@@ -24,7 +24,12 @@ it('preselects the newest reviewed release on the upgrade page', async () => {
 
 async function selectRelease(savedBeta = false) {
   if (!savedBeta) {
-    await screen.findByText('admin:servers.native.release_no_stable')
+    // The empty-state text is used as a SYNCHRONISATION point — wait until the
+    // catalog has loaded and rendered nothing — not as a claim about the
+    // wording. The key changed because this dialog now asks the upgrade
+    // question, whose empty answer is "nothing applies to this node" rather
+    // than "this channel has no releases"; the wait means the same thing.
+    await screen.findByText('admin:servers.native.release_no_target_for_node')
     fireEvent.mouseDown(screen.getByRole('combobox', { name: 'admin:servers.native.release_channel' }))
     fireEvent.click(await screen.findByRole('option', { name: 'admin:servers.native.release_testing' }))
   }
@@ -40,7 +45,7 @@ it('requires explicit confirmation and displays queued rather than a success toa
   expect((screen.getByLabelText('admin:servers.agent_upgrade.current') as HTMLInputElement).value).toBe('v0.0.1-beta2')
   const button = screen.getByRole('button', { name: 'admin:servers.agent_upgrade.confirm' }) as HTMLButtonElement
   expect(button.disabled).toBe(true)
-  await screen.findByText('admin:servers.native.release_no_stable')
+  await screen.findByText('admin:servers.native.release_no_target_for_node')
   expect(button.disabled).toBe(true)
   await selectRelease()
   expect(api.post).not.toHaveBeenCalled()

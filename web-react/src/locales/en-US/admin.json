@@ -2403,7 +2403,8 @@
         "applying": "Agent applying configuration; runtime not yet confirmed",
         "running": "Proxy core confirmed running",
         "error": "Agent or core reported an error. Check the node logs."
-      }
+      },
+      "release_no_target_for_node": "No release in this channel applies to this node."
     },
     "table": {
       "name": "Server name",
@@ -2496,7 +2497,8 @@
       "batch_upgrade_xray_partial": "Upgraded Xray on {{ok}} server(s); {{fail}} failed",
       "batch_upgrade_panel_ok": "Initiated 3X-UI upgrade on {{count}} server(s); each runs a smoke probe in ~60s (results in the audit log)",
       "batch_upgrade_panel_ok_latest": "Initiated 3X-UI upgrade on {{count}} server(s); {{latest}} already on the latest version (skipped)",
-      "batch_upgrade_panel_partial": "Initiated {{ok}}; {{latest}} already latest; {{blocked}} blocked (target outside tested range — force per-panel); {{fail}} failed"
+      "batch_upgrade_panel_partial": "Initiated {{ok}}; {{latest}} already latest; {{blocked}} blocked (target outside tested range — force per-panel); {{fail}} failed",
+      "upgrade_unavailable": "This instance cannot upgrade that component right now ({{reasons}})."
     },
     "confirm": {
       "delete_title": "Delete server",
@@ -2519,7 +2521,13 @@
       "select_core_message": "Select an audited core engine and exact release for {{name}}. The Node verifies source, SHA-256, and the current config before an atomic switch, and rolls back on startup failure.",
       "restricted_core_title": "This release narrows REALITY client compatibility",
       "restricted_core_message": "Xray {{version}}: {{summary}} sing-box REALITY nodes will be omitted from subscriptions; Mihomo is pinned to chrome with ML-KEM enabled. Accept this compatibility scope?",
-      "restricted_core_confirm": "Accept and select"
+      "restricted_core_confirm": "Accept and select",
+      "upgrade_target_unpinnable": "Note: the 3X-UI upgrade endpoint takes no version argument — it fetches whatever is latest when it runs. The target above is what PSP read a moment ago, not a version the panel will be held to."
+    },
+    "compat_notice": {
+      "policy-not-applicable": "The loaded upgrade policy (revision {{revision}}) was not reviewed for this build, so it does not apply.",
+      "policy-expired": "The upgrade policy expired on {{expires}} and no longer grants any upgrade eligibility.",
+      "range-stale": "The 3X-UI tested ceiling {{max}} is the last successful fetch; the most recent refresh failed: {{error}}"
     }
   },
   "diagnostics": {

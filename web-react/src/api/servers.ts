@@ -398,6 +398,11 @@ export interface UpgradePanelResult {
    *  {force: true}. False / absent means the rejection is structural
    *  (e.g. panel unreachable) and force won't help. */
   can_force?: boolean
+  // Absent on a panel whose upgrade cannot name a target; false when the API
+  // says so explicitly. The accepted response repeats it because "accepted" is
+  // not the same as "pinned".
+  target_pinnable?: boolean
+  upgrade_mode?: 'latest_only' | string
   error?: string
 }
 
@@ -443,6 +448,12 @@ export interface UpgradePreviewResult {
   psp_max_xui?: string
   can_force?: boolean
   advisory?: XUIAdvisory
+  // target_pinnable / upgrade_mode come from the panel's own report that
+  // 3X-UI's /updatePanel takes no version argument: the target shown is what PSP
+  // read from upstream a moment ago, not something the panel will be held to.
+  // The dialog says so rather than presenting a version as a promise.
+  target_pinnable?: boolean
+  upgrade_mode?: 'latest_only' | string
 }
 
 // upgradePreview fetches the target version + tested-range check + advisory for
@@ -458,12 +469,13 @@ export async function upgradePreview(id: number) {
 }
 
 // upgrade-options answers, per component, whether THIS instance may upgrade it.
-// The agent answer carries `targets`: the releases a verified edge actually
+// The agent answer carries \`targets\`: the releases a verified edge actually
 // reaches from this node, so a caller can offer those rather than everything
 // that happens to be newer.
 //
-// NOTE: PSP #180 adds this function too. Whichever of the two merges second
-// should drop its copy rather than keep two.
+// ONE COPY OF THESE TYPES. Two branches added them and the merge put both in the
+// file; this is the superset — it keeps \`targets\`, which the other side's copy
+// did not have — and the other was dropped rather than reconciled.
 export type UpgradeComponent = 'panel' | 'core' | 'agent'
 export interface AgentUpgradeTarget {
   version: string
@@ -481,10 +493,41 @@ export interface UpgradeOption {
 }
 
 export async function upgradeOptions(id: number, component: UpgradeComponent) {
+  // Best-effort at the call site: a failure here falls back to the existing
+  // flow rather than blocking an upgrade the write path still enforces.
   const { data } = await client.get<UpgradeOption>(`/admin/servers/${id}/upgrade-options`, {
     params: { component },
     _skipErrorToast: true,
   })
+  return data
+}
+
+// compatStatus is the panel's own view of what its compatibility decisions rest
+// on. Read-only, and the only place an operator can see WHY an upgrade is not
+// offered rather than guessing.
+export interface CompatRangeStatus {
+  min_version?: string
+  max_tested?: string
+  refreshed_at?: string
+  last_error?: string
+}
+export interface PolicyStatus {
+  installed: boolean
+  applicable: boolean
+  enforcing: boolean
+  revision?: number
+  expires_at?: string
+  expired: boolean
+}
+export interface CompatStatusResponse {
+  xui: CompatRangeStatus
+  sui: CompatRangeStatus
+  policy: PolicyStatus
+}
+
+/** The read is best-effort: a panel that cannot report its state must not claim one. */
+export async function getCompatStatus(_skipErrorToast = true) {
+  const { data } = await client.get<CompatStatusResponse>('/admin/servers/compat-status', { _skipErrorToast })
   return data
 }
 

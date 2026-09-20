@@ -3,7 +3,8 @@ import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Server } from '@/api/servers'
 import type { NodeReleaseCatalog } from '@/api/nodeReleases'
-import { api, installReads, list, mount } from '@/test/adminSaveHarness'
+import { api, installReads, list, mount, snack } from '@/test/adminSaveHarness'
+import ConfirmHost from '@/components/ConfirmHost'
 import { useAuthStore } from '@/stores/auth'
 import english from '@/locales/en-US/admin.json'
 import ServersView from './ServersView'
@@ -170,5 +171,201 @@ describe('Server update hints and paired tray icons', () => {
     expect(within(await rowFor(current.name)).queryByText('admin:servers.update_available')).toBeNull()
     expect(api.get.mock.calls.filter(([url]) => url === '/admin/servers/sui-release')).toHaveLength(1)
     expect(upgradeWrites()).toHaveLength(0)
+  })
+})
+
+// The 3X-UI upgrade endpoint takes no version argument, and the API says so with
+// target_pinnable=false. The dialog has to repeat it, because a confirm that
+// shows a target version and nothing else reads as a promise the API explicitly
+// denies — and an admin who believes the promise stops watching the outcome.
+describe('the 3X-UI upgrade confirm states what the target is not', () => {
+  it('warns that the target cannot be pinned when the API reports it', async () => {
+    installReads({
+      '/admin/servers': list([xui]),
+      '/admin/servers/9/upgrade-preview': {
+        update_available: true,
+        current_version: '3.4.2',
+        target_version: 'v3.7.0',
+        compat_status: 'supported',
+        can_force: false,
+        target_pinnable: false,
+        upgrade_mode: 'latest_only',
+      },
+    })
+    mount(<><ConfirmHost /><ServersView /></>)
+
+    const row = await rowFor(xui.name)
+    fireEvent.click(within(row).getByRole('button', { name: 'admin:servers.action.more' }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'admin:servers.action.upgrade_panel' }))
+
+    // The dialog body is one joined string whose lines are i18n KEYS in this
+    // harness, so a substring regex is what matches a single line.
+    expect(await screen.findByText(/admin:servers\.confirm\.upgrade_target_unpinnable/)).toBeTruthy()
+  })
+
+  it('does not add the warning when the API says the target is pinnable', async () => {
+    installReads({
+      '/admin/servers': list([xui]),
+      '/admin/servers/9/upgrade-preview': {
+        update_available: true,
+        current_version: '3.4.2',
+        target_version: 'v3.7.0',
+        compat_status: 'supported',
+        target_pinnable: true,
+      },
+    })
+    mount(<><ConfirmHost /><ServersView /></>)
+
+    const row = await rowFor(xui.name)
+    fireEvent.click(within(row).getByRole('button', { name: 'admin:servers.action.more' }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'admin:servers.action.upgrade_panel' }))
+
+    // The target line is present, so the dialog did open; the caveat is absent
+    // because nothing said the target was unpinnable.
+    // The dialog body is one joined string whose lines are i18n KEYS in this
+    // harness, so a substring regex is what matches a single line.
+    expect(await screen.findByText(/admin:servers\.confirm\.upgrade_target(?![_])/)).toBeTruthy()
+    expect(screen.queryByText(/admin:servers\.confirm\.upgrade_target_unpinnable/)).toBeNull()
+  })
+})
+
+// The instance decides whether it may upgrade a component; the dialog asks.
+// Showing a confirm and letting the request fail would teach the operator that
+// the button is unreliable, and firing on a state the server already called
+// unavailable makes the client the first place the decision was made.
+describe('the upgrade action asks the instance before it fires', () => {
+  const optionRead = (state: string, reason_codes = ['capability_missing']) => ({
+    '/admin/servers/9/upgrade-options': { component: 'panel', state, target_pinnable: false, reason_codes },
+  })
+
+  it.each(['unsupported', 'blocked'])('does not fire when the instance answers %s', async state => {
+    installReads({ '/admin/servers': list([xui]), ...optionRead(state) })
+    mount(<><ConfirmHost /><ServersView /></>)
+
+    const row = await rowFor(xui.name)
+    fireEvent.click(within(row).getByRole('button', { name: 'admin:servers.action.more' }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'admin:servers.action.upgrade_panel' }))
+
+    // The harness mocks pushSnack, so the message is read from the spy rather
+    // than the DOM — and it is the i18n KEY, because t() resolves keys to
+    // themselves here.
+    await waitFor(() => expect(snack.mock.calls.some(([message]) => /upgrade_unavailable/.test(message))).toBe(true))
+    // No confirm and no request: the refusal came from the instance, so there is
+    // nothing for the operator to agree to.
+    expect(screen.queryByText('admin:servers.confirm.upgrade_panel_title')).toBeNull()
+    expect(upgradeWrites()).toHaveLength(0)
+  })
+
+  it('still asks for confirmation when the instance says the upgrade is manual only', async () => {
+    // manual_only is not a refusal — the upgrade is possible, it just cannot be
+    // held to a version — so the operator still gets the dialog.
+    installReads({
+      '/admin/servers': list([xui]),
+      ...optionRead('manual_only', ['target_not_pinnable']),
+      '/admin/servers/9/upgrade-preview': {
+        update_available: true, current_version: '3.4.2', target_version: 'v3.7.0',
+        compat_status: 'supported', target_pinnable: false,
+      },
+    })
+    mount(<><ConfirmHost /><ServersView /></>)
+
+    const row = await rowFor(xui.name)
+    fireEvent.click(within(row).getByRole('button', { name: 'admin:servers.action.more' }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'admin:servers.action.upgrade_panel' }))
+
+    expect(await screen.findByText('admin:servers.confirm.upgrade_panel_title')).toBeTruthy()
+    expect(snack.mock.calls.some(([message]) => /upgrade_unavailable/.test(message))).toBe(false)
+  })
+
+  it('falls through to the existing flow when the instance cannot answer', async () => {
+    // A failed read is NOT a refusal: the write path still protects the fire, so
+    // a control-plane blip must not remove an action the operator was using.
+    installReads({
+      '/admin/servers': list([xui]),
+      '/admin/servers/9/upgrade-preview': { update_available: true, current_version: '3.4.2', target_version: 'v3.7.0' },
+    })
+    mount(<><ConfirmHost /><ServersView /></>)
+
+    const row = await rowFor(xui.name)
+    fireEvent.click(within(row).getByRole('button', { name: 'admin:servers.action.more' }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'admin:servers.action.upgrade_panel' }))
+
+    expect(await screen.findByText('admin:servers.confirm.upgrade_panel_title')).toBeTruthy()
+  })
+})
+
+// The panel can report why an upgrade is not offered. That answer is only useful
+// if it is visible: without it the diagnosis an operator has is to guess, and the
+// guess is usually "the panel is broken" rather than "the range is the last good
+// one" or "the policy expired".
+describe('the fleet-level compatibility state', () => {
+  const working = { xui: { min_version: '3.4.2', max_tested: '3.8.5' }, sui: { max_tested: '1.6.3' },
+    policy: { installed: false, applicable: false, enforcing: false, expired: false } }
+
+  it('warns when the loaded policy is not the one this build was reviewed for', async () => {
+    installReads({
+      '/admin/servers': list([xui]),
+      '/admin/servers/compat-status': { ...working,
+        policy: { installed: true, applicable: false, enforcing: false, revision: 7, expired: false } },
+    })
+    mount(<ServersView />)
+    expect(await screen.findByText(/compat_notice\.policy-not-applicable/)).toBeTruthy()
+  })
+
+  it('warns when the range is the last good one', async () => {
+    installReads({
+      '/admin/servers': list([xui]),
+      '/admin/servers/compat-status': { ...working,
+        xui: { min_version: '3.4.2', max_tested: '3.8.5', refreshed_at: '2026-09-19T00:00:00Z', last_error: 'github unreachable' } },
+    })
+    mount(<ServersView />)
+    expect(await screen.findByText(/compat_notice\.range-stale/)).toBeTruthy()
+  })
+
+  it('says nothing when the state is ordinary', async () => {
+    // A banner for every non-ideal state is how banners stop being read.
+    installReads({ '/admin/servers': list([xui]), '/admin/servers/compat-status': working })
+    mount(<ServersView />)
+    await screen.findByText('admin:servers.title')
+    expect(screen.queryByText(/compat_notice\./)).toBeNull()
+  })
+
+  it('says nothing when the panel cannot answer', async () => {
+    installReads({ '/admin/servers': list([xui]) })
+    mount(<ServersView />)
+    await screen.findByText('admin:servers.title')
+    expect(screen.queryByText(/compat_notice\./)).toBeNull()
+  })
+})
+
+// The manual-maintenance copy existed in both locales and was rendered nowhere —
+// written and never wired, which looks identical to never having written it. Its
+// absence matters because "there is a newer release" and "there is something for
+// you to do" are different sentences.
+describe('the S-UI manual-upgrade hint', () => {
+  it('tells an S-UI operator the release is theirs to install', async () => {
+    installReads({ '/admin/servers': list([sui]) })
+    mount(<ServersView />)
+    const row = await rowFor(sui.name)
+    expect(await within(row).findByText('admin:servers.sui_update.manual_hint')).toBeTruthy()
+  })
+
+  it('does not say it when there is no update to install', async () => {
+    // The hint is a step, not a permanent caveat about the backend.
+    installReads({ '/admin/servers': list([{ ...sui, update_available: false, latest_sui_version: undefined }]) })
+    mount(<ServersView />)
+    const row = await rowFor(sui.name)
+    await within(row).findByText('S-UI 1.5.0')
+    expect(within(row).queryByText('admin:servers.sui_update.manual_hint')).toBeNull()
+  })
+
+  it('does not attach it to a 3X-UI row', async () => {
+    // 3X-UI has a managed path from the row menu; telling its operator to
+    // maintain it by hand would be the opposite of true.
+    installReads({ '/admin/servers': list([xui]) })
+    mount(<ServersView />)
+    const row = await rowFor(xui.name)
+    expect(await within(row).findByText(/admin:servers.update_available/)).toBeTruthy()
+    expect(within(row).queryByText('admin:servers.sui_update.manual_hint')).toBeNull()
   })
 })

@@ -5,6 +5,7 @@ import NodeDiagnosticsDialog from './NodeDiagnosticsDialog'
 import { NodeMigrationPreviewDialog } from './NodeMigrationPreviewDialog'
 import { ReinstallBackendDialog } from './ReinstallBackendDialog'
 import NodeReleaseSelector from '@/components/NodeReleaseSelector'
+import { compatNotice } from '@/utils/compatNotice'
 import NodeInstallCommand from '@/components/NodeInstallCommand'
 import { Link as RouterLink } from 'react-router'
 import {
@@ -81,9 +82,12 @@ import {
 	selectCore,
   testServer,
   updateServer,
+  getCompatStatus,
+  upgradeOptions,
   upgradePanel,
   upgradePreview,
   upgradeXray,
+	type CompatStatusResponse,
 	type Server,
 	type NativeServerProvisioning,
 	type NativeAgentStatus,
@@ -396,6 +400,22 @@ export default function ServersView() {
     // during the confirm modal could fire two upgrade POSTs.
     setUpgrading(s.id)
     try {
+      // ASK THE INSTANCE FIRST, when it can answer. The decision is the
+      // server's; a dialog that decided for itself would be a second decision
+      // source, and the one the operator saw would not be the one enforced.
+      // A failure here is NOT a refusal — the write path still protects the
+      // fire — so it falls through to the existing flow.
+      const option = await upgradeOptions(s.id, 'panel').catch(() => null)
+      if (option?.state === 'unsupported' || option?.state === 'blocked') {
+        pushSnack(
+          t('admin:servers.toast.upgrade_unavailable', {
+            reasons: option.reason_codes.join(', '),
+            defaultValue: '此实例当前不能升级该组件（{{reasons}}）。',
+          }),
+          'warning',
+        )
+        return
+      }
       if (!force) {
         closeMenu()
         // Read-only pre-flight: target version + tested-range check + advisory,
@@ -431,6 +451,14 @@ export default function ServersView() {
           lines.push(t('admin:servers.confirm.upgrade_target', {
             target: preview.target_version,
             defaultValue: '目标版本：{{target}}',
+          }))
+        }
+        if (preview?.target_pinnable === false) {
+          // The response says the target cannot be pinned, so the dialog must not
+          // present it as a version the panel will be held to. Leaving it out
+          // would make the confirm read as a promise the API explicitly denies.
+          lines.push(t('admin:servers.confirm.upgrade_target_unpinnable', {
+            defaultValue: '注意：3X-UI 的升级接口不接受版本参数，它会拉取当时的最新版。上面的目标版本是刚读到的值，不是面板会遵守的承诺。',
           }))
         }
         if (advisory?.text) {
@@ -1131,6 +1159,14 @@ export default function ServersView() {
         )}
         {s.panel_type === 'psp' && nodeReleaseCheckFailed && <Typography
           variant="caption" color="text.secondary">{t('admin:servers.native.update_check_failed')}</Typography>}
+        {/* S-UI KEEPS A MANUAL UPGRADE, and saying so is the difference between
+            "there is a newer release" and "there is something for you to do".
+            The copy for this existed in both locales and was rendered NOWHERE —
+            written and never wired, which looks identical to not having written
+            it. Shown only when there is an update, so it reads as a step rather
+            than as a permanent caveat about the backend. */}
+        {s.panel_type === 'sui' && !!updateVersion && <Typography
+          variant="caption" color="text.secondary">{t('admin:servers.sui_update.manual_hint')}</Typography>}
       </Box>
     )
     return stacked
@@ -1146,6 +1182,16 @@ export default function ServersView() {
   // Compat banners filter on the current page only — surfacing rows
   // from invisible pages would be misleading. Banners only fire when
   // the admin's current view contains an offending row.
+  // The panel's own account of what its compatibility decisions rest on. Read
+  // once and best-effort: it is diagnosis, and a panel that cannot report its
+  // state must not claim one.
+  const [compatStatus, setCompatStatus] = useState<CompatStatusResponse | null>(null)
+  useEffect(() => {
+    let live = true
+    void getCompatStatus().then(next => { if (live) setCompatStatus(next) }).catch(() => { if (live) setCompatStatus(null) })
+    return () => { live = false }
+  }, [])
+  const compatBanner = compatNotice(compatStatus)
   const panelsTooOld = items.filter(s => s.compat_status === 'too_old')
   const panelsUntested = items.filter(s => s.compat_status === 'untested')
   // Reused for both banners — render "name (vX.Y.Z)" joined with 、
@@ -1279,6 +1325,16 @@ export default function ServersView() {
           </>
         }
       />
+      {/* Fleet-level compatibility state, before the per-panel banners: these
+          are states an operator would otherwise misread as a working panel —
+          a policy reviewed for another build, an expired one, a range that is
+          the last good one. Nothing is shown for a merely old range, because a
+          banner nobody needs is how banners stop being read. */}
+      {compatBanner && (
+        <Alert severity="warning" sx={{ mt: 2 }}>
+          {t(`admin:servers.compat_notice.${compatBanner.kind}`, compatBanner.values)}
+        </Alert>
+      )}
       {/* Compat banners — split by severity (too_old = error, can't be
           relied on; untested = warning, may still work). "Unknown" panels
           (never probed / probe failing transiently) stay out of both

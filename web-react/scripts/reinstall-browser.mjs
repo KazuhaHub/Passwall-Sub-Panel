@@ -97,6 +97,17 @@ async function fixture(request, response, url) {
     if (pathname === '/api/admin/servers') return reply(response, { items: servers, total: servers.length, page: 1, page_size: 25 });
     // Match GetSUIRelease's read-only metadata DTO; no upstream request is made.
     if (pathname === '/api/admin/servers/sui-release') return reply(response, { version: 'v1.6.2' });
+    // THE SERVERS PAGE READS THE PANEL'S OWN COMPATIBILITY STATE, so the fixture has
+    // to answer it: a path this does not know is a throw, and the acceptance counts a
+    // fixture error as its own failure. The state it reports is the UNREMARKABLE one —
+    // a range with no failed refresh and no policy — so the page renders exactly what
+    // it rendered before it started asking, and the banner logic stays where it is
+    // covered deliberately, in ServersView.updates.test.tsx.
+    if (pathname === '/api/admin/servers/compat-status') return reply(response, {
+      xui: { min_version: '3.4.2', max_tested: '3.8.5', refreshed_at: '2026-09-12T13:00:00Z' },
+      sui: { max_tested: '1.6.3', refreshed_at: '2026-09-12T13:00:00Z' },
+      policy: { installed: false, applicable: false, enforcing: false, expired: false },
+    });
     if (pathname === '/api/admin/servers/node-releases') return reply(response, {
       checked_at: new Date().toISOString(), releases: [{ version, channel: 'testing',
         published_at: '2026-09-12T12:00:00Z', notes: 'Reviewed browser acceptance fixture',

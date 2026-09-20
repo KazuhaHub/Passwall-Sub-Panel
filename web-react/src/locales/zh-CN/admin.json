@@ -2401,7 +2401,8 @@
         "applying": "Agent 正在应用配置，尚未确认运行",
         "running": "代理内核已确认运行",
         "error": "Agent 或内核报告错误，请检查节点日志"
-      }
+      },
+      "release_no_target_for_node": "该渠道下没有适用于此节点的发布版本。"
     },
     "table": {
       "name": "服务器名称",
@@ -2494,7 +2495,8 @@
       "batch_upgrade_xray_partial": "已升级 {{ok}} 台 Xray，失败 {{fail}} 台",
       "batch_upgrade_panel_ok": "已发起 {{count}} 台 3X-UI 升级，约 60 秒后各自跑 smoke probe（结果见 audit log）",
       "batch_upgrade_panel_ok_latest": "已发起 {{count}} 台 3X-UI 升级；{{latest}} 台已是最新、跳过",
-      "batch_upgrade_panel_partial": "已发起 {{ok}} 台；{{latest}} 台已是最新；{{blocked}} 台超出已测范围被拦截（可逐台强制）；{{fail}} 台失败"
+      "batch_upgrade_panel_partial": "已发起 {{ok}} 台；{{latest}} 台已是最新；{{blocked}} 台超出已测范围被拦截（可逐台强制）；{{fail}} 台失败",
+      "upgrade_unavailable": "此实例当前不能升级该组件（{{reasons}}）。"
     },
     "confirm": {
       "delete_title": "删除服务器",
@@ -2517,7 +2519,13 @@
       "select_core_message": "为 {{name}} 选择经过审计的内核与精确版本。Node 会先校验来源、SHA-256 与现有配置，再原子切换；启动失败自动回滚。",
       "restricted_core_title": "此版本会缩窄 REALITY 客户端兼容范围",
       "restricted_core_message": "Xray {{version}}：{{summary}} 选择后 sing-box REALITY 节点会被订阅输出排除；Mihomo 会固定 chrome 并开启 ML-KEM。是否接受这个兼容范围？",
-      "restricted_core_confirm": "接受并选择"
+      "restricted_core_confirm": "接受并选择",
+      "upgrade_target_unpinnable": "注意：3X-UI 的升级接口不接受版本参数，它会拉取当时的最新版。上面的目标版本是刚读到的值，不是面板会遵守的承诺。"
+    },
+    "compat_notice": {
+      "policy-not-applicable": "已加载的升级政策（修订 {{revision}}）不是为当前这个构建审阅的，因此不会生效。",
+      "policy-expired": "升级政策已于 {{expires}} 失效，不再授予任何升级资格。",
+      "range-stale": "当前 3X-UI 已测上限 {{max}} 是最后一次成功获取的结果；最近一次刷新失败：{{error}}"
     }
   },
   "diagnostics": {
