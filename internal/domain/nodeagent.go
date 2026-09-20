@@ -52,6 +52,21 @@ type NodeAgent struct {
 	UpdatedAt               time.Time
 }
 
+// SupportedNodeProtocolGenerations is PSP's OWN declaration of which wire
+// generations this binary speaks.
+//
+// It lives here rather than in the shared protocol module because it is a
+// property of this binary, not of the contract. When the range was compiled into
+// the shared package, adding a generation there widened what PSP accepts without
+// anyone reviewing that decision here — a dependency upgrade granting a
+// capability. Widening this is now a change to this file, in this repository.
+func SupportedNodeProtocolGenerations() nodeprotocol.GenerationRange {
+	return nodeprotocol.GenerationRange{
+		Min: nodeprotocol.ProtocolVersion1,
+		Max: nodeprotocol.ProtocolVersion1,
+	}
+}
+
 // ProtocolCompatibility returns the shared PSP/Node compatibility decision
 // for the most recent authenticated report. The bool is false until at least
 // one report has been persisted; a zero protocol version after that point is
@@ -60,7 +75,7 @@ func (a *NodeAgent) ProtocolCompatibility() (nodeprotocol.Compatibility, bool) {
 	if a == nil || a.ProtocolObservedAt == nil {
 		return nodeprotocol.Compatibility{}, false
 	}
-	return nodeprotocol.AssessCompatibility(a.ObservedProtocolVersion, a.ObservedCapabilities), true
+	return nodeprotocol.AssessCompatibilityIn(a.ObservedProtocolVersion, a.ObservedCapabilities, SupportedNodeProtocolGenerations()), true
 }
 
 // NodeAgentIssue is an operator-visible condition reported by a native agent.
