@@ -81,8 +81,30 @@ test('the deploy guard suites are all executed by the container job', () => {
     'deploy/compat/check-case-set.test.mjs',
     'deploy/compat/plan.test.mjs',
     'deploy/compat/evidence-index.test.mjs',
-    'deploy/compat/check-releases-policy.test.mjs'
+    'deploy/compat/check-releases-policy.test.mjs',
+    'deploy/compat/contract-source.test.mjs'
   ]) {
     assert(container.includes(suite), `${suite} is not run by any job`)
   }
+})
+
+// The pinned-source contract job must not learn which Node revision to test
+// from go.mod. Doing so made the evidence move with every dependency bump, and
+// would have removed the job's entry point the moment the PN root module was
+// dropped — the test would have gone with the dependency rather than outliving
+// it. The revision is named in docs/compat/verification-v1.json instead.
+test('the contract job takes its Node revision from the manifest, not from go.mod', () => {
+  const contract = job('node-contract')
+  assert(
+    contract.includes('deploy/compat/contract-source.mjs'),
+    'the contract job must read its pinned source from the manifest',
+  )
+  assert(
+    !/go list -m[^\n]*passwall-node/.test(contract),
+    'the contract job must not resolve the Node module through go list (that is go.mod again, one step removed)',
+  )
+  assert(
+    contract.includes('rev-parse HEAD') && contract.includes('= "$source_commit"'),
+    'the contract job must assert the checked-out commit IS the pinned one, or a moved tag passes silently',
+  )
 })
