@@ -14,7 +14,7 @@ import (
 func TestMigrationPreflightCoversPublishedInstallerTools(t *testing.T) {
 	installer, err := deployment.RenderLinux(deployment.Options{
 		Endpoint: "https://panel.example/v1/node/sync", AgentID: "agt_test-node",
-		Credential: "pspn_" + strings.Repeat("a", 40), Version: "v0.0.1-beta3",
+		Credential: "pspn_" + strings.Repeat("a", 40), Version: "4.0.0",
 	})
 	if err != nil {
 		t.Fatal(err)

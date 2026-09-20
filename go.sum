@@ -41,6 +41,8 @@ github.com/KazuhaHub/passwall-node v0.0.1-beta9.0.20260920101113-97e5eccd0cfb h1
 github.com/KazuhaHub/passwall-node v0.0.1-beta9.0.20260920101113-97e5eccd0cfb/go.mod h1:Rhi/6PWBO+pfvjAFnFV9rXBmP3x0DTyA44xmTIAO/M8=
 github.com/KazuhaHub/passwall-node v0.0.1-beta9.0.20260920101952-2f5bac0fd5b6 h1:UkaoJMFzHvq9DNghPVP1VzFhJRvxrKJjX3mnFZ0L0sM=
 github.com/KazuhaHub/passwall-node v0.0.1-beta9.0.20260920101952-2f5bac0fd5b6/go.mod h1:Rhi/6PWBO+pfvjAFnFV9rXBmP3x0DTyA44xmTIAO/M8=
+github.com/KazuhaHub/passwall-node v0.0.1-beta9.0.20260920125452-a750aba85cec h1:QrfEQZITmNtDdcbdOS55CZIu9ESx3F6rrfVZDFrQE0Q=
+github.com/KazuhaHub/passwall-node v0.0.1-beta9.0.20260920125452-a750aba85cec/go.mod h1:Rhi/6PWBO+pfvjAFnFV9rXBmP3x0DTyA44xmTIAO/M8=
 github.com/KazuhaHub/passwall-protocol v0.1.0 h1:B5Y/vHXflIGGEogeConPbBh9xjitGmzKpu6+x1QUgOE=
 github.com/KazuhaHub/passwall-protocol v0.1.0/go.mod h1:IQAhUtHV50QCZFbjIKDvrQBzyQY1tZerGp7F4KfquBI=
 github.com/KazuhaHub/passwall-protocol v0.2.0 h1:nYnqmFMJYXZ3TuiCfKOGeT8zrSOALUPkbp2DqUgQUIw=
