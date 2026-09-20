@@ -5,6 +5,7 @@ import NodeDiagnosticsDialog from './NodeDiagnosticsDialog'
 import { NodeMigrationPreviewDialog } from './NodeMigrationPreviewDialog'
 import { ReinstallBackendDialog } from './ReinstallBackendDialog'
 import NodeReleaseSelector from '@/components/NodeReleaseSelector'
+import { compatNotice } from '@/utils/compatNotice'
 import NodeInstallCommand from '@/components/NodeInstallCommand'
 import { Link as RouterLink } from 'react-router'
 import {
@@ -81,10 +82,12 @@ import {
 	selectCore,
   testServer,
   updateServer,
+  getCompatStatus,
   upgradeOptions,
   upgradePanel,
   upgradePreview,
   upgradeXray,
+	type CompatStatusResponse,
 	type Server,
 	type NativeServerProvisioning,
 	type NativeAgentStatus,
@@ -1170,6 +1173,16 @@ export default function ServersView() {
   // Compat banners filter on the current page only — surfacing rows
   // from invisible pages would be misleading. Banners only fire when
   // the admin's current view contains an offending row.
+  // The panel's own account of what its compatibility decisions rest on. Read
+  // once and best-effort: it is diagnosis, and a panel that cannot report its
+  // state must not claim one.
+  const [compatStatus, setCompatStatus] = useState<CompatStatusResponse | null>(null)
+  useEffect(() => {
+    let live = true
+    void getCompatStatus().then(next => { if (live) setCompatStatus(next) }).catch(() => { if (live) setCompatStatus(null) })
+    return () => { live = false }
+  }, [])
+  const compatBanner = compatNotice(compatStatus)
   const panelsTooOld = items.filter(s => s.compat_status === 'too_old')
   const panelsUntested = items.filter(s => s.compat_status === 'untested')
   // Reused for both banners — render "name (vX.Y.Z)" joined with 、
@@ -1303,6 +1316,16 @@ export default function ServersView() {
           </>
         }
       />
+      {/* Fleet-level compatibility state, before the per-panel banners: these
+          are states an operator would otherwise misread as a working panel —
+          a policy reviewed for another build, an expired one, a range that is
+          the last good one. Nothing is shown for a merely old range, because a
+          banner nobody needs is how banners stop being read. */}
+      {compatBanner && (
+        <Alert severity="warning" sx={{ mt: 2 }}>
+          {t(`admin:servers.compat_notice.${compatBanner.kind}`, compatBanner.values)}
+        </Alert>
+      )}
       {/* Compat banners — split by severity (too_old = error, can't be
           relied on; untested = warning, may still work). "Unknown" panels
           (never probed / probe failing transiently) stay out of both

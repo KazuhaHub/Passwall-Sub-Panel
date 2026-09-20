@@ -494,6 +494,35 @@ export async function upgradeOptions(id: number, component: UpgradeComponent) {
   return data
 }
 
+// compatStatus is the panel's own view of what its compatibility decisions rest
+// on. Read-only, and the only place an operator can see WHY an upgrade is not
+// offered rather than guessing.
+export interface CompatRangeStatus {
+  min_version?: string
+  max_tested?: string
+  refreshed_at?: string
+  last_error?: string
+}
+export interface PolicyStatus {
+  installed: boolean
+  applicable: boolean
+  enforcing: boolean
+  revision?: number
+  expires_at?: string
+  expired: boolean
+}
+export interface CompatStatusResponse {
+  xui: CompatRangeStatus
+  sui: CompatRangeStatus
+  policy: PolicyStatus
+}
+
+/** The read is best-effort: a panel that cannot report its state must not claim one. */
+export async function getCompatStatus(_skipErrorToast = true) {
+  const { data } = await client.get<CompatStatusResponse>('/admin/servers/compat-status', { _skipErrorToast })
+  return data
+}
+
 export interface UpgradeXrayResult {
   ok: boolean
 	engine?: NativeCoreEngine

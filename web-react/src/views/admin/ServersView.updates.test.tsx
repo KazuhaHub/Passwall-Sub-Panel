@@ -293,3 +293,47 @@ describe('the upgrade action asks the instance before it fires', () => {
     expect(await screen.findByText('admin:servers.confirm.upgrade_panel_title')).toBeTruthy()
   })
 })
+
+// The panel can report why an upgrade is not offered. That answer is only useful
+// if it is visible: without it the diagnosis an operator has is to guess, and the
+// guess is usually "the panel is broken" rather than "the range is the last good
+// one" or "the policy expired".
+describe('the fleet-level compatibility state', () => {
+  const working = { xui: { min_version: '3.4.2', max_tested: '3.8.5' }, sui: { max_tested: '1.6.3' },
+    policy: { installed: false, applicable: false, enforcing: false, expired: false } }
+
+  it('warns when the loaded policy is not the one this build was reviewed for', async () => {
+    installReads({
+      '/admin/servers': list([xui]),
+      '/admin/servers/compat-status': { ...working,
+        policy: { installed: true, applicable: false, enforcing: false, revision: 7, expired: false } },
+    })
+    mount(<ServersView />)
+    expect(await screen.findByText(/compat_notice\.policy-not-applicable/)).toBeTruthy()
+  })
+
+  it('warns when the range is the last good one', async () => {
+    installReads({
+      '/admin/servers': list([xui]),
+      '/admin/servers/compat-status': { ...working,
+        xui: { min_version: '3.4.2', max_tested: '3.8.5', refreshed_at: '2026-09-19T00:00:00Z', last_error: 'github unreachable' } },
+    })
+    mount(<ServersView />)
+    expect(await screen.findByText(/compat_notice\.range-stale/)).toBeTruthy()
+  })
+
+  it('says nothing when the state is ordinary', async () => {
+    // A banner for every non-ideal state is how banners stop being read.
+    installReads({ '/admin/servers': list([xui]), '/admin/servers/compat-status': working })
+    mount(<ServersView />)
+    await screen.findByText('admin:servers.title')
+    expect(screen.queryByText(/compat_notice\./)).toBeNull()
+  })
+
+  it('says nothing when the panel cannot answer', async () => {
+    installReads({ '/admin/servers': list([xui]) })
+    mount(<ServersView />)
+    await screen.findByText('admin:servers.title')
+    expect(screen.queryByText(/compat_notice\./)).toBeNull()
+  })
+})
