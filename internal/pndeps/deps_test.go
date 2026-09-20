@@ -25,10 +25,12 @@ import (
 // intended: an allowlist that outlives its entries is a description of a
 // repository that no longer exists, and it is what the next reader would trust.
 //
-// Deleting entries from this map IS the migration. Each one has a named
-// successor:
+// Deleting entries from this map IS the migration. One has MOVED rather than
+// gone: PSP's direct use of the Node module's protocol package is zero, and what
+// keeps it in the closure is the two packages beside it. What remains, each with
+// a named successor:
 //
-//	protocol     → github.com/KazuhaHub/passwall-protocol (extracted, X01–X06)
+//	protocol     → already imported from github.com/KazuhaHub/passwall-protocol
 //	deployment   → the installation contract PSP consumes as an adapter (X07)
 //	corecatalog  → the dynamically reviewed release policy (X07)
 type residualDependency struct {
@@ -42,9 +44,15 @@ type residualDependency struct {
 }
 
 var allowedResidual = map[string]residualDependency{
+	// TRANSITIVE NOW, AND THAT IS THE PROGRESS. PSP's production code imports the
+	// shared contract from github.com/KazuhaHub/passwall-protocol and no longer
+	// from the Node module's copy — zero files. The package is still in the
+	// dependency CLOSURE because `deployment` and `corecatalog` use it
+	// themselves, and `go list -deps` reports what ships rather than what was
+	// typed. It leaves when they do.
 	"github.com/KazuhaHub/passwall-node/protocol": {
-		successor: "github.com/KazuhaHub/passwall-protocol",
-		files:     18,
+		successor: "leaves with deployment and corecatalog; PSP no longer imports it",
+		files:     0,
 	},
 	"github.com/KazuhaHub/passwall-node/deployment": {
 		successor: "a pinned, signed installation template consumed by a PSP adapter",

@@ -14,7 +14,12 @@ import (
 	"regexp"
 	"time"
 
-	nodeprotocol "github.com/KazuhaHub/passwall-node/protocol"
+	// The shared contract from its own module (#177), and NOT the Node module's
+	// copy — which this branch stopped importing altogether. Neither
+	// `deployment` nor `semver` is here: the installer's version rule was the
+	// wrong question for a caller's version, and x/mod/semver answers zero for a
+	// product version, so the ordering is version.CompareRelease.
+	nodeprotocol "github.com/KazuhaHub/passwall-protocol/protocol"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/compatadmission"

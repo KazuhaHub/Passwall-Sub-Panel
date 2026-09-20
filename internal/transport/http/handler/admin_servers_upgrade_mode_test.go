@@ -123,27 +123,6 @@ func TestAPanelThatCannotUpgradeIsRefusedByTheAPI(t *testing.T) {
 	}
 }
 
-// Records the audit actions a handler wrote, so a test can assert not only what
-// the response said but what the trail will show a reviewer later.
-type upgradeGateAudit struct {
-	ports.AuditRepo
-	actions []string
-}
-
-func (a *upgradeGateAudit) Insert(_ context.Context, e *domain.AuditEntry) error {
-	a.actions = append(a.actions, e.Action)
-	return nil
-}
-
-func (a *upgradeGateAudit) saw(action string) bool {
-	for _, got := range a.actions {
-		if got == action {
-			return true
-		}
-	}
-	return false
-}
-
 type coreUpgradeClient struct {
 	ports.PanelClient
 	status    ports.ServerStatus
