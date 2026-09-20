@@ -142,7 +142,14 @@ export function parseReleaseTag(raw: string): ReleaseTag {
     }
     return { raw, scheme: 'product', product }
   }
-  if (raw.startsWith('v') && raw.length > 1) {
+  if (raw.startsWith('v')) {
+    // "Keep the old tag as it is" means do not REINTERPRET it — not accept
+    // anything starting with a v. A tag is an identity, and recognising a
+    // string that merely begins with v would put a value into the support
+    // matrix that no release ever published.
+    if (!/^v\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/.test(raw)) {
+      throw new ReleaseIdError(`releaseid: ${JSON.stringify(raw)} begins with v but is not a version`)
+    }
     return { raw, scheme: 'legacy' }
   }
   throw new ReleaseIdError(`releaseid: ${JSON.stringify(raw)} is neither ${TAG_PREFIX}MAJOR.MINOR.PATCH nor a legacy v-tag`)
