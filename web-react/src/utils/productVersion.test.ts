@@ -66,6 +66,21 @@ describe('product version vectors', () => {
     for (const tc of vectors.reject_tags) expect(isReleaseTag(tc.in), `${tc.in} (${tc.why})`).toBe(false)
   })
 
+  // releaseTag reads the two strings a catalog entry carries. The vectors supply
+  // the tags, so the stated-value half is checked against the same data the
+  // derivation is.
+  it('prefers the stated tag and falls back to the derived one', () => {
+    const [first] = vectors.tags
+    expect(releaseTag('v0.0.1-beta11', first.in)).toBe(first.in)
+    // A stated tag that is not one of ours is refused rather than re-derived:
+    // falling back would address a release the panel did not name.
+    expect(releaseTag('v0.0.1-beta11', 'not-a-tag')).toBeUndefined()
+    for (const tc of vectors.reject_tags) expect(releaseTag('v0.0.1-beta11', tc.in), tc.in).toBeUndefined()
+    // Absent, the derivation answers — which is every panel older than the field.
+    expect(releaseTag('v0.0.1-beta11')).toBe('v0.0.1-beta11')
+    expect(releaseTag('4.0.0')).toBe(`${TAG_PREFIX}4.0.0`)
+  })
+
   it('refuses tags that are not tags', () => {
     for (const tc of vectors.reject_tags) {
       expect(() => parseReleaseTag(tc.in), `${tc.in} (${tc.why})`).toThrow()
