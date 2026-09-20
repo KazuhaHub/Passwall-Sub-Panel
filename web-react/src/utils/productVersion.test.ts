@@ -169,9 +169,14 @@ describe('the two schemes are not interchangeable', () => {
     expect(parseReleaseTag('v102.1.0').scheme).toBe('legacy')
   })
 
-  it('does not truncate a fourth segment', () => {
-    expect(() => parseProductVersion('102.1.0.1')).toThrow()
-    expect(() => parseReleaseTag('release/102.1.0.1')).toThrow()
+  // A FOURTH SEGMENT IS A VERSION NOW. This asserted the opposite until the
+  // format gained the optional BUILD component; what has not changed is that
+  // nothing is ever TRUNCATED, so the fifth is still refused.
+  it('does not truncate a fifth segment', () => {
+    expect(() => parseProductVersion('102.1.0.1.2')).toThrow()
+    expect(() => parseReleaseTag('release/102.1.0.1.2')).toThrow()
+    expect(parseProductVersion('102.1.0.1').build).toBe(1)
+    expect(parseReleaseTag('release/102.1.0.1').product?.build).toBe(1)
   })
 
   it('does not give the short form a release of its own', () => {

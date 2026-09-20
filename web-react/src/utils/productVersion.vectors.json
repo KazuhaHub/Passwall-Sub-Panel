@@ -16,6 +16,10 @@
       "out": "102.0.0"
     },
     {
+      "in": "102.1.0.1",
+      "out": "102.1.0.1"
+    },
+    {
       "in": "102.1",
       "out": "102.1.0"
     },
@@ -56,10 +60,6 @@
     {
       "in": "102..1",
       "why": "empty segment"
-    },
-    {
-      "in": "102.1.0.1",
-      "why": "a fourth segment is a different format, not something to truncate"
     },
     {
       "in": "102.1.0.0",
@@ -144,6 +144,14 @@
     {
       "in": "102.1.0 ",
       "why": "trailing whitespace"
+    },
+    {
+      "in": "102.1.0.1.2",
+      "why": "a fifth segment is a different format, not something to truncate"
+    },
+    {
+      "in": "102.1.0.0",
+      "why": "a zero fourth segment is another spelling of 102.1.0"
     }
   ],
   "order": [
@@ -229,6 +237,11 @@
     {
       "in": "v0.0.1",
       "scheme": "legacy"
+    },
+    {
+      "in": "release/102.1.0.1",
+      "scheme": "product",
+      "version": "102.1.0.1"
     }
   ],
   "reject_tags": [
@@ -239,10 +252,6 @@
     {
       "in": "release/102",
       "why": "a new tag is always three segments"
-    },
-    {
-      "in": "release/102.1.0.1",
-      "why": "fourth segment"
     },
     {
       "in": "102.1.0",
@@ -279,6 +288,10 @@
     {
       "in": "v1.2.3.4",
       "why": "four segments is not the historical form either"
+    },
+    {
+      "in": "release/102.1.0.1.2",
+      "why": "a fifth segment is a different format"
     }
   ],
   "channels": [
@@ -409,12 +422,12 @@
     {
       "in": "4.0",
       "ok": false,
-      "why": "a product version is always three segments"
+      "why": "a version is never shorthand, so a short form names nothing anyone published"
     },
     {
       "in": "4.0.0.1",
-      "ok": false,
-      "why": "four segments is a different format"
+      "scheme": "product",
+      "ok": true
     },
     {
       "in": "04.0.0",
@@ -460,6 +473,16 @@
       "in": "4.0.0/../../PRIVATE_RESPONSE",
       "ok": false,
       "why": "a path separator must never survive into a URL built from a version"
+    },
+    {
+      "in": "4.0.0.1.2",
+      "ok": false,
+      "why": "a fifth segment is a different format, not something to truncate"
+    },
+    {
+      "in": "4.0.0.0",
+      "ok": false,
+      "why": "a zero fourth segment is another spelling of 4.0.0"
     }
   ]
 }

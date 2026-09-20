@@ -61,7 +61,7 @@ describe('newerNodeRelease', () => {
     // an identity this function refused and the upgrade badge could never
     // appear. The product-scheme block below asserts it is accepted; what stays
     // here is the near misses, which are still not identities.
-    '1.0', '04.0.0', '1.0.0.1', 'release/1.0.0',
+    '1.0', '04.0.0', '1.0.0.1.2', 'release/1.0.0',
     'v01.0.0', 'v1.0', 'v1.0.0+local', 'v1.0.0-beta.01', 'v1.0.0 (abc123)',
     `v1.0.0 (${'a'.repeat(41)})`, 'v1.0.0 (xyz1234)', 'v1.0.0(abc1234)',
     'v1.0.0 (abc1234) extra', 'v1.0.0\n',
@@ -244,7 +244,7 @@ describe('newerNodeRelease, product scheme', () => {
   })
 
   it('does not guess a malformed product identity', () => {
-    for (const panel_version of ['4.0', '04.0.0', '4.0.0.1', '4.0.0+local', 'release/4.0.0', ' 4.0.0', '4.0.0 ']) {
+    for (const panel_version of ['4.0', '04.0.0', '4.0.0.1.2', '4.0.0+local', 'release/4.0.0', ' 4.0.0', '4.0.0 ']) {
       expect(newerNodeRelease({ panel_version }, [product('4.1.0')])).toBeUndefined()
     }
   })

@@ -64,10 +64,14 @@ func MajorOfRelease(value string) (int, bool) {
 		}
 	}
 	segments := strings.Split(base, ".")
-	if len(segments) != 3 {
+	// A VERSION IS NEVER SHORTHAND: three segments, or four with the optional
+	// BUILD component. The module's ParseProductVersion pads the short forms for
+	// COMPARISON, and its ValidVersion does not — this copy mirrors the second,
+	// because both of its callers ask about a version that was stamped on a build.
+	if len(segments) != 3 && !(len(segments) == 4 && !legacy) {
 		return 0, false
 	}
-	parsed := make([]int, 3)
+	parsed := make([]int, len(segments))
 	for i, segment := range segments {
 		// Anything that is not a plain run of ASCII digits is refused here:
 		// this is what keeps `+build`, a slash, and a non-ASCII digit out.
@@ -82,6 +86,13 @@ func MajorOfRelease(value string) (int, bool) {
 	// release line, and accepting one would grant it a compatibility it never
 	// earned.
 	if !legacy && parsed[0] < 1 {
+		return 0, false
+	}
+	// A LITERAL ZERO FOURTH IS ANOTHER SPELLING OF THE THREE-SEGMENT VERSION, and
+	// the authority refuses it for that reason. Accepting it here would make this
+	// copy accept a string the module rejects — a divergence in the direction that
+	// lets PSP admit a version the publisher cannot.
+	if !legacy && len(parsed) == 4 && parsed[3] == 0 {
 		return 0, false
 	}
 	return parsed[0], true

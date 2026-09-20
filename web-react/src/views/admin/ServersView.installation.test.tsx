@@ -1147,7 +1147,7 @@ describe('native installation inputs', () => {
     // rule: it is exactly what the product scheme stamps, so a released product
     // version left the install action disabled with nothing said about why. It
     // is asserted as accepted below, and the near misses stay here.
-    '1.2', '1.2.3.4', '04.0.0', '1.2.3-beta.1', 'release/1.2.3',
+    '1.2', '1.2.3.4.5', '04.0.0', '1.2.3-beta.1', 'release/1.2.3',
     'v01.2.3', 'v1.2.3-beta.01', 'v1.2', 'v1.2.3.4',
   ])('rejects noncanonical release version %s', version => {
     expect(isNodeReleaseVersion(version)).toBe(false)
