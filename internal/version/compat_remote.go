@@ -369,6 +369,40 @@ func fetchAndApply(ctx context.Context, url string) error {
 		payload.SUIEntries = overlay.SUIEntries
 	}
 
+	if err := applyCompatPayload(payload); err != nil {
+		return err
+	}
+	return storePolicySnapshot(payload)
+}
+
+// applyCompatPayload installs a fully-resolved policy document for the CURRENT
+// build, and is the ONE place that decides whether a document applies here.
+//
+// Two entry points use it: the network fetch, and the boot path replaying the
+// last validated snapshot. They must agree. A boot that installed a cached
+// document by a looser rule than the fetch that stored it is how an instance
+// comes back from a restart believing a range its own version is not covered by
+// — and the cached document could have been written by a different build.
+//
+// The schema check accepts both the base and the overlay schema because by the
+// time this runs the fetch path has merged the overlay in, and the merged
+// document carries the overlay's schema number.
+func applyCompatPayload(payload remoteCompatPayload) error {
+	currentMajor, ok := pspMajor(Version)
+	if !ok {
+		return fmt.Errorf("cannot derive PSP major from version %q", Version)
+	}
+	if payload.SchemaVersion != schemaVersion && payload.SchemaVersion != rangeOverlaySchemaVersion {
+		return fmt.Errorf("compat policy schema_version %d, this PSP build only supports base schema %d and overlay schema %d",
+			payload.SchemaVersion, schemaVersion, rangeOverlaySchemaVersion)
+	}
+	if payload.Major != currentMajor {
+		// Self-validation: PSP fetched v<currentMajor>.json but the file's
+		// `major` field says something else — a wrong file at the URL, or a
+		// cached document from another major. Refuse rather than install
+		// another major's range.
+		return fmt.Errorf("compat policy declares major=%d but this PSP is major=%d (wrong file at URL?)", payload.Major, currentMajor)
+	}
 	entry, ok := lookupForPSPVersion(payload, Version)
 	if !ok {
 		return fmt.Errorf("no compat entry covers PSP %q in %d entries (range gap — bump the JSON)",
@@ -397,7 +431,6 @@ func fetchAndApply(ctx context.Context, url string) error {
 	// off on the path, and replacing ranges must not silently restate it.
 	SetActiveUpgradeEdges(payload.UpgradeEdges)
 	applySUICompat(payload)
-	_ = saveCompatCache(entry.MaxTestedXUI)
 	// Recorded AFTER the install succeeds, so a failure part-way leaves the old
 	// revision in force and the next fetch is still compared against what is
 	// actually applied rather than against what was attempted.

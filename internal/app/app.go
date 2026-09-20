@@ -184,14 +184,16 @@ type App struct {
 // goroutines or listeners; call Run() for that.
 func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	// Wire the version-compat on-disk cache to PSP's DataDir BEFORE any
-	// RefreshRemoteCompat could fire, so the first refresh persists to
-	// the right place and a same-process load picks up the cached
-	// snapshot. LoadCompatCache here means a cold boot with no network
-	// still has a sane active range to work from — admins won't be
-	// stuck staring at "compat unknown" until the first manual Test.
+	// RefreshRemoteCompat could fire, so the first refresh persists to the right
+	// place and a same-process load picks up the cached snapshot.
+	// LoadPolicySnapshot replays the last VALIDATED policy document through the
+	// same apply path a fetch uses, so a cold boot with no network still has the
+	// range it had before the restart — and a document that no longer applies to
+	// this build installs nothing rather than being trusted for having been
+	// stored.
 	version.SetCacheDir(cfg.DataDir)
-	if err := version.LoadCompatCache(); err != nil {
-		log.Warn("load compat cache (will recover on first refresh)", "err", err)
+	if err := version.LoadPolicySnapshot(); err != nil {
+		log.Warn("load compat policy snapshot (will recover on first refresh)", "err", err)
 	}
 	// Same boot pattern for the centralized "latest 3X-UI release tag"
 	// snapshot: cold-boot off the cache so the ⋮ kebab "update available"
