@@ -44,16 +44,9 @@ func TestTheReleaseOrderFromTheVectors(t *testing.T) {
 			}
 		})
 	}
-	for _, tc := range vectors.LegacyOrder {
-		t.Run("legacy "+tc.A+" vs "+tc.B, func(t *testing.T) {
-			if got := version.CompareRelease(tc.A, tc.B); got != tc.Cmp {
-				t.Errorf("CompareRelease(%q, %q) = %d, want %d", tc.A, tc.B, got, tc.Cmp)
-			}
-			if got := version.CompareRelease(tc.B, tc.A); got != -tc.Cmp {
-				t.Errorf("CompareRelease(%q, %q) = %d, want %d (antisymmetry)", tc.B, tc.A, got, -tc.Cmp)
-			}
-		})
-	}
+	// THE LEGACY ORDER IS GONE WITH THE SCHEME, so there is no section to walk
+	// here. What the vectors still pin is the product order, above: numeric
+	// segments, and the BUILD component as the last of them.
 }
 
 // THE DOTLESS-PRERELEASE RULE IS GONE WITH THE SCHEME IT WAS FOR.

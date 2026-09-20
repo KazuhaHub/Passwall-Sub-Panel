@@ -4,8 +4,8 @@ import {
   MAX_SEGMENT,
   TAG_PREFIX,
   canonicalReleaseVersion,
-  compareLegacyTag,
   compareProductVersion,
+  compareReleaseVersion,
   formatProductVersion,
   parseProductVersion,
   parseReleaseTag,
@@ -71,13 +71,12 @@ describe('product version vectors', () => {
   // derivation is.
   it('prefers the stated tag and falls back to the derived one', () => {
     const [first] = vectors.tags
-    expect(releaseTag('v0.0.1-beta11', first.in)).toBe(first.in)
+    expect(releaseTag('4.0.0', first.in)).toBe(first.in)
     // A stated tag that is not one of ours is refused rather than re-derived:
     // falling back would address a release the panel did not name.
-    expect(releaseTag('v0.0.1-beta11', 'not-a-tag')).toBeUndefined()
-    for (const tc of vectors.reject_tags) expect(releaseTag('v0.0.1-beta11', tc.in), tc.in).toBeUndefined()
+    expect(releaseTag('4.0.0', 'not-a-tag')).toBeUndefined()
+    for (const tc of vectors.reject_tags) expect(releaseTag('4.0.0', tc.in), tc.in).toBeUndefined()
     // Absent, the derivation answers — which is every panel older than the field.
-    expect(releaseTag('v0.0.1-beta11')).toBe('v0.0.1-beta11')
     expect(releaseTag('4.0.0')).toBe(`${TAG_PREFIX}4.0.0`)
   })
 
@@ -98,15 +97,9 @@ describe('product version vectors', () => {
     }
   })
 
-  it('accepts and refuses versions the way both schemes say', () => {
-    // The version shape, which the Go side checks against the same section,
-    // so the two readings are held to one piece of data instead of to each
-    // other.
-    //
-    // A `v` PREFIXED TO A PRODUCT VERSION IS NOT AN ERROR AND IS NOT ASSERTED
-    // AS ONE: `v1.0.0` is the legacy identity for those same numbers, and the
-    // scheme separation is that a product version never carries the prefix,
-    // not that the prefix poisons the string.
+  it('accepts and refuses versions the way the vectors say', () => {
+    // The version shape, which the Go side checks against the same section, so
+    // the two readings are held to one piece of data instead of to each other.
     for (const tc of vectors.versions as Array<{ in: string; scheme?: string; ok: boolean; why?: string }>) {
       const canonical = canonicalReleaseVersion(tc.in)
       if (!tc.ok) {
@@ -115,7 +108,7 @@ describe('product version vectors', () => {
       }
       expect(canonical, `${tc.in} (${tc.why ?? ''})`).toBe(tc.in)
       const tag = tagForVersion(tc.in)
-      expect(tag, tc.in).toBe(tc.scheme === 'product' ? `${TAG_PREFIX}${tc.in}` : tc.in)
+      expect(tag, tc.in).toBe(`${TAG_PREFIX}${tc.in}`)
     }
   })
 
@@ -130,43 +123,45 @@ describe('product version vectors', () => {
     }
   })
 
-  // THE TWO COMPARATORS AGREE ON PRODUCT VERSIONS THE UPGRADE LIST CAN PASS
-  // THEM, and that is asserted because the list relies on it: it applies
-  // compareLegacyTag to every release, product ones included, while the vectors
-  // pin each comparator against its OWN section — so a change that made the
-  // legacy rule misorder a product version would fail nowhere and surface as a
-  // node offered the wrong target.
-  //
-  // THE DEFINITION IS "THREE SEGMENTS", NOT "EVERY VECTOR". The two rules
-  // genuinely differ on a SHORT FORM: the product comparator pads, so 102.1 and
-  // 102.1.0 are equal, while the legacy comparator orders by segment count, so
-  // 102.1 is below it. That difference is real, is the same in Go, and is
-  // unreachable here — every string this function compares has already been
-  // through the shape validation, which requires three segments. Asserting it
-  // over the raw vectors would be asserting a property the caller never needs and
-  // the two rules do not have.
-  it('orders three-segment product versions the same way through either comparator', () => {
-    for (const tc of vectors.order) {
-      if (tc.a.split('.').length !== 3 || tc.b.split('.').length !== 3) continue
-      const throughLegacy = compareLegacyTag(tc.a, tc.b)
-      const throughProduct = compareProductVersion(parseProductVersion(tc.a), parseProductVersion(tc.b))
-      expect(throughLegacy, `${tc.a} vs ${tc.b}`).toBe(throughProduct)
+  // THE STRING COMPARATOR IS THE ONE THE UPGRADE LIST USES, and it is the same
+  // rule as the typed one: the catalog carries versions as strings, so a second
+  // implementation here would be a second opinion about whether an upgrade is an
+  // upgrade.
+  it('orders version strings the way it orders parsed ones', () => {
+    // THE VERSIONS SECTION, NOT THE ORDER SECTION. The order section walks the
+    // comparator over inputs that are orderable but are not identities — `0.0.0`
+    // is one — and this function refuses to order a string it cannot first
+    // identify. Walking all PAIRS of identified versions is the stronger check
+    // anyway: it covers the fourth segment and the ties as well.
+    const identified = (vectors.versions as Array<{ in: string; ok: boolean }>)
+      .filter(tc => tc.ok)
+      .map(tc => tc.in)
+    for (const a of identified) {
+      for (const b of identified) {
+        const want = compareProductVersion(parseProductVersion(a), parseProductVersion(b))
+        expect(compareReleaseVersion(a, b), `${a} vs ${b}`).toBe(want)
+      }
     }
-  })
-
-  it('keeps the legacy ordering, whose dotless prereleases sort numerically', () => {
-    for (const tc of vectors.legacy_order) {
-      expect(compareLegacyTag(tc.a, tc.b), `${tc.a} vs ${tc.b}`).toBe(tc.cmp)
-    }
+    // An unparseable input compares EQUAL, which the callers turn into a
+    // refusal: a version that cannot be shown to be newer is not newer.
+    expect(compareReleaseVersion('latest', '4.0.0')).toBe(0)
+    expect(compareReleaseVersion('4.0.0', 'not-a-version')).toBe(0)
+    // A TAG IS NOT A VERSION, so it is not orderable here either.
+    expect(compareReleaseVersion('release/4.0.0', '4.0.0')).toBe(0)
   })
 })
 
-describe('the two schemes are not interchangeable', () => {
-  it('does not turn a legacy tag into a product version', () => {
+describe('a legacy tag is not one of ours', () => {
+  it('does not turn a legacy tag into a product version, or accept it as a tag', () => {
     // The tempting bug: strip the v and treat it as a product version. It would
-    // grant a release an identity it never published.
+    // grant a release an identity this project no longer publishes — and the
+    // other tempting bug is to keep answering for the old scheme, which is how a
+    // string nobody can install keeps being offered.
     expect(() => parseProductVersion('v102.1.0')).toThrow()
-    expect(parseReleaseTag('v102.1.0').scheme).toBe('legacy')
+    expect(() => parseReleaseTag('v102.1.0')).toThrow()
+    expect(isReleaseTag('v102.1.0')).toBe(false)
+    expect(canonicalReleaseVersion('v102.1.0')).toBeUndefined()
+    expect(tagForVersion('v102.1.0')).toBeUndefined()
   })
 
   // A FOURTH SEGMENT IS A VERSION NOW. This asserted the opposite until the

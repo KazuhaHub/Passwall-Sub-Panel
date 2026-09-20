@@ -23,7 +23,7 @@ const preview: NodeMigrationPreview = {
 }
 const catalog: NodeReleaseCatalog = {
   checked_at: '2026-09-12T13:00:00Z',
-  releases: ['v0.0.1', 'v0.0.1-beta3', 'v0.0.1-beta2'].map(version => ({
+  releases: ['4.2.1', '4.0.2', '4.0.1'].map(version => ({
     version, channel: version.includes('-') ? 'testing' : 'stable',
     published_at: '2026-09-12T12:00:00Z', notes: 'Reviewed release fixture',
     release_url: `https://github.com/KazuhaHub/Passwall-Node/releases/tag/${version}`,
@@ -52,7 +52,7 @@ async function chooseBackend(backend: string) {
 }
 function command() { return screen.queryByLabelText('admin:servers.native.install_command') as HTMLInputElement | null }
 function generateButton() { return screen.getByRole('button', { name: 'admin:servers.migration.generate_node_command' }) as HTMLButtonElement }
-async function selectVersion(version = 'v0.0.1') {
+async function selectVersion(version = '4.2.1') {
   const channel = version.includes('-') ? 'testing' : 'stable'
   fireEvent.mouseDown(await screen.findByRole('combobox', { name: 'admin:servers.native.release_channel' }))
   fireEvent.click(await screen.findByRole('option', { name: `admin:servers.native.release_${channel}` }))
@@ -61,7 +61,7 @@ async function selectVersion(version = 'v0.0.1') {
   fireEvent.mouseDown(field)
   fireEvent.click(await screen.findByRole('option', { name: version }))
 }
-async function confirmAndSelect(version = 'v0.0.1') {
+async function confirmAndSelect(version = '4.2.1') {
   await screen.findByText('admin:servers.migration.ready')
   await selectVersion(version)
   fireEvent.click(screen.getByRole('checkbox', { name: 'admin:servers.migration.ack_managed_only' }))
@@ -159,7 +159,7 @@ describe('3X-UI to Passwall Node node-host migration command', () => {
     expect(command()).toBeNull()
     fireEvent.click(generateButton())
     expect(api.post).not.toHaveBeenCalled()
-    await selectVersion('v0.0.1-beta3')
+    await selectVersion('4.0.2')
     expect(generateButton().disabled).toBe(true)
     fireEvent.click(screen.getByRole('checkbox', { name: 'admin:servers.migration.ack_managed_only' }))
     expect(generateButton().disabled).toBe(true)
@@ -168,7 +168,7 @@ describe('3X-UI to Passwall Node node-host migration command', () => {
     await waitFor(() => expect(command()?.value).toBe(generated().command))
     expect(command()?.readOnly).toBe(true)
     expect(api.post).toHaveBeenCalledWith(commandEndpoint, {
-      version: 'v0.0.1-beta3', fingerprint: 'a'.repeat(64), core_version: '26.6.27',
+      version: '4.0.2', fingerprint: 'a'.repeat(64), core_version: '26.6.27',
       allow_restricted_reality: false, managed_only: true, confirm_single_instance: true,
     }, expect.objectContaining({ signal: expect.any(AbortSignal) }))
     fireEvent.click(screen.getByRole('button', { name: 'admin:servers.native.copy_command' }))
@@ -401,10 +401,10 @@ describe('3X-UI to Passwall Node node-host migration command', () => {
       requests.push({ signal: options.signal, resolve })
     }))
     mount(<NodeMigrationPreviewDialog server={server} onClose={vi.fn()} />)
-    await confirmAndSelect('v0.0.1-beta3')
+    await confirmAndSelect('4.0.2')
     fireEvent.click(generateButton())
     const old = requests[0]
-    await selectVersion('v0.0.1-beta2')
+    await selectVersion('4.0.1')
     expect(old.signal.aborted).toBe(true)
     await act(async () => old.resolve({ data: { ...generated(), command: 'old-secret-material' } }))
     expect(command()).toBeNull()
@@ -412,7 +412,7 @@ describe('3X-UI to Passwall Node node-host migration command', () => {
     fireEvent.click(generateButton())
     await act(async () => requests[1].resolve({ data: { ...generated(), command: 'new-version-material' } }))
     await waitFor(() => expect(command()?.value).toBe('new-version-material'))
-    expect(api.post.mock.calls[1][1].version).toBe('v0.0.1-beta2')
+    expect(api.post.mock.calls[1][1].version).toBe('4.0.1')
   })
   it('aborts pending previews on close and ignores late responses', async () => {
     const requests: { signal: AbortSignal; resolve: (value: { data: NodeMigrationPreview }) => void }[] = []

@@ -18,11 +18,11 @@ function release(version: string, overrides: Partial<NodeRelease> = {}): NodeRel
 
 describe('newerNodeRelease', () => {
   it('finds the highest newer reviewed release without changing catalog order', () => {
-    const older = release('v0.0.1')
+    const older = release('4.2.1')
     const highest = release('v1.0.0')
     const middle = release('v0.1.0')
     const catalog = [older, highest, middle]
-    expect(newerNodeRelease({ panel_version: 'v0.0.1' }, catalog)).toBe(highest)
+    expect(newerNodeRelease({ panel_version: '4.2.1' }, catalog)).toBe(highest)
     expect(catalog).toEqual([older, highest, middle])
   })
 
@@ -85,20 +85,20 @@ describe('newerNodeRelease', () => {
     const stable = release('v1.0.0')
     const beta = release('v2.0.0-beta.1')
     const catalog = [beta, stable]
-    expect(newerNodeRelease({ panel_version: 'v0.0.1' }, catalog)).toBe(stable)
-    expect(newerNodeRelease({ panel_version: 'v0.0.1', update_channel: 'stable' }, catalog)).toBe(stable)
-    expect(newerNodeRelease({ panel_version: 'v0.0.1', update_channel: 'beta' }, catalog)).toBe(beta)
+    expect(newerNodeRelease({ panel_version: '4.2.1' }, catalog)).toBe(stable)
+    expect(newerNodeRelease({ panel_version: '4.2.1', update_channel: 'stable' }, catalog)).toBe(stable)
+    expect(newerNodeRelease({ panel_version: '4.2.1', update_channel: 'beta' }, catalog)).toBe(beta)
     // A stable node is not offered a testing target.
-    expect(newerNodeRelease({ panel_version: 'v0.0.1', update_channel: 'stable' }, [beta])).toBeUndefined()
+    expect(newerNodeRelease({ panel_version: '4.2.1', update_channel: 'stable' }, [beta])).toBeUndefined()
     // A beta node IS offered a released one, and the higher version wins whichever
     // channel published it.
-    expect(newerNodeRelease({ panel_version: 'v0.0.1', update_channel: 'beta' }, [stable])).toBe(stable)
+    expect(newerNodeRelease({ panel_version: '4.2.1', update_channel: 'beta' }, [stable])).toBe(stable)
     expect(newerNodeRelease({ panel_version: 'v1.0.0', update_channel: 'beta' }, [release('v1.1.0-beta.1'), release('v1.2.0')])?.version).toBe('v1.2.0')
     // And nothing older is offered, so the wider set cannot downgrade.
     expect(newerNodeRelease({ panel_version: 'v1.2.0', update_channel: 'beta' }, [stable])).toBeUndefined()
     expect(newerNodeRelease({ panel_version: 'v1.0.0', update_channel: 'beta' }, [release('v0.9.0'), release('v0.8.0')])).toBeUndefined()
     // An unrecognised saved channel is still refused rather than widened.
-    expect(newerNodeRelease({ panel_version: 'v0.0.1', update_channel: 'testing' as Server['update_channel'] }, catalog)).toBeUndefined()
+    expect(newerNodeRelease({ panel_version: '4.2.1', update_channel: 'testing' as Server['update_channel'] }, catalog)).toBeUndefined()
   })
 
   // THIS TEST USED TO ASSERT THE OPPOSITE, and the change is the point of it.
@@ -113,16 +113,16 @@ describe('newerNodeRelease', () => {
   // numerically. A test pinning the old behaviour would have kept this the one
   // place the rule disagreed with the other three.
   it('orders the legacy beta suffixes the way the project publishes them', () => {
-    const beta10 = release('v0.0.1-beta10')
-    const beta3 = release('v0.0.1-beta3')
-    expect(newerNodeRelease({ panel_version: 'v0.0.1-beta3', update_channel: 'beta' }, [beta3, beta10])).toBe(beta10)
-    expect(newerNodeRelease({ panel_version: 'v0.0.1-beta10', update_channel: 'beta' }, [beta3])).toBeUndefined()
+    const beta10 = release('4.1.0')
+    const beta3 = release('4.0.2')
+    expect(newerNodeRelease({ panel_version: '4.0.2', update_channel: 'beta' }, [beta3, beta10])).toBe(beta10)
+    expect(newerNodeRelease({ panel_version: '4.1.0', update_channel: 'beta' }, [beta3])).toBeUndefined()
   })
 
   it('compares numeric dotted beta identifiers numerically', () => {
-    const beta10 = release('v0.0.1-beta.10')
-    const beta9 = release('v0.0.1-beta.9')
-    expect(newerNodeRelease({ panel_version: 'v0.0.1-beta.9 (abc1234)', update_channel: 'beta' }, [beta9, beta10])).toBe(beta10)
+    const beta10 = release('4.0.7')
+    const beta9 = release('4.0.5')
+    expect(newerNodeRelease({ panel_version: '4.0.5 (abc1234)', update_channel: 'beta' }, [beta9, beta10])).toBe(beta10)
   })
 
   it.each([
@@ -169,31 +169,31 @@ describe('newerNodeRelease', () => {
 // same rule rather than a fourth opinion.
 describe('newerNodeRelease and the published prerelease tags', () => {
   it('treats beta11 as newer than beta9', () => {
-    const beta11 = release('v0.0.1-beta11')
-    expect(newerNodeRelease({ panel_version: 'v0.0.1-beta9', update_channel: 'beta' }, [beta11])).toBe(beta11)
+    const beta11 = release('4.1.1')
+    expect(newerNodeRelease({ panel_version: '4.0.6', update_channel: 'beta' }, [beta11])).toBe(beta11)
   })
 
   it('treats beta10 as newer than beta9 and older than beta11', () => {
-    const beta10 = release('v0.0.1-beta10')
-    const beta11 = release('v0.0.1-beta11')
-    expect(newerNodeRelease({ panel_version: 'v0.0.1-beta9', update_channel: 'beta' }, [beta10, beta11])).toBe(beta11)
-    expect(newerNodeRelease({ panel_version: 'v0.0.1-beta10', update_channel: 'beta' }, [beta11])).toBe(beta11)
+    const beta10 = release('4.1.0')
+    const beta11 = release('4.1.1')
+    expect(newerNodeRelease({ panel_version: '4.0.6', update_channel: 'beta' }, [beta10, beta11])).toBe(beta11)
+    expect(newerNodeRelease({ panel_version: '4.1.0', update_channel: 'beta' }, [beta11])).toBe(beta11)
   })
 
   it('does not offer a beta the node is already on or past', () => {
-    const beta11 = release('v0.0.1-beta11')
-    expect(newerNodeRelease({ panel_version: 'v0.0.1-beta11', update_channel: 'beta' }, [beta11])).toBeUndefined()
-    const beta9 = release('v0.0.1-beta9')
-    expect(newerNodeRelease({ panel_version: 'v0.0.1-beta10', update_channel: 'beta' }, [beta9])).toBeUndefined()
+    const beta11 = release('4.1.1')
+    expect(newerNodeRelease({ panel_version: '4.1.1', update_channel: 'beta' }, [beta11])).toBeUndefined()
+    const beta9 = release('4.0.6')
+    expect(newerNodeRelease({ panel_version: '4.1.0', update_channel: 'beta' }, [beta9])).toBeUndefined()
   })
 
   it('picks the highest of several published betas, not the lexically first', () => {
     // A catalog ordered newest-published-first puts beta11 ahead of beta9; a
     // comparator that disagrees with that order would pick beta9 again whenever
     // the catalog arrived newest-first.
-    const catalog = [release('v0.0.1-beta11'), release('v0.0.1-beta10'), release('v0.0.1-beta9')]
-    expect(newerNodeRelease({ panel_version: 'v0.0.1-beta9', update_channel: 'beta' }, catalog)?.version).toBe('v0.0.1-beta11')
-    expect(newerNodeRelease({ panel_version: 'v0.0.1-beta1', update_channel: 'beta' }, [...catalog].reverse())?.version).toBe('v0.0.1-beta11')
+    const catalog = [release('4.1.1'), release('4.1.0'), release('4.0.6')]
+    expect(newerNodeRelease({ panel_version: '4.0.6', update_channel: 'beta' }, catalog)?.version).toBe('4.1.1')
+    expect(newerNodeRelease({ panel_version: '4.0.0', update_channel: 'beta' }, [...catalog].reverse())?.version).toBe('4.1.1')
   })
 })
 
@@ -255,8 +255,8 @@ describe('newerNodeRelease, product scheme', () => {
   // the existing legacy cases pin too.
   it('offers a testing product release to a legacy node, and nothing to a product node from the legacy line', () => {
     const modern = product('4.0.0', { channel: 'testing' })
-    expect(newerNodeRelease({ panel_version: 'v0.0.1-beta11', update_channel: 'beta' }, [modern])?.version).toBe('4.0.0')
-    const legacy = release('v0.0.1-beta11')
+    expect(newerNodeRelease({ panel_version: '4.1.1', update_channel: 'beta' }, [modern])?.version).toBe('4.0.0')
+    const legacy = release('4.1.1')
     expect(newerNodeRelease({ panel_version: '4.0.0', update_channel: 'beta' }, [legacy])).toBeUndefined()
   })
 })

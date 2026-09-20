@@ -4,7 +4,7 @@ import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import { useTranslation } from 'react-i18next'
 import { listNodeReleases, type NodeRelease, type NodeReleaseChannel } from '@/api/nodeReleases'
 import type { NativeInstallationSelection } from '@/api/servers'
-import { compareLegacyTag, releaseTag } from '@/utils/productVersion'
+import { compareReleaseVersion, releaseTag } from '@/utils/productVersion'
 
 export interface NodeReleaseSelectorProps {
   enabled: boolean
@@ -136,7 +136,7 @@ export default function NodeReleaseSelector({ enabled, selection, value, onChang
 
   const options = useMemo(() => (releases ?? []).filter(release =>
     release.channel === channel && officialReleaseURL(release) && supportsSelection(release, selection) &&
-    (!newerThan || compareLegacyTag(release.version, newerThan) > 0) &&
+    (!newerThan || compareReleaseVersion(release.version, newerThan) > 0) &&
     (!targets || targets.includes(release.version)),
   ), [releases, channel, selection, newerThan, targets])
   const selected = options.find(release => release.version === value)

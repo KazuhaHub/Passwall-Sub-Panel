@@ -6,8 +6,8 @@ import { api, installReads, mount } from '@/test/adminSaveHarness'
 import { NativeAgentUpgradeDialog } from './NativeAgentUpgradeDialog'
 import type { NativeAgentUpgrade, Server } from '@/api/servers'
 
-const server: Server = { id: 7, name: 'native', panel_type: 'psp', url: 'psp://agt_7', panel_version: 'v0.0.1-beta2 (abcdef0)', capabilities: [], auth_method: '', has_api_token: false, has_password: false, insecure_https: false }
-const queued: NativeAgentUpgrade = { task_id: 'upgrade-test', agent_id: 'agt_7', version: 'v0.0.1-beta3', expected_version: 'v0.0.1-beta2', status: 'queued', upgrade_state: 'queued', not_after_ms: 10000, dispatch_closed: false }
+const server: Server = { id: 7, name: 'native', panel_type: 'psp', url: 'psp://agt_7', panel_version: '4.0.1 (abcdef0)', capabilities: [], auth_method: '', has_api_token: false, has_password: false, insecure_https: false }
+const queued: NativeAgentUpgrade = { task_id: 'upgrade-test', agent_id: 'agt_7', version: '4.0.2', expected_version: '4.0.1', status: 'queued', upgrade_state: 'queued', not_after_ms: 10000, dispatch_closed: false }
 const catalog = { releases: [{ version: queued.version, channel: 'testing', published_at: '2026-09-12T12:00:00Z',
   release_url: `https://github.com/KazuhaHub/Passwall-Node/releases/tag/${queued.version}`, notes: 'Reviewed release fixture',
   methods: ['linux'], platforms: [{ os: 'linux', arch: 'amd64' }, { os: 'linux', arch: 'arm64' }] }], checked_at: '' }
@@ -42,7 +42,7 @@ async function selectRelease(savedBeta = false) {
 it('requires explicit confirmation and displays queued rather than a success toast', async () => {
   api.post.mockResolvedValue({ data: queued })
   mount(<NativeAgentUpgradeDialog server={server} onClose={() => {}} />)
-  expect((screen.getByLabelText('admin:servers.agent_upgrade.current') as HTMLInputElement).value).toBe('v0.0.1-beta2')
+  expect((screen.getByLabelText('admin:servers.agent_upgrade.current') as HTMLInputElement).value).toBe('4.0.1')
   const button = screen.getByRole('button', { name: 'admin:servers.agent_upgrade.confirm' }) as HTMLButtonElement
   expect(button.disabled).toBe(true)
   await screen.findByText('admin:servers.native.release_no_target_for_node')
@@ -114,10 +114,10 @@ it('uses the saved beta preference but still requires an exact reviewed version 
 // own judgement now, and what remains is the policy's answer: a release the policy
 // in force does not offer is not put in front of anyone.
 it('offers the targets the instance offers, and no others', async () => {
-  const further = { ...catalog.releases[0], version: 'v0.0.1-beta9',
-    release_url: 'https://github.com/KazuhaHub/Passwall-Node/releases/tag/v0.0.1-beta9' }
-  const unlisted = { ...catalog.releases[0], version: 'v0.0.1-beta8',
-    release_url: 'https://github.com/KazuhaHub/Passwall-Node/releases/tag/v0.0.1-beta8' }
+  const further = { ...catalog.releases[0], version: '4.0.6',
+    release_url: 'https://github.com/KazuhaHub/Passwall-Node/releases/tag/4.0.6' }
+  const unlisted = { ...catalog.releases[0], version: '4.0.4',
+    release_url: 'https://github.com/KazuhaHub/Passwall-Node/releases/tag/4.0.4' }
   installReads({
     '/admin/servers/node-releases': { ...catalog, releases: [catalog.releases[0], further, unlisted] },
     '/admin/servers/7/node-agent-upgrades/upgrade-test': queued,
@@ -138,16 +138,16 @@ it('offers the targets the instance offers, and no others', async () => {
   expect(await screen.findByRole('option', { name: queued.version })).toBeTruthy()
   // IN THE CATALOG AND AHEAD OF THE NODE, and still offered: the only thing that
   // excludes a release now is a policy that does not list it.
-  expect(await screen.findByRole('option', { name: 'v0.0.1-beta9' })).toBeTruthy()
-  expect(screen.queryByRole('option', { name: 'v0.0.1-beta8' })).toBeNull()
+  expect(await screen.findByRole('option', { name: '4.0.6' })).toBeTruthy()
+  expect(screen.queryByRole('option', { name: '4.0.4' })).toBeNull()
 })
 
 // A control-plane blip must not remove an action the operator was using, and the
 // write path still protects the fire — so a failed read falls back to the weaker
 // "strictly newer" filter rather than emptying the list.
 it('falls back to offering what is newer when the instance cannot answer', async () => {
-  const further = { ...catalog.releases[0], version: 'v0.0.1-beta9',
-    release_url: 'https://github.com/KazuhaHub/Passwall-Node/releases/tag/v0.0.1-beta9' }
+  const further = { ...catalog.releases[0], version: '4.0.6',
+    release_url: 'https://github.com/KazuhaHub/Passwall-Node/releases/tag/4.0.6' }
   installReads({
     '/admin/servers/node-releases': { ...catalog, releases: [catalog.releases[0], further] },
     '/admin/servers/7/node-agent-upgrades/upgrade-test': queued,
@@ -157,7 +157,7 @@ it('falls back to offering what is newer when the instance cannot answer', async
   const field = screen.getByRole('combobox', { name: 'admin:servers.native.agent_version' })
   await waitFor(() => expect(field.getAttribute('aria-disabled')).not.toBe('true'))
   fireEvent.mouseDown(field)
-  expect(await screen.findByRole('option', { name: 'v0.0.1-beta9' })).toBeTruthy()
+  expect(await screen.findByRole('option', { name: '4.0.6' })).toBeTruthy()
 })
 
 // A NODE THAT REPORTS A PRODUCT-SCHEME VERSION.
