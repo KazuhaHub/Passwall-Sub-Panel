@@ -27,6 +27,43 @@ type CoreCatalog interface {
 	Document(ctx context.Context) (CoreCatalogDocument, error)
 }
 
+// CoreCatalogReporter is the optional half: a catalog that can say WHAT it is
+// serving and how it got it.
+//
+// IT IS A SEPARATE INTERFACE RATHER THAN A THIRD METHOD on CoreCatalog, and it is
+// the same shape the panel adapters use for their optional capabilities. A reader
+// that cannot answer — a test double, a build with no source — is still a reader,
+// and forcing every implementation to carry a method nobody reads would trade one
+// awkwardness for a wider one.
+type CoreCatalogReporter interface {
+	Status() CoreCatalogStatus
+}
+
+// CoreCatalogStatus is what an operator needs to judge whether the review in force
+// is the one that is current.
+//
+// IT SAYS STALENESS AND NOTHING MORE. There is deliberately no field claiming the
+// review is current, because this panel cannot know that: it knows when it last
+// read a document and what came back. A panel that is offline keeps the review it
+// has — that is a decision, not a failure — and while it is offline it does not
+// learn about withdrawals. Nothing here should be read as promising otherwise.
+type CoreCatalogStatus struct {
+	// Source names where the document in force came from, in words an operator can
+	// act on.
+	Source string `json:"source"`
+	// ReviewTime is the document's own statement of when the review it records was
+	// made. This is the number that says how old the answer is.
+	ReviewTime *time.Time `json:"review_time,omitempty"`
+	// LastSuccess is when this process last read and verified a document from the
+	// origin. Nil means it never has.
+	LastSuccess *time.Time `json:"last_success,omitempty"`
+	// LastError is why the most recent attempt did not produce one, if it did not.
+	LastError string `json:"last_error,omitempty"`
+	// FallingBack is true when the document in force was NOT read from the origin
+	// on this attempt.
+	FallingBack bool `json:"falling_back"`
+}
+
 // CoreCatalogDocument is the published document, and ITS JSON SHAPE IS THE
 // CONTRACT: the admin API serves a release verbatim and the SPA declares the same
 // fields in web-react/src/api/servers.ts. A field added here and not there is a

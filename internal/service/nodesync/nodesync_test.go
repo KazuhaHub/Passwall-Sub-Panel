@@ -16,6 +16,7 @@ import (
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/adapters/sqlstore"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/corefixtures"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 )
 
@@ -174,7 +175,7 @@ func TestSyncDispatchesDurableTasksOnlyWithBothCapabilitiesAndAcceptsReplay(t *t
 	}
 	now := time.Date(2026, 9, 11, 13, 0, 0, 0, time.UTC)
 	issues := &switchableIssueRepo{NodeAgentIssueRepo: repos.NodeAgentIssue}
-	service, err := New(Options{
+	service, err := New(Options{CoreCatalog: corefixtures.Static{},
 		Desired: repos.NativeDesired, Agents: repos.NodeAgent, Issues: issues, Tasks: repos.NodeAgentTask,
 		Users: repos.User, Clients: repos.PSPClient, Nodes: repos.Node, Settings: repos.ScopedSettings,
 		Now: func() time.Time { return now },
@@ -328,7 +329,7 @@ func TestSyncMintsDocumentsThenIngestsAppliedObservation(t *testing.T) {
 	}
 	now := time.Date(2026, time.September, 10, 12, 0, 0, 0, time.UTC)
 	currentNow := now
-	service, err := New(Options{
+	service, err := New(Options{CoreCatalog: corefixtures.Static{},
 		Desired: repos.NativeDesired, Agents: repos.NodeAgent, Issues: repos.NodeAgentIssue, Tasks: repos.NodeAgentTask, Users: repos.User,
 		Clients: repos.PSPClient, Nodes: repos.Node, Settings: repos.ScopedSettings,
 		Now: func() time.Time { return currentNow },
@@ -554,30 +555,32 @@ func TestSyncMintsDocumentsThenIngestsAppliedObservation(t *testing.T) {
 	}
 }
 
-// THE CONFIG BODY CARRIES THE SELECTION THE PANEL COMMITTED TO, and refuses a row
-// whose core is not a release at all.
+// THE CONFIG BODY CARRIES THE SELECTION THE OPERATOR COMMITTED THIS NODE TO, after
+// re-checking that selection against the review that is current NOW.
 //
-// IT USED TO RESOLVE THE VERSION AGAINST THE COMPILED CATALOG ON EVERY SYNC, which
-// made the hottest path in the system read it: the same fact is settled where the
-// core is CHOSEN (the selector) and where it is PERSISTED (the conversion gate), so
-// a third check behind a network read bought nothing and cost the fleet a config
-// delivery whenever the origin was unreachable.
+// SHAPE NEEDS NO CATALOG, and is still refused here: an engine outside the closed
+// set, a version that is not canonical, or no version at all. Those are statements
+// about the row.
 //
-// WHAT REMAINS IS SHAPE, and it needs no catalog. `latest` used to be refused
-// because the catalog had no such release; it is refused here because it is not a
-// version, which is the reason that survives.
+// WHAT THE REVIEW ADDS IS THE PART SHAPE CANNOT SEE — a release withdrawn after an
+// operator selected it, or re-tiered so that it now requires an acknowledgement the
+// node is not configured with. THIS IS A NEW CAPABILITY, and the difference is worth
+// stating: the check that once lived here resolved against a catalog compiled into
+// the build, so it could only refuse a selection that was already wrong when the
+// panel shipped. It could not learn that a release had been pulled.
 func TestBuildConfigCarriesTheCommittedCoreSelection(t *testing.T) {
 	t.Parallel()
+	reviewed := corefixtures.Document()
 	body, err := buildConfig(&ports.NativeDesiredSnapshot{}, &domain.NodeAgent{
 		DesiredCoreVersion: "26.9.9", AllowRestrictedReality: true,
-	})
+	}, reviewed)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if body.Core.Engine != "xray" || body.Core.Version != "26.9.9" || !body.Core.AllowRestrictedReality {
 		t.Fatalf("core selection = %+v", body.Core)
 	}
-	for _, tests := range []struct {
+	for _, tc := range []struct {
 		name  string
 		agent *domain.NodeAgent
 	}{
@@ -585,25 +588,123 @@ func TestBuildConfigCarriesTheCommittedCoreSelection(t *testing.T) {
 		{"an empty version is not a release", &domain.NodeAgent{}},
 		{"an unsupported engine", &domain.NodeAgent{DesiredCoreEngine: "v2ray", DesiredCoreVersion: "26.6.27"}},
 	} {
-		t.Run(tests.name, func(t *testing.T) {
-			if _, err := buildConfig(&ports.NativeDesiredSnapshot{}, tests.agent); err == nil {
+		t.Run(tc.name, func(t *testing.T) {
+			err := buildConfigError(t, reviewed, tc.agent)
+			if err == nil {
 				t.Fatal("unexpectedly minted a config")
+			}
+			if errors.Is(err, errSelectionWithdrawn) {
+				t.Fatalf("a statement about the row was reported as the review's: %v", err)
 			}
 		})
 	}
 	// AN UPSTREAM-STYLE TAG IS CANONICALIZED RATHER THAN REFUSED, because operators
 	// paste what they see and the catalog stores the form without the v.
-	fromTag, err := buildConfig(&ports.NativeDesiredSnapshot{}, &domain.NodeAgent{DesiredCoreVersion: "v26.6.27"})
+	fromTag, err := buildConfig(&ports.NativeDesiredSnapshot{}, &domain.NodeAgent{DesiredCoreVersion: "v26.6.27"}, reviewed)
 	if err != nil || fromTag.Core.Version != "26.6.27" {
 		t.Fatalf("v-prefixed version = (%+v, %v)", fromTag.Core, err)
 	}
 	singBox, err := buildConfig(&ports.NativeDesiredSnapshot{}, &domain.NodeAgent{
 		DesiredCoreEngine: domain.NodeCoreSingBox, DesiredCoreVersion: "1.14.0",
-	})
+	}, reviewed)
 	if err != nil || singBox.Core.Engine != "sing-box" || singBox.Core.Version != "1.14.0" || singBox.Core.AllowRestrictedReality {
 		t.Fatalf("sing-box core selection = (%+v, %v)", singBox.Core, err)
 	}
 }
+
+// A SELECTION THAT WAS FINE WHEN IT WAS SAVED CAN STOP BEING FINE, and this is the
+// case the whole capability exists for: the operator's choice is unchanged and only
+// the review has moved. Both halves run the SAME agent row, so a refusal that came
+// from anything but the review would fail the first half.
+func TestAWithdrawnSelectionStopsBeingDispatched(t *testing.T) {
+	agent := &domain.NodeAgent{DesiredCoreVersion: "26.6.27"}
+	if err := buildConfigError(t, corefixtures.Document(), agent); err != nil {
+		t.Fatalf("the fixture refuses its own recommended release: %v", err)
+	}
+
+	for _, tc := range []struct {
+		name  string
+		after func(*ports.CoreRelease)
+	}{
+		{
+			name:  "the release is withdrawn",
+			after: func(r *ports.CoreRelease) { r.Selectable = false },
+		},
+		{
+			name: "the release is no longer an offer for this engine",
+			after: func(r *ports.CoreRelease) {
+				r.Engine = string(domain.NodeCoreSingBox)
+			},
+		},
+		{
+			name: "the release now requires an acknowledgement",
+			after: func(r *ports.CoreRelease) {
+				r.Tier, r.RequiresConfirmation = domain.CoreTierRestricted, true
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			withdrawn := corefixtures.Document()
+			for index := range withdrawn.Releases {
+				if withdrawn.Releases[index].Version == "26.6.27" {
+					tc.after(&withdrawn.Releases[index])
+				}
+			}
+			if err := buildConfigError(t, withdrawn, agent); !errors.Is(err, errSelectionWithdrawn) {
+				t.Fatalf("a withdrawn selection was dispatched: %v", err)
+			}
+		})
+	}
+
+	// AND THE OTHER DIRECTION, because a restriction that is LIFTED is also a change
+	// the stored acknowledgement no longer matches.
+	restricted := &domain.NodeAgent{DesiredCoreVersion: "26.9.9", AllowRestrictedReality: true}
+	if err := buildConfigError(t, corefixtures.Document(), restricted); err != nil {
+		t.Fatalf("the fixture refuses its own restricted release: %v", err)
+	}
+	lifted := corefixtures.Document()
+	for index := range lifted.Releases {
+		if lifted.Releases[index].Version == "26.9.9" {
+			lifted.Releases[index].Tier, lifted.Releases[index].RequiresConfirmation = domain.CoreTierVerified, false
+		}
+	}
+	if err := buildConfigError(t, lifted, restricted); !errors.Is(err, errSelectionWithdrawn) {
+		t.Fatalf("a lifted restriction was dispatched: %v", err)
+	}
+}
+
+// THE REFUSAL NAMES THE RELEASE AND WHAT CHANGED. An operator has to be able to act
+// on it from the message alone, because there is nowhere else the reason appears yet.
+func TestTheRefusalSaysWhatChanged(t *testing.T) {
+	withdrawn := corefixtures.Document()
+	for index := range withdrawn.Releases {
+		if withdrawn.Releases[index].Version == "26.6.27" {
+			withdrawn.Releases[index].Selectable = false
+		}
+	}
+	err := buildConfigError(t, withdrawn, &domain.NodeAgent{DesiredCoreVersion: "26.6.27"})
+	if err == nil || !strings.Contains(err.Error(), "26.6.27") {
+		t.Fatalf("the refusal does not name the release: %v", err)
+	}
+}
+
+// buildConfigError runs the builder and returns what it said, so a case can assert
+// on the classification rather than on the message.
+func buildConfigError(t *testing.T, catalog ports.CoreCatalogDocument, agent *domain.NodeAgent) error {
+	t.Helper()
+	_, err := buildConfig(&ports.NativeDesiredSnapshot{}, agent, catalog)
+	return err
+}
+
+// fixedCatalog serves one document and can be told to serve a different one — which
+// is what a refresh does to a service that is already running.
+type fixedCatalog struct{ document ports.CoreCatalogDocument }
+
+func (c *fixedCatalog) Document(context.Context) (ports.CoreCatalogDocument, error) {
+	return c.document, nil
+}
+
+func (c *fixedCatalog) set(document ports.CoreCatalogDocument) { c.document = document }
 
 func TestPendingUsageKeepsOriginalEpochAnchorUntilTrafficPollPersists(t *testing.T) {
 	service := &Service{anchors: make(map[int64]nodeprotocol.ClientCounters)}

@@ -32,7 +32,7 @@ import (
 
 const documentFixture = `{
   "schema_version": 1,
-  "updated_at": "2026-09-11T00:00:00Z",
+  "updated_at": "2026-09-20T00:00:00Z",
   "releases": [
     {
       "engine": "xray",
@@ -224,8 +224,16 @@ func TestItRefusesAReleaseThisProjectDidNotSign(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := catalog.Document(context.Background()); !errors.Is(err, ErrUnavailable) {
+	_, err = catalog.Document(context.Background())
+	if !errors.Is(err, ErrUnavailable) {
 		t.Fatalf("a manifest signed by another key was accepted: %v", err)
+	}
+	// AND IT IS NOT A MOMENT. A signature that does not verify is a statement about
+	// the publication, not a blip: falling back to the review this panel already has
+	// would answer a "somebody is publishing something I do not trust" event with a
+	// working-looking panel.
+	if errors.Is(err, ErrRefreshable) {
+		t.Fatalf("a signature failure was classified as a refreshable read: %v", err)
 	}
 }
 
@@ -267,7 +275,7 @@ func TestItRefusesADocumentItCannotRead(t *testing.T) {
 		{"a newer schema", strings.Replace(documentFixture, `"schema_version": 1`, `"schema_version": 2`, 1)},
 		{"truncated", documentFixture[:len(documentFixture)/2]},
 		{"not JSON", "not a document at all"},
-		{"no releases", `{"schema_version": 1, "updated_at": "2026-09-11T00:00:00Z", "releases": []}`},
+		{"no releases", `{"schema_version": 1, "updated_at": "2026-09-20T00:00:00Z", "releases": []}`},
 		{"no date", `{"schema_version": 1, "updated_at": "0001-01-01T00:00:00Z", "releases": [{"engine": "xray", "version": "26.6.27"}]}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -482,13 +490,17 @@ func TestAPermanentFailureIsNeverAnsweredFromTheCache(t *testing.T) {
 	}
 }
 
-// A RELEASE THAT DOES NOT PUBLISH THE ASSET IS NOT AN UNREACHABLE ORIGIN.
+// A RELEASE THAT DOES NOT PUBLISH THE ASSET FALLS BACK, AND SAYS WHY.
 //
-// It answers the same way on every attempt, so treating it as a moment would hide
-// a packaging mistake behind a retry — and, worse, would keep serving whatever was
-// read before instead of saying that the release a panel is pointed at does not
-// carry a catalog at all.
-func TestAMissingAssetIsReportedAsSuchAndDoesNotFallBack(t *testing.T) {
+// It is a failure of AVAILABILITY rather than of content: the panel cannot name a
+// document, which is what being offline looks like from here, so its newest review
+// — the last thing both sides agreed on — stays in force rather than the whole
+// selector going empty over a missing file.
+//
+// WHAT MUST NOT HAPPEN IS THE REASON BEING LOST. A packaging mistake that reads as
+// a network blip is a packaging mistake nobody fixes, so the reason names the
+// release and the asset, and it reaches the status an operator reads.
+func TestAMissingAssetKeepsTheNewestReviewAndNamesTheReason(t *testing.T) {
 	f := newFixture(t, documentFixture)
 	catalog := f.catalog(t, currentReleases())
 	if _, err := catalog.Document(context.Background()); err != nil {
@@ -500,15 +512,22 @@ func TestAMissingAssetIsReportedAsSuchAndDoesNotFallBack(t *testing.T) {
 	f.mu.Unlock()
 	f.now = f.now.Add(2 * cacheTTL)
 
-	_, err := catalog.Document(context.Background())
-	if !errors.Is(err, ErrDocumentUnusable) {
-		t.Fatalf("a release without the asset was answered with: %v", err)
+	document, err := catalog.Document(context.Background())
+	if err != nil {
+		t.Fatalf("a release without the asset emptied the catalog: %v", err)
 	}
-	if errors.Is(err, ErrRefreshable) {
-		t.Fatalf("a missing asset was classified as a network blip: %v", err)
+	if len(document.Releases) == 0 {
+		t.Fatal("the fallback carries no releases")
 	}
-	if !strings.Contains(err.Error(), "does not publish this asset") {
-		t.Fatalf("the reason does not name the missing asset: %v", err)
+	status := catalog.Status()
+	if !status.FallingBack {
+		t.Fatalf("a fallback is not reported as one: %+v", status)
+	}
+	if !strings.Contains(status.LastError, "does not publish") {
+		t.Fatalf("the reason does not name the missing asset: %q", status.LastError)
+	}
+	if !strings.Contains(status.LastError, "release/4.0.1") {
+		t.Fatalf("the reason does not name the release: %q", status.LastError)
 	}
 }
 
@@ -539,32 +558,71 @@ func TestConcurrentCallersShareOneRead(t *testing.T) {
 	}
 }
 
-// NO RELEASE PUBLISHES A DOCUMENT is a named state rather than an empty catalog:
-// a fleet of legacy releases predates the review being published at all.
-func TestNoPublishingReleaseIsReported(t *testing.T) {
+// NO RELEASE PUBLISHES A DOCUMENT is a named state rather than an empty catalog: a
+// fleet of legacy releases predates the review being published at all.
+//
+// IT FALLS BACK, AND NAMES THAT REASON. The panel cannot name a source, which is
+// what being offline looks like from here; the newest review it has is still the
+// last thing both sides agreed on, and emptying the selector over it would take the
+// fleet's core choices away for a fact about the release list.
+func TestNoPublishingReleaseFallsBackAndNamesThatReason(t *testing.T) {
 	f := newFixture(t, documentFixture)
 	releases := &releaseList{releases: []ports.NodeReleaseCatalogEntry{{Version: "v0.0.1-beta9", Scheme: "legacy"}}}
-	if _, err := f.catalog(t, releases).Document(context.Background()); !errors.Is(err, ErrUnavailable) {
-		t.Fatalf("no publishing release reported %v", err)
+	catalog := f.catalog(t, releases)
+	document, err := catalog.Document(context.Background())
+	if err != nil {
+		t.Fatalf("no publishing release emptied the catalog: %v", err)
 	}
+	if len(document.Releases) == 0 {
+		t.Fatal("the fallback carries no releases")
+	}
+	// NOT ONE CONTACT WITH THE ORIGIN: the release list already said there is nothing
+	// to read, and asking anyway would be a request per call for a known answer.
 	if f.calls != 0 {
-		t.Fatal("the reader contacted the origin for a release it had already rejected")
+		t.Fatalf("the reader contacted the origin %d times for a release it had already rejected", f.calls)
+	}
+	if status := catalog.Status(); !status.FallingBack || !strings.Contains(status.LastError, "publishes a core catalog") {
+		t.Fatalf("the reason is not reported: %+v", status)
 	}
 }
 
-// AN UNREACHABLE RELEASE LIST IS NOT AN EMPTY ONE, and the failure must not be
-// cached as a successful read of nothing.
-func TestAnUnavailableReleaseListIsNotAnEmptyCatalog(t *testing.T) {
+// AN UNREACHABLE RELEASE LIST IS A MOMENT, NOT AN EMPTY CATALOG.
+//
+// The panel cannot name a release to read from, which is what being offline looks
+// like from here — so it serves the newest review it has rather than showing a
+// working panel with no cores offered. The status says it is falling back, because
+// the alternative is a selector that looks current and is not.
+func TestAnUnavailableReleaseListFallsBackAndRecovers(t *testing.T) {
 	f := newFixture(t, documentFixture)
 	releases := currentReleases()
 	releases.err = errors.New("github is unreachable")
 	catalog := f.catalog(t, releases)
-	if _, err := catalog.Document(context.Background()); !errors.Is(err, ErrUnavailable) {
-		t.Fatalf("an unavailable release list reported %v", err)
+
+	document, err := catalog.Document(context.Background())
+	if err != nil {
+		t.Fatalf("an unreachable release list emptied the catalog: %v", err)
 	}
-	// And it recovers without a restart.
+	if len(document.Releases) == 0 {
+		t.Fatal("the fallback document carries no releases")
+	}
+	status := catalog.Status()
+	if !status.FallingBack || status.Source == "" || status.ReviewTime == nil {
+		t.Fatalf("a panel serving a fallback does not say so: %+v", status)
+	}
+	if status.LastSuccess != nil {
+		t.Fatalf("a process that has never read a document claims it has: %+v", status.LastSuccess)
+	}
+	if status.LastError == "" {
+		t.Fatal("the reason the origin was not read is not reported")
+	}
+
+	// And it recovers without a restart, and stops saying it is falling back.
 	releases.err = nil
+	f.now = f.now.Add(2 * cacheTTL)
 	if _, err := catalog.Document(context.Background()); err != nil {
 		t.Fatalf("did not recover once the list was reachable again: %v", err)
+	}
+	if status := catalog.Status(); status.FallingBack || status.LastError != "" || status.LastSuccess == nil {
+		t.Fatalf("a recovered reader still reports a fallback: %+v", status)
 	}
 }

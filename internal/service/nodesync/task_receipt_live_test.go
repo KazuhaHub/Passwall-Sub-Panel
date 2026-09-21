@@ -19,6 +19,7 @@ import (
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/adapters/sqlstore"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/corefixtures"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/nodesync"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/transport/http/handler"
 )
@@ -75,7 +76,7 @@ func TestLive_RealNodeTaskEvidenceReceipt(t *testing.T) {
 	if _, created, err := repos.NodeAgentTask.CreateOrGet(ctx, task); err != nil || !created {
 		t.Fatalf("create task = (%v, %v)", created, err)
 	}
-	coordinator, err := nodesync.New(nodesync.Options{
+	coordinator, err := nodesync.New(nodesync.Options{CoreCatalog: corefixtures.Static{},
 		Desired: repos.NativeDesired, Agents: repos.NodeAgent, Issues: repos.NodeAgentIssue,
 		Tasks: repos.NodeAgentTask, Users: repos.User, Clients: repos.PSPClient,
 		Nodes: repos.Node, Panels: repos.XUIPanel, Settings: repos.ScopedSettings,

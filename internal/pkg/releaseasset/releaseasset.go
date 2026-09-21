@@ -71,6 +71,14 @@ var (
 	ErrAssetMissing = fmt.Errorf("%w: the release does not publish this asset", ErrUnavailable)
 	// ErrUntrusted means the manifest is not signed by this project.
 	ErrUntrusted = errors.New("release asset: the release manifest is not signed by this project")
+	// ErrAssetNotPublished means the release's manifest is authentic and names no
+	// such asset — the release simply does not carry it.
+	//
+	// IT IS A DIFFERENT FACT FROM ErrAssetMismatch, which is about bytes that
+	// arrived and did not match. One is a publication that does not include the
+	// file; the other is content that cannot be trusted, and they call for different
+	// answers: the first is a release to pick again, the second is an event.
+	ErrAssetNotPublished = errors.New("release asset: the release's manifest names no such asset")
 	// ErrAssetMismatch means the asset is not the file the manifest names.
 	ErrAssetMismatch = errors.New("release asset: the asset does not match its manifest")
 )
@@ -213,5 +221,5 @@ func digestOf(manifest []byte, asset string) (string, error) {
 		}
 		return strings.ToLower(fields[0]), nil
 	}
-	return "", fmt.Errorf("%w: the manifest names no %s", ErrAssetMismatch, asset)
+	return "", fmt.Errorf("%w: the manifest names no %s", ErrAssetNotPublished, asset)
 }

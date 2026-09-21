@@ -13,6 +13,7 @@ import (
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/adapters/sqlstore"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/corefixtures"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 )
 
@@ -82,7 +83,7 @@ func TestSyncDurableReceiptsSurviveLaterIssueAndStreamFailures(t *testing.T) {
 	}
 	issues := &switchableIssueRepo{NodeAgentIssueRepo: repos.NodeAgentIssue, fail: true}
 	agents := &receiptAppliedAgentRepo{NodeAgentRepo: repos.NodeAgent}
-	service, err := New(Options{
+	service, err := New(Options{CoreCatalog: corefixtures.Static{},
 		Desired: repos.NativeDesired, Agents: agents, Issues: issues, Tasks: repos.NodeAgentTask,
 		Users: repos.User, Clients: repos.PSPClient, Nodes: repos.Node, Settings: repos.ScopedSettings,
 		Now: func() time.Time { return now },
@@ -147,7 +148,7 @@ func TestSyncNeverOfferedReceiptClosesDispatchWithoutReleasingQuota(t *testing.T
 	repos := newReceiptTestRepos(t)
 	task := newReceiptTask(t, repos.NodeAgentTask, "task-receipt-queued")
 	now := time.Date(2026, 9, 12, 13, 0, 0, 0, time.UTC)
-	service, err := New(Options{
+	service, err := New(Options{CoreCatalog: corefixtures.Static{},
 		Desired: repos.NativeDesired, Agents: repos.NodeAgent, Issues: repos.NodeAgentIssue, Tasks: repos.NodeAgentTask,
 		Users: repos.User, Clients: repos.PSPClient, Nodes: repos.Node, Settings: repos.ScopedSettings,
 		Now: func() time.Time { return now },
@@ -195,5 +196,70 @@ func TestSyncNeverOfferedReceiptClosesDispatchWithoutReleasingQuota(t *testing.T
 		if candidate.TaskID == task.TaskID {
 			t.Fatal("dispatch-closed task was offered again")
 		}
+	}
+}
+
+// A REFUSED DISPATCH STILL RECORDS WHAT THE NODE REPORTED AND WHAT IT COMPLETED.
+//
+// The core re-check is OUTBOUND and the report is INBOUND, and their order inside
+// Sync is a requirement rather than a detail: a withdrawn selection stays refused
+// until an operator acts, so if the check could cost the panel a node's task
+// receipt, one stale core selection would quietly stop recording work the node had
+// already done — and the node would be told its report failed for a reason that has
+// nothing to do with the report.
+//
+// This drives the whole service rather than the builder, so it fails if the check
+// is ever moved above the ingest. The review is moved by a stub that serves one
+// document and is then told to serve another, which is what a refresh does.
+func TestARefusedCoreSelectionStillRecordsTheReportAndItsReceipts(t *testing.T) {
+	repos := newReceiptTestRepos(t)
+	task := newReceiptTask(t, repos.NodeAgentTask, "task-receipt-refused-core")
+	now := time.Date(2026, 9, 12, 12, 0, 0, 0, time.UTC)
+	if _, err := repos.NodeAgentTask.Offer(t.Context(), task.AgentID,
+		ports.NodeAgentTaskOfferSupport{EligibleKinds: []string{task.Kind}}, 1,
+		int(nodeprotocol.MaxSyncBodyBytes), now); err != nil {
+		t.Fatal(err)
+	}
+
+	review := &fixedCatalog{document: corefixtures.Document()}
+	service, err := New(Options{CoreCatalog: review,
+		Desired: repos.NativeDesired, Agents: repos.NodeAgent, Issues: repos.NodeAgentIssue, Tasks: repos.NodeAgentTask,
+		Users: repos.User, Clients: repos.PSPClient, Nodes: repos.Node, Settings: repos.ScopedSettings,
+		Now: func() time.Time { return now },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The review supports this node's selection while the panel is serving it.
+	if _, err := service.Sync(t.Context(), receiptReport(now)); err != nil {
+		t.Fatalf("the review refuses the node's selection before anything moved: %v", err)
+	}
+
+	withdrawn := corefixtures.Document()
+	for index := range withdrawn.Releases {
+		if withdrawn.Releases[index].Version == "26.6.27" {
+			withdrawn.Releases[index].Selectable = false
+		}
+	}
+	review.set(withdrawn)
+	now = now.Add(time.Minute)
+
+	result := nodeprotocol.TaskResult{
+		ID: task.TaskID, Kind: task.Kind, InputSHA256: task.InputSHA256,
+		OK: true, Result: []byte("executed before the review moved"),
+	}
+	if _, err := service.Sync(t.Context(), receiptReport(now, result)); !errors.Is(err, errSelectionWithdrawn) {
+		t.Fatalf("a selection the review has withdrawn was dispatched: %v", err)
+	}
+
+	// AND THE RECEIPT IS ON THE RECORD ANYWAY. The node did this work; refusing to
+	// send it a new configuration is a statement about the future, not a reason to
+	// forget the past.
+	terminal, err := repos.NodeAgentTask.GetByTaskID(t.Context(), task.TaskID)
+	if err != nil || terminal.Status != domain.NodeAgentTaskSucceeded {
+		t.Fatalf("refusing to dispatch cost the panel the node's receipt = (%+v, %v)", terminal, err)
+	}
+	if terminal.CompletedAt == nil || !terminal.CompletedAt.Equal(now) {
+		t.Fatalf("the receipt was recorded at the wrong time: %+v", terminal.CompletedAt)
 	}
 }

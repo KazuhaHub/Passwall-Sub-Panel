@@ -180,7 +180,7 @@ func openConfiguredDatabase(ctx context.Context, path string) (*connection, erro
 	// release published. A maintenance command that cannot reach it still runs: the
 	// preview reports the missing catalog as a blocker, which is the answer an
 	// operator needs rather than a command that refuses to start.
-	catalog, err := coreCatalogForMaintenance()
+	catalog, err := coreCatalogForMaintenance(cfg)
 	if err != nil {
 		log.Warn("core catalog unavailable for this maintenance run", "err", err)
 		catalog = corecatalogdoc.Unavailable(err)
@@ -191,10 +191,13 @@ func openConfiguredDatabase(ctx context.Context, path string) (*connection, erro
 
 // coreCatalogForMaintenance builds the reviewed core catalog for a standalone
 // maintenance run, which has no application and therefore no shared instance.
-func coreCatalogForMaintenance() (ports.CoreCatalog, error) {
+func coreCatalogForMaintenance(cfg *config.Config) (ports.CoreCatalog, error) {
 	releases, err := noderelease.New(noderelease.Options{})
 	if err != nil {
 		return nil, err
 	}
-	return corecatalogdoc.New(corecatalogdoc.Options{Releases: releases})
+	return corecatalogdoc.New(corecatalogdoc.Options{
+		Releases:     releases,
+		SnapshotPath: corecatalogdoc.DiskSnapshotPath(cfg.DataDir),
+	})
 }

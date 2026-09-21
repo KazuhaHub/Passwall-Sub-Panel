@@ -28,6 +28,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -118,18 +119,37 @@ type Options struct {
 	BaseURL    string
 	PublicKey  ed25519.PublicKey
 	Now        func() time.Time
+	// SnapshotPath is where the panel keeps the last review it read, so the next
+	// start has it. Empty disables the file entirely — the review shipped with the
+	// build is still served, and the panel simply re-reads from the origin on every
+	// start.
+	SnapshotPath string
 }
 
 type Catalog struct {
-	assets   *releaseasset.Source
-	releases ports.NodeReleaseCatalog
-	now      func() time.Time
+	assets       *releaseasset.Source
+	releases     ports.NodeReleaseCatalog
+	now          func() time.Time
+	snapshotPath string
+	shipped      ports.CoreCatalogDocument
 
-	mu      sync.Mutex
+	mu sync.Mutex
+	// good is the document in force, and have says whether there is one. It is set
+	// from the origin when a read succeeds and from the newest review available
+	// when one does not.
 	good    ports.CoreCatalogDocument
 	have    bool
 	expires time.Time
 	flight  *load
+
+	// The three fields below exist to answer "what am I being served, and how old
+	// is it" — the question an operator has to be able to ask, because a panel that
+	// is quietly serving an old review looks exactly like one serving a current one.
+	servedReviewTime time.Time
+	lastSuccess      time.Time
+	lastError        error
+	fallingBack      bool
+	source           string
 }
 
 type load struct {
@@ -156,7 +176,19 @@ func New(options Options) (*Catalog, error) {
 	if now == nil {
 		now = time.Now
 	}
-	return &Catalog{assets: source, releases: options.Releases, now: now}, nil
+	shipped, err := snapshotDocument()
+	if err != nil {
+		// A BUILD WHOSE OWN CONSTANT IS UNUSABLE CANNOT RECOVER AT RUNTIME, so it
+		// refuses to start rather than serving a fleet with no review at all. This
+		// is a build defect and it is reported as one.
+		return nil, err
+	}
+	return &Catalog{
+		assets: source, releases: options.Releases, now: now,
+		snapshotPath: strings.TrimSpace(options.SnapshotPath),
+		shipped:      shipped,
+		source:       shippedOrigin,
+	}, nil
 }
 
 // Document returns the reviewed catalog, reusing the last read within its TTL.
@@ -200,27 +232,8 @@ func (c *Catalog) Document(ctx context.Context) (ports.CoreCatalogDocument, erro
 	document, err := c.load(ctx)
 
 	c.mu.Lock()
-	switch {
-	case err == nil:
-		c.good, c.have = document, true
-		c.expires = c.now().Add(cacheTTL)
-	case errors.Is(err, ErrRefreshable):
-		if c.have {
-			// The previous document is served, and the TTL is EXTENDED rather than
-			// left to expire: leaving it would make every subsequent call attempt
-			// the same failing read, turning one origin problem into a
-			// request-per-call.
-			c.expires = c.now().Add(cacheTTL)
-		}
-	default:
-		// A DOCUMENT THIS BUILD CANNOT USE RETIRES THE PREVIOUS ONE. Keeping it
-		// would mean a later network failure served a review the publisher has
-		// moved past, so the cache is dropped and every call fails with the reason
-		// until a usable document arrives.
-		c.good, c.have, c.expires = ports.CoreCatalogDocument{}, false, time.Time{}
-	}
+	document, err = c.settle(document, err)
 	c.flight = nil
-	document, err = c.resolve(document, err)
 	c.mu.Unlock()
 
 	current.result, current.err = document, err
@@ -228,24 +241,65 @@ func (c *Catalog) Document(ctx context.Context) (ports.CoreCatalogDocument, erro
 	return document, err
 }
 
-// resolve decides what a call reports once the lock is held again: the fresh
-// document, the previous one, or nothing at all.
+// settle records what one read produced and decides what the caller is told.
+// Called with the lock held.
 //
-// THE CLASSIFICATION IS THE WHOLE DECISION. Only a refreshable failure may be
-// answered from the previous document; everything else is reported with its
-// reason, because the alternative is a panel that enforces a review nobody
-// publishes any more while looking exactly like a working one.
-func (c *Catalog) resolve(fresh ports.CoreCatalogDocument, err error) (ports.CoreCatalogDocument, error) {
-	if err == nil {
+// THE TTL IS EXTENDED ON EVERY OUTCOME THAT SERVES SOMETHING, rather than left to
+// expire: leaving it would make every subsequent call attempt the same failing
+// read, turning one origin problem into a request-per-call.
+func (c *Catalog) settle(fresh ports.CoreCatalogDocument, err error) (ports.CoreCatalogDocument, error) {
+	switch {
+	case err == nil:
+		c.good, c.have = fresh, true
+		c.expires = c.now().Add(cacheTTL)
+		c.servedReviewTime, c.lastSuccess = fresh.UpdatedAt, c.now()
+		c.lastError, c.fallingBack = nil, false
+		c.source = "read from the published release"
+		c.writeDiskSnapshot(fresh)
 		return fresh, nil
+
+	case errors.Is(err, ErrRefreshable):
+		// OFFLINE IS A DECISION, NOT A FAILURE. The newest review this panel has is
+		// still a review somebody made, and it is what the panel was enforcing a
+		// moment ago; the alternative is emptying the selector and refusing every
+		// conversion over a network blip.
+		fallback, source, ok := c.newestReview()
+		if !ok {
+			return ports.CoreCatalogDocument{}, c.fail(err)
+		}
+		c.good, c.have, c.expires = fallback, true, c.now().Add(cacheTTL)
+		c.servedReviewTime, c.fallingBack, c.source, c.lastError = fallback.UpdatedAt, true, source, err
+		log.Warn("core catalog not refreshed; serving the newest review this panel has",
+			"err", err, "source", source, "review_time", fallback.UpdatedAt)
+		return fallback, nil
+
+	default:
+		// A DOCUMENT THIS BUILD CANNOT USE RETIRES EVERY REVIEW THIS PROCESS CAN
+		// SERVE WITHOUT THE ORIGIN — the one in force AND the one the build shipped
+		// with.
+		//
+		// The second half is the part worth stating. A schema bump means the
+		// publisher's documents have changed in a way this build cannot interpret;
+		// falling back to the review it was built with would answer with a review
+		// that is BOTH older and known to be superseded in form, and would do it
+		// silently, which is the failure the classification exists to prevent. So
+		// the panel refuses with the reason until it can read a document again.
+		//
+		// ONE HONEST LIMIT: a RESTART re-arms the shipped review, because a restart
+		// cannot be told from a first start and the offline case — an origin that
+		// cannot be reached at all — is one this panel supports on purpose. Nothing
+		// is persisted to say "the origin changed shape", so the next process
+		// discovers it again on its first read.
+		c.good, c.have, c.expires = ports.CoreCatalogDocument{}, false, time.Time{}
+		c.shipped = ports.CoreCatalogDocument{}
+		return ports.CoreCatalogDocument{}, c.fail(err)
 	}
-	if errors.Is(err, ErrRefreshable) && c.have {
-		log.Warn("core catalog not refreshed; serving the last reviewed document", "err", err)
-		return c.good, nil
-	}
-	// BOTH ARE WRAPPED. `%v` for the reason would print it and drop the chain,
-	// which is exactly the classification the caller asked for.
-	return ports.CoreCatalogDocument{}, fmt.Errorf("%w: %w", ErrUnavailable, err)
+}
+
+// fail records why a call is being refused. Called with the lock held.
+func (c *Catalog) fail(err error) error {
+	c.fallingBack, c.lastError = false, err
+	return fmt.Errorf("%w: %w", ErrUnavailable, err)
 }
 
 // load reads, verifies and decodes the document the newest reviewed release
@@ -270,17 +324,32 @@ func (c *Catalog) load(ctx context.Context) (ports.CoreCatalogDocument, error) {
 		break
 	}
 	if tag == "" {
-		// A FLEET WHERE NO RELEASE PUBLISHES ONE is a statement about the fleet,
-		// not a moment, and waiting will not change it.
-		return ports.CoreCatalogDocument{}, unusable(errors.New("no reviewed Node release publishes a core catalog"))
+		// NO REVIEWED RELEASE PUBLISHES ONE AT ALL. Also availability: the panel
+		// cannot name a source, which is what being offline looks like from here, and
+		// the reason names the difference.
+		return ports.CoreCatalogDocument{}, refreshable(errors.New("no reviewed Node release publishes a core catalog"))
 	}
 	body, err := c.assets.Asset(ctx, tag, catalogAsset)
 	if err != nil {
-		// A RELEASE THAT DOES NOT CARRY THE ASSET IS NOT A NETWORK PROBLEM. It will
-		// answer the same way on every attempt, and reporting it as an unreachable
-		// origin is how a packaging mistake stays hidden behind a retry.
-		if errors.Is(err, releaseasset.ErrAssetMissing) {
+		// THE LINE IS BETWEEN AVAILABILITY AND CONTENT.
+		//
+		// A manifest this project did not sign, and an asset that does not match the
+		// digest the manifest names, are statements about WHAT ARRIVED: they will say
+		// the same thing on the next attempt, and serving the previous review instead
+		// would answer "somebody is publishing something I do not trust" with a panel
+		// that looks like it is working.
+		if errors.Is(err, releaseasset.ErrUntrusted) || errors.Is(err, releaseasset.ErrAssetMismatch) {
 			return ports.CoreCatalogDocument{}, unusable(fmt.Errorf("%s: %w", tag, err))
+		}
+		// A RELEASE THAT DOES NOT CARRY THE ASSET IS A FAILURE OF AVAILABILITY, and
+		// it falls back — WITH ITS OWN REASON, which is the part that matters. It is
+		// not a moment of unreachability and must never be reported as one: a
+		// packaging mistake that reads as a network blip is a packaging mistake
+		// nobody fixes. But the panel's newest review is still the last thing both
+		// sides agreed on, and refusing to offer anything over a missing file would
+		// take the whole fleet's core selector down for it.
+		if errors.Is(err, releaseasset.ErrAssetMissing) || errors.Is(err, releaseasset.ErrAssetNotPublished) {
+			return ports.CoreCatalogDocument{}, refreshable(fmt.Errorf("%s does not publish %s: %w", tag, catalogAsset, err))
 		}
 		return ports.CoreCatalogDocument{}, refreshable(fmt.Errorf("read %s from %s: %w", catalogAsset, tag, err))
 	}
@@ -403,4 +472,10 @@ type unavailable struct{ reason error }
 
 func (u unavailable) Document(context.Context) (ports.CoreCatalogDocument, error) {
 	return ports.CoreCatalogDocument{}, fmt.Errorf("%w: %v", ErrUnavailable, u.reason)
+}
+
+// Status reports the reason this catalog can never answer, so a status page says
+// WHY rather than showing an empty source.
+func (u unavailable) Status() ports.CoreCatalogStatus {
+	return ports.CoreCatalogStatus{Source: "unavailable", LastError: u.reason.Error()}
 }

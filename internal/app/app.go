@@ -288,7 +288,7 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	if err != nil {
 		return nil, err
 	}
-	coreCatalog, err := newCoreCatalog(nodeReleases)
+	coreCatalog, err := newCoreCatalog(nodeReleases, cfg.DataDir)
 	if err != nil {
 		return nil, err
 	}
@@ -300,7 +300,11 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	nativeSync, err := nodesync.New(nodesync.Options{
 		Desired: repos.NativeDesired, Agents: repos.NodeAgent, Issues: repos.NodeAgentIssue, Tasks: repos.NodeAgentTask, Users: repos.User,
 		Clients: repos.PSPClient, Nodes: repos.Node, Settings: repos.ScopedSettings, Panels: repos.XUIPanel,
-		Host: nodeMetrics,
+		// The node-sync path re-checks each node's configured core against the
+		// review that is current now, which is what stops a withdrawn release from
+		// being dispatched to the fleet.
+		CoreCatalog: coreCatalog,
+		Host:        nodeMetrics,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("native node sync: %w", err)

@@ -15,6 +15,13 @@ import (
 // build. So the reader is built directly, and an unreadable document is a
 // failure at read time with a reason in it rather than a permanently absent
 // catalog nobody is told about.
-func newCoreCatalog(releases ports.NodeReleaseCatalog) (ports.CoreCatalog, error) {
-	return corecatalogdoc.New(corecatalogdoc.Options{Releases: releases})
+func newCoreCatalog(releases ports.NodeReleaseCatalog, dataDir string) (ports.CoreCatalog, error) {
+	return corecatalogdoc.New(corecatalogdoc.Options{
+		Releases: releases,
+		// THE PANEL'S OWN LAST READ, so a restart does not have to reach the origin
+		// before it can serve a review. The path is under the data directory because
+		// that is where a deployment's durable state lives, and the composition root
+		// is the level that knows it.
+		SnapshotPath: corecatalogdoc.DiskSnapshotPath(dataDir),
+	})
 }

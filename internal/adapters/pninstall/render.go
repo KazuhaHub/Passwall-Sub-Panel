@@ -147,7 +147,7 @@ func assetError(err error) error {
 		return ErrUntrusted
 	case errors.Is(err, releaseasset.ErrAssetMismatch):
 		return ErrTemplateMismatch
-	case errors.Is(err, releaseasset.ErrAssetMissing):
+	case errors.Is(err, releaseasset.ErrAssetMissing), errors.Is(err, releaseasset.ErrAssetNotPublished):
 		// CHECKED BEFORE ErrUnavailable, which it wraps: a release that never
 		// carried the file and an origin that could not be reached are the same
 		// error value to a reader that only asks whether the read worked.

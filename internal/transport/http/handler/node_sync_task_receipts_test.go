@@ -14,6 +14,7 @@ import (
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/adapters/sqlstore"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/corefixtures"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/nodesync"
 )
@@ -44,7 +45,7 @@ func newHTTPReceiptFixture(t *testing.T) (ports.Repos, *NodeSyncHandler, time.Ti
 		t.Fatal(err)
 	}
 	now := time.Date(2026, 9, 12, 14, 0, 0, 0, time.UTC)
-	service, err := nodesync.New(nodesync.Options{
+	service, err := nodesync.New(nodesync.Options{CoreCatalog: corefixtures.Static{},
 		Desired: repos.NativeDesired, Agents: repos.NodeAgent, Issues: repos.NodeAgentIssue, Tasks: repos.NodeAgentTask,
 		Users: repos.User, Clients: repos.PSPClient, Nodes: repos.Node, Settings: repos.ScopedSettings,
 		Now: func() time.Time { return now },

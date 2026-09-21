@@ -307,7 +307,7 @@ func newFixture(t *testing.T, ctx context.Context) *fixture {
 	attachment := domain.PSPClientInbound{ClientID: f.clientID, NodeID: node.ID, State: domain.ClientApplyApplied, AppliedVersion: 1, AppliedEmail: client.Email, AppliedUUID: client.UUID, AppliedPassword: client.Password}
 	must(t, f.repos.PSPClient.SetInbounds(ctx, f.clientID, []domain.PSPClientInbound{attachment}), "attach original client")
 	must(t, f.repos.PSPClient.UpdateInboundState(ctx, attachment), "record old applied credentials")
-	f.coordinator, err = nodesync.New(nodesync.Options{Desired: f.repos.NativeDesired, Agents: f.repos.NodeAgent, Issues: f.repos.NodeAgentIssue, Tasks: f.repos.NodeAgentTask, Users: f.repos.User, Clients: f.repos.PSPClient, Nodes: f.repos.Node, Settings: f.repos.ScopedSettings, Panels: f.repos.XUIPanel})
+	f.coordinator, err = nodesync.New(nodesync.Options{CoreCatalog: corefixtures.Static{}, Desired: f.repos.NativeDesired, Agents: f.repos.NodeAgent, Issues: f.repos.NodeAgentIssue, Tasks: f.repos.NodeAgentTask, Users: f.repos.User, Clients: f.repos.PSPClient, Nodes: f.repos.Node, Settings: f.repos.ScopedSettings, Panels: f.repos.XUIPanel})
 	must(t, err, "production node coordinator")
 	registry := paneladapter.NewRegistry()
 	must(t, registry.Register(domain.PanelKind3XUI, func(p *domain.Panel) (ports.PanelClient, error) { return xui.New(p) }), "old adapter registry")

@@ -161,7 +161,7 @@ func runRealNodeAgentContract(t *testing.T, migrate bool) {
 			t.Fatal(err)
 		}
 	}
-	coordinator, err := nodesync.New(nodesync.Options{
+	coordinator, err := nodesync.New(nodesync.Options{CoreCatalog: corefixtures.Static{},
 		Desired: repos.NativeDesired, Agents: repos.NodeAgent, Issues: repos.NodeAgentIssue, Tasks: repos.NodeAgentTask, Users: repos.User,
 		Clients: repos.PSPClient, Nodes: repos.Node, Panels: repos.XUIPanel, Settings: repos.ScopedSettings,
 	})
