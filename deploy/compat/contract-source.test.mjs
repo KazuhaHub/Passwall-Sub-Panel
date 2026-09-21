@@ -81,3 +81,47 @@ test('a module path that is not host and two segments is refused', () => {
     assert.throws(() => contractSource(doc), /module_path/, bad)
   }
 })
+
+// A MAJOR-VERSION SUFFIX IS PART OF THE MODULE PATH AND NOT PART OF THE
+// REPOSITORY.
+//
+// Go requires the path of a module published at major N to end in `/vN`, so
+// Passwall Node's module path becomes `github.com/KazuhaHub/passwall-node/v4` —
+// and the REPOSITORY it lives in is still `github.com/KazuhaHub/passwall-node`.
+// Appending the whole path produced `.../passwall-node/v4.git`, which GitHub
+// answers with Not Found: the same failure the doubled host used to produce, one
+// layer further from the diff that would be blamed for it.
+test('the repository URL drops the major-version suffix from the module path', () => {
+  assert.equal(
+    repositoryURL({ module_path: 'github.com/KazuhaHub/passwall-node/v4' }),
+    'https://github.com/KazuhaHub/passwall-node.git',
+  )
+  // AND A PATH WITHOUT ONE IS UNCHANGED. Both shapes are in the wild: the
+  // protocol module is published at v0, where the suffix is not allowed at all.
+  assert.equal(
+    repositoryURL({ module_path: 'github.com/KazuhaHub/passwall-node' }),
+    'https://github.com/KazuhaHub/passwall-node.git',
+  )
+})
+
+test('a module path may end in a major-version suffix', () => {
+  const doc = read()
+  doc.contract_source.module_path = 'github.com/KazuhaHub/passwall-node/v4'
+  assert.equal(contractSource(doc).module_path, 'github.com/KazuhaHub/passwall-node/v4')
+})
+
+test('a module path is a host, a repository and an optional major suffix and no more', () => {
+  // `v4` is the only extra segment allowed, and only in that spelling: a Go major
+  // suffix is `v` followed by digits. Anything else is somebody's subdirectory or a
+  // typo, and composing a repository URL out of either fetches the wrong place.
+  for (const bad of ['github.com/a/b/c', 'github.com/a/b/v', 'github.com/a/b/v4/x', 'github.com/a/b/V4']) {
+    const doc = read()
+    doc.contract_source.module_path = bad
+    assert.throws(() => contractSource(doc), /module_path/, bad)
+  }
+  for (const good of ['github.com/a/b', 'github.com/a/b/v4', 'github.com/a/b/v12']) {
+    const doc = read()
+    doc.contract_source.module_path = good
+    assert.equal(contractSource(doc).module_path, good)
+  }
+})
