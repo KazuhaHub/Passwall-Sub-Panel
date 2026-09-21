@@ -16,7 +16,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/KazuhaHub/passwall-node/corecatalog"
 	nodeprotocol "github.com/KazuhaHub/passwall-protocol/protocol"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
@@ -86,7 +85,7 @@ type Options struct {
 func New(options Options) (*Service, error) {
 	if options.Desired == nil || options.Agents == nil || options.Issues == nil || options.Tasks == nil || options.Users == nil ||
 		options.Clients == nil || options.Nodes == nil || options.Settings == nil {
-		return nil, errors.New("nodesync: desired, agents, issues, tasks, users, clients, nodes and settings are required")
+		return nil, errors.New("nodesync: desired, agents, issues, tasks, users, clients, nodes, settings are required")
 	}
 	now := options.Now
 	if now == nil {
@@ -262,35 +261,41 @@ func (s *Service) mint(ctx context.Context, agent *domain.NodeAgent, stream doma
 
 type listenerConfig = domain.NodeConfigIntent
 
+// buildConfig carries the core selection THE PANEL ALREADY COMMITTED THIS AGENT TO.
+//
+// IT DOES NOT CONSULT THE REVIEWED CATALOG, and that is deliberate. The pair — a
+// release, and whether its restriction was acknowledged — is decided where it is
+// chosen (the panel's core selector, the node adapter's install) and checked
+// against the published catalog where it is PERSISTED (the offline-conversion
+// gate, whose comment says as much). Re-resolving it here would be a third check
+// of one fact, on the hottest path in the system and in front of a network read,
+// so a moment of GitHub unreachability would stop every node in the fleet from
+// receiving its configuration — to re-derive an answer the panel wrote down.
+//
+// WHAT IS STILL REFUSED HERE IS SHAPE, WHICH NEEDS NO CATALOG: an engine outside
+// the closed set, a version that is not a canonical release, or no version at all.
+// A row missing its core is not something this function may invent, because
+// inventing it is how a node ends up running a release nobody selected.
 func buildConfig(snapshot *ports.NativeDesiredSnapshot, agent *domain.NodeAgent) (nodeprotocol.ConfigBody, error) {
 	engine := domain.NodeCoreXray
 	version := ""
 	allowRestricted := false
 	if agent != nil {
 		engine = domain.NormalizeNodeCoreEngine(agent.DesiredCoreEngine)
-		version = agent.DesiredCoreVersion
+		version = strings.TrimSpace(agent.DesiredCoreVersion)
 		allowRestricted = agent.AllowRestrictedReality
 	}
 	if !engine.Valid() {
 		return nodeprotocol.ConfigBody{}, fmt.Errorf("nodesync: desired core engine %q is unsupported", engine)
 	}
-	var release corecatalog.Release
-	var err error
-	if version == "" {
-		release, err = corecatalog.Recommended(string(engine))
-	} else {
-		release, err = corecatalog.Resolve(string(engine), version)
-	}
+	normalized, err := domain.NormalizeCoreVersion(version)
 	if err != nil {
-		return nodeprotocol.ConfigBody{}, fmt.Errorf("nodesync: resolve desired core: %w", err)
-	}
-	if release.RequiresConfirmation != allowRestricted {
-		return nodeprotocol.ConfigBody{}, fmt.Errorf("nodesync: desired core %s restriction acknowledgement mismatch", release.Version)
+		return nodeprotocol.ConfigBody{}, fmt.Errorf("nodesync: no canonical desired core release is configured for this agent: %w", err)
 	}
 	body := nodeprotocol.ConfigBody{
 		Listeners: make([]nodeprotocol.Listener, 0, len(snapshot.Nodes)),
 		Core: nodeprotocol.CoreSelection{
-			Engine: string(engine), Version: release.Version, AllowRestrictedReality: allowRestricted,
+			Engine: string(engine), Version: normalized, AllowRestrictedReality: allowRestricted,
 		},
 	}
 	for _, node := range snapshot.Nodes {

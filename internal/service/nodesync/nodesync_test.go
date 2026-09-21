@@ -158,7 +158,8 @@ func TestSyncDispatchesDurableTasksOnlyWithBothCapabilitiesAndAcceptsReplay(t *t
 	repos := sqlstore.NewRepos(db)
 	agent := &domain.NodeAgent{
 		AgentID: "agt_sync_tasks", PanelID: 909,
-		CredentialSHA256: nodeprotocol.ComputeTaskInputSHA256("agt_sync_tasks", nil),
+		CredentialSHA256:  nodeprotocol.ComputeTaskInputSHA256("agt_sync_tasks", nil),
+		DesiredCoreEngine: domain.NodeCoreXray, DesiredCoreVersion: "26.6.27",
 	}
 	if err := repos.NodeAgent.Create(ctx, agent); err != nil {
 		t.Fatal(err)
@@ -316,7 +317,8 @@ func TestSyncMintsDocumentsThenIngestsAppliedObservation(t *testing.T) {
 	digest := sha256.Sum256([]byte("credential"))
 	agent := &domain.NodeAgent{
 		AgentID: "agt_test", PanelID: 9, Epoch: 1,
-		CredentialSHA256: hex.EncodeToString(digest[:]),
+		CredentialSHA256:  hex.EncodeToString(digest[:]),
+		DesiredCoreEngine: domain.NodeCoreXray, DesiredCoreVersion: "26.6.27",
 	}
 	if err := repos.NodeAgent.Create(ctx, agent); err != nil {
 		t.Fatal(err)
@@ -552,7 +554,19 @@ func TestSyncMintsDocumentsThenIngestsAppliedObservation(t *testing.T) {
 	}
 }
 
-func TestBuildConfigCarriesExactRestrictedCoreAcknowledgement(t *testing.T) {
+// THE CONFIG BODY CARRIES THE SELECTION THE PANEL COMMITTED TO, and refuses a row
+// whose core is not a release at all.
+//
+// IT USED TO RESOLVE THE VERSION AGAINST THE COMPILED CATALOG ON EVERY SYNC, which
+// made the hottest path in the system read it: the same fact is settled where the
+// core is CHOSEN (the selector) and where it is PERSISTED (the conversion gate), so
+// a third check behind a network read bought nothing and cost the fleet a config
+// delivery whenever the origin was unreachable.
+//
+// WHAT REMAINS IS SHAPE, and it needs no catalog. `latest` used to be refused
+// because the catalog had no such release; it is refused here because it is not a
+// version, which is the reason that survives.
+func TestBuildConfigCarriesTheCommittedCoreSelection(t *testing.T) {
 	t.Parallel()
 	body, err := buildConfig(&ports.NativeDesiredSnapshot{}, &domain.NodeAgent{
 		DesiredCoreVersion: "26.9.9", AllowRestrictedReality: true,
@@ -563,11 +577,25 @@ func TestBuildConfigCarriesExactRestrictedCoreAcknowledgement(t *testing.T) {
 	if body.Core.Engine != "xray" || body.Core.Version != "26.9.9" || !body.Core.AllowRestrictedReality {
 		t.Fatalf("core selection = %+v", body.Core)
 	}
-	if _, err := buildConfig(&ports.NativeDesiredSnapshot{}, &domain.NodeAgent{DesiredCoreVersion: "26.9.9"}); err == nil {
-		t.Fatal("restricted core without acknowledgement unexpectedly minted")
+	for _, tests := range []struct {
+		name  string
+		agent *domain.NodeAgent
+	}{
+		{"a floating tag is not a release", &domain.NodeAgent{DesiredCoreVersion: "latest"}},
+		{"an empty version is not a release", &domain.NodeAgent{}},
+		{"an unsupported engine", &domain.NodeAgent{DesiredCoreEngine: "v2ray", DesiredCoreVersion: "26.6.27"}},
+	} {
+		t.Run(tests.name, func(t *testing.T) {
+			if _, err := buildConfig(&ports.NativeDesiredSnapshot{}, tests.agent); err == nil {
+				t.Fatal("unexpectedly minted a config")
+			}
+		})
 	}
-	if _, err := buildConfig(&ports.NativeDesiredSnapshot{}, &domain.NodeAgent{DesiredCoreVersion: "latest"}); err == nil {
-		t.Fatal("latest unexpectedly minted")
+	// AN UPSTREAM-STYLE TAG IS CANONICALIZED RATHER THAN REFUSED, because operators
+	// paste what they see and the catalog stores the form without the v.
+	fromTag, err := buildConfig(&ports.NativeDesiredSnapshot{}, &domain.NodeAgent{DesiredCoreVersion: "v26.6.27"})
+	if err != nil || fromTag.Core.Version != "26.6.27" {
+		t.Fatalf("v-prefixed version = (%+v, %v)", fromTag.Core, err)
 	}
 	singBox, err := buildConfig(&ports.NativeDesiredSnapshot{}, &domain.NodeAgent{
 		DesiredCoreEngine: domain.NodeCoreSingBox, DesiredCoreVersion: "1.14.0",

@@ -63,9 +63,14 @@ func newConfigAppliedFixture(t *testing.T) *configAppliedFixture {
 	if err := repos.Node.Create(t.Context(), node); err != nil {
 		t.Fatal(err)
 	}
+	// A CONFORMING AGENT ROW CARRIES ITS CORE, and the config body may not invent
+	// one: the reviewed catalog is not read on this path, so a row without a release
+	// is refused rather than silently filled from whatever the panel thinks is
+	// current.
 	agent := &domain.NodeAgent{
 		AgentID: "agt_config_ack", PanelID: node.PanelID, Epoch: 7,
-		CredentialSHA256: strings.Repeat("a", 64),
+		CredentialSHA256:  strings.Repeat("a", 64),
+		DesiredCoreEngine: domain.NodeCoreXray, DesiredCoreVersion: "26.6.27",
 	}
 	if err := repos.NodeAgent.Create(t.Context(), agent); err != nil {
 		t.Fatal(err)

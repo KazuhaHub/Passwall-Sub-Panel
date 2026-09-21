@@ -45,7 +45,8 @@ func newReceiptTestRepos(t *testing.T) ports.Repos {
 	repos := sqlstore.NewRepos(db)
 	if err := repos.NodeAgent.Create(t.Context(), &domain.NodeAgent{
 		AgentID: "agt_receipts", PanelID: 919,
-		CredentialSHA256: nodeprotocol.ComputeTaskInputSHA256("agt_receipts", nil),
+		CredentialSHA256:  nodeprotocol.ComputeTaskInputSHA256("agt_receipts", nil),
+		DesiredCoreEngine: domain.NodeCoreXray, DesiredCoreVersion: "26.6.27",
 	}); err != nil {
 		t.Fatal(err)
 	}

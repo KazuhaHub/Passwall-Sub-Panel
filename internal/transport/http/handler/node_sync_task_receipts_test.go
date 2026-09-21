@@ -36,6 +36,10 @@ func newHTTPReceiptFixture(t *testing.T) (ports.Repos, *NodeSyncHandler, time.Ti
 	if err := repos.NodeAgent.Create(t.Context(), &domain.NodeAgent{
 		AgentID: "agt_http_receipts", PanelID: 929,
 		CredentialSHA256: nodeprotocol.ComputeTaskInputSHA256("agt_http_receipts", nil),
+		// A CONFORMING AGENT ROW CARRIES ITS CORE. The config body echoes the
+		// selection the panel committed to rather than resolving it against the
+		// reviewed catalog, so a row without one is refused.
+		DesiredCoreEngine: domain.NodeCoreXray, DesiredCoreVersion: "26.6.27",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -157,7 +161,8 @@ func TestNodeSyncHTTPConflictingEvidenceRollsBackWholeResultBatch(t *testing.T) 
 				knownAgent = "agt_http_foreign"
 				if err := repos.NodeAgent.Create(t.Context(), &domain.NodeAgent{
 					AgentID: knownAgent, PanelID: 930,
-					CredentialSHA256: nodeprotocol.ComputeTaskInputSHA256(knownAgent, nil),
+					CredentialSHA256:  nodeprotocol.ComputeTaskInputSHA256(knownAgent, nil),
+					DesiredCoreEngine: domain.NodeCoreXray, DesiredCoreVersion: "26.6.27",
 				}); err != nil {
 					t.Fatal(err)
 				}

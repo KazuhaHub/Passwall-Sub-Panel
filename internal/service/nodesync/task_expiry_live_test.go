@@ -78,7 +78,8 @@ func TestLive_RealNodeTaskExpiryContract(t *testing.T) {
 			repos := sqlstore.NewRepos(db)
 			agentRow := &domain.NodeAgent{
 				AgentID: "agt_task_expiry_live", Epoch: 1,
-				CredentialSHA256: nodeprotocol.ComputeTaskInputSHA256("contract_credential", nil),
+				CredentialSHA256:  nodeprotocol.ComputeTaskInputSHA256("contract_credential", nil),
+				DesiredCoreEngine: domain.NodeCoreXray, DesiredCoreVersion: "26.6.27",
 			}
 			panel := &domain.XUIPanel{Kind: domain.PanelKindPSP, Name: "task-expiry", URL: "psp://" + agentRow.AgentID}
 			if err := repos.NativeAgentProvisioning.Create(ctx, panel, agentRow); err != nil {
