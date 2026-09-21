@@ -220,7 +220,7 @@ func TestNodeRegistryReport(t *testing.T) {
 		// Decided, and the next reader can see why.
 		excluded := nodeRegistryReport(nodeRegistry{
 			Releases: []nodeRegistryRelease{{Version: "4.0.0"}},
-			Refusals: []nodeRegistryExclusion{
+			Excluded: []nodeRegistryExclusion{
 				{Version: "4.0.2", Reason: "broken installer"},
 				{Version: "4.1.0", Reason: "superseded by beta11"},
 				{Version: "4.1.1", Reason: "withdrawn before rollout"},
@@ -233,7 +233,7 @@ func TestNodeRegistryReport(t *testing.T) {
 		// it, so it must not count as having ruled on the release.
 		silent := nodeRegistryReport(nodeRegistry{
 			Releases: []nodeRegistryRelease{{Version: "4.0.0"}},
-			Refusals: []nodeRegistryExclusion{
+			Excluded: []nodeRegistryExclusion{
 				{Version: "4.0.2", Reason: "broken installer"},
 				{Version: "4.1.0", Reason: "superseded by beta11"},
 				{Version: "4.1.1"},

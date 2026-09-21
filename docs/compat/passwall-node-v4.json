@@ -2,7 +2,7 @@
   "schema_version": 2,
   "panel_major": 4,
   "updated_at": "2026-09-20",
-  "_comment": "The Passwall Node claim for PSP major 4: the wire generation, the supported set, and the per-release review notes the panel shows in the upgrade dialog. IT REPLACED TWO FILES, and that is the point of the merge. This file used to be docs/compat/node-v4.json — the runtime manifest, which the CI planner and the compatibility matrix read by position at min_supported — while the DISPLAY metadata (notes, install methods, platforms, the published Docker tag) lived in a second, HAND-MAINTAINED file COMPILED INTO THE PANEL (internal/adapters/noderelease/reviewed.json). Adding a release therefore meant editing two documents and re-publishing the panel, because only one of them was fetched. THE TWO VOCABULARIES ARE NOT THE SAME AXIS AND BOTH REMAIN: released_nodes[].upgrade_methods (linux-systemd | managed-docker) is what the upgrade machinery and the verification profiles mean by a path, and released_nodes[].install_methods (linux | docker | manual) is what the operator picks in the dialog and is cross-checked against the published assets. THE RELEASE LIST IS AN ALLOW-LIST, NOT A RANGE: a reviewed release carries notes and platforms, which a min/max pair cannot hold, so this document names releases rather than bounding them. min_supported is a floor over the same list, matched BY POSITION in released_nodes — see min_supported_doc. THIS DOCUMENT IS DELIBERATELY SEPARATE from docs/compat/releases-v1.json (+ .sig): that one is the signed, opt-in ADMISSION policy, this one is the unsigned runtime manifest a default install fetches, and folding them together would put a signature over a document that must work without a key.",
+  "_comment": "THE CI TEST MATRIX, AND THE TWO FACTS THE PANEL CANNOT LEARN FROM A RELEASE. released_nodes is the set the compatibility matrix exercises — the planner slices it by POSITION at min_supported — so a version missing from it is a version nothing tests. wire and features are the protocol generation and the capabilities this panel requires of a node; features.agent_upgrade_v1.required_capabilities is the one gate the upgrade path still has, and TestNodeV4CompatibilityMatrixMatchesSharedProtocolPolicy pins it to the shared protocol package. IT NO LONGER DECIDES WHAT THE PANEL OFFERS. It used to be an allow-list, with per-release display metadata (review notes, install methods, platforms, a published Docker tag) that the panel fetched and the dialog rendered — so adding a release meant editing this file, pinning its commit and publishing a panel. The catalog now lists the releases this project has PUBLISHED and reads what each release says about itself, which is why those fields are gone from the rows: leaving them would be a second, unread copy of what the assets already state. The document also used to name docs/compat/releases-v1.json as the signed admission policy beside it; that policy has been deleted, and what an operator may install is their choice among the published releases.",
   "wire": {
     "endpoint": "/v1/node/sync",
     "min_protocol_version": 1,
@@ -29,40 +29,7 @@
       "upgrade_methods": [
         "linux-systemd",
         "managed-docker"
-      ],
-      "install_methods": [
-        "linux",
-        "docker",
-        "manual"
-      ],
-      "platforms": [
-        {
-          "os": "linux",
-          "arch": "amd64"
-        },
-        {
-          "os": "linux",
-          "arch": "arm64"
-        },
-        {
-          "os": "darwin",
-          "arch": "amd64"
-        },
-        {
-          "os": "darwin",
-          "arch": "arm64"
-        },
-        {
-          "os": "windows",
-          "arch": "amd64"
-        },
-        {
-          "os": "windows",
-          "arch": "arm64"
-        }
-      ],
-      "docker_published_tag": "4.0.0",
-      "notes": "Reviewed PSP v4 agent protocol and exact release packaging. The first release under the product scheme: the tag is release/4.0.0 and the version is 4.0.0, the archive is named passwall-node_4.0.0_linux_<arch>.tar.gz, and the exact image tag is 4.0.0. The download chain was verified against the published release rather than constructed: the slash-bearing URL serves the asset, the checksum manifest names it exactly once, and sha256sum --check passes. State schema 9 and upgrade contract 1 are unchanged. Published as a pre-release, so no stable pointer moved. Remote upgrades require Linux/systemd, the upgrade helper, and unchanged state schema 9. Docker uses container-managed updates. Docker and Windows end-to-end installation has not been verified, and no end-to-end upgrade on a real host has been performed for this release."
+      ]
     }
   ]
 }

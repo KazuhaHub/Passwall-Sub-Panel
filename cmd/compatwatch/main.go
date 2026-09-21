@@ -61,17 +61,19 @@ const (
 )
 
 // nodeRegistryPath is the published manifest whose rows decide which Node releases
-// the panel offers, nodePolicyPath is the signed policy that records the releases
-// ruled OUT, and nodeRepo is where the releases it must account for are published.
+// the CI MATRIX tests, nodeVerificationPath is where a version deliberately passed
+// over is recorded with its reason, and nodeRepo is where the releases it must
+// account for are published.
 //
-// TWO DOCUMENTS BECAUSE THE ROWS MOVED. This used to read one hand-maintained
-// registry carrying both the reviewed releases and the decisions about versions
-// passed over. The reviewed releases now live in the manifest the panel reads, and
-// a refusal is an ADMISSION decision that belongs with the other admission rules —
-// in the policy document — rather than as a note beside the releases.
+// TWO DOCUMENTS BECAUSE THEY ANSWER DIFFERENT QUESTIONS, and because the one that
+// used to sit here is gone: this read a signed POLICY's refusals until that policy
+// was deleted, and a refusal is not a thing the panel has any more — it offers what
+// is published. What is still worth insisting on is that nothing published goes
+// UNNOTICED: every release is either exercised by the matrix or passed over with a
+// reason somebody wrote down.
 const (
 	nodeRegistryPath = "docs/compat/passwall-node-v4.json"
-	nodePolicyPath   = "docs/compat/releases-v1.json"
+	nodeVerificationPath = "docs/compat/verification-v1.json"
 	nodeRepo         = "KazuhaHub/Passwall-Node"
 )
 
@@ -287,10 +289,10 @@ func run() error {
 		reports = append(reports, r)
 	}
 
-	// The Node registry is judged last, and from the other side: the two rows
-	// above are upstreams PSP consumes, while this one is releases PSP publishes
-	// itself. Its absence is the failure nothing else can see, because every
-	// other check reads the registry instead of questioning it.
+	// The Node matrix is judged last, and from the other side: the two rows above
+	// are upstreams PSP consumes, while this one is releases PSP publishes itself.
+	// Its absence is the failure nothing else can see, because every other check
+	// reads the list instead of questioning it.
 	registryRaw, err := os.ReadFile(nodeRegistryPath)
 	if err != nil {
 		return fmt.Errorf("read %s (run from the repo root): %w", nodeRegistryPath, err)
@@ -299,17 +301,17 @@ func run() error {
 	if err := json.Unmarshal(registryRaw, &registry); err != nil {
 		return fmt.Errorf("%s: %w", nodeRegistryPath, err)
 	}
-	policyRaw, err := os.ReadFile(nodePolicyPath)
+	verificationRaw, err := os.ReadFile(nodeVerificationPath)
 	if err != nil {
-		return fmt.Errorf("read %s (run from the repo root): %w", nodePolicyPath, err)
+		return fmt.Errorf("read %s (run from the repo root): %w", nodeVerificationPath, err)
 	}
-	var policy struct {
-		Refusals []nodeRegistryExclusion `json:"refusals"`
+	var verification struct {
+		Excluded []nodeRegistryExclusion `json:"excluded"`
 	}
-	if err := json.Unmarshal(policyRaw, &policy); err != nil {
-		return fmt.Errorf("%s: %w", nodePolicyPath, err)
+	if err := json.Unmarshal(verificationRaw, &verification); err != nil {
+		return fmt.Errorf("%s: %w", nodeVerificationPath, err)
 	}
-	registry.Refusals = append(registry.Refusals, policy.Refusals...)
+	registry.Excluded = append(registry.Excluded, verification.Excluded...)
 	tags, releaseErr := api.allReleases(ctx, nodeRepo)
 	published, identifyErr := publishedReleases(tags)
 	reports = append(reports, nodeRegistryReport(registry, published, errors.Join(releaseErr, identifyErr)))
@@ -332,8 +334,10 @@ func run() error {
 	return nil
 }
 
-// nodeRegistryUpstream labels the row in the report table.
-const nodeRegistryUpstream = "Passwall-Node registry"
+// nodeRegistryUpstream labels the row in the report table. It was "Passwall-Node
+// registry" while the releases came from a curated registry; the row now compares
+// the releases this project publishes against the set the matrix tests.
+const nodeRegistryUpstream = "Passwall-Node matrix"
 
 type nodeRegistryRelease struct {
 	Version string `json:"version"`
@@ -344,14 +348,14 @@ type nodeRegistryExclusion struct {
 	Reason  string `json:"reason"`
 }
 
-// nodeRegistry is the manifest's rows, plus the refusals the policy records.
+// nodeRegistry is the matrix's versions plus the ones deliberately passed over.
 //
 // released_nodes IS THE MANIFEST'S KEY. It is the same row list the CI planner
-// reads by position at min_supported and the panel reads for what to offer; this
-// watcher needs only the versions, so the extra per-row fields are ignored.
+// slices by position at min_supported; this watcher needs only the versions, so the
+// other per-row fields are ignored.
 type nodeRegistry struct {
 	Releases []nodeRegistryRelease   `json:"released_nodes"`
-	Refusals []nodeRegistryExclusion `json:"refusals"`
+	Excluded []nodeRegistryExclusion `json:"excluded"`
 }
 
 // accounted lists every release the documents have ruled on.
@@ -362,13 +366,13 @@ type nodeRegistry struct {
 // resolving it, and would let a release be skipped as quietly as forgetting about
 // it.
 func (r nodeRegistry) accounted() []string {
-	versions := make([]string, 0, len(r.Releases)+len(r.Refusals))
+	versions := make([]string, 0, len(r.Releases)+len(r.Excluded))
 	for _, release := range r.Releases {
 		versions = append(versions, release.Version)
 	}
-	for _, refused := range r.Refusals {
-		if refused.Reason != "" {
-			versions = append(versions, refused.Version)
+	for _, excluded := range r.Excluded {
+		if excluded.Reason != "" {
+			versions = append(versions, excluded.Version)
 		}
 	}
 	return versions
@@ -502,7 +506,7 @@ func nodeRegistryReport(registry nodeRegistry, published []publishedRelease, fet
 	historical := len(published) - len(current)
 	note := ""
 	if historical > 0 {
-		note = fmt.Sprintf(" (%d published before the current scheme, outside the registry by construction)", historical)
+		note = fmt.Sprintf(" (%d published before the current scheme, and so not a version the matrix can name)", historical)
 	}
 	if len(current) == 0 {
 		report.Verdict = version.CeilingUnknown
@@ -591,8 +595,9 @@ func writeTable(w io.Writer, reports []version.CeilingReport) {
 const panelCeilingRemedy = "needs a review pass before the ceiling moves — see `docs/3xui-compat.md`. " +
 	"Do not bump `" + xuiCompatPath + "` or `" + suiCompatPath + "` without it."
 
-const nodeRegistryRemedy = "has published releases nobody has ruled on. Review each into `" + nodeRegistryPath + "`, " +
-	"or record it under `refusals` in `" + nodePolicyPath + "` with the reason it is not offered."
+const nodeRegistryRemedy = "has published releases the matrix does not exercise. Add each to `" + nodeRegistryPath + "` " +
+	"and pin its commit, or record it under `excluded` in `" + nodeVerificationPath + "` with the reason it is passed over. " +
+	"Neither is an admission decision: the panel offers what is published, so this is about what gets TESTED."
 
 func remedyFor(upstream string) string {
 	if upstream == nodeRegistryUpstream {

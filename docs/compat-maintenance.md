@@ -51,9 +51,11 @@
 1. 在 `docs/compat/verification-v1.json` 的 `pinned_sources` 里固定它的**提交**。
 2. 如果不是要提供，就写进 `excluded` 并给出理由；**只写版本号不算一个决定**，规划器会拒绝。
 3. 跑 `node deploy/compat/plan.mjs` 确认规划通过。
-4. **给它一条已验证的升级边。** 在 `verification-v1.json` 的 `upgrade_edges` 里加 `{id, from, to}`，并在运行时清单 `docs/compat/passwall-node-v4.json` 的同名字段里发布同一条——PSP 在决策时只能读到后者。没有边的版本**可以被安装，但不会被推荐或远程升级**：这是 R10 §8 的要求，不是遗漏。
+4. **不需要把它「提供」出来——提供是自动的。** 面板列出的是**已发布的发行**，所以资产上传齐、校验和清单就位之后它自然出现在升级列表里；没有一份已评审清单要你去加一行。
 
-   **边是路径，不是范围。** `from→to` 只对它自己成立，`beta2→beta3` 不会让 `beta2→beta4` 通过，两段拼起来也不构成一条边。要开放哪条路径，就验证并发布哪条。
+   > 这一步曾经是「给它一条已验证的升级边」：在 `verification-v1.json` 的 `upgrade_edges` 里加 `{id, from, to}` 并发布到运行时清单。那条轴已删除——`verification-v1.json` 里**没有** `upgrade_edges` 字段，准入也不再看它。照旧写法去加一个不存在的字段，规划器不会报错，因为没有人再读它。
+
+   **你能控制的只剩「测什么」**：`released_nodes` 决定 CI 矩阵测哪些版本，`min_supported` 决定从哪一行起测。没列进去的版本**可以被安装，但没有任何东西测过它**——这是它的真实状态，不是一道门。
 
 **注意固定的是提交，不是 tag 对象。** `git ls-remote --tags` 同时列 `refs/tags/X`（标注 tag 对象）和 `refs/tags/X^{}`（解引用提交）；固定前者会让每个 leg 都报"tag moved"。两个 workflow 都会拿解决出来的提交和它比对，所以填错会在第一次运行就红，而不是安静地测了另一份源码。
 
@@ -124,7 +126,7 @@ gh api repos/KazuhaHub/Passwall-Sub-Panel/rulesets/23046834 \
 
 诚实列出，别让下一任以为已经自动化了：
 
-- **远程升级的"已验证边"清单是空的，所以现在没有任何升级会被推荐或准入。** 这是**事实陈述**，不是故障：边的模型（`docs/compat/verification-v1.json` 的 `upgrade_edges`，由 `deploy/compat/plan.mjs` 校验形状）先于数据存在，而至今没有人通过 R06 的历史套件验证过任何一条边。真要把某条边打开，就在 `upgrade_edges` 里加一条 `{id, from, to}`，并把它发布到运行时清单 `docs/compat/passwall-node-v4.json` 的同名字段——运行时读的是后者。
+- **升级边这条轴已删除。** 这里曾经写着「边的清单是空的，所以没有升级会被推荐或准入」——准入现在不看边：节点声明 `task.agent.upgrade.v1` 并近期上报，面板就会下发，而装的是什么由**已发布发行**的资产和节点对制品签名的校验共同决定。`verification-v1.json` 里没有 `upgrade_edges` 字段。
 - **反方向（候选 Node × 清单内旧 PSP）有可跑的 harness，但还没有 CI。** `deployment/compat/old-psp.sh` 覆盖 B01–B08（B06 为有据的 N/A），需要真实旧 PSP 发布物与候选 PN 作为两个进程跑，因此尚未接进 workflow。
 - **历史升级／回退、真实第三方隔离、真实代理链路**分别是 R06／R07／R08，都需要真实环境。
 - **第三方范围与上限的机器可读政策**还没有（`docs/compat/3x-ui-v4.json` 是实测记录，不是政策）。

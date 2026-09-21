@@ -84,7 +84,7 @@ jobs:
           set -e
           case "$code" in
             0) echo "::notice::Upstream ceilings are current and every published Node release is accounted for." ;;
-            1) echo "::error::A compat gap is real. Either an upstream has released past its tested ceiling (do the live-panel review in docs/3xui-compat.md before moving the number in docs/compat/3x-ui-v4.json or docs/compat/sui-v4.json), or a published Node release has been neither reviewed in docs/compat/passwall-node-v4.json nor refused with a reason in docs/compat/releases-v1.json. The table above names which." ;;
+            1) echo "::error::A compat gap is real. Either an upstream has released past its tested ceiling (do the live-panel review in docs/3xui-compat.md before moving the number in docs/compat/3x-ui-v4.json or docs/compat/sui-v4.json), or a published Node release is neither exercised by the matrix in docs/compat/passwall-node-v4.json nor passed over with a reason in docs/compat/verification-v1.json. The table above names which. Neither is an admission decision: the panel offers what is published." ;;
             2) echo "::error::A comparison could not be made — the watcher itself needs attention (upstream repo moved, API shape changed, or rate limited). This is NOT a clean bill of health." ;;
             *) echo "::error::compatwatch exited $code" ;;
           esac
