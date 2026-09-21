@@ -15,7 +15,7 @@ case "$(uname -m)" in
     x86_64|amd64|aarch64|arm64) ;;
     *) fail 'only amd64 and arm64 are supported by the reviewed Node installer; no services were changed or PSP conversion requested' ;;
 esac
-for tool in curl systemctl systemd-detect-virt stat readlink find tar timeout sleep mktemp install chmod cp rm rmdir flock bash sha256sum awk getent useradd chown cmp mv mkdir ln; do
+for tool in curl systemctl systemd-detect-virt stat readlink find tar timeout sleep mktemp install chmod cp rm rmdir flock bash sha256sum awk date getent useradd chown cmp mv mkdir ln; do
     command -v "$tool" >/dev/null 2>&1 || fail "required tool missing: $tool; install it and rerun before any service is changed"
 done
 [[ -d /run/systemd/system && ! -L /run/systemd/system ]] || fail 'systemd is not running; container/unknown deployments require manual shutdown and installation'
