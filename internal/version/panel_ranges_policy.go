@@ -45,7 +45,7 @@ type CompatPSPRange struct {
 }
 
 type PanelRangesPolicy struct {
-	SchemaVersion int       `json:"schema_version"`
+	SchemaVersion int `json:"schema_version"`
 	// Product says which document this is, and it must be one of the products
 	// this build knows. It is REQUIRED rather than inferred from which fields are
 	// populated, because the two products' fields are both optional in the shape
@@ -55,10 +55,10 @@ type PanelRangesPolicy struct {
 	// It is also the cross-check against the ADDRESS: the fetch knows which
 	// document it asked for, and a document that turns out to be the other
 	// product's is a wrong file at that URL, not a review that removed a range.
-	Product       string    `json:"product"`
-	Revision      int64     `json:"revision"`
-	IssuedAt      time.Time `json:"issued_at"`
-	ExpiresAt     time.Time `json:"expires_at"`
+	Product   string    `json:"product"`
+	Revision  int64     `json:"revision"`
+	IssuedAt  time.Time `json:"issued_at"`
+	ExpiresAt time.Time `json:"expires_at"`
 	// AppliesToPSP is the window of panel builds this document was reviewed for.
 	// Per-entry psp_min/psp_max narrow it further; nothing may widen it.
 	AppliesToPSP CompatPSPRange         `json:"applies_to_psp"`

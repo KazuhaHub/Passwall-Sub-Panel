@@ -40,7 +40,6 @@ type Config struct {
 	// Empty = keep the default (info). Override order: --debug flag >
 	// PSP_LOG_LEVEL env > this field > default.
 	LogLevel string `yaml:"log_level"`
-
 }
 
 // HTTPConfig groups reverse-proxy-aware request-handling settings.
@@ -437,7 +436,6 @@ func (c *Config) validate() error {
 	// DSN is optional; empty falls back to SQLite at <DataDir>/panel.db.
 	return nil
 }
-
 
 // DBKind returns the active database driver: "mysql", "postgres" or
 // "sqlite".

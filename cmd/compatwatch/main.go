@@ -72,9 +72,9 @@ const (
 // UNNOTICED: every release is either exercised by the matrix or passed over with a
 // reason somebody wrote down.
 const (
-	nodeRegistryPath = "docs/compat/passwall-node-v4.json"
+	nodeRegistryPath     = "docs/compat/passwall-node-v4.json"
 	nodeVerificationPath = "docs/compat/verification-v1.json"
-	nodeRepo         = "KazuhaHub/Passwall-Node"
+	nodeRepo             = "KazuhaHub/Passwall-Node"
 )
 
 // fetchAttempts exists to keep the job from crying wolf. A single GitHub blip
@@ -545,7 +545,7 @@ func nodeRegistryReport(registry nodeRegistry, published []publishedRelease, fet
 	}
 	report.Ceiling = report.Latest
 	report.Verdict = version.CeilingCurrent
-	report.Reason = fmt.Sprintf("every one of the %d published releases is reviewed or excluded with a reason%s",
+	report.Reason = fmt.Sprintf("every one of the %d published releases is either tested by the matrix or passed over with a reason%s",
 		len(current), note)
 	return report
 }

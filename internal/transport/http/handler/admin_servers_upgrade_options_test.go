@@ -211,4 +211,3 @@ func TestAgentTargetsComeFromTheReleaseList(t *testing.T) {
 		t.Fatalf("targets = %+v, want nil", got)
 	}
 }
-

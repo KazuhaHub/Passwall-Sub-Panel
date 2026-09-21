@@ -19,8 +19,6 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/safehttp"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/version"
-
-
 )
 
 const (
@@ -68,12 +66,12 @@ type candidateRelease struct {
 }
 
 type Catalog struct {
-	client *http.Client
-	now    func() time.Time
-	mu     sync.Mutex
-	cached   ports.NodeReleaseList
-	expires  time.Time
-	flight   *refresh
+	client  *http.Client
+	now     func() time.Time
+	mu      sync.Mutex
+	cached  ports.NodeReleaseList
+	expires time.Time
+	flight  *refresh
 }
 
 type refresh struct {

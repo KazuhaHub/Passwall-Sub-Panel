@@ -84,7 +84,20 @@ const SUPPORTED = (() => {
 // exclusion, and the order it keeps — and none of them can be observed with a
 // single row. They start from the shipped manifest and add a release to it, so
 // each case still changes exactly one thing about what ships.
-const SECOND_RELEASE = '4.0.1'
+// A RELEASE THE SHIPPED MANIFEST DOES NOT CARRY, DERIVED RATHER THAN WRITTEN DOWN.
+// It was the literal '4.0.1' appended to the shipped set, which worked while the
+// file held one release — and broke the moment 4.0.1 was published, because the
+// plan then saw that version twice: once supported and once excluded as known-bad.
+// The failure was about the fixture, not about the planner, which is exactly what
+// a derived value prevents.
+const SECOND_RELEASE = (() => {
+  const present = new Set(realManifest().released_nodes.map((row) => row.version))
+  for (let patch = 1; patch < 100; patch++) {
+    const candidate = `4.0.${patch}`
+    if (!present.has(candidate)) return candidate
+  }
+  throw new Error('no free 4.0.x version for this fixture')
+})()
 const SECOND_SHA = '2'.repeat(40)
 
 function manifestWithASecondRelease() {
@@ -152,7 +165,10 @@ test('the plan keeps the manifest order, and slices it at the floor positionally
   manifest.released_nodes.reverse()
   manifest.min_supported = manifest.released_nodes[0].version
   const { result } = planTwoReleases({ manifest })
-  assert.deepEqual(result.cases.map((c) => c.version), ['4.0.1', '4.0.0'],
+  // STATED AS THE PROPERTY RATHER THAN AS A LIST: the planned versions are the
+  // manifest's, in the manifest's order. A literal pair would have to be rewritten
+  // every time a release is published, and would then be about this fixture.
+  assert.deepEqual(result.cases.map((c) => c.version), manifest.released_nodes.map((row) => row.version),
     'the plan must follow the manifest, not the version order')
 })
 
@@ -171,7 +187,7 @@ test('a supported version with no pinned identity fails the plan', () => {
   const { code, result, stderr } = planTwoReleases({ verification })
   assert.equal(code, 1)
   assert.equal(result.verdict, 'invalid')
-  assert.match(stderr + JSON.stringify(result.problems), /4\.0\.1/)
+  assert.match(stderr + JSON.stringify(result.problems), new RegExp(SECOND_RELEASE.replaceAll('.', '\\.')))
 })
 
 test('a floor naming no row fails the plan', () => {

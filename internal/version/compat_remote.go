@@ -28,8 +28,9 @@ import (
 //   - a PRODUCT build reads ONE DOCUMENT PER PRODUCT, named after the PANEL MAJOR
 //     its own version carries (4.0.0 → 3x-ui-v4.json, sui-v4.json).
 //
-// The address is shared with the Node release catalog, which fetches
-// passwall-node-v<major>.json from here through RemoteCompatURLBase.
+// NOTHING ELSE FETCHES FROM THIS ADDRESS. It was shared with the Node release
+// catalog for a while, which read a document here; the catalog lists the releases
+// the project has published instead, so this base is the ranges documents' alone.
 const defaultRemoteCompatURLBase = "https://raw.githubusercontent.com/KazuhaHub/passwall-sub-panel/main/docs/compat/"
 
 // remoteFetchThrottle gates how often RefreshRemoteCompat actually hits the
@@ -96,17 +97,17 @@ const rangeOverlaySchemaVersion = 3
 // consume a newer JSON as long as the v2 essentials are present.
 
 type remoteCompatPayload struct {
-	SchemaVersion int                    `json:"schema_version"`
-	Major         int                    `json:"major"`
-	UpdatedAt     string                 `json:"updated_at"`
+	SchemaVersion int    `json:"schema_version"`
+	Major         int    `json:"major"`
+	UpdatedAt     string `json:"updated_at"`
 	// Product is which product's ranges this payload carries, and it travels with
 	// the payload for the same reason the window below does: the snapshot, the
 	// revision guard and the install all have to know WHICH document they are
 	// about. Empty means the payload came from a per-major manifest, which carries
 	// both panels in one document — the frozen legacy route, where "both" is the
 	// correct answer rather than a missing one.
-	Product   string                 `json:"product,omitempty"`
-	Entries   []remoteCompatPSPEntry `json:"entries"`
+	Product string                 `json:"product,omitempty"`
+	Entries []remoteCompatPSPEntry `json:"entries"`
 	// Advisories is the optional top-level version→advisory map surfaced in the
 	// pre-upgrade confirm dialog. Top-level (not per-entry) because "what breaks
 	// when you upgrade TO 3X-UI X" is independent of which PSP version is asking.

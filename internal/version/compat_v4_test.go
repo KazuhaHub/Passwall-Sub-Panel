@@ -312,4 +312,3 @@ func TestCompatV4FetchAppliesPublishedShape(t *testing.T) {
 		t.Fatalf("a refused fetch changed the persisted snapshot: %v", err)
 	}
 }
-
