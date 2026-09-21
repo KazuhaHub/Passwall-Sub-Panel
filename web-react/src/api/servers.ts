@@ -254,7 +254,7 @@ export async function importNativeCredential(id: number, credential: string, sig
  * what the node reports is either an upgrade or a mistake, and the installer
  * refuses to guess.
  */
-export type InstallMode = 'install' | 'upgrade'
+export type InstallMode = 'install' | 'upgrade' | 'replace'
 
 export async function createNativeInstallScript(id: number, input: { version: string; mode?: InstallMode }, signal?: AbortSignal) {
   const { data } = await client.post<string>(`/admin/servers/${id}/node-install-script`,

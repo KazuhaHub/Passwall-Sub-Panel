@@ -315,7 +315,7 @@ func TestAMissingTemplateIsReportedAsAPublisherDecision(t *testing.T) {
 // nothing about what was actually wrong.
 func TestItRendersTheModeItWasAskedFor(t *testing.T) {
 	f := newFixture(t, templateFixture)
-	for mode, want := range map[string]string{"": "mode='install'", "install": "mode='install'", "upgrade": "mode='upgrade'"} {
+	for mode, want := range map[string]string{"": "mode='install'", "install": "mode='install'", "upgrade": "mode='upgrade'", "replace": "mode='replace'"} {
 		options := validOptions()
 		options.Mode = mode
 		rendered, err := f.renderer(t).Render(context.Background(), options)
@@ -363,7 +363,7 @@ environment=@@ENVIRONMENT@@
 // reaches it has already cost a download and a service stop.
 func TestItRefusesAnUnknownModeWithoutTouchingTheNetwork(t *testing.T) {
 	f := newFixture(t, templateFixture)
-	for _, mode := range []string{"replace", "force", "INSTALL", "install "} {
+	for _, mode := range []string{"REPLACE", "force", "INSTALL", "install "} {
 		options := validOptions()
 		options.Mode = mode
 		if err := f.renderer(t).Validate(options); !errors.Is(err, ErrNotRenderable) {

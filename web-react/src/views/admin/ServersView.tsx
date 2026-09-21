@@ -2089,6 +2089,11 @@ export function NativeInstallationDialog({ server, initialProvisioning, onClose,
   // beside the choice so an operator can see the difference, and the warning below
   // says what the installer will do about it; the panel does not decide for them.
   const [upgradeInPlace, setUpgradeInPlace] = useState(false)
+  // AND NEITHER IS TAKING THE HOST OVER. This one is not about a version at all: it
+  // hands the machine to this panel with a new identity, which is what a server
+  // moving between installations needs. It is never inferred either — the version
+  // says nothing about it — and what it costs is said beside it rather than after.
+  const [replaceIdentity, setReplaceIdentity] = useState(false)
   const [commandError, setCommandError] = useState('')
   const [commandExpired, setCommandExpired] = useState(false)
   const [selection, setSelection] = useState<NativeInstallationSelection>(initialSelection)
@@ -2107,7 +2112,7 @@ export function NativeInstallationDialog({ server, initialProvisioning, onClose,
   // The node's own record of itself, first token only: the reported string may carry
   // a build stamp, and it is the release the installer compares, not the stamp.
   const reportedVersion = (server?.panel_version ?? '').split(' ')[0]
-  const installMode: InstallMode = upgradeInPlace ? 'upgrade' : 'install'
+  const installMode: InstallMode = replaceIdentity ? 'replace' : upgradeInPlace ? 'upgrade' : 'install'
   const versionValid = selection.method === 'github' || (selection.method === 'docker'
     ? isNodeDockerImageSelection(version.trim())
     : isNodeReleaseVersion(version.trim()))
@@ -2329,13 +2334,21 @@ export function NativeInstallationDialog({ server, initialProvisioning, onClose,
           onChange={next => { invalidateMaterials(); setVersion(next) }} autoSelectLatest disabled={rotating} />}
         {selection.method === 'linux' && <Box>
           <FormControlLabel control={<Checkbox size="small" checked={upgradeInPlace} disabled={!server}
-            onChange={event => { invalidateMaterials(); setUpgradeInPlace(event.target.checked) }} />}
+            onChange={event => { invalidateMaterials(); setUpgradeInPlace(event.target.checked); setReplaceIdentity(false) }} />}
             label={t('admin:servers.native.upgrade_in_place')} />
           <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>{t('admin:servers.native.upgrade_in_place_hint')}</Typography>
+          {/* THE SECOND ANSWER TO THE SAME QUESTION, and they are mutually exclusive
+              because they say opposite things about the identity: one keeps it, the
+              other replaces it. Both are off by default; the panel never picks. */}
+          <FormControlLabel control={<Checkbox size="small" checked={replaceIdentity} disabled={!server}
+            onChange={event => { invalidateMaterials(); setReplaceIdentity(event.target.checked); setUpgradeInPlace(false) }} />}
+            label={t('admin:servers.native.replace_identity')} />
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>{t('admin:servers.native.replace_identity_hint')}</Typography>
+          {replaceIdentity && <Alert severity="warning">{t('admin:servers.native.replace_identity_warning')}</Alert>}
           {/* THE COMMAND IS REFUSED AT THE HOST, NOT HERE, when the node is on
-              another release and this is off — and that refusal arrives as a message
-              about identity that names nothing about the version. */}
-          {reportedVersion && version.trim() && reportedVersion !== version.trim() && !upgradeInPlace &&
+              another release and neither answer is chosen — and that refusal arrives
+              as a message about identity that names nothing about the version. */}
+          {reportedVersion && version.trim() && reportedVersion !== version.trim() && !upgradeInPlace && !replaceIdentity &&
             <Alert severity="warning">{t('admin:servers.native.upgrade_in_place_needed', { version: reportedVersion })}</Alert>}
         </Box>}
         {provisioning.endpoint.startsWith('http://') && <Alert severity="warning">{t('admin:servers.native.http_warning')}</Alert>}
