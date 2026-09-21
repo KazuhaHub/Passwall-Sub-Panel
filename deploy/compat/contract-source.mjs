@@ -72,15 +72,19 @@ export function contractSource(verification) {
 // so it comes off — the same rule the Go side applies, written here because the
 // two are in different languages and the tag is what this file is given.
 //
-// A TAG OUTSIDE THE NAMESPACE IS REFUSED rather than passed through: a pin is a
-// claim about a release this project publishes, and a tag that is not in the
-// namespace names no such release.
-const TAG_NAMESPACE = 'release/'
+// EITHER NAMESPACE, BECAUSE A PIN NAMES SOMETHING PUBLISHED. Four releases live
+// under `release/` and everything since under `v`, and a rule that knew only one of
+// them would refuse a pin onto the other — which is the half it is here to test. A
+// tag under neither namespace is refused rather than passed through: it names no
+// release this project publishes.
+const TAG_NAMESPACES = ['v', 'release/']
 function versionOfTag(tag) {
-  if (!tag.startsWith(TAG_NAMESPACE)) {
-    throw new Error(`contract_source.tag is not in the ${TAG_NAMESPACE} namespace: ${tag}`)
+  for (const namespace of TAG_NAMESPACES) {
+    if (tag.startsWith(namespace) && tag.length > namespace.length) {
+      return tag.slice(namespace.length)
+    }
   }
-  return tag.slice(TAG_NAMESPACE.length)
+  throw new Error(`contract_source.tag is under no namespace this project publishes: ${tag}`)
 }
 
 // A MAJOR-VERSION SUFFIX BELONGS TO THE MODULE, NOT TO THE REPOSITORY. Go appends
