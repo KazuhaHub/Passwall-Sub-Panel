@@ -12,6 +12,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/releaseasset"
 )
 
 // THE TEMPLATE IS SIGNED, AND THE SIGNATURE IS THE TRUST.
@@ -45,8 +47,8 @@ func newFixture(t *testing.T, template string) *fixture {
 	digest := sha256.Sum256([]byte(template))
 	manifest := fmt.Sprintf("%s  %s\n", hex.EncodeToString(digest[:]), templateName)
 	signature := ed25519.Sign(private, []byte(manifest))
-	f.served[checksumAsset] = []byte(manifest)
-	f.served[signatureAsset] = []byte(base64.StdEncoding.EncodeToString(signature) + "\n")
+	f.served[releaseasset.ChecksumAsset] = []byte(manifest)
+	f.served[releaseasset.SignatureAsset] = []byte(base64.StdEncoding.EncodeToString(signature) + "\n")
 	f.served[templateName] = []byte(template)
 	f.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		f.calls++
@@ -214,8 +216,8 @@ func resign(t *testing.T, f *fixture, template string) *fixture {
 	}
 	digest := sha256.Sum256([]byte(template))
 	manifest := fmt.Sprintf("%s  %s\n", hex.EncodeToString(digest[:]), templateName)
-	f.served[checksumAsset] = []byte(manifest)
-	f.served[signatureAsset] = []byte(base64.StdEncoding.EncodeToString(ed25519.Sign(private, []byte(manifest))) + "\n")
+	f.served[releaseasset.ChecksumAsset] = []byte(manifest)
+	f.served[releaseasset.SignatureAsset] = []byte(base64.StdEncoding.EncodeToString(ed25519.Sign(private, []byte(manifest))) + "\n")
 	f.served[templateName] = []byte(template)
 	f.key = public
 	return f
