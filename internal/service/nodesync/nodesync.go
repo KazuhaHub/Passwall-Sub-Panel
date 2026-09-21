@@ -334,15 +334,17 @@ func buildConfig(snapshot *ports.NativeDesiredSnapshot, agent *domain.NodeAgent,
 	// restricted, fails the comparison below.
 	release, err := catalog.Resolve(string(engine), normalized)
 	if err != nil {
+		log.Warn("core selection refused: the reviewed catalog no longer offers it",
+			"agent_id", agent.AgentID, "engine", string(engine), "version", normalized, "err", err)
 		return nodeprotocol.ConfigBody{}, fmt.Errorf("%w: %s %s: %w", errSelectionWithdrawn, engine, normalized, err)
 	}
 	if release.RequiresConfirmation != allowRestricted {
+		log.Warn("core selection refused: the acknowledgement no longer matches the review",
+			"agent_id", agent.AgentID, "engine", string(engine), "version", normalized,
+			"tier", release.Tier, "requires_confirmation", release.RequiresConfirmation, "configured", allowRestricted)
 		return nodeprotocol.ConfigBody{}, fmt.Errorf("%w: %s %s now requires confirmation=%t and this node is configured with %t",
 			errSelectionWithdrawn, engine, normalized, release.RequiresConfirmation, allowRestricted)
 	}
-	log.Warn("core selection refused: the reviewed catalog no longer supports it",
-		"agent_id", agent.AgentID, "engine", string(engine), "version", normalized,
-		"tier", release.Tier, "requires_confirmation", release.RequiresConfirmation)
 
 	body := nodeprotocol.ConfigBody{
 		Listeners: make([]nodeprotocol.Listener, 0, len(snapshot.Nodes)),
