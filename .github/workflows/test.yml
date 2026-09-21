@@ -244,6 +244,24 @@ jobs:
             --input "$evidence/go-events.jsonl" \
             --go-exit-code "$test_exit" \
             --output "$evidence/result.json"
+          # TWO CROSS-REPOSITORY CONTRACTS ARE CHECKED HERE, in the only job that
+          # has the other repository on disk.
+          #
+          #   internal/version        PSP's copy of the shared version vectors is
+          #                           still the copy the Node project publishes. Both
+          #                           consumers — this repository's Go tests and the
+          #                           front end's TypeScript tests — run against that
+          #                           one file.
+          #   internal/pkg/nodebootstrap
+          #                           the migration wrapper's prerequisite list still
+          #                           covers what the published installer requires. A
+          #                           tool added there and not here defers the failure
+          #                           until after the old service has been stopped.
+          #
+          # THEY RUN AFTER THE EVIDENCE IS WRITTEN so a divergence cannot mask the
+          # wire result, and they read the checkout this step already verified.
+          PSP_LIVE_NODE_REPO="$contract_repo" go test -count=1 \
+            ./internal/version/ ./internal/pkg/nodebootstrap/
           cat > "$evidence/environment.json" <<JSON
           {
             "case": "pinned-source",

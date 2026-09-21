@@ -37,6 +37,25 @@ func TestProductionDependsOnNoNodePackage(t *testing.T) {
 	}
 }
 
+// AND IT IS NOT REQUIRED, which is a separate statement from "nothing imports it".
+//
+// A require line with no import behind it is not a dependency today and is one
+// tomorrow: the next convenient import resolves against whatever revision happens
+// to be pinned, and nothing in between signals that a decision was made. The tests
+// that need the Node project read it from the checkout the contract job provides
+// rather than from this module, which is what let the require go.
+func TestTheNodeModuleIsNotRequired(t *testing.T) {
+	text, err := os.ReadFile(filepath.Join(moduleRoot(t), "go.mod"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, line := range strings.Split(string(text), "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), nodeModulePrefix) {
+			t.Fatalf("go.mod requires the Node module, so the dependency surface can grow again without a decision: %s", strings.TrimSpace(line))
+		}
+	}
+}
+
 // A local `replace` would make every check in this file describe a different
 // build than the one consumers get: the imports resolve here and nowhere else,
 // and the residual surface is measured against a working copy. The plan names
