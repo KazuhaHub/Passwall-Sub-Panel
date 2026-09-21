@@ -54,16 +54,20 @@ const (
 	nodeUnit    = "/etc/systemd/system/passwall-node.service"
 	installLock = "/opt/.passwall-node-install.lock"
 	ownerMarker = nodeRoot + "/.psp-disposable-reinstall-owner"
-	// THE FIRST RELEASE UNDER THE CURRENT SCHEME, and a real published one: this
-	// suite downloads and verifies the actual archive, so the identity has to name
-	// a release that exists. It used to name the published beta4, which the panel
-	// cannot read any more — a legacy version is not a version, so the bootstrap
-	// endpoint refused it before anything was installed.
-	nodeVersion = "4.0.0"
-	// The release/4.0.0 tag peels to 5fd84eca5b1ffbc5d999979ea6b3ec377b0c6d33.
+	// A REAL PUBLISHED RELEASE, because this suite verifies the actual archive and
+	// the panel installs from real release assets. It has to be one that publishes
+	// what the install path reads: the tag a release is addressed by and the
+	// template it renders are both release assets, and no release before 4.0.1.1
+	// carries them.
+	nodeVersion = "4.0.1.1"
+	// The release/4.0.1.1 tag peels to ea61b1d745d6c79120b0c04a920c5fcb29d573da.
 	// The publisher stamps short7; the daemon reports version.String(), not a bare
 	// version. Pin the real identity rather than accepting an arbitrary suffix.
-	nodeReportedIdentity = "4.0.0 (5fd84ec)"
+	//
+	// IT IS THE FIRST RELEASE THAT CARRIES WHAT THIS CASE INSTALLS FROM: the release
+	// before it publishes no installation template, so this case could not run
+	// against a real asset at all until this one existed.
+	nodeReportedIdentity = "4.0.1.1 (ea61b1d)"
 	coreVersion          = "26.6.27"
 )
 
@@ -105,8 +109,19 @@ func fixtureInstallTemplate(t *testing.T) ports.NodeInstallTemplate {
 	t.Helper()
 	checkout := os.Getenv(templateRepoEnv)
 	if checkout == "" {
-		t.Skipf("%s is unset, so there is no pinned revision to publish an installer from", templateRepoEnv)
+		// THE REAL RELEASE, WHICH IS THE POINT OF THIS CASE. A release publishes the
+		// template now, so the production reader is pointed at the real origin and
+		// what this installs from is what an operator installs from. Nothing about
+		// the path below changes: same reader, same compiled key, same substitution.
+		renderer, err := pninstall.New(pninstall.RendererOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return renderer
 	}
+	// THE INJECTION REMAINS, FOR A TEMPLATE NO RELEASE CARRIES YET: a change to the
+	// installer is worth being able to run through this case before it is published.
+	// CI does not set the variable, so what CI exercises is the released asset.
 	body, err := os.ReadFile(filepath.Join(checkout, "deployment", "install.sh"))
 	if err != nil {
 		t.Fatalf("read the pinned installer from %s: %v", checkout, err)
