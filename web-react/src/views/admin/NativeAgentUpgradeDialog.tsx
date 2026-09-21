@@ -19,12 +19,15 @@ export function NativeAgentUpgradeDialog({ server, onClose }: { server: Server |
   const [targets, setTargets] = useState<string[] | undefined>(undefined)
   const key = useRef('')
   const requestController = useRef<AbortController | null>(null)
+  // THE NODE'S OWN RECORD OF ITSELF, shown as-is and never parsed here. The node
+  // is what compares it against the request, so a stamp from the replaced scheme
+  // (`v0.0.1-beta9`) is a value this dialog passes through rather than judges —
+  // requiring it to be a product version is what made those nodes un-upgradable.
   const expected = server?.panel_version?.split(' ')[0] ?? ''
-  // A VERSION, IN EITHER SCHEME. This was a local copy of the shape rule and it
-  // knew only the legacy one, so a node reporting a product version — three
-  // integers, no prefix — could not be confirmed at all: the action was disabled
-  // and nothing said why. The rule lives in the module that reads the shared
-  // vectors.
+  // A TARGET MUST NAME A RELEASE, because that is what the node turns into a
+  // download address. This rule is about the target only; it used to be applied
+  // to the node's reported version as well, which put the shape decision in the
+  // wrong place.
   const exact = (s: string) => canonicalReleaseVersion(s) !== undefined
 
   useEffect(() => {
@@ -74,7 +77,7 @@ export function NativeAgentUpgradeDialog({ server, onClose }: { server: Server |
   }, [server?.id, task?.task_id, task?.upgrade_state, retry, t])
 
   async function submit() {
-    if (!server || busy || task || !exact(version.trim()) || !exact(expected) || version.trim() === expected) return
+    if (!server || busy || task || !exact(version.trim()) || version.trim() === expected) return
     if (!key.current) key.current = crypto.randomUUID()
     const controller = new AbortController(); requestController.current = controller
     setBusy(true); setError('')
@@ -118,7 +121,7 @@ export function NativeAgentUpgradeDialog({ server, onClose }: { server: Server |
     </DialogContent>
     <DialogActions>
       <Button onClick={onClose} disabled={busy}>{t('common:actions.close')}</Button>
-      {!task && <Button variant="contained" onClick={() => void submit()} disabled={busy || !exact(version.trim()) || !exact(expected) || version.trim() === expected}>
+      {!task && <Button variant="contained" onClick={() => void submit()} disabled={busy || !exact(version.trim()) || version.trim() === expected}>
         {busy && <CircularProgress size={16} sx={{ mr: 1 }} />}{t(error ? 'admin:servers.agent_upgrade.retry' : 'admin:servers.agent_upgrade.confirm')}
       </Button>}
     </DialogActions>

@@ -83,7 +83,25 @@ var validUpgradeRequest = Request{Version: "4.0.1", ExpectedVersion: "4.0.0"}
 
 const upgradeRequestKey = "upgrade-request-0001"
 
-func TestUpgradeRequestRequiresAnExactNewerRelease(t *testing.T) {
+// THE TARGET IS AN EXACT RELEASE; THE VERSION IT REPLACES IS WHATEVER THE NODE
+// REPORTS.
+//
+// The request used to require BOTH to parse as product versions, and to require
+// the target to order above the current one. Those two rules were about the
+// version SCHEME rather than about the upgrade: they existed because this project
+// deleted its legacy naming, so a node still reporting `v0.0.1-beta9` handed the
+// panel a string it could not parse — and a node whose own version the panel
+// cannot read became impossible to move. Both are gone.
+//
+// WHAT REPLACES THEM IS NOT A WEAKER VERSION RULE BUT A DIFFERENT ONE. The target
+// must be a release version, because the node derives its download address from it
+// and the checksum manifest names it; the expected version is an OPAQUE IDENTITY
+// that has to match what the node believes it is, which the node checks itself.
+// That is also why order is no longer checked: an operator picking an older
+// release is making an explicit choice, and the rules that remain — the artifact's
+// signature, its checksum, and the downloaded binary reporting exactly the
+// requested version — are what stop that choice from installing something else.
+func TestTheTargetIsExactAndTheReplacedVersionIsOpaque(t *testing.T) {
 	for _, tc := range []struct {
 		target   string
 		expected string
@@ -93,29 +111,37 @@ func TestUpgradeRequestRequiresAnExactNewerRelease(t *testing.T) {
 		{"4.0.0.1", "4.0.0", true}, // a rebuild of the running release is an upgrade
 		{"102.1.0", "102.0.3", true},
 		{"4.1.0", "4.0.0.9", true},
-		// `100000000000000000000.0.0` against a 20-digit major used to be here,
-		// asserting that the comparison does not overflow. That property is
-		// asserted where it lives, in the comparator; the string itself is now
-		// REFUSED by the shape rule, which bounds a segment because PSP returns a
-		// major and cannot represent one this large. See MaxVersionSegmentBounds.
+		// THE POINT OF REMOVING THE TWO RULES: a node on the replaced scheme has a
+		// version this build cannot parse, and it must still be movable.
+		{"4.0.1", "v0.0.1-beta9", true},
+		{"4.0.1", "v0.0.1-beta12", true},
+		{"4.0.1", "v3.9.2", true},
+		{"4.0.0", "v4.0.0", true},
+		// AND NOT-NEWER IS NO LONGER A REFUSAL. This is deliberate: the panel does
+		// not decide what an operator may install, and the ordering rule answered
+		// wrongly for exactly the nodes it could not parse.
+		{"4.0.0", "4.0.1", true},
+		{"4.0.0", "4.99.99", true},
+		// A NO-OP IS STILL REFUSED, by string identity rather than by ordering: the
+		// node would download, verify and reinstall the release it is already on.
 		{"4.0.0", "4.0.0", false},
-		{"4.0.0", "4.0.1", false},
-		{"4.0.0", "4.0.0.1", false},
+		{"v0.0.1-beta9", "v0.0.1-beta9", false},
+		// THE TARGET IS STILL EXACT. It has to be: the node builds its download
+		// address from it, so a target that is not a release version cannot be
+		// fetched at all.
 		{"4.0", "4.0.0", false},
 		{"04.0.0", "4.0.0", false},
 		{"4.0.0+build", "4.0.0", false},
 		{"latest", "4.0.0", false},
 		{"release/4.0.0", "4.0.0", false},
-		// THE LEGACY SHAPE, REFUSED RATHER THAN ORDERED. It was accepted here -
-		// and the ordering below it is what the dotless-prerelease rule existed
-		// for - until the scheme was removed. Nothing publishes it now, so the
-		// panel cannot be asked to move a node onto one.
 		{"v0.0.1-beta3", "v0.0.1-beta2", false},
 		{"v0.0.1-beta.10", "v0.0.1-beta.9", false},
 		{"v0.0.1", "v0.0.1-beta3", false},
 		{"v4.0.0", "4.0.0", false},
-		{"4.0.0", "v4.0.0", false},
 		{"v1.0.0", "v0.0.1", false},
+		// An expected version that is absent cannot match what the node believes it
+		// is, so the request is refused here rather than at the node.
+		{"4.0.1", "", false},
 	} {
 		err := validateRequest(Request{Version: tc.target, ExpectedVersion: tc.expected})
 		if tc.valid && err != nil || !tc.valid && !errors.Is(err, domain.ErrValidation) {

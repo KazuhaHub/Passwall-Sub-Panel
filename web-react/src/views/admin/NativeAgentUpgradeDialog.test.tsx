@@ -193,10 +193,47 @@ it('upgrades a node that reports a product-scheme version', async () => {
   await waitFor(() => expect(button.disabled).toBe(false))
 })
 
-// A version that is not one in either scheme is still refused, and the near
-// misses stay refused: the point is that the rule moved, not that it went away.
-it('still refuses a node whose reported version is not a release', async () => {
-  for (const panel_version of ['4.0', '04.0.0', '4.0.0.1', 'release/4.0.0', 'dev', 'latest']) {
+// A NODE ON THE REPLACED SCHEME IS STILL UPGRADABLE, AND THAT IS THE WHOLE POINT.
+//
+// The dialog used to require the node's OWN reported version to be a product
+// version before it would enable Confirm. A node still reporting `v0.0.1-beta9`
+// therefore could not be moved at all: the operator opened the page, picked a
+// target, and found the action permanently disabled. But that version is the
+// NODE'S OWN RECORD of itself — the node is what compares it against the request
+// — so this panel has no business parsing it.
+it('upgrades a node that reports a version from the replaced scheme', async () => {
+  const legacyServer: Server = { ...server, panel_version: 'v0.0.1-beta9' }
+  installReads({
+    '/admin/servers/node-releases': {
+      checked_at: '',
+      releases: [{
+        version: '4.0.1', channel: 'stable', published_at: '2026-09-12T12:00:00Z',
+        release_url: 'https://github.com/KazuhaHub/Passwall-Node/releases/tag/release/4.0.1',
+        notes: 'Reviewed release fixture', methods: ['linux'],
+        platforms: [{ os: 'linux', arch: 'amd64' }, { os: 'linux', arch: 'arm64' }],
+      }],
+    },
+  })
+  mount(<NativeAgentUpgradeDialog server={legacyServer} onClose={() => {}} />)
+  expect((screen.getByLabelText('admin:servers.agent_upgrade.current') as HTMLInputElement).value).toBe('v0.0.1-beta9')
+  const button = screen.getByRole('button', { name: 'admin:servers.agent_upgrade.confirm' }) as HTMLButtonElement
+  expect(button.disabled).toBe(true)
+  const field = screen.getByRole('combobox', { name: 'admin:servers.native.agent_version' })
+  await waitFor(() => expect(field.getAttribute('aria-disabled')).not.toBe('true'))
+  fireEvent.mouseDown(field)
+  fireEvent.click(await screen.findByRole('option', { name: '4.0.1' }))
+  await waitFor(() => expect(button.disabled).toBe(false))
+})
+
+// THE NODE'S VERSION IS OPAQUE, SO THE PANEL DOES NOT JUDGE IT.
+//
+// This case used to be its opposite: a reported version that is not a release
+// version disabled Confirm. That made the panel the arbiter of a string it does
+// not own, and it is why a node from before the scheme change could not be
+// upgraded. What still gates the action is the TARGET — it must name a release,
+// because that is what the node fetches.
+it('accepts whatever version the node reports about itself', async () => {
+  for (const panel_version of ['v0.0.1-beta9', 'v3.9.2', 'v0.0.1-beta12 (abcdef0)', 'dev']) {
     installReads({
       '/admin/servers/node-releases': {
         checked_at: '',
@@ -209,10 +246,12 @@ it('still refuses a node whose reported version is not a release', async () => {
       },
     })
     const view = mount(<NativeAgentUpgradeDialog server={{ ...server, panel_version }} onClose={() => {}} />)
-    // The node's own version cannot be confirmed as exact, so nothing is
-    // submittable — which is the correct answer for a string that names no
-    // release.
-    expect((screen.getByRole('button', { name: 'admin:servers.agent_upgrade.confirm' }) as HTMLButtonElement).disabled, panel_version).toBe(true)
+    const field = screen.getByRole('combobox', { name: 'admin:servers.native.agent_version' })
+    await waitFor(() => expect(field.getAttribute('aria-disabled')).not.toBe('true'))
+    fireEvent.mouseDown(field)
+    fireEvent.click(await screen.findByRole('option', { name: '4.0.1' }))
+    const button = screen.getByRole('button', { name: 'admin:servers.agent_upgrade.confirm' }) as HTMLButtonElement
+    await waitFor(() => expect(button.disabled, panel_version).toBe(false))
     view.unmount()
   }
 })

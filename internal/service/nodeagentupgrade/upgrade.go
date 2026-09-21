@@ -89,15 +89,30 @@ var (
 )
 
 func validateRequest(request Request) error {
-	if !version.IsReleaseVersion(request.Version) || !version.IsReleaseVersion(request.ExpectedVersion) {
-		return fmt.Errorf("%w: exact canonical target and expected Node versions are required", domain.ErrValidation)
+	// THE TARGET IS EXACT, AND THAT IS AN ADDRESSING REQUIREMENT RATHER THAN A
+	// POLICY. The node derives its download address from this version and the
+	// checksum manifest names it, so a target that is not a release version cannot
+	// be fetched at all.
+	if !version.IsReleaseVersion(request.Version) {
+		return fmt.Errorf("%w: the target must be an exact release version", domain.ErrValidation)
 	}
-	// THE PROJECT'S RELEASE ORDER, not x/mod/semver: that package answers ZERO
-	// for a bare product version, and zero is "equal", so this check would refuse
-	// every product upgrade as "not newer" — after the guard above had been
-	// widened to let it through.
-	if version.CompareRelease(request.Version, request.ExpectedVersion) <= 0 {
-		return fmt.Errorf("%w: native upgrade target must be newer than its expected current version", domain.ErrValidation)
+	// THE VERSION BEING REPLACED IS OPAQUE. It is what the node reports about
+	// itself, and the node is the one that checks it — see client.go's
+	// `c.Version != args.ExpectedVersion`. This used to require a product version
+	// here too, which meant a node still reporting a stamp from the replaced
+	// scheme (`v0.0.1-beta9`) could never be moved: the panel refused the request
+	// because it could not parse a string that the node was perfectly able to
+	// compare against itself.
+	if request.ExpectedVersion == "" {
+		return fmt.Errorf("%w: the version being replaced is required", domain.ErrValidation)
+	}
+	// A NO-OP IS REFUSED BY IDENTITY, NOT BY ORDER. There is no ordering rule any
+	// more: it answered wrongly across the two schemes, and an operator choosing an
+	// older release is making an explicit choice that the artifact's signature,
+	// checksum and self-reported version already guard. Reinstalling the version
+	// the node is already on is the one case with nothing to gain.
+	if request.ExpectedVersion == request.Version {
+		return fmt.Errorf("%w: the target is the version the node is already on", domain.ErrValidation)
 	}
 	// THE POLICY GATE IS HERE because this is the one function both entry points
 	// pass through — the API handler and DecodeRequest. A check placed at the
