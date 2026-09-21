@@ -41,7 +41,7 @@
 
 > **分配器在本仓库里，改规则就是改代码。** 这条规则**曾经**来自 pin 住的 Node 模块，于是一个规则修复要先合并上游、再升 pin，发布路径才用得上新规则；现在它在 `internal/version` 里，合并到 `main` 即生效。
 >
-> **但"同一规则"仍要靠向量保证**，不是靠两边各写一遍：`internal/version` 与前端 `web-react/src/utils/productVersion.vectors.json` 由同一份向量驱动。向量目前从 pin 住的 Node 模块目录读取——**这条 pin 是删 require 时要一并解决的最后一项**（X07 的收尾步骤）。
+> **但"同一规则"仍要靠向量保证**，不是靠两边各写一遍：`internal/version` 与前端 `web-react/src/utils/productVersion.vectors.json` 由同一份向量驱动。**跨仓那一半由 pinned-source 契约 job 做**——它本来就把 Node 仓库按记录的 revision 签出来，现在这份 checkout 也用来比对向量；本仓库不再要求 Node 模块，`go.mod` 里已经没有它。
 
 **渠道来自 `prerelease` 元数据，永远不来自 tag 文本。** 纯数字产品版本没有连字符，按连字符判渠道会把所有正式版误判。
 
