@@ -20,6 +20,8 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/adapters/pspnode"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/adapters/sqlstore"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/corefixtures"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/nodesync"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/transport/http/handler"
 )
@@ -133,6 +135,12 @@ func runRealNodeAgentContract(t *testing.T, migrate bool) {
 		}
 		sqlstore.ConfigureSecretKey("test-only-migration-contract-key")
 		defer sqlstore.ConfigureSecretKey("")
+		// THE CONVERSION GATE READS THE REVIEWED CATALOG, and this case builds its own
+		// composition rather than going through the application, so it has to supply
+		// one. Unconfigured is a refusal rather than a skip, so without this the case
+		// would be testing the refusal instead of the conversion.
+		sqlstore.ConfigureCoreCatalog(corefixtures.Static{})
+		defer sqlstore.ConfigureCoreCatalog(nil)
 		agentRow.PanelID = panel.ID
 		snapshot, err := repos.ServerMigration.Load(ctx, panel.ID)
 		if err != nil {
@@ -153,7 +161,7 @@ func runRealNodeAgentContract(t *testing.T, migrate bool) {
 			t.Fatal(err)
 		}
 	}
-	coordinator, err := nodesync.New(nodesync.Options{
+	coordinator, err := nodesync.New(nodesync.Options{CoreCatalog: corefixtures.Static{},
 		Desired: repos.NativeDesired, Agents: repos.NodeAgent, Issues: repos.NodeAgentIssue, Tasks: repos.NodeAgentTask, Users: repos.User,
 		Clients: repos.PSPClient, Nodes: repos.Node, Panels: repos.XUIPanel, Settings: repos.ScopedSettings,
 	})
@@ -211,7 +219,7 @@ func runRealNodeAgentContract(t *testing.T, migrate bool) {
 	if err != nil || observedAgent.ObservedCoreEngine != domain.NodeCoreXray {
 		t.Fatalf("real report core observation = (%+v, %v); output=%s", observedAgent, err, output)
 	}
-	adapter, err := pspnode.New(panel, coordinator, repos.Node, repos.NodeAgent)
+	adapter, err := pspnode.New(panel, coordinator, repos.Node, repos.NodeAgent, liveCoreCatalog{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -412,4 +420,14 @@ func (c *realNodeContractCapture) snapshot() []realNodeContractExchange {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return append([]realNodeContractExchange(nil), c.exchanges...)
+}
+
+// liveCoreCatalog is the core catalog this live contract case passes through. The
+// case is about client projection, so the document is deliberately empty and
+// nothing here reads a core release: what is being proved is that the adapter's
+// core dependency does not stand between a real agent report and the panel.
+type liveCoreCatalog struct{}
+
+func (liveCoreCatalog) Document(context.Context) (ports.CoreCatalogDocument, error) {
+	return ports.CoreCatalogDocument{SchemaVersion: 1, UpdatedAt: time.Now().UTC()}, nil
 }

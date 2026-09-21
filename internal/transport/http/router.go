@@ -93,8 +93,18 @@ type Deps struct {
 	// NodeMetrics serves the resource-telemetry API. Optional: absent, its
 	// routes are simply not registered, so a build without host telemetry does
 	// not answer 200 with an empty series.
-	NodeMetrics     *nodemetrics.Service
-	NodeReleases    ports.NodeReleaseCatalog
+	NodeMetrics  *nodemetrics.Service
+	NodeReleases ports.NodeReleaseCatalog
+	// NodeInstallTemplate renders a registered node's installation script from the
+	// release the Node project published. Optional in the same way the catalog is,
+	// except that its absence refuses the installation endpoints rather than
+	// leaving them unregistered: an operator who asks for a script must be told why
+	// they cannot have one.
+	NodeInstallTemplate ports.NodeInstallTemplate
+	// CoreCatalog is the reviewed catalog of proxy-core releases. Optional in the
+	// same sense as the others: absent, the core endpoints answer 503, which is
+	// what "the panel is running and its source is not" deserves.
+	CoreCatalog     ports.CoreCatalog
 	ServerMigration handler.ServerMigrationPreviewer
 	Async           AsyncDispatcher
 
@@ -631,6 +641,8 @@ func NewRouter(d Deps) stdhttp.Handler {
 			WithNativeAgentUpgrade(d.NodeAgentUpgrade).
 			WithNodeDiagnostics(d.NodeDiagnostics).
 			WithNodeReleaseCatalog(d.NodeReleases).
+			WithNodeInstallTemplate(d.NodeInstallTemplate).
+			WithCoreCatalog(d.CoreCatalog).
 			WithServerMigrationPreviewer(d.ServerMigration)
 		bootstrapPublic = handler.NewNodeBootstrapHandler(servers, d.Repos.ServerMigration, d.OperationGate)
 		// 3X-UI panel credentials live here — never operator.

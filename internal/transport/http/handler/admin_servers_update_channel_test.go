@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/corefixtures"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 	"github.com/gin-gonic/gin"
 )
@@ -137,7 +138,7 @@ func TestNativeCreateUpdateChannelDefaultsStableOrAcceptsExplicitChoice(t *testi
 	gin.SetMode(gin.TestMode)
 	for _, test := range []struct{ extra, want string }{{"", "stable"}, {`,"update_channel":"stable"`, "stable"}, {`,"update_channel":"beta"`, "beta"}} {
 		provisioning := &nativeProvisioningRepoStub{}
-		h := NewAdminServersHandler(nativeProvisioningPanelRepo{}, &nativeProvisioningPool{}, nil, nil, nil, nil).WithNativeAgentProvisioning(provisioning)
+		h := NewAdminServersHandler(nativeProvisioningPanelRepo{}, &nativeProvisioningPool{}, nil, nil, nil, nil).WithNativeAgentProvisioning(provisioning).WithCoreCatalog(corefixtures.Static{})
 		w := httptest.NewRecorder()
 		c, _ := gin.CreateTestContext(w)
 		c.Request = httptest.NewRequest(http.MethodPost, "https://panel.example/api/admin/servers", strings.NewReader(`{"panel_type":"psp","name":"node"`+test.extra+`}`))
@@ -165,7 +166,7 @@ func TestServerCreateUpdateChannelRejectsInvalidOrThirdPartyPreference(t *testin
 		`{"panel_type":"sui","name":"node","url":"https://original.invalid","api_token":"token","update_channel":"beta"}`,
 	} {
 		provisioning := &nativeProvisioningRepoStub{}
-		h := NewAdminServersHandler(nativeProvisioningPanelRepo{}, &nativeProvisioningPool{}, nil, nil, nil, nil).WithNativeAgentProvisioning(provisioning)
+		h := NewAdminServersHandler(nativeProvisioningPanelRepo{}, &nativeProvisioningPool{}, nil, nil, nil, nil).WithNativeAgentProvisioning(provisioning).WithCoreCatalog(corefixtures.Static{})
 		w := httptest.NewRecorder()
 		c, _ := gin.CreateTestContext(w)
 		c.Request = httptest.NewRequest(http.MethodPost, "https://panel.example/api/admin/servers", strings.NewReader(body))

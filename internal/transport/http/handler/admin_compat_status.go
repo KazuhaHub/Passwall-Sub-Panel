@@ -6,6 +6,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/version"
 )
 
@@ -26,6 +27,10 @@ import (
 type compatStatusResponse struct {
 	XUI compatRangeStatus `json:"xui"`
 	SUI compatRangeStatus `json:"sui"`
+	// CoreCatalog is the reviewed core catalog's own report. It sits beside the
+	// ranges because it is the same kind of fact: something the panel reads from
+	// outside itself, that can go stale, and that decides what it will offer.
+	CoreCatalog ports.CoreCatalogStatus `json:"core_catalog"`
 }
 
 type compatRangeStatus struct {
@@ -41,16 +46,31 @@ type compatRangeStatus struct {
 // CompatStatus is the read-only view. Registered on the staff group: reading the
 // panel's own compatibility state is diagnosis, not a break-glass action.
 func (h *AdminServersHandler) CompatStatus(c *gin.Context) {
-	c.JSON(http.StatusOK, buildCompatStatus(version.LastRefreshAt(), version.LastRefreshError()))
+	c.JSON(http.StatusOK, buildCompatStatus(version.LastRefreshAt(), version.LastRefreshError(), h.coreCatalogStatus()))
+}
+
+// coreCatalogStatus reads the reader's own report.
+//
+// A READER THAT CANNOT ANSWER SAYS SO rather than being reported as healthy: a
+// build whose catalog is permanently unavailable, and a test double that has no
+// state to report, both come out as "unavailable" — which is true of both and is
+// the answer an operator should act on.
+func (h *AdminServersHandler) coreCatalogStatus() ports.CoreCatalogStatus {
+	reporter, ok := h.coreCatalog.(ports.CoreCatalogReporter)
+	if !ok {
+		return ports.CoreCatalogStatus{Source: "unavailable"}
+	}
+	return reporter.Status()
 }
 
 // buildCompatStatus is pure so the shapes — including the awkward one, a range
 // that could not be refreshed and is being served from the last good fetch — can
 // be tested without a running panel.
-func buildCompatStatus(refreshedAt time.Time, refreshErr error) compatStatusResponse {
+func buildCompatStatus(refreshedAt time.Time, refreshErr error, core ports.CoreCatalogStatus) compatStatusResponse {
 	response := compatStatusResponse{
-		XUI: compatRangeStatus{MinVersion: version.ActiveMinXUI(), MaxTested: version.ActiveMaxTestedXUI()},
-		SUI: compatRangeStatus{MaxTested: version.ActiveMaxTestedSUI()},
+		XUI:         compatRangeStatus{MinVersion: version.ActiveMinXUI(), MaxTested: version.ActiveMaxTestedXUI()},
+		SUI:         compatRangeStatus{MaxTested: version.ActiveMaxTestedSUI()},
+		CoreCatalog: core,
 	}
 	if !refreshedAt.IsZero() {
 		at := refreshedAt.UTC()

@@ -3,11 +3,11 @@ package handler
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"time"
 
-	"github.com/KazuhaHub/passwall-node/deployment"
 	nodeprotocol "github.com/KazuhaHub/passwall-protocol/protocol"
 	"github.com/gin-gonic/gin"
 
@@ -21,6 +21,65 @@ import (
 // carry a Docker floating image tag through the installer package's shape check.
 // It is never rendered, never published and never compared to anything.
 const validationVersionPlaceholder = "1.0.0"
+
+// installTemplateUnverified is the ONE message for a publication that could not be
+// obtained or trusted, wherever it happens. It reads the same every time on
+// purpose: the operator cannot act on the difference between a signature that did
+// not verify and a template that did not download, and a message that named the
+// wrong one of the two would send them looking in the wrong place.
+// installTemplateNotPublished says the selected release carries no script. It is a
+// statement about that release, so the useful next step is a different release
+// rather than another attempt at this one.
+const installTemplateNotPublished = "the selected Node release does not publish an installation script; choose another release"
+
+const installTemplateUnverified = "the selected Node release's installation script could not be obtained or verified; choose another release or try again"
+
+// installTemplateRefused writes the refusal a failed render deserves and reports
+// whether it wrote one.
+//
+// THE TWO KINDS GET DIFFERENT STATUS CODES because they send an operator to
+// different places. A request that cannot be rendered is theirs to fix, so the
+// caller's own message — naming what it asked for — is the useful one. A
+// publication that could not be obtained or trusted is not theirs to fix, and
+// answering "invalid request" to a signature failure would send someone to re-check
+// an endpoint that is fine.
+func installTemplateRefused(c *gin.Context, err error, requestMessage string) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, ports.ErrInstallTemplateRequest) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": requestMessage})
+		return true
+	}
+	// CHECKED BEFORE THE GENERAL SOURCE FAILURE, which it also satisfies. A release
+	// that does not publish the script is not something to try again: the operator
+	// needs to pick another release, and telling them to retry sends them nowhere.
+	if errors.Is(err, ports.ErrInstallTemplateMissing) {
+		c.JSON(http.StatusBadGateway, gin.H{"error": installTemplateNotPublished})
+		return true
+	}
+	c.JSON(http.StatusBadGateway, gin.H{"error": installTemplateUnverified})
+	return true
+}
+
+// renderInstallScript and validateInstallScript are the ONE place the panel reaches
+// the template source. A handler built without one refuses here rather than
+// panicking inside a request — the same nil-tolerant shape as every other optional
+// dependency on this handler, except that this one has no useful degraded
+// behaviour: there is no script to hand over.
+func (h *AdminServersHandler) renderInstallScript(ctx context.Context, req ports.InstallTemplateRequest) (string, error) {
+	if h.nodeInstall == nil {
+		return "", fmt.Errorf("%w: no template source is configured", ports.ErrInstallTemplateSource)
+	}
+	return h.nodeInstall.Render(ctx, req)
+}
+
+func (h *AdminServersHandler) validateInstallScript(req ports.InstallTemplateRequest) error {
+	if h.nodeInstall == nil {
+		return fmt.Errorf("%w: no template source is configured", ports.ErrInstallTemplateSource)
+	}
+	return h.nodeInstall.Validate(req)
+}
 
 // The installation endpoints belong to the existing administrator-only server
 // group. They never mint an identity, rotate a verifier, or publish a secret URL.
@@ -168,12 +227,11 @@ func (h *AdminServersHandler) NodeInstallScript(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "an exact published Node version is required"})
 		return
 	}
-	script, err := deployment.RenderLinux(deployment.Options{
+	script, err := h.renderInstallScript(c.Request.Context(), ports.InstallTemplateRequest{
 		Endpoint: provisioning.Endpoint, AgentID: provisioning.AgentID,
 		Credential: provisioning.Credential, Version: req.Version,
 	})
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "a canonical HTTPS PSP endpoint and exact published Node version are required"})
+	if installTemplateRefused(c, err, "a canonical HTTPS PSP endpoint and exact published Node version are required") {
 		return
 	}
 	if !h.auditNodeCredentialRead(c, panel.ID, provisioning.AgentID) {
@@ -213,11 +271,10 @@ func (h *AdminServersHandler) NodeInstallationFiles(c *gin.Context) {
 	if validationVersion == "latest" || validationVersion == "beta" {
 		validationVersion = validationVersionPlaceholder
 	}
-	if _, err := deployment.RenderLinux(deployment.Options{
+	if installTemplateRefused(c, h.validateInstallScript(ports.InstallTemplateRequest{
 		Endpoint: provisioning.Endpoint, AgentID: provisioning.AgentID,
 		Credential: provisioning.Credential, Version: validationVersion,
-	}); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "a canonical HTTPS PSP endpoint and supported Node image selection are required"})
+	}), "a canonical HTTPS PSP endpoint and supported Node image selection are required") {
 		return
 	}
 	if !h.auditNodeCredentialRead(c, panel.ID, provisioning.AgentID) {

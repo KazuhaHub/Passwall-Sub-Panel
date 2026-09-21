@@ -14,6 +14,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/corefixtures"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/nodecompat"
 )
@@ -91,6 +92,9 @@ func TestNativeCoreUpgradeRequiresRestrictedConfirmationAndReturnsAccepted(t *te
 	handler := &AdminServersHandler{
 		repo: nativeCorePanelRepo{panel: &domain.XUIPanel{ID: 9, Kind: domain.PanelKindPSP}},
 		pool: fakeWebCertPool{client: client},
+		// THE CORE ENDPOINTS READ THE REVIEWED CATALOG, so a handler with none
+		// answers 503 and every case below would test the refusal instead of the gate.
+		coreCatalog: corefixtures.Static{},
 	}
 
 	request := func(body string) *httptest.ResponseRecorder {
@@ -126,6 +130,9 @@ func TestNativeCoreUpgradeRejectsLatest(t *testing.T) {
 	handler := &AdminServersHandler{
 		repo: nativeCorePanelRepo{panel: &domain.XUIPanel{ID: 9, Kind: domain.PanelKindPSP}},
 		pool: fakeWebCertPool{client: client},
+		// THE CORE ENDPOINTS READ THE REVIEWED CATALOG, so a handler with none
+		// answers 503 and every case below would test the refusal instead of the gate.
+		coreCatalog: corefixtures.Static{},
 	}
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
@@ -144,6 +151,9 @@ func TestNativeCoreSelectionListsAndAcceptsAuditedSingBox(t *testing.T) {
 	handler := &AdminServersHandler{
 		repo: nativeCorePanelRepo{panel: &domain.XUIPanel{ID: 9, Kind: domain.PanelKindPSP}},
 		pool: fakeWebCertPool{client: client},
+		// THE CORE ENDPOINTS READ THE REVIEWED CATALOG, so a handler with none
+		// answers 503 and every case below would test the refusal instead of the gate.
+		coreCatalog: corefixtures.Static{},
 	}
 
 	listRecorder := httptest.NewRecorder()
@@ -176,6 +186,9 @@ func TestNativeCoreSelectionRequiresExactRestrictionAcknowledgement(t *testing.T
 	handler := &AdminServersHandler{
 		repo: nativeCorePanelRepo{panel: &domain.XUIPanel{ID: 9, Kind: domain.PanelKindPSP}},
 		pool: fakeWebCertPool{client: client},
+		// THE CORE ENDPOINTS READ THE REVIEWED CATALOG, so a handler with none
+		// answers 503 and every case below would test the refusal instead of the gate.
+		coreCatalog: corefixtures.Static{},
 	}
 	request := func(body string) *httptest.ResponseRecorder {
 		recorder := httptest.NewRecorder()
@@ -233,6 +246,7 @@ func TestServerListSeparatesDesiredAndObservedNativeCoreWithoutPerRowQueries(t *
 	handler := &AdminServersHandler{
 		repo: nativeCoreListPanelRepo{panels: []*domain.XUIPanel{panel}},
 		pool: fakeWebCertPool{client: &nativeCoreClientStub{}}, agents: agents,
+		coreCatalog: corefixtures.Static{},
 	}
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
@@ -273,7 +287,10 @@ func TestNativeCompatibilityDTOStatesAreFailClosed(t *testing.T) {
 	panel := &domain.XUIPanel{ID: 9, Kind: domain.PanelKindPSP, Name: "native", PanelVersion: "v0.2.0"}
 	// (the edge gate was removed: readiness and admission follow the decision)
 	// (the edge gate was removed: readiness and admission follow the decision)
-	handler := &AdminServersHandler{pool: fakeWebCertPool{client: &nativeCoreClientStub{}}}
+	handler := &AdminServersHandler{
+		pool:        fakeWebCertPool{client: &nativeCoreClientStub{}},
+		coreCatalog: corefixtures.Static{},
+	}
 	observedAt := time.Date(2026, 9, 16, 13, 0, 0, 0, time.UTC)
 	for _, test := range []struct {
 		name         string
@@ -317,7 +334,10 @@ func TestNativeUpgradeReadinessFollowsTheDecision(t *testing.T) {
 		ObservedCapabilities:    nodeprotocol.AgentUpgradeCapabilities(),
 		ProtocolObservedAt:      &observedAt,
 	}
-	handler := &AdminServersHandler{pool: fakeWebCertPool{client: &nativeCoreClientStub{}}}
+	handler := &AdminServersHandler{
+		pool:        fakeWebCertPool{client: &nativeCoreClientStub{}},
+		coreCatalog: corefixtures.Static{},
+	}
 	policy := nodecompat.Policy(nodecompat.DefaultObservationAge())
 
 	// (the edge gate was removed: readiness and admission follow the decision)

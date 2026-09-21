@@ -15,6 +15,7 @@ import (
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/adapters/sqlstore"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/corefixtures"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 )
 
@@ -63,15 +64,20 @@ func newConfigAppliedFixture(t *testing.T) *configAppliedFixture {
 	if err := repos.Node.Create(t.Context(), node); err != nil {
 		t.Fatal(err)
 	}
+	// A CONFORMING AGENT ROW CARRIES ITS CORE, and the config body may not invent
+	// one: the reviewed catalog is not read on this path, so a row without a release
+	// is refused rather than silently filled from whatever the panel thinks is
+	// current.
 	agent := &domain.NodeAgent{
 		AgentID: "agt_config_ack", PanelID: node.PanelID, Epoch: 7,
-		CredentialSHA256: strings.Repeat("a", 64),
+		CredentialSHA256:  strings.Repeat("a", 64),
+		DesiredCoreEngine: domain.NodeCoreXray, DesiredCoreVersion: "26.6.27",
 	}
 	if err := repos.NodeAgent.Create(t.Context(), agent); err != nil {
 		t.Fatal(err)
 	}
 	f := &configAppliedFixture{db: db, repos: &repos, agent: agent, node: node, now: now}
-	f.service, err = New(Options{
+	f.service, err = New(Options{CoreCatalog: corefixtures.Static{},
 		Desired: repos.NativeDesired, Agents: repos.NodeAgent, Issues: repos.NodeAgentIssue, Tasks: repos.NodeAgentTask,
 		Users: repos.User, Clients: repos.PSPClient, Nodes: repos.Node, Settings: repos.ScopedSettings,
 		Now: func() time.Time { return f.now },

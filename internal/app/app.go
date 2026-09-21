@@ -17,6 +17,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/adapters/acme"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/adapters/localefs"
 	paneladapter "github.com/KazuhaHub/passwall-sub-panel/internal/adapters/panel"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/adapters/pninstall"
 	pspnodeadapter "github.com/KazuhaHub/passwall-sub-panel/internal/adapters/pspnode"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/adapters/sqlstore"
 	suiadapter "github.com/KazuhaHub/passwall-sub-panel/internal/adapters/sui"
@@ -279,10 +280,31 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	if err != nil {
 		return nil, fmt.Errorf("node metrics: %w", err)
 	}
+	// THE RELEASE CATALOG AND THE CORE CATALOG ARE BUILT FIRST, before anything that
+	// reads them: the node-sync service takes the core catalog, the PSP panel factory
+	// closure captures it, and a name declared below its first use is not in scope.
+	// Both need nothing but the stamped version, so nothing is being reordered.
+	nodeReleases, err := newNodeReleaseCatalog()
+	if err != nil {
+		return nil, err
+	}
+	coreCatalog, err := newCoreCatalog(nodeReleases, cfg.DataDir)
+	if err != nil {
+		return nil, err
+	}
+	// THE OFFLINE CONVERSION GATE READS THE SAME CATALOG. It lives inside the store
+	// adapter, where it is the last check before a converted server is persisted, and
+	// it is configured here rather than passed through NewRepos because that
+	// constructor has a dozen callers that have no business naming a core catalog.
+	sqlstore.ConfigureCoreCatalog(coreCatalog)
 	nativeSync, err := nodesync.New(nodesync.Options{
 		Desired: repos.NativeDesired, Agents: repos.NodeAgent, Issues: repos.NodeAgentIssue, Tasks: repos.NodeAgentTask, Users: repos.User,
 		Clients: repos.PSPClient, Nodes: repos.Node, Settings: repos.ScopedSettings, Panels: repos.XUIPanel,
-		Host: nodeMetrics,
+		// The node-sync path re-checks each node's configured core against the
+		// review that is current now, which is what stops a withdrawn release from
+		// being dispatched to the fleet.
+		CoreCatalog: coreCatalog,
+		Host:        nodeMetrics,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("native node sync: %w", err)
@@ -314,7 +336,7 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 		return nil, fmt.Errorf("register S-UI adapter: %w", err)
 	}
 	if err := panelRegistry.Register(domain.PanelKindPSP, func(p *domain.Panel) (ports.PanelClient, error) {
-		return pspnodeadapter.New(p, nativeSync, repos.Node, repos.NodeAgent)
+		return pspnodeadapter.New(p, nativeSync, repos.Node, repos.NodeAgent, coreCatalog)
 	}); err != nil {
 		return nil, fmt.Errorf("register PSP native adapter: %w", err)
 	}
@@ -517,7 +539,11 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	trafficSvc.SetGeoStreakStore(geoStreaks)
 
 	// --- transport layer ---
-	nodeReleases, err := newNodeReleaseCatalog()
+	// The Node installation template is fetched from the release that published it
+	// and verified against a compiled-in key — which is why an unusable key is a
+	// build defect and not a runtime condition: nothing here can recover from it,
+	// and a panel that started anyway would hand out unverified install scripts.
+	nodeInstall, err := pninstall.New(pninstall.RendererOptions{})
 	if err != nil {
 		return nil, err
 	}
@@ -565,9 +591,12 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 		NodeAgentUpgrade: nativeUpgrade,
 		NodeDiagnostics:  nodeDiagnostics,
 		NodeReleases:     nodeReleases,
-		ServerMigration:  servermigration.New(repos.ServerMigration),
-		SubPerIPPerMin:   sysSettings.SubPerIPPerMin,
-		LoginPerIPPerMin: sysSettings.LoginPerIPPerMin,
+
+		NodeInstallTemplate: nodeInstall,
+		CoreCatalog:         coreCatalog,
+		ServerMigration:     servermigration.New(repos.ServerMigration, coreCatalog),
+		SubPerIPPerMin:      sysSettings.SubPerIPPerMin,
+		LoginPerIPPerMin:    sysSettings.LoginPerIPPerMin,
 	})
 
 	// Health check ticks more often than reconcile because a "node is

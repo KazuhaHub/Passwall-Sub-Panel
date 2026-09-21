@@ -5,9 +5,11 @@ package acceptance_test
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/tls"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
@@ -30,12 +32,15 @@ import (
 	"time"
 
 	paneladapter "github.com/KazuhaHub/passwall-sub-panel/internal/adapters/panel"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/adapters/pninstall"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/adapters/pspnode"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/adapters/sqlstore"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/adapters/xui"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/corefixtures"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/operationgate"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/panelpath"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/releaseasset"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/nodesync"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/servermigration"
@@ -49,22 +54,111 @@ const (
 	nodeUnit    = "/etc/systemd/system/passwall-node.service"
 	installLock = "/opt/.passwall-node-install.lock"
 	ownerMarker = nodeRoot + "/.psp-disposable-reinstall-owner"
-	// THE FIRST RELEASE UNDER THE CURRENT SCHEME, and a real published one: this
-	// suite downloads and verifies the actual archive, so the identity has to name
-	// a release that exists. It used to name the published beta4, which the panel
-	// cannot read any more — a legacy version is not a version, so the bootstrap
-	// endpoint refused it before anything was installed.
-	nodeVersion = "4.0.0"
-	// The release/4.0.0 tag peels to 5fd84eca5b1ffbc5d999979ea6b3ec377b0c6d33.
+	// A REAL PUBLISHED RELEASE, because this suite verifies the actual archive and
+	// the panel installs from real release assets. It has to be one that publishes
+	// what the install path reads: the tag a release is addressed by and the
+	// template it renders are both release assets, and no release before 4.0.1.1
+	// carries them.
+	nodeVersion = "4.0.1.1"
+	// The release/4.0.1.1 tag peels to ea61b1d745d6c79120b0c04a920c5fcb29d573da.
 	// The publisher stamps short7; the daemon reports version.String(), not a bare
 	// version. Pin the real identity rather than accepting an arbitrary suffix.
-	nodeReportedIdentity = "4.0.0 (5fd84ec)"
+	//
+	// IT IS THE FIRST RELEASE THAT CARRIES WHAT THIS CASE INSTALLS FROM: the release
+	// before it publishes no installation template, so this case could not run
+	// against a real asset at all until this one existed.
+	nodeReportedIdentity = "4.0.1.1 (ea61b1d)"
 	coreVersion          = "26.6.27"
 )
 
 // These fixture pins select a reviewed release, not a floating latest build.
 // Production installer still obtains/verifies the published checksum/archive.
 type pinnedCatalog struct{}
+
+// templateRepoEnv names the Passwall Node checkout the workflow provides, so the
+// installer can be published as a signed asset without a release that carries one.
+const templateRepoEnv = "PSP_NODE_TEMPLATE_REPO"
+
+// fixtureInstallTemplate serves the pinned revision's installer AS A SIGNED
+// RELEASE ASSET, locally.
+//
+// WHY IT IS PACKAGED RATHER THAN STUBBED. The panel no longer compiles an
+// installer in: the setup path fetches the template a release publishes, verifies
+// the manifest's detached signature and renders it. A stub returning a script
+// would take this whole case out of that path, and the case exists to install a
+// real node on a real host from the exact script an operator would run. So the
+// PRODUCTION reader is used — internal/adapters/pninstall, with its own download,
+// verification and substitution — and only the origin is local.
+//
+// THE KEY IS A FIXTURE KEY because the production private key is a release
+// secret; the renderer takes the verification key as a seam for exactly this.
+//
+// THE PACKAGE STILL COMES FROM THE REAL RELEASE. Only the template is served
+// here; the script it renders addresses
+// github.com/KazuhaHub/Passwall-Node/releases/download/<tag>/…, so the archive,
+// its checksum manifest and its signature are the published ones and this case
+// keeps checking them. The two verifications are different things and both
+// matter: that a template can be published and rendered at all, and that a
+// published release is intact.
+//
+// THE REVISION IS PINNED BY THE WORKFLOW, not by this file. It must be one whose
+// installer addresses a release by TAG — releases before that change build the
+// download path out of the version, which is a path no product-scheme release
+// lives at, so they cannot install anything this panel offers.
+func fixtureInstallTemplate(t *testing.T) ports.NodeInstallTemplate {
+	t.Helper()
+	checkout := os.Getenv(templateRepoEnv)
+	if checkout == "" {
+		// THE REAL RELEASE, WHICH IS THE POINT OF THIS CASE. A release publishes the
+		// template now, so the production reader is pointed at the real origin and
+		// what this installs from is what an operator installs from. Nothing about
+		// the path below changes: same reader, same compiled key, same substitution.
+		renderer, err := pninstall.New(pninstall.RendererOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return renderer
+	}
+	// THE INJECTION REMAINS, FOR A TEMPLATE NO RELEASE CARRIES YET: a change to the
+	// installer is worth being able to run through this case before it is published.
+	// CI does not set the variable, so what CI exercises is the released asset.
+	body, err := os.ReadFile(filepath.Join(checkout, "deployment", "install.sh"))
+	if err != nil {
+		t.Fatalf("read the pinned installer from %s: %v", checkout, err)
+	}
+	public, private, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest := sha256.Sum256(body)
+	manifest := fmt.Sprintf("%s  %s\n", hex.EncodeToString(digest[:]), pninstall.TemplateAsset)
+	assets := map[string][]byte{
+		pninstall.TemplateAsset:     body,
+		releaseasset.ChecksumAsset:  []byte(manifest),
+		releaseasset.SignatureAsset: []byte(base64.StdEncoding.EncodeToString(ed25519.Sign(private, []byte(manifest))) + "\n"),
+	}
+	// ANY TAG IS SERVED: the tag is the release being installed, which this fixture
+	// does not choose. Only the template differs between releases; the archive is
+	// fetched from the real release by the rendered script.
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		payload, ok := assets[r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1:]]
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = w.Write(payload)
+	}))
+	t.Cleanup(server.Close)
+	renderer, err := pninstall.New(pninstall.RendererOptions{
+		HTTPClient: server.Client(),
+		BaseURL:    server.URL + "/download/",
+		PublicKey:  public,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return renderer
+}
 
 func (pinnedCatalog) List(context.Context) (ports.NodeReleaseList, error) {
 	return ports.NodeReleaseList{Releases: []ports.NodeReleaseCatalogEntry{{Version: nodeVersion, Channel: "testing", Methods: []string{"linux"}, Platforms: []ports.NodeReleasePlatform{{OS: "linux", Arch: "amd64"}, {OS: "linux", Arch: "arm64"}}}}}, nil
@@ -95,6 +189,13 @@ func TestDisposableSystemdNodeReinstall(t *testing.T) {
 	gin.SetMode(gin.ReleaseMode)
 	sqlstore.ConfigureSecretKey("disposable-acceptance-only-strong-encryption-key-9c6376875de2")
 	defer sqlstore.ConfigureSecretKey("")
+	// THIS FIXTURE BUILDS ITS OWN COMPOSITION rather than going through the
+	// application, so it has to supply the reviewed core catalog by hand: the
+	// offline-conversion gate reads it, and unconfigured is a refusal rather than a
+	// skip. The releases are the ones the cases name, including the core version
+	// this fixture installs.
+	sqlstore.ConfigureCoreCatalog(corefixtures.Static{})
+	defer sqlstore.ConfigureCoreCatalog(nil)
 	for _, standardOldUnit := range []bool{false, true} {
 		f := newFixture(t, ctx)
 		func() {
@@ -221,17 +322,17 @@ func newFixture(t *testing.T, ctx context.Context) *fixture {
 	attachment := domain.PSPClientInbound{ClientID: f.clientID, NodeID: node.ID, State: domain.ClientApplyApplied, AppliedVersion: 1, AppliedEmail: client.Email, AppliedUUID: client.UUID, AppliedPassword: client.Password}
 	must(t, f.repos.PSPClient.SetInbounds(ctx, f.clientID, []domain.PSPClientInbound{attachment}), "attach original client")
 	must(t, f.repos.PSPClient.UpdateInboundState(ctx, attachment), "record old applied credentials")
-	f.coordinator, err = nodesync.New(nodesync.Options{Desired: f.repos.NativeDesired, Agents: f.repos.NodeAgent, Issues: f.repos.NodeAgentIssue, Tasks: f.repos.NodeAgentTask, Users: f.repos.User, Clients: f.repos.PSPClient, Nodes: f.repos.Node, Settings: f.repos.ScopedSettings, Panels: f.repos.XUIPanel})
+	f.coordinator, err = nodesync.New(nodesync.Options{CoreCatalog: corefixtures.Static{}, Desired: f.repos.NativeDesired, Agents: f.repos.NodeAgent, Issues: f.repos.NodeAgentIssue, Tasks: f.repos.NodeAgentTask, Users: f.repos.User, Clients: f.repos.PSPClient, Nodes: f.repos.Node, Settings: f.repos.ScopedSettings, Panels: f.repos.XUIPanel})
 	must(t, err, "production node coordinator")
 	registry := paneladapter.NewRegistry()
 	must(t, registry.Register(domain.PanelKind3XUI, func(p *domain.Panel) (ports.PanelClient, error) { return xui.New(p) }), "old adapter registry")
 	must(t, registry.Register(domain.PanelKindPSP, func(p *domain.Panel) (ports.PanelClient, error) {
-		return pspnode.New(p, f.coordinator, f.repos.Node, f.repos.NodeAgent)
+		return pspnode.New(p, f.coordinator, f.repos.Node, f.repos.NodeAgent, corefixtures.Static{})
 	}), "native adapter registry")
 	pool, err := paneladapter.NewPool(ctx, f.repos.XUIPanel, registry)
 	must(t, err, "production adapter pool")
 	gate := operationgate.New()
-	servers := handler.NewAdminServersHandler(f.repos.XUIPanel, pool, f.repos.Node, f.repos.Audit, nil, nil).WithNativeAgentProvisioning(f.repos.NativeAgentProvisioning).WithNodeAgents(f.repos.NodeAgent).WithNodeSettings(f.repos.Settings).WithNodeReleaseCatalog(pinnedCatalog{}).WithServerMigrationPreviewer(servermigration.New(f.repos.ServerMigration))
+	servers := handler.NewAdminServersHandler(f.repos.XUIPanel, pool, f.repos.Node, f.repos.Audit, nil, nil).WithNativeAgentProvisioning(f.repos.NativeAgentProvisioning).WithNodeAgents(f.repos.NodeAgent).WithNodeSettings(f.repos.Settings).WithNodeReleaseCatalog(pinnedCatalog{}).WithNodeInstallTemplate(fixtureInstallTemplate(t)).WithServerMigrationPreviewer(servermigration.New(f.repos.ServerMigration, corefixtures.Static{}))
 	bootstrap := handler.NewNodeBootstrapHandler(servers, f.repos.ServerMigration, gate)
 	auth, err := handler.NewNodeBearerAuthenticator(f.repos.NodeAgent)
 	must(t, err, "production Bearer authenticator")
@@ -282,7 +383,7 @@ func (f *fixture) mint(migration bool) string {
 	action := "node-install-command"
 	if migration {
 		action = "node-migration-command"
-		preview, err := servermigration.New(f.repos.ServerMigration).Preview(f.ctx, f.panelID, coreVersion, false)
+		preview, err := servermigration.New(f.repos.ServerMigration, corefixtures.Static{}).Preview(f.ctx, f.panelID, coreVersion, false)
 		must(f.t, err, "migration preview")
 		if !preview.CanMigrate {
 			f.t.Fatal("fixture unexpectedly blocked")

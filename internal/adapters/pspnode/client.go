@@ -10,8 +10,6 @@ import (
 	"sort"
 	"sync"
 
-	"github.com/KazuhaHub/passwall-node/corecatalog"
-
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 )
@@ -21,19 +19,26 @@ type Client struct {
 	reader  ports.NativePanelSnapshotReader
 	nodes   ports.NodeRepo
 	agents  ports.NodeAgentRepo
+	// catalog is the reviewed core releases this node may be offered. It is
+	// process-wide and read-only, but it is an input rather than a compiled-in
+	// table because the review is published, not built here.
+	catalog ports.CoreCatalog
 
 	allocationMu sync.Mutex
 	nextInbound  int
 }
 
-func New(panel *domain.Panel, reader ports.NativePanelSnapshotReader, nodes ports.NodeRepo, agents ports.NodeAgentRepo) (*Client, error) {
+func New(panel *domain.Panel, reader ports.NativePanelSnapshotReader, nodes ports.NodeRepo, agents ports.NodeAgentRepo, catalog ports.CoreCatalog) (*Client, error) {
 	if panel == nil || panel.ID == 0 {
 		return nil, errors.New("PSP native panel definition with a persisted ID is required")
 	}
 	if reader == nil || nodes == nil || agents == nil {
 		return nil, errors.New("PSP native snapshot reader, node repository and agent repository are required")
 	}
-	return &Client{panelID: panel.ID, reader: reader, nodes: nodes, agents: agents}, nil
+	if catalog == nil {
+		return nil, errors.New("PSP native core catalog is required")
+	}
+	return &Client{panelID: panel.ID, reader: reader, nodes: nodes, agents: agents, catalog: catalog}, nil
 }
 
 func (c *Client) Capabilities() []ports.PanelCapability {
@@ -58,15 +63,16 @@ func (c *Client) GetCoreVersionList(ctx context.Context) ([]string, error) {
 	return c.GetCoreVersionListForEngine(ctx, domain.NodeCoreXray)
 }
 
-func (c *Client) GetCoreVersionListForEngine(_ context.Context, engine domain.NodeCoreEngine) ([]string, error) {
+func (c *Client) GetCoreVersionListForEngine(ctx context.Context, engine domain.NodeCoreEngine) ([]string, error) {
 	engine = domain.NormalizeNodeCoreEngine(engine)
 	if !engine.Valid() {
 		return nil, errors.New("unsupported native core engine")
 	}
-	releases, err := corecatalog.List(string(engine))
+	document, err := c.catalog.Document(ctx)
 	if err != nil {
 		return nil, err
 	}
+	releases := document.List(string(engine))
 	versions := make([]string, len(releases))
 	for index, release := range releases {
 		versions[index] = release.Version
@@ -75,7 +81,11 @@ func (c *Client) GetCoreVersionListForEngine(_ context.Context, engine domain.No
 }
 
 func (c *Client) InstallCore(ctx context.Context, version string) error {
-	release, err := corecatalog.Resolve(string(domain.NodeCoreXray), version)
+	document, err := c.catalog.Document(ctx)
+	if err != nil {
+		return err
+	}
+	release, err := document.Resolve(string(domain.NodeCoreXray), version)
 	if err != nil {
 		return err
 	}
@@ -87,7 +97,11 @@ func (c *Client) InstallCoreEngine(ctx context.Context, engine domain.NodeCoreEn
 	if !engine.Valid() {
 		return errors.New("unsupported native core engine")
 	}
-	release, err := corecatalog.Resolve(string(engine), version)
+	document, err := c.catalog.Document(ctx)
+	if err != nil {
+		return err
+	}
+	release, err := document.Resolve(string(engine), version)
 	if err != nil {
 		return err
 	}

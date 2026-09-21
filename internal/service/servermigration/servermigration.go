@@ -10,27 +10,38 @@ import (
 	"io"
 	"strings"
 
-	"github.com/KazuhaHub/passwall-node/corecatalog"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 )
 
-type Service struct{ repo ports.ServerMigrationRepo }
+type Service struct {
+	repo    ports.ServerMigrationRepo
+	catalog ports.CoreCatalog
+}
 
-func New(repo ports.ServerMigrationRepo) *Service { return &Service{repo: repo} }
+func New(repo ports.ServerMigrationRepo, catalog ports.CoreCatalog) *Service {
+	return &Service{repo: repo, catalog: catalog}
+}
 
-// ValidateCore uses the same published catalog as the PN runtime. An explicit
-// restricted acknowledgment is a deliberate compatibility choice, not a claim
-// that its clients are broadly compatible.
-func ValidateCore(version string, allowRestricted bool) (corecatalog.Release, error) {
-	release, err := corecatalog.Resolve(string(domain.NodeCoreXray), version)
+// validateCore uses the same published catalog the node runtime reads. An explicit
+// restricted acknowledgment is a deliberate compatibility choice, not a claim that
+// its clients are broadly compatible.
+//
+// THE TIER SET HERE IS NOT THE SAME AS "NOT RECOMMENDED". `config_verified` is
+// absent deliberately: its name says the configuration was exercised, not that a
+// client was observed connecting, and every install gate in the panel requires the
+// handshake evidence as well. The Node project refuses a selectable release
+// without config evidence; this refuses one without handshake evidence, and the two
+// together are what "reviewed" means.
+func validateCore(document ports.CoreCatalogDocument, version string, allowRestricted bool) (ports.CoreRelease, error) {
+	release, err := document.Resolve(string(domain.NodeCoreXray), version)
 	if err != nil {
-		return corecatalog.Release{}, fmt.Errorf("%w: core_not_verified", domain.ErrValidation)
+		return ports.CoreRelease{}, fmt.Errorf("%w: core_not_verified", domain.ErrValidation)
 	}
 	if release.RequiresConfirmation && !allowRestricted {
 		return release, fmt.Errorf("%w: core_ack_required", domain.ErrValidation)
 	}
-	if release.Tier != corecatalog.TierRecommended && release.Tier != corecatalog.TierVerified && release.Tier != corecatalog.TierRestricted {
+	if release.Tier != domain.CoreTierRecommended && release.Tier != domain.CoreTierVerified && release.Tier != domain.CoreTierRestricted {
 		return release, fmt.Errorf("%w: core_not_verified", domain.ErrValidation)
 	}
 	if !release.Evidence.SourceAudited || !release.Evidence.ConfigTested || !release.Evidence.HandshakeTested {
@@ -56,7 +67,14 @@ func (s *Service) Preview(ctx context.Context, panelID int64, coreVersion string
 	if snapshot.Panel.ID != panelID {
 		return nil, fmt.Errorf("%w: server scope mismatch", domain.ErrValidation)
 	}
-	recommended, err := corecatalog.Recommended(string(domain.NodeCoreXray))
+	// ONE READ FOR THE WHOLE PREVIEW. Both the default and the validation come from
+	// the same document, so a refresh landing between them cannot make the preview
+	// report a recommended version that its own validation then refuses.
+	document, err := s.catalog.Document(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("core catalog unavailable: %w", err)
+	}
+	recommended, err := document.Recommended(string(domain.NodeCoreXray))
 	if err != nil {
 		return nil, fmt.Errorf("core catalog unavailable: %w", err)
 	}
@@ -73,7 +91,7 @@ func (s *Service) Preview(ctx context.Context, panelID int64, coreVersion string
 		NodeCount: len(snapshot.Nodes), ClientCount: len(snapshot.Clients),
 		Blockers: snapshot.Blockers(), Warnings: append(snapshot.Warnings(), domain.MigrationIssue{Code: "managed_scope"}),
 	}
-	release, coreErr := ValidateCore(coreVersion, allowRestrictedReality)
+	release, coreErr := validateCore(document, coreVersion, allowRestrictedReality)
 	if release.Version != "" {
 		preview.CoreVersion, preview.CoreRequiresAck = release.Version, release.RequiresConfirmation
 		// Native desired config uses a canonical acknowledgement: it must be
@@ -99,7 +117,7 @@ func (s *Service) Preview(ctx context.Context, panelID int64, coreVersion string
 		}
 	}
 	if explicit {
-		previous, normalizeErr := corecatalog.NormalizeVersion(snapshot.Panel.XrayVersion)
+		previous, normalizeErr := domain.NormalizeCoreVersion(snapshot.Panel.XrayVersion)
 		if normalizeErr != nil || previous != preview.CoreVersion {
 			preview.Warnings = append(preview.Warnings, domain.MigrationIssue{Code: "core_version_changed"})
 		}

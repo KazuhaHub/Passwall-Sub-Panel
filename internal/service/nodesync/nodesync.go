@@ -16,11 +16,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/KazuhaHub/passwall-node/corecatalog"
 	nodeprotocol "github.com/KazuhaHub/passwall-protocol/protocol"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/keyedmutex"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/log"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/nodemetrics"
 )
@@ -41,6 +41,8 @@ type Service struct {
 	nodes    ports.NodeRepo
 	settings ports.ScopedSettings
 	panels   ports.XUIPanelRepo
+	// coreCatalog is the review the configured core is re-checked against.
+	coreCatalog ports.CoreCatalog
 
 	agentLocks keyedmutex.Map[string]
 
@@ -77,6 +79,10 @@ type Options struct {
 	Nodes    ports.NodeRepo
 	Settings ports.ScopedSettings
 	Panels   ports.XUIPanelRepo
+	// CoreCatalog resolves the node's configured core release against the review
+	// that is current now. Required: a config body that cannot be checked against
+	// the review is not one the panel should dispatch.
+	CoreCatalog ports.CoreCatalog
 	// Host is optional: a build without a metrics repository simply does not
 	// ingest telemetry, and the envelope carries no cadence for it.
 	Host *nodemetrics.Service
@@ -86,7 +92,7 @@ type Options struct {
 func New(options Options) (*Service, error) {
 	if options.Desired == nil || options.Agents == nil || options.Issues == nil || options.Tasks == nil || options.Users == nil ||
 		options.Clients == nil || options.Nodes == nil || options.Settings == nil {
-		return nil, errors.New("nodesync: desired, agents, issues, tasks, users, clients, nodes and settings are required")
+		return nil, errors.New("nodesync: desired, agents, issues, tasks, users, clients, nodes, settings are required")
 	}
 	now := options.Now
 	if now == nil {
@@ -95,7 +101,7 @@ func New(options Options) (*Service, error) {
 	return &Service{
 		desired: options.Desired, agents: options.Agents, issues: options.Issues, tasks: options.Tasks, users: options.Users,
 		clients: options.Clients, nodes: options.Nodes, settings: options.Settings,
-		panels:  options.Panels,
+		panels: options.Panels, coreCatalog: options.CoreCatalog,
 		reports: make(map[string]receivedFullReport),
 		anchors: make(map[int64]nodeprotocol.ClientCounters), now: now,
 		grants: make(map[string]map[nodeprotocol.ClientKey]int64),
@@ -146,7 +152,21 @@ func (s *Service) Sync(ctx context.Context, report nodeprotocol.NodeReport) (nod
 		return nodeprotocol.SyncResponse{}, err
 	}
 
-	configBody, err := buildConfig(snapshot, agent)
+	// THE CONFIGURED CORE IS RE-CHECKED AGAINST THE REVIEW THAT IS CURRENT NOW.
+	//
+	// It runs HERE, after the report has been ingested, and that placement is the
+	// requirement rather than an accident: a node's reports and its task receipts
+	// are the record of what it has done, and a stale core selection must not cost
+	// the panel that record. Everything below this line is outbound.
+	//
+	// THE READ IS CACHED. The reader refreshes on its own TTL and de-duplicates
+	// concurrent refreshes, so the hot path takes a lock and compares a time; it
+	// does not reach the origin.
+	coreDocument, err := s.coreCatalog.Document(ctx)
+	if err != nil {
+		return nodeprotocol.SyncResponse{}, fmt.Errorf("nodesync: %w", err)
+	}
+	configBody, err := buildConfig(snapshot, agent, coreDocument)
 	if err != nil {
 		return nodeprotocol.SyncResponse{}, err
 	}
@@ -262,35 +282,72 @@ func (s *Service) mint(ctx context.Context, agent *domain.NodeAgent, stream doma
 
 type listenerConfig = domain.NodeConfigIntent
 
-func buildConfig(snapshot *ports.NativeDesiredSnapshot, agent *domain.NodeAgent) (nodeprotocol.ConfigBody, error) {
+// errSelectionWithdrawn means the release this node is configured for is no longer
+// one the review offers, or no longer one whose restriction acknowledgement matches.
+var errSelectionWithdrawn = errors.New("nodesync: the configured core release is no longer an offer the review supports")
+
+// buildConfig describes the listener set and the core selection this agent is
+// configured for, RE-CHECKED AGAINST THE REVIEW THAT IS CURRENT NOW.
+//
+// WHAT THIS IS: the panel stops dispatching a core release the review has since
+// withdrawn, and a release whose restriction acknowledgement no longer matches what
+// the node is configured with. The check reads the reviewed catalog through its
+// port — the same review the selector offers from and the node runtime reads — so
+// a release pulled for a failed handshake stops being pushed to the fleet without
+// waiting for a panel release.
+//
+// WHAT THIS IS NOT, AND THE DISTINCTION MATTERS: it is NOT revocation. A node that
+// already received and applied the selection keeps running it. No configuration is
+// withdrawn from a running node, nothing is uninstalled, and a node that is offline
+// while the withdrawal happens will keep its core until it next syncs and is
+// refused. This stops the choice from spreading and stops it from being re-sent; it
+// does not take it back. Calling it a runtime revocation mechanism would promise
+// something the panel cannot do.
+//
+// WHY IT IS NOT MORE THAN THAT. The protocol has no "there is no config for you"
+// answer that is valid for an agent with no local bytes — an unchanged segment is
+// rejected by the agent when its etag differs from what it applied, and the zero
+// core selection means "use the recommended release from YOUR catalog", which would
+// silently move a node to a different core rather than decline to move it. So the
+// refusal is a failed sync: the node keeps what it has, the operator sees why, and
+// nothing is dispatched in the meantime.
+func buildConfig(snapshot *ports.NativeDesiredSnapshot, agent *domain.NodeAgent, catalog ports.CoreCatalogDocument) (nodeprotocol.ConfigBody, error) {
 	engine := domain.NodeCoreXray
 	version := ""
 	allowRestricted := false
 	if agent != nil {
 		engine = domain.NormalizeNodeCoreEngine(agent.DesiredCoreEngine)
-		version = agent.DesiredCoreVersion
+		version = strings.TrimSpace(agent.DesiredCoreVersion)
 		allowRestricted = agent.AllowRestrictedReality
 	}
 	if !engine.Valid() {
 		return nodeprotocol.ConfigBody{}, fmt.Errorf("nodesync: desired core engine %q is unsupported", engine)
 	}
-	var release corecatalog.Release
-	var err error
-	if version == "" {
-		release, err = corecatalog.Recommended(string(engine))
-	} else {
-		release, err = corecatalog.Resolve(string(engine), version)
-	}
+	normalized, err := domain.NormalizeCoreVersion(version)
 	if err != nil {
-		return nodeprotocol.ConfigBody{}, fmt.Errorf("nodesync: resolve desired core: %w", err)
+		return nodeprotocol.ConfigBody{}, fmt.Errorf("nodesync: no canonical desired core release is configured for this agent: %w", err)
+	}
+
+	// THE REVIEW MAY HAVE MOVED SINCE THE OPERATOR CHOSE. Resolve answers from the
+	// selectable set, so a release that has been withdrawn or removed fails here —
+	// and a release the review now considers restricted, or no longer considers
+	// restricted, fails the comparison below.
+	release, err := catalog.Resolve(string(engine), normalized)
+	if err != nil {
+		return nodeprotocol.ConfigBody{}, fmt.Errorf("%w: %s %s: %w", errSelectionWithdrawn, engine, normalized, err)
 	}
 	if release.RequiresConfirmation != allowRestricted {
-		return nodeprotocol.ConfigBody{}, fmt.Errorf("nodesync: desired core %s restriction acknowledgement mismatch", release.Version)
+		return nodeprotocol.ConfigBody{}, fmt.Errorf("%w: %s %s now requires confirmation=%t and this node is configured with %t",
+			errSelectionWithdrawn, engine, normalized, release.RequiresConfirmation, allowRestricted)
 	}
+	log.Warn("core selection refused: the reviewed catalog no longer supports it",
+		"agent_id", agent.AgentID, "engine", string(engine), "version", normalized,
+		"tier", release.Tier, "requires_confirmation", release.RequiresConfirmation)
+
 	body := nodeprotocol.ConfigBody{
 		Listeners: make([]nodeprotocol.Listener, 0, len(snapshot.Nodes)),
 		Core: nodeprotocol.CoreSelection{
-			Engine: string(engine), Version: release.Version, AllowRestrictedReality: allowRestricted,
+			Engine: string(engine), Version: normalized, AllowRestrictedReality: allowRestricted,
 		},
 	}
 	for _, node := range snapshot.Nodes {

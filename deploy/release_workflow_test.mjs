@@ -60,8 +60,8 @@ test('the release workflow keeps the tag and the version apart', () => {
   // One derivation, from the one implementation. A shell `case` or a `${tag#v}`
   // here would be a second copy of a rule whose whole point is that there is one.
   assert(
-    workflow.includes('version=$(go run github.com/KazuhaHub/passwall-node/deployment/cmd/release-tag "$tag")'),
-    'the workflow must derive the version from the pinned release-tag command, not a second shell rule',
+    workflow.includes('version=$(go run ./cmd/release-tag "$tag")'),
+    'the workflow must derive the version from this repository\'s own command, not a second shell rule',
   )
   for (const strip of ['${tag#v}', '${tag##v}']) {
     assert(!workflow.includes(strip), `the workflow strips the v prefix itself (${strip}), which is a second version derivation`)
@@ -237,10 +237,15 @@ test('all literal release shell scripts parse without executing or publishing', 
   for (const script of scripts) execFileSync('bash', ['-n'], { input: script })
 })
 
-test('release tag input uses env plus the pinned published canonical validator', () => {
+// THE VALIDATOR IS THIS REPOSITORY'S OWN. It used to be Passwall Node's command,
+// run with `go run`, which kept the Node module in PSP's go.mod — so the
+// dependency could not be dropped while this derivation was outsourced. The RULE
+// is unchanged and the shared vectors are still the contract between the two
+// implementations; only the implementation's address moved.
+test('release tag input uses env plus this repository\'s own canonical validator', () => {
   const setup = job('setup')
   assert(setup.includes('REQUESTED_TAG: ${{ inputs.tag }}'))
-  assert(setup.includes('go run github.com/KazuhaHub/passwall-node/deployment/cmd/release-tag "$tag"'))
+  assert(setup.includes('go run ./cmd/release-tag "$tag"'))
   assert(setup.includes('test "$GITHUB_REF" = "refs/tags/${tag}"'))
   assert(setup.includes('git rev-parse --verify "refs/tags/${tag}^{commit}"'))
   assert(setup.includes('test "$release_sha" = "$GITHUB_SHA"'))
@@ -283,8 +288,8 @@ test('the tag job cuts the tag after the suite passes, only when the form asked 
   // three consumers, and it lives in Passwall Node's releaseid. `go run` resolves
   // the module at the version go.mod pins, so the rule is the tested one.
   assert(
-    cut.includes('go run github.com/KazuhaHub/passwall-node/deployment/cmd/allocate-release-tag'),
-    'the number must come from the pinned allocator, not from arithmetic in YAML',
+    cut.includes('go run ./cmd/allocate-release-tag'),
+    'the number must come from this repository\'s own allocator, not from arithmetic in YAML',
   )
   assert(
     cut.includes('-line "$line"'),

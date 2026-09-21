@@ -11,7 +11,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/KazuhaHub/passwall-node/corecatalog"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 	"gorm.io/gorm/logger"
@@ -25,6 +24,28 @@ import (
 // the pool before releasing admission. Old responses and detached writers must
 // not commit after conversion or create new old-backend tasks after retirement.
 type serverMigrationRepo struct{ db *gorm.DB }
+
+// coreCatalogForMigration is the reviewed core catalog the offline conversion gate
+// reads. It is package-level for the same reason the secret key is: NewRepos is
+// called from more than a dozen places, and a constructor parameter would make
+// every one of them name a dependency only this one gate uses.
+//
+// UNCONFIGURED IS A REFUSAL RATHER THAN A SKIP. A gate that quietly disappears
+// when a wiring line is missing is worse than no gate at all, because the thing it
+// exists to prevent — persisting a core nobody reviewed — is exactly what success
+// looks like.
+var coreCatalogForMigration ports.CoreCatalog
+
+// ConfigureCoreCatalog supplies the reviewed core catalog the conversion gate
+// reads. Call it from a composition root, before any conversion is applied.
+func ConfigureCoreCatalog(catalog ports.CoreCatalog) { coreCatalogForMigration = catalog }
+
+func migrationCoreDocument(ctx context.Context) (ports.CoreCatalogDocument, error) {
+	if coreCatalogForMigration == nil {
+		return ports.CoreCatalogDocument{}, errors.New("the reviewed core catalog is not configured")
+	}
+	return coreCatalogForMigration.Document(ctx)
+}
 
 func (r *serverMigrationRepo) Load(ctx context.Context, panelID int64) (*domain.ServerMigrationSnapshot, error) {
 	if panelID <= 0 {
@@ -55,10 +76,14 @@ func (r *serverMigrationRepo) Apply(ctx context.Context, panelID int64, expected
 	if copyAgent.DesiredCoreEngine != domain.NodeCoreXray {
 		return fmt.Errorf("%w: conversion currently requires the Xray core", domain.ErrValidation)
 	}
-	release, err := corecatalog.Resolve(string(domain.NodeCoreXray), copyAgent.DesiredCoreVersion)
+	document, err := migrationCoreDocument(ctx)
+	if err != nil {
+		return fmt.Errorf("core catalog unavailable: %w", err)
+	}
+	release, err := document.Resolve(string(domain.NodeCoreXray), copyAgent.DesiredCoreVersion)
 	if err != nil || release.Version != copyAgent.DesiredCoreVersion || !release.Selectable ||
 		!release.Evidence.SourceAudited || !release.Evidence.ConfigTested || !release.Evidence.HandshakeTested ||
-		(release.Tier != corecatalog.TierRecommended && release.Tier != corecatalog.TierVerified && release.Tier != corecatalog.TierRestricted) ||
+		(release.Tier != domain.CoreTierRecommended && release.Tier != domain.CoreTierVerified && release.Tier != domain.CoreTierRestricted) ||
 		release.RequiresConfirmation != copyAgent.AllowRestrictedReality {
 		// The preview canonicalizes an unnecessary acknowledgement to false.
 		// Persist the same exact shape nodesync accepts, not just a checkbox.

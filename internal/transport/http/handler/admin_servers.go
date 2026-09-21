@@ -10,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/KazuhaHub/passwall-node/corecatalog"
 	"github.com/gin-gonic/gin"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
@@ -47,6 +46,8 @@ type AdminServersHandler struct {
 	nativeUpgrade    NativeAgentUpgradeService
 	nodeDiagnostics  NodeDiagnosticsService
 	nodeReleases     ports.NodeReleaseCatalog
+	nodeInstall      ports.NodeInstallTemplate
+	coreCatalog      ports.CoreCatalog
 	serverMigration  ServerMigrationPreviewer
 	nodeMetrics      ports.NodeHostMetricRepo
 
@@ -61,6 +62,23 @@ type AdminServersHandler struct {
 
 func (h *AdminServersHandler) WithNativeAgentProvisioning(repo ports.NativeAgentProvisioningRepo) *AdminServersHandler {
 	h.native = repo
+	return h
+}
+
+// WithNodeInstallTemplate supplies the source of the Node installation script. It
+// is the Node project's published template, fetched and verified per render, and
+// it is a dependency rather than a compiled-in constant because the template is
+// not this repository's to own.
+func (h *AdminServersHandler) WithNodeInstallTemplate(template ports.NodeInstallTemplate) *AdminServersHandler {
+	h.nodeInstall = template
+	return h
+}
+
+// WithCoreCatalog supplies the reviewed core catalog this handler offers and
+// enforces against. It is the document the node runtime reads, so the selector an
+// operator sees and the gate that refuses a version are the same review.
+func (h *AdminServersHandler) WithCoreCatalog(catalog ports.CoreCatalog) *AdminServersHandler {
+	h.coreCatalog = catalog
 	return h
 }
 
@@ -79,6 +97,28 @@ func NewAdminServersHandler(repo ports.XUIPanelRepo, pool ports.XUIPool, nodes p
 		repo: repo, pool: pool, nodes: nodes, audit: audit, async: async, invalidateRender: invalidateRender,
 		startedAt: time.Now().UTC(),
 	}
+}
+
+// coreDocument reads the reviewed catalog for one request.
+//
+// THE READ IS PER REQUEST, NOT PER QUERY, so a page that lists two engines reads
+// the document once and both answers come from the same review — a refresh landing
+// between them could otherwise let the page show a release its own next query
+// would refuse.
+//
+// AN UNREADABLE CATALOG IS A 503, not a 500: the panel's own state is fine and the
+// source it reads is not, which is the distinction an operator acts on.
+func (h *AdminServersHandler) coreDocument(c *gin.Context) (ports.CoreCatalogDocument, bool) {
+	if h.coreCatalog == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "the reviewed core catalog is unavailable"})
+		return ports.CoreCatalogDocument{}, false
+	}
+	document, err := h.coreCatalog.Document(c.Request.Context())
+	if err != nil {
+		respondError(c, err)
+		return ports.CoreCatalogDocument{}, false
+	}
+	return document, true
 }
 
 // serverDTO is the API representation. Sensitive fields (api_token /
@@ -454,7 +494,11 @@ func (h *AdminServersHandler) createNative(c *gin.Context, req serverCreateReque
 		respondError(c, err)
 		return
 	}
-	release, err := corecatalog.Recommended("xray")
+	coreDocument, ok := h.coreDocument(c)
+	if !ok {
+		return
+	}
+	release, err := coreDocument.Recommended("xray")
 	if err != nil {
 		respondError(c, err)
 		return
@@ -1089,12 +1133,12 @@ func (h *AdminServersHandler) ListXrayVersions(c *gin.Context) {
 	for _, coreVersion := range versions {
 		available[coreVersion] = struct{}{}
 	}
-	catalog, catalogErr := corecatalog.List("xray")
-	if catalogErr != nil {
-		respondError(c, catalogErr)
+	coreDocument, ok := h.coreDocument(c)
+	if !ok {
 		return
 	}
-	metadata := make([]corecatalog.Release, 0, len(catalog))
+	catalog := coreDocument.List("xray")
+	metadata := make([]ports.CoreRelease, 0, len(catalog))
 	for _, release := range catalog {
 		if _, ok := available[release.Version]; ok {
 			metadata = append(metadata, release)
@@ -1131,8 +1175,12 @@ func (h *AdminServersHandler) ListCoreReleases(c *gin.Context) {
 		c.JSON(http.StatusNotImplemented, gin.H{"error": ports.ErrPanelCapabilityUnsupported.Error()})
 		return
 	}
+	coreDocument, ok := h.coreDocument(c)
+	if !ok {
+		return
+	}
 	engines := []domain.NodeCoreEngine{domain.NodeCoreXray, domain.NodeCoreSingBox}
-	releases := make([]corecatalog.Release, 0)
+	releases := make([]ports.CoreRelease, 0)
 	for _, engine := range engines {
 		versions, listErr := selector.GetCoreVersionListForEngine(c.Request.Context(), engine)
 		if listErr != nil {
@@ -1143,12 +1191,7 @@ func (h *AdminServersHandler) ListCoreReleases(c *gin.Context) {
 		for _, version := range versions {
 			available[version] = struct{}{}
 		}
-		catalog, catalogErr := corecatalog.List(string(engine))
-		if catalogErr != nil {
-			respondError(c, catalogErr)
-			return
-		}
-		for _, release := range catalog {
+		for _, release := range coreDocument.List(string(engine)) {
 			if _, exists := available[release.Version]; exists {
 				releases = append(releases, release)
 			}
@@ -1191,7 +1234,11 @@ func (h *AdminServersHandler) SelectCore(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"ok": false, "reason": "invalid_core_selection", "error": "supported engine and exact version are required"})
 		return
 	}
-	release, err := corecatalog.Resolve(string(engine), req.Version)
+	coreDocument, ok := h.coreDocument(c)
+	if !ok {
+		return
+	}
+	release, err := coreDocument.Resolve(string(engine), req.Version)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"ok": false, "reason": "core_not_audited", "error": err.Error()})
 		return
@@ -1298,7 +1345,11 @@ func (h *AdminServersHandler) UpgradeXray(c *gin.Context) {
 	// accepts latest or an unlisted version.
 	_ = c.ShouldBindJSON(&req)
 	if req.Version == "" && panel.Kind == domain.PanelKindPSP {
-		recommended, resolveErr := corecatalog.Recommended("xray")
+		coreDocument, ok := h.coreDocument(c)
+		if !ok {
+			return
+		}
+		recommended, resolveErr := coreDocument.Recommended("xray")
 		if resolveErr != nil {
 			respondError(c, resolveErr)
 			return
@@ -1308,7 +1359,11 @@ func (h *AdminServersHandler) UpgradeXray(c *gin.Context) {
 		req.Version = "latest"
 	}
 	if panel.Kind == domain.PanelKindPSP {
-		release, resolveErr := corecatalog.Resolve("xray", req.Version)
+		coreDocument, ok := h.coreDocument(c)
+		if !ok {
+			return
+		}
+		release, resolveErr := coreDocument.Resolve("xray", req.Version)
 		if resolveErr != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"ok": false, "reason": "core_not_audited", "error": resolveErr.Error()})
 			return

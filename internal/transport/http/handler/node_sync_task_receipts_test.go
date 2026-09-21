@@ -14,6 +14,7 @@ import (
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/adapters/sqlstore"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/corefixtures"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/nodesync"
 )
@@ -36,11 +37,15 @@ func newHTTPReceiptFixture(t *testing.T) (ports.Repos, *NodeSyncHandler, time.Ti
 	if err := repos.NodeAgent.Create(t.Context(), &domain.NodeAgent{
 		AgentID: "agt_http_receipts", PanelID: 929,
 		CredentialSHA256: nodeprotocol.ComputeTaskInputSHA256("agt_http_receipts", nil),
+		// A CONFORMING AGENT ROW CARRIES ITS CORE. The config body echoes the
+		// selection the panel committed to rather than resolving it against the
+		// reviewed catalog, so a row without one is refused.
+		DesiredCoreEngine: domain.NodeCoreXray, DesiredCoreVersion: "26.6.27",
 	}); err != nil {
 		t.Fatal(err)
 	}
 	now := time.Date(2026, 9, 12, 14, 0, 0, 0, time.UTC)
-	service, err := nodesync.New(nodesync.Options{
+	service, err := nodesync.New(nodesync.Options{CoreCatalog: corefixtures.Static{},
 		Desired: repos.NativeDesired, Agents: repos.NodeAgent, Issues: repos.NodeAgentIssue, Tasks: repos.NodeAgentTask,
 		Users: repos.User, Clients: repos.PSPClient, Nodes: repos.Node, Settings: repos.ScopedSettings,
 		Now: func() time.Time { return now },
@@ -157,7 +162,8 @@ func TestNodeSyncHTTPConflictingEvidenceRollsBackWholeResultBatch(t *testing.T) 
 				knownAgent = "agt_http_foreign"
 				if err := repos.NodeAgent.Create(t.Context(), &domain.NodeAgent{
 					AgentID: knownAgent, PanelID: 930,
-					CredentialSHA256: nodeprotocol.ComputeTaskInputSHA256(knownAgent, nil),
+					CredentialSHA256:  nodeprotocol.ComputeTaskInputSHA256(knownAgent, nil),
+					DesiredCoreEngine: domain.NodeCoreXray, DesiredCoreVersion: "26.6.27",
 				}); err != nil {
 					t.Fatal(err)
 				}

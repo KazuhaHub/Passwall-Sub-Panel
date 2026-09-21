@@ -1,9 +1,6 @@
 package pndeps
 
 import (
-	"go/parser"
-	"go/token"
-	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -11,124 +8,50 @@ import (
 	"testing"
 )
 
-// The residual Passwall Node dependency surface, pinned so it can only SHRINK.
+// PSP PRODUCTION DEPENDS ON NO PACKAGE OF THE NODE MODULE.
 //
-// X07's acceptance is that PSP production no longer depends on the Node module,
-// verified with `go list -deps` and imports. A check performed once is a check
-// that stops being true: during a migration the surface grows easily, one
-// convenient import at a time, and each addition is invisible until the removal
-// step — which is the step where it is most expensive to discover, because by
-// then code has been written against it.
+// X07's acceptance is exactly this, verified against the dependency closure rather
+// than against go.mod, because a require line with no import behind it is not a
+// dependency and an import satisfied by a local replace is not a buildable one.
 //
-// So the allowed set is written down with the reason each entry is still there,
-// and anything else fails. The list failing when it is merely STALE is also
-// intended: an allowlist that outlives its entries is a description of a
-// repository that no longer exists, and it is what the next reader would trust.
+// THIS STARTED AS A LIST THAT COULD ONLY SHRINK, and the list is gone rather than
+// emptied. It held five packages across four removals — `protocol`, the Node
+// release catalog, the agent-upgrade service, the installation contract with the
+// two packages reachable only through it, and last the core catalog. Each time
+// this guard failed on the stale entries before anything else noticed, which is
+// what it was for. An empty allowlist and no allowlist are the same statement, and
+// only one of them invites the next reader to add a line back.
 //
-// Deleting entries from this map IS the migration. Two have MOVED rather than
-// gone: PSP's direct use of the Node module's protocol package is zero, and the
-// package itself has now left the closure as well. What remains, each with a
-// named successor:
+// WHAT REPLACED THE DEPENDENCIES, so that a future reader knows where to look
+// rather than reaching for the module again:
 //
-//	deployment   → the installation contract PSP consumes as an adapter (X07)
-//	corecatalog  → the dynamically reviewed release policy (X07)
-//	releaseid    → leaves with deployment; reached only through it
-//	nodeconfig   → leaves with deployment; reached only through it
-type residualDependency struct {
-	// successor is what will replace this dependency, so the reason for the
-	// entry is not "it is still here", which is not a reason.
-	successor string
-	// files is how many production files import it today. A dependency that
-	// grows from 5 files to 40 is a different decision from one that stays at 5,
-	// and the count is cheap to keep true.
-	files int
-}
-
-var allowedResidual = map[string]residualDependency{
-	// THIS ONE LEFT, AND THIS GUARD IS HOW THAT WAS NOTICED. `passwall-node/protocol`
-	// was a transitive entry because `deployment` and `corecatalog` used it
-	// themselves. Moving the dependency pin to the verified Node main commit
-	// dropped it from the closure — the Node side now reaches the shared contract
-	// from `github.com/KazuhaHub/passwall-protocol` — and an allowlist entry that
-	// outlived the package would have been a description of a repository that no
-	// longer exists. The entry is deleted rather than kept for safety.
-	"github.com/KazuhaHub/passwall-node/deployment": {
-		successor: "a pinned, signed installation template consumed by a PSP adapter",
-		files:     2,
-	},
-	"github.com/KazuhaHub/passwall-node/corecatalog": {
-		successor: "the dynamically reviewed release policy",
-		files:     5,
-	},
-	// ADDED BY THE PIN MOVE, AND THAT IS A DECISION RATHER THAN A SLIP. The
-	// verified revision drops `protocol` and gains this: the `release-tag`
-	// command PSP's release workflow runs resolves the tag through `releaseid`,
-	// which is the whole reason the pin moved, so it cannot be avoided by
-	// choosing a different revision. Zero files import it directly — it arrives
-	// through `deployment`, exactly as `nodeconfig` does, and it leaves when
-	// `deployment` does.
-	//
-	// IF PSP EVER NEEDS THE RULE DIRECTLY, that is a separate decision about
-	// where the rule should live — the Node module or the shared protocol module —
-	// and not something to settle by importing whichever copy is nearest.
-	"github.com/KazuhaHub/passwall-node/releaseid": {
-		successor: "leaves with deployment; not separately removable",
-		files:     0,
-	},
-	// Reached only through the Node packages above, never imported by PSP
-	// directly: `deployment` uses it to render the connection environment. It
-	// leaves when they do, and it cannot be removed on its own. It is listed
-	// because `go list -deps` reports it, and a guard that ignored what the
-	// tool reports would be describing a different dependency graph than the
-	// one that exists.
-	//
-	// The surface has SHRUNK three times since this list was written: the Node
-	// release catalog and the agent-upgrade service each stopped reaching for a
-	// rule the installer owns, and then `protocol` left the closure entirely.
-	// Every time this guard failed on the stale entries before anything else
-	// noticed. That is the property worth keeping — the number is not
-	// documentation, it is a tripwire.
-	"github.com/KazuhaHub/passwall-node/internal/nodeconfig": {
-		successor: "leaves with deployment; not separately removable",
-		files:     0,
-	},
-}
-
+//	installation template  → a signed release asset, read by internal/adapters/pninstall
+//	core catalog           → a signed release asset, read by internal/adapters/corecatalogdoc
+//	release numbering rule → internal/version, checked against shared vectors
+//	the wire contract      → github.com/KazuhaHub/passwall-protocol
 const nodeModulePrefix = "github.com/KazuhaHub/passwall-node"
 
-func TestProductionDependsOnNoNewNodePackages(t *testing.T) {
-	actual := productionNodeDependencies(t)
-
-	for pkg := range actual {
-		if _, ok := allowedResidual[pkg]; !ok {
-			t.Errorf("production code imports a new Node package: %s", pkg)
-		}
-	}
-	for pkg, entry := range allowedResidual {
-		if _, ok := actual[pkg]; !ok {
-			t.Errorf("%s is in the allowed residual set but is no longer imported; remove the entry so the list describes the repository that exists (successor: %s)", pkg, entry.successor)
-		}
-	}
-	if t.Failed() {
-		t.Log("the residual Node dependency surface may only shrink while the migration runs; a new import needs a decision, not an entry in the list")
+func TestProductionDependsOnNoNodePackage(t *testing.T) {
+	for pkg := range productionNodeDependencies(t) {
+		t.Errorf("production code imports a Node module package: %s", pkg)
 	}
 }
 
-// The import-site counts are the part that catches growth INSIDE an allowed
-// package. The package list stays the same while a codebase spreads its use,
-// and "we only depend on three packages" stops being a useful statement.
-func TestProductionImportSitesDoNotGrow(t *testing.T) {
-	for pkg, entry := range allowedResidual {
-		if entry.files == 0 {
-			// Transitive entries have no import sites of their own.
-			continue
-		}
-		got := countImportSites(t, pkg)
-		if got > entry.files {
-			t.Errorf("production import sites for %s grew to %d (was %d); the surface may only shrink. Successor: %s", pkg, got, entry.files, entry.successor)
-		}
-		if got < entry.files {
-			t.Errorf("production import sites for %s dropped to %d (was %d); lower the number so it keeps meaning something", pkg, got, entry.files)
+// AND IT IS NOT REQUIRED, which is a separate statement from "nothing imports it".
+//
+// A require line with no import behind it is not a dependency today and is one
+// tomorrow: the next convenient import resolves against whatever revision happens
+// to be pinned, and nothing in between signals that a decision was made. The tests
+// that need the Node project read it from the checkout the contract job provides
+// rather than from this module, which is what let the require go.
+func TestTheNodeModuleIsNotRequired(t *testing.T) {
+	text, err := os.ReadFile(filepath.Join(moduleRoot(t), "go.mod"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, line := range strings.Split(string(text), "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), nodeModulePrefix) {
+			t.Fatalf("go.mod requires the Node module, so the dependency surface can grow again without a decision: %s", strings.TrimSpace(line))
 		}
 	}
 }
@@ -173,50 +96,6 @@ func productionNodeDependencies(t *testing.T) map[string]bool {
 		}
 	}
 	return seen
-}
-
-// countImportSites counts PRODUCTION FILES that import the package.
-//
-// Files rather than packages, deliberately: spreading an existing dependency
-// across more of an already-importing package is exactly the growth that leaves
-// the package list unchanged, and "we depend on three packages" stops being a
-// useful statement once each of them is everywhere.
-func countImportSites(t *testing.T, pkg string) int {
-	t.Helper()
-	root := moduleRoot(t)
-	count := 0
-	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if entry.IsDir() {
-			switch entry.Name() {
-			case ".git", "vendor", "node_modules":
-				return fs.SkipDir
-			}
-			return nil
-		}
-		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
-			return nil
-		}
-		file, err := parser.ParseFile(token.NewFileSet(), path, nil, parser.ImportsOnly)
-		if err != nil {
-			// A file this cannot parse is a file the compiler cannot build, so
-			// it is a real failure and not a reason to undercount.
-			return err
-		}
-		for _, spec := range file.Imports {
-			if strings.Trim(spec.Path.Value, `"`) == pkg {
-				count++
-				break
-			}
-		}
-		return nil
-	})
-	if err != nil {
-		t.Fatalf("scanning production files for %s: %v", pkg, err)
-	}
-	return count
 }
 
 func runGoList(t *testing.T, args ...string) string {

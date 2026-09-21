@@ -513,9 +513,26 @@ export interface CompatRangeStatus {
   refreshed_at?: string
   last_error?: string
 }
+/**
+ * What the reviewed core catalog is being served from, and how old it is.
+ *
+ * EVERY FIELD IS OPTIONAL BECAUSE THE PANEL MAY NOT BE ABLE TO SAY. A reader that
+ * has never read a document has no last success; one that cannot report at all
+ * reports nothing. Drawing a conclusion from a missing field would be drawing one
+ * from the panel's silence.
+ */
+export interface CoreCatalogStatus {
+  source?: string
+  review_time?: string
+  last_success?: string
+  last_error?: string
+  falling_back?: boolean
+}
 export interface CompatStatusResponse {
   xui: CompatRangeStatus
   sui: CompatRangeStatus
+  /** Absent only from a panel older than this field. */
+  core_catalog?: CoreCatalogStatus
 }
 
 /** The read is best-effort: a panel that cannot report its state must not claim one. */

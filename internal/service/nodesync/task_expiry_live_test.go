@@ -20,6 +20,7 @@ import (
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/adapters/sqlstore"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/corefixtures"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/nodesync"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/transport/http/handler"
 )
@@ -78,7 +79,8 @@ func TestLive_RealNodeTaskExpiryContract(t *testing.T) {
 			repos := sqlstore.NewRepos(db)
 			agentRow := &domain.NodeAgent{
 				AgentID: "agt_task_expiry_live", Epoch: 1,
-				CredentialSHA256: nodeprotocol.ComputeTaskInputSHA256("contract_credential", nil),
+				CredentialSHA256:  nodeprotocol.ComputeTaskInputSHA256("contract_credential", nil),
+				DesiredCoreEngine: domain.NodeCoreXray, DesiredCoreVersion: "26.6.27",
 			}
 			panel := &domain.XUIPanel{Kind: domain.PanelKindPSP, Name: "task-expiry", URL: "psp://" + agentRow.AgentID}
 			if err := repos.NativeAgentProvisioning.Create(ctx, panel, agentRow); err != nil {
@@ -96,7 +98,7 @@ func TestLive_RealNodeTaskExpiryContract(t *testing.T) {
 			if _, created, err := repos.NodeAgentTask.CreateOrGet(ctx, task); err != nil || !created {
 				t.Fatalf("create task = (%v, %v)", created, err)
 			}
-			coordinator, err := nodesync.New(nodesync.Options{
+			coordinator, err := nodesync.New(nodesync.Options{CoreCatalog: corefixtures.Static{},
 				Desired: repos.NativeDesired, Agents: repos.NodeAgent, Issues: repos.NodeAgentIssue,
 				Tasks: repos.NodeAgentTask, Users: repos.User, Clients: repos.PSPClient,
 				Nodes: repos.Node, Panels: repos.XUIPanel, Settings: repos.ScopedSettings,

@@ -10,6 +10,7 @@ import (
 	nodeprotocol "github.com/KazuhaHub/passwall-protocol/protocol"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/corefixtures"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 )
 
@@ -27,7 +28,7 @@ func TestSyncDoesNotAuthorizeLifecycleTaskWithoutExpiryCapability(t *testing.T) 
 	if _, _, err := repos.NodeAgentTask.CreateOrGet(t.Context(), protected); err != nil {
 		t.Fatal(err)
 	}
-	service, err := New(Options{
+	service, err := New(Options{CoreCatalog: corefixtures.Static{},
 		Desired: repos.NativeDesired, Agents: repos.NodeAgent, Issues: repos.NodeAgentIssue, Tasks: repos.NodeAgentTask,
 		Users: repos.User, Clients: repos.PSPClient, Nodes: repos.Node, Settings: repos.ScopedSettings,
 		Now: func() time.Time { return now },
@@ -112,7 +113,7 @@ func TestSyncLifecycleDispatchRequiresCurrentTripleCapabilityAndEchoesDeadline(t
 			if _, _, err := repos.NodeAgentTask.CreateOrGet(t.Context(), task); err != nil {
 				t.Fatal(err)
 			}
-			service, err := New(Options{
+			service, err := New(Options{CoreCatalog: corefixtures.Static{},
 				Desired: repos.NativeDesired, Agents: repos.NodeAgent, Issues: repos.NodeAgentIssue, Tasks: repos.NodeAgentTask,
 				Users: repos.User, Clients: repos.PSPClient, Nodes: repos.Node, Settings: repos.ScopedSettings,
 				Now: func() time.Time { return now },
@@ -172,7 +173,7 @@ func TestSyncCapabilitylessExpiryClosureDoesNotReopenOnClockRollback(t *testing.
 	if _, _, err := repos.NodeAgentTask.CreateOrGet(t.Context(), task); err != nil {
 		t.Fatal(err)
 	}
-	service, err := New(Options{
+	service, err := New(Options{CoreCatalog: corefixtures.Static{},
 		Desired: repos.NativeDesired, Agents: repos.NodeAgent, Issues: repos.NodeAgentIssue, Tasks: repos.NodeAgentTask,
 		Users: repos.User, Clients: repos.PSPClient, Nodes: repos.Node, Settings: repos.ScopedSettings,
 		Now: func() time.Time { return now },

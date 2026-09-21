@@ -13,6 +13,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/corefixtures"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 )
 
@@ -97,7 +98,10 @@ func TestAdminServersCreateNativeReturnsRecoverableCredentialAndDigestOnlyAgent(
 	provisioning := &nativeProvisioningRepoStub{}
 	pool := &nativeProvisioningPool{}
 	handler := NewAdminServersHandler(nativeProvisioningPanelRepo{}, pool, nil, nil, nil, nil).
-		WithNativeAgentProvisioning(provisioning)
+		WithNativeAgentProvisioning(provisioning).
+		// Creating a native panel resolves the recommended core, so the handler needs
+		// the reviewed catalog to do it.
+		WithCoreCatalog(corefixtures.Static{})
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
 	ctx.Request = httptest.NewRequest(http.MethodPost, "http://panel.example/api/admin/servers",
@@ -130,7 +134,8 @@ func TestAdminServersRotateNativeCredentialReturnsRecoverableSecretAndDigestOnly
 	gin.SetMode(gin.TestMode)
 	provisioning := &nativeProvisioningRepoStub{}
 	handler := NewAdminServersHandler(nativeProvisioningPanelRepo{}, &nativeProvisioningPool{}, nil, nil, nil, nil).
-		WithNativeAgentProvisioning(provisioning)
+		WithNativeAgentProvisioning(provisioning).
+		WithCoreCatalog(corefixtures.Static{})
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
 	ctx.Params = gin.Params{{Key: "id", Value: "41"}}

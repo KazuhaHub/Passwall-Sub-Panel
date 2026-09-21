@@ -244,6 +244,28 @@ jobs:
             --input "$evidence/go-events.jsonl" \
             --go-exit-code "$test_exit" \
             --output "$evidence/result.json"
+          # TWO CROSS-REPOSITORY CONTRACTS ARE CHECKED HERE, in the only job that
+          # has the other repository on disk.
+          #
+          #   internal/version        PSP's copy of the shared version vectors is
+          #                           still the copy the Node project publishes. Both
+          #                           consumers — this repository's Go tests and the
+          #                           front end's TypeScript tests — run against that
+          #                           one file.
+          #   internal/pkg/nodebootstrap
+          #                           the migration wrapper's prerequisite list still
+          #                           covers what the published installer requires. A
+          #                           tool added there and not here defers the failure
+          #                           until after the old service has been stopped.
+          #   internal/adapters/corecatalogdoc
+          #                           the reviewed catalog this build ships as data is
+          #                           still the one the project publishes. A drifted
+          #                           copy is a panel offering a pulled release.
+          #
+          # THEY RUN AFTER THE EVIDENCE IS WRITTEN so a divergence cannot mask the
+          # wire result, and they read the checkout this step already verified.
+          PSP_LIVE_NODE_REPO="$contract_repo" go test -count=1 \
+            ./internal/version/ ./internal/pkg/nodebootstrap/ ./internal/adapters/corecatalogdoc/
           cat > "$evidence/environment.json" <<JSON
           {
             "case": "pinned-source",
@@ -560,6 +582,17 @@ jobs:
           test -n "$build_toolchain"
           test "$(go env GOVERSION)" = "$build_toolchain"
           test "$(go tool compile -V | awk '{ print $3 }')" = "$build_toolchain"
+      # THE FORMAT GATE IS HERE BECAUSE ITS ABSENCE COST TIME TWICE. This repository
+      # had no format check at all — its whole static surface was `go vet` — so a
+      # file that `gofmt -w` would change passed every gate here and failed in the
+      # Node project's CI instead, on a change that had already been pushed. The two
+      # repositories are edited by the same hands, and a check one of them runs is
+      # not a check the other can skip.
+      #
+      # It is a `test -z` rather than a `gofmt -d` so the failure names the files and
+      # exits non-zero in one line, the same shape the Node project uses.
+      - name: Formatting
+        run: test -z "$(gofmt -l .)"
       - run: go vet ./...
       - name: Reachable vulnerability check
         run: go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
