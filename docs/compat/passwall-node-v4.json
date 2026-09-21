@@ -64,6 +64,17 @@
         "managed-docker"
       ],
       "tag": "release/4.0.1.2"
+    },
+    {
+      "version": "4.0.1.3",
+      "protocol_version": 1,
+      "base_sync": "supported",
+      "remote_upgrade": "conditional",
+      "upgrade_methods": [
+        "linux-systemd",
+        "managed-docker"
+      ],
+      "tag": "v4.0.1.3"
     }
   ]
 }
