@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -49,34 +50,47 @@ func writeSnapshot(t *testing.T, dir string, payload remoteCompatPayload) policy
 	return snapshot
 }
 
-// productPolicy builds the document a PRODUCT build actually reads, the way the
-// apply path builds it: from docs/compat/panel-ranges-v1.json, reached by name.
+// snapshotDocument returns the 3X-UI document out of a container.
 //
-// IT REPLACES A PER-MAJOR FIXTURE. The old one folded v4.json's range overlay in,
-// which is the route a build with a derivable compatibility major takes — and a
-// product version has none, because its first segment is a release LINE rather
-// than a major, so no number can name that build's file. These cases are about
-// what a snapshot replays, so the fixture is the document the build would have
-// fetched.
-// The instant the shipped document is read at. Fixed rather than taken from the
-// clock: the document carries a window, and a test that moved with the wall clock
+// It FAILS when there is none, so a mutation written for the old flat file cannot
+// edit nothing and then pass: the container moved the document one level down, and
+// an edit aimed at the top level would silently keep doing what it used to.
+func snapshotDocument(t *testing.T, snapshot *policySnapshot) policySnapshotDocument {
+	t.Helper()
+	document, ok := snapshot.Documents[productXUI]
+	if !ok {
+		t.Fatalf("the snapshot holds no %s document: %#v", productXUI, snapshot.Documents)
+	}
+	return document
+}
+
+// The instant the shipped documents are read at. Fixed rather than taken from the
+// clock: a document carries a window, and a test that moved with the wall clock
 // would start failing on the day the window closes rather than on the day the
 // document changes.
 var compatCacheNow = time.Date(2026, 9, 20, 12, 0, 0, 0, time.UTC)
 
-func productPolicy(t *testing.T) remoteCompatPayload {
+// shippedPolicy parses one of the published per-product documents.
+func shippedPolicy(t *testing.T, name string) PanelRangesPolicy {
 	t.Helper()
-	raw, err := os.ReadFile(filepath.Join("..", "..", "docs", "compat", "panel-ranges-v1.json"))
+	raw, err := os.ReadFile(filepath.Join("..", "..", "docs", "compat", name))
 	if err != nil {
-		t.Fatalf("read the shipped document: %v", err)
+		t.Fatalf("read the shipped document %s: %v", name, err)
 	}
 	policy, err := ParsePanelRangesPolicy(raw, compatCacheNow)
 	if err != nil {
-		t.Fatalf("the shipped document does not parse: %v", err)
+		t.Fatalf("the shipped document %s does not parse: %v", name, err)
 	}
+	return policy
+}
+
+// shippedPayload converts a parsed document into the payload the apply path
+// builds, which is what the snapshot stores.
+func shippedPayload(policy PanelRangesPolicy) remoteCompatPayload {
 	window := policy.AppliesToPSP
 	return remoteCompatPayload{
 		SchemaVersion: schemaVersion,
+		Product:       policy.Product,
 		UpdatedAt:     policy.IssuedAt.UTC().Format(time.RFC3339),
 		Entries:       policy.Entries,
 		SUIEntries:    policy.SUIEntries,
@@ -84,6 +98,12 @@ func productPolicy(t *testing.T) remoteCompatPayload {
 		SUIAdvisories: policy.SUIAdvisories,
 		AppliesToPSP:  &window,
 	}
+}
+
+// productPolicy is the 3X-UI document a PRODUCT build actually reads.
+func productPolicy(t *testing.T) remoteCompatPayload {
+	t.Helper()
+	return shippedPayload(shippedPolicy(t, fmt.Sprintf(xuiDocumentPattern, 4)))
 }
 
 // The snapshot stores the DOCUMENT, not a conclusion. These cases exercise what
@@ -153,11 +173,11 @@ func TestAnUnwritableSnapshotDirectoryDoesNotFailTheApply(t *testing.T) {
 	}
 	SetCacheDir(filepath.Join(blocker, "data"))
 
-	raw, err := os.ReadFile(filepath.Join("..", "..", "docs", "compat", "panel-ranges-v1.json"))
+	raw, err := os.ReadFile(filepath.Join("..", "..", "docs", "compat", fmt.Sprintf(xuiDocumentPattern, 4)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := applyPanelRangesDocument(raw, time.Now().UTC()); err != nil {
+	if err := applyXUICompatDocument(raw, time.Now().UTC()); err != nil {
 		t.Fatalf("an unwritable snapshot directory failed the apply: %v", err)
 	}
 	if got := ActiveMaxTestedXUI(); got != "3.8.5" {
@@ -182,11 +202,13 @@ func TestPolicySnapshotRefusesADocumentThatFailsItsOwnIntegrityCheck(t *testing.
 				// document has no major, so the edit changed nothing and the case
 				// stopped testing what it says it tests. The window is the field
 				// that decides whether the document applies at all.
-				edited := bytes.Replace(snapshot.Payload, []byte(`"max":"4.99.99"`), []byte(`"max":"9.99.99"`), 1)
-				if bytes.Equal(edited, snapshot.Payload) {
+				document := snapshotDocument(t, &snapshot)
+				edited := bytes.Replace(document.Payload, []byte(`"max":"4.99.99"`), []byte(`"max":"9.99.99"`), 1)
+				if bytes.Equal(edited, document.Payload) {
 					t.Fatal("the fixture payload carries no window to edit; this case would pass vacuously")
 				}
-				snapshot.Payload = edited // digest deliberately NOT recomputed
+				document.Payload = edited // digest deliberately NOT recomputed
+				snapshot.Documents[productXUI] = document
 				out, err := json.Marshal(snapshot)
 				if err != nil {
 					t.Fatal(err)
@@ -207,9 +229,11 @@ func TestPolicySnapshotRefusesADocumentThatFailsItsOwnIntegrityCheck(t *testing.
 				// the document describe a release line this panel is not on —
 				// which is the named-document form of "a document for another
 				// major".
-				snapshot.Payload = bytes.Replace(snapshot.Payload, []byte(`"min":"4.0.0"`), []byte(`"min":"9.0.0"`), 1)
-				sum := sha256.Sum256(snapshot.Payload)
-				snapshot.Digest = hex.EncodeToString(sum[:])
+				document := snapshotDocument(t, &snapshot)
+				document.Payload = bytes.Replace(document.Payload, []byte(`"min":"4.0.0"`), []byte(`"min":"9.0.0"`), 1)
+				sum := sha256.Sum256(document.Payload)
+				document.Digest = hex.EncodeToString(sum[:])
+				snapshot.Documents[productXUI] = document
 				out, err := json.Marshal(snapshot)
 				if err != nil {
 					t.Fatal(err)
@@ -245,7 +269,18 @@ func TestPolicySnapshotRefusesADocumentThatFailsItsOwnIntegrityCheck(t *testing.
 				if err := json.Unmarshal(raw, &snapshot); err != nil {
 					t.Fatal(err)
 				}
-				delete(snapshot, "payload")
+				// THE DOCUMENT IS INSIDE A CONTAINER NOW, so removing the payload
+				// from the file's top level would leave the container intact and
+				// the case would pass without testing anything.
+				documents, ok := snapshot["documents"].(map[string]any)
+				if !ok {
+					t.Fatalf("the snapshot is not a container: %s", raw)
+				}
+				document, ok := documents[productXUI].(map[string]any)
+				if !ok {
+					t.Fatalf("the container holds no %s document: %s", productXUI, raw)
+				}
+				delete(document, "payload")
 				out, err := json.Marshal(snapshot)
 				if err != nil {
 					t.Fatal(err)
@@ -287,10 +322,11 @@ func TestPolicySnapshotRoundTripsAndKeepsItsProvenance(t *testing.T) {
 	if snapshot.SnapshotSchema != policySnapshotSchema {
 		t.Fatalf("snapshot format = %d", snapshot.SnapshotSchema)
 	}
-	if snapshot.Revision == "" || snapshot.Source == "" || snapshot.FetchedAt.IsZero() || snapshot.Digest == "" {
+	document := snapshotDocument(t, &snapshot)
+	if document.Revision == "" || document.Source == "" || document.FetchedAt.IsZero() || document.Digest == "" {
 		t.Fatalf("snapshot lost its provenance: %#v", snapshot)
 	}
-	if len(snapshot.Payload) == 0 {
+	if len(document.Payload) == 0 {
 		t.Fatal("snapshot stored no document")
 	}
 

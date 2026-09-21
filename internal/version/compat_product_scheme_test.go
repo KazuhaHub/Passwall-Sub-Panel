@@ -5,57 +5,51 @@ import (
 	"testing"
 )
 
-// A PRODUCT-SCHEME BUILD READS NO PER-MAJOR MANIFEST, and that is a decision
-// rather than a gap in the code.
+// A BUILD DERIVES ITS OWN DOCUMENT NAMES, AND THE MAJOR IN THEM IS THE PANEL'S.
 //
-// The per-major files are named after the COMPATIBILITY major: v3.x reads
-// v3.json. Under the product scheme the first segment is a RELEASE LINE — 102.1.0
-// is the hundred-and-second release line, not "compat major 102" — so deriving a
-// path from it would fetch `v102.json`, which does not exist, or worse, exists
-// and describes a different panel. A product build takes its range from the
-// release policy instead, which states the range explicitly rather than
-// inferring one from a number.
+// A legacy build reads ONE per-major manifest named after the COMPATIBILITY
+// major: v3.x reads v3.json. A product build reads ONE DOCUMENT PER PRODUCT,
+// named after the PANEL MAJOR its own version carries: 4.0.0 reads
+// 3x-ui-v4.json and sui-v4.json.
 //
-// The consequence is FAIL-CLOSED and worth pinning as such: with no manifest
-// loaded, the max-tested ceiling is empty, so a probed panel is reported as
-// untested rather than as supported. An empty answer is the conservative one;
-// the failure this guards against is a product build quietly deriving a major
-// and inheriting a range nobody published for it.
+// DERIVING IS SAFE BECAUSE THE NAME IS NOT THE CLAIM. The document states the
+// builds it applies to in `applies_to_psp`, and the apply path checks that
+// window before installing anything — so a document that is not about this
+// build installs nothing even though its name was derived from this build's own
+// version. The name decides WHERE to look; the window decides whether what was
+// found counts.
 //
-// IT IS A GAP, NOT A DESIGN, and this file does not pretend otherwise: nothing
-// carries the compat ranges in a policy-shaped document yet, so a product build
-// has no source for them at all. The error message says that rather than naming a
-// document that does not exist.
-func TestAProductBuildDerivesNoPerMajorManifest(t *testing.T) {
+// THE FAILURE MODE IS A 404 RATHER THAN A REFUSAL. A line whose documents have
+// not been published, or a hundred-and-second line that never will be, gets no
+// ceiling — and empty is the conservative answer: a probed panel is reported as
+// untested rather than as supported. A version with no identity at all is a
+// refusal instead, because there is no window it could be matched against and
+// nothing useful to say about where to look.
+func TestABuildDerivesItsOwnDocumentNames(t *testing.T) {
 	previous := Version
 	t.Cleanup(func() { Version = previous })
 
 	for _, tc := range []struct {
 		version string
-		url     string
+		want    []string
 		why     string
 	}{
-		{"v3.6.0", "v3.json", "the legacy form names a compatibility major"},
-		{"v3.6.0-beta.7", "v3.json", "a prerelease does not change the major"},
-		{"v4.0.0", "v4.json", ""},
-		// THE PRODUCT SCHEME REACHES A DOCUMENT, NOT A DERIVED PATH. Its first
-		// segment is a release LINE — 102.1.0 is the hundred-and-second line, not
-		// "compat major 102" — so there is no v102.json and nothing to infer. The
-		// document it reaches is named, and states the builds it applies to.
-		{"3.6.0", panelRangesDocumentName, "no prefix, so no major to derive"},
-		{"102.1.0", panelRangesDocumentName, "102 is a release line; there is no v102.json"},
-		// A version that is neither scheme derives nothing at all: there is no
-		// window it could be matched against.
-		{"0.1.0", "", "a zero release line is not a released identity"},
-		{"dev", "", ""},
-		{"", "", ""},
+		{"v3.6.0", []string{"v3.json"}, "the legacy form names a compatibility major"},
+		{"v3.6.0-beta.7", []string{"v3.json"}, "a prerelease does not change the major"},
+		{"v4.0.0-beta.25", []string{"v4.json"}, "the legacy form is what the beta line carried"},
+		{"4.0.0", []string{"3x-ui-v4.json", "sui-v4.json"}, "a product build reads one document per product"},
+		{"4.1.7", []string{"3x-ui-v4.json", "sui-v4.json"}, "the document follows the major, not the release line's patch"},
+		{"102.1.0", []string{"3x-ui-v102.json", "sui-v102.json"}, "102 IS the panel major of that line, and the name follows it"},
+		{"0.1.0", nil, "a zero release line is not a released identity"},
+		{"dev", nil, ""},
+		{"", nil, ""},
 	} {
 		t.Run(tc.version, func(t *testing.T) {
 			Version = tc.version
-			url, err := defaultURLForCurrentVersion()
-			if tc.url == "" {
+			sources, err := compatDocumentSources()
+			if tc.want == nil {
 				if err == nil {
-					t.Fatalf("Version=%q derived %q; it has no identity to match a window against (%s)", tc.version, url, tc.why)
+					t.Fatalf("Version=%q derived %v; it has no identity to match a window against (%s)", tc.version, sources, tc.why)
 				}
 				// The message must state the consequence — an operator reading it
 				// must not be told a range was configured.
@@ -67,8 +61,20 @@ func TestAProductBuildDerivesNoPerMajorManifest(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Version=%q: %v", tc.version, err)
 			}
-			if !strings.HasSuffix(url, tc.url) {
-				t.Fatalf("Version=%q derived %q, want it to end in %q", tc.version, url, tc.url)
+			got := make([]string, 0, len(sources))
+			for _, source := range sources {
+				if !strings.HasSuffix(source.URL, "/docs/compat/"+source.Name) {
+					t.Errorf("URL %q does not address %q", source.URL, source.Name)
+				}
+				got = append(got, source.Name)
+			}
+			if len(got) != len(tc.want) {
+				t.Fatalf("Version=%q derived %v, want %v (%s)", tc.version, got, tc.want, tc.why)
+			}
+			for i := range got {
+				if got[i] != tc.want[i] {
+					t.Fatalf("Version=%q derived %v, want %v (%s)", tc.version, got, tc.want, tc.why)
+				}
 			}
 		})
 	}

@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/log"
@@ -34,16 +36,34 @@ const policySnapshotFile = "compat-policy-snapshot.json"
 // policySnapshotSchema is the SNAPSHOT's own format number, separate from the
 // policy document's schema_version. They move independently: the document format
 // is a wire contract, this is a local file.
-const policySnapshotSchema = 1
+//
+// 2 IS THE CONTAINER. Format 1 held ONE payload, because one document carried
+// both panels; with a document per product there are two to replay, and a file
+// that holds only the last one would restore half a policy at boot. The older
+// format is refused rather than read for what it happens to contain: its payload
+// has no product, so a reader would have to guess which product it belongs to,
+// and a guess about which ceiling to install is how an instance comes back
+// believing a range nobody published.
+const policySnapshotSchema = 2
 
 type policySnapshot struct {
-	SnapshotSchema int             `json:"snapshot_schema"`
-	PolicySchema   int             `json:"policy_schema"`
-	Revision       string          `json:"revision"`
-	Source         string          `json:"source"`
-	FetchedAt      time.Time       `json:"fetched_at"`
-	Digest         string          `json:"digest"`
-	Payload        json.RawMessage `json:"payload"`
+	SnapshotSchema int `json:"snapshot_schema"`
+	// Documents is keyed by product. ONE FILE RATHER THAN ONE PER PRODUCT,
+	// because a boot has to restore them together: two files have no cross-file
+	// atomicity, so a crash between two writes leaves a snapshot that disagrees
+	// with itself about the day it was taken. The empty key is the per-major
+	// manifest, which carries both panels in one document — the frozen legacy
+	// route.
+	Documents map[string]policySnapshotDocument `json:"documents"`
+}
+
+type policySnapshotDocument struct {
+	PolicySchema int             `json:"policy_schema"`
+	Revision     string          `json:"revision"`
+	Source       string          `json:"source"`
+	FetchedAt    time.Time       `json:"fetched_at"`
+	Digest       string          `json:"digest"`
+	Payload      json.RawMessage `json:"payload"`
 }
 
 // storePolicySnapshotOrWarn records the document that was applied, and reports a
@@ -67,7 +87,13 @@ func storePolicySnapshotOrWarn(payload remoteCompatPayload) {
 	}
 }
 
-// storePolicySnapshot persists the document that was just applied.
+// snapshotWriteMu serializes the read-modify-write below. Two products are stored
+// by two different fetches, and an interleaving that lost one of them would leave
+// the next boot restoring one ceiling and fetching the other.
+var snapshotWriteMu sync.Mutex
+
+// storePolicySnapshot persists the document that was just applied, BESIDE whatever
+// the other product already left here.
 //
 // Written to a temporary file and renamed into place: a reader either sees the
 // previous snapshot or this one, never a half-written file. The temporary name
@@ -83,15 +109,35 @@ func storePolicySnapshot(payload remoteCompatPayload) error {
 		return fmt.Errorf("encode policy snapshot: %w", err)
 	}
 	sum := sha256.Sum256(body)
-	snapshot := policySnapshot{
-		SnapshotSchema: policySnapshotSchema,
-		PolicySchema:   payload.SchemaVersion,
-		Revision:       payload.UpdatedAt,
-		Source:         compatSnapshotSource(payload),
-		FetchedAt:      time.Now().UTC(),
-		Digest:         hex.EncodeToString(sum[:]),
-		Payload:        body,
+	document := policySnapshotDocument{
+		PolicySchema: payload.SchemaVersion,
+		Revision:     payload.UpdatedAt,
+		Source:       compatSnapshotSource(payload),
+		FetchedAt:    time.Now().UTC(),
+		Digest:       hex.EncodeToString(sum[:]),
+		Payload:      body,
 	}
+
+	snapshotWriteMu.Lock()
+	defer snapshotWriteMu.Unlock()
+
+	// THE OTHER PRODUCT'S DOCUMENT IS CARRIED FORWARD, not dropped. Each document
+	// is stored as it is applied, so replacing the file with only this one would
+	// make the next boot restore a single ceiling and fetch for the other — the
+	// half-a-policy state the container exists to prevent.
+	snapshot := policySnapshot{SnapshotSchema: policySnapshotSchema, Documents: map[string]policySnapshotDocument{}}
+	target := filepath.Join(dir, policySnapshotFile)
+	if raw, err := os.ReadFile(target); err == nil {
+		var existing policySnapshot
+		// A file this build cannot read is overwritten rather than merged: it is
+		// either a format from before the split or corrupt, and neither is a
+		// document to carry forward.
+		if json.Unmarshal(raw, &existing) == nil && existing.SnapshotSchema == policySnapshotSchema && existing.Documents != nil {
+			snapshot.Documents = existing.Documents
+		}
+	}
+	snapshot.Documents[payload.Product] = document
+
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("ensure cache dir: %w", err)
 	}
@@ -105,7 +151,6 @@ func storePolicySnapshot(payload remoteCompatPayload) error {
 	if err != nil {
 		return fmt.Errorf("encode policy snapshot: %w", err)
 	}
-	target := filepath.Join(dir, policySnapshotFile)
 	tmp := target + ".tmp"
 	if err := os.WriteFile(tmp, encoded, 0o644); err != nil {
 		return fmt.Errorf("write policy snapshot: %w", err)
@@ -121,6 +166,9 @@ func storePolicySnapshot(payload remoteCompatPayload) error {
 // is recorded rather than inferred: a snapshot with no provenance cannot be
 // reported on when an operator asks why a range is what it is.
 func compatSnapshotSource(payload remoteCompatPayload) string {
+	if payload.Product != "" {
+		return payload.Product + " ranges document"
+	}
 	if payload.Major > 0 {
 		return fmt.Sprintf("per-major manifest v%d", payload.Major)
 	}
@@ -159,22 +207,43 @@ func LoadPolicySnapshot() error {
 	if snapshot.SnapshotSchema != policySnapshotSchema {
 		return fmt.Errorf("policy snapshot format %d, this PSP build only reads %d", snapshot.SnapshotSchema, policySnapshotSchema)
 	}
-	if len(snapshot.Payload) == 0 {
-		return errors.New("policy snapshot carries no payload")
+	if len(snapshot.Documents) == 0 {
+		return errors.New("policy snapshot carries no documents")
 	}
-	sum := sha256.Sum256(snapshot.Payload)
-	if hex.EncodeToString(sum[:]) != snapshot.Digest {
-		return errors.New("policy snapshot digest does not match its payload; refusing to install a document that fails its own integrity check")
+	// EVERY DOCUMENT IS REPLAYED, AND EACH STANDS ON ITS OWN — the same rule the
+	// fetch side follows. One product's document failing its integrity check says
+	// nothing about the other's, and refusing both would drop a range that is
+	// perfectly good because its neighbour is not.
+	var failures []string
+	for product, document := range snapshot.Documents {
+		if err := replaySnapshotDocument(document); err != nil {
+			failures = append(failures, fmt.Sprintf("%s: %v", product, err))
+		}
+	}
+	if len(failures) > 0 {
+		return fmt.Errorf("policy snapshot does not apply to this build: %s", strings.Join(failures, "; "))
+	}
+	return nil
+}
+
+// replaySnapshotDocument verifies one document and installs it through the SAME
+// apply path the fetch used. That is what makes "startup re-matches against the
+// current build" true rather than aspirational: there is no second, weaker rule
+// for the boot case.
+func replaySnapshotDocument(document policySnapshotDocument) error {
+	if len(document.Payload) == 0 {
+		return errors.New("carries no payload")
+	}
+	sum := sha256.Sum256(document.Payload)
+	if hex.EncodeToString(sum[:]) != document.Digest {
+		return errors.New("digest does not match its payload; refusing to install a document that fails its own integrity check")
 	}
 	var payload remoteCompatPayload
-	if err := json.Unmarshal(snapshot.Payload, &payload); err != nil {
-		return fmt.Errorf("decode policy snapshot payload: %w", err)
+	if err := json.Unmarshal(document.Payload, &payload); err != nil {
+		return fmt.Errorf("decode payload: %w", err)
 	}
-	// The SAME apply path the fetch used. This is what makes "startup re-matches
-	// against the current build" true rather than aspirational: there is no
-	// second, weaker rule for the boot case.
 	if err := applyCompatPayload(payload); err != nil {
-		return fmt.Errorf("policy snapshot does not apply to this build: %w", err)
+		return err
 	}
 	return nil
 }

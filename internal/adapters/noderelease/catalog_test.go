@@ -142,24 +142,84 @@ func fixtureResponse(req *http.Request, status int, body string) *http.Response 
 	}
 }
 
+// servingCatalogDocument answers the REVIEWED-SET fetch, so a test's transport
+// sees only the GitHub API calls it was written to judge.
+//
+// IT IS WRAPPED AROUND EACH TRANSPORT RATHER THAN REWRITTEN INTO IT, because what
+// those transports assert is which RELEASE endpoints the catalog may ask for: a
+// test that also had to describe the reviewed-set request would be judging two
+// separate properties in one place, and the one it was written for would be the
+// harder to read.
+//
+// THE PUBLISHED DOCUMENT IS THE COPY THIS BINARY SHIPS in these tests, which is
+// what the repository holds today — so a fetch that succeeds and a fetch that
+// fails differ only in whether the rows in force were replaced, which is the
+// distinction the fallback exists to make.
+func servingCatalogDocument(inner roundTripFunc) roundTripFunc {
+	return servingCatalogDocumentBytes(inner, embeddedCatalog)
+}
+
+func servingCatalogDocumentBytes(inner roundTripFunc, document []byte) roundTripFunc {
+	return func(req *http.Request) (*http.Response, error) {
+		if strings.HasPrefix(req.URL.String(), versionpkg.RemoteCompatURLBase) {
+			return fixtureResponse(req, http.StatusOK, string(document)), nil
+		}
+		return inner(req)
+	}
+}
+
 func fixtureCatalog(t *testing.T, transport roundTripFunc, now func() time.Time) *Catalog {
+	t.Helper()
+	return fixtureCatalogWithDocument(t, transport, nil, now)
+}
+
+// fixtureRows is the reviewed set the shipped copy carries, for a case that needs
+// to change it before it is served.
+func fixtureRows(t *testing.T) []reviewedRelease {
+	t.Helper()
+	_, rows, err := decodeCatalogDocument(embeddedCatalog, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return rows
+}
+
+// catalogDocumentWith renders a reviewed set as the document the catalog fetches.
+//
+// THE FIXTURE IS THE WIRE SHAPE, which is the point: a case that needs an
+// arbitrary allow-list supplies it the way production does, instead of reaching
+// into the catalog afterwards — and the rows marshal through the same tags the
+// published document uses, so there is one shape to keep right rather than two.
+func catalogDocumentWith(t *testing.T, rows []reviewedRelease) []byte {
+	t.Helper()
+	raw, err := json.Marshal(map[string]any{
+		"schema_version": 2, "panel_major": 4, "released_nodes": rows,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return raw
+}
+
+// fixtureCatalogWithDocument builds a catalog whose reviewed set ARRIVES OVER THE
+// WIRE. rows == nil serves the copy this binary ships.
+func fixtureCatalogWithDocument(t *testing.T, transport roundTripFunc, rows []reviewedRelease, now func() time.Time) *Catalog {
 	t.Helper()
 	if now == nil {
 		now = func() time.Time { return fixtureNow }
 	}
-	catalog, err := New(Options{HTTPClient: &http.Client{Transport: transport}, Now: now, PSPMajor: 4})
+	document := embeddedCatalog
+	if rows != nil {
+		document = catalogDocumentWith(t, rows)
+	}
+	catalog, err := New(Options{
+		HTTPClient: &http.Client{Transport: servingCatalogDocumentBytes(transport, document)},
+		Now:        now,
+		PSPMajor:   4,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Semantic single-release HTTP fixtures must not inherit additional
-	// production registry entries as compatibility reviews are appended.
-	for _, reviewed := range catalog.reviewed {
-		if reviewed.Version == fixtureVersion {
-			catalog.reviewed = []reviewedRelease{reviewed}
-			return catalog
-		}
-	}
-	t.Fatalf("single-release fixture is no longer reviewed: %s", fixtureVersion)
 	return catalog
 }
 
@@ -256,7 +316,7 @@ func TestNewUsesOnlyReviewedMajorAndDoesNotFetch(t *testing.T) {
 	})
 	for _, major := range []int{0, 4, 3, 5} {
 		catalog, err := New(Options{
-			HTTPClient: &http.Client{Transport: transport}, Now: func() time.Time { return fixtureNow }, PSPMajor: major,
+			HTTPClient: &http.Client{Transport: servingCatalogDocument(transport)}, Now: func() time.Time { return fixtureNow }, PSPMajor: major,
 		})
 		if err != nil {
 			t.Fatalf("major %d: %v", major, err)
@@ -313,14 +373,13 @@ func TestCatalogListsByPublicationNotByVersion(t *testing.T) {
 	// methods offered. A partial entry is dropped by the catalog rather than
 	// presented — which is a property of its own, asserted elsewhere.
 	reviewed := []reviewedRelease{
-		{Version: higher, PSPMajor: 4, Notes: "reviewed: the older publication",
-			Methods: []string{"linux", "docker", "manual"}, Platforms: fixturePlatforms, DockerPublishedTag: higher},
-		{Version: lower, PSPMajor: 4, Notes: "reviewed: the newer publication",
-			Methods: []string{"linux", "docker", "manual"}, Platforms: fixturePlatforms, DockerPublishedTag: lower},
+		{Version: higher, Notes: "reviewed: the older publication",
+			InstallMethods: []string{"linux", "docker", "manual"}, Platforms: fixturePlatforms, DockerPublishedTag: higher},
+		{Version: lower, Notes: "reviewed: the newer publication",
+			InstallMethods: []string{"linux", "docker", "manual"}, Platforms: fixturePlatforms, DockerPublishedTag: lower},
 	}
 	var requested []string
-	catalog, err := New(Options{
-		HTTPClient: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+	catalog := fixtureCatalogWithDocument(t, func(req *http.Request) (*http.Response, error) {
 			tag, ok := strings.CutPrefix(req.URL.String(), "https://api.github.com/repos/KazuhaHub/Passwall-Node/releases/tags/")
 			// THE URL CARRIES THE TAG AND THE REGISTRY HOLDS VERSIONS. The fixture
 			// makes the same mapping the catalog does, by asking the same function
@@ -335,15 +394,7 @@ func TestCatalogListsByPublicationNotByVersion(t *testing.T) {
 			release.PublishedAt = &published
 			release.Prerelease = true // published as a candidate, like every release so far
 			return fixtureResponse(req, http.StatusOK, fixtureBody(t, release)), nil
-		})},
-		Now: func() time.Time { return fixtureNow }, PSPMajor: 4,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	// The registry is the catalog's, and the shipped one carries a single release;
-	// this case says which releases it is asking about.
-	catalog.reviewed = reviewed
+	}, reviewed, nil)
 
 	list, err := catalog.List(context.Background())
 	if err != nil || len(list.Releases) != 2 || !list.CheckedAt.Equal(fixtureNow) {
@@ -487,7 +538,7 @@ func (errorReader) Read([]byte) (int, error) {
 func TestCatalogRejectsRedirectEvenWithInjectedPermissiveClient(t *testing.T) {
 	var calls int
 	client := &http.Client{
-		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		Transport: servingCatalogDocument(roundTripFunc(func(req *http.Request) (*http.Response, error) {
 			calls++
 			if req.URL.Host != "api.github.com" {
 				t.Errorf("redirect left official API: %s", req.URL)
@@ -495,7 +546,7 @@ func TestCatalogRejectsRedirectEvenWithInjectedPermissiveClient(t *testing.T) {
 			response := fixtureResponse(req, http.StatusFound, "PRIVATE_RESPONSE")
 			response.Header.Set("Location", "https://sensitive.invalid/private")
 			return response, nil
-		}),
+		})),
 		CheckRedirect: func(*http.Request, []*http.Request) error { return nil },
 	}
 	catalog, err := New(Options{HTTPClient: client, Now: func() time.Time { return fixtureNow }})
@@ -610,7 +661,13 @@ func TestCatalogRejectsDuplicateAssetNames(t *testing.T) {
 func TestCatalogOnlyExplicitReviewedReleasesAndSortsExactVersions(t *testing.T) {
 	versions := []string{fixtureVersion, "4.0.0.1", "4.1.0"}
 	var requested []string
-	catalog := fixtureCatalog(t, func(req *http.Request) (*http.Response, error) {
+	rows := fixtureRows(t)
+	for _, version := range versions[1:] {
+		reviewed := rows[0]
+		reviewed.Version, reviewed.DockerPublishedTag = version, version
+		rows = append(rows, reviewed)
+	}
+	catalog := fixtureCatalogWithDocument(t, func(req *http.Request) (*http.Response, error) {
 		// THE URL CARRIES THE TAG AND THE RECORD HOLDS THE VERSION. Reading the
 		// path segment as the version is the swap this whole file is about: it
 		// would build a fixture release named `release/4.0.0`.
@@ -621,13 +678,7 @@ func TestCatalogOnlyExplicitReviewedReleasesAndSortsExactVersions(t *testing.T) 
 		}
 		requested = append(requested, version)
 		return fixtureResponse(req, http.StatusOK, fixtureBody(t, fixtureRelease(version))), nil
-	}, nil)
-	base := catalog.reviewed[0]
-	for _, version := range versions[1:] {
-		reviewed := base
-		reviewed.Version, reviewed.DockerPublishedTag = version, version
-		catalog.reviewed = append(catalog.reviewed, reviewed)
-	}
+	}, rows, nil)
 	list, err := catalog.List(context.Background())
 	if err != nil || len(list.Releases) != 3 || !reflect.DeepEqual(requested, versions) {
 		t.Fatalf("requests=%v list=%+v err=%v", requested, list, err)
@@ -650,11 +701,12 @@ func TestCatalogOnlyExplicitReviewedReleasesAndSortsExactVersions(t *testing.T) 
 		t.Fatalf("stable/testing channels were inferred incorrectly: %v", channels)
 	}
 	// The curated methods remain an upper bound even if all public assets exist.
-	catalog = fixtureCatalog(t, func(req *http.Request) (*http.Response, error) {
+	curated := fixtureRows(t)
+	curated[0].InstallMethods = []string{"manual"}
+	curated[0].DockerPublishedTag = ""
+	catalog = fixtureCatalogWithDocument(t, func(req *http.Request) (*http.Response, error) {
 		return fixtureResponse(req, http.StatusOK, fixtureBody(t, fixtureRelease(fixtureVersion))), nil
-	}, nil)
-	catalog.reviewed[0].Methods = []string{"manual"}
-	catalog.reviewed[0].DockerPublishedTag = ""
+	}, curated, nil)
 	list, err = catalog.List(context.Background())
 	if err != nil || len(list.Releases) != 1 || !reflect.DeepEqual(list.Releases[0].Methods, []string{"manual"}) {
 		t.Fatalf("unreviewed installation method became available: %+v %v", list, err)
@@ -893,16 +945,28 @@ func TestCatalogCanceledContextNeverFetchesOrReadsCache(t *testing.T) {
 }
 
 func TestCatalogInvalidCuratedTagCannotChooseAnotherHTTPSource(t *testing.T) {
-	var calls int
-	catalog := fixtureCatalog(t, func(req *http.Request) (*http.Response, error) {
-		calls++
+	const malformed = "v0.0.1/../../https://sensitive.invalid/PRIVATE_RESPONSE"
+	var asked []string
+	rows := fixtureRows(t)
+	rows[0].Version = malformed
+	catalog := fixtureCatalogWithDocument(t, func(req *http.Request) (*http.Response, error) {
+		asked = append(asked, req.URL.String())
 		return fixtureResponse(req, http.StatusOK, "PRIVATE_RESPONSE"), nil
-	}, nil)
-	catalog.reviewed[0].Version = "v0.0.1/../../https://sensitive.invalid/PRIVATE_RESPONSE"
+	}, rows, nil)
 	list, err := catalog.List(context.Background())
+	// THE DOCUMENT IS REFUSED WHOLE rather than partially trusted, and the set
+	// already in force answers instead. THAT SET IS ITSELF UNREACHABLE HERE — this
+	// transport serves no valid release — so the list comes back unavailable,
+	// which is the point: the malformed value must not be what decides anything.
 	assertUnavailable(t, list, err)
-	if calls != 0 {
-		t.Fatalf("malformed compatibility tag selected an HTTP source: calls=%d", calls)
+	// AND THE MALFORMED VALUE NEVER BECAME AN ADDRESS. This is the property, and it
+	// is asserted on the URL rather than on a call count: a count would also be
+	// satisfied by never contacting the release source at all, which is a different
+	// fact and one this case does not establish.
+	for _, url := range asked {
+		if strings.Contains(url, "sensitive.invalid") || strings.Contains(url, "..") {
+			t.Fatalf("malformed compatibility value reached an address: %s", url)
+		}
 	}
 }
 
@@ -917,15 +981,15 @@ func TestReviewedRegistryRejectsUnsafeOrUnverifiedRecords(t *testing.T) {
 	}{
 		{"floating version", func(r *reviewedRelease) { r.Version = "latest" }},
 		{"version URL injection", func(r *reviewedRelease) { r.Version = "v0.0.1/../../PRIVATE_RESPONSE" }},
-		{"missing PSP major", func(r *reviewedRelease) { r.PSPMajor = 0 }},
+		{"no platforms", func(r *reviewedRelease) { r.Platforms = nil }},
 		{"no notes", func(r *reviewedRelease) { r.Notes = "" }},
 		{"oversized notes", func(r *reviewedRelease) { r.Notes = strings.Repeat("a", 4097) }},
-		{"unknown method", func(r *reviewedRelease) { r.Methods = []string{"ssh"} }},
-		{"duplicate method", func(r *reviewedRelease) { r.Methods = []string{"manual", "manual"} }},
-		{"no methods", func(r *reviewedRelease) { r.Methods = nil }},
+		{"unknown method", func(r *reviewedRelease) { r.InstallMethods = []string{"ssh"} }},
+		{"duplicate method", func(r *reviewedRelease) { r.InstallMethods = []string{"manual", "manual"} }},
+		{"no methods", func(r *reviewedRelease) { r.InstallMethods = nil }},
 		{"docker floating tag", func(r *reviewedRelease) { r.DockerPublishedTag = "beta" }},
 		{"docker other exact tag", func(r *reviewedRelease) { r.DockerPublishedTag = "v0.0.1-beta2" }},
-		{"docker not reviewed", func(r *reviewedRelease) { r.Methods = []string{"manual"} }},
+		{"docker not reviewed", func(r *reviewedRelease) { r.InstallMethods = []string{"manual"} }},
 		{"unsupported OS", func(r *reviewedRelease) { r.Platforms = []ports.NodeReleasePlatform{{OS: "freebsd", Arch: "amd64"}} }},
 		{"unsupported arch", func(r *reviewedRelease) { r.Platforms = []ports.NodeReleasePlatform{{OS: "linux", Arch: "386"}} }},
 		{"duplicate platform", func(r *reviewedRelease) {
@@ -968,7 +1032,14 @@ func TestCatalogOrdersByPublicationNotByVersionText(t *testing.T) {
 	for index, version := range released {
 		published[version] = base.Add(time.Duration(index) * time.Hour)
 	}
-	catalog := fixtureCatalog(t, func(req *http.Request) (*http.Response, error) {
+	template := fixtureRows(t)[0]
+	rows := make([]reviewedRelease, 0, len(released))
+	for _, version := range released {
+		reviewed := template
+		reviewed.Version, reviewed.DockerPublishedTag = version, version
+		rows = append(rows, reviewed)
+	}
+	catalog := fixtureCatalogWithDocument(t, func(req *http.Request) (*http.Response, error) {
 		// THE URL CARRIES THE TAG; the fixture release is named by the version.
 		tag := strings.TrimPrefix(req.URL.String(), "https://api.github.com/repos/KazuhaHub/Passwall-Node/releases/tags/")
 		version, identified := versionpkg.VersionOfReleaseTag(tag)
@@ -979,15 +1050,7 @@ func TestCatalogOrdersByPublicationNotByVersionText(t *testing.T) {
 		at := published[version]
 		release.PublishedAt = &at
 		return fixtureResponse(req, http.StatusOK, fixtureBody(t, release)), nil
-	}, nil)
-
-	template := catalog.reviewed[0]
-	catalog.reviewed = nil
-	for _, version := range released {
-		reviewed := template
-		reviewed.Version, reviewed.DockerPublishedTag = version, version
-		catalog.reviewed = append(catalog.reviewed, reviewed)
-	}
+	}, rows, nil)
 
 	list, err := catalog.List(context.Background())
 	if err != nil {
@@ -1094,8 +1157,8 @@ func TestAProductReleaseIsAddressedByItsTagAndNamedByItsVersion(t *testing.T) {
 		return fixtureResponse(req, http.StatusOK, fixtureBody(t, release)), nil
 	}), nil)
 	catalog.reviewed = []reviewedRelease{{
-		Version: version, PSPMajor: 4, Notes: "reviewed",
-		Methods: []string{"linux", "docker", "manual"}, Platforms: fixturePlatforms,
+		Version: version, Notes: "reviewed",
+		InstallMethods: []string{"linux", "docker", "manual"}, Platforms: fixturePlatforms,
 		DockerPublishedTag: version,
 	}}
 

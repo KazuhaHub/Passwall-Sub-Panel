@@ -19,6 +19,9 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/safehttp"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/version"
+
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/log"
+
 )
 
 const (
@@ -31,8 +34,26 @@ const (
 	releaseBase    = "https://github.com/KazuhaHub/Passwall-Node/releases/"
 )
 
-//go:embed reviewed.json
-var reviewedJSON []byte
+// embeddedCatalog is the document this build ships FOR ITS OWN MAJOR: a
+// byte-identical copy of the published one.
+//
+// WHY A COPY AT ALL, when the published document is fetched anyway. The fetch can
+// fail on its own — a network policy that blocks raw.githubusercontent while
+// allowing api.github.com is the ordinary case — and this is the allow-list of
+// last resort for it. WHAT IT IS NOT IS AN OFFLINE CATALOG: every entry still has
+// to be confirmed against the GitHub API before it is offered, so a panel with no
+// egress at all has no catalog either way. What the copy buys is that a failed
+// fetch cannot look like "no release was ever reviewed".
+//
+// A COPY RATHER THAN A SECOND DOCUMENT. This used to be a hand-maintained
+// registry with its own shape — a psp_major on every row, its own method
+// vocabulary — kept in step with the manifest by hand, so adding a release meant
+// editing both and republishing the panel. The file below is the same JSON as the
+// published document, and TestTheEmbeddedCatalogMatchesThePublishedOne fails the
+// build when the two drift.
+//
+//go:embed passwall-node-v4.json
+var embeddedCatalog []byte
 
 var errUnavailable = errors.New("Node release source is unavailable")
 
@@ -44,18 +65,51 @@ type Options struct {
 	PSPMajor   int
 }
 
+// nodeCatalogDocument is the published Passwall Node document, decoded for the
+// fields THIS package reads.
+//
+// TWO AUDIENCES READ THE SAME FILE AND ASK DIFFERENT QUESTIONS. The CI planner and
+// the compatibility matrix read released_nodes[] by position at min_supported to
+// decide what to TEST. This reads the same rows for what may be OFFERED, plus the
+// per-release review notes the dialog shows. Unknown fields are therefore
+// tolerated on purpose: the rows also carry protocol_version, base_sync,
+// remote_upgrade and upgrade_methods, and neither audience should have to know the
+// other's vocabulary to read its own half.
+type nodeCatalogDocument struct {
+	SchemaVersion int               `json:"schema_version"`
+	PanelMajor    int               `json:"panel_major"`
+	Releases      []reviewedRelease `json:"released_nodes"`
+}
+
+// reviewedRelease is one reviewed release, in the shape the document publishes.
+//
+// psp_major IS GONE and its absence is the point: the document is addressed by the
+// panel major in its own NAME, so a second copy of that number on every row was a
+// second place to get it wrong. The top-level panel_major is the authority.
 type reviewedRelease struct {
-	Version            string                      `json:"version"`
-	PSPMajor           int                         `json:"psp_major"`
-	Notes              string                      `json:"notes"`
-	Methods            []string                    `json:"methods"`
+	Version string `json:"version"`
+	Notes   string `json:"notes"`
+	// InstallMethods is what the OPERATOR picks — linux, docker, manual — and it is
+	// a different axis from the document's upgrade_methods (linux-systemd,
+	// managed-docker), which is what the upgrade machinery means by a path. Both
+	// survive because they answer different questions, and this one is
+	// cross-checked against the published assets in catalogEntry.
+	InstallMethods     []string                    `json:"install_methods"`
 	Platforms          []ports.NodeReleasePlatform `json:"platforms"`
 	DockerPublishedTag string                      `json:"docker_published_tag"`
 }
 
 type Catalog struct {
-	client   *http.Client
-	now      func() time.Time
+	client *http.Client
+	now    func() time.Time
+	// major is the panel major this catalog was built for, and it decides which
+	// published document this build asks for.
+	major int
+	// reviewed is the allow-list IN FORCE: the copy this build ships until the
+	// published document can be read, and the published document's rows from then
+	// on. A refresh that fails leaves it where it was, which is the same
+	// degradation the ranges take — against a fetch failure, the last reviewed set
+	// rather than no catalog.
 	reviewed []reviewedRelease
 	mu       sync.Mutex
 	cached   ports.NodeReleaseList
@@ -107,22 +161,23 @@ func New(opts Options) (*Catalog, error) {
 	if opts.PSPMajor < 1 {
 		return nil, errors.New("invalid PSP major for Node release catalog")
 	}
-	var registry struct {
-		Releases []reviewedRelease `json:"releases"`
+	// THE SHIPPED COPY IS VALIDATED AT CONSTRUCTION, because a build that ships a
+	// document it cannot read has no allow-list to fall back to and no way to say
+	// so later — the failure would surface as an empty catalog on a panel whose
+	// network is fine.
+	installedMajor, installed, err := decodeCatalogDocument(embeddedCatalog, 0)
+	if err != nil {
+		return nil, fmt.Errorf("the embedded Node release catalog is unusable: %w", err)
 	}
-	if err := json.Unmarshal(reviewedJSON, &registry); err != nil || len(registry.Releases) > maxReviewed {
-		return nil, errors.New("invalid reviewed Node release compatibility")
-	}
-	seen := make(map[string]bool, len(registry.Releases))
-	selected := make([]reviewedRelease, 0, len(registry.Releases))
-	for _, entry := range registry.Releases {
-		if !validReviewed(entry) || seen[entry.Version] {
-			return nil, errors.New("invalid reviewed Node release compatibility")
-		}
-		seen[entry.Version] = true
-		if entry.PSPMajor == opts.PSPMajor {
-			selected = append(selected, entry)
-		}
+	// A MAJOR THIS BUILD SHIPS NO REVIEWS FOR GETS AN EMPTY SET, NOT AN ERROR.
+	// PSPMajorForVersion answers for whatever a build is stamped as, and a build
+	// stamped for a panel major this binary was not compiled for has no reviews of
+	// its own. Refusing to construct would make an optional metadata feature stop
+	// the panel from booting; an empty catalog offers nothing, which is the same
+	// answer an incompatible major got before.
+	reviewed := installed
+	if installedMajor != opts.PSPMajor {
+		reviewed = nil
 	}
 	client := safehttp.NewClient(requestTimeout)
 	if opts.HTTPClient != nil {
@@ -138,17 +193,52 @@ func New(opts Options) (*Catalog, error) {
 	if opts.Now == nil {
 		opts.Now = time.Now
 	}
-	return &Catalog{client: client, now: opts.Now, reviewed: selected}, nil
+	return &Catalog{client: client, now: opts.Now, major: opts.PSPMajor, reviewed: reviewed}, nil
+}
+
+// decodeCatalogDocument validates a document and returns the panel major it names
+// with the rows for that major.
+//
+// IT IS APPLIED TO UNTRUSTED INPUT — whatever the fetch returned — as well as to
+// the copy this build ships, and the same rules cover both: every row has to name
+// a release version, carry review notes, at least one install method and at least
+// one platform. The panel major is checked against the DOCUMENT's own field rather
+// than trusted from the name it arrived under, so a v5 document served at the v4
+// address is refused instead of installing another major's releases.
+func decodeCatalogDocument(raw []byte, wantMajor int) (int, []reviewedRelease, error) {
+	var document nodeCatalogDocument
+	if err := json.Unmarshal(raw, &document); err != nil {
+		return 0, nil, errors.New("invalid reviewed Node release compatibility")
+	}
+	if document.PanelMajor < 1 {
+		return 0, nil, errors.New("the Node release catalog names no panel major")
+	}
+	if wantMajor != 0 && document.PanelMajor != wantMajor {
+		return document.PanelMajor, nil, fmt.Errorf("the document is for panel major %d, and this catalog is for %d", document.PanelMajor, wantMajor)
+	}
+	if len(document.Releases) == 0 || len(document.Releases) > maxReviewed {
+		return 0, nil, errors.New("invalid reviewed Node release compatibility")
+	}
+	seen := make(map[string]bool, len(document.Releases))
+	selected := make([]reviewedRelease, 0, len(document.Releases))
+	for _, entry := range document.Releases {
+		if !validReviewed(entry) || seen[entry.Version] {
+			return 0, nil, errors.New("invalid reviewed Node release compatibility")
+		}
+		seen[entry.Version] = true
+		selected = append(selected, entry)
+	}
+	return document.PanelMajor, selected, nil
 }
 
 func validReviewed(entry reviewedRelease) bool {
-	if !version.IsReleaseVersion(entry.Version) || entry.PSPMajor < 1 ||
-		len(entry.Notes) == 0 || len(entry.Notes) > 4096 || len(entry.Methods) == 0 ||
+	if !version.IsReleaseVersion(entry.Version) ||
+		len(entry.Notes) == 0 || len(entry.Notes) > 4096 || len(entry.InstallMethods) == 0 ||
 		len(entry.Platforms) == 0 || len(entry.Platforms) > 6 {
 		return false
 	}
 	methods := make(map[string]bool)
-	for _, method := range entry.Methods {
+	for _, method := range entry.InstallMethods {
 		if (method != "linux" && method != "docker" && method != "manual") || methods[method] {
 			return false
 		}
@@ -250,7 +340,11 @@ type githubAsset struct {
 
 func (c *Catalog) fetch(ctx context.Context) (ports.NodeReleaseList, error) {
 	result := ports.NodeReleaseList{Releases: []ports.NodeReleaseCatalogEntry{}}
-	for _, reviewed := range c.reviewed {
+	reviewed, err := c.reviewedReleases(ctx)
+	if err != nil {
+		return ports.NodeReleaseList{}, err
+	}
+	for _, reviewed := range reviewed {
 		if err := ctx.Err(); err != nil {
 			return ports.NodeReleaseList{}, err
 		}
@@ -307,6 +401,75 @@ func (c *Catalog) fetch(ctx context.Context) (ports.NodeReleaseList, error) {
 	})
 	result.CheckedAt = c.now().UTC()
 	return result, nil
+}
+
+// reviewedReleases returns the allow-list: the PUBLISHED document when it can be
+// had, and the copy this build ships when it cannot.
+//
+// IT DEGRADES RATHER THAN REFUSING, and that is this package's existing stance
+// rather than a new one — the catalog's failure contract has always been "offer
+// nothing rather than offer something unreviewed". A document that cannot be
+// fetched, or that arrives and cannot be read, is therefore not an empty catalog:
+// it is the same reviewed set the panel shipped with, older by however long the
+// fetch has been failing, with the degradation logged rather than swallowed.
+func (c *Catalog) reviewedReleases(ctx context.Context) ([]reviewedRelease, error) {
+	raw, err := c.fetchCatalogDocument(ctx)
+	if err != nil {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		log.Warn("Node release catalog document not fetched; offering the reviewed set already in force", "err", err)
+		return c.reviewedSet(), nil
+	}
+	_, rows, err := decodeCatalogDocument(raw, c.major)
+	if err != nil {
+		log.Warn("Node release catalog document not usable; offering the reviewed set already in force", "err", err)
+		return c.reviewedSet(), nil
+	}
+	// THE PUBLISHED DOCUMENT BECOMES THE SET IN FORCE, so a later fetch failure
+	// degrades to the newest reviewed set rather than to the one this binary
+	// shipped with.
+	c.mu.Lock()
+	c.reviewed = rows
+	c.mu.Unlock()
+	return rows, nil
+}
+
+// reviewedSet reads the allow-list in force. The mutex is NOT held by the caller:
+// List releases it before fetching, which is what lets a refresh publish its
+// result here.
+func (c *Catalog) reviewedSet() []reviewedRelease {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.reviewed
+}
+
+// fetchCatalogDocument reads the published document for THIS build's major.
+//
+// THE ADDRESS IS THE COMPATIBILITY DOCUMENTS' ADDRESS — same base, same naming —
+// while the TRANSPORT stays this package's. The catalog has a test seam that the
+// ranges do not, and borrowing their client would make this package's tests depend
+// on process-global state it does not own.
+func (c *Catalog) fetchCatalogDocument(ctx context.Context) ([]byte, error) {
+	name := version.RemoteNodeCatalogDocument(c.major)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, version.RemoteCompatURLBase+name, nil)
+	if err != nil {
+		return nil, errUnavailable
+	}
+	req.Header.Set("Accept", "application/json")
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return nil, errUnavailable
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, errUnavailable
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponse+1))
+	if err != nil || len(body) > maxResponse {
+		return nil, errUnavailable
+	}
+	return body, nil
 }
 
 // releaseChannelAgrees reports whether GitHub's prerelease flag may be taken at
@@ -426,7 +589,7 @@ func catalogEntry(reviewed reviewedRelease, release *githubRelease, tag string) 
 		}
 	}
 	for _, method := range []string{"linux", "docker", "manual"} {
-		if !contains(reviewed.Methods, method) {
+		if !contains(reviewed.InstallMethods, method) {
 			continue
 		}
 		if method == "manual" && len(entry.Platforms) > 0 ||

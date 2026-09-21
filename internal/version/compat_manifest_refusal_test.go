@@ -30,12 +30,12 @@ import (
 func TestManifestFailureLeavesTheLastValidRangeInForce(t *testing.T) {
 	priorVersion := Version
 	priorMax := ActiveMaxTestedXUI()
-	priorApplied := currentAppliedRevision()
+	priorApplied := currentAppliedRevision("")
 	Version = "v4.0.0-beta.20"
 	t.Cleanup(func() {
 		Version = priorVersion
 		SetActiveMaxTestedXUI(priorMax)
-		setAppliedRevision(priorApplied)
+		setAppliedRevision("", priorApplied)
 	})
 
 	const goodUpdatedAt = "2026-09-19"
@@ -127,7 +127,7 @@ func TestManifestFailureLeavesTheLastValidRangeInForce(t *testing.T) {
 			if got := ActiveMaxTestedXUI(); got != goodMaxTested {
 				t.Errorf("tested ceiling = %q, want it left at %q", got, goodMaxTested)
 			}
-			if got := currentAppliedRevision(); got != goodUpdatedAt {
+			if got := currentAppliedRevision(""); got != goodUpdatedAt {
 				t.Errorf("applied revision = %q, want it left at %q", got, goodUpdatedAt)
 			}
 

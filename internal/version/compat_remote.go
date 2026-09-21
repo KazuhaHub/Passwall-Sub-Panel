@@ -3,6 +3,7 @@ package version
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -16,20 +17,20 @@ import (
 	"golang.org/x/mod/semver"
 )
 
-// defaultRemoteCompatURLBase is the GitHub raw path under which per-major
-// compat JSON files live. Each PSP build pulls the file matching its own
-// major (v3.x → v3.json, v4.x → v4.json) — the major number is appended
-// at fetch time. Per-major split (v3.6.0-beta.7) replaces the v3.6.0-beta.5
-// single-file model: each file is naturally bounded by "how many minors
-// a single major ships" (~10), maintainers only ever edit the active-
-// major file, and bumping to a new major (v4) is just "create v4.json,
-// leave v3.json frozen".
+// defaultRemoteCompatURLBase is the GitHub raw path under which the compat JSON
+// files are published. WHICH files a build reads is compatDocumentSources' job,
+// and there are two shapes there:
+//
+//   - a LEGACY build reads ONE per-major manifest, named after its compatibility
+//     major (v3.x → v3.json). That route is FROZEN rather than removed: builds
+//     that already shipped read it by a name their own version derives, and a
+//     document they fetch by name is a compatibility surface, not a file to tidy.
+//   - a PRODUCT build reads ONE DOCUMENT PER PRODUCT, named after the PANEL MAJOR
+//     its own version carries (4.0.0 → 3x-ui-v4.json, sui-v4.json).
+//
+// The address is shared with the Node release catalog, which fetches
+// passwall-node-v<major>.json from here through RemoteCompatURLBase.
 const defaultRemoteCompatURLBase = "https://raw.githubusercontent.com/KazuhaHub/passwall-sub-panel/main/docs/compat/"
-
-// panelRangesDocumentName is the document a build reaches when no major names a
-// file for it. It carries its own applicability window, so the name never has to
-// be inferred from the version — which is the whole reason it exists.
-const panelRangesDocumentName = "panel-ranges-v1.json"
 
 // remoteFetchThrottle gates how often RefreshRemoteCompat actually hits the
 // network. The Test handler triggers a refresh on every "test connection"
@@ -53,21 +54,12 @@ const httpFetchTimeout = 8 * time.Second
 // unprefixed version here would have derived that path and fetched a file that
 // does not exist — or worse, that exists and means something else.
 //
-// So a build whose version is not the legacy form gets no per-major URL at all.
-//
-// WHAT IT GETS INSTEAD IS NOT BUILT YET, and saying so is the point of this line.
-// The release policy that governs Node releases carries `applies_to_psp` — an
-// explicit applicable range rather than a number to index a file by — but it
-// carries RELEASES, not XUI/SUI COMPATIBILITY RANGES. So as things stand a
-// product-versioned build reads neither: its ceiling is empty and a probed panel
-// is reported as untested. That is fail-closed, and it is a GAP rather than a
-// design; the earlier wording here said the build "reads its policy instead",
-// which described a document that does not exist.
-//
-// Closing it is V03's remaining work: carry the compat ranges in a policy-shaped
-// document with its own applicable range, and keep the per-major files for builds
-// that still read them. What must NOT happen first is an unprefixed version
-// deriving a path from this pattern.
+// So a build whose version is not the legacy form gets no PER-MAJOR URL from this
+// pattern. It gets something else entirely: the per-product documents, whose names
+// are derived from the same first segment but through compatDocumentSources rather
+// than from a v-prefixed string. Keeping the two apart is what stops an unprefixed
+// version from silently inheriting a file number it has no claim to — the window
+// each document carries is the other half of that guard.
 var pspMajorRe = regexp.MustCompile(`^v(\d+)\.`)
 
 // schemaVersion is what the base per-major JSON files must carry. Bumped to 2
@@ -107,7 +99,14 @@ type remoteCompatPayload struct {
 	SchemaVersion int                    `json:"schema_version"`
 	Major         int                    `json:"major"`
 	UpdatedAt     string                 `json:"updated_at"`
-	Entries       []remoteCompatPSPEntry `json:"entries"`
+	// Product is which product's ranges this payload carries, and it travels with
+	// the payload for the same reason the window below does: the snapshot, the
+	// revision guard and the install all have to know WHICH document they are
+	// about. Empty means the payload came from a per-major manifest, which carries
+	// both panels in one document — the frozen legacy route, where "both" is the
+	// correct answer rather than a missing one.
+	Product   string                 `json:"product,omitempty"`
+	Entries   []remoteCompatPSPEntry `json:"entries"`
 	// Advisories is the optional top-level version→advisory map surfaced in the
 	// pre-upgrade confirm dialog. Top-level (not per-entry) because "what breaks
 	// when you upgrade TO 3X-UI X" is independent of which PSP version is asking.
@@ -123,16 +122,17 @@ type remoteCompatPayload struct {
 	// entries replace only the XUI/SUI ranges. Advisories stay in this base
 	// document so old readers retain the full upgrade guidance.
 	RangeOverlay string `json:"range_overlay,omitempty"`
-	// AppliesToPSP is set ONLY when this payload came from a panel ranges
+	// AppliesToPSP is set when this payload came from a per-product ranges
 	// document, and it is what makes such a document installable at all.
 	//
-	// A per-major manifest says which builds it is for by its NAME and its
-	// `major` field: a build derives its major and reads the file with that name.
-	// A panel ranges document is reached by a FIXED name and says it HERE,
-	// because under the product scheme the first segment of a version is a
-	// RELEASE LINE, not a compatibility major — there is no number that could
-	// name the file. Set means "match by this window"; absent means "match by the
-	// derived major", which is what every manifest does.
+	// TWO WAYS TO SAY WHICH BUILDS A DOCUMENT IS FOR, because there are two kinds
+	// of document. A per-major manifest says it by its NAME and its `major` field:
+	// a legacy build derives its major and reads the file with that name. A
+	// per-product document is named after the PANEL major, which a product version
+	// carries as its first segment — and a name is not evidence, so it says it
+	// HERE as well: the name decides where to look, and this window decides
+	// whether what was found counts. Set means "match by this window"; absent
+	// means "match by the derived major", which is what every manifest does.
 	AppliesToPSP *PolicyPSPRange `json:"applies_to_psp,omitempty"`
 }
 
@@ -198,13 +198,16 @@ func shouldFetchCompat(lastAt, now time.Time, force bool) bool {
 // single-flight) — used by the panel-upgrade pre-flight so the support gate
 // never decides on a stale cache.
 func RefreshRemoteCompat(ctx context.Context, urlOverride string, force bool) error {
-	url := urlOverride
-	if url == "" {
-		var err error
-		url, err = defaultURLForCurrentVersion()
-		if err != nil {
-			return err
-		}
+	sources, err := compatDocumentSources()
+	if urlOverride != "" {
+		// AN OVERRIDE POINTS AT ONE DOCUMENT, and it carries no product because an
+		// operator may point at either kind: the apply path takes the product from
+		// the document when the source does not already know it.
+		sources = []compatSource{{Name: urlOverride, URL: urlOverride}}
+		err = nil
+	}
+	if err != nil {
+		return err
 	}
 
 	refreshMu.Lock()
@@ -219,7 +222,7 @@ func RefreshRemoteCompat(ctx context.Context, urlOverride string, force bool) er
 	refreshInflight = true
 	refreshMu.Unlock()
 
-	err := fetchAndApply(ctx, url)
+	err = fetchAndApplyAll(ctx, sources)
 
 	refreshMu.Lock()
 	refreshInflight = false
@@ -229,6 +232,28 @@ func RefreshRemoteCompat(ctx context.Context, urlOverride string, force bool) er
 	}
 	refreshMu.Unlock()
 	return err
+}
+
+// fetchAndApplyAll reads every document this build reads, and EACH STANDS ON ITS
+// OWN.
+//
+// ONE PRODUCT'S DOCUMENT FAILING MUST NOT HOLD THE OTHER'S CEILING. They are
+// separate files, reviewed on separate schedules, and a 404 or a malformed row in
+// one says nothing about the other. Today's single document made that question
+// moot; with two, all-or-nothing would mean a typo in the S-UI file silently
+// freezes the 3X-UI ceiling until somebody notices a number that stopped moving.
+// So every source is attempted and the failures are reported together.
+func fetchAndApplyAll(ctx context.Context, sources []compatSource) error {
+	var failures []string
+	for _, source := range sources {
+		if err := fetchAndApply(ctx, source); err != nil {
+			failures = append(failures, fmt.Sprintf("%s: %v", source.Name, err))
+		}
+	}
+	if len(failures) > 0 {
+		return errors.New(strings.Join(failures, "; "))
+	}
+	return nil
 }
 
 // LastRefreshError returns whatever the most recent fetch produced (nil on
@@ -245,27 +270,6 @@ func LastRefreshAt() time.Time {
 	refreshMu.Lock()
 	defer refreshMu.Unlock()
 	return refreshLastAt
-}
-
-// defaultURLForCurrentVersion returns the GitHub raw URL of the per-major
-// JSON file matching THIS PSP build's major. "dev" / unparseable PSP
-// version → error (RefreshRemoteCompat surfaces it; dev builds get
-// CompatUnknown until admin uses force override, which is the documented
-// trade-off).
-func defaultURLForCurrentVersion() (string, error) {
-	if major, ok := pspMajor(Version); ok {
-		return defaultRemoteCompatURLBase + "v" + strconv.Itoa(major) + ".json", nil
-	}
-	// A product-scheme build reaches its ranges BY NAME. Its first segment is a
-	// release line rather than a compatibility major, so there is no per-major
-	// file to derive and none to fetch: the document named here states the builds
-	// it applies to instead. That is what closes the gap the previous version of
-	// this function named — a build that could reach no ranges at all.
-	if IsReleaseVersion(Version) {
-		return defaultRemoteCompatURLBase + panelRangesDocumentName, nil
-	}
-	return "", fmt.Errorf("version %q is neither a legacy v-prefixed build nor a release version, so no compat document applies to it; "+
-		"its supported ceiling stays unknown until one is", Version)
 }
 
 // pspMajor extracts the compatibility major from a legacy version string.
@@ -316,11 +320,11 @@ func revisionRegressed(applied, fetched string) (bool, error) {
 
 // parseManifestRevision accepts the two forms the published manifests use.
 //
-// DATE-ONLY IS THE FORM EVERY PUBLISHED FILE ACTUALLY CARRIES — v3.json,
-// v4.json, v4-ranges.json and node-v4.json all say "2026-09-16". An RFC3339
-// parser alone would therefore refuse the real manifests and take the whole
-// compat load down with them, which is how this was found: a test that drives
-// the real document rather than a fixture written to match the parser.
+// DATE-ONLY IS THE FORM THE PUBLISHED DOCUMENTS ACTUALLY CARRY — v3.json says
+// "2026-09-16", and the per-product documents that replaced the v4 manifests say
+// the same. An RFC3339 parser alone would therefore refuse the real documents and
+// take the whole compat load down with them, which is how this was found: a test
+// that drives the real document rather than a fixture written to match the parser.
 //
 // Both forms resolve to an instant, so a file may move from one to the other.
 // Moving to a full timestamp on the SAME DAY reads as a regression, because the
@@ -332,24 +336,44 @@ func parseManifestRevision(value string) (time.Time, error) {
 	return time.Parse("2006-01-02", value)
 }
 
-// appliedRevision is the updated_at of the manifest currently in force. It is
-// kept independently of the refresh mutex because fetchAndApply also runs while
-// that mutex is held.
+// appliedRevision is the updated_at of the document currently in force, PER
+// DOCUMENT. It is kept independently of the refresh mutex because fetchAndApply
+// also runs while that mutex is held.
+//
+// PER DOCUMENT, NOT PER PROCESS, and the difference is a range silently lost. The
+// products are reviewed at different times, so their documents carry different
+// dates and arrive in different orders: with one value, the later S-UI document
+// advances the revision a 3X-UI document is then compared against, and an
+// in-order 3X-UI document is refused as a regression. Nothing reports it — the
+// panel keeps serving the previous ceiling and looks healthy.
 var (
 	appliedRevisionMu sync.Mutex
-	appliedRevision   string
+	appliedRevision   = map[string]string{}
 )
 
-func setAppliedRevision(revision string) {
+// revisionKey is the identity a revision belongs to: the product whose document
+// it came from, or "" for the per-major manifest that carries both.
+func revisionKey(product string) string { return product }
+
+func setAppliedRevision(product, revision string) {
 	appliedRevisionMu.Lock()
-	appliedRevision = revision
+	appliedRevision[revisionKey(product)] = revision
 	appliedRevisionMu.Unlock()
 }
 
-func currentAppliedRevision() string {
+func currentAppliedRevision(product string) string {
 	appliedRevisionMu.Lock()
 	defer appliedRevisionMu.Unlock()
-	return appliedRevision
+	return appliedRevision[revisionKey(product)]
+}
+
+// resetAppliedRevisions clears every recorded revision. A test seam: the revisions
+// are process state, and a test that leaves one behind makes the next test's first
+// document look like a regression.
+func resetAppliedRevisions() {
+	appliedRevisionMu.Lock()
+	appliedRevision = map[string]string{}
+	appliedRevisionMu.Unlock()
 }
 
 // fetchAndApply reads one compat document and installs it if it applies here.
@@ -357,39 +381,61 @@ func currentAppliedRevision() string {
 // WHICH DOCUMENT IT IS COMES FROM ITS OWN SCHEMA, not from which build is asking.
 // A URL override can point either somewhere, and dispatching on the build would
 // parse a document by the wrong rules and then accept it.
-func fetchAndApply(ctx context.Context, url string) error {
-	raw, err := fetchCompatDocument(ctx, url)
+func fetchAndApply(ctx context.Context, source compatSource) error {
+	raw, err := fetchCompatDocument(ctx, source.URL)
 	if err != nil {
 		return err
 	}
 	var kind struct {
-		SchemaVersion int `json:"schema_version"`
+		SchemaVersion int    `json:"schema_version"`
+		Product       string `json:"product"`
 	}
 	if err := json.Unmarshal(raw, &kind); err != nil {
 		return fmt.Errorf("decode JSON: %w", err)
 	}
 	if kind.SchemaVersion == panelRangesSchema {
-		return applyPanelRangesDocument(raw, time.Now().UTC())
+		return applyProductRangesDocument(raw, source.Product, time.Now().UTC())
 	}
-	return applyPerMajorManifest(ctx, raw, url)
+	return applyPerMajorManifest(ctx, raw, source.URL)
 }
 
-// applyPanelRangesDocument validates and installs a named panel ranges document.
+// applyXUICompatDocument installs the 3X-UI ranges document for the CURRENT build.
+func applyXUICompatDocument(raw []byte, now time.Time) error {
+	return applyProductRangesDocument(raw, productXUI, now)
+}
+
+// applySUICompatDocument installs the S-UI ranges document for the CURRENT build.
+func applySUICompatDocument(raw []byte, now time.Time) error {
+	return applyProductRangesDocument(raw, productSUI, now)
+}
+
+// applyProductRangesDocument validates and installs ONE product's ranges document.
+//
+// expectedProduct is the product the ADDRESS claims, and is empty when the caller
+// does not know — a URL override, which may point at either kind of document.
+// When it is known the document has to agree: a `sui-v4.json` served at the 3X-UI
+// address is a wrong file at that URL, and installing nothing under the 3X-UI
+// name would read as "the range was reviewed and removed" rather than "the wrong
+// document is published". The ceiling would simply stop moving.
 //
 // IT IS CONVERTED, NOT INSTALLED RAW. Its payload is the same shape the manifest
 // carries, so once the applicability check has passed it becomes an ordinary
-// payload and every step downstream — first-match-wins entries, the S-UI gate,
-// advisories, the revision guard, the snapshot a boot replays — is unchanged.
-// The window travels with it so those replays can make the same decision the
-// fetch just made.
-func applyPanelRangesDocument(raw []byte, now time.Time) error {
+// payload and every step downstream — first-match-wins entries, the advisories,
+// the revision guard, the snapshot a boot replays — is unchanged. The window AND
+// the product travel with it, so those replays make the same decision the fetch
+// just made instead of guessing from which fields are populated.
+func applyProductRangesDocument(raw []byte, expectedProduct string, now time.Time) error {
 	policy, err := ParsePanelRangesPolicy(raw, now)
 	if err != nil {
 		return err
 	}
+	if expectedProduct != "" && policy.Product != expectedProduct {
+		return fmt.Errorf("%w: the address names %s and the document says %s", ErrPanelRangesProduct, expectedProduct, policy.Product)
+	}
 	window := policy.AppliesToPSP
 	payload := remoteCompatPayload{
 		SchemaVersion: schemaVersion,
+		Product:       policy.Product,
 		UpdatedAt:     policy.IssuedAt.UTC().Format(time.RFC3339),
 		Entries:       policy.Entries,
 		SUIEntries:    policy.SUIEntries,
@@ -397,13 +443,17 @@ func applyPanelRangesDocument(raw []byte, now time.Time) error {
 		SUIAdvisories: policy.SUIAdvisories,
 		AppliesToPSP:  &window,
 	}
-	applied := currentAppliedRevision()
+	// COMPARED AGAINST THIS PRODUCT'S OWN REVISION, which is the whole reason the
+	// guard is keyed. A document is newer or older than the one it replaces, not
+	// than whatever the other product published last week.
+	applied := currentAppliedRevision(policy.Product)
 	regressed, err := revisionRegressed(applied, payload.UpdatedAt)
 	if err != nil {
 		return err
 	}
 	if regressed {
-		return fmt.Errorf("panel ranges document is dated %s, older than the applied revision %s; refusing to replace a newer tested range with an older one", payload.UpdatedAt, applied)
+		return fmt.Errorf("%s ranges document is dated %s, older than the applied %s revision %s; refusing to replace a newer tested range with an older one",
+			policy.Product, payload.UpdatedAt, policy.Product, applied)
 	}
 	if err := applyCompatPayload(payload); err != nil {
 		return err
@@ -428,8 +478,8 @@ func applyPerMajorManifest(ctx context.Context, raw []byte, url string) error {
 		// can point a build at a manifest, and without this the operator gets
 		// "cannot derive a major" with no hint that a document exists which is
 		// addressed by name and would have worked.
-		return fmt.Errorf("cannot derive a PSP major from version %q, so no per-major manifest applies to it; "+
-			"a build with no derivable major reads the %s document instead", Version, panelRangesDocumentName)
+		return fmt.Errorf("cannot derive a PSP major from version %q, so no per-major manifest applies to it, "+
+			"and no document is named after a major it does not carry; a product build reads one document per product", Version)
 	}
 	if payload.Major != currentMajor {
 		// Self-validation: PSP fetched v<currentMajor>.json but the
@@ -442,7 +492,7 @@ func applyPerMajorManifest(ctx context.Context, raw []byte, url string) error {
 	// Checked HERE, before the overlay fetch and before any mutation, so a
 	// document that will be refused costs no second request and cannot
 	// half-install a range.
-	applied := currentAppliedRevision()
+	applied := currentAppliedRevision("")
 	regressed, err := revisionRegressed(applied, payload.UpdatedAt)
 	if err != nil {
 		return err
@@ -498,9 +548,11 @@ func applyPerMajorManifest(ctx context.Context, raw []byte, url string) error {
 // is running, and says why not when it was not.
 //
 // TWO WAYS TO SAY IT, because there are two kinds of document. A per-major
-// manifest says it by its NAME and its `major` field. A panel ranges document
-// carries its own window, because a product version's first segment is a release
-// line rather than a compatibility major and no number could name its file.
+// manifest says it by its NAME and its `major` field, and only a legacy build
+// reads one. A per-product document carries its own window: its name is DERIVED
+// from this build's own first segment, so a document that is not about this build
+// can still arrive under a name this build asked for — by a mistaken publication,
+// or by a window that was narrowed after the fact.
 //
 // THE CHECK IS THE SAME ONE THE FETCH MAKES. Sharing it is the point: a document
 // that installed from a fetch and then fails to install from the cache would
@@ -522,8 +574,8 @@ func payloadApplies(payload remoteCompatPayload) error {
 	// this one exists for its position, not for its verdict.
 	currentMajor, ok := pspMajor(Version)
 	if !ok {
-		return fmt.Errorf("cannot derive a PSP major from version %q, so no per-major manifest applies to it; "+
-			"a build with no derivable major reads the %s document instead", Version, panelRangesDocumentName)
+		return fmt.Errorf("cannot derive a PSP major from version %q, so no per-major manifest applies to it, "+
+			"and no document is named after a major it does not carry; a product build reads one document per product", Version)
 	}
 	if payload.Major != currentMajor {
 		// Self-validation: PSP fetched v<currentMajor>.json but the file's
@@ -543,6 +595,42 @@ func applyCompatPayload(payload remoteCompatPayload) error {
 	if err := payloadApplies(payload); err != nil {
 		return err
 	}
+	// WHICH SUBSET TO INSTALL FOLLOWS FROM THE PRODUCT, and the one empty product
+	// is the case that installs BOTH: a per-major manifest carries the two panels
+	// in one document, which is the frozen legacy route rather than an oversight.
+	//
+	// THE DISPATCH IS NOT A CONVENIENCE. The S-UI installer CLEARS the S-UI bounds
+	// when no row matches, so running it over a 3X-UI document — whose
+	// sui_entries are empty by construction — would erase the S-UI ceiling as a
+	// side effect of editing the 3X-UI one.
+	switch payload.Product {
+	case productXUI:
+		if err := installXUICeiling(payload); err != nil {
+			return err
+		}
+	case productSUI:
+		applySUICompat(payload)
+	case "":
+		if err := installXUICeiling(payload); err != nil {
+			return err
+		}
+		applySUICompat(payload)
+	default:
+		return fmt.Errorf("%w: %q is not a product this build applies", ErrPanelRangesProduct, payload.Product)
+	}
+	// Recorded AFTER the install succeeds, so a failure part-way leaves the old
+	// revision in force and the next fetch is still compared against what is
+	// actually applied rather than against what was attempted.
+	setAppliedRevision(payload.Product, payload.UpdatedAt)
+	return nil
+}
+
+// installXUICeiling installs the 3X-UI half of a payload, or refuses the payload.
+//
+// The refusal is the same one the single-document path made: a payload whose
+// entries do not cover this build is a range gap, and the answer is to bump the
+// document rather than to install a ceiling that matches nothing.
+func installXUICeiling(payload remoteCompatPayload) error {
 	entry, ok := lookupForPSPVersion(payload, Version)
 	if !ok {
 		return fmt.Errorf("no compat entry covers PSP %q in %d entries (range gap — bump the JSON)",
@@ -566,11 +654,6 @@ func applyCompatPayload(payload remoteCompatPayload) error {
 	// Advisories are top-level (PSP-version-independent) and runtime-only; install
 	// the whole map, canonicalizing keys so "v3.5.0"/"3.5" both resolve on lookup.
 	SetActiveAdvisories(canonAdvisories(payload.Advisories))
-	applySUICompat(payload)
-	// Recorded AFTER the install succeeds, so a failure part-way leaves the old
-	// revision in force and the next fetch is still compared against what is
-	// actually applied rather than against what was attempted.
-	setAppliedRevision(payload.UpdatedAt)
 	return nil
 }
 
