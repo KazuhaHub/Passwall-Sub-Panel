@@ -60,6 +60,13 @@ const (
 	// template it renders are both release assets, and no release before 4.0.1.1
 	// carries them.
 	nodeVersion = "4.0.1.1"
+	// THE ADDRESS IS STATED, AS A REAL PANEL STATES IT. A version no longer
+	// determines one: four releases live under `release/` and everything since under
+	// `v`, and this pinned release is one of the four. The stub below stands in for
+	// the panel's release catalog, so it has to carry what that catalog carries —
+	// without it the panel falls back to the current namespace and renders a script
+	// that downloads a tag nobody published.
+	nodeReleaseTag = "release/4.0.1.1"
 	// The release/4.0.1.1 tag peels to ea61b1d745d6c79120b0c04a920c5fcb29d573da.
 	// The publisher stamps short7; the daemon reports version.String(), not a bare
 	// version. Pin the real identity rather than accepting an arbitrary suffix.
@@ -161,7 +168,9 @@ func fixtureInstallTemplate(t *testing.T) ports.NodeInstallTemplate {
 }
 
 func (pinnedCatalog) List(context.Context) (ports.NodeReleaseList, error) {
-	return ports.NodeReleaseList{Releases: []ports.NodeReleaseCatalogEntry{{Version: nodeVersion, Channel: "testing", Methods: []string{"linux"}, Platforms: []ports.NodeReleasePlatform{{OS: "linux", Arch: "amd64"}, {OS: "linux", Arch: "arm64"}}}}}, nil
+	return ports.NodeReleaseList{Releases: []ports.NodeReleaseCatalogEntry{{
+		Version: nodeVersion, ReleaseTag: nodeReleaseTag, Channel: "testing",
+		Methods: []string{"linux"}, Platforms: []ports.NodeReleasePlatform{{OS: "linux", Arch: "amd64"}, {OS: "linux", Arch: "arm64"}}}}}, nil
 }
 
 type fixture struct {
