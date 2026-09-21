@@ -582,6 +582,17 @@ jobs:
           test -n "$build_toolchain"
           test "$(go env GOVERSION)" = "$build_toolchain"
           test "$(go tool compile -V | awk '{ print $3 }')" = "$build_toolchain"
+      # THE FORMAT GATE IS HERE BECAUSE ITS ABSENCE COST TIME TWICE. This repository
+      # had no format check at all — its whole static surface was `go vet` — so a
+      # file that `gofmt -w` would change passed every gate here and failed in the
+      # Node project's CI instead, on a change that had already been pushed. The two
+      # repositories are edited by the same hands, and a check one of them runs is
+      # not a check the other can skip.
+      #
+      # It is a `test -z` rather than a `gofmt -d` so the failure names the files and
+      # exits non-zero in one line, the same shape the Node project uses.
+      - name: Formatting
+        run: test -z "$(gofmt -l .)"
       - run: go vet ./...
       - name: Reachable vulnerability check
         run: go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...

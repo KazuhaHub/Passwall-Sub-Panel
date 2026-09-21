@@ -63,7 +63,6 @@ type releaseVectors struct {
 		B   string `json:"b"`
 		Cmp int    `json:"cmp"`
 	} `json:"order"`
-
 }
 
 func loadReleaseVectors(t *testing.T) releaseVectors {
