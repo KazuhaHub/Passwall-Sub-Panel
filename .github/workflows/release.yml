@@ -182,7 +182,7 @@ jobs:
           attempt=0
           tag=
           while [ "$attempt" -lt 5 ]; do
-            tag=$(go run github.com/KazuhaHub/passwall-node/deployment/cmd/allocate-release-tag \
+            tag=$(go run ./cmd/allocate-release-tag \
               -line "$line" \
               -existing "$(all_tags | tr '\n' ',')" \
               -on-commit "$(tags_on_this_commit)")
@@ -287,7 +287,7 @@ jobs:
           # It refuses an unpublishable tag, and the emptiness check is the belt
           # to its braces: an empty version reaching ldflags or an archive name is
           # a silently wrong artifact rather than a failure.
-          version=$(go run github.com/KazuhaHub/passwall-node/deployment/cmd/release-tag "$tag")
+          version=$(go run ./cmd/release-tag "$tag")
           test -n "$version" || {
             echo 'the release tag produced no version' >&2
             exit 1

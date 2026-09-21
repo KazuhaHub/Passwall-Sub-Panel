@@ -39,37 +39,16 @@ const MaxVersionSegmentBounds = 2147483647
 // The two answers are one decision. A caller that read a major out of a string
 // it had not checked would be acting on the major of a path attempt or of a tag.
 func MajorOfRelease(value string) (int, bool) {
-	segments := strings.Split(value, ".")
-	// A VERSION IS NEVER SHORTHAND: three segments, or four with the optional
-	// BUILD component. Short forms are padded for COMPARISON, never accepted as
-	// an identity.
-	if len(segments) != 3 && len(segments) != 4 {
+	// READ THROUGH THE ONE PARSER. Splitting the segments here as well would be a
+	// second place that decides what a version is, and the two would eventually
+	// disagree about a shape neither was written for — the asymmetry that matters,
+	// because this copy refusing what the publisher accepts would drop a release
+	// from the panel's own view of itself.
+	segments, ok := releaseSegments(value)
+	if !ok {
 		return 0, false
 	}
-	parsed := make([]int, len(segments))
-	for i, segment := range segments {
-		// Anything that is not a plain run of ASCII digits is refused here: this
-		// is what keeps a leading `v`, `+build`, a slash, a hyphen and a
-		// non-ASCII digit out — one check rather than a list of shapes to reject.
-		n, ok := canonicalSegment(segment)
-		if !ok {
-			return 0, false
-		}
-		parsed[i] = n
-	}
-	// The product line starts at 1: no product release ever had a zero release
-	// line, and accepting one would grant it a compatibility it never earned.
-	if parsed[0] < 1 {
-		return 0, false
-	}
-	// A LITERAL ZERO FOURTH IS ANOTHER SPELLING OF THE THREE-SEGMENT VERSION.
-	// Accepting it would make this copy accept a string the authority rejects — a
-	// divergence in the direction that lets PSP admit a version the publisher
-	// cannot.
-	if len(parsed) == 4 && parsed[3] == 0 {
-		return 0, false
-	}
-	return parsed[0], true
+	return segments[0], true
 }
 
 // IsReleaseVersion reports whether the string is a release version.
