@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "product": "sui",
+  "revision": 2,
+  "issued_at": "2026-09-19T00:00:00Z",
+  "expires_at": "2027-09-19T00:00:00Z",
+  "applies_to_psp": {
+    "min": "4.0.0",
+    "max": "4.99.99"
+  },
+  "_comment": "The WHOLE S-UI claim for PSP major 4, in one self-contained document. It is the S-UI half of what docs/compat/panel-ranges-v1.json used to carry for both panels, and it is a SEPARATE DOCUMENT rather than a section of a shared one because the two ranges are reviewed at different times by different evidence: 3X-UI is verified through the xui adapter surface and S-UI through the sui adapter's Token API, and a review of one must not rewrite the file that carries the other's ceiling. The name carries the PSP major; the S-UI side publishes no floor, deliberately (see min_sui in the manifest), so an entry here may omit it. THERE IS DELIBERATELY NO range_overlay and no 3x-ui entries: the split is the point.",
+  "sui_entries": [
+    {
+      "psp_min": "4.0.0",
+      "psp_max": "4.99.99",
+      "max_tested_sui": "1.6.3",
+      "notes": "S-UI 1.6.3 live adapter verification (2026-09-16 UTC) used PSP main at 2440112 against upstream tag 13abbdc4 and sing-box 1.14.1 on darwin/arm64. TestLive_SUISurface passed after upgrading the 1.6.2 scratch database. Token authentication and inbound/client read-write shapes remain compatible; the new session API and multi-user Snell support are additive. The beta-line row this replaces recorded the same contract for builds that no longer have an identity. No S-UI minimum or new optional capability is claimed."
+    }
+  ],
+  "sui_advisories": {
+    "1.6.0": {
+      "severity": "warning",
+      "affects_xray": true,
+      "text": "S-UI 1.6.0 会升级内置 sing-box 到 1.14 并重启内核，还会迁移全局 DNS、缓存、rule-set 和 TLS ACME 配置。legacy DNS address 过滤器及 DNS 规则 strategy 动作不会自动迁移，需要按上游提示手工转换。客户端名称从此不能为空、不能与其他客户端重名，保存时会去除首尾空格；PSP 的唯一客户端 email 满足这项要求。/apiv2、Token 认证和客户端/inbound 模型的兼容依据来自 v3 清单记录的既有 1.6.0 适配器实机验证，并非 V4 发布二进制新实测。"
+    },
+    "1.6.1": {
+      "severity": "info",
+      "affects_xray": false,
+      "text": "S-UI 1.6.1 内置 sing-box 仍为 1.14.0。PSP 已在临时 1.6.1 面板上完成现有适配器接口验证，Token 认证及客户端、入站读写兼容，无需修改适配器。新增维护模式会主动停止内核并保持停止，需在 S-UI 中退出维护模式才能恢复服务；PSP 当前显示内核停止状态。浏览器登录失败 10 次会锁定来源地址 10 分钟，公开地址的反向代理不再受信任，可能影响登录日志和限流的来源地址识别；这些调整不影响 PSP 的 Token 请求。新增 TLS spoofing 与 OpenVPN/OpenConnect endpoint TLS 不属于 PSP 已支持的功能，本次验证也不代表完整代理流量、配额执法或已有数据库升级验证。"
+    },
+    "1.6.2": {
+      "severity": "info",
+      "affects_xray": false,
+      "text": "S-UI 1.6.2 修复设置页因迁移标记被当作未知设置而无法保存的问题（#1258），内置 sing-box 仍为 1.14.0。PSP 已验证现有 Token、客户端及入站接口兼容，无需修改适配器。1.6.1 引入的登录失败限流和可信代理规则仍适用；维护模式会保持内核停止，需在 S-UI 中退出才能恢复代理服务。"
+    },
+    "1.6.3": {
+      "severity": "info",
+      "affects_xray": true,
+      "text": "S-UI 1.6.3 将 sing-box 从 1.14.0 升到 1.14.1，并新增实时会话查看/断开及 Snell 多用户支持；这些接口对 PSP 都是附加项。PSP 已用真实 1.6.3 面板验证 Token、状态、入站及客户端完整读写流程，无需修改适配器。上游同时修复了客户端重新启用后被流量重置逻辑再次停用的问题。升级会重启 sing-box，请按维护窗口操作。"
+    }
+  }
+}

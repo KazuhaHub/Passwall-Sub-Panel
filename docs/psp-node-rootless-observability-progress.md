@@ -449,7 +449,7 @@ staleness 以 capability 为门，从未声明能力的旧节点是 unsupported 
 - [x] 打 tag `v0.0.1-beta10`。发布 job 在受保护的 `release-signing` environment
       后面，**需要人工批准才会真正签名并发布产物**，所以推 tag 本身不会自动上线
 - [x] PSP `go.mod` 从伪版本切到 `v0.0.1-beta10`；四处枚举已发布版本的位置同步更新：
-      `test.yml` 的兼容循环、`release.yml` 的矩阵、`docs/compat/node-v4.json`、
+      `test.yml` 的兼容循环、`release.yml` 的矩阵、`docs/compat/passwall-node-v4.json`、
       `node_compat_matrix_test.go`（该测试先以 "has 9 rows, want 10" 失败，行数在起作用）
 - [x] PSP #123 合入 main（squash `9c083a6`）。首次合并被 ruleset 的
       `required_review_thread_resolution` 挡住：code-quality 报告 `healthFor` 里

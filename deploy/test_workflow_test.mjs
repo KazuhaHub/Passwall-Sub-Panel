@@ -81,7 +81,6 @@ test('the deploy guard suites are all executed by the container job', () => {
     'deploy/compat/check-case-set.test.mjs',
     'deploy/compat/plan.test.mjs',
     'deploy/compat/evidence-index.test.mjs',
-    'deploy/compat/check-releases-policy.test.mjs',
     'deploy/compat/contract-source.test.mjs'
   ]) {
     assert(container.includes(suite), `${suite} is not run by any job`)

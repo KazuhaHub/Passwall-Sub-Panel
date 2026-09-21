@@ -25,7 +25,7 @@
     }
   },
   "third-party-sui-live": {
-    "description": "The live S-UI adapter surface against an isolated real panel. S-UI exposes one live entry point; the note in docs/compat/v4-ranges.json is that its FLOOR is unestablished, which is a different claim from its surface working.",
+    "description": "The live S-UI adapter surface against an isolated real panel. S-UI exposes one live entry point; the note in docs/compat/3x-ui-v4.json is that its FLOOR is unestablished, which is a different claim from its surface working.",
     "package": "github.com/KazuhaHub/passwall-sub-panel/internal/adapters/sui",
     "required": {
       "TestLive_SUISurface": {}

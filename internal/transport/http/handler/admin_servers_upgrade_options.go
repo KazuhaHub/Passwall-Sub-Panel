@@ -3,7 +3,6 @@ package handler
 import (
 	"net/http"
 	"strconv"
-	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -40,19 +39,15 @@ const (
 	upgradeBlocked upgradeOptionState = "blocked"
 )
 
-// agentUpgradeTarget is one release this node could be moved to, with the claim
-// that matters attached to it.
+// agentUpgradeTarget is one release this node could be moved to.
 //
-// ONE CLAIM NOW, NOT TWO. This used to answer per target whether a VERIFIED EDGE
-// reached it, because admission refused a pair nobody had walked — so the list had
-// to say which of the ahead releases were reachable as well as which were newer.
-// Admission decides on the peer being compatible, so the only remaining claim is
-// whether the policy in force offers the release.
+// NOTHING IS CLAIMED ABOUT IT BEYOND ITS NAME, and that is the simplification:
+// this used to carry whether a VERIFIED EDGE reached the target and then whether a
+// signed policy offered it, and each of those was a claim the panel could not make
+// on its own. What an operator may install is their choice among the releases that
+// are published, and whether one installs is decided by the artifact's signature.
 type agentUpgradeTarget struct {
 	Version string `json:"version"`
-	// OfferedByPolicy is meaningful only when a policy is in force; before one
-	// exists there is no offered-target list and every reviewed release is on it.
-	OfferedByPolicy bool `json:"offered_by_policy"`
 }
 
 type upgradeOption struct {
@@ -125,27 +120,22 @@ func decideCoreUpgrade(hasUpdater bool, currentVersion string) upgradeOption {
 	}
 }
 
-// decideAgentUpgrade answers for the native-agent component from the policy in
-// force and the node's own identity.
+// decideAgentUpgrade answers for the native-agent component from the node's own
+// identity.
 //
-// A release being listed is not a path to it having been checked, so this needs
-// both: a policy that offers a target, and a verified edge from where the node
-// is now. Without a policy the panel is in its pre-policy state and the answer
-// is computed from the manifest edges, which is what it always was.
-func decideAgentUpgrade(currentVersion string, offersTarget bool) upgradeOption {
+// IDENTITY IS THE ONLY THING THE PANEL CAN REFUSE ON HERE. It used to refuse when
+// no policy offered a target as well, which was a second document's opinion about
+// a question the operator is entitled to answer themselves.
+func decideAgentUpgrade(currentVersion string) upgradeOption {
 	option := upgradeOption{Component: "agent", CurrentVersion: currentVersion}
-	switch {
-	case currentVersion == "":
+	if currentVersion == "" {
 		option.State = upgradeBlocked
 		option.ReasonCodes = []string{"identity_unknown"}
-	case !offersTarget:
-		option.State = upgradeBlocked
-		option.ReasonCodes = []string{"no_offered_target"}
-	default:
-		option.State = upgradeReady
-		option.TargetPinnable = true
-		option.ReasonCodes = []string{"compatible"}
+		return option
 	}
+	option.State = upgradeReady
+	option.TargetPinnable = true
+	option.ReasonCodes = []string{"compatible"}
 	return option
 }
 
@@ -171,14 +161,6 @@ func (h *AdminServersHandler) UpgradeOptions(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Server not registered in pool: " + err.Error()})
 		return
 	}
-
-	// THE PRE-FLIGHT FORCES A REFRESH, because a pre-flight answered from a
-	// schedule is answered from whatever the schedule last saw — and the whole
-	// point of asking before an upgrade is to know NOW. The call is silent: it
-	// throttles itself, backs off when the source is down, and never fails the
-	// request over a refresh, because the state it could not refresh is already
-	// reported by compat-status.
-	version.RefreshPolicyForPreflight(c.Request.Context(), time.Now().UTC())
 
 	var option upgradeOption
 	switch component {
@@ -229,20 +211,9 @@ func (h *AdminServersHandler) decideAgentOption(c *gin.Context, panelID int64) u
 			current = panel.PanelVersion
 		}
 	}
-	// Before a policy exists the panel is in its pre-policy state, where the
-	// manifest's edges are the only source and there is no offered-target list
-	// to consult. Once one is in force it answers both questions.
-	policyInForce := version.PolicyInForce()
-	policyReleases := []string(nil)
-	if policy := version.ActiveReleasesPolicy(); policy != nil {
-		for _, release := range policy.Releases {
-			policyReleases = append(policyReleases, release.Version)
-		}
-	}
-	targetOffered := !policyInForce || (current != "" && version.PolicyOffersRelease(current))
-	option := decideAgentUpgrade(current, targetOffered)
-	// The per-target answer. It comes from the release list the panel already
-	// publishes, not from a separate record of which paths somebody walked: a node
+	option := decideAgentUpgrade(current)
+	// The per-target list. It comes from the releases the panel can see are
+	// published, not from a separate record of which paths somebody walked: a node
 	// whose version no edge started from used to get an empty list, and the remedy
 	// was a document edit the operator had no reason to know about.
 	releases := []string(nil)
@@ -253,7 +224,7 @@ func (h *AdminServersHandler) decideAgentOption(c *gin.Context, panelID int64) u
 			}
 		}
 	}
-	option.Targets = agentTargets(current, releases, policyInForce, policyReleases)
+	option.Targets = agentTargets(current, releases)
 	return option
 }
 
@@ -272,13 +243,9 @@ func (h *AdminServersHandler) decideAgentOption(c *gin.Context, panelID int64) u
 //
 // offered_by_policy is meaningful only when a policy is in force; before one exists
 // there is no offered list and every reviewed release is a candidate.
-func agentTargets(current string, releases []string, policyInForce bool, policyReleases []string) []agentUpgradeTarget {
+func agentTargets(current string, releases []string) []agentUpgradeTarget {
 	if current == "" {
 		return nil
-	}
-	offered := make(map[string]struct{}, len(policyReleases))
-	for _, release := range policyReleases {
-		offered[release] = struct{}{}
 	}
 	targets := make([]agentUpgradeTarget, 0, len(releases))
 	seen := make(map[string]struct{}, len(releases))
@@ -292,11 +259,7 @@ func agentTargets(current string, releases []string, policyInForce bool, policyR
 			continue
 		}
 		seen[release] = struct{}{}
-		_, listed := offered[release]
-		targets = append(targets, agentUpgradeTarget{
-			Version:         release,
-			OfferedByPolicy: !policyInForce || listed,
-		})
+		targets = append(targets, agentUpgradeTarget{Version: release})
 	}
 	return targets
 }

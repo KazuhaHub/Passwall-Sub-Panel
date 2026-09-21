@@ -89,28 +89,38 @@ var (
 )
 
 func validateRequest(request Request) error {
-	if !version.IsReleaseVersion(request.Version) || !version.IsReleaseVersion(request.ExpectedVersion) {
-		return fmt.Errorf("%w: exact canonical target and expected Node versions are required", domain.ErrValidation)
+	// THE TARGET IS EXACT, AND THAT IS AN ADDRESSING REQUIREMENT RATHER THAN A
+	// POLICY. The node derives its download address from this version and the
+	// checksum manifest names it, so a target that is not a release version cannot
+	// be fetched at all.
+	if !version.IsReleaseVersion(request.Version) {
+		return fmt.Errorf("%w: the target must be an exact release version", domain.ErrValidation)
 	}
-	// THE PROJECT'S RELEASE ORDER, not x/mod/semver: that package answers ZERO
-	// for a bare product version, and zero is "equal", so this check would refuse
-	// every product upgrade as "not newer" — after the guard above had been
-	// widened to let it through.
-	if version.CompareRelease(request.Version, request.ExpectedVersion) <= 0 {
-		return fmt.Errorf("%w: native upgrade target must be newer than its expected current version", domain.ErrValidation)
+	// THE VERSION BEING REPLACED IS OPAQUE. It is what the node reports about
+	// itself, and the node is the one that checks it — see client.go's
+	// `c.Version != args.ExpectedVersion`. This used to require a product version
+	// here too, which meant a node still reporting a stamp from the replaced
+	// scheme (`v0.0.1-beta9`) could never be moved: the panel refused the request
+	// because it could not parse a string that the node was perfectly able to
+	// compare against itself.
+	if request.ExpectedVersion == "" {
+		return fmt.Errorf("%w: the version being replaced is required", domain.ErrValidation)
 	}
-	// THE POLICY GATE IS HERE because this is the one function both entry points
-	// pass through — the API handler and DecodeRequest. A check placed at the
-	// handler would be a check a caller can skip by reaching the service another
-	// way, and "the UI does not list it" is not a refusal.
-	//
-	// It only bites when a policy is actually in force. Before one exists the
-	// panel is in its manifest-only state, which is where every deployment
-	// starts; once one is installed, a target it does not offer is refused
-	// rather than falling back to whatever the panel happens to list.
-	if version.PolicyInForce() && !version.PolicyOffersRelease(request.Version) {
-		return fmt.Errorf("%w: %s is not a release the policy in force offers", domain.ErrValidation, request.Version)
+	// A NO-OP IS REFUSED BY IDENTITY, NOT BY ORDER. There is no ordering rule any
+	// more: it answered wrongly across the two schemes, and an operator choosing an
+	// older release is making an explicit choice that the artifact's signature,
+	// checksum and self-reported version already guard. Reinstalling the version
+	// the node is already on is the one case with nothing to gain.
+	if request.ExpectedVersion == request.Version {
+		return fmt.Errorf("%w: the target is the version the node is already on", domain.ErrValidation)
 	}
+	// THERE IS NO "IS THIS RELEASE ALLOWED" GATE HERE ANY MORE. It was a signed
+	// document listing the releases the panel would move a node onto, and it is
+	// gone: it was opt-in and off in every default deployment, so it gated nothing
+	// there, while making "offer a release" a document edit plus a signature. What
+	// the operator may install is now the operator's choice among the releases that
+	// are actually published, and the artifact's own signature is what decides
+	// whether a chosen release installs.
 	return nil
 }
 
@@ -148,19 +158,15 @@ func (s *Service) Request(ctx context.Context, panelID int64, request Request, k
 	}
 	now := s.options.Now().UTC()
 
-	// ONE DECISION SOURCE, AND NOW AN EDGE.
+	// ONE DECISION SOURCE, AND IT IS THE CAPABILITY ONE.
 	//
-	// This is the ELIGIBILITY question AND the edge question, and it is the one
-	// place both ends of the edge are known: the request carries the exact
-	// version it expects the node to be on and the exact version it wants it to
-	// reach. The plan requires the second without accepting the first — a
-	// target that is merely a release this panel lists is not a path anybody
-	// checked — so an edge nobody verified refuses the request by name.
-	//
-	// The edge list is empty today, which means every upgrade is refused. That
-	// is the truthful state rather than a regression: docs/compat/verification-v1.json
-	// publishes the edge model with no edges in it, and the first verified edge
-	// turns this back on for that one path.
+	// The node has to advertise the capabilities this operation needs and to have
+	// reported recently enough to be trusted; that is what compatadmission answers,
+	// and it is the gate this whole path keeps. It is deliberately EDGE-AGNOSTIC —
+	// it once also asked whether somebody had walked this specific from/to pair, and
+	// that axis is gone: it refused every upgrade while the edge list was empty, and
+	// the list was empty because nobody had walked one. What an operator may install
+	// is their choice among the published releases.
 	compatPolicy := nodecompat.Policy(time.Duration(policy.OfflineReconcileDays) * 24 * time.Hour)
 	admission := nodecompat.Request(agent, compatadmission.OperationRemoteUpgrade, now, compatPolicy)
 	if decision := compatadmission.Decide(admission); !decision.Allowed {

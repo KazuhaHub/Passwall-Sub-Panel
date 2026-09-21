@@ -29,7 +29,7 @@ workflow re-checks them with `printenv`, which is a child too.
 | 3X-UI adapter | 9 | 2 | 0 |
 | S-UI adapter | 1 | 0 | 0 |
 
-Both ship at the exact versions `docs/compat/v4-ranges.json` records as the
+Both ship at the exact versions `docs/compat/3x-ui-v4.json` records as the
 tested ceilings.
 
 ## The two probes that skip, and why a waiver has to be REQUIRED to count
@@ -85,7 +85,7 @@ broken adapter rather than a missing setup step.
 
 - The panels are pinned by the caller through `PSP_LIVE_3XUI_IMAGE` /
   `PSP_LIVE_SUI_IMAGE`. Nothing here chooses a version, and nothing writes to
-  `docs/compat/v4-ranges.json` — that file is a record of what a human verified.
+  `docs/compat/3x-ui-v4.json` — that file is a record of what a human verified.
 - `down` removes this case's containers only. It never prunes globally.
 - The runtime is discovered (`docker`, `nerdctl`, `podman`) with `sudo` added only
   when the runtime cannot be reached without it.

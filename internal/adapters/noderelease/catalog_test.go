@@ -127,13 +127,27 @@ func withRealPublicationTime(release githubRelease) githubRelease {
 	return release
 }
 
+// fixtureList is the answer the COLLECTION endpoint gives for these releases.
+//
+// THE RESPONSE IS AN ARRAY, and that is what a fixture has to be: the catalog asks
+// what has been published rather than asking about one version at a time, so a
+// one-element body means "this release is published".
+func fixtureList(t *testing.T, releases ...githubRelease) string {
+	t.Helper()
+	bodies := make([]string, 0, len(releases))
+	for _, release := range releases {
+		data, err := json.Marshal(release)
+		if err != nil {
+			t.Fatal(err)
+		}
+		bodies = append(bodies, string(data))
+	}
+	return "[" + strings.Join(bodies, ",") + "]"
+}
+
 func fixtureBody(t *testing.T, release githubRelease) string {
 	t.Helper()
-	data, err := json.Marshal(release)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return string(data)
+	return fixtureList(t, release)
 }
 
 func fixtureResponse(req *http.Request, status int, body string) *http.Response {
@@ -147,20 +161,21 @@ func fixtureCatalog(t *testing.T, transport roundTripFunc, now func() time.Time)
 	if now == nil {
 		now = func() time.Time { return fixtureNow }
 	}
-	catalog, err := New(Options{HTTPClient: &http.Client{Transport: transport}, Now: now, PSPMajor: 4})
+	catalog, err := New(Options{HTTPClient: &http.Client{Transport: transport}, Now: now})
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Semantic single-release HTTP fixtures must not inherit additional
-	// production registry entries as compatibility reviews are appended.
-	for _, reviewed := range catalog.reviewed {
-		if reviewed.Version == fixtureVersion {
-			catalog.reviewed = []reviewedRelease{reviewed}
-			return catalog
-		}
-	}
-	t.Fatalf("single-release fixture is no longer reviewed: %s", fixtureVersion)
 	return catalog
+}
+
+// servingReleases answers every request with one list: the catalog makes exactly
+// one call per refresh, and what a case varies is what that call returns.
+func servingReleases(t *testing.T, releases ...githubRelease) roundTripFunc {
+	t.Helper()
+	body := fixtureList(t, releases...)
+	return func(req *http.Request) (*http.Response, error) {
+		return fixtureResponse(req, http.StatusOK, body), nil
+	}
 }
 
 func assertEmptyList(t *testing.T, list ports.NodeReleaseList, err error) {
@@ -179,109 +194,6 @@ func assertUnavailable(t *testing.T, list ports.NodeReleaseList, err error) {
 		if strings.Contains(err.Error(), secret) {
 			t.Fatalf("source failure exposes transport/body details: %v", err)
 		}
-	}
-}
-
-func TestPSPMajorForVersionBindsStampedCompatibility(t *testing.T) {
-	// A BUILD STAMP IS NOT A RELEASE TAG. This function answers "which reviewed
-	// major does the build that is running belong to", so the input is the
-	// version PSP's own workflow stamped into it.
-	//
-	// `4.0.0` used to be in the refusal list below, and that was the defect
-	// rather than the rule: the product scheme stamps exactly that, so the
-	// first release named this way would have had its Node release catalog
-	// silently disabled — `newNodeReleaseCatalog` returns nil and the list is
-	// simply unavailable. The table now covers both schemes.
-	for _, tc := range []struct {
-		version string
-		major   int
-	}{
-		{"dev", 4},
-		// The single scheme: three or four integers, no prefix.
-		{"4.0.0", 4},
-		{"4.0.0.1", 4},
-		{"102.1.0", 102},
-		// Refusals. A stamp that is not canonical must not inherit reviewed
-		// compatibility, and must not be repaired into something that does.
-		//
-		// THE LEGACY STAMPS ARE HERE NOW. Every build in the field used to be one
-		// of these, and this table asserted they carried their major; the scheme
-		// is gone, so a build stamped that way names no release line this catalog
-		// can bind compatibility to.
-		{"v4.0.0-beta.2", 0},
-		{"v4.0.0", 0},
-		{"v3.9.2-beta.20", 0},
-		{"v5.0.0-beta.1", 0},
-		{"v102.1.0", 0},
-		{"v0.1.0", 0},
-		{"", 0},
-		{"latest", 0},
-		{"v4", 0},
-		{"v04.0.0", 0},
-		{"v4.0.0+build", 0},
-		{"v4.0.0/../../PRIVATE_RESPONSE", 0},
-		{"v999999999999999999999999999.0.0", 0},
-		// The product scheme is three or four segments with no prerelease: a
-		// candidate is distinguished by its CHANNEL, not by its version.
-		{"4.0", 0},
-		{"4.0.0.1.2", 0},
-		{"4.0.0.0", 0},
-		{"04.0.0", 0},
-		{"0.1.0", 0},
-		{"4.0.0-beta.1", 0},
-		{"4.0.0+build", 0},
-		// A tag is not a version, and this is the swap that produces it.
-		{"release/4.0.0", 0},
-	} {
-		t.Run(tc.version, func(t *testing.T) {
-			major, err := PSPMajorForVersion(tc.version)
-			if tc.major == 0 {
-				if err == nil || major != 0 {
-					t.Fatalf("invalid stamp inherited compatibility: major=%d err=%v", major, err)
-				}
-				return
-			}
-			if err != nil || major != tc.major {
-				t.Fatalf("stamp %q: expected major=%d got=%d err=%v", tc.version, tc.major, major, err)
-			}
-		})
-	}
-}
-
-func TestNewUsesOnlyReviewedMajorAndDoesNotFetch(t *testing.T) {
-	var calls atomic.Int32
-	transport := roundTripFunc(func(req *http.Request) (*http.Response, error) {
-		calls.Add(1)
-		return fixtureResponse(req, http.StatusOK, fixtureBody(t, fixtureRelease(fixtureVersion))), nil
-	})
-	for _, major := range []int{0, 4, 3, 5} {
-		catalog, err := New(Options{
-			HTTPClient: &http.Client{Transport: transport}, Now: func() time.Time { return fixtureNow }, PSPMajor: major,
-		})
-		if err != nil {
-			t.Fatalf("major %d: %v", major, err)
-		}
-		if calls.Load() != 0 {
-			t.Fatal("New must not contact the release source")
-		}
-		if major == 0 || major == 4 {
-			versions := make([]string, len(catalog.reviewed))
-			for i, reviewed := range catalog.reviewed {
-				versions[i] = reviewed.Version
-			}
-			if !reflect.DeepEqual(versions, []string{fixtureVersion}) {
-				t.Fatalf("unexpected current registry: %+v", catalog.reviewed)
-			}
-			continue
-		}
-		list, err := catalog.List(context.Background())
-		assertEmptyList(t, list, err)
-		if calls.Load() != 0 {
-			t.Fatal("an incompatible PSP major must not probe unreviewed releases")
-		}
-	}
-	if _, err := New(Options{PSPMajor: -1}); err == nil {
-		t.Fatal("negative PSP major accepted")
 	}
 }
 
@@ -309,48 +221,24 @@ func TestCatalogListsByPublicationNotByVersion(t *testing.T) {
 		}
 		return fixtureNow.Add(-48 * time.Hour)
 	}
-	// Shaped like a real reviewed entry: all six platforms uploaded, all three
-	// methods offered. A partial entry is dropped by the catalog rather than
-	// presented — which is a property of its own, asserted elsewhere.
-	reviewed := []reviewedRelease{
-		{Version: higher, PSPMajor: 4, Notes: "reviewed: the older publication",
-			Methods: []string{"linux", "docker", "manual"}, Platforms: fixturePlatforms, DockerPublishedTag: higher},
-		{Version: lower, PSPMajor: 4, Notes: "reviewed: the newer publication",
-			Methods: []string{"linux", "docker", "manual"}, Platforms: fixturePlatforms, DockerPublishedTag: lower},
-	}
-	var requested []string
-	catalog, err := New(Options{
-		HTTPClient: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
-			tag, ok := strings.CutPrefix(req.URL.String(), "https://api.github.com/repos/KazuhaHub/Passwall-Node/releases/tags/")
-			// THE URL CARRIES THE TAG AND THE REGISTRY HOLDS VERSIONS. The fixture
-			// makes the same mapping the catalog does, by asking the same function
-			// rather than by restating the rule.
-			version, identified := versionpkg.VersionOfReleaseTag(tag)
-			if !ok || !identified || (version != lower && version != higher) {
-				t.Fatalf("registry requested an unreviewed endpoint: %s", req.URL)
-			}
-			requested = append(requested, version)
-			release := fixtureRelease(version)
-			published := publishedAt(version)
-			release.PublishedAt = &published
-			release.Prerelease = true // published as a candidate, like every release so far
-			return fixtureResponse(req, http.StatusOK, fixtureBody(t, release)), nil
-		})},
-		Now: func() time.Time { return fixtureNow }, PSPMajor: 4,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	// The registry is the catalog's, and the shipped one carries a single release;
-	// this case says which releases it is asking about.
-	catalog.reviewed = reviewed
+	// Both releases are published, with the publication times swapped relative to
+	// their versions — which is the disagreement this case exists to observe.
+	// TWO VARIABLES, NOT ONE. Sharing a `published` variable between them makes
+	// both releases point at the same instant, which turns this into an ordering
+	// test that agrees with whatever the version tie-break does.
+	olderAt, newerAt := publishedAt(higher), publishedAt(lower)
+	older := fixtureRelease(higher)
+	older.PublishedAt = &olderAt
+	older.Prerelease = true // published as a candidate, like every release so far
+	newer := fixtureRelease(lower)
+	newer.PublishedAt = &newerAt
+	newer.Prerelease = true
+
+	catalog := fixtureCatalog(t, servingReleases(t, older, newer), nil)
 
 	list, err := catalog.List(context.Background())
 	if err != nil || len(list.Releases) != 2 || !list.CheckedAt.Equal(fixtureNow) {
 		t.Fatalf("list=%+v err=%v", list, err)
-	}
-	if !reflect.DeepEqual(requested, []string{higher, lower}) {
-		t.Fatalf("the catalog did not fetch exactly the reviewed releases: %v", requested)
 	}
 	if list.Releases[0].Version != lower || list.Releases[1].Version != higher {
 		t.Fatalf("presented %s then %s, want the newer PUBLICATION first",
@@ -373,11 +261,15 @@ func TestCatalogListsByPublicationNotByVersion(t *testing.T) {
 
 func TestCatalogPublishedOfficialReleaseAndTrustedReviewMetadata(t *testing.T) {
 	release := fixtureRelease(fixtureVersion)
-	body := strings.TrimSuffix(fixtureBody(t, release), "}") + `,"body":"PRIVATE_RESPONSE unreviewed claims","name":"unreviewed name"}`
+	// THE RELEASE'S OWN DESCRIPTION IS WHAT THE DIALOG SHOWS. It used to be told the
+	// opposite — that notes must come from a reviewed document and never from the
+	// body — and that is the curation this replaced: a body is written by whoever cut
+	// the release, and the panel now reports what the release says about itself.
+	release.Body = "A release body written for a release page.\n\n" + strings.Repeat("x", 2000)
 	var calls int
 	catalog := fixtureCatalog(t, func(req *http.Request) (*http.Response, error) {
 		calls++
-		if req.Method != http.MethodGet || req.URL.String() != "https://api.github.com/repos/KazuhaHub/Passwall-Node/releases/tags/release/4.0.0" {
+		if req.Method != http.MethodGet || req.URL.String() != releaseListURL(maxReleases) {
 			t.Errorf("unexpected official request: %s %s", req.Method, req.URL)
 		}
 		if req.Header.Get("Accept") != "application/vnd.github+json" || req.Header.Get("X-GitHub-Api-Version") == "" || req.Header.Get("User-Agent") == "" {
@@ -386,7 +278,7 @@ func TestCatalogPublishedOfficialReleaseAndTrustedReviewMetadata(t *testing.T) {
 		if req.Header.Get("Authorization") != "" || req.Body != nil {
 			t.Error("catalog request must not transmit credentials or a request body")
 		}
-		return fixtureResponse(req, http.StatusOK, body), nil
+		return fixtureResponse(req, http.StatusOK, fixtureList(t, release)), nil
 	}, nil)
 	list, err := catalog.List(context.Background())
 	if err != nil || calls != 1 || len(list.Releases) != 1 || !list.CheckedAt.Equal(fixtureNow) {
@@ -396,15 +288,26 @@ func TestCatalogPublishedOfficialReleaseAndTrustedReviewMetadata(t *testing.T) {
 	if entry.Version != fixtureVersion || entry.Channel != "testing" || entry.ReleaseURL != release.HTMLURL || !entry.PublishedAt.Equal(*release.PublishedAt) {
 		t.Fatalf("incorrect release identity: %+v", entry)
 	}
-	if entry.Notes != catalog.reviewed[0].Notes || strings.Contains(entry.Notes, "PRIVATE_RESPONSE") {
-		t.Fatalf("notes must come from reviewed compatibility, not GitHub body: %q", entry.Notes)
+	if !strings.HasPrefix(entry.Notes, "A release body written for a release page.") {
+		t.Fatalf("notes must be the release's own description: %q", entry.Notes)
 	}
-	if !strings.Contains(entry.Notes, "Docker and Windows end-to-end installation has not been verified") {
-		t.Fatalf("review metadata lost the explicit E2E limitation: %q", entry.Notes)
+	// AND BOUNDED. A body is written for a release page — changelogs, contributor
+	// links — and the dialog renders it under a version selector.
+	if len([]rune(entry.Notes)) > maxNotesRunes+1 {
+		t.Fatalf("notes were not bounded to %d runes: %d", maxNotesRunes, len([]rune(entry.Notes)))
 	}
-	if !reflect.DeepEqual(entry.Methods, []string{"linux", "docker", "manual"}) || !reflect.DeepEqual(entry.Platforms, fixturePlatforms) {
-		t.Fatalf("incorrect reviewed availability: %+v", entry)
+	// LINUX AND MANUAL, AND NOT DOCKER. Docker used to be offered on the strength of
+	// a curated published tag; a release cannot be asked whether its image was
+	// pushed, so the panel does not claim it.
+	if !reflect.DeepEqual(entry.Methods, []string{"linux", "manual"}) || !reflect.DeepEqual(entry.Platforms, fixturePlatforms) {
+		t.Fatalf("incorrect availability: %+v", entry)
 	}
+}
+
+// releaseListURL is the address the catalog asks for. Spelled out here rather than
+// reading the constant, so a change to the constant is visible in this file.
+func releaseListURL(limit int) string {
+	return fmt.Sprintf("https://api.github.com/repos/KazuhaHub/Passwall-Node/releases?per_page=%d", limit)
 }
 
 func TestCatalogUnavailableAndUnpublishedAreDifferent(t *testing.T) {
@@ -413,7 +316,10 @@ func TestCatalogUnavailableAndUnpublishedAreDifferent(t *testing.T) {
 		status int
 		mutate func(*githubRelease)
 	}{
-		{name: "missing", status: http.StatusNotFound},
+		// NO 404 CASE. A 404 on the COLLECTION endpoint means the repository is not
+		// there — a source failure like any other, and the suite below covers it. The
+		// per-release endpoint's 404 used to mean "this release is not published",
+		// which is now what an empty list says.
 		{name: "draft", status: http.StatusOK, mutate: func(r *githubRelease) { r.Draft = true }},
 		{name: "unpublished", status: http.StatusOK, mutate: func(r *githubRelease) { r.PublishedAt = nil }},
 		{name: "zero published date", status: http.StatusOK, mutate: func(r *githubRelease) { zero := time.Time{}; r.PublishedAt = &zero }},
@@ -424,9 +330,6 @@ func TestCatalogUnavailableAndUnpublishedAreDifferent(t *testing.T) {
 				tc.mutate(&release)
 			}
 			body := fixtureBody(t, release)
-			if tc.status == http.StatusNotFound {
-				body = "PRIVATE_RESPONSE not valid JSON"
-			}
 			catalog := fixtureCatalog(t, func(req *http.Request) (*http.Response, error) {
 				return fixtureResponse(req, tc.status, body), nil
 			}, nil)
@@ -512,37 +415,6 @@ func TestCatalogRejectsRedirectEvenWithInjectedPermissiveClient(t *testing.T) {
 	}
 }
 
-func TestCatalogRejectsPublishedReleaseIdentityMismatch(t *testing.T) {
-	for _, tc := range []struct {
-		name   string
-		mutate func(*githubRelease)
-	}{
-		{"wrong exact tag", func(r *githubRelease) { r.TagName = "v0.0.1-beta2" }},
-		// "a pre-release advertised as stable" used to be here, and it set
-		// Prerelease false on a v-prefixed beta tag: the tag spelled the channel,
-		// so the two could disagree. A product tag spells no channel — that is the
-		// whole reason a candidate is a publication rather than a suffix — so the
-		// flag IS the channel and there is nothing for it to contradict. A wrong
-		// channel is a wrong publication, which this catalog is not in a position
-		// to detect and does not claim to.
-		{"wrong release owner", func(r *githubRelease) {
-			r.HTMLURL = "https://github.com/attacker/Passwall-Node/releases/tag/" + fixtureVersion
-		}},
-		{"URL query", func(r *githubRelease) { r.HTMLURL += "?private=PRIVATE_RESPONSE" }},
-		{"URL fragment", func(r *githubRelease) { r.HTMLURL += "#download" }},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			release := fixtureRelease(fixtureVersion)
-			tc.mutate(&release)
-			catalog := fixtureCatalog(t, func(req *http.Request) (*http.Response, error) {
-				return fixtureResponse(req, http.StatusOK, fixtureBody(t, release)), nil
-			}, nil)
-			list, err := catalog.List(context.Background())
-			assertUnavailable(t, list, err)
-		})
-	}
-}
-
 func TestCatalogFiltersPlatformsAndInstallationMethodsByExactUploadedAssets(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
@@ -553,7 +425,7 @@ func TestCatalogFiltersPlatformsAndInstallationMethodsByExactUploadedAssets(t *t
 		{"missing checksum", func(r *githubRelease) { r.Assets = r.Assets[1:] }, nil, nil},
 		{"missing one Linux arch", func(r *githubRelease) { r.Assets = append(r.Assets[:2], r.Assets[3:]...) }, append(append([]ports.NodeReleasePlatform{}, fixturePlatforms[:1]...), fixturePlatforms[2:]...), []string{"manual"}},
 		{"only Windows arm64", func(r *githubRelease) { r.Assets = []githubAsset{r.Assets[0], r.Assets[6]} }, []ports.NodeReleasePlatform{{OS: "windows", Arch: "arm64"}}, []string{"manual"}},
-		{"only Linux", func(r *githubRelease) { r.Assets = r.Assets[:3] }, fixturePlatforms[:2], []string{"linux", "docker", "manual"}},
+		{"only Linux", func(r *githubRelease) { r.Assets = r.Assets[:3] }, fixturePlatforms[:2], []string{"linux", "manual"}},
 		{"no packages", func(r *githubRelease) { r.Assets = r.Assets[:1] }, nil, nil},
 		{"upload pending", func(r *githubRelease) { r.Assets[2].State = "new" }, append(append([]ports.NodeReleasePlatform{}, fixturePlatforms[:1]...), fixturePlatforms[2:]...), []string{"manual"}},
 		{"empty package", func(r *githubRelease) { r.Assets[2].Size = 0 }, append(append([]ports.NodeReleasePlatform{}, fixturePlatforms[:1]...), fixturePlatforms[2:]...), []string{"manual"}},
@@ -607,41 +479,35 @@ func TestCatalogRejectsDuplicateAssetNames(t *testing.T) {
 	}
 }
 
-func TestCatalogOnlyExplicitReviewedReleasesAndSortsExactVersions(t *testing.T) {
+func TestCatalogSortsExactVersions(t *testing.T) {
 	versions := []string{fixtureVersion, "4.0.0.1", "4.1.0"}
-	var requested []string
-	catalog := fixtureCatalog(t, func(req *http.Request) (*http.Response, error) {
-		// THE URL CARRIES THE TAG AND THE RECORD HOLDS THE VERSION. Reading the
-		// path segment as the version is the swap this whole file is about: it
-		// would build a fixture release named `release/4.0.0`.
-		tag := strings.TrimPrefix(req.URL.String(), "https://api.github.com/repos/KazuhaHub/Passwall-Node/releases/tags/")
-		version, identified := versionpkg.VersionOfReleaseTag(tag)
-		if !identified {
-			t.Fatalf("the catalog asked for a tag this project does not publish: %s", tag)
-		}
-		requested = append(requested, version)
-		return fixtureResponse(req, http.StatusOK, fixtureBody(t, fixtureRelease(version))), nil
-	}, nil)
-	base := catalog.reviewed[0]
-	for _, version := range versions[1:] {
-		reviewed := base
-		reviewed.Version, reviewed.DockerPublishedTag = version, version
-		catalog.reviewed = append(catalog.reviewed, reviewed)
+	releases := make([]githubRelease, 0, len(versions))
+	for _, version := range versions {
+		releases = append(releases, fixtureRelease(version))
 	}
+	// EVERY RELEASE IS PUBLISHED AT THE SAME INSTANT, so the version is what orders
+	// them — which is the tie-break, and the reason it has to be the project's own
+	// comparator: x/mod/semver answers zero for a four-segment version.
+	for i := range releases {
+		same := fixtureNow.Add(-time.Hour)
+		releases[i].PublishedAt = &same
+	}
+	catalog := fixtureCatalog(t, servingReleases(t, releases...), nil)
+
 	list, err := catalog.List(context.Background())
-	if err != nil || len(list.Releases) != 3 || !reflect.DeepEqual(requested, versions) {
-		t.Fatalf("requests=%v list=%+v err=%v", requested, list, err)
+	if err != nil || len(list.Releases) != 3 {
+		t.Fatalf("list=%+v err=%v", list, err)
 	}
 	wanted := []string{"4.1.0", "4.0.0.1", fixtureVersion}
 	for i, version := range wanted {
 		if list.Releases[i].Version != version {
-			t.Fatalf("catalog is not semver descending: %+v", list)
+			t.Fatalf("catalog is not version-descending within one instant: %+v", list)
 		}
 	}
 	// CHANNELS COME FROM THE RELEASE, NOT FROM THE TEXT, so they are read by
-	// version rather than by position: the shipped release is published as a
-	// pre-release and the two added here as released, and nothing about their
-	// version strings says either.
+	// version rather than by position: one of these is published as a pre-release
+	// and the others as released, and nothing about their version strings says
+	// which.
 	channels := make(map[string]string, len(list.Releases))
 	for _, entry := range list.Releases {
 		channels[entry.Version] = entry.Channel
@@ -649,15 +515,20 @@ func TestCatalogOnlyExplicitReviewedReleasesAndSortsExactVersions(t *testing.T) 
 	if channels[fixtureVersion] != "testing" || channels["4.0.0.1"] != "stable" || channels["4.1.0"] != "stable" {
 		t.Fatalf("stable/testing channels were inferred incorrectly: %v", channels)
 	}
-	// The curated methods remain an upper bound even if all public assets exist.
-	catalog = fixtureCatalog(t, func(req *http.Request) (*http.Response, error) {
-		return fixtureResponse(req, http.StatusOK, fixtureBody(t, fixtureRelease(fixtureVersion))), nil
-	}, nil)
-	catalog.reviewed[0].Methods = []string{"manual"}
-	catalog.reviewed[0].DockerPublishedTag = ""
+
+	// WHAT A RELEASE CAN EVIDENCE IS WHAT IT IS OFFERED FOR. This used to be a
+	// curated list of methods acting as an upper bound; the bound is now the assets
+	// themselves, so a release that published only macOS packages is installable by
+	// hand and in no other way.
+	partial := fixtureRelease(fixtureVersion)
+	partial.Assets = []githubAsset{fixtureAsset(partial.TagName, "SHA256SUMS.txt")}
+	for _, platform := range []ports.NodeReleasePlatform{{OS: "darwin", Arch: "amd64"}, {OS: "darwin", Arch: "arm64"}} {
+		partial.Assets = append(partial.Assets, fixtureAsset(partial.TagName, fixturePackage(fixtureVersion, platform)))
+	}
+	catalog = fixtureCatalog(t, servingReleases(t, partial), nil)
 	list, err = catalog.List(context.Background())
 	if err != nil || len(list.Releases) != 1 || !reflect.DeepEqual(list.Releases[0].Methods, []string{"manual"}) {
-		t.Fatalf("unreviewed installation method became available: %+v %v", list, err)
+		t.Fatalf("a release offered a path its assets do not support: %+v %v", list, err)
 	}
 }
 
@@ -714,14 +585,17 @@ func TestCatalogCachesConfirmedEmptyButNotFailures(t *testing.T) {
 	var calls int
 	catalog := fixtureCatalog(t, func(req *http.Request) (*http.Response, error) {
 		calls++
-		return fixtureResponse(req, http.StatusNotFound, ""), nil
+		// AN EMPTY LIST IS A CONFIRMED ANSWER — the project has published nothing —
+		// and it is cached like any other. A status code that means the source could
+		// not be read is the case below.
+		return fixtureResponse(req, http.StatusOK, "[]"), nil
 	}, nil)
 	for range 2 {
 		list, err := catalog.List(context.Background())
 		assertEmptyList(t, list, err)
 	}
 	if calls != 1 {
-		t.Fatalf("confirmed missing release did not use cache: calls=%d", calls)
+		t.Fatalf("a confirmed empty catalog did not use cache: calls=%d", calls)
 	}
 	catalog = fixtureCatalog(t, func(req *http.Request) (*http.Response, error) {
 		calls++
@@ -892,102 +766,47 @@ func TestCatalogCanceledContextNeverFetchesOrReadsCache(t *testing.T) {
 	}
 }
 
-func TestCatalogInvalidCuratedTagCannotChooseAnotherHTTPSource(t *testing.T) {
-	var calls int
+func TestAReleaseOutsideTheNamespaceIsSkippedRatherThanRequested(t *testing.T) {
+	const malformed = "v0.0.1/../../https://sensitive.invalid/PRIVATE_RESPONSE"
+	var asked []string
+	// A RELEASE THE REPOSITORY CARRIES BUT THIS PROJECT DOES NOT PUBLISH. The
+	// endpoint answers the repository's releases, and the legacy tags are still
+	// among them, so a tag outside the namespace is a normal thing to meet — it is
+	// skipped, not refused, because a list is not a claim that every entry is ours.
+	foreign := fixtureRelease(fixtureVersion)
+	foreign.TagName = malformed
 	catalog := fixtureCatalog(t, func(req *http.Request) (*http.Response, error) {
-		calls++
-		return fixtureResponse(req, http.StatusOK, "PRIVATE_RESPONSE"), nil
+		asked = append(asked, req.URL.String())
+		return fixtureResponse(req, http.StatusOK, fixtureList(t, foreign)), nil
 	}, nil)
-	catalog.reviewed[0].Version = "v0.0.1/../../https://sensitive.invalid/PRIVATE_RESPONSE"
+
 	list, err := catalog.List(context.Background())
-	assertUnavailable(t, list, err)
-	if calls != 0 {
-		t.Fatalf("malformed compatibility tag selected an HTTP source: calls=%d", calls)
+	if err != nil || len(list.Releases) != 0 {
+		t.Fatalf("a release outside the namespace was offered: %+v %v", list, err)
+	}
+	// AND THE MALFORMED VALUE NEVER BECAME AN ADDRESS. This is the property, and it
+	// is asserted on the URL rather than on a call count: a count would also be
+	// satisfied by never contacting the release source at all, which is a different
+	// fact and one this case does not establish.
+	for _, url := range asked {
+		if strings.Contains(url, "sensitive.invalid") || strings.Contains(url, "..") {
+			t.Fatalf("malformed value reached an address: %s", url)
+		}
 	}
 }
-
-func TestReviewedRegistryRejectsUnsafeOrUnverifiedRecords(t *testing.T) {
-	catalog := fixtureCatalog(t, func(*http.Request) (*http.Response, error) {
-		t.Fatal("registry validation must not fetch")
-		return nil, nil
-	}, nil)
-	for _, tc := range []struct {
-		name   string
-		mutate func(*reviewedRelease)
-	}{
-		{"floating version", func(r *reviewedRelease) { r.Version = "latest" }},
-		{"version URL injection", func(r *reviewedRelease) { r.Version = "v0.0.1/../../PRIVATE_RESPONSE" }},
-		{"missing PSP major", func(r *reviewedRelease) { r.PSPMajor = 0 }},
-		{"no notes", func(r *reviewedRelease) { r.Notes = "" }},
-		{"oversized notes", func(r *reviewedRelease) { r.Notes = strings.Repeat("a", 4097) }},
-		{"unknown method", func(r *reviewedRelease) { r.Methods = []string{"ssh"} }},
-		{"duplicate method", func(r *reviewedRelease) { r.Methods = []string{"manual", "manual"} }},
-		{"no methods", func(r *reviewedRelease) { r.Methods = nil }},
-		{"docker floating tag", func(r *reviewedRelease) { r.DockerPublishedTag = "beta" }},
-		{"docker other exact tag", func(r *reviewedRelease) { r.DockerPublishedTag = "v0.0.1-beta2" }},
-		{"docker not reviewed", func(r *reviewedRelease) { r.Methods = []string{"manual"} }},
-		{"unsupported OS", func(r *reviewedRelease) { r.Platforms = []ports.NodeReleasePlatform{{OS: "freebsd", Arch: "amd64"}} }},
-		{"unsupported arch", func(r *reviewedRelease) { r.Platforms = []ports.NodeReleasePlatform{{OS: "linux", Arch: "386"}} }},
-		{"duplicate platform", func(r *reviewedRelease) {
-			r.Platforms = []ports.NodeReleasePlatform{fixturePlatforms[0], fixturePlatforms[0]}
-		}},
-		{"no platforms", func(r *reviewedRelease) { r.Platforms = nil }},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			reviewed := catalog.reviewed[0]
-			tc.mutate(&reviewed)
-			if validReviewed(reviewed) {
-				t.Fatalf("invalid compatibility record accepted: %+v", reviewed)
-			}
-		})
-	}
-	if !validReviewed(catalog.reviewed[0]) {
-		t.Fatal("current reviewed registry is invalid")
-	}
-}
-
-// A TWO-DIGIT SEGMENT IS NOT TWO CHARACTERS, and this is the test that would have
-// caught it before an operator noticed.
-//
-// The pathology used to be spelled in a prerelease: semver compares identifiers
-// character by character, so v0.0.1-beta11 ranked BELOW v0.0.1-beta9, and sorting
-// "newest first" with it put the older release at the top of the list whose first
-// entry the UI marks as recommended. The scheme that could spell it that way is
-// gone, and the SEGMENT form is the same mistake: `4.0.10` against `4.0.9` as
-// text ranks the tenth patch below the ninth.
-//
-// RECENCY COMES FROM THE PUBLICATION TIME, which is the only axis a version
-// string cannot reinterpret — and the versions here are the ones a text
-// comparison would invert.
 func TestCatalogOrdersByPublicationNotByVersionText(t *testing.T) {
 	// Deliberately ascending in publication order, with a segment whose text and
 	// numeric order disagree.
 	released := []string{"4.0.9", "4.0.10", "4.0.11"}
-	published := make(map[string]time.Time, len(released))
 	base := fixtureNow.Add(-time.Duration(len(released)) * time.Hour)
+	releases := make([]githubRelease, 0, len(released))
 	for index, version := range released {
-		published[version] = base.Add(time.Duration(index) * time.Hour)
-	}
-	catalog := fixtureCatalog(t, func(req *http.Request) (*http.Response, error) {
-		// THE URL CARRIES THE TAG; the fixture release is named by the version.
-		tag := strings.TrimPrefix(req.URL.String(), "https://api.github.com/repos/KazuhaHub/Passwall-Node/releases/tags/")
-		version, identified := versionpkg.VersionOfReleaseTag(tag)
-		if !identified {
-			t.Fatalf("the catalog asked for a tag this project does not publish: %s", tag)
-		}
 		release := fixtureRelease(version)
-		at := published[version]
+		at := base.Add(time.Duration(index) * time.Hour)
 		release.PublishedAt = &at
-		return fixtureResponse(req, http.StatusOK, fixtureBody(t, release)), nil
-	}, nil)
-
-	template := catalog.reviewed[0]
-	catalog.reviewed = nil
-	for _, version := range released {
-		reviewed := template
-		reviewed.Version, reviewed.DockerPublishedTag = version, version
-		catalog.reviewed = append(catalog.reviewed, reviewed)
+		releases = append(releases, release)
 	}
+	catalog := fixtureCatalog(t, servingReleases(t, releases...), nil)
 
 	list, err := catalog.List(context.Background())
 	if err != nil {
@@ -1002,60 +821,6 @@ func TestCatalogOrdersByPublicationNotByVersionText(t *testing.T) {
 		t.Fatalf("catalog order = %v, want newest-published first %v", got, want)
 	}
 }
-
-
-// The agreement check between GitHub's prerelease flag and the tag text is a
-// LEGACY defence, and it is load-bearing there: an older beta cut before the
-// workflow set the flag arrives with prerelease=false, and a hyphen has always
-// meant a pre-release in that form.
-//
-// It is not a rule about product tags, which have no hyphen at all. Requiring
-// agreement there would reject every testing candidate — and it would do it in
-// the catalog's LOOP, so one misclassified release empties the whole list an
-// operator chooses an upgrade from rather than dropping one row.
-func TestReleaseChannelAgreementIsScopedToTheLegacyForm(t *testing.T) {
-	for _, tc := range []struct {
-		name       string
-		tag        string
-		prerelease bool
-		want       bool
-		why        string
-	}{
-		{
-			name: "a legacy beta the flag caught", tag: "v0.0.1-beta11", prerelease: true, want: true,
-			why: "flag and tag agree",
-		},
-		{
-			name: "a legacy beta the flag missed", tag: "v0.0.1-beta11", prerelease: false, want: false,
-			why: "the gap this check exists for: published before the workflow set the flag",
-		},
-		{
-			name: "a legacy stable", tag: "v0.0.1", prerelease: false, want: true,
-			why: "no hyphen, no flag",
-		},
-		{
-			name: "a product tag the flag marks testing", tag: "release/4.0.0", prerelease: true, want: true,
-			why: "no hyphen to find, so the flag decides",
-		},
-		{
-			name: "a product tag the flag calls released", tag: "release/4.0.0", prerelease: false, want: true,
-			why: "the flag is the authority for this namespace",
-		},
-		{
-			name: "a tag in neither scheme", tag: "4.0.0-rc.1", prerelease: false, want: false,
-			why: "for an unrecognised form the characters are all there is to go on",
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := releaseChannelAgrees(tc.tag, tc.prerelease); got != tc.want {
-				t.Fatalf("releaseChannelAgrees(%q, %v) = %v, want %v — %s", tc.tag, tc.prerelease, got, tc.want, tc.why)
-			}
-		})
-	}
-}
-
-// fixtureProductAsset names the asset by the VERSION and addresses it under the
-// TAG, which is what the release workflow publishes.
 func fixtureProductAsset(tag, version, name string) githubAsset {
 	return githubAsset{
 		Name: name, State: "uploaded", Size: 123,
@@ -1080,25 +845,19 @@ func fixtureProductRelease(tag, version string) githubRelease {
 // contents by its VERSION, and the two are different strings.
 //
 // Every address in the catalog is one or the other, and the failure of getting
-// it wrong is not a wrong list — it is `errUnavailable`, so the WHOLE catalog
-// goes dark rather than one entry disappearing. The API path, the tag GitHub
-// reports back, the release page and the download path are all the tag; the
-// asset names and the entry's own version are the version.
+// it wrong is not a wrong list — it is a list whose every entry is dropped, since
+// an asset that is not named for the version is not found. The tag is the release
+// page and the download path; the version is the asset names and the entry's own
+// version.
 func TestAProductReleaseIsAddressedByItsTagAndNamedByItsVersion(t *testing.T) {
 	const version, tag = "4.0.0", "release/4.0.0"
 	release := fixtureProductRelease(tag, version)
 	catalog := fixtureCatalog(t, roundTripFunc(func(req *http.Request) (*http.Response, error) {
-		if got := req.URL.String(); got != "https://api.github.com/repos/KazuhaHub/Passwall-Node/releases/tags/"+tag {
-			t.Fatalf("the catalog asked for %s, and the release lives at %s", got, tag)
+		if got := req.URL.String(); got != releaseListURL(maxReleases) {
+			t.Fatalf("the catalog asked for %s", got)
 		}
 		return fixtureResponse(req, http.StatusOK, fixtureBody(t, release)), nil
 	}), nil)
-	catalog.reviewed = []reviewedRelease{{
-		Version: version, PSPMajor: 4, Notes: "reviewed",
-		Methods: []string{"linux", "docker", "manual"}, Platforms: fixturePlatforms,
-		DockerPublishedTag: version,
-	}}
-
 	list, err := catalog.List(context.Background())
 	if err != nil {
 		t.Fatalf("a product-scheme release must be readable: %v", err)
@@ -1132,7 +891,9 @@ func TestAProductReleaseIsAddressedByItsTagAndNamedByItsVersion(t *testing.T) {
 	if !reflect.DeepEqual(entry.Platforms, fixturePlatforms) {
 		t.Errorf("platforms = %+v, want %+v", entry.Platforms, fixturePlatforms)
 	}
-	if !reflect.DeepEqual(entry.Methods, []string{"linux", "docker", "manual"}) {
+	// NO DOCKER: a release cannot be asked whether its image was pushed, so the
+	// panel does not offer a path it cannot see.
+	if !reflect.DeepEqual(entry.Methods, []string{"linux", "manual"}) {
 		t.Errorf("methods = %+v", entry.Methods)
 	}
 	// Published under a prerelease flag, so it is a candidate.

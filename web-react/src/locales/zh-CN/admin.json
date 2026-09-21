@@ -2523,8 +2523,6 @@
       "upgrade_target_unpinnable": "注意：3X-UI 的升级接口不接受版本参数，它会拉取当时的最新版。上面的目标版本是刚读到的值，不是面板会遵守的承诺。"
     },
     "compat_notice": {
-      "policy-not-applicable": "已加载的升级政策（修订 {{revision}}）不是为当前这个构建审阅的，因此不会生效。",
-      "policy-expired": "升级政策已于 {{expires}} 失效，不再授予任何升级资格。",
       "range-stale": "当前 3X-UI 已测上限 {{max}} 是最后一次成功获取的结果；最近一次刷新失败：{{error}}"
     }
   },

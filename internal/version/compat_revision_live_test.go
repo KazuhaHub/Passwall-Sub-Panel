@@ -14,7 +14,7 @@ import (
 func TestFetchAndApplyRefusesAnOlderManifest(t *testing.T) {
 	priorVersion := Version
 	priorMax := ActiveMaxTestedXUI()
-	priorApplied := currentAppliedRevision()
+	priorApplied := currentAppliedRevision(productXUI)
 	// THE BUILD IS A PRODUCT ONE, so the document it fetches is the one addressed
 	// by name: a per-major manifest would be refused, because a product version has
 	// no derivable compatibility major.
@@ -22,19 +22,19 @@ func TestFetchAndApplyRefusesAnOlderManifest(t *testing.T) {
 	t.Cleanup(func() {
 		Version = priorVersion
 		SetActiveMaxTestedXUI(priorMax)
-		setAppliedRevision(priorApplied)
+		setAppliedRevision(productXUI, priorApplied)
 	})
 	// AND NOTHING IS IN FORCE TO BEGIN WITH. The guard is about the ORDER of two
 	// revisions, and the document this repository ships is applied before any test
 	// runs — so a fixture dated before it would be refused for a reason that has
 	// nothing to do with what is under test.
-	setAppliedRevision("")
+	setAppliedRevision(productXUI, "")
 
 	var updatedAt, maxTested string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		// A PANEL RANGES DOCUMENT: it states the builds it applies to, which is how
-		// a product build is matched, and its issued_at is the revision.
-		fmt.Fprintf(w, `{"schema_version":1,"revision":1,"issued_at":%q,"expires_at":"2099-01-01T00:00:00Z","applies_to_psp":{"min":"4.0.0","max":"4.99.99"},"entries":[{"psp_min":"4.0.0","psp_max":"4.99.99","min_xui":"3.4.2","max_tested_xui":%q}]}`, updatedAt, maxTested)
+		// A 3X-UI PANEL RANGES DOCUMENT: it says which product it is, states the builds
+		// it applies to, and carries its revision as issued_at.
+		fmt.Fprintf(w, `{"schema_version":1,"product":"3x-ui","revision":1,"issued_at":%q,"expires_at":"2099-01-01T00:00:00Z","applies_to_psp":{"min":"4.0.0","max":"4.99.99"},"entries":[{"psp_min":"4.0.0","psp_max":"4.99.99","min_xui":"3.4.2","max_tested_xui":%q}]}`, updatedAt, maxTested)
 	}))
 	defer server.Close()
 
@@ -47,7 +47,7 @@ func TestFetchAndApplyRefusesAnOlderManifest(t *testing.T) {
 
 	apply := func(when, max string) error {
 		updatedAt, maxTested = when, max
-		return fetchAndApply(context.Background(), server.URL)
+		return fetchAndApply(context.Background(), compatSource{Product: productXUI, Name: "3x-ui-v4.json", URL: server.URL})
 	}
 
 	// The first manifest installs, and its revision is what later ones are
@@ -55,7 +55,7 @@ func TestFetchAndApplyRefusesAnOlderManifest(t *testing.T) {
 	if err := apply("2026-09-01T00:00:00Z", "3.8.5"); err != nil {
 		t.Fatalf("the first manifest must apply: %v", err)
 	}
-	if got := currentAppliedRevision(); got != "2026-09-01T00:00:00Z" {
+	if got := currentAppliedRevision(productXUI); got != "2026-09-01T00:00:00Z" {
 		t.Fatalf("applied revision = %q, want the first manifest's", got)
 	}
 
@@ -75,7 +75,7 @@ func TestFetchAndApplyRefusesAnOlderManifest(t *testing.T) {
 	if got := ActiveMaxTestedXUI(); got != "3.9.0" {
 		t.Fatalf("the tested ceiling regressed to %q; a refused manifest must leave the range in force", got)
 	}
-	if got := currentAppliedRevision(); got != "2026-09-02T00:00:00Z" {
+	if got := currentAppliedRevision(productXUI); got != "2026-09-02T00:00:00Z" {
 		t.Fatalf("the applied revision regressed to %q", got)
 	}
 }

@@ -297,20 +297,9 @@ describe('the upgrade action asks the instance before it fires', () => {
 // The panel can report why an upgrade is not offered. That answer is only useful
 // if it is visible: without it the diagnosis an operator has is to guess, and the
 // guess is usually "the panel is broken" rather than "the range is the last good
-// one" or "the policy expired".
+// one".
 describe('the fleet-level compatibility state', () => {
-  const working = { xui: { min_version: '3.4.2', max_tested: '3.8.5' }, sui: { max_tested: '1.6.3' },
-    policy: { installed: false, applicable: false, enforcing: false, expired: false } }
-
-  it('warns when the loaded policy is not the one this build was reviewed for', async () => {
-    installReads({
-      '/admin/servers': list([xui]),
-      '/admin/servers/compat-status': { ...working,
-        policy: { installed: true, applicable: false, enforcing: false, revision: 7, expired: false } },
-    })
-    mount(<ServersView />)
-    expect(await screen.findByText(/compat_notice\.policy-not-applicable/)).toBeTruthy()
-  })
+  const working = { xui: { min_version: '3.4.2', max_tested: '3.8.5' }, sui: { max_tested: '1.6.3' } }
 
   it('warns when the range is the last good one', async () => {
     installReads({

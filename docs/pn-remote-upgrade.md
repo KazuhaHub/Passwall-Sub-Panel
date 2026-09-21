@@ -12,7 +12,7 @@ Xray/sing-box。管理员选择已发布的精确版本并确认短暂连接中�
 启动授权默认十分钟；当轮报告必须同时声明 execution、expiry 与 `task.agent.upgrade.v1` 才下发。
 任务创建前还会读取最近一次已验证的协议/能力快照；未知、不兼容或能力不全时不会创建任务。下发时再次
 检查当轮报告，详细规则见 [ADR 0033](adr/0033-native-node-compatibility-and-upgrade-admission.md) 与
-[机器兼容矩阵](compat/node-v4.json)。旧 beta2 没有升级能力，需先人工升级一次并保留身份和数据。
+[机器兼容矩阵](compat/passwall-node-v4.json)。旧 beta2 没有升级能力，需先人工升级一次并保留身份和数据。
 
 Linux/systemd 使用固定路径的独立 root helper。Docker 默认生成兼容 NAS 项目编辑器的单服务 Compose；
 只有管理员在安装弹窗“高级”中显式开启远程升级时，才生成双服务 Compose：Agent 保持非 root 且不挂载

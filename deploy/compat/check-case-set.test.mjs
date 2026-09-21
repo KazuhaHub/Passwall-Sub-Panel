@@ -19,26 +19,34 @@ import { after, test } from 'node:test'
 // ---------------------------------------------------------------------------
 
 const CHECKER = fileURLToPath(new URL('check-case-set.mjs', import.meta.url))
-const MANIFEST = fileURLToPath(new URL('../../docs/compat/node-v4.json', import.meta.url))
+const MANIFEST = fileURLToPath(new URL('../../docs/compat/passwall-node-v4.json', import.meta.url))
 
-// A TWO-RELEASE MANIFEST, BECAUSE MOST OF THESE CASES ARE ABOUT A SET.
+// A MANIFEST WITH SEVERAL RELEASES, BECAUSE MOST OF THESE CASES ARE ABOUT A SET.
 //
-// The shipped manifest carries one release — the products publish one, and there
-// is no deployment whose set has to stay covered while it is narrowed — and a set
-// of one cannot show a dropped leg, a failed report, an unreadable one, or a
+// A set of one cannot show a dropped leg, a failed report, an unreadable one, or a
 // narrowed floor: every one of those cases needs a case that SURVIVES it. So the
-// gate is driven against the shipped manifest plus a release, and what the cases
+// gate is driven against the shipped manifest PLUS releases, and what the cases
 // below exercise is the gate rather than the file.
-const EXTRA_RELEASES = ['4.0.1', '4.0.2', '4.0.3']
+//
+// THE EXTRAS MUST NOT COLLIDE WITH WHAT THE FILE ALREADY HAS. They were a fixed
+// list appended to the shipped set, and the shipped set grows: once 4.0.1 became a
+// published release the file carried it too, so appending it again produced two
+// cases with ONE id. The gate refuses that, correctly — and these cases then failed
+// for a reason about the fixture rather than about the gate. Filtering by what is
+// present keeps the fixture about the gate however the file grows.
+const EXTRA_RELEASES = ['4.0.2', '4.0.3', '4.0.4']
 const manifestDir = mkdtempSync(join(tmpdir(), 'psp-manifest-'))
-const MANIFEST_TWO = join(manifestDir, 'node-v4.json')
+const MANIFEST_TWO = join(manifestDir, 'passwall-node-v4.json')
 after(() => rmSync(manifestDir, { recursive: true, force: true }))
 
 function twoReleaseManifest() {
   const manifest = JSON.parse(readFileSync(MANIFEST, 'utf8'))
+  const present = new Set(manifest.released_nodes.map((row) => row.version))
   manifest.released_nodes = [
     ...manifest.released_nodes,
-    ...EXTRA_RELEASES.map((version) => ({ version, protocol_version: 1, base_sync: 'supported', remote_upgrade: 'conditional' }))
+    ...EXTRA_RELEASES
+      .filter((version) => !present.has(version))
+      .map((version) => ({ version, protocol_version: 1, base_sync: 'supported', remote_upgrade: 'conditional' }))
   ]
   return manifest
 }
@@ -166,7 +174,7 @@ test('a shortened version list narrows the expected set rather than being ignore
   // gate must follow it, or a floor move would leave the gate demanding reports
   // for versions the matrix no longer runs.
   const manifest = JSON.parse(readFileSync(MANIFEST_TWO, 'utf8'))
-  const trimmed = join(mkdtempSync(join(tmpdir(), 'psp-manifest-')), 'node-v4.json')
+  const trimmed = join(mkdtempSync(join(tmpdir(), 'psp-manifest-')), 'passwall-node-v4.json')
   writeFileSync(trimmed, JSON.stringify({ ...manifest, min_supported: EXTRA_RELEASES.at(-1) }))
   const { code, result } = check(everyCase, { extraArgs: ['--manifest', trimmed] })
   assert.equal(code, 0)

@@ -18,7 +18,7 @@ import { readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-const DEFAULT_MANIFEST = fileURLToPath(new URL('../../docs/compat/node-v4.json', import.meta.url))
+const DEFAULT_MANIFEST = fileURLToPath(new URL('../../docs/compat/passwall-node-v4.json', import.meta.url))
 const DEFAULT_PROFILES = fileURLToPath(new URL('profiles.json', import.meta.url))
 
 function parseArgs(argv) {

@@ -6,11 +6,14 @@ import type { CompatStatusResponse } from '@/api/servers'
 // rule is that a banner is for a state someone would otherwise MISREAD, not for
 // every non-ideal one: a range that is simply the compiled floor is normal, and a
 // banner for it would train people to ignore banners.
+//
+// THERE USED TO BE TWO POLICY KINDS ABOVE THE RANGE ONE — a policy reviewed for a
+// different build, and an expired one — and they are gone with the signed policy
+// itself. What is left is the state that was always the panel's own: a range it
+// could not refresh and is serving from the last good fetch, which looks exactly
+// like a fresh one from outside.
 
-export type CompatNoticeKind =
-  | 'policy-not-applicable'
-  | 'policy-expired'
-  | 'range-stale'
+export type CompatNoticeKind = 'range-stale'
 
 export interface CompatNotice {
   kind: CompatNoticeKind
@@ -18,26 +21,10 @@ export interface CompatNotice {
   values: Record<string, string>
 }
 
-/**
- * Picks the ONE state worth showing, or nothing.
- *
- * Ordered by how much the state would mislead: a policy reviewed for a different
- * build looks like a working panel and is not; an expired policy looks like an
- * enforcing one; a stale range looks fresh. A range that is merely old is not on
- * this list — nothing misleads an operator about a range nobody claimed was new.
- */
+/** Picks the ONE state worth showing, or nothing. */
 export function compatNotice(status: CompatStatusResponse | null | undefined): CompatNotice | null {
   if (!status) return null
 
-  const policy = status.policy
-  if (policy?.installed && !policy.applicable) {
-    // The worst of the three: everything looks configured, and none of it applies
-    // to the build that is running.
-    return { kind: 'policy-not-applicable', values: { revision: String(policy.revision ?? '') } }
-  }
-  if (policy?.expired) {
-    return { kind: 'policy-expired', values: { expires: policy.expires_at ?? '' } }
-  }
   if (status.xui?.last_error && status.xui?.max_tested) {
     // The range works AND the last attempt to update it failed — the state an
     // operator cannot distinguish from a fresh fetch without being told.

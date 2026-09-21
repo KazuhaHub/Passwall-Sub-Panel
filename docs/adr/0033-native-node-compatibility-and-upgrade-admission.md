@@ -59,7 +59,7 @@ Passwall Sub Panel 与 Passwall Node 独立发布。节点协议 v1 允许增加
 ### 5. 发布门包含已发布旧节点
 
 Passwall Sub Panel 的普通 CI 继续测试当前固定的 Node 依赖；发布 CI 另外以真实 release tag 运行旧节点
-矩阵。兼容矩阵位于 `docs/compat/node-v4.json`，测试强制它与共享协议常量、能力集合和 CI tag 列表一致。
+矩阵。兼容矩阵位于 `docs/compat/passwall-node-v4.json`，测试强制它与共享协议常量、能力集合和 CI tag 列表一致。
 删除旧版本前必须通过新的 ADR 修改支持策略，而不是直接从 workflow 移除。
 
 ## 后果

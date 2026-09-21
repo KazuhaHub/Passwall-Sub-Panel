@@ -7,7 +7,7 @@
 // job that reads the plan.
 //
 // THE SUPPORTED VERSION LIST IS NOT IN THIS FILE, AND MUST NOT BE. It is sliced
-// from docs/compat/node-v4.json by POSITION at min_supported. Restating it here
+// from docs/compat/passwall-node-v4.json by POSITION at min_supported. Restating it here
 // would make the plan agree with itself while silently disagreeing with the
 // manifest the panel ships — which is how a version stops being tested without
 // anybody deciding it should.
@@ -22,7 +22,7 @@ import { readFileSync, writeFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 
 const DEFAULTS = {
-  manifest: fileURLToPath(new URL('../../docs/compat/node-v4.json', import.meta.url)),
+  manifest: fileURLToPath(new URL('../../docs/compat/passwall-node-v4.json', import.meta.url)),
   verification: fileURLToPath(new URL('../../docs/compat/verification-v1.json', import.meta.url)),
   profiles: fileURLToPath(new URL('profiles.json', import.meta.url))
 }

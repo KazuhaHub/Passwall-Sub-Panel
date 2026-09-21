@@ -36,48 +36,61 @@ func TestOnlyALegacyBuildHasACompatibilityMajor(t *testing.T) {
 	}
 }
 
-func TestAProductVersionHasNoPerMajorManifestURL(t *testing.T) {
+// A PRODUCT BUILD MUST NOT DERIVE A PER-MAJOR MANIFEST NAME.
+//
+// The per-major files (v3.json, v4.json) are named after a COMPATIBILITY major,
+// and a product version's first segment is not one: 102.1.0 would derive
+// v102.json, which either does not exist or describes a different panel. What a
+// product build derives instead is one document per product, named after the
+// panel major its own version carries.
+//
+// THIS IS THE SPECIFIC FILE NAME THAT MUST NOT APPEAR, which is the half worth
+// keeping separate from the derivation itself: the danger is not a missing URL,
+// it is a build quietly inheriting a range nobody published for it because a
+// number it derived happened to name somebody else's file.
+func TestAProductBuildDerivesNoPerMajorManifestName(t *testing.T) {
 	previous := Version
 	t.Cleanup(func() { Version = previous })
 
-	// A legacy build still gets its per-major manifest.
+	for _, tc := range []struct{ version, forbidden string }{
+		{"102.1.0", "v102.json"},
+		{"4.0.0", "v4.json"},
+		{"3.6.0", "v3.json"},
+	} {
+		Version = tc.version
+		sources, err := compatDocumentSources()
+		if err != nil {
+			t.Fatalf("Version=%q: %v", tc.version, err)
+		}
+		for _, source := range sources {
+			if strings.HasSuffix(source.URL, "/"+tc.forbidden) {
+				t.Fatalf("Version=%q derived the per-major file %s (%s)", tc.version, tc.forbidden, source.URL)
+			}
+		}
+	}
+
+	// A LEGACY BUILD STILL GETS ITS PER-MAJOR MANIFEST. That route is frozen
+	// rather than removed, and nothing here may reach it.
 	Version = "v4.0.0-beta.25"
-	url, err := defaultURLForCurrentVersion()
+	sources, err := compatDocumentSources()
 	if err != nil {
 		t.Fatalf("a legacy build must derive its manifest URL: %v", err)
 	}
-	if !strings.HasSuffix(url, "/v4.json") {
-		t.Fatalf("legacy URL = %q, want it to end in /v4.json", url)
+	if len(sources) != 1 || !strings.HasSuffix(sources[0].URL, "/v4.json") {
+		t.Fatalf("legacy sources = %v, want the single /v4.json manifest", sources)
 	}
+}
 
-	// A product-scheme build does NOT derive a per-major URL: its first segment
-	// is a release line, so v102.json would be a file that either does not exist
-	// or means something else.
-	//
-	// IT USED TO DERIVE NOTHING AT ALL, and this test used to assert the refusal.
-	// That was the honest description of a gap — the build reached no ranges
-	// whatsoever. It now reaches a document that is NAMED rather than derived and
-	// states the builds it applies to, so the assertion becomes: not a per-major
-	// path, and a document that carries its own window.
-	Version = "102.1.0"
-	url, err = defaultURLForCurrentVersion()
-	if err != nil {
-		t.Fatalf("a product build must reach the named document: %v", err)
-	}
-	if strings.Contains(url, "v102") || strings.HasSuffix(url, "/v4.json") {
-		t.Fatalf("a per-major path was produced from an unprefixed version: %q", url)
-	}
-	if !strings.HasSuffix(url, "/"+panelRangesDocumentName) {
-		t.Fatalf("URL = %q, want the named panel ranges document", url)
-	}
-
-	// And a version that is neither scheme still derives nothing, because there
-	// is no window it could be matched against.
+// A version that is neither scheme derives nothing, because there is no window
+// it could be matched against.
+func TestAnUnidentifiableVersionDerivesNothing(t *testing.T) {
+	previous := Version
+	t.Cleanup(func() { Version = previous })
 	for _, unidentifiable := range []string{"dev", "", "0.1.0"} {
 		Version = unidentifiable
-		url, err = defaultURLForCurrentVersion()
+		sources, err := compatDocumentSources()
 		if err == nil {
-			t.Fatalf("Version=%q derived %q; it has no release identity to match a window against", unidentifiable, url)
+			t.Fatalf("Version=%q derived %v; it has no release identity to match a window against", unidentifiable, sources)
 		}
 		if !strings.Contains(err.Error(), "stays unknown") {
 			t.Errorf("the refusal must state the consequence; it said %q", err)

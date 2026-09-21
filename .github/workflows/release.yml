@@ -26,8 +26,8 @@ on:
       # release's TAG is not its VERSION — `release/4.0.0` names the release
       # `4.0.0` — and two consumers of a published release read the tag as the
       # version: the public Node installer, and PSP's own cmd/compatwatch, which
-      # reconciles the Node repo's releases against
-      # internal/adapters/noderelease/reviewed.json.
+      # reconciles the Node repo's releases against the reviewed set in
+      # docs/compat/passwall-node-v4.json.
       #
       # Both now handle both identities: the installer takes the version out of
       # the asset name and the address out of the release document
@@ -438,9 +438,9 @@ jobs:
           set -euo pipefail
           resolved=$(git -C .compat/passwall-node rev-parse HEAD)
           # A TAG IS A LABEL, NOT AN IDENTITY. If it was moved, the leg would
-          # otherwise test a different commit from the one the policy was
-          # verified against while still reporting the same version — the one
-          # substitution this matrix cannot afford to make silently.
+          # otherwise test a different commit from the one the plan pinned while
+          # still reporting the same version — the one substitution this matrix
+          # cannot afford to make silently.
           if [ "$resolved" != "$EXPECTED" ]; then
             echo "::error::${{ matrix.node_case.version }} now resolves to $resolved, but the plan pinned $EXPECTED. A tag moved; re-verify before re-pinning."
             exit 1

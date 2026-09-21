@@ -19,12 +19,15 @@ export function NativeAgentUpgradeDialog({ server, onClose }: { server: Server |
   const [targets, setTargets] = useState<string[] | undefined>(undefined)
   const key = useRef('')
   const requestController = useRef<AbortController | null>(null)
+  // THE NODE'S OWN RECORD OF ITSELF, shown as-is and never parsed here. The node
+  // is what compares it against the request, so a stamp from the replaced scheme
+  // (`v0.0.1-beta9`) is a value this dialog passes through rather than judges —
+  // requiring it to be a product version is what made those nodes un-upgradable.
   const expected = server?.panel_version?.split(' ')[0] ?? ''
-  // A VERSION, IN EITHER SCHEME. This was a local copy of the shape rule and it
-  // knew only the legacy one, so a node reporting a product version — three
-  // integers, no prefix — could not be confirmed at all: the action was disabled
-  // and nothing said why. The rule lives in the module that reads the shared
-  // vectors.
+  // A TARGET MUST NAME A RELEASE, because that is what the node turns into a
+  // download address. This rule is about the target only; it used to be applied
+  // to the node's reported version as well, which put the shape decision in the
+  // wrong place.
   const exact = (s: string) => canonicalReleaseVersion(s) !== undefined
 
   useEffect(() => {
@@ -41,15 +44,12 @@ export function NativeAgentUpgradeDialog({ server, onClose }: { server: Server |
     void upgradeOptions(server.id, 'agent')
       .then(option => {
         if (!live) return
-        const reachable = (option.targets ?? [])
-          // ONE PREDICATE, NOT TWO. The list was filtered by a verified edge as
-          // well, because admission refused a pair nobody had walked — so a node on a
-          // version no edge started from got an empty dialog, and the remedy was a
-          // policy document the operator had no reason to know about. Admission
-          // follows the panel's own judgement now.
-          .filter(target => target.offered_by_policy)
-          .map(target => target.version)
-        setTargets(reachable)
+        // NO PREDICATE AT ALL. This list was filtered twice before — by a
+        // verified edge, then by whether a signed policy offered the release — and
+        // each filter emptied the dialog for a node the operator could see, with
+        // the remedy a document they had no reason to know about. What the panel
+        // offers is what the panel can see is published.
+        setTargets((option.targets ?? []).map(target => target.version))
       })
       .catch(() => { if (live) setTargets(undefined) })
     return () => { live = false }
@@ -74,7 +74,7 @@ export function NativeAgentUpgradeDialog({ server, onClose }: { server: Server |
   }, [server?.id, task?.task_id, task?.upgrade_state, retry, t])
 
   async function submit() {
-    if (!server || busy || task || !exact(version.trim()) || !exact(expected) || version.trim() === expected) return
+    if (!server || busy || task || !exact(version.trim()) || version.trim() === expected) return
     if (!key.current) key.current = crypto.randomUUID()
     const controller = new AbortController(); requestController.current = controller
     setBusy(true); setError('')
@@ -118,7 +118,7 @@ export function NativeAgentUpgradeDialog({ server, onClose }: { server: Server |
     </DialogContent>
     <DialogActions>
       <Button onClick={onClose} disabled={busy}>{t('common:actions.close')}</Button>
-      {!task && <Button variant="contained" onClick={() => void submit()} disabled={busy || !exact(version.trim()) || !exact(expected) || version.trim() === expected}>
+      {!task && <Button variant="contained" onClick={() => void submit()} disabled={busy || !exact(version.trim()) || version.trim() === expected}>
         {busy && <CircularProgress size={16} sx={{ mr: 1 }} />}{t(error ? 'admin:servers.agent_upgrade.retry' : 'admin:servers.agent_upgrade.confirm')}
       </Button>}
     </DialogActions>

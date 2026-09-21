@@ -87,7 +87,7 @@ release 固定到 SHA，运行基础 profile 与声明的升级／回退验证�
 | --- | --- | --- |
 | `CompatStatus.supported` | 运行时判断 | 当前能跟这台第三方面板通话；`version >= 下限 && <= 最后实测`，低于下限即 `too_old`。见 `internal/version/compat.go` |
 | PN `min_supported`／“supported set” | 测试选择 | 这一版还在 CI 里被跑。只有两条 workflow 与矩阵测试读取，生产代码零消费者 |
-| 单行 `base_sync: "supported"` | 证据状态 | 在这一版上**验证过**基础同步。见 `docs/compat/node-v4.json` 的 `released_nodes` |
+| 单行 `base_sync: "supported"` | 证据状态 | 在这一版上**验证过**基础同步。见 `docs/compat/passwall-node-v4.json` 的 `released_nodes` |
 
 三者方向相反：运行时结论低于下限就**拒绝**，测试选择低于 floor 只是**不再测**，证据状态
 只描述**已经测过什么**。混用会得出错误的保证——尤其把 `min_supported` 读成运行时拒绝器，
@@ -120,7 +120,7 @@ PN 使用经过认证的报告；第三方面板使用认证 API、版本信息�
 
 | 状态 | 运行处理 | 新升级处理 |
 | --- | --- | --- |
-| 已验证 | 按对应 profile 管理 | 检查具体升级边后允许 |
+| 已验证 | 按对应 profile 管理 | 按能力与协议世代检查后允许（升级边那条轴已删除，见 §4）|
 | 基础可用、功能受限 | 保留已验证功能，拒绝缺失能力的操作 | 缺升级能力则手工处理 |
 | 未验证 | 显示证据不足；不扩大功能授权 | 默认不得作为自动升级目标 |
 | 已知不兼容 | 拒绝对应操作，报告影响范围 | 仅提供已验证修复路径 |
@@ -138,6 +138,8 @@ PN 使用经过认证的报告；第三方面板使用认证 API、版本信息�
 advisory 必须描述具体受影响功能；不能未经评估就把新最低版本变成所有存量实例的停服命令。
 
 ## 4. 支持政策、验证证据与升级边
+
+> **这一节是目标契约，而其中两项已被明确删除。** 「不可变修订的签名支持政策」与「升级边」都实现过，随后被移除：签名政策是 opt-in 的、默认部署里不生效，却让「提供一个发行」变成改文档加签名（见 `docs/release-runbook.md` 第 4 节）；升级边是一条 `from→to` 的准入轴，它拒掉了当时列表为空的**每一次**升级。**面板提供什么现在由已发布的发行决定**，准入只剩能力与协议世代那道门。下面 §4.1 的表留着描述曾经达成的形状，照着建之前先确认它没有被这两次决定否掉。
 
 维护一份逻辑支持政策，允许按产品／major 分文件。由它选择 CI 测试组合、生成展示信息和
 发布准入输入，避免 workflow 再手写另一份版本列表。政策与实测结果分开存储并相互引用。
@@ -280,12 +282,12 @@ PR 不使用生产凭据或生产后端；外部 PR 不能通过高权限 workfl
 
 | 现有入口 | 证据类型 | 已有基础 | 不能据此宣称 |
 | --- | --- | --- | --- |
-| [ADR 0033](adr/0033-native-node-compatibility-and-upgrade-admission.md)、[PN 矩阵](compat/node-v4.json) | `wire-contract` | v1 范围、升级能力门控、保留旧 PN | 完整双向支持与任意升级路径 |
+| [ADR 0033](adr/0033-native-node-compatibility-and-upgrade-admission.md)、[PN 矩阵](compat/passwall-node-v4.json) | `wire-contract` | v1 范围、升级能力门控、保留旧 PN | 完整双向支持与任意升级路径 |
 | [PSP Test workflow](../.github/workflows/test.yml) | `wire-contract` | 固定 PN 依赖与从 min_supported 派生的 beta1–beta11 协议测试 | 完整 Bearer 认证、安装和真实核心链路 |
 | [协议测试说明](../internal/service/nodesync/contract_live_test.go) | `wire-contract` | 实际 HTTP／状态／收敛，确定性核心替身 | 真实代理握手及内核计数恢复 |
 | [旧 PSP 人工验证记录](psp-node-rootless-observability-progress.md) | `wire-contract`（人工、一次性） | 具体旧 PSP／新 PN 的观测上报实测记录 | 所有基础功能或反方向持续 CI |
 | PN `.github/workflows/test.yml` 升级 E2E | `upgrade-mechanism` | 当前源码带不同版本身份验证升级机制 | 真实历史数据迁移兼容 |
-| [第三方矩阵](compat/v4-ranges.json)、[live tests](../internal/adapters/sui/client_live_test.go) | `adapter-live` | 有实测范围记录和隔离测试入口 | 版本范围内所有发布物／完整流量都已测试 |
+| [第三方矩阵](compat/3x-ui-v4.json)、[live tests](../internal/adapters/sui/client_live_test.go) | `adapter-live` | 有实测范围记录和隔离测试入口 | 版本范围内所有发布物／完整流量都已测试 |
 | [上游 watcher](../.github/workflows/compat-watch.yml) | —（发现，不是证据） | 每周发现超出已测上限的新版本 | 自动认证新上游 |
 
 **六类里今天只有三类有实例。** 上表覆盖 `wire-contract`、`adapter-live` 和

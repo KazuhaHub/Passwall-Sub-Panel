@@ -111,24 +111,25 @@ it('uses the saved beta preference but still requires an exact reviewed version 
 // ONE PREDICATE, NOT TWO. The list used to exclude a target that no VERIFIED EDGE
 // reached, because a request along an unwalked path was refused — so a node on a
 // version no edge started from had an empty dialog, and the remedy was a policy
-// document the operator had no reason to know about. Admission follows the panel's
-// own judgement now, and what remains is the policy's answer: a release the policy
-// in force does not offer is not put in front of anyone.
-it('offers the targets the instance offers, and no others', async () => {
+// THE INSTANCE'S ANSWER IS THE WHOLE ANSWER.
+//
+// This list used to be filtered twice on the way in — by whether a verified edge
+// reached the release, then by whether a signed policy offered it — and each
+// filter could empty the dialog for a node the operator was looking at, with the
+// remedy a document they had no reason to know about. Nothing is filtered here
+// now: the panel reports the releases it can see are published, and an operator
+// choosing among them is making the decision those gates were making for them.
+it('offers exactly the targets the instance reports', async () => {
   const further = { ...catalog.releases[0], version: '4.0.6',
     release_url: `https://github.com/KazuhaHub/Passwall-Node/releases/tag/${releaseTag('4.0.6')}` }
-  const unlisted = { ...catalog.releases[0], version: '4.0.4',
-    release_url: `https://github.com/KazuhaHub/Passwall-Node/releases/tag/${releaseTag('4.0.4')}` }
+  const unreported = { ...catalog.releases[0], version: '4.0.7',
+    release_url: `https://github.com/KazuhaHub/Passwall-Node/releases/tag/${releaseTag('4.0.7')}` }
   installReads({
-    '/admin/servers/node-releases': { ...catalog, releases: [catalog.releases[0], further, unlisted] },
+    '/admin/servers/node-releases': { ...catalog, releases: [catalog.releases[0], further, unreported] },
     '/admin/servers/7/node-agent-upgrades/upgrade-test': queued,
     '/admin/servers/7/upgrade-options': {
       component: 'agent', state: 'ready', target_pinnable: true, reason_codes: ['compatible'],
-      targets: [
-        { version: queued.version, offered_by_policy: true },
-        { version: further.version, offered_by_policy: true },
-        { version: unlisted.version, offered_by_policy: false },
-      ],
+      targets: [{ version: queued.version }, { version: further.version }],
     },
   })
   mount(<NativeAgentUpgradeDialog server={{ ...server, update_channel: 'beta' }} onClose={() => {}} />)
@@ -137,10 +138,11 @@ it('offers the targets the instance offers, and no others', async () => {
   await waitFor(() => expect(field.getAttribute('aria-disabled')).not.toBe('true'))
   fireEvent.mouseDown(field)
   expect(await screen.findByRole('option', { name: queued.version })).toBeTruthy()
-  // IN THE CATALOG AND AHEAD OF THE NODE, and still offered: the only thing that
-  // excludes a release now is a policy that does not list it.
   expect(await screen.findByRole('option', { name: '4.0.6' })).toBeTruthy()
-  expect(screen.queryByRole('option', { name: '4.0.4' })).toBeNull()
+  // IN THE CATALOG BUT NOT IN THE ANSWER, so it is not offered — the instance's
+  // list is the restriction, and it is the panel's own statement rather than a
+  // second document's opinion.
+  expect(screen.queryByRole('option', { name: '4.0.7' })).toBeNull()
 })
 
 // A control-plane blip must not remove an action the operator was using, and the
@@ -193,10 +195,47 @@ it('upgrades a node that reports a product-scheme version', async () => {
   await waitFor(() => expect(button.disabled).toBe(false))
 })
 
-// A version that is not one in either scheme is still refused, and the near
-// misses stay refused: the point is that the rule moved, not that it went away.
-it('still refuses a node whose reported version is not a release', async () => {
-  for (const panel_version of ['4.0', '04.0.0', '4.0.0.1', 'release/4.0.0', 'dev', 'latest']) {
+// A NODE ON THE REPLACED SCHEME IS STILL UPGRADABLE, AND THAT IS THE WHOLE POINT.
+//
+// The dialog used to require the node's OWN reported version to be a product
+// version before it would enable Confirm. A node still reporting `v0.0.1-beta9`
+// therefore could not be moved at all: the operator opened the page, picked a
+// target, and found the action permanently disabled. But that version is the
+// NODE'S OWN RECORD of itself — the node is what compares it against the request
+// — so this panel has no business parsing it.
+it('upgrades a node that reports a version from the replaced scheme', async () => {
+  const legacyServer: Server = { ...server, panel_version: 'v0.0.1-beta9' }
+  installReads({
+    '/admin/servers/node-releases': {
+      checked_at: '',
+      releases: [{
+        version: '4.0.1', channel: 'stable', published_at: '2026-09-12T12:00:00Z',
+        release_url: 'https://github.com/KazuhaHub/Passwall-Node/releases/tag/release/4.0.1',
+        notes: 'Reviewed release fixture', methods: ['linux'],
+        platforms: [{ os: 'linux', arch: 'amd64' }, { os: 'linux', arch: 'arm64' }],
+      }],
+    },
+  })
+  mount(<NativeAgentUpgradeDialog server={legacyServer} onClose={() => {}} />)
+  expect((screen.getByLabelText('admin:servers.agent_upgrade.current') as HTMLInputElement).value).toBe('v0.0.1-beta9')
+  const button = screen.getByRole('button', { name: 'admin:servers.agent_upgrade.confirm' }) as HTMLButtonElement
+  expect(button.disabled).toBe(true)
+  const field = screen.getByRole('combobox', { name: 'admin:servers.native.agent_version' })
+  await waitFor(() => expect(field.getAttribute('aria-disabled')).not.toBe('true'))
+  fireEvent.mouseDown(field)
+  fireEvent.click(await screen.findByRole('option', { name: '4.0.1' }))
+  await waitFor(() => expect(button.disabled).toBe(false))
+})
+
+// THE NODE'S VERSION IS OPAQUE, SO THE PANEL DOES NOT JUDGE IT.
+//
+// This case used to be its opposite: a reported version that is not a release
+// version disabled Confirm. That made the panel the arbiter of a string it does
+// not own, and it is why a node from before the scheme change could not be
+// upgraded. What still gates the action is the TARGET — it must name a release,
+// because that is what the node fetches.
+it('accepts whatever version the node reports about itself', async () => {
+  for (const panel_version of ['v0.0.1-beta9', 'v3.9.2', 'v0.0.1-beta12 (abcdef0)', 'dev']) {
     installReads({
       '/admin/servers/node-releases': {
         checked_at: '',
@@ -209,10 +248,12 @@ it('still refuses a node whose reported version is not a release', async () => {
       },
     })
     const view = mount(<NativeAgentUpgradeDialog server={{ ...server, panel_version }} onClose={() => {}} />)
-    // The node's own version cannot be confirmed as exact, so nothing is
-    // submittable — which is the correct answer for a string that names no
-    // release.
-    expect((screen.getByRole('button', { name: 'admin:servers.agent_upgrade.confirm' }) as HTMLButtonElement).disabled, panel_version).toBe(true)
+    const field = screen.getByRole('combobox', { name: 'admin:servers.native.agent_version' })
+    await waitFor(() => expect(field.getAttribute('aria-disabled')).not.toBe('true'))
+    fireEvent.mouseDown(field)
+    fireEvent.click(await screen.findByRole('option', { name: '4.0.1' }))
+    const button = screen.getByRole('button', { name: 'admin:servers.agent_upgrade.confirm' }) as HTMLButtonElement
+    await waitFor(() => expect(button.disabled, panel_version).toBe(false))
     view.unmount()
   }
 })

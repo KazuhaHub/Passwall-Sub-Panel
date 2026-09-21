@@ -1,6 +1,6 @@
 # 兼容体系交接包
 
-日期：2026-09-19。配套：[整改实施手册](compat-remediation-plan.md)、[维护 SOP](compat-maintenance.md)、[机器可读政策](compat/node-v4.json)。
+日期：2026-09-19。配套：[整改实施手册](compat-remediation-plan.md)、[维护 SOP](compat-maintenance.md)、[机器可读政策](compat/passwall-node-v4.json)。
 
 手册 §15 要求交付一份交接包，列出合并 PR、两仓 SHA、支持政策、required case 清单、通过与失败注入证据、已知限制、运行时示例、发布 needs 图、分支保护设置和下一位维护者的操作命令。这份文档就是那份包，**每一项都指向可核对的东西**，不是一句"已完成"。
 
@@ -42,10 +42,10 @@ PN：
 
 | 文件 | 是什么 | 权威性 |
 | --- | --- | --- |
-| `docs/compat/node-v4.json` | 运行时清单：wire 世代、features、`upgrade_edges`、`min_supported`、`released_nodes` | PSP 运行时拉取的那一份 |
-| `docs/compat/verification-v1.json` | 身份固定：每个 tag 当初解引用到的**提交**、profile 断言、`upgrade_edges` 的权威副本 | 规划器读取的那一份 |
+| `docs/compat/passwall-node-v4.json` | CI 测试矩阵与协议世代：`wire`、`features`、`min_supported`、`released_nodes` | 规划器与矩阵读取的那一份（面板的升级列表已改由**已发布发行**决定）|
+| `docs/compat/verification-v1.json` | 身份固定：每个 tag 当初解引用到的**提交**、profile 断言、`excluded` 的排除理由 | 规划器读取的那一份 |
 | `deploy/compat/profiles.json`、`profiles-third-party.json` | 逐 case 的 required / notApplicable 闭集 | 两个校验器读取 |
-| `docs/compat/v4-ranges.json` | 第三方后端的**实测记录** | **不是政策**，是人类评审的留痕 |
+| `docs/compat/3x-ui-v4.json` | 第三方后端的**实测记录** | **不是政策**，是人类评审的留痕 |
 
 ## 4. required case 清单
 
@@ -72,7 +72,7 @@ $ node deploy/compat/plan.mjs --emit cases
 
 **逐条列出，不合并成"部分支持"。**
 
-- **没有任何一条已验证的升级边。** `upgrade_edges` 在两个文件里都是空的，因此**没有节点升级会被推荐或准入**（#168）。这是事实陈述；发布一条 `{id, from, to}` 即可为那条路径打开，SOP §3 写明。
+- **升级边这条轴已删除，不再是「空的」——它不存在。** 曾经的含义是「没有一条已验证的 `from→to`，所以没有升级会被准入」，而准入现在只看能力与协议世代两道门：节点声明 `task.agent.upgrade.v1` 且近期上报，升级就会下发。`verification-v1.json` 里没有 `upgrade_edges` 字段，SOP §3 已改写。
 - **反方向（候选 Node × 旧 PSP）没有 CI。** harness 可跑（PN #34），但需要真实旧 PSP 发布物与候选 PN 作为两个进程。
 - **R08 只测了 VLESS/TCP/none 一种组合。** TLS／REALITY 不在 `dataplane.sh` 里；PN 自己的 core-acceptance 在原生 Linux 上覆盖官方核心与 REALITY，未接的是"经第三方面板升级后"这个触发点。
 - **R05 的 B06 是 N/A**，理由是版本事实：`node-diagnostics` 于 2026-09-18 加入，`v4.0.0-beta.19` 于 2026-09-17 发布。

@@ -20,5 +20,5 @@
     "v0.0.1-beta10": "fe607ebd240e11e5bbf0a8cc459109854fc0d52c",
     "v0.0.1-beta11": "60d96490f2b0561279ae9332ef6a809e14aab996"
   },
-  "why_it_moved": "The panel's own version rule became single-scheme (docs/compat/releases-v1.json revision 2). The matrix keys its cases by a version from node-v4.json's released_nodes, and those rows were legacy stamps that no longer name anything a build can be matched against. Rather than delete the pins - which would have removed the only evidence that the wire survives a node built before the current scheme - they were moved here in full."
+  "why_it_moved": "The panel's own version rule became single-scheme (docs/compat/releases-v1.json revision 2 — that document has since been deleted, it was the signed upgrade policy; the name is kept here because this records what was true when the pins moved). The matrix keys its cases by a version from passwall-node-v4.json's released_nodes, and those rows were legacy stamps that no longer name anything a build can be matched against. Rather than delete the pins - which would have removed the only evidence that the wire survives a node built before the current scheme - they were moved here in full."
 }

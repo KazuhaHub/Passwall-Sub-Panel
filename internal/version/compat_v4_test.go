@@ -10,12 +10,20 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path"
 	"path/filepath"
 	"testing"
 )
 
+// THE PER-MAJOR MANIFEST IS THE LEGACY BUILD'S ROUTE, AND ONE IS LEFT.
+//
+// v3.json is the only per-major manifest this repository publishes: the v4 files
+// it used to sit beside were replaced by one document per product, which a product
+// build derives from its own major. v3.json is NOT part of that change — builds
+// already in the field fetch it by a name their own version derives, so it stays
+// readable and validated here.
 func TestShippedCompatManifestRangesAndAdvisories(t *testing.T) {
-	for _, major := range []int{3, 4} {
+	for _, major := range []int{3} {
 		t.Run(fmt.Sprintf("v%d", major), func(t *testing.T) {
 			payload := readCompatJSONForMajor(t, major)
 			if payload.UpdatedAt == "" || len(payload.Entries) == 0 {
@@ -92,76 +100,81 @@ func TestShippedCompatManifestRangesAndAdvisories(t *testing.T) {
 	}
 }
 
-func TestCompatV4ReleaseRange(t *testing.T) {
-	payload := readCompatJSONForMajor(t, 4)
-	if payload.RangeOverlay != "v4-ranges.json" {
-		t.Fatalf("V4 base manifest lost its prerelease-aware range overlay: %q", payload.RangeOverlay)
-	}
-	for _, version := range []string{"v4.0.0-beta.1", "4.0.0", "4.0.1", "v4.99.99"} {
-		xui, ok := lookupForPSPVersion(payload, version)
-		if !ok || xui.MinXUI != MinXUI || xui.MaxTestedXUI != "3.7.0" {
-			t.Fatalf("V4 initial XUI contract for %q: %#v found=%v", version, xui, ok)
-		}
-		sui, ok := lookupSUIForPSPVersion(payload, version)
-		if !ok || sui.MinSUI != "" || sui.MaxTestedSUI != "1.6.3" {
-			t.Fatalf("V4 must retain the verified SUI ceiling without inventing a floor: %q %#v found=%v", version, sui, ok)
-		}
-	}
-	for _, version := range []string{"v3.99.99", "v5.0.0", "dev"} {
-		if _, ok := lookupForPSPVersion(payload, version); ok {
-			t.Fatalf("V4 XUI entry leaked onto %q", version)
-		}
-		if _, ok := lookupSUIForPSPVersion(payload, version); ok {
-			t.Fatalf("V4 SUI entry leaked onto %q", version)
-		}
-	}
-	for _, key := range []string{"3.5.0", "3.6.0", "3.7.0"} {
-		if payload.Advisories[key].Text == "" {
-			t.Fatalf("V4 lost existing XUI upgrade warning %q", key)
-		}
-	}
-	if payload.Advisories["3.7.0"].AffectsXray || !payload.SUIAdvisories["1.6.0"].AffectsXray {
-		t.Fatal("inherited core restart advisories changed meaning")
-	}
-}
-
-// THE OVERLAY COVERS THE RELEASE LINE, AND NOTHING FINER.
+// THE PER-MAJOR MANIFEST AND ITS RANGE OVERLAY REMAIN A LIVE CODE PATH, and this
+// repository no longer publishes a document that uses the overlay half: v3.json,
+// the one remaining per-major manifest, carries its ranges directly.
 //
-// It used to be prerelease-aware: a row for beta.9 and up on 3.8.5 and a narrower
-// one for beta.1 through beta.8 on 3.7.0, so a panel reported the ceiling its own
-// build had earned. The legacy scheme is gone, the beta line is not a set of
-// identities any more, and what is left is the property the finer rows existed to
-// protect — that the ceiling a build is given is a reviewed one. There is one
-// review now, so there is one answer.
-func TestCompatV4RangeOverlay(t *testing.T) {
-	payload := readCompatRangeOverlay(t)
-	for _, version := range []string{"4.0.0", "4.0.1", "4.99.99"} {
-		xui, ok := lookupForPSPVersion(payload, version)
-		if !ok || xui.MinXUI != MinXUI || xui.MaxTestedXUI != "3.8.5" {
-			t.Fatalf("v4 range missing for %q: %#v found=%v", version, xui, ok)
+// SO THE FIXTURE IS INLINE. A test that read a published file would be asserting
+// something about that file's contents; this is about the folding itself — the
+// base manifest is the conservative answer, the overlay replaces only the ranges,
+// and the result carries the window the overlay was reviewed for. Nothing here
+// would be a defect in a document.
+func TestThePerMajorManifestAndItsRangeOverlay(t *testing.T) {
+	const base = `{"schema_version":2,"major":3,"updated_at":"2026-09-19",
+	  "range_overlay":"v3-ranges.json",
+	  "entries":[{"psp_min":"v3.0.0","psp_max":"v3.99.99","min_xui":"3.4.2","max_tested_xui":"3.7.0"}],
+	  "sui_entries":[{"psp_min":"v3.0.0","psp_max":"v3.99.99","max_tested_sui":"1.6.3"}],
+	  "xui_advisories":{"3.7.0":{"severity":"warning","affects_xray":false,"text":"reviewed"}}}`
+	const overlay = `{"schema_version":3,"major":3,"updated_at":"2026-09-20",
+	  "entries":[{"psp_min":"v3.0.0","psp_max":"v3.99.99","min_xui":"3.4.2","max_tested_xui":"3.8.5"}],
+	  "sui_entries":[{"psp_min":"v3.0.0","psp_max":"v3.99.99","max_tested_sui":"1.6.3"}]}`
+
+	manifest, err := decodeCompatPayload([]byte(base))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if manifest.RangeOverlay != "v3-ranges.json" {
+		t.Fatalf("the base manifest lost its range overlay reference: %q", manifest.RangeOverlay)
+	}
+	// THE BASE IS THE CONSERVATIVE ANSWER for a build that cannot read the overlay.
+	for _, version := range []string{"v3.0.0", "v3.9.2", "v3.99.99"} {
+		xui, ok := lookupForPSPVersion(manifest, version)
+		if !ok || xui.MinXUI != MinXUI || xui.MaxTestedXUI != "3.7.0" {
+			t.Fatalf("base XUI contract for %q: %#v found=%v", version, xui, ok)
 		}
-		sui, ok := lookupSUIForPSPVersion(payload, version)
+		sui, ok := lookupSUIForPSPVersion(manifest, version)
 		if !ok || sui.MinSUI != "" || sui.MaxTestedSUI != "1.6.3" {
-			t.Fatalf("SUI overlay range missing for %q: %#v found=%v", version, sui, ok)
+			t.Fatalf("base SUI contract for %q: %#v found=%v", version, sui, ok)
 		}
 	}
 	// AND THE LINE IS BOUNDED. These canonicalise to something, and none of them
-	// lands inside the reviewed line: the two outside it belong to other release
-	// lines, and the legacy stamp belongs BELOW it, where it used to have a row
-	// of its own.
-	for _, version := range []string{"3.9.2", "5.0.0", "v4.0.0-beta.9", "v4.0.0-beta.1"} {
-		if xui, ok := lookupForPSPVersion(payload, version); ok {
-			t.Fatalf("a version outside the reviewed line was certified: %q -> %#v", version, xui)
+	// lands inside the reviewed line.
+	for _, version := range []string{"v2.99.99", "v4.0.0", "dev"} {
+		if _, ok := lookupForPSPVersion(manifest, version); ok {
+			t.Fatalf("the v3 entry leaked onto %q", version)
+		}
+		if _, ok := lookupSUIForPSPVersion(manifest, version); ok {
+			t.Fatalf("the v3 SUI entry leaked onto %q", version)
+		}
+	}
+
+	// THE OVERLAY REPLACES THE RANGES AND NOTHING ELSE, which is why the
+	// advisories stay in the base document: an old reader that ignores the overlay
+	// keeps the full upgrade guidance rather than losing it.
+	folded, err := decodeCompatPayload([]byte(overlay))
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest.SchemaVersion = folded.SchemaVersion
+	manifest.Entries = folded.Entries
+	manifest.SUIEntries = folded.SUIEntries
+	if advisory := manifest.Advisories["3.7.0"]; advisory.Text == "" {
+		t.Fatal("folding the overlay dropped the base document's advisories")
+	}
+	for _, version := range []string{"v3.0.0", "v3.9.2"} {
+		xui, ok := lookupForPSPVersion(manifest, version)
+		if !ok || xui.MaxTestedXUI != "3.8.5" {
+			t.Fatalf("the folded range is not in force for %q: %#v found=%v", version, xui, ok)
 		}
 	}
 	// A BUILD COMPONENT IS NOT COVERED, AND THAT IS A GAP RATHER THAN A DESIGN.
-	// The lookup canonicalises through x/mod/semver, which knows three segments,
-	// so a version carrying the optional fourth matches no entry — and the panel
-	// would report the ceiling as untested for exactly the builds the fourth
-	// segment was added to distinguish. This asserts the gap so that closing it
-	// turns this case red and the case is removed deliberately, rather than the
-	// gap being remembered only by whoever wrote it.
-	if xui, ok := lookupForPSPVersion(payload, "4.0.0.1"); ok {
+	// The lookup canonicalises through x/mod/semver, which knows three segments, so
+	// a version carrying the optional fourth matches no entry — and the panel would
+	// report the ceiling as untested for exactly the builds the fourth segment was
+	// added to distinguish. This asserts the gap so that closing it turns this case
+	// red and the case is removed deliberately, rather than the gap being
+	// remembered only by whoever wrote it.
+	if xui, ok := lookupForPSPVersion(manifest, "4.0.0.1"); ok {
 		t.Fatalf("the fourth segment is covered now (%#v); delete this case", xui)
 	}
 }
@@ -172,8 +185,9 @@ func (f compatV4RoundTripper) RoundTrip(req *http.Request) (*http.Response, erro
 	return f(req)
 }
 
-// Exercise the actual runtime fetch/apply path with a local in-memory HTTP
-// response. No live panel or network is used, and this is not a V4 panel smoke.
+// Exercise the actual runtime fetch/apply path with local in-memory HTTP
+// responses, ONE PER PRODUCT. No live panel or network is used, and this is not a
+// V4 panel smoke.
 func TestCompatV4FetchAppliesPublishedShape(t *testing.T) {
 	dir := isolatedCompatCache(t, "4.0.0")
 	oldClient := httpClient
@@ -189,29 +203,37 @@ func TestCompatV4FetchAppliesPublishedShape(t *testing.T) {
 		SetActiveAdvisories(oldAdvisories)
 		SetActiveSUIAdvisories(oldSUIAdvisories)
 	})
-	// THE DOCUMENT THIS BUILD FETCHES, not the per-major one it cannot derive.
-	raw, err := os.ReadFile(filepath.Join("..", "..", "docs", "compat", "panel-ranges-v1.json"))
+
+	// BOTH DOCUMENTS THIS BUILD READS, not a per-major manifest, which a product
+	// version cannot derive. The names carry the panel major.
+	xuiName := fmt.Sprintf(xuiDocumentPattern, 4)
+	suiName := fmt.Sprintf(suiDocumentPattern, 4)
+	xuiRaw, err := os.ReadFile(filepath.Join("..", "..", "docs", "compat", xuiName))
 	if err != nil {
 		t.Fatal(err)
 	}
+	suiRaw, err := os.ReadFile(filepath.Join("..", "..", "docs", "compat", suiName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	served := map[string][]byte{xuiName: xuiRaw, suiName: suiRaw}
+
 	httpClient = &http.Client{Transport: compatV4RoundTripper(func(req *http.Request) (*http.Response, error) {
 		if req.Header.Get("Accept") != "application/json" {
 			t.Errorf("missing JSON accept header: %s", req.URL)
 		}
-		// THE NAMED DOCUMENT, WHICH IS THE ONLY ONE THIS BUILD FETCHES. A product
-		// version has no derivable compatibility major, so the per-major route —
-		// v4.json with its overlay folded in — is not one this build can take,
-		// and the URL the fetch composes is the document's own name.
-		if req.URL.String() != defaultRemoteCompatURLBase+"panel-ranges-v1.json" {
+		body, ok := served[path.Base(req.URL.Path)]
+		if !ok {
 			return nil, fmt.Errorf("wrong compat request: %s", req.URL)
 		}
-		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(bytes.NewReader(raw)), Header: make(http.Header)}, nil
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(bytes.NewReader(body)), Header: make(http.Header)}, nil
 	})}
-	url, err := defaultURLForCurrentVersion()
+
+	sources, err := compatDocumentSources()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := fetchAndApply(context.Background(), url); err != nil {
+	if err := fetchAndApplyAll(context.Background(), sources); err != nil {
 		t.Fatal(err)
 	}
 	if ActiveMinXUI() != MinXUI || ActiveMaxTestedXUI() != "3.8.5" || ActiveMinSUI() != "" || ActiveMaxTestedSUI() != "1.6.3" {
@@ -226,17 +248,12 @@ func TestCompatV4FetchAppliesPublishedShape(t *testing.T) {
 	if a, ok := LookupSUIAdvisory("v1.6.0"); !ok || !a.AffectsXray || a.Text == "" {
 		t.Fatal("runtime lost the canonical SUI advisory")
 	}
-	if a, ok := LookupSUIAdvisory("v1.6.1"); !ok || a.AffectsXray || a.Severity != "info" || a.Text == "" {
-		t.Fatal("runtime lost the SUI 1.6.1 maintenance/login advisory")
-	}
-	if a, ok := LookupSUIAdvisory("v1.6.2"); !ok || a.AffectsXray || a.Severity != "info" || a.Text == "" {
-		t.Fatal("runtime lost the SUI 1.6.2 settings-save advisory")
-	}
 	if a, ok := LookupSUIAdvisory("v1.6.3"); !ok || !a.AffectsXray || a.Severity != "info" || a.Text == "" {
 		t.Fatal("runtime lost the SUI 1.6.3 core-upgrade advisory")
 	}
-	// The snapshot stores the VALIDATED DOCUMENT and its digest, not a bare
-	// value: a reader replaying it must be able to re-run the same applicability
+
+	// The snapshot stores the VALIDATED DOCUMENTS and their digests, not bare
+	// values: a reader replaying it must be able to re-run the same applicability
 	// test rather than trust a conclusion whose premises are gone.
 	cache, err := os.ReadFile(filepath.Join(dir, policySnapshotFile))
 	if err != nil {
@@ -246,36 +263,46 @@ func TestCompatV4FetchAppliesPublishedShape(t *testing.T) {
 	if err := json.Unmarshal(cache, &stored); err != nil {
 		t.Fatal(err)
 	}
-	sum := sha256.Sum256(stored.Payload)
-	if stored.SnapshotSchema != policySnapshotSchema || stored.Digest != hex.EncodeToString(sum[:]) {
-		t.Fatalf("snapshot integrity fields are wrong: %#v", stored)
+	if stored.SnapshotSchema != policySnapshotSchema || len(stored.Documents) != 2 {
+		t.Fatalf("the snapshot is not a container of one document per product: %#v", stored)
 	}
-	var replayed remoteCompatPayload
-	if err := json.Unmarshal(stored.Payload, &replayed); err != nil || replayed.UpdatedAt == "" {
-		t.Fatalf("snapshot payload is not the applied document: %v", err)
-	}
-	// THE WINDOW, NOT A MAJOR. A panel ranges document states the builds it
-	// applies to rather than being named after one, so this is what the snapshot
-	// has to carry: a boot replays the document and re-runs the applicability
-	// test, rather than trusting a conclusion whose premises are gone.
-	if replayed.AppliesToPSP == nil || replayed.AppliesToPSP.Min != "4.0.0" {
-		t.Fatalf("snapshot payload declares window=%+v, want the published 4.0.0 floor", replayed.AppliesToPSP)
+	for product, document := range stored.Documents {
+		sum := sha256.Sum256(document.Payload)
+		if document.Digest != hex.EncodeToString(sum[:]) {
+			t.Fatalf("%s: snapshot integrity fields are wrong: %#v", product, document)
+		}
+		var replayed remoteCompatPayload
+		if err := json.Unmarshal(document.Payload, &replayed); err != nil || replayed.UpdatedAt == "" {
+			t.Fatalf("%s: snapshot payload is not the applied document: %v", product, err)
+		}
+		// THE PRODUCT TRAVELS WITH THE PAYLOAD, which is what lets a boot replay
+		// each document through the install path that matches it.
+		if replayed.Product != product {
+			t.Fatalf("the snapshot keys %s by %q", product, replayed.Product)
+		}
+		// THE WINDOW, NOT A MAJOR. A product document states the builds it applies
+		// to rather than being named after a compatibility major, so this is what
+		// the snapshot has to carry: a boot replays the document and re-runs the
+		// applicability test.
+		if replayed.AppliesToPSP == nil || replayed.AppliesToPSP.Min != "4.0.0" {
+			t.Fatalf("%s: snapshot payload declares window=%+v, want the published 4.0.0 floor", product, replayed.AppliesToPSP)
+		}
 	}
 
-	// AND A DOCUMENT FOR ANOTHER LINE CANNOT REPLACE THIS ONE. This used to serve
-	// the per-major v3.json and rely on its `major` not matching. A product build
-	// derives no major and never asks for that file, so the refusal now comes a
-	// step earlier — from the document's own window, which is the same guard in
-	// the only form this build can reach. The range and the snapshot must survive
-	// it either way.
-	wrong := bytes.Replace(raw, []byte(`"min": "4.0.0"`), []byte(`"min": "9.0.0"`), 1)
-	if bytes.Equal(wrong, raw) {
-		t.Fatal("the served document carries no window to move; this case would pass vacuously")
+	// AND A DOCUMENT FOR ANOTHER LINE CANNOT REPLACE THIS ONE. The refusal comes
+	// from the document's own window, which is the form this build can reach: it
+	// asks for its own names, so a document for another build arrives only because
+	// its window says so. The range and the snapshot must survive it.
+	for name, raw := range served {
+		moved := bytes.Replace(raw, []byte(`"min": "4.0.0"`), []byte(`"min": "9.0.0"`), 1)
+		if bytes.Equal(moved, raw) {
+			t.Fatal("the served document carries no window to move; this case would pass vacuously")
+		}
+		served[name] = moved
 	}
-	raw = wrong
 	SetActiveMaxTestedXUI("3.5.0")
-	if err := fetchAndApply(context.Background(), url); err == nil {
-		t.Fatal("runtime accepted a document for another release line")
+	if err := fetchAndApplyAll(context.Background(), sources); err == nil {
+		t.Fatal("runtime accepted documents for another release line")
 	}
 	if ActiveMaxTestedXUI() != "3.5.0" {
 		t.Fatal("a refused fetch changed active state")
@@ -284,20 +311,4 @@ func TestCompatV4FetchAppliesPublishedShape(t *testing.T) {
 	if err != nil || !bytes.Equal(after, cache) {
 		t.Fatalf("a refused fetch changed the persisted snapshot: %v", err)
 	}
-}
-
-func readCompatRangeOverlay(t *testing.T) remoteCompatPayload {
-	t.Helper()
-	raw, err := os.ReadFile(filepath.Join("..", "..", "docs", "compat", "v4-ranges.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var payload remoteCompatPayload
-	if err := json.Unmarshal(raw, &payload); err != nil {
-		t.Fatal(err)
-	}
-	if payload.SchemaVersion != rangeOverlaySchemaVersion || payload.Major != 4 {
-		t.Fatalf("unexpected V4 range overlay identity: schema=%d major=%d", payload.SchemaVersion, payload.Major)
-	}
-	return payload
 }

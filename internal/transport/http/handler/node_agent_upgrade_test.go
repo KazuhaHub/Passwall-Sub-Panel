@@ -106,7 +106,13 @@ func TestNativeUpgradeHTTPAdministratorBoundaryAndPrivateStatus(t *testing.T) {
 }
 
 func TestNativeUpgradeHTTPStrictBoundedMetadataAndIdempotency(t *testing.T) {
-	for _, body := range []string{`null`, `{}`, `{"version":"latest","expected_version":"4.0.0"}`, `{"version":"4.0.0","expected_version":"4.0.0"}`, `{"version":"4.0.0","expected_version":"4.0.1"}`, `{"version":"4.0.1","expected_version":"4.0.0","command":"private-secret"}`, `{"version":"4.0.1","version":"4.0.2","expected_version":"4.0.0"}`, `{"VERSION":"4.0.1","expected_version":"4.0.0"}`, `{"version":1,"expected_version":"4.0.0"}`, upgradeHTTPBody + ` {}`, strings.Repeat(" ", 4097) + upgradeHTTPBody} {
+	// A TARGET OLDER THAN THE CURRENT VERSION IS NOT IN THIS LIST ANY MORE. It was
+	// refused while the panel ordered versions, and removing that rule is a
+	// deliberate change rather than a loosening: an operator picking an older
+	// release is making an explicit choice, and the ordering answered wrongly for
+	// nodes whose version this panel cannot parse. The new expectation is asserted
+	// in nodeagentupgrade's table, beside the rule it belongs to.
+	for _, body := range []string{`null`, `{}`, `{"version":"latest","expected_version":"4.0.0"}`, `{"version":"4.0.0","expected_version":"4.0.0"}`, `{"version":"4.0.1","expected_version":"4.0.0","command":"private-secret"}`, `{"version":"4.0.1","version":"4.0.2","expected_version":"4.0.0"}`, `{"VERSION":"4.0.1","expected_version":"4.0.0"}`, `{"version":1,"expected_version":"4.0.0"}`, `{"version":"4.0.1"}`, upgradeHTTPBody + ` {}`, strings.Repeat(" ", 4097) + upgradeHTTPBody} {
 		service := &nativeUpgradeHTTPStub{}
 		w := upgradeHTTPRequest(service, domain.RoleAdmin, http.MethodPost, "41/upgrade-node-agent", body, upgradeHTTPKey)
 		if w.Code != http.StatusBadRequest || service.calls != 0 {

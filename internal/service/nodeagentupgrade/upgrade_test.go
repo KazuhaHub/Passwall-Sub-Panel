@@ -16,7 +16,6 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/idgen"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
-	"github.com/KazuhaHub/passwall-sub-panel/internal/version"
 )
 
 type upgradeFixture struct {
@@ -83,7 +82,25 @@ var validUpgradeRequest = Request{Version: "4.0.1", ExpectedVersion: "4.0.0"}
 
 const upgradeRequestKey = "upgrade-request-0001"
 
-func TestUpgradeRequestRequiresAnExactNewerRelease(t *testing.T) {
+// THE TARGET IS AN EXACT RELEASE; THE VERSION IT REPLACES IS WHATEVER THE NODE
+// REPORTS.
+//
+// The request used to require BOTH to parse as product versions, and to require
+// the target to order above the current one. Those two rules were about the
+// version SCHEME rather than about the upgrade: they existed because this project
+// deleted its legacy naming, so a node still reporting `v0.0.1-beta9` handed the
+// panel a string it could not parse — and a node whose own version the panel
+// cannot read became impossible to move. Both are gone.
+//
+// WHAT REPLACES THEM IS NOT A WEAKER VERSION RULE BUT A DIFFERENT ONE. The target
+// must be a release version, because the node derives its download address from it
+// and the checksum manifest names it; the expected version is an OPAQUE IDENTITY
+// that has to match what the node believes it is, which the node checks itself.
+// That is also why order is no longer checked: an operator picking an older
+// release is making an explicit choice, and the rules that remain — the artifact's
+// signature, its checksum, and the downloaded binary reporting exactly the
+// requested version — are what stop that choice from installing something else.
+func TestTheTargetIsExactAndTheReplacedVersionIsOpaque(t *testing.T) {
 	for _, tc := range []struct {
 		target   string
 		expected string
@@ -93,29 +110,37 @@ func TestUpgradeRequestRequiresAnExactNewerRelease(t *testing.T) {
 		{"4.0.0.1", "4.0.0", true}, // a rebuild of the running release is an upgrade
 		{"102.1.0", "102.0.3", true},
 		{"4.1.0", "4.0.0.9", true},
-		// `100000000000000000000.0.0` against a 20-digit major used to be here,
-		// asserting that the comparison does not overflow. That property is
-		// asserted where it lives, in the comparator; the string itself is now
-		// REFUSED by the shape rule, which bounds a segment because PSP returns a
-		// major and cannot represent one this large. See MaxVersionSegmentBounds.
+		// THE POINT OF REMOVING THE TWO RULES: a node on the replaced scheme has a
+		// version this build cannot parse, and it must still be movable.
+		{"4.0.1", "v0.0.1-beta9", true},
+		{"4.0.1", "v0.0.1-beta12", true},
+		{"4.0.1", "v3.9.2", true},
+		{"4.0.0", "v4.0.0", true},
+		// AND NOT-NEWER IS NO LONGER A REFUSAL. This is deliberate: the panel does
+		// not decide what an operator may install, and the ordering rule answered
+		// wrongly for exactly the nodes it could not parse.
+		{"4.0.0", "4.0.1", true},
+		{"4.0.0", "4.99.99", true},
+		// A NO-OP IS STILL REFUSED, by string identity rather than by ordering: the
+		// node would download, verify and reinstall the release it is already on.
 		{"4.0.0", "4.0.0", false},
-		{"4.0.0", "4.0.1", false},
-		{"4.0.0", "4.0.0.1", false},
+		{"v0.0.1-beta9", "v0.0.1-beta9", false},
+		// THE TARGET IS STILL EXACT. It has to be: the node builds its download
+		// address from it, so a target that is not a release version cannot be
+		// fetched at all.
 		{"4.0", "4.0.0", false},
 		{"04.0.0", "4.0.0", false},
 		{"4.0.0+build", "4.0.0", false},
 		{"latest", "4.0.0", false},
 		{"release/4.0.0", "4.0.0", false},
-		// THE LEGACY SHAPE, REFUSED RATHER THAN ORDERED. It was accepted here -
-		// and the ordering below it is what the dotless-prerelease rule existed
-		// for - until the scheme was removed. Nothing publishes it now, so the
-		// panel cannot be asked to move a node onto one.
 		{"v0.0.1-beta3", "v0.0.1-beta2", false},
 		{"v0.0.1-beta.10", "v0.0.1-beta.9", false},
 		{"v0.0.1", "v0.0.1-beta3", false},
 		{"v4.0.0", "4.0.0", false},
-		{"4.0.0", "v4.0.0", false},
 		{"v1.0.0", "v0.0.1", false},
+		// An expected version that is absent cannot match what the node believes it
+		// is, so the request is refused here rather than at the node.
+		{"4.0.1", "", false},
 	} {
 		err := validateRequest(Request{Version: tc.target, ExpectedVersion: tc.expected})
 		if tc.valid && err != nil || !tc.valid && !errors.Is(err, domain.ErrValidation) {
@@ -402,91 +427,5 @@ func TestUpgradeIsAdmittedForACompatiblePeer(t *testing.T) {
 	other := Request{Version: "4.0.2", ExpectedVersion: "4.0.0"}
 	if _, created, err := f.service.Request(context.Background(), f.panel.ID, other, upgradeRequestKey+"-other-version"); err != nil || !created {
 		t.Fatalf("a compatible target was refused for want of a recorded edge: err=%v created=%v", err, created)
-	}
-}
-
-// A policy in force decides which targets may be requested, and it must decide
-// for BOTH entry points: the API handler reaches the service through
-// validateRequest, and DecodeRequest — used when a task is read back — goes
-// through the same function. A gate placed on one of them would be a gate a
-// caller can walk around.
-func TestAPolicyInForceRefusesATargetItDoesNotOffer(t *testing.T) {
-	// A policy only applies to a build it names, and a `go test` build calls
-	// itself "dev" — so the build identity is stamped here the way the release
-	// binary stamps it, and restored afterwards.
-	previousVersion := version.Version
-	t.Cleanup(func() { version.Version = previousVersion })
-	version.Version = "4.0.0"
-
-	previousEnforcement := version.PolicyEnforcing()
-	t.Cleanup(func() { version.SetPolicyEnforcement(previousEnforcement) })
-	install := func(releases ...string) {
-		t.Helper()
-		// Loading a policy is not the same as letting it decide; this case is
-		// about the gate, so it switches enforcement on.
-		version.SetPolicyEnforcement(true)
-		entries := make([]version.PolicyRelease, 0, len(releases))
-		for _, r := range releases {
-			entries = append(entries, version.PolicyRelease{
-				Version: r, ReleaseTag: version.ProductTagNamespace + r, Scheme: "product", Evidence: []string{"test"},
-			})
-		}
-		version.SetActiveReleasesPolicy(&version.ReleasesPolicy{
-			SchemaVersion: 1,
-			Revision:      1,
-			IssuedAt:      time.Now().UTC().Add(-time.Hour),
-			ExpiresAt:     time.Now().UTC().Add(time.Hour),
-			AppliesToPSP:  version.PolicyPSPRange{Min: version.Version, Max: version.Version},
-			Releases:      entries,
-		})
-	}
-	t.Cleanup(func() { version.SetActiveReleasesPolicy(nil) })
-
-	// No policy: the pre-policy state, unchanged.
-	version.SetActiveReleasesPolicy(nil)
-	if err := validateRequest(validUpgradeRequest); err != nil {
-		t.Fatalf("without a policy the request must still validate: %v", err)
-	}
-
-	// A policy that does not list the target refuses it.
-	install("4.0.0")
-	if err := validateRequest(validUpgradeRequest); !errors.Is(err, domain.ErrValidation) || !strings.Contains(err.Error(), "policy in force offers") {
-		t.Fatalf("a policy must refuse a target it does not offer: %v", err)
-	}
-	// ...including through the decode path, which is the other way in.
-	payload, err := json.Marshal(nodeprotocol.AgentUpgradeArgs{Version: validUpgradeRequest.Version, ExpectedVersion: validUpgradeRequest.ExpectedVersion})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := DecodeRequest(payload); !errors.Is(err, domain.ErrValidation) {
-		t.Fatalf("DecodeRequest must apply the same gate: %v", err)
-	}
-
-	// A policy that lists the target lets it through, so the gate is a filter
-	// and not a blanket refusal.
-	install("4.0.0", validUpgradeRequest.Version)
-	if err := validateRequest(validUpgradeRequest); err != nil {
-		t.Fatalf("a policy that offers the target must allow it: %v", err)
-	}
-}
-
-// A policy reviewed for a different build is installed but not in force here, so
-// it must not start refusing requests this build was always allowed to make.
-func TestAPolicyForAnotherBuildDoesNotGateThisOne(t *testing.T) {
-	previousVersion := version.Version
-	t.Cleanup(func() { version.Version = previousVersion })
-	version.Version = "4.0.0"
-
-	version.SetActiveReleasesPolicy(&version.ReleasesPolicy{
-		SchemaVersion: 1,
-		Revision:      1,
-		IssuedAt:      time.Now().UTC().Add(-time.Hour),
-		ExpiresAt:     time.Now().UTC().Add(time.Hour),
-		AppliesToPSP:  version.PolicyPSPRange{Min: "9.0.0", Max: "9.99.99"},
-	})
-	t.Cleanup(func() { version.SetActiveReleasesPolicy(nil) })
-
-	if err := validateRequest(validUpgradeRequest); err != nil {
-		t.Fatalf("a policy for another build must not gate this one: %v", err)
 	}
 }

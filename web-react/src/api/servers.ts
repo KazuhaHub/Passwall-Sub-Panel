@@ -478,11 +478,11 @@ export async function upgradePreview(id: number) {
 // did not have — and the other was dropped rather than reconciled.
 export type UpgradeComponent = 'panel' | 'core' | 'agent'
 export interface AgentUpgradeTarget {
+  // A NAME AND NOTHING ELSE. It used to carry whether a reviewed edge reached the
+  // release and then whether a signed policy offered it, and each was a claim the
+  // panel could not make on its own. What an operator may install is their choice
+  // among the published releases.
   version: string
-  // Whether the policy in force offers this release. There used to be an
-  // edge_verified beside it; admission no longer requires a reviewed
-  // from-to edge, so the panel stopped reporting one.
-  offered_by_policy: boolean
 }
 export interface UpgradeOption {
   component: UpgradeComponent
@@ -513,18 +513,9 @@ export interface CompatRangeStatus {
   refreshed_at?: string
   last_error?: string
 }
-export interface PolicyStatus {
-  installed: boolean
-  applicable: boolean
-  enforcing: boolean
-  revision?: number
-  expires_at?: string
-  expired: boolean
-}
 export interface CompatStatusResponse {
   xui: CompatRangeStatus
   sui: CompatRangeStatus
-  policy: PolicyStatus
 }
 
 /** The read is best-effort: a panel that cannot report its state must not claim one. */

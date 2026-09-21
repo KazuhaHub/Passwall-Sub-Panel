@@ -84,19 +84,19 @@ func TestTheAgentAnswerNeedsAnIdentityAndAnOfferedTarget(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
 		current string
-		offered bool
 		state   upgradeOptionState
 		reason  string
 	}{
-		{"no identity", "", true, upgradeBlocked, "identity_unknown"},
-		{"not offered", "v0.0.1-beta11", false, upgradeBlocked, "no_offered_target"},
-		// NO THIRD INPUT. "Nobody walked this path" used to be a refusal of its
-		// own, beside an eligibility answer that said the node was compatible —
-		// two answers to one question. What decides is the decision.
-		{"compatible", "v0.0.1-beta3", true, upgradeReady, "compatible"},
+		{"no identity", "", upgradeBlocked, "identity_unknown"},
+		// Identity is the ONLY thing this refuses on. There used to be two more
+		// reasons here — "nobody walked this path" and "the policy does not offer
+		// it" — and each was a second document's opinion about a question the
+		// operator is entitled to answer.
+		{"a version this panel cannot parse", "v0.0.1-beta3", upgradeReady, "compatible"},
+		{"the current version", "4.0.1", upgradeReady, "compatible"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			option := decideAgentUpgrade(tc.current, tc.offered)
+			option := decideAgentUpgrade(tc.current)
 			if option.State != tc.state {
 				t.Fatalf("state = %q, want %q", option.State, tc.state)
 			}
@@ -178,57 +178,36 @@ func TestUpgradeOptionsReportsUnsupportedForABackendWithoutTheCapability(t *test
 	}
 }
 
-// THE LIST NAMES RELEASES THE PANEL ACCEPTS, NOT PATHS SOMEBODY WALKED.
+// THE LIST IS THE RELEASES THE PANEL CAN SEE, AND NOTHING ELSE IS FILTERED.
 //
-// It was built from the verified edges, so a node on a version no edge started from
-// got an empty dialog — and the remedy was a document edit the operator had no
-// reason to know about. The catalog is the panel's own answer about what it
-// supports, so that is what the list is built from.
+// It was built from the verified edges, then from a signed policy's offered set,
+// and each filter could empty the dialog for a node the operator was looking at.
+// What is left is the panel's own answer about what is published.
 func TestAgentTargetsComeFromTheReleaseList(t *testing.T) {
-	releases := []string{"v0.0.1-beta3", "v0.0.1-beta10", "v0.0.1-beta11", "v0.0.1-beta11"}
+	releases := []string{"4.0.0", "4.0.1", "4.0.2", "4.0.2"}
 
-	targets := agentTargets("v0.0.1-beta3", releases, false, nil)
+	targets := agentTargets("4.0.0", releases)
 	// The node's own version is not a target, and the catalog may name one release
 	// twice through two platforms.
 	if len(targets) != 2 {
 		t.Fatalf("targets = %+v, want the two releases that are not the node's own", targets)
 	}
 	for _, target := range targets {
-		if target.Version == "v0.0.1-beta3" {
+		if target.Version == "4.0.0" {
 			t.Fatalf("the node's own version was offered as a target: %+v", target)
-		}
-		if !target.OfferedByPolicy {
-			t.Fatalf("without a policy every reviewed release is a candidate: %+v", target)
 		}
 	}
 
-	// A VERSION NO EDGE EVER STARTED FROM IS NO LONGER A DEAD END. beta9 is the
-	// case this rewrite exists for: it had no edge and therefore no targets at all.
-	fromBeta9 := agentTargets("v0.0.1-beta9", releases, false, nil)
-	if len(fromBeta9) != 3 {
-		t.Fatalf("targets = %+v, want the three releases that are not beta9", fromBeta9)
+	// A VERSION NO EDGE EVER STARTED FROM IS NO LONGER A DEAD END. A node on a
+	// stamp from the replaced scheme is the case this exists for: it had no edge,
+	// and it must still get the whole list.
+	fromLegacy := agentTargets("v0.0.1-beta9", releases)
+	if len(fromLegacy) != 3 {
+		t.Fatalf("targets = %+v, want all three releases", fromLegacy)
 	}
 
 	// An unknown identity cannot be the start of anything.
-	if got := agentTargets("", releases, false, nil); got != nil {
+	if got := agentTargets("", releases); got != nil {
 		t.Fatalf("targets = %+v, want nil", got)
-	}
-}
-
-// With a policy in force the offered list is part of the answer: a release the
-// policy no longer offers is not something to put in front of an operator.
-func TestAgentTargetsCarryThePolicyAnswerWhenOneIsInForce(t *testing.T) {
-	releases := []string{"v0.0.1-beta10", "v0.0.1-beta11"}
-
-	listed := agentTargets("v0.0.1-beta3", releases, true, []string{"v0.0.1-beta11"})
-	if len(listed) != 2 {
-		t.Fatalf("targets = %+v, want both releases", listed)
-	}
-	byVersion := map[string]bool{}
-	for _, target := range listed {
-		byVersion[target.Version] = target.OfferedByPolicy
-	}
-	if !byVersion["v0.0.1-beta11"] || byVersion["v0.0.1-beta10"] {
-		t.Fatalf("targets = %+v, want the policy answer carried rather than assumed", listed)
 	}
 }

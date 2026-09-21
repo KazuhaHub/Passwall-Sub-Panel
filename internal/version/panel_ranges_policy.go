@@ -7,32 +7,61 @@ import (
 	"time"
 )
 
-// PanelRangesPolicy is the per-major compat manifest's payload, published as ONE
-// document that states the builds it applies to.
+// PanelRangesPolicy is ONE PRODUCT's compat ranges, published as a document that
+// states the builds it applies to and which product it is.
 //
-// WHY IT EXISTS. The per-major files are addressed by the product version's FIRST
-// SEGMENT — v3.x reads v3.json — and under the product scheme that segment is a
-// RELEASE LINE, not a compatibility major: 102.1.0 would ask for v102.json, which
-// either does not exist or describes a different panel. A build reached its own
-// ranges by that route and no longer can, and the route it took instead was
-// nothing at all.
+// WHY IT IS SHAPED THIS WAY, in three parts.
 //
-// THIS DOCUMENT IS REACHED BY NAME and states the range it applies to, instead of
-// having one inferred from a number. It does NOT replace the per-major files:
-// builds that do not know it keep reading theirs, and the per-entry
-// psp_min/psp_max matching is unchanged — only how the document is found is new.
+// THE PRODUCT IS ON THE DOCUMENT. The ranges used to arrive in one document
+// carrying both panels, so a review of one panel rewrote the file that carried the
+// other's ceiling. They are now separate documents, and each says which product it
+// is rather than having that inferred from which of the two optional field lists
+// happens to be populated.
+//
+// THE MAJOR IS IN THE NAME. A legacy build reads a per-major manifest, whose name
+// is its compatibility major. A product version's first segment is a RELEASE LINE
+// rather than a compatibility major — 102.1.0 would ask for v102.json, which
+// either does not exist or describes a different panel — so the per-product names
+// are derived from the PANEL major instead. The name decides WHERE TO LOOK, and
+// the window below decides whether what was found COUNTS: a name is not evidence,
+// and a document that arrived under a name this build asked for can still be about
+// a different build.
 //
 // RANGE IS A CLAIM ABOUT A BUILD, which is why the applicability window and the
 // revision are on the document rather than inferred. A range that had to be
 // guessed is a range nobody reviewed.
+// CompatPSPRange is the window of panel builds a ranges document was reviewed
+// for — and the FIRST GATE every such document passes, before any entry in it is
+// looked at.
+//
+// IT LIVES HERE RATHER THAN WITH A DOCUMENT TYPE because two shapes carry it: a
+// product's ranges document states its own window, and a per-major manifest's
+// converted payload carries the one it was read under. Both are "which builds is
+// this a claim about", and a claim that had to be inferred from a file NAME is a
+// claim nobody wrote down.
+type CompatPSPRange struct {
+	Min string `json:"min"`
+	Max string `json:"max"`
+}
+
 type PanelRangesPolicy struct {
-	SchemaVersion int       `json:"schema_version"`
-	Revision      int64     `json:"revision"`
-	IssuedAt      time.Time `json:"issued_at"`
-	ExpiresAt     time.Time `json:"expires_at"`
+	SchemaVersion int `json:"schema_version"`
+	// Product says which document this is, and it must be one of the products
+	// this build knows. It is REQUIRED rather than inferred from which fields are
+	// populated, because the two products' fields are both optional in the shape
+	// and a document that forgot to say would otherwise install nothing under one
+	// product's name — a ceiling that stops moving with nothing recording why.
+	//
+	// It is also the cross-check against the ADDRESS: the fetch knows which
+	// document it asked for, and a document that turns out to be the other
+	// product's is a wrong file at that URL, not a review that removed a range.
+	Product   string    `json:"product"`
+	Revision  int64     `json:"revision"`
+	IssuedAt  time.Time `json:"issued_at"`
+	ExpiresAt time.Time `json:"expires_at"`
 	// AppliesToPSP is the window of panel builds this document was reviewed for.
 	// Per-entry psp_min/psp_max narrow it further; nothing may widen it.
-	AppliesToPSP PolicyPSPRange         `json:"applies_to_psp"`
+	AppliesToPSP CompatPSPRange         `json:"applies_to_psp"`
 	Entries      []remoteCompatPSPEntry `json:"entries"`
 	// SUIEntries is optional for the same reason it is optional in the manifest:
 	// a document published before S-UI ranges were reviewed carries none, and
@@ -56,6 +85,9 @@ var (
 	ErrPanelRangesExpired = errors.New("panel ranges policy: expired")
 	// ErrPanelRangesMalformed means the document is internally inconsistent.
 	ErrPanelRangesMalformed = errors.New("panel ranges policy: malformed")
+	// ErrPanelRangesProduct means the document does not say which product it is,
+	// or names one this build does not know.
+	ErrPanelRangesProduct = errors.New("panel ranges policy: unknown product")
 )
 
 // ParsePanelRangesPolicy validates a panel ranges document.
@@ -79,6 +111,9 @@ func ParsePanelRangesPolicy(raw []byte, now time.Time) (PanelRangesPolicy, error
 	if policy.SchemaVersion != panelRangesSchema {
 		return PanelRangesPolicy{}, fmt.Errorf("%w: %d, this build reads %d", ErrPanelRangesSchema, policy.SchemaVersion, panelRangesSchema)
 	}
+	if !knownProduct(policy.Product) {
+		return PanelRangesPolicy{}, fmt.Errorf("%w: product %q is not one of %s or %s", ErrPanelRangesProduct, policy.Product, productXUI, productSUI)
+	}
 	if policy.Revision <= 0 {
 		return PanelRangesPolicy{}, fmt.Errorf("%w: revision must be positive, got %d", ErrPanelRangesMalformed, policy.Revision)
 	}
@@ -89,12 +124,23 @@ func ParsePanelRangesPolicy(raw []byte, now time.Time) (PanelRangesPolicy, error
 		return PanelRangesPolicy{}, fmt.Errorf("%w: it expired at %s", ErrPanelRangesExpired, policy.ExpiresAt.UTC().Format(time.RFC3339))
 	}
 
-	window, err := parsePolicyPSPRange(policy.AppliesToPSP)
+	window, err := parseCompatPSPRange(policy.AppliesToPSP)
 	if err != nil {
 		return PanelRangesPolicy{}, err
 	}
+	// A DOCUMENT WITH NO ROWS OF ITS OWN SUPPORTS NOTHING, and which rows those
+	// are follows from the product it named. This replaces one combined check:
+	// with the products separated, a `3x-ui` document that carries only
+	// `sui_entries` is not "a document with some entries" — it is the wrong
+	// document, and it would install an empty 3X-UI range set.
 	if len(policy.Entries) == 0 && len(policy.SUIEntries) == 0 {
 		return PanelRangesPolicy{}, fmt.Errorf("%w: a document with no entries supports nothing", ErrPanelRangesMalformed)
+	}
+	if policy.Product == productXUI && len(policy.Entries) == 0 {
+		return PanelRangesPolicy{}, fmt.Errorf("%w: a %s document carries no entries", ErrPanelRangesMalformed, productXUI)
+	}
+	if policy.Product == productSUI && len(policy.SUIEntries) == 0 {
+		return PanelRangesPolicy{}, fmt.Errorf("%w: a %s document carries no sui_entries", ErrPanelRangesMalformed, productSUI)
 	}
 	for i, entry := range policy.Entries {
 		if err := checkPanelRangeEntry(i, entry.PSPMin, entry.PSPMax, window); err != nil {
@@ -124,9 +170,9 @@ func ParsePanelRangesPolicy(raw []byte, now time.Time) (PanelRangesPolicy, error
 	return policy, nil
 }
 
-// parsePolicyPSPRange validates the document's applicability window and returns
+// parseCompatPSPRange validates the document's applicability window and returns
 // it, so the entries can be checked against the same numbers.
-func parsePolicyPSPRange(r PolicyPSPRange) ([2]string, error) {
+func parseCompatPSPRange(r CompatPSPRange) ([2]string, error) {
 	if !IsReleaseVersion(r.Min) || !IsReleaseVersion(r.Max) {
 		return [2]string{}, fmt.Errorf("%w: applies_to_psp must name release versions, got %q..%q", ErrPanelRangesMalformed, r.Min, r.Max)
 	}
