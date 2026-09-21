@@ -36,6 +36,26 @@ describe('compatNotice', () => {
     expect(notice?.values.error).toBe('github unreachable')
   })
 
+  it('flags a range that could not be fetched at all, because nothing else says why', () => {
+    // EVERY PANEL READS UNKNOWN in this state, and the reason is here and nowhere
+    // else. Without this the page said nothing, which leaves "the panel is broken"
+    // as the only diagnosis an operator can reach.
+    const notice = compatNotice(status({
+      xui: { min_version: '3.4.2', last_error: '3x-ui-v4.json answered HTTP 403' },
+    }))
+    expect(notice?.kind).toBe('range-unavailable')
+    expect(notice?.values.error).toBe('3x-ui-v4.json answered HTTP 403')
+  })
+
+  it('prefers the range it still has over the failure that produced it', () => {
+    // A range that is merely last-good is the notice below: it tells the operator
+    // what the ceiling is, which the "nothing fetched" one cannot.
+    const notice = compatNotice(status({
+      xui: { min_version: '3.4.2', max_tested: '3.8.5', last_error: 'github unreachable' },
+    }))
+    expect(notice?.kind).toBe('range-stale')
+  })
+
   it('flags a core catalog the panel is falling back on, and carries its age', () => {
     // THE ONE AN OPERATOR CANNOT SEE FROM THE SELECTOR: a reviewed release that has
     // since been withdrawn is still on the list, and nothing about the list says so.
@@ -65,11 +85,17 @@ describe('compatNotice', () => {
     expect(compatNotice(status({ core_catalog: undefined }))).toBeNull()
   })
 
-  it('does not flag a refresh failure when there is no range to fall back on', () => {
-    // No range means the panel says "unknown" everywhere already; a second
-    // message about the same absence is noise, and the range line says it.
+  // THIS CASE USED TO ASSERT THE OPPOSITE, and the reasoning it recorded was
+  // "no range means the panel says unknown everywhere already; a second message
+  // about the same absence is noise". What that missed is WHY: the per-panel badge
+  // says the range is missing and never says why it is missing, and the two causes
+  // — a document nobody fetched, and a fetch that keeps failing — send an operator
+  // to different places. A panel whose compat fetch is being refused looks, from
+  // every other surface, exactly like a panel with a broken compatibility system.
+  it('flags a refresh that failed even when there is no range to fall back on', () => {
     const notice = compatNotice(status({ xui: { last_error: 'github unreachable' } }))
-    expect(notice).toBeNull()
+    expect(notice?.kind).toBe('range-unavailable')
+    expect(notice?.values.error).toBe('github unreachable')
   })
 
   it('does not flag a range merely because it is old', () => {

@@ -13,7 +13,7 @@ import type { CompatStatusResponse } from '@/api/servers'
 // could not refresh and is serving from the last good fetch, which looks exactly
 // like a fresh one from outside.
 
-export type CompatNoticeKind = 'core-catalog-stale' | 'range-stale'
+export type CompatNoticeKind = 'core-catalog-stale' | 'range-unavailable' | 'range-stale'
 
 export interface CompatNotice {
   kind: CompatNoticeKind
@@ -41,6 +41,15 @@ export function compatNotice(status: CompatStatusResponse | null | undefined): C
         error: catalog.last_error ?? '',
       },
     }
+  }
+
+  // A REFRESH THAT FAILED IS WORTH SAYING EVEN WHEN THERE IS NOTHING TO FALL BACK
+  // ON, and that is the case this did not cover: the notice below is about a range
+  // that is the LAST GOOD one, so it needs a range to describe. With none, every
+  // panel reads Unknown, the reason sits in `last_error`, and the page said nothing
+  // at all — leaving "the panel is broken" as the only available diagnosis.
+  if (status.xui?.last_error && !status.xui?.max_tested) {
+    return { kind: 'range-unavailable', values: { error: status.xui.last_error } }
   }
 
   if (status.xui?.last_error && status.xui?.max_tested) {
