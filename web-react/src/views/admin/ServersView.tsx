@@ -71,6 +71,7 @@ import {
   createNativeInstallScript,
   createNativeInstallationFiles,
   createNodeInstallCommand,
+  type InstallMode,
   deleteServer,
 	getNativeAgentStatus,
 	getNativeInstallation,
@@ -2074,6 +2075,10 @@ export function NativeInstallationDialog({ server, initialProvisioning, onClose,
   const [scriptError, setScriptError] = useState('')
   const [installCommand, setInstallCommand] = useState<{ command: string; expires_at: string } | null>(null)
   const [commandBusy, setCommandBusy] = useState(false)
+  // REPLACING A RELEASE IS NEVER INFERRED. The node's reported version is shown
+  // beside the choice so an operator can see the difference, and the warning below
+  // says what the installer will do about it; the panel does not decide for them.
+  const [upgradeInPlace, setUpgradeInPlace] = useState(false)
   const [commandError, setCommandError] = useState('')
   const [commandExpired, setCommandExpired] = useState(false)
   const [selection, setSelection] = useState<NativeInstallationSelection>(initialSelection)
@@ -2089,6 +2094,10 @@ export function NativeInstallationDialog({ server, initialProvisioning, onClose,
   const filesRequest = useRef<AbortController | null>(null)
   const commandRequest = useRef<AbortController | null>(null)
   const serverID = server?.id
+  // The node's own record of itself, first token only: the reported string may carry
+  // a build stamp, and it is the release the installer compares, not the stamp.
+  const reportedVersion = (server?.panel_version ?? '').split(' ')[0]
+  const installMode: InstallMode = upgradeInPlace ? 'upgrade' : 'install'
   const versionValid = selection.method === 'github' || (selection.method === 'docker'
     ? isNodeDockerImageSelection(version.trim())
     : isNodeReleaseVersion(version.trim()))
@@ -2196,7 +2205,7 @@ export function NativeInstallationDialog({ server, initialProvisioning, onClose,
     setScriptBusy(action)
     setScriptError('')
     try {
-      const script = await createNativeInstallScript(server.id, version.trim(), controller.signal)
+      const script = await createNativeInstallScript(server.id, { version: version.trim(), mode: installMode }, controller.signal)
       if (controller.signal.aborted) return
       if (typeof script !== 'string' || !script.trim()) throw new Error(t('admin:servers.native.script_failed'))
       if (action === 'copy') await copyToClipboard(script)
@@ -2235,7 +2244,7 @@ export function NativeInstallationDialog({ server, initialProvisioning, onClose,
     setInstallCommand(null)
     setCommandExpired(false)
     try {
-      const result = await createNodeInstallCommand(server.id, { version: version.trim() }, controller.signal)
+      const result = await createNodeInstallCommand(server.id, { version: version.trim(), mode: installMode }, controller.signal)
       if (controller.signal.aborted) return
       if (result.server_id !== server.id || typeof result.command !== 'string' || !result.command.trim() ||
         result.command.length > 8192 || /[\0\r\n]/.test(result.command) ||
@@ -2308,6 +2317,17 @@ export function NativeInstallationDialog({ server, initialProvisioning, onClose,
         {selection.method !== 'github' && <NodeReleaseSelector compact key={serverID} enabled={!!server} selection={selection} value={version}
           initialChannel={server?.update_channel === 'beta' ? 'testing' : 'stable'}
           onChange={next => { invalidateMaterials(); setVersion(next) }} autoSelectLatest disabled={rotating} />}
+        {selection.method === 'linux' && <Box>
+          <FormControlLabel control={<Checkbox size="small" checked={upgradeInPlace} disabled={!server}
+            onChange={event => { invalidateMaterials(); setUpgradeInPlace(event.target.checked) }} />}
+            label={t('admin:servers.native.upgrade_in_place')} />
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>{t('admin:servers.native.upgrade_in_place_hint')}</Typography>
+          {/* THE COMMAND IS REFUSED AT THE HOST, NOT HERE, when the node is on
+              another release and this is off — and that refusal arrives as a message
+              about identity that names nothing about the version. */}
+          {reportedVersion && version.trim() && reportedVersion !== version.trim() && !upgradeInPlace &&
+            <Alert severity="warning">{t('admin:servers.native.upgrade_in_place_needed', { version: reportedVersion })}</Alert>}
+        </Box>}
         {provisioning.endpoint.startsWith('http://') && <Alert severity="warning">{t('admin:servers.native.http_warning')}</Alert>}
         {selection.method === 'github' ? <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
           <Alert severity="info">{t('admin:servers.native.github_manual_summary')}</Alert>

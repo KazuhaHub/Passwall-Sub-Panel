@@ -422,7 +422,7 @@ describe('Passwall Node installation', () => {
     expect(command.value).toBe(generated.command)
     expect(command.readOnly).toBe(true)
     expect(screen.getByText('admin:servers.native.command_safety')).toBeTruthy()
-    expect(api.post).toHaveBeenCalledWith('/admin/servers/7/node-install-command', { version: '4.1.0' }, expect.objectContaining({ signal: expect.any(AbortSignal) }))
+    expect(api.post).toHaveBeenCalledWith('/admin/servers/7/node-install-command', { version: '4.1.0', mode: 'install' }, expect.objectContaining({ signal: expect.any(AbortSignal) }))
     fireEvent.click(screen.getByRole('button', { name: 'admin:servers.native.copy_command' }))
     await waitFor(() => expect(copy).toHaveBeenCalledWith(generated.command))
     expect((screen.getByLabelText('admin:servers.native.credential') as HTMLInputElement).value).toBe(provisioning.credential)
@@ -730,7 +730,7 @@ describe('Passwall Node installation', () => {
     await selectVersion('4.1.1')
     fireEvent.click(copyScript())
     await waitFor(() => expect(copy).toHaveBeenCalledWith(`#!/bin/sh\n# ${provisioning.credential}\n`))
-    expect(api.post).toHaveBeenCalledWith('/admin/servers/7/node-install-script', { version: '4.1.1' }, expect.objectContaining({ responseType: 'text' }))
+    expect(api.post).toHaveBeenCalledWith('/admin/servers/7/node-install-script', { version: '4.1.1', mode: 'install' }, expect.objectContaining({ responseType: 'text' }))
     expect(screen.queryByLabelText('admin:servers.native.start_command')).toBeNull()
     const run = (screen.getByLabelText('admin:servers.native.run_script_command') as HTMLTextAreaElement).value
     expect(run).toContain('sudo bash ./passwall-node-install-agt_7.sh')
@@ -764,7 +764,7 @@ describe('Passwall Node installation', () => {
     mountExpanded(<NativeInstallationDialog server={nativeServer} initialProvisioning={provisioning} onClose={vi.fn()} onRotate={vi.fn()} />)
     await selectVersion('4.1.0')
     fireEvent.click(copyScript())
-    await waitFor(() => expect(api.post).toHaveBeenCalledWith('/admin/servers/7/node-install-script', { version: '4.1.0' }, expect.objectContaining({ signal: expect.any(AbortSignal) })))
+    await waitFor(() => expect(api.post).toHaveBeenCalledWith('/admin/servers/7/node-install-script', { version: '4.1.0', mode: 'install' }, expect.objectContaining({ signal: expect.any(AbortSignal) })))
     const request = api.post.mock.calls.find(([url]) => url === '/admin/servers/7/node-install-script')!
     await selectMethod('github')
     expect(request[2].signal.aborted).toBe(true)
@@ -1184,5 +1184,49 @@ describe('native installation inputs', () => {
     expect(hostFromURL('PSP://agt_7')).toBe('')
     expect(hostFromURL('https://proxy.example.test:8443/admin')).toBe('proxy.example.test')
     expect(hostFromURL('proxy.example.test:8443')).toBe('proxy.example.test')
+  })
+})
+
+// REPLACING THE RELEASE IS THE OPERATOR'S DECISION, AND THE PANEL SAYS SO WHEN IT
+// IS MISSING.
+//
+// A node on another release is the case an in-place upgrade exists for, and the
+// installer refuses without being told — with a message about identity that names
+// nothing about the version. The panel knows the node's reported version, so it can
+// say what is about to happen before the operator runs anything, without deciding
+// for them: the switch is off until they turn it on.
+describe('Passwall Node in-place upgrade', () => {
+  it('warns when the node reports another release and sends the mode only once asked', async () => {
+    api.get.mockImplementation((url: string) => Promise.resolve(url.includes('node-installation')
+      ? { data: provisioning }
+      : { data: waiting }))
+    api.post.mockResolvedValue({ data: { server_id: 7, command: 'curl -fsSL https://panel.test/private-once | sudo bash',
+      expires_at: new Date(Date.now() + 15 * 60_000).toISOString() } })
+
+    const installed = { ...nativeServer, panel_version: '4.0.0 (abcdef1)' }
+    mountExpanded(<NativeInstallationDialog server={installed}
+      initialProvisioning={{ ...provisioning, server: installed }} onClose={vi.fn()} onRotate={vi.fn()} />)
+    await selectVersion('4.1.0')
+
+    // The switch is off and the panel says what that means here.
+    const toggle = screen.getByRole('checkbox', { name: 'admin:servers.native.upgrade_in_place' }) as HTMLInputElement
+    expect(toggle.checked).toBe(false)
+    expect(screen.getByText('admin:servers.native.upgrade_in_place_needed')).toBeTruthy()
+
+    fireEvent.click(toggle)
+    fireEvent.click(screen.getByRole('button', { name: 'admin:servers.native.generate_command' }))
+    await waitFor(() => expect(api.post).toHaveBeenCalledWith('/admin/servers/7/node-install-command',
+      { version: '4.1.0', mode: 'upgrade' }, expect.objectContaining({ signal: expect.any(AbortSignal) })))
+  })
+
+  it('says nothing about replacing a release when the node already reports the selected one', async () => {
+    api.get.mockImplementation((url: string) => Promise.resolve(url.includes('node-installation')
+      ? { data: provisioning }
+      : { data: waiting }))
+    const installed = { ...nativeServer, panel_version: '4.1.0 (abcdef1)' }
+    mountExpanded(<NativeInstallationDialog server={installed}
+      initialProvisioning={{ ...provisioning, server: installed }} onClose={vi.fn()} onRotate={vi.fn()} />)
+    await selectVersion('4.1.0')
+    expect(screen.queryByText('admin:servers.native.upgrade_in_place_needed')).toBeNull()
   })
 })

@@ -33,13 +33,14 @@ import (
 const fixtureInstallTemplateBody = `#!/bin/sh
 version=@@VERSION@@
 tag=@@TAG@@
+mode=@@MODE@@
 agent=@@AGENT_ID@@
 endpoint=@@ENDPOINT@@
 credential=@@CREDENTIAL@@
 environment=@@ENVIRONMENT@@
 curl -fsSL "https://github.com/KazuhaHub/Passwall-Node/releases/download/${tag}/passwall-node_${version}_linux_${arch}" \
   -o /tmp/passwall-node
-case "$version$tag" in *@@*) echo "unsubstituted" >&2; exit 1;; esac
+case "$version$tag$mode" in *@@*) echo "unsubstituted" >&2; exit 1;; esac
 `
 
 // fixtureInstallTemplate serves a signed release for ANY tag, so a caller can ask

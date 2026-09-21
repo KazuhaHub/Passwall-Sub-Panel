@@ -91,11 +91,12 @@ func validOptions() Options {
 const templateFixture = `#!/bin/sh
 version=@@VERSION@@
 tag=@@TAG@@
+mode=@@MODE@@
 agent=@@AGENT_ID@@
 endpoint=@@ENDPOINT@@
 credential=@@CREDENTIAL@@
 environment=@@ENVIRONMENT@@
-case "$version$tag" in *@@*) echo "unsubstituted" >&2; exit 1;; esac
+case "$version$tag$mode" in *@@*) echo "unsubstituted" >&2; exit 1;; esac
 `
 
 func TestItRendersThePublishedTemplateForThisIdentity(t *testing.T) {
@@ -247,5 +248,71 @@ func TestAMissingTemplateIsReportedAsAPublisherDecision(t *testing.T) {
 	}
 	if errors.Is(err, ErrNotRenderable) {
 		t.Fatalf("a publisher's omission was reported as the caller's mistake: %v", err)
+	}
+}
+
+// THE MODE IS RENDERED, ALWAYS. A release whose installer has no notion of modes
+// would read an absent marker as nothing to do and install where an upgrade was
+// asked for — and the refusal at the node would be about identity, which names
+// nothing about what was actually wrong.
+func TestItRendersTheModeItWasAskedFor(t *testing.T) {
+	f := newFixture(t, templateFixture)
+	for mode, want := range map[string]string{"": "mode='install'", "install": "mode='install'", "upgrade": "mode='upgrade'"} {
+		options := validOptions()
+		options.Mode = mode
+		rendered, err := f.renderer(t).Render(context.Background(), options)
+		if err != nil {
+			t.Fatalf("mode %q: %v", mode, err)
+		}
+		if !strings.Contains(rendered, want) {
+			t.Errorf("mode %q rendered without %s", mode, want)
+		}
+	}
+}
+
+// A RELEASE THAT PREDATES MODES CANNOT BE ASKED TO UPGRADE.
+//
+// This panel renders the template a RELEASE publishes, so unlike the Node project's
+// own renderer this template really can be older than the caller: an installation
+// on an older release is exactly the case an upgrade is for. Substituting a marker
+// the template does not carry is a no-op, so without this check the operator would
+// get a plain install and a refusal about identity.
+func TestItRefusesAnUpgradeAgainstAReleaseThatPredatesIt(t *testing.T) {
+	const beforeModes = `#!/bin/sh
+version=@@VERSION@@
+tag=@@TAG@@
+agent=@@AGENT_ID@@
+endpoint=@@ENDPOINT@@
+credential=@@CREDENTIAL@@
+environment=@@ENVIRONMENT@@
+`
+	f := newFixture(t, beforeModes)
+	options := validOptions()
+	options.Mode = "upgrade"
+	if _, err := f.renderer(t).Render(context.Background(), options); !errors.Is(err, ErrModeUnsupported) {
+		t.Fatalf("an upgrade against a release from before modes reported %v", err)
+	}
+	// AND THE SAME RELEASE STILL INSTALLS: what is unsupported is the mode, not the
+	// release.
+	options.Mode = ""
+	if _, err := f.renderer(t).Render(context.Background(), options); err != nil {
+		t.Fatalf("a plain install against the same release failed: %v", err)
+	}
+}
+
+// AN UNKNOWN MODE IS A REQUEST ERROR, AND IT IS DECIDED BEFORE ANYTHING IS FETCHED.
+// The installer's own closed set is enforced at the node too, but a value that
+// reaches it has already cost a download and a service stop.
+func TestItRefusesAnUnknownModeWithoutTouchingTheNetwork(t *testing.T) {
+	f := newFixture(t, templateFixture)
+	for _, mode := range []string{"replace", "force", "INSTALL", "install "} {
+		options := validOptions()
+		options.Mode = mode
+		if err := f.renderer(t).Validate(options); !errors.Is(err, ErrNotRenderable) {
+			t.Errorf("mode %q reported %v", mode, err)
+		}
+	}
+	if f.calls != 0 {
+		t.Fatalf("a request that cannot be rendered reached the network %d times", f.calls)
 	}
 }

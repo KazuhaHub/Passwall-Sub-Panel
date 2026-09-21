@@ -245,9 +245,20 @@ export async function importNativeCredential(id: number, credential: string, sig
   return data
 }
 
-export async function createNativeInstallScript(id: number, version: string, signal?: AbortSignal) {
+/**
+ * What the installer is asked to do where an installation already exists.
+ *
+ * `upgrade` replaces the RELEASE and keeps the node's identity and state, which is
+ * the only way to move a node whose own version rule cannot express the target. It
+ * is the operator's decision rather than the panel's: a version that differs from
+ * what the node reports is either an upgrade or a mistake, and the installer
+ * refuses to guess.
+ */
+export type InstallMode = 'install' | 'upgrade'
+
+export async function createNativeInstallScript(id: number, input: { version: string; mode?: InstallMode }, signal?: AbortSignal) {
   const { data } = await client.post<string>(`/admin/servers/${id}/node-install-script`,
-    { version }, { responseType: 'text', signal, _skipErrorToast: true },
+    input, { responseType: 'text', signal, _skipErrorToast: true },
   )
   return data
 }
@@ -258,7 +269,7 @@ export interface NodeInstallCommand {
   expires_at: string
 }
 
-export async function createNodeInstallCommand(id: number, input: { version: string }, signal?: AbortSignal) {
+export async function createNodeInstallCommand(id: number, input: { version: string; mode?: InstallMode }, signal?: AbortSignal) {
   const { data } = await client.post<NodeInstallCommand>(`/admin/servers/${id}/node-install-command`, input,
     { signal, _skipErrorToast: true })
   return data

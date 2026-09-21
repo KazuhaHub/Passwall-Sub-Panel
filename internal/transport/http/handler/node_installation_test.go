@@ -368,3 +368,56 @@ func TestInstallationEndpointsRefuseWithoutATemplateSource(t *testing.T) {
 		t.Fatalf("a handler with no template source answered %d", w.Code)
 	}
 }
+
+// AN OPERATOR CAN ASK FOR THE RELEASE TO BE REPLACED IN PLACE, and the request
+// carries that through to the script: the same identity, a different version. The
+// installer is the only code that can move a node whose own version rule cannot
+// express the target, and it can only do it when it is told to.
+func TestNodeInstallScriptCarriesTheRequestedInstallationMode(t *testing.T) {
+	h, _ := installationFixture(t)
+	for _, tc := range []struct{ body, want string }{
+		{`{"version":"4.0.0"}`, "mode='install'"},
+		{`{"version":"4.0.0","mode":"install"}`, "mode='install'"},
+		{`{"version":"4.0.0","mode":"upgrade"}`, "mode='upgrade'"},
+	} {
+		w := installationRequest(h, http.MethodPost, "node-install-script", tc.body, "", domain.RoleAdmin)
+		if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), tc.want) {
+			t.Fatalf("request %s answered %d without %s", tc.body, w.Code, tc.want)
+		}
+	}
+
+	// AND A MODE THE INSTALLER DOES NOT HAVE IS THE CALLER'S MISTAKE, refused before
+	// anything is fetched.
+	for _, body := range []string{`{"version":"4.0.0","mode":"replace"}`, `{"version":"4.0.0","mode":"force"}`} {
+		w := installationRequest(h, http.MethodPost, "node-install-script", body, "", domain.RoleAdmin)
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("request %s answered %d", body, w.Code)
+		}
+	}
+}
+
+// THE ONE-TIME COMMAND CARRIES IT TOO, because the script is rendered when the
+// ticket is redeemed rather than when it is minted — a mode that stopped at the
+// ticket would produce a command that installs where the operator asked to upgrade.
+func TestNodeBootstrapCommandCarriesTheInstallationModeToRedemption(t *testing.T) {
+	f := newBootstrapFixture(t, false)
+	body := `{"version":"4.0.0","mode":"upgrade"}`
+	recorder := f.request(http.MethodPost, "/api/admin/servers/41/node-install-command", body, "")
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("minting an upgrade command answered %d: %s", recorder.Code, recorder.Body.String())
+	}
+	var reply struct {
+		Command string `json:"command"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &reply); err != nil {
+		t.Fatal(err)
+	}
+	token := commandToken.FindStringSubmatch(reply.Command)
+	if len(token) != 2 {
+		t.Fatalf("the command carries no ticket: %s", reply.Command)
+	}
+	download := f.request(http.MethodGet, "/node-bootstrap/"+token[1], "", "")
+	if download.Code != http.StatusOK || !strings.Contains(download.Body.String(), "mode='upgrade'") {
+		t.Fatalf("the redeemed command answered %d without the mode", download.Code)
+	}
+}

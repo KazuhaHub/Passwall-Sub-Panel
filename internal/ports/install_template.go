@@ -32,7 +32,23 @@ type InstallTemplateRequest struct {
 	AgentID    string
 	Credential string
 	Version    string
+	// Mode is what the installer is being asked to do where an installation already
+	// exists. Empty means ModeInstall.
+	Mode string
 }
+
+// The installation modes this panel can ask a release's installer for. They are the
+// control plane's decision rather than something the script may infer: a version
+// that differs from the installed one is either an upgrade or a mistake, and only
+// this side knows which.
+const (
+	// ModeInstall installs where there is nothing and refuses where the release or
+	// the identity differs.
+	ModeInstall = "install"
+	// ModeUpgrade replaces the RELEASE of the installation that is there and keeps
+	// its identity: the credential and the endpoint must still match byte for byte.
+	ModeUpgrade = "upgrade"
+)
 
 // THE FAILURES ARE TWO KINDS, and a caller has to tell them apart: one is the
 // request it sent, the other is the publication it could not obtain or trust. The
@@ -47,6 +63,12 @@ var (
 	// ErrInstallTemplateSource means the published template could not be obtained,
 	// or was obtained and could not be trusted.
 	ErrInstallTemplateSource = errors.New("install template: the published template could not be obtained")
+	// ErrInstallTemplateModeUnsupported means the selected release's installer is
+	// older than the request: it has no way to be told what to do, so it would
+	// install where an upgrade was asked for and refuse at the node with a message
+	// about identity. A release to pick instead is the fix, which is why this is a
+	// source failure and not a bad request.
+	ErrInstallTemplateModeUnsupported = fmt.Errorf("%w: the release's installer predates in-place upgrades", ErrInstallTemplateSource)
 	// ErrInstallTemplateMissing means the selected release does not publish a
 	// template AT ALL.
 	//

@@ -69,6 +69,9 @@ var (
 	ErrUntrusted = fmt.Errorf("%w: the release manifest is not signed by this project", ports.ErrInstallTemplateSource)
 	// ErrTemplateMismatch means the template is not the file the manifest names.
 	ErrTemplateMismatch = fmt.Errorf("%w: the published template does not match its manifest", ports.ErrInstallTemplateSource)
+	// ErrModeUnsupported means the selected release's installer predates in-place
+	// upgrades, so it cannot be told what to do.
+	ErrModeUnsupported = ports.ErrInstallTemplateModeUnsupported
 	// ErrTemplateMissing means the release does not publish a template at all.
 	ErrTemplateMissing = ports.ErrInstallTemplateMissing
 	// ErrUnknownPlaceholder means the template carries a marker this build cannot
@@ -181,6 +184,16 @@ func prepare(options Options) (string, error) {
 	if strings.TrimSpace(options.AgentID) == "" {
 		return "", fmt.Errorf("%w: an agent identity is required", ErrNotRenderable)
 	}
+	// THE MODE IS THE CONTROL PLANE'S DECISION, not something the script may infer: a
+	// version that differs from the installed one is either an upgrade or a mistake,
+	// and only this side knows which. An unknown value is refused here rather than
+	// passed through, because the alternative is a script that reads it as a plain
+	// install and then fails at the node for a reason that names nothing.
+	switch options.Mode {
+	case "", ports.ModeInstall, ports.ModeUpgrade:
+	default:
+		return "", fmt.Errorf("%w: %q is not an installation mode", ErrNotRenderable, options.Mode)
+	}
 	// THE CREDENTIAL ENVELOPE IS THE SHARED CONTRACT'S, not a number written here:
 	// the daemon accepts the same range, and a second copy would eventually admit a
 	// credential the other end refuses.
@@ -200,7 +213,7 @@ func prepare(options Options) (string, error) {
 // project's renderer fills them. A template that gains one this build does not
 // know is REFUSED rather than rendered: the script would carry `@@NEW@@` and fail
 // on the host, after the operator had already run it.
-var placeholders = []string{"@@VERSION@@", "@@TAG@@", "@@AGENT_ID@@", "@@ENDPOINT@@", "@@CREDENTIAL@@", "@@ENVIRONMENT@@"}
+var placeholders = []string{"@@VERSION@@", "@@TAG@@", "@@MODE@@", "@@AGENT_ID@@", "@@ENDPOINT@@", "@@CREDENTIAL@@", "@@ENVIRONMENT@@"}
 
 var markerPattern = regexp.MustCompile(`@@[A-Z0-9_]+@@`)
 
@@ -214,11 +227,25 @@ func substitute(template string, options Options, tag string) (string, error) {
 			return "", fmt.Errorf("%w: %s", ErrUnknownPlaceholder, marker)
 		}
 	}
+	mode := options.Mode
+	if mode == "" {
+		mode = ports.ModeInstall
+	}
+	// A RELEASE WHOSE INSTALLER PREDATES MODES CANNOT BE ASKED TO UPGRADE. The
+	// substitution would be a no-op, so the operator would get a plain install that
+	// refuses at the node with a message about identity — and would have no way to
+	// tell that the release, rather than their request, is what is too old. This
+	// panel renders templates fetched from a published release, so unlike the Node
+	// project's own renderer this template really can be older than the caller.
+	if mode != ports.ModeInstall && !strings.Contains(template, "@@MODE@@") {
+		return "", ErrModeUnsupported
+	}
 	environment := "PSP_NODE_AGENT_ID=" + quote(options.AgentID) + "\n" +
 		"PSP_NODE_ENDPOINT=" + quote(options.Endpoint) + "\n"
 	replacer := strings.NewReplacer(
 		"@@VERSION@@", shellquote.Quote(options.Version),
 		"@@TAG@@", shellquote.Quote(tag),
+		"@@MODE@@", shellquote.Quote(mode),
 		"@@AGENT_ID@@", shellquote.Quote(options.AgentID),
 		"@@ENDPOINT@@", shellquote.Quote(options.Endpoint),
 		"@@CREDENTIAL@@", shellquote.Quote(options.Credential),

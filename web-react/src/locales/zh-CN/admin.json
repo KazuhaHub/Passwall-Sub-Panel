@@ -2402,7 +2402,10 @@
         "running": "代理内核已确认运行",
         "error": "Agent 或内核报告错误，请检查节点日志"
       },
-      "release_no_target_for_node": "该渠道下没有适用于此节点的发布版本。"
+      "release_no_target_for_node": "该渠道下没有适用于此节点的发布版本。",
+      "upgrade_in_place": "原地替换版本（升级）",
+      "upgrade_in_place_hint": "保留节点身份与状态，只替换已安装的发行版本。节点已在别的版本上时必须启用。",
+      "upgrade_in_place_needed": "该节点上报的版本是 {{version}}。不启用「原地替换版本」的话，安装器会在主机上拒绝。"
     },
     "table": {
       "name": "服务器名称",
