@@ -120,6 +120,19 @@ jobs:
           go-version-file: go.mod
           cache: false
 
+      # THE SAME GATE EVERY OTHER JOB HERE HAS. Setting up Go means verifying the
+      # compiler the build will actually use, immediately and unconditionally —
+      # TestPSPBuildBaselinesStayAligned enforces that pairing for every job in this
+      # file, and it is what makes the toolchain in go.mod a fact rather than a
+      # request. This job sets up Go to run the allocator, so it owes the same check.
+      - name: Verify exact preferred compiler
+        run: |
+          set -eu
+          build_toolchain=$(awk '$1 == "toolchain" { print $2 }' go.mod)
+          test -n "$build_toolchain"
+          test "$(go env GOVERSION)" = "$build_toolchain"
+          test "$(go tool compile -V | awk '{ print $3 }')" = "$build_toolchain"
+
       - name: Refuse a commit the test suite has not passed
         env:
           GH_TOKEN: ${{ github.token }}
