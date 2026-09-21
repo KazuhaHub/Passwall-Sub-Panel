@@ -59,6 +59,16 @@ const (
 var (
 	// ErrUnavailable means the release or one of its assets could not be read.
 	ErrUnavailable = errors.New("release asset: the release could not be read")
+	// ErrAssetMissing means the release does not carry the asset at all — a 404.
+	//
+	// IT IS SEPARATE FROM ErrUnavailable BECAUSE THE TWO ARE NOT THE SAME PROBLEM.
+	// An unreachable origin is a moment, and a consumer may reasonably carry on
+	// with what it read before. A release that does not publish the asset is a
+	// statement about that release, it will say the same thing on every attempt,
+	// and reporting it as a transient read failure is how a packaging mistake
+	// stays hidden behind a retry. Wraps ErrUnavailable because it is still a read
+	// that produced nothing.
+	ErrAssetMissing = fmt.Errorf("%w: the release does not publish this asset", ErrUnavailable)
 	// ErrUntrusted means the manifest is not signed by this project.
 	ErrUntrusted = errors.New("release asset: the release manifest is not signed by this project")
 	// ErrAssetMismatch means the asset is not the file the manifest names.
@@ -156,6 +166,9 @@ func (s *Source) fetch(ctx context.Context, tag, asset string) ([]byte, error) {
 		return nil, fmt.Errorf("%w: %s", ErrUnavailable, asset)
 	}
 	defer response.Body.Close()
+	if response.StatusCode == http.StatusNotFound {
+		return nil, fmt.Errorf("%w: %s", ErrAssetMissing, asset)
+	}
 	if response.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("%w: %s answered HTTP %d", ErrUnavailable, asset, response.StatusCode)
 	}

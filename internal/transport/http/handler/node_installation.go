@@ -27,6 +27,11 @@ const validationVersionPlaceholder = "1.0.0"
 // purpose: the operator cannot act on the difference between a signature that did
 // not verify and a template that did not download, and a message that named the
 // wrong one of the two would send them looking in the wrong place.
+// installTemplateNotPublished says the selected release carries no script. It is a
+// statement about that release, so the useful next step is a different release
+// rather than another attempt at this one.
+const installTemplateNotPublished = "the selected Node release does not publish an installation script; choose another release"
+
 const installTemplateUnverified = "the selected Node release's installation script could not be obtained or verified; choose another release or try again"
 
 // installTemplateRefused writes the refusal a failed render deserves and reports
@@ -44,6 +49,13 @@ func installTemplateRefused(c *gin.Context, err error, requestMessage string) bo
 	}
 	if errors.Is(err, ports.ErrInstallTemplateRequest) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": requestMessage})
+		return true
+	}
+	// CHECKED BEFORE THE GENERAL SOURCE FAILURE, which it also satisfies. A release
+	// that does not publish the script is not something to try again: the operator
+	// needs to pick another release, and telling them to retry sends them nowhere.
+	if errors.Is(err, ports.ErrInstallTemplateMissing) {
+		c.JSON(http.StatusBadGateway, gin.H{"error": installTemplateNotPublished})
 		return true
 	}
 	c.JSON(http.StatusBadGateway, gin.H{"error": installTemplateUnverified})

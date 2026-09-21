@@ -3,6 +3,7 @@ package ports
 import (
 	"context"
 	"errors"
+	"fmt"
 )
 
 // NodeInstallTemplate renders the installation script for a registered node
@@ -46,4 +47,12 @@ var (
 	// ErrInstallTemplateSource means the published template could not be obtained,
 	// or was obtained and could not be trusted.
 	ErrInstallTemplateSource = errors.New("install template: the published template could not be obtained")
+	// ErrInstallTemplateMissing means the selected release does not publish a
+	// template AT ALL.
+	//
+	// IT IS A KIND OF ITS OWN because the answer differs: an unreachable origin is
+	// worth retrying and a signature failure might be a transient corruption, while
+	// a release that never carried the file will answer the same way forever. An
+	// operator told to "try again" on this one would retry until they gave up.
+	ErrInstallTemplateMissing = fmt.Errorf("%w: the release does not publish an installation script", ErrInstallTemplateSource)
 )

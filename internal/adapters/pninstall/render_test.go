@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -14,6 +15,7 @@ import (
 	"testing"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/releaseasset"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 )
 
 // THE TEMPLATE IS SIGNED, AND THE SIGNATURE IS THE TRUST.
@@ -221,4 +223,29 @@ func resign(t *testing.T, f *fixture, template string) *fixture {
 	f.served[templateName] = []byte(template)
 	f.key = public
 	return f
+}
+
+// A RELEASE THAT DOES NOT PUBLISH THE TEMPLATE IS NOT AN UNREACHABLE ORIGIN.
+//
+// The two are the same error value to a reader that only asks whether the read
+// worked, and they need different answers: an unreachable origin is worth another
+// attempt, while a release that never carried the file will answer the same way
+// forever. The distinction is made where the read is classified, so a caller can
+// tell an operator to pick another release rather than to try again.
+func TestAMissingTemplateIsReportedAsAPublisherDecision(t *testing.T) {
+	f := newFixture(t, templateFixture)
+	delete(f.served, TemplateAsset)
+
+	_, err := f.renderer(t).Render(context.Background(), validOptions())
+	if !errors.Is(err, ErrTemplateMissing) {
+		t.Fatalf("a release without the template reported %v", err)
+	}
+	// AND IT IS STILL A SOURCE FAILURE, so a caller that only knows the port's two
+	// kinds still answers "the publication is what is wrong" rather than 400.
+	if !errors.Is(err, ports.ErrInstallTemplateSource) {
+		t.Fatalf("it stopped being a source failure: %v", err)
+	}
+	if errors.Is(err, ErrNotRenderable) {
+		t.Fatalf("a publisher's omission was reported as the caller's mistake: %v", err)
+	}
 }

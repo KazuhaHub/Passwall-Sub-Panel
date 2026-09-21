@@ -332,6 +332,10 @@ func TestInstallationEndpointsSeparateABadRequestFromAnUnreadableRelease(t *test
 		wantStatus int
 	}{
 		{"an unreadable release", ports.ErrInstallTemplateSource, "node-install-script", `{"version":"4.0.0"}`, http.StatusBadGateway},
+		// A RELEASE THAT NEVER CARRIED THE SCRIPT IS NOT SOMETHING TO RETRY, and the
+		// message has to say so: "try again or choose another release" sends an
+		// operator to retry until they give up.
+		{"a release that does not publish a script", ports.ErrInstallTemplateMissing, "node-install-script", `{"version":"4.0.0"}`, http.StatusBadGateway},
 		{"a release that failed verification", fmt.Errorf("%w: bad signature", ports.ErrInstallTemplateSource), "node-install-script", `{"version":"4.0.0"}`, http.StatusBadGateway},
 		{"the caller's own request", ports.ErrInstallTemplateRequest, "node-install-script", `{"version":"4.0.0"}`, http.StatusBadRequest},
 		{"an unreadable release for the Docker bundle", ports.ErrInstallTemplateSource, "node-installation-files", `{"method":"docker","version":"latest"}`, http.StatusBadGateway},
@@ -344,6 +348,9 @@ func TestInstallationEndpointsSeparateABadRequestFromAnUnreadableRelease(t *test
 			}
 			if strings.Contains(w.Body.String(), r.credential) {
 				t.Fatal("a refusal carried the node credential")
+			}
+			if errors.Is(tc.err, ports.ErrInstallTemplateMissing) && !strings.Contains(w.Body.String(), "choose another release") {
+				t.Fatalf("a release without a script was reported as something to retry: %s", w.Body.String())
 			}
 		})
 	}

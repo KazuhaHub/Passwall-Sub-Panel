@@ -69,6 +69,8 @@ var (
 	ErrUntrusted = fmt.Errorf("%w: the release manifest is not signed by this project", ports.ErrInstallTemplateSource)
 	// ErrTemplateMismatch means the template is not the file the manifest names.
 	ErrTemplateMismatch = fmt.Errorf("%w: the published template does not match its manifest", ports.ErrInstallTemplateSource)
+	// ErrTemplateMissing means the release does not publish a template at all.
+	ErrTemplateMissing = ports.ErrInstallTemplateMissing
 	// ErrUnknownPlaceholder means the template carries a marker this build cannot
 	// fill, which would otherwise ship a script that fails on the host.
 	ErrUnknownPlaceholder = fmt.Errorf("%w: the template carries a placeholder this build cannot fill", ports.ErrInstallTemplateSource)
@@ -145,6 +147,11 @@ func assetError(err error) error {
 		return ErrUntrusted
 	case errors.Is(err, releaseasset.ErrAssetMismatch):
 		return ErrTemplateMismatch
+	case errors.Is(err, releaseasset.ErrAssetMissing):
+		// CHECKED BEFORE ErrUnavailable, which it wraps: a release that never
+		// carried the file and an origin that could not be reached are the same
+		// error value to a reader that only asks whether the read worked.
+		return fmt.Errorf("%w: %s", ErrTemplateMissing, err)
 	case errors.Is(err, releaseasset.ErrUnavailable):
 		return fmt.Errorf("%w: %s", ErrUnavailable, err)
 	default:

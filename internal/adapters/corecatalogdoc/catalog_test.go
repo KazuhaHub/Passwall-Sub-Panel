@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -16,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/releaseasset"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 )
@@ -105,6 +107,9 @@ type fixture struct {
 	mu     sync.Mutex
 	served map[string][]byte
 	fail   bool
+	// absent serves a 404 for the document, which is what a release that does not
+	// publish the asset answers.
+	absent bool
 	calls  int
 	now    time.Time
 }
@@ -127,6 +132,10 @@ func newFixture(t *testing.T, document string) *fixture {
 		f.calls++
 		if f.fail {
 			http.Error(w, "origin down", http.StatusBadGateway)
+			return
+		}
+		if f.absent {
+			http.NotFound(w, r)
 			return
 		}
 		body, ok := f.served[r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1:]]
@@ -220,34 +229,177 @@ func TestItRefusesAReleaseThisProjectDidNotSign(t *testing.T) {
 	}
 }
 
-// A DOCUMENT THIS BUILD CANNOT BE SURE IT UNDERSTANDS IS REFUSED.
+// ADDITIVE FIELDS ARE ALLOWED. A field this build does not know, inside a schema it
+// does, cannot change what the fields it reads mean — that is what a schema number
+// is for. Refusing it instead meant one publisher-side addition turned every
+// deployed panel dark until each was upgraded, and made the schema number
+// meaningless.
 //
-// A schema bump changes what the fields mean, so decoding a newer document into
-// these fields reads the same words with a different meaning; and a field added
-// for another repository is a condition this panel was supposed to honor. Both
-// failures have to have a name in them rather than being absorbed.
-func TestItRefusesADocumentItCannotUnderstand(t *testing.T) {
+// The case is the same document with fields added at both levels, and it must read
+// exactly as before.
+func TestItIgnoresFieldsAddedWithinAKnownSchema(t *testing.T) {
+	extended := strings.Replace(documentFixture, `"releases": [`, `"core_policy": {"pinned": true}, "releases": [`, 1)
+	extended = strings.Replace(extended, `"tier": "recommended"`, `"tier": "recommended", "quarantined": false, "review": {"by": "someone"}`, 1)
+	if extended == documentFixture {
+		t.Fatal("the fixture carries no field to add; this case would pass vacuously")
+	}
+	document, err := newFixture(t, extended).catalog(t, currentReleases()).Document(context.Background())
+	if err != nil {
+		t.Fatalf("a document with additive fields was refused: %v", err)
+	}
+	if len(document.Releases) != 3 {
+		t.Fatalf("document = %+v", document)
+	}
+	recommended, err := document.Recommended("xray")
+	if err != nil || recommended.Version != "26.6.27" {
+		t.Fatalf("Recommended = %q, %v", recommended.Version, err)
+	}
+}
+
+// A DOCUMENT THIS BUILD CANNOT READ IS REFUSED, and these are the two forms that
+// are about the document itself rather than about its fields: a schema whose
+// meaning this build does not know, and bytes that are not a document.
+func TestItRefusesADocumentItCannotRead(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
 		document string
 	}{
 		{"a newer schema", strings.Replace(documentFixture, `"schema_version": 1`, `"schema_version": 2`, 1)},
-		{"a field this build does not know", strings.Replace(documentFixture, `"releases": [`, `"core_policy": {"pinned": true}, "releases": [`, 1)},
-		{"a field inside a release", strings.Replace(documentFixture, `"tier": "recommended"`, `"tier": "recommended", "quarantined": true`, 1)},
-		{"no releases", `{"schema_version": 1, "updated_at": "2026-09-11T00:00:00Z", "releases": []}`},
-		{"no date", `{"schema_version": 1, "updated_at": "0001-01-01T00:00:00Z", "releases": [{"engine": "xray", "version": "26.6.27"}]}`},
 		{"truncated", documentFixture[:len(documentFixture)/2]},
 		{"not JSON", "not a document at all"},
+		{"no releases", `{"schema_version": 1, "updated_at": "2026-09-11T00:00:00Z", "releases": []}`},
+		{"no date", `{"schema_version": 1, "updated_at": "0001-01-01T00:00:00Z", "releases": [{"engine": "xray", "version": "26.6.27"}]}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newFixture(t, tc.document)
 			// The manifest is re-signed over the tampered body, so what is being
-			// tested is the decode and not the digest.
-			if _, err := f.catalog(t, currentReleases()).Document(context.Background()); !errors.Is(err, ErrUnavailable) {
+			// tested is the parse and not the digest.
+			_, err := f.catalog(t, currentReleases()).Document(context.Background())
+			if !errors.Is(err, ErrUnavailable) || !errors.Is(err, ErrDocumentUnusable) {
 				t.Fatalf("a document this build cannot read was accepted: %v", err)
+			}
+			// AND IT IS NOT CLASSIFIED AS A MOMENT. This is the difference that
+			// decides whether the panel may keep serving what it read before.
+			if errors.Is(err, ErrRefreshable) {
+				t.Fatalf("an unusable document was classified as a refreshable read: %v", err)
 			}
 		})
 	}
+}
+
+// reviewedDocument builds a publishable document from Go values, so a case mutates
+// a FIELD rather than text: editing the JSON would collide with the fields already
+// in the object, and a duplicate key is resolved by the decoder taking the last
+// one — which turns a case that looks like it changes something into one that
+// changes nothing.
+func reviewedDocument(t *testing.T, mutate func(*ports.CoreCatalogDocument)) string {
+	t.Helper()
+	base := func(engine, version, tier string, restricted bool) ports.CoreRelease {
+		return ports.CoreRelease{
+			Engine: engine, Version: version, Tier: tier, Selectable: true,
+			RequiresConfirmation: restricted,
+			PublishedAt:          time.Date(2026, 6, 27, 0, 0, 0, 0, time.UTC),
+		}
+	}
+	document := ports.CoreCatalogDocument{
+		SchemaVersion: 1,
+		UpdatedAt:     time.Date(2026, 9, 11, 0, 0, 0, 0, time.UTC),
+		Releases: []ports.CoreRelease{
+			base("xray", "26.6.27", domain.CoreTierRecommended, false),
+			base("xray", "26.9.9", domain.CoreTierRestricted, true),
+			base("sing-box", "1.14.0", domain.CoreTierRecommended, false),
+		},
+	}
+	if mutate != nil {
+		mutate(&document)
+	}
+	body, err := json.Marshal(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(body)
+}
+
+// THE FIELDS THE PANEL'S OWN DECISIONS READ ARE CHECKED, because its gates test
+// membership in closed sets and compare flags against tiers. A value outside those
+// sets does not make the panel offer something wrong — it makes every gate fall
+// through, and a fall-through is silent unless the reason is named.
+func TestItRefusesValuesItsOwnDecisionsCannotUse(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		mutate func(*ports.CoreCatalogDocument)
+	}{
+		{"an engine the panel cannot offer", func(d *ports.CoreCatalogDocument) {
+			d.Releases[0].Engine = "v2ray"
+		}},
+		{"a version that is not canonical", func(d *ports.CoreCatalogDocument) {
+			d.Releases[0].Version = "v26.6.27"
+		}},
+		{"a tier the panel does not know", func(d *ports.CoreCatalogDocument) {
+			d.Releases[0].Tier = "probably_fine"
+		}},
+		{"confirmation on a release that is not restricted", func(d *ports.CoreCatalogDocument) {
+			d.Releases[0].RequiresConfirmation = true
+		}},
+		{"a restriction that does not ask for confirmation", func(d *ports.CoreCatalogDocument) {
+			d.Releases[1].RequiresConfirmation = false
+		}},
+		{"one release listed twice", func(d *ports.CoreCatalogDocument) {
+			d.Releases = append(d.Releases, d.Releases[0])
+		}},
+		{"no review date", func(d *ports.CoreCatalogDocument) {
+			d.UpdatedAt = time.Time{}
+		}},
+		{"no releases", func(d *ports.CoreCatalogDocument) {
+			d.Releases = nil
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body := reviewedDocument(t, tc.mutate)
+			err := errorsOf(t, body)
+			if !errors.Is(err, ErrDocumentUnusable) {
+				t.Fatalf("a value the panel's decisions cannot use was accepted: %v", err)
+			}
+			if errors.Is(err, ErrRefreshable) {
+				t.Fatalf("it was classified as a moment rather than a statement: %v", err)
+			}
+		})
+	}
+}
+
+// TWO RECOMMENDED RELEASES ON ONE ENGINE is the document's answer to give, and it
+// can only give one: the panel's default core comes from here, and taking the first
+// of two would make it depend on ordering.
+func TestItRefusesTwoRecommendedReleasesForOneEngine(t *testing.T) {
+	body := reviewedDocument(t, func(d *ports.CoreCatalogDocument) {
+		d.Releases[1].Tier = domain.CoreTierRecommended
+		d.Releases[1].RequiresConfirmation = false
+	})
+	if err := errorsOf(t, body); !errors.Is(err, ErrDocumentUnusable) {
+		t.Fatalf("two recommended releases were accepted: %v", err)
+	}
+}
+
+// A SECOND RECOMMENDED RELEASE THAT IS NOT SELECTABLE IS NOT ONE. The panel only
+// ever lists and resolves selectable releases, so a withheld entry cannot make the
+// default ambiguous — and refusing the document for it would reject something the
+// publisher's own review allows.
+func TestASecondRecommendedThatIsNotSelectableIsAccepted(t *testing.T) {
+	body := reviewedDocument(t, func(d *ports.CoreCatalogDocument) {
+		d.Releases[1].Tier = domain.CoreTierRecommended
+		d.Releases[1].RequiresConfirmation = false
+		d.Releases[1].Selectable = false
+	})
+	if err := errorsOf(t, body); err != nil {
+		t.Fatalf("a document the publisher's review allows was refused: %v", err)
+	}
+}
+
+// errorsOf reads one document through the adapter and returns whatever it said.
+func errorsOf(t *testing.T, body string) error {
+	t.Helper()
+	_, err := newFixture(t, body).catalog(t, currentReleases()).Document(context.Background())
+	return err
 }
 
 // AN ORIGIN THAT STOPS ANSWERING DOES NOT EMPTY THE SELECTOR.
@@ -286,6 +438,77 @@ func TestAFailedRefreshKeepsServingTheLastReviewedDocument(t *testing.T) {
 	}
 	if f.calls != before {
 		t.Fatalf("a failing origin was contacted %d more times", f.calls-before)
+	}
+}
+
+// A STATEMENT IS NEVER ANSWERED FROM THE CACHE.
+//
+// The case above is a moment: an origin that stops answering, where the document
+// read a minute ago is still the review this panel was enforcing. This is the
+// other kind — the document arrived and cannot be used — and serving the previous
+// one would leave the panel enforcing a review its publisher has moved past, while
+// looking exactly like a working panel. It is refused, with the reason, and the
+// previous document is retired rather than kept for a later network failure to
+// resurrect.
+func TestAPermanentFailureIsNeverAnsweredFromTheCache(t *testing.T) {
+	f := newFixture(t, documentFixture)
+	catalog := f.catalog(t, currentReleases())
+	if _, err := catalog.Document(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	// The publisher moves to a schema this build does not read.
+	f.mu.Lock()
+	f.publish(strings.Replace(documentFixture, `"schema_version": 1`, `"schema_version": 2`, 1))
+	f.mu.Unlock()
+	f.now = f.now.Add(2 * cacheTTL)
+
+	_, err := catalog.Document(context.Background())
+	if !errors.Is(err, ErrDocumentUnusable) {
+		t.Fatalf("an unusable document was answered with: %v", err)
+	}
+	if errors.Is(err, ErrRefreshable) {
+		t.Fatalf("it was classified as a moment: %v", err)
+	}
+
+	// AND THE PREVIOUS DOCUMENT IS GONE. A later moment — the origin going down —
+	// must not resurrect a review the publisher has abandoned.
+	f.mu.Lock()
+	f.fail, f.served = true, map[string][]byte{}
+	f.mu.Unlock()
+	f.now = f.now.Add(2 * cacheTTL)
+	if document, err := catalog.Document(context.Background()); err == nil {
+		t.Fatalf("a retired document came back after an unrelated failure: %d releases", len(document.Releases))
+	}
+}
+
+// A RELEASE THAT DOES NOT PUBLISH THE ASSET IS NOT AN UNREACHABLE ORIGIN.
+//
+// It answers the same way on every attempt, so treating it as a moment would hide
+// a packaging mistake behind a retry — and, worse, would keep serving whatever was
+// read before instead of saying that the release a panel is pointed at does not
+// carry a catalog at all.
+func TestAMissingAssetIsReportedAsSuchAndDoesNotFallBack(t *testing.T) {
+	f := newFixture(t, documentFixture)
+	catalog := f.catalog(t, currentReleases())
+	if _, err := catalog.Document(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	f.mu.Lock()
+	f.absent = true
+	f.mu.Unlock()
+	f.now = f.now.Add(2 * cacheTTL)
+
+	_, err := catalog.Document(context.Background())
+	if !errors.Is(err, ErrDocumentUnusable) {
+		t.Fatalf("a release without the asset was answered with: %v", err)
+	}
+	if errors.Is(err, ErrRefreshable) {
+		t.Fatalf("a missing asset was classified as a network blip: %v", err)
+	}
+	if !strings.Contains(err.Error(), "does not publish this asset") {
+		t.Fatalf("the reason does not name the missing asset: %v", err)
 	}
 }
 

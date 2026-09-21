@@ -146,6 +146,10 @@ func bootstrapInstallRefused(c *gin.Context, err error, requestMessage string) {
 		bootstrapError(c, http.StatusBadRequest, requestMessage)
 		return
 	}
+	if errors.Is(err, ports.ErrInstallTemplateMissing) {
+		bootstrapError(c, http.StatusBadGateway, installTemplateNotPublished)
+		return
+	}
 	bootstrapError(c, http.StatusBadGateway, installTemplateUnverified)
 }
 
@@ -291,6 +295,10 @@ func (h *NodeBootstrapHandler) Download(c *gin.Context) {
 		// the 409 below would tell an operator their node was re-keyed when what
 		// happened is that a release asset could not be read — sending them to
 		// regenerate instructions that were never the problem.
+		if errors.Is(err, ports.ErrInstallTemplateMissing) {
+			bootstrapError(c, http.StatusBadGateway, installTemplateNotPublished)
+			return
+		}
 		if errors.Is(err, ports.ErrInstallTemplateSource) {
 			bootstrapError(c, http.StatusBadGateway, installTemplateUnverified)
 			return

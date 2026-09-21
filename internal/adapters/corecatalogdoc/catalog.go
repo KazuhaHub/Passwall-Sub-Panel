@@ -61,6 +61,52 @@ const (
 // panel is running and the source it reads is not.
 var ErrUnavailable = fmt.Errorf("%w: the reviewed core catalog is unavailable", domain.ErrUnavailable)
 
+// THE TWO KINDS OF FAILURE ARE NOT THE SAME PROBLEM, and they must not share an
+// answer.
+//
+// ErrRefreshable is a moment: the origin was unreachable, slow, or answered with
+// a server error. What was read before is still the review this panel was
+// enforcing a minute ago, so serving it is the honest answer and the alternative
+// is turning a network blip into an empty core selector.
+//
+// ErrDocumentUnusable is a statement: the document this build received has a
+// schema it does not know, is not valid JSON, breaks a constraint its own
+// decisions read, or a release does not publish one at all. It will say the same
+// thing on every attempt, and answering IT from the cache would leave the panel
+// enforcing a review the publisher has moved past — visibly working, and wrong.
+// That is why these never fall back.
+var (
+	ErrRefreshable      = errors.New("core catalog: a refreshable read failure")
+	ErrDocumentUnusable = errors.New("core catalog: the published document cannot be used")
+)
+
+// readFailure carries which of the two a failed read was.
+//
+// IT IS A WRAPPER RATHER THAN A PREFIXED MESSAGE so the underlying error's text
+// reaches the operator unchanged — the reason is the point — while errors.Is
+// still answers the classification question.
+type readFailure struct {
+	err         error
+	refreshable bool
+}
+
+func (f readFailure) Error() string { return f.err.Error() }
+func (f readFailure) Unwrap() error { return f.err }
+
+func (f readFailure) Is(target error) bool {
+	switch target {
+	case ErrRefreshable:
+		return f.refreshable
+	case ErrDocumentUnusable:
+		return !f.refreshable
+	default:
+		return false
+	}
+}
+
+func refreshable(err error) error { return readFailure{err: err, refreshable: true} }
+func unusable(err error) error    { return readFailure{err: err} }
+
 // Options are the seams and the two inputs the reader needs.
 type Options struct {
 	// Releases locates the release to read the document from. It is the reviewed
@@ -154,14 +200,24 @@ func (c *Catalog) Document(ctx context.Context) (ports.CoreCatalogDocument, erro
 	document, err := c.load(ctx)
 
 	c.mu.Lock()
-	if err == nil {
+	switch {
+	case err == nil:
 		c.good, c.have = document, true
 		c.expires = c.now().Add(cacheTTL)
-	} else if c.have {
-		// The previous document is served, and the TTL is EXTENDED rather than
-		// left to expire: leaving it would make every subsequent call attempt the
-		// same failing read, turning one origin problem into a request-per-call.
-		c.expires = c.now().Add(cacheTTL)
+	case errors.Is(err, ErrRefreshable):
+		if c.have {
+			// The previous document is served, and the TTL is EXTENDED rather than
+			// left to expire: leaving it would make every subsequent call attempt
+			// the same failing read, turning one origin problem into a
+			// request-per-call.
+			c.expires = c.now().Add(cacheTTL)
+		}
+	default:
+		// A DOCUMENT THIS BUILD CANNOT USE RETIRES THE PREVIOUS ONE. Keeping it
+		// would mean a later network failure served a review the publisher has
+		// moved past, so the cache is dropped and every call fails with the reason
+		// until a usable document arrives.
+		c.good, c.have, c.expires = ports.CoreCatalogDocument{}, false, time.Time{}
 	}
 	c.flight = nil
 	document, err = c.resolve(document, err)
@@ -174,15 +230,22 @@ func (c *Catalog) Document(ctx context.Context) (ports.CoreCatalogDocument, erro
 
 // resolve decides what a call reports once the lock is held again: the fresh
 // document, the previous one, or nothing at all.
+//
+// THE CLASSIFICATION IS THE WHOLE DECISION. Only a refreshable failure may be
+// answered from the previous document; everything else is reported with its
+// reason, because the alternative is a panel that enforces a review nobody
+// publishes any more while looking exactly like a working one.
 func (c *Catalog) resolve(fresh ports.CoreCatalogDocument, err error) (ports.CoreCatalogDocument, error) {
 	if err == nil {
 		return fresh, nil
 	}
-	if c.have {
+	if errors.Is(err, ErrRefreshable) && c.have {
 		log.Warn("core catalog not refreshed; serving the last reviewed document", "err", err)
 		return c.good, nil
 	}
-	return ports.CoreCatalogDocument{}, fmt.Errorf("%w: %v", ErrUnavailable, err)
+	// BOTH ARE WRAPPED. `%v` for the reason would print it and drop the chain,
+	// which is exactly the classification the caller asked for.
+	return ports.CoreCatalogDocument{}, fmt.Errorf("%w: %w", ErrUnavailable, err)
 }
 
 // load reads, verifies and decodes the document the newest reviewed release
@@ -190,7 +253,9 @@ func (c *Catalog) resolve(fresh ports.CoreCatalogDocument, err error) (ports.Cor
 func (c *Catalog) load(ctx context.Context) (ports.CoreCatalogDocument, error) {
 	list, err := c.releases.List(ctx)
 	if err != nil {
-		return ports.CoreCatalogDocument{}, fmt.Errorf("locate the published catalog: %w", err)
+		// The release list is a read from the same origin, so it fails the same
+		// way one and is refreshable for the same reason.
+		return ports.CoreCatalogDocument{}, refreshable(fmt.Errorf("locate the published catalog: %w", err))
 	}
 	tag := ""
 	for _, release := range list.Releases {
@@ -205,41 +270,123 @@ func (c *Catalog) load(ctx context.Context) (ports.CoreCatalogDocument, error) {
 		break
 	}
 	if tag == "" {
-		return ports.CoreCatalogDocument{}, errors.New("no reviewed Node release publishes a core catalog")
+		// A FLEET WHERE NO RELEASE PUBLISHES ONE is a statement about the fleet,
+		// not a moment, and waiting will not change it.
+		return ports.CoreCatalogDocument{}, unusable(errors.New("no reviewed Node release publishes a core catalog"))
 	}
 	body, err := c.assets.Asset(ctx, tag, catalogAsset)
 	if err != nil {
-		return ports.CoreCatalogDocument{}, fmt.Errorf("read %s from %s: %w", catalogAsset, tag, err)
+		// A RELEASE THAT DOES NOT CARRY THE ASSET IS NOT A NETWORK PROBLEM. It will
+		// answer the same way on every attempt, and reporting it as an unreachable
+		// origin is how a packaging mistake stays hidden behind a retry.
+		if errors.Is(err, releaseasset.ErrAssetMissing) {
+			return ports.CoreCatalogDocument{}, unusable(fmt.Errorf("%s: %w", tag, err))
+		}
+		return ports.CoreCatalogDocument{}, refreshable(fmt.Errorf("read %s from %s: %w", catalogAsset, tag, err))
 	}
-	return decode(body)
+	return parse(body)
 }
 
-// decode reads the document, refusing anything this build cannot be sure it
-// understands.
+// parse reads the document and checks the fields this build's own decisions read.
 //
-// UNKNOWN FIELDS ARE REFUSED, which is stricter than it needs to be to read the
-// fields below and is the point: the publisher is another repository, and a field
-// added there is a change to a document this panel enforces on. Refusing means
-// the disagreement shows up as a failed read with a name in it, rather than as a
-// panel that quietly ignores a new condition it was supposed to honor.
-func decode(body []byte) (ports.CoreCatalogDocument, error) {
+// ADDITIVE FIELDS ARE ALLOWED, AND THAT IS A CHANGE OF POSITION. This used to
+// refuse any field it did not know, on the reasoning that a field added by the
+// publisher is a condition the panel was meant to honor. The reasoning was right
+// and the remedy was backwards: refusing meant one publisher-side addition turned
+// every deployed panel dark until each was upgraded, and it made the schema number
+// meaningless — a version exists precisely to say when the meaning changed rather
+// than when the document grew.
+//
+// SO THE LINE IS DRAWN BY SCHEMA AND BY SEMANTICS:
+//
+//   - A field this build does not know, within a schema it does, is ignored. It
+//     cannot change what the fields below mean, because that is what a schema bump
+//     is for.
+//   - A schema this build does not read is refused, whatever the fields say. The
+//     same words could mean something else.
+//   - The fields below are checked for the values and constraints THE PANEL'S OWN
+//     DECISIONS depend on. The publisher's deeper review — assets covering every
+//     target, handshake evidence agreeing with each REALITY conclusion, URLs inside
+//     the matching official release — stays where it runs, before the signature.
+func parse(body []byte) (ports.CoreCatalogDocument, error) {
 	var document ports.CoreCatalogDocument
 	decoder := json.NewDecoder(bytes.NewReader(body))
-	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&document); err != nil {
-		return ports.CoreCatalogDocument{}, fmt.Errorf("decode %s: %w", catalogAsset, err)
+		return ports.CoreCatalogDocument{}, unusable(fmt.Errorf("decode %s: %w", catalogAsset, err))
 	}
 	var trailing any
 	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		return ports.CoreCatalogDocument{}, fmt.Errorf("decode %s: trailing JSON value", catalogAsset)
+		return ports.CoreCatalogDocument{}, unusable(fmt.Errorf("decode %s: trailing JSON value", catalogAsset))
 	}
-	if document.SchemaVersion != supportedSchema {
-		return ports.CoreCatalogDocument{}, fmt.Errorf("core catalog schema %d, this build reads %d", document.SchemaVersion, supportedSchema)
-	}
-	if document.UpdatedAt.IsZero() || len(document.Releases) == 0 {
-		return ports.CoreCatalogDocument{}, errors.New("core catalog carries no dated review")
+	if err := validateDocument(document); err != nil {
+		return ports.CoreCatalogDocument{}, unusable(err)
 	}
 	return document, nil
+}
+
+// validateDocument applies the checks this panel's decisions rest on.
+func validateDocument(document ports.CoreCatalogDocument) error {
+	if document.SchemaVersion != supportedSchema {
+		return fmt.Errorf("core catalog is schema %d and this build reads %d; a schema number changes when the fields change meaning, so this document cannot be read as if it had not", document.SchemaVersion, supportedSchema)
+	}
+	if document.UpdatedAt.IsZero() {
+		return errors.New("core catalog carries no review date")
+	}
+	if len(document.Releases) == 0 {
+		return errors.New("core catalog carries no releases")
+	}
+	recommended := map[string]int{}
+	seen := make(map[string]bool, len(document.Releases))
+	for index, release := range document.Releases {
+		// ENGINE AND VERSION ARE IDENTITIES, and both are compared against values
+		// this panel produces: the engine against a closed set it offers, the
+		// version against what a node reports about itself. A release whose either
+		// is unreadable is one the panel cannot match to anything, and matching is
+		// the only thing it does with them.
+		if release.Engine != string(domain.NodeCoreXray) && release.Engine != string(domain.NodeCoreSingBox) {
+			return fmt.Errorf("core catalog release %d names engine %q, which this panel cannot offer", index, release.Engine)
+		}
+		normalized, err := domain.NormalizeCoreVersion(release.Version)
+		if err != nil || normalized != release.Version {
+			return fmt.Errorf("core catalog release %d has version %q, which is not canonical: %v", index, release.Version, err)
+		}
+		// THE TIER IS GATED ON, so an unknown one would fall through every
+		// comparison that decides what may be installed — and the panel's gates
+		// test membership in a set, so an unknown tier is refused rather than
+		// allowed. Naming it here is what turns that into a diagnosis.
+		switch release.Tier {
+		case domain.CoreTierRecommended, domain.CoreTierVerified, domain.CoreTierConfigVerified, domain.CoreTierRestricted:
+		default:
+			return fmt.Errorf("core catalog release %s names tier %q, which this panel does not know", release.Version, release.Tier)
+		}
+		// CONFIRMATION AND TIER HAVE TO AGREE. The panel stores the operator's
+		// acknowledgement beside the version and compares the two on every write, so
+		// a document where the flag and the tier disagree makes that comparison
+		// wrong in one direction or the other.
+		if (release.Tier == domain.CoreTierRestricted) != release.RequiresConfirmation {
+			return fmt.Errorf("core catalog release %s is tier %q with requires_confirmation=%t; only a restricted release requires confirmation, and every restricted release does",
+				release.Version, release.Tier, release.RequiresConfirmation)
+		}
+		key := release.Engine + "/" + release.Version
+		if seen[key] {
+			// Two entries for one identity are two reviews of one release, and a
+			// lookup would return whichever came first.
+			return fmt.Errorf("core catalog lists %s more than once", key)
+		}
+		seen[key] = true
+		if release.Selectable && release.Tier == domain.CoreTierRecommended {
+			recommended[release.Engine]++
+		}
+	}
+	for engine, count := range recommended {
+		if count > 1 {
+			// WHICH ONE IS RECOMMENDED IS THE DOCUMENT'S ANSWER TO GIVE, and it can
+			// only give one: the panel's default core comes from here, and picking
+			// the first of two would make it depend on ordering.
+			return fmt.Errorf("core catalog marks %d releases as recommended for %s; the panel takes its default from this and cannot choose between two", count, engine)
+		}
+	}
+	return nil
 }
 
 // Unavailable is a catalog that can never answer, for a build that has no way to
