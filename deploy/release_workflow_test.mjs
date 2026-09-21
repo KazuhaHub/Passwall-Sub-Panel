@@ -285,8 +285,9 @@ test('the tag job cuts the tag after the suite passes, only when the form asked 
   assert(cut.includes('contents: write'), 'cutting a tag is the one job that needs to write contents')
   // THE NUMBER IS NOT COMPUTED HERE. "An incremental fix takes the fourth segment"
   // and "a number, once bound to a revision, is never reused" are one rule with
-  // three consumers, and it lives in Passwall Node's releaseid. `go run` resolves
-  // the module at the version go.mod pins, so the rule is the tested one.
+  // three consumers, and it lives in internal/version. It used to be reached
+  // through the Node module; X07 moved it into this repository, which is why the
+  // command below is a path into this checkout rather than a module reference.
   assert(
     cut.includes('go run ./cmd/allocate-release-tag'),
     'the number must come from this repository\'s own allocator, not from arithmetic in YAML',
@@ -311,6 +312,33 @@ test('the tag job cuts the tag after the suite passes, only when the form asked 
     'the tag job must ask about the test workflow rather than about every run on the commit',
   )
   assert(!cut.includes('check-runs'), 'enumerating check runs refuses the commit for the release run itself existing')
+})
+
+// A TAG CARRIES AN IDENTITY, AND A FRESH RUNNER HAS NONE.
+//
+// `git tag -a` refuses with `fatal: empty ident name` when no committer is
+// configured, and this job is the only place in the release that creates a ref. It
+// was written, guarded for its shape, and then failed the FIRST time it actually
+// ran — the two releases before it were tagged before the job existed, so nothing
+// had exercised it. Shape guards cannot see a missing identity, which is why this
+// one asserts the identity rather than the sequence.
+//
+// The identity is a person's, and it is the one every existing tag carries: a
+// published tag cannot be rewritten, so a tool's name in it would be permanent.
+test('the tag job gives the tag an identity before creating it', () => {
+  const cut = job('tag')
+  // THE COMMAND, NOT THE PHRASE. Searching for `git tag -a` found the comment that
+  // explains why the identity is needed — which sits above the configuration it is
+  // meant to precede — so this assertion first reported that the fix was in the
+  // wrong place. Counting indentation instead was worse: the create is inside a
+  // retry loop and the configuration is not, so they do not share a depth. The flag
+  // is what belongs to the command and to nothing a comment would say.
+  const created = cut.indexOf('git tag -a --cleanup=verbatim')
+  const configured = cut.indexOf('git config user.name')
+  assert(created >= 0, 'the tag job no longer creates an annotated tag')
+  assert(configured >= 0, 'a fresh runner has no committer identity, and git tag -a refuses without one')
+  assert.match(cut, /git config user\.email/, 'the identity needs an email as well as a name')
+  assert(configured < created, 'the identity must be configured before the tag is created, not after')
 })
 
 test('the release reads the tag this run cut', () => {
