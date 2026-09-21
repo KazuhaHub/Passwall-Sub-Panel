@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -81,7 +82,8 @@ func installationFixture(t *testing.T) (*AdminServersHandler, *nativeProvisionin
 	agent := &domain.NodeAgent{ID: 42, PanelID: 41, AgentID: "agt_existing", Epoch: 7, CredentialSHA256: hex.EncodeToString(digest[:])}
 	r := &nativeProvisioningRepoStub{agent: agent, credential: raw}
 	h := NewAdminServersHandler(nativeProvisioningPanelRepo{}, &nativeProvisioningPool{}, nil, nil, nil, nil).
-		WithNativeAgentProvisioning(r).WithNodeAgents(installationAgents{agent: agent})
+		WithNativeAgentProvisioning(r).WithNodeAgents(installationAgents{agent: agent}).
+		WithNodeInstallTemplate(fixtureInstallTemplate(t))
 	// The constructor stamps startedAt from the wall clock, but these tests inject a
 	// fixed `now`. Comparing the two would make the liveness verdict depend on the
 	// real date, so pin it far enough back that "the panel has been listening" holds
@@ -161,14 +163,17 @@ func TestNodeInstallationLegacyBackfillDoesNotRotate(t *testing.T) {
 	}
 }
 
-// THE SCRIPT DOWNLOAD IS THE ONE THING HERE THAT CANNOT BE EXERCISED, and that is
-// recorded rather than hidden. The endpoint renders the version into the Node
-// repository's installer template, whose own rule still reads the legacy release
-// shape and uses the version as the download path — so a release this panel
-// accepts is refused by the template, and PSP cannot change that from here
-// because the package is a pinned dependency (X07). What this case still owns is
-// the property it was written for: the endpoint is private, and a refusal carries
-// no credential.
+// THE SCRIPT DOWNLOAD USED TO BE THE ONE THING HERE THAT COULD NOT BE EXERCISED,
+// and this case recorded that rather than hiding it: the endpoint rendered the
+// version into a template compiled into the Node repository's module, whose own
+// rule still read the legacy release shape and used the version as the download
+// path — so a release this panel accepted was refused by the template, and PSP
+// could not change that from here because the package was a pinned dependency.
+//
+// IT CAN BE EXERCISED NOW. The template is a signed asset the release publishes,
+// so this endpoint renders a real published template and the case below asserts
+// what the rendered script addresses. What it still owns besides that: the
+// endpoint is private, and a refusal carries no credential.
 func TestNodeInstallScriptPrivateDownloadAndAdministratorBoundary(t *testing.T) {
 	h, r := installationFixture(t)
 	w := installationRequest(h, http.MethodPost, "node-install-script", `{"version":"4.0.0"}`, "/panel", domain.RoleAdmin)
@@ -295,5 +300,64 @@ func TestNodeAgentStatusDoesNotBlameTheNodeForThePanelsOwnDowntime(t *testing.T)
 				t.Fatalf("state=%q want %q (agent last seen %v, panel up for %v)", got.State, tc.want, tc.seen, tc.upFor)
 			}
 		})
+	}
+}
+
+// failingInstallTemplate is a source that refuses everything the way one of the
+// two failure KINDS does — the distinction the endpoints have to preserve.
+type failingInstallTemplate struct{ err error }
+
+func (f failingInstallTemplate) Validate(ports.InstallTemplateRequest) error { return f.err }
+func (f failingInstallTemplate) Render(context.Context, ports.InstallTemplateRequest) (string, error) {
+	return "", f.err
+}
+
+// A PUBLICATION THAT COULD NOT BE READ IS NOT A BAD REQUEST.
+//
+// The endpoint used to have one failure mode, because rendering was a pure
+// function over a compiled-in template: every refusal was something the caller had
+// done. It now fetches a signed asset, so a refusal can also mean the release could
+// not be obtained or was not signed by this project — and answering "a canonical
+// HTTPS PSP endpoint and exact published Node version are required" to that sends
+// an operator to re-check an endpoint and a version that are both fine, while the
+// publication is what is wrong. The two are told apart, and neither leaks the
+// credential.
+func TestInstallationEndpointsSeparateABadRequestFromAnUnreadableRelease(t *testing.T) {
+	h, r := installationFixture(t)
+	for _, tc := range []struct {
+		name       string
+		err        error
+		action     string
+		body       string
+		wantStatus int
+	}{
+		{"an unreadable release", ports.ErrInstallTemplateSource, "node-install-script", `{"version":"4.0.0"}`, http.StatusBadGateway},
+		{"a release that failed verification", fmt.Errorf("%w: bad signature", ports.ErrInstallTemplateSource), "node-install-script", `{"version":"4.0.0"}`, http.StatusBadGateway},
+		{"the caller's own request", ports.ErrInstallTemplateRequest, "node-install-script", `{"version":"4.0.0"}`, http.StatusBadRequest},
+		{"an unreadable release for the Docker bundle", ports.ErrInstallTemplateSource, "node-installation-files", `{"method":"docker","version":"latest"}`, http.StatusBadGateway},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h.WithNodeInstallTemplate(failingInstallTemplate{err: tc.err})
+			w := installationRequest(h, http.MethodPost, tc.action, tc.body, "", domain.RoleAdmin)
+			if w.Code != tc.wantStatus {
+				t.Fatalf("status=%d, want %d; body=%s", w.Code, tc.wantStatus, w.Body.String())
+			}
+			if strings.Contains(w.Body.String(), r.credential) {
+				t.Fatal("a refusal carried the node credential")
+			}
+		})
+	}
+}
+
+// AND A HANDLER WITH NO SOURCE AT ALL REFUSES rather than panicking. The field is
+// optional in the same way every other dependency on this handler is, and its
+// degraded behaviour is a refusal: there is no script to hand over, and inventing
+// one is not an option.
+func TestInstallationEndpointsRefuseWithoutATemplateSource(t *testing.T) {
+	h, _ := installationFixture(t)
+	h.WithNodeInstallTemplate(nil)
+	w := installationRequest(h, http.MethodPost, "node-install-script", `{"version":"4.0.0"}`, "", domain.RoleAdmin)
+	if w.Code != http.StatusBadGateway {
+		t.Fatalf("a handler with no template source answered %d", w.Code)
 	}
 }

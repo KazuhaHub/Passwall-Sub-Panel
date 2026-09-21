@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
@@ -365,5 +366,26 @@ func TestNodeBootstrapCallbackScopeAndShutdownRequired(t *testing.T) {
 	w = f.request("POST", "/api/node-bootstrap/complete", `{"old_backend_stopped":true}`, ticket.callbackToken)
 	if w.Code == 200 || f.migration.calls != 0 {
 		t.Fatal("undownloaded wrapper authorized conversion")
+	}
+}
+
+// A RELEASE THAT CANNOT BE READ IS NOT A CHANGED IDENTITY.
+//
+// Download maps a failed render to 409 "server identity or credential changed;
+// regenerate installation instructions" — which is right for the conflict that
+// path was written for, and wrong for the failure X07 introduced here. A ticket is
+// minted before the template is fetched, so the fetch can fail at redemption time;
+// telling an operator their node was re-keyed would send them to regenerate
+// instructions that were never the problem.
+func TestNodeBootstrapDistinguishesAnUnreadableReleaseFromAChangedIdentity(t *testing.T) {
+	f := newBootstrapFixture(t, false)
+	token, _ := mintBootstrap(t, f, false)
+	f.h.servers.WithNodeInstallTemplate(failingInstallTemplate{err: fmt.Errorf("%w: asset missing", ports.ErrInstallTemplateSource)})
+	w := f.request(http.MethodGet, "/node-bootstrap/"+token, "", "")
+	if w.Code != http.StatusBadGateway {
+		t.Fatalf("an unreadable release answered %d, want %d", w.Code, http.StatusBadGateway)
+	}
+	if strings.Contains(w.Body.String(), f.provisioning.credential) || strings.Contains(w.Body.String(), "identity") {
+		t.Fatalf("the refusal leaked a credential or blamed the identity: %s", w.Body.String())
 	}
 }

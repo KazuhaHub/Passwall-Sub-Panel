@@ -47,6 +47,7 @@ type AdminServersHandler struct {
 	nativeUpgrade    NativeAgentUpgradeService
 	nodeDiagnostics  NodeDiagnosticsService
 	nodeReleases     ports.NodeReleaseCatalog
+	nodeInstall      ports.NodeInstallTemplate
 	serverMigration  ServerMigrationPreviewer
 	nodeMetrics      ports.NodeHostMetricRepo
 
@@ -61,6 +62,15 @@ type AdminServersHandler struct {
 
 func (h *AdminServersHandler) WithNativeAgentProvisioning(repo ports.NativeAgentProvisioningRepo) *AdminServersHandler {
 	h.native = repo
+	return h
+}
+
+// WithNodeInstallTemplate supplies the source of the Node installation script. It
+// is the Node project's published template, fetched and verified per render, and
+// it is a dependency rather than a compiled-in constant because the template is
+// not this repository's to own.
+func (h *AdminServersHandler) WithNodeInstallTemplate(template ports.NodeInstallTemplate) *AdminServersHandler {
+	h.nodeInstall = template
 	return h
 }
 

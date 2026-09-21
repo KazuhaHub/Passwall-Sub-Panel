@@ -17,6 +17,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/adapters/acme"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/adapters/localefs"
 	paneladapter "github.com/KazuhaHub/passwall-sub-panel/internal/adapters/panel"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/adapters/pninstall"
 	pspnodeadapter "github.com/KazuhaHub/passwall-sub-panel/internal/adapters/pspnode"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/adapters/sqlstore"
 	suiadapter "github.com/KazuhaHub/passwall-sub-panel/internal/adapters/sui"
@@ -521,6 +522,14 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	if err != nil {
 		return nil, err
 	}
+	// The Node installation template is fetched from the release that published it
+	// and verified against a compiled-in key — which is why an unusable key is a
+	// build defect and not a runtime condition: nothing here can recover from it,
+	// and a panel that started anyway would hand out unverified install scripts.
+	nodeInstall, err := pninstall.New(pninstall.RendererOptions{})
+	if err != nil {
+		return nil, err
+	}
 	httpHandler := httptransport.NewRouter(httptransport.Deps{
 		OperationGate: a.operationGate,
 		Async:         dispatcher,
@@ -565,9 +574,11 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 		NodeAgentUpgrade: nativeUpgrade,
 		NodeDiagnostics:  nodeDiagnostics,
 		NodeReleases:     nodeReleases,
-		ServerMigration:  servermigration.New(repos.ServerMigration),
-		SubPerIPPerMin:   sysSettings.SubPerIPPerMin,
-		LoginPerIPPerMin: sysSettings.LoginPerIPPerMin,
+
+		NodeInstallTemplate: nodeInstall,
+		ServerMigration:     servermigration.New(repos.ServerMigration),
+		SubPerIPPerMin:      sysSettings.SubPerIPPerMin,
+		LoginPerIPPerMin:    sysSettings.LoginPerIPPerMin,
 	})
 
 	// Health check ticks more often than reconcile because a "node is

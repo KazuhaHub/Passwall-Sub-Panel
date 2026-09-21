@@ -13,7 +13,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/KazuhaHub/passwall-node/deployment"
 	"github.com/gin-gonic/gin"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
@@ -140,6 +139,16 @@ func (h *NodeBootstrapHandler) reviewedLinux(c *gin.Context, version string) boo
 	return false
 }
 
+// bootstrapInstallRefused is installTemplateRefused for the bootstrap endpoints,
+// which answer through bootstrapError rather than directly.
+func bootstrapInstallRefused(c *gin.Context, err error, requestMessage string) {
+	if errors.Is(err, ports.ErrInstallTemplateRequest) {
+		bootstrapError(c, http.StatusBadRequest, requestMessage)
+		return
+	}
+	bootstrapError(c, http.StatusBadGateway, installTemplateUnverified)
+}
+
 func bootstrapError(c *gin.Context, status int, message string) {
 	privateNodeResponse(c)
 	c.JSON(status, gin.H{"error": message})
@@ -178,10 +187,13 @@ func (h *NodeBootstrapHandler) MintInstall(c *gin.Context) {
 	if !ok {
 		return
 	}
-	// Validate the endpoint/version before issuing anything executable.
-	if _, err := deployment.RenderLinux(deployment.Options{Endpoint: provisioning.Endpoint,
+	// Validate the endpoint and credential before issuing anything executable. NO
+	// TEMPLATE IS FETCHED HERE: this handler mints a ticket, and the script is
+	// rendered when the ticket is redeemed. The version was already confirmed
+	// against the published releases by reviewedLinux above.
+	if err := h.servers.validateInstallScript(ports.InstallTemplateRequest{Endpoint: provisioning.Endpoint,
 		AgentID: provisioning.AgentID, Credential: provisioning.Credential, Version: req.Version}); err != nil {
-		bootstrapError(c, http.StatusBadRequest, "a canonical HTTPS PSP endpoint is required")
+		bootstrapInstallRefused(c, err, "a canonical HTTPS PSP endpoint is required")
 		return
 	}
 	digest := sha256.Sum256([]byte(provisioning.Credential))
@@ -275,6 +287,14 @@ func (h *NodeBootstrapHandler) Download(c *gin.Context) {
 		script, err = h.installScript(c.Request.Context(), t, t.agentID, t.digest)
 	}
 	if err != nil {
+		// A FAILED FETCH IS NOT A CHANGED IDENTITY. Both arrive here as an error, and
+		// the 409 below would tell an operator their node was re-keyed when what
+		// happened is that a release asset could not be read — sending them to
+		// regenerate instructions that were never the problem.
+		if errors.Is(err, ports.ErrInstallTemplateSource) {
+			bootstrapError(c, http.StatusBadGateway, installTemplateUnverified)
+			return
+		}
 		bootstrapError(c, http.StatusConflict, "server identity or credential changed; regenerate installation instructions")
 		return
 	}
@@ -315,7 +335,7 @@ func (h *NodeBootstrapHandler) installScript(ctx context.Context, t *bootstrapTi
 	if subtle.ConstantTimeCompare([]byte(hex.EncodeToString(rawDigest[:])), []byte(digest)) != 1 {
 		return "", domain.ErrConflict
 	}
-	return deployment.RenderLinux(deployment.Options{Endpoint: t.endpoint, AgentID: agentID, Credential: credential, Version: t.version})
+	return h.servers.renderInstallScript(ctx, ports.InstallTemplateRequest{Endpoint: t.endpoint, AgentID: agentID, Credential: credential, Version: t.version})
 }
 
 func (h *NodeBootstrapHandler) Complete(c *gin.Context) {
