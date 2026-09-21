@@ -26,8 +26,8 @@ on:
       # release's TAG is not its VERSION — `release/4.0.0` names the release
       # `4.0.0` — and two consumers of a published release read the tag as the
       # version: the public Node installer, and PSP's own cmd/compatwatch, which
-      # reconciles the Node repo's releases against
-      # internal/adapters/noderelease/reviewed.json.
+      # reconciles the Node repo's releases against the reviewed set in
+      # docs/compat/passwall-node-v4.json.
       #
       # Both now handle both identities: the installer takes the version out of
       # the asset name and the address out of the release document
