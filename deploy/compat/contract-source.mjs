@@ -39,8 +39,14 @@ export function contractSource(verification) {
   if (source.module_path.includes('://')) {
     throw new Error(`contract_source.module_path must be a module path, not a URL: ${source.module_path}`)
   }
-  if (!/^[a-z0-9.-]+\.[a-z]{2,}\/[^/\s]+\/[^/\s]+$/.test(source.module_path)) {
-    throw new Error(`contract_source.module_path is not host and two path segments: ${source.module_path}`)
+  // A GO MAJOR-VERSION SUFFIX IS ALLOWED AND NOTHING ELSE IS. Go requires the path
+  // of a module published at major N to end in `/vN`, so `.../passwall-node/v4` is a
+  // module path; a fourth segment that is not that spelling is somebody's
+  // subdirectory or a typo, and a repository URL composed from either fetches the
+  // wrong place. The suffix is refused on its own too — `/v4/x` is not a shape this
+  // project publishes.
+  if (!/^[a-z0-9.-]+\.[a-z]{2,}\/[^/\s]+\/[^/\s]+(\/v[0-9]+)?$/.test(source.module_path)) {
+    throw new Error(`contract_source.module_path is not a host, a repository and an optional major-version suffix: ${source.module_path}`)
   }
   // A tag pinning a commit the manifest also claims must agree with the reviewed
   // pin for that release; two places naming different revisions is worse than one.
@@ -77,14 +83,22 @@ function versionOfTag(tag) {
   return tag.slice(TAG_NAMESPACE.length)
 }
 
+// A MAJOR-VERSION SUFFIX BELONGS TO THE MODULE, NOT TO THE REPOSITORY. Go appends
+// `/vN` to the path of a module published at major N, and the repository it lives
+// in is the path WITHOUT that suffix — so `.../passwall-node/v4` is cloned from
+// `.../passwall-node`. The suffix is only ever the last segment and only ever `v`
+// followed by digits.
+const MAJOR_SUFFIX = /\/v[0-9]+$/
+
 // repositoryURL is the git remote the pinned-source job fetches from.
 //
-// IT IS THE MODULE PATH WITH A SCHEME, and nothing else: a Go module path on
-// GitHub already begins with the host, so a URL is `https://<module_path>.git`.
-// Adding the host again — which the workflow did — produces a URL GitHub answers
-// with Not Found, and the job fails before it can test anything.
+// IT IS THE MODULE PATH WITH A SCHEME AND WITHOUT THE MAJOR SUFFIX. A Go module
+// path on GitHub already begins with the host, so a URL is `https://<path>.git`;
+// adding the host again — which the workflow did — produces a URL GitHub answers
+// with Not Found. Composing it out of the FULL module path fails the same way for
+// a v2+ module, and that failure is one more layer from the diff being blamed.
 export function repositoryURL(source) {
-  return `https://${source.module_path}.git`
+  return `https://${source.module_path.replace(MAJOR_SUFFIX, '')}.git`
 }
 
 function main() {
