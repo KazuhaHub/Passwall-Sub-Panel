@@ -12,6 +12,13 @@ on:
       # through these two, so a change in either changes what is under test.
       - 'internal/adapters/pninstall/**'
       - 'internal/pkg/releaseasset/**'
+      # THESE THREE ARE CONSTRUCTED BY THE CASE ITSELF, so a signature change in any
+      # of them breaks its COMPILE — and this is the only job that compiles it. They
+      # were missing, which meant such a change would not re-run this job at all: the
+      # breakage would sit until something else happened to touch a listed path.
+      - 'internal/service/nodesync/**'
+      - 'internal/service/servermigration/**'
+      - 'internal/adapters/pspnode/**'
       - 'internal/pkg/nodebootstrap/**'
       - 'internal/pkg/operationgate/**'
       - 'internal/transport/http/handler/node_bootstrap*'
@@ -29,6 +36,13 @@ on:
       # through these two, so a change in either changes what is under test.
       - 'internal/adapters/pninstall/**'
       - 'internal/pkg/releaseasset/**'
+      # THESE THREE ARE CONSTRUCTED BY THE CASE ITSELF, so a signature change in any
+      # of them breaks its COMPILE — and this is the only job that compiles it. They
+      # were missing, which meant such a change would not re-run this job at all: the
+      # breakage would sit until something else happened to touch a listed path.
+      - 'internal/service/nodesync/**'
+      - 'internal/service/servermigration/**'
+      - 'internal/adapters/pspnode/**'
       - 'internal/pkg/nodebootstrap/**'
       - 'internal/pkg/operationgate/**'
       - 'internal/transport/http/handler/node_bootstrap*'
