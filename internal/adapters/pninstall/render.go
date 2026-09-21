@@ -40,10 +40,16 @@ import (
 )
 
 const (
-	// templateAsset is the name the release publishes the template under. A
-	// rename there is a rename here, and the read fails loudly rather than
-	// rendering something else.
-	templateAsset = "passwall-node-install-template.sh"
+	// TemplateAsset is the name the release publishes the template under. A rename
+	// there is a rename here, and the read fails loudly rather than rendering
+	// something else.
+	//
+	// IT IS EXPORTED BECAUSE IT IS A PUBLISHED NAME, not an implementation detail:
+	// anything that stands in for a release — an acceptance fixture that packages
+	// an unreleased template, a checker that reads the manifest — has to name the
+	// same asset. A second literal in a test would be a second copy of the
+	// contract, and it would keep passing after the contract moved.
+	TemplateAsset = "passwall-node-install-template.sh"
 
 	// syncPath is the endpoint suffix the daemon's connection requires; the
 	// template writes it into the environment file the daemon parses.
@@ -122,7 +128,7 @@ func (r *Renderer) Render(ctx context.Context, options Options) (string, error) 
 	if err != nil {
 		return "", err
 	}
-	template, err := r.assets.Asset(ctx, tag, templateAsset)
+	template, err := r.assets.Asset(ctx, tag, TemplateAsset)
 	if err != nil {
 		return "", assetError(err)
 	}

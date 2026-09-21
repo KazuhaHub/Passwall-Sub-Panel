@@ -8,6 +8,10 @@ on:
       - 'go.mod'
       - 'go.sum'
       - 'internal/adapters/noderelease/**'
+      # The installer this case installs from is a release asset the panel reads
+      # through these two, so a change in either changes what is under test.
+      - 'internal/adapters/pninstall/**'
+      - 'internal/pkg/releaseasset/**'
       - 'internal/pkg/nodebootstrap/**'
       - 'internal/pkg/operationgate/**'
       - 'internal/transport/http/handler/node_bootstrap*'
@@ -21,6 +25,10 @@ on:
       - 'go.mod'
       - 'go.sum'
       - 'internal/adapters/noderelease/**'
+      # The installer this case installs from is a release asset the panel reads
+      # through these two, so a change in either changes what is under test.
+      - 'internal/adapters/pninstall/**'
+      - 'internal/pkg/releaseasset/**'
       - 'internal/pkg/nodebootstrap/**'
       - 'internal/pkg/operationgate/**'
       - 'internal/transport/http/handler/node_bootstrap*'
@@ -57,6 +65,34 @@ jobs:
         run: |
           test "$(go env GOVERSION)" = go1.26.8
           go test -c -tags node_reinstall_acceptance -o "$RUNNER_TEMP/node-reinstall-acceptance.test" ./tests/acceptance/node-reinstall-systemd
+      - name: Provide the pinned installer revision
+        shell: bash
+        run: |
+          set -euo pipefail
+          # THE INSTALLER IS A RELEASE ASSET NOW, and no published release carries
+          # one yet — so this case would have nothing to render from. The fixture
+          # packages THIS revision's installer as a signed asset locally and points
+          # the panel's production reader at it, which is what lets the case
+          # exercise an unreleased template instead of waiting for a release.
+          #
+          # A COMMIT, CHECKED OUT AND VERIFIED — the same rule the wire-contract
+          # job follows, for the same reason: a tag can be moved, and the assertion
+          # is what turns that into a failure rather than a different revision
+          # quietly under test.
+          #
+          # THE REVISION MUST ADDRESS A RELEASE BY TAG. Earlier installers build the
+          # download path out of the VERSION, and no product-scheme release lives at
+          # such a path — that is the defect the tag split fixed, and a revision
+          # from before it could not install anything this panel offers.
+          template_commit=5c53317117461232acb125fa060e5d74c5b278d1
+          template_repo=$(mktemp -d "$RUNNER_TEMP/psp-template.XXXXXX")
+          git -C "$template_repo" init -q
+          git -C "$template_repo" remote add origin https://github.com/KazuhaHub/Passwall-Node.git
+          git -C "$template_repo" fetch -q --depth 1 origin "$template_commit"
+          git -C "$template_repo" checkout -q FETCH_HEAD
+          test "$(git -C "$template_repo" rev-parse HEAD)" = "$template_commit"
+          test -f "$template_repo/deployment/install.sh"
+          echo "PSP_NODE_TEMPLATE_REPO=$template_repo" >> "$GITHUB_ENV"
       - name: Run actual systemd acceptance (no production host)
         env:
           PSP_NODE_REINSTALL_EPHEMERAL: 'yes'
@@ -65,7 +101,7 @@ jobs:
           set -euo pipefail
           test "$GITHUB_ACTIONS" = true
           test "$RUNNER_ENVIRONMENT" = github-hosted
-          sudo --preserve-env=GITHUB_ACTIONS,RUNNER_ENVIRONMENT,PSP_NODE_REINSTALL_EPHEMERAL \
+          sudo --preserve-env=GITHUB_ACTIONS,RUNNER_ENVIRONMENT,PSP_NODE_REINSTALL_EPHEMERAL,PSP_NODE_TEMPLATE_REPO \
             "$RUNNER_TEMP/node-reinstall-acceptance.test" -test.v -test.run '^TestDisposableSystemdNodeReinstall$' -test.timeout 24m \
             2>&1 | tee "$RUNNER_TEMP/node-reinstall-acceptance.log"
           test "$(grep -c '^--- PASS: TestDisposableSystemdNodeReinstall ' "$RUNNER_TEMP/node-reinstall-acceptance.log")" = 1
