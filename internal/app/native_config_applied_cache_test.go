@@ -77,7 +77,11 @@ func TestBuildNativeConfigAppliedInvalidatesBothSubscriptionCacheLayers(t *testi
 	// called, so there are no listeners, worker ticks, or external requests.
 	credential := strings.Repeat("fixture-native-cache-credential-", 2)
 	digest := sha256.Sum256([]byte(credential))
-	agent := &domain.NodeAgent{AgentID: "agt_cache_wiring", Epoch: 7, CredentialSHA256: hex.EncodeToString(digest[:])}
+	// The core selection is part of a conforming agent row, and this fixture is a
+	// conforming agent: the config body echoes what the panel committed to rather
+	// than resolving it against the reviewed catalog on every sync.
+	agent := &domain.NodeAgent{AgentID: "agt_cache_wiring", Epoch: 7, CredentialSHA256: hex.EncodeToString(digest[:]),
+		DesiredCoreEngine: domain.NodeCoreXray, DesiredCoreVersion: "26.6.27"}
 	panel := &domain.XUIPanel{Name: "cache-native", Kind: domain.PanelKindPSP, URL: "psp://" + agent.AgentID}
 	if err := a.repos.NativeAgentProvisioning.Create(ctx, panel, agent); err != nil {
 		t.Fatal(err)

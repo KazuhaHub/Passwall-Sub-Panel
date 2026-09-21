@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/corefixtures"
 )
 
 func migrationFixture() *domain.ServerMigrationSnapshot {
@@ -265,7 +266,7 @@ func TestPreviewCoreChoiceIsExplicitAndReadOnly(t *testing.T) {
 			snapshot.Panel.XrayVersion = test.current
 			repo := &fakeRepo{snapshot: snapshot}
 			before, _ := json.Marshal(snapshot)
-			p, err := New(repo).Preview(context.Background(), 1, test.explicit, test.ack)
+			p, err := New(repo, corefixtures.Static{}).Preview(context.Background(), 1, test.explicit, test.ack)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -304,24 +305,24 @@ func TestPreviewCoreChoiceIsExplicitAndReadOnly(t *testing.T) {
 }
 
 func TestPreviewErrorsAndValidation(t *testing.T) {
-	if _, err := New(nil).Preview(context.Background(), 1, "", false); err == nil {
+	if _, err := New(nil, corefixtures.Static{}).Preview(context.Background(), 1, "", false); err == nil {
 		t.Fatal("nil repo accepted")
 	}
 	repo := &fakeRepo{snapshot: migrationFixture()}
-	if _, err := New(repo).Preview(context.Background(), 0, "", false); !errors.Is(err, domain.ErrValidation) || repo.loads != 0 {
+	if _, err := New(repo, corefixtures.Static{}).Preview(context.Background(), 0, "", false); !errors.Is(err, domain.ErrValidation) || repo.loads != 0 {
 		t.Fatal("invalid identity loaded repository")
 	}
 	repo.err = domain.ErrNotFound
-	if _, err := New(repo).Preview(context.Background(), 1, "", false); !errors.Is(err, domain.ErrNotFound) {
+	if _, err := New(repo, corefixtures.Static{}).Preview(context.Background(), 1, "", false); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatal("repository error lost")
 	}
-	if _, err := ValidateCore("1.14.0", false); !errors.Is(err, domain.ErrValidation) {
+	if _, err := validateCore(corefixtures.Document(), "1.14.0", false); !errors.Is(err, domain.ErrValidation) {
 		t.Fatal("sing-box engine switch accepted")
 	}
-	if _, err := ValidateCore("26.9.9", false); !errors.Is(err, domain.ErrValidation) {
+	if _, err := validateCore(corefixtures.Document(), "26.9.9", false); !errors.Is(err, domain.ErrValidation) {
 		t.Fatal("restricted core accepted without ack")
 	}
-	if _, err := ValidateCore("26.9.9", true); err != nil {
+	if _, err := validateCore(corefixtures.Document(), "26.9.9", true); err != nil {
 		t.Fatal(err)
 	}
 }

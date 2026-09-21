@@ -14,6 +14,7 @@ import (
 	"gorm.io/gorm/logger"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/corefixtures"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 )
 
@@ -33,6 +34,12 @@ func newServerMigrationFixture(t *testing.T) *serverMigrationFixture {
 	previousKey := append([]byte(nil), dbSecretKey...)
 	ConfigureSecretKey("server-migration-fixture-encryption-key")
 	t.Cleanup(func() { dbSecretKey = previousKey })
+	// THE CONVERSION GATE READS THE REVIEWED CORE CATALOG, and unconfigured is a
+	// refusal rather than a skip — so a fixture that does not supply one tests the
+	// refusal instead of the conversion.
+	previousCatalog := coreCatalogForMigration
+	ConfigureCoreCatalog(corefixtures.Static{})
+	t.Cleanup(func() { coreCatalogForMigration = previousCatalog })
 	db, err := openIsolatedTestDB(t)
 	if err != nil {
 		t.Fatal(err)

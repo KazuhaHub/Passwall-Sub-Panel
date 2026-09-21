@@ -15,10 +15,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/KazuhaHub/passwall-sub-panel/internal/adapters/corecatalogdoc"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/adapters/noderelease"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/adapters/sqlstore"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/config"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/idgen"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/log"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/servermigration"
 	"gorm.io/gorm"
@@ -173,5 +176,25 @@ func openConfiguredDatabase(ctx context.Context, path string) (*connection, erro
 	}
 	sqlstore.ConfigureSecretKey(cfg.SecretKeyMaterial())
 	repo := sqlstore.NewRepos(db).ServerMigration
-	return &connection{preview: servermigration.New(repo), repo: repo, close: func() { sqlDB.Close() }}, nil
+	// The conversion gate reads the reviewed core catalog from the document a Node
+	// release published. A maintenance command that cannot reach it still runs: the
+	// preview reports the missing catalog as a blocker, which is the answer an
+	// operator needs rather than a command that refuses to start.
+	catalog, err := coreCatalogForMaintenance()
+	if err != nil {
+		log.Warn("core catalog unavailable for this maintenance run", "err", err)
+		catalog = corecatalogdoc.Unavailable(err)
+	}
+	sqlstore.ConfigureCoreCatalog(catalog)
+	return &connection{preview: servermigration.New(repo, catalog), repo: repo, close: func() { sqlDB.Close() }}, nil
+}
+
+// coreCatalogForMaintenance builds the reviewed core catalog for a standalone
+// maintenance run, which has no application and therefore no shared instance.
+func coreCatalogForMaintenance() (ports.CoreCatalog, error) {
+	releases, err := noderelease.New(noderelease.Options{})
+	if err != nil {
+		return nil, err
+	}
+	return corecatalogdoc.New(corecatalogdoc.Options{Releases: releases})
 }

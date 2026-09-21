@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/corefixtures"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 )
 
@@ -78,7 +79,7 @@ func TestReadFacadePreservesUnavailableSnapshotAndObservedEmpty(t *testing.T) {
 	}
 	for condition, unavailable := range conditions {
 		client, err := New(&domain.Panel{ID: 9, Kind: domain.PanelKindPSP},
-			snapshotReader{err: unavailable}, nodeRepo{}, &agentRepo{})
+			snapshotReader{err: unavailable}, nodeRepo{}, &agentRepo{}, corefixtures.Static{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -96,7 +97,7 @@ func TestReadFacadePreservesUnavailableSnapshotAndObservedEmpty(t *testing.T) {
 		Clients: make(map[string]ports.ClientDetail), LiveClientIPs: make(map[string][]string),
 	}
 	client, err := New(&domain.Panel{ID: 9, Kind: domain.PanelKindPSP},
-		snapshotReader{snapshot: empty}, nodeRepo{}, &agentRepo{})
+		snapshotReader{snapshot: empty}, nodeRepo{}, &agentRepo{}, corefixtures.Static{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -121,7 +122,7 @@ func TestClientProjectsObservedSnapshotAndKeepsWritesAsIntent(t *testing.T) {
 		LiveClientIPs: map[string][]string{"a@psp": {"203.0.113.1"}},
 		Status:        ports.ServerStatus{PanelVersion: "v0.1", XrayVersion: "v25", XrayState: "running"},
 	}}
-	client, err := New(&domain.Panel{ID: 9, Kind: domain.PanelKindPSP}, reader, nodeRepo{}, &agentRepo{})
+	client, err := New(&domain.Panel{ID: 9, Kind: domain.PanelKindPSP}, reader, nodeRepo{}, &agentRepo{}, corefixtures.Static{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -159,6 +160,7 @@ func TestAddInboundAllocatesCompatibilityIDWithoutUsingItAsWireIdentity(t *testi
 			{PanelID: 9, InboundID: 4}, {PanelID: 9, InboundID: 9}, {PanelID: 10, InboundID: 100},
 		}},
 		&agentRepo{},
+		corefixtures.Static{},
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -176,7 +178,7 @@ func TestAddInboundAllocatesCompatibilityIDWithoutUsingItAsWireIdentity(t *testi
 func TestCoreUpdaterUsesAuditedCatalogAndPersistsDesiredVersion(t *testing.T) {
 	repo := &agentRepo{agent: &domain.NodeAgent{AgentID: "agt_9", PanelID: 9}}
 	client, err := New(&domain.Panel{ID: 9, Kind: domain.PanelKindPSP},
-		snapshotReader{snapshot: &ports.NativePanelSnapshot{}}, nodeRepo{}, repo)
+		snapshotReader{snapshot: &ports.NativePanelSnapshot{}}, nodeRepo{}, repo, corefixtures.Static{})
 	if err != nil {
 		t.Fatal(err)
 	}

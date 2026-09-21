@@ -101,8 +101,12 @@ type Deps struct {
 	// leaving them unregistered: an operator who asks for a script must be told why
 	// they cannot have one.
 	NodeInstallTemplate ports.NodeInstallTemplate
-	ServerMigration     handler.ServerMigrationPreviewer
-	Async               AsyncDispatcher
+	// CoreCatalog is the reviewed catalog of proxy-core releases. Optional in the
+	// same sense as the others: absent, the core endpoints answer 503, which is
+	// what "the panel is running and its source is not" deserves.
+	CoreCatalog     ports.CoreCatalog
+	ServerMigration handler.ServerMigrationPreviewer
+	Async           AsyncDispatcher
 
 	// SharedClients answers, for one user, which panels hold their clients and
 	// whether each can store the connection caps. Read-only; serves the
@@ -638,6 +642,7 @@ func NewRouter(d Deps) stdhttp.Handler {
 			WithNodeDiagnostics(d.NodeDiagnostics).
 			WithNodeReleaseCatalog(d.NodeReleases).
 			WithNodeInstallTemplate(d.NodeInstallTemplate).
+			WithCoreCatalog(d.CoreCatalog).
 			WithServerMigrationPreviewer(d.ServerMigration)
 		bootstrapPublic = handler.NewNodeBootstrapHandler(servers, d.Repos.ServerMigration, d.OperationGate)
 		// 3X-UI panel credentials live here — never operator.
