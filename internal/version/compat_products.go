@@ -1,7 +1,6 @@
 package version
 
 import (
-	"context"
 	"fmt"
 	"strconv"
 )
@@ -28,35 +27,15 @@ const (
 // The published document names. A pattern rather than a constant because the
 // major is part of the name: the v4 pair and a future v5 pair are different
 // documents, and a build asks for its own.
-const (
-	xuiDocumentPattern  = "3x-ui-v%d.json"
-	suiDocumentPattern  = "sui-v%d.json"
-	nodeDocumentPattern = "passwall-node-v%d.json"
-)
-
-// RemoteCompatURLBase is where every compatibility document is published. It is
-// exported because a second reader outside this package — the Node release
-// catalog — fetches the Passwall Node document from the same place, and it must
-// not grow a second copy of this address.
-const RemoteCompatURLBase = defaultRemoteCompatURLBase
-
-// RemoteNodeCatalogDocument names the Passwall Node document for a panel major.
-// The panel major rather than the Node version: the document is a claim about
-// which Node releases THIS PANEL may offer, so it is addressed by the panel it
-// was reviewed for.
-func RemoteNodeCatalogDocument(major int) string {
-	return fmt.Sprintf(nodeDocumentPattern, major)
-}
-
-// FetchRemoteCompatDocument reads a published compatibility document's bytes.
 //
-// It is the same fetch the ranges use — the shared SSRF-refusing client, the same
-// timeout, the same size cap — so a second reader cannot acquire a looser one. It
-// returns BYTES rather than a payload because the two readers disagree about what
-// a document means and should each decode it by their own rules.
-func FetchRemoteCompatDocument(ctx context.Context, name string) ([]byte, error) {
-	return fetchCompatDocument(ctx, RemoteCompatURLBase+name)
-}
+// THE NODE DOCUMENT IS NOT IN THIS SET. It was, briefly, when the release catalog
+// was served from it — the catalog now lists the releases the project has
+// published, so nothing fetches that document at runtime and no pattern is needed
+// for it. It is still a published document: the CI matrix reads it.
+const (
+	xuiDocumentPattern = "3x-ui-v%d.json"
+	suiDocumentPattern = "sui-v%d.json"
+)
 
 // knownProduct reports whether a document named a product this build reads.
 func knownProduct(product string) bool {

@@ -2,17 +2,15 @@ package app
 
 import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/adapters/noderelease"
-	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/log"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 )
 
-func newNodeReleaseCatalog(stampedVersion string) (ports.NodeReleaseCatalog, error) {
-	major, err := noderelease.PSPMajorForVersion(stampedVersion)
-	if err != nil {
-		// Custom development stamps must neither inherit reviewed v4
-		// compatibility nor make an optional metadata feature prevent startup.
-		log.Warn("Node release catalog disabled: PSP build has no canonical release identity")
-		return nil, nil
-	}
-	return noderelease.New(noderelease.Options{PSPMajor: major})
+// newNodeReleaseCatalog builds the catalog of Node releases this panel can offer.
+//
+// IT TAKES NO VERSION. It used to be handed the panel's own stamp, to select the
+// reviewed set for that major; the catalog is now the releases this project has
+// PUBLISHED, which is the same answer for every build. That also removed the case
+// where an unreadable stamp left the panel with no catalog at all.
+func newNodeReleaseCatalog() (ports.NodeReleaseCatalog, error) {
+	return noderelease.New(noderelease.Options{})
 }

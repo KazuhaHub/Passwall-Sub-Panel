@@ -517,7 +517,7 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	trafficSvc.SetGeoStreakStore(geoStreaks)
 
 	// --- transport layer ---
-	nodeReleases, err := newNodeReleaseCatalog(version.Version)
+	nodeReleases, err := newNodeReleaseCatalog()
 	if err != nil {
 		return nil, err
 	}
