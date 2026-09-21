@@ -2525,7 +2525,8 @@
       "upgrade_target_unpinnable": "Note: the 3X-UI upgrade endpoint takes no version argument — it fetches whatever is latest when it runs. The target above is what PSP read a moment ago, not a version the panel will be held to."
     },
     "compat_notice": {
-      "range-stale": "The 3X-UI tested ceiling {{max}} is the last successful fetch; the most recent refresh failed: {{error}}"
+      "range-stale": "The 3X-UI tested ceiling {{max}} is the last successful fetch; the most recent refresh failed: {{error}}",
+      "core-catalog-stale": "The reviewed core catalog could not be refreshed, so the panel is offering {{source}} (reviewed {{review}}). Reason: {{error}}. A release withdrawn since that review is still shown."
     }
   },
   "diagnostics": {

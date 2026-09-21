@@ -13,7 +13,7 @@ import type { CompatStatusResponse } from '@/api/servers'
 // could not refresh and is serving from the last good fetch, which looks exactly
 // like a fresh one from outside.
 
-export type CompatNoticeKind = 'range-stale'
+export type CompatNoticeKind = 'core-catalog-stale' | 'range-stale'
 
 export interface CompatNotice {
   kind: CompatNoticeKind
@@ -24,6 +24,24 @@ export interface CompatNotice {
 /** Picks the ONE state worth showing, or nothing. */
 export function compatNotice(status: CompatStatusResponse | null | undefined): CompatNotice | null {
   if (!status) return null
+
+  // THE REVIEW THE CORE CHOICES REST ON, and it comes first because offering a core
+  // is a claim about what may be installed. Falling back means the panel is offering
+  // what it last agreed with the project rather than what the project says today —
+  // invisible from the selector, because an old reviewed release looks exactly like a
+  // current one, and it is the state in which a release pulled since is still on
+  // offer. The age of the review is what an operator acts on, so it is in the message.
+  if (status.core_catalog?.falling_back) {
+    const catalog = status.core_catalog
+    return {
+      kind: 'core-catalog-stale',
+      values: {
+        source: catalog.source ?? '',
+        review: catalog.review_time ?? '',
+        error: catalog.last_error ?? '',
+      },
+    }
+  }
 
   if (status.xui?.last_error && status.xui?.max_tested) {
     // The range works AND the last attempt to update it failed — the state an

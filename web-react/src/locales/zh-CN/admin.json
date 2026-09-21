@@ -2523,7 +2523,8 @@
       "upgrade_target_unpinnable": "注意：3X-UI 的升级接口不接受版本参数，它会拉取当时的最新版。上面的目标版本是刚读到的值，不是面板会遵守的承诺。"
     },
     "compat_notice": {
-      "range-stale": "当前 3X-UI 已测上限 {{max}} 是最后一次成功获取的结果；最近一次刷新失败：{{error}}"
+      "range-stale": "当前 3X-UI 已测上限 {{max}} 是最后一次成功获取的结果；最近一次刷新失败：{{error}}",
+      "core-catalog-stale": "内核审核目录未能刷新，面板正在使用{{source}}（审核时间 {{review}}）。原因：{{error}}。该审核之后被撤回的 release 仍会显示。"
     }
   },
   "diagnostics": {

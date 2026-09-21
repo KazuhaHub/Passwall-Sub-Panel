@@ -36,6 +36,35 @@ describe('compatNotice', () => {
     expect(notice?.values.error).toBe('github unreachable')
   })
 
+  it('flags a core catalog the panel is falling back on, and carries its age', () => {
+    // THE ONE AN OPERATOR CANNOT SEE FROM THE SELECTOR: a reviewed release that has
+    // since been withdrawn is still on the list, and nothing about the list says so.
+    // The age of the review is what they act on, so it is in the message.
+    const notice = compatNotice(status({
+      core_catalog: {
+        source: 'shipped with this panel build; regenerated when this build is cut',
+        review_time: '2026-09-11T00:00:00Z',
+        last_error: 'release/4.0.1 does not publish core-catalog.json',
+        falling_back: true,
+      },
+    }))
+    expect(notice?.kind).toBe('core-catalog-stale')
+    expect(notice?.values.review).toBe('2026-09-11T00:00:00Z')
+    expect(notice?.values.error).toBe('release/4.0.1 does not publish core-catalog.json')
+  })
+
+  it('says nothing about a core catalog read from the origin', () => {
+    expect(compatNotice(status({
+      core_catalog: { source: 'read from the published release', review_time: '2026-09-20T00:00:00Z', last_success: '2026-09-21T11:56:00Z' },
+    }))).toBeNull()
+  })
+
+  it('says nothing when a panel cannot report its core catalog at all', () => {
+    // No field means an older panel, not a failing one. Inventing a banner from its
+    // silence would be reading a conclusion out of a missing answer.
+    expect(compatNotice(status({ core_catalog: undefined }))).toBeNull()
+  })
+
   it('does not flag a refresh failure when there is no range to fall back on', () => {
     // No range means the panel says "unknown" everywhere already; a second
     // message about the same absence is noise, and the range line says it.
