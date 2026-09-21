@@ -20,6 +20,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/adapters/pspnode"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/adapters/sqlstore"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/corefixtures"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/nodesync"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/transport/http/handler"
@@ -134,6 +135,12 @@ func runRealNodeAgentContract(t *testing.T, migrate bool) {
 		}
 		sqlstore.ConfigureSecretKey("test-only-migration-contract-key")
 		defer sqlstore.ConfigureSecretKey("")
+		// THE CONVERSION GATE READS THE REVIEWED CATALOG, and this case builds its own
+		// composition rather than going through the application, so it has to supply
+		// one. Unconfigured is a refusal rather than a skip, so without this the case
+		// would be testing the refusal instead of the conversion.
+		sqlstore.ConfigureCoreCatalog(corefixtures.Static{})
+		defer sqlstore.ConfigureCoreCatalog(nil)
 		agentRow.PanelID = panel.ID
 		snapshot, err := repos.ServerMigration.Load(ctx, panel.ID)
 		if err != nil {

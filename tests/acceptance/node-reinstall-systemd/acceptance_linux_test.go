@@ -34,6 +34,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/adapters/sqlstore"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/adapters/xui"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/corefixtures"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/operationgate"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/panelpath"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
@@ -95,6 +96,13 @@ func TestDisposableSystemdNodeReinstall(t *testing.T) {
 	gin.SetMode(gin.ReleaseMode)
 	sqlstore.ConfigureSecretKey("disposable-acceptance-only-strong-encryption-key-9c6376875de2")
 	defer sqlstore.ConfigureSecretKey("")
+	// THIS FIXTURE BUILDS ITS OWN COMPOSITION rather than going through the
+	// application, so it has to supply the reviewed core catalog by hand: the
+	// offline-conversion gate reads it, and unconfigured is a refusal rather than a
+	// skip. The releases are the ones the cases name, including the core version
+	// this fixture installs.
+	sqlstore.ConfigureCoreCatalog(corefixtures.Static{})
+	defer sqlstore.ConfigureCoreCatalog(nil)
 	for _, standardOldUnit := range []bool{false, true} {
 		f := newFixture(t, ctx)
 		func() {
@@ -226,12 +234,12 @@ func newFixture(t *testing.T, ctx context.Context) *fixture {
 	registry := paneladapter.NewRegistry()
 	must(t, registry.Register(domain.PanelKind3XUI, func(p *domain.Panel) (ports.PanelClient, error) { return xui.New(p) }), "old adapter registry")
 	must(t, registry.Register(domain.PanelKindPSP, func(p *domain.Panel) (ports.PanelClient, error) {
-		return pspnode.New(p, f.coordinator, f.repos.Node, f.repos.NodeAgent)
+		return pspnode.New(p, f.coordinator, f.repos.Node, f.repos.NodeAgent, corefixtures.Static{})
 	}), "native adapter registry")
 	pool, err := paneladapter.NewPool(ctx, f.repos.XUIPanel, registry)
 	must(t, err, "production adapter pool")
 	gate := operationgate.New()
-	servers := handler.NewAdminServersHandler(f.repos.XUIPanel, pool, f.repos.Node, f.repos.Audit, nil, nil).WithNativeAgentProvisioning(f.repos.NativeAgentProvisioning).WithNodeAgents(f.repos.NodeAgent).WithNodeSettings(f.repos.Settings).WithNodeReleaseCatalog(pinnedCatalog{}).WithServerMigrationPreviewer(servermigration.New(f.repos.ServerMigration))
+	servers := handler.NewAdminServersHandler(f.repos.XUIPanel, pool, f.repos.Node, f.repos.Audit, nil, nil).WithNativeAgentProvisioning(f.repos.NativeAgentProvisioning).WithNodeAgents(f.repos.NodeAgent).WithNodeSettings(f.repos.Settings).WithNodeReleaseCatalog(pinnedCatalog{}).WithServerMigrationPreviewer(servermigration.New(f.repos.ServerMigration, corefixtures.Static{}))
 	bootstrap := handler.NewNodeBootstrapHandler(servers, f.repos.ServerMigration, gate)
 	auth, err := handler.NewNodeBearerAuthenticator(f.repos.NodeAgent)
 	must(t, err, "production Bearer authenticator")
@@ -282,7 +290,7 @@ func (f *fixture) mint(migration bool) string {
 	action := "node-install-command"
 	if migration {
 		action = "node-migration-command"
-		preview, err := servermigration.New(f.repos.ServerMigration).Preview(f.ctx, f.panelID, coreVersion, false)
+		preview, err := servermigration.New(f.repos.ServerMigration, corefixtures.Static{}).Preview(f.ctx, f.panelID, coreVersion, false)
 		must(f.t, err, "migration preview")
 		if !preview.CanMigrate {
 			f.t.Fatal("fixture unexpectedly blocked")
