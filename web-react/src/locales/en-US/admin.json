@@ -2525,8 +2525,6 @@
       "upgrade_target_unpinnable": "Note: the 3X-UI upgrade endpoint takes no version argument — it fetches whatever is latest when it runs. The target above is what PSP read a moment ago, not a version the panel will be held to."
     },
     "compat_notice": {
-      "policy-not-applicable": "The loaded upgrade policy (revision {{revision}}) was not reviewed for this build, so it does not apply.",
-      "policy-expired": "The upgrade policy expired on {{expires}} and no longer grants any upgrade eligibility.",
       "range-stale": "The 3X-UI tested ceiling {{max}} is the last successful fetch; the most recent refresh failed: {{error}}"
     }
   },

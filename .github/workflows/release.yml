@@ -438,9 +438,9 @@ jobs:
           set -euo pipefail
           resolved=$(git -C .compat/passwall-node rev-parse HEAD)
           # A TAG IS A LABEL, NOT AN IDENTITY. If it was moved, the leg would
-          # otherwise test a different commit from the one the policy was
-          # verified against while still reporting the same version — the one
-          # substitution this matrix cannot afford to make silently.
+          # otherwise test a different commit from the one the plan pinned while
+          # still reporting the same version — the one substitution this matrix
+          # cannot afford to make silently.
           if [ "$resolved" != "$EXPECTED" ]; then
             echo "::error::${{ matrix.node_case.version }} now resolves to $resolved, but the plan pinned $EXPECTED. A tag moved; re-verify before re-pinning."
             exit 1

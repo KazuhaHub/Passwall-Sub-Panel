@@ -111,24 +111,25 @@ it('uses the saved beta preference but still requires an exact reviewed version 
 // ONE PREDICATE, NOT TWO. The list used to exclude a target that no VERIFIED EDGE
 // reached, because a request along an unwalked path was refused — so a node on a
 // version no edge started from had an empty dialog, and the remedy was a policy
-// document the operator had no reason to know about. Admission follows the panel's
-// own judgement now, and what remains is the policy's answer: a release the policy
-// in force does not offer is not put in front of anyone.
-it('offers the targets the instance offers, and no others', async () => {
+// THE INSTANCE'S ANSWER IS THE WHOLE ANSWER.
+//
+// This list used to be filtered twice on the way in — by whether a verified edge
+// reached the release, then by whether a signed policy offered it — and each
+// filter could empty the dialog for a node the operator was looking at, with the
+// remedy a document they had no reason to know about. Nothing is filtered here
+// now: the panel reports the releases it can see are published, and an operator
+// choosing among them is making the decision those gates were making for them.
+it('offers exactly the targets the instance reports', async () => {
   const further = { ...catalog.releases[0], version: '4.0.6',
     release_url: `https://github.com/KazuhaHub/Passwall-Node/releases/tag/${releaseTag('4.0.6')}` }
-  const unlisted = { ...catalog.releases[0], version: '4.0.4',
-    release_url: `https://github.com/KazuhaHub/Passwall-Node/releases/tag/${releaseTag('4.0.4')}` }
+  const unreported = { ...catalog.releases[0], version: '4.0.7',
+    release_url: `https://github.com/KazuhaHub/Passwall-Node/releases/tag/${releaseTag('4.0.7')}` }
   installReads({
-    '/admin/servers/node-releases': { ...catalog, releases: [catalog.releases[0], further, unlisted] },
+    '/admin/servers/node-releases': { ...catalog, releases: [catalog.releases[0], further, unreported] },
     '/admin/servers/7/node-agent-upgrades/upgrade-test': queued,
     '/admin/servers/7/upgrade-options': {
       component: 'agent', state: 'ready', target_pinnable: true, reason_codes: ['compatible'],
-      targets: [
-        { version: queued.version, offered_by_policy: true },
-        { version: further.version, offered_by_policy: true },
-        { version: unlisted.version, offered_by_policy: false },
-      ],
+      targets: [{ version: queued.version }, { version: further.version }],
     },
   })
   mount(<NativeAgentUpgradeDialog server={{ ...server, update_channel: 'beta' }} onClose={() => {}} />)
@@ -137,10 +138,11 @@ it('offers the targets the instance offers, and no others', async () => {
   await waitFor(() => expect(field.getAttribute('aria-disabled')).not.toBe('true'))
   fireEvent.mouseDown(field)
   expect(await screen.findByRole('option', { name: queued.version })).toBeTruthy()
-  // IN THE CATALOG AND AHEAD OF THE NODE, and still offered: the only thing that
-  // excludes a release now is a policy that does not list it.
   expect(await screen.findByRole('option', { name: '4.0.6' })).toBeTruthy()
-  expect(screen.queryByRole('option', { name: '4.0.4' })).toBeNull()
+  // IN THE CATALOG BUT NOT IN THE ANSWER, so it is not offered — the instance's
+  // list is the restriction, and it is the panel's own statement rather than a
+  // second document's opinion.
+  expect(screen.queryByRole('option', { name: '4.0.7' })).toBeNull()
 })
 
 // A control-plane blip must not remove an action the operator was using, and the

@@ -30,6 +30,20 @@ import (
 // RANGE IS A CLAIM ABOUT A BUILD, which is why the applicability window and the
 // revision are on the document rather than inferred. A range that had to be
 // guessed is a range nobody reviewed.
+// CompatPSPRange is the window of panel builds a ranges document was reviewed
+// for — and the FIRST GATE every such document passes, before any entry in it is
+// looked at.
+//
+// IT LIVES HERE RATHER THAN WITH A DOCUMENT TYPE because two shapes carry it: a
+// product's ranges document states its own window, and a per-major manifest's
+// converted payload carries the one it was read under. Both are "which builds is
+// this a claim about", and a claim that had to be inferred from a file NAME is a
+// claim nobody wrote down.
+type CompatPSPRange struct {
+	Min string `json:"min"`
+	Max string `json:"max"`
+}
+
 type PanelRangesPolicy struct {
 	SchemaVersion int       `json:"schema_version"`
 	// Product says which document this is, and it must be one of the products
@@ -47,7 +61,7 @@ type PanelRangesPolicy struct {
 	ExpiresAt     time.Time `json:"expires_at"`
 	// AppliesToPSP is the window of panel builds this document was reviewed for.
 	// Per-entry psp_min/psp_max narrow it further; nothing may widen it.
-	AppliesToPSP PolicyPSPRange         `json:"applies_to_psp"`
+	AppliesToPSP CompatPSPRange         `json:"applies_to_psp"`
 	Entries      []remoteCompatPSPEntry `json:"entries"`
 	// SUIEntries is optional for the same reason it is optional in the manifest:
 	// a document published before S-UI ranges were reviewed carries none, and
@@ -110,7 +124,7 @@ func ParsePanelRangesPolicy(raw []byte, now time.Time) (PanelRangesPolicy, error
 		return PanelRangesPolicy{}, fmt.Errorf("%w: it expired at %s", ErrPanelRangesExpired, policy.ExpiresAt.UTC().Format(time.RFC3339))
 	}
 
-	window, err := parsePolicyPSPRange(policy.AppliesToPSP)
+	window, err := parseCompatPSPRange(policy.AppliesToPSP)
 	if err != nil {
 		return PanelRangesPolicy{}, err
 	}
@@ -156,9 +170,9 @@ func ParsePanelRangesPolicy(raw []byte, now time.Time) (PanelRangesPolicy, error
 	return policy, nil
 }
 
-// parsePolicyPSPRange validates the document's applicability window and returns
+// parseCompatPSPRange validates the document's applicability window and returns
 // it, so the entries can be checked against the same numbers.
-func parsePolicyPSPRange(r PolicyPSPRange) ([2]string, error) {
+func parseCompatPSPRange(r CompatPSPRange) ([2]string, error) {
 	if !IsReleaseVersion(r.Min) || !IsReleaseVersion(r.Max) {
 		return [2]string{}, fmt.Errorf("%w: applies_to_psp must name release versions, got %q..%q", ErrPanelRangesMalformed, r.Min, r.Max)
 	}

@@ -133,7 +133,7 @@ type remoteCompatPayload struct {
 	// HERE as well: the name decides where to look, and this window decides
 	// whether what was found counts. Set means "match by this window"; absent
 	// means "match by the derived major", which is what every manifest does.
-	AppliesToPSP *PolicyPSPRange `json:"applies_to_psp,omitempty"`
+	AppliesToPSP *CompatPSPRange `json:"applies_to_psp,omitempty"`
 }
 
 // remoteCompatPSPEntry covers one PSP version range. In a schema-v2 base
