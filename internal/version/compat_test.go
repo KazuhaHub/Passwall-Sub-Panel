@@ -272,12 +272,12 @@ func TestLookupForPSPVersion_Schema3DistinguishesPrereleases(t *testing.T) {
 }
 
 func TestResolveRangeOverlayURLStaysOnManifestOrigin(t *testing.T) {
-	got, err := resolveRangeOverlayURL("https://example.test/compat/v4.json", "v4-ranges.json")
-	if err != nil || got != "https://example.test/compat/v4-ranges.json" {
+	got, err := resolveRangeOverlayURL("https://example.test/compat/v3.json", "v3-ranges.json")
+	if err != nil || got != "https://example.test/compat/v3-ranges.json" {
 		t.Fatalf("relative overlay = %q, %v", got, err)
 	}
 	for _, ref := range []string{"https://evil.test/ranges.json", "//evil.test/ranges.json"} {
-		if got, err := resolveRangeOverlayURL("https://example.test/compat/v4.json", ref); err == nil {
+		if got, err := resolveRangeOverlayURL("https://example.test/compat/v3.json", ref); err == nil {
 			t.Fatalf("cross-origin overlay %q resolved to %q", ref, got)
 		}
 	}

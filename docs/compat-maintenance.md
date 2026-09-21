@@ -6,7 +6,7 @@
 
 ## 1. 发现上游有新版本
 
-`compat-watch.yml` 每周一跑 `cmd/compatwatch`，报两类事情：上游面板超出已测上限（`docs/compat/v4-ranges.json` 的 `max_tested` 侧），以及我们自己发布的 Node release 有没有既没被 review、也没被显式排除的。
+`compat-watch.yml` 每周一跑 `cmd/compatwatch`，报两类事情：上游面板超出已测上限（`docs/compat/3x-ui-v4.json` 的 `max_tested` 侧），以及我们自己发布的 Node release 有没有既没被 review、也没被显式排除的。
 
 **监测不是认证，也不是失败。** 下面四件事必须分开报告，不能合并成"有事发生"：
 
@@ -31,7 +31,7 @@
 
 ## 2. 移动 Node 的 floor（`min_supported`）
 
-`docs/compat/node-v4.json` 的 `min_supported` **选择测什么，不决定谁能连**。没有生产代码读它，所以提升它只停止测试下面那些版本，不会断开任何节点。拒绝节点是 wire 世代的事（`wire.min_protocol_version`），需要自己的变更、公告和迁移验收。
+`docs/compat/passwall-node-v4.json` 的 `min_supported` **选择测什么，不决定谁能连**。没有生产代码读它，所以提升它只停止测试下面那些版本，不会断开任何节点。拒绝节点是 wire 世代的事（`wire.min_protocol_version`），需要自己的变更、公告和迁移验收。
 
 移动前必须列出：
 
@@ -42,7 +42,7 @@
 - **停止测试**的日期
 - **真正移除协议**的日期——这是另一个决定，不是同一个
 
-移动后：`docs/compat/node-v4.json` 的 `min_supported_doc` 与 `docs/compat-policy.md` 第 10 节的沿革都要更新，写明现在什么是未被测试的。
+移动后：`docs/compat/passwall-node-v4.json` 的 `min_supported_doc` 与 `docs/compat-policy.md` 第 10 节的沿革都要更新，写明现在什么是未被测试的。
 
 **不缩减既有支持**，除非走第 4 节。**新 floor 不是顺手优化 CI 耗时的借口**——`deploy/compat/plan.mjs` 按位置切片，matrix 的大小是这条政策的直接后果。
 
@@ -51,7 +51,7 @@
 1. 在 `docs/compat/verification-v1.json` 的 `pinned_sources` 里固定它的**提交**。
 2. 如果不是要提供，就写进 `excluded` 并给出理由；**只写版本号不算一个决定**，规划器会拒绝。
 3. 跑 `node deploy/compat/plan.mjs` 确认规划通过。
-4. **给它一条已验证的升级边。** 在 `verification-v1.json` 的 `upgrade_edges` 里加 `{id, from, to}`，并在运行时清单 `docs/compat/node-v4.json` 的同名字段里发布同一条——PSP 在决策时只能读到后者。没有边的版本**可以被安装，但不会被推荐或远程升级**：这是 R10 §8 的要求，不是遗漏。
+4. **给它一条已验证的升级边。** 在 `verification-v1.json` 的 `upgrade_edges` 里加 `{id, from, to}`，并在运行时清单 `docs/compat/passwall-node-v4.json` 的同名字段里发布同一条——PSP 在决策时只能读到后者。没有边的版本**可以被安装，但不会被推荐或远程升级**：这是 R10 §8 的要求，不是遗漏。
 
    **边是路径，不是范围。** `from→to` 只对它自己成立，`beta2→beta3` 不会让 `beta2→beta4` 通过，两段拼起来也不构成一条边。要开放哪条路径，就验证并发布哪条。
 
@@ -81,7 +81,7 @@
 下一个维护者接手时应当拿到：
 
 - 合并的 PR 清单与两仓最终 SHA
-- 机器可读的支持政策（`docs/compat/node-v4.json`、`docs/compat/verification-v1.json`、`deploy/compat/profiles.json`）
+- 机器可读的支持政策（`docs/compat/passwall-node-v4.json`、`docs/compat/verification-v1.json`、`deploy/compat/profiles.json`）
 - 完整的 required case 清单（`node deploy/compat/plan.mjs --emit cases`）
 - 通过与失败注入的证据
 - 已知限制
@@ -124,7 +124,7 @@ gh api repos/KazuhaHub/Passwall-Sub-Panel/rulesets/23046834 \
 
 诚实列出，别让下一任以为已经自动化了：
 
-- **远程升级的"已验证边"清单是空的，所以现在没有任何升级会被推荐或准入。** 这是**事实陈述**，不是故障：边的模型（`docs/compat/verification-v1.json` 的 `upgrade_edges`，由 `deploy/compat/plan.mjs` 校验形状）先于数据存在，而至今没有人通过 R06 的历史套件验证过任何一条边。真要把某条边打开，就在 `upgrade_edges` 里加一条 `{id, from, to}`，并把它发布到运行时清单 `docs/compat/node-v4.json` 的同名字段——运行时读的是后者。
+- **远程升级的"已验证边"清单是空的，所以现在没有任何升级会被推荐或准入。** 这是**事实陈述**，不是故障：边的模型（`docs/compat/verification-v1.json` 的 `upgrade_edges`，由 `deploy/compat/plan.mjs` 校验形状）先于数据存在，而至今没有人通过 R06 的历史套件验证过任何一条边。真要把某条边打开，就在 `upgrade_edges` 里加一条 `{id, from, to}`，并把它发布到运行时清单 `docs/compat/passwall-node-v4.json` 的同名字段——运行时读的是后者。
 - **反方向（候选 Node × 清单内旧 PSP）有可跑的 harness，但还没有 CI。** `deployment/compat/old-psp.sh` 覆盖 B01–B08（B06 为有据的 N/A），需要真实旧 PSP 发布物与候选 PN 作为两个进程跑，因此尚未接进 workflow。
 - **历史升级／回退、真实第三方隔离、真实代理链路**分别是 R06／R07／R08，都需要真实环境。
-- **第三方范围与上限的机器可读政策**还没有（`docs/compat/v4-ranges.json` 是实测记录，不是政策）。
+- **第三方范围与上限的机器可读政策**还没有（`docs/compat/3x-ui-v4.json` 是实测记录，不是政策）。

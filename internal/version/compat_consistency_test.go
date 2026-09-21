@@ -20,8 +20,12 @@ import (
 // one the latest build resolves to, hence the one whose min_xui must equal the
 // compiled floor. Older entries (e.g. the v3.6.0–v3.6.1 baseline) keep their
 // own historical min_xui and are intentionally not checked here.
+// ONE MANIFEST IS LEFT TO CHECK. The v4 file this used to include was replaced by
+// one document per product, and a product document carries its own floor per entry
+// rather than a base-and-overlay pair — so the compiled backstop is compared
+// against the manifest that still states it that way.
 func TestMinXUIConstMatchesCompatJSON(t *testing.T) {
-	for _, major := range []int{3, 4} {
+	for _, major := range []int{3} {
 		t.Run(fmt.Sprintf("v%d", major), func(t *testing.T) {
 			payload := readCompatJSONForMajor(t, major)
 			if len(payload.Entries) == 0 {

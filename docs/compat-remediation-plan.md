@@ -14,7 +14,7 @@
 
 ### 0.1 已完成，禁止重复重做
 
-- PSP 两条 workflow 已从 `docs/compat/node-v4.json` 的 `min_supported` 和有序 `released_nodes` 派生 PN 集合。
+- PSP 两条 workflow 已从 `docs/compat/passwall-node-v4.json` 的 `min_supported` 和有序 `released_nodes` 派生 PN 集合。
 - `min_supported` 当前是 `v0.0.1-beta1`，保留 beta1–beta11，不缩减已有支持。
 - PN 已有协议 v1、可选能力、升级任务能力检查；保留现有双重准入。
 - PN 已有升级助手、同 schema／升级 contract 限制及机制级恢复测试；新增历史测试不能删除这些测试。
@@ -58,7 +58,7 @@
 
 ## 2. R01：支持边界和证据命名
 
-现有入口：`docs/compat-policy.md`、`docs/compat/node-v4.json`、`docs/compat/v4-ranges.json`、`internal/version/node_compat_matrix_test.go`、`internal/version/compat.go`、`internal/version/compat_sui.go`。
+现有入口：`docs/compat-policy.md`、`docs/compat/passwall-node-v4.json`、`docs/compat/3x-ui-v4.json`、`internal/version/node_compat_matrix_test.go`、`internal/version/compat.go`、`internal/version/compat_sui.go`。
 
 实施步骤：
 
@@ -162,7 +162,7 @@ GOWORK=off go test -json -count=1 -timeout=5m \
 
 ## 5. R04：固定身份的矩阵与 planner
 
-现有入口：`docs/compat/node-v4.json`、`internal/version/node_compat_matrix_test.go`、两条 workflow 中的 Python 切片。
+现有入口：`docs/compat/passwall-node-v4.json`、`internal/version/node_compat_matrix_test.go`、两条 workflow 中的 Python 切片。
 
 新增建议：`deploy/compat/plan.mjs` 与对应测试；`docs/compat/verification-v1.json` 保存 CI 组合和证据引用。第一阶段保留现有运行时 JSON 格式，只增加旁侧验证清单，避免旧 PSP 读取新 schema 失效。
 

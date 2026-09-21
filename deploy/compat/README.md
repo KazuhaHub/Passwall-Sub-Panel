@@ -22,7 +22,7 @@ node deploy/compat/plan.mjs --emit cases            # JSON array of case objects
 ```
 
 **The supported version list is not in any of these files, and must not be.** It
-is sliced from `docs/compat/node-v4.json` by **position** at `min_supported` —
+is sliced from `docs/compat/passwall-node-v4.json` by **position** at `min_supported` —
 never by comparing version strings, because `v0.0.1-beta9` sorts above
 `v0.0.1-beta11` and a comparison would silently invert the floor. Restating the
 list here would make the plan agree with itself while disagreeing with the
@@ -145,7 +145,7 @@ node deploy/compat/check-case-set.mjs --reports evidence --output case-set.json
 ```
 
 The expected set is **derived** — profiles × the supported versions in
-`docs/compat/node-v4.json`, sliced by position at `min_supported` — never read
+`docs/compat/passwall-node-v4.json`, sliced by position at `min_supported` — never read
 back out of the reports directory. "Every report I found is fine" is a statement
 that is trivially true of an empty directory, and an empty directory is what a
 run with no uploads produces.

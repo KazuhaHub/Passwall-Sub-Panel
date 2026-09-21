@@ -15,7 +15,7 @@ const workflow = readFileSync(new URL('../.github/workflows/release.yml', import
 //   - the public Node installer, which now takes the version out of the asset
 //     name and the address out of the release document (Passwall-Node#40); and
 //   - PSP's own cmd/compatwatch, which now parses the tag into a version before
-//     reconciling it against internal/adapters/noderelease/reviewed.json (#183).
+//     reconciling it against docs/compat/passwall-node-v4.json (#183).
 //
 // Both landed, so this test is REWRITTEN to require the pattern rather than
 // deleted — the same way its counterpart PN test is, and for the same reason: the

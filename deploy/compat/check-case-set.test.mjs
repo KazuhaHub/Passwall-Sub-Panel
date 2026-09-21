@@ -19,7 +19,7 @@ import { after, test } from 'node:test'
 // ---------------------------------------------------------------------------
 
 const CHECKER = fileURLToPath(new URL('check-case-set.mjs', import.meta.url))
-const MANIFEST = fileURLToPath(new URL('../../docs/compat/node-v4.json', import.meta.url))
+const MANIFEST = fileURLToPath(new URL('../../docs/compat/passwall-node-v4.json', import.meta.url))
 
 // A TWO-RELEASE MANIFEST, BECAUSE MOST OF THESE CASES ARE ABOUT A SET.
 //
@@ -31,7 +31,7 @@ const MANIFEST = fileURLToPath(new URL('../../docs/compat/node-v4.json', import.
 // below exercise is the gate rather than the file.
 const EXTRA_RELEASES = ['4.0.1', '4.0.2', '4.0.3']
 const manifestDir = mkdtempSync(join(tmpdir(), 'psp-manifest-'))
-const MANIFEST_TWO = join(manifestDir, 'node-v4.json')
+const MANIFEST_TWO = join(manifestDir, 'passwall-node-v4.json')
 after(() => rmSync(manifestDir, { recursive: true, force: true }))
 
 function twoReleaseManifest() {
@@ -166,7 +166,7 @@ test('a shortened version list narrows the expected set rather than being ignore
   // gate must follow it, or a floor move would leave the gate demanding reports
   // for versions the matrix no longer runs.
   const manifest = JSON.parse(readFileSync(MANIFEST_TWO, 'utf8'))
-  const trimmed = join(mkdtempSync(join(tmpdir(), 'psp-manifest-')), 'node-v4.json')
+  const trimmed = join(mkdtempSync(join(tmpdir(), 'psp-manifest-')), 'passwall-node-v4.json')
   writeFileSync(trimmed, JSON.stringify({ ...manifest, min_supported: EXTRA_RELEASES.at(-1) }))
   const { code, result } = check(everyCase, { extraArgs: ['--manifest', trimmed] })
   assert.equal(code, 0)

@@ -67,7 +67,7 @@ function realVerification() {
 }
 
 function realManifest() {
-  return JSON.parse(readFileSync(new URL('../../docs/compat/node-v4.json', import.meta.url), 'utf8'))
+  return JSON.parse(readFileSync(new URL('../../docs/compat/passwall-node-v4.json', import.meta.url), 'utf8'))
 }
 
 const SUPPORTED = (() => {

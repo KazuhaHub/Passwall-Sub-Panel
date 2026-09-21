@@ -57,7 +57,7 @@ func supportedFromFloor(matrix nodeCompatibilityMatrix) []string {
 }
 
 func TestNodeV4CompatibilityMatrixMatchesSharedProtocolPolicy(t *testing.T) {
-	raw, err := os.ReadFile("../../docs/compat/node-v4.json")
+	raw, err := os.ReadFile("../../docs/compat/passwall-node-v4.json")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,7 +65,12 @@ func TestNodeV4CompatibilityMatrixMatchesSharedProtocolPolicy(t *testing.T) {
 	if err := json.Unmarshal(raw, &matrix); err != nil {
 		t.Fatal(err)
 	}
-	if matrix.SchemaVersion != 1 || matrix.PanelMajor != 4 || matrix.Wire.Endpoint != "/v1/node/sync" ||
+	// SCHEMA 2 IS THE DOCUMENT THAT ALSO CARRIES THE RELEASE CATALOG. The rows gained
+	// the review notes, install methods, platforms and published Docker tag the
+	// upgrade dialog shows, which the panel used to read from a file compiled into
+	// it. The fields THIS test reads are unchanged, which is why it still asserts
+	// the same protocol policy.
+	if matrix.SchemaVersion != 2 || matrix.PanelMajor != 4 || matrix.Wire.Endpoint != "/v1/node/sync" ||
 		matrix.Wire.MinProtocolVersion != nodeprotocol.MinSupportedProtocolVersion ||
 		matrix.Wire.MaxProtocolVersion != nodeprotocol.MaxSupportedProtocolVersion ||
 		matrix.Wire.LegacyZeroMapsTo != nodeprotocol.EffectiveProtocolVersion(0) {

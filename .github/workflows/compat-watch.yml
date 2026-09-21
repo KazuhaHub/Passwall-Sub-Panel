@@ -37,14 +37,18 @@ on:
   workflow_dispatch:
   # Also on changes to the inputs, so an edit that puts the compat file out of
   # reach of its own watcher is caught on the PR rather than on the next Monday.
-  # reviewed.json is listed for the same reason from the other direction: adding
-  # a release is the very edit this check has an opinion about.
+  #
+  # THE EMBEDDED COPY IS LISTED SEPARATELY BECAUSE `docs/compat/**` DOES NOT COVER
+  # IT. The copy the panel ships is a compat input — adding a release means editing
+  # it and the published document together — and a change to only one of them is
+  # exactly the drift a guard test already rejects. Watching it here is what makes
+  # that edit run the check as well.
   pull_request:
     paths:
       - "docs/compat/**"
       - "cmd/compatwatch/**"
       - "internal/version/ceiling*.go"
-      - "internal/adapters/noderelease/reviewed.json"
+      - "internal/adapters/noderelease/passwall-node-v4.json"
       - ".github/workflows/compat-watch.yml"
 
 permissions:
@@ -80,7 +84,7 @@ jobs:
           set -e
           case "$code" in
             0) echo "::notice::Upstream ceilings are current and every published Node release is accounted for." ;;
-            1) echo "::error::A compat gap is real. Either an upstream has released past its tested ceiling (do the live-panel review in docs/3xui-compat.md before moving the number in docs/compat/v4-ranges.json), or a published Node release is neither reviewed in internal/adapters/noderelease/reviewed.json nor excluded there with a reason. The table above names which." ;;
+            1) echo "::error::A compat gap is real. Either an upstream has released past its tested ceiling (do the live-panel review in docs/3xui-compat.md before moving the number in docs/compat/3x-ui-v4.json or docs/compat/sui-v4.json), or a published Node release has been neither reviewed in docs/compat/passwall-node-v4.json nor refused with a reason in docs/compat/releases-v1.json. The table above names which." ;;
             2) echo "::error::A comparison could not be made — the watcher itself needs attention (upstream repo moved, API shape changed, or rate limited). This is NOT a clean bill of health." ;;
             *) echo "::error::compatwatch exited $code" ;;
           esac

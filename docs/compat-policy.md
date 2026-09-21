@@ -87,7 +87,7 @@ release 固定到 SHA，运行基础 profile 与声明的升级／回退验证�
 | --- | --- | --- |
 | `CompatStatus.supported` | 运行时判断 | 当前能跟这台第三方面板通话；`version >= 下限 && <= 最后实测`，低于下限即 `too_old`。见 `internal/version/compat.go` |
 | PN `min_supported`／“supported set” | 测试选择 | 这一版还在 CI 里被跑。只有两条 workflow 与矩阵测试读取，生产代码零消费者 |
-| 单行 `base_sync: "supported"` | 证据状态 | 在这一版上**验证过**基础同步。见 `docs/compat/node-v4.json` 的 `released_nodes` |
+| 单行 `base_sync: "supported"` | 证据状态 | 在这一版上**验证过**基础同步。见 `docs/compat/passwall-node-v4.json` 的 `released_nodes` |
 
 三者方向相反：运行时结论低于下限就**拒绝**，测试选择低于 floor 只是**不再测**，证据状态
 只描述**已经测过什么**。混用会得出错误的保证——尤其把 `min_supported` 读成运行时拒绝器，
@@ -280,12 +280,12 @@ PR 不使用生产凭据或生产后端；外部 PR 不能通过高权限 workfl
 
 | 现有入口 | 证据类型 | 已有基础 | 不能据此宣称 |
 | --- | --- | --- | --- |
-| [ADR 0033](adr/0033-native-node-compatibility-and-upgrade-admission.md)、[PN 矩阵](compat/node-v4.json) | `wire-contract` | v1 范围、升级能力门控、保留旧 PN | 完整双向支持与任意升级路径 |
+| [ADR 0033](adr/0033-native-node-compatibility-and-upgrade-admission.md)、[PN 矩阵](compat/passwall-node-v4.json) | `wire-contract` | v1 范围、升级能力门控、保留旧 PN | 完整双向支持与任意升级路径 |
 | [PSP Test workflow](../.github/workflows/test.yml) | `wire-contract` | 固定 PN 依赖与从 min_supported 派生的 beta1–beta11 协议测试 | 完整 Bearer 认证、安装和真实核心链路 |
 | [协议测试说明](../internal/service/nodesync/contract_live_test.go) | `wire-contract` | 实际 HTTP／状态／收敛，确定性核心替身 | 真实代理握手及内核计数恢复 |
 | [旧 PSP 人工验证记录](psp-node-rootless-observability-progress.md) | `wire-contract`（人工、一次性） | 具体旧 PSP／新 PN 的观测上报实测记录 | 所有基础功能或反方向持续 CI |
 | PN `.github/workflows/test.yml` 升级 E2E | `upgrade-mechanism` | 当前源码带不同版本身份验证升级机制 | 真实历史数据迁移兼容 |
-| [第三方矩阵](compat/v4-ranges.json)、[live tests](../internal/adapters/sui/client_live_test.go) | `adapter-live` | 有实测范围记录和隔离测试入口 | 版本范围内所有发布物／完整流量都已测试 |
+| [第三方矩阵](compat/3x-ui-v4.json)、[live tests](../internal/adapters/sui/client_live_test.go) | `adapter-live` | 有实测范围记录和隔离测试入口 | 版本范围内所有发布物／完整流量都已测试 |
 | [上游 watcher](../.github/workflows/compat-watch.yml) | —（发现，不是证据） | 每周发现超出已测上限的新版本 | 自动认证新上游 |
 
 **六类里今天只有三类有实例。** 上表覆盖 `wire-contract`、`adapter-live` 和

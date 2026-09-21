@@ -51,13 +51,27 @@ var upstreams = []struct {
 	{Name: "S-UI", Repo: "alireza0/s-ui"},
 }
 
-const compatPath = "docs/compat/v4-ranges.json"
-
-// nodeRegistryPath is the reviewed allowlist that decides which Node releases
-// the panel offers for remote upgrade, and nodeRepo is where the releases it
-// must account for are published.
+// THE RANGES ARE ONE DOCUMENT PER UPSTREAM, and that is the shape the panel reads:
+// a 3X-UI review and an S-UI review are separate publications now, so a watcher
+// that read one file for both would be checking something the panel no longer has
+// — and would report a ceiling for an upstream whose document moved elsewhere.
 const (
-	nodeRegistryPath = "internal/adapters/noderelease/reviewed.json"
+	xuiCompatPath = "docs/compat/3x-ui-v4.json"
+	suiCompatPath = "docs/compat/sui-v4.json"
+)
+
+// nodeRegistryPath is the published manifest whose rows decide which Node releases
+// the panel offers, nodePolicyPath is the signed policy that records the releases
+// ruled OUT, and nodeRepo is where the releases it must account for are published.
+//
+// TWO DOCUMENTS BECAUSE THE ROWS MOVED. This used to read one hand-maintained
+// registry carrying both the reviewed releases and the decisions about versions
+// passed over. The reviewed releases now live in the manifest the panel reads, and
+// a refusal is an ADMISSION decision that belongs with the other admission rules —
+// in the policy document — rather than as a note beside the releases.
+const (
+	nodeRegistryPath = "docs/compat/passwall-node-v4.json"
+	nodePolicyPath   = "docs/compat/releases-v1.json"
 	nodeRepo         = "KazuhaHub/Passwall-Node"
 )
 
@@ -228,15 +242,33 @@ func main() {
 }
 
 func run() error {
-	raw, err := os.ReadFile(compatPath)
-	if err != nil {
-		return fmt.Errorf("read %s (run from the repo root): %w", compatPath, err)
+	now := time.Now().UTC()
+	ceilings := map[string]string{}
+	for _, source := range []struct{ upstream, path string }{
+		{"3X-UI", xuiCompatPath},
+		{"S-UI", suiCompatPath},
+	} {
+		raw, err := os.ReadFile(source.path)
+		if err != nil {
+			return fmt.Errorf("read %s (run from the repo root): %w", source.path, err)
+		}
+		product, ceiling, err := version.CeilingFromDocument(raw, now)
+		if err != nil {
+			return fmt.Errorf("%s: %w", source.path, err)
+		}
+		// THE DOCUMENT HAS TO BE ABOUT THE UPSTREAM IT IS READ FOR. The two files are
+		// named after their products, and a 3X-UI document served under the S-UI path
+		// would otherwise have its ceiling compared against the wrong upstream — a
+		// permanent false alarm, or a permanent silence.
+		want := map[string]string{"3X-UI": "3x-ui", "S-UI": "sui"}[source.upstream]
+		if product != want {
+			return fmt.Errorf("%s says it is a %s document, and it is read here for %s", source.path, product, source.upstream)
+		}
+		if ceiling == "" {
+			return fmt.Errorf("%s publishes no %s ceiling", source.path, source.upstream)
+		}
+		ceilings[source.upstream] = ceiling
 	}
-	xuiCeiling, suiCeiling, err := version.CeilingsFromCompatJSON(raw)
-	if err != nil {
-		return fmt.Errorf("%s: %w", compatPath, err)
-	}
-	ceilings := map[string]string{"3X-UI": xuiCeiling, "S-UI": suiCeiling}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
@@ -267,6 +299,17 @@ func run() error {
 	if err := json.Unmarshal(registryRaw, &registry); err != nil {
 		return fmt.Errorf("%s: %w", nodeRegistryPath, err)
 	}
+	policyRaw, err := os.ReadFile(nodePolicyPath)
+	if err != nil {
+		return fmt.Errorf("read %s (run from the repo root): %w", nodePolicyPath, err)
+	}
+	var policy struct {
+		Refusals []nodeRegistryExclusion `json:"refusals"`
+	}
+	if err := json.Unmarshal(policyRaw, &policy); err != nil {
+		return fmt.Errorf("%s: %w", nodePolicyPath, err)
+	}
+	registry.Refusals = append(registry.Refusals, policy.Refusals...)
 	tags, releaseErr := api.allReleases(ctx, nodeRepo)
 	published, identifyErr := publishedReleases(tags)
 	reports = append(reports, nodeRegistryReport(registry, published, errors.Join(releaseErr, identifyErr)))
@@ -301,26 +344,31 @@ type nodeRegistryExclusion struct {
 	Reason  string `json:"reason"`
 }
 
+// nodeRegistry is the manifest's rows, plus the refusals the policy records.
+//
+// released_nodes IS THE MANIFEST'S KEY. It is the same row list the CI planner
+// reads by position at min_supported and the panel reads for what to offer; this
+// watcher needs only the versions, so the extra per-row fields are ignored.
 type nodeRegistry struct {
-	Releases []nodeRegistryRelease   `json:"releases"`
-	Excluded []nodeRegistryExclusion `json:"excluded"`
+	Releases []nodeRegistryRelease   `json:"released_nodes"`
+	Refusals []nodeRegistryExclusion `json:"refusals"`
 }
 
-// accounted lists every release the registry has ruled on.
+// accounted lists every release the documents have ruled on.
 //
-// AN EXCLUSION WITHOUT A REASON IS NOT A DECISION, so it does not count. The
-// point of recording one is that the next reader learns why a release is not
-// offered; an entry that only names the version moves the silence one line
-// down instead of resolving it, and would let a release be skipped as quietly as
-// forgetting about it.
+// A REFUSAL WITHOUT A REASON IS NOT A DECISION, so it does not count. The point of
+// recording one is that the next reader learns why a release is not offered; an
+// entry that only names the version moves the silence one line down instead of
+// resolving it, and would let a release be skipped as quietly as forgetting about
+// it.
 func (r nodeRegistry) accounted() []string {
-	versions := make([]string, 0, len(r.Releases)+len(r.Excluded))
+	versions := make([]string, 0, len(r.Releases)+len(r.Refusals))
 	for _, release := range r.Releases {
 		versions = append(versions, release.Version)
 	}
-	for _, excluded := range r.Excluded {
-		if excluded.Reason != "" {
-			versions = append(versions, excluded.Version)
+	for _, refused := range r.Refusals {
+		if refused.Reason != "" {
+			versions = append(versions, refused.Version)
 		}
 	}
 	return versions
@@ -541,10 +589,10 @@ func writeTable(w io.Writer, reports []version.CeilingReport) {
 // whose entries carry prose. One hardcoded message was correct while every row
 // was an upstream — reusing it would send a maintainer to edit the wrong file.
 const panelCeilingRemedy = "needs a review pass before the ceiling moves — see `docs/3xui-compat.md`. " +
-	"Do not bump `" + compatPath + "` without it."
+	"Do not bump `" + xuiCompatPath + "` or `" + suiCompatPath + "` without it."
 
 const nodeRegistryRemedy = "has published releases nobody has ruled on. Review each into `" + nodeRegistryPath + "`, " +
-	"or record it under `excluded` with the reason it is not offered."
+	"or record it under `refusals` in `" + nodePolicyPath + "` with the reason it is not offered."
 
 func remedyFor(upstream string) string {
 	if upstream == nodeRegistryUpstream {

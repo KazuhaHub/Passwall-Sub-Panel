@@ -29,7 +29,9 @@ PSP 通过 `/panel/api/*` 对接 3X-UI 面板。本文档维护两件事：
 
 > S-UI 侧没有 `min_sui`：上限验过了，但「支持到多旧」从来没有人确立过，而 `CheckSUI` 只对**显式发布过的** floor 报 too_old。
 
-> 这张表是人看的速查；运行时按 PSP major 使用 `docs/compat/v3.json` 或 `docs/compat/v4.json`。v4 基础清单另指向 `v4-ranges.json`：新版本读取 prerelease-aware 范围，旧 beta 忽略该字段并继续使用保守基础范围。`min_xui` 和 `max_tested_xui` 两个字段**都已接入运行时**(PSP 按需拉取并据此判 too_old / untested)。S-UI 使用对应的 `sui_entries`。
+> 这张表是人看的速查；运行时按 PSP major 取文档，且**每个上游一份**：legacy 构建读 `docs/compat/v3.json`，产品构建读 `docs/compat/3x-ui-v4.json` 与 `docs/compat/sui-v4.json`。`min_xui` 和 `max_tested_xui` 两个字段**都已接入运行时**（PSP 按需拉取并据此判 too_old / untested），S-UI 用 `docs/compat/sui-v4.json` 的 `sui_entries`。
+>
+> 拆分之前是一份文档同时装两个面板，所以一次 3X-UI 评审要改的文件里也装着 S-UI 的上限。现在**文件名说去哪儿找，文档里的 `applies_to_psp` 说找到的那份算不算数**：名字不是证据，名字只是地址。
 
 **规则**:
 - "最低 3X-UI" = 该 PSP 版本能正常工作的最早 3X-UI 版本(低于这个会破)
@@ -46,7 +48,7 @@ V3 从 `v3.9.2` 分叉到长期维护分支 `release/v3`。V3 只接受兼容性
 
 本次用 **V3 分支本身**连接 tag `7ef22f94` 构建的真实 3X-UI 3.8.5 / Xray 26.9.9。完整接口、REALITY 扫描、连接限制、五组流量底线、批量启停、共享客户端迁移、批量删除和并发写入测试全部通过；共享客户端测试使用两个真实禁用入站，无跳过项。面板回报 `panelVersion=3.8.5`、`xrayVersion=26.9.9`，扫描确认 `CurveID=X25519MLKEM768`。因此只有 v3.9.3+ 的新窄范围将 `max_tested_xui` 提升到 3.8.5；v3.9.1–v3.9.2 继续保持 3.7.0。
 
-V4 beta.9 已包含同类修复。原 schema-v2 清单会丢弃 `-beta.N` 后缀，因此 `v4.json` 保持保守范围供旧二进制读取，`v4-ranges.json` schema-v3 overlay 则让新构建按完整 SemVer 将 beta.9+ 与 stable 认证到 3.8.5；历史 beta 仍停在 3.7.0。
+V4 beta.9 已包含同类修复。当时用「基础清单 + schema-v3 overlay」两份文件表达「beta.9 起认证到 3.8.5、更早的 beta 停在 3.7.0」：基础清单保守，overlay 按完整 SemVer 区分 prerelease。**这套结构已随旧命名一起删除** —— 那一批 beta 不再是任何构建的身份，被它们拆开的那条范围也就没有对象可匹配。现在每个上游一份文档，一条范围。
 
 S-UI [v1.6.3](https://github.com/alireza0/s-ui/releases/tag/v1.6.3) 将 sing-box 升级到 1.14.1，新增实时会话查询/断开和 Snell 多用户支持，并修复客户端重新启用后被流量重置逻辑再次停用的问题。同一 V3 分支在由 1.6.2 数据库升级而来的真实 1.6.3 面板上通过 `TestLive_SUISurface` 和 `TestLive_SUIBulkSetEnabled`：Token、状态、入站及客户端完整生命周期、批量启停与凭据保留均兼容。新增 API 为附加项，Client/Inbound 存储形状未变，无需修改 S-UI 适配器；v3/v4 已测上限均抬到 1.6.3。验证未覆盖完整代理流量。
 
@@ -482,15 +484,18 @@ PSP `rawInbound` 这四个字段定义为 Go `string`,`json.Unmarshal` 一个 ob
 
 ### 何时改 / 改什么
 
-- **新 3X-UI 出 patch 版本(无 API 改动)** ── 在当前 active major 的 JSON 里把
-  覆盖你 PSP 版本那条 entry 的 `max_tested_xui` 改成新版本号,顺手更新 `updated_at`
+- **新 3X-UI 出 patch 版本(无 API 改动)** ── 在 `docs/compat/3x-ui-v4.json` 里把
+  覆盖你 PSP 版本那条 entry 的 `max_tested_xui` 改成新版本号,顺手更新 `issued_at`
   和 `notes`。commit + push 到 main → 所有该 major 的 PSP 部署 60 秒内自动感知。
-- **PSP 发新 minor (比如 v3.6 → v3.7)** ── 在当前 major 的 JSON 加新 entry,
-  `psp_min: "v3.7.0"`, `psp_max: "v3.7.99"`,把新 entry 放在 `entries` 数组**最前**
+  **S-UI 改 `docs/compat/sui-v4.json`** —— 两个上游是两份文档,改一份不会碰另一份的上限。
+- **PSP 发新 minor (比如 v4.0 → v4.1)** ── 在 `docs/compat/3x-ui-v4.json` 加新 entry,
+  `psp_min: "4.1.0"`, `psp_max: "4.1.99"`,把新 entry 放在 `entries` 数组**最前**
   (first-match-wins 让新版优先匹配)。
-- **PSP 发新 major (比如 v3.x → v4.0)** ── 新建 `docs/compat/v4.json`,内部 `major: 4`,
-  entries 从只覆盖 v4.0 的 baseline 开始。`v3.json` 保持不动 — 仍跑 v3.x 的部署继续从
-  那个文件拿数据。
+- **PSP 发新 major (比如 v4 → v5)** ── 新建 `docs/compat/3x-ui-v5.json`、
+  `docs/compat/sui-v5.json` 与 `docs/compat/passwall-node-v5.json`,各自的
+  `applies_to_psp` 从只覆盖 v5.0 的 baseline 开始,PN 那份另需一条 v5 的
+  `released_nodes`。**旧 major 的文档保持不动** —— `v3.json` 是这样,新建的 v4 三份
+  也一样:仍跑那个 major 的部署继续从它们的文件名拿数据。
 - **patch 级精度区间(罕见)** ── 比如 v3.6.5-v3.6.8 单独验过 3.2.0,其它 v3.6.x
   还是 3.1.0:在 entries 数组前面插入一条更窄的 entry(narrower 在前 = first-match
   生效),broader 的 baseline 在后面兜底。

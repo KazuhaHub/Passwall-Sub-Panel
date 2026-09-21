@@ -6,7 +6,7 @@ import { test } from 'node:test'
 import { checkReleasesPolicy } from './check-releases-policy.mjs'
 
 const policy = fileURLToPath(new URL('../../docs/compat/releases-v1.json', import.meta.url))
-const nodeManifest = fileURLToPath(new URL('../../docs/compat/node-v4.json', import.meta.url))
+const nodeManifest = fileURLToPath(new URL('../../docs/compat/passwall-node-v4.json', import.meta.url))
 const verification = fileURLToPath(new URL('../../docs/compat/verification-v1.json', import.meta.url))
 
 const read = path => JSON.parse(readFileSync(path, 'utf8'))

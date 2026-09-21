@@ -24,7 +24,7 @@
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 
-const NODE_MANIFEST = fileURLToPath(new URL('../../docs/compat/node-v4.json', import.meta.url))
+const NODE_MANIFEST = fileURLToPath(new URL('../../docs/compat/passwall-node-v4.json', import.meta.url))
 const VERIFICATION = fileURLToPath(new URL('../../docs/compat/verification-v1.json', import.meta.url))
 const POLICY = fileURLToPath(new URL('../../docs/compat/releases-v1.json', import.meta.url))
 
@@ -46,13 +46,13 @@ export function checkReleasesPolicy({ policy, nodeManifest, verification }) {
     const node = known.get(release.version)
     if (!node) {
       problems.push(
-        `${release.version} is offered but docs/compat/node-v4.json does not list it — the panel cannot identify a target it does not know`,
+        `${release.version} is offered but docs/compat/passwall-node-v4.json does not list it — the panel cannot identify a target it does not know`,
       )
       continue
     }
     if (node.remote_upgrade === 'unsupported') {
       problems.push(
-        `${release.version} is offered as an upgrade target but node-v4.json records remote_upgrade=unsupported — two documents in this repository contradict each other`,
+        `${release.version} is offered as an upgrade target but passwall-node-v4.json records remote_upgrade=unsupported — two documents in this repository contradict each other`,
       )
     }
     if (!pinned.has(release.version)) {
@@ -67,7 +67,7 @@ export function checkReleasesPolicy({ policy, nodeManifest, verification }) {
 
   for (const version of refused) {
     if (!known.has(version)) {
-      problems.push(`refusal ${version} names a version node-v4.json does not list — check for a typo`)
+      problems.push(`refusal ${version} names a version passwall-node-v4.json does not list — check for a typo`)
     }
   }
 

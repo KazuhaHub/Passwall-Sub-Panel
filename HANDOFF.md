@@ -154,8 +154,10 @@ S-UI 尚未开放：现有快照是有损投影，需要原始 inbound/TLS 比�
 不为稳定版／测试版另建长期分支。渠道对应 GitHub 的 Release／Pre-release；安装始终锁定
 准确 release tag，而不是分支或浮动标签。安装页面默认稳定渠道，管理员明确选择渠道和版本；
 暂无兼容正式版时不自动回落测试版。版本列表只纳入本版 PSP 明确登记兼容、官方已发布且具备
-对应安装资产的版本；登记源为 `internal/adapters/noderelease/reviewed.json`，编译进 PSP。
-新 Passwall Node 版本须先核验、登记并随新 PSP 版本发布，不能仅凭正式版标记推断兼容。
+对应安装资产的版本；登记源为 `docs/compat/passwall-node-v4.json`，面板**运行时拉取**它，
+并在拉不到时回退到二进制内**字节相同**的副本（见 `internal/adapters/noderelease/`）。
+新 Passwall Node 版本须先核验并登记进那份文档，不能仅凭正式版标记推断兼容；
+登记**不再需要**随之发布一次 PSP —— 扩登记源是改文档，不是改代码。
 现有服务器身份、凭据、已安装版本不随渠道选择改变，也不自动升级。`latest` 仍仅正式版，
 Docker `beta` 保持“最新的任意发行版（含正式版）”语义；Passwall Node 与代理内核目录分开。
 

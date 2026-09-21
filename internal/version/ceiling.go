@@ -3,9 +3,10 @@ package version
 import (
 	"encoding/json"
 	"fmt"
+	"time"
 )
 
-// The tested ceiling (max_tested_xui / max_tested_sui in docs/compat/v3.json)
+// The tested ceiling (max_tested_xui / max_tested_sui in the ranges documents)
 // is the one compat fact that goes stale WITHOUT anybody editing anything: it
 // is a statement about an upstream that keeps shipping. Everything else in that
 // file drifts only when a human changes a line, and TestMinXUIConstMatchesCompatJSON
@@ -109,6 +110,45 @@ func CeilingsFromCompatJSON(raw []byte) (xui string, sui string, err error) {
 	if len(payload.Entries) == 0 {
 		return "", "", fmt.Errorf("compat json has no entries")
 	}
+	xui, sui = ceilingsFromPayload(payload)
+	if xui == "" {
+		return "", "", fmt.Errorf("no entry has a parseable psp_max")
+	}
+	return xui, sui, nil
+}
+
+// CeilingFromDocument reads ONE product's ranges document and returns which
+// product it is and the tested ceiling that product publishes.
+//
+// IT EXISTS BECAUSE CeilingsFromCompatJSON CANNOT ANSWER THIS. That function reads
+// a manifest carrying both panels and requires the 3X-UI half to be present, which
+// is right for the per-major files and wrong for a per-product document: an S-UI
+// document has no entries at all, and reading one through the manifest's rules
+// would call it empty rather than calling it S-UI's.
+func CeilingFromDocument(raw []byte, now time.Time) (product string, ceiling string, err error) {
+	policy, err := ParsePanelRangesPolicy(raw, now)
+	if err != nil {
+		return "", "", err
+	}
+	window := policy.AppliesToPSP
+	payload := remoteCompatPayload{
+		SchemaVersion: schemaVersion, Product: policy.Product,
+		Entries: policy.Entries, SUIEntries: policy.SUIEntries,
+		Advisories: policy.Advisories, SUIAdvisories: policy.SUIAdvisories,
+		AppliesToPSP: &window,
+	}
+	xui, sui := ceilingsFromPayload(payload)
+	if policy.Product == productXUI {
+		return policy.Product, xui, nil
+	}
+	return policy.Product, sui, nil
+}
+
+// ceilingsFromPayload returns the tested ceiling each product's rows publish. AN
+// ABSENT HALF YIELDS AN EMPTY CEILING RATHER THAN AN ERROR: a document that is
+// about one product has nothing to say about the other, and that is a state the
+// callers render as unknown rather than a defect to report.
+func ceilingsFromPayload(payload remoteCompatPayload) (xui string, sui string) {
 	var bestXUI [3]int
 	var haveXUI bool
 	for _, e := range payload.Entries {
@@ -119,9 +159,6 @@ func CeilingsFromCompatJSON(raw []byte) (xui string, sui string, err error) {
 		if !haveXUI || cmpSemver(v, bestXUI) > 0 {
 			bestXUI, haveXUI, xui = v, true, e.MaxTestedXUI
 		}
-	}
-	if !haveXUI {
-		return "", "", fmt.Errorf("no entry has a parseable psp_max")
 	}
 	var bestSUI [3]int
 	var haveSUI bool
@@ -134,5 +171,5 @@ func CeilingsFromCompatJSON(raw []byte) (xui string, sui string, err error) {
 			bestSUI, haveSUI, sui = v, true, e.MaxTestedSUI
 		}
 	}
-	return xui, sui, nil
+	return xui, sui
 }

@@ -1,6 +1,6 @@
 # 兼容体系交接包
 
-日期：2026-09-19。配套：[整改实施手册](compat-remediation-plan.md)、[维护 SOP](compat-maintenance.md)、[机器可读政策](compat/node-v4.json)。
+日期：2026-09-19。配套：[整改实施手册](compat-remediation-plan.md)、[维护 SOP](compat-maintenance.md)、[机器可读政策](compat/passwall-node-v4.json)。
 
 手册 §15 要求交付一份交接包，列出合并 PR、两仓 SHA、支持政策、required case 清单、通过与失败注入证据、已知限制、运行时示例、发布 needs 图、分支保护设置和下一位维护者的操作命令。这份文档就是那份包，**每一项都指向可核对的东西**，不是一句"已完成"。
 
@@ -42,10 +42,10 @@ PN：
 
 | 文件 | 是什么 | 权威性 |
 | --- | --- | --- |
-| `docs/compat/node-v4.json` | 运行时清单：wire 世代、features、`upgrade_edges`、`min_supported`、`released_nodes` | PSP 运行时拉取的那一份 |
+| `docs/compat/passwall-node-v4.json` | 运行时清单：wire 世代、features、`upgrade_edges`、`min_supported`、`released_nodes` | PSP 运行时拉取的那一份 |
 | `docs/compat/verification-v1.json` | 身份固定：每个 tag 当初解引用到的**提交**、profile 断言、`upgrade_edges` 的权威副本 | 规划器读取的那一份 |
 | `deploy/compat/profiles.json`、`profiles-third-party.json` | 逐 case 的 required / notApplicable 闭集 | 两个校验器读取 |
-| `docs/compat/v4-ranges.json` | 第三方后端的**实测记录** | **不是政策**，是人类评审的留痕 |
+| `docs/compat/3x-ui-v4.json` | 第三方后端的**实测记录** | **不是政策**，是人类评审的留痕 |
 
 ## 4. required case 清单
 

@@ -220,7 +220,7 @@ func TestNodeRegistryReport(t *testing.T) {
 		// Decided, and the next reader can see why.
 		excluded := nodeRegistryReport(nodeRegistry{
 			Releases: []nodeRegistryRelease{{Version: "4.0.0"}},
-			Excluded: []nodeRegistryExclusion{
+			Refusals: []nodeRegistryExclusion{
 				{Version: "4.0.2", Reason: "broken installer"},
 				{Version: "4.1.0", Reason: "superseded by beta11"},
 				{Version: "4.1.1", Reason: "withdrawn before rollout"},
@@ -233,7 +233,7 @@ func TestNodeRegistryReport(t *testing.T) {
 		// it, so it must not count as having ruled on the release.
 		silent := nodeRegistryReport(nodeRegistry{
 			Releases: []nodeRegistryRelease{{Version: "4.0.0"}},
-			Excluded: []nodeRegistryExclusion{
+			Refusals: []nodeRegistryExclusion{
 				{Version: "4.0.2", Reason: "broken installer"},
 				{Version: "4.1.0", Reason: "superseded by beta11"},
 				{Version: "4.1.1"},
@@ -339,8 +339,13 @@ func TestRemedyPointsAtTheRightFile(t *testing.T) {
 		{Upstream: nodeRegistryUpstream, Ceiling: "4.0.2", Latest: "4.1.1", Verdict: version.CeilingBehind, Reason: "unaccounted"},
 	})
 	out := sb.String()
-	if !strings.Contains(out, compatPath) {
-		t.Errorf("the panel row must name %s:\n%s", compatPath, out)
+	// BOTH RANGES DOCUMENTS, because the panel row's remedy is "review before the
+	// ceiling moves" and which document a maintainer bumps depends on the upstream
+	// the review is for. Naming one would send half the readers to the wrong file.
+	for _, path := range []string{xuiCompatPath, suiCompatPath} {
+		if !strings.Contains(out, path) {
+			t.Errorf("the panel row must name %s:\n%s", path, out)
+		}
 	}
 	if !strings.Contains(out, nodeRegistryPath) {
 		t.Errorf("the registry row must name %s:\n%s", nodeRegistryPath, out)
@@ -349,7 +354,7 @@ func TestRemedyPointsAtTheRightFile(t *testing.T) {
 	// row, or a reader cannot tell which gap the instruction answers.
 	var panelLine, registryLine bool
 	for _, line := range strings.Split(out, "\n") {
-		if strings.HasPrefix(line, "3X-UI ") && strings.Contains(line, compatPath) {
+		if strings.HasPrefix(line, "3X-UI ") && strings.Contains(line, xuiCompatPath) {
 			panelLine = true
 		}
 		if strings.HasPrefix(line, nodeRegistryUpstream+" ") && strings.Contains(line, nodeRegistryPath) {
