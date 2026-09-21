@@ -162,12 +162,15 @@ async function fixture(request, response, url) {
         : { ok: true, inbound_count: 3 });
     }
     if (pathname === '/api/admin/servers/7/node-install-command') {
-      assert.deepEqual(body, { version });
+      // THE BODY IS THE CONTRACT, and it gained the mode: the panel states which of
+      // the two installation decisions it is asking for rather than leaving the
+      // installer to infer one from a version string.
+      assert.deepEqual(body, { version, mode: 'install' });
       return reply(response, command(7));
     }
     const createdCommand = previewOnly && pathname.match(/^\/api\/admin\/servers\/(\d+)\/node-install-command$/);
     if (createdCommand && previewCreatedIDs.has(Number(createdCommand[1]))) {
-      assert.deepEqual(body, { version });
+      assert.deepEqual(body, { version, mode: 'install' });
       return reply(response, command(Number(createdCommand[1])));
     }
     if (pathname === '/api/admin/servers/17/node-migration-command') {
