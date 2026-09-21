@@ -2404,7 +2404,10 @@
         "running": "Proxy core confirmed running",
         "error": "Agent or core reported an error. Check the node logs."
       },
-      "release_no_target_for_node": "No release in this channel applies to this node."
+      "release_no_target_for_node": "No release in this channel applies to this node.",
+      "upgrade_in_place": "Replace the release in place (upgrade)",
+      "upgrade_in_place_hint": "Keeps the node identity and its state; only the installed release changes. Required when the node is already on another release.",
+      "upgrade_in_place_needed": "This node reports version {{version}}. Without replacing the release in place the installer refuses at the host."
     },
     "table": {
       "name": "Server name",

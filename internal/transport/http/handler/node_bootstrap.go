@@ -34,11 +34,15 @@ type bootstrapTicket struct {
 	expires                          time.Time
 	version, endpoint, completionURL string
 	agentID, digest                  string
-	fingerprint, core                string
-	allowRestricted                  bool
-	migration                        bool
-	downloaded                       bool
-	callbackToken                    string
+	// mode is what the installer is asked to do where an installation already
+	// exists. It is carried on the ticket because the script is rendered when the
+	// ticket is redeemed, not when it is minted.
+	mode              string
+	fingerprint, core string
+	allowRestricted   bool
+	migration         bool
+	downloaded        bool
+	callbackToken     string
 	// Remember the attempted identity before Apply: a lost commit acknowledgement
 	// must never cause a retry to create a second identity.
 	attempt        *domain.NodeAgent
@@ -180,6 +184,9 @@ func (h *NodeBootstrapHandler) MintInstall(c *gin.Context) {
 	}
 	var req struct {
 		Version string `json:"version"`
+		// Mode is how an operator asks to replace the RELEASE of the installation
+		// that is already on the host, keeping its identity. Absent means install.
+		Mode string `json:"mode"`
 	}
 	if c.ShouldBindJSON(&req) != nil || !h.reviewedLinux(c, req.Version) {
 		if !c.Writer.Written() {
@@ -196,13 +203,13 @@ func (h *NodeBootstrapHandler) MintInstall(c *gin.Context) {
 	// rendered when the ticket is redeemed. The version was already confirmed
 	// against the published releases by reviewedLinux above.
 	if err := h.servers.validateInstallScript(ports.InstallTemplateRequest{Endpoint: provisioning.Endpoint,
-		AgentID: provisioning.AgentID, Credential: provisioning.Credential, Version: req.Version}); err != nil {
-		bootstrapInstallRefused(c, err, "a canonical HTTPS PSP endpoint is required")
+		AgentID: provisioning.AgentID, Credential: provisioning.Credential, Version: req.Version, Mode: req.Mode}); err != nil {
+		bootstrapInstallRefused(c, err, "a canonical HTTPS PSP endpoint and a supported installation mode are required")
 		return
 	}
 	digest := sha256.Sum256([]byte(provisioning.Credential))
 	t := &bootstrapTicket{serverID: panel.ID, version: req.Version, endpoint: provisioning.Endpoint,
-		agentID: provisioning.AgentID, digest: hex.EncodeToString(digest[:])}
+		agentID: provisioning.AgentID, digest: hex.EncodeToString(digest[:]), mode: req.Mode}
 	h.mintResponse(c, t)
 }
 
@@ -343,7 +350,8 @@ func (h *NodeBootstrapHandler) installScript(ctx context.Context, t *bootstrapTi
 	if subtle.ConstantTimeCompare([]byte(hex.EncodeToString(rawDigest[:])), []byte(digest)) != 1 {
 		return "", domain.ErrConflict
 	}
-	return h.servers.renderInstallScript(ctx, ports.InstallTemplateRequest{Endpoint: t.endpoint, AgentID: agentID, Credential: credential, Version: t.version})
+	return h.servers.renderInstallScript(ctx, ports.InstallTemplateRequest{
+		Endpoint: t.endpoint, AgentID: agentID, Credential: credential, Version: t.version, Mode: t.mode})
 }
 
 func (h *NodeBootstrapHandler) Complete(c *gin.Context) {

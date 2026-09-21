@@ -206,6 +206,9 @@ func (h *AdminServersHandler) NodeInstallScript(c *gin.Context) {
 	}
 	var req struct {
 		Version string `json:"version"`
+		// Mode is how an operator asks to replace the RELEASE of the installation
+		// that is already on the host, keeping its identity. Absent means install.
+		Mode string `json:"mode"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "an exact published Node version is required"})
@@ -229,9 +232,9 @@ func (h *AdminServersHandler) NodeInstallScript(c *gin.Context) {
 	}
 	script, err := h.renderInstallScript(c.Request.Context(), ports.InstallTemplateRequest{
 		Endpoint: provisioning.Endpoint, AgentID: provisioning.AgentID,
-		Credential: provisioning.Credential, Version: req.Version,
+		Credential: provisioning.Credential, Version: req.Version, Mode: req.Mode,
 	})
-	if installTemplateRefused(c, err, "a canonical HTTPS PSP endpoint and exact published Node version are required") {
+	if installTemplateRefused(c, err, "a canonical HTTPS PSP endpoint, an exact published Node version and a supported installation mode are required") {
 		return
 	}
 	if !h.auditNodeCredentialRead(c, panel.ID, provisioning.AgentID) {
