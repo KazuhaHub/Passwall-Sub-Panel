@@ -99,6 +99,27 @@ func renderNodeInstallationFiles(panelID int64, p nativeServerCreateResponse, r 
     volumes:
       - ./config:/run/secrets/passwall-node:ro
       - ./data:/var/lib/passwall-node
+    # THE SECURITY PROFILE IS NOT OPTIONAL, AND NOT ONLY FOR SECURITY. The Node
+    # project's Docker updater refuses to replace a container whose profile differs
+    # from the supported one — it checks that the container is not privileged, has a
+    # read-only root filesystem and uses host networking, and it does that BEFORE it
+    # pulls anything. A generated file without this line produces a node that can be
+    # upgraded in the panel and refused on the host, with a message about the profile
+    # that says nothing about the compose it came from.
+    read_only: true
+    tmpfs:
+      - /run/passwall-node:size=64k,mode=0700
+      - /tmp:size=16m,mode=1777
+    cap_drop:
+      - ALL
+    # Entrypoint-only capabilities: copy/chown the secret and state volume, then
+    # switch to the configured unprivileged UID/GID before exec.
+    cap_add:
+      - CHOWN
+      - SETGID
+      - SETUID
+    security_opt:
+      - no-new-privileges:true
     stop_grace_period: 30s
 `, agentContainer, r.Version, platformLine, composeYAMLString(p.Endpoint), composeYAMLString(p.AgentID), fmt.Sprint(r.DockerRemoteUpgrade))
 		if r.DockerRemoteUpgrade {

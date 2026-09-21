@@ -1,6 +1,7 @@
 package version
 
 import (
+	"errors"
 	"testing"
 	"time"
 )
@@ -177,17 +178,34 @@ func TestCompatMessage_ContainsKeyFacts(t *testing.T) {
 	}
 }
 
+// AN EMPTY CEILING HAS TWO CAUSES, AND THEY SEND AN OPERATOR TO DIFFERENT PLACES.
+//
+// A document that has not been fetched yet and one whose fetch keeps failing both
+// leave the range empty and every panel reading Unknown. The message said "fetch
+// pending" for both and told the reader to open the Servers page — which does not
+// fetch, because the reactive refresh lives in the traffic poll and behind Test.
+// The failure was already recorded in this package and went unread.
 func TestCompatMessage_UnknownDistinguishesNoRemoteFromBadInput(t *testing.T) {
-	// When max isn't loaded, the Unknown message should hint at "open
-	// Servers / click Test to refresh" so admin knows what to do. When
-	// max IS loaded but the input is garbage, the message should just
-	// say "couldn't parse panel reply".
 	resetCompatForTest(t)
 	msg := CompatMessage("3.1.0", CompatUnknown)
-	if !contains(msg, "not loaded yet") {
-		t.Fatalf("Unknown message when no remote loaded should mention refresh hint: %q", msg)
+	if !contains(msg, "has not been fetched yet") || !contains(msg, "retries in the background") {
+		t.Fatalf("a ceiling nobody has fetched yet should say so and say what happens next: %q", msg)
 	}
 
+	// A FAILED FETCH NAMES ITSELF. The detail is the only place an operator can
+	// find out why a fleet of panels reads Unknown, so it has to carry the reason.
+	refreshMu.Lock()
+	refreshLastError = errors.New("3x-ui-v4.json answered HTTP 403")
+	refreshMu.Unlock()
+	msg = CompatMessage("3.1.0", CompatUnknown)
+	if !contains(msg, "could not be fetched") || !contains(msg, "HTTP 403") {
+		t.Fatalf("a failed fetch should name its reason: %q", msg)
+	}
+	if contains(msg, "Servers page") {
+		t.Fatalf("the message still sends the operator to a page that does not fetch: %q", msg)
+	}
+
+	resetCompatForTest(t)
 	SetActiveMaxTestedXUI("3.1.0")
 	msg = CompatMessage("garbage", CompatUnknown)
 	if !contains(msg, "couldn't") || !contains(msg, "garbage") {

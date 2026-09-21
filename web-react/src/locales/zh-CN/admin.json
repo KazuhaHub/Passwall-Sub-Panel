@@ -2527,7 +2527,8 @@
     },
     "compat_notice": {
       "range-stale": "当前 3X-UI 已测上限 {{max}} 是最后一次成功获取的结果；最近一次刷新失败：{{error}}",
-      "core-catalog-stale": "内核审核目录未能刷新，面板正在使用{{source}}（审核时间 {{review}}）。原因：{{error}}。该审核之后被撤回的 release 仍会显示。"
+      "core-catalog-stale": "内核审核目录未能刷新，面板正在使用{{source}}（审核时间 {{review}}）。原因：{{error}}。该审核之后被撤回的 release 仍会显示。",
+      "range-unavailable": "3X-UI 兼容范围未能获取，因此所有 3X-UI 服务器都显示「未知」：{{error}}"
     }
   },
   "diagnostics": {

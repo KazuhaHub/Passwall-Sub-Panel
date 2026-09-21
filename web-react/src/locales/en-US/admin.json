@@ -2529,7 +2529,8 @@
     },
     "compat_notice": {
       "range-stale": "The 3X-UI tested ceiling {{max}} is the last successful fetch; the most recent refresh failed: {{error}}",
-      "core-catalog-stale": "The reviewed core catalog could not be refreshed, so the panel is offering {{source}} (reviewed {{review}}). Reason: {{error}}. A release withdrawn since that review is still shown."
+      "core-catalog-stale": "The reviewed core catalog could not be refreshed, so the panel is offering {{source}} (reviewed {{review}}). Reason: {{error}}. A release withdrawn since that review is still shown.",
+      "range-unavailable": "The 3X-UI compatibility range could not be fetched, so every 3X-UI server reads “unknown”: {{error}}"
     }
   },
   "diagnostics": {

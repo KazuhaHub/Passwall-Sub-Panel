@@ -324,10 +324,19 @@ func CompatMessage(panelVersion string, status CompatStatus) string {
 			panelVersion, ActiveMaxTestedXUI())
 	default:
 		max := ActiveMaxTestedXUI()
-		if max == "" {
-			return fmt.Sprintf("3X-UI compatibility data not loaded yet (PSP min is %s; remote-compat JSON fetch pending) — open the Servers page or click Test to trigger a refresh",
-				ActiveMinXUI())
+		if max != "" {
+			return fmt.Sprintf("3X-UI version unknown (reported %q) — PSP couldn't probe the panel or couldn't parse its reply", panelVersion)
 		}
-		return fmt.Sprintf("3X-UI version unknown (reported %q) — PSP couldn't probe the panel or couldn't parse its reply", panelVersion)
+		// WHY THE CEILING IS EMPTY IS TWO DIFFERENT ANSWERS, and from the range alone
+		// they are indistinguishable. This message used to say "fetch pending" for
+		// both, and told the operator to open the Servers page — which does not
+		// fetch. The reactive refresh lives in the traffic poll and behind Test, so
+		// the page it named was the one place that would not help, and the reason
+		// the fetch failed was already in this package and unread.
+		if err := LastRefreshError(); err != nil {
+			return fmt.Sprintf("3X-UI compatibility data could not be fetched, so the supported ceiling stays unknown rather than guessed: %v", err)
+		}
+		return fmt.Sprintf("3X-UI compatibility data has not been fetched yet (PSP min is %s); the panel retries in the background and a successful fetch sets the ceiling",
+			ActiveMinXUI())
 	}
 }
