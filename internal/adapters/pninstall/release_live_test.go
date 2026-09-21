@@ -2,11 +2,13 @@ package pninstall
 
 import (
 	"context"
+	"errors"
 	"os"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/version"
 )
 
@@ -82,5 +84,46 @@ func TestLivePublishedReleasePublishesAnInstallationScript(t *testing.T) {
 	}
 	if !strings.Contains(script, "PSP_NODE_AGENT_ID=") || !strings.Contains(script, "PSP_NODE_ENDPOINT=") {
 		t.Error("the rendered script does not carry the connection environment file")
+	}
+
+	// AND THE SAME RELEASE CAN BE ASKED TO REPLACE A RELEASE IN PLACE.
+	//
+	// This is the half a release can be missing without anything else noticing: the
+	// mode is a marker in the template, and a release published before it exists
+	// substitutes nothing and installs where an upgrade was asked for. Checking it
+	// here means the release that has to carry it is the thing under test.
+	//
+	// THE ADDRESS IS STATED, exactly as the other render and as the panel does: a
+	// version no longer determines one, and deriving it here would fail this case
+	// against every release published before the namespace changed — which are
+	// precisely the releases this pair of checks exists to keep working.
+	upgrade, err := renderer.Render(ctx, Options{
+		Endpoint:   "https://panel.example/v1/node/sync",
+		AgentID:    "agt_live_release_check",
+		Credential: "pspn_" + strings.Repeat("a", 40),
+		Version:    releaseVersion,
+		Tag:        tag,
+		Mode:       ports.ModeUpgrade,
+	})
+	// A RELEASE PUBLISHED BEFORE IN-PLACE UPGRADES EXISTED IS REFUSED, AND THAT IS THE
+	// CORRECT ANSWER: the panel installs nothing when an upgrade was asked for, and the
+	// operator is told to pick another release. What must never happen is the third
+	// possibility — a script rendered for the install mode that says nothing about it
+	// — and the adapter's own cases pin that refusal against a template without the
+	// marker. So the live check accepts either answer and rejects a silent one.
+	if errors.Is(err, ports.ErrInstallTemplateModeUnsupported) {
+		t.Logf("the published release predates in-place upgrades; it is refused rather than installed over")
+		return
+	}
+	if err != nil {
+		t.Fatalf("the published release cannot be asked to replace a release in place: %v", err)
+	}
+	if !strings.Contains(upgrade, "mode='upgrade'") {
+		t.Fatal("the published template rendered an in-place upgrade without the mode")
+	}
+	for _, line := range strings.Split(upgrade, "\n") {
+		if strings.Contains(line, "@@") && !strings.Contains(line, "*@@*") {
+			t.Errorf("the rendered upgrade script still carries a placeholder: %s", strings.TrimSpace(line))
+		}
 	}
 }
