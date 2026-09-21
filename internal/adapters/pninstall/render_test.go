@@ -36,6 +36,11 @@ type fixture struct {
 	calls  int
 	// served is what the origin answers for each asset, by name.
 	served map[string][]byte
+	// requested is every path the renderer asked for, in order. The asset NAME
+	// alone cannot tell a test which RELEASE was read — and with the address no
+	// longer derivable from the version, which release a script installs from is
+	// the thing worth asserting.
+	requested []string
 }
 
 func newFixture(t *testing.T, template string) *fixture {
@@ -54,6 +59,7 @@ func newFixture(t *testing.T, template string) *fixture {
 	f.served[templateName] = []byte(template)
 	f.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		f.calls++
+		f.requested = append(f.requested, r.URL.Path)
 		name := r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1:]
 		body, ok := f.served[name]
 		if !ok {
@@ -107,13 +113,21 @@ func TestItRendersThePublishedTemplateForThisIdentity(t *testing.T) {
 	}
 	for _, want := range []string{
 		"version='4.0.1'",
-		"tag='release/4.0.1'",
+		"tag='v4.0.1'",
 		"agent='agt_node-1'",
 		"endpoint='https://panel.example/psp/v1/node/sync'",
 		"credential='pspn_" + strings.Repeat("a", 40) + "'",
 	} {
 		if !strings.Contains(rendered, want) {
 			t.Fatalf("the rendered script does not carry %s:\n%s", want, rendered)
+		}
+	}
+	// AND THE TEMPLATE WAS READ FROM THAT RELEASE. The script's tag and the release
+	// the bytes came from have to be the same one, or the operator runs one
+	// release's installer against another release's assets.
+	for _, path := range f.requested {
+		if !strings.Contains(path, "/download/v4.0.1/") {
+			t.Errorf("the renderer read %s, which is not the release it named", path)
 		}
 	}
 	// THE ENVIRONMENT FILE IS WRITTEN THE WAY THE DAEMON READS IT: the same two
@@ -126,6 +140,50 @@ func TestItRendersThePublishedTemplateForThisIdentity(t *testing.T) {
 	// here costs a refusal instead of an install.
 	if strings.Contains(strings.ReplaceAll(rendered, "*@@*", ""), "@@") {
 		t.Fatalf("a placeholder survived rendering:\n%s", rendered)
+	}
+}
+
+// A RELEASE PUBLISHED BEFORE THE NAMESPACE CHANGED IS ADDRESSED AS IT WAS
+// PUBLISHED. Four releases live under `release/…`; deriving an address from their
+// version names a tag that does not exist, and the panel that lists them is what
+// states their tag. This is the path that keeps those four installable — including
+// for the operator whose next step is to move a host onto one of them.
+func TestItAddressesAReleaseTheCallerStated(t *testing.T) {
+	f := newFixture(t, templateFixture)
+	options := validOptions()
+	options.Tag = "release/4.0.1"
+	rendered, err := f.renderer(t).Render(context.Background(), options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(rendered, "tag='release/4.0.1'") {
+		t.Fatalf("the rendered script does not carry the stated address:\n%s", rendered)
+	}
+	for _, path := range f.requested {
+		if !strings.Contains(path, "/download/release/4.0.1/") {
+			t.Errorf("the renderer read %s, which is not the release the caller stated", path)
+		}
+	}
+}
+
+// A STATED ADDRESS THAT NAMES ANOTHER RELEASE IS REFUSED, before anything is
+// fetched. Taking one release's address for another installs a release the
+// operator did not choose under the identity they did choose, and it would look
+// like success.
+func TestItRefusesAStatedTagThatNamesAnotherVersion(t *testing.T) {
+	f := newFixture(t, templateFixture)
+	options := validOptions()
+	options.Tag = "release/4.0.2"
+	if _, err := f.renderer(t).Render(context.Background(), options); !errors.Is(err, ports.ErrInstallTemplateRequest) {
+		t.Fatalf("a tag naming another version was accepted: %v", err)
+	}
+	// A BARE VERSION IS NOT AN ADDRESS EITHER, stated or derived.
+	options.Tag = "4.0.1"
+	if _, err := f.renderer(t).Render(context.Background(), options); err == nil {
+		t.Fatal("a bare version was accepted as an address")
+	}
+	if f.calls != 0 {
+		t.Fatalf("a refused request reached the network: %d calls (%v)", f.calls, f.requested)
 	}
 }
 

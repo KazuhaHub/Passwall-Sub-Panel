@@ -218,11 +218,17 @@ describe('newerNodeRelease and the published prerelease tags', () => {
 //
 // The URLs are the other half: the release PAGE is addressed by the TAG, and the
 // backend now builds it from the tag, so a product release's URL contains
-// `tag/release/4.0.0` while its `version` is `4.0.0`.
+// `tag/v4.0.0` while its `version` is `4.0.0`.
 describe('newerNodeRelease, product scheme', () => {
+  // THE ADDRESS IS STATED, WHICH IS WHAT THE API DOES: a catalog entry carries the
+  // tag its release is published at, and the page URL is built from that tag. It is
+  // stated here rather than derived for the same reason it is stated on the wire —
+  // a version no longer determines an address, because four releases were published
+  // under a namespace that the ones after them do not use.
   function product(version: string, overrides: Partial<NodeRelease> = {}): NodeRelease {
     return release(version, {
-      release_url: `https://github.com/KazuhaHub/Passwall-Node/releases/tag/release/${version}`,
+      release_tag: `v${version}`,
+      release_url: `https://github.com/KazuhaHub/Passwall-Node/releases/tag/v${version}`,
       ...overrides,
     })
   }
@@ -252,6 +258,25 @@ describe('newerNodeRelease, product scheme', () => {
     const candidate = product('4.0.1', { channel: 'testing' })
     expect(newerNodeRelease({ panel_version: '4.0.0', update_channel: 'beta' }, [candidate])).toBe(candidate)
     expect(newerNodeRelease({ panel_version: '4.0.0', update_channel: 'stable' }, [candidate])).toBeUndefined()
+  })
+
+  // A RELEASE PUBLISHED BEFORE THE NAMESPACE CHANGED IS OFFERED FROM WHERE IT IS.
+  // The panel states `release/4.0.1.2` for the four it published under that
+  // namespace, and a front end that rebuilt the address from the version would drop
+  // all four — silently, because a release that fails this check is skipped rather
+  // than reported.
+  it('offers a release addressed under the historical namespace', () => {
+    const next = product('4.0.1.2', {
+      release_tag: 'release/4.0.1.2',
+      release_url: 'https://github.com/KazuhaHub/Passwall-Node/releases/tag/release/4.0.1.2',
+    })
+    expect(newerNodeRelease({ panel_version: '4.0.1.1' }, [next])).toBe(next)
+    // AND THE STATED TAG IS WHAT THE PAGE MUST MATCH. The derived address is not a
+    // second acceptable one: it names a tag nobody published.
+    expect(newerNodeRelease({ panel_version: '4.0.1.1' }, [{
+      ...next,
+      release_url: 'https://github.com/KazuhaHub/Passwall-Node/releases/tag/v4.0.1.2',
+    }])).toBeUndefined()
   })
 
   it('does not guess a malformed product identity', () => {

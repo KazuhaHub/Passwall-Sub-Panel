@@ -1,6 +1,7 @@
 {
   "format": 1,
-  "comment": "THE SHARED VECTORS. One file, three consumers: this package, the web front end (web-react/src/utils/productVersion.vectors.json), and the panel's Go mirror. It is COPIED rather than fetched, because a test may not reach into another module at run time.\n\nONE SCHEME. The legacy v-prefixed forms were removed from every section here when the products stopped publishing them — the scheme went away with the deployments that would have needed migrating, and a vector that keeps a string the rule now refuses is a vector that documents a rule nobody implements.\n\nWHAT IT PINS IS THE SHAPE, THE ORDER AND THE ADDRESSES. The order section carries the BUILD COMPONENT pairs, which nothing covered before: the fourth segment was ignored by the comparison, so a rebuild and its base compared equal while the panel's mirror disagreed.",
+  "comment": "THE SHARED VECTORS. One file, three consumers: this package, the web front end (web-react/src/utils/productVersion.vectors.json), and the panel's Go mirror. It is COPIED rather than fetched, because a test may not reach into another module at run time.\n\nTWO NAMESPACES, ONE CURRENT ADDRESS. A release tag is `vMAJOR.MINOR.PATCH[.BUILD]`, and four releases were published under `release/` before the address changed; `tag_namespace` is the current one. BOTH are read, because a published tag cannot be moved and the panel still lists those four; only the current one is DERIVED, and `derive` pins that — including the case that makes it matter, where a version published under the historical namespace does NOT derive back to its own address. The legacy v0.0.1-beta forms are a third shape and are neither: `reject_tags` is where they are refused.\n\nWHAT IT PINS IS THE SHAPE, THE ORDER AND THE ADDRESSES. The order section carries the BUILD COMPONENT pairs, which nothing covered before: the fourth segment was ignored by the comparison, so a rebuild and its base compared equal while the panel's mirror disagreed.",
+  "tag_namespace": "v",
   "max_segment": 2147483647,
   "normalize": [
     {
@@ -233,37 +234,68 @@
   ],
   "tags": [
     {
+      "in": "v102.1.0",
+      "scheme": "product",
+      "version": "102.1.0",
+      "why": "the current namespace"
+    },
+    {
+      "in": "v1.0.0",
+      "scheme": "product",
+      "version": "1.0.0",
+      "why": "the current namespace"
+    },
+    {
+      "in": "v102.1.0.1",
+      "scheme": "product",
+      "version": "102.1.0.1",
+      "why": "the current namespace, with the build component"
+    },
+    {
+      "in": "v1.2.3.4",
+      "scheme": "product",
+      "version": "1.2.3.4",
+      "why": "four segments with a build component is a published identity, so it is a tag"
+    },
+    {
       "in": "release/102.1.0",
       "scheme": "product",
-      "version": "102.1.0"
+      "version": "102.1.0",
+      "why": "the historical namespace: read, never derived"
     },
     {
       "in": "release/1.0.0",
       "scheme": "product",
-      "version": "1.0.0"
+      "version": "1.0.0",
+      "why": "the historical namespace"
     },
     {
       "in": "release/102.1.0.1",
       "scheme": "product",
-      "version": "102.1.0.1"
+      "version": "102.1.0.1",
+      "why": "the historical namespace, with the build component"
     }
   ],
   "reject_tags": [
     {
-      "in": "release/102.1",
-      "why": "a new tag is always three segments; short forms do not get their own release"
+      "in": "v102.1",
+      "why": "a tag names a published identity, which is three segments or four with the build component"
     },
     {
-      "in": "release/102",
-      "why": "a new tag is always three segments"
+      "in": "v102",
+      "why": "a tag names a published identity, never shorthand"
+    },
+    {
+      "in": "release/102.1",
+      "why": "the historical namespace holds published identities too"
     },
     {
       "in": "102.1.0",
-      "why": "a bare product version is not a tag"
+      "why": "a bare product version is not a tag, under either namespace"
     },
     {
       "in": "release/v102.1.0",
-      "why": "the product tag namespace does not carry a v"
+      "why": "the version inside the historical namespace is bare; the v IS the other namespace"
     },
     {
       "in": "v",
@@ -275,27 +307,43 @@
     },
     {
       "in": "beta11",
-      "why": "neither scheme"
+      "why": "neither namespace"
     },
     {
       "in": "V0.0.1",
-      "why": "legacy tags are lower-case v"
+      "why": "the namespace is a lower-case v"
     },
     {
       "in": "vNOTAVERSION",
       "why": "begins with v but is not a version — a tag is an identity, not a prefix"
     },
     {
-      "in": "v1.2",
-      "why": "the historical form carries three segments"
+      "in": "v0.0.1",
+      "why": "no release line was ever published as zero"
     },
     {
-      "in": "v1.2.3.4",
-      "why": "four segments is not the historical form either"
+      "in": "v0.0.1-beta11",
+      "why": "the legacy scheme, whose tag was the version itself"
+    },
+    {
+      "in": "v4.0.0-beta.25",
+      "why": "a prerelease is a CHANNEL, not a spelling of a published identity"
+    },
+    {
+      "in": "v4.0.0/../../PRIVATE_RESPONSE",
+      "why": "a path separator"
+    },
+    {
+      "in": "release/4.0.0/../../PRIVATE_RESPONSE",
+      "why": "a path separator in the historical namespace"
     },
     {
       "in": "release/102.1.0.1.2",
       "why": "a fifth segment is a different format"
+    },
+    {
+      "in": "v102.1.0.1.2",
+      "why": "a fifth segment is a different format, in either namespace"
     }
   ],
   "channels": [
@@ -340,6 +388,27 @@
       "in": "4.0.0.1",
       "scheme": "product",
       "ok": true
+    }
+  ],
+  "derive": [
+    {
+      "in": "102.1.0",
+      "tag": "v102.1.0",
+      "why": "the current namespace, which is what a release about to be published gets"
+    },
+    {
+      "in": "1.0.0",
+      "tag": "v1.0.0"
+    },
+    {
+      "in": "102.1.0.1",
+      "tag": "v102.1.0.1",
+      "why": "the build component travels with the version it names"
+    },
+    {
+      "in": "4.0.1.2",
+      "tag": "v4.0.1.2",
+      "why": "DERIVATION DOES NOT KNOW HISTORY: 4.0.1.2 was published as release/4.0.1.2, and a caller addressing a published release carries its tag rather than deriving it"
     }
   ]
 }

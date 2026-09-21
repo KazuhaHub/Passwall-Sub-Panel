@@ -17,32 +17,37 @@ name: Release
 on:
   push:
     tags:
-      # ONE SCHEME. `release/*` is the shape this project publishes; the v-prefixed
-      # trigger went with the scheme it belonged to, because a workflow that can
-      # still cut a v-named release is a way to publish one the panel cannot read
-      # (release/MAJOR.MINOR.PATCH).
+      # ONE NAMESPACE NOW, AND IT IS THE ONE THE PRODUCT ALREADY WEARS:
+      # `vMAJOR.MINOR.PATCH[.BUILD]`. It replaces `release/*`, which is where the
+      # first four releases live and where nothing else will: a published tag cannot
+      # be moved, so those four addresses are permanent and every reader still reads
+      # them, while no new release is written there.
       #
-      # IT WAS WITHHELD UNTIL THE READING SIDE CAUGHT UP, because a product
-      # release's TAG is not its VERSION — `release/4.0.0` names the release
-      # `4.0.0` — and two consumers of a published release read the tag as the
-      # version: the public Node installer, and PSP's own cmd/compatwatch, which
-      # reconciles the Node repo's releases against the reviewed set in
-      # docs/compat/passwall-node-v4.json.
+      # WHAT THE OLD NAMESPACE BOUGHT AND WHAT IT COST. It kept a product tag from
+      # being read as a Go module version — and no build here is a dependency, so
+      # nothing resolves this repository as one. What it charged was a SLASH in
+      # every address: two path entries in a download URL, and a Docker tag that is
+      # silently read as a different repository (see the image job). A four-segment
+      # version, which is what a fix release carries, is not a valid Go version
+      # under any namespace.
       #
-      # Both now handle both identities: the installer takes the version out of
-      # the asset name and the address out of the release document
-      # (Passwall-Node#40), and compatwatch parses the tag into a version before
-      # reconciling it (#183). That is the condition this trigger was waiting on,
-      # and deploy/release_workflow_test.mjs was rewritten to REQUIRE the pattern
-      # in the same change rather than deleted.
-      - "release/*"
+      # IT WAS WITHHELD UNTIL THE READING SIDE CAUGHT UP. A product release's TAG is
+      # not its VERSION — `v4.0.0` names the release `4.0.0` — and two consumers read
+      # the tag as the version: the public Node installer, and PSP's own
+      # cmd/compatwatch, which reconciles the Node repo's releases against the
+      # reviewed set in docs/compat/passwall-node-v4.json. Both handle both
+      # identities now (Passwall-Node#40, #183), and this repository's own readers
+      # take either namespace — which is the change this trigger is riding on.
+      # deploy/release_workflow_test.mjs REQUIRES this pattern in the same change
+      # rather than being deleted.
+      - "v*"
   workflow_dispatch:
     inputs:
       tag:
         # BLANK CUTS THE NEXT ONE. The form is the normal release path; naming
         # the tag by hand is the exception, for a line's first release or for a
         # tag that already exists. See the `tag` job.
-        description: "Release tag, for example release/4.0.0. Leave blank to cut the next one on the line."
+        description: "Release tag, for example v4.0.1.3. Leave blank to cut the next one on the line."
         required: false
         type: string
       line:
@@ -288,8 +293,8 @@ jobs:
           # Use the pinned, published Node installer/publisher tag authority, not
           # a second PSP regex or an automatically resolved latest version. It
           # PRINTS THE VERSION, which for the legacy scheme is the tag itself and
-          # for the product scheme is not: `release/4.0.0` names the release
-          # `4.0.0`. Discarding that output — which is what this did — left the
+          # for the product scheme is not: `v4.0.0` names the release `4.0.0`.
+          # Discarding that output — which is what this did — left the
           # tag standing in for the version everywhere downstream.
           #
           # It refuses an unpublishable tag, and the emptiness check is the belt
@@ -368,6 +373,10 @@ jobs:
             auto)    prerelease=true ;;
             *) echo "unknown publication channel: ${REQUESTED}" >&2; exit 1 ;;
           esac
+          # WHETHER THE TAG ADDRESSES A RELEASE AT ALL. Both namespaces do: the
+          # current one is what every release from here on carries, and the
+          # historical one is what the four published before it carry — they are
+          # real releases and rebuilding one should publish its image too.
           case "$PINNED_TAG" in
             v*|release/*) images=true ;;
             *)            images=false ;;
@@ -431,8 +440,10 @@ jobs:
         with:
           repository: KazuhaHub/Passwall-Node
           # BY TAG, BECAUSE A VERSION IS NOT A GIT REF. The release lives at
-          # refs/tags/release/4.0.0 and is named 4.0.0, so asking git to resolve
-          # the version fails outright — the job dies before it records anything,
+          # refs/tags/<tag> and is NAMED by its version — the two were one string
+          # only while the legacy scheme was the only one, and the pins here are
+          # the releases published before this project changed its address
+          # namespace. Asking git to resolve the version fails outright — the job dies before it records anything,
           # and the failure surfaces two jobs away from this line. The planner
           # emits both fields; this one addresses the source and the version
           # names the build.
@@ -927,7 +938,12 @@ jobs:
         with:
           tag_name: ${{ needs.setup.outputs.tag }}
           target_commitish: ${{ needs.setup.outputs.sha }}
-          name: ${{ needs.setup.outputs.tag }}
+          # THE TITLE CARRIES THE TAG, AND THE PRODUCT NAMES IT. The page used to
+          # read `release/4.0.1.1`, which is an ADDRESS — the namespace exists so a
+          # tag cannot be read as a Go module version, and it is not what the
+          # release is called. `Passwall Sub Panel v4.0.1.2` says which product and
+          # which release in one line, and the tag is shown beside it by GitHub.
+          name: Passwall Sub Panel ${{ needs.setup.outputs.tag }}
           # Resolved once in setup, where the reason for each answer is written
           # down; both this job and the image job read that one answer.
           prerelease: ${{ needs.setup.outputs.prerelease }}
@@ -990,12 +1006,15 @@ jobs:
         with:
           images: ghcr.io/${{ needs.setup.outputs.owner_lc }}/passwall-sub-panel
           tags: |
-            # THE EXACT IMAGE TAG IS THE VERSION, NOT THE GIT TAG. A product tag
-            # contains a slash, and a slash in a Docker tag is not rejected — it
+            # THE EXACT IMAGE TAG IS THE VERSION, NOT THE GIT TAG. They are
+            # different identities, and the tag can contain characters an image tag
+            # cannot mean the same thing by: a slash is not rejected by Docker — it
             # is read as a REPOSITORY separator, so
             # `passwall-sub-panel:release/4.0.0` addresses a repository named
-            # `passwall-sub-panel/release`. The build would succeed and push to
-            # somewhere nobody is watching.
+            # `passwall-sub-panel/release`, and the build succeeds and pushes
+            # somewhere nobody is watching. That is the historical namespace's
+            # shape; the current one has no slash, and the rule stays because the
+            # four releases published there are still built from this same job.
             type=raw,value=${{ needs.setup.outputs.version }}
             # Two rolling channels:
             #   :latest → newest STABLE only. Mirrors GitHub /releases/latest and

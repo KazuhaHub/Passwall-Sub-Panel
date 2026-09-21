@@ -117,7 +117,7 @@ import { useQueryScope } from '@/query/useQueryScope'
 import { ipCapBadgeTone, type IPCapTone } from '@/utils/capabilities'
 import { copyToClipboard } from '@/utils/clipboard'
 import { useCan } from '@/utils/permissions'
-import { canonicalReleaseVersion, tagForVersion } from '@/utils/productVersion'
+import { canonicalReleaseVersion, versionOfTag } from '@/utils/productVersion'
 import {
   type FieldErrors,
   firstError,
@@ -2011,11 +2011,21 @@ function isNodeDockerImageSelection(version: string): boolean {
 // version left every product release unusable: the response was rejected as
 // though it named some other file, and the operator was told the release had no
 // installation assets.
+//
+// THE TAG IN THE PATH MUST NAME THE VERSION THAT WAS ASKED FOR, AND EITHER ADDRESS
+// DOES. Four releases are published under the historical namespace and everything
+// since under the current one, and this side does not know which of the two a given
+// version went out under — the panel does, and it states the tag where getting it
+// wrong is visible (the release page link). What this has to catch is a path built
+// from the VERSION, which names no release in either namespace.
 function isOfficialNodeReleaseDownload(download: { name: string; url: string }, version: string): boolean {
   if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/.test(download.name)) return false
-  const tag = tagForVersion(version)
-  if (!tag) return false
-  return download.url === `https://github.com/KazuhaHub/Passwall-Node/releases/download/${tag}/${download.name}`
+  const expected = canonicalReleaseVersion(version)
+  if (expected === undefined) return false
+  const prefix = 'https://github.com/KazuhaHub/Passwall-Node/releases/download/'
+  if (!download.url.startsWith(prefix) || !download.url.endsWith('/' + download.name)) return false
+  const tag = download.url.slice(prefix.length, download.url.length - download.name.length - 1)
+  return versionOfTag(tag) === expected
 }
 
 function installationErrorMessage(error: unknown, fallback: string): string {

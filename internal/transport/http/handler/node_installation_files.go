@@ -15,6 +15,12 @@ type nodeInstallationFilesRequest struct {
 	OS                  string `json:"os"`
 	Arch                string `json:"arch"`
 	DockerRemoteUpgrade bool   `json:"docker_remote_upgrade"`
+	// Tag is the ADDRESS of the selected release, and it is UNBINDABLE: the panel
+	// fills it from its own catalog after the request is read. A release's address
+	// is no longer derivable from its version — four were published under a
+	// namespace the ones after them do not use — so the panel states it, and a
+	// client-supplied value is not read at all rather than validated.
+	Tag string `json:"-"`
 }
 
 func (r *nodeInstallationFilesRequest) normalize() bool {
@@ -216,11 +222,12 @@ const nodeReleaseDownloadBase = "https://github.com/KazuhaHub/Passwall-Node/rele
 // inside a segment; the tag is validated before it gets here, and this makes the
 // URL correct even if a future scheme allows a character that is not.
 //
-// WHAT IS STILL OPEN: whether GitHub resolves a slash-bearing tag this way is a
-// question the migration plan says to settle with a real download rather than
-// assume, and no such release exists yet. This builds the only URL that could be
-// right — the one the publisher's own tag names — rather than the one that
-// definitely is not.
+// WHAT A SLASH MEANS HERE IS SETTLED. It was an open question when the namespace
+// was chosen — "whether GitHub resolves a slash-bearing tag this way is a question
+// to settle with a real download rather than assume" — and it has been settled by
+// the four releases published under that namespace, which have been installed from
+// these URLs since. The historical namespace is the only slash-bearing one, so this
+// path stays for those four and is idle for everything published since.
 func releaseTagPath(tag string) string {
 	segments := strings.Split(tag, "/")
 	for i, segment := range segments {
@@ -249,11 +256,23 @@ func manualReleaseDownloads(r nodeInstallationFilesRequest) []nodeInstallationDo
 	// Passing the version as the path — which this did — asks for a release that
 	// does not exist under that name, and the download fails as though the
 	// release were missing rather than the address wrong.
-	tag, ok := version.ReleaseTagFor(r.Version)
-	if !ok {
-		// Unreachable behind normalize(), which requires a release version. An
-		// address that cannot be built is no downloads rather than a guessed one.
-		return nil
+	//
+	// THE TAG IS THE ONE THE PANEL STATES FOR THIS RELEASE. r.Tag is filled by the
+	// handler from the release catalog, because a version no longer determines an
+	// address: the four releases published before the namespace changed are not
+	// addressed the way deriving one would name them. The derivation is the
+	// fallback for a version the catalog does not list — one this panel has never
+	// seen published — and it answers in the current namespace, which is what such
+	// a version would be published under.
+	tag := r.Tag
+	if named, ok := version.VersionOfReleaseTag(tag); !ok || named != r.Version {
+		derived, ok := version.ReleaseTagFor(r.Version)
+		if !ok {
+			// Unreachable behind normalize(), which requires a release version. An
+			// address that cannot be built is no downloads rather than a guessed one.
+			return nil
+		}
+		tag = derived
 	}
 	return []nodeInstallationDownload{
 		{Name: asset, URL: nodeReleaseAssetURL(tag, asset)},

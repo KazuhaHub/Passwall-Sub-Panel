@@ -346,7 +346,7 @@ func TestNodeInstallationFilesManualExactArchivesAndSafeQuoting(t *testing.T) {
 			t.Fatal("manual guide did not use the fixed offline archive/credential-file")
 		}
 		if len(result.Downloads) != 2 || result.Downloads[0].Name != asset ||
-			result.Downloads[0].URL != "https://github.com/KazuhaHub/Passwall-Node/releases/download/release/4.0.0/"+asset ||
+			result.Downloads[0].URL != "https://github.com/KazuhaHub/Passwall-Node/releases/download/v4.0.0/"+asset ||
 			result.Downloads[1].Name != "SHA256SUMS.txt" || !strings.HasSuffix(result.Downloads[1].URL, "/SHA256SUMS.txt") {
 			t.Fatal("manual response did not expose the exact release downloads")
 		}
@@ -562,20 +562,46 @@ func TestReleaseAssetURLEscapesTheAssetNameToo(t *testing.T) {
 // attributed to the release rather than to the rule. The URLs are the other half:
 // the path is addressed by the TAG and the asset is named by the VERSION, and
 // before this the version was used for both.
+//
+// TWO ADDRESSES, ONE RULE. A release that has not been published yet is addressed
+// in the current namespace, and the four published before it changed are addressed
+// where they actually are — stated by the panel's catalog, which is what fills Tag
+// on the request. The pair is the whole reason a version no longer determines an
+// address.
 func TestNodeInstallationFilesRenderForAProductRelease(t *testing.T) {
 	_, repo := installationFixture(t)
 	p := nativeServerCreateResponse{AgentID: repo.agent.AgentID, Credential: repo.credential, Endpoint: "https://panel.example/v1/node/sync"}
-	result := renderNodeInstallationFiles(41, p, nodeInstallationFilesRequest{Method: "manual", Version: "4.0.0", OS: "linux", Arch: "amd64"})
-	if len(result.Steps) == 0 || len(result.Downloads) != 2 {
-		t.Fatalf("a product release produced no materials: %+v", result)
+	for _, tc := range []struct{ name, tag, wantPath string }{
+		{"derived, for a release not published yet", "", "v4.0.0"},
+		{"stated, for one published before the namespace changed", "release/4.0.0", "release/4.0.0"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			result := renderNodeInstallationFiles(41, p, nodeInstallationFilesRequest{
+				Method: "manual", Version: "4.0.0", OS: "linux", Arch: "amd64", Tag: tc.tag,
+			})
+			if len(result.Steps) == 0 || len(result.Downloads) != 2 {
+				t.Fatalf("a product release produced no materials: %+v", result)
+			}
+			asset := "passwall-node_4.0.0_linux_amd64.tar.gz"
+			want := []nodeInstallationDownload{
+				{Name: asset, URL: "https://github.com/KazuhaHub/Passwall-Node/releases/download/" + tc.wantPath + "/" + asset},
+				{Name: "SHA256SUMS.txt", URL: "https://github.com/KazuhaHub/Passwall-Node/releases/download/" + tc.wantPath + "/SHA256SUMS.txt"},
+			}
+			if !reflect.DeepEqual(result.Downloads, want) {
+				t.Fatalf("downloads = %+v, want %+v", result.Downloads, want)
+			}
+		})
 	}
-	asset := "passwall-node_4.0.0_linux_amd64.tar.gz"
-	want := []nodeInstallationDownload{
-		{Name: asset, URL: "https://github.com/KazuhaHub/Passwall-Node/releases/download/release/4.0.0/" + asset},
-		{Name: "SHA256SUMS.txt", URL: "https://github.com/KazuhaHub/Passwall-Node/releases/download/release/4.0.0/SHA256SUMS.txt"},
-	}
-	if !reflect.DeepEqual(result.Downloads, want) {
-		t.Fatalf("downloads = %+v, want %+v", result.Downloads, want)
+	// A STATED ADDRESS THAT NAMES ANOTHER RELEASE IS NOT USED. It is the panel's
+	// own answer in production, and this is the guard that keeps a wrong one from
+	// becoming a download link.
+	mismatched := renderNodeInstallationFiles(41, p, nodeInstallationFilesRequest{
+		Method: "manual", Version: "4.0.0", OS: "linux", Arch: "amd64", Tag: "release/4.0.2",
+	})
+	for _, download := range mismatched.Downloads {
+		if strings.Contains(download.URL, "4.0.2") {
+			t.Fatalf("a stated tag naming another release was addressed: %s", download.URL)
+		}
 	}
 }
 

@@ -164,6 +164,48 @@ func TestHistoricalReleasesAreClassifiedAndCountedRatherThanRefused(t *testing.T
 	}
 }
 
+// BOTH ADDRESS NAMESPACES ARE ONE SCHEME. A release is a release whichever
+// namespace its tag is in — four were published under the historical one and
+// everything after them carries the current one — and the registry this job
+// reconciles against is keyed by VERSION. Reading only one of the two would make
+// the other half of the published history invisible to the check that exists to
+// see it.
+func TestBothTagNamespacesAreTheSameScheme(t *testing.T) {
+	published, err := publishedReleases([]string{"v4.0.2", "release/4.0.1.2", "v4.0.1", "v0.0.1-beta12"})
+	if err != nil {
+		t.Fatalf("a release under one of the two namespaces was refused: %v", err)
+	}
+	want := []struct {
+		tag        string
+		version    string
+		historical bool
+	}{
+		{"v4.0.2", "4.0.2", false},
+		{"release/4.0.1.2", "4.0.1.2", false},
+		{"v4.0.1", "4.0.1", false},
+		{"v0.0.1-beta12", "", true},
+	}
+	if len(published) != len(want) {
+		t.Fatalf("published %d releases, want %d: %+v", len(published), len(want), published)
+	}
+	for i, w := range want {
+		if published[i].Tag != w.tag || published[i].Version != w.version || published[i].Historical != w.historical {
+			t.Errorf("release %d = %+v, want tag %q version %q historical %v", i, published[i], w.tag, w.version, w.historical)
+		}
+	}
+	// AND THE REPORT ADDRESSES THE NEWEST ONE BY ITS OWN TAG, whichever namespace
+	// it is in: a reader has to be able to go and look at the release.
+	report := nodeRegistryReport(nodeRegistry{
+		Releases: []nodeRegistryRelease{{Version: "4.0.1.2"}, {Version: "4.0.1"}, {Version: "4.0.2"}},
+	}, published, nil)
+	if report.Verdict != version.CeilingCurrent {
+		t.Fatalf("verdict = %s, want current: every release is accounted for", report.Verdict)
+	}
+	if report.Latest != "v4.0.2" {
+		t.Fatalf("latest = %q, want the tag of the newest published release", report.Latest)
+	}
+}
+
 // The registry row asks the opposite question from the panel rows above it, so
 // the thing worth pinning is that both directions still reach the SAME two
 // states: a real gap exits 1, and anything unreadable exits 2 rather than
@@ -310,7 +352,13 @@ func TestNodeRegistryReconcilesTheVersionNotTheTag(t *testing.T) {
 // check pass while describing a repository with a release nobody can account for,
 // which is the silence this job exists to refuse.
 func TestPublishedReleasesRefusesATagItCannotIdentify(t *testing.T) {
-	for _, tag := range []string{"main", "release/4.0", "v4.0.0.1", "release/v4.0.0"} {
+	for _, tag := range []string{
+		"main", "release/4.0", "release/v4.0.0", "v4.0", "v0.0.1",
+		// A MALFORMED TAG OF THE CURRENT SCHEME IS NOT HISTORY. The historical
+		// pattern is as narrow as the twelve releases that exist, so anything else
+		// that merely starts with a v is a release nobody can account for.
+		"v05.0.0", "v4.0.0-beta.25", "v4.0.0.0", "v4.0.0-rc.1",
+	} {
 		t.Run(tag, func(t *testing.T) {
 			got, err := publishedReleases([]string{"release/4.0.0", tag})
 			if err == nil {

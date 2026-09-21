@@ -422,8 +422,8 @@ func unaccountedReleases(published, accounted []string) []string {
 // publishedRelease is one published release in both of its identities.
 //
 // THE TAG LOCATES IT AND THE VERSION ACCOUNTS FOR IT. GitHub reports a release's
-// tag_name, and they are never the same string: a release's tag is
-// `release/4.0.0` and its version is `4.0.0`. The registry is keyed by version — it is the list of releases the panel may offer —
+// tag_name, and they are never the same string: a release's tag is `v4.0.0` and
+// its version is `4.0.0`. The registry is keyed by version — it is the list of releases the panel may offer —
 // so reconciling on the tag would report a fully reviewed release as a gap whose
 // only remedy is an entry that is already there. The tag is kept because it is
 // what names a release to a reader and what addresses it on GitHub.
@@ -439,11 +439,18 @@ type publishedRelease struct {
 // legacyPublishedShape RECOGNISES the historical published form. It does not read
 // it as an identity, and no other part of this build accepts one.
 //
-// THE SCHEME IS GONE AND THE RELEASES ARE NOT. Nine v0.0.1-beta releases are on
+// THE SCHEME IS GONE AND THE RELEASES ARE NOT. Twelve v0.0.1-beta releases are on
 // GitHub and always will be. A watcher that refuses to look at them reports
 // "unknown" on every run, and a watcher that cannot run is worse than one that
 // classifies: the silence this job refuses would be its own.
-var legacyPublishedShape = regexp.MustCompile(`^v\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$`)
+//
+// IT IS AS NARROW AS THE RELEASES THAT EXIST, and the narrowness is load-bearing
+// now that `v` is the namespace this project publishes under. A pattern matching
+// any v-prefixed number would file a MALFORMED tag of the current scheme as
+// history — `v05.0.0`, a zero release line, a typo — and a release nobody can
+// account for is exactly what this check exists to refuse. These twelve match;
+// nothing else does.
+var legacyPublishedShape = regexp.MustCompile(`^v0\.0\.1-beta\.?[0-9]+$`)
 
 // publishedReleases pairs each published tag with the version it names, and
 // separates the releases published before the current scheme from the ones the

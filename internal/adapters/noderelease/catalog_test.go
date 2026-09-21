@@ -60,7 +60,7 @@ func fixtureRelease(version string) githubRelease {
 	published := fixtureNow.Add(-time.Hour)
 	// THE TAG IS DERIVED FROM THE VERSION, by the panel's own rule. Setting one to
 	// the other is what this whole migration is about: a product release is
-	// addressed as release/4.0.0 and named 4.0.0, and a fixture that conflated them
+	// addressed as v4.0.0 and named 4.0.0, and a fixture that conflated them
 	// would build a release the catalog then correctly refuses.
 	tag, ok := versionpkg.ReleaseTagFor(version)
 	if !ok {
@@ -90,7 +90,7 @@ func fixtureRelease(version string) githubRelease {
 // field the release object carries, and for a product release the tag is not the
 // version. Getting that wrong twice in one file is why both maps say it.
 var fixtureProductPrerelease = map[string]bool{
-	"release/4.0.0": true,
+	"v4.0.0": true,
 }
 
 // fixturePrerelease states what a fixture release was PUBLISHED as. It used to
@@ -114,7 +114,7 @@ func fixturePrerelease(tag string) bool {
 // case that wants to observe it; the cases below do that with their own
 // releases rather than by reading this table.
 var realPublicationTimes = map[string]time.Time{
-	"release/4.0.0": time.Date(2026, 9, 20, 9, 1, 33, 0, time.UTC),
+	"v4.0.0": time.Date(2026, 9, 20, 9, 1, 33, 0, time.UTC),
 }
 
 // withRealPublicationTime gives a fixture release its real instant, LOOKED UP BY

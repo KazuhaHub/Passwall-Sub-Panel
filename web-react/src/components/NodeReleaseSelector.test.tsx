@@ -15,14 +15,22 @@ const platforms: NodeRelease['platforms'] = [
   { os: 'darwin', arch: 'amd64' }, { os: 'darwin', arch: 'arm64' },
   { os: 'windows', arch: 'amd64' }, { os: 'windows', arch: 'arm64' },
 ]
+// THE ADDRESS IS STATED, WHICH IS WHAT THE API DOES. A catalog entry carries the
+// tag its release is published at, and the panel builds the page URL from that tag.
+// Deriving it in a fixture would be a second implementation of the rule the
+// component is being tested against — and a version no longer determines an
+// address, so the derivation is not the answer for the releases published before
+// the namespace changed.
 const stable: NodeRelease = {
   version: '4.1.0', channel: 'stable', published_at: '2026-09-12T12:36:16Z',
-  release_url: 'https://github.com/KazuhaHub/Passwall-Node/releases/tag/release/4.1.0',
+  release_tag: 'v4.1.0',
+  release_url: 'https://github.com/KazuhaHub/Passwall-Node/releases/tag/v4.1.0',
   notes: 'Reviewed protocol compatibility; install exactly this tag.', methods: ['linux', 'docker', 'manual'], platforms,
 }
 const testing: NodeRelease = {
   ...stable, version: '4.1.1', channel: 'testing',
-  release_url: 'https://github.com/KazuhaHub/Passwall-Node/releases/tag/release/4.1.1',
+  release_tag: 'v4.1.1',
+  release_url: 'https://github.com/KazuhaHub/Passwall-Node/releases/tag/v4.1.1',
 }
 
 function reads(releases: NodeRelease[]) {
@@ -339,13 +347,13 @@ describe('an explicit target list wins over being merely newer', () => {
 // list at all, and an operator with nothing to choose from concludes there is
 // nothing to install.
 describe('a product-scheme release, whose page is addressed by its tag', () => {
-  const product = (version: string, release_url: string): NodeRelease => ({
-    ...stable, version, release_url,
+  const product = (version: string, tag: string): NodeRelease => ({
+    ...stable, version, release_tag: tag,
+    release_url: `https://github.com/KazuhaHub/Passwall-Node/releases/tag/${tag}`,
   })
-  const official = (version: string) => `https://github.com/KazuhaHub/Passwall-Node/releases/tag/release/${version}`
 
   it('lists it, selects it and links to its tag page', async () => {
-    const release = product('4.0.0', official('4.0.0'))
+    const release = product('4.0.0', 'v4.0.0')
     reads([release])
     mount(<Controlled />)
     await waitFor(() => expect(screen.queryByRole('status')).toBeNull())
@@ -356,9 +364,23 @@ describe('a product-scheme release, whose page is addressed by its tag', () => {
     expect(link.getAttribute('rel')).toBe('noopener noreferrer')
   })
 
+  // A RELEASE PUBLISHED BEFORE THE NAMESPACE CHANGED IS OFFERED FROM WHERE IT IS.
+  // The panel states `release/4.0.1.2` for the four it published there, and a front
+  // end that rebuilt the address from the version would offer `v4.0.1.2` — a tag
+  // nobody published — or, as here, drop the release from the list entirely.
+  it('lists a release published under the historical namespace', async () => {
+    const release = product('4.0.1.2', 'release/4.0.1.2')
+    reads([release])
+    mount(<Controlled />)
+    await waitFor(() => expect(screen.queryByRole('status')).toBeNull())
+    await chooseVersion('4.0.1.2')
+    expect(selected()).toBe('4.0.1.2')
+    expect(screen.getByRole('link', { name: 'admin:servers.native.release_details' }).getAttribute('href')).toBe(release.release_url)
+  })
+
   it('refuses a product release whose link is built from its version instead', async () => {
-    // tag/4.0.0 is not where a product release lives; tag/release/4.0.0 is.
-    reads([product('4.0.0', 'https://github.com/KazuhaHub/Passwall-Node/releases/tag/4.0.0')])
+    // tag/4.0.0 is not where a release lives in any namespace.
+    reads([{ ...product('4.0.0', 'v4.0.0'), release_url: 'https://github.com/KazuhaHub/Passwall-Node/releases/tag/4.0.0' }])
     mount(<Controlled />)
     await screen.findByText('admin:servers.native.release_no_stable')
     expect(screen.queryByRole('link')).toBeNull()
@@ -367,12 +389,12 @@ describe('a product-scheme release, whose page is addressed by its tag', () => {
 
   it('still refuses a product link from anywhere else, and any injected scheme', async () => {
     for (const release_url of [
-      'https://github.com/attacker/Passwall-Node/releases/tag/release/4.0.0',
+      'https://github.com/attacker/Passwall-Node/releases/tag/v4.0.0',
       'javascript:alert(1)',
-      'https://github.com/KazuhaHub/Passwall-Node/releases/tag/release/4.0.0?download=1',
-      'http://github.com/KazuhaHub/Passwall-Node/releases/tag/release/4.0.0',
+      'https://github.com/KazuhaHub/Passwall-Node/releases/tag/v4.0.0?download=1',
+      'http://github.com/KazuhaHub/Passwall-Node/releases/tag/v4.0.0',
     ]) {
-      reads([product('4.0.0', release_url)])
+      reads([{ ...product('4.0.0', 'v4.0.0'), release_url }])
       const view = mount(<Controlled />)
       await screen.findByText('admin:servers.native.release_no_stable')
       expect(screen.queryByRole('link'), release_url).toBeNull()
@@ -381,7 +403,7 @@ describe('a product-scheme release, whose page is addressed by its tag', () => {
   })
 
   it('does not turn a version with a path in it into a link', async () => {
-    reads([product('4.0.0/../../latest', official('4.0.0'))])
+    reads([product('4.0.0/../../latest', 'v4.0.0')])
     mount(<Controlled />)
     await screen.findByText('admin:servers.native.release_no_stable')
     expect(screen.queryByRole('link')).toBeNull()
@@ -390,22 +412,20 @@ describe('a product-scheme release, whose page is addressed by its tag', () => {
 
 // THE PANEL'S OWN ANSWER WINS.
 //
-// The catalog now states the tag it published, and a front end that re-derived
-// the mapping would be answering a question the panel already answered — with the
+// The catalog states the tag it published, and a front end that re-derived the
+// mapping would be answering a question the panel already answered — with the
 // added risk that the two rules disagree. The stated value is used when present;
 // the derivation stays for a panel older than the field, which is why the cases
 // above (no `release_tag`) still pass.
 describe('a release whose tag the panel states', () => {
   it('uses the stated tag rather than deriving one', async () => {
     // THE STATED TAG HAS TO DIFFER FROM THE DERIVED ONE FOR THIS TO PROVE
-    // ANYTHING. For a consistent pair they are the same string by construction —
-    // `release/` + version — so a case like that passes whichever value is used,
-    // and the test would be describing a preference it never exercised. Here the
-    // panel's tag and its version disagree, and only the stated value reaches the
-    // URL.
+    // ANYTHING, and it differs for every release published before the namespace
+    // changed: the panel states `release/4.0.0` and deriving the version gives
+    // `v4.0.0`. Only the stated value reaches the URL.
     const release: NodeRelease = {
-      ...stable, version: '4.0.0', release_tag: 'release/4.0.1',
-      release_url: 'https://github.com/KazuhaHub/Passwall-Node/releases/tag/release/4.0.1',
+      ...stable, version: '4.0.0', release_tag: 'release/4.0.0',
+      release_url: 'https://github.com/KazuhaHub/Passwall-Node/releases/tag/release/4.0.0',
     }
     reads([release])
     mount(<Controlled />)
@@ -415,9 +435,23 @@ describe('a release whose tag the panel states', () => {
     expect(screen.getByRole('link', { name: 'admin:servers.native.release_details' }).getAttribute('href')).toBe(release.release_url)
   })
 
-  it('refuses a stated tag that disagrees with the URL', async () => {
+  it('refuses a stated tag that names another release', async () => {
+    // TWO RELEASES DESCRIBED ONCE. The tag is well formed and the version is well
+    // formed; they are simply not the same release, and the entry is refused rather
+    // than resolved — the version is what the operator selects and what the upgrade
+    // comparison ranks, while the tag is where the link goes.
     reads([{
       ...stable, version: '4.0.0', release_tag: 'release/4.0.1',
+      release_url: 'https://github.com/KazuhaHub/Passwall-Node/releases/tag/release/4.0.1',
+    }])
+    mount(<Controlled />)
+    await screen.findByText('admin:servers.native.release_no_stable')
+    expect(screen.queryByRole('link')).toBeNull()
+  })
+
+  it('refuses a stated tag that disagrees with the URL', async () => {
+    reads([{
+      ...stable, version: '4.0.1', release_tag: 'release/4.0.1',
       release_url: 'https://github.com/KazuhaHub/Passwall-Node/releases/tag/release/4.0.0',
     }])
     mount(<Controlled />)

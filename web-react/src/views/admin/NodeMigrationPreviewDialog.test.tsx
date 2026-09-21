@@ -79,6 +79,7 @@ describe('3X-UI to Passwall Node node-host migration command', () => {
       checked_at: '2026-09-12T13:00:00Z',
       releases: [{
         version: '4.0.0', channel: 'stable', published_at: '2026-09-12T12:00:00Z', notes: 'Reviewed release fixture',
+        release_tag: 'release/4.0.0',
         release_url: 'https://github.com/KazuhaHub/Passwall-Node/releases/tag/release/4.0.0',
         methods: ['linux'], platforms: [{ os: 'linux', arch: 'amd64' }, { os: 'linux', arch: 'arm64' }],
       }],

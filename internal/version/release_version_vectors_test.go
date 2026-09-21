@@ -35,16 +35,29 @@ import (
 type releaseVectors struct {
 	Format int `json:"format"`
 
+	// TagNamespace is the namespace a version is published under NOW, and it is
+	// data rather than a second copy of the constant so that the two cannot
+	// disagree: a build that derived addresses in the other namespace would be
+	// publishing to a path no release is written to.
+	TagNamespace string `json:"tag_namespace"`
+
 	Tags []struct {
 		In      string `json:"in"`
 		Scheme  string `json:"scheme"`
 		Version string `json:"version"`
+		Why     string `json:"why"`
 	} `json:"tags"`
 
 	RejectTags []struct {
 		In  string `json:"in"`
 		Why string `json:"why"`
 	} `json:"reject_tags"`
+
+	Derive []struct {
+		In  string `json:"in"`
+		Tag string `json:"tag"`
+		Why string `json:"why"`
+	} `json:"derive"`
 
 	Reject []struct {
 		In  string `json:"in"`
@@ -78,19 +91,41 @@ func loadReleaseVectors(t *testing.T) releaseVectors {
 	if vectors.Format != 1 {
 		t.Fatalf("vectors format = %d, want 1", vectors.Format)
 	}
-	if len(vectors.Tags) == 0 || len(vectors.RejectTags) == 0 || len(vectors.Reject) == 0 ||
-		len(vectors.Versions) == 0 || len(vectors.Order) == 0 {
+	if len(vectors.Tags) == 0 || len(vectors.RejectTags) == 0 || len(vectors.Derive) == 0 ||
+		len(vectors.Reject) == 0 || len(vectors.Versions) == 0 || len(vectors.Order) == 0 {
 		t.Fatal("the vectors lost a section this test reads; a section that vanished would make this pass vacuously")
+	}
+	if vectors.TagNamespace == "" {
+		t.Fatal("the vectors no longer name the current tag namespace")
 	}
 	return vectors
 }
 
-// Every tag the released data calls a release tag, in both schemes.
+// The namespace this build publishes under is the one the data names.
+//
+// IT IS THE ONE THING THAT CANNOT BE CHECKED AGAINST A STRING: every other
+// assertion here goes through the constant, so a build whose constant disagreed
+// with the file would agree with itself all the way down and publish to an
+// address no release is written to.
+func TestTheVectorsNameTheCurrentNamespace(t *testing.T) {
+	vectors := loadReleaseVectors(t)
+	if version.ProductTagNamespace != vectors.TagNamespace {
+		t.Fatalf("ProductTagNamespace = %q, and the shared vectors name %q", version.ProductTagNamespace, vectors.TagNamespace)
+	}
+	// The historical namespace is read and is not the current one: a build that
+	// published under it would be writing new tags into a namespace whose only
+	// member is four releases that cannot move.
+	if version.HistoricalTagNamespace == vectors.TagNamespace {
+		t.Fatalf("the historical namespace %q is being published under", version.HistoricalTagNamespace)
+	}
+}
+
+// Every tag the released data calls a release tag, in both namespaces.
 func TestReleaseVersionVectorsAcceptTheTags(t *testing.T) {
 	for _, tc := range loadReleaseVectors(t).Tags {
 		t.Run(tc.In, func(t *testing.T) {
 			if !version.IsReleaseTag(tc.In) {
-				t.Fatalf("IsReleaseTag(%q) = false, and the released data calls it a %s tag", tc.In, tc.Scheme)
+				t.Fatalf("IsReleaseTag(%q) = false, and the released data calls it a %s tag (%s)", tc.In, tc.Scheme, tc.Why)
 			}
 			versionOfTag, ok := version.VersionOfReleaseTag(tc.In)
 			if !ok {
@@ -105,12 +140,30 @@ func TestReleaseVersionVectorsAcceptTheTags(t *testing.T) {
 			if versionOfTag != want {
 				t.Errorf("VersionOfReleaseTag(%q) = %q, want %q", tc.In, versionOfTag, want)
 			}
-			// And back: deriving the tag from the version must return the tag
-			// the data published, or a caller addresses one release and
-			// compares against another.
-			tag, ok := version.ReleaseTagFor(versionOfTag)
-			if !ok || tag != tc.In {
-				t.Errorf("ReleaseTagFor(%q) = %q, %v; want %q", versionOfTag, tag, ok, tc.In)
+			// AND BACK. The derived tag has to name the same release, but it is NOT
+			// required to be the same string: a tag published under the historical
+			// namespace cannot be rewritten, so deriving its address is a different
+			// answer from the one that was published. What the round trip has to
+			// preserve is the identity, and the exact addresses are pinned by the
+			// two sections around this one.
+			back, ok := version.ReleaseTagFor(versionOfTag)
+			if !ok {
+				t.Fatalf("ReleaseTagFor(%q) refused the version of %q", versionOfTag, tc.In)
+			}
+			if named, ok := version.VersionOfReleaseTag(back); !ok || named != versionOfTag {
+				t.Errorf("ReleaseTagFor(%q) = %q, which names %q rather than %q", versionOfTag, back, named, versionOfTag)
+			}
+		})
+	}
+}
+
+// Every address the released data derives, which is the CURRENT namespace's.
+func TestReleaseVersionVectorsDeriveTheCurrentAddress(t *testing.T) {
+	for _, tc := range loadReleaseVectors(t).Derive {
+		t.Run(tc.In, func(t *testing.T) {
+			tag, ok := version.ReleaseTagFor(tc.In)
+			if !ok || tag != tc.Tag {
+				t.Errorf("ReleaseTagFor(%q) = %q, %v; the released data says %q (%s)", tc.In, tag, ok, tc.Tag, tc.Why)
 			}
 		})
 	}

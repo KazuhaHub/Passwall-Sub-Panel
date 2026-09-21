@@ -75,10 +75,10 @@ func ParseReleaseLine(value string) (Line, error) {
 // AllocateVersion returns the next version on a line, given every tag that
 // already names a release.
 //
-// A TAG IT CANNOT READ TAKES NO NUMBER. `release/4.0.oops` is not a release
-// version, so it is not a release on this line either: it is skipped. Refusing
-// the whole allocation instead would let one stray tag on the remote freeze every
-// future release.
+// A TAG IT CANNOT READ TAKES NO NUMBER. `v4.0.oops` is not a release version, so
+// it is not a release on this line either: it is skipped. Refusing the whole
+// allocation instead would let one stray tag on the remote freeze every future
+// release.
 //
 // ANOTHER LINE'S TAGS ARE IGNORED, because they have their own numbering.
 //

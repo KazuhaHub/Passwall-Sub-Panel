@@ -1,15 +1,23 @@
 // The identity rules for a Passwall product release, on the client side.
 //
-// This file is one of three consumers of releaseid/testdata/vectors.json — the
-// others being the Go package of the same name and the release CLI. It exists
-// because the browser needs to answer the same questions the server does: what
-// version is this, is this string a version at all, and is this release a
-// testing candidate or a released one. A second set of rules here is how the
-// two sides come to disagree about a version they were both shown.
+// This file is one of three consumers of the shared vectors — the others being
+// the Go package of the same name and the release CLI. It exists because the
+// browser needs to answer the same questions the server does: what version is
+// this, is this string a version at all, and is this release a testing
+// candidate or a released one. A second set of rules here is how the two sides
+// come to disagree about a version they were both shown.
 //
 // THREE IDENTITIES, KEPT APART. A product version ("102.1.0") is not a release
-// tag ("release/102.1.0"), and neither is a Go module version. Product versions
-// have no v prefix; module versions do, because the Go toolchain requires one.
+// tag ("v102.1.0", or "release/102.1.0" for the four published before the
+// address changed), and neither is a Go module version. Product versions have no
+// prefix; a tag carries one.
+//
+// READING IS WIDER THAN WRITING. Both namespaces parse, because a published tag
+// cannot be moved and the panel still lists those four; only the current one is
+// ever derived. So a caller that has to address a release the panel already
+// published carries the tag it stated — releaseTag() below prefers it — and a
+// caller that derives gets an address that is right for the next release and
+// wrong for the historical four.
 
 /** The ceiling on a single segment. The same number in every implementation:
  *  the browser has no 64-bit integer at the top of its range, so a limit that
@@ -17,9 +25,14 @@
  *  both shown. */
 export const MAX_SEGMENT = 2147483647
 
-/** Product tags live under this namespace, so a product tag can never be
- *  mistaken for a Go module version, which also begins with a v. */
-export const TAG_PREFIX = 'release/'
+/** Product tags live under this namespace, and the vectors state it. */
+export const TAG_PREFIX = 'v'
+
+/** The namespace the four releases published before the address changed live
+ *  under. READ, NEVER WRITTEN: a published tag cannot be moved, the panel still
+ *  offers those releases, and its slash occupies two path entries in a download
+ *  URL — which is why it is a closed set rather than a second current form. */
+export const HISTORICAL_TAG_PREFIX = 'release/'
 
 export class ReleaseIdError extends Error {
   constructor(message: string) {
@@ -135,21 +148,23 @@ export function compareProductVersion(a: ProductVersion, b: ProductVersion): num
 /**
  * Parses a release tag.
  *
- * "release/MAJOR.MINOR.PATCH[.BUILD]" is the form, and the version part must be
- * three or four segments: a tag is a published identity, so the short forms that
- * are legal as parse input do not get releases of their own.
+ * "vMAJOR.MINOR.PATCH[.BUILD]" is the form, and "release/" + the same version is
+ * the historical one, which is still read because the four releases published
+ * under it are still on GitHub and still offered. The version part must be three
+ * or four segments either way: a tag is a published identity, so the short forms
+ * that are legal as parse input do not get releases of their own.
  *
- * A v INSIDE THE NAMESPACE (release/v4.0.0) is refused: it would be read as a tag
- * by one rule and a version by another, and the two readings differ about which
- * release it names.
+ * A v INSIDE THE HISTORICAL NAMESPACE (release/v4.0.0) is refused: the version
+ * after that namespace is bare, and the v IS the other namespace — a string read
+ * as a tag by one rule and a version by another differs about which release it
+ * names.
  */
 export function parseReleaseTag(raw: string): ReleaseTag {
-  if (!raw.startsWith(TAG_PREFIX)) {
-    throw new ReleaseIdError(`releaseid: ${JSON.stringify(raw)} is not a ${TAG_PREFIX}MAJOR.MINOR.PATCH tag`)
-  }
-  const body = raw.slice(TAG_PREFIX.length)
-  if (body.startsWith('v')) {
-    throw new ReleaseIdError(`releaseid: ${JSON.stringify(raw)} puts a v inside the product tag namespace`)
+  const body = tagBody(raw)
+  if (body === undefined) {
+    throw new ReleaseIdError(
+      `releaseid: ${JSON.stringify(raw)} is neither a ${TAG_PREFIX}MAJOR.MINOR.PATCH nor a ${HISTORICAL_TAG_PREFIX}MAJOR.MINOR.PATCH tag`,
+    )
   }
   const dots = (body.match(/\./g) ?? []).length
   if (dots !== 2 && dots !== 3) {
@@ -160,6 +175,17 @@ export function parseReleaseTag(raw: string): ReleaseTag {
     throw new ReleaseIdError(`releaseid: ${JSON.stringify(raw)} has a zero release line, which is not a released identity`)
   }
   return { raw, scheme: 'product', product }
+}
+
+/** The version part of a tag under either namespace, or undefined when the
+ *  string is not one of this project's tags at all. The two namespaces cannot be
+ *  confused for one another — neither is a prefix of the other — so the order
+ *  they are tried in is not a decision. */
+function tagBody(raw: string): string | undefined {
+  for (const prefix of [TAG_PREFIX, HISTORICAL_TAG_PREFIX]) {
+    if (raw.startsWith(prefix)) return raw.slice(prefix.length)
+  }
+  return undefined
 }
 
 /**
@@ -214,13 +240,19 @@ export function canonicalReleaseVersion(input: string): string | undefined {
 }
 
 /**
- * The tag a version is published under.
+ * The tag the NEXT release of this version is published under.
  *
- * NEVER THE VERSION ITSELF. A release is published under `release/` + its
- * version, because the namespace is what keeps a tag from being mistaken for a Go
- * module version — it is part of the ADDRESS, not part of the version. A caller
- * that puts a version where a tag belongs asks for a release that does not
- * exist, and the 404 reads as "no such release" rather than "wrong identity".
+ * NEVER THE VERSION ITSELF. The namespace is part of the ADDRESS, not part of the
+ * version, and a caller that puts a version where a tag belongs asks for a release
+ * that does not exist — the 404 reads as "no such release" rather than "wrong
+ * identity".
+ *
+ * IT CANNOT ANSWER FOR A RELEASE THAT IS ALREADY PUBLISHED, and no derivation
+ * could: no version string says which namespace its release went out under.
+ * `4.0.1.2` was published as `release/4.0.1.2` and the next fix will be published
+ * as `v4.0.1.3`, and this returns the second shape for both. A caller addressing
+ * a published release wants releaseTag(), which prefers the tag the catalog
+ * stated and only falls back to this.
  */
 export function tagForVersion(version: string): string | undefined {
   const canonical = canonicalReleaseVersion(version)
@@ -246,27 +278,45 @@ export function isReleaseTag(tag: string): boolean {
 }
 
 /**
+ * The version a tag names, or undefined when the string is not one of this
+ * project's tags.
+ *
+ * The inverse of tagForVersion FOR THE CURRENT NAMESPACE ONLY, and not the thing
+ * to build an address with: two tags name `4.0.1.2` and only one of them exists.
+ */
+export function versionOfTag(tag: string): string | undefined {
+  try {
+    return formatProductVersion(parseReleaseTag(tag).product!)
+  } catch {
+    return undefined
+  }
+}
+
+/**
  * The tag a release is ADDRESSED by, from the two strings a catalog entry
  * carries: the version, and the tag the PANEL stated if it sent one.
  *
  * THE STATED VALUE WINS, because the panel knows the tag it published while this
  * only re-derives it — and the derivation stays for a panel older than the field,
- * pinned by the shared vectors so it cannot drift from the rule the panel
- * applies.
+ * pinned by the shared vectors so it cannot drift from the rule the panel applies.
  *
- * A STATED TAG IS STILL CHECKED. Taking "the panel said so" as the same thing as
- * "it is one of our tags" would leave this value — which goes into an href —
- * validated by nothing at all; a tag that fails the rule is refused rather than
- * quietly re-derived, because falling back would address a release the panel did
- * not name.
+ * THE VERSION IS CHECKED IN BOTH BRANCHES, and the stated tag is checked against
+ * it. This value goes into an href, so taking "the panel said so" as the same thing
+ * as "it is one of our tags" would leave it validated by nothing at all; and a pair
+ * that disagrees is not one release described twice but two releases described once
+ * — refused rather than used, and rather than quietly re-derived, which would
+ * address a release the panel did not name.
+ *
+ * IT IS THE SAME RULE THE PANEL APPLIES to a stated tag before it renders from one,
+ * which is why the two cannot drift into accepting different pairs.
  *
  * It lives here, and takes two strings, so that a pure module does not have to
  * import the API layer to answer the question — which it did, and which dragged
  * an HTTP client into a node-environment test.
  */
 export function releaseTag(version: string, stated?: string): string | undefined {
-  if (stated !== undefined) {
-    return isReleaseTag(stated) ? stated : undefined
-  }
-  return tagForVersion(version)
+  const canonical = canonicalReleaseVersion(version)
+  if (canonical === undefined) return undefined
+  if (stated === undefined) return TAG_PREFIX + canonical
+  return versionOfTag(stated) === canonical ? stated : undefined
 }

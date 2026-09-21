@@ -7,21 +7,22 @@ import { test } from 'node:test'
 
 const workflow = readFileSync(new URL('../.github/workflows/release.yml', import.meta.url), 'utf8')
 
-// THE PRODUCT SCHEME IS OPEN, WHICH IS WHAT THE PREVIOUS VERSION OF THIS TEST WAS
-// WAITING FOR. It asserted the ABSENCE of `release/*` because a product release's
-// tag is not its version (`release/4.0.0` names the release `4.0.0`) and the two
-// consumers of a published release read the tag as the version:
+// THE NAMESPACE IS THE ONE THE PRODUCT ALREADY WEARS, AND THE OLD ONE IS CLOSED.
 //
-//   - the public Node installer, which now takes the version out of the asset
-//     name and the address out of the release document (Passwall-Node#40); and
-//   - PSP's own cmd/compatwatch, which now parses the tag into a version before
-//     reconciling it against docs/compat/passwall-node-v4.json (#183).
+// This assertion has reversed twice now, which is why it is kept rather than
+// deleted: it first asserted the ABSENCE of `release/*` (while the legacy scheme
+// was the only one), then REQUIRED it (once both consumers handled a tag that is
+// not its own version), and it requires `v*` and refuses `release/*` now — the
+// namespace the first four releases live in, and where nothing new is written.
 //
-// Both landed, so this test is REWRITTEN to require the pattern rather than
-// deleted — the same way its counterpart PN test is, and for the same reason: the
-// absence it used to assert is a decision with a condition attached, and the
-// condition is now met rather than waived.
-test('the release workflow triggers on both tag schemes', () => {
+// WHAT MAKES THE CURRENT TRIGGER SAFE IS THAT EVERY READER TAKES EITHER NAMESPACE.
+// A release's TAG is not its VERSION — `v4.0.0` names the release `4.0.0` — and
+// the consumers that used to read the tag as the version take both identities now:
+// the public Node installer reads the version out of the asset name and the address
+// out of the release document (Passwall-Node#40), and cmd/compatwatch parses the
+// tag before reconciling it (#183). The four releases published under the
+// historical namespace are read by that same path.
+test('the release workflow triggers on the current tag namespace, and only it', () => {
   const patterns = []
   const lines = workflow.split('\n')
   const start = lines.indexOf('    tags:')
@@ -35,17 +36,17 @@ test('the release workflow triggers on both tag schemes', () => {
     if (!/^      - /.test(line)) break
     patterns.push(line.replace(/^\s*- /, '').replace(/^["']|["']$/g, ''))
   }
-  // AND THE HISTORICAL TRIGGER IS REFUSED, which is the half that reversed when
-  // the scheme was removed. A workflow that still triggers on a v-prefixed tag is
-  // a way to cut a release the panel cannot read: it would publish artifacts and
-  // a release document for a name nothing on the reading side accepts.
   assert(
-    !patterns.includes('v*'),
-    `the release workflow still triggers on a v-prefixed tag (found ${patterns.join(', ')}). The scheme is gone; a tag it does trigger on is a release it will publish.`,
+    patterns.includes('v*'),
+    `the release workflow does not trigger on v* (found ${patterns.join(', ')}). A tag the workflow does not trigger on is a release that does not happen: no red run, no artifact, and a tag that names nothing.`,
   )
+  // AND THE HISTORICAL NAMESPACE IS REFUSED. Four releases live under it and no
+  // more can join them, because a published tag cannot be moved and the reading
+  // side treats the set as closed — while every address in it carries a slash that
+  // a download URL and a Docker tag both read as a separator.
   assert(
-    patterns.includes('release/*'),
-    `the release workflow does not trigger on release/* (found ${patterns.join(', ')}). A tag the workflow does not trigger on is a release that does not happen: no red run, no artifact, and a tag that names nothing.`,
+    !patterns.includes('release/*'),
+    `the release workflow still triggers on release/* (found ${patterns.join(', ')}). That namespace holds the four releases published before the address changed; a tag it does trigger on is a new release published into it.`,
   )
 })
 

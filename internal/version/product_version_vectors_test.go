@@ -64,6 +64,21 @@ func TestProductVersionVectorsMatchTheNodeCheckout(t *testing.T) {
 			"the vendored copy cannot be checked against it until the pin moves past the removal", checkout)
 	}
 
+	// A CHECKOUT FROM BEFORE THE ADDRESS CHANGED IS NOT A DIVERGENCE EITHER, and
+	// this one is the mirror image of the skip above: the vendored copy names a
+	// current namespace and reads two, and a pinned revision that has not been
+	// through the same change carries only the historical one. The two files
+	// differ for a reason that is about the pin rather than about either copy.
+	//
+	// THE SKIP RETIRES ITSELF. `tag_namespace` is the field the change added, so a
+	// pinned source that names ANY namespace stops skipping here and is compared
+	// byte for byte below — which is where a copy that drifted after the change
+	// fails.
+	if !bytes.Contains(canonical, []byte(`"tag_namespace"`)) {
+		t.Skipf("the pinned Node revision predates the current tag namespace (%s); "+
+			"the vendored copy carries it, and the two are compared once the pin moves past the change", checkout)
+	}
+
 	if !bytes.Equal(vendored, canonical) {
 		t.Fatalf("the vendored product-version vectors differ from the Node checkout's copy.\n"+
 			"vendored: %s\ncanonical: %s\n"+

@@ -25,7 +25,7 @@ import (
 
 func main() {
 	if len(os.Args) != 2 {
-		fmt.Fprintln(os.Stderr, "release requires an explicit tag: release/MAJOR.MINOR.PATCH[.BUILD]")
+		fmt.Fprintln(os.Stderr, "release requires an explicit tag: vMAJOR.MINOR.PATCH[.BUILD]")
 		os.Exit(1)
 	}
 	released, ok := version.VersionOfReleaseTag(os.Args[1])

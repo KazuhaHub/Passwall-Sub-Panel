@@ -32,6 +32,18 @@ type InstallTemplateRequest struct {
 	AgentID    string
 	Credential string
 	Version    string
+	// Tag is the ADDRESS of the release to read, when the caller knows it. It is
+	// optional, and the reason it exists is that a version no longer determines one:
+	// four releases were published under a namespace every release since does not
+	// use, and no version string says which. Empty means "derive it from the
+	// version", which answers for a release that has not been published yet and is
+	// wrong for those four — a caller addressing one of those states the tag, which
+	// is what the panel's own catalog carries per release.
+	//
+	// A STATED TAG THAT DOES NOT NAME THIS VERSION IS REFUSED rather than
+	// corrected: it goes into a URL an operator will run, and taking one release's
+	// address for another installs a different release under the right identity.
+	Tag string
 	// Mode is what the installer is being asked to do where an installation already
 	// exists. Empty means ModeInstall.
 	Mode string

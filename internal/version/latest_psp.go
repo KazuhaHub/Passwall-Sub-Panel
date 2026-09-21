@@ -34,7 +34,7 @@ var (
 )
 
 // LatestPSP returns the most recently observed latest STABLE PSP release tag
-// (e.g. "release/4.0.0"). Empty until a fetch lands; callers treat empty as
+// (e.g. "v4.0.2"). Empty until a fetch lands; callers treat empty as
 // "unknown" and show no update nudge.
 func LatestPSP() string {
 	if v, ok := latestPSPTag.Load().(string); ok {
@@ -64,7 +64,25 @@ func LatestPSPRefreshAt() time.Time {
 // ProductTagNamespace is where product-scheme tags live. Exported because more
 // than one place has to recognise the address form, and each of them spelling the
 // prefix inline is how the two come to disagree about which namespace it is.
-const ProductTagNamespace = "release/"
+//
+// A `v` PREFIX, WHICH IS ALSO HOW A GO MODULE VERSION BEGINS. That was the whole
+// reason for the namespace the product line used to live under, and the reason it
+// is only readable now is that no build here is a dependency: the module version
+// of this repository is a separate identity that nothing resolves, and every tag
+// a caller of this package meets — GitHub's tag_name, a release document, an
+// asset URL — is a product release. A four-segment version, which is what a fix
+// release carries, is not a valid Go version under any namespace.
+const ProductTagNamespace = "v"
+
+// HistoricalTagNamespace is where the four releases published before the address
+// changed live, and it is read rather than published.
+//
+// IT CANNOT BE RETIRED, because the tags cannot move: `release/4.0.0` through
+// `release/4.0.1.2` are on GitHub permanently, the panel lists them, and a node
+// still installs from them. It is a closed set — nothing new is published here —
+// and it carries the one property the current namespace does not: a slash, which
+// occupies two path entries in a download URL.
+const HistoricalTagNamespace = "release/"
 
 // IsPSPUpdateAvailable reports whether THIS build is behind the latest stable
 // release. Returns false for "dev" / unparseable / no-latest-yet so the nudge
@@ -176,11 +194,17 @@ func fetchLatestPSP(ctx context.Context) error {
 // historical gap: a beta cut before the workflow began setting the prerelease
 // flag would arrive here without it, and the presence of a hyphen in a
 // v-prefixed version was the only other evidence available. A product tag is
-// `release/MAJOR.MINOR.PATCH` — three integers in an explicit namespace, no
-// hyphen anywhere — so the test found nothing to reject there, and the code
-// carried an exemption to stop it from being applied where it was meaningless.
-// With the legacy shape gone there is no gap left to cover and no exemption to
-// scope: the flag decides, and the tag only has to be one of ours.
+// `vMAJOR.MINOR.PATCH[.BUILD]` — integers behind a namespace, no hyphen anywhere —
+// so the test found nothing to reject there, and the code carried an exemption to
+// stop it from being applied where it was meaningless. With the legacy shape gone
+// there is no gap left to cover and no exemption to scope: the flag decides, and
+// the tag only has to be one of ours.
+//
+// ONE THING THE FLAG DOES NOT SETTLE: an old stable release is still a release
+// this accepts, and a repository whose newest release is a testing candidate
+// answers /releases/latest with the newest STABLE one — which predates the
+// product line. The comparison downstream ranks a 4.x product version above it, so
+// the nudge stays silent; that is the comparator's job and not this function's.
 func acceptLatestPSPStable(tagName string, prerelease bool) (string, bool) {
 	if tagName == "" || prerelease {
 		return "", false
