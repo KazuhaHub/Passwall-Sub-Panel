@@ -17,25 +17,59 @@ import (
 // was never rendered still parses as Go.
 const hostArgMarker = "/*psp:host*/"
 
+// The path the fixtures are WRITTEN in. What they must NAME is read from the
+// revision under test — see nodeModulePath.
+const writtenModulePath = "github.com/KazuhaHub/passwall-node"
+
 // nodeFixture renders a fixture harness for the Node revision under test.
 //
 // THE HARNESS IS COMPILED AGAINST EVERY REVISION THE GATE EXERCISES, which is
-// every published tag as well as the revision PSP pins. Synchronizer.SyncOnce
-// took (ctx, partial) through beta9 and takes (ctx, partial, includeHost) from
-// the release that added host telemetry, so a hard-coded arity fails to build
-// at one end or the other — and the two ends are checked by two different jobs,
-// which means no single literal can satisfy both.
+// every published tag as well as the revision PSP pins. Two things about the Node
+// have moved while those releases were being cut, and a fixture written for one
+// side of either change does not build at the other:
 //
-// The arity is therefore read from the revision's own source rather than
-// assumed. An unrecognised shape is a failure rather than a guess: picking the
-// wrong one silently would turn a build error into a gate that proves nothing.
+//   - Synchronizer.SyncOnce took (ctx, partial) through beta9 and takes
+//     (ctx, partial, includeHost) from the release that added host telemetry, so a
+//     hard-coded arity fails to build at one end or the other.
+//   - The MODULE PATH carries the product major from the release that arranged it
+//     (`github.com/KazuhaHub/passwall-node/v4`), so a fixture importing the node's
+//     own packages by the bare path resolves nothing at that revision and later.
+//
+// The two ends are checked by two different jobs, which means no single literal can
+// satisfy both, and the failures read as a harness problem rather than as a node's.
+// So both are read from the revision's own source rather than assumed. An
+// unrecognised shape is a failure rather than a guess: picking the wrong one
+// silently would turn a build error into a gate that proves nothing.
 func nodeFixture(t *testing.T, nodeRepo, fixture string) string {
 	t.Helper()
+	fixture = strings.ReplaceAll(fixture, writtenModulePath+"/", nodeModulePath(t, nodeRepo)+"/")
 	arg, err := syncHostArg(nodeRepo)
 	if err != nil {
 		t.Fatalf("render the Node fixture for %s: %v", nodeRepo, err)
 	}
 	return strings.ReplaceAll(fixture, hostArgMarker, arg)
+}
+
+// nodeModulePath reads the module path the revision declares.
+//
+// From its go.mod rather than from a constant, because the constant would be a
+// second copy of a decision the module makes about itself — and the one that
+// hard-coded the bare path is what this replaces.
+func nodeModulePath(t *testing.T, nodeRepo string) string {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join(nodeRepo, "go.mod"))
+	if err != nil {
+		t.Fatalf("read the Node module path from %s: %v", nodeRepo, err)
+	}
+	for _, line := range strings.Split(string(raw), "\n") {
+		if path, found := strings.CutPrefix(strings.TrimSpace(line), "module "); found {
+			if path = strings.TrimSpace(path); path != "" {
+				return path
+			}
+		}
+	}
+	t.Fatalf("the Node checkout at %s declares no module path", nodeRepo)
+	return ""
 }
 
 // syncHostArg reports the argument to append at hostArgMarker: ", false" for a
