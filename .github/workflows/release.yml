@@ -162,12 +162,20 @@ jobs:
         run: |
           set -euo pipefail
           line=${RELEASE_LINE:?name the release line, MAJOR.MINOR, when the tag is blank}
-          # THE NUMBER COMES FROM THE PINNED ALLOCATOR, NOT FROM ARITHMETIC HERE.
-          # "An incremental fix takes the fourth segment" and "a number, once
-          # bound to a revision, is never reused" are one rule, and it lives in
-          # Passwall Node's releaseid so that every consumer applies the same one.
-          # `go run` resolves the module at the version go.mod pins, so this is
-          # the allocator this repository was tested against, not today's main.
+          # THE NUMBER COMES FROM THIS REPOSITORY'S OWN ALLOCATOR, NOT FROM
+          # ARITHMETIC HERE. "An incremental fix takes the fourth segment" and "a
+          # number, once bound to a revision, is never reused" are one rule, and it
+          # lives in internal/version so that every consumer applies the same one.
+          # It used to be reached through the Node module; X07 moved it here, and
+          # the two implementations are held to one set of vectors.
+          #
+          # THE TAG CARRIES A PERSON'S IDENTITY, and it is the one every existing
+          # release tag carries. A fresh runner has NO committer identity, so
+          # `git tag -a` refuses outright — `fatal: empty ident name` — and a
+          # published tag is the one artefact here that cannot be rewritten, which
+          # is exactly why it must not carry a tool's name instead.
+          git config user.name "Kazuha Mo"
+          git config user.email "kazuhak@uci.edu"
           all_tags() { git ls-remote --tags --refs origin | sed 's#.*refs/tags/##'; }
           tags_on_this_commit() {
             git ls-remote --tags origin | awk -v sha="$SHA" '$1 == sha { sub("^refs/tags/", "", $2); print $2 }'
