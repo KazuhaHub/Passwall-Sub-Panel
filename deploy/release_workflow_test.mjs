@@ -166,10 +166,14 @@ test('every automatic channel is a pre-release, and stable is stated', () => {
 // This intentionally guards a bounded, canonical workflow layout; the Go
 // version package additionally parses the full YAML and validates SDK gates.
 function job(name) {
-  const marker = `  ${name}:\n`
-  const start = workflow.indexOf(marker)
-  assert(start >= 0, `missing ${name} job`)
-  const tail = workflow.slice(start + marker.length)
+  // ANCHORED TO THE LINE START. A plain `indexOf('  tag:\n')` also matches the
+  // `    tag:` inside the dispatch form, so a job whose name is also an input key
+  // resolved to the input block — and the assertions then read a fragment of the
+  // form as if it were the job.
+  const marker = new RegExp(`^  ${name}:\\n`, 'm')
+  const found = marker.exec(workflow)
+  assert(found, `missing ${name} job`)
+  const tail = workflow.slice(found.index + found[0].length)
   const next = /^  [a-z][a-z-]*:\n/m.exec(tail)
   return tail.slice(0, next?.index ?? tail.length)
 }
@@ -245,6 +249,83 @@ test('release tag input uses env plus the pinned published canonical validator',
   for (const script of literalScripts()) {
     assert(!script.includes('${{ inputs.'), 'untrusted input must never be interpolated into shell source')
   }
+})
+
+// THE RELEASE IS ONE DISPATCH. Before this, the tag had to exist first and the run
+// had to be dispatched FROM that tag, so fixing the release path itself cost a PR
+// and a merge before a release could run — which happened twice in one session. A
+// hand-pushed tag is still accepted, so this adds a path rather than replacing one.
+test('the dispatch form can cut the next release without a local tag push', () => {
+  const form = workflow.slice(
+    workflow.indexOf('  workflow_dispatch:'),
+    workflow.indexOf('\njobs:'),
+  )
+  for (const name of ['tag:', 'line:', 'notes:']) {
+    assert(form.includes(`\n      ${name}`), `the dispatch form has no ${name} input`)
+  }
+  // BLANK CUTS THE NEXT ONE, so the tag input CANNOT be required: a required tag
+  // input is the old path, where the tag is made elsewhere and the form only
+  // records it.
+  const tag = form.slice(form.indexOf('      tag:'), form.indexOf('      line:'))
+  assert(/required:\s*false/.test(tag), 'the tag input must be optional: blank means cut the next one')
+  assert(!/required:\s*true/.test(tag), 'a required tag input puts the tag back outside the form')
+})
+
+test('the tag job cuts the tag after the suite passes, only when the form asked for one', () => {
+  const cut = job('tag')
+  assert(
+    cut.includes("if: github.event_name == 'workflow_dispatch' && inputs.tag == ''"),
+    'the tag job must run only for a dispatch that named no tag',
+  )
+  assert(cut.includes('contents: write'), 'cutting a tag is the one job that needs to write contents')
+  // THE NUMBER IS NOT COMPUTED HERE. "An incremental fix takes the fourth segment"
+  // and "a number, once bound to a revision, is never reused" are one rule with
+  // three consumers, and it lives in Passwall Node's releaseid. `go run` resolves
+  // the module at the version go.mod pins, so the rule is the tested one.
+  assert(
+    cut.includes('go run github.com/KazuhaHub/passwall-node/deployment/cmd/allocate-release-tag'),
+    'the number must come from the pinned allocator, not from arithmetic in YAML',
+  )
+  assert(
+    cut.includes('-line "$line"'),
+    'the line must be named by the caller: a line\'s first release is named, not allocated',
+  )
+  // THE CREATE IS THE CONFIRMATION. `git push` refuses to move a ref, so a lost
+  // race is found by the push failing and the next pass re-reading — which is why
+  // this is a loop rather than one shot.
+  assert(cut.includes('git push --quiet origin "refs/tags/$tag"'), 'the tag must be created by an atomic ref push')
+  assert(/while \[ "\$attempt" -lt \d+ \]/.test(cut), 'the allocation must retry when the push loses the race')
+  // ANNOTATED AT CREATION, because the notes are the artefact a reader opens and
+  // the only place a note survives a rerun.
+  assert(cut.includes('git tag -a --cleanup=verbatim "$tag"'), 'the tag must be annotated and carry the notes')
+  // AND IT REFUSES A COMMIT THE SUITE HAS NOT PASSED — asking about the gate
+  // workflow. Enumerating the commit's check runs would include this very release
+  // run, still in progress, and refuse the commit for its own existence.
+  assert(
+    cut.includes('--workflow test.yml --commit "$SHA"'),
+    'the tag job must ask about the test workflow rather than about every run on the commit',
+  )
+  assert(!cut.includes('check-runs'), 'enumerating check runs refuses the commit for the release run itself existing')
+})
+
+test('the release reads the tag this run cut', () => {
+  assert(job('tag').includes('tag: ${{ steps.cut.outputs.tag }}'), 'the tag job must export the tag it cut')
+  const setup = job('setup')
+  assert(setup.includes('CUT_TAG: ${{ needs.tag.outputs.tag }}'), 'setup must read the tag the run cut')
+  assert(/^\s*needs: tag$/m.test(setup), 'setup must depend on the tag job')
+  // A SKIPPED DEPENDENCY SKIPS ITS DEPENDENTS, so the condition has to say that a
+  // skipped tag job is not a failed one — otherwise a pushed tag releases nothing.
+  assert(
+    setup.includes("needs.tag.result == 'skipped'"),
+    'a skipped tag job must not skip the release',
+  )
+  // THE REF CHECK CANNOT APPLY TO A TAG THIS RUN CUT: the run was dispatched from a
+  // branch, so GITHUB_REF is not the tag. It stays for the hand-pushed path, where
+  // the ref that triggered the run is the tag.
+  assert(
+    setup.includes('if [ -z "${CUT_TAG}" ]; then'),
+    'the tag-ref check must be limited to the paths where the triggering ref IS the tag',
+  )
 })
 
 test('every downstream job checks out trusted immutable workflow SHA proven equal to release SHA', () => {
@@ -389,12 +470,49 @@ test('the compatibility gate actually runs the case-set checker', () => {
 test('every job that can write is behind the compatibility gate', () => {
   const names = [...workflow.matchAll(/^  ([a-z][a-z0-9_-]*):\n/gm)].map((m) => m[1])
   assert(names.length > 3, `expected the workflow to declare jobs, found ${names.length}`)
-  const writers = names.filter((name) => /^ {6}(contents|packages|id-token):\s*write\s*$/m.test(job(name)))
+  // ONE EXEMPTION, AND IT IS ABOUT ORDER RATHER THAN TRUST. The tag job writes a
+  // REF, not a release and not an artifact, and it runs BEFORE the gate: the tag
+  // it cuts is the identity every later job reads, so a dependency on
+  // `compatibility` is a cycle rather than a safeguard. Its own gate is the test
+  // suite on the commit, which it checks directly and refuses without. A number
+  // that a later-failing release then leaves unused is the gap the allocation rule
+  // explicitly permits. The exemption is itself guarded by the test below, which
+  // holds the tag job to a ref push and nothing else.
+  const writers = names.filter(
+    (name) => name !== 'tag' && /^ {6}(contents|packages|id-token):\s*write\s*$/m.test(job(name)),
+  )
   assert(writers.length > 0, 'no job can write; either the workflow changed or this matcher broke')
   for (const name of writers) {
     assert(
       /needs: \[[^\]]*\bcompatibility\b[^\]]*\]/.test(job(name)),
       `${name} can write but does not depend on the compatibility summary`
+    )
+  }
+})
+
+// THE EXEMPTION ABOVE IS NARROW, AND THIS IS WHAT KEEPS IT SO. The tag job may
+// write because it creates the ref the release is published under; if that scope
+// ever grows to a package or an OIDC token, it has stopped being a tag cutter and
+// the exemption no longer covers it.
+test('the tag job writes a ref and nothing else', () => {
+  const cut = job('tag')
+  assert(/^ {6}contents: write$/m.test(cut), 'the tag job needs contents: write to create the tag')
+  for (const scope of ['packages', 'id-token']) {
+    assert(
+      !new RegExp(`^ {6}${scope}: write$`, 'm').test(cut),
+      `the tag job must not hold a ${scope} write; that is a publisher, not a tag cutter`,
+    )
+  }
+  // COMMENTS NAME THE COMMAND TOO, so a bare substring search matches the prose
+  // explaining the race and reports it as a second push.
+  const writes = cut
+    .split('\n')
+    .filter((line) => !line.trimStart().startsWith('#') && /git push/.test(line))
+  assert(writes.length > 0, 'the tag job must push the tag')
+  for (const line of writes) {
+    assert(
+      line.includes('refs/tags/$tag'),
+      `the tag job pushes something other than the release tag: ${line.trim()}`,
     )
   }
 })
@@ -540,14 +658,26 @@ test('latest never points at a prerelease and beta always tracks the newest of a
   assert.deepEqual(resolveChannel('v1.0.0', 'testing'), { prerelease: true, images: true })
 })
 
+// MUTATE ONE NAMED JOB, NOT "THE FIRST MATCH IN THE FILE". `String.replace` with a
+// string changes only the first occurrence, so these mutations silently started
+// editing whichever job happened to come first — and when a new job was added
+// ahead of the publishers, the guard stopped being exercised at all and the test
+// failed for a reason that had nothing to do with caches.
+function inJob(name, from, to) {
+  const body = job(name)
+  const mutated = body.replace(from, to)
+  assert(mutated !== body, `${name}: nothing matched ${JSON.stringify(from)} to mutate`)
+  return workflow.replace(body, mutated)
+}
+
 test('publisher cache guard rejects implicit defaults and explicit cache restoration', () => {
   for (const [label, mutated] of [
-    ['implicit Go cache', workflow.replace('          cache: false\n', '')],
-    ['enabled Go cache', workflow.replace('          cache: false', '          cache: true')],
-    ['implicit Node cache', workflow.replace('          package-manager-cache: false\n', '')],
-    ['enabled Node cache', workflow.replace('          package-manager-cache: false', '          package-manager-cache: true')],
-    ['explicit npm cache', workflow.replace('          package-manager-cache: false', '          package-manager-cache: false\n          cache: npm')],
-    ['npm cache path', workflow.replace('          package-manager-cache: false', '          package-manager-cache: false\n          cache-dependency-path: web-react/package-lock.json')],
+    ['implicit Go cache', inJob('setup', '          cache: false\n', '')],
+    ['enabled Go cache', inJob('build', '          cache: false', '          cache: true')],
+    ['implicit Node cache', inJob('web', '          package-manager-cache: false\n', '')],
+    ['enabled Node cache', inJob('web', '          package-manager-cache: false', '          package-manager-cache: true')],
+    ['explicit npm cache', inJob('web', '          package-manager-cache: false', '          package-manager-cache: false\n          cache: npm')],
+    ['npm cache path', inJob('web', '          package-manager-cache: false', '          package-manager-cache: false\n          cache-dependency-path: web-react/package-lock.json')],
     ['shared cache action', workflow + '\n      - uses: actions/cache@v4\n'],
     ['shared image cache', workflow + '\n          cache-from: type=gha\n'],
   ]) {
