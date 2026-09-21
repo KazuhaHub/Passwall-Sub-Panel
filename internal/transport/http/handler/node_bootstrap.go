@@ -351,7 +351,11 @@ func (h *NodeBootstrapHandler) installScript(ctx context.Context, t *bootstrapTi
 		return "", domain.ErrConflict
 	}
 	return h.servers.renderInstallScript(ctx, ports.InstallTemplateRequest{
-		Endpoint: t.endpoint, AgentID: agentID, Credential: credential, Version: t.version, Mode: t.mode})
+		Endpoint: t.endpoint, AgentID: agentID, Credential: credential, Version: t.version, Mode: t.mode,
+		// The address of the selected release, stated by the panel's own catalog:
+		// for a release published before the namespace changed, deriving one from
+		// the version names a tag that does not exist.
+		Tag: h.servers.nodeReleaseTag(ctx, t.version)})
 }
 
 func (h *NodeBootstrapHandler) Complete(c *gin.Context) {

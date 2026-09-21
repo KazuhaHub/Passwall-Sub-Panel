@@ -61,6 +61,20 @@ describe('product version vectors', () => {
 
   // isReleaseTag is the predicate the catalog's stated tag goes through, so it is
   // held to the same two sections as the parser it delegates to.
+  // A version is published under the CURRENT namespace, and the file says which
+  // one that is: a rule that pinned the string here instead would let a build
+  // derive an address the publisher never writes to.
+  it('publishes under the namespace the vectors name', () => {
+    expect(vectors.tag_namespace).toBe(TAG_PREFIX)
+    for (const tc of vectors.derive) {
+      expect(tagForVersion(tc.in), `${tc.in} (${tc.why ?? ''})`).toBe(tc.tag)
+    }
+  })
+
+  // THE DERIVATION IS NOT THE INVERSE OF READING, and the last derive vector is
+  // the case that says so: the four releases published under the historical
+  // namespace do not derive back to their own address, which is why an address for
+  // a published release is carried rather than rebuilt.
   it('agrees with the vectors about which strings are tags', () => {
     for (const tc of vectors.tags) expect(isReleaseTag(tc.in), tc.in).toBe(true)
     for (const tc of vectors.reject_tags) expect(isReleaseTag(tc.in), `${tc.in} (${tc.why})`).toBe(false)
@@ -70,12 +84,24 @@ describe('product version vectors', () => {
   // the tags, so the stated-value half is checked against the same data the
   // derivation is.
   it('prefers the stated tag and falls back to the derived one', () => {
-    const [first] = vectors.tags
-    expect(releaseTag('4.0.0', first.in)).toBe(first.in)
+    // A HISTORICAL TAG IS WHAT THIS IS FOR: the panel states `release/102.1.0` for a
+    // release that is published there, and deriving would name a tag nobody
+    // published. The pair must AGREE — the tag has to name the version it is stated
+    // beside — so this is also the case that pins a stated tag naming another
+    // release being refused rather than used.
+    expect(releaseTag('102.1.0', 'release/102.1.0')).toBe('release/102.1.0')
+    expect(releaseTag('102.1.0', 'v102.1.0')).toBe('v102.1.0')
+    expect(releaseTag('102.1.0')).toBe(`${TAG_PREFIX}102.1.0`)
+    expect(releaseTag('102.1.0', 'release/1.0.0')).toBeUndefined()
+    expect(releaseTag('102.1.0', 'v1.0.0')).toBeUndefined()
     // A stated tag that is not one of ours is refused rather than re-derived:
     // falling back would address a release the panel did not name.
     expect(releaseTag('4.0.0', 'not-a-tag')).toBeUndefined()
     for (const tc of vectors.reject_tags) expect(releaseTag('4.0.0', tc.in), tc.in).toBeUndefined()
+    // AND THE VERSION IS CHECKED WHATEVER THE TAG SAYS. `4.0.0/../../latest` is not
+    // a version, and a well-formed tag beside it does not make it one.
+    expect(releaseTag('4.0.0/../../latest', 'v4.0.0')).toBeUndefined()
+    expect(releaseTag('latest', 'v4.0.0')).toBeUndefined()
     // Absent, the derivation answers — which is every panel older than the field.
     expect(releaseTag('4.0.0')).toBe(`${TAG_PREFIX}4.0.0`)
   })
@@ -157,11 +183,28 @@ describe('a legacy tag is not one of ours', () => {
     // grant a release an identity this project no longer publishes — and the
     // other tempting bug is to keep answering for the old scheme, which is how a
     // string nobody can install keeps being offered.
+    expect(() => parseProductVersion('v0.0.1-beta11')).toThrow()
+    expect(() => parseReleaseTag('v0.0.1-beta11')).toThrow()
+    expect(isReleaseTag('v0.0.1-beta11')).toBe(false)
+    expect(canonicalReleaseVersion('v0.0.1-beta11')).toBeUndefined()
+    expect(tagForVersion('v0.0.1-beta11')).toBeUndefined()
+  })
+
+  // A V-PREFIX IS THE CURRENT NAMESPACE, and what separates a product tag from the
+  // legacy shape is not the prefix: it is the hyphen and the zero release line,
+  // both of which the version rule refuses. The row above and this one are the two
+  // halves of that distinction.
+  it('reads a v-prefixed product tag, and still does not read it as a version', () => {
+    expect(parseReleaseTag('v102.1.0').product?.minor).toBe(1)
+    expect(isReleaseTag('v102.1.0')).toBe(true)
     expect(() => parseProductVersion('v102.1.0')).toThrow()
-    expect(() => parseReleaseTag('v102.1.0')).toThrow()
-    expect(isReleaseTag('v102.1.0')).toBe(false)
     expect(canonicalReleaseVersion('v102.1.0')).toBeUndefined()
     expect(tagForVersion('v102.1.0')).toBeUndefined()
+    // And the historical namespace is read the same way, because the releases
+    // published under it are still offered.
+    expect(parseReleaseTag('release/102.1.0').product?.minor).toBe(1)
+    expect(isReleaseTag('release/102.1.0')).toBe(true)
+    expect(canonicalReleaseVersion('release/102.1.0')).toBeUndefined()
   })
 
   // A FOURTH SEGMENT IS A VERSION NOW. This asserted the opposite until the
@@ -170,12 +213,16 @@ describe('a legacy tag is not one of ours', () => {
   it('does not truncate a fifth segment', () => {
     expect(() => parseProductVersion('102.1.0.1.2')).toThrow()
     expect(() => parseReleaseTag('release/102.1.0.1.2')).toThrow()
+    expect(() => parseReleaseTag('v102.1.0.1.2')).toThrow()
     expect(parseProductVersion('102.1.0.1').build).toBe(1)
     expect(parseReleaseTag('release/102.1.0.1').product?.build).toBe(1)
+    expect(parseReleaseTag('v102.1.0.1').product?.build).toBe(1)
   })
 
   it('does not give the short form a release of its own', () => {
     expect(() => parseReleaseTag('release/102.1')).toThrow()
     expect(() => parseReleaseTag('release/102')).toThrow()
+    expect(() => parseReleaseTag('v102.1')).toThrow()
+    expect(() => parseReleaseTag('v102')).toThrow()
   })
 })

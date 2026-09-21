@@ -25,10 +25,12 @@ type NodeReleaseCatalogEntry struct {
 	//
 	// The two coincide in the legacy scheme, which is why one field was enough
 	// while only that scheme existed. Under the product scheme the tag is
-	// `release/4.0.0` and the version is `4.0.0`, and a caller that builds an
-	// address out of the version asks for a release that does not exist. Stating
-	// both here means the front end validates a URL against what the panel says
-	// rather than re-deriving the mapping.
+	// `v4.0.0` and the version is `4.0.0`, and a caller that builds an address out
+	// of the version asks for a release that does not exist. Stating both here
+	// means the front end validates a URL against what the panel says rather than
+	// re-deriving the mapping — which no longer has one answer anyway: the four
+	// releases published before the namespace changed are addressed as
+	// `release/…`, and only this field knows that.
 	//
 	// ProductVersion is EMPTY for a legacy release, and that is the honest
 	// answer: `v0.0.1-beta11` has no product version, and normalising it into one

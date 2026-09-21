@@ -233,6 +233,10 @@ func (h *AdminServersHandler) NodeInstallScript(c *gin.Context) {
 	script, err := h.renderInstallScript(c.Request.Context(), ports.InstallTemplateRequest{
 		Endpoint: provisioning.Endpoint, AgentID: provisioning.AgentID,
 		Credential: provisioning.Credential, Version: req.Version, Mode: req.Mode,
+		// THE ADDRESS COMES FROM THE PANEL'S OWN CATALOG, not from the version:
+		// the releases published before the namespace changed are not addressed
+		// the way a derivation would name them.
+		Tag: h.nodeReleaseTag(c.Request.Context(), req.Version),
 	})
 	if installTemplateRefused(c, err, "a canonical HTTPS PSP endpoint, an exact published Node version and a supported installation mode are required") {
 		return
@@ -283,6 +287,7 @@ func (h *AdminServersHandler) NodeInstallationFiles(c *gin.Context) {
 	if !h.auditNodeCredentialRead(c, panel.ID, provisioning.AgentID) {
 		return
 	}
+	req.Tag = h.nodeReleaseTag(c.Request.Context(), req.Version)
 	result := renderNodeInstallationFiles(panel.ID, provisioning, req)
 	c.JSON(http.StatusOK, result)
 }

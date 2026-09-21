@@ -33,11 +33,12 @@ const DEFAULTS = {
 // and a manifest row that still carried one would now be refused as "not a release
 // version" rather than planned into a case nobody can run.
 const RELEASE_VERSION = /^\d+\.\d+\.\d+(\.\d+)?$/
-// TAG_NAMESPACE is where a release's address lives. A version is the identity and
-// a tag is where it was published, and they are never the same string under the
-// product scheme — the case below carries the tag as a readable label beside the
-// SHA that is the real identity.
-const TAG_NAMESPACE = 'release/'
+// A RELEASE TAG IS A VERSION BEHIND A NAMESPACE, and there are two namespaces to
+// read: the current one, and the historical one the four releases published before
+// the address changed live in. A release from a fix line carries the optional
+// build component. WHICH namespace a given release is under IS NOT DERIVABLE — no
+// version string says it — so the manifest states the tag and this only checks it.
+const RELEASE_TAG = /^(?:release\/|v)\d+\.\d+\.\d+(?:\.\d+)?$/
 const SHA = /^[0-9a-f]{40}$/
 
 function parseArgs(argv) {
@@ -67,6 +68,25 @@ function build(manifest, verification, profiles) {
   for (const name of names) {
     if (seen.has(name)) problems.push(`released_nodes repeats ${name}`)
     seen.add(name)
+  }
+
+  // WHERE EACH RELEASE IS ADDRESSED, stated by the manifest rather than derived
+  // from the version. Deriving names a tag nobody published for the four releases
+  // from before the address changed, and would name the wrong shape for every
+  // release after it — while the matrix this feeds addresses each case by exactly
+  // this tag. A row that says nothing, or says something this project could not
+  // have published, is a problem rather than a case.
+  const tags = new Map()
+  for (const row of manifest.released_nodes) {
+    if (!row.tag) {
+      problems.push(`released_nodes row ${JSON.stringify(row.version)} does not state the tag it is published at`)
+      continue
+    }
+    if (!RELEASE_TAG.test(row.tag)) {
+      problems.push(`released_nodes row ${JSON.stringify(row.version)} states a tag this project does not publish: ${JSON.stringify(row.tag)}`)
+      continue
+    }
+    tags.set(row.version, row.tag)
   }
 
   // An exclusion is a decision, and a decision says why. Without the reason it
@@ -128,10 +148,10 @@ function build(manifest, verification, profiles) {
         direction: spec.direction ?? '',
         version,
         // The tag is a readable label; the SHA is the identity. Carrying only
-        // the tag would let a moved tag silently substitute another commit — and
-        // the tag is DERIVED from the version rather than copied from it, because
-        // a product version is not the path its release lives at.
-        tag: `${TAG_NAMESPACE}${version}`,
+        // the tag would let a moved tag silently substitute another commit — and it
+        // is copied from the row rather than rebuilt from the version, because
+        // which namespace a release is under is a fact about the release.
+        tag: tags.get(version),
         sha: pinned[version],
         install_methods: spec.install_methods ?? [],
         platforms: spec.platforms ?? [],

@@ -162,15 +162,46 @@ func assetError(err error) error {
 	}
 }
 
+// address is the tag this request reads and writes into the script: the caller's
+// when it stated one, the derived one when it did not.
+//
+// A STATED ADDRESS IS CHECKED AGAINST THE VERSION IT MUST NAME. It is the release
+// a host will download from and the identity the script writes down, and taking
+// one release's address for another is a script that installs the wrong release
+// under the right identity — a failure that shows up as a version nobody asked
+// for, long after the operator has stopped looking at the command they ran. A
+// stated tag that does not name this version is REFUSED rather than replaced by the
+// derived one, because falling back would install a release the caller did not
+// name.
+//
+// THE DERIVATION ANSWERS WITH THE CURRENT NAMESPACE, which is right for a release
+// that has not been published yet. For the four published under the historical
+// namespace it names a tag that does not exist, which is exactly why the caller
+// that has the answer states it.
+func address(options Options) (string, error) {
+	if options.Tag != "" {
+		named, ok := version.VersionOfReleaseTag(options.Tag)
+		if !ok || named != options.Version {
+			return "", fmt.Errorf("%w: %q is not a tag naming the release version %q", ErrNotRenderable, options.Tag, options.Version)
+		}
+		return options.Tag, nil
+	}
+	tag, ok := version.ReleaseTagFor(options.Version)
+	if !ok {
+		return "", fmt.Errorf("%w: %q has no tag", ErrNotRenderable, options.Version)
+	}
+	return tag, nil
+}
+
 // prepare validates everything the render needs and derives the tag. It contacts
 // nothing, so a request that cannot be rendered never reaches the network.
 func prepare(options Options) (string, error) {
 	if !version.IsReleaseVersion(options.Version) {
 		return "", fmt.Errorf("%w: %q is not a release version", ErrNotRenderable, options.Version)
 	}
-	tag, ok := version.ReleaseTagFor(options.Version)
-	if !ok {
-		return "", fmt.Errorf("%w: %q has no tag", ErrNotRenderable, options.Version)
+	tag, err := address(options)
+	if err != nil {
+		return "", err
 	}
 	endpoint, err := url.Parse(options.Endpoint)
 	if err != nil || endpoint.Scheme != "https" || endpoint.Host == "" ||

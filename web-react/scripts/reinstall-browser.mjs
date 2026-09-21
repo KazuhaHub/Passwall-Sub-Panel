@@ -112,7 +112,10 @@ async function fixture(request, response, url) {
       checked_at: new Date().toISOString(), releases: [{ version, channel: 'testing',
         published_at: '2026-09-12T12:00:00Z', notes: 'Reviewed browser acceptance fixture',
         // THE ADDRESS IS THE TAG AND THE RECORD IS THE VERSION, which are never the same
-        // string: the panel rejects a release whose page is not addressed under release/.
+        // string — and a version no longer determines the address, so the panel states it
+        // and this stands in for what a real panel sends. The page URL is built from it,
+        // and the surface rejects a release whose page is addressed another way.
+        release_tag: `release/${version}`,
         release_url: `https://github.com/KazuhaHub/Passwall-Node/releases/tag/release/${version}`,
         methods: ['linux', 'docker', 'manual'], platforms: ['amd64', 'arm64'].map(arch => ({ os: 'linux', arch })) }],
     });

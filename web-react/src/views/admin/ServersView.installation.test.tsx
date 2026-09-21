@@ -985,6 +985,7 @@ describe('Passwall Node installation', () => {
       checked_at: '2026-09-12T13:00:00Z',
       releases: [{
         version: '4.0.0', channel: 'stable', published_at: '2026-09-12T12:00:00Z', notes: 'Reviewed contract fixture',
+        release_tag: 'release/4.0.0',
         release_url: 'https://github.com/KazuhaHub/Passwall-Node/releases/tag/release/4.0.0',
         methods: ['linux', 'docker', 'manual'],
         platforms: (['linux', 'darwin', 'windows'] as const).flatMap(os =>
@@ -1013,6 +1014,7 @@ describe('Passwall Node installation', () => {
       checked_at: '2026-09-12T13:00:00Z',
       releases: [{
         version: '4.0.0', channel: 'stable', published_at: '2026-09-12T12:00:00Z', notes: 'Reviewed contract fixture',
+        release_tag: 'release/4.0.0',
         release_url: 'https://github.com/KazuhaHub/Passwall-Node/releases/tag/release/4.0.0',
         methods: ['linux', 'docker', 'manual'],
         platforms: (['linux', 'darwin', 'windows'] as const).flatMap(os =>

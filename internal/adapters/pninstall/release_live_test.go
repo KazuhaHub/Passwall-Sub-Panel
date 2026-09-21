@@ -18,9 +18,10 @@ import (
 // the RELEASE, and it is the one an operator depends on, because this is the script
 // they hand to a host.
 //
-// SET PSP_LIVE_NODE_RELEASE TO A PUBLISHED TAG, for example release/4.0.1.1. The
-// production renderer is used — the compiled verification key and the real origin —
-// so what runs here is the path an installation takes, not a rehearsal of it.
+// SET PSP_LIVE_NODE_RELEASE TO A PUBLISHED TAG, for example `release/4.0.1.2` or
+// `v4.0.1.3`. The production renderer is used — the compiled verification key and
+// the real origin — so what runs here is the path an installation takes, not a
+// rehearsal of it.
 func TestLivePublishedReleasePublishesAnInstallationScript(t *testing.T) {
 	tag := strings.TrimSpace(os.Getenv("PSP_LIVE_NODE_RELEASE"))
 	if tag == "" {
@@ -41,6 +42,12 @@ func TestLivePublishedReleasePublishesAnInstallationScript(t *testing.T) {
 		AgentID:    "agt_live_release_check",
 		Credential: "pspn_" + strings.Repeat("a", 40),
 		Version:    releaseVersion,
+		// THE TAG IS HANDED OVER, NOT RE-DERIVED, and this is the case that shows
+		// why: the env var may name a release published before the address changed,
+		// whose derived address is a tag nobody published. A caller that has the
+		// address passes it; the assertion below is what checks that the script then
+		// carries the one this release is really at.
+		Tag: tag,
 	})
 	if err != nil {
 		t.Fatalf("the published release does not serve an installation script: %v", err)

@@ -44,13 +44,22 @@ func main() {
 	// the commit is what records which one that is.
 	released, err := version.ResumeVersion(parsedLine, splitTags(*onCommit))
 	if err == nil {
-		tag, ok := version.ReleaseTagFor(released)
-		if !ok {
-			fmt.Fprintf(os.Stderr, "%q is not a publishable version\n", released)
-			os.Exit(1)
+		// AND IT IS PRINTED AS IT WAS FOUND. The number comes from the repository,
+		// so the address does too: the tag that recorded the number is the address
+		// the release went out under, and deriving one instead would name a tag
+		// that does not exist for a release published before the address changed —
+		// a rerun that then creates a second tag for one release.
+		for _, raw := range splitTags(*onCommit) {
+			if named, ok := version.VersionOfReleaseTag(raw); ok && named == released {
+				fmt.Println(raw)
+				return
+			}
 		}
-		fmt.Println(tag)
-		return
+		// Unreachable behind ResumeVersion, which found this version among these
+		// tags. Kept as a refusal rather than a derived guess: printing an address
+		// nothing published is worse than printing nothing.
+		fmt.Fprintf(os.Stderr, "%q is bound to this revision, but no tag among the ones read names it\n", released)
+		os.Exit(1)
 	}
 	if !errors.Is(err, version.ErrVersionNotAllocated) {
 		// AN AMBIGUITY IS A REFUSAL, NOT A LICENCE TO ALLOCATE ANOTHER NUMBER. The

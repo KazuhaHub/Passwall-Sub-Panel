@@ -178,6 +178,7 @@ it('upgrades a node that reports a product-scheme version', async () => {
       checked_at: '',
       releases: [{
         version: '4.0.1', channel: 'stable', published_at: '2026-09-12T12:00:00Z',
+        release_tag: 'release/4.0.1',
         release_url: 'https://github.com/KazuhaHub/Passwall-Node/releases/tag/release/4.0.1',
         notes: 'Reviewed release fixture', methods: ['linux'],
         platforms: [{ os: 'linux', arch: 'amd64' }, { os: 'linux', arch: 'arm64' }],
@@ -210,6 +211,7 @@ it('upgrades a node that reports a version from the replaced scheme', async () =
       checked_at: '',
       releases: [{
         version: '4.0.1', channel: 'stable', published_at: '2026-09-12T12:00:00Z',
+        release_tag: 'release/4.0.1',
         release_url: 'https://github.com/KazuhaHub/Passwall-Node/releases/tag/release/4.0.1',
         notes: 'Reviewed release fixture', methods: ['linux'],
         platforms: [{ os: 'linux', arch: 'amd64' }, { os: 'linux', arch: 'arm64' }],
@@ -241,6 +243,7 @@ it('accepts whatever version the node reports about itself', async () => {
         checked_at: '',
         releases: [{
           version: '4.0.1', channel: 'stable', published_at: '2026-09-12T12:00:00Z',
+          release_tag: 'release/4.0.1',
           release_url: 'https://github.com/KazuhaHub/Passwall-Node/releases/tag/release/4.0.1',
           notes: 'Reviewed release fixture', methods: ['linux'],
           platforms: [{ os: 'linux', arch: 'amd64' }, { os: 'linux', arch: 'arm64' }],

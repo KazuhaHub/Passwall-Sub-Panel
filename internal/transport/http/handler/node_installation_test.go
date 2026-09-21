@@ -182,14 +182,28 @@ func TestNodeInstallScriptPrivateDownloadAndAdministratorBoundary(t *testing.T) 
 	}
 	// THE SCRIPT CARRIES BOTH IDENTITIES, WHICH IS THE POINT. It builds the
 	// download path from the TAG and the asset name from the VERSION, and they are
-	// never the same string: the path segment a release lives at is
-	// `release/4.0.0` while the archive it serves is `passwall-node_4.0.0_…`. A
-	// renderer that had only one of them — which is what the template used to
-	// take — could address no release this project publishes.
-	for _, want := range []string{"version='4.0.0'", "tag='release/4.0.0'", "releases/download/${tag}", "passwall-node_${version}_linux_${arch}"} {
+	// never the same string: the path segment a release lives at is `v4.0.0` while
+	// the archive it serves is `passwall-node_4.0.0_…`. A renderer that had only
+	// one of them — which is what the template used to take — could address no
+	// release this project publishes.
+	for _, want := range []string{"version='4.0.0'", "tag='v4.0.0'", "releases/download/${tag}", "passwall-node_${version}_linux_${arch}"} {
 		if !strings.Contains(w.Body.String(), want) {
 			t.Fatalf("the rendered script is missing %q, so it does not address the release by tag and name it by version", want)
 		}
+	}
+	// AND A RELEASE PUBLISHED BEFORE THE NAMESPACE CHANGED IS ADDRESSED WHERE IT
+	// IS. The catalog is how the panel states its own publications, so the address
+	// comes from there rather than from the version: `release/4.0.0` is a tag that
+	// exists, and the derived `v4.0.0` is one this project never published — a
+	// script that named it would 404 on the host, after the operator had run it.
+	source := h.nodeReleases
+	h.WithNodeReleaseCatalog(&releaseCatalogStub{result: ports.NodeReleaseList{
+		Releases: []ports.NodeReleaseCatalogEntry{{Version: "4.0.0", ReleaseTag: "release/4.0.0"}},
+	}})
+	defer h.WithNodeReleaseCatalog(source)
+	w = installationRequest(h, http.MethodPost, "node-install-script", `{"version":"4.0.0"}`, "/panel", domain.RoleAdmin)
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "tag='release/4.0.0'") {
+		t.Fatalf("the script did not address the release the panel published: status=%d body=%s", w.Code, w.Body.String())
 	}
 	for _, version := range []string{"latest", "04.0.0", "4.0.0;id", ""} {
 		body, _ := json.Marshal(map[string]string{"version": version})

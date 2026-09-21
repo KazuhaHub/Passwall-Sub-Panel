@@ -78,8 +78,8 @@ const SUPPORTED = (() => {
 
 // A SECOND RELEASE, FOR THE CASES THAT NEED TWO.
 //
-// The shipped manifest carries ONE release: the products publish one, and there is
-// no deployment whose set has to stay covered while it is narrowed. Three cases
+// The shipped manifest carries the releases published so far, and there is no
+// deployment whose set has to stay covered while it is narrowed. Three cases
 // below are about the planner rather than about that data — a missing pin, an
 // exclusion, and the order it keeps — and none of them can be observed with a
 // single row. They start from the shipped manifest and add a release to it, so
@@ -104,7 +104,10 @@ function manifestWithASecondRelease() {
   const manifest = realManifest()
   manifest.released_nodes = [
     ...manifest.released_nodes,
-    { version: SECOND_RELEASE, protocol_version: 1, base_sync: 'supported', remote_upgrade: 'conditional', upgrade_methods: ['linux-systemd'] }
+    // A NEW RELEASE, so its address is the current namespace's — while every row
+    // the shipped manifest carries is under the historical one. Between them the
+    // cases below cover both.
+    { version: SECOND_RELEASE, tag: `v${SECOND_RELEASE}`, protocol_version: 1, base_sync: 'supported', remote_upgrade: 'conditional', upgrade_methods: ['linux-systemd'] }
   ]
   return manifest
 }
@@ -133,7 +136,13 @@ test('the plan covers every supported version exactly once', () => {
     assert.equal(entry.class, 'required')
     // A tag is a readable label; the SHA is the identity. Carrying only the tag
     // would let a moved tag silently substitute another commit.
-    assert.match(entry.tag, /^release\/\d+\.\d+\.\d+$/)
+    //
+    // IT IS THE ROW'S TAG, NOT A REBUILT ONE. The planner used to derive it from the
+    // version, which names a tag nobody published for the four releases from before
+    // the address changed (and the wrong shape for every release after) — and this
+    // is the tag the matrix fetches each case by.
+    assert.equal(entry.tag, realManifest().released_nodes.find((row) => row.version === entry.version).tag)
+    assert.match(entry.tag, /^(?:release\/|v)\d+\.\d+\.\d+(?:\.\d+)?$/)
     assert.match(entry.sha, /^[0-9a-f]{40}$/)
     assert.equal(entry.id, `node-wire-v1@${entry.version}`)
   }
@@ -250,6 +259,25 @@ test('a version that is not a release version fails the plan', () => {
   const verification = realVerification()
   verification.pinned_sources.nightly = '0'.repeat(40)
   const { code, result } = plan({ manifest, verification })
+  assert.equal(code, 1)
+  assert.equal(result.verdict, 'invalid')
+})
+
+test('a row that states no address fails the plan', () => {
+  // The planner cannot rebuild it: four releases live under one namespace and
+  // everything since under another, and no version string says which. A row that
+  // says nothing would be planned against a tag nobody published.
+  const manifest = manifestWithASecondRelease()
+  delete manifest.released_nodes.at(-1).tag
+  const { code, result } = planTwoReleases({ manifest })
+  assert.equal(code, 1)
+  assert.equal(result.verdict, 'invalid')
+})
+
+test('a row that states an address this project does not publish fails the plan', () => {
+  const manifest = manifestWithASecondRelease()
+  manifest.released_nodes.at(-1).tag = 'nightly-2026'
+  const { code, result } = planTwoReleases({ manifest })
   assert.equal(code, 1)
   assert.equal(result.verdict, 'invalid')
 })

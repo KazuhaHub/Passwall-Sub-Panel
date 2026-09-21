@@ -53,10 +53,15 @@ func run(t *testing.T, args ...string) (int, string, string) {
 // status still cannot build with an invented version.
 func TestItPrintsTheVersionAndNothingElse(t *testing.T) {
 	for _, tc := range []struct{ tag, want string }{
+		{"v4.0.0", "4.0.0"},
+		{"v4.0.1", "4.0.1"},
+		{"v4.0.1.1", "4.0.1.1"},
+		{"v102.1.0", "102.1.0"},
+		// THE FOUR PUBLISHED BEFORE THE ADDRESS CHANGED ARE STILL ADDRESSES. The
+		// pin that names one of them has to resolve to its version, or the build
+		// that reads the pin stops being able to say what it is building.
 		{"release/4.0.0", "4.0.0"},
-		{"release/4.0.1", "4.0.1"},
 		{"release/4.0.1.1", "4.0.1.1"},
-		{"release/102.1.0", "102.1.0"},
 	} {
 		code, stdout, stderr := run(t, tc.tag)
 		if code != 0 {
@@ -75,7 +80,11 @@ func TestARefusalPrintsNothingOnStdout(t *testing.T) {
 		"release/4.0",     // shorthand is not an identity
 		"release/04.0.0",  // a leading zero
 		"release/4.0.0.0", // a literal zero build
-		"v4.0.1",          // the scheme this project does not publish
+		"v4.0",            // shorthand, under the current namespace
+		"v4.0.0.0",        // a literal zero build, under the current namespace
+		"release/v4.0.0",  // the historical namespace holds a bare version
+		"v0.0.1-beta11",   // the legacy shape this project stopped publishing
+		"v3.7.0-beta.16",  // a burn-in beta of a line that never had a product release
 		"",                // nothing
 	} {
 		code, stdout, stderr := run(t, tag)

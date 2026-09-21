@@ -9,18 +9,17 @@ import (
 // A release version, and the release line it belongs to.
 //
 // A VERSION IS THREE INTEGERS, optionally followed by a BUILD component, with no
-// prefix and no suffix. A tag is not a version: `release/4.0.0` is an address,
-// `4.0.0` is the thing, and the rule is strict about the difference because the
-// same predicate guards a GitHub API URL path — anything that could be read as a
-// path separator is refused rather than escaped.
+// prefix and no suffix. A tag is not a version: `v4.0.0` is an address, `4.0.0` is
+// the thing, and the rule is strict about the difference because the same
+// predicate guards a GitHub API URL path — anything that could be read as a path
+// separator is refused rather than escaped.
 //
-// THE LEGACY SHAPE IS REFUSED, and it is refused HERE rather than in a comment.
-// `v0.0.1-beta11` and the whole published history it names used to be accepted by
-// this predicate, because Node releases in the field were all of that shape and
-// the panel had to read them. The scheme was removed — nothing is deployed, so
-// nothing needed migrating — and the rows below are the record of what that
-// costs: every string this project has ever published under is now something the
-// panel will not act on, and it says so in one place.
+// A V-PREFIXED STRING IS NOT A VERSION, AND IT IS NOT NOTHING EITHER. The rows
+// below refuse `v0.0.1-beta11`, `v1.0.0` and `v4.0.0-beta.25` as versions, which
+// they are not and never were — and the difference between them is what the tag
+// tests below are about: the first names a legacy release the panel will not act
+// on, and the other two are product tags, one of them for a version that was
+// published before this project had a product scheme.
 func TestReleaseVersions(t *testing.T) {
 	for _, tc := range []struct {
 		value string
@@ -52,12 +51,15 @@ func TestReleaseVersions(t *testing.T) {
 		{"4.0.0+build", 0, false, "build metadata"},
 		{"4.0.0.1+build", 0, false, "build metadata"},
 		{"4.0.0-beta.1", 0, false, "a candidate is a CHANNEL, not a spelling of the version"},
-		// THE LEGACY SHAPE, in every form it was ever published under.
+		// THE LEGACY SHAPE, in every form it was ever published under. These are
+		// not versions now and were not versions then: the legacy scheme used the
+		// tag AS the version, which is exactly what made it unrecognisable as an
+		// address once the version shape narrowed.
 		{"v0.0.1-beta11", 0, false, "the shape every published legacy Node release had"},
 		{"v0.0.1-beta.11", 0, false, "the dotted prerelease"},
-		{"v1.0.0", 0, false, ""},
-		{"v4.0.0", 0, false, "a PSP build stamp of the legacy line"},
-		{"v4.0.0-beta.25", 0, false, "a PSP build stamp of the legacy line"},
+		{"v1.0.0", 0, false, "a product TAG whose version is 1.0.0"},
+		{"v4.0.0", 0, false, "a product TAG whose version is 4.0.0"},
+		{"v4.0.0-beta.25", 0, false, "a burn-in beta of a line that was never released under this scheme"},
 		{"v102.1.0", 0, false, ""},
 		{"v0.0.1", 0, false, ""},
 		{"v1.0.0-alpha.01", 0, false, ""},
@@ -91,21 +93,27 @@ func TestReleaseVersions(t *testing.T) {
 // The inverse: the tag a release with this version is published under.
 //
 // The tag is what a URL and a git ref are addressed by, and it is NEVER the
-// version — the namespace exists so a product tag cannot be mistaken for a Go
-// module version, and it is part of the ADDRESS rather than part of the version.
-// A caller that put the version where the tag belongs asks GitHub for a release
-// that does not exist, and the 404 reads as "no such release" rather than "wrong
+// version: the namespace is part of the ADDRESS rather than part of the version. A
+// caller that put the version where the tag belongs asks GitHub for a release that
+// does not exist, and the 404 reads as "no such release" rather than "wrong
 // identity". Deriving it rather than storing it keeps one field in the reviewed
 // records and makes the two impossible to disagree about.
+//
+// IT ANSWERS WITH THE CURRENT ADDRESS, WHICH IS NOT ALWAYS THE PUBLISHED ONE. Four
+// releases went out under `release/`, and no version string says which namespace
+// its release was published under — `4.0.1.2` was, `4.0.1.3` will not be. So this
+// is for a release about to be published, and a caller addressing one that already
+// is carries the tag it was told (ports.NodeReleaseCatalogEntry.ReleaseTag).
 func TestTheTagAVersionIsPublishedUnder(t *testing.T) {
 	for _, tc := range []struct {
 		version string
 		tag     string
 		why     string
 	}{
-		{"4.0.0", "release/4.0.0", "the product namespace is part of the address, not of the version"},
-		{"102.1.0", "release/102.1.0", ""},
-		{"4.0.0.1", "release/4.0.0.1", "the build component travels with the version it names"},
+		{"4.0.0", "v4.0.0", "the product namespace is part of the address, not of the version"},
+		{"102.1.0", "v102.1.0", ""},
+		{"4.0.0.1", "v4.0.0.1", "the build component travels with the version it names"},
+		{"4.0.1.2", "v4.0.1.2", "and it is the CURRENT address even for a version that was published under the historical one"},
 	} {
 		t.Run(tc.version, func(t *testing.T) {
 			tag, ok := version.ReleaseTagFor(tc.version)
@@ -121,6 +129,13 @@ func TestTheTagAVersionIsPublishedUnder(t *testing.T) {
 			if !version.IsReleaseTag(tag) {
 				t.Errorf("ReleaseTagFor(%q) produced %q, which is not a release tag", tc.version, tag)
 			}
+			// AND IT NAMES THE VERSION THAT WAS ASKED FOR. The two namespaces make
+			// the derived string no longer the only address for a version, but the
+			// correspondence has to hold: a caller that derived an address for one
+			// release must not end up pointing at another.
+			if named, ok := version.VersionOfReleaseTag(tag); !ok || named != tc.version {
+				t.Errorf("ReleaseTagFor(%q) = %q, which names %q", tc.version, tag, named)
+			}
 		})
 	}
 
@@ -130,17 +145,19 @@ func TestTheTagAVersionIsPublishedUnder(t *testing.T) {
 	// this project publishes it at any more.
 	for _, value := range []string{
 		"", "latest", "4.0", "04.0.0", "release/4.0.0", "v4.0.0/../../PRIVATE_RESPONSE",
-		"4.0.0-beta.1", "v0.0.1-beta11", "v1.0.0", "4.0.0.0",
+		"4.0.0-beta.1", "v0.0.1-beta11", "v4.0.0", "4.0.0.0",
 	} {
 		if tag, ok := version.ReleaseTagFor(value); ok {
 			t.Errorf("ReleaseTagFor(%q) = %q, want a refusal", value, tag)
 		}
 	}
-	// And a tag that is not one of ours is not read as a release. The middle four
-	// are the ones a path-injection attempt produces.
+	// And a tag that is not one of ours is not read as a release. The middle ones
+	// are the path-injection attempts, and the historical namespace is read but is
+	// not a licence to put anything after it.
 	for _, tag := range []string{
-		"", "4.0.0", "v4", "release/", "release/4.0", "release/v4.0.0", "release/4.0.0/../../x", "nightly",
-		"v4.0.0", "v0.0.1-beta11", "release/4.0.0.0",
+		"", "4.0.0", "v", "v4", "release/", "release/v4.0.0", "v4.0.0/../../x",
+		"release/4.0", "release/4.0.0/../../x", "nightly",
+		"v0.0.1-beta11", "v4.0.0-beta.25", "release/4.0.0.0", "v4.0.0.0", "v0.0.1",
 	} {
 		if version.IsReleaseTag(tag) {
 			t.Errorf("IsReleaseTag(%q) = true, want false", tag)
@@ -154,14 +171,24 @@ func TestTheTagAVersionIsPublishedUnder(t *testing.T) {
 // tag_name, and the update nudge compares that against this build's version. The
 // two are never the same string, so a comparison that skips this step is
 // comparing an address to a name and silently finding no update.
+//
+// BOTH NAMESPACES ARE READ, AND THE ROUND TRIP IS NOT LITERAL. `release/4.0.1.2`
+// names `4.0.1.2` and so does `v4.0.1.2`; both are addresses of that version, and
+// only one of them is anywhere on GitHub. Reading them the same way is what lets
+// the panel keep offering the four releases published before the address changed,
+// and deriving is deliberately NOT the inverse of reading for those four: what
+// makes an address right is that it is the one that was published.
 func TestTheVersionATagNames(t *testing.T) {
 	for _, tc := range []struct {
 		tag     string
 		version string
 	}{
+		{"v4.0.0", "4.0.0"},
+		{"v102.1.0", "102.1.0"},
+		{"v4.0.0.1", "4.0.0.1"},
 		{"release/4.0.0", "4.0.0"},
 		{"release/102.1.0", "102.1.0"},
-		{"release/4.0.0.1", "4.0.0.1"},
+		{"release/4.0.1.2", "4.0.1.2"},
 	} {
 		t.Run(tc.tag, func(t *testing.T) {
 			got, ok := version.VersionOfReleaseTag(tc.tag)
@@ -171,20 +198,26 @@ func TestTheVersionATagNames(t *testing.T) {
 			if got != tc.version {
 				t.Errorf("VersionOfReleaseTag(%q) = %q, want %q", tc.tag, got, tc.version)
 			}
-			// And the round trip, so a caller cannot address one release and
-			// compare against another.
+			// The derived tag names the same version. It is not required to be the
+			// SAME STRING, and for a historical tag it must not be: rewriting those
+			// four addresses is what the round trip used to assert and what a
+			// published tag makes impossible.
 			back, ok := version.ReleaseTagFor(got)
-			if !ok || back != tc.tag {
-				t.Errorf("ReleaseTagFor(%q) = %q, %v; the round trip must be lossless", got, back, ok)
+			if !ok {
+				t.Fatalf("ReleaseTagFor(%q) refused the version of %q", got, tc.tag)
+			}
+			if named, ok := version.VersionOfReleaseTag(back); !ok || named != got {
+				t.Errorf("ReleaseTagFor(%q) = %q, which names %q", got, back, named)
 			}
 		})
 	}
-	// A LEGACY TAG IS NOT A TAG THIS PROJECT HAS. Its namespace is the version
-	// itself, which is the property that made it unrecognisable as an address the
-	// moment the version shape narrowed.
+	// A LEGACY TAG IS NOT A TAG THIS PROJECT HAS. `v0.0.1-beta11` starts with the
+	// current namespace and fails inside it: a hyphen is not a digit, and the zero
+	// release line it names was never published under a product scheme.
 	for _, tag := range []string{
-		"", "4.0.0", "v4", "release/4.0", "release/v4.0.0", "nightly",
-		"v0.0.1-beta11", "v1.0.0", "v4.0.0", "release/4.0.0.0",
+		"", "4.0.0", "v", "v4", "release/", "release/v4.0.0", "nightly",
+		"v0.0.1-beta11", "v0.0.1", "v4.0.0-beta.25", "release/4.0.0.0", "v4.0.0.0",
+		"v4.0.0/../../PRIVATE_RESPONSE", "release/4.0.0/../../PRIVATE_RESPONSE",
 	} {
 		if got, ok := version.VersionOfReleaseTag(tag); ok {
 			t.Errorf("VersionOfReleaseTag(%q) = %q, want a refusal", tag, got)

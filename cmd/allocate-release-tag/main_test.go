@@ -55,12 +55,22 @@ func TestItAllocatesTheNextNumberOnTheLine(t *testing.T) {
 		args []string
 		want string
 	}{
-		{"the first fix", []string{"-line", "4.0", "-existing", "release/4.0.0"}, "release/4.0.0.1"},
-		// THE CASE THE RELEASE PATH HITS TODAY.
-		{"above a published patch", []string{"-line", "4.0", "-existing", "release/4.0.0\nrelease/4.0.1\n"}, "release/4.0.1.1"},
-		{"a shell hands over commas", []string{"-line", "4.0", "-existing", "release/4.0.0,release/4.0.0.1"}, "release/4.0.0.2"},
-		{"and spaces", []string{"-line", "4.0", "-existing", "release/4.0.0 release/4.0.0.1"}, "release/4.0.0.2"},
-		{"a rerun resumes its own number", []string{"-line", "4.0", "-existing", "release/4.0.0", "-on-commit", "release/4.0.0.1"}, "release/4.0.0.1"},
+		{"the first fix", []string{"-line", "4.0", "-existing", "v4.0.0"}, "v4.0.0.1"},
+		// THE CASE THE RELEASE PATH HITS TODAY. The tags on the line are the four
+		// published before the address changed, and the number allocated is
+		// published under the current namespace: an allocation is always a release
+		// that has not gone out yet.
+		{"above a published patch", []string{"-line", "4.0", "-existing", "release/4.0.0\nrelease/4.0.1\n"}, "v4.0.1.1"},
+		{"a shell hands over commas", []string{"-line", "4.0", "-existing", "v4.0.0,v4.0.0.1"}, "v4.0.0.2"},
+		{"and spaces", []string{"-line", "4.0", "-existing", "v4.0.0 v4.0.0.1"}, "v4.0.0.2"},
+		// A RERUN CONTINUES ITS OWN ADDRESS, not a derived one: the number was
+		// bound to a revision by a tag, and that tag is what the release is
+		// addressed by.
+		{"a rerun resumes its own number", []string{"-line", "4.0", "-existing", "v4.0.0", "-on-commit", "v4.0.0.1"}, "v4.0.0.1"},
+		{"a rerun of a release published before the address changed", []string{"-line", "4.0", "-existing", "release/4.0.1\n", "-on-commit", "release/4.0.1.1"}, "release/4.0.1.1"},
+		// THE TWO NAMESPACES ARE ONE LINE, so the numbering runs through the
+		// address change rather than restarting at it.
+		{"across the address change", []string{"-line", "4.0", "-existing", "release/4.0.0 release/4.0.1 release/4.0.1.1 v4.0.1.2"}, "v4.0.1.3"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			code, stdout, stderr := run(t, tc.args...)
