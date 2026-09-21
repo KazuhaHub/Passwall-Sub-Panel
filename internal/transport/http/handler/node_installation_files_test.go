@@ -578,3 +578,72 @@ func TestNodeInstallationFilesRenderForAProductRelease(t *testing.T) {
 		t.Fatalf("downloads = %+v, want %+v", result.Downloads, want)
 	}
 }
+
+// THE GENERATED COMPOSE IS WHAT THE NODE'S OWN UPDATER VALIDATES.
+//
+// The updater refuses to replace a container whose profile differs from the one it
+// supports, and it decides that before it pulls anything: not privileged, a
+// read-only root filesystem, host networking (Passwall-Node,
+// internal/upgrade/docker_helper.go). A generated file that satisfies only the
+// first and the third produces a node the panel offers to upgrade and the host
+// refuses — with a message about the profile that names nothing about the compose it
+// came from, which is exactly how this was found.
+//
+// IT READS THE YAML THE WAY THAT CHECK DOES, rather than looking for lines. The
+// requirement is a property of the container, so a case that asserts spelling would
+// pass on a file that sets `read_only: false` and says `read_only`.
+func TestTheGeneratedComposeSatisfiesTheProfileTheNodeUpdaterRequires(t *testing.T) {
+	_, repo := installationFixture(t)
+	p := nativeServerCreateResponse{AgentID: repo.agent.AgentID, Credential: repo.credential, Endpoint: "https://panel.example/v1/node/sync"}
+	for _, remoteUpgrade := range []bool{false, true} {
+		t.Run(fmt.Sprintf("remote upgrade %t", remoteUpgrade), func(t *testing.T) {
+			result := renderNodeInstallationFiles(41, p, nodeInstallationFilesRequest{
+				Method: "docker", Version: "4.0.1.2", OS: "linux", DockerRemoteUpgrade: remoteUpgrade,
+			})
+			var compose string
+			for _, file := range result.Files {
+				if file.Name == "compose.yaml" {
+					compose = file.Content
+				}
+			}
+			if compose == "" {
+				t.Fatal("the bundle carries no compose file")
+			}
+			var document struct {
+				Services map[string]struct {
+					ReadOnly    bool     `yaml:"read_only"`
+					NetworkMode string   `yaml:"network_mode"`
+					Privileged  bool     `yaml:"privileged"`
+					Tmpfs       []string `yaml:"tmpfs"`
+				} `yaml:"services"`
+			}
+			if err := yaml.Unmarshal([]byte(compose), &document); err != nil {
+				t.Fatalf("the generated compose is not valid YAML: %v", err)
+			}
+			agent, ok := document.Services["passwall-node"]
+			if !ok {
+				t.Fatalf("the compose no longer defines the agent service:\n%s", compose)
+			}
+			if agent.Privileged {
+				t.Error("the agent is privileged, and the updater refuses to replace a privileged container")
+			}
+			if !agent.ReadOnly {
+				t.Error("the agent root filesystem is writable, and the updater refuses to replace it")
+			}
+			if agent.NetworkMode != "host" {
+				t.Errorf("the agent network mode is %q, and the updater requires host networking", agent.NetworkMode)
+			}
+			// A READ-ONLY ROOT NEEDS SOMEWHERE TO WRITE, and these two are where the
+			// entrypoint and the agent put everything that is not on a volume.
+			for _, mount := range []string{"/run/passwall-node", "/tmp"} {
+				declared := false
+				for _, tmpfs := range agent.Tmpfs {
+					declared = declared || strings.HasPrefix(tmpfs, mount+":")
+				}
+				if !declared {
+					t.Errorf("a read-only root filesystem with no writable %s", mount)
+				}
+			}
+		})
+	}
+}
