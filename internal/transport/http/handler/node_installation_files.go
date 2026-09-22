@@ -118,19 +118,32 @@ func renderNodeInstallationFiles(panelID int64, p nativeServerCreateResponse, r 
       - /tmp:size=16m,mode=1777
     cap_drop:
       - ALL
-    # Entrypoint-only capabilities: copy/chown the secret and state volume,
-    # protect the runtime tmpfs, then switch to the configured unprivileged
-    # UID/GID before exec.
+    # Entrypoint-only capabilities: read the mounted credential, copy/chown the
+    # secret and state volume, protect the runtime directory, then switch to the
+    # configured unprivileged UID/GID before exec.
     #
-    # FOWNER IS NOT DECORATION. The runtime directory is a tmpfs mount, so it is
-    # root-owned; the entrypoint chowns it to the service account and then chmods
-    # it, and a root process that is NOT the owner needs CAP_FOWNER for that
-    # chmod. With every capability dropped it does not have one: the container
-    # starts, prints "chmod: /run/passwall-node: Operation not permitted", reports
-    # that it cannot protect its runtime directory, and restarts forever. CHOWN is
-    # for the chown, and SETGID/SETUID are for the privilege drop.
+    # DAC_OVERRIDE IS FOR READING THE CREDENTIAL, AND THE INSTRUCTIONS FURTHER DOWN
+    # ARE WHY. They tell the operator to chmod 0600 the credential file, and on a NAS
+    # that file belongs to the account that ran the install rather than to uid 0 — so
+    # the container's root is neither its owner nor permitted by "other", and without
+    # this capability the copy fails with
+    #
+    #     cp: can't open '/run/secrets/passwall-node/node-credential.txt': Permission denied
+    #
+    # and the agent restarts forever. The alternative, making the credential
+    # world-readable on the host, is worse on a shared machine, and this capability is
+    # exercised for about a second by the entrypoint, which then drops to PUID
+    # permanently.
+    #
+    # FOWNER IS NOT DECORATION EITHER. The runtime directory is a tmpfs mount, so it is
+    # root-owned; the entrypoint chmods it, and a root process that is NOT the owner
+    # needs CAP_FOWNER for that chmod. With every capability dropped it does not have
+    # one: the container starts, prints "chmod: /run/passwall-node: Operation not
+    # permitted", reports that it cannot protect its runtime directory, and restarts
+    # forever. CHOWN is for the chown, and SETGID/SETUID are for the privilege drop.
     cap_add:
       - CHOWN
+      - DAC_OVERRIDE
       - FOWNER
       - SETGID
       - SETUID
