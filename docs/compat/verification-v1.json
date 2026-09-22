@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "revision": "2026-09-21.2",
+  "revision": "2026-09-22.1",
   "note": "IDENTITY AND PROFILE METADATA ONLY. This file deliberately does NOT list which Node versions are supported — that list lives in docs/compat/passwall-node-v4.json and is sliced by position at min_supported, so there is exactly one place to move a floor. This file supplies what that list cannot: which commit each release resolved to, and what a case against it claims. A version the manifest supports but this file does not pin fails the plan rather than being tested against whatever a tag points at today. THE KEYS ARE VERSIONS, NOT TAGS. They were the same string while the legacy scheme was the only one, and the two consumers split on it: the case planner looked a version up and the contract check looked a tag up. Neither was wrong, and nothing noticed, because no release had ever had two names. A product release does — `release/4.0.0` is the address, `4.0.0` is the version — so the key is the VERSION and each consumer derives the tag where it needs one. The legacy pins moved to docs/compat/historical-pins.json, which nothing reads.",
   "profiles": {
     "node-wire-v1": {
@@ -21,13 +21,14 @@
     "4.0.1": "5c53317117461232acb125fa060e5d74c5b278d1",
     "4.0.1.1": "ea61b1d745d6c79120b0c04a920c5fcb29d573da",
     "4.0.1.2": "0155865fa343671d06568c2fc0f1d82ae7d869d5",
-    "4.0.1.3": "426fb4aa111a77176f82390cdbeaf3ac06229b46"
+    "4.0.1.3": "426fb4aa111a77176f82390cdbeaf3ac06229b46",
+    "4.0.1.4": "df35eed61163dcd2399b1f4e925c5c793bac8032"
   },
   "excluded": [],
   "contract_source": {
     "note": "THE SOURCE THE PINNED-SOURCE CONTRACT JOB TESTS, named here rather than taken from PSP's go.mod. When the job resolved it from go.mod, the evidence for 'PSP speaks to a real released Node' moved whenever a dependency bump happened, and removing the PN root dependency (X07) would have removed the test entry point with it. A commit, not a tag: the matrix resolves the commit and checks it, so a moved tag is caught instead of silently testing a different revision. The tag names the release this build is a candidate against, and the pin it must agree with is looked up by the VERSION that tag names — see the pin-key note above.",
-    "tag": "v4.0.1.3",
-    "commit": "426fb4aa111a77176f82390cdbeaf3ac06229b46",
+    "tag": "v4.0.1.4",
+    "commit": "df35eed61163dcd2399b1f4e925c5c793bac8032",
     "module_path": "github.com/KazuhaHub/passwall-node"
   },
   "pinned_sources_note": "THESE ARE COMMITS, NOT TAG OBJECTS. `git ls-remote --tags` lists both refs/tags/X (the annotated tag object) and refs/tags/X^{} (the commit it points at); pinning the former fails every leg, because a checkout resolves to the commit. The matrix verifies the resolved commit against these, so a wrong-but-well-formed SHA is caught on the first run rather than after it has quietly tested a different revision. These are commits of the PRODUCT releases, whose tags live under `release/`; the commit below is what that tag resolved to when it was first resolved."
