@@ -174,6 +174,95 @@ test('the build job compiles every release target, and reports all of them', () 
   assert(build.includes('exit "$failed"'), 'the step must report the failures it collected')
 })
 
+// ONE PACKAGE IS HALF THE RACE SUITE, AND PACKAGES CANNOT BALANCE IT.
+//
+// internal/adapters/sqlstore is 174s of the roughly 320s the weights file records,
+// so longest-processing-time packing gives it a shard to itself: measured on main,
+// shard 1 took 229s of test time while its siblings took 93s, 145s and 114s, and
+// the run waited on it. No arrangement of PACKAGES shortens a package longer than
+// a quarter of the suite, so its TESTS are partitioned instead.
+//
+// THE DANGEROUS FAILURE IS SILENT. `go test -run` matching nothing exits 0, so a
+// broken partition here is a race check that goes green having executed less than
+// it claims — which is exactly the failure this job cannot report about itself.
+// The assertions below pin the parts that make it safe: the package is excluded
+// from the partition (or it would run twice), both halves run even when one fails,
+// and the round-robin is a real partition — checked by running the shipped awk
+// program over a fixture, not by reading it.
+test('the race shards partition the heavy package\'s tests, and cover them all', () => {
+  const race = job('race-shard')
+  const heavy = /^\s*heavy=(\S+)$/m.exec(race)
+  assert(heavy, 'the race job must name the heavy package it takes out of the partition')
+  assert(
+    race.includes('--exclude "$heavy"'),
+    'the heavy package must be excluded from the package partition, or it is tested twice — once whole and once in slices',
+  )
+  assert(
+    race.includes('-run "^(${regex})$" "$heavy"'),
+    'the heavy package must be run as a slice of its tests, not skipped',
+  )
+  assert(
+    /tests=\$\(go test -list '\^Test' "\$heavy"/.test(race),
+    'the slice must come from the package\'s own test list, so a test added tomorrow is in a shard by construction',
+  )
+  // A FAILING HALF MUST NOT HIDE THE OTHER. The two invocations are separate
+  // because they answer separate questions; `set -e` would end the step on the
+  // first, which is why the failure is collected rather than propagated.
+  assert(race.includes('|| failed=1'), 'both halves must run even when the first fails')
+  assert(race.includes('exit "$failed"'), 'the step must report the failures it collected')
+  // `set -e` is what makes `test -n` guards mean anything: without it they do not
+  // stop the step, and an empty planner result reaches `go test` with no arguments.
+  assert(
+    race.includes('set -euo pipefail'),
+    'the step must fail on the first unexpected error, or its guards are decorative',
+  )
+
+  // AND THE ROUND-ROBIN IS A PARTITION, PROVEN RATHER THAN ASSUMED. The program is
+  // read out of the workflow and run over a fixture the size of the real test
+  // list: every element must land in exactly one shard, and every shard must print
+  // something.
+  const roundRobin = /awk -v s="\$\{\{ matrix\.part \}\}" -v m=(\d+) '([^']+)'/.exec(race)
+  assert(roundRobin, 'the round-robin that splits the heavy package\'s tests must be in the job')
+  const shards = Number(roundRobin[1])
+  const program = roundRobin[2]
+  const fixture = Array.from({ length: 315 }, (_, i) => `TestFixture${String(i).padStart(3, '0')}`)
+  const placed = new Map()
+  for (let s = 1; s <= shards; s++) {
+    const result = spawnSync('awk', ['-v', `s=${s}`, '-v', `m=${shards}`, program], {
+      input: `${fixture.join('\n')}\n`,
+      encoding: 'utf8',
+    })
+    assert.equal(result.status, 0, `the round-robin failed for shard ${s}: ${result.stderr}`)
+    const selected = result.stdout.split('\n').filter(Boolean)
+    assert(selected.length > 0, `shard ${s} selected no test: a shard that runs nothing of the heavy package is a shard that proves nothing`)
+    for (const name of selected) {
+      assert(
+        !placed.has(name),
+        `${name} is in shard ${placed.get(name)} and shard ${s}: the slices overlap, so at least one of them tests less than it reports`,
+      )
+      placed.set(name, s)
+    }
+  }
+  assert.equal(
+    placed.size,
+    fixture.length,
+    'the slices do not cover every test: a test in no shard is a test nothing runs, and the job stays green',
+  )
+})
+
+// The pinned Playwright version appears twice — in the install and in the cache key
+// that remembers the browser it downloaded — and a cache key that outlives the
+// version it names serves a browser the pinned CLI did not ask for.
+test('the browser cache is keyed on the Playwright version the step installs', () => {
+  const web = job('web')
+  const pinned = /playwright@(\d+\.\d+\.\d+)/.exec(web)
+  assert(pinned, 'the web job must pin the Playwright version it installs')
+  assert(
+    web.includes(`playwright-chromium-\${{ runner.os }}-${pinned[1]}`),
+    `the browser cache key must name the pinned Playwright version (${pinned[1]})`,
+  )
+})
+
 // The pinned-source contract job must not learn which Node revision to test from
 // go.mod. Doing so made the evidence move with every dependency bump, and would
 // have removed the job's entry point the moment the PN root module was dropped —

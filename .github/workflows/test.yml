@@ -548,6 +548,20 @@ jobs:
       - name: Install dependencies
         working-directory: web-react
         run: npm ci
+      # THE BROWSER IS A DOWNLOAD, NOT A BUILD. `playwright install chromium`
+      # fetches it into a shared, version-keyed directory, so the only thing that
+      # changes between runs is nothing — and the 50s this step cost was mostly the
+      # fetch plus the apt dependencies it also installs (which are not cached and
+      # still run).
+      #
+      # KEYED ON THE PINNED VERSION, because that is the only thing that can
+      # invalidate the browser: a key that outlives the version it names would serve
+      # a browser the pinned CLI did not ask for.
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-${{ runner.os }}-1.63.0
+          restore-keys: playwright-chromium-${{ runner.os }}-
       - name: build
         working-directory: web-react
         run: npm run build
@@ -706,6 +720,15 @@ jobs:
         part: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@v7
+      # The same build cache the build job restores, keyed per shard: each shard
+      # compiles a different set of packages under -race, and `actions/cache` will
+      # not save a key that exists, so one shared key would freeze whichever
+      # shard finished first. See the build job for the measurement.
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/go-build
+          key: go-build-race-${{ matrix.part }}-${{ runner.os }}-${{ hashFiles('go.sum') }}
+          restore-keys: go-build-race-${{ matrix.part }}-${{ runner.os }}-
       - uses: actions/setup-go@v7
         # Allow toolchain selection; setup-go exports local after installation.
         env:
@@ -722,19 +745,60 @@ jobs:
           test "$(go tool compile -V | awk '{ print $3 }')" = "$build_toolchain"
       - name: test
         run: |
-          set -o pipefail
+          # `set -e` IS PART OF THE GUARD BELOW, not just hygiene: without it
+          # `test -n "$packages"` does not stop anything, and an empty planner
+          # result reaches `go test` with no arguments — which tests the
+          # repository root and reports "no Go files in ...", naming the symptom
+          # rather than the cause.
+          set -euo pipefail
+          # ONE PACKAGE IS HALF THIS SUITE, AND PACKAGES CANNOT BALANCE IT.
+          #
+          # internal/adapters/sqlstore is 174s of the roughly 320s the weights file
+          # records, so longest-processing-time packing gives it a shard to itself
+          # and fills the other three with everything else. Measured on main: shard
+          # 1 took 229s of test time while its siblings took 93s, 145s and 114s, so
+          # the whole run waited on one package that no arrangement of PACKAGES can
+          # shorten — it is longer than a quarter of the suite.
+          #
+          # So its TESTS are partitioned instead: round-robin over the list
+          # `go test -list` prints. Round-robin needs no weights and maintains
+          # itself — a test added tomorrow lands in exactly one shard — and with 315
+          # of them the spread is what a weight table could not buy.
+          #
+          # THE PACKAGE IS TAKEN OUT OF THE PARTITION AND RUN HERE, and both places
+          # that name it read one variable, so the two halves cannot overlap.
+          heavy=github.com/KazuhaHub/passwall-sub-panel/internal/adapters/sqlstore
           packages=$(.github/scripts/plan-race-shards.sh \
-            --shards 4 --shard "${{ matrix.part }}" \
+            --shards 4 --shard "${{ matrix.part }}" --exclude "$heavy" \
             --default 1 --weights .github/race-shard-weights.txt)
-          # A planner that produced no packages would otherwise run `go test`
-          # with no arguments — which tests the repository root and reports
-          # "no Go files in ...", naming the symptom rather than the cause.
           test -n "$packages"
-          # Still one canonical full-suite race run: the shards are a partition
-          # of the same package set, so every package is covered exactly once.
-          # PostgreSQL/MySQL below focus on dialect correctness without
-          # multiplying race-detector runtime.
-          go test -race -count=1 -timeout=8m $packages 2>&1 | tee test-output.txt
+          # A `-run` THAT MATCHES NOTHING IS A PASS — that is the failure this
+          # guards against, and it is the one this job cannot see for itself: a
+          # shard that ran no test of the heavy package looks exactly like a shard
+          # whose slice was small. The list is checked before it is turned into a
+          # pattern, and the pattern is checked before it is used.
+          tests=$(go test -list '^Test' "$heavy" | grep '^Test' | grep -v '^TestMain$')
+          test -n "$tests"
+          regex=$(printf '%s\n' "$tests" \
+            | awk -v s="${{ matrix.part }}" -v m=4 'NR % m == s % m' \
+            | paste -sd'|' -)
+          test -n "$regex"
+          # Still one canonical full-suite race run: the shards partition the same
+          # package set and the heavy package's tests partition the same test set,
+          # so every package and every test in it runs exactly once.
+          # PostgreSQL/MySQL below focus on dialect correctness without multiplying
+          # race-detector runtime. Both invocations run — a failure in the first
+          # must not hide whether the second would have passed as well.
+          #
+          # EACH PIPELINE ASSIGNS ITS OWN VERDICT, rather than a group whose status
+          # is checked at the end: a `{ … } | tee` puts the group in a subshell, so
+          # a `failed=1` set inside it is discarded and the step reports success
+          # while a suite failed. shellcheck found exactly that here (SC2030/SC2031),
+          # and it is the failure this job is least able to see for itself.
+          failed=0
+          go test -race -count=1 -timeout=8m $packages 2>&1 | tee test-output.txt || failed=1
+          go test -race -count=1 -timeout=8m -run "^(${regex})$" "$heavy" 2>&1 | tee -a test-output.txt || failed=1
+          exit "$failed"
       - name: upload test output
         if: failure()
         uses: actions/upload-artifact@v7

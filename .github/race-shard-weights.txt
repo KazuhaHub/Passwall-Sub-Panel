@@ -15,6 +15,12 @@
 # REFRESH BY READING THE SHARD LOGS when the shape of the suite changes.
 #
 # <seconds> <import path>
+#
+# sqlstore's entry is kept as the record of WHY IT IS NOT PACKED: at 174s it is
+# longer than a quarter of the suite, so no arrangement of packages balances it,
+# and the race job excludes it from the partition and partitions its TESTS
+# instead (see the race job in test.yml). Delete this line and the planner starts
+# giving some shard a 174s package again — the exclusion is a flag, not an entry.
 174.2 github.com/KazuhaHub/passwall-sub-panel/internal/adapters/sqlstore
 27.6 github.com/KazuhaHub/passwall-sub-panel/internal/service/nodeagentupgrade
 25.6 github.com/KazuhaHub/passwall-sub-panel/internal/service/nodesync
