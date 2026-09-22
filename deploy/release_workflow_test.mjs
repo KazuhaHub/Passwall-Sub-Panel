@@ -179,6 +179,22 @@ function job(name) {
   return tail.slice(0, next?.index ?? tail.length)
 }
 
+// EVERY job in this file, by name, as its raw block. `job(name)` reads one; this
+// reads the set, which is what an invariant over the graph needs.
+function jobs() {
+  const start = workflow.indexOf('\njobs:\n')
+  assert(start >= 0, 'the release workflow defines jobs')
+  const body = workflow.slice(start + '\njobs:\n'.length)
+  const markers = [...body.matchAll(/^  ([a-z][a-z-]*):\n/gm)]
+  const found = new Map()
+  markers.forEach((marker, index) => {
+    const end = index + 1 < markers.length ? markers[index + 1].index : body.length
+    found.set(marker[1], body.slice(marker.index, end))
+  })
+  assert(found.size > 0, 'the release workflow defines jobs')
+  return found
+}
+
 function literalScripts() {
   const lines = workflow.split('\n')
   const scripts = []
@@ -279,9 +295,29 @@ test('the dispatch form can cut the next release without a local tag push', () =
 
 test('the tag job cuts the tag after the suite passes, only when the form asked for one', () => {
   const cut = job('tag')
+  // THE CONDITION IS A STEP, NOT AN `if:` ON THE JOB, AND THAT IS THE ASSERTION.
+  //
+  // It used to be `if: github.event_name == 'workflow_dispatch' && inputs.tag == ''`
+  // on the job, which skipped it on the pushed-tag path — and a skipped job skips
+  // everything downstream of it, so that path published nothing while reporting a
+  // failed compatibility gate. The exemption written on `setup` (`always() && …`)
+  // did not restore them. The invariant is asserted over the whole graph by the
+  // case below; here it is pinned where it was broken.
   assert(
-    cut.includes("if: github.event_name == 'workflow_dispatch' && inputs.tag == ''"),
-    'the tag job must run only for a dispatch that named no tag',
+    !/^    if:/m.test(cut),
+    'the tag job must carry no job-level condition: a skipped job skips its whole downstream chain, and the release jobs under it depend on this one having run',
+  )
+  assert(
+    cut.includes('if: steps.decision.outputs.cut == \'true\''),
+    'the cut is gated on a step output, so the job itself always runs',
+  )
+  // WHAT IT DECIDES IS UNCHANGED, and it is read from the same two inputs the job
+  // condition used: the event, and whether the form named a tag.
+  assert(cut.includes('EVENT_NAME: ${{ github.event_name }}'), 'the decision must read the event')
+  assert(cut.includes('REQUESTED_TAG: ${{ inputs.tag }}'), 'the decision must read the form')
+  assert(
+    cut.includes('"$EVENT_NAME" = "workflow_dispatch" ] && [ -z "$REQUESTED_TAG" ]'),
+    'only a dispatch that named no tag cuts one: a pushed tag is the tag, and a named tag already addresses the release',
   )
   assert(cut.includes('contents: write'), 'cutting a tag is the one job that needs to write contents')
   // THE NUMBER IS NOT COMPUTED HERE. "An incremental fix takes the fourth segment"
@@ -313,6 +349,59 @@ test('the tag job cuts the tag after the suite passes, only when the form asked 
     'the tag job must ask about the test workflow rather than about every run on the commit',
   )
   assert(!cut.includes('check-runs'), 'enumerating check runs refuses the commit for the release run itself existing')
+  // AND THAT CHECK IS NOT BEHIND THE DECISION. It used to sit inside a job that only
+  // ran for the blank dispatch form, so a tag pushed by hand was published from a
+  // commit whose suite nobody had asked about — the one path where the commit was
+  // chosen by a person rather than by the allocator. The step now runs on every
+  // path; only the allocation below it is conditional.
+  const suiteCheck = /- name: Refuse a commit the test suite has not passed\n([\s\S]*?)\n      - name:/.exec(cut)
+  assert(suiteCheck, 'the suite check must be its own step')
+  assert(
+    !/^        if:/m.test(suiteCheck[1]),
+    'the suite check must run on every path, including a pushed tag',
+  )
+})
+
+// A SKIPPED JOB SKIPS EVERYTHING DOWNSTREAM OF IT, TRANSITIVELY, AND `always()` ON A
+// JOB IN BETWEEN DOES NOT RESTORE THE JOBS UNDER IT. The exempted job runs and reports
+// success; its dependents are skipped anyway, because GitHub decides each dependent's
+// skip from the graph rather than from what the intermediate job actually reported.
+//
+// THIS IS NOT A THEORY. The first release cut by pushing a tag (v4.0.1.8) published
+// nothing: the tag job was skipped on that path, `setup` was exempted (`always() && …`)
+// and succeeded, and `web`, `build`, `release` and `docker` were skipped with it. The
+// run reached the compatibility gate — which carries `always()` — and failed there,
+// with `LEG=skipped` standing in for "no artifact was ever built".
+//
+// SO TWO PROPERTIES ARE PINNED, AND TOGETHER THEY CLOSE THE CLASS.
+//
+// One: nothing the release is built from carries a job-level condition at all. Those
+// jobs may still be skipped when a job above them FAILS, and that is the outcome we
+// want — a failed release stops, loudly, naming its cause. What must not happen is a
+// job being skipped while the jobs below it are expected to run.
+//
+// Two: any job-level condition left in the file has to carry `always()`, so it can
+// report on a chain that did not succeed instead of being skipped by it. The
+// compatibility gate is that shape: it is terminal, and its verdict on a failed leg is
+// the reason it exists.
+test('no job is skipped by its own condition while the release depends on it', () => {
+  const all = jobs()
+  for (const name of ['setup', 'node-compatibility', 'web', 'build', 'release', 'docker']) {
+    const raw = all.get(name)
+    assert(raw, `the release graph must still contain the ${name} job`)
+    assert(
+      !/^    if:/m.test(raw),
+      `${name} is part of what a release is built from and must carry no job-level if:. A condition there skips the job — and every job under it — without failing anything, which is how v4.0.1.8 published nothing.`,
+    )
+  }
+  for (const [name, raw] of all) {
+    const condition = /^    if: (.*)$/m.exec(raw)
+    if (!condition) continue
+    assert(
+      condition[1].includes('always()'),
+      `${name} carries a job-level if: without always(), so it can be skipped by its own condition and take its dependents with it. Gate a step instead, as the tag job does.`,
+    )
+  }
 })
 
 // A TAG CARRIES AN IDENTITY, AND A FRESH RUNNER HAS NONE.

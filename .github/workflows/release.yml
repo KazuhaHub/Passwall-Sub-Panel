@@ -104,9 +104,28 @@ jobs:
     name: Cut the release tag
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    # NOTHING TO CUT when a tag was pushed (that tag is the trigger) or when the
-    # form named one. The job is the blank-tag path, and only that path.
-    if: github.event_name == 'workflow_dispatch' && inputs.tag == ''
+    # THIS JOB CARRIES NO CONDITION, AND THAT IS NOT A STYLE CHOICE.
+    #
+    # A SKIPPED JOB SKIPS EVERYTHING DOWNSTREAM OF IT, TRANSITIVELY, and `always()`
+    # on a job in between does not restore them: the exempted job runs and reports
+    # success while its dependents are still skipped. This job used to carry
+    # `if: github.event_name == 'workflow_dispatch' && inputs.tag == ''`, with
+    # `setup` exempted by `always() && needs.tag.result == 'skipped'`. On a pushed
+    # tag the job was skipped as intended, `setup` ran and succeeded as intended —
+    # and `web`, `build`, `release` and `docker` were all skipped with it, so the
+    # run reached the compatibility gate with no artifacts, reported the missing
+    # matrix leg as `LEG=skipped`, and failed without publishing anything.
+    #
+    # NOTHING HAD EXPOSED IT because every release published until then went
+    # through the blank dispatch form, and on that path this job really does run.
+    # The tag-push path — the one a release is supposed to take — was the only way
+    # to reach it, and it had never been used.
+    #
+    # SO THE DECISION MOVED INTO A STEP. What it decides is unchanged, and it is
+    # still "only a dispatch that named no tag cuts one"; the job itself now always
+    # runs, which is the property the rest of the graph depends on. The cost is one
+    # checkout and one toolchain on the paths that cut nothing, and the release path
+    # is not where a minute matters.
     permissions:
       contents: write
       actions: read
@@ -138,6 +157,25 @@ jobs:
           test "$(go env GOVERSION)" = "$build_toolchain"
           test "$(go tool compile -V | awk '{ print $3 }')" = "$build_toolchain"
 
+      - name: Decide whether this run cuts the tag
+        id: decision
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REQUESTED_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          # THE CONDITION THIS JOB USED TO CARRY, IN THE ONE PLACE IT CAN BE SAFE.
+          # A pushed tag IS the tag, and a dispatch that named one has already
+          # addressed the release: both leave this job nothing to cut, and both must
+          # still run, because everything below them needs it to have run.
+          if [ "$EVENT_NAME" = "workflow_dispatch" ] && [ -z "$REQUESTED_TAG" ]; then
+            echo "cut=true" >> "$GITHUB_OUTPUT"
+            echo "cutting the next tag on the line named on the form"
+          else
+            echo "cut=false" >> "$GITHUB_OUTPUT"
+            echo "nothing to cut: the tag is named by the $EVENT_NAME that started this run"
+          fi
+
       - name: Refuse a commit the test suite has not passed
         env:
           GH_TOKEN: ${{ github.token }}
@@ -148,6 +186,13 @@ jobs:
           # commit's check runs would include this very release run, still in
           # progress and therefore inconclusive, and the commit would be refused
           # for its own existence.
+          #
+          # IT RUNS ON EVERY PATH, INCLUDING THE PUSHED TAG. It used to sit behind
+          # this job's condition, so a tag pushed by hand was published from a commit
+          # whose suite nobody had asked about — the one path where the check cannot
+          # be skipped is the one where a person, rather than the allocator, chose
+          # the commit. A tag that is pushed before the suite finishes is refused
+          # here; the run is re-run, not re-tagged.
           conclusion=$(gh run list --repo "$GITHUB_REPOSITORY" \
             --workflow test.yml --commit "$SHA" --limit 1 \
             --json status,conclusion \
@@ -159,6 +204,10 @@ jobs:
 
       - name: Allocate the next number on the line and create the tag
         id: cut
+        # THE ONLY CONDITIONAL STEP, AND IT IS A STEP RATHER THAN AN `if:` ON THE
+        # JOB (see the head of this job). A no-op pass leaves `steps.cut.outputs.tag`
+        # empty, which is the same value `setup` would have read from a skipped job.
+        if: steps.decision.outputs.cut == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           SHA: ${{ github.sha }}
@@ -227,12 +276,14 @@ jobs:
 
   setup:
     name: Resolve release identity
-    # THE TAG JOB IS SKIPPED ON THE PATHS THAT DO NOT NEED IT — a pushed tag, or
-    # a form that named one — and a skipped dependency skips its dependents
-    # unless the condition says otherwise, which would have meant no release at
-    # all. Only a tag job that FAILED stops the release.
+    # A PLAIN `needs`, WITH NO EXEMPTION. It read
+    # `always() && (needs.tag.result == 'success' || needs.tag.result == 'skipped')`
+    # — written when the tag job could be skipped, to keep a skipped dependency from
+    # taking the release with it. The exemption did its own job and failed at the one
+    # beside it: it let this job run, and this job's dependents were skipped anyway.
+    # The tag job cannot be skipped now, so there is nothing left to exempt, and a
+    # tag job that FAILS must stop the release — which a plain `needs` does.
     needs: tag
-    if: always() && (needs.tag.result == 'success' || needs.tag.result == 'skipped')
     runs-on: ubuntu-latest
     outputs:
       tag: ${{ steps.identity.outputs.tag }}
@@ -579,6 +630,16 @@ jobs:
         env:
           LEG: ${{ needs.node-compatibility.result }}
         run: |
+          # A SKIPPED LEG IS NO LONGER A STRUCTURAL ACCIDENT. Every job that feeds
+          # this one is unconditional now, so a `skipped` here has exactly one
+          # meaning left: this job carries `always()` and ran anyway, while the chain
+          # that produces its evidence did not — because the release stopped upstream
+          # and `setup` never resolved an identity. Naming that beats reporting an
+          # absent matrix, which is what made the first tag-push release unreadable.
+          if [ "$LEG" = skipped ]; then
+            echo "::error::the compatibility cases never ran: the release stopped before setup resolved an identity. Read the tag and setup jobs; this gate is only reporting their absence."
+            exit 1
+          fi
           # The case-set check below would also notice a cancelled leg, but it
           # would report it as a pile of missing cases. Naming the cause first
           # keeps the failure readable.
