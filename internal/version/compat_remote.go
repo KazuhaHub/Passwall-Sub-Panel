@@ -763,6 +763,17 @@ func applySUICompat(payload remoteCompatPayload) {
 // lookupSUIForPSPVersion is lookupForPSPVersion over sui_entries: same
 // document-order, first-match-wins, skip-malformed-rows semantics.
 func lookupSUIForPSPVersion(payload remoteCompatPayload, pspVersion string) (remoteCompatSUIEntry, bool) {
+	// Same rule, same reason as the 3X-UI lookup above: sui_entries state their
+	// intervals in the product rule and a fix release is inside one only if the
+	// comparison can read it.
+	if IsReleaseVersion(pspVersion) {
+		for _, e := range payload.SUIEntries {
+			if releaseWithinRange(pspVersion, e.PSPMin, e.PSPMax) {
+				return e, true
+			}
+		}
+		return remoteCompatSUIEntry{}, false
+	}
 	if payload.SchemaVersion >= rangeOverlaySchemaVersion {
 		pv, ok := canonicalPSPSemver(pspVersion)
 		if !ok {
@@ -797,12 +808,44 @@ func lookupSUIForPSPVersion(payload remoteCompatPayload, pspVersion string) (rem
 	return remoteCompatSUIEntry{}, false
 }
 
+// releaseWithinRange reports whether a PRODUCT release version is inside the closed
+// [min, max] interval an entry states, both sides read in the product rule.
+//
+// THE FOURTH SEGMENT PARTICIPATES. A fix of a release is above that release, so an
+// interval that ends at the base release does not cover its fixes — which is a
+// distinction the documents are written to be able to make.
+func releaseWithinRange(version, min, max string) bool {
+	if !IsReleaseVersion(min) || !IsReleaseVersion(max) {
+		return false
+	}
+	return CompareRelease(version, min) >= 0 && CompareRelease(version, max) <= 0
+}
+
 // lookupForPSPVersion iterates entries in document order and returns the
 // FIRST one whose [psp_min, psp_max] closed interval contains pspVersion.
 // "First match wins" is the documented semantics — admin authoring the
 // JSON puts narrower / newer ranges earlier so a more-specific entry
 // shadows a broader one.
 func lookupForPSPVersion(payload remoteCompatPayload, pspVersion string) (remoteCompatPSPEntry, bool) {
+	// THE PRODUCT RULE FIRST, AND IT IS THE ONE A BUILD OF THIS LINE NEEDS. A product
+	// version carries an optional FOURTH segment — the incremental fix — which neither
+	// branch below can read: x/mod/semver refuses it and the three-integer parser
+	// refuses it, so every fix release was told its compatibility was unknown while
+	// the document that answers for its line sat in memory, in range. The bounds are
+	// written in the same rule, so one comparison answers for both.
+	//
+	// A BUILD THAT IS A RELEASE VERSION IS ANSWERED HERE AND NOWHERE ELSE: the legacy
+	// branches below read a document from the deleted scheme, and a document written
+	// in it covers no product build — which is the honest answer for a scheme this
+	// build does not have.
+	if IsReleaseVersion(pspVersion) {
+		for _, e := range payload.Entries {
+			if releaseWithinRange(pspVersion, e.PSPMin, e.PSPMax) {
+				return e, true
+			}
+		}
+		return remoteCompatPSPEntry{}, false
+	}
 	if payload.SchemaVersion >= rangeOverlaySchemaVersion {
 		pv, ok := canonicalPSPSemver(pspVersion)
 		if !ok {
