@@ -280,30 +280,40 @@ test('caches are restored on every event and saved only from the default branch'
     `every job that compiles Go, plus the browser download, restores a cache — found ${restores}`,
   )
 
-  // THE LAYER CACHE FOLLOWS THE SAME POLICY IN A DIFFERENT SHAPE. buildx exports its
-  // cache at the END of the build, so there is no save step to gate: the gate is the
-  // flag, added only on the default branch. It is asserted here because it is the same
-  // decision, and a reviewer looking for the policy should find both halves in one place.
+  // THE LAYER CACHE FOLLOWS THE SAME POLICY, AND IT HAS TO BE EXPORTED BY THE ACTION.
+  //
+  // `type=gha` needs ACTIONS_RUNTIME_TOKEN and ACTIONS_CACHE_URL in the process that
+  // speaks the cache protocol, and with a container-driver builder that process is
+  // inside the builder container, which does not inherit the runner's environment.
+  // Docker's documentation says it plainly: run buildx yourself in an inline step and
+  // "the variables must be manually exposed". A CLI `--cache-to` in a `run:` step
+  // therefore writes NOTHING, and reports no failure for it — the first version of this
+  // did exactly that. docker/build-push-action populates url and token itself.
   const container = job('container')
   assert(
-    /"\$?\{?layer_cache\}?"|type=gha,scope=/.test(container) && container.includes('"--cache-from"'),
+    /cache-from: type=gha,scope=\S+/.test(container),
     'the container job must restore a layer cache: its source image is a node + vite + go build that nothing else reuses',
   )
   assert(
-    container.includes('"${GITHUB_EVENT_NAME}" = push') && container.includes('refs/heads/main'),
-    'the container job must add --cache-to only on the default branch, or its layer cache is written where nothing reads it',
+    /cache-to: \$\{\{ [^}]*refs\/heads\/main[^}]*\}\}/.test(container),
+    'the layer cache must be exported only from the default branch, or it is written where nothing reads it',
   )
-  // `--load` IS NOT DECORATION: from Docker 23 on, `docker build` is an alias for
+  for (const line of container.matchAll(/docker buildx build[^\n]*/g)) {
+    if (!/--cache-(from|to)/.test(line[0])) continue
+    assert.fail(
+      `a CLI build carries a cache flag: ${line[0].trim()}. A type=gha cache named there is silently never written, because the builder container does not inherit ACTIONS_RUNTIME_TOKEN — the action has to own it.`,
+    )
+  }
+  assert(
+    container.includes('load: true'),
+    'the source image must be loaded into the daemon: the checks below read it with docker create and docker cp',
+  )
+  // `--load` IS NOT DECORATION. From Docker 23 on, `docker build` is an alias for
   // `docker buildx build`, and a container-driver builder leaves the result out of the
-  // daemon's store unless it is asked. The ownership and runtime checks below read that
-  // store, so a missing `--load` fails them on an image that built perfectly.
+  // daemon's store unless it is asked — which is where every check below reads it.
   assert(
     container.includes('docker buildx build --load -f Dockerfile.release'),
     'the release image build must pass --load, or the runtime checks cannot find the image it just built',
-  )
-  assert(
-    /source_args=\(--load\b/.test(container),
-    'the source image build must pass --load, for the same reason',
   )
 })
 
