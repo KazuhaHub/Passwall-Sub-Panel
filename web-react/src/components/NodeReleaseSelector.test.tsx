@@ -25,7 +25,12 @@ const stable: NodeRelease = {
   version: '4.1.0', channel: 'stable', published_at: '2026-09-12T12:36:16Z',
   release_tag: 'v4.1.0',
   release_url: 'https://github.com/KazuhaHub/Passwall-Node/releases/tag/v4.1.0',
-  notes: 'Reviewed protocol compatibility; install exactly this tag.', methods: ['linux', 'docker', 'manual'], platforms,
+  notes: 'Reviewed protocol compatibility; install exactly this tag.',
+  // THE METHODS A RELEASE ADVERTISES ARE ITS ASSETS, and the panel's catalog reader
+  // stopped listing `docker` among them: an image is not an asset the release page
+  // can be asked about. The fixture said otherwise, which is why a Docker
+  // installation could look covered here while being impossible in the product.
+  methods: ['linux', 'manual'], platforms,
 }
 const testing: NodeRelease = {
   ...stable, version: '4.1.1', channel: 'testing',
@@ -174,13 +179,22 @@ describe('Passwall Node release selection', () => {
     reads([{ ...stable, platforms: [{ os: 'linux', arch: 'amd64' }] }])
     const view = mount(<Controlled />)
     await screen.findByText('admin:servers.native.release_no_stable')
+    // A DOCKER INSTALLATION DETECTS THE HOST ARCHITECTURE TOO, so a release
+    // published for only one of the two Linux architectures is not offerable to it
+    // either — the recipe is what differs, not the platform rule.
     view.rerender(<Controlled selection={{ ...linux, method: 'docker' }} />)
     await screen.findByText('admin:servers.native.release_no_stable')
     expect(selected()).toBe('')
-    reads([{ ...stable, methods: ['manual'] }])
+    // AND THE RECIPE RULE IS ABOUT THE RECIPES. A release that does not advertise
+    // `manual` is not offerable to a manual installation; a Docker installation
+    // reads an image, so it needs no entry among the release's assets at all.
+    reads([{ ...stable, methods: ['linux'] }])
+    view.rerender(<Controlled enabled={false} />)
+    view.rerender(<Controlled selection={{ ...linux, method: 'manual' }} />)
+    await screen.findByText('admin:servers.native.release_no_stable')
     view.rerender(<Controlled enabled={false} />)
     view.rerender(<Controlled selection={{ ...linux, method: 'docker' }} />)
-    await screen.findByText('admin:servers.native.release_no_stable')
+    await waitFor(() => expect(selected()).toBe('latest'))
   })
 
   it('distinguishes a lookup failure from an empty channel and lets the administrator retry', async () => {

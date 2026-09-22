@@ -52,7 +52,14 @@ export interface NodeReleaseSelectorProps {
 }
 
 function supportsSelection(release: NodeRelease, selection: NativeInstallationSelection): boolean {
-  if (!Array.isArray(release.methods) || !release.methods.includes(selection.method)) return false
+  // THE DOCKER METHOD CONSUMES AN IMAGE, NOT A RELEASE ASSET. Its version may be the
+  // floating channel tag and an exact pin is only an image tag, so nothing here has
+  // to exist among a release's assets — while the methods a release ADVERTISES are
+  // exactly its assets, as the panel's own catalog reader computes them. Requiring
+  // an entry for docker therefore emptied this list for every Docker installation,
+  // including the reinstall an operator runs to repair one, and the dialog reported
+  // an empty channel instead of a method that has no catalog to read.
+  if (selection.method !== 'docker' && (!Array.isArray(release.methods) || !release.methods.includes(selection.method))) return false
   if (!Array.isArray(release.platforms)) return false
   if (selection.method === 'manual') {
     return release.platforms.some(platform => platform.os === selection.os && platform.arch === selection.arch)
