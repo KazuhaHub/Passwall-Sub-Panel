@@ -467,6 +467,30 @@ jobs:
             # This verifies binary execution, not the panel's production startup.
             docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges --user 10001:10001 --entrypoint /app/psp "$image" --version
           done
+      - name: The entrypoint repairs ownership in the image it ships in
+        run: |
+          set -euo pipefail
+          # THE IMAGE'S OWN USERLAND IS THE SUBJECT, NOT THE RUNNER'S. This repair
+          # used `find … ! -uid … -exec chown … +` and swallowed the error: the
+          # runtime is Alpine, BusyBox's find has no -uid, and every container start
+          # therefore repaired ownership of nothing — silently — while the panel ran
+          # as PUID and could not write its own data directory. It was found in
+          # production, as a warning about a file the panel could not store.
+          #
+          # A GUARD THAT ONLY CHECKED THE OUTCOME could pass on a runner whose find is
+          # GNU's and say nothing about the image, so the dialect is asserted first.
+          docker run --rm --entrypoint /bin/sh psp-source-check \
+            -c 'if find /app -maxdepth 0 -uid 0 2>&1 | grep -q "unrecognized: -uid"; then exit 0; fi; echo "the image shell understands -uid now; this guard is describing a constraint that moved"; exit 1'
+          # A VOLUME, because the repair is about a mount that already exists: each
+          # docker run would otherwise start from a clean layer and prove nothing.
+          docker volume create psp-entrypoint-check >/dev/null
+          trap 'docker volume rm psp-entrypoint-check >/dev/null' EXIT
+          docker run --rm --entrypoint /bin/sh -v psp-entrypoint-check:/app/data psp-source-check \
+            -c 'chown root:root /app/data && test "$(stat -c %u /app/data)" = 0'
+          # The entrypoint drops into the panel, which exits on --version.
+          docker run --rm -v psp-entrypoint-check:/app/data psp-source-check --version
+          docker run --rm --entrypoint /bin/sh -v psp-entrypoint-check:/app/data psp-source-check \
+            -c 'test "$(stat -c %u /app/data)" = 10001'
       - name: Publisher identity, compat result validators and fail-closed guard tests
         run: node --test deploy/check_image_test.mjs deploy/check_build_test.mjs deploy/release_workflow_test.mjs deploy/compat/check-go-results.test.mjs deploy/compat/check-case-set.test.mjs deploy/compat/plan.test.mjs deploy/compat/profiles.test.mjs deploy/compat/backends/third-party_env.test.mjs deploy/compat/evidence-index.test.mjs deploy/compat/contract-source.test.mjs deploy/tracked_text_test.mjs deploy/test_workflow_test.mjs
 
