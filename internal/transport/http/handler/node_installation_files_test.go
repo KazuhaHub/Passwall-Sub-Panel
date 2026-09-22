@@ -641,6 +641,8 @@ func TestTheGeneratedComposeSatisfiesTheProfileTheNodeUpdaterRequires(t *testing
 					NetworkMode string   `yaml:"network_mode"`
 					Privileged  bool     `yaml:"privileged"`
 					Tmpfs       []string `yaml:"tmpfs"`
+					CapDrop     []string `yaml:"cap_drop"`
+					CapAdd      []string `yaml:"cap_add"`
 				} `yaml:"services"`
 			}
 			if err := yaml.Unmarshal([]byte(compose), &document); err != nil {
@@ -668,6 +670,25 @@ func TestTheGeneratedComposeSatisfiesTheProfileTheNodeUpdaterRequires(t *testing
 				}
 				if !declared {
 					t.Errorf("a read-only root filesystem with no writable %s", mount)
+				}
+			}
+			// AND THE CAPABILITIES THE ENTRYPOINT NEEDS TO GET THAT FAR. It chowns the
+			// runtime directory to the service account and then chmods it, and the
+			// directory is a tmpfs mount — root-owned — so a root process that is NOT the
+			// owner needs CAP_FOWNER for the chmod. With capabilities dropped and FOWNER
+			// missing, the container starts, reports that it cannot protect its runtime
+			// directory, and restarts forever; that is how this was found, in a user's
+			// container log, after a generated compose was applied.
+			if len(agent.CapDrop) != 1 || agent.CapDrop[0] != "ALL" {
+				t.Errorf("the agent does not drop every capability first: %v", agent.CapDrop)
+			}
+			for _, capability := range []string{"CHOWN", "FOWNER", "SETGID", "SETUID"} {
+				granted := false
+				for _, add := range agent.CapAdd {
+					granted = granted || add == capability
+				}
+				if !granted {
+					t.Errorf("the agent is not granted %s, which its entrypoint needs", capability)
 				}
 			}
 		})
