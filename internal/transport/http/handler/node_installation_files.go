@@ -118,10 +118,20 @@ func renderNodeInstallationFiles(panelID int64, p nativeServerCreateResponse, r 
       - /tmp:size=16m,mode=1777
     cap_drop:
       - ALL
-    # Entrypoint-only capabilities: copy/chown the secret and state volume, then
-    # switch to the configured unprivileged UID/GID before exec.
+    # Entrypoint-only capabilities: copy/chown the secret and state volume,
+    # protect the runtime tmpfs, then switch to the configured unprivileged
+    # UID/GID before exec.
+    #
+    # FOWNER IS NOT DECORATION. The runtime directory is a tmpfs mount, so it is
+    # root-owned; the entrypoint chowns it to the service account and then chmods
+    # it, and a root process that is NOT the owner needs CAP_FOWNER for that
+    # chmod. With every capability dropped it does not have one: the container
+    # starts, prints "chmod: /run/passwall-node: Operation not permitted", reports
+    # that it cannot protect its runtime directory, and restarts forever. CHOWN is
+    # for the chown, and SETGID/SETUID are for the privilege drop.
     cap_add:
       - CHOWN
+      - FOWNER
       - SETGID
       - SETUID
     security_opt:
