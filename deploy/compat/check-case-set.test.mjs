@@ -52,11 +52,14 @@ function twoReleaseManifest() {
 }
 writeFileSync(MANIFEST_TWO, JSON.stringify(twoReleaseManifest()))
 
-// The versions the panel still supports, matched by POSITION at min_supported.
+// The versions the matrix exercises: the floor the panel still supports and the
+// newest published release, matched by POSITION at min_supported. The fixture above
+// deliberately carries releases BETWEEN them, so a gate that went back to expecting
+// the whole list fails here rather than passing by sharing the checker's bug.
 function supportedVersions(path = MANIFEST_TWO) {
   const manifest = JSON.parse(readFileSync(path, 'utf8'))
   const names = manifest.released_nodes.map((row) => row.version)
-  return names.slice(names.indexOf(manifest.min_supported))
+  return [names[names.indexOf(manifest.min_supported)], names[names.length - 1]]
 }
 
 const VERSIONS = supportedVersions()
@@ -111,7 +114,7 @@ test('a complete set of passing reports is the only shape that passes', () => {
 test('a missing case fails the gate even though every report present is green', () => {
   // The cancelled-matrix-leg case. Nothing about the reports that survived is
   // wrong; the run is still incomplete.
-  const dropped = CASES[3]
+  const dropped = CASES[CASES.length - 1]
   const { code, result } = check((reports) => {
     everyCase(reports)
     rmSync(join(reports, dropped), { recursive: true })
@@ -129,7 +132,7 @@ test('an empty reports directory is incomplete, not vacuously complete', () => {
 })
 
 test('a report whose own verdict is not a pass fails the gate', () => {
-  const failed = CASES[2]
+  const failed = CASES[CASES.length - 1]
   const { code, result } = check((reports) => {
     everyCase(reports)
     writeCase(reports, failed, { verdict: 'missing' })
@@ -139,7 +142,7 @@ test('a report whose own verdict is not a pass fails the gate', () => {
 })
 
 test('an unreadable report is not a pass', () => {
-  const broken = CASES[1]
+  const broken = CASES[CASES.length - 1]
   const { code, result } = check((reports) => {
     everyCase(reports)
     writeCase(reports, broken, { raw: '{"verdict":' })
