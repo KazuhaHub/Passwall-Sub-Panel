@@ -520,33 +520,42 @@ jobs:
           test -n "$build_toolchain"
           test "$(go env GOVERSION)" = "$build_toolchain"
           test "$(go tool compile -V | awk '{ print $3 }')" = "$build_toolchain"
-      # THE LAYER CACHE, AND WHY IT IS A FLAG RATHER THAN A STEP. A buildx cache is
-      # exported at the END of the build, so there is no separate save step to gate —
-      # the gate is the `--cache-to` argument, added only on the default branch. Same
-      # policy as every `actions/cache` in this file, for the same reason: a cache a PR
-      # writes lands in a scope nothing but that PR's re-runs can read.
+      # THE CACHE PARAMETERS BELONG TO THE ACTION, NOT TO THE CLI, AND THE FIRST
+      # VERSION OF THIS GOT IT WRONG IN THE QUIETEST WAY POSSIBLE.
       #
-      # THE SOURCE IMAGE IS THE ONLY THING WORTH CACHING (node → vite → go, ~111s of
-      # this job). The release image just copies a binary into alpine, so it gets
-      # `--load` and no cache.
+      # `type=gha` needs `ACTIONS_RUNTIME_TOKEN` and `ACTIONS_CACHE_URL` in the process
+      # that speaks the cache protocol, and with a container-driver builder that process
+      # lives INSIDE the builder container, which does not inherit the runner's
+      # environment. Docker's own documentation says it plainly: run buildx yourself in
+      # an inline step and "the variables must be manually exposed". The earlier version
+      # named a cache on a CLI buildx invocation from a `run:` step, so it cached
+      # nothing — no entry in the cache list, no error in the log, and a build
+      # that took the same 105 seconds. A cache that is never written looks exactly like
+      # a cache that always misses.
+      #
+      # docker/build-push-action populates url and token itself. The release image below
+      # stays a CLI call: it copies a binary into alpine and caches nothing.
       - uses: docker/setup-buildx-action@v4
-      - name: Build both Docker paths and execute isolated binary version checks
+      - name: Build the source image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          build-args: VERSION=ci
+          tags: psp-source-check
+          # The checks below are `docker create` and `docker cp` against this image, so
+          # it has to reach the daemon's store rather than stay in the builder.
+          load: true
+          cache-from: type=gha,scope=psp-source-image
+          # A PR restores and exports nothing: a save it would make is readable by
+          # nothing but that PR's own re-runs. Same policy as every actions/cache here.
+          cache-to: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && 'type=gha,scope=psp-source-image,mode=max' || '' }}
+      - name: Build the release runtime image and check both Docker paths
         run: |
           set -euo pipefail
-          # `--load` IS NOT OPTIONAL ONCE BUILDX IS SET UP. `docker build` is an alias
-          # for `docker buildx build` from Docker 23 on, and a builder with the
-          # container driver does not put the result in the daemon's image store unless
-          # it is asked to — the `docker create` and `docker run` checks below would
-          # then fail on an image that was built perfectly.
-          # ONE ELEMENT PER LINE, because the cache spec carries a comma of its own and
-          # an array literal would read as if that comma separated elements.
-          layer_cache="type=gha,scope=psp-source-image"
-          source_args=(--load --build-arg VERSION=ci --tag psp-source-check)
-          source_args+=("--cache-from" "$layer_cache")
-          if [ "${GITHUB_EVENT_NAME}" = push ] && [ "${GITHUB_REF}" = refs/heads/main ]; then
-            source_args+=("--cache-to" "${layer_cache},mode=max")
-          fi
-          docker buildx build "${source_args[@]}" .
+          # `--load` IS NOT DECORATION. From Docker 23 on, `docker build` is an alias for
+          # `docker buildx build`, and a container-driver builder leaves the result out
+          # of the daemon's image store unless it is asked — every check below reads that
+          # store, and would fail on an image that built perfectly.
           runtime_context=$(mktemp -d "$RUNNER_TEMP/psp-runtime-check.XXXXXX")
           mkdir -p "$runtime_context/bin/linux-amd64"
           container_id=$(docker create psp-source-check --version)
