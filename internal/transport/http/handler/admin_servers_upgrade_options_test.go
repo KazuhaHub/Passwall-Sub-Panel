@@ -267,6 +267,7 @@ func TestTheAgentAnswerRefusesWhatTheUpgradeServiceWouldRefuse(t *testing.T) {
 	// A node that reports a version but advertises no upgrade capability. This is
 	// the shape a legacy-scheme or dev build takes on the wire.
 	withoutCapability := answer(&domain.NodeAgent{
+		AgentID: "agt_7", PanelID: 7,
 		ObservedProtocolVersion: nodeprotocol.ProtocolVersion1,
 		ObservedCapabilities:    []string{nodeprotocol.CapabilityTaskExecutionV1},
 		ProtocolObservedAt:      &observed,
@@ -286,6 +287,7 @@ func TestTheAgentAnswerRefusesWhatTheUpgradeServiceWouldRefuse(t *testing.T) {
 
 	// A node the write path would accept is still ready, and still gets its list.
 	ready := answer(&domain.NodeAgent{
+		AgentID: "agt_7", PanelID: 7,
 		ObservedProtocolVersion: nodeprotocol.ProtocolVersion1,
 		ObservedCapabilities:    nodeprotocol.AgentUpgradeCapabilities(),
 		ProtocolObservedAt:      &observed,
@@ -294,10 +296,32 @@ func TestTheAgentAnswerRefusesWhatTheUpgradeServiceWouldRefuse(t *testing.T) {
 		t.Fatalf("a capable node was refused: %+v", ready)
 	}
 
-	// No agent record at all leaves the identity-only answer alone rather than
-	// inventing a refusal: that is a different unknown, and decideAgentUpgrade
-	// already has an opinion about it.
-	if none := answer(nil); none.State != upgradeReady {
-		t.Fatalf("state = %q, want the identity-only answer when nothing is known", none.State)
+	// NO AGENT ROW FAILS CLOSED. nodeagentupgrade.owner refuses this outright, and
+	// the same holds for a repository error: answering "ready" because the lookup
+	// did not work is how a transient database fault becomes a green answer beside
+	// a full release menu.
+	none := answer(nil)
+	if none.State != upgradeBlocked || !hasReason(none, "agent_unknown") {
+		t.Fatalf("a server with no bound agent answered %+v", none)
+	}
+	if len(none.Targets) != 0 {
+		t.Fatal("a refusal was accompanied by a list of targets, which is an invitation")
+	}
+
+	// A server that is not a native node has no agent component at all, and the
+	// write path says so. The panel version on the row belongs to something else.
+	notNative := func() upgradeOption {
+		h := &AdminServersHandler{
+			repo:   upgradeModeRepo{panel: &domain.XUIPanel{ID: 7, Kind: domain.PanelKind3XUI, PanelVersion: "3.5.1"}},
+			agents: nodeMetricsAgentRepo{},
+		}
+		recorder := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(recorder)
+		c.Params = gin.Params{{Key: "id", Value: "7"}}
+		c.Request = httptest.NewRequest(http.MethodGet, "/admin/servers/7/upgrade-options?component=agent", nil)
+		return h.decideAgentOption(c, 7)
+	}()
+	if notNative.State != upgradeBlocked || !hasReason(notNative, "not_a_native_server") {
+		t.Fatalf("a 3X-UI server was offered an agent upgrade: %+v", notNative)
 	}
 }

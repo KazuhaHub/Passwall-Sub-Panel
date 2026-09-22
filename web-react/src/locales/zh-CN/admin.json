@@ -2156,7 +2156,8 @@
         "manual_attention": "升级结果无法自动确认，需要检查节点与升级助手日志。",
         "awaiting_observation": "已收到升级收据，等待目标版本的新鲜上报。",
         "verified": "已确认目标版本重启、同步及配置收敛，并核对二进制校验和。"
-      }
+      },
+      "blocked_fallback": "本面板目前不能远程升级这台服务器的节点程序。"
     },
     "sui_update": {
       "available": "查看 S-UI {{version}} 发行版本",

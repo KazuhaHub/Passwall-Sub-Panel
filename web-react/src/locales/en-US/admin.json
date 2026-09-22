@@ -2158,7 +2158,8 @@
         "manual_attention": "The outcome cannot be confirmed automatically. Inspect agent and upgrade-helper logs.",
         "awaiting_observation": "Upgrade receipt received; waiting for a fresh target-version report.",
         "verified": "Target restart, synchronization, configuration convergence and binary checksum verified."
-      }
+      },
+      "blocked_fallback": "This panel cannot remotely upgrade this server’s node agent right now."
     },
     "sui_update": {
       "available": "View S-UI {{version}} release",

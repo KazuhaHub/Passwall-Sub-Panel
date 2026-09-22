@@ -57,7 +57,13 @@ export function NativeAgentUpgradeDialog({ server, onClose }: { server: Server |
         // release, so it never registered the upgrade handler and never advertised
         // the capability — used to be offered the whole release list and refused
         // only after the operator had chosen from it.
-        setBlocked(option.state === 'blocked' ? (option.detail || option.reason_codes?.[0] || 'blocked') : '')
+        const refusal = option.state === 'blocked' ? (option.detail || t('admin:servers.agent_upgrade.blocked_fallback')) : ''
+        setBlocked(refusal)
+        // THE SELECTOR MAY HAVE AUTO-SELECTED ALREADY. It resolves from its own
+        // catalog fetch, which can land before this one, so a refusal that only
+        // hid the selector would leave a version chosen and Confirm live next to
+        // the alert explaining why it cannot be done.
+        if (refusal) setVersion('')
       })
       .catch(() => { if (live) { setTargets(undefined); setBlocked('') } })
     return () => { live = false }
@@ -128,7 +134,7 @@ export function NativeAgentUpgradeDialog({ server, onClose }: { server: Server |
     </DialogContent>
     <DialogActions>
       <Button onClick={onClose} disabled={busy}>{t('common:actions.close')}</Button>
-      {!task && <Button variant="contained" onClick={() => void submit()} disabled={busy || !exact(version.trim()) || version.trim() === expected}>
+      {!task && !blocked && <Button variant="contained" onClick={() => void submit()} disabled={busy || !exact(version.trim()) || version.trim() === expected}>
         {busy && <CircularProgress size={16} sx={{ mr: 1 }} />}{t(error ? 'admin:servers.agent_upgrade.retry' : 'admin:servers.agent_upgrade.confirm')}
       </Button>}
     </DialogActions>

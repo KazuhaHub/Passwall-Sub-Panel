@@ -543,3 +543,35 @@ describe('a node saved on the testing channel', () => {
     expect(selected()).toBe(stable.version)
   })
 })
+
+// THE OPTIONS FETCH CAN FAIL, AND THEN THERE IS NO TARGET LIST AT ALL.
+//
+// `targets` is undefined whenever the dialog's /upgrade-options call failed, and
+// the whole catalog is listed — including the version the node is already on,
+// which the server would otherwise have omitted. Recommending that one, and
+// auto-selecting it, leaves Confirm disabled with nothing on screen to say why:
+// the write path refuses the exact no-op.
+describe('the recommendation is strictly ahead, not merely not-older', () => {
+  const beta = (version: string): NodeRelease => ({
+    ...testing, version,
+    release_tag: releaseTag(version),
+    release_url: `https://github.com/KazuhaHub/Passwall-Node/releases/tag/${releaseTag(version)}`,
+  })
+
+  it('never recommends the version the node is already running', async () => {
+    const onChange = vi.fn()
+    reads([beta('4.1.0'), beta('4.0.6')])
+    mount(<NodeReleaseSelector enabled autoSelectLatest selection={linux} value="" onChange={onChange}
+      initialChannel="testing" newerThan="4.1.0" />)
+    const field = screen.getByRole('combobox', { name: 'admin:servers.native.agent_version' })
+    await waitFor(() => expect(field.getAttribute('aria-disabled')).not.toBe('true'))
+    fireEvent.mouseDown(field)
+
+    // Both are listed — the panel permits a downgrade and does not hide one.
+    const own = await screen.findByRole('option', { name: '4.1.0' })
+    expect(screen.getByRole('option', { name: '4.0.6' })).toBeTruthy()
+    // But neither is recommended, and nothing was chosen on the operator's behalf.
+    expect(own.textContent).not.toContain('admin:servers.native.release_recommended')
+    expect(onChange).not.toHaveBeenCalled()
+  })
+})

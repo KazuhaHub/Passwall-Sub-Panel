@@ -8,6 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/compatadmission"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/nodecompat"
@@ -218,39 +219,48 @@ func (h *AdminServersHandler) decideAgentOption(c *gin.Context, panelID int64) u
 	// already reads. The agent record carries protocol and capability
 	// observations, not a release version.
 	current := ""
+	kind := domain.PanelKind("")
 	if h.repo != nil {
 		if panel, err := h.repo.GetByID(c.Request.Context(), panelID); err == nil && panel != nil {
 			current = panel.PanelVersion
+			kind = domain.NormalizePanelKind(panel.Kind)
 		}
 	}
 	option := decideAgentUpgrade(current)
-	// THE READ PATH ASKS WHAT THE WRITE PATH ASKS. decideAgentUpgrade above can
-	// only refuse on identity, so a node that reports a version but cannot be
-	// upgraded at all was answered "ready / compatible" here while
-	// nodeagentupgrade.Request refused the very next call. That is the one thing
-	// ADR 0033 and R09 name as the failure to avoid: the list offering an action
-	// the service will not perform.
-	//
-	// The commonest instance is not exotic. A node whose own compiled version is
-	// not a canonical release never constructs an upgrade client
-	// (Passwall-Node cmd/node/upgrade_linux.go remoteUpgradeEnabled requires
-	// releaseid.ValidVersion), so it never registers the handler and never
-	// advertises task.agent.upgrade.v1 — and that capability is not overridable
-	// here. Such a node was shown a full release menu and refused after the
-	// operator chose from it.
-	if option.State == upgradeReady && h.agents != nil {
-		agent, err := h.agents.GetByPanelID(c.Request.Context(), panelID)
-		if err == nil && agent != nil {
-			decision := nodecompat.Decide(agent, compatadmission.OperationUpgradeEligibility,
-				time.Now().UTC(), h.compatPolicy(c.Request.Context()))
-			if !decision.Allowed {
-				option.State = upgradeBlocked
-				option.TargetPinnable = false
-				option.ReasonCodes = []string{string(decision.Reason)}
-				option.Detail = nodecompat.Message(agent, decision)
-				return option
-			}
-		}
+	if option.State != upgradeReady {
+		return option
+	}
+	// THE READ PATH MIRRORS THE WRITE PATH, INCLUDING HOW IT FAILS.
+	// nodeagentupgrade.owner refuses a server that is not PSP-kind and an agent
+	// row that is missing or does not belong to it, and it propagates a repository
+	// error rather than carrying on. Answering "ready" in any of those cases is
+	// the same defect this function exists to fix: a list offering an action the
+	// service will not perform. A transient database error must not turn a refusal
+	// into a green answer, so every branch here fails closed.
+	if kind != domain.PanelKindPSP {
+		return blockedAgentOption(current, "not_a_native_server",
+			"this server is not a native Passwall Node, so there is no agent to upgrade")
+	}
+	if h.agents == nil {
+		return blockedAgentOption(current, "agent_unknown",
+			"the native agent record cannot be read, so this cannot be answered")
+	}
+	agent, err := h.agents.GetByPanelID(c.Request.Context(), panelID)
+	if err != nil || agent == nil || agent.AgentID == "" || agent.PanelID != panelID {
+		return blockedAgentOption(current, "agent_unknown",
+			"no native agent is bound to this server, so there is nothing to upgrade")
+	}
+	// The verdict itself, from the function the write path calls. The commonest
+	// refusal is not exotic: a node whose own compiled version is not a canonical
+	// release never constructs an upgrade client (Passwall-Node's
+	// remoteUpgradeEnabled requires releaseid.ValidVersion), so it never registers
+	// the handler and never advertises task.agent.upgrade.v1 — and that capability
+	// cannot be forced. Such a node used to be shown the whole release menu and
+	// refused only after the operator had chosen from it.
+	decision := nodecompat.Decide(agent, compatadmission.OperationUpgradeEligibility,
+		time.Now().UTC(), h.compatPolicy(c.Request.Context()))
+	if !decision.Allowed {
+		return blockedAgentOption(current, string(decision.Reason), nodecompat.Message(agent, decision))
 	}
 	// The per-target list. It comes from the releases the panel can see are
 	// published, not from a separate record of which paths somebody walked: a node
@@ -266,6 +276,19 @@ func (h *AdminServersHandler) decideAgentOption(c *gin.Context, panelID int64) u
 	}
 	option.Targets = agentTargets(current, releases)
 	return option
+}
+
+// blockedAgentOption is a refusal an operator can read and a caller can branch
+// on. Targets are deliberately absent: a list beside a refusal is an invitation.
+func blockedAgentOption(current, reason, detail string) upgradeOption {
+	return upgradeOption{
+		Component:      "agent",
+		State:          upgradeBlocked,
+		CurrentVersion: current,
+		TargetPinnable: false,
+		ReasonCodes:    []string{reason},
+		Detail:         detail,
+	}
 }
 
 // agentTargets lists the releases a node may be moved to.

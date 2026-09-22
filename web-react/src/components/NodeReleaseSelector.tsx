@@ -158,14 +158,22 @@ export default function NodeReleaseSelector({ enabled, selection, value, onChang
   // `newerThan` when the node's reported version happened to parse, so the nodes
   // with the strangest versions got no guidance at all.
   const isOlder = (version: string) => !!newerThan && compareReleaseVersion(version, newerThan) < 0
-  // Auto-selection still refuses to land on one: offering a downgrade is fine,
-  // pre-selecting it and calling it "Recommended" is not.
+  // STRICTLY AHEAD, NOT MERELY NOT-OLDER. The two differ on the node's OWN
+  // version, which compares equal: the server already omits it from `targets`,
+  // but `targets` is undefined whenever that fetch failed, and then the whole
+  // catalog is listed. Recommending the version the node is already running — and
+  // auto-selecting it — leaves Confirm disabled with no explanation, because the
+  // write path refuses the exact no-op.
   //
-  // THE FIRST NON-OLDER OPTION, WHICH RELIES ON THE CATALOG BEING NEWEST-FIRST —
-  // it reads GitHub's release list, which is ordered by publication. That
-  // dependency predates this: the recommendation used to be options[0] outright.
-  // It is named here because it is now load-bearing in a second place.
-  const recommended = useMemo(() => options.find(release => !isOlder(release.version)), [options, newerThan])
+  // For a version the comparator cannot order, this is false for everything and
+  // nothing is auto-selected. That is the honest outcome: with no ordering there
+  // is no "latest" to recommend, and guessing is what the label would be doing.
+  const isAhead = (version: string) => !newerThan || compareReleaseVersion(version, newerThan) > 0
+  // THE FIRST ONE, WHICH RELIES ON THE CATALOG BEING NEWEST-FIRST — it reads
+  // GitHub's release list, which is ordered by publication. That dependency
+  // predates this: the recommendation used to be options[0] outright. It is named
+  // here because it is now load-bearing in a second place.
+  const recommended = useMemo(() => options.find(release => isAhead(release.version)), [options, newerThan])
   const selected = options.find(release => release.version === value)
   const selectedURL = selected ? officialReleaseURL(selected) : undefined
   const channelTag = channel === 'stable' ? 'latest' : 'beta'
