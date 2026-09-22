@@ -20,10 +20,25 @@ PGID="${PGID:-10001}"
 
 if [ "$(id -u)" = "0" ]; then
     mkdir -p /app/config /app/data
-    # Only chown entries NOT already owned by the target UID, so warm restarts
-    # do ~no work and only genuinely root-owned (fresh/upgrade) files get
-    # touched.
-    find /app/config /app/data \! -uid "$PUID" -exec chown "$PUID:$PGID" {} + 2>/dev/null || true
+    # RECURSIVE AND UNCONDITIONAL, BECAUSE THE CLEVER FORM DID NOTHING.
+    # This used `find … ! -uid … -exec chown … +`, which reads better, skips work
+    # on a warm restart and is what the flag means on GNU find — and on the
+    # IMAGE'S OWN SHELL IT DOES NOT EXIST: the runtime is Alpine, BusyBox's find
+    # has no -uid, and the error went into the stderr this line swallowed. So
+    # every start repaired ownership of nothing, silently, and a fresh volume
+    # stayed root-owned while the panel ran as PUID and could not write its own
+    # data directory — visible only as the panel's own warnings about the files
+    # it could not store.
+    #
+    # chown -R is the same job with no dialect to get wrong, and chowning
+    # something the target already owns is a no-op, which is what the find was
+    # optimizing for.
+    #
+    # A FAILURE IS STILL NOT FATAL — a read-only mount must not stop the panel
+    # from starting — but it is no longer SILENT: an operator cannot tell a
+    # repair that worked from one that never ran.
+    chown -R "$PUID:$PGID" /app/config /app/data || \
+        echo "passwall-sub-panel: could not repair ownership of /app/config or /app/data; the panel may be unable to write them" >&2
     # Replace PID 1 with the panel running unprivileged. exec => the binary is
     # PID 1 and receives SIGTERM directly, preserving graceful drain. su-exec
     # takes a numeric UID:GID, so the target need not exist in /etc/passwd.
