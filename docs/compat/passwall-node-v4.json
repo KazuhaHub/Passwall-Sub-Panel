@@ -1,7 +1,7 @@
 {
   "schema_version": 2,
   "panel_major": 4,
-  "updated_at": "2026-09-21",
+  "updated_at": "2026-09-22",
   "_comment": "THE CI TEST MATRIX, AND THE TWO FACTS THE PANEL CANNOT LEARN FROM A RELEASE. released_nodes is the set the compatibility matrix exercises — the planner slices it by POSITION at min_supported — so a version missing from it is a version nothing tests. wire and features are the protocol generation and the capabilities this panel requires of a node; features.agent_upgrade_v1.required_capabilities is the one gate the upgrade path still has, and TestNodeV4CompatibilityMatrixMatchesSharedProtocolPolicy pins it to the shared protocol package. IT NO LONGER DECIDES WHAT THE PANEL OFFERS. It used to be an allow-list, with per-release display metadata (review notes, install methods, platforms, a published Docker tag) that the panel fetched and the dialog rendered — so adding a release meant editing this file, pinning its commit and publishing a panel. The catalog now lists the releases this project has PUBLISHED and reads what each release says about itself, which is why those fields are gone from the rows: leaving them would be a second, unread copy of what the assets already state. THE TAG STAYS, and it is not display metadata: it is the ADDRESS the release is fetched by, the matrix addresses each case by it, and a version does not determine it — four releases live under `release/` and everything since under `v`. The document also used to name docs/compat/releases-v1.json as the signed admission policy beside it; that policy has been deleted, and what an operator may install is their choice among the published releases.",
   "wire": {
     "endpoint": "/v1/node/sync",
@@ -75,6 +75,17 @@
         "managed-docker"
       ],
       "tag": "v4.0.1.3"
+    },
+    {
+      "version": "4.0.1.4",
+      "protocol_version": 1,
+      "base_sync": "supported",
+      "remote_upgrade": "conditional",
+      "upgrade_methods": [
+        "linux-systemd",
+        "managed-docker"
+      ],
+      "tag": "v4.0.1.4"
     }
   ]
 }
