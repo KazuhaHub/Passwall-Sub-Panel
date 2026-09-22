@@ -393,6 +393,7 @@ func TestNodeInstallScriptCarriesTheRequestedInstallationMode(t *testing.T) {
 		{`{"version":"4.0.0"}`, "mode='install'"},
 		{`{"version":"4.0.0","mode":"install"}`, "mode='install'"},
 		{`{"version":"4.0.0","mode":"upgrade"}`, "mode='upgrade'"},
+		{`{"version":"4.0.0","mode":"replace"}`, "mode='replace'"},
 	} {
 		w := installationRequest(h, http.MethodPost, "node-install-script", tc.body, "", domain.RoleAdmin)
 		if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), tc.want) {
@@ -402,7 +403,7 @@ func TestNodeInstallScriptCarriesTheRequestedInstallationMode(t *testing.T) {
 
 	// AND A MODE THE INSTALLER DOES NOT HAVE IS THE CALLER'S MISTAKE, refused before
 	// anything is fetched.
-	for _, body := range []string{`{"version":"4.0.0","mode":"replace"}`, `{"version":"4.0.0","mode":"force"}`} {
+	for _, body := range []string{`{"version":"4.0.0","mode":"force"}`, `{"version":"4.0.0","mode":"install "}`} {
 		w := installationRequest(h, http.MethodPost, "node-install-script", body, "", domain.RoleAdmin)
 		if w.Code != http.StatusBadRequest {
 			t.Fatalf("request %s answered %d", body, w.Code)

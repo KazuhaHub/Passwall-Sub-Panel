@@ -221,7 +221,7 @@ func prepare(options Options) (string, error) {
 	// passed through, because the alternative is a script that reads it as a plain
 	// install and then fails at the node for a reason that names nothing.
 	switch options.Mode {
-	case "", ports.ModeInstall, ports.ModeUpgrade:
+	case "", ports.ModeInstall, ports.ModeUpgrade, ports.ModeReplace:
 	default:
 		return "", fmt.Errorf("%w: %q is not an installation mode", ErrNotRenderable, options.Mode)
 	}

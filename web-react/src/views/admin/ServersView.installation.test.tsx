@@ -1230,5 +1230,54 @@ describe('Passwall Node in-place upgrade', () => {
       initialProvisioning={{ ...provisioning, server: installed }} onClose={vi.fn()} onRotate={vi.fn()} />)
     await selectVersion('4.1.0')
     expect(screen.queryByText('admin:servers.native.upgrade_in_place_needed')).toBeNull()
+  })})
+
+// TAKING THE HOST OVER IS THE OTHER ANSWER TO THE SAME QUESTION, and it is about the
+// identity rather than the version: it exists for a machine that has a node this panel
+// does not know — one another panel installed, or one left behind. It is never
+// inferred, and what it costs is stated where it is chosen rather than afterwards.
+describe('Passwall Node identity replacement', () => {
+  function mountReplaceable(panelVersion: string) {
+    api.get.mockImplementation((url: string) => Promise.resolve(url.includes('node-installation')
+      ? { data: provisioning }
+      : { data: waiting }))
+    api.post.mockResolvedValue({ data: { server_id: 7, command: 'curl -fsSL https://panel.test/private-once | sudo bash',
+      expires_at: new Date(Date.now() + 15 * 60_000).toISOString() } })
+    const installed = { ...nativeServer, panel_version: panelVersion }
+    mountExpanded(<NativeInstallationDialog server={installed}
+      initialProvisioning={{ ...provisioning, server: installed }} onClose={vi.fn()} onRotate={vi.fn()} />)
+  }
+
+  it('sends the replace mode, with its consequences, and only once asked', async () => {
+    mountReplaceable('4.0.0 (abcdef1)')
+    await selectVersion('4.1.0')
+
+    const toggle = screen.getByRole('checkbox', { name: 'admin:servers.native.replace_identity' }) as HTMLInputElement
+    expect(toggle.checked).toBe(false)
+    expect(screen.queryByText('admin:servers.native.replace_identity_warning')).toBeNull()
+
+    fireEvent.click(toggle)
+    // THE COST IS SAID WHERE THE CHOICE IS, and the warning about the reported version
+    // is gone: this answer covers it, because the identity is not being kept.
+    expect(screen.getByText('admin:servers.native.replace_identity_warning')).toBeTruthy()
+    expect(screen.queryByText('admin:servers.native.upgrade_in_place_needed')).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: 'admin:servers.native.generate_command' }))
+    await waitFor(() => expect(api.post).toHaveBeenCalledWith('/admin/servers/7/node-install-command',
+      { version: '4.1.0', mode: 'replace' }, expect.objectContaining({ signal: expect.any(AbortSignal) })))
+  })
+
+  it('keeps the two answers to one question mutually exclusive', async () => {
+    mountReplaceable('4.1.0 (abcdef1)')
+    await selectVersion('4.1.0')
+    const upgrade = screen.getByRole('checkbox', { name: 'admin:servers.native.upgrade_in_place' }) as HTMLInputElement
+    const replace = screen.getByRole('checkbox', { name: 'admin:servers.native.replace_identity' }) as HTMLInputElement
+
+    fireEvent.click(replace)
+    expect(replace.checked).toBe(true)
+    fireEvent.click(upgrade)
+    expect(upgrade.checked).toBe(true)
+    expect(replace.checked).toBe(false)
+    expect(screen.queryByText('admin:servers.native.replace_identity_warning')).toBeNull()
   })
 })

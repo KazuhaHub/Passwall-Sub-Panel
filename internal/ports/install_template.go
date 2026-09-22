@@ -60,6 +60,19 @@ const (
 	// ModeUpgrade replaces the RELEASE of the installation that is there and keeps
 	// its identity: the credential and the endpoint must still match byte for byte.
 	ModeUpgrade = "upgrade"
+	// ModeReplace puts a DIFFERENT identity on a host that already has one, which is
+	// what a server moving to another installation needs: the credential and the
+	// endpoint in this request are the new ones, and the release is whatever is being
+	// installed. The installer stops the node that is there, moves the whole
+	// installation into its backup area, and installs this identity with EMPTY STATE
+	// — so the counters the old panel was accumulating are not this one's to
+	// continue, and the old panel keeps a row for a node that is no longer reporting
+	// to it until an operator deletes it.
+	//
+	// IT IS NOT A REPAIR FOR A FAILED UPGRADE. An upgrade keeps the identity and the
+	// state and can be undone; this cannot, which is why it is never a default and
+	// why the surface that offers it has to say what it does.
+	ModeReplace = "replace"
 )
 
 // THE FAILURES ARE TWO KINDS, and a caller has to tell them apart: one is the

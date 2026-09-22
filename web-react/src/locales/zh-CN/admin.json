@@ -2405,7 +2405,10 @@
       "release_no_target_for_node": "该渠道下没有适用于此节点的发布版本。",
       "upgrade_in_place": "原地替换版本（升级）",
       "upgrade_in_place_hint": "保留节点身份与状态，只替换已安装的发行版本。节点已在别的版本上时必须启用。",
-      "upgrade_in_place_needed": "该节点上报的版本是 {{version}}。不启用「原地替换版本」的话，安装器会在主机上拒绝。"
+      "upgrade_in_place_needed": "该节点上报的版本是 {{version}}。不启用「原地替换版本」的话，安装器会在主机上拒绝。",
+      "replace_identity": "换身份覆盖安装",
+      "replace_identity_hint": "把不兼容的旧安装 —— 例如另一个面板留下的节点 —— 换成这个面板的身份。旧安装会被停掉并整体移入主机的 backups/。",
+      "replace_identity_warning": "覆盖安装之后：这台节点的流量计数从零开始（旧计数留在主机备份里）；如果它原本属于另一个面板，那个面板里的服务器记录需要人工删除。"
     },
     "table": {
       "name": "服务器名称",

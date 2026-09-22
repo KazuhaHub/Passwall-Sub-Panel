@@ -2407,7 +2407,10 @@
       "release_no_target_for_node": "No release in this channel applies to this node.",
       "upgrade_in_place": "Replace the release in place (upgrade)",
       "upgrade_in_place_hint": "Keeps the node identity and its state; only the installed release changes. Required when the node is already on another release.",
-      "upgrade_in_place_needed": "This node reports version {{version}}. Without replacing the release in place the installer refuses at the host."
+      "upgrade_in_place_needed": "This node reports version {{version}}. Without replacing the release in place the installer refuses at the host.",
+      "replace_identity": "Replace with a different identity",
+      "replace_identity_hint": "Takes over an incompatible installation — a node another panel left behind, for instance — with this panel's identity. The one that is there is stopped and moved into the host's backups/.",
+      "replace_identity_warning": "After this: usage for this node starts from zero (the old counters stay in the host's backup), and if it belonged to another panel, that panel's server record has to be deleted by hand."
     },
     "table": {
       "name": "Server name",
