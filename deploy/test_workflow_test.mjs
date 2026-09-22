@@ -250,6 +250,59 @@ test('the race shards partition the heavy package\'s tests, and cover them all',
   )
 })
 
+// A CACHE A PULL REQUEST WRITES IS A CACHE NOBODY CAN READ.
+//
+// A run restores from its own branch or the default branch and from nothing else,
+// and a PR's caches are scoped to refs/pull/N/merge — read by no run but a re-run
+// of that same PR. So a save made there is write-only: it costs the runner the
+// upload and it takes room from the caches main reads. The combined
+// `actions/cache@v4` saves on every event, which is exactly this mistake; the
+// restore/save pair is the shape that saves where it can be read.
+test('caches are restored on every event and saved only from the default branch', () => {
+  const all = jobs()
+  let restores = 0
+  for (const [name, raw] of all) {
+    assert(
+      !/uses: actions\/cache@/.test(raw),
+      `${name} uses the combined actions/cache, which saves on every event — including a pull request, whose save lands in a scope nothing but that PR's re-runs can read`,
+    )
+    if (!raw.includes('uses: actions/cache/restore@')) continue
+    restores += 1
+    const save = raw.indexOf('uses: actions/cache/save@')
+    assert(save >= 0, `${name} restores a cache and never saves one, so nothing would warm it`)
+    assert(
+      /if: github\.event_name == 'push' && github\.ref == 'refs\/heads\/main'/.test(raw.slice(save)),
+      `${name} saves a cache without gating it on the default branch: that save is readable by nothing, and a key cannot be written twice`,
+    )
+  }
+  assert(
+    restores >= 9,
+    `every job that compiles Go, plus the browser download, restores a cache — found ${restores}`,
+  )
+})
+
+// THE SHARD COUNT LIVES IN THREE PLACES, AND THEY ARE ONE DECISION.
+//
+// The planner partitions the packages into N, the round-robin splits the heavy
+// package's tests into N, and the matrix launches N jobs. Disagreement is silent in
+// the worst direction: a matrix smaller than the partition leaves whole shards
+// unrun while every job that did run is green.
+test('the race shard count is written once and agrees with itself', () => {
+  const race = job('race-shard')
+  const planner = /--shards (\d+) --shard/.exec(race)
+  const roundRobin = /-v m=(\d+) /.exec(race)
+  const matrix = /part: \[([0-9, ]+)\]/.exec(race)
+  assert(planner, 'the race job must name its shard count where it calls the planner')
+  assert(roundRobin, 'the race job must name its shard count in the round-robin')
+  assert(matrix, 'the race job must name its shard count in the matrix')
+  const counts = new Set([Number(planner[1]), Number(roundRobin[1]), matrix[1].split(',').length])
+  assert.equal(
+    counts.size,
+    1,
+    `the shard count is written ${counts.size} different ways (${[...counts].join(', ')}): the packages would be partitioned into one number of shards, the heavy package's tests into another, and the matrix would launch a third`,
+  )
+})
+
 // The pinned Playwright version appears twice — in the install and in the cache key
 // that remembers the browser it downloaded — and a cache key that outlives the
 // version it names serves a browser the pinned CLI did not ask for.

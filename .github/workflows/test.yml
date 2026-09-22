@@ -52,6 +52,13 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
+      # The build cache pair the build job explains: restored on every event, and
+      # saved only from the default branch, where a save can be read.
+      - uses: actions/cache/restore@v4
+        with:
+          path: ~/.cache/go-build
+          key: go-build-node-compat-${{ runner.os }}-${{ hashFiles('go.sum') }}
+          restore-keys: go-build-node-compat-${{ runner.os }}-
       - uses: actions/setup-go@v7
         env:
           GOTOOLCHAIN: auto
@@ -186,6 +193,11 @@ jobs:
           path: evidence/
           if-no-files-found: error
           retention-days: 90
+      - uses: actions/cache/save@v4
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        with:
+          path: ~/.cache/go-build
+          key: go-build-node-compat-${{ runner.os }}-${{ hashFiles('go.sum') }}
 
   node-contract:
     name: node contract (pinned published source)
@@ -195,6 +207,13 @@ jobs:
       GOWORK: "off"
     steps:
       - uses: actions/checkout@v7
+      # The build cache pair the build job explains: restored on every event, and
+      # saved only from the default branch, where a save can be read.
+      - uses: actions/cache/restore@v4
+        with:
+          path: ~/.cache/go-build
+          key: go-build-node-contract-${{ runner.os }}-${{ hashFiles('go.sum') }}
+          restore-keys: go-build-node-contract-${{ runner.os }}-
       - uses: actions/setup-go@v7
         # Allow toolchain selection; setup-go exports local after installation.
         env:
@@ -310,6 +329,11 @@ jobs:
   # case the panel promises to test actually reported. A leg cancelled by a
   # superseded push, or an artifact upload that failed, leaves every case that
   # did report perfectly green and the run looking complete.
+      - uses: actions/cache/save@v4
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        with:
+          path: ~/.cache/go-build
+          key: go-build-node-contract-${{ runner.os }}-${{ hashFiles('go.sum') }}
   compatibility:
     name: compatibility gate
     runs-on: ubuntu-latest
@@ -381,6 +405,13 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v7
+      # The build cache pair the build job explains: restored on every event, and
+      # saved only from the default branch, where a save can be read.
+      - uses: actions/cache/restore@v4
+        with:
+          path: ~/.cache/go-build
+          key: go-build-third-party-${{ runner.os }}-${{ hashFiles('go.sum') }}
+          restore-keys: go-build-third-party-${{ runner.os }}-
       - uses: actions/setup-go@v7
         env:
           GOTOOLCHAIN: auto
@@ -461,6 +492,11 @@ jobs:
       - name: stop the panels
         if: always()
         run: deploy/compat/backends/third-party.sh down
+      - uses: actions/cache/save@v4
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        with:
+          path: ~/.cache/go-build
+          key: go-build-third-party-${{ runner.os }}-${{ hashFiles('go.sum') }}
 
   container:
     name: Docker source and release runtime baselines
@@ -557,7 +593,10 @@ jobs:
       # KEYED ON THE PINNED VERSION, because that is the only thing that can
       # invalidate the browser: a key that outlives the version it names would serve
       # a browser the pinned CLI did not ask for.
-      - uses: actions/cache@v4
+      #
+      # Restored always, saved only from the default branch — the same split the Go
+      # jobs use, for the same reason: a PR's save lands in a scope nothing reads.
+      - uses: actions/cache/restore@v4
         with:
           path: ~/.cache/ms-playwright
           key: playwright-chromium-${{ runner.os }}-1.63.0
@@ -578,6 +617,11 @@ jobs:
       - name: unit tests
         working-directory: web-react
         run: npm run test
+      - uses: actions/cache/save@v4
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-${{ runner.os }}-1.63.0
 
   # ONE JOB, SIX TARGETS, AND THE REQUIRED CHECK NAME UNCHANGED.
   #
@@ -603,7 +647,8 @@ jobs:
       # every run recompiled all six targets from source: 354 seconds of it,
       # measured identically on two consecutive runs — which is what a cache that
       # is never restored looks like. The same target on a warm GOCACHE compiles
-      # in about two seconds, so the whole step is the cache's to win.
+      # in about two seconds, so the whole step is the cache's to win. Every job in
+      # this file that compiles Go restores it, under a key of its own.
       #
       # A KEY PER JOB RATHER THAN PER REPOSITORY. `actions/cache` will not save a
       # key that already exists, so several jobs sharing one key means whichever
@@ -613,7 +658,15 @@ jobs:
       #
       # A PREFIX RESTORE IS SAFE HERE because the cache is content-addressed: an
       # entry keyed on a stale go.sum can only be a miss, never a wrong build.
-      - uses: actions/cache@v4
+      #
+      # RESTORE AND SAVE ARE TWO STEPS, AND THE SPLIT IS THE POINT. A run restores
+      # from its own branch or the default branch and from nothing else, and a pull
+      # request's caches are scoped to `refs/pull/N/merge` — read by nobody but a
+      # re-run of that same PR. A save made on a PR is therefore write-only: it
+      # costs the runner the upload and takes room from the caches main reads. The
+      # combined `actions/cache@v4` saves on every event; the pair below saves where
+      # it can be read.
+      - uses: actions/cache/restore@v4
         with:
           path: ~/.cache/go-build
           key: go-build-targets-${{ runner.os }}-${{ hashFiles('go.sum') }}
@@ -660,6 +713,14 @@ jobs:
             fi
           done
           exit "$failed"
+      # SAVED ONLY FROM THE DEFAULT BRANCH, and only by a run that succeeded: a
+      # key cannot be overwritten once written, so letting a partially populated
+      # cache claim it would freeze the cache below what this job needs — for good.
+      - uses: actions/cache/save@v4
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        with:
+          path: ~/.cache/go-build
+          key: go-build-targets-${{ runner.os }}-${{ hashFiles('go.sum') }}
 
   go_static:
     name: go (static checks)
@@ -667,6 +728,13 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
+      # The build cache pair the build job explains: restored on every event, and
+      # saved only from the default branch, where a save can be read.
+      - uses: actions/cache/restore@v4
+        with:
+          path: ~/.cache/go-build
+          key: go-build-static-${{ runner.os }}-${{ hashFiles('go.sum') }}
+          restore-keys: go-build-static-${{ runner.os }}-
       - uses: actions/setup-go@v7
         # Allow toolchain selection; setup-go exports local after installation.
         env:
@@ -699,17 +767,32 @@ jobs:
   # The race suite is sharded because it is the critical path: at 4m22s it was
   # still running while the other twenty-two checks had finished.
   #
+  # THREE SHARDS, NOT FOUR, AND THAT NUMBER IS ARITHMETIC RATHER THAN TASTE. A
+  # shard is one runner slot, so the right count is the smallest that keeps the
+  # lane off this run's critical path — which is `web`, at 185s. Measured with a
+  # warm build cache: four shards at 80-114s each, so the work is about 220s of
+  # test time plus ~40s of per-shard overhead. Three shards put that at ~115s,
+  # comfortably under the bound, and two would put it at ~150s, which is close
+  # enough to `web`'s worst measured 185s that a slow frontend run would make the
+  # race lane the thing everyone waits for again. The fourth shard was buying
+  # parallelism nobody was waiting for.
+  #
   # THE SHARDS COMPUTE THEIR OWN PACKAGES from a deterministic planner, so the
   # matrix carries only the shard number. Putting the package list in the matrix
   # would put it in the job name as well — GitHub appends every matrix value —
-  # and the check would read "go race full (1/4, <eighty package paths>)".
+  # and the check would read "go race full (1/3, <eighty package paths>)".
   #
   # `sqlite (full suite, race)` keeps its name and becomes a gate over them.
   # Branch protection requires that exact context, and a matrix reports as
   # several checks, so a split that renamed the job would leave the required
   # context unproduced and block every merge on main.
+      - uses: actions/cache/save@v4
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        with:
+          path: ~/.cache/go-build
+          key: go-build-static-${{ runner.os }}-${{ hashFiles('go.sum') }}
   race-shard:
-    name: go race full (${{ matrix.part }}/4)
+    name: go race full (${{ matrix.part }}/3)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     strategy:
@@ -717,14 +800,15 @@ jobs:
       # see every failure in one run, and fail-fast would hide the rest.
       fail-fast: false
       matrix:
-        part: [1, 2, 3, 4]
+        part: [1, 2, 3]
     steps:
       - uses: actions/checkout@v7
-      # The same build cache the build job restores, keyed per shard: each shard
-      # compiles a different set of packages under -race, and `actions/cache` will
-      # not save a key that exists, so one shared key would freeze whichever
-      # shard finished first. See the build job for the measurement.
-      - uses: actions/cache@v4
+      # The same build cache pair the build job uses, keyed per shard: each shard
+      # compiles a different set of packages under -race, and a key cannot be
+      # overwritten, so one shared key would freeze whichever shard finished first.
+      # See the build job for the measurement and for why restore and save are two
+      # steps.
+      - uses: actions/cache/restore@v4
         with:
           path: ~/.cache/go-build
           key: go-build-race-${{ matrix.part }}-${{ runner.os }}-${{ hashFiles('go.sum') }}
@@ -769,7 +853,7 @@ jobs:
           # that name it read one variable, so the two halves cannot overlap.
           heavy=github.com/KazuhaHub/passwall-sub-panel/internal/adapters/sqlstore
           packages=$(.github/scripts/plan-race-shards.sh \
-            --shards 4 --shard "${{ matrix.part }}" --exclude "$heavy" \
+            --shards 3 --shard "${{ matrix.part }}" --exclude "$heavy" \
             --default 1 --weights .github/race-shard-weights.txt)
           test -n "$packages"
           # A `-run` THAT MATCHES NOTHING IS A PASS — that is the failure this
@@ -780,7 +864,7 @@ jobs:
           tests=$(go test -list '^Test' "$heavy" | grep '^Test' | grep -v '^TestMain$')
           test -n "$tests"
           regex=$(printf '%s\n' "$tests" \
-            | awk -v s="${{ matrix.part }}" -v m=4 'NR % m == s % m' \
+            | awk -v s="${{ matrix.part }}" -v m=3 'NR % m == s % m' \
             | paste -sd'|' -)
           test -n "$regex"
           # Still one canonical full-suite race run: the shards partition the same
@@ -805,6 +889,11 @@ jobs:
         with:
           name: race-shard-${{ matrix.part }}-test-output
           path: test-output.txt
+      - uses: actions/cache/save@v4
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        with:
+          path: ~/.cache/go-build
+          key: go-build-race-${{ matrix.part }}-${{ runner.os }}-${{ hashFiles('go.sum') }}
 
   sqlite:
     name: sqlite (full suite, race)
@@ -842,6 +931,13 @@ jobs:
       PSP_TEST_DB_REUSE_SCHEMA: "true"
     steps:
       - uses: actions/checkout@v7
+      # The build cache pair the build job explains: restored on every event, and
+      # saved only from the default branch, where a save can be read.
+      - uses: actions/cache/restore@v4
+        with:
+          path: ~/.cache/go-build
+          key: go-build-postgres-${{ runner.os }}-${{ hashFiles('go.sum') }}
+          restore-keys: go-build-postgres-${{ runner.os }}-
       - uses: actions/setup-go@v7
         # Allow toolchain selection; setup-go exports local after installation.
         env:
@@ -866,6 +962,11 @@ jobs:
         with:
           name: postgres-test-output
           path: test-output.txt
+      - uses: actions/cache/save@v4
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        with:
+          path: ~/.cache/go-build
+          key: go-build-postgres-${{ runner.os }}-${{ hashFiles('go.sum') }}
 
   mysql:
     name: mysql (sqlstore dialect)
@@ -891,6 +992,13 @@ jobs:
       PSP_TEST_DB_REUSE_SCHEMA: "true"
     steps:
       - uses: actions/checkout@v7
+      # The build cache pair the build job explains: restored on every event, and
+      # saved only from the default branch, where a save can be read.
+      - uses: actions/cache/restore@v4
+        with:
+          path: ~/.cache/go-build
+          key: go-build-mysql-${{ runner.os }}-${{ hashFiles('go.sum') }}
+          restore-keys: go-build-mysql-${{ runner.os }}-
       - uses: actions/setup-go@v7
         # Allow toolchain selection; setup-go exports local after installation.
         env:
@@ -915,3 +1023,8 @@ jobs:
         with:
           name: mysql-test-output
           path: test-output.txt
+      - uses: actions/cache/save@v4
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        with:
+          path: ~/.cache/go-build
+          key: go-build-mysql-${{ runner.os }}-${{ hashFiles('go.sum') }}
