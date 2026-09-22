@@ -286,8 +286,18 @@ func (r *nodeAgentRepo) UpdateProtocolObservation(ctx context.Context, agentID s
 	return r.finishNodeAgentUpdate(ctx, agentID, result)
 }
 
+// canonicalProtocolCapabilities refuses a value this panel does not admit before
+// it can reach a row.
+//
+// THE CEILING IS PSP'S DECLARATION, not the shared package's, for the reason
+// given on nodecompat.Policy: reading a dependency's constant here would let a
+// go.mod bump widen what this panel stores without a review in this repository.
+// This guard is why an out-of-range generation is structurally unstorable, and
+// therefore why the persisted observation keeps naming the last generation that
+// was actually accepted.
 func canonicalProtocolCapabilities(protocolVersion int, capabilities []string) ([]string, error) {
-	if protocolVersion < 0 || protocolVersion > nodeprotocol.MaxSupportedProtocolVersion {
+	generations := domain.SupportedNodeProtocolGenerations()
+	if protocolVersion < 0 || protocolVersion > generations.Max {
 		return nil, errors.New("protocol version is unsupported")
 	}
 	if len(capabilities) > nodeprotocol.MaxCapabilitiesPerReport {
