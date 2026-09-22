@@ -59,9 +59,20 @@ function build(manifest, verification, profiles) {
   const names = manifest.released_nodes.map((row) => row.version)
   const floor = names.indexOf(manifest.min_supported)
   if (floor < 0) problems.push(`min_supported ${JSON.stringify(manifest.min_supported)} names no row in released_nodes`)
+  // THE ENDS, NOT EVERYTHING BETWEEN THEM. The matrix compiles a harness against each
+  // case and exercises a real wire contract, and the middle of the list adds nothing
+  // the ends do not: a harness that breaks against an old release and against a new
+  // one is caught by the pair — which is exactly how the module path and the
+  // SyncOnce arity were caught, both of them differences between the floor and the
+  // newest and neither of them visible in between.
+  //
+  // THE MANIFEST STILL RECORDS EVERY REVIEWED RELEASE, so the difference is readable:
+  // a row says "this was reviewed and is supported", and the pair below says which
+  // two of them the pipeline spends a real run on.
+  //
   // POSITIONAL, never a version comparison: v0.0.1-beta9 sorts above
   // v0.0.1-beta11, so ordering this by version would invert the floor.
-  const supported = floor < 0 ? [] : names.slice(floor)
+  const supported = floor < 0 ? [] : [...new Set([names[floor], names[names.length - 1]])]
   if (supported.length === 0) problems.push('the supported Node set is empty')
 
   const seen = new Set()

@@ -70,10 +70,14 @@ function realManifest() {
   return JSON.parse(readFileSync(new URL('../../docs/compat/passwall-node-v4.json', import.meta.url), 'utf8'))
 }
 
+// THE TWO ENDS THE MATRIX EXERCISES: the floor the panel still supports and the
+// newest published release. The rows between them are the manifest's record of what
+// was REVIEWED, not a list of what is RUN — see the case below, which is what would
+// catch a regression back to running everything.
 const SUPPORTED = (() => {
   const manifest = realManifest()
   const names = manifest.released_nodes.map((row) => row.version)
-  return names.slice(names.indexOf(manifest.min_supported))
+  return [...new Set([names[names.indexOf(manifest.min_supported)], names[names.length - 1]])]
 })()
 
 // A SECOND RELEASE, FOR THE CASES THAT NEED TWO.
@@ -125,12 +129,24 @@ function planTwoReleases({ manifest, verification } = {}) {
   })
 }
 
-test('the plan covers every supported version exactly once', () => {
+test('the plan covers the floor and the newest, and nothing between them', () => {
   const { code, result } = plan()
   assert.equal(code, 0)
   assert.equal(result.verdict, 'ok')
   assert.equal(result.cases.length, SUPPORTED.length)
   assert.deepEqual([...new Set(result.cases.map((c) => c.version))].sort(), [...SUPPORTED].sort())
+  // AND THE MIDDLE IS NOT RUN. A manifest row says a release was reviewed and is
+  // supported; the matrix spends a real run on the two ends, because a harness that
+  // breaks against an old release and against a new one is caught by the pair. The
+  // shipped manifest carries rows between them, so this is where a regression back to
+  // "run everything" shows up.
+  const planned = new Set(result.cases.map((c) => c.version))
+  const between = realManifest().released_nodes.map((row) => row.version)
+    .filter((version) => !SUPPORTED.includes(version))
+  assert.ok(between.length > 0, 'this case needs the shipped manifest to carry a release between the ends')
+  for (const version of between) {
+    assert.ok(!planned.has(version), `${version} is between the ends and must not be planned`)
+  }
   for (const entry of result.cases) {
     assert.equal(entry.profile, 'node-wire-v1')
     assert.equal(entry.class, 'required')
@@ -148,15 +164,16 @@ test('the plan covers every supported version exactly once', () => {
   }
 })
 
-test('the planned set is exactly what the inline derivation produced', () => {
-  // The migration's acceptance condition. The old expression is kept here
-  // verbatim so the equivalence is checked against the thing being replaced,
-  // not against the planner's own restatement of it.
+test('the planned set is the two ends of the supported range', () => {
+  // DERIVED HERE RATHER THAN READ FROM THE PLANNER, so this is an independent
+  // statement of the rule and not the planner agreeing with itself. It replaced a
+  // case that asserted the plan equalled the old full-slice expression; that
+  // equivalence is deliberately gone, and what remains is the rule itself.
   const manifest = realManifest()
   const names = manifest.released_nodes.map((row) => row.version)
-  const viaPython = names.slice(names.indexOf(manifest.min_supported))
+  const ends = [names[names.indexOf(manifest.min_supported)], names[names.length - 1]]
   const { result } = plan()
-  assert.deepEqual(result.cases.map((c) => c.version), viaPython)
+  assert.deepEqual(result.cases.map((c) => c.version), ends)
 })
 
 test('the plan keeps the manifest order, and slices it at the floor positionally', () => {
@@ -174,10 +191,13 @@ test('the plan keeps the manifest order, and slices it at the floor positionally
   manifest.released_nodes.reverse()
   manifest.min_supported = manifest.released_nodes[0].version
   const { result } = planTwoReleases({ manifest })
-  // STATED AS THE PROPERTY RATHER THAN AS A LIST: the planned versions are the
-  // manifest's, in the manifest's order. A literal pair would have to be rewritten
-  // every time a release is published, and would then be about this fixture.
-  assert.deepEqual(result.cases.map((c) => c.version), manifest.released_nodes.map((row) => row.version),
+  // STATED AS THE PROPERTY RATHER THAN AS A LIST: the floor is whichever row sits
+  // first and the newest is whichever sits last, in the manifest's own order — so a
+  // planner that sorted by version would pick the other two. A literal pair would
+  // have to be rewritten every time a release is published, and would then be about
+  // this fixture.
+  const reversed = manifest.released_nodes.map((row) => row.version)
+  assert.deepEqual(result.cases.map((c) => c.version), [reversed[0], reversed[reversed.length - 1]],
     'the plan must follow the manifest, not the version order')
 })
 

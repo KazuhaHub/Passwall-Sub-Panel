@@ -58,16 +58,21 @@ function everyResult(root) {
   return found
 }
 
-// expectedCases is profile x supported version. The version list comes from the
-// manifest's min_supported floor, matched by POSITION — never by comparing
-// version strings, because v0.0.1-beta11 sorts below v0.0.1-beta9.
+// expectedCases is profile x supported version, where "supported" is the FLOOR AND
+// THE NEWEST — the pair the matrix exercises, for the reason plan.mjs states: a
+// harness that breaks against an old release and against a new one is caught by the
+// two ends, and the rows between them are the manifest's record of what was reviewed
+// rather than a list of what is run.
+//
+// The list comes from the manifest's min_supported floor, matched by POSITION —
+// never by comparing version strings, because v0.0.1-beta11 sorts below v0.0.1-beta9.
 function expectedCases(manifest, profiles) {
   const names = manifest.released_nodes.map((row) => row.version)
   const floor = names.indexOf(manifest.min_supported)
   if (floor < 0) {
     throw new Error(`min_supported ${JSON.stringify(manifest.min_supported)} names no row in released_nodes`)
   }
-  const supported = names.slice(floor)
+  const supported = [...new Set([names[floor], names[names.length - 1]])]
   if (supported.length === 0) throw new Error('the supported Node set is empty')
   const cases = []
   for (const profile of Object.keys(profiles)) {

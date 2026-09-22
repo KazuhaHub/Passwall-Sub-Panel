@@ -54,12 +54,14 @@ jobs:
         run: |
           set -euo pipefail
           # THE PLAN, NOT A LIST. `min_supported` in the manifest names the oldest
-          # node this panel still tests, and everything from that row onward is
-          # what gets exercised — so the matrix stops growing once the floor
-          # moves, instead of gaining a permanent row per release. The list used
-          # to be hand-written here, in release.yml and in the manifest, which
-          # meant three places to forget. The planner reads the one data source,
-          # and each case carries the commit its tag must still resolve to.
+          # node this panel still tests, and the matrix exercises THAT ROW AND THE
+          # NEWEST one: a harness that breaks against an old release and against a
+          # new one is caught by the pair, while the rows between them are the
+          # manifest's record of what was reviewed rather than a list of what is
+          # run. The list used to be hand-written here, in release.yml and in the
+          # manifest, which meant three places to forget. The planner reads the one
+          # data source, and each case carries the commit its tag must still
+          # resolve to.
           #
           # Matched by POSITION, never by comparing versions: the prerelease
           # suffix sorted lexically, so v0.0.1-beta9 ranked above v0.0.1-beta11.

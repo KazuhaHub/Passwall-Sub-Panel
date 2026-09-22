@@ -399,11 +399,11 @@ jobs:
           RELEASE_VERSION: ${{ steps.identity.outputs.version }}
         run: node deploy/check-image.mjs "${IMAGE_OWNER}/passwall-sub-panel" "$RELEASE_VERSION"
 
-      # THE PLAN, NOT A LIST. The supported versions come from the manifest by
-      # position at min_supported, and each one carries the commit its tag
-      # resolved to when it was first pinned. The release gate used to carry its
-      # own copy of every released version, so a release had to be added here as
-      # well as in test.yml and the manifest.
+      # THE PLAN, NOT A LIST. The versions exercised come from the manifest — the
+      # row at min_supported and the newest one — and each carries the commit its
+      # tag resolved to when it was first pinned. The release gate used to carry
+      # its own copy of every released version, so a release had to be added here
+      # as well as in test.yml and the manifest.
       - name: Resolve the compatible Node cases
         id: node_support
         shell: bash
