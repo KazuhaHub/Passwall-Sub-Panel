@@ -3,10 +3,14 @@ package handler
 import (
 	"net/http"
 	"strconv"
+	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/compatadmission"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/nodecompat"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/version"
 )
 
@@ -60,9 +64,17 @@ type upgradeOption struct {
 	// and "this will reach a known version" are different promises.
 	TargetPinnable bool     `json:"target_pinnable"`
 	ReasonCodes    []string `json:"reason_codes"`
-	// Targets is populated for the agent component: every release a verified
-	// edge leaves this node's version along, so a caller can offer exactly those
-	// rather than everything that happens to be newer.
+	// Detail is the operator-facing sentence behind a refusal, in the words this
+	// layer's operators already read. It is present only when a decision produced
+	// one; the machine-readable answer stays in ReasonCodes.
+	Detail string `json:"detail,omitempty"`
+	// Targets is populated for the agent component: every published release other
+	// than the one this node is on. It is a LIST, NOT AN ORDERING — the panel has
+	// no ordering rule (see nodeagentupgrade.validateRequest) and deliberately
+	// permits an operator to choose an older release.
+	//
+	// The previous comment here described verified from→to edges. That model was
+	// deleted; the wording outlived it.
 	Targets []agentUpgradeTarget `json:"targets,omitempty"`
 }
 
@@ -212,6 +224,34 @@ func (h *AdminServersHandler) decideAgentOption(c *gin.Context, panelID int64) u
 		}
 	}
 	option := decideAgentUpgrade(current)
+	// THE READ PATH ASKS WHAT THE WRITE PATH ASKS. decideAgentUpgrade above can
+	// only refuse on identity, so a node that reports a version but cannot be
+	// upgraded at all was answered "ready / compatible" here while
+	// nodeagentupgrade.Request refused the very next call. That is the one thing
+	// ADR 0033 and R09 name as the failure to avoid: the list offering an action
+	// the service will not perform.
+	//
+	// The commonest instance is not exotic. A node whose own compiled version is
+	// not a canonical release never constructs an upgrade client
+	// (Passwall-Node cmd/node/upgrade_linux.go remoteUpgradeEnabled requires
+	// releaseid.ValidVersion), so it never registers the handler and never
+	// advertises task.agent.upgrade.v1 — and that capability is not overridable
+	// here. Such a node was shown a full release menu and refused after the
+	// operator chose from it.
+	if option.State == upgradeReady && h.agents != nil {
+		agent, err := h.agents.GetByPanelID(c.Request.Context(), panelID)
+		if err == nil && agent != nil {
+			decision := nodecompat.Decide(agent, compatadmission.OperationUpgradeEligibility,
+				time.Now().UTC(), h.compatPolicy(c.Request.Context()))
+			if !decision.Allowed {
+				option.State = upgradeBlocked
+				option.TargetPinnable = false
+				option.ReasonCodes = []string{string(decision.Reason)}
+				option.Detail = nodecompat.Message(agent, decision)
+				return option
+			}
+		}
+	}
 	// The per-target list. It comes from the releases the panel can see are
 	// published, not from a separate record of which paths somebody walked: a node
 	// whose version no edge started from used to get an empty list, and the remedy
@@ -246,6 +286,14 @@ func (h *AdminServersHandler) decideAgentOption(c *gin.Context, panelID int64) u
 func agentTargets(current string, releases []string) []agentUpgradeTarget {
 	if current == "" {
 		return nil
+	}
+	// THE REPORTED IDENTITY IS NOT ALWAYS A BARE VERSION. A node reports
+	// "4.0.0 (abc1234)" when its build carries a commit, so comparing the whole
+	// string let the catalog offer a node the exact release it is already running
+	// — which the write path then refuses as a no-op, after the operator picked
+	// it. Compare the version part only.
+	if version, _, found := strings.Cut(current, " "); found {
+		current = version
 	}
 	targets := make([]agentUpgradeTarget, 0, len(releases))
 	seen := make(map[string]struct{}, len(releases))

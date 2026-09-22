@@ -36,17 +36,24 @@ export interface NodeReleaseSelectorProps {
    *
    * The comparison is the project's release order, NOT SemVer's: these are the
    * dotless prerelease tags this project publishes, where SemVer ranks beta11
-   * below beta9. It is the same rule the panel's admission check applies, so the
-   * list cannot offer something the service would reject for being older.
+   * below beta9.
+   *
+   * IT ANNOTATES; IT DOES NOT FILTER. The claim that this is "the same rule the
+   * panel's admission check applies" was false: the panel has no ordering rule at
+   * all, and deliberately so — nodeagentupgrade.validateRequest records that an
+   * operator choosing an older release is making an explicit choice, guarded by
+   * the signed manifest, the checksum, the state-schema equality check and the
+   * binary's own version self-report. Hiding those releases made the browser the
+   * only place a rule existed, and a rule that exists in one place is a rule two
+   * answers can disagree about.
    */
   newerThan?: string
   /**
    * When set, only these versions are offered.
    *
-   * The upgrade dialog passes the releases a verified edge actually reaches.
-   * `newerThan` narrows by version, which is a weaker claim: a release can be
-   * ahead of the node and still be a path nobody has walked, and offering it
-   * invites a request the edge check refuses.
+   * The upgrade dialog passes the releases the panel says are installable. It no
+   * longer means "a verified edge reaches this": that model was deleted, and the
+   * server now answers with every published release other than the node's own.
    */
   targets?: readonly string[]
 }
@@ -143,9 +150,22 @@ export default function NodeReleaseSelector({ enabled, selection, value, onChang
 
   const options = useMemo(() => (releases ?? []).filter(release =>
     release.channel === channel && officialReleaseURL(release) && supportsSelection(release, selection) &&
-    (!newerThan || compareReleaseVersion(release.version, newerThan) > 0) &&
     (!targets || targets.includes(release.version)),
-  ), [releases, channel, selection, newerThan, targets])
+  ), [releases, channel, selection, targets])
+  // OLDER RELEASES ARE SHOWN AND MARKED, NOT HIDDEN. The server permits them; a
+  // list that silently omits what the service would accept is a second opinion,
+  // and it was an opinion that switched itself off — the dialog only supplied
+  // `newerThan` when the node's reported version happened to parse, so the nodes
+  // with the strangest versions got no guidance at all.
+  const isOlder = (version: string) => !!newerThan && compareReleaseVersion(version, newerThan) < 0
+  // Auto-selection still refuses to land on one: offering a downgrade is fine,
+  // pre-selecting it and calling it "Recommended" is not.
+  //
+  // THE FIRST NON-OLDER OPTION, WHICH RELIES ON THE CATALOG BEING NEWEST-FIRST —
+  // it reads GitHub's release list, which is ordered by publication. That
+  // dependency predates this: the recommendation used to be options[0] outright.
+  // It is named here because it is now load-bearing in a second place.
+  const recommended = useMemo(() => options.find(release => !isOlder(release.version)), [options, newerThan])
   const selected = options.find(release => release.version === value)
   const selectedURL = selected ? officialReleaseURL(selected) : undefined
   const channelTag = channel === 'stable' ? 'latest' : 'beta'
@@ -159,8 +179,8 @@ export default function NodeReleaseSelector({ enabled, selection, value, onChang
       return
     }
     if (value && !acceptedValue) onChangeRef.current('')
-    if (autoSelectLatest && !disabled && !value && options.length > 0) onChangeRef.current(options[0].version)
-  }, [acceptedValue, autoSelectLatest, channelTag, disabled, enabled, failed, loading, options, releases, selection.method, value])
+    if (autoSelectLatest && !disabled && !value && recommended) onChangeRef.current(recommended.version)
+  }, [acceptedValue, autoSelectLatest, channelTag, disabled, enabled, failed, loading, options, recommended, releases, selection.method, value])
 
   if (!enabled) return null
   const published = selected && new Date(selected.published_at)
@@ -205,8 +225,10 @@ export default function NodeReleaseSelector({ enabled, selection, value, onChang
         {t(channel === 'stable' ? 'admin:servers.native.release_follow_stable' : 'admin:servers.native.release_follow_testing')}
         {` (${t('admin:servers.native.release_recommended')})`}
       </MenuItem>}
-      {options.map((release, index) => <MenuItem key={release.version} value={release.version} aria-label={release.version}>
-        {release.version}{index === 0 ? ` (${t('admin:servers.native.release_recommended')})` : ''}
+      {options.map(release => <MenuItem key={release.version} value={release.version} aria-label={release.version}>
+        {release.version}
+        {isOlder(release.version) ? ` (${t('admin:servers.native.release_older_than_current')})` : ''}
+        {release.version === recommended?.version ? ` (${t('admin:servers.native.release_recommended')})` : ''}
       </MenuItem>)}
     </TextField>
     </Stack>

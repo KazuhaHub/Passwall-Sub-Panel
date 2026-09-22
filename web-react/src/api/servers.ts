@@ -533,6 +533,8 @@ export interface UpgradeOption {
   target_version?: string
   target_pinnable: boolean
   reason_codes: string[]
+  /** The operator-facing sentence behind a refusal, when the decision produced one. */
+  detail?: string
   targets?: AgentUpgradeTarget[]
 }
 

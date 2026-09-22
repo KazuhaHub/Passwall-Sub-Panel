@@ -2143,7 +2143,7 @@
       "warning": "Upgrading briefly interrupts proxy connections on this server. Confirm the release and maintenance window. Server, node and user identities remain unchanged.",
       "requirements": "Requires an enabled upgrade helper: Linux/systemd, or Docker generated with the Advanced remote-upgrade option enabled. Older agents need one manual maintenance update. Success requires the new process to synchronize and converge configuration; Docker automatically restores the retained previous container on failure. State-schema changes require manual migration.",
       "current": "Current Passwall Node release (last reported)",
-      "version_hint": "Choose an exact reviewed, published release from the selected channel. Floating latest or beta tags and downgrades are refused. Channel changes here are temporary; save the server's update channel in Edit.",
+      "version_hint": "Choose an exact reviewed, published release from the selected channel. Floating latest or beta tags are refused. Releases older than the one this node runs are marked but remain selectable — the panel does not block a downgrade; the release signature, its checksum and the node’s own state-schema check are what guard it. Channel changes here are temporary; save the server’s update channel in Edit.",
       "confirm": "Confirm and request upgrade",
       "retry": "Retry the same upgrade request",
       "refresh": "Check the original task again",
@@ -2412,7 +2412,8 @@
       "upgrade_in_place_needed": "This node reports version {{version}}. Without replacing the release in place the installer refuses at the host.",
       "replace_identity": "Replace with a different identity",
       "replace_identity_hint": "Takes over an incompatible installation — a node another panel left behind, for instance — with this panel's identity. The one that is there is stopped and moved into the host's backups/.",
-      "replace_identity_warning": "After this: usage for this node starts from zero (the old counters stay in the host's backup), and if it belonged to another panel, that panel's server record has to be deleted by hand."
+      "replace_identity_warning": "After this: usage for this node starts from zero (the old counters stay in the host's backup), and if it belonged to another panel, that panel's server record has to be deleted by hand.",
+      "release_older_than_current": "older than current"
     },
     "table": {
       "name": "Server name",

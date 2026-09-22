@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { useState } from 'react'
 import { act, fireEvent, screen, waitFor } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { api, installReads, mount } from '@/test/adminSaveHarness'
 import type { NodeRelease, NodeReleaseCatalog, NodeReleaseChannel } from '@/api/nodeReleases'
 import type { NativeInstallationSelection } from '@/api/servers'
@@ -280,13 +280,24 @@ describe('the empty state answers the question that was asked', () => {
 // a request the service refuses — and offering a downgrade as though it were a
 // target is how an operator learns to distrust the list rather than the request.
 describe('the upgrade list offers only targets that are actually ahead', () => {
+  // release_tag HAS TO MOVE WITH THE VERSION. It did not: every beta inherited
+  // `testing`'s v4.1.1, so officialReleaseURL — which builds the expected address
+  // from the panel-stated tag and compares it to release_url — rejected every
+  // release except 4.1.1. The ordering assertions below then passed because the
+  // OTHER filter had already removed their subjects, which is the failure mode
+  // this whole file exists to catch in the product.
   const beta = (version: string): NodeRelease => ({
     ...testing, version,
+    release_tag: releaseTag(version),
     release_url: `https://github.com/KazuhaHub/Passwall-Node/releases/tag/${releaseTag(version)}`,
   })
 
-  it('excludes the node’s own version and everything older', async () => {
-    reads([beta('4.0.6'), beta('4.1.0'), beta('4.1.1')])
+  it('lists an older release and marks it rather than hiding it', async () => {
+    // NEWEST FIRST, because that is what the catalog returns — it reads GitHub's
+    // release list, which is ordered by publication. "Recommended" is the first
+    // option that is not older, so this order is load-bearing rather than
+    // decorative, and a fixture in the other order would assert the wrong thing.
+    reads([beta('4.1.1'), beta('4.1.0'), beta('4.0.6')])
     mount(<NodeReleaseSelector enabled selection={linux} value="" onChange={() => {}}
       initialChannel="testing" newerThan="4.1.0" />)
     const field = screen.getByRole('combobox', { name: 'admin:servers.native.agent_version' })
@@ -294,9 +305,40 @@ describe('the upgrade list offers only targets that are actually ahead', () => {
     // then opens nothing — wait for it to become usable first.
     await waitFor(() => expect(field.getAttribute('aria-disabled')).not.toBe('true'))
     fireEvent.mouseDown(field)
-    await screen.findByRole('option', { name: '4.1.1' })
-    expect(screen.queryByRole('option', { name: '4.1.0' })).toBeNull()
-    expect(screen.queryByRole('option', { name: '4.0.6' })).toBeNull()
+
+    // THE PANEL PERMITS A DOWNGRADE, so the list may not pretend otherwise. The
+    // write path has no ordering rule at all and records why: the signature, the
+    // checksum and the node's own state-schema check are what guard the choice.
+    // Hiding these made the browser the only place a rule lived.
+    const older = await screen.findByRole('option', { name: '4.0.6' })
+    expect(older.textContent).toContain('admin:servers.native.release_older_than_current')
+
+    // The newest is still the one marked recommended.
+    const newest = screen.getByRole('option', { name: '4.1.1' })
+    expect(newest.textContent).toContain('admin:servers.native.release_recommended')
+    expect(newest.textContent).not.toContain('admin:servers.native.release_older_than_current')
+
+    // The node's own version is neither older nor recommended: it is simply not
+    // ahead. Excluding it is the SERVER's job — agentTargets omits it — so the
+    // selector does not duplicate that rule.
+    expect(screen.getByRole('option', { name: '4.1.0' }).textContent)
+      .not.toContain('admin:servers.native.release_older_than_current')
+  })
+
+  it('never auto-selects a release older than the node', async () => {
+    // Offering a downgrade is fine. Pre-selecting one, and labelling it
+    // "recommended", is how an operator ends up installing it by pressing return.
+    const onChange = vi.fn()
+    reads([beta('4.0.6')])
+    mount(<NodeReleaseSelector enabled autoSelectLatest selection={linux} value="" onChange={onChange}
+      initialChannel="testing" newerThan="4.1.0" />)
+    const field = screen.getByRole('combobox', { name: 'admin:servers.native.agent_version' })
+    await waitFor(() => expect(field.getAttribute('aria-disabled')).not.toBe('true'))
+    fireEvent.mouseDown(field)
+    const only = await screen.findByRole('option', { name: '4.0.6' })
+    expect(only.textContent).toContain('admin:servers.native.release_older_than_current')
+    expect(only.textContent).not.toContain('admin:servers.native.release_recommended')
+    expect(onChange).not.toHaveBeenCalled()
   })
 
   it('ranks a release above the node it is ahead of', async () => {
@@ -309,14 +351,8 @@ describe('the upgrade list offers only targets that are actually ahead', () => {
     const field = screen.getByRole('combobox', { name: 'admin:servers.native.agent_version' })
     await waitFor(() => expect(field.getAttribute('aria-disabled')).not.toBe('true'))
     fireEvent.mouseDown(field)
-    expect(await screen.findByRole('option', { name: '4.1.1' })).toBeTruthy()
-  })
-
-  it('offers nothing when the list has nothing ahead of the node', async () => {
-    reads([beta('4.0.6')])
-    mount(<NodeReleaseSelector enabled selection={linux} value="" onChange={() => {}}
-      initialChannel="testing" newerThan="4.0.6" />)
-    await waitFor(() => expect(screen.queryByRole('option', { name: '4.0.6' })).toBeNull())
+    const ahead = await screen.findByRole('option', { name: '4.1.1' })
+    expect(ahead.textContent).not.toContain('admin:servers.native.release_older_than_current')
   })
 })
 
