@@ -337,6 +337,32 @@ PSP 入口：`internal/service/render/`、用户／流量服务；PN 可复用 `
 
 现有入口：`internal/version/compat*.go`、`internal/ports/xui.go`、`internal/service/nodeagentupgrade/upgrade.go`、`internal/transport/http/handler/admin_servers.go`、`node_agent_upgrade.go`，以及前端服务器 API／能力展示。
 
+**现状缺陷（2026-09-22 核对，未修复）：纯函数决策模型已经存在，但基础同步和配置写入没有接上它。**
+
+第 1 步已经完成——`internal/pkg/compatadmission` 是纯函数决策模型，`internal/service/nodecompat`
+是唯一的转换点，第 2、4 步要求的状态区分（`unverified` / `observation-stale` /
+`protocol-incompatible` / `capability-missing` / `known-bad`，以及读取／基础同步／配置写入／远程升级
+四种资格分开）都已实现并有测试。缺的是调用点：`compatadmission.OperationBaseSync` 与
+`OperationConfigWrite` 在 `nodecompat.Policy()` 里声明了所需能力（都是空集），**生产代码零调用**，
+只有 `nodecompat_test.go` 用到。真正跑在生产路径上的只有 `OperationUpgradeEligibility`
+（`internal/transport/http/handler/admin_servers.go:1867`，服务器列表渲染）与 `OperationRemoteUpgrade`
+（`internal/service/nodeagentupgrade/upgrade.go:171`，创建升级任务）。
+
+同一道缺口的另一半在代际判定上。`domain.SupportedNodeProtocolGenerations()` 是 PSP 对「自己说哪些
+wire 代际」的声明，共享模块特意把这个范围交还给调用方（`passwall-protocol` 的
+`protocol/compatibility.go` `GenerationRange`，理由写在那里：共享依赖升级不得替产品扩大支持范围）。
+但 `/v1/node/sync` 的实际代际门是 `passwall-protocol/protocol/validate.go:25` 的
+`report.ProtocolVersion > ProtocolVersion1`——**共享库常量，不是 PSP 声明的范围**。
+`SupportedNodeProtocolGenerations()` 今天只有两个调用点，`admin_servers.go:1855` 与
+`internal/service/nodecompat/nodecompat.go:117`／`:123`，都只用于渲染给管理员看的状态和文案。
+
+**这意味着什么，不意味着什么。** 今天两个值都是 `1..1`，没有可观察的行为差异，所以这不是一个现存
+故障，也不能据此声称基础同步会错误接受不兼容节点。它是一道建好但没有接上的闸：共享模块将来增加
+代际 2 时，PSP 只要升级依赖，`/v1/node/sync` 就会开始接受 protocol 2 的上报，而 PSP 自己没有审过
+这个决定——正是引入 `GenerationRange` 时要挡住的那件事。修复方向是让代际判定发生在 PSP 仓库内
+（handler 层先按 `SupportedNodeProtocolGenerations()` 判一次，再进 `ValidateNodeReportBase`），
+而不是去改共享库的常量；把范围写回共享库等于重新交出决定权。
+
 实施顺序：
 
 1. 先建立纯函数决策模型，输入本地实现约束、经过认证的远端观察、观察时间、适用政策与请求操作；输出运行结论、操作是否允许、稳定 reason code、证据修订。
