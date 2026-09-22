@@ -2226,8 +2226,10 @@
         "unknown": "兼容状态未知",
         "compatible_detail": "兼容 · 可远程升级",
         "limited_detail": "节点同步兼容，但当前不能远程升级。请手动更新一次节点，或启用其升级助手。",
-        "incompatible_detail": "当前 Passwall Sub Panel 版本尚未验证此节点协议，已阻止远程升级。",
-        "unknown_detail": "尚未保存通过身份验证的协议上报，请等待节点成功连接一次。"
+        "incompatible_detail": "节点报告协议代际 {{reported}}，本面板已审核的范围是 {{min}}..{{max}}，因此已拒绝其上报（自 {{since}}）。最后一次通过验证的代际为 {{accepted}}。节点仍在按最后一次生效的配置转发流量；远程升级已阻止，需人工处理。",
+        "report_refused_detail": "本面板无法读取该节点的上报，已拒绝（自 {{since}}）。节点仍在按最后一次生效的配置转发流量；需人工检查后才能继续下发。",
+        "unknown_never_observed": "尚未保存通过身份验证的协议上报，请等待节点成功连接一次。",
+        "unknown_observation_stale": "最近一次通过验证的协议上报是 {{observed}}，已超出可据以操作的时限。高风险操作需要一次新的成功连接。"
       },
       "outbound_hint": "Passwall Node 主动连接 Passwall Sub Panel，不需要入站管理 URL 或上游面板凭据。先填写服务器信息并选择安装方式，再生成该服务器的专属安装文件；inbound 在节点页面单独配置。",
       "create_record_hint": "先创建服务器记录，下一页生成安装命令；inbound 在节点页面单独配置。",

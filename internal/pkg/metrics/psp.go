@@ -413,6 +413,16 @@ var (
 		"Node host telemetry rows removed by retention, by table.",
 		"table",
 	)
+	// The FIRST result counter on /v1/node/sync, and it counts the half that was
+	// invisible. A refused report produced no row, no audit entry and no log line
+	// carrying an agent id, so a node reporting a generation this panel does not
+	// admit was indistinguishable from one that was switched off. The log line is
+	// throttled per agent; this is not, because it is the durable record.
+	NodeSyncRefusedTotal = NewCounterVec(
+		"psp_node_sync_refused_total",
+		"Authenticated node reports refused at the wire boundary, by reason.",
+		"reason",
+	)
 )
 
 // ---------------------------------------------------------------------

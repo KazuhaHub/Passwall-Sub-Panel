@@ -48,8 +48,58 @@ type NodeAgent struct {
 	AllowRestrictedReality  bool
 	ObservedCoreEngine      NodeCoreEngine
 	LastSeen                *time.Time
-	CreatedAt               time.Time
-	UpdatedAt               time.Time
+	// Refused* record the most recent authenticated report this panel REFUSED at
+	// the wire boundary, which is a different fact from an observation and is
+	// stored in different columns for that reason.
+	//
+	// WHY IT CANNOT SHARE THE OBSERVATION COLUMNS. An observation is what the
+	// panel accepted and still acts on; a refusal is what it would not accept.
+	// Writing a refused generation into ObservedProtocolVersion would destroy the
+	// last thing the panel actually knows about the node — and that record is
+	// what compat-policy 3.2 means by keeping the last valid observation when
+	// contact is lost. canonicalProtocolCapabilities refuses the value anyway, so
+	// the attempt would fail rather than corrupt; these columns exist so the fact
+	// has somewhere true to go.
+	//
+	// RefusedFirstAt is the first refusal of the current run and does not move
+	// while refusals continue, so "since when" survives a node that retries every
+	// thirty seconds. Both are cleared the moment a report is accepted again: a
+	// refusal is a current fact, never a sticky mark, for the same reason
+	// capabilities are (ADR 0033 section 2).
+	RefusedProtocolVersion *int
+	RefusedReason          string
+	RefusedFirstAt         *time.Time
+	RefusedAt              *time.Time
+	CreatedAt              time.Time
+	UpdatedAt              time.Time
+}
+
+// Refusal reasons. They are stable strings: an operator-facing message and a
+// metric label are both derived from them.
+const (
+	// NodeRefusalProtocolGeneration is a report whose wire generation is outside
+	// the range this panel declares.
+	NodeRefusalProtocolGeneration = "protocol_generation"
+	// NodeRefusalReportInvalid is a report this panel could not accept for any
+	// other structural reason. It is deliberately one bucket: the detail belongs
+	// in the log, not in a column an unauthenticated-shaped value could grow.
+	NodeRefusalReportInvalid = "report_invalid"
+)
+
+// CurrentlyRefused reports whether the last thing this panel did with a report
+// from this agent was refuse it.
+//
+// A refusal older than the last accepted observation means the node recovered,
+// so the comparison is against the observation rather than against the presence
+// of the columns.
+func (a *NodeAgent) CurrentlyRefused() bool {
+	if a == nil || a.RefusedAt == nil {
+		return false
+	}
+	if a.ProtocolObservedAt == nil {
+		return true
+	}
+	return !a.RefusedAt.Before(*a.ProtocolObservedAt)
 }
 
 // SupportedNodeProtocolGenerations is PSP's OWN declaration of which wire

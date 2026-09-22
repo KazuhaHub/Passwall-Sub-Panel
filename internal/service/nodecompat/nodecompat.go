@@ -134,9 +134,31 @@ func Request(agent *domain.NodeAgent, operation compatadmission.Operation, now t
 	return compatadmission.Request{
 		Operation: operation,
 		Observed:  Observation(agent),
+		Refused:   Refusal(agent),
 		Now:       now,
 		Policy:    policy,
 	}
+}
+
+// Refusal converts the persisted refusal columns. Nil means this panel is not
+// currently refusing the agent's reports — either it never has, or it has since
+// accepted one, which clears them.
+func Refusal(agent *domain.NodeAgent) *compatadmission.Refusal {
+	if agent == nil || agent.RefusedAt == nil || agent.RefusedReason == "" {
+		return nil
+	}
+	refusal := &compatadmission.Refusal{
+		Reason:  agent.RefusedReason,
+		At:      *agent.RefusedAt,
+		FirstAt: *agent.RefusedAt,
+	}
+	if agent.RefusedFirstAt != nil {
+		refusal.FirstAt = *agent.RefusedFirstAt
+	}
+	if agent.RefusedProtocolVersion != nil {
+		refusal.ProtocolVersion = *agent.RefusedProtocolVersion
+	}
+	return refusal
 }
 
 // Message renders a decision in the words this layer's operators already read.
@@ -153,9 +175,20 @@ func Message(agent *domain.NodeAgent, decision compatadmission.Decision) string 
 	case compatadmission.ReasonObservationStale:
 		return "native agent compatibility observation is too old to act on; wait for a successful check-in"
 	case compatadmission.ReasonProtocolIncompatible:
+		// THE NUMBER IS THE REFUSED ONE WHEN THERE IS ONE. Reading
+		// ObservedProtocolVersion here would print the last generation the panel
+		// ACCEPTED — 1 — in a sentence explaining that the panel refused 2. The
+		// observation is deliberately frozen at the last good value, so it is the
+		// wrong field for this message by construction.
+		reported := nodeprotocol.EffectiveProtocolVersion(agent.ObservedProtocolVersion)
+		if agent.CurrentlyRefused() && agent.RefusedProtocolVersion != nil {
+			reported = *agent.RefusedProtocolVersion
+		}
+		generations := domain.SupportedNodeProtocolGenerations()
 		return fmt.Sprintf("native agent protocol version %d is outside the reviewed range %d..%d",
-			nodeprotocol.EffectiveProtocolVersion(agent.ObservedProtocolVersion),
-			domain.SupportedNodeProtocolGenerations().Min, domain.SupportedNodeProtocolGenerations().Max)
+			reported, generations.Min, generations.Max)
+	case compatadmission.ReasonReportRefused:
+		return "native agent reports are being refused by this panel; the node keeps serving its last applied configuration"
 	case compatadmission.ReasonCapabilityMissing:
 		// Read through the shared protocol assessment rather than re-deriving:
 		// this is a projection of the observation for the message, not a second

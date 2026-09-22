@@ -1009,6 +1009,38 @@ export default function ServersView() {
     return { display: match[1], commit: match[2] }
   }
 
+  // nativeCompatibilityDetail renders the tooltip sentence for a native node.
+  //
+  // A refused node reports BOTH halves on purpose: the generation this panel last
+  // accepted, and the one it is refusing now. compat-policy 3.2 requires that
+  // losing contact must not erase the last valid observation, and this is where
+  // that stops being an invariant nobody can see.
+  function nativeCompatibilityDetail(s: Server, tr: typeof t): string | undefined {
+    if (!s.node_compatibility) return undefined
+    const key = `admin:servers.native.compatibility.`
+    const since = s.node_refused_since ? new Date(s.node_refused_since).toLocaleString() : undefined
+    switch (s.node_compatibility_reason) {
+      case 'protocol-incompatible':
+        return tr(`${key}incompatible_detail`, {
+          reported: s.node_refused_protocol_version ?? s.node_effective_protocol_version ?? '—',
+          min: s.node_reviewed_protocol_min ?? '—',
+          max: s.node_reviewed_protocol_max ?? '—',
+          accepted: s.node_protocol_version ?? '—',
+          since: since ?? '—',
+        })
+      case 'report-refused':
+        return tr(`${key}report_refused_detail`, { since: since ?? '—' })
+      case 'observation-stale':
+        return tr(`${key}unknown_observation_stale`, {
+          observed: s.node_protocol_observed_at ? new Date(s.node_protocol_observed_at).toLocaleString() : '—',
+        })
+      case 'unverified':
+        return tr(`${key}unknown_never_observed`)
+      default:
+        return tr(`${key}${s.node_compatibility}_detail`)
+    }
+  }
+
   // versionCell renders the 3X-UI + Xray version pair plus compatibility
   // state. A healthy native Node is intentionally quiet; limited, unknown
   // and incompatible states remain visible because they change the next
@@ -1071,12 +1103,17 @@ export default function ServersView() {
 			}
 		}
 		const versionIdentity = splitVersionIdentity(s.panel_version)
+		// THE TOOLTIP IS SELECTED BY REASON, NOT BY STATUS, because the status
+		// folds situations that need different sentences: 'unknown' is both "never
+		// installed" and "the last report is too old to act on", and telling an
+		// operator to wait for a check-in is only true for the first. The backend
+		// has always sent node_compatibility_reason; nothing read it.
+		//
+		// It also passes the values the strings interpolate. The previous call
+		// passed `protocol` and not one of the four *_detail strings contained a
+		// placeholder, so the interpolation had no effect at all.
 		const compatibilityMessage = s.panel_type === 'psp'
-			? s.node_compatibility
-				? t(`admin:servers.native.compatibility.${s.node_compatibility}_detail`, {
-						protocol: s.node_effective_protocol_version ?? '—',
-					})
-				: undefined
+			? nativeCompatibilityDetail(s, t)
 			: s.compat_message
 		const versionTooltip = (versionIdentity.commit || compatibilityMessage) && (
 			<Box sx={{ fontSize: 11, lineHeight: 1.5 }}>
