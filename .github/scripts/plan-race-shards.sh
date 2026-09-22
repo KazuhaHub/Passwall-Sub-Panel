@@ -29,6 +29,7 @@ shards=4
 only=""
 weights=""
 default_weight=1
+excluded=""
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -36,6 +37,12 @@ while [ $# -gt 0 ]; do
     --shard) only="$2"; shift 2 ;;
     --weights) weights="$2"; shift 2 ;;
     --default) default_weight="$2"; shift 2 ;;
+    # ONE PACKAGE MAY BE TAKEN OUT OF THE PARTITION ENTIRELY. A package longer
+    # than a shard's share cannot be balanced by packing — it gets a shard to
+    # itself and the run waits on it — so the caller splits its TESTS instead and
+    # this flag is how the two halves of that decision are kept from overlapping.
+    # The excluded package is the caller's to run, in every shard.
+    --exclude) excluded="$2"; shift 2 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
 done
@@ -70,7 +77,7 @@ if [ "$count" -eq 0 ]; then
   exit 1
 fi
 
-go list ./... | awk -v n="$shards" -v only="$only" -v weights="$weights" -v fallback="$default_weight" '
+go list ./... | awk -v n="$shards" -v only="$only" -v weights="$weights" -v fallback="$default_weight" -v exclude="$excluded" '
   BEGIN {
     if (weights != "") {
       while ((getline line < weights) > 0) {
@@ -84,11 +91,20 @@ go list ./... | awk -v n="$shards" -v only="$only" -v weights="$weights" -v fall
     for (i = 1; i <= n; i++) { load[i] = 0; shard[i] = "" }
   }
   NF {
+    # THE EXCLUDED PACKAGE IS THE CALLER TO RUN, in every shard, so leaving it
+    # here would run it twice — once whole and once in slices.
+    if (exclude != "" && $0 == exclude) { dropped++; next }
     total++
     weight[total] = ($0 in measured) ? measured[$0] : fallback + 0
     name[total] = $0
   }
   END {
+    # A NAME THAT MATCHED NOTHING IS A TYPO, and the cost of it is silent: the
+    # package stays in the partition AND the caller runs it again in slices.
+    if (exclude != "" && dropped == 0) {
+      printf "excluded package %s is not in `go list ./...`\n", exclude > "/dev/stderr"
+      exit 1
+    }
     # Longest-processing-time first. Selection sort: n is a few dozen, so the
     # quadratic cost is irrelevant next to spawning a runner.
     for (i = 1; i <= total; i++) {
