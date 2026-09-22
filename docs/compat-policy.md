@@ -289,9 +289,11 @@ PR 不使用生产凭据或生产后端；外部 PR 不能通过高权限 workfl
 | PN `.github/workflows/test.yml` 升级 E2E | `upgrade-mechanism` | 当前源码带不同版本身份验证升级机制 | 真实历史数据迁移兼容 |
 | [第三方矩阵](compat/3x-ui-v4.json)、[live tests](../internal/adapters/sui/client_live_test.go) | `adapter-live` | 有实测范围记录和隔离测试入口 | 版本范围内所有发布物／完整流量都已测试 |
 | [上游 watcher](../.github/workflows/compat-watch.yml) | —（发现，不是证据） | 每周发现超出已测上限的新版本 | 自动认证新上游 |
+| [ADR 0038](adr/0038-refused-node-report-is-recorded.md)、拒绝记录与显示 | `wire-contract` | 被拒上报在 `node_agents` 留痕、进判定、在服务器列表显示为 `incompatible` 并给出两个代际数字 | **不构成 dataplane 证据，也不构成反方向（新 PN × 旧 PSP）支持承诺**；现网无节点能触发代际分支 |
 
 **六类里今天只有三类有实例。** 上表覆盖 `wire-contract`、`adapter-live` 和
 `upgrade-mechanism`；`dataplane`、`historical-upgrade`、`artifact-runtime` **一条都没有**。
+ADR 0038 那一行不改变这个计数：它是又一条 `wire-contract`，不是新的一类。
 这不是遗漏，而是 P3／P4／P5 各自要产出的东西——在它们完成之前，任何声称“完整链路”“历史
 数据兼容”“发布物已验证”的说法都没有对应证据可引，只能显示为未验证。
 
