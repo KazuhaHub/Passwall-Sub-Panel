@@ -9,6 +9,13 @@ name: Test
 # server dialects reuse an initialized schema for ordinary repository tests
 # while migration/DDL tests retain fresh databases. Every Go test invocation
 # bypasses the Go result cache and uploads output on failure.
+#
+# A PR AND A MAIN PUSH ARE NOT THE SAME RUN, in the one place where the
+# difference buys something: a job whose verdict cannot change because of THIS
+# PR does not need a runner slot on every push to the branch. The gates are the
+# same on both paths — the merge gate and the post-merge backstop are the same
+# checks — and `third-party-isolated` is the one job that qualifies, for the
+# reason its comment gives.
 
 on:
   push:
@@ -23,12 +30,20 @@ env:
 permissions:
   contents: read
 
-# Superseded commits do not need to keep consuming the public-runner pool. A
-# main push still runs the full suite: branch protection currently permits a
-# tested PR to merge without first updating to the latest base.
+# Superseded commits do not need to keep consuming the public-runner pool — and
+# a PR push supersedes the one before it, so cancelling is right there.
+#
+# A MAIN PUSH IS NOT SUPERSEDED BY THE NEXT MERGE. The group used to be keyed on
+# the ref for both events, which meant every main push shared one group with the
+# merge after it and `cancel-in-progress` killed the run in flight. Three of the
+# last forty main runs were cancelled that way, and because branch protection
+# permits a tested PR to merge without updating to the latest base, that run is
+# the only thing standing between "two PRs each passed" and a broken main: the
+# protection did not fail, it disappeared. So a main push and a manual run get
+# their own group each — `github.run_id` — and cancel nothing.
 concurrency:
-  group: test-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  group: test-${{ github.workflow }}-${{ github.event_name }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   node-compatibility:
@@ -340,6 +355,26 @@ jobs:
   # type in the repository.
   third-party-isolated:
     name: third-party adapters (isolated real panels)
+    # NOT ON A PR, AND THIS IS THE ONE JOB WHERE THAT IS THE RIGHT ANSWER.
+    #
+    # It is the only job here that is NOT a required check: it drives real 3X-UI
+    # and S-UI containers, and a red run never blocked a merge — it informed one.
+    # What it costs is real: two third-party images pulled from the network, the
+    # longest timeout in the file, and a slot on every push to every branch. What
+    # a PR gains from it is the answer to "did I break the adapter", which the
+    # merge will also give, on main, where a red run is a fact rather than a
+    # guess and the images are the ones the pinned fixtures did not cover.
+    #
+    # THE COST OF THE TRADE, stated: a PR that breaks an adapter now merges green
+    # and turns main red. That is deliberate. The alternative is what this job
+    # was — a 30-minute lane that gated nothing and occupied a slot on the path
+    # developers are waiting on.
+    #
+    # NOTHING NEEDS THIS JOB, which is what makes the condition safe: a skipped
+    # job skips its whole downstream chain, transitively, and `always()` on a job
+    # in between does not restore the jobs under it. A condition here would take
+    # the run's verdict with it if anything did.
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
@@ -530,20 +565,23 @@ jobs:
         working-directory: web-react
         run: npm run test
 
-  build_targets:
-    name: build (${{ matrix.goos }}/${{ matrix.goarch }})
+  # ONE JOB, SIX TARGETS, AND THE REQUIRED CHECK NAME UNCHANGED.
+  #
+  # This was a six-leg matrix with a one-line gate job under it: seven runner
+  # slots to compile six binaries, each leg paying its own checkout and toolchain
+  # for about fifteen seconds of work. Branch protection requires the context
+  # `build (cross-compile release targets)` — the name of the gate — so the merge
+  # keeps that name on the job that does the work rather than spending a slot to
+  # relay a verdict.
+  #
+  # THE LOOP DOES NOT STOP AT THE FIRST FAILURE. The matrix ran with
+  # `fail-fast: false` for the reason this keeps: a target that does not compile
+  # must not hide the five behind it, because the point of the job is every
+  # platform's verdict from one run.
+  build:
+    name: build (cross-compile release targets)
     runs-on: ubuntu-latest
-    timeout-minutes: 10
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - { goos: linux,   goarch: amd64 }
-          - { goos: linux,   goarch: arm64 }
-          - { goos: darwin,  goarch: amd64 }
-          - { goos: darwin,  goarch: arm64 }
-          - { goos: windows, goarch: amd64 }
-          - { goos: windows, goarch: arm64 }
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
@@ -560,33 +598,34 @@ jobs:
           test -n "$build_toolchain"
           test "$(go env GOVERSION)" = "$build_toolchain"
           test "$(go tool compile -V | awk '{ print $3 }')" = "$build_toolchain"
-      # Cross-compile the deployable binary for one release GOOS/GOARCH. The
-      # matrix runs each target independently and in parallel. The binary is
-      # pure Go (CGO_ENABLED=0), so this needs no C toolchain. The committed
-      # internal/web/dist/.gitkeep satisfies //go:embed all:dist, so no SPA
-      # build is required just to confirm the Go binary links — the web job
-      # covers the SPA build separately. Output is discarded (-o /dev/null);
-      # we only care that this target compiles.
+      # Cross-compile the deployable binary for every release GOOS/GOARCH. The
+      # binary is pure Go (CGO_ENABLED=0), so this needs no C toolchain. The
+      # committed internal/web/dist/.gitkeep satisfies //go:embed all:dist, so no
+      # SPA build is required just to confirm the Go binary links — the web job
+      # covers the SPA build separately. Output is discarded (-o /dev/null); we
+      # only care that each target compiles.
+      #
+      # NO `set -e`, AND THAT IS THE WHOLE POINT OF THE LOOP'S SHAPE: one target's
+      # failure must not end the step for the others. `-u` and `pipefail` stay,
+      # and the loop's own exit status is what the step reports.
       - name: cross-compile ./cmd/panel
-        env:
-          GOOS: ${{ matrix.goos }}
-          GOARCH: ${{ matrix.goarch }}
-          CGO_ENABLED: "0"
-        run: go build -trimpath -ldflags="-s -w" -o /dev/null ./cmd/panel
-
-  # Keep one stable required check for branch protection while the target
-  # builds above remain independent matrix jobs.
-  build:
-    name: build (cross-compile release targets)
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    needs: build_targets
-    if: ${{ always() }}
-    steps:
-      - name: Verify all cross-compile targets passed
-        env:
-          TARGET_RESULT: ${{ needs.build_targets.result }}
-        run: test "$TARGET_RESULT" = success
+        run: |
+          set -uo pipefail
+          failed=0
+          for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64
+          do
+            goos=${target%%/*}
+            goarch=${target##*/}
+            if GOOS="$goos" GOARCH="$goarch" CGO_ENABLED=0 \
+              go build -trimpath -ldflags="-s -w" -o /dev/null ./cmd/panel
+            then
+              echo "ok   $goos/$goarch"
+            else
+              echo "::error::./cmd/panel does not compile for $goos/$goarch"
+              failed=1
+            fi
+          done
+          exit "$failed"
 
   go_static:
     name: go (static checks)

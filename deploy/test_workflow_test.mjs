@@ -87,11 +87,98 @@ test('the deploy guard suites are all executed by the container job', () => {
   }
 })
 
-// The pinned-source contract job must not learn which Node revision to test
-// from go.mod. Doing so made the evidence move with every dependency bump, and
-// would have removed the job's entry point the moment the PN root module was
-// dropped — the test would have gone with the dependency rather than outliving
-// it. The revision is named in docs/compat/verification-v1.json instead.
+// Every job in this file, by name, as its raw block — the same helpers the
+// release guard carries, for the same reason: an invariant over the graph needs
+// the graph.
+function jobs() {
+  const start = workflow.indexOf('\njobs:\n')
+  assert(start >= 0, 'the test workflow defines jobs')
+  const body = workflow.slice(start + '\njobs:\n'.length)
+  const markers = [...body.matchAll(/^  ([a-z][a-z0-9_-]*):\n/gm)]
+  const found = new Map()
+  markers.forEach((marker, index) => {
+    const end = index + 1 < markers.length ? markers[index + 1].index : body.length
+    found.set(marker[1], body.slice(marker.index, end))
+  })
+  assert(found.size > 0, 'the test workflow defines jobs')
+  return found
+}
+
+// `needs` is written both ways in this file: a bare name, and a bracketed list.
+function needsOf(raw) {
+  const listed = /^    needs: \[(.*)\]$/m.exec(raw)
+  if (listed) return listed[1].split(',').map((name) => name.trim().replace(/['"]/g, ''))
+  const single = /^    needs: ([A-Za-z0-9_-]+)$/m.exec(raw)
+  return single ? [single[1]] : []
+}
+
+// THE BUG THAT COST A RELEASE, APPLIED TO THE WORKFLOW EVERYBODY TOUCHES.
+//
+// A skipped job skips its whole downstream chain, transitively, and `always()` on
+// a job in between does not restore the jobs under it: the exempted job runs and
+// reports success while its dependents are skipped anyway. The reproduction is in
+// release_workflow_test.mjs; this is the same rule stated for this graph.
+//
+// A job-level condition here is allowed only when the job is a leaf (nothing
+// needs it), or when it carries `always()` — which is what lets the gates report
+// on a chain that did not succeed instead of being skipped by it.
+test('a job that can be skipped by its own condition has nothing below it', () => {
+  const all = jobs()
+  for (const [name, raw] of all) {
+    const condition = /^    if: (.*)$/m.exec(raw)
+    if (!condition || condition[1].includes('always()')) continue
+    const dependents = [...all]
+      .filter(([other, block]) => other !== name && needsOf(block).includes(name))
+      .map(([other]) => other)
+    assert.deepEqual(
+      dependents,
+      [],
+      `${name} can be skipped by its own condition (${condition[1]}) and is needed by ${dependents.join(', ')}. A skipped job skips its whole downstream chain, transitively, and always() on the job in between does not restore it — gate a step instead, or make the job a leaf.`,
+    )
+  }
+})
+
+// ONE JOB MUST PRODUCE THE REQUIRED `build (cross-compile release targets)`
+// CONTEXT, AND IT MUST COMPILE EVERY TARGET.
+//
+// It was a six-leg matrix plus a one-line gate, which spent seven slots to compile
+// six binaries and made the required context the name of the job that did nothing.
+// These assertions keep the two properties the merge is worth having: the job that
+// carries the required name is the job that compiles, and every release target is
+// still in it. A target dropped from the list would be a platform that stops being
+// checked here — silently, since the remaining five would still compile.
+test('the build job compiles every release target, and reports all of them', () => {
+  const build = job('build')
+  for (const target of [
+    'linux/amd64',
+    'linux/arm64',
+    'darwin/amd64',
+    'darwin/arm64',
+    'windows/amd64',
+    'windows/arm64',
+  ]) {
+    assert(build.includes(target), `the build job must still compile ${target}`)
+  }
+  assert(
+    !/^    strategy:/m.test(build),
+    'the required build context must be one job: a matrix reports as several checks, and branch protection needs the one stable name',
+  )
+  // NOT `set -e`. The matrix ran with `fail-fast: false` so one bad target could
+  // not hide the others; a loop with `set -e` would put that back.
+  assert(
+    /set -uo pipefail/.test(build),
+    'the cross-compile loop must not stop at the first failing target — the matrix ran with fail-fast: false, and that is what the loop replaces',
+  )
+  assert(!/set -euo pipefail/.test(build), 'set -e in the cross-compile loop aborts before the remaining targets are tried')
+  assert(build.includes('failed=1'), 'a failing target must be recorded rather than ending the step')
+  assert(build.includes('exit "$failed"'), 'the step must report the failures it collected')
+})
+
+// The pinned-source contract job must not learn which Node revision to test from
+// go.mod. Doing so made the evidence move with every dependency bump, and would
+// have removed the job's entry point the moment the PN root module was dropped —
+// the test would have gone with the dependency rather than outliving it. The
+// revision is named in docs/compat/verification-v1.json instead.
 test('the contract job takes its Node revision from the manifest, not from go.mod', () => {
   const contract = job('node-contract')
   assert(
