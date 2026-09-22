@@ -376,6 +376,33 @@ jobs:
             # V3 is a stable maintenance line. Its releases update :latest and
             # the V3-only rolling tag, but never :beta: that channel belongs to
             # the active V4 pre-release line and must not be rolled back to V3.
+            #
+            # :latest IS BORROWED, NOT OWNED. V3 holds it only because V4 has
+            # never published a non-prerelease, and main gates its own :latest on
+            # exactly that. The condition below is deliberately NOT limited to v3
+            # tags, because while V3 is the only stable line "newest stable" and
+            # "newest V3" are the same image, and narrowing it early would leave
+            # :latest frozen on an older release with nothing advancing it.
+            #
+            # >>> WHEN V4 PUBLISHES ITS FIRST STABLE RELEASE, DELETE THE :latest
+            # >>> LINE BELOW. <<<
+            #
+            # From that moment the two lines both write it, and the winner is
+            # whoever published most recently — so a routine V3 patch would drag
+            # :latest back across a major boundary, onto an image with a different
+            # database model, for every deployment that tracks it. Nothing in
+            # either workflow detects or warns about that; the tags are applied
+            # unconditionally and the push succeeds. :v3 already carries the V3
+            # rolling channel, so deleting the line costs V3 users nothing beyond
+            # pointing compose at :v3 (README documents this).
+            #
+            # The same handover applies to the GitHub Release marker, which is one
+            # repo-wide pointer that cannot be split per line: add
+            # `make_latest: false` to the Publish step (the action supports it;
+            # the REST default is true, which is why V3 claims it today).
+            # Deployed panels up to v3.9.4 read /releases/latest directly, so that
+            # handover is what stops them seeing a V4 tag — v3.9.5+ additionally
+            # filters by major in internal/version/latest_psp.go.
             type=raw,value=latest,enable=${{ startsWith(needs.setup.outputs.tag, 'v') && !contains(needs.setup.outputs.tag, '-') }}
             type=raw,value=v3,enable=${{ startsWith(needs.setup.outputs.tag, 'v3.') && !contains(needs.setup.outputs.tag, '-') }}
           labels: |

@@ -203,13 +203,14 @@ Every operational setting (secrets, MySQL DSN) lives in `./config/config.yaml` �
 
 ### Image channels (stable / beta)
 
-Releases flow through two rolling channels, matching the in-app version-badge color (green = stable, amber = pre-release):
+The V3 stable maintenance line and the V4 testing line use separate rolling channels; the in-app version badge matches (green = stable, amber = pre-release):
 
 | Tag | Tracks | For |
 |---|---|---|
-| `:latest` | newest **stable** (default) | production / day-to-day |
-| `:beta` | the **leading edge** — newest release of any kind (pre-release **or** stable) | always on the newest build |
-| `:v3.7.0` / `:v3.7.0-beta.17` | a pinned exact version | no auto-roll |
+| `:latest` | newest **stable** in the repository (default) | production / day-to-day |
+| `:v3` | newest **V3** stable maintenance release | staying on the V3 data model |
+| `:beta` | the V4 testing line | trying V4 early |
+| `:v3.9.3` / `:v4.0.0-beta.10` | a pinned exact version | no auto-roll |
 
 Switching channels is a one-line change to `image` in `docker-compose.yml`, then `docker compose up -d` (`pull_policy: always` re-pulls):
 
@@ -219,7 +220,9 @@ services:
     image: ghcr.io/kazuhahub/passwall-sub-panel:beta   # latest → beta
 ```
 
-> `:beta` means "always newest", not "betas only": a `:beta` deploy **auto-rolls forward onto a stable** once it ships (e.g. `v3.7.0`), then onto the next beta. Use `:latest` to stay on the stable track, or `:vX.Y.Z` to pin.
+> A V3 maintenance release updates `:latest` and `:v3` and never touches `:beta`, so shipping a V3 security fix cannot roll a V4 test deployment back to V3. Pin with the full `:vX.Y.Z` to stop rolling entirely.
+>
+> **To stay on V3 long-term, follow `:v3`, not `:latest`.** `:latest` means "the newest stable in this repository", not "the newest V3" — the two coincide today only because every V4 release is still a pre-release. Once V4 ships a stable, `:latest` moves to V4 and deployments tracking it are carried across a major boundary onto a different database model. `:v3` only ever follows V3 stable maintenance releases.
 >
 > PSP also checks for a newer **stable** release of itself and surfaces it in the **admin notifications** (stable only — it never nags you toward a beta); it likewise flags a 3X-UI panel that's below PSP's max-tested version.
 
