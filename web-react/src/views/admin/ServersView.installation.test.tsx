@@ -501,8 +501,11 @@ describe('Passwall Node installation', () => {
     await showIdentity()
     expect((screen.getByLabelText('admin:servers.native.credential') as HTMLInputElement).value)
       .toBe(change === 'server' ? secondProvisioning.credential : provisioning.credential)
-  })
-
+  // A LOADED RUNNER TAKES LONGER THAN THE DEFAULT FIVE SECONDS, and this case drives
+  // four variants of one cancellation flow through a real dialog — it timed out once
+  // on a shared runner and passed on the rerun. The timeout is not the assertion: what
+  // it proves is that a late private response is ignored, not that it is quick.
+  }, 30_000)
   it.each(['wrong-server', 'expired', 'empty'] as const)('rejects an invalid %s command response instead of exposing it', async invalid => {
     reads()
     api.post.mockResolvedValue({ data: { server_id: invalid === 'wrong-server' ? 8 : 7,
