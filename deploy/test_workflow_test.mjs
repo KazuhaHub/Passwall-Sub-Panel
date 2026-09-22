@@ -279,6 +279,32 @@ test('caches are restored on every event and saved only from the default branch'
     restores >= 9,
     `every job that compiles Go, plus the browser download, restores a cache — found ${restores}`,
   )
+
+  // THE LAYER CACHE FOLLOWS THE SAME POLICY IN A DIFFERENT SHAPE. buildx exports its
+  // cache at the END of the build, so there is no save step to gate: the gate is the
+  // flag, added only on the default branch. It is asserted here because it is the same
+  // decision, and a reviewer looking for the policy should find both halves in one place.
+  const container = job('container')
+  assert(
+    /"\$?\{?layer_cache\}?"|type=gha,scope=/.test(container) && container.includes('"--cache-from"'),
+    'the container job must restore a layer cache: its source image is a node + vite + go build that nothing else reuses',
+  )
+  assert(
+    container.includes('"${GITHUB_EVENT_NAME}" = push') && container.includes('refs/heads/main'),
+    'the container job must add --cache-to only on the default branch, or its layer cache is written where nothing reads it',
+  )
+  // `--load` IS NOT DECORATION: from Docker 23 on, `docker build` is an alias for
+  // `docker buildx build`, and a container-driver builder leaves the result out of the
+  // daemon's store unless it is asked. The ownership and runtime checks below read that
+  // store, so a missing `--load` fails them on an image that built perfectly.
+  assert(
+    container.includes('docker buildx build --load -f Dockerfile.release'),
+    'the release image build must pass --load, or the runtime checks cannot find the image it just built',
+  )
+  assert(
+    /source_args=\(--load\b/.test(container),
+    'the source image build must pass --load, for the same reason',
+  )
 })
 
 // THE SHARD COUNT LIVES IN THREE PLACES, AND THEY ARE ONE DECISION.
