@@ -584,6 +584,26 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
+      # THE GO BUILD CACHE IS NOT WHAT `cache: true` RESTORES. That input covers
+      # the MODULE cache (the source of dependencies), not the compiled objects, so
+      # every run recompiled all six targets from source: 354 seconds of it,
+      # measured identically on two consecutive runs — which is what a cache that
+      # is never restored looks like. The same target on a warm GOCACHE compiles
+      # in about two seconds, so the whole step is the cache's to win.
+      #
+      # A KEY PER JOB RATHER THAN PER REPOSITORY. `actions/cache` will not save a
+      # key that already exists, so several jobs sharing one key means whichever
+      # finishes first freezes its own subset of objects for everyone else, and
+      # the cache never grows past that. The build job's objects are its own —
+      # six targets no other job compiles — so it gets its own key.
+      #
+      # A PREFIX RESTORE IS SAFE HERE because the cache is content-addressed: an
+      # entry keyed on a stale go.sum can only be a miss, never a wrong build.
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/go-build
+          key: go-build-targets-${{ runner.os }}-${{ hashFiles('go.sum') }}
+          restore-keys: go-build-targets-${{ runner.os }}-
       - uses: actions/setup-go@v7
         # Allow toolchain selection; setup-go exports local after installation.
         env:
