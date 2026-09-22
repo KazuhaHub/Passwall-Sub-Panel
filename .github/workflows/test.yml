@@ -347,6 +347,17 @@ jobs:
       - name: Download every case report
         uses: actions/download-artifact@v7
         with:
+          # SCOPED TO ITS OWN EVIDENCE, BECAUSE AN UNSCOPED DOWNLOAD FAILS ON ANYTHING.
+          # This step reads the run's artifacts with no name, no id and no pattern — so
+          # it depends on every artifact in the run being one it can download and
+          # extract. One was not: the container job's build cache is published as a
+          # `….dockerbuild` artifact, the download of it failed after five retries, and
+          # the gate went red on main reporting "the compatibility evidence could not be
+          # downloaded" while the evidence was sitting right there.
+          #
+          # The pattern keeps the layout the checker expects (one directory per
+          # artifact) and matches the two legs the gate summarises.
+          pattern: 'node-*-evidence'
           path: evidence
       - name: the compatibility jobs themselves succeeded
         env:

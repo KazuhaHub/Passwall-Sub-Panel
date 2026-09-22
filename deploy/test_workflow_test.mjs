@@ -66,6 +66,13 @@ test('the compatibility gate is unconditional and covers both Node jobs', () => 
   assert(/needs: \[[^\]]*node-contract[^\]]*\]/.test(gate), 'the gate must summarise the pinned-source job')
   assert(gate.includes('deploy/compat/check-case-set.mjs'), 'the gate must check the expected case set')
   assert(gate.includes('actions/download-artifact'), 'the gate must read the uploaded evidence')
+  // AND IT MUST SAY WHICH ARTIFACTS. An unscoped download reads whatever the run
+  // happens to contain, so any artifact a job adds — a build cache, a debug dump —
+  // becomes a way for this gate to fail while its own evidence is intact.
+  assert(
+    /pattern: 'node-\*-evidence'/.test(gate),
+    'the gate must download only its own evidence: an unscoped download depends on every artifact in the run being extractable',
+  )
 })
 
 // The suite that protects the gate has to run somewhere. This asserts the
