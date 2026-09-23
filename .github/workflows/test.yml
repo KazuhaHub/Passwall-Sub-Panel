@@ -804,6 +804,20 @@ jobs:
       - name: Formatting
         run: test -z "$(gofmt -l .)"
       - run: go vet ./...
+      # THE REINSTALL ACCEPTANCE IS BEHIND A BUILD TAG, SO THE LINE ABOVE NEVER OPENS
+      # IT. Its only compile was node-reinstall-acceptance.yml, which runs on a path
+      # filter, and the case imports fifteen of this repository's packages of which the
+      # filter covers six whole. #231 changed six files in the other nine and started
+      # the acceptance only because it also happened to add a test under nodesync. A
+      # signature change there without that luck merges green, and the broken compile
+      # surfaces on the next PR that touches a listed path — blamed on that PR.
+      #
+      # Vetted here it no longer depends on the filter being complete. The dependencies
+      # are already compiled by the line above, but the tag is part of vet's cache key:
+      # measured locally this is ~11s until go.sum next changes and main saves a cache
+      # that has seen it, and under a second after.
+      - name: The tagged reinstall acceptance still compiles
+        run: go vet -tags node_reinstall_acceptance ./tests/acceptance/...
       - name: Reachable vulnerability check
         run: go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
 
