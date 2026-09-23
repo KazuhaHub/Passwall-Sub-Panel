@@ -682,13 +682,16 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
-      # THE GO BUILD CACHE IS NOT WHAT `cache: true` RESTORES. That input covers
-      # the MODULE cache (the source of dependencies), not the compiled objects, so
-      # every run recompiled all six targets from source: 354 seconds of it,
-      # measured identically on two consecutive runs — which is what a cache that
-      # is never restored looks like. The same target on a warm GOCACHE compiles
-      # in about two seconds, so the whole step is the cache's to win. Every job in
-      # this file that compiles Go restores it, under a key of its own.
+      # `cache: true` IS NOT THIS JOB'S BUILD CACHE, although it does restore one.
+      # setup-go caches the compiled objects as well as the modules — its log resolves
+      # both GOMODCACHE and GOCACHE and restores ~372 MB into them — but under ONE key
+      # per toolchain and go.sum, shared by every job here and saved, on any event, by
+      # whichever job gets there first: the frozen subset the next paragraph describes.
+      # It did not hold the six cross-compiled targets, so every run recompiled them from
+      # source: 354 seconds of it, measured identically on two consecutive runs. The
+      # same target on a warm GOCACHE compiles in about two seconds, so the whole step
+      # is the cache's to win. Every job in this file that compiles Go restores its own
+      # build cache, under a key of its own.
       #
       # A KEY PER JOB RATHER THAN PER REPOSITORY. `actions/cache` will not save a
       # key that already exists, so several jobs sharing one key means whichever
