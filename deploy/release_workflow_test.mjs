@@ -185,7 +185,7 @@ function jobs() {
   const start = workflow.indexOf('\njobs:\n')
   assert(start >= 0, 'the release workflow defines jobs')
   const body = workflow.slice(start + '\njobs:\n'.length)
-  const markers = [...body.matchAll(/^  ([a-z][a-z-]*):\n/gm)]
+  const markers = [...body.matchAll(/^  ([A-Za-z_][A-Za-z0-9_-]*):\n/gm)]
   const found = new Map()
   markers.forEach((marker, index) => {
     const end = index + 1 < markers.length ? markers[index + 1].index : body.length
@@ -638,6 +638,47 @@ test('the tag job writes a ref and nothing else', () => {
       `the tag job pushes something other than the release tag: ${line.trim()}`,
     )
   }
+})
+
+// A WRITE TOKEN RUNS ONLY CODE THAT CANNOT BE SWAPPED UNDER IT. The writers are
+// derived from their permissions, so a publisher added later is held to this too —
+// and derived from ALL of them: any scope granted `write`, `write-all`, and for a job
+// that declares no permissions of its own, whatever the top-level block grants it
+// (or the repository default, which can be write, when there is no block at all).
+// In each, an action from outside actions/* is named by a full commit with its
+// release in a trailing comment — the form Dependabot keeps current. A tag would
+// run whatever it points at on the day of the release.
+function permissionsAt(text, indent) {
+  const found = new RegExp(`^ {${indent}}permissions:(.*)\\n((?: {${indent + 2},}.*\\n|[ \\t]*\\n)*)`, 'm').exec(text)
+  return found ? `${found[1]}\n${found[2]}`.replace(/#.*$/gm, '') : null
+}
+
+function grantsWrite(permissions) {
+  return /^\s*write-all\s*$/m.test(permissions) || /[a-z-]+:\s*write\b/.test(permissions)
+}
+
+test('every third-party action in a job that can write is pinned by commit', () => {
+  const inherited = permissionsAt(workflow.slice(0, workflow.indexOf('\njobs:\n') + 1), 0) ?? 'write-all'
+  let seen = 0
+  for (const [name, block] of jobs()) {
+    if (!grantsWrite(permissionsAt(block, 4) ?? inherited)) continue
+    for (const [line, ref] of block.matchAll(/^ +(?:- )?uses: (\S+).*$/gm)) {
+      seen++
+      if (ref.startsWith('actions/') || ref.startsWith('./')) continue
+      assert(
+        /@[0-9a-f]{40} # v\d+\.\d+\.\d+$/.test(line),
+        `${name} runs ${ref} with a write token; pin it to a commit with a # vX.Y.Z comment`,
+      )
+    }
+  }
+  assert(seen > 0, 'no job that can write uses an action; either the workflow changed or this matcher broke')
+  // The derivation itself, on the shapes a later job could take.
+  const at = (text) => grantsWrite(permissionsAt(text, 4) ?? inherited)
+  assert.equal(at('  j:\n    permissions: write-all\n    steps:\n'), true)
+  assert.equal(at('  j:\n    permissions:\n      contents: read\n      # a note\n\n      attestations: write\n'), true)
+  assert.equal(at('  j:\n    permissions:\n      contents: read\n    steps:\n      - run: echo contents: write\n'), false)
+  assert.equal(permissionsAt('  j:\n    steps:\n      - run: true\n', 4), null, 'a job with no block of its own inherits')
+  assert.equal(grantsWrite(permissionsAt('permissions:\n  pull-requests: write\njobs:\n', 0)), true)
 })
 
 // R10 STEP 3: "cross-platform compilation does not substitute for runtime
