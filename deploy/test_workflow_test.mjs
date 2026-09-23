@@ -255,6 +255,29 @@ test('the build job compiles every release target, and reports all of them', () 
   assert(build.includes('exit "$failed"'), 'the step must report the failures it collected')
 })
 
+// THE STATIC JOB'S BUILD CACHE KEY NAMES EVERY TOOL IT COMPILES, AT ITS PIN.
+//
+// A cache key is written once. Keyed on go.sum alone, go_static's entry is the one
+// main saved after go.sum last moved; every later run restores it and no later save
+// can add to it, so a tool added or bumped since compiles from source on every run,
+// on every event, until go.sum happens to change. With each `go run` and
+// `go install` pin in the key, the change that moves a pin moves the key, and the
+// next main push saves a cache that has built it.
+test('go_static\'s build cache key names every tool the job compiles, at its pin', () => {
+  const steps = job('go_static').replace(/^\s*#.*$/gm, '')
+  const keys = [...steps.matchAll(/^ +key: (go-build-static-.+)$/gm)].map((m) => m[1])
+  assert.equal(keys.length, 2, 'go_static restores one build cache and saves it')
+  assert.equal(keys[0], keys[1], 'go_static must save under the key it restores, or no run ever hits it')
+  const tools = [...steps.matchAll(/\bgo (?:run|install) \S*\/([a-z0-9-]+)@(v\d+\.\d+\.\d+)/g)]
+  assert(tools.length >= 2, `go_static compiles staticcheck and govulncheck at pinned versions; found ${tools.length}`)
+  for (const [, tool, version] of tools) {
+    assert(
+      keys[0].includes(`-${tool}-${version}-`) || keys[0].endsWith(`-${tool}-${version}`),
+      `go_static compiles ${tool}@${version} and its build cache key does not name it: the key is written once per go.sum, so no main save would ever hold that build`,
+    )
+  }
+})
+
 // ONE PACKAGE IS HALF THE RACE SUITE, AND PACKAGES CANNOT BALANCE IT.
 //
 // internal/adapters/sqlstore is 174s of the roughly 320s the weights file records,

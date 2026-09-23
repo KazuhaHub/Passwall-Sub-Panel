@@ -771,12 +771,20 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
+      # THE BUILD CACHE KEY NAMES THE TOOLS THIS JOB COMPILES, AT THEIR PINS. A key is
+      # written once, so keyed on go.sum alone the entry is the one main saved after
+      # go.sum last moved, and no later save can add to it: staticcheck, added after
+      # that save, would compile from source on every run until go.sum next changed.
+      # With the pins in the key, adding or bumping a tool moves it, and the next main
+      # push saves a cache that holds the build. The deploy guard reads the pins off
+      # the steps below, so a bump that forgets the key fails there.
+      #
       # The build cache pair the build job explains: restored on every event, and
       # saved only from the default branch, where a save can be read.
       - uses: actions/cache/restore@v4
         with:
           path: ~/.cache/go-build
-          key: go-build-static-${{ runner.os }}-${{ hashFiles('go.sum') }}
+          key: go-build-static-${{ runner.os }}-${{ hashFiles('go.sum') }}-staticcheck-v0.8.1-govulncheck-v1.8.0
           restore-keys: go-build-static-${{ runner.os }}-
       - uses: actions/setup-go@v7
         # Allow toolchain selection; setup-go exports local after installation.
@@ -814,10 +822,26 @@ jobs:
       #
       # Vetted here it no longer depends on the filter being complete. The dependencies
       # are already compiled by the line above, but the tag is part of vet's cache key:
-      # measured locally this is ~11s until go.sum next changes and main saves a cache
-      # that has seen it, and under a second after.
+      # measured locally this is ~11s until the build cache key above next moves and
+      # main saves a cache that has seen it, and under a second after.
       - name: The tagged reinstall acceptance still compiles
         run: go vet -tags node_reinstall_acceptance ./tests/acceptance/...
+      # STATICCHECK, BECAUSE VET DOES NOT LOOK FOR WHAT IT FINDS. Its first run here
+      # reported thirteen findings every gate above had passed, among them six pieces
+      # of dead code, a dead store in nodesync, a crypto/ecdsa field deprecated since
+      # Go 1.26, and an alert source the router wires in and nothing lists. The CHANGELOG
+      # records one manual U1000 sweep; this makes the sweep continuous. It runs with
+      # the acceptance tag because a tag only adds files, so one pass reads them all.
+      #
+      # THE PIN HAS TO UNDERSTAND go.mod'S TOOLCHAIN, SO THE TWO MOVE TOGETHER.
+      # staticcheck reads the compiler's export data, and a release older than the
+      # toolchain cannot: v0.7.0 fails on go1.27.1 with "export data version 4 is
+      # greater than maximum supported version 2", and v0.8.1 works. A toolchain bump
+      # that turns this step red is asking for the staticcheck bump in the same PR.
+      #
+      # ~18s on a cold analysis cache, measured locally, in a job off the critical path.
+      - name: staticcheck
+        run: go run honnef.co/go/tools/cmd/staticcheck@v0.8.1 -tags node_reinstall_acceptance ./...
       - name: Reachable vulnerability check
         run: go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
 
@@ -847,7 +871,7 @@ jobs:
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         with:
           path: ~/.cache/go-build
-          key: go-build-static-${{ runner.os }}-${{ hashFiles('go.sum') }}
+          key: go-build-static-${{ runner.os }}-${{ hashFiles('go.sum') }}-staticcheck-v0.8.1-govulncheck-v1.8.0
   race-shard:
     name: go race full (${{ matrix.part }}/3)
     runs-on: ubuntu-latest

@@ -86,9 +86,8 @@ func fixtureRelease(version string) githubRelease {
 // then dropped it from a testing caller's list. The channel is publication
 // metadata; a hyphen in a tag is the legacy scheme's way of writing it down, not
 // the rule.
-// KEYED BY TAG, like realPublicationTimes and for the same reason: this is the
-// field the release object carries, and for a product release the tag is not the
-// version. Getting that wrong twice in one file is why both maps say it.
+// KEYED BY TAG, because that is the field the release object carries, and for a
+// product release the tag is not the version.
 var fixtureProductPrerelease = map[string]bool{
 	"v4.0.0": true,
 }
@@ -99,32 +98,6 @@ var fixtureProductPrerelease = map[string]bool{
 // that is not in the namespace is not a release this project publishes.
 func fixturePrerelease(tag string) bool {
 	return fixtureProductPrerelease[tag]
-}
-
-// realPublicationTimes are the instants these releases actually went out on
-// GitHub. The registry test stamps releases with them, because ordering by
-// anything derived from the version string is the defect this file guards — and
-// the table exists to hold a time that is NOT the order a version sort would
-// produce.
-//
-// IT HAS ONE ENTRY NOW, WHICH IS A LIMITATION RATHER THAN A DESIGN. It used to
-// hold the whole v0.0.1-beta line, whose publication order and version order
-// genuinely disagreed (beta11 sorts below beta9 as text). Integer versions sort
-// the way they were published, so the disagreement has to be CONSTRUCTED by a
-// case that wants to observe it; the cases below do that with their own
-// releases rather than by reading this table.
-var realPublicationTimes = map[string]time.Time{
-	"v4.0.0": time.Date(2026, 9, 20, 9, 1, 33, 0, time.UTC),
-}
-
-// withRealPublicationTime gives a fixture release its real instant, LOOKED UP BY
-// TAG because that is what the release carries. Tags outside the table keep the
-// shared timestamp.
-func withRealPublicationTime(release githubRelease) githubRelease {
-	if published, ok := realPublicationTimes[release.TagName]; ok {
-		release.PublishedAt = &published
-	}
-	return release
 }
 
 // fixtureList is the answer the COLLECTION endpoint gives for these releases.

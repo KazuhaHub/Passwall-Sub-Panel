@@ -7,7 +7,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math/rand"
 	"net"
 	"net/http"
 	"sync"
@@ -1086,18 +1085,6 @@ func (a *App) runGeoUpdateLoop(ctx context.Context) {
 // The heavy ACME work runs in the sync-task processor; this loop only scans +
 // enqueues. Interval (and the renew-before-days threshold) are re-read from
 // settings each cycle, so cadence changes take effect without a restart.
-// policyRefreshInterval is the plan's initial value. It is not a setting: nothing
-// reads a policy faster than it can be published, and a knob nobody turns is a
-// knob nobody can reason about.
-const policyRefreshInterval = 30 * time.Minute
-
-// policyRefreshJitter spreads refreshes over ±10% of the interval, so a fleet of
-// panels configured from one document does not fetch it in lockstep.
-func policyRefreshJitter(d time.Duration) time.Duration {
-	spread := float64(d) * 0.1
-	return d - time.Duration(spread) + time.Duration(rand.Float64()*2*spread)
-}
-
 func (a *App) runCertRenewalLoop(ctx context.Context) {
 	if a.cert == nil {
 		return

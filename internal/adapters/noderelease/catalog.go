@@ -36,6 +36,7 @@ const (
 	releaseBase     = "https://github.com/KazuhaHub/Passwall-Node/releases/"
 )
 
+//lint:ignore ST1005 "Node" is the product's name, not a capitalised sentence.
 var errUnavailable = errors.New("Node release source is unavailable")
 
 type Options struct {
