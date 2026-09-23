@@ -168,6 +168,40 @@ test('every build-tagged Go file is type-checked by go_static', () => {
   assert.equal(buildConstraintHolds('!windows && (foo || bar)', ['bar']), true)
 })
 
+// A PACKAGE THAT BRANCHES ON THE DIALECT HAS TO BE RUN ON THE DIALECTS.
+//
+// The traffic rollup chose its upsert by `Dialector.Name()`, and for as long as its
+// tests ran on SQLite only, the MySQL branch was proven by a DryRun of its text —
+// the same branch whose empty ON DUPLICATE KEY UPDATE had already failed in
+// production. The postgres and mysql lanes run it now. This keeps that true for the
+// next package that asks which database it is on: any Go file outside sqlstore that
+// reads the dialect must be in a package both lanes test.
+test('every package that branches on the SQL dialect is tested by both dialect lanes', () => {
+  const root = fileURLToPath(new URL('../', import.meta.url))
+  const branching = execFileSync('git', ['ls-files', '-z', '--', '*.go'], { cwd: root, encoding: 'utf8' })
+    .split('\0')
+    .filter((file) => file !== '' && !file.endsWith('_test.go') && !/(^|\/)(vendor|testdata)\//.test(file))
+    .filter((file) => !file.startsWith('internal/adapters/sqlstore/'))
+    .filter((file) => /\bDialector\.Name\(\)/.test(readFileSync(join(root, file), 'utf8')))
+    .map((file) => file.slice(0, file.lastIndexOf('/')))
+  assert(
+    branching.includes('internal/service/rollup'),
+    'the rollup no longer reads the dialect, so this guard checked nothing: drop it from the lanes and from here together',
+  )
+  for (const lane of ['postgres', 'mysql']) {
+    const command = /go test -count=1 -timeout=\S+ ((?:\.\/\S+ )+)2>&1/.exec(job(lane))
+    assert(command, `the ${lane} lane must run go test over named packages`)
+    const patterns = command[1].trim().split(/\s+/)
+    assert(patterns.includes('./internal/adapters/sqlstore/...'), `the ${lane} lane must still test sqlstore`)
+    for (const dir of new Set(branching)) {
+      assert(
+        patterns.some((pattern) => packagePatternCovers(pattern, dir)),
+        `${dir} branches on the SQL dialect and the ${lane} lane does not test it, so only SQLite ever executes that branch`,
+      )
+    }
+  }
+})
+
 // Every job in this file, by name, as its raw block — the same helpers the
 // release guard carries, for the same reason: an invariant over the graph needs
 // the graph.

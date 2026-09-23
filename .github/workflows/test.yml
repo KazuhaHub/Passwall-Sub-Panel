@@ -5,7 +5,8 @@ name: Test
 # GOOS/GOARCH (CGO off, pure Go) so a platform-specific build break is caught
 # here on push/PR instead of only when a release tag is cut. Go static checks
 # run once. The canonical SQLite job runs the whole Go suite under the race
-# detector. PostgreSQL and MySQL run the DB-adapter package separately; those
+# detector. PostgreSQL and MySQL run the DB-adapter package separately, plus the
+# traffic rollup, the one other package that writes dialect-specific SQL; those
 # server dialects reuse an initialized schema for ordinary repository tests
 # while migration/DDL tests retain fresh databases. Every Go test invocation
 # bypasses the Go result cache and uploads output on failure.
@@ -1033,10 +1034,17 @@ jobs:
           test -n "$build_toolchain"
           test "$(go env GOVERSION)" = "$build_toolchain"
           test "$(go tool compile -V | awk '{ print $3 }')" = "$build_toolchain"
+      # THE ROLLUP RUNS HERE TOO, because it is the one package outside sqlstore that
+      # writes dialect-specific SQL: its hourly upsert branches on MySQL, after an empty
+      # ON DUPLICATE KEY UPDATE failed in production, and SQLite alone had executed it.
+      # Its tests read the same PSP_TEST_DB_* variables and take a fresh schema each.
+      # Measured locally on PostgreSQL 16 and MySQL 8.0: 5s and 12s, in a binary go
+      # test runs alongside sqlstore's 96s and 63s, so the step takes no longer. With
+      # the old MySQL branch put back, they fail with the production 1064.
       - name: test
         run: |
           set -o pipefail
-          go test -count=1 -timeout=8m ./internal/adapters/sqlstore/... 2>&1 | tee test-output.txt
+          go test -count=1 -timeout=8m ./internal/adapters/sqlstore/... ./internal/service/rollup/... 2>&1 | tee test-output.txt
       - name: upload test output
         if: failure()
         uses: actions/upload-artifact@v7
@@ -1094,10 +1102,11 @@ jobs:
           test -n "$build_toolchain"
           test "$(go env GOVERSION)" = "$build_toolchain"
           test "$(go tool compile -V | awk '{ print $3 }')" = "$build_toolchain"
+      # The rollup's tests run here as well; the postgres job says why.
       - name: test
         run: |
           set -o pipefail
-          go test -count=1 -timeout=8m ./internal/adapters/sqlstore/... 2>&1 | tee test-output.txt
+          go test -count=1 -timeout=8m ./internal/adapters/sqlstore/... ./internal/service/rollup/... 2>&1 | tee test-output.txt
       - name: upload test output
         if: failure()
         uses: actions/upload-artifact@v7
