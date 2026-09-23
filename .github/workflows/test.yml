@@ -350,10 +350,12 @@ jobs:
           # SCOPED TO ITS OWN EVIDENCE, BECAUSE AN UNSCOPED DOWNLOAD FAILS ON ANYTHING.
           # This step reads the run's artifacts with no name, no id and no pattern — so
           # it depends on every artifact in the run being one it can download and
-          # extract. One was not: the container job's build cache is published as a
-          # `….dockerbuild` artifact, the download of it failed after five retries, and
-          # the gate went red on main reporting "the compatibility evidence could not be
-          # downloaded" while the evidence was sitting right there.
+          # extract. One was not: the container job's build-push-action used to publish
+          # a `….dockerbuild` build record as an artifact, the download of it failed
+          # after five retries, and the gate went red on main reporting "the
+          # compatibility evidence could not be downloaded" while the evidence was
+          # sitting right there. That action is gone, but any job may upload something
+          # this step cannot read, and the scope is what keeps that off the gate.
           #
           # The pattern keeps the layout the checker expects (one directory per
           # artifact) and matches the two legs the gate summarises.
@@ -523,7 +525,10 @@ jobs:
           GOTOOLCHAIN: auto
         with:
           go-version-file: go.mod
-          cache: true
+          # NOTHING IS COMPILED ON THIS RUNNER: the build happens inside the image, and
+          # Go is here for `go tool compile -V` and `go version -m`. The ~372 MB setup-go
+          # would restore is several seconds of download that nothing reads.
+          cache: false
       - name: Verify exact preferred compiler
         run: |
           set -eu
@@ -531,42 +536,34 @@ jobs:
           test -n "$build_toolchain"
           test "$(go env GOVERSION)" = "$build_toolchain"
           test "$(go tool compile -V | awk '{ print $3 }')" = "$build_toolchain"
-      # THE CACHE PARAMETERS BELONG TO THE ACTION, NOT TO THE CLI, AND THE FIRST
-      # VERSION OF THIS GOT IT WRONG IN THE QUIETEST WAY POSSIBLE.
+      # NO LAYER CACHE, AND THAT IS A MEASUREMENT RATHER THAN AN OMISSION. #223 and
+      # #225 gave this image a type=gha cache through setup-buildx and build-push-action,
+      # because two docker builds were 111 of this job's 137 seconds. The job got slower:
+      # 169s on a PR and 202s on main afterwards. The time is the go build, 74s on every
+      # run, and it sits after `COPY . .`, so every commit invalidates it and no layer
+      # cache can hold it. The layer it did hold, the module download, took 19s to
+      # import, which is about what downloading costs; the builder added 11-22s of setup
+      # and teardown; and main spent ~52s exporting the cache at the end. The action also
+      # published a `.dockerbuild` build record as a run artifact, which is what broke the
+      # compatibility gate's unscoped download (#226).
       #
-      # `type=gha` needs `ACTIONS_RUNTIME_TOKEN` and `ACTIONS_CACHE_URL` in the process
-      # that speaks the cache protocol, and with a container-driver builder that process
-      # lives INSIDE the builder container, which does not inherit the runner's
-      # environment. Docker's own documentation says it plainly: run buildx yourself in
-      # an inline step and "the variables must be manually exposed". The earlier version
-      # named a cache on a CLI buildx invocation from a `run:` step, so it cached
-      # nothing — no entry in the cache list, no error in the log, and a build
-      # that took the same 105 seconds. A cache that is never written looks exactly like
-      # a cache that always misses.
-      #
-      # docker/build-push-action populates url and token itself. The release image below
-      # stays a CLI call: it copies a binary into alpine and caches nothing.
-      - uses: docker/setup-buildx-action@v4
+      # So the source image is built on the runner's default builder. Its driver is
+      # `docker`, which puts the result straight into the daemon's image store — where
+      # the `docker create` and `docker run` checks below read it. If this is cached
+      # again, the thing worth caching is the Go compile (a cache mount on
+      # /root/.cache/go-build, persisted across runners), measured against these numbers
+      # first; and a type=gha cache has to be the action's, because one named on a CLI
+      # buildx call is silently never written (#225).
       - name: Build the source image
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          build-args: VERSION=ci
-          tags: psp-source-check
-          # The checks below are `docker create` and `docker cp` against this image, so
-          # it has to reach the daemon's store rather than stay in the builder.
-          load: true
-          cache-from: type=gha,scope=psp-source-image
-          # A PR restores and exports nothing: a save it would make is readable by
-          # nothing but that PR's own re-runs. Same policy as every actions/cache here.
-          cache-to: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && 'type=gha,scope=psp-source-image,mode=max' || '' }}
+        run: docker build --build-arg VERSION=ci --tag psp-source-check .
       - name: Build the release runtime image and check both Docker paths
         run: |
           set -euo pipefail
-          # `--load` IS NOT DECORATION. From Docker 23 on, `docker build` is an alias for
-          # `docker buildx build`, and a container-driver builder leaves the result out
-          # of the daemon's image store unless it is asked — every check below reads that
-          # store, and would fail on an image that built perfectly.
+          # `--load` IS HARMLESS HERE AND KEPT ON PURPOSE. The default builder's docker
+          # driver loads by itself; a container-driver builder, if one is ever set up in
+          # this job again, leaves the result out of the daemon's image store unless it
+          # is asked — and every check below reads that store, so it would fail on an
+          # image that built perfectly.
           runtime_context=$(mktemp -d "$RUNNER_TEMP/psp-runtime-check.XXXXXX")
           mkdir -p "$runtime_context/bin/linux-amd64"
           container_id=$(docker create psp-source-check --version)
@@ -685,13 +682,16 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
-      # THE GO BUILD CACHE IS NOT WHAT `cache: true` RESTORES. That input covers
-      # the MODULE cache (the source of dependencies), not the compiled objects, so
-      # every run recompiled all six targets from source: 354 seconds of it,
-      # measured identically on two consecutive runs — which is what a cache that
-      # is never restored looks like. The same target on a warm GOCACHE compiles
-      # in about two seconds, so the whole step is the cache's to win. Every job in
-      # this file that compiles Go restores it, under a key of its own.
+      # `cache: true` IS NOT THIS JOB'S BUILD CACHE, although it does restore one.
+      # setup-go caches the compiled objects as well as the modules — its log resolves
+      # both GOMODCACHE and GOCACHE and restores ~372 MB into them — but under ONE key
+      # per toolchain and go.sum, shared by every job here and saved, on any event, by
+      # whichever job gets there first: the frozen subset the next paragraph describes.
+      # It did not hold the six cross-compiled targets, so every run recompiled them from
+      # source: 354 seconds of it, measured identically on two consecutive runs. The
+      # same target on a warm GOCACHE compiles in about two seconds, so the whole step
+      # is the cache's to win. Every job in this file that compiles Go restores its own
+      # build cache, under a key of its own.
       #
       # A KEY PER JOB RATHER THAN PER REPOSITORY. `actions/cache` will not save a
       # key that already exists, so several jobs sharing one key means whichever
@@ -804,6 +804,20 @@ jobs:
       - name: Formatting
         run: test -z "$(gofmt -l .)"
       - run: go vet ./...
+      # THE REINSTALL ACCEPTANCE IS BEHIND A BUILD TAG, SO THE LINE ABOVE NEVER OPENS
+      # IT. Its only compile was node-reinstall-acceptance.yml, which runs on a path
+      # filter, and the case imports fifteen of this repository's packages of which the
+      # filter covers six whole. #231 changed six files in the other nine and started
+      # the acceptance only because it also happened to add a test under nodesync. A
+      # signature change there without that luck merges green, and the broken compile
+      # surfaces on the next PR that touches a listed path — blamed on that PR.
+      #
+      # Vetted here it no longer depends on the filter being complete. The dependencies
+      # are already compiled by the line above, but the tag is part of vet's cache key:
+      # measured locally this is ~11s until go.sum next changes and main saves a cache
+      # that has seen it, and under a second after.
+      - name: The tagged reinstall acceptance still compiles
+        run: go vet -tags node_reinstall_acceptance ./tests/acceptance/...
       - name: Reachable vulnerability check
         run: go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
 

@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict'
-import { spawnSync } from 'node:child_process'
+import { execFileSync, spawnSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { test } from 'node:test'
 
 // test.yml had no guard of its own. release_workflow_test.mjs checks the release
@@ -92,6 +94,78 @@ test('the deploy guard suites are all executed by the container job', () => {
   ]) {
     assert(container.includes(suite), `${suite} is not run by any job`)
   }
+})
+
+// A BUILD TAG IS A FILE THE PLAIN `go vet ./...` NEVER OPENS.
+//
+// The reinstall acceptance is behind `node_reinstall_acceptance`, and its only compile
+// was a path-filtered workflow whose list named six of the fifteen packages it
+// imports — so a signature change in the other nine merged green and broke the case
+// silently. go_static vets it with its tag now. This keeps that true for the next
+// tagged suite as well, wherever it is put: every tracked Go file with a build
+// constraint must be opened by a `go vet` line in go_static whose tags satisfy that
+// constraint on the job's runner (linux/amd64, gc, cgo), or its compile depends on a
+// filter happening to fire. The plain `go vet ./...` counts, with no tags, so a file
+// that is merely linux-only is covered by it.
+function buildConstraintHolds(expression, tags) {
+  const satisfied = new Set(['linux', 'unix', 'amd64', 'gc', 'cgo', ...tags])
+  let rest = expression.trim()
+  let program = ''
+  while (rest) {
+    const token = /^(\(|\)|!|&&|\|\||[A-Za-z0-9_.]+)\s*/.exec(rest)
+    assert(token, `cannot read the build constraint "${expression}"`)
+    const word = token[1]
+    program += /^[A-Za-z0-9_.]+$/.test(word) ? ` ${satisfied.has(word) || /^go1\.\d+$/.test(word)} ` : word
+    rest = rest.slice(token[0].length)
+  }
+  // Only true, false and the operators Go shares with JavaScript reach this.
+  return Function(`return (${program})`)()
+}
+
+function packagePatternCovers(pattern, dir) {
+  const path = pattern.replace(/^\.\//, '')
+  if (path === '...') return true
+  if (path.endsWith('/...')) {
+    const prefix = path.slice(0, -'/...'.length)
+    return dir === prefix || dir.startsWith(`${prefix}/`)
+  }
+  return path === dir
+}
+
+test('every build-tagged Go file is type-checked by go_static', () => {
+  const root = fileURLToPath(new URL('../', import.meta.url))
+  // TRACKED FILES, NOT A WALK OF THE TREE, so an installed node_modules or a
+  // scratch checkout cannot add Go files that are nobody's to vet. vendor/ and
+  // testdata/ are left out for the reason `./...` leaves them out, and `ignore` is
+  // the constraint a file uses to ask to be left out of every build, vet included.
+  const tagged = execFileSync('git', ['ls-files', '-z', '--', '*.go'], { cwd: root, encoding: 'utf8' })
+    .split('\0')
+    .filter((file) => file !== '' && !/(^|\/)(vendor|testdata)\//.test(file))
+    .flatMap((file) => {
+      const constraint = /^\/\/go:build (.+)$/m.exec(readFileSync(join(root, file), 'utf8'))
+      if (!constraint || constraint[1].trim() === 'ignore') return []
+      return [{ dir: file.includes('/') ? file.slice(0, file.lastIndexOf('/')) : '.', file, constraint: constraint[1] }]
+    })
+  assert(
+    tagged.length > 0,
+    'no tracked Go file has a build constraint, so this checked nothing: if the reinstall acceptance is gone, its vet step in go_static and this guard go with it',
+  )
+  const vets = [...job('go_static').matchAll(/go vet (?:-tags (\S+) )?(\.\/\S*)/g)].map(([, tags, pattern]) => ({
+    tags: tags ? tags.split(',') : [],
+    pattern,
+  }))
+  for (const { dir, file, constraint } of tagged) {
+    assert(
+      vets.some(({ tags, pattern }) => packagePatternCovers(pattern, dir) && buildConstraintHolds(constraint, tags)),
+      `${file} is built only under "${constraint}", and no \`go vet\` line in go_static opens it. Its compile then depends on a path-filtered workflow happening to run, which is how a broken acceptance merges green.`,
+    )
+  }
+  // The evaluator itself, on the cases that matter: a tag vet does not pass, and a
+  // platform go_static's runner is not.
+  assert.equal(buildConstraintHolds('linux && node_reinstall_acceptance', ['node_reinstall_acceptance']), true)
+  assert.equal(buildConstraintHolds('linux && node_reinstall_acceptance', []), false)
+  assert.equal(buildConstraintHolds('darwin && node_reinstall_acceptance', ['node_reinstall_acceptance']), false)
+  assert.equal(buildConstraintHolds('!windows && (foo || bar)', ['bar']), true)
 })
 
 // Every job in this file, by name, as its raw block — the same helpers the
@@ -287,37 +361,25 @@ test('caches are restored on every event and saved only from the default branch'
     `every job that compiles Go, plus the browser download, restores a cache — found ${restores}`,
   )
 
-  // THE LAYER CACHE FOLLOWS THE SAME POLICY, AND IT HAS TO BE EXPORTED BY THE ACTION.
+  // THE CONTAINER JOB HAS NO LAYER CACHE, AND THAT IS A MEASUREMENT.
   //
-  // `type=gha` needs ACTIONS_RUNTIME_TOKEN and ACTIONS_CACHE_URL in the process that
-  // speaks the cache protocol, and with a container-driver builder that process is
-  // inside the builder container, which does not inherit the runner's environment.
-  // Docker's documentation says it plainly: run buildx yourself in an inline step and
-  // "the variables must be manually exposed". A CLI `--cache-to` in a `run:` step
-  // therefore writes NOTHING, and reports no failure for it — the first version of this
-  // did exactly that. docker/build-push-action populates url and token itself.
+  // #223 and #225 gave its source image a type=gha cache, and the job got slower: 137s
+  // before, 169s on a PR and 202s on main after. The time is the go build — 74s on
+  // every run — and it sits after `COPY . .`, so every commit invalidates it and no
+  // layer cache can hold it; the layer the cache did hold took as long to import as to
+  // download, and main paid ~52s to export it. A cache that comes back here has to
+  // cache the Go compile itself, and has to beat those numbers. Comments are stripped
+  // first, because the workflow's own comment names the thing this rejects.
   const container = job('container')
+  const containerSteps = container.replace(/^\s*#.*$/gm, '')
   assert(
-    /cache-from: type=gha,scope=\S+/.test(container),
-    'the container job must restore a layer cache: its source image is a node + vite + go build that nothing else reuses',
+    !/type=gha/.test(containerSteps),
+    'the container job must not use a type=gha layer cache: its 74s go build sits after COPY . . and is invalidated by every commit, so the cache made the job 30-65s slower rather than faster',
   )
-  assert(
-    /cache-to: \$\{\{ [^}]*refs\/heads\/main[^}]*\}\}/.test(container),
-    'the layer cache must be exported only from the default branch, or it is written where nothing reads it',
-  )
-  for (const line of container.matchAll(/docker buildx build[^\n]*/g)) {
-    if (!/--cache-(from|to)/.test(line[0])) continue
-    assert.fail(
-      `a CLI build carries a cache flag: ${line[0].trim()}. A type=gha cache named there is silently never written, because the builder container does not inherit ACTIONS_RUNTIME_TOKEN — the action has to own it.`,
-    )
-  }
-  assert(
-    container.includes('load: true'),
-    'the source image must be loaded into the daemon: the checks below read it with docker create and docker cp',
-  )
-  // `--load` IS NOT DECORATION. From Docker 23 on, `docker build` is an alias for
-  // `docker buildx build`, and a container-driver builder leaves the result out of the
-  // daemon's store unless it is asked — which is where every check below reads it.
+  // `--load` IS KEPT ON THE RELEASE BUILD. The default builder's docker driver loads by
+  // itself, but a container-driver builder leaves the result out of the daemon's store
+  // unless it is asked — which is where every check below reads it — so the flag is
+  // what keeps the line right if such a builder is ever set up in this job again.
   assert(
     container.includes('docker buildx build --load -f Dockerfile.release'),
     'the release image build must pass --load, or the runtime checks cannot find the image it just built',

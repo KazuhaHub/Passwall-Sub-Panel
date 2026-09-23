@@ -39,12 +39,34 @@ func TestPSPBuildBaselinesStayAligned(t *testing.T) {
 	if len(sourceBase) != 1 || len(releaseBase) != 1 || sourceBase[0][1] != releaseBase[0][1] {
 		t.Error("source and release Docker runtime bases must share one exact three-component Alpine patch release")
 	}
-	for _, path := range []string{".github/workflows/test.yml", ".github/workflows/release.yml"} {
+	// EVERY WORKFLOW THAT SETS UP GO, NOT A LIST OF TWO. The list was test.yml and
+	// release.yml, and node-reinstall-acceptance.yml went on building PSP with
+	// go1.26.8 after go.mod named go1.27.1 because nothing here read it. A workflow
+	// that installs Go builds this repository's code, so it is held to the same
+	// compiler as the binary that ships. The two that always did are still required,
+	// so neither can drop out of the set by losing its setup step.
+	workflows, err := filepath.Glob(filepath.Join("..", "..", ".github", "workflows", "*.y*ml"))
+	if err != nil {
+		t.Fatalf("list workflows: %v", err)
+	}
+	checked := map[string]bool{}
+	for _, file := range workflows {
+		path := ".github/workflows/" + filepath.Base(file)
+		raw := read(path)
+		if !strings.Contains(raw, "actions/setup-go@") {
+			continue
+		}
+		checked[path] = true
 		t.Run(path, func(t *testing.T) {
-			if err := validateBuildBaselineWorkflow(read(path)); err != nil {
+			if err := validateBuildBaselineWorkflow(raw); err != nil {
 				t.Fatal(err)
 			}
 		})
+	}
+	for _, path := range []string{".github/workflows/test.yml", ".github/workflows/release.yml"} {
+		if !checked[path] {
+			t.Errorf("%s no longer sets up Go, so nothing holds its builds to go.mod's compiler", path)
+		}
 	}
 }
 
