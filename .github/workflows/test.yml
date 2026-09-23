@@ -345,7 +345,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: Download every case report
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           # SCOPED TO ITS OWN EVIDENCE, BECAUSE AN UNSCOPED DOWNLOAD FAILS ON ANYTHING.
           # This step reads the run's artifacts with no name, no id and no pattern — so
