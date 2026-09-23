@@ -11,7 +11,7 @@
     "postbuild": "node scripts/restore-dist-gitkeep.mjs",
     "preview": "vite preview",
     "smoke:dist": "node scripts/smoke-dist.mjs",
-    "test": "vitest run",
+    "test": "vitest run --maxWorkers=2",
     "test:coverage": "vitest run --coverage",
     "gen:locale-hant": "node scripts/gen-locale-hant.mjs",
     "gen:locale-hant:builtin": "node scripts/gen-locale-hant.mjs --builtin"
