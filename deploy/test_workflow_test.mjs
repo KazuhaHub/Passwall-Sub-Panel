@@ -361,37 +361,25 @@ test('caches are restored on every event and saved only from the default branch'
     `every job that compiles Go, plus the browser download, restores a cache — found ${restores}`,
   )
 
-  // THE LAYER CACHE FOLLOWS THE SAME POLICY, AND IT HAS TO BE EXPORTED BY THE ACTION.
+  // THE CONTAINER JOB HAS NO LAYER CACHE, AND THAT IS A MEASUREMENT.
   //
-  // `type=gha` needs ACTIONS_RUNTIME_TOKEN and ACTIONS_CACHE_URL in the process that
-  // speaks the cache protocol, and with a container-driver builder that process is
-  // inside the builder container, which does not inherit the runner's environment.
-  // Docker's documentation says it plainly: run buildx yourself in an inline step and
-  // "the variables must be manually exposed". A CLI `--cache-to` in a `run:` step
-  // therefore writes NOTHING, and reports no failure for it — the first version of this
-  // did exactly that. docker/build-push-action populates url and token itself.
+  // #223 and #225 gave its source image a type=gha cache, and the job got slower: 137s
+  // before, 169s on a PR and 202s on main after. The time is the go build — 74s on
+  // every run — and it sits after `COPY . .`, so every commit invalidates it and no
+  // layer cache can hold it; the layer the cache did hold took as long to import as to
+  // download, and main paid ~52s to export it. A cache that comes back here has to
+  // cache the Go compile itself, and has to beat those numbers. Comments are stripped
+  // first, because the workflow's own comment names the thing this rejects.
   const container = job('container')
+  const containerSteps = container.replace(/^\s*#.*$/gm, '')
   assert(
-    /cache-from: type=gha,scope=\S+/.test(container),
-    'the container job must restore a layer cache: its source image is a node + vite + go build that nothing else reuses',
+    !/type=gha/.test(containerSteps),
+    'the container job must not use a type=gha layer cache: its 74s go build sits after COPY . . and is invalidated by every commit, so the cache made the job 30-65s slower rather than faster',
   )
-  assert(
-    /cache-to: \$\{\{ [^}]*refs\/heads\/main[^}]*\}\}/.test(container),
-    'the layer cache must be exported only from the default branch, or it is written where nothing reads it',
-  )
-  for (const line of container.matchAll(/docker buildx build[^\n]*/g)) {
-    if (!/--cache-(from|to)/.test(line[0])) continue
-    assert.fail(
-      `a CLI build carries a cache flag: ${line[0].trim()}. A type=gha cache named there is silently never written, because the builder container does not inherit ACTIONS_RUNTIME_TOKEN — the action has to own it.`,
-    )
-  }
-  assert(
-    container.includes('load: true'),
-    'the source image must be loaded into the daemon: the checks below read it with docker create and docker cp',
-  )
-  // `--load` IS NOT DECORATION. From Docker 23 on, `docker build` is an alias for
-  // `docker buildx build`, and a container-driver builder leaves the result out of the
-  // daemon's store unless it is asked — which is where every check below reads it.
+  // `--load` IS KEPT ON THE RELEASE BUILD. The default builder's docker driver loads by
+  // itself, but a container-driver builder leaves the result out of the daemon's store
+  // unless it is asked — which is where every check below reads it — so the flag is
+  // what keeps the line right if such a builder is ever set up in this job again.
   assert(
     container.includes('docker buildx build --load -f Dockerfile.release'),
     'the release image build must pass --load, or the runtime checks cannot find the image it just built',
