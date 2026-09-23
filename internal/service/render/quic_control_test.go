@@ -32,7 +32,11 @@ func TestSeedRulesSeparateQUICFromGeneralUDP(t *testing.T) {
 	}
 }
 
-func TestSeedControlsDefaultToRejectQUICAndPassUDP(t *testing.T) {
+// TestSeedControlsDefaultToDirectUDPAndQUICFollowsUDP pins the shipped
+// defaults: general UDP goes DIRECT (allowed, local exit, never disabled) and
+// QUIC delegates to the UDP selector, so one switch governs all UDP while QUIC
+// can still be overridden on its own. Both formats get the same defaults.
+func TestSeedControlsDefaultToDirectUDPAndQUICFollowsUDP(t *testing.T) {
 	body, err := os.ReadFile("../../seed/files/rulesets/default-rules.yaml")
 	if err != nil {
 		t.Fatal(err)
@@ -65,22 +69,21 @@ func TestSeedControlsDefaultToRejectQUICAndPassUDP(t *testing.T) {
 				t.Fatalf("missing control groups: %#v", groups)
 			}
 			assertMemberStrings(t, []string{groups[0].Name, groups[1].Name, groups[2].Name}, []string{"🚀 节点选择", "🎮 UDP控制", "⚡ QUIC控制"})
-			assertMemberStrings(t, groups[1].Proxies, []string{"PASS", "🚀 节点选择", "DIRECT", "REJECT"})
-			assertMemberStrings(t, groups[2].Proxies, []string{"REJECT", "🚀 节点选择", "DIRECT"})
+			assertMemberStrings(t, groups[1].Proxies, []string{"DIRECT", "🚀 节点选择", "REJECT"})
+			assertMemberStrings(t, groups[2].Proxies, []string{"🎮 UDP控制", "🚀 节点选择", "DIRECT", "REJECT"})
 
-			// sing-box has no PASS outbound. Its equivalent default omits the UDP
-			// catch-all and selector, while retaining rejected-by-default QUIC.
 			outbounds := buildSingBoxSelectorOutboundsWithMembers(defaults.Content, items, tc.order, nil)
-			if len(outbounds) < 2 {
+			if len(outbounds) < 3 {
 				t.Fatalf("missing sing-box control groups: %#v", outbounds)
 			}
-			for i, name := range []string{"🚀 节点选择", "⚡ QUIC控制"} {
+			for i, name := range []string{"🚀 节点选择", "🎮 UDP控制", "⚡ QUIC控制"} {
 				if outbounds[i]["tag"] != name {
 					t.Fatalf("sing-box group[%d] = %#v, want %s", i, outbounds[i], name)
 				}
 			}
-			if outbounds[1]["default"] != "block" {
-				t.Fatalf("sing-box QUIC default must be block: %#v", outbounds)
+			assertMemberStrings(t, outbounds[1]["outbounds"].([]string), []string{"direct", "🚀 节点选择", "block"})
+			if outbounds[1]["default"] != "direct" || outbounds[2]["default"] != "🎮 UDP控制" {
+				t.Fatalf("sing-box defaults must delegate QUIC to direct UDP: %#v", outbounds[:3])
 			}
 		})
 	}

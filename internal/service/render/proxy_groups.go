@@ -197,8 +197,9 @@ func withRequiredProxyGroupDependencies(targets []string) []string {
 			}
 		}
 	}
-	// Close the transitive dependency if a built-in selector references the UDP
-	// selector: UDP's own alternatives also reference the canonical node group.
+	// The QUIC selector delegates to the UDP selector by default, and UDP's own
+	// alternatives reference the canonical node selector. Close that transitive
+	// dependency even when an administrator defines only a QUIC rule.
 	if needsUDPSelector && !hasUDPSelector {
 		needsNodeSelector = true
 	}
@@ -257,15 +258,20 @@ func normalizeRulePart(raw string) string {
 func proxyGroupChoices(name string) []string {
 	switch {
 	case strings.Contains(name, "QUIC控制"):
-		// HTTP/3 over UDP/443 is independent from general UDP. REJECT is the
-		// conservative default: browsers immediately fall back to TCP instead of
-		// stalling on a slow UDP path. Users can still opt into proxying or DIRECT.
-		return []string{"REJECT", "🚀 节点选择", "DIRECT"}
+		// HTTP/3 over UDP/443 is independently selectable. Delegating to the
+		// general UDP selector first keeps one switch for all UDP, while the
+		// remaining members let a subscriber override QUIC without changing
+		// other UDP traffic. No PASS default here: sing-box has no PASS outbound,
+		// so a PASS-default selector is dropped from sing-box output entirely
+		// and its subscribers lose the switch.
+		return []string{"🎮 UDP控制", "🚀 节点选择", "DIRECT", "REJECT"}
 	case strings.Contains(name, "UDP控制"):
-		// PASS keeps evaluating later domain/region rules, so non-QUIC UDP follows
-		// the same policy as the corresponding service instead of being forced
-		// through a potentially slow UDP proxy or leaked through DIRECT.
-		return []string{"PASS", "🚀 节点选择", "DIRECT", "REJECT"}
+		// General non-local UDP defaults to the local DIRECT exit, independently
+		// of the main node selection. This allows UDP; it neither blocks it nor
+		// depends on the selected node's UDP support, and it does not promise a
+		// proxied source IP. QUIC delegates here by default, while either selector
+		// can still be overridden by subscribers.
+		return []string{"DIRECT", "🚀 节点选择", "REJECT"}
 	case strings.Contains(name, "全球直连"):
 		return []string{"DIRECT"}
 	case strings.Contains(name, "广告拦截") || strings.Contains(name, "应用净化"):
