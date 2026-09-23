@@ -24,9 +24,22 @@ import (
 
 // Policy builds the compatibility policy this build applies.
 //
-// The protocol range comes from the shared protocol package rather than from
-// numbers written here, so the panel cannot be configured into claiming a range
-// its own wire layer does not speak.
+// THE PROTOCOL RANGE IS PSP'S OWN DECLARATION, not the shared package's.
+//
+// It read nodeprotocol.Min/MaxSupportedProtocolVersion until 2026-09-22, with a
+// comment arguing that taking the numbers from the contract stopped the panel
+// claiming a range its wire layer does not speak. That reasoning inverts: the
+// shared package is a DEPENDENCY, so reading its constants here means a go.mod
+// bump widens what this panel admits with no review in this repository — which
+// is the exact failure GenerationRange was introduced to prevent
+// (passwall-protocol/protocol/compatibility.go). The handoff reached
+// internal/domain and stopped one layer short of the policy that feeds
+// compatadmission, and therefore of the remote-upgrade admission path.
+//
+// Two tests disagreed about this and both passed, because Min and Max are both
+// 1: this package asserted the policy follows the shared range, and
+// domain/nodeagent_generations_test.go asserted the opposite. The domain one is
+// the decision; this file now follows it.
 //
 // maxObservationAge is the operator-facing bound on how old a report may be
 // before it stops authorising high-risk work. Callers pass the ADR 0032
@@ -34,15 +47,36 @@ import (
 // may go before the panel stops trusting its own record, and a second number
 // would be a second answer to the same question.
 func Policy(maxObservationAge time.Duration) compatadmission.Policy {
+	return PolicyIn(domain.SupportedNodeProtocolGenerations(), maxObservationAge)
+}
+
+// PolicyIn builds the policy against a generation range the CALLER declares.
+//
+// It exists for the same reason AssessCompatibilityIn exists one layer up, and
+// the reason is testability rather than flexibility: a range read from a
+// constant inside this function cannot be exercised against any other value, so
+// no test can show the policy follows the range it was handed rather than one it
+// reached for. While PSP's declaration and the shared package's constants are
+// both 1, that difference is invisible from the outside — which is precisely the
+// window in which the wiring can be changed back without anything failing.
+//
+// Production has exactly one caller of this, Policy above.
+func PolicyIn(generations nodeprotocol.GenerationRange, maxObservationAge time.Duration) compatadmission.Policy {
 	upgrade := nodeprotocol.AgentUpgradeCapabilities()
 	return compatadmission.Policy{
 		// The revision names the generation the decision was taken under, so a
-		// stored decision can still be read once the policy moves.
-		Revision:           fmt.Sprintf("native-protocol-v%d", nodeprotocol.ProtocolVersion1),
-		MinProtocolVersion: nodeprotocol.MinSupportedProtocolVersion,
-		MaxProtocolVersion: nodeprotocol.MaxSupportedProtocolVersion,
-		LegacyZeroMapsTo:   nodeprotocol.EffectiveProtocolVersion(0),
-		MaxObservationAge:  maxObservationAge,
+		// stored decision can still be read once the policy moves. It spells a
+		// one-generation range as the bare number it has always been, so today's
+		// value is byte-identical and a widened range is visibly different.
+		Revision:           generationRevision(generations),
+		MinProtocolVersion: generations.Min,
+		MaxProtocolVersion: generations.Max,
+		// The legacy zero mapping stays the SHARED package's, and that is not an
+		// inconsistency with the range above. Which generations this panel admits
+		// is PSP's decision; that an omitted protocol_version means v1 is a fact
+		// about the wire format itself, recorded once in the contract.
+		LegacyZeroMapsTo:  nodeprotocol.EffectiveProtocolVersion(0),
+		MaxObservationAge: maxObservationAge,
 		RequiredCapabilities: map[compatadmission.Operation][]string{
 			// Base sync is decided by the protocol range alone (ADR 0033 §1), so
 			// it requires no capability at all.
@@ -59,6 +93,13 @@ func Policy(maxObservationAge time.Duration) compatadmission.Policy {
 		// which is the reviewed-release registry rather than the report.
 		KnownBad: nil,
 	}
+}
+
+func generationRevision(generations nodeprotocol.GenerationRange) string {
+	if generations.Min == generations.Max {
+		return fmt.Sprintf("native-protocol-v%d", generations.Max)
+	}
+	return fmt.Sprintf("native-protocol-v%d..%d", generations.Min, generations.Max)
 }
 
 // DefaultObservationAge is the bound used when no settings are available. It is
@@ -93,9 +134,31 @@ func Request(agent *domain.NodeAgent, operation compatadmission.Operation, now t
 	return compatadmission.Request{
 		Operation: operation,
 		Observed:  Observation(agent),
+		Refused:   Refusal(agent),
 		Now:       now,
 		Policy:    policy,
 	}
+}
+
+// Refusal converts the persisted refusal columns. Nil means this panel is not
+// currently refusing the agent's reports — either it never has, or it has since
+// accepted one, which clears them.
+func Refusal(agent *domain.NodeAgent) *compatadmission.Refusal {
+	if agent == nil || agent.RefusedAt == nil || agent.RefusedReason == "" {
+		return nil
+	}
+	refusal := &compatadmission.Refusal{
+		Reason:  agent.RefusedReason,
+		At:      *agent.RefusedAt,
+		FirstAt: *agent.RefusedAt,
+	}
+	if agent.RefusedFirstAt != nil {
+		refusal.FirstAt = *agent.RefusedFirstAt
+	}
+	if agent.RefusedProtocolVersion != nil {
+		refusal.ProtocolVersion = *agent.RefusedProtocolVersion
+	}
+	return refusal
 }
 
 // Message renders a decision in the words this layer's operators already read.
@@ -112,9 +175,20 @@ func Message(agent *domain.NodeAgent, decision compatadmission.Decision) string 
 	case compatadmission.ReasonObservationStale:
 		return "native agent compatibility observation is too old to act on; wait for a successful check-in"
 	case compatadmission.ReasonProtocolIncompatible:
+		// THE NUMBER IS THE REFUSED ONE WHEN THERE IS ONE. Reading
+		// ObservedProtocolVersion here would print the last generation the panel
+		// ACCEPTED — 1 — in a sentence explaining that the panel refused 2. The
+		// observation is deliberately frozen at the last good value, so it is the
+		// wrong field for this message by construction.
+		reported := nodeprotocol.EffectiveProtocolVersion(agent.ObservedProtocolVersion)
+		if agent.CurrentlyRefused() && agent.RefusedProtocolVersion != nil {
+			reported = *agent.RefusedProtocolVersion
+		}
+		generations := domain.SupportedNodeProtocolGenerations()
 		return fmt.Sprintf("native agent protocol version %d is outside the reviewed range %d..%d",
-			nodeprotocol.EffectiveProtocolVersion(agent.ObservedProtocolVersion),
-			domain.SupportedNodeProtocolGenerations().Min, domain.SupportedNodeProtocolGenerations().Max)
+			reported, generations.Min, generations.Max)
+	case compatadmission.ReasonReportRefused:
+		return "native agent reports are being refused by this panel; the node keeps serving its last applied configuration"
 	case compatadmission.ReasonCapabilityMissing:
 		// Read through the shared protocol assessment rather than re-deriving:
 		// this is a projection of the observation for the message, not a second

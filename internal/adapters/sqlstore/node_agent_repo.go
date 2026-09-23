@@ -37,8 +37,15 @@ type nodeAgentRow struct {
 	AllowRestrictedReality  bool   `gorm:"not null;default:false"`
 	ObservedCoreEngine      string `gorm:"size:16;not null;default:''"`
 	LastSeen                *time.Time
-	CreatedAt               time.Time
-	UpdatedAt               time.Time
+	// Refusal columns are separate from the observation columns on purpose; see
+	// domain.NodeAgent. Nullable so "never refused" is distinguishable from
+	// "refused reporting generation 0", which is the legacy spelling of v1.
+	RefusedProtocolVersion *int
+	RefusedReason          string `gorm:"size:32;not null;default:''"`
+	RefusedFirstAt         *time.Time
+	RefusedAt              *time.Time
+	CreatedAt              time.Time
+	UpdatedAt              time.Time
 }
 
 func (nodeAgentRow) TableName() string { return "node_agents" }
@@ -179,6 +186,10 @@ func rowToNodeAgent(row *nodeAgentRow) *domain.NodeAgent {
 		AllowRestrictedReality:  row.AllowRestrictedReality,
 		ObservedCoreEngine:      domain.NodeCoreEngine(row.ObservedCoreEngine),
 		LastSeen:                row.LastSeen,
+		RefusedProtocolVersion:  row.RefusedProtocolVersion,
+		RefusedReason:           row.RefusedReason,
+		RefusedFirstAt:          row.RefusedFirstAt,
+		RefusedAt:               row.RefusedAt,
 		CreatedAt:               row.CreatedAt, UpdatedAt: row.UpdatedAt,
 	}
 }
@@ -282,12 +293,55 @@ func (r *nodeAgentRepo) UpdateProtocolObservation(ctx context.Context, agentID s
 		"observed_protocol_version": protocolVersion,
 		"observed_capabilities":     jsonStrings(canonical),
 		"protocol_observed_at":      observedAt.UTC(),
+		// An accepted report ENDS a refusal run. Clearing here rather than
+		// comparing timestamps at read time keeps a recovered node from carrying a
+		// stale mark, which is the same rule capabilities follow: a current fact,
+		// never a sticky one.
+		"refused_protocol_version": nil,
+		"refused_reason":           "",
+		"refused_first_at":         nil,
+		"refused_at":               nil,
 	})
 	return r.finishNodeAgentUpdate(ctx, agentID, result)
 }
 
+// RecordProtocolRefusal records that an AUTHENTICATED report was refused at the
+// wire boundary.
+//
+// IT NEVER TOUCHES THE OBSERVATION COLUMNS, and it never touches last_seen.
+// last_seen would be the obvious place and is the wrong one: nodehealth reads it
+// to decide whether an agent is offline, and the installation view reads it to
+// decide whether a node is still applying. Moving it would flip a refused node to
+// "online" and then measure it against thresholds using frozen host metrics.
+//
+// refused_first_at is set once per run via COALESCE, so a node retrying every
+// thirty seconds does not reset the operator's "since when".
+func (r *nodeAgentRepo) RecordProtocolRefusal(ctx context.Context, agentID string, protocolVersion int, reason string, refusedAt time.Time) error {
+	if agentID == "" || reason == "" || refusedAt.IsZero() {
+		return errors.New("record node agent protocol refusal: valid agent ID, reason and refusal time required")
+	}
+	at := refusedAt.UTC()
+	result := r.db.WithContext(ctx).Model(&nodeAgentRow{}).Where("agent_id = ?", agentID).Updates(map[string]any{
+		"refused_protocol_version": protocolVersion,
+		"refused_reason":           reason,
+		"refused_first_at":         gorm.Expr("COALESCE(refused_first_at, ?)", at),
+		"refused_at":               at,
+	})
+	return r.finishNodeAgentUpdate(ctx, agentID, result)
+}
+
+// canonicalProtocolCapabilities refuses a value this panel does not admit before
+// it can reach a row.
+//
+// THE CEILING IS PSP'S DECLARATION, not the shared package's, for the reason
+// given on nodecompat.Policy: reading a dependency's constant here would let a
+// go.mod bump widen what this panel stores without a review in this repository.
+// This guard is why an out-of-range generation is structurally unstorable, and
+// therefore why the persisted observation keeps naming the last generation that
+// was actually accepted.
 func canonicalProtocolCapabilities(protocolVersion int, capabilities []string) ([]string, error) {
-	if protocolVersion < 0 || protocolVersion > nodeprotocol.MaxSupportedProtocolVersion {
+	generations := domain.SupportedNodeProtocolGenerations()
+	if protocolVersion < 0 || protocolVersion > generations.Max {
 		return nil, errors.New("protocol version is unsupported")
 	}
 	if len(capabilities) > nodeprotocol.MaxCapabilitiesPerReport {

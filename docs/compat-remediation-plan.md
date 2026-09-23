@@ -337,6 +337,53 @@ PSP 入口：`internal/service/render/`、用户／流量服务；PN 可复用 `
 
 现有入口：`internal/version/compat*.go`、`internal/ports/xui.go`、`internal/service/nodeagentupgrade/upgrade.go`、`internal/transport/http/handler/admin_servers.go`、`node_agent_upgrade.go`，以及前端服务器 API／能力展示。
 
+**现状缺陷（2026-09-22 核对，未修复）：纯函数决策模型已经存在，但它读的代际范围不是 PSP 自己的声明。**
+
+第 1 步已经完成——`internal/pkg/compatadmission` 是纯函数决策模型，`internal/service/nodecompat`
+是唯一的转换点，第 2、4 步要求的状态区分（`unverified` / `observation-stale` /
+`protocol-incompatible` / `capability-missing` / `known-bad`，以及读取／基础同步／配置写入／远程升级
+四种资格分开）都已实现并有测试。缺的有两件。
+
+**一、四种资格里只有两种被调用。** `compatadmission.OperationBaseSync` 与 `OperationConfigWrite`
+在 `nodecompat.Policy()` 里声明了所需能力（都是空集），**生产代码零调用**，只有
+`nodecompat_test.go` 用到。真正跑在生产路径上的只有 `OperationUpgradeEligibility`
+（`internal/transport/http/handler/admin_servers.go:1868`，服务器列表渲染）与 `OperationRemoteUpgrade`
+（`internal/service/nodeagentupgrade/upgrade.go:171`，创建升级任务）。
+
+**二、`GenerationRange` 的收口只做到了 `internal/domain`。** 共享模块特意把「支持哪些 wire 代际」
+交还给调用方（`passwall-protocol` 的 `protocol/compatibility.go`，理由写在那里：共享依赖升级不得替
+产品扩大支持范围）。PSP 的声明是 `domain.SupportedNodeProtocolGenerations()`
+（`internal/domain/nodeagent.go:63`）。但**今天有三处判代际，没有一处读它**：
+
+| 位置 | 读的是 | 作用 |
+| --- | --- | --- |
+| `passwall-protocol/protocol/validate.go:25` | `ProtocolVersion1` | `/v1/node/sync` 的 wire 闸门 |
+| `internal/service/nodecompat/nodecompat.go:42-43` | `nodeprotocol.Min/MaxSupportedProtocolVersion` | 喂给 `compatadmission` 的准入策略 |
+| `internal/adapters/sqlstore/node_agent_repo.go:290` | `nodeprotocol.MaxSupportedProtocolVersion` | 落库前的取值守卫 |
+
+`SupportedNodeProtocolGenerations()` 自己只有两个调用方，`admin_servers.go:1855` 与
+`nodecompat.go:117`／`:123`，**都只用于渲染给管理员看的状态和文案**。
+
+**两条测试在断言相反的意图，而且都是绿的。**
+`internal/service/nodecompat/nodecompat_test.go:107` 的 `TestPolicyUsesTheSharedProtocolRange`
+写着「policy 的代际范围来自共享包，这样面板不会偏离它实际讲的契约」；
+`internal/domain/nodeagent_generations_test.go:13` 的
+`TestSupportedGenerationsArePSPsOwnDeclaration` 写着「PSP 支持哪些代际由 PSP 自己声明……共享包知道
+某个代际，不等于这个面板接受它」。两者同时通过，只因为两个数今天都是 `1`。
+
+**这意味着什么，不意味着什么。** 今天 `Min == Max == 1`，没有可观察的行为差异，所以这不是一个现存
+故障，也不能据此声称基础同步会错误接受不兼容节点。它是一道建好但没有接上的闸：共享模块增加代际 2
+的那天，**一行 `go.mod` pin bump、PSP 仓库零代码审查**，就会同时widen三处——`/v1/node/sync` 开始
+收，落库守卫开始放行，而 `compatadmission` 的协议分支（`decision.go:192-201`）也跟着放行，于是
+`nodeagentupgrade` 的远程升级准入直接吃到这个判决；与此同时 `nodecompat.Message` 渲染拒绝文案时读
+的是**另一个**范围，会打印 `1..1`。这正是引入 `GenerationRange` 时要挡住的那件事。
+
+修复方向是让这三处都读 `domain.SupportedNodeProtocolGenerations()`，并把
+`TestPolicyUsesTheSharedProtocolRange` 改成断言 policy 等于 PSP 的声明、另补一条「共享模块 Max=2
+时 policy 不跟着变」的用例（可照 `nodeagent_generations_test.go:21` 的 hypothetical 写法）。
+**不要去改共享库的常量**：把范围写回共享库等于重新交出决定权，而 `validate.go` 那个字面量正是
+未来 generation 2 按并行端点规则开 `/v2/node/sync` 时应当原封不动留下的东西。
+
 实施顺序：
 
 1. 先建立纯函数决策模型，输入本地实现约束、经过认证的远端观察、观察时间、适用政策与请求操作；输出运行结论、操作是否允许、稳定 reason code、证据修订。
