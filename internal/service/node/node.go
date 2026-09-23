@@ -25,6 +25,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/crypto"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/log"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/safego"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/xraycompat"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/xrayspec"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/group"
@@ -694,6 +695,48 @@ func (s *Service) UpdateInboundConfig(ctx context.Context, id int64, spec ports.
 		s.markConfigPending(ctx, n)
 	}
 	return nil
+}
+
+// NormalizeRealityFingerprintsForPanel converges existing desired snapshots
+// when a panel is first observed across the Xray 26.9.8 boundary. New writes
+// are normalized by the HTTP boundary; this closes the out-of-band core-upgrade
+// gap for already-managed inbounds without putting a hidden override back in
+// subscription rendering.
+func (s *Service) NormalizeRealityFingerprintsForPanel(ctx context.Context, panelID int64, xrayVersion string) (int, error) {
+	if !xraycompat.RequiresMLKEMFirst(xrayVersion) {
+		return 0, nil
+	}
+	nodes, err := s.nodes.List(ctx)
+	if err != nil {
+		return 0, err
+	}
+	changed := 0
+	var errs []error
+	for _, n := range nodes {
+		if n == nil || n.PanelID != panelID || !inboundcfg.HasStoredConfig(n) {
+			continue
+		}
+		spec, err := inboundcfg.SpecFromNode(n)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("node %d: %w", n.ID, err))
+			continue
+		}
+		normalized, didChange, err := xraycompat.NormalizeRealityFingerprint(spec.StreamSettings, xrayVersion)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("node %d: %w", n.ID, err))
+			continue
+		}
+		if !didChange {
+			continue
+		}
+		spec.StreamSettings = normalized
+		if err := s.UpdateInboundConfig(ctx, n.ID, spec); err != nil {
+			errs = append(errs, fmt.Errorf("node %d: %w", n.ID, err))
+			continue
+		}
+		changed++
+	}
+	return changed, errors.Join(errs...)
 }
 
 // markConfigPending flips the snapshot's sync-state column to "pending" so the

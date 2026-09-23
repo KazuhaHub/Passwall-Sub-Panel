@@ -28,6 +28,13 @@ type captureNodeRepo struct {
 	enabledUpdates int
 }
 
+type normalizationNodeRepo struct {
+	*captureNodeRepo
+	nodes []*domain.Node
+}
+
+func (r *normalizationNodeRepo) List(context.Context) ([]*domain.Node, error) { return r.nodes, nil }
+
 func (r *captureNodeRepo) Create(_ context.Context, n *domain.Node) error {
 	r.created = n
 	if n.ID == 0 {
@@ -151,6 +158,31 @@ func TestUpdateInboundConfig_WriteThrough_PushOK(t *testing.T) {
 	}
 	if client.updated == nil {
 		t.Fatalf("config not pushed to 3X-UI")
+	}
+}
+
+func TestNormalizeRealityFingerprintsForPanelConvergesStoredConfig(t *testing.T) {
+	now := time.Now()
+	n := &domain.Node{
+		ID: 1, PanelID: 7, InboundID: 3, DesiredProtocol: "vless", DesiredPort: 443,
+		InboundSettings: `{"decryption":"none"}`,
+		StreamSettings:  `{"network":"tcp","security":"reality","realitySettings":{"settings":{"fingerprint":"firefox"}}}`,
+		ConfigSyncedAt:  &now,
+	}
+	base := &captureNodeRepo{node: n}
+	repo := &normalizationNodeRepo{captureNodeRepo: base, nodes: []*domain.Node{n}}
+	client := &stubXUIClient{}
+	svc := &Service{nodes: repo, pool: stubXUIPool{c: client}}
+
+	changed, err := svc.NormalizeRealityFingerprintsForPanel(context.Background(), 7, "26.9.9")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if changed != 1 || repo.updateCfg == nil || !strings.Contains(repo.updateCfg.StreamSettings, `"fingerprint":"chrome"`) {
+		t.Fatalf("stored config not normalized: changed=%d node=%+v", changed, repo.updateCfg)
+	}
+	if client.updated == nil || !strings.Contains(client.updated.StreamSettings, `"fingerprint":"chrome"`) {
+		t.Fatalf("normalized config not pushed: %+v", client.updated)
 	}
 }
 

@@ -31,6 +31,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/metrics"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/operationgate"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/safego"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/xraycompat"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/audit"
@@ -917,12 +918,21 @@ func (a *App) probePanelVersionsOnce(ctx context.Context) {
 		}
 		if uerr := a.repos.XUIPanel.UpdateVersion(ctx, p.ID, status.PanelVersion, status.XrayVersion, &now); uerr != nil {
 			log.Warn("compat probe: write version", "panel_id", p.ID, "err", uerr)
-		} else if a.render != nil && p.XrayVersion != status.XrayVersion {
-			// Mihomo REALITY output changes at the Xray 26.9.8 boundary.
-			// Drop the 60s render cache as soon as a manual/out-of-band core
-			// upgrade is observed, otherwise a freshly refreshed subscription
-			// can keep the pre-upgrade handshake shape until cache expiry.
-			a.render.InvalidateAll()
+		} else if p.XrayVersion != status.XrayVersion {
+			if !xraycompat.RequiresMLKEMFirst(p.XrayVersion) && xraycompat.RequiresMLKEMFirst(status.XrayVersion) && a.node != nil {
+				changed, nerr := a.node.NormalizeRealityFingerprintsForPanel(ctx, p.ID, status.XrayVersion)
+				if nerr != nil {
+					log.Warn("compat probe: normalize REALITY fingerprints", "panel_id", p.ID, "changed", changed, "err", nerr)
+				} else if changed > 0 {
+					log.Info("normalized REALITY fingerprints after Xray compatibility boundary", "panel_id", p.ID, "nodes", changed)
+				}
+			}
+			if a.render != nil {
+				// The compatibility transition changes desired inbound snapshots
+				// and Mihomo's explicit ML-KEM option. Drop the render cache as
+				// soon as an out-of-band core change is observed.
+				a.render.InvalidateAll()
+			}
 		}
 		// Rides the same tick and the same authenticated client. One extra GET
 		// against a panel we are already talking to, once per traffic poll

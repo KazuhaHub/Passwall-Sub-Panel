@@ -170,14 +170,6 @@ func emitVLESS(base map[string]any, uuid string, stream xuiStreamSettings, flow 
 		base["tls"] = true
 		if stream.RealitySettings != nil {
 			fingerprint := defaultStr(stream.RealitySettings.Settings.Fingerprint, "chrome")
-			if mihomoMLKEM {
-				// Xray 26.9.8+ rejects a REALITY ClientHello unless its first
-				// key share is X25519MLKEM768. In Mihomo 1.19.29 the opt-in
-				// preserves that share, while chrome is the audited fingerprint
-				// that actually supplies it. The option belongs to the Mihomo
-				// outbound, never the Xray inbound.
-				fingerprint = "chrome"
-			}
 			base["client-fingerprint"] = fingerprint
 			base["servername"] = first(stream.RealitySettings.ServerNames)
 			// publicKey is what the client actually needs. Modern 3X-UI stores
@@ -195,6 +187,9 @@ func emitVLESS(base map[string]any, uuid string, stream xuiStreamSettings, flow 
 				"short-id":   first(stream.RealitySettings.ShortIds),
 			}
 			if mihomoMLKEM {
+				// The inbound write boundary has already normalized the stored
+				// fingerprint to chrome. Rendering only emits Mihomo's explicit
+				// opt-in; it must not silently rewrite desired configuration.
 				realityOptions["support-x25519mlkem768"] = true
 			}
 			base["reality-opts"] = realityOptions
