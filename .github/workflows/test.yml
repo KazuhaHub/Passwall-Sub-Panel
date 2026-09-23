@@ -1034,6 +1034,27 @@ jobs:
           test -n "$build_toolchain"
           test "$(go env GOVERSION)" = "$build_toolchain"
           test "$(go tool compile -V | awk '{ print $3 }')" = "$build_toolchain"
+      # THE SERVER IS THROWAWAY, SO IT DOES NOT SYNC TO DISK. The fixture was already
+      # rebuilt around this cost — DROP DATABASE forced a checkpoint that "made the
+      # schema-heavy CI suite spend minutes syncing disposable data" (testdb_test.go) —
+      # and every reset is still a TRUNCATE ... CASCADE that flushes WAL on commit. No
+      # test asserts crash durability, and a service container that dies takes its data
+      # with it whatever these say. All three are reloadable; psp is the superuser.
+      #
+      # AN EXPERIMENT, MEASURED ONCE. Locally on PostgreSQL 16 it took this step's
+      # command from 94-96s to 64s. What it has to move here is a test-step p50 of
+      # 122s, with eleven of ninety-two runs over 150s and one at 458s against the 8m
+      # timeout: compare p50 and p90 over ~20 runs before calling it a saving. The
+      # -timeout stays as it is either way.
+      - name: the throwaway server does not sync to disk
+        env:
+          SERVICE: ${{ job.services.postgres.id }}
+        run: |
+          docker exec "$SERVICE" psql -U psp -d psptest -v ON_ERROR_STOP=1 \
+            -c 'ALTER SYSTEM SET fsync = off' \
+            -c 'ALTER SYSTEM SET synchronous_commit = off' \
+            -c 'ALTER SYSTEM SET full_page_writes = off' \
+            -c 'SELECT pg_reload_conf()'
       # THE ROLLUP RUNS HERE TOO, because it is the one package outside sqlstore that
       # writes dialect-specific SQL: its hourly upsert branches on MySQL, after an empty
       # ON DUPLICATE KEY UPDATE failed in production, and SQLite alone had executed it.
@@ -1102,6 +1123,17 @@ jobs:
           test -n "$build_toolchain"
           test "$(go env GOVERSION)" = "$build_toolchain"
           test "$(go tool compile -V | awk '{ print $3 }')" = "$build_toolchain"
+      # The postgres job's experiment, for InnoDB: the redo log is flushed about once a
+      # second instead of at every commit, and the binlog whenever the OS gets to it.
+      # Both are dynamic globals. Locally on MySQL 8.0 it took this step's
+      # command from 58-63s to 48s; here the test step's p50 is 90s with one run at
+      # 372s, so it is the tail over ~20 runs that says whether it worked.
+      - name: the throwaway server does not flush every commit
+        env:
+          SERVICE: ${{ job.services.mysql.id }}
+        run: |
+          docker exec "$SERVICE" mysql -uroot -ppsp \
+            -e 'SET GLOBAL innodb_flush_log_at_trx_commit = 0; SET GLOBAL sync_binlog = 0'
       # The rollup's tests run here as well; the postgres job says why.
       - name: test
         run: |
