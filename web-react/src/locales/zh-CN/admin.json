@@ -668,7 +668,7 @@
     },
     "placeholder": {
       "rule_sets": "选择与该模板策略组匹配的规则集",
-      "content": "支持占位符 (proxies / proxy_groups / rules_common / rules_personal)"
+      "content": "支持占位符 (proxies / proxy_groups / rules_common / rules_personal / mihomo_sub_rules)"
     },
     "table": {
       "slug": "Slug",
@@ -692,6 +692,7 @@
       "missing_targets": "规则目标未在模板策略组中找到：{{names}}",
       "groups_ok": "已识别 {{n}} 个策略组，规则目标匹配正常。",
       "no_binding": "当前未绑定规则集，只会渲染节点、策略组和个人规则。",
+      "missing_mihomo_sub_rules": "所选规则集包含 Mihomo 子规则，模板必须加入 {{ mihomo_sub_rules }} 占位符。",
       "incomplete": "模板内容尚未完整，请继续编辑。"
     },
     "validate": {
@@ -1050,7 +1051,41 @@
     },
     "tabs": {
       "rules": "规则内容",
-      "members": "策略组成员"
+      "members": "策略组成员",
+      "mihomo": "Mihomo 高级规则"
+    },
+    "mihomo": {
+      "compatibility": "这些配置仅进入 Mihomo 订阅；Rematch 出站要求 Mihomo v1.19.28 或更高版本，sing-box 会忽略全部高级字段。",
+      "main_rules": "Mihomo 主规则",
+      "main_rules_hint": "按规则集顺序插入共享规则之前；适合放置 SUB-RULE、REMATCH-NAME 及触发 Rematch 的规则。",
+      "rematches": "Rematch 出站",
+      "rematches_hint": "标记名用于重新匹配主规则；目标子规则用于直接进入命名子规则，二者至少填写一个。",
+      "outbound_name": "出站名称",
+      "target_rematch_name": "Rematch 标记名",
+      "target_sub_rule": "目标子规则",
+      "no_rematches": "尚未配置 Rematch 出站",
+      "sub_rules": "命名子规则",
+      "sub_rules_hint": "每个子规则使用 Mihomo 规则列表语法，建议提供 MATCH 兜底。",
+      "sub_rule_name": "子规则名称",
+      "unnamed_sub_rule": "未命名子规则",
+      "no_sub_rules": "尚未配置子规则",
+      "issues": {
+        "invalid_name": "名称不能为空，也不能包含逗号或换行",
+        "duplicate_sub_rule": "子规则名称重复：{{name}}",
+        "invalid_rule_yaml": "规则内容不是有效的 YAML 规则列表",
+        "nested_sub_rule": "Mihomo 子规则内不能再次跳转到 SUB-RULE",
+        "missing_match_fallback": "子规则没有 MATCH 兜底，未命中时将无法得到明确出口",
+        "missing_sub_rule": "SUB-RULE 引用的子规则不存在：{{name}}",
+        "duplicate_rematch_outbound": "Rematch 出站名称重复：{{name}}",
+        "missing_rematch_target": "Rematch 出站至少需要设置标记名或目标子规则",
+        "invalid_rematch_name": "Rematch 标记名不能为空，也不能包含逗号或换行",
+        "missing_target_sub_rule": "Rematch 目标子规则不存在",
+        "outbound_name_collision": "Rematch 出站名称与内置出口、策略组或节点名称冲突：{{name}}",
+        "unsafe_rematch_order": "对应的 REMATCH-NAME 规则必须位于触发该 Rematch 出站的规则之前",
+        "duplicate_bound_sub_rule": "当前模板绑定的规则集中存在同名子规则：{{name}}",
+        "duplicate_bound_rematch_outbound": "当前模板绑定的规则集中存在同名 Rematch 出站：{{name}}",
+        "missing_sub_rules_placeholder": "模板必须包含 {{ mihomo_sub_rules }} 占位符"
+      }
     },
     "members": {
       "groups_title": "代理组",
@@ -1105,6 +1140,7 @@
       "kind_tag": "标签节点",
       "kind_builtin": "内置出口",
       "kind_group": "其他代理组",
+      "kind_outbound": "Rematch 出站",
       "remaining": "其余节点（自动去重）",
       "region_set": "区域：{{value}}",
       "tag_set": "标签：{{value}}",
@@ -1131,6 +1167,7 @@
         "invalid_node_set": "非法节点集合：{{value}}",
         "empty_node_set": "节点集合当前没有匹配项：{{value}}",
         "unknown_kind": "未知成员类型：{{value}}",
+        "missing_outbound": "引用的 Rematch 出站不存在：{{value}}",
         "missing_remaining": "未包含“其余节点”，未来新增节点不会自动进入此代理组",
         "cycle": "代理组引用形成循环",
         "unknown_group_options": "代理组类型配置不在当前规则内容中",
@@ -1141,7 +1178,7 @@
         "invalid_tolerance": "节点切换容差不能小于 0",
         "invalid_strategy": "未知负载均衡策略：{{value}}",
         "insufficient_auto_members": "自动选择或负载均衡通常至少需要两个可用成员",
-        "auto_group_builtin_member": "自动测速 / 回退 / 负载均衡类型的成员不能包含 DIRECT、REJECT 等内置出口，请改用具体节点或其它代理组"
+        "auto_group_builtin_member": "自动测速 / 回退 / 负载均衡类型的成员不能包含内置出口或 Rematch 出站，请改用具体节点或其它代理组"
       }
     },
     "table": {
@@ -1161,7 +1198,8 @@
     "validate": {
       "slug_name_required": "slug 和 name 必填",
       "slug_exists": "已存在 slug 为“{{slug}}”的规则集 —— 请换一个 slug",
-      "proxy_group_members": "策略组成员配置存在错误，请先修正"
+      "proxy_group_members": "策略组成员配置存在错误，请先修正",
+      "mihomo": "Mihomo 高级规则存在错误，请先修正"
     },
     "toast": {
       "saved": "已保存",

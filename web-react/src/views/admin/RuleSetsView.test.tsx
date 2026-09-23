@@ -124,3 +124,33 @@ it('reports a failed read instead of showing an empty rule-set list', async () =
 
   await waitFor(() => expect(screen.getByText('admin:rules.load_failed')).toBeTruthy())
 })
+
+it('edits and saves Mihomo main rules, sub-rules, and Rematch outbounds', async () => {
+  const advancedRow = {
+    ...row,
+    mihomo_rules: '- DOMAIN,ai.example,AI Rematch',
+    mihomo_sub_rules: [{ name: 'ai-rules', content: '- MATCH,DIRECT' }],
+    mihomo_rematch_outbounds: [{ name: 'AI Rematch', target_rematch_name: 'ai', target_sub_rule: 'ai-rules' }],
+  }
+  installReads({ '/admin/rules': list([advancedRow]) })
+  api.post.mockResolvedValue({ data: { groups: [], builtins: [], nodes: [], regions: [], tags: [], issues: [] } })
+  api.put.mockImplementation(async (_url, body) => ({ data: body }))
+  mount(<RuleSetsView />)
+
+  const dialog = await editRow()
+  fireEvent.click(within(dialog).getByRole('tab', { name: 'admin:rules.tabs.mihomo' }))
+  await waitFor(() => expect(within(dialog).getAllByLabelText('code')).toHaveLength(2))
+  expect(within(dialog).getByDisplayValue('AI Rematch')).toBeTruthy()
+  expect((within(dialog).getByLabelText('admin:rules.mihomo.sub_rule_name') as HTMLInputElement).value).toBe('ai-rules')
+
+  fireEvent.change(within(dialog).getAllByLabelText('code')[0], { target: { value: '- DOMAIN,new.example,AI Rematch' } })
+  fireEvent.change(within(dialog).getByLabelText('admin:rules.mihomo.target_rematch_name'), { target: { value: 'ai-v2' } })
+  fireEvent.click(within(dialog).getByRole('button', { name: 'common:actions.ok' }))
+
+  await waitFor(() => expect(api.put).toHaveBeenCalledTimes(1))
+  expect(api.put.mock.calls[0][1]).toMatchObject({
+    mihomo_rules: '- DOMAIN,new.example,AI Rematch',
+    mihomo_sub_rules: [{ name: 'ai-rules', content: '- MATCH,DIRECT' }],
+    mihomo_rematch_outbounds: [{ name: 'AI Rematch', target_rematch_name: 'ai-v2', target_sub_rule: 'ai-rules' }],
+  })
+})

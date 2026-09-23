@@ -93,3 +93,38 @@ func TestResolveRulesCommonDoesNotInjectWithoutEnabledOptionOrHostname(t *testin
 		})
 	}
 }
+
+func TestResolveRuleBundleSeparatesMihomoAndSharedRules(t *testing.T) {
+	s := &Service{repos: ports.Repos{RuleSet: renderRuleSetRepo{items: map[string]*domain.RuleSet{
+		"advanced": {
+			Slug: "advanced", Enabled: true,
+			Content:                "- MATCH,Shared",
+			MihomoRules:            "- REMATCH-NAME,marked,Mihomo",
+			MihomoSubRules:         []domain.MihomoSubRule{{Name: "sub", Content: "- MATCH,Mihomo"}},
+			MihomoRematchOutbounds: []domain.MihomoRematchOutbound{{Name: "jump", TargetSubRule: "sub"}},
+		},
+	}}}}
+	bundle, err := s.resolveRuleBundle(context.Background(), &domain.Template{RuleSets: []string{"advanced"}}, ports.UISettings{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bundle.SharedRules != "- MATCH,Shared" {
+		t.Fatalf("shared rules = %q", bundle.SharedRules)
+	}
+	if bundle.MihomoRules != "- REMATCH-NAME,marked,Mihomo\n- MATCH,Shared" {
+		t.Fatalf("Mihomo rules = %q", bundle.MihomoRules)
+	}
+	if len(bundle.SubRules) != 1 || len(bundle.RematchOutbounds) != 1 {
+		t.Fatalf("advanced bundle missing: %#v", bundle)
+	}
+}
+
+func TestResolveRuleBundleRejectsDuplicateAdvancedNames(t *testing.T) {
+	s := &Service{repos: ports.Repos{RuleSet: renderRuleSetRepo{items: map[string]*domain.RuleSet{
+		"one": {Slug: "one", Enabled: true, Content: "- MATCH,DIRECT", MihomoSubRules: []domain.MihomoSubRule{{Name: "duplicate", Content: "- MATCH,DIRECT"}}},
+		"two": {Slug: "two", Enabled: true, Content: "- MATCH,DIRECT", MihomoSubRules: []domain.MihomoSubRule{{Name: "duplicate", Content: "- MATCH,DIRECT"}}},
+	}}}}
+	if _, err := s.resolveRuleBundle(context.Background(), &domain.Template{RuleSets: []string{"one", "two"}}, ports.UISettings{}); err == nil {
+		t.Fatal("expected duplicate sub-rule error")
+	}
+}

@@ -18,7 +18,9 @@ var proxyGroupBuiltins = []string{"DIRECT", "REJECT", "REJECT-DROP", "PASS"}
 // do not currently resolve (for example a disabled/deleted node).
 type ProxyGroupIssue struct {
 	Level   string         `json:"level"`
+	Section string         `json:"section,omitempty"`
 	Group   string         `json:"group,omitempty"`
+	Name    string         `json:"name,omitempty"`
 	Code    string         `json:"code,omitempty"`
 	Params  map[string]any `json:"params,omitempty"`
 	Message string         `json:"message"`
@@ -67,8 +69,8 @@ type ProxyGroupMetadata struct {
 // no longer occur in the rule content. References from a surviving group to a
 // removed group are deliberately retained: the normal validator must surface
 // those as missing_group instead of silently changing the surviving layout.
-func NormalizeProxyGroupMetadata(content string, order []string, members map[string][]domain.ProxyGroupMember, options map[string]domain.ProxyGroupOptions) ProxyGroupMetadata {
-	targets := proxyGroupTargets(content, members)
+func NormalizeProxyGroupMetadata(content string, order []string, members map[string][]domain.ProxyGroupMember, options map[string]domain.ProxyGroupOptions, advanced ...MihomoRuleFeatures) ProxyGroupMetadata {
+	targets := proxyGroupTargets(content, members, advanced...)
 	valid := make(map[string]bool, len(targets))
 	for _, target := range targets {
 		valid[target] = true
@@ -119,9 +121,15 @@ func NormalizeProxyGroupMetadata(content string, order []string, members map[str
 // intentionally free of repositories so the admin handler and unit tests can
 // use the exact compiler semantics without constructing a render Service.
 func InspectProxyGroups(content string, members map[string][]domain.ProxyGroupMember, options map[string]domain.ProxyGroupOptions, nodes []*domain.Node, previewScope ...[]*domain.Node) ProxyGroupInspection {
-	targets := proxyGroupTargets(content, members)
-	issues := validateProxyGroupMembers(targets, members, nodes)
+	return InspectProxyGroupsWithMihomo(content, members, options, nodes, MihomoRuleFeatures{}, previewScope...)
+}
+
+func InspectProxyGroupsWithMihomo(content string, members map[string][]domain.ProxyGroupMember, options map[string]domain.ProxyGroupOptions, nodes []*domain.Node, advanced MihomoRuleFeatures, previewScope ...[]*domain.Node) ProxyGroupInspection {
+	advanced = NormalizeMihomoRuleFeatures(advanced)
+	targets := proxyGroupTargets(content, members, advanced)
+	issues := validateProxyGroupMembers(targets, members, nodes, advanced.outboundNames())
 	issues = append(issues, validateProxyGroupOptions(targets, options)...)
+	issues = append(issues, inspectMihomoFeatures(content, advanced, targets, members, nodes)...)
 
 	regionsSet := map[string]bool{}
 	tagsSet := map[string]bool{}
@@ -182,16 +190,16 @@ func InspectProxyGroups(content string, members map[string][]domain.ProxyGroupMe
 		if optionsConfigured {
 			effectiveOptions = EffectiveProxyGroupOptions(rawOptions)
 		}
-		preview := resolveConfiguredMembers(effective, previewItems)
+		preview := resolveConfiguredMembersWithOutbounds(effective, previewItems)
 		isAutoType := effectiveOptions.Type == ProxyGroupTypeURLTest ||
 			effectiveOptions.Type == ProxyGroupTypeFallback ||
 			effectiveOptions.Type == ProxyGroupTypeLoadBalance
-		if isAutoType && membersContainBuiltinExit(effective) {
+		if isAutoType && membersContainNonTestableExit(effective) {
 			// A DIRECT/REJECT member turns an auto group into a no-op: DIRECT wins
 			// the health check in ~0ms (everything routes direct) and REJECT makes
 			// the check fail. Block it at save time so the misconfiguration surfaces
 			// in the editor instead of silently misrouting at render time.
-			issues = append(issues, ProxyGroupIssue{Level: "error", Group: target, Code: "auto_group_builtin_member", Message: "自动测速 / 回退 / 负载均衡类型的成员不能包含 DIRECT、REJECT 等内置出口，请改用具体节点或其它代理组"})
+			issues = append(issues, ProxyGroupIssue{Level: "error", Group: target, Code: "auto_group_builtin_member", Message: "自动测速 / 回退 / 负载均衡类型的成员不能包含内置出口或 Rematch 出站，请改用具体节点或其它代理组"})
 		}
 		if (effectiveOptions.Type == ProxyGroupTypeURLTest || effectiveOptions.Type == ProxyGroupTypeLoadBalance) && len(preview) < 2 {
 			issues = append(issues, ProxyGroupIssue{Level: "warning", Group: target, Code: "insufficient_auto_members", Message: "自动选择或负载均衡通常至少需要两个可用成员"})
@@ -211,8 +219,12 @@ func InspectProxyGroups(content string, members map[string][]domain.ProxyGroupMe
 	}
 }
 
-func proxyGroupTargets(content string, members map[string][]domain.ProxyGroupMember) []string {
-	targets := withRequiredProxyGroupDependencies(ruleTargetsInOrder(content))
+func proxyGroupTargets(content string, members map[string][]domain.ProxyGroupMember, advanced ...MihomoRuleFeatures) []string {
+	features := MihomoRuleFeatures{}
+	if len(advanced) > 0 {
+		features = advanced[0]
+	}
+	targets := withRequiredProxyGroupDependencies(ruleTargetsInOrderExcluding(strings.Join(features.allRuleFragments(content), "\n"), features.outboundNames()))
 	return withConfiguredProxyGroupDependencies(targets, members)
 }
 
@@ -270,7 +282,7 @@ func defaultMembersForTarget(target string) []domain.ProxyGroupMember {
 	return out
 }
 
-func validateProxyGroupMembers(targets []string, configs map[string][]domain.ProxyGroupMember, nodes []*domain.Node) []ProxyGroupIssue {
+func validateProxyGroupMembers(targets []string, configs map[string][]domain.ProxyGroupMember, nodes []*domain.Node, outbounds ...map[string]bool) []ProxyGroupIssue {
 	issues := []ProxyGroupIssue{}
 	targetSet := map[string]bool{}
 	for _, t := range targets {
@@ -283,6 +295,10 @@ func validateProxyGroupMembers(targets []string, configs map[string][]domain.Pro
 		}
 	}
 	graph := map[string][]string{}
+	knownOutbounds := map[string]bool{}
+	if len(outbounds) > 0 {
+		knownOutbounds = outbounds[0]
+	}
 
 	for group, list := range configs {
 		if !targetSet[group] {
@@ -336,6 +352,10 @@ func validateProxyGroupMembers(targets []string, configs map[string][]domain.Pro
 				}
 				if member.Value == "remaining" {
 					hasRemaining = true
+				}
+			case "outbound":
+				if !knownOutbounds[member.Value] {
+					issues = append(issues, ProxyGroupIssue{Level: "error", Group: group, Code: "missing_outbound", Params: map[string]any{"value": member.Value}, Message: "引用的 Rematch 出站不存在：" + member.Value})
 				}
 			default:
 				issues = append(issues, ProxyGroupIssue{Level: "error", Group: group, Code: "unknown_kind", Params: map[string]any{"value": member.Kind}, Message: "未知成员类型：" + member.Kind})
@@ -393,12 +413,11 @@ func nodeSetHasMatch(selector string, nodes []*domain.Node) bool {
 	return false
 }
 
-// membersContainBuiltinExit reports whether any member is a DIRECT/REJECT-family
-// built-in outbound, which is invalid inside an auto (url-test/fallback/
-// load-balance) group.
-func membersContainBuiltinExit(members []domain.ProxyGroupMember) bool {
+// membersContainNonTestableExit reports members that cannot safely participate
+// in health checks: built-in exits and control-flow-only Rematch outbounds.
+func membersContainNonTestableExit(members []domain.ProxyGroupMember) bool {
 	for _, member := range members {
-		if member.Kind == "builtin" && builtInRuleTargets[member.Value] {
+		if member.Kind == "outbound" || (member.Kind == "builtin" && builtInRuleTargets[member.Value]) {
 			return true
 		}
 	}
@@ -420,6 +439,16 @@ func memberLabel(member domain.ProxyGroupMember, nodes map[int64]*domain.Node) s
 // labels globally, which makes "specific node, DIRECT, remaining" do what an
 // admin expects without repeating that node inside remaining.
 func resolveConfiguredMembers(members []domain.ProxyGroupMember, items []renderItem) []string {
+	return resolveConfiguredMembersForClient(members, items, false)
+}
+
+// resolveConfiguredMembersWithOutbounds is the Mihomo variant. sing-box uses
+// resolveConfiguredMembers and deliberately drops Mihomo-only Rematch members.
+func resolveConfiguredMembersWithOutbounds(members []domain.ProxyGroupMember, items []renderItem) []string {
+	return resolveConfiguredMembersForClient(members, items, true)
+}
+
+func resolveConfiguredMembersForClient(members []domain.ProxyGroupMember, items []renderItem, includeOutbounds bool) []string {
 	seen := map[string]bool{}
 	out := []string{}
 	add := func(name string) {
@@ -440,6 +469,10 @@ func resolveConfiguredMembers(members []domain.ProxyGroupMember, items []renderI
 		switch member.Kind {
 		case "builtin", "proxy_group":
 			add(member.Value)
+		case "outbound":
+			if includeOutbounds {
+				add(member.Value)
+			}
 		case "node":
 			addMatching(func(item renderItem) bool { return item.node != nil && item.node.ID == member.NodeID })
 		case "node_set":

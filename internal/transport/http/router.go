@@ -532,7 +532,7 @@ func NewRouter(d Deps) stdhttp.Handler {
 		adminGroup.PUT("/groups/:id/scope-settings", scopeSettings.SetOverride)
 		adminGroup.DELETE("/groups/:id/scope-settings/:type/:name", scopeSettings.DeleteOverride)
 
-		rules := handler.NewAdminRuleSetsHandler(d.Repos.RuleSet, d.Repos.Node, d.Group, d.Render.InvalidateAll, d.Cfg.ConfigDir)
+		rules := handler.NewAdminRuleSetsHandler(d.Repos.RuleSet, d.Repos.Node, d.Group, d.Render.InvalidateAll, d.Cfg.ConfigDir, d.Repos.Template)
 		staffGroup.GET("/rules", rules.List)
 		adminGroup.POST("/rules/inspect-proxy-groups", rules.InspectProxyGroups)
 		staffGroup.GET("/rules/:slug", rules.Get)
@@ -540,7 +540,7 @@ func NewRouter(d Deps) stdhttp.Handler {
 		adminGroup.DELETE("/rules/:slug", rules.Delete)
 		adminGroup.POST("/rules/:slug/reset", rules.Reset)
 
-		templates := handler.NewAdminTemplatesHandler(d.Repos.Template, d.Cfg.ConfigDir)
+		templates := handler.NewAdminTemplatesHandler(d.Repos.Template, d.Cfg.ConfigDir, d.Repos.RuleSet)
 		staffGroup.GET("/templates", templates.List)
 		staffGroup.GET("/templates/:slug", templates.Get)
 		adminGroup.PUT("/templates/:slug", templates.Save)

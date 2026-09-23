@@ -668,7 +668,7 @@
     },
     "placeholder": {
       "rule_sets": "Pick rule sets matching this template's proxy groups",
-      "content": "Supports proxies / proxy_groups / rules_common / rules_personal placeholders"
+      "content": "Supports proxies / proxy_groups / rules_common / rules_personal / mihomo_sub_rules placeholders"
     },
     "table": {
       "slug": "Slug",
@@ -692,6 +692,7 @@
       "missing_targets": "Rule targets not found in the template's proxy groups: {{names}}",
       "groups_ok": "Detected {{n}} proxy groups; rule targets match.",
       "no_binding": "Nothing bound — only nodes, proxy groups, and personal rules will render.",
+      "missing_mihomo_sub_rules": "A selected rule set defines Mihomo sub-rules, so the template must contain {{ mihomo_sub_rules }}.",
       "incomplete": "Template content is too short to analyze."
     },
     "validate": {
@@ -1052,7 +1053,41 @@
     },
     "tabs": {
       "rules": "Rules",
-      "members": "Group members"
+      "members": "Group members",
+      "mihomo": "Mihomo advanced"
+    },
+    "mihomo": {
+      "compatibility": "These settings are emitted only for Mihomo subscriptions. Rematch requires Mihomo v1.19.28 or newer; sing-box ignores every advanced field.",
+      "main_rules": "Mihomo main rules",
+      "main_rules_hint": "Inserted before the shared rules in each rule set; use this for SUB-RULE, REMATCH-NAME, and rules that trigger Rematch.",
+      "rematches": "Rematch outbounds",
+      "rematches_hint": "The rematch name restarts main-rule matching; the target sub-rule jumps directly to a named sub-rule. Set at least one.",
+      "outbound_name": "Outbound name",
+      "target_rematch_name": "Rematch name",
+      "target_sub_rule": "Target sub-rule",
+      "no_rematches": "No Rematch outbounds configured",
+      "sub_rules": "Named sub-rules",
+      "sub_rules_hint": "Each sub-rule uses a Mihomo rule list. A MATCH fallback is recommended.",
+      "sub_rule_name": "Sub-rule name",
+      "unnamed_sub_rule": "Unnamed sub-rule",
+      "no_sub_rules": "No sub-rules configured",
+      "issues": {
+        "invalid_name": "The name cannot be empty or contain commas or line breaks",
+        "duplicate_sub_rule": "Duplicate sub-rule name: {{name}}",
+        "invalid_rule_yaml": "The rule content is not a valid YAML rule list",
+        "nested_sub_rule": "A Mihomo sub-rule cannot jump to another SUB-RULE",
+        "missing_match_fallback": "This sub-rule has no MATCH fallback, so unmatched traffic has no explicit outbound",
+        "missing_sub_rule": "The referenced SUB-RULE does not exist: {{name}}",
+        "duplicate_rematch_outbound": "Duplicate Rematch outbound name: {{name}}",
+        "missing_rematch_target": "A Rematch outbound needs a rematch name, a target sub-rule, or both",
+        "invalid_rematch_name": "The Rematch name cannot be empty or contain commas or line breaks",
+        "missing_target_sub_rule": "The target sub-rule does not exist",
+        "outbound_name_collision": "The Rematch outbound name conflicts with a built-in, proxy group, or node: {{name}}",
+        "unsafe_rematch_order": "The matching REMATCH-NAME rule must appear before the rule that selects this Rematch outbound",
+        "duplicate_bound_sub_rule": "The selected rule sets contain duplicate sub-rule names: {{name}}",
+        "duplicate_bound_rematch_outbound": "The selected rule sets contain duplicate Rematch outbound names: {{name}}",
+        "missing_sub_rules_placeholder": "The template must contain the {{ mihomo_sub_rules }} placeholder"
+      }
     },
     "members": {
       "groups_title": "Proxy groups",
@@ -1107,6 +1142,7 @@
       "kind_tag": "Tagged nodes",
       "kind_builtin": "Built-in outbound",
       "kind_group": "Another proxy group",
+      "kind_outbound": "Rematch outbound",
       "remaining": "Remaining nodes (deduplicated)",
       "region_set": "Region: {{value}}",
       "tag_set": "Tag: {{value}}",
@@ -1133,6 +1169,7 @@
         "invalid_node_set": "Invalid node set: {{value}}",
         "empty_node_set": "The node set currently has no matches: {{value}}",
         "unknown_kind": "Unknown member type: {{value}}",
+        "missing_outbound": "Referenced Rematch outbound does not exist: {{value}}",
         "missing_remaining": "Without “Remaining nodes”, newly added nodes will not enter this proxy group automatically",
         "cycle": "Proxy-group references form a cycle",
         "unknown_group_options": "The proxy-group type configuration does not occur in the current rule content",
@@ -1143,7 +1180,7 @@
         "invalid_tolerance": "The switch tolerance cannot be negative",
         "invalid_strategy": "Unknown load-balancing strategy: {{value}}",
         "insufficient_auto_members": "Automatic selection or load balancing usually needs at least two available members",
-        "auto_group_builtin_member": "url-test / fallback / load-balance members cannot include built-in exits like DIRECT or REJECT; use a specific node or another proxy group instead"
+        "auto_group_builtin_member": "url-test / fallback / load-balance members cannot include built-in or Rematch outbounds; use a specific node or another proxy group instead"
       }
     },
     "table": {
@@ -1163,7 +1200,8 @@
     "validate": {
       "slug_name_required": "Slug and name are required",
       "slug_exists": "A rule set with slug \"{{slug}}\" already exists — choose a different slug",
-      "proxy_group_members": "Fix the proxy-group member errors before saving"
+      "proxy_group_members": "Fix the proxy-group member errors before saving",
+      "mihomo": "Fix the Mihomo advanced-rule errors before saving"
     },
     "toast": {
       "saved": "Saved",

@@ -63,6 +63,56 @@ func TestAdminRuleSetsSavePersistsMembersAndOptionsAndInvalidatesRenderCache(t *
 	}
 }
 
+func TestAdminRuleSetsSavePersistsMihomoAdvancedFields(t *testing.T) {
+	repo, err := yamladapter.NewRuleSetRepo(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := NewAdminRuleSetsHandler(repo, staticRuleNodes{}, nil, nil, t.TempDir())
+	body := ruleSetDTO{
+		Slug: "advanced", Name: "Advanced", Enabled: true, Content: "- MATCH,DIRECT",
+		MihomoRules:            "- DOMAIN-SUFFIX,openai.com,use-ai-rules",
+		MihomoSubRules:         []domain.MihomoSubRule{{Name: "ai-rules", Content: "- MATCH,DIRECT"}},
+		MihomoRematchOutbounds: []domain.MihomoRematchOutbound{{Name: "use-ai-rules", TargetSubRule: "ai-rules"}},
+	}
+	w := performRuleSave(t, h, body)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+	got, err := repo.GetBySlug(context.Background(), "advanced")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.MihomoRules != body.MihomoRules || len(got.MihomoSubRules) != 1 || len(got.MihomoRematchOutbounds) != 1 {
+		t.Fatalf("advanced fields not persisted: %#v", got)
+	}
+}
+
+func TestAdminRuleSetsSaveRejectsBoundSubRulesWithoutTemplatePlaceholder(t *testing.T) {
+	root := t.TempDir()
+	rules, err := yamladapter.NewRuleSetRepo(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	templates, err := yamladapter.NewTemplateRepo(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := templates.Save(context.Background(), &domain.Template{
+		Slug: "mihomo", Name: "Mihomo", ClientType: domain.ClientMihomo, RuleSets: []string{"advanced"}, Content: "rules:\n  {{ rules_common }}",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	h := NewAdminRuleSetsHandler(rules, staticRuleNodes{}, nil, nil, root, templates)
+	w := performRuleSave(t, h, ruleSetDTO{
+		Slug: "advanced", Name: "Advanced", Enabled: true, Content: "- MATCH,DIRECT",
+		MihomoSubRules: []domain.MihomoSubRule{{Name: "ai-rules", Content: "- MATCH,DIRECT"}},
+	})
+	if w.Code != http.StatusBadRequest || !bytes.Contains(w.Body.Bytes(), []byte("missing_sub_rules_placeholder")) {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+}
+
 func TestAdminRuleSetsSavePrunesRemovedGroupMetadataAndReturnsPersistedRuleSet(t *testing.T) {
 	repo, err := yamladapter.NewRuleSetRepo(t.TempDir())
 	if err != nil {

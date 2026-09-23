@@ -38,7 +38,10 @@ func TestRuleSetRepoSaveListGetDelete(t *testing.T) {
 		ProxyGroupOptions: map[string]domain.ProxyGroupOptions{
 			"💬 Ai平台": {Type: "url-test", URL: "https://example.com/check", Interval: ruleSetInt(0), Lazy: ruleSetBool(false), Timeout: ruleSetInt(2500), Tolerance: ruleSetInt(80)},
 		},
-		Content: "- DOMAIN-SUFFIX,example.com,DIRECT",
+		MihomoRules:            "- SUB-RULE,(NETWORK,tcp),ai-rules",
+		MihomoSubRules:         []domain.MihomoSubRule{{Name: "ai-rules", Content: "- MATCH,💬 Ai平台"}},
+		MihomoRematchOutbounds: []domain.MihomoRematchOutbound{{Name: "use-ai-rules", TargetSubRule: "ai-rules"}},
+		Content:                "- DOMAIN-SUFFIX,example.com,DIRECT",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -63,6 +66,9 @@ func TestRuleSetRepoSaveListGetDelete(t *testing.T) {
 	}
 	if options := got.ProxyGroupOptions["💬 Ai平台"]; options.Type != "url-test" || options.Interval == nil || *options.Interval != 0 || options.Lazy == nil || *options.Lazy || options.Tolerance == nil || *options.Tolerance != 80 {
 		t.Fatalf("unexpected proxy group options: %#v", got.ProxyGroupOptions)
+	}
+	if got.MihomoRules == "" || len(got.MihomoSubRules) != 1 || got.MihomoSubRules[0].Name != "ai-rules" || len(got.MihomoRematchOutbounds) != 1 || got.MihomoRematchOutbounds[0].TargetSubRule != "ai-rules" {
+		t.Fatalf("unexpected Mihomo advanced fields: %#v", got)
 	}
 
 	if _, err := os.Stat(filepath.Join(repo.dir, "a_rules.yaml")); err != nil {

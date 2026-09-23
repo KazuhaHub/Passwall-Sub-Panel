@@ -148,36 +148,47 @@ func (s *Service) RenderForUser(ctx context.Context, u *domain.User, ct domain.C
 	if err != nil {
 		return nil, fmt.Errorf("load template: %w", err)
 	}
-	proxies := s.buildProxies(ctx, u, items, st)
-
-	proxiesYAML, err := yaml.Marshal(proxies)
-	if err != nil {
-		return nil, fmt.Errorf("marshal proxies: %w", err)
-	}
-
-	rulesCommon, proxyGroupOrder, proxyGroupMembers, proxyGroupOptions, err := s.resolveRulesCommon(ctx, tpl, st)
+	bundle, err := s.resolveRuleBundle(ctx, tpl, st)
 	if err != nil {
 		return nil, fmt.Errorf("resolve rules: %w", err)
 	}
-	if len(proxyGroupOrder) == 0 {
-		proxyGroupOrder = tpl.ProxyGroupOrder
+	if len(bundle.ProxyGroupOrder) == 0 {
+		bundle.ProxyGroupOrder = tpl.ProxyGroupOrder
 	}
 	if ct == domain.ClientSingBox {
 		// proxyGroupOptions is intentionally Mihomo-only. sing-box has no
 		// complete semantic equivalent for fallback/load-balance, so all groups
 		// remain selectors while sharing the same ordered member layouts.
-		return s.renderSingBox(ctx, u, tpl, items, rulesCommon, proxyGroupOrder, proxyGroupMembers, st)
+		return s.renderSingBox(ctx, u, tpl, items, bundle.SharedRules, bundle.ProxyGroupOrder, bundle.ProxyGroupMembers, st)
 	}
-	proxyGroupsYAML, err := buildProxyGroupsYAMLWithMembers(strings.Join([]string{u.PersonalRules, rulesCommon}, "\n"), proxyGroupOrder, proxyGroupMembers, proxyGroupOptions, items)
+	proxies := s.buildProxies(ctx, u, items, st)
+	proxies, err = appendMihomoRematchOutbounds(proxies, bundle.RematchOutbounds)
+	if err != nil {
+		return nil, err
+	}
+	proxiesYAML, err := yaml.Marshal(proxies)
+	if err != nil {
+		return nil, fmt.Errorf("marshal proxies: %w", err)
+	}
+	advanced := MihomoRuleFeatures{Rules: bundle.MihomoRules, SubRules: bundle.SubRules, RematchOutbounds: bundle.RematchOutbounds}
+	proxyGroupsYAML, err := buildProxyGroupsYAMLWithFeatures(strings.Join([]string{u.PersonalRules, bundle.MihomoRules}, "\n"), bundle.ProxyGroupOrder, bundle.ProxyGroupMembers, bundle.ProxyGroupOptions, items, advanced)
 	if err != nil {
 		return nil, fmt.Errorf("build proxy groups: %w", err)
 	}
+	subRulesYAML, err := marshalMihomoSubRules(bundle.SubRules)
+	if err != nil {
+		return nil, fmt.Errorf("marshal Mihomo sub-rules: %w", err)
+	}
+	if subRulesYAML != "" && !hasRootBlockPlaceholder(tpl.Content, "mihomo_sub_rules") {
+		return nil, fmt.Errorf("template %s must contain {{ mihomo_sub_rules }} when bound rules define Mihomo sub-rules", tpl.Slug)
+	}
 
 	body := substituteBlockPlaceholders(tpl.Content, map[string]string{
-		"proxies":        strings.TrimRight(string(proxiesYAML), "\n"),
-		"proxy_groups":   proxyGroupsYAML,
-		"rules_common":   strings.TrimRight(rulesCommon, "\n"),
-		"rules_personal": strings.TrimRight(u.PersonalRules, "\n"),
+		"proxies":          strings.TrimRight(string(proxiesYAML), "\n"),
+		"proxy_groups":     proxyGroupsYAML,
+		"rules_common":     strings.TrimRight(bundle.MihomoRules, "\n"),
+		"rules_personal":   strings.TrimRight(u.PersonalRules, "\n"),
+		"mihomo_sub_rules": subRulesYAML,
 	})
 	body = substituteInlinePlaceholders(body, s.profilePlaceholders(u, st))
 	body = expandNodeRefs(body, items)
@@ -596,19 +607,34 @@ recv:
 	return out
 }
 
-func (s *Service) resolveRulesCommon(ctx context.Context, tpl *domain.Template, st ports.UISettings) (string, []string, map[string][]domain.ProxyGroupMember, map[string]domain.ProxyGroupOptions, error) {
+type resolvedRuleBundle struct {
+	SharedRules       string
+	MihomoRules       string
+	ProxyGroupOrder   []string
+	ProxyGroupMembers map[string][]domain.ProxyGroupMember
+	ProxyGroupOptions map[string]domain.ProxyGroupOptions
+	SubRules          []domain.MihomoSubRule
+	RematchOutbounds  []domain.MihomoRematchOutbound
+}
+
+func (s *Service) resolveRuleBundle(ctx context.Context, tpl *domain.Template, st ports.UISettings) (resolvedRuleBundle, error) {
 	slugs := tpl.RuleSets
 	if len(slugs) == 0 {
 		log.Debug("render: no rule_sets configured for template", "template", tpl.Slug)
-		return "", nil, nil, nil, nil
+		return resolvedRuleBundle{}, nil
 	}
-	parts := make([]string, 0, len(slugs))
+	sharedParts := make([]string, 0, len(slugs))
+	mihomoParts := make([]string, 0, len(slugs)*2)
 	directSubscriptionRule := subscriptionDirectRule(st.SubBaseURL)
 	directSubscriptionRequested := false
 	proxyGroupOrder := []string{}
 	seenOrder := map[string]bool{}
 	proxyGroupMembers := map[string][]domain.ProxyGroupMember{}
 	proxyGroupOptions := map[string]domain.ProxyGroupOptions{}
+	subRules := []domain.MihomoSubRule{}
+	rematchOutbounds := []domain.MihomoRematchOutbound{}
+	seenSubRules := map[string]string{}
+	seenRematchOutbounds := map[string]string{}
 	for _, slug := range slugs {
 		rs, err := s.repos.RuleSet.GetBySlug(ctx, slug)
 		if err != nil {
@@ -623,11 +649,40 @@ func (s *Service) resolveRulesCommon(ctx context.Context, tpl *domain.Template, 
 			directSubscriptionRequested = true
 		}
 		content := strings.TrimRight(rs.Content, "\n")
-		if content == "" {
+		mihomoRules := strings.TrimRight(rs.MihomoRules, "\n")
+		if content == "" && mihomoRules == "" && len(rs.MihomoSubRules) == 0 && len(rs.MihomoRematchOutbounds) == 0 {
 			log.Warn("render: rule_set content is empty", "slug", slug)
 			continue
 		}
-		parts = append(parts, content)
+		if content != "" {
+			sharedParts = append(sharedParts, content)
+		}
+		if mihomoRules != "" {
+			mihomoParts = append(mihomoParts, mihomoRules)
+		}
+		if content != "" {
+			mihomoParts = append(mihomoParts, content)
+		}
+		for _, subRule := range rs.MihomoSubRules {
+			name := strings.TrimSpace(subRule.Name)
+			if owner, exists := seenSubRules[name]; exists {
+				return resolvedRuleBundle{}, fmt.Errorf("duplicate Mihomo sub-rule %q in rule sets %s and %s", name, owner, slug)
+			}
+			seenSubRules[name] = slug
+			subRule.Name = name
+			subRules = append(subRules, subRule)
+		}
+		for _, outbound := range rs.MihomoRematchOutbounds {
+			name := strings.TrimSpace(outbound.Name)
+			if owner, exists := seenRematchOutbounds[name]; exists {
+				return resolvedRuleBundle{}, fmt.Errorf("duplicate Mihomo rematch outbound %q in rule sets %s and %s", name, owner, slug)
+			}
+			seenRematchOutbounds[name] = slug
+			outbound.Name = name
+			outbound.TargetRematchName = strings.TrimSpace(outbound.TargetRematchName)
+			outbound.TargetSubRule = strings.TrimSpace(outbound.TargetSubRule)
+			rematchOutbounds = append(rematchOutbounds, outbound)
+		}
 		for _, target := range rs.ProxyGroupOrder {
 			target = strings.TrimSpace(target)
 			if target == "" || seenOrder[target] {
@@ -653,11 +708,25 @@ func (s *Service) resolveRulesCommon(ctx context.Context, tpl *domain.Template, 
 		// Keep the generated exception at the head of the common rules. Personal
 		// rules still remain ahead of rules_common by template design, while this
 		// rule always wins over a later MATCH or broad catch-all in a ruleset.
-		parts = append([]string{directSubscriptionRule}, parts...)
+		sharedParts = append([]string{directSubscriptionRule}, sharedParts...)
+		mihomoParts = append([]string{directSubscriptionRule}, mihomoParts...)
 	}
-	result := strings.Join(parts, "\n")
-	log.Debug("render: rules_common resolved", "total_length", len(result), "rule_sets", len(parts))
-	return result, proxyGroupOrder, proxyGroupMembers, proxyGroupOptions, nil
+	shared := strings.Join(sharedParts, "\n")
+	mihomo := strings.Join(mihomoParts, "\n")
+	log.Debug("render: rules_common resolved", "total_length", len(mihomo), "rule_sets", len(sharedParts))
+	return resolvedRuleBundle{
+		SharedRules: shared, MihomoRules: mihomo,
+		ProxyGroupOrder: proxyGroupOrder, ProxyGroupMembers: proxyGroupMembers, ProxyGroupOptions: proxyGroupOptions,
+		SubRules: subRules, RematchOutbounds: rematchOutbounds,
+	}, nil
+}
+
+// resolveRulesCommon retains the narrow helper used by subscription-domain
+// tests and older call sites. It exposes the shared rule stream; Mihomo render
+// uses resolveRuleBundle directly.
+func (s *Service) resolveRulesCommon(ctx context.Context, tpl *domain.Template, st ports.UISettings) (string, []string, map[string][]domain.ProxyGroupMember, map[string]domain.ProxyGroupOptions, error) {
+	bundle, err := s.resolveRuleBundle(ctx, tpl, st)
+	return bundle.SharedRules, bundle.ProxyGroupOrder, bundle.ProxyGroupMembers, bundle.ProxyGroupOptions, err
 }
 
 // subscriptionDirectRule returns the client rule that keeps the PSP

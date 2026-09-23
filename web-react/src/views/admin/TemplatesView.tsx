@@ -293,8 +293,13 @@ export default function TemplatesView() {
   const formRuleTargets = extractRuleTargets(formSelectedRuleSets)
   const formMissing = missingTargets(formProxyGroups, formRuleTargets)
   const formDynamic = usesDynamicProxyGroups(form.content)
+  const formNeedsMihomoSubRules = form.client_type === 'mihomo' && formSelectedRuleSets.some(ruleSet => (ruleSet.mihomo_sub_rules || []).length > 0)
+  const formMissingMihomoSubRulesPlaceholder = formNeedsMihomoSubRules && !/^\{\{\s*mihomo_sub_rules\s*\}\}\s*$/m.test(form.content)
 
   function formHint() {
+    if (formMissingMihomoSubRulesPlaceholder) {
+      return { color: md.error, text: t('admin:templates.hint.missing_mihomo_sub_rules') }
+    }
     if (formDynamic && form.rule_sets.length > 0) {
       return { color: md.tertiary, text: t('admin:templates.hint.auto_groups') }
     }

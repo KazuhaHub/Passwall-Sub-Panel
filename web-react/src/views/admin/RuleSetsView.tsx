@@ -48,6 +48,7 @@ import { pushSnack } from '@/components/SnackbarHost'
 import { PagedTableFooter } from '@/components/PagedTableFooter'
 import PageHeader from '@/components/PageHeader'
 import ProxyGroupMembersEditor from '@/components/ProxyGroupMembersEditor'
+import MihomoAdvancedRulesEditor from '@/components/MihomoAdvancedRulesEditor'
 import { pruneRuleSetProxyGroupMetadata } from '@/utils/proxyGroupMembers'
 
 // Lazy-load the CodeMirror editor so its (heavy) deps stay out of the initial
@@ -55,7 +56,7 @@ import { pruneRuleSetProxyGroupMetadata } from '@/utils/proxyGroupMembers'
 const CodeEditor = lazy(() => import('@/components/CodeEditor'))
 
 const EMPTY: RuleSet = {
-  slug: '', name: '', sort: 100, enabled: true, direct_subscription_domain: false, proxy_group_order: [], proxy_group_members: {}, proxy_group_options: {}, content: '',
+  slug: '', name: '', sort: 100, enabled: true, direct_subscription_domain: false, proxy_group_order: [], proxy_group_members: {}, proxy_group_options: {}, mihomo_rules: '', mihomo_sub_rules: [], mihomo_rematch_outbounds: [], content: '',
 }
 
 function cloneProxyGroupMembers(members: RuleSet['proxy_group_members']): NonNullable<RuleSet['proxy_group_members']> {
@@ -64,6 +65,17 @@ function cloneProxyGroupMembers(members: RuleSet['proxy_group_members']): NonNul
 
 function cloneProxyGroupOptions(options: RuleSet['proxy_group_options']): NonNullable<RuleSet['proxy_group_options']> {
   return Object.fromEntries(Object.entries(options || {}).map(([name, value]) => [name, { ...value }]))
+}
+
+function cloneRuleSet(ruleSet: RuleSet): RuleSet {
+  return {
+    ...ruleSet,
+    proxy_group_order: [...(ruleSet.proxy_group_order || [])],
+    proxy_group_members: cloneProxyGroupMembers(ruleSet.proxy_group_members),
+    proxy_group_options: cloneProxyGroupOptions(ruleSet.proxy_group_options),
+    mihomo_sub_rules: (ruleSet.mihomo_sub_rules || []).map(rule => ({ ...rule })),
+    mihomo_rematch_outbounds: (ruleSet.mihomo_rematch_outbounds || []).map(outbound => ({ ...outbound })),
+  }
 }
 
 export default function RuleSetsView() {
@@ -99,7 +111,7 @@ export default function RuleSetsView() {
   const [initialProxyGroupMembers, setInitialProxyGroupMembers] = useState<NonNullable<RuleSet['proxy_group_members']>>({})
   const [initialProxyGroupOptions, setInitialProxyGroupOptions] = useState<NonNullable<RuleSet['proxy_group_options']>>({})
   const [busy, setBusy] = useState(false)
-  const [dialogTab, setDialogTab] = useState<'rules' | 'members'>('rules')
+  const [dialogTab, setDialogTab] = useState<'rules' | 'members' | 'mihomo'>('rules')
 
   // Client-side pagination — rule-set lists are tiny but the footer
   // gives the admin a per-page selector consistent with other tables.
@@ -149,12 +161,13 @@ export default function RuleSetsView() {
   }
 
   function openCreate() {
-    setEditing(false); setForm({ ...EMPTY, proxy_group_order: [], proxy_group_members: {}, proxy_group_options: {} }); setInitialProxyGroupOrder([]); setInitialProxyGroupMembers({}); setInitialProxyGroupOptions({}); setDialogTab('rules'); setDialogOpen(true)
+    setEditing(false); setForm(cloneRuleSet(EMPTY)); setInitialProxyGroupOrder([]); setInitialProxyGroupMembers({}); setInitialProxyGroupOptions({}); setDialogTab('rules'); setDialogOpen(true)
   }
   function openEdit(rs: RuleSet) {
-    const proxyGroupMembers = cloneProxyGroupMembers(rs.proxy_group_members)
-    const proxyGroupOptions = cloneProxyGroupOptions(rs.proxy_group_options)
-    setEditing(true); setForm({ ...rs, proxy_group_members: proxyGroupMembers, proxy_group_options: proxyGroupOptions }); setInitialProxyGroupMembers(cloneProxyGroupMembers(proxyGroupMembers)); setInitialProxyGroupOptions(cloneProxyGroupOptions(proxyGroupOptions))
+    const draft = cloneRuleSet(rs)
+    const proxyGroupMembers = draft.proxy_group_members || {}
+    const proxyGroupOptions = draft.proxy_group_options || {}
+    setEditing(true); setForm(draft); setInitialProxyGroupMembers(cloneProxyGroupMembers(proxyGroupMembers)); setInitialProxyGroupOptions(cloneProxyGroupOptions(proxyGroupOptions))
     setInitialProxyGroupOrder([...(rs.proxy_group_order || [])])
     setDialogTab('rules')
     setDialogOpen(true)
@@ -164,11 +177,12 @@ export default function RuleSetsView() {
   // (especially useful for seeded rule sets that are now non-deletable
   // and would lose customizations on Restore).
   function openDuplicate(rs: RuleSet) {
-    const proxyGroupMembers = cloneProxyGroupMembers(rs.proxy_group_members)
-    const proxyGroupOptions = cloneProxyGroupOptions(rs.proxy_group_options)
+    const cloned = cloneRuleSet(rs)
+    const proxyGroupMembers = cloned.proxy_group_members || {}
+    const proxyGroupOptions = cloned.proxy_group_options || {}
     setEditing(false)
     setForm({
-      ...rs,
+      ...cloned,
       slug: rs.slug + '-copy',
       name: rs.name + ' (Copy)',
       proxy_group_members: proxyGroupMembers,
@@ -200,6 +214,9 @@ export default function RuleSetsView() {
         content: draft.content,
         proxy_group_members: draft.proxy_group_members || {},
         proxy_group_options: draft.proxy_group_options || {},
+        mihomo_rules: draft.mihomo_rules || '',
+        mihomo_sub_rules: draft.mihomo_sub_rules || [],
+        mihomo_rematch_outbounds: draft.mihomo_rematch_outbounds || [],
       })
       const cleanup = pruneRuleSetProxyGroupMetadata(draft, inspection.groups)
       if (cleanup.removedGroups.length > 0) {
@@ -215,12 +232,16 @@ export default function RuleSetsView() {
           content: draft.content,
           proxy_group_members: draft.proxy_group_members || {},
           proxy_group_options: draft.proxy_group_options || {},
+          mihomo_rules: draft.mihomo_rules || '',
+          mihomo_sub_rules: draft.mihomo_sub_rules || [],
+          mihomo_rematch_outbounds: draft.mihomo_rematch_outbounds || [],
         })
       }
       const hasErrors = inspection.issues.some(issue => issue.level === 'error')
       if (hasErrors) {
-        setDialogTab('members')
-        pushSnack(t('admin:rules.validate.proxy_group_members'), 'warning'); return
+        const hasMihomoErrors = inspection.issues.some(issue => issue.level === 'error' && Boolean(issue.section))
+        setDialogTab(hasMihomoErrors ? 'mihomo' : 'members')
+        pushSnack(t(hasMihomoErrors ? 'admin:rules.validate.mihomo' : 'admin:rules.validate.proxy_group_members'), 'warning'); return
       }
       const saved = await saveRuleSet(draft)
       if (editing) {
@@ -468,6 +489,7 @@ export default function RuleSetsView() {
             <Tabs value={dialogTab} onChange={(_, value) => setDialogTab(value)} sx={{ borderBottom: `1px solid ${md.outlineVariant}` }}>
               <Tab value="rules" label={t('admin:rules.tabs.rules')} />
               <Tab value="members" label={t('admin:rules.tabs.members')} />
+              <Tab value="mihomo" label={t('admin:rules.tabs.mihomo')} />
             </Tabs>
             {dialogTab === 'rules' && <>
             <TextField required fullWidth label={t('admin:rules.field.slug')}
@@ -526,7 +548,13 @@ export default function RuleSetsView() {
                 initialOptions={initialProxyGroupOptions}
                 onOptionsChange={proxy_group_options => setForm(current => ({ ...current, proxy_group_options }))}
                 previewGroups={groups}
+                mihomoRules={form.mihomo_rules}
+                mihomoSubRules={form.mihomo_sub_rules}
+                mihomoRematchOutbounds={form.mihomo_rematch_outbounds}
               />
+            )}
+            {dialogTab === 'mihomo' && (
+              <MihomoAdvancedRulesEditor value={form} onChange={setForm} />
             )}
           </Box>
         </DialogContent>

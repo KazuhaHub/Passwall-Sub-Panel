@@ -158,6 +158,8 @@ func upgradeUnmodifiedRoutingDefaults(configDir string) error {
 	updates := []managedDefaultUpdate{
 		{relPath: "templates/default-mihomo.yaml", oldSHA256s: []string{
 			"13cd9b7b8d29447f86fd46503536e15359e07116c302d3b5364a66e879a84c3c",
+			// Default through v4.0.0-beta.25, before Mihomo sub-rules support.
+			"d83f169df2cd5f5889c5635c074f0546db46c4f7e319e818b80445b9ee8a6dd0",
 		}},
 		{relPath: "rulesets/default-rules.yaml", oldSHA256s: []string{
 			"01c4be93d1bb183336940faa8ed8ebf0f08110adee12327405ab659be282adbc",

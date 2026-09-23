@@ -118,7 +118,7 @@ setDialogOpen(false)
 
 新接口若不满足这些条件，应优先让 `PUT/PATCH` 返回安全的完整实体，而不是再加一次列表读取。
 
-规则集是一个明确的反例：保存时会删除规则正文中已不存在策略组的 `proxy_group_order`、`proxy_group_members` 与 `proxy_group_options` 项，并规范化代理组类型参数，因此 `PUT /api/admin/rules/:slug` 返回实际落盘的完整实体。前端必须用该响应替换本地行，不能把提交前的表单快照写回。
+规则集是一个明确的反例：保存时会删除规则正文（包括 Mihomo 主规则与子规则）中已不存在策略组的 `proxy_group_order`、`proxy_group_members` 与 `proxy_group_options` 项，并规范化代理组类型参数；Mihomo 子规则、Rematch 出站及其成员引用也会在落盘前校验。因此 `PUT /api/admin/rules/:slug` 返回实际落盘的完整实体。前端必须用该响应替换本地行，不能把提交前的表单快照写回。
 
 ### 3.4 创建与编辑必须分开
 
