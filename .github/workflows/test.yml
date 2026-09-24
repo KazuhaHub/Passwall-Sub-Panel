@@ -273,28 +273,64 @@ jobs:
           git -C "$contract_repo" checkout -q FETCH_HEAD
           test "$(git -C "$contract_repo" rev-parse HEAD)" = "$source_commit"
           test -f "$contract_repo/go.mod"
-          # NOT a per-version case: this job exercises the exact published
-          # revision PSP consumes, whatever go.mod pins, rather than a released
-          # tag. It is filed under its own name so it cannot collide with the
-          # matrix case for the same version, and so it is visible as additional
-          # evidence rather than mistaken for one of the promised cases.
+          # NOT a per-version case: this job exercises the exact published revision
+          # the manifest names as the contract source, rather than a matrix end. It is
+          # filed under its own name so it cannot collide with the matrix case for the
+          # same version, and so it is visible as additional evidence rather than
+          # mistaken for one of the promised cases.
           evidence="evidence/pinned-source"
           mkdir -p "$evidence"
-          # Captured, not propagated: the validator has to run even when the
-          # tests failed, because its report is what names the required item that
-          # did not pass. stderr stays separate from the JSON stream.
-          test_exit=0
-          PSP_LIVE_NODE_REPO="$contract_repo" go test -json -count=1 -timeout=5m \
-            ./internal/service/nodesync \
-            -run '^TestLive_RealNode(AgentContract|MigratedServerContract|TaskEvidenceReceipt|TaskExpiryContract)$' \
-            > "$evidence/go-events.jsonl" 2> "$evidence/go-stderr.txt" || test_exit=$?
-          node deploy/compat/check-go-results.mjs \
-            --profile node-wire-v1 \
-            --input "$evidence/go-events.jsonl" \
-            --go-exit-code "$test_exit" \
-            --output "$evidence/result.json"
-          # TWO CROSS-REPOSITORY CONTRACTS ARE CHECKED HERE, in the only job that
-          # has the other repository on disk.
+          # THE WIRE SUITE IS NOT RUN TWICE ON ONE COMMIT. When contract_source is one
+          # of the planned matrix cases -- the bookkeeping for v4.0.1.3 and v4.0.1.4
+          # moved both together -- node-compatibility has already run these four tests,
+          # with this profile, against this commit, for this PSP SHA, in this same run,
+          # and the compatibility gate fails unless that job succeeded. A second run
+          # adds no coverage. When the source is a release between the matrix ends, as
+          # v4.0.1.4 is while the newest end is v4.0.1.5, it is extra coverage, and it
+          # runs. Matched by COMMIT, the identity both jobs verify, never by version.
+          covered_by=$(node deploy/compat/plan.mjs --emit cases \
+            | python3 -c 'import json,sys; print(" ".join(c["id"] for c in json.load(sys.stdin) if c["sha"] == sys.argv[1]))' "$source_commit")
+          # WHICH REVISION, WRITTEN FIRST. A report that cannot name its inputs cannot
+          # be re-checked, and this file used to be written last, under `set -e`: a
+          # failing wire run or cross-repository test exited before it, and the
+          # uploaded evidence of the failure had no identity.
+          cat > "$evidence/environment.json" <<JSON
+          {
+            "case": "pinned-source",
+            "profile": "node-wire-v1",
+            "psp_sha": "${{ github.sha }}",
+            "node_pinned_tag": "$source_tag",
+            "node_sha": "$(git -C "$contract_repo" rev-parse HEAD 2>/dev/null || echo unknown)",
+            "wire_covered_by": "$covered_by",
+            "runner_os": "$RUNNER_OS",
+            "runner_arch": "$RUNNER_ARCH",
+            "run_id": "${{ github.run_id }}",
+            "run_attempt": "${{ github.run_attempt }}"
+          }
+          JSON
+          # From here every verdict is COLLECTED, the way node-compatibility collects
+          # its legs: a wire failure must not hide whether the cross-repository
+          # contracts below broke as well, and the reverse.
+          failed=0
+          if [ -n "$covered_by" ]; then
+            echo "wire contract: $source_commit is the planned case $covered_by, which node-compatibility runs in this workflow run; not run a second time"
+          else
+            # Captured, not propagated: the validator has to run even when the tests
+            # failed, because its report is what names the required item that did not
+            # pass. stderr stays separate from the JSON stream.
+            test_exit=0
+            PSP_LIVE_NODE_REPO="$contract_repo" go test -json -count=1 -timeout=5m \
+              ./internal/service/nodesync \
+              -run '^TestLive_RealNode(AgentContract|MigratedServerContract|TaskEvidenceReceipt|TaskExpiryContract)$' \
+              > "$evidence/go-events.jsonl" 2> "$evidence/go-stderr.txt" || test_exit=$?
+            node deploy/compat/check-go-results.mjs \
+              --profile node-wire-v1 \
+              --input "$evidence/go-events.jsonl" \
+              --go-exit-code "$test_exit" \
+              --output "$evidence/result.json" || failed=1
+          fi
+          # THREE CROSS-REPOSITORY CONTRACTS ARE CHECKED HERE, ALWAYS, in the only job
+          # that has the other repository on disk.
           #
           #   internal/version        PSP's copy of the shared version vectors is
           #                           still the copy the Node project publishes. Both
@@ -311,23 +347,10 @@ jobs:
           #                           still the one the project publishes. A drifted
           #                           copy is a panel offering a pulled release.
           #
-          # THEY RUN AFTER THE EVIDENCE IS WRITTEN so a divergence cannot mask the
-          # wire result, and they read the checkout this step already verified.
-          PSP_LIVE_NODE_REPO="$contract_repo" go test -count=1 \
-            ./internal/version/ ./internal/pkg/nodebootstrap/ ./internal/adapters/corecatalogdoc/
-          cat > "$evidence/environment.json" <<JSON
-          {
-            "case": "pinned-source",
-            "profile": "node-wire-v1",
-            "psp_sha": "${{ github.sha }}",
-            "node_pinned_tag": "$source_tag",
-            "node_sha": "$(git -C "$contract_repo" rev-parse HEAD 2>/dev/null || echo unknown)",
-            "runner_os": "$RUNNER_OS",
-            "runner_arch": "$RUNNER_ARCH",
-            "run_id": "${{ github.run_id }}",
-            "run_attempt": "${{ github.run_attempt }}"
-          }
-          JSON
+          # They read the checkout this step already verified.
+          PSP_LIVE_NODE_REPO="$contract_repo" go test -count=1 -timeout=5m \
+            ./internal/version/ ./internal/pkg/nodebootstrap/ ./internal/adapters/corecatalogdoc/ || failed=1
+          exit "$failed"
       - name: upload case evidence
         if: always()
         uses: actions/upload-artifact@v7

@@ -677,3 +677,40 @@ test('the contract job takes its Node revision from the manifest, not from go.mo
     'the contract job must assert the checked-out commit IS the pinned one, or a moved tag passes silently',
   )
 })
+
+// THE CONTRACT JOB DOES NOT RE-RUN THE MATRIX, AND IT DOES NOT LOSE ITS OWN WORK.
+//
+// When contract_source is one of the planned cases, node-compatibility has already run
+// the same four wire tests against the same commit in the same run, and the gate
+// requires that job. So the wire suite is skipped there, and only there: matched by
+// commit, the identity both jobs verify. The three cross-repository packages are this
+// job's own and always run, and every verdict is collected, so neither half can hide
+// the other. The identity file is written before any of it, because a failure is the
+// only time anyone reads the evidence. The match itself is run, not read: the program
+// is lifted out of the workflow and fed the real plan.
+test('the contract job skips only a wire run the matrix already made, and always runs its own contracts', () => {
+  const contract = step(job('node-contract'), 'real Node sync, durable result receipt and task expiry')
+  const identity = contract.indexOf('> "$evidence/environment.json"')
+  const firstTest = contract.indexOf('go test')
+  assert(identity >= 0 && identity < firstTest, 'environment.json must be written before any test can fail the step')
+  assert(contract.includes('wire_covered_by'), 'the evidence must say when, and by which case, the wire run was covered')
+  const wire = contract.indexOf("-run '^TestLive_RealNode(")
+  const branch = contract.indexOf('if [ -n "$covered_by" ]; then')
+  const drift = contract.indexOf('./internal/version/ ./internal/pkg/nodebootstrap/ ./internal/adapters/corecatalogdoc/')
+  const fi = contract.indexOf('\n          fi\n')
+  assert(branch >= 0 && branch < wire && wire < fi, 'the wire suite must be the only thing the covered-by branch skips')
+  assert(drift > fi, 'the cross-repository packages must run whatever the branch decided')
+  assert(/corecatalogdoc\/ \|\| failed=1/.test(contract), 'a cross-repository failure must be collected, not end the step before the verdict')
+  assert(/--output "\$evidence\/result\.json" \|\| failed=1/.test(contract), 'a wire failure must be collected, not hide the cross-repository contracts')
+  assert(contract.trimEnd().endsWith('exit "$failed"'), 'the step must report the failures it collected')
+
+  const matcher = /python3 -c '([^']+)' "\$source_commit"/.exec(contract)
+  assert(matcher, 'the covered-by match must be a python3 program over the plan, keyed on $source_commit')
+  const root = fileURLToPath(new URL('../', import.meta.url))
+  const plan = execFileSync('node', ['deploy/compat/plan.mjs', '--emit', 'cases'], { cwd: root, encoding: 'utf8' })
+  const cases = JSON.parse(plan)
+  assert(cases.length > 0, 'the plan emitted no case, so the match was not exercised')
+  const match = (sha) => execFileSync('python3', ['-c', matcher[1], sha], { input: plan, encoding: 'utf8' }).trim()
+  for (const planned of cases) assert.equal(match(planned.sha), planned.id, `a planned commit must be recognised as ${planned.id}`)
+  assert.equal(match('0'.repeat(40)), '', 'a commit outside the plan must not be treated as covered, or its wire run is silently dropped')
+})
