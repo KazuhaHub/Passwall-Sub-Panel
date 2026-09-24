@@ -976,10 +976,21 @@ jobs:
           # a `failed=1` set inside it is discarded and the step reports success
           # while a suite failed. shellcheck found exactly that here (SC2030/SC2031),
           # and it is the failure this job is least able to see for itself.
+          #
+          # FOUR MINUTES EACH, SO A HANG IS KILLED BY GO TEST AND NOT BY THE RUNNER. Only
+          # go test's timeout panic prints the goroutine dump, and only a failed step --
+          # not a cancelled job -- uploads test-output.txt. The budgets were 8m each,
+          # run one after the other inside this job's 10: a hang in the second half
+          # met the runner's limit first and left a bare cancellation. -timeout counts a
+          # binary's run time, not its compile, and the slowest binary measured is the
+          # heavy slice at 65s, so 4m is 3.7 times that. A hang in either half is now
+          # killed after ~25s of setup, a compile that takes seconds warm and a few
+          # minutes after go.sum moves, the other half's one to two minutes, and 4m:
+          # inside the 10.
           failed=0
           # shellcheck disable=SC2086 # $packages is a list of import paths, split on purpose
-          go test -race -count=1 -timeout=8m $packages 2>&1 | tee test-output.txt || failed=1
-          go test -race -count=1 -timeout=8m -run "^(${regex})$" "$heavy" 2>&1 | tee -a test-output.txt || failed=1
+          go test -race -count=1 -timeout=4m $packages 2>&1 | tee test-output.txt || failed=1
+          go test -race -count=1 -timeout=4m -run "^(${regex})$" "$heavy" 2>&1 | tee -a test-output.txt || failed=1
           exit "$failed"
       - name: upload test output
         if: failure()

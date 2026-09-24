@@ -465,6 +465,24 @@ test('the race shard count is written once and agrees with itself', () => {
   )
 })
 
+// A HANG MUST BE KILLED BY GO TEST, WHICH PRINTS THE GOROUTINE DUMP, AND NOT BY
+// THE RUNNER, WHICH PRINTS NOTHING. The race step runs its invocations one after the
+// other, so their -timeout budgets add up, and they have to leave the job room for
+// setup and a cold compile: two budgets of 8m inside a 10-minute job meant a hang in
+// the second half ended as a bare cancellation, with no dump and no uploaded output.
+test('the race shard\'s go test budgets fit inside its job timeout', () => {
+  const race = job('race-shard')
+  const jobMinutes = /^    timeout-minutes: (\d+)$/m.exec(race)
+  assert(jobMinutes, 'the race shard must set timeout-minutes')
+  const budgets = [...race.matchAll(/go test -race -count=1 -timeout=(\d+)m /g)].map(([, minutes]) => Number(minutes))
+  assert(budgets.length >= 2, 'the race step must bound both of its go test invocations with -timeout')
+  const total = budgets.reduce((sum, minutes) => sum + minutes, 0)
+  assert(
+    total + 2 <= Number(jobMinutes[1]),
+    `the race step's -timeout budgets add up to ${total}m in a ${jobMinutes[1]}-minute job: with setup and a cold compile the runner's limit comes first, and a hang ends without its goroutine dump`,
+  )
+})
+
 // The pinned Playwright version appears twice — in the install and in the cache key
 // that remembers the browser it downloaded — and a cache key that outlives the
 // version it names serves a browser the pinned CLI did not ask for.
