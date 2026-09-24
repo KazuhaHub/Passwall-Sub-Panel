@@ -697,11 +697,11 @@ func (s *Service) UpdateInboundConfig(ctx context.Context, id int64, spec ports.
 	return nil
 }
 
-// NormalizeRealityFingerprintsForPanel converges existing desired snapshots
-// when a panel is first observed across the Xray 26.9.8 boundary. New writes
-// are normalized by the HTTP boundary; this closes the out-of-band core-upgrade
-// gap for already-managed inbounds without putting a hidden override back in
-// subscription rendering.
+// NormalizeRealityFingerprintsForPanel idempotently converges existing desired
+// snapshots whenever a trusted observation reports Xray 26.9.8+. New writes are
+// normalized by the HTTP boundary; repeatedly calling this method closes boot,
+// native-report, in-panel upgrade, and partial-failure gaps without putting a
+// hidden override back in subscription rendering.
 func (s *Service) NormalizeRealityFingerprintsForPanel(ctx context.Context, panelID int64, xrayVersion string) (int, error) {
 	if !xraycompat.RequiresMLKEMFirst(xrayVersion) {
 		return 0, nil

@@ -54,6 +54,11 @@ type Service struct {
 	// invalidateRender is late-bound because the native adapter needs this
 	// service before the panel pool (and therefore render service) can exist.
 	invalidateRender func()
+	// normalizeRealityFingerprints is late-bound for the same assembly-order
+	// reason. Every trusted native Xray observation invokes it idempotently so
+	// upgrades, first boot on an already-new core, and prior partial failures all
+	// converge without relying on a one-shot version transition.
+	normalizeRealityFingerprints func(context.Context, int64, string) (int, error)
 	// host ingests the optional telemetry subtree. NIL MEANS THIS BUILD DOES NOT
 	// COLLECT IT, which is what keeps a panel with no metrics repository from
 	// advertising a cadence it cannot honour.
@@ -111,6 +116,10 @@ func New(options Options) (*Service, error) {
 
 func (s *Service) SetRenderInvalidator(invalidate func()) { s.invalidateRender = invalidate }
 
+func (s *Service) SetRealityFingerprintNormalizer(normalize func(context.Context, int64, string) (int, error)) {
+	s.normalizeRealityFingerprints = normalize
+}
+
 // Sync ingests one agent observation and returns all three independently
 // conditional segments in the same round trip. Authentication stays outside
 // this service: the production HTTP boundary resolves a strict Bearer digest
@@ -148,8 +157,19 @@ func (s *Service) Sync(ctx context.Context, report nodeprotocol.NodeReport) (nod
 	if err := s.ingestReport(ctx, agent, snapshot, report, now); err != nil {
 		return nodeprotocol.SyncResponse{}, err
 	}
-	if err := s.recordPanelObservation(ctx, agent, report, now); err != nil {
+	normalized, err := s.recordPanelObservation(ctx, agent, report, now)
+	if err != nil {
 		return nodeprotocol.SyncResponse{}, err
+	}
+	if normalized {
+		// The snapshot was loaded before observations were ingested. A successful
+		// normalization changes that authoritative desired state, so reload it
+		// before minting this very response; otherwise the same sync round could
+		// send the pre-normalization fingerprint back to the node.
+		snapshot, err = s.desired.Load(ctx, agent.PanelID)
+		if err != nil {
+			return nodeprotocol.SyncResponse{}, fmt.Errorf("nodesync: reload normalized desired snapshot: %w", err)
+		}
 	}
 
 	// THE CONFIGURED CORE IS RE-CHECKED AGAINST THE REVIEW THAT IS CURRENT NOW.
@@ -236,13 +256,13 @@ func (s *Service) Sync(ctx context.Context, report nodeprotocol.NodeReport) (nod
 	return response, nil
 }
 
-func (s *Service) recordPanelObservation(ctx context.Context, agent *domain.NodeAgent, report nodeprotocol.NodeReport, now time.Time) error {
+func (s *Service) recordPanelObservation(ctx context.Context, agent *domain.NodeAgent, report nodeprotocol.NodeReport, now time.Time) (bool, error) {
 	if s.panels == nil || agent == nil {
-		return nil
+		return false, nil
 	}
 	panel, err := s.panels.GetByID(ctx, agent.PanelID)
 	if err != nil {
-		return fmt.Errorf("nodesync: load native panel observation target: %w", err)
+		return false, fmt.Errorf("nodesync: load native panel observation target: %w", err)
 	}
 	panelVersion := report.AgentVersion
 	if panelVersion == "" {
@@ -256,16 +276,28 @@ func (s *Service) recordPanelObservation(ctx context.Context, agent *domain.Node
 	engineChanged := observedEngine != "" && observedEngine != agent.ObservedCoreEngine
 	if engineChanged && s.agents != nil {
 		if err := s.agents.UpdateCoreObservation(ctx, agent.AgentID, observedEngine); err != nil {
-			return fmt.Errorf("nodesync: persist native core engine observation: %w", err)
+			return false, fmt.Errorf("nodesync: persist native core engine observation: %w", err)
 		}
 	}
 	if err := s.panels.UpdateVersion(ctx, agent.PanelID, panelVersion, coreVersion, &now); err != nil {
-		return fmt.Errorf("nodesync: persist native panel observation: %w", err)
+		return false, fmt.Errorf("nodesync: persist native panel observation: %w", err)
+	}
+	engine := observedEngine
+	if engine == "" {
+		engine = agent.ObservedCoreEngine
+	}
+	normalized := false
+	if engine == domain.NodeCoreXray && s.normalizeRealityFingerprints != nil {
+		changed, err := s.normalizeRealityFingerprints(ctx, agent.PanelID, coreVersion)
+		if err != nil {
+			return false, fmt.Errorf("nodesync: normalize REALITY fingerprints: %w", err)
+		}
+		normalized = changed > 0
 	}
 	if (coreVersion != panel.XrayVersion || engineChanged) && s.invalidateRender != nil {
 		s.invalidateRender()
 	}
-	return nil
+	return normalized, nil
 }
 
 func (s *Service) mint(ctx context.Context, agent *domain.NodeAgent, stream domain.NodeAgentStreamName, body any, now time.Time) (*domain.NodeAgentStream, error) {

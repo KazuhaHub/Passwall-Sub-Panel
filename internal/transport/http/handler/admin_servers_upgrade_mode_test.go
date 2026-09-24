@@ -130,6 +130,20 @@ type coreUpgradeClient struct {
 	installed string
 }
 
+type recordingRealityNormalizer struct {
+	calls   int
+	panelID int64
+	version string
+	err     error
+}
+
+func (n *recordingRealityNormalizer) NormalizeRealityFingerprintsForPanel(_ context.Context, panelID int64, version string) (int, error) {
+	n.calls++
+	n.panelID = panelID
+	n.version = version
+	return 1, n.err
+}
+
 func (c *coreUpgradeClient) GetCoreVersionList(_ context.Context) ([]string, error) {
 	return []string{"26.9.9", "26.9.8"}, nil
 }
@@ -171,6 +185,30 @@ func TestACoreUpgradeIsCompletedOnlyWhenThePanelReportsTheTarget(t *testing.T) {
 	}
 	if !audit.saw("xray_upgrade_completed") {
 		t.Fatalf("actions = %v, want xray_upgrade_completed", audit.actions)
+	}
+}
+
+func TestXrayUpgradeConvergesRealityFingerprintsAfterReadback(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	client := &coreUpgradeClient{status: ports.ServerStatus{PanelVersion: "3.8.5", XrayVersion: "26.9.9"}}
+	normalizer := &recordingRealityNormalizer{}
+	h := (&AdminServersHandler{
+		repo: upgradeModeRepo{panel: &domain.XUIPanel{ID: 7, Kind: domain.PanelKind3XUI}},
+		pool: fakeWebCertPool{client: client}, audit: &upgradeGateAudit{},
+	}).WithRealityFingerprintNormalizer(normalizer)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Params = gin.Params{{Key: "id", Value: "7"}}
+	c.Request = httptest.NewRequest(http.MethodPost, "/admin/servers/7/upgrade-xray", strings.NewReader(`{"version":"26.9.9"}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	h.UpgradeXray(c)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("response = %d %s", recorder.Code, recorder.Body.String())
+	}
+	if normalizer.calls != 1 || normalizer.panelID != 7 || normalizer.version != "26.9.9" {
+		t.Fatalf("normalizer calls=%d panel=%d version=%q", normalizer.calls, normalizer.panelID, normalizer.version)
 	}
 }
 

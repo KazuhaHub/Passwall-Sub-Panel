@@ -429,6 +429,7 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	syncSvc.SetPSPClientRepo(repos.PSPClient)
 	userSvc := user.New(repos.User, repos.Group, repos.Ownership, repos.SyncTask, groupSvc, syncSvc, pool, repos.ScopedSettings)
 	nodeSvc := node.New(repos.Node, repos.Separator, pool, syncSvc, repos.SyncTask, repos.Group, repos.User)
+	nativeSync.SetRealityFingerprintNormalizer(nodeSvc.NormalizeRealityFingerprintsForPanel)
 	trafficSvc := traffic.New(repos.User, repos.Ownership, repos.Traffic, repos.Node, repos.NodeTraffic, pool, userSvc).WithSettings(repos.ScopedSettings)
 	// traffic needs user to push the per-client floor into 3X-UI after each
 	// poll. The reverse edge is gone: user used to take a late-wired usage
@@ -916,28 +917,39 @@ func (a *App) probePanelVersionsOnce(ctx context.Context) {
 				"compat", compatStatus.String(),
 				"detail", version.CompatMessage(status.PanelVersion, compatStatus))
 		}
-		if uerr := a.repos.XUIPanel.UpdateVersion(ctx, p.ID, status.PanelVersion, status.XrayVersion, &now); uerr != nil {
-			log.Warn("compat probe: write version", "panel_id", p.ID, "err", uerr)
-		} else if p.XrayVersion != status.XrayVersion {
-			if !xraycompat.RequiresMLKEMFirst(p.XrayVersion) && xraycompat.RequiresMLKEMFirst(status.XrayVersion) && a.node != nil {
-				changed, nerr := a.node.NormalizeRealityFingerprintsForPanel(ctx, p.ID, status.XrayVersion)
-				if nerr != nil {
-					log.Warn("compat probe: normalize REALITY fingerprints", "panel_id", p.ID, "changed", changed, "err", nerr)
-				} else if changed > 0 {
-					log.Info("normalized REALITY fingerprints after Xray compatibility boundary", "panel_id", p.ID, "nodes", changed)
-				}
-			}
-			if a.render != nil {
-				// The compatibility transition changes desired inbound snapshots
-				// and Mihomo's explicit ML-KEM option. Drop the render cache as
-				// soon as an out-of-band core change is observed.
-				a.render.InvalidateAll()
-			}
-		}
+		a.recordProbedPanelVersion(ctx, p, status, now)
 		// Rides the same tick and the same authenticated client. One extra GET
 		// against a panel we are already talking to, once per traffic poll
 		// (cron_traffic_pull_minutes, default 5).
 		a.probeIPLimitEnforcement(ctx, p, c, now)
+	}
+}
+
+// recordProbedPanelVersion is shared by the boot and periodic probe paths. Its
+// convergence decision intentionally uses only the trusted current observation,
+// not a one-shot version transition: an installation may already have 26.9.8+
+// stored when this PSP first starts, and repeating the idempotent operation is
+// what retries partial failures.
+func (a *App) recordProbedPanelVersion(ctx context.Context, panel *domain.XUIPanel, status *ports.ServerStatus, now time.Time) {
+	if panel == nil || status == nil {
+		return
+	}
+	if err := a.repos.XUIPanel.UpdateVersion(ctx, panel.ID, status.PanelVersion, status.XrayVersion, &now); err != nil {
+		log.Warn("compat probe: write version", "panel_id", panel.ID, "err", err)
+		return
+	}
+	if xraycompat.RequiresMLKEMFirst(status.XrayVersion) && a.node != nil {
+		changed, err := a.node.NormalizeRealityFingerprintsForPanel(ctx, panel.ID, status.XrayVersion)
+		if err != nil {
+			log.Warn("compat probe: normalize REALITY fingerprints", "panel_id", panel.ID, "changed", changed, "err", err)
+		} else if changed > 0 {
+			log.Info("normalized REALITY fingerprints for observed Xray version", "panel_id", panel.ID, "nodes", changed)
+		}
+	}
+	if panel.XrayVersion != status.XrayVersion && a.render != nil {
+		// The compatibility transition changes Mihomo's explicit ML-KEM option.
+		// Drop the render cache as soon as an out-of-band core change is observed.
+		a.render.InvalidateAll()
 	}
 }
 
