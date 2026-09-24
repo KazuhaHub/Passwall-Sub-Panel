@@ -621,6 +621,26 @@ test('the browser cache is keyed on the Playwright version the step installs', (
   )
 })
 
+// THE REQUIRED SMOKE RUNS ON THE PINNED BROWSER. It probed for the runner image's
+// google-chrome while a pinned Chromium was installed one step later, so the browser
+// under a required check changed with GitHub's image rather than with a commit.
+// The install has to come first and hand its binary to the smoke.
+test('the production smoke runs on the Chromium the job pins, installed before it', () => {
+  const web = job('web')
+  const install = web.indexOf('      - name: Install the pinned Playwright and its Chromium\n')
+  const smoke = web.indexOf('      - name: production browser smoke\n')
+  assert(install >= 0 && smoke >= 0, 'the web job must install the pinned Playwright and run the smoke')
+  assert(install < smoke, 'the pinned browser must be installed before the smoke, or the smoke falls back to the runner image\'s Chrome')
+  assert(
+    step(web, 'production browser smoke').includes('CHROME_PATH: ${{ steps.browser.outputs.chrome }}'),
+    'the smoke must be pointed at the pinned browser through CHROME_PATH',
+  )
+  assert(
+    step(web, 'Install the pinned Playwright and its Chromium').includes('test -x "$chrome"'),
+    'the install step must prove the browser it hands over exists, or a layout change would silently send the smoke back to the runner\'s Chrome',
+  )
+})
+
 // The pinned-source contract job must not learn which Node revision to test from
 // go.mod. Doing so made the evidence move with every dependency bump, and would
 // have removed the job's entry point the moment the PN root module was dropped —

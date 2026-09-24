@@ -729,16 +729,39 @@ jobs:
       - name: build
         working-directory: web-react
         run: npm run build
-      - name: production browser smoke
-        working-directory: web-react
-        run: npm run smoke:dist
-      - name: Real Chromium server reinstallation flows (isolated fixtures)
+      # THE SMOKE RUNS ON THE PINNED BROWSER, NOT ON THE RUNNER'S. It used to find
+      # whatever google-chrome the runner image shipped, one step before this job
+      # installed a pinned Chromium, so the browser under the required smoke changed
+      # whenever GitHub updated the image, independent of any commit (two of the web
+      # job's four confirmed flakes in 300 runs were the smoke's TIMEOUT). The install
+      # moved ahead of it, and the smoke gets Playwright's chrome-headless-shell: the
+      # binary `chromium.launch({ headless: true })` runs, so the smoke and the
+      # reinstall flows below use one browser, and the one built for --dump-dom. Locally
+      # the full Chrome for Testing 153 hung on --dump-dom of a data: URL where the
+      # shell answered in 0.2s. This makes the browser reproducible; it is not a
+      # proven fix for those TIMEOUTs.
+      - name: Install the pinned Playwright and its Chromium
+        id: browser
         run: |
           set -euo pipefail
           browser_acceptance_dir=$(mktemp -d "$RUNNER_TEMP/psp-reinstall-browser.XXXXXX")
           npm install --prefix "$browser_acceptance_dir" --no-package-lock --ignore-scripts playwright@1.63.0
-          node "$browser_acceptance_dir/node_modules/playwright/cli.js" install --with-deps chromium
-          node web-react/scripts/reinstall-browser.mjs "$browser_acceptance_dir/node_modules/playwright"
+          playwright="$browser_acceptance_dir/node_modules/playwright"
+          node "$playwright/cli.js" install --with-deps chromium
+          shell_dir=$(node "$playwright/cli.js" install --dry-run chromium-headless-shell | awk '/Install location:/ { print $3; exit }')
+          chrome="$shell_dir/chrome-headless-shell-linux64/chrome-headless-shell"
+          test -x "$chrome" || { echo "::error::no chrome-headless-shell at $chrome; the Playwright layout moved"; exit 1; }
+          echo "playwright=$playwright" >> "$GITHUB_OUTPUT"
+          echo "chrome=$chrome" >> "$GITHUB_OUTPUT"
+      - name: production browser smoke
+        working-directory: web-react
+        env:
+          CHROME_PATH: ${{ steps.browser.outputs.chrome }}
+        run: npm run smoke:dist
+      - name: Real Chromium server reinstallation flows (isolated fixtures)
+        env:
+          PLAYWRIGHT_PACKAGE: ${{ steps.browser.outputs.playwright }}
+        run: node web-react/scripts/reinstall-browser.mjs "$PLAYWRIGHT_PACKAGE"
       - name: unit tests
         working-directory: web-react
         run: npm run test
