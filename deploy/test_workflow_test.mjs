@@ -378,7 +378,7 @@ test('go_static\'s build cache key names every tool the job compiles, at its pin
   assert.equal(keys.length, 2, 'go_static restores one build cache and saves it')
   assert.equal(keys[0], keys[1], 'go_static must save under the key it restores, or no run ever hits it')
   const tools = [...steps.matchAll(/\bgo (?:run|install) \S*\/([a-z0-9-]+)@(v\d+\.\d+\.\d+)/g)]
-  assert(tools.length >= 2, `go_static compiles staticcheck and govulncheck at pinned versions; found ${tools.length}`)
+  assert(tools.length >= 3, `go_static compiles actionlint, staticcheck and govulncheck at pinned versions; found ${tools.length}`)
   for (const [, tool, version] of tools) {
     assert(
       keys[0].includes(`-${tool}-${version}-`) || keys[0].endsWith(`-${tool}-${version}`),
@@ -738,4 +738,17 @@ test('the real-panel suites\' go test budgets fit inside their job timeout', () 
     budget * suites + 5 <= jobMinutes,
     `${suites} suites of ${budget}m in a ${jobMinutes}-minute job leave no room for pulling and starting the panels`,
   )
+})
+
+// THE LINTERS RUN, AND THE ONE THAT DEPENDS ON THE OTHER CAN SEE IT. actionlint
+// shellchecks run: blocks only when shellcheck is on PATH and is silent when it is
+// not, so the step asserts it first; the standalone scripts are listed from git so a
+// new one is linted by construction.
+test('go_static lints the workflows with actionlint and the tracked shell scripts with shellcheck', () => {
+  const lint = step(job('go_static'), 'Workflow and shell lint')
+  assert.match(lint, /go run github\.com\/rhysd\/actionlint\/cmd\/actionlint@v\d+\.\d+\.\d+\n/, 'actionlint must run at a pinned version')
+  const probe = lint.indexOf('command -v shellcheck')
+  assert(probe >= 0 && probe < lint.indexOf('actionlint@'), 'shellcheck must be asserted before actionlint, which skips it silently when it is missing')
+  assert(lint.includes("git ls-files -z '*.sh' | xargs -0 shellcheck"), 'every tracked .sh file must be shellchecked')
+  assert(!/shellcheck -S (warning|error)/.test(lint), 'the scripts are clean at every severity, and SC2086 is "info": raising the floor would stop checking quoting')
 })

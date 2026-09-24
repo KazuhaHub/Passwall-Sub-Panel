@@ -523,6 +523,9 @@ jobs:
           # rather than the launcher that never gave it anything to run with.
           service_env=$(deploy/compat/backends/third-party.sh env)
           test -n "$service_env"
+          # sed, not ${var//}: it redacts the rest of EVERY line after TOKEN=, which a
+          # parameter expansion over the whole multi-line value cannot express.
+          # shellcheck disable=SC2001
           echo "$service_env" | sed 's/\(TOKEN=\).*/\1<redacted>/'
           eval "$service_env"
           # READ THROUGH A CHILD PROCESS. `printenv` is an external command, so
@@ -930,11 +933,11 @@ jobs:
       - uses: actions/checkout@v7
       # THE BUILD CACHE KEY NAMES THE TOOLS THIS JOB COMPILES, AT THEIR PINS. A key is
       # written once, so keyed on go.sum alone the entry is the one main saved after
-      # go.sum last moved, and no later save can add to it: staticcheck, added after
-      # that save, would compile from source on every run until go.sum next changed.
-      # With the pins in the key, adding or bumping a tool moves it, and the next main
-      # push saves a cache that holds the build. The deploy guard reads the pins off
-      # the steps below, so a bump that forgets the key fails there.
+      # go.sum last moved, and no later save can add to it: staticcheck and actionlint,
+      # added after that save, would compile from source on every run until go.sum
+      # next changed. With the pins in the key, adding or bumping a tool moves it, and
+      # the next main push saves a cache that holds the build. The deploy guard reads
+      # the pins off the steps below, so a bump that forgets the key fails there.
       #
       # The build cache pair the build job explains: restored on every event, and
       # saved only from the default branch, where a save can be read. Then the shared
@@ -942,7 +945,7 @@ jobs:
       - uses: actions/cache/restore@v4
         with:
           path: ~/.cache/go-build
-          key: go-build-static-${{ runner.os }}-${{ hashFiles('go.sum') }}-staticcheck-v0.8.1-govulncheck-v1.8.0
+          key: go-build-static-${{ runner.os }}-${{ hashFiles('go.sum') }}-actionlint-v1.7.12-staticcheck-v0.8.1-govulncheck-v1.8.0
           restore-keys: go-build-static-${{ runner.os }}-
       - uses: actions/cache/restore@v4
         with:
@@ -974,6 +977,28 @@ jobs:
       # exits non-zero in one line, the same shape the Node project uses.
       - name: Formatting
         run: test -z "$(gofmt -l .)"
+      # WORKFLOWS AND SHELL ARE LINTED, NOT ONLY PARSED. The deploy guard runs `bash -n`
+      # over test.yml's scripts and the Go tests syntax-check the two scripts this panel
+      # serves to operator hosts, and a parse is all either proves: the subshell that
+      # swallowed a race-shard verdict passed `bash -n` and was found by a hand-run
+      # shellcheck (the race step's comment has it). release.yml and the other
+      # workflows had no expression or type check at all.
+      #
+      # actionlint is the version the Node project and SAP pin. It shellchecks every
+      # run: block ONLY IF shellcheck is on PATH, and says nothing when it is not, so
+      # the runner image's shellcheck is asserted first. The tracked .sh files get
+      # shellcheck at its default severity, style included: they are clean at every
+      # level today, and the quoting checks that matter for scripts run as root on an
+      # operator's host (SC2086 among them) are "info", below -S warning. A finding
+      # that is deliberate is disabled at its line with the reason, as the race step
+      # already does for SC2086. Measured locally: under a second each on a warm build
+      # cache, which main's next save provides because the cache key names the pin.
+      - name: Workflow and shell lint
+        run: |
+          set -euo pipefail
+          command -v shellcheck
+          go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+          git ls-files -z '*.sh' | xargs -0 shellcheck
       - run: go vet ./...
       # THE REINSTALL ACCEPTANCE IS BEHIND A BUILD TAG, SO THE LINE ABOVE NEVER OPENS
       # IT. Its only compile was node-reinstall-acceptance.yml, which runs on a path
@@ -1035,7 +1060,7 @@ jobs:
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         with:
           path: ~/.cache/go-build
-          key: go-build-static-${{ runner.os }}-${{ hashFiles('go.sum') }}-staticcheck-v0.8.1-govulncheck-v1.8.0
+          key: go-build-static-${{ runner.os }}-${{ hashFiles('go.sum') }}-actionlint-v1.7.12-staticcheck-v0.8.1-govulncheck-v1.8.0
 
   # The race suite is sharded because it is the critical path: at 4m22s it was
   # still running while the other twenty-two checks had finished.
