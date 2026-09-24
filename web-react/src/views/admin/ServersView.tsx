@@ -55,6 +55,7 @@ import DownloadIcon from '@mui/icons-material/DownloadOutlined'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import { useTranslation } from 'react-i18next'
 import { allSettledLimited } from '@/utils/promises'
+import { AsyncButton, AsyncIconButton } from '@/components/AsyncButton'
 
 import WarningAmberIcon from '@mui/icons-material/WarningAmber'
 import MoreVertIcon from '@mui/icons-material/MoreVert'
@@ -1569,9 +1570,13 @@ export default function ServersView() {
                     <IconButton size="small" onClick={() => openEdit(s)} aria-label={t('admin:servers.action.edit')}>
                       <EditIcon fontSize="small" />
                     </IconButton>
-                    <IconButton size="small" onClick={() => confirmDelete(s)} aria-label={t('admin:servers.action.delete')} sx={{ color: md.error }}>
+                    {/* AsyncIconButton, not a plain IconButton: on a slow link
+                        the delete request itself can take seconds, and until
+                        this shows its own wait the row reads as unresponsive
+                        and invites a second, duplicate delete. */}
+                    <AsyncIconButton size="small" onClick={() => confirmDelete(s)} aria-label={t('admin:servers.action.delete')} sx={{ color: md.error }}>
                       <DeleteIcon fontSize="small" />
-                    </IconButton>
+                    </AsyncIconButton>
                     {/* Kebab menu hosts the destructive remote-upgrade
                         actions — kept out of the always-visible row
                         actions so an accidental click can't fire
@@ -2357,9 +2362,13 @@ export function NativeInstallationDialog({ server, initialProvisioning, onClose,
           autoComplete="off" onChange={event => setOldCredential(event.target.value)} disabled={credentialBusy} fullWidth />
         {credentialError && <Alert severity="error">{credentialError}</Alert>}
         <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
-          <Button variant="contained" disabled={!oldCredential.trim() || credentialBusy || rotating} onClick={() => void saveOldCredential()}>
+          {/* AsyncButton with the existing credentialBusy state passed in as
+              `pending`: the import can take a few seconds (write + re-read of
+              the installation), and a disabled-only button on that wait looked
+              identical to a broken one. */}
+          <AsyncButton variant="contained" pending={credentialBusy} disabled={!oldCredential.trim() || rotating} onClick={() => saveOldCredential()}>
             {t('admin:servers.native.import_credential')}
-          </Button>
+          </AsyncButton>
           <Button variant="outlined" startIcon={<VpnKeyIcon />} disabled={credentialBusy || rotating} onClick={() => server && onRotate(server)}>
             {t('admin:servers.action.rotate_node_credential')}
           </Button>

@@ -75,6 +75,7 @@ import {
 } from '@/api/traffic'
 
 const TrafficChart = lazy(() => import('@/components/TrafficChart'))
+import { AsyncButton } from '@/components/AsyncButton'
 import { confirm } from '@/components/ConfirmHost'
 import { pushSnack } from '@/components/SnackbarHost'
 import { copyToClipboard } from '@/utils/clipboard'
@@ -1006,11 +1007,16 @@ export default function MeView() {
                 onClick={openRules}>
                 {t('actions.personal_rules')}
               </Button>
-              <Button size="small" color="error" variant="text"
+              {/* reset() awaits confirm + the API call + the profile/usage
+                  reload, so on a slow link the plain button below used to sit
+                  clickable for the whole round trip — inviting a second,
+                  overlapping reset. AsyncButton needs the click handler to
+                  RETURN that promise (not `void` it) to track it. */}
+              <AsyncButton size="small" color="error" variant="text"
                 startIcon={<KeyIcon fontSize="small" />}
-                onClick={() => void reset()}>
+                onClick={() => reset()}>
                 {t('sub.reset')}
-              </Button>
+              </AsyncButton>
             </Box>
           </Box>
         </Box>
@@ -1189,6 +1195,7 @@ export default function MeView() {
       <UsagePanel
         limitBytes={profile.traffic_limit_bytes}
         usage={usage}
+        usageLoading={usageQuery.isPending}
         expireAt={profile.expire_at ?? null}
         resetPeriod={profile.traffic_reset_period}
         md={md}
@@ -1445,6 +1452,11 @@ export default function MeView() {
 interface UsagePanelProps {
   limitBytes: number
   usage: UsageReport | null
+  // True while the usage query's FIRST load is still in flight. `usage` is
+  // null both then and on a genuine zero reading, so without this the card
+  // rendered "0.00 / X GB, 0%, today 0" for however long the request took —
+  // indistinguishable from an account that really has used nothing.
+  usageLoading: boolean
   expireAt: string | null
   // Reset cadence (never/monthly/quarterly/yearly). Shown as a small caption
   // beside "本周期已用" so the user understands when the counter rolls back —
@@ -1453,7 +1465,7 @@ interface UsagePanelProps {
   md: M3Tokens
 }
 
-function UsagePanel({ limitBytes, usage, expireAt, resetPeriod, md }: UsagePanelProps) {
+function UsagePanel({ limitBytes, usage, usageLoading, expireAt, resetPeriod, md }: UsagePanelProps) {
   const { t } = useTranslation('user')
   // The expiry shown here is in the viewer's local timezone, while the panel
   // sets cutoffs against its own zone. Surface that only when they differ, so
@@ -1508,26 +1520,42 @@ function UsagePanel({ limitBytes, usage, expireAt, resetPeriod, md }: UsagePanel
             )}
           </Typography>
           <Typography sx={{ fontSize: 13, color: md.onSurfaceVariant, fontVariantNumeric: 'tabular-nums' }}>
-            {isUnlimited
-              ? t('profile.unlimited')
-              : `${usagePercent.toFixed(1)}%`}
+            {usageLoading
+              ? ''
+              : isUnlimited
+                ? t('profile.unlimited')
+                : `${usagePercent.toFixed(1)}%`}
           </Typography>
         </Box>
-        <Box sx={{ mb: 1 }}>
-          <Typography sx={{ fontSize: 22, fontWeight: 500, fontVariantNumeric: 'tabular-nums' }}>
-            {isUnlimited
-              ? bytesToHuman(usedBytes)
-              : `${(usedBytes / 1024 / 1024 / 1024).toFixed(2)} / ${limitGB.toFixed(0)} GB`}
-          </Typography>
-        </Box>
-        {!isUnlimited && (
-          <Box sx={{ height: 8, borderRadius: 4, bgcolor: md.surfaceContainerHighest, overflow: 'hidden' }}>
-            <Box sx={{
-              height: '100%', width: `${usagePercent}%`,
-              bgcolor: usageColor, borderRadius: 4,
-              transition: 'width .4s ease',
-            }} />
+        {/* usageLoading covers only the FIRST load of the usage query —
+            `usage` is indistinguishable from "really used nothing" while it's
+            null, so showing 0.00/0% here would read as a real reading rather
+            than "still loading". A refetch after that leaves the last-known
+            numbers up rather than blanking them again. */}
+        {usageLoading ? (
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, py: 0.5 }}>
+            <CircularProgress size={18} />
+            <Typography sx={{ fontSize: 13, color: md.onSurfaceVariant }}>{t('common:status.loading')}</Typography>
           </Box>
+        ) : (
+          <>
+            <Box sx={{ mb: 1 }}>
+              <Typography sx={{ fontSize: 22, fontWeight: 500, fontVariantNumeric: 'tabular-nums' }}>
+                {isUnlimited
+                  ? bytesToHuman(usedBytes)
+                  : `${(usedBytes / 1024 / 1024 / 1024).toFixed(2)} / ${limitGB.toFixed(0)} GB`}
+              </Typography>
+            </Box>
+            {!isUnlimited && (
+              <Box sx={{ height: 8, borderRadius: 4, bgcolor: md.surfaceContainerHighest, overflow: 'hidden' }}>
+                <Box sx={{
+                  height: '100%', width: `${usagePercent}%`,
+                  bgcolor: usageColor, borderRadius: 4,
+                  transition: 'width .4s ease',
+                }} />
+              </Box>
+            )}
+          </>
         )}
       </Box>
 
@@ -1538,7 +1566,7 @@ function UsagePanel({ limitBytes, usage, expireAt, resetPeriod, md }: UsagePanel
             {t('profile.today_used')}
           </Typography>
           <Typography sx={{ fontSize: 18, fontWeight: 500, fontVariantNumeric: 'tabular-nums' }}>
-            {bytesToHuman(todayBytes)}
+            {usageLoading ? t('common:status.loading') : bytesToHuman(todayBytes)}
           </Typography>
         </Box>
         <Box>
