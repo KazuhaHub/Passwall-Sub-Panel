@@ -47,6 +47,7 @@ import { confirm } from '@/components/ConfirmHost'
 import { pushSnack } from '@/components/SnackbarHost'
 import { PagedTableFooter } from '@/components/PagedTableFooter'
 import PageHeader from '@/components/PageHeader'
+import { AsyncButton, AsyncIconButton } from '@/components/AsyncButton'
 
 function initialPageSize(): number {
   try {
@@ -106,7 +107,10 @@ export default function SyncTasksView() {
   const total = tasksQuery.data?.total ?? 0
   const loading = tasksQuery.isPending
 
-  function load() { void tasksQuery.refetch() }
+  // Returns the refetch promise (rather than firing-and-forgetting it) so the
+  // Refresh button's own AsyncButton can track it: that's what lets a second
+  // click on the same tick be ignored before isFetching has even re-rendered.
+  function load() { return tasksQuery.refetch() }
   const [selected, setSelected] = useState<Set<number>>(new Set())
   const [batchBusy, setBatchBusy] = useState<'retry' | 'cancel' | ''>('')
 
@@ -203,10 +207,19 @@ export default function SyncTasksView() {
         subtitle={t('admin:sync_tasks.pending_count', { count: pendingCount })}
         actions={
           <>
-            {canConfig && <Button variant="outlined" color="error" startIcon={<CleaningIcon />} onClick={purge}>{t('admin:sync_tasks.purge')}</Button>}
-            <Button variant="contained" startIcon={<RefreshIcon />} onClick={() => load()}>
+            {canConfig && (
+              <AsyncButton variant="outlined" color="error" startIcon={<CleaningIcon />} onClick={() => purge()}>
+                {t('admin:sync_tasks.purge')}
+              </AsyncButton>
+            )}
+            {/* Not polled (see syncTasksQuery), so a manual refresh is the only way
+                this list updates: on a slow link it must visibly go busy or the
+                operator reads the click as having done nothing. isFetching, not
+                isPending — the latter is false again once the first page has
+                loaded, even mid-refetch. */}
+            <AsyncButton variant="contained" startIcon={<RefreshIcon />} pending={tasksQuery.isFetching} onClick={() => load()}>
               {t('admin:sync_tasks.refresh')}
-            </Button>
+            </AsyncButton>
           </>
         }
       />
@@ -295,12 +308,12 @@ export default function SyncTasksView() {
                         </IconButton>
                       </Tooltip>
                       <Tooltip title={t('admin:sync_tasks.action.retry')}>
-                        <span><IconButton size="small" aria-label={t('admin:sync_tasks.action.retry')} disabled={statusOf(r) === 'retired'} onClick={() => retry(r)}><ReplayIcon fontSize="small" /></IconButton></span>
+                        <span><AsyncIconButton size="small" aria-label={t('admin:sync_tasks.action.retry')} disabled={statusOf(r) === 'retired'} onClick={() => retry(r)}><ReplayIcon fontSize="small" /></AsyncIconButton></span>
                       </Tooltip>
                       <Tooltip title={t('admin:sync_tasks.action.cancel')}>
-                        <span><IconButton size="small" aria-label={t('admin:sync_tasks.action.cancel')} disabled={statusOf(r) === 'retired'} onClick={() => cancel(r)} sx={{ color: md.error }}>
+                        <span><AsyncIconButton size="small" aria-label={t('admin:sync_tasks.action.cancel')} disabled={statusOf(r) === 'retired'} onClick={() => cancel(r)} sx={{ color: md.error }}>
                           <CloseIcon fontSize="small" />
-                        </IconButton></span>
+                        </AsyncIconButton></span>
                       </Tooltip>
                     </TableCell>
                   </TableRow>

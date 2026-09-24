@@ -43,6 +43,7 @@ import { getUISettings, putUISettings } from '@/api/settings'
 import { confirm } from '@/components/ConfirmHost'
 import { pushSnack } from '@/components/SnackbarHost'
 import { PagedTableFooter } from '@/components/PagedTableFooter'
+import { AsyncButton } from '@/components/AsyncButton'
 import { useTabParam } from '@/hooks/useTabParam'
 import GeoAnomaliesTab from './GeoAnomaliesTab'
 import { formatDualTz } from '@/utils/datetime'
@@ -327,12 +328,12 @@ export default function LogsView() {
           </Box>
           <Box sx={{ display: 'flex', gap: 1, mb: 2, alignItems: 'center', flexWrap: 'wrap' }}>
             {canConfig && <>
-              <Button variant="outlined" startIcon={<CleaningIcon />} onClick={purgeSubOld}>
+              <AsyncButton variant="outlined" startIcon={<CleaningIcon />} onClick={() => purgeSubOld()}>
                 {t('admin:logs.purge_old')}
-              </Button>
-              <Button variant="outlined" color="error" startIcon={<DeleteIcon />} onClick={clearSubAll}>
+              </AsyncButton>
+              <AsyncButton variant="outlined" color="error" startIcon={<DeleteIcon />} onClick={() => clearSubAll()}>
                 {t('admin:logs.clear_all')}
-              </Button>
+              </AsyncButton>
             </>}
             <Box sx={{ flex: 1 }} />
             {canConfig && <>
@@ -421,9 +422,9 @@ export default function LogsView() {
             </Box>
             <Button type="submit" variant="outlined">{t('common:search.placeholder')}</Button>
             <Box sx={{ flex: 1 }} />
-            {canConfig && <Button variant="outlined" color="error" startIcon={<DeleteIcon />} onClick={clearAuditAll}>
+            {canConfig && <AsyncButton variant="outlined" color="error" startIcon={<DeleteIcon />} onClick={() => clearAuditAll()}>
               {t('admin:logs.clear_all')}
-            </Button>}
+            </AsyncButton>}
           </Box>
           <Card sx={{ bgcolor: md.surfaceContainerLow, boxShadow: '0 1px 2px rgba(0,0,0,.3),0 1px 3px 1px rgba(0,0,0,.15)', overflow: 'hidden' }}>
             <TableContainer>
@@ -576,12 +577,12 @@ export default function LogsView() {
           </Box>
           <Box sx={{ display: 'flex', gap: 1, mb: 2, alignItems: 'center', flexWrap: 'wrap' }}>
             {canConfig && <>
-              <Button variant="outlined" startIcon={<CleaningIcon />} onClick={purgeEmailOld}>
+              <AsyncButton variant="outlined" startIcon={<CleaningIcon />} onClick={() => purgeEmailOld()}>
                 {t('admin:logs.purge_old')}
-              </Button>
-              <Button variant="outlined" color="error" startIcon={<DeleteIcon />} onClick={clearEmailAll}>
+              </AsyncButton>
+              <AsyncButton variant="outlined" color="error" startIcon={<DeleteIcon />} onClick={() => clearEmailAll()}>
                 {t('admin:logs.clear_all')}
-              </Button>
+              </AsyncButton>
             </>}
             <Box sx={{ flex: 1 }} />
             {canConfig && <>
