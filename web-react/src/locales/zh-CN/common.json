@@ -22,7 +22,9 @@
     "online": "在线",
     "offline": "离线",
     "load": "负载",
-    "delta_vs_yesterday": "较昨日"
+    "delta_vs_yesterday": "较昨日",
+    "working": "处理中…",
+    "loading": "加载中…"
   },
   "search": {
     "placeholder": "搜索…"
