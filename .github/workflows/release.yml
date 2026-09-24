@@ -649,8 +649,23 @@ jobs:
         with:
           ref: ${{ github.sha }}
       - name: Download every case report
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
+          # SCOPED TO ITS OWN EVIDENCE, as test.yml's gate is since #226. With no
+          # name and no pattern this fetched every artifact in the run — the six
+          # psp binaries and the web bundle, about 150 MB it never read — and it
+          # depended on every one of them being downloadable. test.yml's gate went
+          # red on main over a `.dockerbuild` record it could not fetch, and the
+          # docker job here publishes one; only the job order keeps it off this
+          # step. The two patterns are the two things the gate reads, and each
+          # artifact still lands in a directory of its own, which is the layout
+          # the case-set checker and the digest collector below expect.
+          pattern: 'node-wire-v1@*'
+          path: evidence
+      - name: Download the artifact digests the build legs recorded
+        uses: actions/download-artifact@v8
+        with:
+          pattern: 'compat-digest-*'
           path: evidence
       - name: the matrix leg itself succeeded
         env:

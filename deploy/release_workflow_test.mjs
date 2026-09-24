@@ -640,6 +640,19 @@ test('the compatibility gate actually runs the case-set checker', () => {
   const gate = job('compatibility')
   assert(gate.includes('deploy/compat/check-case-set.mjs'))
   assert(gate.includes('actions/download-artifact'))
+  // AND IT DOWNLOADS ONLY WHAT IT READS. An unscoped download fetches every artifact
+  // in the run and fails on any it cannot read; that took test.yml's gate down on
+  // main (#226), and this run's docker job publishes the same kind of record.
+  const downloads = withoutComments(gate)
+    .split(/\n(?= {6}- )/)
+    .filter((step) => step.includes('uses: actions/download-artifact@'))
+  assert(downloads.length > 0, 'the gate must download its evidence')
+  for (const step of downloads) {
+    assert(/^ {10}(?:name|pattern): \S/m.test(step), `the gate downloads every artifact in the run:\n${step}`)
+  }
+  for (const pattern of ["pattern: 'node-wire-v1@*'", "pattern: 'compat-digest-*'"]) {
+    assert(downloads.some((step) => step.includes(pattern)), `the gate no longer downloads ${pattern}`)
+  }
 })
 
 // R10 STEP 1, MADE ENFORCEABLE. "Walk the release needs graph and list every job
