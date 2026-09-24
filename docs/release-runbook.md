@@ -62,9 +62,16 @@
 
 1. 选定一个**已验收**的 release，核对 commit 与制品 digest 没有变。
 2. 确认 required 证据完整（`check-case-set.mjs` 的汇总）。
-3. 只改 GitHub 的 `prerelease` 元数据为 **false**。
-4. **不移动 tag、不重建、不替换附件、不要求已安装的实例重装。**
-5. 更新 `latest`（仅正式版）与 Docker `latest` 到**已经验证过的那个 digest**。
+3. **V4 的第一个 stable 之前（只做一次）：先让 `release/v3` 交出 `latest`。** 在 `release/v3` 上合入一个改动，改它自己的 `.github/workflows/release.yml`：
+   - 删掉 docker metadata 里的 `type=raw,value=latest,...` 一行（文件里 `# >>> WHEN V4 PUBLISHES ITS FIRST STABLE RELEASE, DELETE THE :latest` 这条标记指的那行；标记在下一行注释 `# >>> LINE BELOW. <<<` 才结束，按整句搜是搜不到的）；
+   - 在同一文件的 `Publish GitHub Release` step 加 `make_latest: false`——GitHub 的 Latest 标记是全仓库**一个**指针，按线拆不开。
+
+   **原因**：两条线的发布工作流都会写 Docker `:latest` 和 GitHub Latest，谁最后发布谁赢。交接没做，下一个 V3 例行补丁就会把 `:latest` 拖回 V3——**数据库模型不同的镜像**；`docker-compose.yml` 默认就是 `:latest` 加 `pull_policy: always`，每个跟着它的部署下一次 `up -d` 就跨大版本降级。两个工作流都不检测、不告警，而这条交接说明原先只写在另一条分支的注释里，在 `main` 上转 stable 的人看不到。V3 用户改用滚动标签 `:v3`（`release/v3` 的 README 已写；main 的 README 还没有），交接对他们不丢任何东西。
+
+   核对（先 `git fetch origin release/v3`）：`git show origin/release/v3:.github/workflows/release.yml | grep -n 'value=latest'` 应当**没有输出**；同一文件 `grep -nE '^ +make_latest: false'` 应当命中 Publish step 里的那一行——注释里提到它不算，今天的注释就提到了。两条都成立再改元数据：V4 一旦是正式版，交接前的任何一个 V3 补丁都会把两个 `latest` 抢回去。
+4. 只改 GitHub 的 `prerelease` 元数据为 **false**。
+5. **不移动 tag、不重建、不替换附件、不要求已安装的实例重装。**
+6. 更新 `latest`（仅正式版）与 Docker `latest` 到**已经验证过的那个 digest**。
 
 > 同一个版本从 testing 转到 stable 是**改元数据**，不是发新版本。若修复代码或改变构建输入导致制品不同，**分配新号**（同线增量修复即下一个第 4 段），不要在原 tag 下重新上传。
 
