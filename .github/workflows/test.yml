@@ -709,6 +709,12 @@ jobs:
       - name: Install dependencies
         working-directory: web-react
         run: npm ci
+      # The hook rules the source was written against, which no job ran: rules-of-hooks
+      # fails the step, exhaustive-deps only reports. web-react/.oxlintrc.json says
+      # why. ~0.3s measured locally, before the build so a hook error fails fast.
+      - name: lint (react hooks)
+        working-directory: web-react
+        run: npm run lint
       # THE BROWSER IS A DOWNLOAD, NOT A BUILD. `playwright install chromium`
       # fetches it into a shared, version-keyed directory, so the only thing that
       # changes between runs is nothing — and the 50s this step cost was mostly the

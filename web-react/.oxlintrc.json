@@ -1,0 +1,25 @@
+{
+  // THE HOOK RULES, AND ONLY THEM. The source was written against rules-of-hooks
+  // and exhaustive-deps -- it carries twelve eslint-disable comments for the second
+  // -- and no job ran either. oxlint because it needs neither the TypeScript API
+  // (this tree is on TypeScript 7) nor an ESLint install, lints src in ~0.3s, and
+  // honours those eslint-disable comments.
+  //
+  // rules-of-hooks is an error: a hook called conditionally or outside a component
+  // is a bug on the render it takes the other branch. exhaustive-deps is a warning:
+  // 32 unsuppressed findings stood when this was added, and each one is a judgment
+  // about a stale closure that belongs to whoever owns the effect, not to a lint
+  // commit. oxlint's default correctness set and the react plugin's compiler-era
+  // rules (set-state-in-effect and friends) are off, so this stays about hooks.
+  //
+  // THE PLUGIN MUST BE NAMED. Without "react" here the two rules below are silently
+  // inactive and the lint passes having checked nothing. A rule name this version
+  // does not know fails the config parse instead, loudly.
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["react"],
+  "categories": { "correctness": "off" },
+  "rules": {
+    "react-hooks/rules-of-hooks": "error",
+    "react-hooks/exhaustive-deps": "warn"
+  }
+}

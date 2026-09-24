@@ -641,6 +641,22 @@ test('the production smoke runs on the Chromium the job pins, installed before i
   )
 })
 
+// THE HOOK LINT RUNS, AND IT CAN FAIL. The rules only exist when the react plugin
+// is named in the config: without it oxlint passes having checked nothing, which is
+// the one failure a lint step cannot report about itself.
+test('the web job lints the React hook rules, with rules-of-hooks as an error', () => {
+  const web = job('web')
+  assert(step(web, 'lint (react hooks)').includes('npm run lint'), 'the web job must run the hook lint')
+  const pkg = JSON.parse(readFileSync(new URL('../web-react/package.json', import.meta.url), 'utf8'))
+  assert.match(pkg.scripts.lint ?? '', /^oxlint\b/, 'web-react must have a lint script that runs oxlint')
+  assert.match(pkg.devDependencies.oxlint ?? '', /^\d+\.\d+\.\d+$/, 'oxlint must be an exactly pinned devDependency')
+  // The config is JSONC; its comments are whole lines, so dropping them is enough.
+  const raw = readFileSync(new URL('../web-react/.oxlintrc.json', import.meta.url), 'utf8')
+  const config = JSON.parse(raw.split('\n').filter((line) => !/^\s*\/\//.test(line)).join('\n'))
+  assert(config.plugins?.includes('react'), 'the react plugin must be enabled, or the hook rules are silently inactive')
+  assert.equal(config.rules?.['react-hooks/rules-of-hooks'], 'error', 'rules-of-hooks must fail the lint')
+})
+
 // The pinned-source contract job must not learn which Node revision to test from
 // go.mod. Doing so made the evidence move with every dependency bump, and would
 // have removed the job's entry point the moment the PN root module was dropped —
