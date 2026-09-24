@@ -301,6 +301,14 @@ jobs:
     # tag job that FAILS must stop the release — which a plain `needs` does.
     needs: tag
     runs-on: ubuntu-latest
+    # EVERY JOB STATES ITS OWN TIMEOUT, and here that is not tidiness. All releases
+    # share one concurrency group that never cancels, and GitHub keeps one pending
+    # run per group: a hung upload, push or npm ci held on the 360-minute default
+    # blocks every other release for six hours, and a third release started
+    # meanwhile silently replaces the second, which for a pushed tag leaves a tag
+    # with no release. Each limit is several times the job's time in run
+    # 35941771170 (v4.0.1.11): this one took 40 seconds.
+    timeout-minutes: 10
     outputs:
       tag: ${{ steps.identity.outputs.tag }}
       version: ${{ steps.identity.outputs.version }}
@@ -620,6 +628,8 @@ jobs:
   compatibility:
     name: compatibility gate
     runs-on: ubuntu-latest
+    # A checkout, two small downloads and three node scripts: 12 seconds.
+    timeout-minutes: 10
     # `build` is here because the gate now gathers the artifact digests the build
     # legs emit; without the edge it could run first and find none. The build
     # itself does not depend on the gate, so this adds no cycle — and `release`
@@ -737,6 +747,8 @@ jobs:
     name: Build web assets
     runs-on: ubuntu-latest
     needs: setup
+    # npm ci, a vite build and the browser smoke: 36 seconds.
+    timeout-minutes: 10
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -787,6 +799,8 @@ jobs:
     # wait as long as its x64 ones).
     runs-on: ${{ matrix.runner }}
     needs: [setup, web]
+    # A cold toolchain and a cold compile: about 1m40s a leg.
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
@@ -914,6 +928,9 @@ jobs:
   release:
     name: Publish GitHub Release
     runs-on: ubuntu-latest
+    # 35 seconds before it read the draft back; the read-back downloads the
+    # release's own files (149 MB for v4.0.1.11) and adds an attestation.
+    timeout-minutes: 15
     # Through the GATE, never straight onto the matrix: the gate is the only job
     # that knows whether the whole case set reported, so reaching around it
     # would let a release publish on a run where a version went untested.
@@ -1211,6 +1228,8 @@ jobs:
   docker:
     name: Publish container image
     runs-on: ubuntu-latest
+    # A two-platform push of prebuilt binaries, then an attestation: 36 seconds.
+    timeout-minutes: 15
     # Same reason as `release` above: a channel this job rolls forward must not
     # move on a run whose compatibility evidence is incomplete.
     needs: [setup, build, compatibility]

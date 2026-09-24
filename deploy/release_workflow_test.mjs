@@ -452,6 +452,16 @@ test('no job is skipped by its own condition while the release depends on it', (
   }
 })
 
+// EVERY RELEASE JOB STATES ITS OWN TIMEOUT. All releases share one concurrency group
+// that never cancels, and GitHub keeps one pending run per group, so a job hung on
+// the 360-minute default blocks every release for six hours, and a third release
+// started meanwhile silently replaces the second: a pushed tag left without a release.
+test('every job in release.yml sets its own timeout', () => {
+  for (const [name, raw] of jobs()) {
+    assert(/^    timeout-minutes: \d+$/m.test(raw), `${name} has no timeout-minutes, so a hang holds the release group for GitHub's 360-minute default`)
+  }
+})
+
 // A TAG CARRIES AN IDENTITY, AND A FRESH RUNNER HAS NONE.
 //
 // `git tag -a` refuses with `fatal: empty ident name` when no committer is
