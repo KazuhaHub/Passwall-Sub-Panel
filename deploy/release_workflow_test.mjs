@@ -829,8 +829,9 @@ test('the release attaches the evidence index under its checksums, and the image
 // publisher. The manual's words are "do not modify production code to trust an
 // arbitrary release source for a private candidate".
 //
-// PSP publishes checksums rather than signatures, so there is no signature step
-// to separate here — but the same rule has a checkable form: the publisher must
+// PSP publishes checksums and a provenance attestation, and verifies no signature
+// on the way in, so there is no signature step to separate here — but the same
+// rule has a checkable form: the publisher must
 // still verify what it produced, and nothing in the path may be relaxed to make a
 // candidate pass. Each pattern below is a way that rule gets broken quietly.
 test('the publisher verifies its own artifacts and relaxes nothing', () => {
@@ -892,6 +893,45 @@ test('the publisher verifies its own artifacts and relaxes nothing', () => {
   ]) {
     assert(!pattern.test(workflow), `the publisher relaxes verification: ${pattern}`)
   }
+})
+
+// CHECKSUMS PROVE INTEGRITY, NOT ORIGIN. SHA256SUMS.txt is published on the same
+// page as the files it covers, so whoever could replace a file could replace the
+// sums. A provenance attestation binds each digest to this workflow, commit and
+// run under a Sigstore certificate, and it is checked with `gh attestation verify`.
+// Held here: both publishers attest what they publish, the scopes that needs are
+// ADDED to theirs (the write-scope asserts above still read the same prefix), the
+// release attests while it is still a draft, and the image by digest, not by tag.
+test('the release files and the pushed image carry build provenance', () => {
+  const release = job('release')
+  const docker = job('docker')
+  assert(
+    release.includes('permissions:\n      contents: write\n      id-token: write\n      attestations: write\n'),
+    'the release job needs id-token and attestations, after its own contents: write',
+  )
+  assert(
+    docker.includes('permissions:\n      contents: read\n      packages: write\n      id-token: write\n      attestations: write\n'),
+    'the docker job needs id-token and attestations, after its own scopes',
+  )
+
+  const files = withoutComments(release)
+  // The files read back from the draft, which are the published bytes; dist/ is
+  // not, on a re-run over this run's own draft.
+  const attestFiles = /uses: actions\/attest-build-provenance@\S+\n {8}with:\n {10}subject-path: verify\/\*\n/.exec(files)
+  assert(attestFiles, 'the release must attest every file it publishes, as read back from the release')
+  assert(
+    files.indexOf("- name: Verify the draft's assets") < attestFiles.index &&
+      attestFiles.index < files.indexOf('--draft=false'),
+    'the files are attested after they are verified and while the release is still a draft',
+  )
+
+  const image = withoutComments(docker)
+  const attestImage = image.indexOf('uses: actions/attest-build-provenance@')
+  assert(attestImage > image.indexOf('id: push'), 'the image is attested after it is pushed')
+  const inputs = image.slice(attestImage)
+  assert(inputs.includes('subject-name: ghcr.io/${{ needs.setup.outputs.owner_lc }}/passwall-sub-panel\n'), 'the image is named without a tag')
+  assert(inputs.includes('subject-digest: ${{ steps.push.outputs.digest }}\n'), 'the image is attested by the digest the push reported')
+  assert(inputs.includes('push-to-registry: true\n'), 'the attestation must sit in the registry beside the image')
 })
 
 // R10 STEP 7: "rolling channels follow the repository's existing semantics, and

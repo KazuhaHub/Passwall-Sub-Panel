@@ -918,8 +918,16 @@ jobs:
     # that knows whether the whole case set reported, so reaching around it
     # would let a release publish on a run where a version went untested.
     needs: [setup, build, compatibility]
+    # id-token and attestations are for the provenance step alone: the first mints
+    # the OIDC token Sigstore signs with, the second stores the attestation. GitHub
+    # grants scopes per job, so every other step here, the pinned upload action
+    # included, could mint that token and attest files of its own choosing. Kept
+    # here because an attesting job of its own would have to be handed the read-back
+    # files, and the draft held until it finished, to attest before publication.
     permissions:
       contents: write
+      id-token: write
+      attestations: write
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -1172,6 +1180,21 @@ jobs:
           }
           echo "The draft's ${checked} archives carry the binaries the gate accepted, and every file matches SHA256SUMS.txt."
 
+      # WHERE THE FILES CAME FROM, SIGNED. SHA256SUMS.txt sits on the same page as
+      # the files it covers, so it proves they arrived intact and nothing about
+      # who built them. This binds each file's digest to this workflow, this commit
+      # and this run with a Sigstore certificate, and anyone can check it with
+      # `gh attestation verify <file> --repo KazuhaHub/Passwall-Sub-Panel`. It runs
+      # while the release is still a draft, so a failure here publishes nothing.
+      #
+      # IT ATTESTS THE FILES READ BACK, NOT dist/. They are the published bytes,
+      # and on a re-run over this run's own draft the two differ: the draft keeps
+      # the first attempt's archives, and packaging again gives new tar mtimes.
+      - name: Attest the release files
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: verify/*
+
       # ONLY THE DRAFT FLAG CHANGES. The channel was set when the draft was made
       # and carries over; `latest` is left to GitHub's default for a newly
       # published release, which is exactly what the action asked for when it
@@ -1194,9 +1217,13 @@ jobs:
     # The docker/* actions are pinned by commit for the release step's reason:
     # after the login, this job's credential pushes :latest and :beta, which every
     # Docker deployment pulls, and a moved tag would run past the image preflight.
+    # id-token and attestations are the image attestation's, and as in `release`
+    # the scope is the job's, so those actions hold it as well.
     permissions:
       contents: read
       packages: write
+      id-token: write
+      attestations: write
     # THE DIGEST IS THE IMAGE; the tags are pointers to it, and two of them move.
     # R10 step 4 asks for the image digest next to the archives', and nothing
     # recorded it: the exact tag was the only link between the evidence and what
@@ -1324,3 +1351,17 @@ jobs:
               if [ -n "$tag" ]; then echo "- \`${tag}\`"; fi
             done <<<"$TAGS"
           } >> "$GITHUB_STEP_SUMMARY"
+
+      # THE IMAGE'S PROVENANCE, BOUND TO THE DIGEST RATHER THAN A TAG: a tag moves,
+      # and two of these do. Pushed to the registry beside the image, so
+      # `gh attestation verify oci://ghcr.io/<owner>/passwall-sub-panel:<version>
+      # --repo KazuhaHub/Passwall-Sub-Panel` finds it. The login above is the
+      # credential it pushes with. No storage record: that is organisation
+      # inventory metadata, needs a third write scope, and verifies nothing.
+      - name: Attest the pushed image
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-name: ghcr.io/${{ needs.setup.outputs.owner_lc }}/passwall-sub-panel
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true
+          create-storage-record: false

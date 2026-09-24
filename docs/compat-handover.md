@@ -157,6 +157,15 @@ PSP_CANDIDATE_AGENT=/path/to/passwall-node ./deployment/compat/old-psp.sh
 
 镜像 digest 以前哪里都没记，证据和被推送的镜像之间只靠那个精确 tag 连着。现在 `docker` job 把 build-push 的 digest 作为 job 输出 `digest` 导出，并写进运行摘要：`ghcr.io/<owner>/passwall-sub-panel@sha256:…` 以及它被打上的每个 tag。空的或格式不对的 digest 会让这一步失败，而不是被当成一条记录写下来。
 
+**来源可以核对，不只是完整性。** `SHA256SUMS.txt` 和它覆盖的文件在同一个发布页上，能换掉文件的人也能换掉它，所以它只证明文件完整到达，证明不了是谁构建的。现在两个发布 job 各自给产物生成 build provenance 证明（`actions/attest-build-provenance`，Sigstore 签名，绑定本工作流、提交与运行）：`release` 在 draft 读回核对之后、公开之前证明**读回的那些文件**（即公开出去的字节，不是 `dist/`：同一运行重跑时 draft 保留第一次的归档，重新打包的 tar 时间戳不同）；`docker` 按 digest（不是 tag）证明推送的镜像，并把证明推到镜像旁边。核对命令：
+
+```bash
+gh attestation verify passwall-sub-panel_<版本>_linux_amd64.tar.gz --repo KazuhaHub/Passwall-Sub-Panel
+gh attestation verify oci://ghcr.io/kazuhahub/passwall-sub-panel:<版本> --repo KazuhaHub/Passwall-Sub-Panel
+```
+
+镜像证明也就把 digest 与提交、运行永久绑在了一起，不随运行日志过期。
+
 ### 第一次执行抓到的东西
 
 第一次运行就失败了，而且是**正确地**失败:证据索引那一步引用的 `.compat/digests.json` **没有任何作业产出**——引用写了，产出没写，而这条路径此前从未跑过，所以一直没人发现。门挡住了发布，`release` 与 `docker` 未运行，没有任何归档被上传、没有任何渠道被移动。修复见 #173。
