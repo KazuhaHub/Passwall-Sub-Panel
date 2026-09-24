@@ -29,6 +29,15 @@ updates:
           - minor
           - patch
         exclude-patterns:
+          # The two libraries this project shares with its siblings. authcore
+          # requires the same crewjam/saml, goxmldsig and go-webauthn versions this
+          # module selects, so under minimal version selection an authcore release
+          # that raises one raises it here too -- inside a batch, past the list
+          # below. passwall-protocol is the wire the Node speaks, and at 0.x a minor
+          # release may break it. Each is reviewed on its own, as SAP already does
+          # for authcore.
+          - "github.com/KazuhaHub/authcore"
+          - "github.com/KazuhaHub/passwall-protocol"
           - "github.com/crewjam/saml"
           - "github.com/russellhaering/goxmldsig"
           - "github.com/beevik/etree"
