@@ -314,9 +314,14 @@ const notesTruncationMarker = "\n\n…"
 // BOUNDARY and fits the bound with the marker. The dialog renders Markdown, and a
 // generated changelog is one pull request per line, each ending in its URL: a cut
 // at a fixed rune count lands inside one of those URLs, and the renderer links the
-// truncated address. With no line break inside the bound it falls back to the
-// last space, which still never splits a URL; only a body with neither is cut
-// hard.
+// truncated address. With no line break in the back half of the bound it falls
+// back to the last space there, which still never splits a URL; only a body with
+// neither is cut hard.
+//
+// THE BACK HALF, NOT ANYWHERE. A hand-written body is often a short heading, a
+// blank line and one long paragraph, and its only line break is then the last
+// one in the window: cutting there kept the heading and dropped the paragraph. A
+// boundary is taken only when it keeps at least half of what fits.
 func releaseNotes(body string) string {
 	trimmed := strings.TrimSpace(body)
 	runes := []rune(trimmed)
@@ -324,11 +329,12 @@ func releaseNotes(body string) string {
 		return trimmed
 	}
 	window := string(runes[:maxNotesRunes-len([]rune(notesTruncationMarker))])
+	floor := len(window) / 2
 	cut := strings.LastIndex(window, "\n")
-	if cut <= 0 {
-		cut = strings.LastIndexAny(window, " \t")
+	if cut < floor {
+		cut = strings.LastIndexAny(window, " \t\n")
 	}
-	if cut > 0 {
+	if cut >= floor {
 		window = window[:cut]
 	}
 	return strings.TrimSpace(window) + notesTruncationMarker

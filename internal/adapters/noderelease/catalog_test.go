@@ -941,4 +941,22 @@ func TestReleaseNotesTruncateOnLineBoundaries(t *testing.T) {
 	if !ok || strings.Contains(kept, "https://") || strings.HasSuffix(kept, "wor") {
 		t.Fatalf("single-line body must be cut at a space: %q", got)
 	}
+
+	// A BOUNDARY NEAR THE START IS NOT A CUT POINT. A hand-written body is often a
+	// short heading, a blank line and one long paragraph; its only line break is
+	// then the last one in the window, and cutting there kept the heading and
+	// threw the paragraph away.
+	for _, tc := range []struct{ name, body string }{
+		{"one long word after a heading", "Title\n" + strings.Repeat("A", 700)},
+		{"long prose after a heading", "## Summary\n\n" + strings.Repeat("This release fixes things. ", 40)},
+		{"the catalog fixture's shape", "A release body written for a release page.\n\n" + strings.Repeat("x", 2000)},
+	} {
+		got := releaseNotes(tc.body)
+		if n := len([]rune(got)); n > maxNotesRunes || n < maxNotesRunes/2 {
+			t.Fatalf("%s: kept %d runes, want between %d and %d: %q", tc.name, n, maxNotesRunes/2, maxNotesRunes, got)
+		}
+		if !strings.HasPrefix(tc.body, strings.TrimSuffix(got, notesTruncationMarker)) {
+			t.Fatalf("%s: result is not a prefix of the body: %q", tc.name, got)
+		}
+	}
 }
