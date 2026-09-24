@@ -596,7 +596,7 @@ jobs:
           for image in psp-source-check psp-release-runtime-check; do
             test "$(docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges --entrypoint /bin/cat "$image" /etc/alpine-release)" = "$runtime_base"
             # Version exits before configuration, DB bootstrap or HTTP binding.
-            # This verifies binary execution, not the panel's production startup.
+            # This verifies binary execution; the boot step below is the startup.
             docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges --user 10001:10001 --entrypoint /app/psp "$image" --version
           done
       - name: The entrypoint repairs ownership in the image it ships in
@@ -623,6 +623,56 @@ jobs:
           docker run --rm -v psp-entrypoint-check:/app/data psp-source-check --version
           docker run --rm --entrypoint /bin/sh -v psp-entrypoint-check:/app/data psp-source-check \
             -c 'test "$(stat -c %u /app/data)" = 10001'
+      # EVERY CHECK ABOVE STOPS AT `--version`, WHICH EXITS BEFORE THE PANEL DOES
+      # ANYTHING. internal/app's tests already call app.Build and drive the router, so
+      # this is not about wiring. It is what only the shipped image can answer: main()
+      # generating its config and seeding a fresh ./config, SQLite created in the data
+      # volume by the unprivileged user the entrypoint drops to, a real bind, and the
+      # SPA the image embedded -- every Go job compiles against the .gitkeep
+      # placeholder, and the web job's smoke serves dist from Node, so nothing else
+      # sees the bundle inside the binary. A binary without it answers / with a 404.
+      #
+      # The mounts are compose's: a bind-mounted config directory the runner creates
+      # (so the entrypoint has to hand it over) and a named data volume. No secret is
+      # involved; the panel generates its own on first start, as a fresh install does.
+      # `docker stop` is part of the check: the panel is PID 1 and must drain on
+      # SIGTERM and exit 0, or every compose restart is a kill. Measured locally
+      # against the same binary: healthy 0.5s after start, the whole sequence ~2s.
+      - name: The image boots on a fresh SQLite and serves the SPA it embeds
+        run: |
+          set -euo pipefail
+          config_dir=$(mktemp -d "$RUNNER_TEMP/psp-boot-config.XXXXXX")
+          cid=$(docker run -d -p 127.0.0.1:18788:8788 \
+            -e PSP_CONFIG=/app/config/config.yaml \
+            -v "$config_dir:/app/config" -v psp-boot-data:/app/data psp-source-check)
+          cleanup() {
+            status=$?
+            if [ "$status" -ne 0 ]; then docker logs "$cid" 2>&1 | tail -n 80; fi
+            docker rm -f "$cid" >/dev/null 2>&1 || true
+            docker volume rm psp-boot-data >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+          base=http://127.0.0.1:18788
+          healthy=0
+          for _ in $(seq 1 30); do
+            if curl -fs -o /dev/null "$base/health"; then healthy=1; break; fi
+            if [ "$(docker inspect -f '{{.State.Running}}' "$cid")" != true ]; then
+              echo "::error::the panel exited during boot"; exit 1
+            fi
+            sleep 1
+          done
+          test "$healthy" = 1 || { echo "::error::/health did not answer within 30s"; exit 1; }
+          curl -fsS "$base/health" | grep -q '"status":"ok"'
+          # The page AND the module it loads: an index.html whose assets were left out
+          # of the embed would pass a check on the page alone.
+          index=$(curl -fsS "$base/")
+          entry=$(printf '%s\n' "$index" | sed -n 's|.*<script type="module"[^>]* src="\./\(assets/[^"]*\.js\)".*|\1|p' | head -n 1)
+          test -n "$entry" || { echo "::error::/ is not the built SPA: no module script in it"; exit 1; }
+          curl -fsS -o /dev/null "$base/$entry"
+          docker exec "$cid" test -s /app/config/config.yaml
+          test "$(docker exec "$cid" stat -c %u /app/data/panel.db)" = 10001
+          docker stop -t 15 "$cid" >/dev/null
+          test "$(docker inspect -f '{{.State.ExitCode}}' "$cid")" = 0
       - name: Publisher identity, compat result validators and fail-closed guard tests
         run: node --test deploy/check_image_test.mjs deploy/check_build_test.mjs deploy/release_workflow_test.mjs deploy/compat/check-go-results.test.mjs deploy/compat/check-case-set.test.mjs deploy/compat/plan.test.mjs deploy/compat/profiles.test.mjs deploy/compat/backends/third-party_env.test.mjs deploy/compat/evidence-index.test.mjs deploy/compat/contract-source.test.mjs deploy/tracked_text_test.mjs deploy/test_workflow_test.mjs
 

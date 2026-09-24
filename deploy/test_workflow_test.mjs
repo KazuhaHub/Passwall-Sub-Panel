@@ -96,6 +96,34 @@ test('the deploy guard suites are all executed by the container job', () => {
   }
 })
 
+// One step of a job, by its name, up to the next step: the name line, its
+// options and its script.
+function step(jobBlock, name) {
+  const start = jobBlock.indexOf(`      - name: ${name}\n`)
+  assert(start >= 0, `missing step "${name}"`)
+  const tail = jobBlock.slice(start + 1)
+  const next = /^      - /m.exec(tail)
+  return tail.slice(0, next?.index ?? tail.length)
+}
+
+// THE SHIPPED IMAGE HAS TO START, NOT ONLY PRINT ITS VERSION. Every other check in
+// the container job runs `--version`, which exits before config generation, the
+// seed, the database or the bind, and every Go job compiles against the .gitkeep
+// placeholder, so the SPA inside the binary is seen nowhere else. The step must go
+// through the real entrypoint (the privilege drop is part of what boots), prove the
+// module the page loads is served as well as the page, and stop the panel the way
+// compose does.
+test('the container job boots the source image and fetches the SPA it embeds', () => {
+  const boot = step(job('container'), 'The image boots on a fresh SQLite and serves the SPA it embeds')
+  assert(/docker run -d [^]*psp-source-check\)/.test(boot), 'the boot step must start the source image detached')
+  assert(!boot.includes('--entrypoint'), 'the boot step must go through the image entrypoint, which is what drops to the panel user')
+  assert(boot.includes('/health'), 'the boot step must wait on the health endpoint')
+  assert(boot.includes('<script type="module"'), 'the boot step must check that / is the built SPA, not the placeholder')
+  assert(boot.includes('"$base/$entry"'), 'the boot step must fetch the module the page loads, not only the page')
+  assert(boot.includes('stat -c %u /app/data/panel.db)" = 10001'), 'the boot step must prove the database was created by the unprivileged user')
+  assert(boot.includes("{{.State.ExitCode}}') = 0") || boot.includes(`{{.State.ExitCode}}' "$cid")" = 0`), 'the boot step must stop the panel and require a clean exit')
+})
+
 // A BUILD TAG IS A FILE THE PLAIN `go vet ./...` NEVER OPENS.
 //
 // The reinstall acceptance is behind `node_reinstall_acceptance`, and its only compile
