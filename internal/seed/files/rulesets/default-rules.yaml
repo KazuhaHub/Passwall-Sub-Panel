@@ -61,6 +61,7 @@ content: |
   # All remaining non-local UDP -> the 🎮 UDP控制 selector, default DIRECT.
   # DIRECT allows UDP without relying on the proxy node's UDP support; it
   # leaves from the local exit IP, which can differ from the TCP proxy exit.
+  # PASS (Mihomo only) hands UDP to the service rules below instead.
   # Group display order is UDP then QUIC; matching must remain QUIC then UDP.
   # Both rules
   # sit after localhost/LAN/private-IP direct rules so router DNS, mDNS (.local)

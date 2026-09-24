@@ -261,9 +261,10 @@ func proxyGroupChoices(name string) []string {
 		// HTTP/3 over UDP/443 is independently selectable. Delegating to the
 		// general UDP selector first keeps one switch for all UDP, while the
 		// remaining members let a subscriber override QUIC without changing
-		// other UDP traffic. No PASS default here: sing-box has no PASS outbound,
-		// so a PASS-default selector is dropped from sing-box output entirely
-		// and its subscribers lose the switch.
+		// other UDP traffic. No PASS member at all: in the shipped rule set the
+		// rule right after the QUIC rule is the general UDP rule, so a QUIC PASS
+		// would land there and duplicate the 🎮 UDP控制 member. A PASS default
+		// would also be dropped from sing-box output with its whole selector.
 		return []string{"🎮 UDP控制", "🚀 节点选择", "DIRECT", "REJECT"}
 	case strings.Contains(name, "UDP控制"):
 		// General non-local UDP defaults to the local DIRECT exit, independently
@@ -271,7 +272,14 @@ func proxyGroupChoices(name string) []string {
 		// depends on the selected node's UDP support, and it does not promise a
 		// proxied source IP. QUIC delegates here by default, while either selector
 		// can still be overridden by subscribers.
-		return []string{"DIRECT", "🚀 节点选择", "REJECT"}
+		//
+		// PASS hands UDP to the service rules below (YouTube to its group,
+		// mainland IPs to 🇨🇳 中国大陆, the rest to the final MATCH), which the
+		// node selector cannot express: that one forces all UDP through the node.
+		// Both stay. PASS is second, never first, because sing-box has no PASS
+		// outbound: a non-default PASS is simply dropped from its selector, while
+		// a PASS default would remove the whole UDP selector and its route there.
+		return []string{"DIRECT", "PASS", "🚀 节点选择", "REJECT"}
 	case strings.Contains(name, "全球直连"):
 		return []string{"DIRECT"}
 	case strings.Contains(name, "广告拦截") || strings.Contains(name, "应用净化"):

@@ -108,7 +108,8 @@ func TestEnsureUpgradesPreviousIndependentRoutingDefaults(t *testing.T) {
 			"  # a slow UDP path; a subscriber can independently select the proxy or DIRECT.\n",
 		"  # All remaining non-local UDP -> the 🎮 UDP控制 selector, default DIRECT.\n"+
 			"  # DIRECT allows UDP without relying on the proxy node's UDP support; it\n"+
-			"  # leaves from the local exit IP, which can differ from the TCP proxy exit.\n",
+			"  # leaves from the local exit IP, which can differ from the TCP proxy exit.\n"+
+			"  # PASS (Mihomo only) hands UDP to the service rules below instead.\n",
 		"  # All remaining non-local UDP -> the 🎮 UDP控制 selector, default PASS.\n"+
 			"  # PASS continues through the later domain/region rules, so each service keeps\n"+
 			"  # its normal routing decision instead of all UDP being forced direct or proxy.\n",
