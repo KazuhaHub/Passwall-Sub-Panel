@@ -8,7 +8,6 @@ import {
   DialogActions,
   DialogContent,
   DialogTitle,
-  IconButton,
   Table,
   TableBody,
   TableCell,
@@ -27,6 +26,7 @@ import WarningAmberIcon from '@mui/icons-material/WarningAmberOutlined'
 import { useTranslation } from 'react-i18next'
 
 import { useCan } from '@/utils/permissions'
+import { AsyncIconButton } from '@/components/AsyncButton'
 import { saveLocale, deleteLocale, MAX_LOCALE_PACK_BYTES, type LocaleMeta, type LocalePack } from '@/api/locales'
 import { useLocales } from '@/query/locales'
 import { useQueryScope } from '@/query/useQueryScope'
@@ -223,9 +223,13 @@ export default function LanguagePacksView() {
                   <TableCell align="right">
                     {canConfig && (
                       <Tooltip title={t('common:actions.delete')}>
-                        <IconButton size="small" onClick={() => confirmDelete(m)} sx={{ color: md.error }}>
+                        {/* AsyncIconButton, not a plain IconButton: delete hits the
+                            upstream and a slow link left this clickable with no
+                            feedback for the whole round-trip, inviting a repeat
+                            click that re-opened the confirm dialog mid-request. */}
+                        <AsyncIconButton size="small" onClick={() => confirmDelete(m)} sx={{ color: md.error }}>
                           <DeleteIcon fontSize="small" />
-                        </IconButton>
+                        </AsyncIconButton>
                       </Tooltip>
                     )}
                   </TableCell>

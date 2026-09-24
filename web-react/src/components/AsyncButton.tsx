@@ -25,7 +25,13 @@ function usePendingClick(onClick: Handler | undefined) {
   // from before the first one re-rendered.
   const running = useRef(false)
   const mounted = useRef(true)
-  useEffect(() => () => { mounted.current = false }, [])
+  // Set on setup as well as cleared on cleanup: StrictMode replays effects on
+  // mount (setup, cleanup, setup), and a flag only the cleanup wrote would end
+  // that replay as "unmounted" and leave the button busy after its first action.
+  useEffect(() => {
+    mounted.current = true
+    return () => { mounted.current = false }
+  }, [])
 
   async function handle(event: MouseEvent<HTMLButtonElement>) {
     if (running.current || !onClick) return

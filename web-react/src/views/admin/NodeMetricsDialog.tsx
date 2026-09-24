@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
-  Alert, Box, Button, Chip, CircularProgress, Dialog, DialogContent, DialogTitle,
-  Divider, Stack, Tab, Tabs, Typography,
+  Alert, Box, Chip, CircularProgress, Dialog, DialogContent, DialogTitle,
+  Divider, LinearProgress, Stack, Tab, Tabs, Typography,
 } from '@mui/material'
 import RefreshIcon from '@mui/icons-material/Refresh'
 
+import { AsyncButton } from '@/components/AsyncButton'
 import NodeMetricsChart, { formatBits, formatBytes, type MetricsSeries } from '@/components/NodeMetricsChart'
 import {
   getNodeHealth, getNodeMetricsCurrent, getNodeMetricsHistory, requestNodeMetricsRefresh,
@@ -110,9 +111,12 @@ export default function NodeMetricsDialog({ server, open, onClose }: {
           <span>{t('admin:nodeMetrics.title', { name: server?.name ?? '' })}</span>
           {current && <HealthChip health={current.available ? current.freshness : 'unsupported'} />}
           <Box sx={{ flexGrow: 1 }} />
-          <Button size="small" startIcon={<RefreshIcon />} onClick={refresh} disabled={refreshing}>
+          {/* AsyncButton: the refresh polls for up to 30s waiting for a
+              changed sample, and a disabled-only button on that whole wait
+              looked identical to a stuck one. */}
+          <AsyncButton size="small" startIcon={<RefreshIcon />} pending={refreshing} onClick={refresh}>
             {t('admin:nodeMetrics.refresh')}
-          </Button>
+          </AsyncButton>
         </Stack>
       </DialogTitle>
       <DialogContent dividers>
@@ -140,9 +144,22 @@ export default function NodeMetricsDialog({ server, open, onClose }: {
                   size="small"
                   color={item.key === range.key ? 'primary' : 'default'}
                   onClick={() => setRange(item)}
+                  // All chips, not only the clicked one: a range switch
+                  // re-fetches both current and history, and a click on a
+                  // different chip mid-fetch would otherwise start a second,
+                  // overlapping request rather than being ignored like the
+                  // rest of this dialog's async actions.
+                  disabled={status === 'loading'}
+                  icon={status === 'loading' && item.key === range.key
+                    ? <CircularProgress size={12} color="inherit" /> : undefined}
                 />
               ))}
             </Stack>
+            {/* The range/tab re-fetch keeps the previous current+history on
+                screen (see load()) so switching never blanks the chart, but
+                that silence read as broken — this is the only signal that a
+                request is actually running while the stale data still shows. */}
+            {status === 'loading' && <LinearProgress sx={{ mb: 2 }} />}
             {tab === 0 && <OverviewTab current={current} />}
             {tab === 1 && (
               <PerformanceTab
@@ -330,19 +347,31 @@ function NetworkTab({ current }: { current: NodeMetricsCurrent }) {
 }
 
 function DiagnosticsTab({ serverID, current }: { serverID: number; current: NodeMetricsCurrent }) {
-  const { t } = useTranslation(['admin'])
+  const { t } = useTranslation(['admin', 'common'])
   // The detailed findings come from their own endpoint, so the overview never
   // loads a snapshot to render a badge and this tab never loads a chart to list
   // a condition.
   const [health, setHealth] = useState<NodeHealthDetail | null>(null)
+  // Switching to this tab is itself a fetch (see the effect below), and until
+  // this existed the cards sat on the current.freshness/em-dash fallback the
+  // whole time — indistinguishable from "checked and found nothing".
+  const [healthLoading, setHealthLoading] = useState(false)
   useEffect(() => {
     if (!current.available || !serverID) return
     const controller = new AbortController()
+    setHealthLoading(true)
     void getNodeHealth(serverID, controller.signal).then(setHealth).catch(() => undefined)
+      .finally(() => { if (!controller.signal.aborted) setHealthLoading(false) })
     return () => controller.abort()
   }, [current.available, serverID])
   return (
     <Stack spacing={2}>
+      {healthLoading && (
+        <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+          <CircularProgress size={16} />
+          <Typography variant="body2">{t('common:status.loading')}</Typography>
+        </Stack>
+      )}
       <Stack direction="row" spacing={3} sx={{ flexWrap: 'wrap' }}>
         <MetricCard label={t('admin:nodeMetrics.freshnessLabel')} value={health?.freshness ?? current.freshness} />
         <MetricCard label={t('admin:nodeMetrics.resourceHealth')} value={health?.resource_health ?? '—'} />

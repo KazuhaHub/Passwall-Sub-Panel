@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { StrictMode } from 'react'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import DeleteIcon from '@mui/icons-material/Delete'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -43,6 +44,23 @@ describe('AsyncIconButton', () => {
     fireEvent.click(button)
     await act(async () => { pending.reject(new Error('502')); await pending.promise.catch(() => {}) })
     expect((button as HTMLButtonElement).disabled).toBe(false)
+  })
+
+  // STRICT MODE REPLAYS EFFECTS ON MOUNT (setup, cleanup, setup). A mounted flag
+  // that only its cleanup writes ends that replay as "unmounted", and the button
+  // then never leaves its busy state after the first action. The app and the
+  // view test harness both render under StrictMode.
+  it('returns to idle after an action under StrictMode, and again after the next one', async () => {
+    let pending = deferred()
+    render(<StrictMode><AsyncIconButton aria-label="retry" onClick={() => pending.promise}><DeleteIcon /></AsyncIconButton></StrictMode>)
+    const button = screen.getByRole('button', { name: 'retry' }) as HTMLButtonElement
+    for (let round = 0; round < 2; round++) {
+      fireEvent.click(button)
+      expect(button.disabled).toBe(true)
+      await act(async () => { pending.resolve(); await pending.promise })
+      expect(button.disabled).toBe(false)
+      pending = deferred()
+    }
   })
 
   it('stays an ordinary button for a synchronous handler', () => {

@@ -6,6 +6,7 @@ import {
   TableHead, TableRow, Typography,
 } from '@mui/material'
 
+import { AsyncButton } from '@/components/AsyncButton'
 import {
   NODE_DIAGNOSTIC_SECTIONS, getNodeDiagnostic, isTerminalNodeDiagnostic, requestNodeDiagnostic,
   type NodeDiagnostic, type NodeDiagnosticSection,
@@ -224,13 +225,17 @@ export default function NodeDiagnosticsDialog({ server, open, onClose }: {
       </DialogContent>
       <DialogActions>
         <Button onClick={onClose}>{t('common:actions.close')}</Button>
-        <Button
+        {/* AsyncButton, driven by the existing `busy` state: the POST alone
+            can take a few seconds, and a disabled-only button on that wait
+            was indistinguishable from one that silently ate the click. */}
+        <AsyncButton
           variant="contained"
-          disabled={busy || sections.length === 0 || (waiting && diagnostic !== null)}
+          pending={busy}
+          disabled={sections.length === 0 || (waiting && diagnostic !== null)}
           onClick={request}
         >
           {t('admin:nodeDiagnostics.collect')}
-        </Button>
+        </AsyncButton>
       </DialogActions>
     </Dialog>
   )

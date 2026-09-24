@@ -31,6 +31,7 @@ import { useUsersList } from '@/query/users'
 import { useQueryScope } from '@/query/useQueryScope'
 import { UserServerUsage } from './UserServerUsage'
 import { getUISettings } from '@/api/settings'
+import { AsyncButton } from '@/components/AsyncButton'
 import PageHeader from '@/components/PageHeader'
 import { pushSnack } from '@/components/SnackbarHost'
 import { useTabParam } from '@/hooks/useTabParam'
@@ -291,7 +292,12 @@ export default function TrafficView() {
               <MenuItem value={20}>{t('traffic.limit.20')}</MenuItem>
               <MenuItem value={50}>{t('traffic.limit.50')}</MenuItem>
             </Select>
-            <Button variant="outlined" onClick={loadRank} disabled={loading}>{t('traffic.refresh')}</Button>
+            {/* `loading` (activeRank.isPending) is false once data exists, even
+                while a background refetch is running, so it can't drive this
+                button — a click on a slow link would look like it did
+                nothing. `isFetching` covers every refetch, not just the
+                first load. */}
+            <AsyncButton variant="outlined" pending={activeRank.isFetching} onClick={loadRank}>{t('traffic.refresh')}</AsyncButton>
             <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant, ml: 1 }}>
               {t('traffic.rank_note')}
             </Typography>
@@ -446,7 +452,11 @@ export default function TrafficView() {
                 <TextField {...params} label={t('traffic.trend.timezone')}
                   onBlur={() => setSelectedTz(tzInput)} />
               )} />
-            <Button variant="outlined" onClick={loadHistory} disabled={chartLoading}>{t('traffic.refresh')}</Button>
+            {/* Same isPending/isFetching split as the Rank refresh above —
+                chartLoading stays isPending-driven (it decides whether the
+                chart itself renders as "loading" vs "empty"), the button's
+                own busy state comes from isFetching instead. */}
+            <AsyncButton variant="outlined" pending={historyQuery.isFetching} onClick={loadHistory}>{t('traffic.refresh')}</AsyncButton>
           </Box>
 
           <Box sx={{

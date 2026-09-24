@@ -27,6 +27,7 @@ import type { User } from '@/api/types'
 import type { M3Tokens } from '@/theme'
 import { confirm } from '@/components/ConfirmHost'
 import { copyToClipboard } from '@/utils/clipboard'
+import { AsyncButton } from '@/components/AsyncButton'
 
 interface Props {
   open: boolean
@@ -37,10 +38,14 @@ interface Props {
   // result flows); the drawer just calls them. Recovery-code regeneration is new
   // and self-contained here.
   onResetPassword: (u: User) => void
-  onResetCredentials: (u: User) => void
-  onResetEmergency: (u: User) => void
-  onUnlinkSSO: (u: User) => void
-  onReset2FA: (u: User) => void
+  // These four hit the network directly (behind a confirm() for three of
+  // them) rather than opening another dialog, so on a slow link the button
+  // itself has to carry the wait — they are typed to return the request's
+  // promise so their buttons can be AsyncButtons instead of plain Buttons.
+  onResetCredentials: (u: User) => Promise<void>
+  onResetEmergency: (u: User) => Promise<void>
+  onUnlinkSSO: (u: User) => Promise<void>
+  onReset2FA: (u: User) => Promise<void>
   onManagePasskeys: (u: User) => void
 }
 
@@ -154,9 +159,9 @@ export default function AccountSecurityDrawer({
                 {t('users.security.regen_recovery', { defaultValue: '重新生成备用码' })}
               </Button>
               {u.totp_enabled && (
-                <Button size="small" variant="outlined" color="error" startIcon={<ShieldIcon />} onClick={() => onReset2FA(u)}>
+                <AsyncButton size="small" variant="outlined" color="error" startIcon={<ShieldIcon />} onClick={() => onReset2FA(u)}>
                   {t('users.more_menu.reset_2fa', { defaultValue: '重置两步验证' })}
-                </Button>
+                </AsyncButton>
               )}
             </Stack>
           ) : (
@@ -186,9 +191,9 @@ export default function AccountSecurityDrawer({
 
         <SectionCard md={md} icon={<KeyIcon fontSize="small" />}
           title={t('users.security.section_credentials', { defaultValue: '订阅凭证' })}>
-          <Button size="small" variant="outlined" color="error" startIcon={<KeyIcon />} onClick={() => onResetCredentials(u)}>
+          <AsyncButton size="small" variant="outlined" color="error" startIcon={<KeyIcon />} onClick={() => onResetCredentials(u)}>
             {t('users.more_menu.reset_credentials')}
-          </Button>
+          </AsyncButton>
         </SectionCard>
 
         <SectionCard md={md} icon={<LinkIcon fontSize="small" />}
@@ -196,17 +201,17 @@ export default function AccountSecurityDrawer({
           status={<Typography variant="caption" color="text.secondary">
             {hasSSO ? (u.sso_provider || '') : t('users.security.sso_none', { defaultValue: '未绑定' })}
           </Typography>}>
-          <Button size="small" variant="outlined" color="error" startIcon={<LinkOffIcon />}
+          <AsyncButton size="small" variant="outlined" color="error" startIcon={<LinkOffIcon />}
             disabled={!hasSSO} onClick={() => onUnlinkSSO(u)}>
             {t('users.more_menu.unlink_sso')}
-          </Button>
+          </AsyncButton>
         </SectionCard>
 
         <SectionCard md={md} icon={<EmergencyIcon fontSize="small" />}
           title={t('users.security.section_emergency', { defaultValue: '紧急访问' })}>
-          <Button size="small" variant="outlined" startIcon={<EmergencyIcon />} onClick={() => onResetEmergency(u)}>
+          <AsyncButton size="small" variant="outlined" startIcon={<EmergencyIcon />} onClick={() => onResetEmergency(u)}>
             {t('users.more_menu.reset_emergency')}
-          </Button>
+          </AsyncButton>
         </SectionCard>
       </Box>
       </>)}
