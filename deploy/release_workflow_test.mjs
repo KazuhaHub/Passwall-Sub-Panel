@@ -360,6 +360,27 @@ test('the tag job cuts the tag after the suite passes, only when the form asked 
     !/^        if:/m.test(suiteCheck[1]),
     'the suite check must run on every path, including a pushed tag',
   )
+  // AND IT ASKS ABOUT MAIN, TWICE. A dispatch can start from any branch, and a
+  // branch head usually has a green pull_request run of test.yml, which tested the
+  // merge ref and not this commit. Unfiltered, the lookup accepted that run and a
+  // permanent tag could be cut on unmerged code. Read from the executed lines, so
+  // the comment explaining the rule cannot satisfy it.
+  const suiteScript = suiteCheck[1]
+    .split('\n')
+    .filter((line) => !line.trimStart().startsWith('#'))
+    .join('\n')
+  assert(
+    suiteScript.includes('git merge-base --is-ancestor "$SHA" origin/main'),
+    'the suite check must refuse a commit that main does not contain',
+  )
+  assert(
+    /git fetch [^\n]*refs\/heads\/main:refs\/remotes\/origin\/main/.test(suiteScript),
+    'the ancestry check must read a main this step fetched, not whatever the checkout happened to leave',
+  )
+  assert(
+    /--workflow test\.yml --commit "\$SHA" --branch main\b/.test(suiteScript),
+    'the suite check must take only a test.yml run on main as evidence, not a pull_request run of the same head',
+  )
 })
 
 // A SKIPPED JOB SKIPS EVERYTHING DOWNSTREAM OF IT, TRANSITIVELY, AND `always()` ON A

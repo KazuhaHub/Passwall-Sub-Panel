@@ -193,12 +193,27 @@ jobs:
           # be skipped is the one where a person, rather than the allocator, chose
           # the commit. A tag that is pushed before the suite finishes is refused
           # here; the run is re-run, not re-tagged.
+          #
+          # AND THE COMMIT HAS TO BE ON MAIN, JUDGED BY A RUN THAT TESTED IT THERE.
+          # A dispatch can be started from any branch, and a branch head usually has
+          # a green test.yml run already: the pull_request one, which tested the
+          # merge ref rather than this commit and skips the third-party lane. Asked
+          # without a branch, the lookup took that run, and the dispatch would have
+          # cut a permanent tag on unmerged code and moved :beta. The ancestry check
+          # refuses the commit, `--branch main` refuses the borrowed evidence. Main
+          # is fetched by name rather than left to the checkout's refspec; a
+          # maintenance line, if one ever releases from here, names its own branch.
+          git fetch --quiet --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          git merge-base --is-ancestor "$SHA" origin/main || {
+            echo "${SHA:0:7} is not on main; a release is cut from a commit main already contains" >&2
+            exit 1
+          }
           conclusion=$(gh run list --repo "$GITHUB_REPOSITORY" \
-            --workflow test.yml --commit "$SHA" --limit 1 \
+            --workflow test.yml --commit "$SHA" --branch main --limit 1 \
             --json status,conclusion \
             --jq '.[] | select(.status == "completed") | .conclusion' | head -n 1)
           test "$conclusion" = "success" || {
-            echo "the test suite has not succeeded on ${SHA:0:7} (conclusion: ${conclusion:-none})" >&2
+            echo "the test suite has not succeeded on ${SHA:0:7} on main (conclusion: ${conclusion:-none})" >&2
             exit 1
           }
 
