@@ -54,18 +54,24 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       # The build cache pair the build job explains: restored on every event, and
-      # saved only from the default branch, where a save can be read.
+      # saved only from the default branch, where a save can be read. Then the shared
+      # module cache, which go_static saves; setup-go's own cache is off.
       - uses: actions/cache/restore@v4
         with:
           path: ~/.cache/go-build
           key: go-build-node-compat-${{ runner.os }}-${{ hashFiles('go.sum') }}
           restore-keys: go-build-node-compat-${{ runner.os }}-
+      - uses: actions/cache/restore@v4
+        with:
+          path: ~/go/pkg/mod
+          key: go-mod-${{ runner.os }}-${{ hashFiles('go.sum') }}
+          restore-keys: go-mod-${{ runner.os }}-
       - uses: actions/setup-go@v7
         env:
           GOTOOLCHAIN: auto
         with:
           go-version-file: go.mod
-          cache: true
+          cache: false
       - name: Verify exact preferred compiler
         run: |
           set -eu
@@ -209,19 +215,25 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       # The build cache pair the build job explains: restored on every event, and
-      # saved only from the default branch, where a save can be read.
+      # saved only from the default branch, where a save can be read. Then the shared
+      # module cache, which go_static saves; setup-go's own cache is off.
       - uses: actions/cache/restore@v4
         with:
           path: ~/.cache/go-build
           key: go-build-node-contract-${{ runner.os }}-${{ hashFiles('go.sum') }}
           restore-keys: go-build-node-contract-${{ runner.os }}-
+      - uses: actions/cache/restore@v4
+        with:
+          path: ~/go/pkg/mod
+          key: go-mod-${{ runner.os }}-${{ hashFiles('go.sum') }}
+          restore-keys: go-mod-${{ runner.os }}-
       - uses: actions/setup-go@v7
         # Allow toolchain selection; setup-go exports local after installation.
         env:
           GOTOOLCHAIN: auto
         with:
           go-version-file: go.mod
-          cache: true
+          cache: false
       - name: Verify exact preferred compiler
         run: |
           set -eu
@@ -420,18 +432,24 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       # The build cache pair the build job explains: restored on every event, and
-      # saved only from the default branch, where a save can be read.
+      # saved only from the default branch, where a save can be read. Then the shared
+      # module cache, which go_static saves; setup-go's own cache is off.
       - uses: actions/cache/restore@v4
         with:
           path: ~/.cache/go-build
           key: go-build-third-party-${{ runner.os }}-${{ hashFiles('go.sum') }}
           restore-keys: go-build-third-party-${{ runner.os }}-
+      - uses: actions/cache/restore@v4
+        with:
+          path: ~/go/pkg/mod
+          key: go-mod-${{ runner.os }}-${{ hashFiles('go.sum') }}
+          restore-keys: go-mod-${{ runner.os }}-
       - uses: actions/setup-go@v7
         env:
           GOTOOLCHAIN: auto
         with:
           go-version-file: go.mod
-          cache: true
+          cache: false
       # The compiler gate must sit IMMEDIATELY after setup-go: the baseline guard
       # reads job steps positionally, so anything between them, including the Node
       # setup this job also needs, is a failure rather than a style choice.
@@ -683,16 +701,23 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
-      # `cache: true` IS NOT THIS JOB'S BUILD CACHE, although it does restore one.
-      # setup-go caches the compiled objects as well as the modules — its log resolves
-      # both GOMODCACHE and GOCACHE and restores ~372 MB into them — but under ONE key
-      # per toolchain and go.sum, shared by every job here and saved, on any event, by
-      # whichever job gets there first: the frozen subset the next paragraph describes.
-      # It did not hold the six cross-compiled targets, so every run recompiled them from
-      # source: 354 seconds of it, measured identically on two consecutive runs. The
-      # same target on a warm GOCACHE compiles in about two seconds, so the whole step
-      # is the cache's to win. Every job in this file that compiles Go restores its own
-      # build cache, under a key of its own.
+      # SETUP-GO'S OWN CACHE IS OFF, IN EVERY JOB IN THIS FILE, and a guard keeps it off.
+      # `cache: true` restored ~372 MB, the module cache AND a GOCACHE, under ONE key per
+      # toolchain and go.sum shared by every job, and saved on any event by whichever job
+      # got there first: the frozen subset the paragraphs below describe, extracted over
+      # each job's own build cache after it, and on a PR that changed go.sum a ~400 MB
+      # write into a scope nothing reads. That cache did not hold the six cross-compiled
+      # targets, so every run recompiled them from source: 354 seconds of it, measured
+      # identically on two consecutive runs. The same target on a warm GOCACHE compiles
+      # in about two seconds, so the whole step is the cache's to win. Every job in this
+      # file that compiles Go restores its own build cache, under a key of its own.
+      #
+      # THE MODULE CACHE IS THE EXCEPTION: ONE KEY, RESTORED EVERYWHERE, SAVED BY ONE JOB.
+      # Module sources do not differ by job the way compiled objects do, so one key can
+      # serve them all as long as the job that writes it loads the widest set. go_static
+      # does, after govulncheck: vet, staticcheck, their tools and three GOOS scans. A job
+      # needing more (the node jobs build Passwall-Node's own go.sum) fetches the rest
+      # from the proxy, which is what every job did for whatever the frozen key lacked.
       #
       # A KEY PER JOB RATHER THAN PER REPOSITORY. `actions/cache` will not save a
       # key that already exists, so several jobs sharing one key means whichever
@@ -715,13 +740,18 @@ jobs:
           path: ~/.cache/go-build
           key: go-build-targets-${{ runner.os }}-${{ hashFiles('go.sum') }}
           restore-keys: go-build-targets-${{ runner.os }}-
+      - uses: actions/cache/restore@v4
+        with:
+          path: ~/go/pkg/mod
+          key: go-mod-${{ runner.os }}-${{ hashFiles('go.sum') }}
+          restore-keys: go-mod-${{ runner.os }}-
       - uses: actions/setup-go@v7
         # Allow toolchain selection; setup-go exports local after installation.
         env:
           GOTOOLCHAIN: auto
         with:
           go-version-file: go.mod
-          cache: true
+          cache: false
       - name: Verify exact preferred compiler
         run: |
           set -eu
@@ -781,19 +811,25 @@ jobs:
       # the steps below, so a bump that forgets the key fails there.
       #
       # The build cache pair the build job explains: restored on every event, and
-      # saved only from the default branch, where a save can be read.
+      # saved only from the default branch, where a save can be read. Then the shared
+      # module cache, which go_static saves; setup-go's own cache is off.
       - uses: actions/cache/restore@v4
         with:
           path: ~/.cache/go-build
           key: go-build-static-${{ runner.os }}-${{ hashFiles('go.sum') }}-staticcheck-v0.8.1-govulncheck-v1.8.0
           restore-keys: go-build-static-${{ runner.os }}-
+      - uses: actions/cache/restore@v4
+        with:
+          path: ~/go/pkg/mod
+          key: go-mod-${{ runner.os }}-${{ hashFiles('go.sum') }}
+          restore-keys: go-mod-${{ runner.os }}-
       - uses: actions/setup-go@v7
         # Allow toolchain selection; setup-go exports local after installation.
         env:
           GOTOOLCHAIN: auto
         with:
           go-version-file: go.mod
-          cache: true
+          cache: false
       - name: Verify exact preferred compiler
         run: |
           set -eu
@@ -862,6 +898,13 @@ jobs:
             GOOS="$goos" "$(go env GOPATH)/bin/govulncheck" ./... || failed=1
           done
           exit "$failed"
+      # THE ONE SAVE OF THE SHARED MODULE CACHE, and it is here, after govulncheck, because
+      # by then this job has loaded every module any job in this file restores it for.
+      - uses: actions/cache/save@v4
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        with:
+          path: ~/go/pkg/mod
+          key: go-mod-${{ runner.os }}-${{ hashFiles('go.sum') }}
       - uses: actions/cache/save@v4
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         with:
@@ -906,19 +949,24 @@ jobs:
       # compiles a different set of packages under -race, and a key cannot be
       # overwritten, so one shared key would freeze whichever shard finished first.
       # See the build job for the measurement and for why restore and save are two
-      # steps.
+      # steps. The module cache after it is the shared one go_static saves.
       - uses: actions/cache/restore@v4
         with:
           path: ~/.cache/go-build
           key: go-build-race-${{ matrix.part }}-${{ runner.os }}-${{ hashFiles('go.sum') }}
           restore-keys: go-build-race-${{ matrix.part }}-${{ runner.os }}-
+      - uses: actions/cache/restore@v4
+        with:
+          path: ~/go/pkg/mod
+          key: go-mod-${{ runner.os }}-${{ hashFiles('go.sum') }}
+          restore-keys: go-mod-${{ runner.os }}-
       - uses: actions/setup-go@v7
         # Allow toolchain selection; setup-go exports local after installation.
         env:
           GOTOOLCHAIN: auto
         with:
           go-version-file: go.mod
-          cache: true
+          cache: false
       - name: Verify exact preferred compiler
         run: |
           set -eu
@@ -1058,19 +1106,25 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       # The build cache pair the build job explains: restored on every event, and
-      # saved only from the default branch, where a save can be read.
+      # saved only from the default branch, where a save can be read. Then the shared
+      # module cache, which go_static saves; setup-go's own cache is off.
       - uses: actions/cache/restore@v4
         with:
           path: ~/.cache/go-build
           key: go-build-postgres-${{ runner.os }}-${{ hashFiles('go.sum') }}
           restore-keys: go-build-postgres-${{ runner.os }}-
+      - uses: actions/cache/restore@v4
+        with:
+          path: ~/go/pkg/mod
+          key: go-mod-${{ runner.os }}-${{ hashFiles('go.sum') }}
+          restore-keys: go-mod-${{ runner.os }}-
       - uses: actions/setup-go@v7
         # Allow toolchain selection; setup-go exports local after installation.
         env:
           GOTOOLCHAIN: auto
         with:
           go-version-file: go.mod
-          cache: true
+          cache: false
       - name: Verify exact preferred compiler
         run: |
           set -eu
@@ -1147,19 +1201,25 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       # The build cache pair the build job explains: restored on every event, and
-      # saved only from the default branch, where a save can be read.
+      # saved only from the default branch, where a save can be read. Then the shared
+      # module cache, which go_static saves; setup-go's own cache is off.
       - uses: actions/cache/restore@v4
         with:
           path: ~/.cache/go-build
           key: go-build-mysql-${{ runner.os }}-${{ hashFiles('go.sum') }}
           restore-keys: go-build-mysql-${{ runner.os }}-
+      - uses: actions/cache/restore@v4
+        with:
+          path: ~/go/pkg/mod
+          key: go-mod-${{ runner.os }}-${{ hashFiles('go.sum') }}
+          restore-keys: go-mod-${{ runner.os }}-
       - uses: actions/setup-go@v7
         # Allow toolchain selection; setup-go exports local after installation.
         env:
           GOTOOLCHAIN: auto
         with:
           go-version-file: go.mod
-          cache: true
+          cache: false
       - name: Verify exact preferred compiler
         run: |
           set -eu

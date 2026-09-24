@@ -443,6 +443,56 @@ test('caches are restored on every event and saved only from the default branch'
   )
 })
 
+// SETUP-GO'S OWN CACHE IS OFF, AND THE MODULE CACHE HAS ONE WRITER.
+//
+// `cache: true` on setup-go restored ~372 MB, the module cache and a GOCACHE, under one
+// key shared by every job and saved on ANY event by whichever job finished first, so it
+// sat outside the rule above: a PR that changed go.sum wrote ~400 MB into its own scope,
+// and the frozen GOCACHE was extracted over each job's own build cache. It is `false` in
+// every job, written out because the action's default is true. The module cache is one
+// key restored everywhere, and only go_static writes it, after govulncheck has loaded the
+// widest module set any job needs.
+test('setup-go caches nothing, and only go_static saves the module cache, after govulncheck', () => {
+  const modKey = "go-mod-${{ runner.os }}-${{ hashFiles('go.sum') }}"
+  const savers = []
+  let setups = 0
+  for (const [name, raw] of jobs()) {
+    const steps = raw.split(/^      - /m).slice(1)
+    for (const step of steps) {
+      if (step.startsWith('uses: actions/setup-go@')) {
+        setups += 1
+        assert(
+          /^          cache: false$/m.test(step),
+          `${name}'s setup-go must say cache: false. Its default is true, which restores one frozen module+build archive shared by every job and saves it on any event, pull requests included`,
+        )
+      }
+      if (!/^          path: ~\/go\/pkg\/mod$/m.test(step)) continue
+      assert(step.includes(`key: ${modKey}`), `${name} must use the one module cache key, ${modKey}`)
+      if (step.startsWith('uses: actions/cache/save@')) {
+        assert(
+          step.includes("if: github.event_name == 'push' && github.ref == 'refs/heads/main'"),
+          `${name} saves the module cache without gating it on the default branch`,
+        )
+        savers.push(name)
+      }
+    }
+    if (raw.includes('path: ~/.cache/go-build')) {
+      assert(
+        raw.includes('path: ~/go/pkg/mod'),
+        `${name} restores a build cache but not the module cache, so it downloads every module on every run`,
+      )
+    }
+  }
+  assert(setups >= 9, `every Go job in this file sets up Go; found ${setups} setup-go steps`)
+  assert.deepEqual(savers, ['go_static'], 'the module cache must have exactly one writer, go_static: a key cannot be written twice, so a second writer races it and freezes whichever subset lands first')
+  const staticJob = job('go_static')
+  assert(
+    // Its restore comes first, so the last mention of the path is the save.
+    staticJob.lastIndexOf('path: ~/go/pkg/mod') > staticJob.indexOf('name: Reachable vulnerability check'),
+    'go_static must save the module cache after govulncheck, or the saved set lacks the modules the scans load',
+  )
+})
+
 // THE SHARD COUNT LIVES IN THREE PLACES, AND THEY ARE ONE DECISION.
 //
 // The planner partitions the packages into N, the round-robin splits the heavy
