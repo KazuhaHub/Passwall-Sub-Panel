@@ -6,7 +6,8 @@ name: Release
 # amd64 + docker arm64 under QEMU) and the linux binaries four times. Here:
 #
 #   web         → builds the SPA once
-#   build       → cross-compiles 6 platforms natively in parallel (matrix)
+#   build       → compiles 6 platforms in parallel (matrix); the two linux
+#                 legs run on their own architecture and run what they built
 #   release     → packages tarballs/zips + checksums and publishes the Release
 #   docker      → reuses the linux/amd64 + linux/arm64 binaries to push a
 #                 multi-arch image (no compilation inside the container build)
@@ -776,18 +777,26 @@ jobs:
 
   build:
     name: Build ${{ matrix.goos }}/${{ matrix.goarch }}
-    runs-on: ubuntu-latest
+    # EACH LINUX LEG RUNS ON ITS OWN ARCHITECTURE, so the binary it builds can be
+    # run, not only inspected (see the build step). linux/arm64 is the one that
+    # moved: it is the arm64 image's binary, and no job had ever started it. The
+    # target decides the bytes, not the host — CGO is off and the build is
+    # -trimpath — and whatever this leg builds is what the gate indexes and every
+    # later job reads. The leg costs what it did: a public repository's arm64
+    # runner is free, and it queues like the others (Passwall-Node's arm legs
+    # wait as long as its x64 ones).
+    runs-on: ${{ matrix.runner }}
     needs: [setup, web]
     strategy:
       fail-fast: false
       matrix:
         include:
-          - { goos: linux,   goarch: amd64, ext: ""     }
-          - { goos: linux,   goarch: arm64, ext: ""     }
-          - { goos: darwin,  goarch: amd64, ext: ""     }
-          - { goos: darwin,  goarch: arm64, ext: ""     }
-          - { goos: windows, goarch: amd64, ext: ".exe" }
-          - { goos: windows, goarch: arm64, ext: ".exe" }
+          - { goos: linux,   goarch: amd64, ext: "",     runner: ubuntu-latest    }
+          - { goos: linux,   goarch: arm64, ext: "",     runner: ubuntu-24.04-arm }
+          - { goos: darwin,  goarch: amd64, ext: "",     runner: ubuntu-latest    }
+          - { goos: darwin,  goarch: arm64, ext: "",     runner: ubuntu-latest    }
+          - { goos: windows, goarch: amd64, ext: ".exe", runner: ubuntu-latest    }
+          - { goos: windows, goarch: arm64, ext: ".exe", runner: ubuntu-latest    }
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -829,6 +838,15 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p out
+          # THE PANEL'S UI IS EMBEDDED, AND AN EMPTY dist STILL COMPILES. The
+          # tracked .gitkeep keeps `//go:embed all:dist` building without the
+          # bundle, and the server only logs that SPA routes will 404. So a web
+          # bundle that lands anywhere but here ships a panel with no UI and a
+          # green run; this is the one place that can notice before it is linked.
+          test -f internal/web/dist/index.html || {
+            echo 'internal/web/dist/index.html is missing: the binary would embed a panel with no UI' >&2
+            exit 1
+          }
           short_sha="${COMMIT:0:7}"
           ldflags="-s -w"
           ldflags+=" -X github.com/KazuhaHub/passwall-sub-panel/internal/version.Version=${VERSION}"
@@ -836,6 +854,27 @@ jobs:
           ldflags+=" -X github.com/KazuhaHub/passwall-sub-panel/internal/version.BuildDate=${BUILD_DATE}"
           go build -trimpath -ldflags="${ldflags}" -o "out/psp${{ matrix.ext }}" ./cmd/panel
           sh deploy/check-build.sh "out/psp${{ matrix.ext }}" "$GOOS" "$GOARCH" "$COMMIT"
+          # A LINUX BINARY IS RUN, AND IT MUST NAME THE RELEASE. The linker ignores
+          # -X for a symbol that does not exist, so a moved or renamed version
+          # package ships every binary and image as "dev": the in-app update
+          # nudge goes quiet and the compat document is looked up under the wrong
+          # name, and check-build.sh cannot see it, because it reads the build
+          # metadata rather than the stamp. Both linux legs run on their own
+          # architecture, which is what makes this native evidence and not
+          # emulation; a leg moved to a foreign runner fails here instead of
+          # quietly skipping. darwin and windows stay inspected only.
+          if [ "$GOOS" = linux ]; then
+            test "$(go env GOHOSTARCH)" = "$GOARCH" || {
+              echo "linux/$GOARCH is built on a $(go env GOHOSTARCH) runner, so its binary cannot be run here" >&2
+              exit 1
+            }
+            reported=$(out/psp --version 2>&1)
+            printf '%s\n' "$reported"
+            grep -qF "${VERSION} (${short_sha})" <<<"$reported" || {
+              echo "linux/$GOARCH reports no ${VERSION} (${short_sha}); the version stamp did not land" >&2
+              exit 1
+            }
+          fi
 
       - name: Upload binary
         uses: actions/upload-artifact@v7

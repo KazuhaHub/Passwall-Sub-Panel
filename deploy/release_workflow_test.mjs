@@ -716,6 +716,50 @@ test('a cross-compile job is never a publishing job\'s only dependency', () => {
   }
 })
 
+// R10 STEP 3, THE HALF A NEEDS GRAPH CANNOT SHOW. "Declared runtime platforms need
+// native or clearly labelled runtime evidence." check-build.sh reads build
+// metadata and never runs anything, so three failures shipped green past it: a
+// version stamp the linker silently dropped (every binary reports "dev"), a web
+// bundle that landed outside internal/web/dist (a panel with no UI, since an empty
+// dist still compiles), and an arm64 binary no job had ever started. The build job
+// now answers all three, and this holds it to the executed lines, not the comments.
+test('each linux leg runs what it built, natively, and no leg links a panel without its UI', () => {
+  const build = job('build')
+  const executed = build
+    .split('\n')
+    .filter((line) => !line.trimStart().startsWith('#'))
+    .join('\n')
+
+  const bundle = executed.indexOf('test -f internal/web/dist/index.html')
+  const compile = executed.indexOf('go build ')
+  assert(bundle >= 0, 'every leg must refuse a missing internal/web/dist/index.html')
+  assert(compile >= 0, 'the build job no longer compiles the panel')
+  assert(bundle < compile, 'the UI check must come before go build, while it can still stop the leg')
+
+  // NATIVE, BY CONSTRUCTION. A linux leg on a foreign runner could only emulate,
+  // and R10 does not let emulation stand in for native; the step fails such a leg
+  // rather than skipping it, and this refuses the matrix that would reach it.
+  assert(/^    runs-on: \$\{\{ matrix\.runner \}\}$/m.test(build), 'each build leg must run on the runner its matrix row names')
+  const legs = [...build.matchAll(/^ +- \{ goos: (\w+), +goarch: (\w+),.*\brunner: ([\w.-]+) *\}$/gm)]
+  assert.equal(legs.length, 6, 'every one of the six release targets must name its runner')
+  const linux = legs.filter(([, goos]) => goos === 'linux')
+  assert.deepEqual(linux.map(([, , goarch]) => goarch).sort(), ['amd64', 'arm64'])
+  for (const [, , goarch, runner] of linux) {
+    const armRunner = /-arm$/.test(runner)
+    assert.equal(armRunner, goarch === 'arm64', `linux/${goarch} is built on ${runner}, which cannot run it natively`)
+  }
+  assert(executed.includes('test "$(go env GOHOSTARCH)" = "$GOARCH"'), 'a linux leg on a foreign runner must fail, not skip its run')
+
+  // AND WHAT RUNS MUST NAME THE RELEASE. Exit status alone passes a binary that
+  // says "dev", which is exactly what a dropped -X produces.
+  assert(executed.includes('if [ "$GOOS" = linux ]; then'), 'both linux legs must run their binary')
+  assert(executed.includes('reported=$(out/psp --version 2>&1)'), 'the linux legs must run the binary they built')
+  assert(
+    executed.includes('grep -qF "${VERSION} (${short_sha})" <<<"$reported"'),
+    'the binary must report the release version and commit, not merely exit 0',
+  )
+})
+
 // R10 STEP 4: the evidence index is what still exists once the run's logs have
 // expired, so its absence is not a missing convenience — it is a claim nobody can
 // check later. Asserted by shape because this guard reads the workflow as text:
