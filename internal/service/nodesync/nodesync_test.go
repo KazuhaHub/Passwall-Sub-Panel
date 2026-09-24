@@ -88,7 +88,7 @@ func TestNativeCoreObservationPersistsAndInvalidatesRenderCache(t *testing.T) {
 
 func TestNativeXrayObservationConvergesEveryReportAndRetries(t *testing.T) {
 	repo := &panelObservationRepo{panel: &domain.XUIPanel{
-		ID: 9, Kind: domain.PanelKindPSP, PanelVersion: "v0.2.0", XrayVersion: "26.9.9",
+		ID: 9, Kind: domain.PanelKindPSP, PanelVersion: "v0.2.0", XrayVersion: "26.7.28",
 	}}
 	service := &Service{panels: repo}
 	calls := 0
@@ -107,6 +107,9 @@ func TestNativeXrayObservationConvergesEveryReportAndRetries(t *testing.T) {
 
 	if _, err := service.recordPanelObservation(t.Context(), agent, report, time.Now()); err == nil {
 		t.Fatal("first normalization failure was ignored")
+	}
+	if repo.panel.XrayVersion != "26.9.9" {
+		t.Fatalf("native boundary observation was not persisted: %q", repo.panel.XrayVersion)
 	}
 	normalized, err := service.recordPanelObservation(t.Context(), agent, report, time.Now().Add(time.Second))
 	if err != nil {
