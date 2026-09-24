@@ -147,9 +147,15 @@ PSP_CANDIDATE_AGENT=/path/to/passwall-node ./deployment/compat/old-psp.sh
 | 发布 | `v4.0.0-beta.25`，Pre-release，六个归档 + `SHA256SUMS.txt` |
 | 镜像 | `ghcr.io/kazuhahub/passwall-sub-panel:v4.0.0-beta.25` 与 `:beta` |
 | `:latest` | **未移动**（仍是 v3.9.3 那次正式版），`/releases/latest` 也仍指向它，因此预发布不会出现在应用内升级提示里 |
-| 证据索引 | 本次运行产出，并作为附件随发布留存：11 个 case、`missing: []`、六个产物的 sha256、`source_sha` 即上面那个提交 |
+| 证据索引 | 本次运行产出，并作为附件随发布留存：11 个 case、`missing: []`、六个产物的 sha256、`source_sha` 即上面那个提交。**这一次的附件是手工上传的**（比工作流上传的归档晚两分钟），之后的发布一直没有它，见下文 |
 
 **R10 的验收性质由此可核对**：索引里的 `source_sha` 与被发布的归档来自同一次构建，`release` 与 `docker` 只经由 `compatibility gate`（两者都不直接依赖 node-compatibility），`:latest` 按分支规则未动。
+
+### 索引与镜像 digest 如何留存
+
+证据索引作为 artifact 最多保留 90 天（公开仓库的上限），过期之后，发布背后的兼容声明就无从核对，而这正是 `evidence-index.mjs` 开头说它要避免的事。所以现在由 `release` job 自动附上：它下载本次运行门禁写出的 `compatibility-evidence-index`，先核对 `source_sha` 是这个提交、`missing` 为空，再以 **`compat-evidence-index-<版本>.json`** 放进 `dist/`。放入发生在生成 `SHA256SUMS.txt` **之前**，所以校验和覆盖它，和六个归档一样。文件名用版本不用 tag：`dist/` 里的文件名都归版本管，而 tag 可能带斜杠。
+
+镜像 digest 以前哪里都没记，证据和被推送的镜像之间只靠那个精确 tag 连着。现在 `docker` job 把 build-push 的 digest 作为 job 输出 `digest` 导出，并写进运行摘要：`ghcr.io/<owner>/passwall-sub-panel@sha256:…` 以及它被打上的每个 tag。空的或格式不对的 digest 会让这一步失败，而不是被当成一条记录写下来。
 
 ### 第一次执行抓到的东西
 

@@ -932,10 +932,23 @@ jobs:
           path: artifacts
           pattern: psp-*
 
+      # THE INDEX SHIPS WITH THE RELEASE, because that is the only place it
+      # outlives the run. As an artifact it is kept 90 days, which is also the
+      # most a public repository allows, so from then on the claim behind the
+      # release could no longer be read — the one thing evidence-index.mjs says
+      # it exists to prevent. It was attached by hand once (v4.0.0-beta.25) and
+      # never again.
+      - name: Download the compatibility evidence index
+        uses: actions/download-artifact@v8
+        with:
+          name: compatibility-evidence-index
+          path: evidence
+
       - name: Package archives
         shell: bash
         env:
           VERSION: ${{ needs.setup.outputs.version }}
+          SHA: ${{ needs.setup.outputs.sha }}
         run: |
           set -euo pipefail
           mkdir -p dist build
@@ -978,6 +991,18 @@ jobs:
               tar -C build -czf "dist/${pkgname}.tar.gz" "${pkgname}"
             fi
           done
+
+          # NAMED FOR THE VERSION, like every other file in dist: a file name is
+          # the version's job here, and a tag may carry a slash. Copied BEFORE the
+          # sums are taken, so SHA256SUMS.txt covers it like any archive. It has to
+          # be this commit's index — the gate only uploads one that it wrote, but a
+          # permanent record is worth the one line that says so.
+          jq -e --arg sha "$SHA" '.source_sha == $sha and (.missing | length) == 0' \
+            evidence/evidence-index.json > /dev/null || {
+            echo 'the evidence index does not name this commit, or names a case that never reported' >&2
+            exit 1
+          }
+          cp evidence/evidence-index.json "dist/compat-evidence-index-${VERSION}.json"
 
           (cd dist && sha256sum -- * > SHA256SUMS.txt)
 
@@ -1092,6 +1117,12 @@ jobs:
     permissions:
       contents: read
       packages: write
+    # THE DIGEST IS THE IMAGE; the tags are pointers to it, and two of them move.
+    # R10 step 4 asks for the image digest next to the archives', and nothing
+    # recorded it: the exact tag was the only link between the evidence and what
+    # was pushed.
+    outputs:
+      digest: ${{ steps.push.outputs.digest }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -1180,6 +1211,7 @@ jobs:
         run: node deploy/check-image.mjs "${IMAGE_OWNER}/passwall-sub-panel" "$RELEASE_VERSION"
 
       - name: Build and push multi-arch image
+        id: push
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
@@ -1191,3 +1223,24 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           provenance: false
+
+      - name: Record the pushed image digest
+        shell: bash
+        env:
+          IMAGE: ghcr.io/${{ needs.setup.outputs.owner_lc }}/passwall-sub-panel
+          DIGEST: ${{ steps.push.outputs.digest }}
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          set -euo pipefail
+          # A push that reports no digest pushed nothing this run can name, and
+          # an empty line here would read as a record.
+          [[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] || {
+            echo "the image push reported no digest (got '${DIGEST}')" >&2
+            exit 1
+          }
+          {
+            echo "Pushed \`${IMAGE}@${DIGEST}\`, tagged:"
+            while IFS= read -r tag; do
+              if [ -n "$tag" ]; then echo "- \`${tag}\`"; fi
+            done <<<"$TAGS"
+          } >> "$GITHUB_STEP_SUMMARY"

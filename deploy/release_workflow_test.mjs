@@ -195,6 +195,15 @@ function jobs() {
   return found
 }
 
+// The lines a block RUNS, without the comments that explain them. Searching a whole
+// job finds the sentence that explains a command as readily as the command itself.
+function withoutComments(text) {
+  return text
+    .split('\n')
+    .filter((line) => !line.trimStart().startsWith('#'))
+    .join('\n')
+}
+
 function literalScripts() {
   const lines = workflow.split('\n')
   const scripts = []
@@ -365,10 +374,7 @@ test('the tag job cuts the tag after the suite passes, only when the form asked 
   // merge ref and not this commit. Unfiltered, the lookup accepted that run and a
   // permanent tag could be cut on unmerged code. Read from the executed lines, so
   // the comment explaining the rule cannot satisfy it.
-  const suiteScript = suiteCheck[1]
-    .split('\n')
-    .filter((line) => !line.trimStart().startsWith('#'))
-    .join('\n')
+  const suiteScript = withoutComments(suiteCheck[1])
   assert(
     suiteScript.includes('git merge-base --is-ancestor "$SHA" origin/main'),
     'the suite check must refuse a commit that main does not contain',
@@ -725,10 +731,7 @@ test('a cross-compile job is never a publishing job\'s only dependency', () => {
 // now answers all three, and this holds it to the executed lines, not the comments.
 test('each linux leg runs what it built, natively, and no leg links a panel without its UI', () => {
   const build = job('build')
-  const executed = build
-    .split('\n')
-    .filter((line) => !line.trimStart().startsWith('#'))
-    .join('\n')
+  const executed = withoutComments(build)
 
   const bundle = executed.indexOf('test -f internal/web/dist/index.html')
   const compile = executed.indexOf('go build ')
@@ -769,6 +772,35 @@ test('the release gate records an evidence index', () => {
   assert(gate.includes('deploy/compat/evidence-index.mjs'), 'the gate must assemble an evidence index')
   assert(gate.includes('deploy/compat/plan.mjs'), 'the index must be built against the planned case manifest, not the reports')
   assert(gate.includes('compatibility-evidence-index'), 'the index must be uploaded, or it expires with the runner')
+})
+
+// AND UPLOADED IS NOT KEPT. An artifact lives 90 days at most, which is exactly the
+// horizon the index exists to outlive, and the handover records it as a release
+// attachment — which it was once, by hand. So the release carries it, under the
+// same checksums as the archives, and the image digest, which R10 step 4 also asks
+// for and which nothing recorded, is written down where the push happens.
+test('the release attaches the evidence index under its checksums, and the image digest is recorded', () => {
+  const release = job('release')
+  assert(
+    /uses: actions\/download-artifact@v\d+\n\s+with:\n\s+name: compatibility-evidence-index\n/.test(release),
+    'the release job must download the index the gate wrote',
+  )
+  const packaging = withoutComments(release)
+  const attach = packaging.indexOf('cp evidence/evidence-index.json "dist/compat-evidence-index-${VERSION}.json"')
+  const sums = packaging.indexOf('(cd dist && sha256sum -- * > SHA256SUMS.txt)')
+  assert(attach >= 0, 'the index must be packaged into dist, which is what the release publishes')
+  assert(sums >= 0, 'the release no longer writes SHA256SUMS.txt')
+  assert(attach < sums, 'the index must be in dist before the sums are taken, or it is published unchecked')
+  assert(packaging.includes(".source_sha == $sha"), 'the attached index must be checked to name this commit')
+  assert(/files: \|\n\s+dist\/\*\n/.test(release), 'the release publishes dist/*, which is what carries the index')
+
+  const docker = job('docker')
+  assert(/^ {6}- name: Build and push multi-arch image\n {8}id: push$/m.test(docker), 'the push step must be addressable for its digest')
+  assert(docker.includes('digest: ${{ steps.push.outputs.digest }}'), 'the docker job must export the digest it pushed')
+  const record = withoutComments(docker.slice(docker.indexOf('- name: Record the pushed image digest')))
+  assert(record.includes('DIGEST: ${{ steps.push.outputs.digest }}'), 'the digest must be recorded from the push itself')
+  assert(record.includes('>> "$GITHUB_STEP_SUMMARY"'), 'the digest must be written where the run shows it')
+  assert(record.includes('^sha256:[0-9a-f]{64}$'), 'an empty or malformed digest must fail rather than be recorded')
 })
 
 // R10 STEP 5: signature verification and the candidate's test trust chain are
