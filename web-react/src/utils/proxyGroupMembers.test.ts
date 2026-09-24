@@ -61,8 +61,8 @@ describe('proxy group member editor helpers', () => {
     ]
     expect(applyProxyGroupOrder(groups, []).map(group => group.name)).toEqual([
       '🚀 节点选择',
-      '⚡ QUIC控制',
       '🎮 UDP控制',
+      '⚡ QUIC控制',
       '🇨🇳 中国大陆',
       '🍎 苹果服务',
       '🐟 漏网之鱼',

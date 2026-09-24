@@ -3,6 +3,7 @@ import i18n from '@/i18n'
 import { pushSnack } from '@/components/SnackbarHost'
 import { panelAPIBase, panelURL } from '@/panelPath'
 import { announcePending, isUserObserved, syncPendingOf, userIdFromURL } from './syncPending'
+import { trackWrites } from './requestProgress'
 
 // Shared axios instance. Bearer token is attached automatically from
 // local storage. The response interceptor centralises three concerns:
@@ -15,6 +16,11 @@ export const client = axios.create({
   baseURL: panelAPIBase,
   timeout: 30000,
 })
+
+// Every write on the wire drives the app-wide progress bar
+// (components/RequestProgressBar); see requestProgress.ts for why the adapter,
+// not an interceptor, is where it is counted.
+client.defaults.adapter = trackWrites(axios.getAdapter(client.defaults.adapter ?? axios.defaults.adapter))
 
 // Optional per-request flags. Set on a request config to bypass the
 // interceptors selectively.

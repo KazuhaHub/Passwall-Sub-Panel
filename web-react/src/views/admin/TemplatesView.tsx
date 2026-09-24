@@ -38,6 +38,7 @@ import RestartAltIcon from '@mui/icons-material/RestartAlt'
 import { useTranslation } from 'react-i18next'
 import { useCan } from '@/utils/permissions'
 import { allSettledLimited } from '@/utils/promises'
+import { AsyncIconButton } from '@/components/AsyncButton'
 
 import { deleteTemplate, resetTemplate, saveTemplate, SEEDED_TEMPLATE_SLUGS, type Template } from '@/api/templates'
 import type { RuleSet } from '@/api/rules'
@@ -417,21 +418,25 @@ export default function TemplatesView() {
                     </Tooltip>
                     {SEEDED_TEMPLATE_SLUGS.includes(tpl.slug) && (
                       <Tooltip title={t('admin:templates.reset_to_default')}>
-                        <IconButton size="small" onClick={() => confirmReset(tpl)}
+                        {/* AsyncIconButton, not a plain IconButton: reset hits the
+                            upstream and a slow link left this clickable with no
+                            feedback for the whole round-trip, inviting a repeat
+                            click that re-opened the confirm dialog mid-request. */}
+                        <AsyncIconButton size="small" onClick={() => confirmReset(tpl)}
                           sx={{ color: md.onSurfaceVariant }}>
                           <RestartAltIcon fontSize="small" />
-                        </IconButton>
+                        </AsyncIconButton>
                       </Tooltip>
                     )}
                     <Tooltip title={SEEDED_TEMPLATE_SLUGS.includes(tpl.slug)
                       ? t('admin:templates.cannot_delete_seeded')
                       : t('admin:templates.batch_delete')}>
                       <span>
-                        <IconButton size="small" onClick={() => confirmDelete(tpl)}
+                        <AsyncIconButton size="small" onClick={() => confirmDelete(tpl)}
                           disabled={tpl.is_default || SEEDED_TEMPLATE_SLUGS.includes(tpl.slug)}
                           sx={{ color: md.error }}>
                           <DeleteIcon fontSize="small" />
-                        </IconButton>
+                        </AsyncIconButton>
                       </span>
                     </Tooltip>
                     </>}
