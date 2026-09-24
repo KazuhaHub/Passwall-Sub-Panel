@@ -302,16 +302,36 @@ func candidateFor(released string, release githubRelease) candidateRelease {
 // maxNotesRunes bounds what the dialog renders. The release body is written for a
 // release page — headings, contributor links, a full changelog — and the dialog
 // shows it under a version selector, so it is truncated rather than trusted to be
-// short.
+// short. The bound includes the truncation marker.
 const maxNotesRunes = 600
 
+// notesTruncationMarker closes a truncated body as a paragraph of its own, so it
+// cannot fuse onto a list item or heading when the dialog renders the notes as
+// Markdown.
+const notesTruncationMarker = "\n\n…"
+
+// releaseNotes returns the body, or its longest prefix that ends on a LINE
+// BOUNDARY and fits the bound with the marker. The dialog renders Markdown, and a
+// generated changelog is one pull request per line, each ending in its URL: a cut
+// at a fixed rune count lands inside one of those URLs, and the renderer links the
+// truncated address. With no line break inside the bound it falls back to the
+// last space, which still never splits a URL; only a body with neither is cut
+// hard.
 func releaseNotes(body string) string {
 	trimmed := strings.TrimSpace(body)
 	runes := []rune(trimmed)
 	if len(runes) <= maxNotesRunes {
 		return trimmed
 	}
-	return strings.TrimSpace(string(runes[:maxNotesRunes])) + "…"
+	window := string(runes[:maxNotesRunes-len([]rune(notesTruncationMarker))])
+	cut := strings.LastIndex(window, "\n")
+	if cut <= 0 {
+		cut = strings.LastIndexAny(window, " \t")
+	}
+	if cut > 0 {
+		window = window[:cut]
+	}
+	return strings.TrimSpace(window) + notesTruncationMarker
 }
 
 func packageName(version string, platform ports.NodeReleasePlatform) string {

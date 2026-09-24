@@ -901,3 +901,44 @@ func TestAProductReleaseIsAddressedByItsTagAndNamedByItsVersion(t *testing.T) {
 		t.Errorf("channel = %q, want testing", entry.Channel)
 	}
 }
+
+// THE DIALOG RENDERS NOTES AS MARKDOWN, SO A CUT MUST NOT LAND INSIDE A LINE.
+// A release body is GitHub's generated changelog: one PR per line, each ending in
+// a URL. A cut at a fixed rune count lands in the middle of one of those URLs,
+// and the renderer then links the truncated address — a link that goes somewhere
+// other than the PR it names.
+func TestReleaseNotesTruncateOnLineBoundaries(t *testing.T) {
+	if got := releaseNotes("  ## What's Changed\n* short  "); got != "## What's Changed\n* short" {
+		t.Fatalf("a short body must only be trimmed: %q", got)
+	}
+
+	var body strings.Builder
+	body.WriteString("## What's Changed\n")
+	for i := 0; body.Len() < 4*maxNotesRunes; i++ {
+		fmt.Fprintf(&body, "* Change number %d by @KKazuhaK in https://github.com/KazuhaHub/Passwall-Node/pull/%d\n", i, 1000+i)
+	}
+	body.WriteString("\n**Full Changelog**: https://github.com/KazuhaHub/Passwall-Node/compare/v4.0.1.4...v4.0.1.5")
+	got := releaseNotes(body.String())
+	if n := len([]rune(got)); n > maxNotesRunes {
+		t.Fatalf("notes exceed %d runes: %d", maxNotesRunes, n)
+	}
+	kept, ok := strings.CutSuffix(got, notesTruncationMarker)
+	if !ok {
+		t.Fatalf("truncated notes must end with the marker on its own paragraph: %q", got)
+	}
+	original := strings.Split(body.String(), "\n")
+	for i, line := range strings.Split(kept, "\n") {
+		if line != original[i] {
+			t.Fatalf("line %d was cut mid-line: %q, want %q", i, line, original[i])
+		}
+	}
+
+	// ONE LONG LINE, NO LINE BREAK INSIDE THE BOUND: fall back to the last space,
+	// which still never splits a URL, since a URL contains none.
+	long := strings.Repeat("word ", maxNotesRunes/5) + "https://github.com/KazuhaHub/Passwall-Node/pull/59 tail"
+	got = releaseNotes(long)
+	kept, ok = strings.CutSuffix(got, notesTruncationMarker)
+	if !ok || strings.Contains(kept, "https://") || strings.HasSuffix(kept, "wor") {
+		t.Fatalf("single-line body must be cut at a space: %q", got)
+	}
+}

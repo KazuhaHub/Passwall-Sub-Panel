@@ -1,10 +1,14 @@
-import { useEffect, useId, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { Accordion, AccordionDetails, AccordionSummary, Alert, Box, Button, CircularProgress, Link, MenuItem, Stack, TextField, Typography } from '@mui/material'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import { useTranslation } from 'react-i18next'
 import { listNodeReleases, type NodeRelease, type NodeReleaseChannel } from '@/api/nodeReleases'
 import type { NativeInstallationSelection } from '@/api/servers'
 import { compareReleaseVersion, releaseTag } from '@/utils/productVersion'
+
+// Loaded when the notes are first expanded: the Markdown renderer is only ever
+// needed behind the fold, so the dialogs do not carry it until someone asks.
+const ReleaseNotes = lazy(() => import('./ReleaseNotes'))
 
 export interface NodeReleaseSelectorProps {
   enabled: boolean
@@ -14,7 +18,12 @@ export interface NodeReleaseSelectorProps {
   disabled?: boolean
   /** Saved preference supplies the opening channel only; temporary changes never persist here. */
   initialChannel?: NodeReleaseChannel
-  /** Installation keeps publication metadata folded; upgrades retain their full review surface. */
+  /**
+   * The installation layout: channel and version side by side, no helper text.
+   * Publication details are folded on EVERY surface, upgrades included — a
+   * release body under the version field made the upgrade dialog a page long,
+   * and the operator opens it when they want to read it.
+   */
   compact?: boolean
   /** Upgrade flows can opt into selecting the newest reviewed release automatically. */
   autoSelectLatest?: boolean
@@ -200,7 +209,9 @@ export default function NodeReleaseSelector({ enabled, selection, value, onChang
     {publishedLabel && <Typography variant="body2" color="text.secondary">
       {t('admin:servers.native.release_published', { date: publishedLabel })}
     </Typography>}
-    {selected.notes && <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{selected.notes}</Typography>}
+    {selected.notes && <Suspense fallback={<CircularProgress size={16} />}>
+      <ReleaseNotes>{selected.notes}</ReleaseNotes>
+    </Suspense>}
     {selectedURL && <Link href={selectedURL} target="_blank" rel="noopener noreferrer" variant="body2">
       {t('admin:servers.native.release_details')}
     </Link>}
@@ -253,11 +264,11 @@ export default function NodeReleaseSelector({ enabled, selection, value, onChang
         ? t('admin:servers.native.release_no_target_for_node')
         : t(channel === 'stable' ? 'admin:servers.native.release_no_stable' : 'admin:servers.native.release_no_testing')}
     </Alert>}
-    {details && (compact ? <Accordion key={value} disableGutters elevation={0} slotProps={{ transition: { unmountOnExit: true } }}>
+    {details && <Accordion key={value} disableGutters elevation={0} slotProps={{ transition: { unmountOnExit: true } }}>
       <AccordionSummary id={reviewID} aria-controls={`${reviewID}-details`} expandIcon={<ExpandMoreIcon />}>
         <Typography variant="body2">{t('admin:servers.native.release_review')}</Typography>
       </AccordionSummary>
       <AccordionDetails>{details}</AccordionDetails>
-    </Accordion> : details)}
+    </Accordion>}
   </Stack>
 }
