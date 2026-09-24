@@ -346,6 +346,24 @@ func validateProxyGroupMembers(targets []string, configs map[string][]domain.Pro
 		}
 	}
 
+	// A group without configured members renders its defaults, and those can
+	// reference other groups too (⚡ QUIC控制 delegates to 🎮 UDP控制, most
+	// service groups to 🚀 节点选择). Those edges reach the client exactly like
+	// configured ones, so a loop closed through a default is just as fatal: both
+	// Mihomo and sing-box refuse a config whose groups reference each other in a
+	// circle. The defaults alone are acyclic, so any loop found here runs through
+	// at least one configured group.
+	for _, target := range targets {
+		if _, configured := configs[target]; configured {
+			continue
+		}
+		for _, member := range defaultMembersForTarget(target) {
+			if member.Kind == "proxy_group" && member.Value != target && targetSet[member.Value] {
+				graph[target] = append(graph[target], member.Value)
+			}
+		}
+	}
+
 	state := map[string]int{}
 	var visit func(string) bool
 	visit = func(n string) bool {
