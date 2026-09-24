@@ -25,8 +25,11 @@
 # FALSE, which exits the script silently. Every wait loop below uses `if`, so a
 # loop waits rather than dying on its first empty read.
 
-# Everything here is pinned to a digest-carrying tag by the caller. Nothing
-# touches the host's docker state beyond this case's own container and volume.
+# The images are the caller's choice, and CI's caller pins them: test.yml's
+# third-party job passes the reviewed ceilings as tag@digest. The :latest
+# fallbacks below are for a local run, which is only as reproducible as the
+# person running it. Nothing touches the host's docker state beyond this case's
+# own container and volume.
 set -euo pipefail
 
 RUNTIME="${PSP_CONTAINER_RUNTIME:-}"

@@ -124,6 +124,53 @@ test('the container job boots the source image and fetches the SPA it embeds', (
   assert(boot.includes("{{.State.ExitCode}}') = 0") || boot.includes(`{{.State.ExitCode}}' "$cid")" = 0`), 'the boot step must stop the panel and require a clean exit')
 })
 
+// THE REAL PANELS ARE THE CEILINGS A HUMAN REVIEWED, AND THEY MOVE TOGETHER.
+//
+// third-party-isolated floated on :latest while the launcher and its README said
+// the caller pins, so a red run on main could mean a broken adapter or an upstream
+// release, and its evidence could not say which. It runs the reviewed ceilings now,
+// by tag and digest. Raising max_tested_xui or max_tested_sui without the image
+// (or the reverse) fails here, because Dependabot does not read a workflow's env
+// and nothing else would notice the two drifting apart.
+function highestVersion(versions) {
+  const parse = (v) => v.split('.').map(Number)
+  return versions.reduce((best, v) => {
+    const [a, b] = [parse(v), parse(best)]
+    for (let i = 0; i < Math.max(a.length, b.length); i++) {
+      if ((a[i] ?? 0) !== (b[i] ?? 0)) return (a[i] ?? 0) > (b[i] ?? 0) ? v : best
+    }
+    return best
+  })
+}
+
+test('the isolated third-party panels are pinned to the recorded ceilings', () => {
+  const readCompat = (file) => JSON.parse(readFileSync(new URL(`../docs/compat/${file}`, import.meta.url), 'utf8'))
+  const ceilings = {
+    PSP_LIVE_3XUI_IMAGE: {
+      repo: 'ghcr.io/mhsanaei/3x-ui',
+      version: highestVersion(readCompat('3x-ui-v4.json').entries.map((entry) => entry.max_tested_xui)),
+    },
+    PSP_LIVE_SUI_IMAGE: {
+      repo: 'ghcr.io/alireza0/s-ui',
+      version: highestVersion(readCompat('sui-v4.json').sui_entries.map((entry) => entry.max_tested_sui)),
+    },
+  }
+  const isolated = job('third-party-isolated')
+  for (const [name, { repo, version }] of Object.entries(ceilings)) {
+    const pinned = new RegExp(`^      ${name}: \\$\\{\\{ vars\\.${name} \\|\\| '([^']+)' \\}\\}$`, 'm').exec(isolated)
+    assert(pinned, `third-party-isolated must set ${name} once, at job level, with a pinned default`)
+    assert.match(
+      pinned[1],
+      new RegExp(`^${repo.replace(/[.]/g, '\\.')}:v${version.replace(/[.]/g, '\\.')}@sha256:[0-9a-f]{64}$`),
+      `${name} must default to ${repo}:v${version}@sha256:…, the ceiling docs/compat records: a floating tag turns main red on an upstream release, and a stale one tests a panel nobody claims`,
+    )
+  }
+  assert(
+    isolated.includes('> evidence/images.txt'),
+    'the evidence must record which images ran, or a verdict from a repository-variable override cannot be told from one on the pins',
+  )
+})
+
 // A BUILD TAG IS A FILE THE PLAIN `go vet ./...` NEVER OPENS.
 //
 // The reinstall acceptance is behind `node_reinstall_acceptance`, and its only compile

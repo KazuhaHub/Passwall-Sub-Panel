@@ -429,6 +429,19 @@ jobs:
     timeout-minutes: 30
     permissions:
       contents: read
+    # THE PANELS ARE THE REVIEWED CEILINGS, BY TAG AND DIGEST. They floated on
+    # :latest, which the launcher and its README both said the caller never does,
+    # and which made a red run on main mean either "this commit broke an adapter" or
+    # "upstream shipped something" with nothing in the evidence to say which. The
+    # second question is compat-watch's, asked every Monday against the same
+    # ceilings. So the defaults are max_tested_xui and max_tested_sui from
+    # docs/compat, a guard in deploy/test_workflow_test.mjs fails when a ceiling
+    # moves without its image, and Dependabot does not read these strings. The
+    # repository variables still override both, and the drive step records the
+    # digest that actually ran, so an override is never anonymous.
+    env:
+      PSP_LIVE_3XUI_IMAGE: ${{ vars.PSP_LIVE_3XUI_IMAGE || 'ghcr.io/mhsanaei/3x-ui:v3.8.5@sha256:e0f90c10902e0e74f947d5a9efe017b273804477430233bbfc4918542ffe366c' }}
+      PSP_LIVE_SUI_IMAGE: ${{ vars.PSP_LIVE_SUI_IMAGE || 'ghcr.io/alireza0/s-ui:v1.6.3@sha256:51cdb0036118dbcac12cba28fed13e36c53f8cdcb72bff88a062b5d6f243bd64' }}
     steps:
       - uses: actions/checkout@v7
       # The build cache pair the build job explains: restored on every event, and
@@ -464,14 +477,17 @@ jobs:
         with:
           node-version: "26"
       - name: start the isolated panels
-        env:
-          PSP_LIVE_3XUI_IMAGE: ${{ vars.PSP_LIVE_3XUI_IMAGE || 'ghcr.io/mhsanaei/3x-ui:latest' }}
-          PSP_LIVE_SUI_IMAGE: ${{ vars.PSP_LIVE_SUI_IMAGE || 'ghcr.io/alireza0/s-ui:latest' }}
         run: deploy/compat/backends/third-party.sh up
       - name: drive every adapter surface
         run: |
           set -uo pipefail
           mkdir -p evidence
+          # WHICH PANELS THE VERDICT IS ABOUT, written before anything can fail. The
+          # reference names the version, the repo digest names the image.
+          for image in "$PSP_LIVE_3XUI_IMAGE" "$PSP_LIVE_SUI_IMAGE"; do
+            printf '%s %s\n' "$image" "$(docker image inspect --format '{{json .RepoDigests}}' "$image")"
+          done > evidence/images.txt
+          cat evidence/images.txt
           # Each suite gets its own log and its own validator run: they are
           # different packages with different profiles, and a single combined
           # verdict could not say which of them measured less than it claims.
