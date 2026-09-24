@@ -51,15 +51,17 @@ content: |
   - IP-CIDR6,fe80::/10,🎯 全球直连,no-resolve
   - IP-CIDR6,fd00::/8,🎯 全球直连,no-resolve
   # HTTP/3's usual transport (UDP/443) has its own runtime selector. It defaults
-  # to REJECT so browsers immediately fall back to TCP instead of stalling on
-  # a slow UDP path; a subscriber can independently select the proxy or DIRECT.
+  # to the general 🎮 UDP控制 selector, so one switch governs all UDP; a
+  # subscriber can still select the proxy, DIRECT, or REJECT (which lets
+  # browsers fall back to TCP) for QUIC alone.
   # This intentionally contains no country assumption: overseas users and
   # return-to-China profiles need the same safe controls in the opposite
   # direction. Non-443 QUIC is handled by the general UDP selector below.
   - AND,((NETWORK,UDP),(DST-PORT,443)),⚡ QUIC控制
-  # All remaining non-local UDP -> the 🎮 UDP控制 selector, default PASS.
-  # PASS continues through the later domain/region rules, so each service keeps
-  # its normal routing decision instead of all UDP being forced direct or proxy.
+  # All remaining non-local UDP -> the 🎮 UDP控制 selector, default DIRECT.
+  # DIRECT allows UDP without relying on the proxy node's UDP support; it
+  # leaves from the local exit IP, which can differ from the TCP proxy exit.
+  # PASS (Mihomo only) hands UDP to the service rules below instead.
   # Group display order is UDP then QUIC; matching must remain QUIC then UDP.
   # Both rules
   # sit after localhost/LAN/private-IP direct rules so router DNS, mDNS (.local)
