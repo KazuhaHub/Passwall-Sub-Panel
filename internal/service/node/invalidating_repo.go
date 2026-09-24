@@ -2,6 +2,7 @@ package node
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
@@ -68,6 +69,18 @@ func (r invalidatingNodeRepo) UpdateMetadata(ctx context.Context, n *domain.Node
 
 func (r invalidatingNodeRepo) UpdateInboundConfig(ctx context.Context, n *domain.Node) error {
 	return after(r.NodeRepo.UpdateInboundConfig(ctx, n), r.notify)
+}
+
+func (r invalidatingNodeRepo) CompareAndSwapRealityStream(ctx context.Context, panelID, nodeID int64, observedStream, normalizedStream string) (bool, error) {
+	writer, ok := r.NodeRepo.(ports.RealityFingerprintCASRepo)
+	if !ok {
+		return false, fmt.Errorf("node repository does not support REALITY fingerprint convergence")
+	}
+	changed, err := writer.CompareAndSwapRealityStream(ctx, panelID, nodeID, observedStream, normalizedStream)
+	if err == nil && changed && r.notify != nil {
+		r.notify()
+	}
+	return changed, err
 }
 
 func (r invalidatingNodeRepo) UpdateObservedEndpoint(ctx context.Context, nodeID int64, observed domain.NodeObservedEndpoint) error {

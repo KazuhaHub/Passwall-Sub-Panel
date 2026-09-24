@@ -35,6 +35,15 @@ type normalizationNodeRepo struct {
 
 func (r *normalizationNodeRepo) List(context.Context) ([]*domain.Node, error) { return r.nodes, nil }
 
+func (r *normalizationNodeRepo) CompareAndSwapRealityStream(_ context.Context, panelID, nodeID int64, observed, normalized string) (bool, error) {
+	if r.node.PanelID != panelID || r.node.ID != nodeID || r.node.StreamSettings != observed {
+		return false, nil
+	}
+	r.node.StreamSettings = normalized
+	r.updateCfg = r.node
+	return true, nil
+}
+
 func (r *captureNodeRepo) Create(_ context.Context, n *domain.Node) error {
 	r.created = n
 	if n.ID == 0 {
@@ -57,6 +66,9 @@ func (r *captureNodeRepo) Update(_ context.Context, n *domain.Node) error {
 func (r *captureNodeRepo) UpdateInboundConfig(_ context.Context, n *domain.Node) error {
 	r.updateCfg = n
 	return nil
+}
+func (r *captureNodeRepo) ConfirmAppliedConfig(context.Context, int64, int64, domain.NodeConfigIntent) (bool, error) {
+	return true, nil
 }
 func (r *captureNodeRepo) UpdateEnabled(_ context.Context, _ int64, _ bool) error {
 	r.enabledUpdates++

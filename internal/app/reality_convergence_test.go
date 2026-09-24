@@ -49,6 +49,22 @@ func (r *realityConvergenceNodeRepo) UpdateInboundConfig(_ context.Context, next
 	return nil
 }
 
+func (r *realityConvergenceNodeRepo) CompareAndSwapRealityStream(_ context.Context, panelID, nodeID int64, observed, normalized string) (bool, error) {
+	r.writes++
+	if r.failWrite {
+		return false, errors.New("transient snapshot write failure")
+	}
+	if r.node.PanelID != panelID || r.node.ID != nodeID || r.node.StreamSettings != observed {
+		return false, nil
+	}
+	r.node.StreamSettings = normalized
+	return true, nil
+}
+
+func (r *realityConvergenceNodeRepo) ConfirmAppliedConfig(context.Context, int64, int64, domain.NodeConfigIntent) (bool, error) {
+	return true, nil
+}
+
 type realityConvergenceClient struct{ ports.XUIClient }
 
 func (*realityConvergenceClient) UpdateInbound(context.Context, int, ports.InboundSpec) error {

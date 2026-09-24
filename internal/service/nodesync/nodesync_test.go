@@ -120,6 +120,46 @@ func TestNativeXrayObservationConvergesEveryReportAndRetries(t *testing.T) {
 	}
 }
 
+func TestNativeSyncReloadsRealityConfigAfterNormalization(t *testing.T) {
+	f := newConfigAppliedFixture(t)
+	oldStream := `{"security":"reality","realitySettings":{"settings":{"fingerprint":"firefox"}}}`
+	newStream := `{"security":"reality","realitySettings":{"settings":{"fingerprint":"chrome"}}}`
+	stored := f.storedNode(t)
+	stored.StreamSettings = oldStream
+	if err := f.repos.Node.UpdateInboundConfig(t.Context(), stored); err != nil {
+		t.Fatal(err)
+	}
+	f.service.panels = &panelObservationRepo{panel: &domain.XUIPanel{ID: f.agent.PanelID, XrayVersion: "26.7.28"}}
+	f.service.SetRealityFingerprintNormalizer(func(ctx context.Context, panelID int64, version string) (int, error) {
+		if version != "26.9.9" {
+			t.Fatalf("observed core version = %q", version)
+		}
+		changed, err := f.repos.Node.(ports.RealityFingerprintCASRepo).CompareAndSwapRealityStream(ctx, panelID, f.node.ID, oldStream, newStream)
+		if changed {
+			return 1, err
+		}
+		return 0, err
+	})
+	response, err := f.service.Sync(t.Context(), nodeprotocol.NodeReport{
+		AgentID: f.agent.AgentID, ProtocolVersion: nodeprotocol.ProtocolVersion1,
+		ReportedAtMS: f.now.UnixMilli(), Have: emptyProtocolHave(),
+		CoreEngine: "xray", CoreVersion: "26.9.9", CoreState: "running",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.Config.Body == nil || len(response.Config.Body.Listeners) != 1 {
+		t.Fatalf("normalized response has no listener: %+v", response.Config)
+	}
+	var intent domain.NodeConfigIntent
+	if err := json.Unmarshal(response.Config.Body.Listeners[0].Config, &intent); err != nil {
+		t.Fatal(err)
+	}
+	if intent.StreamSettings != newStream {
+		t.Fatalf("same-round config used stale fingerprint: %s", intent.StreamSettings)
+	}
+}
+
 func TestCloneObservationReportDropsOneShotFields(t *testing.T) {
 	report := nodeprotocol.NodeReport{
 		AgentID: "agt_cache", AgentVersion: "v1", Have: emptyProtocolHave(),

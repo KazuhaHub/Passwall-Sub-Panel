@@ -706,6 +706,10 @@ func (s *Service) NormalizeRealityFingerprintsForPanel(ctx context.Context, pane
 	if !xraycompat.RequiresMLKEMFirst(xrayVersion) {
 		return 0, nil
 	}
+	writer, ok := s.nodes.(ports.RealityFingerprintCASRepo)
+	if !ok {
+		return 0, fmt.Errorf("node repository does not support REALITY fingerprint convergence")
+	}
 	nodes, err := s.nodes.List(ctx)
 	if err != nil {
 		return 0, err
@@ -716,12 +720,7 @@ func (s *Service) NormalizeRealityFingerprintsForPanel(ctx context.Context, pane
 		if n == nil || n.PanelID != panelID || !inboundcfg.HasStoredConfig(n) {
 			continue
 		}
-		spec, err := inboundcfg.SpecFromNode(n)
-		if err != nil {
-			errs = append(errs, fmt.Errorf("node %d: %w", n.ID, err))
-			continue
-		}
-		normalized, didChange, err := xraycompat.NormalizeRealityFingerprint(spec.StreamSettings, xrayVersion)
+		normalized, didChange, err := xraycompat.NormalizeRealityFingerprint(n.StreamSettings, xrayVersion)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("node %d: %w", n.ID, err))
 			continue
@@ -729,14 +728,46 @@ func (s *Service) NormalizeRealityFingerprintsForPanel(ctx context.Context, pane
 		if !didChange {
 			continue
 		}
-		spec.StreamSettings = normalized
-		if err := s.UpdateInboundConfig(ctx, n.ID, spec); err != nil {
+		applied, err := writer.CompareAndSwapRealityStream(ctx, panelID, n.ID, n.StreamSettings, normalized)
+		if err != nil {
 			errs = append(errs, fmt.Errorf("node %d: %w", n.ID, err))
 			continue
 		}
+		if !applied {
+			// Another writer changed the snapshot after List. The next version
+			// observation re-evaluates its current stream instead of restoring
+			// fields from this stale copy.
+			continue
+		}
 		changed++
+		if err := s.pushNormalizedRealityInbound(ctx, n.ID); err != nil {
+			errs = append(errs, fmt.Errorf("node %d: %w", n.ID, err))
+		}
 	}
 	return changed, errors.Join(errs...)
+}
+
+func (s *Service) pushNormalizedRealityInbound(ctx context.Context, nodeID int64) error {
+	n, err := s.nodes.GetByID(ctx, nodeID)
+	if err != nil {
+		return err
+	}
+	spec, err := inboundcfg.SpecFromNode(n)
+	if err != nil {
+		return err
+	}
+	c, err := s.pool.Get(n.PanelID)
+	if err == nil {
+		err = c.UpdateInbound(ctx, n.InboundID, spec)
+	}
+	if err != nil {
+		return s.enqueueNodeTask(ctx, domain.SyncTaskNodeUpdate, n, "normalize REALITY fingerprint", spec)
+	}
+	if async, ok := c.(ports.AsynchronousApplier); ok && async.ApplyIsAsynchronous() {
+		return nil // Native applied receipt confirms the pending snapshot.
+	}
+	_, err = s.nodes.ConfirmAppliedConfig(ctx, n.ID, n.PanelID, n.ConfigIntent())
+	return err
 }
 
 // markConfigPending flips the snapshot's sync-state column to "pending" so the
