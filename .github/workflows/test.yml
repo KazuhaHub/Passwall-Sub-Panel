@@ -324,17 +324,17 @@ jobs:
           path: evidence/
           if-no-files-found: error
           retention-days: 90
+      - uses: actions/cache/save@v4
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        with:
+          path: ~/.cache/go-build
+          key: go-build-node-contract-${{ runner.os }}-${{ hashFiles('go.sum') }}
 
   # THE SUMMARY GATE FOR THE NODE WIRE CONTRACT. The two jobs above report their
   # own verdicts, but neither can answer the question this asks: whether EVERY
   # case the panel promises to test actually reported. A leg cancelled by a
   # superseded push, or an artifact upload that failed, leaves every case that
   # did report perfectly green and the run looking complete.
-      - uses: actions/cache/save@v4
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        with:
-          path: ~/.cache/go-build
-          key: go-build-node-contract-${{ runner.os }}-${{ hashFiles('go.sum') }}
   compatibility:
     name: compatibility gate
     runs-on: ubuntu-latest
@@ -845,6 +845,11 @@ jobs:
         run: go run honnef.co/go/tools/cmd/staticcheck@v0.8.1 -tags node_reinstall_acceptance ./...
       - name: Reachable vulnerability check
         run: go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
+      - uses: actions/cache/save@v4
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        with:
+          path: ~/.cache/go-build
+          key: go-build-static-${{ runner.os }}-${{ hashFiles('go.sum') }}-staticcheck-v0.8.1-govulncheck-v1.8.0
 
   # The race suite is sharded because it is the critical path: at 4m22s it was
   # still running while the other twenty-two checks had finished.
@@ -868,11 +873,6 @@ jobs:
   # Branch protection requires that exact context, and a matrix reports as
   # several checks, so a split that renamed the job would leave the required
   # context unproduced and block every merge on main.
-      - uses: actions/cache/save@v4
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        with:
-          path: ~/.cache/go-build
-          key: go-build-static-${{ runner.os }}-${{ hashFiles('go.sum') }}-staticcheck-v0.8.1-govulncheck-v1.8.0
   race-shard:
     name: go race full (${{ matrix.part }}/3)
     runs-on: ubuntu-latest
