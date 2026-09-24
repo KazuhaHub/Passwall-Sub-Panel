@@ -54,6 +54,10 @@ updates:
         update-types:
           - minor
           - patch
+        # jsdom changes can alter browser emulation semantics and invalidate
+        # large parts of the component test suite, so review it independently.
+        exclude-patterns:
+          - "jsdom"
 
   - package-ecosystem: github-actions
     directory: /
