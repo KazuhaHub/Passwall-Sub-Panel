@@ -340,7 +340,7 @@ test('the race shards partition the heavy package\'s tests, and cover them all',
     'the heavy package must be run as a slice of its tests, not skipped',
   )
   assert(
-    /tests=\$\(go test -list '\^Test' "\$heavy"/.test(race),
+    /tests=\$\(go test (?:-race )?-list '\^Test' "\$heavy"/.test(race),
     'the slice must come from the package\'s own test list, so a test added tomorrow is in a shard by construction',
   )
   // A FAILING HALF MUST NOT HIDE THE OTHER. The two invocations are separate

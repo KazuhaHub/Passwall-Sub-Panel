@@ -910,6 +910,16 @@ jobs:
           test "$(go env GOVERSION)" = "$build_toolchain"
           test "$(go tool compile -V | awk '{ print $3 }')" = "$build_toolchain"
       - name: test
+        env:
+          # THE RACE RUNTIME SLEEPS A SECOND BEFORE EVERY EXIT (atexit_sleep_ms defaults to
+          # 1000), giving a goroutine the tests leaked time to report a race it is about to
+          # hit. Every test binary pays it, ~30 of them a shard, and cmd/panel pays it again
+          # each time it re-executes itself for a CLI case: that is why a trivial package
+          # reports 1.01s. A race inside a test fails that test whatever this says, so what
+          # a shorter sleep gives up is only the late report from a leaked goroutine, and
+          # 100ms still leaves a window for it. Measured locally over internal/pkg/... and
+          # cmd/panel: 35s at the default, 25s at 100ms, 24s at 0.
+          GORACE: atexit_sleep_ms=100
         run: |
           # `set -e` IS PART OF THE GUARD BELOW, not just hygiene: without it
           # `test -n "$packages"` does not stop anything, and an empty planner
@@ -943,7 +953,12 @@ jobs:
           # shard that ran no test of the heavy package looks exactly like a shard
           # whose slice was small. The list is checked before it is turned into a
           # pattern, and the pattern is checked before it is used.
-          tests=$(go test -list '^Test' "$heavy" | grep '^Test' | grep -v '^TestMain$')
+          #
+          # LISTED FROM THE RACE BUILD, which the run below then reuses. A plain `go test
+          # -list` compiled the package and its whole dependency tree a second time,
+          # without -race: 30s measured locally on a cache already holding the race
+          # build, against 2s for this, and paid on every shard whose cache was stale.
+          tests=$(go test -race -list '^Test' "$heavy" | grep '^Test' | grep -v '^TestMain$')
           test -n "$tests"
           regex=$(printf '%s\n' "$tests" \
             | awk -v s="${{ matrix.part }}" -v m=3 'NR % m == s % m' \
@@ -962,6 +977,7 @@ jobs:
           # while a suite failed. shellcheck found exactly that here (SC2030/SC2031),
           # and it is the failure this job is least able to see for itself.
           failed=0
+          # shellcheck disable=SC2086 # $packages is a list of import paths, split on purpose
           go test -race -count=1 -timeout=8m $packages 2>&1 | tee test-output.txt || failed=1
           go test -race -count=1 -timeout=8m -run "^(${regex})$" "$heavy" 2>&1 | tee -a test-output.txt || failed=1
           exit "$failed"
