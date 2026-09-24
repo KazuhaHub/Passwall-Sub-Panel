@@ -155,13 +155,16 @@ test('the isolated third-party panels are pinned to the recorded ceilings', () =
       version: highestVersion(readCompat('sui-v4.json').sui_entries.map((entry) => entry.max_tested_sui)),
     },
   }
+  // Every metacharacter, backslash included: the repo and version come from files, and a
+  // pattern built from them must match them literally or it proves nothing.
+  const escapeRegExp = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
   const isolated = job('third-party-isolated')
   for (const [name, { repo, version }] of Object.entries(ceilings)) {
     const pinned = new RegExp(`^      ${name}: \\$\\{\\{ vars\\.${name} \\|\\| '([^']+)' \\}\\}$`, 'm').exec(isolated)
     assert(pinned, `third-party-isolated must set ${name} once, at job level, with a pinned default`)
     assert.match(
       pinned[1],
-      new RegExp(`^${repo.replace(/[.]/g, '\\.')}:v${version.replace(/[.]/g, '\\.')}@sha256:[0-9a-f]{64}$`),
+      new RegExp(`^${escapeRegExp(repo)}:v${escapeRegExp(version)}@sha256:[0-9a-f]{64}$`),
       `${name} must default to ${repo}:v${version}@sha256:…, the ceiling docs/compat records: a floating tag turns main red on an upstream release, and a stale one tests a panel nobody claims`,
     )
   }
