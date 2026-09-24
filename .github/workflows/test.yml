@@ -843,8 +843,25 @@ jobs:
       # ~18s on a cold analysis cache, measured locally, in a job off the critical path.
       - name: staticcheck
         run: go run honnef.co/go/tools/cmd/staticcheck@v0.8.1 -tags node_reinstall_acceptance ./...
+      # EVERY OS THE RELEASE SHIPS, NOT ONLY THE RUNNER'S. govulncheck analyses the
+      # packages as they build for the current GOOS, so an advisory whose vulnerable
+      # code lives only in a _windows.go or _darwin.go file is never evaluated on a
+      # linux runner, and the build job and release.yml ship windows and darwin panels.
+      # The tool is installed once for the host: `go run` under GOOS=windows would build
+      # a Windows govulncheck and then fail to execute it. One OS failing does not stop
+      # the others from being scanned. Measured locally: 9s for linux, 7s and 6s for
+      # windows and darwin.
       - name: Reachable vulnerability check
-        run: go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
+        run: |
+          set -u
+          go install golang.org/x/vuln/cmd/govulncheck@v1.8.0 || exit 1
+          failed=0
+          for goos in linux windows darwin
+          do
+            echo "== GOOS=$goos"
+            GOOS="$goos" "$(go env GOPATH)/bin/govulncheck" ./... || failed=1
+          done
+          exit "$failed"
       - uses: actions/cache/save@v4
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         with:
