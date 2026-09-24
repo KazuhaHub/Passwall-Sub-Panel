@@ -1,0 +1,87 @@
+name: Vulnerability watch
+
+# Scans main and the V3 maintenance line for reachable vulnerabilities every
+# week, whether or not anybody pushed.
+#
+# WHY A SCHEDULE AND NOT ONLY test.yml. govulncheck in go_static runs on a push or
+# a pull request, so it answers "does this commit call a known vulnerability" and
+# never "does the code we already shipped call one published since". An advisory
+# that lands in a quiet week is not reported until the next commit happens to run
+# the scan -- which is how gRPC's HTTP/2 memory exhaustion was found on release/v3:
+# a push for something else ran the check (run 35048352855), not a watch.
+#
+# WHY release/v3 IS HERE. It is the long-term V3 line (docs/3xui-compat.md), it
+# publishes its own releases, and nothing on main looks at it: Dependabot's
+# alerts and security updates cover the default branch only, and a schedule only
+# fires from the default branch's copy of a workflow. So this file, on main,
+# checks the branch out, and builds it with that branch's own go.mod toolchain --
+# the compiler its releases are built with, whose standard library is part of
+# what is being scanned. The branch itself is not modified. When the V3 line is
+# retired, its matrix entry goes with it.
+#
+# Every OS the releases ship, for the reason go_static gives: an advisory whose
+# code sits in a _windows.go or _darwin.go file is never evaluated on a linux
+# runner. Measured locally on release/v3: 20s for linux, 5s each for windows and
+# darwin.
+#
+# A red run is the signal, not a broken build: nothing requires this check. The
+# person who last edited the schedule is notified by GitHub. Scheduled workflows
+# are disabled after 60 days without repository activity, which this repository
+# is nowhere near.
+
+on:
+  schedule:
+    # Mondays 03:41 UTC, off the hour for the reason compat-watch.yml gives, and
+    # not at compat-watch's minute.
+    - cron: "41 3 * * 1"
+  workflow_dispatch:
+
+# test.yml's shape: setup-go chooses from go.mod, every step after it runs local,
+# and the build-baseline guard holds this file to it like every workflow that sets
+# up Go.
+env:
+  GOWORK: "off"
+  GOTOOLCHAIN: "local"
+
+permissions:
+  contents: read
+
+jobs:
+  govulncheck:
+    name: govulncheck (${{ matrix.ref }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      # One line's finding must not cancel the other's scan.
+      fail-fast: false
+      matrix:
+        ref: [main, release/v3]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ matrix.ref }}
+      - uses: actions/setup-go@v7
+        # Allow toolchain selection; setup-go exports local after installation.
+        env:
+          GOTOOLCHAIN: auto
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Verify exact preferred compiler
+        run: |
+          set -eu
+          build_toolchain=$(awk '$1 == "toolchain" { print $2 }' go.mod)
+          test -n "$build_toolchain"
+          test "$(go env GOVERSION)" = "$build_toolchain"
+          test "$(go tool compile -V | awk '{ print $3 }')" = "$build_toolchain"
+      - name: Reachable vulnerability check
+        run: |
+          set -u
+          go install golang.org/x/vuln/cmd/govulncheck@v1.8.0 || exit 1
+          failed=0
+          for goos in linux windows darwin
+          do
+            echo "== GOOS=$goos"
+            GOOS="$goos" "$(go env GOPATH)/bin/govulncheck" ./... || failed=1
+          done
+          exit "$failed"
