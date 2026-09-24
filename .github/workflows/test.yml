@@ -373,6 +373,9 @@ jobs:
   compatibility:
     name: compatibility gate
     runs-on: ubuntu-latest
+    # A checkout, a download and two node scripts. The default is 360 minutes, which
+    # is what a hung runner would otherwise hold a required check for.
+    timeout-minutes: 5
     needs: [node-compatibility, node-contract]
     # always(), so a failed or cancelled leg still produces a verdict. A skipped
     # gate would report as an absent check, which reads as "not run" rather than
@@ -539,10 +542,15 @@ jobs:
           # a test log, which reads like a corrupt database.
           xui_db_dir=$(dirname "$PSP_LIVE_XUI_DB")
           test -w "$xui_db_dir" || { echo "::error::$xui_db_dir is not writable by $(id -un); TestLive_XUITrafficFloorMatrix seeds usage straight into it"; exit 1; }
+          # TEN MINUTES A SUITE, SO A HANG IS KILLED BY GO TEST, NOT BY THE RUNNER. Two
+          # suites of 20m ran one after the other inside this job's 30, so a hang in the
+          # first met the job's limit before the validator could name it, and the second
+          # never ran. The whole drive takes about two minutes; 10m each plus the panels'
+          # start leaves the job's limit last.
           run_suite() {
             profile="$1"; pkg="$2"; out="$3"
             code=0
-            go test -json -count=1 -timeout=20m "$pkg" -run '^TestLive_' > "evidence/$out.jsonl" 2> "evidence/$out.stderr" || code=$?
+            go test -json -count=1 -timeout=10m "$pkg" -run '^TestLive_' > "evidence/$out.jsonl" 2> "evidence/$out.stderr" || code=$?
             node deploy/compat/check-go-results.mjs --profile "$profile" \
               --profiles deploy/compat/profiles-third-party.json \
               --input "evidence/$out.jsonl" --go-exit-code "$code" \
@@ -1204,6 +1212,7 @@ jobs:
     # which reads as "not run" rather than "failed".
     if: always()
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - name: every shard passed
         run: test "${{ needs.race-shard.result }}" = success

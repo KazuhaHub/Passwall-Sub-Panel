@@ -714,3 +714,28 @@ test('the contract job skips only a wire run the matrix already made, and always
   for (const planned of cases) assert.equal(match(planned.sha), planned.id, `a planned commit must be recognised as ${planned.id}`)
   assert.equal(match('0'.repeat(40)), '', 'a commit outside the plan must not be treated as covered, or its wire run is silently dropped')
 })
+
+// A JOB WITHOUT A TIMEOUT HOLDS ITS RUNNER FOR 360 MINUTES WHEN SOMETHING HANGS, and
+// for a required check that is six hours of a red nobody can read. Every job here
+// states its own bound.
+test('every job in test.yml sets its own timeout', () => {
+  for (const [name, raw] of jobs()) {
+    assert(/^    timeout-minutes: \d+$/m.test(raw), `${name} has no timeout-minutes, so a hang holds the runner for GitHub's 360-minute default`)
+  }
+})
+
+// The real-panel suites run one after the other, so their -timeout budgets add up and
+// must leave the job room to start the panels: otherwise a hang in the first suite is
+// ended by the runner, without go test's goroutine dump and before the validator can
+// name it.
+test('the real-panel suites\' go test budgets fit inside their job timeout', () => {
+  const isolated = job('third-party-isolated')
+  const jobMinutes = Number(/^    timeout-minutes: (\d+)$/m.exec(isolated)[1])
+  const budget = Number(/go test -json -count=1 -timeout=(\d+)m "\$pkg"/.exec(isolated)?.[1])
+  const suites = (isolated.match(/^\s*run_suite third-party-/gm) ?? []).length
+  assert(budget > 0 && suites >= 2, 'the real-panel job must bound each suite with -timeout and run both suites')
+  assert(
+    budget * suites + 5 <= jobMinutes,
+    `${suites} suites of ${budget}m in a ${jobMinutes}-minute job leave no room for pulling and starting the panels`,
+  )
+})

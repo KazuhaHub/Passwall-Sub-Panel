@@ -64,6 +64,8 @@ jobs:
   watch:
     name: ceilings and node registry vs published releases
     runs-on: ubuntu-latest
+    # A build and a few API reads; the default 360 minutes is only ever a hang.
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
