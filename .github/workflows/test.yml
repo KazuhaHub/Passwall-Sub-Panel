@@ -985,6 +985,15 @@ jobs:
           # 100ms still leaves a window for it. Measured locally over internal/pkg/... and
           # cmd/panel: 35s at the default, 25s at 100ms, 24s at 0.
           GORACE: atexit_sleep_ms=100
+          # THE HEAVY PACKAGE'S ORDINARY TESTS START FROM A COPY OF ONE MIGRATED SQLITE
+          # FILE instead of running EnsureSchema each. Under -race the schema was most
+          # of sqlstore's time: a fresh one costs 506ms against 26ms without the
+          # detector, and the copy 39ms. Measured locally, the whole package under
+          # -race went from 227s to 92s, every test passing both ways. Schema and
+          # migration tests keep their fresh databases, and a plain `go test` without
+          # this variable keeps the real boot path for every test; testdb_test.go says
+          # why the copy cannot differ from what EnsureSchema would have left.
+          PSP_TEST_DB_REUSE_SCHEMA: "true"
         run: |
           # `set -e` IS PART OF THE GUARD BELOW, not just hygiene: without it
           # `test -n "$packages"` does not stop anything, and an empty planner

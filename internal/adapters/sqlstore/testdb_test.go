@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"path/filepath"
 	"slices"
 	"sort"
 	"strings"
@@ -15,7 +16,7 @@ import (
 	"gorm.io/gorm"
 )
 
-const reuseServerSchemaEnv = "PSP_TEST_DB_REUSE_SCHEMA"
+const reuseSchemaEnv = "PSP_TEST_DB_REUSE_SCHEMA"
 
 // reusableSchemaDialector marks a connection whose schema was initialized by
 // reusableServerTestPool. It deliberately changes no dialect behavior; the
@@ -38,19 +39,86 @@ func ensureTestSchema(db *gorm.DB) error {
 // With no env config — including a plain local `go test` — it is a fresh,
 // in-process SQLite database. Cross-dialect CI can set
 // PSP_TEST_DB_REUSE_SCHEMA=true: MySQL/Postgres then reuse a fully migrated
-// database while clearing every data table between tests. Tests that inspect
-// or mutate schema use openIsolatedTestDB instead.
+// database while clearing every data table between tests, and SQLite gets a
+// copy of a database migrated once per test binary. Tests that inspect or
+// mutate schema use openIsolatedTestDB instead.
 func openTestDB(t *testing.T) (*gorm.DB, error) {
 	t.Helper()
 	kind := os.Getenv("PSP_TEST_DB_KIND")
-	if reuseServerTestSchema() && (kind == "mysql" || kind == "postgres") {
-		return reusableServerTestDBs.open(t, kind, os.Getenv("PSP_TEST_DB_DSN"))
+	if reuseTestSchema() {
+		switch kind {
+		case "mysql", "postgres":
+			return reusableServerTestDBs.open(t, kind, os.Getenv("PSP_TEST_DB_DSN"))
+		case "", "sqlite":
+			return openSQLiteTemplateCopy(t)
+		}
 	}
 	return openIsolatedTestDB(t)
 }
 
-func reuseServerTestSchema() bool {
-	switch strings.ToLower(strings.TrimSpace(os.Getenv(reuseServerSchemaEnv))) {
+// sqliteTemplate is one SQLite file per test binary, migrated by the real
+// EnsureSchema, whose bytes every reusing test starts from.
+//
+// UNDER -race THE SCHEMA IS MOST OF THE SUITE. The race detector instruments
+// the pure-Go SQLite engine, and a fresh EnsureSchema went from 26ms to 506ms
+// per database, measured locally; replaying the template's DDL into a new
+// in-memory database still took 395ms, because it is the DDL itself that is
+// slow there. A copy of the migrated file takes 39ms. The copy is byte-for-byte
+// the database a fresh EnsureSchema leaves, seeded roles and sequences
+// included, so unlike the server pools nothing is reset and nothing can drift.
+//
+// ONLY WHERE PSP_TEST_DB_REUSE_SCHEMA ASKS FOR IT, which the race shards do. A
+// plain `go test` keeps a fresh in-memory database and the real boot path per
+// test, and openIsolatedTestDB keeps it everywhere. The copy is a file, with
+// the journal in memory and no syncs, so it costs what the in-memory database
+// did rather than a disk write per commit.
+var sqliteTemplate struct {
+	once sync.Once
+	raw  []byte
+	err  error
+}
+
+func openSQLiteTemplateCopy(t *testing.T) (*gorm.DB, error) {
+	t.Helper()
+	sqliteTemplate.once.Do(func() {
+		dir, err := os.MkdirTemp("", "psp-sqlite-template-")
+		if err != nil {
+			sqliteTemplate.err = err
+			return
+		}
+		defer os.RemoveAll(dir)
+		path := filepath.Join(dir, "template.db")
+		db, err := Open("sqlite", path)
+		if err != nil {
+			sqliteTemplate.err = err
+			return
+		}
+		err = EnsureSchema(db)
+		closeGormDB(db)
+		if err != nil {
+			sqliteTemplate.err = fmt.Errorf("initialize SQLite template: %w", err)
+			return
+		}
+		sqliteTemplate.raw, sqliteTemplate.err = os.ReadFile(path)
+	})
+	if sqliteTemplate.err != nil {
+		return nil, sqliteTemplate.err
+	}
+	path := filepath.Join(t.TempDir(), "panel.db")
+	if err := os.WriteFile(path, sqliteTemplate.raw, 0o600); err != nil {
+		return nil, err
+	}
+	db, err := Open("sqlite", path+"?_pragma=journal_mode(MEMORY)&_pragma=synchronous(OFF)")
+	if err != nil {
+		return nil, err
+	}
+	db.Dialector = reusableSchemaDialector{Dialector: db.Dialector}
+	t.Cleanup(func() { closeGormDB(db) })
+	return db, nil
+}
+
+func reuseTestSchema() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(reuseSchemaEnv))) {
 	case "1", "true", "yes":
 		return true
 	default:
@@ -168,7 +236,7 @@ func postgresDSNWithSearchPath(dsn, schemaName string) string {
 func openIsolatedMySQLTestDB(t *testing.T) (*gorm.DB, error) {
 	t.Helper()
 	base := os.Getenv("PSP_TEST_DB_DSN")
-	if reuseServerTestSchema() {
+	if reuseTestSchema() {
 		return reusableBlankMySQLTestDBs.openBlankMySQL(t, base)
 	}
 	dbName := uniqueTestNamespace()
