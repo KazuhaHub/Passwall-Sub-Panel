@@ -108,7 +108,7 @@ setup ──┬─ node-compatibility ─┐
 
 `compatibility` 是所有发布动作的唯一入口；`release` 与 `docker` 都只依赖它，不直接依赖 `node-compatibility`。取消或缺少报告都不通过。
 
-**R10 的性质**（手册 §15 原文："最终被发布的摘要与被验收摘要完全一致，无发布旁路"）由这几处强制，且都有守卫测试：tag 必须解引用到 CI 自身的 SHA、所有下游 job 一律 checkout `github.sha`、`target_commitish` 指向被验收的 SHA、tag 在构建期间变动即拒绝、`overwrite_files: false`。
+**R10 的性质**（手册 §15 原文："最终被发布的摘要与被验收摘要完全一致，无发布旁路"）由这几处强制，且都有守卫测试：tag 必须解引用到 CI 自身的 SHA、所有下游 job 一律 checkout `github.sha`、`target_commitish` 指向被验收的 SHA、tag 在构建期间变动即拒绝、`overwrite_files: false`、发布先以 draft 上传并读回核对（`SHA256SUMS.txt` 与索引里的二进制摘要）之后才公开。
 
 ## 9. 分支保护设置
 

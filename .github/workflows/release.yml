@@ -1081,9 +1081,19 @@ jobs:
       # release the commit is, and Dependabot's github-actions entry moves the two
       # together. actions/* stay on major tags: GitHub, which publishes them, also
       # runs the runner that executes them.
+      #
+      # AS A DRAFT, AND IT STAYS ONE UNTIL THE STEP BELOW HAS READ IT BACK. The action
+      # drafts a stable release while it uploads, but creates a pre-release — the
+      # default channel — public and uploads after: v4.0.1.10 was published at
+      # 09:33:04 and its assets arrived at 09:33:08. A failed upload left a public
+      # release with part of its files, and nothing ever checked the files that
+      # did arrive. A draft is not listed and not /releases/latest, so everything
+      # below can fail without anyone having seen the release.
       - name: Publish GitHub Release
+        id: publish
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
+          draft: true
           tag_name: ${{ needs.setup.outputs.tag }}
           target_commitish: ${{ needs.setup.outputs.sha }}
           # THE TITLE CARRIES THE TAG, AND THE PRODUCT NAMES IT. The page used to
@@ -1104,6 +1114,76 @@ jobs:
             dist/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # WHAT WAS UPLOADED, READ BACK, AGAINST WHAT THE GATE ACCEPTED. The draft's
+      # files are downloaded through the API and checked three ways: the set is
+      # exactly what this job packaged, every file matches the SHA256SUMS.txt
+      # published beside it, and the psp inside each archive is the binary whose
+      # digest the evidence index names. The last one is R10's "the published
+      # digest is the accepted digest", and it is what refuses a draft left by
+      # another run: the action does not overwrite a file already on a draft, so
+      # such a draft keeps that run's bytes. A draft this run left on an earlier
+      # attempt holds this run's binaries and passes.
+      - name: Verify the draft's assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.setup.outputs.tag }}
+          VERSION: ${{ needs.setup.outputs.version }}
+          RELEASE_ID: ${{ steps.publish.outputs.id }}
+        run: |
+          set -euo pipefail
+          # The release the tag resolves to must be the draft the action wrote.
+          resolved=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json databaseId,isDraft \
+            --jq '"\(.databaseId) \(.isDraft)"')
+          test "$resolved" = "${RELEASE_ID} true" || {
+            echo "${TAG} resolves to release ${resolved}, not to draft ${RELEASE_ID}" >&2
+            exit 1
+          }
+          rm -rf verify
+          mkdir verify
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir verify
+          diff <(cd dist && ls) <(cd verify && ls) || {
+            echo 'the draft does not hold exactly the files this job packaged' >&2
+            exit 1
+          }
+          (cd verify && sha256sum -c SHA256SUMS.txt)
+          checked=0
+          for archive in verify/passwall-sub-panel_"${VERSION}"_*; do
+            pkgname=$(basename "$archive")
+            pkgname=${pkgname%.tar.gz}
+            pkgname=${pkgname%.zip}
+            platform=${pkgname#passwall-sub-panel_"${VERSION}"_}
+            case "$archive" in
+              *.zip) actual=$(unzip -p "$archive" "${pkgname}/psp.exe" | sha256sum | cut -d' ' -f1) ;;
+              *)     actual=$(tar -xzOf "$archive" "${pkgname}/psp" | sha256sum | cut -d' ' -f1) ;;
+            esac
+            expected=$(jq -r --arg name "psp-${platform/_/-}" '.artifacts[$name] // ""' evidence/evidence-index.json)
+            if [ -z "$expected" ] || [ "$actual" != "$expected" ]; then
+              echo "${archive#verify/} holds psp ${actual}, but the gate accepted ${expected:-nothing} for ${platform}" >&2
+              echo 'a draft from another run keeps its own files; delete it and re-run' >&2
+              exit 1
+            fi
+            checked=$((checked + 1))
+          done
+          test "$checked" = 6 || {
+            echo "checked ${checked} archives against the evidence index, not six" >&2
+            exit 1
+          }
+          echo "The draft's ${checked} archives carry the binaries the gate accepted, and every file matches SHA256SUMS.txt."
+
+      # ONLY THE DRAFT FLAG CHANGES. The channel was set when the draft was made
+      # and carries over; `latest` is left to GitHub's default for a newly
+      # published release, which is exactly what the action asked for when it
+      # published by itself: a stable release becomes Latest, a pre-release
+      # cannot. The notes are the draft's, already written.
+      - name: Make the release public
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.setup.outputs.tag }}
+        run: |
+          set -euo pipefail
+          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false
 
   docker:
     name: Publish container image

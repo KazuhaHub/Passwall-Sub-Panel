@@ -48,7 +48,7 @@
 >
 > 所以现在的规矩是：**构建产物依赖的 job 一律不带 job 级 `if:`**，需要条件就写在 step 上；文件里剩下的 job 级 `if:` 必须带 `always()`，即"链路失败时我照跑来出结论"的那种（兼容门禁）。这两条由 `deploy/release_workflow_test.mjs` 钉住。
 
-之后 `setup` 用本仓库的 `release-tag` 命令把 tag 解析成版本（tag 与版本是两个身份），门禁、构建、上传为 **draft**、Docker 依次跑；证据齐全后把 `prerelease` 置为 **true** → **testing**。draft 不进用户目录。
+之后 `setup` 用本仓库的 `release-tag` 命令把 tag 解析成版本（tag 与版本是两个身份），门禁、构建、上传为 **draft**、Docker 依次跑；证据齐全后把 `prerelease` 置为 **true** → **testing**。draft 不进用户目录。**draft 在公开之前会被读回来核对**：`release` job 把 draft 上的文件经 API 下载回来，文件集合必须恰好是本 job 打包的那些，每个文件都要通过同一发布里的 `SHA256SUMS.txt`，每个归档里的 `psp` 都必须是证据索引记录、门禁接受过的那个摘要；三条都过，才只改 draft 标志把它公开——渠道、Latest、说明都在建 draft 时已定，不再改。核对失败时发布停在 draft：若是本次运行较早一次尝试留下的 draft，重跑失败的 job 即可（二进制相同，照样通过；只是动作更新已有 release 时会把说明末尾的 Docker / Verify 一段再追加一遍，公开后手工删掉即可）；若是**别的运行**留下的，它保留着那次的文件（动作不覆盖 draft 上已有的文件），先删掉这个 draft 再重跑。
 
 一次发布只发一个候选：**不移动 tag、不重建、不替换附件。**
 

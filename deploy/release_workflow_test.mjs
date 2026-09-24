@@ -204,8 +204,8 @@ function withoutComments(text) {
     .join('\n')
 }
 
-function literalScripts() {
-  const lines = workflow.split('\n')
+function literalScripts(text = workflow) {
+  const lines = text.split('\n')
   const scripts = []
   for (let i = 0; i < lines.length; i++) {
     const match = /^(\s*)run: \|$/.exec(lines[i])
@@ -222,6 +222,27 @@ function literalScripts() {
     scripts.push(body.join('\n').replace(/\$\{\{[^}]+\}\}/g, 'fixture'))
   }
   return scripts
+}
+
+// The lines a script EXECUTES: no comments, and no heredoc bodies. A heredoc is
+// data on its way into a file, and the release notes are one — they tell the
+// reader to run `sha256sum -c SHA256SUMS.txt`, and that sentence was the only
+// line the checksum guard below ever matched, for as long as no step verified
+// anything at all. A here-string (<<<) is not a heredoc and is left alone.
+function executedLines(script) {
+  const executed = []
+  let terminator = null
+  for (const line of script.split('\n')) {
+    if (terminator !== null) {
+      if (line.replace(/^\t+/, '') === terminator) terminator = null
+      continue
+    }
+    if (line.trimStart().startsWith('#')) continue
+    executed.push(line)
+    const heredoc = /(?<!<)<<(?!<)-?\s*(['"]?)([A-Za-z_][A-Za-z0-9_]*)\1/.exec(line)
+    if (heredoc) terminator = heredoc[2]
+  }
+  return executed
 }
 
 // Floor for actions/setup-go and actions/setup-node. Below this the inputs this
@@ -813,15 +834,53 @@ test('the release attaches the evidence index under its checksums, and the image
 // still verify what it produced, and nothing in the path may be relaxed to make a
 // candidate pass. Each pattern below is a way that rule gets broken quietly.
 test('the publisher verifies its own artifacts and relaxes nothing', () => {
+  // EXECUTED, NOT MENTIONED. This used to count every line of the file matching
+  // the command, and the one it found was in the release-notes heredoc: an
+  // instruction to the reader. The guard was green while nothing downloaded or
+  // checked a published file, and the release was public before its files
+  // existed. Heredoc bodies are data, so they are not counted now.
+  assert.deepEqual(
+    executedLines('set -eu\ncat <<EOF > notes.md\nsha256sum -c SHA256SUMS.txt\nEOF\ngrep -q x <<<"$y"\n'),
+    ['set -eu', 'cat <<EOF > notes.md', 'grep -q x <<<"$y"', ''],
+    'a heredoc body must not count as a command, and a here-string must not open one',
+  )
+  const release = job('release')
+  const executed = literalScripts(release).flatMap(executedLines)
   // The checksum verification has to be a real step, not a swallowed one. Asserting
   // only that the command appears is not enough — it still appears with `|| true`
   // appended, and that is precisely the shape a quiet relaxation takes.
-  const verifyLines = workflow.split('\n').filter((line) => /sha256sum -c\s+SHA256SUMS\.txt/.test(line))
-  assert(verifyLines.length > 0, 'the publisher must verify the checksums it published')
+  const verifyLines = executed.filter((line) => /sha256sum -c\s+SHA256SUMS\.txt/.test(line))
+  assert(verifyLines.length > 0, 'the publisher must verify the checksums it published, in a line that runs')
   for (const line of verifyLines) {
     const after = line.slice(line.indexOf('SHA256SUMS.txt') + 'SHA256SUMS.txt'.length)
     assert(!/\|\||&&|;/.test(after), `the checksum verification is followed by more shell, which can swallow its failure: ${line.trim()}`)
   }
+  // WHAT IT VERIFIES IS WHAT WAS PUBLISHED, AND BEFORE ANYONE CAN SEE IT. The files
+  // are read back from the release, not from dist/, which the upload read too; the
+  // release is a draft while that happens; and only after it passes does the draft
+  // flag change — nothing else about the release does.
+  assert(executed.some((line) => /gh release download "\$TAG"[^\n]*--dir verify/.test(line)), 'the published files must be downloaded back')
+  assert(verifyLines.some((line) => line.includes('cd verify')), 'the checksums must be checked against the downloaded files')
+  assert(
+    executed.some((line) => line.includes("'.artifacts[$name]") && line.includes('evidence/evidence-index.json')),
+    'each archived binary must be compared with the digest the gate indexed',
+  )
+  const steps = withoutComments(release)
+  const upload = /- name: Publish GitHub Release\n([\s\S]*?)(?=\n {6}- name:|$)/.exec(steps)
+  assert(upload, 'the release job no longer has its upload step')
+  assert(upload[1].includes('uses: softprops/action-gh-release@'), 'the upload step is not the release action')
+  assert(/^ {10}draft: true$/m.test(upload[1]), 'the release must be uploaded as a draft')
+  const drafted = upload.index
+  const verified = steps.indexOf("- name: Verify the draft's assets")
+  const undrafted = steps.indexOf('gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false')
+  assert(verified > drafted, 'the files must be verified after the draft is uploaded')
+  assert(undrafted > verified, 'the release may become public only after its files are verified')
+  const edits = executed.filter((line) => /\bgh release edit\b/.test(line))
+  assert.deepEqual(
+    edits.map((line) => line.trim()),
+    ['gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false'],
+    'making the release public must change the draft flag only: the channel, Latest and the notes were already decided',
+  )
   for (const pattern of [
     /\|\|\s*true[^\n]*sha256/i,
     /sha256sum[^\n]*--insecure/,
