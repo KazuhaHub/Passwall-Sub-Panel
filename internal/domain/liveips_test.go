@@ -174,3 +174,71 @@ func TestAggregate_IPsAreSortedNotMapOrdered(t *testing.T) {
 		t.Fatalf("IPs = %v, want %v", got[7].IPs, want)
 	}
 }
+
+// A panel whose reader has no timestamps (a PSP-native node) can only say
+// "these were in the window", which is what v1 treated as live. Fresh must
+// fall back to exactly that, or every native-node user reads as idle and
+// the check silently switches off for half a fleet.
+func TestAggregate_FreshDefaultsToTheWindowWithoutTimestamps(t *testing.T) {
+	got := AggregateLiveIPsByUser(
+		[]PanelLiveIPs{
+			panelIPs(1, map[string][]string{"u7@x": {"2.2.2.2", "1.1.1.1"}}),
+			panelIPs(1, map[string][]string{}),
+		},
+		owners(1, "u7@x", 7, 1, "u8@x", 8),
+	)
+	if want := []string{"1.1.1.1", "2.2.2.2"}; !reflect.DeepEqual(got[7].Fresh, want) {
+		t.Fatalf("fresh = %v, want the window %v", got[7].Fresh, want)
+	}
+	// Idle is a computed empty, not a missing value.
+	if f := got[8].Fresh; f == nil || len(f) != 0 {
+		t.Fatalf("idle user's fresh = %#v, want a non-nil empty slice", f)
+	}
+}
+
+// Where a panel did compute freshness, only its live addresses count as
+// concurrent, while the window count (IPs) stays what it always was.
+func TestAggregate_FreshUnionsOnlyFreshAddresses(t *testing.T) {
+	p1 := panelIPs(1, map[string][]string{"u7@x": {"1.1.1.1", "2.2.2.2", "3.3.3.3"}, "hand@pnl": {"9.9.9.9"}})
+	p1.Fresh = map[string][]string{"u7@x": {"3.3.3.3", ""}, "hand@pnl": {"9.9.9.9"}}
+	p2 := panelIPs(2, map[string][]string{"u7@x": {"4.4.4.4"}})
+	unread := PanelLiveIPs{PanelID: 3, Fresh: map[string][]string{"u7@x": {"5.5.5.5"}}, Err: errors.New("down")}
+	got := AggregateLiveIPsByUser(
+		[]PanelLiveIPs{p1, p2, unread},
+		owners(1, "u7@x", 7, 2, "u7@x", 7, 3, "u7@x", 7),
+	)
+	u := got[7]
+	if want := []string{"3.3.3.3", "4.4.4.4"}; !reflect.DeepEqual(u.Fresh, want) {
+		t.Fatalf("fresh = %v, want %v — only live addresses, owned, from panels that answered", u.Fresh, want)
+	}
+	if want := []string{"1.1.1.1", "2.2.2.2", "3.3.3.3", "4.4.4.4"}; !reflect.DeepEqual(u.IPs, want) {
+		t.Fatalf("IPs = %v, want the unchanged window %v", u.IPs, want)
+	}
+	if u.Panels != 2 || u.Unread != 1 {
+		t.Fatalf("panels=%d unread=%d, want 2/1 unchanged by freshness", u.Panels, u.Unread)
+	}
+}
+
+// One flattening rule for every detail reader, so ByEmail from a detail
+// reader cannot drift from what a plain reader returns.
+func TestLiveIPsOf_DedupesSortsAndDropsBlanks(t *testing.T) {
+	got := LiveIPsOf(map[string][]LiveIPSighting{
+		"u7@x": {
+			{IP: "2.2.2.2", Node: "a", SeenAt: 5},
+			{IP: " 1.1.1.1 ", Node: "a"},
+			{IP: "2.2.2.2", Node: "b", SeenAt: 9},
+			{IP: "  "},
+		},
+		"":         {{IP: "3.3.3.3"}},
+		"idle@x":   {{IP: ""}},
+		"u7-c1@x":  {{IP: "4.4.4.4"}},
+		"nobody@x": nil,
+	})
+	want := map[string][]string{
+		"u7@x":    {"1.1.1.1", "2.2.2.2"},
+		"u7-c1@x": {"4.4.4.4"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("LiveIPsOf = %v, want %v", got, want)
+	}
+}
