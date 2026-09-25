@@ -765,6 +765,7 @@ func (a *App) Run() error {
 	safego.GoTracked(&a.bgWG, "audit-cleanup-loop", func() { a.runAuditCleanupLoop(bgCtx) })
 	safego.GoTracked(&a.bgWG, "geo-update-loop", func() { a.runGeoUpdateLoop(bgCtx) })
 	safego.GoTracked(&a.bgWG, "traffic-loop", func() { a.runTrafficLoop(bgCtx) })
+	safego.GoTracked(&a.bgWG, "infra-address-loop", func() { a.runInfraAddressLoop(bgCtx) })
 	safego.GoTracked(&a.bgWG, "mail-loop", func() { a.runMailLoop(bgCtx) })
 	safego.GoTracked(&a.bgWG, "reconcile-loop", func() { a.runReconcileLoop(bgCtx) })
 	safego.GoTracked(&a.bgWG, "health-loop", func() { a.runHealthLoop(bgCtx) })
@@ -1598,6 +1599,44 @@ func (a *App) runTrafficLoop(ctx context.Context) {
 				defer a.compatProbeInflight.Store(false)
 				a.probePanelVersionsOnce(ctx)
 			})
+		}
+	}
+}
+
+// infraRefreshInterval is how often the node and relay addresses the
+// location detector excludes are rebuilt. A constant, not a setting: it is
+// background upkeep off the poll's critical path, like the sync-task, mail
+// and audit-cleanup cadences. Hostname answers are cached for twice this
+// (traffic's infraHostTTL), so roughly every other refresh is a node-list
+// read and no DNS at all.
+const infraRefreshInterval = 5 * time.Minute
+
+// runInfraAddressLoop keeps traffic's infrastructure-address set current.
+//
+// It refreshes once as soon as it starts, before the first tick: the first
+// scheduled traffic poll runs one interval after boot, and a loop that
+// waited out its own first tick would let that poll judge every relay
+// address as a user's location. Kept out of the poll entirely because
+// resolving relay hostnames is DNS, and DNS latency or failure has no
+// business inside the cycle that meters traffic.
+func (a *App) runInfraAddressLoop(ctx context.Context) {
+	if a.traffic == nil {
+		return
+	}
+	refresh := func() {
+		if err := a.operationGate.RunRead(ctx, a.traffic.RefreshInfraAddresses); err != nil && ctx.Err() == nil {
+			log.Warn("infra address refresh failed; keeping the previous set", "err", err)
+		}
+	}
+	refresh()
+	t := time.NewTicker(infraRefreshInterval)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			refresh()
 		}
 	}
 }

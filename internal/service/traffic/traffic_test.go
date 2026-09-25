@@ -2054,3 +2054,25 @@ func (c *liveIPReaderFake) ListLiveClientIPs(context.Context) (map[string][]stri
 	c.liveCalls++
 	return c.liveIPs, c.liveIPsErr
 }
+
+// liveIPDetailReaderFake is what a 3X-UI client really is: BOTH readers,
+// the plain one and the one that keeps node and last-seen time. It counts
+// each separately so a test can prove which one the poll chose — only the
+// detail read can tell a live address from one the upstream merely still
+// remembers.
+type liveIPDetailReaderFake struct {
+	*fakeXUIClient
+	sightings   map[string][]domain.LiveIPSighting
+	detailErr   error
+	detailCalls int
+}
+
+func (c *liveIPDetailReaderFake) ListLiveClientIPs(context.Context) (map[string][]string, error) {
+	c.liveCalls++
+	return c.liveIPs, c.liveIPsErr
+}
+
+func (c *liveIPDetailReaderFake) ListLiveClientIPDetails(context.Context) (map[string][]domain.LiveIPSighting, error) {
+	c.detailCalls++
+	return c.sightings, c.detailErr
+}

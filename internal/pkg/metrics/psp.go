@@ -200,6 +200,61 @@ var (
 		"psp_live_ip_users_incomplete_total",
 		"Users whose fleet-wide live-IP count was a floor this poll because a panel could not be read.",
 	)
+	// What the detector actually JUDGED, as opposed to what the upstream
+	// remembered. psp_user_live_ips is the 30-minute window; this is the
+	// sources live at poll time and left after every exclusion. The gap
+	// between the two is how much of the old number was memory and relays.
+	UserConcurrentIPs = NewHistogram(
+		"psp_user_concurrent_ips",
+		"Concurrent, non-excluded sources per judged user per traffic poll (IPv6 folded by /64). The number the location verdict is drawn from.",
+		"ips", CountBuckets,
+	)
+	// Window addresses that were not live at poll time. A large, steady
+	// value is the commuter effect the freshness rule exists to remove. A
+	// busy 3X-UI fleet reading zero here for hours is worth a look: it is
+	// what a fleet whose timestamps stopped arriving looks like, with every
+	// remembered address judged as live again.
+	LiveIPStaleTotal = NewCounter(
+		"psp_live_ip_stale_total",
+		"Live-IP window addresses judged stale (not seen within the freshness window of their node's newest scan), summed over judged users.",
+	)
+	// Sources set aside before judging, by rule: shared, listed, infra,
+	// internal. Labelled so an operator can tell a relay that is not
+	// registered (shared climbing) from a working exclusion (infra), and
+	// notice an ignore list that has grown to swallow real users (listed).
+	LiveIPExcludedTotal = NewCounterVec(
+		"psp_live_ip_excluded_total",
+		"Live sources excluded from location judging, by reason: shared, listed, infra, internal.",
+		"reason",
+	)
+	// Over-samples by the coarsest tier that was over. The dial for the
+	// default's sensitivity: a fleet whose region line dwarfs the country
+	// one is mostly home-router-plus-phone, and a region tolerance of 2 is
+	// the one-number fix.
+	GeoOverTierTotal = NewCounterVec(
+		"psp_geo_over_tier_total",
+		"Judged samples over the flag tolerances, by the coarsest tier over: country, region, city.",
+		"tier",
+	)
+	// Users NOT re-judged because their last judgement was less than half a
+	// poll interval ago. Only a manual poll can produce one; a steady count
+	// means someone is pressing "poll now" repeatedly, which is exactly the
+	// acceleration this guard refuses to count.
+	GeoSamplesSpacedTotal = NewCounter(
+		"psp_geo_samples_spaced_total",
+		"Users skipped by the location detector because they were judged less than half a traffic interval ago.",
+	)
+	// PSP's own node and relay addresses, excluded as infrastructure. A
+	// drop to zero with nodes configured means the refresh is failing or
+	// every hostname stopped resolving.
+	InfraAddresses = NewGauge(
+		"psp_infra_addresses",
+		"Distinct node and relay addresses currently excluded from location judging as PSP infrastructure.",
+	)
+	InfraAddressResolveFailuresTotal = NewCounter(
+		"psp_infra_address_resolve_failures_total",
+		"Node or relay hostnames that failed to resolve during an infrastructure-address refresh. The previous addresses are kept.",
+	)
 	// P in the cost model.
 	UserClientCount = NewHistogram(
 		"psp_user_client_count",

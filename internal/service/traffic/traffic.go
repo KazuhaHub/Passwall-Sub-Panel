@@ -69,6 +69,18 @@ type Service struct {
 	geo        GeoResolver
 	geoPolicy  domain.GeoAnomalyPolicy
 	geoStreaks GeoStreakStore
+	// infra is PSP's own node and relay addresses (infraaddr.go), refreshed
+	// by the app's loop and only read here. Created in New; nil on a bare
+	// &Service{}, where it simply excludes nothing.
+	infra *infraAddressSet
+	// liveRefs is each upstream node's newest last-seen timestamp from the
+	// previous observation, which is what makes "this node was rescanned
+	// since" decidable (domain.FreshLiveIPs). Guarded by its own mutex
+	// because the scheduled poll and the staff "poll now" run PollOnce
+	// concurrently with nothing else serialising them. Lazily initialised:
+	// tests build &Service{} directly.
+	liveRefsMu sync.Mutex
+	liveRefs   map[domain.NodeRef]int64
 	// configPusher is wired lazily (user.Service is the implementor and
 	// is created before traffic.Service). nil = skip floor refresh on poll.
 	configPusher UserConfigPusher
@@ -130,6 +142,10 @@ func (s *Service) SetConfigPusher(p UserConfigPusher) {
 // repo is wired the shared-client metering pass runs (no-op pre-migration).
 func (s *Service) SetPSPClientRepo(r ports.PSPClientRepo) { s.pspClient = r }
 
+// errPanelNotRead marks a panel whose fetch produced no result at all this
+// cycle, so its users count as unread rather than as idle.
+var errPanelNotRead = errors.New("panel was not read this cycle")
+
 type inboundKey struct {
 	panelID   int64
 	inboundID int
@@ -161,6 +177,11 @@ func New(users ports.UserRepo, ownership ports.OwnershipRepo, traffic ports.Traf
 		// Service-scoped semaphore for async floor pushes — see Service.pushSem doc.
 		// Sized to the same default (8) as paneltz.ResolveMaxPanelConcurrency(0).
 		pushSem: make(chan struct{}, capacity),
+		// Empty until the app's refresh loop first runs. That loop refreshes
+		// at start, well before the first scheduled poll; only a poll that
+		// beats it (a manual one right after boot) judges with no
+		// infrastructure excluded.
+		infra: newInfraAddressSet(),
 	}
 	// Published so a snapshot is self-contained: "peak in-flight 8" only
 	// means saturation if the reader also knows the capacity is 8, and
@@ -443,7 +464,12 @@ func (s *Service) PollOnce(ctx context.Context) (err error) {
 		// different things downstream — err drops the panel's numbers,
 		// liveErr only makes the per-user IP total a floor.
 		liveIPs map[string][]string
-		liveErr error
+		// liveSightings is the same answer from a detail reader, with each
+		// address's node and last-seen time kept; nil from a plain reader.
+		// Only it can tell an address connected now from one the upstream
+		// merely still remembers.
+		liveSightings map[string][]domain.LiveIPSighting
+		liveErr       error
 	}
 	panelData := make(map[int64]panelListResult, len(panelsToFetch))
 	var panelMu sync.Mutex
@@ -458,8 +484,12 @@ func (s *Service) PollOnce(ctx context.Context) (err error) {
 			defer func() { <-panelSem }()
 			c, err := s.pool.Get(pid)
 			if err != nil {
+				// No client means no live-IP read either. Recording the
+				// error on BOTH halves is what makes this panel's users
+				// read as unread (a floor) rather than as a panel that
+				// answered and had nobody online.
 				panelMu.Lock()
-				panelData[pid] = panelListResult{err: err}
+				panelData[pid] = panelListResult{err: err, liveErr: err}
 				panelMu.Unlock()
 				return
 			}
@@ -481,27 +511,36 @@ func (s *Service) PollOnce(ctx context.Context) (err error) {
 			// talking to, and the by-guid endpoint returns the whole panel
 			// in that one call regardless of user count.
 			//
-			// Optional capability. An adapter that does not implement it
-			// (S-UI has no equivalent) leaves liveIPs nil with no error,
-			// and the aggregate counts its users as unread — never as
-			// zero, which would read as "nobody is connected".
+			// Optional capability, best reader first. The detail reader
+			// (3X-UI) keeps each address's node and last-seen time, which
+			// is what separates "connected now" from "still remembered";
+			// the plain reader (PSP-native nodes) has no timestamps, so its
+			// addresses all read as live. An adapter with neither (S-UI
+			// has no equivalent) is counted as unread — never as zero,
+			// which would read as "nobody is connected".
 			var live map[string][]string
+			var sightings map[string][]domain.LiveIPSighting
 			var liveErr error
-			if reader, ok := c.(ports.LiveIPReader); ok {
+			readable := true
+			switch reader := c.(type) {
+			case ports.LiveIPDetailReader:
+				sightings, liveErr = reader.ListLiveClientIPDetails(ctx)
+			case ports.LiveIPReader:
 				live, liveErr = reader.ListLiveClientIPs(ctx)
-				if liveErr != nil {
-					// Warn, do not fail the panel: the traffic numbers
-					// above are good and are what this poll exists for.
-					log.Warn("traffic poll: live client IPs unavailable for this panel",
-						"panel_id", pid, "err", liveErr)
-				}
-			} else {
+			default:
+				readable = false
 				liveErr = ports.ErrPanelCapabilityUnsupported
+			}
+			if readable && liveErr != nil {
+				// Warn, do not fail the panel: the traffic numbers
+				// above are good and are what this poll exists for.
+				log.Warn("traffic poll: live client IPs unavailable for this panel",
+					"panel_id", pid, "err", liveErr)
 			}
 			panelMu.Lock()
 			panelData[pid] = panelListResult{
 				stats: stats, counters: counters, err: lerr,
-				liveIPs: live, liveErr: liveErr,
+				liveIPs: live, liveSightings: sightings, liveErr: liveErr,
 			}
 			panelMu.Unlock()
 		}(panelID)
@@ -514,15 +553,45 @@ func (s *Service) PollOnce(ctx context.Context) (err error) {
 	metrics.PollPanels.Observe(float64(len(panelsToFetch)))
 	mark("panel_fetch", "Phase 1 parallel ListInboundsSlim")
 
-	// Phase 1b — fold the live-IP reads into one row per USER.
+	// Phase 1b — fold the live-IP reads into one row per USER and judge it.
 	//
-	// Pure in-memory: the reads already happened above, inside the slot each
-	// panel goroutine held. Observation only for now; nothing here changes a
-	// user's state or writes to a panel.
-	s.observeLiveIPs(ctx, users, sharedClients, func(pid int64) (map[string][]string, error) {
-		d := panelData[pid]
-		return d.liveIPs, d.liveErr
-	}, panelsToFetch)
+	// No panel I/O: the reads already happened above, inside the slot each
+	// panel goroutine held. What runs here is in memory plus one streak load
+	// and one save (and, per group, a settings read). Only concurrent
+	// addresses that are not infrastructure are judged, and a user judged
+	// less than half an interval ago is not judged again (see
+	// observeLiveIPs). Observation only; nothing here changes a user's state
+	// or writes to a panel.
+	//
+	// minSpacing is half the configured interval: the scheduled polls are a
+	// whole interval apart and always count, while a manual poll landing
+	// right after one does not. It is 0 only when no settings are wired
+	// (the loader defaults the interval to 5 minutes), which disables it.
+	pc := s.newGeoPolicyCache(ctx, users)
+	s.observeLiveIPs(ctx, liveIPInput{
+		users:    users,
+		clients:  sharedClients,
+		panelIDs: panelsToFetch,
+		read: func(pid int64) domain.PanelLiveIPs {
+			d, ok := panelData[pid]
+			if !ok {
+				// The fetch goroutine ended without writing a result, so
+				// nothing was read. Its zero value has no error and would
+				// read exactly like a panel that answered "nobody online".
+				return domain.PanelLiveIPs{PanelID: pid, Err: errPanelNotRead}
+			}
+			byEmail := d.liveIPs
+			if d.liveSightings != nil {
+				// One flattening rule for both readers, so the window
+				// count cannot drift between them.
+				byEmail = domain.LiveIPsOf(d.liveSightings)
+			}
+			return domain.PanelLiveIPs{PanelID: pid, ByEmail: byEmail, Sightings: d.liveSightings, Err: d.liveErr}
+		},
+		ignore:     pollCfg.GeoAnomalyIgnoreAddresses,
+		policies:   pc,
+		minSpacing: time.Duration(pollCfg.CronTrafficPullMinutes) * time.Minute / 2,
+	})
 	mark("live_ips", "Phase 1b per-user live-IP aggregation")
 
 	// Phase 2 — per-panel sequential processing. ListInbounds results are
