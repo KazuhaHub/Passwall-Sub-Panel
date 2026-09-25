@@ -103,21 +103,34 @@ func TestEmitSingBoxSUIModernOutbounds(t *testing.T) {
 	}
 }
 
-// TestBuildSingBoxRouteRules_NetworkUDP pins the default UDP PASS translation.
-// sing-box has no PASS outbound, so the equivalent is to omit the catch-all
-// UDP route and let later domain/region rules continue matching.
+// TestBuildSingBoxRouteRules_NetworkUDP pins the NETWORK,udp translation: it
+// becomes a sing-box route rule matching network=udp that routes to the named
+// selector (the 🎮 UDP控制 catch-all). Without the NETWORK case the rule would
+// be silently dropped for sing-box. The selector defaults to direct, the same
+// default Mihomo gets.
 func TestBuildSingBoxRouteRules_NetworkUDP(t *testing.T) {
 	raw := "- NETWORK,udp,🎮 UDP控制\n- MATCH,DIRECT\n"
 	passThrough := singBoxPassThroughProxyGroups(nil, nil, raw)
-	rules, final := buildSingBoxRouteRulesWithPassThrough(passThrough, raw)
-	if len(rules) != 1 || rules[0]["action"] != "sniff" || final != "direct" {
-		t.Fatalf("default UDP PASS must continue matching: rules=%#v final=%q", rules, final)
+	rules, _ := buildSingBoxRouteRulesWithPassThrough(passThrough, raw)
+	if len(rules) != 2 {
+		t.Fatalf("want sniff + udp rule, got %#v", rules)
+	}
+	if rules[1]["action"] != "route" || rules[1]["outbound"] != "🎮 UDP控制" || rules[1]["network"] != "udp" {
+		t.Fatalf("invalid general UDP route: %#v", rules[1])
 	}
 	selectors := buildSingBoxSelectorOutboundsWithMembers(raw, nil, nil, nil)
+	var udpSelector map[string]any
 	for _, selector := range selectors {
 		if selector["tag"] == "🎮 UDP控制" {
-			t.Fatalf("PASS-only compatibility selector must not be emitted: %#v", selectors)
+			udpSelector = selector
 		}
+	}
+	if udpSelector == nil {
+		t.Fatalf("UDP selector missing: %#v", selectors)
+	}
+	assertMemberStrings(t, udpSelector["outbounds"].([]string), []string{"direct", "🚀 节点选择", "block"})
+	if udpSelector["default"] != "direct" {
+		t.Fatalf("UDP selector default = %#v, want direct", udpSelector["default"])
 	}
 }
 
@@ -129,8 +142,8 @@ func TestBuildSingBoxRouteRules_QUICAndUDPStayIndependent(t *testing.T) {
 `
 	passThrough := singBoxPassThroughProxyGroups(nil, nil, raw)
 	rules, _ := buildSingBoxRouteRulesWithPassThrough(passThrough, raw)
-	if len(rules) != 2 {
-		t.Fatalf("want sniff + rejected-by-default QUIC; UDP PASS must be omitted, got %#v", rules)
+	if len(rules) != 3 {
+		t.Fatalf("want sniff + quic + udp rules, got %#v", rules)
 	}
 	quic := rules[1]
 	if quic["action"] != "route" || quic["outbound"] != "⚡ QUIC控制" || quic["network"] != "udp" {
@@ -140,21 +153,39 @@ func TestBuildSingBoxRouteRules_QUICAndUDPStayIndependent(t *testing.T) {
 	if !ok || len(ports) != 1 || ports[0] != 443 {
 		t.Fatalf("QUIC route port = %#v, want [443]", quic["port"])
 	}
-	selectors := buildSingBoxSelectorOutboundsWithMembers(raw, nil, nil, nil)
-	quicSelectorFound := false
-	for _, selector := range selectors {
-		if selector["tag"] == "⚡ QUIC控制" {
-			quicSelectorFound = true
-			if selector["default"] != "block" {
-				t.Fatalf("QUIC selector default = %#v, want block", selector["default"])
-			}
-		}
-		if selector["tag"] == "🎮 UDP控制" {
-			t.Fatalf("default PASS UDP selector must not be emitted: %#v", selectors)
-		}
+	if rules[2]["outbound"] != "🎮 UDP控制" || rules[2]["network"] != "udp" {
+		t.Fatalf("invalid general UDP route: %#v", rules[2])
 	}
-	if !quicSelectorFound {
-		t.Fatalf("QUIC selector missing: %#v", selectors)
+	defaults := map[string]any{}
+	for _, selector := range buildSingBoxSelectorOutboundsWithMembers(raw, nil, nil, nil) {
+		defaults[selector["tag"].(string)] = selector["default"]
+	}
+	if defaults["⚡ QUIC控制"] != "🎮 UDP控制" || defaults["🎮 UDP控制"] != "direct" {
+		t.Fatalf("QUIC must follow UDP and UDP must default to direct: %#v", defaults)
+	}
+}
+
+// QUIC follows UDP by default, so an administrator who switches UDP to PASS
+// carries QUIC along. sing-box has to omit both routes and both selectors:
+// keeping the QUIC selector would leave its default pointing at a UDP
+// selector that is never emitted.
+func TestSingBoxQUICFollowsAdministratorPassUDP(t *testing.T) {
+	raw := "- AND,((NETWORK,UDP),(DST-PORT,443)),⚡ QUIC控制\n- NETWORK,udp,🎮 UDP控制\n- MATCH,🚀 节点选择\n"
+	members := map[string][]domain.ProxyGroupMember{
+		"🎮 UDP控制": {{Kind: "builtin", Value: "PASS"}, {Kind: "builtin", Value: "DIRECT"}},
+	}
+	passThrough := singBoxPassThroughProxyGroups(nil, members, raw)
+	if !passThrough["🎮 UDP控制"] || !passThrough["⚡ QUIC控制"] {
+		t.Fatalf("PASS UDP must carry the following QUIC selector: %#v", passThrough)
+	}
+	rules, _ := buildSingBoxRouteRulesWithPassThrough(passThrough, raw)
+	if len(rules) != 1 || rules[0]["action"] != "sniff" {
+		t.Fatalf("PASS UDP and QUIC routes must continue matching: %#v", rules)
+	}
+	for _, selector := range buildSingBoxSelectorOutboundsWithMembers(raw, nil, nil, members) {
+		if selector["tag"] == "🎮 UDP控制" || selector["tag"] == "⚡ QUIC控制" {
+			t.Fatalf("PASS-resolving selector emitted: %#v", selector)
+		}
 	}
 }
 
@@ -171,7 +202,7 @@ func TestSingBoxConfiguredUDPDefaultStillRoutesToSelector(t *testing.T) {
 	}
 	passThrough := singBoxPassThroughProxyGroups(items, members, raw)
 	if passThrough["🎮 UDP控制"] {
-		t.Fatal("administrator-selected node must replace the default PASS behavior")
+		t.Fatal("a node ahead of PASS must keep the UDP route")
 	}
 	rules, _ := buildSingBoxRouteRulesWithPassThrough(passThrough, raw)
 	if len(rules) != 2 || rules[1]["outbound"] != "🎮 UDP控制" || rules[1]["network"] != "udp" {
@@ -193,6 +224,7 @@ func TestSingBoxNestedPassDefaultDoesNotLeaveDanglingSelector(t *testing.T) {
 	raw := "- NETWORK,udp,UDP wrapper\n- DOMAIN,udp-control.example,🎮 UDP控制\n- MATCH,DIRECT\n"
 	members := map[string][]domain.ProxyGroupMember{
 		"UDP wrapper": {{Kind: "proxy_group", Value: "🎮 UDP控制"}, {Kind: "builtin", Value: "DIRECT"}},
+		"🎮 UDP控制":     {{Kind: "builtin", Value: "PASS"}, {Kind: "builtin", Value: "DIRECT"}},
 	}
 	passThrough := singBoxPassThroughProxyGroups(nil, members, raw)
 	if !passThrough["UDP wrapper"] || !passThrough["🎮 UDP控制"] {

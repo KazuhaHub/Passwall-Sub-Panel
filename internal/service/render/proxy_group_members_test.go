@@ -165,6 +165,37 @@ func TestInspectProxyGroupsRejectsCycleAndWarnsWithoutRemaining(t *testing.T) {
 	}
 }
 
+// A group left on its defaults still references other groups, and those edges
+// are rendered just like configured ones. ⚡ QUIC控制 delegates to 🎮 UDP控制 by
+// default, so pointing 🎮 UDP控制 back at ⚡ QUIC控制 forms a loop that both
+// Mihomo and sing-box refuse to load; the validator has to see it.
+func TestInspectProxyGroupsRejectsCycleThroughDefaultMembers(t *testing.T) {
+	rules := "- AND,((NETWORK,UDP),(DST-PORT,443)),⚡ QUIC控制\n- NETWORK,udp,🎮 UDP控制\n- MATCH,🚀 节点选择\n"
+	configs := map[string][]domain.ProxyGroupMember{
+		"🎮 UDP控制": {{Kind: "proxy_group", Value: "⚡ QUIC控制"}, {Kind: "builtin", Value: "DIRECT"}},
+	}
+	inspection := InspectProxyGroups(rules, configs, nil, nil)
+	hasCycle := false
+	for _, issue := range inspection.Issues {
+		if issue.Level == "error" && issue.Code == "cycle" {
+			hasCycle = true
+		}
+	}
+	if !hasCycle {
+		t.Fatalf("expected cycle error through the QUIC default: %#v", inspection.Issues)
+	}
+
+	// The shipped defaults alone must stay loop-free, or every unconfigured
+	// rule set would now fail validation.
+	for _, content := range []string{rules, readTemplateContent(t, "../../seed/files/rulesets/default-rules.yaml")} {
+		for _, issue := range InspectProxyGroups(content, nil, nil, nil).Issues {
+			if issue.Code == "cycle" {
+				t.Fatalf("defaults must not form a cycle: %#v", issue)
+			}
+		}
+	}
+}
+
 func TestInspectProxyGroupsWarnsWhenDynamicSetHasNoCurrentMatch(t *testing.T) {
 	configs := map[string][]domain.ProxyGroupMember{
 		"A": {{Kind: "node_set", Value: "region:CN"}, {Kind: "node_set", Value: "remaining"}},

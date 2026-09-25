@@ -17,6 +17,24 @@ export type PanelType = '3xui' | 'sui' | 'psp'
 export type NodeUpdateChannel = 'stable' | 'beta'
 export type NativeCoreEngine = 'xray' | 'sing-box'
 export type NativeCompatibilityStatus = 'unknown' | 'compatible' | 'limited' | 'incompatible'
+
+/**
+ * The stable code behind NativeCompatibilityStatus, mirroring
+ * internal/pkg/compatadmission.Reason.
+ *
+ * The status alone folds distinct situations together — 'unknown' is both "never
+ * installed" and "the last report is too old to act on", and before the refusal
+ * columns existed it was also "this panel is refusing every report". The backend
+ * has always sent this field; nothing read it.
+ */
+export type NativeCompatibilityReason =
+  | 'allowed'
+  | 'unverified'
+  | 'observation-stale'
+  | 'protocol-incompatible'
+  | 'capability-missing'
+  | 'known-bad'
+  | 'report-refused'
 export type PanelCapability =
   | 'inbound.read' | 'inbound.write'
   | 'inbound.create' | 'inbound.update' | 'inbound.delete' | 'inbound.enable'
@@ -59,6 +77,19 @@ export interface Server {
   node_upgrade_ready?: boolean
   node_missing_capabilities?: string[]
   node_protocol_observed_at?: string
+  node_compatibility_reason?: NativeCompatibilityReason
+  /**
+   * A report this panel is currently REFUSING. Deliberately separate from
+   * node_protocol_version, which keeps meaning "the last generation that was
+   * accepted" — both halves are shown, so an operator sees "last verified 1, now
+   * reporting 2, refused since ...".
+   */
+  node_refused_protocol_version?: number
+  node_refused_since?: string
+  node_refused_at?: string
+  /** The generations THIS PANEL declares it speaks, so a refusal explains itself. */
+  node_reviewed_protocol_min?: number
+  node_reviewed_protocol_max?: number
   version_checked_at?: string
   compat_status?: CompatStatus
   compat_message?: string
@@ -502,6 +533,8 @@ export interface UpgradeOption {
   target_version?: string
   target_pinnable: boolean
   reason_codes: string[]
+  /** The operator-facing sentence behind a refusal, when the decision produced one. */
+  detail?: string
   targets?: AgentUpgradeTarget[]
 }
 

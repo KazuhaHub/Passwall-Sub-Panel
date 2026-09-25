@@ -17,6 +17,8 @@ export function NativeAgentUpgradeDialog({ server, onClose }: { server: Server |
   // request along one of those is refused, which teaches the operator to distrust
   // the list rather than the request.
   const [targets, setTargets] = useState<string[] | undefined>(undefined)
+  // The server's own refusal, when it has one. Empty means it did not refuse.
+  const [blocked, setBlocked] = useState('')
   const key = useRef('')
   const requestController = useRef<AbortController | null>(null)
   // THE NODE'S OWN RECORD OF ITSELF, shown as-is and never parsed here. The node
@@ -32,7 +34,7 @@ export function NativeAgentUpgradeDialog({ server, onClose }: { server: Server |
 
   useEffect(() => {
     requestController.current?.abort()
-    setVersion(''); setTask(null); setBusy(false); setError(''); key.current = ''
+    setVersion(''); setTask(null); setBusy(false); setError(''); setBlocked(''); key.current = ''
     return () => requestController.current?.abort()
   }, [server?.id, server?.update_channel])
 
@@ -50,8 +52,20 @@ export function NativeAgentUpgradeDialog({ server, onClose }: { server: Server |
         // the remedy a document they had no reason to know about. What the panel
         // offers is what the panel can see is published.
         setTargets((option.targets ?? []).map(target => target.version))
+        // THE SERVER'S REFUSAL IS SHOWN INSTEAD OF A MENU. A node that cannot be
+        // upgraded at all — most often because its own version is not a canonical
+        // release, so it never registered the upgrade handler and never advertised
+        // the capability — used to be offered the whole release list and refused
+        // only after the operator had chosen from it.
+        const refusal = option.state === 'blocked' ? (option.detail || t('admin:servers.agent_upgrade.blocked_fallback')) : ''
+        setBlocked(refusal)
+        // THE SELECTOR MAY HAVE AUTO-SELECTED ALREADY. It resolves from its own
+        // catalog fetch, which can land before this one, so a refusal that only
+        // hid the selector would leave a version chosen and Confirm live next to
+        // the alert explaining why it cannot be done.
+        if (refusal) setVersion('')
       })
-      .catch(() => { if (live) setTargets(undefined) })
+      .catch(() => { if (live) { setTargets(undefined); setBlocked('') } })
     return () => { live = false }
   }, [server?.id])
 
@@ -93,10 +107,12 @@ export function NativeAgentUpgradeDialog({ server, onClose }: { server: Server |
         <Alert severity="warning">{t('admin:servers.agent_upgrade.warning')}</Alert>
         <Typography variant="body2">{t('admin:servers.agent_upgrade.requirements')}</Typography>
         <TextField label={t('admin:servers.agent_upgrade.current')} value={expected} slotProps={{ input: { readOnly: true } }} />
-        <NodeReleaseSelector key={server?.id} enabled={!!server} selection={{ method: 'linux', os: 'linux', arch: 'amd64' }}
+        {blocked
+          ? <Alert severity="warning">{blocked}</Alert>
+          : <NodeReleaseSelector key={server?.id} enabled={!!server} selection={{ method: 'linux', os: 'linux', arch: 'amd64' }}
           initialChannel={server?.update_channel === 'beta' ? 'testing' : 'stable'} value={version}
           onChange={next => { setVersion(next); if (!error) key.current = '' }} autoSelectLatest context="upgrade"
-          newerThan={exact(expected) ? expected : undefined} targets={targets} disabled={busy || !!task || !!error} />
+          newerThan={expected} targets={targets} disabled={busy || !!task || !!error} />}
         <Typography variant="body2">{t('admin:servers.agent_upgrade.version_hint')}</Typography>
         {error && <Alert severity="error">{error}</Alert>}
         {task && <>
@@ -118,7 +134,7 @@ export function NativeAgentUpgradeDialog({ server, onClose }: { server: Server |
     </DialogContent>
     <DialogActions>
       <Button onClick={onClose} disabled={busy}>{t('common:actions.close')}</Button>
-      {!task && <Button variant="contained" onClick={() => void submit()} disabled={busy || !exact(version.trim()) || version.trim() === expected}>
+      {!task && !blocked && <Button variant="contained" onClick={() => void submit()} disabled={busy || !exact(version.trim()) || version.trim() === expected}>
         {busy && <CircularProgress size={16} sx={{ mr: 1 }} />}{t(error ? 'admin:servers.agent_upgrade.retry' : 'admin:servers.agent_upgrade.confirm')}
       </Button>}
     </DialogActions>

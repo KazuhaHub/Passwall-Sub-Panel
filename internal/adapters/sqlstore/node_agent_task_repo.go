@@ -881,22 +881,6 @@ func validSHA256Hex(value string) bool {
 	return err == nil
 }
 
-func uniqueNonEmptyStrings(values []string) []string {
-	seen := make(map[string]struct{}, len(values))
-	out := make([]string, 0, len(values))
-	for _, value := range values {
-		if value == "" {
-			continue
-		}
-		if _, ok := seen[value]; ok {
-			continue
-		}
-		seen[value] = struct{}{}
-		out = append(out, value)
-	}
-	return out
-}
-
 func cloneStringPointer(value *string) *string {
 	if value == nil {
 		return nil

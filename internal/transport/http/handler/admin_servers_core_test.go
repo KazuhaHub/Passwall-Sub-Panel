@@ -361,3 +361,87 @@ func TestNativeUpgradeReadinessFollowsTheDecision(t *testing.T) {
 		t.Fatalf("a peer with no upgrade capability must not read ready: %+v", got)
 	}
 }
+
+// A REFUSED NODE IS NOT AN UNKNOWN NODE, and before this it was rendered as one.
+//
+// The panel refuses a report whose generation it has not reviewed, at the wire
+// boundary, before anything is persisted. The observation columns therefore keep
+// naming the last generation that was ACCEPTED, so the row went on reporting
+// "compatible" with the remote-upgrade action lit while every poll was being
+// answered 400 — and once the observation aged past the window it became
+// "unknown", which is the bucket a never-installed node sits in. Three different
+// situations, one appearance.
+func TestRefusedNodeIsDistinguishableFromUnknownAndCompatible(t *testing.T) {
+	panel := &domain.XUIPanel{ID: 11, Kind: domain.PanelKindPSP, Name: "native", PanelVersion: "v0.2.0"}
+	handler := &AdminServersHandler{
+		pool:        fakeWebCertPool{client: &nativeCoreClientStub{}},
+		coreCatalog: corefixtures.Static{},
+	}
+	policy := nodecompat.Policy(nodecompat.DefaultObservationAge())
+	accepted := time.Date(2026, 9, 20, 10, 0, 0, 0, time.UTC)
+	refusedFirst := time.Date(2026, 9, 21, 9, 0, 0, 0, time.UTC)
+	refusedLast := time.Date(2026, 9, 21, 12, 0, 0, 0, time.UTC)
+	ahead := nodeprotocol.ProtocolVersion1 + 1
+
+	// The case that used to read "compatible, upgrade ready": a good observation
+	// frozen behind a refusal that is more recent than it.
+	refusedAfterGoodRun := &domain.NodeAgent{
+		ObservedProtocolVersion: nodeprotocol.ProtocolVersion1,
+		ObservedCapabilities:    nodeprotocol.AgentUpgradeCapabilities(),
+		ProtocolObservedAt:      &accepted,
+		RefusedProtocolVersion:  &ahead,
+		RefusedReason:           domain.NodeRefusalProtocolGeneration,
+		RefusedFirstAt:          &refusedFirst,
+		RefusedAt:               &refusedLast,
+	}
+	got := handler.toServerDTOWithAgent(panel, refusedAfterGoodRun, policy)
+	if got.NodeCompatibility != "incompatible" || got.NodeUpgradeReady {
+		t.Fatalf("a refused node must not read as compatible or upgradeable: %q ready=%v",
+			got.NodeCompatibility, got.NodeUpgradeReady)
+	}
+	if got.NodeRefusedProtocolVersion == nil || *got.NodeRefusedProtocolVersion != ahead {
+		t.Fatalf("the refused generation is what an operator needs to see: %+v", got.NodeRefusedProtocolVersion)
+	}
+	// BOTH HALVES SURVIVE. The last accepted generation is still reported, because
+	// compat-policy 3.2 says losing contact must not erase the last valid
+	// observation — this is that rule being visible rather than merely true.
+	if got.NodeProtocolVersion == nil || *got.NodeProtocolVersion != nodeprotocol.ProtocolVersion1 {
+		t.Fatalf("the last accepted generation was lost: %+v", got.NodeProtocolVersion)
+	}
+	if got.NodeRefusedSince == nil || !got.NodeRefusedSince.Equal(refusedFirst) {
+		t.Fatalf("since-when must be the FIRST refusal, not the latest: %+v", got.NodeRefusedSince)
+	}
+
+	// A node that has never been accepted and is being refused right now is also
+	// not "unknown": that is the never-installed bucket, and telling an operator
+	// to wait for a check-in that is already happening is the defect itself.
+	neverAccepted := &domain.NodeAgent{
+		RefusedProtocolVersion: &ahead,
+		RefusedReason:          domain.NodeRefusalProtocolGeneration,
+		RefusedFirstAt:         &refusedFirst,
+		RefusedAt:              &refusedLast,
+	}
+	if got := handler.toServerDTOWithAgent(panel, neverAccepted, policy); got.NodeCompatibility != "incompatible" {
+		t.Fatalf("a never-accepted but actively refused node read as %q", got.NodeCompatibility)
+	}
+
+	// A refusal OLDER than the last accepted report means the node recovered. The
+	// columns are cleared on acceptance, and the comparison holds anyway.
+	recovered := &domain.NodeAgent{
+		ObservedProtocolVersion: nodeprotocol.ProtocolVersion1,
+		ObservedCapabilities:    nodeprotocol.AgentUpgradeCapabilities(),
+		ProtocolObservedAt:      &refusedLast,
+		RefusedProtocolVersion:  &ahead,
+		RefusedReason:           domain.NodeRefusalProtocolGeneration,
+		RefusedFirstAt:          &refusedFirst,
+		RefusedAt:               &accepted,
+	}
+	if got := handler.toServerDTOWithAgent(panel, recovered, policy); got.NodeCompatibility != "compatible" || !got.NodeUpgradeReady {
+		t.Fatalf("a recovered node stayed marked: %q ready=%v", got.NodeCompatibility, got.NodeUpgradeReady)
+	}
+
+	// And an agent nothing is known about still reads unknown.
+	if got := handler.toServerDTOWithAgent(panel, &domain.NodeAgent{}, policy); got.NodeCompatibility != "unknown" {
+		t.Fatalf("a silent agent read as %q", got.NodeCompatibility)
+	}
+}

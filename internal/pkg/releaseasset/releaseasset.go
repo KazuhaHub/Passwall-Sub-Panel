@@ -191,7 +191,7 @@ func (s *Source) fetch(ctx context.Context, tag, asset string) ([]byte, error) {
 // is trusted. The signature is canonical base64 with an optional trailing newline.
 func VerifyManifest(key ed25519.PublicKey, manifest, encodedSignature []byte) error {
 	trimmed := bytes.TrimSuffix(encodedSignature, []byte("\n"))
-	if len(trimmed) == 0 || bytes.IndexAny(trimmed, " \t\r\n") >= 0 {
+	if len(trimmed) == 0 || bytes.ContainsAny(trimmed, " \t\r\n") {
 		return fmt.Errorf("%w: the signature has invalid framing", ErrUntrusted)
 	}
 	signature, err := base64.StdEncoding.Strict().DecodeString(string(trimmed))

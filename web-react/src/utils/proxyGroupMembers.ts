@@ -7,8 +7,8 @@ export const DEFAULT_PROXY_GROUP_TOLERANCE = 50
 export const DEFAULT_LOAD_BALANCE_STRATEGY: LoadBalanceStrategy = 'consistent-hashing'
 export const DEFAULT_PROXY_GROUP_ORDER = [
   '🚀 节点选择',
-  '⚡ QUIC控制',
   '🎮 UDP控制',
+  '⚡ QUIC控制',
   '🇨🇳 中国大陆',
   '💬 Ai平台',
   '📹 油管视频',

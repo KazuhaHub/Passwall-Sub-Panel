@@ -22,7 +22,9 @@
     "online": "Online",
     "offline": "Offline",
     "load": "Load",
-    "delta_vs_yesterday": "vs. yesterday"
+    "delta_vs_yesterday": "vs. yesterday",
+    "working": "Working…",
+    "loading": "Loading…"
   },
   "search": {
     "placeholder": "Search…"

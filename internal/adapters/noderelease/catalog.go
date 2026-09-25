@@ -36,6 +36,7 @@ const (
 	releaseBase     = "https://github.com/KazuhaHub/Passwall-Node/releases/"
 )
 
+//lint:ignore ST1005 "Node" is the product's name, not a capitalised sentence.
 var errUnavailable = errors.New("Node release source is unavailable")
 
 type Options struct {
@@ -302,16 +303,42 @@ func candidateFor(released string, release githubRelease) candidateRelease {
 // maxNotesRunes bounds what the dialog renders. The release body is written for a
 // release page — headings, contributor links, a full changelog — and the dialog
 // shows it under a version selector, so it is truncated rather than trusted to be
-// short.
+// short. The bound includes the truncation marker.
 const maxNotesRunes = 600
 
+// notesTruncationMarker closes a truncated body as a paragraph of its own, so it
+// cannot fuse onto a list item or heading when the dialog renders the notes as
+// Markdown.
+const notesTruncationMarker = "\n\n…"
+
+// releaseNotes returns the body, or its longest prefix that ends on a LINE
+// BOUNDARY and fits the bound with the marker. The dialog renders Markdown, and a
+// generated changelog is one pull request per line, each ending in its URL: a cut
+// at a fixed rune count lands inside one of those URLs, and the renderer links the
+// truncated address. With no line break in the back half of the bound it falls
+// back to the last space there, which still never splits a URL; only a body with
+// neither is cut hard.
+//
+// THE BACK HALF, NOT ANYWHERE. A hand-written body is often a short heading, a
+// blank line and one long paragraph, and its only line break is then the last
+// one in the window: cutting there kept the heading and dropped the paragraph. A
+// boundary is taken only when it keeps at least half of what fits.
 func releaseNotes(body string) string {
 	trimmed := strings.TrimSpace(body)
 	runes := []rune(trimmed)
 	if len(runes) <= maxNotesRunes {
 		return trimmed
 	}
-	return strings.TrimSpace(string(runes[:maxNotesRunes])) + "…"
+	window := string(runes[:maxNotesRunes-len([]rune(notesTruncationMarker))])
+	floor := len(window) / 2
+	cut := strings.LastIndex(window, "\n")
+	if cut < floor {
+		cut = strings.LastIndexAny(window, " \t\n")
+	}
+	if cut >= floor {
+		window = window[:cut]
+	}
+	return strings.TrimSpace(window) + notesTruncationMarker
 }
 
 func packageName(version string, platform ports.NodeReleasePlatform) string {

@@ -55,6 +55,7 @@ import { useAppearanceStore } from '@/stores/appearance'
 import { setLanguage, currentLanguage } from '@/i18n'
 import { DEFAULT_PRESET_HEX, type AppLanguage } from '@/theme'
 import { getVersion, type VersionInfo } from '@/api/version'
+import { prefetchView, prefetchViewsWhenIdle } from '@/router/prefetch'
 
 // Sidebar width is fixed regardless of density: the compact setting tightens
 // page content (tables, forms, dialogs) but the nav rail keeps its full width
@@ -199,6 +200,16 @@ export default function AdminLayout() {
     }
   }, [siteLoaded, siteThemeColor])
 
+  // WARM THE VIEWS THIS ROLE CAN OPEN while the browser is idle, one chunk at a
+  // time, so a later click renders at once instead of waiting on the network.
+  // The items under the pointer or focus are warmed immediately (see the nav
+  // buttons below); this covers the ones nobody has pointed at yet.
+  useEffect(() => prefetchViewsWhenIdle(
+    ADMIN_NAV.flatMap(section => section.items)
+      .filter(item => !item.adminOnly || role === 'admin')
+      .map(item => item.to),
+  ), [role])
+
   function handleNav(to: string) {
     navigate(to)
     if (isMobile) setMobileOpen(false)
@@ -288,6 +299,11 @@ export default function AdminLayout() {
                   <ListItemButton
                     key={item.to}
                     onClick={() => handleNav(item.to)}
+                    // Intent precedes the click by a few hundred milliseconds;
+                    // start fetching the view's chunk then.
+                    onMouseEnter={() => prefetchView(item.to)}
+                    onFocus={() => prefetchView(item.to)}
+                    onTouchStart={() => prefetchView(item.to)}
                     sx={{
                       borderRadius: railCollapsed ? 2 : 9999,
                       minHeight: 44,

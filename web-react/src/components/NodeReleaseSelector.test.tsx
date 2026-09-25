@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { useState } from 'react'
 import { act, fireEvent, screen, waitFor } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { api, installReads, mount } from '@/test/adminSaveHarness'
 import type { NodeRelease, NodeReleaseCatalog, NodeReleaseChannel } from '@/api/nodeReleases'
 import type { NativeInstallationSelection } from '@/api/servers'
@@ -64,12 +64,17 @@ async function choose(label: string, option: string) {
 }
 
 const chooseVersion = (version: string) => choose('admin:servers.native.agent_version', version)
+// Publication details are folded on every surface; open them before reading them.
+const openReview = () => fireEvent.click(screen.getByRole('button', { name: 'admin:servers.native.release_review' }))
 const chooseTesting = () => choose('admin:servers.native.release_channel', 'admin:servers.native.release_testing')
 
 describe('Passwall Node release selection', () => {
-  it('folds publication notes behind an accessible summary only on the compact installation surface', async () => {
+  it.each([
+    { surface: 'compact installation', compact: true },
+    { surface: 'upgrade', compact: false },
+  ])('folds publication notes behind an accessible summary on the $surface surface', async ({ compact }) => {
     reads([stable])
-    mount(<Controlled compact />)
+    mount(<Controlled compact={compact} />)
     await chooseVersion(stable.version)
     expect(screen.queryByText(stable.notes)).toBeNull()
     expect(screen.queryByRole('link', { name: 'admin:servers.native.release_details' })).toBeNull()
@@ -134,18 +139,67 @@ describe('Passwall Node release selection', () => {
     expect(api.post).not.toHaveBeenCalled()
   })
 
-  it('requires an exact version choice and displays the official link, date, and plain-text compatibility notes', async () => {
-    reads([{ ...stable, notes: '<script>alert("not HTML")</script>\nReviewed contract.' }])
-    mount(<Controlled />)
+  it('requires an exact version choice and displays the official link, date, and notes without raw HTML', async () => {
+    reads([{ ...stable, notes: '<script>alert("not HTML")</script>\n\nReviewed contract.' }])
+    const view = mount(<Controlled />)
     await waitFor(() => expect(screen.queryByRole('status')).toBeNull())
     expect(selected()).toBe('')
     await chooseVersion(stable.version)
     expect(selected()).toBe(stable.version)
-    expect(screen.getByText(/<script>alert/).querySelector('script')).toBeNull()
+    openReview()
+    expect(await screen.findByText('Reviewed contract.')).toBeTruthy()
+    // Raw HTML in a release body is dropped, neither executed nor shown as markup.
+    expect(view.container.querySelector('script')).toBeNull()
+    expect(screen.queryByText(/alert\(/)).toBeNull()
     const link = screen.getByRole('link', { name: 'admin:servers.native.release_details' })
     expect(link.getAttribute('href')).toBe(stable.release_url)
     expect(link.getAttribute('rel')).toBe('noopener noreferrer')
     expect(screen.getByText('admin:servers.native.release_published')).toBeTruthy()
+  })
+
+  // THE NOTES ARE A GITHUB RELEASE BODY, which is Markdown: GitHub's generated
+  // changelog is a heading, one bulleted pull request per line, and a bold
+  // "Full Changelog" line, with bare URLs that GitHub autolinks. Shown as text,
+  // the operator reads "## What's Changed" and asterisks.
+  it('renders the release body as Markdown with safe links and no remote images', async () => {
+    reads([{ ...stable, notes: [
+      "## What's Changed",
+      '* The example compose grants FOWNER by @KKazuhaK in https://github.com/KazuhaHub/Passwall-Node/pull/58',
+      '* Root must not hand the runtime directory away by @KKazuhaK in https://github.com/KazuhaHub/Passwall-Node/pull/59',
+      '',
+      '**Full Changelog**: https://github.com/KazuhaHub/Passwall-Node/compare/v4.0.1.4...v4.0.1.5',
+      '',
+      '[not a link](javascript:alert(1))',
+      '',
+      '![tracking pixel](https://tracker.example/pixel.png)',
+    ].join('\n') }])
+    const view = mount(<Controlled />)
+    await chooseVersion(stable.version)
+    openReview()
+
+    const heading = await screen.findByRole('heading', { name: "What's Changed" })
+    expect(heading.textContent).not.toContain('#')
+    const items = screen.getAllByRole('listitem')
+    expect(items.map(item => item.textContent)).toEqual([
+      'The example compose grants FOWNER by @KKazuhaK in https://github.com/KazuhaHub/Passwall-Node/pull/58',
+      'Root must not hand the runtime directory away by @KKazuhaK in https://github.com/KazuhaHub/Passwall-Node/pull/59',
+    ])
+    expect(screen.getByText('Full Changelog').tagName).toBe('STRONG')
+    expect(view.container.textContent).not.toContain('**')
+
+    const pull = screen.getByRole('link', { name: 'https://github.com/KazuhaHub/Passwall-Node/pull/58' })
+    expect(pull.getAttribute('href')).toBe('https://github.com/KazuhaHub/Passwall-Node/pull/58')
+    expect(pull.getAttribute('target')).toBe('_blank')
+    expect(pull.getAttribute('rel')).toBe('noopener noreferrer')
+    expect(screen.getByRole('link', { name: 'https://github.com/KazuhaHub/Passwall-Node/compare/v4.0.1.4...v4.0.1.5' })).toBeTruthy()
+
+    // Only http(s) targets become links, and a remote image is never fetched:
+    // opening the dialog must not report the operator's address to a third party.
+    expect(screen.queryByRole('link', { name: 'not a link' })).toBeNull()
+    expect(screen.getByText('not a link')).toBeTruthy()
+    expect(view.container.querySelector('a[href^="javascript:"]')).toBeNull()
+    expect(view.container.querySelector('img')).toBeNull()
+    expect(screen.getByText('tracking pixel')).toBeTruthy()
   })
 
   it('clears the exact selection when changing channels and does not auto-select the other channel', async () => {
@@ -280,13 +334,24 @@ describe('the empty state answers the question that was asked', () => {
 // a request the service refuses — and offering a downgrade as though it were a
 // target is how an operator learns to distrust the list rather than the request.
 describe('the upgrade list offers only targets that are actually ahead', () => {
+  // release_tag HAS TO MOVE WITH THE VERSION. It did not: every beta inherited
+  // `testing`'s v4.1.1, so officialReleaseURL — which builds the expected address
+  // from the panel-stated tag and compares it to release_url — rejected every
+  // release except 4.1.1. The ordering assertions below then passed because the
+  // OTHER filter had already removed their subjects, which is the failure mode
+  // this whole file exists to catch in the product.
   const beta = (version: string): NodeRelease => ({
     ...testing, version,
+    release_tag: releaseTag(version),
     release_url: `https://github.com/KazuhaHub/Passwall-Node/releases/tag/${releaseTag(version)}`,
   })
 
-  it('excludes the node’s own version and everything older', async () => {
-    reads([beta('4.0.6'), beta('4.1.0'), beta('4.1.1')])
+  it('lists an older release and marks it rather than hiding it', async () => {
+    // NEWEST FIRST, because that is what the catalog returns — it reads GitHub's
+    // release list, which is ordered by publication. "Recommended" is the first
+    // option that is not older, so this order is load-bearing rather than
+    // decorative, and a fixture in the other order would assert the wrong thing.
+    reads([beta('4.1.1'), beta('4.1.0'), beta('4.0.6')])
     mount(<NodeReleaseSelector enabled selection={linux} value="" onChange={() => {}}
       initialChannel="testing" newerThan="4.1.0" />)
     const field = screen.getByRole('combobox', { name: 'admin:servers.native.agent_version' })
@@ -294,9 +359,40 @@ describe('the upgrade list offers only targets that are actually ahead', () => {
     // then opens nothing — wait for it to become usable first.
     await waitFor(() => expect(field.getAttribute('aria-disabled')).not.toBe('true'))
     fireEvent.mouseDown(field)
-    await screen.findByRole('option', { name: '4.1.1' })
-    expect(screen.queryByRole('option', { name: '4.1.0' })).toBeNull()
-    expect(screen.queryByRole('option', { name: '4.0.6' })).toBeNull()
+
+    // THE PANEL PERMITS A DOWNGRADE, so the list may not pretend otherwise. The
+    // write path has no ordering rule at all and records why: the signature, the
+    // checksum and the node's own state-schema check are what guard the choice.
+    // Hiding these made the browser the only place a rule lived.
+    const older = await screen.findByRole('option', { name: '4.0.6' })
+    expect(older.textContent).toContain('admin:servers.native.release_older_than_current')
+
+    // The newest is still the one marked recommended.
+    const newest = screen.getByRole('option', { name: '4.1.1' })
+    expect(newest.textContent).toContain('admin:servers.native.release_recommended')
+    expect(newest.textContent).not.toContain('admin:servers.native.release_older_than_current')
+
+    // The node's own version is neither older nor recommended: it is simply not
+    // ahead. Excluding it is the SERVER's job — agentTargets omits it — so the
+    // selector does not duplicate that rule.
+    expect(screen.getByRole('option', { name: '4.1.0' }).textContent)
+      .not.toContain('admin:servers.native.release_older_than_current')
+  })
+
+  it('never auto-selects a release older than the node', async () => {
+    // Offering a downgrade is fine. Pre-selecting one, and labelling it
+    // "recommended", is how an operator ends up installing it by pressing return.
+    const onChange = vi.fn()
+    reads([beta('4.0.6')])
+    mount(<NodeReleaseSelector enabled autoSelectLatest selection={linux} value="" onChange={onChange}
+      initialChannel="testing" newerThan="4.1.0" />)
+    const field = screen.getByRole('combobox', { name: 'admin:servers.native.agent_version' })
+    await waitFor(() => expect(field.getAttribute('aria-disabled')).not.toBe('true'))
+    fireEvent.mouseDown(field)
+    const only = await screen.findByRole('option', { name: '4.0.6' })
+    expect(only.textContent).toContain('admin:servers.native.release_older_than_current')
+    expect(only.textContent).not.toContain('admin:servers.native.release_recommended')
+    expect(onChange).not.toHaveBeenCalled()
   })
 
   it('ranks a release above the node it is ahead of', async () => {
@@ -309,14 +405,8 @@ describe('the upgrade list offers only targets that are actually ahead', () => {
     const field = screen.getByRole('combobox', { name: 'admin:servers.native.agent_version' })
     await waitFor(() => expect(field.getAttribute('aria-disabled')).not.toBe('true'))
     fireEvent.mouseDown(field)
-    expect(await screen.findByRole('option', { name: '4.1.1' })).toBeTruthy()
-  })
-
-  it('offers nothing when the list has nothing ahead of the node', async () => {
-    reads([beta('4.0.6')])
-    mount(<NodeReleaseSelector enabled selection={linux} value="" onChange={() => {}}
-      initialChannel="testing" newerThan="4.0.6" />)
-    await waitFor(() => expect(screen.queryByRole('option', { name: '4.0.6' })).toBeNull())
+    const ahead = await screen.findByRole('option', { name: '4.1.1' })
+    expect(ahead.textContent).not.toContain('admin:servers.native.release_older_than_current')
   })
 })
 
@@ -373,6 +463,7 @@ describe('a product-scheme release, whose page is addressed by its tag', () => {
     await waitFor(() => expect(screen.queryByRole('status')).toBeNull())
     await chooseVersion('4.0.0')
     expect(selected()).toBe('4.0.0')
+    openReview()
     const link = screen.getByRole('link', { name: 'admin:servers.native.release_details' })
     expect(link.getAttribute('href')).toBe(release.release_url)
     expect(link.getAttribute('rel')).toBe('noopener noreferrer')
@@ -389,6 +480,7 @@ describe('a product-scheme release, whose page is addressed by its tag', () => {
     await waitFor(() => expect(screen.queryByRole('status')).toBeNull())
     await chooseVersion('4.0.1.2')
     expect(selected()).toBe('4.0.1.2')
+    openReview()
     expect(screen.getByRole('link', { name: 'admin:servers.native.release_details' }).getAttribute('href')).toBe(release.release_url)
   })
 
@@ -446,6 +538,7 @@ describe('a release whose tag the panel states', () => {
     await waitFor(() => expect(screen.queryByRole('status')).toBeNull())
     await chooseVersion('4.0.0')
     expect(selected()).toBe('4.0.0')
+    openReview()
     expect(screen.getByRole('link', { name: 'admin:servers.native.release_details' }).getAttribute('href')).toBe(release.release_url)
   })
 
@@ -505,5 +598,37 @@ describe('a node saved on the testing channel', () => {
     fireEvent.click(await screen.findByRole('option', { name: 'admin:servers.native.release_stable' }))
     await chooseVersion(stable.version)
     expect(selected()).toBe(stable.version)
+  })
+})
+
+// THE OPTIONS FETCH CAN FAIL, AND THEN THERE IS NO TARGET LIST AT ALL.
+//
+// `targets` is undefined whenever the dialog's /upgrade-options call failed, and
+// the whole catalog is listed — including the version the node is already on,
+// which the server would otherwise have omitted. Recommending that one, and
+// auto-selecting it, leaves Confirm disabled with nothing on screen to say why:
+// the write path refuses the exact no-op.
+describe('the recommendation is strictly ahead, not merely not-older', () => {
+  const beta = (version: string): NodeRelease => ({
+    ...testing, version,
+    release_tag: releaseTag(version),
+    release_url: `https://github.com/KazuhaHub/Passwall-Node/releases/tag/${releaseTag(version)}`,
+  })
+
+  it('never recommends the version the node is already running', async () => {
+    const onChange = vi.fn()
+    reads([beta('4.1.0'), beta('4.0.6')])
+    mount(<NodeReleaseSelector enabled autoSelectLatest selection={linux} value="" onChange={onChange}
+      initialChannel="testing" newerThan="4.1.0" />)
+    const field = screen.getByRole('combobox', { name: 'admin:servers.native.agent_version' })
+    await waitFor(() => expect(field.getAttribute('aria-disabled')).not.toBe('true'))
+    fireEvent.mouseDown(field)
+
+    // Both are listed — the panel permits a downgrade and does not hide one.
+    const own = await screen.findByRole('option', { name: '4.1.0' })
+    expect(screen.getByRole('option', { name: '4.0.6' })).toBeTruthy()
+    // But neither is recommended, and nothing was chosen on the operator's behalf.
+    expect(own.textContent).not.toContain('admin:servers.native.release_recommended')
+    expect(onChange).not.toHaveBeenCalled()
   })
 })

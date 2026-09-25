@@ -37,6 +37,7 @@ import { useTranslation } from 'react-i18next'
 import { deviceCapIsInert } from '@/utils/capabilities'
 import { useCan } from '@/utils/permissions'
 import { allSettledLimited } from '@/utils/promises'
+import { AsyncIconButton } from '@/components/AsyncButton'
 
 import { createGroup, deleteGroup, updateGroup } from '@/api/groups'
 import type { ListResponse } from '@/api/types'
@@ -644,14 +645,21 @@ export default function GroupsView() {
                         <IconButton size="small" onClick={() => openEdit(g)} aria-label={t('admin:groups.action.edit')}>
                           <EditIcon fontSize="small" />
                         </IconButton>
-                        <IconButton
+                        {/* Unlike batchDeleteGroups (which has batchBusy + a
+                            spinner), this row action awaited its request with
+                            no busy state at all — on a slow link the icon sat
+                            unchanged for the whole round trip and invited a
+                            second, duplicate delete. AsyncIconButton needs the
+                            handler to RETURN the promise, which confirmDelete
+                            already does as an async function. */}
+                        <AsyncIconButton
                           size="small"
                           onClick={() => confirmDelete(g)}
                           aria-label={t('admin:groups.action.delete')}
                           sx={{ color: md.error, '&.Mui-disabled': { color: alpha(md.error, 0.4) } }}
                         >
                           <DeleteIcon fontSize="small" />
-                        </IconButton>
+                        </AsyncIconButton>
                       </>}
                     </TableCell>
                   </TableRow>

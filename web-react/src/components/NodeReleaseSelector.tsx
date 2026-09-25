@@ -1,10 +1,14 @@
-import { useEffect, useId, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { Accordion, AccordionDetails, AccordionSummary, Alert, Box, Button, CircularProgress, Link, MenuItem, Stack, TextField, Typography } from '@mui/material'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import { useTranslation } from 'react-i18next'
 import { listNodeReleases, type NodeRelease, type NodeReleaseChannel } from '@/api/nodeReleases'
 import type { NativeInstallationSelection } from '@/api/servers'
 import { compareReleaseVersion, releaseTag } from '@/utils/productVersion'
+
+// Loaded when the notes are first expanded: the Markdown renderer is only ever
+// needed behind the fold, so the dialogs do not carry it until someone asks.
+const ReleaseNotes = lazy(() => import('./ReleaseNotes'))
 
 export interface NodeReleaseSelectorProps {
   enabled: boolean
@@ -14,7 +18,12 @@ export interface NodeReleaseSelectorProps {
   disabled?: boolean
   /** Saved preference supplies the opening channel only; temporary changes never persist here. */
   initialChannel?: NodeReleaseChannel
-  /** Installation keeps publication metadata folded; upgrades retain their full review surface. */
+  /**
+   * The installation layout: channel and version side by side, no helper text.
+   * Publication details are folded on EVERY surface, upgrades included — a
+   * release body under the version field made the upgrade dialog a page long,
+   * and the operator opens it when they want to read it.
+   */
   compact?: boolean
   /** Upgrade flows can opt into selecting the newest reviewed release automatically. */
   autoSelectLatest?: boolean
@@ -36,17 +45,24 @@ export interface NodeReleaseSelectorProps {
    *
    * The comparison is the project's release order, NOT SemVer's: these are the
    * dotless prerelease tags this project publishes, where SemVer ranks beta11
-   * below beta9. It is the same rule the panel's admission check applies, so the
-   * list cannot offer something the service would reject for being older.
+   * below beta9.
+   *
+   * IT ANNOTATES; IT DOES NOT FILTER. The claim that this is "the same rule the
+   * panel's admission check applies" was false: the panel has no ordering rule at
+   * all, and deliberately so — nodeagentupgrade.validateRequest records that an
+   * operator choosing an older release is making an explicit choice, guarded by
+   * the signed manifest, the checksum, the state-schema equality check and the
+   * binary's own version self-report. Hiding those releases made the browser the
+   * only place a rule existed, and a rule that exists in one place is a rule two
+   * answers can disagree about.
    */
   newerThan?: string
   /**
    * When set, only these versions are offered.
    *
-   * The upgrade dialog passes the releases a verified edge actually reaches.
-   * `newerThan` narrows by version, which is a weaker claim: a release can be
-   * ahead of the node and still be a path nobody has walked, and offering it
-   * invites a request the edge check refuses.
+   * The upgrade dialog passes the releases the panel says are installable. It no
+   * longer means "a verified edge reaches this": that model was deleted, and the
+   * server now answers with every published release other than the node's own.
    */
   targets?: readonly string[]
 }
@@ -143,9 +159,30 @@ export default function NodeReleaseSelector({ enabled, selection, value, onChang
 
   const options = useMemo(() => (releases ?? []).filter(release =>
     release.channel === channel && officialReleaseURL(release) && supportsSelection(release, selection) &&
-    (!newerThan || compareReleaseVersion(release.version, newerThan) > 0) &&
     (!targets || targets.includes(release.version)),
-  ), [releases, channel, selection, newerThan, targets])
+  ), [releases, channel, selection, targets])
+  // OLDER RELEASES ARE SHOWN AND MARKED, NOT HIDDEN. The server permits them; a
+  // list that silently omits what the service would accept is a second opinion,
+  // and it was an opinion that switched itself off — the dialog only supplied
+  // `newerThan` when the node's reported version happened to parse, so the nodes
+  // with the strangest versions got no guidance at all.
+  const isOlder = (version: string) => !!newerThan && compareReleaseVersion(version, newerThan) < 0
+  // STRICTLY AHEAD, NOT MERELY NOT-OLDER. The two differ on the node's OWN
+  // version, which compares equal: the server already omits it from `targets`,
+  // but `targets` is undefined whenever that fetch failed, and then the whole
+  // catalog is listed. Recommending the version the node is already running — and
+  // auto-selecting it — leaves Confirm disabled with no explanation, because the
+  // write path refuses the exact no-op.
+  //
+  // For a version the comparator cannot order, this is false for everything and
+  // nothing is auto-selected. That is the honest outcome: with no ordering there
+  // is no "latest" to recommend, and guessing is what the label would be doing.
+  const isAhead = (version: string) => !newerThan || compareReleaseVersion(version, newerThan) > 0
+  // THE FIRST ONE, WHICH RELIES ON THE CATALOG BEING NEWEST-FIRST — it reads
+  // GitHub's release list, which is ordered by publication. That dependency
+  // predates this: the recommendation used to be options[0] outright. It is named
+  // here because it is now load-bearing in a second place.
+  const recommended = useMemo(() => options.find(release => isAhead(release.version)), [options, newerThan])
   const selected = options.find(release => release.version === value)
   const selectedURL = selected ? officialReleaseURL(selected) : undefined
   const channelTag = channel === 'stable' ? 'latest' : 'beta'
@@ -159,8 +196,8 @@ export default function NodeReleaseSelector({ enabled, selection, value, onChang
       return
     }
     if (value && !acceptedValue) onChangeRef.current('')
-    if (autoSelectLatest && !disabled && !value && options.length > 0) onChangeRef.current(options[0].version)
-  }, [acceptedValue, autoSelectLatest, channelTag, disabled, enabled, failed, loading, options, releases, selection.method, value])
+    if (autoSelectLatest && !disabled && !value && recommended) onChangeRef.current(recommended.version)
+  }, [acceptedValue, autoSelectLatest, channelTag, disabled, enabled, failed, loading, options, recommended, releases, selection.method, value])
 
   if (!enabled) return null
   const published = selected && new Date(selected.published_at)
@@ -172,7 +209,9 @@ export default function NodeReleaseSelector({ enabled, selection, value, onChang
     {publishedLabel && <Typography variant="body2" color="text.secondary">
       {t('admin:servers.native.release_published', { date: publishedLabel })}
     </Typography>}
-    {selected.notes && <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{selected.notes}</Typography>}
+    {selected.notes && <Suspense fallback={<CircularProgress size={16} />}>
+      <ReleaseNotes>{selected.notes}</ReleaseNotes>
+    </Suspense>}
     {selectedURL && <Link href={selectedURL} target="_blank" rel="noopener noreferrer" variant="body2">
       {t('admin:servers.native.release_details')}
     </Link>}
@@ -205,8 +244,10 @@ export default function NodeReleaseSelector({ enabled, selection, value, onChang
         {t(channel === 'stable' ? 'admin:servers.native.release_follow_stable' : 'admin:servers.native.release_follow_testing')}
         {` (${t('admin:servers.native.release_recommended')})`}
       </MenuItem>}
-      {options.map((release, index) => <MenuItem key={release.version} value={release.version} aria-label={release.version}>
-        {release.version}{index === 0 ? ` (${t('admin:servers.native.release_recommended')})` : ''}
+      {options.map(release => <MenuItem key={release.version} value={release.version} aria-label={release.version}>
+        {release.version}
+        {isOlder(release.version) ? ` (${t('admin:servers.native.release_older_than_current')})` : ''}
+        {release.version === recommended?.version ? ` (${t('admin:servers.native.release_recommended')})` : ''}
       </MenuItem>)}
     </TextField>
     </Stack>
@@ -223,11 +264,11 @@ export default function NodeReleaseSelector({ enabled, selection, value, onChang
         ? t('admin:servers.native.release_no_target_for_node')
         : t(channel === 'stable' ? 'admin:servers.native.release_no_stable' : 'admin:servers.native.release_no_testing')}
     </Alert>}
-    {details && (compact ? <Accordion key={value} disableGutters elevation={0} slotProps={{ transition: { unmountOnExit: true } }}>
+    {details && <Accordion key={value} disableGutters elevation={0} slotProps={{ transition: { unmountOnExit: true } }}>
       <AccordionSummary id={reviewID} aria-controls={`${reviewID}-details`} expandIcon={<ExpandMoreIcon />}>
         <Typography variant="body2">{t('admin:servers.native.release_review')}</Typography>
       </AccordionSummary>
       <AccordionDetails>{details}</AccordionDetails>
-    </Accordion> : details)}
+    </Accordion>}
   </Stack>
 }

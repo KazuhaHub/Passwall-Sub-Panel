@@ -41,14 +41,14 @@
 **两条路都做的事。** `tag` job 有三步，顺序不能换：
 
 1. **判断这次是否要切号。** 只有"空白 dispatch"这条路要切；推 tag 和填了 tag 的 dispatch 到这里就停——**但 job 本身照跑**，理由见下面的警示。
-2. **拒绝没跑过测试的 commit。** 它查的是 **Test 工作流**在这个 SHA 上的结论，不是"这个 commit 上的所有 run"——枚举所有 run 会把**正在运行的这次 release 自己**算进去（in progress、无结论），于是提交因为自己存在而被拒。**这一步在两条路上都跑**：手工推 tag 的路径上，commit 是人挑的，正好是最不能跳过这一问的地方。
+2. **拒绝没跑过测试的 commit。** 它查的是 **Test 工作流**在这个 SHA 上的结论，不是"这个 commit 上的所有 run"——枚举所有 run 会把**正在运行的这次 release 自己**算进去（in progress、无结论），于是提交因为自己存在而被拒。**这一步在两条路上都跑**：手工推 tag 的路径上，commit 是人挑的，正好是最不能跳过这一问的地方。**而且只认 `main`**：commit 必须已在 `main` 上（`git merge-base --is-ancestor`），结论也只取 `main` 上那次 Test 运行（`--branch main`）。dispatch 可以从任意分支发起，分支头往往已有一次绿色的 `pull_request` 运行——它测的是合并结果而不是这个 commit，还跳过了第三方隔离那条线；不加这两道限制，它就足以在未合并的代码上切出一个永久 tag、移动 `:beta`。
 3. **调本仓库的分配器取号**（仅切号路径），并把 `-on-commit` 一起给它：已经绑在这个源码上的号会被**续用**，重跑不会烧掉新号。随后**创建并推送附注 tag**，冲突即重读再取（最多 5 次）。`git push` 拒绝移动已有 ref，所以并发两个发布里输的那个会看到别人的号已占用，重取下一个——**永不覆盖已有 tag**。构建失败允许留下空号。
 
 > **发布图里不允许有"可被跳过"的 job。** 被 skip 的 job 会**连带跳掉它整条下游链路**，而且在中间那个 job 上写 `always()` **救不了下游**：被豁免的 job 照跑并报成功，它下面的 job 还是被跳过。v4.0.1.8——第一个用推 tag 发的版本——就是这样什么都没发出去：`tag` job 在那条路上被自己的 `if:` 跳过，`setup` 靠 `always()` 跑成功，而 `web`/`build`/`release`/`docker` 全被跳掉，run 一路走到兼容门禁（它带 `always()`），报出一句 `LEG=skipped` 然后失败。**这条路径此前从未被走过**，因为在那之前每一次发布都是空白 dispatch，而那条路上 `tag` job 是真的会跑。
 >
 > 所以现在的规矩是：**构建产物依赖的 job 一律不带 job 级 `if:`**，需要条件就写在 step 上；文件里剩下的 job 级 `if:` 必须带 `always()`，即"链路失败时我照跑来出结论"的那种（兼容门禁）。这两条由 `deploy/release_workflow_test.mjs` 钉住。
 
-之后 `setup` 用本仓库的 `release-tag` 命令把 tag 解析成版本（tag 与版本是两个身份），门禁、构建、上传为 **draft**、Docker 依次跑；证据齐全后把 `prerelease` 置为 **true** → **testing**。draft 不进用户目录。
+之后 `setup` 用本仓库的 `release-tag` 命令把 tag 解析成版本（tag 与版本是两个身份），门禁、构建、上传为 **draft**、Docker 依次跑；证据齐全后把 `prerelease` 置为 **true** → **testing**。draft 不进用户目录。**draft 在公开之前会被读回来核对**：`release` job 把 draft 上的文件经 API 下载回来，文件集合必须恰好是本 job 打包的那些，每个文件都要通过同一发布里的 `SHA256SUMS.txt`，每个归档里的 `psp` 都必须是证据索引记录、门禁接受过的那个摘要；三条都过，才只改 draft 标志把它公开——渠道、Latest、说明都在建 draft 时已定，不再改。核对失败时发布停在 draft：若是本次运行较早一次尝试留下的 draft，重跑失败的 job 即可（二进制相同，照样通过；只是动作更新已有 release 时会把说明末尾的 Docker / Verify 一段再追加一遍，公开后手工删掉即可）；若是**别的运行**留下的，它保留着那次的文件（动作不覆盖 draft 上已有的文件），先删掉这个 draft 再重跑。
 
 一次发布只发一个候选：**不移动 tag、不重建、不替换附件。**
 
@@ -62,9 +62,16 @@
 
 1. 选定一个**已验收**的 release，核对 commit 与制品 digest 没有变。
 2. 确认 required 证据完整（`check-case-set.mjs` 的汇总）。
-3. 只改 GitHub 的 `prerelease` 元数据为 **false**。
-4. **不移动 tag、不重建、不替换附件、不要求已安装的实例重装。**
-5. 更新 `latest`（仅正式版）与 Docker `latest` 到**已经验证过的那个 digest**。
+3. **V4 的第一个 stable 之前（只做一次）：先让 `release/v3` 交出 `latest`。** 在 `release/v3` 上合入一个改动，改它自己的 `.github/workflows/release.yml`：
+   - 删掉 docker metadata 里的 `type=raw,value=latest,...` 一行（文件里 `# >>> WHEN V4 PUBLISHES ITS FIRST STABLE RELEASE, DELETE THE :latest` 这条标记指的那行；标记在下一行注释 `# >>> LINE BELOW. <<<` 才结束，按整句搜是搜不到的）；
+   - 在同一文件的 `Publish GitHub Release` step 加 `make_latest: false`——GitHub 的 Latest 标记是全仓库**一个**指针，按线拆不开。
+
+   **原因**：两条线的发布工作流都会写 Docker `:latest` 和 GitHub Latest，谁最后发布谁赢。交接没做，下一个 V3 例行补丁就会把 `:latest` 拖回 V3——**数据库模型不同的镜像**；`docker-compose.yml` 默认就是 `:latest` 加 `pull_policy: always`，每个跟着它的部署下一次 `up -d` 就跨大版本降级。两个工作流都不检测、不告警，而这条交接说明原先只写在另一条分支的注释里，在 `main` 上转 stable 的人看不到。V3 用户改用滚动标签 `:v3`（`release/v3` 的 README 已写；main 的 README 还没有），交接对他们不丢任何东西。
+
+   核对（先 `git fetch origin release/v3`）：`git show origin/release/v3:.github/workflows/release.yml | grep -n 'value=latest'` 应当**没有输出**；同一文件 `grep -nE '^ +make_latest: false'` 应当命中 Publish step 里的那一行——注释里提到它不算，今天的注释就提到了。两条都成立再改元数据：V4 一旦是正式版，交接前的任何一个 V3 补丁都会把两个 `latest` 抢回去。
+4. 只改 GitHub 的 `prerelease` 元数据为 **false**。
+5. **不移动 tag、不重建、不替换附件、不要求已安装的实例重装。**
+6. 更新 `latest`（仅正式版）与 Docker `latest` 到**已经验证过的那个 digest**。
 
 > 同一个版本从 testing 转到 stable 是**改元数据**，不是发新版本。若修复代码或改变构建输入导致制品不同，**分配新号**（同线增量修复即下一个第 4 段），不要在原 tag 下重新上传。
 
@@ -92,7 +99,7 @@ GitHub 元数据、Docker 标签和政策更新**不是跨服务原子事务**�
 | 计划项 | 状态 | 缺的是 |
 | --- | --- | --- |
 | V05 编号分配 | **已实施** | `tag` job：切号、原子冲突确认、空号规则；分配器已归本仓库（X07 A）。守 `deploy/release_workflow_test.mjs` |
-| V05 候选构建 | **已实施** | 一次构建；跨平台编译 + 门禁 + 精确上传为 draft |
+| V05 候选构建 | **已实施** | 一次构建；跨平台编译 + 门禁 + 精确上传为 draft。linux 两个架构各在原生 runner 上构建，并运行产物核对版本戳；darwin / windows 只检查构建元数据 |
 | V06 渠道推广 | 部分 | 精确制品与 `prerelease` 决定渠道；**按 digest 晋升**（`promote.yml`）已有 |
 | C08 发布门回归 | 部分 | `deploy/compat/` 的校验器已在 CI。**推 tag 这条路在 `v4.0.1.8` 上第一次被走就失败了**——`tag` job 被自己的 `if:` 跳过，连带跳掉整条下游，什么都没发出去（第 2 节的警示）；缺陷已修，但**修复后的首次真实发布仍未跑过** |
 | S08 桥接验收 | **作废** | 旧命名方案已整体删除，没有要桥接的部署 |

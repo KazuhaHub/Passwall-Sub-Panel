@@ -12,6 +12,9 @@ coverage.*
 web-react/coverage/
 *.coverprofile
 profile.cov
+# go test's output, which the race and dialect lanes tee at the repo root to upload
+# on failure; a local run of those step scripts leaves it there too.
+/test-output.txt
 local-build/
 
 # Go workspace files

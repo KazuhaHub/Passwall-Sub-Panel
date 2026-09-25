@@ -54,6 +54,9 @@ const server = createServer(async (request, response) => {
   }
 })
 
+// CI sets CHROME_PATH to the Playwright-pinned chrome-headless-shell (test.yml's
+// web job), so the browser there moves with the pin and not with the runner
+// image. The rest of the list is for a local run.
 const chromeCandidates = [
   process.env.CHROME_PATH,
   process.platform === 'win32' && 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',

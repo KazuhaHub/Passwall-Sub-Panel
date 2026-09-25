@@ -102,16 +102,26 @@ func TestDecidePassesTheAgentObservationThrough(t *testing.T) {
 	})
 }
 
-// The policy's protocol range comes from the shared protocol package, so the
-// panel cannot drift from the contract it actually speaks.
-func TestPolicyUsesTheSharedProtocolRange(t *testing.T) {
+// The policy's protocol range is PSP'S OWN DECLARATION, not the shared package's.
+//
+// THIS TEST USED TO ASSERT THE OPPOSITE, and it passed for the same reason its
+// replacement does: both numbers are 1. It read
+// nodeprotocol.Min/MaxSupportedProtocolVersion and was named
+// TestPolicyUsesTheSharedProtocolRange, while
+// domain/nodeagent_generations_test.go asserted that the shared package knowing
+// a generation must not be the same thing as this panel accepting it. Nothing
+// had to choose between them until a generation was added, which is exactly when
+// finding out would have been most expensive.
+func TestPolicyUsesPSPsOwnGenerationDeclaration(t *testing.T) {
 	policy := Policy(time.Hour)
-	if policy.MinProtocolVersion != nodeprotocol.MinSupportedProtocolVersion ||
-		policy.MaxProtocolVersion != nodeprotocol.MaxSupportedProtocolVersion {
-		t.Fatalf("policy range = %d..%d, shared range = %d..%d",
-			policy.MinProtocolVersion, policy.MaxProtocolVersion,
-			nodeprotocol.MinSupportedProtocolVersion, nodeprotocol.MaxSupportedProtocolVersion)
+	declared := domain.SupportedNodeProtocolGenerations()
+	if policy.MinProtocolVersion != declared.Min || policy.MaxProtocolVersion != declared.Max {
+		t.Fatalf("policy range = %d..%d, PSP declares %d..%d",
+			policy.MinProtocolVersion, policy.MaxProtocolVersion, declared.Min, declared.Max)
 	}
+	// The legacy zero mapping is deliberately still the shared package's: which
+	// generations this panel admits is PSP's decision, but that an omitted
+	// protocol_version means v1 is a property of the wire format itself.
 	if policy.LegacyZeroMapsTo != nodeprotocol.EffectiveProtocolVersion(0) {
 		t.Fatalf("legacy mapping = %d, shared = %d", policy.LegacyZeroMapsTo, nodeprotocol.EffectiveProtocolVersion(0))
 	}
@@ -119,5 +129,66 @@ func TestPolicyUsesTheSharedProtocolRange(t *testing.T) {
 	// decision can be read back after the policy moves.
 	if policy.Revision == "" {
 		t.Fatal("a policy without a revision cannot be recorded with its decisions")
+	}
+}
+
+// The policy follows the range it is HANDED, which is the part that can be
+// proved today.
+//
+// TestPolicyUsesPSPsOwnGenerationDeclaration above cannot fail while PSP's
+// declaration and the shared package's constants are both 1 — pointing Policy
+// back at the dependency would keep it green. It becomes load-bearing at exactly
+// the moment it matters: the day the shared package gains a generation, the
+// domain declaration stays 1..1 (its own test holds that line) and the two
+// sources finally differ. This test covers the mechanism in the meantime.
+func TestPolicyFollowsTheGenerationRangeItIsGiven(t *testing.T) {
+	ahead := nodeprotocol.GenerationRange{Min: nodeprotocol.ProtocolVersion1, Max: nodeprotocol.ProtocolVersion1 + 1}
+	if got := PolicyIn(ahead, time.Hour); got.MinProtocolVersion != ahead.Min || got.MaxProtocolVersion != ahead.Max {
+		t.Fatalf("PolicyIn ignored the declared range: got %d..%d, want %d..%d",
+			got.MinProtocolVersion, got.MaxProtocolVersion, ahead.Min, ahead.Max)
+	}
+	// A wider range must also change the revision, so a decision recorded under
+	// one range is not mistaken for a decision recorded under another.
+	if PolicyIn(ahead, time.Hour).Revision == Policy(time.Hour).Revision {
+		t.Fatal("two different generation ranges produced the same revision")
+	}
+	// And the shipped policy is NOT that range: this is the panel refusing to
+	// admit a generation nobody in this repository has reviewed.
+	if Policy(time.Hour).MaxProtocolVersion >= ahead.Max {
+		t.Fatalf("the shipped policy admits generation %d", ahead.Max)
+	}
+}
+
+// A generation the SHARED PACKAGE gains must not widen this policy on its own.
+//
+// domain/nodeagent_generations_test.go holds this line for the declaration; this
+// holds it for the policy that actually feeds compatadmission, and therefore for
+// the remote-upgrade admission path in internal/service/nodeagentupgrade. A
+// go.mod bump alone must not move it.
+func TestPolicyDoesNotFollowTheSharedPackageUpward(t *testing.T) {
+	policy := Policy(time.Hour)
+	ahead := nodeprotocol.ProtocolVersion1 + 1
+
+	// Stand-in for "the contract gained a generation": a caller that DOES declare
+	// it accepts it, so the harness is measuring the range and not something else.
+	declares := nodeprotocol.GenerationRange{Min: nodeprotocol.ProtocolVersion1, Max: ahead}
+	if comp := nodeprotocol.AssessCompatibilityIn(ahead, nodeprotocol.AgentUpgradeCapabilities(), declares); !comp.ProtocolSupported {
+		t.Fatal("the harness is wrong: a caller that declares the generation must accept it")
+	}
+
+	if policy.MaxProtocolVersion >= ahead {
+		t.Fatalf("policy admits generation %d, which this repository has not reviewed", ahead)
+	}
+
+	observed := time.Now().UTC()
+	agent := &domain.NodeAgent{
+		ObservedProtocolVersion: ahead,
+		ObservedCapabilities:    nodeprotocol.AgentUpgradeCapabilities(),
+		ProtocolObservedAt:      &observed,
+	}
+	decision := Decide(agent, compatadmission.OperationRemoteUpgrade, observed, policy)
+	if decision.Allowed || decision.Reason != compatadmission.ReasonProtocolIncompatible {
+		t.Fatalf("an undeclared generation reached the upgrade path: allowed=%v reason=%s",
+			decision.Allowed, decision.Reason)
 	}
 }

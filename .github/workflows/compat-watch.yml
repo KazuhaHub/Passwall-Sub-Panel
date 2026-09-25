@@ -51,6 +51,12 @@ on:
       - "internal/adapters/noderelease/passwall-node-v4.json"
       - ".github/workflows/compat-watch.yml"
 
+# The watcher is built with go.mod's exact compiler, in test.yml's shape, and the
+# build-baseline guard holds it there like every other workflow that sets up Go.
+env:
+  GOWORK: "off"
+  GOTOOLCHAIN: "local"
+
 permissions:
   contents: read
 
@@ -58,12 +64,24 @@ jobs:
   watch:
     name: ceilings and node registry vs published releases
     runs-on: ubuntu-latest
+    # A build and a few API reads; the default 360 minutes is only ever a hang.
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
+        # Allow toolchain selection; setup-go exports local after installation.
+        env:
+          GOTOOLCHAIN: auto
         with:
           go-version-file: go.mod
           cache: true
+      - name: Verify exact preferred compiler
+        run: |
+          set -eu
+          build_toolchain=$(awk '$1 == "toolchain" { print $2 }' go.mod)
+          test -n "$build_toolchain"
+          test "$(go env GOVERSION)" = "$build_toolchain"
+          test "$(go tool compile -V | awk '{ print $3 }')" = "$build_toolchain"
       # Built rather than `go run`: go run reports a child's non-zero exit as
       # plain 1, which would collapse "an upstream is ahead" (1) into "the
       # watcher could not tell" (2) — the one distinction this job exists to

@@ -219,7 +219,11 @@ func NewRouter(d Deps) stdhttp.Handler {
 		if err != nil {
 			panic("configure native node authentication: " + err.Error())
 		}
-		nodeSync, err := handler.NewNodeSyncHandler(d.NodeSync, nodeAuth)
+		// The agent repository is already required by this branch for
+		// authentication; the recorder reuses it through a one-method interface so
+		// the sync handler cannot reach the rest of it.
+		nodeSync, err := handler.NewNodeSyncHandler(d.NodeSync, nodeAuth,
+			handler.WithNodeRefusalRecorder(d.Repos.NodeAgent))
 		if err != nil {
 			panic("configure native node sync: " + err.Error())
 		}

@@ -185,7 +185,7 @@ function jobs() {
   const start = workflow.indexOf('\njobs:\n')
   assert(start >= 0, 'the release workflow defines jobs')
   const body = workflow.slice(start + '\njobs:\n'.length)
-  const markers = [...body.matchAll(/^  ([a-z][a-z-]*):\n/gm)]
+  const markers = [...body.matchAll(/^  ([A-Za-z_][A-Za-z0-9_-]*):\n/gm)]
   const found = new Map()
   markers.forEach((marker, index) => {
     const end = index + 1 < markers.length ? markers[index + 1].index : body.length
@@ -195,8 +195,17 @@ function jobs() {
   return found
 }
 
-function literalScripts() {
-  const lines = workflow.split('\n')
+// The lines a block RUNS, without the comments that explain them. Searching a whole
+// job finds the sentence that explains a command as readily as the command itself.
+function withoutComments(text) {
+  return text
+    .split('\n')
+    .filter((line) => !line.trimStart().startsWith('#'))
+    .join('\n')
+}
+
+function literalScripts(text = workflow) {
+  const lines = text.split('\n')
   const scripts = []
   for (let i = 0; i < lines.length; i++) {
     const match = /^(\s*)run: \|$/.exec(lines[i])
@@ -213,6 +222,27 @@ function literalScripts() {
     scripts.push(body.join('\n').replace(/\$\{\{[^}]+\}\}/g, 'fixture'))
   }
   return scripts
+}
+
+// The lines a script EXECUTES: no comments, and no heredoc bodies. A heredoc is
+// data on its way into a file, and the release notes are one — they tell the
+// reader to run `sha256sum -c SHA256SUMS.txt`, and that sentence was the only
+// line the checksum guard below ever matched, for as long as no step verified
+// anything at all. A here-string (<<<) is not a heredoc and is left alone.
+function executedLines(script) {
+  const executed = []
+  let terminator = null
+  for (const line of script.split('\n')) {
+    if (terminator !== null) {
+      if (line.replace(/^\t+/, '') === terminator) terminator = null
+      continue
+    }
+    if (line.trimStart().startsWith('#')) continue
+    executed.push(line)
+    const heredoc = /(?<!<)<<(?!<)-?\s*(['"]?)([A-Za-z_][A-Za-z0-9_]*)\1/.exec(line)
+    if (heredoc) terminator = heredoc[2]
+  }
+  return executed
 }
 
 // Floor for actions/setup-go and actions/setup-node. Below this the inputs this
@@ -360,6 +390,24 @@ test('the tag job cuts the tag after the suite passes, only when the form asked 
     !/^        if:/m.test(suiteCheck[1]),
     'the suite check must run on every path, including a pushed tag',
   )
+  // AND IT ASKS ABOUT MAIN, TWICE. A dispatch can start from any branch, and a
+  // branch head usually has a green pull_request run of test.yml, which tested the
+  // merge ref and not this commit. Unfiltered, the lookup accepted that run and a
+  // permanent tag could be cut on unmerged code. Read from the executed lines, so
+  // the comment explaining the rule cannot satisfy it.
+  const suiteScript = withoutComments(suiteCheck[1])
+  assert(
+    suiteScript.includes('git merge-base --is-ancestor "$SHA" origin/main'),
+    'the suite check must refuse a commit that main does not contain',
+  )
+  assert(
+    /git fetch [^\n]*refs\/heads\/main:refs\/remotes\/origin\/main/.test(suiteScript),
+    'the ancestry check must read a main this step fetched, not whatever the checkout happened to leave',
+  )
+  assert(
+    /--workflow test\.yml --commit "\$SHA" --branch main\b/.test(suiteScript),
+    'the suite check must take only a test.yml run on main as evidence, not a pull_request run of the same head',
+  )
 })
 
 // A SKIPPED JOB SKIPS EVERYTHING DOWNSTREAM OF IT, TRANSITIVELY, AND `always()` ON A
@@ -401,6 +449,16 @@ test('no job is skipped by its own condition while the release depends on it', (
       condition[1].includes('always()'),
       `${name} carries a job-level if: without always(), so it can be skipped by its own condition and take its dependents with it. Gate a step instead, as the tag job does.`,
     )
+  }
+})
+
+// EVERY RELEASE JOB STATES ITS OWN TIMEOUT. All releases share one concurrency group
+// that never cancels, and GitHub keeps one pending run per group, so a job hung on
+// the 360-minute default blocks every release for six hours, and a third release
+// started meanwhile silently replaces the second: a pushed tag left without a release.
+test('every job in release.yml sets its own timeout', () => {
+  for (const [name, raw] of jobs()) {
+    assert(/^    timeout-minutes: \d+$/m.test(raw), `${name} has no timeout-minutes, so a hang holds the release group for GitHub's 360-minute default`)
   }
 })
 
@@ -582,6 +640,19 @@ test('the compatibility gate actually runs the case-set checker', () => {
   const gate = job('compatibility')
   assert(gate.includes('deploy/compat/check-case-set.mjs'))
   assert(gate.includes('actions/download-artifact'))
+  // AND IT DOWNLOADS ONLY WHAT IT READS. An unscoped download fetches every artifact
+  // in the run and fails on any it cannot read; that took test.yml's gate down on
+  // main (#226), and this run's docker job publishes the same kind of record.
+  const downloads = withoutComments(gate)
+    .split(/\n(?= {6}- )/)
+    .filter((step) => step.includes('uses: actions/download-artifact@'))
+  assert(downloads.length > 0, 'the gate must download its evidence')
+  for (const step of downloads) {
+    assert(/^ {10}(?:name|pattern): \S/m.test(step), `the gate downloads every artifact in the run:\n${step}`)
+  }
+  for (const pattern of ["pattern: 'node-wire-v1@*'", "pattern: 'compat-digest-*'"]) {
+    assert(downloads.some((step) => step.includes(pattern)), `the gate no longer downloads ${pattern}`)
+  }
 })
 
 // R10 STEP 1, MADE ENFORCEABLE. "Walk the release needs graph and list every job
@@ -640,6 +711,47 @@ test('the tag job writes a ref and nothing else', () => {
   }
 })
 
+// A WRITE TOKEN RUNS ONLY CODE THAT CANNOT BE SWAPPED UNDER IT. The writers are
+// derived from their permissions, so a publisher added later is held to this too —
+// and derived from ALL of them: any scope granted `write`, `write-all`, and for a job
+// that declares no permissions of its own, whatever the top-level block grants it
+// (or the repository default, which can be write, when there is no block at all).
+// In each, an action from outside actions/* is named by a full commit with its
+// release in a trailing comment — the form Dependabot keeps current. A tag would
+// run whatever it points at on the day of the release.
+function permissionsAt(text, indent) {
+  const found = new RegExp(`^ {${indent}}permissions:(.*)\\n((?: {${indent + 2},}.*\\n|[ \\t]*\\n)*)`, 'm').exec(text)
+  return found ? `${found[1]}\n${found[2]}`.replace(/#.*$/gm, '') : null
+}
+
+function grantsWrite(permissions) {
+  return /^\s*write-all\s*$/m.test(permissions) || /[a-z-]+:\s*write\b/.test(permissions)
+}
+
+test('every third-party action in a job that can write is pinned by commit', () => {
+  const inherited = permissionsAt(workflow.slice(0, workflow.indexOf('\njobs:\n') + 1), 0) ?? 'write-all'
+  let seen = 0
+  for (const [name, block] of jobs()) {
+    if (!grantsWrite(permissionsAt(block, 4) ?? inherited)) continue
+    for (const [line, ref] of block.matchAll(/^ +(?:- )?uses: (\S+).*$/gm)) {
+      seen++
+      if (ref.startsWith('actions/') || ref.startsWith('./')) continue
+      assert(
+        /@[0-9a-f]{40} # v\d+\.\d+\.\d+$/.test(line),
+        `${name} runs ${ref} with a write token; pin it to a commit with a # vX.Y.Z comment`,
+      )
+    }
+  }
+  assert(seen > 0, 'no job that can write uses an action; either the workflow changed or this matcher broke')
+  // The derivation itself, on the shapes a later job could take.
+  const at = (text) => grantsWrite(permissionsAt(text, 4) ?? inherited)
+  assert.equal(at('  j:\n    permissions: write-all\n    steps:\n'), true)
+  assert.equal(at('  j:\n    permissions:\n      contents: read\n      # a note\n\n      attestations: write\n'), true)
+  assert.equal(at('  j:\n    permissions:\n      contents: read\n    steps:\n      - run: echo contents: write\n'), false)
+  assert.equal(permissionsAt('  j:\n    steps:\n      - run: true\n', 4), null, 'a job with no block of its own inherits')
+  assert.equal(grantsWrite(permissionsAt('permissions:\n  pull-requests: write\njobs:\n', 0)), true)
+})
+
 // R10 STEP 3: "cross-platform compilation does not substitute for runtime
 // acceptance". The compile matrix is what makes a release buildable on every
 // platform; it is not evidence that any of them RUNS. A publishing job that
@@ -654,6 +766,47 @@ test('a cross-compile job is never a publishing job\'s only dependency', () => {
   }
 })
 
+// R10 STEP 3, THE HALF A NEEDS GRAPH CANNOT SHOW. "Declared runtime platforms need
+// native or clearly labelled runtime evidence." check-build.sh reads build
+// metadata and never runs anything, so three failures shipped green past it: a
+// version stamp the linker silently dropped (every binary reports "dev"), a web
+// bundle that landed outside internal/web/dist (a panel with no UI, since an empty
+// dist still compiles), and an arm64 binary no job had ever started. The build job
+// now answers all three, and this holds it to the executed lines, not the comments.
+test('each linux leg runs what it built, natively, and no leg links a panel without its UI', () => {
+  const build = job('build')
+  const executed = withoutComments(build)
+
+  const bundle = executed.indexOf('test -f internal/web/dist/index.html')
+  const compile = executed.indexOf('go build ')
+  assert(bundle >= 0, 'every leg must refuse a missing internal/web/dist/index.html')
+  assert(compile >= 0, 'the build job no longer compiles the panel')
+  assert(bundle < compile, 'the UI check must come before go build, while it can still stop the leg')
+
+  // NATIVE, BY CONSTRUCTION. A linux leg on a foreign runner could only emulate,
+  // and R10 does not let emulation stand in for native; the step fails such a leg
+  // rather than skipping it, and this refuses the matrix that would reach it.
+  assert(/^    runs-on: \$\{\{ matrix\.runner \}\}$/m.test(build), 'each build leg must run on the runner its matrix row names')
+  const legs = [...build.matchAll(/^ +- \{ goos: (\w+), +goarch: (\w+),.*\brunner: ([\w.-]+) *\}$/gm)]
+  assert.equal(legs.length, 6, 'every one of the six release targets must name its runner')
+  const linux = legs.filter(([, goos]) => goos === 'linux')
+  assert.deepEqual(linux.map(([, , goarch]) => goarch).sort(), ['amd64', 'arm64'])
+  for (const [, , goarch, runner] of linux) {
+    const armRunner = /-arm$/.test(runner)
+    assert.equal(armRunner, goarch === 'arm64', `linux/${goarch} is built on ${runner}, which cannot run it natively`)
+  }
+  assert(executed.includes('test "$(go env GOHOSTARCH)" = "$GOARCH"'), 'a linux leg on a foreign runner must fail, not skip its run')
+
+  // AND WHAT RUNS MUST NAME THE RELEASE. Exit status alone passes a binary that
+  // says "dev", which is exactly what a dropped -X produces.
+  assert(executed.includes('if [ "$GOOS" = linux ]; then'), 'both linux legs must run their binary')
+  assert(executed.includes('reported=$(out/psp --version 2>&1)'), 'the linux legs must run the binary they built')
+  assert(
+    executed.includes('grep -qF "${VERSION} (${short_sha})" <<<"$reported"'),
+    'the binary must report the release version and commit, not merely exit 0',
+  )
+})
+
 // R10 STEP 4: the evidence index is what still exists once the run's logs have
 // expired, so its absence is not a missing convenience — it is a claim nobody can
 // check later. Asserted by shape because this guard reads the workflow as text:
@@ -665,25 +818,93 @@ test('the release gate records an evidence index', () => {
   assert(gate.includes('compatibility-evidence-index'), 'the index must be uploaded, or it expires with the runner')
 })
 
+// AND UPLOADED IS NOT KEPT. An artifact lives 90 days at most, which is exactly the
+// horizon the index exists to outlive, and the handover records it as a release
+// attachment — which it was once, by hand. So the release carries it, under the
+// same checksums as the archives, and the image digest, which R10 step 4 also asks
+// for and which nothing recorded, is written down where the push happens.
+test('the release attaches the evidence index under its checksums, and the image digest is recorded', () => {
+  const release = job('release')
+  assert(
+    /uses: actions\/download-artifact@v\d+\n\s+with:\n\s+name: compatibility-evidence-index\n/.test(release),
+    'the release job must download the index the gate wrote',
+  )
+  const packaging = withoutComments(release)
+  const attach = packaging.indexOf('cp evidence/evidence-index.json "dist/compat-evidence-index-${VERSION}.json"')
+  const sums = packaging.indexOf('(cd dist && sha256sum -- * > SHA256SUMS.txt)')
+  assert(attach >= 0, 'the index must be packaged into dist, which is what the release publishes')
+  assert(sums >= 0, 'the release no longer writes SHA256SUMS.txt')
+  assert(attach < sums, 'the index must be in dist before the sums are taken, or it is published unchecked')
+  assert(packaging.includes(".source_sha == $sha"), 'the attached index must be checked to name this commit')
+  assert(/files: \|\n\s+dist\/\*\n/.test(release), 'the release publishes dist/*, which is what carries the index')
+
+  const docker = job('docker')
+  assert(/^ {6}- name: Build and push multi-arch image\n {8}id: push$/m.test(docker), 'the push step must be addressable for its digest')
+  assert(docker.includes('digest: ${{ steps.push.outputs.digest }}'), 'the docker job must export the digest it pushed')
+  const record = withoutComments(docker.slice(docker.indexOf('- name: Record the pushed image digest')))
+  assert(record.includes('DIGEST: ${{ steps.push.outputs.digest }}'), 'the digest must be recorded from the push itself')
+  assert(record.includes('>> "$GITHUB_STEP_SUMMARY"'), 'the digest must be written where the run shows it')
+  assert(record.includes('^sha256:[0-9a-f]{64}$'), 'an empty or malformed digest must fail rather than be recorded')
+})
+
 // R10 STEP 5: signature verification and the candidate's test trust chain are
 // SEPARATE, and a private candidate must never be made trusted by relaxing the
 // publisher. The manual's words are "do not modify production code to trust an
 // arbitrary release source for a private candidate".
 //
-// PSP publishes checksums rather than signatures, so there is no signature step
-// to separate here — but the same rule has a checkable form: the publisher must
+// PSP publishes checksums and a provenance attestation, and verifies no signature
+// on the way in, so there is no signature step to separate here — but the same
+// rule has a checkable form: the publisher must
 // still verify what it produced, and nothing in the path may be relaxed to make a
 // candidate pass. Each pattern below is a way that rule gets broken quietly.
 test('the publisher verifies its own artifacts and relaxes nothing', () => {
+  // EXECUTED, NOT MENTIONED. This used to count every line of the file matching
+  // the command, and the one it found was in the release-notes heredoc: an
+  // instruction to the reader. The guard was green while nothing downloaded or
+  // checked a published file, and the release was public before its files
+  // existed. Heredoc bodies are data, so they are not counted now.
+  assert.deepEqual(
+    executedLines('set -eu\ncat <<EOF > notes.md\nsha256sum -c SHA256SUMS.txt\nEOF\ngrep -q x <<<"$y"\n'),
+    ['set -eu', 'cat <<EOF > notes.md', 'grep -q x <<<"$y"', ''],
+    'a heredoc body must not count as a command, and a here-string must not open one',
+  )
+  const release = job('release')
+  const executed = literalScripts(release).flatMap(executedLines)
   // The checksum verification has to be a real step, not a swallowed one. Asserting
   // only that the command appears is not enough — it still appears with `|| true`
   // appended, and that is precisely the shape a quiet relaxation takes.
-  const verifyLines = workflow.split('\n').filter((line) => /sha256sum -c\s+SHA256SUMS\.txt/.test(line))
-  assert(verifyLines.length > 0, 'the publisher must verify the checksums it published')
+  const verifyLines = executed.filter((line) => /sha256sum -c\s+SHA256SUMS\.txt/.test(line))
+  assert(verifyLines.length > 0, 'the publisher must verify the checksums it published, in a line that runs')
   for (const line of verifyLines) {
     const after = line.slice(line.indexOf('SHA256SUMS.txt') + 'SHA256SUMS.txt'.length)
     assert(!/\|\||&&|;/.test(after), `the checksum verification is followed by more shell, which can swallow its failure: ${line.trim()}`)
   }
+  // WHAT IT VERIFIES IS WHAT WAS PUBLISHED, AND BEFORE ANYONE CAN SEE IT. The files
+  // are read back from the release, not from dist/, which the upload read too; the
+  // release is a draft while that happens; and only after it passes does the draft
+  // flag change — nothing else about the release does.
+  assert(executed.some((line) => /gh release download "\$TAG"[^\n]*--dir verify/.test(line)), 'the published files must be downloaded back')
+  assert(verifyLines.some((line) => line.includes('cd verify')), 'the checksums must be checked against the downloaded files')
+  assert(
+    executed.some((line) => line.includes("'.artifacts[$name]") && line.includes('evidence/evidence-index.json')),
+    'each archived binary must be compared with the digest the gate indexed',
+  )
+  const steps = withoutComments(release)
+  const upload = /- name: Publish GitHub Release\n([\s\S]*?)(?=\n {6}- name:|$)/.exec(steps)
+  assert(upload, 'the release job no longer has its upload step')
+  assert(upload[1].includes('uses: softprops/action-gh-release@'), 'the upload step is not the release action')
+  assert(/^ {10}draft: true$/m.test(upload[1]), 'the release must be uploaded as a draft')
+  const drafted = upload.index
+  const verified = steps.indexOf("- name: Verify the draft's assets")
+  const undrafted = steps.indexOf('gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false')
+  assert(verified > drafted, 'the files must be verified after the draft is uploaded')
+  assert(undrafted > verified, 'the release may become public only after its files are verified')
+  const edits = executed.filter((line) => /\bgh release edit\b/.test(line))
+  assert.deepEqual(
+    edits.map((line) => line.trim()),
+    ['gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false'],
+    'making the release public must change the draft flag only: the channel, Latest and the notes were already decided',
+  )
   for (const pattern of [
     /\|\|\s*true[^\n]*sha256/i,
     /sha256sum[^\n]*--insecure/,
@@ -695,6 +916,45 @@ test('the publisher verifies its own artifacts and relaxes nothing', () => {
   ]) {
     assert(!pattern.test(workflow), `the publisher relaxes verification: ${pattern}`)
   }
+})
+
+// CHECKSUMS PROVE INTEGRITY, NOT ORIGIN. SHA256SUMS.txt is published on the same
+// page as the files it covers, so whoever could replace a file could replace the
+// sums. A provenance attestation binds each digest to this workflow, commit and
+// run under a Sigstore certificate, and it is checked with `gh attestation verify`.
+// Held here: both publishers attest what they publish, the scopes that needs are
+// ADDED to theirs (the write-scope asserts above still read the same prefix), the
+// release attests while it is still a draft, and the image by digest, not by tag.
+test('the release files and the pushed image carry build provenance', () => {
+  const release = job('release')
+  const docker = job('docker')
+  assert(
+    release.includes('permissions:\n      contents: write\n      id-token: write\n      attestations: write\n'),
+    'the release job needs id-token and attestations, after its own contents: write',
+  )
+  assert(
+    docker.includes('permissions:\n      contents: read\n      packages: write\n      id-token: write\n      attestations: write\n'),
+    'the docker job needs id-token and attestations, after its own scopes',
+  )
+
+  const files = withoutComments(release)
+  // The files read back from the draft, which are the published bytes; dist/ is
+  // not, on a re-run over this run's own draft.
+  const attestFiles = /uses: actions\/attest-build-provenance@\S+\n {8}with:\n {10}subject-path: verify\/\*\n/.exec(files)
+  assert(attestFiles, 'the release must attest every file it publishes, as read back from the release')
+  assert(
+    files.indexOf("- name: Verify the draft's assets") < attestFiles.index &&
+      attestFiles.index < files.indexOf('--draft=false'),
+    'the files are attested after they are verified and while the release is still a draft',
+  )
+
+  const image = withoutComments(docker)
+  const attestImage = image.indexOf('uses: actions/attest-build-provenance@')
+  assert(attestImage > image.indexOf('id: push'), 'the image is attested after it is pushed')
+  const inputs = image.slice(attestImage)
+  assert(inputs.includes('subject-name: ghcr.io/${{ needs.setup.outputs.owner_lc }}/passwall-sub-panel\n'), 'the image is named without a tag')
+  assert(inputs.includes('subject-digest: ${{ steps.push.outputs.digest }}\n'), 'the image is attested by the digest the push reported')
+  assert(inputs.includes('push-to-registry: true\n'), 'the attestation must sit in the registry beside the image')
 })
 
 // R10 STEP 7: "rolling channels follow the repository's existing semantics, and
