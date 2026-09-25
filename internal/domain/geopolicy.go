@@ -177,8 +177,9 @@ type GeoAnomalyPolicy struct {
 	AllowAnywhere bool
 	// CoTravel groups COUNTRIES that do not count as separate from each
 	// other. Each entry is a set of upper-case country codes; occupying two
-	// in the same set counts as one country. A country outside every set
-	// still counts. Regions and cities are never folded across countries.
+	// in the same set counts as one country. Sets that share a country merge
+	// transitively (see foldCoTravel). A country outside every set still
+	// counts. Regions and cities are never folded across countries.
 	CoTravel [][]string
 	// MinPlacedRatio is the fraction of a user's live addresses that must be
 	// placeable before any conclusion is drawn. Below it the verdict is
@@ -296,44 +297,73 @@ func (p GeoAnomalyPolicy) sanitized() GeoAnomalyPolicy {
 // country tier is folded; regions and cities are never merged across
 // countries.
 //
-// A set is represented by its smallest member, so folding is stable and two
-// members of one set can never be counted separately. Places named in no set
-// are returned untouched — the point is to excuse a SPECIFIC pairing, not to
-// raise the threshold, so a third unrelated place still counts.
+// Sets that share a member are ONE set, transitively: "CN,HK" and "HK,MO"
+// make CN, HK and MO a single place, even for a user seen in CN and MO but
+// never in HK. An admin writing overlapping lines means exactly that, and the
+// alternative is order-dependent — an earlier version kept one
+// representative per code in a last-writer-wins map, so the second line
+// re-pointed HK away from CN, the first line's pair silently stopped folding,
+// and a declared Shenzhen + Hong Kong user was flagged (and, with the ban
+// armed, suspended). A union-find over every code named in any set makes the
+// merge independent of line order. Blank members join nothing, and a
+// one-member set is a component of one, which folds its place to itself:
+// neither needs a guard to excuse nothing.
+//
+// Each component is NAMED by its smallest OBSERVED member, never by its
+// smallest declared one. Places feeds the verdict's Reason, the stored
+// record an admin reads and the audit row of an automatic suspension; naming
+// the declared minimum would put "CN" in all three for a user seen only in
+// HK and JP. The count is the same either way, and the name is still stable
+// for a stable observation.
+//
+// Places named in no set are returned untouched — the point is to excuse a
+// SPECIFIC pairing, not to raise the threshold, so a third unrelated place
+// still counts.
 func (p GeoAnomalyPolicy) foldCoTravel(places map[string]struct{}) map[string]struct{} {
 	if len(p.CoTravel) == 0 || len(places) == 0 {
 		return places
 	}
-	canon := map[string]string{}
+	parent := map[string]string{}
+	find := func(x string) string {
+		for parent[x] != x {
+			parent[x] = parent[parent[x]] // path halving; sets are tiny, this is hygiene
+			x = parent[x]
+		}
+		return x
+	}
 	for _, set := range p.CoTravel {
-		cleaned := make([]string, 0, len(set))
+		first := ""
 		for _, s := range set {
-			if s = strings.TrimSpace(s); s != "" {
-				cleaned = append(cleaned, s)
+			if s = strings.TrimSpace(s); s == "" {
+				continue
+			}
+			if _, ok := parent[s]; !ok {
+				parent[s] = s
+			}
+			if first == "" {
+				first = s
+				continue
+			}
+			// Which root wins does not matter: the component's name is
+			// chosen below from what was observed, not from the tree.
+			if a, b := find(first), find(s); a != b {
+				parent[b] = a
 			}
 		}
-		if len(cleaned) == 0 {
-			// Guards the indexing below, and nothing more. A ONE-member set
-			// needs no special case: it folds its only place to itself, so
-			// it is already the identity and excuses nothing. An earlier
-			// version skipped singletons too, with a comment claiming that
-			// stopped them becoming a blanket exemption — mutation testing
-			// showed the two branches are behaviourally identical, so the
-			// comment was describing a danger the code was not averting.
-			// The property is still pinned by a test; it is delivered by
-			// the fold being an identity, not by a guard.
+	}
+	name := map[string]string{} // component root -> smallest observed member
+	for place := range places {
+		if _, ok := parent[place]; !ok {
 			continue
 		}
-		sort.Strings(cleaned)
-		rep := cleaned[0]
-		for _, s := range cleaned {
-			canon[s] = rep
+		if root := find(place); name[root] == "" || place < name[root] {
+			name[root] = place
 		}
 	}
 	out := make(map[string]struct{}, len(places))
 	for place := range places {
-		if rep, ok := canon[place]; ok {
-			out[rep] = struct{}{}
+		if _, ok := parent[place]; ok {
+			out[name[find(place)]] = struct{}{}
 			continue
 		}
 		out[place] = struct{}{}

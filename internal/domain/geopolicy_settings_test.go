@@ -103,7 +103,7 @@ func TestGeoPolicyFromSettings_ParsedCoTravelActuallyFolds(t *testing.T) {
 }
 
 // Empty and whitespace-only entries produce no set rather than an empty one
-// that would reach the fold and index past the end.
+// that would sit in the policy looking like a rule while folding nothing.
 func TestGeoPolicyFromSettings_BlankCoTravelEntriesAreDropped(t *testing.T) {
 	got := GeoPolicyFromSettings(GeoPolicySettings{CoTravel: "\n  \n , , "})
 	if len(got.CoTravel) != 0 {
@@ -216,6 +216,33 @@ func TestGeoPolicyFromSettings_RegionCoTravelTokenIsDroppedNotSilentlyIgnored(t 
 	want := [][]string{{"HK"}, {"JP", "TW"}}
 	if !reflect.DeepEqual(got.CoTravel, want) {
 		t.Fatalf("co-travel = %v, want %v", got.CoTravel, want)
+	}
+}
+
+// Two stored lines that share a country are kept as written — the parser
+// neither rejects nor rewrites an overlap — and the policy they produce folds
+// them as one set, end to end. This is the reported Greater Bay Area case:
+// "CN,HK" then "HK,MO", a Shenzhen + Hong Kong user, auto-suspension armed.
+// Before the merge it read "in 2 countries at once ([CN HK])" and the ban
+// came due for a pairing the admin had excused.
+func TestGeoPolicyFromSettings_OverlappingCoTravelLinesExcuseTheirPair(t *testing.T) {
+	p := GeoPolicyFromSettings(GeoPolicySettings{
+		CoTravel:       "CN,HK\nHK,MO",
+		FlagAfterPolls: 1,
+		BanEnabled:     true,
+		BanAfterPolls:  1,
+	})
+	if want := [][]string{{"CN", "HK"}, {"HK", "MO"}}; !reflect.DeepEqual(p.CoTravel, want) {
+		t.Fatalf("co-travel = %v, want %v", p.CoTravel, want)
+	}
+	o := ObserveGeo(p, ips("1.1.1.1", "2.2.2.2"),
+		lookupOf(map[string]GeoLocation{
+			"1.1.1.1": geoAt("CN", "Guangdong", "Shenzhen"),
+			"2.2.2.2": geoAt("HK", "", "Hong Kong"),
+		}), true)
+	v := EvaluateGeo(p, o, GeoStreak{})
+	if v.State != GeoStateClean || v.BanDue {
+		t.Fatalf("state = %s banDue = %v (%s), want clean — the admin declared this pair", v.State, v.BanDue, v.Reason)
 	}
 }
 

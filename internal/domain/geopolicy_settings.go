@@ -94,6 +94,11 @@ func setIfPositive(dst *int, v int) {
 // scope suggested, and co-travel folds countries only, so such a token could
 // never match anything — it would sit in the set looking like a rule while
 // doing nothing. A set left empty is dropped with it.
+//
+// Lines that share a country are kept as written, not rejected or rewritten:
+// the fold merges them transitively, which is what an admin who writes
+// "CN,HK" and "HK,MO" means. Rejecting the overlap instead would make the
+// admin restate the same intent as one longer line.
 func parseCoTravel(raw string) [][]string {
 	var out [][]string
 	for _, line := range strings.Split(raw, "\n") {

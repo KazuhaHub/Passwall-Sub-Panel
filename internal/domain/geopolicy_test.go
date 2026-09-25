@@ -250,13 +250,124 @@ func TestObserve_CoTravelDoesNotExcuseAThirdPlace(t *testing.T) {
 	}
 }
 
+// Two sets that share a country are ONE set. The Greater Bay Area admin
+// writes "CN,HK" and "HK,MO" on separate lines; a Shenzhen + Hong Kong user
+// is then one place, in either line order. The fold used to be a
+// last-writer-wins map, so the second line re-pointed HK away from CN and the
+// first line's pairing silently stopped folding — a declared pair flagged
+// and, with auto-suspension armed, suspended.
+func TestObserve_OverlappingCoTravelSetsMerge(t *testing.T) {
+	for _, sets := range [][][]string{
+		{{"CN", "HK"}, {"HK", "MO"}},
+		{{"HK", "MO"}, {"CN", "HK"}},
+	} {
+		p := pol(func(p *GeoAnomalyPolicy) { p.CoTravel = sets })
+		o := ObserveGeo(p, ips("1.1.1.1", "2.2.2.2"),
+			lookupOf(map[string]GeoLocation{
+				"1.1.1.1": geoAt("CN", "Guangdong", "Shenzhen"),
+				"2.2.2.2": geoAt("HK", "", "Hong Kong"),
+			}), true)
+		if !reflect.DeepEqual(o.Places, []string{"CN"}) {
+			t.Fatalf("sets %v: places = %v, want [CN] — overlapping sets must fold as one", sets, o.Places)
+		}
+	}
+}
+
+// The merge is transitive, not pairwise: CN and MO share no line, but each
+// shares one with HK, so they are in the same set even when the user is never
+// seen in HK itself. This is what distinguishes a real merge from a fold that
+// merely stopped overwriting.
+func TestObserve_CoTravelMergesThroughAnUnobservedBridge(t *testing.T) {
+	p := pol(func(p *GeoAnomalyPolicy) { p.CoTravel = [][]string{{"CN", "HK"}, {"HK", "MO"}} })
+	o := ObserveGeo(p, ips("1.1.1.1", "2.2.2.2"),
+		lookupOf(map[string]GeoLocation{
+			"1.1.1.1": geoAt("MO", "", "Macau"),
+			"2.2.2.2": geoAt("CN", "Guangdong", "Zhuhai"),
+		}), true)
+	if !reflect.DeepEqual(o.Places, []string{"CN"}) {
+		t.Fatalf("places = %v, want [CN] — CN and MO are joined through HK", o.Places)
+	}
+}
+
+// A folded set is NAMED by a country the user was actually in: the smallest
+// OBSERVED member, not the smallest declared one. "HK,CN" with a Hong Kong +
+// Tokyo user used to read [CN JP] — in the Places an admin reads, in the
+// verdict's Reason, and in the audit row of an automatic suspension — for a
+// user never seen in mainland China. The count was right; the evidence lied.
+func TestObserve_CoTravelNamesOnlyCountriesTheUserWasIn(t *testing.T) {
+	p := pol(func(p *GeoAnomalyPolicy) {
+		p.CoTravel = [][]string{{"HK", "CN"}}
+		p.FlagAfterPolls = 1
+		p.BanEnabled = true
+		p.BanAfterPolls = 1
+	})
+	o := ObserveGeo(p, ips("1.1.1.1", "2.2.2.2"),
+		lookupOf(map[string]GeoLocation{
+			"1.1.1.1": geoAt("HK", "", "Hong Kong"),
+			"2.2.2.2": geoAt("JP", "Kanto", "Tokyo"),
+		}), true)
+	if !reflect.DeepEqual(o.Places, []string{"HK", "JP"}) {
+		t.Fatalf("places = %v, want [HK JP] — CN was declared, never observed", o.Places)
+	}
+	v := EvaluateGeo(p, o, GeoStreak{})
+	if v.State != GeoStateFlagged || !v.BanDue {
+		t.Fatalf("state = %s banDue = %v (%s); two countries must still flag and ban", v.State, v.BanDue, v.Reason)
+	}
+	for name, text := range map[string]string{"reason": v.Reason, "ban reason": v.BanReason} {
+		if !strings.Contains(text, "[HK JP]") || strings.Contains(text, "CN") {
+			t.Fatalf("%s = %q, want it to name [HK JP] and never CN", name, text)
+		}
+	}
+}
+
+// Within a merged set the name still follows what was observed: HK and MO
+// seen, CN (the set's smallest declared code) not, reads as HK — whichever
+// line the admin wrote first.
+func TestObserve_MergedCoTravelSetIsNamedBySmallestObservedMember(t *testing.T) {
+	for _, sets := range [][][]string{
+		{{"CN", "HK"}, {"HK", "MO"}},
+		{{"HK", "MO"}, {"CN", "HK"}},
+	} {
+		p := pol(func(p *GeoAnomalyPolicy) { p.CoTravel = sets })
+		o := ObserveGeo(p, ips("1.1.1.1", "2.2.2.2"),
+			lookupOf(map[string]GeoLocation{
+				"1.1.1.1": geoAt("MO", "", "Macau"),
+				"2.2.2.2": geoAt("HK", "", "Hong Kong"),
+			}), true)
+		if !reflect.DeepEqual(o.Places, []string{"HK"}) {
+			t.Fatalf("sets %v: places = %v, want [HK]", sets, o.Places)
+		}
+	}
+}
+
+// Merging widens the set, never the tolerance: every member of the merged
+// set is one place, and a country in no set still counts on top of it.
+func TestObserve_MergedCoTravelSetStillCountsAThirdCountry(t *testing.T) {
+	p := pol(func(p *GeoAnomalyPolicy) {
+		p.CoTravel = [][]string{{"CN", "HK"}, {"HK", "MO"}}
+		p.FlagAfterPolls = 1
+	})
+	o := ObserveGeo(p, ips("1.1.1.1", "2.2.2.2", "3.3.3.3", "4.4.4.4"),
+		lookupOf(map[string]GeoLocation{
+			"1.1.1.1": geoAt("CN", "Guangdong", "Shenzhen"),
+			"2.2.2.2": geoAt("HK", "", "Hong Kong"),
+			"3.3.3.3": geoAt("MO", "", "Macau"),
+			"4.4.4.4": geoAt("JP", "Kanto", "Tokyo"),
+		}), true)
+	if !reflect.DeepEqual(o.Places, []string{"CN", "JP"}) {
+		t.Fatalf("places = %v, want [CN JP] (the merged set plus JP)", o.Places)
+	}
+	if v := EvaluateGeo(p, o, GeoStreak{}); v.State != GeoStateFlagged {
+		t.Fatalf("state = %s (%s); a country outside every set must still flag", v.State, v.Reason)
+	}
+}
+
 // A one-member set excuses nothing.
 //
-// This pins the PROPERTY, not a line. No guard delivers it: folding a
-// singleton maps its only place to itself, so it is already the identity.
-// Verified by mutation — loosening the emptiness check to also process
-// singletons leaves this green, which is correct rather than a gap. Recorded
-// here so a later reader does not add a guard believing this test demands one.
+// This pins the PROPERTY, not a line. No guard delivers it: a singleton is a
+// union-find component of one, and its only place folds to itself, so it is
+// already the identity. Recorded here so a later reader does not add a guard
+// believing this test demands one.
 func TestObserve_SingletonCoTravelSetIsIgnored(t *testing.T) {
 	p := pol(func(p *GeoAnomalyPolicy) { p.CoTravel = [][]string{{"JP"}} })
 	o := ObserveGeo(p, ips("1.1.1.1", "2.2.2.2"),
@@ -361,8 +472,8 @@ func TestObserve_ScopeOffPlacesNothing(t *testing.T) {
 	}
 }
 
-// The one thing the emptiness check actually averts: an empty set would index
-// past the end when picking a representative.
+// A policy built directly rather than parsed can carry empty sets and blank
+// members. They must be skipped without disturbing a real pair beside them.
 func TestObserve_EmptyCoTravelSetDoesNotPanic(t *testing.T) {
 	p := pol(func(p *GeoAnomalyPolicy) { p.CoTravel = [][]string{{}, {"  ", ""}, {"JP", "TW"}} })
 	o := ObserveGeo(p, ips("1.1.1.1", "2.2.2.2"),
@@ -372,5 +483,20 @@ func TestObserve_EmptyCoTravelSetDoesNotPanic(t *testing.T) {
 		}), true)
 	if len(o.Places) != 1 {
 		t.Fatalf("places = %v; empty sets must be skipped and the real pair still folded", o.Places)
+	}
+}
+
+// Now that sets sharing a member merge, a blank member must not count as a
+// shared one: "JP, " and "DE, " would otherwise both join the "" code and
+// merge JP with DE — a pairing nobody declared, excused by whitespace.
+func TestObserve_BlankCoTravelMembersJoinNothing(t *testing.T) {
+	p := pol(func(p *GeoAnomalyPolicy) { p.CoTravel = [][]string{{"JP", " "}, {"DE", ""}} })
+	o := ObserveGeo(p, ips("1.1.1.1", "2.2.2.2"),
+		lookupOf(map[string]GeoLocation{
+			"1.1.1.1": geoAt("JP", "", "Tokyo"),
+			"2.2.2.2": geoAt("DE", "", "Berlin"),
+		}), true)
+	if !reflect.DeepEqual(o.Places, []string{"DE", "JP"}) {
+		t.Fatalf("places = %v, want [DE JP] — a blank member merges nothing", o.Places)
 	}
 }

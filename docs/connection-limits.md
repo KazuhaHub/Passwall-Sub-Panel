@@ -476,7 +476,7 @@ Not enforceable on: probe-sui — clients placed there ignore this.
 | `FlagAfterPolls`（`flag_after_polls`） | 3 | 迟滞。一次噪声只到 `suspect`，不报警 |
 | `ClearAfterPolls`（`clear_after_polls`） | 6 | **刻意比上升慢**，否则账号在两次检查之间踩到线下就能甩掉标记 |
 | `AllowAnywhere`（`allow_anywhere`） | false | 出差账号、团队共享凭据、运维自己的测试号——**整体豁免**，而不是为他们抬高所有人的阈值 |
-| `CoTravel`（`co_travel`） | 空 | 真实跨境常客（如 JP/TW 双地）。**指名这一对**比抬高容错率更诚实：第三个国家仍然会触发。**只折叠国家**，大小写不限；含 `/` 的省、城市条目直接丢弃 |
+| `CoTravel`（`co_travel`） | 空 | 真实跨境常客（如 JP/TW 双地）。**指名这一对**比抬高容错率更诚实：第三个国家仍然会触发。**只折叠国家**，大小写不限；含 `/` 的省、城市条目直接丢弃。共享同一国家的几行合并成一组，而且是传递的：`CN,HK` 和 `HK,MO` 两行即 CN、HK、MO 算一处，与行的先后无关。折叠后的名字取用户**实际出现过**的成员里代码最小的那个，所以原因文字和自动暂停的审计记录不会写出一个他没去过的国家 |
 | `MinPlacedRatio`（`min_placed_ratio`） | 0.5 | 数据库陈旧或残缺时判 `unknown`，而不是悄悄变成「全员清白」 |
 
 自动暂停自己的几个旋钮见 §12.5.2。
