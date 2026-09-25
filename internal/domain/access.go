@@ -31,6 +31,26 @@ func AccountLoginAllowed(enabled bool, reason AutoDisabledReason) bool {
 	return enabled || SelfServiceDisableReason(reason)
 }
 
+// HardServiceHold reports whether r is a service hold that outranks emergency
+// access: exactly the reasons AccessSnapshot returns on BEFORE it consults the
+// emergency window. They are someone's deliberate decision (an admin's, the
+// blocked-client policy's, the location detector's), not a fact the quota or
+// expiry machinery derived, so that machinery must never replace one with its
+// own reason nor lift one when its own condition clears. Emergency access is
+// unavailable under one, because granting it would not restore service anyway.
+//
+// TestHardServiceHoldIsExactlyWhatOutranksEmergency pins this set to
+// AccessSnapshot's behaviour, so a reason added to one and not the other
+// fails the build.
+func HardServiceHold(r AutoDisabledReason) bool {
+	switch r {
+	case DisabledBlockedClient, DisabledServiceManual, DisabledGeoAnomaly, DisabledGeoAutoSuspend:
+		return true
+	default:
+		return false
+	}
+}
+
 // AccessSnapshot folds persisted administrative intent together with live
 // facts (expiry, traffic and emergency access). Precedence is intentionally
 // explicit: an account lock wins over everything, hard service holds win over
@@ -95,6 +115,15 @@ func (u *User) AccessSnapshot(now time.Time) UserAccessSnapshot {
 		// exists so the next reason added here cannot repeat that.
 		snapshot.ServiceStatus = ServiceStatusManualSuspended
 		snapshot.ServiceReason = DisabledGeoAnomaly
+		return snapshot
+	case DisabledGeoAutoSuspend:
+		// Same status as its human sibling so the SPA's resume button and
+		// badges work unchanged; the reason is what tells the two apart, and
+		// what the automatic lift keys on. Ahead of the emergency check like
+		// every hold here: an emergency window must not quietly undo a
+		// suspension the detector is about to lift on its own timer.
+		snapshot.ServiceStatus = ServiceStatusManualSuspended
+		snapshot.ServiceReason = DisabledGeoAutoSuspend
 		return snapshot
 	}
 

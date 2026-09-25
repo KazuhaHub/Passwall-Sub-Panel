@@ -1952,6 +1952,18 @@ func EmergencyAccessStatusForUserWithTrafficLimit(u *domain.User, settings ports
 		st.Reason = "emergency access is already active"
 		return st
 	}
+	// A hard hold (admin pause, blocked client, geo suspension) outranks
+	// emergency access in AccessSnapshot, so a window granted under one would
+	// spend a use and restore nothing. Worse, UseEmergencyAccess writes the
+	// service reason: it would replace the hold with traffic_exceeded, and the
+	// next rollover would then resume the user. Checked before "remaining" so
+	// the user is told the real obstacle, not that they are out of uses.
+	// UseEmergencyAccess reads this status under emergencyMu before any write.
+	if domain.HardServiceHold(u.ServiceDisabledReason) {
+		st.Status = "service_held"
+		st.Reason = "emergency access is unavailable while the service is held"
+		return st
+	}
 	if st.Remaining <= 0 {
 		st.Status = "no_quota"
 		st.Reason = "emergency access limit reached"
@@ -2389,6 +2401,22 @@ func (s *Service) SetServiceSuspendedAndSync(ctx context.Context, userID int64, 
 	u, err := s.users.GetByID(ctx, userID)
 	if err != nil {
 		return err
+	}
+	// The quota reason never replaces a hard hold. The traffic callers already
+	// check their in-memory copy, but that copy is the poll's snapshot from the
+	// top of the cycle; an admin pause or a geo suspension written since then
+	// is only visible here, on the fresh row. Overwriting it would hand the
+	// hold to the rollover, which resumes quota suspensions. ErrConflict lets
+	// the callers read it as "held" rather than as a failure.
+	//
+	// Only quota is refused: an admin or the blocked-client policy replacing
+	// one hold with another is a newer deliberate decision. Residual race,
+	// accepted: a hold written in the milliseconds between this read and the
+	// write below is still overwritten. This path takes no per-user lock (the
+	// admin and quota paths never have), so closing that window would need a
+	// conditional write here, not a re-read.
+	if reason == domain.DisabledTrafficExceeded && domain.HardServiceHold(u.ServiceDisabledReason) {
+		return fmt.Errorf("%w: service is held (%s)", domain.ErrConflict, u.ServiceDisabledReason)
 	}
 	now := time.Now()
 	if err := s.updateServiceState(ctx, userID, reason, detail, &now); err != nil {

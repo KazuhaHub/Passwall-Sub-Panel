@@ -1472,7 +1472,15 @@ func (s *Service) recordAndEnforceWith(ctx context.Context, u *domain.User, tota
 		// If their service was traffic-suspended (including an active emergency
 		// access window), the new period gives them quota back without touching
 		// panel login state.
-		if u.ServiceDisabledReason == domain.DisabledTrafficExceeded || u.AutoDisabledReason == domain.DisabledTrafficExceeded {
+		//
+		// Never over a hard hold. The legacy account-axis marker alone used to
+		// satisfy this condition, so a user carrying a stale
+		// AutoDisabledReason=traffic_exceeded next to an admin pause, a
+		// blocked-client hold or a geo suspension was resumed by the month
+		// turning over: ResumeServiceAndSync clears the service reason whatever
+		// it is. Quota handed back is not the hold's condition clearing.
+		if (u.ServiceDisabledReason == domain.DisabledTrafficExceeded || u.AutoDisabledReason == domain.DisabledTrafficExceeded) &&
+			!domain.HardServiceHold(u.ServiceDisabledReason) {
 			if err := s.disabler.ResumeServiceAndSync(ctx, u.ID); err != nil {
 				log.Warn("traffic service resume", "user_id", u.ID, "err", err)
 			} else {
@@ -1540,10 +1548,27 @@ func (s *Service) recordAndEnforceWith(ctx context.Context, u *domain.User, tota
 		return err
 	}
 	if periodUsed >= u.TrafficLimitBytes {
+		// A hard hold already cuts service, and it outranks quota: replacing it
+		// with traffic_exceeded would hand it to the rollover above, which
+		// resumes quota suspensions — the admin pause (or geo suspension) would
+		// evaporate at the next period start. Leave it, and skip the floor push
+		// below too: the held user's upstream client is already disabled.
+		if domain.HardServiceHold(u.ServiceDisabledReason) {
+			return nil
+		}
 		if u.ServiceDisabledReason == domain.DisabledTrafficExceeded && !clearedEmergencyThisCycle {
 			return nil
 		}
 		if err := s.disabler.SetServiceSuspendedAndSync(ctx, u.ID, domain.DisabledTrafficExceeded, "traffic limit exceeded"); err != nil {
+			// ErrConflict: the FRESH row carries a hard hold this cycle's
+			// snapshot predates. Service is already cut under a reason quota
+			// must not replace, so this is "held", not a failed poll. Leave the
+			// in-memory copy alone: claiming traffic_exceeded here would have
+			// the rest of this cycle act on a reason the row does not carry.
+			if errors.Is(err, domain.ErrConflict) {
+				log.Info("quota suspension skipped: service already held", "user_id", u.ID, "err", err)
+				return nil
+			}
 			return fmt.Errorf("auto-suspend service: %w", err)
 		}
 		u.ServiceDisabledReason = domain.DisabledTrafficExceeded
@@ -2632,8 +2657,19 @@ func (s *Service) SetPeriodUsage(ctx context.Context, userID int64, usedBytes in
 	if u.TrafficLimitBytes <= 0 {
 		return nil
 	}
-	if usedBytes >= u.TrafficLimitBytes && u.Enabled && u.ServiceDisabledReason != domain.DisabledTrafficExceeded {
-		return s.disabler.SetServiceSuspendedAndSync(ctx, u.ID, domain.DisabledTrafficExceeded, "traffic limit exceeded")
+	// Same rule as the poll: a hard hold is never replaced by the quota reason
+	// (see recordAndEnforceWith). The usage above is saved either way. The
+	// resume branch below is already safe: it matches traffic_exceeded exactly.
+	if usedBytes >= u.TrafficLimitBytes && u.Enabled && u.ServiceDisabledReason != domain.DisabledTrafficExceeded &&
+		!domain.HardServiceHold(u.ServiceDisabledReason) {
+		err := s.disabler.SetServiceSuspendedAndSync(ctx, u.ID, domain.DisabledTrafficExceeded, "traffic limit exceeded")
+		// ErrConflict: a hold landed after the read above. The usage edit is
+		// already saved and the user is held, so the request succeeded.
+		if errors.Is(err, domain.ErrConflict) {
+			log.Info("quota suspension skipped: service already held", "user_id", u.ID, "err", err)
+			return nil
+		}
+		return err
 	}
 	if usedBytes < u.TrafficLimitBytes && u.ServiceDisabledReason == domain.DisabledTrafficExceeded {
 		return s.disabler.ResumeServiceAndSync(ctx, u.ID)

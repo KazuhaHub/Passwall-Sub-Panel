@@ -204,6 +204,48 @@ func TestEmergencyStatus_UsedBytesZeroWhenNoActiveWindow(t *testing.T) {
 	}
 }
 
+// A hard service hold outranks emergency access (AccessSnapshot checks it
+// first), so offering a window under one would take a use from the user and
+// restore nothing. Worse, the grant writes the service reason: before this, it
+// replaced the hold with traffic_exceeded, and the next rollover then resumed
+// the user — an admin pause or geo suspension undone by the user clicking a
+// button. Over quota is exactly when such a user would click it.
+func TestEmergencyStatus_UnavailableUnderAHardServiceHold(t *testing.T) {
+	now := time.Now()
+	for _, hold := range []domain.AutoDisabledReason{domain.DisabledGeoAutoSuspend, domain.DisabledServiceManual} {
+		t.Run(string(hold), func(t *testing.T) {
+			u := &domain.User{ID: 1, Enabled: true, ServiceDisabledReason: hold}
+			st := EmergencyAccessStatusForUserWithTrafficLimit(u, emSettings(), now, true) // over quota
+			if st.Available {
+				t.Fatalf("Available = true under a %s hold", hold)
+			}
+			if st.Status != "service_held" {
+				t.Fatalf("status = %q, want service_held", st.Status)
+			}
+		})
+	}
+}
+
+// The use path decides from the same status under emergencyMu, before any
+// write: the held row is left exactly as it was and no use is spent.
+func TestUseEmergencyAccess_RefusedUnderAHardServiceHoldWithoutWriting(t *testing.T) {
+	u := &domain.User{ID: 7, Enabled: true, ServiceDisabledReason: domain.DisabledGeoAutoSuspend, ServiceDisableDetail: "held"}
+	repo := &memoryUserRepo{byID: map[int64]*domain.User{7: u}}
+	svc := &Service{users: repo, ownership: emptyOwnershipRepo{}, settings: &fakeFloorSettingsRepo{cfg: emSettings()}}
+
+	_, err := svc.UseEmergencyAccess(context.Background(), 7, true)
+	if !errors.Is(err, domain.ErrValidation) {
+		t.Fatalf("err = %v, want ErrValidation", err)
+	}
+	got := repo.byID[7]
+	if got.ServiceDisabledReason != domain.DisabledGeoAutoSuspend || got.ServiceDisableDetail != "held" {
+		t.Fatalf("row = %q/%q, want the hold untouched", got.ServiceDisabledReason, got.ServiceDisableDetail)
+	}
+	if got.EmergencyUntil != nil || got.EmergencyUsedCount != 0 {
+		t.Fatalf("a window was granted: until=%v used=%d", got.EmergencyUntil, got.EmergencyUsedCount)
+	}
+}
+
 // The SSO role-policy unit tests live in the auth package now
 // (see internal/service/auth/role_test.go) because the policy moved
 // out of this package — user.EnsureSSO just calls auth.ResolveRoleForSSO.

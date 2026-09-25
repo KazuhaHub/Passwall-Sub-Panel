@@ -50,7 +50,24 @@ const (
 	// Service-level on purpose, never an account disable: the account keeps its
 	// panel login so the user can read why they were cut off and respond, and
 	// the step is reversible in one call. Suspicion is not proof.
+	//
+	// DisabledGeoAutoSuspend is its machine-applied, time-boxed sibling. This
+	// reason keeps meaning "a human decided"; the detector never writes it, so
+	// a resume of it still counts a human's false positive and nothing else.
 	DisabledGeoAnomaly AutoDisabledReason = "geo_anomaly"
+	// DisabledGeoAutoSuspend is the location detector's own, optional service
+	// suspension (off by default): applied only to a row that carries no other
+	// service reason, and lifted by the traffic poll once the configured
+	// duration has passed. A distinct reason rather than a flavour of
+	// DisabledGeoAnomaly for two reasons. The lift must be able to recognise
+	// its own suspension and never touch a human's, and an admin resume of
+	// THIS reason is the countable false-positive rate of the automation, which
+	// a shared reason would blur into the manual one.
+	//
+	// Service-level like its sibling, so the user can still sign in and read
+	// when service comes back. The value fits users.service_disabled_reason
+	// (size:32).
+	DisabledGeoAutoSuspend AutoDisabledReason = "geo_auto"
 	// DisabledPendingEmailVerify marks a self-registered account that hasn't yet
 	// confirmed its email. It can't log in (NOT a self-service reason) and has no
 	// 3X-UI clients provisioned until verification activates it.
@@ -110,7 +127,7 @@ func AccountDisableReason(r AutoDisabledReason) bool {
 func ServiceSuspensionReason(r AutoDisabledReason) bool {
 	switch r {
 	case DisabledServiceManual, DisabledBlockedClient, DisabledTrafficExceeded, DisabledExpired,
-		DisabledGeoAnomaly:
+		DisabledGeoAnomaly, DisabledGeoAutoSuspend:
 		return true
 	default:
 		return false

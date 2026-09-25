@@ -2076,3 +2076,164 @@ func (c *liveIPDetailReaderFake) ListLiveClientIPDetails(context.Context) (map[s
 	c.detailCalls++
 	return c.sightings, c.detailErr
 }
+
+// hardHolds are the service reasons someone deliberately applied, which the
+// quota machinery must neither replace nor lift. Two are enough to pin the
+// predicate: the pre-existing admin pause and the detector's own suspension.
+var hardHolds = []domain.AutoDisabledReason{domain.DisabledServiceManual, domain.DisabledGeoAutoSuspend}
+
+// An over-quota user who is already held must stay held under THAT reason.
+// Before this, the quota path overwrote the hold with traffic_exceeded, and the
+// next period rollover then resumed the user: an admin pause (or a geo
+// suspension) silently evaporated at the start of the month.
+func TestRecordAndEnforce_QuotaDoesNotOverwriteAHardHold(t *testing.T) {
+	for _, hold := range hardHolds {
+		t.Run(string(hold), func(t *testing.T) {
+			users := &fakeUserRepo{users: map[int64]*domain.User{
+				1: {ID: 1, Enabled: true, ServiceDisabledReason: hold, TrafficLimitBytes: 1},
+			}}
+			disabler := &fakeDisabler{}
+			svc := New(users, nil, &fakeTrafficRepo{}, nil, nil, nil, disabler)
+
+			cp := *users.users[1]
+			if err := svc.recordAndEnforce(context.Background(), &cp, trafficTotals{
+				up: 2, deltaUp: 2, deltaTotal: 2, hits: 1,
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if len(disabler.calls) != 0 {
+				t.Fatalf("disabler calls = %v, want none: a %s hold must not be replaced by the quota suspension", disabler.calls, hold)
+			}
+			if cp.ServiceDisabledReason != hold {
+				t.Fatalf("in-memory reason = %q, want %q kept", cp.ServiceDisabledReason, hold)
+			}
+		})
+	}
+}
+
+// A period rollover hands quota back, so it resumes a QUOTA suspension, and
+// the legacy account-axis marker (AutoDisabledReason=traffic_exceeded, from
+// builds that wrote quota onto the account switch) used to be enough to
+// trigger that resume on its own. A user who carries that stale marker AND a
+// hard hold must not be resumed by the month turning over.
+func TestRecordAndEnforce_RolloverDoesNotLiftAHardHold(t *testing.T) {
+	now := time.Now()
+	oldStart := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location()).AddDate(0, -1, 0)
+	for _, hold := range hardHolds {
+		t.Run(string(hold), func(t *testing.T) {
+			users := &fakeUserRepo{users: map[int64]*domain.User{
+				1: {
+					ID:                    1,
+					Enabled:               false,
+					AutoDisabledReason:    domain.DisabledTrafficExceeded,
+					ServiceDisabledReason: hold,
+					TrafficLimitBytes:     1 << 30,
+					TrafficResetPeriod:    domain.ResetMonthly,
+					TrafficPeriodStart:    &oldStart,
+				},
+			}}
+			disabler := &fakeDisabler{}
+			svc := New(users, nil, &fakeTrafficRepo{}, nil, nil, nil, disabler)
+
+			cp := *users.users[1]
+			if err := svc.recordAndEnforce(context.Background(), &cp, trafficTotals{
+				up: 2, deltaUp: 2, deltaTotal: 2, hits: 1,
+			}); err != nil {
+				t.Fatal(err)
+			}
+			for _, enabled := range disabler.calls {
+				if enabled {
+					t.Fatalf("disabler calls = %v: the rollover resumed a user held by %s", disabler.calls, hold)
+				}
+			}
+			if cp.ServiceDisabledReason != hold {
+				t.Fatalf("in-memory reason = %q, want %q kept", cp.ServiceDisabledReason, hold)
+			}
+			// The rollover itself still happens: the hold is about service,
+			// not about the billing calendar.
+			if saved := users.users[1].TrafficPeriodStart; saved == nil || saved.Equal(oldStart) {
+				t.Fatalf("period start not advanced: %v", saved)
+			}
+		})
+	}
+}
+
+// An admin setting this period's usage over the limit must not replace a hard
+// hold with traffic_exceeded either — same evaporation as the poll path. The
+// usage itself is still saved.
+func TestSetPeriodUsage_DoesNotOverwriteAHardHold(t *testing.T) {
+	const gb = int64(1) << 30
+	for _, hold := range hardHolds {
+		t.Run(string(hold), func(t *testing.T) {
+			users := &fakeUserRepo{users: map[int64]*domain.User{
+				1: {ID: 1, Enabled: true, ServiceDisabledReason: hold, TrafficLimitBytes: 10 * gb},
+			}}
+			disabler := &fakeDisabler{}
+			svc := New(users, nil, &fakeTrafficRepo{}, nil, nil, nil, disabler)
+
+			if err := svc.SetPeriodUsage(context.Background(), 1, 20*gb); err != nil {
+				t.Fatal(err)
+			}
+			if len(disabler.calls) != 0 {
+				t.Fatalf("disabler calls = %v, want none: a %s hold must not be replaced by the quota suspension", disabler.calls, hold)
+			}
+			if got := users.users[1].PeriodUsed(); got != 20*gb {
+				t.Fatalf("PeriodUsed() = %d, want %d: the usage edit must still be saved", got, 20*gb)
+			}
+		})
+	}
+}
+
+// conflictDisabler answers the quota suspension the way user.Service does when
+// the FRESH row carries a hard hold the caller's snapshot did not.
+type conflictDisabler struct {
+	fakeDisabler
+}
+
+func (d *conflictDisabler) SetServiceSuspendedAndSync(ctx context.Context, userID int64, reason domain.AutoDisabledReason, detail string) error {
+	d.calls = append(d.calls, false)
+	return fmt.Errorf("%w: service is held (%s)", domain.ErrConflict, domain.DisabledServiceManual)
+}
+
+// A conflict from the chokepoint means "someone else already holds this user",
+// which is the outcome the quota path wanted (service cut) under a reason it
+// must not replace. It is not a poll failure, and the poll's copy must not
+// claim traffic_exceeded — the next rollover would then act on a reason the
+// row does not carry.
+func TestRecordAndEnforce_QuotaConflictIsHeldNotAnError(t *testing.T) {
+	users := &fakeUserRepo{users: map[int64]*domain.User{
+		1: {ID: 1, Enabled: true, TrafficLimitBytes: 1},
+	}}
+	disabler := &conflictDisabler{}
+	svc := New(users, nil, &fakeTrafficRepo{}, nil, nil, nil, disabler)
+
+	cp := *users.users[1]
+	if err := svc.recordAndEnforce(context.Background(), &cp, trafficTotals{
+		up: 2, deltaUp: 2, deltaTotal: 2, hits: 1,
+	}); err != nil {
+		t.Fatalf("err = %v, want nil: a held user is not a failed poll", err)
+	}
+	if len(disabler.calls) != 1 {
+		t.Fatalf("disabler calls = %v, want the one refused suspension", disabler.calls)
+	}
+	if cp.ServiceDisabledReason != domain.DisabledNone || cp.ServiceDisableDetail != "" {
+		t.Fatalf("in-memory reason = %q/%q, want untouched", cp.ServiceDisabledReason, cp.ServiceDisableDetail)
+	}
+}
+
+// Same for the admin usage edit: the usage is already saved when the
+// suspension is refused, so the request succeeded.
+func TestSetPeriodUsage_QuotaConflictIsHeldNotAnError(t *testing.T) {
+	const gb = int64(1) << 30
+	users := &fakeUserRepo{users: map[int64]*domain.User{
+		1: {ID: 1, Enabled: true, TrafficLimitBytes: 10 * gb},
+	}}
+	svc := New(users, nil, &fakeTrafficRepo{}, nil, nil, nil, &conflictDisabler{})
+
+	if err := svc.SetPeriodUsage(context.Background(), 1, 20*gb); err != nil {
+		t.Fatalf("err = %v, want nil: the usage was saved and the user is held", err)
+	}
+	if got := users.users[1].PeriodUsed(); got != 20*gb {
+		t.Fatalf("PeriodUsed() = %d, want %d", got, 20*gb)
+	}
+}
