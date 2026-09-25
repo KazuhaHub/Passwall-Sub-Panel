@@ -1064,7 +1064,7 @@
       "no_rematches": "No Rematch outbounds configured",
       "sub_rules": "Sub-rules",
       "sub_rules_hint": "Each sub-rule uses a Mihomo rule list. A MATCH fallback is recommended.",
-      "sub_rules_compatibility": "Sub-rules are emitted only for Mihomo; reference them with SUB-RULE in the main rules above.",
+      "sub_rules_compatibility": "Sub-rules are emitted only in Mihomo subscriptions; reference them with SUB-RULE in the main rules, or select a target sub-rule for a Rematch outbound.",
       "sub_rules_count": "{{count}} sub-rules configured",
       "sub_rule_name": "Sub-rule name",
       "unnamed_sub_rule": "Unnamed sub-rule",

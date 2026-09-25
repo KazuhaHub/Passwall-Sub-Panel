@@ -198,7 +198,7 @@ func inspectMihomoFeatures(shared string, features MihomoRuleFeatures, targets [
 			}
 		}
 		if builtInRuleTargets[name] || groupSet[name] || nodeNames[name] {
-			addOutboundIssue(mihomoIssue("error", "rematch_outbound", name, "outbound_name_collision", "Rematch 出站名称与内置出口、策略组或节点名称冲突："+name))
+			addOutboundIssue(mihomoIssue("error", "rematch_outbound", name, "outbound_name_collision", "Rematch 出站名称与内置出口、代理组或节点名称冲突："+name))
 		}
 	}
 

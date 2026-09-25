@@ -303,7 +303,7 @@ func validateProxyGroupMembers(targets []string, configs map[string][]domain.Pro
 
 	for group, list := range configs {
 		if !targetSet[group] {
-			issues = append(issues, ProxyGroupIssue{Level: "error", Group: group, Code: "unknown_group", Message: "策略组不在当前主规则中"})
+			issues = append(issues, ProxyGroupIssue{Level: "error", Group: group, Code: "unknown_group", Message: "代理组不在当前主规则中"})
 		}
 		if len(list) == 0 {
 			issues = append(issues, ProxyGroupIssue{Level: "error", Group: group, Code: "empty_members", Message: "自定义成员不能为空；如需默认行为请删除自定义配置"})

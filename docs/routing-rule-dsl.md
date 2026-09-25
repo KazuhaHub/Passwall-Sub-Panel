@@ -218,7 +218,7 @@ src
 
 | PSP/Mihomo 表达 | sing-box 表达 | 说明 |
 |---|---|---|
-| 策略组或出站名称 | `action: route` + `outbound` | 路由到指定出站 |
+| 代理组或出站名称 | `action: route` + `outbound` | 路由到指定出站 |
 | `DIRECT` | `route` 到 direct 出站 | 直连 |
 | `REJECT` | `action: reject` | 拒绝连接 |
 | `REJECT-DROP` | `reject` + `method: drop` | 丢弃数据包，具体限流行为可能不同 |

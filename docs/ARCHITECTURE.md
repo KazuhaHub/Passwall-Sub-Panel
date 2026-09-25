@@ -100,7 +100,7 @@
 | **UPN (User Principal Name)** | 所有用户的唯一标识（本地用户和 SSO 用户统一） | 面板 MySQL |
 | **分组 (Group)** | 用户分组，含 tag_filter + layout + 可覆盖的 scope 设置（v3.8.0，见 §6.3） | 面板 MySQL |
 | **归属表 (Ownership) / `user_xui_clients`** | v3.0–v3.8 模型：每个用户在 3X-UI 里拥有的 client 白名单，一行 = 一个 (user, node)。**v3.9.0 起为遗留表**，新用户/新挂载不再写入，仅供未完成迁移的存量数据与过渡期回退逻辑使用（`MIGRATION(v3→v4)` 标记，计划 v4.0.0 删除，见 [migration/v3-to-v4-cleanup.md](migration/v3-to-v4-cleanup.md)） | 面板 MySQL |
-| **规则集 (Rule Set)** | Clash/sing-box rules 分片 + 策略组顺序 | 面板 YAML (`config/rulesets/*.yaml`) |
+| **规则集 (Rule Set)** | Clash/sing-box rules 分片 + 代理组顺序 | 面板 YAML (`config/rulesets/*.yaml`) |
 | **模板 (Template)** | Clash/Sing-box 配置框架 | 面板 YAML (`config/templates/*.yaml`) |
 | **layout** | 分组级渲染布局（节点排序 + 分隔符占位） | 面板 MySQL |
 | **同步任务 (Sync Task)** | 异步可重试的 3X-UI 操作 | 面板 MySQL |
@@ -228,7 +228,7 @@
 ┌──────┴───────────────────────────────────────────────────┐
 │      文件系统 (config/)                                    │
 │  config.yaml          主配置（最小化：listen/jwt/db）        │
-│  rulesets/*.yaml      规则集 + 策略组顺序                    │
+│  rulesets/*.yaml      规则集 + 代理组顺序                    │
 │  templates/*.yaml     订阅模板                              │
 └──────────────────────────────────────────────────────────┘
 ```
@@ -754,7 +754,7 @@ CREATE TABLE cert_events (
 | 文件 | 用途 |
 |---|---|
 | `config.yaml` | 监听端口、JWT 密钥、数据库 DSN、配置目录 |
-| `config/rulesets/*.yaml` | 规则集，包含规则片段、策略组顺序和启用状态 |
+| `config/rulesets/*.yaml` | 规则集，包含规则片段、代理组顺序和启用状态 |
 | `config/templates/*.yaml` | 订阅模板（mihomo / sing-box） |
 
 **注意**：3X-UI 面板凭证、SAML/OIDC 配置、系统设置等通过管理后台写入数据库。规则集和模板通过管理后台编辑，但最终落盘到 YAML 文件。
@@ -1098,7 +1098,7 @@ GET /{sub_path}/abc123 (UA: mihomo)
      e. proxy-groups 内的 @all / @region:TW / @tag:reality 展开
      f. {{ rules_common }} 按模板绑定顺序拼接各规则集的统一 rules；Mihomo 原样输出，sing-box 按支持类型编译
      g. `sub-rules:` 由模板定义，{{ sub_rules }} 只输出其下的 Mihomo 子规则映射内容；Rematch 出站追加到 proxies
-     h. 按规则集 proxy_group_order 生成策略组顺序；{{ rules_personal }} 插入 user.personal_rules
+     h. 按规则集 proxy_group_order 生成代理组顺序；{{ rules_personal }} 插入 user.personal_rules
   6. 写 sub_logs
   7. 写 Subscription-Userinfo header（流量 + 到期 + 限额）
   8. 返回 yaml
@@ -1253,21 +1253,21 @@ GET /{sub_path}/abc123 (UA: mihomo)
 | `@tag:reality` | tags 含 reality 的节点名 |
 | `@region:TW+tag:reality` | AND 组合 |
 
-规则集内的 `proxy_group_order` 是 mihomo `proxy-groups` 和 sing-box selector outbounds 的展示顺序。字段留空时使用项目内置默认顺序：`🚀 节点选择` → `⚡ QUIC控制` → `🎮 UDP控制` → `🇨🇳 中国大陆` → `💬 Ai平台` → `📹 油管视频` → `🎥 奈飞视频` → `📺 巴哈姆特` → `🌍 国外媒体` → `🎮 游戏平台` → `📲 电报消息` → `Ⓜ️ 微软Bing` → `📢 谷歌FCM` → `🌏 国内媒体` → `📺 哔哩哔哩` → `Ⓜ️ 微软云盘` → `Ⓜ️ 微软服务` → `🍎 苹果服务` → `🎶 网易音乐` → `🎯 全球直连` → `🛑 广告拦截` → `🍃 应用净化` → `🐟 漏网之鱼`；不在默认或自定义列表中的代理组，按主规则中的首次出现顺序放在列表末尾（保持既有订阅的展示位置，避免部分自定义顺序打乱未列出的组）。模板负责声明使用哪些规则集；规则集负责声明自定义策略组顺序和主规则。
+规则集内的 `proxy_group_order` 是 mihomo `proxy-groups` 和 sing-box selector outbounds 的展示顺序。字段留空时使用项目内置默认顺序：`🚀 节点选择` → `⚡ QUIC控制` → `🎮 UDP控制` → `🇨🇳 中国大陆` → `💬 Ai平台` → `📹 油管视频` → `🎥 奈飞视频` → `📺 巴哈姆特` → `🌍 国外媒体` → `🎮 游戏平台` → `📲 电报消息` → `Ⓜ️ 微软Bing` → `📢 谷歌FCM` → `🌏 国内媒体` → `📺 哔哩哔哩` → `Ⓜ️ 微软云盘` → `Ⓜ️ 微软服务` → `🍎 苹果服务` → `🎶 网易音乐` → `🎯 全球直连` → `🛑 广告拦截` → `🍃 应用净化` → `🐟 漏网之鱼`；不在默认或自定义列表中的代理组，按主规则中的首次出现顺序放在列表末尾（保持既有订阅的展示位置，避免部分自定义顺序打乱未列出的组）。模板负责声明使用哪些规则集；规则集负责声明自定义代理组顺序和主规则。
 
 HTTP/3 常见的 `UDP/443` 与其他 UDP 分开控制：`⚡ QUIC控制` 默认委托给 `🎮 UDP控制`，也可在客户端单独选择节点、`DIRECT` 或 `REJECT`。规则不包含国家/地区假设，因此海外用户和回国代理使用同一套配置。详见 [ADR 0030](adr/0030-separate-quic-and-udp-controls.md)。
 
-`proxy_group_members` 可选地覆盖单个策略组内部的成员顺序，Mihomo 与 sing-box 共用。支持具体节点（稳定 `node_id`）、内置出口、其他策略组以及 `remaining` / `region:XX` / `tag:name` 动态节点集合；Mihomo 还支持 `kind: rematch` 引用同一规则集声明的 Rematch 出站。展开后按首次出现去重。字段缺失时继续使用内置的名称匹配默认顺序。后台入口为「规则库 → 编辑规则集 → 策略组成员」。
+`proxy_group_members` 可选地覆盖单个代理组内部的成员顺序，Mihomo 与 sing-box 共用。支持具体节点（稳定 `node_id`）、内置出口、其他代理组以及 `remaining` / `region:XX` / `tag:name` 动态节点集合；Mihomo 还支持 `kind: rematch` 引用同一规则集声明的 Rematch 出站。展开后按首次出现去重。字段缺失时继续使用内置的名称匹配默认顺序。后台入口为「规则库 → 编辑规则集 → 标题组成员」。
 
-主规则（加上渲染器自动补充的必要依赖组）是策略组存在性的真相源。删除主规则中某个策略组后，后台保存前会列出并确认级联删除该组的 `proxy_group_order`、`proxy_group_members` 与 `proxy_group_options` 项；保存接口也会执行相同规范化并返回实际落盘实体，确保直接 API 调用不会留下不可见的孤立配置。仅删除以该组为键的顶层配置；其它存活组若仍把它作为成员引用，继续按 `missing_group` 拦截，不能静默改变存活组的路由语义。已有孤立配置不做启动时批量迁移，在下一次保存该规则集时清理。
+主规则（加上渲染器自动补充的必要依赖组）是代理组存在性的真相源。删除主规则中某个代理组后，后台保存前会列出并确认级联删除该组的 `proxy_group_order`、`proxy_group_members` 与 `proxy_group_options` 项；保存接口也会执行相同规范化并返回实际落盘实体，确保直接 API 调用不会留下不可见的孤立配置。仅删除以该组为键的顶层配置；其它存活组若仍把它作为成员引用，继续按 `missing_group` 拦截，不能静默改变存活组的路由语义。已有孤立配置不做启动时批量迁移，在下一次保存该规则集时清理。
 
 > **跨规则集引用限制**：`proxy_group` 成员的校验以单个规则集为单位——被引用的组必须出现在**当前规则集自身**的主规则中，否则保存时按 `missing_group` 拦截（编辑器预览同样如此，反馈一致）。渲染时多个规则集会拼接，因此已保存的跨规则集引用能正常解析；但保存阶段暂不支持引用只在其它规则集里定义的组。若需要跨规则集引用，请把相关组定义在同一规则集内。
 
-`proxy_group_options` 可选地覆盖单个策略组的 Mihomo 类型，支持 `select`、`url-test`、`fallback`、`load-balance`。三个自动类型共用 `url`、`interval`、`lazy`、`timeout`；`url-test` 额外支持 `tolerance`，`load-balance` 额外支持 `round-robin` / `consistent-hashing` / `sticky-sessions`。该字段仅影响 Mihomo；sing-box 始终生成 `selector`。自动类型（`url-test` / `fallback` / `load-balance`）的成员必须是真实出口（具体节点或其它代理组），不能包含 `DIRECT` / `REJECT` 等内置出口或 Rematch 出站——保存校验会直接拦截，渲染时也会剥离这类成员；若某用户可授权节点与配置成员没有交集导致成员为空，该组会安全降级为 `select`（避免生成把全部流量导向 `DIRECT` 的伪自动组）。模板绑定多个规则集且同名组重复配置时，members 与 options 分别按规则集顺序取第一个配置。
+`proxy_group_options` 可选地覆盖单个代理组的 Mihomo 类型，支持 `select`、`url-test`、`fallback`、`load-balance`。三个自动类型共用 `url`、`interval`、`lazy`、`timeout`；`url-test` 额外支持 `tolerance`，`load-balance` 额外支持 `round-robin` / `consistent-hashing` / `sticky-sessions`。该字段仅影响 Mihomo；sing-box 始终生成 `selector`。自动类型（`url-test` / `fallback` / `load-balance`）的成员必须是真实出口（具体节点或其它代理组），不能包含 `DIRECT` / `REJECT` 等内置出口或 Rematch 出站——保存校验会直接拦截，渲染时也会剥离这类成员；若某用户可授权节点与配置成员没有交集导致成员为空，该组会安全降级为 `select`（避免生成把全部流量导向 `DIRECT` 的伪自动组）。模板绑定多个规则集且同名组重复配置时，members 与 options 分别按规则集顺序取第一个配置。
 
 PSP 主规则遵守以下编译约定：模板中的规则集顺序决定合并顺序，每个规则集只有一份主规则；Mihomo 保持原始行序，sing-box 跳过无法转换的 Mihomo 专属类型。`SUB-RULE` 只能引用当前规则集声明的子规则，子规则禁止继续嵌套 `SUB-RULE`，并建议以 `MATCH` 兜底。只设置 `target-rematch-name` 的 Rematch 出站，其对应 `REMATCH-NAME` 处理规则必须位于触发该出站的规则之前，以避免重复匹配循环；也可以设置 `target-sub-rule` 直接进入子规则。
 
-同一 Mihomo 模板绑定的所有启用规则集中，子规则名和 Rematch 出站名必须分别保持唯一；出站名也不能与内置出口、策略组、节点重名。规则集保存和模板保存都会执行这组交叉校验。Mihomo 模板通过 `{{ sub_rules }}` 输出子规则映射内容，占位符本身不包含顶层 `sub-rules:` 键；缺少该占位符时不报错，子规则会被静默丢弃。默认模板在末尾显式定义 `sub-rules:` 并在其下内置该占位符。
+同一 Mihomo 模板绑定的所有启用规则集中，子规则名和 Rematch 出站名必须分别保持唯一；出站名也不能与内置出口、代理组、节点重名。规则集保存和模板保存都会执行这组交叉校验。Mihomo 模板通过 `{{ sub_rules }}` 输出子规则映射内容，占位符本身不包含顶层 `sub-rules:` 键；缺少该占位符时不报错，子规则会被静默丢弃。默认模板在末尾显式定义 `sub-rules:` 并在其下内置该占位符。
 
 ### 9.2 分组级 layout
 
