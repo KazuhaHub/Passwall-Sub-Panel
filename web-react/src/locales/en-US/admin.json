@@ -1052,7 +1052,7 @@
     },
     "tabs": {
       "rules": "Main rules",
-      "members": "Group members"
+      "members": "Proxy group members"
     },
     "mihomo": {
       "rematches": "Rematch outbounds",
@@ -1115,7 +1115,6 @@
       },
       "test_url": "Test URL",
       "interval": "Test interval (seconds)",
-      "interval_hint": "0 disables scheduled tests in Mihomo; sing-box uses its default 3-minute interval",
       "timeout": "Timeout (milliseconds)",
       "tolerance": "Switch tolerance (milliseconds)",
       "lazy": "Lazy health checks (skip while group is unused)",
@@ -1130,7 +1129,7 @@
         "consistent-hashing": "Send requests for the same destination to the same proxy node.",
         "sticky-sessions": "Pin the same source and destination pair to one node for 10 minutes."
       },
-      "client_compatibility": "Automatic latency test generates a urltest outbound in sing-box subscriptions; fallback and load balancing still generate manual selectors in sing-box.",
+      "client_compatibility": "sing-box subscriptions support only Manual selection and Automatic latency test; Automatic fallback and Load balancing are downgraded to manual selectors.",
       "add_title": "Add member",
       "add": "Add",
       "kind_node": "Specific node",

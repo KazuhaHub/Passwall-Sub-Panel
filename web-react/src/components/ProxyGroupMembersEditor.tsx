@@ -303,7 +303,7 @@ export default function ProxyGroupMembersEditor({ content, groupOrder, initialGr
                   onChange={e => updateOptions({ url: e.target.value })} sx={{ gridColumn: '1 / -1' }} />
                 <TextField size="small" type="number" label={t('admin:rules.members.interval')}
                   value={currentOptions.interval ?? ''} onChange={e => updateOptions({ interval: Number(e.target.value) })}
-                  helperText={t('admin:rules.members.interval_hint')} slotProps={{ htmlInput: { min: 0, step: 1 } }} />
+                  slotProps={{ htmlInput: { min: 0, step: 1 } }} />
                 <TextField size="small" type="number" label={t('admin:rules.members.timeout')}
                   value={currentOptions.timeout ?? ''} onChange={e => updateOptions({ timeout: Number(e.target.value) })}
                   slotProps={{ htmlInput: { min: 1, step: 1 } }} />

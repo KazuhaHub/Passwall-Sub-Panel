@@ -1257,7 +1257,7 @@ GET /{sub_path}/abc123 (UA: mihomo)
 
 HTTP/3 常见的 `UDP/443` 与其他 UDP 分开控制：`⚡ QUIC控制` 默认委托给 `🎮 UDP控制`，也可在客户端单独选择节点、`DIRECT` 或 `REJECT`。规则不包含国家/地区假设，因此海外用户和回国代理使用同一套配置。详见 [ADR 0030](adr/0030-separate-quic-and-udp-controls.md)。
 
-`proxy_group_members` 可选地覆盖单个代理组内部的成员顺序，Mihomo 与 sing-box 共用。支持具体节点（稳定 `node_id`）、内置出口、其他代理组以及 `remaining` / `region:XX` / `tag:name` 动态节点集合；Mihomo 还支持 `kind: rematch` 引用同一规则集声明的 Rematch 出站。展开后按首次出现去重。字段缺失时继续使用内置的名称匹配默认顺序。后台入口为「规则库 → 编辑规则集 → 标题组成员」。
+`proxy_group_members` 可选地覆盖单个代理组内部的成员顺序，Mihomo 与 sing-box 共用。支持具体节点（稳定 `node_id`）、内置出口、其他代理组以及 `remaining` / `region:XX` / `tag:name` 动态节点集合；Mihomo 还支持 `kind: rematch` 引用同一规则集声明的 Rematch 出站。展开后按首次出现去重。字段缺失时继续使用内置的名称匹配默认顺序。后台入口为「规则库 → 编辑规则集 → 代理组成员」。
 
 主规则（加上渲染器自动补充的必要依赖组）是代理组存在性的真相源。删除主规则中某个代理组后，后台保存前会列出并确认级联删除该组的 `proxy_group_order`、`proxy_group_members` 与 `proxy_group_options` 项；保存接口也会执行相同规范化并返回实际落盘实体，确保直接 API 调用不会留下不可见的孤立配置。仅删除以该组为键的顶层配置；其它存活组若仍把它作为成员引用，继续按 `missing_group` 拦截，不能静默改变存活组的路由语义。已有孤立配置不做启动时批量迁移，在下一次保存该规则集时清理。
 

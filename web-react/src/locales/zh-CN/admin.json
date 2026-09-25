@@ -1050,7 +1050,7 @@
     },
     "tabs": {
       "rules": "主规则",
-      "members": "标题组成员"
+      "members": "代理组成员"
     },
     "mihomo": {
       "rematches": "Rematch 出站",
@@ -1113,7 +1113,6 @@
       },
       "test_url": "测试地址",
       "interval": "测试间隔（秒）",
-      "interval_hint": "0 在 Mihomo 中关闭定时测试；sing-box 使用默认间隔 3 分钟",
       "timeout": "超时时间（毫秒）",
       "tolerance": "节点切换容差（毫秒）",
       "lazy": "懒惰检测（未使用该组时不测试）",
@@ -1128,7 +1127,7 @@
         "consistent-hashing": "相同目标地址的请求固定分配给同一个代理节点。",
         "sticky-sessions": "相同来源地址和目标地址的请求固定到同一节点，缓存 10 分钟。"
       },
-      "client_compatibility": "自动测速会在 sing-box 订阅中生成 urltest；自动回退和负载均衡在 sing-box 中仍生成手动 selector。",
+      "client_compatibility": "sing-box 订阅仅支持“手动选择”和“自动测速”，“自动回退”和“负载均衡”将降级为手动 selector。",
       "add_title": "添加成员",
       "add": "添加",
       "kind_node": "具体节点",
