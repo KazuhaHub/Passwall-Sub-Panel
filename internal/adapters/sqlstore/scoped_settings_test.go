@@ -232,3 +232,72 @@ func TestScopedSettings_SkipsNonOverridableRow(t *testing.T) {
 			g.Require2FAForStaff, gl.Require2FAForStaff)
 	}
 }
+
+// TestScopedSettings_GeoTierAndBanKeysOverridable: the per-tier tolerances and
+// every automatic-suspension key resolve per group, which is how one group
+// arms suspension (or a group of confirmed false positives disarms it) while
+// the fleet keeps the default. Bites if any of the eight is missing from
+// OverridableScopeKeys: SetOverride would still store the row, and the
+// resolver would silently skip it, so the group editor would show a value
+// the poll never judges with.
+//
+// The ignore list is the deliberate exception: whether an address is
+// somebody's relay does not depend on which group is looking. A stray group
+// row for it must not take effect.
+func TestScopedSettings_GeoTierAndBanKeysOverridable(t *testing.T) {
+	global, scope, resolver := newScopedTestRepos(t)
+	ctx := context.Background()
+
+	base, _ := global.Load(ctx, ports.UISettings{})
+	base.GeoAnomalyIgnoreAddresses = "203.0.113.7"
+	if err := global.Save(ctx, base); err != nil {
+		t.Fatalf("save global: %v", err)
+	}
+	for _, o := range []ports.ScopeOverride{
+		{Type: "geo_anomaly", Name: "max_regions", Value: "2"},
+		{Type: "geo_anomaly", Name: "max_cities", Value: "5"},
+		{Type: "geo_anomaly", Name: "ban_enabled", Value: "1"},
+		{Type: "geo_anomaly", Name: "ban_max_countries", Value: "2"},
+		{Type: "geo_anomaly", Name: "ban_max_regions", Value: "3"},
+		{Type: "geo_anomaly", Name: "ban_max_cities", Value: "6"},
+		{Type: "geo_anomaly", Name: "ban_after_polls", Value: "8"},
+		{Type: "geo_anomaly", Name: "ban_duration_minutes", Value: "120"},
+		// Written straight to the repo, which (unlike the admin handler)
+		// does not gate on the overridable set.
+		{Type: "geo_anomaly", Name: "ignore_addresses", Value: "198.51.100.0/24"},
+	} {
+		if err := scope.SetOverride(ctx, "group", 1, o); err != nil {
+			t.Fatalf("set override %s: %v", o.Name, err)
+		}
+	}
+
+	g, err := resolver.LoadForGroup(ctx, 1, ports.UISettings{})
+	if err != nil {
+		t.Fatalf("LoadForGroup: %v", err)
+	}
+	for _, c := range []struct {
+		key       string
+		got, want any
+	}{
+		{"max_regions", g.GeoAnomalyMaxRegions, 2},
+		{"max_cities", g.GeoAnomalyMaxCities, 5},
+		{"ban_enabled", g.GeoAnomalyBanEnabled, true},
+		{"ban_max_countries", g.GeoAnomalyBanMaxCountries, 2},
+		{"ban_max_regions", g.GeoAnomalyBanMaxRegions, 3},
+		{"ban_max_cities", g.GeoAnomalyBanMaxCities, 6},
+		{"ban_after_polls", g.GeoAnomalyBanAfterPolls, 8},
+		{"ban_duration_minutes", g.GeoAnomalyBanDurationMinutes, 120},
+	} {
+		if c.got != c.want {
+			t.Errorf("group override geo_anomaly.%s must apply: got %v, want %v", c.key, c.got, c.want)
+		}
+	}
+	if g.GeoAnomalyIgnoreAddresses != "203.0.113.7" {
+		t.Errorf("the ignore list is global only; a group row must not replace it: got %q", g.GeoAnomalyIgnoreAddresses)
+	}
+
+	gl, _ := resolver.Load(ctx, ports.UISettings{})
+	if gl.GeoAnomalyBanEnabled || gl.GeoAnomalyMaxCities != 0 {
+		t.Error("the global geo policy must be unaffected by a group override")
+	}
+}

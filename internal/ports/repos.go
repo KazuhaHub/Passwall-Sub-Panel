@@ -1245,19 +1245,41 @@ type UISettings struct {
 	// misjudged, and the two failure directions are not symmetric — a false
 	// flag accuses somebody who did nothing.
 	//
-	// All of these are per-group overridable (see OverridableScopeKeys), so a
-	// group of travelling staff can be exempted without loosening the fleet.
+	// Every knob here except GeoAnomalyIgnoreAddresses is per-group
+	// overridable (see OverridableScopeKeys), so a group of travelling staff
+	// can be exempted, or automatic suspension armed for one group, without
+	// changing the fleet. A group value REPLACES the global one whole, and a
+	// stored 0 means "the shipped default" — not "inherit", and not "zero
+	// tolerance" (domain.GeoPolicyFromSettings is the one place that reads it).
 	//
-	// GeoAnomalyScope is the granularity at which two observations count as
-	// different places: "off", "country" (default), "region", "city".
-	// Two CITIES is a commute or a carrier NAT pool and fires constantly in a
-	// general fleet, which is why country is the default and city is not.
+	// GeoAnomalyScope names the FINEST tier judged; every coarser tier is
+	// judged too, each against its own tolerance: "city" (the default:
+	// countries, regions and cities), "region" (countries and regions),
+	// "country", or "off". Empty means the default. Any other value judges
+	// countries only — with the finest tier as the default, "unrecognised
+	// keeps the default" would make a typo the most sensitive setting.
 	GeoAnomalyScope string `json:"geo_anomaly_scope"`
-	// GeoAnomalyMaxPlaces is how many places may be occupied concurrently
-	// before a sample is over tolerance. 1 means "two at once is over".
-	// A second location is often entirely legitimate — a work VPN, a second
-	// home, family abroad — so this is a number rather than a hardcoded 2.
+	// GeoAnomalyMaxPlaces is the COUNTRY tolerance: how many countries may be
+	// occupied at once before a sample is over. 1 means "two at once is
+	// over". The name predates the tiers and is kept so a stored value, and
+	// every group override of it, keeps meaning what it meant at country
+	// scope. A second country is often entirely legitimate — a work VPN,
+	// family abroad — so this is a number rather than a hardcoded 2.
 	GeoAnomalyMaxPlaces int `json:"geo_anomaly_max_places"`
+	// GeoAnomalyMaxRegions is the REGION (province / state) tolerance,
+	// counted inside the widest country and never summed across countries.
+	// Default 1: two provinces at once is the signal operators in large
+	// countries ask about, and one that country scope cannot see. A home
+	// router left on plus a phone in another province trips it too, which is
+	// why it is a number an admin can raise rather than a fixed rule.
+	GeoAnomalyMaxRegions int `json:"geo_anomaly_max_regions"`
+	// GeoAnomalyMaxCities is the CITY tolerance inside the widest country.
+	// Default 2, one above the region tolerance: home broadband and a phone
+	// carrier routinely exit in two different cities of one province, and a
+	// city threshold of 1 fired on every such subscriber (why v1 kept city
+	// scope off the default). An address the database places only to a
+	// country never counts as a city.
+	GeoAnomalyMaxCities int `json:"geo_anomaly_max_cities"`
 	// GeoAnomalyFlagAfterPolls is how many CONSECUTIVE over-tolerance samples
 	// are required before the state becomes flagged; below it the state is
 	// "suspect" and is never acted on. This is the knob that stops the
@@ -1273,10 +1295,12 @@ type UISettings struct {
 	// is "unknown". Without it a stale or partial database reads as a fleet
 	// where nobody is sharing.
 	GeoAnomalyMinPlacedRatio float64 `json:"geo_anomaly_min_placed_ratio"`
-	// GeoAnomalyCoTravel names place sets that do not count as separate from
-	// each other: one set per LINE, members comma-separated (e.g. "JP,TW").
-	// For a genuine dual presence this is more honest than raising their
-	// tolerance, because it stays specific: a THIRD place still flags.
+	// GeoAnomalyCoTravel names COUNTRY sets that do not count as separate
+	// from each other: one set per LINE, members comma-separated (e.g.
+	// "JP,TW", any case). For a genuine dual presence this is more honest
+	// than raising their tolerance, because it stays specific: a THIRD
+	// country still flags. Countries only — regions and cities are never
+	// folded across a border — so a "CC/Region" token is dropped on read.
 	//
 	// A single newline-separated string rather than a list because the
 	// settings store has scalar descriptors only, and because a textarea is
@@ -1287,6 +1311,58 @@ type UISettings struct {
 	// cleaner than raising a threshold, which would loosen detection for
 	// people who are not travelling.
 	GeoAnomalyAllowAnywhere bool `json:"geo_anomaly_allow_anywhere"`
+	// GeoAnomalyIgnoreAddresses lists source addresses the judgement never
+	// counts: IPs and CIDRs, one per line or comma-separated, text after '#'
+	// is a comment, at most domain.GeoIgnoreListMaxEntries entries. It is for
+	// the relays, CDNs and office exits the panel cannot know about; PSP's
+	// own node and relay addresses, internal ranges and exits held by several
+	// accounts at once are set aside without an entry.
+	//
+	// GLOBAL ONLY — deliberately absent from OverridableScopeKeys. Whether an
+	// address is somebody's infrastructure does not depend on which group is
+	// looking, and a per-group copy would let one group's edit leave every
+	// other group judging the same relay as a place.
+	//
+	// It is also the one value in this block the admin form VALIDATES: a
+	// typo here fails OPEN — the entry silently matches nothing and the relay
+	// keeps accusing people — and, unlike a nonsense tolerance, nothing
+	// downstream can repair it toward not accusing. So a save naming a bad
+	// entry is refused, with the entry named.
+	GeoAnomalyIgnoreAddresses string `json:"geo_anomaly_ignore_addresses"`
+
+	// ---- Concurrent locations: automatic temporary suspension ----
+	// Suspicion is not proof, so the default response to a flag is a bell
+	// entry for an admin and nothing else. These arm the one automatic
+	// response, OFF unless a scope turns it on: pausing the account's proxy
+	// SERVICE — never its panel login — for a fixed time, lifted again
+	// without an admin. It never replaces a suspension held for any other
+	// reason, and never fires on an account that is expired, over quota or
+	// inside an emergency window.
+	//
+	// GeoAnomalyBanEnabled arms it. Per-group so it can be armed for one
+	// group, or disarmed for a group holding confirmed false positives —
+	// there is no per-user switch, so that group is the remedy.
+	GeoAnomalyBanEnabled bool `json:"geo_anomaly_ban_enabled"`
+	// GeoAnomalyBanMaxCountries / BanMaxRegions / BanMaxCities are the
+	// suspension's own tolerances, with the same meaning as the flag
+	// tolerances above. Defaults 1 / 2 / 3: looser than the flag's 1 / 1 / 2
+	// below the country tier, because cutting somebody's service needs a
+	// wider spread than raising a bell entry. Each is raised to at least the
+	// flag tolerance of its tier when read, so a suspension can never fire on
+	// a sample the flag itself calls within tolerance.
+	GeoAnomalyBanMaxCountries int `json:"geo_anomaly_ban_max_countries"`
+	GeoAnomalyBanMaxRegions   int `json:"geo_anomaly_ban_max_regions"`
+	GeoAnomalyBanMaxCities    int `json:"geo_anomaly_ban_max_cities"`
+	// GeoAnomalyBanAfterPolls is how many CONSECUTIVE samples over the
+	// suspension tolerances an already-flagged account needs. Default 6
+	// (about 30 minutes at a 5-minute poll). A nonsense value repairs to 6,
+	// never to 1: a single sample must never cost somebody their service.
+	GeoAnomalyBanAfterPolls int `json:"geo_anomaly_ban_after_polls"`
+	// GeoAnomalyBanDurationMinutes is how long a suspension lasts before it
+	// lifts itself. Default 60, clamped to 1..10080 (a week): the time box is
+	// what lets a false positive heal without an admin, and a value long
+	// enough to be permanent in practice would defeat it.
+	GeoAnomalyBanDurationMinutes int `json:"geo_anomaly_ban_duration_minutes"`
 
 	// ---- IP geolocation (access-log region display, offline .mmdb) ----
 	// Resolution is fully offline against a local .mmdb in <ConfigDir>/geoip/;
@@ -1588,13 +1664,28 @@ var OverridableScopeKeys = map[string]bool{
 	// so a team that genuinely works across borders can be exempted or
 	// loosened without weakening detection for everyone else. See
 	// docs/connection-limits.md §12.3.
+	//
+	// geo_anomaly.ignore_addresses is deliberately NOT here, and its absence
+	// is the whole global-only mechanism: whether an address is somebody's
+	// relay or office exit does not depend on which group is looking.
 	"geo_anomaly.scope":             true,
 	"geo_anomaly.max_places":        true,
+	"geo_anomaly.max_regions":       true,
+	"geo_anomaly.max_cities":        true,
 	"geo_anomaly.flag_after_polls":  true,
 	"geo_anomaly.clear_after_polls": true,
 	"geo_anomaly.min_placed_ratio":  true,
 	"geo_anomaly.co_travel":         true,
 	"geo_anomaly.allow_anywhere":    true,
+	// Automatic temporary suspension — per-group like sub_block_auto_disable
+	// below: it can be armed for one group, and a group holding confirmed
+	// false positives can disarm it (there is no per-user switch).
+	"geo_anomaly.ban_enabled":          true,
+	"geo_anomaly.ban_max_countries":    true,
+	"geo_anomaly.ban_max_regions":      true,
+	"geo_anomaly.ban_max_cities":       true,
+	"geo_anomaly.ban_after_polls":      true,
+	"geo_anomaly.ban_duration_minutes": true,
 	// 2FA methods (login / enroll) — auth_local / twofa / passkey / login2fa.
 	"security.totp_enabled":      true,
 	"security.passkey_enabled":   true,

@@ -593,3 +593,128 @@ func TestObserveLiveIPs_PersistsThatACountWasOnlyAFloor(t *testing.T) {
 		t.Fatal("a panel could not be read, so the count is a floor — persisting it as complete hides that")
 	}
 }
+
+// placeIn places an address in one region of a country, with a city: the
+// shape a city-granular database returns.
+func placeIn(cc, region, city string) domain.GeoLocation {
+	return domain.GeoLocation{CountryCode: cc, Country: cc, Region: region, City: city}
+}
+
+// Whether the stored CITY tolerance reaches the judgement. Four cities in one
+// region of one country is over the default city tolerance of 2 and within
+// every coarser tier, so the city tolerance alone decides it: a group that
+// raised it to 5 must see the same user clean. If the poll dropped the
+// stored value, the group editor would show a tolerance nothing judges with.
+func TestObserveLiveIPs_StoredCityToleranceChangesTheVerdict(t *testing.T) {
+	geo := &stubGeo{available: true, places: map[string]domain.GeoLocation{
+		"1.1.1.1": placeIn("JP", "Kanto", "Tokyo"),
+		"1.1.1.2": placeIn("JP", "Kanto", "Yokohama"),
+		"1.1.1.3": placeIn("JP", "Kanto", "Chiba"),
+		"1.1.1.4": placeIn("JP", "Kanto", "Saitama"),
+	}}
+	users := []*domain.User{{ID: 7, GroupID: 3}}
+	clients := []*domain.PSPClient{client(7, 1, "u7@x")}
+	ips := func(int64) (map[string][]string, error) {
+		return map[string][]string{"u7@x": {"1.1.1.1", "1.1.1.2", "1.1.1.3", "1.1.1.4"}}, nil
+	}
+
+	// Nothing stored: the shipped city tolerance (2) is exceeded.
+	metrics.Reset()
+	s := newObserver(geo, nil, domain.DefaultGeoPolicy())
+	s.settings = &fakeScoped{byGroup: map[int64]ports.UISettings{3: {}}}
+	s.observeLiveIPs(context.Background(), users, clients, ips, panelsOf(1))
+	if got := counterFor(t, "psp_geo_verdict_total{state=suspect}"); got != 1 {
+		t.Fatalf("four cities at once must be over the default city tolerance: suspect=%d clean=%d",
+			got, counterFor(t, "psp_geo_verdict_total{state=clean}"))
+	}
+
+	// The group raised the city tolerance: the SAME user is within it.
+	metrics.Reset()
+	s = newObserver(geo, nil, domain.DefaultGeoPolicy())
+	s.settings = &fakeScoped{byGroup: map[int64]ports.UISettings{3: {GeoAnomalyMaxCities: 5}}}
+	s.observeLiveIPs(context.Background(), users, clients, ips, panelsOf(1))
+	if got := counterFor(t, "psp_geo_verdict_total{state=clean}"); got != 1 {
+		t.Fatalf("a stored city tolerance of 5 must clear four cities: clean=%d suspect=%d",
+			got, counterFor(t, "psp_geo_verdict_total{state=suspect}"))
+	}
+}
+
+// The same for the REGION tolerance: two provinces of one country (and only
+// two cities, within the default city tolerance) is over the default region
+// tolerance of 1, and a group that raised it to 2 must see the user clean.
+func TestObserveLiveIPs_StoredRegionToleranceChangesTheVerdict(t *testing.T) {
+	geo := &stubGeo{available: true, places: map[string]domain.GeoLocation{
+		"1.1.1.1": placeIn("JP", "Kanto", "Tokyo"),
+		"1.1.1.2": placeIn("JP", "Kansai", "Osaka"),
+	}}
+	users := []*domain.User{{ID: 7, GroupID: 3}}
+	clients := []*domain.PSPClient{client(7, 1, "u7@x")}
+	ips := func(int64) (map[string][]string, error) {
+		return map[string][]string{"u7@x": {"1.1.1.1", "1.1.1.2"}}, nil
+	}
+
+	metrics.Reset()
+	s := newObserver(geo, nil, domain.DefaultGeoPolicy())
+	s.settings = &fakeScoped{byGroup: map[int64]ports.UISettings{3: {}}}
+	s.observeLiveIPs(context.Background(), users, clients, ips, panelsOf(1))
+	if got := counterFor(t, "psp_geo_verdict_total{state=suspect}"); got != 1 {
+		t.Fatalf("two regions at once must be over the default region tolerance: suspect=%d clean=%d",
+			got, counterFor(t, "psp_geo_verdict_total{state=clean}"))
+	}
+
+	metrics.Reset()
+	s = newObserver(geo, nil, domain.DefaultGeoPolicy())
+	s.settings = &fakeScoped{byGroup: map[int64]ports.UISettings{3: {GeoAnomalyMaxRegions: 2}}}
+	s.observeLiveIPs(context.Background(), users, clients, ips, panelsOf(1))
+	if got := counterFor(t, "psp_geo_verdict_total{state=clean}"); got != 1 {
+		t.Fatalf("a stored region tolerance of 2 must clear two regions: clean=%d suspect=%d",
+			got, counterFor(t, "psp_geo_verdict_total{state=suspect}"))
+	}
+}
+
+// Whether the stored AUTOMATIC-SUSPENSION settings reach the policy. The
+// suspension streak is the observable: it only counts when suspension is
+// armed, and only for samples over the suspension tolerances. Three groups,
+// the same two-country spread each (distinct addresses per user, so no exit
+// is shared):
+//   - armed with the default tolerances: 2 countries is over 1, streak 1;
+//   - armed, country tolerance 2: within it, streak 0;
+//   - nothing stored: suspension is off by default, streak 0.
+//
+// If the poll dropped ban_enabled the first would read 0; if it dropped
+// ban_max_countries the second would read 1.
+func TestObserveLiveIPs_StoredBanSettingsReachThePolicy(t *testing.T) {
+	metrics.Reset()
+	geo := &stubGeo{available: true, places: map[string]domain.GeoLocation{
+		"1.1.1.7": at("JP"), "2.2.2.7": at("DE"),
+		"1.1.1.8": at("JP"), "2.2.2.8": at("DE"),
+		"1.1.1.9": at("JP"), "2.2.2.9": at("DE"),
+	}}
+	store := &memStreaks{}
+	s := newObserver(geo, store, domain.DefaultGeoPolicy())
+	s.settings = &fakeScoped{byGroup: map[int64]ports.UISettings{
+		3: {GeoAnomalyBanEnabled: true},
+		4: {GeoAnomalyBanEnabled: true, GeoAnomalyBanMaxCountries: 2},
+		5: {},
+	}}
+	s.observeLiveIPs(context.Background(),
+		[]*domain.User{{ID: 7, GroupID: 3}, {ID: 8, GroupID: 4}, {ID: 9, GroupID: 5}},
+		[]*domain.PSPClient{client(7, 1, "u7@x"), client(8, 1, "u8@x"), client(9, 1, "u9@x")},
+		func(int64) (map[string][]string, error) {
+			return map[string][]string{
+				"u7@x": {"1.1.1.7", "2.2.2.7"},
+				"u8@x": {"1.1.1.8", "2.2.2.8"},
+				"u9@x": {"1.1.1.9", "2.2.2.9"},
+			}, nil
+		}, panelsOf(1))
+
+	for uid, want := range map[int64]int{7: 1, 8: 0, 9: 0} {
+		rec, ok := store.data[uid]
+		if !ok {
+			t.Fatalf("nothing persisted for user %d", uid)
+		}
+		if rec.Streak.BanOver != want {
+			t.Errorf("user %d: saved suspension streak = %d, want %d", uid, rec.Streak.BanOver, want)
+		}
+	}
+}

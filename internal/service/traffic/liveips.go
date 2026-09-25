@@ -142,15 +142,27 @@ func (s *Service) observeLiveIPs(
 			// values, whole value by whole value — there is no per-user
 			// layer — and GeoPolicyFromSettings then reads a 0 as "never
 			// configured", not as zero tolerance.
+			//
+			// Every per-group geo knob goes through here; the ignore list
+			// does not, because it is global only and is not part of the
+			// judging policy — it decides which addresses are judged at all.
 			if set, err := s.settings.LoadForUser(ctx, u, ports.UISettings{}); err == nil {
 				p = domain.GeoPolicyFromSettings(domain.GeoPolicySettings{
-					Scope:           set.GeoAnomalyScope,
-					MaxPlaces:       set.GeoAnomalyMaxPlaces,
-					FlagAfterPolls:  set.GeoAnomalyFlagAfterPolls,
-					ClearAfterPolls: set.GeoAnomalyClearAfterPolls,
-					MinPlacedRatio:  set.GeoAnomalyMinPlacedRatio,
-					CoTravel:        set.GeoAnomalyCoTravel,
-					AllowAnywhere:   set.GeoAnomalyAllowAnywhere,
+					Scope:              set.GeoAnomalyScope,
+					MaxPlaces:          set.GeoAnomalyMaxPlaces,
+					MaxRegions:         set.GeoAnomalyMaxRegions,
+					MaxCities:          set.GeoAnomalyMaxCities,
+					FlagAfterPolls:     set.GeoAnomalyFlagAfterPolls,
+					ClearAfterPolls:    set.GeoAnomalyClearAfterPolls,
+					MinPlacedRatio:     set.GeoAnomalyMinPlacedRatio,
+					CoTravel:           set.GeoAnomalyCoTravel,
+					AllowAnywhere:      set.GeoAnomalyAllowAnywhere,
+					BanEnabled:         set.GeoAnomalyBanEnabled,
+					BanMaxCountries:    set.GeoAnomalyBanMaxCountries,
+					BanMaxRegions:      set.GeoAnomalyBanMaxRegions,
+					BanMaxCities:       set.GeoAnomalyBanMaxCities,
+					BanAfterPolls:      set.GeoAnomalyBanAfterPolls,
+					BanDurationMinutes: set.GeoAnomalyBanDurationMinutes,
 				})
 			} else {
 				// Fall back to the process default rather than to a zero

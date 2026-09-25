@@ -84,15 +84,27 @@ type settingsDTO struct {
 	// Notify thresholds (moved from mail_settings to settings KV type='notify').
 	ExpireBeforeDays     int `json:"expire_before_days"`
 	TrafficRemainPercent int `json:"traffic_remain_percent"`
-	// Concurrent-location anomaly policy. Per-group overridable; see
-	// docs/connection-limits.md §12.3 for why each knob exists.
+	// Concurrent-location anomaly policy. Every field but the ignore list is
+	// per-group overridable (the ignore list is global only); see
+	// ports.UISettings and docs/connection-limits.md §12.3 for why each knob
+	// exists.
 	GeoAnomalyScope           string  `json:"geo_anomaly_scope"`
 	GeoAnomalyMaxPlaces       int     `json:"geo_anomaly_max_places"`
+	GeoAnomalyMaxRegions      int     `json:"geo_anomaly_max_regions"`
+	GeoAnomalyMaxCities       int     `json:"geo_anomaly_max_cities"`
 	GeoAnomalyFlagAfterPolls  int     `json:"geo_anomaly_flag_after_polls"`
 	GeoAnomalyClearAfterPolls int     `json:"geo_anomaly_clear_after_polls"`
 	GeoAnomalyMinPlacedRatio  float64 `json:"geo_anomaly_min_placed_ratio"`
 	GeoAnomalyCoTravel        string  `json:"geo_anomaly_co_travel"`
 	GeoAnomalyAllowAnywhere   bool    `json:"geo_anomaly_allow_anywhere"`
+	GeoAnomalyIgnoreAddresses string  `json:"geo_anomaly_ignore_addresses"`
+	// Automatic temporary suspension on concurrent locations (off by default).
+	GeoAnomalyBanEnabled         bool `json:"geo_anomaly_ban_enabled"`
+	GeoAnomalyBanMaxCountries    int  `json:"geo_anomaly_ban_max_countries"`
+	GeoAnomalyBanMaxRegions      int  `json:"geo_anomaly_ban_max_regions"`
+	GeoAnomalyBanMaxCities       int  `json:"geo_anomaly_ban_max_cities"`
+	GeoAnomalyBanAfterPolls      int  `json:"geo_anomaly_ban_after_polls"`
+	GeoAnomalyBanDurationMinutes int  `json:"geo_anomaly_ban_duration_minutes"`
 	// Geo IP (access-log region display, offline .mmdb).
 	GeoIPEnabled             bool   `json:"geo_ip_enabled"`
 	GeoIPDBFile              string `json:"geo_ip_db_file"`
@@ -283,11 +295,14 @@ func settingsToDTO(s ports.UISettings) settingsDTO {
 		TrafficRemainPercent:        s.TrafficRemainPercent,
 		GeoAnomalyScope:             s.GeoAnomalyScope,
 		GeoAnomalyMaxPlaces:         s.GeoAnomalyMaxPlaces,
+		GeoAnomalyMaxRegions:        s.GeoAnomalyMaxRegions,
+		GeoAnomalyMaxCities:         s.GeoAnomalyMaxCities,
 		GeoAnomalyFlagAfterPolls:    s.GeoAnomalyFlagAfterPolls,
 		GeoAnomalyClearAfterPolls:   s.GeoAnomalyClearAfterPolls,
 		GeoAnomalyMinPlacedRatio:    s.GeoAnomalyMinPlacedRatio,
 		GeoAnomalyCoTravel:          s.GeoAnomalyCoTravel,
 		GeoAnomalyAllowAnywhere:     s.GeoAnomalyAllowAnywhere,
+		GeoAnomalyIgnoreAddresses:   s.GeoAnomalyIgnoreAddresses,
 		GeoIPEnabled:                s.GeoIPEnabled,
 		GeoIPDBFile:                 s.GeoIPDBFile,
 		GeoIPAutoUpdate:             s.GeoIPAutoUpdate,
@@ -329,6 +344,13 @@ func settingsToDTO(s ports.UISettings) settingsDTO {
 		TwoFAEmailResendCooldownSec:          s.TwoFAEmailResendCooldownSec,
 		CodeResendCooldownSec:                s.CodeResendCooldownSec,
 		Require2FAForStaff:                   s.Require2FAForStaff,
+		// Concurrent locations: automatic temporary suspension (off by default).
+		GeoAnomalyBanEnabled:         s.GeoAnomalyBanEnabled,
+		GeoAnomalyBanMaxCountries:    s.GeoAnomalyBanMaxCountries,
+		GeoAnomalyBanMaxRegions:      s.GeoAnomalyBanMaxRegions,
+		GeoAnomalyBanMaxCities:       s.GeoAnomalyBanMaxCities,
+		GeoAnomalyBanAfterPolls:      s.GeoAnomalyBanAfterPolls,
+		GeoAnomalyBanDurationMinutes: s.GeoAnomalyBanDurationMinutes,
 
 		NodeTaskOfflineReconcileDays: policy.OfflineReconcileDays,
 		NodeTaskBackupRestoreDays:    policy.BackupRestoreDays,
@@ -416,13 +438,26 @@ func (h *AdminSettingsHandler) Put(c *gin.Context) {
 		// is the single place a stored value is interpreted, and it already
 		// repairs an unusable one toward NOT accusing. Rejecting at the form
 		// would put a second, drifting definition of "valid" in the codebase.
+		//
+		// The ignore list is the one exception, validated below: a typo in it
+		// fails OPEN (the entry silently matches nothing) and there is nothing
+		// downstream that could repair it toward not accusing.
 		GeoAnomalyScope:               strings.TrimSpace(req.GeoAnomalyScope),
 		GeoAnomalyMaxPlaces:           req.GeoAnomalyMaxPlaces,
+		GeoAnomalyMaxRegions:          req.GeoAnomalyMaxRegions,
+		GeoAnomalyMaxCities:           req.GeoAnomalyMaxCities,
 		GeoAnomalyFlagAfterPolls:      req.GeoAnomalyFlagAfterPolls,
 		GeoAnomalyClearAfterPolls:     req.GeoAnomalyClearAfterPolls,
 		GeoAnomalyMinPlacedRatio:      req.GeoAnomalyMinPlacedRatio,
 		GeoAnomalyCoTravel:            strings.TrimSpace(req.GeoAnomalyCoTravel),
 		GeoAnomalyAllowAnywhere:       req.GeoAnomalyAllowAnywhere,
+		GeoAnomalyIgnoreAddresses:     strings.TrimSpace(req.GeoAnomalyIgnoreAddresses),
+		GeoAnomalyBanEnabled:          req.GeoAnomalyBanEnabled,
+		GeoAnomalyBanMaxCountries:     req.GeoAnomalyBanMaxCountries,
+		GeoAnomalyBanMaxRegions:       req.GeoAnomalyBanMaxRegions,
+		GeoAnomalyBanMaxCities:        req.GeoAnomalyBanMaxCities,
+		GeoAnomalyBanAfterPolls:       req.GeoAnomalyBanAfterPolls,
+		GeoAnomalyBanDurationMinutes:  req.GeoAnomalyBanDurationMinutes,
 		GeoIPEnabled:                  req.GeoIPEnabled,
 		GeoIPDBFile:                   strings.TrimSpace(req.GeoIPDBFile),
 		GeoIPAutoUpdate:               req.GeoIPAutoUpdate,
@@ -566,6 +601,16 @@ func (h *AdminSettingsHandler) Put(c *gin.Context) {
 	// even though the downloader supported it.
 	if !geo.IsValidUpdateSource(s.GeoIPUpdateSource) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Geo_ip_update_source must be maxmind, dbip, ipinfo, or custom"})
+		return
+	}
+	// The concurrent-location ignore list is parsed by the SAME function the
+	// traffic poll uses, so the form cannot accept a list the poll would read
+	// differently. Refused whole rather than saved with the bad entries
+	// dropped: the admin typed those entries to cover something, and a save
+	// that quietly kept the rest would leave that something accusing people
+	// with nothing on screen to say so. The error names every bad entry.
+	if _, err := domain.ParseGeoIgnoreList(s.GeoAnomalyIgnoreAddresses); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 	if s.AuditRetentionDays < 0 || s.SyncTaskRetentionDays < 0 || s.AuthEventRetentionDays < 0 {
