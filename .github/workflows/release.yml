@@ -6,7 +6,8 @@ name: Release
 # amd64 + docker arm64 under QEMU) and the linux binaries four times. Here:
 #
 #   web         → builds the SPA once
-#   build       → cross-compiles 6 platforms natively in parallel (matrix)
+#   build       → compiles 6 platforms in parallel (matrix); the two linux
+#                 legs run on their own architecture and run what they built
 #   release     → packages tarballs/zips + checksums and publishes the Release
 #   docker      → reuses the linux/amd64 + linux/arm64 binaries to push a
 #                 multi-arch image (no compilation inside the container build)
@@ -193,12 +194,27 @@ jobs:
           # be skipped is the one where a person, rather than the allocator, chose
           # the commit. A tag that is pushed before the suite finishes is refused
           # here; the run is re-run, not re-tagged.
+          #
+          # AND THE COMMIT HAS TO BE ON MAIN, JUDGED BY A RUN THAT TESTED IT THERE.
+          # A dispatch can be started from any branch, and a branch head usually has
+          # a green test.yml run already: the pull_request one, which tested the
+          # merge ref rather than this commit and skips the third-party lane. Asked
+          # without a branch, the lookup took that run, and the dispatch would have
+          # cut a permanent tag on unmerged code and moved :beta. The ancestry check
+          # refuses the commit, `--branch main` refuses the borrowed evidence. Main
+          # is fetched by name rather than left to the checkout's refspec; a
+          # maintenance line, if one ever releases from here, names its own branch.
+          git fetch --quiet --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          git merge-base --is-ancestor "$SHA" origin/main || {
+            echo "${SHA:0:7} is not on main; a release is cut from a commit main already contains" >&2
+            exit 1
+          }
           conclusion=$(gh run list --repo "$GITHUB_REPOSITORY" \
-            --workflow test.yml --commit "$SHA" --limit 1 \
+            --workflow test.yml --commit "$SHA" --branch main --limit 1 \
             --json status,conclusion \
             --jq '.[] | select(.status == "completed") | .conclusion' | head -n 1)
           test "$conclusion" = "success" || {
-            echo "the test suite has not succeeded on ${SHA:0:7} (conclusion: ${conclusion:-none})" >&2
+            echo "the test suite has not succeeded on ${SHA:0:7} on main (conclusion: ${conclusion:-none})" >&2
             exit 1
           }
 
@@ -285,6 +301,14 @@ jobs:
     # tag job that FAILS must stop the release — which a plain `needs` does.
     needs: tag
     runs-on: ubuntu-latest
+    # EVERY JOB STATES ITS OWN TIMEOUT, and here that is not tidiness. All releases
+    # share one concurrency group that never cancels, and GitHub keeps one pending
+    # run per group: a hung upload, push or npm ci held on the 360-minute default
+    # blocks every other release for six hours, and a third release started
+    # meanwhile silently replaces the second, which for a pushed tag leaves a tag
+    # with no release. Each limit is several times the job's time in run
+    # 35941771170 (v4.0.1.11): this one took 40 seconds.
+    timeout-minutes: 10
     outputs:
       tag: ${{ steps.identity.outputs.tag }}
       version: ${{ steps.identity.outputs.version }}
@@ -468,6 +492,19 @@ jobs:
           echo "planned cases: $(echo "$cases" | python3 -c 'import json,sys;print(" ".join(c["id"] for c in json.load(sys.stdin)))')"
           echo "node_cases=$cases" >> "$GITHUB_OUTPUT"
 
+  # A SECOND RUN OF CASES test.yml HAS ALREADY PASSED ON THIS COMMIT, AND ON PURPOSE.
+  # The tag job refuses a commit whose main run of test.yml did not succeed, and
+  # that run exercised these same cases, with the same planner, test selection and
+  # validator, against the same pinned Node commits. Reading its evidence instead
+  # would save two runner slots, and it would put the publication gate on a
+  # cache-restored run: test.yml's compatibility job restores the shared Go build
+  # and module caches, and a publisher restores nothing (see the head of this
+  # file). R10 does not allow cache isolation to be removed even to make CI pass,
+  # and two slots are a weaker reason than that. It would also make the gate trust
+  # a report from another run, which then has to be proven to name this commit.
+  # So the cases run again here, cold and in this run. It costs no wall-clock: in
+  # run 35941771170 these legs finished at 01:16:59 and the last build leg at
+  # 01:17:15, so the gate was waiting on the build either way.
   node-compatibility:
     name: Released Node compatibility (${{ matrix.node_case.version }})
     runs-on: ubuntu-latest
@@ -604,6 +641,8 @@ jobs:
   compatibility:
     name: compatibility gate
     runs-on: ubuntu-latest
+    # A checkout, two small downloads and three node scripts: 12 seconds.
+    timeout-minutes: 10
     # `build` is here because the gate now gathers the artifact digests the build
     # legs emit; without the edge it could run first and find none. The build
     # itself does not depend on the gate, so this adds no cycle — and `release`
@@ -625,6 +664,21 @@ jobs:
       - name: Download every case report
         uses: actions/download-artifact@v8
         with:
+          # SCOPED TO ITS OWN EVIDENCE, as test.yml's gate is since #226. With no
+          # name and no pattern this fetched every artifact in the run — the six
+          # psp binaries and the web bundle, about 150 MB it never read — and it
+          # depended on every one of them being downloadable. test.yml's gate went
+          # red on main over a `.dockerbuild` record it could not fetch, and the
+          # docker job here publishes one; only the job order keeps it off this
+          # step. The two patterns are the two things the gate reads, and each
+          # artifact still lands in a directory of its own, which is the layout
+          # the case-set checker and the digest collector below expect.
+          pattern: 'node-wire-v1@*'
+          path: evidence
+      - name: Download the artifact digests the build legs recorded
+        uses: actions/download-artifact@v8
+        with:
+          pattern: 'compat-digest-*'
           path: evidence
       - name: the matrix leg itself succeeded
         env:
@@ -721,6 +775,8 @@ jobs:
     name: Build web assets
     runs-on: ubuntu-latest
     needs: setup
+    # npm ci, a vite build and the browser smoke: 36 seconds.
+    timeout-minutes: 10
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -761,18 +817,28 @@ jobs:
 
   build:
     name: Build ${{ matrix.goos }}/${{ matrix.goarch }}
-    runs-on: ubuntu-latest
+    # EACH LINUX LEG RUNS ON ITS OWN ARCHITECTURE, so the binary it builds can be
+    # run, not only inspected (see the build step). linux/arm64 is the one that
+    # moved: it is the arm64 image's binary, and no job had ever started it. The
+    # target decides the bytes, not the host — CGO is off and the build is
+    # -trimpath — and whatever this leg builds is what the gate indexes and every
+    # later job reads. The leg costs what it did: a public repository's arm64
+    # runner is free, and it queues like the others (Passwall-Node's arm legs
+    # wait as long as its x64 ones).
+    runs-on: ${{ matrix.runner }}
     needs: [setup, web]
+    # A cold toolchain and a cold compile: about 1m40s a leg.
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
         include:
-          - { goos: linux,   goarch: amd64, ext: ""     }
-          - { goos: linux,   goarch: arm64, ext: ""     }
-          - { goos: darwin,  goarch: amd64, ext: ""     }
-          - { goos: darwin,  goarch: arm64, ext: ""     }
-          - { goos: windows, goarch: amd64, ext: ".exe" }
-          - { goos: windows, goarch: arm64, ext: ".exe" }
+          - { goos: linux,   goarch: amd64, ext: "",     runner: ubuntu-latest    }
+          - { goos: linux,   goarch: arm64, ext: "",     runner: ubuntu-24.04-arm }
+          - { goos: darwin,  goarch: amd64, ext: "",     runner: ubuntu-latest    }
+          - { goos: darwin,  goarch: arm64, ext: "",     runner: ubuntu-latest    }
+          - { goos: windows, goarch: amd64, ext: ".exe", runner: ubuntu-latest    }
+          - { goos: windows, goarch: arm64, ext: ".exe", runner: ubuntu-latest    }
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -814,6 +880,15 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p out
+          # THE PANEL'S UI IS EMBEDDED, AND AN EMPTY dist STILL COMPILES. The
+          # tracked .gitkeep keeps `//go:embed all:dist` building without the
+          # bundle, and the server only logs that SPA routes will 404. So a web
+          # bundle that lands anywhere but here ships a panel with no UI and a
+          # green run; this is the one place that can notice before it is linked.
+          test -f internal/web/dist/index.html || {
+            echo 'internal/web/dist/index.html is missing: the binary would embed a panel with no UI' >&2
+            exit 1
+          }
           short_sha="${COMMIT:0:7}"
           ldflags="-s -w"
           ldflags+=" -X github.com/KazuhaHub/passwall-sub-panel/internal/version.Version=${VERSION}"
@@ -821,6 +896,27 @@ jobs:
           ldflags+=" -X github.com/KazuhaHub/passwall-sub-panel/internal/version.BuildDate=${BUILD_DATE}"
           go build -trimpath -ldflags="${ldflags}" -o "out/psp${{ matrix.ext }}" ./cmd/panel
           sh deploy/check-build.sh "out/psp${{ matrix.ext }}" "$GOOS" "$GOARCH" "$COMMIT"
+          # A LINUX BINARY IS RUN, AND IT MUST NAME THE RELEASE. The linker ignores
+          # -X for a symbol that does not exist, so a moved or renamed version
+          # package ships every binary and image as "dev": the in-app update
+          # nudge goes quiet and the compat document is looked up under the wrong
+          # name, and check-build.sh cannot see it, because it reads the build
+          # metadata rather than the stamp. Both linux legs run on their own
+          # architecture, which is what makes this native evidence and not
+          # emulation; a leg moved to a foreign runner fails here instead of
+          # quietly skipping. darwin and windows stay inspected only.
+          if [ "$GOOS" = linux ]; then
+            test "$(go env GOHOSTARCH)" = "$GOARCH" || {
+              echo "linux/$GOARCH is built on a $(go env GOHOSTARCH) runner, so its binary cannot be run here" >&2
+              exit 1
+            }
+            reported=$(out/psp --version 2>&1)
+            printf '%s\n' "$reported"
+            grep -qF "${VERSION} (${short_sha})" <<<"$reported" || {
+              echo "linux/$GOARCH reports no ${VERSION} (${short_sha}); the version stamp did not land" >&2
+              exit 1
+            }
+          fi
 
       - name: Upload binary
         uses: actions/upload-artifact@v7
@@ -860,12 +956,23 @@ jobs:
   release:
     name: Publish GitHub Release
     runs-on: ubuntu-latest
+    # 35 seconds before it read the draft back; the read-back downloads the
+    # release's own files (149 MB for v4.0.1.11) and adds an attestation.
+    timeout-minutes: 15
     # Through the GATE, never straight onto the matrix: the gate is the only job
     # that knows whether the whole case set reported, so reaching around it
     # would let a release publish on a run where a version went untested.
     needs: [setup, build, compatibility]
+    # id-token and attestations are for the provenance step alone: the first mints
+    # the OIDC token Sigstore signs with, the second stores the attestation. GitHub
+    # grants scopes per job, so every other step here, the pinned upload action
+    # included, could mint that token and attest files of its own choosing. Kept
+    # here because an attesting job of its own would have to be handed the read-back
+    # files, and the draft held until it finished, to attest before publication.
     permissions:
       contents: write
+      id-token: write
+      attestations: write
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -878,10 +985,23 @@ jobs:
           path: artifacts
           pattern: psp-*
 
+      # THE INDEX SHIPS WITH THE RELEASE, because that is the only place it
+      # outlives the run. As an artifact it is kept 90 days, which is also the
+      # most a public repository allows, so from then on the claim behind the
+      # release could no longer be read — the one thing evidence-index.mjs says
+      # it exists to prevent. It was attached by hand once (v4.0.0-beta.25) and
+      # never again.
+      - name: Download the compatibility evidence index
+        uses: actions/download-artifact@v8
+        with:
+          name: compatibility-evidence-index
+          path: evidence
+
       - name: Package archives
         shell: bash
         env:
           VERSION: ${{ needs.setup.outputs.version }}
+          SHA: ${{ needs.setup.outputs.sha }}
         run: |
           set -euo pipefail
           mkdir -p dist build
@@ -924,6 +1044,18 @@ jobs:
               tar -C build -czf "dist/${pkgname}.tar.gz" "${pkgname}"
             fi
           done
+
+          # NAMED FOR THE VERSION, like every other file in dist: a file name is
+          # the version's job here, and a tag may carry a slash. Copied BEFORE the
+          # sums are taken, so SHA256SUMS.txt covers it like any archive. It has to
+          # be this commit's index — the gate only uploads one that it wrote, but a
+          # permanent record is worth the one line that says so.
+          jq -e --arg sha "$SHA" '.source_sha == $sha and (.missing | length) == 0' \
+            evidence/evidence-index.json > /dev/null || {
+            echo 'the evidence index does not name this commit, or names a case that never reported' >&2
+            exit 1
+          }
+          cp evidence/evidence-index.json "dist/compat-evidence-index-${VERSION}.json"
 
           (cd dist && sha256sum -- * > SHA256SUMS.txt)
 
@@ -1002,9 +1134,19 @@ jobs:
       # release the commit is, and Dependabot's github-actions entry moves the two
       # together. actions/* stay on major tags: GitHub, which publishes them, also
       # runs the runner that executes them.
+      #
+      # AS A DRAFT, AND IT STAYS ONE UNTIL THE STEP BELOW HAS READ IT BACK. The action
+      # drafts a stable release while it uploads, but creates a pre-release — the
+      # default channel — public and uploads after: v4.0.1.10 was published at
+      # 09:33:04 and its assets arrived at 09:33:08. A failed upload left a public
+      # release with part of its files, and nothing ever checked the files that
+      # did arrive. A draft is not listed and not /releases/latest, so everything
+      # below can fail without anyone having seen the release.
       - name: Publish GitHub Release
+        id: publish
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
+          draft: true
           tag_name: ${{ needs.setup.outputs.tag }}
           target_commitish: ${{ needs.setup.outputs.sha }}
           # THE TITLE CARRIES THE TAG, AND THE PRODUCT NAMES IT. The page used to
@@ -1026,18 +1168,115 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      # WHAT WAS UPLOADED, READ BACK, AGAINST WHAT THE GATE ACCEPTED. The draft's
+      # files are downloaded through the API and checked three ways: the set is
+      # exactly what this job packaged, every file matches the SHA256SUMS.txt
+      # published beside it, and the psp inside each archive is the binary whose
+      # digest the evidence index names. The last one is R10's "the published
+      # digest is the accepted digest", and it is what refuses a draft left by
+      # another run: the action does not overwrite a file already on a draft, so
+      # such a draft keeps that run's bytes. A draft this run left on an earlier
+      # attempt holds this run's binaries and passes.
+      - name: Verify the draft's assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.setup.outputs.tag }}
+          VERSION: ${{ needs.setup.outputs.version }}
+          RELEASE_ID: ${{ steps.publish.outputs.id }}
+        run: |
+          set -euo pipefail
+          # The release the tag resolves to must be the draft the action wrote.
+          resolved=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json databaseId,isDraft \
+            --jq '"\(.databaseId) \(.isDraft)"')
+          test "$resolved" = "${RELEASE_ID} true" || {
+            echo "${TAG} resolves to release ${resolved}, not to draft ${RELEASE_ID}" >&2
+            exit 1
+          }
+          rm -rf verify
+          mkdir verify
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir verify
+          diff <(cd dist && ls) <(cd verify && ls) || {
+            echo 'the draft does not hold exactly the files this job packaged' >&2
+            exit 1
+          }
+          (cd verify && sha256sum -c SHA256SUMS.txt)
+          checked=0
+          for archive in verify/passwall-sub-panel_"${VERSION}"_*; do
+            pkgname=$(basename "$archive")
+            pkgname=${pkgname%.tar.gz}
+            pkgname=${pkgname%.zip}
+            platform=${pkgname#passwall-sub-panel_"${VERSION}"_}
+            case "$archive" in
+              *.zip) actual=$(unzip -p "$archive" "${pkgname}/psp.exe" | sha256sum | cut -d' ' -f1) ;;
+              *)     actual=$(tar -xzOf "$archive" "${pkgname}/psp" | sha256sum | cut -d' ' -f1) ;;
+            esac
+            expected=$(jq -r --arg name "psp-${platform/_/-}" '.artifacts[$name] // ""' evidence/evidence-index.json)
+            if [ -z "$expected" ] || [ "$actual" != "$expected" ]; then
+              echo "${archive#verify/} holds psp ${actual}, but the gate accepted ${expected:-nothing} for ${platform}" >&2
+              echo 'a draft from another run keeps its own files; delete it and re-run' >&2
+              exit 1
+            fi
+            checked=$((checked + 1))
+          done
+          test "$checked" = 6 || {
+            echo "checked ${checked} archives against the evidence index, not six" >&2
+            exit 1
+          }
+          echo "The draft's ${checked} archives carry the binaries the gate accepted, and every file matches SHA256SUMS.txt."
+
+      # WHERE THE FILES CAME FROM, SIGNED. SHA256SUMS.txt sits on the same page as
+      # the files it covers, so it proves they arrived intact and nothing about
+      # who built them. This binds each file's digest to this workflow, this commit
+      # and this run with a Sigstore certificate, and anyone can check it with
+      # `gh attestation verify <file> --repo KazuhaHub/Passwall-Sub-Panel`. It runs
+      # while the release is still a draft, so a failure here publishes nothing.
+      #
+      # IT ATTESTS THE FILES READ BACK, NOT dist/. They are the published bytes,
+      # and on a re-run over this run's own draft the two differ: the draft keeps
+      # the first attempt's archives, and packaging again gives new tar mtimes.
+      - name: Attest the release files
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: verify/*
+
+      # ONLY THE DRAFT FLAG CHANGES. The channel was set when the draft was made
+      # and carries over; `latest` is left to GitHub's default for a newly
+      # published release, which is exactly what the action asked for when it
+      # published by itself: a stable release becomes Latest, a pre-release
+      # cannot. The notes are the draft's, already written.
+      - name: Make the release public
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.setup.outputs.tag }}
+        run: |
+          set -euo pipefail
+          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false
+
   docker:
     name: Publish container image
     runs-on: ubuntu-latest
+    # A two-platform push of prebuilt binaries, then an attestation: 36 seconds.
+    timeout-minutes: 15
     # Same reason as `release` above: a channel this job rolls forward must not
     # move on a run whose compatibility evidence is incomplete.
     needs: [setup, build, compatibility]
     # The docker/* actions are pinned by commit for the release step's reason:
     # after the login, this job's credential pushes :latest and :beta, which every
     # Docker deployment pulls, and a moved tag would run past the image preflight.
+    # id-token and attestations are the image attestation's, and as in `release`
+    # the scope is the job's, so those actions hold it as well.
     permissions:
       contents: read
       packages: write
+      id-token: write
+      attestations: write
+    # THE DIGEST IS THE IMAGE; the tags are pointers to it, and two of them move.
+    # R10 step 4 asks for the image digest next to the archives', and nothing
+    # recorded it: the exact tag was the only link between the evidence and what
+    # was pushed.
+    outputs:
+      digest: ${{ steps.push.outputs.digest }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -1126,6 +1365,7 @@ jobs:
         run: node deploy/check-image.mjs "${IMAGE_OWNER}/passwall-sub-panel" "$RELEASE_VERSION"
 
       - name: Build and push multi-arch image
+        id: push
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
@@ -1137,3 +1377,38 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           provenance: false
+
+      - name: Record the pushed image digest
+        shell: bash
+        env:
+          IMAGE: ghcr.io/${{ needs.setup.outputs.owner_lc }}/passwall-sub-panel
+          DIGEST: ${{ steps.push.outputs.digest }}
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          set -euo pipefail
+          # A push that reports no digest pushed nothing this run can name, and
+          # an empty line here would read as a record.
+          [[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] || {
+            echo "the image push reported no digest (got '${DIGEST}')" >&2
+            exit 1
+          }
+          {
+            echo "Pushed \`${IMAGE}@${DIGEST}\`, tagged:"
+            while IFS= read -r tag; do
+              if [ -n "$tag" ]; then echo "- \`${tag}\`"; fi
+            done <<<"$TAGS"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # THE IMAGE'S PROVENANCE, BOUND TO THE DIGEST RATHER THAN A TAG: a tag moves,
+      # and two of these do. Pushed to the registry beside the image, so
+      # `gh attestation verify oci://ghcr.io/<owner>/passwall-sub-panel:<version>
+      # --repo KazuhaHub/Passwall-Sub-Panel` finds it. The login above is the
+      # credential it pushes with. No storage record: that is organisation
+      # inventory metadata, needs a third write scope, and verifies nothing.
+      - name: Attest the pushed image
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-name: ghcr.io/${{ needs.setup.outputs.owner_lc }}/passwall-sub-panel
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true
+          create-storage-record: false

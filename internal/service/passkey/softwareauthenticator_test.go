@@ -90,8 +90,13 @@ func clientDataJSON(t *testing.T, ceremony, challenge, origin string) []byte {
 // an EC2 key on P-256 with the ES256 algorithm.
 func (a *softwareAuthenticator) coseKey(t *testing.T) []byte {
 	t.Helper()
-	x := a.key.PublicKey.X.FillBytes(make([]byte, 32))
-	y := a.key.PublicKey.Y.FillBytes(make([]byte, 32))
+	// The uncompressed SEC 1 point, 0x04 || X || Y, 32 bytes each on P-256: the
+	// raw X and Y fields are deprecated since Go 1.26.
+	point, err := a.key.PublicKey.Bytes()
+	if err != nil || len(point) != 65 {
+		t.Fatalf("encode public key: %d bytes, %v", len(point), err)
+	}
+	x, y := point[1:33], point[33:]
 	// 1=kty(EC2) 3=alg(ES256) -1=crv(P-256) -2=x -3=y.
 	b, err := cbor.Marshal(map[int]any{1: 2, 3: -7, -1: 1, -2: x, -3: y})
 	if err != nil {

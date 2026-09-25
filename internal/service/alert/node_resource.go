@@ -46,6 +46,12 @@ type NodeResourceFinding struct {
 // conditions is one row the operator has to deal with, and four rows for the same
 // machine is how a bell badge stops meaning anything. The count says how many are
 // behind it and the detail endpoint expands them.
+//
+// NOTHING CALLS THIS YET. The router wires Deps.NodeResource, but List does not
+// include these alerts and the bell has no rendering for node_resource, so adding
+// it to List is a product change rather than a lint fix.
+//
+//lint:ignore U1000 wired through Deps.NodeResource, deliberately not listed yet; see above.
 func (s *Service) nodeResource(ctx context.Context) []Alert {
 	if s.d.NodeResource == nil {
 		return nil

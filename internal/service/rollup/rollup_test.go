@@ -2,7 +2,12 @@ package rollup
 
 import (
 	"context"
+	"fmt"
+	"net/url"
+	"os"
 	"path/filepath"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -11,26 +16,122 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/adapters/sqlstore"
 )
 
-// newServiceFromTest spins up a fresh SQLite under t.TempDir(), runs
-// EnsureSchema, and returns a rollup Service hooked up to it plus an
-// exec/read helper. Tests run against the real GORM dialect so the
-// OnConflict upsert and uniqueIndex shapes behave like production.
+// newServiceFromTest opens a fresh database, runs EnsureSchema, and returns a
+// rollup Service hooked up to it plus an exec/read helper. Tests run against the
+// real GORM dialect so the OnConflict upsert and uniqueIndex shapes behave like
+// production.
+//
+// THE DIALECT IS THE ONE THE CI LANE NAMES. This is the one package outside
+// sqlstore that issues dialect-specific SQL — onConflictClause branches on MySQL,
+// after an empty ON DUPLICATE KEY UPDATE failed in production — and it used to be
+// executed on SQLite only, with MySQL covered by a DryRun of the SQL text. Text is
+// not semantics: keep-vs-overwrite, RowsAffected and the captured_at window bound
+// are what the driver does with it. So PSP_TEST_DB_KIND / PSP_TEST_DB_DSN, the
+// variables the postgres and mysql lanes set for sqlstore, select the dialect here
+// too; with neither set, as in a plain local `go test`, it is SQLite as before.
 func newServiceFromTest(t *testing.T) (*Service, *gorm.DB) {
 	t.Helper()
-	g, err := sqlstore.Open("sqlite", filepath.Join(t.TempDir(), "panel.db"))
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
+	g := openRollupTestDB(t)
 	if err := sqlstore.EnsureSchema(g); err != nil {
 		t.Fatalf("ensure schema: %v", err)
 	}
+	return New(g, 0), g
+}
+
+// openRollupTestDB gives each test its own namespace: a file for SQLite, a schema
+// for PostgreSQL, a database for MySQL, each dropped when the test ends.
+//
+// IT IS A COPY OF THE SHAPE OF sqlstore's openIsolatedTestDB, NOT A CALL TO IT.
+// That fixture is package-private, and it cannot move to an importable package
+// without an import cycle: sqlstore's own in-package tests would have to import a
+// package that imports sqlstore. The pooled, reusable schema it keeps for ordinary
+// repository tests is left there too; thirteen fresh schemas is what this costs.
+func openRollupTestDB(t *testing.T) *gorm.DB {
+	t.Helper()
+	kind, base := os.Getenv("PSP_TEST_DB_KIND"), os.Getenv("PSP_TEST_DB_DSN")
+	var dsn string
+	switch kind {
+	case "", "sqlite":
+		kind, dsn = "sqlite", filepath.Join(t.TempDir(), "panel.db")
+	case "postgres":
+		dsn = isolatedPostgresSchema(t, base)
+	case "mysql":
+		dsn = isolatedMySQLDatabase(t, base)
+	default:
+		t.Fatalf("unknown PSP_TEST_DB_KIND %q (want sqlite|postgres|mysql)", kind)
+	}
+	g, err := sqlstore.Open(kind, dsn)
+	if err != nil {
+		t.Fatalf("open %s: %v", kind, err)
+	}
+	// Registered after the namespace's drop, so LIFO closes this pool first.
+	t.Cleanup(func() { closeTestDB(g) })
+	return g
+}
+
+var rollupTestSeq atomic.Int64
+
+// rollupTestNamespace is unique per process and per call; the pid keeps it apart
+// from sqlstore's test binary, which may share the lane's server concurrently.
+func rollupTestNamespace() string {
+	return fmt.Sprintf("psprollup_%d_%d", os.Getpid(), rollupTestSeq.Add(1))
+}
+
+func isolatedPostgresSchema(t *testing.T, base string) string {
+	t.Helper()
+	name := rollupTestNamespace()
+	if err := adminExec("postgres", base, `CREATE SCHEMA "`+name+`"`); err != nil {
+		t.Fatal(err)
+	}
 	t.Cleanup(func() {
-		sqlDB, err := g.DB()
-		if err == nil {
-			_ = sqlDB.Close()
+		if err := adminExec("postgres", base, `DROP SCHEMA IF EXISTS "`+name+`" CASCADE`); err != nil {
+			t.Error(err)
 		}
 	})
-	return New(g, 0), g
+	u, err := url.Parse(base)
+	if err != nil || u.Scheme == "" {
+		return strings.TrimSpace(base) + " search_path=" + name
+	}
+	query := u.Query()
+	query.Set("search_path", name)
+	u.RawQuery = query.Encode()
+	return u.String()
+}
+
+func isolatedMySQLDatabase(t *testing.T, base string) string {
+	t.Helper()
+	if !strings.Contains(base, "{schema}") {
+		t.Fatalf("PSP_TEST_DB_DSN for mysql must contain a {schema} placeholder")
+	}
+	name := rollupTestNamespace()
+	server := strings.Replace(base, "{schema}", "", 1)
+	if err := adminExec("mysql", server, "CREATE DATABASE `"+name+"`"); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := adminExec("mysql", server, "DROP DATABASE IF EXISTS `"+name+"`"); err != nil {
+			t.Error(err)
+		}
+	})
+	return strings.Replace(base, "{schema}", name, 1)
+}
+
+func adminExec(kind, dsn, statement string) error {
+	admin, err := sqlstore.Open(kind, dsn)
+	if err != nil {
+		return fmt.Errorf("open %s admin connection: %w", kind, err)
+	}
+	defer closeTestDB(admin)
+	if err := admin.Exec(statement).Error; err != nil {
+		return fmt.Errorf("%s: %w", statement, err)
+	}
+	return nil
+}
+
+func closeTestDB(g *gorm.DB) {
+	if sqlDB, err := g.DB(); err == nil {
+		_ = sqlDB.Close()
+	}
 }
 
 func insertUserSnap(t *testing.T, g *gorm.DB, userID int64, ts time.Time, up, down, total int64) {

@@ -108,7 +108,7 @@ setup ──┬─ node-compatibility ─┐
 
 `compatibility` 是所有发布动作的唯一入口；`release` 与 `docker` 都只依赖它，不直接依赖 `node-compatibility`。取消或缺少报告都不通过。
 
-**R10 的性质**（手册 §15 原文："最终被发布的摘要与被验收摘要完全一致，无发布旁路"）由这几处强制，且都有守卫测试：tag 必须解引用到 CI 自身的 SHA、所有下游 job 一律 checkout `github.sha`、`target_commitish` 指向被验收的 SHA、tag 在构建期间变动即拒绝、`overwrite_files: false`。
+**R10 的性质**（手册 §15 原文："最终被发布的摘要与被验收摘要完全一致，无发布旁路"）由这几处强制，且都有守卫测试：tag 必须解引用到 CI 自身的 SHA、所有下游 job 一律 checkout `github.sha`、`target_commitish` 指向被验收的 SHA、tag 在构建期间变动即拒绝、`overwrite_files: false`、发布先以 draft 上传并读回核对（`SHA256SUMS.txt` 与索引里的二进制摘要）之后才公开。
 
 ## 9. 分支保护设置
 
@@ -147,9 +147,24 @@ PSP_CANDIDATE_AGENT=/path/to/passwall-node ./deployment/compat/old-psp.sh
 | 发布 | `v4.0.0-beta.25`，Pre-release，六个归档 + `SHA256SUMS.txt` |
 | 镜像 | `ghcr.io/kazuhahub/passwall-sub-panel:v4.0.0-beta.25` 与 `:beta` |
 | `:latest` | **未移动**（仍是 v3.9.3 那次正式版），`/releases/latest` 也仍指向它，因此预发布不会出现在应用内升级提示里 |
-| 证据索引 | 本次运行产出，并作为附件随发布留存：11 个 case、`missing: []`、六个产物的 sha256、`source_sha` 即上面那个提交 |
+| 证据索引 | 本次运行产出，并作为附件随发布留存：11 个 case、`missing: []`、六个产物的 sha256、`source_sha` 即上面那个提交。**这一次的附件是手工上传的**（比工作流上传的归档晚两分钟），之后的发布一直没有它，见下文 |
 
 **R10 的验收性质由此可核对**：索引里的 `source_sha` 与被发布的归档来自同一次构建，`release` 与 `docker` 只经由 `compatibility gate`（两者都不直接依赖 node-compatibility），`:latest` 按分支规则未动。
+
+### 索引与镜像 digest 如何留存
+
+证据索引作为 artifact 最多保留 90 天（公开仓库的上限），过期之后，发布背后的兼容声明就无从核对，而这正是 `evidence-index.mjs` 开头说它要避免的事。所以现在由 `release` job 自动附上：它下载本次运行门禁写出的 `compatibility-evidence-index`，先核对 `source_sha` 是这个提交、`missing` 为空，再以 **`compat-evidence-index-<版本>.json`** 放进 `dist/`。放入发生在生成 `SHA256SUMS.txt` **之前**，所以校验和覆盖它，和六个归档一样。文件名用版本不用 tag：`dist/` 里的文件名都归版本管，而 tag 可能带斜杠。
+
+镜像 digest 以前哪里都没记，证据和被推送的镜像之间只靠那个精确 tag 连着。现在 `docker` job 把 build-push 的 digest 作为 job 输出 `digest` 导出，并写进运行摘要：`ghcr.io/<owner>/passwall-sub-panel@sha256:…` 以及它被打上的每个 tag。空的或格式不对的 digest 会让这一步失败，而不是被当成一条记录写下来。
+
+**来源可以核对，不只是完整性。** `SHA256SUMS.txt` 和它覆盖的文件在同一个发布页上，能换掉文件的人也能换掉它，所以它只证明文件完整到达，证明不了是谁构建的。现在两个发布 job 各自给产物生成 build provenance 证明（`actions/attest-build-provenance`，Sigstore 签名，绑定本工作流、提交与运行）：`release` 在 draft 读回核对之后、公开之前证明**读回的那些文件**（即公开出去的字节，不是 `dist/`：同一运行重跑时 draft 保留第一次的归档，重新打包的 tar 时间戳不同）；`docker` 按 digest（不是 tag）证明推送的镜像，并把证明推到镜像旁边。核对命令：
+
+```bash
+gh attestation verify passwall-sub-panel_<版本>_linux_amd64.tar.gz --repo KazuhaHub/Passwall-Sub-Panel
+gh attestation verify oci://ghcr.io/kazuhahub/passwall-sub-panel:<版本> --repo KazuhaHub/Passwall-Sub-Panel
+```
+
+镜像证明也就把 digest 与提交、运行永久绑在了一起，不随运行日志过期。
 
 ### 第一次执行抓到的东西
 

@@ -5,7 +5,8 @@ name: Test
 # GOOS/GOARCH (CGO off, pure Go) so a platform-specific build break is caught
 # here on push/PR instead of only when a release tag is cut. Go static checks
 # run once. The canonical SQLite job runs the whole Go suite under the race
-# detector. PostgreSQL and MySQL run the DB-adapter package separately; those
+# detector. PostgreSQL and MySQL run the DB-adapter package separately, plus the
+# traffic rollup, the one other package that writes dialect-specific SQL; those
 # server dialects reuse an initialized schema for ordinary repository tests
 # while migration/DDL tests retain fresh databases. Every Go test invocation
 # bypasses the Go result cache and uploads output on failure.
@@ -53,18 +54,24 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       # The build cache pair the build job explains: restored on every event, and
-      # saved only from the default branch, where a save can be read.
+      # saved only from the default branch, where a save can be read. Then the shared
+      # module cache, which go_static saves; setup-go's own cache is off.
       - uses: actions/cache/restore@v6
         with:
           path: ~/.cache/go-build
           key: go-build-node-compat-${{ runner.os }}-${{ hashFiles('go.sum') }}
           restore-keys: go-build-node-compat-${{ runner.os }}-
+      - uses: actions/cache/restore@v6
+        with:
+          path: ~/go/pkg/mod
+          key: go-mod-${{ runner.os }}-${{ hashFiles('go.sum') }}
+          restore-keys: go-mod-${{ runner.os }}-
       - uses: actions/setup-go@v7
         env:
           GOTOOLCHAIN: auto
         with:
           go-version-file: go.mod
-          cache: true
+          cache: false
       - name: Verify exact preferred compiler
         run: |
           set -eu
@@ -208,19 +215,25 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       # The build cache pair the build job explains: restored on every event, and
-      # saved only from the default branch, where a save can be read.
+      # saved only from the default branch, where a save can be read. Then the shared
+      # module cache, which go_static saves; setup-go's own cache is off.
       - uses: actions/cache/restore@v6
         with:
           path: ~/.cache/go-build
           key: go-build-node-contract-${{ runner.os }}-${{ hashFiles('go.sum') }}
           restore-keys: go-build-node-contract-${{ runner.os }}-
+      - uses: actions/cache/restore@v6
+        with:
+          path: ~/go/pkg/mod
+          key: go-mod-${{ runner.os }}-${{ hashFiles('go.sum') }}
+          restore-keys: go-mod-${{ runner.os }}-
       - uses: actions/setup-go@v7
         # Allow toolchain selection; setup-go exports local after installation.
         env:
           GOTOOLCHAIN: auto
         with:
           go-version-file: go.mod
-          cache: true
+          cache: false
       - name: Verify exact preferred compiler
         run: |
           set -eu
@@ -260,28 +273,64 @@ jobs:
           git -C "$contract_repo" checkout -q FETCH_HEAD
           test "$(git -C "$contract_repo" rev-parse HEAD)" = "$source_commit"
           test -f "$contract_repo/go.mod"
-          # NOT a per-version case: this job exercises the exact published
-          # revision PSP consumes, whatever go.mod pins, rather than a released
-          # tag. It is filed under its own name so it cannot collide with the
-          # matrix case for the same version, and so it is visible as additional
-          # evidence rather than mistaken for one of the promised cases.
+          # NOT a per-version case: this job exercises the exact published revision
+          # the manifest names as the contract source, rather than a matrix end. It is
+          # filed under its own name so it cannot collide with the matrix case for the
+          # same version, and so it is visible as additional evidence rather than
+          # mistaken for one of the promised cases.
           evidence="evidence/pinned-source"
           mkdir -p "$evidence"
-          # Captured, not propagated: the validator has to run even when the
-          # tests failed, because its report is what names the required item that
-          # did not pass. stderr stays separate from the JSON stream.
-          test_exit=0
-          PSP_LIVE_NODE_REPO="$contract_repo" go test -json -count=1 -timeout=5m \
-            ./internal/service/nodesync \
-            -run '^TestLive_RealNode(AgentContract|MigratedServerContract|TaskEvidenceReceipt|TaskExpiryContract)$' \
-            > "$evidence/go-events.jsonl" 2> "$evidence/go-stderr.txt" || test_exit=$?
-          node deploy/compat/check-go-results.mjs \
-            --profile node-wire-v1 \
-            --input "$evidence/go-events.jsonl" \
-            --go-exit-code "$test_exit" \
-            --output "$evidence/result.json"
-          # TWO CROSS-REPOSITORY CONTRACTS ARE CHECKED HERE, in the only job that
-          # has the other repository on disk.
+          # THE WIRE SUITE IS NOT RUN TWICE ON ONE COMMIT. When contract_source is one
+          # of the planned matrix cases -- the bookkeeping for v4.0.1.3 and v4.0.1.4
+          # moved both together -- node-compatibility has already run these four tests,
+          # with this profile, against this commit, for this PSP SHA, in this same run,
+          # and the compatibility gate fails unless that job succeeded. A second run
+          # adds no coverage. When the source is a release between the matrix ends, as
+          # v4.0.1.4 is while the newest end is v4.0.1.5, it is extra coverage, and it
+          # runs. Matched by COMMIT, the identity both jobs verify, never by version.
+          covered_by=$(node deploy/compat/plan.mjs --emit cases \
+            | python3 -c 'import json,sys; print(" ".join(c["id"] for c in json.load(sys.stdin) if c["sha"] == sys.argv[1]))' "$source_commit")
+          # WHICH REVISION, WRITTEN FIRST. A report that cannot name its inputs cannot
+          # be re-checked, and this file used to be written last, under `set -e`: a
+          # failing wire run or cross-repository test exited before it, and the
+          # uploaded evidence of the failure had no identity.
+          cat > "$evidence/environment.json" <<JSON
+          {
+            "case": "pinned-source",
+            "profile": "node-wire-v1",
+            "psp_sha": "${{ github.sha }}",
+            "node_pinned_tag": "$source_tag",
+            "node_sha": "$(git -C "$contract_repo" rev-parse HEAD 2>/dev/null || echo unknown)",
+            "wire_covered_by": "$covered_by",
+            "runner_os": "$RUNNER_OS",
+            "runner_arch": "$RUNNER_ARCH",
+            "run_id": "${{ github.run_id }}",
+            "run_attempt": "${{ github.run_attempt }}"
+          }
+          JSON
+          # From here every verdict is COLLECTED, the way node-compatibility collects
+          # its legs: a wire failure must not hide whether the cross-repository
+          # contracts below broke as well, and the reverse.
+          failed=0
+          if [ -n "$covered_by" ]; then
+            echo "wire contract: $source_commit is the planned case $covered_by, which node-compatibility runs in this workflow run; not run a second time"
+          else
+            # Captured, not propagated: the validator has to run even when the tests
+            # failed, because its report is what names the required item that did not
+            # pass. stderr stays separate from the JSON stream.
+            test_exit=0
+            PSP_LIVE_NODE_REPO="$contract_repo" go test -json -count=1 -timeout=5m \
+              ./internal/service/nodesync \
+              -run '^TestLive_RealNode(AgentContract|MigratedServerContract|TaskEvidenceReceipt|TaskExpiryContract)$' \
+              > "$evidence/go-events.jsonl" 2> "$evidence/go-stderr.txt" || test_exit=$?
+            node deploy/compat/check-go-results.mjs \
+              --profile node-wire-v1 \
+              --input "$evidence/go-events.jsonl" \
+              --go-exit-code "$test_exit" \
+              --output "$evidence/result.json" || failed=1
+          fi
+          # THREE CROSS-REPOSITORY CONTRACTS ARE CHECKED HERE, ALWAYS, in the only job
+          # that has the other repository on disk.
           #
           #   internal/version        PSP's copy of the shared version vectors is
           #                           still the copy the Node project publishes. Both
@@ -298,23 +347,10 @@ jobs:
           #                           still the one the project publishes. A drifted
           #                           copy is a panel offering a pulled release.
           #
-          # THEY RUN AFTER THE EVIDENCE IS WRITTEN so a divergence cannot mask the
-          # wire result, and they read the checkout this step already verified.
-          PSP_LIVE_NODE_REPO="$contract_repo" go test -count=1 \
-            ./internal/version/ ./internal/pkg/nodebootstrap/ ./internal/adapters/corecatalogdoc/
-          cat > "$evidence/environment.json" <<JSON
-          {
-            "case": "pinned-source",
-            "profile": "node-wire-v1",
-            "psp_sha": "${{ github.sha }}",
-            "node_pinned_tag": "$source_tag",
-            "node_sha": "$(git -C "$contract_repo" rev-parse HEAD 2>/dev/null || echo unknown)",
-            "runner_os": "$RUNNER_OS",
-            "runner_arch": "$RUNNER_ARCH",
-            "run_id": "${{ github.run_id }}",
-            "run_attempt": "${{ github.run_attempt }}"
-          }
-          JSON
+          # They read the checkout this step already verified.
+          PSP_LIVE_NODE_REPO="$contract_repo" go test -count=1 -timeout=5m \
+            ./internal/version/ ./internal/pkg/nodebootstrap/ ./internal/adapters/corecatalogdoc/ || failed=1
+          exit "$failed"
       - name: upload case evidence
         if: always()
         uses: actions/upload-artifact@v7
@@ -323,20 +359,23 @@ jobs:
           path: evidence/
           if-no-files-found: error
           retention-days: 90
+      - uses: actions/cache/save@v6
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        with:
+          path: ~/.cache/go-build
+          key: go-build-node-contract-${{ runner.os }}-${{ hashFiles('go.sum') }}
 
   # THE SUMMARY GATE FOR THE NODE WIRE CONTRACT. The two jobs above report their
   # own verdicts, but neither can answer the question this asks: whether EVERY
   # case the panel promises to test actually reported. A leg cancelled by a
   # superseded push, or an artifact upload that failed, leaves every case that
   # did report perfectly green and the run looking complete.
-      - uses: actions/cache/save@v6
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        with:
-          path: ~/.cache/go-build
-          key: go-build-node-contract-${{ runner.os }}-${{ hashFiles('go.sum') }}
   compatibility:
     name: compatibility gate
     runs-on: ubuntu-latest
+    # A checkout, a download and two node scripts. The default is 360 minutes, which
+    # is what a hung runner would otherwise hold a required check for.
+    timeout-minutes: 5
     needs: [node-compatibility, node-contract]
     # always(), so a failed or cancelled leg still produces a verdict. A skipped
     # gate would report as an absent check, which reads as "not run" rather than
@@ -416,21 +455,40 @@ jobs:
     timeout-minutes: 30
     permissions:
       contents: read
+    # THE PANELS ARE THE REVIEWED CEILINGS, BY TAG AND DIGEST. They floated on
+    # :latest, which the launcher and its README both said the caller never does,
+    # and which made a red run on main mean either "this commit broke an adapter" or
+    # "upstream shipped something" with nothing in the evidence to say which. The
+    # second question is compat-watch's, asked every Monday against the same
+    # ceilings. So the defaults are max_tested_xui and max_tested_sui from
+    # docs/compat, a guard in deploy/test_workflow_test.mjs fails when a ceiling
+    # moves without its image, and Dependabot does not read these strings. The
+    # repository variables still override both, and the drive step records the
+    # digest that actually ran, so an override is never anonymous.
+    env:
+      PSP_LIVE_3XUI_IMAGE: ${{ vars.PSP_LIVE_3XUI_IMAGE || 'ghcr.io/mhsanaei/3x-ui:v3.8.5@sha256:e0f90c10902e0e74f947d5a9efe017b273804477430233bbfc4918542ffe366c' }}
+      PSP_LIVE_SUI_IMAGE: ${{ vars.PSP_LIVE_SUI_IMAGE || 'ghcr.io/alireza0/s-ui:v1.6.3@sha256:51cdb0036118dbcac12cba28fed13e36c53f8cdcb72bff88a062b5d6f243bd64' }}
     steps:
       - uses: actions/checkout@v7
       # The build cache pair the build job explains: restored on every event, and
-      # saved only from the default branch, where a save can be read.
+      # saved only from the default branch, where a save can be read. Then the shared
+      # module cache, which go_static saves; setup-go's own cache is off.
       - uses: actions/cache/restore@v6
         with:
           path: ~/.cache/go-build
           key: go-build-third-party-${{ runner.os }}-${{ hashFiles('go.sum') }}
           restore-keys: go-build-third-party-${{ runner.os }}-
+      - uses: actions/cache/restore@v6
+        with:
+          path: ~/go/pkg/mod
+          key: go-mod-${{ runner.os }}-${{ hashFiles('go.sum') }}
+          restore-keys: go-mod-${{ runner.os }}-
       - uses: actions/setup-go@v7
         env:
           GOTOOLCHAIN: auto
         with:
           go-version-file: go.mod
-          cache: true
+          cache: false
       # The compiler gate must sit IMMEDIATELY after setup-go: the baseline guard
       # reads job steps positionally, so anything between them, including the Node
       # setup this job also needs, is a failure rather than a style choice.
@@ -445,14 +503,17 @@ jobs:
         with:
           node-version: "26"
       - name: start the isolated panels
-        env:
-          PSP_LIVE_3XUI_IMAGE: ${{ vars.PSP_LIVE_3XUI_IMAGE || 'ghcr.io/mhsanaei/3x-ui:latest' }}
-          PSP_LIVE_SUI_IMAGE: ${{ vars.PSP_LIVE_SUI_IMAGE || 'ghcr.io/alireza0/s-ui:latest' }}
         run: deploy/compat/backends/third-party.sh up
       - name: drive every adapter surface
         run: |
           set -uo pipefail
           mkdir -p evidence
+          # WHICH PANELS THE VERDICT IS ABOUT, written before anything can fail. The
+          # reference names the version, the repo digest names the image.
+          for image in "$PSP_LIVE_3XUI_IMAGE" "$PSP_LIVE_SUI_IMAGE"; do
+            printf '%s %s\n' "$image" "$(docker image inspect --format '{{json .RepoDigests}}' "$image")"
+          done > evidence/images.txt
+          cat evidence/images.txt
           # Each suite gets its own log and its own validator run: they are
           # different packages with different profiles, and a single combined
           # verdict could not say which of them measured less than it claims.
@@ -462,6 +523,9 @@ jobs:
           # rather than the launcher that never gave it anything to run with.
           service_env=$(deploy/compat/backends/third-party.sh env)
           test -n "$service_env"
+          # sed, not ${var//}: it redacts the rest of EVERY line after TOKEN=, which a
+          # parameter expansion over the whole multi-line value cannot express.
+          # shellcheck disable=SC2001
           echo "$service_env" | sed 's/\(TOKEN=\).*/\1<redacted>/'
           eval "$service_env"
           # READ THROUGH A CHILD PROCESS. `printenv` is an external command, so
@@ -481,10 +545,15 @@ jobs:
           # a test log, which reads like a corrupt database.
           xui_db_dir=$(dirname "$PSP_LIVE_XUI_DB")
           test -w "$xui_db_dir" || { echo "::error::$xui_db_dir is not writable by $(id -un); TestLive_XUITrafficFloorMatrix seeds usage straight into it"; exit 1; }
+          # TEN MINUTES A SUITE, SO A HANG IS KILLED BY GO TEST, NOT BY THE RUNNER. Two
+          # suites of 20m ran one after the other inside this job's 30, so a hang in the
+          # first met the job's limit before the validator could name it, and the second
+          # never ran. The whole drive takes about two minutes; 10m each plus the panels'
+          # start leaves the job's limit last.
           run_suite() {
             profile="$1"; pkg="$2"; out="$3"
             code=0
-            go test -json -count=1 -timeout=20m "$pkg" -run '^TestLive_' > "evidence/$out.jsonl" 2> "evidence/$out.stderr" || code=$?
+            go test -json -count=1 -timeout=10m "$pkg" -run '^TestLive_' > "evidence/$out.jsonl" 2> "evidence/$out.stderr" || code=$?
             node deploy/compat/check-go-results.mjs --profile "$profile" \
               --profiles deploy/compat/profiles-third-party.json \
               --input "evidence/$out.jsonl" --go-exit-code "$code" \
@@ -577,7 +646,7 @@ jobs:
           for image in psp-source-check psp-release-runtime-check; do
             test "$(docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges --entrypoint /bin/cat "$image" /etc/alpine-release)" = "$runtime_base"
             # Version exits before configuration, DB bootstrap or HTTP binding.
-            # This verifies binary execution, not the panel's production startup.
+            # This verifies binary execution; the boot step below is the startup.
             docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges --user 10001:10001 --entrypoint /app/psp "$image" --version
           done
       - name: The entrypoint repairs ownership in the image it ships in
@@ -604,6 +673,56 @@ jobs:
           docker run --rm -v psp-entrypoint-check:/app/data psp-source-check --version
           docker run --rm --entrypoint /bin/sh -v psp-entrypoint-check:/app/data psp-source-check \
             -c 'test "$(stat -c %u /app/data)" = 10001'
+      # EVERY CHECK ABOVE STOPS AT `--version`, WHICH EXITS BEFORE THE PANEL DOES
+      # ANYTHING. internal/app's tests already call app.Build and drive the router, so
+      # this is not about wiring. It is what only the shipped image can answer: main()
+      # generating its config and seeding a fresh ./config, SQLite created in the data
+      # volume by the unprivileged user the entrypoint drops to, a real bind, and the
+      # SPA the image embedded -- every Go job compiles against the .gitkeep
+      # placeholder, and the web job's smoke serves dist from Node, so nothing else
+      # sees the bundle inside the binary. A binary without it answers / with a 404.
+      #
+      # The mounts are compose's: a bind-mounted config directory the runner creates
+      # (so the entrypoint has to hand it over) and a named data volume. No secret is
+      # involved; the panel generates its own on first start, as a fresh install does.
+      # `docker stop` is part of the check: the panel is PID 1 and must drain on
+      # SIGTERM and exit 0, or every compose restart is a kill. Measured locally
+      # against the same binary: healthy 0.5s after start, the whole sequence ~2s.
+      - name: The image boots on a fresh SQLite and serves the SPA it embeds
+        run: |
+          set -euo pipefail
+          config_dir=$(mktemp -d "$RUNNER_TEMP/psp-boot-config.XXXXXX")
+          cid=$(docker run -d -p 127.0.0.1:18788:8788 \
+            -e PSP_CONFIG=/app/config/config.yaml \
+            -v "$config_dir:/app/config" -v psp-boot-data:/app/data psp-source-check)
+          cleanup() {
+            status=$?
+            if [ "$status" -ne 0 ]; then docker logs "$cid" 2>&1 | tail -n 80; fi
+            docker rm -f "$cid" >/dev/null 2>&1 || true
+            docker volume rm psp-boot-data >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+          base=http://127.0.0.1:18788
+          healthy=0
+          for _ in $(seq 1 30); do
+            if curl -fs -o /dev/null "$base/health"; then healthy=1; break; fi
+            if [ "$(docker inspect -f '{{.State.Running}}' "$cid")" != true ]; then
+              echo "::error::the panel exited during boot"; exit 1
+            fi
+            sleep 1
+          done
+          test "$healthy" = 1 || { echo "::error::/health did not answer within 30s"; exit 1; }
+          curl -fsS "$base/health" | grep -q '"status":"ok"'
+          # The page AND the module it loads: an index.html whose assets were left out
+          # of the embed would pass a check on the page alone.
+          index=$(curl -fsS "$base/")
+          entry=$(printf '%s\n' "$index" | sed -n 's|.*<script type="module"[^>]* src="\./\(assets/[^"]*\.js\)".*|\1|p' | head -n 1)
+          test -n "$entry" || { echo "::error::/ is not the built SPA: no module script in it"; exit 1; }
+          curl -fsS -o /dev/null "$base/$entry"
+          docker exec "$cid" test -s /app/config/config.yaml
+          test "$(docker exec "$cid" stat -c %u /app/data/panel.db)" = 10001
+          docker stop -t 15 "$cid" >/dev/null
+          test "$(docker inspect -f '{{.State.ExitCode}}' "$cid")" = 0
       - name: Publisher identity, compat result validators and fail-closed guard tests
         run: node --test deploy/check_image_test.mjs deploy/check_build_test.mjs deploy/release_workflow_test.mjs deploy/compat/check-go-results.test.mjs deploy/compat/check-case-set.test.mjs deploy/compat/plan.test.mjs deploy/compat/profiles.test.mjs deploy/compat/backends/third-party_env.test.mjs deploy/compat/evidence-index.test.mjs deploy/compat/contract-source.test.mjs deploy/tracked_text_test.mjs deploy/test_workflow_test.mjs
 
@@ -624,6 +743,12 @@ jobs:
       - name: Install dependencies
         working-directory: web-react
         run: npm ci
+      # The hook rules the source was written against, which no job ran: rules-of-hooks
+      # fails the step, exhaustive-deps only reports. web-react/.oxlintrc.json says
+      # why. ~0.3s measured locally, before the build so a hook error fails fast.
+      - name: lint (react hooks)
+        working-directory: web-react
+        run: npm run lint
       # THE BROWSER IS A DOWNLOAD, NOT A BUILD. `playwright install chromium`
       # fetches it into a shared, version-keyed directory, so the only thing that
       # changes between runs is nothing — and the 50s this step cost was mostly the
@@ -644,16 +769,39 @@ jobs:
       - name: build
         working-directory: web-react
         run: npm run build
-      - name: production browser smoke
-        working-directory: web-react
-        run: npm run smoke:dist
-      - name: Real Chromium server reinstallation flows (isolated fixtures)
+      # THE SMOKE RUNS ON THE PINNED BROWSER, NOT ON THE RUNNER'S. It used to find
+      # whatever google-chrome the runner image shipped, one step before this job
+      # installed a pinned Chromium, so the browser under the required smoke changed
+      # whenever GitHub updated the image, independent of any commit (two of the web
+      # job's four confirmed flakes in 300 runs were the smoke's TIMEOUT). The install
+      # moved ahead of it, and the smoke gets Playwright's chrome-headless-shell: the
+      # binary `chromium.launch({ headless: true })` runs, so the smoke and the
+      # reinstall flows below use one browser, and the one built for --dump-dom. Locally
+      # the full Chrome for Testing 153 hung on --dump-dom of a data: URL where the
+      # shell answered in 0.2s. This makes the browser reproducible; it is not a
+      # proven fix for those TIMEOUTs.
+      - name: Install the pinned Playwright and its Chromium
+        id: browser
         run: |
           set -euo pipefail
           browser_acceptance_dir=$(mktemp -d "$RUNNER_TEMP/psp-reinstall-browser.XXXXXX")
           npm install --prefix "$browser_acceptance_dir" --no-package-lock --ignore-scripts playwright@1.63.0
-          node "$browser_acceptance_dir/node_modules/playwright/cli.js" install --with-deps chromium
-          node web-react/scripts/reinstall-browser.mjs "$browser_acceptance_dir/node_modules/playwright"
+          playwright="$browser_acceptance_dir/node_modules/playwright"
+          node "$playwright/cli.js" install --with-deps chromium
+          shell_dir=$(node "$playwright/cli.js" install --dry-run chromium-headless-shell | awk '/Install location:/ { print $3; exit }')
+          chrome="$shell_dir/chrome-headless-shell-linux64/chrome-headless-shell"
+          test -x "$chrome" || { echo "::error::no chrome-headless-shell at $chrome; the Playwright layout moved"; exit 1; }
+          echo "playwright=$playwright" >> "$GITHUB_OUTPUT"
+          echo "chrome=$chrome" >> "$GITHUB_OUTPUT"
+      - name: production browser smoke
+        working-directory: web-react
+        env:
+          CHROME_PATH: ${{ steps.browser.outputs.chrome }}
+        run: npm run smoke:dist
+      - name: Real Chromium server reinstallation flows (isolated fixtures)
+        env:
+          PLAYWRIGHT_PACKAGE: ${{ steps.browser.outputs.playwright }}
+        run: node web-react/scripts/reinstall-browser.mjs "$PLAYWRIGHT_PACKAGE"
       - name: unit tests
         working-directory: web-react
         run: npm run test
@@ -682,16 +830,23 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
-      # `cache: true` IS NOT THIS JOB'S BUILD CACHE, although it does restore one.
-      # setup-go caches the compiled objects as well as the modules — its log resolves
-      # both GOMODCACHE and GOCACHE and restores ~372 MB into them — but under ONE key
-      # per toolchain and go.sum, shared by every job here and saved, on any event, by
-      # whichever job gets there first: the frozen subset the next paragraph describes.
-      # It did not hold the six cross-compiled targets, so every run recompiled them from
-      # source: 354 seconds of it, measured identically on two consecutive runs. The
-      # same target on a warm GOCACHE compiles in about two seconds, so the whole step
-      # is the cache's to win. Every job in this file that compiles Go restores its own
-      # build cache, under a key of its own.
+      # SETUP-GO'S OWN CACHE IS OFF, IN EVERY JOB IN THIS FILE, and a guard keeps it off.
+      # `cache: true` restored ~372 MB, the module cache AND a GOCACHE, under ONE key per
+      # toolchain and go.sum shared by every job, and saved on any event by whichever job
+      # got there first: the frozen subset the paragraphs below describe, extracted over
+      # each job's own build cache after it, and on a PR that changed go.sum a ~400 MB
+      # write into a scope nothing reads. That cache did not hold the six cross-compiled
+      # targets, so every run recompiled them from source: 354 seconds of it, measured
+      # identically on two consecutive runs. The same target on a warm GOCACHE compiles
+      # in about two seconds, so the whole step is the cache's to win. Every job in this
+      # file that compiles Go restores its own build cache, under a key of its own.
+      #
+      # THE MODULE CACHE IS THE EXCEPTION: ONE KEY, RESTORED EVERYWHERE, SAVED BY ONE JOB.
+      # Module sources do not differ by job the way compiled objects do, so one key can
+      # serve them all as long as the job that writes it loads the widest set. go_static
+      # does, after govulncheck: vet, staticcheck, their tools and three GOOS scans. A job
+      # needing more (the node jobs build Passwall-Node's own go.sum) fetches the rest
+      # from the proxy, which is what every job did for whatever the frozen key lacked.
       #
       # A KEY PER JOB RATHER THAN PER REPOSITORY. `actions/cache` will not save a
       # key that already exists, so several jobs sharing one key means whichever
@@ -707,20 +862,25 @@ jobs:
       # request's caches are scoped to `refs/pull/N/merge` — read by nobody but a
       # re-run of that same PR. A save made on a PR is therefore write-only: it
       # costs the runner the upload and takes room from the caches main reads. The
-      # combined `actions/cache@v4` saves on every event; the pair below saves where
+      # combined `actions/cache` action saves on every event; the pair below saves where
       # it can be read.
       - uses: actions/cache/restore@v6
         with:
           path: ~/.cache/go-build
           key: go-build-targets-${{ runner.os }}-${{ hashFiles('go.sum') }}
           restore-keys: go-build-targets-${{ runner.os }}-
+      - uses: actions/cache/restore@v6
+        with:
+          path: ~/go/pkg/mod
+          key: go-mod-${{ runner.os }}-${{ hashFiles('go.sum') }}
+          restore-keys: go-mod-${{ runner.os }}-
       - uses: actions/setup-go@v7
         # Allow toolchain selection; setup-go exports local after installation.
         env:
           GOTOOLCHAIN: auto
         with:
           go-version-file: go.mod
-          cache: true
+          cache: false
       - name: Verify exact preferred compiler
         run: |
           set -eu
@@ -771,20 +931,34 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
+      # THE BUILD CACHE KEY NAMES THE TOOLS THIS JOB COMPILES, AT THEIR PINS. A key is
+      # written once, so keyed on go.sum alone the entry is the one main saved after
+      # go.sum last moved, and no later save can add to it: staticcheck and actionlint,
+      # added after that save, would compile from source on every run until go.sum
+      # next changed. With the pins in the key, adding or bumping a tool moves it, and
+      # the next main push saves a cache that holds the build. The deploy guard reads
+      # the pins off the steps below, so a bump that forgets the key fails there.
+      #
       # The build cache pair the build job explains: restored on every event, and
-      # saved only from the default branch, where a save can be read.
+      # saved only from the default branch, where a save can be read. Then the shared
+      # module cache, which go_static saves; setup-go's own cache is off.
       - uses: actions/cache/restore@v6
         with:
           path: ~/.cache/go-build
-          key: go-build-static-${{ runner.os }}-${{ hashFiles('go.sum') }}
+          key: go-build-static-${{ runner.os }}-${{ hashFiles('go.sum') }}-actionlint-v1.7.12-staticcheck-v0.8.1-govulncheck-v1.8.0
           restore-keys: go-build-static-${{ runner.os }}-
+      - uses: actions/cache/restore@v6
+        with:
+          path: ~/go/pkg/mod
+          key: go-mod-${{ runner.os }}-${{ hashFiles('go.sum') }}
+          restore-keys: go-mod-${{ runner.os }}-
       - uses: actions/setup-go@v7
         # Allow toolchain selection; setup-go exports local after installation.
         env:
           GOTOOLCHAIN: auto
         with:
           go-version-file: go.mod
-          cache: true
+          cache: false
       - name: Verify exact preferred compiler
         run: |
           set -eu
@@ -803,6 +977,28 @@ jobs:
       # exits non-zero in one line, the same shape the Node project uses.
       - name: Formatting
         run: test -z "$(gofmt -l .)"
+      # WORKFLOWS AND SHELL ARE LINTED, NOT ONLY PARSED. The deploy guard runs `bash -n`
+      # over test.yml's scripts and the Go tests syntax-check the two scripts this panel
+      # serves to operator hosts, and a parse is all either proves: the subshell that
+      # swallowed a race-shard verdict passed `bash -n` and was found by a hand-run
+      # shellcheck (the race step's comment has it). release.yml and the other
+      # workflows had no expression or type check at all.
+      #
+      # actionlint is the version the Node project and SAP pin. It shellchecks every
+      # run: block ONLY IF shellcheck is on PATH, and says nothing when it is not, so
+      # the runner image's shellcheck is asserted first. The tracked .sh files get
+      # shellcheck at its default severity, style included: they are clean at every
+      # level today, and the quoting checks that matter for scripts run as root on an
+      # operator's host (SC2086 among them) are "info", below -S warning. A finding
+      # that is deliberate is disabled at its line with the reason, as the race step
+      # already does for SC2086. Measured locally: under a second each on a warm build
+      # cache, which main's next save provides because the cache key names the pin.
+      - name: Workflow and shell lint
+        run: |
+          set -euo pipefail
+          command -v shellcheck
+          go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+          git ls-files -z '*.sh' | xargs -0 shellcheck
       - run: go vet ./...
       # THE REINSTALL ACCEPTANCE IS BEHIND A BUILD TAG, SO THE LINE ABOVE NEVER OPENS
       # IT. Its only compile was node-reinstall-acceptance.yml, which runs on a path
@@ -814,12 +1010,57 @@ jobs:
       #
       # Vetted here it no longer depends on the filter being complete. The dependencies
       # are already compiled by the line above, but the tag is part of vet's cache key:
-      # measured locally this is ~11s until go.sum next changes and main saves a cache
-      # that has seen it, and under a second after.
+      # measured locally this is ~11s until the build cache key above next moves and
+      # main saves a cache that has seen it, and under a second after.
       - name: The tagged reinstall acceptance still compiles
         run: go vet -tags node_reinstall_acceptance ./tests/acceptance/...
+      # STATICCHECK, BECAUSE VET DOES NOT LOOK FOR WHAT IT FINDS. Its first run here
+      # reported thirteen findings every gate above had passed, among them six pieces
+      # of dead code, a dead store in nodesync, a crypto/ecdsa field deprecated since
+      # Go 1.26, and an alert source the router wires in and nothing lists. The CHANGELOG
+      # records one manual U1000 sweep; this makes the sweep continuous. It runs with
+      # the acceptance tag because a tag only adds files, so one pass reads them all.
+      #
+      # THE PIN HAS TO UNDERSTAND go.mod'S TOOLCHAIN, SO THE TWO MOVE TOGETHER.
+      # staticcheck reads the compiler's export data, and a release older than the
+      # toolchain cannot: v0.7.0 fails on go1.27.1 with "export data version 4 is
+      # greater than maximum supported version 2", and v0.8.1 works. A toolchain bump
+      # that turns this step red is asking for the staticcheck bump in the same PR.
+      #
+      # ~18s on a cold analysis cache, measured locally, in a job off the critical path.
+      - name: staticcheck
+        run: go run honnef.co/go/tools/cmd/staticcheck@v0.8.1 -tags node_reinstall_acceptance ./...
+      # EVERY OS THE RELEASE SHIPS, NOT ONLY THE RUNNER'S. govulncheck analyses the
+      # packages as they build for the current GOOS, so an advisory whose vulnerable
+      # code lives only in a _windows.go or _darwin.go file is never evaluated on a
+      # linux runner, and the build job and release.yml ship windows and darwin panels.
+      # The tool is installed once for the host: `go run` under GOOS=windows would build
+      # a Windows govulncheck and then fail to execute it. One OS failing does not stop
+      # the others from being scanned. Measured locally: 9s for linux, 7s and 6s for
+      # windows and darwin.
       - name: Reachable vulnerability check
-        run: go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
+        run: |
+          set -u
+          go install golang.org/x/vuln/cmd/govulncheck@v1.8.0 || exit 1
+          failed=0
+          for goos in linux windows darwin
+          do
+            echo "== GOOS=$goos"
+            GOOS="$goos" "$(go env GOPATH)/bin/govulncheck" ./... || failed=1
+          done
+          exit "$failed"
+      # THE ONE SAVE OF THE SHARED MODULE CACHE, and it is here, after govulncheck, because
+      # by then this job has loaded every module any job in this file restores it for.
+      - uses: actions/cache/save@v6
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        with:
+          path: ~/go/pkg/mod
+          key: go-mod-${{ runner.os }}-${{ hashFiles('go.sum') }}
+      - uses: actions/cache/save@v6
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        with:
+          path: ~/.cache/go-build
+          key: go-build-static-${{ runner.os }}-${{ hashFiles('go.sum') }}-actionlint-v1.7.12-staticcheck-v0.8.1-govulncheck-v1.8.0
 
   # The race suite is sharded because it is the critical path: at 4m22s it was
   # still running while the other twenty-two checks had finished.
@@ -843,11 +1084,6 @@ jobs:
   # Branch protection requires that exact context, and a matrix reports as
   # several checks, so a split that renamed the job would leave the required
   # context unproduced and block every merge on main.
-      - uses: actions/cache/save@v6
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        with:
-          path: ~/.cache/go-build
-          key: go-build-static-${{ runner.os }}-${{ hashFiles('go.sum') }}
   race-shard:
     name: go race full (${{ matrix.part }}/3)
     runs-on: ubuntu-latest
@@ -864,19 +1100,24 @@ jobs:
       # compiles a different set of packages under -race, and a key cannot be
       # overwritten, so one shared key would freeze whichever shard finished first.
       # See the build job for the measurement and for why restore and save are two
-      # steps.
+      # steps. The module cache after it is the shared one go_static saves.
       - uses: actions/cache/restore@v6
         with:
           path: ~/.cache/go-build
           key: go-build-race-${{ matrix.part }}-${{ runner.os }}-${{ hashFiles('go.sum') }}
           restore-keys: go-build-race-${{ matrix.part }}-${{ runner.os }}-
+      - uses: actions/cache/restore@v6
+        with:
+          path: ~/go/pkg/mod
+          key: go-mod-${{ runner.os }}-${{ hashFiles('go.sum') }}
+          restore-keys: go-mod-${{ runner.os }}-
       - uses: actions/setup-go@v7
         # Allow toolchain selection; setup-go exports local after installation.
         env:
           GOTOOLCHAIN: auto
         with:
           go-version-file: go.mod
-          cache: true
+          cache: false
       - name: Verify exact preferred compiler
         run: |
           set -eu
@@ -885,6 +1126,25 @@ jobs:
           test "$(go env GOVERSION)" = "$build_toolchain"
           test "$(go tool compile -V | awk '{ print $3 }')" = "$build_toolchain"
       - name: test
+        env:
+          # THE RACE RUNTIME SLEEPS A SECOND BEFORE EVERY EXIT (atexit_sleep_ms defaults to
+          # 1000), giving a goroutine the tests leaked time to report a race it is about to
+          # hit. Every test binary pays it, ~30 of them a shard, and cmd/panel pays it again
+          # each time it re-executes itself for a CLI case: that is why a trivial package
+          # reports 1.01s. A race inside a test fails that test whatever this says, so what
+          # a shorter sleep gives up is only the late report from a leaked goroutine, and
+          # 100ms still leaves a window for it. Measured locally over internal/pkg/... and
+          # cmd/panel: 35s at the default, 25s at 100ms, 24s at 0.
+          GORACE: atexit_sleep_ms=100
+          # THE HEAVY PACKAGE'S ORDINARY TESTS START FROM A COPY OF ONE MIGRATED SQLITE
+          # FILE instead of running EnsureSchema each. Under -race the schema was most
+          # of sqlstore's time: a fresh one costs 506ms against 26ms without the
+          # detector, and the copy 39ms. Measured locally, the whole package under
+          # -race went from 227s to 92s, every test passing both ways. Schema and
+          # migration tests keep their fresh databases, and a plain `go test` without
+          # this variable keeps the real boot path for every test; testdb_test.go says
+          # why the copy cannot differ from what EnsureSchema would have left.
+          PSP_TEST_DB_REUSE_SCHEMA: "true"
         run: |
           # `set -e` IS PART OF THE GUARD BELOW, not just hygiene: without it
           # `test -n "$packages"` does not stop anything, and an empty planner
@@ -918,7 +1178,12 @@ jobs:
           # shard that ran no test of the heavy package looks exactly like a shard
           # whose slice was small. The list is checked before it is turned into a
           # pattern, and the pattern is checked before it is used.
-          tests=$(go test -list '^Test' "$heavy" | grep '^Test' | grep -v '^TestMain$')
+          #
+          # LISTED FROM THE RACE BUILD, which the run below then reuses. A plain `go test
+          # -list` compiled the package and its whole dependency tree a second time,
+          # without -race: 30s measured locally on a cache already holding the race
+          # build, against 2s for this, and paid on every shard whose cache was stale.
+          tests=$(go test -race -list '^Test' "$heavy" | grep '^Test' | grep -v '^TestMain$')
           test -n "$tests"
           regex=$(printf '%s\n' "$tests" \
             | awk -v s="${{ matrix.part }}" -v m=3 'NR % m == s % m' \
@@ -936,9 +1201,21 @@ jobs:
           # a `failed=1` set inside it is discarded and the step reports success
           # while a suite failed. shellcheck found exactly that here (SC2030/SC2031),
           # and it is the failure this job is least able to see for itself.
+          #
+          # FOUR MINUTES EACH, SO A HANG IS KILLED BY GO TEST AND NOT BY THE RUNNER. Only
+          # go test's timeout panic prints the goroutine dump, and only a failed step --
+          # not a cancelled job -- uploads test-output.txt. The budgets were 8m each,
+          # run one after the other inside this job's 10: a hang in the second half
+          # met the runner's limit first and left a bare cancellation. -timeout counts a
+          # binary's run time, not its compile, and the slowest binary measured is the
+          # heavy slice at 65s, so 4m is 3.7 times that. A hang in either half is now
+          # killed after ~25s of setup, a compile that takes seconds warm and a few
+          # minutes after go.sum moves, the other half's one to two minutes, and 4m:
+          # inside the 10.
           failed=0
-          go test -race -count=1 -timeout=8m $packages 2>&1 | tee test-output.txt || failed=1
-          go test -race -count=1 -timeout=8m -run "^(${regex})$" "$heavy" 2>&1 | tee -a test-output.txt || failed=1
+          # shellcheck disable=SC2086 # $packages is a list of import paths, split on purpose
+          go test -race -count=1 -timeout=4m $packages 2>&1 | tee test-output.txt || failed=1
+          go test -race -count=1 -timeout=4m -run "^(${regex})$" "$heavy" 2>&1 | tee -a test-output.txt || failed=1
           exit "$failed"
       - name: upload test output
         if: failure()
@@ -960,6 +1237,7 @@ jobs:
     # which reads as "not run" rather than "failed".
     if: always()
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - name: every shard passed
         run: test "${{ needs.race-shard.result }}" = success
@@ -989,19 +1267,25 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       # The build cache pair the build job explains: restored on every event, and
-      # saved only from the default branch, where a save can be read.
+      # saved only from the default branch, where a save can be read. Then the shared
+      # module cache, which go_static saves; setup-go's own cache is off.
       - uses: actions/cache/restore@v6
         with:
           path: ~/.cache/go-build
           key: go-build-postgres-${{ runner.os }}-${{ hashFiles('go.sum') }}
           restore-keys: go-build-postgres-${{ runner.os }}-
+      - uses: actions/cache/restore@v6
+        with:
+          path: ~/go/pkg/mod
+          key: go-mod-${{ runner.os }}-${{ hashFiles('go.sum') }}
+          restore-keys: go-mod-${{ runner.os }}-
       - uses: actions/setup-go@v7
         # Allow toolchain selection; setup-go exports local after installation.
         env:
           GOTOOLCHAIN: auto
         with:
           go-version-file: go.mod
-          cache: true
+          cache: false
       - name: Verify exact preferred compiler
         run: |
           set -eu
@@ -1009,10 +1293,38 @@ jobs:
           test -n "$build_toolchain"
           test "$(go env GOVERSION)" = "$build_toolchain"
           test "$(go tool compile -V | awk '{ print $3 }')" = "$build_toolchain"
+      # THE SERVER IS THROWAWAY, SO IT DOES NOT SYNC TO DISK. The fixture was already
+      # rebuilt around this cost — DROP DATABASE forced a checkpoint that "made the
+      # schema-heavy CI suite spend minutes syncing disposable data" (testdb_test.go) —
+      # and every reset is still a TRUNCATE ... CASCADE that flushes WAL on commit. No
+      # test asserts crash durability, and a service container that dies takes its data
+      # with it whatever these say. All three are reloadable; psp is the superuser.
+      #
+      # AN EXPERIMENT, MEASURED ONCE. Locally on PostgreSQL 16 it took this step's
+      # command from 94-96s to 64s. What it has to move here is a test-step p50 of
+      # 122s, with eleven of ninety-two runs over 150s and one at 458s against the 8m
+      # timeout: compare p50 and p90 over ~20 runs before calling it a saving. The
+      # -timeout stays as it is either way.
+      - name: the throwaway server does not sync to disk
+        env:
+          SERVICE: ${{ job.services.postgres.id }}
+        run: |
+          docker exec "$SERVICE" psql -U psp -d psptest -v ON_ERROR_STOP=1 \
+            -c 'ALTER SYSTEM SET fsync = off' \
+            -c 'ALTER SYSTEM SET synchronous_commit = off' \
+            -c 'ALTER SYSTEM SET full_page_writes = off' \
+            -c 'SELECT pg_reload_conf()'
+      # THE ROLLUP RUNS HERE TOO, because it is the one package outside sqlstore that
+      # writes dialect-specific SQL: its hourly upsert branches on MySQL, after an empty
+      # ON DUPLICATE KEY UPDATE failed in production, and SQLite alone had executed it.
+      # Its tests read the same PSP_TEST_DB_* variables and take a fresh schema each.
+      # Measured locally on PostgreSQL 16 and MySQL 8.0: 5s and 12s, in a binary go
+      # test runs alongside sqlstore's 96s and 63s, so the step takes no longer. With
+      # the old MySQL branch put back, they fail with the production 1064.
       - name: test
         run: |
           set -o pipefail
-          go test -count=1 -timeout=8m ./internal/adapters/sqlstore/... 2>&1 | tee test-output.txt
+          go test -count=1 -timeout=8m ./internal/adapters/sqlstore/... ./internal/service/rollup/... 2>&1 | tee test-output.txt
       - name: upload test output
         if: failure()
         uses: actions/upload-artifact@v7
@@ -1050,19 +1362,25 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       # The build cache pair the build job explains: restored on every event, and
-      # saved only from the default branch, where a save can be read.
+      # saved only from the default branch, where a save can be read. Then the shared
+      # module cache, which go_static saves; setup-go's own cache is off.
       - uses: actions/cache/restore@v6
         with:
           path: ~/.cache/go-build
           key: go-build-mysql-${{ runner.os }}-${{ hashFiles('go.sum') }}
           restore-keys: go-build-mysql-${{ runner.os }}-
+      - uses: actions/cache/restore@v6
+        with:
+          path: ~/go/pkg/mod
+          key: go-mod-${{ runner.os }}-${{ hashFiles('go.sum') }}
+          restore-keys: go-mod-${{ runner.os }}-
       - uses: actions/setup-go@v7
         # Allow toolchain selection; setup-go exports local after installation.
         env:
           GOTOOLCHAIN: auto
         with:
           go-version-file: go.mod
-          cache: true
+          cache: false
       - name: Verify exact preferred compiler
         run: |
           set -eu
@@ -1070,10 +1388,22 @@ jobs:
           test -n "$build_toolchain"
           test "$(go env GOVERSION)" = "$build_toolchain"
           test "$(go tool compile -V | awk '{ print $3 }')" = "$build_toolchain"
+      # The postgres job's experiment, for InnoDB: the redo log is flushed about once a
+      # second instead of at every commit, and the binlog whenever the OS gets to it.
+      # Both are dynamic globals. Locally on MySQL 8.0 it took this step's
+      # command from 58-63s to 48s; here the test step's p50 is 90s with one run at
+      # 372s, so it is the tail over ~20 runs that says whether it worked.
+      - name: the throwaway server does not flush every commit
+        env:
+          SERVICE: ${{ job.services.mysql.id }}
+        run: |
+          docker exec "$SERVICE" mysql -uroot -ppsp \
+            -e 'SET GLOBAL innodb_flush_log_at_trx_commit = 0; SET GLOBAL sync_binlog = 0'
+      # The rollup's tests run here as well; the postgres job says why.
       - name: test
         run: |
           set -o pipefail
-          go test -count=1 -timeout=8m ./internal/adapters/sqlstore/... 2>&1 | tee test-output.txt
+          go test -count=1 -timeout=8m ./internal/adapters/sqlstore/... ./internal/service/rollup/... 2>&1 | tee test-output.txt
       - name: upload test output
         if: failure()
         uses: actions/upload-artifact@v7

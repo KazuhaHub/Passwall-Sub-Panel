@@ -402,6 +402,8 @@ export default function MeView() {
   async function tryEmergency() {
     setEmergencyBusy(true)
     try {
+      // Not a hook: an API call (src/api/me.ts) whose name starts with `use`.
+      // eslint-disable-next-line react-hooks/rules-of-hooks
       const res = await useEmergencyAccess()
       // Backend returns 200 only on success (forbidden / quota-reached come
       // back as HTTP errors and throw above).

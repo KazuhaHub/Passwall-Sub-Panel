@@ -22,6 +22,17 @@ updates:
     open-pull-requests-limit: 10
     commit-message:
       prefix: "deps"
+    # INDIRECT REQUIREMENTS TOO, OR THE LIST BELOW IS HALF DECORATION. Version
+    # updates default to direct dependencies, and Go's parser treats a
+    # `// indirect` line as a subdependency: etree and goxmldsig are both
+    # indirect here, so the list below kept them out of a batch they were never
+    # going to be in. Observed, not assumed: the runs of 2026-09-17 and
+    # 2026-09-23 proposed only direct modules, while x/net v0.59.0, x/image
+    # v0.46.0, x/arch v0.31.0 and mimetype v1.4.15, all indirect, were published
+    # before either run. Security updates were never limited this way; this is
+    # about the routine updates the header says close the gap they leave.
+    allow:
+      - dependency-type: all
     groups:
       # Non-security libraries can land together to keep PR noise down.
       minor-and-patch:
@@ -29,6 +40,15 @@ updates:
           - minor
           - patch
         exclude-patterns:
+          # The two libraries this project shares with its siblings. authcore
+          # requires the same crewjam/saml, goxmldsig and go-webauthn versions this
+          # module selects, so under minimal version selection an authcore release
+          # that raises one raises it here too -- inside a batch, past the list
+          # below. passwall-protocol is the wire the Node speaks, and at 0.x a minor
+          # release may break it. Each is reviewed on its own, as SAP already does
+          # for authcore.
+          - "github.com/KazuhaHub/authcore"
+          - "github.com/KazuhaHub/passwall-protocol"
           - "github.com/crewjam/saml"
           - "github.com/russellhaering/goxmldsig"
           - "github.com/beevik/etree"
