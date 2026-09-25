@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => {
   } = {}
   const http = Object.assign(vi.fn(), {
     post: vi.fn(),
+    defaults: {} as { adapter?: unknown },
     interceptors: {
       request: { use: vi.fn((fn: typeof state.request) => { state.request = fn }) },
       response: {
@@ -19,9 +20,12 @@ const mocks = vi.hoisted(() => {
       },
     },
   })
+  // The transport the client wraps for progress tracking.
+  const baseAdapter = vi.fn(async (config: Record<string, unknown>) => ({ data: {}, status: 200, config }))
   return {
     state,
     http,
+    baseAdapter,
     pushSnack: vi.fn(),
     translate: vi.fn((key: string, options?: { defaultValue?: string }) => options?.defaultValue ?? key),
   }
@@ -31,6 +35,8 @@ vi.mock('axios', () => ({
   default: {
     create: vi.fn(() => mocks.http),
     isCancel: vi.fn((error: { cancelled?: boolean }) => error.cancelled === true),
+    defaults: { adapter: ['xhr', 'fetch'] },
+    getAdapter: vi.fn(() => mocks.baseAdapter),
   },
 }))
 vi.mock('@/i18n', () => ({ default: { t: mocks.translate } }))
@@ -186,5 +192,17 @@ describe('shared API client interceptors', () => {
     await expect(mocks.state.responseError?.(timeout)).rejects.toBe(timeout)
     expect(mocks.pushSnack).toHaveBeenCalledTimes(1)
     expect(mocks.pushSnack).toHaveBeenCalledWith(expect.any(String), 'error')
+  })
+})
+
+describe('shared API client transport', () => {
+  // The app-wide progress bar counts writes at the transport, so the client must
+  // send through the tracking wrapper rather than the bare adapter.
+  it('sends every request through a wrapper around the platform adapter', async () => {
+    const adapter = mocks.http.defaults.adapter as (config: Record<string, unknown>) => Promise<unknown>
+    expect(typeof adapter).toBe('function')
+    expect(adapter).not.toBe(mocks.baseAdapter)
+    await adapter({ method: 'post', url: '/admin/users/1/renew', headers: {} })
+    expect(mocks.baseAdapter).toHaveBeenCalledWith(expect.objectContaining({ method: 'post' }))
   })
 })

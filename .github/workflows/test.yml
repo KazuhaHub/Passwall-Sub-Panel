@@ -56,12 +56,12 @@ jobs:
       # The build cache pair the build job explains: restored on every event, and
       # saved only from the default branch, where a save can be read. Then the shared
       # module cache, which go_static saves; setup-go's own cache is off.
-      - uses: actions/cache/restore@v4
+      - uses: actions/cache/restore@v6
         with:
           path: ~/.cache/go-build
           key: go-build-node-compat-${{ runner.os }}-${{ hashFiles('go.sum') }}
           restore-keys: go-build-node-compat-${{ runner.os }}-
-      - uses: actions/cache/restore@v4
+      - uses: actions/cache/restore@v6
         with:
           path: ~/go/pkg/mod
           key: go-mod-${{ runner.os }}-${{ hashFiles('go.sum') }}
@@ -200,7 +200,7 @@ jobs:
           path: evidence/
           if-no-files-found: error
           retention-days: 90
-      - uses: actions/cache/save@v4
+      - uses: actions/cache/save@v6
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         with:
           path: ~/.cache/go-build
@@ -217,12 +217,12 @@ jobs:
       # The build cache pair the build job explains: restored on every event, and
       # saved only from the default branch, where a save can be read. Then the shared
       # module cache, which go_static saves; setup-go's own cache is off.
-      - uses: actions/cache/restore@v4
+      - uses: actions/cache/restore@v6
         with:
           path: ~/.cache/go-build
           key: go-build-node-contract-${{ runner.os }}-${{ hashFiles('go.sum') }}
           restore-keys: go-build-node-contract-${{ runner.os }}-
-      - uses: actions/cache/restore@v4
+      - uses: actions/cache/restore@v6
         with:
           path: ~/go/pkg/mod
           key: go-mod-${{ runner.os }}-${{ hashFiles('go.sum') }}
@@ -359,7 +359,7 @@ jobs:
           path: evidence/
           if-no-files-found: error
           retention-days: 90
-      - uses: actions/cache/save@v4
+      - uses: actions/cache/save@v6
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         with:
           path: ~/.cache/go-build
@@ -384,7 +384,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: Download every case report
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           # SCOPED TO ITS OWN EVIDENCE, BECAUSE AN UNSCOPED DOWNLOAD FAILS ON ANYTHING.
           # This step reads the run's artifacts with no name, no id and no pattern — so
@@ -473,12 +473,12 @@ jobs:
       # The build cache pair the build job explains: restored on every event, and
       # saved only from the default branch, where a save can be read. Then the shared
       # module cache, which go_static saves; setup-go's own cache is off.
-      - uses: actions/cache/restore@v4
+      - uses: actions/cache/restore@v6
         with:
           path: ~/.cache/go-build
           key: go-build-third-party-${{ runner.os }}-${{ hashFiles('go.sum') }}
           restore-keys: go-build-third-party-${{ runner.os }}-
-      - uses: actions/cache/restore@v4
+      - uses: actions/cache/restore@v6
         with:
           path: ~/go/pkg/mod
           key: go-mod-${{ runner.os }}-${{ hashFiles('go.sum') }}
@@ -574,7 +574,7 @@ jobs:
       - name: stop the panels
         if: always()
         run: deploy/compat/backends/third-party.sh down
-      - uses: actions/cache/save@v4
+      - uses: actions/cache/save@v6
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         with:
           path: ~/.cache/go-build
@@ -761,7 +761,7 @@ jobs:
       #
       # Restored always, saved only from the default branch — the same split the Go
       # jobs use, for the same reason: a PR's save lands in a scope nothing reads.
-      - uses: actions/cache/restore@v4
+      - uses: actions/cache/restore@v6
         with:
           path: ~/.cache/ms-playwright
           key: playwright-chromium-${{ runner.os }}-1.63.0
@@ -805,7 +805,7 @@ jobs:
       - name: unit tests
         working-directory: web-react
         run: npm run test
-      - uses: actions/cache/save@v4
+      - uses: actions/cache/save@v6
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         with:
           path: ~/.cache/ms-playwright
@@ -862,14 +862,14 @@ jobs:
       # request's caches are scoped to `refs/pull/N/merge` — read by nobody but a
       # re-run of that same PR. A save made on a PR is therefore write-only: it
       # costs the runner the upload and takes room from the caches main reads. The
-      # combined `actions/cache@v4` saves on every event; the pair below saves where
+      # combined `actions/cache` action saves on every event; the pair below saves where
       # it can be read.
-      - uses: actions/cache/restore@v4
+      - uses: actions/cache/restore@v6
         with:
           path: ~/.cache/go-build
           key: go-build-targets-${{ runner.os }}-${{ hashFiles('go.sum') }}
           restore-keys: go-build-targets-${{ runner.os }}-
-      - uses: actions/cache/restore@v4
+      - uses: actions/cache/restore@v6
         with:
           path: ~/go/pkg/mod
           key: go-mod-${{ runner.os }}-${{ hashFiles('go.sum') }}
@@ -919,7 +919,7 @@ jobs:
       # SAVED ONLY FROM THE DEFAULT BRANCH, and only by a run that succeeded: a
       # key cannot be overwritten once written, so letting a partially populated
       # cache claim it would freeze the cache below what this job needs — for good.
-      - uses: actions/cache/save@v4
+      - uses: actions/cache/save@v6
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         with:
           path: ~/.cache/go-build
@@ -942,12 +942,12 @@ jobs:
       # The build cache pair the build job explains: restored on every event, and
       # saved only from the default branch, where a save can be read. Then the shared
       # module cache, which go_static saves; setup-go's own cache is off.
-      - uses: actions/cache/restore@v4
+      - uses: actions/cache/restore@v6
         with:
           path: ~/.cache/go-build
           key: go-build-static-${{ runner.os }}-${{ hashFiles('go.sum') }}-actionlint-v1.7.12-staticcheck-v0.8.1-govulncheck-v1.8.0
           restore-keys: go-build-static-${{ runner.os }}-
-      - uses: actions/cache/restore@v4
+      - uses: actions/cache/restore@v6
         with:
           path: ~/go/pkg/mod
           key: go-mod-${{ runner.os }}-${{ hashFiles('go.sum') }}
@@ -1051,12 +1051,12 @@ jobs:
           exit "$failed"
       # THE ONE SAVE OF THE SHARED MODULE CACHE, and it is here, after govulncheck, because
       # by then this job has loaded every module any job in this file restores it for.
-      - uses: actions/cache/save@v4
+      - uses: actions/cache/save@v6
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         with:
           path: ~/go/pkg/mod
           key: go-mod-${{ runner.os }}-${{ hashFiles('go.sum') }}
-      - uses: actions/cache/save@v4
+      - uses: actions/cache/save@v6
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         with:
           path: ~/.cache/go-build
@@ -1101,12 +1101,12 @@ jobs:
       # overwritten, so one shared key would freeze whichever shard finished first.
       # See the build job for the measurement and for why restore and save are two
       # steps. The module cache after it is the shared one go_static saves.
-      - uses: actions/cache/restore@v4
+      - uses: actions/cache/restore@v6
         with:
           path: ~/.cache/go-build
           key: go-build-race-${{ matrix.part }}-${{ runner.os }}-${{ hashFiles('go.sum') }}
           restore-keys: go-build-race-${{ matrix.part }}-${{ runner.os }}-
-      - uses: actions/cache/restore@v4
+      - uses: actions/cache/restore@v6
         with:
           path: ~/go/pkg/mod
           key: go-mod-${{ runner.os }}-${{ hashFiles('go.sum') }}
@@ -1223,7 +1223,7 @@ jobs:
         with:
           name: race-shard-${{ matrix.part }}-test-output
           path: test-output.txt
-      - uses: actions/cache/save@v4
+      - uses: actions/cache/save@v6
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         with:
           path: ~/.cache/go-build
@@ -1269,12 +1269,12 @@ jobs:
       # The build cache pair the build job explains: restored on every event, and
       # saved only from the default branch, where a save can be read. Then the shared
       # module cache, which go_static saves; setup-go's own cache is off.
-      - uses: actions/cache/restore@v4
+      - uses: actions/cache/restore@v6
         with:
           path: ~/.cache/go-build
           key: go-build-postgres-${{ runner.os }}-${{ hashFiles('go.sum') }}
           restore-keys: go-build-postgres-${{ runner.os }}-
-      - uses: actions/cache/restore@v4
+      - uses: actions/cache/restore@v6
         with:
           path: ~/go/pkg/mod
           key: go-mod-${{ runner.os }}-${{ hashFiles('go.sum') }}
@@ -1331,7 +1331,7 @@ jobs:
         with:
           name: postgres-test-output
           path: test-output.txt
-      - uses: actions/cache/save@v4
+      - uses: actions/cache/save@v6
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         with:
           path: ~/.cache/go-build
@@ -1364,12 +1364,12 @@ jobs:
       # The build cache pair the build job explains: restored on every event, and
       # saved only from the default branch, where a save can be read. Then the shared
       # module cache, which go_static saves; setup-go's own cache is off.
-      - uses: actions/cache/restore@v4
+      - uses: actions/cache/restore@v6
         with:
           path: ~/.cache/go-build
           key: go-build-mysql-${{ runner.os }}-${{ hashFiles('go.sum') }}
           restore-keys: go-build-mysql-${{ runner.os }}-
-      - uses: actions/cache/restore@v4
+      - uses: actions/cache/restore@v6
         with:
           path: ~/go/pkg/mod
           key: go-mod-${{ runner.os }}-${{ hashFiles('go.sum') }}
@@ -1410,7 +1410,7 @@ jobs:
         with:
           name: mysql-test-output
           path: test-output.txt
-      - uses: actions/cache/save@v4
+      - uses: actions/cache/save@v6
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         with:
           path: ~/.cache/go-build

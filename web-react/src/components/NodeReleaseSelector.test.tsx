@@ -64,12 +64,17 @@ async function choose(label: string, option: string) {
 }
 
 const chooseVersion = (version: string) => choose('admin:servers.native.agent_version', version)
+// Publication details are folded on every surface; open them before reading them.
+const openReview = () => fireEvent.click(screen.getByRole('button', { name: 'admin:servers.native.release_review' }))
 const chooseTesting = () => choose('admin:servers.native.release_channel', 'admin:servers.native.release_testing')
 
 describe('Passwall Node release selection', () => {
-  it('folds publication notes behind an accessible summary only on the compact installation surface', async () => {
+  it.each([
+    { surface: 'compact installation', compact: true },
+    { surface: 'upgrade', compact: false },
+  ])('folds publication notes behind an accessible summary on the $surface surface', async ({ compact }) => {
     reads([stable])
-    mount(<Controlled compact />)
+    mount(<Controlled compact={compact} />)
     await chooseVersion(stable.version)
     expect(screen.queryByText(stable.notes)).toBeNull()
     expect(screen.queryByRole('link', { name: 'admin:servers.native.release_details' })).toBeNull()
@@ -134,18 +139,67 @@ describe('Passwall Node release selection', () => {
     expect(api.post).not.toHaveBeenCalled()
   })
 
-  it('requires an exact version choice and displays the official link, date, and plain-text compatibility notes', async () => {
-    reads([{ ...stable, notes: '<script>alert("not HTML")</script>\nReviewed contract.' }])
-    mount(<Controlled />)
+  it('requires an exact version choice and displays the official link, date, and notes without raw HTML', async () => {
+    reads([{ ...stable, notes: '<script>alert("not HTML")</script>\n\nReviewed contract.' }])
+    const view = mount(<Controlled />)
     await waitFor(() => expect(screen.queryByRole('status')).toBeNull())
     expect(selected()).toBe('')
     await chooseVersion(stable.version)
     expect(selected()).toBe(stable.version)
-    expect(screen.getByText(/<script>alert/).querySelector('script')).toBeNull()
+    openReview()
+    expect(await screen.findByText('Reviewed contract.')).toBeTruthy()
+    // Raw HTML in a release body is dropped, neither executed nor shown as markup.
+    expect(view.container.querySelector('script')).toBeNull()
+    expect(screen.queryByText(/alert\(/)).toBeNull()
     const link = screen.getByRole('link', { name: 'admin:servers.native.release_details' })
     expect(link.getAttribute('href')).toBe(stable.release_url)
     expect(link.getAttribute('rel')).toBe('noopener noreferrer')
     expect(screen.getByText('admin:servers.native.release_published')).toBeTruthy()
+  })
+
+  // THE NOTES ARE A GITHUB RELEASE BODY, which is Markdown: GitHub's generated
+  // changelog is a heading, one bulleted pull request per line, and a bold
+  // "Full Changelog" line, with bare URLs that GitHub autolinks. Shown as text,
+  // the operator reads "## What's Changed" and asterisks.
+  it('renders the release body as Markdown with safe links and no remote images', async () => {
+    reads([{ ...stable, notes: [
+      "## What's Changed",
+      '* The example compose grants FOWNER by @KKazuhaK in https://github.com/KazuhaHub/Passwall-Node/pull/58',
+      '* Root must not hand the runtime directory away by @KKazuhaK in https://github.com/KazuhaHub/Passwall-Node/pull/59',
+      '',
+      '**Full Changelog**: https://github.com/KazuhaHub/Passwall-Node/compare/v4.0.1.4...v4.0.1.5',
+      '',
+      '[not a link](javascript:alert(1))',
+      '',
+      '![tracking pixel](https://tracker.example/pixel.png)',
+    ].join('\n') }])
+    const view = mount(<Controlled />)
+    await chooseVersion(stable.version)
+    openReview()
+
+    const heading = await screen.findByRole('heading', { name: "What's Changed" })
+    expect(heading.textContent).not.toContain('#')
+    const items = screen.getAllByRole('listitem')
+    expect(items.map(item => item.textContent)).toEqual([
+      'The example compose grants FOWNER by @KKazuhaK in https://github.com/KazuhaHub/Passwall-Node/pull/58',
+      'Root must not hand the runtime directory away by @KKazuhaK in https://github.com/KazuhaHub/Passwall-Node/pull/59',
+    ])
+    expect(screen.getByText('Full Changelog').tagName).toBe('STRONG')
+    expect(view.container.textContent).not.toContain('**')
+
+    const pull = screen.getByRole('link', { name: 'https://github.com/KazuhaHub/Passwall-Node/pull/58' })
+    expect(pull.getAttribute('href')).toBe('https://github.com/KazuhaHub/Passwall-Node/pull/58')
+    expect(pull.getAttribute('target')).toBe('_blank')
+    expect(pull.getAttribute('rel')).toBe('noopener noreferrer')
+    expect(screen.getByRole('link', { name: 'https://github.com/KazuhaHub/Passwall-Node/compare/v4.0.1.4...v4.0.1.5' })).toBeTruthy()
+
+    // Only http(s) targets become links, and a remote image is never fetched:
+    // opening the dialog must not report the operator's address to a third party.
+    expect(screen.queryByRole('link', { name: 'not a link' })).toBeNull()
+    expect(screen.getByText('not a link')).toBeTruthy()
+    expect(view.container.querySelector('a[href^="javascript:"]')).toBeNull()
+    expect(view.container.querySelector('img')).toBeNull()
+    expect(screen.getByText('tracking pixel')).toBeTruthy()
   })
 
   it('clears the exact selection when changing channels and does not auto-select the other channel', async () => {
@@ -409,6 +463,7 @@ describe('a product-scheme release, whose page is addressed by its tag', () => {
     await waitFor(() => expect(screen.queryByRole('status')).toBeNull())
     await chooseVersion('4.0.0')
     expect(selected()).toBe('4.0.0')
+    openReview()
     const link = screen.getByRole('link', { name: 'admin:servers.native.release_details' })
     expect(link.getAttribute('href')).toBe(release.release_url)
     expect(link.getAttribute('rel')).toBe('noopener noreferrer')
@@ -425,6 +480,7 @@ describe('a product-scheme release, whose page is addressed by its tag', () => {
     await waitFor(() => expect(screen.queryByRole('status')).toBeNull())
     await chooseVersion('4.0.1.2')
     expect(selected()).toBe('4.0.1.2')
+    openReview()
     expect(screen.getByRole('link', { name: 'admin:servers.native.release_details' }).getAttribute('href')).toBe(release.release_url)
   })
 
@@ -482,6 +538,7 @@ describe('a release whose tag the panel states', () => {
     await waitFor(() => expect(screen.queryByRole('status')).toBeNull())
     await chooseVersion('4.0.0')
     expect(selected()).toBe('4.0.0')
+    openReview()
     expect(screen.getByRole('link', { name: 'admin:servers.native.release_details' }).getAttribute('href')).toBe(release.release_url)
   })
 

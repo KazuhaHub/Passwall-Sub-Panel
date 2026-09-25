@@ -1,7 +1,8 @@
 import { Suspense, useEffect, useMemo, useState } from 'react'
 import CssBaseline from '@mui/material/CssBaseline'
 import { ThemeProvider } from '@mui/material/styles'
-import { RouterProvider } from 'react-router/dom'
+import AppRouter from '@/router/AppRouter'
+import RequestProgressBar from '@/components/RequestProgressBar'
 import { useTranslation } from 'react-i18next'
 import { Box, CircularProgress } from '@mui/material'
 
@@ -76,10 +77,11 @@ export default function App() {
             cache. */}
         <QuerySessionProvider>
           <Suspense fallback={<RouteFallback />}>
-            <RouterProvider router={router} />
+            <AppRouter router={router} />
           </Suspense>
         </QuerySessionProvider>
       </ErrorBoundary>
+      <RequestProgressBar />
       <SnackbarHost />
       <ConfirmHost />
     </ThemeProvider>

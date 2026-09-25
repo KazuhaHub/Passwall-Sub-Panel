@@ -5,6 +5,7 @@ import RequireAuth from './RequireAuth'
 import { homeForRole } from './home'
 import { useAuthStore } from '@/stores/auth'
 import { panelPath } from '@/panelPath'
+import { viewLoaders } from './viewModules'
 
 const LoginView = lazy(() => import('@/views/LoginView'))
 const SsoCallbackView = lazy(() => import('@/views/SsoCallbackView'))
@@ -19,23 +20,23 @@ const VerifyEmailView = lazy(() => import('@/views/VerifyEmailView'))
 const AdminLayout = lazy(() => import('@/layouts/AdminLayout'))
 const UserLayout = lazy(() => import('@/layouts/UserLayout'))
 const PlaceholderView = lazy(() => import('@/views/admin/PlaceholderView'))
-const DashboardView = lazy(() => import('@/views/admin/DashboardView'))
-const ServersView = lazy(() => import('@/views/admin/ServersView'))
-const CertificatesView = lazy(() => import('@/views/admin/CertificatesView'))
-const GroupsView = lazy(() => import('@/views/admin/GroupsView'))
-const UsersView = lazy(() => import('@/views/admin/UsersView'))
-const NodesView = lazy(() => import('@/views/admin/NodesView'))
-const RuleSetsView = lazy(() => import('@/views/admin/RuleSetsView'))
-const TemplatesView = lazy(() => import('@/views/admin/TemplatesView'))
-const SubClientsView = lazy(() => import('@/views/admin/SubClientsView'))
-const LogsView = lazy(() => import('@/views/admin/LogsView'))
-const SyncTasksView = lazy(() => import('@/views/admin/SyncTasksView'))
-const NodeIssuesView = lazy(() => import('@/views/admin/NodeIssuesView'))
-const DiagnosticsView = lazy(() => import('@/views/admin/DiagnosticsView'))
-const TrafficView = lazy(() => import('@/views/admin/TrafficView'))
-const SettingsView = lazy(() => import('@/views/admin/SettingsView'))
-const LanguagePacksView = lazy(() => import('@/views/admin/LanguagePacksView'))
-const MeView = lazy(() => import('@/views/user/MeView'))
+const DashboardView = lazy(viewLoaders['/admin/dashboard'])
+const ServersView = lazy(viewLoaders['/admin/servers'])
+const CertificatesView = lazy(viewLoaders['/admin/certs'])
+const GroupsView = lazy(viewLoaders['/admin/groups'])
+const UsersView = lazy(viewLoaders['/admin/users'])
+const NodesView = lazy(viewLoaders['/admin/nodes'])
+const RuleSetsView = lazy(viewLoaders['/admin/rules'])
+const TemplatesView = lazy(viewLoaders['/admin/templates'])
+const SubClientsView = lazy(viewLoaders['/admin/sub-clients'])
+const LogsView = lazy(viewLoaders['/admin/logs'])
+const SyncTasksView = lazy(viewLoaders['/admin/sync-tasks'])
+const NodeIssuesView = lazy(viewLoaders['/admin/node-issues'])
+const DiagnosticsView = lazy(viewLoaders['/admin/diagnostics'])
+const TrafficView = lazy(viewLoaders['/admin/traffic'])
+const SettingsView = lazy(viewLoaders['/admin/settings'])
+const LanguagePacksView = lazy(viewLoaders['/admin/language-packs'])
+const MeView = lazy(viewLoaders['/user/me'])
 
 // All admin pages migrated.
 const PLACEHOLDER_PATHS: string[] = []
