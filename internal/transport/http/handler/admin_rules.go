@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -45,10 +46,12 @@ type ruleSetDTO struct {
 	ProxyGroupOrder          []string                             `json:"proxy_group_order"`
 	ProxyGroupMembers        map[string][]domain.ProxyGroupMember `json:"proxy_group_members,omitempty"`
 	ProxyGroupOptions        map[string]domain.ProxyGroupOptions  `json:"proxy_group_options,omitempty"`
-	MihomoRules              string                               `json:"mihomo_rules,omitempty"`
-	MihomoSubRules           []domain.MihomoSubRule               `json:"mihomo_sub_rules,omitempty"`
-	MihomoRematchOutbounds   []domain.MihomoRematchOutbound       `json:"mihomo_rematch_outbounds,omitempty"`
-	Content                  string                               `json:"content"`
+	// MihomoRules is accepted as a migration-only input. Responses leave it
+	// empty, so old clients can upgrade without preserving a second rule stream.
+	MihomoRules            string                         `json:"mihomo_rules,omitempty"`
+	MihomoSubRules         []domain.MihomoSubRule         `json:"mihomo_sub_rules,omitempty"`
+	MihomoRematchOutbounds []domain.MihomoRematchOutbound `json:"mihomo_rematch_outbounds,omitempty"`
+	Content                string                         `json:"content"`
 }
 
 func ruleSetDTOFromDomain(r *domain.RuleSet) ruleSetDTO {
@@ -59,7 +62,6 @@ func ruleSetDTOFromDomain(r *domain.RuleSet) ruleSetDTO {
 		ProxyGroupOrder:          r.ProxyGroupOrder,
 		ProxyGroupMembers:        r.ProxyGroupMembers,
 		ProxyGroupOptions:        r.ProxyGroupOptions,
-		MihomoRules:              r.MihomoRules,
 		MihomoSubRules:           r.MihomoSubRules,
 		MihomoRematchOutbounds:   r.MihomoRematchOutbounds,
 		Content:                  r.Content,
@@ -109,9 +111,10 @@ func (h *AdminRuleSetsHandler) Save(c *gin.Context) {
 		respondError(c, err)
 		return
 	}
-	advanced := render.NormalizeMihomoRuleFeatures(render.MihomoRuleFeatures{Rules: req.MihomoRules, SubRules: req.MihomoSubRules, RematchOutbounds: req.MihomoRematchOutbounds})
-	metadata := render.NormalizeProxyGroupMetadata(req.Content, req.ProxyGroupOrder, req.ProxyGroupMembers, req.ProxyGroupOptions, advanced)
-	inspection := render.InspectProxyGroupsWithMihomo(req.Content, metadata.Members, metadata.Options, nodes, advanced)
+	content := mergeLegacyRuleContent(req.MihomoRules, req.Content)
+	advanced := render.NormalizeMihomoRuleFeatures(render.MihomoRuleFeatures{SubRules: req.MihomoSubRules, RematchOutbounds: req.MihomoRematchOutbounds})
+	metadata := render.NormalizeProxyGroupMetadata(content, req.ProxyGroupOrder, req.ProxyGroupMembers, req.ProxyGroupOptions, advanced)
+	inspection := render.InspectProxyGroupsWithMihomo(content, metadata.Members, metadata.Options, nodes, advanced)
 	for _, issue := range inspection.Issues {
 		if issue.Level == "error" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid proxy group members", "issues": inspection.Issues})
@@ -125,10 +128,9 @@ func (h *AdminRuleSetsHandler) Save(c *gin.Context) {
 		ProxyGroupOrder:          metadata.Order,
 		ProxyGroupMembers:        metadata.Members,
 		ProxyGroupOptions:        render.NormalizeProxyGroupOptionsMap(metadata.Options),
-		MihomoRules:              advanced.Rules,
 		MihomoSubRules:           advanced.SubRules,
 		MihomoRematchOutbounds:   advanced.RematchOutbounds,
-		Content:                  req.Content,
+		Content:                  content,
 	}
 	if issues, err := h.validateTemplateBindings(c.Request.Context(), saved); err != nil {
 		respondError(c, err)
@@ -240,8 +242,21 @@ func (h *AdminRuleSetsHandler) InspectProxyGroups(c *gin.Context) {
 			return
 		}
 	}
-	advanced := render.MihomoRuleFeatures{Rules: req.MihomoRules, SubRules: req.MihomoSubRules, RematchOutbounds: req.MihomoRematchOutbounds}
-	c.JSON(http.StatusOK, render.InspectProxyGroupsWithMihomo(req.Content, req.ProxyGroupMembers, req.ProxyGroupOptions, nodes, advanced, preview))
+	content := mergeLegacyRuleContent(req.MihomoRules, req.Content)
+	advanced := render.MihomoRuleFeatures{SubRules: req.MihomoSubRules, RematchOutbounds: req.MihomoRematchOutbounds}
+	c.JSON(http.StatusOK, render.InspectProxyGroupsWithMihomo(content, req.ProxyGroupMembers, req.ProxyGroupOptions, nodes, advanced, preview))
+}
+
+func mergeLegacyRuleContent(legacy, content string) string {
+	legacy = strings.TrimRight(legacy, "\r\n")
+	if legacy == "" {
+		return content
+	}
+	content = strings.TrimLeft(content, "\r\n")
+	if content == "" {
+		return legacy
+	}
+	return legacy + "\n" + content
 }
 
 func (h *AdminRuleSetsHandler) Delete(c *gin.Context) {

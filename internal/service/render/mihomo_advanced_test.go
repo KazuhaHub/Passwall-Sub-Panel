@@ -11,15 +11,10 @@ import (
 
 func TestMihomoAdvancedInspectionSeparatesGroupsOutboundsAndSubRules(t *testing.T) {
 	features := MihomoRuleFeatures{
-		Rules: `
-- REMATCH-NAME,streaming,Streaming
-- DOMAIN-SUFFIX,netflix.com,mark-streaming
-- SUB-RULE,(NETWORK,tcp),ai-rules
-`,
 		SubRules:         []domain.MihomoSubRule{{Name: "ai-rules", Content: "- DOMAIN-SUFFIX,openai.com,AI\n- MATCH,DIRECT"}},
 		RematchOutbounds: []domain.MihomoRematchOutbound{{Name: "mark-streaming", TargetRematchName: "streaming"}},
 	}
-	inspection := InspectProxyGroupsWithMihomo("- MATCH,Final", nil, nil, nil, features)
+	inspection := InspectProxyGroupsWithMihomo("- REMATCH-NAME,streaming,Streaming\n- DOMAIN-SUFFIX,netflix.com,mark-streaming\n- SUB-RULE,(NETWORK,tcp),ai-rules\n- MATCH,Final", nil, nil, nil, features)
 	for _, issue := range inspection.Issues {
 		if issue.Level == "error" {
 			t.Fatalf("unexpected error: %#v", issue)
@@ -39,10 +34,9 @@ func TestMihomoAdvancedInspectionSeparatesGroupsOutboundsAndSubRules(t *testing.
 
 func TestMihomoAdvancedInspectionRejectsUnsafeRematchOrder(t *testing.T) {
 	features := MihomoRuleFeatures{
-		Rules:            "- DOMAIN-SUFFIX,netflix.com,mark-streaming\n- REMATCH-NAME,streaming,Streaming",
 		RematchOutbounds: []domain.MihomoRematchOutbound{{Name: "mark-streaming", TargetRematchName: "streaming"}},
 	}
-	inspection := InspectProxyGroupsWithMihomo("", nil, nil, nil, features)
+	inspection := InspectProxyGroupsWithMihomo("- DOMAIN-SUFFIX,netflix.com,mark-streaming\n- REMATCH-NAME,streaming,Streaming", nil, nil, nil, features)
 	for _, issue := range inspection.Issues {
 		if issue.Code == "unsafe_rematch_order" && issue.Level == "error" {
 			return
@@ -56,7 +50,7 @@ func TestMihomoAutoGroupDoesNotRenderRematchMember(t *testing.T) {
 	features := MihomoRuleFeatures{RematchOutbounds: []domain.MihomoRematchOutbound{{Name: "AI Rematch", TargetSubRule: "ai-rules"}}}
 	raw, err := buildProxyGroupsYAMLWithFeatures(
 		"- MATCH,Auto", nil,
-		map[string][]domain.ProxyGroupMember{"Auto": {{Kind: "outbound", Value: "AI Rematch"}, {Kind: "node", NodeID: 1}}},
+		map[string][]domain.ProxyGroupMember{"Auto": {{Kind: "rematch", Value: "AI Rematch"}, {Kind: "node", NodeID: 1}}},
 		map[string]domain.ProxyGroupOptions{"Auto": {Type: ProxyGroupTypeURLTest}},
 		[]renderItem{{name: "Node", node: node}}, features,
 	)
@@ -70,17 +64,38 @@ func TestMihomoAutoGroupDoesNotRenderRematchMember(t *testing.T) {
 
 func TestMihomoAdvancedInspectionValidatesSubRuleAndOutboundMembers(t *testing.T) {
 	features := MihomoRuleFeatures{
-		Rules:            "- SUB-RULE,(NETWORK,tcp),missing\n- MATCH,Manual",
 		RematchOutbounds: []domain.MihomoRematchOutbound{{Name: "jump"}},
 	}
-	members := map[string][]domain.ProxyGroupMember{"Manual": {{Kind: "outbound", Value: "missing"}}}
-	inspection := InspectProxyGroupsWithMihomo("", members, nil, nil, features)
-	want := map[string]bool{"missing_sub_rule": true, "missing_rematch_target": true, "missing_outbound": true}
+	members := map[string][]domain.ProxyGroupMember{"Manual": {{Kind: "rematch", Value: "missing"}}}
+	inspection := InspectProxyGroupsWithMihomo("- SUB-RULE,(NETWORK,tcp),missing\n- MATCH,Manual", members, nil, nil, features)
+	want := map[string]bool{"missing_sub_rule": true, "missing_rematch_target": true, "missing_rematch": true}
 	for _, issue := range inspection.Issues {
 		delete(want, issue.Code)
 	}
 	if len(want) != 0 {
 		t.Fatalf("missing validation issues: %#v; got %#v", want, inspection.Issues)
+	}
+}
+
+func TestMihomoAdvancedInspectionAttachesRematchIndexesToIssues(t *testing.T) {
+	features := MihomoRuleFeatures{RematchOutbounds: []domain.MihomoRematchOutbound{
+		{Name: ""},
+		{Name: "jump"},
+	}}
+	inspection := InspectProxyGroupsWithMihomo("- MATCH,DIRECT", nil, nil, nil, features)
+	want := map[int]bool{0: true, 1: true}
+	for _, issue := range inspection.Issues {
+		if issue.Section != "rematch_outbound" {
+			continue
+		}
+		index, ok := issue.Params["index"].(int)
+		if !ok {
+			t.Fatalf("Rematch issue has no numeric index: %#v", issue)
+		}
+		delete(want, index)
+	}
+	if len(want) != 0 {
+		t.Fatalf("missing indexed Rematch issues: %#v; got %#v", want, inspection.Issues)
 	}
 }
 

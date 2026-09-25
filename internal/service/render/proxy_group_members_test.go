@@ -29,7 +29,7 @@ func TestResolveConfiguredMembersSpecificNodeBeforeDirectAndRemainingDeduplicate
 }
 
 func TestResolveConfiguredMembersKeepsRematchMihomoOnly(t *testing.T) {
-	members := []domain.ProxyGroupMember{{Kind: "outbound", Value: "AI Rematch"}}
+	members := []domain.ProxyGroupMember{{Kind: "rematch", Value: "AI Rematch"}}
 	if got := resolveConfiguredMembers(members, nil); len(got) != 0 {
 		t.Fatalf("sing-box member resolution leaked Rematch outbound: %#v", got)
 	}

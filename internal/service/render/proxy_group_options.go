@@ -109,7 +109,7 @@ func validateProxyGroupOptions(targets []string, configs map[string]domain.Proxy
 	}
 	for group, options := range configs {
 		if !targetSet[group] {
-			issues = append(issues, ProxyGroupIssue{Level: "error", Group: group, Code: "unknown_group_options", Message: "代理组类型配置不在当前规则内容中"})
+			issues = append(issues, ProxyGroupIssue{Level: "error", Group: group, Code: "unknown_group_options", Message: "代理组类型配置不在当前主规则中"})
 		}
 		typeName := strings.TrimSpace(options.Type)
 		if !validProxyGroupTypes[typeName] {

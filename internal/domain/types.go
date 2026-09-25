@@ -1141,11 +1141,10 @@ type RuleSet struct {
 	// behavior. sing-box intentionally ignores these options and keeps using a
 	// selector outbound.
 	ProxyGroupOptions map[string]ProxyGroupOptions
-	Content           string // raw YAML rules fragment shared by Mihomo and sing-box
-	// MihomoRules is prepended to Content for Mihomo subscriptions only. Keeping
-	// it separate prevents Mihomo-only control-flow rules from leaking into the
-	// sing-box rule converter.
-	MihomoRules string
+	// Content is the single PSP rule stream. Mihomo consumes the original
+	// Mihomo-style lines; the sing-box compiler translates only rule types it
+	// supports and ignores Mihomo-only control-flow rules.
+	Content string
 	// MihomoSubRules and MihomoRematchOutbounds are emitted only for Mihomo.
 	// Slices preserve the administrator's display order while still allowing
 	// duplicate-name validation before the structures become YAML maps.
@@ -1169,8 +1168,8 @@ type MihomoRematchOutbound struct {
 }
 
 // ProxyGroupMember is one ordered choice in a generated Mihomo/sing-box
-// selector. Kind is one of: builtin, proxy_group, node, node_set, outbound.
-// NodeID is used only by node; Value carries the builtin/group/outbound name
+// selector. Kind is one of: builtin, proxy_group, node, node_set, rematch.
+// NodeID is used only by node; Value carries the builtin/group/rematch name
 // or a node-set selector (remaining, region:XX, tag:name).
 type ProxyGroupMember struct {
 	Kind   string `json:"kind" yaml:"kind"`

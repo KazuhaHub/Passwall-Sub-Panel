@@ -4,7 +4,7 @@
 
 ## 1. 目标与定位
 
-PSP 的规则正文沿用 Mihomo/Clash 的行式规则语法。PSP 不另外发明一套与现有配置割裂的中立语法，而是在保持 Mihomo 规则兼容的基础上，增加能够表达 sing-box 独有条件和动作的扩展，形成：
+PSP 的主规则沿用 Mihomo/Clash 的行式规则语法，并以 `content` 作为唯一真相源。PSP 不另外发明一套与现有配置割裂的中立语法，而是在保持 Mihomo 规则兼容的基础上，增加能够表达 sing-box 独有条件和动作的扩展，形成：
 
 > **PSP 抽象规则语法 = Mihomo 规则语法的兼容超集。**
 
@@ -24,6 +24,8 @@ PSP 的规则正文沿用 Mihomo/Clash 的行式规则语法。PSP 不另外发�
 ```
 
 PSP 将规则解析成统一的内部表示，再分别编译为 Mihomo 行式规则和 sing-box 结构化路由规则。不能等价生成到目标内核的规则必须出现在兼容性诊断中，不得无提示地改变路由语义。
+
+`REMATCH-NAME` 与 `SUB-RULE` 直接写在主规则中：Mihomo 保持原始写法和顺序；sing-box 不生成这两类规则。子规则和 Rematch 出站本身仍以结构化字段保存，因为它们分别对应 Mihomo 根级 `sub-rules` 和 `proxies` 配置，而不是另一份主规则。
 
 参考上游文档：
 
@@ -97,7 +99,7 @@ PSP 将规则解析成统一的内部表示，再分别编译为 Mihomo 行式�
 说明：
 
 1. sing-box 没有通用的 `process_name_regex`；其 `package_name_regex` 主要表达 Android 包名，不能完整承接 Mihomo 的普通进程名正则。
-2. sing-box 可用 `rule_set` 或逻辑规则组织规则，但没有与 Mihomo `SUB-RULE` 完全相同的命名子规则控制流。
+2. sing-box 可用 `rule_set` 或逻辑规则组织规则，但没有与 Mihomo `SUB-RULE` 完全相同的子规则控制流。
 3. Mihomo 的 `src` 把目标 IP 规则改为来源 IP 匹配；sing-box 使用独立的 `source_*` 字段。
 4. Mihomo 在 Android 上允许 `PROCESS-NAME` 系列匹配包名；sing-box 使用独立的 `package_name` 和 `package_name_regex`。
 5. Mihomo 原生提供 `GEOSITE`、`GEOIP` 和 `SRC-GEOIP`。sing-box 的内联 GeoIP/GeoSite 字段已经废弃，现代配置应通过 `rule_set` 引用对应规则集。
@@ -312,6 +314,8 @@ GEOIP
 | `GEOSITE` | 转换为 `geosite-*` 远程规则集；带 `@` 属性的分类会被忽略 |
 | `no-resolve` | 解析器会识别并跳过该参数，但尚未保留它的完整语义 |
 
+`REMATCH-NAME` 和 `SUB-RULE` 已允许写入统一 `content` 并完整输出到 Mihomo；它们属于 Mihomo 专属控制流，sing-box 生成时有意跳过。短期分支版本使用过的 `mihomo_rules` 字段会在 YAML/API 读取时前置合并到 `content`，规范化保存后不再写出旧字段。
+
 ### 8.3 Mihomo 可原样输出、sing-box 尚未转换
 
 ```text
@@ -331,11 +335,11 @@ SRC-GEOIP
 SUB-RULE
 ```
 
-当前 Mihomo 模板直接插入规则正文，因此上游支持的规则通常能够原样输出。sing-box 渲染器则只转换已登记的类型；当前未登记类型会被跳过。实现 §7 的兼容性诊断前，维护者必须特别注意这种行为。
+当前 Mihomo 模板直接插入主规则，因此上游支持的规则通常能够原样输出。sing-box 渲染器则只转换已登记的类型；当前未登记类型会被跳过。实现 §7 的兼容性诊断前，维护者必须特别注意这种行为。
 
 ## 9. 实施顺序建议
 
-1. 建立统一规则 AST、类型注册表和能力元数据。
+1. 建立主规则 AST、类型注册表和能力元数据。
 2. 补齐有直接字段映射的 `DOMAIN-REGEX`、`SRC-PORT`、`IN-NAME`、`IN-USER`、`PROCESS-PATH`、`PROCESS-PATH-REGEX`、`UID`、`RULE-SET`。
 3. 实现通用逻辑规则 `AND`、`OR`、`NOT`，并覆盖嵌套、重复字段和否定语义测试。
 4. 实现通配符到正则的受控转换。

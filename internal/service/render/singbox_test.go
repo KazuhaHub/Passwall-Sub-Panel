@@ -400,6 +400,24 @@ func TestBuildSingBoxRouteRulesPersonalRulesFirst(t *testing.T) {
 	}
 }
 
+func TestBuildSingBoxRouteRulesSkipsMihomoControlFlowInUnifiedContent(t *testing.T) {
+	rules, final := buildSingBoxRouteRules(`
+- REMATCH-NAME,marked,Streaming
+- SUB-RULE,(NETWORK,tcp),tcp-rules
+- DOMAIN-SUFFIX,example.com,Proxy
+- MATCH,DIRECT
+`)
+	if final != "direct" {
+		t.Fatalf("final = %q, want direct", final)
+	}
+	if len(rules) != 2 { // global sniff action + the supported domain rule
+		t.Fatalf("Mihomo-only rules leaked into sing-box: %#v", rules)
+	}
+	if got := rules[1]["domain_suffix"]; got == nil || rules[1]["outbound"] != "Proxy" {
+		t.Fatalf("supported rule was not preserved: %#v", rules[1])
+	}
+}
+
 func TestBuildSingBoxSelectorOutbounds(t *testing.T) {
 	raw := `
 - DOMAIN-SUFFIX,example.com,💬 Ai平台

@@ -24,7 +24,7 @@ it('reopens with the saved rule without reloading the stale list', async () => {
   expect(within(reopened).getByDisplayValue('server-normalized-name')).toBeTruthy()
 })
 
-it('confirms and removes metadata for a group deleted from rule content', async () => {
+it('confirms and removes metadata for a group deleted from main rules', async () => {
   const orphanRow = {
     ...row,
     content: '- DOMAIN,a,Keep\n- GEOSITE,googlefcm,📣 谷歌FCM',
@@ -125,10 +125,10 @@ it('reports a failed read instead of showing an empty rule-set list', async () =
   await waitFor(() => expect(screen.getByText('admin:rules.load_failed')).toBeTruthy())
 })
 
-it('edits and saves Mihomo main rules, sub-rules, and Rematch outbounds', async () => {
+it('edits unified rules, sub-rules, and Rematch outbounds on one rules page', async () => {
   const advancedRow = {
     ...row,
-    mihomo_rules: '- DOMAIN,ai.example,AI Rematch',
+    content: '- DOMAIN,ai.example,AI Rematch',
     mihomo_sub_rules: [{ name: 'ai-rules', content: '- MATCH,DIRECT' }],
     mihomo_rematch_outbounds: [{ name: 'AI Rematch', target_rematch_name: 'ai', target_sub_rule: 'ai-rules' }],
   }
@@ -138,19 +138,56 @@ it('edits and saves Mihomo main rules, sub-rules, and Rematch outbounds', async 
   mount(<RuleSetsView />)
 
   const dialog = await editRow()
-  fireEvent.click(within(dialog).getByRole('tab', { name: 'admin:rules.tabs.mihomo' }))
-  await waitFor(() => expect(within(dialog).getAllByLabelText('code')).toHaveLength(2))
-  expect(within(dialog).getByDisplayValue('AI Rematch')).toBeTruthy()
-  expect((within(dialog).getByLabelText('admin:rules.mihomo.sub_rule_name') as HTMLInputElement).value).toBe('ai-rules')
+  expect(within(dialog).queryByRole('tab', { name: 'admin:rules.tabs.mihomo' })).toBeNull()
+  expect(within(dialog).getByText('admin:rules.hint.direct_subscription_domain')).toBeTruthy()
+  expect(within(dialog).getAllByLabelText('code')).toHaveLength(1)
+
+  fireEvent.click(within(dialog).getByRole('button', { name: /admin:rules.mihomo.sub_rules/ }))
+  const subRulesDialog = await screen.findByRole('dialog', { name: 'admin:rules.mihomo.sub_rules' })
+  expect((within(subRulesDialog).getByLabelText('admin:rules.mihomo.sub_rule_name') as HTMLInputElement).value).toBe('ai-rules')
+  fireEvent.click(within(subRulesDialog).getByRole('button', { name: 'common:actions.close' }))
+  await waitFor(() => expect(screen.queryByRole('dialog', { name: 'admin:rules.mihomo.sub_rules' })).toBeNull())
+
+  fireEvent.click(within(dialog).getByRole('button', { name: /admin:rules.mihomo.rematches/ }))
+  const rematchesDialog = await screen.findByRole('dialog', { name: 'admin:rules.mihomo.rematches' })
+  expect(within(rematchesDialog).getByDisplayValue('AI Rematch')).toBeTruthy()
 
   fireEvent.change(within(dialog).getAllByLabelText('code')[0], { target: { value: '- DOMAIN,new.example,AI Rematch' } })
-  fireEvent.change(within(dialog).getByLabelText('admin:rules.mihomo.target_rematch_name'), { target: { value: 'ai-v2' } })
+  fireEvent.change(within(rematchesDialog).getByLabelText('admin:rules.mihomo.target_rematch_name'), { target: { value: 'ai-v2' } })
+  fireEvent.click(within(rematchesDialog).getByRole('button', { name: 'common:actions.close' }))
+  await waitFor(() => expect(screen.queryByRole('dialog', { name: 'admin:rules.mihomo.rematches' })).toBeNull())
   fireEvent.click(within(dialog).getByRole('button', { name: 'common:actions.ok' }))
 
   await waitFor(() => expect(api.put).toHaveBeenCalledTimes(1))
   expect(api.put.mock.calls[0][1]).toMatchObject({
-    mihomo_rules: '- DOMAIN,new.example,AI Rematch',
+    content: '- DOMAIN,new.example,AI Rematch',
     mihomo_sub_rules: [{ name: 'ai-rules', content: '- MATCH,DIRECT' }],
     mihomo_rematch_outbounds: [{ name: 'AI Rematch', target_rematch_name: 'ai-v2', target_sub_rule: 'ai-rules' }],
   })
+})
+
+it('shows Rematch errors only after a close attempt and keeps the dialog open', async () => {
+  const invalidRow = {
+    ...row,
+    mihomo_sub_rules: [],
+    mihomo_rematch_outbounds: [{ name: '', target_rematch_name: '', target_sub_rule: '' }],
+  }
+  installReads({ '/admin/rules': list([invalidRow]) })
+  api.post.mockResolvedValue({
+    data: {
+      groups: [], builtins: [], nodes: [], regions: [], tags: [],
+      issues: [{ level: 'error', section: 'rematch_outbound', name: '', code: 'invalid_name', params: { index: 0 }, message: 'invalid' }],
+    },
+  })
+  mount(<RuleSetsView />)
+
+  const dialog = await editRow()
+  fireEvent.click(within(dialog).getByRole('button', { name: /admin:rules.mihomo.rematches/ }))
+  const rematchesDialog = await screen.findByRole('dialog', { name: 'admin:rules.mihomo.rematches' })
+  await waitFor(() => expect(api.post).toHaveBeenCalled())
+  expect(within(rematchesDialog).queryByText('admin:rules.mihomo.issues.invalid_name')).toBeNull()
+
+  fireEvent.click(within(rematchesDialog).getByRole('button', { name: 'common:actions.close' }))
+  await waitFor(() => expect(within(rematchesDialog).getByText('admin:rules.mihomo.issues.invalid_name')).toBeTruthy())
+  expect(screen.getByRole('dialog', { name: 'admin:rules.mihomo.rematches' })).toBeTruthy()
 })

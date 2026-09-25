@@ -1037,7 +1037,7 @@
       "enabled": "启用",
       "direct_subscription_domain": "DIRECT 订阅域名",
       "proxy_group_order": "策略组顺序",
-      "content": "规则内容"
+      "content": "主规则"
     },
     "placeholder": {
       "slug": "ad_block",
@@ -1046,33 +1046,32 @@
       "content": "- DOMAIN-SUFFIX,example.com,DIRECT"
     },
     "hint": {
-      "proxy_group_order": "可留空；一行一个策略组名。未列出的策略组会放在开头，并保持规则内容中的首次出现顺序。",
+      "proxy_group_order": "可留空；一行一个策略组名。未列出的策略组会放在开头，并保持主规则中的首次出现顺序。",
       "direct_subscription_domain": "开启后，会在该规则集前面自动生成 DOMAIN-SUFFIX,<订阅域名>,DIRECT。未配置有效的订阅 Base URL 时不会生成；关闭后订阅更新按其它规则处理。"
     },
     "tabs": {
-      "rules": "规则内容",
-      "members": "策略组成员",
-      "mihomo": "Mihomo 高级规则"
+      "rules": "主规则",
+      "members": "策略组成员"
     },
     "mihomo": {
-      "compatibility": "这些配置仅进入 Mihomo 订阅；Rematch 出站要求 Mihomo v1.19.28 或更高版本，sing-box 会忽略全部高级字段。",
-      "main_rules": "Mihomo 主规则",
-      "main_rules_hint": "按规则集顺序插入共享规则之前；适合放置 SUB-RULE、REMATCH-NAME 及触发 Rematch 的规则。",
       "rematches": "Rematch 出站",
-      "rematches_hint": "标记名用于重新匹配主规则；目标子规则用于直接进入命名子规则，二者至少填写一个。",
+      "rematches_hint": "标记名用于重新匹配主规则；目标子规则用于直接进入子规则，二者至少填写一个。",
+      "rematch_compatibility": "Rematch 出站仅进入 Mihomo 订阅，并要求 Mihomo v1.19.28 或更高版本；sing-box 不会生成这些出站。",
       "outbound_name": "出站名称",
       "target_rematch_name": "Rematch 标记名",
       "target_sub_rule": "目标子规则",
       "no_rematches": "尚未配置 Rematch 出站",
-      "sub_rules": "命名子规则",
+      "sub_rules": "子规则",
       "sub_rules_hint": "每个子规则使用 Mihomo 规则列表语法，建议提供 MATCH 兜底。",
+      "sub_rules_compatibility": "子规则仅进入 Mihomo；请在上方主规则中使用 SUB-RULE 引用。",
+      "sub_rules_count": "已配置 {{count}} 个子规则",
       "sub_rule_name": "子规则名称",
-      "unnamed_sub_rule": "未命名子规则",
+      "unnamed_sub_rule": "未命名的子规则",
       "no_sub_rules": "尚未配置子规则",
       "issues": {
         "invalid_name": "名称不能为空，也不能包含逗号或换行",
         "duplicate_sub_rule": "子规则名称重复：{{name}}",
-        "invalid_rule_yaml": "规则内容不是有效的 YAML 规则列表",
+        "invalid_rule_yaml": "规则不是有效的 YAML 规则列表",
         "nested_sub_rule": "Mihomo 子规则内不能再次跳转到 SUB-RULE",
         "missing_match_fallback": "子规则没有 MATCH 兜底，未命中时将无法得到明确出口",
         "missing_sub_rule": "SUB-RULE 引用的子规则不存在：{{name}}",
@@ -1097,7 +1096,7 @@
       "custom": "自定义编排",
       "system_default": "系统默认",
       "unsaved": "有未保存的修改",
-      "no_groups": "规则内容中尚未识别到代理组",
+      "no_groups": "主规则中尚未识别到代理组",
       "first_default": "第一项是客户端默认选中的出口",
       "restore_default": "恢复系统默认",
       "default_badge": "默认",
@@ -1140,7 +1139,7 @@
       "kind_tag": "标签节点",
       "kind_builtin": "内置出口",
       "kind_group": "其他代理组",
-      "kind_outbound": "Rematch 出站",
+      "kind_rematch": "Rematch 出站",
       "remaining": "其余节点（自动去重）",
       "region_set": "区域：{{value}}",
       "tag_set": "标签：{{value}}",
@@ -1154,7 +1153,7 @@
       "preview_all": "全部启用节点",
       "preview_empty": "当前范围没有可用成员，将安全回退到 DIRECT",
       "issues": {
-        "unknown_group": "策略组不在当前规则内容中",
+        "unknown_group": "策略组不在当前主规则中",
         "empty_members": "自定义成员不能为空；如需默认行为请恢复系统默认",
         "too_many_members": "成员数量不能超过 {{max}}",
         "duplicate": "存在重复成员：{{member}}",
@@ -1167,10 +1166,10 @@
         "invalid_node_set": "非法节点集合：{{value}}",
         "empty_node_set": "节点集合当前没有匹配项：{{value}}",
         "unknown_kind": "未知成员类型：{{value}}",
-        "missing_outbound": "引用的 Rematch 出站不存在：{{value}}",
+        "missing_rematch": "引用的 Rematch 出站不存在：{{value}}",
         "missing_remaining": "未包含“其余节点”，未来新增节点不会自动进入此代理组",
         "cycle": "代理组引用形成循环",
-        "unknown_group_options": "代理组类型配置不在当前规则内容中",
+        "unknown_group_options": "代理组类型配置不在当前主规则中",
         "invalid_group_type": "未知代理组类型：{{value}}",
         "invalid_test_url": "测试地址必须是有效的 HTTP/HTTPS URL",
         "invalid_interval": "测试间隔不能小于 0",
@@ -1199,7 +1198,7 @@
       "slug_name_required": "slug 和 name 必填",
       "slug_exists": "已存在 slug 为“{{slug}}”的规则集 —— 请换一个 slug",
       "proxy_group_members": "策略组成员配置存在错误，请先修正",
-      "mihomo": "Mihomo 高级规则存在错误，请先修正"
+      "rule_extensions": "主规则、子规则或 Rematch 出站存在错误，请先修正"
     },
     "toast": {
       "saved": "已保存",
@@ -1217,7 +1216,7 @@
       "reset_title": "恢复为内置默认？",
       "reset_message": "将磁盘上的 {{slug}} 内容覆盖为当前 binary 内嵌的默认版本，自定义修改会丢失。",
       "cleanup_groups_title": "同时删除策略组配置？",
-      "cleanup_groups_message": "当前规则内容已不再包含以下策略组：{{names}}。继续保存将同时删除它们的自定义成员、类型和排序配置。",
+      "cleanup_groups_message": "当前主规则已不再包含以下策略组：{{names}}。继续保存将同时删除它们的自定义成员、类型和排序配置。",
       "batch_delete_title": "批量删除规则集",
       "batch_delete_message": "确定删除 {{count}} 个规则集？"
     },

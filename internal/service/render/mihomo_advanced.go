@@ -13,7 +13,6 @@ import (
 // Mihomo. It is passed as an optional compiler input so legacy callers keep
 // their existing shared-rule behavior.
 type MihomoRuleFeatures struct {
-	Rules            string
 	SubRules         []domain.MihomoSubRule
 	RematchOutbounds []domain.MihomoRematchOutbound
 }
@@ -22,7 +21,7 @@ type MihomoRuleFeatures struct {
 // rule fragments. It keeps persisted names identical to the symbols validated
 // and emitted by the compiler.
 func NormalizeMihomoRuleFeatures(features MihomoRuleFeatures) MihomoRuleFeatures {
-	normalized := MihomoRuleFeatures{Rules: features.Rules}
+	normalized := MihomoRuleFeatures{}
 	normalized.SubRules = make([]domain.MihomoSubRule, len(features.SubRules))
 	for index, subRule := range features.SubRules {
 		subRule.Name = strings.TrimSpace(subRule.Name)
@@ -99,8 +98,8 @@ func (f MihomoRuleFeatures) outboundNames() map[string]bool {
 	return out
 }
 
-func (f MihomoRuleFeatures) allRuleFragments(shared string) []string {
-	parts := []string{f.Rules, shared}
+func (f MihomoRuleFeatures) allRuleFragments(content string) []string {
+	parts := []string{content}
 	for _, subRule := range f.SubRules {
 		parts = append(parts, subRule.Content)
 	}
@@ -148,9 +147,9 @@ func inspectMihomoFeatures(shared string, features MihomoRuleFeatures, targets [
 		}
 	}
 
-	mainLines, err := parseRuleSequence(strings.Join([]string{features.Rules, shared}, "\n"))
+	mainLines, err := parseRuleSequence(shared)
 	if err != nil {
-		issues = append(issues, mihomoIssue("error", "mihomo_rules", "", "invalid_rule_yaml", "Mihomo 主规则不是有效的 YAML 规则列表："+err.Error()))
+		issues = append(issues, mihomoIssue("error", "rules", "", "invalid_rule_yaml", "主规则不是有效的 YAML 规则列表："+err.Error()))
 		mainLines = nil
 	}
 	for _, line := range mainLines {
@@ -158,7 +157,7 @@ func inspectMihomoFeatures(shared string, features MihomoRuleFeatures, targets [
 		if strings.EqualFold(firstField(fields), "SUB-RULE") {
 			ref := subRuleReference(fields)
 			if ref == "" || subRules[ref].Name == "" {
-				issues = append(issues, mihomoIssue("error", "mihomo_rules", ref, "missing_sub_rule", "SUB-RULE 引用的子规则不存在："+ref))
+				issues = append(issues, mihomoIssue("error", "rules", ref, "missing_sub_rule", "SUB-RULE 引用的子规则不存在："+ref))
 			}
 		}
 	}
@@ -174,38 +173,47 @@ func inspectMihomoFeatures(shared string, features MihomoRuleFeatures, targets [
 		}
 	}
 	outbounds := map[string]domain.MihomoRematchOutbound{}
-	for _, outbound := range features.RematchOutbounds {
+	outboundIndexes := map[string]int{}
+	for outboundIndex, outbound := range features.RematchOutbounds {
+		addOutboundIssue := func(issue ProxyGroupIssue) {
+			if issue.Params == nil {
+				issue.Params = map[string]any{}
+			}
+			issue.Params["index"] = outboundIndex
+			issues = append(issues, issue)
+		}
 		name := strings.TrimSpace(outbound.Name)
 		if issue := validateMihomoSymbol("rematch_outbound", name); issue != nil {
-			issues = append(issues, *issue)
+			addOutboundIssue(*issue)
 			continue
 		}
 		if _, exists := outbounds[name]; exists {
-			issues = append(issues, mihomoIssue("error", "rematch_outbound", name, "duplicate_rematch_outbound", "Rematch 出站名称重复："+name))
+			addOutboundIssue(mihomoIssue("error", "rematch_outbound", name, "duplicate_rematch_outbound", "Rematch 出站名称重复："+name))
 			continue
 		}
 		outbound.Name = name
 		outbound.TargetRematchName = strings.TrimSpace(outbound.TargetRematchName)
 		outbound.TargetSubRule = strings.TrimSpace(outbound.TargetSubRule)
 		outbounds[name] = outbound
+		outboundIndexes[name] = outboundIndex
 		if outbound.TargetRematchName == "" && outbound.TargetSubRule == "" {
-			issues = append(issues, mihomoIssue("error", "rematch_outbound", name, "missing_rematch_target", "Rematch 出站至少需要设置标记名或目标子规则"))
+			addOutboundIssue(mihomoIssue("error", "rematch_outbound", name, "missing_rematch_target", "Rematch 出站至少需要设置标记名或目标子规则"))
 		}
 		if outbound.TargetRematchName != "" {
 			if issue := validateMihomoSymbol("rematch_outbound", outbound.TargetRematchName); issue != nil {
 				issue.Name = name
 				issue.Code = "invalid_rematch_name"
 				issue.Message = "Rematch 标记名不能为空，也不能包含逗号或换行"
-				issues = append(issues, *issue)
+				addOutboundIssue(*issue)
 			}
 		}
 		if outbound.TargetSubRule != "" {
 			if _, ok := subRules[outbound.TargetSubRule]; !ok {
-				issues = append(issues, mihomoIssue("error", "rematch_outbound", name, "missing_target_sub_rule", "Rematch 目标子规则不存在："+outbound.TargetSubRule))
+				addOutboundIssue(mihomoIssue("error", "rematch_outbound", name, "missing_target_sub_rule", "Rematch 目标子规则不存在："+outbound.TargetSubRule))
 			}
 		}
 		if builtInRuleTargets[name] || groupSet[name] || nodeNames[name] {
-			issues = append(issues, mihomoIssue("error", "rematch_outbound", name, "outbound_name_collision", "Rematch 出站名称与内置出口、策略组或节点名称冲突："+name))
+			addOutboundIssue(mihomoIssue("error", "rematch_outbound", name, "outbound_name_collision", "Rematch 出站名称与内置出口、策略组或节点名称冲突："+name))
 		}
 	}
 
@@ -230,7 +238,9 @@ func inspectMihomoFeatures(shared string, features MihomoRuleFeatures, targets [
 			}
 		}
 		if triggerIndex >= 0 && (handlerIndex < 0 || handlerIndex > triggerIndex) {
-			issues = append(issues, mihomoIssue("error", "rematch_outbound", name, "unsafe_rematch_order", "对应的 REMATCH-NAME 规则必须位于触发该 Rematch 出站的规则之前"))
+			issue := mihomoIssue("error", "rematch_outbound", name, "unsafe_rematch_order", "对应的 REMATCH-NAME 规则必须位于触发该 Rematch 出站的规则之前")
+			issue.Params["index"] = outboundIndexes[name]
+			issues = append(issues, issue)
 		}
 	}
 

@@ -55,7 +55,7 @@ type ProxyGroupInspection struct {
 }
 
 // ProxyGroupMetadata is the rule-set metadata whose keys must refer to groups
-// that still exist in the rule content. NormalizeProxyGroupMetadata returns a
+// that still exist in the main rules. NormalizeProxyGroupMetadata returns a
 // detached copy so callers can persist the result without mutating the request
 // object used for validation or error reporting.
 type ProxyGroupMetadata struct {
@@ -66,7 +66,7 @@ type ProxyGroupMetadata struct {
 }
 
 // NormalizeProxyGroupMetadata removes top-level configuration for groups that
-// no longer occur in the rule content. References from a surviving group to a
+// no longer occur in the main rules. References from a surviving group to a
 // removed group are deliberately retained: the normal validator must surface
 // those as missing_group instead of silently changing the surviving layout.
 func NormalizeProxyGroupMetadata(content string, order []string, members map[string][]domain.ProxyGroupMember, options map[string]domain.ProxyGroupOptions, advanced ...MihomoRuleFeatures) ProxyGroupMetadata {
@@ -92,7 +92,8 @@ func NormalizeProxyGroupMetadata(content string, order []string, members map[str
 			removedSet[group] = true
 			continue
 		}
-		normalizedMembers[group] = append([]domain.ProxyGroupMember(nil), configured...)
+		normalized := append([]domain.ProxyGroupMember(nil), configured...)
+		normalizedMembers[group] = normalized
 	}
 
 	normalizedOptions := make(map[string]domain.ProxyGroupOptions, len(options))
@@ -302,7 +303,7 @@ func validateProxyGroupMembers(targets []string, configs map[string][]domain.Pro
 
 	for group, list := range configs {
 		if !targetSet[group] {
-			issues = append(issues, ProxyGroupIssue{Level: "error", Group: group, Code: "unknown_group", Message: "策略组不在当前规则内容中"})
+			issues = append(issues, ProxyGroupIssue{Level: "error", Group: group, Code: "unknown_group", Message: "策略组不在当前主规则中"})
 		}
 		if len(list) == 0 {
 			issues = append(issues, ProxyGroupIssue{Level: "error", Group: group, Code: "empty_members", Message: "自定义成员不能为空；如需默认行为请删除自定义配置"})
@@ -353,9 +354,9 @@ func validateProxyGroupMembers(targets []string, configs map[string][]domain.Pro
 				if member.Value == "remaining" {
 					hasRemaining = true
 				}
-			case "outbound":
+			case "rematch":
 				if !knownOutbounds[member.Value] {
-					issues = append(issues, ProxyGroupIssue{Level: "error", Group: group, Code: "missing_outbound", Params: map[string]any{"value": member.Value}, Message: "引用的 Rematch 出站不存在：" + member.Value})
+					issues = append(issues, ProxyGroupIssue{Level: "error", Group: group, Code: "missing_rematch", Params: map[string]any{"value": member.Value}, Message: "引用的 Rematch 出站不存在：" + member.Value})
 				}
 			default:
 				issues = append(issues, ProxyGroupIssue{Level: "error", Group: group, Code: "unknown_kind", Params: map[string]any{"value": member.Kind}, Message: "未知成员类型：" + member.Kind})
@@ -417,7 +418,7 @@ func nodeSetHasMatch(selector string, nodes []*domain.Node) bool {
 // in health checks: built-in exits and control-flow-only Rematch outbounds.
 func membersContainNonTestableExit(members []domain.ProxyGroupMember) bool {
 	for _, member := range members {
-		if member.Kind == "outbound" || (member.Kind == "builtin" && builtInRuleTargets[member.Value]) {
+		if member.Kind == "rematch" || (member.Kind == "builtin" && builtInRuleTargets[member.Value]) {
 			return true
 		}
 	}
@@ -469,7 +470,7 @@ func resolveConfiguredMembersForClient(members []domain.ProxyGroupMember, items 
 		switch member.Kind {
 		case "builtin", "proxy_group":
 			add(member.Value)
-		case "outbound":
+		case "rematch":
 			if includeOutbounds {
 				add(member.Value)
 			}

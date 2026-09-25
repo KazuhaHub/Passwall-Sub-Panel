@@ -170,8 +170,8 @@ func (s *Service) RenderForUser(ctx context.Context, u *domain.User, ct domain.C
 	if err != nil {
 		return nil, fmt.Errorf("marshal proxies: %w", err)
 	}
-	advanced := MihomoRuleFeatures{Rules: bundle.MihomoRules, SubRules: bundle.SubRules, RematchOutbounds: bundle.RematchOutbounds}
-	proxyGroupsYAML, err := buildProxyGroupsYAMLWithFeatures(strings.Join([]string{u.PersonalRules, bundle.MihomoRules}, "\n"), bundle.ProxyGroupOrder, bundle.ProxyGroupMembers, bundle.ProxyGroupOptions, items, advanced)
+	advanced := MihomoRuleFeatures{SubRules: bundle.SubRules, RematchOutbounds: bundle.RematchOutbounds}
+	proxyGroupsYAML, err := buildProxyGroupsYAMLWithFeatures(strings.Join([]string{u.PersonalRules, bundle.SharedRules}, "\n"), bundle.ProxyGroupOrder, bundle.ProxyGroupMembers, bundle.ProxyGroupOptions, items, advanced)
 	if err != nil {
 		return nil, fmt.Errorf("build proxy groups: %w", err)
 	}
@@ -186,7 +186,7 @@ func (s *Service) RenderForUser(ctx context.Context, u *domain.User, ct domain.C
 	body := substituteBlockPlaceholders(tpl.Content, map[string]string{
 		"proxies":          strings.TrimRight(string(proxiesYAML), "\n"),
 		"proxy_groups":     proxyGroupsYAML,
-		"rules_common":     strings.TrimRight(bundle.MihomoRules, "\n"),
+		"rules_common":     strings.TrimRight(bundle.SharedRules, "\n"),
 		"rules_personal":   strings.TrimRight(u.PersonalRules, "\n"),
 		"mihomo_sub_rules": subRulesYAML,
 	})
@@ -609,7 +609,6 @@ recv:
 
 type resolvedRuleBundle struct {
 	SharedRules       string
-	MihomoRules       string
 	ProxyGroupOrder   []string
 	ProxyGroupMembers map[string][]domain.ProxyGroupMember
 	ProxyGroupOptions map[string]domain.ProxyGroupOptions
@@ -624,7 +623,6 @@ func (s *Service) resolveRuleBundle(ctx context.Context, tpl *domain.Template, s
 		return resolvedRuleBundle{}, nil
 	}
 	sharedParts := make([]string, 0, len(slugs))
-	mihomoParts := make([]string, 0, len(slugs)*2)
 	directSubscriptionRule := subscriptionDirectRule(st.SubBaseURL)
 	directSubscriptionRequested := false
 	proxyGroupOrder := []string{}
@@ -649,19 +647,12 @@ func (s *Service) resolveRuleBundle(ctx context.Context, tpl *domain.Template, s
 			directSubscriptionRequested = true
 		}
 		content := strings.TrimRight(rs.Content, "\n")
-		mihomoRules := strings.TrimRight(rs.MihomoRules, "\n")
-		if content == "" && mihomoRules == "" && len(rs.MihomoSubRules) == 0 && len(rs.MihomoRematchOutbounds) == 0 {
+		if content == "" && len(rs.MihomoSubRules) == 0 && len(rs.MihomoRematchOutbounds) == 0 {
 			log.Warn("render: rule_set content is empty", "slug", slug)
 			continue
 		}
 		if content != "" {
 			sharedParts = append(sharedParts, content)
-		}
-		if mihomoRules != "" {
-			mihomoParts = append(mihomoParts, mihomoRules)
-		}
-		if content != "" {
-			mihomoParts = append(mihomoParts, content)
 		}
 		for _, subRule := range rs.MihomoSubRules {
 			name := strings.TrimSpace(subRule.Name)
@@ -709,13 +700,11 @@ func (s *Service) resolveRuleBundle(ctx context.Context, tpl *domain.Template, s
 		// rules still remain ahead of rules_common by template design, while this
 		// rule always wins over a later MATCH or broad catch-all in a ruleset.
 		sharedParts = append([]string{directSubscriptionRule}, sharedParts...)
-		mihomoParts = append([]string{directSubscriptionRule}, mihomoParts...)
 	}
 	shared := strings.Join(sharedParts, "\n")
-	mihomo := strings.Join(mihomoParts, "\n")
-	log.Debug("render: rules_common resolved", "total_length", len(mihomo), "rule_sets", len(sharedParts))
+	log.Debug("render: rules_common resolved", "total_length", len(shared), "rule_sets", len(sharedParts))
 	return resolvedRuleBundle{
-		SharedRules: shared, MihomoRules: mihomo,
+		SharedRules:     shared,
 		ProxyGroupOrder: proxyGroupOrder, ProxyGroupMembers: proxyGroupMembers, ProxyGroupOptions: proxyGroupOptions,
 		SubRules: subRules, RematchOutbounds: rematchOutbounds,
 	}, nil

@@ -98,8 +98,7 @@ func TestResolveRuleBundleSeparatesMihomoAndSharedRules(t *testing.T) {
 	s := &Service{repos: ports.Repos{RuleSet: renderRuleSetRepo{items: map[string]*domain.RuleSet{
 		"advanced": {
 			Slug: "advanced", Enabled: true,
-			Content:                "- MATCH,Shared",
-			MihomoRules:            "- REMATCH-NAME,marked,Mihomo",
+			Content:                "- REMATCH-NAME,marked,Mihomo\n- MATCH,Shared",
 			MihomoSubRules:         []domain.MihomoSubRule{{Name: "sub", Content: "- MATCH,Mihomo"}},
 			MihomoRematchOutbounds: []domain.MihomoRematchOutbound{{Name: "jump", TargetSubRule: "sub"}},
 		},
@@ -108,11 +107,8 @@ func TestResolveRuleBundleSeparatesMihomoAndSharedRules(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if bundle.SharedRules != "- MATCH,Shared" {
+	if bundle.SharedRules != "- REMATCH-NAME,marked,Mihomo\n- MATCH,Shared" {
 		t.Fatalf("shared rules = %q", bundle.SharedRules)
-	}
-	if bundle.MihomoRules != "- REMATCH-NAME,marked,Mihomo\n- MATCH,Shared" {
-		t.Fatalf("Mihomo rules = %q", bundle.MihomoRules)
 	}
 	if len(bundle.SubRules) != 1 || len(bundle.RematchOutbounds) != 1 {
 		t.Fatalf("advanced bundle missing: %#v", bundle)

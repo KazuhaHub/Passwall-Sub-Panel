@@ -44,6 +44,9 @@ func TestAdminRuleSetsSavePersistsMembersAndOptionsAndInvalidatesRenderCache(t *
 	if w.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
 	}
+	if bytes.Contains(w.Body.Bytes(), []byte("mihomo_rules")) {
+		t.Fatalf("legacy field leaked into normalized response: %s", w.Body.String())
+	}
 	if invalidations != 1 {
 		t.Fatalf("invalidations=%d", invalidations)
 	}
@@ -63,7 +66,7 @@ func TestAdminRuleSetsSavePersistsMembersAndOptionsAndInvalidatesRenderCache(t *
 	}
 }
 
-func TestAdminRuleSetsSavePersistsMihomoAdvancedFields(t *testing.T) {
+func TestAdminRuleSetsSaveMigratesLegacyMihomoRulesIntoContent(t *testing.T) {
 	repo, err := yamladapter.NewRuleSetRepo(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -79,12 +82,39 @@ func TestAdminRuleSetsSavePersistsMihomoAdvancedFields(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
 	}
+	if bytes.Contains(w.Body.Bytes(), []byte("mihomo_rules")) || !bytes.Contains(w.Body.Bytes(), []byte("DOMAIN-SUFFIX,openai.com")) {
+		t.Fatalf("legacy rules were not normalized in the response: %s", w.Body.String())
+	}
 	got, err := repo.GetBySlug(context.Background(), "advanced")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.MihomoRules != body.MihomoRules || len(got.MihomoSubRules) != 1 || len(got.MihomoRematchOutbounds) != 1 {
+	if got.Content != body.MihomoRules+"\n- MATCH,DIRECT" || len(got.MihomoSubRules) != 1 || len(got.MihomoRematchOutbounds) != 1 {
 		t.Fatalf("advanced fields not persisted: %#v", got)
+	}
+}
+
+func TestAdminRuleSetsInspectMergesLegacyMihomoRulesIntoContent(t *testing.T) {
+	repo, err := yamladapter.NewRuleSetRepo(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := NewAdminRuleSetsHandler(repo, staticRuleNodes{}, nil, nil, t.TempDir())
+	raw, err := json.Marshal(inspectProxyGroupsRequest{
+		Content:     "- MATCH,Current",
+		MihomoRules: "- MATCH,Legacy",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/admin/rules/inspect-proxy-groups", bytes.NewReader(raw))
+	c.Request.Header.Set("Content-Type", "application/json")
+	h.InspectProxyGroups(c)
+	c.Writer.WriteHeaderNow()
+	if w.Code != http.StatusOK || !bytes.Contains(w.Body.Bytes(), []byte(`"name":"Legacy"`)) || !bytes.Contains(w.Body.Bytes(), []byte(`"name":"Current"`)) {
+		t.Fatalf("legacy and unified rules were not both inspected: status=%d body=%s", w.Code, w.Body.String())
 	}
 }
 

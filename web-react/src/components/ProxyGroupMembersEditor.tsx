@@ -55,16 +55,15 @@ interface Props {
   initialOptions: OptionMap
   onOptionsChange: (options: OptionMap) => void
   previewGroups: Group[]
-  mihomoRules?: string
   mihomoSubRules?: MihomoSubRule[]
   mihomoRematchOutbounds?: MihomoRematchOutbound[]
   onValidationChange?: (hasErrors: boolean) => void
 }
 
-type AddKind = 'node' | 'builtin' | 'proxy_group' | 'outbound' | 'region' | 'tag' | 'remaining'
+type AddKind = 'node' | 'builtin' | 'proxy_group' | 'rematch' | 'region' | 'tag' | 'remaining'
 type AddOption = { value: string | number; label: string }
 
-export default function ProxyGroupMembersEditor({ content, groupOrder, initialGroupOrder, onGroupOrderChange, members, initialMembers, onChange, options, initialOptions, onOptionsChange, previewGroups, mihomoRules = '', mihomoSubRules = [], mihomoRematchOutbounds = [], onValidationChange }: Props) {
+export default function ProxyGroupMembersEditor({ content, groupOrder, initialGroupOrder, onGroupOrderChange, members, initialMembers, onChange, options, initialOptions, onOptionsChange, previewGroups, mihomoSubRules = [], mihomoRematchOutbounds = [], onValidationChange }: Props) {
   const theme = useTheme()
   const md = theme.palette.md
   const { t } = useTranslation(['admin', 'common'])
@@ -79,7 +78,7 @@ export default function ProxyGroupMembersEditor({ content, groupOrder, initialGr
 
   const serializedMembers = useMemo(() => JSON.stringify(members), [members])
   const serializedOptions = useMemo(() => JSON.stringify(options), [options])
-  const serializedMihomo = useMemo(() => JSON.stringify([mihomoRules, mihomoSubRules, mihomoRematchOutbounds]), [mihomoRules, mihomoSubRules, mihomoRematchOutbounds])
+  const serializedMihomo = useMemo(() => JSON.stringify([mihomoSubRules, mihomoRematchOutbounds]), [mihomoSubRules, mihomoRematchOutbounds])
   useEffect(() => {
     const controller = new AbortController()
     const timer = window.setTimeout(() => {
@@ -88,7 +87,6 @@ export default function ProxyGroupMembersEditor({ content, groupOrder, initialGr
         content,
         proxy_group_members: members,
         proxy_group_options: options,
-        mihomo_rules: mihomoRules,
         mihomo_sub_rules: mihomoSubRules,
         mihomo_rematch_outbounds: mihomoRematchOutbounds,
         preview_group_id: previewGroupID || undefined,
@@ -195,7 +193,7 @@ export default function ProxyGroupMembersEditor({ content, groupOrder, initialGr
       case 'node': return (inspection?.nodes || []).map(node => ({ value: node.id, label: node.display_name }))
       case 'builtin': return (inspection?.builtins || []).map(value => ({ value, label: value }))
       case 'proxy_group': return (inspection?.groups || []).filter(group => group.name !== selected).map(group => ({ value: group.name, label: group.name }))
-      case 'outbound': return mihomoRematchOutbounds.filter(outbound => outbound.name.trim()).map(outbound => ({ value: outbound.name, label: outbound.name }))
+      case 'rematch': return mihomoRematchOutbounds.filter(outbound => outbound.name.trim()).map(outbound => ({ value: outbound.name, label: outbound.name }))
       case 'region': return (inspection?.regions || []).map(value => ({ value, label: value }))
       case 'tag': return (inspection?.tags || []).map(value => ({ value, label: value }))
       case 'remaining': return [{ value: 'remaining', label: t('admin:rules.members.remaining') }]
@@ -362,7 +360,7 @@ export default function ProxyGroupMembersEditor({ content, groupOrder, initialGr
                 <MenuItem value="tag">{t('admin:rules.members.kind_tag')}</MenuItem>
                 <MenuItem value="builtin">{t('admin:rules.members.kind_builtin')}</MenuItem>
                 <MenuItem value="proxy_group">{t('admin:rules.members.kind_group')}</MenuItem>
-                <MenuItem value="outbound">{t('admin:rules.members.kind_outbound')}</MenuItem>
+                <MenuItem value="rematch">{t('admin:rules.members.kind_rematch')}</MenuItem>
               </TextField>
               <Autocomplete<AddOption> size="small" options={addOptions} value={addOptions.find(option => option.value === addValue) || null}
                 onChange={(_, option) => setAddValue(option?.value ?? null)} getOptionLabel={option => option.label}

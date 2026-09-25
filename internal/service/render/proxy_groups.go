@@ -16,7 +16,7 @@ var builtInRuleTargets = map[string]bool{
 
 // defaultProxyGroupOrder preserves the original project ordering when a rule
 // set does not declare a custom proxy_group_order. Groups that are not listed
-// here are prepended in their first-occurrence order from the rule content.
+// here are prepended in their first-occurrence order from the main rules.
 var defaultProxyGroupOrder = []string{
 	"🚀 节点选择",
 	"🎮 UDP控制",
@@ -139,7 +139,7 @@ func buildProxyGroupsYAMLInternal(rules string, preferredOrder []string, members
 
 // applyProxyGroupOrder emits the explicitly ordered groups first, in the
 // configured order, then appends any group the order does not mention at the
-// END, preserving its first-occurrence order from the rule content. Keeping the
+// END, preserving its first-occurrence order from the main rules. Keeping the
 // unlisted groups last is what existing subscriptions already render, so a
 // partial custom order never reshuffles the groups an admin did not name.
 func applyProxyGroupOrder(targets, preferredOrder []string) []string {
