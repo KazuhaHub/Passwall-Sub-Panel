@@ -126,8 +126,8 @@ content: |
   proxy-groups:
     {{ proxy_groups }}
 
-  {{ mihomo_sub_rules }}
-
   rules:
     {{ rules_personal }}
     {{ rules_common }}
+
+  {{ sub_rules }}

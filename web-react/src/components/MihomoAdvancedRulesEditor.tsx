@@ -11,6 +11,7 @@ import {
   List,
   ListItemButton,
   ListItemText,
+  MenuItem,
   Stack,
   TextField,
   Typography,
@@ -230,9 +231,9 @@ export default function MihomoAdvancedRulesEditor({ value, onChange, onValidatio
                       onChange={event => updateRematch(index, { ...outbound, target_rematch_name: event.target.value })} />
                     <TextField select size="small" label={t('admin:rules.mihomo.target_sub_rule')} value={outbound.target_sub_rule || ''}
                       onChange={event => updateRematch(index, { ...outbound, target_sub_rule: event.target.value })}
-                      slotProps={{ inputLabel: { shrink: true }, select: { native: true } }}>
-                      <option value="">—</option>
-                      {subRules.filter(rule => rule.name.trim()).map(rule => <option key={rule.name} value={rule.name}>{rule.name}</option>)}
+                      slotProps={{ inputLabel: { shrink: true } }}>
+                      <MenuItem value="">—</MenuItem>
+                      {subRules.filter(rule => rule.name.trim()).map(rule => <MenuItem key={rule.name} value={rule.name}>{rule.name}</MenuItem>)}
                     </TextField>
                     <IconButton color="error" onClick={() => patch({ mihomo_rematch_outbounds: rematches.filter((_, i) => i !== index) })}><DeleteIcon /></IconButton>
                   </Box>

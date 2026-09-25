@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { ThemeProvider } from '@mui/material/styles'
 import { MemoryRouter } from 'react-router'
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createAppTheme } from '@/theme'
 import { makeTestQueryClient, queryWrapper } from '@/test/queryTestUtils'
@@ -53,28 +53,5 @@ describe('TemplatesView', () => {
     mount()
 
     await waitFor(() => expect(screen.getByText('暂时无法加载配置方案')).toBeTruthy())
-  })
-
-  it('warns when bound Mihomo sub-rules have no template placeholder', async () => {
-    const template = {
-      slug: 'custom-mihomo', name: 'Custom Mihomo', client_type: 'mihomo', is_default: false,
-      rule_sets: ['advanced'], proxy_group_order: [], content: 'rules:\n  {{ rules_common }}',
-    }
-    const rule = {
-      slug: 'advanced', name: 'Advanced', sort: 1, enabled: true,
-      direct_subscription_domain: false, proxy_group_order: [], content: '- MATCH,DIRECT',
-      mihomo_sub_rules: [{ name: 'ai-rules', content: '- MATCH,DIRECT' }],
-    }
-    api.get.mockImplementation(async (url: string) => {
-      if (url === '/admin/templates') return { data: { items: [template], total: 1, page: 1, page_size: 25 } }
-      if (url === '/admin/rules') return { data: { items: [rule], total: 1, page: 1, page_size: 25 } }
-      throw new Error(`Unexpected GET ${url}`)
-    })
-    mount()
-
-    const row = (await screen.findByText('Custom Mihomo')).closest('tr')!
-    fireEvent.click(within(row).getByTestId('EditOutlinedIcon').closest('button')!)
-    const dialog = await screen.findByRole('dialog')
-    expect(within(dialog).getByText('admin:templates.hint.missing_mihomo_sub_rules')).toBeTruthy()
   })
 })

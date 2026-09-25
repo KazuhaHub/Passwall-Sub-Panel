@@ -179,16 +179,12 @@ func (s *Service) RenderForUser(ctx context.Context, u *domain.User, ct domain.C
 	if err != nil {
 		return nil, fmt.Errorf("marshal Mihomo sub-rules: %w", err)
 	}
-	if subRulesYAML != "" && !hasRootBlockPlaceholder(tpl.Content, "mihomo_sub_rules") {
-		return nil, fmt.Errorf("template %s must contain {{ mihomo_sub_rules }} when bound rules define Mihomo sub-rules", tpl.Slug)
-	}
-
 	body := substituteBlockPlaceholders(tpl.Content, map[string]string{
-		"proxies":          strings.TrimRight(string(proxiesYAML), "\n"),
-		"proxy_groups":     proxyGroupsYAML,
-		"rules_common":     strings.TrimRight(bundle.SharedRules, "\n"),
-		"rules_personal":   strings.TrimRight(u.PersonalRules, "\n"),
-		"mihomo_sub_rules": subRulesYAML,
+		"proxies":        strings.TrimRight(string(proxiesYAML), "\n"),
+		"proxy_groups":   proxyGroupsYAML,
+		"rules_common":   strings.TrimRight(bundle.SharedRules, "\n"),
+		"rules_personal": strings.TrimRight(u.PersonalRules, "\n"),
+		"sub_rules":      subRulesYAML,
 	})
 	body = substituteInlinePlaceholders(body, s.profilePlaceholders(u, st))
 	body = expandNodeRefs(body, items)

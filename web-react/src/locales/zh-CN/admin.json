@@ -668,7 +668,7 @@
     },
     "placeholder": {
       "rule_sets": "选择与该模板策略组匹配的规则集",
-      "content": "支持占位符 (proxies / proxy_groups / rules_common / rules_personal / mihomo_sub_rules)"
+      "content": "支持占位符 (proxies / proxy_groups / rules_common / rules_personal / sub_rules)"
     },
     "table": {
       "slug": "Slug",
@@ -692,7 +692,6 @@
       "missing_targets": "规则目标未在模板策略组中找到：{{names}}",
       "groups_ok": "已识别 {{n}} 个策略组，规则目标匹配正常。",
       "no_binding": "当前未绑定规则集，只会渲染节点、策略组和个人规则。",
-      "missing_mihomo_sub_rules": "所选规则集包含 Mihomo 子规则，模板必须加入 {{ mihomo_sub_rules }} 占位符。",
       "incomplete": "模板内容尚未完整，请继续编辑。"
     },
     "validate": {
@@ -1082,8 +1081,7 @@
         "outbound_name_collision": "Rematch 出站名称与内置出口、策略组或节点名称冲突：{{name}}",
         "unsafe_rematch_order": "对应的 REMATCH-NAME 规则必须位于触发该 Rematch 出站的规则之前",
         "duplicate_bound_sub_rule": "当前模板绑定的规则集中存在同名子规则：{{name}}",
-        "duplicate_bound_rematch_outbound": "当前模板绑定的规则集中存在同名 Rematch 出站：{{name}}",
-        "missing_sub_rules_placeholder": "模板必须包含 {{ mihomo_sub_rules }} 占位符"
+        "duplicate_bound_rematch_outbound": "当前模板绑定的规则集中存在同名 Rematch 出站：{{name}}"
       }
     },
     "members": {

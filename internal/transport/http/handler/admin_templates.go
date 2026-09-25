@@ -133,7 +133,7 @@ func (h *AdminTemplatesHandler) validateMihomoBindings(ctx context.Context, temp
 		}
 		bound = append(bound, ruleSet)
 	}
-	return render.ValidateMihomoTemplateBundle(bound, template.Content), nil
+	return render.ValidateMihomoTemplateBundle(bound), nil
 }
 
 func (h *AdminTemplatesHandler) Delete(c *gin.Context) {

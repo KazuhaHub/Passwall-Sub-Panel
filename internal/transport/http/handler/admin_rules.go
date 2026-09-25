@@ -180,7 +180,7 @@ func (h *AdminRuleSetsHandler) validateTemplateBindings(ctx context.Context, can
 			}
 			bound = append(bound, ruleSet)
 		}
-		if issues := render.ValidateMihomoTemplateBundle(bound, template.Content); hasRuleSetErrors(issues) {
+		if issues := render.ValidateMihomoTemplateBundle(bound); hasRuleSetErrors(issues) {
 			return issues, nil
 		}
 	}

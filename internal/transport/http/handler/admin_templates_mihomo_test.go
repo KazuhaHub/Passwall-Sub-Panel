@@ -14,7 +14,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 )
 
-func TestAdminTemplatesSaveValidatesMihomoSubRulePlaceholder(t *testing.T) {
+func TestAdminTemplatesSaveAllowsMissingSubRulesPlaceholder(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	root := t.TempDir()
 	rules, err := yamladapter.NewRuleSetRepo(root)
@@ -38,12 +38,6 @@ func TestAdminTemplatesSaveValidatesMihomoSubRulePlaceholder(t *testing.T) {
 		RuleSets: []string{"advanced"}, Content: "rules:\n  {{ rules_common }}",
 	}
 	w := performTemplateSave(t, h, body)
-	if w.Code != http.StatusBadRequest || !bytes.Contains(w.Body.Bytes(), []byte("missing_sub_rules_placeholder")) {
-		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
-	}
-
-	body.Content = "{{ mihomo_sub_rules }}\nrules:\n  {{ rules_common }}"
-	w = performTemplateSave(t, h, body)
 	if w.Code != http.StatusNoContent {
 		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
 	}

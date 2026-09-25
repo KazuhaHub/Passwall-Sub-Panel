@@ -131,10 +131,10 @@ func TestMihomoSubRulesPlaceholderProducesValidRootYAML(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	body := substituteBlockPlaceholders("proxies:\n  {{ proxies }}\n{{ mihomo_sub_rules }}\nrules:\n  {{ rules_common }}\n", map[string]string{
-		"proxies":          "- name: node\n  type: ss",
-		"mihomo_sub_rules": subRules,
-		"rules_common":     "- SUB-RULE,(NETWORK,tcp),ai-rules",
+	body := substituteBlockPlaceholders("proxies:\n  {{ proxies }}\nrules:\n  {{ rules_common }}\n{{ sub_rules }}\n", map[string]string{
+		"proxies":      "- name: node\n  type: ss",
+		"sub_rules":    subRules,
+		"rules_common": "- SUB-RULE,(NETWORK,tcp),ai-rules",
 	})
 	var document map[string]any
 	if err := yaml.Unmarshal([]byte(body), &document); err != nil {
@@ -142,6 +142,13 @@ func TestMihomoSubRulesPlaceholderProducesValidRootYAML(t *testing.T) {
 	}
 	if _, ok := document["sub-rules"]; !ok {
 		t.Fatalf("sub-rules missing from rendered root: %#v\n%s", document, body)
+	}
+	withoutPlaceholder := substituteBlockPlaceholders("rules:\n  {{ rules_common }}\n", map[string]string{
+		"rules_common": "- MATCH,DIRECT",
+		"sub_rules":    subRules,
+	})
+	if strings.Contains(withoutPlaceholder, "sub-rules:") {
+		t.Fatalf("sub-rules must be silently discarded without a placeholder:\n%s", withoutPlaceholder)
 	}
 }
 
@@ -157,21 +164,15 @@ func TestValidateMihomoTemplateBundle(t *testing.T) {
 		{Slug: "one", Enabled: true, MihomoSubRules: []domain.MihomoSubRule{{Name: "shared"}}, MihomoRematchOutbounds: []domain.MihomoRematchOutbound{{Name: "jump"}}},
 		{Slug: "two", Enabled: true, MihomoSubRules: []domain.MihomoSubRule{{Name: "shared"}}, MihomoRematchOutbounds: []domain.MihomoRematchOutbound{{Name: "jump"}}},
 	}
-	issues := ValidateMihomoTemplateBundle(ruleSets, "rules:\n  {{ rules_common }}")
-	want := map[string]bool{"duplicate_bound_sub_rule": true, "duplicate_bound_rematch_outbound": true, "missing_sub_rules_placeholder": true}
+	issues := ValidateMihomoTemplateBundle(ruleSets)
+	want := map[string]bool{"duplicate_bound_sub_rule": true, "duplicate_bound_rematch_outbound": true}
 	for _, issue := range issues {
 		delete(want, issue.Code)
 	}
 	if len(want) != 0 {
 		t.Fatalf("missing bundle issues: %#v; got %#v", want, issues)
 	}
-	if issues := ValidateMihomoTemplateBundle(ruleSets[:1], "{{ mihomo_sub_rules }}\nrules:\n  {{ rules_common }}"); len(issues) != 0 {
+	if issues := ValidateMihomoTemplateBundle(ruleSets[:1]); len(issues) != 0 {
 		t.Fatalf("valid bundle issues: %#v", issues)
-	}
-	if issues := ValidateMihomoTemplateBundle(ruleSets[:1], "{{mihomo_sub_rules}}\nrules:\n  {{ rules_common }}"); len(issues) != 0 {
-		t.Fatalf("compact valid placeholder issues: %#v", issues)
-	}
-	if issues := ValidateMihomoTemplateBundle(ruleSets[:1], "root:\n  {{ mihomo_sub_rules }}"); len(issues) != 1 || issues[0].Code != "missing_sub_rules_placeholder" {
-		t.Fatalf("indented placeholder must not satisfy root contract: %#v", issues)
 	}
 }

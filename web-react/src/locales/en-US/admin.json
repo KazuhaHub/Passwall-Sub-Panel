@@ -668,7 +668,7 @@
     },
     "placeholder": {
       "rule_sets": "Pick rule sets matching this template's proxy groups",
-      "content": "Supports proxies / proxy_groups / rules_common / rules_personal / mihomo_sub_rules placeholders"
+      "content": "Supports proxies / proxy_groups / rules_common / rules_personal / sub_rules placeholders"
     },
     "table": {
       "slug": "Slug",
@@ -692,7 +692,6 @@
       "missing_targets": "Rule targets not found in the template's proxy groups: {{names}}",
       "groups_ok": "Detected {{n}} proxy groups; rule targets match.",
       "no_binding": "Nothing bound — only nodes, proxy groups, and personal rules will render.",
-      "missing_mihomo_sub_rules": "A selected rule set defines Mihomo sub-rules, so the template must contain {{ mihomo_sub_rules }}.",
       "incomplete": "Template content is too short to analyze."
     },
     "validate": {
@@ -1084,8 +1083,7 @@
         "outbound_name_collision": "The Rematch outbound name conflicts with a built-in, proxy group, or node: {{name}}",
         "unsafe_rematch_order": "The matching REMATCH-NAME rule must appear before the rule that selects this Rematch outbound",
         "duplicate_bound_sub_rule": "The selected rule sets contain duplicate sub-rule names: {{name}}",
-        "duplicate_bound_rematch_outbound": "The selected rule sets contain duplicate Rematch outbound names: {{name}}",
-        "missing_sub_rules_placeholder": "The template must contain the {{ mihomo_sub_rules }} placeholder"
+        "duplicate_bound_rematch_outbound": "The selected rule sets contain duplicate Rematch outbound names: {{name}}"
       }
     },
     "members": {

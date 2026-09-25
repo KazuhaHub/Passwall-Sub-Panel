@@ -118,7 +118,7 @@ func TestAdminRuleSetsInspectMergesLegacyMihomoRulesIntoContent(t *testing.T) {
 	}
 }
 
-func TestAdminRuleSetsSaveRejectsBoundSubRulesWithoutTemplatePlaceholder(t *testing.T) {
+func TestAdminRuleSetsSaveAllowsBoundSubRulesWithoutTemplatePlaceholder(t *testing.T) {
 	root := t.TempDir()
 	rules, err := yamladapter.NewRuleSetRepo(root)
 	if err != nil {
@@ -138,8 +138,12 @@ func TestAdminRuleSetsSaveRejectsBoundSubRulesWithoutTemplatePlaceholder(t *test
 		Slug: "advanced", Name: "Advanced", Enabled: true, Content: "- MATCH,DIRECT",
 		MihomoSubRules: []domain.MihomoSubRule{{Name: "ai-rules", Content: "- MATCH,DIRECT"}},
 	})
-	if w.Code != http.StatusBadRequest || !bytes.Contains(w.Body.Bytes(), []byte("missing_sub_rules_placeholder")) {
+	if w.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+	saved, err := rules.GetBySlug(context.Background(), "advanced")
+	if err != nil || len(saved.MihomoSubRules) != 1 {
+		t.Fatalf("sub-rules were not saved: %#v, err=%v", saved, err)
 	}
 }
 

@@ -61,7 +61,6 @@ func TestRoutingDefaultMigrationSourcesExistAndChanged(t *testing.T) {
 	checks := map[string][]string{
 		"templates/default-mihomo.yaml": {
 			"13cd9b7b8d29447f86fd46503536e15359e07116c302d3b5364a66e879a84c3c",
-			"d83f169df2cd5f5889c5635c074f0546db46c4f7e319e818b80445b9ee8a6dd0",
 		},
 		"rulesets/default-rules.yaml": {
 			"01c4be93d1bb183336940faa8ed8ebf0f08110adee12327405ab659be282adbc",
@@ -87,15 +86,6 @@ func TestEnsureUpgradesPreviousIndependentRoutingDefaults(t *testing.T) {
 	template, err := defaultsFS.ReadFile("files/templates/default-mihomo.yaml")
 	if err != nil {
 		t.Fatal(err)
-	}
-	previousTemplate := []byte(strings.Replace(
-		strings.ReplaceAll(string(template), "\r\n", "\n"),
-		"\n  {{ mihomo_sub_rules }}\n", "", 1,
-	))
-	// Pin the prior published template rather than accidentally treating a
-	// newly generated variant as an upgrade source.
-	if got := testSHA256(previousTemplate); got != "d83f169df2cd5f5889c5635c074f0546db46c4f7e319e818b80445b9ee8a6dd0" {
-		t.Fatalf("previous official template hash = %s", got)
 	}
 	rules, err := defaultsFS.ReadFile("files/rulesets/default-rules.yaml")
 	if err != nil {
@@ -160,7 +150,7 @@ func TestEnsureUpgradesPreviousIndependentRoutingDefaults(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()
-			oldTemplate := append([]byte(nil), previousTemplate...)
+			oldTemplate := append([]byte(nil), template...)
 			oldRules := append([]byte(nil), tc.sourceRules...)
 			if tc.customizeTemplate {
 				oldTemplate = append(oldTemplate, []byte("# administrator customization\n")...)

@@ -1097,7 +1097,7 @@ GET /{sub_path}/abc123 (UA: mihomo)
      d. {{ proxies }} 替换为节点 YAML 列表
      e. proxy-groups 内的 @all / @region:TW / @tag:reality 展开
      f. {{ rules_common }} 按模板绑定顺序拼接各规则集的统一 rules；Mihomo 原样输出，sing-box 按支持类型编译
-     g. {{ mihomo_sub_rules }} 输出 Mihomo 子规则，并把 Rematch 出站追加到 proxies
+     g. {{ sub_rules }} 输出 Mihomo 子规则，并把 Rematch 出站追加到 proxies
      h. 按规则集 proxy_group_order 生成策略组顺序；{{ rules_personal }} 插入 user.personal_rules
   6. 写 sub_logs
   7. 写 Subscription-Userinfo header（流量 + 到期 + 限额）
@@ -1247,7 +1247,7 @@ GET /{sub_path}/abc123 (UA: mihomo)
 | `{{ proxies }}` | 用户授权节点的 Clash proxy block 列表 + group.layout 应用 |
 | `{{ rules_common }}` | 当前模板 `rule_sets` 绑定的规则集内容拼接 |
 | `{{ rules_personal }}` | user.personal_rules 原文 |
-| `{{ mihomo_sub_rules }}` | Mihomo 模板绑定规则集中的子规则；没有子规则时展开为空 |
+| `{{ sub_rules }}` | Mihomo 模板绑定规则集中的子规则；模板缺少该占位符时静默丢弃 |
 | `@all` (在 proxy-groups.proxies) | 该用户所有授权节点名（按 layout 顺序，含分隔符） |
 | `@region:TW` | region=TW 的节点名 |
 | `@tag:reality` | tags 含 reality 的节点名 |
@@ -1267,7 +1267,7 @@ HTTP/3 常见的 `UDP/443` 与其他 UDP 分开控制：`⚡ QUIC控制` 默认�
 
 PSP 主规则遵守以下编译约定：模板中的规则集顺序决定合并顺序，每个规则集只有一份主规则；Mihomo 保持原始行序，sing-box 跳过无法转换的 Mihomo 专属类型。`SUB-RULE` 只能引用当前规则集声明的子规则，子规则禁止继续嵌套 `SUB-RULE`，并建议以 `MATCH` 兜底。只设置 `target-rematch-name` 的 Rematch 出站，其对应 `REMATCH-NAME` 处理规则必须位于触发该出站的规则之前，以避免重复匹配循环；也可以设置 `target-sub-rule` 直接进入子规则。
 
-同一 Mihomo 模板绑定的所有启用规则集中，子规则名和 Rematch 出站名必须分别保持唯一；出站名也不能与内置出口、策略组、节点重名。规则集保存和模板保存都会执行这组交叉校验。只要绑定内容含有子规则，自定义 Mihomo 模板就必须包含根级 `{{ mihomo_sub_rules }}` 占位符；默认模板已内置该占位符。
+同一 Mihomo 模板绑定的所有启用规则集中，子规则名和 Rematch 出站名必须分别保持唯一；出站名也不能与内置出口、策略组、节点重名。规则集保存和模板保存都会执行这组交叉校验。Mihomo 模板通过 `{{ sub_rules }}` 输出子规则；缺少该占位符时不报错，子规则会被静默丢弃。默认模板在末尾内置该占位符。
 
 ### 9.2 分组级 layout
 

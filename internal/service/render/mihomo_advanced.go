@@ -39,11 +39,10 @@ func NormalizeMihomoRuleFeatures(features MihomoRuleFeatures) MihomoRuleFeatures
 
 // ValidateMihomoTemplateBundle checks invariants that only exist after several
 // rule sets are bound to one Mihomo template.
-func ValidateMihomoTemplateBundle(ruleSets []*domain.RuleSet, templateContent string) []ProxyGroupIssue {
+func ValidateMihomoTemplateBundle(ruleSets []*domain.RuleSet) []ProxyGroupIssue {
 	issues := []ProxyGroupIssue{}
 	subRuleOwner := map[string]string{}
 	outboundOwner := map[string]string{}
-	hasSubRules := false
 	for _, ruleSet := range ruleSets {
 		if ruleSet == nil || !ruleSet.Enabled {
 			continue
@@ -53,7 +52,6 @@ func ValidateMihomoTemplateBundle(ruleSets []*domain.RuleSet, templateContent st
 			if name == "" {
 				continue
 			}
-			hasSubRules = true
 			if owner, exists := subRuleOwner[name]; exists {
 				issues = append(issues, mihomoIssue("error", "sub_rule", name, "duplicate_bound_sub_rule", fmt.Sprintf("Mihomo 模板绑定的规则集 %s 与 %s 定义了同名子规则：%s", owner, ruleSet.Slug, name)))
 				continue
@@ -72,20 +70,7 @@ func ValidateMihomoTemplateBundle(ruleSets []*domain.RuleSet, templateContent st
 			outboundOwner[name] = ruleSet.Slug
 		}
 	}
-	if hasSubRules && !hasRootBlockPlaceholder(templateContent, "mihomo_sub_rules") {
-		issues = append(issues, mihomoIssue("error", "sub_rule", "", "missing_sub_rules_placeholder", "绑定了 Mihomo 子规则时，模板必须包含 {{ mihomo_sub_rules }} 占位符"))
-	}
 	return issues
-}
-
-func hasRootBlockPlaceholder(content, tag string) bool {
-	for _, line := range strings.Split(content, "\n") {
-		match := linePlaceholderRE.FindStringSubmatch(line)
-		if match != nil && match[1] == "" && match[2] == tag {
-			return true
-		}
-	}
-	return false
 }
 
 func (f MihomoRuleFeatures) outboundNames() map[string]bool {
