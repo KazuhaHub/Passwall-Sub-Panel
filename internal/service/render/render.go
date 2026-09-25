@@ -156,10 +156,7 @@ func (s *Service) RenderForUser(ctx context.Context, u *domain.User, ct domain.C
 		bundle.ProxyGroupOrder = tpl.ProxyGroupOrder
 	}
 	if ct == domain.ClientSingBox {
-		// proxyGroupOptions is intentionally Mihomo-only. sing-box has no
-		// complete semantic equivalent for fallback/load-balance, so all groups
-		// remain selectors while sharing the same ordered member layouts.
-		return s.renderSingBox(ctx, u, tpl, items, bundle.SharedRules, bundle.ProxyGroupOrder, bundle.ProxyGroupMembers, st)
+		return s.renderSingBox(ctx, u, tpl, items, bundle.SharedRules, bundle.ProxyGroupOrder, bundle.ProxyGroupMembers, bundle.ProxyGroupOptions, st)
 	}
 	proxies := s.buildProxies(ctx, u, items, st)
 	proxies, err = appendMihomoRematchOutbounds(proxies, bundle.RematchOutbounds)

@@ -32,7 +32,7 @@ var validLoadBalanceStrategies = map[string]bool{
 func intPointer(value int) *int    { return &value }
 func boolPointer(value bool) *bool { return &value }
 
-// EffectiveProxyGroupOptions returns safe, fully populated Mihomo settings.
+// EffectiveProxyGroupOptions returns safe, fully populated proxy group settings.
 // Invalid hand-written YAML falls back to select (invalid type) or the field
 // defaults, while the inspector reports the corresponding issue to the admin.
 func EffectiveProxyGroupOptions(raw domain.ProxyGroupOptions) domain.ProxyGroupOptions {

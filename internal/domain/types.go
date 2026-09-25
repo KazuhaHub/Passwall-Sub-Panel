@@ -1136,10 +1136,10 @@ type RuleSet struct {
 	// individual policy group. A nil/empty map preserves the legacy
 	// name-based defaults in render.proxyGroupChoices.
 	ProxyGroupMembers map[string][]ProxyGroupMember
-	// ProxyGroupOptions optionally changes the generated Mihomo group type and
+	// ProxyGroupOptions optionally changes the generated proxy group type and
 	// its health-check settings. Missing entries preserve the legacy select
-	// behavior. sing-box intentionally ignores these options and keeps using a
-	// selector outbound.
+	// behavior. sing-box maps url-test to urltest; unsupported types and fields
+	// keep their selector behavior or are silently omitted.
 	ProxyGroupOptions map[string]ProxyGroupOptions
 	// Content is the single PSP rule stream. Mihomo consumes the original
 	// Mihomo-style lines; the sing-box compiler translates only rule types it
@@ -1177,7 +1177,7 @@ type ProxyGroupMember struct {
 	NodeID int64  `json:"node_id,omitempty" yaml:"node_id,omitempty"`
 }
 
-// ProxyGroupOptions configures one generated Mihomo proxy group. Pointer
+// ProxyGroupOptions configures one generated proxy group. Pointer
 // scalars preserve the distinction between an omitted value (use the panel
 // default) and an explicit zero, which is meaningful for interval.
 type ProxyGroupOptions struct {

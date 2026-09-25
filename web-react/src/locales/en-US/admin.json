@@ -1103,7 +1103,7 @@
       "group_type": "Proxy group type",
       "type": {
         "select": "Manual selection (select)",
-        "url-test": "Automatic selection (url-test)",
+        "url-test": "Automatic latency test (url-test)",
         "fallback": "Automatic fallback (fallback)",
         "load-balance": "Load balancing (load-balance)"
       },
@@ -1115,7 +1115,7 @@
       },
       "test_url": "Test URL",
       "interval": "Test interval (seconds)",
-      "interval_hint": "0 disables scheduled tests",
+      "interval_hint": "0 disables scheduled tests in Mihomo; sing-box uses its default 3-minute interval",
       "timeout": "Timeout (milliseconds)",
       "tolerance": "Switch tolerance (milliseconds)",
       "lazy": "Lazy health checks (skip while group is unused)",
@@ -1130,7 +1130,7 @@
         "consistent-hashing": "Send requests for the same destination to the same proxy node.",
         "sticky-sessions": "Pin the same source and destination pair to one node for 10 minutes."
       },
-      "mihomo_only": "Proxy group types and health-check settings apply only to Mihomo; sing-box always generates a manual selector.",
+      "client_compatibility": "Automatic latency test generates a urltest outbound in sing-box subscriptions; fallback and load balancing still generate manual selectors in sing-box.",
       "add_title": "Add member",
       "add": "Add",
       "kind_node": "Specific node",
@@ -1176,7 +1176,7 @@
         "invalid_timeout": "The timeout must be greater than 0",
         "invalid_tolerance": "The switch tolerance cannot be negative",
         "invalid_strategy": "Unknown load-balancing strategy: {{value}}",
-        "insufficient_auto_members": "Automatic selection or load balancing usually needs at least two available members",
+        "insufficient_auto_members": "Automatic latency testing or load balancing usually needs at least two available members",
         "auto_group_builtin_member": "url-test / fallback / load-balance members cannot include built-in or Rematch outbounds; use a specific node or another proxy group instead"
       }
     },

@@ -1101,7 +1101,7 @@
       "group_type": "代理组类型",
       "type": {
         "select": "手动选择（select）",
-        "url-test": "自动选择（url-test）",
+        "url-test": "自动测速（url-test）",
         "fallback": "自动回退（fallback）",
         "load-balance": "负载均衡（load-balance）"
       },
@@ -1113,7 +1113,7 @@
       },
       "test_url": "测试地址",
       "interval": "测试间隔（秒）",
-      "interval_hint": "0 表示关闭定时测试",
+      "interval_hint": "0 在 Mihomo 中关闭定时测试；sing-box 使用默认间隔 3 分钟",
       "timeout": "超时时间（毫秒）",
       "tolerance": "节点切换容差（毫秒）",
       "lazy": "懒惰检测（未使用该组时不测试）",
@@ -1128,7 +1128,7 @@
         "consistent-hashing": "相同目标地址的请求固定分配给同一个代理节点。",
         "sticky-sessions": "相同来源地址和目标地址的请求固定到同一节点，缓存 10 分钟。"
       },
-      "mihomo_only": "代理组类型和健康检查参数仅作用于 Mihomo；sing-box 始终生成手动 selector。",
+      "client_compatibility": "自动测速会在 sing-box 订阅中生成 urltest；自动回退和负载均衡在 sing-box 中仍生成手动 selector。",
       "add_title": "添加成员",
       "add": "添加",
       "kind_node": "具体节点",
@@ -1174,7 +1174,7 @@
         "invalid_timeout": "超时时间必须大于 0",
         "invalid_tolerance": "节点切换容差不能小于 0",
         "invalid_strategy": "未知负载均衡策略：{{value}}",
-        "insufficient_auto_members": "自动选择或负载均衡通常至少需要两个可用成员",
+        "insufficient_auto_members": "自动测速或负载均衡通常至少需要两个可用成员",
         "auto_group_builtin_member": "自动测速 / 回退 / 负载均衡类型的成员不能包含内置出口或 Rematch 出站，请改用具体节点或其它代理组"
       }
     },

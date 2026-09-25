@@ -326,7 +326,7 @@ export default function ProxyGroupMembersEditor({ content, groupOrder, initialGr
                   label={t('admin:rules.members.lazy')} />
               </Box>
             )}
-            <Alert severity="info" sx={{ mt: 1.5 }}>{t('admin:rules.members.mihomo_only')}</Alert>
+            <Alert severity="info" sx={{ mt: 1.5 }}>{t('admin:rules.members.client_compatibility')}</Alert>
           </Box>
 
           <Stack spacing={1} sx={{ mt: 2 }}>
