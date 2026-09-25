@@ -36,6 +36,7 @@ import EditIcon from '@mui/icons-material/EditOutlined'
 import LinkOffIcon from '@mui/icons-material/LinkOff'
 import CloudSyncIcon from '@mui/icons-material/CloudSync'
 import { useTranslation } from 'react-i18next'
+import { AsyncIconButton } from '@/components/AsyncButton'
 import { useCan } from '@/utils/permissions'
 import { formatDualTz } from '@/utils/datetime'
 import { allSettledLimited } from '@/utils/promises'
@@ -2408,6 +2409,11 @@ export default function NodesView() {
   const [claimOpen, setClaimOpen] = useState(false)
   const [claimBusy, setClaimBusy] = useState(false)
   const [claimUsers, setClaimUsers] = useState<User[]>([])
+  // The dialog opens before listUsers resolves (see startClaim), so an empty
+  // claimUsers is ambiguous between "no users on the panel" and "still
+  // loading" without this — and the empty case renders as the same disabled
+  // placeholder Select either way.
+  const [claimUsersLoading, setClaimUsersLoading] = useState(false)
   const [claimForm, setClaimForm] = useState({
     panel_id: 0, panel_name: '', inbound_id: 0,
     user_id: 0,
@@ -3150,10 +3156,12 @@ export default function NodesView() {
       user_id: 0, client_email: '', client_uuid: '',
     })
     setClaimOpen(true)
+    setClaimUsersLoading(true)
     try {
       const res = await listUsers({ page: 1, page_size: 200 })
       setClaimUsers(res.items)
     } catch { /* toasted */ }
+    finally { setClaimUsersLoading(false) }
   }
 
   async function submitClaim(e: FormEvent) {
@@ -3444,10 +3452,19 @@ export default function NodesView() {
                                 <EditIcon fontSize="small" />
                               </IconButton>
                             </Tooltip>
+                            {/* AsyncIconButton, wrapped in a span so Tooltip
+                                gets a DOM ref to anchor to (AsyncIconButton
+                                is a plain function component and does not
+                                forward one itself): delete awaits the
+                                confirm dialog AND the request, and until this
+                                showed its own wait the icon stayed clickable
+                                through the whole round trip. */}
                             <Tooltip title={t('admin:nodes.action.delete')}>
-                              <IconButton size="small" onClick={() => confirmDelete(n)} sx={{ color: md.error }}>
-                                <DeleteIcon fontSize="small" />
-                              </IconButton>
+                              <span>
+                                <AsyncIconButton size="small" onClick={() => confirmDelete(n)} sx={{ color: md.error }}>
+                                  <DeleteIcon fontSize="small" />
+                                </AsyncIconButton>
+                              </span>
                             </Tooltip>
                           </>)
                         ) : (
@@ -3460,20 +3477,30 @@ export default function NodesView() {
                                 <KeyIcon fontSize="small" />
                               </IconButton>
                             </Tooltip>
+                            {/* Same AsyncIconButton-in-a-span reasoning as the
+                                delete icon below: recreate-inbound and detach
+                                are also requests the operator waits on, not
+                                instant local edits. */}
                             <Tooltip title={t('admin:nodes.action.recreate_inbound', { defaultValue: '在服务器上重建 inbound' })}>
-                              <IconButton size="small" onClick={() => confirmRecreateInbound(n)} disabled={!canRecreateInbound}>
-                                <CloudSyncIcon fontSize="small" />
-                              </IconButton>
+                              <span>
+                                <AsyncIconButton size="small" onClick={() => confirmRecreateInbound(n)} disabled={!canRecreateInbound}>
+                                  <CloudSyncIcon fontSize="small" />
+                                </AsyncIconButton>
+                              </span>
                             </Tooltip>
                             <Tooltip title={t('admin:nodes.action.detach')}>
-                              <IconButton size="small" onClick={() => confirmDetach(n)} sx={{ color: md.tertiary }}>
-                                <LinkOffIcon fontSize="small" />
-                              </IconButton>
+                              <span>
+                                <AsyncIconButton size="small" onClick={() => confirmDetach(n)} sx={{ color: md.tertiary }}>
+                                  <LinkOffIcon fontSize="small" />
+                                </AsyncIconButton>
+                              </span>
                             </Tooltip>
                             <Tooltip title={t('admin:nodes.action.delete')}>
-                              <IconButton size="small" onClick={() => confirmDelete(n)} disabled={!canDeleteInbound} sx={{ color: md.error }}>
-                                <DeleteIcon fontSize="small" />
-                              </IconButton>
+                              <span>
+                                <AsyncIconButton size="small" onClick={() => confirmDelete(n)} disabled={!canDeleteInbound} sx={{ color: md.error }}>
+                                  <DeleteIcon fontSize="small" />
+                                </AsyncIconButton>
+                              </span>
                             </Tooltip>
                           </>
                         ))}
@@ -3714,9 +3741,12 @@ export default function NodesView() {
           </Typography>
           <Box component="form" id="claim-form" onSubmit={submitClaim} sx={{ display: 'flex', flexDirection: 'column', gap: 2.5 }}>
             <Select required size="small" fullWidth value={claimForm.user_id || ''} displayEmpty
+              disabled={claimUsersLoading}
               error={!!claimErr.user_id}
               onChange={e => setClaimForm({ ...claimForm, user_id: Number(e.target.value) })}>
-              <MenuItem value="" disabled>{t('admin:nodes.claim_dialog.user')}</MenuItem>
+              <MenuItem value="" disabled>
+                {claimUsersLoading ? t('common:status.loading') : t('admin:nodes.claim_dialog.user')}
+              </MenuItem>
               {claimUsers.map(u => (
                 <MenuItem key={u.id} value={u.id}>
                   {u.display_name ? `${u.display_name} (${u.upn})` : u.upn}

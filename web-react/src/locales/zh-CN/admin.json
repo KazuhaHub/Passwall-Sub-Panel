@@ -2142,7 +2142,7 @@
       "warning": "升级会短暂中断此服务器的代理连接。请确认目标版本及维护时段；不会更改服务器、节点或用户身份。",
       "requirements": "需要已启用升级助手的 Linux/systemd，或生成 Docker 文件时已开启“高级”中的远程升级选项。旧版本需先手动维护一次。新进程重新同步并完成配置收敛后才算成功；Docker 失败时会自动恢复保留的旧容器。数据库格式改变时仍需手动迁移。",
       "current": "当前 Passwall Node 版本（最近上报）",
-      "version_hint": "从所选频道选择已审核、已发布的精确版本；不接受 latest、beta 等浮动标签，不允许降级。此处切换频道仅临时生效；保存默认频道请编辑服务器。",
+      "version_hint": "从所选频道选择已审核、已发布的精确版本；不接受 latest、beta 等浮动标签。比当前版本旧的发行版会被标注出来，但仍可选择——面板不阻止降级，安全性由发行物签名、校验和与节点侧的状态 schema 检查保证。此处切换频道仅临时生效；保存默认频道请编辑服务器。",
       "confirm": "确认并下发升级",
       "retry": "重试同一个升级请求",
       "refresh": "重新查询原任务",
@@ -2157,7 +2157,8 @@
         "manual_attention": "升级结果无法自动确认，需要检查节点与升级助手日志。",
         "awaiting_observation": "已收到升级收据，等待目标版本的新鲜上报。",
         "verified": "已确认目标版本重启、同步及配置收敛，并核对二进制校验和。"
-      }
+      },
+      "blocked_fallback": "本面板目前不能远程升级这台服务器的节点程序。"
     },
     "sui_update": {
       "available": "查看 S-UI {{version}} 发行版本",
@@ -2227,8 +2228,10 @@
         "unknown": "兼容状态未知",
         "compatible_detail": "兼容 · 可远程升级",
         "limited_detail": "节点同步兼容，但当前不能远程升级。请手动更新一次节点，或启用其升级助手。",
-        "incompatible_detail": "当前 Passwall Sub Panel 版本尚未验证此节点协议，已阻止远程升级。",
-        "unknown_detail": "尚未保存通过身份验证的协议上报，请等待节点成功连接一次。"
+        "incompatible_detail": "节点报告协议代际 {{reported}}，本面板已审核的范围是 {{min}}..{{max}}，因此已拒绝其上报（自 {{since}}）。最后一次通过验证的代际为 {{accepted}}。节点仍在按最后一次生效的配置转发流量；远程升级已阻止，需人工处理。",
+        "report_refused_detail": "本面板无法读取该节点的上报，已拒绝（自 {{since}}）。节点仍在按最后一次生效的配置转发流量；需人工检查后才能继续下发。",
+        "unknown_never_observed": "尚未保存通过身份验证的协议上报，请等待节点成功连接一次。",
+        "unknown_observation_stale": "最近一次通过验证的协议上报是 {{observed}}，已超出可据以操作的时限。高风险操作需要一次新的成功连接。"
       },
       "outbound_hint": "Passwall Node 主动连接 Passwall Sub Panel，不需要入站管理 URL 或上游面板凭据。先填写服务器信息并选择安装方式，再生成该服务器的专属安装文件；inbound 在节点页面单独配置。",
       "create_record_hint": "先创建服务器记录，下一页生成安装命令；inbound 在节点页面单独配置。",
@@ -2409,7 +2412,8 @@
       "upgrade_in_place_needed": "该节点上报的版本是 {{version}}。不启用「原地替换版本」的话，安装器会在主机上拒绝。",
       "replace_identity": "换身份覆盖安装",
       "replace_identity_hint": "把不兼容的旧安装 —— 例如另一个面板留下的节点 —— 换成这个面板的身份。旧安装会被停掉并整体移入主机的 backups/。",
-      "replace_identity_warning": "覆盖安装之后：这台节点的流量计数从零开始（旧计数留在主机备份里）；如果它原本属于另一个面板，那个面板里的服务器记录需要人工删除。"
+      "replace_identity_warning": "覆盖安装之后：这台节点的流量计数从零开始（旧计数留在主机备份里）；如果它原本属于另一个面板，那个面板里的服务器记录需要人工删除。",
+      "release_older_than_current": "较当前版本旧"
     },
     "table": {
       "name": "服务器名称",

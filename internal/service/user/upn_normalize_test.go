@@ -12,9 +12,9 @@ import (
 
 // The service-layer half of the upn identity contract.
 //
-// internal/adapters/sqlstore owns the cross-dialect half (it is the only package
-// that reads PSP_TEST_DB_KIND, so it is where "all three backends agree" gets
-// pinned). What CANNOT be asserted there is that the service normalizes BEFORE
+// internal/adapters/sqlstore owns the cross-dialect half (it is where
+// PSP_TEST_DB_KIND selects a real backend for repository code, so it is where
+// "all three backends agree" gets pinned). What CANNOT be asserted there is that the service normalizes BEFORE
 // it writes — the repo deliberately stores what it is handed. That is this file.
 //
 // These run against memoryUserRepo, whose Create now rejects a byte-exact

@@ -203,6 +203,22 @@ type serverDTO struct {
 	NodeUpgradeReady        bool       `json:"node_upgrade_ready,omitempty"`
 	NodeMissingCapabilities []string   `json:"node_missing_capabilities,omitempty"`
 	NodeProtocolObservedAt  *time.Time `json:"node_protocol_observed_at,omitempty"`
+	// NodeRefused* describe a report this panel is currently REFUSING. They are
+	// separate from the observation fields above, and that separation is the
+	// point: NodeProtocolVersion keeps meaning "the last generation that was
+	// ACCEPTED", so an operator can be shown both halves — last verified
+	// generation 1, now reporting 2 and refused since a given time. compat-policy
+	// 3.2's rule that a network failure must not erase the last valid observation
+	// becomes visible here for the first time rather than only being true.
+	NodeRefusedProtocolVersion *int       `json:"node_refused_protocol_version,omitempty"`
+	NodeRefusedSince           *time.Time `json:"node_refused_since,omitempty"`
+	NodeRefusedAt              *time.Time `json:"node_refused_at,omitempty"`
+	// NodeReviewedProtocolMin/Max are the generations THIS PANEL declares it
+	// speaks. They ride on the row so a refusal can be explained without a second
+	// request: "reports 2, this panel reviewed 1..1" is the whole story, and an
+	// operator should not have to know where else to look for the other half.
+	NodeReviewedProtocolMin *int       `json:"node_reviewed_protocol_min,omitempty"`
+	NodeReviewedProtocolMax *int       `json:"node_reviewed_protocol_max,omitempty"`
 	VersionCheckedAt        *time.Time `json:"version_checked_at,omitempty"`
 	CompatStatus            string     `json:"compat_status,omitempty"`  // "supported" | "too_old" | "untested" | "unknown"
 	CompatMessage           string     `json:"compat_message,omitempty"` // human-readable, for tooltip / banner
@@ -1900,20 +1916,37 @@ func (h *AdminServersHandler) toServerDTOWithAgent(p *domain.Panel, agent *domai
 				dto.NodeCapabilities = append([]string(nil), agent.ObservedCapabilities...)
 				dto.NodeProtocolObservedAt = agent.ProtocolObservedAt
 				dto.NodeMissingCapabilities = append([]string(nil), compatibility.MissingAgentUpgrade...)
-				// THE VERDICT COMES FROM THE SAME FUNCTION THE ADMISSION PATH
-				// USES. The raw protocol fields above are a projection of the
-				// observation, not a decision; this is the decision, so the list
-				// and the upgrade action cannot disagree about what is eligible.
-				decision := nodecompat.Decide(agent, compatadmission.OperationUpgradeEligibility, time.Now().UTC(), policy)
-				dto.NodeCompatibility = nodeCompatibilityState(decision)
-				dto.NodeCompatibilityReason = string(decision.Reason)
-				// ONE ANSWER, NOT TWO. This used to require a separately reviewed
-				// from→to edge on top of the decision, so a row read "compatible"
-				// while the upgrade action was disabled — and the only remedy was
-				// a document edit nobody had asked for. The decision IS the
-				// answer: a peer PSP's own judgement accepts is upgradeable.
-				dto.NodeUpgradeReady = decision.Allowed
 			}
+			if agent.CurrentlyRefused() {
+				dto.NodeRefusedProtocolVersion = agent.RefusedProtocolVersion
+				dto.NodeRefusedSince = agent.RefusedFirstAt
+				dto.NodeRefusedAt = agent.RefusedAt
+			}
+			// THE VERDICT COMES FROM THE SAME FUNCTION THE ADMISSION PATH USES.
+			// The raw protocol fields above are a projection of the observation,
+			// not a decision; this is the decision, so the list and the upgrade
+			// action cannot disagree about what is eligible.
+			//
+			// IT IS TAKEN FOR EVERY AGENT, not only one with an accepted
+			// observation. It used to sit inside that branch, which made the most
+			// important case unreachable: a node whose reports this panel refuses
+			// has no accepted observation to offer, so the row fell through to the
+			// "unknown" default and told an operator to wait for a check-in that
+			// was already happening and already being refused. That is also the
+			// bucket a never-installed node sits in, so the two were identical on
+			// screen.
+			generations := domain.SupportedNodeProtocolGenerations()
+			dto.NodeReviewedProtocolMin = &generations.Min
+			dto.NodeReviewedProtocolMax = &generations.Max
+			decision := nodecompat.Decide(agent, compatadmission.OperationUpgradeEligibility, time.Now().UTC(), policy)
+			dto.NodeCompatibility = nodeCompatibilityState(decision)
+			dto.NodeCompatibilityReason = string(decision.Reason)
+			// ONE ANSWER, NOT TWO. This used to require a separately reviewed
+			// from→to edge on top of the decision, so a row read "compatible"
+			// while the upgrade action was disabled — and the only remedy was a
+			// document edit nobody had asked for. The decision IS the answer: a
+			// peer PSP's own judgement accepts is upgradeable.
+			dto.NodeUpgradeReady = decision.Allowed
 		}
 	}
 	client, err := h.pool.Get(p.ID)

@@ -17,7 +17,14 @@ Mihomo 有 `PASS`，sing-box 没有对等的 selector outbound。把 `PASS` 翻�
 1. 在私网/LAN 直连规则之后，先用 `NETWORK=UDP + DST-PORT=443` 进入 `⚡ QUIC控制`。
 2. 随后才用 `NETWORK=UDP` 进入 `🎮 UDP控制`。TCP 不受影响。
 3. `⚡ QUIC控制` 默认成员是 `🎮 UDP控制`，然后是 `🚀 节点选择` / `DIRECT` / `REJECT`。
-   这既保留一个 UDP 总开关，也允许订阅用户单独覆盖 QUIC。
+   这既保留一个 UDP 总开关，也允许订阅用户单独覆盖 QUIC。`🎮 UDP控制` 默认成员是
+   `DIRECT`，然后是 `PASS` / `🚀 节点选择` / `REJECT`：`DIRECT` 允许 UDP、走本地出口，不依赖
+   所选节点的 UDP 能力，其出口 IP 可能与 TCP 代理出口不同；`PASS` 让 UDP 继续按下面的服务
+   规则分流（例如 YouTube 进油管组、国内 IP 进中国大陆组、其余到最终 MATCH）；`🚀 节点选择`
+   则让全部 UDP（包括国内目的地）走节点。`PASS` 只在 Mihomo 输出里出现：sing-box 没有对应
+   出站，渲染时丢掉这个非默认成员，保留其余选项，所以 sing-box 用户仍能选节点。
+   `⚡ QUIC控制` 不放 `PASS`：默认规则里 QUIC 规则的下一条就是普通 UDP 规则，QUIC 选
+   `PASS` 会被它接住，与选 `🎮 UDP控制` 完全等价，只是多一个重复选项。
 4. 两个输出都生成真实的 selector。sing-box 翻译器会把 Mihomo `AND` 条件合并成一条
    `{network: udp, port: 443}` 路由，而不使用隐藏的强制拒绝规则。
 5. sing-box 输出遇到 `PASS` 时忽略该规则/成员以继续匹配，绝不翻译成 `direct`。
@@ -38,3 +45,16 @@ Mihomo 有 `PASS`，sing-box 没有对等的 selector outbound。把 `PASS` 翻�
 - **中国直连、其他拒绝**：地区假设错误，且规则优先级会覆盖用户意图。
 - **所有 UDP 共用一个组**：无法“只禁 QUIC，保留游戏/语音 UDP”。
 - **sing-box 将 `PASS` 映射为 `direct`**：语义不等价，可导致静默绕过代理。
+
+## 修订
+
+- 2026-09-23：默认值曾改为 `🎮 UDP控制` = `PASS`、`⚡ QUIC控制` = `REJECT`，现恢复为上面第 3
+  条。那段时间里 sing-box 没有 `PASS` 的对应物，只能把 UDP 规则和整个 UDP 控制组省略，
+  sing-box 客户端因此无法切换普通 UDP。管理员仍可把 `PASS` 配成成员；sing-box 对它的处理
+  不变（省略匹配、继续向下，绝不映射为 `direct`），并沿 QUIC 的默认委托一并传递。组成员
+  由渲染器决定，升级即生效（管理员为这两组自定义过成员的除外）；未经修改的官方默认规则集
+  按旧内容 SHA-256 自动升级注释；客户端已保存的选择 PSP 无法也不会重置。
+- 2026-09-23：`PASS` 作为 `🎮 UDP控制` 的第二个成员加回（不是默认），与 `🚀 节点选择` 并存。
+  两者表达的意图不同：`PASS` 按服务规则分流，节点选择是全部 UDP 走节点；只保留前者会让
+  sing-box 用户失去所有代理 UDP 的途径，因为 `PASS` 在那里不存在。Mihomo 客户端记住的
+  `PASS` 选择也因此在升级后仍然有效。

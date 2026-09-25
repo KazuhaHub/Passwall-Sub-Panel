@@ -12,10 +12,11 @@ on:
       # through these two, so a change in either changes what is under test.
       - 'internal/adapters/pninstall/**'
       - 'internal/pkg/releaseasset/**'
-      # THESE THREE ARE CONSTRUCTED BY THE CASE ITSELF, so a signature change in any
-      # of them breaks its COMPILE — and this is the only job that compiles it. They
-      # were missing, which meant such a change would not re-run this job at all: the
-      # breakage would sit until something else happened to touch a listed path.
+      # THESE ARE CONSTRUCTED BY THE CASE ITSELF, so a change in any of them changes
+      # what the systemd run exercises and has to re-run it. The case's COMPILE is not
+      # this list's job: it imports fifteen of this repository's packages and the list
+      # covers six of them whole, so go_static in test.yml vets it with its build tag
+      # on every push and pull request. A list cannot keep up with an import graph.
       - 'internal/service/nodesync/**'
       - 'internal/service/servermigration/**'
       - 'internal/adapters/pspnode/**'
@@ -36,10 +37,11 @@ on:
       # through these two, so a change in either changes what is under test.
       - 'internal/adapters/pninstall/**'
       - 'internal/pkg/releaseasset/**'
-      # THESE THREE ARE CONSTRUCTED BY THE CASE ITSELF, so a signature change in any
-      # of them breaks its COMPILE — and this is the only job that compiles it. They
-      # were missing, which meant such a change would not re-run this job at all: the
-      # breakage would sit until something else happened to touch a listed path.
+      # THESE ARE CONSTRUCTED BY THE CASE ITSELF, so a change in any of them changes
+      # what the systemd run exercises and has to re-run it. The case's COMPILE is not
+      # this list's job: it imports fifteen of this repository's packages and the list
+      # covers six of them whole, so go_static in test.yml vets it with its build tag
+      # on every push and pull request. A list cannot keep up with an import graph.
       - 'internal/service/nodesync/**'
       - 'internal/service/servermigration/**'
       - 'internal/adapters/pspnode/**'
@@ -52,12 +54,27 @@ on:
       - '.github/workflows/test.yml'
       - 'web-react/scripts/reinstall-browser.mjs'
 
+# THE SAME COMPILER AS THE BINARY THAT SHIPS. This case compiles PSP's handlers and
+# nodesync and drives them over real TLS, so it has to compile them with the stdlib
+# the release does. It pinned go1.26.8 in three places while go.mod named go1.27.1,
+# and nothing noticed: the guard that holds workflows to go.mod
+# (internal/version/build_baseline_test.go) read only test.yml and release.yml. It
+# reads every workflow that sets up Go now, and this one has test.yml's shape —
+# setup-go chooses from go.mod, and every step after it runs local.
+env:
+  GOWORK: "off"
+  GOTOOLCHAIN: "local"
+
 permissions:
   contents: read
 
+# A MAIN PUSH IS NOT SUPERSEDED BY THE NEXT MERGE — test.yml's rule, for the reason
+# its comment gives. Keyed on the ref for both events, 7 of this workflow's 68 main
+# runs were cancelled by the merge after them, which leaves that commit with no
+# acceptance at all. A PR push still cancels the one before it.
 concurrency:
-  group: node-reinstall-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  group: node-reinstall-${{ github.event_name }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   systemd:
@@ -67,17 +84,23 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
+        # Allow toolchain selection; setup-go exports local after installation.
+        env:
+          GOTOOLCHAIN: auto
         with:
-          go-version: '1.26.8'
+          go-version-file: go.mod
           cache: true
+      - name: Verify exact preferred compiler
+        run: |
+          set -eu
+          build_toolchain=$(awk '$1 == "toolchain" { print $2 }' go.mod)
+          test -n "$build_toolchain"
+          test "$(go env GOVERSION)" = "$build_toolchain"
+          test "$(go tool compile -V | awk '{ print $3 }')" = "$build_toolchain"
       - name: Install fixture prerequisites
         run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends sqlite3 gcc
       - name: Build isolated acceptance driver
-        env:
-          GOWORK: 'off'
-          GOTOOLCHAIN: go1.26.8
         run: |
-          test "$(go env GOVERSION)" = go1.26.8
           go test -c -tags node_reinstall_acceptance -o "$RUNNER_TEMP/node-reinstall-acceptance.test" ./tests/acceptance/node-reinstall-systemd
       # THE RELEASE THE CASE INSTALLS FROM IS CHECKED BEFORE THE CASE RUNS.
       #
@@ -92,9 +115,6 @@ jobs:
       # which release is under test. A pattern that stops matching fails here rather
       # than silently checking nothing.
       - name: The pinned release publishes what the panel reads
-        env:
-          GOWORK: 'off'
-          GOTOOLCHAIN: go1.26.8
         run: |
           set -euo pipefail
           pinned=$(grep -oE 'nodeVersion += "[0-9][0-9.]*"' tests/acceptance/node-reinstall-systemd/acceptance_linux_test.go | head -1 | cut -d'"' -f2)

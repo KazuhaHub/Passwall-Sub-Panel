@@ -70,6 +70,7 @@ import { useQueryScope } from '@/query/useQueryScope'
 import { useQueryClient } from '@tanstack/react-query'
 import PageHeader from '@/components/PageHeader'
 import { PagedTableFooter } from '@/components/PagedTableFooter'
+import { AsyncIconButton } from '@/components/AsyncButton'
 import { confirm } from '@/components/ConfirmHost'
 import { pushSnack } from '@/components/SnackbarHost'
 import { copyToClipboard } from '@/utils/clipboard'
@@ -654,15 +655,20 @@ export default function CertificatesView() {
                             <EditIcon fontSize="small" />
                           </IconButton>
                         </Tooltip>
+                        {/* Renew/delete hit the ACME/DB round trip directly (no
+                            sync-task queue cushions them), so on a slow link the
+                            icon sat unchanged for seconds and read as dead —
+                            AsyncIconButton disables it and shows a spinner for
+                            the life of the click's own promise. */}
                         <Tooltip title={t('admin:certs.renew')}>
-                          <IconButton size="small" onClick={() => onRenew(c)}>
+                          <AsyncIconButton size="small" onClick={() => onRenew(c)}>
                             <AutorenewIcon fontSize="small" />
-                          </IconButton>
+                          </AsyncIconButton>
                         </Tooltip>
                         <Tooltip title={t('common:actions.delete')}>
-                          <IconButton size="small" onClick={() => onDeleteCert(c)}>
+                          <AsyncIconButton size="small" onClick={() => onDeleteCert(c)}>
                             <DeleteIcon fontSize="small" />
-                          </IconButton>
+                          </AsyncIconButton>
                         </Tooltip>
                       </TableCell>
                     </TableRow>
@@ -692,6 +698,17 @@ export default function CertificatesView() {
                 </TableRow>
               </TableHead>
               <TableBody>
+                {/* Same "loading, not empty" guard as Tab 0: `creds` is still
+                    `[]` on the first render, so without this a credential-less
+                    moment mid-fetch read as "you have no credentials" rather
+                    than "still loading". */}
+                {loading && (
+                  <TableRow>
+                    <TableCell colSpan={4} align="center">
+                      <CircularProgress size={22} />
+                    </TableCell>
+                  </TableRow>
+                )}
                 {creds.slice((credPage - 1) * credPageSize, credPage * credPageSize).map(c => (
                   <TableRow key={c.id} hover>
                     <TableCell>{c.name}</TableCell>
@@ -710,14 +727,14 @@ export default function CertificatesView() {
                         </IconButton>
                       </Tooltip>
                       <Tooltip title={t('common:actions.delete')}>
-                        <IconButton size="small" onClick={() => onDeleteCred(c)}>
+                        <AsyncIconButton size="small" onClick={() => onDeleteCred(c)}>
                           <DeleteIcon fontSize="small" />
-                        </IconButton>
+                        </AsyncIconButton>
                       </Tooltip>
                     </TableCell>
                   </TableRow>
                 ))}
-                {creds.length === 0 && (
+                {!loading && creds.length === 0 && (
                   <TableRow>
                     <TableCell colSpan={4} align="center" sx={{ color: md.onSurfaceVariant }}>
                       {t('common:empty')}
@@ -760,6 +777,16 @@ export default function CertificatesView() {
                   </TableRow>
                 </TableHead>
                 <TableBody>
+                  {/* Same "loading, not empty" guard as the other two tabs —
+                      without it "还没有 ACME 账号" flashed on every mount, even
+                      when the account read just hadn't come back yet. */}
+                  {loading && (
+                    <TableRow>
+                      <TableCell colSpan={5} align="center">
+                        <CircularProgress size={22} />
+                      </TableCell>
+                    </TableRow>
+                  )}
                   {accounts.map(a => (
                     <TableRow key={a.id} hover>
                       <TableCell>{a.name || '—'}</TableCell>
@@ -777,12 +804,12 @@ export default function CertificatesView() {
                           <IconButton size="small" onClick={() => openAcct(a)}><EditIcon fontSize="small" /></IconButton>
                         </Tooltip>
                         <Tooltip title={t('common:actions.delete')}>
-                          <IconButton size="small" onClick={() => onDeleteAcct(a)}><DeleteIcon fontSize="small" /></IconButton>
+                          <AsyncIconButton size="small" onClick={() => onDeleteAcct(a)}><DeleteIcon fontSize="small" /></AsyncIconButton>
                         </Tooltip>
                       </TableCell>
                     </TableRow>
                   ))}
-                  {accounts.length === 0 && (
+                  {!loading && accounts.length === 0 && (
                     <TableRow>
                       <TableCell colSpan={5} align="center" sx={{ color: md.onSurfaceVariant }}>
                         {t('admin:certs.acct_empty', { defaultValue: '还没有 ACME 账号。新建一个后才能签发证书。' })}

@@ -450,6 +450,10 @@ type NodeAgentRepo interface {
 	UpdateCoreSelection(ctx context.Context, agentID string, engine domain.NodeCoreEngine, version string, allowRestrictedReality bool) error
 	UpdateCoreObservation(ctx context.Context, agentID string, engine domain.NodeCoreEngine) error
 	UpdateProtocolObservation(ctx context.Context, agentID string, protocolVersion int, capabilities []string, observedAt time.Time) error
+	// RecordProtocolRefusal records an authenticated report this panel refused at
+	// the wire boundary. It writes columns disjoint from the observation and does
+	// not touch last_seen; an accepted report clears them.
+	RecordProtocolRefusal(ctx context.Context, agentID string, protocolVersion int, reason string, refusedAt time.Time) error
 	TouchLastSeen(ctx context.Context, agentID string, seenAt time.Time) error
 	GetStream(ctx context.Context, agentID string, stream domain.NodeAgentStreamName) (*domain.NodeAgentStream, error)
 	ListStreams(ctx context.Context, agentID string) ([]*domain.NodeAgentStream, error)

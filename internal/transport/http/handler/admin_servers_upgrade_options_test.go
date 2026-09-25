@@ -6,10 +6,14 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
+	nodeprotocol "github.com/KazuhaHub/passwall-protocol/protocol"
+
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/compatadmission"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/version"
 )
@@ -209,5 +213,115 @@ func TestAgentTargetsComeFromTheReleaseList(t *testing.T) {
 	// An unknown identity cannot be the start of anything.
 	if got := agentTargets("", releases); got != nil {
 		t.Fatalf("targets = %+v, want nil", got)
+	}
+
+	// A REPORTED IDENTITY CARRYING A COMMIT IS STILL THAT VERSION. A node built
+	// from a known commit reports "4.0.0 (abc1234)", and comparing the whole
+	// string offered it the exact release it is already running — which the write
+	// path then refuses as a no-op, after the operator had picked it from a list
+	// that showed it.
+	withCommit := agentTargets("4.0.0 (abc1234)", releases)
+	if len(withCommit) != 2 {
+		t.Fatalf("targets = %+v, want the two releases that are not the node's own", withCommit)
+	}
+	for _, target := range withCommit {
+		if target.Version == "4.0.0" {
+			t.Fatalf("a node reporting a commit was offered its own version: %+v", target)
+		}
+	}
+}
+
+// THE READ PATH MUST ANSWER WHAT THE WRITE PATH WILL ANSWER.
+//
+// decideAgentUpgrade above refuses on identity alone, which is correct for what
+// it knows; the option as a whole has to know more. A node that reports a version
+// but cannot be upgraded at all was told "ready / compatible" here, offered the
+// full release list, and refused by nodeagentupgrade.Request the moment the
+// operator chose from it. ADR 0033 and R09 name exactly that as the failure: the
+// list offering an action the service will not perform.
+//
+// The commonest instance is not exotic. A Passwall-Node whose own compiled
+// version is not a canonical release never constructs an upgrade client
+// (cmd/node/upgrade_linux.go's remoteUpgradeEnabled requires
+// releaseid.ValidVersion), so it never registers the handler and never advertises
+// task.agent.upgrade.v1 — and compatadmission does not allow that capability to
+// be forced.
+func TestTheAgentAnswerRefusesWhatTheUpgradeServiceWouldRefuse(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	observed := time.Now().UTC()
+	panel := &domain.XUIPanel{ID: 7, Kind: domain.PanelKindPSP, PanelVersion: "4.0.1"}
+
+	answer := func(agent *domain.NodeAgent) upgradeOption {
+		t.Helper()
+		h := &AdminServersHandler{
+			repo:   upgradeModeRepo{panel: panel},
+			agents: nodeMetricsAgentRepo{agent: agent},
+		}
+		recorder := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(recorder)
+		c.Params = gin.Params{{Key: "id", Value: "7"}}
+		c.Request = httptest.NewRequest(http.MethodGet, "/admin/servers/7/upgrade-options?component=agent", nil)
+		return h.decideAgentOption(c, 7)
+	}
+
+	// A node that reports a version but advertises no upgrade capability. This is
+	// the shape a legacy-scheme or dev build takes on the wire.
+	withoutCapability := answer(&domain.NodeAgent{
+		AgentID: "agt_7", PanelID: 7,
+		ObservedProtocolVersion: nodeprotocol.ProtocolVersion1,
+		ObservedCapabilities:    []string{nodeprotocol.CapabilityTaskExecutionV1},
+		ProtocolObservedAt:      &observed,
+	})
+	if withoutCapability.State != upgradeBlocked {
+		t.Fatalf("state = %q, want %q: the write path refuses this node", withoutCapability.State, upgradeBlocked)
+	}
+	if !hasReason(withoutCapability, string(compatadmission.ReasonCapabilityMissing)) {
+		t.Fatalf("reasons = %v, want the machine-readable refusal", withoutCapability.ReasonCodes)
+	}
+	if withoutCapability.Detail == "" {
+		t.Fatal("a refusal an operator cannot read is not actionable")
+	}
+	if withoutCapability.TargetPinnable {
+		t.Fatal("a blocked answer must not claim the target can be pinned")
+	}
+
+	// A node the write path would accept is still ready, and still gets its list.
+	ready := answer(&domain.NodeAgent{
+		AgentID: "agt_7", PanelID: 7,
+		ObservedProtocolVersion: nodeprotocol.ProtocolVersion1,
+		ObservedCapabilities:    nodeprotocol.AgentUpgradeCapabilities(),
+		ProtocolObservedAt:      &observed,
+	})
+	if ready.State != upgradeReady || !hasReason(ready, "compatible") {
+		t.Fatalf("a capable node was refused: %+v", ready)
+	}
+
+	// NO AGENT ROW FAILS CLOSED. nodeagentupgrade.owner refuses this outright, and
+	// the same holds for a repository error: answering "ready" because the lookup
+	// did not work is how a transient database fault becomes a green answer beside
+	// a full release menu.
+	none := answer(nil)
+	if none.State != upgradeBlocked || !hasReason(none, "agent_unknown") {
+		t.Fatalf("a server with no bound agent answered %+v", none)
+	}
+	if len(none.Targets) != 0 {
+		t.Fatal("a refusal was accompanied by a list of targets, which is an invitation")
+	}
+
+	// A server that is not a native node has no agent component at all, and the
+	// write path says so. The panel version on the row belongs to something else.
+	notNative := func() upgradeOption {
+		h := &AdminServersHandler{
+			repo:   upgradeModeRepo{panel: &domain.XUIPanel{ID: 7, Kind: domain.PanelKind3XUI, PanelVersion: "3.5.1"}},
+			agents: nodeMetricsAgentRepo{},
+		}
+		recorder := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(recorder)
+		c.Params = gin.Params{{Key: "id", Value: "7"}}
+		c.Request = httptest.NewRequest(http.MethodGet, "/admin/servers/7/upgrade-options?component=agent", nil)
+		return h.decideAgentOption(c, 7)
+	}()
+	if notNative.State != upgradeBlocked || !hasReason(notNative, "not_a_native_server") {
+		t.Fatalf("a 3X-UI server was offered an agent upgrade: %+v", notNative)
 	}
 }

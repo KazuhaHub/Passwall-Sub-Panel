@@ -2144,7 +2144,7 @@
       "warning": "Upgrading briefly interrupts proxy connections on this server. Confirm the release and maintenance window. Server, node and user identities remain unchanged.",
       "requirements": "Requires an enabled upgrade helper: Linux/systemd, or Docker generated with the Advanced remote-upgrade option enabled. Older agents need one manual maintenance update. Success requires the new process to synchronize and converge configuration; Docker automatically restores the retained previous container on failure. State-schema changes require manual migration.",
       "current": "Current Passwall Node release (last reported)",
-      "version_hint": "Choose an exact reviewed, published release from the selected channel. Floating latest or beta tags and downgrades are refused. Channel changes here are temporary; save the server's update channel in Edit.",
+      "version_hint": "Choose an exact reviewed, published release from the selected channel. Floating latest or beta tags are refused. Releases older than the one this node runs are marked but remain selectable — the panel does not block a downgrade; the release signature, its checksum and the node’s own state-schema check are what guard it. Channel changes here are temporary; save the server’s update channel in Edit.",
       "confirm": "Confirm and request upgrade",
       "retry": "Retry the same upgrade request",
       "refresh": "Check the original task again",
@@ -2159,7 +2159,8 @@
         "manual_attention": "The outcome cannot be confirmed automatically. Inspect agent and upgrade-helper logs.",
         "awaiting_observation": "Upgrade receipt received; waiting for a fresh target-version report.",
         "verified": "Target restart, synchronization, configuration convergence and binary checksum verified."
-      }
+      },
+      "blocked_fallback": "This panel cannot remotely upgrade this server’s node agent right now."
     },
     "sui_update": {
       "available": "View S-UI {{version}} release",
@@ -2229,8 +2230,10 @@
         "unknown": "Compatibility unknown",
         "compatible_detail": "Compatible · remote upgrade ready.",
         "limited_detail": "Node synchronization is compatible, but remote upgrade is unavailable. Update this Node manually once or enable its upgrade helper.",
-        "incompatible_detail": "This Node protocol has not been reviewed for this Passwall Sub Panel release. Remote upgrade is blocked.",
-        "unknown_detail": "No authenticated protocol observation has been saved yet. Wait for a successful Node check-in."
+        "incompatible_detail": "This Node reports protocol generation {{reported}}; this panel has reviewed {{min}}..{{max}}, so its reports are being refused (since {{since}}). The last generation verified was {{accepted}}. The Node keeps forwarding traffic on its last applied configuration; remote upgrade is blocked and needs a person.",
+        "report_refused_detail": "This panel cannot read this Node’s reports and is refusing them (since {{since}}). The Node keeps forwarding traffic on its last applied configuration; nothing can be delivered until this is looked at.",
+        "unknown_never_observed": "No authenticated protocol observation has been saved yet. Wait for a successful Node check-in.",
+        "unknown_observation_stale": "The last verified protocol observation was {{observed}}, which is too old to act on. A high-risk action needs a fresh successful check-in."
       },
       "outbound_hint": "Passwall Node connects outbound to Passwall Sub Panel. It needs no inbound management URL or upstream-panel credential. Enter server details and select an installation method, then generate files for that server. Configure inbounds separately on the Nodes page.",
       "create_record_hint": "Create the server record first; the next page generates its installation command. Configure inbounds separately on Nodes.",
@@ -2411,7 +2414,8 @@
       "upgrade_in_place_needed": "This node reports version {{version}}. Without replacing the release in place the installer refuses at the host.",
       "replace_identity": "Replace with a different identity",
       "replace_identity_hint": "Takes over an incompatible installation — a node another panel left behind, for instance — with this panel's identity. The one that is there is stopped and moved into the host's backups/.",
-      "replace_identity_warning": "After this: usage for this node starts from zero (the old counters stay in the host's backup), and if it belonged to another panel, that panel's server record has to be deleted by hand."
+      "replace_identity_warning": "After this: usage for this node starts from zero (the old counters stay in the host's backup), and if it belonged to another panel, that panel's server record has to be deleted by hand.",
+      "release_older_than_current": "older than current"
     },
     "table": {
       "name": "Server name",

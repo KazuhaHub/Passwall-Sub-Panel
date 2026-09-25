@@ -83,6 +83,7 @@ import { UserActivity } from './UserActivity'
 import SyncStatusCard from '@/components/SyncStatusCard'
 import AdminPasskeysDialog from './AdminPasskeysDialog'
 import AccountSecurityDrawer from './AccountSecurityDrawer'
+import { AsyncButton, AsyncIconButton } from '@/components/AsyncButton'
 import { Link as RouterLink } from 'react-router'
 import { useAuthStore } from '@/stores/auth'
 import { useCan } from '@/utils/permissions'
@@ -390,6 +391,15 @@ export default function UsersView() {
   // Per-row More menu
   const [moreAnchor, setMoreAnchor] = useState<HTMLElement | null>(null)
   const [moreUser, setMoreUser] = useState<User | null>(null)
+  // Resume/Suspend service fire straight from a MenuItem, which closeMore()
+  // unmounts the instant it is clicked — so unlike a row icon button, it
+  // cannot carry its own busy state. The row's More button is the only
+  // element still on screen afterward, so it borrows this id-keyed flag to
+  // show the wait and refuse to reopen the menu mid-request.
+  const [moreActionBusy, setMoreActionBusy] = useState<number | null>(null)
+  // The single-user reason dialog stays open, its confirm button pending and
+  // its dismissals refused, until the request settles (see submitReason).
+  const [reasonBusy, setReasonBusy] = useState(false)
   const [passkeysUser, setPasskeysUser] = useState<User | null>(null)
   const [securityUser, setSecurityUser] = useState<User | null>(null)
   // Keep the open Account Security drawer in sync with reloaded data — its
@@ -811,8 +821,10 @@ export default function UsersView() {
     setReasonUser(null); setReasonBatch({ enable }); setReasonText(''); setReasonOpen(true)
   }
   async function submitReason() {
-    setReasonOpen(false)
     if (reasonBatch) {
+      // Batch already surfaces progress through batchBusy (toolbar-level), so
+      // it keeps closing the dialog immediately, same as before.
+      setReasonOpen(false)
       const enable = reasonBatch.enable
       const rows = selectedRows
       if (rows.length === 0) return
@@ -830,10 +842,23 @@ export default function UsersView() {
       return
     }
     if (!reasonUser) return
-    const enabling = !accountEnabledForEdit(reasonUser)
-    await setEnabled(reasonUser.id, enabling, reasonText.trim() || undefined)
-    pushSnack(t(enabling ? 'admin:users.toast.enabled' : 'admin:users.toast.disabled'), 'success')
-    await load()
+    // Single-user path: the dialog used to close (and the confirm button had
+    // no busy state at all) before setEnabled was even awaited, so a slow
+    // link left the admin staring at a dialog-less table for seconds with no
+    // sign the click landed. Keep it open — and its confirm button pending —
+    // until the request settles; only close on success so a failure (already
+    // toasted by the client interceptor) can be retried without retyping the
+    // reason.
+    setReasonBusy(true)
+    try {
+      const enabling = !accountEnabledForEdit(reasonUser)
+      await setEnabled(reasonUser.id, enabling, reasonText.trim() || undefined)
+      pushSnack(t(enabling ? 'admin:users.toast.enabled' : 'admin:users.toast.disabled'), 'success')
+      setReasonOpen(false)
+      await load()
+    } catch {
+      // Stay open; see the comment above.
+    } finally { setReasonBusy(false) }
   }
 
   // ---- Quick renew (single + batch) ----
@@ -1021,16 +1046,22 @@ export default function UsersView() {
 
   async function actionResumeService(u: User) {
     closeMore()
-    await setServiceStatus(u.id, true)
-    pushSnack(t('admin:users.toast.service_resumed', { defaultValue: '服务已恢复' }), 'success')
-    await load()
+    setMoreActionBusy(u.id)
+    try {
+      await setServiceStatus(u.id, true)
+      pushSnack(t('admin:users.toast.service_resumed', { defaultValue: '服务已恢复' }), 'success')
+      await load()
+    } finally { setMoreActionBusy(null) }
   }
 
   async function actionSuspendService(u: User) {
     closeMore()
-    await setServiceStatus(u.id, false, 'service_manual')
-    pushSnack(t('admin:users.toast.service_suspended', { defaultValue: '服务已暂停' }), 'success')
-    await load()
+    setMoreActionBusy(u.id)
+    try {
+      await setServiceStatus(u.id, false, 'service_manual')
+      pushSnack(t('admin:users.toast.service_suspended', { defaultValue: '服务已暂停' }), 'success')
+      await load()
+    } finally { setMoreActionBusy(null) }
   }
 
   async function actionReset2FA(u: User) {
@@ -1306,9 +1337,16 @@ export default function UsersView() {
           <MenuItem value="">{t('admin:users.filter_group_all')}</MenuItem>
           {groups.map(g => <MenuItem key={g.id} value={g.id}>{g.name}</MenuItem>)}
         </Select>
-        <Button variant="outlined" startIcon={<RefreshIcon />} onClick={() => load()} disabled={loading}>
+        {/* load()/refresh() fire-and-forget the refetch (see their comment),
+            so they never hand AsyncButton a promise to track on its own —
+            usersQuery.isFetching is the only signal a background refresh is
+            running. isPending (loading) stays false once data exists, so it
+            alone would leave this button looking inert on every refresh
+            after the first load. */}
+        <AsyncButton variant="outlined" startIcon={<RefreshIcon />} onClick={() => load()} disabled={loading}
+          pending={usersQuery.isFetching}>
           {t('admin:users.refresh')}
-        </Button>
+        </AsyncButton>
       </Box>
       {/* Batch toolbar */}
       {selected.size > 0 && (
@@ -1431,9 +1469,9 @@ export default function UsersView() {
                     </Tooltip>
                     <Tooltip title={t('admin:users.action.renew')}>
                       <span>
-                        <IconButton size="small" onClick={() => quickRenew(u)} disabled={!canQuickRenew(u)}>
+                        <AsyncIconButton size="small" onClick={() => quickRenew(u)} disabled={!canQuickRenew(u)}>
                           <RestartAltIcon fontSize="small" />
-                        </IconButton>
+                        </AsyncIconButton>
                       </span>
                     </Tooltip>
                     {canManageUser(u) && <>
@@ -1445,13 +1483,18 @@ export default function UsersView() {
                       </IconButton>
                     </Tooltip>
                     <Tooltip title={t('admin:users.action.delete')}>
-                      <IconButton size="small" onClick={() => confirmDelete(u)} sx={{ color: md.error }}>
-                        <DeleteIcon fontSize="small" />
-                      </IconButton>
+                      <span>
+                        <AsyncIconButton size="small" onClick={() => confirmDelete(u)} sx={{ color: md.error }}>
+                          <DeleteIcon fontSize="small" />
+                        </AsyncIconButton>
+                      </span>
                     </Tooltip>
-                    <IconButton size="small" onClick={(e) => openMore(e, u)}>
+                    {/* Resume/Suspend fire from a MenuItem below, which
+                        unmounts on click — moreActionBusy is what actually
+                        shows the wait once the menu is gone. */}
+                    <AsyncIconButton size="small" onClick={(e) => openMore(e, u)} pending={moreActionBusy === u.id}>
                       <MoreVertIcon fontSize="small" />
-                    </IconButton>
+                    </AsyncIconButton>
                     </>}
                   </TableCell>
                 </TableRow>
@@ -1917,14 +1960,16 @@ export default function UsersView() {
                     input: { readOnly: true }
                   }} />
                 {canResumeService(editing) && (
-                  <Button variant="outlined" onClick={() => actionResumeService(editing)} sx={{ flexShrink: 0, mt: 0.25 }}>
+                  <AsyncButton variant="outlined" onClick={() => actionResumeService(editing)} sx={{ flexShrink: 0, mt: 0.25 }}
+                    pending={moreActionBusy === editing.id}>
                     {t('admin:users.more_menu.resume_service', { defaultValue: '恢复服务' })}
-                  </Button>
+                  </AsyncButton>
                 )}
                 {canSuspendService(editing) && (
-                  <Button variant="outlined" color="error" onClick={() => actionSuspendService(editing)} sx={{ flexShrink: 0, mt: 0.25 }}>
+                  <AsyncButton variant="outlined" color="error" onClick={() => actionSuspendService(editing)} sx={{ flexShrink: 0, mt: 0.25 }}
+                    pending={moreActionBusy === editing.id}>
                     {t('admin:users.more_menu.suspend_service', { defaultValue: '暂停服务' })}
-                  </Button>
+                  </AsyncButton>
                 )}
               </Box>
             )}
@@ -2082,7 +2127,9 @@ export default function UsersView() {
         </DialogActions>
       </Dialog>
       {/* Reason dialog (single + batch) */}
-      <Dialog open={reasonOpen} onClose={() => setReasonOpen(false)}
+      {/* Not dismissible mid-request: closing it would hide the only sign the
+          change is still in flight, and the row still shows the old status. */}
+      <Dialog open={reasonOpen} onClose={() => { if (!reasonBusy) setReasonOpen(false) }}
         slotProps={{
           paper: { sx: { borderRadius: 3, bgcolor: md.surfaceContainerHigh, width: 480, maxWidth: '90vw' } }
         }}>
@@ -2102,15 +2149,15 @@ export default function UsersView() {
             } />
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setReasonOpen(false)} variant="text">{t('common:actions.cancel')}</Button>
-          <Button onClick={submitReason} variant="contained"
+          <Button onClick={() => setReasonOpen(false)} variant="text" disabled={reasonBusy}>{t('common:actions.cancel')}</Button>
+          <AsyncButton onClick={() => submitReason()} variant="contained" pending={reasonBusy}
             sx={(reasonBatch?.enable ?? (reasonUser ? !accountEnabledForEdit(reasonUser) : true))
               ? undefined
               : { bgcolor: md.error, color: md.onError, '&:hover': { bgcolor: alpha(md.error, 0.9) } }}>
             {(reasonBatch?.enable ?? (reasonUser ? !accountEnabledForEdit(reasonUser) : true))
               ? t('admin:users.action.enable')
               : t('admin:users.action.disable')}
-          </Button>
+          </AsyncButton>
         </DialogActions>
       </Dialog>
       {/* Personal rules dialog */}

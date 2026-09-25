@@ -276,9 +276,10 @@ config_dir: "./config"                     # runtime configs (templates, etc.)
 data_dir: "./data"                         # SQLite panel.db lives here when no MySQL is set
 
 # ---- Database ----
-# Recommended: a real MySQL 5.7+ / MariaDB 10.5+ server. Fill in the discrete
-# fields below — the panel assembles the DSN for you. Uncomment the mysql:
-# block to enable.
+# Recommended: a real MySQL 8.0+ server, the version the test suite runs
+# against; MariaDB and MySQL 5.7 are not tested. Fill in the discrete fields
+# below — the panel assembles the DSN for you. Uncomment the mysql: block to
+# enable.
 #
 # mysql:
 #   host: "127.0.0.1"                      # MySQL server hostname or IP

@@ -424,29 +424,6 @@ func singBoxResolvedChoices(raw []string) []string {
 	return out
 }
 
-func singBoxSelectorChoices(raw []string, nodeTags []string) []string {
-	seen := map[string]bool{}
-	out := []string{}
-	add := func(tag string) {
-		if tag == "" || seen[tag] {
-			return
-		}
-		seen[tag] = true
-		out = append(out, tag)
-	}
-	for _, item := range raw {
-		switch item {
-		case "@all":
-			for _, tag := range nodeTags {
-				add(tag)
-			}
-		default:
-			add(singBoxOutboundTag(item))
-		}
-	}
-	return out
-}
-
 func buildSingBoxRouteRules(ruleParts ...string) ([]map[string]any, string) {
 	return buildSingBoxRouteRulesWithPassThrough(nil, ruleParts...)
 }

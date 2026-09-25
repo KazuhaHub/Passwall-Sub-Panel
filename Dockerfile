@@ -49,7 +49,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build -trimpath \
 # su-exec is Alpine's ~10KB gosu equivalent; PUID/PGID (default 10001) align the
 # runtime UID with the host owner so ./config stays host-editable.
 # NOTE: keep this runtime stage in sync with Dockerfile.release (drift guard).
-FROM alpine:3.24.1
+FROM alpine:3.24.2
 RUN apk add --no-cache ca-certificates tzdata su-exec \
  && adduser -D -H -u 10001 psp
 # Pin the panel process to UTC so Go's time.Local matches the

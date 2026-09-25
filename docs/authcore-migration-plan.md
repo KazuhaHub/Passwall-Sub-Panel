@@ -713,14 +713,14 @@ GOWORK=off go vet ./...
 ```sh
 PSP_TEST_DB_KIND=postgres \
 PSP_TEST_DB_DSN='postgres://psp:psp@localhost:5432/psptest?sslmode=disable' \
-GOWORK=off go test -count=1 ./internal/adapters/sqlstore/...
+GOWORK=off go test -count=1 ./internal/adapters/sqlstore/... ./internal/service/rollup/...
 
 PSP_TEST_DB_KIND=mysql \
 PSP_TEST_DB_DSN='root:psp@tcp(127.0.0.1:3306)/{schema}?parseTime=true&multiStatements=true' \
-GOWORK=off go test -count=1 ./internal/adapters/sqlstore/...
+GOWORK=off go test -count=1 ./internal/adapters/sqlstore/... ./internal/service/rollup/...
 ```
 
-DSN 是现有 CI 测试 fixture 的示例，按本地测试实例调整。当前 PostgreSQL/MySQL CI 跑 sqlstore 包，而不是所有包；涉及新 SQL 的用例必须放到会实际执行的位置。
+DSN 是现有 CI 测试 fixture 的示例，按本地测试实例调整。当前 PostgreSQL/MySQL CI 跑 sqlstore 与 rollup 两个包，而不是所有包；涉及新 SQL 的用例必须放到会实际执行的位置。
 
 前端和可运行二进制验证，先构建前端：
 

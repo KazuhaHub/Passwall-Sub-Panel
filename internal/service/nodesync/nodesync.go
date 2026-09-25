@@ -859,7 +859,7 @@ func (s *Service) buildDirectives(ctx context.Context, agent *domain.NodeAgent, 
 	fullFreshnessSeconds := nodeprotocol.EffectiveFullReportPeriod(settings.FullReportSeconds, nextPollSeconds)
 	report, receivedAtMS, hasFull := s.fullReport(agent.AgentID)
 	if !current.Partial {
-		report, receivedAtMS, hasFull = current, now.UnixMilli(), true
+		report, hasFull = current, true
 	} else if hasFull && fullReportStale(receivedAtMS, now, fullFreshnessSeconds) {
 		hasFull = false
 	}

@@ -59,6 +59,17 @@ const (
 	ReasonProtocolIncompatible Reason = "protocol-incompatible"
 	ReasonCapabilityMissing    Reason = "capability-missing"
 	ReasonKnownBad             Reason = "known-bad"
+	// ReasonReportRefused is the panel refusing the peer's reports for a
+	// structural reason other than its wire generation. It is separate from
+	// ReasonProtocolIncompatible because the remedy is different: one is a
+	// pairing this panel has not reviewed, the other is a report it cannot read.
+	ReasonReportRefused Reason = "report-refused"
+)
+
+// Refusal reasons, matching domain.NodeRefusal*.
+const (
+	RefusalProtocolGeneration = "protocol_generation"
+	RefusalReportInvalid      = "report_invalid"
 )
 
 // Status is the runtime verdict, which is what an operator is shown. It is
@@ -98,6 +109,36 @@ type Policy struct {
 	KnownBad map[string]string
 }
 
+// Refusal is an AUTHENTICATED report the panel would not accept.
+//
+// IT IS NOT AN OBSERVATION, and keeping the two apart is the whole point. An
+// observation is what the panel accepted and still acts on. Folding a refused
+// generation into Observation.ProtocolVersion would look tidier and is a trap:
+// the day the panel widens its range — which is the same release that fixes the
+// pairing — that record would pass the protocol branch below and land in the
+// capability branch, carrying the capabilities of a report from weeks earlier.
+// The peer would be reported as missing capabilities it never lost, with an empty
+// list after the colon, and that text is what the upgrade path hands an operator
+// as its refusal reason.
+type Refusal struct {
+	ProtocolVersion int
+	Reason          string
+	At              time.Time
+	FirstAt         time.Time
+}
+
+// current reports whether this refusal is still what the panel last did. A
+// refusal older than the last accepted observation means the peer recovered.
+func (r *Refusal) current(observed *Observation) bool {
+	if r == nil || r.At.IsZero() {
+		return false
+	}
+	if observed == nil {
+		return true
+	}
+	return !r.At.Before(observed.ObservedAt)
+}
+
 // Request is everything the decision depends on, including the time. Passing
 // the clock in rather than reading it is what makes a decision reproducible.
 type Request struct {
@@ -106,6 +147,10 @@ type Request struct {
 	Observed    *Observation
 	Now         time.Time
 	Policy      Policy
+	// Refused is the peer's most recent refused report, when the panel refused one
+	// more recently than it accepted one. Nil means the panel is not currently
+	// refusing this peer.
+	Refused *Refusal
 	// Force is an operator's explicit acknowledgement of THIN EVIDENCE. It is
 	// not a way past a protocol generation the panel cannot speak, a release
 	// known to break, or a capability the peer does not have.
@@ -170,6 +215,39 @@ func Decide(request Request) Decision {
 		decision.Status = StatusIncompatible
 		decision.Reason = ReasonKnownBad
 		decision.Detail = fmt.Sprintf("%s is a known-bad release: %s", request.PeerVersion, reason)
+		return decision
+	}
+
+	// A REFUSAL OUTRANKS AN OBSERVATION, and it is checked before the
+	// no-observation branch on purpose: a node that has never been accepted but is
+	// being refused right now must not read as "nothing is known about it". That
+	// bucket is where a never-installed node lives, and making the two
+	// indistinguishable is the defect this branch exists to end.
+	//
+	// It is placed before Force for the same reason the protocol branch is: an
+	// operator acknowledging thin evidence cannot make the panel able to read a
+	// report it is refusing.
+	if refusal := request.Refused; refusal.current(request.Observed) {
+		decision.Detail = fmt.Sprintf("the last authenticated report was refused at %s and has been refused since %s",
+			refusal.At.UTC().Format(time.RFC3339), refusal.FirstAt.UTC().Format(time.RFC3339))
+		switch refusal.Reason {
+		case RefusalProtocolGeneration:
+			// ADR 0033 section 4's definition of incompatible is conditional and
+			// this is its condition: a generation outside the reviewed range, with
+			// remote upgrade blocked. The peer keeps serving its last applied
+			// configuration throughout, which is what the operator-facing wording
+			// has to say rather than implying a fault.
+			decision.Status = StatusIncompatible
+			decision.Reason = ReasonProtocolIncompatible
+			decision.Detail = fmt.Sprintf("peer reports protocol %d, reviewed range is %d..%d; %s",
+				refusal.ProtocolVersion, policy.MinProtocolVersion, policy.MaxProtocolVersion, decision.Detail)
+		default:
+			// Not incompatible: the pairing may be fine and the report is not
+			// readable. Limited is ADR 0033 section 4's "still serving, action
+			// needs a person", which is exactly this peer's situation.
+			decision.Status = StatusLimited
+			decision.Reason = ReasonReportRefused
+		}
 		return decision
 	}
 
