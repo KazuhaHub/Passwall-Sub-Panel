@@ -130,4 +130,5 @@ content: |
     {{ rules_personal }}
     {{ rules_common }}
 
-  {{ sub_rules }}
+  sub-rules:
+    {{ sub_rules }}

@@ -322,7 +322,7 @@ func mihomoIssue(level, section, name, code, message string) ProxyGroupIssue {
 
 func marshalMihomoSubRules(subRules []domain.MihomoSubRule) (string, error) {
 	if len(subRules) == 0 {
-		return "", nil
+		return "{}", nil
 	}
 	root := &yaml.Node{Kind: yaml.MappingNode}
 	for _, subRule := range subRules {
@@ -342,7 +342,7 @@ func marshalMihomoSubRules(subRules []domain.MihomoSubRule) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return "sub-rules:\n" + indentBlock(strings.TrimRight(string(raw), "\n"), "  "), nil
+	return strings.TrimRight(string(raw), "\n"), nil
 }
 
 func appendMihomoRematchOutbounds(proxies []map[string]any, outbounds []domain.MihomoRematchOutbound) ([]map[string]any, error) {
@@ -369,15 +369,4 @@ func appendMihomoRematchOutbounds(proxies []map[string]any, outbounds []domain.M
 		out = append(out, block)
 	}
 	return out, nil
-}
-
-func indentBlock(raw, prefix string) string {
-	if raw == "" {
-		return ""
-	}
-	lines := strings.Split(raw, "\n")
-	for index := range lines {
-		lines[index] = prefix + lines[index]
-	}
-	return strings.Join(lines, "\n")
 }

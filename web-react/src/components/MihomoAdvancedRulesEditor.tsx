@@ -230,8 +230,7 @@ export default function MihomoAdvancedRulesEditor({ value, onChange, onValidatio
                     <TextField size="small" label={t('admin:rules.mihomo.target_rematch_name')} value={outbound.target_rematch_name || ''}
                       onChange={event => updateRematch(index, { ...outbound, target_rematch_name: event.target.value })} />
                     <TextField select size="small" label={t('admin:rules.mihomo.target_sub_rule')} value={outbound.target_sub_rule || ''}
-                      onChange={event => updateRematch(index, { ...outbound, target_sub_rule: event.target.value })}
-                      slotProps={{ inputLabel: { shrink: true } }}>
+                      onChange={event => updateRematch(index, { ...outbound, target_sub_rule: event.target.value })}>
                       <MenuItem value="">—</MenuItem>
                       {subRules.filter(rule => rule.name.trim()).map(rule => <MenuItem key={rule.name} value={rule.name}>{rule.name}</MenuItem>)}
                     </TextField>

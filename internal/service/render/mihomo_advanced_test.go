@@ -104,12 +104,15 @@ func TestMarshalMihomoSubRulesAndAppendRematchOutbounds(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var document map[string]map[string][]string
+	var document map[string][]string
 	if err := yaml.Unmarshal([]byte(raw), &document); err != nil {
 		t.Fatal(err)
 	}
-	if got := document["sub-rules"]["ai-rules"]; len(got) != 2 || got[1] != "MATCH,DIRECT" {
+	if got := document["ai-rules"]; len(got) != 2 || got[1] != "MATCH,DIRECT" {
 		t.Fatalf("unexpected sub-rules block: %#v\n%s", document, raw)
+	}
+	if strings.Contains(raw, "sub-rules:") {
+		t.Fatalf("sub_rules placeholder content must not include its parent key:\n%s", raw)
 	}
 
 	proxies, err := appendMihomoRematchOutbounds([]map[string]any{{"name": "node", "type": "ss"}}, []domain.MihomoRematchOutbound{{
@@ -131,7 +134,7 @@ func TestMihomoSubRulesPlaceholderProducesValidRootYAML(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	body := substituteBlockPlaceholders("proxies:\n  {{ proxies }}\nrules:\n  {{ rules_common }}\n{{ sub_rules }}\n", map[string]string{
+	body := substituteBlockPlaceholders("proxies:\n  {{ proxies }}\nrules:\n  {{ rules_common }}\nsub-rules:\n  {{ sub_rules }}\n", map[string]string{
 		"proxies":      "- name: node\n  type: ss",
 		"sub_rules":    subRules,
 		"rules_common": "- SUB-RULE,(NETWORK,tcp),ai-rules",
@@ -147,8 +150,18 @@ func TestMihomoSubRulesPlaceholderProducesValidRootYAML(t *testing.T) {
 		"rules_common": "- MATCH,DIRECT",
 		"sub_rules":    subRules,
 	})
-	if strings.Contains(withoutPlaceholder, "sub-rules:") {
+	if strings.Contains(withoutPlaceholder, "ai-rules:") {
 		t.Fatalf("sub-rules must be silently discarded without a placeholder:\n%s", withoutPlaceholder)
+	}
+}
+
+func TestEmptyMihomoSubRulesRenderAsEmptyMappingContent(t *testing.T) {
+	raw, err := marshalMihomoSubRules(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if raw != "{}" {
+		t.Fatalf("empty sub_rules placeholder content = %q, want empty mapping", raw)
 	}
 }
 
