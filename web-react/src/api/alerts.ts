@@ -9,6 +9,10 @@ export type AlertType =
   | 'panel_upgrade'
   | 'psp_upgrade'
   | 'login_security'
+  // The location detector's two admin-only singletons, each with a `count`:
+  // accounts whose flag is latched, and accounts it has auto-suspended.
+  | 'geo_anomaly'
+  | 'geo_auto_suspended'
 
 export interface Alert {
   key: string

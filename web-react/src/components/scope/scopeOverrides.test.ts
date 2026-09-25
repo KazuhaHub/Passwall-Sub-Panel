@@ -13,7 +13,14 @@ import {
   setGroupScopeOverride,
 } from '@/api/scopeSettings'
 import { getUISettings } from '@/api/settings'
-import { kvFromGlobal, loadScopeState, saveScopeState, type ScopeState } from './scopeOverrides'
+import {
+  kvFromGlobal,
+  loadScopeState,
+  saveScopeState,
+  SCOPE_CATEGORIES,
+  SCOPE_KEYS,
+  type ScopeState,
+} from './scopeOverrides'
 
 describe('scope override state', () => {
   beforeEach(() => vi.clearAllMocks())
@@ -78,5 +85,72 @@ describe('scope override state', () => {
     expect(setGroupScopeOverride).toHaveBeenCalledTimes(2)
     expect(setGroupScopeOverride).toHaveBeenNthCalledWith(1, 9, 'security', 'passkey_enabled', '1')
     expect(setGroupScopeOverride).toHaveBeenNthCalledWith(2, 9, 'notify', 'expire_before_days', '14')
+  })
+})
+
+describe('geo catalog', () => {
+  const geoKeys = (cat: string) => SCOPE_KEYS.filter(k => k.cat === cat).map(k => k.key)
+
+  it('has the geo and geo_ban keys and never ignore_addresses', () => {
+    expect(SCOPE_CATEGORIES.map(c => c.id)).toEqual(expect.arrayContaining(['geo', 'geo_ban']))
+    expect(geoKeys('geo')).toEqual([
+      'geo_anomaly.scope',
+      'geo_anomaly.max_places',
+      'geo_anomaly.max_regions',
+      'geo_anomaly.max_cities',
+      'geo_anomaly.flag_after_polls',
+      'geo_anomaly.clear_after_polls',
+      'geo_anomaly.co_travel',
+      'geo_anomaly.allow_anywhere',
+    ])
+    expect(geoKeys('geo_ban')).toEqual([
+      'geo_anomaly.ban_enabled',
+      'geo_anomaly.ban_max_countries',
+      'geo_anomaly.ban_max_regions',
+      'geo_anomaly.ban_max_cities',
+      'geo_anomaly.ban_after_polls',
+      'geo_anomaly.ban_duration_minutes',
+    ])
+    // The ignore list names fleet infrastructure (a relay, an office exit),
+    // not a population's tolerance: global only. The backend refuses the
+    // override anyway; a row here would only offer a switch that 400s.
+    expect(SCOPE_KEYS.some(k => k.key === 'geo_anomaly.ignore_addresses')).toBe(false)
+    // Every row's key is its type.name, so saveScopeState writes what it shows.
+    for (const k of SCOPE_KEYS.filter(k => k.type === 'geo_anomaly')) {
+      expect(`${k.type}.${k.name}`).toBe(k.key)
+    }
+  })
+
+  it('makes the scope row an enum with the four options, defaulting to city', () => {
+    const row = SCOPE_KEYS.find(k => k.key === 'geo_anomaly.scope')
+    expect(row?.kind).toBe('enum')
+    expect(row?.options?.map(o => o.value)).toEqual(['city', 'region', 'country', 'off'])
+    expect(row?.enumDefault).toBe('city')
+  })
+
+  it('names each numeric row\'s shipped default, so an unset 0 reads as it', () => {
+    const unset = Object.fromEntries(
+      SCOPE_KEYS.filter(k => k.type === 'geo_anomaly' && k.kind === 'int').map(k => [k.name, k.unsetValue]),
+    )
+    expect(unset).toEqual({
+      max_places: '1',
+      max_regions: '1',
+      max_cities: '2',
+      flag_after_polls: '3',
+      clear_after_polls: '6',
+      ban_max_countries: '1',
+      ban_max_regions: '2',
+      ban_max_cities: '3',
+      ban_after_polls: '6',
+      ban_duration_minutes: '60',
+    })
+  })
+
+  it('keeps an unset enum as the empty string rather than inventing a value', () => {
+    // '' is what the server stores for "never configured"; the editor shows
+    // it as the default, but the inherited baseline stays exactly what the
+    // server said.
+    expect(kvFromGlobal('enum', '')).toBe('')
+    expect(kvFromGlobal('enum', 'region')).toBe('region')
   })
 })
