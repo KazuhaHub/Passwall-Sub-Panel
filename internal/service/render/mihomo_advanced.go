@@ -356,7 +356,7 @@ func appendMihomoRematchOutbounds(proxies []map[string]any, outbounds []domain.M
 	for _, outbound := range outbounds {
 		name := strings.TrimSpace(outbound.Name)
 		if seen[name] {
-			return nil, fmt.Errorf("Mihomo rematch outbound name collides with an emitted proxy: %s", name)
+			return nil, fmt.Errorf("mihomo rematch outbound name collides with an emitted proxy: %s", name)
 		}
 		seen[name] = true
 		block := map[string]any{"name": name, "type": "rematch"}
