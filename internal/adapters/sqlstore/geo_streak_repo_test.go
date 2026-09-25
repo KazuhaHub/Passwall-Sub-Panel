@@ -4,9 +4,13 @@ import (
 	"context"
 	"reflect"
 	"testing"
+	"time"
 	"unicode/utf8"
 
+	"gorm.io/gorm"
+
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 )
 
 // The streak is the only thing standing between a stable verdict and a jittery
@@ -542,5 +546,108 @@ func TestGeoStreakRepo_NoEvidenceIsStoredAsNull(t *testing.T) {
 	}
 	if nulls != 1 {
 		t.Fatalf("rows with NULL evidence = %d, want 1 (only the verdict saved without evidence)", nulls)
+	}
+}
+
+// ---- CountFlagged: the notification bell's geo_anomaly count ----
+
+// newStreakRepoWithUsers is newStreakRepo plus the users repository over the
+// same database: CountFlagged joins users, so its fixtures need real rows.
+func newStreakRepoWithUsers(t *testing.T) (*GeoStreakRepo, ports.UserRepo, *gorm.DB) {
+	t.Helper()
+	db, err := openTestDB(t)
+	if err != nil {
+		t.Fatalf("open test db: %v", err)
+	}
+	if err := ensureTestSchema(db); err != nil {
+		t.Fatalf("ensure schema: %v", err)
+	}
+	return NewGeoStreakRepo(db), NewRepos(db).User, db
+}
+
+// The bell counts the LATCH, not the last state. A flagged account that went
+// idle, or whose panel could not be read, keeps its flag (the streak freezes)
+// and must keep the bell lit — counting state=flagged would let it drop off
+// by disconnecting. An account over tolerance that has not latched yet
+// (suspect) is not flagged.
+func TestGeoStreakRepo_CountFlaggedCountsTheLatchNotTheState(t *testing.T) {
+	r, users, _ := newStreakRepoWithUsers(t)
+	ctx := context.Background()
+	recs := map[int64]domain.GeoRecord{}
+	for i, rec := range []domain.GeoRecord{
+		{State: domain.GeoStateFlagged, Streak: domain.GeoStreak{Over: 3, Flagged: true, Tier: domain.GeoTierCity}},
+		{State: domain.GeoStateIdle, Streak: domain.GeoStreak{Over: 3, Flagged: true, Tier: domain.GeoTierCity}},
+		{State: domain.GeoStateUnknown, Streak: domain.GeoStreak{Under: 2, Flagged: true, Tier: domain.GeoTierCountry}},
+		{State: domain.GeoStateSuspect, Streak: domain.GeoStreak{Over: 2, Tier: domain.GeoTierRegion}},
+		{State: domain.GeoStateClean, Streak: domain.GeoStreak{Under: 6}},
+	} {
+		u := createServiceStateUser(t, users, i+1)
+		rec.UserID = u.ID
+		recs[u.ID] = rec
+	}
+	if err := r.Save(ctx, recs); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	n, err := r.CountFlagged(ctx, time.Now().Add(-24*time.Hour))
+	if err != nil {
+		t.Fatalf("CountFlagged: %v", err)
+	}
+	if n != 3 {
+		t.Fatalf("CountFlagged = %d, want 3 (flagged, idle-latched, unknown-latched; not suspect, not clean)", n)
+	}
+}
+
+// geo_streaks has no foreign key to users, so a deleted account leaves its
+// row behind. The bell must not light for somebody who no longer exists —
+// the admin could not find them to review.
+func TestGeoStreakRepo_CountFlaggedIgnoresDeletedUsers(t *testing.T) {
+	r, users, _ := newStreakRepoWithUsers(t)
+	ctx := context.Background()
+	kept := createServiceStateUser(t, users, 1)
+	gone := createServiceStateUser(t, users, 2)
+	const neverExisted = int64(987654)
+	flagged := domain.GeoRecord{State: domain.GeoStateFlagged, Streak: domain.GeoStreak{Over: 3, Flagged: true}}
+	if err := r.Save(ctx, map[int64]domain.GeoRecord{kept.ID: flagged, gone.ID: flagged, neverExisted: flagged}); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	if err := users.Delete(ctx, gone.ID); err != nil {
+		t.Fatalf("delete user: %v", err)
+	}
+
+	n, err := r.CountFlagged(ctx, time.Now().Add(-24*time.Hour))
+	if err != nil {
+		t.Fatalf("CountFlagged: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("CountFlagged = %d, want 1 (a row whose user is gone is not an account to review)", n)
+	}
+}
+
+// A row the detector has stopped judging (the user lost every client, or the
+// poll is dead) keeps its last latch forever — Save leaves unjudged rows
+// alone on purpose. The bell counts only rows judged since the cutoff, so a
+// stale latch stops lighting it instead of staying on screen indefinitely.
+func TestGeoStreakRepo_CountFlaggedIgnoresRowsTheDetectorStoppedJudging(t *testing.T) {
+	r, users, db := newStreakRepoWithUsers(t)
+	ctx := context.Background()
+	fresh := createServiceStateUser(t, users, 1)
+	stale := createServiceStateUser(t, users, 2)
+	flagged := domain.GeoRecord{State: domain.GeoStateFlagged, Streak: domain.GeoStreak{Over: 3, Flagged: true}}
+	if err := r.Save(ctx, map[int64]domain.GeoRecord{fresh.ID: flagged, stale.ID: flagged}); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	now := time.Now()
+	if err := db.Exec("UPDATE geo_streaks SET updated_at = ? WHERE user_id = ?",
+		now.Add(-25*time.Hour).UnixMilli(), stale.ID).Error; err != nil {
+		t.Fatalf("age the row: %v", err)
+	}
+
+	n, err := r.CountFlagged(ctx, now.Add(-24*time.Hour))
+	if err != nil {
+		t.Fatalf("CountFlagged: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("CountFlagged = %d, want 1 (a latch last judged 25 hours ago is outside a 24-hour window)", n)
 	}
 }

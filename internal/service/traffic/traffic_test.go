@@ -115,6 +115,16 @@ func (r *fakeUserRepo) ClearServiceStateIfReason(ctx context.Context, userID int
 	return true, nil
 }
 
+func (r *fakeUserRepo) CountByServiceDisabledReason(ctx context.Context, reason domain.AutoDisabledReason) (int64, error) {
+	var n int64
+	for _, u := range r.users {
+		if u.ServiceDisabledReason == reason {
+			n++
+		}
+	}
+	return n, nil
+}
+
 func (r *fakeUserRepo) UpdateTrafficState(ctx context.Context, u *domain.User) error {
 	cur, ok := r.users[u.ID]
 	if !ok {

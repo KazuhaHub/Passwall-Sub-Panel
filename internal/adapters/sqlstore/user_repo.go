@@ -377,6 +377,18 @@ func (r *userRepo) ClearServiceStateIfReason(ctx context.Context, userID int64, 
 	return res.RowsAffected == 1, nil
 }
 
+// CountByServiceDisabledReason is one COUNT over the service-reason column —
+// the bell's geo_auto_suspended entry, re-derived on every feed request, so
+// it must never materialise the rows it counts. Exact match: counting
+// geo_auto must not pick up a human's geo_anomaly or an admin pause.
+func (r *userRepo) CountByServiceDisabledReason(ctx context.Context, reason domain.AutoDisabledReason) (int64, error) {
+	var n int64
+	err := r.db.WithContext(ctx).Model(&userRow{}).
+		Where("service_disabled_reason = ?", string(reason)).
+		Count(&n).Error
+	return n, err
+}
+
 // UpdateTrafficState writes only the columns the traffic poll owns, via a
 // map so zero-values (e.g. resetting period_baseline_bytes to 0) are persisted.
 // Keeps a slow poll cycle from clobbering concurrent admin / self-service edits

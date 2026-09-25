@@ -562,7 +562,9 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 		Cfg:           cfg,
 		Repos:         repos,
 		GeoRecords:    geoStreaks,
-		Pool:          pool,
+		// The same store again, as the bell's count of latched flags.
+		GeoFlags: geoStreaks,
+		Pool:     pool,
 		// Same service the push path uses, so the capabilities the edit form
 		// reports are read through the identical check that gates the write.
 		SharedClients: sharedClientSvc,

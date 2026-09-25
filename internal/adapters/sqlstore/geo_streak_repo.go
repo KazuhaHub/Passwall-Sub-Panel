@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"gorm.io/gorm"
@@ -199,6 +200,32 @@ func (r *GeoStreakRepo) List(ctx context.Context) ([]domain.GeoRecord, error) {
 		out = append(out, row.toDomain())
 	}
 	return out, nil
+}
+
+// CountFlagged counts the accounts whose flag is latched and whose row the
+// detector judged at or after since — the notification bell's geo_anomaly
+// count, one COUNT per feed request.
+//
+// The LATCH (flagged), not the last state. A flagged account that went idle
+// or unreadable keeps its flag, because those samples freeze the streak; a
+// count of state='flagged' would let it leave the bell by disconnecting.
+//
+// Joined to users because geo_streaks has no foreign key: a deleted account
+// leaves its row behind, and a bell entry nobody can look up is noise.
+//
+// Bounded by updated_at because Save deliberately never deletes an unjudged
+// row. Every judged user is re-saved each cycle, idle ones included, so the
+// bound drops only rows the poll stopped judging — a user with no clients
+// left, or a dead poll — rather than keeping their last latch lit forever.
+// updated_at is unix milliseconds, so the comparison is an integer one and
+// identical on every dialect.
+func (r *GeoStreakRepo) CountFlagged(ctx context.Context, since time.Time) (int64, error) {
+	var n int64
+	err := r.db.WithContext(ctx).Table("geo_streaks").
+		Joins("JOIN users ON users.id = geo_streaks.user_id").
+		Where("geo_streaks.flagged = ? AND geo_streaks.updated_at >= ?", true, since.UnixMilli()).
+		Count(&n).Error
+	return n, err
 }
 
 func (row geoStreakRow) toDomain() domain.GeoRecord {

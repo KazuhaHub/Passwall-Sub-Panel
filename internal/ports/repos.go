@@ -164,6 +164,11 @@ type UserRepo interface {
 	// whether it wrote. The automatic lift's second guard: a row an admin
 	// resumed or re-suspended under another reason is left alone.
 	ClearServiceStateIfReason(ctx context.Context, userID int64, reason domain.AutoDisabledReason) (bool, error)
+	// CountByServiceDisabledReason counts the users whose service axis
+	// currently carries exactly reason — one COUNT, so the notification bell
+	// can say "N accounts are held by the location detector" on every poll
+	// of the feed without materialising those rows.
+	CountByServiceDisabledReason(ctx context.Context, reason domain.AutoDisabledReason) (int64, error)
 	// BatchUpdateTrafficState runs N UpdateTrafficState writes in one
 	// transaction. The traffic poll calls it ONCE at end-of-cycle instead
 	// of issuing N inline UPDATEs while it walks the user list. On SQLite

@@ -338,3 +338,40 @@ func TestSetServiceStateIfClear_ConcurrentCallersWinOnce(t *testing.T) {
 		t.Fatalf("winners = %d, want exactly 1", got)
 	}
 }
+
+// The bell's geo_auto_suspended count: exactly the rows carrying the reason
+// asked for. A human's geo_anomaly and an admin pause are different reasons
+// and must not inflate the count of what the automation did.
+func TestUserRepo_CountByServiceDisabledReason(t *testing.T) {
+	repo, _ := serviceStateFixture(t)
+	ctx := context.Background()
+	at := time.Date(2026, 9, 24, 12, 0, 0, 0, time.UTC)
+	for i, reason := range []domain.AutoDisabledReason{
+		domain.DisabledGeoAutoSuspend,
+		domain.DisabledGeoAutoSuspend,
+		domain.DisabledGeoAnomaly,
+		domain.DisabledNone,
+	} {
+		u := createServiceStateUser(t, repo, i+1)
+		if reason == domain.DisabledNone {
+			continue
+		}
+		if err := repo.UpdateServiceState(ctx, u.ID, reason, "d", &at); err != nil {
+			t.Fatalf("seed %s: %v", reason, err)
+		}
+	}
+
+	for reason, want := range map[domain.AutoDisabledReason]int64{
+		domain.DisabledGeoAutoSuspend: 2,
+		domain.DisabledGeoAnomaly:     1,
+		domain.DisabledServiceManual:  0,
+	} {
+		got, err := repo.CountByServiceDisabledReason(ctx, reason)
+		if err != nil {
+			t.Fatalf("count %s: %v", reason, err)
+		}
+		if got != want {
+			t.Fatalf("CountByServiceDisabledReason(%s) = %d, want %d", reason, got, want)
+		}
+	}
+}
