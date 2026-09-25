@@ -6,21 +6,23 @@ import "strings"
 // admin actually types, and what the scoped-settings layer resolves per user.
 //
 // Separate from GeoAnomalyPolicy on purpose. The settings layer resolves
-// user > group > global by REPLACING whole values, so the sparse pointer form
-// (GeoPolicyOverrides) has nowhere to live there; this is the already-resolved
-// result of that layering, which GeoPolicyFromSettings then validates.
+// group over global by REPLACING whole values (there is no per-user layer),
+// and a stored 0 there means "never configured"; this is that already-merged
+// result, which GeoPolicyFromSettings turns into defaults and validates.
 //
 // Keeping the two apart also means a stored value can be nonsense — an admin
 // typed it, or it came from an older schema — without the judging code ever
 // seeing an unusable policy.
 type GeoPolicySettings struct {
-	Scope           string
-	MaxPlaces       int
-	FlagAfterPolls  int
-	ClearAfterPolls int
-	MinPlacedRatio  float64
-	CoTravel        string
-	AllowAnywhere   bool
+	Scope                                        string
+	MaxPlaces, MaxRegions, MaxCities             int
+	FlagAfterPolls, ClearAfterPolls              int
+	MinPlacedRatio                               float64
+	CoTravel                                     string
+	AllowAnywhere                                bool
+	BanEnabled                                   bool
+	BanMaxCountries, BanMaxRegions, BanMaxCities int
+	BanAfterPolls, BanDurationMinutes            int
 }
 
 // GeoPolicyFromSettings turns stored settings into a policy that is safe to
@@ -29,54 +31,75 @@ type GeoPolicySettings struct {
 // A ZERO value means "never configured", not "zero tolerance". A fresh
 // install has empty settings, and reading those literally would give
 // MaxPlaces 0 and FlagAfterPolls 0 — flagging every connected user
-// immediately, on their first poll, including one sitting at home. So each
-// unset field falls back to the shipped default rather than to its zero.
+// immediately, on their first poll, including one sitting at home — and a
+// BanAfterPolls of 0 would suspend on one sample. So each unset field falls
+// back to the shipped default rather than to its zero.
 //
 // This is the single place that distinction is made. Everything downstream
 // receives a sanitised policy and does not have to ask whether a 0 was meant.
 func GeoPolicyFromSettings(s GeoPolicySettings) GeoAnomalyPolicy {
 	p := DefaultGeoPolicy()
-	if sc := GeoScope(strings.TrimSpace(strings.ToLower(s.Scope))); sc.Valid() {
+	switch sc := GeoScope(strings.ToLower(strings.TrimSpace(s.Scope))); {
+	case sc == "":
+		// Never configured: keep the default (city).
+	case sc.Valid():
 		p.Scope = sc
+	default:
+		// Explicit, not left to sanitized(): the default is now the FINEST
+		// tier, so "invalid keeps the default" would make a typo judge
+		// cities. An unrecognised value judges countries only.
+		p.Scope = GeoScopeCountry
 	}
-	// MaxPlaces is the one field whose guard is currently redundant: the
-	// shipped default is 1 and sanitized() also repairs 0 to 1, so removing
-	// the check changes nothing today. Kept because that is a coincidence of
-	// the current default, not a property — raising DefaultGeoPolicy's
-	// MaxPlaces would make an unset setting silently strict without it.
-	if s.MaxPlaces > 0 {
-		p.MaxPlaces = s.MaxPlaces
-	}
-	if s.FlagAfterPolls > 0 {
-		p.FlagAfterPolls = s.FlagAfterPolls
-	}
-	if s.ClearAfterPolls > 0 {
-		p.ClearAfterPolls = s.ClearAfterPolls
-	}
+	// Every int guard is load-bearing even where sanitized() would repair a
+	// 0 to the same number today: that is a coincidence of the current
+	// defaults, not a property, and raising a default would otherwise make
+	// an unset setting silently strict.
+	setIfPositive(&p.MaxPlaces, s.MaxPlaces)
+	setIfPositive(&p.MaxRegions, s.MaxRegions)
+	setIfPositive(&p.MaxCities, s.MaxCities)
+	setIfPositive(&p.FlagAfterPolls, s.FlagAfterPolls)
+	setIfPositive(&p.ClearAfterPolls, s.ClearAfterPolls)
+	setIfPositive(&p.BanMaxCountries, s.BanMaxCountries)
+	setIfPositive(&p.BanMaxRegions, s.BanMaxRegions)
+	setIfPositive(&p.BanMaxCities, s.BanMaxCities)
+	setIfPositive(&p.BanAfterPolls, s.BanAfterPolls)
+	setIfPositive(&p.BanDurationMinutes, s.BanDurationMinutes)
 	if s.MinPlacedRatio > 0 {
 		p.MinPlacedRatio = s.MinPlacedRatio
 	}
-	// AllowAnywhere has no "unset" — false IS the default, and a group that
-	// sets it true is making a choice the global default cannot express as a
-	// zero. Carried through verbatim.
+	// AllowAnywhere and BanEnabled have no "unset" — false IS the default,
+	// and a group that sets one true is making a choice the global default
+	// cannot express as a zero. Carried through verbatim.
 	p.AllowAnywhere = s.AllowAnywhere
+	p.BanEnabled = s.BanEnabled
 	p.CoTravel = parseCoTravel(s.CoTravel)
 	return p.sanitized()
 }
 
-// parseCoTravel turns the stored text into place sets: one set per LINE,
+func setIfPositive(dst *int, v int) {
+	if v > 0 {
+		*dst = v
+	}
+}
+
+// parseCoTravel turns the stored text into country sets: one set per LINE,
 // members comma-separated.
 //
-// Uppercased because country codes are conventionally upper and placeOf emits
-// them that way; a set typed as "jp,tw" that silently never matched would be
-// indistinguishable from one that was ignored, and an admin would have no way
-// to tell which.
+// Upper-cased because ObserveGeo upper-cases the country codes it folds; a
+// set typed as "jp,tw" that silently never matched would be
+// indistinguishable from one that was ignored, and an admin would have no
+// way to tell which.
+//
+// A token containing "/" is dropped. It is the "CC/Region" shape v1's region
+// scope suggested, and co-travel folds countries only, so such a token could
+// never match anything — it would sit in the set looking like a rule while
+// doing nothing. A set left empty is dropped with it.
 func parseCoTravel(raw string) [][]string {
 	var out [][]string
 	for _, line := range strings.Split(raw, "\n") {
 		var set []string
 		for _, part := range strings.Split(line, ",") {
-			if p := strings.ToUpper(strings.TrimSpace(part)); p != "" {
+			if p := strings.ToUpper(strings.TrimSpace(part)); p != "" && !strings.Contains(p, "/") {
 				set = append(set, p)
 			}
 		}

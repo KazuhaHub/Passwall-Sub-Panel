@@ -26,8 +26,10 @@ type GeoResolver interface {
 // Unknown, which is the honest answer when nothing can be placed.
 func (s *Service) SetGeoResolver(g GeoResolver) { s.geo = g }
 
-// SetGeoPolicy installs the deployment-wide default policy. Per-group and
-// per-user overrides layer on top of it; see domain.ResolveGeoPolicy.
+// SetGeoPolicy installs the fallback policy: the one judged with when no
+// settings are wired, or when a group's settings cannot be read. When they
+// can, the stored global values with that group's overrides on top replace
+// it whole (see policyFor below); there is no per-user layer.
 func (s *Service) SetGeoPolicy(p domain.GeoAnomalyPolicy) { s.geoPolicy = p }
 
 // GeoStreakStore persists the little between-poll state that makes a verdict
@@ -83,6 +85,11 @@ func (s *Service) observeLiveIPs(
 	}
 
 	agg := domain.AggregateLiveIPsByUser(panels, owners)
+	// Group each user's addresses into sources (an IPv6 /64 is one phone's
+	// rotating privacy addresses, not a crowd). Every exclusion is still off
+	// here, so no address is set aside yet; the poll arms them once it reads
+	// the ignore list and knows its own node and relay addresses.
+	addrs := domain.ClassifyAddresses(agg, domain.AddressExclusions{})
 
 	geoAvailable := s.geo != nil && s.geo.Available(ctx)
 	var lookup domain.GeoLookup
@@ -131,8 +138,10 @@ func (s *Service) observeLiveIPs(
 		}
 		p := s.geoPolicy
 		if s.settings != nil && u != nil {
-			// LoadForUser already layers user > group > global, which is the
-			// same precedence the traffic and connection limits use.
+			// LoadForUser is the group's overrides on top of the global
+			// values, whole value by whole value — there is no per-user
+			// layer — and GeoPolicyFromSettings then reads a 0 as "never
+			// configured", not as zero tolerance.
 			if set, err := s.settings.LoadForUser(ctx, u, ports.UISettings{}); err == nil {
 				p = domain.GeoPolicyFromSettings(domain.GeoPolicySettings{
 					Scope:           set.GeoAnomalyScope,
@@ -164,7 +173,7 @@ func (s *Service) observeLiveIPs(
 
 		policy := policyFor(uid)
 
-		obs := domain.ObserveGeo(policy, u, lookup, geoAvailable)
+		obs := domain.ObserveGeo(policy, addrs[uid], lookup, geoAvailable)
 		v := domain.EvaluateGeo(policy, obs, prev[uid].Streak)
 		next[uid] = domain.GeoRecord{
 			UserID:   uid,
