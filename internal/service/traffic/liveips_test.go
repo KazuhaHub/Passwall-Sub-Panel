@@ -97,8 +97,8 @@ func newObserver(geo *stubGeo, store GeoStreakStore, p domain.GeoAnomalyPolicy) 
 // resolved from users. Each read is wrapped as a panel answer carrying no
 // timestamps, so every address in it reads as live.
 func observe(s *Service, users []*domain.User, clients []*domain.PSPClient,
-	f func(int64) (map[string][]string, error), panels map[int64]struct{}) {
-	s.observeLiveIPs(context.Background(), liveIPInput{users: users, clients: clients, panelIDs: panels,
+	f func(int64) (map[string][]string, error), panels map[int64]struct{}) []geoBan {
+	return s.observeLiveIPs(context.Background(), liveIPInput{users: users, clients: clients, panelIDs: panels,
 		read: func(pid int64) domain.PanelLiveIPs {
 			ips, err := f(pid)
 			return domain.PanelLiveIPs{PanelID: pid, ByEmail: ips, Err: err}

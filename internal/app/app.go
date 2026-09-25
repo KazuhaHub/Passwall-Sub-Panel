@@ -524,10 +524,11 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	// Link the geo updater's background download to the app lifecycle so
 	// Shutdown cancels + drains an in-flight DB download instead of leaking it.
 	geoSvc.SetBackground(bgCtx, &a.bgWG)
-	// Concurrent-location observation on the traffic poll. Late-bound like the
+	// Concurrent-location detection on the traffic poll. Late-bound like the
 	// shared-client repo: without it the poll still meters, and every verdict
 	// reads Unknown rather than Clean — the honest answer when nothing can be
-	// placed. Observation only; no automatic response is armed.
+	// placed. By default it only observes (the Geo tab); a group can arm the
+	// time-boxed automatic suspension (geo_auto), wired below.
 	trafficSvc.SetGeoResolver(geoSvc)
 	trafficSvc.SetGeoPolicy(domain.DefaultGeoPolicy())
 	// The hysteresis state has to outlive the process. The detector latches a
@@ -536,6 +537,15 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	// would make every deploy a free acquittal for anyone being watched.
 	geoStreaks := sqlstore.NewGeoStreakRepo(db)
 	trafficSvc.SetGeoStreakStore(geoStreaks)
+	// The automatic suspension's writer and its audit log. user.Service is
+	// the writer because its conditional writes are the only path that
+	// never replaces another reason, and it holds the per-user lock and the
+	// emergency lock the push and a concurrent grant need. Both setters are
+	// nil-tolerant, so leaving either out would compile and quietly disable
+	// the feature (bans counted skipped_unwired, no lifts, no audit rows);
+	// TestBuildWiresTheGeoAutoSuspension guards that.
+	trafficSvc.SetGeoSuspender(userSvc)
+	trafficSvc.SetAuditRepo(repos.Audit)
 
 	// --- transport layer ---
 	// The Node installation template is fetched from the release that published it

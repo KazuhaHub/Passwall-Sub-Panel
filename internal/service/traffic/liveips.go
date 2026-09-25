@@ -2,6 +2,7 @@ package traffic
 
 import (
 	"context"
+	"sort"
 	"time"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
@@ -162,17 +163,19 @@ func (c *geoPolicyCache) forUser(uid int64) domain.GeoAnomalyPolicy {
 //   - at most once per half poll interval per user (in.minSpacing), so a
 //     manual poll cannot turn clicks into samples.
 //
-// OBSERVATION ONLY. It changes no user's state and writes to no panel. The
-// distribution it produces is the input to deciding whether any automatic
-// response is safe to arm — arming one against an unknown false-positive
-// rate is how a fleet locks out paying customers.
+// It changes no user's state and writes to no panel. What it does beyond the
+// verdict is hand back the automatic suspensions that are due (only where a
+// group has armed them; off by default), for PollOnce to apply at the end of
+// the cycle (enforceGeo). Which of them are handed back is decided here,
+// before the streaks are saved, because that decision is also a streak write:
+// see collectGeoBans.
 //
 // Never fails the poll. Traffic metering is what PollOnce exists for, and a
 // missing geo database or an unreadable panel must not cost the cycle its
 // primary job.
-func (s *Service) observeLiveIPs(ctx context.Context, in liveIPInput) {
+func (s *Service) observeLiveIPs(ctx context.Context, in liveIPInput) []geoBan {
 	if len(in.clients) == 0 || in.read == nil {
-		return
+		return nil
 	}
 
 	owners := make(map[domain.ClientKey]int64, len(in.clients))
@@ -183,7 +186,7 @@ func (s *Service) observeLiveIPs(ctx context.Context, in liveIPInput) {
 		owners[domain.NewClientKey(c.PanelID, c.Email)] = c.UserID
 	}
 	if len(owners) == 0 {
-		return
+		return nil
 	}
 	now := in.now
 	if now.IsZero() {
@@ -250,6 +253,7 @@ func (s *Service) observeLiveIPs(ctx context.Context, in liveIPInput) {
 	}
 
 	next := make(map[int64]domain.GeoRecord, len(agg))
+	var due []geoBan
 	var incomplete, spaced int
 	for uid, u := range agg {
 		// Sample spacing. The staff "poll now" calls PollOnce directly, and
@@ -289,6 +293,9 @@ func (s *Service) observeLiveIPs(ctx context.Context, in liveIPInput) {
 			Excluded:   obs.Excluded.Total(),
 			Evidence:   domain.GeoEvidenceFrom(obs),
 			Complete:   u.Complete(),
+		}
+		if v.BanDue {
+			due = append(due, geoBan{UserID: uid, Tier: v.BanTier, Reason: v.BanReason, Spread: v.BanSpread})
 		}
 		metrics.GeoVerdictTotal.With(string(v.State)).Inc()
 		metrics.UserConcurrentIPs.Observe(float64(obs.Placed + obs.Unplaced))
@@ -330,11 +337,77 @@ func (s *Service) observeLiveIPs(ctx context.Context, in liveIPInput) {
 			"users", incomplete, "panels", len(panels))
 	}
 
+	bans := collectGeoBans(due, in.users, next, pc, now)
+
 	if s.geoStreaks != nil {
 		if err := s.geoStreaks.Save(ctx, next); err != nil {
 			log.Warn("live-ip observe: could not persist geo streaks; hysteresis restarts next cycle", "err", err)
 		}
 	}
+	return bans
+}
+
+// collectGeoBans turns this cycle's due suspensions into the ones PollOnce
+// will try to apply, and fixes up the streaks that decision affects. It runs
+// before the save because it edits next.
+//
+// A due verdict has already CONSUMED its ban streak (EvaluateGeo resets it,
+// so a suspended user who goes idle cannot be re-suspended by their first
+// over-sample after the lift). So every due ban ends here in exactly one of
+// three ways, and none is silently lost:
+//
+//   - not eligible now (held by another reason, expired, over quota, in an
+//     emergency window, account disabled; see geoBanEligible): stays
+//     consumed and is counted skipped_held. These are handled BEFORE the cap
+//     so a crowd of held users cannot use up its slots;
+//   - eligible and inside geoMaxSuspensionsPerPoll, lowest user ID first so
+//     the choice is deterministic: returned;
+//   - eligible but over the cap: deferred. The consumption is undone by
+//     putting the streak back AT the threshold, so the user's next
+//     over-sample makes it due again; counted deferred.
+//
+// Eligibility is judged on the users as listed at the top of the poll;
+// enforceGeo re-checks it on the same users after the quota pass.
+func collectGeoBans(due []geoBan, users []*domain.User, next map[int64]domain.GeoRecord, pc *geoPolicyCache, now time.Time) []geoBan {
+	if len(due) == 0 {
+		return nil
+	}
+	byID := make(map[int64]*domain.User, len(users))
+	for _, u := range users {
+		if u != nil {
+			byID[u.ID] = u
+		}
+	}
+	sort.Slice(due, func(i, j int) bool { return due[i].UserID < due[j].UserID })
+
+	var bans []geoBan
+	var held, deferred int
+	for _, b := range due {
+		if !geoBanEligible(byID[b.UserID], now) {
+			held++
+			continue
+		}
+		if len(bans) < geoMaxSuspensionsPerPoll {
+			bans = append(bans, b)
+			continue
+		}
+		// The same threshold the verdict was judged against: group
+		// policies come through GeoPolicyFromSettings, and production's
+		// fallback is the shipped default, both already sanitized. (A raw
+		// fallback set with 0 here would restore 0, which only makes the
+		// next suspension later, never sooner.)
+		rec := next[b.UserID]
+		rec.Streak.BanOver = pc.forUser(b.UserID).BanAfterPolls
+		next[b.UserID] = rec
+		deferred++
+	}
+	geoAutoCount("skipped_held", held)
+	geoAutoCount("deferred", deferred)
+	if deferred > 0 {
+		log.Warn("geo auto-suspension: more suspensions due than one poll applies; the rest are deferred to their next over-sample",
+			"eligible", len(bans)+deferred, "cap", geoMaxSuspensionsPerPoll, "deferred", deferred)
+	}
+	return bans
 }
 
 // freshLiveIPs marks which sightings were live at poll time and advances the

@@ -2441,6 +2441,120 @@ func (s *Service) SetServiceSuspendedAndSync(ctx context.Context, userID int64, 
 	return nil
 }
 
+// SuspendServiceIfClear suspends the user's service ONLY if nothing holds it
+// yet, and reports whether it did. It is the automatic location suspension's
+// write path (geo_auto), which must never replace another reason: an admin
+// pause, a blocked-client hold, a human geo suspension, even the quota. The
+// unconditional SetServiceSuspendedAndSync cannot give that guarantee — its
+// check would be a read the next writer races — so the predicate lives in the
+// UPDATE itself (users.SetServiceStateIfClear).
+//
+// Two locks, always lockUser then emergencyMu. That order is deadlock-free
+// because nothing takes emergencyMu and then lockUser: neither
+// UseEmergencyAccess's critical section nor the poll's WithEmergencyLock
+// callback takes the per-user lock.
+//
+//   - lockUser, the same per-user lock ResyncMembership holds, across the
+//     write AND the push, so the push cannot interleave with a membership
+//     resync computing its own lifecycle from an older read;
+//   - emergencyMu around the write only. UseEmergencyAccess reads the service
+//     reason and writes its own under that mutex; without it a grant could
+//     read an empty reason and then overwrite a geo_auto landed in between
+//     with traffic_exceeded, which the rollover would later lift.
+//
+// When the write wins, the rest mirrors SetServiceSuspendedAndSync: auth
+// cache dropped, one suspension mail, a push from the FRESH row, and a queued
+// SyncTaskUserPushConfig if the push (or the re-read) fails. applied is true
+// whenever the write won, even if the push was only queued; an error beside
+// applied=true means the push failed AND could not be queued.
+func (s *Service) SuspendServiceIfClear(ctx context.Context, userID int64, reason domain.AutoDisabledReason, detail string) (bool, error) {
+	if reason == domain.DisabledNone || !domain.ServiceSuspensionReason(reason) {
+		return false, fmt.Errorf("%w: invalid service suspension reason %q", domain.ErrValidation, reason)
+	}
+	unlock := s.lockUser(userID)
+	defer unlock()
+
+	var (
+		applied bool
+		err     error
+	)
+	now := time.Now()
+	s.WithEmergencyLock(func() {
+		applied, err = s.users.SetServiceStateIfClear(ctx, userID, reason, detail, now)
+	})
+	if err != nil || !applied {
+		return false, err
+	}
+	s.invalidateAuth(userID)
+	// Committed, so the mail is true whatever happens to the push below.
+	s.notifyServiceSuspended(userID, reason, detail)
+
+	who := fmt.Sprintf("#%d", userID)
+	u, pushErr := s.users.GetByID(ctx, userID)
+	if pushErr == nil {
+		who = u.UPN
+		pushErr = s.pushClientConfigToAll(ctx, u)
+	}
+	if pushErr != nil {
+		if taskErr := s.enqueueUserTask(ctx, domain.SyncTaskUserPushConfig, userID, fmt.Sprintf("sync service status for user %s", who)); taskErr != nil {
+			log.Warn("enqueue user service-status push failed", "user_id", userID, "err", taskErr)
+			return true, errUnqueuedPush("suspend proxy service", pushErr, taskErr)
+		}
+	}
+	return true, nil
+}
+
+// LiftServiceIfHeldSince lifts a suspension carrying reason, but only one
+// written at or before suspendedAtOrBefore, and reports whether it did. It is
+// the time-based end of an automatic location suspension: the caller passes
+// now minus the effective duration.
+//
+// The decision is made on a FRESH read under lockUser, never on the caller's
+// snapshot. The traffic poll's user list is from the top of its cycle; in the
+// meantime an admin may have resumed the user and a concurrent poll may have
+// suspended them again. That newer suspension's timestamp is after the cutoff,
+// so it is refused here. The due check is in Go, not SQL, because SQLite
+// stores service_disabled_at as text in the writer's location. The clear
+// itself is conditional too (ClearServiceStateIfReason), so an admin decision
+// landing between this read and that write is not undone either.
+//
+// No restore mail: the suspension mail already said service comes back by
+// itself, and a second mail per episode is noise. An admin resume still goes
+// through ResumeServiceAndSync and sends one.
+func (s *Service) LiftServiceIfHeldSince(ctx context.Context, userID int64, reason domain.AutoDisabledReason, suspendedAtOrBefore time.Time) (bool, error) {
+	if reason == domain.DisabledNone {
+		return false, fmt.Errorf("%w: lifting requires a non-empty reason", domain.ErrValidation)
+	}
+	unlock := s.lockUser(userID)
+	defer unlock()
+
+	u, err := s.users.GetByID(ctx, userID)
+	if err != nil {
+		return false, err
+	}
+	if u.ServiceDisabledReason != reason {
+		return false, nil
+	}
+	if u.ServiceDisabledAt != nil && u.ServiceDisabledAt.After(suspendedAtOrBefore) {
+		return false, nil
+	}
+	lifted, err := s.users.ClearServiceStateIfReason(ctx, userID, reason)
+	if err != nil || !lifted {
+		return false, err
+	}
+	s.invalidateAuth(userID)
+	u.ServiceDisabledReason = domain.DisabledNone
+	u.ServiceDisableDetail = ""
+	u.ServiceDisabledAt = nil
+	if pushErr := s.pushClientConfigToAll(ctx, u); pushErr != nil {
+		if taskErr := s.enqueueUserTask(ctx, domain.SyncTaskUserPushConfig, userID, fmt.Sprintf("sync service resume for user %s", u.UPN)); taskErr != nil {
+			log.Warn("enqueue user service-resume push failed", "user_id", userID, "err", taskErr)
+			return true, errUnqueuedPush("resume proxy service", pushErr, taskErr)
+		}
+	}
+	return true, nil
+}
+
 // ResumeServiceAndSync clears a service-level suspension. If the suspension was
 // caused by blocked-client violations, the violation counter is reset as part of
 // the same operation so the next allowed restore does not instantly re-suspend.
@@ -2452,6 +2566,13 @@ func (s *Service) ResumeServiceAndSync(ctx context.Context, userID int64) error 
 	wasBlocked := u.ServiceDisabledReason == domain.DisabledBlockedClient
 	if err := s.updateServiceState(ctx, userID, domain.DisabledNone, "", nil); err != nil {
 		return err
+	}
+	// A person resuming the location detector's own suspension is its
+	// countable false-positive signal. The automatic lift never comes through
+	// here (LiftServiceIfHeldSince), and neither the quota rollover nor a
+	// profile edit resumes geo_auto, so every geo_auto seen here is an admin's.
+	if u.ServiceDisabledReason == domain.DisabledGeoAutoSuspend {
+		metrics.GeoAutoSuspensionTotal.With("lifted_admin").Inc()
 	}
 	u.ServiceDisabledReason = domain.DisabledNone
 	u.ServiceDisableDetail = ""

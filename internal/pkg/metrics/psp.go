@@ -244,6 +244,18 @@ var (
 		"psp_geo_samples_spaced_total",
 		"Users skipped by the location detector because they were judged less than half a traffic interval ago.",
 	)
+	// The optional automatic suspension (geo_auto), by outcome. Two lines
+	// matter most. lifted_admin against suspended is the false-positive
+	// rate: every geo_auto an admin resumes by hand is one the detector got
+	// wrong or one a person overruled. lift_error / suspend_error are the
+	// failures that otherwise show only as Warn logs. deferred and
+	// lift_deferred climbing mean the per-poll caps are being hit — a mass
+	// event, or a broken location database with suspension on.
+	GeoAutoSuspensionTotal = NewCounterVec(
+		"psp_geo_auto_suspension_total",
+		"Automatic location suspensions by outcome: suspended, skipped_held, skipped_unwired, deferred, suspend_error, lifted_expiry, lifted_admin, lift_skipped, lift_deferred, lift_error.",
+		"outcome",
+	)
 	// PSP's own node and relay addresses, excluded as infrastructure. A
 	// drop to zero with nodes configured means the refresh is failing or
 	// every hostname stopped resolving.

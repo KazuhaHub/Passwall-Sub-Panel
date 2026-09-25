@@ -528,6 +528,38 @@ func (r *memoryUserRepo) UpdateServiceState(ctx context.Context, userID int64, r
 	return nil
 }
 
+// SetServiceStateIfClear / ClearServiceStateIfReason mirror the production
+// conditional writes (same predicates, same "did it write", same refusal of an
+// empty reason), so a service test cannot pass against code that overwrites.
+func (r *memoryUserRepo) SetServiceStateIfClear(ctx context.Context, userID int64, reason domain.AutoDisabledReason, detail string, at time.Time) (bool, error) {
+	if reason == domain.DisabledNone {
+		return false, fmt.Errorf("%w: empty service reason", domain.ErrValidation)
+	}
+	cur, ok := r.byID[userID]
+	if !ok || cur.ServiceDisabledReason != domain.DisabledNone {
+		return false, nil
+	}
+	a := at
+	cur.ServiceDisabledReason = reason
+	cur.ServiceDisableDetail = detail
+	cur.ServiceDisabledAt = &a
+	return true, nil
+}
+
+func (r *memoryUserRepo) ClearServiceStateIfReason(ctx context.Context, userID int64, reason domain.AutoDisabledReason) (bool, error) {
+	if reason == domain.DisabledNone {
+		return false, fmt.Errorf("%w: empty service reason", domain.ErrValidation)
+	}
+	cur, ok := r.byID[userID]
+	if !ok || cur.ServiceDisabledReason != reason {
+		return false, nil
+	}
+	cur.ServiceDisabledReason = domain.DisabledNone
+	cur.ServiceDisableDetail = ""
+	cur.ServiceDisabledAt = nil
+	return true, nil
+}
+
 func (r *memoryUserRepo) UpdateTrafficState(ctx context.Context, u *domain.User) error {
 	cur, ok := r.byID[u.ID]
 	if !ok {

@@ -69,6 +69,12 @@ type Service struct {
 	geo        GeoResolver
 	geoPolicy  domain.GeoAnomalyPolicy
 	geoStreaks GeoStreakStore
+	// geoSuspender and audit back the optional automatic suspension
+	// (geoenforce.go), also late-bound. Without the suspender a due ban is
+	// only counted (skipped_unwired); without the audit log the transitions
+	// still happen and are logged, but leave no audit row.
+	geoSuspender GeoSuspender
+	audit        ports.AuditRepo
 	// infra is PSP's own node and relay addresses (infraaddr.go), refreshed
 	// by the app's loop and only read here. Created in New; nil on a bare
 	// &Service{}, where it simply excludes nothing.
@@ -560,15 +566,19 @@ func (s *Service) PollOnce(ctx context.Context) (err error) {
 	// and one save (and, per group, a settings read). Only concurrent
 	// addresses that are not infrastructure are judged, and a user judged
 	// less than half an interval ago is not judged again (see
-	// observeLiveIPs). Observation only; nothing here changes a user's state
-	// or writes to a panel.
+	// observeLiveIPs). Nothing here changes a user's state or writes to a
+	// panel: the automatic suspensions due this cycle (only where a group
+	// armed them) come back as bans, applied in Phase 4 below.
 	//
 	// minSpacing is half the configured interval: the scheduled polls are a
 	// whole interval apart and always count, while a manual poll landing
 	// right after one does not. It is 0 only when no settings are wired
 	// (the loader defaults the interval to 5 minutes), which disables it.
+	//
+	// pc outlives this phase on purpose: Phase 4 reads each user's
+	// suspension duration through the same per-group resolution.
 	pc := s.newGeoPolicyCache(ctx, users)
-	s.observeLiveIPs(ctx, liveIPInput{
+	bans := s.observeLiveIPs(ctx, liveIPInput{
 		users:    users,
 		clients:  sharedClients,
 		panelIDs: panelsToFetch,
@@ -939,6 +949,17 @@ func (s *Service) PollOnce(ctx context.Context) (err error) {
 		}
 	}
 	mark("sink_flush", "6 batches")
+
+	// Phase 4 — the automatic location suspension: lift the suspensions
+	// whose time is up, then apply the bans Phase 1b found due. Last, after
+	// the flush, because both push to the panels inline and wait on the
+	// per-user lock a membership resync may hold; neither may delay
+	// persisting the cycle's metering. Every cycle, even one that read no
+	// live-IP data, because a lift depends only on the clock. Nothing
+	// between Phase 1b and here returns early, so a consumed ban always
+	// reaches it.
+	s.enforceGeo(ctx, users, bans, pc, time.Now())
+	mark("geo_enforce", "Phase 4 geo auto-suspension lift/apply")
 	return nil
 }
 

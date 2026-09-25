@@ -151,6 +151,19 @@ type UserRepo interface {
 	// UpdateServiceState writes the service-level suspension fields without
 	// touching account login state. reason="" means service is active.
 	UpdateServiceState(ctx context.Context, userID int64, reason domain.AutoDisabledReason, detail string, disabledAt *time.Time) error
+	// SetServiceStateIfClear writes reason/detail/at ONLY while the row carries
+	// no service reason ('' or NULL) and reports whether it wrote. The location
+	// detector's automatic suspension goes through here so it can never replace
+	// a hold someone else put there, even one written after the caller's read.
+	// reason must be non-empty (ErrValidation otherwise), so the reason column
+	// always changes and "wrote" is exact on every dialect — MySQL reports
+	// CHANGED rows, which an unchanged value would read as a lost race.
+	SetServiceStateIfClear(ctx context.Context, userID int64, reason domain.AutoDisabledReason, detail string, at time.Time) (bool, error)
+	// ClearServiceStateIfReason clears reason/detail/at ONLY while the row
+	// still carries reason (non-empty, ErrValidation otherwise) and reports
+	// whether it wrote. The automatic lift's second guard: a row an admin
+	// resumed or re-suspended under another reason is left alone.
+	ClearServiceStateIfReason(ctx context.Context, userID int64, reason domain.AutoDisabledReason) (bool, error)
 	// BatchUpdateTrafficState runs N UpdateTrafficState writes in one
 	// transaction. The traffic poll calls it ONCE at end-of-cycle instead
 	// of issuing N inline UPDATEs while it walks the user list. On SQLite

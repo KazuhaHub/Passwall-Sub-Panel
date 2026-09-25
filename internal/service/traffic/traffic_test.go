@@ -82,6 +82,39 @@ func (r *fakeUserRepo) UpdateServiceState(ctx context.Context, userID int64, rea
 	return nil
 }
 
+// SetServiceStateIfClear / ClearServiceStateIfReason mirror the production
+// conditional writes: the same predicates, the same "did it write" answer,
+// the same refusal of an empty reason. A fake that wrote unconditionally
+// would let the enforcement tests pass against code that overwrites holds.
+func (r *fakeUserRepo) SetServiceStateIfClear(ctx context.Context, userID int64, reason domain.AutoDisabledReason, detail string, at time.Time) (bool, error) {
+	if reason == domain.DisabledNone {
+		return false, fmt.Errorf("%w: empty service reason", domain.ErrValidation)
+	}
+	cur, ok := r.users[userID]
+	if !ok || cur.ServiceDisabledReason != domain.DisabledNone {
+		return false, nil
+	}
+	a := at
+	cur.ServiceDisabledReason = reason
+	cur.ServiceDisableDetail = detail
+	cur.ServiceDisabledAt = &a
+	return true, nil
+}
+
+func (r *fakeUserRepo) ClearServiceStateIfReason(ctx context.Context, userID int64, reason domain.AutoDisabledReason) (bool, error) {
+	if reason == domain.DisabledNone {
+		return false, fmt.Errorf("%w: empty service reason", domain.ErrValidation)
+	}
+	cur, ok := r.users[userID]
+	if !ok || cur.ServiceDisabledReason != reason {
+		return false, nil
+	}
+	cur.ServiceDisabledReason = domain.DisabledNone
+	cur.ServiceDisableDetail = ""
+	cur.ServiceDisabledAt = nil
+	return true, nil
+}
+
 func (r *fakeUserRepo) UpdateTrafficState(ctx context.Context, u *domain.User) error {
 	cur, ok := r.users[u.ID]
 	if !ok {
