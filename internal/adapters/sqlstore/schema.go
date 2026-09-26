@@ -836,6 +836,32 @@ type subLogRow struct {
 	// (WHERE accessed_at < cutoff); leading-column user_id in the composite
 	// idx can't, same rationale as traffic_snapshots.
 	AccessedAt time.Time `gorm:"index:idx_sub_user_time,priority:2;index:idx_sub_accessed"`
+	// DeviceID is a keyed per-user digest of the client's declared x-hwid
+	// (subdevice.Hasher), NEVER the raw header. The empty string means nothing
+	// declared, capture off, or a row that predates capture.
+	//
+	// Both device columns are varchar with an empty DEFAULT, never text: a
+	// text column may not carry a DEFAULT on MySQL (TestSchemaNoDefaultOnTextColumns),
+	// and the DEFAULT is what lets AutoMigrate add a NOT NULL column to a
+	// populated table. The ADD COLUMN is instant on MySQL 8, metadata-only on
+	// Postgres 11+ and O(1) on SQLite, which matters on the busiest table.
+	DeviceID string `gorm:"size:16;not null;default:''"`
+	// DeviceLabel is the sanitized OS/version/model the same fetch declared
+	// (subdevice.Label, at most 64 runes). Admin-only on every read path.
+	DeviceLabel string `gorm:"size:64;not null;default:''"`
+}
+
+func (r subLogRow) toDomain() domain.SubLog {
+	return domain.SubLog{
+		ID:          r.ID,
+		UserID:      r.UserID,
+		IP:          r.IP,
+		UA:          r.UA,
+		ClientType:  r.ClientType,
+		AccessedAt:  r.AccessedAt,
+		DeviceID:    r.DeviceID,
+		DeviceLabel: r.DeviceLabel,
+	}
 }
 
 type syncTaskRow struct {

@@ -837,6 +837,13 @@ type SubLogRepo interface {
 	List(ctx context.Context, filter SubLogFilter) (items []*domain.SubLog, total int64, err error)
 	Clear(ctx context.Context) error
 	DeleteBefore(ctx context.Context, cutoff time.Time) (int64, error)
+	// ScanSince calls fn with every row accessed at or after since, in id order,
+	// batch rows at a time (batch<=0 → 5000). fn must not retain the slice; a fn
+	// error stops the scan and is returned. fn is never called with an empty
+	// slice. Rows carry no user join (UserUPN/UserDisplay/UserGroupID are zero):
+	// this is the window read for background aggregation, which holds a whole
+	// week of fetches in one pass and must not hold it in memory at once.
+	ScanSince(ctx context.Context, since time.Time, batch int, fn func([]domain.SubLog) error) error
 }
 
 type SyncTaskRepo interface {
