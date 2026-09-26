@@ -49,7 +49,7 @@ type RiskPolicy struct {
 	SubSpreadOff, DevicesOff, UsageShiftOff, LoginCountryOff bool
 	MinDays                                                  int     // 1..RiskWindowDays
 	MaxDevices                                               int     // >= 1
-	UsageRatio                                               float64 // >= RiskUsageRatioMin
+	UsageRatio                                               float64 // >= RiskUsageRatioMin, finite
 	UsageFloorBytes                                          int64   // >= RiskGiB
 }
 
@@ -76,7 +76,10 @@ func DefaultRiskPolicy() RiskPolicy {
 //     be met, and "flagged" would silently stop existing.
 //   - UsageRatio is raised to RiskUsageRatioMin. A lower ratio accuses more.
 //     NaN — which a group override can carry, since stored values are parsed
-//     without validation — is not > 0, so it takes the default.
+//     without validation — is not > 0, so it takes the default. +Inf ("Inf"
+//     parses) means "never over" and is kept as the largest finite ratio:
+//     the ratio is written into usage_shift's evidence, and encoding/json
+//     refuses an infinity, so the account's row could never be saved.
 //   - The floor is GB × RiskGiB, saturating rather than wrapping: a value too
 //     large for int64 bytes must stay the highest floor, not turn negative
 //     (no floor at all).
@@ -99,7 +102,7 @@ func RiskPolicyFromSettings(s RiskPolicySettings) RiskPolicy {
 		p.MaxDevices = s.MaxDevices
 	}
 	if s.UsageRatio > 0 {
-		p.UsageRatio = max(s.UsageRatio, RiskUsageRatioMin)
+		p.UsageRatio = min(max(s.UsageRatio, RiskUsageRatioMin), math.MaxFloat64)
 	}
 	if s.UsageFloorGB > 0 {
 		if int64(s.UsageFloorGB) > math.MaxInt64/RiskGiB {

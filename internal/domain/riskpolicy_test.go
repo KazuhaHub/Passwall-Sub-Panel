@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"encoding/json"
 	"math"
 	"reflect"
 	"testing"
@@ -73,6 +74,25 @@ func TestRiskPolicyFromSettings_RatioBelowOneAndAHalfIsRaised(t *testing.T) {
 		if got := RiskPolicyFromSettings(RiskPolicySettings{UsageRatio: c.in}).UsageRatio; got != c.want {
 			t.Errorf("%s: UsageRatio %v resolved to %v, want %v", c.name, c.in, got, c.want)
 		}
+	}
+}
+
+// A group override is stored as a raw string and parsed without validation,
+// and strconv.ParseFloat("Inf") succeeds. An infinite ratio is the literal
+// reading of "never over" — silence, which is the safe direction — but the
+// ratio is written into every usage_shift evidence, and encoding/json refuses
+// ±Inf: the account's row would fail to serialize and never be written. So it
+// is kept, as the largest finite ratio. -Inf is not > 0: unset, the default.
+func TestRiskPolicyFromSettings_InfiniteRatioStaysFinite(t *testing.T) {
+	got := RiskPolicyFromSettings(RiskPolicySettings{UsageRatio: math.Inf(1)}).UsageRatio
+	if got != math.MaxFloat64 {
+		t.Fatalf("UsageRatio +Inf resolved to %v, want the largest finite ratio %v", got, math.MaxFloat64)
+	}
+	if _, err := json.Marshal(got); err != nil {
+		t.Fatalf("the resolved ratio does not serialize: %v", err)
+	}
+	if got := RiskPolicyFromSettings(RiskPolicySettings{UsageRatio: math.Inf(-1)}).UsageRatio; got != 3.0 {
+		t.Fatalf("UsageRatio -Inf resolved to %v, want the default 3", got)
 	}
 }
 

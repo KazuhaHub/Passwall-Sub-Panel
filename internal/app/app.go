@@ -49,6 +49,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/nodesync"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/reconcile"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/render"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/risk"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/rollup"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/servermigration"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/sharedclient"
@@ -130,6 +131,7 @@ type App struct {
 	health        *health.Service
 	geo           *geo.Service
 	render        *render.Service
+	risk          *risk.Service
 	settings      ports.SettingsRepo
 	syncTasks     ports.SyncTaskRepo
 	// trafficRepo / nodeTraffic kept for the retention cron — PruneBefore is
@@ -647,6 +649,17 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	a.trafficRepo = repos.Traffic
 	a.nodeTraffic = repos.NodeTraffic
 	a.nodeMetrics = nodeMetrics
+	// The observe-only risk signals. The worker is handed read-only views and
+	// one store that writes only risk_signals — a concrete repo built from the
+	// database handle like the geo streak store, not a ports.Repos field, so
+	// nothing else is handed its writer. TestBuildWiresTheRiskSignals guards
+	// the wiring: a worker left out compiles, and the table just stays empty.
+	a.risk = risk.New(risk.Deps{
+		Users:    repos.User,
+		Store:    sqlstore.NewRiskSignalRepo(db),
+		Settings: repos.ScopedSettings,
+		Traffic:  repos.Traffic,
+	})
 	a.trafficInterval = time.Duration(sysSettings.CronTrafficPullMinutes) * time.Minute
 	// Rollup's gap heartbeat is derived from the poll cadence so a coarse poll
 	// interval doesn't make every segment exceed a fixed heartbeat (blank charts).
@@ -791,6 +804,7 @@ func (a *App) Run() error {
 	safego.GoTracked(&a.bgWG, "geo-update-loop", func() { a.runGeoUpdateLoop(bgCtx) })
 	safego.GoTracked(&a.bgWG, "traffic-loop", func() { a.runTrafficLoop(bgCtx) })
 	safego.GoTracked(&a.bgWG, "infra-address-loop", func() { a.runInfraAddressLoop(bgCtx) })
+	safego.GoTracked(&a.bgWG, "risk-signal-loop", func() { a.runRiskLoop(bgCtx, riskFirstDelay) })
 	safego.GoTracked(&a.bgWG, "mail-loop", func() { a.runMailLoop(bgCtx) })
 	safego.GoTracked(&a.bgWG, "reconcile-loop", func() { a.runReconcileLoop(bgCtx) })
 	safego.GoTracked(&a.bgWG, "health-loop", func() { a.runHealthLoop(bgCtx) })
@@ -1675,6 +1689,54 @@ func (a *App) runInfraAddressLoop(ctx context.Context) {
 	}
 	refresh()
 	t := time.NewTicker(infraRefreshInterval)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			refresh()
+		}
+	}
+}
+
+// riskRefreshInterval is how often the risk signals are recomputed. A
+// constant like the audit-cleanup cadence, not a setting: the signals are
+// day-scale (a week of fetches, 35 days of traffic), so an hour is fresh
+// enough, and none of them sits on the poll path.
+const riskRefreshInterval = time.Hour
+
+// riskFirstDelay is how long after start the first refresh runs: long
+// enough for the boot probes and the infrastructure-address refresh (which
+// runs as soon as its loop starts) to settle, so the first run does not
+// compete with them; short enough that a fresh install's risk view is not
+// empty for a whole interval.
+const riskFirstDelay = 2 * time.Minute
+
+// runRiskLoop recomputes the observe-only risk signals: once after
+// firstDelay, then every riskRefreshInterval. A failed run keeps the
+// previous rows (the service writes nothing on error) and is retried on the
+// next tick; RefreshOnce counts every run it starts in
+// psp_risk_refresh_total. Runs under the operation gate like every other
+// background pass, so a backend switch drains it.
+func (a *App) runRiskLoop(ctx context.Context, firstDelay time.Duration) {
+	if a.risk == nil {
+		return
+	}
+	refresh := func() {
+		if err := a.operationGate.RunRead(ctx, a.risk.RefreshOnce); err != nil && ctx.Err() == nil {
+			log.Warn("risk signal refresh failed; previous rows kept", "err", err)
+		}
+	}
+	first := time.NewTimer(firstDelay)
+	defer first.Stop()
+	select {
+	case <-ctx.Done():
+		return
+	case <-first.C:
+	}
+	refresh()
+	t := time.NewTicker(riskRefreshInterval)
 	defer t.Stop()
 	for {
 		select {
