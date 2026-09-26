@@ -1,4 +1,5 @@
 import { client } from './client'
+import type { ReadOptions } from './requestOptions'
 import type { LoginMode } from './types'
 
 export type SubPlatform = 'windows' | 'macos' | 'linux' | 'ios' | 'android' | 'other'
@@ -150,21 +151,48 @@ export interface UISettings {
    *  0 disables auto-prune. Default 30. */
   mail_sent_retention_days: number
 
-  // ---- IP geolocation (offline .mmdb region display in access logs) ----
-  /** Master toggle. Off by default; resolution is fully offline against a
-   *  local .mmdb in <ConfigDir>/geoip/ (no per-IP external calls). */
-  // Concurrent-location anomaly policy. Every field is per-group
-  // overridable; see docs/connection-limits.md §12.3 for why each knob
-  // exists — each one is there because a specific real user would
-  // otherwise be misjudged.
+  // ---- Concurrent-location anomaly detection ----
+  // Every field is per-group overridable EXCEPT geo_anomaly_ignore_addresses,
+  // which names fleet infrastructure rather than a population's tolerance and
+  // is global only; see docs/connection-limits.md §12.3 for why each knob
+  // exists. A stored 0 (or '' for the scope) means "the shipped default",
+  // never "zero tolerance" — utils/geoAnomaly.geoTolerances mirrors how the
+  // server resolves them.
+  /** The FINEST tier judged; '' = the default, city (all three tiers). */
   geo_anomaly_scope: 'off' | 'country' | 'region' | 'city' | ''
+  /** COUNTRY tolerance (the key predates tiers). 0 = default 1. */
   geo_anomaly_max_places: number
+  /** Regions allowed at once in the widest country. 0 = default 1. */
+  geo_anomaly_max_regions: number
+  /** Cities allowed at once in the widest country. 0 = default 2. */
+  geo_anomaly_max_cities: number
   geo_anomaly_flag_after_polls: number
   geo_anomaly_clear_after_polls: number
   geo_anomaly_min_placed_ratio: number
-  // One place set per LINE, members comma-separated ("JP,TW").
+  // One COUNTRY set per LINE, members comma-separated ("JP,TW"). Tokens
+  // containing "/" are dropped server-side: only countries fold.
   geo_anomaly_co_travel: string
   geo_anomaly_allow_anywhere: boolean
+  /** IPs/CIDRs, newline/comma separated, '#' comments, <=256. GLOBAL only.
+   *  The one geo field the server validates: a bad entry is a 400 naming it. */
+  geo_anomaly_ignore_addresses: string
+  // Automatic temporary suspension (off by default). Its own thresholds,
+  // raised server-side to at least the flag tolerances per tier.
+  geo_anomaly_ban_enabled: boolean
+  /** 0 = default 1. */
+  geo_anomaly_ban_max_countries: number
+  /** 0 = default 2. */
+  geo_anomaly_ban_max_regions: number
+  /** 0 = default 3. */
+  geo_anomaly_ban_max_cities: number
+  /** Consecutive over-the-line checks before suspending. 0 = default 6. */
+  geo_anomaly_ban_after_polls: number
+  /** 0 = default 60; clamped to 1..10080 (7 days). */
+  geo_anomaly_ban_duration_minutes: number
+
+  // ---- IP geolocation (offline .mmdb region display in access logs) ----
+  /** Master toggle. Off by default; resolution is fully offline against a
+   *  local .mmdb in <ConfigDir>/geoip/ (no per-IP external calls). */
   geo_ip_enabled: boolean
   /** Active database filename when several .mmdb are present. Empty = first by
    *  name. Only one is ever active (no merging → no conflict). */
@@ -303,8 +331,17 @@ export interface GeoIPStatus {
   update: GeoUpdateState
 }
 
-export async function getGeoIPStatus() {
-  const { data } = await client.get<GeoIPStatus>('/admin/settings/geoip/status')
+export async function getGeoIPStatus(opts: ReadOptions = {}) {
+  // Options only when asked for: the settings page (which polls this during an
+  // update) keeps the exact request it has always made, while the Geo tab's
+  // banner read passes its query signal and stays quiet on failure — a failed
+  // read there just means no banner, not a toast over the page's real data.
+  const { data } = opts.signal || opts.silent
+    ? await client.get<GeoIPStatus>('/admin/settings/geoip/status', {
+      signal: opts.signal,
+      _skipErrorToast: opts.silent,
+    })
+    : await client.get<GeoIPStatus>('/admin/settings/geoip/status')
   return data
 }
 

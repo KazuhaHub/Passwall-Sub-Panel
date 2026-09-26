@@ -526,10 +526,11 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	// Link the geo updater's background download to the app lifecycle so
 	// Shutdown cancels + drains an in-flight DB download instead of leaking it.
 	geoSvc.SetBackground(bgCtx, &a.bgWG)
-	// Concurrent-location observation on the traffic poll. Late-bound like the
+	// Concurrent-location detection on the traffic poll. Late-bound like the
 	// shared-client repo: without it the poll still meters, and every verdict
 	// reads Unknown rather than Clean — the honest answer when nothing can be
-	// placed. Observation only; no automatic response is armed.
+	// placed. By default it only observes (the Geo tab); a group can arm the
+	// time-boxed automatic suspension (geo_auto), wired below.
 	trafficSvc.SetGeoResolver(geoSvc)
 	trafficSvc.SetGeoPolicy(domain.DefaultGeoPolicy())
 	// The hysteresis state has to outlive the process. The detector latches a
@@ -538,6 +539,15 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	// would make every deploy a free acquittal for anyone being watched.
 	geoStreaks := sqlstore.NewGeoStreakRepo(db)
 	trafficSvc.SetGeoStreakStore(geoStreaks)
+	// The automatic suspension's writer and its audit log. user.Service is
+	// the writer because its conditional writes are the only path that
+	// never replaces another reason, and it holds the per-user lock and the
+	// emergency lock the push and a concurrent grant need. Both setters are
+	// nil-tolerant, so leaving either out would compile and quietly disable
+	// the feature (bans counted skipped_unwired, no lifts, no audit rows);
+	// TestBuildWiresTheGeoAutoSuspension guards that.
+	trafficSvc.SetGeoSuspender(userSvc)
+	trafficSvc.SetAuditRepo(repos.Audit)
 
 	// --- transport layer ---
 	// The Node installation template is fetched from the release that published it
@@ -554,7 +564,9 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 		Cfg:           cfg,
 		Repos:         repos,
 		GeoRecords:    geoStreaks,
-		Pool:          pool,
+		// The same store again, as the bell's count of latched flags.
+		GeoFlags: geoStreaks,
+		Pool:     pool,
 		// Same service the push path uses, so the capabilities the edit form
 		// reports are read through the identical check that gates the write.
 		SharedClients: sharedClientSvc,
@@ -767,6 +779,7 @@ func (a *App) Run() error {
 	safego.GoTracked(&a.bgWG, "audit-cleanup-loop", func() { a.runAuditCleanupLoop(bgCtx) })
 	safego.GoTracked(&a.bgWG, "geo-update-loop", func() { a.runGeoUpdateLoop(bgCtx) })
 	safego.GoTracked(&a.bgWG, "traffic-loop", func() { a.runTrafficLoop(bgCtx) })
+	safego.GoTracked(&a.bgWG, "infra-address-loop", func() { a.runInfraAddressLoop(bgCtx) })
 	safego.GoTracked(&a.bgWG, "mail-loop", func() { a.runMailLoop(bgCtx) })
 	safego.GoTracked(&a.bgWG, "reconcile-loop", func() { a.runReconcileLoop(bgCtx) })
 	safego.GoTracked(&a.bgWG, "health-loop", func() { a.runHealthLoop(bgCtx) })
@@ -1620,6 +1633,44 @@ func (a *App) runTrafficLoop(ctx context.Context) {
 				defer a.compatProbeInflight.Store(false)
 				a.probePanelVersionsOnce(ctx)
 			})
+		}
+	}
+}
+
+// infraRefreshInterval is how often the node and relay addresses the
+// location detector excludes are rebuilt. A constant, not a setting: it is
+// background upkeep off the poll's critical path, like the sync-task, mail
+// and audit-cleanup cadences. Hostname answers are cached for twice this
+// (traffic's infraHostTTL), so roughly every other refresh is a node-list
+// read and no DNS at all.
+const infraRefreshInterval = 5 * time.Minute
+
+// runInfraAddressLoop keeps traffic's infrastructure-address set current.
+//
+// It refreshes once as soon as it starts, before the first tick: the first
+// scheduled traffic poll runs one interval after boot, and a loop that
+// waited out its own first tick would let that poll judge every relay
+// address as a user's location. Kept out of the poll entirely because
+// resolving relay hostnames is DNS, and DNS latency or failure has no
+// business inside the cycle that meters traffic.
+func (a *App) runInfraAddressLoop(ctx context.Context) {
+	if a.traffic == nil {
+		return
+	}
+	refresh := func() {
+		if err := a.operationGate.RunRead(ctx, a.traffic.RefreshInfraAddresses); err != nil && ctx.Err() == nil {
+			log.Warn("infra address refresh failed; keeping the previous set", "err", err)
+		}
+	}
+	refresh()
+	t := time.NewTicker(infraRefreshInterval)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			refresh()
 		}
 	}
 }

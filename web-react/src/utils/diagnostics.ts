@@ -237,10 +237,14 @@ const SEVERITY_ORDER: Record<Severity, number> = { critical: 0, error: 1, warn: 
  *    banner on every fresh install that has never typed an IP limit — an
  *    "enforcement outage" with nothing to enforce. It stays on the servers page,
  *    which has the per-node badge and the tooltip that says which gate is shut.
- *  - Geo verdicts (psp_geo_verdict_total). No response to a flagged account has
- *    been built yet, so a finding here would carry no remedy — and an all-idle
- *    fleet at 04:00 is the healthiest reading the detector can produce, not a
- *    blind one.
+ *  - Geo verdicts (psp_geo_verdict_total) and auto-suspensions
+ *    (psp_geo_auto_suspension_total). A response exists now — the bell counts
+ *    flagged and auto-suspended accounts, and the Geo tab lists them with the
+ *    evidence — so a finding here would only repeat the bell without naming
+ *    anyone. And the one reading this page could add is not a fault: an
+ *    all-idle fleet at 04:00 is the healthiest thing the detector can report,
+ *    not a blind one. A detector that has stopped judging shows up as
+ *    poll_dead (no poll, no verdicts), which is already a finding.
  */
 export function deriveFindings(
   snap: DiagnosticsSnapshot,

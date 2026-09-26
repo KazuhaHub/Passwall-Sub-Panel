@@ -1060,6 +1060,8 @@ TrafficSvc cron 每 N 分钟（默认 5）:
   4. 算当前计费周期已用量:
        周期内已用 = users.lifetime_total_bytes - users.period_baseline_bytes（O(1) 内存计算）
   5. 若 user.traffic_limit_bytes > 0 且 已用 > limit:
+       - 服务已被硬性暂停（service_manual / blocked_client / geo_anomaly / geo_auto）→ 跳过，
+         配额原因从不替换它们（见 §11.3）
        - 调 user.SetServiceSuspendedAndSync(userID, reason=DisabledTrafficExceeded)
        - 内部：写 users.service_disabled_reason（不动 users.enabled，账号仍可登录查看原因）
        - 对该用户所有 psp_client 调 SharedClientSvc.SyncLifecycle(enable=false)
@@ -1508,6 +1510,8 @@ func (c *Client) UpgradeXray(ctx, tag string) error
 | 管理员手动恢复服务 | 清 `service_disabled_reason`，推 `enable=true` |
 
 **永远不删 client**，只是暂停服务；且**从不锁账号登录**——详见 §7.9 的账号状态/服务状态拆分。
+
+**硬性暂停优先于配额**（2026-09-25）：服务已被 `service_manual` / `blocked_client` / `geo_anomaly` / `geo_auto` 暂停的用户，超限时不会被改写成 `traffic_exceeded`，周期滚动也不会恢复他们，期间紧急访问不可用——否则管理员的暂停会在下一个周期起点蒸发。详见 [connection-limits.md](connection-limits.md) §12.5.3。
 
 ### 11.4 看板聚合查询
 

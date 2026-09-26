@@ -115,6 +115,30 @@ func TestScopeSettingsHandler_RejectsNonOverridable(t *testing.T) {
 	}
 }
 
+// The concurrent-location ignore list is global only: whether an address is
+// somebody's relay or office exit does not depend on which group is looking,
+// and a per-group copy would let one group's edit leave every other group
+// judging the same relay as a place. Absence from OverridableScopeKeys IS the
+// mechanism, so this pins the refusal at the write seam: adding the key to
+// that set would turn it red.
+func TestScopeSettingsHandler_RejectsIgnoreAddresses(t *testing.T) {
+	repo := newFakeScopeRepo()
+	h := NewAdminScopeSettingsHandler(fakeScopeGroups{exists: map[int64]bool{5: true}}, repo)
+	r := scopeRouter(h)
+	body, _ := json.Marshal(setScopeOverrideRequest{Type: "geo_anomaly", Name: "ignore_addresses", Value: "203.0.113.0/24"})
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodPut, "/api/admin/groups/5/scope-settings", bytes.NewReader(body)))
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("PUT geo_anomaly.ignore_addresses = %d, want 400; body=%s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "not overridable per group") {
+		t.Errorf("the refusal must say why: %s", w.Body.String())
+	}
+	if len(repo.rows) != 0 {
+		t.Error("a rejected override must not be written")
+	}
+}
+
 func TestScopeSettingsHandler_GroupNotFound(t *testing.T) {
 	h := NewAdminScopeSettingsHandler(fakeScopeGroups{exists: map[int64]bool{}}, newFakeScopeRepo())
 	r := scopeRouter(h)

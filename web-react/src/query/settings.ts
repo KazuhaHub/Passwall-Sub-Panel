@@ -1,9 +1,11 @@
 import { queryOptions, useQuery } from '@tanstack/react-query'
 import {
+  getGeoIPStatus,
   getMailSettings,
   getOIDC,
   getSAML,
   getUISettings,
+  type GeoIPStatus,
   type MailSettings,
   type MailTemplate,
   type OIDCConfig,
@@ -76,4 +78,22 @@ export function oidcConfigQuery(scope: QueryScope) {
 
 export function useOidcConfig(scope: QueryScope) {
   return useQuery(oidcConfigQuery(scope))
+}
+
+/**
+ * The location databases and which is active — for the Geo tab, which only
+ * needs to know whether the active one resolves countries only. Quiet on
+ * failure: the banner is advisory, and a toast over a page whose real data
+ * loaded fine would say something broke when nothing the admin asked for did.
+ */
+export function geoIPStatusQuery(scope: QueryScope) {
+  return queryOptions({
+    queryKey: settingsKeys.geoIPStatus(scope),
+    queryFn: ({ signal }): Promise<GeoIPStatus> => getGeoIPStatus({ signal, silent: true }),
+    ...freshness(policies.geoIPStatus),
+  })
+}
+
+export function useGeoIPStatus(scope: QueryScope) {
+  return useQuery(geoIPStatusQuery(scope))
 }

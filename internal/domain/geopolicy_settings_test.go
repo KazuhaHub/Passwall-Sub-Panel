@@ -9,13 +9,15 @@ import (
 // and FlagAfterPolls 0 — which flags EVERY connected user on their first poll,
 // including one sitting at home. Zero means "never configured", and this is
 // the single place that distinction is made.
+//
+// Compared field by field over the WHOLE policy, so a knob added later that
+// forgets its "0 means default" guard fails here rather than shipping as a
+// zero tolerance or a zero-minute ban.
 func TestGeoPolicyFromSettings_UnsetFallsBackToTheDefaultNotToZero(t *testing.T) {
 	got := GeoPolicyFromSettings(GeoPolicySettings{})
 	want := DefaultGeoPolicy()
-	if got.MaxPlaces != want.MaxPlaces || got.FlagAfterPolls != want.FlagAfterPolls ||
-		got.ClearAfterPolls != want.ClearAfterPolls || got.Scope != want.Scope ||
-		got.MinPlacedRatio != want.MinPlacedRatio {
-		t.Fatalf("empty settings = %+v, want the shipped default %+v", got, want)
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("empty settings = %+v\nwant the shipped default %+v", got, want)
 	}
 }
 
@@ -34,16 +36,21 @@ func TestGeoPolicyFromSettings_ConfiguredValuesApply(t *testing.T) {
 // Scope is typed by a human into a form. Accepting mixed case and stray
 // whitespace is the difference between a working setting and one that
 // silently reverts to the default with no way to tell.
+//
+// Region, not city: city is the default, so a city input would pass even if
+// the parse ignored it entirely.
 func TestGeoPolicyFromSettings_ScopeIsCaseAndSpaceTolerant(t *testing.T) {
-	for _, in := range []string{"City", " CITY ", "city"} {
-		if got := GeoPolicyFromSettings(GeoPolicySettings{Scope: in}); got.Scope != GeoScopeCity {
-			t.Fatalf("scope %q resolved to %s, want city", in, got.Scope)
+	for _, in := range []string{"Region", " REGION ", "region"} {
+		if got := GeoPolicyFromSettings(GeoPolicySettings{Scope: in}); got.Scope != GeoScopeRegion {
+			t.Fatalf("scope %q resolved to %s, want region", in, got.Scope)
 		}
 	}
 }
 
-// An unrecognised scope falls back to the documented default rather than to
-// something permissive-by-accident.
+// An unrecognised scope — a typo, or a value from some other build — falls
+// back to COUNTRY, the coarsest tier, and deliberately not to the default:
+// the default is the finest tier, and a misconfiguration must never make a
+// policy judge more finely than the admin meant.
 func TestGeoPolicyFromSettings_UnknownScopeFallsBackToCountry(t *testing.T) {
 	if got := GeoPolicyFromSettings(GeoPolicySettings{Scope: "continent"}); got.Scope != GeoScopeCountry {
 		t.Fatalf("scope = %s, want country", got.Scope)
@@ -69,10 +76,10 @@ func TestGeoPolicyFromSettings_AllowAnywhereCarriesThrough(t *testing.T) {
 	}
 }
 
-// Co-travel sets are typed as "JP,TW". Country codes are conventionally
-// upper and placeOf emits them that way, so a set typed lowercase that
-// silently never matched would be indistinguishable from one that was
-// ignored — and an admin would have no way to tell which.
+// Co-travel sets are typed as "JP,TW". Country codes are compared
+// upper-cased, so a set typed lowercase that silently never matched would be
+// indistinguishable from one that was ignored — and an admin would have no
+// way to tell which.
 func TestGeoPolicyFromSettings_CoTravelIsParsedAndUppercased(t *testing.T) {
 	got := GeoPolicyFromSettings(GeoPolicySettings{CoTravel: " jp , tw \ndE,at,ch"})
 	want := [][]string{{"JP", "TW"}, {"DE", "AT", "CH"}}
@@ -96,7 +103,7 @@ func TestGeoPolicyFromSettings_ParsedCoTravelActuallyFolds(t *testing.T) {
 }
 
 // Empty and whitespace-only entries produce no set rather than an empty one
-// that would reach the fold and index past the end.
+// that would sit in the policy looking like a rule while folding nothing.
 func TestGeoPolicyFromSettings_BlankCoTravelEntriesAreDropped(t *testing.T) {
 	got := GeoPolicyFromSettings(GeoPolicySettings{CoTravel: "\n  \n , , "})
 	if len(got.CoTravel) != 0 {
@@ -108,5 +115,168 @@ func TestGeoPolicyFromSettings_BlankCoTravelEntriesAreDropped(t *testing.T) {
 func TestGeoPolicyFromSettings_OutOfRangeRatioIsClamped(t *testing.T) {
 	if got := GeoPolicyFromSettings(GeoPolicySettings{MinPlacedRatio: 5}); got.MinPlacedRatio > 1 {
 		t.Fatalf("ratio = %v, want clamped to 1", got.MinPlacedRatio)
+	}
+}
+
+// ---------------------------------------------------------------- v2 tiers
+
+// The shipped default judges down to the city tier (D1): countries 1,
+// regions 1, cities 2. City is safe as a default only because each tier has
+// its own tolerance — home broadband and a phone's carrier exit are two
+// cities of one province, which the city tolerance of 2 absorbs.
+func TestGeoPolicyFromSettings_DefaultScopeIsCity(t *testing.T) {
+	d := DefaultGeoPolicy()
+	if d.Scope != GeoScopeCity || d.MaxPlaces != 1 || d.MaxRegions != 1 || d.MaxCities != 2 {
+		t.Fatalf("default = scope %s, tolerances %d/%d/%d; want city, 1/1/2",
+			d.Scope, d.MaxPlaces, d.MaxRegions, d.MaxCities)
+	}
+	if got := GeoPolicyFromSettings(GeoPolicySettings{}).Scope; got != GeoScopeCity {
+		t.Fatalf("unset scope = %s, want city", got)
+	}
+}
+
+// An empty (or blank) stored scope is "never configured", which is the
+// default — not the unknown-value fallback.
+func TestGeoPolicyFromSettings_EmptyScopeIsTheDefault(t *testing.T) {
+	for _, in := range []string{"", "   ", "\t"} {
+		if got := GeoPolicyFromSettings(GeoPolicySettings{Scope: in}).Scope; got != DefaultGeoPolicy().Scope {
+			t.Fatalf("scope %q = %s, want the default %s", in, got, DefaultGeoPolicy().Scope)
+		}
+	}
+}
+
+func TestGeoPolicyFromSettings_TierTolerancesApply(t *testing.T) {
+	got := GeoPolicyFromSettings(GeoPolicySettings{MaxPlaces: 2, MaxRegions: 4, MaxCities: 6})
+	if got.MaxPlaces != 2 || got.MaxRegions != 4 || got.MaxCities != 6 {
+		t.Fatalf("tolerances = %d/%d/%d, want 2/4/6", got.MaxPlaces, got.MaxRegions, got.MaxCities)
+	}
+}
+
+func TestGeoPolicyFromSettings_BanSettingsApply(t *testing.T) {
+	got := GeoPolicyFromSettings(GeoPolicySettings{
+		BanEnabled:      true,
+		BanMaxCountries: 2, BanMaxRegions: 3, BanMaxCities: 4,
+		BanAfterPolls: 8, BanDurationMinutes: 90,
+	})
+	if !got.BanEnabled || got.BanMaxCountries != 2 || got.BanMaxRegions != 3 || got.BanMaxCities != 4 ||
+		got.BanAfterPolls != 8 || got.BanDurationMinutes != 90 {
+		t.Fatalf("ban settings did not apply: %+v", got)
+	}
+	// Unset ban numbers are the shipped defaults (1/2/3, 6 polls, 60 min),
+	// never zero: a zero BanAfterPolls would suspend on one sample.
+	d := GeoPolicyFromSettings(GeoPolicySettings{BanEnabled: true})
+	if d.BanMaxCountries != 1 || d.BanMaxRegions != 2 || d.BanMaxCities != 3 ||
+		d.BanAfterPolls != 6 || d.BanDurationMinutes != 60 {
+		t.Fatalf("unset ban numbers = %+v, want the defaults 1/2/3, 6, 60", d)
+	}
+}
+
+// Automatic suspension is off unless a scope turns it on (D3). There is no
+// "unset" for the switch: false is the default.
+func TestGeoPolicyFromSettings_BanIsOffUnlessEnabled(t *testing.T) {
+	if DefaultGeoPolicy().BanEnabled || GeoPolicyFromSettings(GeoPolicySettings{}).BanEnabled {
+		t.Fatal("automatic suspension must be off by default")
+	}
+	if !GeoPolicyFromSettings(GeoPolicySettings{BanEnabled: true}).BanEnabled {
+		t.Fatal("an explicit ban_enabled must carry through")
+	}
+}
+
+// A ban tolerance stricter than the flag tolerance would suspend someone the
+// flag does not even consider over. It is raised to the flag tolerance.
+func TestGeoPolicyFromSettings_BanToleranceNeverBelowFlagTolerance(t *testing.T) {
+	got := GeoPolicyFromSettings(GeoPolicySettings{
+		MaxPlaces: 3, MaxRegions: 4, MaxCities: 5,
+		BanMaxCountries: 1, BanMaxRegions: 2, BanMaxCities: 3,
+	})
+	if got.BanMaxCountries != 3 || got.BanMaxRegions != 4 || got.BanMaxCities != 5 {
+		t.Fatalf("ban tolerances = %d/%d/%d, want raised to the flag ones 3/4/5",
+			got.BanMaxCountries, got.BanMaxRegions, got.BanMaxCities)
+	}
+}
+
+// A suspension must stay reversible: at most a week, however long the stored
+// value is.
+func TestGeoPolicyFromSettings_BanDurationIsClamped(t *testing.T) {
+	got := GeoPolicyFromSettings(GeoPolicySettings{BanDurationMinutes: 999999})
+	if got.BanDurationMinutes != GeoBanMaxDurationMinutes {
+		t.Fatalf("ban duration = %d, want clamped to %d", got.BanDurationMinutes, GeoBanMaxDurationMinutes)
+	}
+	if got := GeoPolicyFromSettings(GeoPolicySettings{BanDurationMinutes: -5}); got.BanDurationMinutes != 60 {
+		t.Fatalf("negative ban duration = %d, want the 60-minute default", got.BanDurationMinutes)
+	}
+}
+
+// A NEGATIVE stored number is "never configured" too, exactly like 0: it
+// becomes the shipped default, not the clamp edge sanitized() would give it
+// (1 for a tolerance or a count, 0 for the ratio, 1 minute for the duration).
+// A group override is where one comes from — the editor's number box and the
+// API both accept a minus sign — and docs/connection-limits.md tells the
+// operator what such a value does, so the answer is pinned field by field
+// over the whole policy: a knob added later whose guard lets a negative
+// through to sanitized() fails here instead of quietly meaning 1.
+func TestGeoPolicyFromSettings_NegativeStoredValuesMeanTheDefault(t *testing.T) {
+	got := GeoPolicyFromSettings(GeoPolicySettings{
+		MaxPlaces: -1, MaxRegions: -1, MaxCities: -1,
+		FlagAfterPolls: -1, ClearAfterPolls: -1,
+		MinPlacedRatio:  -0.5,
+		BanMaxCountries: -1, BanMaxRegions: -1, BanMaxCities: -1,
+		BanAfterPolls: -1, BanDurationMinutes: -1,
+	})
+	if want := DefaultGeoPolicy(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("negative settings = %+v\nwant the shipped default %+v", got, want)
+	}
+}
+
+// Co-travel folds COUNTRIES only. A token like "JP/Kanto" — the shape v1's
+// region scope suggested — could never match a country code, so it used to
+// sit in the set looking like a rule while doing nothing. It is dropped, and
+// a set left empty by that is dropped with it.
+func TestGeoPolicyFromSettings_RegionCoTravelTokenIsDroppedNotSilentlyIgnored(t *testing.T) {
+	got := GeoPolicyFromSettings(GeoPolicySettings{CoTravel: "JP/Kanto, JP/Kansai\ncn/guangdong,hk\njp,tw"})
+	want := [][]string{{"HK"}, {"JP", "TW"}}
+	if !reflect.DeepEqual(got.CoTravel, want) {
+		t.Fatalf("co-travel = %v, want %v", got.CoTravel, want)
+	}
+}
+
+// Two stored lines that share a country are kept as written — the parser
+// neither rejects nor rewrites an overlap — and the policy they produce folds
+// them as one set, end to end. This is the reported Greater Bay Area case:
+// "CN,HK" then "HK,MO", a Shenzhen + Hong Kong user, auto-suspension armed.
+// Before the merge it read "in 2 countries at once ([CN HK])" and the ban
+// came due for a pairing the admin had excused.
+func TestGeoPolicyFromSettings_OverlappingCoTravelLinesExcuseTheirPair(t *testing.T) {
+	p := GeoPolicyFromSettings(GeoPolicySettings{
+		CoTravel:       "CN,HK\nHK,MO",
+		FlagAfterPolls: 1,
+		BanEnabled:     true,
+		BanAfterPolls:  1,
+	})
+	if want := [][]string{{"CN", "HK"}, {"HK", "MO"}}; !reflect.DeepEqual(p.CoTravel, want) {
+		t.Fatalf("co-travel = %v, want %v", p.CoTravel, want)
+	}
+	o := ObserveGeo(p, ips("1.1.1.1", "2.2.2.2"),
+		lookupOf(map[string]GeoLocation{
+			"1.1.1.1": geoAt("CN", "Guangdong", "Shenzhen"),
+			"2.2.2.2": geoAt("HK", "", "Hong Kong"),
+		}), true)
+	v := EvaluateGeo(p, o, GeoStreak{})
+	if v.State != GeoStateClean || v.BanDue {
+		t.Fatalf("state = %s banDue = %v (%s), want clean — the admin declared this pair", v.State, v.BanDue, v.Reason)
+	}
+}
+
+// The set and the database may disagree on case in either direction; the
+// fold must not care.
+func TestGeoPolicyFromSettings_CoTravelIsCaseInsensitive(t *testing.T) {
+	p := GeoPolicyFromSettings(GeoPolicySettings{CoTravel: "Jp,tW"})
+	o := ObserveGeo(p, ips("1.1.1.1", "2.2.2.2"),
+		lookupOf(map[string]GeoLocation{
+			"1.1.1.1": geoAt("jp", "", "Tokyo"),
+			"2.2.2.2": geoAt("TW", "", "Taipei"),
+		}), true)
+	if !reflect.DeepEqual(o.Places, []string{"JP"}) {
+		t.Fatalf("places = %v, want [JP]", o.Places)
 	}
 }

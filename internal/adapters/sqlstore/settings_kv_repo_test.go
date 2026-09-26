@@ -570,3 +570,107 @@ func TestKVSettingsBoolMarshal(t *testing.T) {
 		t.Errorf("boolField Unmarshal(\"true\") should set true")
 	}
 }
+
+// TestSettingsKV_GeoTierAndBanKeysRoundTrip: the per-tier tolerances, the
+// ignore list and the automatic-suspension keys survive Save → Load, under
+// the exact "geo_anomaly.<name>" keys that group overrides and the admin
+// catalog address them by. A UISettings field without a descriptor is not
+// an error anywhere: the form saves, the response echoes the request, and
+// the value is gone on the next Load — the knob would read as configured
+// while the poll judged with the default.
+func TestSettingsKV_GeoTierAndBanKeysRoundTrip(t *testing.T) {
+	db, err := openTestDB(t)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	t.Cleanup(func() {
+		if sqlDB, _ := db.DB(); sqlDB != nil {
+			_ = sqlDB.Close()
+		}
+	})
+	if err := ensureTestSchema(db); err != nil {
+		t.Fatalf("schema: %v", err)
+	}
+	repo := newKVSettingsRepo(db)
+	ctx := context.Background()
+
+	// Never configured: every key reads as its zero. The settings layer must
+	// NOT fill these in — domain.GeoPolicyFromSettings owns "0 means the
+	// shipped default", and a group override of 0 relies on the same rule.
+	fresh, err := repo.Load(ctx, ports.UISettings{})
+	if err != nil {
+		t.Fatalf("Load fresh: %v", err)
+	}
+	if fresh.GeoAnomalyMaxRegions != 0 || fresh.GeoAnomalyMaxCities != 0 ||
+		fresh.GeoAnomalyIgnoreAddresses != "" || fresh.GeoAnomalyBanEnabled ||
+		fresh.GeoAnomalyBanMaxCountries != 0 || fresh.GeoAnomalyBanMaxRegions != 0 ||
+		fresh.GeoAnomalyBanMaxCities != 0 || fresh.GeoAnomalyBanAfterPolls != 0 ||
+		fresh.GeoAnomalyBanDurationMinutes != 0 {
+		t.Fatalf("a fresh install must read every new geo key as unset, got %+v", fresh)
+	}
+
+	in := fresh
+	in.GeoAnomalyMaxRegions = 2
+	in.GeoAnomalyMaxCities = 4
+	in.GeoAnomalyIgnoreAddresses = "203.0.113.7 # office\n198.51.100.0/24"
+	in.GeoAnomalyBanEnabled = true
+	in.GeoAnomalyBanMaxCountries = 3
+	in.GeoAnomalyBanMaxRegions = 5
+	in.GeoAnomalyBanMaxCities = 7
+	in.GeoAnomalyBanAfterPolls = 9
+	in.GeoAnomalyBanDurationMinutes = 240
+	if err := repo.Save(ctx, in); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	out, err := repo.Load(ctx, ports.UISettings{})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	for _, c := range []struct {
+		name      string
+		got, want any
+	}{
+		{"GeoAnomalyMaxRegions", out.GeoAnomalyMaxRegions, in.GeoAnomalyMaxRegions},
+		{"GeoAnomalyMaxCities", out.GeoAnomalyMaxCities, in.GeoAnomalyMaxCities},
+		{"GeoAnomalyIgnoreAddresses", out.GeoAnomalyIgnoreAddresses, in.GeoAnomalyIgnoreAddresses},
+		{"GeoAnomalyBanEnabled", out.GeoAnomalyBanEnabled, in.GeoAnomalyBanEnabled},
+		{"GeoAnomalyBanMaxCountries", out.GeoAnomalyBanMaxCountries, in.GeoAnomalyBanMaxCountries},
+		{"GeoAnomalyBanMaxRegions", out.GeoAnomalyBanMaxRegions, in.GeoAnomalyBanMaxRegions},
+		{"GeoAnomalyBanMaxCities", out.GeoAnomalyBanMaxCities, in.GeoAnomalyBanMaxCities},
+		{"GeoAnomalyBanAfterPolls", out.GeoAnomalyBanAfterPolls, in.GeoAnomalyBanAfterPolls},
+		{"GeoAnomalyBanDurationMinutes", out.GeoAnomalyBanDurationMinutes, in.GeoAnomalyBanDurationMinutes},
+	} {
+		if c.got != c.want {
+			t.Errorf("%s: got %v, want %v", c.name, c.got, c.want)
+		}
+	}
+
+	var rows []settingRow
+	if err := db.Where("type = ?", "geo_anomaly").Find(&rows).Error; err != nil {
+		t.Fatalf("read rows: %v", err)
+	}
+	stored := map[string]string{}
+	for _, r := range rows {
+		stored[r.Name] = r.Value
+	}
+	for name, want := range map[string]string{
+		"max_regions":          "2",
+		"max_cities":           "4",
+		"ignore_addresses":     in.GeoAnomalyIgnoreAddresses,
+		"ban_enabled":          "1",
+		"ban_max_countries":    "3",
+		"ban_max_regions":      "5",
+		"ban_max_cities":       "7",
+		"ban_after_polls":      "9",
+		"ban_duration_minutes": "240",
+	} {
+		got, ok := stored[name]
+		if !ok {
+			t.Errorf("no row stored under geo_anomaly.%s — every reader, group overrides included, addresses it by that key", name)
+			continue
+		}
+		if got != want {
+			t.Errorf("geo_anomaly.%s stored as %q, want %q", name, got, want)
+		}
+	}
+}

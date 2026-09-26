@@ -326,6 +326,75 @@ func (r *userRepo) UpdateServiceState(ctx context.Context, userID int64, reason 
 		}).Error
 }
 
+// SetServiceStateIfClear is UpdateServiceState behind a predicate: one
+// conditional UPDATE, so "the row was clear" and "I wrote it" are the same
+// atomic fact on every dialect. A read-then-write would let an admin pause
+// landing between the two be overwritten by the detector.
+//
+// NULL is treated as clear alongside the empty string. The shipped column is
+// NOT NULL with an empty default, but a row that reached NULL some other way
+// must not read as held forever. The reason is required to be non-empty so
+// the reason column always changes: MySQL's RowsAffected counts CHANGED rows,
+// and a write that changed nothing would report a won race as lost.
+func (r *userRepo) SetServiceStateIfClear(ctx context.Context, userID int64, reason domain.AutoDisabledReason, detail string, at time.Time) (bool, error) {
+	if userID == 0 {
+		return false, fmt.Errorf("%w: SetServiceStateIfClear requires a non-zero user ID", domain.ErrValidation)
+	}
+	if reason == domain.DisabledNone {
+		return false, fmt.Errorf("%w: SetServiceStateIfClear requires a non-empty reason", domain.ErrValidation)
+	}
+	at = at.UTC()
+	res := r.db.WithContext(ctx).
+		Model(&userRow{}).
+		Where("id = ? AND (service_disabled_reason = '' OR service_disabled_reason IS NULL)", userID).
+		Updates(map[string]any{
+			"service_disabled_reason": string(reason),
+			"service_disable_detail":  detail,
+			"service_disabled_at":     &at,
+		})
+	if res.Error != nil {
+		return false, res.Error
+	}
+	return res.RowsAffected == 1, nil
+}
+
+// ClearServiceStateIfReason clears the service columns only while the row
+// still carries reason. The due-time check is the caller's, in Go, on a
+// fresh read: SQLite stores service_disabled_at as text in the writer's
+// location, so a SQL time comparison would not be portable.
+func (r *userRepo) ClearServiceStateIfReason(ctx context.Context, userID int64, reason domain.AutoDisabledReason) (bool, error) {
+	if userID == 0 {
+		return false, fmt.Errorf("%w: ClearServiceStateIfReason requires a non-zero user ID", domain.ErrValidation)
+	}
+	if reason == domain.DisabledNone {
+		return false, fmt.Errorf("%w: ClearServiceStateIfReason requires a non-empty reason", domain.ErrValidation)
+	}
+	res := r.db.WithContext(ctx).
+		Model(&userRow{}).
+		Where("id = ? AND service_disabled_reason = ?", userID, string(reason)).
+		Updates(map[string]any{
+			"service_disabled_reason": string(domain.DisabledNone),
+			"service_disable_detail":  "",
+			"service_disabled_at":     nil,
+		})
+	if res.Error != nil {
+		return false, res.Error
+	}
+	return res.RowsAffected == 1, nil
+}
+
+// CountByServiceDisabledReason is one COUNT over the service-reason column —
+// the bell's geo_auto_suspended entry, re-derived on every feed request, so
+// it must never materialise the rows it counts. Exact match: counting
+// geo_auto must not pick up a human's geo_anomaly or an admin pause.
+func (r *userRepo) CountByServiceDisabledReason(ctx context.Context, reason domain.AutoDisabledReason) (int64, error) {
+	var n int64
+	err := r.db.WithContext(ctx).Model(&userRow{}).
+		Where("service_disabled_reason = ?", string(reason)).
+		Count(&n).Error
+	return n, err
+}
+
 // UpdateTrafficState writes only the columns the traffic poll owns, via a
 // map so zero-values (e.g. resetting period_baseline_bytes to 0) are persisted.
 // Keeps a slow poll cycle from clobbering concurrent admin / self-service edits

@@ -618,6 +618,17 @@ func (h *AdminUserHandler) SetServiceStatus(c *gin.Context) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid service status reason"})
 			return
 		}
+		// geo_auto is valid for the COLUMN but not from a person. The location
+		// detector owns it end to end: it is the only writer, and its
+		// time-based lift keys on this reason, so a hand-written one would be a
+		// "manual" suspension that silently expires. An admin resume of it is
+		// also the detector's false-positive count, which a person's own
+		// suspensions would pollute. geo_anomaly is the human decision for the
+		// same evidence.
+		if reason == domain.DisabledGeoAutoSuspend {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Geo_auto is applied by the location detector only; use geo_anomaly for a manual geo suspension"})
+			return
+		}
 		if err := h.user.SetServiceSuspendedAndSync(c.Request.Context(), id, reason, strings.TrimSpace(req.Detail)); err != nil {
 			respondError(c, err)
 			return

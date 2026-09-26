@@ -18,6 +18,7 @@ import ErrorOutlineIcon from '@mui/icons-material/ErrorOutlined'
 import ScheduleIcon from '@mui/icons-material/Schedule'
 import SystemUpdateAltIcon from '@mui/icons-material/SystemUpdateAlt'
 import ShieldOutlinedIcon from '@mui/icons-material/ShieldOutlined'
+import PauseCircleOutlinedIcon from '@mui/icons-material/PauseCircleOutlined'
 import CheckCircleIcon from '@mui/icons-material/CheckCircle'
 import { useNavigate } from 'react-router'
 import { useTranslation } from 'react-i18next'
@@ -34,6 +35,10 @@ const ROUTE: Partial<Record<AlertType, string>> = {
   cert_expiring: '/admin/certs',
   panel_upgrade: '/admin/servers',
   login_security: '/admin/logs',
+  // Both geo entries are counts, not accounts: the Geo tab is where the
+  // accounts are listed, with the evidence beside each.
+  geo_anomaly: '/admin/logs?tab=geo',
+  geo_auto_suspended: '/admin/logs?tab=geo',
 }
 
 const PSP_RELEASES_URL = 'https://github.com/KazuhaHub/passwall-sub-panel/releases'
@@ -50,7 +55,12 @@ function typeIcon(type: AlertType, severity: AlertSeverity) {
     case 'psp_upgrade':
       return <SystemUpdateAltIcon fontSize="small" />
     case 'login_security':
+    case 'geo_anomaly':
       return <ShieldOutlinedIcon fontSize="small" />
+    case 'geo_auto_suspended':
+      // Not the shield: this entry says the panel already ACTED (paused the
+      // service), where the flag only asks for a look.
+      return <PauseCircleOutlinedIcon fontSize="small" />
     case 'node_health':
     default:
       return severity === 'error' ? <ErrorOutlineIcon fontSize="small" /> : <WarningAmberIcon fontSize="small" />
@@ -99,6 +109,10 @@ export default function NotificationBell() {
         return t('alerts.title.psp_upgrade', { version: a.latest_version, defaultValue: `面板新版本 ${a.latest_version} 可更新` })
       case 'login_security':
         return t('alerts.title.login_security', { count: a.count, defaultValue: `近期发生 ${a.count} 次登录锁定` })
+      case 'geo_anomaly':
+        return t('alerts.title.geo_anomaly', { count: a.count, defaultValue: `${a.count} 个账号被标记为异地并发` })
+      case 'geo_auto_suspended':
+        return t('alerts.title.geo_auto_suspended', { count: a.count, defaultValue: `${a.count} 个账号因异地并发被自动临时暂停` })
       default:
         return name
     }
