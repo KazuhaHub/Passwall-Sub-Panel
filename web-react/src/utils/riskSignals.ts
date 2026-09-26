@@ -99,10 +99,12 @@ function codeParams(sig: RiskSignal): Record<string, unknown> {
     }
     case 'usage_shift': {
       const ev = evidenceOf<UsageShiftEvidence>(sig)
-      // The series is 35 days, so that is what hourly history must cover,
-      // whatever the fetch window is.
+      // The series is 35 days, and hourly history must cover one more,
+      // whatever the fetch window is: the prune cuts at now minus the
+      // retention, so at 35 the series' first day is already partly gone
+      // (domain.EvaluateUsageShift's retention_short).
       return {
-        retention: ev.history_retention_days, needed: 35,
+        retention: ev.history_retention_days, needed: 36,
         over: ev.over_days, ratio: ev.ratio, history: ev.history_days,
       }
     }

@@ -116,15 +116,19 @@ func TestUsageShift_BaselineIgnoresDaysBeforeFirstUse(t *testing.T) {
 // Zeros AFTER the first day of use are real: the account existed and used
 // nothing. A median of zero makes every threshold zero, so the floor is what
 // keeps a light account's first real week from reading as a change — and
-// above the floor, a sustained rise from nothing is exactly the signal.
+// above the floor, a sustained rise from nothing is exactly the signal. A day
+// is over only ABOVE its threshold: four days at exactly the floor are not
+// four over-days.
 func TestUsageShift_ZeroMedianUsesTheFloor(t *testing.T) {
 	for _, c := range []struct {
 		recent int64
 		state  GeoState
 		code   RiskCode
+		over   int
 	}{
-		{4 * usageGiB, GeoStateFlagged, RiskCodeSustained},
-		{2 * usageGiB, GeoStateClean, RiskCodeWithin},
+		{4 * usageGiB, GeoStateFlagged, RiskCodeSustained, 4},
+		{2 * usageGiB, GeoStateClean, RiskCodeWithin, 0},
+		{3 * usageGiB, GeoStateClean, RiskCodeWithin, 0},
 	} {
 		user := usageDays(func(k int) int64 {
 			switch {
@@ -137,8 +141,8 @@ func TestUsageShift_ZeroMedianUsesTheFloor(t *testing.T) {
 		})
 		v, ev := EvaluateUsageShift(defaultUsagePolicy(), soloInput(user))
 		wantUsage(t, v, c.state, c.code)
-		if ev.Median != 0 {
-			t.Fatalf("median = %d, want 0", ev.Median)
+		if ev.Median != 0 || ev.OverDays != c.over {
+			t.Fatalf("recent days at %d: median %d, over days %d; want 0 and %d", c.recent, ev.Median, ev.OverDays, c.over)
 		}
 		for i, th := range ev.Thresholds {
 			if th != 3*usageGiB {
@@ -270,8 +274,11 @@ func TestUsageShift_OffIsDisabled(t *testing.T) {
 
 // The hourly rollup is pruned at traffic_history_days. Below 35, the oldest
 // baseline days are gone and read as zeros — a shortened, deflated baseline
-// that would accuse. Unknown, never clean: the series cannot be trusted. 0
-// means the rollup is never pruned.
+// that would accuse. Unknown, never clean: the series cannot be trusted. At
+// exactly 35 it still cannot: the prune cuts at now minus 35 days, an
+// instant, while the series starts at the local midnight 35 days ago, so
+// once today has begun the first day is already partly deleted. 36 keeps it
+// whole. 0 means the rollup is never pruned.
 func TestUsageShift_HistoryRetentionShorterThanTheSeriesIsUnknown(t *testing.T) {
 	user := steadyWithRecent(0, 1, 2, 3)
 	for _, c := range []struct {
@@ -281,7 +288,8 @@ func TestUsageShift_HistoryRetentionShorterThanTheSeriesIsUnknown(t *testing.T) 
 	}{
 		{30, GeoStateUnknown, RiskCodeRetentionShort},
 		{34, GeoStateUnknown, RiskCodeRetentionShort},
-		{35, GeoStateFlagged, RiskCodeSustained},
+		{35, GeoStateUnknown, RiskCodeRetentionShort},
+		{36, GeoStateFlagged, RiskCodeSustained},
 		{0, GeoStateFlagged, RiskCodeSustained},
 	} {
 		in := soloInput(user)

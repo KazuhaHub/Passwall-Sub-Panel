@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/netip"
 	"reflect"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -177,6 +178,47 @@ func shanghai(t *testing.T) *time.Location {
 	return loc
 }
 
+// midnightGap is a date whose 00:00 never happened: the zone springs forward
+// AT midnight, from 00:00 straight to 01:00. time.Date resolves that missing
+// midnight with the offset before the jump, to 23:00 of the day BEFORE.
+type midnightGap struct {
+	zone string
+	y    int
+	m    time.Month
+	d    int
+}
+
+var midnightGaps = []midnightGap{
+	{"America/Santiago", 2026, time.September, 6},
+	{"America/Havana", 2026, time.March, 8},
+}
+
+// load returns the zone, after checking the premise: its midnight on the
+// date really is missing. A tz database that moved the jump would otherwise
+// turn every test built on it into a test of an ordinary day.
+func (g midnightGap) load(t *testing.T) *time.Location {
+	t.Helper()
+	loc, err := time.LoadLocation(g.zone)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, d := time.Date(g.y, g.m, g.d, 0, 0, 0, 0, loc).Date(); d == g.d {
+		t.Fatalf("premise: %s has a midnight on %d-%02d-%02d; the tz database moved the jump", g.zone, g.y, g.m, g.d)
+	}
+	return loc
+}
+
+// at is hour:minute local on the day k days after the gap date (negative:
+// before). Every wall time used with it exists: the gap is only 00:00–01:00.
+func (g midnightGap) at(loc *time.Location, k, hour, minute int) time.Time {
+	return time.Date(g.y, g.m, g.d+k, hour, minute, 0, 0, loc)
+}
+
+// date is the gap date plus k days, as the evidence writes it.
+func (g midnightGap) date(k int) string {
+	return time.Date(g.y, g.m, g.d+k, 12, 0, 0, 0, time.UTC).Format("2006-01-02")
+}
+
 func usersInGroups(groups ...int64) []*domain.User {
 	out := make([]*domain.User, len(groups))
 	for i, g := range groups {
@@ -199,6 +241,8 @@ type harness struct {
 	// The login log and the landing addresses, wired only when set too.
 	logins  *fakeLogins
 	landing func() []netip.Addr
+	// now is the run's clock; zero is refreshNow.
+	now time.Time
 }
 
 func newHarness(users []*domain.User) *harness {
@@ -213,7 +257,12 @@ func newHarness(users []*domain.User) *harness {
 func (h *harness) service() *Service {
 	d := Deps{
 		Users: h.users, Store: h.store, Settings: h.settings, Traffic: h.traffic,
-		Now:     func() time.Time { return refreshNow },
+		Now: func() time.Time {
+			if !h.now.IsZero() {
+				return h.now
+			}
+			return refreshNow
+		},
 		IsInfra: h.isInfra, InfraLoaded: h.infraLoaded,
 	}
 	// A nil *fakeScanner in the interface would be a non-nil dependency.
@@ -323,6 +372,94 @@ func TestRefresh_BucketsHourlyTrafficIntoPanelDays(t *testing.T) {
 	if len(h.traffic.userCalls) != 1 || !h.traffic.userCalls[0].since.Equal(wantSince) || !h.traffic.userCalls[0].until.Equal(wantUntil) {
 		t.Fatalf("hourly reads %+v, want one over [%s, %s)", h.traffic.userCalls, wantSince, wantUntil)
 	}
+}
+
+// The usage series survives a date without a midnight wherever it falls in
+// it. Anchored at resolved midnights, the date read as the day before:
+//   - as the series' first day, every bucket was counted from the evening
+//     before — that evening became day 0, every day moved one column late,
+//     and yesterday fell off the end;
+//   - as its last day, the columns were labelled as ending the day before;
+//   - as today, the read stopped at 23:00 the evening before, and
+//     yesterday's last hour was never read. The fake hands every bucket out
+//     whatever the range, so the range itself is checked: the store cuts
+//     exactly there.
+func TestRefresh_UsageDaysSurviveADateWithoutAMidnight(t *testing.T) {
+	type bucket struct {
+		day, hour int // relative to the gap date, local
+		bytes     int64
+	}
+	for _, g := range midnightGaps {
+		for _, c := range []struct {
+			name    string
+			today   int // today, relative to the gap date
+			buckets []bucket
+			series  map[int]int64 // the nonzero series days
+			endDate string
+		}{
+			{"first day", 35, []bucket{{-1, 23, 888}, {0, 1, 7}, {34, 12, 250}}, map[int]int64{0: 7, 34: 250}, g.date(34)},
+			{"last day", 1, []bucket{{0, 12, 5}}, map[int]int64{34: 5}, g.date(0)},
+			{"today", 0, []bucket{{-1, 23, 9}}, map[int]int64{34: 9}, g.date(-1)},
+		} {
+			t.Run(g.zone+"/"+c.name, func(t *testing.T) {
+				loc := g.load(t)
+				h := newHarness(usersInGroups(0))
+				h.settings.global.Timezone = g.zone
+				h.now = g.at(loc, c.today, 12, 0)
+				var rows []domain.HourlyTraffic
+				for _, b := range c.buckets {
+					rows = append(rows, domain.HourlyTraffic{BucketStart: g.at(loc, b.day, b.hour, 0).UTC(), TotalBytes: b.bytes})
+				}
+				h.traffic.byUser = map[int64][]domain.HourlyTraffic{1: rows}
+				if err := h.service().RefreshOnce(t.Context()); err != nil {
+					t.Fatal(err)
+				}
+				r := h.store.saved(t)[1][domain.RiskKindUsageShift]
+				var ev domain.UsageShiftEvidence
+				if err := json.Unmarshal(r.Evidence, &ev); err != nil {
+					t.Fatalf("evidence %q: %v (verdict %s/%s)", r.Evidence, err, r.State, r.Code)
+				}
+				want := make([]int64, domain.RiskUsageSeriesDays)
+				for k, b := range c.series {
+					want[k] = b
+				}
+				if !reflect.DeepEqual(ev.Series, want) {
+					t.Fatalf("series = %v\nwant     %v", ev.Series, want)
+				}
+				if ev.EndDate != c.endDate {
+					t.Fatalf("end date = %q, want %q (yesterday)", ev.EndDate, c.endDate)
+				}
+				// Both reads cover the 35 days as the store cuts them: from no
+				// later than day 0's first instant, up to no earlier than
+				// today's.
+				from := dayStartOf(t, g.at(loc, c.today-domain.RiskUsageSeriesDays, 12, 0), loc)
+				to := dayStartOf(t, g.at(loc, c.today, 12, 0), loc)
+				for _, call := range slices.Concat(h.traffic.fleetCalls, h.traffic.userCalls) {
+					if call.since.After(from) || call.until.Before(to) {
+						t.Fatalf("hourly read [%s, %s) does not cover the series [%s, %s)",
+							call.since.In(loc), call.until.In(loc), from, to)
+					}
+				}
+			})
+		}
+	}
+}
+
+// dayStartOf is the first instant of noon's local date, found by walking back
+// minute by minute: slow and obviously right, as a test's own answer should be.
+func dayStartOf(t *testing.T, noon time.Time, loc *time.Location) time.Time {
+	t.Helper()
+	y, m, d := noon.In(loc).Date()
+	at := noon
+	for range 36 * 60 {
+		prev := at.Add(-time.Minute)
+		if py, pm, pd := prev.In(loc).Date(); py != y || pm != m || pd != d {
+			return at
+		}
+		at = prev
+	}
+	t.Fatalf("no start found for %s", noon)
+	return time.Time{}
 }
 
 // A group that switched the signal off gets "disabled" with no evidence —

@@ -397,6 +397,42 @@ func TestRefresh_DayMasksUsePanelTimezone(t *testing.T) {
 	}
 }
 
+// A window whose first day is a date without a midnight still starts on that
+// date. Anchored at the resolved 00:00 — 23:00 the evening before — every
+// day was counted from the day before: the evening's fetch became day 0, the
+// first day's became day 1, and TODAY's fell off the end of the window, for
+// every account, on every run of that day. Today counts (day 6). The scan may
+// start early, since each row is still placed by its own date, but never
+// after the first day's first instant: the store cuts exactly at the bound.
+func TestRefresh_WindowStartsOnADateWithoutAMidnight(t *testing.T) {
+	for _, g := range midnightGaps {
+		t.Run(g.zone, func(t *testing.T) {
+			loc := g.load(t)
+			h := newSpreadHarness(usersInGroups(0), []domain.SubLog{
+				phone(1, ipHomeGD)(g.at(loc, -1, 23, 30)), // the evening before: outside the window
+				phone(1, ipHomeGD)(g.at(loc, 0, 1, 30)),   // just after the jump: day 0
+				phone(1, ipHomeGD)(g.at(loc, 6, 10, 0)),   // today: day 6
+			})
+			h.settings.global.Timezone = g.zone
+			h.now = g.at(loc, 6, 12, 0)
+			if err := h.service().RefreshOnce(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			_, ev := spreadRow(t, h, 1)
+			if ev.WindowStart != g.date(0) {
+				t.Fatalf("window start = %q, want %q", ev.WindowStart, g.date(0))
+			}
+			if len(ev.Provinces) != 1 || ev.Provinces[0].Days != 1|1<<6 {
+				t.Fatalf("provinces %+v, want Guangdong on days 0 and 6 only (mask %d)", ev.Provinces, 1|1<<6)
+			}
+			first := dayStartOf(t, g.at(loc, 0, 12, 0), loc) // the jump, 01:00
+			if len(h.scanner.calls) != 1 || h.scanner.calls[0].since.After(first) {
+				t.Fatalf("scans %+v, want one from no later than %s", h.scanner.calls, first)
+			}
+		})
+	}
+}
+
 // sub_spread reuses the group's own geo policy (V3-D3): a group that allows
 // two provinces allows two groups of them, while the global tolerance of one
 // still applies to everyone else.

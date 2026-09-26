@@ -21,9 +21,8 @@ import (
 // even while the rollup is unreadable. One account's failed read costs only
 // that account's row.
 func (s *Service) usageShift(ctx context.Context, r *refresh) error {
-	bounds := usageDayBounds(r.now, r.loc)
-	since, until := bounds[0], bounds[domain.RiskUsageSeriesDays]
-	endDate := paneltz.DateString(bounds[domain.RiskUsageSeriesDays-1], r.loc)
+	day0, last, since, until := usageSpan(r.now, r.loc)
+	endDate := paneltz.DateString(last, r.loc)
 
 	var fleet [domain.RiskUsageSeriesDays]int64
 	fleetOK := true
@@ -35,7 +34,7 @@ func (s *Service) usageShift(ctx context.Context, r *refresh) error {
 		r.partial = true
 		log.Warn("risk signals: fleet hourly traffic unreadable; usage_shift keeps its previous rows", "err", err)
 	} else {
-		fleet = dailyTotals(buckets, since, r.loc)
+		fleet = dailyTotals(buckets, day0, r.loc)
 	}
 
 	for _, u := range r.users {
@@ -65,7 +64,7 @@ func (s *Service) usageShift(ctx context.Context, r *refresh) error {
 		}
 		v, ev := domain.EvaluateUsageShift(p, domain.UsageShiftInput{
 			EndDate:              endDate,
-			User:                 dailyTotals(buckets, since, r.loc),
+			User:                 dailyTotals(buckets, day0, r.loc),
 			Fleet:                fleet,
 			HistoryRetentionDays: r.global.TrafficHistoryDays,
 		})
@@ -80,25 +79,30 @@ func usagePolicy(p domain.RiskPolicy) domain.UsageShiftPolicy {
 	return domain.UsageShiftPolicy{Off: p.UsageShiftOff, Ratio: p.UsageRatio, FloorBytes: p.UsageFloorBytes}
 }
 
-// usageDayBounds returns the local midnights b_0..b_35 of the 35 whole days
-// before today: day k is [b_k, b_k+1), day 34 is yesterday, b_35 is the start
-// of today. Today is left out because it is not over — a half day always
-// reads low.
-func usageDayBounds(now time.Time, loc *time.Location) [domain.RiskUsageSeriesDays + 1]time.Time {
-	y, m, d := now.In(loc).Date()
-	var b [domain.RiskUsageSeriesDays + 1]time.Time
-	for k := range b {
-		b[k] = time.Date(y, m, d-domain.RiskUsageSeriesDays+k, 0, 0, 0, 0, loc)
-	}
-	return b
+// usageSpan places the series: the 35 whole panel-local days before today,
+// day 34 being yesterday. Today is left out because it is not over — a half
+// day always reads low.
+//
+// day0 and last are the first and last day as DATES, each carried as its
+// local noon (see localNoon): day0 is what every bucket's day is counted
+// from, last is the evidence's EndDate. Anchored at local midnights instead,
+// a date whose 00:00 the clocks skipped read as the day before — as day 0 it
+// moved every bucket one day late and dropped yesterday; as the last day it
+// mislabelled every column. [since, until) is what the store reads, from day
+// 0's first instant to today's (see dayStart): with today's resolved
+// midnight as its end, yesterday's last hour was never read.
+func usageSpan(now time.Time, loc *time.Location) (day0, last, since, until time.Time) {
+	day0 = localNoon(now, -domain.RiskUsageSeriesDays, loc)
+	last = localNoon(now, -1, loc)
+	return day0, last, dayStart(day0, loc), dayStart(now, loc)
 }
 
 // dailyTotals sums hourly buckets into the series' days by each bucket's
-// START, read in the panel's zone. The rollup stores UTC bucket starts, so a
-// UTC date would put a Shanghai evening on the wrong day. In a zone whose
-// offset is not whole hours, a bucket straddling midnight counts to the day
-// it starts in. Buckets outside the 35 days are dropped whatever the reader
-// returned.
+// START, read in the panel's zone; day0 is any instant on the first day, and
+// only its date is read. The rollup stores UTC bucket starts, so a UTC date
+// would put a Shanghai evening on the wrong day. In a zone whose offset is
+// not whole hours, a bucket straddling midnight counts to the day it starts
+// in. Buckets outside the 35 days are dropped whatever the reader returned.
 func dailyTotals(buckets []domain.HourlyTraffic, day0 time.Time, loc *time.Location) [domain.RiskUsageSeriesDays]int64 {
 	var out [domain.RiskUsageSeriesDays]int64
 	for _, b := range buckets {

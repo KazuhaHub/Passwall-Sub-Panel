@@ -86,9 +86,13 @@ type UsageShiftEvidence struct {
 // match wins:
 //
 //  1. Off → disabled / signal_off, no evidence.
-//  2. 0 < HistoryRetentionDays < 35 → unknown / retention_short. The rollup
+//  2. 0 < HistoryRetentionDays ≤ 35 → unknown / retention_short. The rollup
 //     is pruned before the series starts, so its oldest days read as zeros:
-//     a deflated baseline that would accuse. Unknown, never clean.
+//     a deflated baseline that would accuse. Unknown, never clean. 35 is
+//     short too: the prune cuts at now minus the retention, an instant,
+//     while the series starts at a local midnight 35 days back, so once
+//     today has begun the first day is already partly deleted. It takes 36
+//     to keep the whole series.
 //  3. every recent day 0 → idle / no_usage, no evidence.
 //  4. fewer than 14 history days → unknown / warmup.
 //  5. over on 4+ recent days → flagged / sustained.
@@ -132,7 +136,7 @@ func EvaluateUsageShift(p UsageShiftPolicy, in UsageShiftInput) (RiskVerdict, *U
 		Over:                 []bool{},
 		FleetFactors:         []float64{},
 	}
-	if in.HistoryRetentionDays > 0 && in.HistoryRetentionDays < RiskUsageSeriesDays {
+	if in.HistoryRetentionDays > 0 && in.HistoryRetentionDays <= RiskUsageSeriesDays {
 		return RiskVerdict{State: GeoStateUnknown, Code: RiskCodeRetentionShort}, ev
 	}
 	recent := in.User[RiskUsageBaselineDays:]

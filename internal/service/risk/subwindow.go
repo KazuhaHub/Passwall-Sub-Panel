@@ -81,25 +81,29 @@ func windowDays(retention int) int {
 	return domain.RiskWindowDays
 }
 
-// readWindow streams the fetch log from the first window day's local
-// midnight and folds every row of a listed account into its window.
+// readWindow streams the fetch log from the first window day's first
+// instant and folds every row of a listed account into its window.
 //
 // Days are panel-local calendar days, cut in Go on each row's instant: the
 // store's bound is only a lower bound, and a row stamped after now (a clock
 // step) belongs to no window day. Rows of accounts the user list does not
 // hold are skipped entirely — they are not judged, and they must not count
 // toward another account's shared exit either.
+//
+// Day 0 is carried as its local noon, never its midnight (see localNoon): on
+// a date whose 00:00 the clocks skipped, a midnight anchor read as the day
+// before, and every fetch of the window's last day — today's — fell out of
+// it. The scan starts at the day's real first instant (see dayStart).
 func (s *Service) readWindow(ctx context.Context, r *refresh) (*fetchWindow, error) {
 	w := &fetchWindow{days: windowDays(r.global.SubLogRetentionDays), users: map[int64]*userWindow{}}
-	y, m, d := r.now.In(r.loc).Date()
-	day0 := time.Date(y, m, d-(w.days-1), 0, 0, 0, 0, r.loc)
+	day0 := localNoon(r.now, -(w.days - 1), r.loc)
 	w.start = paneltz.DateString(day0, r.loc)
 
 	listed := make(map[int64]bool, len(r.users))
 	for _, u := range r.users {
 		listed[u.ID] = true
 	}
-	err := s.d.SubLogs.ScanSince(ctx, day0, scanBatch, func(rows []domain.SubLog) error {
+	err := s.d.SubLogs.ScanSince(ctx, dayStart(day0, r.loc), scanBatch, func(rows []domain.SubLog) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
@@ -118,7 +122,8 @@ func (s *Service) readWindow(ctx context.Context, r *refresh) (*fetchWindow, err
 	return w, nil
 }
 
-// add folds one fetch into its account's window.
+// add folds one fetch into its account's window. day0 is any instant on the
+// window's first date; only its date is read.
 func (w *fetchWindow) add(row *domain.SubLog, day0 time.Time, loc *time.Location) {
 	day := domain.CivilDaysBetween(day0, row.AccessedAt, loc)
 	if day < 0 || day >= w.days {

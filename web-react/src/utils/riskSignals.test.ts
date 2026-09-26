@@ -117,7 +117,7 @@ const evidence: Record<RiskKind, object> = {
     recurrent: 4, distinct: 5, devices: [], fetches_with_hwid: 9, fetches_without: 1, clients: [],
   },
   usage_shift: {
-    v: 1, end_date: '2026-09-24', history_retention_days: 30, series: [], history_days: 9, median: 0,
+    v: 1, end_date: '2026-09-24', history_retention_days: 35, series: [], history_days: 9, median: 0,
     ratio: 3, floor: 3 * 2 ** 30, thresholds: [], over: [], over_days: 4, fleet_factors: [],
   },
   login_country: {
@@ -163,8 +163,10 @@ describe('riskCodeText', () => {
     expect(text('devices', 'over')).toBe('4 台常用设备（上限 3）')
     expect(text('devices', 'over_building')).toBe('共 5 台设备，其中常用 4 台（上限 3）')
     expect(text('devices', 'within')).toBe('5 台设备，在上限 3 内')
-    // Usage needs 35 days of hourly history, whatever the fetch window is.
-    expect(text('usage_shift', 'retention_short')).toBe('流量历史只保留 30 天，少于判断所需的 35 天')
+    // Usage needs 36 days of hourly history, whatever the fetch window is:
+    // the 35-day series plus the day the prune is partway through, so 35
+    // itself is short.
+    expect(text('usage_shift', 'retention_short')).toBe('流量历史只保留 35 天，少于判断所需的 36 天')
     expect(text('usage_shift', 'warmup')).toBe('用量历史只有 9 天，满 14 天后开始判断')
     expect(text('usage_shift', 'sustained')).toBe('最近 7 天有 4 天超过自身基线的 3 倍')
     expect(text('login_country', 'learning')).toBe('之前的登录不足 3 次，还在学习')
