@@ -163,6 +163,39 @@ func TestScopeSettingsHandler_RejectsHWIDCaptureOff(t *testing.T) {
 	}
 }
 
+// The eight risk-signal knobs are per-group, the counterpart of the refusal
+// above: a group whose members legitimately trip one signal gets that signal
+// switched off, or its tolerance raised, without touching the fleet. A knob
+// missing from OverridableScopeKeys would be refused here with a 400 while
+// the group editor offered it — so every one is written through the handler.
+func TestScopeSettingsHandler_AcceptsRiskKnobs(t *testing.T) {
+	for name, value := range map[string]string{
+		"min_days":          "4",
+		"max_devices":       "5",
+		"usage_ratio":       "2.5",
+		"usage_floor_gb":    "6",
+		"sub_spread_off":    "1",
+		"devices_off":       "1",
+		"usage_shift_off":   "1",
+		"login_country_off": "1",
+	} {
+		t.Run(name, func(t *testing.T) {
+			repo := newFakeScopeRepo()
+			h := NewAdminScopeSettingsHandler(fakeScopeGroups{exists: map[int64]bool{5: true}}, repo)
+			r := scopeRouter(h)
+			body, _ := json.Marshal(setScopeOverrideRequest{Type: "risk", Name: name, Value: value})
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, httptest.NewRequest(http.MethodPut, "/api/admin/groups/5/scope-settings", bytes.NewReader(body)))
+			if w.Code != http.StatusOK {
+				t.Fatalf("PUT risk.%s = %d, want 200; body=%s", name, w.Code, w.Body.String())
+			}
+			if got, ok := repo.rows["risk."+name]; !ok || got.Value != value {
+				t.Errorf("risk.%s override not stored as %q: %+v", name, value, repo.rows)
+			}
+		})
+	}
+}
+
 func TestScopeSettingsHandler_GroupNotFound(t *testing.T) {
 	h := NewAdminScopeSettingsHandler(fakeScopeGroups{exists: map[int64]bool{}}, newFakeScopeRepo())
 	r := scopeRouter(h)

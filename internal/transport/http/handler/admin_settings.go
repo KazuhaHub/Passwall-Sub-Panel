@@ -108,6 +108,21 @@ type settingsDTO struct {
 	// Risk signals (observe only). Capture of the device a subscription
 	// client declares; global only, false = capture on.
 	RiskHWIDCaptureOff bool `json:"risk_hwid_capture_off"`
+	// The four signal switches (negative: false = signal on) and the shared
+	// tolerances, all per-group overridable; see ports.UISettings for why
+	// each exists. 0 in a number means "never configured". Not validated on
+	// PUT, for the reason Put gives for the geo knobs:
+	// domain.RiskPolicyFromSettings is the one place a stored value is
+	// interpreted, and it repairs nonsense toward NOT accusing (a ratio under
+	// 1.5 is raised, MinDays is clamped to the window, 0 is unset).
+	RiskSubSpreadOff    bool    `json:"risk_sub_spread_off"`
+	RiskDevicesOff      bool    `json:"risk_devices_off"`
+	RiskUsageShiftOff   bool    `json:"risk_usage_shift_off"`
+	RiskLoginCountryOff bool    `json:"risk_login_country_off"`
+	RiskMinDays         int     `json:"risk_min_days"`
+	RiskMaxDevices      int     `json:"risk_max_devices"`
+	RiskUsageRatio      float64 `json:"risk_usage_ratio"`
+	RiskUsageFloorGB    int     `json:"risk_usage_floor_gb"`
 	// Geo IP (access-log region display, offline .mmdb).
 	GeoIPEnabled             bool   `json:"geo_ip_enabled"`
 	GeoIPDBFile              string `json:"geo_ip_db_file"`
@@ -355,6 +370,14 @@ func settingsToDTO(s ports.UISettings) settingsDTO {
 		GeoAnomalyBanAfterPolls:      s.GeoAnomalyBanAfterPolls,
 		GeoAnomalyBanDurationMinutes: s.GeoAnomalyBanDurationMinutes,
 		RiskHWIDCaptureOff:           s.RiskHWIDCaptureOff,
+		RiskSubSpreadOff:             s.RiskSubSpreadOff,
+		RiskDevicesOff:               s.RiskDevicesOff,
+		RiskUsageShiftOff:            s.RiskUsageShiftOff,
+		RiskLoginCountryOff:          s.RiskLoginCountryOff,
+		RiskMinDays:                  s.RiskMinDays,
+		RiskMaxDevices:               s.RiskMaxDevices,
+		RiskUsageRatio:               s.RiskUsageRatio,
+		RiskUsageFloorGB:             s.RiskUsageFloorGB,
 
 		NodeTaskOfflineReconcileDays: policy.OfflineReconcileDays,
 		NodeTaskBackupRestoreDays:    policy.BackupRestoreDays,
@@ -463,6 +486,14 @@ func (h *AdminSettingsHandler) Put(c *gin.Context) {
 		GeoAnomalyBanAfterPolls:       req.GeoAnomalyBanAfterPolls,
 		GeoAnomalyBanDurationMinutes:  req.GeoAnomalyBanDurationMinutes,
 		RiskHWIDCaptureOff:            req.RiskHWIDCaptureOff,
+		RiskSubSpreadOff:              req.RiskSubSpreadOff,
+		RiskDevicesOff:                req.RiskDevicesOff,
+		RiskUsageShiftOff:             req.RiskUsageShiftOff,
+		RiskLoginCountryOff:           req.RiskLoginCountryOff,
+		RiskMinDays:                   req.RiskMinDays,
+		RiskMaxDevices:                req.RiskMaxDevices,
+		RiskUsageRatio:                req.RiskUsageRatio,
+		RiskUsageFloorGB:              req.RiskUsageFloorGB,
 		GeoIPEnabled:                  req.GeoIPEnabled,
 		GeoIPDBFile:                   strings.TrimSpace(req.GeoIPDBFile),
 		GeoIPAutoUpdate:               req.GeoIPAutoUpdate,

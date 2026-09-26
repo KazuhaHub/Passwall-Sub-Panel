@@ -301,3 +301,66 @@ func TestScopedSettings_GeoTierAndBanKeysOverridable(t *testing.T) {
 		t.Error("the global geo policy must be unaffected by a group override")
 	}
 }
+
+// TestScopedSettings_RiskKeysOverridable: the eight risk-signal knobs resolve
+// per group, which is how one group has a signal it legitimately trips
+// switched off, or its tolerance raised, while the fleet keeps the default.
+// Bites if any of the eight is missing from OverridableScopeKeys: the row is
+// stored and the resolver silently skips it, so the group editor would show
+// a value the worker never judges with.
+//
+// Device capture is the deliberate exception: /sub reads it from the global
+// settings, and whether the panel records a device identifier at all is a
+// panel-wide decision. A stray group row for it must not take effect.
+func TestScopedSettings_RiskKeysOverridable(t *testing.T) {
+	global, scope, resolver := newScopedTestRepos(t)
+	ctx := context.Background()
+
+	for _, o := range []ports.ScopeOverride{
+		{Type: "risk", Name: "sub_spread_off", Value: "1"},
+		{Type: "risk", Name: "devices_off", Value: "1"},
+		{Type: "risk", Name: "usage_shift_off", Value: "1"},
+		{Type: "risk", Name: "login_country_off", Value: "1"},
+		{Type: "risk", Name: "min_days", Value: "4"},
+		{Type: "risk", Name: "max_devices", Value: "5"},
+		{Type: "risk", Name: "usage_ratio", Value: "2.5"},
+		{Type: "risk", Name: "usage_floor_gb", Value: "6"},
+		// Written straight to the repo, which (unlike the admin handler)
+		// does not gate on the overridable set.
+		{Type: "risk", Name: "hwid_capture_off", Value: "1"},
+	} {
+		if err := scope.SetOverride(ctx, "group", 1, o); err != nil {
+			t.Fatalf("set override %s: %v", o.Name, err)
+		}
+	}
+
+	g, err := resolver.LoadForGroup(ctx, 1, ports.UISettings{})
+	if err != nil {
+		t.Fatalf("LoadForGroup: %v", err)
+	}
+	for _, c := range []struct {
+		key       string
+		got, want any
+	}{
+		{"sub_spread_off", g.RiskSubSpreadOff, true},
+		{"devices_off", g.RiskDevicesOff, true},
+		{"usage_shift_off", g.RiskUsageShiftOff, true},
+		{"login_country_off", g.RiskLoginCountryOff, true},
+		{"min_days", g.RiskMinDays, 4},
+		{"max_devices", g.RiskMaxDevices, 5},
+		{"usage_ratio", g.RiskUsageRatio, 2.5},
+		{"usage_floor_gb", g.RiskUsageFloorGB, 6},
+	} {
+		if c.got != c.want {
+			t.Errorf("group override risk.%s must apply: got %v, want %v", c.key, c.got, c.want)
+		}
+	}
+	if g.RiskHWIDCaptureOff {
+		t.Error("device capture is global only; a group row must not turn it off")
+	}
+
+	gl, _ := global.Load(ctx, ports.UISettings{})
+	if gl.RiskSubSpreadOff || gl.RiskMinDays != 0 || gl.RiskUsageRatio != 0 {
+		t.Error("the global risk policy must be unaffected by a group override")
+	}
+}
