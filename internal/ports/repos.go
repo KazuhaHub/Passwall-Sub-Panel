@@ -75,6 +75,14 @@ type AuthEventFilter struct {
 	Until   *time.Time
 	// Search is a case-insensitive substring matched across upn / ip / ua / reason.
 	Search string
+	// AfterID, when positive, keeps only the events with id > AfterID. With
+	// SortBy "id" ascending and Page 1 it is a keyset cursor: pass the last
+	// id of the previous page. Offset paging (Page n) is not stable while
+	// the hourly retention prune deletes the oldest rows between two pages
+	// — every later row moves up past the page boundary and is never read —
+	// and a cursor on the primary key is. Internal readers only; the admin
+	// API does not expose it.
+	AfterID int64
 }
 
 type SubLogFilter struct {

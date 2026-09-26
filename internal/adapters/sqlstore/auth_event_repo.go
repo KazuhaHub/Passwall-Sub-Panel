@@ -56,6 +56,13 @@ func (r *authEventRepo) List(ctx context.Context, filter ports.AuthEventFilter) 
 	if filter.Until != nil {
 		q = q.Where("at <= ?", *filter.Until)
 	}
+	// The keyset cursor (see ports.AuthEventFilter.AfterID): a plain
+	// comparison on the primary key, so it reads the same in all three
+	// dialects and rides the key's own index. It goes on q, not on the
+	// paged query alone, so a COUNT for the page counts the same rows.
+	if filter.AfterID > 0 {
+		q = q.Where("id > ?", filter.AfterID)
+	}
 	// `at` is non-unique under bursts, so pin "at, id" (see auditRepo.List).
 	if filter.SortBy == "" {
 		filter.SortBy = "at"

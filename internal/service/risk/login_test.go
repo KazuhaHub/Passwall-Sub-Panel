@@ -18,17 +18,22 @@ import (
 // ---- login-log fake --------------------------------------------------------
 
 // fakeLogins serves the authentication-event log the way the repository
-// does: filtered by outcome, ordered by the sort it is asked for (its default
-// otherwise: newest first), and paged with the repository's cap — a page
-// size above 200 is served as 200, as applyPagination does. The since bound
-// is NOT applied, like the scanner's: the service must cut the lookback
-// itself. afterPage runs once each page has been served, so a test can land
-// a new login between two pages.
+// does: filtered by outcome and by the keyset cursor (id > AfterID), ordered
+// by the sort it is asked for (its default otherwise: newest first), and
+// paged by offset with the repository's cap — a page size above 200 is
+// served as 200, as applyPagination does. The since bound is NOT applied,
+// like the scanner's: the service must cut the lookback itself. afterPage
+// runs once each read has been served, with the number of that read, so a
+// test can land a new login, or prune old ones, between two pages.
 type fakeLogins struct {
 	events    []*domain.AuthEvent
 	err       error
 	calls     []ports.AuthEventFilter
-	afterPage func(page int)
+	afterPage func(read int)
+	lastID    int64
+	// ignoreCursor serves every read as if AfterID were 0: a store that
+	// lost the cursor.
+	ignoreCursor bool
 }
 
 func (f *fakeLogins) List(_ context.Context, filter ports.AuthEventFilter) ([]*domain.AuthEvent, int64, error) {
@@ -38,6 +43,9 @@ func (f *fakeLogins) List(_ context.Context, filter ports.AuthEventFilter) ([]*d
 	}
 	var match []*domain.AuthEvent
 	for _, e := range f.events {
+		if !f.ignoreCursor && filter.AfterID > 0 && e.ID <= filter.AfterID {
+			continue
+		}
 		if filter.Outcome == "" || string(e.Outcome) == filter.Outcome {
 			match = append(match, e)
 		}
@@ -60,17 +68,33 @@ func (f *fakeLogins) List(_ context.Context, filter ports.AuthEventFilter) ([]*d
 	}
 	out := append([]*domain.AuthEvent(nil), match...)
 	if f.afterPage != nil {
-		f.afterPage(max(filter.Page, 1))
+		f.afterPage(len(f.calls))
 	}
 	return out, total, nil
 }
 
-// add appends events, numbering them after the ones already there.
+// add appends events, numbering them after every one ever added: ids only
+// grow, and a pruned id is never reused.
 func (f *fakeLogins) add(events ...*domain.AuthEvent) {
 	for _, e := range events {
-		e.ID = int64(len(f.events) + 1)
+		f.lastID++
+		e.ID = f.lastID
 		f.events = append(f.events, e)
 	}
+}
+
+// deleteBefore drops the events older than cutoff, as the hourly
+// retention prune does (AuthEventRepo.DeleteBefore), and says how many.
+func (f *fakeLogins) deleteBefore(cutoff time.Time) int {
+	kept := f.events[:0]
+	for _, e := range f.events {
+		if !e.At.Before(cutoff) {
+			kept = append(kept, e)
+		}
+	}
+	n := len(f.events) - len(kept)
+	f.events = kept
+	return n
 }
 
 // ---- fixtures ----------------------------------------------------------------
@@ -197,8 +221,8 @@ func TestRefresh_LoginCountryJudgesTheLogins(t *testing.T) {
 		t.Fatalf("read the login log %d times, want one short page", len(h.logins.calls))
 	}
 	c := h.logins.calls[0]
-	if c.Outcome != string(domain.AuthOutcomeSuccess) || c.SortBy != "id" || c.SortDir != "asc" || c.PageSize != 200 || c.Page != 1 {
-		t.Fatalf("login read %+v, want successes by id ascending, 200 a page from page 1", c)
+	if c.Outcome != string(domain.AuthOutcomeSuccess) || c.SortBy != "id" || c.SortDir != "asc" || c.PageSize != 200 || c.Page != 1 || c.AfterID != 0 {
+		t.Fatalf("login read %+v, want successes by id ascending, 200 a page from the first id", c)
 	}
 	if c.Since == nil || c.Since.After(refreshNow.Add(-90*day)) {
 		t.Fatalf("login read since %v, want a bound at or before 90 days back", c.Since)
@@ -305,15 +329,16 @@ func TestRefresh_LookbackFollowsAuthEventRetention(t *testing.T) {
 // more and stopped on a short page would read one page and stop. Every
 // login is read. Ascending ids keep the pages stable while a login lands
 // between two of them — newest-first paging would read one row twice and
-// never see the new one.
+// never see the new one. Each read is the first page after the last id
+// the one before it served: a keyset walk, never page n by offset.
 func TestRefresh_LoginPagesAreAllRead(t *testing.T) {
 	var events []*domain.AuthEvent
 	for i := range 450 {
 		events = append(events, signIn(1, ipHomeGD, time.Duration(i+2)*4*time.Hour))
 	}
 	h := newLoginHarness(t, usersInGroups(0), events...)
-	h.logins.afterPage = func(page int) {
-		if page == 1 {
+	h.logins.afterPage = func(read int) {
+		if read == 1 {
 			h.logins.add(signIn(1, ipTokyo, time.Minute))
 		}
 	}
@@ -328,10 +353,61 @@ func TestRefresh_LoginPagesAreAllRead(t *testing.T) {
 	if len(h.logins.calls) != 3 {
 		t.Fatalf("read %d pages, want 3 (200, 200, 51)", len(h.logins.calls))
 	}
+	// Ids 1..450, then the new login as 451: the reads start after 0, 200
+	// and 400.
 	for i, c := range h.logins.calls {
-		if c.Page != i+1 || c.PageSize > 200 || c.SortBy != "id" || c.SortDir != "asc" {
-			t.Fatalf("page read %d = %+v, want page %d of at most 200 by id ascending", i, c, i+1)
+		if after := int64(i * 200); c.Page != 1 || c.AfterID != after || c.PageSize > 200 || c.SortBy != "id" || c.SortDir != "asc" {
+			t.Fatalf("read %d = %+v, want the first page after id %d, at most 200 by id ascending", i, c, after)
 		}
+	}
+}
+
+// The hourly retention prune deletes the logins older than the retention
+// while a run may be between two pages, and those are the lowest ids of the
+// read: the store's bound is a day wider than the lookback, so the band the
+// prune cuts lies inside it. Paged by offset, the second page would then
+// start that many rows late, and the rows the prune moved up past the
+// boundary would never be read — here the one earlier login from Japan,
+// which would turn today's login from Japan into a new country: an
+// accusation from missing data. Each page is read after the last id of the
+// one before, so every login that survives the prune is read.
+func TestRefresh_LoginPagesSurviveARetentionPruneBetweenThem(t *testing.T) {
+	var events []*domain.AuthEvent
+	// 50 logins from the band the prune cuts: older than the 90-day
+	// lookback, younger than the store's bound a day before it.
+	for i := range 50 {
+		events = append(events, signIn(1, ipHomeGD, 90*day+time.Duration(50-i)*10*time.Minute))
+	}
+	// 400 logins from home, oldest first, before the recent days; the 170th
+	// of them (id 220, on the rows page 2 by offset would skip) is the one
+	// earlier login from Tokyo.
+	for i := range 400 {
+		ip := ipHomeGD
+		if i == 169 {
+			ip = ipTokyo
+		}
+		events = append(events, signIn(1, ip, 8*day+time.Duration(400-i)*3*time.Hour))
+	}
+	h := newLoginHarness(t, usersInGroups(0), append(events, signIn(1, ipTokyo, day))...)
+	pruned := 0
+	h.logins.afterPage = func(read int) {
+		if read == 1 {
+			pruned = h.logins.deleteBefore(refreshNow.Add(-90 * day))
+		}
+	}
+	if err := h.service().RefreshOnce(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if pruned != 50 {
+		t.Fatalf("the prune deleted %d logins between the pages, want the 50 of the band", pruned)
+	}
+	r, ev := loginRow(t, h, 1)
+	if ev.Logins != 401 {
+		t.Fatalf("judged %d logins of the lookback over %d reads, want all 401 that survived the prune", ev.Logins, len(h.logins.calls))
+	}
+	wantLoginRow(t, r, domain.GeoStateClean, domain.RiskCodeKnownCountries)
+	if got := strings.Join(ev.Known, ","); got != "CN,JP" {
+		t.Fatalf("known countries %s, want CN,JP: the earlier login from Japan was read", got)
 	}
 }
 
@@ -401,6 +477,38 @@ func TestRefresh_LoginLogUnreadableKeepsItsRowsAndIsPartial(t *testing.T) {
 		if _, ok := rows[kind]; !ok {
 			t.Fatalf("the login-log failure cost the %s row too", kind)
 		}
+	}
+	wantOutcome(t, before, "partial")
+}
+
+// The walk ends on a short page, so a store that served a full page and
+// then did not move past it — one that lost the cursor — would keep the
+// run in the loop until shutdown, holding the read side of the operation
+// gate all the while. A full page that does not pass the cursor is a login
+// log that cannot be read: the kind keeps its previous rows, the run is
+// partial, and the store is asked no third time.
+func TestRefresh_LoginLogThatDoesNotAdvanceIsUnreadable(t *testing.T) {
+	var events []*domain.AuthEvent
+	for i := range 250 {
+		events = append(events, signIn(1, ipHomeGD, time.Duration(i+2)*4*time.Hour))
+	}
+	h := newLoginHarness(t, usersInGroups(0), events...)
+	h.logins.ignoreCursor = true
+	// A backstop for a walk with no end: every read after the second fails.
+	h.logins.afterPage = func(read int) {
+		if read == 2 {
+			h.logins.err = errors.New("read past the backstop")
+		}
+	}
+	before := outcomes()
+	if err := h.service().RefreshOnce(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if n := len(h.logins.calls); n != 2 {
+		t.Fatalf("read the login log %d times, want 2: the second read served the first page again", n)
+	}
+	if _, ok := h.store.saved(t)[1][domain.RiskKindLoginCountry]; ok {
+		t.Fatal("login_country judged from a login log that did not advance")
 	}
 	wantOutcome(t, before, "partial")
 }

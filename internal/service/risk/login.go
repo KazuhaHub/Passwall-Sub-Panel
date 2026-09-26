@@ -93,13 +93,24 @@ func (s *Service) loginCountry(ctx context.Context, r *refresh, pl placement) er
 // readLogins pages through the successful logins since `since`, lowest id
 // first, and keeps those of listed accounts.
 //
-// Ascending ids keep the pages still while logins arrive: a new row lands
-// after the last page, where newest-first paging would push every row one
-// place down, read one twice and never see the new one. The store's time
-// bound is only a pre-filter — SQLite compares times as zone-bearing
-// strings — so it is taken a day early, in UTC, as the fetch-log scan's is,
-// and the evaluator cuts the lookback exactly. Failed attempts are not
-// logins, and an attempt no account was resolved for (UserID 0) is nobody's.
+// The pages are a keyset walk: each read asks for the first page after the
+// highest id the read before it served (AfterID), never for page n by
+// offset, because both ends of the log move while a run reads it. New
+// logins land after the highest id; newest-first paging would push every
+// row one place down, read one twice and never see the new one. The hourly
+// retention prune deletes from the low end, and inside the read: with a
+// retention of 90 days or fewer the store's bound below is a day older than
+// the prune's cutoff, so the band it cuts holds the read's lowest ids.
+// Under offset paging every row after the deleted ones would move up past a
+// page boundary and never be read, and a missed earlier login from a
+// country makes a later one from there read as new — a flag raised on
+// missing data. A cursor on the primary key is moved by neither end.
+//
+// The store's time bound is only a pre-filter — SQLite compares times as
+// zone-bearing strings — so it is taken a day early, in UTC, as the
+// fetch-log scan's is, and the evaluator cuts the lookback exactly. Failed
+// attempts are not logins, and an attempt no account was resolved for
+// (UserID 0) is nobody's.
 func (s *Service) readLogins(ctx context.Context, r *refresh, since time.Time) (map[int64][]accountLogin, error) {
 	bound := since.UTC().Add(-24 * time.Hour)
 	listed := make(map[int64]bool, len(r.users))
@@ -107,26 +118,43 @@ func (s *Service) readLogins(ctx context.Context, r *refresh, since time.Time) (
 		listed[u.ID] = true
 	}
 	out := map[int64][]accountLogin{}
-	for page := 1; ; page++ {
+	var after int64
+	for {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
 		events, _, err := s.d.AuthEvents.List(ctx, ports.AuthEventFilter{
-			Pagination: ports.Pagination{Page: page, PageSize: authPageSize, SortBy: "id", SortDir: "asc"},
+			Pagination: ports.Pagination{Page: 1, PageSize: authPageSize, SortBy: "id", SortDir: "asc"},
 			Outcome:    string(domain.AuthOutcomeSuccess),
 			Since:      &bound,
+			AfterID:    after,
 		})
 		if err != nil {
 			return nil, err
 		}
+		// next is the highest id served: in the id order asked for, the
+		// last row's.
+		next := after
 		for _, e := range events {
-			if e != nil && e.UserID > 0 && listed[e.UserID] {
+			if e == nil {
+				continue
+			}
+			next = max(next, e.ID)
+			if e.UserID > 0 && listed[e.UserID] {
 				out[e.UserID] = append(out[e.UserID], accountLogin{atMS: e.At.UnixMilli(), method: string(e.Method), ip: e.IP})
 			}
 		}
 		if len(events) < authPageSize {
 			return out, nil
 		}
+		// The walk ends only on a short page. A full page that did not
+		// pass the cursor means a store that ignored it, and would serve
+		// the same page until shutdown while the run holds the read side
+		// of the operation gate; a log read that way is unreadable.
+		if next <= after {
+			return nil, fmt.Errorf("login log: a full page after id %d served no later id: %w", after, domain.ErrUnavailable)
+		}
+		after = next
 	}
 }
 
