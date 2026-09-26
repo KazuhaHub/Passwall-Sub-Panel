@@ -329,6 +329,10 @@ func (s *Service) observeLiveIPs(ctx context.Context, in liveIPInput) []geoBan {
 
 		obs := domain.ObserveGeo(policy, a, lookup, geoAvailable)
 		v := domain.EvaluateGeo(policy, obs, prev[uid].Streak)
+		// The evidence records the verdict's own Why, not one rebuilt from
+		// the process policy: it carries this user's GROUP policy as judged,
+		// and the record is the only place a reader can learn it — the admin
+		// UI knows the global settings, not what each group overrode.
 		next[uid] = domain.GeoRecord{
 			UserID:     uid,
 			Streak:     v.Streak,
@@ -338,7 +342,7 @@ func (s *Service) observeLiveIPs(ctx context.Context, in liveIPInput) []geoBan {
 			LiveIPs:    u.Count(),
 			Concurrent: obs.Placed + obs.Unplaced,
 			Excluded:   obs.Excluded.Total(),
-			Evidence:   domain.GeoEvidenceFrom(obs),
+			Evidence:   domain.GeoEvidenceFrom(obs, v.Why),
 			Complete:   u.Complete(),
 		}
 		if v.BanDue {

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -198,8 +199,8 @@ func TestGeoAnomalyList_CarriesTierEvidenceCounts(t *testing.T) {
 	if !ok {
 		t.Fatalf("evidence = %v, want an object", r["evidence"])
 	}
-	if ev["v"] != float64(1) || ev["stale"] != float64(21) || ev["networks"] != float64(3) {
-		t.Fatalf("evidence header = %v, want v 1, stale 21, networks 3", ev)
+	if ev["v"] != float64(domain.GeoEvidenceVersion) || ev["stale"] != float64(21) || ev["networks"] != float64(3) {
+		t.Fatalf("evidence header = %v, want v %d, stale 21, networks 3", ev, domain.GeoEvidenceVersion)
 	}
 	spots, ok := ev["spots"].([]any)
 	if !ok || len(spots) != 2 {
@@ -216,6 +217,31 @@ func TestGeoAnomalyList_CarriesTierEvidenceCounts(t *testing.T) {
 	spread, _ := ev["spread"].(map[string]any)
 	if spread["regions"] != float64(2) || spread["region_country"] != "CN" {
 		t.Fatalf("evidence.spread = %v, want 2 regions of CN", ev["spread"])
+	}
+}
+
+// The why is what the SPA localizes the reason from, so it has to reach the
+// client exactly as stored: the handler passes the evidence through rather
+// than rebuilding it, and a rebuild that forgot the new field would leave
+// every row falling back to the English.
+func TestGeoAnomalyList_PassesTheWhyThrough(t *testing.T) {
+	h := NewAdminGeoAnomalyHandler(&stubRecords{recs: []domain.GeoRecord{{
+		UserID: 7,
+		State:  domain.GeoStateSuspect,
+		Reason: "in 2 countries at once ([DE JP]); tolerance is 1, 1 of 3 checks so far",
+		Evidence: domain.GeoEvidence{
+			V: domain.GeoEvidenceVersion,
+			Why: &domain.GeoWhy{
+				Code: domain.GeoWhySuspect, Tier: domain.GeoTierCountry, Scope: domain.GeoScopeCity,
+				Tol:       domain.GeoTolerances{Countries: 1, Regions: 1, Cities: 2},
+				FlagAfter: 3, ClearAfter: 6, MinPlacedRatio: 0.5,
+			},
+		},
+		Streak: domain.GeoStreak{Over: 1, Tier: domain.GeoTierCountry},
+	}}}, nil)
+	body := getJSON(t, h.List).Body.String()
+	if !strings.Contains(body, `"why":{"code":"suspect"`) {
+		t.Fatalf("body = %s, want the evidence's why passed through", body)
 	}
 }
 

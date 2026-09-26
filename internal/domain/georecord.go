@@ -46,10 +46,18 @@ const (
 	// written per user per poll; a user with a hundred sources must not make
 	// the row a hundred entries long.
 	GeoEvidenceMaxSpots = 12
-	// GeoEvidenceVersion is written into every evidence value. 0 means a
-	// legacy row that has no evidence at all, which a reader must render as
-	// "not recorded", not as "nothing found".
-	GeoEvidenceVersion = 1
+	// GeoEvidenceVersion is written into every evidence value.
+	//
+	//   2 = carries Why (the branch and the policy judged with), so a reader
+	//       can localize the reason; the poll always has a verdict to
+	//       explain, so its v2 rows always carry one;
+	//   1 = no Why: a reader shows the stored English Reason instead;
+	//   0 = a legacy row that has no evidence at all, which a reader must
+	//       render as "not recorded", not as "nothing found".
+	//
+	// A v1 row is not rewritten on upgrade. It keeps its evidence until the
+	// poll next judges that user, which re-saves the whole row as v2.
+	GeoEvidenceVersion = 2
 )
 
 // GeoCoverage is how much of the sample the database could place, per tier.
@@ -86,13 +94,23 @@ type GeoEvidence struct {
 	Coverage GeoCoverage `json:"coverage"`
 	Networks int         `json:"networks"`
 	Spread   GeoSpread   `json:"spread"`
+	// Why is the verdict's GeoWhy: which branch wrote the Reason beside this
+	// evidence, and the policy (group overrides included) it was judged
+	// against. It rides in the evidence rather than a column of its own so it
+	// is saved in the same write as the verdict and can never describe a
+	// different cycle. nil on v1 and legacy rows, and whenever the caller had
+	// no verdict to explain; omitted from the JSON then, so a reader never
+	// meets an explanation with an empty code.
+	Why *GeoWhy `json:"why,omitempty"`
 }
 
-// GeoEvidenceFrom records an observation as evidence. Spots are copied (the
-// stored value must not alias a slice the caller may reuse) and never nil, so
-// the JSON always reads "spots": [] rather than null.
-func GeoEvidenceFrom(obs GeoObservation) GeoEvidence {
-	return GeoEvidence{
+// GeoEvidenceFrom records an observation, and the Why of the verdict drawn
+// from it, as evidence. Spots are copied (the stored value must not alias a
+// slice the caller may reuse) and never nil, so the JSON always reads
+// "spots": [] rather than null. A Why that names no branch is not recorded:
+// see GeoEvidence.Why.
+func GeoEvidenceFrom(obs GeoObservation, why GeoWhy) GeoEvidence {
+	e := GeoEvidence{
 		V:        GeoEvidenceVersion,
 		Spots:    append([]GeoSpot{}, obs.Spots...),
 		Excluded: obs.Excluded,
@@ -112,4 +130,11 @@ func GeoEvidenceFrom(obs GeoObservation) GeoEvidence {
 			CityCountry:   obs.CityCountry,
 		},
 	}
+	if why.Code != "" {
+		// A pointer to the parameter, which is already this call's own
+		// copy: nothing the caller does to its GeoWhy afterwards reaches the
+		// stored value.
+		e.Why = &why
+	}
+	return e
 }

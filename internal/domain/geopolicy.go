@@ -108,7 +108,15 @@ const (
 // before the sample is over at that tier. Regions and Cities are counted
 // inside ONE country (the widest), never summed across countries: two
 // cities in Japan and two in Germany are the country tier's business.
-type GeoTolerances struct{ Countries, Regions, Cities int }
+//
+// Tagged because GeoWhy stores and serves it: the SPA reads tol.countries,
+// tol.regions and tol.cities from the evidence, and a stored value outlives
+// the build that wrote it, so the names are a contract, not Go's defaults.
+type GeoTolerances struct {
+	Countries int `json:"countries"`
+	Regions   int `json:"regions"`
+	Cities    int `json:"cities"`
+}
 
 // GeoBanMaxDurationMinutes caps an automatic suspension at a week. The ban is
 // time-boxed so that a false positive heals itself without an admin; a value

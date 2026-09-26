@@ -120,6 +120,9 @@ type GeoVerdict struct {
 	BanTier   GeoTier
 	BanReason string
 	BanSpread int
+	// Why is Reason as data: which branch produced it, the tier it names,
+	// and the sanitized policy it was judged against. Set on every return.
+	Why GeoWhy
 }
 
 // EvaluateGeo applies a policy to one observation and the streak so far.
@@ -144,16 +147,27 @@ type GeoVerdict struct {
 func EvaluateGeo(p GeoAnomalyPolicy, obs GeoObservation, prev GeoStreak) GeoVerdict {
 	p = p.sanitized()
 	v := GeoVerdict{Places: obs.Places, Placed: obs.Placed, Unplaced: obs.Unplaced, Streak: prev}
+	// mk records the branch beside its sentence, with the SANITIZED policy:
+	// what a verdict was judged against is what these numbers are after
+	// repair, and a stored 0 tolerance was never judged with. Every branch
+	// snapshots the policy, not only those whose sentence prints numbers, so
+	// a reader never meets a Why with zeros where the policy should be.
+	mk := func(c GeoReasonCode, t GeoTier) GeoWhy {
+		return GeoWhy{Code: c, Tier: t, Scope: p.Scope, Tol: p.FlagTolerances(),
+			FlagAfter: p.FlagAfterPolls, ClearAfter: p.ClearAfterPolls, MinPlacedRatio: p.MinPlacedRatio}
+	}
 
 	if p.Scope == GeoScopeOff {
 		v.State = GeoStateDisabled
 		v.Reason = "location checks are switched off for this account"
+		v.Why = mk(GeoWhyDisabled, GeoTierNone)
 		v.Streak = GeoStreak{}
 		return v
 	}
 	if p.AllowAnywhere {
 		v.State = GeoStateExempt
 		v.Reason = "this account is allowed to connect from anywhere"
+		v.Why = mk(GeoWhyExempt, GeoTierNone)
 		// Reset rather than freeze: if the exemption is later removed, the
 		// account starts from a clean slate instead of inheriting a streak
 		// accumulated while nobody was judging it.
@@ -171,8 +185,10 @@ func EvaluateGeo(p GeoAnomalyPolicy, obs GeoObservation, prev GeoStreak) GeoVerd
 		// idle too, and the reason says so rather than "nobody".
 		if obs.Stale > 0 {
 			v.Reason = fmt.Sprintf("no concurrent connections; %d address(es) seen earlier in the upstream window", obs.Stale)
+			v.Why = mk(GeoWhyIdleStale, GeoTierNone)
 		} else {
 			v.Reason = "no live connections"
+			v.Why = mk(GeoWhyIdleNone, GeoTierNone)
 		}
 		return v
 	}
@@ -183,17 +199,23 @@ func EvaluateGeo(p GeoAnomalyPolicy, obs GeoObservation, prev GeoStreak) GeoVerd
 		v.State = GeoStateUnknown
 		v.Reason = fmt.Sprintf("all %d concurrent address(es) are excluded (shared %d, listed %d, infrastructure %d, internal %d); no conclusion drawn",
 			obs.Excluded.Total(), obs.Excluded.Shared, obs.Excluded.Listed, obs.Excluded.Infra, obs.Excluded.Internal)
+		v.Why = mk(GeoWhyUnknownExcluded, GeoTierNone)
 		return v
 	}
 	if !obs.GeoAvailable {
 		v.State = GeoStateUnknown
 		v.Reason = "location lookup unavailable; no conclusion drawn"
+		// Its own code: the counts cannot tell this from too few placed,
+		// because ObserveGeo marks every kept source unplaced when lookup is
+		// off (see GeoReasonCode).
+		v.Why = mk(GeoWhyUnknownGeoOff, GeoTierNone)
 		return v
 	}
 	if ratio := float64(obs.Placed) / float64(sample); ratio < p.MinPlacedRatio {
 		v.State = GeoStateUnknown
 		v.Reason = fmt.Sprintf("only %d of %d addresses could be located (%.0f%% required)",
 			obs.Placed, sample, p.MinPlacedRatio*100)
+		v.Why = mk(GeoWhyUnknownLowRatio, GeoTierNone)
 		return v
 	}
 
@@ -228,6 +250,7 @@ func EvaluateGeo(p GeoAnomalyPolicy, obs GeoObservation, prev GeoStreak) GeoVerd
 		v.State = GeoStateFlagged
 		v.Reason = describeOver(flagTier, obs, flagTol) +
 			fmt.Sprintf(", sustained for %d of %d checks", v.Streak.Over, p.FlagAfterPolls)
+		v.Why = mk(GeoWhyFlaggedSustained, flagTier)
 	case over:
 		// Over tolerance but not yet sustained. Visible, never actionable —
 		// this is the ramp, and hiding it would make the eventual flag look
@@ -236,6 +259,7 @@ func EvaluateGeo(p GeoAnomalyPolicy, obs GeoObservation, prev GeoStreak) GeoVerd
 		v.State = GeoStateSuspect
 		v.Reason = describeOver(flagTier, obs, flagTol) +
 			fmt.Sprintf(", %d of %d checks so far", v.Streak.Over, p.FlagAfterPolls)
+		v.Why = mk(GeoWhySuspect, flagTier)
 	case prev.Flagged && v.Streak.Under < p.ClearAfterPolls:
 		// Latched. Clearing is deliberately slower than flagging so an
 		// account cannot step just under the line between checks. The tier
@@ -249,16 +273,22 @@ func EvaluateGeo(p GeoAnomalyPolicy, obs GeoObservation, prev GeoStreak) GeoVerd
 		if prev.Tier != GeoTierNone {
 			v.Reason += fmt.Sprintf("; flagged at the %s tier", prev.Tier)
 		}
+		// The tier that RAISED the flag, as the sentence names it; "" for a
+		// latch an older build stored without one, and the sentence then
+		// leaves the tier clause out too.
+		v.Why = mk(GeoWhyFlaggedClearing, prev.Tier)
 	default:
 		v.Streak.Flagged = false
 		v.Streak.Tier = GeoTierNone
 		v.State = GeoStateClean
 		if len(obs.Places) == 0 {
 			v.Reason = "connected, but no address could be placed"
+			v.Why = mk(GeoWhyCleanUnplaced, GeoTierNone)
 		} else {
 			v.Reason = fmt.Sprintf("within tolerance: %d country(ies) %v, %d region(s) and %d city(ies) in the widest country; tolerances %d/%d/%d (scope %s)",
 				len(obs.Places), obs.Places, obs.RegionSpread, obs.CitySpread,
 				flagTol.Countries, flagTol.Regions, flagTol.Cities, p.Scope)
+			v.Why = mk(GeoWhyCleanWithin, GeoTierNone)
 		}
 	}
 

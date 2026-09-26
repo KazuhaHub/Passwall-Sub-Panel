@@ -304,7 +304,8 @@ func TestGeoStreakRepo_TruncationDoesNotSplitARune(t *testing.T) {
 	}
 }
 
-// sampleEvidence is a realistic v1 evidence value: two provinces of one
+// sampleEvidence is a realistic evidence value at the current version, with
+// no why (TestGeoStreakRepo_WhyRoundTrips adds one): two provinces of one
 // country, some sources excluded, most of the upstream window stale. One
 // non-ASCII name, because the column holds whatever the geo database says.
 func sampleEvidence() domain.GeoEvidence {
@@ -420,6 +421,55 @@ func TestGeoStreakRepo_LegacyNullEvidenceReadsAsNone(t *testing.T) {
 	// The latch an old build set is still a latch after the upgrade.
 	if !loaded[7].Streak.Flagged {
 		t.Fatal("a legacy latched flag was lost across the upgrade")
+	}
+}
+
+// The why rides inside the evidence column and must come back whole through
+// List, the admin view's read: the code a UI localizes from, and the policy
+// the verdict was judged against. A why lost on the way back renders every
+// row as the stored English, and a partial one renders a sentence with the
+// wrong numbers in it.
+func TestGeoStreakRepo_WhyRoundTrips(t *testing.T) {
+	r := newStreakRepo(t)
+	ev := sampleEvidence()
+	ev.Why = &domain.GeoWhy{
+		Code: domain.GeoWhyFlaggedSustained, Tier: domain.GeoTierRegion, Scope: domain.GeoScopeCity,
+		Tol:       domain.GeoTolerances{Countries: 1, Regions: 3, Cities: 2},
+		FlagAfter: 4, ClearAfter: 8, MinPlacedRatio: 0.25,
+	}
+	if err := r.Save(context.Background(), map[int64]domain.GeoRecord{
+		7: {UserID: 7, State: domain.GeoStateFlagged, Evidence: ev},
+	}); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	g := listed(t, r, 7)
+	if g.Evidence.Why == nil {
+		t.Fatalf("why lost in the store: evidence = %+v", g.Evidence)
+	}
+	if *g.Evidence.Why != *ev.Why {
+		t.Fatalf("why = %+v, want %+v", *g.Evidence.Why, *ev.Why)
+	}
+	if !reflect.DeepEqual(g.Evidence, ev) {
+		t.Fatalf("evidence = %+v, want %+v", g.Evidence, ev)
+	}
+}
+
+// A row a v1 build wrote has evidence and no why. After the upgrade it must
+// still read as that: v 1 (so a reader knows which build wrote it and falls
+// back to the stored English) and no why — not a zero why, which a reader
+// would try to localize as a code of "".
+func TestGeoStreakRepo_V1EvidenceReadsWithoutWhy(t *testing.T) {
+	r := newStreakRepo(t)
+	ctx := context.Background()
+	if err := r.db.WithContext(ctx).Exec(
+		"INSERT INTO geo_streaks (user_id, state, evidence, updated_at) VALUES (?, ?, ?, ?)",
+		int64(7), string(domain.GeoStateSuspect), `{"v":1,"spots":[]}`, int64(1_700_000_000_000),
+	).Error; err != nil {
+		t.Fatalf("insert v1 row: %v", err)
+	}
+	g := listed(t, r, 7)
+	if g.Evidence.V != 1 || g.Evidence.Why != nil {
+		t.Fatalf("evidence = v%d why %+v, want v1 with no why", g.Evidence.V, g.Evidence.Why)
 	}
 }
 
