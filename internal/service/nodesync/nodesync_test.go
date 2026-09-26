@@ -70,7 +70,7 @@ func TestNativeCoreObservationPersistsAndInvalidatesRenderCache(t *testing.T) {
 	service := &Service{panels: repo, agents: agents, invalidateRender: func() { invalidations++ }}
 	now := time.Date(2026, time.September, 11, 12, 0, 0, 0, time.UTC)
 	agent := &domain.NodeAgent{AgentID: "agt_test", PanelID: 9}
-	if err := service.recordPanelObservation(t.Context(), agent, nodeprotocol.NodeReport{
+	if _, err := service.recordPanelObservation(t.Context(), agent, nodeprotocol.NodeReport{
 		AgentVersion: "v0.2.0", CoreEngine: "sing-box", CoreVersion: "1.14.0", CoreState: "running",
 	}, now); err != nil {
 		t.Fatal(err)
@@ -78,11 +78,85 @@ func TestNativeCoreObservationPersistsAndInvalidatesRenderCache(t *testing.T) {
 	if repo.panel.PanelVersion != "v0.2.0" || repo.panel.XrayVersion != "1.14.0" || agents.engine != domain.NodeCoreSingBox || repo.updates != 1 || invalidations != 1 {
 		t.Fatalf("persisted panel=%+v updates=%d invalidations=%d", repo.panel, repo.updates, invalidations)
 	}
-	if err := service.recordPanelObservation(t.Context(), agent, nodeprotocol.NodeReport{}, now.Add(time.Second)); err != nil {
+	if _, err := service.recordPanelObservation(t.Context(), agent, nodeprotocol.NodeReport{}, now.Add(time.Second)); err != nil {
 		t.Fatal(err)
 	}
 	if repo.panel.PanelVersion != "v0.2.0" || repo.panel.XrayVersion != "1.14.0" || invalidations != 1 {
 		t.Fatalf("empty observation erased state or invalidated cache: panel=%+v invalidations=%d", repo.panel, invalidations)
+	}
+}
+
+func TestNativeXrayObservationConvergesEveryReportAndRetries(t *testing.T) {
+	repo := &panelObservationRepo{panel: &domain.XUIPanel{
+		ID: 9, Kind: domain.PanelKindPSP, PanelVersion: "v0.2.0", XrayVersion: "26.7.28",
+	}}
+	service := &Service{panels: repo}
+	calls := 0
+	service.SetRealityFingerprintNormalizer(func(_ context.Context, panelID int64, version string) (int, error) {
+		calls++
+		if panelID != 9 || version != "26.9.9" {
+			t.Fatalf("normalizer input = panel %d version %q", panelID, version)
+		}
+		if calls == 1 {
+			return 0, errors.New("transient normalization failure")
+		}
+		return 1, nil
+	})
+	agent := &domain.NodeAgent{AgentID: "agt_xray", PanelID: 9, ObservedCoreEngine: domain.NodeCoreXray}
+	report := nodeprotocol.NodeReport{CoreEngine: "xray", CoreVersion: "26.9.9", CoreState: "running"}
+
+	if _, err := service.recordPanelObservation(t.Context(), agent, report, time.Now()); err == nil {
+		t.Fatal("first normalization failure was ignored")
+	}
+	if repo.panel.XrayVersion != "26.9.9" {
+		t.Fatalf("native boundary observation was not persisted: %q", repo.panel.XrayVersion)
+	}
+	normalized, err := service.recordPanelObservation(t.Context(), agent, report, time.Now().Add(time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !normalized || calls != 2 {
+		t.Fatalf("normalized=%v calls=%d, want successful retry on unchanged observed version", normalized, calls)
+	}
+}
+
+func TestNativeSyncReloadsRealityConfigAfterNormalization(t *testing.T) {
+	f := newConfigAppliedFixture(t)
+	oldStream := `{"security":"reality","realitySettings":{"settings":{"fingerprint":"firefox"}}}`
+	newStream := `{"security":"reality","realitySettings":{"settings":{"fingerprint":"chrome"}}}`
+	stored := f.storedNode(t)
+	stored.StreamSettings = oldStream
+	if err := f.repos.Node.UpdateInboundConfig(t.Context(), stored); err != nil {
+		t.Fatal(err)
+	}
+	f.service.panels = &panelObservationRepo{panel: &domain.XUIPanel{ID: f.agent.PanelID, XrayVersion: "26.7.28"}}
+	f.service.SetRealityFingerprintNormalizer(func(ctx context.Context, panelID int64, version string) (int, error) {
+		if version != "26.9.9" {
+			t.Fatalf("observed core version = %q", version)
+		}
+		changed, err := f.repos.Node.(ports.RealityFingerprintCASRepo).CompareAndSwapRealityStream(ctx, panelID, f.node.ID, oldStream, newStream)
+		if changed {
+			return 1, err
+		}
+		return 0, err
+	})
+	response, err := f.service.Sync(t.Context(), nodeprotocol.NodeReport{
+		AgentID: f.agent.AgentID, ProtocolVersion: nodeprotocol.ProtocolVersion1,
+		ReportedAtMS: f.now.UnixMilli(), Have: emptyProtocolHave(),
+		CoreEngine: "xray", CoreVersion: "26.9.9", CoreState: "running",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.Config.Body == nil || len(response.Config.Body.Listeners) != 1 {
+		t.Fatalf("normalized response has no listener: %+v", response.Config)
+	}
+	var intent domain.NodeConfigIntent
+	if err := json.Unmarshal(response.Config.Body.Listeners[0].Config, &intent); err != nil {
+		t.Fatal(err)
+	}
+	if intent.StreamSettings != newStream {
+		t.Fatalf("same-round config used stale fingerprint: %s", intent.StreamSettings)
 	}
 }
 

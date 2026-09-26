@@ -1370,6 +1370,7 @@
       "reality_scan_use": "使用",
       "reality_scan_empty": "没有扫描结果",
       "reality_fingerprint": "Fingerprint",
+      "reality_fingerprint_mlkem_locked": "当前服务器运行 Xray-core 26.9.8 或更高版本，REALITY 指纹必须为 Chrome。",
       "reality_spider_x": "spiderX 路径",
       "reality_min_client": "最低客户端版本",
       "reality_min_client_hint": "Xray-core 26.7.11–26.7.28 将留空默认成 26.3.27；26.9.8 起留空不设最低版本。填 1.0.0 可避免旧内核的默认版本限制，但不会绕过 REALITY 的 ML-KEM 要求。",

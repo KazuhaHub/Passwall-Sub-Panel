@@ -269,11 +269,11 @@ type NodeRepo interface {
 	// Its narrow value type cannot carry desired values, making the
 	// desired/observed ownership boundary enforceable by the compiler.
 	UpdateObservedEndpoint(ctx context.Context, nodeID int64, observed domain.NodeObservedEndpoint) error
-	// ConfirmAppliedConfig is for a validated full native receipt of the current
-	// minted config. Under a row lock it compares the PSP-owned expected intent
-	// with the current node, then writes only the observed endpoint and config
-	// confirmation state (synced, no pending age). Deleted/rebound/edited nodes
-	// are a no-op; storage errors must propagate so the receipt can be retried.
+	// ConfirmAppliedConfig is for a validated full native receipt or a successful
+	// synchronous inbound push. Under a row lock it compares the PSP-owned expected
+	// intent with the current node, then writes only the observed endpoint and
+	// config confirmation state (synced, no pending age). Deleted/rebound/edited
+	// nodes are a no-op; storage errors must propagate so confirmation can retry.
 	// The expected intent is a guard, not a desired snapshot to persist.
 	// changed is false for an already-confirmed receipt as well as a no-op,
 	// allowing subscription invalidation only when this write changes state.
@@ -307,6 +307,15 @@ type NodeRepo interface {
 	// insensitive substring). SortBy recognizes "id" / "display_name" /
 	// "sort_order" / "created_at" / "panel_id"; default "sort_order".
 	ListPaged(ctx context.Context, p Pagination) (items []*domain.Node, total int64, err error)
+}
+
+// RealityFingerprintCASRepo is the narrow migration writer for an existing
+// REALITY snapshot. It changes only stream_settings and marks sync pending
+// if the node still has the stream settings observed by the caller. A concurrent
+// admin edit makes changed false, so the next version observation can retry
+// against the new snapshot without overwriting any of its other fields.
+type RealityFingerprintCASRepo interface {
+	CompareAndSwapRealityStream(ctx context.Context, panelID, nodeID int64, observedStream, normalizedStream string) (changed bool, err error)
 }
 
 // NodeSortUpdate is one (node_id, sort_order) pair for BatchUpdateSortOrder.

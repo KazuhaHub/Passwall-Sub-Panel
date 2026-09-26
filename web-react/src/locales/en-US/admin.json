@@ -1395,6 +1395,7 @@
       "reality_scan_use": "Use",
       "reality_scan_empty": "No scan results",
       "reality_fingerprint": "Fingerprint",
+      "reality_fingerprint_mlkem_locked": "This server runs Xray-core 26.9.8 or newer, so the REALITY fingerprint is fixed to Chrome.",
       "reality_spider_x": "spiderX path",
       "reality_min_client": "Min client version",
       "reality_min_client_hint": "Xray-core 26.7.11–26.7.28 defaults an empty value to 26.3.27; 26.9.8+ leaves the version floor disabled when empty. Set 1.0.0 to avoid the older cores' default floor. This does not bypass REALITY's ML-KEM requirements.",

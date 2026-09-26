@@ -207,6 +207,56 @@ func (r *nodeRepo) UpdateInboundConfig(ctx context.Context, n *domain.Node) erro
 		}).Error
 }
 
+// CompareAndSwapRealityStream updates only the stream and sync metadata under
+// a row lock. In particular, it must not write an old SpecFromNode snapshot:
+// an admin may have changed the listener's port, certificate, or protocol after
+// the migration listed the node. Comparing decrypted JSON also works when the
+// encrypted-at-rest representation uses a fresh nonce on every write.
+func (r *nodeRepo) CompareAndSwapRealityStream(ctx context.Context, panelID, nodeID int64, observedStream, normalizedStream string) (bool, error) {
+	changed := false
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		read := tx.Where("id = ? AND panel_id = ?", nodeID, panelID)
+		if tx.Dialector.Name() != "sqlite" {
+			read = read.Clauses(clause.Locking{Strength: "UPDATE"})
+		}
+		var row nodeRow
+		if err := read.First(&row).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil
+			}
+			return err
+		}
+		current, err := row.toDomain()
+		if err != nil {
+			return err
+		}
+		if current.ConfigSyncedAt == nil || current.StreamSettings != observedStream {
+			return nil
+		}
+		encoded, err := encryptSecret(normalizedStream)
+		if err != nil {
+			return err
+		}
+		now := time.Now()
+		current.ConfigSyncedAt = &now
+		current.SetConfigSyncState(domain.ConfigSyncPending, now)
+		result := tx.Model(&nodeRow{}).
+			Where("id = ? AND panel_id = ?", nodeID, panelID).
+			Updates(map[string]any{
+				"stream_settings":      encoded,
+				"config_synced_at":     current.ConfigSyncedAt,
+				"config_sync_state":    current.ConfigSyncState,
+				"config_pending_since": current.ConfigPendingSince,
+			})
+		if result.Error != nil {
+			return result.Error
+		}
+		changed = result.RowsAffected == 1
+		return nil
+	})
+	return changed, err
+}
+
 // UpdateObservedEndpoint is intentionally unable to write desired endpoint
 // columns: its payload contains only the last reported values, and this SQL
 // statement names only observed_port/observed_protocol. Agent reports and
@@ -225,7 +275,8 @@ func (r *nodeRepo) UpdateObservedEndpoint(ctx context.Context, nodeID int64, obs
 }
 
 // ConfirmAppliedConfig clears pending state only while the acknowledged
-// listener intent still matches the current row. Locking the row keeps an admin
+// listener intent still matches the current row. Acknowledgment may be a native
+// applied receipt or a completed synchronous panel update. Locking the row keeps an admin
 // edit from landing between the comparison and the narrow acknowledgment write.
 // SQLite omits FOR UPDATE; its transaction and single-connection pool serialize
 // local writers, and any transaction conflict is returned rather than bypassed.

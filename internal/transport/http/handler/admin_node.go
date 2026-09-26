@@ -13,6 +13,7 @@ import (
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/realitykey"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/xraycompat"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 	certsvc "github.com/KazuhaHub/passwall-sub-panel/internal/service/cert"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/node"
@@ -34,6 +35,26 @@ type AdminNodeHandler struct {
 
 func NewAdminNodeHandler(nodeSvc *node.Service, syncSvc *syncsvc.Service, ownership ports.OwnershipRepo, users ports.UserRepo, panels ports.XUIPanelRepo, pspClients ports.PSPClientRepo, certs ports.CertificateRepo) *AdminNodeHandler {
 	return &AdminNodeHandler{node: nodeSvc, sync: syncSvc, ownership: ownership, users: users, panels: panels, pspClients: pspClients, certs: certs}
+}
+
+// normalizeRealityFingerprint enforces the server-core compatibility rule at
+// the write boundary. The UI mirrors this by locking the selector, but API
+// callers and raw/advanced JSON must not be able to persist a contradictory
+// desired configuration. Unknown core versions remain untouched.
+func (h *AdminNodeHandler) normalizeRealityFingerprint(ctx context.Context, panelID int64, spec *ports.InboundSpec) error {
+	if h.panels == nil || spec == nil {
+		return nil
+	}
+	panel, err := h.panels.GetByID(ctx, panelID)
+	if err != nil {
+		return err
+	}
+	normalized, _, err := xraycompat.NormalizeRealityFingerprint(spec.StreamSettings, panel.XrayVersion)
+	if err != nil {
+		return fmt.Errorf("normalize REALITY fingerprint: %w", err)
+	}
+	spec.StreamSettings = normalized
+	return nil
 }
 
 // ---- DTOs ----
@@ -534,6 +555,10 @@ func (h *AdminNodeHandler) CreateInbound(c *gin.Context) {
 		n.CertSource = domain.CertSourceManaged
 		n.CertID = managed.ID
 	}
+	if err := h.normalizeRealityFingerprint(c.Request.Context(), n.PanelID, &spec); err != nil {
+		mapNodeServiceError(c, err)
+		return
+	}
 	if err := h.node.CreateInbound(c.Request.Context(), n, spec); err != nil {
 		mapNodeServiceError(c, err)
 		return
@@ -636,6 +661,15 @@ func (h *AdminNodeHandler) UpdateInboundConfig(c *gin.Context) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
+	}
+	n, err := h.node.Get(c.Request.Context(), id)
+	if err != nil {
+		mapNodeServiceError(c, err)
+		return
+	}
+	if err := h.normalizeRealityFingerprint(c.Request.Context(), n.PanelID, &spec); err != nil {
+		mapNodeServiceError(c, err)
+		return
 	}
 	if err := h.node.UpdateInboundConfig(c.Request.Context(), id, spec); err != nil {
 		mapNodeServiceError(c, err)

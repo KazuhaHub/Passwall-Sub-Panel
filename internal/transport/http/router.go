@@ -637,8 +637,11 @@ func NewRouter(d Deps) stdhttp.Handler {
 		if d.Render != nil {
 			invalidateRender = d.Render.InvalidateAll
 		}
-		servers := handler.NewAdminServersHandler(d.Repos.XUIPanel, d.Pool, d.Repos.Node, d.Repos.Audit, d.Async, invalidateRender).
-			WithNativeAgentProvisioning(d.Repos.NativeAgentProvisioning).
+		servers := handler.NewAdminServersHandler(d.Repos.XUIPanel, d.Pool, d.Repos.Node, d.Repos.Audit, d.Async, invalidateRender)
+		if d.Node != nil {
+			servers.WithRealityFingerprintNormalizer(d.Node)
+		}
+		servers.WithNativeAgentProvisioning(d.Repos.NativeAgentProvisioning).
 			WithNodeMetrics(d.Repos.NodeHostMetric).
 			WithNodeAgents(d.Repos.NodeAgent).
 			WithNodeSettings(d.Repos.Settings).

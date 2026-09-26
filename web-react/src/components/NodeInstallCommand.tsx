@@ -17,10 +17,20 @@ export default function NodeInstallCommand({ command, expiresAt, disabled = fals
   const [feedback, setFeedback] = useState<'copied' | 'copy_failed' | ''>('')
   const [copying, setCopying] = useState(false)
   const intent = useRef(0)
+  const observed = useRef({ command, expiresAt, disabled })
   useEffect(() => {
-    intent.current += 1
-    setFeedback('')
-    setCopying(false)
+    const previous = observed.current
+    const changed = previous.command !== command || previous.expiresAt !== expiresAt || previous.disabled !== disabled
+    observed.current = { command, expiresAt, disabled }
+    // Initial mount is not a new intent. Invalidating there can race an
+    // immediate copy click on a busy runner: the resolved clipboard result is
+    // then discarded even though the command never changed. Dependency changes
+    // still invalidate in-flight work, and cleanup covers unmount/StrictMode.
+    if (changed) {
+      intent.current += 1
+      setFeedback('')
+      setCopying(false)
+    }
     return () => { intent.current += 1 }
   }, [command, expiresAt, disabled])
 

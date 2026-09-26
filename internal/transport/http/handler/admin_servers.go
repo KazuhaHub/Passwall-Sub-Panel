@@ -34,22 +34,23 @@ import (
 // (v3.6.0-beta.3) to write audit-trail rows and to schedule the post-upgrade
 // smoke probe; they're optional for the CRUD/Test flows.
 type AdminServersHandler struct {
-	repo             ports.XUIPanelRepo
-	pool             ports.XUIPool
-	nodes            ports.NodeRepo
-	audit            ports.AuditRepo
-	async            AsyncDispatcher
-	invalidateRender func()
-	native           ports.NativeAgentProvisioningRepo
-	agents           ports.NodeAgentRepo
-	nodeSettings     ports.SettingsRepo
-	nativeUpgrade    NativeAgentUpgradeService
-	nodeDiagnostics  NodeDiagnosticsService
-	nodeReleases     ports.NodeReleaseCatalog
-	nodeInstall      ports.NodeInstallTemplate
-	coreCatalog      ports.CoreCatalog
-	serverMigration  ServerMigrationPreviewer
-	nodeMetrics      ports.NodeHostMetricRepo
+	repo              ports.XUIPanelRepo
+	pool              ports.XUIPool
+	nodes             ports.NodeRepo
+	audit             ports.AuditRepo
+	async             AsyncDispatcher
+	invalidateRender  func()
+	realityNormalizer RealityFingerprintNormalizer
+	native            ports.NativeAgentProvisioningRepo
+	agents            ports.NodeAgentRepo
+	nodeSettings      ports.SettingsRepo
+	nativeUpgrade     NativeAgentUpgradeService
+	nodeDiagnostics   NodeDiagnosticsService
+	nodeReleases      ports.NodeReleaseCatalog
+	nodeInstall       ports.NodeInstallTemplate
+	coreCatalog       ports.CoreCatalog
+	serverMigration   ServerMigrationPreviewer
+	nodeMetrics       ports.NodeHostMetricRepo
 
 	// startedAt is when THIS PSP process began listening. It exists because a
 	// node's silence during the panel's own downtime is not evidence about the
@@ -58,6 +59,14 @@ type AdminServersHandler struct {
 	// reads as "up long enough", which keeps the pre-existing verdict for any
 	// handler built without the constructor.
 	startedAt time.Time
+}
+
+// RealityFingerprintNormalizer converges PSP-owned inbound snapshots after a
+// trusted Xray version observation. It is intentionally idempotent: callers
+// invoke it for every 26.9.8+ observation so failed or previously missed
+// migrations are retried instead of depending on a one-shot version change.
+type RealityFingerprintNormalizer interface {
+	NormalizeRealityFingerprintsForPanel(context.Context, int64, string) (int, error)
 }
 
 func (h *AdminServersHandler) WithNativeAgentProvisioning(repo ports.NativeAgentProvisioningRepo) *AdminServersHandler {
@@ -80,6 +89,26 @@ func (h *AdminServersHandler) WithNodeInstallTemplate(template ports.NodeInstall
 func (h *AdminServersHandler) WithCoreCatalog(catalog ports.CoreCatalog) *AdminServersHandler {
 	h.coreCatalog = catalog
 	return h
+}
+
+func (h *AdminServersHandler) WithRealityFingerprintNormalizer(normalizer RealityFingerprintNormalizer) *AdminServersHandler {
+	h.realityNormalizer = normalizer
+	return h
+}
+
+func (h *AdminServersHandler) normalizeRealityFingerprints(ctx context.Context, panelID int64, xrayVersion, source string) {
+	if h.realityNormalizer == nil {
+		return
+	}
+	changed, err := h.realityNormalizer.NormalizeRealityFingerprintsForPanel(ctx, panelID, xrayVersion)
+	if err != nil {
+		// The periodic probe and later observations retry this idempotently. Do
+		// not report a completed core installation as failed after the core has
+		// already switched merely because one inbound could not be converged yet.
+		log.Warn(source+": normalize REALITY fingerprints", "panel_id", panelID, "changed", changed, "err", err)
+	} else if changed > 0 {
+		log.Info("normalized REALITY fingerprints for observed Xray version", "source", source, "panel_id", panelID, "nodes", changed)
+	}
 }
 
 func (h *AdminServersHandler) WithNodeAgents(repo ports.NodeAgentRepo) *AdminServersHandler {
@@ -818,8 +847,13 @@ func (h *AdminServersHandler) Test(c *gin.Context) {
 		now := time.Now()
 		if uerr := h.repo.UpdateVersion(c.Request.Context(), req.ID, status.PanelVersion, status.XrayVersion, &now); uerr != nil {
 			log.Warn("admin test: write version", "panel_id", req.ID, "err", uerr)
-		} else if h.invalidateRender != nil {
-			h.invalidateRender()
+		} else {
+			if isXUI {
+				h.normalizeRealityFingerprints(c.Request.Context(), req.ID, status.XrayVersion, "admin test")
+			}
+			if h.invalidateRender != nil {
+				h.invalidateRender()
+			}
 		}
 		if isXUI {
 			compatStatus := version.CheckXUI(status.PanelVersion)
@@ -1437,8 +1471,11 @@ func (h *AdminServersHandler) UpgradeXray(c *gin.Context) {
 	now := time.Now()
 	if err := h.repo.UpdateVersion(c.Request.Context(), id, status.PanelVersion, status.XrayVersion, &now); err != nil {
 		log.Warn("xray upgrade: write version", "panel_id", id, "err", err)
-	} else if h.invalidateRender != nil {
-		h.invalidateRender()
+	} else {
+		h.normalizeRealityFingerprints(c.Request.Context(), id, status.XrayVersion, "xray upgrade")
+		if h.invalidateRender != nil {
+			h.invalidateRender()
+		}
 	}
 
 	if req.Version == "latest" {
@@ -1582,8 +1619,11 @@ func (h *AdminServersHandler) runPostUpgradeSmoke(ctx context.Context, panelID i
 		now := time.Now()
 		if err := h.repo.UpdateVersion(ctx, panelID, status.PanelVersion, status.XrayVersion, &now); err != nil {
 			log.Warn("post-upgrade smoke: write version", "panel_id", panelID, "err", err)
-		} else if h.invalidateRender != nil {
-			h.invalidateRender()
+		} else {
+			h.normalizeRealityFingerprints(ctx, panelID, status.XrayVersion, "post-upgrade smoke")
+			if h.invalidateRender != nil {
+				h.invalidateRender()
+			}
 		}
 		h.writeSmokeAudit(ctx, "panel_upgrade_succeeded", panelID, panelName, targetVersion,
 			"panel back online at "+status.PanelVersion+" (xray "+status.XrayVersion+"), inbounds decode ok")

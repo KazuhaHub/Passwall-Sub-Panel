@@ -6,14 +6,17 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/KazuhaHub/passwall-sub-panel/internal/adapters/sqlstore"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/node"
 )
 
 // A panel that can be told to upgrade, but not to upgrade TO anything.
@@ -128,6 +131,12 @@ type coreUpgradeClient struct {
 	status    ports.ServerStatus
 	statusErr error
 	installed string
+	updated   *ports.InboundSpec
+}
+
+func (c *coreUpgradeClient) UpdateInbound(_ context.Context, _ int, spec ports.InboundSpec) error {
+	c.updated = &spec
+	return nil
 }
 
 func (c *coreUpgradeClient) GetCoreVersionList(_ context.Context) ([]string, error) {
@@ -171,6 +180,60 @@ func TestACoreUpgradeIsCompletedOnlyWhenThePanelReportsTheTarget(t *testing.T) {
 	}
 	if !audit.saw("xray_upgrade_completed") {
 		t.Fatalf("actions = %v, want xray_upgrade_completed", audit.actions)
+	}
+}
+
+func TestXrayUpgradeConvergesRealityFingerprintsAfterReadback(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	sqlstore.ConfigureSecretKey("test-only-xray-upgrade-key")
+	t.Cleanup(func() { sqlstore.ConfigureSecretKey("") })
+	db, err := sqlstore.Open("sqlite", filepath.Join(t.TempDir(), "upgrade.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	connection, err := db.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = connection.Close() })
+	if err := sqlstore.EnsureSchema(db); err != nil {
+		t.Fatal(err)
+	}
+	repos := sqlstore.NewRepos(db)
+	captured := time.Now().Add(-time.Hour)
+	managed := &domain.Node{
+		PanelID: 7, InboundID: 3, DesiredProtocol: "vless", DesiredPort: 443,
+		InboundSettings: `{"decryption":"none"}`,
+		StreamSettings:  `{"security":"reality","realitySettings":{"settings":{"fingerprint":"firefox"}}}`,
+		ConfigSyncedAt:  &captured, ConfigSyncState: domain.ConfigSyncSynced,
+	}
+	if err := repos.Node.Create(t.Context(), managed); err != nil {
+		t.Fatal(err)
+	}
+	client := &coreUpgradeClient{status: ports.ServerStatus{PanelVersion: "3.8.5", XrayVersion: "26.9.9"}}
+	pool := fakeWebCertPool{client: client}
+	normalizer := node.New(repos.Node, nil, pool, nil, nil, nil, nil)
+	h := (&AdminServersHandler{
+		repo: upgradeModeRepo{panel: &domain.XUIPanel{ID: 7, Kind: domain.PanelKind3XUI, XrayVersion: "26.7.28"}},
+		pool: pool, audit: &upgradeGateAudit{},
+	}).WithRealityFingerprintNormalizer(normalizer)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Params = gin.Params{{Key: "id", Value: "7"}}
+	c.Request = httptest.NewRequest(http.MethodPost, "/admin/servers/7/upgrade-xray", strings.NewReader(`{"version":"26.9.9"}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	h.UpgradeXray(c)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("response = %d %s", recorder.Code, recorder.Body.String())
+	}
+	stored, err := repos.Node.GetByID(t.Context(), managed.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stored.StreamSettings, `"fingerprint":"chrome"`) || client.updated == nil || !strings.Contains(client.updated.StreamSettings, `"fingerprint":"chrome"`) {
+		t.Fatalf("upgrade did not converge stored and pushed inbound: stored=%s pushed=%+v", stored.StreamSettings, client.updated)
 	}
 }
 
