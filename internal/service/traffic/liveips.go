@@ -388,6 +388,9 @@ func collectGeoBans(due []geoBan, users []*domain.User, next map[int64]domain.Ge
 			continue
 		}
 		if len(bans) < geoMaxSuspensionsPerPoll {
+			// The row as it will be saved: only deferred users' rows are
+			// edited below, so this one is final.
+			b.Record = next[b.UserID]
 			bans = append(bans, b)
 			continue
 		}

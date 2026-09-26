@@ -768,22 +768,34 @@ func plainRead(m map[string][]string) func(int64) domain.PanelLiveIPs {
 // upsertStreaks behaves like the real repository: Save merges, it never
 // replaces the table, so a user left out of a cycle keeps their row. It
 // also keeps every batch so a test can say who was (not) written.
+//
+// A cancelled context fails Save before anything is written, as it does
+// against the database. afterSave, when set, runs once after the next save
+// commits: a poll cancelled right after Phase 1b persisted its streaks.
 type upsertStreaks struct {
-	data    map[int64]domain.GeoRecord
-	batches []map[int64]domain.GeoRecord
+	data      map[int64]domain.GeoRecord
+	batches   []map[int64]domain.GeoRecord
+	afterSave func()
 }
 
 func (u *upsertStreaks) Load(context.Context) (map[int64]domain.GeoRecord, error) {
 	return u.data, nil
 }
 
-func (u *upsertStreaks) Save(_ context.Context, recs map[int64]domain.GeoRecord) error {
+func (u *upsertStreaks) Save(ctx context.Context, recs map[int64]domain.GeoRecord) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if u.data == nil {
 		u.data = map[int64]domain.GeoRecord{}
 	}
 	u.batches = append(u.batches, recs)
 	for uid, r := range recs {
 		u.data[uid] = r
+	}
+	if f := u.afterSave; f != nil {
+		u.afterSave = nil
+		f()
 	}
 	return nil
 }

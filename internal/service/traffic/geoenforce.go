@@ -30,6 +30,9 @@ import (
 // twenty accounts per poll either way. Neither cap loses work: an over-cap ban
 // keeps its streak at the threshold and fires on its next over-sample, and an
 // over-cap lift is simply due again next poll.
+//
+// A cancelled poll is handled the same way, for the transitions it has not
+// started: see enforceGeo.
 const (
 	geoMaxSuspensionsPerPoll = 20
 	// Counted over DUE lifts only. Counting every geo_auto row would let
@@ -37,6 +40,14 @@ const (
 	// out of every poll for a week.
 	geoMaxLiftsPerPoll = 20
 )
+
+// geoFollowUpWriteTimeout bounds the writes Phase 4 makes after the poll's
+// context may already be cancelled: the audit row of a transition that has
+// committed, and the re-armed streaks of the bans a cancelled poll did not
+// get to. Both record something that has already happened, so they run
+// detached from the cancellation (context.WithoutCancel), and both are one
+// small statement, so they are bounded like one.
+const geoFollowUpWriteTimeout = 30 * time.Second
 
 // GeoSuspender is the narrow slice of user.Service the automatic suspension
 // needs. Both methods are conditional and report whether they wrote, so a
@@ -69,11 +80,18 @@ func (s *Service) SetAuditRepo(a ports.AuditRepo) { s.audit = a }
 // that moment and inside the per-poll cap. Tier and Spread feed the
 // user-facing detail (which names no places); Reason is the admin-side text,
 // which does, and goes to the log and the audit row.
+//
+// Record is the streak row Phase 1b saved for the user, with the ban streak
+// the due verdict consumed. A ban Phase 4 does not start (the poll was
+// cancelled) is deferred by saving it back with that streak re-armed, the way
+// collectGeoBans defers an over-cap one; carrying the row saves a table load
+// on that path and writes back exactly what this poll judged.
 type geoBan struct {
 	UserID int64
 	Tier   domain.GeoTier
 	Reason string
 	Spread int
+	Record domain.GeoRecord
 }
 
 // geoBanEligible: may the detector suspend this user now?
@@ -133,6 +151,17 @@ func geoAutoCount(outcome string, n int) {
 // freshest state the poll has; the writes themselves re-check the row.
 //
 // Lifts go first so a poll over its caps frees service before it takes more.
+//
+// A cancelled ctx (an admin closed the "Poll now" tab, the request timed out,
+// the app is shutting down) stops NEW transitions; it is checked before each
+// one. Every transition is inline pushes under the per-user lock, and its
+// conditional write would fail on the dead context anyway, as a *_error that
+// for a ban also loses the streak Phase 1b consumed. So a cancelled poll
+// defers instead, with nothing lost: a due lift is due again next poll
+// (lift_deferred), and a ban is re-armed exactly like an over-cap one
+// (deferred). A transition already in flight when the cancellation lands is
+// finished — the suspender detaches its push and retry queueing once its
+// write has committed, and its audit row is written detached too.
 func (s *Service) enforceGeo(ctx context.Context, users []*domain.User, bans []geoBan, pc *geoPolicyCache, now time.Time) {
 	if s.geoSuspender == nil {
 		// Nothing but the suspender can write geo_auto (the admin API
@@ -199,7 +228,17 @@ func (s *Service) liftDueGeoSuspensions(ctx context.Context, users []*domain.Use
 		due = due[:geoMaxLiftsPerPoll]
 	}
 
-	for _, c := range due {
+	for i, c := range due {
+		if err := ctx.Err(); err != nil {
+			// The poll was cancelled: start no further lift. Each is due
+			// again next poll, so nothing is lost; counted with the
+			// over-cap ones because it is the same wait.
+			n := len(due) - i
+			geoAutoCount("lift_deferred", n)
+			log.Info("geo auto-suspension: the poll was cancelled; the remaining due lifts wait for the next poll",
+				"deferred", n, "err", err)
+			break
+		}
 		u := c.u
 		lifted, err := s.geoSuspender.LiftServiceIfHeldSince(ctx, u.ID, domain.DisabledGeoAutoSuspend, now.Add(-c.d))
 		if !lifted {
@@ -246,6 +285,11 @@ func (s *Service) liftDueGeoSuspensions(ctx context.Context, users []*domain.Use
 // alternative — restoring it — would need a second streak write after the
 // save, for an error path whose likeliest cause (the database) would fail
 // that write too.
+//
+// A cancelled poll is not that error path. Its eligible bans are not
+// attempted, and they ARE restored (rearmGeoBans): the cause is the caller
+// going away, not the database, and the one write it takes runs detached.
+// Held users are still consumed as skipped_held first, as in collectGeoBans.
 func (s *Service) applyGeoBans(ctx context.Context, users []*domain.User, bans []geoBan, pc *geoPolicyCache, now time.Time) {
 	if len(bans) == 0 {
 		return
@@ -256,10 +300,24 @@ func (s *Service) applyGeoBans(ctx context.Context, users []*domain.User, bans [
 			byID[u.ID] = u
 		}
 	}
+	var rearm map[int64]domain.GeoRecord
 	for _, b := range bans {
 		u := byID[b.UserID]
 		if !geoBanEligible(u, now) {
 			geoAutoCount("skipped_held", 1)
+			continue
+		}
+		if ctx.Err() != nil {
+			// The same threshold the verdict was judged against, as in
+			// collectGeoBans. In PollOnce this user's group was resolved
+			// when Phase 1b judged them, so this is the poll's cached
+			// answer, not a settings read on the cancelled context.
+			rec := b.Record
+			rec.Streak.BanOver = pc.forUser(u.ID).BanAfterPolls
+			if rearm == nil {
+				rearm = make(map[int64]domain.GeoRecord, len(bans))
+			}
+			rearm[u.ID] = rec
 			continue
 		}
 		minutes := int(pc.forUser(u.ID).BanDuration() / time.Minute)
@@ -297,17 +355,52 @@ func (s *Service) applyGeoBans(ctx context.Context, users []*domain.User, bans [
 		at := now
 		u.ServiceDisabledAt = &at
 	}
+	if len(rearm) > 0 {
+		geoAutoCount("deferred", len(rearm))
+		log.Info("geo auto-suspension: the poll was cancelled; the remaining due suspensions are deferred to their next over-sample",
+			"deferred", len(rearm), "err", ctx.Err())
+		s.rearmGeoBans(ctx, rearm)
+	}
+}
+
+// rearmGeoBans saves back the streak rows of bans a cancelled poll did not
+// apply, their ban streak at the threshold again, so each user's next
+// over-sample makes the ban due. It is the cap deferral's streak write, done
+// after the save instead of before it, on a context detached from the
+// cancellation that caused it.
+//
+// A failure is logged and the bans are lost the way a suspend_error loses
+// one: the streak stays consumed and rebuilds over ban_after_polls samples.
+func (s *Service) rearmGeoBans(ctx context.Context, rearm map[int64]domain.GeoRecord) {
+	if s.geoStreaks == nil {
+		// Nothing was persisted, so nothing was consumed across polls
+		// either.
+		return
+	}
+	wctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), geoFollowUpWriteTimeout)
+	defer cancel()
+	if err := s.geoStreaks.Save(wctx, rearm); err != nil {
+		log.Warn("geo auto-suspension: could not re-arm the deferred bans; their streaks rebuild before they are due again",
+			"users", len(rearm), "err", err)
+	}
 }
 
 // auditGeo writes one transition with the system actor, the way reconcile
 // records its own runs. Best effort: the transition already happened, and a
 // failed audit write must not undo or repeat it.
+//
+// Detached from the poll's cancellation (bounded by geoFollowUpWriteTimeout):
+// a transition whose write committed just before the poll was cancelled is
+// as real as any other, and its row is the only record of who changed the
+// account and why.
 func (s *Service) auditGeo(ctx context.Context, e *domain.AuditEntry) {
 	if s.audit == nil {
 		return
 	}
 	e.Actor = "geo-detector"
-	if err := s.audit.Insert(ctx, e); err != nil {
+	actx, cancel := context.WithTimeout(context.WithoutCancel(ctx), geoFollowUpWriteTimeout)
+	defer cancel()
+	if err := s.audit.Insert(actx, e); err != nil {
 		log.Warn("geo auto-suspension: audit write failed", "action", e.Action, "target", e.Target, "err", err)
 	}
 }

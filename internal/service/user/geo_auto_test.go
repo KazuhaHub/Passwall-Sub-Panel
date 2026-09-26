@@ -317,3 +317,196 @@ func TestSuspendServiceIfClear_RejectsANonServiceReason(t *testing.T) {
 		t.Fatalf("reason = %q, want untouched", got)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// A caller cancelled after the write has committed.
+// ---------------------------------------------------------------------------
+
+// abortingUserRepo is the user repository the way a database-backed one
+// behaves under a cancelled context — every call fails with ctx.Err() — plus
+// the moment that matters here: the conditional write commits and THEN the
+// caller's context is cancelled, as when an admin closes the "Poll now" tab or
+// the app shuts down while the poll is in Phase 4.
+type abortingUserRepo struct {
+	*memoryUserRepo
+	cancel context.CancelFunc
+}
+
+func (r *abortingUserRepo) GetByID(ctx context.Context, id int64) (*domain.User, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return r.memoryUserRepo.GetByID(ctx, id)
+}
+
+func (r *abortingUserRepo) SetServiceStateIfClear(ctx context.Context, userID int64, reason domain.AutoDisabledReason, detail string, at time.Time) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	applied, err := r.memoryUserRepo.SetServiceStateIfClear(ctx, userID, reason, detail, at)
+	if applied {
+		r.cancel()
+	}
+	return applied, err
+}
+
+func (r *abortingUserRepo) ClearServiceStateIfReason(ctx context.Context, userID int64, reason domain.AutoDisabledReason) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	lifted, err := r.memoryUserRepo.ClearServiceStateIfReason(ctx, userID, reason)
+	if lifted {
+		r.cancel()
+	}
+	return lifted, err
+}
+
+// ctxSharedLife is the shared-client push the way the panel adapter behaves:
+// a cancelled context fails the request before it leaves. down makes the
+// panel itself refuse, so only the queued retry can converge it. bounded
+// records, per call that got through, whether the context carried a deadline.
+type ctxSharedLife struct {
+	down    bool
+	calls   []sharedLifeCall
+	bounded []bool
+}
+
+func (f *ctxSharedLife) SyncUserLifecycle(ctx context.Context, userID int64, want domain.UserLifecycle) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	_, ok := ctx.Deadline()
+	f.bounded = append(f.bounded, ok)
+	if f.down {
+		return errors.New("panel unreachable")
+	}
+	f.calls = append(f.calls, sharedLifeCall{userID, want})
+	return nil
+}
+
+// ctxTaskRepo is the sync-task queue the way the database-backed one behaves
+// under a cancelled context.
+type ctxTaskRepo struct {
+	recordingTaskRepo
+	bounded []bool
+}
+
+func (r *ctxTaskRepo) GetActiveByTarget(ctx context.Context, typ domain.SyncTaskType, target string, id int64) (*domain.SyncTask, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return r.recordingTaskRepo.GetActiveByTarget(ctx, typ, target, id)
+}
+
+func (r *ctxTaskRepo) Create(ctx context.Context, t *domain.SyncTask) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	_, ok := ctx.Deadline()
+	r.bounded = append(r.bounded, ok)
+	return r.recordingTaskRepo.Create(ctx, t)
+}
+
+// abortAfterWrite wires a Service whose caller context is cancelled the
+// moment the conditional write commits.
+func abortAfterWrite(u *domain.User, down bool) (*Service, *ctxSharedLife, *ctxTaskRepo, context.Context) {
+	ctx, cancel := context.WithCancel(context.Background())
+	repo := &abortingUserRepo{memoryUserRepo: &memoryUserRepo{byID: map[int64]*domain.User{u.ID: u}}, cancel: cancel}
+	life := &ctxSharedLife{down: down}
+	tasks := &ctxTaskRepo{}
+	svc := &Service{users: repo, ownership: emptyOwnershipRepo{}, tasks: tasks, settings: bfSettings{}}
+	svc.SetSharedLifecycleSyncer(life)
+	return svc, life, tasks, ctx
+}
+
+// Once the lift has cleared the row, PSP says the user is served again. The
+// upstream client is still disabled until the push lands, so a caller that
+// goes away right after the write must not take the push (or, when the panel
+// is down, its queued retry) with it: that left an account every PSP surface
+// called active cut off for up to an hour, with nothing queued to fix it.
+// The follow-up is still bounded: it runs on a context with a deadline.
+func TestLiftServiceIfHeldSince_FinishesThePushWhenTheCallerIsCancelledAfterTheWrite(t *testing.T) {
+	at := time.Now().Add(-2 * time.Hour)
+	held := func() *domain.User {
+		return &domain.User{ID: 7, UPN: "u@example.com", Enabled: true,
+			ServiceDisabledReason: domain.DisabledGeoAutoSuspend, ServiceDisabledAt: &at}
+	}
+
+	t.Run("panel up: pushed", func(t *testing.T) {
+		svc, life, tasks, ctx := abortAfterWrite(held(), false)
+
+		lifted, err := svc.LiftServiceIfHeldSince(ctx, 7, domain.DisabledGeoAutoSuspend, time.Now())
+
+		if err != nil || !lifted {
+			t.Fatalf("lifted=%v err=%v, want true, nil (the caller went away after the write, not before it)", lifted, err)
+		}
+		if len(life.calls) != 1 || life.calls[0].userID != 7 || !life.calls[0].want.Enable {
+			t.Fatalf("push = %+v, want one push for user 7 with Enable=true", life.calls)
+		}
+		if len(life.bounded) != 1 || !life.bounded[0] {
+			t.Fatalf("push context bounded = %v, want [true] (detached, but never unbounded)", life.bounded)
+		}
+		if got := pushConfigTasks(&tasks.recordingTaskRepo); len(got) != 0 {
+			t.Fatalf("queued push tasks = %+v, want none (the push landed)", got)
+		}
+	})
+
+	t.Run("panel down: queued", func(t *testing.T) {
+		svc, _, tasks, ctx := abortAfterWrite(held(), true)
+
+		lifted, err := svc.LiftServiceIfHeldSince(ctx, 7, domain.DisabledGeoAutoSuspend, time.Now())
+
+		if err != nil || !lifted {
+			t.Fatalf("lifted=%v err=%v, want true, nil (the failed push is queued, not returned)", lifted, err)
+		}
+		if got := pushConfigTasks(&tasks.recordingTaskRepo); len(got) != 1 || got[0].TargetID != 7 {
+			t.Fatalf("queued push tasks = %+v, want one for user 7", got)
+		}
+		if len(tasks.bounded) != 1 || !tasks.bounded[0] {
+			t.Fatalf("queue context bounded = %v, want [true]", tasks.bounded)
+		}
+	})
+}
+
+// The same on the suspension side, where it fails OPEN: the row says
+// geo_auto, the user reads a suspension mail, and the upstream client keeps
+// serving them. The fresh re-read the push works from is part of the
+// follow-up too, so it must not ride the cancelled context either.
+func TestSuspendServiceIfClear_FinishesThePushWhenTheCallerIsCancelledAfterTheWrite(t *testing.T) {
+	clear := func() *domain.User { return &domain.User{ID: 7, UPN: "u@example.com", Enabled: true} }
+
+	t.Run("panel up: pushed", func(t *testing.T) {
+		svc, life, tasks, ctx := abortAfterWrite(clear(), false)
+
+		applied, err := svc.SuspendServiceIfClear(ctx, 7, domain.DisabledGeoAutoSuspend, "d")
+
+		if err != nil || !applied {
+			t.Fatalf("applied=%v err=%v, want true, nil (the caller went away after the write, not before it)", applied, err)
+		}
+		if len(life.calls) != 1 || life.calls[0].userID != 7 || life.calls[0].want.Enable {
+			t.Fatalf("push = %+v, want one push for user 7 with Enable=false", life.calls)
+		}
+		if len(life.bounded) != 1 || !life.bounded[0] {
+			t.Fatalf("push context bounded = %v, want [true] (detached, but never unbounded)", life.bounded)
+		}
+		if got := pushConfigTasks(&tasks.recordingTaskRepo); len(got) != 0 {
+			t.Fatalf("queued push tasks = %+v, want none (the push landed)", got)
+		}
+	})
+
+	t.Run("panel down: queued", func(t *testing.T) {
+		svc, _, tasks, ctx := abortAfterWrite(clear(), true)
+
+		applied, err := svc.SuspendServiceIfClear(ctx, 7, domain.DisabledGeoAutoSuspend, "d")
+
+		if err != nil || !applied {
+			t.Fatalf("applied=%v err=%v, want true, nil (the failed push is queued, not returned)", applied, err)
+		}
+		if got := pushConfigTasks(&tasks.recordingTaskRepo); len(got) != 1 || got[0].TargetID != 7 {
+			t.Fatalf("queued push tasks = %+v, want one for user 7", got)
+		}
+		if len(tasks.bounded) != 1 || !tasks.bounded[0] {
+			t.Fatalf("queue context bounded = %v, want [true]", tasks.bounded)
+		}
+	})
+}

@@ -250,7 +250,10 @@ var (
 	// wrong or one a person overruled. lift_error / suspend_error are the
 	// failures that otherwise show only as Warn logs. deferred and
 	// lift_deferred climbing mean the per-poll caps are being hit — a mass
-	// event, or a broken location database with suspension on.
+	// event, or a broken location database with suspension on. A poll
+	// cancelled before Phase 4 finishes (a closed "Poll now" tab, a
+	// shutdown) defers what it had not started and counts it here too;
+	// that shows as a sporadic bump, not a climb.
 	GeoAutoSuspensionTotal = NewCounterVec(
 		"psp_geo_auto_suspension_total",
 		"Automatic location suspensions by outcome: suspended, skipped_held, skipped_unwired, deferred, suspend_error, lifted_expiry, lifted_admin, lift_skipped, lift_deferred, lift_error.",

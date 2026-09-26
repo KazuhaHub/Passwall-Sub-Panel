@@ -670,6 +670,11 @@ DNS 视角是不完整的：GeoDNS、anycast 下，PSP 解析到的地址和客�
 - 暂停：按用户 ID 从小到大取前 20 个，结果是确定的；其余**延后**——把他们的暂停计数放回阈值，下一个超限样本就会再次到期，计为 `deferred`。不符合资格的在截取之前就被剔除，一群已被暂停的用户占不掉名额。
 - 解除：只数**已到期**的（否则二十个更早开始的 7 天暂停，会让一个到期的 60 分钟暂停一整周都排不上），暂停最久的优先；其余下一轮再解，计为 `lift_deferred`。
 
+**轮询被取消时**（管理员关掉了「立即轮询」的页面、请求超时被前端放弃、应用正在关闭）：
+
+- **不再开始新的转换**，每次转换之前都检查一次。还没轮到的解除下一轮再解，计为 `lift_deferred`；还没轮到的暂停按上限延后的同一方式处理——把这一轮 Phase 1b 存下的那一行写回去，只把暂停计数放回阈值，下一个超限样本就会再次到期，计为 `deferred`。不这样做的话，它们会在已取消的上下文上各自失败成 `*_error`，暂停那一侧还会丢掉已经消耗的计数。
+- **已经写入的转换会做完**。条件写成功之后，重新读行、推送到各面板、推送失败时排队的 `user_push_config` 重试，都在与调用方取消脱钩、但有上限的上下文上完成（推送 2 分钟，排队另给 30 秒，推送用完了自己的时间也不会连累排队）；审计行和上面那次写回同样如此（各 30 秒）。否则一次解除会让 PSP 各处都显示「服务正常」，而上游客户端仍是停用的、也没有任何重试在排队，只能等对账的兜底（默认最长约一小时）；暂停那一侧则反过来放行。
+
 **写入是条件写，从不覆盖别人的决定。** 暂停只在服务原因为空（`''` 或 `NULL`）时写入（`SetServiceStateIfClear`）。谓词写在 `UPDATE` 本身里，而不是先读后写——先读后写会被下一个写入者抢在中间。所以管理员的暂停、被拦截客户端、人工的 `geo_anomaly`、配额暂停，一个都不会被替换；输了就计 `skipped_held`，不发邮件、不推送、不写审计。写入在每用户锁之内，并且写入那一刻持有紧急访问锁：紧急访问的授予要么先看到 `geo_auto` 而拒绝，要么暂停先看到授予写下的原因而跳过。没有这把锁，一次授予可以在两者之间把 `geo_auto` 换成 `traffic_exceeded`，而下一次周期滚动会把后者解除。
 
 **用户看到什么**：
@@ -736,7 +741,7 @@ DNS 视角是不完整的：GeoDNS、anycast 下，PSP 解析到的地址和客�
 | `psp_geo_verdict_total{state}` | 计数器 | 七种状态的分母（§12.4） |
 | `psp_geo_over_tier_total{tier}` | 计数器 | 超过标记容错的样本，按最粗的超限层级。这是默认灵敏度的刻度盘：`region` 远高于 `country` 的机队，多半是家里路由器 + 手机那一对，把省级容错调到 2 就是那个一个数字的修法 |
 | `psp_geo_samples_spaced_total` | 计数器 | 因距上次判定不足半个周期而跳过的用户。只有手动采集会产生它；持续有值，说明有人在反复点「立即采集」，而这正是采样间隔拒绝计入的加速 |
-| `psp_geo_auto_suspension_total{outcome}` | 计数器 | `suspended`、`skipped_held`、`skipped_unwired`、`deferred`、`suspend_error`、`lifted_expiry`、`lifted_admin`、`lift_skipped`、`lift_deferred`、`lift_error`。`lifted_admin` 对 `suspended` 是误报率；两个 `_error` 是否则只在 Warn 日志里的失败；两个 `deferred` 上涨说明每轮上限被撞到——一次大规模事件，或者自动暂停开着时地区库坏了 |
+| `psp_geo_auto_suspension_total{outcome}` | 计数器 | `suspended`、`skipped_held`、`skipped_unwired`、`deferred`、`suspend_error`、`lifted_expiry`、`lifted_admin`、`lift_skipped`、`lift_deferred`、`lift_error`。`lifted_admin` 对 `suspended` 是误报率；两个 `_error` 是否则只在 Warn 日志里的失败；两个 `deferred` 上涨说明每轮上限被撞到——一次大规模事件，或者自动暂停开着时地区库坏了；轮询在 Phase 4 前后被取消也会计入，那种是零星的 |
 | `psp_infra_addresses` | gauge | 当前作为本机基础设施排除的节点与中转地址数。配了节点却掉到 0，说明刷新失败或主机名全都解析不了 |
 | `psp_infra_address_resolve_failures_total` | 计数器 | 节点或中转主机名解析失败次数（保留上次的地址） |
 | `psp_poll_stage_ms{stage="geo_enforce"}` | 直方图 | Phase 4（解除与暂停）的耗时 |

@@ -2441,6 +2441,37 @@ func (s *Service) SetServiceSuspendedAndSync(ctx context.Context, userID int64, 
 	return nil
 }
 
+// The follow-up of a committed automatic service transition — the fresh
+// re-read, the push to every panel, and the SyncTaskUserPushConfig queued when
+// the push fails — runs on a context detached from the caller's
+// cancellation, the way the poll's traffic-floor push does, and for the same
+// reason. The conditional write has already committed, so PSP's row (portal,
+// admin list, bell) already shows the new state, while the upstream client is
+// what actually admits or refuses the connection. The caller is the traffic
+// poll, and a poll is cancelled for reasons that say nothing about this user:
+// an admin closes the "Poll now" tab (the request context), the SPA's request
+// timeout aborts it, or Shutdown cancels the background context. Inheriting
+// that cancellation failed the push AND the enqueue that is meant to catch a
+// failed push, so a lift left the account "active" in PSP and disabled
+// upstream — and a suspension left it "suspended" in PSP and serving
+// upstream — with nothing queued; only the reconcile backstop (up to about an
+// hour) noticed.
+//
+// Detached, but never unbounded, and on two separate budgets: a push that uses
+// up its own (a panel that hangs until the adapter's own 30s request timeout,
+// a few times over) must still leave the enqueue time to record the retry.
+// WithoutCancel keeps the caller's values, including the operation gate's
+// admission, so a nested read reuses it instead of queueing behind a writer.
+const (
+	transitionPushTimeout  = 2 * time.Minute
+	transitionQueueTimeout = 30 * time.Second
+)
+
+// detachedFollowUp is the context for one step of that follow-up.
+func detachedFollowUp(ctx context.Context, d time.Duration) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), d)
+}
+
 // SuspendServiceIfClear suspends the user's service ONLY if nothing holds it
 // yet, and reports whether it did. It is the automatic location suspension's
 // write path (geo_auto), which must never replace another reason: an admin
@@ -2467,6 +2498,9 @@ func (s *Service) SetServiceSuspendedAndSync(ctx context.Context, userID int64, 
 // SyncTaskUserPushConfig if the push (or the re-read) fails. applied is true
 // whenever the write won, even if the push was only queued; an error beside
 // applied=true means the push failed AND could not be queued.
+//
+// The write runs on the caller's context: a caller already gone starts no
+// suspension. Everything after it runs detached (see detachedFollowUp).
 func (s *Service) SuspendServiceIfClear(ctx context.Context, userID int64, reason domain.AutoDisabledReason, detail string) (bool, error) {
 	if reason == domain.DisabledNone || !domain.ServiceSuspensionReason(reason) {
 		return false, fmt.Errorf("%w: invalid service suspension reason %q", domain.ErrValidation, reason)
@@ -2489,14 +2523,18 @@ func (s *Service) SuspendServiceIfClear(ctx context.Context, userID int64, reaso
 	// Committed, so the mail is true whatever happens to the push below.
 	s.notifyServiceSuspended(userID, reason, detail)
 
+	pushCtx, cancelPush := detachedFollowUp(ctx, transitionPushTimeout)
+	defer cancelPush()
 	who := fmt.Sprintf("#%d", userID)
-	u, pushErr := s.users.GetByID(ctx, userID)
+	u, pushErr := s.users.GetByID(pushCtx, userID)
 	if pushErr == nil {
 		who = u.UPN
-		pushErr = s.pushClientConfigToAll(ctx, u)
+		pushErr = s.pushClientConfigToAll(pushCtx, u)
 	}
 	if pushErr != nil {
-		if taskErr := s.enqueueUserTask(ctx, domain.SyncTaskUserPushConfig, userID, fmt.Sprintf("sync service status for user %s", who)); taskErr != nil {
+		queueCtx, cancelQueue := detachedFollowUp(ctx, transitionQueueTimeout)
+		defer cancelQueue()
+		if taskErr := s.enqueueUserTask(queueCtx, domain.SyncTaskUserPushConfig, userID, fmt.Sprintf("sync service status for user %s", who)); taskErr != nil {
 			log.Warn("enqueue user service-status push failed", "user_id", userID, "err", taskErr)
 			return true, errUnqueuedPush("suspend proxy service", pushErr, taskErr)
 		}
@@ -2521,6 +2559,10 @@ func (s *Service) SuspendServiceIfClear(ctx context.Context, userID int64, reaso
 // No restore mail: the suspension mail already said service comes back by
 // itself, and a second mail per episode is noise. An admin resume still goes
 // through ResumeServiceAndSync and sends one.
+//
+// The read and the clear run on the caller's context; the push and its
+// queued retry, once the clear has committed, run detached (see
+// detachedFollowUp).
 func (s *Service) LiftServiceIfHeldSince(ctx context.Context, userID int64, reason domain.AutoDisabledReason, suspendedAtOrBefore time.Time) (bool, error) {
 	if reason == domain.DisabledNone {
 		return false, fmt.Errorf("%w: lifting requires a non-empty reason", domain.ErrValidation)
@@ -2546,8 +2588,12 @@ func (s *Service) LiftServiceIfHeldSince(ctx context.Context, userID int64, reas
 	u.ServiceDisabledReason = domain.DisabledNone
 	u.ServiceDisableDetail = ""
 	u.ServiceDisabledAt = nil
-	if pushErr := s.pushClientConfigToAll(ctx, u); pushErr != nil {
-		if taskErr := s.enqueueUserTask(ctx, domain.SyncTaskUserPushConfig, userID, fmt.Sprintf("sync service resume for user %s", u.UPN)); taskErr != nil {
+	pushCtx, cancelPush := detachedFollowUp(ctx, transitionPushTimeout)
+	defer cancelPush()
+	if pushErr := s.pushClientConfigToAll(pushCtx, u); pushErr != nil {
+		queueCtx, cancelQueue := detachedFollowUp(ctx, transitionQueueTimeout)
+		defer cancelQueue()
+		if taskErr := s.enqueueUserTask(queueCtx, domain.SyncTaskUserPushConfig, userID, fmt.Sprintf("sync service resume for user %s", u.UPN)); taskErr != nil {
 			log.Warn("enqueue user service-resume push failed", "user_id", userID, "err", taskErr)
 			return true, errUnqueuedPush("resume proxy service", pushErr, taskErr)
 		}

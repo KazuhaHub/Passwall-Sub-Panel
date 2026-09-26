@@ -31,14 +31,27 @@ type fakeGeoSuspender struct {
 	suspendCalls []int64
 	liftCalls    []int64
 	cutoffs      map[int64]time.Time
+
+	// afterWrite runs once a write has committed, before the call returns:
+	// the moment a caller's cancellation (a closed "Poll now" tab, a
+	// shutdown) lands in the middle of a transition.
+	afterWrite func()
 }
 
+// The writes run on the caller's context, as user.Service's do: a context
+// already cancelled fails the call before anything is written.
 func (f *fakeGeoSuspender) SuspendServiceIfClear(ctx context.Context, userID int64, reason domain.AutoDisabledReason, detail string) (bool, error) {
 	f.suspendCalls = append(f.suspendCalls, userID)
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
 	if err := f.errFor[userID]; err != nil && !f.appliedWithErr[userID] {
 		return false, err
 	}
 	applied, err := f.repo.SetServiceStateIfClear(ctx, userID, reason, detail, time.Now())
+	if applied && f.afterWrite != nil {
+		f.afterWrite()
+	}
 	if err == nil {
 		err = f.errFor[userID]
 	}
@@ -51,6 +64,9 @@ func (f *fakeGeoSuspender) LiftServiceIfHeldSince(ctx context.Context, userID in
 		f.cutoffs = map[int64]time.Time{}
 	}
 	f.cutoffs[userID] = cutoff
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
 	if err := f.errFor[userID]; err != nil && !f.appliedWithErr[userID] {
 		return false, err
 	}
@@ -62,6 +78,9 @@ func (f *fakeGeoSuspender) LiftServiceIfHeldSince(ctx context.Context, userID in
 		return false, nil
 	}
 	lifted, err := f.repo.ClearServiceStateIfReason(ctx, userID, reason)
+	if lifted && f.afterWrite != nil {
+		f.afterWrite()
+	}
 	if err == nil {
 		err = f.errFor[userID]
 	}
@@ -73,7 +92,11 @@ type fakeAuditRepo struct {
 	entries []domain.AuditEntry
 }
 
-func (a *fakeAuditRepo) Insert(_ context.Context, e *domain.AuditEntry) error {
+// Insert fails on a cancelled context, as the database-backed log does.
+func (a *fakeAuditRepo) Insert(ctx context.Context, e *domain.AuditEntry) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	a.entries = append(a.entries, *e)
 	return nil
 }
@@ -821,4 +844,205 @@ func TestPollOnce_GeoEnforceRunsAfterTheFlush(t *testing.T) {
 	if want := []string{"flush", "suspend"}; strings.Join(users.order, ",") != strings.Join(want, ",") {
 		t.Fatalf("order = %v, want %v", users.order, want)
 	}
+}
+
+// ---------------------------------------------------------------------------
+// A poll cancelled around Phase 4.
+// ---------------------------------------------------------------------------
+
+// consumedRecord is what Phase 1b saved for a user whose ban came due: the
+// flag, its reason and evidence, and a ban streak the due verdict consumed.
+func consumedRecord(uid int64) domain.GeoRecord {
+	return domain.GeoRecord{
+		UserID: uid,
+		Streak: domain.GeoStreak{Over: 4, Flagged: true, Tier: domain.GeoTierCountry, BanOver: 0},
+		State:  domain.GeoStateFlagged,
+		Reason: "in 2 countries at once ([DE JP]); tolerance is 1",
+		Places: []string{"DE", "JP"},
+	}
+}
+
+// consumedBan is a due ban carrying the record Phase 1b saved for it.
+func consumedBan(uid int64) geoBan {
+	b := ban(uid)
+	b.Record = consumedRecord(uid)
+	return b
+}
+
+// banAfter is a group armed with its own ban threshold, so a re-armed streak
+// is told apart from a consumed (0) or a fresh (1) one.
+func banAfter(n int) ports.UISettings {
+	s := armed()
+	s.GeoAnomalyBanAfterPolls = n
+	return s
+}
+
+// A poll whose caller has gone (a closed "Poll now" tab, a shutdown) starts
+// no new transition: every lift or suspension is inline pushes under the
+// per-user lock, and each one would fail on the cancelled context anyway.
+// Nothing is lost by stopping. A due lift is simply due again next poll; a
+// due ban already had its streak consumed and saved in Phase 1b, so it is
+// deferred the way the per-poll cap defers one — the streak put back AT the
+// threshold, the rest of the row as Phase 1b saved it — and fires on the
+// user's next over-sample.
+func TestEnforceGeo_ACancelledPollStartsNoTransitionAndLosesNoBan(t *testing.T) {
+	metrics.Reset()
+	users := &fakeUserRepo{users: map[int64]*domain.User{
+		1: {ID: 1, GroupID: 3, Enabled: true},
+		2: {ID: 2, GroupID: 3, Enabled: true, ServiceDisabledReason: domain.DisabledGeoAutoSuspend, ServiceDisabledAt: minutesAgo(120)},
+	}}
+	s, sus, audit := newEnforcer(users, map[int64]ports.UISettings{3: banAfter(4)})
+	store := &upsertStreaks{data: map[int64]domain.GeoRecord{1: consumedRecord(1)}}
+	s.SetGeoStreakStore(store)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	s.enforceGeo(ctx, listed(users), []geoBan{consumedBan(1)}, nil, time.Now())
+
+	if len(sus.suspendCalls) != 0 || len(sus.liftCalls) != 0 {
+		t.Fatalf("suspend calls %v, lift calls %v; a cancelled poll must not start a transition", sus.suspendCalls, sus.liftCalls)
+	}
+	if got := users.users[1].ServiceDisabledReason; got != domain.DisabledNone {
+		t.Fatalf("user 1: reason = %q, want none", got)
+	}
+	if got := users.users[2].ServiceDisabledReason; got != domain.DisabledGeoAutoSuspend {
+		t.Fatalf("user 2: reason = %q, want geo_auto still (lifted next poll)", got)
+	}
+	if len(audit.entries) != 0 {
+		t.Fatalf("audit rows = %+v, want none (nothing happened)", audit.entries)
+	}
+	for outcome, want := range map[string]int64{
+		"deferred": 1, "lift_deferred": 1, "suspend_error": 0, "lift_error": 0, "suspended": 0, "lifted_expiry": 0,
+	} {
+		if got := geoOutcome(t, outcome); got != want {
+			t.Errorf("%s = %d, want %d", outcome, got, want)
+		}
+	}
+	got, want := store.data[1], consumedRecord(1)
+	want.Streak.BanOver = 4
+	if got.Streak != want.Streak || got.State != want.State || got.Reason != want.Reason || strings.Join(got.Places, ",") != "DE,JP" {
+		t.Fatalf("saved row = %+v, want Phase 1b's row with the ban streak re-armed to 4: %+v", got, want)
+	}
+}
+
+// End to end: the poll is cancelled right after Phase 1b saved the consumed
+// streak, so the Phase 4 that follows runs on a dead context. The ban is not
+// applied then, and it is not lost either: the user's next over-sample makes
+// it due again. Three samples to the threshold, so a streak that stayed
+// consumed (0, one sample later 1) cannot pass for a re-armed one.
+func TestPollOnce_ABanACancelledPollDidNotApplyFiresOnTheNextSample(t *testing.T) {
+	metrics.Reset()
+	users := &fakeUserRepo{users: map[int64]*domain.User{1: {ID: 1, GroupID: 3, Enabled: true}}}
+	g := newGeoPoll(users, map[string][]string{emailOf(1): {"1.1.1.1", "2.2.2.2"}}, twoCountries(),
+		map[int64]ports.UISettings{3: banAfter(3)})
+
+	g.poll(t)
+	g.poll(t)
+	if got := g.store.data[1].Streak.BanOver; got != 2 {
+		t.Fatalf("ban streak after two over-samples = %d, want 2 (precondition)", got)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	g.store.afterSave = cancel
+	_ = g.svc.PollOnce(ctx)
+
+	if got := users.users[1].ServiceDisabledReason; got != domain.DisabledNone {
+		t.Fatalf("reason = %q after the cancelled poll, want none (no transition started)", got)
+	}
+	saved := g.store.data[1]
+	if got := saved.Streak.BanOver; got != 3 {
+		t.Fatalf("saved ban streak after the cancelled poll = %d, want 3 (re-armed at the threshold)", got)
+	}
+	// The re-arm writes back the row this poll judged, not a blank one with
+	// only the streak set: the Geo tab and the bell read the rest of it.
+	if saved.State != domain.GeoStateFlagged || !strings.Contains(saved.Reason, "2 countries") ||
+		strings.Join(saved.Places, ",") != "DE,JP" || !saved.Streak.Flagged || saved.Streak.Over != 3 {
+		t.Fatalf("saved row after the cancelled poll = %+v, want this poll's flagged verdict with only the ban streak re-armed", saved)
+	}
+	if got := geoOutcome(t, "deferred"); got != 1 {
+		t.Fatalf("deferred = %d, want 1", got)
+	}
+
+	g.poll(t)
+	if got := users.users[1].ServiceDisabledReason; got != domain.DisabledGeoAutoSuspend {
+		t.Fatalf("reason = %q after the next over-sample, want geo_auto (deferred, not lost)", got)
+	}
+}
+
+// Cancelled in the middle of a transition: the one whose write committed is
+// a real transition and is recorded as one — counted and audited, on a
+// context the cancellation does not reach — and the ones after it are not
+// started. The check is made before EACH transition, not once at the top.
+func TestEnforceGeo_CancelledMidPhaseFinishesTheTransitionInFlightAndStartsNoOther(t *testing.T) {
+	t.Run("suspensions", func(t *testing.T) {
+		metrics.Reset()
+		users := &fakeUserRepo{users: map[int64]*domain.User{
+			1: {ID: 1, GroupID: 3, UPN: "first@example.test", Enabled: true},
+			2: {ID: 2, GroupID: 3, Enabled: true},
+		}}
+		s, sus, audit := newEnforcer(users, map[int64]ports.UISettings{3: banAfter(4)})
+		store := &upsertStreaks{data: map[int64]domain.GeoRecord{1: consumedRecord(1), 2: consumedRecord(2)}}
+		s.SetGeoStreakStore(store)
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		sus.afterWrite = cancel
+
+		s.enforceGeo(ctx, listed(users), []geoBan{consumedBan(1), consumedBan(2)}, nil, time.Now())
+
+		if len(sus.suspendCalls) != 1 || sus.suspendCalls[0] != 1 {
+			t.Fatalf("suspend calls = %v, want only user 1 (the one in flight when the poll was cancelled)", sus.suspendCalls)
+		}
+		if got := users.users[1].ServiceDisabledReason; got != domain.DisabledGeoAutoSuspend {
+			t.Fatalf("user 1: reason = %q, want geo_auto", got)
+		}
+		if len(audit.entries) != 1 || audit.entries[0].Action != "geo_auto_suspend" || audit.entries[0].Target != "user:1 first@example.test" {
+			t.Fatalf("audit rows = %+v, want one geo_auto_suspend for user 1", audit.entries)
+		}
+		if got := geoOutcome(t, "suspended"); got != 1 {
+			t.Errorf("suspended = %d, want 1", got)
+		}
+		if got := geoOutcome(t, "deferred"); got != 1 {
+			t.Errorf("deferred = %d, want 1", got)
+		}
+		if got := store.data[2].Streak.BanOver; got != 4 {
+			t.Fatalf("user 2: saved ban streak = %d, want 4 (re-armed)", got)
+		}
+		if got := store.data[1].Streak.BanOver; got != 0 {
+			t.Fatalf("user 1: saved ban streak = %d, want 0 (consumed by the suspension it got)", got)
+		}
+	})
+
+	t.Run("lifts", func(t *testing.T) {
+		metrics.Reset()
+		users := &fakeUserRepo{users: map[int64]*domain.User{
+			3: {ID: 3, Enabled: true, ServiceDisabledReason: domain.DisabledGeoAutoSuspend, ServiceDisabledAt: minutesAgo(120)},
+			4: {ID: 4, UPN: "oldest@example.test", Enabled: true, ServiceDisabledReason: domain.DisabledGeoAutoSuspend, ServiceDisabledAt: minutesAgo(121)},
+		}}
+		s, sus, audit := newEnforcer(users, nil)
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		sus.afterWrite = cancel
+
+		s.enforceGeo(ctx, listed(users), nil, nil, time.Now())
+
+		if len(sus.liftCalls) != 1 || sus.liftCalls[0] != 4 {
+			t.Fatalf("lift calls = %v, want only user 4 (the longest-running, in flight when the poll was cancelled)", sus.liftCalls)
+		}
+		if got := users.users[4].ServiceDisabledReason; got != domain.DisabledNone {
+			t.Fatalf("user 4: reason = %q, want lifted", got)
+		}
+		if got := users.users[3].ServiceDisabledReason; got != domain.DisabledGeoAutoSuspend {
+			t.Fatalf("user 3: reason = %q, want geo_auto still (lifted next poll)", got)
+		}
+		if len(audit.entries) != 1 || audit.entries[0].Action != "geo_auto_lift" || audit.entries[0].Target != "user:4 oldest@example.test" {
+			t.Fatalf("audit rows = %+v, want one geo_auto_lift for user 4", audit.entries)
+		}
+		if got := geoOutcome(t, "lifted_expiry"); got != 1 {
+			t.Errorf("lifted_expiry = %d, want 1", got)
+		}
+		if got := geoOutcome(t, "lift_deferred"); got != 1 {
+			t.Errorf("lift_deferred = %d, want 1", got)
+		}
+	})
 }
