@@ -734,6 +734,7 @@ func (h *AdminUserHandler) RegenerateUser2FARecovery(c *gin.Context) {
 }
 
 type updateUserRequest struct {
+	UPN      *string    `json:"upn,omitempty"`
 	GroupID  *int64     `json:"group_id,omitempty"`
 	Role     *string    `json:"role,omitempty"`
 	Email    *string    `json:"email,omitempty"`
@@ -802,6 +803,7 @@ func (h *AdminUserHandler) Update(c *gin.Context) {
 		}
 	}
 	in := user.UpdateInput{
+		UPN:         req.UPN,
 		GroupID:     req.GroupID,
 		Email:       req.Email,
 		ExpireAt:    expireAt,

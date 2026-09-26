@@ -1556,6 +1556,7 @@
     "refresh": "刷新",
     "field": {
       "upn": "UPN",
+      "upn_edit_hint": "登录名；修改后请使用新 UPN 登录。SSO 绑定仍按身份标识匹配。",
       "email": "邮箱",
       "display_name": "显示名",
       "password": "初始密码（留空自动生成）",

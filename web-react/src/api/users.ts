@@ -10,6 +10,7 @@ import type {
 } from './types'
 
 export interface UpdateUserRequest {
+  upn?: string
   group_id?: number
   role?: Role
   expire_at?: string | null

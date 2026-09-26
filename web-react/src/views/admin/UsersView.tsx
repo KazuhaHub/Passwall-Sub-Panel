@@ -134,6 +134,7 @@ interface CreateForm {
 }
 
 interface EditForm {
+  upn: string
   display_name: string
   email: string
   group_id: number | ''
@@ -182,7 +183,7 @@ function dateInNDays(n: number): string {
 }
 
 const EMPTY_EDIT: EditForm = {
-  display_name: '', email: '', group_id: '', role: 'user',
+  upn: '', display_name: '', email: '', group_id: '', role: 'user',
   expire_mode: 'date', expire_at: '', traffic_limit_gb: 0,
   traffic_reset_period: 'monthly', ip_limit: 0, device_limit: 0, remark: '',
   inherit_traffic: false, inherit_ip: false, inherit_device: false,
@@ -200,7 +201,7 @@ function bytesToGB(b: number) { return Math.round((b / 1024 / 1024 / 1024) * 100
  */
 function rowFingerprint(u: User): string {
   return JSON.stringify([
-    u.display_name ?? '', u.email ?? '', u.role, u.group_id,
+    u.upn, u.display_name ?? '', u.email ?? '', u.role, u.group_id,
     u.traffic_limit_bytes, u.expire_date ?? '', u.expire_at ?? '',
     u.ip_limit, u.device_limit, accountEnabledForEdit(u),
     !!u.inherits_traffic_limit, !!u.inherits_ip_limit, !!u.inherits_device_limit,
@@ -353,7 +354,7 @@ export default function UsersView() {
   // acted on: the admin's draft survives until they choose to reload it.
   const editRowChanged = !!editing && editBaseline !== null && rowFingerprint(editing) !== editBaseline
   const [editForm, setEditForm] = useState<EditForm>(EMPTY_EDIT)
-  type EditField = 'display_name' | 'email' | 'group_id' | 'expire_at' | 'traffic_limit_gb' | 'period_used_gb' | 'ip_limit' | 'device_limit'
+  type EditField = 'upn' | 'display_name' | 'email' | 'group_id' | 'expire_at' | 'traffic_limit_gb' | 'period_used_gb' | 'ip_limit' | 'device_limit'
   const [editErr, setEditErr] = useState<FieldErrors<EditField>>({})
 
   const [reasonOpen, setReasonOpen] = useState(false)
@@ -661,7 +662,7 @@ export default function UsersView() {
   function buildEditForm(u: User): EditForm {
     const usedGB = bytesToGB(usageMap.get(u.id)?.period_used_bytes ?? 0)
     return {
-      display_name: u.display_name ?? '', email: u.email ?? '',
+      upn: u.upn, display_name: u.display_name ?? '', email: u.email ?? '',
       group_id: u.group_id, role: u.role,
       expire_mode: u.expire_at ? 'date' : 'permanent',
       // Prefill from the panel-timezone calendar day the backend computed,
@@ -711,6 +712,7 @@ export default function UsersView() {
 
   function validateEdit(f: EditForm): FieldErrors<EditField> {
     return {
+      upn: validateRequired(f.upn.trim()),
       display_name: validateName(f.display_name, { max: 64 }),
       email: validateEmail(f.email),
       group_id: validateGroupId(f.group_id, { required: true }),
@@ -764,6 +766,8 @@ export default function UsersView() {
           ? { inherit_device_limit: true }
           : { device_limit: editForm.device_limit }),
       }
+      // Keep unrelated profile edits from rewriting a legacy noncanonical UPN.
+      if (editForm.upn !== editing.upn) req.upn = editForm.upn
       if (editForm.expire_mode === 'permanent') req.clear_expire = true
       // Send the bare YYYY-MM-DD; the backend anchors it to end-of-day in
       // the panel timezone so the chosen day can't drift with the browser tz.
@@ -786,7 +790,10 @@ export default function UsersView() {
         savedUser = { ...savedUser, enabled: editForm.enabled }
       }
       mutateItems(prev => prev.map(user => user.id === savedUser.id ? savedUser : user))
-      if (editing.id === auth.userId) auth.setDisplayName(editForm.display_name || '')
+      if (editing.id === auth.userId) {
+        auth.setDisplayName(editForm.display_name || '')
+        auth.setUPN(savedUser.upn)
+      }
       pushSnack(t('admin:users.toast.saved'), 'success')
       setEditOpen(false)
     } catch {
@@ -1856,6 +1863,11 @@ export default function UsersView() {
             {/* RIGHT — editable fields */}
             <Box component="form" id="edit-form" onSubmit={submitEdit}
               sx={{ flex: '1 1 360px', minWidth: 300, display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 2, alignItems: 'flex-start' }}>
+            <TextField required fullWidth label={t('admin:users.field.upn')}
+              value={editForm.upn} onChange={e => setEditForm({ ...editForm, upn: e.target.value })}
+              slotProps={{ htmlInput: { maxLength: 255 } }}
+              error={!!editErr.upn}
+              helperText={editErr.upn ? t(`admin:${editErr.upn}`) : t('admin:users.field.upn_edit_hint')} />
             <TextField fullWidth label={t('admin:users.field.display_name')}
               value={editForm.display_name} onChange={e => setEditForm({ ...editForm, display_name: e.target.value })}
               error={!!editErr.display_name}
