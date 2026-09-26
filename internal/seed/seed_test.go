@@ -212,6 +212,103 @@ func TestEnsureUpgradesPreviousIndependentRoutingDefaults(t *testing.T) {
 	}
 }
 
+func TestEnsureUpgradesUnmodifiedDNSDefaults(t *testing.T) {
+	const oldHost = "v5brh3pn84.cloudflare-gateway.com"
+	const newHost = "l9f26nnn5d.cloudflare-gateway.com"
+	const previousMihomoForeign = `      # Foreign domains -> org Cloudflare Gateway (primary; bare resolution
+      # verified working — TCP ping + full DoH Status:0), public Cloudflare
+      # 1.1.1.1 / 1.0.0.1 as backup. The CF IPs carry IP SANs so DoH-by-IP
+      # validates cleanly; Google 8.8.8.8-by-IP is NOT used (its cert is
+      # dns.google-only, no IP SAN -> would fail certificate validation).
+      "geosite:geolocation-!cn":
+      - https://l9f26nnn5d.cloudflare-gateway.com/dns-query
+      - https://1.1.1.1/dns-query
+      - https://1.0.0.1/dns-query`
+	files := []struct {
+		relPath     string
+		oldLFHash   string
+		oldCRLFHash string
+	}{
+		{"templates/default-mihomo.yaml", "f7e3a2784a67fcdf38ba580f51ba0ae577aac4bcfc1c72efc32c8c39ca4f3e4b", "426353853592fb9a17afe5cbe801c8c674fc9394ad052b45b3b6ea20789b093d"},
+		{"templates/default-sing-box.yaml", "e73031f8844a9bc54922510ff209286f3fb24f709de448427fb32f0ebef5cf27", "6cfb82005a288b1b2a662cb91dd249337f0678b3ff0df4a10551b25f735439f8"},
+	}
+	for _, tc := range []struct {
+		name                    string
+		customized              string
+		crlf                    bool
+		previousGatewayHostOnly bool
+	}{
+		{"LF both untouched", "", false, false},
+		{"CRLF both untouched", "", true, false},
+		{"Gateway hostname only", "", false, true},
+		{"customized Mihomo", files[0].relPath, false, false},
+		{"customized Sing-box", files[1].relPath, false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			wants := make(map[string][]byte)
+			for _, file := range files {
+				current, err := defaultsFS.ReadFile("files/" + file.relPath)
+				if err != nil {
+					t.Fatal(err)
+				}
+				previousText := strings.ReplaceAll(string(current), "\r\n", "\n")
+				oldHash := file.oldLFHash
+				if file.relPath == files[0].relPath {
+					start := strings.Index(previousText, "      # Foreign domains ->")
+					if start < 0 {
+						t.Fatal("missing Mihomo foreign DNS policy")
+					}
+					end := strings.Index(previousText[start:], "\n\n  proxies:")
+					if end < 0 {
+						t.Fatal("missing Mihomo proxies block after DNS policy")
+					}
+					previousText = previousText[:start] + previousMihomoForeign + previousText[start+end:]
+					if tc.previousGatewayHostOnly {
+						oldHash = "fbe93907df14dcfe5a6d26207c7fbd5b717be1734491bbeb5aa6de66d636af47"
+					}
+				}
+				if !tc.previousGatewayHostOnly || file.relPath != files[0].relPath {
+					previousText = strings.Replace(previousText, newHost, oldHost, 1)
+				}
+				previous := []byte(previousText)
+				if tc.crlf {
+					previous = []byte(strings.ReplaceAll(string(previous), "\n", "\r\n"))
+					if tc.previousGatewayHostOnly && file.relPath == files[0].relPath {
+						oldHash = "802667bf6c7caf954dc431bbd926b045583333a570320172a082621a6a635038"
+					} else {
+						oldHash = file.oldCRLFHash
+					}
+				}
+				if got := testSHA256(previous); got != oldHash {
+					t.Fatalf("previous %s hash = %s", file.relPath, got)
+				}
+				want := current
+				if file.relPath == tc.customized {
+					previous = append(previous, []byte("# administrator customization\n")...)
+					want = previous
+				}
+				wants[file.relPath] = want
+				path := filepath.Join(dir, file.relPath)
+				if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(path, previous, 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			for attempt := 0; attempt < 2; attempt++ {
+				if err := Ensure(dir); err != nil {
+					t.Fatal(err)
+				}
+				for relPath, want := range wants {
+					assertManagedTestFile(t, dir, relPath, want)
+				}
+			}
+		})
+	}
+}
+
 func writeManagedTestFiles(t *testing.T, template, rules []byte) string {
 	t.Helper()
 	dir := t.TempDir()
