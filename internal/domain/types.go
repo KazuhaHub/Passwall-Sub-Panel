@@ -1095,18 +1095,35 @@ type SAMLLoginRequest struct {
 // Consumed reports whether this request has already been claimed.
 func (r *SAMLLoginRequest) Consumed() bool { return r != nil && r.ConsumedAt != nil }
 
-// GeoLocation is a resolved geolocation for an IP. Empty fields mean
+// GeoLocation is a resolved geolocation for an IP. Empty name fields mean
 // "unknown" (private/reserved IP, lookup disabled, or provider failure).
 // CountryCode is ISO 3166-1 alpha-2 (e.g. "HK"); the frontend renders the
 // flag from it.
+//
+// Only the four names reach JSON. The sub-log, audit and auth-event views
+// serve this type verbatim, and their bytes must not change. The fields
+// after them are for in-memory judging; evidence exposes what it needs of
+// them through its own fields, and coordinates never leave memory.
 type GeoLocation struct {
 	CountryCode string `json:"country_code"`
 	Country     string `json:"country"`
 	Region      string `json:"region"`
 	City        string `json:"city"`
+	// RegionCode is Region's ISO 3166-2 code without the country prefix
+	// ("GD"), as the database gave it; normalize with NormalizeRegionCode.
+	RegionCode string `json:"-"`
+	// Latitude/Longitude place the NETWORK (WGS84), a pair or none; (0, 0)
+	// means none. AccuracyRadiusKm is the database's radius around it, 0 =
+	// none given (not "exact"). In memory only: see GeoPoint.
+	Latitude         float64 `json:"-"`
+	Longitude        float64 `json:"-"`
+	AccuracyRadiusKm int     `json:"-"`
 }
 
-// Empty reports whether nothing useful was resolved.
+// Empty reports whether nothing useful was resolved. It reads the four names
+// only, mirroring authcore's Location.Empty: a record carrying a region code
+// or coordinates but no name is still "nothing resolved", as it was before
+// those fields existed, so the geo service keeps dropping it.
 func (g GeoLocation) Empty() bool {
 	return g.CountryCode == "" && g.Country == "" && g.Region == "" && g.City == ""
 }

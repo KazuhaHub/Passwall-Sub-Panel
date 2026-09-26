@@ -5,7 +5,7 @@ go 1.26.0
 toolchain go1.27.1
 
 require (
-	github.com/KazuhaHub/authcore v0.4.0
+	github.com/KazuhaHub/authcore v0.5.0
 	github.com/KazuhaHub/passwall-protocol v0.2.0
 	github.com/coreos/go-oidc/v3 v3.21.0
 	github.com/crewjam/saml v0.5.1

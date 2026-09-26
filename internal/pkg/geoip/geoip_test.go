@@ -31,6 +31,23 @@ func TestToDomain(t *testing.T) {
 	if got != want {
 		t.Fatalf("toDomain = %+v, want %+v", got, want)
 	}
+	// A city database fills the region code and the coordinates too, and each
+	// must arrive on its own field: the region code is what the SPA names a
+	// Chinese province by, and a transposed or dropped coordinate would move
+	// the distance the geo poll computes without failing anything else. The
+	// struct stays comparable (floats and an int), so != still checks every
+	// field at once.
+	full := toDomain(authcoregeoip.Location{
+		CountryCode: "CN", Country: "China", Region: "Guangdong", City: "Shenzhen",
+		RegionCode: "GD", Latitude: 22.5431, Longitude: 114.0579, AccuracyRadiusKm: 20,
+	})
+	wantFull := domain.GeoLocation{
+		CountryCode: "CN", Country: "China", Region: "Guangdong", City: "Shenzhen",
+		RegionCode: "GD", Latitude: 22.5431, Longitude: 114.0579, AccuracyRadiusKm: 20,
+	}
+	if full != wantFull {
+		t.Fatalf("toDomain of a full city record = %+v, want %+v", full, wantFull)
+	}
 	// Every field is optional — a country-level database fills two of the four.
 	if empty := toDomain(authcoregeoip.Location{}); !empty.Empty() {
 		t.Fatalf("toDomain of an empty location = %+v, want the domain zero value", empty)
