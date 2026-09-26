@@ -197,8 +197,8 @@ func TestRefresh_SubSpreadJudgesTheWindow(t *testing.T) {
 	if idle.Evidence != nil {
 		t.Fatalf("an account that fetched nothing has evidence %s", idle.Evidence)
 	}
-	if rows := h.store.saved(t); len(rows[1]) != 2 {
-		t.Fatalf("user 1 rows %v, want usage_shift and sub_spread", rows[1])
+	if rows := h.store.saved(t); len(rows[1]) != 3 {
+		t.Fatalf("user 1 rows %v, want usage_shift, devices and sub_spread", rows[1])
 	}
 	if len(h.scanner.calls) != 1 || h.scanner.calls[0].batch != scanBatch {
 		t.Fatalf("scans %+v, want one in batches of %d", h.scanner.calls, scanBatch)
@@ -322,8 +322,10 @@ func TestRefresh_ScanErrorKeepsWindowKindsAndIsPartial(t *testing.T) {
 	}
 	rows := h.store.saved(t)
 	for uid := int64(1); uid <= 2; uid++ {
-		if _, ok := rows[uid][domain.RiskKindSubSpread]; ok {
-			t.Fatalf("user %d judged from a fetch window that failed half-way", uid)
+		for _, kind := range []domain.RiskKind{domain.RiskKindSubSpread, domain.RiskKindDevices} {
+			if _, ok := rows[uid][kind]; ok {
+				t.Fatalf("user %d %s judged from a fetch window that failed half-way", uid, kind)
+			}
 		}
 		if _, ok := rows[uid][domain.RiskKindUsageShift]; !ok {
 			t.Fatalf("user %d lost its usage_shift row to the fetch-log failure", uid)
@@ -551,7 +553,8 @@ func TestRefresh_SubSpreadLabelsClients(t *testing.T) {
 
 // Nothing the worker saves carries an address. The evidence names provinces,
 // countries, client labels and a four-character device prefix; every input
-// address, the /24 and /64 around it, and the full device id stay out.
+// address, the /24 and /64 around it, and the full device id stay out — of
+// sub_spread's evidence and of devices'.
 func TestRefresh_SavedEvidenceHasNoInputAddress(t *testing.T) {
 	rows := rowsOf(
 		everyDay(t, phone(1, ipHomeGD)), everyDay(t, client(1, ipHunan, "ClashX Pro/1.118.0")),
@@ -570,21 +573,21 @@ func TestRefresh_SavedEvidenceHasNoInputAddress(t *testing.T) {
 	for _, r := range rows {
 		leaks = append(leaks, r.IP)
 	}
-	saved := 0
+	saved := map[domain.RiskKind]int{}
 	for _, kinds := range h.store.saved(t) {
 		for _, r := range kinds {
-			if r.Kind != domain.RiskKindSubSpread || r.Evidence == nil {
+			if r.Kind == domain.RiskKindUsageShift || r.Evidence == nil {
 				continue
 			}
-			saved++
+			saved[r.Kind]++
 			for _, leak := range leaks {
 				if strings.Contains(string(r.Evidence), leak) {
-					t.Fatalf("user %d evidence carries %q: %s", r.UserID, leak, r.Evidence)
+					t.Fatalf("user %d %s evidence carries %q: %s", r.UserID, r.Kind, leak, r.Evidence)
 				}
 			}
 		}
 	}
-	if saved != 4 {
-		t.Fatalf("checked %d sub_spread rows with evidence, want 4", saved)
+	if want := map[domain.RiskKind]int{domain.RiskKindSubSpread: 4, domain.RiskKindDevices: 4}; !reflect.DeepEqual(saved, want) {
+		t.Fatalf("checked rows with evidence %v, want %v", saved, want)
 	}
 }

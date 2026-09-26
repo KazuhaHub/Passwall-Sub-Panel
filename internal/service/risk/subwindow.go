@@ -43,6 +43,9 @@ type userWindow struct {
 	ips        map[string]struct{}
 	cells      map[windowCell]uint8
 	identities map[string]*identityAgg
+	// fetches counts the account's fetches in the window, with an address
+	// or without; withHWID how many of them declared a device.
+	fetches, withHWID int
 }
 
 // windowCell is one client at one raw address.
@@ -57,6 +60,15 @@ type identityAgg struct {
 	// rows arrive in id order, which is not quite time order, and the label
 	// shown is the newest one declared.
 	labelMS int64
+	// days is every window day the client fetched on, from any address or
+	// none: the device count reads it. (sub_spread reads days per place,
+	// from the cells, where an excluded address says nothing.)
+	days uint8
+	// client is the newest client name its fetches were detected as, by
+	// fetch time like the label, and clientMS when; lastMS is its newest
+	// fetch of all.
+	client           string
+	clientMS, lastMS int64
 }
 
 // windowDays is how many days the fetch window holds: a week, or the
@@ -131,9 +143,10 @@ func (w *fetchWindow) add(row *domain.SubLog, day0 time.Time, loc *time.Location
 	if row.DeviceID != "" {
 		key, kind = "d:"+row.DeviceID, "hwid"
 	}
+	at := row.AccessedAt.UnixMilli()
 	agg := uw.identities[key]
 	if agg == nil {
-		agg = &identityAgg{kind: kind}
+		agg = &identityAgg{kind: kind, lastMS: at}
 		if kind == "hwid" {
 			agg.hwid4 = truncateRunes(row.DeviceID, 4)
 		} else {
@@ -141,12 +154,19 @@ func (w *fetchWindow) add(row *domain.SubLog, day0 time.Time, loc *time.Location
 		}
 		uw.identities[key] = agg
 	}
-	if kind == "hwid" && row.DeviceLabel != "" {
-		// The newest label declared, by fetch time; a later fetch that
-		// declared none does not erase it.
-		if at := row.AccessedAt.UnixMilli(); agg.label == "" || at >= agg.labelMS {
-			agg.label, agg.labelMS = row.DeviceLabel, at
-		}
+	uw.fetches++
+	if kind == "hwid" {
+		uw.withHWID++
+	}
+	agg.days |= 1 << day
+	agg.lastMS = max(agg.lastMS, at)
+	// The newest label and client name, by fetch time; a later fetch that
+	// declared none (or was not recognised) does not erase them.
+	if kind == "hwid" && row.DeviceLabel != "" && (agg.label == "" || at >= agg.labelMS) {
+		agg.label, agg.labelMS = row.DeviceLabel, at
+	}
+	if row.ClientType != "" && (agg.client == "" || at >= agg.clientMS) {
+		agg.client, agg.clientMS = row.ClientType, at
 	}
 	// A row with no address still says the account fetched; it just has
 	// no source to place.

@@ -48,7 +48,7 @@ type Deps struct {
 	// Now is the clock. Nil: time.Now.
 	Now func() time.Time
 	// SubLogs is the subscription fetch log, read as one streamed window.
-	// Nil: sub_spread is not computed.
+	// Nil: sub_spread and devices are not computed.
 	SubLogs FetchScanner
 	// Geo places the window's sources. Nil: nothing can be placed, and the
 	// place signals read unknown/geo_unavailable — never clean.
@@ -206,22 +206,27 @@ func (s *Service) RefreshOnce(ctx context.Context) (err error) {
 	// because nothing was collected yet, and every account behind a relay
 	// would read as fetching from the relay's province. The loop's first run
 	// is minutes after the set's, so this is a guard, not a schedule. Their
-	// stored rows stay as they were meanwhile.
+	// stored rows stay as they were meanwhile. The device count places
+	// nothing, so the window is read either way and devices does not wait.
 	infraReady := s.d.InfraLoaded == nil || s.d.InfraLoaded()
-	switch {
-	case s.d.SubLogs == nil:
-	case !infraReady:
-		r.infraPending = true
-		log.Info("infrastructure addresses not loaded yet; place-based risk signals skipped this run")
-	default:
+	if s.d.SubLogs != nil {
+		if !infraReady {
+			r.infraPending = true
+			log.Info("infrastructure addresses not loaded yet; place-based risk signals skipped this run")
+		}
 		// A window read part-way is not judged: a week missing its last
-		// batches reads as fewer provinces and fewer days. The kinds it
-		// feeds keep their previous rows.
+		// batches reads as fewer provinces, fewer days and fewer devices.
+		// The kinds it feeds keep their previous rows.
 		window, err := s.readWindow(ctx, r)
 		switch {
 		case err == nil:
-			if err := s.subSpread(ctx, r, window); err != nil {
+			if err := s.devices(ctx, r, window); err != nil {
 				return err
+			}
+			if infraReady {
+				if err := s.subSpread(ctx, r, window); err != nil {
+					return err
+				}
 			}
 		case ctx.Err() != nil:
 			return fmt.Errorf("risk refresh: %w", ctx.Err())

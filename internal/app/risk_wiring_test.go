@@ -28,9 +28,10 @@ import (
 // opened.
 //
 // Every optional source is nil-tolerant, so each is checked by what it
-// changes: without the fetch log there is no sub_spread row at all; without
-// InfraLoaded the place signals would run before the set was ever built;
-// without IsInfra the node's own address would count as a place. The geo
+// changes: without the fetch log there is no sub_spread or devices row at
+// all; without InfraLoaded the place signals would run before the set was
+// ever built; without IsInfra the node's own address would count as a
+// place. The geo
 // resolver cannot be told apart here — no database is installed, so a wired
 // one and a missing one both read geo_unavailable.
 func TestBuildWiresTheRiskSignals(t *testing.T) {
@@ -117,6 +118,11 @@ func TestBuildWiresTheRiskSignals(t *testing.T) {
 	}
 	if spread := rowOf(domain.RiskKindSubSpread); spread != nil {
 		t.Fatalf("sub_spread row %+v before the infrastructure set was ever built: InfraLoaded is not wired", *spread)
+	}
+	// The device count places nothing and does not wait for the set. Both
+	// fetches declared no device: unknown, not clean.
+	if dev := rowOf(domain.RiskKindDevices); dev == nil || dev.State != domain.GeoStateUnknown || dev.Code != domain.RiskCodeNoHWID {
+		t.Fatalf("devices row %+v before the infrastructure set was built, want unknown/no_hwid from the fetch log", dev)
 	}
 
 	if err := a.traffic.RefreshInfraAddresses(ctx); err != nil {
