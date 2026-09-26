@@ -11,7 +11,7 @@ import { useGeoAnomalies } from '@/query/geoAnomalies'
 import { useGeoIPStatus } from '@/query/settings'
 import { useQueryScope } from '@/query/useQueryScope'
 import { countryFlag } from '@/utils/geo'
-import { activeDbIsCountryOnly, groupSpots, sortBySeverity, tierLabelKey, type SpotTree } from '@/utils/geoAnomaly'
+import { activeDbIsCountryOnly, groupSpots, reasonText, sortBySeverity, tierLabelKey, type SpotTree } from '@/utils/geoAnomaly'
 
 /**
  * Colour carries meaning here, so it is assigned by what the operator should
@@ -202,7 +202,10 @@ export default function GeoAnomaliesTab() {
                       )}
                     </Box>
                   </TableCell>
-                  <TableCell sx={{ fontSize: 12, color: md.onSurfaceVariant, maxWidth: 420 }}>{r.reason}</TableCell>
+                  {/* Localized from the stored why (the policy the server
+                      judged with); a row written before that renders its
+                      stored English. */}
+                  <TableCell sx={{ fontSize: 12, color: md.onSurfaceVariant, maxWidth: 420 }}>{reasonText(r, t)}</TableCell>
                   <TableCell sx={{ fontSize: 12, whiteSpace: 'nowrap' }}>
                     {r.updated_at_ms ? new Date(r.updated_at_ms).toLocaleString() : '—'}
                   </TableCell>

@@ -9,9 +9,19 @@ import GeoAnomaliesTab, { stateColor } from './GeoAnomaliesTab'
 
 const api = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() }))
 vi.mock('@/api/client', () => ({ client: api }))
+// The two reason strings the localized-reason test reads, as zh-CN ships
+// them; every other key falls through to its defaultValue exactly as before,
+// so the rest of this file still reads the component's own Chinese defaults.
+const zh = vi.hoisted((): Record<string, string> => ({
+  'admin:geo_anomalies.reason_over_region': '同时在 {{country}} 的 {{spread}} 个省 / 州（容错 {{tolerance}}）',
+  'admin:geo_anomalies.reason_flagged_suffix': '，已持续 {{over}} / {{need}} 次',
+}))
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
-    t: (_k: string, o?: { defaultValue?: string }) => o?.defaultValue ?? _k,
+    t: (k: string, o?: Record<string, unknown>) => {
+      const raw = zh[k] ?? (typeof o?.defaultValue === 'string' ? o.defaultValue : k)
+      return raw.replace(/\{\{(\w+)\}\}/g, (m, name: string) => (o && name in o ? String(o[name]) : m))
+    },
     i18n: { language: 'zh-CN' },
   }),
 }))
@@ -252,6 +262,34 @@ describe('GeoAnomaliesTab rows', () => {
     expect(places).toContain('DE 2')
     expect(places).toContain('JP 1')
     expect(places).not.toContain('?')
+  })
+
+  it('renders the localized reason', async () => {
+    // The Basis cell used to print the server's English sentence verbatim on
+    // every page. A v2 row carries the branch and the policy it was judged
+    // with; a row written before that keeps its stored English.
+    serve([
+      row({
+        user_id: 1, upn: 'alice', state: 'flagged', flagged: true, tier: 'region', over_streak: 3,
+        reason: 'in 2 regions of CN at once ([CN/Guangdong CN/Hunan]); tolerance is 1, sustained for 3 of 3 checks',
+        evidence: {
+          ...row({}).evidence,
+          v: 2,
+          spread: { countries: 1, regions: 2, region_country: 'CN', cities: 2, city_country: 'CN' },
+          why: {
+            code: 'flagged_sustained', tier: 'region', scope: 'city',
+            tol: { countries: 1, regions: 1, cities: 2 }, flag_after: 3, clear_after: 6, min_placed_ratio: 0.5,
+          },
+        },
+      }),
+      row({ user_id: 2, upn: 'bob', reason: 'within tolerance' }),
+    ])
+    mount()
+
+    await screen.findByText('alice')
+    const reasonOf = (name: string) => rowOf(name).querySelectorAll('td')[4]?.textContent
+    expect(reasonOf('alice')).toBe('同时在 CN 的 2 个省 / 州（容错 1），已持续 3 / 3 次')
+    expect(reasonOf('bob')).toBe('within tolerance')
   })
 
   it('falls back to the recorded places for a row an older build wrote', async () => {

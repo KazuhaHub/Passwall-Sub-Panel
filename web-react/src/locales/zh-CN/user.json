@@ -26,7 +26,9 @@
     "blocked_title": "客户端违规封禁",
     "blocked_body": "检测到使用了被禁止的客户端，订阅服务已暂停。请更换允许的客户端或联系管理员恢复。",
     "suspended_title": "服务已暂停",
-    "suspended_body": "管理员已暂停你的订阅和代理服务。"
+    "suspended_body": "管理员已暂停你的订阅和代理服务。",
+    "geo_auto_title": "服务已临时暂停",
+    "geo_auto_body": "检测到账号在多个地区同时使用，代理服务已临时暂停，到时会自动恢复。如有疑问请联系管理员。"
   },
   "profile": {
     "title": "我的订阅",

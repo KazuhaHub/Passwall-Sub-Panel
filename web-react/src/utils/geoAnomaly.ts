@@ -1,8 +1,9 @@
 // Pure helpers for the concurrent-location views: the Geo tab, the geo
 // settings section and the per-group editor. No I/O, no React — each one
 // either mirrors a server rule (geoTolerances) or decides what an admin reads
-// first, so both are pinned by unit tests rather than by rendering.
-import type { GeoAnomaly, GeoSpot, GeoTier } from '@/api/geoAnomalies'
+// (sortBySeverity, reasonText), so both are pinned by unit tests rather than
+// by rendering.
+import type { GeoAnomaly, GeoEvidence, GeoSpot, GeoTier, GeoWhy } from '@/api/geoAnomalies'
 import type { GeoIPStatus, UISettings } from '@/api/settings'
 
 /**
@@ -18,6 +19,104 @@ export function tierLabelKey(tier: GeoTier): string | null {
       return `admin:geo_anomalies.tier_${tier}`
     default:
       return null
+  }
+}
+
+export type Translate = (key: string, opts?: Record<string, unknown>) => string
+
+const REASON = 'admin:geo_anomalies.'
+
+/**
+ * The numbers an over sentence names at the verdict's tier: how many, where,
+ * against which tolerance. The same choice the server's describeOver makes,
+ * so the localized sentence and the stored English cannot disagree on them.
+ * null for a tier this build does not know, which the caller renders as the
+ * stored English rather than a sentence with a hole in it.
+ */
+function overAt(why: GeoWhy, ev: GeoEvidence): { spread: number; tolerance: number; country: string } | null {
+  switch (why.tier) {
+    case 'country': return { spread: ev.spread.countries, tolerance: why.tol.countries, country: '' }
+    case 'region': return { spread: ev.spread.regions, tolerance: why.tol.regions, country: ev.spread.region_country }
+    case 'city': return { spread: ev.spread.cities, tolerance: why.tol.cities, country: ev.spread.city_country }
+    default: return null
+  }
+}
+
+/**
+ * The localized reason for a geo row, built from evidence.why (the policy the
+ * server actually judged with, group overrides included), the evidence counts
+ * and the row's streak fields. Every key carries defaultValue: row.reason, so a
+ * v<2 row, an unknown code or a missing key renders the stored English.
+ *
+ * The numbers come from the row, never from the settings: the policy is
+ * resolved per group, and geoTolerances(global) would print the default
+ * tolerance for an account whose group allows more. Unlike the English, the
+ * sentence does not repeat the place list — the Places column beside it
+ * already shows every spot, by country, region and city.
+ */
+export function reasonText(row: GeoAnomaly, t: Translate): string {
+  const ev = row.evidence
+  const why = ev && ev.v >= 2 ? ev.why : undefined
+  if (!why) return row.reason
+  const d = { defaultValue: row.reason }
+  // Two strings make one sentence, and they fall back together. With the
+  // head missing, t has already returned the whole stored English, streak
+  // included; a localized tail glued onto it would print the streak twice,
+  // once in each language.
+  const glue = (head: string, tail: () => string) => (head === row.reason ? head : head + tail())
+
+  switch (why.code) {
+    case 'disabled':
+      return t(`${REASON}reason_disabled`, d)
+    case 'exempt':
+      return t(`${REASON}reason_exempt`, d)
+    case 'idle_stale':
+      return t(`${REASON}reason_idle_stale`, { ...d, stale: ev.stale })
+    case 'idle_none':
+      return t(`${REASON}reason_idle_none`, d)
+    case 'unknown_excluded': {
+      const x = ev.excluded
+      return t(`${REASON}reason_unknown_excluded`, {
+        ...d, total: x.shared + x.listed + x.infra + x.internal,
+        shared: x.shared, listed: x.listed, infra: x.infra, internal: x.internal,
+      })
+    }
+    case 'unknown_geo_off':
+      return t(`${REASON}reason_unknown_geo_off`, d)
+    case 'unknown_low_ratio':
+      return t(`${REASON}reason_unknown_low_ratio`, {
+        ...d, placed: ev.coverage.placed, sample: ev.coverage.placed + ev.coverage.unplaced,
+        ratio: Math.round(why.min_placed_ratio * 100),
+      })
+    case 'suspect':
+    case 'flagged_sustained': {
+      const at = overAt(why, ev)
+      if (!at) return row.reason
+      const suffix = why.code === 'suspect' ? 'reason_suspect_suffix' : 'reason_flagged_suffix'
+      return glue(t(`${REASON}reason_over_${why.tier}`, { ...d, ...at }),
+        () => t(`${REASON}${suffix}`, { over: row.over_streak, need: why.flag_after, defaultValue: '' }))
+    }
+    case 'flagged_clearing': {
+      const head = t(`${REASON}reason_flagged_clearing`, { ...d, under: row.under_streak, need: why.clear_after })
+      // The tier that RAISED the flag, named with the Geo tab's own chip
+      // label. A latch stored without one gets no clause, as on the server.
+      const tierKey = tierLabelKey(why.tier ?? '')
+      if (!tierKey) return head
+      return glue(head, () => t(`${REASON}reason_flagged_clearing_tier`, {
+        tier: t(tierKey, { defaultValue: why.tier }), defaultValue: '',
+      }))
+    }
+    case 'clean_unplaced':
+      return t(`${REASON}reason_clean_unplaced`, d)
+    case 'clean_within':
+      return t(`${REASON}reason_clean_within`, {
+        ...d, countries: ev.spread.countries, regions: ev.spread.regions, cities: ev.spread.cities,
+        tol_countries: why.tol.countries, tol_regions: why.tol.regions, tol_cities: why.tol.cities,
+        scope: t(`${REASON}reason_scope_${why.scope}`, { defaultValue: why.scope }),
+      })
+    default:
+      // A code a newer server wrote before this build learned it.
+      return row.reason
   }
 }
 
