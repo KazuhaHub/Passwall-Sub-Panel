@@ -20,6 +20,15 @@ export interface SubLog {
   client_type: string
   accessed_at: string
   region?: GeoLocation
+  /**
+   * The device the fetch declared through x-hwid, for ADMINS ONLY: the server
+   * leaves both out for anyone else, and for a fetch that declared nothing.
+   * The label is a sanitized OS / version / model string; the id is the
+   * first 4 characters of a keyed per-account digest — enough to tell one
+   * account's devices apart, useless for anything else.
+   */
+  device_label?: string
+  device_id4?: string
 }
 
 export interface SubLogListResponse {

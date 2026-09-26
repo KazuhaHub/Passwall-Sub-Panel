@@ -46,7 +46,8 @@
       "psp_upgrade": "Panel update {{version}} available",
       "login_security": "{{count}} login lockouts recently",
       "geo_anomaly": "{{count}} account(s) flagged for concurrent locations",
-      "geo_auto_suspended": "{{count}} account(s) auto-suspended for concurrent locations"
+      "geo_auto_suspended": "{{count}} account(s) auto-suspended for concurrent locations",
+      "risk_signals": "{{count}} account(s) have risk signals"
     }
   },
   "validation": {
@@ -278,6 +279,26 @@
       "ban_duration": "Suspension length (minutes)",
       "ban_duration_hint": "Default 60, at most 10080 (7 days). Restored automatically; an admin can resume at any time. Changes apply to suspensions already running.",
       "ban_effective": "In effect: {{countries}} countries, or {{regions}} regions, or {{cities}} cities in one country, for {{polls}} checks; suspended {{minutes}} minutes"
+    },
+    "risk": {
+      "section": "Risk signals (observe only)",
+      "hint": "Four signals beside concurrent locations, recomputed hourly and listed under Logs → Risk signals; the bell lights when an account is flagged. None of them suspends, disables or changes an account. Subscription spread reuses the concurrent-location granularity, region tolerance and allow-anywhere above.",
+      "sub_spread": "Subscription spread: fetches from unconnected provinces across days",
+      "sub_spread_hint": "Provinces one client (same device id or client string) was seen in count as one group; more groups than the region tolerance above is flagged. Only the country with the most recurring provinces is judged; cross-border is not judged here.",
+      "devices": "Devices: devices the client declares",
+      "usage_shift": "Usage change: against the account's own last four weeks",
+      "login_country": "Login country: a panel login from a new country",
+      "min_days": "Recurring days",
+      "min_days_hint": "Days a province or device must appear on within the last 7 days (bounded by sub-log retention), counted as calendar days in the panel timezone. Default 3, range 1–7. 0 = default.",
+      "max_devices": "Device limit",
+      "max_devices_hint": "More recurring devices than this is flagged; only clients that send x-hwid are counted. Default 3. 0 = default.",
+      "usage_ratio": "Usage ratio",
+      "usage_ratio_hint": "A day above the daily median of the past 4 weeks (since first use) times this ratio is an over-day; 4 over-days in 7 is flagged, 2–3 is suspect. Default 3, minimum 1.5. 0 = default.",
+      "usage_floor_gb": "Daily floor (GB)",
+      "usage_floor_gb_hint": "Days below this are never over-days, so an account with a tiny baseline is not flagged for light use. Default 3. 0 = default.",
+      "effective": "In effect: recurring at {{min_days}} days, {{max_devices}} devices, usage ratio {{ratio}}, daily floor {{floor}} GB",
+      "hwid_capture": "Capture client device ids (x-hwid)",
+      "hwid_capture_hint": "Only some clients send a device id (x-hwid) when they refresh; most do not. Only a keyed per-account digest (not reversible) and the OS / model are kept; they expire with the subscription log and are visible to admins only. It only observes and never blocks a fetch. Turning it off stops capture; stored digests expire with the log. Global only."
     },
     "geo": {
       "section": "IP region (logs)",
@@ -975,6 +996,102 @@
     "reason_scope_region": "judged down to regions",
     "reason_scope_country": "countries only"
   },
+  "risk_signals": {
+    "intro": "Four observe-only signals beside concurrent locations, recomputed hourly per account: subscription spread (provinces across days, merged by client), devices (declared x-hwid), usage change (against the account's own last four weeks) and login country (a panel login from a new country). None of them suspends or changes an account; \"cannot tell\" and \"no data\" are not \"clean\". Only accounts that need attention are listed by default.",
+    "unwired": "Risk signals are not enabled in this deployment.",
+    "empty": "Nothing computed yet — risk signals are recomputed hourly.",
+    "empty_attention": "No account needs attention right now.",
+    "show_all": "Show all accounts",
+    "not_computed": "Not computed yet",
+    "col_user": "User",
+    "col_geo": "Concurrent locations",
+    "col_updated": "Last computed",
+    "kind": {
+      "sub_spread": "Subscription spread",
+      "devices": "Devices",
+      "usage_shift": "Usage change",
+      "login_country": "Login country"
+    },
+    "state": {
+      "flagged": "Flagged",
+      "suspect": "Suspect",
+      "clean": "Clean",
+      "unknown": "Cannot tell",
+      "idle": "No data",
+      "exempt": "Exempt",
+      "disabled": "Off"
+    },
+    "geo_open": "Open in Concurrent locations",
+    "expand": "Show evidence",
+    "collapse": "Hide",
+    "window_hint": "One cell per day, {{days}} days from {{start}} (panel timezone)",
+    "province_recurring": "Recurring",
+    "province_group": "Group {{n}}",
+    "identities_title": "Clients that fetched",
+    "identity_hwid": "Device",
+    "identity_ua": "Client string",
+    "identity_seen_at": "Seen at: {{places}}",
+    "foreign_title": "Sources in other countries (context only, not judged)",
+    "coverage": "{{sources}} sources, {{placed}} located, {{region_known}} to a province; excluded: shared {{shared}}, ignore list {{listed}}, own nodes / relays {{infra}}, internal {{internal}}",
+    "devices_title": "Declared devices",
+    "device_recurring": "Recurring",
+    "device_last_seen": "Last seen {{time}}",
+    "device_fetches": "{{with}} fetches with a device id, {{without}} without",
+    "clients_title": "Clients without a device id",
+    "usage_title": "Daily usage, last 35 days (to {{end}})",
+    "usage_caption": "Baseline median {{median}}, ratio {{ratio}}, daily floor {{floor}}; {{over}} of the last 7 days over",
+    "login_known": "Known countries",
+    "login_events": "New-country logins",
+    "login_counts": "{{logins}} logins in {{lookback}} days; {{recent}} in the last 7, {{judged}} judged; skipped: own nodes {{infra}}, internal {{internal}}, ignore list {{listed}}, node countries {{node_country}}, unlocatable {{unplaced}}",
+    "no_evidence": "No evidence to show",
+    "code": {
+      "sub_spread": {
+        "signal_off": "Subscription spread is off for this account's scope",
+        "scope_off": "Concurrent-location granularity is \"off\"",
+        "scope_country": "Concurrent-location granularity is \"country only\", so provinces are not judged",
+        "allow_anywhere": "This account is allowed to connect from anywhere",
+        "no_fetches": "No subscription fetch in the window",
+        "retention_short": "Subscription logs are kept {{retention}} day(s), fewer than the {{needed}} needed",
+        "all_excluded": "All {{total}} fetch sources are excluded (shared {{shared}}, ignore list {{listed}}, own nodes / relays {{infra}}, internal {{internal}})",
+        "geo_unavailable": "Location lookup unavailable",
+        "low_placed": "Only {{placed}} of {{sources}} sources could be located ({{ratio}}% required)",
+        "no_regions": "Sources resolve to a country only, so provinces cannot be judged",
+        "spread": "{{groups}} unconnected groups of recurring provinces in {{country}} (tolerance {{tolerance}})",
+        "spread_building": "{{groups}} unconnected groups of provinces in {{country}}, not all seen on {{min_days}} days yet (tolerance {{tolerance}})",
+        "within": "{{groups}} group(s) of provinces, within tolerance {{tolerance}}"
+      },
+      "devices": {
+        "signal_off": "Devices is off for this account's scope",
+        "capture_off": "Device-id capture is switched off",
+        "no_fetches": "No subscription fetch in the window",
+        "retention_short": "Subscription logs are kept {{retention}} day(s), fewer than the {{needed}} needed",
+        "no_hwid": "No fetch in the window declared a device (x-hwid)",
+        "over": "{{recurrent}} recurring devices (limit {{max}})",
+        "over_building": "{{distinct}} devices, {{recurrent}} recurring (limit {{max}})",
+        "within": "{{distinct}} device(s), within the limit of {{max}}"
+      },
+      "usage_shift": {
+        "signal_off": "Usage change is off for this account's scope",
+        "retention_short": "Traffic history is kept {{retention}} day(s), fewer than the {{needed}} needed",
+        "no_usage": "No usage in the last 7 days",
+        "warmup": "Only {{history}} day(s) of usage history; judging starts at 14",
+        "sustained": "{{over}} of the last 7 days above {{ratio}}× the account's own baseline",
+        "building": "{{over}} of the last 7 days above {{ratio}}× the account's own baseline (flagged at 4)",
+        "within": "{{over}} of the last 7 days above {{ratio}}× the account's own baseline"
+      },
+      "login_country": {
+        "signal_off": "Login country is off for this account's scope",
+        "scope_off": "Concurrent-location granularity is \"off\"",
+        "allow_anywhere": "This account is allowed to connect from anywhere",
+        "no_recent_logins": "No panel login in the last 7 days",
+        "geo_unavailable": "Location lookup unavailable",
+        "unplaced": "Recent logins came only from nodes, internal or unlocatable addresses",
+        "learning": "Fewer than {{warmup}} earlier logins; still learning",
+        "new_country": "Login from a new country: {{countries}}",
+        "known_countries": "Recent logins all came from known countries"
+      }
+    }
+  },
   "logs": {
     "title": "Logs",
     "load_failed": "Log data is temporarily unavailable",
@@ -986,6 +1103,7 @@
     "tab_email": "Email logs",
     "tab_certs": "Certificates",
     "tab_geo": "Locations",
+    "tab_risk": "Risk signals",
     "cert_table": {
       "at": "Time",
       "cert": "Certificate",
@@ -1028,6 +1146,8 @@
       "ip": "IP / region",
       "client_type": "Client",
       "ua": "User-Agent",
+      "device": "Device",
+      "device_hint": "The device a client declared via x-hwid: only a keyed per-account digest (first 4 characters shown) and the OS / model are kept, visible to admins only",
       "at": "Time"
     },
     "audit_table": {
@@ -1974,6 +2094,15 @@
       "geo_ban_max_cities": "Suspend at: cities",
       "geo_ban_after": "Checks to suspend",
       "geo_ban_duration": "Suspension (minutes)",
+      "cat_risk": "Risk signals (observe only)",
+      "risk_sub_spread_off": "Off: subscription spread",
+      "risk_devices_off": "Off: devices",
+      "risk_usage_shift_off": "Off: usage change",
+      "risk_login_country_off": "Off: login country",
+      "risk_min_days": "Recurring days",
+      "risk_max_devices": "Device limit",
+      "risk_usage_ratio": "Usage ratio",
+      "risk_usage_floor_gb": "Daily floor (GB)",
       "default_suffix": " (default)",
       "override": "Override",
       "inherit": "Inherit",

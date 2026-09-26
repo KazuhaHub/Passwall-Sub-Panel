@@ -38,7 +38,7 @@ function state(key: string, global: string, edit: { on: boolean; value: string }
 
 function mount(scope: ScopeState) {
   const onChange = vi.fn()
-  render(<ScopeOverridesEditor scope={scope} onChange={onChange} categories={['geo', 'geo_ban']} />)
+  render(<ScopeOverridesEditor scope={scope} onChange={onChange} categories={['geo', 'geo_ban', 'risk']} />)
   return onChange
 }
 
@@ -139,6 +139,26 @@ describe('ScopeOverridesEditor, overridden unset numeric rows', () => {
       scope={state('notify.expire_before_days', '3', { on: true, value: '0' })} />)
     expect(screen.queryByRole('spinbutton')).not.toBeNull()
     expect(screen.queryByText(/^=/)).toBeNull()
+  })
+})
+
+describe('ScopeOverridesEditor, overridden unset float rows', () => {
+  it('reads a fractional override as the number it is', () => {
+    // The server parses a float row with strconv.ParseFloat, so 2.5 is a
+    // real ratio. Read with the integer rule it would be "unparsable" and
+    // the hint would claim the override does nothing.
+    mount(state('risk.usage_ratio', '0', { on: true, value: '2.5' }))
+    expect(screen.queryByRole('spinbutton')).not.toBeNull()
+    expect(screen.queryByText(/^=/)).toBeNull()
+  })
+
+  it('still explains a 0 or an empty float override', () => {
+    mount(state('risk.usage_ratio', '4', { on: true, value: '0' }))
+    expect(screen.queryByRole('spinbutton', { description: '= 3 (default)' })).not.toBeNull()
+    cleanup()
+
+    mount(state('risk.usage_ratio', '4', { on: true, value: '' }))
+    expect(screen.queryByText('= Global: 4')).not.toBeNull()
   })
 })
 

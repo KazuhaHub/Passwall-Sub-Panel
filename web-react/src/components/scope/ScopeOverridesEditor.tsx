@@ -73,12 +73,20 @@ export default function ScopeOverridesEditor({
   //   - an empty or unparsable value is skipped by applyScopeOverrides, which
   //     leaves the inherited GLOBAL value in place — the override does
   //     nothing, and "= default" would be the same lie the bare 0 told.
-  //     "Parsable" is Go's strconv.Atoi, which intField uses: an optional
-  //     sign, then digits — so '1.5' and '1e3' are skipped too.
+  //     "Parsable" is the parser the key's descriptor uses. For an int row
+  //     that is Go's strconv.Atoi (intField): an optional sign, then digits —
+  //     so '1.5' and '1e3' are skipped too. For a float row it is
+  //     strconv.ParseFloat (floatField), which takes both, so read with the
+  //     int rule a real ratio of 2.5 would be called an override that does
+  //     nothing.
   // The field keeps what was typed; the hint says which of the two it is.
+  const parsable = (k: ScopeKeyMeta, raw: string) =>
+    k.kind === 'float'
+      ? /^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$/.test(raw)
+      : /^[+-]?\d+$/.test(raw)
   const overrideHint = (k: ScopeKeyMeta, raw: string) => {
     if (k.unsetValue === undefined) return null
-    if (!/^[+-]?\d+$/.test(raw)) {
+    if (!parsable(k, raw)) {
       return `= ${t('admin:groups.scope.global_prefix', { defaultValue: '全局' })}: ${fmtVal(k, scope.global[k.key])}`
     }
     return Number(raw) <= 0 ? `= ${k.unsetValue}${defaultSuffix()}` : null

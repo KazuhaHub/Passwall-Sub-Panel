@@ -93,6 +93,7 @@ import { normalizeRegistry } from './subclients/clientRegistry'
 import ScopeOverridesEditor from '@/components/scope/ScopeOverridesEditor'
 import { loadScopeState, saveScopeState, type ScopeState } from '@/components/scope/scopeOverrides'
 import { geoTolerances } from '@/utils/geoAnomaly'
+import { riskPolicy } from '@/utils/riskSignals'
 
 type TabKey = 'general' | 'security' | 'brand' | 'subscription' | 'portal' | 'mail' | 'sso'
 
@@ -445,6 +446,10 @@ export default function SettingsView() {
   // stored as '') judges all three. Under region, country or off they would
   // promise a line the detector never draws, so they are not shown there.
   const geoTiered = (settings.geo_anomaly_scope || 'city') === 'city'
+  // The risk policy the server will judge with for the draft, the same way:
+  // an unset 0 is the default and a nonsense value is repaired toward not
+  // accusing (a ratio under 1.5 is raised, min_days is clamped to 7).
+  const riskEff = riskPolicy(settings)
 
   const tabs: { key: TabKey; labelKey: string }[] = [
     { key: 'general', labelKey: 'settings.tab_general' },
@@ -942,7 +947,7 @@ export default function SettingsView() {
           </Section>
         </Box>
       ))}
-      {tab === 'general' && renderScopeTab(['notify', 'emergency', 'geo', 'geo_ban'], (
+      {tab === 'general' && renderScopeTab(['notify', 'emergency', 'geo', 'geo_ban', 'risk'], (
         <Box component="form" onSubmit={save} sx={{ display: 'flex', flexDirection: 'column', gap: 2.5, maxWidth: 880 }}>          <Section title={t('settings.general.section_runtime')} md={md}>
             <Autocomplete
               freeSolo
@@ -1337,6 +1342,84 @@ export default function SettingsView() {
                 })}
               </Typography>
             )}
+          </Section>
+
+          {/* Observe-only risk signals. Beside the concurrent-location
+              section because sub_spread judges with that section's scope,
+              region tolerance and allow-anywhere, and an admin tuning one
+              should read the other. The switches read positively ("signal
+              on") over NEGATIVE keys (risk_*_off), whose zero value — every
+              install that never saved them — is on. Nothing here validates:
+              the server repairs a nonsense value toward not accusing, and the
+              caption shows what that repair gives. */}
+          <Section title={t('settings.risk.section', { defaultValue: '风险信号（只提示）' })} md={md}>
+            <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant }}>
+              {t('settings.risk.hint', { defaultValue: '除「异地并发」之外的四种信号，每小时计算一次，结果在「日志管理 → 风险信号」，有账号被标记时通知铃提醒。它们不会暂停、禁用或修改任何账号。「订阅多地」沿用上面「异地并发」的判定粒度、省级容错和「允许任何地方」。' })}
+            </Typography>
+            {([
+              ['risk_sub_spread_off', 'sub_spread', '订阅多地：跨天从互不相连的省份拉取订阅'],
+              ['risk_devices_off', 'devices', '设备数：客户端声明的设备'],
+              ['risk_usage_shift_off', 'usage_shift', '用量变化：与自己过去 4 周相比'],
+              ['risk_login_country_off', 'login_country', '登录国家：面板登录出现新国家'],
+            ] as const).map(([field, name, def]) => (
+              <React.Fragment key={field}>
+                <FormControlLabel
+                  label={t(`settings.risk.${name}`, { defaultValue: def })}
+                  control={<Switch checked={!settings[field]} onChange={(_, c) => patch(field, !c)} />}
+                  sx={{ ml: 0, '& .MuiFormControlLabel-label': { ml: 1.5 } }} />
+                {name === 'sub_spread' && (
+                  <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant, mt: -1 }}>
+                    {t('settings.risk.sub_spread_hint', { defaultValue: '同一个客户端（同一设备标识或同一客户端标识）去过的省份算作同一组，组数超过上面的省级容错即标记。只判常驻省份最多的那个国家，跨国不在这里判断。' })}
+                  </Typography>
+                )}
+              </React.Fragment>
+            ))}
+
+            <Pair>
+              <NumField
+                label={t('settings.risk.min_days', { defaultValue: '常驻天数' })}
+                value={settings.risk_min_days ?? 0}
+                onChange={v => patch('risk_min_days', v)}
+                max={7}
+                helperText={t('settings.risk.min_days_hint', { defaultValue: '一个省或一台设备在最近 7 天（受订阅日志保留天数限制）里至少出现几天才算常驻，按面板时区的自然日计。默认 3，范围 1–7。0 = 默认。' })} />
+              <NumField
+                label={t('settings.risk.max_devices', { defaultValue: '设备上限' })}
+                value={settings.risk_max_devices ?? 0}
+                onChange={v => patch('risk_max_devices', v)}
+                helperText={t('settings.risk.max_devices_hint', { defaultValue: '常用设备超过这个数即标记，只统计带 x-hwid 的客户端。默认 3。0 = 默认。' })} />
+            </Pair>
+            <Pair>
+              <NumField
+                label={t('settings.risk.usage_ratio', { defaultValue: '用量倍数' })}
+                value={settings.risk_usage_ratio ?? 0}
+                onChange={v => patch('risk_usage_ratio', v)}
+                step="any"
+                helperText={t('settings.risk.usage_ratio_hint', { defaultValue: '某天用量超过「开始使用以来、过去 4 周内日用量中位数 × 倍数」即为超标日；7 天内 4 天超标即标记，2–3 天为疑似。默认 3，最小 1.5。0 = 默认。' })} />
+              <NumField
+                label={t('settings.risk.usage_floor_gb', { defaultValue: '每日用量下限（GB）' })}
+                value={settings.risk_usage_floor_gb ?? 0}
+                onChange={v => patch('risk_usage_floor_gb', v)}
+                helperText={t('settings.risk.usage_floor_gb_hint', { defaultValue: '低于这个量的日子不算超标，避免基线很低的账号因少量使用被标记。默认 3。0 = 默认。' })} />
+            </Pair>
+            <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant, mt: -0.5 }}>
+              {t('settings.risk.effective', {
+                min_days: riskEff.minDays, max_devices: riskEff.maxDevices, ratio: riskEff.ratio, floor: riskEff.floorGB,
+                defaultValue: `当前生效：常驻 ${riskEff.minDays} 天，设备上限 ${riskEff.maxDevices}，用量倍数 ${riskEff.ratio}，每日下限 ${riskEff.floorGB} GB`,
+              })}
+            </Typography>
+
+            {/* Global only: /sub reads it on every fetch, before it knows the
+                account's group, so it has no row in the per-group rail. It
+                only records; it never blocks a fetch. */}
+            <Divider sx={{ my: 0.5 }} />
+            <FormControlLabel
+              label={t('settings.risk.hwid_capture', { defaultValue: '采集客户端设备标识（x-hwid）' })}
+              control={<Switch checked={!settings.risk_hwid_capture_off}
+                onChange={(_, c) => patch('risk_hwid_capture_off', !c)} />}
+              sx={{ ml: 0, '& .MuiFormControlLabel-label': { ml: 1.5 } }} />
+            <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant, mt: -1 }}>
+              {t('settings.risk.hwid_capture_hint', { defaultValue: '只有部分客户端会在更新订阅时带上设备标识（x-hwid），多数客户端不带。只保存按用户加密的摘要（无法还原）和系统 / 机型，随订阅日志一起过期，仅管理员可见；只提示，从不拦截拉取。关闭后不再采集，已保存的摘要随订阅日志过期。仅全局生效。' })}
+            </Typography>
           </Section>
 
         </Box>

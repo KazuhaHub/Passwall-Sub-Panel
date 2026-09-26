@@ -59,6 +59,9 @@ export const SCOPE_CATEGORIES: ScopeCategoryMeta[] = [
   // judge, and whether the panel may act on a judgement by itself.
   { id: 'geo', labelKey: 'cat_geo', def: '异地并发检测' },
   { id: 'geo_ban', labelKey: 'cat_geo_ban', def: '异地并发 · 自动临时暂停' },
+  // Observe-only signals: nothing in this category acts on an account, which
+  // is why it is its own decision, apart from the two above.
+  { id: 'risk', labelKey: 'cat_risk', def: '风险信号（只提示）' },
 ]
 
 const GEO_SCOPE_OPTIONS: NonNullable<ScopeKeyMeta['options']> = [
@@ -107,6 +110,22 @@ export const SCOPE_KEYS: ScopeKeyMeta[] = [
   { cat: 'geo_ban', key: 'geo_anomaly.ban_max_cities', type: 'geo_anomaly', name: 'ban_max_cities', kind: 'int', field: 'geo_anomaly_ban_max_cities', labelKey: 'geo_ban_max_cities', def: '暂停阈值：城市', unsetValue: '3' },
   { cat: 'geo_ban', key: 'geo_anomaly.ban_after_polls', type: 'geo_anomaly', name: 'ban_after_polls', kind: 'int', field: 'geo_anomaly_ban_after_polls', labelKey: 'geo_ban_after', def: '连续几次才暂停', unsetValue: '6' },
   { cat: 'geo_ban', key: 'geo_anomaly.ban_duration_minutes', type: 'geo_anomaly', name: 'ban_duration_minutes', kind: 'int', field: 'geo_anomaly_ban_duration_minutes', labelKey: 'geo_ban_duration', def: '暂停时长（分钟）', unsetValue: '60' },
+  // Risk signals, the mirror of ports.OverridableScopeKeys' risk block. The
+  // switches are negative keys (on = the signal is OFF for the group), and
+  // the unsetValues are domain.DefaultRiskPolicy: a stored 0 means "never
+  // configured", never "no device allowed" or "a zero-byte floor".
+  // risk.hwid_capture_off is deliberately absent: /sub reads it before it
+  // knows the account's group, so it is global only and the backend refuses
+  // the override. sub_spread's region tolerance is geo_anomaly.max_regions
+  // above, not a key of its own.
+  { cat: 'risk', key: 'risk.sub_spread_off', type: 'risk', name: 'sub_spread_off', kind: 'bool', field: 'risk_sub_spread_off', labelKey: 'risk_sub_spread_off', def: '关闭：订阅多地' },
+  { cat: 'risk', key: 'risk.devices_off', type: 'risk', name: 'devices_off', kind: 'bool', field: 'risk_devices_off', labelKey: 'risk_devices_off', def: '关闭：设备数' },
+  { cat: 'risk', key: 'risk.usage_shift_off', type: 'risk', name: 'usage_shift_off', kind: 'bool', field: 'risk_usage_shift_off', labelKey: 'risk_usage_shift_off', def: '关闭：用量变化' },
+  { cat: 'risk', key: 'risk.login_country_off', type: 'risk', name: 'login_country_off', kind: 'bool', field: 'risk_login_country_off', labelKey: 'risk_login_country_off', def: '关闭：登录国家' },
+  { cat: 'risk', key: 'risk.min_days', type: 'risk', name: 'min_days', kind: 'int', field: 'risk_min_days', labelKey: 'risk_min_days', def: '常驻天数', unsetValue: '3' },
+  { cat: 'risk', key: 'risk.max_devices', type: 'risk', name: 'max_devices', kind: 'int', field: 'risk_max_devices', labelKey: 'risk_max_devices', def: '设备上限', unsetValue: '3' },
+  { cat: 'risk', key: 'risk.usage_ratio', type: 'risk', name: 'usage_ratio', kind: 'float', field: 'risk_usage_ratio', labelKey: 'risk_usage_ratio', def: '用量倍数', unsetValue: '3' },
+  { cat: 'risk', key: 'risk.usage_floor_gb', type: 'risk', name: 'usage_floor_gb', kind: 'int', field: 'risk_usage_floor_gb', labelKey: 'risk_usage_floor_gb', def: '每日用量下限（GB）', unsetValue: '3' },
 ]
 
 // edit[key].on distinguishes "overridden" (sparse row exists) from "inherit"

@@ -46,6 +46,7 @@ import { PagedTableFooter } from '@/components/PagedTableFooter'
 import { AsyncButton } from '@/components/AsyncButton'
 import { useTabParam } from '@/hooks/useTabParam'
 import GeoAnomaliesTab from './GeoAnomaliesTab'
+import RiskSignalsTab from './RiskSignalsTab'
 import { formatDualTz } from '@/utils/datetime'
 import CertEventsTab from './CertEventsTab'
 import { useSiteStore } from '@/stores/site'
@@ -77,7 +78,7 @@ export default function LogsView() {
   const canConfig = useCan('config.write')
   const panelTz = useSiteStore(s => s.timezone)
 
-  const [tab, setTab] = useTabParam<'sub' | 'audit' | 'auth' | 'email' | 'certs' | 'geo'>('tab', 'sub', ['sub', 'audit', 'auth', 'email', 'certs', 'geo'])
+  const [tab, setTab] = useTabParam<'sub' | 'audit' | 'auth' | 'email' | 'certs' | 'geo' | 'risk'>('tab', 'sub', ['sub', 'audit', 'auth', 'email', 'certs', 'geo', 'risk'])
 
   // Sub logs
   const [subPage, setSubPage] = useState(1)
@@ -310,10 +311,15 @@ export default function LogsView() {
             the API is the authority either way, this just stops offering a
             door that is always locked. */}
         {canConfig && <Tab value="geo" label={t('admin:logs.tab_geo', { defaultValue: '异地并发' })} />}
+        {/* Admin only for the same reason: /admin/risk-signals is adminGroup. */}
+        {canConfig && <Tab value="risk" label={t('admin:logs.tab_risk', { defaultValue: '风险信号' })} />}
       </Tabs>
       {/* Lives beside the logs rather than on its own page: it is a record of
           what the fleet did, read the same way and by the same person. */}
       {tab === 'geo' && canConfig && <GeoAnomaliesTab />}
+      {/* Each risk row carries the account's concurrent-location verdict;
+          its chip opens that tab, where the evidence behind it is. */}
+      {tab === 'risk' && canConfig && <RiskSignalsTab onOpenGeo={() => setTab('geo')} />}
       {tab === 'sub' && (
         <>
           <Box component="form" onSubmit={onSubFilter} sx={{ display: 'flex', gap: 1.5, mb: 2, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -366,16 +372,29 @@ export default function LogsView() {
                     <TableCell>{t('admin:logs.sub_table.ip')}</TableCell>
                     <TableCell>{t('admin:logs.sub_table.client_type')}</TableCell>
                     <TableCell>{t('admin:logs.sub_table.ua')}</TableCell>
+                    {/* Admin only, as the API is: the sub-log route is staff,
+                        and the server adds the device fields for admins alone.
+                        describeChild keeps the column's name "Device" and puts
+                        the hint in its description. */}
+                    {canConfig && (
+                      <TableCell>
+                        <Tooltip describeChild title={t('admin:logs.sub_table.device_hint', {
+                          defaultValue: '客户端通过 x-hwid 声明的设备：只保存按用户加密的摘要（显示前 4 位）与系统 / 机型，仅管理员可见',
+                        })}>
+                          <span>{t('admin:logs.sub_table.device', { defaultValue: '设备' })}</span>
+                        </Tooltip>
+                      </TableCell>
+                    )}
                     <TableCell>{t('admin:logs.sub_table.at')}</TableCell>
                     <TableCell align="right" />
                   </TableRow>
                 </TableHead>
                 <TableBody>
                   {subLoading && subItems.length === 0 && (
-                    <TableRow><TableCell colSpan={7} sx={{ textAlign: 'center', py: 6 }}><CircularProgress size={24} /></TableCell></TableRow>
+                    <TableRow><TableCell colSpan={canConfig ? 8 : 7} sx={{ textAlign: 'center', py: 6 }}><CircularProgress size={24} /></TableCell></TableRow>
                   )}
                   {!subLoading && subItems.length === 0 && (
-                    <TableRow><TableCell colSpan={7} sx={{ textAlign: 'center', py: 6, color: md.onSurfaceVariant }}>—</TableCell></TableRow>
+                    <TableRow><TableCell colSpan={canConfig ? 8 : 7} sx={{ textAlign: 'center', py: 6, color: md.onSurfaceVariant }}>—</TableCell></TableRow>
                   )}
                   {subItems.map(r => (
                     <TableRow key={r.id} hover sx={{ '& td': { borderBottom: `1px solid ${md.outlineVariant}` } }}>
@@ -390,6 +409,14 @@ export default function LogsView() {
                       </TableCell>
                       <TableCell sx={{ fontSize: 13 }}>{r.client_type}</TableCell>
                       <TableCell sx={{ fontSize: 12, color: md.onSurfaceVariant, maxWidth: 320, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.ua}</TableCell>
+                      {/* The label, else the digest's 4-character prefix; a
+                          fetch that declared nothing says so rather than
+                          leaving a blank that reads as "not loaded". */}
+                      {canConfig && (
+                        <TableCell sx={{ fontSize: 12, color: md.onSurfaceVariant, whiteSpace: 'nowrap' }}>
+                          {r.device_label || (r.device_id4 ? `#${r.device_id4}` : '—')}
+                        </TableCell>
+                      )}
                       <TableCell sx={{ fontSize: 13, whiteSpace: 'nowrap' }}>{formatDualTz(r.accessed_at, panelTz)}</TableCell>
                       <TableCell align="right">
                         <Tooltip title={t('admin:logs.view_detail')}>

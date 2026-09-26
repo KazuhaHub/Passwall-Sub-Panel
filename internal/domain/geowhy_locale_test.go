@@ -80,6 +80,19 @@ func TestGeoReasonCodesHaveLocaleKeys(t *testing.T) {
 // "geo_anomalies.<key>" does.
 func readGeoAnomalyLocale(t *testing.T, lang string) map[string]any {
 	t.Helper()
+	geo := readAdminLocaleObject(t, lang, "geo_anomalies")
+	if geo == nil {
+		t.Fatalf("%s admin.json has no geo_anomalies object", lang)
+	}
+	return geo
+}
+
+// readAdminLocaleObject returns one top-level object of a shipped language's
+// admin bundle, or nil when the bundle has no such object — the caller says
+// what that means. A bundle that cannot be read or parsed fails the test
+// outright: every guard built on it would otherwise pass vacuously.
+func readAdminLocaleObject(t *testing.T, lang, name string) map[string]any {
+	t.Helper()
 	path := filepath.Join("..", "..", "web-react", "src", "locales", lang, "admin.json")
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -89,9 +102,6 @@ func readGeoAnomalyLocale(t *testing.T, lang string) map[string]any {
 	if err := json.Unmarshal(raw, &bundle); err != nil {
 		t.Fatalf("parse %s: %v", path, err)
 	}
-	geo, ok := bundle["geo_anomalies"].(map[string]any)
-	if !ok {
-		t.Fatalf("%s has no geo_anomalies object", path)
-	}
-	return geo
+	obj, _ := bundle[name].(map[string]any)
+	return obj
 }

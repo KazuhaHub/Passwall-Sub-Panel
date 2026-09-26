@@ -108,4 +108,25 @@ describe('NotificationBell', () => {
     // page's default tab (subscription logs) would say nothing about them.
     await waitFor(() => expect(screen.getByTestId('location').textContent).toBe('/admin/logs?tab=geo'))
   })
+
+  it('renders the risk_signals title with its count and the shield', async () => {
+    api.get.mockResolvedValue(feed({ key: 'risk_signals', type: 'risk_signals', severity: 'warning', count: 2 }))
+    mount()
+
+    fireEvent.click(await screen.findByLabelText('notifications'))
+
+    // One entry for every flagged account, not a row each (V3-D5).
+    await waitFor(() => expect(screen.queryByText('2 个账号有风险信号')).not.toBeNull())
+    expect(screen.queryByTestId('ShieldOutlinedIcon')).not.toBeNull()
+  })
+
+  it('opens the risk tab from risk_signals', async () => {
+    api.get.mockResolvedValue(feed({ key: 'risk_signals', type: 'risk_signals', severity: 'warning', count: 1 }))
+    mount()
+
+    fireEvent.click(await screen.findByLabelText('notifications'))
+    fireEvent.click(await screen.findByRole('menuitem'))
+
+    await waitFor(() => expect(screen.getByTestId('location').textContent).toBe('/admin/logs?tab=risk'))
+  })
 })

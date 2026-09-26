@@ -46,7 +46,8 @@
       "psp_upgrade": "面板新版本 {{version}} 可更新",
       "login_security": "近期发生 {{count}} 次登录锁定",
       "geo_anomaly": "{{count}} 个账号被标记为异地并发",
-      "geo_auto_suspended": "{{count}} 个账号因异地并发被自动临时暂停"
+      "geo_auto_suspended": "{{count}} 个账号因异地并发被自动临时暂停",
+      "risk_signals": "{{count}} 个账号有风险信号"
     }
   },
   "validation": {
@@ -278,6 +279,26 @@
       "ban_duration": "暂停时长（分钟）",
       "ban_duration_hint": "默认 60，最长 10080（7 天）。到时自动恢复，管理员可随时手动恢复。修改会作用于正在暂停中的账号。",
       "ban_effective": "当前生效：同时 {{countries}} 个国家，或同一国家 {{regions}} 个省，或 {{cities}} 个城市，连续 {{polls}} 次，暂停 {{minutes}} 分钟"
+    },
+    "risk": {
+      "section": "风险信号（只提示）",
+      "hint": "除「异地并发」之外的四种信号，每小时计算一次，结果在「日志管理 → 风险信号」，有账号被标记时通知铃提醒。它们不会暂停、禁用或修改任何账号。「订阅多地」沿用上面「异地并发」的判定粒度、省级容错和「允许任何地方」。",
+      "sub_spread": "订阅多地：跨天从互不相连的省份拉取订阅",
+      "sub_spread_hint": "同一个客户端（同一设备标识或同一客户端标识）去过的省份算作同一组，组数超过上面的省级容错即标记。只判常驻省份最多的那个国家，跨国不在这里判断。",
+      "devices": "设备数：客户端声明的设备",
+      "usage_shift": "用量变化：与自己过去 4 周相比",
+      "login_country": "登录国家：面板登录出现新国家",
+      "min_days": "常驻天数",
+      "min_days_hint": "一个省或一台设备在最近 7 天（受订阅日志保留天数限制）里至少出现几天才算常驻，按面板时区的自然日计。默认 3，范围 1–7。0 = 默认。",
+      "max_devices": "设备上限",
+      "max_devices_hint": "常用设备超过这个数即标记，只统计带 x-hwid 的客户端。默认 3。0 = 默认。",
+      "usage_ratio": "用量倍数",
+      "usage_ratio_hint": "某天用量超过「开始使用以来、过去 4 周内日用量中位数 × 倍数」即为超标日；7 天内 4 天超标即标记，2–3 天为疑似。默认 3，最小 1.5。0 = 默认。",
+      "usage_floor_gb": "每日用量下限（GB）",
+      "usage_floor_gb_hint": "低于这个量的日子不算超标，避免基线很低的账号因少量使用被标记。默认 3。0 = 默认。",
+      "effective": "当前生效：常驻 {{min_days}} 天，设备上限 {{max_devices}}，用量倍数 {{ratio}}，每日下限 {{floor}} GB",
+      "hwid_capture": "采集客户端设备标识（x-hwid）",
+      "hwid_capture_hint": "只有部分客户端会在更新订阅时带上设备标识（x-hwid），多数客户端不带。只保存按用户加密的摘要（无法还原）和系统 / 机型，随订阅日志一起过期，仅管理员可见；只提示，从不拦截拉取。关闭后不再采集，已保存的摘要随订阅日志过期。仅全局生效。"
     },
     "geo": {
       "section": "IP 地区显示（日志）",
@@ -973,6 +994,102 @@
     "reason_scope_region": "判到省",
     "reason_scope_country": "仅判国家"
   },
+  "risk_signals": {
+    "intro": "除「异地并发」外的四种只提示信号，每小时按账号重新计算：订阅多地（跨天、按客户端合并的省份）、设备数（客户端声明的 x-hwid）、用量变化（与自己过去 4 周相比）和登录国家（面板登录出现新国家）。它们都不会暂停或修改任何账号；「无法判断」「无数据」不等于「正常」。默认只列出需要关注的账号。",
+    "unwired": "本部署未启用风险信号。",
+    "empty": "还没有计算结果——风险信号每小时计算一次。",
+    "empty_attention": "目前没有需要关注的账号。",
+    "show_all": "显示全部账号",
+    "not_computed": "尚未计算",
+    "col_user": "用户",
+    "col_geo": "异地并发",
+    "col_updated": "最后计算",
+    "kind": {
+      "sub_spread": "订阅多地",
+      "devices": "设备数",
+      "usage_shift": "用量变化",
+      "login_country": "登录国家"
+    },
+    "state": {
+      "flagged": "已标记",
+      "suspect": "疑似",
+      "clean": "正常",
+      "unknown": "无法判断",
+      "idle": "无数据",
+      "exempt": "已豁免",
+      "disabled": "未启用"
+    },
+    "geo_open": "在「异地并发」中查看",
+    "expand": "查看证据",
+    "collapse": "收起",
+    "window_hint": "每格一天，自 {{start}} 起共 {{days}} 天（面板时区）",
+    "province_recurring": "常驻",
+    "province_group": "第 {{n}} 组",
+    "identities_title": "拉取订阅的客户端",
+    "identity_hwid": "设备",
+    "identity_ua": "客户端标识",
+    "identity_seen_at": "去过：{{places}}",
+    "foreign_title": "其他国家的来源（仅供参考，不参与判断）",
+    "coverage": "来源 {{sources}} 个，可定位 {{placed}} 个，定位到省 {{region_known}} 个；已排除：共享出口 {{shared}}、忽略名单 {{listed}}、本机节点 / 中转 {{infra}}、内网 {{internal}}",
+    "devices_title": "声明的设备",
+    "device_recurring": "常用",
+    "device_last_seen": "最后一次 {{time}}",
+    "device_fetches": "带设备标识的拉取 {{with}} 次，不带的 {{without}} 次",
+    "clients_title": "未带设备标识的客户端",
+    "usage_title": "最近 35 天每日用量（截至 {{end}}）",
+    "usage_caption": "基线中位数 {{median}}，倍数 {{ratio}}，每日下限 {{floor}}；最近 7 天超标 {{over}} 天",
+    "login_known": "已知国家",
+    "login_events": "新国家登录",
+    "login_counts": "{{lookback}} 天内登录 {{logins}} 次；最近 7 天 {{recent}} 次，其中已判断 {{judged}} 次；跳过：本机节点 {{infra}}、内网 {{internal}}、忽略名单 {{listed}}、节点所在国家 {{node_country}}、无法定位 {{unplaced}}",
+    "no_evidence": "没有可显示的证据",
+    "code": {
+      "sub_spread": {
+        "signal_off": "该账号所在范围关闭了「订阅多地」",
+        "scope_off": "异地并发判定粒度为「关闭」",
+        "scope_country": "异地并发判定粒度为「仅国家」，不按省判断",
+        "allow_anywhere": "此账号允许从任何地方连接",
+        "no_fetches": "窗口内没有订阅拉取",
+        "retention_short": "订阅日志只保留 {{retention}} 天，少于判断所需的 {{needed}} 天",
+        "all_excluded": "全部 {{total}} 个拉取来源都已排除（共享出口 {{shared}}、忽略名单 {{listed}}、本机节点 / 中转 {{infra}}、内网 {{internal}}）",
+        "geo_unavailable": "地区库不可用，无法判断",
+        "low_placed": "{{sources}} 个来源中只有 {{placed}} 个能定位（至少需要 {{ratio}}%）",
+        "no_regions": "来源只能定位到国家，无法按省判断",
+        "spread": "{{country}} 有 {{groups}} 组互不相连的常驻省份（容错 {{tolerance}}）",
+        "spread_building": "{{country}} 有 {{groups}} 组互不相连的省份，但还没有都出现满 {{min_days}} 天（容错 {{tolerance}}）",
+        "within": "{{groups}} 组省份，在容错 {{tolerance}} 内"
+      },
+      "devices": {
+        "signal_off": "该账号所在范围关闭了「设备数」",
+        "capture_off": "设备标识采集已关闭",
+        "no_fetches": "窗口内没有订阅拉取",
+        "retention_short": "订阅日志只保留 {{retention}} 天，少于判断所需的 {{needed}} 天",
+        "no_hwid": "窗口内的拉取都没有带设备标识（x-hwid）",
+        "over": "{{recurrent}} 台常用设备（上限 {{max}}）",
+        "over_building": "共 {{distinct}} 台设备，其中常用 {{recurrent}} 台（上限 {{max}}）",
+        "within": "{{distinct}} 台设备，在上限 {{max}} 内"
+      },
+      "usage_shift": {
+        "signal_off": "该账号所在范围关闭了「用量变化」",
+        "retention_short": "流量历史只保留 {{retention}} 天，少于判断所需的 {{needed}} 天",
+        "no_usage": "最近 7 天没有用量",
+        "warmup": "用量历史只有 {{history}} 天，满 14 天后开始判断",
+        "sustained": "最近 7 天有 {{over}} 天超过自身基线的 {{ratio}} 倍",
+        "building": "最近 7 天有 {{over}} 天超过自身基线的 {{ratio}} 倍（满 4 天标记）",
+        "within": "最近 7 天有 {{over}} 天超过自身基线的 {{ratio}} 倍"
+      },
+      "login_country": {
+        "signal_off": "该账号所在范围关闭了「登录国家」",
+        "scope_off": "异地并发判定粒度为「关闭」",
+        "allow_anywhere": "此账号允许从任何地方连接",
+        "no_recent_logins": "最近 7 天没有登录面板",
+        "geo_unavailable": "地区库不可用，无法判断",
+        "unplaced": "最近的登录都来自节点、内网或无法定位的地址",
+        "learning": "之前的登录不足 {{warmup}} 次，还在学习",
+        "new_country": "从新国家登录：{{countries}}",
+        "known_countries": "最近的登录都来自已知国家"
+      }
+    }
+  },
   "logs": {
     "title": "日志管理",
     "load_failed": "暂时无法加载日志",
@@ -984,6 +1101,7 @@
     "tab_email": "邮件日志",
     "tab_certs": "证书",
     "tab_geo": "异地并发",
+    "tab_risk": "风险信号",
     "cert_table": {
       "at": "时间",
       "cert": "证书",
@@ -1026,6 +1144,8 @@
       "ip": "IP / 地区",
       "client_type": "客户端",
       "ua": "User-Agent",
+      "device": "设备",
+      "device_hint": "客户端通过 x-hwid 声明的设备：只保存按用户加密的摘要（显示前 4 位）与系统 / 机型，仅管理员可见",
       "at": "时间"
     },
     "audit_table": {
@@ -1972,6 +2092,15 @@
       "geo_ban_max_cities": "暂停阈值：城市",
       "geo_ban_after": "连续几次才暂停",
       "geo_ban_duration": "暂停时长（分钟）",
+      "cat_risk": "风险信号（只提示）",
+      "risk_sub_spread_off": "关闭：订阅多地",
+      "risk_devices_off": "关闭：设备数",
+      "risk_usage_shift_off": "关闭：用量变化",
+      "risk_login_country_off": "关闭：登录国家",
+      "risk_min_days": "常驻天数",
+      "risk_max_devices": "设备上限",
+      "risk_usage_ratio": "用量倍数",
+      "risk_usage_floor_gb": "每日用量下限（GB）",
       "default_suffix": "（默认）",
       "override": "覆盖",
       "inherit": "继承",

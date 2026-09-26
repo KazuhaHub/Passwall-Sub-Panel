@@ -190,6 +190,31 @@ export interface UISettings {
   /** 0 = default 60; clamped to 1..10080 (7 days). */
   geo_anomaly_ban_duration_minutes: number
 
+  // ---- Risk signals (observe only) ----
+  // Four signals beside concurrent locations, recomputed hourly; none of them
+  // acts on an account. The switches are NEGATIVE keys, so the zero value of
+  // an install that never saved them is "on". A stored 0 in a number means
+  // "the shipped default" — utils/riskSignals.riskPolicy mirrors how the
+  // server resolves them. Every field is per-group overridable EXCEPT
+  // risk_hwid_capture_off, which /sub reads before it knows the account's
+  // group and is global only.
+  risk_sub_spread_off: boolean
+  risk_devices_off: boolean
+  risk_usage_shift_off: boolean
+  risk_login_country_off: boolean
+  /** Days of the fetch window a province or device must recur on. 0 = default
+   *  3; clamped to 1..7. */
+  risk_min_days: number
+  /** Recurring declared devices allowed. 0 = default 3. */
+  risk_max_devices: number
+  /** A day over median × this is an over-day. 0 = default 3; raised to 1.5. */
+  risk_usage_ratio: number
+  /** GiB below which a day is never an over-day. 0 = default 3. */
+  risk_usage_floor_gb: number
+  /** Stops recording the x-hwid a subscription client declares. GLOBAL only;
+   *  stored digests expire with the sub log. */
+  risk_hwid_capture_off: boolean
+
   // ---- IP geolocation (offline .mmdb region display in access logs) ----
   /** Master toggle. Off by default; resolution is fully offline against a
    *  local .mmdb in <ConfigDir>/geoip/ (no per-IP external calls). */

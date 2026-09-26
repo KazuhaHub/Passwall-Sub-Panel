@@ -13,6 +13,9 @@ export type AlertType =
   // accounts whose flag is latched, and accounts it has auto-suspended.
   | 'geo_anomaly'
   | 'geo_auto_suspended'
+  // The observe-only risk signals' one admin-only singleton, with a `count`:
+  // accounts with any risk signal flagged, judged within the last day.
+  | 'risk_signals'
 
 export interface Alert {
   key: string

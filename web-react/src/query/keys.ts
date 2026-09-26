@@ -163,6 +163,11 @@ export const geoAnomalyKeys = {
   all: (s: QueryScope) => [...privateRoot(s), 'geo-anomalies'] as const,
 }
 
+/** The observe-only risk signals, as shown on the Logs page's risk tab. */
+export const riskSignalKeys = {
+  all: (s: QueryScope) => [...privateRoot(s), 'risk-signals'] as const,
+}
+
 /** The upstream sync-task queue, as shown on the Sync tasks page. */
 export const syncTaskKeys = {
   all: (s: QueryScope) => [...privateRoot(s), 'sync-tasks'] as const,
