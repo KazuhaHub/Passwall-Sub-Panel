@@ -139,6 +139,30 @@ func TestScopeSettingsHandler_RejectsIgnoreAddresses(t *testing.T) {
 	}
 }
 
+// Device capture on /sub is global only, for two reasons that do not depend
+// on the group: the public endpoint reads it from the global settings it has
+// already loaded (a per-group value would be silently ignored there), and
+// whether the panel records a device identifier at all is a panel-wide
+// privacy decision. Absence from OverridableScopeKeys is the mechanism; adding
+// the key there turns this red.
+func TestScopeSettingsHandler_RejectsHWIDCaptureOff(t *testing.T) {
+	repo := newFakeScopeRepo()
+	h := NewAdminScopeSettingsHandler(fakeScopeGroups{exists: map[int64]bool{5: true}}, repo)
+	r := scopeRouter(h)
+	body, _ := json.Marshal(setScopeOverrideRequest{Type: "risk", Name: "hwid_capture_off", Value: "true"})
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodPut, "/api/admin/groups/5/scope-settings", bytes.NewReader(body)))
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("PUT risk.hwid_capture_off = %d, want 400; body=%s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "not overridable per group") {
+		t.Errorf("the refusal must say why: %s", w.Body.String())
+	}
+	if len(repo.rows) != 0 {
+		t.Error("a rejected override must not be written")
+	}
+}
+
 func TestScopeSettingsHandler_GroupNotFound(t *testing.T) {
 	h := NewAdminScopeSettingsHandler(fakeScopeGroups{exists: map[int64]bool{}}, newFakeScopeRepo())
 	r := scopeRouter(h)

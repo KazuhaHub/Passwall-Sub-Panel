@@ -17,6 +17,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/log"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/operationgate"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/panelpath"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/subdevice"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/alert"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/audit"
@@ -76,7 +77,14 @@ type Deps struct {
 	// bell's geo_anomaly entry — in practice the same store as GeoRecords, a
 	// separate field because the bell needs a COUNT and the Geo tab the rows.
 	// Optional like every alert source: absent, the bell has no such entry.
-	GeoFlags         alert.GeoFlagCounter
+	GeoFlags alert.GeoFlagCounter
+	// DeviceHasher keys the device a subscription client declares (x-hwid)
+	// into the per-account digest sub_logs keeps. Nil disables capture: /sub
+	// serves exactly as before and every fetch logs as anonymous. Built by
+	// the composition root from the panel secret, so the handler never sees
+	// key material; TestBuildRecordsTheDeclaredDeviceOnEveryLoggedFetch
+	// guards that it is actually handed over.
+	DeviceHasher     *subdevice.Hasher
 	Pool             ports.XUIPool
 	Auth             *auth.Service
 	SAML             *auth.SAMLService
@@ -248,7 +256,7 @@ func NewRouter(d Deps) stdhttp.Handler {
 	enrollPublic := handler.NewNodeEnrollHandler(d.Repos.AuthToken, d.Repos.XUIPanel, d.Pool, d.EnrollProbe)
 	var bootstrapPublic *handler.NodeBootstrapHandler
 
-	subHandler := handler.NewSubHandler(d.User, d.Render, d.Repos.SubLog, d.Repos.ScopedSettings, d.Repos.User, d.Mail, d.Async)
+	subHandler := handler.NewSubHandler(d.User, d.Render, d.Repos.SubLog, d.Repos.ScopedSettings, d.Repos.User, d.Mail, d.Async, d.DeviceHasher)
 	subLimiter := middleware.NewPerIPLimiter(d.SubPerIPPerMin, time.Minute)
 	subLimiter.SetLimitFunc(newSettingsIntCache(d.Repos.Settings, d.SubPerIPPerMin, func(s ports.UISettings) int { return s.SubPerIPPerMin }).get)
 

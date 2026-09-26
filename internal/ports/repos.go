@@ -1398,6 +1398,26 @@ type UISettings struct {
 	// enough to be permanent in practice would defeat it.
 	GeoAnomalyBanDurationMinutes int `json:"geo_anomaly_ban_duration_minutes"`
 
+	// ---- Risk signals (observe only) ----
+	// Nothing in this block suspends, blocks or notifies an account holder:
+	// the signals are for an admin to read, next to the concurrent-location
+	// verdict, and each is judged on its own.
+	//
+	// RiskHWIDCaptureOff stops recording the device a subscription client
+	// declares about itself (the x-hwid header and its OS/model companions).
+	// The zero value is capture ON, so an install that never saved the form
+	// captures. What is kept is never the raw header: a keyed per-account
+	// digest and a sanitized label, both expiring with sub_logs, and neither
+	// ever affects the response (see handler.SubHandler.declaredDevice).
+	// Turning it off stops new captures; rows already written age out with
+	// sub_log_retention_days.
+	//
+	// GLOBAL ONLY — deliberately absent from OverridableScopeKeys. It is read
+	// on the public /sub path from the global settings that request already
+	// loaded, and whether the panel records a device identifier at all is a
+	// panel-wide privacy decision, not a group's policy.
+	RiskHWIDCaptureOff bool `json:"risk_hwid_capture_off"`
+
 	// ---- IP geolocation (access-log region display, offline .mmdb) ----
 	// Resolution is fully offline against a local .mmdb in <ConfigDir>/geoip/;
 	// no per-IP external calls. GeoIPEnabled gates the whole feature (default

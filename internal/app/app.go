@@ -30,6 +30,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/metrics"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/operationgate"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/safego"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/subdevice"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/xraycompat"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 
@@ -217,6 +218,13 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 		return nil, fmt.Errorf("db schema: %w", err)
 	}
 	sqlstore.ConfigureSecretKey(cfg.SecretKeyMaterial())
+	// The key for the subscription device digest comes from the same panel
+	// secret, under its own label (subdevice.NewHasher), so it is neither
+	// the at-rest AES key just configured nor anything a JWT signature can
+	// equal. Rotating the secret therefore changes every device id; old and
+	// new ids coexist until sub_logs retention ages the old ones out. A
+	// blank secret yields nil, which the /sub handler treats as capture off.
+	deviceHasher := subdevice.NewHasher(cfg.SecretKeyMaterial())
 	// Surface advisory key-material warnings (weak jwt_secret/encryption_key,
 	// or the coupled-key fallback where jwt_secret doubles as the at-rest key).
 	for _, w := range cfg.SecurityWarnings() {
@@ -566,7 +574,10 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 		GeoRecords:    geoStreaks,
 		// The same store again, as the bell's count of latched flags.
 		GeoFlags: geoStreaks,
-		Pool:     pool,
+		// Optional like GeoFlags, so leaving it out would compile and quietly
+		// record every subscription fetch as anonymous.
+		DeviceHasher: deviceHasher,
+		Pool:         pool,
 		// Same service the push path uses, so the capabilities the edit form
 		// reports are read through the identical check that gates the write.
 		SharedClients: sharedClientSvc,

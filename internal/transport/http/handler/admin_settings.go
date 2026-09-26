@@ -105,6 +105,9 @@ type settingsDTO struct {
 	GeoAnomalyBanMaxCities       int  `json:"geo_anomaly_ban_max_cities"`
 	GeoAnomalyBanAfterPolls      int  `json:"geo_anomaly_ban_after_polls"`
 	GeoAnomalyBanDurationMinutes int  `json:"geo_anomaly_ban_duration_minutes"`
+	// Risk signals (observe only). Capture of the device a subscription
+	// client declares; global only, false = capture on.
+	RiskHWIDCaptureOff bool `json:"risk_hwid_capture_off"`
 	// Geo IP (access-log region display, offline .mmdb).
 	GeoIPEnabled             bool   `json:"geo_ip_enabled"`
 	GeoIPDBFile              string `json:"geo_ip_db_file"`
@@ -351,6 +354,7 @@ func settingsToDTO(s ports.UISettings) settingsDTO {
 		GeoAnomalyBanMaxCities:       s.GeoAnomalyBanMaxCities,
 		GeoAnomalyBanAfterPolls:      s.GeoAnomalyBanAfterPolls,
 		GeoAnomalyBanDurationMinutes: s.GeoAnomalyBanDurationMinutes,
+		RiskHWIDCaptureOff:           s.RiskHWIDCaptureOff,
 
 		NodeTaskOfflineReconcileDays: policy.OfflineReconcileDays,
 		NodeTaskBackupRestoreDays:    policy.BackupRestoreDays,
@@ -458,6 +462,7 @@ func (h *AdminSettingsHandler) Put(c *gin.Context) {
 		GeoAnomalyBanMaxCities:        req.GeoAnomalyBanMaxCities,
 		GeoAnomalyBanAfterPolls:       req.GeoAnomalyBanAfterPolls,
 		GeoAnomalyBanDurationMinutes:  req.GeoAnomalyBanDurationMinutes,
+		RiskHWIDCaptureOff:            req.RiskHWIDCaptureOff,
 		GeoIPEnabled:                  req.GeoIPEnabled,
 		GeoIPDBFile:                   strings.TrimSpace(req.GeoIPDBFile),
 		GeoIPAutoUpdate:               req.GeoIPAutoUpdate,

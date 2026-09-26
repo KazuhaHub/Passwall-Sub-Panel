@@ -10,6 +10,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/geo"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/transport/http/middleware"
 )
 
 // AdminSubLogHandler exposes /api/admin/sub-logs — paginated subscription
@@ -30,7 +31,19 @@ func NewAdminSubLogHandler(repo ports.SubLogRepo, settings ports.SettingsRepo, g
 type subLogView struct {
 	*domain.SubLog
 	Region *domain.GeoLocation `json:"region,omitempty"`
+	// The device the fetch declared, for ADMINS ONLY. This route is on the
+	// staff group, so operators read it too, and domain.SubLog keeps its own
+	// device fields off the wire (json:"-") for exactly that reason: they
+	// reach JSON only through these two, which List fills after a role
+	// check. Admins get the label and the first 4 hex characters of the
+	// per-account digest — enough to tell one account's devices apart at a
+	// glance, not a value worth copying anywhere.
+	DeviceLabelForAdmin string `json:"device_label,omitempty"`
+	DeviceIDPrefix      string `json:"device_id4,omitempty"`
 }
+
+// deviceIDPrefixLen is how much of the stored device digest an admin sees.
+const deviceIDPrefixLen = 4
 
 func (h *AdminSubLogHandler) List(c *gin.Context) {
 	p := parsePagination(c)
@@ -66,12 +79,22 @@ func (h *AdminSubLogHandler) List(c *gin.Context) {
 	if h.geo != nil {
 		regions = h.geo.Lookup(c.Request.Context(), ips)
 	}
+	// Nil claims (a route mounted without auth, a test harness) reads as
+	// "not an admin": the device is shown on a positive admin check only.
+	claims := middleware.ClaimsFrom(c)
+	showDevice := claims != nil && claims.Role == domain.RoleAdmin
 	views := make([]subLogView, len(items))
 	for i, it := range items {
 		views[i] = subLogView{SubLog: it}
 		if loc, ok := regions[it.IP]; ok {
 			locCopy := loc
 			views[i].Region = &locCopy
+		}
+		if showDevice {
+			views[i].DeviceLabelForAdmin = it.DeviceLabel
+			if len(it.DeviceID) >= deviceIDPrefixLen {
+				views[i].DeviceIDPrefix = it.DeviceID[:deviceIDPrefixLen]
+			}
 		}
 	}
 	c.JSON(http.StatusOK, pagedEnvelope(views, total, p))

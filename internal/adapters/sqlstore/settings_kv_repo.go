@@ -463,6 +463,12 @@ func settingDescriptors(s *ports.UISettings) []settingDescriptor {
 		intField("geo_anomaly", "ban_after_polls", &s.GeoAnomalyBanAfterPolls),
 		intField("geo_anomaly", "ban_duration_minutes", &s.GeoAnomalyBanDurationMinutes),
 
+		// risk --- risk signals (observe only). hwid_capture_off is GLOBAL
+		// only (absent from ports.OverridableScopeKeys): /sub reads it from
+		// the global settings it already loaded. Not defaulted in
+		// applyUISettingsDefaults — false (capture on) is the default.
+		boolField("risk", "hwid_capture_off", &s.RiskHWIDCaptureOff),
+
 		// geo --- IP geolocation for access-log region display (offline .mmdb)
 		boolField("geo", "geo_ip_enabled", &s.GeoIPEnabled),
 		strField("geo", "geo_ip_db_file", &s.GeoIPDBFile),
