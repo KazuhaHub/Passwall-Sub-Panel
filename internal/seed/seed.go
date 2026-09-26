@@ -140,7 +140,10 @@ func Ensure(configDir string) error {
 	}); err != nil {
 		return err
 	}
-	return upgradeUnmodifiedRoutingDefaults(configDir)
+	if err := upgradeUnmodifiedRoutingDefaults(configDir); err != nil {
+		return err
+	}
+	return upgradeUnmodifiedDNSDefaults(configDir)
 }
 
 type managedDefaultUpdate struct {
@@ -180,6 +183,35 @@ func upgradeUnmodifiedRoutingDefaults(configDir string) error {
 		updates[i].newBody = body
 	}
 	return upgradeManagedDefaults(configDir, updates)
+}
+
+// upgradeUnmodifiedDNSDefaults updates each untouched template independently,
+// so administrator edits to one template do not hold back the other.
+func upgradeUnmodifiedDNSDefaults(configDir string) error {
+	for _, update := range []managedDefaultUpdate{
+		{relPath: "templates/default-mihomo.yaml", oldSHA256s: []string{
+			// Official LF and CRLF checkouts of the previous default.
+			"f7e3a2784a67fcdf38ba580f51ba0ae577aac4bcfc1c72efc32c8c39ca4f3e4b",
+			"426353853592fb9a17afe5cbe801c8c674fc9394ad052b45b3b6ea20789b093d",
+			// The Gateway hostname update before selector-aware DNS routing.
+			"fbe93907df14dcfe5a6d26207c7fbd5b717be1734491bbeb5aa6de66d636af47",
+			"802667bf6c7caf954dc431bbd926b045583333a570320172a082621a6a635038",
+		}},
+		{relPath: "templates/default-sing-box.yaml", oldSHA256s: []string{
+			"e73031f8844a9bc54922510ff209286f3fb24f709de448427fb32f0ebef5cf27",
+			"6cfb82005a288b1b2a662cb91dd249337f0678b3ff0df4a10551b25f735439f8",
+		}},
+	} {
+		body, err := defaultsFS.ReadFile("files/" + update.relPath)
+		if err != nil {
+			return fmt.Errorf("read managed default files/%s: %w", update.relPath, err)
+		}
+		update.newBody = body
+		if err := upgradeManagedDefaults(configDir, []managedDefaultUpdate{update}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func upgradeManagedDefaults(configDir string, updates []managedDefaultUpdate) error {

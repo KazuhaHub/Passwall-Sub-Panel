@@ -110,15 +110,11 @@ content: |
       "geosite:cn,apple-cn,microsoft@cn":
       - https://dns.alidns.com/dns-query
       - https://doh.pub/dns-query
-      # Foreign domains -> org Cloudflare Gateway (primary; bare resolution
-      # verified working — TCP ping + full DoH Status:0), public Cloudflare
-      # 1.1.1.1 / 1.0.0.1 as backup. The CF IPs carry IP SANs so DoH-by-IP
-      # validates cleanly; Google 8.8.8.8-by-IP is NOT used (its cert is
-      # dns.google-only, no IP SAN -> would fail certificate validation).
+      # Foreign domains -> org Cloudflare Gateway. Its DoH connection follows
+      # the main node selector: DIRECT stays direct; a selected node proxies it.
+      # Proxy-node domains still use proxy-server-nameserver above for bootstrap.
       "geosite:geolocation-!cn":
-      - https://v5brh3pn84.cloudflare-gateway.com/dns-query
-      - https://1.1.1.1/dns-query
-      - https://1.0.0.1/dns-query
+      - 'https://l9f26nnn5d.cloudflare-gateway.com/dns-query#🚀 节点选择'
 
   proxies:
     {{ proxies }}

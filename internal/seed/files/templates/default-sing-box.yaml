@@ -41,7 +41,7 @@ content: |
         {
           "tag": "cloudflare-gateway",
           "type": "https",
-          "server": "v5brh3pn84.cloudflare-gateway.com",
+          "server": "l9f26nnn5d.cloudflare-gateway.com",
           "domain_resolver": "bootstrap"
         },
         {
