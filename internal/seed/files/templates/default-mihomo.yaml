@@ -129,3 +129,6 @@ content: |
   rules:
     {{ rules_personal }}
     {{ rules_common }}
+
+  sub-rules:
+    {{ sub_rules }}

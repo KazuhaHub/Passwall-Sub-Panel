@@ -688,8 +688,8 @@
       "content": "模板内容"
     },
     "placeholder": {
-      "rule_sets": "选择与该模板策略组匹配的规则集",
-      "content": "支持占位符 (proxies / proxy_groups / rules_common / rules_personal)"
+      "rule_sets": "选择与该模板代理组匹配的规则集",
+      "content": "支持占位符 (proxies / proxy_groups / rules_common / rules_personal / sub_rules)"
     },
     "table": {
       "slug": "Slug",
@@ -709,10 +709,10 @@
     },
     "hint": {
       "rule_sets": "订阅渲染只使用这里绑定的规则集。",
-      "auto_groups": "策略组将根据已绑定规则集的规则目标自动生成。",
-      "missing_targets": "规则目标未在模板策略组中找到：{{names}}",
-      "groups_ok": "已识别 {{n}} 个策略组，规则目标匹配正常。",
-      "no_binding": "当前未绑定规则集，只会渲染节点、策略组和个人规则。",
+      "auto_groups": "代理组将根据已绑定规则集的规则目标自动生成。",
+      "missing_targets": "规则目标未在模板代理组中找到：{{names}}",
+      "groups_ok": "已识别 {{n}} 个代理组，规则目标匹配正常。",
+      "no_binding": "当前未绑定规则集，只会渲染节点、代理组和个人规则。",
       "incomplete": "模板内容尚未完整，请继续编辑。"
     },
     "validate": {
@@ -1064,8 +1064,8 @@
       "sort": "排序",
       "enabled": "启用",
       "direct_subscription_domain": "DIRECT 订阅域名",
-      "proxy_group_order": "策略组顺序",
-      "content": "规则内容"
+      "proxy_group_order": "代理组顺序",
+      "content": "主规则"
     },
     "placeholder": {
       "slug": "ad_block",
@@ -1074,12 +1074,44 @@
       "content": "- DOMAIN-SUFFIX,example.com,DIRECT"
     },
     "hint": {
-      "proxy_group_order": "可留空；一行一个策略组名。未列出的策略组会放在开头，并保持规则内容中的首次出现顺序。",
+      "proxy_group_order": "可留空；一行一个代理组名。未列出的代理组会放在开头，并保持主规则中的首次出现顺序。",
       "direct_subscription_domain": "开启后，会在该规则集前面自动生成 DOMAIN-SUFFIX,<订阅域名>,DIRECT。未配置有效的订阅 Base URL 时不会生成；关闭后订阅更新按其它规则处理。"
     },
     "tabs": {
-      "rules": "规则内容",
-      "members": "策略组成员"
+      "rules": "主规则",
+      "members": "代理组成员"
+    },
+    "mihomo": {
+      "rematches": "Rematch 出站",
+      "rematches_hint": "标记名用于重新匹配主规则；目标子规则用于直接进入子规则，二者至少填写一个。",
+      "rematch_compatibility": "Rematch 出站仅进入 Mihomo 订阅，并要求 Mihomo v1.19.28 或更高版本；sing-box 不会生成这些出站。",
+      "outbound_name": "出站名称",
+      "target_rematch_name": "Rematch 标记名",
+      "target_sub_rule": "目标子规则",
+      "no_rematches": "尚未配置 Rematch 出站",
+      "sub_rules": "子规则",
+      "sub_rules_hint": "每个子规则使用 Mihomo 规则列表语法，建议提供 MATCH 兜底。",
+      "sub_rules_compatibility": "子规则仅进入 Mihomo 订阅；请在主规则中使用 SUB-RULE 引用，或在 Rematch 出站中设置目标子规则。",
+      "sub_rules_count": "已配置 {{count}} 个子规则",
+      "sub_rule_name": "子规则名称",
+      "unnamed_sub_rule": "未命名的子规则",
+      "no_sub_rules": "尚未配置子规则",
+      "issues": {
+        "invalid_name": "名称不能为空，也不能包含逗号或换行",
+        "duplicate_sub_rule": "子规则名称重复：{{name}}",
+        "invalid_rule_yaml": "规则不是有效的 YAML 规则列表",
+        "nested_sub_rule": "Mihomo 子规则内不能再次跳转到 SUB-RULE",
+        "missing_match_fallback": "子规则没有 MATCH 兜底，未命中时将无法得到明确出口",
+        "missing_sub_rule": "SUB-RULE 引用的子规则不存在：{{name}}",
+        "duplicate_rematch_outbound": "Rematch 出站名称重复：{{name}}",
+        "missing_rematch_target": "Rematch 出站至少需要设置标记名或目标子规则",
+        "invalid_rematch_name": "Rematch 标记名不能为空，也不能包含逗号或换行",
+        "missing_target_sub_rule": "Rematch 目标子规则不存在",
+        "outbound_name_collision": "Rematch 出站名称与内置出口、代理组或节点名称冲突：{{name}}",
+        "unsafe_rematch_order": "对应的 REMATCH-NAME 规则必须位于触发该 Rematch 出站的规则之前",
+        "duplicate_bound_sub_rule": "当前模板绑定的规则集中存在同名子规则：{{name}}",
+        "duplicate_bound_rematch_outbound": "当前模板绑定的规则集中存在同名 Rematch 出站：{{name}}"
+      }
     },
     "members": {
       "groups_title": "代理组",
@@ -1091,14 +1123,14 @@
       "custom": "自定义编排",
       "system_default": "系统默认",
       "unsaved": "有未保存的修改",
-      "no_groups": "规则内容中尚未识别到代理组",
+      "no_groups": "主规则中尚未识别到代理组",
       "first_default": "第一项是客户端默认选中的出口",
       "restore_default": "恢复系统默认",
       "default_badge": "默认",
       "group_type": "代理组类型",
       "type": {
         "select": "手动选择（select）",
-        "url-test": "自动选择（url-test）",
+        "url-test": "自动测速（url-test）",
         "fallback": "自动回退（fallback）",
         "load-balance": "负载均衡（load-balance）"
       },
@@ -1110,7 +1142,6 @@
       },
       "test_url": "测试地址",
       "interval": "测试间隔（秒）",
-      "interval_hint": "0 表示关闭定时测试",
       "timeout": "超时时间（毫秒）",
       "tolerance": "节点切换容差（毫秒）",
       "lazy": "懒惰检测（未使用该组时不测试）",
@@ -1125,7 +1156,7 @@
         "consistent-hashing": "相同目标地址的请求固定分配给同一个代理节点。",
         "sticky-sessions": "相同来源地址和目标地址的请求固定到同一节点，缓存 10 分钟。"
       },
-      "mihomo_only": "代理组类型和健康检查参数仅作用于 Mihomo；sing-box 始终生成手动 selector。",
+      "client_compatibility": "sing-box 订阅仅支持“手动选择”和“自动测速”，“自动回退”和“负载均衡”将降级为手动 selector。",
       "add_title": "添加成员",
       "add": "添加",
       "kind_node": "具体节点",
@@ -1134,6 +1165,7 @@
       "kind_tag": "标签节点",
       "kind_builtin": "内置出口",
       "kind_group": "其他代理组",
+      "kind_rematch": "Rematch 出站",
       "remaining": "其余节点（自动去重）",
       "region_set": "区域：{{value}}",
       "tag_set": "标签：{{value}}",
@@ -1147,7 +1179,7 @@
       "preview_all": "全部启用节点",
       "preview_empty": "当前范围没有可用成员，将安全回退到 DIRECT",
       "issues": {
-        "unknown_group": "策略组不在当前规则内容中",
+        "unknown_group": "代理组不在当前主规则中",
         "empty_members": "自定义成员不能为空；如需默认行为请恢复系统默认",
         "too_many_members": "成员数量不能超过 {{max}}",
         "duplicate": "存在重复成员：{{member}}",
@@ -1160,17 +1192,18 @@
         "invalid_node_set": "非法节点集合：{{value}}",
         "empty_node_set": "节点集合当前没有匹配项：{{value}}",
         "unknown_kind": "未知成员类型：{{value}}",
+        "missing_rematch": "引用的 Rematch 出站不存在：{{value}}",
         "missing_remaining": "未包含“其余节点”，未来新增节点不会自动进入此代理组",
         "cycle": "代理组引用形成循环",
-        "unknown_group_options": "代理组类型配置不在当前规则内容中",
+        "unknown_group_options": "代理组类型配置不在当前主规则中",
         "invalid_group_type": "未知代理组类型：{{value}}",
         "invalid_test_url": "测试地址必须是有效的 HTTP/HTTPS URL",
         "invalid_interval": "测试间隔不能小于 0",
         "invalid_timeout": "超时时间必须大于 0",
         "invalid_tolerance": "节点切换容差不能小于 0",
         "invalid_strategy": "未知负载均衡策略：{{value}}",
-        "insufficient_auto_members": "自动选择或负载均衡通常至少需要两个可用成员",
-        "auto_group_builtin_member": "自动测速 / 回退 / 负载均衡类型的成员不能包含 DIRECT、REJECT 等内置出口，请改用具体节点或其它代理组"
+        "insufficient_auto_members": "自动测速或负载均衡通常至少需要两个可用成员",
+        "auto_group_builtin_member": "自动测速 / 回退 / 负载均衡类型的成员不能包含内置出口或 Rematch 出站，请改用具体节点或其它代理组"
       }
     },
     "table": {
@@ -1190,7 +1223,8 @@
     "validate": {
       "slug_name_required": "slug 和 name 必填",
       "slug_exists": "已存在 slug 为“{{slug}}”的规则集 —— 请换一个 slug",
-      "proxy_group_members": "策略组成员配置存在错误，请先修正"
+      "proxy_group_members": "代理组成员配置存在错误，请先修正",
+      "rule_extensions": "主规则、子规则或 Rematch 出站存在错误，请先修正"
     },
     "toast": {
       "saved": "已保存",
@@ -1207,8 +1241,8 @@
       "delete_used_suffix": "\n\n该规则集正在被 {{names}} 引用，删除后这些配置方案会跳过它。",
       "reset_title": "恢复为内置默认？",
       "reset_message": "将磁盘上的 {{slug}} 内容覆盖为当前 binary 内嵌的默认版本，自定义修改会丢失。",
-      "cleanup_groups_title": "同时删除策略组配置？",
-      "cleanup_groups_message": "当前规则内容已不再包含以下策略组：{{names}}。继续保存将同时删除它们的自定义成员、类型和排序配置。",
+      "cleanup_groups_title": "同时删除代理组配置？",
+      "cleanup_groups_message": "当前主规则已不再包含以下代理组：{{names}}。继续保存将同时删除它们的自定义成员、类型和排序配置。",
       "batch_delete_title": "批量删除规则集",
       "batch_delete_message": "确定删除 {{count}} 个规则集？"
     },
@@ -1399,6 +1433,7 @@
       "reality_scan_use": "使用",
       "reality_scan_empty": "没有扫描结果",
       "reality_fingerprint": "Fingerprint",
+      "reality_fingerprint_mlkem_locked": "当前服务器运行 Xray-core 26.9.8 或更高版本，REALITY 指纹必须为 Chrome。",
       "reality_spider_x": "spiderX 路径",
       "reality_min_client": "最低客户端版本",
       "reality_min_client_hint": "Xray-core 26.7.11–26.7.28 将留空默认成 26.3.27；26.9.8 起留空不设最低版本。填 1.0.0 可避免旧内核的默认版本限制，但不会绕过 REALITY 的 ML-KEM 要求。",
@@ -1585,6 +1620,7 @@
     "refresh": "刷新",
     "field": {
       "upn": "UPN",
+      "upn_edit_hint": "登录名；修改后请使用新 UPN 登录。SSO 绑定仍按身份标识匹配。",
       "email": "邮箱",
       "display_name": "显示名",
       "password": "初始密码（留空自动生成）",

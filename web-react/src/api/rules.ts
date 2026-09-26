@@ -10,11 +10,24 @@ export interface RuleSet {
   proxy_group_order: string[]
   proxy_group_members?: Record<string, ProxyGroupMember[]>
   proxy_group_options?: Record<string, ProxyGroupOptions>
+  mihomo_sub_rules?: MihomoSubRule[]
+  mihomo_rematch_outbounds?: MihomoRematchOutbound[]
   content: string
 }
 
+export interface MihomoSubRule {
+  name: string
+  content: string
+}
+
+export interface MihomoRematchOutbound {
+  name: string
+  target_rematch_name?: string
+  target_sub_rule?: string
+}
+
 export interface ProxyGroupMember {
-  kind: 'builtin' | 'proxy_group' | 'node' | 'node_set'
+  kind: 'builtin' | 'proxy_group' | 'node' | 'node_set' | 'rematch'
   value?: string
   node_id?: number
 }
@@ -34,7 +47,9 @@ export interface ProxyGroupOptions {
 
 export interface ProxyGroupIssue {
   level: 'error' | 'warning'
+  section?: 'proxy_group' | 'rules' | 'sub_rule' | 'rematch_outbound'
   group?: string
+  name?: string
   code?: string
   params?: Record<string, string | number>
   message: string
@@ -96,6 +111,8 @@ export async function inspectProxyGroups(req: {
   content: string
   proxy_group_members: Record<string, ProxyGroupMember[]>
   proxy_group_options: Record<string, ProxyGroupOptions>
+  mihomo_sub_rules?: MihomoSubRule[]
+  mihomo_rematch_outbounds?: MihomoRematchOutbound[]
   preview_group_id?: number
 }, signal?: AbortSignal) {
   const { data } = await client.post<ProxyGroupInspection>('/admin/rules/inspect-proxy-groups', req, { signal })

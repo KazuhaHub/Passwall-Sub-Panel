@@ -34,6 +34,8 @@ import {
   type ProxyGroupMember,
   type ProxyGroupOptions,
   type ProxyGroupType,
+  type MihomoRematchOutbound,
+  type MihomoSubRule,
 } from '@/api/rules'
 import type { Group } from '@/api/types'
 import { appendUniqueProxyGroupMember, applyProxyGroupOrder, defaultProxyGroupOptions, proxyGroupMemberIdentity, proxyGroupMemberListsEqual, proxyGroupOptionsEqual, proxyGroupOrderEqual, reorderProxyGroupMembers, reorderProxyGroupNames } from '@/utils/proxyGroupMembers'
@@ -53,13 +55,15 @@ interface Props {
   initialOptions: OptionMap
   onOptionsChange: (options: OptionMap) => void
   previewGroups: Group[]
+  mihomoSubRules?: MihomoSubRule[]
+  mihomoRematchOutbounds?: MihomoRematchOutbound[]
   onValidationChange?: (hasErrors: boolean) => void
 }
 
-type AddKind = 'node' | 'builtin' | 'proxy_group' | 'region' | 'tag' | 'remaining'
+type AddKind = 'node' | 'builtin' | 'proxy_group' | 'rematch' | 'region' | 'tag' | 'remaining'
 type AddOption = { value: string | number; label: string }
 
-export default function ProxyGroupMembersEditor({ content, groupOrder, initialGroupOrder, onGroupOrderChange, members, initialMembers, onChange, options, initialOptions, onOptionsChange, previewGroups, onValidationChange }: Props) {
+export default function ProxyGroupMembersEditor({ content, groupOrder, initialGroupOrder, onGroupOrderChange, members, initialMembers, onChange, options, initialOptions, onOptionsChange, previewGroups, mihomoSubRules = [], mihomoRematchOutbounds = [], onValidationChange }: Props) {
   const theme = useTheme()
   const md = theme.palette.md
   const { t } = useTranslation(['admin', 'common'])
@@ -74,6 +78,7 @@ export default function ProxyGroupMembersEditor({ content, groupOrder, initialGr
 
   const serializedMembers = useMemo(() => JSON.stringify(members), [members])
   const serializedOptions = useMemo(() => JSON.stringify(options), [options])
+  const serializedMihomo = useMemo(() => JSON.stringify([mihomoSubRules, mihomoRematchOutbounds]), [mihomoSubRules, mihomoRematchOutbounds])
   useEffect(() => {
     const controller = new AbortController()
     const timer = window.setTimeout(() => {
@@ -82,6 +87,8 @@ export default function ProxyGroupMembersEditor({ content, groupOrder, initialGr
         content,
         proxy_group_members: members,
         proxy_group_options: options,
+        mihomo_sub_rules: mihomoSubRules,
+        mihomo_rematch_outbounds: mihomoRematchOutbounds,
         preview_group_id: previewGroupID || undefined,
       }, controller.signal).then(result => {
         setInspection(result)
@@ -97,7 +104,7 @@ export default function ProxyGroupMembersEditor({ content, groupOrder, initialGr
       })
     }, 300)
     return () => { window.clearTimeout(timer); controller.abort() }
-  }, [content, serializedMembers, serializedOptions, previewGroupID]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [content, serializedMembers, serializedOptions, serializedMihomo, previewGroupID]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const current = inspection?.groups.find(group => group.name === selected)
   const currentConfigured = Object.prototype.hasOwnProperty.call(members, selected)
@@ -186,11 +193,12 @@ export default function ProxyGroupMembersEditor({ content, groupOrder, initialGr
       case 'node': return (inspection?.nodes || []).map(node => ({ value: node.id, label: node.display_name }))
       case 'builtin': return (inspection?.builtins || []).map(value => ({ value, label: value }))
       case 'proxy_group': return (inspection?.groups || []).filter(group => group.name !== selected).map(group => ({ value: group.name, label: group.name }))
+      case 'rematch': return mihomoRematchOutbounds.filter(outbound => outbound.name.trim()).map(outbound => ({ value: outbound.name, label: outbound.name }))
       case 'region': return (inspection?.regions || []).map(value => ({ value, label: value }))
       case 'tag': return (inspection?.tags || []).map(value => ({ value, label: value }))
       case 'remaining': return [{ value: 'remaining', label: t('admin:rules.members.remaining') }]
     }
-  }, [addKind, inspection, selected, t])
+  }, [addKind, inspection, mihomoRematchOutbounds, selected, t])
 
   function addMember() {
     let member: ProxyGroupMember | null = null
@@ -295,7 +303,7 @@ export default function ProxyGroupMembersEditor({ content, groupOrder, initialGr
                   onChange={e => updateOptions({ url: e.target.value })} sx={{ gridColumn: '1 / -1' }} />
                 <TextField size="small" type="number" label={t('admin:rules.members.interval')}
                   value={currentOptions.interval ?? ''} onChange={e => updateOptions({ interval: Number(e.target.value) })}
-                  helperText={t('admin:rules.members.interval_hint')} slotProps={{ htmlInput: { min: 0, step: 1 } }} />
+                  slotProps={{ htmlInput: { min: 0, step: 1 } }} />
                 <TextField size="small" type="number" label={t('admin:rules.members.timeout')}
                   value={currentOptions.timeout ?? ''} onChange={e => updateOptions({ timeout: Number(e.target.value) })}
                   slotProps={{ htmlInput: { min: 1, step: 1 } }} />
@@ -318,7 +326,7 @@ export default function ProxyGroupMembersEditor({ content, groupOrder, initialGr
                   label={t('admin:rules.members.lazy')} />
               </Box>
             )}
-            <Alert severity="info" sx={{ mt: 1.5 }}>{t('admin:rules.members.mihomo_only')}</Alert>
+            <Alert severity="info" sx={{ mt: 1.5 }}>{t('admin:rules.members.client_compatibility')}</Alert>
           </Box>
 
           <Stack spacing={1} sx={{ mt: 2 }}>
@@ -352,6 +360,7 @@ export default function ProxyGroupMembersEditor({ content, groupOrder, initialGr
                 <MenuItem value="tag">{t('admin:rules.members.kind_tag')}</MenuItem>
                 <MenuItem value="builtin">{t('admin:rules.members.kind_builtin')}</MenuItem>
                 <MenuItem value="proxy_group">{t('admin:rules.members.kind_group')}</MenuItem>
+                <MenuItem value="rematch">{t('admin:rules.members.kind_rematch')}</MenuItem>
               </TextField>
               <Autocomplete<AddOption> size="small" options={addOptions} value={addOptions.find(option => option.value === addValue) || null}
                 onChange={(_, option) => setAddValue(option?.value ?? null)} getOptionLabel={option => option.label}

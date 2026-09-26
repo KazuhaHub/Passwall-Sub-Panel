@@ -1136,25 +1136,48 @@ type RuleSet struct {
 	// individual policy group. A nil/empty map preserves the legacy
 	// name-based defaults in render.proxyGroupChoices.
 	ProxyGroupMembers map[string][]ProxyGroupMember
-	// ProxyGroupOptions optionally changes the generated Mihomo group type and
+	// ProxyGroupOptions optionally changes the generated proxy group type and
 	// its health-check settings. Missing entries preserve the legacy select
-	// behavior. sing-box intentionally ignores these options and keeps using a
-	// selector outbound.
+	// behavior. sing-box maps url-test to urltest; unsupported types and fields
+	// keep their selector behavior or are silently omitted.
 	ProxyGroupOptions map[string]ProxyGroupOptions
-	Content           string // raw YAML rules fragment
+	// Content is the single PSP rule stream. Mihomo consumes the original
+	// Mihomo-style lines; the sing-box compiler translates only rule types it
+	// supports and ignores Mihomo-only control-flow rules.
+	Content string
+	// MihomoSubRules and MihomoRematchOutbounds are emitted only for Mihomo.
+	// Slices preserve the administrator's display order while still allowing
+	// duplicate-name validation before the structures become YAML maps.
+	MihomoSubRules         []MihomoSubRule
+	MihomoRematchOutbounds []MihomoRematchOutbound
+}
+
+// MihomoSubRule is one named Mihomo sub-rules entry. Content is a raw YAML
+// sequence fragment using the same line format as RuleSet.Content.
+type MihomoSubRule struct {
+	Name    string `json:"name" yaml:"name"`
+	Content string `json:"content" yaml:"content"`
+}
+
+// MihomoRematchOutbound describes Mihomo's built-in rematch outbound. At
+// least one target must be set; both may be used together.
+type MihomoRematchOutbound struct {
+	Name              string `json:"name" yaml:"name"`
+	TargetRematchName string `json:"target_rematch_name,omitempty" yaml:"target_rematch_name,omitempty"`
+	TargetSubRule     string `json:"target_sub_rule,omitempty" yaml:"target_sub_rule,omitempty"`
 }
 
 // ProxyGroupMember is one ordered choice in a generated Mihomo/sing-box
-// selector. Kind is one of: builtin, proxy_group, node, node_set. NodeID is
-// used only by node; Value carries the builtin/group name or a node-set
-// selector (remaining, region:XX, tag:name).
+// selector. Kind is one of: builtin, proxy_group, node, node_set, rematch.
+// NodeID is used only by node; Value carries the builtin/group/rematch name
+// or a node-set selector (remaining, region:XX, tag:name).
 type ProxyGroupMember struct {
 	Kind   string `json:"kind" yaml:"kind"`
 	Value  string `json:"value,omitempty" yaml:"value,omitempty"`
 	NodeID int64  `json:"node_id,omitempty" yaml:"node_id,omitempty"`
 }
 
-// ProxyGroupOptions configures one generated Mihomo proxy group. Pointer
+// ProxyGroupOptions configures one generated proxy group. Pointer
 // scalars preserve the distinction between an omitted value (use the panel
 // default) and an explicit zero, which is meaningful for interval.
 type ProxyGroupOptions struct {

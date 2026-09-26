@@ -124,6 +124,33 @@ func TestCreateDuplicateUPNReportsAlreadyExists(t *testing.T) {
 	}
 }
 
+func TestUpdateDuplicateUPNReportsAlreadyExists(t *testing.T) {
+	db, err := openTestDB(t)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	if err := ensureTestSchema(db); err != nil {
+		t.Fatalf("schema: %v", err)
+	}
+	repos := NewRepos(db)
+	ctx := context.Background()
+	alice := mkUser("alice@corp.com", "update-a")
+	bob := mkUser("bob@corp.com", "update-b")
+	for _, u := range []*domain.User{alice, bob} {
+		if err := repos.User.Create(ctx, u); err != nil {
+			t.Fatalf("create %q: %v", u.UPN, err)
+		}
+	}
+	bob.UPN = alice.UPN
+	if err := repos.User.Update(ctx, bob); !errors.Is(err, domain.ErrAlreadyExists) {
+		t.Fatalf("duplicate Update = %v, want ErrAlreadyExists", err)
+	}
+	stored, err := repos.User.GetByID(ctx, bob.ID)
+	if err != nil || stored.UPN != "bob@corp.com" {
+		t.Fatalf("failed update changed bob: user=%+v err=%v", stored, err)
+	}
+}
+
 // T3 — the lockout-regression guard. DO NOT DELETE THIS TEST.
 //
 // Installs created before normalization carry non-canonical upns: CreateLocal

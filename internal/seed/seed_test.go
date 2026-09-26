@@ -59,7 +59,9 @@ func TestUpgradeManagedDefaultsUpdatesOnlyTheOfficialBundle(t *testing.T) {
 
 func TestRoutingDefaultMigrationSourcesExistAndChanged(t *testing.T) {
 	checks := map[string][]string{
-		"templates/default-mihomo.yaml": {"13cd9b7b8d29447f86fd46503536e15359e07116c302d3b5364a66e879a84c3c"},
+		"templates/default-mihomo.yaml": {
+			"13cd9b7b8d29447f86fd46503536e15359e07116c302d3b5364a66e879a84c3c",
+		},
 		"rulesets/default-rules.yaml": {
 			"01c4be93d1bb183336940faa8ed8ebf0f08110adee12327405ab659be282adbc",
 			"81ca6e2e15c700478b8a15b59ef006f4f2b46043b587484b6b6238b7dee039c3",
@@ -86,15 +88,12 @@ func TestEnsureUpgradesPreviousIndependentRoutingDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// This template did not change; pin its published beta.7 bytes rather than
-	// accidentally testing a newly generated template as the previous version.
-	if got := testSHA256(template); got != "d83f169df2cd5f5889c5635c074f0546db46c4f7e319e818b80445b9ee8a6dd0" {
-		t.Fatalf("previous official template hash = %s", got)
-	}
 	rules, err := defaultsFS.ReadFile("files/rulesets/default-rules.yaml")
 	if err != nil {
 		t.Fatal(err)
 	}
+	currentRules := rules
+	rules = []byte(strings.ReplaceAll(string(rules), "\r\n", "\n"))
 	// The REJECT-QUIC / PASS-UDP defaults were replaced by DIRECT UDP with QUIC
 	// following it. Only the explanatory comments differ in the file; the
 	// selector members themselves come from the renderer.
@@ -195,8 +194,10 @@ func TestEnsureUpgradesPreviousIndependentRoutingDefaults(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			wantRules := rules
+			wantTemplate := template
+			wantRules := currentRules
 			if tc.customizeTemplate || tc.customizeRules {
+				wantTemplate = oldTemplate
 				wantRules = oldRules
 			}
 			// Ensure must be idempotent for both upgraded and customized bundles.
@@ -204,7 +205,7 @@ func TestEnsureUpgradesPreviousIndependentRoutingDefaults(t *testing.T) {
 				if err := Ensure(dir); err != nil {
 					t.Fatal(err)
 				}
-				assertManagedTestFile(t, dir, "templates/default-mihomo.yaml", oldTemplate)
+				assertManagedTestFile(t, dir, "templates/default-mihomo.yaml", wantTemplate)
 				assertManagedTestFile(t, dir, "rulesets/default-rules.yaml", wantRules)
 			}
 		})

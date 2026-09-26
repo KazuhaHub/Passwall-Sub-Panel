@@ -273,6 +273,51 @@ func TestUpdateProfile_BlocksDemotingLastAdmin(t *testing.T) {
 	}
 }
 
+func TestUpdateProfile_ChangesUPN(t *testing.T) {
+	local := &domain.User{ID: 1, UPN: "old@example.test", SSOProvider: domain.SSOProviderLocal, SSOSubject: "old@example.test"}
+	sso := &domain.User{ID: 2, UPN: "sso@example.test", SSOProvider: domain.SSOProviderSAML, SSOSubject: "stable-subject"}
+	repo := &memoryUserRepo{byID: map[int64]*domain.User{1: local, 2: sso}}
+	svc := &Service{users: repo}
+
+	newLocal := " New@Example.Test "
+	if err := svc.UpdateProfile(context.Background(), 1, UpdateInput{UPN: &newLocal}); err != nil {
+		t.Fatalf("update local UPN: %v", err)
+	}
+	if got := repo.byID[1]; got.UPN != "new@example.test" || got.SSOSubject != got.UPN {
+		t.Fatalf("local identity = (%q, %q), want canonical matching UPN and subject", got.UPN, got.SSOSubject)
+	}
+	newSSO := "changed@example.test"
+	if err := svc.UpdateProfile(context.Background(), 2, UpdateInput{UPN: &newSSO}); err != nil {
+		t.Fatalf("update SSO UPN: %v", err)
+	}
+	if got := repo.byID[2]; got.UPN != newSSO || got.SSOSubject != "stable-subject" {
+		t.Fatalf("SSO identity = (%q, %q), want new UPN with original subject", got.UPN, got.SSOSubject)
+	}
+}
+
+func TestUpdateProfile_RejectsInvalidOrDuplicateUPN(t *testing.T) {
+	repo := &memoryUserRepo{byID: map[int64]*domain.User{
+		1: {ID: 1, UPN: "alice@example.test"},
+		2: {ID: 2, UPN: "bob@example.test"},
+	}}
+	svc := &Service{users: repo}
+	for _, tc := range []struct {
+		upn  string
+		want error
+	}{
+		{"  ", domain.ErrValidation},
+		{" Bob@Example.Test ", domain.ErrAlreadyExists},
+	} {
+		err := svc.UpdateProfile(context.Background(), 1, UpdateInput{UPN: &tc.upn})
+		if !errors.Is(err, tc.want) {
+			t.Errorf("upn %q: got %v, want %v", tc.upn, err, tc.want)
+		}
+		if got := repo.byID[1].UPN; got != "alice@example.test" {
+			t.Errorf("upn %q changed stored identity to %q", tc.upn, got)
+		}
+	}
+}
+
 // TestUpdateProfile_AllowsPromotingToOperator pins that operator is an
 // assignable role. Three things already treat it as one: the SPA's role select
 // offers it, ARCHITECTURE.md documents it as the day-to-day staff role, and an

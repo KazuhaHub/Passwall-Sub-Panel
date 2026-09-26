@@ -1542,6 +1542,7 @@ func validateConnLimit(field string, v int) error {
 }
 
 type UpdateInput struct {
+	UPN               *string
 	GroupID           *int64
 	Role              *domain.Role
 	Email             *string
@@ -1599,6 +1600,30 @@ func (s *Service) UpdateProfile(ctx context.Context, userID int64, in UpdateInpu
 	u, err := s.users.GetByID(ctx, userID)
 	if err != nil {
 		return err
+	}
+	if in.UPN != nil {
+		upn := domain.NormalizeUPN(*in.UPN)
+		if upn == "" {
+			return fmt.Errorf("%w: upn required", domain.ErrValidation)
+		}
+		if len(upn) > 255 {
+			return fmt.Errorf("%w: upn too long", domain.ErrValidation)
+		}
+		if upn != u.UPN {
+			// Probe the raw input as well as its canonical form, matching CreateLocal's
+			// compatibility check for rows written before UPN normalization.
+			if existing, err := s.users.GetByUPN(ctx, *in.UPN); err == nil {
+				if existing.ID != userID {
+					return domain.ErrAlreadyExists
+				}
+			} else if !errors.Is(err, domain.ErrNotFound) {
+				return err
+			}
+			if u.SSOProvider == domain.SSOProviderLocal && u.SSOSubject == u.UPN {
+				u.SSOSubject = upn
+			}
+			u.UPN = upn
+		}
 	}
 	groupChanged := false
 	expireChanged := false

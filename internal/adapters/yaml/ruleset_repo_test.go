@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
@@ -38,7 +39,9 @@ func TestRuleSetRepoSaveListGetDelete(t *testing.T) {
 		ProxyGroupOptions: map[string]domain.ProxyGroupOptions{
 			"💬 Ai平台": {Type: "url-test", URL: "https://example.com/check", Interval: ruleSetInt(0), Lazy: ruleSetBool(false), Timeout: ruleSetInt(2500), Tolerance: ruleSetInt(80)},
 		},
-		Content: "- DOMAIN-SUFFIX,example.com,DIRECT",
+		MihomoSubRules:         []domain.MihomoSubRule{{Name: "ai-rules", Content: "- MATCH,💬 Ai平台"}},
+		MihomoRematchOutbounds: []domain.MihomoRematchOutbound{{Name: "use-ai-rules", TargetSubRule: "ai-rules"}},
+		Content:                "- SUB-RULE,(NETWORK,tcp),ai-rules\n- DOMAIN-SUFFIX,example.com,DIRECT",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -64,6 +67,9 @@ func TestRuleSetRepoSaveListGetDelete(t *testing.T) {
 	if options := got.ProxyGroupOptions["💬 Ai平台"]; options.Type != "url-test" || options.Interval == nil || *options.Interval != 0 || options.Lazy == nil || *options.Lazy || options.Tolerance == nil || *options.Tolerance != 80 {
 		t.Fatalf("unexpected proxy group options: %#v", got.ProxyGroupOptions)
 	}
+	if got.Content != "- SUB-RULE,(NETWORK,tcp),ai-rules\n- DOMAIN-SUFFIX,example.com,DIRECT" || len(got.MihomoSubRules) != 1 || got.MihomoSubRules[0].Name != "ai-rules" || len(got.MihomoRematchOutbounds) != 1 || got.MihomoRematchOutbounds[0].TargetSubRule != "ai-rules" {
+		t.Fatalf("unexpected Mihomo advanced fields: %#v", got)
+	}
 
 	if _, err := os.Stat(filepath.Join(repo.dir, "a_rules.yaml")); err != nil {
 		t.Fatalf("expected ruleset file: %v", err)
@@ -78,6 +84,45 @@ func TestRuleSetRepoSaveListGetDelete(t *testing.T) {
 
 func ruleSetInt(value int) *int    { return &value }
 func ruleSetBool(value bool) *bool { return &value }
+
+func TestRuleSetRepoReadsLegacyMihomoRulesAndWritesUnifiedContent(t *testing.T) {
+	ctx := context.Background()
+	repo, err := NewRuleSetRepo(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(repo.dir, "legacy.yaml")
+	raw := []byte(`slug: legacy
+name: Legacy
+enabled: true
+mihomo_rules: |-
+  - REMATCH-NAME,marked,Proxy
+  - SUB-RULE,(NETWORK,tcp),tcp-rules
+content: |-
+  - MATCH,DIRECT
+`)
+	if err := os.WriteFile(path, raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := repo.GetBySlug(ctx, "legacy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "- REMATCH-NAME,marked,Proxy\n- SUB-RULE,(NETWORK,tcp),tcp-rules\n- MATCH,DIRECT"
+	if got.Content != want {
+		t.Fatalf("merged content = %q, want %q", got.Content, want)
+	}
+	if err := repo.Save(ctx, got); err != nil {
+		t.Fatal(err)
+	}
+	saved, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(saved), "mihomo_rules:") || !strings.Contains(string(saved), "REMATCH-NAME,marked,Proxy") {
+		t.Fatalf("legacy field was not migrated:\n%s", saved)
+	}
+}
 
 func TestRuleSetRepoGetBySlugUsesDocumentSlug(t *testing.T) {
 	ctx := context.Background()

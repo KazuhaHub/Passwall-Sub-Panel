@@ -65,9 +65,13 @@ outbound/DNS 旧字段。PSP 管理的是 inbound 快照，不写这些全局 ou
 现在回传所有非零排序值；零值及旧面板缺失字段仍保留原处理。增加 HTTP
 读写回读回归测试，覆盖正数、负数、零值与旧面板缺失字段。
 
-当前 v4 源码已有 26.9.8+ REALITY 的 ML-KEM-first 适配：Mihomo 使用
-`client-fingerprint: chrome` 与 `support-x25519mlkem768: true`，已知不兼容的
-sing-box 输出省略对应 REALITY 节点。应使用支持这些选项的客户端并刷新订阅。
+当前 v4 源码已有 26.9.8+ REALITY 的 ML-KEM-first 适配：服务器一旦确认运行
+Xray 26.9.8+，REALITY inbound 的期望配置会收敛为 `fingerprint: chrome`；节点编辑器
+将该选择固定为 Chrome，写接口也执行同一规范化，避免 API／高级 JSON 绕过。Mihomo
+订阅只追加 `support-x25519mlkem768: true`，不再在渲染阶段暗中覆盖指纹；已知不兼容的
+sing-box 输出仍省略对应 REALITY 节点。每次可信版本观测确认 Xray 26.9.8+ 时，存量受管
+inbound 都会幂等收敛；启动探测、面板内置升级和原生节点上报共用这一规则，失败会在后续
+观测中重试。应使用支持这些选项的客户端并刷新订阅。
 `minClientVer` 留空在 26.9.8+ 不设最低版本，旧 26.7.11–26.7.28 则默认为
 26.3.27；PSP 保留显式 `1.0.0` 默认值，修正中英文提示。这一设置不绕过 ML-KEM 要求。
 

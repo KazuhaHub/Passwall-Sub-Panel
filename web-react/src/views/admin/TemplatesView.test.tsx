@@ -5,6 +5,7 @@ import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createAppTheme } from '@/theme'
 import { makeTestQueryClient, queryWrapper } from '@/test/queryTestUtils'
+import { useAuthStore } from '@/stores/auth'
 import TemplatesView from './TemplatesView'
 
 const api = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() }))
@@ -37,7 +38,10 @@ function mount() {
   )
 }
 
-beforeEach(() => vi.clearAllMocks())
+beforeEach(() => {
+  vi.clearAllMocks()
+  useAuthStore.setState({ role: 'admin', userId: 1, hasToken: true })
+})
 afterEach(cleanup)
 
 describe('TemplatesView', () => {

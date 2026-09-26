@@ -12,7 +12,7 @@
     "preview": "vite preview",
     "smoke:dist": "node scripts/smoke-dist.mjs",
     "lint": "oxlint src",
-    "test": "vitest run",
+    "test": "vitest run --maxWorkers=2",
     "test:coverage": "vitest run --coverage",
     "gen:locale-hant": "node scripts/gen-locale-hant.mjs",
     "gen:locale-hant:builtin": "node scripts/gen-locale-hant.mjs --builtin"
@@ -50,7 +50,7 @@
     "@types/semver": "^7.8.0",
     "@vitejs/plugin-react": "^6.1.1",
     "@vitest/coverage-v8": "^5.0.1",
-    "jsdom": "^30.0.1",
+    "jsdom": "^30.1.1",
     "opencc-js": "^1.4.2",
     "oxlint": "1.85.0",
     "typescript": "^7.0.2",

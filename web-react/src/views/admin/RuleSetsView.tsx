@@ -5,7 +5,6 @@ import {
   Card,
   Checkbox,
   CircularProgress,
-  Dialog,
   DialogActions,
   DialogContent,
   DialogTitle,
@@ -49,6 +48,8 @@ import { pushSnack } from '@/components/SnackbarHost'
 import { PagedTableFooter } from '@/components/PagedTableFooter'
 import PageHeader from '@/components/PageHeader'
 import ProxyGroupMembersEditor from '@/components/ProxyGroupMembersEditor'
+import MihomoAdvancedRulesEditor from '@/components/MihomoAdvancedRulesEditor'
+import RuleEditorDialog from '@/components/RuleEditorDialog'
 import { pruneRuleSetProxyGroupMetadata } from '@/utils/proxyGroupMembers'
 
 // Lazy-load the CodeMirror editor so its (heavy) deps stay out of the initial
@@ -56,7 +57,7 @@ import { pruneRuleSetProxyGroupMetadata } from '@/utils/proxyGroupMembers'
 const CodeEditor = lazy(() => import('@/components/CodeEditor'))
 
 const EMPTY: RuleSet = {
-  slug: '', name: '', sort: 100, enabled: true, direct_subscription_domain: false, proxy_group_order: [], proxy_group_members: {}, proxy_group_options: {}, content: '',
+  slug: '', name: '', sort: 100, enabled: true, direct_subscription_domain: false, proxy_group_order: [], proxy_group_members: {}, proxy_group_options: {}, mihomo_sub_rules: [], mihomo_rematch_outbounds: [], content: '',
 }
 
 function cloneProxyGroupMembers(members: RuleSet['proxy_group_members']): NonNullable<RuleSet['proxy_group_members']> {
@@ -65,6 +66,17 @@ function cloneProxyGroupMembers(members: RuleSet['proxy_group_members']): NonNul
 
 function cloneProxyGroupOptions(options: RuleSet['proxy_group_options']): NonNullable<RuleSet['proxy_group_options']> {
   return Object.fromEntries(Object.entries(options || {}).map(([name, value]) => [name, { ...value }]))
+}
+
+function cloneRuleSet(ruleSet: RuleSet): RuleSet {
+  return {
+    ...ruleSet,
+    proxy_group_order: [...(ruleSet.proxy_group_order || [])],
+    proxy_group_members: cloneProxyGroupMembers(ruleSet.proxy_group_members),
+    proxy_group_options: cloneProxyGroupOptions(ruleSet.proxy_group_options),
+    mihomo_sub_rules: (ruleSet.mihomo_sub_rules || []).map(rule => ({ ...rule })),
+    mihomo_rematch_outbounds: (ruleSet.mihomo_rematch_outbounds || []).map(outbound => ({ ...outbound })),
+  }
 }
 
 export default function RuleSetsView() {
@@ -150,12 +162,13 @@ export default function RuleSetsView() {
   }
 
   function openCreate() {
-    setEditing(false); setForm({ ...EMPTY, proxy_group_order: [], proxy_group_members: {}, proxy_group_options: {} }); setInitialProxyGroupOrder([]); setInitialProxyGroupMembers({}); setInitialProxyGroupOptions({}); setDialogTab('rules'); setDialogOpen(true)
+    setEditing(false); setForm(cloneRuleSet(EMPTY)); setInitialProxyGroupOrder([]); setInitialProxyGroupMembers({}); setInitialProxyGroupOptions({}); setDialogTab('rules'); setDialogOpen(true)
   }
   function openEdit(rs: RuleSet) {
-    const proxyGroupMembers = cloneProxyGroupMembers(rs.proxy_group_members)
-    const proxyGroupOptions = cloneProxyGroupOptions(rs.proxy_group_options)
-    setEditing(true); setForm({ ...rs, proxy_group_members: proxyGroupMembers, proxy_group_options: proxyGroupOptions }); setInitialProxyGroupMembers(cloneProxyGroupMembers(proxyGroupMembers)); setInitialProxyGroupOptions(cloneProxyGroupOptions(proxyGroupOptions))
+    const draft = cloneRuleSet(rs)
+    const proxyGroupMembers = draft.proxy_group_members || {}
+    const proxyGroupOptions = draft.proxy_group_options || {}
+    setEditing(true); setForm(draft); setInitialProxyGroupMembers(cloneProxyGroupMembers(proxyGroupMembers)); setInitialProxyGroupOptions(cloneProxyGroupOptions(proxyGroupOptions))
     setInitialProxyGroupOrder([...(rs.proxy_group_order || [])])
     setDialogTab('rules')
     setDialogOpen(true)
@@ -165,11 +178,12 @@ export default function RuleSetsView() {
   // (especially useful for seeded rule sets that are now non-deletable
   // and would lose customizations on Restore).
   function openDuplicate(rs: RuleSet) {
-    const proxyGroupMembers = cloneProxyGroupMembers(rs.proxy_group_members)
-    const proxyGroupOptions = cloneProxyGroupOptions(rs.proxy_group_options)
+    const cloned = cloneRuleSet(rs)
+    const proxyGroupMembers = cloned.proxy_group_members || {}
+    const proxyGroupOptions = cloned.proxy_group_options || {}
     setEditing(false)
     setForm({
-      ...rs,
+      ...cloned,
       slug: rs.slug + '-copy',
       name: rs.name + ' (Copy)',
       proxy_group_members: proxyGroupMembers,
@@ -201,6 +215,8 @@ export default function RuleSetsView() {
         content: draft.content,
         proxy_group_members: draft.proxy_group_members || {},
         proxy_group_options: draft.proxy_group_options || {},
+        mihomo_sub_rules: draft.mihomo_sub_rules || [],
+        mihomo_rematch_outbounds: draft.mihomo_rematch_outbounds || [],
       })
       const cleanup = pruneRuleSetProxyGroupMetadata(draft, inspection.groups)
       if (cleanup.removedGroups.length > 0) {
@@ -216,12 +232,15 @@ export default function RuleSetsView() {
           content: draft.content,
           proxy_group_members: draft.proxy_group_members || {},
           proxy_group_options: draft.proxy_group_options || {},
+          mihomo_sub_rules: draft.mihomo_sub_rules || [],
+          mihomo_rematch_outbounds: draft.mihomo_rematch_outbounds || [],
         })
       }
       const hasErrors = inspection.issues.some(issue => issue.level === 'error')
       if (hasErrors) {
-        setDialogTab('members')
-        pushSnack(t('admin:rules.validate.proxy_group_members'), 'warning'); return
+        const hasRuleExtensionErrors = inspection.issues.some(issue => issue.level === 'error' && Boolean(issue.section))
+        setDialogTab(hasRuleExtensionErrors ? 'rules' : 'members')
+        pushSnack(t(hasRuleExtensionErrors ? 'admin:rules.validate.rule_extensions' : 'admin:rules.validate.proxy_group_members'), 'warning'); return
       }
       const saved = await saveRuleSet(draft)
       if (editing) {
@@ -461,10 +480,7 @@ export default function RuleSetsView() {
         />
       </Card>
       {/* Create/Edit dialog */}
-      <Dialog open={dialogOpen} onClose={() => !busy && setDialogOpen(false)}
-        slotProps={{
-          paper: { sx: { borderRadius: 3, bgcolor: md.surfaceContainerHigh, width: 1120, maxWidth: '96vw' } }
-        }}>
+      <RuleEditorDialog open={dialogOpen} onClose={() => !busy && setDialogOpen(false)} paperWidth={1120}>
         <DialogTitle>
           {editing ? t('admin:rules.edit_title') : t('admin:rules.create')}
         </DialogTitle>
@@ -475,47 +491,43 @@ export default function RuleSetsView() {
               <Tab value="members" label={t('admin:rules.tabs.members')} />
             </Tabs>
             {dialogTab === 'rules' && <>
-            <TextField required fullWidth label={t('admin:rules.field.slug')}
-              value={form.slug} disabled={editing}
-              onChange={e => setForm({ ...form, slug: e.target.value })}
-              placeholder={t('admin:rules.placeholder.slug')}
-              sx={{ '& input': {  } }} />
-            <TextField required fullWidth label={t('admin:rules.field.name')}
-              value={form.name}
-              onChange={e => setForm({ ...form, name: e.target.value })}
-              placeholder={t('admin:rules.placeholder.name')} />
-            <Box sx={{ display: 'flex', gap: 2 }}>
-              <TextField type="number" label={t('admin:rules.field.sort')}
-                value={form.sort}
-                onChange={e => setForm({ ...form, sort: Number(e.target.value) })}
-                sx={{ width: 160 }} />
+            <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'minmax(0, 1fr) minmax(0, 1fr) auto' }, gap: 2, alignItems: 'center' }}>
+              <TextField required fullWidth label={t('admin:rules.field.slug')}
+                value={form.slug} disabled={editing}
+                onChange={e => setForm({ ...form, slug: e.target.value })}
+                placeholder={t('admin:rules.placeholder.slug')} />
+              <TextField required fullWidth label={t('admin:rules.field.name')}
+                value={form.name}
+                onChange={e => setForm({ ...form, name: e.target.value })}
+                placeholder={t('admin:rules.placeholder.name')} />
               <FormControlLabel
                 label={t('admin:rules.field.enabled')}
                 control={<Switch checked={form.enabled} onChange={(_, c) => setForm({ ...form, enabled: c })} />}
-                sx={{ ml: 1, '& .MuiFormControlLabel-label': { ml: 1.5 } }}
+                sx={{ m: 0, px: 1, whiteSpace: 'nowrap', '& .MuiFormControlLabel-label': { ml: 1 } }}
               />
+            </Box>
+            <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '160px minmax(220px, 1fr) auto auto' }, gap: 1.5, alignItems: 'center' }}>
+              <TextField type="number" label={t('admin:rules.field.sort')}
+                value={form.sort}
+                onChange={e => setForm({ ...form, sort: Number(e.target.value) })} />
               <FormControlLabel
                 label={t('admin:rules.field.direct_subscription_domain')}
                 control={<Switch checked={form.direct_subscription_domain} onChange={(_, c) => setForm({ ...form, direct_subscription_domain: c })} />}
-                sx={{ ml: 1, '& .MuiFormControlLabel-label': { ml: 1.5 } }}
+                sx={{ m: 0, px: 1, whiteSpace: 'nowrap', '& .MuiFormControlLabel-label': { ml: 1 } }}
               />
+              <MihomoAdvancedRulesEditor value={form} onChange={setForm} />
             </Box>
             <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant, mt: -1 }}>
               {t('admin:rules.hint.direct_subscription_domain')}
             </Typography>
-            <Box>
-              <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant, mb: 0.5 }}>
-                {t('admin:rules.field.content')}
-              </Typography>
-              <Box sx={{ border: `1px solid ${md.outlineVariant}`, borderRadius: 2, overflow: 'hidden' }}>
-                <Suspense fallback={<Box sx={{ height: 380, display: 'grid', placeItems: 'center' }}><CircularProgress size={22} /></Box>}>
-                  <CodeEditor
-                    value={form.content}
-                    onChange={v => setForm({ ...form, content: v })}
-                    dark={theme.palette.mode === 'dark'}
-                  />
-                </Suspense>
-              </Box>
+            <Box sx={{ border: `1px solid ${md.outlineVariant}`, borderRadius: 2, overflow: 'hidden' }}>
+              <Suspense fallback={<Box sx={{ height: 380, display: 'grid', placeItems: 'center' }}><CircularProgress size={22} /></Box>}>
+                <CodeEditor
+                  value={form.content}
+                  onChange={v => setForm({ ...form, content: v })}
+                  dark={theme.palette.mode === 'dark'}
+                />
+              </Suspense>
             </Box>
             </>}
             {dialogTab === 'members' && (
@@ -531,6 +543,8 @@ export default function RuleSetsView() {
                 initialOptions={initialProxyGroupOptions}
                 onOptionsChange={proxy_group_options => setForm(current => ({ ...current, proxy_group_options }))}
                 previewGroups={groups}
+                mihomoSubRules={form.mihomo_sub_rules}
+                mihomoRematchOutbounds={form.mihomo_rematch_outbounds}
               />
             )}
           </Box>
@@ -542,7 +556,7 @@ export default function RuleSetsView() {
             {t('common:actions.ok')}
           </Button>
         </DialogActions>
-      </Dialog>
+      </RuleEditorDialog>
     </Box>
   );
 }

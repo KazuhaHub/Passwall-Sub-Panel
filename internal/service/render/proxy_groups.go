@@ -16,7 +16,7 @@ var builtInRuleTargets = map[string]bool{
 
 // defaultProxyGroupOrder preserves the original project ordering when a rule
 // set does not declare a custom proxy_group_order. Groups that are not listed
-// here are prepended in their first-occurrence order from the rule content.
+// here are prepended in their first-occurrence order from the main rules.
 var defaultProxyGroupOrder = []string{
 	"🚀 节点选择",
 	"🎮 UDP控制",
@@ -60,11 +60,19 @@ func buildProxyGroupsYAML(rules string, preferredOrder []string) (string, error)
 }
 
 func buildProxyGroupsYAMLWithMembers(rules string, preferredOrder []string, members map[string][]domain.ProxyGroupMember, options map[string]domain.ProxyGroupOptions, items []renderItem) (string, error) {
-	return buildProxyGroupsYAMLInternal(rules, preferredOrder, members, options, items, true)
+	return buildProxyGroupsYAMLWithFeatures(rules, preferredOrder, members, options, items, MihomoRuleFeatures{})
 }
 
-func buildProxyGroupsYAMLInternal(rules string, preferredOrder []string, members map[string][]domain.ProxyGroupMember, options map[string]domain.ProxyGroupOptions, items []renderItem, resolve bool) (string, error) {
-	targets := ruleTargetsInOrder(rules)
+func buildProxyGroupsYAMLWithFeatures(rules string, preferredOrder []string, members map[string][]domain.ProxyGroupMember, options map[string]domain.ProxyGroupOptions, items []renderItem, advanced MihomoRuleFeatures) (string, error) {
+	return buildProxyGroupsYAMLInternal(rules, preferredOrder, members, options, items, true, advanced.outboundNames())
+}
+
+func buildProxyGroupsYAMLInternal(rules string, preferredOrder []string, members map[string][]domain.ProxyGroupMember, options map[string]domain.ProxyGroupOptions, items []renderItem, resolve bool, excluded ...map[string]bool) (string, error) {
+	var excludedTargets map[string]bool
+	if len(excluded) > 0 {
+		excludedTargets = excluded[0]
+	}
+	targets := ruleTargetsInOrderExcluding(rules, excludedTargets)
 	targets = withRequiredProxyGroupDependencies(targets)
 	targets = withConfiguredProxyGroupDependencies(targets, members)
 	targets = applyProxyGroupOrder(targets, preferredOrder)
@@ -84,17 +92,18 @@ func buildProxyGroupsYAMLInternal(rules string, preferredOrder []string, members
 			if configured, ok := members[target]; ok {
 				effectiveMembers = configured
 			}
-			choices = resolveConfiguredMembers(effectiveMembers, items)
+			choices = resolveConfiguredMembersWithOutbounds(effectiveMembers, items)
 		}
 		// Auto types (url-test/fallback/load-balance) health-check their members
-		// and pick a winner, so a DIRECT/REJECT sitting among real nodes would
+		// and pick a winner, so a DIRECT/REJECT or control-flow-only Rematch
+		// outbound sitting among real nodes would
 		// short-circuit the whole group — DIRECT answers in ~0ms and always wins,
 		// silently routing everything direct. Strip the built-in exits, and when
 		// nothing testable is left (e.g. the configured members don't intersect
 		// THIS user's authorized nodes) degrade to a plain manual selector rather
 		// than emit a bogus single-member url-test.
 		if groupOptions.Type != ProxyGroupTypeSelect {
-			choices = withoutBuiltinExits(choices)
+			choices = withoutBuiltinExits(choices, excludedTargets)
 			if len(choices) == 0 {
 				groupOptions = domain.ProxyGroupOptions{Type: ProxyGroupTypeSelect}
 			}
@@ -130,7 +139,7 @@ func buildProxyGroupsYAMLInternal(rules string, preferredOrder []string, members
 
 // applyProxyGroupOrder emits the explicitly ordered groups first, in the
 // configured order, then appends any group the order does not mention at the
-// END, preserving its first-occurrence order from the rule content. Keeping the
+// END, preserving its first-occurrence order from the main rules. Keeping the
 // unlisted groups last is what existing subscriptions already render, so a
 // partial custom order never reshuffles the groups an admin did not name.
 func applyProxyGroupOrder(targets, preferredOrder []string) []string {
@@ -159,14 +168,17 @@ func applyProxyGroupOrder(targets, preferredOrder []string) []string {
 	return out
 }
 
-// withoutBuiltinExits drops DIRECT/REJECT-family built-in outbounds from a
-// resolved proxy list. Auto group types (url-test/fallback/load-balance) must
-// only health-check real endpoints, never a built-in exit that would win or
-// dilute the selection.
-func withoutBuiltinExits(choices []string) []string {
+// withoutBuiltinExits drops DIRECT/REJECT-family built-ins and optional
+// control-flow-only outbounds from a resolved proxy list. Auto group types
+// must health-check real endpoints only.
+func withoutBuiltinExits(choices []string, nonTestable ...map[string]bool) []string {
+	extra := map[string]bool{}
+	if len(nonTestable) > 0 {
+		extra = nonTestable[0]
+	}
 	out := make([]string, 0, len(choices))
 	for _, choice := range choices {
-		if builtInRuleTargets[choice] {
+		if builtInRuleTargets[choice] || extra[choice] {
 			continue
 		}
 		out = append(out, choice)
@@ -218,31 +230,19 @@ func withRequiredProxyGroupDependencies(targets []string) []string {
 }
 
 func ruleTargetsInOrder(rules string) []string {
+	return ruleTargetsInOrderExcluding(rules, nil)
+}
+
+func ruleTargetsInOrderExcluding(rules string, excluded map[string]bool) []string {
 	seen := map[string]bool{}
 	out := []string{}
 	for _, rawLine := range strings.Split(rules, "\n") {
-		line := strings.TrimSpace(rawLine)
-		line = strings.TrimPrefix(line, "- ")
-		if line == "" || strings.HasPrefix(line, "#") || strings.Contains(line, "{{") {
+		parts := splitRuleFields(rawLine)
+		if len(parts) < 2 || strings.EqualFold(parts[0], "SUB-RULE") {
 			continue
 		}
-		parts := strings.Split(line, ",")
-		if len(parts) < 2 {
-			continue
-		}
-		useful := make([]string, 0, len(parts))
-		for _, part := range parts {
-			part = normalizeRulePart(part)
-			if part == "" || part == "no-resolve" {
-				continue
-			}
-			useful = append(useful, part)
-		}
-		if len(useful) < 2 {
-			continue
-		}
-		target := useful[len(useful)-1]
-		if builtInRuleTargets[target] || seen[target] {
+		target := ruleOutboundTarget(parts)
+		if target == "" || builtInRuleTargets[target] || excluded[target] || seen[target] {
 			continue
 		}
 		seen[target] = true

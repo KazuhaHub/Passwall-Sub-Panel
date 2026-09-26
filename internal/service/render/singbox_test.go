@@ -432,6 +432,24 @@ func TestBuildSingBoxRouteRulesPersonalRulesFirst(t *testing.T) {
 	}
 }
 
+func TestBuildSingBoxRouteRulesSkipsMihomoControlFlowInUnifiedContent(t *testing.T) {
+	rules, final := buildSingBoxRouteRules(`
+- REMATCH-NAME,marked,Streaming
+- SUB-RULE,(NETWORK,tcp),tcp-rules
+- DOMAIN-SUFFIX,example.com,Proxy
+- MATCH,DIRECT
+`)
+	if final != "direct" {
+		t.Fatalf("final = %q, want direct", final)
+	}
+	if len(rules) != 2 { // global sniff action + the supported domain rule
+		t.Fatalf("Mihomo-only rules leaked into sing-box: %#v", rules)
+	}
+	if got := rules[1]["domain_suffix"]; got == nil || rules[1]["outbound"] != "Proxy" {
+		t.Fatalf("supported rule was not preserved: %#v", rules[1])
+	}
+}
+
 func TestBuildSingBoxSelectorOutbounds(t *testing.T) {
 	raw := `
 - DOMAIN-SUFFIX,example.com,💬 Ai平台
@@ -470,6 +488,93 @@ func TestBuildSingBoxSelectorOutboundsUsesManualDisplayOrder(t *testing.T) {
 	for i := range want {
 		if got[i] != want[i] {
 			t.Fatalf("selector[%d] = %q, want %q; all=%#v", i, got[i], want[i], got)
+		}
+	}
+}
+
+func TestBuildSingBoxURLTestOutboundMapsSupportedOptions(t *testing.T) {
+	interval, tolerance, timeout, lazy := 300, 80, 5000, true
+	items := []renderItem{
+		{name: "node-a", node: &domain.Node{ID: 1}},
+		{name: "node-b", node: &domain.Node{ID: 2}},
+	}
+	members := map[string][]domain.ProxyGroupMember{
+		"Auto": {
+			{Kind: "builtin", Value: "PASS"},
+			{Kind: "rematch", Value: "mihomo-only"},
+			{Kind: "node", NodeID: 1},
+			{Kind: "node", NodeID: 2},
+		},
+	}
+	options := map[string]domain.ProxyGroupOptions{
+		"Auto": {
+			Type: ProxyGroupTypeURLTest, URL: "https://probe.example/generate_204",
+			Interval: &interval, Tolerance: &tolerance, Timeout: &timeout, Lazy: &lazy,
+		},
+	}
+
+	outbounds := buildSingBoxGroupOutboundsWithMembers("- MATCH,Auto", items, nil, members, options)
+	var auto map[string]any
+	for _, outbound := range outbounds {
+		if outbound["tag"] == "Auto" {
+			auto = outbound
+			break
+		}
+	}
+	if auto == nil {
+		t.Fatalf("urltest outbound missing: %#v", outbounds)
+	}
+	if auto["type"] != "urltest" || auto["url"] != "https://probe.example/generate_204" || auto["interval"] != "300s" || auto["tolerance"] != 80 {
+		t.Fatalf("unexpected urltest outbound: %#v", auto)
+	}
+	assertMemberStrings(t, auto["outbounds"].([]string), []string{"node-a", "node-b"})
+	for _, omitted := range []string{"default", "lazy", "timeout"} {
+		if _, exists := auto[omitted]; exists {
+			t.Fatalf("sing-box urltest must omit %q: %#v", omitted, auto)
+		}
+	}
+}
+
+func TestBuildSingBoxURLTestZeroIntervalAndEmptyMemberFallback(t *testing.T) {
+	zero := 0
+	options := map[string]domain.ProxyGroupOptions{
+		"Zero":  {Type: ProxyGroupTypeURLTest, Interval: &zero},
+		"Empty": {Type: ProxyGroupTypeURLTest},
+	}
+	members := map[string][]domain.ProxyGroupMember{
+		"Zero":  {{Kind: "proxy_group", Value: "Nested"}},
+		"Empty": {{Kind: "builtin", Value: "DIRECT"}},
+	}
+	outbounds := buildSingBoxGroupOutboundsWithMembers("- DOMAIN,a,Zero\n- MATCH,Empty", nil, nil, members, options)
+	byTag := make(map[string]map[string]any, len(outbounds))
+	for _, outbound := range outbounds {
+		byTag[outbound["tag"].(string)] = outbound
+	}
+	if got := byTag["Zero"]; got["type"] != "urltest" || got["interval"] != "0s" {
+		t.Fatalf("zero interval urltest = %#v", got)
+	}
+	if got := byTag["Empty"]; got["type"] != "selector" || got["default"] != "direct" {
+		t.Fatalf("empty urltest must safely degrade to selector: %#v", got)
+	}
+}
+
+func TestBuildSingBoxUnsupportedAutomaticTypesRemainSelectors(t *testing.T) {
+	options := map[string]domain.ProxyGroupOptions{
+		"Fallback": {Type: ProxyGroupTypeFallback},
+		"Balance":  {Type: ProxyGroupTypeLoadBalance},
+	}
+	outbounds := buildSingBoxGroupOutboundsWithMembers("- DOMAIN,a,Fallback\n- MATCH,Balance", nil, nil, nil, options)
+	for _, outbound := range outbounds {
+		if outbound["tag"] != "Fallback" && outbound["tag"] != "Balance" {
+			continue
+		}
+		if outbound["type"] != "selector" || outbound["default"] == nil {
+			t.Fatalf("unsupported automatic type must remain selector: %#v", outbound)
+		}
+		for _, omitted := range []string{"url", "interval", "tolerance", "lazy", "timeout"} {
+			if _, exists := outbound[omitted]; exists {
+				t.Fatalf("selector must omit %q: %#v", omitted, outbound)
+			}
 		}
 	}
 }

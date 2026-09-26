@@ -214,8 +214,8 @@ func TestBuildProxiesAddsMLKEMForNewXrayReality(t *testing.T) {
 	if len(out) != 1 {
 		t.Fatalf("want one proxy, got %#v", out)
 	}
-	if out[0]["client-fingerprint"] != "chrome" {
-		t.Fatalf("new Xray REALITY fingerprint = %#v, want chrome", out[0]["client-fingerprint"])
+	if out[0]["client-fingerprint"] != "firefox" {
+		t.Fatalf("renderer rewrote stored REALITY fingerprint = %#v", out[0]["client-fingerprint"])
 	}
 	reality, ok := out[0]["reality-opts"].(map[string]any)
 	if !ok || reality["support-x25519mlkem768"] != true {
@@ -289,8 +289,8 @@ func TestBuildProxiesAppliesMLKEMCompatibilityPerServingPanel(t *testing.T) {
 		t.Fatalf("old Xray unexpectedly enabled ML-KEM: %#v", oldReality)
 	}
 
-	if out[1]["client-fingerprint"] != "chrome" {
-		t.Fatalf("new Xray fingerprint = %#v, want chrome", out[1]["client-fingerprint"])
+	if out[1]["client-fingerprint"] != "firefox" {
+		t.Fatalf("new Xray renderer rewrote stored fingerprint = %#v", out[1]["client-fingerprint"])
 	}
 	newReality := out[1]["reality-opts"].(map[string]any)
 	if newReality["support-x25519mlkem768"] != true {
@@ -308,7 +308,7 @@ func TestBuildSingBoxOutboundsOmitsMLKEMFirstReality(t *testing.T) {
 		pool: panicPool{},
 	}
 	out := s.buildSingBoxOutbounds(context.Background(), &domain.User{ID: 5, UUID: "uuid-of-user-5"},
-		[]renderItem{{name: "US-1", node: node}}, nil, nil, ports.UISettings{EmailDomain: "kazuha.org"})
+		[]renderItem{{name: "US-1", node: node}}, nil, nil, nil, ports.UISettings{EmailDomain: "kazuha.org"})
 	for _, outbound := range out {
 		if outbound["tag"] == "US-1" {
 			t.Fatalf("known-incompatible sing-box REALITY outbound was emitted: %#v", outbound)
@@ -326,7 +326,7 @@ func TestBuildSingBoxOutboundsKeepsOlderReality(t *testing.T) {
 		pool: panicPool{},
 	}
 	out := s.buildSingBoxOutbounds(context.Background(), &domain.User{ID: 5, UUID: "uuid-of-user-5"},
-		[]renderItem{{name: "US-1", node: node}}, nil, nil, ports.UISettings{EmailDomain: "kazuha.org"})
+		[]renderItem{{name: "US-1", node: node}}, nil, nil, nil, ports.UISettings{EmailDomain: "kazuha.org"})
 	for _, outbound := range out {
 		if outbound["tag"] == "US-1" {
 			return

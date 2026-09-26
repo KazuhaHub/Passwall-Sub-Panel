@@ -73,6 +73,7 @@ import { useNodesList, useSeparators, useUnmanagedInbounds } from '@/query/nodes
 import { useServersList } from '@/query/servers'
 import { useQueryScope } from '@/query/useQueryScope'
 import { useQueryClient } from '@tanstack/react-query'
+import { xrayRequiresMLKEMFirst } from '@/utils/xrayReality'
 
 /** The managed-tab read always covers the whole set, so its key is a constant. */
 const NODES_PARAMS = { page: 1, page_size: 500 } as const
@@ -1104,6 +1105,7 @@ interface FieldsProps {
   setForm: Dispatch<SetStateAction<InboundFormState>>
   showMetadata: boolean
   servers?: Server[]
+  server?: Server
   onGenKeys: () => void | Promise<void>
   onGenSSPassword: () => void
   genKeysBusy: boolean
@@ -1125,7 +1127,7 @@ interface FieldsProps {
   allowRealityScan?: boolean
 }
 
-function InboundFormFields({ form, setForm, showMetadata, servers, onGenKeys, onGenSSPassword, genKeysBusy, protocolReadonly, advanced, onSetAdvanced, allTags, scanSourceName, panelType, allowRealityScan }: FieldsProps) {
+function InboundFormFields({ form, setForm, showMetadata, servers, server, onGenKeys, onGenSSPassword, genKeysBusy, protocolReadonly, advanced, onSetAdvanced, allTags, scanSourceName, panelType, allowRealityScan }: FieldsProps) {
   const theme = useTheme()
   const md = theme.palette.md
   const { t } = useTranslation(['admin', 'common'])
@@ -1144,8 +1146,14 @@ function InboundFormFields({ form, setForm, showMetadata, servers, onGenKeys, on
   const [managedCerts, setManagedCerts] = useState<Cert[]>([])
   const [fetchingPanelCert, setFetchingPanelCert] = useState(false)
   const [realityScannerOpen, setRealityScannerOpen] = useState(false)
-  const selectedServer = servers?.find(s => s.id === form.panel_id)
+  const selectedServer = servers?.find(s => s.id === form.panel_id) ?? server
   const effectivePanelType = panelType ?? selectedServer?.panel_type ?? '3xui'
+  const selectedXrayVersion = effectivePanelType === '3xui'
+    ? selectedServer?.xray_version
+    : effectivePanelType === 'psp' && selectedServer?.core_engine === 'xray'
+      ? selectedServer.core_version ?? selectedServer.xray_version
+      : undefined
+  const realityFingerprintLocked = xrayRequiresMLKEMFirst(selectedXrayVersion)
   const protocolOptions = effectivePanelType === 'sui'
     ? PROTOCOL_OPTIONS
     : PROTOCOL_OPTIONS.filter(option => !SUI_ONLY_PROTOCOLS.has(option.value))
@@ -1154,6 +1162,10 @@ function InboundFormFields({ form, setForm, showMetadata, servers, onGenKeys, on
   useEffect(() => {
     listCerts().then(setManagedCerts).catch(() => {})
   }, [])
+  useEffect(() => {
+    if (!realityFingerprintLocked) return
+    setForm(prev => prev.reality_fingerprint === 'chrome' ? prev : { ...prev, reality_fingerprint: 'chrome' })
+  }, [realityFingerprintLocked, setForm])
 
   async function fetchFromPanel() {
     if (!form.panel_id) {
@@ -1717,7 +1729,9 @@ function InboundFormFields({ form, setForm, showMetadata, servers, onGenKeys, on
                 <Box sx={{ display: 'flex', gap: 1.5, flexWrap: 'wrap' }}>
                   <TextField select size="small" label={t('admin:nodes.create_dialog.reality_fingerprint')}
                     value={form.reality_fingerprint}
+                    disabled={realityFingerprintLocked}
                     onChange={e => update('reality_fingerprint', e.target.value)}
+                    helperText={realityFingerprintLocked ? t('admin:nodes.create_dialog.reality_fingerprint_mlkem_locked') : undefined}
                     sx={{ flex: '1 1 180px', minWidth: 140 }}>
                     {FINGERPRINTS.map(fp => <MenuItem key={fp} value={fp}>{fp}</MenuItem>)}
                   </TextField>
@@ -3689,6 +3703,7 @@ export default function NodesView() {
               </Typography>}
               <InboundFormFields form={editInboundForm} setForm={setEditInboundForm}
                 showMetadata={false}
+                server={servers.find(s => s.id === editingInboundNode?.panel_id)}
                 scanSourceName={editingInboundNode?.panel_name}
                 onGenKeys={genKeysForEdit}
                 onGenSSPassword={genSSPasswordEdit}

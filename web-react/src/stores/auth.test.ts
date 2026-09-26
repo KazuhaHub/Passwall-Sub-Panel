@@ -133,6 +133,10 @@ describe('auth store', () => {
     auth.useAuthStore.getState().setDisplayName('New Name')
     expect(JSON.parse(localStorage.getItem('psp_user') || '{}')).toMatchObject({ displayName: 'New Name' })
 
+    auth.useAuthStore.getState().setUPN('new@example.com')
+    expect(auth.useAuthStore.getState().upn).toBe('new@example.com')
+    expect(JSON.parse(localStorage.getItem('psp_user') || '{}')).toMatchObject({ upn: 'new@example.com' })
+
     localStorage.setItem('psp_user', JSON.stringify({
       userId: 11, upn: 'other@example.com', displayName: 'Other', role: 'user',
     }))

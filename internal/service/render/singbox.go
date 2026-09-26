@@ -18,8 +18,8 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 )
 
-func (s *Service) renderSingBox(ctx context.Context, u *domain.User, tpl *domain.Template, items []renderItem, rulesCommon string, proxyGroupOrder []string, proxyGroupMembers map[string][]domain.ProxyGroupMember, st ports.UISettings) (*Output, error) {
-	outbounds := s.buildSingBoxOutbounds(ctx, u, items, proxyGroupOrder, proxyGroupMembers, st, u.PersonalRules, rulesCommon)
+func (s *Service) renderSingBox(ctx context.Context, u *domain.User, tpl *domain.Template, items []renderItem, rulesCommon string, proxyGroupOrder []string, proxyGroupMembers map[string][]domain.ProxyGroupMember, proxyGroupOptions map[string]domain.ProxyGroupOptions, st ports.UISettings) (*Output, error) {
+	outbounds := s.buildSingBoxOutbounds(ctx, u, items, proxyGroupOrder, proxyGroupMembers, proxyGroupOptions, st, u.PersonalRules, rulesCommon)
 	outboundsJSON, err := marshalJSONBlock(outbounds)
 	if err != nil {
 		return nil, fmt.Errorf("marshal sing-box outbounds: %w", err)
@@ -77,7 +77,7 @@ func (s *Service) renderSingBox(ctx context.Context, u *domain.User, tpl *domain
 	}, nil
 }
 
-func (s *Service) buildSingBoxOutbounds(ctx context.Context, u *domain.User, items []renderItem, preferredOrder []string, memberConfigs map[string][]domain.ProxyGroupMember, st ports.UISettings, ruleParts ...string) []map[string]any {
+func (s *Service) buildSingBoxOutbounds(ctx context.Context, u *domain.User, items []renderItem, preferredOrder []string, memberConfigs map[string][]domain.ProxyGroupMember, optionConfigs map[string]domain.ProxyGroupOptions, st ports.UISettings, ruleParts ...string) []map[string]any {
 	out := []map[string]any{
 		{"type": "direct", "tag": "direct"},
 		{"type": "block", "tag": "block"},
@@ -152,7 +152,7 @@ func (s *Service) buildSingBoxOutbounds(ctx context.Context, u *domain.User, ite
 	}
 
 	rules := strings.TrimSpace(strings.Join(ruleParts, "\n"))
-	out = append(out, buildSingBoxSelectorOutboundsWithMembers(rules, selectorItems, preferredOrder, memberConfigs)...)
+	out = append(out, buildSingBoxGroupOutboundsWithMembers(rules, selectorItems, preferredOrder, memberConfigs, optionConfigs)...)
 	return out
 }
 
@@ -376,6 +376,10 @@ func buildSingBoxSelectorOutbounds(rules string, nodeTags []string, preferredOrd
 }
 
 func buildSingBoxSelectorOutboundsWithMembers(rules string, items []renderItem, preferredOrder []string, memberConfigs map[string][]domain.ProxyGroupMember) []map[string]any {
+	return buildSingBoxGroupOutboundsWithMembers(rules, items, preferredOrder, memberConfigs, nil)
+}
+
+func buildSingBoxGroupOutboundsWithMembers(rules string, items []renderItem, preferredOrder []string, memberConfigs map[string][]domain.ProxyGroupMember, optionConfigs map[string]domain.ProxyGroupOptions) []map[string]any {
 	targets := withRequiredProxyGroupDependencies(ruleTargetsInOrder(rules))
 	targets = withConfiguredProxyGroupDependencies(targets, memberConfigs)
 	targets = applyProxyGroupOrder(targets, preferredOrder)
@@ -386,18 +390,43 @@ func buildSingBoxSelectorOutboundsWithMembers(rules string, items []renderItem, 
 		if configured, ok := memberConfigs[target]; ok {
 			members = configured
 		}
+		groupOptions := domain.ProxyGroupOptions{Type: ProxyGroupTypeSelect}
+		if configured, ok := optionConfigs[target]; ok {
+			groupOptions = EffectiveProxyGroupOptions(configured)
+		}
+		// sing-box only has a native equivalent for url-test. Built-in exits and
+		// Mihomo-only Rematch outbounds cannot participate in its health check.
+		// Keep fallback/load-balance as manual selectors, including their normal
+		// selector choices.
+		if groupOptions.Type == ProxyGroupTypeURLTest {
+			members = slices.DeleteFunc(slices.Clone(members), func(member domain.ProxyGroupMember) bool {
+				return member.Kind == "rematch" || (member.Kind == "builtin" && builtInRuleTargets[member.Value])
+			})
+		}
 		resolved := resolveConfiguredMembers(members, items)
 		// sing-box has no PASS outbound. When PASS is the effective default,
 		// route compilation omits rules targeting this group so matching really
 		// continues. Do not emit an unreachable selector whose displayed default
 		// would misleadingly become the next non-PASS member.
-		if passThroughGroups[target] {
+		if passThroughGroups[target] && groupOptions.Type != ProxyGroupTypeURLTest {
 			continue
 		}
 		resolved = slices.DeleteFunc(resolved, func(choice string) bool { return passThroughGroups[choice] })
 		choices := singBoxResolvedChoices(resolved)
 		if len(choices) == 0 {
 			choices = []string{"direct"}
+			groupOptions = domain.ProxyGroupOptions{Type: ProxyGroupTypeSelect}
+		}
+		if groupOptions.Type == ProxyGroupTypeURLTest {
+			out = append(out, map[string]any{
+				"type":      "urltest",
+				"tag":       target,
+				"outbounds": choices,
+				"url":       groupOptions.URL,
+				"interval":  strconv.Itoa(*groupOptions.Interval) + "s",
+				"tolerance": *groupOptions.Tolerance,
+			})
+			continue
 		}
 		selector := map[string]any{
 			"type":      "selector",

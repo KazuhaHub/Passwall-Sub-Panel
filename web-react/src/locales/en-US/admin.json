@@ -689,7 +689,7 @@
     },
     "placeholder": {
       "rule_sets": "Pick rule sets matching this template's proxy groups",
-      "content": "Supports proxies / proxy_groups / rules_common / rules_personal placeholders"
+      "content": "Supports proxies / proxy_groups / rules_common / rules_personal / sub_rules placeholders"
     },
     "table": {
       "slug": "Slug",
@@ -1067,7 +1067,7 @@
       "enabled": "Enabled",
       "direct_subscription_domain": "DIRECT subscription domain",
       "proxy_group_order": "Proxy group order",
-      "content": "Rule content"
+      "content": "Main rules"
     },
     "placeholder": {
       "slug": "ad_block",
@@ -1076,12 +1076,44 @@
       "content": "- DOMAIN-SUFFIX,example.com,DIRECT"
     },
     "hint": {
-      "proxy_group_order": "Optional; one group name per line. Unlisted groups are placed first and keep their order of first occurrence in the rule content.",
+      "proxy_group_order": "Optional; one group name per line. Unlisted groups are placed first and keep their order of first occurrence in the main rules.",
       "direct_subscription_domain": "When enabled, the subscription Base URL hostname is prepended as DOMAIN-SUFFIX,<hostname>,DIRECT. Nothing is generated without a valid subscription Base URL; when disabled, subscription updates follow the other rules."
     },
     "tabs": {
-      "rules": "Rules",
-      "members": "Group members"
+      "rules": "Main rules",
+      "members": "Proxy group members"
+    },
+    "mihomo": {
+      "rematches": "Rematch outbounds",
+      "rematches_hint": "The rematch name restarts main-rule matching; the target sub-rule jumps directly to a sub-rule. Set at least one.",
+      "rematch_compatibility": "Rematch outbounds are emitted only for Mihomo and require Mihomo v1.19.28 or newer; sing-box does not receive them.",
+      "outbound_name": "Outbound name",
+      "target_rematch_name": "Rematch name",
+      "target_sub_rule": "Target sub-rule",
+      "no_rematches": "No Rematch outbounds configured",
+      "sub_rules": "Sub-rules",
+      "sub_rules_hint": "Each sub-rule uses a Mihomo rule list. A MATCH fallback is recommended.",
+      "sub_rules_compatibility": "Sub-rules are emitted only in Mihomo subscriptions; reference them with SUB-RULE in the main rules, or select a target sub-rule for a Rematch outbound.",
+      "sub_rules_count": "{{count}} sub-rules configured",
+      "sub_rule_name": "Sub-rule name",
+      "unnamed_sub_rule": "Unnamed sub-rule",
+      "no_sub_rules": "No sub-rules configured",
+      "issues": {
+        "invalid_name": "The name cannot be empty or contain commas or line breaks",
+        "duplicate_sub_rule": "Duplicate sub-rule name: {{name}}",
+        "invalid_rule_yaml": "The rule is not a valid YAML rule list",
+        "nested_sub_rule": "A Mihomo sub-rule cannot jump to another SUB-RULE",
+        "missing_match_fallback": "This sub-rule has no MATCH fallback, so unmatched traffic has no explicit outbound",
+        "missing_sub_rule": "The referenced SUB-RULE does not exist: {{name}}",
+        "duplicate_rematch_outbound": "Duplicate Rematch outbound name: {{name}}",
+        "missing_rematch_target": "A Rematch outbound needs a rematch name, a target sub-rule, or both",
+        "invalid_rematch_name": "The Rematch name cannot be empty or contain commas or line breaks",
+        "missing_target_sub_rule": "The target sub-rule does not exist",
+        "outbound_name_collision": "The Rematch outbound name conflicts with a built-in, proxy group, or node: {{name}}",
+        "unsafe_rematch_order": "The matching REMATCH-NAME rule must appear before the rule that selects this Rematch outbound",
+        "duplicate_bound_sub_rule": "The selected rule sets contain duplicate sub-rule names: {{name}}",
+        "duplicate_bound_rematch_outbound": "The selected rule sets contain duplicate Rematch outbound names: {{name}}"
+      }
     },
     "members": {
       "groups_title": "Proxy groups",
@@ -1093,14 +1125,14 @@
       "custom": "Custom layout",
       "system_default": "System default",
       "unsaved": "Has unsaved changes",
-      "no_groups": "No proxy groups were detected in the rule content",
+      "no_groups": "No proxy groups were detected in the main rules",
       "first_default": "The first item is selected by default in the client",
       "restore_default": "Restore system default",
       "default_badge": "Default",
       "group_type": "Proxy group type",
       "type": {
         "select": "Manual selection (select)",
-        "url-test": "Automatic selection (url-test)",
+        "url-test": "Automatic latency test (url-test)",
         "fallback": "Automatic fallback (fallback)",
         "load-balance": "Load balancing (load-balance)"
       },
@@ -1112,7 +1144,6 @@
       },
       "test_url": "Test URL",
       "interval": "Test interval (seconds)",
-      "interval_hint": "0 disables scheduled tests",
       "timeout": "Timeout (milliseconds)",
       "tolerance": "Switch tolerance (milliseconds)",
       "lazy": "Lazy health checks (skip while group is unused)",
@@ -1127,7 +1158,7 @@
         "consistent-hashing": "Send requests for the same destination to the same proxy node.",
         "sticky-sessions": "Pin the same source and destination pair to one node for 10 minutes."
       },
-      "mihomo_only": "Proxy group types and health-check settings apply only to Mihomo; sing-box always generates a manual selector.",
+      "client_compatibility": "sing-box subscriptions support only Manual selection and Automatic latency test; Automatic fallback and Load balancing are downgraded to manual selectors.",
       "add_title": "Add member",
       "add": "Add",
       "kind_node": "Specific node",
@@ -1136,6 +1167,7 @@
       "kind_tag": "Tagged nodes",
       "kind_builtin": "Built-in outbound",
       "kind_group": "Another proxy group",
+      "kind_rematch": "Rematch outbound",
       "remaining": "Remaining nodes (deduplicated)",
       "region_set": "Region: {{value}}",
       "tag_set": "Tag: {{value}}",
@@ -1149,7 +1181,7 @@
       "preview_all": "All enabled nodes",
       "preview_empty": "No member is available in this scope; rendering will safely fall back to DIRECT",
       "issues": {
-        "unknown_group": "This proxy group does not occur in the current rule content",
+        "unknown_group": "This proxy group does not occur in the current main rules",
         "empty_members": "A custom member list cannot be empty; restore the system default instead",
         "too_many_members": "A group cannot contain more than {{max}} members",
         "duplicate": "Duplicate member: {{member}}",
@@ -1162,17 +1194,18 @@
         "invalid_node_set": "Invalid node set: {{value}}",
         "empty_node_set": "The node set currently has no matches: {{value}}",
         "unknown_kind": "Unknown member type: {{value}}",
+        "missing_rematch": "Referenced Rematch outbound does not exist: {{value}}",
         "missing_remaining": "Without “Remaining nodes”, newly added nodes will not enter this proxy group automatically",
         "cycle": "Proxy-group references form a cycle",
-        "unknown_group_options": "The proxy-group type configuration does not occur in the current rule content",
+        "unknown_group_options": "The proxy-group type configuration does not occur in the current main rules",
         "invalid_group_type": "Unknown proxy-group type: {{value}}",
         "invalid_test_url": "The test URL must be a valid HTTP/HTTPS URL",
         "invalid_interval": "The test interval cannot be negative",
         "invalid_timeout": "The timeout must be greater than 0",
         "invalid_tolerance": "The switch tolerance cannot be negative",
         "invalid_strategy": "Unknown load-balancing strategy: {{value}}",
-        "insufficient_auto_members": "Automatic selection or load balancing usually needs at least two available members",
-        "auto_group_builtin_member": "url-test / fallback / load-balance members cannot include built-in exits like DIRECT or REJECT; use a specific node or another proxy group instead"
+        "insufficient_auto_members": "Automatic latency testing or load balancing usually needs at least two available members",
+        "auto_group_builtin_member": "url-test / fallback / load-balance members cannot include built-in or Rematch outbounds; use a specific node or another proxy group instead"
       }
     },
     "table": {
@@ -1192,7 +1225,8 @@
     "validate": {
       "slug_name_required": "Slug and name are required",
       "slug_exists": "A rule set with slug \"{{slug}}\" already exists — choose a different slug",
-      "proxy_group_members": "Fix the proxy-group member errors before saving"
+      "proxy_group_members": "Fix the proxy-group member errors before saving",
+      "rule_extensions": "Fix the main rules, sub-rule, or Rematch outbound errors before saving"
     },
     "toast": {
       "saved": "Saved",
@@ -1210,7 +1244,7 @@
       "reset_title": "Restore seeded default?",
       "reset_message": "Overwrite the on-disk content of {{slug}} with the version embedded in this build. Any customizations will be lost.",
       "cleanup_groups_title": "Delete related proxy-group settings?",
-      "cleanup_groups_message": "The current rule content no longer contains these proxy groups: {{names}}. Continuing will also delete their custom members, type, and ordering settings.",
+      "cleanup_groups_message": "The current main rules no longer contain these proxy groups: {{names}}. Continuing will also delete their custom members, type, and ordering settings.",
       "batch_delete_title": "Delete rule sets",
       "batch_delete_message": "Delete {{count}} rule sets?"
     },
@@ -1424,6 +1458,7 @@
       "reality_scan_use": "Use",
       "reality_scan_empty": "No scan results",
       "reality_fingerprint": "Fingerprint",
+      "reality_fingerprint_mlkem_locked": "This server runs Xray-core 26.9.8 or newer, so the REALITY fingerprint is fixed to Chrome.",
       "reality_spider_x": "spiderX path",
       "reality_min_client": "Min client version",
       "reality_min_client_hint": "Xray-core 26.7.11–26.7.28 defaults an empty value to 26.3.27; 26.9.8+ leaves the version floor disabled when empty. Set 1.0.0 to avoid the older cores' default floor. This does not bypass REALITY's ML-KEM requirements.",
@@ -1587,6 +1622,7 @@
     "refresh": "Refresh",
     "field": {
       "upn": "UPN",
+      "upn_edit_hint": "Login name; use the new UPN to sign in. SSO binding remains linked by identity.",
       "email": "Email",
       "display_name": "Display name",
       "password": "Initial password (auto-generated if blank)",

@@ -1,11 +1,21 @@
 // @vitest-environment jsdom
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { expect, it } from 'vitest'
-import { api, editRow, installReads, list, mount, node } from '@/test/adminSaveHarness'
+import { api, editRow, installReads, list, mount, node, server } from '@/test/adminSaveHarness'
 import NodesView from './NodesView'
 
 const inbound = { id: 1, protocol: 'vless', remark: 'old-name', enable: true, port: 443, listen: '', settings: '{"decryption":"none"}', stream_settings: '{"network":"tcp","security":"tls","tlsSettings":{"serverName":"example.test"}}', sniffing: '{}', allocate: '' }
 const localInbound = { ...inbound, stream_settings: '{"network":"tcp","security":"none"}' }
+const realityInbound = {
+  ...inbound,
+  stream_settings: JSON.stringify({
+    network: 'tcp', security: 'reality',
+    realitySettings: {
+      target: 'example.com:443', serverNames: ['example.com'], privateKey: 'private', shortIds: ['abcd'],
+      settings: { publicKey: 'public', fingerprint: 'firefox', spiderX: '/' },
+    },
+  }),
+}
 
 function expectNoEditableInbound(dialog: HTMLElement) {
   expect(dialog.querySelector('#edit-inbound-form')).toBeNull()
@@ -13,6 +23,20 @@ function expectNoEditableInbound(dialog: HTMLElement) {
   expect(api.put).not.toHaveBeenCalled()
   expect(api.post).not.toHaveBeenCalled()
 }
+
+it('forces and locks the REALITY fingerprint for Xray 26.9.8 or newer', async () => {
+  installReads({
+    '/admin/servers': list([{ ...server, xray_version: '26.9.9' }]),
+    '/admin/nodes': list([node]),
+    '/admin/nodes/1': { node, inbound: realityInbound, clients: [] },
+  })
+  mount(<NodesView />)
+  const dialog = await editRow('old-name', 'VpnKeyIcon')
+  const fingerprint = await within(dialog).findByLabelText('admin:nodes.create_dialog.reality_fingerprint')
+  await waitFor(() => expect(fingerprint.getAttribute('aria-disabled')).toBe('true'))
+  expect(within(dialog).getByText('chrome')).toBeTruthy()
+  expect(within(dialog).getByText('admin:nodes.create_dialog.reality_fingerprint_mlkem_locked')).toBeTruthy()
+})
 
 it('uses the fresh detail node when opening the inbound editor', async () => {
   const freshNode = { ...node, flow: 'xtls-rprx-vision', cert_source: 'psp_managed', cert_id: 7 }

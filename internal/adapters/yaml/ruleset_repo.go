@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -56,7 +57,12 @@ type ruleSetFile struct {
 	ProxyGroupOrder          []string                             `yaml:"proxy_group_order"`
 	ProxyGroupMembers        map[string][]domain.ProxyGroupMember `yaml:"proxy_group_members,omitempty"`
 	ProxyGroupOptions        map[string]domain.ProxyGroupOptions  `yaml:"proxy_group_options,omitempty"`
-	Content                  string                               `yaml:"content"`
+	// MihomoRules reads the short-lived split main-rule format. New saves omit
+	// it after merging the legacy stream into Content.
+	MihomoRules            string                         `yaml:"mihomo_rules,omitempty"`
+	MihomoSubRules         []domain.MihomoSubRule         `yaml:"mihomo_sub_rules,omitempty"`
+	MihomoRematchOutbounds []domain.MihomoRematchOutbound `yaml:"mihomo_rematch_outbounds,omitempty"`
+	Content                string                         `yaml:"content"`
 }
 
 func (r *RuleSetRepo) List(ctx context.Context) ([]*domain.RuleSet, error) {
@@ -156,6 +162,8 @@ func (r *RuleSetRepo) Save(ctx context.Context, rs *domain.RuleSet) error {
 		ProxyGroupOrder:          rs.ProxyGroupOrder,
 		ProxyGroupMembers:        rs.ProxyGroupMembers,
 		ProxyGroupOptions:        rs.ProxyGroupOptions,
+		MihomoSubRules:           rs.MihomoSubRules,
+		MihomoRematchOutbounds:   rs.MihomoRematchOutbounds,
 		Content:                  rs.Content,
 	}
 	if err := writeYAML(p, doc); err != nil {
@@ -247,7 +255,9 @@ func (r *RuleSetRepo) readFile(path string) (*domain.RuleSet, error) {
 			ProxyGroupOrder:          doc.ProxyGroupOrder,
 			ProxyGroupMembers:        doc.ProxyGroupMembers,
 			ProxyGroupOptions:        doc.ProxyGroupOptions,
-			Content:                  doc.Content,
+			MihomoSubRules:           doc.MihomoSubRules,
+			MihomoRematchOutbounds:   doc.MihomoRematchOutbounds,
+			Content:                  mergeLegacyRuleSetContent(doc.MihomoRules, doc.Content),
 		}
 		r.cache.Store(path, ruleSetCacheEntry{mtime: st.ModTime(), value: rs})
 		return rs, nil
@@ -269,6 +279,20 @@ func (r *RuleSetRepo) readFile(path string) (*domain.RuleSet, error) {
 		ProxyGroupOrder:          doc.ProxyGroupOrder,
 		ProxyGroupMembers:        doc.ProxyGroupMembers,
 		ProxyGroupOptions:        doc.ProxyGroupOptions,
-		Content:                  doc.Content,
+		MihomoSubRules:           doc.MihomoSubRules,
+		MihomoRematchOutbounds:   doc.MihomoRematchOutbounds,
+		Content:                  mergeLegacyRuleSetContent(doc.MihomoRules, doc.Content),
 	}, nil
+}
+
+func mergeLegacyRuleSetContent(legacy, content string) string {
+	legacy = strings.TrimRight(legacy, "\r\n")
+	if legacy == "" {
+		return content
+	}
+	content = strings.TrimLeft(content, "\r\n")
+	if content == "" {
+		return legacy
+	}
+	return legacy + "\n" + content
 }

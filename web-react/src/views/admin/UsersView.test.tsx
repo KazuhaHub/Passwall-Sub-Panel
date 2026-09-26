@@ -15,8 +15,28 @@ it('reopens with the user returned by the update without reloading the stale lis
   fireEvent.click(within(dialog).getByRole('button', { name: 'common:actions.ok' }))
 
   await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+  expect(api.put.mock.calls[0][1]).not.toHaveProperty('upn')
   const reopened = await editRow('new-name')
   expect(within(reopened).getByDisplayValue('new-name')).toBeTruthy()
+})
+
+it('saves an edited UPN and shows the returned canonical value', async () => {
+  const saved = { ...user, upn: 'renamed@example.test' }
+  installReads({ '/admin/users': list([user]) })
+  api.put.mockResolvedValueOnce({ data: saved })
+  mount(<UsersView />)
+  const dialog = await editRow()
+  fireEvent.change(within(dialog).getByRole('textbox', { name: 'admin:users.field.upn' }), {
+    target: { value: ' Renamed@Example.Test ' },
+  })
+  fireEvent.click(within(dialog).getByRole('button', { name: 'common:actions.ok' }))
+
+  await waitFor(() => expect(api.put).toHaveBeenCalledWith(`/admin/users/${user.id}`, expect.objectContaining({
+    upn: ' Renamed@Example.Test ',
+  })))
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+  const reopened = await editRow()
+  expect(within(reopened).getByRole('textbox', { name: 'admin:users.field.upn' })).toHaveProperty('value', saved.upn)
 })
 
 it('updates the open edit dialog status after resuming the service', async () => {
