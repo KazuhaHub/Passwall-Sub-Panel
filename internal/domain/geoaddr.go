@@ -423,3 +423,44 @@ func isInternalAddr(a netip.Addr) bool {
 		a.IsLinkLocalMulticast() ||
 		a.IsUnspecified()
 }
+
+// The single-address exclusion reasons AddressExclusion names. The first
+// three are ClassifyAddresses' own rules, spelled as its GeoExcluded
+// counters are; the fourth is an address no rule can read.
+const (
+	AddressExcludedInternal = "internal"
+	AddressExcludedListed   = "listed"
+	AddressExcludedInfra    = "infra"
+	AddressUnparseable      = "unparseable"
+)
+
+// AddressExclusion names the single-address rule that sets ip aside, or ""
+// when none does: AddressExcludedInternal, AddressExcludedListed,
+// AddressExcludedInfra, or AddressUnparseable when ip does not parse.
+//
+// It is ClassifyAddresses over one pseudo-account holding only ip, reading
+// which counter moved — so the rules and their precedence are the live
+// check's by construction and cannot drift into a second copy. The shared
+// rule is forced off: "shared" means several accounts on one source at
+// once, a question one address on its own does not pose. (Shared is last in
+// the order, so it could never mask one of the three reasons named here; it
+// is switched off so the pseudo-account is never counted as an exit at
+// all.) An unparseable address is named here rather than kept
+// (ClassifyAddresses keeps it, to be counted): a caller asking about one
+// address needs to know no database can place it.
+func AddressExclusion(ip string, ex AddressExclusions) string {
+	if _, _, ok := SourceKey(ip); !ok {
+		return AddressUnparseable
+	}
+	ex.SharedMinUsers = 0
+	e := ClassifyAddresses(map[int64]UserLiveIPs{0: {Fresh: []string{ip}}}, ex)[0].Excluded
+	switch {
+	case e.Internal > 0:
+		return AddressExcludedInternal
+	case e.Listed > 0:
+		return AddressExcludedListed
+	case e.Infra > 0:
+		return AddressExcludedInfra
+	}
+	return ""
+}

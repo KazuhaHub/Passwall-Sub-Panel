@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -25,6 +26,10 @@ import (
 // because it already knows every node and relay it renders. The shared-exit
 // rule and the admin ignore list catch what this cannot see (a CDN, an
 // operator's own forwarder the panel does not know about).
+//
+// The set also remembers which addresses are LANDING nodes (a node's own
+// server) as opposed to relays, for the risk worker's login check, which
+// skips the landings' countries but not the relays'.
 const (
 	// infraHostTTL is how long a hostname's answer is reused. Relay
 	// hostnames rarely move, and the refresh loop runs far more often than
@@ -55,6 +60,11 @@ type hostResolution struct {
 type infraAddressSet struct {
 	mu      sync.RWMutex
 	current map[netip.Addr]struct{}
+	// landing is the subset of current that came from a node's own
+	// ServerAddress — a literal, or what a hostname named there resolved
+	// to — as opposed to a relay in front of it. The login check skips the
+	// countries of landings only (see Landing).
+	landing map[netip.Addr]struct{}
 	hosts   map[string]hostResolution
 	// loaded is set by the first swap and never cleared. Until then the set
 	// is empty because nothing has been collected yet, not because nothing
@@ -120,6 +130,40 @@ func (s *Service) IsInfra(a netip.Addr) bool {
 	return s != nil && s.infra.Contains(a)
 }
 
+// Landing returns the addresses of PSP's landing nodes — every enabled
+// node's own ServerAddress, resolved — as a sorted copy. Relays are left
+// out: the risk worker skips a panel login from a landing's COUNTRY (an
+// account holder's browser often reaches the panel through their own
+// proxy, whose egress is the landing's), and relays usually sit in the
+// account holder's own country, so counting them would skip every login
+// from home. Nil-safe; nil before the first refresh.
+func (c *infraAddressSet) Landing() []netip.Addr {
+	if c == nil {
+		return nil
+	}
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if len(c.landing) == 0 {
+		return nil
+	}
+	out := make([]netip.Addr, 0, len(c.landing))
+	for a := range c.landing {
+		out = append(out, a)
+	}
+	slices.SortFunc(out, netip.Addr.Compare)
+	return out
+}
+
+// LandingAddresses reports the addresses of PSP's own landing nodes (see
+// infraAddressSet.Landing), handed to the risk worker as a plain function
+// like IsInfra. A copy, taken under the read lock; no I/O.
+func (s *Service) LandingAddresses() []netip.Addr {
+	if s == nil {
+		return nil
+	}
+	return s.infra.Landing()
+}
+
 // RefreshInfraAddresses rebuilds the infrastructure set from the node list.
 // Called by the app's refresh loop, never by the poll. A node list that
 // cannot be read leaves the previous set in place and returns the error, so
@@ -137,7 +181,9 @@ func (s *Service) RefreshInfraAddresses(ctx context.Context) error {
 }
 
 // refresh collects every enabled node's own address and every enabled relay
-// in front of it, resolves the hostnames among them, and swaps the result in.
+// in front of it, resolves the hostnames among them, and swaps the result in
+// — together with the landing subset, the addresses that came from a node's
+// own ServerAddress rather than a relay (see Landing).
 //
 // What counts mirrors what can carry traffic: a separator is a label, not a
 // server; a disabled node or relay renders nothing. The node's direct address
@@ -156,27 +202,40 @@ func (c *infraAddressSet) refresh(ctx context.Context, nodes []*domain.Node) {
 		clock = time.Now
 	}
 
+	// Resolution is keyed by hostname, so recording which literals and
+	// which names a node's own ServerAddress contributed is enough to know,
+	// after resolving, which addresses are landings. A name that is one
+	// node's server and another's relay is a landing: it IS a node.
 	literals := map[netip.Addr]struct{}{}
 	names := map[string]struct{}{}
-	collect := func(raw string) {
+	landingLiterals := map[netip.Addr]struct{}{}
+	landingNames := map[string]struct{}{}
+	collect := func(raw string, landing bool) {
 		h := normaliseInfraHost(raw)
 		if h == "" {
 			return
 		}
 		if a, err := netip.ParseAddr(h); err == nil {
-			literals[a.Unmap().WithZone("")] = struct{}{}
+			a = a.Unmap().WithZone("")
+			literals[a] = struct{}{}
+			if landing {
+				landingLiterals[a] = struct{}{}
+			}
 			return
 		}
 		names[h] = struct{}{}
+		if landing {
+			landingNames[h] = struct{}{}
+		}
 	}
 	for _, n := range nodes {
 		if n == nil || n.IsSeparator() || !n.Enabled {
 			continue
 		}
-		collect(n.ServerAddress)
+		collect(n.ServerAddress, true)
 		for _, r := range n.Relays {
 			if r.Enabled {
-				collect(r.Address)
+				collect(r.Address, false)
 			}
 		}
 	}
@@ -254,9 +313,19 @@ func (c *infraAddressSet) refresh(ctx context.Context, nodes []*domain.Node) {
 			current[a] = struct{}{}
 		}
 	}
+	landing := make(map[netip.Addr]struct{}, len(landingLiterals)+len(landingNames))
+	for a := range landingLiterals {
+		landing[a] = struct{}{}
+	}
+	for h := range landingNames {
+		for _, a := range hosts[h].addrs {
+			landing[a] = struct{}{}
+		}
+	}
 
 	c.mu.Lock()
 	c.current = current
+	c.landing = landing
 	c.hosts = hosts
 	c.loaded = true
 	c.mu.Unlock()

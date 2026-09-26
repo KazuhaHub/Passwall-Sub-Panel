@@ -48,7 +48,9 @@ type Deps struct {
 	// Now is the clock. Nil: time.Now.
 	Now func() time.Time
 	// SubLogs is the subscription fetch log, read as one streamed window.
-	// Nil: sub_spread and devices are not computed.
+	// Nil: sub_spread, devices and login_country are not computed (the
+	// last because its known countries are the ones the fetches
+	// established).
 	SubLogs FetchScanner
 	// Geo places the window's sources. Nil: nothing can be placed, and the
 	// place signals read unknown/geo_unavailable — never clean.
@@ -64,6 +66,16 @@ type Deps struct {
 	// read as fetching from the relay's province. Nil: treated as loaded,
 	// for tests and deployments without the set.
 	InfraLoaded func() bool
+	// AuthEvents is the authentication-event log, read for its successful
+	// logins. Nil: login_country is not computed.
+	AuthEvents LoginLister
+	// LandingAddrs reports PSP's landing-node addresses — each enabled
+	// node's own server, not the relays in front of it. A login from a
+	// country one of them is in is skipped: an account holder's browser
+	// often reaches the panel through their own proxy, whose egress is the
+	// landing's. A function, like IsInfra. Nil: no country is a node
+	// country.
+	LandingAddrs func() []netip.Addr
 }
 
 // UserLister pages through the accounts (ports.UserRepo's List, alone).
@@ -92,6 +104,13 @@ type HourlyReader interface {
 // per-account window and keeps none of them.
 type FetchScanner interface {
 	ScanSince(ctx context.Context, since time.Time, batch int, fn func([]domain.SubLog) error) error
+}
+
+// LoginLister pages through the authentication-event log
+// (ports.AuthEventRepo's List, alone). It cannot write, and it cannot reach
+// the login guard's counters either.
+type LoginLister interface {
+	List(ctx context.Context, f ports.AuthEventFilter) ([]*domain.AuthEvent, int64, error)
 }
 
 // GeoResolver places addresses (the geo service's read side). Available is
@@ -224,8 +243,19 @@ func (s *Service) RefreshOnce(ctx context.Context) (err error) {
 				return err
 			}
 			if infraReady {
-				if err := s.subSpread(ctx, r, window); err != nil {
+				pl := s.placeWindow(ctx, r, window)
+				if err := s.subSpread(ctx, r, window, pl); err != nil {
 					return err
+				}
+				// login_country measures logins against the countries the
+				// fetches established, so it runs only here: on a window
+				// read in full and placed against a loaded infrastructure
+				// set. Judged with an empty or partial known set, every
+				// login from home would lean toward "new".
+				if s.d.AuthEvents != nil {
+					if err := s.loginCountry(ctx, r, pl); err != nil {
+						return err
+					}
 				}
 			}
 		case ctx.Err() != nil:

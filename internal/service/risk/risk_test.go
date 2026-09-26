@@ -196,6 +196,9 @@ type harness struct {
 	geo         *fakeGeo
 	isInfra     func(netip.Addr) bool
 	infraLoaded func() bool
+	// The login log and the landing addresses, wired only when set too.
+	logins  *fakeLogins
+	landing func() []netip.Addr
 }
 
 func newHarness(users []*domain.User) *harness {
@@ -220,6 +223,10 @@ func (h *harness) service() *Service {
 	if h.geo != nil {
 		d.Geo = h.geo
 	}
+	if h.logins != nil {
+		d.AuthEvents = h.logins
+	}
+	d.LandingAddrs = h.landing
 	return New(d)
 }
 

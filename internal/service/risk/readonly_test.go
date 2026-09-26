@@ -29,12 +29,13 @@ import (
 // would bring its writers along).
 func TestRiskServiceCannotWriteServiceState(t *testing.T) {
 	allowed := map[string][]string{
-		"Users":    {"List"},
-		"Store":    {"PurgeOrphans", "Save"},
-		"Settings": {"Load", "LoadForGroup", "LoadForUser"},
-		"Traffic":  {"ListHourlyByUser", "SumHourlyAllUsers"},
-		"SubLogs":  {"ScanSince"},
-		"Geo":      {"Available", "Lookup"},
+		"Users":      {"List"},
+		"Store":      {"PurgeOrphans", "Save"},
+		"Settings":   {"Load", "LoadForGroup", "LoadForUser"},
+		"Traffic":    {"ListHourlyByUser", "SumHourlyAllUsers"},
+		"SubLogs":    {"ScanSince"},
+		"Geo":        {"Available", "Lookup"},
+		"AuthEvents": {"List"},
 	}
 	deps := reflect.TypeFor[Deps]()
 	seen := map[string]bool{}

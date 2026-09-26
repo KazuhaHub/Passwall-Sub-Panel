@@ -19,16 +19,18 @@ type placedWindow struct {
 	identities                   []domain.SubIdentity
 }
 
-// placement is the whole fleet's window placed in one pass.
+// placement is the whole fleet's window placed in one pass, and the rules
+// it was placed under: the login check sets addresses aside with the same
+// ignore list, parsed (and warned about) once.
 type placement struct {
 	geoAvailable bool
+	ignore       domain.GeoIgnoreList
 	users        map[int64]*placedWindow
 }
 
 // subSpread judges every account's fetch window (domain.EvaluateSubSpread)
 // and appends one sub_spread row per account of a readable group.
-func (s *Service) subSpread(ctx context.Context, r *refresh, w *fetchWindow) error {
-	pl := s.placeWindow(ctx, r, w)
+func (s *Service) subSpread(ctx context.Context, r *refresh, w *fetchWindow, pl placement) error {
 	for _, u := range r.users {
 		if err := ctx.Err(); err != nil {
 			return fmt.Errorf("risk refresh: %w", err)
@@ -96,6 +98,7 @@ func (s *Service) placeWindow(ctx context.Context, r *refresh, w *fetchWindow) p
 
 	pl := placement{
 		geoAvailable: s.d.Geo != nil && s.d.Geo.Available(ctx),
+		ignore:       ignore,
 		users:        make(map[int64]*placedWindow, len(w.users)),
 	}
 	located := map[string]domain.GeoLocation{}

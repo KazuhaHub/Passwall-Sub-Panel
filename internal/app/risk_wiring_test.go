@@ -31,9 +31,10 @@ import (
 // changes: without the fetch log there is no sub_spread or devices row at
 // all; without InfraLoaded the place signals would run before the set was
 // ever built; without IsInfra the node's own address would count as a
-// place. The geo
+// place; without the login log there is no login_country row. The geo
 // resolver cannot be told apart here — no database is installed, so a wired
-// one and a missing one both read geo_unavailable.
+// one and a missing one both read geo_unavailable — and neither can the
+// landing addresses, which matter only through the countries it would name.
 func TestBuildWiresTheRiskSignals(t *testing.T) {
 	ctx := t.Context()
 	directory := t.TempDir()
@@ -73,6 +74,13 @@ func TestBuildWiresTheRiskSignals(t *testing.T) {
 		if err := a.repos.SubLog.Insert(ctx, &domain.SubLog{UserID: u.ID, IP: ip, UA: "clash.meta/1.19.2", ClientType: "mihomo", AccessedAt: time.Now()}); err != nil {
 			t.Fatal(err)
 		}
+	}
+	// A panel login from home, a day ago.
+	if err := a.repos.AuthEvent.Insert(ctx, &domain.AuthEvent{
+		UserID: u.ID, UPN: u.UPN, Method: domain.AuthMethodLocal, Outcome: domain.AuthOutcomeSuccess,
+		IP: "198.51.100.20", UA: "Mozilla/5.0", At: time.Now().Add(-24 * time.Hour),
+	}); err != nil {
+		t.Fatal(err)
 	}
 	if a.risk == nil {
 		t.Fatal("Build did not construct the risk worker: the loop would return at once and no signal would ever be computed")
@@ -119,6 +127,9 @@ func TestBuildWiresTheRiskSignals(t *testing.T) {
 	if spread := rowOf(domain.RiskKindSubSpread); spread != nil {
 		t.Fatalf("sub_spread row %+v before the infrastructure set was ever built: InfraLoaded is not wired", *spread)
 	}
+	if login := rowOf(domain.RiskKindLoginCountry); login != nil {
+		t.Fatalf("login_country row %+v before the infrastructure set was ever built", *login)
+	}
 	// The device count places nothing and does not wait for the set. Both
 	// fetches declared no device: unknown, not clean.
 	if dev := rowOf(domain.RiskKindDevices); dev == nil || dev.State != domain.GeoStateUnknown || dev.Code != domain.RiskCodeNoHWID {
@@ -145,6 +156,20 @@ func TestBuildWiresTheRiskSignals(t *testing.T) {
 		ev.Excluded.Infra != 1 || ev.Coverage.Sources != 1 {
 		t.Fatalf("sub_spread = %s/%s, excluded %+v, coverage %+v; want unknown/geo_unavailable with the node's address set aside and one source kept",
 			spread.State, spread.Code, ev.Excluded, ev.Coverage)
+	}
+	// The login is recent and from an address no rule sets aside, so it is
+	// judged — and cannot be placed without a database: unknown, not idle.
+	login := rowOf(domain.RiskKindLoginCountry)
+	if login == nil {
+		t.Fatal("no login_country row after the infrastructure set was built: the login log is not wired")
+	}
+	var lev domain.LoginCountryEvidence
+	if err := json.Unmarshal(login.Evidence, &lev); err != nil {
+		t.Fatalf("evidence %s: %v", login.Evidence, err)
+	}
+	if login.State != domain.GeoStateUnknown || login.Code != domain.RiskCodeGeoUnavailable || lev.Recent != 1 {
+		t.Fatalf("login_country = %s/%s with %d recent logins, want unknown/geo_unavailable with the one login read",
+			login.State, login.Code, lev.Recent)
 	}
 }
 

@@ -442,3 +442,74 @@ func TestInfraAddresses_IsInfraReadsTheSet(t *testing.T) {
 		t.Fatal("a service with no set reports an address as infrastructure")
 	}
 }
+
+// The login check skips the countries of PSP's LANDING nodes — an account
+// holder's browser often reaches the panel through their own proxy — but not
+// the relays' countries: relays usually sit in the account holder's own
+// country, and skipping it would skip every login from home. So the set
+// keeps apart which addresses came from a node's own ServerAddress. A relay
+// literal is infrastructure but not a landing; a node's ServerAddress,
+// literal or resolved hostname, is both. A disabled node is neither, and a
+// hostname that is both a node and another node's relay is a landing.
+func TestInfraAddresses_LandingIsNodeAddressesOnly(t *testing.T) {
+	off := infraNode(3, "203.0.113.30")
+	off.Enabled = false
+	s, _, res, _ := newInfraFixture(
+		infraNode(1, "203.0.113.1", relayAt("198.51.100.7", true), relayAt("relay.example.com", true)),
+		infraNode(2, "Edge.Example.com.", relayAt("[2001:db8::7]", true)),
+		infraNode(4, "203.0.113.4", relayAt("edge.example.com", true)),
+		off,
+	)
+	res.answers["edge.example.com"] = []string{"203.0.113.5", "2001:db8::5"}
+	res.answers["relay.example.com"] = []string{"198.51.100.8"}
+	if s.LandingAddresses() != nil {
+		t.Fatal("landing addresses before any refresh")
+	}
+	refreshOK(t, s)
+
+	for ip, want := range map[string]bool{
+		"203.0.113.1":  true,  // a node literal
+		"203.0.113.4":  true,  // a node literal
+		"203.0.113.5":  true,  // a node hostname, resolved
+		"2001:db8::5":  true,  // the same hostname's IPv6 answer
+		"198.51.100.7": false, // a relay literal
+		"198.51.100.8": false, // a relay hostname, resolved
+		"2001:db8::7":  false, // a bracketed relay literal
+		"203.0.113.30": false, // a disabled node
+	} {
+		if !s.IsInfra(mustAddr(ip)) && ip != "203.0.113.30" {
+			t.Errorf("IsInfra(%s) = false: every enabled node and relay address is infrastructure", ip)
+		}
+		landing := false
+		for _, a := range s.LandingAddresses() {
+			if a == mustAddr(ip) {
+				landing = true
+			}
+		}
+		if landing != want {
+			t.Errorf("%s landing = %v, want %v", ip, landing, want)
+		}
+	}
+	want := []netip.Addr{mustAddr("203.0.113.1"), mustAddr("203.0.113.4"), mustAddr("203.0.113.5"), mustAddr("2001:db8::5")}
+	got := s.LandingAddresses()
+	if len(got) != len(want) {
+		t.Fatalf("LandingAddresses() = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("LandingAddresses() = %v, want %v (sorted)", got, want)
+		}
+	}
+	// A copy: the caller may do what it likes with it.
+	got[0] = mustAddr("192.0.2.1")
+	if s.LandingAddresses()[0] != want[0] {
+		t.Fatal("LandingAddresses() hands out the set's own slice")
+	}
+	if (&Service{}).LandingAddresses() != nil {
+		t.Fatal("a service with no set reports landing addresses")
+	}
+	var none *infraAddressSet
+	if none.Landing() != nil {
+		t.Fatal("a nil set reports landing addresses")
+	}
+}
