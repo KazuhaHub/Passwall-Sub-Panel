@@ -308,7 +308,7 @@ func TestBuildSingBoxOutboundsOmitsMLKEMFirstReality(t *testing.T) {
 		pool: panicPool{},
 	}
 	out := s.buildSingBoxOutbounds(context.Background(), &domain.User{ID: 5, UUID: "uuid-of-user-5"},
-		[]renderItem{{name: "US-1", node: node}}, nil, nil, ports.UISettings{EmailDomain: "kazuha.org"})
+		[]renderItem{{name: "US-1", node: node}}, nil, nil, nil, ports.UISettings{EmailDomain: "kazuha.org"})
 	for _, outbound := range out {
 		if outbound["tag"] == "US-1" {
 			t.Fatalf("known-incompatible sing-box REALITY outbound was emitted: %#v", outbound)
@@ -326,7 +326,7 @@ func TestBuildSingBoxOutboundsKeepsOlderReality(t *testing.T) {
 		pool: panicPool{},
 	}
 	out := s.buildSingBoxOutbounds(context.Background(), &domain.User{ID: 5, UUID: "uuid-of-user-5"},
-		[]renderItem{{name: "US-1", node: node}}, nil, nil, ports.UISettings{EmailDomain: "kazuha.org"})
+		[]renderItem{{name: "US-1", node: node}}, nil, nil, nil, ports.UISettings{EmailDomain: "kazuha.org"})
 	for _, outbound := range out {
 		if outbound["tag"] == "US-1" {
 			return

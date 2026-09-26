@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -17,6 +18,7 @@ import (
 // AdminRuleSetsHandler exposes CRUD for rule sets under /api/admin/rules.
 type AdminRuleSetsHandler struct {
 	repo       ports.RuleSetRepo
+	templates  ports.TemplateRepo
 	nodes      ruleNodeLister
 	groups     *groupsvc.Service
 	invalidate func()
@@ -27,8 +29,12 @@ type ruleNodeLister interface {
 	List(ctx context.Context) ([]*domain.Node, error)
 }
 
-func NewAdminRuleSetsHandler(repo ports.RuleSetRepo, nodes ruleNodeLister, groups *groupsvc.Service, invalidate func(), configDir string) *AdminRuleSetsHandler {
-	return &AdminRuleSetsHandler{repo: repo, nodes: nodes, groups: groups, invalidate: invalidate, configDir: configDir}
+func NewAdminRuleSetsHandler(repo ports.RuleSetRepo, nodes ruleNodeLister, groups *groupsvc.Service, invalidate func(), configDir string, templates ...ports.TemplateRepo) *AdminRuleSetsHandler {
+	h := &AdminRuleSetsHandler{repo: repo, nodes: nodes, groups: groups, invalidate: invalidate, configDir: configDir}
+	if len(templates) > 0 {
+		h.templates = templates[0]
+	}
+	return h
 }
 
 type ruleSetDTO struct {
@@ -40,7 +46,12 @@ type ruleSetDTO struct {
 	ProxyGroupOrder          []string                             `json:"proxy_group_order"`
 	ProxyGroupMembers        map[string][]domain.ProxyGroupMember `json:"proxy_group_members,omitempty"`
 	ProxyGroupOptions        map[string]domain.ProxyGroupOptions  `json:"proxy_group_options,omitempty"`
-	Content                  string                               `json:"content"`
+	// MihomoRules is accepted as a migration-only input. Responses leave it
+	// empty, so old clients can upgrade without preserving a second rule stream.
+	MihomoRules            string                         `json:"mihomo_rules,omitempty"`
+	MihomoSubRules         []domain.MihomoSubRule         `json:"mihomo_sub_rules,omitempty"`
+	MihomoRematchOutbounds []domain.MihomoRematchOutbound `json:"mihomo_rematch_outbounds,omitempty"`
+	Content                string                         `json:"content"`
 }
 
 func ruleSetDTOFromDomain(r *domain.RuleSet) ruleSetDTO {
@@ -51,6 +62,8 @@ func ruleSetDTOFromDomain(r *domain.RuleSet) ruleSetDTO {
 		ProxyGroupOrder:          r.ProxyGroupOrder,
 		ProxyGroupMembers:        r.ProxyGroupMembers,
 		ProxyGroupOptions:        r.ProxyGroupOptions,
+		MihomoSubRules:           r.MihomoSubRules,
+		MihomoRematchOutbounds:   r.MihomoRematchOutbounds,
 		Content:                  r.Content,
 	}
 }
@@ -98,8 +111,10 @@ func (h *AdminRuleSetsHandler) Save(c *gin.Context) {
 		respondError(c, err)
 		return
 	}
-	metadata := render.NormalizeProxyGroupMetadata(req.Content, req.ProxyGroupOrder, req.ProxyGroupMembers, req.ProxyGroupOptions)
-	inspection := render.InspectProxyGroups(req.Content, metadata.Members, metadata.Options, nodes)
+	content := mergeLegacyRuleContent(req.MihomoRules, req.Content)
+	advanced := render.NormalizeMihomoRuleFeatures(render.MihomoRuleFeatures{SubRules: req.MihomoSubRules, RematchOutbounds: req.MihomoRematchOutbounds})
+	metadata := render.NormalizeProxyGroupMetadata(content, req.ProxyGroupOrder, req.ProxyGroupMembers, req.ProxyGroupOptions, advanced)
+	inspection := render.InspectProxyGroupsWithMihomo(content, metadata.Members, metadata.Options, nodes, advanced)
 	for _, issue := range inspection.Issues {
 		if issue.Level == "error" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid proxy group members", "issues": inspection.Issues})
@@ -113,7 +128,16 @@ func (h *AdminRuleSetsHandler) Save(c *gin.Context) {
 		ProxyGroupOrder:          metadata.Order,
 		ProxyGroupMembers:        metadata.Members,
 		ProxyGroupOptions:        render.NormalizeProxyGroupOptionsMap(metadata.Options),
-		Content:                  req.Content,
+		MihomoSubRules:           advanced.SubRules,
+		MihomoRematchOutbounds:   advanced.RematchOutbounds,
+		Content:                  content,
+	}
+	if issues, err := h.validateTemplateBindings(c.Request.Context(), saved); err != nil {
+		respondError(c, err)
+		return
+	} else if hasRuleSetErrors(issues) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid Mihomo template binding", "issues": issues})
+		return
 	}
 	if err := h.repo.Save(c.Request.Context(), saved); err != nil {
 		if errors.Is(err, domain.ErrValidation) {
@@ -129,11 +153,66 @@ func (h *AdminRuleSetsHandler) Save(c *gin.Context) {
 	c.JSON(http.StatusOK, ruleSetDTOFromDomain(saved))
 }
 
+func (h *AdminRuleSetsHandler) validateTemplateBindings(ctx context.Context, candidate *domain.RuleSet) ([]render.ProxyGroupIssue, error) {
+	if h.templates == nil || h.repo == nil {
+		return nil, nil
+	}
+	templates, err := h.templates.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, template := range templates {
+		if template.ClientType != domain.ClientMihomo || !containsString(template.RuleSets, candidate.Slug) {
+			continue
+		}
+		bound := make([]*domain.RuleSet, 0, len(template.RuleSets))
+		for _, slug := range template.RuleSets {
+			if slug == candidate.Slug {
+				bound = append(bound, candidate)
+				continue
+			}
+			ruleSet, err := h.repo.GetBySlug(ctx, slug)
+			if err != nil {
+				if errors.Is(err, domain.ErrNotFound) {
+					continue
+				}
+				return nil, err
+			}
+			bound = append(bound, ruleSet)
+		}
+		if issues := render.ValidateMihomoTemplateBundle(bound); hasRuleSetErrors(issues) {
+			return issues, nil
+		}
+	}
+	return nil, nil
+}
+
+func hasRuleSetErrors(issues []render.ProxyGroupIssue) bool {
+	for _, issue := range issues {
+		if issue.Level == "error" {
+			return true
+		}
+	}
+	return false
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
+}
+
 type inspectProxyGroupsRequest struct {
-	Content           string                               `json:"content"`
-	ProxyGroupMembers map[string][]domain.ProxyGroupMember `json:"proxy_group_members"`
-	ProxyGroupOptions map[string]domain.ProxyGroupOptions  `json:"proxy_group_options"`
-	PreviewGroupID    int64                                `json:"preview_group_id,omitempty"`
+	Content                string                               `json:"content"`
+	ProxyGroupMembers      map[string][]domain.ProxyGroupMember `json:"proxy_group_members"`
+	ProxyGroupOptions      map[string]domain.ProxyGroupOptions  `json:"proxy_group_options"`
+	MihomoRules            string                               `json:"mihomo_rules,omitempty"`
+	MihomoSubRules         []domain.MihomoSubRule               `json:"mihomo_sub_rules,omitempty"`
+	MihomoRematchOutbounds []domain.MihomoRematchOutbound       `json:"mihomo_rematch_outbounds,omitempty"`
+	PreviewGroupID         int64                                `json:"preview_group_id,omitempty"`
 }
 
 // InspectProxyGroups is the draft-time compiler used by the rule-set editor.
@@ -163,7 +242,21 @@ func (h *AdminRuleSetsHandler) InspectProxyGroups(c *gin.Context) {
 			return
 		}
 	}
-	c.JSON(http.StatusOK, render.InspectProxyGroups(req.Content, req.ProxyGroupMembers, req.ProxyGroupOptions, nodes, preview))
+	content := mergeLegacyRuleContent(req.MihomoRules, req.Content)
+	advanced := render.MihomoRuleFeatures{SubRules: req.MihomoSubRules, RematchOutbounds: req.MihomoRematchOutbounds}
+	c.JSON(http.StatusOK, render.InspectProxyGroupsWithMihomo(content, req.ProxyGroupMembers, req.ProxyGroupOptions, nodes, advanced, preview))
+}
+
+func mergeLegacyRuleContent(legacy, content string) string {
+	legacy = strings.TrimRight(legacy, "\r\n")
+	if legacy == "" {
+		return content
+	}
+	content = strings.TrimLeft(content, "\r\n")
+	if content == "" {
+		return legacy
+	}
+	return legacy + "\n" + content
 }
 
 func (h *AdminRuleSetsHandler) Delete(c *gin.Context) {

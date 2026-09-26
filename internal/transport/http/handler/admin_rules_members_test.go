@@ -44,6 +44,9 @@ func TestAdminRuleSetsSavePersistsMembersAndOptionsAndInvalidatesRenderCache(t *
 	if w.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
 	}
+	if bytes.Contains(w.Body.Bytes(), []byte("mihomo_rules")) {
+		t.Fatalf("legacy field leaked into normalized response: %s", w.Body.String())
+	}
 	if invalidations != 1 {
 		t.Fatalf("invalidations=%d", invalidations)
 	}
@@ -60,6 +63,87 @@ func TestAdminRuleSetsSavePersistsMembersAndOptionsAndInvalidatesRenderCache(t *
 	options := got.ProxyGroupOptions["🇨🇳 中国大陆"]
 	if options.Type != "load-balance" || options.Strategy != "consistent-hashing" || options.URL == "" || options.Interval == nil || options.Lazy == nil || options.Timeout == nil {
 		t.Fatalf("options were not normalized and persisted: %#v", options)
+	}
+}
+
+func TestAdminRuleSetsSaveMigratesLegacyMihomoRulesIntoContent(t *testing.T) {
+	repo, err := yamladapter.NewRuleSetRepo(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := NewAdminRuleSetsHandler(repo, staticRuleNodes{}, nil, nil, t.TempDir())
+	body := ruleSetDTO{
+		Slug: "advanced", Name: "Advanced", Enabled: true, Content: "- MATCH,DIRECT",
+		MihomoRules:            "- DOMAIN-SUFFIX,openai.com,use-ai-rules",
+		MihomoSubRules:         []domain.MihomoSubRule{{Name: "ai-rules", Content: "- MATCH,DIRECT"}},
+		MihomoRematchOutbounds: []domain.MihomoRematchOutbound{{Name: "use-ai-rules", TargetSubRule: "ai-rules"}},
+	}
+	w := performRuleSave(t, h, body)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+	if bytes.Contains(w.Body.Bytes(), []byte("mihomo_rules")) || !bytes.Contains(w.Body.Bytes(), []byte("DOMAIN-SUFFIX,openai.com")) {
+		t.Fatalf("legacy rules were not normalized in the response: %s", w.Body.String())
+	}
+	got, err := repo.GetBySlug(context.Background(), "advanced")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Content != body.MihomoRules+"\n- MATCH,DIRECT" || len(got.MihomoSubRules) != 1 || len(got.MihomoRematchOutbounds) != 1 {
+		t.Fatalf("advanced fields not persisted: %#v", got)
+	}
+}
+
+func TestAdminRuleSetsInspectMergesLegacyMihomoRulesIntoContent(t *testing.T) {
+	repo, err := yamladapter.NewRuleSetRepo(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := NewAdminRuleSetsHandler(repo, staticRuleNodes{}, nil, nil, t.TempDir())
+	raw, err := json.Marshal(inspectProxyGroupsRequest{
+		Content:     "- MATCH,Current",
+		MihomoRules: "- MATCH,Legacy",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/admin/rules/inspect-proxy-groups", bytes.NewReader(raw))
+	c.Request.Header.Set("Content-Type", "application/json")
+	h.InspectProxyGroups(c)
+	c.Writer.WriteHeaderNow()
+	if w.Code != http.StatusOK || !bytes.Contains(w.Body.Bytes(), []byte(`"name":"Legacy"`)) || !bytes.Contains(w.Body.Bytes(), []byte(`"name":"Current"`)) {
+		t.Fatalf("legacy and unified rules were not both inspected: status=%d body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestAdminRuleSetsSaveAllowsBoundSubRulesWithoutTemplatePlaceholder(t *testing.T) {
+	root := t.TempDir()
+	rules, err := yamladapter.NewRuleSetRepo(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	templates, err := yamladapter.NewTemplateRepo(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := templates.Save(context.Background(), &domain.Template{
+		Slug: "mihomo", Name: "Mihomo", ClientType: domain.ClientMihomo, RuleSets: []string{"advanced"}, Content: "rules:\n  {{ rules_common }}",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	h := NewAdminRuleSetsHandler(rules, staticRuleNodes{}, nil, nil, root, templates)
+	w := performRuleSave(t, h, ruleSetDTO{
+		Slug: "advanced", Name: "Advanced", Enabled: true, Content: "- MATCH,DIRECT",
+		MihomoSubRules: []domain.MihomoSubRule{{Name: "ai-rules", Content: "- MATCH,DIRECT"}},
+	})
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+	saved, err := rules.GetBySlug(context.Background(), "advanced")
+	if err != nil || len(saved.MihomoSubRules) != 1 {
+		t.Fatalf("sub-rules were not saved: %#v, err=%v", saved, err)
 	}
 }
 

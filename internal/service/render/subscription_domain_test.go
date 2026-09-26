@@ -93,3 +93,48 @@ func TestResolveRulesCommonDoesNotInjectWithoutEnabledOptionOrHostname(t *testin
 		})
 	}
 }
+
+func TestResolveRuleBundleSeparatesMihomoAndSharedRules(t *testing.T) {
+	s := &Service{repos: ports.Repos{RuleSet: renderRuleSetRepo{items: map[string]*domain.RuleSet{
+		"advanced": {
+			Slug: "advanced", Enabled: true,
+			Content:                "- REMATCH-NAME,marked,Mihomo\n- MATCH,Shared",
+			MihomoSubRules:         []domain.MihomoSubRule{{Name: "sub", Content: "- MATCH,Mihomo"}},
+			MihomoRematchOutbounds: []domain.MihomoRematchOutbound{{Name: "jump", TargetSubRule: "sub"}},
+		},
+	}}}}
+	bundle, err := s.resolveRuleBundle(context.Background(), &domain.Template{RuleSets: []string{"advanced"}}, ports.UISettings{}, domain.ClientMihomo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bundle.SharedRules != "- REMATCH-NAME,marked,Mihomo\n- MATCH,Shared" {
+		t.Fatalf("shared rules = %q", bundle.SharedRules)
+	}
+	if len(bundle.SubRules) != 1 || len(bundle.RematchOutbounds) != 1 {
+		t.Fatalf("advanced bundle missing: %#v", bundle)
+	}
+}
+
+func TestResolveRuleBundleRejectsDuplicateAdvancedNames(t *testing.T) {
+	s := &Service{repos: ports.Repos{RuleSet: renderRuleSetRepo{items: map[string]*domain.RuleSet{
+		"one": {Slug: "one", Enabled: true, Content: "- MATCH,DIRECT", MihomoSubRules: []domain.MihomoSubRule{{Name: "duplicate", Content: "- MATCH,DIRECT"}}},
+		"two": {Slug: "two", Enabled: true, Content: "- MATCH,DIRECT", MihomoSubRules: []domain.MihomoSubRule{{Name: "duplicate", Content: "- MATCH,DIRECT"}}},
+	}}}}
+	if _, err := s.resolveRuleBundle(context.Background(), &domain.Template{RuleSets: []string{"one", "two"}}, ports.UISettings{}, domain.ClientMihomo); err == nil {
+		t.Fatal("expected duplicate sub-rule error")
+	}
+}
+
+func TestResolveRuleBundleIgnoresMihomoNamesForSingBox(t *testing.T) {
+	s := &Service{repos: ports.Repos{RuleSet: renderRuleSetRepo{items: map[string]*domain.RuleSet{
+		"one": {Slug: "one", Enabled: true, Content: "- DOMAIN,one.example,DIRECT", MihomoSubRules: []domain.MihomoSubRule{{Name: "duplicate", Content: "- MATCH,DIRECT"}}, MihomoRematchOutbounds: []domain.MihomoRematchOutbound{{Name: "jump", TargetSubRule: "duplicate"}}},
+		"two": {Slug: "two", Enabled: true, Content: "- MATCH,DIRECT", MihomoSubRules: []domain.MihomoSubRule{{Name: "duplicate", Content: "- MATCH,DIRECT"}}, MihomoRematchOutbounds: []domain.MihomoRematchOutbound{{Name: "jump", TargetSubRule: "duplicate"}}},
+	}}}}
+	bundle, err := s.resolveRuleBundle(context.Background(), &domain.Template{RuleSets: []string{"one", "two"}}, ports.UISettings{}, domain.ClientSingBox)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bundle.SharedRules != "- DOMAIN,one.example,DIRECT\n- MATCH,DIRECT" || len(bundle.SubRules) != 0 || len(bundle.RematchOutbounds) != 0 {
+		t.Fatalf("sing-box bundle includes Mihomo-only features or loses shared rules: %#v", bundle)
+	}
+}

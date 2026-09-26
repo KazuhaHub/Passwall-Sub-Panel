@@ -73,6 +73,7 @@ private/
 # Editor/IDE
 .idea/
 .vscode/
+.commandcode/
 .claude/
 AGENT.md
 AGENTS.md

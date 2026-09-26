@@ -28,6 +28,14 @@ func TestResolveConfiguredMembersSpecificNodeBeforeDirectAndRemainingDeduplicate
 	assertMemberStrings(t, resolveConfiguredMembers(members, items), []string{china.DisplayName, "DIRECT", "🚀 节点选择", taiwan.DisplayName})
 }
 
+func TestResolveConfiguredMembersKeepsRematchMihomoOnly(t *testing.T) {
+	members := []domain.ProxyGroupMember{{Kind: "rematch", Value: "AI Rematch"}}
+	if got := resolveConfiguredMembers(members, nil); len(got) != 0 {
+		t.Fatalf("sing-box member resolution leaked Rematch outbound: %#v", got)
+	}
+	assertMemberStrings(t, resolveConfiguredMembersWithOutbounds(members, nil), []string{"AI Rematch"})
+}
+
 func TestResolveConfiguredMembersRegionTagAndMissingNode(t *testing.T) {
 	a := &domain.Node{ID: 1, DisplayName: "CN premium", Region: "CN", Tags: []string{"premium"}}
 	b := &domain.Node{ID: 2, DisplayName: "US premium", Region: "US", Tags: []string{"premium"}}

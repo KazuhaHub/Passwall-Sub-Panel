@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"errors"
 	"net/http"
 
@@ -9,17 +10,23 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/seed"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/render"
 )
 
 // AdminTemplatesHandler exposes CRUD for the YAML-backed config templates
 // under /api/admin/templates. One file per slug.
 type AdminTemplatesHandler struct {
 	repo      ports.TemplateRepo
+	rules     ports.RuleSetRepo
 	configDir string
 }
 
-func NewAdminTemplatesHandler(repo ports.TemplateRepo, configDir string) *AdminTemplatesHandler {
-	return &AdminTemplatesHandler{repo: repo, configDir: configDir}
+func NewAdminTemplatesHandler(repo ports.TemplateRepo, configDir string, rules ...ports.RuleSetRepo) *AdminTemplatesHandler {
+	h := &AdminTemplatesHandler{repo: repo, configDir: configDir}
+	if len(rules) > 0 {
+		h.rules = rules[0]
+	}
+	return h
 }
 
 type templateDTO struct {
@@ -84,7 +91,7 @@ func (h *AdminTemplatesHandler) Save(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Slug required"})
 		return
 	}
-	if err := h.repo.Save(c.Request.Context(), &domain.Template{
+	template := &domain.Template{
 		Slug:            req.Slug,
 		Name:            req.Name,
 		ClientType:      domain.ClientType(req.ClientType),
@@ -92,7 +99,15 @@ func (h *AdminTemplatesHandler) Save(c *gin.Context) {
 		RuleSets:        req.RuleSets,
 		ProxyGroupOrder: req.ProxyGroupOrder,
 		Content:         req.Content,
-	}); err != nil {
+	}
+	if issues, err := h.validateMihomoBindings(c.Request.Context(), template); err != nil {
+		respondError(c, err)
+		return
+	} else if hasRuleSetErrors(issues) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid Mihomo template binding", "issues": issues})
+		return
+	}
+	if err := h.repo.Save(c.Request.Context(), template); err != nil {
 		if errors.Is(err, domain.ErrValidation) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
@@ -101,6 +116,24 @@ func (h *AdminTemplatesHandler) Save(c *gin.Context) {
 		return
 	}
 	c.Status(http.StatusNoContent)
+}
+
+func (h *AdminTemplatesHandler) validateMihomoBindings(ctx context.Context, template *domain.Template) ([]render.ProxyGroupIssue, error) {
+	if h.rules == nil || template.ClientType != domain.ClientMihomo {
+		return nil, nil
+	}
+	bound := make([]*domain.RuleSet, 0, len(template.RuleSets))
+	for _, slug := range template.RuleSets {
+		ruleSet, err := h.rules.GetBySlug(ctx, slug)
+		if err != nil {
+			if errors.Is(err, domain.ErrNotFound) {
+				continue
+			}
+			return nil, err
+		}
+		bound = append(bound, ruleSet)
+	}
+	return render.ValidateMihomoTemplateBundle(bound), nil
 }
 
 func (h *AdminTemplatesHandler) Delete(c *gin.Context) {
