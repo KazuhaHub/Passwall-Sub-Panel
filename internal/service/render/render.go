@@ -148,7 +148,7 @@ func (s *Service) RenderForUser(ctx context.Context, u *domain.User, ct domain.C
 	if err != nil {
 		return nil, fmt.Errorf("load template: %w", err)
 	}
-	bundle, err := s.resolveRuleBundle(ctx, tpl, st)
+	bundle, err := s.resolveRuleBundle(ctx, tpl, st, ct)
 	if err != nil {
 		return nil, fmt.Errorf("resolve rules: %w", err)
 	}
@@ -609,7 +609,7 @@ type resolvedRuleBundle struct {
 	RematchOutbounds  []domain.MihomoRematchOutbound
 }
 
-func (s *Service) resolveRuleBundle(ctx context.Context, tpl *domain.Template, st ports.UISettings) (resolvedRuleBundle, error) {
+func (s *Service) resolveRuleBundle(ctx context.Context, tpl *domain.Template, st ports.UISettings, clientType domain.ClientType) (resolvedRuleBundle, error) {
 	slugs := tpl.RuleSets
 	if len(slugs) == 0 {
 		log.Debug("render: no rule_sets configured for template", "template", tpl.Slug)
@@ -647,25 +647,27 @@ func (s *Service) resolveRuleBundle(ctx context.Context, tpl *domain.Template, s
 		if content != "" {
 			sharedParts = append(sharedParts, content)
 		}
-		for _, subRule := range rs.MihomoSubRules {
-			name := strings.TrimSpace(subRule.Name)
-			if owner, exists := seenSubRules[name]; exists {
-				return resolvedRuleBundle{}, fmt.Errorf("duplicate Mihomo sub-rule %q in rule sets %s and %s", name, owner, slug)
+		if clientType == domain.ClientMihomo {
+			for _, subRule := range rs.MihomoSubRules {
+				name := strings.TrimSpace(subRule.Name)
+				if owner, exists := seenSubRules[name]; exists {
+					return resolvedRuleBundle{}, fmt.Errorf("duplicate Mihomo sub-rule %q in rule sets %s and %s", name, owner, slug)
+				}
+				seenSubRules[name] = slug
+				subRule.Name = name
+				subRules = append(subRules, subRule)
 			}
-			seenSubRules[name] = slug
-			subRule.Name = name
-			subRules = append(subRules, subRule)
-		}
-		for _, outbound := range rs.MihomoRematchOutbounds {
-			name := strings.TrimSpace(outbound.Name)
-			if owner, exists := seenRematchOutbounds[name]; exists {
-				return resolvedRuleBundle{}, fmt.Errorf("duplicate Mihomo rematch outbound %q in rule sets %s and %s", name, owner, slug)
+			for _, outbound := range rs.MihomoRematchOutbounds {
+				name := strings.TrimSpace(outbound.Name)
+				if owner, exists := seenRematchOutbounds[name]; exists {
+					return resolvedRuleBundle{}, fmt.Errorf("duplicate Mihomo rematch outbound %q in rule sets %s and %s", name, owner, slug)
+				}
+				seenRematchOutbounds[name] = slug
+				outbound.Name = name
+				outbound.TargetRematchName = strings.TrimSpace(outbound.TargetRematchName)
+				outbound.TargetSubRule = strings.TrimSpace(outbound.TargetSubRule)
+				rematchOutbounds = append(rematchOutbounds, outbound)
 			}
-			seenRematchOutbounds[name] = slug
-			outbound.Name = name
-			outbound.TargetRematchName = strings.TrimSpace(outbound.TargetRematchName)
-			outbound.TargetSubRule = strings.TrimSpace(outbound.TargetSubRule)
-			rematchOutbounds = append(rematchOutbounds, outbound)
 		}
 		for _, target := range rs.ProxyGroupOrder {
 			target = strings.TrimSpace(target)
@@ -707,7 +709,7 @@ func (s *Service) resolveRuleBundle(ctx context.Context, tpl *domain.Template, s
 // tests and older call sites. It exposes the shared rule stream; Mihomo render
 // uses resolveRuleBundle directly.
 func (s *Service) resolveRulesCommon(ctx context.Context, tpl *domain.Template, st ports.UISettings) (string, []string, map[string][]domain.ProxyGroupMember, map[string]domain.ProxyGroupOptions, error) {
-	bundle, err := s.resolveRuleBundle(ctx, tpl, st)
+	bundle, err := s.resolveRuleBundle(ctx, tpl, st, domain.ClientSingBox)
 	return bundle.SharedRules, bundle.ProxyGroupOrder, bundle.ProxyGroupMembers, bundle.ProxyGroupOptions, err
 }
 
