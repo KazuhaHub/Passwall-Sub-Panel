@@ -687,8 +687,9 @@ DNS 视角是不完整的：GeoDNS、anycast 下，PSP 解析到的地址和客�
 **解除只看时钟，不看判定**：服务原因是 `geo_auto`，且 `service_disabled_at` 加上该用户分组**当前**生效的时长已经过去（没有时间戳的视为立即到期）。
 
 - 用的是当前时长，不管 `ban_enabled` 现在还开没开：关掉开关只停止新的暂停，不能把进行中的困住；改时长也作用于进行中的暂停。
+- 这一轮**读不到**该用户分组的设置（例如一次数据库抖动）时，不解除，留到能读到的那一轮再算，计为 `lift_deferred`，并记一条 Warn。读不到时判定退回出厂默认是安全的方向（出厂默认不开自动暂停，最多让暂停晚到，不会造成暂停），拿它给暂停计时却会提前放人：分组存的是 24 小时，60 分钟就解除了，之后也没有任何东西把它补回去。
 - 轮询开头的用户快照只负责**提名**；决定是在每用户锁下**重新读这一行**之后做的，截止点是「现在 − 时长」：一个被管理员恢复、又被另一轮并发轮询重新暂停的用户，时间戳晚于截止点，会被拒绝——**更新的暂停永远不会被旧快照解除**。清除本身也是条件写（原因仍是 `geo_auto` 才清），读和写之间落下的管理员决定同样不会被撤销。到期判断在 Go 里做而不在 SQL 里，因为 SQLite 把这个时间戳按写入方的时区存成文本。
-- 解除的延迟最多是时长加一个轮询周期（撞上每轮上限时再多一轮）。
+- 解除的延迟最多是时长加一个轮询周期（撞上每轮上限时再多一轮，读不到分组设置的每一轮也再多一轮）。
 
 **审计**：执行者 `geo-detector`，动作 `geo_auto_suspend`（之后：层级、带地点的理由、时长分钟）和 `geo_auto_lift`（之前：暂停时刻，没有时为 null；之后：时长分钟），都带时间。没有发生的转换只计数，不写审计。施加时另有一条 Warn 日志 `geo auto-suspension applied`。
 
@@ -741,7 +742,7 @@ DNS 视角是不完整的：GeoDNS、anycast 下，PSP 解析到的地址和客�
 | `psp_geo_verdict_total{state}` | 计数器 | 七种状态的分母（§12.4） |
 | `psp_geo_over_tier_total{tier}` | 计数器 | 超过标记容错的样本，按最粗的超限层级。这是默认灵敏度的刻度盘：`region` 远高于 `country` 的机队，多半是家里路由器 + 手机那一对，把省级容错调到 2 就是那个一个数字的修法 |
 | `psp_geo_samples_spaced_total` | 计数器 | 因距上次判定不足半个周期而跳过的用户。只有手动采集会产生它；持续有值，说明有人在反复点「立即采集」，而这正是采样间隔拒绝计入的加速 |
-| `psp_geo_auto_suspension_total{outcome}` | 计数器 | `suspended`、`skipped_held`、`skipped_unwired`、`deferred`、`suspend_error`、`lifted_expiry`、`lifted_admin`、`lift_skipped`、`lift_deferred`、`lift_error`。`lifted_admin` 对 `suspended` 是误报率；两个 `_error` 是否则只在 Warn 日志里的失败；两个 `deferred` 上涨说明每轮上限被撞到——一次大规模事件，或者自动暂停开着时地区库坏了；轮询在 Phase 4 前后被取消也会计入，那种是零星的 |
+| `psp_geo_auto_suspension_total{outcome}` | 计数器 | `suspended`、`skipped_held`、`skipped_unwired`、`deferred`、`suspend_error`、`lifted_expiry`、`lifted_admin`、`lift_skipped`、`lift_deferred`、`lift_error`。`lifted_admin` 对 `suspended` 是误报率；两个 `_error` 是否则只在 Warn 日志里的失败；两个 `deferred` 上涨说明每轮上限被撞到——一次大规模事件，或者自动暂停开着时地区库坏了；轮询在 Phase 4 前后被取消也会计入，那种是零星的；`lift_deferred` 还包括分组设置读不到、这一轮没有计时的暂停 |
 | `psp_infra_addresses` | gauge | 当前作为本机基础设施排除的节点与中转地址数。配了节点却掉到 0，说明刷新失败或主机名全都解析不了 |
 | `psp_infra_address_resolve_failures_total` | 计数器 | 节点或中转主机名解析失败次数（保留上次的地址） |
 | `psp_poll_stage_ms{stage="geo_enforce"}` | 直方图 | Phase 4（解除与暂停）的耗时 |

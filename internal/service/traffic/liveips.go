@@ -29,9 +29,11 @@ type GeoResolver interface {
 func (s *Service) SetGeoResolver(g GeoResolver) { s.geo = g }
 
 // SetGeoPolicy installs the fallback policy: the one judged with when no
-// settings are wired, or when a group's settings cannot be read. When they
-// can, the stored global values with that group's overrides on top replace
-// it whole (see geoPolicyCache below); there is no per-user layer.
+// settings are wired, when a group's settings cannot be read, or for a client
+// owner missing from the poll's user list. When they can be read, the stored
+// global values with that group's overrides on top replace it whole (see
+// geoPolicyCache below); there is no per-user layer. A fallback standing in
+// for an unread group is never used to time a lift (see geoPolicyEntry).
 func (s *Service) SetGeoPolicy(p domain.GeoAnomalyPolicy) { s.geoPolicy = p }
 
 // GeoStreakStore persists the little between-poll state that makes a verdict
@@ -79,11 +81,34 @@ type liveIPInput struct {
 // next poll rather than on restart. Used only inside one PollOnce, from one
 // goroutine, so it takes no lock; it keeps that poll's context because every
 // lookup belongs to it.
+//
+// Keyed by GroupID, and ONLY for users in the poll's list: 0 is a real key
+// ("no group", common for SSO and legacy rows), so an owner the list does not
+// contain must never be filed under it (see lookup).
 type geoPolicyCache struct {
 	s      *Service
 	ctx    context.Context
 	byUser map[int64]*domain.User
-	byKey  map[int64]domain.GeoAnomalyPolicy
+	byKey  map[int64]geoPolicyEntry
+}
+
+// geoPolicyEntry is one group's policy for the poll, and whether it IS that
+// group's policy.
+//
+// resolved is false when the policy is only the deployment fallback standing
+// in for a value this poll could not learn: the group's settings read failed,
+// or the owner is not in the poll's user list and so has no group at all.
+// Judging may use the stand-in: production's fallback is the shipped default,
+// whose suspension is off, so judging on it can hold a suspension back but
+// never cause one. A time box may not: the fallback's 60 minutes would end a
+// group's longer suspension early, and nothing puts it back (see
+// liftDueGeoSuspensions).
+//
+// With no settings wired the fallback IS the configuration, so it counts as
+// resolved.
+type geoPolicyEntry struct {
+	policy   domain.GeoAnomalyPolicy
+	resolved bool
 }
 
 func (s *Service) newGeoPolicyCache(ctx context.Context, users []*domain.User) *geoPolicyCache {
@@ -93,23 +118,38 @@ func (s *Service) newGeoPolicyCache(ctx context.Context, users []*domain.User) *
 			byUser[u.ID] = u
 		}
 	}
-	return &geoPolicyCache{s: s, ctx: ctx, byUser: byUser, byKey: map[int64]domain.GeoAnomalyPolicy{}}
+	return &geoPolicyCache{s: s, ctx: ctx, byUser: byUser, byKey: map[int64]geoPolicyEntry{}}
 }
 
 // forUser is the effective policy for one user: the stored global values
 // with that user's group overrides on top, or the deployment fallback when
-// no settings are wired, the user is unknown, or the read fails.
+// no settings are wired, the user is unknown, or the read fails. Callers that
+// must tell the fallback from a real answer use lookup.
 func (c *geoPolicyCache) forUser(uid int64) domain.GeoAnomalyPolicy {
+	return c.lookup(uid).policy
+}
+
+// lookup is forUser with its provenance: see geoPolicyEntry.
+func (c *geoPolicyCache) lookup(uid int64) geoPolicyEntry {
 	u := c.byUser[uid]
-	key := int64(0)
-	if u != nil {
-		key = u.GroupID
+	if u == nil {
+		// The owner of a shared client who is missing from this poll's user
+		// list: a user row removed without its psp_clients, or one the
+		// OFFSET-paged list skipped when a row was deleted mid-read. There
+		// is no group to resolve, so it gets the fallback, and it is not
+		// cached. Filed under group 0, as it once was, it decided the policy
+		// of every no-group user for the rest of the poll whenever the map
+		// order reached it first: suspension off, the shipped tolerances,
+		// an armed ban streak wiped, and in Phase 4 a stored 24-hour box
+		// lifted on the fallback's 60 minutes. There is no read behind it,
+		// so there is nothing to cache either.
+		return geoPolicyEntry{policy: c.s.geoPolicy}
 	}
-	if p, ok := c.byKey[key]; ok {
-		return p
+	if e, ok := c.byKey[u.GroupID]; ok {
+		return e
 	}
-	p := c.s.geoPolicy
-	if c.s.settings != nil && u != nil {
+	e := geoPolicyEntry{policy: c.s.geoPolicy, resolved: c.s.settings == nil}
+	if c.s.settings != nil {
 		// LoadForUser is the group's overrides on top of the global
 		// values, whole value by whole value — there is no per-user
 		// layer — and GeoPolicyFromSettings then reads a 0 as "never
@@ -119,7 +159,8 @@ func (c *geoPolicyCache) forUser(uid int64) domain.GeoAnomalyPolicy {
 		// does not, because it is global only and is not part of the
 		// judging policy — it decides which addresses are judged at all.
 		if set, err := c.s.settings.LoadForUser(c.ctx, u, ports.UISettings{}); err == nil {
-			p = domain.GeoPolicyFromSettings(domain.GeoPolicySettings{
+			e.resolved = true
+			e.policy = domain.GeoPolicyFromSettings(domain.GeoPolicySettings{
 				Scope:              set.GeoAnomalyScope,
 				MaxPlaces:          set.GeoAnomalyMaxPlaces,
 				MaxRegions:         set.GeoAnomalyMaxRegions,
@@ -139,12 +180,15 @@ func (c *geoPolicyCache) forUser(uid int64) domain.GeoAnomalyPolicy {
 		} else {
 			// Fall back to the process default rather than to a zero
 			// policy: a zero MaxPlaces would flag every connected user.
-			log.Warn("live-ip observe: could not resolve the location policy; using the deployment default",
-				"user_id", uid, "err", err)
+			// Cached unresolved for the rest of the poll: one Warn per
+			// group, and Phase 4 reads the same answer Phase 1b judged
+			// on (and knows not to time a suspension by it).
+			log.Warn("geo policy: could not read a group's settings; this poll uses the deployment default for it",
+				"user_id", uid, "group_id", u.GroupID, "err", err)
 		}
 	}
-	c.byKey[key] = p
-	return p
+	c.byKey[u.GroupID] = e
+	return e
 }
 
 // observeLiveIPs folds this cycle's per-panel live-IP reads into one row per

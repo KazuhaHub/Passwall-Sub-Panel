@@ -387,6 +387,9 @@ type fakeScoped struct {
 	byGroup map[int64]ports.UISettings
 	loads   int
 	err     error
+	// errFor fails the reads of those groups only, so a group whose read
+	// failed can sit beside a control group that resolved.
+	errFor map[int64]error
 }
 
 func (f *fakeScoped) Load(context.Context, ports.UISettings) (ports.UISettings, error) {
@@ -394,6 +397,9 @@ func (f *fakeScoped) Load(context.Context, ports.UISettings) (ports.UISettings, 
 }
 func (f *fakeScoped) LoadForGroup(_ context.Context, gid int64, _ ports.UISettings) (ports.UISettings, error) {
 	f.loads++
+	if err := f.errFor[gid]; err != nil {
+		return ports.UISettings{}, err
+	}
 	return f.byGroup[gid], f.err
 }
 func (f *fakeScoped) LoadForUser(_ context.Context, u *domain.User, _ ports.UISettings) (ports.UISettings, error) {
@@ -404,6 +410,9 @@ func (f *fakeScoped) LoadForUser(_ context.Context, u *domain.User, _ ports.UISe
 	var gid int64
 	if u != nil {
 		gid = u.GroupID
+	}
+	if err := f.errFor[gid]; err != nil {
+		return ports.UISettings{}, err
 	}
 	return f.byGroup[gid], nil
 }
@@ -499,6 +508,31 @@ func TestObserveLiveIPs_PolicyIsResolvedOncePerGroup(t *testing.T) {
 
 	if sc.loads != 1 {
 		t.Fatalf("settings resolved %d times for 5 users in ONE group, want 1", sc.loads)
+	}
+}
+
+// A psp_client owner missing from the poll's user list (a user row deleted
+// without its shared clients, or one the OFFSET-paged list skipped) has no
+// group to resolve and is judged on the deployment fallback. That answer must
+// not be filed under group 0: "no group" is a real, common state (SSO and
+// legacy rows), and whichever of the two the poll's map order reached first
+// used to decide the policy of every no-group user for the whole poll —
+// suspension off, the shipped tolerances, and in Phase 4 the 60-minute box.
+//
+// The order is forced here by resolving the unknown owner first.
+func TestGeoPolicyCache_AnUnknownOwnerNeverStandsInForTheNoGroupPolicy(t *testing.T) {
+	s := newObserver(nil, nil, domain.DefaultGeoPolicy())
+	s.settings = &fakeScoped{byGroup: map[int64]ports.UISettings{
+		0: {GeoAnomalyBanEnabled: true, GeoAnomalyBanDurationMinutes: 1440},
+	}}
+	pc := s.newGeoPolicyCache(context.Background(), []*domain.User{{ID: 7}}) // no group
+
+	pc.forUser(99) // owns a shared client, missing from the users list
+	got := pc.forUser(7)
+
+	if !got.BanEnabled || got.BanDuration() != 24*time.Hour {
+		t.Fatalf("no-group user after an unknown owner: ban enabled %v, duration %v; want the stored global true, 24h0m0s",
+			got.BanEnabled, got.BanDuration())
 	}
 }
 

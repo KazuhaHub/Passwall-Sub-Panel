@@ -193,21 +193,41 @@ func (s *Service) enforceGeo(ctx context.Context, users []*domain.User, bans []g
 // LiftServiceIfHeldSince on a fresh read under the per-user lock, against a
 // cutoff of now - duration: a user an admin resumed and a concurrent poll
 // re-suspended since this snapshot carries a newer timestamp and is refused.
+//
+// A user whose group's settings could not be read this poll has no known
+// duration, only the fallback's stand-in (geoPolicyEntry). Timing the lift on
+// it would end a longer suspension early — a 24-hour box after the shipped 60
+// minutes — and nothing would restore it, so those lifts wait for a poll that
+// can read the group, timed or untimed alike. They are counted lift_deferred,
+// every one whether or not it would be due (without the duration nobody can
+// say), with one Warn per poll. The read error itself was already logged per
+// group when the policy was resolved.
 func (s *Service) liftDueGeoSuspensions(ctx context.Context, users []*domain.User, pc *geoPolicyCache, now time.Time) {
 	type dueLift struct {
 		u *domain.User
 		d time.Duration
 	}
 	var due []dueLift
+	var unread int
 	for _, u := range users {
 		if u == nil || u.ServiceDisabledReason != domain.DisabledGeoAutoSuspend {
 			continue
 		}
-		d := pc.forUser(u.ID).BanDuration()
+		e := pc.lookup(u.ID)
+		if !e.resolved {
+			unread++
+			continue
+		}
+		d := e.policy.BanDuration()
 		if u.ServiceDisabledAt != nil && now.Before(u.ServiceDisabledAt.Add(d)) {
 			continue
 		}
 		due = append(due, dueLift{u: u, d: d})
+	}
+	if unread > 0 {
+		geoAutoCount("lift_deferred", unread)
+		log.Warn("geo auto-suspension: some groups' settings could not be read; their suspensions are not lifted until a poll can read them",
+			"deferred", unread)
 	}
 	// Longest-running first (an untimed row counts as the oldest), then by
 	// ID, so an over-cap poll is deterministic and nobody waits twice.

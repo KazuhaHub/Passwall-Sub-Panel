@@ -253,7 +253,9 @@ var (
 	// event, or a broken location database with suspension on. A poll
 	// cancelled before Phase 4 finishes (a closed "Poll now" tab, a
 	// shutdown) defers what it had not started and counts it here too;
-	// that shows as a sporadic bump, not a climb.
+	// that shows as a sporadic bump, not a climb. lift_deferred also counts
+	// the suspensions of a group whose settings could not be read that
+	// poll: their duration is unknown, so they are not timed until it is.
 	GeoAutoSuspensionTotal = NewCounterVec(
 		"psp_geo_auto_suspension_total",
 		"Automatic location suspensions by outcome: suspended, skipped_held, skipped_unwired, deferred, suspend_error, lifted_expiry, lifted_admin, lift_skipped, lift_deferred, lift_error.",

@@ -543,6 +543,66 @@ func TestEnforceGeo_LiftUsesTheGroupDuration(t *testing.T) {
 	}
 }
 
+// A group whose settings could not be read this poll has no known duration.
+// The fallback policy's 60 minutes is a safe stand-in for JUDGING (it can only
+// under-report), but for a time box it is the unsafe direction: a 24-hour
+// suspension would end after 60 minutes, and nothing restores it. So those
+// lifts wait for a poll that can read the group, and are counted as waiting.
+//
+// User 1's group stores 1440 minutes and its read fails; 90 minutes have
+// passed, due on the fallback box and not on the stored one. User 2's group
+// resolves to the shipped 60 and is the control.
+func TestEnforceGeo_LiftWaitsWhenTheGroupsSettingsCannotBeRead(t *testing.T) {
+	metrics.Reset()
+	users := &fakeUserRepo{users: map[int64]*domain.User{
+		1: {ID: 1, GroupID: 3, Enabled: true, ServiceDisabledReason: domain.DisabledGeoAutoSuspend, ServiceDisabledAt: minutesAgo(90)},
+		2: {ID: 2, GroupID: 4, Enabled: true, ServiceDisabledReason: domain.DisabledGeoAutoSuspend, ServiceDisabledAt: minutesAgo(90)},
+	}}
+	s, sus, _ := newEnforcer(users, map[int64]ports.UISettings{
+		3: {GeoAnomalyBanDurationMinutes: 1440},
+		4: {},
+	})
+	s.settings.(*fakeScoped).errFor = map[int64]error{3: errors.New("scope overrides unavailable")}
+
+	s.enforceGeo(context.Background(), listed(users), nil, nil, time.Now())
+
+	if got := users.users[1].ServiceDisabledReason; got != domain.DisabledGeoAutoSuspend {
+		t.Fatalf("unreadable group (stored 1440 minutes, 90 elapsed): reason = %q, want geo_auto still", got)
+	}
+	for _, uid := range sus.liftCalls {
+		if uid == 1 {
+			t.Fatal("the lift was attempted for a user whose group's duration is unknown")
+		}
+	}
+	if got := geoOutcome(t, "lift_deferred"); got != 1 {
+		t.Fatalf("lift_deferred = %d, want 1 (the unreadable group's suspension)", got)
+	}
+	if got := users.users[2].ServiceDisabledReason; got != domain.DisabledNone {
+		t.Fatalf("readable group of 60 minutes, 90 elapsed (control): reason = %q, want lifted", got)
+	}
+}
+
+// The unknown-owner collision end to end, as Phase 4 sees it: Phase 1b hands
+// the SAME cache on, so an owner missing from the users list resolved there
+// first must not shorten a no-group user's stored 24-hour box to the
+// fallback's 60 minutes.
+func TestEnforceGeo_AnUnknownOwnerDoesNotShortenANoGroupSuspension(t *testing.T) {
+	metrics.Reset()
+	users := &fakeUserRepo{users: map[int64]*domain.User{
+		7: {ID: 7, Enabled: true, ServiceDisabledReason: domain.DisabledGeoAutoSuspend, ServiceDisabledAt: minutesAgo(90)},
+	}}
+	s, _, _ := newEnforcer(users, map[int64]ports.UISettings{0: {GeoAnomalyBanDurationMinutes: 1440}})
+	list := listed(users)
+	pc := s.newGeoPolicyCache(context.Background(), list)
+	pc.forUser(99) // what Phase 1b resolves for a client whose owner is not listed
+
+	s.enforceGeo(context.Background(), list, nil, pc, time.Now())
+
+	if got := users.users[7].ServiceDisabledReason; got != domain.DisabledGeoAutoSuspend {
+		t.Fatalf("no-group user, stored 1440 minutes, 90 elapsed: reason = %q, want geo_auto still", got)
+	}
+}
+
 // A geo_auto row with no timestamp cannot be timed, so it is due now rather
 // than never: a suspension the detector cannot end would be permanent.
 func TestEnforceGeo_LiftWithoutATimestampLiftsNow(t *testing.T) {
