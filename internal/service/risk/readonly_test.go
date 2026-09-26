@@ -27,6 +27,14 @@ import (
 // and no import beyond the ones a pure observer needs (in particular no
 // adapter, which could open its own writer, and no other service, which
 // would bring its writers along).
+//
+// Nor may the package use reflection itself. The value behind Users is the
+// composition root's full user repository, and
+// reflect.ValueOf(d.Users).MethodByName("SetServiceState").Call(...) reaches
+// its writer without a type assertion anywhere; unsafe reinterprets the value
+// outright, and it is also what //go:linkname needs. text/template,
+// html/template and net/rpc are the same hole one step removed: each calls
+// exported methods by name, through reflect, on whatever it is handed.
 func TestRiskServiceCannotWriteServiceState(t *testing.T) {
 	allowed := map[string][]string{
 		"Users":      {"List"},
@@ -76,6 +84,18 @@ func TestRiskServiceCannotWriteServiceState(t *testing.T) {
 		module + "internal/pkg/metrics": true,
 		module + "internal/pkg/paneltz": true,
 	}
+	// Standard-library packages that call a method named at run time, or
+	// reinterpret a value's memory. Elsewhere the standard library calls only
+	// the fixed methods it documents (fmt's String, encoding/json's
+	// MarshalJSON); plugin hands back an untyped symbol that is useless
+	// without the type assertion the scan below already refuses.
+	importsDenied := map[string]string{
+		"reflect":       "it calls a method by name on the value it is handed",
+		"unsafe":        "it reinterprets a value's memory, and //go:linkname needs it",
+		"text/template": "a template calls exported methods by name, through reflect",
+		"html/template": "a template calls exported methods by name, through reflect",
+		"net/rpc":       "a registered receiver's exported methods are called by name, through reflect",
+	}
 	files, err := filepath.Glob("*.go")
 	if err != nil {
 		t.Fatal(err)
@@ -95,6 +115,9 @@ func TestRiskServiceCannotWriteServiceState(t *testing.T) {
 			path, _ := strconv.Unquote(imp.Path.Value)
 			if strings.HasPrefix(path, module) && !importsAllowed[path] {
 				t.Errorf("%s imports %s: the risk service may import only domain, ports, pkg/log, pkg/metrics and pkg/paneltz", name, path)
+			}
+			if why, denied := importsDenied[path]; denied {
+				t.Errorf("%s imports %s: %s, so it could reach a writer through a read-only dependency", name, path, why)
 			}
 		}
 		ast.Inspect(f, func(n ast.Node) bool {

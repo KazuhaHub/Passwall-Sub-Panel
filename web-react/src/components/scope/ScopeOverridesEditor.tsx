@@ -9,6 +9,8 @@
 import { Box, MenuItem, Switch, TextField, Typography } from '@mui/material'
 import { useTranslation } from 'react-i18next'
 
+import { goParseFloat } from '@/utils/goParseFloat'
+
 import { SCOPE_CATEGORIES, SCOPE_KEYS, type ScopeKeyMeta, type ScopeState } from './scopeOverrides'
 
 const TOGGLE_COL = 124
@@ -78,18 +80,26 @@ export default function ScopeOverridesEditor({
   //     so '1.5' and '1e3' are skipped too. For a float row it is
   //     strconv.ParseFloat (floatField), which takes both, so read with the
   //     int rule a real ratio of 2.5 would be called an override that does
-  //     nothing.
+  //     nothing. It is ParseFloat itself (goParseFloat), not a decimal
+  //     pattern, because the value may have come in through the API: 'Inf',
+  //     'NaN', '1_5' and '0x1.8p1' all apply, and 1e400 is skipped — Go
+  //     calls it out of range where Number() would answer Infinity.
+  // A parsed NaN is neither > 0 nor <= 0. The policy keeps a value only when
+  // it is > 0 (RiskPolicyFromSettings), so NaN takes the default like a 0
+  // does — hence the test is "> 0 or the default", not "<= 0 or nothing".
+  // +Inf applies and means "never over", which is what it says.
   // The field keeps what was typed; the hint says which of the two it is.
-  const parsable = (k: ScopeKeyMeta, raw: string) =>
+  const decode = (k: ScopeKeyMeta, raw: string) =>
     k.kind === 'float'
-      ? /^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$/.test(raw)
-      : /^[+-]?\d+$/.test(raw)
+      ? goParseFloat(raw)
+      : /^[+-]?\d+$/.test(raw) ? Number(raw) : undefined
   const overrideHint = (k: ScopeKeyMeta, raw: string) => {
     if (k.unsetValue === undefined) return null
-    if (!parsable(k, raw)) {
+    const v = decode(k, raw)
+    if (v === undefined) {
       return `= ${t('admin:groups.scope.global_prefix', { defaultValue: '全局' })}: ${fmtVal(k, scope.global[k.key])}`
     }
-    return Number(raw) <= 0 ? `= ${k.unsetValue}${defaultSuffix()}` : null
+    return v > 0 ? null : `= ${k.unsetValue}${defaultSuffix()}`
   }
 
   // Switching an override on copies the inherited value, so the field opens
