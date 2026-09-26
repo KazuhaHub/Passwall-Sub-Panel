@@ -558,6 +558,11 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	// TestBuildWiresTheGeoAutoSuspension guards that.
 	trafficSvc.SetGeoSuspender(userSvc)
 	trafficSvc.SetAuditRepo(repos.Audit)
+	// The observe-only risk signals' store: a concrete repo built from the
+	// database handle like the geo streak store, not a ports.Repos field, so
+	// each consumer is handed only the narrow interface it declares — the
+	// worker below writes it, the admin view lists it, the bell counts it.
+	riskSignals := sqlstore.NewRiskSignalRepo(db)
 
 	// --- transport layer ---
 	// The Node installation template is fetched from the release that published it
@@ -576,6 +581,12 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 		GeoRecords:    geoStreaks,
 		// The same store again, as the bell's count of latched flags.
 		GeoFlags: geoStreaks,
+		// The risk store twice over, the same way: the risk view's rows and
+		// the bell's count of flagged accounts. Both optional, so leaving
+		// either out would compile — TestBuildWiresTheRiskSignals reads both
+		// through the assembled router.
+		RiskSignals: riskSignals,
+		RiskFlags:   riskSignals,
 		// Optional like GeoFlags, so leaving it out would compile and quietly
 		// record every subscription fetch as anonymous.
 		DeviceHasher: deviceHasher,
@@ -650,10 +661,10 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	a.nodeTraffic = repos.NodeTraffic
 	a.nodeMetrics = nodeMetrics
 	// The observe-only risk signals. The worker is handed read-only views and
-	// one store that writes only risk_signals — a concrete repo built from the
-	// database handle like the geo streak store, not a ports.Repos field, so
-	// nothing else is handed its writer. TestBuildWiresTheRiskSignals guards
-	// the wiring: a worker left out compiles, and the table just stays empty.
+	// one store that writes only risk_signals — the store built above, the
+	// one the router reads, so nothing else is handed its writer.
+	// TestBuildWiresTheRiskSignals guards the wiring: a worker left out
+	// compiles, and the table just stays empty.
 	//
 	// The infrastructure set arrives as method values, not as the traffic
 	// service: the worker needs "is this PSP's own address", "has the set
@@ -662,7 +673,7 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	// repo, but the worker's field is an interface with List alone.
 	a.risk = risk.New(risk.Deps{
 		Users:        repos.User,
-		Store:        sqlstore.NewRiskSignalRepo(db),
+		Store:        riskSignals,
 		Settings:     repos.ScopedSettings,
 		Traffic:      repos.Traffic,
 		SubLogs:      repos.SubLog,

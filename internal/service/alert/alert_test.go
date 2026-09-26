@@ -283,14 +283,16 @@ func TestCountsAggregate(t *testing.T) {
 		Panels:     stubPanels{panels: []*domain.XUIPanel{{ID: 3, Name: "p", PanelVersion: "3.2.6"}}},
 		Settings:   stubSettings{s: ports.UISettings{CertRenewBeforeDays: 14}},
 		UpgradeFor: func(string) (string, bool) { return "3.2.8", true }, // 1 info
-		// Two geo singletons: one warning each, however many users are
-		// behind them — the badge counts things to look at, not accounts.
+		// Two geo singletons and the risk singleton: one warning each,
+		// however many users are behind them — the badge counts things to
+		// look at, not accounts.
 		GeoFlags:     &stubGeoFlags{n: 4},
 		ServiceHolds: &stubServiceHolds{byReason: map[domain.AutoDisabledReason]int64{domain.DisabledGeoAutoSuspend: 2}},
+		RiskFlags:    &stubRiskFlags{n: 6},
 	}, now)
 	_, counts := svc.List(context.Background())
-	if counts.Error != 1 || counts.Warning != 3 || counts.Info != 1 {
-		t.Fatalf("counts wrong: %+v, want error 1, warning 3 (cert + two geo entries), info 1", counts)
+	if counts.Error != 1 || counts.Warning != 4 || counts.Info != 1 {
+		t.Fatalf("counts wrong: %+v, want error 1, warning 4 (cert + two geo entries + risk signals), info 1", counts)
 	}
 }
 
@@ -408,5 +410,89 @@ func TestGeoAlertsAreAdminOnly(t *testing.T) {
 		if !typ.AdminOnly() {
 			t.Errorf("%s must be admin-only (the Geo tab is the owner's call, not an operator's)", typ)
 		}
+	}
+}
+
+// ---- risk signals (risk.go) ----
+
+type stubRiskFlags struct {
+	n     int64
+	err   error
+	since time.Time
+	calls int
+}
+
+func (s *stubRiskFlags) CountFlaggedUsers(_ context.Context, since time.Time) (int64, error) {
+	s.calls++
+	s.since = since
+	return s.n, s.err
+}
+
+// ONE entry for the risk signals, whatever the number of accounts and kinds
+// behind it (V3-D5): the count is accounts with any signal flagged, and the
+// entry is a warning like the geo ones — something to review, never an
+// outage. One count per feed request, because every open admin tab polls
+// the feed.
+func TestRiskAlert_CountsFlaggedUsers(t *testing.T) {
+	now := time.Date(2026, 9, 26, 12, 0, 0, 0, time.UTC)
+	flags := &stubRiskFlags{n: 3}
+	got := byType(mustList(t, newSvc(Deps{RiskFlags: flags}, now)), TypeRiskSignals)
+	if len(got) != 1 {
+		t.Fatalf("risk_signals alerts = %+v, want exactly one singleton", got)
+	}
+	a := got[0]
+	if a.Key != "risk_signals" || string(a.Type) != "risk_signals" || a.Severity != SeverityWarning || a.Count != 3 {
+		t.Fatalf("risk_signals = %+v, want key and type risk_signals, severity warning, count 3", a)
+	}
+	if a.TargetID != 0 || a.TargetName != "" {
+		t.Fatalf("risk_signals = %+v names an account; the bell carries a count, the tab carries the names", a)
+	}
+	if flags.calls != 1 {
+		t.Fatalf("CountFlaggedUsers called %d times for one feed request, want 1", flags.calls)
+	}
+}
+
+// Nobody flagged, no entry. And a failing count costs only this entry: the
+// geo entries and node health beside it must survive, as they do for every
+// other failing source here.
+func TestRiskAlert_SilentWhenNone(t *testing.T) {
+	now := time.Date(2026, 9, 26, 12, 0, 0, 0, time.UTC)
+	if got := byType(mustList(t, newSvc(Deps{RiskFlags: &stubRiskFlags{}}, now)), TypeRiskSignals); len(got) != 0 {
+		t.Fatalf("risk_signals with nobody flagged = %+v, want none", got)
+	}
+	failing := newSvc(Deps{
+		RiskFlags: &stubRiskFlags{n: 5, err: errors.New("db down")},
+		GeoFlags:  &stubGeoFlags{n: 2},
+		Nodes:     stubNodes{nodes: []*domain.Node{{ID: 1, Enabled: true, HealthState: domain.NodeHealthUnreachable}}},
+	}, now)
+	all := mustList(t, failing)
+	if got := byType(all, TypeRiskSignals); len(got) != 0 {
+		t.Fatalf("risk_signals on a count error = %+v, want none", got)
+	}
+	if len(byType(all, TypeNodeHealth)) != 1 || len(byType(all, TypeGeoAnomaly)) != 1 {
+		t.Fatalf("a failing risk count took other entries with it: %+v", all)
+	}
+}
+
+// The count is bounded to rows the worker wrote in the last day, the geo
+// entry's window: a flag the hourly worker stopped rewriting — a dead loop,
+// a kind skipped for days — must stop lighting the bell rather than stay on
+// screen as if it were current.
+func TestRiskAlert_UsesTheFreshnessWindow(t *testing.T) {
+	now := time.Date(2026, 9, 26, 12, 0, 0, 0, time.UTC)
+	flags := &stubRiskFlags{n: 1}
+	mustList(t, newSvc(Deps{RiskFlags: flags}, now))
+	if want := now.Add(-24 * time.Hour); !flags.since.Equal(want) {
+		t.Fatalf("CountFlaggedUsers since = %v, want %v (24 hours before now)", flags.since, want)
+	}
+}
+
+// The entry leads to the risk tab, which is admin-only for the Geo tab's
+// reason: it names people on signals, not proof. The feed route is
+// staff-visible, so AdminOnly is what keeps an operator from being handed
+// the link or a badge that counts it.
+func TestRiskAlertIsAdminOnly(t *testing.T) {
+	if !TypeRiskSignals.AdminOnly() {
+		t.Fatal("risk_signals must be admin-only (the risk tab is the owner's call, not an operator's)")
 	}
 }

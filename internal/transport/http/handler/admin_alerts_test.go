@@ -172,3 +172,43 @@ func TestAdminAlerts_OperatorNeverSeesGeoAlerts(t *testing.T) {
 		t.Fatalf("counts must be recomputed without the geo warnings: %s", op)
 	}
 }
+
+type alRiskFlags struct{ n int64 }
+
+func (a alRiskFlags) CountFlaggedUsers(context.Context, time.Time) (int64, error) { return a.n, nil }
+
+// The risk entry leads to the risk tab, admin-only for the Geo tab's reason:
+// it names people on signals, not proof. On the staff-visible feed route an
+// operator must get neither the entry nor a badge count that includes it;
+// the admin, on the same service, gets it.
+func TestAdminAlerts_OperatorNeverSeesRiskSignals(t *testing.T) {
+	svc := alert.New(alert.Deps{
+		Nodes:     alNodes{n: []*domain.Node{{ID: 1, DisplayName: "n1", Enabled: true, HealthState: domain.NodeHealthUnreachable}}},
+		RiskFlags: alRiskFlags{n: 3},
+	})
+	h := NewAdminAlertsHandler(svc)
+
+	c, rr := claimsCtx(domain.RoleAdmin)
+	c.Request = httptest.NewRequest(http.MethodGet, "/api/admin/alerts", nil)
+	h.List(c)
+	if admin := rr.Body.String(); !strings.Contains(admin, `"risk_signals"`) || !strings.Contains(admin, `"warning":1`) {
+		t.Fatalf("admin must see the risk_signals entry and its warning: %s", admin)
+	}
+
+	c, rr = claimsCtx(domain.RoleOperator)
+	c.Request = httptest.NewRequest(http.MethodGet, "/api/admin/alerts", nil)
+	h.List(c)
+	op := rr.Body.String()
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d, want 200", rr.Code)
+	}
+	if !strings.Contains(op, `"node_health"`) {
+		t.Fatalf("operator must still see node_health: %s", op)
+	}
+	if strings.Contains(op, `"risk_signals"`) {
+		t.Fatalf("operator must NOT see the risk_signals entry (the risk tab is admin-only): %s", op)
+	}
+	if !strings.Contains(op, `"warning":0`) {
+		t.Fatalf("counts must be recomputed without the risk warning: %s", op)
+	}
+}

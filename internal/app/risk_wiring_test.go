@@ -3,6 +3,8 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -11,8 +13,10 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/adapters/sqlstore"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/config"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/jwtutil"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/operationgate"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/alert"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/risk"
 )
 
@@ -35,6 +39,10 @@ import (
 // resolver cannot be told apart here — no database is installed, so a wired
 // one and a missing one both read geo_unavailable — and neither can the
 // landing addresses, which matter only through the countries it would name.
+//
+// The read side is optional in the same way: the admin endpoint and the
+// bell's count are router deps that compile when left out, so the test ends
+// by reading both through the assembled router.
 func TestBuildWiresTheRiskSignals(t *testing.T) {
 	ctx := t.Context()
 	directory := t.TempDir()
@@ -87,7 +95,7 @@ func TestBuildWiresTheRiskSignals(t *testing.T) {
 	}
 
 	// The store is not on App, so this opens the same database file Build
-	// opened, the way the admin view will read it.
+	// opened.
 	db, err := sqlstore.Open(cfg.DBKind(), cfg.DBDSN())
 	if err != nil {
 		t.Fatal(err)
@@ -170,6 +178,99 @@ func TestBuildWiresTheRiskSignals(t *testing.T) {
 	if login.State != domain.GeoStateUnknown || login.Code != domain.RiskCodeGeoUnavailable || lev.Recent != 1 {
 		t.Fatalf("login_country = %s/%s with %d recent logins, want unknown/geo_unavailable with the one login read",
 			login.State, login.Code, lev.Recent)
+	}
+
+	// The read side. Both the endpoint's store and the bell's count are
+	// optional router deps, so leaving either out compiles: the endpoint
+	// answers 503 and the bell never lights. A flagged row, written through
+	// the same store the worker uses, has to reach both through the
+	// assembled router.
+	if err := sqlstore.NewRiskSignalRepo(db).Save(ctx, []domain.RiskSignal{{
+		UserID: u.ID, Kind: domain.RiskKindDevices, State: domain.GeoStateFlagged, Code: domain.RiskCodeOver,
+		Evidence: json.RawMessage(`{"v":1}`),
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	admin := &domain.User{
+		UPN: "risk-admin@example.test", Email: "risk-admin@example.test", SSOProvider: domain.SSOProviderLocal,
+		SSOSubject: "risk-admin@example.test", Role: domain.RoleAdmin, Enabled: true,
+		UUID: "77777777-7777-4777-8777-777777777778", SubToken: "fixture-risk-admin-subscription-token",
+		TrafficResetPeriod: domain.ResetMonthly,
+	}
+	if err := a.repos.User.Create(ctx, admin); err != nil {
+		t.Fatal(err)
+	}
+	// A token the application's own verifier accepts: same secret, same
+	// issuer setting.
+	set, err := a.repos.Settings.Load(ctx, ports.UISettings{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	token, err := jwtutil.NewIssuer(cfg.JWTSecret, func() jwtutil.Params {
+		return jwtutil.Params{AccessTTL: time.Hour, RefreshTTL: time.Hour, Issuer: set.JWTIssuer}
+	}).IssueAccess(admin.ID, admin.UPN, admin.Role, admin.TokenVersion)
+	if err != nil {
+		t.Fatal(err)
+	}
+	get := func(path string) *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+		rec := httptest.NewRecorder()
+		a.server.Handler.ServeHTTP(rec, req)
+		return rec
+	}
+
+	rec := get("/api/admin/alerts")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /api/admin/alerts = %d: %s", rec.Code, rec.Body.String())
+	}
+	var feed struct {
+		Alerts []alert.Alert `json:"alerts"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &feed); err != nil {
+		t.Fatalf("decode: %v (%s)", err, rec.Body.String())
+	}
+	riskCount := 0
+	for _, item := range feed.Alerts {
+		if item.Type == alert.TypeRiskSignals {
+			riskCount = item.Count
+		}
+	}
+	if riskCount != 1 {
+		t.Fatalf("risk_signals count = %d in %s, want 1 — is the risk store wired into the alert service?", riskCount, rec.Body.String())
+	}
+
+	rec = get("/api/admin/risk-signals")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /api/admin/risk-signals = %d: %s — is the risk store wired into the router?", rec.Code, rec.Body.String())
+	}
+	var list struct {
+		Items []struct {
+			UserID  int64  `json:"user_id"`
+			UPN     string `json:"upn"`
+			Signals []struct {
+				Kind  string `json:"kind"`
+				State string `json:"state"`
+			} `json:"signals"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &list); err != nil {
+		t.Fatalf("decode: %v (%s)", err, rec.Body.String())
+	}
+	found := false
+	for _, it := range list.Items {
+		if it.UserID != u.ID || it.UPN != u.UPN {
+			continue
+		}
+		for _, sig := range it.Signals {
+			if sig.Kind == string(domain.RiskKindDevices) && sig.State == string(domain.GeoStateFlagged) {
+				found = true
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("GET /api/admin/risk-signals = %s, want %s with the flagged devices signal", rec.Body.String(), u.UPN)
 	}
 }
 
