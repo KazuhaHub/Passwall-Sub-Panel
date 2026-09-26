@@ -306,7 +306,10 @@ func (s *Service) observeLiveIPs(ctx context.Context, in liveIPInput) []geoBan {
 		// else notices the data did not change) a sustained streak in
 		// seconds. A user judged less than half an interval ago is left
 		// exactly as stored — no row write, no metric — so the scheduled
-		// polls, an interval apart, are what count. A PSP clock stepping
+		// polls, an interval apart, are what normally count. Only elapsed
+		// time is checked, not who started the poll, so a scheduled poll
+		// can be skipped as well (right after a manual one, or after the
+		// interval is raised; see PollOnce). A PSP clock stepping
 		// backwards also reads as "too soon" until it passes the stored
 		// time again; that pauses judging and never accuses anyone.
 		if in.minSpacing > 0 {

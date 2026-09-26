@@ -1416,6 +1416,62 @@ func TestPollOnce_WiresTheSampleSpacingFromTheTrafficInterval(t *testing.T) {
 	}
 }
 
+// The spacing is half the interval THIS poll reads, not the one the traffic
+// loop's ticker still holds. So raising cron_traffic_pull_minutes to more
+// than twice its old value makes the next SCHEDULED poll — which fires on
+// the old cadence, because the loop picks up the edit only after that tick —
+// skip everyone judged one old interval ago. Pinned because the metric's
+// comment and docs/connection-limits.md say so: psp_geo_samples_spaced_total
+// rising is not by itself proof that someone is pressing "poll now".
+//
+// Two users so the spacing is shown to be exactly half of 20 minutes: the
+// one judged 5 minutes ago (the old 5-minute tick) is skipped, the one
+// judged 11 minutes ago is judged.
+func TestPollOnce_SpacingFollowsTheIntervalThisPollReads(t *testing.T) {
+	metrics.Reset()
+	users := &fakeUserRepo{users: map[int64]*domain.User{
+		1: {ID: 1, Enabled: true},
+		2: {ID: 2, Enabled: true},
+	}}
+	psp := &fakePSPClientRepo{byUser: map[int64][]*domain.PSPClient{
+		1: {{ID: 1, UserID: 1, PanelID: 10, Email: "u1@psp.local"}},
+		2: {{ID: 2, UserID: 2, PanelID: 10, Email: "u2@psp.local"}},
+	}}
+	base := &fakeXUIClient{
+		inbounds: []ports.Inbound{{ID: 20}},
+		liveIPs: map[string][]string{
+			"u1@psp.local": {"1.1.1.1", "2.2.2.2"},
+			"u2@psp.local": {"1.1.1.1", "2.2.2.2"},
+		},
+	}
+	pool := &fakeXUIPool{clients: map[int64]ports.XUIClient{10: &liveIPReaderFake{fakeXUIClient: base}}}
+	now := time.Now()
+	store := &upsertStreaks{data: map[int64]domain.GeoRecord{
+		1: {UserID: 1, UpdatedAtMS: now.Add(-5 * time.Minute).UnixMilli()},
+		2: {UserID: 2, UpdatedAtMS: now.Add(-11 * time.Minute).UnixMilli()},
+	}}
+	svc := New(users, &fakeOwnershipRepo{byUser: map[int64][]*domain.XUIClientEntry{}},
+		&fakeTrafficRepo{}, nil, nil, pool, &fakeDisabler{})
+	// Just raised from 5: the loop's ticker still fires on the 5-minute tick.
+	svc.WithSettings(&fakeScoped{global: ports.UISettings{CronTrafficPullMinutes: 20}})
+	svc.SetPSPClientRepo(psp)
+	svc.SetGeoResolver(twoCountries())
+	svc.SetGeoStreakStore(store)
+
+	if err := svc.PollOnce(context.Background()); err != nil {
+		t.Fatalf("PollOnce: %v", err)
+	}
+	if store.wrote(1) {
+		t.Fatal("a user judged one old 5-minute interval ago was judged; the spacing must be half of the 20 minutes this poll read")
+	}
+	if !store.wrote(2) {
+		t.Fatal("a user judged 11 minutes ago was not judged; the spacing is longer than half of 20 minutes")
+	}
+	if got := counterFor(t, "psp_geo_samples_spaced_total"); got != 1 {
+		t.Fatalf("psp_geo_samples_spaced_total = %d, want 1 — a scheduled poll counts here too", got)
+	}
+}
+
 // The ignore list an admin SAVED must reach the judgement, not only the list
 // a test hands the observer. The relay or office exit on it would otherwise
 // keep being placed as the user's location — the fail-open the list exists to

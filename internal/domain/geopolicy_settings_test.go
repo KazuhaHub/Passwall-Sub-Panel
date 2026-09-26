@@ -207,6 +207,27 @@ func TestGeoPolicyFromSettings_BanDurationIsClamped(t *testing.T) {
 	}
 }
 
+// A NEGATIVE stored number is "never configured" too, exactly like 0: it
+// becomes the shipped default, not the clamp edge sanitized() would give it
+// (1 for a tolerance or a count, 0 for the ratio, 1 minute for the duration).
+// A group override is where one comes from — the editor's number box and the
+// API both accept a minus sign — and docs/connection-limits.md tells the
+// operator what such a value does, so the answer is pinned field by field
+// over the whole policy: a knob added later whose guard lets a negative
+// through to sanitized() fails here instead of quietly meaning 1.
+func TestGeoPolicyFromSettings_NegativeStoredValuesMeanTheDefault(t *testing.T) {
+	got := GeoPolicyFromSettings(GeoPolicySettings{
+		MaxPlaces: -1, MaxRegions: -1, MaxCities: -1,
+		FlagAfterPolls: -1, ClearAfterPolls: -1,
+		MinPlacedRatio:  -0.5,
+		BanMaxCountries: -1, BanMaxRegions: -1, BanMaxCities: -1,
+		BanAfterPolls: -1, BanDurationMinutes: -1,
+	})
+	if want := DefaultGeoPolicy(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("negative settings = %+v\nwant the shipped default %+v", got, want)
+	}
+}
+
 // Co-travel folds COUNTRIES only. A token like "JP/Kanto" — the shape v1's
 // region scope suggested — could never match a country code, so it used to
 // sit in the set looking like a rule while doing nothing. It is dropped, and

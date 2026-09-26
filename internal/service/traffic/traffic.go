@@ -570,10 +570,17 @@ func (s *Service) PollOnce(ctx context.Context) (err error) {
 	// panel: the automatic suspensions due this cycle (only where a group
 	// armed them) come back as bans, applied in Phase 4 below.
 	//
-	// minSpacing is half the configured interval: the scheduled polls are a
-	// whole interval apart and always count, while a manual poll landing
-	// right after one does not. It is 0 only when no settings are wired
-	// (the loader defaults the interval to 5 minutes), which disables it.
+	// minSpacing is half the configured interval: scheduled polls a whole
+	// interval apart count, while a manual poll landing right after one does
+	// not. The check is elapsed time only, so a SCHEDULED poll is skipped too
+	// whenever it lands under half an interval after the last judgement:
+	// the tick right after a manual poll that judged, or the first tick
+	// after the interval is raised to more than twice its old value
+	// (pollCfg is loaded at the top of every PollOnce, while runTrafficLoop
+	// resets its ticker only after that tick fired on the old cadence).
+	// Either one only delays a judgement. It is 0 only when no settings are
+	// wired (the loader defaults the interval to 5 minutes), which disables
+	// it.
 	//
 	// pc outlives this phase on purpose: Phase 4 reads each user's
 	// suspension duration through the same per-group resolution.

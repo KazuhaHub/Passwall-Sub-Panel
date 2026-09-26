@@ -237,9 +237,16 @@ var (
 		"tier",
 	)
 	// Users NOT re-judged because their last judgement was less than half a
-	// poll interval ago. Only a manual poll can produce one; a steady count
-	// means someone is pressing "poll now" repeatedly, which is exactly the
-	// acceleration this guard refuses to count.
+	// poll interval ago. The guard measures elapsed time only, not who
+	// started the poll, so a manual "poll now" is not the only source: a
+	// scheduled poll that follows a manual one by less than half an
+	// interval counts here, and so does the first scheduled poll after
+	// cron_traffic_pull_minutes is raised to more than twice its old value
+	// (the ticker still fires on the old cadence while the spacing is
+	// already half the new one). A rise is therefore not proof that someone
+	// is pressing "poll now"; a count that keeps climbing with no interval
+	// change and no clock step is the shape of repeated clicks, which is
+	// exactly the acceleration this guard refuses to count.
 	GeoSamplesSpacedTotal = NewCounter(
 		"psp_geo_samples_spaced_total",
 		"Users skipped by the location detector because they were judged less than half a traffic interval ago.",
