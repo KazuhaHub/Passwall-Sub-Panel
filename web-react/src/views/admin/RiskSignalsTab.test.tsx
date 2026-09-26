@@ -178,6 +178,37 @@ describe('RiskSignalsTab rows', () => {
     expect(screen.queryByText('第 2 组')).not.toBeNull()
   })
 
+  it('names a province in the admin\'s language where its ISO code is known', async () => {
+    // zh-CN from the real bundle: the province line and the client's
+    // "visited" line both read 广东, and a province without a code keeps the
+    // database's name.
+    serve([user(1, 'alice', [
+      sig('sub_spread', 'suspect', {
+        code: 'spread_building',
+        evidence: {
+          v: 1, window_days: 3, window_start: '2026-09-18', retention_days: 3, min_days: 3, min_placed_pct: 50,
+          tolerance: 1, country: 'CN', groups: 1, groups_all: 2,
+          provinces: [
+            { cc: 'CN', region: 'Guangdong', rc: 'GD', days: 0b111, established: true, group: 1 },
+            { cc: 'CN', region: 'Hunan', days: 0b001, established: false, group: 2 },
+          ],
+          identities: [{ kind: 'ua', label: 'ClashMeta/1.0', days: 0b111, provinces: [0] }],
+          foreign: [], excluded: { shared: 0, listed: 0, infra: 0, internal: 0 },
+          coverage: { sources: 3, placed: 3, region_known: 3 },
+        },
+      }),
+    ])])
+    mount()
+
+    await screen.findByText('alice')
+    fireEvent.click(within(rowOf('alice')).getByRole('button', { name: '查看证据' }))
+
+    expect(await screen.findByText('广东')).toBeTruthy()
+    expect(screen.queryByText('Guangdong')).toBeNull()
+    expect(screen.queryByText('Hunan')).not.toBeNull()
+    expect(screen.queryByText('去过：广东')).not.toBeNull()
+  })
+
   it('opens the Geo tab from the concurrent-location chip', async () => {
     serve([user(1, 'alice', [sig('devices', 'clean')],
       { geo: { state: 'idle', flagged: true, tier: 'region', updated_at_ms: 1 } })])

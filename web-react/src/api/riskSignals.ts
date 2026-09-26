@@ -68,7 +68,9 @@ export interface SubSpreadEvidence {
   /** Groups holding a recurring province; groups ≤ groups_all always. */
   groups: number
   groups_all: number
-  provinces: { cc: string; region: string; days: number; established: boolean; group: number }[]
+  /** `rc` is the region's ISO 3166-2 code, display only, absent when the
+   *  database gave none; the province is still keyed by (cc, region). */
+  provinces: { cc: string; region: string; rc?: string; days: number; established: boolean; group: number }[]
   /** `provinces` are indexes into the provinces above. */
   identities: { kind: 'hwid' | 'ua'; label: string; hwid4?: string; days: number; provinces: number[] }[]
   /** Every other placed country: context only, never judged. */

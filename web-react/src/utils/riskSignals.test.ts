@@ -255,4 +255,12 @@ describe('placeLabel', () => {
     expect(placeLabel({ cc: 'CN', region: 'Guangdong' })).toBe('Guangdong')
     expect(placeLabel({ cc: 'CN', region: '' })).toBe('CN')
   })
+
+  it('names the province through the namer it is given', () => {
+    // The one hook: the tab passes regionNamer, which maps the ISO code to
+    // the admin's language, and the country stays the fallback for a namer
+    // with nothing to say.
+    expect(placeLabel({ cc: 'CN', region: 'Guangdong', rc: 'GD' }, () => '广东')).toBe('广东')
+    expect(placeLabel({ cc: 'CN', region: 'Guangdong', rc: 'GD' }, () => '')).toBe('CN')
+  })
 })

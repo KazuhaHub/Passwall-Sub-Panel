@@ -123,7 +123,9 @@ export function reasonText(row: GeoAnomaly, t: Translate): string {
 export interface SpotTree {
   cc: string
   n: number
-  regions: { region: string; n: number; cities: { city: string; n: number }[] }[]
+  /** `rc` is the region's ISO 3166-2 code, present only when a spot gave one:
+   *  display only, the region is still keyed by its name. */
+  regions: { region: string; rc?: string; n: number; cities: { city: string; n: number }[] }[]
 }
 
 /**
@@ -149,27 +151,52 @@ function bySpotOrder<T extends { n: number }>(name: (x: T) => string) {
  * the tree so each level reads as "how many of the judged sources were here".
  * The evidence caps spots server-side, so the sums describe what was recorded,
  * which is what the verdict's reason names too.
+ *
+ * A region's code is the smallest non-empty `rc` among its spots, the rule
+ * the server applies (domain.PreferRegionCode). The server already gives one
+ * region one code per poll; picking the same way here keeps the tree
+ * deterministic whatever order the spots arrive in. It never splits a region —
+ * the key stays the name — and a region with no code gets no `rc` property at
+ * all, so its node is shaped as it always was.
  */
 export function groupSpots(spots: GeoSpot[]): SpotTree[] {
-  const countries = new Map<string, Map<string, Map<string, number>>>()
+  const countries = new Map<string, Map<string, { rc: string; cities: Map<string, number> }>>()
   for (const s of spots) {
     let regions = countries.get(s.cc)
     if (!regions) countries.set(s.cc, (regions = new Map()))
-    let cities = regions.get(s.region)
-    if (!cities) regions.set(s.region, (cities = new Map()))
-    cities.set(s.city, (cities.get(s.city) ?? 0) + s.n)
+    let r = regions.get(s.region)
+    if (!r) regions.set(s.region, (r = { rc: '', cities: new Map() }))
+    const rc = s.rc ?? ''
+    if (rc !== '' && (r.rc === '' || rc < r.rc)) r.rc = rc
+    r.cities.set(s.city, (r.cities.get(s.city) ?? 0) + s.n)
   }
   const out: SpotTree[] = []
   for (const [cc, regions] of countries) {
     const rs: SpotTree['regions'] = []
-    for (const [region, cities] of regions) {
+    for (const [region, { rc, cities }] of regions) {
       const cs = [...cities].map(([city, n]) => ({ city, n })).sort(bySpotOrder(c => c.city))
-      rs.push({ region, n: cs.reduce((sum, c) => sum + c.n, 0), cities: cs })
+      rs.push({ region, ...(rc ? { rc } : {}), n: cs.reduce((sum, c) => sum + c.n, 0), cities: cs })
     }
     rs.sort(bySpotOrder(r => r.region))
     out.push({ cc, n: rs.reduce((sum, r) => sum + r.n, 0), regions: rs })
   }
   return out.sort(bySpotOrder(c => c.cc))
+}
+
+/**
+ * The farthest pair of the row's concurrent sources, in km after both
+ * accuracy radii (rounded to 10 by the server), or 0 for nothing to show.
+ *
+ * Only v3 evidence can carry it. Before that an absent max_km means "not
+ * recorded", and a number on such a row is not one this build vouches for.
+ * On v3, absent or 0 means no distance was measured (fewer than two located
+ * sources below the country) or every pair lay within its radii — never "the
+ * same place" — so it is not shown either. Display only: the verdict never
+ * reads it.
+ */
+export function spreadKm(ev: GeoEvidence | undefined): number {
+  const km = ev && ev.v >= 3 ? ev.spread?.max_km : undefined
+  return typeof km === 'number' && Number.isFinite(km) && km > 0 ? Math.round(km) : 0
 }
 
 /**
