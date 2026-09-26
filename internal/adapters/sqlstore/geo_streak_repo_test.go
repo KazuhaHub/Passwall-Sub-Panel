@@ -651,3 +651,49 @@ func TestGeoStreakRepo_CountFlaggedIgnoresRowsTheDetectorStoppedJudging(t *testi
 		t.Fatalf("CountFlagged = %d, want 1 (a latch last judged 25 hours ago is outside a 24-hour window)", n)
 	}
 }
+
+// Every save is a judgement, so every save must move updated_at — the upsert
+// names it in DoUpdates for exactly that. Left out, the column keeps the
+// row's FIRST insert time forever, and two readers go wrong without a single
+// error: the poll's sample spacing compares now against that first judgement,
+// so after one half-interval every "poll now" click counts as a sample again;
+// and the bell's CountFlagged(now-24h) drops a latch the poll re-judges every
+// cycle once the row turns a day old. The row is aged by hand, the way the
+// test above does, so a second save within the same millisecond cannot pass
+// by accident.
+func TestGeoStreakRepo_ReSaveAdvancesUpdatedAt(t *testing.T) {
+	r, users, db := newStreakRepoWithUsers(t)
+	ctx := context.Background()
+	u := createServiceStateUser(t, users, 1)
+	flagged := domain.GeoRecord{State: domain.GeoStateFlagged, Streak: domain.GeoStreak{Over: 3, Flagged: true, Tier: domain.GeoTierCity}}
+	if err := r.Save(ctx, map[int64]domain.GeoRecord{u.ID: flagged}); err != nil {
+		t.Fatalf("first save: %v", err)
+	}
+	aged := time.Now().Add(-25 * time.Hour).UnixMilli()
+	if err := db.Exec("UPDATE geo_streaks SET updated_at = ? WHERE user_id = ?", aged, u.ID).Error; err != nil {
+		t.Fatalf("age the row: %v", err)
+	}
+
+	before := time.Now()
+	if err := r.Save(ctx, map[int64]domain.GeoRecord{u.ID: flagged}); err != nil {
+		t.Fatalf("second save: %v", err)
+	}
+	loaded, err := r.Load(ctx)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	// GORM stamps the column from the process clock at save time
+	// (autoUpdateTime:milli), not from the database's, so it cannot read
+	// earlier than the moment just before the save.
+	if got := loaded[u.ID].UpdatedAtMS; got < before.UnixMilli() {
+		t.Fatalf("updated_at = %d after a re-save, want the second save's time (>= %d); the aged value was %d",
+			got, before.UnixMilli(), aged)
+	}
+	n, err := r.CountFlagged(ctx, time.Now().Add(-24*time.Hour))
+	if err != nil {
+		t.Fatalf("CountFlagged: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("CountFlagged = %d, want 1 — a latch judged just now is inside a 24-hour window", n)
+	}
+}

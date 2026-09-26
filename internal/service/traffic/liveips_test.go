@@ -1415,3 +1415,43 @@ func TestPollOnce_WiresTheSampleSpacingFromTheTrafficInterval(t *testing.T) {
 		t.Fatalf("psp_geo_samples_spaced_total = %d, want 1", got)
 	}
 }
+
+// The ignore list an admin SAVED must reach the judgement, not only the list
+// a test hands the observer. The relay or office exit on it would otherwise
+// keep being placed as the user's location — the fail-open the list exists to
+// prevent — and nothing would tell the admin: the setting still reads back as
+// saved. Two addresses in two countries are over the default tolerance, so
+// only the stored entry keeps this user in one place.
+func TestPollOnce_WiresTheStoredIgnoreList(t *testing.T) {
+	metrics.Reset()
+	users := &fakeUserRepo{users: map[int64]*domain.User{1: {ID: 1, Enabled: true}}}
+	psp := &fakePSPClientRepo{byUser: map[int64][]*domain.PSPClient{
+		1: {{ID: 1, UserID: 1, PanelID: 10, Email: "u1@psp.local"}},
+	}}
+	base := &fakeXUIClient{
+		inbounds: []ports.Inbound{{ID: 20}},
+		liveIPs:  map[string][]string{"u1@psp.local": {"1.1.1.1", "2.2.2.2"}},
+	}
+	pool := &fakeXUIPool{clients: map[int64]ports.XUIClient{10: &liveIPReaderFake{fakeXUIClient: base}}}
+	store := &upsertStreaks{}
+	svc := New(users, &fakeOwnershipRepo{byUser: map[int64][]*domain.XUIClientEntry{}},
+		&fakeTrafficRepo{}, nil, nil, pool, &fakeDisabler{})
+	svc.WithSettings(&fakeScoped{global: ports.UISettings{GeoAnomalyIgnoreAddresses: "2.2.2.2 # the office exit"}})
+	svc.SetPSPClientRepo(psp)
+	svc.SetGeoResolver(twoCountries())
+	svc.SetGeoStreakStore(store)
+
+	if err := svc.PollOnce(context.Background()); err != nil {
+		t.Fatalf("PollOnce: %v", err)
+	}
+	rec, ok := store.data[1]
+	if !ok {
+		t.Fatal("user 1 was not judged")
+	}
+	if rec.Evidence.Excluded.Listed != 1 {
+		t.Fatalf("listed exclusions = %d, want 1 — PollOnce did not pass the stored ignore list", rec.Evidence.Excluded.Listed)
+	}
+	if len(rec.Places) != 1 || rec.State == domain.GeoStateSuspect || rec.State == domain.GeoStateFlagged {
+		t.Fatalf("state = %q places = %v (%s); the listed address must not be a second country", rec.State, rec.Places, rec.Reason)
+	}
+}

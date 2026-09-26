@@ -186,6 +186,123 @@ func TestSuspendServiceIfClear_WaitsForTheEmergencyLock(t *testing.T) {
 	}
 }
 
+// Both geo transitions hold lockUser, the per-user lock ResyncMembership
+// holds, across the write AND the push. Without it a resync that read the
+// user as active before the suspension can push enable=true after the
+// suspension pushed enable=false, and the upstream client keeps serving a row
+// that says geo_auto until the next push or heal. The emergency lock above
+// has its own test; this is the other one. The lock is released before any
+// assertion can end the test, so a failure cannot strand the call.
+func TestSuspendServiceIfClear_WaitsForTheUserLock(t *testing.T) {
+	h := newGeoAutoHarness(&domain.User{ID: 7, Enabled: true})
+	done := make(chan bool, 1)
+
+	unlock := h.svc.lockUser(7)
+	go func() {
+		applied, _ := h.svc.SuspendServiceIfClear(context.Background(), 7, domain.DisabledGeoAutoSuspend, "d")
+		done <- applied
+	}()
+	time.Sleep(50 * time.Millisecond)
+	held, pushed := h.repo.byID[7].ServiceDisabledReason, len(h.life.calls)
+	unlock()
+	if held != domain.DisabledNone || pushed != 0 {
+		t.Errorf("reason = %q, pushes = %d while the user lock was held, want '' and 0 (the write must wait)", held, pushed)
+	}
+
+	select {
+	case applied := <-done:
+		if !applied {
+			t.Fatal("applied = false after the lock was released, want true")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("SuspendServiceIfClear never returned after the lock was released")
+	}
+	if got := h.repo.byID[7].ServiceDisabledReason; got != domain.DisabledGeoAutoSuspend {
+		t.Fatalf("reason = %q after the lock was released, want geo_auto", got)
+	}
+}
+
+// The lift's side of the same lock: its fresh read, clear and push wait for a
+// resync in flight, so the resync's lifecycle push cannot land after the
+// lift's and disable a client the row says is serving again.
+func TestLiftServiceIfHeldSince_WaitsForTheUserLock(t *testing.T) {
+	at := time.Now().Add(-2 * time.Hour)
+	h := newGeoAutoHarness(&domain.User{ID: 7, Enabled: true, ServiceDisabledReason: domain.DisabledGeoAutoSuspend, ServiceDisabledAt: &at})
+	done := make(chan bool, 1)
+
+	unlock := h.svc.lockUser(7)
+	go func() {
+		lifted, _ := h.svc.LiftServiceIfHeldSince(context.Background(), 7, domain.DisabledGeoAutoSuspend, time.Now())
+		done <- lifted
+	}()
+	time.Sleep(50 * time.Millisecond)
+	held, pushed := h.repo.byID[7].ServiceDisabledReason, len(h.life.calls)
+	unlock()
+	if held != domain.DisabledGeoAutoSuspend || pushed != 0 {
+		t.Errorf("reason = %q, pushes = %d while the user lock was held, want geo_auto and 0 (the lift must wait)", held, pushed)
+	}
+
+	select {
+	case lifted := <-done:
+		if !lifted {
+			t.Fatal("lifted = false after the lock was released, want true")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("LiftServiceIfHeldSince never returned after the lock was released")
+	}
+	if got := h.repo.byID[7].ServiceDisabledReason; got != domain.DisabledNone {
+		t.Fatalf("reason = %q after the lock was released, want cleared", got)
+	}
+}
+
+// adminPausesAfterReadRepo is the user repository at the one moment a
+// synchronous test cannot otherwise reach: the lift's fresh read returns the
+// due geo_auto row, and an admin's pause lands right after it, before the
+// clear. SetServiceSuspendedAndSync takes no per-user lock, so lockUser does
+// not keep it out; only the clear's own predicate does. One-shot, so any
+// later read sees the row as it now is.
+type adminPausesAfterReadRepo struct {
+	*memoryUserRepo
+	pausedAt time.Time
+	paused   bool
+}
+
+func (r *adminPausesAfterReadRepo) GetByID(ctx context.Context, id int64) (*domain.User, error) {
+	u, err := r.memoryUserRepo.GetByID(ctx, id)
+	if err == nil && !r.paused {
+		r.paused = true
+		if perr := r.memoryUserRepo.UpdateServiceState(ctx, id, domain.DisabledServiceManual, "admin pause", &r.pausedAt); perr != nil {
+			return nil, perr
+		}
+	}
+	return u, err
+}
+
+// An admin's pause that lands between the lift's fresh read and its clear is
+// a newer, deliberate decision, and the lift must not wipe it: the clear is
+// conditional on the row still carrying geo_auto. An unconditional clear here
+// would resume, upstream too, a user an admin had just paused.
+func TestLiftServiceIfHeldSince_LeavesAPauseThatLandedAfterTheRead(t *testing.T) {
+	at := time.Now().Add(-2 * time.Hour)
+	h := newGeoAutoHarness(&domain.User{ID: 7, Enabled: true, ServiceDisabledReason: domain.DisabledGeoAutoSuspend, ServiceDisableDetail: "auto", ServiceDisabledAt: &at})
+	pausedAt := time.Now().Add(-time.Minute)
+	h.svc.users = &adminPausesAfterReadRepo{memoryUserRepo: h.repo, pausedAt: pausedAt}
+
+	lifted, err := h.svc.LiftServiceIfHeldSince(context.Background(), 7, domain.DisabledGeoAutoSuspend, time.Now())
+	if err != nil || lifted {
+		t.Fatalf("lifted=%v err=%v, want false, nil — the row no longer carries geo_auto", lifted, err)
+	}
+	got := h.repo.byID[7]
+	if got.ServiceDisabledReason != domain.DisabledServiceManual || got.ServiceDisableDetail != "admin pause" ||
+		got.ServiceDisabledAt == nil || !got.ServiceDisabledAt.Equal(pausedAt) {
+		t.Fatalf("row = %q/%q/%v, want the admin's service_manual/admin pause/%v untouched",
+			got.ServiceDisabledReason, got.ServiceDisableDetail, got.ServiceDisabledAt, pausedAt)
+	}
+	if len(h.life.calls) != 0 || len(h.invalidated) != 0 {
+		t.Fatalf("pushes = %+v, invalidations = %v; a lift that cleared nothing must not push or invalidate", h.life.calls, h.invalidated)
+	}
+}
+
 // The lift clears only its own reason. geo_anomaly is a person's decision
 // and is lifted by a person; the geo_auto row next to it is the control.
 func TestLiftServiceIfHeldSince_OnlyClearsItsOwnReason(t *testing.T) {

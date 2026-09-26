@@ -288,6 +288,28 @@ func TestClassify_TwoUsersOnOneKeyIsNotShared(t *testing.T) {
 	}
 }
 
+// "At the same moment" is what makes an exit shared. Two accounts that used
+// this address earlier in the upstream's 30-minute window but are not live on
+// it now do not make it a relay: the one account live on it is there, and
+// setting it aside would drop real evidence and report it as a shared exit.
+// The helper above builds IPs == Fresh, so only a row whose window and live
+// set differ can tell holders counted from Fresh from holders counted from
+// the window.
+func TestClassify_OnlyLiveHoldersMakeAnExitShared(t *testing.T) {
+	got := ClassifyAddresses(map[int64]UserLiveIPs{
+		1: live(1, "8.8.8.8"),
+		2: {UserID: 2, IPs: []string{"8.8.8.8", "9.9.9.9"}, Fresh: []string{"9.9.9.9"}},
+		3: {UserID: 3, IPs: []string{"8.8.8.8"}},
+	}, sharedRule())
+	if k := keysOf(got[1]); !reflect.DeepEqual(k, []string{"8.8.8.8"}) || got[1].Excluded.Shared != 0 {
+		t.Fatalf("user 1 kept %v shared=%d; two accounts that are only in the window made a live address a shared exit",
+			k, got[1].Excluded.Shared)
+	}
+	if got[2].Excluded.Shared != 0 || got[3].Excluded.Shared != 0 {
+		t.Fatalf("shared = %d/%d for the window-only holders, want 0/0", got[2].Excluded.Shared, got[3].Excluded.Shared)
+	}
+}
+
 // One phone, several privacy addresses in its /64: one source.
 func TestClassify_OnePhonesPrivacyAddressesAreOneSource(t *testing.T) {
 	got := ClassifyAddresses(map[int64]UserLiveIPs{

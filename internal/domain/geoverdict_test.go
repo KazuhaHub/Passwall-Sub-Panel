@@ -197,6 +197,51 @@ func TestEvaluate_UnknownDoesNotClearAFlag(t *testing.T) {
 	}
 }
 
+// Every Unknown freezes the WHOLE streak, not only the latch: a database
+// that is down, or one that places too few of the addresses, can neither
+// build a streak nor break one. The sample under test is over every flag and
+// ban tolerance, and one more ban-over sample would make the ban due, so a
+// branch that counted it — as over, as under, as a ban-over, or by starting
+// again — changes something this compares. A suspension would otherwise land
+// on two real samples and an outage in between instead of BanAfterPolls
+// consecutive ones, and a latched flag would clear after an outage plus one
+// clean check.
+func TestEvaluate_UnknownFreezesEveryStreak(t *testing.T) {
+	p := pol(func(p *GeoAnomalyPolicy) {
+		p.BanEnabled = true
+		p.BanAfterPolls = 3
+		p.ClearAfterPolls = 2
+		p.MinPlacedRatio = 0.5
+	})
+	prev := GeoStreak{Over: 2, Under: 1, Flagged: true, Tier: GeoTierCountry, BanOver: 2}
+
+	unavailable := tiers(3, 3, 4)
+	unavailable.GeoAvailable = false
+	thin := tiers(3, 3, 4)
+	thin.Unplaced = 2 * thin.Placed // a third placed, below the half required
+
+	for _, c := range []struct {
+		name string
+		o    GeoObservation
+	}{
+		{"location lookup unavailable", unavailable},
+		{"too few addresses placed", thin},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			v := EvaluateGeo(p, c.o, prev)
+			if v.State != GeoStateUnknown {
+				t.Fatalf("state = %s (%s), want unknown", v.State, v.Reason)
+			}
+			if v.Streak != prev {
+				t.Fatalf("streak = %+v, want frozen at %+v", v.Streak, prev)
+			}
+			if v.BanDue {
+				t.Fatalf("ban due on a sample nobody could judge (%s)", v.BanReason)
+			}
+		})
+	}
+}
+
 // ---------------------------------------------------------------- actionable
 
 // Only Flagged may drive an automatic response. Suspect is deliberately below
