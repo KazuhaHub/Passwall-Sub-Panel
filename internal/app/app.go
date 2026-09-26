@@ -654,11 +654,19 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	// database handle like the geo streak store, not a ports.Repos field, so
 	// nothing else is handed its writer. TestBuildWiresTheRiskSignals guards
 	// the wiring: a worker left out compiles, and the table just stays empty.
+	//
+	// The infrastructure set arrives as two method values, not as the
+	// traffic service: the worker needs "is this PSP's own address" and "has
+	// the set been built yet", and nothing else that service can do.
 	a.risk = risk.New(risk.Deps{
-		Users:    repos.User,
-		Store:    sqlstore.NewRiskSignalRepo(db),
-		Settings: repos.ScopedSettings,
-		Traffic:  repos.Traffic,
+		Users:       repos.User,
+		Store:       sqlstore.NewRiskSignalRepo(db),
+		Settings:    repos.ScopedSettings,
+		Traffic:     repos.Traffic,
+		SubLogs:     repos.SubLog,
+		Geo:         geoSvc,
+		IsInfra:     trafficSvc.IsInfra,
+		InfraLoaded: trafficSvc.InfraLoaded,
 	})
 	a.trafficInterval = time.Duration(sysSettings.CronTrafficPullMinutes) * time.Minute
 	// Rollup's gap heartbeat is derived from the poll cadence so a coarse poll
@@ -1710,7 +1718,9 @@ const riskRefreshInterval = time.Hour
 // enough for the boot probes and the infrastructure-address refresh (which
 // runs as soon as its loop starts) to settle, so the first run does not
 // compete with them; short enough that a fresh install's risk view is not
-// empty for a whole interval.
+// empty for a whole interval. Correctness does not depend on it: every run
+// skips the place signals while the infrastructure set has never been built
+// (traffic.Service.InfraLoaded), keeping their previous rows.
 const riskFirstDelay = 2 * time.Minute
 
 // runRiskLoop recomputes the observe-only risk signals: once after

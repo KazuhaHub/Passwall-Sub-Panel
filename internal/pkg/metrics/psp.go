@@ -283,12 +283,14 @@ var (
 	// and a failed run keeps the previous rows, so nothing else shows a
 	// worker that has quietly stopped judging: ok means every signal was
 	// recomputed and saved; partial means a source failed (a group's settings,
-	// a traffic read) and the kinds or accounts it feeds kept their previous
-	// rows; error means nothing was written at all. A fleet reading partial
-	// for hours is judging from stale rows.
+	// a traffic read, the fetch log) and the kinds or accounts it feeds kept
+	// their previous rows; infra_pending means the place signals were skipped
+	// because PSP's own node and relay addresses had not been collected yet;
+	// error means nothing was written at all. A fleet reading partial or
+	// infra_pending for hours is judging from stale rows.
 	RiskRefreshTotal = NewCounterVec(
 		"psp_risk_refresh_total",
-		"Hourly risk-signal refreshes by outcome: ok; partial (a source failed and what it feeds kept its previous rows); error (nothing written).",
+		"Hourly risk-signal refreshes by outcome: ok; partial (a source failed and what it feeds kept its previous rows); infra_pending (place signals skipped: infrastructure addresses not loaded yet); error (nothing written).",
 		"outcome",
 	)
 	// P in the cost model.

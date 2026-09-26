@@ -46,7 +46,7 @@ func (s *Service) usageShift(ctx context.Context, r *refresh) error {
 		if !ok {
 			continue // unreadable group: previous rows kept
 		}
-		p := usagePolicy(policy)
+		p := usagePolicy(policy.risk)
 		if p.Off {
 			v, ev := domain.EvaluateUsageShift(p, domain.UsageShiftInput{})
 			addVerdict(r, u.ID, domain.RiskKindUsageShift, v, ev)

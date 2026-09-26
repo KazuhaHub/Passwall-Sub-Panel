@@ -33,6 +33,8 @@ func TestRiskServiceCannotWriteServiceState(t *testing.T) {
 		"Store":    {"PurgeOrphans", "Save"},
 		"Settings": {"Load", "LoadForGroup", "LoadForUser"},
 		"Traffic":  {"ListHourlyByUser", "SumHourlyAllUsers"},
+		"SubLogs":  {"ScanSince"},
+		"Geo":      {"Available", "Lookup"},
 	}
 	deps := reflect.TypeFor[Deps]()
 	seen := map[string]bool{}

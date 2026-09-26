@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/netip"
 	"reflect"
 	"sync"
 	"testing"
@@ -189,6 +190,12 @@ type harness struct {
 	store    *fakeStore
 	settings *fakeSettings
 	traffic  *fakeTraffic
+	// The fetch-window sources. Each is wired only when set, so the tests
+	// that predate them see exactly the usage_shift rows they always did.
+	scanner     *fakeScanner
+	geo         *fakeGeo
+	isInfra     func(netip.Addr) bool
+	infraLoaded func() bool
 }
 
 func newHarness(users []*domain.User) *harness {
@@ -201,15 +208,24 @@ func newHarness(users []*domain.User) *harness {
 }
 
 func (h *harness) service() *Service {
-	return New(Deps{
+	d := Deps{
 		Users: h.users, Store: h.store, Settings: h.settings, Traffic: h.traffic,
-		Now: func() time.Time { return refreshNow },
-	})
+		Now:     func() time.Time { return refreshNow },
+		IsInfra: h.isInfra, InfraLoaded: h.infraLoaded,
+	}
+	// A nil *fakeScanner in the interface would be a non-nil dependency.
+	if h.scanner != nil {
+		d.SubLogs = h.scanner
+	}
+	if h.geo != nil {
+		d.Geo = h.geo
+	}
+	return New(d)
 }
 
 func outcomes() map[string]int64 {
 	out := map[string]int64{}
-	for _, o := range []string{"ok", "partial", "error"} {
+	for _, o := range []string{"ok", "partial", "infra_pending", "error"} {
 		out[o] = metrics.RiskRefreshTotal.With(o).Value()
 	}
 	return out

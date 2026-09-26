@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/netip"
 	"time"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
@@ -46,6 +47,23 @@ type Deps struct {
 	Traffic HourlyReader
 	// Now is the clock. Nil: time.Now.
 	Now func() time.Time
+	// SubLogs is the subscription fetch log, read as one streamed window.
+	// Nil: sub_spread is not computed.
+	SubLogs FetchScanner
+	// Geo places the window's sources. Nil: nothing can be placed, and the
+	// place signals read unknown/geo_unavailable — never clean.
+	Geo GeoResolver
+	// IsInfra reports PSP's own node and relay addresses, which say where
+	// the relay is, not the user. A function, not the traffic service: the
+	// worker gets the one question and nothing else that service can do.
+	// Nil: nothing is infrastructure.
+	IsInfra func(netip.Addr) bool
+	// InfraLoaded reports whether the infrastructure set has been built
+	// once. Until it has, the place signals are skipped (their rows kept):
+	// judged against a set not collected yet, every relayed account would
+	// read as fetching from the relay's province. Nil: treated as loaded,
+	// for tests and deployments without the set.
+	InfraLoaded func() bool
 }
 
 // UserLister pages through the accounts (ports.UserRepo's List, alone).
@@ -66,6 +84,22 @@ type SignalStore interface {
 type HourlyReader interface {
 	ListHourlyByUser(ctx context.Context, userID int64, since, until time.Time) ([]domain.HourlyTraffic, error)
 	SumHourlyAllUsers(ctx context.Context, since, until time.Time) ([]domain.HourlyTraffic, error)
+}
+
+// FetchScanner streams the subscription fetch log from since on, batch rows
+// at a time (ports.SubLogRepo's ScanSince, alone). A week of fetches can be
+// hundreds of thousands of rows; the worker folds each batch into its
+// per-account window and keeps none of them.
+type FetchScanner interface {
+	ScanSince(ctx context.Context, since time.Time, batch int, fn func([]domain.SubLog) error) error
+}
+
+// GeoResolver places addresses (the geo service's read side). Available is
+// asked separately because an empty lookup means two opposite things — "no
+// database" and "nothing placeable" — and only the second is evidence.
+type GeoResolver interface {
+	Lookup(ctx context.Context, ips []string) map[string]domain.GeoLocation
+	Available(ctx context.Context) bool
 }
 
 // Service recomputes the risk signals. It holds no state between runs: each
@@ -89,11 +123,13 @@ func New(d Deps) *Service {
 // the traffic poll walks the fleet with.
 const userPageSize = 100
 
-// Refresh outcomes, psp_risk_refresh_total's label values.
+// Refresh outcomes, psp_risk_refresh_total's label values, in precedence
+// order error > partial > infra_pending > ok.
 const (
-	outcomeOK      = "ok"
-	outcomePartial = "partial"
-	outcomeError   = "error"
+	outcomeOK           = "ok"
+	outcomePartial      = "partial"
+	outcomeInfraPending = "infra_pending"
+	outcomeError        = "error"
 )
 
 // refresh is one run's working state.
@@ -102,11 +138,22 @@ type refresh struct {
 	loc    *time.Location
 	global ports.UISettings
 	users  []*domain.User
-	// policies holds each readable group's risk policy. A group whose
-	// settings could not be read is absent, and its accounts get no rows.
-	policies map[int64]domain.RiskPolicy
+	// policies holds each readable group's policies. A group whose settings
+	// could not be read is absent, and its accounts get no rows.
+	policies map[int64]groupPolicy
 	rows     []domain.RiskSignal
 	partial  bool
+	// infraPending: the place signals were skipped because the
+	// infrastructure set has not been built yet.
+	infraPending bool
+}
+
+// groupPolicy is what one group's settings resolve to: the risk policy, and
+// the concurrent-location policy sub_spread reuses (V3-D3) — its scope,
+// region tolerance, exemption and placed ratio.
+type groupPolicy struct {
+	risk domain.RiskPolicy
+	geo  domain.GeoAnomalyPolicy
 }
 
 // RefreshOnce recomputes every signal for every account and saves the rows.
@@ -154,6 +201,36 @@ func (s *Service) RefreshOnce(ctx context.Context) (err error) {
 		}
 	}
 
+	// The place signals judge where the week's fetches came from, so they
+	// wait for the infrastructure set: before its first build it is empty
+	// because nothing was collected yet, and every account behind a relay
+	// would read as fetching from the relay's province. The loop's first run
+	// is minutes after the set's, so this is a guard, not a schedule. Their
+	// stored rows stay as they were meanwhile.
+	infraReady := s.d.InfraLoaded == nil || s.d.InfraLoaded()
+	switch {
+	case s.d.SubLogs == nil:
+	case !infraReady:
+		r.infraPending = true
+		log.Info("infrastructure addresses not loaded yet; place-based risk signals skipped this run")
+	default:
+		// A window read part-way is not judged: a week missing its last
+		// batches reads as fewer provinces and fewer days. The kinds it
+		// feeds keep their previous rows.
+		window, err := s.readWindow(ctx, r)
+		switch {
+		case err == nil:
+			if err := s.subSpread(ctx, r, window); err != nil {
+				return err
+			}
+		case ctx.Err() != nil:
+			return fmt.Errorf("risk refresh: %w", ctx.Err())
+		default:
+			r.partial = true
+			log.Warn("risk signals: subscription fetch log unreadable; the fetch-based signals keep their previous rows", "err", err)
+		}
+	}
+
 	if len(r.rows) > 0 {
 		if err := s.d.Store.Save(ctx, r.rows); err != nil {
 			return fmt.Errorf("risk refresh: save: %w", err)
@@ -165,14 +242,18 @@ func (s *Service) RefreshOnce(ctx context.Context) (err error) {
 			flagged++
 		}
 	}
-	outcome = outcomeOK
-	if r.partial {
+	switch {
+	case r.partial:
 		outcome = outcomePartial
+	case r.infraPending:
+		outcome = outcomeInfraPending
+	default:
+		outcome = outcomeOK
 	}
 	// Counts only: never an address, a user agent, a label or a device id.
 	log.Info("risk signals refreshed",
 		"outcome", outcome, "users", len(r.users), "rows", len(r.rows), "flagged", flagged,
-		"ms", time.Since(started).Milliseconds())
+		"infra_ready", infraReady, "ms", time.Since(started).Milliseconds())
 	return nil
 }
 
@@ -202,13 +283,13 @@ func (s *Service) listUsers(ctx context.Context) ([]*domain.User, error) {
 	}
 }
 
-// loadPolicies resolves each group's risk policy once. A group whose
+// loadPolicies resolves each group's policies once. A group whose
 // settings cannot be read is left out: judging its accounts with the global
 // or the default policy would be judging them with a policy their admin may
 // have overridden — a switched-off signal switched back on. Its accounts
 // keep their previous rows, and the run is partial.
 func (s *Service) loadPolicies(ctx context.Context, r *refresh) error {
-	r.policies = map[int64]domain.RiskPolicy{}
+	r.policies = map[int64]groupPolicy{}
 	failed := map[int64]bool{}
 	for _, u := range r.users {
 		if err := ctx.Err(); err != nil {
@@ -228,7 +309,13 @@ func (s *Service) loadPolicies(ctx context.Context, r *refresh) error {
 			log.Warn("risk signals: group settings unreadable; its accounts keep their previous rows", "group_id", gid, "err", err)
 			continue
 		}
-		r.policies[gid] = domain.RiskPolicyFromSettings(set.RiskPolicySettings())
+		// The geo policy through the same mapping and the same defaults
+		// the traffic poll judges with, so a group's tolerance means one
+		// thing on both sides.
+		r.policies[gid] = groupPolicy{
+			risk: domain.RiskPolicyFromSettings(set.RiskPolicySettings()),
+			geo:  domain.GeoPolicyFromSettings(set.GeoPolicySettings()),
+		}
 	}
 	return nil
 }

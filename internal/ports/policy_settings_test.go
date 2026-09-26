@@ -81,3 +81,90 @@ func TestUISettings_RiskPolicySettingsCarriesEveryRiskKnob(t *testing.T) {
 		t.Errorf("%d risk.* keys are group-overridable but domain.RiskPolicySettings has %d fields: a per-group knob the policy does not carry is editable and judged with nothing", overridable, n)
 	}
 }
+
+// GeoPolicySettings is the ONE mapping from the stored geo_anomaly.* values
+// to the domain's flat form, shared by the traffic poll and the risk worker.
+// Before it existed the poll carried a fifteen-field literal; a second
+// hand-copied literal in the risk worker could drift from it, and a knob
+// either one forgot would be saved by the form, shown by the group editor
+// and judged with the default.
+//
+// The same four checks as the risk mapping: exact values (crossed numeric
+// fields), each switch alone (crossed switches), every result field
+// non-zero (a domain field added without a mapping), and the number of
+// geo_anomaly_ settings — less the ignore list, which is global, decides
+// which addresses are judged at all and is not part of the judging policy —
+// equal to the number of result fields (a stored knob that never reaches
+// the policy).
+func TestUISettings_GeoPolicySettingsCarriesEveryGeoKnob(t *testing.T) {
+	s := UISettings{
+		GeoAnomalyScope:              "region",
+		GeoAnomalyMaxPlaces:          2,
+		GeoAnomalyMaxRegions:         3,
+		GeoAnomalyMaxCities:          4,
+		GeoAnomalyFlagAfterPolls:     5,
+		GeoAnomalyClearAfterPolls:    6,
+		GeoAnomalyMinPlacedRatio:     0.75,
+		GeoAnomalyCoTravel:           "CN,HK",
+		GeoAnomalyAllowAnywhere:      true,
+		GeoAnomalyIgnoreAddresses:    "203.0.113.0/24",
+		GeoAnomalyBanEnabled:         true,
+		GeoAnomalyBanMaxCountries:    7,
+		GeoAnomalyBanMaxRegions:      8,
+		GeoAnomalyBanMaxCities:       9,
+		GeoAnomalyBanAfterPolls:      10,
+		GeoAnomalyBanDurationMinutes: 11,
+	}
+	want := domain.GeoPolicySettings{
+		Scope:              "region",
+		MaxPlaces:          2,
+		MaxRegions:         3,
+		MaxCities:          4,
+		FlagAfterPolls:     5,
+		ClearAfterPolls:    6,
+		MinPlacedRatio:     0.75,
+		CoTravel:           "CN,HK",
+		AllowAnywhere:      true,
+		BanEnabled:         true,
+		BanMaxCountries:    7,
+		BanMaxRegions:      8,
+		BanMaxCities:       9,
+		BanAfterPolls:      10,
+		BanDurationMinutes: 11,
+	}
+	got := s.GeoPolicySettings()
+	if got != want {
+		t.Fatalf("GeoPolicySettings() = %+v\nwant %+v", got, want)
+	}
+	v := reflect.ValueOf(got)
+	for i := 0; i < v.NumField(); i++ {
+		if v.Field(i).IsZero() {
+			t.Errorf("domain.GeoPolicySettings.%s is never filled from UISettings", v.Type().Field(i).Name)
+		}
+	}
+
+	for _, c := range []struct {
+		name string
+		in   UISettings
+		want domain.GeoPolicySettings
+	}{
+		{"allow_anywhere", UISettings{GeoAnomalyAllowAnywhere: true}, domain.GeoPolicySettings{AllowAnywhere: true}},
+		{"ban_enabled", UISettings{GeoAnomalyBanEnabled: true}, domain.GeoPolicySettings{BanEnabled: true}},
+	} {
+		if got := c.in.GeoPolicySettings(); got != c.want {
+			t.Errorf("%s switch alone = %+v, want %+v", c.name, got, c.want)
+		}
+	}
+
+	stored := 0
+	ut := reflect.TypeOf(UISettings{})
+	for i := 0; i < ut.NumField(); i++ {
+		tag := strings.Split(ut.Field(i).Tag.Get("json"), ",")[0]
+		if strings.HasPrefix(tag, "geo_anomaly_") && tag != "geo_anomaly_ignore_addresses" {
+			stored++
+		}
+	}
+	if n := reflect.TypeOf(domain.GeoPolicySettings{}).NumField(); stored != n {
+		t.Errorf("%d geo_anomaly_ settings (less the ignore list) but domain.GeoPolicySettings has %d fields: a stored knob the policy does not carry is saved and judged with the default", stored, n)
+	}
+}

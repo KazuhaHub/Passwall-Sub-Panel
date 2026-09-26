@@ -56,6 +56,15 @@ type infraAddressSet struct {
 	mu      sync.RWMutex
 	current map[netip.Addr]struct{}
 	hosts   map[string]hostResolution
+	// loaded is set by the first swap and never cleared. Until then the set
+	// is empty because nothing has been collected yet, not because nothing
+	// is infrastructure — a difference the poll can live with (it has always
+	// judged an early poll unfiltered) but the risk worker must not: its
+	// place signals judge a whole week at once, so one run against an empty
+	// set files every relayed user under the relay's province. A refresh
+	// whose node list failed swaps nothing and leaves it false; an empty
+	// node list is an answer, and sets it.
+	loaded bool
 	// resolve and now are replaceable for tests; nil means the real
 	// resolver and clock, so a zero value still works.
 	resolve func(ctx context.Context, host string) ([]string, error)
@@ -82,6 +91,33 @@ func (c *infraAddressSet) Contains(a netip.Addr) bool {
 	defer c.mu.RUnlock()
 	_, ok := c.current[a.Unmap().WithZone("")]
 	return ok
+}
+
+// Loaded reports whether a refresh has ever swapped a set in (see loaded).
+// Nil-safe: no set is never loaded.
+func (c *infraAddressSet) Loaded() bool {
+	if c == nil {
+		return false
+	}
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.loaded
+}
+
+// InfraLoaded reports whether the infrastructure set has been built at least
+// once, so a reader that must not judge against a not-yet-collected set (the
+// risk worker's place signals) can wait for it. False on a service with no
+// set, and while the node list has never been read.
+func (s *Service) InfraLoaded() bool {
+	return s != nil && s.infra.Loaded()
+}
+
+// IsInfra reports whether a is one of PSP's node or relay addresses — the
+// set the poll excludes, handed to the risk worker as a plain function so it
+// never holds the traffic service itself. A map lookup under a read lock; the
+// DNS behind it ran in the refresh loop.
+func (s *Service) IsInfra(a netip.Addr) bool {
+	return s != nil && s.infra.Contains(a)
 }
 
 // RefreshInfraAddresses rebuilds the infrastructure set from the node list.
@@ -222,6 +258,7 @@ func (c *infraAddressSet) refresh(ctx context.Context, nodes []*domain.Node) {
 	c.mu.Lock()
 	c.current = current
 	c.hosts = hosts
+	c.loaded = true
 	c.mu.Unlock()
 	metrics.InfraAddresses.Set(int64(len(current)))
 }

@@ -160,23 +160,9 @@ func (c *geoPolicyCache) lookup(uid int64) geoPolicyEntry {
 		// judging policy — it decides which addresses are judged at all.
 		if set, err := c.s.settings.LoadForUser(c.ctx, u, ports.UISettings{}); err == nil {
 			e.resolved = true
-			e.policy = domain.GeoPolicyFromSettings(domain.GeoPolicySettings{
-				Scope:              set.GeoAnomalyScope,
-				MaxPlaces:          set.GeoAnomalyMaxPlaces,
-				MaxRegions:         set.GeoAnomalyMaxRegions,
-				MaxCities:          set.GeoAnomalyMaxCities,
-				FlagAfterPolls:     set.GeoAnomalyFlagAfterPolls,
-				ClearAfterPolls:    set.GeoAnomalyClearAfterPolls,
-				MinPlacedRatio:     set.GeoAnomalyMinPlacedRatio,
-				CoTravel:           set.GeoAnomalyCoTravel,
-				AllowAnywhere:      set.GeoAnomalyAllowAnywhere,
-				BanEnabled:         set.GeoAnomalyBanEnabled,
-				BanMaxCountries:    set.GeoAnomalyBanMaxCountries,
-				BanMaxRegions:      set.GeoAnomalyBanMaxRegions,
-				BanMaxCities:       set.GeoAnomalyBanMaxCities,
-				BanAfterPolls:      set.GeoAnomalyBanAfterPolls,
-				BanDurationMinutes: set.GeoAnomalyBanDurationMinutes,
-			})
+			// The mapping is ports.UISettings.GeoPolicySettings, the one
+			// the risk worker reads the same group's policy through.
+			e.policy = domain.GeoPolicyFromSettings(set.GeoPolicySettings())
 		} else {
 			// Fall back to the process default rather than to a zero
 			// policy: a zero MaxPlaces would flag every connected user.

@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -22,8 +23,16 @@ import (
 // store: the loop returns at once on a nil service, every unit test builds
 // the service directly, and the risk table simply stays empty — which the
 // admin view would show as "never computed" forever. Only a run through the
-// assembled application sees it: the users, the settings, the hourly rollup
-// and the risk_signals table Build opened.
+// assembled application sees it: the users, the settings, the hourly rollup,
+// the fetch log, the infrastructure set and the risk_signals table Build
+// opened.
+//
+// Every optional source is nil-tolerant, so each is checked by what it
+// changes: without the fetch log there is no sub_spread row at all; without
+// InfraLoaded the place signals would run before the set was ever built;
+// without IsInfra the node's own address would count as a place. The geo
+// resolver cannot be told apart here — no database is installed, so a wired
+// one and a missing one both read geo_unavailable.
 func TestBuildWiresTheRiskSignals(t *testing.T) {
 	ctx := t.Context()
 	directory := t.TempDir()
@@ -53,11 +62,19 @@ func TestBuildWiresTheRiskSignals(t *testing.T) {
 	if err := a.repos.User.Create(ctx, u); err != nil {
 		t.Fatal(err)
 	}
+	// One node, whose own address the account also fetched from (a client
+	// whose fetch went out through the node), and one fetch from home.
+	node := &domain.Node{PanelID: 1, InboundID: 1, DisplayName: "risk-node", ServerAddress: "203.0.113.9", Enabled: true}
+	if err := a.repos.Node.Create(ctx, node); err != nil {
+		t.Fatal(err)
+	}
+	for _, ip := range []string{"203.0.113.9", "198.51.100.20"} {
+		if err := a.repos.SubLog.Insert(ctx, &domain.SubLog{UserID: u.ID, IP: ip, UA: "clash.meta/1.19.2", ClientType: "mihomo", AccessedAt: time.Now()}); err != nil {
+			t.Fatal(err)
+		}
+	}
 	if a.risk == nil {
 		t.Fatal("Build did not construct the risk worker: the loop would return at once and no signal would ever be computed")
-	}
-	if err := a.risk.RefreshOnce(ctx); err != nil {
-		t.Fatal(err)
 	}
 
 	// The store is not on App, so this opens the same database file Build
@@ -71,22 +88,57 @@ func TestBuildWiresTheRiskSignals(t *testing.T) {
 			_ = sqlDB.Close()
 		}
 	})
-	rows, err := sqlstore.NewRiskSignalRepo(db).List(ctx)
-	if err != nil {
+	rowOf := func(kind domain.RiskKind) *domain.RiskSignal {
+		t.Helper()
+		rows, err := sqlstore.NewRiskSignalRepo(db).List(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for i := range rows {
+			if rows[i].UserID == u.ID && rows[i].Kind == kind {
+				return &rows[i]
+			}
+		}
+		return nil
+	}
+
+	// Build starts no loop, so the infrastructure set has never been built:
+	// the place signals wait, and the rest is written.
+	if err := a.risk.RefreshOnce(ctx); err != nil {
 		t.Fatal(err)
 	}
-	var got *domain.RiskSignal
-	for i := range rows {
-		if rows[i].UserID == u.ID && rows[i].Kind == domain.RiskKindUsageShift {
-			got = &rows[i]
-		}
-	}
+	got := rowOf(domain.RiskKindUsageShift)
 	if got == nil {
-		t.Fatalf("no usage_shift row for the account after a refresh (rows: %+v)", rows)
+		t.Fatal("no usage_shift row for the account after a refresh")
 	}
 	// No traffic yet: idle, not unknown and not clean.
 	if got.State != domain.GeoStateIdle || got.Code != domain.RiskCodeNoUsage || got.UPN != u.UPN {
 		t.Fatalf("row = %+v, want idle/no_usage for %s", *got, u.UPN)
+	}
+	if spread := rowOf(domain.RiskKindSubSpread); spread != nil {
+		t.Fatalf("sub_spread row %+v before the infrastructure set was ever built: InfraLoaded is not wired", *spread)
+	}
+
+	if err := a.traffic.RefreshInfraAddresses(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.risk.RefreshOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+	spread := rowOf(domain.RiskKindSubSpread)
+	if spread == nil {
+		t.Fatal("no sub_spread row after the infrastructure set was built: the fetch log is not wired")
+	}
+	var ev domain.SubSpreadEvidence
+	if err := json.Unmarshal(spread.Evidence, &ev); err != nil {
+		t.Fatalf("evidence %s: %v", spread.Evidence, err)
+	}
+	// Two fetches: the node's own address set aside as infrastructure, the
+	// other kept — and nothing placed, because no geo database is installed.
+	if spread.State != domain.GeoStateUnknown || spread.Code != domain.RiskCodeGeoUnavailable ||
+		ev.Excluded.Infra != 1 || ev.Coverage.Sources != 1 {
+		t.Fatalf("sub_spread = %s/%s, excluded %+v, coverage %+v; want unknown/geo_unavailable with the node's address set aside and one source kept",
+			spread.State, spread.Code, ev.Excluded, ev.Coverage)
 	}
 }
 

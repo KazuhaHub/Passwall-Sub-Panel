@@ -376,3 +376,69 @@ func TestInfraAddresses_RefreshAndReadDoNotRace(t *testing.T) {
 		}
 	}
 }
+
+// The risk worker's place signals must not run before the set has been
+// built once: judged against an empty set, every user behind a relay reads
+// as fetching from the relay's province, on the very first run after boot.
+// So the set says whether it has ever been swapped in. A node list that
+// could not be read never swapped anything, and "loaded" stays false; an
+// empty node list is a real answer (nothing is infrastructure), and loads.
+func TestInfraAddresses_LoadedOnlyAfterTheFirstSuccessfulRefresh(t *testing.T) {
+	s, repo, _, _ := newInfraFixture()
+	if s.InfraLoaded() {
+		t.Fatal("loaded before any refresh")
+	}
+
+	boom := errors.New("db down")
+	repo.fail(boom)
+	if err := s.RefreshInfraAddresses(context.Background()); !errors.Is(err, boom) {
+		t.Fatalf("refresh err = %v, want it to wrap %v", err, boom)
+	}
+	if s.InfraLoaded() {
+		t.Fatal("loaded after a refresh whose node list could not be read")
+	}
+
+	repo.fail(nil)
+	refreshOK(t, s)
+	if !s.InfraLoaded() {
+		t.Fatal("not loaded after a successful refresh of an empty node list")
+	}
+
+	// Once loaded, a later failed list keeps the set, and with it "loaded".
+	repo.fail(boom)
+	_ = s.RefreshInfraAddresses(context.Background())
+	if !s.InfraLoaded() {
+		t.Fatal("a failed refresh after a good one un-loaded the set")
+	}
+
+	// A bare service has no set, and a set that never refreshed is empty:
+	// neither is loaded.
+	if (&Service{}).InfraLoaded() {
+		t.Fatal("a service with no set reports it loaded")
+	}
+	if (&infraAddressSet{}).Loaded() {
+		t.Fatal("a zero-value set reports it loaded")
+	}
+}
+
+// IsInfra is the set's membership test as the risk worker is handed it: the
+// same normalisation as Contains (a mapped form of a node address is the
+// node), and nothing is infrastructure on a service with no set.
+func TestInfraAddresses_IsInfraReadsTheSet(t *testing.T) {
+	s, _, _, _ := newInfraFixture(infraNode(1, "203.0.113.1", relayAt("198.51.100.7", true)))
+	refreshOK(t, s)
+	for ip, want := range map[string]bool{
+		"203.0.113.1":         true,
+		"::ffff:203.0.113.1":  true,
+		"198.51.100.7":        true,
+		"198.51.100.8":        false,
+		"2001:db8::203:0:113": false,
+	} {
+		if got := s.IsInfra(mustAddr(ip)); got != want {
+			t.Errorf("IsInfra(%s) = %v, want %v", ip, got, want)
+		}
+	}
+	if (&Service{}).IsInfra(mustAddr("203.0.113.1")) {
+		t.Fatal("a service with no set reports an address as infrastructure")
+	}
+}
