@@ -1558,6 +1558,7 @@
     "refresh": "Refresh",
     "field": {
       "upn": "UPN",
+      "upn_edit_hint": "Login name; use the new UPN to sign in. SSO binding remains linked by identity.",
       "email": "Email",
       "display_name": "Display name",
       "password": "Initial password (auto-generated if blank)",

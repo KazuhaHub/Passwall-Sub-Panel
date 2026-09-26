@@ -47,6 +47,7 @@ interface AuthState {
   complete2FAPasskey: (pendingToken: string) => Promise<void>
   loginSSO: () => Promise<void>
   setDisplayName: (name: string) => void
+  setUPN: (upn: string) => void
   logout: () => void
   syncFromStorage: () => void
 }
@@ -155,6 +156,13 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   setDisplayName(name) {
     const { userId, upn, role, authEpoch } = get()
     const next: PersistedAuthState = { userId, upn, displayName: name, role, authEpoch }
+    set(next)
+    persist(next)
+  },
+
+  setUPN(upn) {
+    const { userId, displayName, role, authEpoch } = get()
+    const next: PersistedAuthState = { userId, upn, displayName, role, authEpoch }
     set(next)
     persist(next)
   },

@@ -110,7 +110,13 @@ var pollOwnedColumns = []string{
 }
 
 func (r *userRepo) Update(ctx context.Context, u *domain.User) error {
-	return r.db.WithContext(ctx).Omit(pollOwnedColumns...).Save(userFromDomain(u)).Error
+	if err := r.db.WithContext(ctx).Omit(pollOwnedColumns...).Save(userFromDomain(u)).Error; err != nil {
+		if isUniqueViolationErr(err) {
+			return fmt.Errorf("%w: %v", domain.ErrAlreadyExists, err)
+		}
+		return err
+	}
+	return nil
 }
 
 // SetTOTP writes the TOTP secret (encrypted at rest), the enabled flag, and the
