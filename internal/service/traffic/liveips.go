@@ -336,6 +336,15 @@ func (s *Service) observeLiveIPs(ctx context.Context, in liveIPInput) []geoBan {
 		}
 		metrics.GeoVerdictTotal.With(string(v.State)).Inc()
 		metrics.UserConcurrentIPs.Observe(float64(obs.Placed + obs.Unplaced))
+		// The distance only where there was one to measure: a user with a
+		// single located source (or a database with no coordinates) has
+		// none, and a 0 recorded for every such user would swamp the bucket
+		// that means "two sources, within each other's radii". Spaced users
+		// never get here (the continue above), so a manual poll cannot
+		// sample one user twice.
+		if obs.CoordSources >= 2 {
+			metrics.GeoSpreadKm.With(string(v.State)).Observe(float64(obs.MaxKm))
+		}
 		if a.Stale > 0 {
 			metrics.LiveIPStaleTotal.Add(int64(a.Stale))
 		}

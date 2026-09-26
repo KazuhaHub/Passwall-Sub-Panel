@@ -35,6 +35,10 @@ var (
 		0, 1, 2, 3, 5, 8, 12, 20, 35, 60, 100,
 		200, 500, 1000, 2000, 5000, 10000,
 	}
+
+	// DistanceBucketsKm spans "within the radii" (exactly 0) to half the
+	// Earth's circumference (20015 km rounds to 20020). le semantics.
+	DistanceBucketsKm = []float64{0, 10, 30, 50, 100, 200, 300, 500, 800, 1200, 2000, 3000, 5000, 10000, 20020}
 )
 
 // registry holds every metric declared in this package. Declaration

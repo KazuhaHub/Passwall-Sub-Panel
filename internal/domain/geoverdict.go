@@ -47,6 +47,13 @@ type GeoObservation struct {
 	// Spots are the kept sources by location, most-occupied first, at most
 	// GeoEvidenceMaxSpots. Never an address.
 	Spots []GeoSpot
+	// MaxKm is MaxSpreadKm over the kept, placed sources resolved below
+	// their country that carried coordinates; CoordSources is how many did
+	// (the distance metric's gate). It may involve a place beyond the
+	// GeoEvidenceMaxSpots listed. Neither is judged — EvaluateGeo never reads
+	// them — and the points behind them die with this call.
+	MaxKm        int
+	CoordSources int
 	// GeoAvailable is false when lookup is switched off or unusable. Kept
 	// separate from "nothing resolved" because the two look identical in
 	// the numbers and mean entirely different things.
@@ -58,8 +65,11 @@ type GeoObservation struct {
 type GeoSpot struct {
 	CC     string `json:"cc"`
 	Region string `json:"region"`
-	City   string `json:"city"`
-	N      int    `json:"n"`
+	// RC is Region's ISO 3166-2 code ("GD"), "" when unknown or Region is "".
+	// Display only: the map key and every count are (CC, Region, City).
+	RC   string `json:"rc,omitempty"`
+	City string `json:"city"`
+	N    int    `json:"n"`
 }
 
 // GeoStreak is the little state carried between polls that makes the verdict
@@ -397,6 +407,15 @@ func ObserveGeo(p GeoAnomalyPolicy, a UserAddresses, lookup GeoLookup, geoAvaila
 	regions := map[string]map[string]struct{}{}
 	cities := map[string]map[string]struct{}{}
 	spots := map[GeoSpot]int{}
+	// codes holds each region's display code, collected beside the spots
+	// rather than in their key: a code that differs between two sources of
+	// one region (a database defect) must not split it into two spots, and
+	// grouping has to stay exactly what it was before codes existed.
+	type placeKey struct{ cc, region string }
+	codes := map[placeKey]string{}
+	// points counts sources per located point, for the distance. It lives
+	// and dies with this call; only the rounded kilometres leave it.
+	points := map[GeoPoint]int{}
 	for _, k := range a.Kept {
 		g, ok := located[k.LookupIP]
 		// Upper-cased so a database answering "jp" is neither a second
@@ -420,6 +439,24 @@ func ObserveGeo(p GeoAnomalyPolicy, a UserAddresses, lookup GeoLookup, geoAvaila
 			obs.CityKnown++
 		}
 		spots[GeoSpot{CC: cc, Region: region, City: city}]++
+		// No region, no code: a code names a region, and a record that
+		// resolved none has nothing for it to name.
+		if region != "" {
+			pk := placeKey{cc, region}
+			codes[pk] = PreferRegionCode(codes[pk], NormalizeRegionCode(g.RegionCode))
+		}
+		// Only a source resolved below its country counts toward the
+		// distance, by the rule the region and city tiers already follow: a
+		// country-only record sits at the country's centroid, and pairing it
+		// with a real city would manufacture a spread of a thousand
+		// kilometres out of one person. A city without a region is below the
+		// country and counts.
+		if region != "" || city != "" {
+			if pt, ok := g.Point(); ok {
+				points[pt]++
+				obs.CoordSources++
+			}
+		}
 	}
 
 	obs.Places = sortedKeys(p.foldCoTravel(countries))
@@ -428,6 +465,13 @@ func ObserveGeo(p GeoAnomalyPolicy, a UserAddresses, lookup GeoLookup, geoAvaila
 	obs.CityCountry, obs.Cities = widest(cities)
 	obs.CitySpread = len(obs.Cities)
 	obs.Spots = rankSpots(spots)
+	for i := range obs.Spots {
+		// "" for a spot with no region: its code was never collected.
+		obs.Spots[i].RC = codes[placeKey{obs.Spots[i].CC, obs.Spots[i].Region}]
+	}
+	// The distance is physical, so the co-travel folding that merges
+	// countries for the verdict does not touch it.
+	obs.MaxKm = MaxSpreadKm(points)
 	return obs
 }
 

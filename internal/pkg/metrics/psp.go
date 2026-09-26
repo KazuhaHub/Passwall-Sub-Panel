@@ -236,6 +236,16 @@ var (
 		"Judged samples over the flag tolerances, by the coarsest tier over: country, region, city.",
 		"tier",
 	)
+	// Concurrent-source distance per judged user with ≥ 2 located sources below
+	// the country, by verdict state. The distribution that informs whether an
+	// impossible-travel detector is worth building (none exists, deliberately;
+	// the geo evidence keeps only each user's latest poll, so this is the one
+	// aggregate record of it). Aggregate only: no user id and no coordinate.
+	// Like every metric here it counts from process start or the last
+	// diagnostics reset, so read it before a restart.
+	GeoSpreadKm = NewHistogramVec("psp_geo_spread_km",
+		"Farthest pair of a judged user's concurrent sources placed below the country, in km after subtracting both accuracy radii, rounded to 10; sampled per traffic poll for users with at least two such sources.",
+		"km", "state", DistanceBucketsKm)
 	// Users NOT re-judged because their last judgement was less than half a
 	// poll interval ago. The guard measures elapsed time only, not who
 	// started the poll, so a manual "poll now" is not the only source: a

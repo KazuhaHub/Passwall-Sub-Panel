@@ -1159,6 +1159,115 @@ func TestObserveLiveIPs_MetricsLabelled(t *testing.T) {
 	}
 }
 
+// placeAt is placeIn plus what a city database with authcore v0.5.0 also
+// returns: the region's ISO code, the network's coordinates and the radius.
+func placeAt(cc, region, rc, city string, lat, lon float64, r int) domain.GeoLocation {
+	g := placeIn(cc, region, city)
+	g.RegionCode = rc
+	g.Latitude, g.Longitude, g.AccuracyRadiusKm = lat, lon, r
+	return g
+}
+
+// histogramFor reads one histogram out of the metrics snapshot, for the same
+// reason counterFor does. A histogram nobody has observed yet is the zero
+// snapshot (count 0), so "no sample" and "never registered" both read as 0.
+func histogramFor(t *testing.T, name string) metrics.HistogramSnapshot {
+	t.Helper()
+	for _, h := range metrics.Take().Histograms {
+		if h.Name == name {
+			return h
+		}
+	}
+	return metrics.HistogramSnapshot{Name: name}
+}
+
+// tokyoOsaka is one user connected from Tokyo and Osaka at once: two regions
+// of one country, over the default region tolerance, 392.44 km apart, and
+// 350 km after both 20 km radii.
+func tokyoOsaka() *stubGeo {
+	return &stubGeo{available: true, places: map[string]domain.GeoLocation{
+		"1.1.1.1": placeAt("JP", "Tokyo", "13", "Tokyo", 35.6762, 139.6503, 20),
+		"2.2.2.2": placeAt("JP", "Osaka", "27", "Osaka", 34.6937, 135.5023, 20),
+		"3.3.3.3": placeAt("JP", "Tokyo", "13", "Tokyo", 35.6762, 139.6503, 20),
+	}}
+}
+
+// The distance and the region codes reach the stored record; the coordinates
+// they were drawn from do not. The record is what the admin API serves and
+// what outlives the poll, so a coordinate there — beside the account — is a
+// map of where the subscriber connects from.
+func TestObserveLiveIPs_DistanceReachesTheEvidenceNotTheCoordinates(t *testing.T) {
+	metrics.Reset()
+	store := &upsertStreaks{}
+	s := newObserver(tokyoOsaka(), store, domain.DefaultGeoPolicy())
+	s.observeLiveIPs(context.Background(), liveIPInput{
+		clients:  []*domain.PSPClient{client(7, 1, "u7@x")},
+		panelIDs: panelsOf(1),
+		read: detailRead(map[string][]domain.LiveIPSighting{
+			"u7@x": {seen("1.1.1.1", 1000), seen("2.2.2.2", 1000)},
+		}),
+	})
+	rec, ok := store.data[7]
+	if !ok {
+		t.Fatal("user 7 was not saved")
+	}
+	ev := rec.Evidence
+	if ev.V != 3 || ev.Spread.MaxKm != 350 {
+		t.Fatalf("evidence = v%d max_km %d, want v3 max_km 350", ev.V, ev.Spread.MaxKm)
+	}
+	codes := map[string]string{}
+	for _, sp := range ev.Spots {
+		codes[sp.Region] = sp.RC
+	}
+	if codes["Tokyo"] != "13" || codes["Osaka"] != "27" {
+		t.Fatalf("spot codes = %v, want Tokyo 13, Osaka 27", codes)
+	}
+	raw, err := json.Marshal(rec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []string{"35.6762", "139.650", "34.6937", "135.502"} {
+		if strings.Contains(string(raw), c) {
+			t.Fatalf("the stored record carries the coordinate %s: %s", c, raw)
+		}
+	}
+}
+
+// The concurrent-distance histogram is what the travel-detector decision
+// will be read from: one sample per judged user with two located sources
+// below the country, under the verdict's state. A user with a single located
+// source has no distance to measure and must add no sample: a 0 from them
+// would be indistinguishable from two sources within each other's radii.
+func TestObserveLiveIPs_SpreadKmMetricByState(t *testing.T) {
+	metrics.Reset()
+	s := newObserver(tokyoOsaka(), nil, domain.DefaultGeoPolicy())
+	s.observeLiveIPs(context.Background(), liveIPInput{
+		clients:  []*domain.PSPClient{client(7, 1, "u7@x"), client(8, 1, "u8@x")},
+		panelIDs: panelsOf(1),
+		read: detailRead(map[string][]domain.LiveIPSighting{
+			"u7@x": {seen("1.1.1.1", 1000), seen("2.2.2.2", 1000)},
+			"u8@x": {seen("3.3.3.3", 1000)},
+		}),
+	})
+	// Not vacuous: both users were judged — one suspect, one clean.
+	if sus, clean := counterFor(t, "psp_geo_verdict_total{state=suspect}"), counterFor(t, "psp_geo_verdict_total{state=clean}"); sus != 1 || clean != 1 {
+		t.Fatalf("verdicts = suspect %d clean %d, want 1 and 1", sus, clean)
+	}
+	h := histogramFor(t, "psp_geo_spread_km{state=suspect}")
+	if h.Count != 1 || h.Sum != 350 {
+		t.Fatalf("psp_geo_spread_km{state=suspect} = count %d sum %v, want 1 sample of 350", h.Count, h.Sum)
+	}
+	var all int64
+	for _, h := range metrics.Take().Histograms {
+		if strings.HasPrefix(h.Name, "psp_geo_spread_km{") {
+			all += h.Count
+		}
+	}
+	if all != 1 {
+		t.Fatalf("psp_geo_spread_km holds %d samples across states, want 1 — the single-source user adds none", all)
+	}
+}
+
 // A typo in the ignore list must not switch the whole list off. The settings
 // PUT rejects bad entries, but a value that predates that check, or one
 // written straight to the database, still reaches the poll.
