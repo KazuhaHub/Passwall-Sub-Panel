@@ -1559,6 +1559,7 @@ var schemaModels = []any{
 	&webauthnCredentialRow{},
 	&subLogRow{},
 	&geoStreakRow{},
+	&riskSignalRow{},
 	&syncTaskRow{},
 	&xuiPanelRow{},
 	&separatorRow{},
