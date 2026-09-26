@@ -208,6 +208,52 @@ describe('GeoAnomaliesTab rows', () => {
     expect(text).toContain('Changsha')
   })
 
+  // The Places cell alone, so an assertion cannot be met by the same word in
+  // the reason beside it.
+  const placesOf = (name: string) => rowOf(name).querySelectorAll('td')[2]?.textContent ?? ''
+
+  it('lists the cities of a country whose database named no region', async () => {
+    // A location record can carry a city and no subdivision, and the city
+    // tier counts those cities on their own. A row it flags must name them:
+    // the missing region prints as "?" like any other unresolved level.
+    serve([row({
+      upn: 'alice', state: 'flagged', flagged: true, tier: 'city', places: ['SG'],
+      evidence: {
+        ...row({}).evidence,
+        spots: [
+          { cc: 'SG', region: '', city: 'Alpha', n: 2 },
+          { cc: 'SG', region: '', city: 'Beta', n: 1 },
+        ],
+      },
+    })])
+    mount()
+
+    await screen.findByText('alice')
+    expect(placesOf('alice')).toContain('SG 3: ? 3 (Alpha 2, Beta 1)')
+  })
+
+  it('prints country-only evidence as the country alone', async () => {
+    // Nothing below the country was resolved, so there is nothing to list,
+    // and a "?" would read as a region the database half-knew.
+    serve([row({
+      upn: 'alice', state: 'flagged', flagged: true, tier: 'country', places: ['DE', 'JP'],
+      evidence: {
+        ...row({}).evidence,
+        spots: [
+          { cc: 'DE', region: '', city: '', n: 2 },
+          { cc: 'JP', region: '', city: '', n: 1 },
+        ],
+      },
+    })])
+    mount()
+
+    await screen.findByText('alice')
+    const places = placesOf('alice')
+    expect(places).toContain('DE 2')
+    expect(places).toContain('JP 1')
+    expect(places).not.toContain('?')
+  })
+
   it('falls back to the recorded places for a row an older build wrote', async () => {
     serve([row({ upn: 'alice', places: ['DE', 'JP'], evidence: { ...row({}).evidence, v: 0 } })])
     mount()

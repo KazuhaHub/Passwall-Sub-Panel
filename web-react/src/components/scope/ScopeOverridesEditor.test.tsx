@@ -97,6 +97,51 @@ describe('ScopeOverridesEditor, unset numeric rows', () => {
   })
 })
 
+describe('ScopeOverridesEditor, overridden unset numeric rows', () => {
+  it('explains an overridden 0 or negative int as the default it stands for', () => {
+    // The server reads a group's value exactly like the global one: a number
+    // that is not positive is "never configured" and becomes the shipped
+    // default. Against a global 4, a group admin typing 0 (meaning "zero" or
+    // "inherit") has made the group STRICTER, and the bare 0 says neither.
+    for (const v of ['0', '-1']) {
+      mount(state('geo_anomaly.max_cities', '4', { on: true, value: v }))
+      // By role and description: the hint belongs to the box it explains.
+      expect(screen.queryByRole('spinbutton', { description: '= 2 (default)' }), `override ${v}`).not.toBeNull()
+      cleanup()
+    }
+  })
+
+  it('explains an overridden empty or non-integer int as the global value', () => {
+    // Not the default: the settings layer skips an empty or unparsable group
+    // value and leaves the inherited global one in place, so the override
+    // does nothing. Promising the default here would be the same lie the
+    // bare 0 told, the other way round.
+    for (const v of ['', '1.5']) {
+      mount(state('geo_anomaly.max_cities', '4', { on: true, value: v }))
+      expect(screen.queryByText('= Global: 4'), `override ${JSON.stringify(v)}`).not.toBeNull()
+      expect(screen.queryByText(/\(default\)/), `override ${JSON.stringify(v)}`).toBeNull()
+      cleanup()
+    }
+    // ...and the global value is itself read the usual way.
+    mount(state('geo_anomaly.max_cities', '0', { on: true, value: '' }))
+    expect(screen.queryByText('= Global: 2 (default)')).not.toBeNull()
+  })
+
+  it('adds no hint to an overridden positive int', () => {
+    mount(state('geo_anomaly.max_cities', '0', { on: true, value: '3' }))
+    expect(screen.queryByText(/^=/)).toBeNull()
+  })
+
+  it('adds no hint to an int whose 0 is a real value', () => {
+    // Only keys with an unsetValue read 0 as unset. Elsewhere 0 means 0, and
+    // a hint would invent a default the server never applies.
+    render(<ScopeOverridesEditor onChange={vi.fn()} categories={['notify']}
+      scope={state('notify.expire_before_days', '3', { on: true, value: '0' })} />)
+    expect(screen.queryByRole('spinbutton')).not.toBeNull()
+    expect(screen.queryByText(/^=/)).toBeNull()
+  })
+})
+
 describe('ScopeOverridesEditor, multi-line strings', () => {
   it('renders a multi-line string override as a textarea', () => {
     // Co-travel is one country set per LINE; a single-line input would

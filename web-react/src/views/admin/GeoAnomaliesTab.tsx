@@ -42,10 +42,18 @@ const TIER_DEFAULT: Record<string, string> = { country: '跨国', region: '跨�
  * name the database did not resolve prints as "?" — it is a real source that
  * could only be placed as far as its parent, and dropping it would make the
  * counts stop adding up. Country-only evidence prints as the country alone.
+ *
+ * "Resolved below the country" means a region OR a city. A location record
+ * can carry a city and no subdivision (the geoip reader takes the two from
+ * separate fields), and the server counts that city for the city tier on its
+ * own (ObserveGeo adds regions and cities independently). Keyed on the region
+ * alone, such a country printed as its head only, so a city-tier flag could
+ * stand next to a Places cell that names no city. It prints as
+ * "? n (City n, …)" instead.
  */
 function spotLine(c: SpotTree): string {
   const name = (s: string) => s || '?'
-  const named = c.regions.some(r => r.region !== '')
+  const named = c.regions.some(r => r.region !== '' || r.cities.some(ci => ci.city !== ''))
   const regions = c.regions.map(r => {
     const cities = r.cities.some(ci => ci.city !== '')
       ? ` (${r.cities.map(ci => `${name(ci.city)} ${ci.n}`).join(', ')})`

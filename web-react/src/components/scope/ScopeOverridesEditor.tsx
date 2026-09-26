@@ -61,6 +61,29 @@ export default function ScopeOverridesEditor({
     return raw
   }
 
+  // What an OVERRIDDEN value of such a key will mean, since the number in the
+  // box does not say it. null = it means what it says; no hint.
+  //
+  // The server has two readings, and they are different:
+  //   - an integer (intField.Unmarshal parses it) that is not positive is
+  //     "never configured", exactly as for the global value, and becomes the
+  //     SHIPPED DEFAULT (GeoPolicyFromSettings keeps only a positive number)
+  //     — not 0 and not the global value. Against a global 4, a group admin
+  //     typing 0 for "zero" or for "inherit" has made the group stricter (2);
+  //   - an empty or unparsable value is skipped by applyScopeOverrides, which
+  //     leaves the inherited GLOBAL value in place — the override does
+  //     nothing, and "= default" would be the same lie the bare 0 told.
+  //     "Parsable" is Go's strconv.Atoi, which intField uses: an optional
+  //     sign, then digits — so '1.5' and '1e3' are skipped too.
+  // The field keeps what was typed; the hint says which of the two it is.
+  const overrideHint = (k: ScopeKeyMeta, raw: string) => {
+    if (k.unsetValue === undefined) return null
+    if (!/^[+-]?\d+$/.test(raw)) {
+      return `= ${t('admin:groups.scope.global_prefix', { defaultValue: '全局' })}: ${fmtVal(k, scope.global[k.key])}`
+    }
+    return Number(raw) <= 0 ? `= ${k.unsetValue}${defaultSuffix()}` : null
+  }
+
   // Switching an override on copies the inherited value, so the field opens
   // on what the admin was just looking at. For an enum whose inherited value
   // is not an option ('' = unset), that is the default it stands for — a
@@ -121,10 +144,18 @@ export default function ScopeOverridesEditor({
                           multiline={k.multiline} minRows={k.multiline ? 2 : undefined}
                           onChange={e => setEdit({ on: true, value: e.target.value })} />
                       ) : (
-                        <TextField size="small" type="number" value={st.value}
+                        // The box stays 100px, flush right; the root spans the
+                        // value column so the hint under it gets the column's
+                        // width (right-aligned under the box) before it wraps.
+                        // helperText rather than a caption beside it: MUI ties
+                        // it to the input via aria-describedby.
+                        <TextField size="small" type="number" value={st.value} fullWidth
                           onChange={e => setEdit({ on: true, value: e.target.value })}
-                          sx={{ width: 100 }} slotProps={{
-                          htmlInput: k.kind === 'float' ? { step: 'any', min: 0 } : { step: 1, min: 0 }
+                          helperText={overrideHint(k, st.value)}
+                          slotProps={{
+                          input: { sx: { width: 100, alignSelf: 'flex-end' } },
+                          htmlInput: k.kind === 'float' ? { step: 'any', min: 0 } : { step: 1, min: 0 },
+                          formHelperText: { sx: { mx: 0, textAlign: 'right' } },
                         }} />
                       )
                     ) : (
