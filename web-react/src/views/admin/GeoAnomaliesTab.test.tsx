@@ -9,20 +9,25 @@ import GeoAnomaliesTab, { stateColor } from './GeoAnomaliesTab'
 
 const api = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() }))
 vi.mock('@/api/client', () => ({ client: api }))
-// The two reason strings the localized-reason test reads, as zh-CN ships
-// them; every other key falls through to its defaultValue exactly as before,
-// so the rest of this file still reads the component's own Chinese defaults.
+// The strings the localized tests read, as zh-CN ships them; every other key
+// falls through to its defaultValue exactly as before, so the rest of this
+// file still reads the component's own Chinese defaults.
 const zh = vi.hoisted((): Record<string, string> => ({
   'admin:geo_anomalies.reason_over_region': '同时在 {{country}} 的 {{spread}} 个省 / 州（容错 {{tolerance}}）',
   'admin:geo_anomalies.reason_flagged_suffix': '，已持续 {{over}} / {{need}} 次',
+  'admin:geo_anomalies.max_km': '相距约 {{km}} 公里',
+  'admin:geo_regions.cn.GD': '广东',
 }))
+// The UI language, read on every render so a test can switch it; afterEach
+// puts it back.
+const lang = vi.hoisted(() => ({ current: 'zh-CN' }))
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
     t: (k: string, o?: Record<string, unknown>) => {
       const raw = zh[k] ?? (typeof o?.defaultValue === 'string' ? o.defaultValue : k)
       return raw.replace(/\{\{(\w+)\}\}/g, (m, name: string) => (o && name in o ? String(o[name]) : m))
     },
-    i18n: { language: 'zh-CN' },
+    i18n: { language: lang.current },
   }),
 }))
 
@@ -38,7 +43,10 @@ function mount() {
 }
 
 beforeEach(() => vi.clearAllMocks())
-afterEach(cleanup)
+afterEach(() => {
+  cleanup()
+  lang.current = 'zh-CN'
+})
 
 // Colour is the first thing an operator reads on this table, so it has to
 // track what they should DO rather than how alarming the word sounds.
@@ -290,6 +298,63 @@ describe('GeoAnomaliesTab rows', () => {
     const reasonOf = (name: string) => rowOf(name).querySelectorAll('td')[4]?.textContent
     expect(reasonOf('alice')).toBe('同时在 CN 的 2 个省 / 州（容错 1），已持续 3 / 3 次')
     expect(reasonOf('bob')).toBe('within tolerance')
+  })
+
+  // Guangdong carries its ISO code; the city is the database's own spelling
+  // in every language.
+  const coded = (over: Partial<GeoAnomaly['evidence']> = {}) => row({
+    upn: 'alice', state: 'suspect', tier: 'region', places: ['CN'],
+    evidence: {
+      ...row({}).evidence,
+      spots: [{ cc: 'CN', region: 'Guangdong', rc: 'GD', city: 'Shenzhen', n: 2 }],
+      ...over,
+    },
+  })
+
+  it('names a Chinese province in Chinese for a Chinese UI', async () => {
+    serve([coded()])
+    mount()
+
+    await screen.findByText('alice')
+    expect(placesOf('alice')).toContain('广东 2 (Shenzhen 2)')
+  })
+
+  it('keeps the database\'s province name for any other UI', async () => {
+    // The sub-log and auth-event region columns show the database's English;
+    // an English Geo tab reads the same.
+    lang.current = 'en-US'
+    serve([coded()])
+    mount()
+
+    await screen.findByText('alice')
+    expect(placesOf('alice')).toContain('Guangdong 2 (Shenzhen 2)')
+    expect(placesOf('alice')).not.toContain('广东')
+  })
+
+  it('shows how far apart the concurrent sources are, marked as not judged', async () => {
+    const base = row({}).evidence
+    serve([coded({ v: 3, spread: { ...base.spread, max_km: 1070 } })])
+    mount()
+
+    await screen.findByText('alice')
+    expect(placesOf('alice')).toContain('相距约 1070 公里')
+    const hint = within(rowOf('alice')).getByText('相距约 1070 公里').closest('[aria-label]')
+    expect(hint?.getAttribute('aria-label') ?? '').toContain('不参与判定')
+  })
+
+  it('shows no distance where none was measured or recorded', async () => {
+    // v3 without max_km: nothing measured. v2: the field did not exist, so a
+    // number there is not one this build vouches for.
+    const base = row({}).evidence
+    serve([
+      coded({ v: 3 }),
+      { ...coded({ v: 2, spread: { ...base.spread, max_km: 1070 } }), user_id: 2, upn: 'bob' },
+    ])
+    mount()
+
+    await screen.findByText('alice')
+    expect(placesOf('alice')).not.toContain('相距')
+    expect(placesOf('bob')).not.toContain('相距')
   })
 
   it('falls back to the recorded places for a row an older build wrote', async () => {

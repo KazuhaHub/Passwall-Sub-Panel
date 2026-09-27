@@ -11,7 +11,7 @@ import { GEO_REASON_CODES, type GeoAnomaly, type GeoReasonCode, type GeoSpot, ty
 import type { GeoIPStatus, UISettings } from '@/api/settings'
 import { flatten, type Nested } from '@/i18n/options'
 import {
-  activeDbIsCountryOnly, geoTolerances, groupSpots, reasonText, sortBySeverity, tierLabelKey, type Translate,
+  activeDbIsCountryOnly, geoTolerances, groupSpots, reasonText, sortBySeverity, spreadKm, tierLabelKey, type Translate,
 } from './geoAnomaly'
 
 function row(over: Partial<GeoAnomaly>): GeoAnomaly {
@@ -83,6 +83,54 @@ describe('groupSpots', () => {
 
   it('returns nothing for no spots', () => {
     expect(groupSpots([])).toEqual([])
+  })
+
+  it('puts the smallest region code on the region, and none where no spot has one', () => {
+    // One region's spots can disagree (a database bug, or a city the database
+    // coded and one it did not). The code is display only, so the region is
+    // still one node, carrying one deterministic code: the smallest, as the
+    // server picks it.
+    const tree = groupSpots([
+      { cc: 'CN', region: 'Guangdong', rc: 'GX', city: 'Shenzhen', n: 2 },
+      { cc: 'CN', region: 'Guangdong', city: 'Foshan', n: 1 },
+      { cc: 'CN', region: 'Guangdong', rc: 'GD', city: 'Guangzhou', n: 1 },
+      { cc: 'CN', region: 'Hunan', rc: '', city: 'Changsha', n: 1 },
+      { cc: 'CN', region: 'Hubei', city: 'Wuhan', n: 1 },
+    ])
+    const regions = tree[0].regions
+    expect(regions.map(r => r.region)).toEqual(['Guangdong', 'Hubei', 'Hunan'])
+    expect(regions[0].rc).toBe('GD')
+    // No code means no property at all, not rc: '' — the node keeps the
+    // shape it had before codes existed.
+    expect('rc' in regions[1]).toBe(false)
+    expect('rc' in regions[2]).toBe(false)
+  })
+})
+
+describe('spreadKm', () => {
+  const ev = (v: number, maxKm?: number) => {
+    const base = row({}).evidence
+    return { ...base, v, spread: { ...base.spread, ...(maxKm === undefined ? {} : { max_km: maxKm }) } }
+  }
+
+  it('reads the distance from v3 evidence', () => {
+    expect(spreadKm(ev(3, 1070))).toBe(1070)
+  })
+
+  it('reads nothing from a row that could not have recorded one', () => {
+    // Before v3 an absent max_km means "not recorded", and a present one
+    // would be a shape this version does not vouch for.
+    expect(spreadKm(ev(2, 1070))).toBe(0)
+    expect(spreadKm(ev(0, 1070))).toBe(0)
+    expect(spreadKm(undefined)).toBe(0)
+  })
+
+  it('reads an absent, zero or malformed distance as none', () => {
+    expect(spreadKm(ev(3))).toBe(0)
+    expect(spreadKm(ev(3, 0))).toBe(0)
+    expect(spreadKm(ev(3, -5))).toBe(0)
+    expect(spreadKm(ev(3, Number.NaN))).toBe(0)
+    expect(spreadKm(ev(3, Number.POSITIVE_INFINITY))).toBe(0)
   })
 })
 

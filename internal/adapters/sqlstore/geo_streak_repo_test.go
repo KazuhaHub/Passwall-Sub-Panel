@@ -473,6 +473,30 @@ func TestGeoStreakRepo_V1EvidenceReadsWithoutWhy(t *testing.T) {
 	}
 }
 
+// What v3 adds rides inside the evidence column and must come back through
+// List: a spot's region code (what the SPA names a province by in Chinese)
+// and the concurrent distance. Either one dropped by the store renders the
+// row as a v3 that measured nothing, which is a different statement from the
+// one the poll made.
+func TestGeoStreakRepo_V3EvidenceRoundTrips(t *testing.T) {
+	r := newStreakRepo(t)
+	ev := sampleEvidence()
+	ev.Spots[0].RC = "GD"
+	ev.Spread.MaxKm = 540
+	if err := r.Save(context.Background(), map[int64]domain.GeoRecord{
+		7: {UserID: 7, State: domain.GeoStateSuspect, Evidence: ev},
+	}); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	g := listed(t, r, 7)
+	if g.Evidence.Spots[0].RC != "GD" || g.Evidence.Spread.MaxKm != 540 {
+		t.Fatalf("evidence = %+v, want the first spot's rc GD and max_km 540", g.Evidence)
+	}
+	if !reflect.DeepEqual(g.Evidence, ev) {
+		t.Fatalf("evidence = %+v, want %+v", g.Evidence, ev)
+	}
+}
+
 // Load is the poll's read and runs every cycle over the whole table; the poll
 // never reads evidence, which is the one sizeable column. It still needs the
 // streak (tier and ban streak included) and when the user was last judged.

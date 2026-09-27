@@ -8,6 +8,7 @@ import {
 } from '@/api/riskSignals'
 import type { UISettings } from '@/api/settings'
 import type { Translate } from './geoAnomaly'
+import type { RegionNamer, RegionRef } from './regionName'
 
 /** Whether this build draws a column for the kind. A newer server's kind has
  *  no column here, so it neither lists a row nor ages one. */
@@ -194,11 +195,11 @@ export function oldestUpdate(row: RiskUserRow): number {
 }
 
 /**
- * How a province is named on the page: the region the location database
- * returned, or the country when it stopped there. The one place the name is
- * chosen, so a later build can map an ISO subdivision code (`rc`) to a local
- * name here and nowhere else.
+ * How a province is named on the page: what `name` makes of it — the tab
+ * passes regionNamer, which gives a Chinese UI the Chinese name of a known CN
+ * code and everyone else the database's own region — or the country when
+ * there is no region to name. The one place the name is chosen.
  */
-export function placeLabel(p: { cc: string; region: string; rc?: string }): string {
-  return p.region || p.cc
+export function placeLabel(p: RegionRef, name: RegionNamer = x => x.region): string {
+  return name(p) || p.cc
 }

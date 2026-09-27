@@ -4,8 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/netip"
 	"reflect"
+	"sort"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -625,5 +628,108 @@ func TestRefresh_SavedEvidenceHasNoInputAddress(t *testing.T) {
 	}
 	if want := map[domain.RiskKind]int{domain.RiskKindSubSpread: 4, domain.RiskKindDevices: 4}; !reflect.DeepEqual(saved, want) {
 		t.Fatalf("checked rows with evidence %v, want %v", saved, want)
+	}
+}
+
+// Each province carries its region's ISO code from the lookups of the
+// sources placed there, normalized, and the smallest valid one across every
+// source and client: a database that codes one home address and not the
+// other still names the province. The phone fetches from two Guangdong
+// addresses, only one of them coded; the worker merges its cells in map
+// order, so the week is judged on twenty fresh harnesses and must name
+// Guangdong every time. The code is display only — the province is still
+// keyed by its name (domain TestSubSpread_RegionCodeNeverChangesTheVerdict).
+func TestRefresh_SubSpreadProvincesCarryTheRegionCode(t *testing.T) {
+	for run := range 20 {
+		h := newSpreadHarness(usersInGroups(0), rowsOf(
+			everyDay(t, phone(1, ipHomeGD)),
+			everyDay(t, phone(1, ipHomeGD2)),
+			everyDay(t, client(1, ipHunan, "ClashX Pro/1.118.0")),
+		))
+		for ip, rc := range map[string]string{ipHomeGD: "GD", ipHomeGD2: "", ipHunan: "hn"} {
+			g := h.geo.places[ip]
+			g.RegionCode = rc
+			h.geo.places[ip] = g
+		}
+		if err := h.service().RefreshOnce(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		r, ev := spreadRow(t, h, 1)
+		wantSpreadRow(t, r, domain.GeoStateFlagged, domain.RiskCodeSpread)
+		got := map[string]string{}
+		for _, p := range ev.Provinces {
+			got[p.Region] = p.RC
+		}
+		if want := map[string]string{"Guangdong": "GD", "Hunan": "HN"}; !reflect.DeepEqual(got, want) {
+			t.Fatalf("run %d: province codes %v, want %v (evidence %s)", run, got, want, r.Evidence)
+		}
+	}
+}
+
+// Coordinates never reach a saved row (I2). Since authcore v0.5.0 every
+// lookup the worker reads carries the network's latitude, longitude and
+// accuracy radius; none of the place kinds stores them — not sub_spread's
+// provinces, not devices', not login_country's events. Each place is given
+// its own six-decimal coordinates, so a leak of any one of them shows, in
+// full or cut to its first six characters.
+func TestRefresh_SavedEvidenceHasNoCoordinate(t *testing.T) {
+	h := newLoginHarness(t, usersInGroups(0, 0), append(settledAt(1, ipHomeGD), signIn(1, ipTokyo, day))...)
+	ips := make([]string, 0, len(h.geo.places))
+	for ip := range h.geo.places {
+		ips = append(ips, ip)
+	}
+	sort.Strings(ips)
+	var needles []string
+	for i, ip := range ips {
+		lat, err := strconv.ParseFloat(fmt.Sprintf("%d.%06d", 20+i, 543121+i), 64)
+		if err != nil {
+			t.Fatal(err)
+		}
+		lon, err := strconv.ParseFloat(fmt.Sprintf("%d.%06d", 110+i, 57861+i), 64)
+		if err != nil {
+			t.Fatal(err)
+		}
+		g := h.geo.places[ip]
+		g.Latitude, g.Longitude, g.AccuracyRadiusKm = lat, lon, 20+i
+		h.geo.places[ip] = g
+		for _, v := range []float64{lat, lon} {
+			s := strconv.FormatFloat(v, 'f', -1, 64)
+			needles = append(needles, s, s[:6])
+		}
+	}
+	if err := h.service().RefreshOnce(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	checked := map[domain.RiskKind]int{}
+	var all strings.Builder
+	for _, kinds := range h.store.saved(t) {
+		for _, r := range kinds {
+			if r.Kind == domain.RiskKindUsageShift || r.Evidence == nil {
+				continue
+			}
+			checked[r.Kind]++
+			all.Write(r.Evidence)
+			for _, needle := range needles {
+				if strings.Contains(string(r.Evidence), needle) {
+					t.Fatalf("user %d %s evidence carries the coordinate %q: %s", r.UserID, r.Kind, needle, r.Evidence)
+				}
+			}
+			for _, key := range []string{"latitude", "longitude", "accuracy"} {
+				if strings.Contains(strings.ToLower(string(r.Evidence)), key) {
+					t.Fatalf("user %d %s evidence carries %q: %s", r.UserID, r.Kind, key, r.Evidence)
+				}
+			}
+		}
+	}
+	for _, kind := range []domain.RiskKind{domain.RiskKindSubSpread, domain.RiskKindDevices, domain.RiskKindLoginCountry} {
+		if checked[kind] == 0 {
+			t.Fatalf("checked no %s row with evidence (checked %v): the guard is looking at nothing", kind, checked)
+		}
+	}
+	// Not vacuous: the places the coordinates belong to are there.
+	for _, want := range []string{`"Guangdong"`, `"JP"`} {
+		if !strings.Contains(all.String(), want) {
+			t.Fatalf("saved evidence lacks %s: %s", want, all.String())
+		}
 	}
 }

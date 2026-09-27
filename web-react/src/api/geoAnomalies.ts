@@ -14,6 +14,10 @@ export type GeoTier = '' | 'country' | 'region' | 'city'
 export interface GeoSpot {
   cc: string
   region: string
+  /** ISO 3166-2 code, display only ("GD", no country prefix); absent when
+   *  the database gave none or region is ''. The spot is still keyed by
+   *  (cc, region, city): a code never splits or merges a place. */
+  rc?: string
   city: string
   n: number
 }
@@ -74,6 +78,8 @@ export interface GeoWhy {
  * field is then zero and `spots` is `[]`, never null — so `v`, not the shape,
  * is how a reader tells "not recorded" from "nothing found". `v` 1 recorded
  * evidence but no `why`; from `v` 2 every row the poll writes carries one.
+ * `v` 3 spots may carry `rc` and its spread may carry `max_km`; on an older
+ * row their absence means "not recorded", not "none".
  */
 export interface GeoEvidence {
   v: number
@@ -84,7 +90,13 @@ export interface GeoEvidence {
   coverage: { placed: number; unplaced: number; region_known: number; city_known: number }
   /** Distinct IPv4 /24 and IPv6 /48 networks among the judged sources. */
   networks: number
-  spread: { countries: number; regions: number; region_country: string; cities: number; city_country: string }
+  spread: {
+    countries: number; regions: number; region_country: string; cities: number; city_country: string
+    /** Present from `v` 3, omitted at 0; km after both radii, rounded to 10.
+     *  The farthest pair of concurrent sources placed below the country, as
+     *  the location database places their networks. Never judged. */
+    max_km?: number
+  }
   /** Present from `v` 2: what the SPA localizes `reason` from. */
   why?: GeoWhy
 }

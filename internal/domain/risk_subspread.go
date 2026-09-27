@@ -44,9 +44,10 @@ import (
 // people on the same app and version are one client string, so their
 // provinces link.
 //
-// Evidence never carries an address: provinces, countries, day masks, client
-// labels and a four-character device-id prefix. The identity key is an
-// in-memory handle and is never rendered.
+// Evidence never carries an address: provinces (with their region codes,
+// display only), countries, day masks, client labels and a four-character
+// device-id prefix. Nor a coordinate: the lookups carry one, and nothing here
+// reads it. The identity key is an in-memory handle and is never rendered.
 
 // Evidence caps: what one row stores and the admin table draws. The verdict
 // is computed over everything; only the listing is bounded.
@@ -80,7 +81,10 @@ type SubPlaceSighting struct {
 	// CC is the upper-case country code, "" when the source could not be
 	// placed; Region is "" when it was placed to its country only.
 	CC, Region string
-	Days       uint8
+	// RC is Region's ISO 3166-2 code, "" when unknown; display only — a
+	// disagreeing code never splits a province.
+	RC   string
+	Days uint8
 }
 
 // SubIdentity describes one client for the evidence. Kind is "hwid" (it
@@ -145,8 +149,13 @@ type SubSpreadEvidence struct {
 
 // SubProvince is one province of the judged country.
 type SubProvince struct {
-	CC          string `json:"cc"`
-	Region      string `json:"region"`
+	CC     string `json:"cc"`
+	Region string `json:"region"`
+	// RC is Region's ISO 3166-2 code ("GD"), left out when no sighting of
+	// the province gave a valid one; the smallest when they disagree. It is
+	// only what the admin UI names the province by in the reader's language:
+	// the province itself is (CC, Region), and so is every count and link.
+	RC          string `json:"rc,omitempty"`
 	Days        uint8  `json:"days"`
 	Established bool   `json:"established"`
 	// Group is the province's group number, 1..groups_all.
@@ -241,13 +250,20 @@ func EvaluateSubSpread(p SubSpreadPolicy, in SubSpreadInput) (RiskVerdict, *SubS
 
 	provinces := map[subPlace]uint8{}
 	countries := map[string]uint8{}
+	// codes rides beside provinces, never inside its key: a database that
+	// codes some of a province's sources and not others, or gives it two
+	// codes, must not split one province into two (B-D3). The smallest valid
+	// code wins, so the display is the same whatever order sightings arrive.
+	codes := map[subPlace]string{}
 	for _, s := range in.Sightings {
 		if s.CC == "" || s.Days == 0 {
 			continue
 		}
 		countries[s.CC] |= s.Days
 		if s.Region != "" {
-			provinces[subPlace{s.CC, s.Region}] |= s.Days
+			k := subPlace{s.CC, s.Region}
+			provinces[k] |= s.Days
+			codes[k] = PreferRegionCode(codes[k], NormalizeRegionCode(s.RC))
 		}
 	}
 	if len(provinces) == 0 {
@@ -261,6 +277,9 @@ func EvaluateSubSpread(p SubSpreadPolicy, in SubSpreadInput) (RiskVerdict, *SubS
 	groups := groupProvinces(country, provinces, in.Sightings, minDays)
 	ev.Groups, ev.GroupsAll = groups.established, groups.all
 	ev.Provinces = groups.listed
+	for i, p := range ev.Provinces {
+		ev.Provinces[i].RC = codes[subPlace{p.CC, p.Region}]
+	}
 	ev.Identities = identityEvidence(in, country, ev.Provinces)
 
 	switch {

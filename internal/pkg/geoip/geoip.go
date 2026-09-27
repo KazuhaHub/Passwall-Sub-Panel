@@ -87,14 +87,25 @@ func (r *Reader) Lookup(ip string) (domain.GeoLocation, error) {
 func IsResolvable(ip string) bool { return authcoregeoip.IsResolvable(ip) }
 
 // toDomain converts a Location into the panel's own type. It is a named
-// function rather than four inlined assignments so the conversion is testable on
-// its own: the schema work behind it is verified by authcore's fixtures, which
-// this package does not re-implement and must not re-verify.
+// function rather than eight inlined assignments so the conversion is testable
+// on its own: the schema work behind it is verified by authcore's fixtures,
+// which this package does not re-implement and must not re-verify.
+//
+// The region code and coordinates are copied as authcore gave them. authcore
+// already upper-cases the code and keeps coordinates pair-or-none with a
+// bounded radius; the domain re-checks both where it uses them, because fakes
+// and future adapters build a GeoLocation without going through here. The
+// domain type keeps those four fields out of its JSON, so copying them here
+// widens no view that serves a GeoLocation.
 func toDomain(l authcoregeoip.Location) domain.GeoLocation {
 	return domain.GeoLocation{
-		CountryCode: l.CountryCode,
-		Country:     l.Country,
-		Region:      l.Region,
-		City:        l.City,
+		CountryCode:      l.CountryCode,
+		Country:          l.Country,
+		Region:           l.Region,
+		City:             l.City,
+		RegionCode:       l.RegionCode,
+		Latitude:         l.Latitude,
+		Longitude:        l.Longitude,
+		AccuracyRadiusKm: l.AccuracyRadiusKm,
 	}
 }

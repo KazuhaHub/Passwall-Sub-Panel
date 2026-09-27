@@ -103,15 +103,69 @@ func wantGroups(t *testing.T, ev *SubSpreadEvidence, groups, all int) {
 	}
 }
 
+// subSpreadCase is one named week of the behaviour tests below.
+type subSpreadCase struct {
+	name string
+	in   SubSpreadInput
+}
+
+// subSpreadCases are the inputs of the behaviour tests that pin how
+// provinces link, group and get judged, kept in one table so a guard can run
+// every one of them again with region codes attached
+// (TestSubSpread_RegionCodeNeverChangesTheVerdict). Each test reads its own
+// week by name and asserts what it always asserted.
+func subSpreadCases() []subSpreadCase {
+	x, y := ua("x/1"), ua("y/1")
+	return []subSpreadCase{
+		{"trip", spreadInput([]SubIdentity{spreadPhone, spreadRouter},
+			seen(spreadPhone, "CN", "Guangdong", week),
+			seen(spreadPhone, "CN", "Hunan", span(2, 4)),
+			seen(spreadRouter, "CN", "Guangdong", week),
+		)},
+		{"friend", spreadInput([]SubIdentity{spreadPhone, spreadFriend},
+			seen(spreadPhone, "CN", "Guangdong", week),
+			seen(spreadFriend, "CN", "Hunan", week),
+		)},
+		{"sim-never-on-wifi", spreadInput([]SubIdentity{spreadPhone, spreadRouter},
+			seen(spreadRouter, "CN", "Guangdong", week),
+			seen(spreadPhone, "CN", "Hunan", week),
+		)},
+		{"transitive", spreadInput([]SubIdentity{x, y},
+			seen(x, "CN", "Anhui", week),
+			seen(x, "CN", "Beijing", week),
+			seen(y, "CN", "Beijing", week),
+			seen(y, "CN", "Chongqing", week),
+		)},
+		{"link-through-unestablished", spreadInput([]SubIdentity{x, y},
+			seen(x, "CN", "Anhui", week),
+			seen(x, "CN", "Beijing", on(3)),
+			seen(y, "CN", "Beijing", on(3)),
+			seen(y, "CN", "Chongqing", week),
+		)},
+		{"country-tier", spreadInput([]SubIdentity{spreadPhone, spreadRouter},
+			seen(spreadPhone, "CN", "Guangdong", week),
+			seen(spreadRouter, "JP", "Tokyo", week),
+		)},
+	}
+}
+
+// spreadCase is the named week of subSpreadCases.
+func spreadCase(t *testing.T, name string) SubSpreadInput {
+	t.Helper()
+	for _, c := range subSpreadCases() {
+		if c.name == name {
+			return c.in
+		}
+	}
+	t.Fatalf("no sub_spread case %q", name)
+	return SubSpreadInput{}
+}
+
 // A trip: the phone fetched at home in Guangdong all week and in Hunan for
 // three days. The provinces are linked by the phone — one person, two places
 // on different days — so it is one group, not two.
 func TestSubSpread_TripLinkedByThePhoneIsClean(t *testing.T) {
-	v, ev := EvaluateSubSpread(spreadPolicy(), spreadInput([]SubIdentity{spreadPhone, spreadRouter},
-		seen(spreadPhone, "CN", "Guangdong", week),
-		seen(spreadPhone, "CN", "Hunan", span(2, 4)),
-		seen(spreadRouter, "CN", "Guangdong", week),
-	))
+	v, ev := EvaluateSubSpread(spreadPolicy(), spreadCase(t, "trip"))
 	wantSpread(t, v, GeoStateClean, RiskCodeWithin)
 	wantGroups(t, ev, 1, 1)
 	if ev.Country != "CN" {
@@ -123,10 +177,7 @@ func TestSubSpread_TripLinkedByThePhoneIsClean(t *testing.T) {
 // client was ever seen in both, so the two provinces are two groups — over a
 // region tolerance of 1.
 func TestSubSpread_FriendInAnotherProvinceIsFlagged(t *testing.T) {
-	v, ev := EvaluateSubSpread(spreadPolicy(), spreadInput([]SubIdentity{spreadPhone, spreadFriend},
-		seen(spreadPhone, "CN", "Guangdong", week),
-		seen(spreadFriend, "CN", "Hunan", week),
-	))
+	v, ev := EvaluateSubSpread(spreadPolicy(), spreadCase(t, "friend"))
 	wantSpread(t, v, GeoStateFlagged, RiskCodeSpread)
 	wantGroups(t, ev, 2, 2)
 }
@@ -138,10 +189,7 @@ func TestSubSpread_FriendInAnotherProvinceIsFlagged(t *testing.T) {
 // groups, exactly like a friend. The remedy is the admin's: a group with a
 // higher max_regions, or risk.sub_spread_off.
 func TestSubSpread_OutOfProvinceSIMNeverOnHomeWiFiIsFlagged(t *testing.T) {
-	v, ev := EvaluateSubSpread(spreadPolicy(), spreadInput([]SubIdentity{spreadPhone, spreadRouter},
-		seen(spreadRouter, "CN", "Guangdong", week),
-		seen(spreadPhone, "CN", "Hunan", week),
-	))
+	v, ev := EvaluateSubSpread(spreadPolicy(), spreadCase(t, "sim-never-on-wifi"))
 	wantSpread(t, v, GeoStateFlagged, RiskCodeSpread)
 	wantGroups(t, ev, 2, 2)
 }
@@ -172,13 +220,7 @@ func TestSubSpread_OneOffProvinceIsSuspect(t *testing.T) {
 // Links chain: X was seen in Anhui and Beijing, Y in Beijing and Chongqing,
 // so all three are one group though no client saw Anhui and Chongqing both.
 func TestSubSpread_LinkingIsTransitive(t *testing.T) {
-	x, y := ua("x/1"), ua("y/1")
-	v, ev := EvaluateSubSpread(spreadPolicy(), spreadInput([]SubIdentity{x, y},
-		seen(x, "CN", "Anhui", week),
-		seen(x, "CN", "Beijing", week),
-		seen(y, "CN", "Beijing", week),
-		seen(y, "CN", "Chongqing", week),
-	))
+	v, ev := EvaluateSubSpread(spreadPolicy(), spreadCase(t, "transitive"))
 	wantSpread(t, v, GeoStateClean, RiskCodeWithin)
 	wantGroups(t, ev, 1, 1)
 	for _, p := range ev.Provinces {
@@ -194,13 +236,7 @@ func TestSubSpread_LinkingIsTransitive(t *testing.T) {
 // one group. Erring toward silence — a province too brief to count on its
 // own can still say two clients belong together.
 func TestSubSpread_LinkThroughAnUnestablishedProvinceCounts(t *testing.T) {
-	x, y := ua("x/1"), ua("y/1")
-	v, ev := EvaluateSubSpread(spreadPolicy(), spreadInput([]SubIdentity{x, y},
-		seen(x, "CN", "Anhui", week),
-		seen(x, "CN", "Beijing", on(3)),
-		seen(y, "CN", "Beijing", on(3)),
-		seen(y, "CN", "Chongqing", week),
-	))
+	v, ev := EvaluateSubSpread(spreadPolicy(), spreadCase(t, "link-through-unestablished"))
 	wantSpread(t, v, GeoStateClean, RiskCodeWithin)
 	wantGroups(t, ev, 1, 1)
 }
@@ -264,10 +300,7 @@ func TestSubSpread_IdenticalClientStringsLink(t *testing.T) {
 // relayed user; concurrent use abroad is v2's business. The other country is
 // shown as context only.
 func TestSubSpread_CountryTierIsNeverJudged(t *testing.T) {
-	v, ev := EvaluateSubSpread(spreadPolicy(), spreadInput([]SubIdentity{spreadPhone, spreadRouter},
-		seen(spreadPhone, "CN", "Guangdong", week),
-		seen(spreadRouter, "JP", "Tokyo", week),
-	))
+	v, ev := EvaluateSubSpread(spreadPolicy(), spreadCase(t, "country-tier"))
 	wantSpread(t, v, GeoStateClean, RiskCodeWithin)
 	wantGroups(t, ev, 1, 1)
 	if ev.Country != "CN" {
@@ -859,5 +892,128 @@ func TestSubSpread_CodesAreExactlyAllRiskCodes(t *testing.T) {
 	}
 	if !reflect.DeepEqual(reached, listed) {
 		t.Fatalf("sub_spread codes reached %v, AllRiskCodes lists %v", reached, listed)
+	}
+}
+
+// coded is s with the region code a database gave its source.
+func coded(s SubPlaceSighting, rc string) SubPlaceSighting {
+	s.RC = rc
+	return s
+}
+
+// A province carries its region's ISO code so the admin UI can name it in
+// the reader's language. Sources of one province can disagree — a database
+// that codes some records and not others, or spells one code in lower case,
+// or gives two — and the province then shows the smallest valid code,
+// whatever order its sightings arrive in. A code that is not a plausible
+// subdivision code is dropped rather than repaired, and a province with no
+// valid code has no "rc" key at all: the UI falls back to the region name.
+func TestSubSpread_ProvinceCarriesTheSmallestRegionCode(t *testing.T) {
+	x := ua("x/1")
+	ids := []SubIdentity{spreadPhone, spreadRouter, spreadFriend, x}
+	sightings := []SubPlaceSighting{
+		coded(seen(spreadPhone, "CN", "Guangdong", week), ""),
+		coded(seen(spreadRouter, "CN", "Guangdong", week), "gd"),
+		coded(seen(x, "CN", "Guangdong", on(2)), "GX"),
+		coded(seen(spreadFriend, "CN", "Hunan", week), "GUANGDONG"),
+	}
+	reversed := make([]SubPlaceSighting, len(sightings))
+	for i, s := range sightings {
+		reversed[len(sightings)-1-i] = s
+	}
+	for _, order := range [][]SubPlaceSighting{sightings, reversed} {
+		_, ev := EvaluateSubSpread(spreadPolicy(), spreadInput(ids, order...))
+		ev = mustSpreadEvidence(t, ev)
+		rc := map[string]string{}
+		for _, p := range ev.Provinces {
+			rc[p.Region] = p.RC
+		}
+		if want := map[string]string{"Guangdong": "GD", "Hunan": ""}; !reflect.DeepEqual(rc, want) {
+			t.Fatalf("province codes %v, want %v (provinces %+v)", rc, want, ev.Provinces)
+		}
+		raw, err := json.Marshal(ev)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(raw), `"region":"Guangdong","rc":"GD"`) {
+			t.Fatalf("evidence %s does not read Guangdong as GD", raw)
+		}
+		var doc struct {
+			Provinces []map[string]json.RawMessage `json:"provinces"`
+		}
+		if err := json.Unmarshal(raw, &doc); err != nil {
+			t.Fatal(err)
+		}
+		for _, p := range doc.Provinces {
+			if _, has := p["rc"]; has && string(p["region"]) == `"Hunan"` {
+				t.Fatalf("Hunan carries an rc key for an invalid code: %s", raw)
+			}
+		}
+	}
+}
+
+// withConflictingCodes is in with a region code on every sighting, chosen so
+// codes carry no information a key could use: every province's first
+// sighting says "ZZ" (so provinces share a code), its second "aa" (so one
+// province has two, one in lower case), its third none, its fourth a numeric
+// code, its fifth an invalid one. It also says how many provinces were given
+// two different valid codes.
+func withConflictingCodes(in SubSpreadInput) (SubSpreadInput, int) {
+	codes := []string{"ZZ", "aa", "", "13", "CN-GD"}
+	out := in
+	out.Sightings = make([]SubPlaceSighting, len(in.Sightings))
+	// Its own key, not the evaluator's: the guard must still compile when a
+	// mutation changes what the evaluator keys provinces by.
+	n := map[[2]string]int{}
+	conflicts := 0
+	for i, s := range in.Sightings {
+		k := [2]string{s.CC, s.Region}
+		s.RC = codes[n[k]%len(codes)]
+		if n[k] == 1 {
+			conflicts++
+		}
+		n[k]++
+		out.Sightings[i] = s
+	}
+	return out, conflicts
+}
+
+// withoutRegionCodes is a copy of ev with every province's code cleared.
+func withoutRegionCodes(ev *SubSpreadEvidence) *SubSpreadEvidence {
+	if ev == nil {
+		return nil
+	}
+	c := *ev
+	c.Provinces = make([]SubProvince, len(ev.Provinces))
+	copy(c.Provinces, ev.Provinces)
+	for i := range c.Provinces {
+		c.Provinces[i].RC = ""
+	}
+	return &c
+}
+
+// THE REGION CODE IS A DISPLAY ATTRIBUTE, NEVER A KEY (B-D3, I5). Provinces
+// are keyed by (country, region name) as they always were: a database that
+// codes some sources and not others, gives one province two codes, or gives
+// two provinces the same one must not split, merge, relink or re-judge
+// anything. Every behaviour week above runs with and without codes; the
+// verdicts are equal, and so is the evidence once the codes are cleared.
+func TestSubSpread_RegionCodeNeverChangesTheVerdict(t *testing.T) {
+	conflicts := 0
+	for _, c := range subSpreadCases() {
+		withCodes, n := withConflictingCodes(c.in)
+		conflicts += n
+		v0, ev0 := EvaluateSubSpread(spreadPolicy(), c.in)
+		v1, ev1 := EvaluateSubSpread(spreadPolicy(), withCodes)
+		if v0 != v1 {
+			t.Errorf("%s: verdict %+v without codes, %+v with them", c.name, v0, v1)
+		}
+		if a, b := withoutRegionCodes(ev0), withoutRegionCodes(ev1); !reflect.DeepEqual(a, b) {
+			t.Errorf("%s: evidence differs once codes are attached\nwithout %+v\nwith    %+v", c.name, a, b)
+		}
+	}
+	// Not vacuous: some province really was given two codes.
+	if conflicts == 0 {
+		t.Fatal("no case gave a province two different codes")
 	}
 }

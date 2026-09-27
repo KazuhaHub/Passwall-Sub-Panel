@@ -11,7 +11,10 @@ import { useGeoAnomalies } from '@/query/geoAnomalies'
 import { useGeoIPStatus } from '@/query/settings'
 import { useQueryScope } from '@/query/useQueryScope'
 import { countryFlag } from '@/utils/geo'
-import { activeDbIsCountryOnly, groupSpots, reasonText, sortBySeverity, tierLabelKey, type SpotTree } from '@/utils/geoAnomaly'
+import {
+  activeDbIsCountryOnly, groupSpots, reasonText, sortBySeverity, spreadKm, tierLabelKey, type SpotTree,
+} from '@/utils/geoAnomaly'
+import { regionNamer, type RegionNamer } from '@/utils/regionName'
 
 /**
  * Colour carries meaning here, so it is assigned by what the operator should
@@ -50,22 +53,27 @@ const TIER_DEFAULT: Record<string, string> = { country: '跨国', region: '跨�
  * alone, such a country printed as its head only, so a city-tier flag could
  * stand next to a Places cell that names no city. It prints as
  * "? n (City n, …)" instead.
+ *
+ * Regions are named by nameRegion: a Chinese UI reads a CN province with a
+ * known ISO code in Chinese, every other region and UI reads the database's
+ * name. Cities always print as the database gives them.
  */
-function spotLine(c: SpotTree): string {
+function spotLine(c: SpotTree, nameRegion: RegionNamer): string {
   const name = (s: string) => s || '?'
   const named = c.regions.some(r => r.region !== '' || r.cities.some(ci => ci.city !== ''))
   const regions = c.regions.map(r => {
     const cities = r.cities.some(ci => ci.city !== '')
       ? ` (${r.cities.map(ci => `${name(ci.city)} ${ci.n}`).join(', ')})`
       : ''
-    return `${name(r.region)} ${r.n}${cities}`
+    return `${nameRegion({ cc: c.cc, region: r.region, rc: r.rc }) || '?'} ${r.n}${cities}`
   })
   const head = [countryFlag(c.cc), c.cc, String(c.n)].filter(Boolean).join(' ')
   return named ? `${head}: ${regions.join(' · ')}` : head
 }
 
 export default function GeoAnomaliesTab() {
-  const { t } = useTranslation(['admin'])
+  const { t, i18n } = useTranslation(['admin'])
+  const nameRegion = regionNamer(t, i18n.language)
   const theme = useTheme()
   const md = theme.palette.md
   const scope = useQueryScope()
@@ -135,6 +143,7 @@ export default function GeoAnomaliesTab() {
               // so its places (whatever that build stored) are all there is.
               const spots = r.evidence?.v > 0 && r.evidence.spots.length ? groupSpots(r.evidence.spots) : null
               const ex = r.evidence?.excluded ?? { shared: 0, listed: 0, infra: 0, internal: 0 }
+              const km = spreadKm(r.evidence)
               const since = r.service_disabled_at_ms ? new Date(r.service_disabled_at_ms).toLocaleString() : '—'
               return (
                 <TableRow key={r.user_id} hover>
@@ -173,8 +182,23 @@ export default function GeoAnomaliesTab() {
                   </TableCell>
                   <TableCell sx={{ fontSize: 12 }}>
                     {spots
-                      ? spots.map(c => <Box key={c.cc} sx={{ whiteSpace: 'nowrap' }}>{spotLine(c)}</Box>)
+                      ? spots.map(c => <Box key={c.cc} sx={{ whiteSpace: 'nowrap' }}>{spotLine(c, nameRegion)}</Box>)
                       : r.places.length ? r.places.join(' · ') : '—'}
+                    {/* Its own line under the places, never inside the reason:
+                        the verdict does not read it, and a distance woven into
+                        "flagged" would read as a travel finding it is not. */}
+                    {km > 0 && (
+                      <Tooltip title={t('admin:geo_anomalies.max_km_hint', {
+                        defaultValue: '此刻同时在连的来源里相距最远的两处：按地区库给出的两个位置算直线距离，减去两边的精度半径，按 10 公里取整。这是地区库对网络位置的估计，不是设备的真实位置；只定位到国家的来源不参与。只作参考，不参与判定。',
+                      })}>
+                        <Box sx={{ whiteSpace: 'nowrap', color: md.onSurfaceVariant }}>
+                          {/* String(km), not a locale-grouped number: the server
+                              already rounded it, and a separator would differ
+                              by browser locale. */}
+                          {t('admin:geo_anomalies.max_km', { km: String(km), defaultValue: `相距约 ${km} 公里` })}
+                        </Box>
+                      </Tooltip>
+                    )}
                   </TableCell>
                   <TableCell align="right">
                     <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.5 }}>

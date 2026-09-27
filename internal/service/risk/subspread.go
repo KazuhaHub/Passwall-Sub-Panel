@@ -138,17 +138,26 @@ func (s *Service) placeWindow(ctx context.Context, r *refresh, w *fetchWindow) p
 		}
 		type sightKey struct{ identity, cc, region string }
 		days := map[sightKey]uint8{}
+		// codes rides beside days, never in sightKey: the code is a display
+		// attribute, and a client whose two home addresses are coded
+		// differently (or one not at all) is still one sighting of one
+		// province. PreferRegionCode keeps the result independent of the
+		// order the cells are ranged in.
+		codes := map[sightKey]string{}
 		for cell, mask := range uw.cells {
 			key, _, _ := domain.SourceKey(cell.ip)
 			src, ok := kept[key]
 			if !ok {
 				continue // excluded: it says nothing about where the account is
 			}
-			cc, region := placeOf(located[src.LookupIP])
-			days[sightKey{cell.identity, cc, region}] |= mask
+			g := located[src.LookupIP]
+			cc, region := placeOf(g)
+			k := sightKey{cell.identity, cc, region}
+			days[k] |= mask
+			codes[k] = domain.PreferRegionCode(codes[k], regionCodeOf(g))
 		}
 		for k, mask := range days {
-			pw.sightings = append(pw.sightings, domain.SubPlaceSighting{Identity: k.identity, CC: k.cc, Region: k.region, Days: mask})
+			pw.sightings = append(pw.sightings, domain.SubPlaceSighting{Identity: k.identity, CC: k.cc, Region: k.region, RC: codes[k], Days: mask})
 		}
 		sort.Slice(pw.sightings, func(i, j int) bool {
 			a, b := pw.sightings[i], pw.sightings[j]
@@ -179,4 +188,15 @@ func placeOf(g domain.GeoLocation) (cc, region string) {
 		return "", ""
 	}
 	return cc, strings.TrimSpace(g.Region)
+}
+
+// regionCodeOf is the normalized ISO code of the region placeOf gives g,
+// "" when placeOf gives no region: a code without its region names nothing.
+// A separate helper rather than a third result of placeOf, whose other
+// callers (the login check) have no use for a display code.
+func regionCodeOf(g domain.GeoLocation) string {
+	if _, region := placeOf(g); region == "" {
+		return ""
+	}
+	return domain.NormalizeRegionCode(g.RegionCode)
 }

@@ -245,6 +245,31 @@ func TestGeoAnomalyList_PassesTheWhyThrough(t *testing.T) {
 	}
 }
 
+// The concurrent distance and the spots' region codes reach the client as
+// stored. The handler passes the evidence through whole; a handler that
+// rebuilt the spread or the spots field by field would drop both, and the
+// Geo tab would read every row as "no distance measured" in English names.
+func TestGeoAnomalyList_PassesTheDistanceThrough(t *testing.T) {
+	h := NewAdminGeoAnomalyHandler(&stubRecords{recs: []domain.GeoRecord{{
+		UserID: 7,
+		State:  domain.GeoStateSuspect,
+		Evidence: domain.GeoEvidence{
+			V: domain.GeoEvidenceVersion,
+			Spots: []domain.GeoSpot{
+				{CC: "JP", Region: "Osaka", RC: "27", City: "Osaka", N: 1},
+				{CC: "JP", Region: "Tokyo", RC: "13", City: "Tokyo", N: 1},
+			},
+			Spread: domain.GeoSpread{Countries: 1, Regions: 2, RegionCountry: "JP", Cities: 2, CityCountry: "JP", MaxKm: 350},
+		},
+	}}}, nil)
+	body := getJSON(t, h.List).Body.String()
+	for _, want := range []string{`"max_km":350`, `"rc":"13"`, `"rc":"27"`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("body = %s, want %s passed through", body, want)
+		}
+	}
+}
+
 // A row an older build wrote has no evidence. It must still serialise as an
 // object with spots [] — a client that reads spots.length on null throws,
 // and one that treats null as "no data" cannot tell legacy from empty

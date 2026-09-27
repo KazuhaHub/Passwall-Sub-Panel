@@ -14,6 +14,7 @@ import {
 import { useRiskSignals } from '@/query/riskSignals'
 import { useQueryScope } from '@/query/useQueryScope'
 import { countryFlag } from '@/utils/geo'
+import { regionNamer } from '@/utils/regionName'
 import {
   dayBits, dayLabels, formatGB, needsAttention, oldestUpdate, placeLabel, riskCodeText, sortRiskRows,
 } from '@/utils/riskSignals'
@@ -287,7 +288,10 @@ function Place({ cc, name }: { cc: string; name: string }) {
 }
 
 function SubSpreadPanel({ ev }: { ev: SubSpreadEvidence }) {
-  const { t } = useTranslation(['admin'])
+  const { t, i18n } = useTranslation(['admin'])
+  // Provinces only: a Chinese UI names a CN province by its ISO code, as the
+  // Geo tab does. The foreign lines below stay country codes.
+  const name = regionNamer(t, i18n.language)
   const labels = dayLabels(ev.window_start, ev.window_days)
   const provinces = ev.provinces ?? []
   const identities = ev.identities ?? []
@@ -302,7 +306,7 @@ function SubSpreadPanel({ ev }: { ev: SubSpreadEvidence }) {
       })}</Caption>
       {provinces.map((p, i) => (
         <Line key={`${p.cc}/${p.region}/${i}`}>
-          <Place cc={p.cc} name={placeLabel(p)} />
+          <Place cc={p.cc} name={placeLabel(p, name)} />
           <DayStrip mask={p.days} labels={labels} />
           {p.established && (
             <Chip size="small" variant="outlined" color="primary"
@@ -316,7 +320,7 @@ function SubSpreadPanel({ ev }: { ev: SubSpreadEvidence }) {
         <Subtitle>{t('admin:risk_signals.identities_title', { defaultValue: '拉取订阅的客户端' })}</Subtitle>
       )}
       {identities.map((id, i) => {
-        const places = (id.provinces ?? []).map(j => provinces[j]).filter(Boolean).map(p => placeLabel(p)).join(' · ')
+        const places = (id.provinces ?? []).map(j => provinces[j]).filter(Boolean).map(p => placeLabel(p, name)).join(' · ')
         return (
           <Line key={`${id.kind}/${id.label}/${i}`}>
             <Chip size="small" variant="outlined" label={id.kind === 'hwid'

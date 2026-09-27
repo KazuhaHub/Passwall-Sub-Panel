@@ -48,16 +48,25 @@ const (
 	GeoEvidenceMaxSpots = 12
 	// GeoEvidenceVersion is written into every evidence value.
 	//
+	//   3 = spots may carry rc (the region's ISO code) and spread may carry
+	//       max_km (the farthest concurrent distance); an absent max_km
+	//       means none was measured;
 	//   2 = carries Why (the branch and the policy judged with), so a reader
 	//       can localize the reason; the poll always has a verdict to
-	//       explain, so its v2 rows always carry one;
+	//       explain, so every row it writes from v2 on carries one. A v2 row
+	//       never recorded a distance: its absent max_km means "not
+	//       recorded";
 	//   1 = no Why: a reader shows the stored English Reason instead;
 	//   0 = a legacy row that has no evidence at all, which a reader must
 	//       render as "not recorded", not as "nothing found".
 	//
-	// A v1 row is not rewritten on upgrade. It keeps its evidence until the
-	// poll next judges that user, which re-saves the whole row as v2.
-	GeoEvidenceVersion = 2
+	// The bump from 2 to 3 is for that one absence. Rows of users the poll
+	// no longer sees are kept indefinitely, so a reader must be able to tell
+	// a distance never recorded from one measured as nothing.
+	//
+	// A v1 or v2 row is not rewritten on upgrade; it keeps its evidence until
+	// the poll next judges that user, which re-saves the whole row as v3.
+	GeoEvidenceVersion = 3
 )
 
 // GeoCoverage is how much of the sample the database could place, per tier.
@@ -76,6 +85,12 @@ type GeoSpread struct {
 	RegionCountry string `json:"region_country"`
 	Cities        int    `json:"cities"`
 	CityCountry   string `json:"city_country"`
+	// MaxKm: see GeoObservation.MaxKm. Omitted at 0. On v3 that means no
+	// distance was measured — fewer than two distinct located points below
+	// the country (including: nothing was looked up, or the database gives
+	// no coordinates) — or every pair lay within its accuracy radii. On
+	// v<3 it means "not recorded". Never "the same place".
+	MaxKm int `json:"max_km,omitempty"`
 }
 
 // GeoEvidence is the stored, admin-visible account of one verdict.
@@ -128,6 +143,7 @@ func GeoEvidenceFrom(obs GeoObservation, why GeoWhy) GeoEvidence {
 			RegionCountry: obs.RegionCountry,
 			Cities:        obs.CitySpread,
 			CityCountry:   obs.CityCountry,
+			MaxKm:         obs.MaxKm,
 		},
 	}
 	if why.Code != "" {
