@@ -523,27 +523,13 @@ func (s *Service) PollOnce(ctx context.Context) (err error) {
 			// talking to, and the by-guid endpoint returns the whole panel
 			// in that one call regardless of user count.
 			//
-			// Optional capability, best reader first. The detail reader
-			// (3X-UI) keeps each address's node and last-seen time, which
-			// is what separates "connected now" from "still remembered";
-			// the plain reader (PSP-native nodes) has no timestamps, so its
-			// addresses all read as live. An adapter with neither (S-UI
-			// has no equivalent) is counted as unread — never as zero,
-			// which would read as "nobody is connected".
-			var live map[string][]string
-			var sightings map[string][]domain.LiveIPSighting
-			var liveErr error
-			readable := true
-			switch reader := c.(type) {
-			case ports.LiveIPDetailReader:
-				sightings, liveErr = reader.ListLiveClientIPDetails(ctx)
-			case ports.LiveIPReader:
-				live, liveErr = reader.ListLiveClientIPs(ctx)
-			default:
-				readable = false
-				liveErr = ports.ErrPanelCapabilityUnsupported
-			}
-			if readable && liveErr != nil {
+			// Best reader first, through the one reader the risk center's
+			// refresh uses too (readPanelLiveIPs, liveconn.go). An adapter
+			// with no live read (S-UI) answers
+			// ErrPanelCapabilityUnsupported and is counted as unread —
+			// never as zero, which would read as "nobody is connected".
+			live, sightings, liveErr := readPanelLiveIPs(ctx, c)
+			if liveReadFailed(liveErr) {
 				// Warn, do not fail the panel: the traffic numbers
 				// above are good and are what this poll exists for.
 				log.Warn("traffic poll: live client IPs unavailable for this panel",
@@ -609,13 +595,9 @@ func (s *Service) PollOnce(ctx context.Context) (err error) {
 				// read exactly like a panel that answered "nobody online".
 				return domain.PanelLiveIPs{PanelID: pid, Err: errPanelNotRead}
 			}
-			byEmail := d.liveIPs
-			if d.liveSightings != nil {
-				// One flattening rule for both readers, so the window
-				// count cannot drift between them.
-				byEmail = domain.LiveIPsOf(d.liveSightings)
-			}
-			return domain.PanelLiveIPs{PanelID: pid, ByEmail: byEmail, Sightings: d.liveSightings, Err: d.liveErr}
+			// Shaped as the refresh shapes its own reads (liveAnswer), so
+			// the two cannot flatten a panel's answer differently.
+			return liveAnswer(pid, d.liveIPs, d.liveSightings, d.liveErr)
 		},
 		ignore:     pollCfg.GeoAnomalyIgnoreAddresses,
 		policies:   pc,

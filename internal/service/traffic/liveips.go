@@ -272,23 +272,13 @@ func (s *Service) observeLiveIPs(ctx context.Context, in liveIPInput) []geoBan {
 
 	agg := domain.AggregateLiveIPsByUser(panels, owners)
 
-	// A bad entry in the ignore list must not switch the whole list off:
-	// the valid entries still apply, and the Warn names the rest. The
-	// settings PUT rejects bad entries up front, so this is a value that
-	// predates that check or was written around it.
-	ignore, err := domain.ParseGeoIgnoreList(in.ignore)
+	// The rules the risk center's refresh classifies with too
+	// (liveExclusions). A bad entry in the ignore list must not switch the
+	// whole list off: the valid entries still apply, and the Warn names the
+	// rest.
+	exclusions, err := s.liveExclusions(in.ignore, rt)
 	if err != nil {
 		log.Warn("live-ip observe: the geo ignore list has invalid entries; applying the valid ones", "err", err)
-	}
-	exclusions := domain.AddressExclusions{
-		Internal:       true,
-		Ignore:         ignore,
-		SharedMinUsers: rt.SharedExitMinUsers,
-	}
-	if s.infra != nil {
-		// A read lock and a map lookup per source; the DNS behind it ran
-		// in the refresh loop, never here.
-		exclusions.Infra = s.infra.Contains
 	}
 	addrs := domain.ClassifyAddresses(agg, exclusions)
 

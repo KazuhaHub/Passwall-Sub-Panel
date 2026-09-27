@@ -4,8 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"reflect"
+	"runtime"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -318,5 +321,443 @@ func TestPollOnce_StoresTheLiveSnapshot(t *testing.T) {
 	want := []domain.LiveConnection{{UserID: 1, PanelID: 10, Node: "guid-a", SourceKey: "1.1.1.1", IP: "1.1.1.1", SeenAt: 1000}}
 	if !reflect.DeepEqual(snap.Conns, want) {
 		t.Fatalf("connections = %+v, want %+v", snap.Conns, want)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// The on-demand refresh (立即刷新): a fresh reading for the view, never a
+// detector sample.
+// ---------------------------------------------------------------------------
+
+// refreshPanel is a 3X-UI-shaped panel for the refresh: both live readers
+// (each counted by liveIPDetailReaderFake), the inbound lists counted by
+// the embedded fakeXUIClient, and a hook that runs inside the live read —
+// the window in which a poll can finish while the refresh waits on the
+// panel.
+type refreshPanel struct {
+	*liveIPDetailReaderFake
+	during func()
+}
+
+func (p *refreshPanel) ListLiveClientIPDetails(ctx context.Context) (map[string][]domain.LiveIPSighting, error) {
+	if p.during != nil {
+		p.during()
+	}
+	return p.liveIPDetailReaderFake.ListLiveClientIPDetails(ctx)
+}
+
+func detailPanel(sightings map[string][]domain.LiveIPSighting) *refreshPanel {
+	return &refreshPanel{liveIPDetailReaderFake: &liveIPDetailReaderFake{fakeXUIClient: &fakeXUIClient{}, sightings: sightings}}
+}
+
+// panicPanel's live read panics: one malformed upstream answer.
+type panicPanel struct{ *fakeXUIClient }
+
+func (panicPanel) ListLiveClientIPDetails(context.Context) (map[string][]domain.LiveIPSighting, error) {
+	panic("malformed live-IP answer")
+}
+
+// goexitPanel's live read ends its goroutine without an answer: the shape
+// a read that dies half-way leaves behind.
+type goexitPanel struct{ *fakeXUIClient }
+
+func (goexitPanel) ListLiveClientIPDetails(context.Context) (map[string][]domain.LiveIPSighting, error) {
+	runtime.Goexit()
+	return nil, nil
+}
+
+// listFailing is a shared-client repository that cannot be read.
+type listFailing struct {
+	ports.PSPClientRepo
+	err error
+}
+
+func (f listFailing) ListAll(context.Context) ([]*domain.PSPClient, error) { return nil, f.err }
+
+// countingStreaks counts every streak read and write, and stores nothing.
+type countingStreaks struct{ loads, saves int }
+
+func (c *countingStreaks) Load(context.Context) (map[int64]domain.GeoRecord, error) {
+	c.loads++
+	return nil, nil
+}
+
+func (c *countingStreaks) Save(context.Context, map[int64]domain.GeoRecord) error {
+	c.saves++
+	return nil
+}
+
+// newRefresher is a Service wired the way the refresh needs it: a pool of
+// panels and the shared clients that own the connections on them.
+func newRefresher(panels map[int64]ports.XUIClient, clients ...*domain.PSPClient) *Service {
+	psp := &fakePSPClientRepo{byUser: map[int64][]*domain.PSPClient{}}
+	for _, c := range clients {
+		psp.byUser[c.UserID] = append(psp.byUser[c.UserID], c)
+	}
+	s := New(&fakeUserRepo{users: map[int64]*domain.User{}}, &fakeOwnershipRepo{byUser: map[int64][]*domain.XUIClientEntry{}},
+		&fakeTrafficRepo{}, nil, nil, &fakeXUIPool{clients: panels}, &fakeDisabler{})
+	s.SetPSPClientRepo(psp)
+	return s
+}
+
+// mustRefresh runs one refresh, failing the test on an error or when it
+// hands back no snapshot.
+func mustRefresh(t *testing.T, s *Service) *domain.LiveConnSnapshot {
+	t.Helper()
+	snap, err := s.RefreshLiveConnections(context.Background())
+	if err != nil {
+		t.Fatalf("RefreshLiveConnections: %v", err)
+	}
+	if snap == nil {
+		t.Fatal("the refresh returned no snapshot")
+	}
+	return snap
+}
+
+// detectorFamilies are the metrics the location detector records per
+// judged sample, plus the automatic suspension's outcomes.
+var detectorFamilies = []string{
+	"psp_user_live_ips", "psp_geo_verdict_total", "psp_live_ip_users_incomplete_total",
+	"psp_user_concurrent_ips", "psp_live_ip_stale_total", "psp_live_ip_excluded_total",
+	"psp_geo_over_tier_total", "psp_geo_spread_km", "psp_geo_samples_spaced_total",
+	"psp_geo_auto_suspension_total",
+}
+
+// detectorMetrics renders every detector metric by name: counters by value,
+// histograms by count and sum. A labelled child is created on first use, so
+// a child appearing is a change too.
+func detectorMetrics() map[string]string {
+	in := func(name string) bool {
+		for _, f := range detectorFamilies {
+			if name == f || strings.HasPrefix(name, f+"{") {
+				return true
+			}
+		}
+		return false
+	}
+	out := map[string]string{}
+	snap := metrics.Take()
+	for _, c := range snap.Counters {
+		if in(c.Name) {
+			out[c.Name] = fmt.Sprint(c.Value)
+		}
+	}
+	for _, h := range snap.Histograms {
+		if in(h.Name) {
+			out[h.Name] = fmt.Sprintf("count %d sum %g", h.Count, h.Sum)
+		}
+	}
+	return out
+}
+
+// One refresh is one live read per panel holding a shared client — the
+// detail read where the adapter has one — and nothing else: metering is
+// the poll's job, so no inbound list is fetched. The reading is stored as
+// a refresh snapshot over every panel it asked, taken when the reads
+// completed. With no reference yet for either timestamped node, both were
+// trusted once, and the snapshot says so.
+func TestRefreshLiveConnections_ReadsEachPanelOnce(t *testing.T) {
+	metrics.Reset()
+	p10 := detailPanel(map[string][]domain.LiveIPSighting{"u1@10": {seen("1.1.1.1", 1000)}})
+	p11 := detailPanel(map[string][]domain.LiveIPSighting{"u2@11": {seen("2.2.2.2", 2000)}})
+	p12 := &liveIPReaderFake{fakeXUIClient: &fakeXUIClient{liveIPs: map[string][]string{"u3@12": {"3.3.3.3"}}}}
+	s := newRefresher(map[int64]ports.XUIClient{10: p10, 11: p11, 12: p12},
+		client(1, 10, "u1@10"), client(2, 11, "u2@11"), client(3, 12, "u3@12"))
+
+	before := time.Now()
+	snap := mustRefresh(t, s)
+
+	for pid, p := range map[int64]*refreshPanel{10: p10, 11: p11} {
+		if p.detailCalls != 1 || p.liveCalls != 0 || p.listSlimCalled != 0 || p.listFullCalled != 0 {
+			t.Fatalf("panel %d: detail %d plain %d slim %d full %d, want one detail read and nothing else",
+				pid, p.detailCalls, p.liveCalls, p.listSlimCalled, p.listFullCalled)
+		}
+	}
+	if p12.liveCalls != 1 || p12.listSlimCalled != 0 || p12.listFullCalled != 0 {
+		t.Fatalf("plain panel: live %d slim %d full %d, want one live read and nothing else",
+			p12.liveCalls, p12.listSlimCalled, p12.listFullCalled)
+	}
+	if snap.Source != domain.LiveSnapshotFromRefresh || snap.PanelsAsked != 3 || snap.TakenAt.Before(before) {
+		t.Fatalf("snapshot source %q asked %d taken %v, want refresh / 3 / after %v", snap.Source, snap.PanelsAsked, snap.TakenAt, before)
+	}
+	want := []domain.LiveConnection{
+		{UserID: 1, PanelID: 10, Node: "n1", SourceKey: "1.1.1.1", IP: "1.1.1.1", SeenAt: 1000},
+		{UserID: 2, PanelID: 11, Node: "n1", SourceKey: "2.2.2.2", IP: "2.2.2.2", SeenAt: 2000},
+		{UserID: 3, PanelID: 12, SourceKey: "3.3.3.3", IP: "3.3.3.3"},
+	}
+	if !reflect.DeepEqual(snap.Conns, want) {
+		t.Fatalf("connections = %+v, want %+v", snap.Conns, want)
+	}
+	if snap.Unreferenced != 2 {
+		t.Fatalf("unreferenced = %d, want 2 (two timestamped nodes, no reference yet)", snap.Unreferenced)
+	}
+	if s.LiveSnapshot() != snap {
+		t.Fatal("the returned snapshot is not the stored one")
+	}
+	if got := gaugeFor(t, "psp_live_connections"); got != 3 {
+		t.Fatalf("psp_live_connections = %d, want 3", got)
+	}
+}
+
+// A refresh is never a detector sample (R2). The reading below, judged,
+// would move every detector figure — two countries at once, a remembered
+// address, an internal one — and the refresh still lists what is live.
+// But nothing the detector keeps between polls may change: not the
+// per-node references (the next poll judges "rescanned since" against
+// them), not a streak, not the poll's settings cache, not one detector
+// metric. Only the size of the stored view moves.
+func TestRefreshLiveConnections_LeavesDetectorStateAlone(t *testing.T) {
+	metrics.Reset()
+	panel := detailPanel(map[string][]domain.LiveIPSighting{
+		"u7@x": {seen("1.1.1.1", 1000), seen("2.2.2.2", 995), seen("10.0.0.1", 1000), seen("3.3.3.3", 700)},
+	})
+	s := newRefresher(map[int64]ports.XUIClient{1: panel}, client(7, 1, "u7@x"))
+	streaks := &countingStreaks{}
+	s.SetGeoStreakStore(streaks)
+	s.SetGeoResolver(twoCountries())
+	s.WithSettings(&fakeScoped{global: ports.UISettings{CronTrafficPullMinutes: 5}})
+	cached := ports.UISettings{CronTrafficPullMinutes: 7, GeoAnomalyIgnoreAddresses: "9.9.9.9"}
+	s.pollCfgCache = cached
+	s.liveRefs = map[domain.NodeRef]int64{{PanelID: 1, Node: "n1"}: 900, {PanelID: 5, Node: "other"}: 42}
+	refs := maps.Clone(s.liveRefs)
+	detector := detectorMetrics()
+	for _, name := range []string{"psp_user_live_ips", "psp_live_ip_users_incomplete_total", "psp_user_concurrent_ips",
+		"psp_live_ip_stale_total", "psp_geo_samples_spaced_total"} {
+		if _, ok := detector[name]; !ok {
+			t.Fatalf("detector metric %s is not registered; the comparison below would prove nothing", name)
+		}
+	}
+
+	snap := mustRefresh(t, s)
+	if len(snap.Conns) != 3 {
+		t.Fatalf("connections = %+v, want the three live sources (3.3.3.3 is memory)", snap.Conns)
+	}
+
+	if !reflect.DeepEqual(s.liveRefs, refs) {
+		t.Errorf("per-node references = %v, want them untouched %v", s.liveRefs, refs)
+	}
+	if streaks.loads != 0 || streaks.saves != 0 {
+		t.Errorf("streak loads %d saves %d, want none", streaks.loads, streaks.saves)
+	}
+	if !reflect.DeepEqual(s.pollCfgCache, cached) {
+		t.Errorf("poll settings cache = %+v, want it untouched", s.pollCfgCache)
+	}
+	if got := detectorMetrics(); !reflect.DeepEqual(got, detector) {
+		for name, v := range got {
+			if detector[name] != v {
+				t.Errorf("detector metric %s: %q → %q, want unchanged", name, detector[name], v)
+			}
+		}
+	}
+	if got := gaugeFor(t, "psp_live_connections"); got != 3 {
+		t.Errorf("psp_live_connections = %d, want 3", got)
+	}
+}
+
+// The references are copied BEFORE the first panel is asked. A poll that
+// finishes while the refresh waits on the panel stores references as new as
+// the refresh's own reading; judged against those, every node reads "not
+// rescanned since", and the refresh would publish an empty view that wins
+// on time. Here the poll lands inside the read, and the address is still
+// listed — and the poll's reference is left as the poll stored it.
+func TestRefreshLiveConnections_ClonesTheReferencesBeforeReading(t *testing.T) {
+	panel := detailPanel(map[string][]domain.LiveIPSighting{"u7@x": {seen("1.1.1.1", 1000)}})
+	s := newRefresher(map[int64]ports.XUIClient{1: panel}, client(7, 1, "u7@x"))
+	ref := domain.NodeRef{PanelID: 1, Node: "n1"}
+	s.liveRefs = map[domain.NodeRef]int64{ref: 900}
+	panel.during = func() {
+		// A poll finishing now, having read the very batch this refresh is reading.
+		s.liveRefsMu.Lock()
+		s.liveRefs[ref] = 1000
+		s.liveRefsMu.Unlock()
+	}
+
+	snap := mustRefresh(t, s)
+	want := []domain.LiveConnection{{UserID: 7, PanelID: 1, Node: "n1", SourceKey: "1.1.1.1", IP: "1.1.1.1", SeenAt: 1000}}
+	if !reflect.DeepEqual(snap.Conns, want) {
+		t.Fatalf("connections = %+v, want %+v — the references were read after the panel", snap.Conns, want)
+	}
+	if snap.Unreferenced != 0 {
+		t.Fatalf("unreferenced = %d, want 0 (the node had a reference)", snap.Unreferenced)
+	}
+	s.liveRefsMu.Lock()
+	got := s.liveRefs[ref]
+	s.liveRefsMu.Unlock()
+	if got != 1000 {
+		t.Fatalf("reference = %d, want the poll's 1000 left as stored", got)
+	}
+}
+
+// The refresh hands back what is stored once it is done, not what it
+// built: a poll that stored a newer reading while the panels were being
+// read wins, and the caller reports that one.
+func TestRefreshLiveConnections_ReturnsTheStoredSnapshot(t *testing.T) {
+	panel := detailPanel(map[string][]domain.LiveIPSighting{"u7@x": {seen("1.1.1.1", 1000)}})
+	s := newRefresher(map[int64]ports.XUIClient{1: panel}, client(7, 1, "u7@x"))
+	newer := &domain.LiveConnSnapshot{TakenAt: time.Now().Add(time.Hour), Source: domain.LiveSnapshotFromPoll}
+	panel.during = func() { s.storeLiveSnapshot(newer) }
+
+	got, err := s.RefreshLiveConnections(context.Background())
+	if err != nil {
+		t.Fatalf("RefreshLiveConnections: %v", err)
+	}
+	if got != newer || s.LiveSnapshot() != newer {
+		t.Fatalf("returned %+v, stored %+v; want the newer poll snapshot for both", got, s.LiveSnapshot())
+	}
+}
+
+// A panel whose read failed, one the pool cannot hand out, and one whose
+// read ended with no answer at all were not read. Each is listed as unread
+// and counts toward its account's unread panels — never read as "nobody
+// connected there".
+func TestRefreshLiveConnections_UnreadPanelIsReported(t *testing.T) {
+	failing := detailPanel(nil)
+	failing.detailErr = errors.New("connection reset")
+	s := newRefresher(map[int64]ports.XUIClient{
+		1: detailPanel(map[string][]domain.LiveIPSighting{"u7@1": {seen("1.1.1.1", 1000)}}),
+		2: failing,
+		4: goexitPanel{&fakeXUIClient{}},
+		// 3 is not in the pool.
+	}, client(7, 1, "u7@1"), client(7, 2, "u7@2"), client(7, 3, "u7@3"), client(7, 4, "u7@4"))
+
+	snap := mustRefresh(t, s)
+	if !reflect.DeepEqual(snap.Unread, []int64{2, 3, 4}) || len(snap.Unsupported) != 0 {
+		t.Fatalf("unread %v unsupported %v, want [2 3 4] and none", snap.Unread, snap.Unsupported)
+	}
+	if snap.PanelsAsked != 4 || len(snap.Conns) != 1 {
+		t.Fatalf("asked %d connections %+v, want 4 panels and the one live connection", snap.PanelsAsked, snap.Conns)
+	}
+	if got := snap.Users[7].Unread; got != 3 {
+		t.Fatalf("user 7 unread panels = %d, want 3", got)
+	}
+}
+
+// An S-UI panel has no live read at all: the adapter's permanent shape,
+// not a failed read. The refresh lists it apart, and it does not count
+// toward any account's unread panels.
+func TestRefreshLiveConnections_UnsupportedPanelIsNotUnread(t *testing.T) {
+	sui := &fakeXUIClient{}
+	s := newRefresher(map[int64]ports.XUIClient{
+		1: detailPanel(map[string][]domain.LiveIPSighting{"u7@1": {seen("1.1.1.1", 1000)}}),
+		2: sui,
+	}, client(7, 1, "u7@1"), client(7, 2, "u7@2"))
+
+	snap := mustRefresh(t, s)
+	if !reflect.DeepEqual(snap.Unsupported, []int64{2}) || len(snap.Unread) != 0 {
+		t.Fatalf("unsupported %v unread %v, want [2] and none", snap.Unsupported, snap.Unread)
+	}
+	if got := snap.Users[7].Unread; got != 0 {
+		t.Fatalf("user 7 unread panels = %d, want 0 — the S-UI panel is not a failed read", got)
+	}
+	if sui.listSlimCalled != 0 || sui.listFullCalled != 0 {
+		t.Fatalf("the S-UI panel was listed (slim %d, full %d); a refresh reads live connections only",
+			sui.listSlimCalled, sui.listFullCalled)
+	}
+}
+
+// One malformed upstream answer must not take the panel process down: the
+// panic is recovered, that panel is unread, the others are listed. With a
+// single slot the reads run one after another, so a panicking read that
+// kept its slot would leave the rest waiting forever.
+func TestRefreshLiveConnections_RecoversAPanickingPanel(t *testing.T) {
+	s := newRefresher(map[int64]ports.XUIClient{
+		1: panicPanel{&fakeXUIClient{}},
+		2: detailPanel(map[string][]domain.LiveIPSighting{"u7@2": {seen("2.2.2.2", 1000)}}),
+		3: panicPanel{&fakeXUIClient{}},
+	}, client(7, 1, "u7@1"), client(7, 2, "u7@2"), client(7, 3, "u7@3"))
+	s.WithSettings(&fakeScoped{global: ports.UISettings{MaxPanelConcurrency: 1}})
+
+	done := make(chan *domain.LiveConnSnapshot, 1)
+	go func() {
+		snap, err := s.RefreshLiveConnections(context.Background())
+		if err != nil {
+			t.Errorf("RefreshLiveConnections: %v", err)
+		}
+		done <- snap
+	}()
+	var snap *domain.LiveConnSnapshot
+	select {
+	case snap = <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the refresh did not finish: a panicking read kept its concurrency slot")
+	}
+	if snap == nil {
+		t.Fatal("the refresh returned no snapshot")
+	}
+	if !reflect.DeepEqual(snap.Unread, []int64{1, 3}) {
+		t.Fatalf("unread = %v, want the panicking panels [1 3]", snap.Unread)
+	}
+	if len(snap.Conns) != 1 || snap.Conns[0].PanelID != 2 {
+		t.Fatalf("connections = %+v, want panel 2's connection", snap.Conns)
+	}
+}
+
+// Without the shared clients or the panel pool there is nothing to read
+// and nothing to attribute: the refresh says the dependency is missing,
+// and stores nothing.
+func TestRefreshLiveConnections_UnwiredIsUnavailable(t *testing.T) {
+	for name, s := range map[string]*Service{
+		"nothing wired":     {},
+		"no shared clients": {pool: &fakeXUIPool{clients: map[int64]ports.XUIClient{}}},
+		"no pool":           {pspClient: &fakePSPClientRepo{}},
+	} {
+		snap, err := s.RefreshLiveConnections(context.Background())
+		if !errors.Is(err, domain.ErrUnavailable) || snap != nil {
+			t.Fatalf("%s: got %+v, %v; want ErrUnavailable and no snapshot", name, snap, err)
+		}
+		if s.LiveSnapshot() != nil {
+			t.Fatalf("%s: a snapshot was stored", name)
+		}
+	}
+}
+
+// Who owns a connection is the shared-client list. When it cannot be read
+// nothing can be attributed, so the refresh fails with the cause and the
+// view keeps its previous reading.
+func TestRefreshLiveConnections_FailsWhenTheClientsCannotBeListed(t *testing.T) {
+	panel := detailPanel(map[string][]domain.LiveIPSighting{"u7@x": {seen("1.1.1.1", 1000)}})
+	s := newRefresher(map[int64]ports.XUIClient{1: panel}, client(7, 1, "u7@x"))
+	prior := &domain.LiveConnSnapshot{TakenAt: time.Now().Add(-time.Minute), Source: domain.LiveSnapshotFromPoll}
+	s.storeLiveSnapshot(prior)
+	boom := errors.New("database is locked")
+	s.SetPSPClientRepo(listFailing{err: boom})
+
+	snap, err := s.RefreshLiveConnections(context.Background())
+	if !errors.Is(err, boom) || snap != nil {
+		t.Fatalf("got %+v, %v; want the list error and no snapshot", snap, err)
+	}
+	if s.LiveSnapshot() != prior || panel.detailCalls != 0 {
+		t.Fatalf("stored %+v after %d reads, want the previous snapshot and no panel read", s.LiveSnapshot(), panel.detailCalls)
+	}
+}
+
+// The refresh classifies with the stored settings (here the ignore list)
+// but never writes the poll's last-good settings cache: that cache is what
+// the next poll falls back to, and it must hold what a POLL loaded. A
+// failed read runs the refresh on the shipped defaults, and still leaves
+// the cache alone.
+func TestRefreshLiveConnections_DoesNotTouchThePollConfigCache(t *testing.T) {
+	panel := detailPanel(map[string][]domain.LiveIPSighting{"u7@x": {seen("1.1.1.1", 1000)}})
+	s := newRefresher(map[int64]ports.XUIClient{1: panel}, client(7, 1, "u7@x"))
+	cached := ports.UISettings{CronTrafficPullMinutes: 7}
+	s.pollCfgCache = cached
+	set := &fakeScoped{global: ports.UISettings{CronTrafficPullMinutes: 5, GeoAnomalyIgnoreAddresses: "1.1.1.1"}}
+	s.WithSettings(set)
+
+	snap := mustRefresh(t, s)
+	if c := snap.Conns; len(c) != 1 || c[0].Exclusion != domain.AddressExcludedListed {
+		t.Fatalf("connections = %+v, want 1.1.1.1 excluded as listed by the stored ignore list", c)
+	}
+	if !reflect.DeepEqual(s.pollCfgCache, cached) {
+		t.Fatalf("poll settings cache = %+v, want it untouched %+v", s.pollCfgCache, cached)
+	}
+
+	set.err = errors.New("database is locked")
+	snap = mustRefresh(t, s)
+	if c := snap.Conns; len(c) != 1 || c[0].Exclusion != "" {
+		t.Fatalf("connections = %+v, want 1.1.1.1 judged on the defaults (no ignore list)", c)
+	}
+	if !reflect.DeepEqual(s.pollCfgCache, cached) {
+		t.Fatalf("poll settings cache = %+v after a failed read, want it untouched %+v", s.pollCfgCache, cached)
 	}
 }
