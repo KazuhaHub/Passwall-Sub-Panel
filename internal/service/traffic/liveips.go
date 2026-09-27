@@ -212,19 +212,24 @@ func (c *geoPolicyCache) lookup(uid int64) geoPolicyEntry {
 //   - at most once per half poll interval per user (in.minSpacing), so a
 //     manual poll cannot turn clicks into samples.
 //
-// It changes no user's state and writes to no panel. What it does beyond the
-// verdict is hand back the automatic suspensions that are due (only where a
-// group has armed them; off by default), for PollOnce to apply at the end of
-// the cycle (enforceGeo). Which of them are handed back is decided here,
-// before the streaks are saved, because that decision is also a streak write:
-// see collectGeoBans.
+// It changes no user's state and writes to no panel. Beyond the verdict it
+// stores the live-connection snapshot (in memory, for the risk center; see
+// liveconn.go) and hands back the automatic suspensions that are due (only
+// where a group has armed them; off by default), for PollOnce to apply at
+// the end of the cycle (enforceGeo). Which of them are handed back is
+// decided here, before the streaks are saved, because that decision is also
+// a streak write: see collectGeoBans.
 //
 // Never fails the poll. Traffic metering is what PollOnce exists for, and a
 // missing geo database or an unreadable panel must not cost the cycle its
 // primary job.
 func (s *Service) observeLiveIPs(ctx context.Context, in liveIPInput) []geoBan {
-	if len(in.clients) == 0 || in.read == nil {
+	if in.read == nil {
 		return nil
+	}
+	now := in.now
+	if now.IsZero() {
+		now = time.Now()
 	}
 
 	owners := make(map[domain.ClientKey]int64, len(in.clients))
@@ -235,11 +240,16 @@ func (s *Service) observeLiveIPs(ctx context.Context, in liveIPInput) []geoBan {
 		owners[domain.NewClientKey(c.PanelID, c.Email)] = c.UserID
 	}
 	if len(owners) == 0 {
+		// Nobody's connection can be attributed, so nothing is read, looked
+		// up or judged. The live view still learns that this poll happened
+		// and found nobody, rather than going on showing an older poll's
+		// connections as the latest.
+		s.storeLiveSnapshot(&domain.LiveConnSnapshot{
+			TakenAt:     now,
+			Source:      domain.LiveSnapshotFromPoll,
+			PanelsAsked: len(in.panelIDs),
+		})
 		return nil
-	}
-	now := in.now
-	if now.IsZero() {
-		now = time.Now()
 	}
 
 	// The policy cache first: it carries the fleet-wide runtime that the
@@ -258,7 +268,7 @@ func (s *Service) observeLiveIPs(ctx context.Context, in liveIPInput) []geoBan {
 		p.PanelID = pid
 		panels = append(panels, p)
 	}
-	panels = s.freshLiveIPs(panels, rt.FreshWindowSeconds)
+	panels, unreferenced := s.freshLiveIPs(panels, rt.FreshWindowSeconds)
 
 	agg := domain.AggregateLiveIPsByUser(panels, owners)
 
@@ -281,6 +291,13 @@ func (s *Service) observeLiveIPs(ctx context.Context, in liveIPInput) []geoBan {
 		exclusions.Infra = s.infra.Contains
 	}
 	addrs := domain.ClassifyAddresses(agg, exclusions)
+
+	// The live-connection view, from exactly what is judged below: the
+	// same fresh sightings and the same exclusion per source. Stored before
+	// judging and for EVERY account, the spaced ones included — spacing
+	// decides who is judged again, not who is connected. It is memory only
+	// and changes nothing the verdict reads.
+	s.storeLiveSnapshot(s.buildLiveSnapshot(ctx, panels, owners, addrs, unreferenced, domain.LiveSnapshotFromPoll, now))
 
 	geoAvailable := s.geo != nil && s.geo.Available(ctx)
 	var lookup domain.GeoLookup
@@ -492,7 +509,13 @@ func collectGeoBans(due []geoBan, users []*domain.User, next map[int64]domain.Ge
 // the next poll read a batch nobody rescanned as "advanced" and replay it as
 // a fresh sample. Pure domain logic does the deciding; this only owns the
 // state between polls.
-func (s *Service) freshLiveIPs(panels []domain.PanelLiveIPs, windowSeconds int) []domain.PanelLiveIPs {
+//
+// unreferenced counts the timestamped nodes that had no reference before
+// this merge — every node on the first poll after a restart — whose answers
+// FreshLiveIPsWithin therefore trusted once. Counted under the same lock
+// the merge holds, so an overlapping poll cannot make one node count twice
+// or not at all.
+func (s *Service) freshLiveIPs(panels []domain.PanelLiveIPs, windowSeconds int) (out []domain.PanelLiveIPs, unreferenced int) {
 	s.liveRefsMu.Lock()
 	defer s.liveRefsMu.Unlock()
 	if s.liveRefs == nil {
@@ -502,11 +525,14 @@ func (s *Service) freshLiveIPs(panels []domain.PanelLiveIPs, windowSeconds int) 
 	// so the live map is passed as is.
 	out, next := domain.FreshLiveIPsWithin(panels, s.liveRefs, windowSeconds)
 	for k, v := range next {
+		if _, ok := s.liveRefs[k]; !ok {
+			unreferenced++
+		}
 		if v > s.liveRefs[k] {
 			s.liveRefs[k] = v
 		}
 	}
-	return out
+	return out, unreferenced
 }
 
 // countExclusions adds one user's excluded sources to the per-reason

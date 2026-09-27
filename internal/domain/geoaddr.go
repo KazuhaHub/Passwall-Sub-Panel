@@ -196,6 +196,15 @@ type UserAddresses struct {
 	// Kept is sorted by Key.
 	Kept     []SourceAddr
 	Excluded GeoExcluded
+	// ExcludedBy names the rule that set each excluded source aside, keyed
+	// by SourceAddr.Key: AddressExcludedInternal, AddressExcludedListed,
+	// AddressExcludedInfra or AddressExcludedShared. A kept source has no
+	// entry; nil when nothing was excluded. Excluded only counts per rule,
+	// which is all a verdict needs; the live-connection view lists each
+	// source with its reason, and the shared-exit reason in particular can
+	// only be decided here, over the whole fleet at once (AddressExclusion
+	// cannot see it).
+	ExcludedBy map[string]string
 	// Stale is how many window addresses were not live at poll time.
 	Stale int
 }
@@ -249,6 +258,8 @@ func SourceKey(ip string) (key string, addr netip.Addr, ok bool) {
 //
 // An unread panel passes through with Fresh nil and contributes no
 // reference. A plain-reader panel (Sightings nil) gets Fresh = ByEmail.
+// FreshSightings is Fresh with each live sighting's node and time kept, for
+// a timestamped panel only (nil on a plain-reader or unread one).
 //
 // FreshLiveIPs judges with the shipped window, LiveIPFreshWindowSeconds.
 // The poll judges with the configured one, through FreshLiveIPsWithin.
@@ -267,6 +278,7 @@ func FreshLiveIPsWithin(panels []PanelLiveIPs, prev map[NodeRef]int64, windowSec
 	next := map[NodeRef]int64{}
 	for i, p := range panels {
 		out[i] = p
+		out[i].FreshSightings = nil
 		if p.Err != nil {
 			out[i].Fresh = nil
 			continue
@@ -299,11 +311,16 @@ func FreshLiveIPsWithin(panels []PanelLiveIPs, prev map[NodeRef]int64, windowSec
 		// Non-nil even when empty: "computed, nobody is live" must not read
 		// as "not computed", which the aggregator would fill from ByEmail.
 		fresh := make(map[string][]string, len(p.Sightings))
+		// The same decision, with each live sighting's node and time kept
+		// for the live-connection view. Filled in the one loop that decides
+		// Fresh, so the two can never disagree about who is live.
+		freshSightings := make(map[string][]LiveIPSighting, len(p.Sightings))
 		for email, list := range p.Sightings {
 			if email == "" {
 				continue
 			}
 			set := map[string]struct{}{}
+			var kept []LiveIPSighting
 			for _, s := range list {
 				ip := strings.TrimSpace(s.IP)
 				if ip == "" {
@@ -311,15 +328,35 @@ func FreshLiveIPsWithin(panels []PanelLiveIPs, prev map[NodeRef]int64, windowSec
 				}
 				if s.SeenAt <= 0 || (advanced[s.Node] && s.SeenAt >= ref[s.Node]-window) {
 					set[ip] = struct{}{}
+					kept = append(kept, LiveIPSighting{IP: ip, Node: s.Node, SeenAt: s.SeenAt})
 				}
 			}
 			if len(set) > 0 {
 				fresh[email] = sortedKeys(set)
+				sortSightings(kept)
+				freshSightings[email] = kept
 			}
 		}
 		out[i].Fresh = fresh
+		out[i].FreshSightings = freshSightings
 	}
 	return out, next
+}
+
+// sortSightings orders one email's sightings by address, then node, then
+// time, so a reader comparing two snapshots is not reading the adapter's
+// map order.
+func sortSightings(list []LiveIPSighting) {
+	sort.Slice(list, func(i, j int) bool {
+		a, b := list[i], list[j]
+		if a.IP != b.IP {
+			return a.IP < b.IP
+		}
+		if a.Node != b.Node {
+			return a.Node < b.Node
+		}
+		return a.SeenAt < b.SeenAt
+	})
 }
 
 // ClassifyAddresses applies the exclusions to every user's LIVE addresses
@@ -372,18 +409,31 @@ func ClassifyAddresses(users map[int64]UserLiveIPs, ex AddressExclusions) map[in
 			Stale:  max(0, len(u.IPs)-len(u.Fresh)),
 		}
 		for key, m := range perUser[uid] {
+			var reason string
 			switch {
 			case ex.Internal && m.any(isInternalAddr):
 				row.Excluded.Internal++
+				reason = AddressExcludedInternal
 			case m.any(ex.Ignore.Contains):
 				row.Excluded.Listed++
+				reason = AddressExcludedListed
 			case ex.Infra != nil && m.any(ex.Infra):
 				row.Excluded.Infra++
+				reason = AddressExcludedInfra
 			case ex.SharedMinUsers > 0 && holders[key] >= ex.SharedMinUsers:
 				row.Excluded.Shared++
+				reason = AddressExcludedShared
 			default:
 				row.Kept = append(row.Kept, m.source(key))
+				continue
 			}
+			// Named in the same branch that counted it, so the per-source
+			// reasons and the per-rule counts are one decision and cannot
+			// disagree.
+			if row.ExcludedBy == nil {
+				row.ExcludedBy = map[string]string{}
+			}
+			row.ExcludedBy[key] = reason
 		}
 		sort.Slice(row.Kept, func(i, j int) bool { return row.Kept[i].Key < row.Kept[j].Key })
 		out[uid] = row
@@ -445,13 +495,16 @@ func isInternalAddr(a netip.Addr) bool {
 		a.IsUnspecified()
 }
 
-// The single-address exclusion reasons AddressExclusion names. The first
-// three are ClassifyAddresses' own rules, spelled as its GeoExcluded
-// counters are; the fourth is an address no rule can read.
+// The exclusion reasons, spelled as the GeoExcluded counters are. The first
+// four are ClassifyAddresses' own rules and the values of
+// UserAddresses.ExcludedBy; AddressExclusion names the first three (never
+// shared, a question one address on its own does not pose) and
+// AddressUnparseable, an address no rule can read.
 const (
 	AddressExcludedInternal = "internal"
 	AddressExcludedListed   = "listed"
 	AddressExcludedInfra    = "infra"
+	AddressExcludedShared   = "shared"
 	AddressUnparseable      = "unparseable"
 )
 

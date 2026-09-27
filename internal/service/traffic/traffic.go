@@ -87,6 +87,12 @@ type Service struct {
 	// tests build &Service{} directly.
 	liveRefsMu sync.Mutex
 	liveRefs   map[domain.NodeRef]int64
+	// liveSnap is the latest live-connection snapshot (liveconn.go): what
+	// the risk center shows by default. Memory only, replaced whole by each
+	// newer reading and never mutated once stored, so readers share the
+	// pointer under the read lock. nil until the first poll.
+	liveSnapMu sync.RWMutex
+	liveSnap   *domain.LiveConnSnapshot
 	// configPusher is wired lazily (user.Service is the implementor and
 	// is created before traffic.Service). nil = skip floor refresh on poll.
 	configPusher UserConfigPusher

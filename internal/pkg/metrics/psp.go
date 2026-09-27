@@ -289,6 +289,15 @@ var (
 		"psp_infra_address_resolve_failures_total",
 		"Node or relay hostnames that failed to resolve during an infrastructure-address refresh. The previous addresses are kept.",
 	)
+	// Connections in the latest live-connection snapshot, the risk
+	// center's default view: one per account, panel node and source,
+	// capped per account. Set whenever a snapshot is stored, so it is the
+	// size of what an admin is shown. Not a detector sample — nothing
+	// judges on it — and it carries no address.
+	LiveConnections = NewGauge(
+		"psp_live_connections",
+		"Live connections (account, panel node, source) in the latest stored live-connection snapshot.",
+	)
 	// Risk-signal refreshes (hourly by default, risk.refresh_interval_minutes),
 	// by outcome. The signals are observe-only and a failed run keeps the
 	// previous rows, so nothing else shows a worker that has quietly stopped

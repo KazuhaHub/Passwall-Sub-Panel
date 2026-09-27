@@ -92,6 +92,14 @@ type PanelLiveIPs struct {
 	// means "not computed" and the aggregator falls back to ByEmail — never
 	// "nobody is live", which is a non-nil empty map.
 	Fresh map[string][]string
+	// FreshSightings is Fresh with each live sighting's node and last-seen
+	// time kept (address trimmed; sorted by address, node, time), set by
+	// FreshLiveIPs from Sightings under the very rule that decides Fresh.
+	// nil for a plain reader, which has no sightings, and for an unread
+	// panel; a non-nil empty map means "computed, nobody is live". Read by
+	// the live-connection view only (CollectLiveConnections), never by the
+	// verdict.
+	FreshSightings map[string][]LiveIPSighting
 	// Err marks a panel that could not be read this cycle — including one
 	// whose adapter does not implement the read at all. Its users are
 	// counted as Unread, never as zero.
