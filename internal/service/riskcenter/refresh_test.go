@@ -3,6 +3,7 @@ package riskcenter
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -115,39 +116,50 @@ func TestRefresh_InProgressRefuses(t *testing.T) {
 	}
 }
 
-// Right after a poll, a refresh reads what the poll just read: 3X-UI
-// rescans every ten seconds, so under one scan later every node still reads
-// "not rescanned" against the references that poll stored, and the refresh
-// would publish an empty view. The poll's snapshot IS the answer; no panel
-// is asked and the cooldown is not consumed. A refresh snapshot does not
-// hold the button off (the cooldown does), and a poll older than the gap
-// does not either.
-func TestRefresh_JustPolledMakesNoPanelRead(t *testing.T) {
+// Right after a poll advanced the per-node references, a refresh would read
+// what the poll just read: 3X-UI rescans every ten seconds, so under one
+// scan later every node it advanced still reads "not rescanned" against
+// them, and the reading would publish an empty view. The traffic service
+// decides that where it copies the references (domain.ErrLiveJustPolled),
+// and the stored snapshot is the answer: not refreshed, reason
+// just_polled, counted as such and not as an error — and the cooldown is
+// not consumed, since no panel was asked.
+//
+// The snapshot on display does not decide it: a fresh poll snapshot is
+// handed to the traffic service like any other, because a refresh that
+// finished after a poll can hide the poll's snapshot while its references
+// still stand, and a poll can merge its references before it stores its
+// snapshot.
+func TestRefresh_JustPolledReadsNoPanelAndKeepsTheCooldown(t *testing.T) {
 	h := newHarness()
 	polled := pollSnapshot(testNow.Add(-5 * time.Second))
 	h.live.snap = polled
+	h.live.refresh = func(context.Context) (*domain.LiveConnSnapshot, error) {
+		return nil, fmt.Errorf("refresh live connections: %w", domain.ErrLiveJustPolled)
+	}
 	before := outcomes()
 	res, err := h.svc.Refresh(t.Context())
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("err = %v; a refresh the traffic service declined as just polled is an answer, not an error", err)
 	}
 	if res.Refreshed || res.Reason != "just_polled" || res.Snapshot != polled {
-		t.Fatalf("result = %+v, want not refreshed, just_polled, the poll's snapshot", res)
+		t.Fatalf("result = %+v, want not refreshed, just_polled, the stored snapshot", res)
 	}
 	assertCounted(t, before, "just_polled")
-	if h.live.refreshCount() != 0 {
-		t.Fatal("a refresh right after a poll read the panels")
+	if h.live.refreshCount() != 1 {
+		t.Fatalf("the traffic service was asked %d times, want once: it decides just_polled, not the snapshot on display", h.live.refreshCount())
 	}
-	// The cooldown was not consumed: past the gap, the refresh runs.
-	h.now = h.now.Add(liveRefreshMinGap)
+
+	// The cooldown was not consumed: a second later the panels are read.
+	h.now = h.now.Add(time.Second)
+	h.live.refresh = nil
 	if res, err = h.svc.Refresh(t.Context()); err != nil || !res.Refreshed {
-		t.Fatalf("refresh %v after the poll = %+v, %v; want a refresh", liveRefreshMinGap+5*time.Second, res, err)
+		t.Fatalf("refresh a second after a just_polled answer = %+v, %v; want a refresh", res, err)
 	}
-	// A fresh REFRESH snapshot does not short-circuit the next one; the
-	// cooldown refuses it instead.
+	// And that one did consume it.
 	h.now = h.now.Add(time.Second)
 	if _, err := h.svc.Refresh(t.Context()); throttled(t, err).Reason != "cooldown" {
-		t.Fatal("a refresh snapshot short-circuited the next refresh")
+		t.Fatal("a refresh that read the panels left the cooldown unconsumed")
 	}
 }
 
@@ -227,5 +239,61 @@ func TestRefresh_TimesOut(t *testing.T) {
 	}
 	if New(Deps{}).refreshTimeout != liveRefreshTimeout || liveRefreshTimeout != 45*time.Second {
 		t.Fatalf("a refresh is bounded by %v, want 45s", New(Deps{}).refreshTimeout)
+	}
+}
+
+// A refresh is one reading of every panel for every admin, bought with the
+// fleet-wide cooldown. An admin closing the tab mid-read (net/http cancels
+// the request's context) must not cut it short: cut, every panel still
+// being read would answer "cancelled" and the reading would list them all
+// as unread — failures that never happened — or be lost, the cooldown spent
+// either way. So the panels are read on the request's values (the backend
+// operation gate's admission rides on them) but not its cancellation, still
+// bounded by liveRefreshTimeout.
+func TestRefresh_ClientDisconnectDoesNotCutTheReading(t *testing.T) {
+	h := newHarness()
+	type admission struct{}
+	reqCtx, disconnect := context.WithCancel(context.WithValue(t.Context(), admission{}, "admitted"))
+	defer disconnect()
+	started, release := make(chan struct{}), make(chan struct{})
+	var value any
+	var deadline time.Time
+	h.live.refresh = func(ctx context.Context) (*domain.LiveConnSnapshot, error) {
+		value = ctx.Value(admission{})
+		deadline, _ = ctx.Deadline()
+		close(started)
+		<-release
+		// A real adapter's request fails once its context is done.
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		return &domain.LiveConnSnapshot{TakenAt: testNow, Source: domain.LiveSnapshotFromRefresh}, nil
+	}
+	type result struct {
+		res RefreshResult
+		err error
+	}
+	done := make(chan result, 1)
+	start := time.Now()
+	go func() {
+		res, err := h.svc.Refresh(reqCtx)
+		done <- result{res, err}
+	}()
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the refresh never read the panels")
+	}
+	disconnect()
+	close(release)
+	got := <-done
+	if got.err != nil || !got.res.Refreshed {
+		t.Fatalf("refresh = %+v, %v; want the reading completed although the admin went away", got.res, got.err)
+	}
+	if value != "admitted" {
+		t.Fatalf("the reading's context carries %v, want the request's values (the operation gate's admission)", value)
+	}
+	if deadline.IsZero() || deadline.Sub(start) > liveRefreshTimeout+time.Second {
+		t.Fatalf("the reading ran without its %v bound (deadline %v)", liveRefreshTimeout, deadline)
 	}
 }

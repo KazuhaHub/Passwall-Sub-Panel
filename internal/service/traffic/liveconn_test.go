@@ -772,3 +772,226 @@ func TestRefreshLiveConnections_DoesNotTouchThePollConfigCache(t *testing.T) {
 		t.Fatalf("poll settings cache = %+v after a failed read, want it untouched %+v", s.pollCfgCache, cached)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// A reading that did not happen is never published.
+// ---------------------------------------------------------------------------
+
+// liveOnly is the connection the refresh tests' panel serves: user 7 on
+// node n1 of panel 1, seen at the panel's second 1000.
+var liveOnly = []domain.LiveConnection{{UserID: 7, PanelID: 1, Node: "n1", SourceKey: "1.1.1.1", IP: "1.1.1.1", SeenAt: 1000}}
+
+// A poll that has just advanced the per-node references makes a refresh
+// pointless for one upstream rescan: judged against them, every node it
+// advanced reads "not rescanned since", and the refresh would publish an
+// empty view as the newest. So the refresh reads no panel and says why
+// (domain.ErrLiveJustPolled), and the stored snapshot stays.
+//
+// What decides is the references' own last advance, taken together with
+// their copy — not the snapshot on display. Here the poll has merged its
+// references but not yet stored its snapshot (the window between the two
+// runs through classification, the geo lookup and the snapshot build): the
+// displayed snapshot is an older refresh, and the refresh must still hold
+// off.
+func TestRefreshLiveConnections_JustAfterAPollAdvancedTheReferences(t *testing.T) {
+	sightings := map[string][]domain.LiveIPSighting{"u7@x": {seen("1.1.1.1", 1000)}}
+	panel := detailPanel(sightings)
+	s := newRefresher(map[int64]ports.XUIClient{1: panel}, client(7, 1, "u7@x"))
+	prior := &domain.LiveConnSnapshot{TakenAt: time.Now().Add(-time.Minute), Source: domain.LiveSnapshotFromRefresh, PanelsAsked: 1, Conns: liveOnly}
+	s.storeLiveSnapshot(prior)
+	// The poll's merge of the very batch the panel is still serving.
+	s.freshLiveIPs([]domain.PanelLiveIPs{{PanelID: 1, Sightings: sightings}}, domain.LiveIPFreshWindowSeconds)
+
+	snap, err := s.RefreshLiveConnections(context.Background())
+	if !errors.Is(err, domain.ErrLiveJustPolled) || snap != nil {
+		t.Fatalf("got %+v, %v; want domain.ErrLiveJustPolled and no snapshot", snap, err)
+	}
+	if panel.detailCalls != 0 {
+		t.Fatalf("the panel was read %d times right after a poll advanced its references, want none", panel.detailCalls)
+	}
+	if got := s.LiveSnapshot(); got != prior {
+		t.Fatalf("stored %+v, want the previous snapshot kept", got)
+	}
+}
+
+// The reviewer's sequence. Refresh R1 waits on a slow panel while the
+// scheduled poll reads every panel and advances the references; R1 then
+// finishes after the poll, and its correct reading replaces the poll's
+// snapshot on time. The admin clicks again: the snapshot on display is a
+// refresh, the cooldown has run out — and the references were advanced a
+// moment ago, so a second reading would find every node "not rescanned"
+// and publish an empty view over a connected user. It must not.
+func TestRefreshLiveConnections_APollShadowedByARefreshStillHoldsTheNextOneOff(t *testing.T) {
+	sightings := map[string][]domain.LiveIPSighting{"u7@x": {seen("1.1.1.1", 1000)}}
+	panel := detailPanel(sightings)
+	owner := client(7, 1, "u7@x")
+	s := newRefresher(map[int64]ports.XUIClient{1: panel}, owner)
+	s.liveRefs = map[domain.NodeRef]int64{{PanelID: 1, Node: "n1"}: 900}
+	panel.during = func() {
+		// The poll, reading the same batch while R1 waits on the panel.
+		s.observeLiveIPs(context.Background(), liveIPInput{
+			clients: []*domain.PSPClient{owner}, panelIDs: panelsOf(1), read: detailRead(sightings),
+		})
+	}
+
+	r1 := mustRefresh(t, s)
+	panel.during = nil
+	if r1.Source != domain.LiveSnapshotFromRefresh || !reflect.DeepEqual(r1.Conns, liveOnly) {
+		t.Fatalf("R1 = %s %+v, want the refresh's own reading of user 7, stored over the poll's", r1.Source, r1.Conns)
+	}
+
+	r2, err := s.RefreshLiveConnections(context.Background())
+	if !errors.Is(err, domain.ErrLiveJustPolled) || r2 != nil {
+		t.Fatalf("R2 = %+v, %v; want domain.ErrLiveJustPolled and no snapshot", r2, err)
+	}
+	if got := s.LiveSnapshot(); got != r1 {
+		t.Fatalf("stored %s %+v after R2, want R1's reading of user 7 kept", got.Source, got.Conns)
+	}
+	if panel.detailCalls != 1 {
+		t.Fatalf("the panel was read %d times, want once (R1 only)", panel.detailCalls)
+	}
+}
+
+// The gate lasts one upstream rescan plus the poll's read (D3's 15 s),
+// counted from the poll's advance: past it, the node has rescanned since,
+// and the refresh reads every panel as usual.
+func TestRefreshLiveConnections_PastTheGapReadsThePanels(t *testing.T) {
+	if liveRefreshMinGap != 15*time.Second {
+		t.Fatalf("liveRefreshMinGap = %v, want 15s: one 10-second 3X-UI scan plus the poll's read", liveRefreshMinGap)
+	}
+	panel := detailPanel(map[string][]domain.LiveIPSighting{"u7@x": {seen("1.1.1.1", 1000)}})
+	s := newRefresher(map[int64]ports.XUIClient{1: panel}, client(7, 1, "u7@x"))
+	s.liveRefs = map[domain.NodeRef]int64{{PanelID: 1, Node: "n1"}: 900}
+	s.liveRefsAdvancedAt = time.Now().Add(-liveRefreshMinGap - time.Second)
+
+	snap := mustRefresh(t, s)
+	if panel.detailCalls != 1 || !reflect.DeepEqual(snap.Conns, liveOnly) {
+		t.Fatalf("read %d times, connections %+v; want one read listing user 7", panel.detailCalls, snap.Conns)
+	}
+}
+
+// Only a poll that moved a reference forward holds a refresh off. A poll
+// whose panels all failed advanced nothing: judged against the references
+// it left as they were, a refresh loses nothing — and it is exactly what an
+// admin reaches for after a poll that could not read a panel.
+func TestRefreshLiveConnections_APollThatAdvancedNothingDoesNotHoldItOff(t *testing.T) {
+	panel := detailPanel(map[string][]domain.LiveIPSighting{"u7@x": {seen("1.1.1.1", 1000)}})
+	s := newRefresher(map[int64]ports.XUIClient{1: panel}, client(7, 1, "u7@x"))
+	s.liveRefs = map[domain.NodeRef]int64{{PanelID: 1, Node: "n1"}: 900}
+	s.freshLiveIPs([]domain.PanelLiveIPs{{PanelID: 1, Err: errors.New("connection reset")}}, domain.LiveIPFreshWindowSeconds)
+	if !s.liveRefsAdvancedAt.IsZero() {
+		t.Fatalf("a poll that advanced no reference stamped %v", s.liveRefsAdvancedAt)
+	}
+
+	snap := mustRefresh(t, s)
+	if panel.detailCalls != 1 || !reflect.DeepEqual(snap.Conns, liveOnly) {
+		t.Fatalf("read %d times, connections %+v; want one read listing user 7", panel.detailCalls, snap.Conns)
+	}
+}
+
+// cancelPanel's live read is cut short by its caller: it cancels the
+// refresh's context (an admin closing the tab mid-read) and answers as a
+// real adapter does, with the context's error.
+type cancelPanel struct {
+	*fakeXUIClient
+	cancel context.CancelFunc
+}
+
+func (p cancelPanel) ListLiveClientIPDetails(ctx context.Context) (map[string][]domain.LiveIPSighting, error) {
+	p.cancel()
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+// A refresh whose caller went away while the panels were read (a closed
+// tab: net/http cancels the request) did not read the panels; the panels
+// did not fail. Stored, its answer would list every such panel as unread
+// and nobody connected, as the newest reading for every admin until the
+// next poll. So it is not stored: the view keeps its previous reading and
+// the caller gets the cancellation — even when some panel had answered,
+// since the rest would still read as failures that never happened.
+func TestRefreshLiveConnections_ACancelledReadingIsNotPublished(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	s := newRefresher(map[int64]ports.XUIClient{
+		1: detailPanel(map[string][]domain.LiveIPSighting{"u7@x": {seen("1.1.1.1", 1000)}}),
+		2: cancelPanel{&fakeXUIClient{}, cancel},
+	}, client(7, 1, "u7@x"), client(8, 2, "u8@y"))
+	prior := &domain.LiveConnSnapshot{TakenAt: time.Now().Add(-time.Minute), Source: domain.LiveSnapshotFromPoll, PanelsAsked: 2, Conns: liveOnly}
+	s.storeLiveSnapshot(prior)
+
+	snap, err := s.RefreshLiveConnections(ctx)
+	if !errors.Is(err, context.Canceled) || snap != nil {
+		t.Fatalf("got %+v, %v; want the cancellation and no snapshot", snap, err)
+	}
+	if got := s.LiveSnapshot(); got != prior {
+		t.Fatalf("stored %s unread %v conns %+v, want the previous snapshot kept", got.Source, got.Unread, got.Conns)
+	}
+}
+
+// hungPanel never answers before its caller's deadline.
+type hungPanel struct{ *fakeXUIClient }
+
+func (hungPanel) ListLiveClientIPDetails(ctx context.Context) (map[string][]domain.LiveIPSighting, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+// The refresh's own bound is different: a reading that ran to its deadline
+// did happen, and a panel that had not answered by then did fail to answer
+// in time. That reading is published, the silent panel listed as unread
+// beside the connections the others reported (§14: a refresh is bounded,
+// and what is unanswered then is unread).
+func TestRefreshLiveConnections_ADeadlineListsTheSilentPanelsAsUnread(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	s := newRefresher(map[int64]ports.XUIClient{
+		1: detailPanel(map[string][]domain.LiveIPSighting{"u7@x": {seen("1.1.1.1", 1000)}}),
+		2: hungPanel{&fakeXUIClient{}},
+	}, client(7, 1, "u7@x"), client(8, 2, "u8@y"))
+
+	snap, err := s.RefreshLiveConnections(ctx)
+	if err != nil || snap == nil {
+		t.Fatalf("got %+v, %v; want the bounded reading stored", snap, err)
+	}
+	if snap.Source != domain.LiveSnapshotFromRefresh || !reflect.DeepEqual(snap.Unread, []int64{2}) || !reflect.DeepEqual(snap.Conns, liveOnly) {
+		t.Fatalf("snapshot %s unread %v conns %+v, want a refresh with panel 2 unread and user 7 listed", snap.Source, snap.Unread, snap.Conns)
+	}
+}
+
+// listAllFailing is a shared-client repository whose fleet-wide listing
+// fails while everything else it serves works.
+type listAllFailing struct {
+	*fakePSPClientRepo
+	err error
+}
+
+func (f listAllFailing) ListAll(context.Context) ([]*domain.PSPClient, error) { return nil, f.err }
+
+// A poll that could not list the shared clients cannot attribute a single
+// connection. That is not "nobody connected": stored, its empty snapshot
+// would replace the last good reading as current, with no unread panel to
+// say anything is missing. The view keeps its previous reading instead —
+// it ages into "stale" on its own — exactly as a refresh does when the same
+// listing fails.
+func TestPollOnce_SharedClientListFailureKeepsTheSnapshot(t *testing.T) {
+	users := &fakeUserRepo{users: map[int64]*domain.User{1: {ID: 1, Enabled: true}}}
+	panel := &liveIPDetailReaderFake{fakeXUIClient: &fakeXUIClient{inbounds: []ports.Inbound{{ID: 20}}},
+		sightings: map[string][]domain.LiveIPSighting{"u1@10": {{IP: "1.1.1.1", Node: "guid-a", SeenAt: 1000}}}}
+	svc := New(users, &fakeOwnershipRepo{byUser: map[int64][]*domain.XUIClientEntry{}},
+		&fakeTrafficRepo{}, nil, nil, &fakeXUIPool{clients: map[int64]ports.XUIClient{10: panel}}, &fakeDisabler{})
+	svc.SetPSPClientRepo(listAllFailing{
+		fakePSPClientRepo: &fakePSPClientRepo{byUser: map[int64][]*domain.PSPClient{1: {{ID: 1, UserID: 1, PanelID: 10, Email: "u1@10"}}}},
+		err:               errors.New("database is locked"),
+	})
+	prior := &domain.LiveConnSnapshot{TakenAt: time.Now().Add(-time.Minute), Source: domain.LiveSnapshotFromPoll, PanelsAsked: 1,
+		Conns: []domain.LiveConnection{{UserID: 1, PanelID: 10, Node: "guid-a", SourceKey: "1.1.1.1", IP: "1.1.1.1", SeenAt: 1000}}}
+	svc.storeLiveSnapshot(prior)
+
+	if err := svc.PollOnce(context.Background()); err != nil {
+		t.Fatalf("PollOnce: %v", err)
+	}
+	if got := svc.LiveSnapshot(); got != prior {
+		t.Fatalf("stored %s asked %d conns %+v, want the previous snapshot kept", got.Source, got.PanelsAsked, got.Conns)
+	}
+}

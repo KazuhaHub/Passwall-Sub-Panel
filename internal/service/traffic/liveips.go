@@ -54,9 +54,14 @@ func (s *Service) SetGeoStreakStore(st GeoStreakStore) { s.geoStreaks = st }
 // subsets: the direct tests leave the policy cache, the spacing and the clock
 // unset and get the documented defaults.
 type liveIPInput struct {
-	users    []*domain.User
-	clients  []*domain.PSPClient
-	panelIDs map[int64]struct{}
+	users   []*domain.User
+	clients []*domain.PSPClient
+	// clientsErr is why the shared clients could not be listed this cycle;
+	// nil when they were, even as an empty list. The two must not look
+	// alike: with the listing failed nobody's connection can be attributed,
+	// which says nothing about who is connected (see observeLiveIPs).
+	clientsErr error
+	panelIDs   map[int64]struct{}
 	// read returns one panel's live-IP answer for this cycle.
 	read func(panelID int64) domain.PanelLiveIPs
 	// ignore is the admin's global ignore list, raw.
@@ -230,6 +235,16 @@ func (c *geoPolicyCache) lookup(uid int64) geoPolicyEntry {
 // primary job.
 func (s *Service) observeLiveIPs(ctx context.Context, in liveIPInput) []geoBan {
 	if in.read == nil {
+		return nil
+	}
+	if in.clientsErr != nil {
+		// The shared clients could not be listed, so no connection can be
+		// attributed and nothing is judged. That is not "nobody connected":
+		// an empty snapshot stored now would replace the last good reading
+		// as current, with no unread panel to say anything is missing. The
+		// view keeps that reading instead, which ages into stale on its own
+		// (the risk center's staleness line), exactly as a refresh keeps it
+		// when the same listing fails. PollOnce has already logged why.
 		return nil
 	}
 	now := in.now
@@ -607,6 +622,13 @@ func collectGeoBans(due []geoBan, users []*domain.User, next map[int64]domain.Ge
 // FreshLiveIPsWithin therefore trusted once. Counted under the same lock
 // the merge holds, so an overlapping poll cannot make one node count twice
 // or not at all.
+//
+// A merge that moved any reference forward stamps liveRefsAdvancedAt, the
+// instant the risk center's refresh is held off from (see
+// RefreshLiveConnections). Only an advance: a poll whose every panel failed,
+// or whose nodes had not rescanned since the last one, leaves the references
+// as they were, and a refresh judged against them loses nothing — it is
+// exactly what an admin retries after a poll that could not read a panel.
 func (s *Service) freshLiveIPs(panels []domain.PanelLiveIPs, windowSeconds int) (out []domain.PanelLiveIPs, unreferenced int) {
 	s.liveRefsMu.Lock()
 	defer s.liveRefsMu.Unlock()
@@ -616,13 +638,18 @@ func (s *Service) freshLiveIPs(panels []domain.PanelLiveIPs, windowSeconds int) 
 	// FreshLiveIPsWithin only reads prev, and the lock is held throughout,
 	// so the live map is passed as is.
 	out, next := domain.FreshLiveIPsWithin(panels, s.liveRefs, windowSeconds)
+	advanced := false
 	for k, v := range next {
 		if _, ok := s.liveRefs[k]; !ok {
 			unreferenced++
 		}
 		if v > s.liveRefs[k] {
 			s.liveRefs[k] = v
+			advanced = true
 		}
+	}
+	if advanced {
+		s.liveRefsAdvancedAt = time.Now()
 	}
 	return out, unreferenced
 }

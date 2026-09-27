@@ -2,6 +2,8 @@ package riskcenter
 
 import (
 	"errors"
+	"math"
+	"math/bits"
 	"slices"
 	"testing"
 	"time"
@@ -318,5 +320,48 @@ func TestHistoryAndFlags_PassTheFilterThrough(t *testing.T) {
 	h.history.err = errors.New("history unreadable")
 	if _, _, _, err := h.svc.History(t.Context(), ports.ConnectionHistoryFilter{}); err == nil {
 		t.Fatal("a history read error was swallowed")
+	}
+}
+
+// liveNoPanic is Live, with a panic reported as the test's failure.
+func liveNoPanic(t *testing.T, h *harness, q LiveQuery) (v LiveView, err error) {
+	t.Helper()
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("Live(page %d, size %d) panicked: %v", q.Page, q.PageSize, r)
+		}
+	}()
+	return h.svc.Live(t.Context(), q)
+}
+
+// The page number is the caller's, unbounded (parsePagination only floors
+// it at 1). A page past the end is an empty page with the true total, like
+// every SQL-backed admin list — never a panic from an offset that
+// overflowed negative, and never the first page again from one that
+// wrapped round to zero.
+func TestLive_APageFarPastTheEndIsEmpty(t *testing.T) {
+	h := newHarness()
+	h.user(1, "u1")
+	h.user(2, "u2")
+	h.live.snap = pollSnapshot(testNow.Add(-time.Minute), conn(1, 1, "198.51.100.1", ""), conn(2, 1, "198.51.100.2", ""))
+	// (page-1)*200 = 25 * 2^UintSize, which wraps to exactly 0.
+	wrapsToZero := 1<<(bits.UintSize-3) + 1
+	for name, p := range map[string]ports.Pagination{
+		"the largest page":      {Page: math.MaxInt, PageSize: 200},
+		"a page that wraps":     {Page: wrapsToZero, PageSize: 200},
+		"just past the end":     {Page: 2, PageSize: 2},
+		"the default size, far": {Page: math.MaxInt / 2, PageSize: 0},
+	} {
+		h.users.calls = nil
+		v, err := liveNoPanic(t, h, LiveQuery{Pagination: p})
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if len(v.Users) != 0 || v.Total != 2 {
+			t.Fatalf("%s: page = %v of %d, want an empty page of 2", name, userIDs(v), v.Total)
+		}
+		if len(h.users.calls) != 0 {
+			t.Fatalf("%s: looked up %v for an empty page", name, h.users.calls)
+		}
 	}
 }

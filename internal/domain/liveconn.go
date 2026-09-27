@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"errors"
 	"net/netip"
 	"sort"
 	"strings"
@@ -111,6 +112,15 @@ const (
 	LiveSnapshotFromPoll    = "poll"
 	LiveSnapshotFromRefresh = "refresh"
 )
+
+// ErrLiveJustPolled is a live-connection refresh that read no panel because
+// a poll advanced the per-node freshness references moments ago. Under one
+// upstream rescan later, every node that poll advanced still reads "not
+// rescanned since" against them, so the reading would drop every one of
+// those nodes' connections and publish an empty view as the newest. The
+// stored snapshot — that poll's, or a reading that finished after it — is
+// the answer instead. Not a failure: the caller reports it as such.
+var ErrLiveJustPolled = errors.New("live connections: a poll read the panels moments ago")
 
 // LiveConnSnapshot is one reading of every panel's live connections.
 // Immutable once stored: readers share the pointer.

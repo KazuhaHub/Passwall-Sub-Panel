@@ -87,14 +87,6 @@ type FlagLister interface {
 // about the upstream or a bound on one request, not a policy an operator
 // would tune.
 const (
-	// liveRefreshMinGap: a refresh asked for this soon after a POLL
-	// snapshot reads no panel and answers with the poll's snapshot. 3X-UI
-	// rescans its connections every ten seconds, so less than one scan
-	// after the poll read them, every node still reads "not rescanned"
-	// against the references that very poll stored, and the refresh would
-	// publish an empty view that wins on time. Fifteen seconds is one scan
-	// plus the poll's own read time.
-	liveRefreshMinGap = 15 * time.Second
 	// liveRefreshTimeout bounds one refresh: a panel that has not answered
 	// by then is listed as unread, and the request gets its answer. Well
 	// under a reverse proxy's usual 60-second read timeout.

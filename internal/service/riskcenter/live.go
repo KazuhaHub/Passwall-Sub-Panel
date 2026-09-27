@@ -179,8 +179,17 @@ func (s *Service) Live(ctx context.Context, q LiveQuery) (LiveView, error) {
 		size = liveDefaultPageSize
 	}
 	size = min(size, liveMaxPageSize)
-	start := min((pageNo-1)*size, len(groups))
-	pageGroups := groups[start:min(start+size, len(groups))]
+	// The page number is the caller's and unbounded (parsePagination floors
+	// it at 1 and caps only the size), so the offset is computed only for a
+	// page that exists: (pageNo-1)*size would otherwise overflow — negative,
+	// a slice panic, or wrapped round to a small offset that serves another
+	// page as this one. Past the last page the page is empty, with the true
+	// total, as in every SQL-backed admin list.
+	var pageGroups []*group
+	if last := (len(groups) + size - 1) / size; pageNo <= last {
+		start := (pageNo - 1) * size
+		pageGroups = groups[start:min(start+size, len(groups))]
+	}
 
 	users := make([]LiveUser, 0, len(pageGroups))
 	var pageConns []domain.LiveConnection

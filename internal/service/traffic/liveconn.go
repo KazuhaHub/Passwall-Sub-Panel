@@ -156,6 +156,15 @@ func (s *Service) placeConnections(ctx context.Context, conns []domain.LiveConne
 	}
 }
 
+// liveRefreshMinGap is how long after a poll advanced the per-node
+// references a refresh reads no panel (domain.ErrLiveJustPolled). 3X-UI
+// rescans its connections every ten seconds, so less than one scan after the
+// poll's read, every node it advanced still reads "not rescanned" against
+// the references that very poll stored, and the refresh would publish an
+// empty view that wins on time. Fifteen seconds is one scan plus the poll's
+// own read time. A fact about the upstream, not a policy: not a setting.
+const liveRefreshMinGap = 15 * time.Second
+
 // RefreshLiveConnections reads every panel's live connections now, at an
 // admin's request (the risk center's 立即刷新), stores them as the
 // live-connection snapshot (source refresh), and returns what is stored
@@ -178,6 +187,27 @@ func (s *Service) placeConnections(ctx context.Context, conns []domain.LiveConne
 //     figure that moves), and the poll's last-good settings cache is not
 //     written: it must hold what a poll loaded.
 //
+// Nor is a reading published that did not happen:
+//
+//   - within liveRefreshMinGap of a poll advancing the references, no panel
+//     is read at all and the answer is domain.ErrLiveJustPolled: judged
+//     against references that new, every node the poll advanced reads "not
+//     rescanned since" and its connections would vanish from a view that
+//     wins on time. That is decided from the references themselves, in the
+//     same critical section that copies them — never from the snapshot on
+//     display, which a refresh finishing after the poll replaces, and which
+//     a poll stores only after it has merged its references. The copy is
+//     either older than the poll's merge (the case above: judged against it,
+//     the reading is right) or the gate sees the merge;
+//   - a reading whose caller went away mid-read (its context CANCELLED — an
+//     admin's closed tab, when a caller has not detached the read from it)
+//     is not stored and the cancellation is returned: every panel still
+//     being read would answer "cancelled" and be listed as unread, failures
+//     of the panels that never happened. The context's DEADLINE is
+//     different: a reading bounded by it did happen, and a panel silent by
+//     then did fail to answer in time, so that reading is stored with the
+//     silent panels unread.
+//
 // What it reads is exactly one live read per panel holding a shared client,
 // through the reader the poll uses (readPanelLiveIPs), and nothing else — no
 // inbound list, because metering is the poll's job. The owners are the
@@ -190,14 +220,27 @@ func (s *Service) placeConnections(ctx context.Context, conns []domain.LiveConne
 // aside for the same reason the poll would give; a failed settings read
 // runs on the shipped defaults.
 //
-// There is no rate limit here: one call is one read of every panel, and
-// deciding how often that may happen (the cooldown, one refresh at a time,
-// none right after a poll) is the caller's job. The caller also bounds the
-// context: a panel still unanswered when it ends is listed as unread.
+// There is no rate limit here — the just-polled gate is a fact about the
+// references, not a ration: one call is one read of every panel, and
+// deciding how often that may happen (the cooldown, one refresh at a time)
+// is the caller's job. The caller also bounds the context: a panel still
+// unanswered at its deadline is listed as unread.
 func (s *Service) RefreshLiveConnections(ctx context.Context) (*domain.LiveConnSnapshot, error) {
 	if s.pspClient == nil || s.pool == nil {
 		return nil, fmt.Errorf("refresh live connections: %w", domain.ErrUnavailable)
 	}
+
+	// The copy comes first, before anything is read, and the just-polled
+	// gate is decided in the same critical section; see above. A poll that
+	// merges after this point is the copy's case, not the gate's.
+	s.liveRefsMu.Lock()
+	if at := s.liveRefsAdvancedAt; !at.IsZero() && time.Since(at) < liveRefreshMinGap {
+		s.liveRefsMu.Unlock()
+		return nil, fmt.Errorf("refresh live connections: %w", domain.ErrLiveJustPolled)
+	}
+	prev := maps.Clone(s.liveRefs)
+	s.liveRefsMu.Unlock()
+
 	clients, err := s.pspClient.ListAll(ctx)
 	if err != nil {
 		// Nobody's connection could be attributed; the view keeps its
@@ -224,12 +267,11 @@ func (s *Service) RefreshLiveConnections(ctx context.Context) (*domain.LiveConnS
 	}
 	rt := domain.GeoRuntimeFromSettings(set.GeoRuntimeSettings())
 
-	// The copy comes first; see above.
-	s.liveRefsMu.Lock()
-	prev := maps.Clone(s.liveRefs)
-	s.liveRefsMu.Unlock()
-
 	panels := s.readLivePanels(ctx, panelIDs, paneltz.ResolveMaxPanelConcurrency(set.MaxPanelConcurrency))
+	if cerr := ctx.Err(); cerr != nil && !errors.Is(cerr, context.DeadlineExceeded) {
+		// Cancelled, not timed out: the reading did not happen; see above.
+		return nil, fmt.Errorf("refresh live connections: the reading was cancelled: %w", cerr)
+	}
 	at := time.Now()
 
 	panels, next := domain.FreshLiveIPsWithin(panels, prev, rt.FreshWindowSeconds)

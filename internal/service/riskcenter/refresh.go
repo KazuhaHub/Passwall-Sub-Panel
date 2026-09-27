@@ -2,6 +2,7 @@ package riskcenter
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -13,8 +14,8 @@ import (
 // RefreshResult is what an admin's 立即刷新 did.
 type RefreshResult struct {
 	// Refreshed is false when no panel was read because a poll had just
-	// read them all (Reason "just_polled"); the poll's snapshot is the
-	// answer then.
+	// read them all (Reason "just_polled"); the stored snapshot — that
+	// poll's, or a reading that finished after it — is the answer then.
 	Refreshed bool
 	Reason    string
 	// Snapshot is what is stored AFTER the refresh: the refresh's own
@@ -56,11 +57,6 @@ const (
 // live view's snapshot (traffic.RefreshLiveConnections: one live read per
 // panel, never a detector sample), rationed for the whole fleet:
 //
-//   - right after a POLL snapshot (liveRefreshMinGap) no panel is read and
-//     the poll's snapshot is the answer: under one upstream rescan later,
-//     every node still reads "not rescanned" against the references that
-//     poll stored, and the refresh would publish an empty view. That costs
-//     the panels nothing, so it does not consume the cooldown;
 //   - one refresh at a time: another request while one is reading the
 //     panels is refused (in_progress), never a second read of every panel;
 //   - one per cooldown (risk.live_refresh_cooldown_seconds) for every admin
@@ -68,23 +64,31 @@ const (
 //     failed still asked every panel, and a failing panel is exactly when
 //     an admin clicks again and again. The shared-exit rule counts the
 //     holders of a source across the fleet, so a refresh is always every
-//     panel, and there is no per-account one to ration separately.
+//     panel, and there is no per-account one to ration separately;
+//   - right after a poll advanced the per-node references, no panel is read
+//     and the stored snapshot is the answer (just_polled): under one
+//     upstream rescan later, every node that poll advanced still reads "not
+//     rescanned" against them, and the refresh would publish an empty view.
+//     The traffic service decides that (domain.ErrLiveJustPolled) in the
+//     same critical section in which it copies the references, because
+//     nothing visible from here can: the snapshot on display may be a
+//     refresh that finished after the poll, and a poll merges its
+//     references before it stores its snapshot. No panel was asked, so the
+//     cooldown this refresh took is handed back.
 //
-// A refresh is bounded by liveRefreshTimeout on top of the request's own
-// context; a panel still unanswered then is listed as unread. The request
-// itself is already admitted by the backend operation gate, so the read
-// runs inside that admission. Outcomes are counted
-// (psp_live_conn_refresh_total) and logged by counts only: the snapshot is
-// addresses.
+// The panels are read on the request's values — the backend operation
+// gate's admission rides on them, so the read runs inside that admission —
+// but not on its cancellation, bounded by liveRefreshTimeout instead; a
+// panel still unanswered then is listed as unread. An admin who closes the
+// tab mid-read must not cut the reading short: every panel still being
+// read would answer "cancelled", and the reading would either list them as
+// failed panels or be thrown away, with the fleet-wide cooldown spent
+// either way. Run to its bound, the reading that cooldown bought is shown
+// to every admin. Outcomes are counted (psp_live_conn_refresh_total) and
+// logged by counts only: the snapshot is addresses.
 func (s *Service) Refresh(ctx context.Context) (RefreshResult, error) {
 	rt, _, _ := s.runtime(ctx)
 	now := s.now()
-
-	if snap := s.d.Live.LiveSnapshot(); snap != nil && snap.Source == domain.LiveSnapshotFromPoll &&
-		now.Sub(snap.TakenAt) < liveRefreshMinGap {
-		metrics.LiveConnRefreshTotal.With(refreshJustPolled).Inc()
-		return RefreshResult{Reason: refreshJustPolled, Snapshot: snap, Panels: s.panelRefs(ctx)}, nil
-	}
 
 	s.mu.Lock()
 	switch {
@@ -98,6 +102,7 @@ func (s *Service) Refresh(ctx context.Context) (RefreshResult, error) {
 		metrics.LiveConnRefreshTotal.With(refreshCooldown).Inc()
 		return RefreshResult{}, &RefreshThrottled{Reason: refreshCooldown, RetryAfter: left}
 	}
+	prevStart := s.lastStart
 	s.running, s.lastStart = true, now
 	s.mu.Unlock()
 	defer func() {
@@ -106,9 +111,18 @@ func (s *Service) Refresh(ctx context.Context) (RefreshResult, error) {
 		s.mu.Unlock()
 	}()
 
-	rctx, cancel := context.WithTimeout(ctx, s.refreshTimeout)
+	rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), s.refreshTimeout)
 	defer cancel()
 	snap, err := s.d.Live.RefreshLiveConnections(rctx)
+	if errors.Is(err, domain.ErrLiveJustPolled) {
+		// No panel was asked. running is still ours, so nobody else has
+		// moved lastStart since it was taken.
+		s.mu.Lock()
+		s.lastStart = prevStart
+		s.mu.Unlock()
+		metrics.LiveConnRefreshTotal.With(refreshJustPolled).Inc()
+		return RefreshResult{Reason: refreshJustPolled, Snapshot: s.d.Live.LiveSnapshot(), Panels: s.panelRefs(ctx)}, nil
+	}
 	if err != nil {
 		metrics.LiveConnRefreshTotal.With(refreshError).Inc()
 		log.Warn("risk center: live-connection refresh failed; the view keeps its previous snapshot", "err", err)
@@ -132,11 +146,15 @@ func (s *Service) Refresh(ctx context.Context) (RefreshResult, error) {
 
 // panelRefs names the panels for a refresh's answer. The refresh has
 // already happened when this runs, so a failed listing costs the names only
-// (the snapshot still carries the ids), never the answer.
+// (the snapshot still carries the ids), never the answer. It reads on the
+// request's own context: once the admin has gone, the names serve nobody,
+// and a listing cut short by that is not a fault worth a Warn.
 func (s *Service) panelRefs(ctx context.Context) []PanelRef {
 	refs, _, err := s.panels(ctx)
 	if err != nil {
-		log.Warn("risk center: panels unreadable; the refresh answer carries panel ids only", "err", err)
+		if ctx.Err() == nil {
+			log.Warn("risk center: panels unreadable; the refresh answer carries panel ids only", "err", err)
+		}
 		return nil
 	}
 	return refs
