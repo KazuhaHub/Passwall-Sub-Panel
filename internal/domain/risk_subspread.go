@@ -95,9 +95,10 @@ type SubIdentity struct{ Key, Kind, Label, HWID4 string }
 // SubSpreadInput is one account's fetch window after address hygiene and
 // placement.
 type SubSpreadInput struct {
-	// WindowDays is how many days the window holds: 7, or the sub-log
-	// retention when that is shorter. RetentionDays is sub_log_retention_days
-	// as stored (0 = never pruned), shown to explain a short window.
+	// WindowDays is how many days the window holds: risk.window_days (7 by
+	// default), or the sub-log retention when that is shorter.
+	// RetentionDays is sub_log_retention_days as stored (0 = never pruned),
+	// shown to explain a short window.
 	WindowDays, RetentionDays int
 	// WindowStart is the panel-local date of window day 0, so the UI can
 	// label the day masks without knowing the panel's zone.

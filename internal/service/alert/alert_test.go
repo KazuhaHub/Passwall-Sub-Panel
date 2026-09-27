@@ -496,3 +496,66 @@ func TestRiskAlertIsAdminOnly(t *testing.T) {
 		t.Fatal("risk_signals must be admin-only (the risk tab is the owner's call, not an operator's)")
 	}
 }
+
+// ---- bell freshness (risk.alert_freshness_hours) ----
+
+type failingSettings struct{}
+
+func (failingSettings) Load(context.Context, ports.UISettings) (ports.UISettings, error) {
+	return ports.UISettings{}, errors.New("db down")
+}
+
+// The geo bell's window is risk.alert_freshness_hours, raised to two poll
+// intervals: the poll re-judges every latched account once per poll, so a
+// window shorter than two polls would drop a flag off the bell between two
+// judgements and bring it back at the next — a lit, dark, lit bell for an
+// account nothing changed about. Six hours at a five-minute poll is six
+// hours; at a ten-hour poll it is twenty.
+func TestGeoAlertsUseTheConfiguredFreshnessAndThePollFloor(t *testing.T) {
+	now := time.Date(2026, 9, 26, 12, 0, 0, 0, time.UTC)
+	for _, c := range []struct {
+		name string
+		poll int
+		want time.Duration
+	}{
+		{"a five-minute poll keeps the configured six hours", 5, 6 * time.Hour},
+		{"a ten-hour poll raises it to two polls", 600, 20 * time.Hour},
+		{"an unset poll is the shipped five minutes", 0, 6 * time.Hour},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			flags := &stubGeoFlags{n: 1}
+			set := ports.UISettings{RiskAlertFreshnessHours: 6, CronTrafficPullMinutes: c.poll}
+			mustList(t, newSvc(Deps{GeoFlags: flags, Settings: stubSettings{s: set}}, now))
+			if want := now.Add(-c.want); !flags.since.Equal(want) {
+				t.Fatalf("CountFlagged since = %v, want %v (%v before now)", flags.since, want, c.want)
+			}
+		})
+	}
+}
+
+// The risk bell's window is the same setting, raised to two worker
+// refreshes instead: the worker rewrites every row once per refresh, so a
+// daily refresh with a one-hour window would show a flag for an hour a day.
+// Unreadable settings are the shipped 24 hours — the bell must not go dark
+// because the settings table did.
+func TestRiskAlertsUseTheConfiguredFreshness(t *testing.T) {
+	now := time.Date(2026, 9, 26, 12, 0, 0, 0, time.UTC)
+	for _, c := range []struct {
+		name     string
+		settings SettingsLoader
+		want     time.Duration
+	}{
+		{"the configured six hours", stubSettings{s: ports.UISettings{RiskAlertFreshnessHours: 6}}, 6 * time.Hour},
+		{"a daily refresh raises one hour to two days", stubSettings{s: ports.UISettings{RiskAlertFreshnessHours: 1, RiskRefreshIntervalMinutes: 1440}}, 48 * time.Hour},
+		{"an unreadable setting is the shipped day", failingSettings{}, 24 * time.Hour},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			flags := &stubRiskFlags{n: 1}
+			geo := &stubGeoFlags{n: 1}
+			mustList(t, newSvc(Deps{RiskFlags: flags, GeoFlags: geo, Settings: c.settings}, now))
+			if want := now.Add(-c.want); !flags.since.Equal(want) {
+				t.Fatalf("CountFlaggedUsers since = %v, want %v (%v before now)", flags.since, want, c.want)
+			}
+		})
+	}
+}

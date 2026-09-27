@@ -16,7 +16,7 @@ import (
 // The widths of risk_signals' bounded columns, checked by Save before anything
 // is written. Left to the database, an over-long value is stored by SQLite,
 // refused by PostgreSQL and truncated or refused by MySQL depending on its
-// SQL mode — one hourly batch would succeed on one install and fail on the
+// SQL mode — one refresh's batch would succeed on one install and fail on the
 // next. Checked here, it fails the same way everywhere. They must equal the
 // size tags on riskSignalRow (TestRiskSignalRow_WidthsMatchTheColumns).
 const (
@@ -31,7 +31,7 @@ const (
 
 // riskSignalRow is one account's latest verdict for one observe-only signal.
 //
-// Overwritten every hour; no history. The worker recomputes each signal from
+// Overwritten every run (hourly by default); no history. The worker recomputes each signal from
 // a whole window every run, so an older row is an older window, not a fact
 // the next run needs — and keeping them would grow without bound for values
 // nothing reads twice.
@@ -249,7 +249,7 @@ func (r *RiskSignalRepo) CountFlaggedUsers(ctx context.Context, since time.Time)
 }
 
 // PurgeOrphans deletes the rows of accounts that no longer exist and returns
-// how many it deleted. The worker runs it every hour, so what a deleted
+// how many it deleted. The worker runs it every refresh, so what a deleted
 // account left lasts at most one run (and List hides it meanwhile).
 //
 // A NOT IN subquery on another table is portable as written: MySQL's

@@ -235,6 +235,70 @@ func TestScopeSettingsHandler_AcceptsRiskKnobs(t *testing.T) {
 	}
 }
 
+// login_country's two thresholds are per-group like the knobs above: a
+// group whose members sign in rarely can be judged after fewer earlier
+// logins, and a group whose admin wants a new country kept on the table
+// longer can hold it longer. Refused here, the group editor would offer a
+// knob whose save fails.
+func TestScopeSettingsHandler_AcceptsRiskLoginKnobs(t *testing.T) {
+	for name, value := range map[string]string{
+		"login_warmup_logins": "1",
+		"login_hold_days":     "30",
+	} {
+		t.Run(name, func(t *testing.T) {
+			repo := newFakeScopeRepo()
+			h := NewAdminScopeSettingsHandler(fakeScopeGroups{exists: map[int64]bool{5: true}}, repo)
+			r := scopeRouter(h)
+			body, _ := json.Marshal(setScopeOverrideRequest{Type: "risk", Name: name, Value: value})
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, httptest.NewRequest(http.MethodPut, "/api/admin/groups/5/scope-settings", bytes.NewReader(body)))
+			if w.Code != http.StatusOK {
+				t.Fatalf("PUT risk.%s = %d, want 200; body=%s", name, w.Code, w.Body.String())
+			}
+			if got, ok := repo.rows["risk."+name]; !ok || got.Value != value {
+				t.Errorf("risk.%s override not stored as %q: %+v", name, value, repo.rows)
+			}
+		})
+	}
+}
+
+// The worker's fleet-wide knobs — the former constants — are global only:
+// the loop runs once for the fleet on one cadence and one first delay, the
+// bell counts the fleet, and the fetch window and the login log are each
+// read once per run for every account together. A group value would be
+// stored, shown in the group editor and never read, so absence from
+// OverridableScopeKeys is pinned at the write seam.
+//
+// Guard: green on arrival. Adding any one of these keys to
+// OverridableScopeKeys turns it red.
+func TestScopeSettingsHandler_RejectsRiskRuntimeKeys(t *testing.T) {
+	for _, name := range []string{
+		"refresh_interval_minutes",
+		"first_delay_minutes",
+		"alert_freshness_hours",
+		"window_days",
+		"login_lookback_days",
+	} {
+		t.Run(name, func(t *testing.T) {
+			repo := newFakeScopeRepo()
+			h := NewAdminScopeSettingsHandler(fakeScopeGroups{exists: map[int64]bool{5: true}}, repo)
+			r := scopeRouter(h)
+			body, _ := json.Marshal(setScopeOverrideRequest{Type: "risk", Name: name, Value: "30"})
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, httptest.NewRequest(http.MethodPut, "/api/admin/groups/5/scope-settings", bytes.NewReader(body)))
+			if w.Code != http.StatusBadRequest {
+				t.Fatalf("PUT risk.%s = %d, want 400; body=%s", name, w.Code, w.Body.String())
+			}
+			if !strings.Contains(w.Body.String(), "not overridable per group") {
+				t.Errorf("the refusal must say why: %s", w.Body.String())
+			}
+			if len(repo.rows) != 0 {
+				t.Error("a rejected override must not be written")
+			}
+		})
+	}
+}
+
 func TestScopeSettingsHandler_GroupNotFound(t *testing.T) {
 	h := NewAdminScopeSettingsHandler(fakeScopeGroups{exists: map[int64]bool{}}, newFakeScopeRepo())
 	r := scopeRouter(h)

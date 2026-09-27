@@ -1485,7 +1485,8 @@ type UISettings struct {
 	// account's panel logins may come from. It plays the "sustained, not a
 	// one-off" role that FlagAfterPolls plays for the live verdict, measured
 	// in days because the evidence is a week of fetch logs. Default 3,
-	// clamped to 1..7 when read (the window is at most a week).
+	// clamped to 1..risk.window_days when read: a pattern cannot recur on
+	// more days than the window holds.
 	RiskMinDays int `json:"risk_min_days"`
 	// RiskMaxDevices is how many distinct declared devices an account may
 	// fetch from before the devices signal speaks. Default 3 — a phone, a
@@ -1501,6 +1502,58 @@ type UISettings struct {
 	// counts as over whatever the ratio says — so a light account going from
 	// 10 MB to 50 MB is not a "fivefold surge". Default 3.
 	RiskUsageFloorGB int `json:"risk_usage_floor_gb"`
+	// RiskLoginWarmupLogins is how many earlier placed panel logins an
+	// account needs before login_country judges a login at all — before
+	// that there is nothing to call a country new against. Default 3,
+	// clamped to 1..50 when read: past 50 a signal that expects rare logins
+	// never finishes learning.
+	RiskLoginWarmupLogins int `json:"risk_login_warmup_logins"`
+	// RiskLoginHoldDays is how many days one login from a new country keeps
+	// the account flagged, and so which logins count as recent. Default 7,
+	// clamped to 1..risk.login_lookback_days when read: a login cannot stay
+	// recent longer than the log is read.
+	RiskLoginHoldDays int `json:"risk_login_hold_days"`
+
+	// ---- Risk signals: the worker's fleet-wide runtime ----
+	// What used to be constants in the worker loop, the fetch window, the
+	// login read and the bell. Each stores 0 for "never configured", which
+	// means the former constant, and each is clamped to a safety bound when
+	// read; domain.RiskRuntimeFromSettings is the one place either rule
+	// lives, and nothing here is validated on save.
+	//
+	// GLOBAL ONLY — all five are deliberately absent from
+	// OverridableScopeKeys. The loop runs once for the fleet, the fetch
+	// window and the login log are each read once per run for every account
+	// together, and the bell counts the fleet; a group value would be
+	// stored, shown and never read.
+	//
+	// RiskRefreshIntervalMinutes is how often the signals are recomputed.
+	// Default 60, clamped to 10..1440: each run streams a week of fetches
+	// and weeks of hourly traffic per account, and a day is as stale as a
+	// flag may get. Re-read after every run, so an edit lands one run late.
+	RiskRefreshIntervalMinutes int `json:"risk_refresh_interval_minutes"`
+	// RiskFirstDelayMinutes is how long after start the first run waits, so
+	// it does not compete with the boot probes and the first infrastructure
+	// refresh. Default 2, clamped to 1..60. Read once when the loop starts:
+	// a change takes effect on the next restart.
+	RiskFirstDelayMinutes int `json:"risk_first_delay_minutes"`
+	// RiskAlertFreshnessHours is how long a flag nobody re-judged keeps the
+	// notification bell lit, for both the concurrent-location and the risk
+	// entry. Default 24, clamped to 1..720, and raised to two worker
+	// refreshes (and, for the concurrent-location entry, to two traffic
+	// polls) so a latched flag never flickers off the bell between two
+	// judgements.
+	RiskAlertFreshnessHours int `json:"risk_alert_freshness_hours"`
+	// RiskWindowDays is the fetch window the place and device signals read,
+	// in panel-local days. Default 7, clamped to 1..7 (every day mask is a
+	// uint8). A shorter sub-log retention still shortens the window where
+	// the logs are read — and a group's min_days is bounded by THIS value,
+	// not by the retention, so a too-short retention reads retention_short.
+	RiskWindowDays int `json:"risk_window_days"`
+	// RiskLoginLookbackDays is how far back login_country reads the login
+	// log. Default 90, clamped to 7..365; a shorter auth-event retention
+	// still shortens it where the log is read.
+	RiskLoginLookbackDays int `json:"risk_login_lookback_days"`
 
 	// ---- IP geolocation (access-log region display, offline .mmdb) ----
 	// Resolution is fully offline against a local .mmdb in <ConfigDir>/geoip/;
@@ -1834,15 +1887,21 @@ var OverridableScopeKeys = map[string]bool{
 	//
 	// risk.hwid_capture_off is deliberately NOT here: /sub reads it from the
 	// global settings it has already loaded, and whether the panel records a
-	// device identifier at all is a panel-wide privacy decision.
-	"risk.sub_spread_off":    true,
-	"risk.devices_off":       true,
-	"risk.usage_shift_off":   true,
-	"risk.login_country_off": true,
-	"risk.min_days":          true,
-	"risk.max_devices":       true,
-	"risk.usage_ratio":       true,
-	"risk.usage_floor_gb":    true,
+	// device identifier at all is a panel-wide privacy decision. The
+	// worker's fleet-wide runtime (refresh_interval_minutes,
+	// first_delay_minutes, alert_freshness_hours, window_days,
+	// login_lookback_days) is absent for the same kind of reason: see
+	// UISettings.
+	"risk.sub_spread_off":      true,
+	"risk.devices_off":         true,
+	"risk.usage_shift_off":     true,
+	"risk.login_country_off":   true,
+	"risk.min_days":            true,
+	"risk.max_devices":         true,
+	"risk.usage_ratio":         true,
+	"risk.usage_floor_gb":      true,
+	"risk.login_warmup_logins": true,
+	"risk.login_hold_days":     true,
 	// 2FA methods (login / enroll) — auth_local / twofa / passkey / login2fa.
 	"security.totp_enabled":      true,
 	"security.passkey_enabled":   true,

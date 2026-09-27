@@ -827,7 +827,7 @@ func (a *App) Run() error {
 	safego.GoTracked(&a.bgWG, "geo-update-loop", func() { a.runGeoUpdateLoop(bgCtx) })
 	safego.GoTracked(&a.bgWG, "traffic-loop", func() { a.runTrafficLoop(bgCtx) })
 	safego.GoTracked(&a.bgWG, "infra-address-loop", func() { a.runInfraAddressLoop(bgCtx) })
-	safego.GoTracked(&a.bgWG, "risk-signal-loop", func() { a.runRiskLoop(bgCtx, riskFirstDelay) })
+	safego.GoTracked(&a.bgWG, "risk-signal-loop", func() { a.runRiskLoop(bgCtx, a.riskFirstDelay(bgCtx)) })
 	safego.GoTracked(&a.bgWG, "mail-loop", func() { a.runMailLoop(bgCtx) })
 	safego.GoTracked(&a.bgWG, "reconcile-loop", func() { a.runReconcileLoop(bgCtx) })
 	safego.GoTracked(&a.bgWG, "health-loop", func() { a.runHealthLoop(bgCtx) })
@@ -1754,27 +1754,68 @@ func (a *App) runInfraAddressLoop(ctx context.Context) {
 	}
 }
 
-// riskRefreshInterval is how often the risk signals are recomputed. A
-// constant like the audit-cleanup cadence, not a setting: the signals are
-// day-scale (a week of fetches, 35 days of traffic), so an hour is fresh
-// enough, and none of them sits on the poll path.
-const riskRefreshInterval = time.Hour
+// riskIntervalFrom is how often the risk signals are recomputed:
+// risk.refresh_interval_minutes, as domain.RiskRuntimeFromSettings sanitises
+// it (an hour by default; at least ten minutes, because every run streams a
+// week of fetches and weeks of hourly traffic per account; at most a day).
+// The signals are day-scale, so an hour is fresh enough, and none of them
+// sits on the poll path.
+//
+// A settings read that failed gives the default, not the interval the loop
+// held — the same bargain as infraIntervalFrom: this is observation whose
+// every value in range is safe, and the default is the one the domain
+// vouches for.
+func riskIntervalFrom(s ports.UISettings, err error) time.Duration {
+	if err != nil {
+		s = ports.UISettings{}
+	}
+	return domain.RiskRuntimeFromSettings(s.RiskRuntimeSettings()).RefreshInterval
+}
 
-// riskFirstDelay is how long after start the first refresh runs: long
-// enough for the boot probes and the infrastructure-address refresh (which
-// runs as soon as its loop starts) to settle, so the first run does not
-// compete with them; short enough that a fresh install's risk view is not
-// empty for a whole interval. Correctness does not depend on it: every run
-// skips the place signals while the infrastructure set has never been built
-// (traffic.Service.InfraLoaded), keeping their previous rows.
-const riskFirstDelay = 2 * time.Minute
+// riskFirstDelayFrom is how long after start the first refresh runs:
+// risk.first_delay_minutes (two by default, at most an hour). Long enough
+// for the boot probes and the infrastructure-address refresh (which runs as
+// soon as its loop starts) to settle, so the first run does not compete
+// with them; short enough that a fresh install's risk view is not empty for
+// a whole interval. Correctness does not depend on it: every run skips the
+// place signals while the infrastructure set has never been built
+// (traffic.Service.InfraLoaded), keeping their previous rows. An unreadable
+// setting is the default, as above.
+func riskFirstDelayFrom(s ports.UISettings, err error) time.Duration {
+	if err != nil {
+		s = ports.UISettings{}
+	}
+	return domain.RiskRuntimeFromSettings(s.RiskRuntimeSettings()).FirstDelay
+}
+
+// riskInterval reads the risk worker's cadence for the next wait, and
+// riskFirstDelay its first delay (read once, in Run: a change takes effect
+// on the next restart). Both nil-safe on a.settings: an App assembled
+// without settings (a test harness) runs on the defaults.
+func (a *App) riskInterval(ctx context.Context) time.Duration {
+	if a.settings == nil {
+		return riskIntervalFrom(ports.UISettings{}, nil)
+	}
+	return riskIntervalFrom(a.settings.Load(ctx, ports.UISettings{}))
+}
+
+func (a *App) riskFirstDelay(ctx context.Context) time.Duration {
+	if a.settings == nil {
+		return riskFirstDelayFrom(ports.UISettings{}, nil)
+	}
+	return riskFirstDelayFrom(a.settings.Load(ctx, ports.UISettings{}))
+}
 
 // runRiskLoop recomputes the observe-only risk signals: once after
-// firstDelay, then every riskRefreshInterval. A failed run keeps the
-// previous rows (the service writes nothing on error) and is retried on the
-// next tick; RefreshOnce counts every run it starts in
+// firstDelay, then every risk.refresh_interval_minutes. A failed run keeps
+// the previous rows (the service writes nothing on error) and is retried on
+// the next tick; RefreshOnce counts every run it starts in
 // psp_risk_refresh_total. Runs under the operation gate like every other
 // background pass, so a backend switch drains it.
+//
+// The cadence is re-read after every refresh, so an admin's edit takes
+// effect without a restart — one wait late, as the infrastructure loop's
+// does.
 func (a *App) runRiskLoop(ctx context.Context, firstDelay time.Duration) {
 	if a.risk == nil {
 		return
@@ -1792,7 +1833,8 @@ func (a *App) runRiskLoop(ctx context.Context, firstDelay time.Duration) {
 	case <-first.C:
 	}
 	refresh()
-	t := time.NewTicker(riskRefreshInterval)
+	interval := a.riskInterval(ctx)
+	t := time.NewTicker(interval)
 	defer t.Stop()
 	for {
 		select {
@@ -1800,6 +1842,11 @@ func (a *App) runRiskLoop(ctx context.Context, firstDelay time.Duration) {
 			return
 		case <-t.C:
 			refresh()
+			if next := a.riskInterval(ctx); next != interval {
+				interval = next
+				t.Reset(interval)
+				log.Info("risk signal refresh interval changed", "interval", interval.String())
+			}
 		}
 	}
 }

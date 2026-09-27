@@ -133,6 +133,20 @@ type settingsDTO struct {
 	RiskMaxDevices      int     `json:"risk_max_devices"`
 	RiskUsageRatio      float64 `json:"risk_usage_ratio"`
 	RiskUsageFloorGB    int     `json:"risk_usage_floor_gb"`
+	// login_country's two thresholds, per-group like the tolerances above
+	// and read by the same domain.RiskPolicyFromSettings.
+	RiskLoginWarmupLogins int `json:"risk_login_warmup_logins"`
+	RiskLoginHoldDays     int `json:"risk_login_hold_days"`
+	// The risk worker's fleet-wide runtime (the former constants of the
+	// loop, the fetch window, the login read and the bell). Global only; 0
+	// means the shipped default, and the clamps are applied when read by
+	// domain.RiskRuntimeFromSettings — not validated on PUT, for the same
+	// reason as the policy knobs.
+	RiskRefreshIntervalMinutes int `json:"risk_refresh_interval_minutes"`
+	RiskFirstDelayMinutes      int `json:"risk_first_delay_minutes"`
+	RiskAlertFreshnessHours    int `json:"risk_alert_freshness_hours"`
+	RiskWindowDays             int `json:"risk_window_days"`
+	RiskLoginLookbackDays      int `json:"risk_login_lookback_days"`
 	// Geo IP (access-log region display, offline .mmdb).
 	GeoIPEnabled             bool   `json:"geo_ip_enabled"`
 	GeoIPDBFile              string `json:"geo_ip_db_file"`
@@ -388,6 +402,15 @@ func settingsToDTO(s ports.UISettings) settingsDTO {
 		RiskMaxDevices:               s.RiskMaxDevices,
 		RiskUsageRatio:               s.RiskUsageRatio,
 		RiskUsageFloorGB:             s.RiskUsageFloorGB,
+		RiskLoginWarmupLogins:        s.RiskLoginWarmupLogins,
+		RiskLoginHoldDays:            s.RiskLoginHoldDays,
+
+		// The risk worker's fleet-wide runtime: the stored values, 0 = default.
+		RiskRefreshIntervalMinutes: s.RiskRefreshIntervalMinutes,
+		RiskFirstDelayMinutes:      s.RiskFirstDelayMinutes,
+		RiskAlertFreshnessHours:    s.RiskAlertFreshnessHours,
+		RiskWindowDays:             s.RiskWindowDays,
+		RiskLoginLookbackDays:      s.RiskLoginLookbackDays,
 
 		// The detector's fleet-wide runtime: the stored values, 0 = default.
 		GeoAnomalyFreshWindowSeconds:  s.GeoAnomalyFreshWindowSeconds,
@@ -518,6 +541,13 @@ func (h *AdminSettingsHandler) Put(c *gin.Context) {
 		RiskMaxDevices:                req.RiskMaxDevices,
 		RiskUsageRatio:                req.RiskUsageRatio,
 		RiskUsageFloorGB:              req.RiskUsageFloorGB,
+		RiskLoginWarmupLogins:         req.RiskLoginWarmupLogins,
+		RiskLoginHoldDays:             req.RiskLoginHoldDays,
+		RiskRefreshIntervalMinutes:    req.RiskRefreshIntervalMinutes,
+		RiskFirstDelayMinutes:         req.RiskFirstDelayMinutes,
+		RiskAlertFreshnessHours:       req.RiskAlertFreshnessHours,
+		RiskWindowDays:                req.RiskWindowDays,
+		RiskLoginLookbackDays:         req.RiskLoginLookbackDays,
 		GeoIPEnabled:                  req.GeoIPEnabled,
 		GeoIPDBFile:                   strings.TrimSpace(req.GeoIPDBFile),
 		GeoIPAutoUpdate:               req.GeoIPAutoUpdate,

@@ -13,6 +13,7 @@ import (
 	nodeprotocol "github.com/KazuhaHub/passwall-protocol/protocol"
 	"gorm.io/gorm"
 
+	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 )
 
@@ -709,7 +710,8 @@ func TestSettingsKV_RiskKeysRoundTrip(t *testing.T) {
 	}
 	if fresh.RiskSubSpreadOff || fresh.RiskDevicesOff || fresh.RiskUsageShiftOff ||
 		fresh.RiskLoginCountryOff || fresh.RiskHWIDCaptureOff || fresh.RiskMinDays != 0 ||
-		fresh.RiskMaxDevices != 0 || fresh.RiskUsageRatio != 0 || fresh.RiskUsageFloorGB != 0 {
+		fresh.RiskMaxDevices != 0 || fresh.RiskUsageRatio != 0 || fresh.RiskUsageFloorGB != 0 ||
+		fresh.RiskLoginWarmupLogins != 0 || fresh.RiskLoginHoldDays != 0 {
 		t.Fatalf("a fresh install must read every risk key as unset (signals on, capture on), got %+v", fresh)
 	}
 
@@ -723,6 +725,8 @@ func TestSettingsKV_RiskKeysRoundTrip(t *testing.T) {
 	in.RiskMaxDevices = 5
 	in.RiskUsageRatio = 2.5
 	in.RiskUsageFloorGB = 6
+	in.RiskLoginWarmupLogins = 7
+	in.RiskLoginHoldDays = 8
 	if err := repo.Save(ctx, in); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
@@ -743,6 +747,8 @@ func TestSettingsKV_RiskKeysRoundTrip(t *testing.T) {
 		{"RiskMaxDevices", out.RiskMaxDevices, in.RiskMaxDevices},
 		{"RiskUsageRatio", out.RiskUsageRatio, in.RiskUsageRatio},
 		{"RiskUsageFloorGB", out.RiskUsageFloorGB, in.RiskUsageFloorGB},
+		{"RiskLoginWarmupLogins", out.RiskLoginWarmupLogins, in.RiskLoginWarmupLogins},
+		{"RiskLoginHoldDays", out.RiskLoginHoldDays, in.RiskLoginHoldDays},
 	} {
 		if c.got != c.want {
 			t.Errorf("%s: got %v, want %v", c.name, c.got, c.want)
@@ -758,15 +764,17 @@ func TestSettingsKV_RiskKeysRoundTrip(t *testing.T) {
 		stored[r.Name] = r.Value
 	}
 	for name, want := range map[string]string{
-		"sub_spread_off":    "1",
-		"devices_off":       "1",
-		"usage_shift_off":   "1",
-		"login_country_off": "1",
-		"hwid_capture_off":  "1",
-		"min_days":          "4",
-		"max_devices":       "5",
-		"usage_ratio":       "2.5",
-		"usage_floor_gb":    "6",
+		"sub_spread_off":      "1",
+		"devices_off":         "1",
+		"usage_shift_off":     "1",
+		"login_country_off":   "1",
+		"hwid_capture_off":    "1",
+		"min_days":            "4",
+		"max_devices":         "5",
+		"usage_ratio":         "2.5",
+		"usage_floor_gb":      "6",
+		"login_warmup_logins": "7",
+		"login_hold_days":     "8",
 	} {
 		got, ok := stored[name]
 		if !ok {
@@ -851,6 +859,80 @@ func TestSettingsKV_GeoRuntimeKeysRoundTrip(t *testing.T) {
 		}
 		if got != want {
 			t.Errorf("geo_anomaly.%s stored as %q, want %q", name, got, want)
+		}
+	}
+}
+
+// TestSettingsKV_RiskRuntimeKeysRoundTrip: the five fleet-wide risk knobs —
+// the worker's cadence, its first delay, the bell's freshness, the fetch
+// window and the login lookback, all former constants — survive Save → Load
+// under the exact "risk.<name>" keys the admin form and the scope refusal
+// address them by. Never configured, each reads as 0:
+// domain.RiskRuntimeFromSettings owns "0 means the shipped default", so the
+// settings layer must not fill them in.
+func TestSettingsKV_RiskRuntimeKeysRoundTrip(t *testing.T) {
+	db, err := openTestDB(t)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	t.Cleanup(func() {
+		if sqlDB, _ := db.DB(); sqlDB != nil {
+			_ = sqlDB.Close()
+		}
+	})
+	if err := ensureTestSchema(db); err != nil {
+		t.Fatalf("schema: %v", err)
+	}
+	repo := newKVSettingsRepo(db)
+	ctx := context.Background()
+
+	fresh, err := repo.Load(ctx, ports.UISettings{})
+	if err != nil {
+		t.Fatalf("Load fresh: %v", err)
+	}
+	if got := fresh.RiskRuntimeSettings(); got != (domain.RiskRuntimeSettings{}) {
+		t.Fatalf("a fresh install must read every risk runtime key as unset, got %+v", got)
+	}
+
+	in := fresh
+	in.RiskRefreshIntervalMinutes = 30
+	in.RiskFirstDelayMinutes = 4
+	in.RiskAlertFreshnessHours = 5
+	in.RiskWindowDays = 6
+	in.RiskLoginLookbackDays = 120
+	if err := repo.Save(ctx, in); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	out, err := repo.Load(ctx, ports.UISettings{})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got, want := out.RiskRuntimeSettings(), in.RiskRuntimeSettings(); got != want {
+		t.Fatalf("round trip = %+v, want %+v", got, want)
+	}
+
+	var rows []settingRow
+	if err := db.Where("type = ?", "risk").Find(&rows).Error; err != nil {
+		t.Fatalf("read rows: %v", err)
+	}
+	stored := map[string]string{}
+	for _, r := range rows {
+		stored[r.Name] = r.Value
+	}
+	for name, want := range map[string]string{
+		"refresh_interval_minutes": "30",
+		"first_delay_minutes":      "4",
+		"alert_freshness_hours":    "5",
+		"window_days":              "6",
+		"login_lookback_days":      "120",
+	} {
+		got, ok := stored[name]
+		if !ok {
+			t.Errorf("no row stored under risk.%s", name)
+			continue
+		}
+		if got != want {
+			t.Errorf("risk.%s stored as %q, want %q", name, got, want)
 		}
 	}
 }

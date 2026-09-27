@@ -24,24 +24,28 @@ import (
 //     fields, so a new per-group knob that never reaches the policy fails.
 func TestUISettings_RiskPolicySettingsCarriesEveryRiskKnob(t *testing.T) {
 	s := UISettings{
-		RiskSubSpreadOff:    true,
-		RiskDevicesOff:      true,
-		RiskUsageShiftOff:   true,
-		RiskLoginCountryOff: true,
-		RiskMinDays:         4,
-		RiskMaxDevices:      5,
-		RiskUsageRatio:      2.5,
-		RiskUsageFloorGB:    6,
+		RiskSubSpreadOff:      true,
+		RiskDevicesOff:        true,
+		RiskUsageShiftOff:     true,
+		RiskLoginCountryOff:   true,
+		RiskMinDays:           4,
+		RiskMaxDevices:        5,
+		RiskUsageRatio:        2.5,
+		RiskUsageFloorGB:      6,
+		RiskLoginWarmupLogins: 7,
+		RiskLoginHoldDays:     8,
 	}
 	want := domain.RiskPolicySettings{
-		SubSpreadOff:    true,
-		DevicesOff:      true,
-		UsageShiftOff:   true,
-		LoginCountryOff: true,
-		MinDays:         4,
-		MaxDevices:      5,
-		UsageRatio:      2.5,
-		UsageFloorGB:    6,
+		SubSpreadOff:      true,
+		DevicesOff:        true,
+		UsageShiftOff:     true,
+		LoginCountryOff:   true,
+		MinDays:           4,
+		MaxDevices:        5,
+		UsageRatio:        2.5,
+		UsageFloorGB:      6,
+		LoginWarmupLogins: 7,
+		LoginHoldDays:     8,
 	}
 	got := s.RiskPolicySettings()
 	if got != want {
@@ -69,16 +73,83 @@ func TestUISettings_RiskPolicySettingsCarriesEveryRiskKnob(t *testing.T) {
 		}
 	}
 
-	overridable := 0
+	// Split by scope, as the geo count is: the per-group risk_ settings are
+	// the judging policy, the global ones (less the capture switch, which
+	// /sub reads and no evaluator judges with) the worker's fleet-wide
+	// runtime. Each side must count exactly its mapping's fields, so a
+	// stored knob that reaches neither fails here whichever side it was
+	// meant for.
+	overridable, global := 0, 0
 	ut := reflect.TypeOf(UISettings{})
 	for i := 0; i < ut.NumField(); i++ {
 		tag := strings.Split(ut.Field(i).Tag.Get("json"), ",")[0]
-		if rest, ok := strings.CutPrefix(tag, "risk_"); ok && OverridableScopeKeys["risk."+rest] {
+		rest, ok := strings.CutPrefix(tag, "risk_")
+		if !ok || tag == "risk_hwid_capture_off" {
+			continue
+		}
+		if OverridableScopeKeys["risk."+rest] {
 			overridable++
+		} else {
+			global++
 		}
 	}
 	if n := reflect.TypeOf(domain.RiskPolicySettings{}).NumField(); overridable != n {
 		t.Errorf("%d risk.* keys are group-overridable but domain.RiskPolicySettings has %d fields: a per-group knob the policy does not carry is editable and judged with nothing", overridable, n)
+	}
+	if n := reflect.TypeOf(domain.RiskRuntimeSettings{}).NumField(); global != n {
+		t.Errorf("%d risk_ settings are global only (less hwid_capture_off) but domain.RiskRuntimeSettings has %d fields: a fleet-wide knob the runtime does not carry is saved and run with the default", global, n)
+	}
+}
+
+// RiskRuntimeSettings is the ONE mapping from the fleet-wide risk.* knobs —
+// the worker's and the bell's former constants — to the domain's flat form.
+// The same checks as the policy mappings: exact distinct values (two crossed
+// fields fail), and every result field non-zero (a domain field added
+// without a mapping fails). The count against the stored settings is in the
+// test above, split from the policy's.
+func TestUISettings_RiskRuntimeSettingsCarriesEveryKnob(t *testing.T) {
+	s := UISettings{
+		RiskRefreshIntervalMinutes: 30,
+		RiskFirstDelayMinutes:      4,
+		RiskAlertFreshnessHours:    5,
+		RiskWindowDays:             6,
+		RiskLoginLookbackDays:      120,
+	}
+	want := domain.RiskRuntimeSettings{
+		RefreshIntervalMinutes: 30,
+		FirstDelayMinutes:      4,
+		AlertFreshnessHours:    5,
+		WindowDays:             6,
+		LoginLookbackDays:      120,
+	}
+	got := s.RiskRuntimeSettings()
+	if got != want {
+		t.Fatalf("RiskRuntimeSettings() = %+v\nwant %+v", got, want)
+	}
+	v := reflect.ValueOf(got)
+	for i := 0; i < v.NumField(); i++ {
+		if v.Field(i).IsZero() {
+			t.Errorf("domain.RiskRuntimeSettings.%s is never filled from UISettings", v.Type().Field(i).Name)
+		}
+	}
+}
+
+// The runtime carries what the admin CONFIGURED: the fetch window and the
+// login lookback are never shortened by the sub-log or auth-event retention
+// here. The retention is applied where the logs are read, because that is
+// the one place that knows the rows before it are gone — and because a
+// group's min_days is bounded by this window (RiskPolicy.Bounded), where a
+// retention-shortened window would hide retention_short, the code that
+// exists to say the logs are too short for min_days.
+func TestRiskRuntime_CarriesConfiguredWindowNotRetention(t *testing.T) {
+	for _, s := range []UISettings{
+		{RiskWindowDays: 7, RiskLoginLookbackDays: 90, SubLogRetentionDays: 3, AuthEventRetentionDays: 14},
+		{SubLogRetentionDays: 3, AuthEventRetentionDays: 14},
+	} {
+		rt := domain.RiskRuntimeFromSettings(s.RiskRuntimeSettings())
+		if rt.WindowDays != 7 || rt.LoginLookbackDays != 90 {
+			t.Fatalf("settings %+v: window %d, lookback %d; want the configured 7 and 90 whatever the retention", s.RiskRuntimeSettings(), rt.WindowDays, rt.LoginLookbackDays)
+		}
 	}
 }
 

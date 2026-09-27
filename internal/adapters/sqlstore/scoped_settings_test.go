@@ -302,10 +302,10 @@ func TestScopedSettings_GeoTierAndBanKeysOverridable(t *testing.T) {
 	}
 }
 
-// TestScopedSettings_RiskKeysOverridable: the eight risk-signal knobs resolve
+// TestScopedSettings_RiskKeysOverridable: the ten risk-signal knobs resolve
 // per group, which is how one group has a signal it legitimately trips
 // switched off, or its tolerance raised, while the fleet keeps the default.
-// Bites if any of the eight is missing from OverridableScopeKeys: the row is
+// Bites if any of the ten is missing from OverridableScopeKeys: the row is
 // stored and the resolver silently skips it, so the group editor would show
 // a value the worker never judges with.
 //
@@ -325,6 +325,8 @@ func TestScopedSettings_RiskKeysOverridable(t *testing.T) {
 		{Type: "risk", Name: "max_devices", Value: "5"},
 		{Type: "risk", Name: "usage_ratio", Value: "2.5"},
 		{Type: "risk", Name: "usage_floor_gb", Value: "6"},
+		{Type: "risk", Name: "login_warmup_logins", Value: "7"},
+		{Type: "risk", Name: "login_hold_days", Value: "8"},
 		// Written straight to the repo, which (unlike the admin handler)
 		// does not gate on the overridable set.
 		{Type: "risk", Name: "hwid_capture_off", Value: "1"},
@@ -350,6 +352,8 @@ func TestScopedSettings_RiskKeysOverridable(t *testing.T) {
 		{"max_devices", g.RiskMaxDevices, 5},
 		{"usage_ratio", g.RiskUsageRatio, 2.5},
 		{"usage_floor_gb", g.RiskUsageFloorGB, 6},
+		{"login_warmup_logins", g.RiskLoginWarmupLogins, 7},
+		{"login_hold_days", g.RiskLoginHoldDays, 8},
 	} {
 		if c.got != c.want {
 			t.Errorf("group override risk.%s must apply: got %v, want %v", c.key, c.got, c.want)

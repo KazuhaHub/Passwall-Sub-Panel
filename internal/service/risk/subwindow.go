@@ -71,14 +71,20 @@ type identityAgg struct {
 	clientMS, lastMS int64
 }
 
-// windowDays is how many days the fetch window holds: a week, or the
-// sub-log retention when that is shorter — the rows before it are gone, and
-// a week-long window would read those days as days without fetches.
-func windowDays(retention int) int {
-	if retention > 0 && retention < domain.RiskWindowDays {
+// windowDays is how many days the fetch window holds: the configured
+// risk.window_days (a week by default), or the sub-log retention when that
+// is shorter — the rows before it are gone, and a longer window would read
+// those days as days without fetches. 0 (keep forever) leaves the configured
+// window.
+//
+// The retention applies here, where the log is read, and nowhere else: the
+// groups' min_days is bounded by the configured window (RiskPolicy.Bounded),
+// so a retention shorter than min_days still reads retention_short.
+func windowDays(retention, configured int) int {
+	if retention > 0 && retention < configured {
 		return retention
 	}
-	return domain.RiskWindowDays
+	return configured
 }
 
 // readWindow streams the fetch log from the first window day's first
@@ -95,7 +101,7 @@ func windowDays(retention int) int {
 // before, and every fetch of the window's last day — today's — fell out of
 // it. The scan starts at the day's real first instant (see dayStart).
 func (s *Service) readWindow(ctx context.Context, r *refresh) (*fetchWindow, error) {
-	w := &fetchWindow{days: windowDays(r.global.SubLogRetentionDays), users: map[int64]*userWindow{}}
+	w := &fetchWindow{days: windowDays(r.global.SubLogRetentionDays, r.rt.WindowDays), users: map[int64]*userWindow{}}
 	day0 := localNoon(r.now, -(w.days - 1), r.loc)
 	w.start = paneltz.DateString(day0, r.loc)
 

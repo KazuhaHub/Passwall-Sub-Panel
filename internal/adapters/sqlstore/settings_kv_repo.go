@@ -473,10 +473,10 @@ func settingDescriptors(s *ports.UISettings) []settingDescriptor {
 		intField("geo_anomaly", "infra_refresh_minutes", &s.GeoAnomalyInfraRefreshMinutes),
 		intField("geo_anomaly", "infra_host_ttl_minutes", &s.GeoAnomalyInfraHostTTLMinutes),
 
-		// risk --- risk signals (observe only). Every key but
-		// hwid_capture_off is per-group overridable; hwid_capture_off is
-		// GLOBAL only (absent from ports.OverridableScopeKeys): /sub reads it
-		// from the global settings it already loaded.
+		// risk --- risk signals (observe only). The judging policy below is
+		// per-group overridable; hwid_capture_off is GLOBAL only (absent
+		// from ports.OverridableScopeKeys): /sub reads it from the global
+		// settings it already loaded.
 		//
 		// None of them is defaulted in applyUISettingsDefaults. The switches
 		// are negative, so false (signal on, capture on) already is the
@@ -492,7 +492,19 @@ func settingDescriptors(s *ports.UISettings) []settingDescriptor {
 		intField("risk", "max_devices", &s.RiskMaxDevices),
 		floatField("risk", "usage_ratio", &s.RiskUsageRatio),
 		intField("risk", "usage_floor_gb", &s.RiskUsageFloorGB),
+		intField("risk", "login_warmup_logins", &s.RiskLoginWarmupLogins),
+		intField("risk", "login_hold_days", &s.RiskLoginHoldDays),
 		boolField("risk", "hwid_capture_off", &s.RiskHWIDCaptureOff),
+		// risk --- the worker's fleet-wide runtime (the former constants of
+		// the loop, the fetch window, the login read and the bell). GLOBAL
+		// only (absent from ports.OverridableScopeKeys), and 0 is "never
+		// configured": domain.RiskRuntimeFromSettings owns both that and the
+		// clamps.
+		intField("risk", "refresh_interval_minutes", &s.RiskRefreshIntervalMinutes),
+		intField("risk", "first_delay_minutes", &s.RiskFirstDelayMinutes),
+		intField("risk", "alert_freshness_hours", &s.RiskAlertFreshnessHours),
+		intField("risk", "window_days", &s.RiskWindowDays),
+		intField("risk", "login_lookback_days", &s.RiskLoginLookbackDays),
 
 		// geo --- IP geolocation for access-log region display (offline .mmdb)
 		boolField("geo", "geo_ip_enabled", &s.GeoIPEnabled),

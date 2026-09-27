@@ -19,10 +19,12 @@ import (
 // never-saved form means "observe".
 func TestRiskPolicyFromSettings_UnsetIsTheDefault(t *testing.T) {
 	want := RiskPolicy{
-		MinDays:         3,
-		MaxDevices:      3,
-		UsageRatio:      3.0,
-		UsageFloorBytes: 3 << 30,
+		MinDays:           3,
+		MaxDevices:        3,
+		UsageRatio:        3.0,
+		UsageFloorBytes:   3 << 30,
+		LoginWarmupLogins: 3,
+		LoginHoldDays:     7,
 	}
 	if got := DefaultRiskPolicy(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("DefaultRiskPolicy() = %+v\nwant the shipped default %+v", got, want)
@@ -172,5 +174,68 @@ func TestRiskPolicyFromSettings_MaxDevicesUnsetIsTheDefault(t *testing.T) {
 		if got := RiskPolicyFromSettings(RiskPolicySettings{MaxDevices: c.in}).MaxDevices; got != c.want {
 			t.Errorf("MaxDevices %d resolved to %d, want %d", c.in, got, c.want)
 		}
+	}
+}
+
+// login_country's two thresholds are per-group knobs now: how many earlier
+// placed logins a login needs before it is judged, and how many days one
+// login from a new country keeps the account flagged. Unset or negative is
+// the default (3 and 7), never the literal: a warm-up of 0 would judge an
+// account's very first login, which is always "new". The warm-up is capped
+// at 50 — past it a signal that expects rare logins never finishes
+// learning — and the hold at a year, the longest the login log is read.
+func TestRiskPolicyFromSettings_LoginKnobs(t *testing.T) {
+	def := RiskPolicyFromSettings(RiskPolicySettings{})
+	if def.LoginWarmupLogins != 3 || def.LoginHoldDays != 7 {
+		t.Fatalf("unset login knobs = warm-up %d, hold %d; want 3 and 7", def.LoginWarmupLogins, def.LoginHoldDays)
+	}
+	for _, c := range []struct {
+		name         string
+		in           RiskPolicySettings
+		warmup, hold int
+	}{
+		{"warm-up beyond fifty", RiskPolicySettings{LoginWarmupLogins: 60}, 50, 7},
+		{"warm-up of one", RiskPolicySettings{LoginWarmupLogins: 1}, 1, 7},
+		{"negative warm-up is unset", RiskPolicySettings{LoginWarmupLogins: -2}, 3, 7},
+		{"hold of a month", RiskPolicySettings{LoginHoldDays: 30}, 3, 30},
+		{"hold beyond a year", RiskPolicySettings{LoginHoldDays: 400}, 3, 365},
+		{"negative hold is unset", RiskPolicySettings{LoginHoldDays: -1}, 3, 7},
+	} {
+		got := RiskPolicyFromSettings(c.in)
+		if got.LoginWarmupLogins != c.warmup || got.LoginHoldDays != c.hold {
+			t.Errorf("%s: warm-up %d, hold %d; want %d and %d", c.name, got.LoginWarmupLogins, got.LoginHoldDays, c.warmup, c.hold)
+		}
+	}
+}
+
+// A group's knobs are bounded by the fleet's runtime they are measured
+// against: a place cannot recur on more days than the fetch window holds,
+// and a login cannot stay recent longer than the log is read. Without the
+// bound a group min_days of 7 under a 3-day window would make "flagged"
+// silently impossible, and a hold of 30 days under a 14-day lookback would
+// describe a month the worker never reads.
+//
+// The bound is the CONFIGURED window and lookback, never one a retention
+// shortened: retention_short exists to say the logs are too short for
+// min_days, and bounding min_days by them would silence it (see the
+// worker's TestRefreshOnce_RetentionShortStillSurfaces).
+func TestRiskPolicy_BoundedByRuntime(t *testing.T) {
+	rt := RiskRuntimeFromSettings(RiskRuntimeSettings{WindowDays: 3, LoginLookbackDays: 14})
+	got := RiskPolicyFromSettings(RiskPolicySettings{MinDays: 7, LoginHoldDays: 30}).Bounded(rt)
+	if got.MinDays != 3 || got.LoginHoldDays != 14 {
+		t.Fatalf("bounded min_days %d, hold %d; want 3 (the window) and 14 (the lookback)", got.MinDays, got.LoginHoldDays)
+	}
+	within := RiskPolicyFromSettings(RiskPolicySettings{MinDays: 2, LoginHoldDays: 10}).Bounded(rt)
+	if within.MinDays != 2 || within.LoginHoldDays != 10 {
+		t.Fatalf("knobs inside the runtime moved: min_days %d, hold %d; want 2 and 10", within.MinDays, within.LoginHoldDays)
+	}
+	// At the defaults the bound is the identity: an upgrade changes nothing.
+	if def := DefaultRiskPolicy(); !reflect.DeepEqual(def.Bounded(DefaultRiskRuntime()), def) {
+		t.Fatalf("the default policy bounded by the default runtime = %+v, want it unchanged", def.Bounded(DefaultRiskRuntime()))
+	}
+	// A zero runtime (never sanitised) bounds nothing rather than driving
+	// min_days to 0, which the evaluators would read as "any one day".
+	if z := DefaultRiskPolicy().Bounded(RiskRuntime{}); z.MinDays != 3 || z.LoginHoldDays != 7 {
+		t.Fatalf("bounded by a zero runtime: min_days %d, hold %d; want 3 and 7", z.MinDays, z.LoginHoldDays)
 	}
 }

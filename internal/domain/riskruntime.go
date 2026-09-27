@@ -1,0 +1,142 @@
+package domain
+
+import "time"
+
+// The risk worker's fleet-wide knobs: what used to be constants in the
+// worker loop, the fetch window, the login read and the bell, and is now an
+// admin setting with the constant as its shipped default.
+//
+// Fleet-wide, not per group, each for a reason that does not depend on who
+// is looking: the loop runs once for the whole fleet on one cadence, the
+// fetch window is streamed once per run for every account together, the
+// login log is read in one keyset pass, and the bell counts the fleet. A
+// group value would be stored, shown and never read, so none of these is in
+// ports.OverridableScopeKeys. (login_country's warm-up and hold ARE per
+// group: they are judging thresholds, in RiskPolicy.)
+//
+// The bounds below are not policy. They keep a knob inside the range where
+// it still means what its name says, and each one is argued at the
+// constant. A stored value outside them is clamped when read, never rejected
+// at the form: this file is the one place a stored value is interpreted,
+// the same bargain GeoRuntimeFromSettings makes.
+const (
+	// RiskDefaultRefreshMinutes is how often the signals are recomputed.
+	// The signals are day-scale (a week of fetches, weeks of traffic), so
+	// an hour is fresh enough. RiskRefreshMinMinutes is a DB-cost bound:
+	// every run streams a week of sub_logs and reads weeks of hourly rows
+	// per account. RiskRefreshMaxMinutes is a day, so a flag is never more
+	// than a day stale.
+	RiskDefaultRefreshMinutes = 60
+	RiskRefreshMinMinutes     = 10
+	RiskRefreshMaxMinutes     = 1440
+	// RiskDefaultFirstDelayMinutes is how long after start the first run
+	// waits, so it does not compete with the boot probes and the first
+	// infrastructure refresh. RiskFirstDelayMaxMinutes: a longer wait leaves
+	// a fresh install's risk view empty for over an hour.
+	RiskDefaultFirstDelayMinutes = 2
+	RiskFirstDelayMaxMinutes     = 60
+	// RiskDefaultAlertFreshnessHours is how long a flag nobody re-judged
+	// keeps the bell lit. RiskAlertFreshnessMaxHours is a month: an older
+	// latch is history, not something to look at now.
+	RiskDefaultAlertFreshnessHours = 24
+	RiskAlertFreshnessMaxHours     = 720
+	// RiskDefaultWindowDays is the fetch window a fresh install reads. Its
+	// ceiling is RiskWindowDays, which is structural, not policy: every day
+	// mask is a uint8.
+	RiskDefaultWindowDays = 7
+	// RiskLoginLookbackMinDays is the shipped hold: a lookback shorter than
+	// the recent days would read a recent login with no history behind it.
+	// RiskLoginLookbackMaxDays is a year, which bounds what one run holds
+	// in memory. RiskLoginLookbackDays (90) stays the default.
+	RiskLoginLookbackMinDays = 7
+	RiskLoginLookbackMaxDays = 365
+	// RiskLoginWarmupMaxLogins bounds login_country's per-group warm-up:
+	// past it, a signal that expects rare panel logins never finishes
+	// learning, and "learning" would silently mean "off".
+	RiskLoginWarmupMaxLogins = 50
+)
+
+// RiskRuntimeSettings is the flat, storage-shaped form: what the admin form
+// saves, with 0 (or a negative number) meaning "never configured".
+// ports.UISettings.RiskRuntimeSettings is the one mapping into it.
+type RiskRuntimeSettings struct {
+	RefreshIntervalMinutes, FirstDelayMinutes, AlertFreshnessHours,
+	WindowDays, LoginLookbackDays int
+}
+
+// RiskRuntime is the sanitised form every reader uses. Each field is inside
+// its bounds; nothing downstream asks whether a value was meant.
+//
+// It carries the CONFIGURED values. The sub-log and auth-event retentions
+// shorten the fetch window and the login lookback where the logs are read,
+// never here: RiskPolicy.Bounded clamps a group's min_days to WindowDays,
+// and clamping it to a retention-shortened window would hide
+// retention_short — the code that exists to say the logs are too short for
+// min_days.
+type RiskRuntime struct {
+	// RefreshInterval: the worker's cadence. 10..1440 min.
+	RefreshInterval time.Duration
+	// FirstDelay: how long after start the first run waits. 1..60 min.
+	FirstDelay time.Duration
+	// AlertFreshness: how long a flag nobody re-judged keeps the bell lit.
+	// 1..720 h, and never less than two RefreshIntervals (see
+	// RiskRuntimeFromSettings); the geo entry is floored by the poll
+	// interval on top (GeoBellFreshness).
+	AlertFreshness time.Duration
+	// WindowDays: the fetch window the place and device signals read, in
+	// panel-local days. 1..RiskWindowDays.
+	WindowDays int
+	// LoginLookbackDays: how far back login_country reads the login log.
+	// RiskLoginLookbackMinDays..RiskLoginLookbackMaxDays.
+	LoginLookbackDays int
+}
+
+// DefaultRiskRuntime is the runtime a fresh install runs with: exactly the
+// constants these knobs replaced, so an upgrade changes nothing.
+func DefaultRiskRuntime() RiskRuntime {
+	return RiskRuntime{
+		RefreshInterval:   RiskDefaultRefreshMinutes * time.Minute,
+		FirstDelay:        RiskDefaultFirstDelayMinutes * time.Minute,
+		AlertFreshness:    RiskDefaultAlertFreshnessHours * time.Hour,
+		WindowDays:        RiskDefaultWindowDays,
+		LoginLookbackDays: RiskLoginLookbackDays,
+	}
+}
+
+// RiskRuntimeFromSettings turns stored settings into a runtime that is safe
+// to run with: unset is the default, anything else is clamped to its bounds.
+//
+// Unset has to be the default and not the zero, for the reason
+// GeoRuntimeFromSettings gives: a fresh install stores nothing, and every
+// one of these read literally is broken — a zero-length ticker (which
+// panics), a first run racing the boot probes, a bell that forgets a flag
+// the moment it is written, a window of no days, a login log read over no
+// time.
+//
+// The bell's freshness is raised to two refresh intervals. The worker
+// rewrites every row once per run, so a window shorter than two runs would
+// drop a latched flag off the bell between one run and the next and bring
+// it back — a lit, dark, lit bell for an account nothing changed about. The
+// raised value IS the value in effect, for both bell entries: one knob, one
+// number an admin can check.
+func RiskRuntimeFromSettings(s RiskRuntimeSettings) RiskRuntime {
+	refresh := time.Duration(settingOr(s.RefreshIntervalMinutes, RiskDefaultRefreshMinutes, RiskRefreshMinMinutes, RiskRefreshMaxMinutes)) * time.Minute
+	fresh := time.Duration(settingOr(s.AlertFreshnessHours, RiskDefaultAlertFreshnessHours, 1, RiskAlertFreshnessMaxHours)) * time.Hour
+	return RiskRuntime{
+		RefreshInterval:   refresh,
+		FirstDelay:        time.Duration(settingOr(s.FirstDelayMinutes, RiskDefaultFirstDelayMinutes, 1, RiskFirstDelayMaxMinutes)) * time.Minute,
+		AlertFreshness:    max(fresh, 2*refresh),
+		WindowDays:        settingOr(s.WindowDays, RiskDefaultWindowDays, 1, RiskWindowDays),
+		LoginLookbackDays: settingOr(s.LoginLookbackDays, RiskLoginLookbackDays, RiskLoginLookbackMinDays, RiskLoginLookbackMaxDays),
+	}
+}
+
+// GeoBellFreshness is the concurrent-location bell entry's window: the
+// configured freshness, raised to two traffic-poll intervals. The poll
+// re-judges every latched account once per poll, so a shorter window would
+// flicker a latch off the bell between two polls. The poll interval has no
+// ceiling (cron_traffic_pull_minutes is checked only for < 0), which is why
+// the floor is computed here and not assumed below the freshness.
+func (rt RiskRuntime) GeoBellFreshness(poll time.Duration) time.Duration {
+	return max(rt.AlertFreshness, 2*poll)
+}
