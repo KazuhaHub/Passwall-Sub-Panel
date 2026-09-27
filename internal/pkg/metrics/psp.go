@@ -298,6 +298,20 @@ var (
 		"psp_live_connections",
 		"Live connections (account, panel node, source) in the latest stored live-connection snapshot.",
 	)
+	// The risk center's on-demand live-connection refreshes (立即刷新), by
+	// outcome. ok and partial read every panel (partial: at least one read
+	// failed, so the view is missing connections; a panel with no live read
+	// at all, S-UI, is never partial). just_polled answered with the poll's
+	// snapshot and read nothing; cooldown and in_progress were refused and
+	// read nothing; error means the refresh could not run (the shared
+	// clients were unreadable, or it timed out). A refresh is never a
+	// detector sample, so none of this moves a verdict — this is the cost
+	// admins' clicks put on the panels.
+	LiveConnRefreshTotal = NewCounterVec(
+		"psp_live_conn_refresh_total",
+		"Risk-center live-connection refreshes by outcome: ok, partial (a panel read failed), just_polled (answered with the poll's snapshot), cooldown, in_progress (refused), error.",
+		"outcome",
+	)
 	// Polls whose judged connections could not be recorded into the
 	// connection history (connection_history). The poll carries on —
 	// metering is its job — so without this a history that has stopped

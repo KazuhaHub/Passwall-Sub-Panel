@@ -295,8 +295,9 @@ func TestScopeSettingsHandler_AcceptsRiskUsageKnobs(t *testing.T) {
 // bell counts the fleet, the fetch window and the login log are each read
 // once per run for every account together, usage_shift's baseline and
 // judged days are the length of the ONE fleet series every account's fleet
-// factor is taken from, and connection_history and flag_records are each
-// pruned by one hourly pass over every account's rows. A group value would be
+// factor is taken from, connection_history and flag_records are each pruned
+// by one hourly pass over every account's rows, and the risk center holds
+// one live snapshot and one refresh for the fleet. A group value would be
 // stored, shown in the group editor and never read, so absence from
 // OverridableScopeKeys is pinned at the write seam.
 //
@@ -313,6 +314,9 @@ func TestScopeSettingsHandler_RejectsRiskRuntimeKeys(t *testing.T) {
 		"usage_recent_days",
 		"connection_retention_days",
 		"flag_record_retention_days",
+		"live_snapshot_stale_minutes",
+		"live_refresh_cooldown_seconds",
+		"device_infer_hours",
 	} {
 		t.Run(name, func(t *testing.T) {
 			repo := newFakeScopeRepo()

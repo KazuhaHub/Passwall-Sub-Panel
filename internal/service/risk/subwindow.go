@@ -147,33 +147,31 @@ func (w *fetchWindow) add(row *domain.SubLog, day0 time.Time, loc *time.Location
 	ip := strings.TrimSpace(row.IP)
 
 	// A declared device id is the client; without one, the exact client
-	// string is. That errs toward linking: two people on the same app and
-	// version are one client here, which can hide a spread but never
-	// invents one.
-	key, kind := "u:"+row.UA, "ua"
-	if row.DeviceID != "" {
-		key, kind = "d:"+row.DeviceID, "hwid"
-	}
+	// string is (domain.SubLogIdentity, the one rule the live view's device
+	// inference uses too, so "one device" means the same in both). That
+	// errs toward linking: two people on the same app and version are one
+	// client here, which can hide a spread but never invents one.
+	key, kind := domain.SubLogIdentity(*row)
 	at := row.AccessedAt.UnixMilli()
 	agg := uw.identities[key]
 	if agg == nil {
 		agg = &identityAgg{kind: kind, lastMS: at}
-		if kind == "hwid" {
-			agg.hwid4 = truncateRunes(row.DeviceID, 4)
+		if kind == domain.SubLogIdentityHWID {
+			agg.hwid4 = truncateRunes(row.DeviceID, domain.DeviceIDShownLen)
 		} else {
 			agg.label = truncateRunes(row.UA, windowLabelRunes)
 		}
 		uw.identities[key] = agg
 	}
 	uw.fetches++
-	if kind == "hwid" {
+	if kind == domain.SubLogIdentityHWID {
 		uw.withHWID++
 	}
 	agg.days |= 1 << day
 	agg.lastMS = max(agg.lastMS, at)
 	// The newest label and client name, by fetch time; a later fetch that
 	// declared none (or was not recognised) does not erase them.
-	if kind == "hwid" && row.DeviceLabel != "" && (agg.label == "" || at >= agg.labelMS) {
+	if kind == domain.SubLogIdentityHWID && row.DeviceLabel != "" && (agg.label == "" || at >= agg.labelMS) {
 		agg.label, agg.labelMS = row.DeviceLabel, at
 	}
 	if row.ClientType != "" && (agg.client == "" || at >= agg.clientMS) {

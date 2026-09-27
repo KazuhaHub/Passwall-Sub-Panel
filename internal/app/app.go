@@ -50,6 +50,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/reconcile"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/render"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/risk"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/riskcenter"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/rollup"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/servermigration"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/sharedclient"
@@ -595,6 +596,24 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	// empty; TestBuildWiresTheConnectionRecorder guards it.
 	connHistory := sqlstore.NewConnectionHistoryRepo(db)
 	trafficSvc.SetConnectionRecorder(connHistory)
+	// The risk center's read side, over the very sources the detectors
+	// write: the traffic service's live snapshot and its on-demand refresh
+	// (never a detector sample), the connection history and flag records
+	// built above, and the page of fetches it infers devices from. Every
+	// field is a narrow read interface (riskcenter.Deps); the users and
+	// panels repos are handed whole but only GetByID and List are
+	// reachable through them. The router dep is optional, so leaving this
+	// out compiles and every risk-center route answers 503;
+	// TestBuildWiresTheRiskCenter drives them through the assembled router.
+	riskCenterSvc := riskcenter.New(riskcenter.Deps{
+		Live:     trafficSvc,
+		Settings: repos.Settings,
+		Users:    repos.User,
+		Panels:   repos.XUIPanel,
+		Fetches:  repos.SubLog,
+		History:  connHistory,
+		Flags:    flagRecords,
+	})
 
 	// --- transport layer ---
 	// The Node installation template is fetched from the release that published it
@@ -619,6 +638,7 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 		// through the assembled router.
 		RiskSignals: riskSignals,
 		RiskFlags:   riskSignals,
+		RiskCenter:  riskCenterSvc,
 		// Optional like GeoFlags, so leaving it out would compile and quietly
 		// record every subscription fetch as anonymous.
 		DeviceHasher: deviceHasher,

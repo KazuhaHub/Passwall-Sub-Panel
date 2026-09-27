@@ -11,9 +11,11 @@ import "time"
 // fetch window is streamed once per run for every account together, the
 // login log is read in one keyset pass, the bell counts the fleet,
 // usage_shift reads one fleet series whose days every account's series must
-// share, and connection_history and flag_records are each pruned by one
-// hourly pass over every account's rows. A group value would be stored,
-// shown and never read, so none of these is in ports.OverridableScopeKeys.
+// share, connection_history and flag_records are each pruned by one hourly
+// pass over every account's rows, and the risk center's live view is one
+// snapshot of the fleet with one refresh button. A group value would be
+// stored, shown and never read, so none of these is in
+// ports.OverridableScopeKeys.
 // (login_country's warm-up and hold, and usage_shift's warm-up and
 // over-days, ARE per group: they are judging thresholds, in RiskPolicy.)
 //
@@ -86,6 +88,33 @@ const (
 	// detector writes ages out.
 	RiskDefaultFlagRecordRetentionDays = 90
 	RiskFlagRecordRetentionMaxDays     = 3650
+	// The risk center's live view (实时连接).
+	//
+	// RiskDefaultLiveSnapshotStaleMinutes is how old the snapshot on show
+	// may get before the view says so: three default polls. The view floors
+	// it at two poll intervals on top (SnapshotStaleAfter), since a poll
+	// snapshot is only replaced by the next poll. RiskLiveSnapshotStaleMaxMinutes
+	// is a day: an older reading is not "live" by any reading of the word.
+	RiskDefaultLiveSnapshotStaleMinutes = 15
+	RiskLiveSnapshotStaleMaxMinutes     = 1440
+	// RiskDefaultLiveRefreshCooldownSeconds is how long one 立即刷新 holds
+	// off the next, for everyone: a refresh reads every panel's live
+	// connections, so it is rationed fleet-wide, never per admin or per
+	// account. RiskLiveRefreshCooldownMinSeconds protects the panels: five
+	// seconds is half of 3X-UI's own ten-second rescan, and clicking faster
+	// mostly reads the same scan again. RiskLiveRefreshCooldownMaxSeconds is
+	// an hour, past which the button is decoration.
+	RiskDefaultLiveRefreshCooldownSeconds = 30
+	RiskLiveRefreshCooldownMinSeconds     = 5
+	RiskLiveRefreshCooldownMaxSeconds     = 3600
+	// RiskDefaultDeviceInferHours is how far back the view looks in the
+	// fetch log for the fetches it infers a connection's device from: the
+	// same account fetching from the same source. A day covers a client
+	// that refreshes its subscription daily. RiskDeviceInferMaxHours is a
+	// week, the fetch window's own ceiling; a shorter sub-log retention
+	// shortens it where the log is read, never here.
+	RiskDefaultDeviceInferHours = 24
+	RiskDeviceInferMaxHours     = 168
 )
 
 // RiskRuntimeSettings is the flat, storage-shaped form: what the admin form
@@ -94,7 +123,8 @@ const (
 type RiskRuntimeSettings struct {
 	RefreshIntervalMinutes, FirstDelayMinutes, AlertFreshnessHours,
 	WindowDays, LoginLookbackDays, UsageBaselineDays, UsageRecentDays int
-	ConnectionRetentionDays, FlagRecordRetentionDays int
+	ConnectionRetentionDays, FlagRecordRetentionDays                       int
+	LiveSnapshotStaleMinutes, LiveRefreshCooldownSeconds, DeviceInferHours int
 }
 
 // RiskRuntime is the sanitised form every reader uses. Each field is inside
@@ -134,6 +164,17 @@ type RiskRuntime struct {
 	// FlagRecordRetentionDays: how many days flag_records keeps a record.
 	// 1..RiskFlagRecordRetentionMaxDays. Fleet-wide for the same reason.
 	FlagRecordRetentionDays int
+	// LiveSnapshotStale: how old the live view's snapshot may get before
+	// the view warns. 1..1440 min; floored by the poll interval where it is
+	// read (SnapshotStaleAfter). Fleet-wide: there is one snapshot.
+	LiveSnapshotStale time.Duration
+	// LiveRefreshCooldown: how long one on-demand refresh holds off the
+	// next, fleet-wide. 5..3600 s.
+	LiveRefreshCooldown time.Duration
+	// DeviceInferWindow: how far back the view reads the fetch log to infer
+	// a connection's device. 1..168 h; a shorter sub-log retention shortens
+	// it where the log is read.
+	DeviceInferWindow time.Duration
 }
 
 // DefaultRiskRuntime is the runtime a fresh install runs with: exactly the
@@ -152,6 +193,10 @@ func DefaultRiskRuntime() RiskRuntime {
 
 		ConnectionRetentionDays: RiskDefaultConnectionRetentionDays,
 		FlagRecordRetentionDays: RiskDefaultFlagRecordRetentionDays,
+
+		LiveSnapshotStale:   RiskDefaultLiveSnapshotStaleMinutes * time.Minute,
+		LiveRefreshCooldown: RiskDefaultLiveRefreshCooldownSeconds * time.Second,
+		DeviceInferWindow:   RiskDefaultDeviceInferHours * time.Hour,
 	}
 }
 
@@ -165,7 +210,9 @@ func DefaultRiskRuntime() RiskRuntime {
 // the moment it is written, a window of no days, a login log read over no
 // time, a usage median over no baseline and no days judged, and a
 // connection history or a flag history pruned to nothing (or, read the way
-// the other retention settings read 0, kept for ever).
+// the other retention settings read 0, kept for ever), a live view stale the
+// moment it is taken, a refresh button with no cooldown, and a device
+// inference over no fetches.
 //
 // The bell's freshness is raised to two refresh intervals. The worker
 // rewrites every row once per run, so a window shorter than two runs would
@@ -187,6 +234,11 @@ func RiskRuntimeFromSettings(s RiskRuntimeSettings) RiskRuntime {
 
 		ConnectionRetentionDays: settingOr(s.ConnectionRetentionDays, RiskDefaultConnectionRetentionDays, 1, RiskConnectionRetentionMaxDays),
 		FlagRecordRetentionDays: settingOr(s.FlagRecordRetentionDays, RiskDefaultFlagRecordRetentionDays, 1, RiskFlagRecordRetentionMaxDays),
+
+		LiveSnapshotStale: time.Duration(settingOr(s.LiveSnapshotStaleMinutes, RiskDefaultLiveSnapshotStaleMinutes, 1, RiskLiveSnapshotStaleMaxMinutes)) * time.Minute,
+		LiveRefreshCooldown: time.Duration(settingOr(s.LiveRefreshCooldownSeconds, RiskDefaultLiveRefreshCooldownSeconds,
+			RiskLiveRefreshCooldownMinSeconds, RiskLiveRefreshCooldownMaxSeconds)) * time.Second,
+		DeviceInferWindow: time.Duration(settingOr(s.DeviceInferHours, RiskDefaultDeviceInferHours, 1, RiskDeviceInferMaxHours)) * time.Hour,
 	}
 }
 
@@ -198,4 +250,13 @@ func RiskRuntimeFromSettings(s RiskRuntimeSettings) RiskRuntime {
 // the floor is computed here and not assumed below the freshness.
 func (rt RiskRuntime) GeoBellFreshness(poll time.Duration) time.Duration {
 	return max(rt.AlertFreshness, 2*poll)
+}
+
+// SnapshotStaleAfter is the age past which the live view calls its snapshot
+// stale: the configured staleness, raised to two traffic-poll intervals. A
+// poll snapshot is replaced only by the next poll, so at a 30-minute poll a
+// 20-minute-old snapshot is simply the latest one; warning about it would
+// teach an admin to skip the warning that means the poll has stopped.
+func (rt RiskRuntime) SnapshotStaleAfter(poll time.Duration) time.Duration {
+	return max(rt.LiveSnapshotStale, 2*poll)
 }

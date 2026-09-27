@@ -905,7 +905,21 @@ type SubLogRepo interface {
 	// this is the window read for background aggregation, which holds a whole
 	// week of fetches in one pass and must not hold it in memory at once.
 	ScanSince(ctx context.Context, since time.Time, batch int, fn func([]domain.SubLog) error) error
+	// RecentForUsers returns the given accounts' fetches accessed at or
+	// after since, newest first, at most limit rows (limit <= 0 means
+	// SubLogRecentMaxRows), without the users join. It serves the risk
+	// center's device inference, which reads one page of accounts at a
+	// time: more than SubLogRecentMaxUsers ids is a domain.ErrValidation,
+	// never a fleet-wide scan. No ids is no rows.
+	RecentForUsers(ctx context.Context, userIDs []int64, since time.Time, limit int) ([]domain.SubLog, error)
 }
+
+// RecentForUsers' bounds: one page of accounts (the admin lists' page-size
+// cap) and the rows one read may hold.
+const (
+	SubLogRecentMaxUsers = 200
+	SubLogRecentMaxRows  = 20000
+)
 
 type SyncTaskRepo interface {
 	Create(ctx context.Context, task *domain.SyncTask) error
@@ -1588,14 +1602,15 @@ type UISettings struct {
 	// the one place either rule lives, and nothing here is validated on
 	// save.
 	//
-	// GLOBAL ONLY — all nine are deliberately absent from
+	// GLOBAL ONLY — all twelve are deliberately absent from
 	// OverridableScopeKeys. The loop runs once for the fleet, the fetch
 	// window and the login log are each read once per run for every account
 	// together, the bell counts the fleet, usage_shift reads ONE fleet
 	// series that every account's fleet factor is taken from, so every
-	// account's series has the same days, and one hourly pass prunes every
-	// account's connection history and flag records; a group value would be
-	// stored, shown and never read.
+	// account's series has the same days, one hourly pass prunes every
+	// account's connection history and flag records, and the risk center
+	// holds one live snapshot for the fleet; a group value would be stored,
+	// shown and never read.
 	//
 	// RiskRefreshIntervalMinutes is how often the signals are recomputed.
 	// Default 60, clamped to 10..1440: each run streams a week of fetches
@@ -1650,6 +1665,20 @@ type UISettings struct {
 	// bounds growth, not a privacy promise. Pruned by the hourly cleanup,
 	// which also deletes a deleted account's records whatever their age.
 	RiskFlagRecordRetentionDays int `json:"risk_flag_record_retention_days"`
+	// The risk center's live view (实时连接). RiskLiveSnapshotStaleMinutes
+	// is how old its snapshot may get before the view warns: default 15,
+	// clamped to 1..1440, and never less than two traffic polls where it is
+	// read, since a poll snapshot is only replaced by the next poll.
+	// RiskLiveRefreshCooldownSeconds is how long one on-demand refresh holds
+	// off the next, for every admin at once (a refresh reads every panel):
+	// default 30, clamped to 5..3600. RiskDeviceInferHours is how far back
+	// the view reads the fetch log to infer a connection's device: default
+	// 24, clamped to 1..168, and shortened by sub_log_retention_days where
+	// the log is read. Global like the rest of this block: there is one
+	// snapshot and one refresh for the whole fleet.
+	RiskLiveSnapshotStaleMinutes   int `json:"risk_live_snapshot_stale_minutes"`
+	RiskLiveRefreshCooldownSeconds int `json:"risk_live_refresh_cooldown_seconds"`
+	RiskDeviceInferHours           int `json:"risk_device_infer_hours"`
 
 	// ---- IP geolocation (access-log region display, offline .mmdb) ----
 	// Resolution is fully offline against a local .mmdb in <ConfigDir>/geoip/;
@@ -1987,8 +2016,10 @@ var OverridableScopeKeys = map[string]bool{
 	// worker's fleet-wide runtime (refresh_interval_minutes,
 	// first_delay_minutes, alert_freshness_hours, window_days,
 	// login_lookback_days, usage_baseline_days, usage_recent_days,
-	// connection_retention_days, flag_record_retention_days) is absent for
-	// the same kind of reason: see UISettings.
+	// connection_retention_days, flag_record_retention_days,
+	// live_snapshot_stale_minutes, live_refresh_cooldown_seconds,
+	// device_infer_hours) is absent for the same kind of reason: see
+	// UISettings.
 	"risk.sub_spread_off":      true,
 	"risk.devices_off":         true,
 	"risk.usage_shift_off":     true,

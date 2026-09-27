@@ -518,6 +518,11 @@ func settingDescriptors(s *ports.UISettings) []settingDescriptor {
 		// flag_records' retention, the same way: global, no key-presence
 		// default, 0 is the shipped 90 days and never "keep forever".
 		intField("risk", "flag_record_retention_days", &s.RiskFlagRecordRetentionDays),
+		// The risk center's live view: its staleness warning, the refresh
+		// cooldown and the device-inference window. Global, 0 = default.
+		intField("risk", "live_snapshot_stale_minutes", &s.RiskLiveSnapshotStaleMinutes),
+		intField("risk", "live_refresh_cooldown_seconds", &s.RiskLiveRefreshCooldownSeconds),
+		intField("risk", "device_infer_hours", &s.RiskDeviceInferHours),
 
 		// geo --- IP geolocation for access-log region display (offline .mmdb)
 		boolField("geo", "geo_ip_enabled", &s.GeoIPEnabled),

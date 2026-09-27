@@ -93,9 +93,11 @@ func (s UISettings) GeoRuntimeSettings() domain.GeoRuntimeSettings {
 // the worker's and the bell's former constants — to the domain's flat form,
 // read by the risk loop (its cadence and first delay), the risk worker (the
 // fetch window, the login lookback and usage_shift's series), the alert
-// feed (the bell's freshness) and the hourly cleanup (the connection
-// history's and the flag records' retentions). domain.RiskRuntimeFromSettings
-// then decides what an unset or out-of-range value means.
+// feed (the bell's freshness), the hourly cleanup (the connection history's
+// and the flag records' retentions) and the risk center's live view (its
+// staleness, its refresh cooldown and its device window).
+// domain.RiskRuntimeFromSettings then decides what an unset or out-of-range
+// value means.
 //
 // Global only, so always read from the global settings: none of these keys
 // is group-overridable, and a group-resolved UISettings would only echo the
@@ -114,5 +116,9 @@ func (s UISettings) RiskRuntimeSettings() domain.RiskRuntimeSettings {
 
 		ConnectionRetentionDays: s.RiskConnectionRetentionDays,
 		FlagRecordRetentionDays: s.RiskFlagRecordRetentionDays,
+
+		LiveSnapshotStaleMinutes:   s.RiskLiveSnapshotStaleMinutes,
+		LiveRefreshCooldownSeconds: s.RiskLiveRefreshCooldownSeconds,
+		DeviceInferHours:           s.RiskDeviceInferHours,
 	}
 }

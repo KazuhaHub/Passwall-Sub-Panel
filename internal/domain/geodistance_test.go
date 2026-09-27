@@ -265,6 +265,8 @@ func TestNoStoredTypeHoldsACoordinate(t *testing.T) {
 		// address and so no pin either.
 		reflect.TypeFor[FlagRecord](),
 		reflect.TypeFor[GeoFlagParams](),
+		// An inferred device is served beside the connection's address.
+		reflect.TypeFor[ConnDevice](),
 	} {
 		walk(root.Name(), root)
 	}

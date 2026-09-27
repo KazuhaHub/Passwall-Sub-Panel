@@ -243,3 +243,27 @@ func TestRiskSignalList_OnlyKindsThisBuildKnows(t *testing.T) {
 		t.Fatalf("user 1 signals = %s, want devices alone", got)
 	}
 }
+
+// The single-account lookup asks for one account's signals (?user_id=): the
+// answer is that account's item alone, with its geo summary, the shape the
+// fleet list has. A malformed id is a 400, never the fleet.
+func TestAdminRiskSignals_UserIDFilter(t *testing.T) {
+	signals := &stubRiskSignals{rows: []domain.RiskSignal{
+		{UserID: 1, Kind: domain.RiskKindDevices, State: domain.GeoStateClean, Code: domain.RiskCodeWithin},
+		{UserID: 2, Kind: domain.RiskKindSubSpread, State: domain.GeoStateFlagged, Code: domain.RiskCodeSpread},
+		{UserID: 2, Kind: domain.RiskKindDevices, State: domain.GeoStateSuspect, Code: domain.RiskCodeOver},
+	}}
+	geo := &stubRecords{recs: []domain.GeoRecord{{UserID: 1, State: domain.GeoStateClean}, {UserID: 2, State: domain.GeoStateFlagged, Streak: domain.GeoStreak{Flagged: true}}}}
+	h := NewAdminRiskSignalHandler(signals, geo)
+
+	items := decodeRiskItems(t, getJSONAt(t, h.List, "/api/admin/risk-signals?user_id=2"))
+	if len(items) != 1 || items[0].UserID != 2 || len(items[0].Signals) != 2 || !strings.Contains(string(items[0].Geo), `"flagged":true`) {
+		t.Fatalf("items = %+v, want account 2 alone with both signals and its geo summary", items)
+	}
+	if items := decodeRiskItems(t, getJSONAt(t, h.List, "/api/admin/risk-signals?user_id=3")); len(items) != 0 {
+		t.Fatalf("an account with no signal row = %+v, want an empty list", items)
+	}
+	if rec := getJSONAt(t, h.List, "/api/admin/risk-signals?user_id=two"); rec.Code != http.StatusBadRequest {
+		t.Fatalf("malformed user_id = %d, want 400", rec.Code)
+	}
+}

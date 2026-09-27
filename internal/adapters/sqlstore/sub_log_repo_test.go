@@ -232,3 +232,104 @@ func TestSubLogRepo_ScanSinceStopsOnCallbackError(t *testing.T) {
 		t.Fatalf("callback ran %d times, want 2 (the scan stops at the first error)", calls)
 	}
 }
+
+// The live view infers a connection's device from the fetches of ONE page of
+// accounts (RecentForUsers). The read must be exact to the second whatever
+// zone the rows were written in — sub_logs rows carry the writer's zone and
+// SQLite compares them as strings — and its order must be by instant, not by
+// the stored string: across a daylight-saving change the same wall clock
+// means two instants an hour apart, and a UTC+14 row's string sorts after a
+// UTC-12 row that happened later. It returns only the accounts asked for,
+// newest first, at most limit rows, and a caller asking for more than one
+// page of accounts is refused rather than served a fleet-wide scan.
+func TestSubLogRepo_RecentForUsersIsExactAndBounded(t *testing.T) {
+	repo, _ := newSubLogRepo(t)
+	ctx := context.Background()
+	plus14 := time.FixedZone("UTC+14", 14*3600)
+	minus12 := time.FixedZone("UTC-12", -12*3600)
+	// Two sides of a daylight-saving change, as a process zone writes them.
+	standard := time.FixedZone("EST", -5*3600)
+	daylight := time.FixedZone("EDT", -4*3600)
+	since := time.Now().UTC().Truncate(time.Second).Add(-3 * time.Hour)
+
+	type row struct {
+		uid  int64
+		at   time.Time
+		keep bool
+	}
+	// Inserted out of time order on purpose: the id order is not the
+	// answer's order either.
+	in := []row{
+		{7, since.Add(-time.Second).In(plus14), false},
+		{7, since.Add(time.Second).In(plus14), true},
+		{7, since.Add(-time.Second).In(minus12), false},
+		{7, since.Add(2 * time.Second).In(minus12), true},
+		{7, since.Add(time.Hour + 10*time.Minute).In(standard), true}, // later instant, earlier-sorting string
+		{7, since.Add(time.Hour).In(daylight), true},
+		{8, since.Add(30 * time.Minute), true},
+		{9, since.Add(40 * time.Minute), false}, // an account nobody asked for
+	}
+	ids := map[time.Time]int64{}
+	for _, r := range in {
+		l := &domain.SubLog{UserID: r.uid, IP: "203.0.113.7", UA: "clash", AccessedAt: r.at}
+		if err := repo.Insert(ctx, l); err != nil {
+			t.Fatalf("insert: %v", err)
+		}
+		ids[r.at] = l.ID
+	}
+	var want []int64
+	var kept []row
+	for _, r := range in {
+		if r.keep {
+			kept = append(kept, r)
+		}
+	}
+	slices.SortFunc(kept, func(a, b row) int { return b.at.Compare(a.at) })
+	for _, r := range kept {
+		want = append(want, ids[r.at])
+	}
+
+	for _, z := range []*time.Location{time.UTC, plus14, minus12} {
+		got, err := repo.RecentForUsers(ctx, []int64{7, 8}, since.In(z), 0)
+		if err != nil {
+			t.Fatalf("since in %s: %v", z, err)
+		}
+		gotIDs := make([]int64, len(got))
+		for i, g := range got {
+			gotIDs[i] = g.ID
+			if g.AccessedAt.Before(since) {
+				t.Fatalf("since in %s: row %d accessed %s is before since %s", z, g.ID, g.AccessedAt, since)
+			}
+		}
+		if !slices.Equal(gotIDs, want) {
+			t.Fatalf("since in %s: ids = %v, want %v (accounts 7 and 8, at or after since, newest instant first)", z, gotIDs, want)
+		}
+	}
+
+	// At most limit rows: the most recently written ones.
+	got, err := repo.RecentForUsers(ctx, []int64{7, 8}, since, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) > 2 {
+		t.Fatalf("limit 2 returned %d rows", len(got))
+	}
+	for _, g := range got {
+		if g.UserID == 9 {
+			t.Fatalf("an account nobody asked for was returned: %+v", g)
+		}
+	}
+
+	// No accounts: nothing, and no query to fail.
+	if got, err := repo.RecentForUsers(ctx, nil, since, 0); err != nil || len(got) != 0 {
+		t.Fatalf("no accounts = %d rows, %v; want none", len(got), err)
+	}
+	// More than one page of accounts is a caller's bug, not a query to run.
+	many := make([]int64, 201)
+	for i := range many {
+		many[i] = int64(i + 1)
+	}
+	if _, err := repo.RecentForUsers(ctx, many, since, 0); !errors.Is(err, domain.ErrValidation) {
+		t.Fatalf("201 accounts: err = %v, want ErrValidation", err)
+	}
+}

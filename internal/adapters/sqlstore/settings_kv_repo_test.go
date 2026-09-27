@@ -873,11 +873,12 @@ func TestSettingsKV_GeoRuntimeKeysRoundTrip(t *testing.T) {
 	}
 }
 
-// TestSettingsKV_RiskRuntimeKeysRoundTrip: the nine fleet-wide risk knobs —
+// TestSettingsKV_RiskRuntimeKeysRoundTrip: the twelve fleet-wide risk knobs —
 // the worker's cadence, its first delay, the bell's freshness, the fetch
 // window, the login lookback and usage_shift's baseline and judged days, all
-// former constants, and the connection history's and the flag records'
-// retentions — survive Save → Load
+// former constants, the connection history's and the flag records'
+// retentions, and the live view's staleness, refresh cooldown and device
+// window — survive Save → Load
 // under the exact "risk.<name>" keys the admin form and the scope refusal
 // address them by. Never configured, each reads as 0:
 // domain.RiskRuntimeFromSettings owns "0 means the shipped default", so the
@@ -916,6 +917,9 @@ func TestSettingsKV_RiskRuntimeKeysRoundTrip(t *testing.T) {
 	in.RiskUsageRecentDays = 5
 	in.RiskConnectionRetentionDays = 14
 	in.RiskFlagRecordRetentionDays = 400
+	in.RiskLiveSnapshotStaleMinutes = 45
+	in.RiskLiveRefreshCooldownSeconds = 90
+	in.RiskDeviceInferHours = 36
 	if err := repo.Save(ctx, in); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
@@ -945,6 +949,10 @@ func TestSettingsKV_RiskRuntimeKeysRoundTrip(t *testing.T) {
 		"usage_recent_days":          "5",
 		"connection_retention_days":  "14",
 		"flag_record_retention_days": "400",
+
+		"live_snapshot_stale_minutes":   "45",
+		"live_refresh_cooldown_seconds": "90",
+		"device_infer_hours":            "36",
 	} {
 		got, ok := stored[name]
 		if !ok {

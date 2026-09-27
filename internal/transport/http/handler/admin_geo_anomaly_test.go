@@ -343,3 +343,56 @@ func TestGeoAnomalyList_CarriesTheAutoSuspension(t *testing.T) {
 		t.Fatalf("an unheld user carries service_disabled_at_ms %v; it must be omitted", rows[1]["service_disabled_at_ms"])
 	}
 }
+
+// countingGeoUsers is geoUsersStub that counts its reads.
+type countingGeoUsers struct {
+	geoUsersStub
+	calls *[]int64
+}
+
+func (s countingGeoUsers) GetByID(ctx context.Context, id int64) (*domain.User, error) {
+	*s.calls = append(*s.calls, id)
+	return s.geoUsersStub.GetByID(ctx, id)
+}
+
+func getJSONAt(t *testing.T, h func(*gin.Context), target string) *httptest.ResponseRecorder {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodGet, target, nil)
+	h(c)
+	return rec
+}
+
+// The risk center's single-account lookup reads one account's verdict. The
+// list names each row with one user read, so ?user_id= filters BEFORE the
+// names are looked up: one account's lookup is one user read, never one per
+// judged account in the fleet. A malformed id is a 400, never the fleet.
+func TestAdminGeoAnomaly_UserIDFilterLooksUpOnlyThatUser(t *testing.T) {
+	var calls []int64
+	users := countingGeoUsers{geoUsersStub: geoUsersStub{byID: map[int64]*domain.User{
+		7: {ID: 7, UPN: "alice"}, 8: {ID: 8, UPN: "bob"}, 9: {ID: 9, UPN: "carol"},
+	}}, calls: &calls}
+	h := NewAdminGeoAnomalyHandler(&stubRecords{recs: []domain.GeoRecord{
+		{UserID: 7, State: domain.GeoStateClean}, {UserID: 8, State: domain.GeoStateFlagged}, {UserID: 9, State: domain.GeoStateIdle},
+	}}, users)
+
+	rows := decodeRows(t, getJSONAt(t, h.List, "/api/admin/geo-anomalies?user_id=8"))
+	if len(rows) != 1 || rows[0]["user_id"] != float64(8) || rows[0]["upn"] != "bob" {
+		t.Fatalf("rows = %v, want only account 8, named", rows)
+	}
+	if len(calls) != 1 || calls[0] != 8 {
+		t.Fatalf("user reads = %v, want exactly one, for account 8", calls)
+	}
+	if rows := decodeRows(t, getJSONAt(t, h.List, "/api/admin/geo-anomalies?user_id=42")); len(rows) != 0 {
+		t.Fatalf("an account the detector has no row for = %v, want an empty list", rows)
+	}
+	if rec := getJSONAt(t, h.List, "/api/admin/geo-anomalies?user_id=eight"); rec.Code != http.StatusBadRequest {
+		t.Fatalf("malformed user_id = %d, want 400", rec.Code)
+	}
+	calls = nil
+	if rows := decodeRows(t, getJSONAt(t, h.List, "/api/admin/geo-anomalies")); len(rows) != 3 || len(calls) != 3 {
+		t.Fatalf("no filter = %d rows with %d reads, want the fleet unchanged", len(rows), len(calls))
+	}
+}

@@ -2,6 +2,8 @@ package sqlstore
 
 import (
 	"context"
+	"fmt"
+	"sort"
 	"time"
 
 	"gorm.io/gorm"
@@ -178,6 +180,57 @@ func (r *subLogRepo) ScanSince(ctx context.Context, since time.Time, batch int, 
 			}
 			return fn(out)
 		}).Error
+}
+
+// RecentForUsers is the risk center's device-inference read: one page of
+// accounts' recent fetches, newest first.
+//
+// The SQL is bounded like ScanSince's, subLogScanSlack early, and the exact
+// cut is made here on real instants, for ScanSince's reason: SQLite compares
+// the zone-bearing strings the rows were written as. For the same reason the
+// database is not asked to order by accessed_at — across two offsets (a
+// daylight-saving change, a moved process zone) the string order is not the
+// time order — but by id, which is insert order: LIMIT then keeps the most
+// recently WRITTEN rows, the ones a live connection's fetches are, and the
+// order returned is by instant, sorted here (the id breaks a tie). A row
+// inside the slack can take a slot of the limit; it is among the oldest
+// written, so it is the first to go when the limit bites.
+//
+// The account list is bounded because every caller is one page of an admin
+// list: more is a bug upstream, refused before it becomes a scan of the
+// fleet's fetches.
+func (r *subLogRepo) RecentForUsers(ctx context.Context, userIDs []int64, since time.Time, limit int) ([]domain.SubLog, error) {
+	if len(userIDs) > ports.SubLogRecentMaxUsers {
+		return nil, fmt.Errorf("%w: at most %d accounts per recent-fetch read, got %d",
+			domain.ErrValidation, ports.SubLogRecentMaxUsers, len(userIDs))
+	}
+	if len(userIDs) == 0 {
+		return nil, nil
+	}
+	if limit <= 0 || limit > ports.SubLogRecentMaxRows {
+		limit = ports.SubLogRecentMaxRows
+	}
+	var rows []subLogRow
+	if err := r.db.WithContext(ctx).Model(&subLogRow{}).
+		Where("user_id IN ? AND accessed_at >= ?", userIDs, since.UTC().Add(-subLogScanSlack)).
+		Order("id DESC").Limit(limit).
+		Find(&rows).Error; err != nil {
+		return nil, fmt.Errorf("recent fetches: %w", err)
+	}
+	out := make([]domain.SubLog, 0, len(rows))
+	for i := range rows {
+		if rows[i].AccessedAt.Before(since) {
+			continue
+		}
+		out = append(out, rows[i].toDomain())
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if !out[i].AccessedAt.Equal(out[j].AccessedAt) {
+			return out[i].AccessedAt.After(out[j].AccessedAt)
+		}
+		return out[i].ID > out[j].ID
+	})
+	return out, nil
 }
 
 func (r *subLogRepo) Clear(ctx context.Context) error {

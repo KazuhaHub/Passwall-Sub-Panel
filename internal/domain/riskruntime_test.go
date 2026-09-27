@@ -22,6 +22,9 @@ func TestRiskRuntimeFromSettings_UnsetIsTheDefault(t *testing.T) {
 		UsageRecentDays:         7,
 		ConnectionRetentionDays: 7,
 		FlagRecordRetentionDays: 90,
+		LiveSnapshotStale:       15 * time.Minute,
+		LiveRefreshCooldown:     30 * time.Second,
+		DeviceInferWindow:       24 * time.Hour,
 	}
 	if got := RiskRuntimeFromSettings(RiskRuntimeSettings{}); got != want {
 		t.Fatalf("RiskRuntimeFromSettings(unset) = %+v\nwant %+v", got, want)
@@ -128,9 +131,11 @@ func TestRiskRuntime_GeoBellFreshnessCoversTwoPolls(t *testing.T) {
 // and usage_shift's four-week baseline and one judged week. Frozen here as
 // literals, so moving a default is a deliberate edit of this test and not a
 // side effect of editing a constant. The connection history's week and the
-// flag records' 90 days are not former constants (both tables are new), but
-// they are frozen here too: each is the retention every upgraded install
-// starts with, and the docs quote both.
+// flag records' 90 days are not former constants (both tables are new), and
+// neither are the live view's knobs (a 15-minute staleness, a 30-second
+// refresh cooldown, a day of fetches to infer devices from), but they are
+// frozen here too: each is what every upgraded install starts with, and the
+// docs quote them.
 //
 // Mutation: a default lookback of 91 turns this red.
 func TestDefaultRiskRuntimeEqualsTheFormerConstants(t *testing.T) {
@@ -144,6 +149,9 @@ func TestDefaultRiskRuntimeEqualsTheFormerConstants(t *testing.T) {
 		UsageRecentDays:         7,
 		ConnectionRetentionDays: 7,
 		FlagRecordRetentionDays: 90,
+		LiveSnapshotStale:       15 * time.Minute,
+		LiveRefreshCooldown:     30 * time.Second,
+		DeviceInferWindow:       24 * time.Hour,
 	}
 	if got := DefaultRiskRuntime(); got != want {
 		t.Fatalf("DefaultRiskRuntime() = %+v\nwant the former constants %+v", got, want)
@@ -209,5 +217,62 @@ func TestRiskRuntime_FlagRecordRetention(t *testing.T) {
 				t.Fatalf("FlagRecordRetentionDays(stored %d) = %d, want %d", c.stored, got, c.want)
 			}
 		})
+	}
+}
+
+// The risk center's live view has three knobs of its own, each clamped to a
+// bound that keeps it meaning what its name says. The staleness is at least
+// a minute (a snapshot cannot be staler than no time) and at most a day. The
+// refresh cooldown is at least five seconds, because one refresh asks every
+// panel, and at most an hour. The device window reads the fetch log for at
+// least an hour and at most a week (the fetch window's own ceiling). Unset
+// and negative are the defaults, as for every other runtime knob.
+func TestRiskRuntime_LiveViewKnobs(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		in   RiskRuntimeSettings
+		got  func(RiskRuntime) any
+		want any
+	}{
+		{"staleness unset", RiskRuntimeSettings{}, func(r RiskRuntime) any { return r.LiveSnapshotStale }, 15 * time.Minute},
+		{"staleness negative", RiskRuntimeSettings{LiveSnapshotStaleMinutes: -1}, func(r RiskRuntime) any { return r.LiveSnapshotStale }, 15 * time.Minute},
+		{"staleness of a minute", RiskRuntimeSettings{LiveSnapshotStaleMinutes: 1}, func(r RiskRuntime) any { return r.LiveSnapshotStale }, time.Minute},
+		{"staleness beyond a day", RiskRuntimeSettings{LiveSnapshotStaleMinutes: 5000}, func(r RiskRuntime) any { return r.LiveSnapshotStale }, 1440 * time.Minute},
+		{"cooldown unset", RiskRuntimeSettings{}, func(r RiskRuntime) any { return r.LiveRefreshCooldown }, 30 * time.Second},
+		{"cooldown below five seconds", RiskRuntimeSettings{LiveRefreshCooldownSeconds: 1}, func(r RiskRuntime) any { return r.LiveRefreshCooldown }, 5 * time.Second},
+		{"cooldown beyond an hour", RiskRuntimeSettings{LiveRefreshCooldownSeconds: 9999}, func(r RiskRuntime) any { return r.LiveRefreshCooldown }, time.Hour},
+		{"cooldown of two minutes", RiskRuntimeSettings{LiveRefreshCooldownSeconds: 120}, func(r RiskRuntime) any { return r.LiveRefreshCooldown }, 2 * time.Minute},
+		{"cooldown negative", RiskRuntimeSettings{LiveRefreshCooldownSeconds: -5}, func(r RiskRuntime) any { return r.LiveRefreshCooldown }, 30 * time.Second},
+		{"device window unset", RiskRuntimeSettings{}, func(r RiskRuntime) any { return r.DeviceInferWindow }, 24 * time.Hour},
+		{"device window of an hour", RiskRuntimeSettings{DeviceInferHours: 1}, func(r RiskRuntime) any { return r.DeviceInferWindow }, time.Hour},
+		{"device window beyond a week", RiskRuntimeSettings{DeviceInferHours: 999}, func(r RiskRuntime) any { return r.DeviceInferWindow }, 168 * time.Hour},
+		{"device window negative", RiskRuntimeSettings{DeviceInferHours: -1}, func(r RiskRuntime) any { return r.DeviceInferWindow }, 24 * time.Hour},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			if got := c.got(RiskRuntimeFromSettings(c.in)); got != c.want {
+				t.Fatalf("got %v, want %v", got, c.want)
+			}
+		})
+	}
+}
+
+// A poll snapshot is replaced by the next poll, so it cannot be called stale
+// before two polls have been missed: at a 30-minute poll interval, a
+// snapshot 20 minutes old is simply the latest, and flagging it would teach
+// an admin to ignore the warning. The poll interval has no ceiling
+// (cron_traffic_pull_minutes is only checked for < 0), which is why the floor
+// is computed from it and not assumed below the setting.
+func TestRiskRuntime_SnapshotStaleAfterCoversTwoPolls(t *testing.T) {
+	rt := RiskRuntimeFromSettings(RiskRuntimeSettings{LiveSnapshotStaleMinutes: 15})
+	for _, c := range []struct {
+		poll, want time.Duration
+	}{
+		{5 * time.Minute, 15 * time.Minute},
+		{30 * time.Minute, time.Hour},
+		{0, 15 * time.Minute},
+	} {
+		if got := rt.SnapshotStaleAfter(c.poll); got != c.want {
+			t.Fatalf("SnapshotStaleAfter(poll %v) = %v, want %v", c.poll, got, c.want)
+		}
 	}
 }

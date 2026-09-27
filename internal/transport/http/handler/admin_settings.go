@@ -160,6 +160,13 @@ type settingsDTO struct {
 	// flag_records' retention in days. Global; 0 means the shipped 90 days
 	// (never "keep forever"), and the 1..3650 clamp is applied when read.
 	RiskFlagRecordRetentionDays int `json:"risk_flag_record_retention_days"`
+	// The risk center's live view: its staleness warning (minutes, floored
+	// at two polls where read), the refresh cooldown (seconds) and how far
+	// back devices are inferred from the fetch log (hours). Global; 0 means
+	// the shipped 15 / 30 / 24, and the clamps are applied when read.
+	RiskLiveSnapshotStaleMinutes   int `json:"risk_live_snapshot_stale_minutes"`
+	RiskLiveRefreshCooldownSeconds int `json:"risk_live_refresh_cooldown_seconds"`
+	RiskDeviceInferHours           int `json:"risk_device_infer_hours"`
 	// Geo IP (access-log region display, offline .mmdb).
 	GeoIPEnabled             bool   `json:"geo_ip_enabled"`
 	GeoIPDBFile              string `json:"geo_ip_db_file"`
@@ -433,6 +440,10 @@ func settingsToDTO(s ports.UISettings) settingsDTO {
 		RiskConnectionRetentionDays: s.RiskConnectionRetentionDays,
 		// flag_records' retention: the stored value, 0 = 90 days.
 		RiskFlagRecordRetentionDays: s.RiskFlagRecordRetentionDays,
+		// The live view's knobs: the stored values, 0 = default.
+		RiskLiveSnapshotStaleMinutes:   s.RiskLiveSnapshotStaleMinutes,
+		RiskLiveRefreshCooldownSeconds: s.RiskLiveRefreshCooldownSeconds,
+		RiskDeviceInferHours:           s.RiskDeviceInferHours,
 
 		// The detector's fleet-wide runtime: the stored values, 0 = default.
 		GeoAnomalyFreshWindowSeconds:  s.GeoAnomalyFreshWindowSeconds,
@@ -577,6 +588,12 @@ func (h *AdminSettingsHandler) Put(c *gin.Context) {
 		RiskUsageRecentDays:           req.RiskUsageRecentDays,
 		RiskConnectionRetentionDays:   req.RiskConnectionRetentionDays,
 		RiskFlagRecordRetentionDays:   req.RiskFlagRecordRetentionDays,
+
+		// The live view's knobs, stored as sent like the runtime above.
+		RiskLiveSnapshotStaleMinutes:   req.RiskLiveSnapshotStaleMinutes,
+		RiskLiveRefreshCooldownSeconds: req.RiskLiveRefreshCooldownSeconds,
+		RiskDeviceInferHours:           req.RiskDeviceInferHours,
+
 		GeoIPEnabled:                  req.GeoIPEnabled,
 		GeoIPDBFile:                   strings.TrimSpace(req.GeoIPDBFile),
 		GeoIPAutoUpdate:               req.GeoIPAutoUpdate,

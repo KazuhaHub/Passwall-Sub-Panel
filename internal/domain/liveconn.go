@@ -3,6 +3,7 @@ package domain
 import (
 	"net/netip"
 	"sort"
+	"strings"
 	"time"
 	"unicode/utf8"
 )
@@ -290,4 +291,171 @@ func cutBytes(s string, n int) string {
 		n--
 	}
 	return s[:n]
+}
+
+// ---- Device inference ----
+//
+// The panels say who is connected from where, never with what. The live
+// view infers the "what" from the fetch log: the same account fetching its
+// subscription from the same source recently. That is an inference, and is
+// labelled one wherever it is shown: a client in TUN or global mode fetches
+// through its own tunnel, and a fetch can come from a device that is not
+// the one connected.
+
+const (
+	// ConnDevicesMax caps the devices inferred for one source, newest first:
+	// behind a household NAT a dozen clients can fetch from one address.
+	ConnDevicesMax = 3
+	// ConnDeviceUARunes caps the client string shown per device.
+	ConnDeviceUARunes = 96
+	// DeviceIDShownLen is how much of a declared device's per-account
+	// digest an admin is shown, wherever it is shown (the sub-log list, the
+	// live view): enough to tell one account's devices apart at a glance,
+	// not a value worth copying anywhere.
+	DeviceIDShownLen = 4
+)
+
+// The two kinds of client identity (SubLogIdentity).
+const (
+	SubLogIdentityHWID = "hwid" // the client declared a device id
+	SubLogIdentityUA   = "ua"   // known by its client string alone
+)
+
+// SubLogIdentity is THE rule that tells one client apart from another in the
+// fetch log: the device id the client declared, else its exact client
+// string. The risk worker's fetch window and the live view's device
+// inference both use it, so "one device" means the same thing in both. It
+// errs toward linking: two people on the same app and version are one
+// client here, which can hide a spread but never invents one. The client
+// type is not part of it: it is the panel's guess from the user agent and
+// changes when one client asks for another format.
+func SubLogIdentity(l SubLog) (key, kind string) {
+	if l.DeviceID != "" {
+		return "d:" + l.DeviceID, SubLogIdentityHWID
+	}
+	return "u:" + l.UA, SubLogIdentityUA
+}
+
+// UserSource is one account's source: the key the live view matches fetches
+// to connections by.
+type UserSource struct {
+	UserID    int64
+	SourceKey string
+}
+
+// ConnDevice is one client inferred behind a connection.
+type ConnDevice struct {
+	// Label is the newest OS/model label the client declared; "" when it
+	// declared none.
+	Label string
+	// DeviceID4 is the first DeviceIDShownLen characters of the declared
+	// device's digest; "" for a client known by its client string.
+	DeviceID4 string
+	// ClientType and UA are the newest format asked for and client string
+	// sent (the latter cut to ConnDeviceUARunes characters).
+	ClientType, UA string
+	// Fetches is how many of the account's fetches from the source this
+	// client made in the window; LastAtMS the newest (unix ms).
+	Fetches  int
+	LastAtMS int64
+}
+
+// InferConnectionDevices matches each connection whose Exclusion is "",
+// listed or shared against the same account's fetches at or after since
+// from the same source (SourceKey of the fetch's address), and describes the
+// clients behind them: one per SubLogIdentity, most recently seen first, at
+// most ConnDevicesMax per source. An internal or infrastructure source is
+// never matched: it is not the account's egress (a fetch "from" PSP's own
+// relay came through the relay, as every other account's did), so a device
+// there would be a guess about somebody else.
+//
+// The result is keyed by (account, source): the same source on two panel
+// nodes is one set of fetches. A source nothing matched has no entry.
+func InferConnectionDevices(conns []LiveConnection, fetches []SubLog, since time.Time) map[UserSource][]ConnDevice {
+	wanted := map[UserSource]bool{}
+	for _, c := range conns {
+		switch c.Exclusion {
+		case "", AddressExcludedListed, AddressExcludedShared:
+			wanted[UserSource{UserID: c.UserID, SourceKey: c.SourceKey}] = true
+		}
+	}
+	if len(wanted) == 0 {
+		return nil
+	}
+
+	type agg struct {
+		key                     string
+		dev                     ConnDevice
+		labelMS, clientMS, uaMS int64
+		lastID                  int64
+	}
+	found := map[UserSource]map[string]*agg{}
+	for i := range fetches {
+		f := &fetches[i]
+		if f.AccessedAt.Before(since) || strings.TrimSpace(f.IP) == "" {
+			continue
+		}
+		key, _, _ := SourceKey(f.IP)
+		// Cut as a connection's key is cut, so an overlong unparsed
+		// address matches the connection it was folded into.
+		us := UserSource{UserID: f.UserID, SourceKey: cutBytes(key, LiveConnKeyMaxBytes)}
+		if !wanted[us] {
+			continue
+		}
+		idKey, kind := SubLogIdentity(*f)
+		byID := found[us]
+		if byID == nil {
+			byID = map[string]*agg{}
+			found[us] = byID
+		}
+		a := byID[idKey]
+		if a == nil {
+			a = &agg{key: idKey}
+			if kind == SubLogIdentityHWID && len(f.DeviceID) >= DeviceIDShownLen {
+				a.dev.DeviceID4 = f.DeviceID[:DeviceIDShownLen]
+			}
+			byID[idKey] = a
+		}
+		at := f.AccessedAt.UnixMilli()
+		a.dev.Fetches++
+		// The newest value of each field, by fetch time (the id breaks a
+		// tie in insert order); a later fetch that sent none does not erase
+		// an earlier one.
+		newer := func(ms int64) bool { return at > ms || (at == ms && f.ID > a.lastID) }
+		if f.DeviceLabel != "" && (a.dev.Label == "" || newer(a.labelMS)) {
+			a.dev.Label, a.labelMS = f.DeviceLabel, at
+		}
+		if f.ClientType != "" && (a.dev.ClientType == "" || newer(a.clientMS)) {
+			a.dev.ClientType, a.clientMS = f.ClientType, at
+		}
+		if a.dev.Fetches == 1 || newer(a.uaMS) {
+			a.dev.UA, a.uaMS = firstRunes(f.UA, ConnDeviceUARunes), at
+		}
+		if a.dev.Fetches == 1 || newer(a.dev.LastAtMS) {
+			a.dev.LastAtMS, a.lastID = at, f.ID
+		}
+	}
+
+	out := make(map[UserSource][]ConnDevice, len(found))
+	for us, byID := range found {
+		list := make([]*agg, 0, len(byID))
+		for _, a := range byID {
+			list = append(list, a)
+		}
+		sort.Slice(list, func(i, j int) bool {
+			if list[i].dev.LastAtMS != list[j].dev.LastAtMS {
+				return list[i].dev.LastAtMS > list[j].dev.LastAtMS
+			}
+			return list[i].key < list[j].key
+		})
+		if len(list) > ConnDevicesMax {
+			list = list[:ConnDevicesMax]
+		}
+		devices := make([]ConnDevice, len(list))
+		for i, a := range list {
+			devices[i] = a.dev
+		}
+		out[us] = devices
+	}
+	return out
 }
