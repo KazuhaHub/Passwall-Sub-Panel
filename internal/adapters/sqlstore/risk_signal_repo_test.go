@@ -491,3 +491,178 @@ func TestRiskSignalRow_WidthsMatchTheColumns(t *testing.T) {
 		t.Fatalf("risk_signals.evidence has type %q, want text (riskEvidenceMaxBytes is TEXT's capacity)", f.DataType)
 	}
 }
+
+// flagRowsInOrder reads every flag record in the order it was written.
+func flagRowsInOrder(t *testing.T, db *gorm.DB) []flagRecordRow {
+	t.Helper()
+	var rows []flagRecordRow
+	if err := db.Order("id").Find(&rows).Error; err != nil {
+		t.Fatalf("read flag_records: %v", err)
+	}
+	return rows
+}
+
+// The risk worker never reads its own rows (risk.Deps.Store is Save and
+// PurgeOrphans), so the change of attention level is found where the
+// previous state still is: inside Save, before the upsert overwrites it.
+// Each save records exactly the (account, signal) pairs whose level moved,
+// each with the verdict's state and code, the level it moved from, and the
+// evidence it was judged from as params — byte for byte what risk_signals
+// stores.
+func TestRiskSignalRepo_SaveRecordsAttentionTransitions(t *testing.T) {
+	r, users, db := newRiskSignalRepo(t)
+	ctx := context.Background()
+	a := createRiskUser(t, users, 1, "")
+	b := createRiskUser(t, users, 2, "")
+	devicesEv := json.RawMessage(`{"v":1,"devices":[{"label":"clash-verge","id4":"ab12"}]}`)
+	loginEv := json.RawMessage(`{"v":1,"logins":[{"cc":"JP","at_ms":1758000000000,"method":"password"}]}`)
+
+	save := func(signals ...domain.RiskSignal) (int64, int64) {
+		t.Helper()
+		before := time.Now().UnixMilli()
+		if err := r.Save(ctx, signals); err != nil {
+			t.Fatalf("save: %v", err)
+		}
+		return before, time.Now().UnixMilli()
+	}
+	lo1, hi1 := save(
+		domain.RiskSignal{UserID: a.ID, Kind: domain.RiskKindDevices, State: domain.GeoStateSuspect, Code: domain.RiskCodeOverBuilding, Evidence: devicesEv},
+		domain.RiskSignal{UserID: a.ID, Kind: domain.RiskKindSubSpread, State: domain.GeoStateClean, Code: domain.RiskCodeWithin, Evidence: json.RawMessage(`{"v":1}`)},
+		domain.RiskSignal{UserID: b.ID, Kind: domain.RiskKindLoginCountry, State: domain.GeoStateFlagged, Code: domain.RiskCodeNewCountry, Evidence: loginEv},
+	)
+	save(
+		domain.RiskSignal{UserID: a.ID, Kind: domain.RiskKindDevices, State: domain.GeoStateFlagged, Code: domain.RiskCodeOver, Evidence: devicesEv},
+		domain.RiskSignal{UserID: a.ID, Kind: domain.RiskKindSubSpread, State: domain.GeoStateClean, Code: domain.RiskCodeWithin, Evidence: json.RawMessage(`{"v":1}`)},
+		domain.RiskSignal{UserID: b.ID, Kind: domain.RiskKindLoginCountry, State: domain.GeoStateUnknown, Code: domain.RiskCodeGeoUnavailable},
+	)
+	save(
+		domain.RiskSignal{UserID: a.ID, Kind: domain.RiskKindDevices, State: domain.GeoStateIdle, Code: domain.RiskCodeNoFetches},
+	)
+
+	type rec struct {
+		user          int64
+		source, event string
+		level, prev   string
+		state, code   string
+		params        string
+		paramsNull    bool
+	}
+	var got []rec
+	rows := flagRowsInOrder(t, db)
+	for _, row := range rows {
+		g := rec{user: row.UserID, source: row.Source, event: row.Event, level: row.Level, prev: row.PrevLevel,
+			state: row.State, code: row.Code, paramsNull: row.Params == nil}
+		if row.Params != nil {
+			g.params = *row.Params
+		}
+		got = append(got, g)
+	}
+	want := []rec{
+		{a.ID, "devices", "enter_suspect", "suspect", "", "suspect", "over_building", string(devicesEv), false},
+		{b.ID, "login_country", "enter_flagged", "flagged", "", "flagged", "new_country", string(loginEv), false},
+		{a.ID, "devices", "enter_flagged", "flagged", "suspect", "flagged", "over", string(devicesEv), false},
+		{b.ID, "login_country", "leave_flagged", "", "flagged", "unknown", "geo_unavailable", "", true},
+		{a.ID, "devices", "leave_flagged", "", "flagged", "idle", "no_fetches", "", true},
+	}
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("flag records:\n got %+v\nwant %+v", got, want)
+	}
+	if at := rows[0].AtMS; at < lo1 || at > hi1 {
+		t.Fatalf("first record at %d, want the save's time in [%d, %d]", at, lo1, hi1)
+	}
+}
+
+// idle ↔ clean, unknown ↔ idle and an unchanged suspect are not changes of
+// attention: the bell never showed them. A history full of them would bury
+// the ones that matter, so none is recorded — and a first-ever verdict below
+// suspect has no attention to have entered.
+func TestRiskSignalRepo_SaveRecordsNothingForIdleCleanChurn(t *testing.T) {
+	r, users, db := newRiskSignalRepo(t)
+	ctx := context.Background()
+	u := createRiskUser(t, users, 1, "")
+	for i, states := range [][2]domain.GeoState{
+		{domain.GeoStateIdle, domain.GeoStateSuspect},
+		{domain.GeoStateClean, domain.GeoStateSuspect},
+		{domain.GeoStateIdle, domain.GeoStateSuspect},
+		{domain.GeoStateUnknown, domain.GeoStateSuspect},
+		{domain.GeoStateDisabled, domain.GeoStateSuspect},
+		{domain.GeoStateClean, domain.GeoStateSuspect},
+	} {
+		if err := r.Save(ctx, []domain.RiskSignal{
+			{UserID: u.ID, Kind: domain.RiskKindUsageShift, State: states[0], Code: domain.RiskCodeWithin},
+			{UserID: u.ID, Kind: domain.RiskKindDevices, State: states[1], Code: domain.RiskCodeOverBuilding},
+		}); err != nil {
+			t.Fatalf("save %d: %v", i, err)
+		}
+	}
+	rows := flagRowsInOrder(t, db)
+	if len(rows) != 1 || rows[0].Event != string(domain.FlagEnterSuspect) || rows[0].Source != string(domain.RiskKindDevices) {
+		t.Fatalf("flag records = %+v; want only the devices signal's first enter_suspect", rows)
+	}
+}
+
+// The upsert and the records of what it changed are one transaction. If the
+// records cannot be written the verdicts are not either — otherwise the next
+// run would read the new state as the previous one and the change would
+// never be recorded at all.
+func TestRiskSignalRepo_SaveRollsBackBothTablesTogether(t *testing.T) {
+	r, users, db := newRiskSignalRepo(t)
+	ctx := context.Background()
+	u := createRiskUser(t, users, 1, "")
+	if err := r.Save(ctx, []domain.RiskSignal{
+		{UserID: u.ID, Kind: domain.RiskKindDevices, State: domain.GeoStateClean, Code: domain.RiskCodeWithin},
+	}); err != nil {
+		t.Fatalf("first save: %v", err)
+	}
+	if err := db.Callback().Create().Before("gorm:create").Register("test:fail_flag_records", func(tx *gorm.DB) {
+		if tx.Statement.Table == "flag_records" {
+			_ = tx.AddError(errors.New("flag store refused"))
+		}
+	}); err != nil {
+		t.Fatalf("register callback: %v", err)
+	}
+
+	err := r.Save(ctx, []domain.RiskSignal{
+		{UserID: u.ID, Kind: domain.RiskKindDevices, State: domain.GeoStateFlagged, Code: domain.RiskCodeOver, Evidence: json.RawMessage(`{"v":1}`)},
+	})
+	if err == nil {
+		t.Fatal("Save succeeded although its flag record was refused")
+	}
+	got, lerr := r.List(ctx)
+	if lerr != nil || len(got) != 1 {
+		t.Fatalf("list = %d rows, %v", len(got), lerr)
+	}
+	if got[0].State != domain.GeoStateClean {
+		t.Fatalf("stored state %s after the failed save, want the previous clean — the upsert must roll back with the records", got[0].State)
+	}
+	if n := countFlagRows(t, db, ""); n != 0 {
+		t.Fatalf("flag records = %d, want 0", n)
+	}
+}
+
+// SQLite has ONE connection (conn.go), and the transaction holds it. A
+// statement of Save issued on the store's handle instead of the
+// transaction's would wait for that connection until its context gave up —
+// a worker that hangs every run. Run on a one-connection pool with a
+// bounded context, a save that transitions both reads, upserts and inserts:
+// it finishes, or one of its statements left the transaction.
+func TestRiskSignalRepo_SaveUsesOnlyTheTransaction(t *testing.T) {
+	r, users, db := newRiskSignalRepo(t)
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatalf("sql db: %v", err)
+	}
+	sqlDB.SetMaxOpenConns(1)
+	u := createRiskUser(t, users, 1, "")
+	for i, state := range []domain.GeoState{domain.GeoStateSuspect, domain.GeoStateFlagged, domain.GeoStateClean} {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		err := r.Save(ctx, []domain.RiskSignal{{UserID: u.ID, Kind: domain.RiskKindDevices, State: state, Code: domain.RiskCodeOver}})
+		cancel()
+		if err != nil {
+			t.Fatalf("save %d on a one-connection pool: %v — a statement ran outside the transaction", i, err)
+		}
+	}
+	if n := countFlagRows(t, db, ""); n != 3 {
+		t.Fatalf("flag records = %d, want 3 (enter suspect, enter flagged, leave flagged)", n)
+	}
+}

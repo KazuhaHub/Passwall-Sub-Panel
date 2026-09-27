@@ -11,11 +11,11 @@ import "time"
 // fetch window is streamed once per run for every account together, the
 // login log is read in one keyset pass, the bell counts the fleet,
 // usage_shift reads one fleet series whose days every account's series must
-// share, and connection_history is pruned by one hourly pass over every
-// account's rows. A group value would be stored, shown and never read, so
-// none of these is in ports.OverridableScopeKeys. (login_country's warm-up
-// and hold, and usage_shift's warm-up and over-days, ARE per group: they are
-// judging thresholds, in RiskPolicy.)
+// share, and connection_history and flag_records are each pruned by one
+// hourly pass over every account's rows. A group value would be stored,
+// shown and never read, so none of these is in ports.OverridableScopeKeys.
+// (login_country's warm-up and hold, and usage_shift's warm-up and
+// over-days, ARE per group: they are judging thresholds, in RiskPolicy.)
 //
 // The bounds below are not policy. They keep a knob inside the range where
 // it still means what its name says, and each one is argued at the
@@ -77,6 +77,15 @@ const (
 	// keeps fetches for ever: an IP-bearing table must always age out.
 	RiskDefaultConnectionRetentionDays = 7
 	RiskConnectionRetentionMaxDays     = 90
+	// How long flag_records keeps an attention change. The history is what
+	// an admin reads to answer "when was this account flagged, and why", so
+	// it outlasts the connection history: 90 days by default. It holds no
+	// address, so RiskFlagRecordRetentionMaxDays (ten years) bounds growth
+	// rather than exposure. Unset or negative is the default, never "keep
+	// forever", for the connection history's reason: everything this
+	// detector writes ages out.
+	RiskDefaultFlagRecordRetentionDays = 90
+	RiskFlagRecordRetentionMaxDays     = 3650
 )
 
 // RiskRuntimeSettings is the flat, storage-shaped form: what the admin form
@@ -85,7 +94,7 @@ const (
 type RiskRuntimeSettings struct {
 	RefreshIntervalMinutes, FirstDelayMinutes, AlertFreshnessHours,
 	WindowDays, LoginLookbackDays, UsageBaselineDays, UsageRecentDays int
-	ConnectionRetentionDays int
+	ConnectionRetentionDays, FlagRecordRetentionDays int
 }
 
 // RiskRuntime is the sanitised form every reader uses. Each field is inside
@@ -122,11 +131,15 @@ type RiskRuntime struct {
 	// source after its LAST sighting. 1..RiskConnectionRetentionMaxDays.
 	// Fleet-wide because one hourly pass prunes every account's rows.
 	ConnectionRetentionDays int
+	// FlagRecordRetentionDays: how many days flag_records keeps a record.
+	// 1..RiskFlagRecordRetentionMaxDays. Fleet-wide for the same reason.
+	FlagRecordRetentionDays int
 }
 
 // DefaultRiskRuntime is the runtime a fresh install runs with: exactly the
 // constants these knobs replaced, so an upgrade changes nothing — plus the
-// connection history's week, a table no earlier build had.
+// connection history's week and the flag records' 90 days, tables no earlier
+// build had.
 func DefaultRiskRuntime() RiskRuntime {
 	return RiskRuntime{
 		RefreshInterval:   RiskDefaultRefreshMinutes * time.Minute,
@@ -138,6 +151,7 @@ func DefaultRiskRuntime() RiskRuntime {
 		UsageRecentDays:   RiskUsageRecentDays,
 
 		ConnectionRetentionDays: RiskDefaultConnectionRetentionDays,
+		FlagRecordRetentionDays: RiskDefaultFlagRecordRetentionDays,
 	}
 }
 
@@ -150,8 +164,8 @@ func DefaultRiskRuntime() RiskRuntime {
 // panics), a first run racing the boot probes, a bell that forgets a flag
 // the moment it is written, a window of no days, a login log read over no
 // time, a usage median over no baseline and no days judged, and a
-// connection history pruned to nothing (or, read the way the other
-// retention settings read 0, kept for ever).
+// connection history or a flag history pruned to nothing (or, read the way
+// the other retention settings read 0, kept for ever).
 //
 // The bell's freshness is raised to two refresh intervals. The worker
 // rewrites every row once per run, so a window shorter than two runs would
@@ -172,6 +186,7 @@ func RiskRuntimeFromSettings(s RiskRuntimeSettings) RiskRuntime {
 		UsageRecentDays:   settingOr(s.UsageRecentDays, RiskUsageRecentDays, RiskUsageRecentMinDays, RiskUsageRecentMaxDays),
 
 		ConnectionRetentionDays: settingOr(s.ConnectionRetentionDays, RiskDefaultConnectionRetentionDays, 1, RiskConnectionRetentionMaxDays),
+		FlagRecordRetentionDays: settingOr(s.FlagRecordRetentionDays, RiskDefaultFlagRecordRetentionDays, 1, RiskFlagRecordRetentionMaxDays),
 	}
 }
 

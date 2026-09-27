@@ -122,6 +122,32 @@ const (
 	ConnExclusionExcluded = "excluded"
 )
 
+// FlagRecordFilter narrows the admin's flag_records read. Every field is
+// optional; the zero value lists every visible record, newest first. The
+// order is fixed (at_ms, then id, both descending): a history reads in time
+// order, and the id breaks a tie in the order the records were written.
+// Pagination's SortBy, SortDir and Keyword are not consulted. A source, level
+// or event the store does not know is a domain.ErrValidation, never an empty
+// answer: a typo must not read as "nothing ever happened".
+type FlagRecordFilter struct {
+	Pagination
+	UserID *int64
+	// Source: "" any, or one of domain.FlagSources().
+	Source string
+	// Level: "" any; "flagged", "suspect" or "suspended", the level a
+	// record moved TO; or FlagLevelCleared, the records that moved to no
+	// attention at all (every leave and every lift).
+	Level string
+	// Event: "" any, or one of domain.FlagEvents().
+	Event string
+	// Since and Until bound the record's time, both inclusive.
+	Since, Until *time.Time
+}
+
+// FlagLevelCleared is the level filter for records whose new level is none:
+// domain.FlagLevelNone is the empty string, which as a filter means "any".
+const FlagLevelCleared = "cleared"
+
 type SyncTaskFilter struct {
 	Pagination
 	Status *domain.SyncTaskStatus
@@ -1562,14 +1588,14 @@ type UISettings struct {
 	// the one place either rule lives, and nothing here is validated on
 	// save.
 	//
-	// GLOBAL ONLY — all eight are deliberately absent from
+	// GLOBAL ONLY — all nine are deliberately absent from
 	// OverridableScopeKeys. The loop runs once for the fleet, the fetch
 	// window and the login log are each read once per run for every account
 	// together, the bell counts the fleet, usage_shift reads ONE fleet
 	// series that every account's fleet factor is taken from, so every
 	// account's series has the same days, and one hourly pass prunes every
-	// account's connection history; a group value would be stored, shown
-	// and never read.
+	// account's connection history and flag records; a group value would be
+	// stored, shown and never read.
 	//
 	// RiskRefreshIntervalMinutes is how often the signals are recomputed.
 	// Default 60, clamped to 10..1440: each run streams a week of fetches
@@ -1617,6 +1643,13 @@ type UISettings struct {
 	// Pruned by the hourly cleanup, which also deletes a deleted account's
 	// rows whatever their age.
 	RiskConnectionRetentionDays int `json:"risk_connection_retention_days"`
+	// RiskFlagRecordRetentionDays is how many days flag_records keeps an
+	// attention change. Default 90, clamped to 1..3650 when read; 0 and a
+	// negative value mean the default, never "keep forever", like the
+	// connection history's. The records hold no address, so the ceiling
+	// bounds growth, not a privacy promise. Pruned by the hourly cleanup,
+	// which also deletes a deleted account's records whatever their age.
+	RiskFlagRecordRetentionDays int `json:"risk_flag_record_retention_days"`
 
 	// ---- IP geolocation (access-log region display, offline .mmdb) ----
 	// Resolution is fully offline against a local .mmdb in <ConfigDir>/geoip/;
@@ -1954,8 +1987,8 @@ var OverridableScopeKeys = map[string]bool{
 	// worker's fleet-wide runtime (refresh_interval_minutes,
 	// first_delay_minutes, alert_freshness_hours, window_days,
 	// login_lookback_days, usage_baseline_days, usage_recent_days,
-	// connection_retention_days) is absent for the same kind of reason: see
-	// UISettings.
+	// connection_retention_days, flag_record_retention_days) is absent for
+	// the same kind of reason: see UISettings.
 	"risk.sub_spread_off":      true,
 	"risk.devices_off":         true,
 	"risk.usage_shift_off":     true,

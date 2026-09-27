@@ -29,10 +29,12 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 )
 
-// Deps is everything the worker reads, and the one table it writes.
+// Deps is everything the worker reads, and the one store it writes.
 //
 // Every dependency is read-only except Store, which writes only
-// risk_signals. No user-state writer can be passed in: each field is a narrow
+// risk_signals — and, inside the same transaction, the flag_records of the
+// attention changes a save makes, which the worker never sees. No
+// user-state writer can be passed in: each field is a narrow
 // interface, TestRiskServiceCannotWriteServiceState pins each method set, and
 // it forbids type assertions in this package, so a wider value handed in
 // cannot be recovered either.
@@ -86,7 +88,10 @@ type UserLister interface {
 
 // SignalStore is the worker's view of risk_signals: write this run's rows,
 // drop what deleted accounts left. It cannot read, so the worker never
-// judges from its own previous output.
+// judges from its own previous output. Which rows changed their attention
+// level is the store's business (sqlstore.RiskSignalRepo.Save records them
+// in flag_records as part of the same write), for the same reason: finding
+// a change needs the previous state, and the worker must not read it.
 type SignalStore interface {
 	Save(ctx context.Context, rows []domain.RiskSignal) error
 	PurgeOrphans(ctx context.Context) (int64, error)

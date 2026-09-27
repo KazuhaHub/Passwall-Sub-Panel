@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -250,5 +251,173 @@ func TestBuildPrunesConnectionHistory(t *testing.T) {
 	}
 	if total != 1 || len(rows) != 1 || rows[0].IP != "198.51.100.2" {
 		t.Fatalf("after the prune: %+v (total %d); want only the source seen an hour ago — is the store wired into App?", rows, total)
+	}
+}
+
+// flag_records is the history of attention changes, kept by
+// risk.flag_record_retention_days: 90 days unless set, at most ten years,
+// and — like the connection history — never "keep forever": 0 or a negative
+// number prunes at the default. A settings outage skips the retention pass
+// rather than pruning a longer configured history at the default; the
+// orphan purge runs regardless, so a deleted account's records are gone
+// within the hour.
+func TestPruneFlagRecords_UsesTheSetting(t *testing.T) {
+	day := 24 * time.Hour
+	for _, c := range []struct {
+		name     string
+		settings ports.SettingsRepo
+		want     time.Duration // 0: no retention pass
+	}{
+		{"unset is 90 days", retentionSettings{}, 90 * day},
+		{"zero is 90 days, not forever", retentionSettings{stored: ports.UISettings{RiskFlagRecordRetentionDays: 0}}, 90 * day},
+		{"negative is 90 days", retentionSettings{stored: ports.UISettings{RiskFlagRecordRetentionDays: -3}}, 90 * day},
+		{"a configured year", retentionSettings{stored: ports.UISettings{RiskFlagRecordRetentionDays: 365}}, 365 * day},
+		{"past ten years is ten years", retentionSettings{stored: ports.UISettings{RiskFlagRecordRetentionDays: 5000}}, 3650 * day},
+		{"the connection history's setting is not this one", retentionSettings{stored: ports.UISettings{RiskConnectionRetentionDays: 3}}, 90 * day},
+		{"a settings outage skips the retention pass", retentionSettings{err: errors.New("db down")}, 0},
+		{"no settings repo is the default", nil, 90 * day},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			store := &connHistoryStore{}
+			a := &App{flagRecords: store}
+			if c.settings != nil {
+				a.settings = c.settings
+			}
+			before := time.Now()
+			a.pruneFlagRecords(context.Background())
+			after := time.Now()
+
+			cutoffs, purges := store.calls()
+			if purges != 1 {
+				t.Errorf("orphan purge ran %d times, want 1", purges)
+			}
+			if c.want == 0 {
+				if len(cutoffs) != 0 {
+					t.Fatalf("pruned at %v on a settings outage; want the pass skipped", cutoffs)
+				}
+				return
+			}
+			if len(cutoffs) != 1 {
+				t.Fatalf("DeleteBefore called %d times, want 1", len(cutoffs))
+			}
+			if lo, hi := before.Add(-c.want), after.Add(-c.want); cutoffs[0].Before(lo) || cutoffs[0].After(hi) {
+				t.Fatalf("cutoff %v, want now - %v (between %v and %v)", cutoffs[0], c.want, lo, hi)
+			}
+		})
+	}
+}
+
+// A failed prune still purges orphans, as for the connection history.
+func TestPruneFlagRecords_PurgesOrphansWhenThePruneFails(t *testing.T) {
+	store := &connHistoryStore{deleteErr: errors.New("db down")}
+	a := &App{flagRecords: store, settings: retentionSettings{}}
+	a.pruneFlagRecords(context.Background())
+	if cutoffs, purges := store.calls(); len(cutoffs) != 1 || purges != 1 {
+		t.Fatalf("prune %d, purge %d; want both attempted once", len(cutoffs), purges)
+	}
+}
+
+// The hourly cleanup loop runs the flag-record prune on its first pass.
+func TestAuditCleanupLoopPrunesFlagRecords(t *testing.T) {
+	store := &connHistoryStore{}
+	a := &App{flagRecords: store, settings: retentionSettings{}}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan struct{})
+	go func() { defer close(done); a.runAuditCleanupLoop(ctx) }()
+
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if cutoffs, purges := store.calls(); len(cutoffs) == 1 && purges == 1 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if cutoffs, purges := store.calls(); len(cutoffs) != 1 || purges != 1 {
+		t.Fatalf("after the first pass: prune %d, purge %d; want 1 and 1", len(cutoffs), purges)
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("cleanup loop did not exit on context cancel")
+	}
+}
+
+// Build hands the loop the real store: a record older than the retention is
+// gone after one pass, a current one stays, and a deleted account's record
+// goes whatever its age. Without the wiring the prune returns at once on a
+// nil store and the history grows for ever.
+func TestBuildPrunesFlagRecords(t *testing.T) {
+	ctx := t.Context()
+	directory := t.TempDir()
+	cfg := &config.Config{
+		Listen: "127.0.0.1:0", JWTSecret: strings.Repeat("j", 48), EncryptionKey: strings.Repeat("e", 48),
+		ConfigDir: filepath.Join(directory, "config"), DataDir: filepath.Join(directory, "data"),
+	}
+	a, err := Build(ctx, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := a.Shutdown(shutdownCtx); err != nil {
+			t.Error(err)
+		}
+		sqlstore.ConfigureSecretKey("")
+	})
+	newUser := func(n int) *domain.User {
+		t.Helper()
+		u := &domain.User{
+			UPN: fmt.Sprintf("flags-%d@example.test", n), Email: fmt.Sprintf("flags-%d@example.test", n),
+			SSOProvider: domain.SSOProviderLocal, SSOSubject: fmt.Sprintf("flags-%d@example.test", n),
+			Role: domain.RoleUser, Enabled: true, UUID: fmt.Sprintf("77777777-7777-4777-8777-%012d", n),
+			SubToken: fmt.Sprintf("fixture-flags-subscription-token-%d", n), TrafficResetPeriod: domain.ResetMonthly,
+		}
+		if err := a.repos.User.Create(ctx, u); err != nil {
+			t.Fatal(err)
+		}
+		return u
+	}
+	kept, gone := newUser(1), newUser(2)
+
+	db, err := sqlstore.Open(cfg.DBKind(), cfg.DBDSN())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if sqlDB, err := db.DB(); err == nil {
+			_ = sqlDB.Close()
+		}
+	})
+	repo := sqlstore.NewFlagRecordRepo(db)
+	now := time.Now()
+	flag := func(uid int64, ev domain.FlagEvent, at time.Time) domain.FlagRecord {
+		return domain.FlagRecord{UserID: uid, Source: domain.FlagSourceGeo, Event: ev, Level: domain.FlagLevelSuspect, AtMS: at.UnixMilli()}
+	}
+	if err := repo.Append(ctx, []domain.FlagRecord{
+		flag(kept.ID, domain.FlagEnterSuspect, now.Add(-91*24*time.Hour)),
+		flag(kept.ID, domain.FlagEnterFlagged, now.Add(-time.Hour)),
+		flag(gone.ID, domain.FlagEnterSuspect, now.Add(-time.Hour)),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.repos.User.Delete(ctx, gone.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	a.pruneFlagRecords(ctx)
+
+	var n int64
+	if err := db.Raw("SELECT COUNT(*) FROM flag_records").Scan(&n).Error; err != nil {
+		t.Fatal(err)
+	}
+	rows, total, err := repo.List(ctx, ports.FlagRecordFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 || total != 1 || len(rows) != 1 || rows[0].Event != domain.FlagEnterFlagged {
+		t.Fatalf("after the prune: %d rows stored, listed %+v; want only the current record of the existing account — is the store wired into App?", n, rows)
 	}
 }

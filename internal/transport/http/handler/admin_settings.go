@@ -157,6 +157,9 @@ type settingsDTO struct {
 	// week (never "keep forever", unlike sub_log_retention_days), and the
 	// 1..90 clamp is applied when read.
 	RiskConnectionRetentionDays int `json:"risk_connection_retention_days"`
+	// flag_records' retention in days. Global; 0 means the shipped 90 days
+	// (never "keep forever"), and the 1..3650 clamp is applied when read.
+	RiskFlagRecordRetentionDays int `json:"risk_flag_record_retention_days"`
 	// Geo IP (access-log region display, offline .mmdb).
 	GeoIPEnabled             bool   `json:"geo_ip_enabled"`
 	GeoIPDBFile              string `json:"geo_ip_db_file"`
@@ -428,6 +431,8 @@ func settingsToDTO(s ports.UISettings) settingsDTO {
 		RiskUsageRecentDays:        s.RiskUsageRecentDays,
 		// connection_history's retention: the stored value, 0 = the week.
 		RiskConnectionRetentionDays: s.RiskConnectionRetentionDays,
+		// flag_records' retention: the stored value, 0 = 90 days.
+		RiskFlagRecordRetentionDays: s.RiskFlagRecordRetentionDays,
 
 		// The detector's fleet-wide runtime: the stored values, 0 = default.
 		GeoAnomalyFreshWindowSeconds:  s.GeoAnomalyFreshWindowSeconds,
@@ -571,6 +576,7 @@ func (h *AdminSettingsHandler) Put(c *gin.Context) {
 		RiskUsageBaselineDays:         req.RiskUsageBaselineDays,
 		RiskUsageRecentDays:           req.RiskUsageRecentDays,
 		RiskConnectionRetentionDays:   req.RiskConnectionRetentionDays,
+		RiskFlagRecordRetentionDays:   req.RiskFlagRecordRetentionDays,
 		GeoIPEnabled:                  req.GeoIPEnabled,
 		GeoIPDBFile:                   strings.TrimSpace(req.GeoIPDBFile),
 		GeoIPAutoUpdate:               req.GeoIPAutoUpdate,

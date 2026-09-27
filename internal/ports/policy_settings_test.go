@@ -123,6 +123,7 @@ func TestUISettings_RiskRuntimeSettingsCarriesEveryKnob(t *testing.T) {
 		RiskUsageBaselineDays:       21,
 		RiskUsageRecentDays:         5,
 		RiskConnectionRetentionDays: 14,
+		RiskFlagRecordRetentionDays: 400,
 	}
 	want := domain.RiskRuntimeSettings{
 		RefreshIntervalMinutes:  30,
@@ -133,6 +134,7 @@ func TestUISettings_RiskRuntimeSettingsCarriesEveryKnob(t *testing.T) {
 		UsageBaselineDays:       21,
 		UsageRecentDays:         5,
 		ConnectionRetentionDays: 14,
+		FlagRecordRetentionDays: 400,
 	}
 	got := s.RiskRuntimeSettings()
 	if got != want {

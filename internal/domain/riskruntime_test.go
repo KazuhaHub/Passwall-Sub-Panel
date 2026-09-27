@@ -21,6 +21,7 @@ func TestRiskRuntimeFromSettings_UnsetIsTheDefault(t *testing.T) {
 		UsageBaselineDays:       28,
 		UsageRecentDays:         7,
 		ConnectionRetentionDays: 7,
+		FlagRecordRetentionDays: 90,
 	}
 	if got := RiskRuntimeFromSettings(RiskRuntimeSettings{}); got != want {
 		t.Fatalf("RiskRuntimeFromSettings(unset) = %+v\nwant %+v", got, want)
@@ -126,10 +127,10 @@ func TestRiskRuntime_GeoBellFreshnessCoversTwoPolls(t *testing.T) {
 // delay, a 24-hour bell, a seven-day fetch window, a 90-day login lookback
 // and usage_shift's four-week baseline and one judged week. Frozen here as
 // literals, so moving a default is a deliberate edit of this test and not a
-// side effect of editing a constant. The connection history's week is not a
-// former constant (the table is new), but it is frozen here too: it is the
-// retention every upgraded install starts with, and the privacy statement
-// quotes it.
+// side effect of editing a constant. The connection history's week and the
+// flag records' 90 days are not former constants (both tables are new), but
+// they are frozen here too: each is the retention every upgraded install
+// starts with, and the docs quote both.
 //
 // Mutation: a default lookback of 91 turns this red.
 func TestDefaultRiskRuntimeEqualsTheFormerConstants(t *testing.T) {
@@ -142,6 +143,7 @@ func TestDefaultRiskRuntimeEqualsTheFormerConstants(t *testing.T) {
 		UsageBaselineDays:       28,
 		UsageRecentDays:         7,
 		ConnectionRetentionDays: 7,
+		FlagRecordRetentionDays: 90,
 	}
 	if got := DefaultRiskRuntime(); got != want {
 		t.Fatalf("DefaultRiskRuntime() = %+v\nwant the former constants %+v", got, want)
@@ -176,6 +178,35 @@ func TestRiskRuntime_ConnectionRetention(t *testing.T) {
 			got := RiskRuntimeFromSettings(RiskRuntimeSettings{ConnectionRetentionDays: c.stored}).ConnectionRetentionDays
 			if got != c.want {
 				t.Fatalf("ConnectionRetentionDays(stored %d) = %d, want %d", c.stored, got, c.want)
+			}
+		})
+	}
+}
+
+// flag_records is the history of attention changes — who was flagged, when,
+// and why — so it is kept far longer than the connection history: 90 days by
+// default, up to ten years. It holds no address (its params are the same
+// address-free evidence the verdicts store), which is why its ceiling is a
+// bound on growth rather than a privacy promise. Unset or negative is the
+// default, never "keep forever", for the same reason as the connection
+// history: every table this detector writes must age out.
+func TestRiskRuntime_FlagRecordRetention(t *testing.T) {
+	for _, c := range []struct {
+		name   string
+		stored int
+		want   int
+	}{
+		{"unset is 90 days", 0, 90},
+		{"negative is unset, never forever", -1, 90},
+		{"beyond ten years is lowered", 5000, 3650},
+		{"the bound itself is kept", 3650, 3650},
+		{"one day is allowed", 1, 1},
+		{"a year is kept", 365, 365},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			got := RiskRuntimeFromSettings(RiskRuntimeSettings{FlagRecordRetentionDays: c.stored}).FlagRecordRetentionDays
+			if got != c.want {
+				t.Fatalf("FlagRecordRetentionDays(stored %d) = %d, want %d", c.stored, got, c.want)
 			}
 		})
 	}

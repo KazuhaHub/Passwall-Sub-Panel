@@ -873,10 +873,11 @@ func TestSettingsKV_GeoRuntimeKeysRoundTrip(t *testing.T) {
 	}
 }
 
-// TestSettingsKV_RiskRuntimeKeysRoundTrip: the eight fleet-wide risk knobs —
+// TestSettingsKV_RiskRuntimeKeysRoundTrip: the nine fleet-wide risk knobs —
 // the worker's cadence, its first delay, the bell's freshness, the fetch
 // window, the login lookback and usage_shift's baseline and judged days, all
-// former constants, and the connection history's retention — survive Save → Load
+// former constants, and the connection history's and the flag records'
+// retentions — survive Save → Load
 // under the exact "risk.<name>" keys the admin form and the scope refusal
 // address them by. Never configured, each reads as 0:
 // domain.RiskRuntimeFromSettings owns "0 means the shipped default", so the
@@ -914,6 +915,7 @@ func TestSettingsKV_RiskRuntimeKeysRoundTrip(t *testing.T) {
 	in.RiskUsageBaselineDays = 21
 	in.RiskUsageRecentDays = 5
 	in.RiskConnectionRetentionDays = 14
+	in.RiskFlagRecordRetentionDays = 400
 	if err := repo.Save(ctx, in); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
@@ -934,14 +936,15 @@ func TestSettingsKV_RiskRuntimeKeysRoundTrip(t *testing.T) {
 		stored[r.Name] = r.Value
 	}
 	for name, want := range map[string]string{
-		"refresh_interval_minutes":  "30",
-		"first_delay_minutes":       "4",
-		"alert_freshness_hours":     "5",
-		"window_days":               "6",
-		"login_lookback_days":       "120",
-		"usage_baseline_days":       "21",
-		"usage_recent_days":         "5",
-		"connection_retention_days": "14",
+		"refresh_interval_minutes":   "30",
+		"first_delay_minutes":        "4",
+		"alert_freshness_hours":      "5",
+		"window_days":                "6",
+		"login_lookback_days":        "120",
+		"usage_baseline_days":        "21",
+		"usage_recent_days":          "5",
+		"connection_retention_days":  "14",
+		"flag_record_retention_days": "400",
 	} {
 		got, ok := stored[name]
 		if !ok {

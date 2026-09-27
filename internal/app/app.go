@@ -151,6 +151,10 @@ type App struct {
 	// nil store compiles and the table grows for ever, which
 	// TestBuildPrunesConnectionHistory guards against.
 	connHistory connectionHistoryPruner
+	// flagRecords is the flag_records store as the hourly cleanup sees it,
+	// for the same two passes. Nothing else keeps that history bounded, so a
+	// nil store compiles and it grows for ever: TestBuildPrunesFlagRecords.
+	flagRecords flagRecordPruner
 	saml        *auth.SAMLService
 	// repos kept around so Run() can call initAdminIfNeeded AFTER the
 	// listen socket is bound — that way a bind failure (port busy / TLS
@@ -578,6 +582,11 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	// empty; TestBuildWiresTheConnectionRecorder guards it.
 	connHistory := sqlstore.NewConnectionHistoryRepo(db)
 	trafficSvc.SetConnectionRecorder(connHistory)
+	// The flag records: the history of every change of attention level.
+	// The risk signals' changes are written by riskSignals.Save itself, in
+	// the transaction of the upsert that made them, so this store is handed
+	// only to the hourly cleanup below for now.
+	flagRecords := sqlstore.NewFlagRecordRepo(db)
 
 	// --- transport layer ---
 	// The Node installation template is fetched from the release that published it
@@ -676,9 +685,11 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	a.nodeTraffic = repos.NodeTraffic
 	a.nodeMetrics = nodeMetrics
 	a.connHistory = connHistory
+	a.flagRecords = flagRecords
 	// The observe-only risk signals. The worker is handed read-only views and
-	// one store that writes only risk_signals — the store built above, the
-	// one the router reads, so nothing else is handed its writer.
+	// one store that writes only risk_signals (and, in the same transaction,
+	// the flag records of what each save changed) — the store built above,
+	// the one the router reads, so nothing else is handed its writer.
 	// TestBuildWiresTheRiskSignals guards the wiring: a worker left out
 	// compiles, and the table just stays empty.
 	//
@@ -1248,6 +1259,7 @@ func (a *App) runAuditCleanupLoop(ctx context.Context) {
 		a.pruneMailSent(ctx)
 		a.pruneSubLogs(ctx)
 		a.pruneConnectionHistory(ctx)
+		a.pruneFlagRecords(ctx)
 		a.pruneCertEvents(ctx)
 		select {
 		case <-ctx.Done():
@@ -1488,6 +1500,63 @@ func (a *App) pruneConnectionHistory(ctx context.Context) {
 		log.Warn("connection history orphan purge", "err", err)
 	case purged > 0:
 		log.Info("connection history orphan purge", "deleted", purged)
+	}
+}
+
+// flagRecordPruner is what the hourly cleanup needs of the flag_records
+// store, and all it is handed.
+type flagRecordPruner interface {
+	DeleteBefore(ctx context.Context, cutoff time.Time) (int64, error)
+	PurgeOrphans(ctx context.Context) (int64, error)
+}
+
+// pruneFlagRecords ages flag_records out and deletes what deleted accounts
+// left, with pruneConnectionHistory's rules and for its reasons:
+//
+//   - Retention is risk.flag_record_retention_days by the record's time,
+//     resolved by domain.RiskRuntimeFromSettings: 90 days unless set, at most
+//     ten years, and 0 or a negative value is the 90 days — never "keep
+//     forever". Everything this detector writes ages out.
+//   - An unreadable setting skips the retention pass (with a Warn) rather
+//     than pruning at the default: an admin who keeps a year would lose most
+//     of it to one failed read, and the next hour retries. No settings repo
+//     at all (a harness) is the default.
+//   - The orphan purge needs no setting and runs whatever else failed. The
+//     records keep no name, so a deleted account's history belongs to
+//     nobody an admin can open.
+//
+// Counts only in the log.
+func (a *App) pruneFlagRecords(ctx context.Context) {
+	if a.flagRecords == nil {
+		return
+	}
+	var set ports.UISettings
+	settingsOK := true
+	if a.settings != nil {
+		loaded, err := a.settings.Load(ctx, ports.UISettings{})
+		if err != nil {
+			log.Warn("flag record cleanup load settings; retention pass skipped", "err", err)
+			settingsOK = false
+		}
+		set = loaded
+	}
+	if settingsOK {
+		days := domain.RiskRuntimeFromSettings(set.RiskRuntimeSettings()).FlagRecordRetentionDays
+		cutoff := time.Now().Add(-time.Duration(days) * 24 * time.Hour)
+		deleted, err := a.flagRecords.DeleteBefore(ctx, cutoff)
+		switch {
+		case err != nil:
+			log.Warn("flag record cleanup", "err", err)
+		case deleted > 0:
+			log.Info("flag record cleanup", "deleted", deleted, "retention_days", days)
+		}
+	}
+	purged, err := a.flagRecords.PurgeOrphans(ctx)
+	switch {
+	case err != nil:
+		log.Warn("flag record orphan purge", "err", err)
+	case purged > 0:
+		log.Info("flag record orphan purge", "deleted", purged)
 	}
 }
 

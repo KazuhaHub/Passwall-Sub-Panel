@@ -261,6 +261,10 @@ func TestNoStoredTypeHoldsACoordinate(t *testing.T) {
 		reflect.TypeFor[LiveConnSnapshot](),
 		// connection_history keeps that shape for up to 90 days.
 		reflect.TypeFor[ConnectionRecord](),
+		// A flag record keeps a verdict's evidence for months, with no
+		// address and so no pin either.
+		reflect.TypeFor[FlagRecord](),
+		reflect.TypeFor[GeoFlagParams](),
 	} {
 		walk(root.Name(), root)
 	}

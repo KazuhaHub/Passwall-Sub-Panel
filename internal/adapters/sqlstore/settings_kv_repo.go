@@ -515,6 +515,9 @@ func settingDescriptors(s *ports.UISettings) []settingDescriptor {
 		// retentions get in Load: 0 is the default week here, never "keep
 		// forever" (domain.RiskRuntimeFromSettings).
 		intField("risk", "connection_retention_days", &s.RiskConnectionRetentionDays),
+		// flag_records' retention, the same way: global, no key-presence
+		// default, 0 is the shipped 90 days and never "keep forever".
+		intField("risk", "flag_record_retention_days", &s.RiskFlagRecordRetentionDays),
 
 		// geo --- IP geolocation for access-log region display (offline .mmdb)
 		boolField("geo", "geo_ip_enabled", &s.GeoIPEnabled),
