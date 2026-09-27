@@ -90,8 +90,8 @@ export async function userTrafficHistory(userId: number, params: TrafficHistoryP
   return data
 }
 
-export async function userTraffic(userId: number) {
-  const { data } = await client.get<UsageReport>(`/admin/traffic/user/${userId}`)
+export async function userTraffic(userId: number, opts: { signal?: AbortSignal } = {}) {
+  const { data } = await client.get<UsageReport>(`/admin/traffic/user/${userId}`, { signal: opts.signal })
   return data
 }
 

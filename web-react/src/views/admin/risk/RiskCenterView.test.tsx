@@ -32,8 +32,13 @@ dict.current = flatten(zh as Nested)
 
 const theme = createAppTheme({ mode: 'light', sourceColor: '#6750a4', language: 'en-US' })
 
+// Every location the page passed through, so a test can tell one URL update
+// from two in a row.
+const seen: string[] = []
+
 function Where() {
   const loc = useLocation()
+  seen.push(loc.pathname + loc.search)
   return <p data-testid="location">{loc.pathname + loc.search}</p>
 }
 
@@ -51,12 +56,25 @@ function mount(url: string) {
   )
 }
 
-// Both tab reads answer; the location-database status fails, which costs the
-// Geo tab nothing but its advisory banner.
-function serve(risk: RiskUserRow[] = []) {
+const liveView = {
+  snapshot: {
+    taken_at: '2026-09-26T10:00:05Z', source: 'poll', age_seconds: 42, stale: false, stale_after_seconds: 900,
+    panels_asked: 1, panels_unread: [], panels_unsupported: [], unreferenced_nodes: 0, users: 0, connections: 0, truncated: 0,
+  },
+  refresh: { cooldown_seconds: 30, available_in_seconds: 0 },
+  device_window_hours: 24, devices_unavailable: false, panels: [], items: [], total: 0, page: 1, page_size: 25,
+}
+
+// Every tab's reads answer; the location-database status fails, which costs
+// the Geo tab nothing but its advisory banner. The user lookup's reads fail
+// as unexpected, which is all these tests need of it: which tab mounted.
+function serve(risk: RiskUserRow[] = [], geo: unknown[] = []) {
   api.get.mockImplementation(async (url: string) => {
-    if (url === '/admin/geo-anomalies') return { data: { items: [] } }
+    if (url === '/admin/geo-anomalies') return { data: { items: geo } }
     if (url === '/admin/risk-signals') return { data: { items: risk } }
+    if (url === '/admin/risk-center/live') return { data: liveView }
+    if (url === '/admin/risk-center/flags') return { data: { items: [], total: 0, page: 1, page_size: 25 } }
+    if (url === '/admin/users') return { data: { items: [], total: 0, page: 1, page_size: 50 } }
     throw new Error(`unexpected GET ${url}`)
   })
 }
@@ -72,6 +90,7 @@ function selectedTab(): string {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  seen.length = 0
   useAuthStore.setState({ role: 'admin', userId: 1, hasToken: true })
 })
 afterEach(() => {
@@ -80,15 +99,57 @@ afterEach(() => {
 })
 
 describe('RiskCenterView', () => {
-  it('opens on the location tab by default', async () => {
+  it('opens on the live connections tab by default', async () => {
     serve()
     mount('/admin/risk')
 
     expect(await screen.findByRole('heading', { name: '风控中心' })).toBeTruthy()
-    expect(selectedTab()).toBe('异地并发')
-    await waitFor(() => expect(fetched('/admin/geo-anomalies')).toBe(true))
-    // Only the open tab reads: the risk list is not fetched behind it.
+    expect(selectedTab()).toBe('实时连接')
+    await waitFor(() => expect(fetched('/admin/risk-center/live')).toBe(true))
+    // Only the open tab reads: the lists behind the other tabs are not
+    // fetched behind it.
+    expect(fetched('/admin/geo-anomalies')).toBe(false)
     expect(fetched('/admin/risk-signals')).toBe(false)
+    expect(fetched('/admin/risk-center/flags')).toBe(false)
+  })
+
+  it('offers the five tabs in order', async () => {
+    serve()
+    mount('/admin/risk')
+    await screen.findByRole('heading', { name: '风控中心' })
+    expect(screen.getAllByRole('tab').map(el => el.textContent)).toEqual(
+      ['实时连接', '异地并发', '风险信号', '标记记录', '用户查询'])
+  })
+
+  it('renders the flag records from ?tab=flags', async () => {
+    serve()
+    mount('/admin/risk?tab=flags')
+    await waitFor(() => expect(fetched('/admin/risk-center/flags')).toBe(true))
+    expect(selectedTab()).toBe('标记记录')
+  })
+
+  // A row on any tab opens its account in the lookup. The tab and the id
+  // are written in ONE update: two in a row would pass through a URL that
+  // names the lookup with no account, or an account on the wrong tab.
+  it('openUser sets tab and id in one update', async () => {
+    serve([], [{
+      user_id: 7, upn: 'alice', state: 'suspect', reason: 'stored', tier: 'region', flagged: false, places: ['CN'],
+      live_ips: 3, concurrent_ips: 3, excluded_ips: 0, complete: true, over_streak: 1, under_streak: 0, ban_streak: 0,
+      evidence: { v: 0, spots: [], excluded: { shared: 0, listed: 0, infra: 0, internal: 0 }, stale: 0,
+        coverage: { placed: 0, unplaced: 0, region_known: 0, city_known: 0 }, networks: 0,
+        spread: { countries: 0, regions: 0, region_country: '', cities: 0, city_country: '' } },
+      updated_at_ms: 1,
+    }])
+    mount('/admin/risk?tab=geo')
+
+    const row = (await screen.findByText('alice')).closest('tr') as HTMLElement
+    const before = seen.length
+    fireEvent.click(within(row).getByRole('button', { name: '查看用户' }))
+
+    await waitFor(() => expect(screen.getByTestId('location').textContent).toBe('/admin/risk?tab=user&id=7'))
+    expect(selectedTab()).toBe('用户查询')
+    const passed = [...new Set(seen.slice(before))]
+    expect(passed).toEqual(['/admin/risk?tab=user&id=7'])
   })
 
   it('renders the location tab from ?tab=geo', async () => {

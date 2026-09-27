@@ -154,10 +154,17 @@ export interface RiskUserRow {
   signals: RiskSignal[]
 }
 
-/** Every account with at least one signal row, by user id. Unfiltered by
- *  design: the attention filter is the tab's, on a switch the admin can turn
- *  off, so a signal that quietly stopped judging stays visible. */
-export async function listRiskSignals(signal?: AbortSignal): Promise<RiskUserRow[]> {
-  const { data } = await client.get<{ items: RiskUserRow[] }>('/admin/risk-signals', { signal })
+/**
+ * Every account with at least one signal row, by user id. Unfiltered by
+ * design: the attention filter is the tab's, on a switch the admin can turn
+ * off, so a signal that quietly stopped judging stays visible.
+ *
+ * `user_id` asks for that one account's row alone (the risk center's lookup),
+ * instead of the fleet list filtered here.
+ */
+export async function listRiskSignals(
+  signal?: AbortSignal, params: { user_id?: number } = {},
+): Promise<RiskUserRow[]> {
+  const { data } = await client.get<{ items: RiskUserRow[] }>('/admin/risk-signals', { params, signal })
   return data.items ?? []
 }

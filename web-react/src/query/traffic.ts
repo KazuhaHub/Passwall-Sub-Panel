@@ -6,11 +6,13 @@ import {
   topNodes,
   topTraffic,
   trafficHistory,
+  userTraffic,
   userTrafficHistory,
   type NodeTrafficRow,
   type TrafficHistoryParams,
   type TrafficHistoryResponse,
   type TrafficRow,
+  type UsageReport,
   type UserNodeUsageRow,
   type UserServerUsageRow,
 } from '@/api/traffic'
@@ -64,6 +66,19 @@ export function userServerUsageQuery(scope: QueryScope, userId: number) {
 
 export function useUserServerUsage(scope: QueryScope, userId: number) {
   return useQuery(userServerUsageQuery(scope, userId))
+}
+
+/** One user's lifetime / period / today totals. */
+export function userUsageQuery(scope: QueryScope, userId: number) {
+  return queryOptions({
+    queryKey: trafficKeys.userUsage(scope, userId),
+    queryFn: ({ signal }): Promise<UsageReport> => userTraffic(userId, { signal }),
+    ...freshness(policies.userLimits),
+  })
+}
+
+export function useUserUsage(scope: QueryScope, userId: number) {
+  return useQuery(userUsageQuery(scope, userId))
 }
 
 /** The node-scoped rank leaderboard. */

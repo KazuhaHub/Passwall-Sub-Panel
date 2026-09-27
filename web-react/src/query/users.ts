@@ -1,5 +1,5 @@
 import { queryOptions, useQuery } from '@tanstack/react-query'
-import { listUsers, type UserListParams } from '@/api/users'
+import { getUser, listUsers, type UserListParams } from '@/api/users'
 import type { ListResponse, User } from '@/api/types'
 import { userKeys } from './keys'
 import { freshness, policies } from './policies'
@@ -20,4 +20,23 @@ export function usersListQuery(scope: QueryScope, params: UserListParams) {
 
 export function useUsersList(scope: QueryScope, params: UserListParams) {
   return useQuery(usersListQuery(scope, params))
+}
+
+/**
+ * One account, by id. Silent: its reader (the risk center's lookup) answers a
+ * 404 with its own "not found", and a toast beside it would say it twice.
+ * Disabled for an id that is not a positive integer, so an unparsed URL never
+ * asks for /admin/users/0.
+ */
+export function userDetailQuery(scope: QueryScope, userId: number) {
+  return queryOptions({
+    queryKey: userKeys.detail(scope, userId),
+    queryFn: ({ signal }): Promise<User> => getUser(userId, { signal, silent: true }),
+    enabled: userId > 0,
+    ...freshness(policies.userDetail),
+  })
+}
+
+export function useUserDetail(scope: QueryScope, userId: number) {
+  return useQuery(userDetailQuery(scope, userId))
 }

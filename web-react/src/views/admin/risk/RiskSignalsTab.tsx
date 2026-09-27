@@ -4,6 +4,7 @@ import { Box, Chip, CircularProgress, FormControlLabel, IconButton, Switch, Tabl
 } from '@mui/material'
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown'
 import KeyboardArrowUpIcon from '@mui/icons-material/KeyboardArrowUp'
+import PersonSearchOutlinedIcon from '@mui/icons-material/PersonSearchOutlined'
 import { useTranslation } from 'react-i18next'
 import { isAxiosError } from 'axios'
 
@@ -42,7 +43,11 @@ const when = (ms: number) => (ms ? new Date(ms).toLocaleString() : '—')
  * never drawn as clean on either tab. Nothing here acts on an account — the
  * server computes these hourly and enforces none of them.
  */
-export default function RiskSignalsTab({ onOpenGeo }: { onOpenGeo: () => void }) {
+export default function RiskSignalsTab({ onOpenGeo, onOpenUser }: {
+  onOpenGeo: () => void
+  /** Opens the account in the risk center's lookup; no button without it. */
+  onOpenUser?: (userId: number) => void
+}) {
   const { t } = useTranslation(['admin'])
   const theme = useTheme()
   const md = theme.palette.md
@@ -121,7 +126,7 @@ export default function RiskSignalsTab({ onOpenGeo }: { onOpenGeo: () => void })
             )}
             {rows.map(r => (
               <RiskRow key={r.user_id} row={r} open={open.has(r.user_id)}
-                onToggle={() => toggle(r.user_id)} onOpenGeo={onOpenGeo} />
+                onToggle={() => toggle(r.user_id)} onOpenGeo={onOpenGeo} onOpenUser={onOpenUser} />
             ))}
           </TableBody>
         </Table>
@@ -130,11 +135,12 @@ export default function RiskSignalsTab({ onOpenGeo }: { onOpenGeo: () => void })
   )
 }
 
-function RiskRow({ row, open, onToggle, onOpenGeo }: {
+function RiskRow({ row, open, onToggle, onOpenGeo, onOpenUser }: {
   row: RiskUserRow
   open: boolean
   onToggle: () => void
   onOpenGeo: () => void
+  onOpenUser?: (userId: number) => void
 }) {
   const { t } = useTranslation(['admin'])
   const md = useTheme().palette.md
@@ -142,12 +148,23 @@ function RiskRow({ row, open, onToggle, onOpenGeo }: {
   return (
     <>
       <TableRow hover>
-        <TableCell>{row.upn || row.display_name || `#${row.user_id}`}</TableCell>
+        <TableCell>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+            <span>{row.upn || row.display_name || `#${row.user_id}`}</span>
+            {onOpenUser && (
+              <Tooltip title={t('admin:risk_center.open_user', { defaultValue: '查看用户' })}>
+                <IconButton size="small" onClick={() => onOpenUser(row.user_id)}>
+                  <PersonSearchOutlinedIcon fontSize="inherit" />
+                </IconButton>
+              </Tooltip>
+            )}
+          </Box>
+        </TableCell>
         {/* By RISK_KINDS, never by the row's own list: a kind this build does
             not know has no column, and drawing it in another kind's cell
             would put a verdict under the wrong heading. */}
         {RISK_KINDS.map(k => (
-          <TableCell key={k}><KindChip sig={row.signals.find(s => s.kind === k)} /></TableCell>
+          <TableCell key={k}><RiskKindChip sig={row.signals.find(s => s.kind === k)} /></TableCell>
         ))}
         <TableCell>
           {geo ? (
@@ -180,7 +197,7 @@ function RiskRow({ row, open, onToggle, onOpenGeo }: {
       {open && (
         <TableRow>
           <TableCell colSpan={COLS} sx={{ bgcolor: md.surfaceContainerLow }}>
-            <Evidence row={row} />
+            <RiskEvidencePanel row={row} />
           </TableCell>
         </TableRow>
       )}
@@ -189,8 +206,9 @@ function RiskRow({ row, open, onToggle, onOpenGeo }: {
 }
 
 /** One kind's cell: its state, explained by its code and its own time. A kind
- *  with no row is "not computed", never blank and never clean. */
-function KindChip({ sig }: { sig: RiskSignal | undefined }) {
+ *  with no row is "not computed", never blank and never clean. Exported for
+ *  the risk center's lookup, which shows one account's four. */
+export function RiskKindChip({ sig }: { sig: RiskSignal | undefined }) {
   const { t } = useTranslation(['admin'])
   if (!sig) {
     return (
@@ -208,8 +226,9 @@ function KindChip({ sig }: { sig: RiskSignal | undefined }) {
   )
 }
 
-/** Every shown kind that carries evidence, in column order. */
-function Evidence({ row }: { row: RiskUserRow }) {
+/** Every shown kind that carries evidence, in column order. Exported for the
+ *  risk center's lookup, so one account's evidence reads the same there. */
+export function RiskEvidencePanel({ row }: { row: RiskUserRow }) {
   const { t } = useTranslation(['admin'])
   const md = useTheme().palette.md
   const shown = RISK_KINDS.flatMap(k => {

@@ -11,7 +11,12 @@ import { useSiteStore } from '@/stores/site'
 /** UserActivity shows a user's recent sign-in events (a per-user slice of the
  *  authentication log) inside the admin user-edit dialog. Read-only; reads the
  *  latest few auth_events for the user through the shared query cache. */
-export function UserActivity({ userId }: { userId: number }) {
+export function UserActivity({ userId, showTitle = true }: {
+  userId: number
+  /** false where the caller already heads the list (the risk center's
+   *  lookup), so the same words do not stand twice in a row. */
+  showTitle?: boolean
+}) {
   const { t } = useTranslation('admin')
   const md = useTheme().palette.md
   const panelTz = useSiteStore(s => s.timezone)
@@ -21,9 +26,11 @@ export function UserActivity({ userId }: { userId: number }) {
 
   return (
     <Box sx={{ mt: 1 }}>
-      <Typography sx={{ fontSize: 13, fontWeight: 600, color: md.onSurfaceVariant, mb: 0.75 }}>
-        {t('users.activity.title', { defaultValue: '最近登录' })}
-      </Typography>
+      {showTitle && (
+        <Typography sx={{ fontSize: 13, fontWeight: 600, color: md.onSurfaceVariant, mb: 0.75 }}>
+          {t('users.activity.title', { defaultValue: '最近登录' })}
+        </Typography>
+      )}
       {isPending && <CircularProgress size={18} />}
       {/* A failed read is NOT an empty history. "No sign-in records" is a claim
           about the account, and a security view is exactly where presenting an

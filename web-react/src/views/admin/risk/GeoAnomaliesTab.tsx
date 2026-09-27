@@ -1,7 +1,8 @@
 import { useMemo } from 'react'
-import { Alert, Box, Chip, CircularProgress, Table, TableBody, TableCell,
+import { Alert, Box, Chip, CircularProgress, IconButton, Table, TableBody, TableCell,
   TableContainer, TableHead, TableRow, Tooltip, Typography, useTheme,
 } from '@mui/material'
+import PersonSearchOutlinedIcon from '@mui/icons-material/PersonSearchOutlined'
 import WarningAmberIcon from '@mui/icons-material/WarningAmber'
 import { useTranslation } from 'react-i18next'
 import { isAxiosError } from 'axios'
@@ -71,7 +72,10 @@ function spotLine(c: SpotTree, nameRegion: RegionNamer): string {
   return named ? `${head}: ${regions.join(' · ')}` : head
 }
 
-export default function GeoAnomaliesTab() {
+export default function GeoAnomaliesTab({ onOpenUser }: {
+  /** Opens the account in the risk center's lookup; no button without it. */
+  onOpenUser?: (userId: number) => void
+}) {
   const { t, i18n } = useTranslation(['admin'])
   const nameRegion = regionNamer(t, i18n.language)
   const theme = useTheme()
@@ -147,7 +151,18 @@ export default function GeoAnomaliesTab() {
               const since = r.service_disabled_at_ms ? new Date(r.service_disabled_at_ms).toLocaleString() : '—'
               return (
                 <TableRow key={r.user_id} hover>
-                  <TableCell>{r.upn || r.display_name || `#${r.user_id}`}</TableCell>
+                  <TableCell>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                      <span>{r.upn || r.display_name || `#${r.user_id}`}</span>
+                      {onOpenUser && (
+                        <Tooltip title={t('admin:risk_center.open_user', { defaultValue: '查看用户' })}>
+                          <IconButton size="small" onClick={() => onOpenUser(r.user_id)}>
+                            <PersonSearchOutlinedIcon fontSize="inherit" />
+                          </IconButton>
+                        </Tooltip>
+                      )}
+                    </Box>
+                  </TableCell>
                   <TableCell>
                     <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, alignItems: 'center' }}>
                       <Chip size="small" color={stateColor(r.state)}

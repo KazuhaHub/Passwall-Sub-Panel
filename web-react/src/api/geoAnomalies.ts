@@ -158,9 +158,17 @@ export interface GeoAnomaly {
   service_disabled_at_ms?: number
 }
 
-/** Every judged user, newest first. Unfiltered by design: the denominator has
- *  to stay reachable so a detector that has stopped working is visible. */
-export async function listGeoAnomalies(signal?: AbortSignal): Promise<GeoAnomaly[]> {
-  const { data } = await client.get<{ items: GeoAnomaly[] }>('/admin/geo-anomalies', { signal })
+/**
+ * Every judged user, newest first. Unfiltered by design: the denominator has
+ * to stay reachable so a detector that has stopped working is visible.
+ *
+ * `user_id` asks for that one account's verdict alone (the risk center's
+ * lookup). The server applies it before it names the rows, so one account
+ * costs one user read rather than one per judged account.
+ */
+export async function listGeoAnomalies(
+  signal?: AbortSignal, params: { user_id?: number } = {},
+): Promise<GeoAnomaly[]> {
+  const { data } = await client.get<{ items: GeoAnomaly[] }>('/admin/geo-anomalies', { params, signal })
   return data.items ?? []
 }

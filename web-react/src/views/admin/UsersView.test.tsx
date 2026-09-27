@@ -2,6 +2,7 @@
 import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { expect, it } from 'vitest'
 import { api, editRow, installReads, list, mount, user } from '@/test/adminSaveHarness'
+import { useAuthStore } from '@/stores/auth'
 import UsersView from './UsersView'
 
 it('reopens with the user returned by the update without reloading the stale list', async () => {
@@ -189,4 +190,25 @@ it('re-reads the usage leaderboard after a write that changes usage', async () =
   fireEvent.click(within(dialog).getByRole('button', { name: 'common:actions.ok' }))
 
   await waitFor(() => expect(topCalls()).toBeGreaterThan(before))
+})
+
+// The edit dialog is where an admin looking at one account goes next; the
+// risk center's lookup is admin-only, so an operator is not offered a link
+// that can only land on a redirect.
+it("links an admin from the edit dialog to the account's risk lookup", async () => {
+  installReads({ '/admin/users': list([user]) })
+  mount(<UsersView />)
+  const dialog = await editRow()
+  const link = within(dialog).getByRole('link', { name: /admin:users\.risk_lookup/ })
+  expect(link.getAttribute('href')).toBe(`/admin/risk?tab=user&id=${user.id}`)
+})
+
+it('offers an operator no risk lookup link', async () => {
+  useAuthStore.setState({ role: 'operator', userId: 1, hasToken: true })
+  installReads({ '/admin/users': list([user]) })
+  mount(<UsersView />)
+  const dialog = await editRow()
+  expect(within(dialog).queryByRole('link', { name: /admin:users\.risk_lookup/ })).toBeNull()
+  // The usage link beside it stays: the traffic page is staff-visible.
+  expect(within(dialog).getByRole('link', { name: /admin:users\.detail\.view_usage/ })).toBeTruthy()
 })
