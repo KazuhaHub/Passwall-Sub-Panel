@@ -71,7 +71,12 @@ type Deps struct {
 	// same rows the traffic poll writes each cycle. Optional: a deployment
 	// without it gets a 503 from the endpoint rather than an empty list, so
 	// "nothing to report" stays distinguishable from "cannot report".
-	GeoRecords       handler.GeoRecordLister
+	GeoRecords handler.GeoRecordLister
+	// GeoFlags counts latched concurrent-location flags for the notification
+	// bell's geo_anomaly entry — in practice the same store as GeoRecords, a
+	// separate field because the bell needs a COUNT and the Geo tab the rows.
+	// Optional like every alert source: absent, the bell has no such entry.
+	GeoFlags         alert.GeoFlagCounter
 	Pool             ports.XUIPool
 	Auth             *auth.Service
 	SAML             *auth.SAMLService
@@ -618,6 +623,12 @@ func NewRouter(d Deps) stdhttp.Handler {
 			// it through the evaluator, so the bell and the node detail page can
 			// never disagree about whether a condition is active.
 			NodeResource: nodeHealthSource,
+			// The location detector's two admin-only entries: latched flags,
+			// and accounts it suspended itself (geo_auto), counted from the
+			// users table. Both nil-tolerant, which is why
+			// TestBuildWiresTheGeoAlerts drives the assembled router.
+			GeoFlags:     d.GeoFlags,
+			ServiceHolds: d.Repos.User,
 		})
 		staffGroup.GET("/alerts", handler.NewAdminAlertsHandler(alertSvc).List)
 

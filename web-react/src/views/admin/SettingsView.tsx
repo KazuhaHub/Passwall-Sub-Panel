@@ -92,6 +92,7 @@ import type { Group } from '@/api/types'
 import { normalizeRegistry } from './subclients/clientRegistry'
 import ScopeOverridesEditor from '@/components/scope/ScopeOverridesEditor'
 import { loadScopeState, saveScopeState, type ScopeState } from '@/components/scope/scopeOverrides'
+import { geoTolerances } from '@/utils/geoAnomaly'
 
 type TabKey = 'general' | 'security' | 'brand' | 'subscription' | 'portal' | 'mail' | 'sso'
 
@@ -433,6 +434,17 @@ export default function SettingsView() {
   if (!settings) {
     return <Box sx={{ p: 3, display: 'grid', placeItems: 'center', minHeight: 400 }}><CircularProgress /></Box>
   }
+
+  // What the server will actually judge with, for the draft as it stands: an
+  // unset (0 / '') geo value is the shipped default and each suspension
+  // threshold is raised to its flag tolerance. The captions print the first
+  // count that is OVER (tolerance + 1) — "2 countries" reads as the line
+  // itself, where "tolerance 1" leaves the admin to do the arithmetic.
+  const geoTol = geoTolerances(settings)
+  // The captions name all three tiers, and only the city scope (the default,
+  // stored as '') judges all three. Under region, country or off they would
+  // promise a line the detector never draws, so they are not shown there.
+  const geoTiered = (settings.geo_anomaly_scope || 'city') === 'city'
 
   const tabs: { key: TabKey; labelKey: string }[] = [
     { key: 'general', labelKey: 'settings.tab_general' },
@@ -930,7 +942,7 @@ export default function SettingsView() {
           </Section>
         </Box>
       ))}
-      {tab === 'general' && renderScopeTab(['notify', 'emergency'], (
+      {tab === 'general' && renderScopeTab(['notify', 'emergency', 'geo', 'geo_ban'], (
         <Box component="form" onSubmit={save} sx={{ display: 'flex', flexDirection: 'column', gap: 2.5, maxWidth: 880 }}>          <Section title={t('settings.general.section_runtime')} md={md}>
             <Autocomplete
               freeSolo
@@ -1171,30 +1183,56 @@ export default function SettingsView() {
           {/* Concurrent-location anomaly. Deliberately its own section rather
               than folded into the geo one above: that section is about
               DISPLAYING a region in the access log, this one JUDGES people.
-              Every field below is per-group overridable, so a team that works
-              across borders is loosened without weakening the fleet. */}
+              Every field below except the ignore list is per-group
+              overridable (the rail on the left), so a team that works across
+              borders is loosened — or armed for auto-suspension — without
+              touching the fleet. */}
           <Section title={t('settings.geo_anomaly.section', { defaultValue: '异地并发检测' })} md={md}>
             <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant }}>
-              {t('settings.geo_anomaly.hint', { defaultValue: '把一个用户在所有面板上的并发源 IP 合起来看，同时出现在多个地方就是共享账号的信号。需要上面的 IP 地区库可用，否则一律判为「无法判断」而不是「正常」。目前只观测和告警，不做任何自动处置。' })}
+              {t('settings.geo_anomaly.hint', { defaultValue: '把一个用户在所有面板上的并发源 IP 合起来看，同时出现在多个地方就是共享账号的信号。需要上面的 IP 地区库可用，否则一律判为「无法判断」而不是「正常」。默认只观测并在通知铃提醒管理员；可选开启下方的「自动临时暂停」。' })}
             </Typography>
 
+            {/* '' is what the server stores when nobody chose, and it judges
+                that as city. Shown as city rather than blank, which reads as
+                "off". */}
             <TextField select fullWidth size="small"
               label={t('settings.geo_anomaly.scope', { defaultValue: '判定粒度' })}
-              value={settings.geo_anomaly_scope || 'country'}
+              value={settings.geo_anomaly_scope || 'city'}
               onChange={e => patch('geo_anomaly_scope', e.target.value as typeof settings.geo_anomaly_scope)}
-              helperText={t('settings.geo_anomaly.scope_hint', { defaultValue: '「国家」是推荐值：异城市每天都在发生（通勤、运营商 NAT 池、手机切基站），按城市判会天天误报。只有确知用户都在本地时才选城市。' })}>
-              <MenuItem value="country">{t('settings.geo_anomaly.scope_country', { defaultValue: '国家（推荐）' })}</MenuItem>
+              helperText={t('settings.geo_anomaly.scope_hint', { defaultValue: '决定最细判到哪一级：「城市·分级」同时判国家、省、城市三级；「省 / 州」不判城市；「仅国家」只判国家。' })}>
+              <MenuItem value="city">{t('settings.geo_anomaly.scope_city', { defaultValue: '城市·分级（推荐）' })}</MenuItem>
               <MenuItem value="region">{t('settings.geo_anomaly.scope_region', { defaultValue: '省 / 州' })}</MenuItem>
-              <MenuItem value="city">{t('settings.geo_anomaly.scope_city', { defaultValue: '城市（易误报）' })}</MenuItem>
+              <MenuItem value="country">{t('settings.geo_anomaly.scope_country', { defaultValue: '仅国家' })}</MenuItem>
               <MenuItem value="off">{t('settings.geo_anomaly.scope_off', { defaultValue: '关闭检测' })}</MenuItem>
             </TextField>
 
             <Pair>
               <NumField
-                label={t('settings.geo_anomaly.max_places', { defaultValue: '容错：允许同时几个地方' })}
-                value={settings.geo_anomaly_max_places}
+                label={t('settings.geo_anomaly.max_places', { defaultValue: '国家容错：允许同时几个国家' })}
+                value={settings.geo_anomaly_max_places ?? 0}
                 onChange={v => patch('geo_anomaly_max_places', v)}
-                helperText={t('settings.geo_anomaly.max_places_hint', { defaultValue: '1 = 同时两个地方就算超。第二个地点常常是正常的（公司 VPN、第二住所、境外家人），觉得误报多就调到 2。' })} />
+                helperText={t('settings.geo_anomaly.max_places_hint', { defaultValue: '1 = 同时两个国家即超限。0 = 默认（1）。' })} />
+              <NumField
+                label={t('settings.geo_anomaly.max_regions', { defaultValue: '省级容错：同一国家允许同时几个省 / 州' })}
+                value={settings.geo_anomaly_max_regions ?? 0}
+                onChange={v => patch('geo_anomaly_max_regions', v)}
+                helperText={t('settings.geo_anomaly.max_regions_hint', { defaultValue: '1 = 同一国家同时两个省即超限。家里常开的路由器 + 外地的手机也会触发，误报多就调到 2。0 = 默认（1）。' })} />
+              <NumField
+                label={t('settings.geo_anomaly.max_cities', { defaultValue: '城市容错：同一国家允许同时几个城市' })}
+                value={settings.geo_anomaly_max_cities ?? 0}
+                onChange={v => patch('geo_anomaly_max_cities', v)}
+                helperText={t('settings.geo_anomaly.max_cities_hint', { defaultValue: '2 = 同一国家同时三个城市即超限；只定位到国家的地址不算城市。0 = 默认（2）。' })} />
+            </Pair>
+            {geoTiered && (
+              <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant, mt: -0.5 }}>
+                {t('settings.geo_anomaly.effective', {
+                  countries: geoTol.flag.countries + 1, regions: geoTol.flag.regions + 1, cities: geoTol.flag.cities + 1,
+                  defaultValue: `当前生效：同时 ${geoTol.flag.countries + 1} 个国家，或同一国家 ${geoTol.flag.regions + 1} 个省，或 ${geoTol.flag.cities + 1} 个城市，即算超限`,
+                })}
+              </Typography>
+            )}
+
+            <Pair>
               <NumField
                 label={t('settings.geo_anomaly.min_placed_ratio', { defaultValue: '最低可定位比例' })}
                 value={settings.geo_anomaly_min_placed_ratio}
@@ -1221,7 +1259,7 @@ export default function SettingsView() {
               value={settings.geo_anomaly_co_travel ?? ''}
               onChange={e => patch('geo_anomaly_co_travel', e.target.value)}
               placeholder={'JP,TW\nDE,AT,CH'}
-              helperText={t('settings.geo_anomaly.co_travel_hint', { defaultValue: '一行一组，组内用逗号分隔国家代码。给真实跨境常客用——比调高容错率更精确：组外的第三个地点仍然会触发。' })} />
+              helperText={t('settings.geo_anomaly.co_travel_hint', { defaultValue: '一行一组，组内用逗号分隔国家代码（大小写不限）。只支持国家；含「/」的省、城市条目会被忽略。组外的第三个国家仍然会触发。' })} />
 
             <FormControlLabel
               label={t('settings.geo_anomaly.allow_anywhere', { defaultValue: '本范围内允许任何地方（不检测）' })}
@@ -1231,6 +1269,74 @@ export default function SettingsView() {
             <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant, mt: -1 }}>
               {t('settings.geo_anomaly.allow_anywhere_hint', { defaultValue: '整体豁免，而不是抬高阈值——抬阈值会连带放松那些没在出差的人。在「分组」里对某个组单独打开，就只豁免那个组。' })}
             </Typography>
+
+            {/* Global only: it names fleet infrastructure, not a population,
+                so it has no row in the per-group rail. The one geo field the
+                server validates — a typo would fail OPEN (the address keeps
+                being judged) with nothing to repair it — and a rejected entry
+                comes back as a 400 naming it, through the normal save error. */}
+            <TextField fullWidth size="small" multiline minRows={3}
+              label={t('settings.geo_anomaly.ignore_addresses', { defaultValue: '忽略的地址（IP 或 CIDR）' })}
+              value={settings.geo_anomaly_ignore_addresses ?? ''}
+              onChange={e => patch('geo_anomaly_ignore_addresses', e.target.value)}
+              placeholder={'203.0.113.7\n198.51.100.0/24  # office exit'}
+              helperText={t('settings.geo_anomaly.ignore_addresses_hint', { defaultValue: '一行或逗号分隔一个，最多 256 条，# 后为注释。用于没在面板登记的中转、CDN、公司出口。节点与中转地址、100.64.0.0/10 与内网地址、同时被 3 个以上账号使用的地址已自动排除。仅全局生效。' })} />
+
+            {/* Automatic temporary suspension. Off by default, its own
+                (looser) thresholds, time-boxed, and never over anybody
+                else's hold — the hint says all of that because an admin
+                arming it is deciding to let the panel act on a signal. */}
+            <Divider sx={{ my: 0.5 }} />
+            <Typography sx={{ fontWeight: 600, fontSize: 13, color: md.onSurface }}>
+              {t('settings.geo_anomaly.ban_section', { defaultValue: '自动临时暂停（默认关闭）' })}
+            </Typography>
+            <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant }}>
+              {t('settings.geo_anomaly.ban_hint', { defaultValue: '开启后，持续超过「暂停阈值」的账号会被自动暂停代理服务，到时自动恢复；不锁面板登录，不覆盖管理员或其他原因的暂停；紧急访问期间、已到期或已超流量的账号不会被自动暂停。恢复后仍持续超限会再次暂停——确认是误报的账号请移入关闭了自动暂停（或允许任何地方）的分组。暂停阈值会被自动抬到不低于上面的标记容错。' })}
+            </Typography>
+            <FormControlLabel
+              label={t('settings.geo_anomaly.ban_enabled', { defaultValue: '启用自动临时暂停' })}
+              control={<Switch checked={!!settings.geo_anomaly_ban_enabled}
+                onChange={(_, c) => patch('geo_anomaly_ban_enabled', c)} />}
+              sx={{ ml: 0, '& .MuiFormControlLabel-label': { ml: 1.5 } }} />
+            <Pair>
+              <NumField
+                label={t('settings.geo_anomaly.ban_max_countries', { defaultValue: '暂停阈值：国家' })}
+                value={settings.geo_anomaly_ban_max_countries ?? 0}
+                onChange={v => patch('geo_anomaly_ban_max_countries', v)} />
+              <NumField
+                label={t('settings.geo_anomaly.ban_max_regions', { defaultValue: '暂停阈值：省 / 州' })}
+                value={settings.geo_anomaly_ban_max_regions ?? 0}
+                onChange={v => patch('geo_anomaly_ban_max_regions', v)} />
+              <NumField
+                label={t('settings.geo_anomaly.ban_max_cities', { defaultValue: '暂停阈值：城市' })}
+                value={settings.geo_anomaly_ban_max_cities ?? 0}
+                onChange={v => patch('geo_anomaly_ban_max_cities', v)} />
+            </Pair>
+            <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant, mt: -0.5 }}>
+              {t('settings.geo_anomaly.ban_tolerance_hint', { defaultValue: '含义同上面的容错，只用于自动暂停。0 = 默认（1 / 2 / 3）。' })}
+            </Typography>
+            <Pair>
+              <NumField
+                label={t('settings.geo_anomaly.ban_after', { defaultValue: '连续几次才暂停' })}
+                value={settings.geo_anomaly_ban_after_polls ?? 0}
+                onChange={v => patch('geo_anomaly_ban_after_polls', v)}
+                helperText={t('settings.geo_anomaly.ban_after_hint', { defaultValue: '默认 6（按 5 分钟一次轮询约 30 分钟）。手动「立即拉取」间隔不足半个轮询周期时不计入。0 = 默认。' })} />
+              <NumField
+                label={t('settings.geo_anomaly.ban_duration', { defaultValue: '暂停时长（分钟）' })}
+                value={settings.geo_anomaly_ban_duration_minutes ?? 0}
+                onChange={v => patch('geo_anomaly_ban_duration_minutes', v)}
+                max={10080}
+                helperText={t('settings.geo_anomaly.ban_duration_hint', { defaultValue: '默认 60，最长 10080（7 天）。到时自动恢复，管理员可随时手动恢复。修改会作用于正在暂停中的账号。' })} />
+            </Pair>
+            {geoTiered && (
+              <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant, mt: -0.5 }}>
+                {t('settings.geo_anomaly.ban_effective', {
+                  countries: geoTol.ban.countries + 1, regions: geoTol.ban.regions + 1, cities: geoTol.ban.cities + 1,
+                  polls: geoTol.banAfterPolls, minutes: geoTol.banMinutes,
+                  defaultValue: `当前生效：同时 ${geoTol.ban.countries + 1} 个国家，或同一国家 ${geoTol.ban.regions + 1} 个省，或 ${geoTol.ban.cities + 1} 个城市，连续 ${geoTol.banAfterPolls} 次，暂停 ${geoTol.banMinutes} 分钟`,
+                })}
+              </Typography>
+            )}
           </Section>
 
         </Box>

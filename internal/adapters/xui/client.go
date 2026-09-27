@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"math/rand/v2"
 	"net/http"
 	"net/http/cookiejar"
@@ -1536,25 +1537,61 @@ func clientObj(s ports.ClientSpec) map[string]any {
 // /server/clientIps takes a single email, so covering a fleet with it would
 // be one request per user per panel.
 //
-// Upstream keys by node guid because one 3X-UI can front several nodes. PSP
-// does not model that layer, and for a per-user total it must not: the same
-// IP seen on two of a panel's nodes is one person on one connection path, so
-// counting it twice would inflate exactly the number this exists to make
-// trustworthy. Flattened and de-duplicated per email here.
+// Upstream keys by node guid because one 3X-UI can front several nodes. For
+// a per-user COUNT PSP must not model that layer: the same IP seen on two of
+// a panel's nodes is one person on one connection path, so counting it twice
+// would inflate exactly the number this exists to make trustworthy.
+// Flattened and de-duplicated per email by domain.LiveIPsOf, the same rule a
+// detail reader's caller uses, so the two reads cannot drift apart.
 //
 // What this CANNOT tell you is which physical device an IP belongs to. See
 // ports.LiveIPReader.
 func (c *Client) ListLiveClientIPs(ctx context.Context) (map[string][]string, error) {
+	sightings, err := c.ListLiveClientIPDetails(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return domain.LiveIPsOf(sightings), nil
+}
+
+// The traffic poll finds the detail read by type assertion. A signature
+// drift here would not fail to compile anywhere else — the poll would just
+// fall back to the plain read and silently judge 30 minutes of upstream
+// memory as "connected right now".
+var _ ports.LiveIPDetailReader = (*Client)(nil)
+
+// ListLiveClientIPDetails implements ports.LiveIPDetailReader: the same one
+// POST as ListLiveClientIPs, with the node guid and the timestamp kept.
+//
+// The timestamp is what makes a concurrent-location judgement possible at
+// all. Upstream keeps an address for 30 minutes after its stream closed,
+// but restamps it on every 10-second scan while the stream is open, so its
+// age relative to the node's newest stamp separates "connected now" from
+// "was connected". Across PSP's supported range (3.4.2 through current) the
+// value is unix seconds taken from the panel host's clock at scan time. What
+// a remote 3X-UI node stamps has not been traced; freshness is judged per
+// node against that node's own newest stamp, which holds either way as long
+// as one node's stamps come from one clock. See seenAt for what is done with
+// a value that is not seconds.
+//
+// One sighting per (node, address) per email, at its newest time; sorted by
+// address then node. Blank emails and addresses are dropped, as in the plain
+// read. The operation label stays "ListLiveClientIPs": it is the same
+// exchange, and splitting the label would break the metric's continuity for
+// what is, on the wire, an unchanged call.
+func (c *Client) ListLiveClientIPDetails(ctx context.Context) (map[string][]domain.LiveIPSighting, error) {
 	ctx = withOp(ctx, "ListLiveClientIPs")
 	// nodeGuid -> email -> [{ip, timestamp}]
 	var raw map[string]map[string][]struct {
-		IP string `json:"ip"`
+		IP        string `json:"ip"`
+		Timestamp seenAt `json:"timestamp"`
 	}
 	if err := c.doJSON(ctx, http.MethodPost, "/panel/api/clients/clientIpsByGuid", nil, &raw); err != nil {
 		return nil, err
 	}
-	seen := map[string]map[string]struct{}{}
-	for _, byEmail := range raw {
+	type nodeIP struct{ node, ip string }
+	newest := map[string]map[nodeIP]int64{}
+	for node, byEmail := range raw {
 		for email, entries := range byEmail {
 			if email == "" {
 				continue
@@ -1564,23 +1601,77 @@ func (c *Client) ListLiveClientIPs(ctx context.Context) (map[string][]string, er
 				if ip == "" {
 					continue
 				}
-				if seen[email] == nil {
-					seen[email] = map[string]struct{}{}
+				if newest[email] == nil {
+					newest[email] = map[nodeIP]int64{}
 				}
-				seen[email][ip] = struct{}{}
+				k := nodeIP{node: node, ip: ip}
+				if at, seen := newest[email][k]; !seen || int64(e.Timestamp) > at {
+					newest[email][k] = int64(e.Timestamp)
+				}
 			}
 		}
 	}
-	out := make(map[string][]string, len(seen))
-	for email, ips := range seen {
-		list := make([]string, 0, len(ips))
-		for ip := range ips {
-			list = append(list, ip)
+	// Non-nil even when idle: one layer up, nil means "a plain reader with
+	// no clock", and an idle panel is not that.
+	out := make(map[string][]domain.LiveIPSighting, len(newest))
+	for email, set := range newest {
+		list := make([]domain.LiveIPSighting, 0, len(set))
+		for k, at := range set {
+			list = append(list, domain.LiveIPSighting{IP: k.ip, Node: k.node, SeenAt: at})
 		}
 		// Sorted so a caller comparing two snapshots, or a test asserting
 		// on the value, is not reading Go's randomized map order.
-		sort.Strings(list)
+		sort.Slice(list, func(i, j int) bool {
+			if list[i].IP != list[j].IP {
+				return list[i].IP < list[j].IP
+			}
+			return list[i].Node < list[j].Node
+		})
 		out[email] = list
 	}
 	return out, nil
+}
+
+// seenAt is an upstream timestamp read tolerantly.
+//
+// It never fails the decode. One unreadable field would otherwise make the
+// whole panel's answer an error, and an error marks every user on the panel
+// unread — far more lost than one address's age. Anything unreadable
+// becomes 0, "unknown", which the freshness rule reads as live: exactly the
+// behaviour before timestamps were read, so a bad field degrades to v1
+// rather than to a guess.
+//
+// Accepted: a JSON number (integer or float) or a quoted one. Values above
+// 1e12 are taken as milliseconds and divided by 1000 — no supported 3X-UI
+// sends them, but one that did would otherwise sit a thousand-fold in the
+// future, become its node's reference, and make every real address on that
+// node read as stale. Zero, negative, non-finite or absurd values are 0.
+type seenAt int64
+
+func (s *seenAt) UnmarshalJSON(b []byte) error {
+	*s = 0
+	text := strings.TrimSpace(string(b))
+	if unq, err := strconv.Unquote(text); err == nil {
+		text = strings.TrimSpace(unq)
+	}
+	var n int64
+	if i, err := strconv.ParseInt(text, 10, 64); err == nil {
+		n = i
+	} else {
+		f, ferr := strconv.ParseFloat(text, 64)
+		// The bound keeps the float→int conversion defined; a real stamp,
+		// even in milliseconds, is over a million times below it.
+		if ferr != nil || math.IsNaN(f) || f <= 0 || f >= math.MaxInt64/2 {
+			return nil
+		}
+		n = int64(f)
+	}
+	switch {
+	case n <= 0:
+		n = 0
+	case n > 1e12:
+		n /= 1000
+	}
+	*s = seenAt(n)
+	return nil
 }

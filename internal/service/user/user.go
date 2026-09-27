@@ -1977,6 +1977,18 @@ func EmergencyAccessStatusForUserWithTrafficLimit(u *domain.User, settings ports
 		st.Reason = "emergency access is already active"
 		return st
 	}
+	// A hard hold (admin pause, blocked client, geo suspension) outranks
+	// emergency access in AccessSnapshot, so a window granted under one would
+	// spend a use and restore nothing. Worse, UseEmergencyAccess writes the
+	// service reason: it would replace the hold with traffic_exceeded, and the
+	// next rollover would then resume the user. Checked before "remaining" so
+	// the user is told the real obstacle, not that they are out of uses.
+	// UseEmergencyAccess reads this status under emergencyMu before any write.
+	if domain.HardServiceHold(u.ServiceDisabledReason) {
+		st.Status = "service_held"
+		st.Reason = "emergency access is unavailable while the service is held"
+		return st
+	}
 	if st.Remaining <= 0 {
 		st.Status = "no_quota"
 		st.Reason = "emergency access limit reached"
@@ -2415,6 +2427,22 @@ func (s *Service) SetServiceSuspendedAndSync(ctx context.Context, userID int64, 
 	if err != nil {
 		return err
 	}
+	// The quota reason never replaces a hard hold. The traffic callers already
+	// check their in-memory copy, but that copy is the poll's snapshot from the
+	// top of the cycle; an admin pause or a geo suspension written since then
+	// is only visible here, on the fresh row. Overwriting it would hand the
+	// hold to the rollover, which resumes quota suspensions. ErrConflict lets
+	// the callers read it as "held" rather than as a failure.
+	//
+	// Only quota is refused: an admin or the blocked-client policy replacing
+	// one hold with another is a newer deliberate decision. Residual race,
+	// accepted: a hold written in the milliseconds between this read and the
+	// write below is still overwritten. This path takes no per-user lock (the
+	// admin and quota paths never have), so closing that window would need a
+	// conditional write here, not a re-read.
+	if reason == domain.DisabledTrafficExceeded && domain.HardServiceHold(u.ServiceDisabledReason) {
+		return fmt.Errorf("%w: service is held (%s)", domain.ErrConflict, u.ServiceDisabledReason)
+	}
 	now := time.Now()
 	if err := s.updateServiceState(ctx, userID, reason, detail, &now); err != nil {
 		return err
@@ -2438,6 +2466,166 @@ func (s *Service) SetServiceSuspendedAndSync(ctx context.Context, userID int64, 
 	return nil
 }
 
+// The follow-up of a committed automatic service transition — the fresh
+// re-read, the push to every panel, and the SyncTaskUserPushConfig queued when
+// the push fails — runs on a context detached from the caller's
+// cancellation, the way the poll's traffic-floor push does, and for the same
+// reason. The conditional write has already committed, so PSP's row (portal,
+// admin list, bell) already shows the new state, while the upstream client is
+// what actually admits or refuses the connection. The caller is the traffic
+// poll, and a poll is cancelled for reasons that say nothing about this user:
+// an admin closes the "Poll now" tab (the request context), the SPA's request
+// timeout aborts it, or Shutdown cancels the background context. Inheriting
+// that cancellation failed the push AND the enqueue that is meant to catch a
+// failed push, so a lift left the account "active" in PSP and disabled
+// upstream — and a suspension left it "suspended" in PSP and serving
+// upstream — with nothing queued; only the reconcile backstop (up to about an
+// hour) noticed.
+//
+// Detached, but never unbounded, and on two separate budgets: a push that uses
+// up its own (a panel that hangs until the adapter's own 30s request timeout,
+// a few times over) must still leave the enqueue time to record the retry.
+// WithoutCancel keeps the caller's values, including the operation gate's
+// admission, so a nested read reuses it instead of queueing behind a writer.
+const (
+	transitionPushTimeout  = 2 * time.Minute
+	transitionQueueTimeout = 30 * time.Second
+)
+
+// detachedFollowUp is the context for one step of that follow-up.
+func detachedFollowUp(ctx context.Context, d time.Duration) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), d)
+}
+
+// SuspendServiceIfClear suspends the user's service ONLY if nothing holds it
+// yet, and reports whether it did. It is the automatic location suspension's
+// write path (geo_auto), which must never replace another reason: an admin
+// pause, a blocked-client hold, a human geo suspension, even the quota. The
+// unconditional SetServiceSuspendedAndSync cannot give that guarantee — its
+// check would be a read the next writer races — so the predicate lives in the
+// UPDATE itself (users.SetServiceStateIfClear).
+//
+// Two locks, always lockUser then emergencyMu. That order is deadlock-free
+// because nothing takes emergencyMu and then lockUser: neither
+// UseEmergencyAccess's critical section nor the poll's WithEmergencyLock
+// callback takes the per-user lock.
+//
+//   - lockUser, the same per-user lock ResyncMembership holds, across the
+//     write AND the push, so the push cannot interleave with a membership
+//     resync computing its own lifecycle from an older read;
+//   - emergencyMu around the write only. UseEmergencyAccess reads the service
+//     reason and writes its own under that mutex; without it a grant could
+//     read an empty reason and then overwrite a geo_auto landed in between
+//     with traffic_exceeded, which the rollover would later lift.
+//
+// When the write wins, the rest mirrors SetServiceSuspendedAndSync: auth
+// cache dropped, one suspension mail, a push from the FRESH row, and a queued
+// SyncTaskUserPushConfig if the push (or the re-read) fails. applied is true
+// whenever the write won, even if the push was only queued; an error beside
+// applied=true means the push failed AND could not be queued.
+//
+// The write runs on the caller's context: a caller already gone starts no
+// suspension. Everything after it runs detached (see detachedFollowUp).
+func (s *Service) SuspendServiceIfClear(ctx context.Context, userID int64, reason domain.AutoDisabledReason, detail string) (bool, error) {
+	if reason == domain.DisabledNone || !domain.ServiceSuspensionReason(reason) {
+		return false, fmt.Errorf("%w: invalid service suspension reason %q", domain.ErrValidation, reason)
+	}
+	unlock := s.lockUser(userID)
+	defer unlock()
+
+	var (
+		applied bool
+		err     error
+	)
+	now := time.Now()
+	s.WithEmergencyLock(func() {
+		applied, err = s.users.SetServiceStateIfClear(ctx, userID, reason, detail, now)
+	})
+	if err != nil || !applied {
+		return false, err
+	}
+	s.invalidateAuth(userID)
+	// Committed, so the mail is true whatever happens to the push below.
+	s.notifyServiceSuspended(userID, reason, detail)
+
+	pushCtx, cancelPush := detachedFollowUp(ctx, transitionPushTimeout)
+	defer cancelPush()
+	who := fmt.Sprintf("#%d", userID)
+	u, pushErr := s.users.GetByID(pushCtx, userID)
+	if pushErr == nil {
+		who = u.UPN
+		pushErr = s.pushClientConfigToAll(pushCtx, u)
+	}
+	if pushErr != nil {
+		queueCtx, cancelQueue := detachedFollowUp(ctx, transitionQueueTimeout)
+		defer cancelQueue()
+		if taskErr := s.enqueueUserTask(queueCtx, domain.SyncTaskUserPushConfig, userID, fmt.Sprintf("sync service status for user %s", who)); taskErr != nil {
+			log.Warn("enqueue user service-status push failed", "user_id", userID, "err", taskErr)
+			return true, errUnqueuedPush("suspend proxy service", pushErr, taskErr)
+		}
+	}
+	return true, nil
+}
+
+// LiftServiceIfHeldSince lifts a suspension carrying reason, but only one
+// written at or before suspendedAtOrBefore, and reports whether it did. It is
+// the time-based end of an automatic location suspension: the caller passes
+// now minus the effective duration.
+//
+// The decision is made on a FRESH read under lockUser, never on the caller's
+// snapshot. The traffic poll's user list is from the top of its cycle; in the
+// meantime an admin may have resumed the user and a concurrent poll may have
+// suspended them again. That newer suspension's timestamp is after the cutoff,
+// so it is refused here. The due check is in Go, not SQL, because SQLite
+// stores service_disabled_at as text in the writer's location. The clear
+// itself is conditional too (ClearServiceStateIfReason), so an admin decision
+// landing between this read and that write is not undone either.
+//
+// No restore mail: the suspension mail already said service comes back by
+// itself, and a second mail per episode is noise. An admin resume still goes
+// through ResumeServiceAndSync and sends one.
+//
+// The read and the clear run on the caller's context; the push and its
+// queued retry, once the clear has committed, run detached (see
+// detachedFollowUp).
+func (s *Service) LiftServiceIfHeldSince(ctx context.Context, userID int64, reason domain.AutoDisabledReason, suspendedAtOrBefore time.Time) (bool, error) {
+	if reason == domain.DisabledNone {
+		return false, fmt.Errorf("%w: lifting requires a non-empty reason", domain.ErrValidation)
+	}
+	unlock := s.lockUser(userID)
+	defer unlock()
+
+	u, err := s.users.GetByID(ctx, userID)
+	if err != nil {
+		return false, err
+	}
+	if u.ServiceDisabledReason != reason {
+		return false, nil
+	}
+	if u.ServiceDisabledAt != nil && u.ServiceDisabledAt.After(suspendedAtOrBefore) {
+		return false, nil
+	}
+	lifted, err := s.users.ClearServiceStateIfReason(ctx, userID, reason)
+	if err != nil || !lifted {
+		return false, err
+	}
+	s.invalidateAuth(userID)
+	u.ServiceDisabledReason = domain.DisabledNone
+	u.ServiceDisableDetail = ""
+	u.ServiceDisabledAt = nil
+	pushCtx, cancelPush := detachedFollowUp(ctx, transitionPushTimeout)
+	defer cancelPush()
+	if pushErr := s.pushClientConfigToAll(pushCtx, u); pushErr != nil {
+		queueCtx, cancelQueue := detachedFollowUp(ctx, transitionQueueTimeout)
+		defer cancelQueue()
+		if taskErr := s.enqueueUserTask(queueCtx, domain.SyncTaskUserPushConfig, userID, fmt.Sprintf("sync service resume for user %s", u.UPN)); taskErr != nil {
+			log.Warn("enqueue user service-resume push failed", "user_id", userID, "err", taskErr)
+			return true, errUnqueuedPush("resume proxy service", pushErr, taskErr)
+		}
+	}
+	return true, nil
+}
+
 // ResumeServiceAndSync clears a service-level suspension. If the suspension was
 // caused by blocked-client violations, the violation counter is reset as part of
 // the same operation so the next allowed restore does not instantly re-suspend.
@@ -2449,6 +2637,13 @@ func (s *Service) ResumeServiceAndSync(ctx context.Context, userID int64) error 
 	wasBlocked := u.ServiceDisabledReason == domain.DisabledBlockedClient
 	if err := s.updateServiceState(ctx, userID, domain.DisabledNone, "", nil); err != nil {
 		return err
+	}
+	// A person resuming the location detector's own suspension is its
+	// countable false-positive signal. The automatic lift never comes through
+	// here (LiftServiceIfHeldSince), and neither the quota rollover nor a
+	// profile edit resumes geo_auto, so every geo_auto seen here is an admin's.
+	if u.ServiceDisabledReason == domain.DisabledGeoAutoSuspend {
+		metrics.GeoAutoSuspensionTotal.With("lifted_admin").Inc()
 	}
 	u.ServiceDisabledReason = domain.DisabledNone
 	u.ServiceDisableDetail = ""

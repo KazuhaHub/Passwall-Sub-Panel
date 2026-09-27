@@ -33,11 +33,22 @@ function generalSettings(overrides: Partial<UISettings> = {}): UISettings {
     geo_ip_enabled: false,
     geo_ip_auto_update: false,
     geo_ip_update_source: 'dbip',
+    geo_anomaly_scope: '',
     geo_anomaly_max_places: 1,
+    geo_anomaly_max_regions: 0,
+    geo_anomaly_max_cities: 0,
     geo_anomaly_min_placed_ratio: 0.8,
     geo_anomaly_flag_after_polls: 2,
     geo_anomaly_clear_after_polls: 3,
+    geo_anomaly_co_travel: '',
     geo_anomaly_allow_anywhere: false,
+    geo_anomaly_ignore_addresses: '',
+    geo_anomaly_ban_enabled: false,
+    geo_anomaly_ban_max_countries: 0,
+    geo_anomaly_ban_max_regions: 0,
+    geo_anomaly_ban_max_cities: 0,
+    geo_anomaly_ban_after_polls: 0,
+    geo_anomaly_ban_duration_minutes: 0,
     sub_clients: [],
     quick_links: [],
     ...overrides,
@@ -176,6 +187,77 @@ describe('native-task lifecycle settings', () => {
     save()
     expect(api.put).not.toHaveBeenCalled()
     expect(snack).toHaveBeenLastCalledWith('admin:settings.general.node_task_retention_minimum', 'warning')
+  })
+})
+
+describe('concurrent-location settings', () => {
+  const geo = (name: string) => screen.getByRole('spinbutton', { name: `admin:settings.geo_anomaly.${name}` }) as HTMLInputElement
+
+  it('shows the ignore-list and auto-suspension fields in All users', async () => {
+    await mountSettings(generalSettings({
+      geo_anomaly_max_regions: 2,
+      geo_anomaly_max_cities: 3,
+      geo_anomaly_ignore_addresses: '203.0.113.7\n198.51.100.0/24 # office exit',
+      geo_anomaly_ban_enabled: true,
+      geo_anomaly_ban_max_countries: 1,
+      geo_anomaly_ban_max_regions: 4,
+      geo_anomaly_ban_max_cities: 5,
+      geo_anomaly_ban_after_polls: 8,
+      geo_anomaly_ban_duration_minutes: 90,
+    }))
+
+    // An unset scope ('') is judged as city; the select says so rather than
+    // showing blank, which would read as "off".
+    expect(screen.queryByText('admin:settings.geo_anomaly.scope_city')).not.toBeNull()
+    expect(geo('max_regions')?.value).toBe('2')
+    expect(geo('max_cities')?.value).toBe('3')
+    expect(screen.queryByText('admin:settings.geo_anomaly.effective')).not.toBeNull()
+
+    // The ignore list is a multi-line field: one entry per line, # comments.
+    const ignore = screen.getByRole('textbox', { name: 'admin:settings.geo_anomaly.ignore_addresses' }) as HTMLTextAreaElement
+    expect(ignore.tagName).toBe('TEXTAREA')
+    expect(ignore.value).toBe('203.0.113.7\n198.51.100.0/24 # office exit')
+
+    expect(screen.queryByText('admin:settings.geo_anomaly.ban_section')).not.toBeNull()
+    expect(screen.queryByText('admin:settings.geo_anomaly.ban_hint')).not.toBeNull()
+    expect((screen.getByRole('switch', { name: 'admin:settings.geo_anomaly.ban_enabled' }) as HTMLInputElement).checked).toBe(true)
+    expect(geo('ban_max_countries').value).toBe('1')
+    expect(geo('ban_max_regions').value).toBe('4')
+    expect(geo('ban_max_cities').value).toBe('5')
+    expect(geo('ban_after').value).toBe('8')
+    expect(geo('ban_duration').value).toBe('90')
+    // The server clamps to 7 days; the field says where the ceiling is.
+    expect(geo('ban_duration').max).toBe('10080')
+    expect(screen.queryByText('admin:settings.geo_anomaly.ban_effective')).not.toBeNull()
+  })
+
+  it.each(['country', 'region', 'off'] as const)('states no three-tier caption under scope %s', async scope => {
+    // The captions name all three tiers. Only the (default) city scope judges
+    // all three, so under any other scope they would promise a region or city
+    // line the detector never draws.
+    await mountSettings(generalSettings({ geo_anomaly_scope: scope }))
+    expect(screen.queryByText('admin:settings.geo_anomaly.effective')).toBeNull()
+    expect(screen.queryByText('admin:settings.geo_anomaly.ban_effective')).toBeNull()
+  })
+
+  it('sends the edited geo fields on save', async () => {
+    await mountSettings()
+    api.put.mockImplementationOnce(async (_url: string, data: UISettings) => ({ data }))
+
+    fireEvent.change(screen.getByRole('textbox', { name: 'admin:settings.geo_anomaly.ignore_addresses' }),
+      { target: { value: '203.0.113.7' } })
+    fireEvent.click(screen.getByRole('switch', { name: 'admin:settings.geo_anomaly.ban_enabled' }))
+    fireEvent.change(geo('max_cities'), { target: { value: '4' } })
+    fireEvent.change(geo('ban_duration'), { target: { value: '120' } })
+    save()
+
+    await waitFor(() => expect(api.put).toHaveBeenCalledOnce())
+    expect(api.put).toHaveBeenCalledWith('/admin/settings/ui', expect.objectContaining({
+      geo_anomaly_ignore_addresses: '203.0.113.7',
+      geo_anomaly_ban_enabled: true,
+      geo_anomaly_max_cities: 4,
+      geo_anomaly_ban_duration_minutes: 120,
+    }))
   })
 })
 

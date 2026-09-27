@@ -95,6 +95,10 @@ export const settingsKeys = {
   mail: (s: QueryScope) => [...settingsKeys.all(s), 'mail'] as const,
   saml: (s: QueryScope) => [...settingsKeys.all(s), 'saml'] as const,
   oidc: (s: QueryScope) => [...settingsKeys.all(s), 'oidc'] as const,
+  /** The offline location databases and which one is active. Read by the Geo
+   *  tab's coarse-database banner; the settings page keeps its own copy in
+   *  local state because it polls it tightly while an update downloads. */
+  geoIPStatus: (s: QueryScope) => [...settingsKeys.all(s), 'geoip-status'] as const,
 }
 
 /** YAML-backed rule sets (`<ConfigDir>/rulesets/`). */

@@ -2,6 +2,7 @@ package alert
 
 import (
 	"context"
+	"errors"
 	"strconv"
 	"testing"
 	"time"
@@ -282,10 +283,14 @@ func TestCountsAggregate(t *testing.T) {
 		Panels:     stubPanels{panels: []*domain.XUIPanel{{ID: 3, Name: "p", PanelVersion: "3.2.6"}}},
 		Settings:   stubSettings{s: ports.UISettings{CertRenewBeforeDays: 14}},
 		UpgradeFor: func(string) (string, bool) { return "3.2.8", true }, // 1 info
+		// Two geo singletons: one warning each, however many users are
+		// behind them — the badge counts things to look at, not accounts.
+		GeoFlags:     &stubGeoFlags{n: 4},
+		ServiceHolds: &stubServiceHolds{byReason: map[domain.AutoDisabledReason]int64{domain.DisabledGeoAutoSuspend: 2}},
 	}, now)
 	_, counts := svc.List(context.Background())
-	if counts.Error != 1 || counts.Warning != 1 || counts.Info != 1 {
-		t.Fatalf("counts wrong: %+v", counts)
+	if counts.Error != 1 || counts.Warning != 3 || counts.Info != 1 {
+		t.Fatalf("counts wrong: %+v, want error 1, warning 3 (cert + two geo entries), info 1", counts)
 	}
 }
 
@@ -293,4 +298,115 @@ func mustList(t *testing.T, s *Service) []Alert {
 	t.Helper()
 	a, _ := s.List(context.Background())
 	return a
+}
+
+// ---- location detector (geo.go) ----
+
+type stubGeoFlags struct {
+	n     int64
+	err   error
+	since time.Time
+	calls int
+}
+
+func (s *stubGeoFlags) CountFlagged(_ context.Context, since time.Time) (int64, error) {
+	s.calls++
+	s.since = since
+	return s.n, s.err
+}
+
+type stubServiceHolds struct {
+	byReason map[domain.AutoDisabledReason]int64
+	err      error
+	asked    []domain.AutoDisabledReason
+}
+
+func (s *stubServiceHolds) CountByServiceDisabledReason(_ context.Context, r domain.AutoDisabledReason) (int64, error) {
+	s.asked = append(s.asked, r)
+	return s.byReason[r], s.err
+}
+
+// One entry for however many accounts are flagged, counted from the latch
+// and bounded to rows the detector judged in the last day. The bound is
+// passed through, not reinvented: the bell must stop lighting for a user the
+// poll stopped judging (a deleted client, a dead poll) rather than keep a
+// week-old latch on screen forever.
+func TestGeoAnomalyAlert_CountsFlaggedUsers(t *testing.T) {
+	now := time.Date(2026, 9, 25, 12, 0, 0, 0, time.UTC)
+	flags := &stubGeoFlags{n: 3}
+	got := byType(mustList(t, newSvc(Deps{GeoFlags: flags}, now)), TypeGeoAnomaly)
+	if len(got) != 1 {
+		t.Fatalf("geo_anomaly alerts = %+v, want exactly one singleton", got)
+	}
+	a := got[0]
+	if a.Key != "geo_anomaly" || a.Severity != SeverityWarning || a.Count != 3 {
+		t.Fatalf("geo_anomaly = %+v, want key geo_anomaly, severity warning, count 3", a)
+	}
+	if want := now.Add(-24 * time.Hour); !flags.since.Equal(want) {
+		t.Fatalf("CountFlagged since = %v, want %v (24 hours before now)", flags.since, want)
+	}
+}
+
+// No flagged account, no entry — and a failing count is skipped rather than
+// blanking the feed, like every other source here.
+func TestGeoAnomalyAlert_SilentWhenNoneFlagged(t *testing.T) {
+	now := time.Date(2026, 9, 25, 12, 0, 0, 0, time.UTC)
+	if got := byType(mustList(t, newSvc(Deps{GeoFlags: &stubGeoFlags{}}, now)), TypeGeoAnomaly); len(got) != 0 {
+		t.Fatalf("geo_anomaly with nobody flagged = %+v, want none", got)
+	}
+	failing := newSvc(Deps{
+		GeoFlags: &stubGeoFlags{n: 5, err: errors.New("db down")},
+		Nodes:    stubNodes{nodes: []*domain.Node{{ID: 1, Enabled: true, HealthState: domain.NodeHealthUnreachable}}},
+	}, now)
+	all := mustList(t, failing)
+	if got := byType(all, TypeGeoAnomaly); len(got) != 0 {
+		t.Fatalf("geo_anomaly on a count error = %+v, want none", got)
+	}
+	if len(byType(all, TypeNodeHealth)) != 1 {
+		t.Fatal("a failing geo count blanked the rest of the feed")
+	}
+}
+
+// The second entry counts only geo_auto — the detector's own time-boxed
+// suspension. geo_anomaly is a person's decision and service_manual is an
+// admin pause; neither is news the bell should repeat.
+func TestGeoAutoSuspendedAlert_CountsGeoAutoOnly(t *testing.T) {
+	holds := &stubServiceHolds{byReason: map[domain.AutoDisabledReason]int64{
+		domain.DisabledGeoAutoSuspend: 2,
+		domain.DisabledGeoAnomaly:     5,
+		domain.DisabledServiceManual:  7,
+	}}
+	got := byType(mustList(t, newSvc(Deps{ServiceHolds: holds}, time.Now())), TypeGeoAutoSuspended)
+	if len(got) != 1 {
+		t.Fatalf("geo_auto_suspended alerts = %+v, want exactly one singleton", got)
+	}
+	a := got[0]
+	if a.Key != "geo_auto_suspended" || a.Severity != SeverityWarning || a.Count != 2 {
+		t.Fatalf("geo_auto_suspended = %+v, want key geo_auto_suspended, severity warning, count 2", a)
+	}
+	for _, r := range holds.asked {
+		if r != domain.DisabledGeoAutoSuspend {
+			t.Fatalf("asked for reason %q; the entry is about geo_auto only", r)
+		}
+	}
+
+	none := &stubServiceHolds{byReason: map[domain.AutoDisabledReason]int64{domain.DisabledGeoAnomaly: 5}}
+	if got := byType(mustList(t, newSvc(Deps{ServiceHolds: none}, time.Now())), TypeGeoAutoSuspended); len(got) != 0 {
+		t.Fatalf("geo_auto_suspended with no geo_auto rows = %+v, want none", got)
+	}
+	failing := &stubServiceHolds{byReason: map[domain.AutoDisabledReason]int64{domain.DisabledGeoAutoSuspend: 2}, err: errors.New("db down")}
+	if got := byType(mustList(t, newSvc(Deps{ServiceHolds: failing}, time.Now())), TypeGeoAutoSuspended); len(got) != 0 {
+		t.Fatalf("geo_auto_suspended on a count error = %+v, want none", got)
+	}
+}
+
+// Both entries lead to the Geo tab, which is admin-only because it names
+// people on a signal rather than proof. The feed route is staff-visible, so
+// AdminOnly is what keeps an operator from being handed that link.
+func TestGeoAlertsAreAdminOnly(t *testing.T) {
+	for _, typ := range []Type{TypeGeoAnomaly, TypeGeoAutoSuspended} {
+		if !typ.AdminOnly() {
+			t.Errorf("%s must be admin-only (the Geo tab is the owner's call, not an operator's)", typ)
+		}
+	}
 }

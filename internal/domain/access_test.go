@@ -25,6 +25,8 @@ func TestUserAccessSnapshotMatrix(t *testing.T) {
 		{name: "pending approval", user: &User{Enabled: false, AutoDisabledReason: DisabledPendingApproval}, account: AccountStatusPendingApproval, service: ServiceStatusAccountDisabled},
 		{name: "manual service pause", user: &User{Enabled: true, ServiceDisabledReason: DisabledServiceManual}, account: AccountStatusActive, service: ServiceStatusManualSuspended, canLogin: true},
 		{name: "policy block wins over emergency", user: &User{Enabled: true, ServiceDisabledReason: DisabledBlockedClient, EmergencyUntil: &future}, account: AccountStatusActive, service: ServiceStatusBlockedClient, canLogin: true},
+		{name: "geo auto-suspension wins over emergency", user: &User{Enabled: true, ServiceDisabledReason: DisabledGeoAutoSuspend, EmergencyUntil: &future}, account: AccountStatusActive, service: ServiceStatusManualSuspended, canLogin: true},
+		{name: "geo auto-suspension keeps login", user: &User{Enabled: true, ServiceDisabledReason: DisabledGeoAutoSuspend}, account: AccountStatusActive, service: ServiceStatusManualSuspended, canLogin: true},
 		{name: "expired", user: &User{Enabled: true, ExpireAt: &past}, account: AccountStatusActive, service: ServiceStatusExpired, canLogin: true},
 		{name: "quota exhausted", user: &User{Enabled: true, TrafficLimitBytes: 10, LifetimeTotalBytes: 10}, account: AccountStatusActive, service: ServiceStatusTrafficExceeded, canLogin: true},
 		{name: "emergency overrides expiry", user: &User{Enabled: true, ExpireAt: &past, EmergencyUntil: &future}, account: AccountStatusActive, service: ServiceStatusEmergencyActive, canLogin: true, proxy: true},
@@ -65,7 +67,7 @@ func TestAccountLoginAllowed(t *testing.T) {
 
 func TestDisableReasonAxesDoNotOverlap(t *testing.T) {
 	accountReasons := []AutoDisabledReason{DisabledManual, DisabledPendingDelete, DisabledPendingApproval, DisabledPendingEmailVerify}
-	serviceReasons := []AutoDisabledReason{DisabledServiceManual, DisabledBlockedClient, DisabledTrafficExceeded, DisabledExpired}
+	serviceReasons := []AutoDisabledReason{DisabledServiceManual, DisabledBlockedClient, DisabledTrafficExceeded, DisabledExpired, DisabledGeoAnomaly, DisabledGeoAutoSuspend}
 	for _, reason := range accountReasons {
 		if !AccountDisableReason(reason) || ServiceSuspensionReason(reason) {
 			t.Fatalf("account reason %q crossed axes", reason)

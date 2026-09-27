@@ -684,6 +684,23 @@ func eventWindowKey(reason string) string {
 	return reason + "@" + time.Now().UTC().Format("2006-01-02T15:04")
 }
 
+// serviceSuspendWindowKey is the dedup key for a service-suspension mail. Every
+// reason keeps eventWindowKey's per-minute bucket except geo_auto, which is per
+// user per UTC day: the detector lifts its own suspension on a timer and a
+// persistent sharer is re-suspended soon after, all day long, so a minute
+// bucket would mail them on every cycle. The first mail of the day already
+// says service comes back by itself, which is all the later ones would repeat.
+//
+// Trade-off, accepted: a reserved slot is at-most-once (see maybeSend), so if
+// SMTP fails on the day's first geo_auto mail, its queued retry finds the day
+// already taken and that day's mail is lost rather than resent.
+func serviceSuspendWindowKey(reason string, now time.Time) string {
+	if reason == string(domain.DisabledGeoAutoSuspend) {
+		return reason + "@" + now.UTC().Format("2006-01-02")
+	}
+	return reason + "@" + now.UTC().Format("2006-01-02T15:04")
+}
+
 // SendAccountDisabledToUser is a convenience wrapper for sending disable notification.
 func (s *Service) SendAccountDisabledToUser(ctx context.Context, userID int64, disableReason, disableDetail string) error {
 	u, err := s.users.GetByID(ctx, userID)
@@ -785,6 +802,12 @@ func serviceSuspendReasonText(reason string) string {
 		// was observed and that a person made the call, so a wrongly-suspended
 		// user knows what to dispute.
 		return "检测到账号在多个地区同时使用，管理员已暂停服务；如有疑问请联系管理员"
+	case string(domain.DisabledGeoAutoSuspend):
+		// The detector's own, time-boxed suspension. Same care as geo_anomaly
+		// not to state the suspicion as fact, but it must not claim a person
+		// decided, and it says the pause ends by itself: the automatic lift
+		// sends no restore mail, so this is the only notice of that.
+		return "检测到账号在多个地区同时使用，代理服务已临时暂停，到时会自动恢复；如有疑问请联系管理员"
 	case string(domain.DisabledExpired):
 		return "订阅已到期"
 	case "":
@@ -839,8 +862,9 @@ func (s *Service) SendServiceSuspendedNotification(ctx context.Context, u *domai
 	// Per-(user, reason, minute) dedup — same backstop as the account-disable
 	// path. The reason prefix keeps a manual-suspend mail from being masked by a
 	// same-minute quota mail, and the minute bucket lets a real later state change
-	// re-notify (see eventWindowKey).
-	windowKey := eventWindowKey(reason)
+	// re-notify (see eventWindowKey). geo_auto is the one per-day exception; see
+	// serviceSuspendWindowKey.
+	windowKey := serviceSuspendWindowKey(reason, time.Now())
 	uiCfg, uiErr := s.settings.Load(ctx, ports.UISettings{})
 	if uiErr != nil {
 		log.Warn("mailer settings.Load", "err", uiErr)

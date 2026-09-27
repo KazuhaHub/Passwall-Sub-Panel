@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/alert"
@@ -118,5 +119,56 @@ func TestAdminAlerts_MixedBackendsKeepUpgradeTargetsAndCountsIsolated(t *testing
 				}
 			}
 		})
+	}
+}
+
+type alGeoFlags struct{ n int64 }
+
+func (a alGeoFlags) CountFlagged(context.Context, time.Time) (int64, error) { return a.n, nil }
+
+type alServiceHolds struct{ n int64 }
+
+func (a alServiceHolds) CountByServiceDisabledReason(_ context.Context, r domain.AutoDisabledReason) (int64, error) {
+	if r == domain.DisabledGeoAutoSuspend {
+		return a.n, nil
+	}
+	return 0, nil
+}
+
+// The feed route is staff-visible; the Geo tab both entries lead to is not,
+// because it names people on a signal rather than proof. An operator must
+// get neither entry nor a badge count that includes them — the admin, on the
+// same service, gets both.
+func TestAdminAlerts_OperatorNeverSeesGeoAlerts(t *testing.T) {
+	svc := alert.New(alert.Deps{
+		Nodes:        alNodes{n: []*domain.Node{{ID: 1, DisplayName: "n1", Enabled: true, HealthState: domain.NodeHealthUnreachable}}},
+		GeoFlags:     alGeoFlags{n: 2},
+		ServiceHolds: alServiceHolds{n: 1},
+	})
+	h := NewAdminAlertsHandler(svc)
+
+	c, rr := claimsCtx(domain.RoleAdmin)
+	c.Request = httptest.NewRequest(http.MethodGet, "/api/admin/alerts", nil)
+	h.List(c)
+	admin := rr.Body.String()
+	if !strings.Contains(admin, `"geo_anomaly"`) || !strings.Contains(admin, `"geo_auto_suspended"`) {
+		t.Fatalf("admin must see both geo entries: %s", admin)
+	}
+
+	c, rr = claimsCtx(domain.RoleOperator)
+	c.Request = httptest.NewRequest(http.MethodGet, "/api/admin/alerts", nil)
+	h.List(c)
+	op := rr.Body.String()
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d, want 200", rr.Code)
+	}
+	if !strings.Contains(op, `"node_health"`) {
+		t.Fatalf("operator must still see node_health: %s", op)
+	}
+	if strings.Contains(op, `"geo_anomaly"`) || strings.Contains(op, `"geo_auto_suspended"`) {
+		t.Fatalf("operator must NOT see the geo entries (the Geo tab is admin-only): %s", op)
+	}
+	if !strings.Contains(op, `"warning":0`) {
+		t.Fatalf("counts must be recomputed without the geo warnings: %s", op)
 	}
 }

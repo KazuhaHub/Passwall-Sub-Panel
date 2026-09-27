@@ -6,6 +6,8 @@ import (
 	"net/http/httptest"
 	"reflect"
 	"testing"
+
+	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 )
 
 // ListLiveClientIPs feeds the only per-USER connection figure PSP has, and
@@ -114,6 +116,121 @@ func TestListLiveClientIPs_FailureIsAnErrorNotAnEmptyResult(t *testing.T) {
 	defer srv.Close()
 	c := &Client{baseURL: srv.URL, http: srv.Client(), apiToken: "t"}
 	if _, err := c.ListLiveClientIPs(context.Background()); err == nil {
+		t.Fatal("a failed read must not be indistinguishable from an idle panel")
+	}
+}
+
+// ---- ListLiveClientIPDetails ----------------------------------------------
+//
+// The detail read keeps what the plain read throws away: which node saw the
+// address and when it last did. Without the timestamp, 30 minutes of
+// upstream memory reads as "connected right now", and one commuter reads as
+// several cities at once.
+
+func details(t *testing.T, body string) map[string][]domain.LiveIPSighting {
+	t.Helper()
+	got, err := liveIPServer(t, body).ListLiveClientIPDetails(context.Background())
+	if err != nil {
+		t.Fatalf("ListLiveClientIPDetails: %v", err)
+	}
+	return got
+}
+
+func TestListLiveClientIPDetails_KeepsNodeAndTimestamp(t *testing.T) {
+	got := details(t, `{"success":true,"obj":{
+		"guid-b":{"u7@x":[{"ip":"2.2.2.2","timestamp":1727000100}]},
+		"guid-a":{"u7@x":[{"ip":" 1.1.1.1 ","timestamp":1727000000}],"u8@x":[{"ip":"3.3.3.3","timestamp":1727000050}]}
+	}}`)
+	want := map[string][]domain.LiveIPSighting{
+		"u7@x": {{IP: "1.1.1.1", Node: "guid-a", SeenAt: 1727000000}, {IP: "2.2.2.2", Node: "guid-b", SeenAt: 1727000100}},
+		"u8@x": {{IP: "3.3.3.3", Node: "guid-a", SeenAt: 1727000050}},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("sightings = %+v, want %+v", got, want)
+	}
+}
+
+// No timestamp is "unknown", which the freshness rule reads as live — the
+// behaviour before timestamps were read at all. Never an error.
+func TestListLiveClientIPDetails_MissingTimestampIsZero(t *testing.T) {
+	got := details(t, `{"success":true,"obj":{"g":{"u7@x":[{"ip":"1.1.1.1"}]}}}`)
+	want := []domain.LiveIPSighting{{IP: "1.1.1.1", Node: "g", SeenAt: 0}}
+	if !reflect.DeepEqual(got["u7@x"], want) {
+		t.Fatalf("sightings = %+v, want %+v", got["u7@x"], want)
+	}
+}
+
+// Every supported 3X-UI serves seconds. A millisecond value (a fork, a
+// future change) would otherwise sit 1000x in the future, become its node's
+// reference, and make every real address on that node read as stale.
+func TestListLiveClientIPDetails_MillisecondsNormalised(t *testing.T) {
+	got := details(t, `{"success":true,"obj":{"g":{"u7@x":[{"ip":"1.1.1.1","timestamp":1727000000123}]}}}`)
+	if s := got["u7@x"]; len(s) != 1 || s[0].SeenAt != 1727000000 {
+		t.Fatalf("sightings = %+v, want SeenAt 1727000000", s)
+	}
+}
+
+// One odd field must not cost the whole panel its read: an error here marks
+// every user on the panel unread. A timestamp that cannot be read is
+// "unknown", and a number that arrives as a float or a quoted string is
+// still read.
+func TestListLiveClientIPDetails_MalformedTimestampIsUnknownNotAnError(t *testing.T) {
+	got := details(t, `{"success":true,"obj":{"g":{
+		"a@x":[{"ip":"1.1.1.1","timestamp":"soon"}],
+		"b@x":[{"ip":"1.1.1.2","timestamp":{}}],
+		"c@x":[{"ip":"1.1.1.3","timestamp":true}],
+		"d@x":[{"ip":"1.1.1.4","timestamp":null}],
+		"e@x":[{"ip":"1.1.1.5","timestamp":-5}],
+		"f@x":[{"ip":"1.1.1.6","timestamp":"1727000000"}],
+		"g@x":[{"ip":"1.1.1.7","timestamp":1727000000.9}],
+		"h@x":[{"ip":"1.1.1.8","timestamp":1e400}]
+	}}}`)
+	want := map[string]int64{
+		"a@x": 0, "b@x": 0, "c@x": 0, "d@x": 0, "e@x": 0,
+		"f@x": 1727000000, "g@x": 1727000000, "h@x": 0,
+	}
+	for email, at := range want {
+		if s := got[email]; len(s) != 1 || s[0].SeenAt != at {
+			t.Errorf("%s: sightings = %+v, want SeenAt %d", email, s, at)
+		}
+	}
+}
+
+// One 3X-UI can front several nodes, and each scans on its own clock, so
+// the same address on two nodes is two sightings here. (The plain read
+// still folds them into one address; see the test above.) The same address
+// twice on ONE node is one sighting at its newest time.
+func TestListLiveClientIPDetails_SameIPOnTwoNodesKeepsBoth(t *testing.T) {
+	got := details(t, `{"success":true,"obj":{
+		"guid-b":{"u7@x":[{"ip":"1.1.1.1","timestamp":20}]},
+		"guid-a":{"u7@x":[{"ip":"1.1.1.1","timestamp":10},{"ip":"1.1.1.1","timestamp":30},{"ip":"","timestamp":99}],"":[{"ip":"9.9.9.9"}]}
+	}}`)
+	want := map[string][]domain.LiveIPSighting{"u7@x": {
+		{IP: "1.1.1.1", Node: "guid-a", SeenAt: 30},
+		{IP: "1.1.1.1", Node: "guid-b", SeenAt: 20},
+	}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("sightings = %+v, want %+v", got, want)
+	}
+}
+
+// nil means "plain reader, nothing to judge freshness by" one layer up. An
+// idle detail reader must say "nobody", not "no clock".
+func TestListLiveClientIPDetails_EmptyIsAnEmptyMapNotNil(t *testing.T) {
+	got := details(t, `{"success":true,"obj":{}}`)
+	if got == nil || len(got) != 0 {
+		t.Fatalf("sightings = %#v, want a non-nil empty map", got)
+	}
+}
+
+// A failed read is an error, never "nobody is connected".
+func TestListLiveClientIPDetails_FailureIsAnError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+	c := &Client{baseURL: srv.URL, http: srv.Client(), apiToken: "t"}
+	if _, err := c.ListLiveClientIPDetails(context.Background()); err == nil {
 		t.Fatal("a failed read must not be indistinguishable from an idle panel")
 	}
 }

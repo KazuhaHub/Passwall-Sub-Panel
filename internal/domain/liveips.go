@@ -1,6 +1,9 @@
 package domain
 
-import "sort"
+import (
+	"sort"
+	"strings"
+)
 
 // UserLiveIPs is one user's live source IPs across the WHOLE fleet, plus how
 // much of the fleet the number actually covers.
@@ -17,7 +20,19 @@ type UserLiveIPs struct {
 	// A person on two panels from one address appears once — the same
 	// connection path, counted once, which is the whole point of
 	// aggregating per user instead of per client email.
+	//
+	// These are the addresses the upstream still REMEMBERS, not the ones
+	// connected now: 3X-UI keeps an address for 30 minutes after its last
+	// stream closed. One commuter's phone therefore reads as several places
+	// "at once" here. Judge concurrency on Fresh; IPs stays the window count
+	// the admin table has always shown.
 	IPs []string
+	// Fresh is the subset of IPs that was live at poll time, sorted. It
+	// equals IPs for a panel whose reader carries no timestamps (PSP-native
+	// nodes, plain readers), which is the v1 behaviour: with nothing to
+	// tell live from remembered, everything reads as live. Never nil on a
+	// row the aggregator produced, so "idle" and "not computed" differ.
+	Fresh []string
 	// Panels is the number of panels that contributed at least one IP for
 	// this user. Not a health signal — a user idle on a panel legitimately
 	// contributes nothing.
@@ -29,7 +44,9 @@ type UserLiveIPs struct {
 }
 
 // Count is the number this feature exists to produce: how many distinct
-// source addresses this person is using right now, fleet-wide.
+// source addresses this person used within the upstream's window (3X-UI:
+// the last 30 minutes), fleet-wide. It is not a "right now" figure; Fresh
+// is, and anything judging concurrency must use that instead.
 //
 // It is an IP count, never a device count. The data plane sees connections
 // and source addresses and has no device concept: a household behind one NAT
@@ -41,17 +58,70 @@ func (u UserLiveIPs) Count() int { return len(u.IPs) }
 // total rather than a floor.
 func (u UserLiveIPs) Complete() bool { return u.Unread == 0 }
 
+// LiveIPSighting is one address as the upstream reported it.
+//
+// SeenAt is unix SECONDS on the PANEL's clock, never PSP's: 3X-UI stamps
+// each address with the wall-clock time of its last 10-second scan that
+// still found the stream open, and comparing that to PSP's clock would turn
+// any skew between the two hosts into a false "live" or a false "gone".
+// FreshLiveIPs only ever compares a timestamp to other timestamps from the
+// same node. 0 means "no timestamp" and reads as live — the v1 behaviour,
+// and all a PSP-native node can offer, since its wire format has none.
+type LiveIPSighting struct {
+	IP string
+	// Node is the upstream node guid; "" when the adapter has no node
+	// layer. Kept because freshness is judged per node: one 3X-UI can
+	// front several nodes whose scans are independent.
+	Node   string
+	SeenAt int64
+}
+
 // PanelLiveIPs is one panel's answer: client email -> that email's live IPs.
 // A nil map with Err set means the panel could not be read; the aggregator
 // keeps those separate from "read fine, nobody online" rather than letting
 // the two collapse into the same zero.
 type PanelLiveIPs struct {
 	PanelID int64
+	// ByEmail is every address in the upstream's retention window.
 	ByEmail map[string][]string
+	// Sightings is the same answer with node and last-seen kept, from a
+	// reader that has them. nil means a plain reader: there is nothing to
+	// judge freshness by, so every address counts as live.
+	Sightings map[string][]LiveIPSighting
+	// Fresh is set by FreshLiveIPs: the addresses live at poll time. nil
+	// means "not computed" and the aggregator falls back to ByEmail — never
+	// "nobody is live", which is a non-nil empty map.
+	Fresh map[string][]string
 	// Err marks a panel that could not be read this cycle — including one
 	// whose adapter does not implement the read at all. Its users are
 	// counted as Unread, never as zero.
 	Err error
+}
+
+// LiveIPsOf flattens sightings to the plain email -> addresses shape:
+// distinct, trimmed, non-empty, sorted addresses per non-empty email, and
+// an email left with no address omitted. It is the one flattening rule, so
+// a detail reader's ByEmail cannot drift from what a plain reader returns.
+func LiveIPsOf(s map[string][]LiveIPSighting) map[string][]string {
+	out := make(map[string][]string, len(s))
+	for email, list := range s {
+		if email == "" {
+			continue
+		}
+		set := map[string]struct{}{}
+		for _, x := range list {
+			if ip := strings.TrimSpace(x.IP); ip != "" {
+				set[ip] = struct{}{}
+			}
+		}
+		if len(set) > 0 {
+			// Sorted so a caller comparing two snapshots, or a test
+			// asserting on the value, is not reading Go's randomized map
+			// order.
+			out[email] = sortedKeys(set)
+		}
+	}
+	return out
 }
 
 // clientKey identifies a client row the way the fleet does: an email is
@@ -79,13 +149,20 @@ type ClientKey struct {
 // A caller asking "who is over their cap" needs the zeroes to distinguish
 // "idle" from "not looked at", and a caller building a distribution needs
 // them or the histogram is conditioned on being online.
+//
+// Fresh is folded the same way from each panel's Fresh, or from its ByEmail
+// when FreshLiveIPs never ran on it (nil), and never counts toward Panels:
+// "contributed an address" is a statement about the window, and IPs,
+// Panels and Unread mean exactly what they meant before freshness existed.
 func AggregateLiveIPsByUser(panels []PanelLiveIPs, owners map[ClientKey]int64) map[int64]UserLiveIPs {
 	// Seed every known user so absence is representable.
 	acc := map[int64]map[string]struct{}{}
+	fresh := map[int64]map[string]struct{}{}
 	panelsSeen := map[int64]map[int64]struct{}{}
 	for _, uid := range owners {
 		if acc[uid] == nil {
 			acc[uid] = map[string]struct{}{}
+			fresh[uid] = map[string]struct{}{}
 			panelsSeen[uid] = map[int64]struct{}{}
 		}
 	}
@@ -122,6 +199,21 @@ func AggregateLiveIPsByUser(panels []PanelLiveIPs, owners map[ClientKey]int64) m
 				panelsSeen[uid][p.PanelID] = struct{}{}
 			}
 		}
+		live := p.Fresh
+		if live == nil {
+			live = p.ByEmail
+		}
+		for email, ips := range live {
+			uid, ok := owners[ClientKey{PanelID: p.PanelID, Email: email}]
+			if !ok {
+				continue
+			}
+			for _, ip := range ips {
+				if ip != "" {
+					fresh[uid][ip] = struct{}{}
+				}
+			}
+		}
 	}
 
 	out := make(map[int64]UserLiveIPs, len(acc))
@@ -131,9 +223,16 @@ func AggregateLiveIPsByUser(panels []PanelLiveIPs, owners map[ClientKey]int64) m
 			ips = append(ips, ip)
 		}
 		sort.Strings(ips)
+		// Seeded non-nil: an idle user's Fresh is a computed empty.
+		live := make([]string, 0, len(fresh[uid]))
+		for ip := range fresh[uid] {
+			live = append(live, ip)
+		}
+		sort.Strings(live)
 		out[uid] = UserLiveIPs{
 			UserID: uid,
 			IPs:    ips,
+			Fresh:  live,
 			Panels: len(panelsSeen[uid]),
 			Unread: unread[uid],
 		}

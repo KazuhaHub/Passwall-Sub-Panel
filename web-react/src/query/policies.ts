@@ -206,6 +206,17 @@ export const policies = {
     refetchInterval: false,
     note: 'Form-backed record; editors keep drafts locally, writes invalidate.',
   },
+  /**
+   * Which location database is active, for the Geo tab's banner. Not polled:
+   * it changes only when an admin swaps or updates the database, and a banner
+   * a minute late costs nothing.
+   */
+  geoIPStatus: {
+    staleTime: 60 * SECOND,
+    gcTime: 5 * MINUTE,
+    refetchInterval: false,
+    note: 'Advisory banner input; revalidates on tab focus like the verdicts beside it.',
+  },
 } as const satisfies Record<string, ResourcePolicy>
 
 export type PolicyName = keyof typeof policies

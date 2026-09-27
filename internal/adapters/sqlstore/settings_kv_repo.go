@@ -440,15 +440,28 @@ func settingDescriptors(s *ports.UISettings) []settingDescriptor {
 		intField("notify", "traffic_remain_percent", &s.TrafficRemainPercent),
 
 		// geo_anomaly --- concurrent-location anomaly policy (traffic poll).
-		// Per-group overridable; see ports.OverridableScopeKeys and
-		// docs/connection-limits.md §12.3.
+		// Per-group overridable except ignore_addresses, which is global only;
+		// see ports.OverridableScopeKeys and docs/connection-limits.md §12.3.
+		// Every int here stores 0 for "never configured" and is NOT defaulted
+		// in applyUISettingsDefaults: domain.GeoPolicyFromSettings owns that
+		// rule, and a group override of 0 must mean the same thing.
 		strField("geo_anomaly", "scope", &s.GeoAnomalyScope),
 		intField("geo_anomaly", "max_places", &s.GeoAnomalyMaxPlaces),
+		intField("geo_anomaly", "max_regions", &s.GeoAnomalyMaxRegions),
+		intField("geo_anomaly", "max_cities", &s.GeoAnomalyMaxCities),
 		intField("geo_anomaly", "flag_after_polls", &s.GeoAnomalyFlagAfterPolls),
 		intField("geo_anomaly", "clear_after_polls", &s.GeoAnomalyClearAfterPolls),
 		floatField("geo_anomaly", "min_placed_ratio", &s.GeoAnomalyMinPlacedRatio),
 		strField("geo_anomaly", "co_travel", &s.GeoAnomalyCoTravel),
 		boolField("geo_anomaly", "allow_anywhere", &s.GeoAnomalyAllowAnywhere),
+		strField("geo_anomaly", "ignore_addresses", &s.GeoAnomalyIgnoreAddresses),
+		// geo_anomaly --- automatic temporary suspension (off by default).
+		boolField("geo_anomaly", "ban_enabled", &s.GeoAnomalyBanEnabled),
+		intField("geo_anomaly", "ban_max_countries", &s.GeoAnomalyBanMaxCountries),
+		intField("geo_anomaly", "ban_max_regions", &s.GeoAnomalyBanMaxRegions),
+		intField("geo_anomaly", "ban_max_cities", &s.GeoAnomalyBanMaxCities),
+		intField("geo_anomaly", "ban_after_polls", &s.GeoAnomalyBanAfterPolls),
+		intField("geo_anomaly", "ban_duration_minutes", &s.GeoAnomalyBanDurationMinutes),
 
 		// geo --- IP geolocation for access-log region display (offline .mmdb)
 		boolField("geo", "geo_ip_enabled", &s.GeoIPEnabled),
