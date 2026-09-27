@@ -176,13 +176,45 @@ describe('riskCodeText', () => {
 
   it('renders a code without evidence, which carries no numbers', () => {
     expect(riskCodeText(sig('devices', 'disabled', { code: 'capture_off' }), zhT)).toBe('设备标识采集已关闭')
-    expect(riskCodeText(sig('usage_shift', 'idle', { code: 'no_usage' }), enT)).toBe('No usage in the last 7 days')
+    // The judged days are a setting now, and an idle row carries no evidence
+    // to say how many there were, so the sentence names none.
+    expect(riskCodeText(sig('usage_shift', 'idle', { code: 'no_usage' }), enT)).toBe('No usage in the judged days')
   })
 
   it('falls back to the code itself for one this build does not know', () => {
     // A newer server may add a branch before this SPA learns it; the raw
     // code is still more than a blank tooltip.
     expect(riskCodeText(sig('devices', 'unknown', { code: 'teleported' }), zhT)).toBe('teleported')
+  })
+})
+
+describe('usage_shift reasons', () => {
+  const usage = (code: string, ev: object, t = zhT) => riskCodeText(sig('usage_shift', 'unknown', { code, evidence: ev }), t)
+
+  it('usage reasons read their days from the evidence, with 7/14/4 fallbacks', () => {
+    // A verdict judged with a 14-day baseline, 3 judged days, a 7-day
+    // warm-up and flag at 2 says so: the sentence names the days that
+    // applied to this account's group, never the shipped ones.
+    const judged = {
+      ...evidence.usage_shift, series: new Array(17).fill(0), history_retention_days: 17,
+      baseline_days: 14, recent_days: 3, warmup_days: 7, flag_days: 2, suspect_days: 2, over_days: 2,
+    }
+    expect(usage('sustained', judged)).toBe('最近 3 天有 2 天超过自身基线的 3 倍')
+    expect(usage('building', judged)).toBe('最近 3 天有 2 天超过自身基线的 3 倍（满 2 天标记）')
+    expect(usage('within', judged, enT)).toBe("2 of the last 3 days above 3× the account's own baseline")
+    expect(usage('warmup', judged)).toBe('用量历史只有 9 天，满 7 天后开始判断')
+    // The hourly history must cover the whole series and the day the prune
+    // is partway through: 14 + 3 + 1.
+    expect(usage('retention_short', judged)).toBe('流量历史只保留 17 天，少于判断所需的 18 天')
+
+    // A row stored before the days were settings carries none of them, and
+    // was judged with the shipped 28 + 7, warm-up 14 and flag at 4.
+    const stored = { ...evidence.usage_shift }
+    expect(usage('building', stored)).toBe('最近 7 天有 4 天超过自身基线的 3 倍（满 4 天标记）')
+    expect(usage('warmup', stored)).toBe('用量历史只有 9 天，满 14 天后开始判断')
+    expect(usage('retention_short', stored)).toBe('流量历史只保留 35 天，少于判断所需的 36 天')
+    // Its series is the fixed 35 days whatever else is missing.
+    expect(usage('retention_short', { ...stored, series: new Array(35).fill(0) })).toBe('流量历史只保留 35 天，少于判断所需的 36 天')
   })
 })
 
@@ -214,6 +246,16 @@ describe('riskPolicy', () => {
     expect(riskPolicy(s({}))).toEqual(def)
     expect(riskPolicy(s({ risk_min_days: 0, risk_max_devices: 0, risk_usage_ratio: 0, risk_usage_floor_gb: 0 }))).toEqual(def)
     expect(riskPolicy(s({ risk_min_days: -2, risk_max_devices: -1, risk_usage_ratio: -3, risk_usage_floor_gb: -4 }))).toEqual(def)
+  })
+
+  it('holds min_days to the fetch window in effect', () => {
+    // RiskPolicy.Bounded: a place cannot recur on more days than the window
+    // holds, and the window is a setting whose value in effect the server
+    // reports. Without the map (an older server) the structural 7 applies.
+    expect(riskPolicy(s({ risk_min_days: 5, runtime_effective: { risk_window_days: 3 } })).minDays).toBe(3)
+    expect(riskPolicy(s({ runtime_effective: { risk_window_days: 2 } })).minDays).toBe(2)
+    expect(riskPolicy(s({ risk_min_days: 5, runtime_effective: {} })).minDays).toBe(5)
+    expect(riskPolicy(s({ risk_min_days: 9 })).minDays).toBe(7)
   })
 
   it('repairs toward not accusing, as the server does', () => {

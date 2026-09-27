@@ -96,24 +96,34 @@ export interface DevicesEvidence {
   clients: { label: string; days: number }[]
 }
 
-/** usage_shift: 35 panel-local days of bytes, oldest first, and every number
- *  the last seven were held to. */
+/** usage_shift: the panel-local days of bytes, oldest first (35 shipped: 28
+ *  baseline days, then 7 judged ones), and every number the judged days were
+ *  held to. */
 export interface UsageShiftEvidence {
   v: number
   end_date: string
   history_retention_days?: number
-  /** 35 daily totals in bytes: 28 baseline days, then the 7 judged ones. */
+  /** Daily totals in bytes: the baseline days, then the judged ones. */
   series: number[]
   history_days: number
   median: number
   ratio: number
   /** Bytes. */
   floor: number
-  /** One per judged day (the last seven), oldest first; empty before judging. */
+  /** One per judged day, oldest first; empty before judging. */
   thresholds: number[]
   over: boolean[]
   over_days: number
   fleet_factors: number[]
+  /** The days the verdict was judged with, "unset" already resolved: the
+   *  fleet's baseline and judged days, and the group's warm-up, flag and
+   *  suspect days. Absent on a row stored before they were settings, which
+   *  was judged with the shipped 28 / 7 / 14 / 4 / 2. */
+  baseline_days?: number
+  recent_days?: number
+  warmup_days?: number
+  flag_days?: number
+  suspect_days?: number
 }
 
 /** login_country: panel logins by country, and the ones from a new one. */

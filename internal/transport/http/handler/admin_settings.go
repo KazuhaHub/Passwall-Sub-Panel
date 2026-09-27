@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"encoding/json"
 	"net/http"
 	"strings"
 	"time"
@@ -167,6 +168,16 @@ type settingsDTO struct {
 	RiskLiveSnapshotStaleMinutes   int `json:"risk_live_snapshot_stale_minutes"`
 	RiskLiveRefreshCooldownSeconds int `json:"risk_live_refresh_cooldown_seconds"`
 	RiskDeviceInferHours           int `json:"risk_device_infer_hours"`
+	// Read-only, response only: for each of the 23 geo and risk runtime
+	// knobs above, the number the panel runs with and the shipped default
+	// an unset knob falls back to (ports.RuntimeEffective), keyed by the
+	// knob's json tag. The fields above echo what is STORED (0 = unset, and
+	// out-of-range values as typed); these say what that became, so the
+	// settings page shows "in effect" and a default placeholder without
+	// holding a copy of any default or clamp. settingsRequest shadows both
+	// keys, so a PUT never reads them, whatever the client sends back.
+	RuntimeEffective map[string]int `json:"runtime_effective"`
+	RuntimeDefaults  map[string]int `json:"runtime_defaults"`
 	// Geo IP (access-log region display, offline .mmdb).
 	GeoIPEnabled             bool   `json:"geo_ip_enabled"`
 	GeoIPDBFile              string `json:"geo_ip_db_file"`
@@ -244,6 +255,12 @@ type settingsRequest struct {
 	NodeTaskOfflineReconcileDays *int `json:"node_task_offline_reconcile_days"`
 	NodeTaskBackupRestoreDays    *int `json:"node_task_backup_restore_days"`
 	NodeTaskResultRetentionDays  *int `json:"node_task_result_retention_days"`
+	// The response-only runtime maps, shadowed as raw JSON so the embedded
+	// DTO's typed maps are never decoded. The SPA posts back the whole
+	// object it read, maps included; a tab loaded before a change to their
+	// shape must still save, and nothing in them is ever stored.
+	RuntimeEffective json.RawMessage `json:"runtime_effective"`
+	RuntimeDefaults  json.RawMessage `json:"runtime_defaults"`
 }
 
 func nodeTaskLifecyclePolicyFromSettings(s ports.UISettings) domain.NodeTaskLifecyclePolicy {
@@ -304,7 +321,13 @@ func (h *AdminSettingsHandler) Get(c *gin.Context) {
 // other (the drift that briefly broke the 2FA totp_enabled round-trip).
 func settingsToDTO(s ports.UISettings) settingsDTO {
 	policy := nodeTaskLifecyclePolicyFromSettings(s)
+	// From the same settings the DTO echoes: after a PUT that is what was
+	// just saved, so the page reads the new values in effect off the save.
+	effective, defaults := ports.RuntimeEffective(s)
 	return settingsDTO{
+		RuntimeEffective: effective,
+		RuntimeDefaults:  defaults,
+
 		LoginMode:                   s.LoginMode,
 		SiteTitle:                   s.SiteTitle,
 		AppTitle:                    s.AppTitle,

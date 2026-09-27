@@ -89,7 +89,7 @@ export default function RiskSignalsTab({ onOpenGeo, onOpenUser }: {
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
       <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant }}>
         {t('admin:risk_signals.intro', {
-          defaultValue: '除「异地并发」外的四种只提示信号，每小时按账号重新计算：订阅多地（跨天、按客户端合并的省份）、设备数（客户端声明的 x-hwid）、用量变化（与自己过去 4 周相比）和登录国家（面板登录出现新国家）。它们都不会暂停或修改任何账号；「无法判断」「无数据」不等于「正常」。默认只列出需要关注的账号。',
+          defaultValue: '除「异地并发」外的四种只提示信号，定期（默认每小时）按账号重新计算：订阅多地（跨天、按客户端合并的省份）、设备数（客户端声明的 x-hwid）、用量变化（与自己基线期（默认 4 周）相比）和登录国家（面板登录出现新国家）。它们都不会暂停或修改任何账号；「无法判断」「无数据」不等于「正常」。默认只列出需要关注的账号。',
         })}
       </Typography>
       <FormControlLabel
@@ -119,7 +119,7 @@ export default function RiskSignalsTab({ onOpenGeo, onOpenUser }: {
                       has and nothing needs a look. The second must not read
                       as the first, or a working worker looks broken. */}
                   {(data?.length ?? 0) === 0
-                    ? t('admin:risk_signals.empty', { defaultValue: '还没有计算结果——风险信号每小时计算一次。' })
+                    ? t('admin:risk_signals.empty', { defaultValue: '还没有计算结果——风险信号按设定的间隔（默认每小时）计算。' })
                     : t('admin:risk_signals.empty_attention', { defaultValue: '目前没有需要关注的账号。' })}
                 </Typography>
               </TableCell></TableRow>
@@ -419,20 +419,25 @@ function DevicesPanel({ ev }: { ev: DevicesEvidence }) {
 
 function UsagePanel({ ev }: { ev: UsageShiftEvidence }) {
   const { t } = useTranslation(['admin'])
-  // The numbers exist only once the week was judged; a warm-up or a short
-  // history carries the series alone, and a caption of zeros would read as
-  // a judgement.
+  // The numbers exist only once the judged days were judged; a warm-up or a
+  // short history carries the series alone, and a caption of zeros would
+  // read as a judgement.
   const judged = (ev.thresholds ?? []).length > 0
+  // Both lengths are settings, so the title counts the bars it draws and
+  // the caption the days the verdict judged. A row stored before they were
+  // settings carries no recent_days and was judged over the shipped seven.
+  const days = (ev.series ?? []).length
+  const recent = ev.recent_days ?? 7
   return (
     <>
       <Caption>{t('admin:risk_signals.usage_title', {
-        end: ev.end_date, defaultValue: `最近 35 天每日用量（截至 ${ev.end_date}）`,
+        days, end: ev.end_date, defaultValue: `最近 ${days} 天每日用量（截至 ${ev.end_date}）`,
       })}</Caption>
       <UsageBars ev={ev} />
       {judged && (
         <Caption>{t('admin:risk_signals.usage_caption', {
-          median: formatGB(ev.median), ratio: ev.ratio, floor: formatGB(ev.floor), over: ev.over_days,
-          defaultValue: `基线中位数 ${formatGB(ev.median)}，倍数 ${ev.ratio}，每日下限 ${formatGB(ev.floor)}；最近 7 天超标 ${ev.over_days} 天`,
+          median: formatGB(ev.median), ratio: ev.ratio, floor: formatGB(ev.floor), over: ev.over_days, recent,
+          defaultValue: `基线中位数 ${formatGB(ev.median)}，倍数 ${ev.ratio}，每日下限 ${formatGB(ev.floor)}；最近 ${recent} 天超标 ${ev.over_days} 天`,
         })}</Caption>
       )}
     </>
@@ -440,10 +445,11 @@ function UsagePanel({ ev }: { ev: UsageShiftEvidence }) {
 }
 
 /**
- * The 35-day series as bars, oldest first. Each judged day (the last seven)
- * carries a tick at the threshold it was held to, and its bar is drawn in the
- * error colour when it went over — the thresholds already include the fleet
- * factor and the floor, so the tick is the line the day actually crossed.
+ * The series as bars, oldest first: the baseline days, then the judged ones.
+ * Each judged day carries a tick at the threshold it was held to, and its bar
+ * is drawn in the error colour when it went over — the thresholds already
+ * include the fleet factor and the floor, so the tick is the line the day
+ * actually crossed.
  */
 function UsageBars({ ev }: { ev: UsageShiftEvidence }) {
   const md = useTheme().palette.md
@@ -484,6 +490,9 @@ function LoginPanel({ ev }: { ev: LoginCountryEvidence }) {
   const known = ev.known ?? []
   const events = ev.events ?? []
   const s = ev.skipped ?? { infra: 0, internal: 0, listed: 0, node_country: 0, unplaced: 0 }
+  // "Recent" is the hold, a per-group setting: the logins counted as recent
+  // are the ones inside the hold this verdict was judged with.
+  const hold = ev.hold_days ?? 7
   return (
     <>
       <Line>
@@ -503,9 +512,9 @@ function LoginPanel({ ev }: { ev: LoginCountryEvidence }) {
         </Line>
       ))}
       <Caption>{t('admin:risk_signals.login_counts', {
-        lookback: ev.lookback_days, logins: ev.logins, recent: ev.recent, judged: ev.judged,
+        lookback: ev.lookback_days, logins: ev.logins, recent: ev.recent, judged: ev.judged, hold,
         infra: s.infra, internal: s.internal, listed: s.listed, node_country: s.node_country, unplaced: s.unplaced,
-        defaultValue: `${ev.lookback_days} 天内登录 ${ev.logins} 次；最近 7 天 ${ev.recent} 次，其中已判断 ${ev.judged} 次；跳过：本机节点 ${s.infra}、内网 ${s.internal}、忽略名单 ${s.listed}、节点所在国家 ${s.node_country}、无法定位 ${s.unplaced}`,
+        defaultValue: `${ev.lookback_days} 天内登录 ${ev.logins} 次；最近 ${hold} 天 ${ev.recent} 次，其中已判断 ${ev.judged} 次；跳过：本机节点 ${s.infra}、内网 ${s.internal}、忽略名单 ${s.listed}、节点所在国家 ${s.node_country}、无法定位 ${s.unplaced}`,
       })}</Caption>
     </>
   )
