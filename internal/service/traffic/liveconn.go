@@ -440,3 +440,53 @@ func judgedConnections(conns []domain.LiveConnection, judged map[int64]domain.Ge
 	}
 	return out
 }
+
+// FlagRecorder is where the poll records the changes it makes: the flag
+// history (flag_records, the risk center's 标记记录). Append adds records
+// and can do nothing else — no read, no rewrite, no delete — so no verdict
+// can be drawn from the history (only the streaks drive geo_auto), and
+// nothing the detector runs can change what it says happened
+// (TestFlagRecorderIsAppendOnly). An interface, like the streak store, so
+// the poll runs on a fake in tests and on nothing at all where the history
+// is not wired.
+//
+// Two producers write through it: the judging step, for every change of an
+// account's geo attention level (domain.GeoFlagTransition), and Phase 4, for
+// every geo_auto suspension applied or lifted by expiry (domain.GeoAutoFlag).
+// A staff resume and a suspension written over geo_auto are the user
+// service's to record; the risk signals' changes are written by their own
+// store, in the transaction of the upsert that made them.
+type FlagRecorder interface {
+	Append(ctx context.Context, recs []domain.FlagRecord) error
+}
+
+// SetFlagRecorder late-binds the flag history. Nil is a supported state: the
+// poll judges, suspends and lifts exactly as without it and records nothing,
+// so an empty history is the only symptom of forgetting the wiring
+// (TestBuildWiresTheFlagRecorders).
+func (s *Service) SetFlagRecorder(r FlagRecorder) { s.flagRec = r }
+
+// appendFlags writes records of changes that have already happened: a
+// judged sample whose streaks were saved, a suspension or lift whose write
+// committed. So it runs detached from the caller's cancellation and bounded
+// on its own (geoFollowUpWriteTimeout), like the audit row of a committed
+// transition; a poll cancelled at that point (a closed "poll now" tab, a
+// shutdown) would otherwise leave a change the history never shows.
+//
+// Never fails the poll, and never undoes what it records: a refused write
+// loses its records, is counted (psp_flag_record_write_errors_total) and is
+// logged with the number of records and the store's error only. The records
+// carry no address, but the count is all an operator needs to know the
+// history has a gap.
+func (s *Service) appendFlags(ctx context.Context, recs []domain.FlagRecord) {
+	if s.flagRec == nil || len(recs) == 0 {
+		return
+	}
+	wctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), geoFollowUpWriteTimeout)
+	defer cancel()
+	if err := s.flagRec.Append(wctx, recs); err != nil {
+		metrics.FlagRecordWriteErrorsTotal.Inc()
+		log.Warn("flag records: could not record the location detector's changes; the changes themselves stand",
+			"records", len(recs), "err", err)
+	}
+}

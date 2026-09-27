@@ -102,6 +102,10 @@ type Service struct {
 	// connRec is the connection history (connection_history) the poll
 	// records each judged sample into; late-bound, nil records nothing.
 	connRec ConnectionRecorder
+	// flagRec is the flag history (flag_records) the poll appends each
+	// change of geo attention and each geo_auto transition to; late-bound,
+	// nil records nothing. Append-only by type (FlagRecorder).
+	flagRec FlagRecorder
 	// configPusher is wired lazily (user.Service is the implementor and
 	// is created before traffic.Service). nil = skip floor refresh on poll.
 	configPusher UserConfigPusher

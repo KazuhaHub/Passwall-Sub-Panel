@@ -568,6 +568,19 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	// TestBuildWiresTheGeoAutoSuspension guards that.
 	trafficSvc.SetGeoSuspender(userSvc)
 	trafficSvc.SetAuditRepo(repos.Audit)
+	// The flag records: the history of every change of attention level,
+	// append-only for everyone handed it. The poll appends the location
+	// verdict's changes and the geo_auto suspensions and expiry lifts it
+	// makes; the user service appends the two ways one ends outside the
+	// poll (a staff resume, another hold written over it). The risk
+	// signals' changes are written by riskSignals.Save itself, in the
+	// transaction of the upsert that made them, and the hourly cleanup below
+	// prunes the table. Both setters are nil-tolerant, so leaving either out
+	// compiles and that side's records are simply missing;
+	// TestBuildWiresTheFlagRecorders guards them.
+	flagRecords := sqlstore.NewFlagRecordRepo(db)
+	trafficSvc.SetFlagRecorder(flagRecords)
+	userSvc.SetFlagRecorder(flagRecords)
 	// The observe-only risk signals' store: a concrete repo built from the
 	// database handle like the geo streak store, not a ports.Repos field, so
 	// each consumer is handed only the narrow interface it declares — the
@@ -582,11 +595,6 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	// empty; TestBuildWiresTheConnectionRecorder guards it.
 	connHistory := sqlstore.NewConnectionHistoryRepo(db)
 	trafficSvc.SetConnectionRecorder(connHistory)
-	// The flag records: the history of every change of attention level.
-	// The risk signals' changes are written by riskSignals.Save itself, in
-	// the transaction of the upsert that made them, so this store is handed
-	// only to the hourly cleanup below for now.
-	flagRecords := sqlstore.NewFlagRecordRepo(db)
 
 	// --- transport layer ---
 	// The Node installation template is fetched from the release that published it

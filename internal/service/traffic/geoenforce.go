@@ -247,6 +247,7 @@ func (s *Service) liftDueGeoSuspensions(ctx context.Context, users []*domain.Use
 		due = due[:limit]
 	}
 
+	var flags []domain.FlagRecord
 	for i, c := range due {
 		if err := ctx.Err(); err != nil {
 			// The poll was cancelled: start no further lift. Each is due
@@ -289,10 +290,22 @@ func (s *Service) liftDueGeoSuspensions(ctx context.Context, users []*domain.Use
 			AfterJSON:  geoAuditJSON(map[string]any{"duration_minutes": minutes}),
 			At:         now,
 		})
+		// The flag history's record of the same lift: how long the box was
+		// and when it began, as a unix-ms number the SPA formats (null for a
+		// row with no timestamp, lifted at once).
+		var suspendedAtMS any
+		if u.ServiceDisabledAt != nil {
+			suspendedAtMS = u.ServiceDisabledAt.UnixMilli()
+		}
+		flags = append(flags, domain.GeoAutoFlag(u.ID, domain.FlagAutoLiftedExpiry, "expired",
+			map[string]any{"duration_minutes": minutes, "suspended_at_ms": suspendedAtMS}, now))
 		u.ServiceDisabledReason = domain.DisabledNone
 		u.ServiceDisableDetail = ""
 		u.ServiceDisabledAt = nil
 	}
+	// Only the lifts that committed are here, and they have committed, so
+	// a cancelled poll still records them (appendFlags runs detached).
+	s.appendFlags(ctx, flags)
 }
 
 // applyGeoBans applies the bans Phase 1b collected, re-checking eligibility
@@ -320,6 +333,7 @@ func (s *Service) applyGeoBans(ctx context.Context, users []*domain.User, bans [
 		}
 	}
 	var rearm map[int64]domain.GeoRecord
+	var flags []domain.FlagRecord
 	for _, b := range bans {
 		u := byID[b.UserID]
 		if !geoBanEligible(u, now) {
@@ -369,11 +383,20 @@ func (s *Service) applyGeoBans(ctx context.Context, users []*domain.User, bans [
 			}),
 			At: now,
 		})
+		// The flag history's record of the same suspension, coded by its
+		// tier, with the numbers the user's own text was built from. NOT the
+		// reason the audit row carries: that sentence names the places, and
+		// the flag history keeps no location beside an account for months.
+		flags = append(flags, domain.GeoAutoFlag(u.ID, domain.FlagAutoSuspended, string(b.Tier),
+			map[string]any{"tier": string(b.Tier), "spread": b.Spread, "duration_minutes": minutes}, now))
 		u.ServiceDisabledReason = domain.DisabledGeoAutoSuspend
 		u.ServiceDisableDetail = detail
 		at := now
 		u.ServiceDisabledAt = &at
 	}
+	// Committed suspensions only, recorded detached like their audit rows:
+	// a poll cancelled after a write landed still records it.
+	s.appendFlags(ctx, flags)
 	if len(rearm) > 0 {
 		geoAutoCount("deferred", len(rearm))
 		log.Info("geo auto-suspension: the poll was cancelled; the remaining due suspensions are deferred to their next over-sample",

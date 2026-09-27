@@ -217,9 +217,11 @@ func (c *geoPolicyCache) lookup(uid int64) geoPolicyEntry {
 // It changes no user's state and writes to no panel. Beyond the verdict it
 // stores the live-connection snapshot (in memory, for the risk center; see
 // liveconn.go), records the connections of the accounts it judged into the
-// connection history (recordConnections), and hands back the automatic
-// suspensions that are due (only where a group has armed them; off by
-// default), for PollOnce to apply at the end of the cycle (enforceGeo).
+// connection history (recordConnections), appends every change of an
+// account's geo attention to the flag history (appendFlags), and hands back
+// the automatic suspensions that are due (only where a group has armed them;
+// off by default), for PollOnce to apply at the end of the cycle
+// (enforceGeo).
 // Which of them are handed back is decided here, before the streaks are
 // saved, because that decision is also a streak write: see collectGeoBans.
 //
@@ -301,7 +303,13 @@ func (s *Service) observeLiveIPs(ctx context.Context, in liveIPInput) []geoBan {
 		}
 	}
 
-	bans, next := s.judgeLiveIPs(ctx, in, pc, agg, addrs, lookup, geoAvailable, len(panels), now)
+	bans, next, flags := s.judgeLiveIPs(ctx, in, pc, agg, addrs, lookup, geoAvailable, len(panels), now)
+
+	// The attention changes this poll made, into the flag history: only
+	// those of a step that judged from the stored streaks and saved the ones
+	// it moved to (see judgeLiveIPs). Outside the judging lock, like the
+	// history write below.
+	s.appendFlags(ctx, flags)
 
 	// This poll's detector sample, into the connection history: the
 	// connections of the accounts just judged, never of the spaced ones
@@ -314,9 +322,21 @@ func (s *Service) observeLiveIPs(ctx context.Context, in liveIPInput) []geoBan {
 
 // judgeLiveIPs is the judging step of one observation, taken under
 // geoJudgeMu: load the streaks, judge every account not judged too recently,
-// decide the due suspensions, save. It returns those suspensions for Phase 4
-// and the records it saved, whose keys are exactly the accounts this poll
-// judged.
+// decide the due suspensions, save. It returns those suspensions for Phase 4,
+// the records it saved, whose keys are exactly the accounts this poll judged,
+// and the flag records of the attention changes it made (geoFlagTransitions).
+//
+// Those flag records only when the step judged from the stored streaks AND
+// saved the ones it moved to; otherwise none at all:
+//
+//   - no streak store: every poll starts every streak from nothing, so a
+//     sharer would "enter" flagged on every poll and never leave;
+//   - the load failed: this cycle judges everyone from a clean streak (see
+//     below), so a latched account reads as newly suspect — a change that
+//     did not happen, and whose "enter" the next good poll would record a
+//     second time;
+//   - the save failed: the next poll judges from the old streak, so the
+//     change did not happen either.
 //
 // One step per poll, because polls overlap: the scheduled one and a staff
 // "poll now" run PollOnce at once with nothing else between them. Two that
@@ -336,7 +356,7 @@ func (s *Service) observeLiveIPs(ctx context.Context, in liveIPInput) []geoBan {
 // traffic metering it shares a cycle with.
 func (s *Service) judgeLiveIPs(ctx context.Context, in liveIPInput, pc *geoPolicyCache,
 	agg map[int64]domain.UserLiveIPs, addrs map[int64]domain.UserAddresses,
-	lookup domain.GeoLookup, geoAvailable bool, panels int, now time.Time) (bans []geoBan, next map[int64]domain.GeoRecord) {
+	lookup domain.GeoLookup, geoAvailable bool, panels int, now time.Time) (bans []geoBan, next map[int64]domain.GeoRecord, flags []domain.FlagRecord) {
 	s.geoJudgeMu.Lock()
 	defer s.geoJudgeMu.Unlock()
 
@@ -344,13 +364,19 @@ func (s *Service) judgeLiveIPs(ctx context.Context, in liveIPInput, pc *geoPolic
 	// from a clean streak this cycle", which under-reports (nobody reaches
 	// the flag threshold) rather than over-reports — the safe direction when
 	// the alternative is accusing people on state we could not read.
+	// loadOK says this cycle judged from what is stored, which is what makes
+	// a change of attention a change (see above).
 	prev := map[int64]domain.GeoRecord{}
+	loadOK := false
 	if s.geoStreaks != nil {
 		loaded, err := s.geoStreaks.Load(ctx)
 		if err != nil {
 			log.Warn("live-ip observe: could not load geo streaks; this cycle judges without history", "err", err)
-		} else if loaded != nil {
-			prev = loaded
+		} else {
+			loadOK = true
+			if loaded != nil {
+				prev = loaded
+			}
 		}
 	}
 
@@ -457,12 +483,45 @@ func (s *Service) judgeLiveIPs(ctx context.Context, in liveIPInput, pc *geoPolic
 
 	bans = collectGeoBans(due, in.users, next, pc, now)
 
+	saveOK := false
 	if s.geoStreaks != nil {
 		if err := s.geoStreaks.Save(ctx, next); err != nil {
 			log.Warn("live-ip observe: could not persist geo streaks; hysteresis restarts next cycle", "err", err)
+		} else {
+			saveOK = true
 		}
 	}
-	return bans, next
+	if loadOK && saveOK {
+		flags = geoFlagTransitions(prev, next, now)
+	}
+	return bans, next, flags
+}
+
+// geoFlagTransitions is the flag records of one judging step: for every
+// account judged, the change of its geo attention from the row it was judged
+// from (prev; none for an account with no row) to the row saved for it
+// (next), if there was one (domain.GeoFlagTransition). Every record is
+// stamped with the poll's instant.
+//
+// Taken from the rows as SAVED, after collectGeoBans, rather than inside the
+// judging loop: a deferred ban's row is re-armed there, and a record's params
+// must say what the stored streak says. Only the accounts in next — the ones
+// judged — are compared; a spaced account was not sampled, so it did not
+// change. Idle and unknown samples freeze the streak, so a latched account
+// that disconnects records nothing (the bell still shows it). Sorted by
+// account so one poll's records keep a stable order in the history, whose
+// tie-break within one millisecond is the order written.
+func geoFlagTransitions(prev, next map[int64]domain.GeoRecord, now time.Time) []domain.FlagRecord {
+	var out []domain.FlagRecord
+	at := now.UnixMilli()
+	for uid, rec := range next {
+		was, had := prev[uid]
+		if r, ok := domain.GeoFlagTransition(was, had, rec, at); ok {
+			out = append(out, r)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].UserID < out[j].UserID })
+	return out
 }
 
 // collectGeoBans turns this cycle's due suspensions into the ones PollOnce

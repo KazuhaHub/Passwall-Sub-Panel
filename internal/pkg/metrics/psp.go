@@ -308,6 +308,19 @@ var (
 		"psp_connection_history_write_errors_total",
 		"Traffic polls whose judged connections could not be recorded into the connection history. The poll itself is unaffected.",
 	)
+	// Flag-record writes (flag_records) that failed on the paths that do
+	// not fail with them: the traffic poll's geo attention changes and
+	// geo_auto transitions, and the user service's staff resume and
+	// replacement of a geo_auto. Each has already happened when its record
+	// is written, so the poll or the request carries on and the record is
+	// lost; without this that shows only as a Warn. One per failed write,
+	// which may carry several records. The risk signals' records are not
+	// counted here: they are written in the transaction of the upsert that
+	// caused them, and fail it.
+	FlagRecordWriteErrorsTotal = NewCounter(
+		"psp_flag_record_write_errors_total",
+		"Flag-record writes of the location detector and its automatic suspension that failed; the transitions they describe happened and are not undone.",
+	)
 	// Risk-signal refreshes (hourly by default, risk.refresh_interval_minutes),
 	// by outcome. The signals are observe-only and a failed run keeps the
 	// previous rows, so nothing else shows a worker that has quietly stopped
