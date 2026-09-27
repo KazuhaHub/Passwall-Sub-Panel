@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"math"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -17,9 +18,19 @@ func defaultUsagePolicy() UsageShiftPolicy {
 	return UsageShiftPolicy{Ratio: RiskDefaultUsageRatio, FloorBytes: RiskDefaultUsageFloorGB * RiskGiB}
 }
 
-// usageDays builds a 35-day series, oldest first: k = 0..27 is the baseline,
-// k = 28..34 the recent week.
-func usageDays(fill func(k int) int64) (s [RiskUsageSeriesDays]int64) {
+// usageSeriesDays is the shipped series length: 28 baseline days, then the 7
+// recent days that are judged.
+const usageSeriesDays = RiskUsageBaselineDays + RiskUsageRecentDays
+
+// usageDays builds a series of the shipped 35 days, oldest first: k = 0..27
+// is the baseline, k = 28..34 the recent week.
+func usageDays(fill func(k int) int64) []int64 {
+	return usageDaysOf(usageSeriesDays, fill)
+}
+
+// usageDaysOf builds an n-day series, oldest first.
+func usageDaysOf(n int, fill func(k int) int64) []int64 {
+	s := make([]int64, n)
 	for k := range s {
 		s[k] = fill(k)
 	}
@@ -27,13 +38,14 @@ func usageDays(fill func(k int) int64) (s [RiskUsageSeriesDays]int64) {
 }
 
 // soloInput is an account alone on its panel: the fleet is the account, so
-// everyone else used nothing and the fleet factor is 1 on every day.
-func soloInput(user [RiskUsageSeriesDays]int64) UsageShiftInput {
-	return UsageShiftInput{EndDate: "2026-09-24", User: user, Fleet: user}
+// everyone else used nothing and the fleet factor is 1 on every day. The
+// fleet is a copy — withFleet adds to it, and must not add to the account.
+func soloInput(user []int64) UsageShiftInput {
+	return UsageShiftInput{EndDate: "2026-09-24", User: user, Fleet: slices.Clone(user)}
 }
 
 // withFleet adds the rest of the fleet's usage to the account's own.
-func withFleet(user, others [RiskUsageSeriesDays]int64) UsageShiftInput {
+func withFleet(user, others []int64) UsageShiftInput {
 	in := soloInput(user)
 	for k := range in.Fleet {
 		in.Fleet[k] = user[k] + others[k]
@@ -43,12 +55,28 @@ func withFleet(user, others [RiskUsageSeriesDays]int64) UsageShiftInput {
 
 // steadyWithRecent is 1 GiB a day, with the listed recent days (0 = the
 // oldest of the seven) at 10 GiB.
-func steadyWithRecent(recent ...int) [RiskUsageSeriesDays]int64 {
-	s := usageDays(func(int) int64 { return usageGiB })
-	for _, i := range recent {
-		s[RiskUsageBaselineDays+i] = 10 * usageGiB
+func steadyWithRecent(recent ...int) []int64 {
+	return steadyOf(RiskUsageBaselineDays, RiskUsageRecentDays, recent...)
+}
+
+// steadyOf is steadyWithRecent for a series of baseline + recent days:
+// 1 GiB a day, the listed recent days (0 = the oldest judged day) at 10 GiB.
+func steadyOf(baseline, recent int, over ...int) []int64 {
+	s := usageDaysOf(baseline+recent, func(int) int64 { return usageGiB })
+	for _, i := range over {
+		s[baseline+i] = 10 * usageGiB
 	}
 	return s
+}
+
+// usageDayPolicy is the shipped ratio and floor judged with the given days:
+// the fleet's baseline and recent lengths, the group's warm-up and over-day
+// thresholds. 0 leaves a knob unset.
+func usageDayPolicy(baseline, recent, warmup, flag, suspect int) UsageShiftPolicy {
+	p := defaultUsagePolicy()
+	p.BaselineDays, p.RecentDays = baseline, recent
+	p.WarmupDays, p.FlagDays, p.SuspectDays = warmup, flag, suspect
+	return p
 }
 
 func wantUsage(t *testing.T, v RiskVerdict, state GeoState, code RiskCode) {
@@ -241,14 +269,14 @@ func TestUsageShift_OwnRiseDoesNotRaiseItsOwnFleetFactor(t *testing.T) {
 // No traffic this week is not evidence of anything, and a stored series of
 // zeros would only be noise: idle, with no evidence at all.
 func TestUsageShift_AllRecentZeroIsIdleWithNilEvidence(t *testing.T) {
-	for name, user := range map[string][RiskUsageSeriesDays]int64{
+	for name, user := range map[string][]int64{
 		"quiet week after use": usageDays(func(k int) int64 {
 			if k < RiskUsageBaselineDays {
 				return 5 * usageGiB
 			}
 			return 0
 		}),
-		"never used": {},
+		"never used": make([]int64, usageSeriesDays),
 	} {
 		v, ev := EvaluateUsageShift(defaultUsagePolicy(), soloInput(user))
 		if v.State != GeoStateIdle || v.Code != RiskCodeNoUsage || ev != nil {
@@ -352,7 +380,7 @@ func TestUsageShift_EvidenceShape(t *testing.T) {
 		V:                    RiskEvidenceVersion,
 		EndDate:              "2026-09-24",
 		HistoryRetentionDays: 730,
-		Series:               user[:],
+		Series:               user,
 		HistoryDays:          28,
 		Median:               2 * usageGiB,
 		Ratio:                3,
@@ -363,6 +391,13 @@ func TestUsageShift_EvidenceShape(t *testing.T) {
 		OverDays:   1,
 		// Displayed to two decimals; the threshold used the exact factor.
 		FleetFactors: []float64{1.13, 1, 1, 1, 1, 1, 1},
+		// The days it was judged with: the policy set none, so the shipped
+		// ones, as numbers rather than as an absence.
+		BaselineDays: 28,
+		RecentDays:   7,
+		WarmupDays:   14,
+		FlagDays:     4,
+		SuspectDays:  2,
 	}
 	if !reflect.DeepEqual(ev, want) {
 		t.Fatalf("evidence =\n%+v\nwant\n%+v", ev, want)
@@ -381,7 +416,7 @@ func TestUsageShift_EvidenceShape(t *testing.T) {
 		got = append(got, k)
 	}
 	sort.Strings(got)
-	wantKeys := []string{"end_date", "fleet_factors", "floor", "history_days", "history_retention_days", "median", "over", "over_days", "ratio", "series", "thresholds", "v"}
+	wantKeys := []string{"baseline_days", "end_date", "flag_days", "fleet_factors", "floor", "history_days", "history_retention_days", "median", "over", "over_days", "ratio", "recent_days", "series", "suspect_days", "thresholds", "v", "warmup_days"}
 	if !reflect.DeepEqual(got, wantKeys) {
 		t.Fatalf("evidence keys = %v, want %v", got, wantKeys)
 	}
@@ -399,13 +434,13 @@ func TestUsageShift_EvidenceShape(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, frag := range []string{`"thresholds":[]`, `"over":[]`, `"fleet_factors":[]`, `"history_days":8`, `"median":0`, `"end_date":"2026-09-24"`} {
+	for _, frag := range []string{`"thresholds":[]`, `"over":[]`, `"fleet_factors":[]`, `"history_days":8`, `"median":0`, `"end_date":"2026-09-24"`, `"warmup_days":14`, `"recent_days":7`} {
 		if !strings.Contains(string(raw), frag) {
 			t.Fatalf("warmup evidence %s lacks %s", raw, frag)
 		}
 	}
-	if len(ev.Series) != RiskUsageSeriesDays {
-		t.Fatalf("warmup series has %d days, want %d", len(ev.Series), RiskUsageSeriesDays)
+	if len(ev.Series) != usageSeriesDays {
+		t.Fatalf("warmup series has %d days, want %d", len(ev.Series), usageSeriesDays)
 	}
 	if strings.Contains(string(raw), "history_retention_days") {
 		t.Fatalf("warmup evidence %s carries history_retention_days for an unbounded rollup", raw)
@@ -433,7 +468,7 @@ func usageFixtures() []struct {
 	}{
 		{off, soloInput(steadyWithRecent())},
 		{defaultUsagePolicy(), short},
-		{defaultUsagePolicy(), soloInput([RiskUsageSeriesDays]int64{})},
+		{defaultUsagePolicy(), soloInput(make([]int64, usageSeriesDays))},
 		{defaultUsagePolicy(), young},
 		{defaultUsagePolicy(), soloInput(steadyWithRecent(0, 1, 2, 3))},
 		{defaultUsagePolicy(), soloInput(steadyWithRecent(0, 1))},
@@ -455,5 +490,203 @@ func TestUsageShift_CodesAreExactlyAllRiskCodes(t *testing.T) {
 	}
 	if !reflect.DeepEqual(reached, listed) {
 		t.Fatalf("usage_shift codes reached %v, AllRiskCodes lists %v", reached, listed)
+	}
+}
+
+// The series' two lengths are the fleet's (risk.usage_baseline_days,
+// risk.usage_recent_days), handed over in the policy: with a two-week
+// baseline and three judged days the evaluator reads a 17-day series, takes
+// the median over its first 14 and judges the last 3. Two of three over,
+// with a group that flags at two, is the judged days' habit.
+func TestEvaluateUsageShift_BaselineAndRecentComeFromThePolicy(t *testing.T) {
+	p := usageDayPolicy(14, 3, 0, 2, 0)
+	v, ev := EvaluateUsageShift(p, soloInput(steadyOf(14, 3, 0, 2)))
+	wantUsage(t, v, GeoStateFlagged, RiskCodeSustained)
+	if len(ev.Series) != 17 || ev.HistoryDays != 14 || ev.Median != usageGiB {
+		t.Fatalf("series %d days, history %d, median %d; want 17, 14 and 1 GiB", len(ev.Series), ev.HistoryDays, ev.Median)
+	}
+	if !reflect.DeepEqual(ev.Over, []bool{true, false, true}) || ev.OverDays != 2 ||
+		len(ev.Thresholds) != 3 || len(ev.FleetFactors) != 3 {
+		t.Fatalf("over %v (%d days), %d thresholds, %d factors; want the 3 judged days, 2 over", ev.Over, ev.OverDays, len(ev.Thresholds), len(ev.FleetFactors))
+	}
+
+	// One of the three is a download, as one of seven is.
+	v, _ = EvaluateUsageShift(p, soloInput(steadyOf(14, 3, 1)))
+	wantUsage(t, v, GeoStateClean, RiskCodeWithin)
+}
+
+// The warm-up and the two over-day thresholds are the group's. A warm-up of
+// 7 judges an account with 8 days of history, which the shipped 14 still
+// calls learning; a group that flags at 5 and calls 3 suspect reads four
+// over-days as suspect and two as within, where the shipped 4 and 2 read
+// them as flagged and suspect.
+func TestEvaluateUsageShift_ThresholdsComeFromThePolicy(t *testing.T) {
+	young := soloInput(usageDays(func(k int) int64 {
+		switch {
+		case k >= RiskUsageBaselineDays && k < RiskUsageBaselineDays+4:
+			return 10 * usageGiB
+		case k >= 20:
+			return usageGiB
+		}
+		return 0
+	}))
+	v, _ := EvaluateUsageShift(defaultUsagePolicy(), young)
+	wantUsage(t, v, GeoStateUnknown, RiskCodeWarmup)
+	v, ev := EvaluateUsageShift(usageDayPolicy(0, 0, 7, 0, 0), young)
+	wantUsage(t, v, GeoStateFlagged, RiskCodeSustained)
+	if ev.HistoryDays != 8 || ev.WarmupDays != 7 {
+		t.Fatalf("history %d, warm-up %d; want 8 judged under a warm-up of 7", ev.HistoryDays, ev.WarmupDays)
+	}
+
+	strict := usageDayPolicy(0, 0, 0, 5, 3)
+	for _, c := range []struct {
+		over          []int
+		shipped, mine GeoState
+	}{
+		{[]int{0, 1, 2, 3, 4}, GeoStateFlagged, GeoStateFlagged},
+		{[]int{0, 1, 2, 3}, GeoStateFlagged, GeoStateSuspect},
+		{[]int{0, 1, 2}, GeoStateSuspect, GeoStateSuspect},
+		{[]int{0, 1}, GeoStateSuspect, GeoStateClean},
+	} {
+		in := soloInput(steadyWithRecent(c.over...))
+		if v, _ := EvaluateUsageShift(defaultUsagePolicy(), in); v.State != c.shipped {
+			t.Errorf("%d over-days under the shipped 4/2: %s, want %s", len(c.over), v.State, c.shipped)
+		}
+		if v, _ := EvaluateUsageShift(strict, in); v.State != c.mine {
+			t.Errorf("%d over-days under a group's 5/3: %s, want %s", len(c.over), v.State, c.mine)
+		}
+	}
+}
+
+// The evidence records the days each verdict was judged with — the fleet's
+// lengths and the group's thresholds, resolved — so the admin's sentence
+// ("2 of the last 3 days", "flagged at 2", "judged from 7") reads the
+// numbers that applied, never the shipped ones. They are always present,
+// on a verdict that stopped before judging too: the UI must not have to
+// guess them.
+func TestEvaluateUsageShift_EvidenceCarriesTheDaysItWasJudgedWith(t *testing.T) {
+	daysOf := func(v RiskVerdict, ev *UsageShiftEvidence) [5]int {
+		t.Helper()
+		if ev == nil {
+			t.Fatalf("%s/%s carries no evidence", v.State, v.Code)
+		}
+		return [5]int{ev.BaselineDays, ev.RecentDays, ev.WarmupDays, ev.FlagDays, ev.SuspectDays}
+	}
+	v, ev := EvaluateUsageShift(usageDayPolicy(20, 5, 10, 3, 2), soloInput(steadyOf(20, 5)))
+	if got := daysOf(v, ev); got != [5]int{20, 5, 10, 3, 2} {
+		t.Fatalf("judged with 20/5/10/3/2, evidence says %v", got)
+	}
+	v, ev = EvaluateUsageShift(defaultUsagePolicy(), soloInput(steadyWithRecent()))
+	if got := daysOf(v, ev); got != [5]int{28, 7, 14, 4, 2} {
+		t.Fatalf("judged with no day set, evidence says %v; want the shipped 28/7/14/4/2 it judged with", got)
+	}
+
+	short := soloInput(steadyOf(20, 5))
+	short.HistoryRetentionDays = 10
+	young := soloInput(usageDaysOf(25, func(k int) int64 {
+		if k >= 18 {
+			return usageGiB
+		}
+		return 0
+	}))
+	for name, in := range map[string]UsageShiftInput{"retention_short": short, "warmup": young} {
+		v, ev := EvaluateUsageShift(usageDayPolicy(20, 5, 10, 3, 2), in)
+		if v.Code != RiskCode(name) {
+			t.Fatalf("%s fixture read %s", name, v.Code)
+		}
+		raw, err := json.Marshal(ev)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, frag := range []string{`"baseline_days":20`, `"recent_days":5`, `"warmup_days":10`, `"flag_days":3`, `"suspect_days":2`} {
+			if !strings.Contains(string(raw), frag) {
+				t.Errorf("%s evidence %s lacks %s", name, raw, frag)
+			}
+		}
+	}
+}
+
+// The series must be exactly baseline + recent days long, both the account's
+// and the fleet's. Any other length is a series that does not describe the
+// days the policy judges: read anyway, it would index past its end or take
+// a recent day for a baseline one. It is what a series cut short looks like,
+// so it reads unknown/retention_short — never clean, never a panic.
+func TestEvaluateUsageShift_SeriesLengthMismatchIsRetentionShort(t *testing.T) {
+	longFleet := soloInput(steadyWithRecent(0, 1, 2, 3))
+	longFleet.Fleet = append(longFleet.Fleet, usageGiB)
+	for name, c := range map[string]struct {
+		p  UsageShiftPolicy
+		in UsageShiftInput
+	}{
+		"the shipped 35 days under a 14+3 policy": {usageDayPolicy(14, 3, 0, 2, 0), soloInput(steadyWithRecent(0, 1, 2, 3))},
+		"17 days under the shipped 28+7":          {defaultUsagePolicy(), soloInput(steadyOf(14, 3, 0, 1, 2))},
+		"a fleet one day longer":                  {defaultUsagePolicy(), longFleet},
+		"no series at all":                        {defaultUsagePolicy(), UsageShiftInput{EndDate: "2026-09-24"}},
+	} {
+		v, ev := EvaluateUsageShift(c.p, c.in)
+		if v.State != GeoStateUnknown || v.Code != RiskCodeRetentionShort {
+			t.Errorf("%s: %s/%s, want unknown/retention_short", name, v.State, v.Code)
+			continue
+		}
+		if ev == nil || ev.Series == nil || len(ev.Thresholds) != 0 || ev.Thresholds == nil || ev.OverDays != 0 {
+			t.Errorf("%s: evidence %+v, want the series as handed over and empty (not null) lists", name, ev)
+		}
+	}
+}
+
+// The rollup's retention is held against the series actually read: with a
+// 14+3 policy the series is 17 days, so a 17-day retention is short (the
+// prune has already begun on its first day, as 35 is under the shipped 35)
+// and 18 keeps it whole. 20 is judged — under the old fixed 35 it read
+// retention_short for a series that was intact.
+func TestEvaluateUsageShift_RetentionShortCoversTheWholeSeries(t *testing.T) {
+	p := usageDayPolicy(14, 3, 0, 2, 0)
+	for _, c := range []struct {
+		retention int
+		state     GeoState
+		code      RiskCode
+	}{
+		{16, GeoStateUnknown, RiskCodeRetentionShort},
+		{17, GeoStateUnknown, RiskCodeRetentionShort},
+		{18, GeoStateFlagged, RiskCodeSustained},
+		{20, GeoStateFlagged, RiskCodeSustained},
+		{0, GeoStateFlagged, RiskCodeSustained},
+	} {
+		in := soloInput(steadyOf(14, 3, 0, 2))
+		in.HistoryRetentionDays = c.retention
+		v, ev := EvaluateUsageShift(p, in)
+		if v.State != c.state || v.Code != c.code {
+			t.Errorf("retention %d under a 17-day series: %s/%s, want %s/%s", c.retention, v.State, v.Code, c.state, c.code)
+		}
+		if ev == nil || ev.HistoryRetentionDays != c.retention {
+			t.Errorf("retention %d: evidence %+v does not carry it", c.retention, ev)
+		}
+	}
+}
+
+// (guard) Upgrading must change nothing. A policy that sets none of the
+// day knobs judges exactly as one that sets the shipped 28/7/14/4/2 — the
+// constants these settings replaced, frozen here as literals — and the
+// defaults the worker hands over (DefaultRiskRuntime's lengths,
+// DefaultRiskPolicy's thresholds) are those same numbers.
+//
+// Mutation: a default flag of 5 turns this red.
+func TestEvaluateUsageShift_DefaultPolicyMatchesTheFormerConstants(t *testing.T) {
+	rt, p := DefaultRiskRuntime(), DefaultRiskPolicy()
+	if got := [5]int{rt.UsageBaselineDays, rt.UsageRecentDays, p.UsageWarmupDays, p.UsageFlagDays, p.UsageSuspectDays}; got != [5]int{28, 7, 14, 4, 2} {
+		t.Fatalf("shipped usage days = %v, want the former constants 28/7/14/4/2", got)
+	}
+	if got := [5]int{RiskUsageBaselineDays, RiskUsageRecentDays, RiskUsageWarmupDays, RiskUsageFlagDays, RiskUsageSuspectDays}; got != [5]int{28, 7, 14, 4, 2} {
+		t.Fatalf("the named defaults moved: %v", got)
+	}
+	for i, f := range usageFixtures() {
+		explicit := f.p
+		explicit.BaselineDays, explicit.RecentDays = 28, 7
+		explicit.WarmupDays, explicit.FlagDays, explicit.SuspectDays = 14, 4, 2
+		v0, ev0 := EvaluateUsageShift(f.p, f.in)
+		v1, ev1 := EvaluateUsageShift(explicit, f.in)
+		if v0 != v1 || !reflect.DeepEqual(ev0, ev1) {
+			t.Errorf("fixture %d: unset days judged %s/%s %+v, the former constants %s/%s %+v", i, v0.State, v0.Code, ev0, v1.State, v1.Code, ev1)
+		}
 	}
 }

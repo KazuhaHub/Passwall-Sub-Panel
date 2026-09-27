@@ -93,7 +93,8 @@ type SignalStore interface {
 }
 
 // HourlyReader is the hourly traffic rollup — the one traffic source that
-// reaches back 35 days (raw snapshots are kept about a week).
+// reaches back over usage_shift's series (35 days shipped, up to 70
+// configured; raw snapshots are kept about a week).
 type HourlyReader interface {
 	ListHourlyByUser(ctx context.Context, userID int64, since, until time.Time) ([]domain.HourlyTraffic, error)
 	SumHourlyAllUsers(ctx context.Context, since, until time.Time) ([]domain.HourlyTraffic, error)

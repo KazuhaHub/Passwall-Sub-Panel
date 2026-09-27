@@ -34,6 +34,9 @@ func TestUISettings_RiskPolicySettingsCarriesEveryRiskKnob(t *testing.T) {
 		RiskUsageFloorGB:      6,
 		RiskLoginWarmupLogins: 7,
 		RiskLoginHoldDays:     8,
+		RiskUsageWarmupDays:   9,
+		RiskUsageFlagDays:     10,
+		RiskUsageSuspectDays:  11,
 	}
 	want := domain.RiskPolicySettings{
 		SubSpreadOff:      true,
@@ -46,6 +49,9 @@ func TestUISettings_RiskPolicySettingsCarriesEveryRiskKnob(t *testing.T) {
 		UsageFloorGB:      6,
 		LoginWarmupLogins: 7,
 		LoginHoldDays:     8,
+		UsageWarmupDays:   9,
+		UsageFlagDays:     10,
+		UsageSuspectDays:  11,
 	}
 	got := s.RiskPolicySettings()
 	if got != want {
@@ -114,6 +120,8 @@ func TestUISettings_RiskRuntimeSettingsCarriesEveryKnob(t *testing.T) {
 		RiskAlertFreshnessHours:    5,
 		RiskWindowDays:             6,
 		RiskLoginLookbackDays:      120,
+		RiskUsageBaselineDays:      21,
+		RiskUsageRecentDays:        5,
 	}
 	want := domain.RiskRuntimeSettings{
 		RefreshIntervalMinutes: 30,
@@ -121,6 +129,8 @@ func TestUISettings_RiskRuntimeSettingsCarriesEveryKnob(t *testing.T) {
 		AlertFreshnessHours:    5,
 		WindowDays:             6,
 		LoginLookbackDays:      120,
+		UsageBaselineDays:      21,
+		UsageRecentDays:        5,
 	}
 	got := s.RiskRuntimeSettings()
 	if got != want {

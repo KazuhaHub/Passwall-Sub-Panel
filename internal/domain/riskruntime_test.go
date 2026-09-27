@@ -18,6 +18,8 @@ func TestRiskRuntimeFromSettings_UnsetIsTheDefault(t *testing.T) {
 		AlertFreshness:    24 * time.Hour,
 		WindowDays:        7,
 		LoginLookbackDays: 90,
+		UsageBaselineDays: 28,
+		UsageRecentDays:   7,
 	}
 	if got := RiskRuntimeFromSettings(RiskRuntimeSettings{}); got != want {
 		t.Fatalf("RiskRuntimeFromSettings(unset) = %+v\nwant %+v", got, want)
@@ -30,7 +32,10 @@ func TestRiskRuntimeFromSettings_UnsetIsTheDefault(t *testing.T) {
 // account for nothing; a first delay past an hour leaves a fresh install's
 // risk view empty; a bell freshness past a month keeps history on the bell;
 // the fetch window cannot outgrow the day masks (a week); the login log is
-// read at least a week (the hold) and at most a year (one run's memory).
+// read at least a week (the hold) and at most a year (one run's memory);
+// usage_shift's baseline is two to eight weeks (two of every weekday at
+// least, and a bound on the hourly rows one run reads per account) and its
+// judged days three to fourteen (room for a flag of two, at most two weeks).
 func TestRiskRuntimeFromSettings_Clamps(t *testing.T) {
 	for _, c := range []struct {
 		name string
@@ -55,6 +60,14 @@ func TestRiskRuntimeFromSettings_Clamps(t *testing.T) {
 		{"negative freshness is unset", RiskRuntimeSettings{AlertFreshnessHours: -1}, func(r RiskRuntime) any { return r.AlertFreshness }, 24 * time.Hour},
 		{"negative window is unset", RiskRuntimeSettings{WindowDays: -1}, func(r RiskRuntime) any { return r.WindowDays }, 7},
 		{"negative lookback is unset", RiskRuntimeSettings{LoginLookbackDays: -1}, func(r RiskRuntime) any { return r.LoginLookbackDays }, 90},
+		{"baseline under two weeks", RiskRuntimeSettings{UsageBaselineDays: 5}, func(r RiskRuntime) any { return r.UsageBaselineDays }, 14},
+		{"baseline beyond eight weeks", RiskRuntimeSettings{UsageBaselineDays: 99}, func(r RiskRuntime) any { return r.UsageBaselineDays }, 56},
+		{"baseline of three weeks", RiskRuntimeSettings{UsageBaselineDays: 21}, func(r RiskRuntime) any { return r.UsageBaselineDays }, 21},
+		{"negative baseline is unset", RiskRuntimeSettings{UsageBaselineDays: -1}, func(r RiskRuntime) any { return r.UsageBaselineDays }, 28},
+		{"judged days under three", RiskRuntimeSettings{UsageRecentDays: 1}, func(r RiskRuntime) any { return r.UsageRecentDays }, 3},
+		{"judged days beyond two weeks", RiskRuntimeSettings{UsageRecentDays: 99}, func(r RiskRuntime) any { return r.UsageRecentDays }, 14},
+		{"judged days of five", RiskRuntimeSettings{UsageRecentDays: 5}, func(r RiskRuntime) any { return r.UsageRecentDays }, 5},
+		{"negative judged days is unset", RiskRuntimeSettings{UsageRecentDays: -1}, func(r RiskRuntime) any { return r.UsageRecentDays }, 7},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			if got := c.got(RiskRuntimeFromSettings(c.in)); got != c.want {
@@ -109,9 +122,10 @@ func TestRiskRuntime_GeoBellFreshnessCoversTwoPolls(t *testing.T) {
 
 // (guard) Upgrading must change nothing: the shipped defaults are exactly the
 // constants these knobs replaced — an hourly refresh, a two-minute first
-// delay, a 24-hour bell, a seven-day fetch window and a 90-day login
-// lookback. Frozen here as literals, so moving a default is a deliberate
-// edit of this test and not a side effect of editing a constant.
+// delay, a 24-hour bell, a seven-day fetch window, a 90-day login lookback
+// and usage_shift's four-week baseline and one judged week. Frozen here as
+// literals, so moving a default is a deliberate edit of this test and not a
+// side effect of editing a constant.
 //
 // Mutation: a default lookback of 91 turns this red.
 func TestDefaultRiskRuntimeEqualsTheFormerConstants(t *testing.T) {
@@ -121,11 +135,15 @@ func TestDefaultRiskRuntimeEqualsTheFormerConstants(t *testing.T) {
 		AlertFreshness:    24 * time.Hour,
 		WindowDays:        7,
 		LoginLookbackDays: 90,
+		UsageBaselineDays: 28,
+		UsageRecentDays:   7,
 	}
 	if got := DefaultRiskRuntime(); got != want {
 		t.Fatalf("DefaultRiskRuntime() = %+v\nwant the former constants %+v", got, want)
 	}
-	if RiskLoginLookbackDays != want.LoginLookbackDays || RiskWindowDays != want.WindowDays {
-		t.Fatalf("the named defaults moved: lookback %d, window %d", RiskLoginLookbackDays, RiskWindowDays)
+	if RiskLoginLookbackDays != want.LoginLookbackDays || RiskWindowDays != want.WindowDays ||
+		RiskUsageBaselineDays != want.UsageBaselineDays || RiskUsageRecentDays != want.UsageRecentDays {
+		t.Fatalf("the named defaults moved: lookback %d, window %d, usage baseline %d, judged days %d",
+			RiskLoginLookbackDays, RiskWindowDays, RiskUsageBaselineDays, RiskUsageRecentDays)
 	}
 }

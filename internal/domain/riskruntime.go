@@ -9,10 +9,12 @@ import "time"
 // Fleet-wide, not per group, each for a reason that does not depend on who
 // is looking: the loop runs once for the whole fleet on one cadence, the
 // fetch window is streamed once per run for every account together, the
-// login log is read in one keyset pass, and the bell counts the fleet. A
-// group value would be stored, shown and never read, so none of these is in
-// ports.OverridableScopeKeys. (login_country's warm-up and hold ARE per
-// group: they are judging thresholds, in RiskPolicy.)
+// login log is read in one keyset pass, the bell counts the fleet, and
+// usage_shift reads one fleet series whose days every account's series must
+// share. A group value would be stored, shown and never read, so none of
+// these is in ports.OverridableScopeKeys. (login_country's warm-up and hold,
+// and usage_shift's warm-up and over-days, ARE per group: they are judging
+// thresholds, in RiskPolicy.)
 //
 // The bounds below are not policy. They keep a knob inside the range where
 // it still means what its name says, and each one is argued at the
@@ -54,6 +56,17 @@ const (
 	// past it, a signal that expects rare panel logins never finishes
 	// learning, and "learning" would silently mean "off".
 	RiskLoginWarmupMaxLogins = 50
+	// usage_shift's series lengths; RiskUsageBaselineDays (28) and
+	// RiskUsageRecentDays (7) are the defaults. The baseline is at least two
+	// weeks — two of every weekday, so a median is not one weekend's — and
+	// at most eight, which bounds the hourly rows one run reads per account.
+	// The recent days are at least three, room for the over-day floor of two
+	// to mean "more than a download", and at most two weeks: a flag is
+	// about what the account does now.
+	RiskUsageBaselineMinDays = 14
+	RiskUsageBaselineMaxDays = 56
+	RiskUsageRecentMinDays   = 3
+	RiskUsageRecentMaxDays   = 14
 )
 
 // RiskRuntimeSettings is the flat, storage-shaped form: what the admin form
@@ -61,7 +74,7 @@ const (
 // ports.UISettings.RiskRuntimeSettings is the one mapping into it.
 type RiskRuntimeSettings struct {
 	RefreshIntervalMinutes, FirstDelayMinutes, AlertFreshnessHours,
-	WindowDays, LoginLookbackDays int
+	WindowDays, LoginLookbackDays, UsageBaselineDays, UsageRecentDays int
 }
 
 // RiskRuntime is the sanitised form every reader uses. Each field is inside
@@ -89,6 +102,11 @@ type RiskRuntime struct {
 	// LoginLookbackDays: how far back login_country reads the login log.
 	// RiskLoginLookbackMinDays..RiskLoginLookbackMaxDays.
 	LoginLookbackDays int
+	// UsageBaselineDays and UsageRecentDays: usage_shift's series, the days
+	// an account's median is taken over and the days after them that are
+	// judged. Fleet-wide because the worker reads one fleet series per run
+	// and every account's fleet factor comes from it. 14..56 and 3..14.
+	UsageBaselineDays, UsageRecentDays int
 }
 
 // DefaultRiskRuntime is the runtime a fresh install runs with: exactly the
@@ -100,6 +118,8 @@ func DefaultRiskRuntime() RiskRuntime {
 		AlertFreshness:    RiskDefaultAlertFreshnessHours * time.Hour,
 		WindowDays:        RiskDefaultWindowDays,
 		LoginLookbackDays: RiskLoginLookbackDays,
+		UsageBaselineDays: RiskUsageBaselineDays,
+		UsageRecentDays:   RiskUsageRecentDays,
 	}
 }
 
@@ -111,7 +131,7 @@ func DefaultRiskRuntime() RiskRuntime {
 // one of these read literally is broken — a zero-length ticker (which
 // panics), a first run racing the boot probes, a bell that forgets a flag
 // the moment it is written, a window of no days, a login log read over no
-// time.
+// time, a usage median over no baseline and no days judged.
 //
 // The bell's freshness is raised to two refresh intervals. The worker
 // rewrites every row once per run, so a window shorter than two runs would
@@ -128,6 +148,8 @@ func RiskRuntimeFromSettings(s RiskRuntimeSettings) RiskRuntime {
 		AlertFreshness:    max(fresh, 2*refresh),
 		WindowDays:        settingOr(s.WindowDays, RiskDefaultWindowDays, 1, RiskWindowDays),
 		LoginLookbackDays: settingOr(s.LoginLookbackDays, RiskLoginLookbackDays, RiskLoginLookbackMinDays, RiskLoginLookbackMaxDays),
+		UsageBaselineDays: settingOr(s.UsageBaselineDays, RiskUsageBaselineDays, RiskUsageBaselineMinDays, RiskUsageBaselineMaxDays),
+		UsageRecentDays:   settingOr(s.UsageRecentDays, RiskUsageRecentDays, RiskUsageRecentMinDays, RiskUsageRecentMaxDays),
 	}
 }
 

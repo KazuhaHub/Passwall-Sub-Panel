@@ -494,17 +494,22 @@ func settingDescriptors(s *ports.UISettings) []settingDescriptor {
 		intField("risk", "usage_floor_gb", &s.RiskUsageFloorGB),
 		intField("risk", "login_warmup_logins", &s.RiskLoginWarmupLogins),
 		intField("risk", "login_hold_days", &s.RiskLoginHoldDays),
+		intField("risk", "usage_warmup_days", &s.RiskUsageWarmupDays),
+		intField("risk", "usage_flag_days", &s.RiskUsageFlagDays),
+		intField("risk", "usage_suspect_days", &s.RiskUsageSuspectDays),
 		boolField("risk", "hwid_capture_off", &s.RiskHWIDCaptureOff),
 		// risk --- the worker's fleet-wide runtime (the former constants of
-		// the loop, the fetch window, the login read and the bell). GLOBAL
-		// only (absent from ports.OverridableScopeKeys), and 0 is "never
-		// configured": domain.RiskRuntimeFromSettings owns both that and the
-		// clamps.
+		// the loop, the fetch window, the login read, the bell and
+		// usage_shift's series). GLOBAL only (absent from
+		// ports.OverridableScopeKeys), and 0 is "never configured":
+		// domain.RiskRuntimeFromSettings owns both that and the clamps.
 		intField("risk", "refresh_interval_minutes", &s.RiskRefreshIntervalMinutes),
 		intField("risk", "first_delay_minutes", &s.RiskFirstDelayMinutes),
 		intField("risk", "alert_freshness_hours", &s.RiskAlertFreshnessHours),
 		intField("risk", "window_days", &s.RiskWindowDays),
 		intField("risk", "login_lookback_days", &s.RiskLoginLookbackDays),
+		intField("risk", "usage_baseline_days", &s.RiskUsageBaselineDays),
+		intField("risk", "usage_recent_days", &s.RiskUsageRecentDays),
 
 		// geo --- IP geolocation for access-log region display (offline .mmdb)
 		boolField("geo", "geo_ip_enabled", &s.GeoIPEnabled),

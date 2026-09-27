@@ -25,6 +25,9 @@ func TestRiskPolicyFromSettings_UnsetIsTheDefault(t *testing.T) {
 		UsageFloorBytes:   3 << 30,
 		LoginWarmupLogins: 3,
 		LoginHoldDays:     7,
+		UsageWarmupDays:   14,
+		UsageFlagDays:     4,
+		UsageSuspectDays:  2,
 	}
 	if got := DefaultRiskPolicy(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("DefaultRiskPolicy() = %+v\nwant the shipped default %+v", got, want)
@@ -220,14 +223,27 @@ func TestRiskPolicyFromSettings_LoginKnobs(t *testing.T) {
 // min_days, and bounding min_days by them would silence it (see the
 // worker's TestRefreshOnce_RetentionShortStillSurfaces).
 func TestRiskPolicy_BoundedByRuntime(t *testing.T) {
-	rt := RiskRuntimeFromSettings(RiskRuntimeSettings{WindowDays: 3, LoginLookbackDays: 14})
-	got := RiskPolicyFromSettings(RiskPolicySettings{MinDays: 7, LoginHoldDays: 30}).Bounded(rt)
+	rt := RiskRuntimeFromSettings(RiskRuntimeSettings{WindowDays: 3, LoginLookbackDays: 14, UsageBaselineDays: 14, UsageRecentDays: 3})
+	got := RiskPolicyFromSettings(RiskPolicySettings{MinDays: 7, LoginHoldDays: 30, UsageWarmupDays: 20, UsageFlagDays: 5, UsageSuspectDays: 4}).Bounded(rt)
 	if got.MinDays != 3 || got.LoginHoldDays != 14 {
 		t.Fatalf("bounded min_days %d, hold %d; want 3 (the window) and 14 (the lookback)", got.MinDays, got.LoginHoldDays)
 	}
-	within := RiskPolicyFromSettings(RiskPolicySettings{MinDays: 2, LoginHoldDays: 10}).Bounded(rt)
-	if within.MinDays != 2 || within.LoginHoldDays != 10 {
-		t.Fatalf("knobs inside the runtime moved: min_days %d, hold %d; want 2 and 10", within.MinDays, within.LoginHoldDays)
+	// usage_shift's thresholds meet the series they are judged on: a
+	// warm-up cannot need more history than the baseline holds (it would
+	// never finish), an account cannot be over on more days than are judged
+	// (flagged would be unreachable), and suspect is never above flag.
+	if got.UsageWarmupDays != 14 || got.UsageFlagDays != 3 || got.UsageSuspectDays != 3 {
+		t.Fatalf("bounded usage warm-up %d, flag %d, suspect %d; want 14 (the baseline), 3 (the judged days) and 3 (the flag)", got.UsageWarmupDays, got.UsageFlagDays, got.UsageSuspectDays)
+	}
+	within := RiskPolicyFromSettings(RiskPolicySettings{MinDays: 2, LoginHoldDays: 10, UsageWarmupDays: 10, UsageFlagDays: 3, UsageSuspectDays: 2}).Bounded(rt)
+	if within.MinDays != 2 || within.LoginHoldDays != 10 || within.UsageWarmupDays != 10 || within.UsageFlagDays != 3 || within.UsageSuspectDays != 2 {
+		t.Fatalf("knobs inside the runtime moved: %+v", within)
+	}
+	// Suspect above flag is held to flag whatever the runtime: under the
+	// shipped week a group flagging at 3 and calling 5 suspect has no
+	// suspect stage, and says so.
+	if s := RiskPolicyFromSettings(RiskPolicySettings{UsageFlagDays: 3, UsageSuspectDays: 5}).Bounded(DefaultRiskRuntime()); s.UsageFlagDays != 3 || s.UsageSuspectDays != 3 {
+		t.Fatalf("flag 3, suspect 5 bounded to flag %d, suspect %d; want 3 and 3", s.UsageFlagDays, s.UsageSuspectDays)
 	}
 	// At the defaults the bound is the identity: an upgrade changes nothing.
 	if def := DefaultRiskPolicy(); !reflect.DeepEqual(def.Bounded(DefaultRiskRuntime()), def) {
@@ -235,7 +251,41 @@ func TestRiskPolicy_BoundedByRuntime(t *testing.T) {
 	}
 	// A zero runtime (never sanitised) bounds nothing rather than driving
 	// min_days to 0, which the evaluators would read as "any one day".
-	if z := DefaultRiskPolicy().Bounded(RiskRuntime{}); z.MinDays != 3 || z.LoginHoldDays != 7 {
-		t.Fatalf("bounded by a zero runtime: min_days %d, hold %d; want 3 and 7", z.MinDays, z.LoginHoldDays)
+	if z := DefaultRiskPolicy().Bounded(RiskRuntime{}); z.MinDays != 3 || z.LoginHoldDays != 7 || z.UsageWarmupDays != 14 || z.UsageFlagDays != 4 || z.UsageSuspectDays != 2 {
+		t.Fatalf("bounded by a zero runtime: %+v; want the defaults 3/7 and 14/4/2", z)
+	}
+}
+
+// usage_shift's three per-group thresholds. Unset or negative is the
+// shipped default (a 14-day warm-up, flagged at 4 over-days, suspect at 2),
+// and each has a floor that errs toward NOT accusing, the precedent
+// RiskUsageRatioMin set: a warm-up under 7 days takes the median over a
+// first week, which is a median over setup (profiles imported, a first big
+// download); flag or suspect at 1 over-day calls a single download a change
+// of habit. The ceilings are the longest series a fleet may configure —
+// Bounded then holds each to the series actually configured.
+func TestRiskPolicyFromSettings_UsageFloors(t *testing.T) {
+	def := RiskPolicyFromSettings(RiskPolicySettings{})
+	if def.UsageWarmupDays != 14 || def.UsageFlagDays != 4 || def.UsageSuspectDays != 2 {
+		t.Fatalf("unset usage days = warm-up %d, flag %d, suspect %d; want 14, 4 and 2", def.UsageWarmupDays, def.UsageFlagDays, def.UsageSuspectDays)
+	}
+	for _, c := range []struct {
+		name                  string
+		in                    RiskPolicySettings
+		warmup, flag, suspect int
+	}{
+		{"flag at one day", RiskPolicySettings{UsageFlagDays: 1}, 14, 2, 2},
+		{"suspect at one day", RiskPolicySettings{UsageSuspectDays: 1}, 14, 4, 2},
+		{"warm-up of three days", RiskPolicySettings{UsageWarmupDays: 3}, 7, 4, 2},
+		{"warm-up beyond the longest baseline", RiskPolicySettings{UsageWarmupDays: 99}, 56, 4, 2},
+		{"flag beyond the longest judged days", RiskPolicySettings{UsageFlagDays: 99}, 14, 14, 2},
+		{"suspect beyond the longest judged days", RiskPolicySettings{UsageSuspectDays: 99}, 14, 4, 14},
+		{"in range", RiskPolicySettings{UsageWarmupDays: 10, UsageFlagDays: 3, UsageSuspectDays: 3}, 10, 3, 3},
+		{"negative is unset", RiskPolicySettings{UsageWarmupDays: -1, UsageFlagDays: -1, UsageSuspectDays: -1}, 14, 4, 2},
+	} {
+		got := RiskPolicyFromSettings(c.in)
+		if got.UsageWarmupDays != c.warmup || got.UsageFlagDays != c.flag || got.UsageSuspectDays != c.suspect {
+			t.Errorf("%s: warm-up %d, flag %d, suspect %d; want %d, %d and %d", c.name, got.UsageWarmupDays, got.UsageFlagDays, got.UsageSuspectDays, c.warmup, c.flag, c.suspect)
+		}
 	}
 }

@@ -133,20 +133,26 @@ type settingsDTO struct {
 	RiskMaxDevices      int     `json:"risk_max_devices"`
 	RiskUsageRatio      float64 `json:"risk_usage_ratio"`
 	RiskUsageFloorGB    int     `json:"risk_usage_floor_gb"`
-	// login_country's two thresholds, per-group like the tolerances above
-	// and read by the same domain.RiskPolicyFromSettings.
+	// login_country's two thresholds and usage_shift's three, per-group like
+	// the tolerances above and read by the same domain.RiskPolicyFromSettings
+	// (which raises usage_shift's to their floors of 7 and 2 days).
 	RiskLoginWarmupLogins int `json:"risk_login_warmup_logins"`
 	RiskLoginHoldDays     int `json:"risk_login_hold_days"`
+	RiskUsageWarmupDays   int `json:"risk_usage_warmup_days"`
+	RiskUsageFlagDays     int `json:"risk_usage_flag_days"`
+	RiskUsageSuspectDays  int `json:"risk_usage_suspect_days"`
 	// The risk worker's fleet-wide runtime (the former constants of the
-	// loop, the fetch window, the login read and the bell). Global only; 0
-	// means the shipped default, and the clamps are applied when read by
-	// domain.RiskRuntimeFromSettings — not validated on PUT, for the same
-	// reason as the policy knobs.
+	// loop, the fetch window, the login read, the bell and usage_shift's
+	// series). Global only; 0 means the shipped default, and the clamps are
+	// applied when read by domain.RiskRuntimeFromSettings — not validated on
+	// PUT, for the same reason as the policy knobs.
 	RiskRefreshIntervalMinutes int `json:"risk_refresh_interval_minutes"`
 	RiskFirstDelayMinutes      int `json:"risk_first_delay_minutes"`
 	RiskAlertFreshnessHours    int `json:"risk_alert_freshness_hours"`
 	RiskWindowDays             int `json:"risk_window_days"`
 	RiskLoginLookbackDays      int `json:"risk_login_lookback_days"`
+	RiskUsageBaselineDays      int `json:"risk_usage_baseline_days"`
+	RiskUsageRecentDays        int `json:"risk_usage_recent_days"`
 	// Geo IP (access-log region display, offline .mmdb).
 	GeoIPEnabled             bool   `json:"geo_ip_enabled"`
 	GeoIPDBFile              string `json:"geo_ip_db_file"`
@@ -404,6 +410,9 @@ func settingsToDTO(s ports.UISettings) settingsDTO {
 		RiskUsageFloorGB:             s.RiskUsageFloorGB,
 		RiskLoginWarmupLogins:        s.RiskLoginWarmupLogins,
 		RiskLoginHoldDays:            s.RiskLoginHoldDays,
+		RiskUsageWarmupDays:          s.RiskUsageWarmupDays,
+		RiskUsageFlagDays:            s.RiskUsageFlagDays,
+		RiskUsageSuspectDays:         s.RiskUsageSuspectDays,
 
 		// The risk worker's fleet-wide runtime: the stored values, 0 = default.
 		RiskRefreshIntervalMinutes: s.RiskRefreshIntervalMinutes,
@@ -411,6 +420,8 @@ func settingsToDTO(s ports.UISettings) settingsDTO {
 		RiskAlertFreshnessHours:    s.RiskAlertFreshnessHours,
 		RiskWindowDays:             s.RiskWindowDays,
 		RiskLoginLookbackDays:      s.RiskLoginLookbackDays,
+		RiskUsageBaselineDays:      s.RiskUsageBaselineDays,
+		RiskUsageRecentDays:        s.RiskUsageRecentDays,
 
 		// The detector's fleet-wide runtime: the stored values, 0 = default.
 		GeoAnomalyFreshWindowSeconds:  s.GeoAnomalyFreshWindowSeconds,
@@ -548,6 +559,11 @@ func (h *AdminSettingsHandler) Put(c *gin.Context) {
 		RiskAlertFreshnessHours:       req.RiskAlertFreshnessHours,
 		RiskWindowDays:                req.RiskWindowDays,
 		RiskLoginLookbackDays:         req.RiskLoginLookbackDays,
+		RiskUsageWarmupDays:           req.RiskUsageWarmupDays,
+		RiskUsageFlagDays:             req.RiskUsageFlagDays,
+		RiskUsageSuspectDays:          req.RiskUsageSuspectDays,
+		RiskUsageBaselineDays:         req.RiskUsageBaselineDays,
+		RiskUsageRecentDays:           req.RiskUsageRecentDays,
 		GeoIPEnabled:                  req.GeoIPEnabled,
 		GeoIPDBFile:                   strings.TrimSpace(req.GeoIPDBFile),
 		GeoIPAutoUpdate:               req.GeoIPAutoUpdate,

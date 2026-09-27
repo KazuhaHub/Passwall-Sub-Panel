@@ -1513,19 +1513,35 @@ type UISettings struct {
 	// clamped to 1..risk.login_lookback_days when read: a login cannot stay
 	// recent longer than the log is read.
 	RiskLoginHoldDays int `json:"risk_login_hold_days"`
+	// RiskUsageWarmupDays is how many days of its own history (from its
+	// first day of use, inside the baseline) an account needs before
+	// usage_shift judges it. Default 14, raised to 7 when read — under a
+	// week the median is taken over setup — and held to
+	// risk.usage_baseline_days: a longer warm-up would never end.
+	RiskUsageWarmupDays int `json:"risk_usage_warmup_days"`
+	// RiskUsageFlagDays and RiskUsageSuspectDays are on how many of the
+	// judged days (risk.usage_recent_days) an account must be over to read
+	// flagged, or suspect. Defaults 4 and 2, each raised to 2 when read (one
+	// day over is a download) and held to the judged days; suspect is held
+	// to flag on top — equal to it means no suspect stage.
+	RiskUsageFlagDays    int `json:"risk_usage_flag_days"`
+	RiskUsageSuspectDays int `json:"risk_usage_suspect_days"`
 
 	// ---- Risk signals: the worker's fleet-wide runtime ----
 	// What used to be constants in the worker loop, the fetch window, the
-	// login read and the bell. Each stores 0 for "never configured", which
-	// means the former constant, and each is clamped to a safety bound when
-	// read; domain.RiskRuntimeFromSettings is the one place either rule
-	// lives, and nothing here is validated on save.
+	// login read, the bell and usage_shift's series. Each stores 0 for
+	// "never configured", which means the former constant, and each is
+	// clamped to a safety bound when read; domain.RiskRuntimeFromSettings is
+	// the one place either rule lives, and nothing here is validated on
+	// save.
 	//
-	// GLOBAL ONLY — all five are deliberately absent from
+	// GLOBAL ONLY — all seven are deliberately absent from
 	// OverridableScopeKeys. The loop runs once for the fleet, the fetch
 	// window and the login log are each read once per run for every account
-	// together, and the bell counts the fleet; a group value would be
-	// stored, shown and never read.
+	// together, the bell counts the fleet, and usage_shift reads ONE fleet
+	// series that every account's fleet factor is taken from, so every
+	// account's series has the same days; a group value would be stored,
+	// shown and never read.
 	//
 	// RiskRefreshIntervalMinutes is how often the signals are recomputed.
 	// Default 60, clamped to 10..1440: each run streams a week of fetches
@@ -1554,6 +1570,16 @@ type UISettings struct {
 	// log. Default 90, clamped to 7..365; a shorter auth-event retention
 	// still shortens it where the log is read.
 	RiskLoginLookbackDays int `json:"risk_login_lookback_days"`
+	// RiskUsageBaselineDays is how many days before the judged ones an
+	// account's usage median is taken over. Default 28, clamped to 14..56:
+	// two of every weekday at least, and a bound on the hourly rows one run
+	// reads per account.
+	RiskUsageBaselineDays int `json:"risk_usage_baseline_days"`
+	// RiskUsageRecentDays is how many of the latest whole days usage_shift
+	// judges. Default 7, clamped to 3..14. The series is the two together,
+	// so traffic_history_days must be longer than their sum or the verdict
+	// reads retention_short.
+	RiskUsageRecentDays int `json:"risk_usage_recent_days"`
 
 	// ---- IP geolocation (access-log region display, offline .mmdb) ----
 	// Resolution is fully offline against a local .mmdb in <ConfigDir>/geoip/;
@@ -1890,8 +1916,8 @@ var OverridableScopeKeys = map[string]bool{
 	// device identifier at all is a panel-wide privacy decision. The
 	// worker's fleet-wide runtime (refresh_interval_minutes,
 	// first_delay_minutes, alert_freshness_hours, window_days,
-	// login_lookback_days) is absent for the same kind of reason: see
-	// UISettings.
+	// login_lookback_days, usage_baseline_days, usage_recent_days) is absent
+	// for the same kind of reason: see UISettings.
 	"risk.sub_spread_off":      true,
 	"risk.devices_off":         true,
 	"risk.usage_shift_off":     true,
@@ -1902,6 +1928,9 @@ var OverridableScopeKeys = map[string]bool{
 	"risk.usage_floor_gb":      true,
 	"risk.login_warmup_logins": true,
 	"risk.login_hold_days":     true,
+	"risk.usage_warmup_days":   true,
+	"risk.usage_flag_days":     true,
+	"risk.usage_suspect_days":  true,
 	// 2FA methods (login / enroll) — auth_local / twofa / passkey / login2fa.
 	"security.totp_enabled":      true,
 	"security.passkey_enabled":   true,

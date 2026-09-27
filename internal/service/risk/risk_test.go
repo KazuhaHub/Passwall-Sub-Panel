@@ -169,6 +169,10 @@ func (f *fakeTraffic) SumHourlyAllUsers(_ context.Context, since, until time.Tim
 // the 35 local days 2026-08-21 .. 2026-09-24.
 var refreshNow = time.Date(2026, 9, 25, 4, 0, 0, 0, time.UTC)
 
+// shippedSeriesDays is the usage series a fleet that never set
+// risk.usage_baseline_days or risk.usage_recent_days reads: 28 + 7.
+const shippedSeriesDays = domain.RiskUsageBaselineDays + domain.RiskUsageRecentDays
+
 func shanghai(t *testing.T) *time.Location {
 	t.Helper()
 	loc, err := time.LoadLocation("Asia/Shanghai")
@@ -355,7 +359,7 @@ func TestRefresh_BucketsHourlyTrafficIntoPanelDays(t *testing.T) {
 	if err := json.Unmarshal(r.Evidence, &ev); err != nil {
 		t.Fatalf("evidence %q: %v (verdict %s/%s)", r.Evidence, err, r.State, r.Code)
 	}
-	want := make([]int64, domain.RiskUsageSeriesDays)
+	want := make([]int64, shippedSeriesDays)
 	want[0], want[33], want[34] = 7, 100, 250
 	if !reflect.DeepEqual(ev.Series, want) {
 		t.Fatalf("series = %v\nwant     %v", ev.Series, want)
@@ -419,7 +423,7 @@ func TestRefresh_UsageDaysSurviveADateWithoutAMidnight(t *testing.T) {
 				if err := json.Unmarshal(r.Evidence, &ev); err != nil {
 					t.Fatalf("evidence %q: %v (verdict %s/%s)", r.Evidence, err, r.State, r.Code)
 				}
-				want := make([]int64, domain.RiskUsageSeriesDays)
+				want := make([]int64, shippedSeriesDays)
 				for k, b := range c.series {
 					want[k] = b
 				}
@@ -432,7 +436,7 @@ func TestRefresh_UsageDaysSurviveADateWithoutAMidnight(t *testing.T) {
 				// Both reads cover the 35 days as the store cuts them: from no
 				// later than day 0's first instant, up to no earlier than
 				// today's.
-				from := dayStartOf(t, g.at(loc, c.today-domain.RiskUsageSeriesDays, 12, 0), loc)
+				from := dayStartOf(t, g.at(loc, c.today-shippedSeriesDays, 12, 0), loc)
 				to := dayStartOf(t, g.at(loc, c.today, 12, 0), loc)
 				for _, call := range slices.Concat(h.traffic.fleetCalls, h.traffic.userCalls) {
 					if call.since.After(from) || call.until.Before(to) {

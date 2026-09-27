@@ -47,11 +47,16 @@ type RiskPolicySettings struct {
 	// how many earlier placed logins a login needs before it is judged, and
 	// how many days a login from a new country keeps the account flagged.
 	LoginWarmupLogins, LoginHoldDays int
+	// UsageWarmupDays, UsageFlagDays and UsageSuspectDays are usage_shift's
+	// thresholds: how many days of its own history an account needs before
+	// it is judged, and on how many of the judged days it must be over to
+	// read flagged or suspect.
+	UsageWarmupDays, UsageFlagDays, UsageSuspectDays int
 }
 
 // RiskPolicy is the sanitized policy the risk evaluators judge with. Every
 // field is usable as it stands; the comments are the invariants
-// RiskPolicyFromSettings guarantees, and Bounded tightens two of them
+// RiskPolicyFromSettings guarantees, and Bounded tightens five of them
 // against the fleet's configured runtime.
 type RiskPolicy struct {
 	SubSpreadOff, DevicesOff, UsageShiftOff, LoginCountryOff bool
@@ -61,6 +66,9 @@ type RiskPolicy struct {
 	UsageFloorBytes                                          int64   // >= RiskGiB
 	LoginWarmupLogins                                        int     // 1..RiskLoginWarmupMaxLogins
 	LoginHoldDays                                            int     // 1..RiskLoginLookbackMaxDays; Bounded: <= the configured lookback
+	UsageWarmupDays                                          int     // RiskUsageWarmupMinDays..RiskUsageBaselineMaxDays; Bounded: <= the configured baseline
+	UsageFlagDays                                            int     // RiskUsageOverDaysMin..RiskUsageRecentMaxDays; Bounded: <= the configured recent days
+	UsageSuspectDays                                         int     // RiskUsageOverDaysMin..RiskUsageRecentMaxDays; Bounded: <= UsageFlagDays
 }
 
 // DefaultRiskPolicy is the shipped policy: every signal on, each tolerance at
@@ -71,9 +79,13 @@ func DefaultRiskPolicy() RiskPolicy {
 		MaxDevices:      RiskDefaultMaxDevices,
 		UsageRatio:      RiskDefaultUsageRatio,
 		UsageFloorBytes: RiskDefaultUsageFloorGB * RiskGiB,
-		// login_country's thresholds, the constants they replaced.
+		// login_country's and usage_shift's thresholds, the constants
+		// they replaced.
 		LoginWarmupLogins: RiskLoginWarmupLogins,
 		LoginHoldDays:     RiskLoginHoldDays,
+		UsageWarmupDays:   RiskUsageWarmupDays,
+		UsageFlagDays:     RiskUsageFlagDays,
+		UsageSuspectDays:  RiskUsageSuspectDays,
 	}
 }
 
@@ -101,6 +113,12 @@ func DefaultRiskPolicy() RiskPolicy {
 //     another name. The hold is clamped to 1..RiskLoginLookbackMaxDays, the
 //     longest the log can be read; Bounded then holds it to the lookback
 //     actually configured.
+//   - usage_shift's warm-up is raised to RiskUsageWarmupMinDays and its
+//     flag and suspect days to RiskUsageOverDaysMin, the floors that stop a
+//     median over setup, or a single download, from reading as a change.
+//     The ceilings are the longest series a fleet may configure
+//     (RiskUsageBaselineMaxDays, RiskUsageRecentMaxDays); Bounded then holds
+//     each to the series actually configured, and suspect to flag.
 //
 // The four switches have no "unset" — false IS the default (signal on) — and
 // are copied through.
@@ -135,6 +153,9 @@ func RiskPolicyFromSettings(s RiskPolicySettings) RiskPolicy {
 	if s.LoginHoldDays > 0 {
 		p.LoginHoldDays = min(s.LoginHoldDays, RiskLoginLookbackMaxDays)
 	}
+	p.UsageWarmupDays = settingOr(s.UsageWarmupDays, RiskUsageWarmupDays, RiskUsageWarmupMinDays, RiskUsageBaselineMaxDays)
+	p.UsageFlagDays = settingOr(s.UsageFlagDays, RiskUsageFlagDays, RiskUsageOverDaysMin, RiskUsageRecentMaxDays)
+	p.UsageSuspectDays = settingOr(s.UsageSuspectDays, RiskUsageSuspectDays, RiskUsageOverDaysMin, RiskUsageRecentMaxDays)
 	return p
 }
 
@@ -145,6 +166,14 @@ func RiskPolicyFromSettings(s RiskPolicySettings) RiskPolicy {
 //     "flagged" silently unreachable.
 //   - LoginHoldDays <= rt.LoginLookbackDays: a login cannot stay recent
 //     longer than the log is read.
+//   - UsageWarmupDays <= rt.UsageBaselineDays: an account's history is
+//     counted inside the baseline, so a longer warm-up never ends and the
+//     signal is "learning" forever — off by another name.
+//   - UsageFlagDays <= rt.UsageRecentDays: an account cannot be over on more
+//     days than are judged, and "flagged" would silently stop existing.
+//   - UsageSuspectDays <= UsageFlagDays: flagged is checked first, so a
+//     suspect bar above it is never reached either way; held to it, the
+//     policy says what it does — no suspect stage.
 //
 // The CONFIGURED window, never the one a short sub-log retention leaves:
 // with a week configured, min_days 5 and three days of logs kept, the place
@@ -164,6 +193,18 @@ func (p RiskPolicy) Bounded(rt RiskRuntime) RiskPolicy {
 	}
 	if rt.LoginLookbackDays > 0 {
 		p.LoginHoldDays = min(p.LoginHoldDays, rt.LoginLookbackDays)
+	}
+	if rt.UsageBaselineDays > 0 {
+		p.UsageWarmupDays = min(p.UsageWarmupDays, rt.UsageBaselineDays)
+	}
+	if rt.UsageRecentDays > 0 {
+		p.UsageFlagDays = min(p.UsageFlagDays, rt.UsageRecentDays)
+	}
+	// Not a runtime bound, but it has to follow the flag's: suspect is held
+	// to the flag the runtime left. A zero flag (a policy that did not come
+	// from RiskPolicyFromSettings) bounds nothing, like a zero runtime.
+	if p.UsageFlagDays > 0 {
+		p.UsageSuspectDays = min(p.UsageSuspectDays, p.UsageFlagDays)
 	}
 	return p
 }

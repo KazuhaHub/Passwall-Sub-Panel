@@ -61,6 +61,9 @@ func (s UISettings) RiskPolicySettings() domain.RiskPolicySettings {
 		UsageFloorGB:      s.RiskUsageFloorGB,
 		LoginWarmupLogins: s.RiskLoginWarmupLogins,
 		LoginHoldDays:     s.RiskLoginHoldDays,
+		UsageWarmupDays:   s.RiskUsageWarmupDays,
+		UsageFlagDays:     s.RiskUsageFlagDays,
+		UsageSuspectDays:  s.RiskUsageSuspectDays,
 	}
 }
 
@@ -89,8 +92,8 @@ func (s UISettings) GeoRuntimeSettings() domain.GeoRuntimeSettings {
 // RiskRuntimeSettings is the ONE mapping from the fleet-wide risk.* knobs —
 // the worker's and the bell's former constants — to the domain's flat form,
 // read by the risk loop (its cadence and first delay), the risk worker (the
-// fetch window and the login lookback) and the alert feed (the bell's
-// freshness). domain.RiskRuntimeFromSettings then decides what an unset or
+// fetch window, the login lookback and usage_shift's series) and the alert
+// feed (the bell's freshness). domain.RiskRuntimeFromSettings then decides what an unset or
 // out-of-range value means.
 //
 // Global only, so always read from the global settings: none of these keys
@@ -105,5 +108,7 @@ func (s UISettings) RiskRuntimeSettings() domain.RiskRuntimeSettings {
 		AlertFreshnessHours:    s.RiskAlertFreshnessHours,
 		WindowDays:             s.RiskWindowDays,
 		LoginLookbackDays:      s.RiskLoginLookbackDays,
+		UsageBaselineDays:      s.RiskUsageBaselineDays,
+		UsageRecentDays:        s.RiskUsageRecentDays,
 	}
 }

@@ -711,7 +711,8 @@ func TestSettingsKV_RiskKeysRoundTrip(t *testing.T) {
 	if fresh.RiskSubSpreadOff || fresh.RiskDevicesOff || fresh.RiskUsageShiftOff ||
 		fresh.RiskLoginCountryOff || fresh.RiskHWIDCaptureOff || fresh.RiskMinDays != 0 ||
 		fresh.RiskMaxDevices != 0 || fresh.RiskUsageRatio != 0 || fresh.RiskUsageFloorGB != 0 ||
-		fresh.RiskLoginWarmupLogins != 0 || fresh.RiskLoginHoldDays != 0 {
+		fresh.RiskLoginWarmupLogins != 0 || fresh.RiskLoginHoldDays != 0 ||
+		fresh.RiskUsageWarmupDays != 0 || fresh.RiskUsageFlagDays != 0 || fresh.RiskUsageSuspectDays != 0 {
 		t.Fatalf("a fresh install must read every risk key as unset (signals on, capture on), got %+v", fresh)
 	}
 
@@ -727,6 +728,9 @@ func TestSettingsKV_RiskKeysRoundTrip(t *testing.T) {
 	in.RiskUsageFloorGB = 6
 	in.RiskLoginWarmupLogins = 7
 	in.RiskLoginHoldDays = 8
+	in.RiskUsageWarmupDays = 9
+	in.RiskUsageFlagDays = 10
+	in.RiskUsageSuspectDays = 11
 	if err := repo.Save(ctx, in); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
@@ -749,6 +753,9 @@ func TestSettingsKV_RiskKeysRoundTrip(t *testing.T) {
 		{"RiskUsageFloorGB", out.RiskUsageFloorGB, in.RiskUsageFloorGB},
 		{"RiskLoginWarmupLogins", out.RiskLoginWarmupLogins, in.RiskLoginWarmupLogins},
 		{"RiskLoginHoldDays", out.RiskLoginHoldDays, in.RiskLoginHoldDays},
+		{"RiskUsageWarmupDays", out.RiskUsageWarmupDays, in.RiskUsageWarmupDays},
+		{"RiskUsageFlagDays", out.RiskUsageFlagDays, in.RiskUsageFlagDays},
+		{"RiskUsageSuspectDays", out.RiskUsageSuspectDays, in.RiskUsageSuspectDays},
 	} {
 		if c.got != c.want {
 			t.Errorf("%s: got %v, want %v", c.name, c.got, c.want)
@@ -775,6 +782,9 @@ func TestSettingsKV_RiskKeysRoundTrip(t *testing.T) {
 		"usage_floor_gb":      "6",
 		"login_warmup_logins": "7",
 		"login_hold_days":     "8",
+		"usage_warmup_days":   "9",
+		"usage_flag_days":     "10",
+		"usage_suspect_days":  "11",
 	} {
 		got, ok := stored[name]
 		if !ok {
@@ -863,9 +873,10 @@ func TestSettingsKV_GeoRuntimeKeysRoundTrip(t *testing.T) {
 	}
 }
 
-// TestSettingsKV_RiskRuntimeKeysRoundTrip: the five fleet-wide risk knobs —
+// TestSettingsKV_RiskRuntimeKeysRoundTrip: the seven fleet-wide risk knobs —
 // the worker's cadence, its first delay, the bell's freshness, the fetch
-// window and the login lookback, all former constants — survive Save → Load
+// window, the login lookback and usage_shift's baseline and judged days, all
+// former constants — survive Save → Load
 // under the exact "risk.<name>" keys the admin form and the scope refusal
 // address them by. Never configured, each reads as 0:
 // domain.RiskRuntimeFromSettings owns "0 means the shipped default", so the
@@ -900,6 +911,8 @@ func TestSettingsKV_RiskRuntimeKeysRoundTrip(t *testing.T) {
 	in.RiskAlertFreshnessHours = 5
 	in.RiskWindowDays = 6
 	in.RiskLoginLookbackDays = 120
+	in.RiskUsageBaselineDays = 21
+	in.RiskUsageRecentDays = 5
 	if err := repo.Save(ctx, in); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
@@ -925,6 +938,8 @@ func TestSettingsKV_RiskRuntimeKeysRoundTrip(t *testing.T) {
 		"alert_freshness_hours":    "5",
 		"window_days":              "6",
 		"login_lookback_days":      "120",
+		"usage_baseline_days":      "21",
+		"usage_recent_days":        "5",
 	} {
 		got, ok := stored[name]
 		if !ok {
