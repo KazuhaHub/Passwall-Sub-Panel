@@ -13,13 +13,14 @@ import (
 // was a constant.
 func TestRiskRuntimeFromSettings_UnsetIsTheDefault(t *testing.T) {
 	want := RiskRuntime{
-		RefreshInterval:   60 * time.Minute,
-		FirstDelay:        2 * time.Minute,
-		AlertFreshness:    24 * time.Hour,
-		WindowDays:        7,
-		LoginLookbackDays: 90,
-		UsageBaselineDays: 28,
-		UsageRecentDays:   7,
+		RefreshInterval:         60 * time.Minute,
+		FirstDelay:              2 * time.Minute,
+		AlertFreshness:          24 * time.Hour,
+		WindowDays:              7,
+		LoginLookbackDays:       90,
+		UsageBaselineDays:       28,
+		UsageRecentDays:         7,
+		ConnectionRetentionDays: 7,
 	}
 	if got := RiskRuntimeFromSettings(RiskRuntimeSettings{}); got != want {
 		t.Fatalf("RiskRuntimeFromSettings(unset) = %+v\nwant %+v", got, want)
@@ -125,18 +126,22 @@ func TestRiskRuntime_GeoBellFreshnessCoversTwoPolls(t *testing.T) {
 // delay, a 24-hour bell, a seven-day fetch window, a 90-day login lookback
 // and usage_shift's four-week baseline and one judged week. Frozen here as
 // literals, so moving a default is a deliberate edit of this test and not a
-// side effect of editing a constant.
+// side effect of editing a constant. The connection history's week is not a
+// former constant (the table is new), but it is frozen here too: it is the
+// retention every upgraded install starts with, and the privacy statement
+// quotes it.
 //
 // Mutation: a default lookback of 91 turns this red.
 func TestDefaultRiskRuntimeEqualsTheFormerConstants(t *testing.T) {
 	want := RiskRuntime{
-		RefreshInterval:   time.Hour,
-		FirstDelay:        2 * time.Minute,
-		AlertFreshness:    24 * time.Hour,
-		WindowDays:        7,
-		LoginLookbackDays: 90,
-		UsageBaselineDays: 28,
-		UsageRecentDays:   7,
+		RefreshInterval:         time.Hour,
+		FirstDelay:              2 * time.Minute,
+		AlertFreshness:          24 * time.Hour,
+		WindowDays:              7,
+		LoginLookbackDays:       90,
+		UsageBaselineDays:       28,
+		UsageRecentDays:         7,
+		ConnectionRetentionDays: 7,
 	}
 	if got := DefaultRiskRuntime(); got != want {
 		t.Fatalf("DefaultRiskRuntime() = %+v\nwant the former constants %+v", got, want)
@@ -145,5 +150,33 @@ func TestDefaultRiskRuntimeEqualsTheFormerConstants(t *testing.T) {
 		RiskUsageBaselineDays != want.UsageBaselineDays || RiskUsageRecentDays != want.UsageRecentDays {
 		t.Fatalf("the named defaults moved: lookback %d, window %d, usage baseline %d, judged days %d",
 			RiskLoginLookbackDays, RiskWindowDays, RiskUsageBaselineDays, RiskUsageRecentDays)
+	}
+}
+
+// connection_history is the one table new code writes an IP address to, so
+// its retention is the privacy promise itself. Unset is a week, and so is a
+// negative value: never "keep forever", which is what 0 means for the
+// sub-log retention — an IP-bearing table must always age out. At most 90
+// days, a privacy bound an owner who needs longer has to raise in code, and
+// at least one day.
+func TestRiskRuntime_ConnectionRetention(t *testing.T) {
+	for _, c := range []struct {
+		name   string
+		stored int
+		want   int
+	}{
+		{"unset is a week", 0, 7},
+		{"negative is unset, never forever", -1, 7},
+		{"beyond the privacy bound is lowered", 500, 90},
+		{"the bound itself is kept", 90, 90},
+		{"one day is allowed", 1, 1},
+		{"a month is kept", 30, 30},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			got := RiskRuntimeFromSettings(RiskRuntimeSettings{ConnectionRetentionDays: c.stored}).ConnectionRetentionDays
+			if got != c.want {
+				t.Fatalf("ConnectionRetentionDays(stored %d) = %d, want %d", c.stored, got, c.want)
+			}
+		})
 	}
 }

@@ -95,6 +95,33 @@ type SubLogFilter struct {
 	Until  *time.Time
 }
 
+// ConnectionHistoryFilter narrows the admin's connection_history read. Every
+// field is optional; the zero value lists every visible row, newest last
+// sighting first. Sortable by last_seen (the default, newest first),
+// first_seen, count, ip and user_id; an unknown sort falls back to the
+// default.
+type ConnectionHistoryFilter struct {
+	Pagination
+	UserID, PanelID *int64
+	// Exclusion: "" any source; ConnExclusionKept the sources the detector
+	// judged; ConnExclusionExcluded the ones it set aside; or one reason
+	// (domain.AddressExcludedInternal, Listed, Infra or Shared). Anything
+	// else is a domain.ErrValidation, never an empty answer.
+	Exclusion string
+	// Since and Until bound the LAST sighting, both inclusive.
+	Since, Until *time.Time
+	// Search: case-insensitive substring across the address, the source,
+	// the country code, the region, the city and the account's upn.
+	Search string
+}
+
+// The two exclusion filters that are not a reason: every judged source, and
+// every source set aside for any reason.
+const (
+	ConnExclusionKept     = "kept"
+	ConnExclusionExcluded = "excluded"
+)
+
 type SyncTaskFilter struct {
 	Pagination
 	Status *domain.SyncTaskStatus
@@ -1535,13 +1562,14 @@ type UISettings struct {
 	// the one place either rule lives, and nothing here is validated on
 	// save.
 	//
-	// GLOBAL ONLY — all seven are deliberately absent from
+	// GLOBAL ONLY — all eight are deliberately absent from
 	// OverridableScopeKeys. The loop runs once for the fleet, the fetch
 	// window and the login log are each read once per run for every account
-	// together, the bell counts the fleet, and usage_shift reads ONE fleet
+	// together, the bell counts the fleet, usage_shift reads ONE fleet
 	// series that every account's fleet factor is taken from, so every
-	// account's series has the same days; a group value would be stored,
-	// shown and never read.
+	// account's series has the same days, and one hourly pass prunes every
+	// account's connection history; a group value would be stored, shown
+	// and never read.
 	//
 	// RiskRefreshIntervalMinutes is how often the signals are recomputed.
 	// Default 60, clamped to 10..1440: each run streams a week of fetches
@@ -1580,6 +1608,15 @@ type UISettings struct {
 	// so traffic_history_days must be longer than their sum or the verdict
 	// reads retention_short.
 	RiskUsageRecentDays int `json:"risk_usage_recent_days"`
+	// RiskConnectionRetentionDays is how many days connection_history keeps
+	// a source after its LAST sighting. Default 7, clamped to 1..90 when
+	// read. That table holds IP addresses — the one place the detector's
+	// data does — so 0 and a negative value mean the default week, NEVER
+	// "keep forever" as they do for sub_log_retention_days: an IP-bearing
+	// table must always age out, and the 90-day ceiling is a privacy bound.
+	// Pruned by the hourly cleanup, which also deletes a deleted account's
+	// rows whatever their age.
+	RiskConnectionRetentionDays int `json:"risk_connection_retention_days"`
 
 	// ---- IP geolocation (access-log region display, offline .mmdb) ----
 	// Resolution is fully offline against a local .mmdb in <ConfigDir>/geoip/;
@@ -1916,8 +1953,9 @@ var OverridableScopeKeys = map[string]bool{
 	// device identifier at all is a panel-wide privacy decision. The
 	// worker's fleet-wide runtime (refresh_interval_minutes,
 	// first_delay_minutes, alert_freshness_hours, window_days,
-	// login_lookback_days, usage_baseline_days, usage_recent_days) is absent
-	// for the same kind of reason: see UISettings.
+	// login_lookback_days, usage_baseline_days, usage_recent_days,
+	// connection_retention_days) is absent for the same kind of reason: see
+	// UISettings.
 	"risk.sub_spread_off":      true,
 	"risk.devices_off":         true,
 	"risk.usage_shift_off":     true,

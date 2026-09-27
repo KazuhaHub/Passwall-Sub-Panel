@@ -293,9 +293,10 @@ func TestScopeSettingsHandler_AcceptsRiskUsageKnobs(t *testing.T) {
 // The worker's fleet-wide knobs — the former constants — are global only:
 // the loop runs once for the fleet on one cadence and one first delay, the
 // bell counts the fleet, the fetch window and the login log are each read
-// once per run for every account together, and usage_shift's baseline and
+// once per run for every account together, usage_shift's baseline and
 // judged days are the length of the ONE fleet series every account's fleet
-// factor is taken from. A group value would be stored, shown in the group
+// factor is taken from, and connection_history is pruned by one hourly pass
+// over every account's rows. A group value would be stored, shown in the group
 // editor and never read, so absence from OverridableScopeKeys is pinned at
 // the write seam.
 //
@@ -310,6 +311,7 @@ func TestScopeSettingsHandler_RejectsRiskRuntimeKeys(t *testing.T) {
 		"login_lookback_days",
 		"usage_baseline_days",
 		"usage_recent_days",
+		"connection_retention_days",
 	} {
 		t.Run(name, func(t *testing.T) {
 			repo := newFakeScopeRepo()

@@ -1560,6 +1560,7 @@ var schemaModels = []any{
 	&subLogRow{},
 	&geoStreakRow{},
 	&riskSignalRow{},
+	&connectionHistoryRow{},
 	&syncTaskRow{},
 	&xuiPanelRow{},
 	&separatorRow{},

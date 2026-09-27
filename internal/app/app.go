@@ -145,6 +145,12 @@ type App struct {
 	// maintenance loop: the refresh window lives in that instance's memory, and a
 	// second one would have a window nobody could close.
 	nodeMetrics *nodemetrics.Service
+	// connHistory is the connection_history store as the hourly cleanup
+	// sees it: prune by age, purge deleted accounts. The table holds IP
+	// addresses, so the cleanup is what keeps its retention a promise; a
+	// nil store compiles and the table grows for ever, which
+	// TestBuildPrunesConnectionHistory guards against.
+	connHistory connectionHistoryPruner
 	saml        *auth.SAMLService
 	// repos kept around so Run() can call initAdminIfNeeded AFTER the
 	// listen socket is bound — that way a bind failure (port busy / TLS
@@ -563,6 +569,11 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	// each consumer is handed only the narrow interface it declares — the
 	// worker below writes it, the admin view lists it, the bell counts it.
 	riskSignals := sqlstore.NewRiskSignalRepo(db)
+	// The connection history: the one table the detector's data keeps IP
+	// addresses in. Built the same way, so its only consumers are the ones
+	// handed a narrow view of it — the hourly cleanup below prunes it. Its
+	// statements log without their bound values (sqlstore.redactParams).
+	connHistory := sqlstore.NewConnectionHistoryRepo(db)
 
 	// --- transport layer ---
 	// The Node installation template is fetched from the release that published it
@@ -660,6 +671,7 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	a.trafficRepo = repos.Traffic
 	a.nodeTraffic = repos.NodeTraffic
 	a.nodeMetrics = nodeMetrics
+	a.connHistory = connHistory
 	// The observe-only risk signals. The worker is handed read-only views and
 	// one store that writes only risk_signals — the store built above, the
 	// one the router reads, so nothing else is handed its writer.
@@ -1231,6 +1243,7 @@ func (a *App) runAuditCleanupLoop(ctx context.Context) {
 		a.pruneTrafficSnapshots(ctx)
 		a.pruneMailSent(ctx)
 		a.pruneSubLogs(ctx)
+		a.pruneConnectionHistory(ctx)
 		a.pruneCertEvents(ctx)
 		select {
 		case <-ctx.Done():
@@ -1413,6 +1426,64 @@ func (a *App) pruneSubLogs(ctx context.Context) {
 	}
 	if deleted > 0 {
 		log.Info("sub log cleanup", "deleted", deleted, "retention_days", settings.SubLogRetentionDays)
+	}
+}
+
+// connectionHistoryPruner is what the hourly cleanup needs of the
+// connection_history store, and all it is handed.
+type connectionHistoryPruner interface {
+	DeleteBefore(ctx context.Context, cutoff time.Time) (int64, error)
+	PurgeOrphans(ctx context.Context) (int64, error)
+}
+
+// pruneConnectionHistory ages connection_history out and deletes what deleted
+// accounts left. The table holds IP addresses, so both passes are promises
+// rather than housekeeping, and each deliberately differs from its sub-log
+// counterpart:
+//
+//   - Retention is risk.connection_retention_days by LAST sighting, resolved
+//     by domain.RiskRuntimeFromSettings: a week unless set, at most 90 days,
+//     and 0 or a negative value is the week — NEVER "keep forever", which is
+//     what pruneSubLogs does on <= 0. An IP-bearing table must always age out.
+//   - An unreadable setting skips the retention pass (with a Warn) rather
+//     than pruning at the default: an admin who keeps 90 days would lose 83
+//     of them to one failed read, and the next hour retries. No settings
+//     repo at all (a harness) is the default, like the loops' cadences.
+//   - The orphan purge needs no setting and runs whatever else failed, so a
+//     deleted account's addresses are gone within the hour.
+//
+// Counts only in the log, never a row's content.
+func (a *App) pruneConnectionHistory(ctx context.Context) {
+	if a.connHistory == nil {
+		return
+	}
+	var set ports.UISettings
+	settingsOK := true
+	if a.settings != nil {
+		loaded, err := a.settings.Load(ctx, ports.UISettings{})
+		if err != nil {
+			log.Warn("connection history cleanup load settings; retention pass skipped", "err", err)
+			settingsOK = false
+		}
+		set = loaded
+	}
+	if settingsOK {
+		days := domain.RiskRuntimeFromSettings(set.RiskRuntimeSettings()).ConnectionRetentionDays
+		cutoff := time.Now().Add(-time.Duration(days) * 24 * time.Hour)
+		deleted, err := a.connHistory.DeleteBefore(ctx, cutoff)
+		switch {
+		case err != nil:
+			log.Warn("connection history cleanup", "err", err)
+		case deleted > 0:
+			log.Info("connection history cleanup", "deleted", deleted, "retention_days", days)
+		}
+	}
+	purged, err := a.connHistory.PurgeOrphans(ctx)
+	switch {
+	case err != nil:
+		log.Warn("connection history orphan purge", "err", err)
+	case purged > 0:
+		log.Info("connection history orphan purge", "deleted", purged)
 	}
 }
 

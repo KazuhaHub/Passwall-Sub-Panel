@@ -510,6 +510,11 @@ func settingDescriptors(s *ports.UISettings) []settingDescriptor {
 		intField("risk", "login_lookback_days", &s.RiskLoginLookbackDays),
 		intField("risk", "usage_baseline_days", &s.RiskUsageBaselineDays),
 		intField("risk", "usage_recent_days", &s.RiskUsageRecentDays),
+		// connection_history's retention. Global like the runtime above,
+		// and deliberately NOT given the key-presence default the other
+		// retentions get in Load: 0 is the default week here, never "keep
+		// forever" (domain.RiskRuntimeFromSettings).
+		intField("risk", "connection_retention_days", &s.RiskConnectionRetentionDays),
 
 		// geo --- IP geolocation for access-log region display (offline .mmdb)
 		boolField("geo", "geo_ip_enabled", &s.GeoIPEnabled),

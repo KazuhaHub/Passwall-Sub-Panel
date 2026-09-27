@@ -115,22 +115,24 @@ func TestUISettings_RiskPolicySettingsCarriesEveryRiskKnob(t *testing.T) {
 // test above, split from the policy's.
 func TestUISettings_RiskRuntimeSettingsCarriesEveryKnob(t *testing.T) {
 	s := UISettings{
-		RiskRefreshIntervalMinutes: 30,
-		RiskFirstDelayMinutes:      4,
-		RiskAlertFreshnessHours:    5,
-		RiskWindowDays:             6,
-		RiskLoginLookbackDays:      120,
-		RiskUsageBaselineDays:      21,
-		RiskUsageRecentDays:        5,
+		RiskRefreshIntervalMinutes:  30,
+		RiskFirstDelayMinutes:       4,
+		RiskAlertFreshnessHours:     5,
+		RiskWindowDays:              6,
+		RiskLoginLookbackDays:       120,
+		RiskUsageBaselineDays:       21,
+		RiskUsageRecentDays:         5,
+		RiskConnectionRetentionDays: 14,
 	}
 	want := domain.RiskRuntimeSettings{
-		RefreshIntervalMinutes: 30,
-		FirstDelayMinutes:      4,
-		AlertFreshnessHours:    5,
-		WindowDays:             6,
-		LoginLookbackDays:      120,
-		UsageBaselineDays:      21,
-		UsageRecentDays:        5,
+		RefreshIntervalMinutes:  30,
+		FirstDelayMinutes:       4,
+		AlertFreshnessHours:     5,
+		WindowDays:              6,
+		LoginLookbackDays:       120,
+		UsageBaselineDays:       21,
+		UsageRecentDays:         5,
+		ConnectionRetentionDays: 14,
 	}
 	got := s.RiskRuntimeSettings()
 	if got != want {

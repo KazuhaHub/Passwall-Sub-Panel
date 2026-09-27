@@ -9,12 +9,13 @@ import "time"
 // Fleet-wide, not per group, each for a reason that does not depend on who
 // is looking: the loop runs once for the whole fleet on one cadence, the
 // fetch window is streamed once per run for every account together, the
-// login log is read in one keyset pass, the bell counts the fleet, and
+// login log is read in one keyset pass, the bell counts the fleet,
 // usage_shift reads one fleet series whose days every account's series must
-// share. A group value would be stored, shown and never read, so none of
-// these is in ports.OverridableScopeKeys. (login_country's warm-up and hold,
-// and usage_shift's warm-up and over-days, ARE per group: they are judging
-// thresholds, in RiskPolicy.)
+// share, and connection_history is pruned by one hourly pass over every
+// account's rows. A group value would be stored, shown and never read, so
+// none of these is in ports.OverridableScopeKeys. (login_country's warm-up
+// and hold, and usage_shift's warm-up and over-days, ARE per group: they are
+// judging thresholds, in RiskPolicy.)
 //
 // The bounds below are not policy. They keep a knob inside the range where
 // it still means what its name says, and each one is argued at the
@@ -67,6 +68,15 @@ const (
 	RiskUsageBaselineMaxDays = 56
 	RiskUsageRecentMinDays   = 3
 	RiskUsageRecentMaxDays   = 14
+	// How long connection_history keeps a source after it was last seen.
+	// That table is the one place new code stores an IP address, so its
+	// retention is a privacy promise: a week by default, and at most
+	// RiskConnectionRetentionMaxDays, a bound an owner who needs longer has
+	// to raise in code. Unset or negative is the week, never "keep
+	// forever" — the deliberate opposite of sub_log_retention_days, whose 0
+	// keeps fetches for ever: an IP-bearing table must always age out.
+	RiskDefaultConnectionRetentionDays = 7
+	RiskConnectionRetentionMaxDays     = 90
 )
 
 // RiskRuntimeSettings is the flat, storage-shaped form: what the admin form
@@ -75,6 +85,7 @@ const (
 type RiskRuntimeSettings struct {
 	RefreshIntervalMinutes, FirstDelayMinutes, AlertFreshnessHours,
 	WindowDays, LoginLookbackDays, UsageBaselineDays, UsageRecentDays int
+	ConnectionRetentionDays int
 }
 
 // RiskRuntime is the sanitised form every reader uses. Each field is inside
@@ -107,10 +118,15 @@ type RiskRuntime struct {
 	// judged. Fleet-wide because the worker reads one fleet series per run
 	// and every account's fleet factor comes from it. 14..56 and 3..14.
 	UsageBaselineDays, UsageRecentDays int
+	// ConnectionRetentionDays: how many days connection_history keeps a
+	// source after its LAST sighting. 1..RiskConnectionRetentionMaxDays.
+	// Fleet-wide because one hourly pass prunes every account's rows.
+	ConnectionRetentionDays int
 }
 
 // DefaultRiskRuntime is the runtime a fresh install runs with: exactly the
-// constants these knobs replaced, so an upgrade changes nothing.
+// constants these knobs replaced, so an upgrade changes nothing — plus the
+// connection history's week, a table no earlier build had.
 func DefaultRiskRuntime() RiskRuntime {
 	return RiskRuntime{
 		RefreshInterval:   RiskDefaultRefreshMinutes * time.Minute,
@@ -120,6 +136,8 @@ func DefaultRiskRuntime() RiskRuntime {
 		LoginLookbackDays: RiskLoginLookbackDays,
 		UsageBaselineDays: RiskUsageBaselineDays,
 		UsageRecentDays:   RiskUsageRecentDays,
+
+		ConnectionRetentionDays: RiskDefaultConnectionRetentionDays,
 	}
 }
 
@@ -131,7 +149,9 @@ func DefaultRiskRuntime() RiskRuntime {
 // one of these read literally is broken — a zero-length ticker (which
 // panics), a first run racing the boot probes, a bell that forgets a flag
 // the moment it is written, a window of no days, a login log read over no
-// time, a usage median over no baseline and no days judged.
+// time, a usage median over no baseline and no days judged, and a
+// connection history pruned to nothing (or, read the way the other
+// retention settings read 0, kept for ever).
 //
 // The bell's freshness is raised to two refresh intervals. The worker
 // rewrites every row once per run, so a window shorter than two runs would
@@ -150,6 +170,8 @@ func RiskRuntimeFromSettings(s RiskRuntimeSettings) RiskRuntime {
 		LoginLookbackDays: settingOr(s.LoginLookbackDays, RiskLoginLookbackDays, RiskLoginLookbackMinDays, RiskLoginLookbackMaxDays),
 		UsageBaselineDays: settingOr(s.UsageBaselineDays, RiskUsageBaselineDays, RiskUsageBaselineMinDays, RiskUsageBaselineMaxDays),
 		UsageRecentDays:   settingOr(s.UsageRecentDays, RiskUsageRecentDays, RiskUsageRecentMinDays, RiskUsageRecentMaxDays),
+
+		ConnectionRetentionDays: settingOr(s.ConnectionRetentionDays, RiskDefaultConnectionRetentionDays, 1, RiskConnectionRetentionMaxDays),
 	}
 }
 

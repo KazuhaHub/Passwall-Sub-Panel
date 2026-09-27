@@ -92,9 +92,10 @@ func (s UISettings) GeoRuntimeSettings() domain.GeoRuntimeSettings {
 // RiskRuntimeSettings is the ONE mapping from the fleet-wide risk.* knobs —
 // the worker's and the bell's former constants — to the domain's flat form,
 // read by the risk loop (its cadence and first delay), the risk worker (the
-// fetch window, the login lookback and usage_shift's series) and the alert
-// feed (the bell's freshness). domain.RiskRuntimeFromSettings then decides what an unset or
-// out-of-range value means.
+// fetch window, the login lookback and usage_shift's series), the alert
+// feed (the bell's freshness) and the hourly cleanup (the connection
+// history's retention). domain.RiskRuntimeFromSettings then decides what an
+// unset or out-of-range value means.
 //
 // Global only, so always read from the global settings: none of these keys
 // is group-overridable, and a group-resolved UISettings would only echo the
@@ -110,5 +111,7 @@ func (s UISettings) RiskRuntimeSettings() domain.RiskRuntimeSettings {
 		LoginLookbackDays:      s.RiskLoginLookbackDays,
 		UsageBaselineDays:      s.RiskUsageBaselineDays,
 		UsageRecentDays:        s.RiskUsageRecentDays,
+
+		ConnectionRetentionDays: s.RiskConnectionRetentionDays,
 	}
 }

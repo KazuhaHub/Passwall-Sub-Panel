@@ -259,6 +259,8 @@ func TestNoStoredTypeHoldsACoordinate(t *testing.T) {
 		// shape: a coordinate there is a map pin per subscriber.
 		reflect.TypeFor[LiveConnection](),
 		reflect.TypeFor[LiveConnSnapshot](),
+		// connection_history keeps that shape for up to 90 days.
+		reflect.TypeFor[ConnectionRecord](),
 	} {
 		walk(root.Name(), root)
 	}
