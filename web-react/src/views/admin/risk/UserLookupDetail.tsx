@@ -3,10 +3,12 @@ import {
   Box, Button, Chip, CircularProgress, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Tooltip,
   Typography, useTheme,
 } from '@mui/material'
+import WarningAmberIcon from '@mui/icons-material/WarningAmber'
 import { Link as RouterLink } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import { isAxiosError } from 'axios'
 
+import type { GeoAnomaly } from '@/api/geoAnomalies'
 import type { User } from '@/api/types'
 import { RISK_KINDS } from '@/api/riskSignals'
 import { useGeoAnomalyForUser } from '@/query/geoAnomalies'
@@ -28,7 +30,7 @@ import ConnectionHistoryTable from './ConnectionHistoryTable'
 import FlagRecordsTab from './FlagRecordsTab'
 import { stateColor } from './GeoAnomaliesTab'
 import LiveConnectionList from './LiveConnectionList'
-import { LiveRefreshButton, LiveSnapshotHeader } from './LiveConnectionsTab'
+import { LiveEmpty, LiveRefreshButton, LiveSnapshotHeader } from './LiveConnectionsTab'
 import { RiskEvidencePanel, RiskKindChip } from './RiskSignalsTab'
 
 /** A read's failure as one line: the server's message when it gave one. */
@@ -161,8 +163,6 @@ function Overview({ user }: { user: User }) {
 }
 
 function LiveSection({ userId }: { userId: number }) {
-  const { t } = useTranslation(['admin'])
-  const md = useTheme().palette.md
   const scope = useQueryScope()
   // One account is one "page" of the live view: the server pages accounts.
   const { data, isPending, error } = useLiveConnections(scope, { user_id: userId, page: 1, page_size: 1 })
@@ -172,14 +172,26 @@ function LiveSection({ userId }: { userId: number }) {
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
       <Box sx={{ display: 'flex', justifyContent: 'flex-end' }}><LiveRefreshButton /></Box>
       <LiveSnapshotHeader view={data} />
+      {/* The account is the subject here, not a filter: its "none" is about
+          it, and says so when a panel could not be read. */}
       {data.items.length === 0
-        ? data.snapshot.taken_at && (
-          <Typography sx={{ fontSize: 13, color: md.onSurfaceVariant }}>{t('admin:risk_center.live.empty')}</Typography>
-        )
+        ? data.snapshot.taken_at && <LiveEmpty view={data} oneAccount />
         : <LiveConnectionList users={data.items} deviceWindowHours={data.device_window_hours}
             devicesUnavailable={data.devices_unavailable} initiallyOpen />}
     </Box>
   )
+}
+
+/**
+ * The verdict chip's colour. A clean verdict judged while some panel could
+ * not be read stands on a floor of the account's sources — "clean as far as
+ * could be seen" — so it is never drawn green, the colour of a clean bill of
+ * health. A suspect or flagged verdict on a floor is, if anything, an
+ * understatement, and keeps its colour.
+ */
+function verdictColor(row: Pick<GeoAnomaly, 'state' | 'complete'>): ReturnType<typeof stateColor> {
+  const c = stateColor(row.state)
+  return !row.complete && c === 'success' ? 'default' : c
 }
 
 function GeoSection({ userId }: { userId: number }) {
@@ -196,7 +208,7 @@ function GeoSection({ userId }: { userId: number }) {
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.75 }}>
       <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, alignItems: 'center' }}>
-        <Chip size="small" color={stateColor(row.state)}
+        <Chip size="small" color={verdictColor(row)}
           label={t(`admin:geo_anomalies.state_${row.state}`, { defaultValue: row.state })} />
         {tierKey && (
           <Chip size="small" variant="outlined" color={row.flagged ? 'error' : row.state === 'suspect' ? 'warning' : 'default'}
@@ -213,8 +225,16 @@ function GeoSection({ userId }: { userId: number }) {
       <Typography sx={{ fontSize: 13 }}>{reasonText(row, t)}</Typography>
       <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant }}>
         {`${t('admin:geo_anomalies.col_places')}: ${row.places.length ? row.places.join(' · ') : '—'} · `}
-        {`${t('admin:geo_anomalies.col_ips')}: ${row.concurrent_ips} / ${row.live_ips} · `}
-        {`${t('admin:geo_anomalies.col_updated')}: ${row.updated_at_ms ? new Date(row.updated_at_ms).toLocaleString() : '—'}`}
+        {`${t('admin:geo_anomalies.col_ips')}: ${row.concurrent_ips} / ${row.live_ips}`}
+        {/* The Geo tab's floor mark, for the same reason: a count taken
+            while a panel was unreadable is a floor, and shown as a plain
+            number it reads as the whole story. */}
+        {!row.complete && (
+          <Tooltip title={t('admin:geo_anomalies.incomplete')}>
+            <WarningAmberIcon fontSize="inherit" color="warning" sx={{ verticalAlign: 'middle', ml: 0.5 }} />
+          </Tooltip>
+        )}
+        {` · ${t('admin:geo_anomalies.col_updated')}: ${row.updated_at_ms ? new Date(row.updated_at_ms).toLocaleString() : '—'}`}
       </Typography>
     </Box>
   )

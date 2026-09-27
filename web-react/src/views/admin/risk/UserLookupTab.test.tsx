@@ -56,7 +56,9 @@ describe('UserLookupTab', () => {
     expect(screen.queryByText(/^detail of/)).toBeNull()
   })
 
-  it('shows the detail of the id in the URL', () => {
+  // Only the prop: that the page reads ?tab=user&id= into it is pinned by
+  // RiskCenterView.test, through the router.
+  it('shows the detail of the account it is given', () => {
     mount(7)
     expect(screen.getByText('detail of 7')).toBeTruthy()
   })

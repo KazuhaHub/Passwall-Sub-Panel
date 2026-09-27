@@ -95,6 +95,7 @@ import { useMailSettings, useOidcConfig, useSamlConfig, useUISettings } from '@/
 import { useQueryScope } from '@/query/useQueryScope'
 import type { Group } from '@/api/types'
 import { normalizeRegistry } from './subclients/clientRegistry'
+import { ADVANCED_GEO_KNOBS, ADVANCED_RISK_KNOBS, advancedKnobConfigured } from './settingsRuntimeKnobs'
 import ScopeOverridesEditor from '@/components/scope/ScopeOverridesEditor'
 import { loadScopeState, saveScopeState, type ScopeState } from '@/components/scope/scopeOverrides'
 import { geoTolerances } from '@/utils/geoAnomaly'
@@ -473,7 +474,7 @@ export default function SettingsView() {
   }
   // The former constants live in a closed panel — until one of them is
   // configured, which must not hide behind it.
-  const advancedConfigured = ADVANCED_GEO_KNOBS.some(k => settings[k] > 0) || ADVANCED_RISK_KNOBS.some(k => settings[k] > 0)
+  const advancedConfigured = advancedKnobConfigured(settings)
 
   const tabs: { key: TabKey; labelKey: string }[] = [
     { key: 'general', labelKey: 'settings.tab_general' },
@@ -2696,17 +2697,6 @@ function NumField({ label, value, onChange, helperText, step, min = 0, max }: { 
     }} />
   );
 }
-
-// The detectors' former constants, shown in the advanced panel in this order.
-const ADVANCED_GEO_KNOBS = [
-  'geo_anomaly_fresh_window_seconds', 'geo_anomaly_shared_exit_min_users',
-  'geo_anomaly_ban_max_per_poll', 'geo_anomaly_lift_max_per_poll',
-  'geo_anomaly_infra_refresh_minutes', 'geo_anomaly_infra_host_ttl_minutes',
-] as const satisfies readonly RuntimeKnob[]
-const ADVANCED_RISK_KNOBS = [
-  'risk_refresh_interval_minutes', 'risk_first_delay_minutes', 'risk_alert_freshness_hours',
-  'risk_window_days', 'risk_usage_baseline_days', 'risk_usage_recent_days', 'risk_login_lookback_days',
-] as const satisfies readonly RuntimeKnob[]
 
 // RuntimeField is one geo/risk runtime knob. The field holds what is STORED,
 // and an unset knob (0, or a negative the server reads the same way) is an

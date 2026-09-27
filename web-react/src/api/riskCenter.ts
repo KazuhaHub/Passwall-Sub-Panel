@@ -102,8 +102,10 @@ export interface LiveSnapshotInfo {
   panels_unread: PanelRef[]
   /** Panels whose adapter has no live read (S-UI): never a failure. */
   panels_unsupported: PanelRef[]
-  /** Nodes judged with no previous reference, whose whole upstream window
-   *  was trusted once (the first poll after a restart). */
+  /** Nodes judged with no previous reference (the first reading after a
+   *  restart): each is taken as still scanning, which only the reference can
+   *  tell, so a node that stopped may list its last scan's addresses. The
+   *  live window still applies; the upstream's whole 30 minutes is not shown. */
   unreferenced_nodes: number
   users: number
   connections: number
@@ -259,6 +261,20 @@ export async function getLiveConnections(params: LiveParams = {}, opts: ReadOpti
 }
 
 /**
+ * How long the SPA waits for one refresh: longer than the server lets a
+ * refresh run (riskcenter.liveRefreshTimeout, 45 s), which the shared
+ * client's 30 s is not. A panel that has not answered is only listed as
+ * unread once that server bound passes, and the refresh is not cancelled by
+ * the browser giving up — it still stores its reading and has spent the
+ * fleet-wide cooldown. Aborted at 30 s, the page would report a timeout for a
+ * refresh that did happen, and the admin's retry would meet the cooldown.
+ * Local to this request, like nodes.ts's REALITY scan: every other call keeps
+ * the shared 30 s. api/riskCenter.test.ts reads the server bound from the Go
+ * source, so raising it past this fails there.
+ */
+export const LIVE_REFRESH_TIMEOUT_MS = 60_000
+
+/**
  * Asks every panel for its live addresses now. The global error toast is
  * skipped: every outcome — refreshed, answered by a poll, refused with the
  * seconds to wait, or failed — is the caller's to report, and a generic
@@ -267,6 +283,7 @@ export async function getLiveConnections(params: LiveParams = {}, opts: ReadOpti
 export async function refreshLiveConnections(): Promise<RefreshResult> {
   const { data } = await client.post<RefreshResult>('/admin/risk-center/live/refresh', undefined, {
     _skipErrorToast: true,
+    timeout: LIVE_REFRESH_TIMEOUT_MS,
   })
   return data
 }

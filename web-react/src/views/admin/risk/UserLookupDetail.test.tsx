@@ -1,7 +1,7 @@
 /** @vitest-environment jsdom */
 import { ThemeProvider } from '@mui/material/styles'
 import { MemoryRouter } from 'react-router'
-import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createAppTheme } from '@/theme'
 import { makeTestQueryClient, queryWrapper } from '@/test/queryTestUtils'
@@ -148,6 +148,55 @@ describe('UserLookupDetail', () => {
     mount()
     expect(await screen.findByText('异地并发检测对这个账号没有记录')).toBeTruthy()
     expect(await screen.findByText('这个账号还没有风险信号')).toBeTruthy()
+  })
+
+  // A verdict judged while one of the account's panels could not be read
+  // stands on a FLOOR of its sources: "clean" there means "clean as far as
+  // could be seen", never a clean bill of health. The Geo tab marks the count
+  // as a floor; the lookup must too, and must not draw that verdict green.
+  it('marks a verdict from a partial reading and never draws it green', async () => {
+    serve({ '/admin/geo-anomalies': { items: [{
+      ...geoRow, state: 'clean', reason: 'within', tier: '', live_ips: 1, concurrent_ips: 1, complete: false,
+    }] } })
+    mount()
+    const section = (await screen.findByRole('heading', { name: '异地并发' })).closest('section') as HTMLElement
+    const chip = (await within(section).findByText('正常')).closest('.MuiChip-root') as HTMLElement
+    expect(chip.className).not.toMatch(/colorSuccess/)
+    expect(within(section).getByLabelText('有面板读取失败，这个数字是下限而不是总数。')).toBeTruthy()
+  })
+
+  it('draws a clean verdict from a complete reading green, without the floor mark', async () => {
+    serve({ '/admin/geo-anomalies': { items: [{
+      ...geoRow, state: 'clean', reason: 'within', tier: '', live_ips: 1, concurrent_ips: 1, complete: true,
+    }] } })
+    mount()
+    const section = (await screen.findByRole('heading', { name: '异地并发' })).closest('section') as HTMLElement
+    const chip = (await within(section).findByText('正常')).closest('.MuiChip-root') as HTMLElement
+    expect(chip.className).toMatch(/colorSuccess/)
+    expect(within(section).queryByLabelText('有面板读取失败，这个数字是下限而不是总数。')).toBeNull()
+  })
+
+  // The live view holds a row only for an account with a connection, so an
+  // empty lookup cannot tell "not connected" from "its panel could not be
+  // read". With a panel unread it says exactly that, and about THIS account,
+  // not "nobody is connected" about the fleet.
+  it('an empty live section says which it is: not connected, or unknown', async () => {
+    serve()
+    mount()
+    const live = (await screen.findByRole('heading', { name: '实时连接' })).closest('section') as HTMLElement
+    expect(await within(live).findByText('这个账号此刻没有在连')).toBeTruthy()
+    expect(within(live).queryByText('此刻没有在连的账号')).toBeNull()
+    cleanup()
+
+    const v = liveView()
+    v.snapshot.panels_unread = [{ id: 2, name: 'hk-1' }] as never[]
+    serve({ '/admin/risk-center/live': v })
+    mount()
+    const again = (await screen.findByRole('heading', { name: '实时连接' })).closest('section') as HTMLElement
+    expect(await within(again).findByText('没有列出这个账号的连接，但有 1 块面板读取失败，它在那里的连接无从得知'))
+      .toBeTruthy()
+    expect(within(again).queryByText('这个账号此刻没有在连')).toBeNull()
+    expect(within(again).queryByText('此刻没有在连的账号')).toBeNull()
   })
 
   // A deleted account has no sections to show, and asking for them would

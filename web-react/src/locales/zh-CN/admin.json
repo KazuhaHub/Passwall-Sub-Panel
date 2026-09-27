@@ -1207,9 +1207,13 @@
       "in_progress": "正在刷新，请稍候",
       "unread": "{{count}} 块面板读取失败，其上的连接未列出：{{names}}",
       "unsupported": "{{count}} 块面板不提供在线地址（如 S-UI），其上的连接无法列出：{{names}}",
-      "unreferenced": "有 {{count}} 个节点还没有上一次的参照时间（刚启动），这次把上游最近 30 分钟见过的地址都当作在连。",
+      "unreferenced": "有 {{count}} 个节点还没有上一次的参照时间（启动后第一次读取），无法确认它们是否仍在扫描，这次一律当作仍在扫描：已经停止扫描的节点，它最后一次扫描（最多 30 分钟前）看到的地址也会当作在连。",
       "truncated": "有 {{count}} 个连接超出单账号 {{max}} 个的上限，未列出",
       "empty": "此刻没有在连的账号",
+      "empty_filtered": "没有符合条件的连接",
+      "empty_unread": "没有列出任何连接，但有 {{count}} 块面板读取失败，那里的连接无从得知",
+      "empty_user": "这个账号此刻没有在连",
+      "empty_user_unread": "没有列出这个账号的连接，但有 {{count}} 块面板读取失败，它在那里的连接无从得知",
       "filter_user": "用户",
       "filter_panel": "面板",
       "filter_sources": "来源",
@@ -1290,6 +1294,9 @@
         "expired": "暂停 {{minutes}} 分钟到期",
         "admin_resume": "管理员或运维员恢复了服务",
         "replaced": "被「{{reason}}」暂停替换"
+      },
+      "hold": {
+        "geo_anomaly": "异地并发（人工）"
       },
       "evidence_show": "查看证据",
       "evidence_hide": "收起证据"

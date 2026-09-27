@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createAppTheme } from '@/theme'
 import { makeTestQueryClient, queryWrapper } from '@/test/queryTestUtils'
 import { useAuthStore } from '@/stores/auth'
-import type { LiveSnapshotInfo, LiveUser, LiveView } from '@/api/riskCenter'
+import { LIVE_REFRESH_TIMEOUT_MS, type LiveSnapshotInfo, type LiveUser, type LiveView } from '@/api/riskCenter'
 import LiveConnectionsTab from './LiveConnectionsTab'
 
 const api = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() }))
@@ -64,9 +64,9 @@ function view(snap: Partial<LiveSnapshotInfo> = {}, over: Partial<LiveView> = {}
   }
 }
 
-function serve(v: LiveView) {
-  api.get.mockImplementation(async (url: string) => {
-    if (url === '/admin/risk-center/live') return { data: v }
+function serve(v: LiveView | ((params: Record<string, unknown>) => LiveView)) {
+  api.get.mockImplementation(async (url: string, cfg: { params?: Record<string, unknown> } = {}) => {
+    if (url === '/admin/risk-center/live') return { data: typeof v === 'function' ? v(cfg.params ?? {}) : v }
     if (url === '/admin/users') return { data: { items: [], total: 0, page: 1, page_size: 50 } }
     throw new Error(`unexpected GET ${url}`)
   })
@@ -137,10 +137,17 @@ describe('LiveConnectionsTab', () => {
     expect(screen.queryByText(/读取失败/)).toBeNull()
   })
 
-  it('notes unreferenced nodes', async () => {
+  // With no previous reference, FreshLiveIPsWithin waives only the "has the
+  // node rescanned since" check: the live window still applies to each
+  // node's newest scan. What that trusts is that every node is still
+  // scanning — so a node that has stopped shows its last scan's addresses,
+  // not everything the upstream remembered for 30 minutes.
+  it('notes unreferenced nodes, and says what is trusted for them', async () => {
     serve(view({ unreferenced_nodes: 2 }))
     mount()
-    expect(await screen.findByText(/^有 2 个节点还没有上一次的参照时间/)).toBeTruthy()
+    expect(await screen.findByText(
+      '有 2 个节点还没有上一次的参照时间（启动后第一次读取），无法确认它们是否仍在扫描，这次一律当作仍在扫描：'
+      + '已经停止扫描的节点，它最后一次扫描（最多 30 分钟前）看到的地址也会当作在连。')).toBeTruthy()
   })
 
   it('says how many connections the per-account cap left out', async () => {
@@ -181,7 +188,8 @@ describe('LiveConnectionsTab', () => {
     fireEvent.click(await screen.findByRole('button', { name: '立即刷新' }))
 
     await waitFor(() => expect(snack).toHaveBeenCalledWith('刷新过于频繁，请 12 秒后再试', 'warning'))
-    expect(api.post).toHaveBeenCalledWith('/admin/risk-center/live/refresh', undefined, { _skipErrorToast: true })
+    expect(api.post).toHaveBeenCalledWith('/admin/risk-center/live/refresh', undefined,
+      { _skipErrorToast: true, timeout: LIVE_REFRESH_TIMEOUT_MS })
   })
 
   it('a refresh already running says so', async () => {
@@ -218,6 +226,33 @@ describe('LiveConnectionsTab', () => {
     fireEvent.click(await screen.findByRole('button', { name: '立即刷新' }))
     await waitFor(() => expect(snack).toHaveBeenCalledWith('已刷新：3 块面板，9 个连接', 'success'))
     await waitFor(() => expect(liveReads()).toBe(2))
+  })
+
+  // An empty page is not always "nobody": a filter can match no one while
+  // the snapshot lists many, and an unread panel's connections are unknown,
+  // not absent. Each says what it is.
+  it('says "nobody is connected" only for an empty, fully read, unfiltered snapshot', async () => {
+    serve(view({ users: 0, connections: 0 }, { items: [], total: 0 }))
+    mount()
+    expect(await screen.findByText('此刻没有在连的账号')).toBeTruthy()
+  })
+
+  it('a filter that matches nobody says no match, not "nobody is connected"', async () => {
+    serve(params => (params.exclusion === 'shared' ? view({}, { items: [], total: 0 }) : view()))
+    mount()
+    await screen.findByText('alice')
+    fireEvent.mouseDown(screen.getByRole('combobox', { name: '来源' }))
+    fireEvent.click(await screen.findByRole('option', { name: '共享出口' }))
+
+    expect(await screen.findByText('没有符合条件的连接')).toBeTruthy()
+    expect(screen.queryByText('此刻没有在连的账号')).toBeNull()
+  })
+
+  it('an empty snapshot with a panel unread says the rest is unknown', async () => {
+    serve(view({ users: 0, connections: 0, panels_unread: [{ id: 2, name: 'hk-1' }] }, { items: [], total: 0 }))
+    mount()
+    expect(await screen.findByText('没有列出任何连接，但有 1 块面板读取失败，那里的连接无从得知')).toBeTruthy()
+    expect(screen.queryByText('此刻没有在连的账号')).toBeNull()
   })
 
   it('filters by source', async () => {

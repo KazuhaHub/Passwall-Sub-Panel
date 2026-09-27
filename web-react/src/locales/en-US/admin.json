@@ -1209,9 +1209,13 @@
       "in_progress": "A refresh is already running",
       "unread": "{{count}} panel(s) could not be read; their connections are not listed: {{names}}",
       "unsupported": "{{count}} panel(s) do not report live addresses (such as S-UI); their connections cannot be listed: {{names}}",
-      "unreferenced": "{{count}} node(s) have no previous reference yet (just started), so addresses the upstream saw in the last 30 minutes are all shown as connected this time.",
+      "unreferenced": "{{count}} node(s) have no previous reference yet (the first reading since start), so there is no telling whether they are still scanning, and each is treated as if it were: a node that has stopped may show the addresses of its last scan (up to 30 minutes old) as connected.",
       "truncated": "{{count}} connection(s) over the per-account cap of {{max}} are not listed",
       "empty": "Nobody is connected right now",
+      "empty_filtered": "No matching connections",
+      "empty_unread": "Nothing listed, but {{count}} panel(s) could not be read; connections there are unknown",
+      "empty_user": "This account is not connected right now",
+      "empty_user_unread": "No connections listed for this account, but {{count}} panel(s) could not be read; any it has there are unknown",
       "filter_user": "User",
       "filter_panel": "Panel",
       "filter_sources": "Sources",
@@ -1292,6 +1296,9 @@
         "expired": "The {{minutes}}-minute suspension expired",
         "admin_resume": "Staff resumed the service",
         "replaced": "Replaced by a “{{reason}}” suspension"
+      },
+      "hold": {
+        "geo_anomaly": "Locations (manual)"
       },
       "evidence_show": "Show evidence",
       "evidence_hide": "Hide evidence"

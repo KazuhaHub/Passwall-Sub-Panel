@@ -80,6 +80,13 @@ describe('flagText', () => {
       rec({ source: 'geo_auto', event: 'auto_replaced', level: '', prev_level: 'suspended', state: '',
         code: 'replaced', params: { replaced_by: 'traffic_exceeded' } }),
       '被「流量已用尽」暂停替换'],
+    // A person's suspension from the location evidence, kept apart from
+    // service_manual in the domain (resuming it counts a false positive), so
+    // it is named as itself rather than as a generic staff suspension.
+    ['a suspension replaced by a manual location suspension, by its name',
+      rec({ source: 'geo_auto', event: 'auto_replaced', level: '', prev_level: 'suspended', state: '',
+        code: 'replaced', params: { replaced_by: 'geo_anomaly' } }),
+      '被「异地并发（人工）」暂停替换'],
     ['a replacement by a hold this build cannot name, as the raw reason',
       rec({ source: 'geo_auto', event: 'auto_replaced', level: '', prev_level: 'suspended', state: '',
         code: 'replaced', params: { replaced_by: 'future_hold' } }),
@@ -90,6 +97,45 @@ describe('flagText', () => {
     ['a source this build does not know, as its code', rec({ source: 'future', code: 'odd' }), 'odd'],
   ])('%s', (_name, r, want) => {
     expect(flagText(r, zhT)).toBe(want)
+  })
+})
+
+// Every service hold that can replace geo_auto: domain.ServiceSuspensionReason
+// minus geo_auto itself (user.SetServiceSuspendedAndSync records the others).
+// Each is named in both shipped languages; a raw code in the sentence means
+// a hold this build forgot, not one it cannot know.
+const REPLACING_HOLDS = ['service_manual', 'blocked_client', 'traffic_exceeded', 'expired', 'geo_anomaly']
+
+function enT(k: string, o?: Record<string, unknown>): string {
+  const flat = k.startsWith('admin:') ? k.slice('admin:'.length) : k
+  const raw = enDict[flat] ?? (typeof o?.defaultValue === 'string' ? o.defaultValue : k)
+  return raw.replace(/\{\{(\w+)\}\}/g, (m, name: string) => (o && name in o ? String(o[name]) : m))
+}
+
+describe('a replaced automatic suspension', () => {
+  it.each(REPLACING_HOLDS)('names %s in zh-CN and en-US, never as its code', hold => {
+    const r = rec({ source: 'geo_auto', event: 'auto_replaced', level: '', prev_level: 'suspended', state: '',
+      code: 'replaced', params: { replaced_by: hold } })
+    for (const [lang, t] of [['zh-CN', zhT], ['en-US', enT]] as const) {
+      const text = flagText(r, t)
+      expect(text, lang).not.toContain(hold)
+      expect(text, lang).not.toMatch(/admin:|risk_center\.|users\.status\./)
+    }
+  })
+})
+
+// The first reading after a restart waives only the "has the node rescanned"
+// check (domain.FreshLiveIPsWithin with no previous reference); the live
+// window still applies to each node's newest scan. The notice must not claim
+// that everything the upstream remembered for 30 minutes is shown.
+describe('the unreferenced-nodes notice', () => {
+  it('claims only what a missing reference trusts', () => {
+    const zhText = zhDict['risk_center.live.unreferenced']
+    const enText = enDict['risk_center.live.unreferenced']
+    expect(zhText).not.toMatch(/30 分钟见过的地址都/)
+    expect(enText).not.toMatch(/last 30 minutes are all shown/)
+    expect(zhText).toMatch(/停止扫描/)
+    expect(enText).toMatch(/stopped/)
   })
 })
 

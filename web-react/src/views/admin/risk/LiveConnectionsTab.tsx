@@ -25,8 +25,9 @@ const names = (refs: PanelRef[]) => refs.map(r => r.name || `#${r.id}`).join(', 
  * The live snapshot's line and every caveat on it: when it was taken and by
  * what (a poll or a refresh), and each reason the list may be short — stale,
  * panels that failed, panels that cannot tell (S-UI, info not failure),
- * nodes whose whole window was trusted once, the per-account cap, and fetches
- * that could not be read for devices. Shared with the user lookup.
+ * nodes with no reference yet (taken as still scanning), the per-account cap,
+ * and fetches that could not be read for devices. Shared with the user
+ * lookup.
  */
 export function LiveSnapshotHeader({ view }: { view: LiveView }) {
   const { t } = useTranslation(['admin'])
@@ -85,6 +86,37 @@ export function LiveSnapshotHeader({ view }: { view: LiveView }) {
 }
 
 /**
+ * What an EMPTY page of the live view says, claiming no more than the page
+ * knows. Only for a snapshot that exists (the header says when there is
+ * none). Shared with the user lookup.
+ *
+ * - `narrowed` (a filter is set, or the page is past the first): no match,
+ *   not "nobody" — the snapshot may list many connections the filter
+ *   excludes, and a page past the end of a shrunk snapshot is empty too.
+ * - A panel unread: the connections on it are unknown, not absent. The live
+ *   view holds a row only for an account with a connection, so an account
+ *   whose only panel failed has no row and no count of its own; the fleet's
+ *   unread panels are all the page can qualify its "none" with.
+ * - `oneAccount` (the lookup): the sentence is about that account, not the
+ *   fleet.
+ */
+export function LiveEmpty({ view, narrowed = false, oneAccount = false }: {
+  view: LiveView
+  narrowed?: boolean
+  oneAccount?: boolean
+}) {
+  const { t } = useTranslation(['admin'])
+  const md = useTheme().palette.md
+  const unread = view.snapshot.panels_unread.length
+  const text = narrowed
+    ? t('admin:risk_center.live.empty_filtered')
+    : oneAccount
+      ? (unread > 0 ? t('admin:risk_center.live.empty_user_unread', { count: unread }) : t('admin:risk_center.live.empty_user'))
+      : (unread > 0 ? t('admin:risk_center.live.empty_unread', { count: unread }) : t('admin:risk_center.live.empty'))
+  return <Typography sx={{ fontSize: 13, color: md.onSurfaceVariant }}>{text}</Typography>
+}
+
+/**
  * "Refresh now": one live read per panel, rationed for the whole fleet by
  * the server. Every outcome is said here — the global toast is off for this
  * request — because each needs its own words: refreshed, answered by the poll
@@ -139,7 +171,6 @@ export function LiveRefreshButton() {
  */
 export default function LiveConnectionsTab({ onOpenUser }: { onOpenUser?: (userId: number) => void }) {
   const { t } = useTranslation(['admin'])
-  const md = useTheme().palette.md
   const scope = useQueryScope()
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(25)
@@ -154,6 +185,10 @@ export default function LiveConnectionsTab({ onOpenUser }: { onOpenUser?: (userI
     ...(exclusion ? { exclusion } : {}),
   }
   const { data, isPending, error } = useLiveConnections(scope, params)
+  // Read off what was actually asked for, so "no match" and the request
+  // cannot disagree about whether a filter was set.
+  const narrowed = params.user_id !== undefined || params.panel_id !== undefined
+    || params.exclusion !== undefined || page > 1
 
   // Any filter change starts again at the first page: page 3 of one filter
   // is not a page of another.
@@ -192,9 +227,10 @@ export default function LiveConnectionsTab({ onOpenUser }: { onOpenUser?: (userI
       {data && (
         <>
           <LiveSnapshotHeader view={data} />
-          {/* "Nobody is connected" only once a snapshot exists to say so. */}
+          {/* An empty page is said only once a snapshot exists to say it of,
+              and in words that match why it is empty. */}
           {data.items.length === 0 && data.snapshot.taken_at && (
-            <Typography sx={{ fontSize: 13, color: md.onSurfaceVariant }}>{t('admin:risk_center.live.empty')}</Typography>
+            <LiveEmpty view={data} narrowed={narrowed} />
           )}
           {data.items.length > 0 && (
             <LiveConnectionList users={data.items} deviceWindowHours={data.device_window_hours}

@@ -34,6 +34,7 @@ vi.mock('react-i18next', () => ({
 import zh from '@/locales/zh-CN/admin.json'
 import { flatten, type Nested } from '@/i18n/options'
 import SettingsView from './SettingsView'
+import { advancedKnobConfigured } from './settingsRuntimeKnobs'
 dict.current = flatten(zh as Nested)
 
 // The 23 runtime knobs (ports.RuntimeEffective), each with the settings key
@@ -161,12 +162,27 @@ describe('geo and risk runtime knobs', () => {
     expect(description(input)).toContain('当前生效：2')
   })
 
+  // A changed former constant must not hide behind a closed panel. Which
+  // knobs open it is a pure rule, checked knob by knob below without a
+  // render; this one mount pins that the page opens the panel by that rule.
+  // (Thirteen full mounts of this page in one test ran past the 5 s default
+  // on a loaded runner, which is a flaky gate, not a slow one.)
   it('opens the advanced panel when one of its knobs is configured', async () => {
-    // A changed former constant must not hide behind a closed panel.
+    await mountSettings(settings({ [ADVANCED[ADVANCED.length - 1]]: 7 }))
+    expect(advancedToggle().getAttribute('aria-expanded')).toBe('true')
+  })
+
+  it('counts each former constant, and only those, as configuring the advanced panel', () => {
+    expect(advancedKnobConfigured(settings())).toBe(false)
     for (const knob of ADVANCED) {
-      await mountSettings(settings({ [knob]: 7 }))
-      expect(advancedToggle().getAttribute('aria-expanded'), knob).toBe('true')
-      cleanup()
+      expect(advancedKnobConfigured(settings({ [knob]: 7 })), knob).toBe(true)
+      // Unset is 0 or a negative the server reads the same way: still closed.
+      expect(advancedKnobConfigured(settings({ [knob]: -1 })), knob).toBe(false)
+    }
+    // The per-group thresholds and the risk center's own five sit outside
+    // the panel; configuring them must not open it.
+    for (const [knob] of KNOBS.slice(0, 10)) {
+      expect(advancedKnobConfigured(settings({ [knob]: 7 })), knob).toBe(false)
     }
   })
 

@@ -65,11 +65,17 @@ const liveView = {
   device_window_hours: 24, devices_unavailable: false, panels: [], items: [], total: 0, page: 1, page_size: 25,
 }
 
+const alice = { id: 7, upn: 'alice', display_name: 'Alice', role: 'user', group_id: 1, enabled: true,
+  traffic_limit_bytes: 0, account_status: 'active', service_status: 'active' }
+
 // Every tab's reads answer; the location-database status fails, which costs
-// the Geo tab nothing but its advisory banner. The user lookup's reads fail
-// as unexpected, which is all these tests need of it: which tab mounted.
+// the Geo tab nothing but its advisory banner. The user lookup reads account
+// 7 itself; its sections' other reads fail as unexpected, which costs these
+// tests nothing: they ask which account the page looked up, not what the
+// sections say about it.
 function serve(risk: RiskUserRow[] = [], geo: unknown[] = []) {
   api.get.mockImplementation(async (url: string) => {
+    if (url === '/admin/users/7') return { data: alice }
     if (url === '/admin/geo-anomalies') return { data: { items: geo } }
     if (url === '/admin/risk-signals') return { data: { items: risk } }
     if (url === '/admin/risk-center/live') return { data: liveView }
@@ -150,6 +156,32 @@ describe('RiskCenterView', () => {
     expect(selectedTab()).toBe('用户查询')
     const passed = [...new Set(seen.slice(before))]
     expect(passed).toEqual(['/admin/risk?tab=user&id=7'])
+  })
+
+  // The link the Users page and every "open user" button write. Driven
+  // through the router, not handed in as a prop: what is pinned is that the
+  // page reads ?id= and looks THAT account up.
+  it('a ?tab=user&id= link opens that account in the lookup', async () => {
+    serve()
+    mount('/admin/risk?tab=user&id=7')
+
+    const overview = (await screen.findByRole('heading', { name: '概况' })).closest('section') as HTMLElement
+    expect(await within(overview).findByText('#7')).toBeTruthy()
+    expect(within(overview).getByText('alice')).toBeTruthy()
+    expect(selectedTab()).toBe('用户查询')
+    expect(fetched('/admin/users/7')).toBe(true)
+  })
+
+  // A malformed id asks for nobody: the pick hint, and no account read at
+  // all — never a lookup of #0 or of whatever Number() made of the text.
+  it.each(['abc', '0', '-7', '7.5', '07x'])('a malformed id=%s asks for a pick instead', async raw => {
+    serve()
+    mount(`/admin/risk?tab=user&id=${raw}`)
+
+    expect(await screen.findByText('按用户名或显示名搜索')).toBeTruthy()
+    expect(selectedTab()).toBe('用户查询')
+    expect(screen.queryByRole('heading', { name: '概况' })).toBeNull()
+    expect(api.get.mock.calls.some(([u]) => /^\/admin\/users\/[^/]+$/.test(u))).toBe(false)
   })
 
   it('renders the location tab from ?tab=geo', async () => {

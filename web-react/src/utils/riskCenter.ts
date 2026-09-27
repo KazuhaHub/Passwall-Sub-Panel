@@ -59,11 +59,19 @@ function paramsOf(rec: FlagRecord): Record<string, unknown> {
 
 // The service holds another suspension can replace geo_auto with, named by
 // the Users page's own status labels. domain.AutoDisabledReason values.
+//
+// geo_anomaly, a person's suspension from the location evidence, has its own
+// label: the Users page folds it into "service suspended", but the domain
+// keeps it apart from service_manual on purpose (resuming it is how a false
+// positive is counted), and a flag record that named it as a generic staff
+// suspension would lose exactly that. Without an entry it rendered as the
+// raw code.
 const HOLD_LABEL: Record<string, string> = {
   traffic_exceeded: 'admin:users.status.traffic_exhausted',
   expired: 'admin:users.status.expired',
   blocked_client: 'admin:users.status.blocked',
   service_manual: 'admin:users.status.service_suspended',
+  geo_anomaly: `${RC}flags.hold.geo_anomaly`,
   manual: 'admin:users.status.manual_disabled',
 }
 

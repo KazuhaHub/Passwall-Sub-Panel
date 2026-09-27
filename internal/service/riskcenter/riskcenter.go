@@ -89,7 +89,11 @@ type FlagLister interface {
 const (
 	// liveRefreshTimeout bounds one refresh: a panel that has not answered
 	// by then is listed as unread, and the request gets its answer. Well
-	// under a reverse proxy's usual 60-second read timeout.
+	// under a reverse proxy's usual 60-second read timeout. The SPA waits
+	// longer than this for the refresh POST (LIVE_REFRESH_TIMEOUT_MS in
+	// web-react/src/api/riskCenter.ts, whose test reads this line): at the
+	// shared client's 30 s it would report as failed a refresh that still
+	// ran and spent the cooldown. Raising this means raising that too.
 	liveRefreshTimeout = 45 * time.Second
 	// deviceInferMaxRows bounds the fetch-log rows one page of the live
 	// view reads to infer devices (ports.SubLogRecentMaxRows).
