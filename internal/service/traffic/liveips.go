@@ -160,23 +160,9 @@ func (c *geoPolicyCache) lookup(uid int64) geoPolicyEntry {
 		// judging policy — it decides which addresses are judged at all.
 		if set, err := c.s.settings.LoadForUser(c.ctx, u, ports.UISettings{}); err == nil {
 			e.resolved = true
-			e.policy = domain.GeoPolicyFromSettings(domain.GeoPolicySettings{
-				Scope:              set.GeoAnomalyScope,
-				MaxPlaces:          set.GeoAnomalyMaxPlaces,
-				MaxRegions:         set.GeoAnomalyMaxRegions,
-				MaxCities:          set.GeoAnomalyMaxCities,
-				FlagAfterPolls:     set.GeoAnomalyFlagAfterPolls,
-				ClearAfterPolls:    set.GeoAnomalyClearAfterPolls,
-				MinPlacedRatio:     set.GeoAnomalyMinPlacedRatio,
-				CoTravel:           set.GeoAnomalyCoTravel,
-				AllowAnywhere:      set.GeoAnomalyAllowAnywhere,
-				BanEnabled:         set.GeoAnomalyBanEnabled,
-				BanMaxCountries:    set.GeoAnomalyBanMaxCountries,
-				BanMaxRegions:      set.GeoAnomalyBanMaxRegions,
-				BanMaxCities:       set.GeoAnomalyBanMaxCities,
-				BanAfterPolls:      set.GeoAnomalyBanAfterPolls,
-				BanDurationMinutes: set.GeoAnomalyBanDurationMinutes,
-			})
+			// The mapping is ports.UISettings.GeoPolicySettings, the one
+			// the risk worker reads the same group's policy through.
+			e.policy = domain.GeoPolicyFromSettings(set.GeoPolicySettings())
 		} else {
 			// Fall back to the process default rather than to a zero
 			// policy: a zero MaxPlaces would flag every connected user.
@@ -329,6 +315,10 @@ func (s *Service) observeLiveIPs(ctx context.Context, in liveIPInput) []geoBan {
 
 		obs := domain.ObserveGeo(policy, a, lookup, geoAvailable)
 		v := domain.EvaluateGeo(policy, obs, prev[uid].Streak)
+		// The evidence records the verdict's own Why, not one rebuilt from
+		// the process policy: it carries this user's GROUP policy as judged,
+		// and the record is the only place a reader can learn it — the admin
+		// UI knows the global settings, not what each group overrode.
 		next[uid] = domain.GeoRecord{
 			UserID:     uid,
 			Streak:     v.Streak,
@@ -338,7 +328,7 @@ func (s *Service) observeLiveIPs(ctx context.Context, in liveIPInput) []geoBan {
 			LiveIPs:    u.Count(),
 			Concurrent: obs.Placed + obs.Unplaced,
 			Excluded:   obs.Excluded.Total(),
-			Evidence:   domain.GeoEvidenceFrom(obs),
+			Evidence:   domain.GeoEvidenceFrom(obs, v.Why),
 			Complete:   u.Complete(),
 		}
 		if v.BanDue {

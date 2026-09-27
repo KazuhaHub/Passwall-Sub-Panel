@@ -38,7 +38,7 @@ function state(key: string, global: string, edit: { on: boolean; value: string }
 
 function mount(scope: ScopeState) {
   const onChange = vi.fn()
-  render(<ScopeOverridesEditor scope={scope} onChange={onChange} categories={['geo', 'geo_ban']} />)
+  render(<ScopeOverridesEditor scope={scope} onChange={onChange} categories={['geo', 'geo_ban', 'risk']} />)
   return onChange
 }
 
@@ -139,6 +139,65 @@ describe('ScopeOverridesEditor, overridden unset numeric rows', () => {
       scope={state('notify.expire_before_days', '3', { on: true, value: '0' })} />)
     expect(screen.queryByRole('spinbutton')).not.toBeNull()
     expect(screen.queryByText(/^=/)).toBeNull()
+  })
+})
+
+describe('ScopeOverridesEditor, overridden unset float rows', () => {
+  it('reads a fractional override as the number it is', () => {
+    // The server parses a float row with strconv.ParseFloat, so 2.5 is a
+    // real ratio. Read with the integer rule it would be "unparsable" and
+    // the hint would claim the override does nothing.
+    mount(state('risk.usage_ratio', '0', { on: true, value: '2.5' }))
+    expect(screen.queryByRole('spinbutton')).not.toBeNull()
+    expect(screen.queryByText(/^=/)).toBeNull()
+  })
+
+  it('still explains a 0 or an empty float override', () => {
+    mount(state('risk.usage_ratio', '4', { on: true, value: '0' }))
+    expect(screen.queryByRole('spinbutton', { description: '= 3 (default)' })).not.toBeNull()
+    cleanup()
+
+    mount(state('risk.usage_ratio', '4', { on: true, value: '' }))
+    expect(screen.queryByText('= Global: 4')).not.toBeNull()
+  })
+
+  // A group override is stored as typed or as PUT through the API, without
+  // validation, and decoded by strconv.ParseFloat. These are the values a
+  // decimal regex read wrongly, in both directions.
+
+  it('explains NaN and a negative infinity as the default', () => {
+    // Both parse. RiskPolicyFromSettings keeps a ratio only when it is > 0,
+    // which neither is, so the group judges with the shipped 3 — not with
+    // the global 4 that "= Global" promised.
+    for (const v of ['NaN', 'nan', '-Inf', '-infinity']) {
+      mount(state('risk.usage_ratio', '4', { on: true, value: v }))
+      expect(screen.queryByRole('spinbutton', { description: '= 3 (default)' }), `override ${v}`).not.toBeNull()
+      cleanup()
+    }
+  })
+
+  it('reads ParseFloat-only spellings as the number they are', () => {
+    // +Inf parses, and is kept as the largest finite ratio: "never over",
+    // which is what an infinite ratio says. Underscores and hex floats are
+    // Go float syntax. Each one applies, so no hint.
+    for (const v of ['Inf', '+infinity', '1_5', '0x1.8p1']) {
+      mount(state('risk.usage_ratio', '4', { on: true, value: v }))
+      expect(screen.queryByRole('spinbutton'), `override ${v}`).not.toBeNull()
+      expect(screen.queryByText(/^=/), `override ${v}`).toBeNull()
+      cleanup()
+    }
+  })
+
+  it('explains an overflowing or ill-formed float override as the global value', () => {
+    // 1e400 is well formed but out of range: ParseFloat returns ErrRange,
+    // floatField returns the error, and the settings layer skips the
+    // override. The others are syntax ParseFloat refuses though Number()
+    // or a looser pattern would take them.
+    for (const v of ['1e400', '-1e400', '+nan', 'infin', '1__5', ' 2', '0x1']) {
+      mount(state('risk.usage_ratio', '4', { on: true, value: v }))
+      expect(screen.queryByText('= Global: 4'), `override ${JSON.stringify(v)}`).not.toBeNull()
+      cleanup()
+    }
   })
 })
 

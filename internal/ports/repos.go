@@ -75,6 +75,14 @@ type AuthEventFilter struct {
 	Until   *time.Time
 	// Search is a case-insensitive substring matched across upn / ip / ua / reason.
 	Search string
+	// AfterID, when positive, keeps only the events with id > AfterID. With
+	// SortBy "id" ascending and Page 1 it is a keyset cursor: pass the last
+	// id of the previous page. Offset paging (Page n) is not stable while
+	// the hourly retention prune deletes the oldest rows between two pages
+	// — every later row moves up past the page boundary and is never read —
+	// and a cursor on the primary key is. Internal readers only; the admin
+	// API does not expose it.
+	AfterID int64
 }
 
 type SubLogFilter struct {
@@ -837,6 +845,13 @@ type SubLogRepo interface {
 	List(ctx context.Context, filter SubLogFilter) (items []*domain.SubLog, total int64, err error)
 	Clear(ctx context.Context) error
 	DeleteBefore(ctx context.Context, cutoff time.Time) (int64, error)
+	// ScanSince calls fn with every row accessed at or after since, in id order,
+	// batch rows at a time (batch<=0 → 5000). fn must not retain the slice; a fn
+	// error stops the scan and is returned. fn is never called with an empty
+	// slice. Rows carry no user join (UserUPN/UserDisplay/UserGroupID are zero):
+	// this is the window read for background aggregation, which holds a whole
+	// week of fetches in one pass and must not hold it in memory at once.
+	ScanSince(ctx context.Context, since time.Time, batch int, fn func([]domain.SubLog) error) error
 }
 
 type SyncTaskRepo interface {
@@ -1391,6 +1406,61 @@ type UISettings struct {
 	// enough to be permanent in practice would defeat it.
 	GeoAnomalyBanDurationMinutes int `json:"geo_anomaly_ban_duration_minutes"`
 
+	// ---- Risk signals (observe only) ----
+	// Nothing in this block suspends, blocks or notifies an account holder:
+	// the signals are for an admin to read, next to the concurrent-location
+	// verdict, and each is judged on its own.
+	//
+	// RiskHWIDCaptureOff stops recording the device a subscription client
+	// declares about itself (the x-hwid header and its OS/model companions).
+	// The zero value is capture ON, so an install that never saved the form
+	// captures. What is kept is never the raw header: a keyed per-account
+	// digest and a sanitized label, both expiring with sub_logs, and neither
+	// ever affects the response (see handler.SubHandler.declaredDevice).
+	// Turning it off stops new captures; rows already written age out with
+	// sub_log_retention_days.
+	//
+	// GLOBAL ONLY — deliberately absent from OverridableScopeKeys. It is read
+	// on the public /sub path from the global settings that request already
+	// loaded, and whether the panel records a device identifier at all is a
+	// panel-wide privacy decision, not a group's policy.
+	RiskHWIDCaptureOff bool `json:"risk_hwid_capture_off"`
+	// The four signal switches. NEGATIVE on purpose: the zero value is what
+	// an install that never saved the form stores, and it must mean "observe"
+	// — a positive "enabled" flag would leave every signal off until an admin
+	// found the form. Per-group, so a group whose members legitimately trip
+	// one signal (a team credential fetched from several provinces, staff who
+	// sign in from abroad) can have that signal alone switched off without
+	// losing the other three. A switched-off signal is stored as "disabled",
+	// never as clean.
+	RiskSubSpreadOff    bool `json:"risk_sub_spread_off"`
+	RiskDevicesOff      bool `json:"risk_devices_off"`
+	RiskUsageShiftOff   bool `json:"risk_usage_shift_off"`
+	RiskLoginCountryOff bool `json:"risk_login_country_off"`
+	// RiskMinDays is how many distinct panel-local days of the fetch window a
+	// place or a device must be seen on before it counts as established: a
+	// province or device seen on fewer days can make a signal suspect, never
+	// flagged, and a country seen on fewer days does not yet count as one the
+	// account's panel logins may come from. It plays the "sustained, not a
+	// one-off" role that FlagAfterPolls plays for the live verdict, measured
+	// in days because the evidence is a week of fetch logs. Default 3,
+	// clamped to 1..7 when read (the window is at most a week).
+	RiskMinDays int `json:"risk_min_days"`
+	// RiskMaxDevices is how many distinct declared devices an account may
+	// fetch from before the devices signal speaks. Default 3 — a phone, a
+	// laptop and one more. Only clients that send a device header are
+	// counted, so an account whose apps declare nothing is never over.
+	RiskMaxDevices int `json:"risk_max_devices"`
+	// RiskUsageRatio is how many times its own median day an account's daily
+	// traffic must reach, on several recent days, to count as a sustained
+	// change. Default 3.0. Raised to 1.5 when read: a lower ratio accuses
+	// more accounts, and a misconfiguration must degrade toward silence.
+	RiskUsageRatio float64 `json:"risk_usage_ratio"`
+	// RiskUsageFloorGB is the daily traffic, in GiB, below which a day never
+	// counts as over whatever the ratio says — so a light account going from
+	// 10 MB to 50 MB is not a "fivefold surge". Default 3.
+	RiskUsageFloorGB int `json:"risk_usage_floor_gb"`
+
 	// ---- IP geolocation (access-log region display, offline .mmdb) ----
 	// Resolution is fully offline against a local .mmdb in <ConfigDir>/geoip/;
 	// no per-IP external calls. GeoIPEnabled gates the whole feature (default
@@ -1713,6 +1783,21 @@ var OverridableScopeKeys = map[string]bool{
 	"geo_anomaly.ban_max_cities":       true,
 	"geo_anomaly.ban_after_polls":      true,
 	"geo_anomaly.ban_duration_minutes": true,
+	// Risk signals — risk.Service; observation only. Per-group so a group
+	// whose members legitimately trip one signal can have that signal alone
+	// switched off, or its tolerance raised, without loosening the fleet.
+	//
+	// risk.hwid_capture_off is deliberately NOT here: /sub reads it from the
+	// global settings it has already loaded, and whether the panel records a
+	// device identifier at all is a panel-wide privacy decision.
+	"risk.sub_spread_off":    true,
+	"risk.devices_off":       true,
+	"risk.usage_shift_off":   true,
+	"risk.login_country_off": true,
+	"risk.min_days":          true,
+	"risk.max_devices":       true,
+	"risk.usage_ratio":       true,
+	"risk.usage_floor_gb":    true,
 	// 2FA methods (login / enroll) — auth_local / twofa / passkey / login2fa.
 	"security.totp_enabled":      true,
 	"security.passkey_enabled":   true,

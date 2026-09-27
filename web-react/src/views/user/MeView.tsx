@@ -267,7 +267,7 @@ function QuickLinkGrid({ links, md, onOpen }: {
 export default function MeView() {
   const theme = useTheme()
   const md = theme.palette.md
-  const { t } = useTranslation('user')
+  const { t, i18n } = useTranslation('user')
 
   const [tab, setTab] = useTabParam<'overview' | 'traffic' | 'clients' | 'status'>('tab', 'overview', ['overview', 'traffic', 'clients', 'status'])
   const scope = useQueryScope()
@@ -580,6 +580,19 @@ export default function MeView() {
           level: 'danger',
         }
       case 'manual_suspended':
+        // The detector's own time-boxed hold, which the access snapshot
+        // reports as manual_suspended like any other service hold.
+        if (p.service_disabled_reason === 'geo_auto') return {
+          title: t('service.geo_auto_title', { defaultValue: '服务已临时暂停' }),
+          // The stored detail is Chinese and states the minutes (the traffic
+          // poll's geoAutoSuspendDetail); a Chinese UI keeps it. Other
+          // languages get the localized generic sentence rather than Chinese
+          // text. An admin's own note (service_manual) is theirs, in whatever
+          // language they wrote it, and is still shown as-is below.
+          body: (i18n.language?.startsWith('zh') && p.service_disable_detail)
+            || t('service.geo_auto_body', { defaultValue: '检测到账号在多个地区同时使用，代理服务已临时暂停，到时会自动恢复。如有疑问请联系管理员。' }),
+          level: 'warning',
+        }
         return {
           title: t('service.suspended_title', { defaultValue: '服务已暂停' }),
           body: p.service_disable_detail || t('service.suspended_body', { defaultValue: '管理员已暂停你的订阅和代理服务。' }),

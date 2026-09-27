@@ -39,6 +39,8 @@ const ROUTE: Partial<Record<AlertType, string>> = {
   // accounts are listed, with the evidence beside each.
   geo_anomaly: '/admin/logs?tab=geo',
   geo_auto_suspended: '/admin/logs?tab=geo',
+  // A count too; the risk tab lists the accounts with each signal's evidence.
+  risk_signals: '/admin/logs?tab=risk',
 }
 
 const PSP_RELEASES_URL = 'https://github.com/KazuhaHub/passwall-sub-panel/releases'
@@ -56,6 +58,7 @@ function typeIcon(type: AlertType, severity: AlertSeverity) {
       return <SystemUpdateAltIcon fontSize="small" />
     case 'login_security':
     case 'geo_anomaly':
+    case 'risk_signals':
       return <ShieldOutlinedIcon fontSize="small" />
     case 'geo_auto_suspended':
       // Not the shield: this entry says the panel already ACTED (paused the
@@ -113,6 +116,8 @@ export default function NotificationBell() {
         return t('alerts.title.geo_anomaly', { count: a.count, defaultValue: `${a.count} 个账号被标记为异地并发` })
       case 'geo_auto_suspended':
         return t('alerts.title.geo_auto_suspended', { count: a.count, defaultValue: `${a.count} 个账号因异地并发被自动临时暂停` })
+      case 'risk_signals':
+        return t('alerts.title.risk_signals', { count: a.count, defaultValue: `${a.count} 个账号有风险信号` })
       default:
         return name
     }

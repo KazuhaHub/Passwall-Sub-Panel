@@ -14,11 +14,13 @@ type subLogRepo struct{ db *gorm.DB }
 
 func (r *subLogRepo) Insert(ctx context.Context, l *domain.SubLog) error {
 	row := subLogRow{
-		UserID:     l.UserID,
-		IP:         l.IP,
-		UA:         l.UA,
-		ClientType: l.ClientType,
-		AccessedAt: l.AccessedAt,
+		UserID:      l.UserID,
+		IP:          l.IP,
+		UA:          l.UA,
+		ClientType:  l.ClientType,
+		AccessedAt:  l.AccessedAt,
+		DeviceID:    l.DeviceID,
+		DeviceLabel: l.DeviceLabel,
 	}
 	if err := r.db.WithContext(ctx).Create(&row).Error; err != nil {
 		return err
@@ -74,6 +76,9 @@ func (r *subLogRepo) List(ctx context.Context, filter ports.SubLogFilter) ([]*do
 		return q
 	}
 
+	// The device columns ride along on sub_logs.*; search deliberately does
+	// not cover them (a digest and an admin-only label are not search terms
+	// an operator may probe).
 	type subLogWithUser struct {
 		ID          int64
 		UserID      int64
@@ -81,6 +86,8 @@ func (r *subLogRepo) List(ctx context.Context, filter ports.SubLogFilter) ([]*do
 		UA          string
 		ClientType  string
 		AccessedAt  time.Time
+		DeviceID    string
+		DeviceLabel string
 		UserUPN     string
 		UserDisplay string
 		UserGroupID int64
@@ -119,9 +126,58 @@ func (r *subLogRepo) List(ctx context.Context, filter ports.SubLogFilter) ([]*do
 			UA:          row.UA,
 			ClientType:  row.ClientType,
 			AccessedAt:  row.AccessedAt,
+			DeviceID:    row.DeviceID,
+			DeviceLabel: row.DeviceLabel,
 		}
 	}
 	return out, total, nil
+}
+
+const (
+	// subLogScanBatch is ScanSince's default batch: a week of fetches can be
+	// hundreds of thousands of rows, and a batch this size bounds what one
+	// pass holds in memory to a few megabytes.
+	subLogScanBatch = 5000
+	// subLogScanSlack widens ScanSince's SQL lower bound so the database can
+	// only over-select. SQLite compares times as zone-bearing strings, and
+	// sub_logs rows carry the writer's zone (time.Now() in the handler), so
+	// between a row and a bound in arbitrary zones the string order can be
+	// off by up to 26 hours (UTC+14 against UTC-12). Against a UTC bound a
+	// row's wall clock reads at most 12 hours earlier than its instant, so a
+	// bound 24 hours early never drops a row of the window; the exact cut is
+	// then made in Go on real instants. MySQL and Postgres compare true
+	// datetimes and merely read up to a day of extra rows.
+	subLogScanSlack = 24 * time.Hour
+)
+
+// ScanSince streams the fetch window in primary-key batches (GORM's
+// FindInBatches: ORDER BY id, then WHERE id > last). Each batch query has
+// finished and released its connection before fn runs, so fn may itself use
+// the database even on SQLite's single connection. The output slice is reused
+// across batches, which is why fn must not retain it.
+func (r *subLogRepo) ScanSince(ctx context.Context, since time.Time, batch int, fn func([]domain.SubLog) error) error {
+	if batch <= 0 {
+		batch = subLogScanBatch
+	}
+	var rows []subLogRow
+	out := make([]domain.SubLog, 0, batch)
+	return r.db.WithContext(ctx).Model(&subLogRow{}).
+		Where("accessed_at >= ?", since.UTC().Add(-subLogScanSlack)).
+		FindInBatches(&rows, batch, func(*gorm.DB, int) error {
+			out = out[:0]
+			for i := range rows {
+				// The exact cut the SQL bound cannot make (see subLogScanSlack).
+				if rows[i].AccessedAt.Before(since) {
+					continue
+				}
+				out = append(out, rows[i].toDomain())
+			}
+			// A batch wholly inside the slack is not a batch of the window.
+			if len(out) == 0 {
+				return nil
+			}
+			return fn(out)
+		}).Error
 }
 
 func (r *subLogRepo) Clear(ctx context.Context) error {

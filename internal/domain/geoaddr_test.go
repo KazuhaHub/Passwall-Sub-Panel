@@ -549,3 +549,104 @@ func TestParseGeoIgnoreList_EmptyIsEmptyNotAnError(t *testing.T) {
 		}
 	}
 }
+
+// ---- AddressExclusion ------------------------------------------------------
+
+// A panel login is one address, judged on its own. The rules that set it
+// aside are the concurrent-location check's, in the same order — a private
+// address the admin also listed is internal, a listed relay is listed, and
+// only then is PSP's own address infrastructure — so one address never gets
+// two different reasons from the two checks. An address PSP cannot read is
+// named as such: no rule can clear it, and no database can place it.
+func TestAddressExclusion_Precedence(t *testing.T) {
+	list, _ := ParseGeoIgnoreList("10.0.0.0/8, 203.0.113.0/24")
+	infra := map[netip.Addr]bool{
+		netip.MustParseAddr("10.1.2.3"):     true, // private, listed and a relay
+		netip.MustParseAddr("203.0.113.5"):  true, // listed and a relay
+		netip.MustParseAddr("198.51.100.7"): true,
+	}
+	ex := AddressExclusions{Internal: true, Ignore: list, Infra: func(a netip.Addr) bool { return infra[a] }}
+	for ip, want := range map[string]string{
+		"10.1.2.3":            AddressExcludedInternal,
+		"203.0.113.5":         AddressExcludedListed,
+		"198.51.100.7":        AddressExcludedInfra,
+		"::ffff:198.51.100.7": AddressExcludedInfra, // the mapped form of a relay is the relay
+		" 198.51.100.7 ":      AddressExcludedInfra, // as a proxy header may carry it
+		"8.8.8.8":             "",
+		"garbage":             AddressUnparseable,
+		"":                    AddressUnparseable,
+	} {
+		if got := AddressExclusion(ip, ex); got != want {
+			t.Errorf("AddressExclusion(%q) = %q, want %q", ip, got, want)
+		}
+	}
+	// A rule that is off excludes nothing: the private address is kept
+	// when Internal is off and it is on no list and no relay.
+	if got := AddressExclusion("192.168.1.1", AddressExclusions{}); got != "" {
+		t.Errorf("AddressExclusion(192.168.1.1, no rules) = %q, want \"\"", got)
+	}
+	// "Shared" means several accounts on one source at once. One address
+	// on its own is never that, whatever threshold the caller passed: it
+	// is kept, and "shared" is not a reason this function names.
+	if got := AddressExclusion("8.8.8.8", AddressExclusions{SharedMinUsers: 1}); got != "" {
+		t.Errorf("AddressExclusion(8.8.8.8, shared threshold 1) = %q, want \"\"", got)
+	}
+}
+
+// AddressExclusion must never drift from the fleet-wide check it stands in
+// for. For every address in the table, under every combination of rules,
+// the reason it names is the counter ClassifyAddresses bumps for that same
+// address held by one account — and "" exactly when ClassifyAddresses keeps
+// it.
+func TestAddressExclusion_AgreesWithClassifyAddresses(t *testing.T) {
+	list, _ := ParseGeoIgnoreList("192.0.2.0/24\n2001:db8:aaaa::/48\n100.64.0.9\n10.9.9.9")
+	relays := map[netip.Addr]bool{
+		netip.MustParseAddr("198.51.100.7"):     true,
+		netip.MustParseAddr("192.0.2.9"):        true,
+		netip.MustParseAddr("2001:db8:bbbb::1"): true,
+		netip.MustParseAddr("fe80::1"):          true,
+		netip.MustParseAddr("10.9.9.9"):         true,
+	}
+	infra := func(a netip.Addr) bool { return relays[a] }
+	rules := []AddressExclusions{
+		{Internal: true, Ignore: list, Infra: infra},
+		{Ignore: list, Infra: infra},
+		{Internal: true, Infra: infra},
+		{Internal: true, Ignore: list},
+		{Infra: infra},
+		{},
+	}
+	addrs := []string{
+		"10.0.0.1", "10.9.9.9", "100.64.0.9", "100.64.0.10", "127.0.0.1", "169.254.1.1", "0.0.0.0",
+		"fe80::1", "fe80::1%eth0", "::", "::1",
+		"192.0.2.1", "192.0.2.9", "198.51.100.7", "::ffff:198.51.100.7",
+		"2001:db8:aaaa::5", "2001:db8:bbbb::1", "2001:db8:bbbb::2",
+		"8.8.8.8", "2606:4700::1111",
+	}
+	checked := 0
+	for i, ex := range rules {
+		for _, ip := range addrs {
+			row := ClassifyAddresses(map[int64]UserLiveIPs{1: live(1, ip)}, ex)[1]
+			want := ""
+			switch e := row.Excluded; {
+			case e.Total() > 1:
+				t.Fatalf("rules #%d: ClassifyAddresses counted %s twice: %+v", i, ip, e)
+			case e.Internal == 1:
+				want = AddressExcludedInternal
+			case e.Listed == 1:
+				want = AddressExcludedListed
+			case e.Infra == 1:
+				want = AddressExcludedInfra
+			case len(row.Kept) != 1:
+				t.Fatalf("rules #%d: ClassifyAddresses neither kept nor excluded %s: %+v", i, ip, row)
+			}
+			if got := AddressExclusion(ip, ex); got != want {
+				t.Errorf("rules #%d: AddressExclusion(%q) = %q, ClassifyAddresses says %q", i, ip, got, want)
+			}
+			checked++
+		}
+	}
+	if checked != len(rules)*len(addrs) {
+		t.Fatalf("checked %d cases, want %d", checked, len(rules)*len(addrs))
+	}
+}

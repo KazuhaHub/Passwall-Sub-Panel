@@ -2,6 +2,7 @@ package sqlstore
 
 import (
 	"context"
+	"slices"
 	"testing"
 	"time"
 
@@ -213,5 +214,88 @@ func TestAuthEventCountByReasonSince(t *testing.T) {
 	}
 	if got, err := repo.CountByReasonSince(ctx, domain.AuthReasonLockedOut, now.Add(-3*time.Hour)); err != nil || got != 3 {
 		t.Fatalf("locked_out wide window = %d (err %v), want 3", got, err)
+	}
+}
+
+// TestAuthEventListAfterIDIsAKeysetCursor pins the cursor the risk worker
+// pages the login log with. Offset paging shifts under the hourly retention
+// prune: rows it deletes from the front of the range while a reader is
+// between two pages move every later row up past the page boundary, and
+// those rows are never read. A reader that carries the last id it saw —
+// id > AfterID, by id ascending, always the first page — reads every
+// surviving row exactly once, with the other filters still applied.
+func TestAuthEventListAfterIDIsAKeysetCursor(t *testing.T) {
+	db, err := openTestDB(t)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	if err := ensureTestSchema(db); err != nil {
+		t.Fatalf("schema: %v", err)
+	}
+	t.Cleanup(func() {
+		if sqlDB, derr := db.DB(); derr == nil {
+			_ = sqlDB.Close()
+		}
+	})
+	repo := NewRepos(db).AuthEvent
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	// Nine successes two hours apart, oldest first — the log's own order,
+	// so the oldest rows hold the lowest ids — and after every third one a
+	// failure an hour later, which the outcome filter drops without it
+	// taking a place on a page.
+	insert := func(outcome domain.AuthOutcome, at time.Time) int64 {
+		t.Helper()
+		e := &domain.AuthEvent{UserID: 1, UPN: "a@x", Method: domain.AuthMethodLocal, Outcome: outcome, IP: "1.1.1.1", At: at}
+		if err := repo.Insert(ctx, e); err != nil {
+			t.Fatalf("insert: %v", err)
+		}
+		return e.ID
+	}
+	var want []int64
+	for i := range 9 {
+		at := now.Add(-time.Duration(20-2*i) * time.Hour)
+		want = append(want, insert(domain.AuthOutcomeSuccess, at))
+		if i%3 == 1 {
+			insert(domain.AuthOutcomeFailure, at.Add(time.Hour))
+		}
+	}
+
+	since := now.Add(-48 * time.Hour)
+	const size = 3
+	var got []int64
+	var after int64
+	// Ten reads bound a cursor that is ignored: it would serve the same
+	// first page forever.
+	for read := 1; read <= 10; read++ {
+		items, _, err := repo.List(ctx, ports.AuthEventFilter{
+			Pagination: ports.Pagination{Page: 1, PageSize: size, SortBy: "id", SortDir: "asc"},
+			Outcome:    string(domain.AuthOutcomeSuccess),
+			Since:      &since,
+			AfterID:    after,
+		})
+		if err != nil {
+			t.Fatalf("list after %d: %v", after, err)
+		}
+		for _, e := range items {
+			got = append(got, e.ID)
+		}
+		if read == 1 {
+			// The prune lands between the first two pages and deletes the
+			// two oldest successes, both already read. Page 2 by offset
+			// would now start at the sixth success and never see the
+			// fourth and fifth.
+			if n, err := repo.DeleteBefore(ctx, now.Add(-17*time.Hour-30*time.Minute)); err != nil || n != 2 {
+				t.Fatalf("DeleteBefore = %d (err %v), want the 2 oldest successes", n, err)
+			}
+		}
+		if len(items) < size {
+			break
+		}
+		after = items[len(items)-1].ID
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("keyset walk read ids %v, want every success once in id order %v", got, want)
 	}
 }

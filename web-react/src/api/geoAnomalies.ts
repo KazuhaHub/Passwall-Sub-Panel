@@ -31,12 +31,49 @@ export interface GeoExcluded {
 }
 
 /**
+ * Which EvaluateGeo branch wrote the verdict's English `reason`. Mirrors
+ * domain.GeoReasonCode: stable strings, stored in the evidence and sent as-is.
+ */
+export type GeoReasonCode = 'disabled' | 'exempt' | 'idle_stale' | 'idle_none' | 'unknown_excluded'
+  | 'unknown_geo_off' | 'unknown_low_ratio' | 'suspect' | 'flagged_sustained' | 'flagged_clearing'
+  | 'clean_unplaced' | 'clean_within'
+
+/** Every code, in domain.AllGeoReasonCodes order. */
+export const GEO_REASON_CODES: readonly GeoReasonCode[] = [
+  'disabled', 'exempt',
+  'idle_stale', 'idle_none',
+  'unknown_excluded', 'unknown_geo_off', 'unknown_low_ratio',
+  'suspect', 'flagged_sustained', 'flagged_clearing',
+  'clean_unplaced', 'clean_within',
+]
+
+/**
+ * The machine-readable twin of `reason` (domain.GeoWhy): the branch, the tier
+ * its sentence names, and the SANITIZED flag policy the server judged with.
+ * Group overrides included — which is why it is stored rather than recomputed
+ * here from the global settings, which would print the wrong tolerance for
+ * any account in an overridden group.
+ */
+export interface GeoWhy {
+  code: GeoReasonCode
+  /** suspect / flagged_sustained: the tier over; flagged_clearing: the tier
+   *  that raised the flag ('' or absent for a latch stored without one). */
+  tier?: GeoTier
+  scope: 'off' | 'country' | 'region' | 'city'
+  tol: { countries: number; regions: number; cities: number }
+  flag_after: number
+  clear_after: number
+  min_placed_ratio: number
+}
+
+/**
  * The structured account of a verdict. It carries NO addresses, ever — only
  * places, counts and coverage.
  *
  * `v` 0 is a row an older build wrote (evidence not recorded); every other
  * field is then zero and `spots` is `[]`, never null — so `v`, not the shape,
- * is how a reader tells "not recorded" from "nothing found".
+ * is how a reader tells "not recorded" from "nothing found". `v` 1 recorded
+ * evidence but no `why`; from `v` 2 every row the poll writes carries one.
  */
 export interface GeoEvidence {
   v: number
@@ -48,6 +85,8 @@ export interface GeoEvidence {
   /** Distinct IPv4 /24 and IPv6 /48 networks among the judged sources. */
   networks: number
   spread: { countries: number; regions: number; region_country: string; cities: number; city_country: string }
+  /** Present from `v` 2: what the SPA localizes `reason` from. */
+  why?: GeoWhy
 }
 
 /**

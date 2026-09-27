@@ -119,6 +119,17 @@ export const policies = {
     note: 'Revalidates on tab focus; the server-side cadence is the traffic poll.',
   },
   /**
+   * The risk signals. Not polled, for the Geo tab's reason and more so: the
+   * worker recomputes them once an hour, so a browser timer would re-read
+   * the same rows sixty times over.
+   */
+  riskSignals: {
+    staleTime: 60 * SECOND,
+    gcTime: 5 * MINUTE,
+    refetchInterval: false,
+    note: 'Recomputed hourly server-side; revalidates on tab focus.',
+  },
+  /**
    * The sync-task queue. NOT polled: it is a bounded list whose contents only
    * change when an operator acts or the retry loop runs, and an operator
    * watching it has an explicit Refresh. Polling it would also mean polling

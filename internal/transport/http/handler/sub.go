@@ -15,6 +15,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/clientdetect"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/log"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/subdevice"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/mailer"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/render"
@@ -37,10 +38,13 @@ type SubHandler struct {
 	users    ports.UserRepo
 	mailer   *mailer.Service
 	async    AsyncDispatcher
+	// devices keys the device a client declares (x-hwid) into the digest
+	// sub_logs keeps. Nil disables capture: every fetch logs as anonymous.
+	devices *subdevice.Hasher
 }
 
-func NewSubHandler(userSvc *user.Service, renderSvc *render.Service, subLogs ports.SubLogRepo, settings ports.ScopedSettings, users ports.UserRepo, mailerSvc *mailer.Service, async AsyncDispatcher) *SubHandler {
-	return &SubHandler{user: userSvc, render: renderSvc, subLogs: subLogs, settings: settings, users: users, mailer: mailerSvc, async: async}
+func NewSubHandler(userSvc *user.Service, renderSvc *render.Service, subLogs ports.SubLogRepo, settings ports.ScopedSettings, users ports.UserRepo, mailerSvc *mailer.Service, async AsyncDispatcher, devices *subdevice.Hasher) *SubHandler {
+	return &SubHandler{user: userSvc, render: renderSvc, subLogs: subLogs, settings: settings, users: users, mailer: mailerSvc, async: async, devices: devices}
 }
 
 func (h *SubHandler) Get(c *gin.Context) {
@@ -133,16 +137,24 @@ func (h *SubHandler) Get(c *gin.Context) {
 		return
 	}
 
+	// The device the client declares about itself, recorded with each of the
+	// two logged fetches below (blocked and served). Read once the user is
+	// known because the digest is keyed per account; read from the GLOBAL
+	// settings because capture is a panel-wide switch. It is observation
+	// only: nothing below branches on it.
+	deviceID, deviceLabel := h.declaredDevice(c, u.ID, settings)
+
 	// If client is blocked, handle violation tracking and potential auto-disable.
 	if clientBlocked {
 		// Log the violation off the hot path. sub_logs is the
-		// highest-write-rate table on the public endpoint — every
-		// active client polls every few minutes; with N users a
+		// highest-write-rate table on the public endpoint — each client
+		// refreshes on its own timer (Profile-Update-Interval, 24 h by
+		// default) and a whole fleet's timers add up; with N users a
 		// synchronous INSERT here means N×(fsync wall-clock) added to
 		// the request budget. async.Go defers the write to a tracked
 		// background goroutine and returns the request right away;
 		// drops on shutdown are acceptable (best-effort log).
-		h.logSubAsync(u.ID, c.ClientIP(), ua, detected.ClientName)
+		h.logSubAsync(u.ID, c.ClientIP(), ua, detected.ClientName, deviceID, deviceLabel)
 
 		// Advance the violation count atomically, with the dedup window gated
 		// INSIDE the UPDATE: only one request per window advances, so concurrent
@@ -234,7 +246,7 @@ func (h *SubHandler) Get(c *gin.Context) {
 	// without modification. 304 still counts as a fetch — admins
 	// reading sub_logs would otherwise see an active polling client
 	// appear dormant.
-	h.logSubAsync(u.ID, c.ClientIP(), ua, detected.ClientName)
+	h.logSubAsync(u.ID, c.ClientIP(), ua, detected.ClientName, deviceID, deviceLabel)
 
 	// Subscription-Userinfo et al. carry live traffic / expiry data — they
 	// must be written on both 200 and 304 so a revalidating client still
@@ -253,24 +265,32 @@ func (h *SubHandler) Get(c *gin.Context) {
 
 // logSubAsync defers the sub_logs INSERT off the request thread via
 // the async dispatcher. Pre-v3.6.1-beta.3 this was a synchronous Insert
-// inside the request — every active proxy client polls every few
-// minutes so the table's write rate is the highest on the public
-// endpoint, and an fsync-bound INSERT on the hot path dominated the
+// inside the request — sub_logs takes the highest write rate on the
+// public endpoint (each client refreshes on its own timer —
+// Profile-Update-Interval, 24 h by default — and a fleet's timers add
+// up), and an fsync-bound INSERT on the hot path dominated the
 // per-request budget. Best-effort: when async or the repo is nil (test
 // harness) the call no-ops; failed inserts log Warn server-side and
 // are swallowed for the caller. Values are captured at call time
 // (NOT inside the goroutine) so a request-context cancel can't race a
 // gin.Context method call after the request returned.
-func (h *SubHandler) logSubAsync(userID int64, ip, ua, clientType string) {
+//
+// deviceID / deviceLabel are declaredDevice's output — the digest and the
+// sanitized label, never the raw header — and "" when nothing was declared.
+// The failure log names the user and the error only: never the IP, the UA
+// or the device.
+func (h *SubHandler) logSubAsync(userID int64, ip, ua, clientType, deviceID, deviceLabel string) {
 	if h.subLogs == nil {
 		return
 	}
 	entry := &domain.SubLog{
-		UserID:     userID,
-		IP:         ip,
-		UA:         ua,
-		ClientType: clientType,
-		AccessedAt: time.Now(),
+		UserID:      userID,
+		IP:          ip,
+		UA:          ua,
+		ClientType:  clientType,
+		AccessedAt:  time.Now(),
+		DeviceID:    deviceID,
+		DeviceLabel: deviceLabel,
 	}
 	if h.async == nil {
 		// Test harness or other no-async wiring: fall back to a
@@ -283,6 +303,42 @@ func (h *SubHandler) logSubAsync(userID int64, ip, ua, clientType string) {
 			log.Warn("sub: log insert failed", "user_id", userID, "err", err)
 		}
 	})
+}
+
+// declaredDevice reads the device the client declares about itself. It never
+// affects the response (status, headers, clientdetect, the blocked-client gate),
+// never logs and never returns an error. Capture is global
+// (risk.hwid_capture_off), read from the global settings Get already loaded.
+//
+// It returns ("", "") — an anonymous fetch — when there is no hasher, when
+// capture is off, or when the x-hwid header is absent or unusable; a label is
+// kept only next to an id, because a description of a device nobody can count
+// is a description kept for nothing. Otherwise the id is the per-account
+// keyed digest (subdevice.Hasher.ID) and the label is the sanitized
+// OS/version/model.
+//
+// The raw header lives only in a local here. Nothing may carry it further:
+// TestDeclaredDeviceHasNoLogOrErrorPath pins that this body calls no logger,
+// returns no error and uses the gin context for reading request headers only
+// — so a client cannot tell from the answer whether capture is on, and there
+// is no x-hwid-* response header of the kind other panels send.
+//
+// The header names are UNVERIFIED against a captured request from any client
+// (see subdevice.HeaderHWID); a client using other names reads as anonymous,
+// which undercounts devices — the safe direction.
+func (h *SubHandler) declaredDevice(c *gin.Context, userID int64, global ports.UISettings) (id, label string) {
+	if h.devices == nil || global.RiskHWIDCaptureOff {
+		return "", ""
+	}
+	hwid, ok := subdevice.ValidHWID(c.GetHeader(subdevice.HeaderHWID))
+	if !ok {
+		return "", ""
+	}
+	return h.devices.ID(userID, hwid), subdevice.Label(
+		c.GetHeader(subdevice.HeaderDeviceOS),
+		c.GetHeader(subdevice.HeaderOSVersion),
+		c.GetHeader(subdevice.HeaderDeviceModel),
+	)
 }
 
 // computeWeakETag returns a weak ETag derived from the response body. 16 hex

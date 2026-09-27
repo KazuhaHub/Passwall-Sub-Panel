@@ -18,20 +18,31 @@ import (
 // is discarded. That is the same "writes succeed and do nothing" shape this
 // whole area keeps producing, one layer up.
 //
-// Scoped to geo_anomaly_* rather than every setting because retrofitting the
+// Scoped to named prefixes rather than every setting because retrofitting the
 // rule to the existing surface would fail on fields that are deliberately
 // absent (encrypted-at-rest tokens are write-only, ACME fields moved to their
 // own page). A narrow guard that holds beats a broad one that gets muted.
+//
+// guardedSettingPrefixes is the list those prefixes come from: the
+// concurrent-location policy, and the risk signals that reuse it. A new
+// family of detector knobs joins by adding its prefix here, not by copying
+// the two tests below.
+var guardedSettingPrefixes = []string{"geo_anomaly_", "risk_"}
+
 func TestSettingsDTOCarriesEveryGeoAnomalyField(t *testing.T) {
-	want := jsonTagsWithPrefix(reflect.TypeOf(ports.UISettings{}), "geo_anomaly_")
-	if len(want) == 0 {
-		t.Fatal("no geo_anomaly_* fields found in UISettings — the guard is pointed at nothing")
-	}
-	got := jsonTagsWithPrefix(reflect.TypeOf(settingsDTO{}), "geo_anomaly_")
-	for tag := range want {
-		if !got[tag] {
-			t.Errorf("UISettings has %q but the admin settings DTO does not: the form cannot read or write it", tag)
-		}
+	for _, prefix := range guardedSettingPrefixes {
+		t.Run(prefix, func(t *testing.T) {
+			want := jsonTagsWithPrefix(reflect.TypeOf(ports.UISettings{}), prefix)
+			if len(want) == 0 {
+				t.Fatalf("no %s* fields found in UISettings — the guard is pointed at nothing", prefix)
+			}
+			got := jsonTagsWithPrefix(reflect.TypeOf(settingsDTO{}), prefix)
+			for tag := range want {
+				if !got[tag] {
+					t.Errorf("UISettings has %q but the admin settings DTO does not: the form cannot read or write it", tag)
+				}
+			}
+		})
 	}
 }
 
@@ -47,17 +58,25 @@ func TestSettingsDTOCarriesEveryGeoAnomalyField(t *testing.T) {
 // this exists to catch, and it does catch it.
 func TestSettingsHandlerMapsEveryGeoAnomalyFieldBothWays(t *testing.T) {
 	src := readHandlerSource(t, "admin_settings.go")
-	for _, name := range goFieldNamesWithJSONPrefix(reflect.TypeOf(ports.UISettings{}), "geo_anomaly_") {
-		// GET: dto{... Field: s.Field ...}
-		if !strings.Contains(src, name+":                s."+name) &&
-			!strings.Contains(src, name+":             s."+name) &&
-			!strings.Contains(src, "s."+name+",") {
-			t.Errorf("%s is never read out of UISettings — the form would always show the zero value", name)
-		}
-		// PUT: UISettings{... Field: req.Field ...}
-		if !strings.Contains(src, "req."+name) {
-			t.Errorf("%s is never read off the request — the admin's change would be silently discarded", name)
-		}
+	for _, prefix := range guardedSettingPrefixes {
+		t.Run(prefix, func(t *testing.T) {
+			names := goFieldNamesWithJSONPrefix(reflect.TypeOf(ports.UISettings{}), prefix)
+			if len(names) == 0 {
+				t.Fatalf("no %s* fields found in UISettings — the guard is pointed at nothing", prefix)
+			}
+			for _, name := range names {
+				// GET: dto{... Field: s.Field ...}
+				if !strings.Contains(src, name+":                s."+name) &&
+					!strings.Contains(src, name+":             s."+name) &&
+					!strings.Contains(src, "s."+name+",") {
+					t.Errorf("%s is never read out of UISettings — the form would always show the zero value", name)
+				}
+				// PUT: UISettings{... Field: req.Field ...}
+				if !strings.Contains(src, "req."+name) {
+					t.Errorf("%s is never read off the request — the admin's change would be silently discarded", name)
+				}
+			}
+		})
 	}
 }
 

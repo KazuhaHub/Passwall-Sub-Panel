@@ -30,6 +30,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/metrics"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/operationgate"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/safego"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/subdevice"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/xraycompat"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 
@@ -48,6 +49,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/nodesync"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/reconcile"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/render"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/risk"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/rollup"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/servermigration"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/sharedclient"
@@ -129,6 +131,7 @@ type App struct {
 	health        *health.Service
 	geo           *geo.Service
 	render        *render.Service
+	risk          *risk.Service
 	settings      ports.SettingsRepo
 	syncTasks     ports.SyncTaskRepo
 	// trafficRepo / nodeTraffic kept for the retention cron — PruneBefore is
@@ -217,6 +220,13 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 		return nil, fmt.Errorf("db schema: %w", err)
 	}
 	sqlstore.ConfigureSecretKey(cfg.SecretKeyMaterial())
+	// The key for the subscription device digest comes from the same panel
+	// secret, under its own label (subdevice.NewHasher), so it is neither
+	// the at-rest AES key just configured nor anything a JWT signature can
+	// equal. Rotating the secret therefore changes every device id; old and
+	// new ids coexist until sub_logs retention ages the old ones out. A
+	// blank secret yields nil, which the /sub handler treats as capture off.
+	deviceHasher := subdevice.NewHasher(cfg.SecretKeyMaterial())
 	// Surface advisory key-material warnings (weak jwt_secret/encryption_key,
 	// or the coupled-key fallback where jwt_secret doubles as the at-rest key).
 	for _, w := range cfg.SecurityWarnings() {
@@ -548,6 +558,11 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	// TestBuildWiresTheGeoAutoSuspension guards that.
 	trafficSvc.SetGeoSuspender(userSvc)
 	trafficSvc.SetAuditRepo(repos.Audit)
+	// The observe-only risk signals' store: a concrete repo built from the
+	// database handle like the geo streak store, not a ports.Repos field, so
+	// each consumer is handed only the narrow interface it declares — the
+	// worker below writes it, the admin view lists it, the bell counts it.
+	riskSignals := sqlstore.NewRiskSignalRepo(db)
 
 	// --- transport layer ---
 	// The Node installation template is fetched from the release that published it
@@ -566,7 +581,16 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 		GeoRecords:    geoStreaks,
 		// The same store again, as the bell's count of latched flags.
 		GeoFlags: geoStreaks,
-		Pool:     pool,
+		// The risk store twice over, the same way: the risk view's rows and
+		// the bell's count of flagged accounts. Both optional, so leaving
+		// either out would compile — TestBuildWiresTheRiskSignals reads both
+		// through the assembled router.
+		RiskSignals: riskSignals,
+		RiskFlags:   riskSignals,
+		// Optional like GeoFlags, so leaving it out would compile and quietly
+		// record every subscription fetch as anonymous.
+		DeviceHasher: deviceHasher,
+		Pool:         pool,
 		// Same service the push path uses, so the capabilities the edit form
 		// reports are read through the identical check that gates the write.
 		SharedClients: sharedClientSvc,
@@ -636,6 +660,29 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	a.trafficRepo = repos.Traffic
 	a.nodeTraffic = repos.NodeTraffic
 	a.nodeMetrics = nodeMetrics
+	// The observe-only risk signals. The worker is handed read-only views and
+	// one store that writes only risk_signals — the store built above, the
+	// one the router reads, so nothing else is handed its writer.
+	// TestBuildWiresTheRiskSignals guards the wiring: a worker left out
+	// compiles, and the table just stays empty.
+	//
+	// The infrastructure set arrives as method values, not as the traffic
+	// service: the worker needs "is this PSP's own address", "has the set
+	// been built yet" and "which of them are landing nodes", and nothing
+	// else that service can do. The login log is handed over as the whole
+	// repo, but the worker's field is an interface with List alone.
+	a.risk = risk.New(risk.Deps{
+		Users:        repos.User,
+		Store:        riskSignals,
+		Settings:     repos.ScopedSettings,
+		Traffic:      repos.Traffic,
+		SubLogs:      repos.SubLog,
+		Geo:          geoSvc,
+		IsInfra:      trafficSvc.IsInfra,
+		InfraLoaded:  trafficSvc.InfraLoaded,
+		AuthEvents:   repos.AuthEvent,
+		LandingAddrs: trafficSvc.LandingAddresses,
+	})
 	a.trafficInterval = time.Duration(sysSettings.CronTrafficPullMinutes) * time.Minute
 	// Rollup's gap heartbeat is derived from the poll cadence so a coarse poll
 	// interval doesn't make every segment exceed a fixed heartbeat (blank charts).
@@ -780,6 +827,7 @@ func (a *App) Run() error {
 	safego.GoTracked(&a.bgWG, "geo-update-loop", func() { a.runGeoUpdateLoop(bgCtx) })
 	safego.GoTracked(&a.bgWG, "traffic-loop", func() { a.runTrafficLoop(bgCtx) })
 	safego.GoTracked(&a.bgWG, "infra-address-loop", func() { a.runInfraAddressLoop(bgCtx) })
+	safego.GoTracked(&a.bgWG, "risk-signal-loop", func() { a.runRiskLoop(bgCtx, riskFirstDelay) })
 	safego.GoTracked(&a.bgWG, "mail-loop", func() { a.runMailLoop(bgCtx) })
 	safego.GoTracked(&a.bgWG, "reconcile-loop", func() { a.runReconcileLoop(bgCtx) })
 	safego.GoTracked(&a.bgWG, "health-loop", func() { a.runHealthLoop(bgCtx) })
@@ -1664,6 +1712,56 @@ func (a *App) runInfraAddressLoop(ctx context.Context) {
 	}
 	refresh()
 	t := time.NewTicker(infraRefreshInterval)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			refresh()
+		}
+	}
+}
+
+// riskRefreshInterval is how often the risk signals are recomputed. A
+// constant like the audit-cleanup cadence, not a setting: the signals are
+// day-scale (a week of fetches, 35 days of traffic), so an hour is fresh
+// enough, and none of them sits on the poll path.
+const riskRefreshInterval = time.Hour
+
+// riskFirstDelay is how long after start the first refresh runs: long
+// enough for the boot probes and the infrastructure-address refresh (which
+// runs as soon as its loop starts) to settle, so the first run does not
+// compete with them; short enough that a fresh install's risk view is not
+// empty for a whole interval. Correctness does not depend on it: every run
+// skips the place signals while the infrastructure set has never been built
+// (traffic.Service.InfraLoaded), keeping their previous rows.
+const riskFirstDelay = 2 * time.Minute
+
+// runRiskLoop recomputes the observe-only risk signals: once after
+// firstDelay, then every riskRefreshInterval. A failed run keeps the
+// previous rows (the service writes nothing on error) and is retried on the
+// next tick; RefreshOnce counts every run it starts in
+// psp_risk_refresh_total. Runs under the operation gate like every other
+// background pass, so a backend switch drains it.
+func (a *App) runRiskLoop(ctx context.Context, firstDelay time.Duration) {
+	if a.risk == nil {
+		return
+	}
+	refresh := func() {
+		if err := a.operationGate.RunRead(ctx, a.risk.RefreshOnce); err != nil && ctx.Err() == nil {
+			log.Warn("risk signal refresh failed; previous rows kept", "err", err)
+		}
+	}
+	first := time.NewTimer(firstDelay)
+	defer first.Stop()
+	select {
+	case <-ctx.Done():
+		return
+	case <-first.C:
+	}
+	refresh()
+	t := time.NewTicker(riskRefreshInterval)
 	defer t.Stop()
 	for {
 		select {

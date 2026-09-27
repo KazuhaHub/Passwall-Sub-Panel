@@ -49,6 +49,15 @@ function generalSettings(overrides: Partial<UISettings> = {}): UISettings {
     geo_anomaly_ban_max_cities: 0,
     geo_anomaly_ban_after_polls: 0,
     geo_anomaly_ban_duration_minutes: 0,
+    risk_sub_spread_off: false,
+    risk_devices_off: false,
+    risk_usage_shift_off: false,
+    risk_login_country_off: false,
+    risk_min_days: 0,
+    risk_max_devices: 0,
+    risk_usage_ratio: 0,
+    risk_usage_floor_gb: 0,
+    risk_hwid_capture_off: false,
     sub_clients: [],
     quick_links: [],
     ...overrides,
@@ -258,6 +267,65 @@ describe('concurrent-location settings', () => {
       geo_anomaly_max_cities: 4,
       geo_anomaly_ban_duration_minutes: 120,
     }))
+  })
+})
+
+describe('risk signal settings', () => {
+  const sw = (name: string) => screen.getByRole('switch', { name: `admin:settings.risk.${name}` }) as HTMLInputElement
+  const num = (name: string) => screen.getByRole('spinbutton', { name: `admin:settings.risk.${name}` }) as HTMLInputElement
+
+  it('shows the four signals and device capture on by default', async () => {
+    // Every switch reads positively ("signal on") over a negative stored key
+    // (risk_*_off), whose zero value — the state of every install that never
+    // saved these — is on.
+    await mountSettings()
+
+    expect(screen.queryByText('admin:settings.risk.section')).not.toBeNull()
+    expect(screen.queryByText('admin:settings.risk.hint')).not.toBeNull()
+    for (const name of ['sub_spread', 'devices', 'usage_shift', 'login_country', 'hwid_capture']) {
+      expect(sw(name).checked, name).toBe(true)
+    }
+    expect(num('min_days').value).toBe('0')
+    expect(num('min_days').max).toBe('7')
+    expect(num('usage_ratio').step).toBe('any')
+    expect(screen.queryByText('admin:settings.risk.effective')).not.toBeNull()
+    expect(screen.queryByText('admin:settings.risk.hwid_capture_hint')).not.toBeNull()
+  })
+
+  it('saves a switched-off signal as risk_*_off=true and leaves the rest on', async () => {
+    await mountSettings()
+    api.put.mockImplementationOnce(async (_url: string, data: UISettings) => ({ data }))
+
+    fireEvent.click(sw('devices'))
+    fireEvent.click(sw('hwid_capture'))
+    fireEvent.change(num('usage_ratio'), { target: { value: '2.5' } })
+    fireEvent.change(num('max_devices'), { target: { value: '4' } })
+    save()
+
+    await waitFor(() => expect(api.put).toHaveBeenCalledOnce())
+    expect(api.put).toHaveBeenCalledWith('/admin/settings/ui', expect.objectContaining({
+      risk_devices_off: true,
+      risk_hwid_capture_off: true,
+      risk_sub_spread_off: false,
+      risk_usage_shift_off: false,
+      risk_login_country_off: false,
+      risk_usage_ratio: 2.5,
+      risk_max_devices: 4,
+    }))
+  })
+
+  it('offers the risk category in a group\'s override rail', async () => {
+    installReads({
+      '/admin/settings/ui': generalSettings(),
+      '/admin/groups': list([{ id: 1, slug: 'test', name: 'group', tag_filter: { all: true, tags: [], mode: 'all' }, members: 0, remark: '', require_2fa: false }]),
+      '/admin/groups/1/scope-settings': { overrides: {}, overridable: ['risk.min_days', 'risk.usage_ratio'] },
+    })
+    mount(<SettingsView />)
+    fireEvent.click(await screen.findByRole('button', { name: 'group' }))
+
+    expect(await screen.findByText('admin:groups.scope.cat_risk')).toBeTruthy()
+    expect(screen.queryByText('admin:groups.scope.risk_min_days')).not.toBeNull()
+    expect(screen.queryByText('admin:groups.scope.risk_usage_ratio')).not.toBeNull()
   })
 })
 

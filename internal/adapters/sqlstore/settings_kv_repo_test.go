@@ -674,3 +674,106 @@ func TestSettingsKV_GeoTierAndBanKeysRoundTrip(t *testing.T) {
 		}
 	}
 }
+
+// TestSettingsKV_RiskKeysRoundTrip: every risk-signal knob survives Save →
+// Load under the exact "risk.<name>" key that group overrides, the scope
+// catalog and the SPA's group editor address it by. A UISettings field with
+// no descriptor fails silently here as it does for the geo keys above: the
+// save answers 200 and the value is gone on the next Load, so the worker
+// would judge with the default while the form showed the admin's choice.
+//
+// Never configured, every key reads as its zero — the switches as "on", the
+// numbers as unset. The settings layer must not fill them in:
+// domain.RiskPolicyFromSettings owns "0 means the shipped default", and a
+// group override of 0 has to mean the same thing.
+func TestSettingsKV_RiskKeysRoundTrip(t *testing.T) {
+	db, err := openTestDB(t)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	t.Cleanup(func() {
+		if sqlDB, _ := db.DB(); sqlDB != nil {
+			_ = sqlDB.Close()
+		}
+	})
+	if err := ensureTestSchema(db); err != nil {
+		t.Fatalf("schema: %v", err)
+	}
+	repo := newKVSettingsRepo(db)
+	ctx := context.Background()
+
+	fresh, err := repo.Load(ctx, ports.UISettings{})
+	if err != nil {
+		t.Fatalf("Load fresh: %v", err)
+	}
+	if fresh.RiskSubSpreadOff || fresh.RiskDevicesOff || fresh.RiskUsageShiftOff ||
+		fresh.RiskLoginCountryOff || fresh.RiskHWIDCaptureOff || fresh.RiskMinDays != 0 ||
+		fresh.RiskMaxDevices != 0 || fresh.RiskUsageRatio != 0 || fresh.RiskUsageFloorGB != 0 {
+		t.Fatalf("a fresh install must read every risk key as unset (signals on, capture on), got %+v", fresh)
+	}
+
+	in := fresh
+	in.RiskSubSpreadOff = true
+	in.RiskDevicesOff = true
+	in.RiskUsageShiftOff = true
+	in.RiskLoginCountryOff = true
+	in.RiskHWIDCaptureOff = true
+	in.RiskMinDays = 4
+	in.RiskMaxDevices = 5
+	in.RiskUsageRatio = 2.5
+	in.RiskUsageFloorGB = 6
+	if err := repo.Save(ctx, in); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	out, err := repo.Load(ctx, ports.UISettings{})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	for _, c := range []struct {
+		name      string
+		got, want any
+	}{
+		{"RiskSubSpreadOff", out.RiskSubSpreadOff, in.RiskSubSpreadOff},
+		{"RiskDevicesOff", out.RiskDevicesOff, in.RiskDevicesOff},
+		{"RiskUsageShiftOff", out.RiskUsageShiftOff, in.RiskUsageShiftOff},
+		{"RiskLoginCountryOff", out.RiskLoginCountryOff, in.RiskLoginCountryOff},
+		{"RiskHWIDCaptureOff", out.RiskHWIDCaptureOff, in.RiskHWIDCaptureOff},
+		{"RiskMinDays", out.RiskMinDays, in.RiskMinDays},
+		{"RiskMaxDevices", out.RiskMaxDevices, in.RiskMaxDevices},
+		{"RiskUsageRatio", out.RiskUsageRatio, in.RiskUsageRatio},
+		{"RiskUsageFloorGB", out.RiskUsageFloorGB, in.RiskUsageFloorGB},
+	} {
+		if c.got != c.want {
+			t.Errorf("%s: got %v, want %v", c.name, c.got, c.want)
+		}
+	}
+
+	var rows []settingRow
+	if err := db.Where("type = ?", "risk").Find(&rows).Error; err != nil {
+		t.Fatalf("read rows: %v", err)
+	}
+	stored := map[string]string{}
+	for _, r := range rows {
+		stored[r.Name] = r.Value
+	}
+	for name, want := range map[string]string{
+		"sub_spread_off":    "1",
+		"devices_off":       "1",
+		"usage_shift_off":   "1",
+		"login_country_off": "1",
+		"hwid_capture_off":  "1",
+		"min_days":          "4",
+		"max_devices":       "5",
+		"usage_ratio":       "2.5",
+		"usage_floor_gb":    "6",
+	} {
+		got, ok := stored[name]
+		if !ok {
+			t.Errorf("no row stored under risk.%s — every reader, group overrides included, addresses it by that key", name)
+			continue
+		}
+		if got != want {
+			t.Errorf("risk.%s stored as %q, want %q", name, got, want)
+		}
+	}
+}

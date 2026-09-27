@@ -154,3 +154,43 @@ describe('geo catalog', () => {
     expect(kvFromGlobal('enum', 'region')).toBe('region')
   })
 })
+
+describe('risk catalog', () => {
+  const riskRows = () => SCOPE_KEYS.filter(k => k.cat === 'risk')
+
+  it('has exactly the eight overridable risk keys, in order', () => {
+    // The mirror of ports.OverridableScopeKeys' risk block.
+    expect(SCOPE_CATEGORIES.find(c => c.id === 'risk')).toEqual({ id: 'risk', labelKey: 'cat_risk', def: '风险信号（只提示）' })
+    expect(riskRows().map(k => k.key)).toEqual([
+      'risk.sub_spread_off',
+      'risk.devices_off',
+      'risk.usage_shift_off',
+      'risk.login_country_off',
+      'risk.min_days',
+      'risk.max_devices',
+      'risk.usage_ratio',
+      'risk.usage_floor_gb',
+    ])
+    expect(riskRows().map(k => k.kind)).toEqual(['bool', 'bool', 'bool', 'bool', 'int', 'int', 'float', 'int'])
+  })
+
+  it('never offers hwid capture per group', () => {
+    // /sub reads it from the global settings on every fetch, before the
+    // account's group is known; the backend refuses the override. A row here
+    // would only offer a switch that 400s.
+    expect(SCOPE_KEYS.some(k => k.key === 'risk.hwid_capture_off')).toBe(false)
+  })
+
+  it('names the shipped default of every numeric row, and writes what it shows', () => {
+    // domain.DefaultRiskPolicy: a stored 0 means "never configured", which is
+    // 3 for each of them — never "no device allowed" or "a zero-byte floor".
+    for (const k of riskRows().filter(k => k.kind !== 'bool')) {
+      expect(k.unsetValue, k.key).toBe('3')
+    }
+    for (const k of riskRows()) {
+      expect(`${k.type}.${k.name}`).toBe(k.key)
+      expect(k.field).toBe(`risk_${k.name}`)
+      expect(k.labelKey).toBe(`risk_${k.name}`)
+    }
+  })
+})

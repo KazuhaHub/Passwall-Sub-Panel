@@ -1,0 +1,261 @@
+package sqlstore
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"time"
+
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
+
+	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
+)
+
+// The widths of risk_signals' bounded columns, checked by Save before anything
+// is written. Left to the database, an over-long value is stored by SQLite,
+// refused by PostgreSQL and truncated or refused by MySQL depending on its
+// SQL mode — one hourly batch would succeed on one install and fail on the
+// next. Checked here, it fails the same way everywhere. They must equal the
+// size tags on riskSignalRow (TestRiskSignalRow_WidthsMatchTheColumns).
+const (
+	riskKindWidth  = 24
+	riskStateWidth = 16
+	riskCodeWidth  = 32
+	// riskEvidenceMaxBytes is MySQL's TEXT capacity, the smallest of the
+	// three dialects'. The evaluators cap their lists far below it; this is
+	// the backstop that keeps a runaway one from failing on MySQL alone.
+	riskEvidenceMaxBytes = 65535
+)
+
+// riskSignalRow is one account's latest verdict for one observe-only signal.
+//
+// Overwritten every hour; no history. The worker recomputes each signal from
+// a whole window every run, so an older row is an older window, not a fact
+// the next run needs — and keeping them would grow without bound for values
+// nothing reads twice.
+//
+// No foreign key to users. Deleting a user cascades nothing
+// (user_repo.go's hard delete), so reads JOIN users to hide what a deleted
+// account left, and PurgeOrphans deletes it on the worker's next run. A
+// foreign key would instead make every user delete depend on this table,
+// which is observation only and must never block an admin action.
+//
+// Composite primary key (user_id, kind), and GORM marks neither column
+// auto-increment: it does so only for a lone integer key, or for the one
+// field of a composite key tagged autoIncrement.
+type riskSignalRow struct {
+	UserID int64  `gorm:"primaryKey"`
+	Kind   string `gorm:"primaryKey;size:24"`
+	// State is one of v2's seven GeoState values; Code names the evaluator
+	// branch (domain.RiskCode). Codes and numbers, never prose: the SPA
+	// localizes them, and a stored English sentence would be English forever.
+	State string `gorm:"size:16;not null;default:''"`
+	Code  string `gorm:"size:32;not null;default:''"`
+	// Evidence is the evaluator's evidence as JSON — places, day masks, client
+	// labels with a short digest prefix, byte totals; never an address.
+	//
+	// text, NULLABLE, and NO DEFAULT: MySQL refuses a DEFAULT on a TEXT column
+	// (error 1101; TestSchemaNoDefaultOnTextColumns). NULL for idle, disabled
+	// and exempt verdicts, so nothing outlives the window it described. A
+	// plain *string rather than a custom Valuer: the value is already JSON,
+	// and a pointer is the one type every driver reads NULL into unaided.
+	Evidence *string `gorm:"column:evidence;type:text"`
+	// UpdatedAt is when the row was last written (unix ms). The bell counts
+	// only fresh flags by it, so a row the worker stopped rewriting — a dead
+	// loop, a skipped kind — falls out of the count instead of staying lit.
+	UpdatedAt int64 `gorm:"autoUpdateTime:milli"`
+}
+
+func (riskSignalRow) TableName() string { return "risk_signals" }
+
+// RiskSignalRepo is the risk_signals store. A concrete type built from the
+// database handle rather than a ports.Repos field, like GeoStreakRepo: each
+// consumer — the worker that writes it, the admin view that lists it, the
+// bell that counts it — declares the narrow interface it needs, so no reader
+// is handed a writer and the writer is handed nothing but this table.
+type RiskSignalRepo struct{ db *gorm.DB }
+
+func NewRiskSignalRepo(db *gorm.DB) *RiskSignalRepo { return &RiskSignalRepo{db: db} }
+
+// Save upserts this run's rows by (user_id, kind).
+//
+// The whole batch is checked before anything is written. A kind that is empty
+// or wider than its column, a state or code wider than its column, evidence
+// that is not valid JSON or will not fit a TEXT column, or one (user, kind)
+// named twice returns a domain.ErrValidation and writes nothing. Evidence has
+// to be valid because the admin API serves it verbatim as a raw JSON value:
+// one bad row would fail that response for every account. A duplicate key is
+// refused because the dialects disagree about it — PostgreSQL rejects an
+// upsert that touches one row twice, SQLite and MySQL silently keep the last.
+//
+// Upsert rather than delete-then-insert, so a crash mid-write can never leave
+// the table empty; and 200 rows per statement inside one transaction (GORM
+// wraps a multi-batch CreateInBatches in one), so a failed batch rolls back
+// the batches before it and the run keeps its previous rows whole.
+//
+// Every mutable column is named in DoUpdates. An upsert rewrites only the
+// columns it names, so one left out keeps its FIRST value forever — last
+// week's evidence beside today's idle verdict. The conflict columns are named
+// explicitly, not left to the dialect to infer from the key.
+//
+// Nil, empty and JSON-null evidence are all stored as NULL, the one form of
+// "no evidence". UpdatedAtMS, UPN and DisplayName are ignored: the store
+// stamps the time itself, and the names belong to users.
+func (r *RiskSignalRepo) Save(ctx context.Context, signals []domain.RiskSignal) error {
+	if len(signals) == 0 {
+		return nil
+	}
+	type key struct {
+		userID int64
+		kind   domain.RiskKind
+	}
+	seen := make(map[key]struct{}, len(signals))
+	rows := make([]riskSignalRow, 0, len(signals))
+	for _, s := range signals {
+		if err := validateRiskSignal(s); err != nil {
+			return err
+		}
+		k := key{s.UserID, s.Kind}
+		if _, dup := seen[k]; dup {
+			return fmt.Errorf("%w: risk signal %q for user %d appears twice in one save", domain.ErrValidation, s.Kind, s.UserID)
+		}
+		seen[k] = struct{}{}
+		rows = append(rows, riskSignalRow{
+			UserID:   s.UserID,
+			Kind:     string(s.Kind),
+			State:    string(s.State),
+			Code:     string(s.Code),
+			Evidence: riskEvidenceColumn(s.Evidence),
+		})
+	}
+	return r.db.WithContext(ctx).Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "user_id"}, {Name: "kind"}},
+		DoUpdates: clause.AssignmentColumns([]string{"state", "code", "evidence", "updated_at"}),
+	}).CreateInBatches(rows, 200).Error
+}
+
+// validateRiskSignal refuses a row the store cannot hold identically on every
+// dialect. Lengths are in bytes. The kinds, states and codes are ASCII by
+// construction, where bytes and characters agree, and for anything else a
+// byte bound is the stricter one, so nothing that passes can overflow a
+// varchar anywhere; MySQL's TEXT limit is in bytes to begin with.
+func validateRiskSignal(s domain.RiskSignal) error {
+	switch {
+	case s.Kind == "" || len(s.Kind) > riskKindWidth:
+		return fmt.Errorf("%w: risk signal kind %q must be 1..%d bytes", domain.ErrValidation, s.Kind, riskKindWidth)
+	case len(s.State) > riskStateWidth:
+		return fmt.Errorf("%w: risk signal state %q is over %d bytes", domain.ErrValidation, s.State, riskStateWidth)
+	case len(s.Code) > riskCodeWidth:
+		return fmt.Errorf("%w: risk signal code %q is over %d bytes", domain.ErrValidation, s.Code, riskCodeWidth)
+	case len(s.Evidence) > riskEvidenceMaxBytes:
+		return fmt.Errorf("%w: risk signal %q evidence is %d bytes, over %d", domain.ErrValidation, s.Kind, len(s.Evidence), riskEvidenceMaxBytes)
+	case len(s.Evidence) > 0 && !json.Valid(s.Evidence):
+		// The kind, not the evidence: evidence is never echoed into an error,
+		// which may reach a log.
+		return fmt.Errorf("%w: risk signal %q evidence is not valid JSON", domain.ErrValidation, s.Kind)
+	}
+	return nil
+}
+
+// riskEvidenceColumn maps evidence to its column: NULL for nil, empty or a
+// JSON null, the JSON text otherwise. A JSON null is what json.Marshal makes
+// of a nil evidence pointer, so a caller that marshals without checking still
+// stores "nothing" in its one form rather than as the string "null".
+func riskEvidenceColumn(e json.RawMessage) *string {
+	if len(e) == 0 || bytes.Equal(bytes.TrimSpace(e), []byte("null")) {
+		return nil
+	}
+	s := string(e)
+	return &s
+}
+
+// riskEvidenceFrom is the reverse, and forgiving: an empty or unparseable
+// column reads as nil, the same as NULL. Save never writes either, but a row
+// edited behind its back must cost only its own evidence — served verbatim,
+// one malformed value would fail the admin response for every account.
+func riskEvidenceFrom(col *string) json.RawMessage {
+	if col == nil || *col == "" || !json.Valid([]byte(*col)) {
+		return nil
+	}
+	return json.RawMessage(*col)
+}
+
+// List returns every row whose user still exists, with the user's UPN and
+// display name, ordered by user_id then kind — the admin risk view's read.
+//
+// JOIN, not LEFT JOIN: a row a deleted account left is not an account an
+// admin can open, and the worker purges it on its next run anyway. Whole-table
+// because the view shows the fleet; the table holds at most one row per
+// account per kind.
+func (r *RiskSignalRepo) List(ctx context.Context) ([]domain.RiskSignal, error) {
+	var rows []struct {
+		UserID      int64
+		Kind        string
+		State       string
+		Code        string
+		Evidence    *string
+		UpdatedAt   int64
+		UPN         string
+		DisplayName string
+	}
+	err := r.db.WithContext(ctx).Table("risk_signals").
+		Select("risk_signals.user_id AS user_id, risk_signals.kind AS kind, risk_signals.state AS state, " +
+			"risk_signals.code AS code, risk_signals.evidence AS evidence, risk_signals.updated_at AS updated_at, " +
+			"users.upn AS upn, users.display_name AS display_name").
+		Joins("JOIN users ON users.id = risk_signals.user_id").
+		Order("risk_signals.user_id, risk_signals.kind").
+		Scan(&rows).Error
+	if err != nil {
+		return nil, fmt.Errorf("list risk signals: %w", err)
+	}
+	out := make([]domain.RiskSignal, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, domain.RiskSignal{
+			UserID:      row.UserID,
+			Kind:        domain.RiskKind(row.Kind),
+			State:       domain.GeoState(row.State),
+			Code:        domain.RiskCode(row.Code),
+			Evidence:    riskEvidenceFrom(row.Evidence),
+			UpdatedAtMS: row.UpdatedAt,
+			UPN:         row.UPN,
+			DisplayName: row.DisplayName,
+		})
+	}
+	return out, nil
+}
+
+// CountFlaggedUsers counts the ACCOUNTS with any signal flagged and written at
+// or after since — the notification bell's risk_signals count, one COUNT per
+// feed request.
+//
+// Distinct accounts, not rows: one account flagged on two signals is one
+// account to review, and a row count would make the bell's number mean
+// nothing an admin can check. Flagged only — suspect is below the line, as it
+// is for the geo entry. Joined to users because there is no foreign key: a
+// deleted account's row is not somebody the admin can look up. Bounded by
+// updated_at so a row the worker stopped rewriting stops lighting the bell;
+// updated_at is unix milliseconds, so the comparison is an integer one and
+// identical on every dialect.
+func (r *RiskSignalRepo) CountFlaggedUsers(ctx context.Context, since time.Time) (int64, error) {
+	var n int64
+	err := r.db.WithContext(ctx).Table("risk_signals").
+		Select("COUNT(DISTINCT risk_signals.user_id)").
+		Joins("JOIN users ON users.id = risk_signals.user_id").
+		Where("risk_signals.state = ? AND risk_signals.updated_at >= ?", string(domain.GeoStateFlagged), since.UnixMilli()).
+		Scan(&n).Error
+	return n, err
+}
+
+// PurgeOrphans deletes the rows of accounts that no longer exist and returns
+// how many it deleted. The worker runs it every hour, so what a deleted
+// account left lasts at most one run (and List hides it meanwhile).
+//
+// A NOT IN subquery on another table is portable as written: MySQL's
+// restriction (error 1093) is on a subquery naming the table being deleted
+// from, and users.id is a primary key, so NOT IN never meets a NULL.
+func (r *RiskSignalRepo) PurgeOrphans(ctx context.Context) (int64, error) {
+	res := r.db.WithContext(ctx).Exec("DELETE FROM risk_signals WHERE user_id NOT IN (SELECT id FROM users)")
+	return res.RowsAffected, res.Error
+}

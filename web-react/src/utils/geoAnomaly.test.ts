@@ -1,7 +1,18 @@
-import { describe, expect, it } from 'vitest'
-import type { GeoAnomaly, GeoSpot } from '@/api/geoAnomalies'
+import { describe, expect, it, vi } from 'vitest'
+
+// GEO_REASON_CODES lives beside the wire types, in a module that imports the
+// shared axios client, which reads the document at import time. These are
+// pure-function tests in a node environment; nothing here makes a request.
+vi.mock('@/api/client', () => ({ client: {} }))
+
+import zh from '@/locales/zh-CN/admin.json'
+import en from '@/locales/en-US/admin.json'
+import { GEO_REASON_CODES, type GeoAnomaly, type GeoReasonCode, type GeoSpot, type GeoWhy } from '@/api/geoAnomalies'
 import type { GeoIPStatus, UISettings } from '@/api/settings'
-import { activeDbIsCountryOnly, geoTolerances, groupSpots, sortBySeverity, tierLabelKey } from './geoAnomaly'
+import { flatten, type Nested } from '@/i18n/options'
+import {
+  activeDbIsCountryOnly, geoTolerances, groupSpots, reasonText, sortBySeverity, tierLabelKey, type Translate,
+} from './geoAnomaly'
 
 function row(over: Partial<GeoAnomaly>): GeoAnomaly {
   return {
@@ -165,5 +176,185 @@ describe('geoTolerances', () => {
     expect(geoTolerances(s({ geo_anomaly_ban_duration_minutes: 10080 })).banMinutes).toBe(10080)
     expect(geoTolerances(s({ geo_anomaly_ban_duration_minutes: 1 })).banMinutes).toBe(1)
     expect(geoTolerances(s({ geo_anomaly_ban_after_polls: 2 })).banAfterPolls).toBe(2)
+  })
+})
+
+// A stand-in for i18next's t over one shipped bundle: the admin namespace
+// flattened the way the SPA registers it, `{{name}}` interpolation, and the
+// defaultValue only when the key is absent. Backed by the REAL locale files,
+// so these tests also prove every placeholder a string uses is one
+// reasonText supplies.
+function translator(bundle: Nested, drop: string[] = []): Translate {
+  const dict = flatten(bundle)
+  for (const k of drop) delete dict[k]
+  return (key, opts = {}) => {
+    const flat = key.startsWith('admin:') ? key.slice('admin:'.length) : key
+    const raw = dict[flat] ?? (typeof opts.defaultValue === 'string' ? opts.defaultValue : key)
+    return raw.replace(/\{\{(\w+)\}\}/g, (m, name: string) => (name in opts ? String(opts[name]) : m))
+  }
+}
+
+describe('reasonText', () => {
+  const zhT = translator(zh as Nested)
+  const enT = translator(en as Nested)
+
+  // DefaultGeoPolicy as the server snapshots it: scope city, tolerances
+  // 1/1/2, flag after 3, clear after 6, placed ratio 0.5.
+  const why = (code: GeoReasonCode, over: Partial<GeoWhy> = {}): GeoWhy => ({
+    code, scope: 'city', tol: { countries: 1, regions: 1, cities: 2 },
+    flag_after: 3, clear_after: 6, min_placed_ratio: 0.5, ...over,
+  })
+  // A v2 row: the English reason is deliberately NOT the one EvaluateGeo
+  // writes, so a test can tell "localized" from "fell back" at a glance.
+  const v2 = (w: GeoWhy, ev: Partial<GeoAnomaly['evidence']> = {}, over: Partial<GeoAnomaly> = {}) => {
+    const base = row({})
+    return row({
+      reason: 'STORED ENGLISH',
+      ...over,
+      evidence: { ...base.evidence, v: 2, why: w, ...ev },
+    })
+  }
+  const spread = (over: Partial<GeoAnomaly['evidence']['spread']>) =>
+    ({ ...row({}).evidence.spread, ...over })
+
+  // One row per sentence EvaluateGeo can write (the §4.2 golden table), and
+  // the zh-CN each one must render. The params come from the evidence, the
+  // row's streaks and the stored policy — never from global settings.
+  const cases: { name: string; r: GeoAnomaly; zh: string }[] = [
+    { name: 'disabled', r: v2(why('disabled', { scope: 'off' })), zh: '此账号的地区检测已关闭' },
+    { name: 'exempt', r: v2(why('exempt')), zh: '此账号允许从任何地方连接' },
+    {
+      name: 'idle_stale', r: v2(why('idle_stale'), { stale: 2 }),
+      zh: '此刻没有并发连接；上游窗口里还有 2 个更早见过的地址',
+    },
+    { name: 'idle_none', r: v2(why('idle_none')), zh: '此刻没有连接' },
+    {
+      name: 'unknown_excluded',
+      r: v2(why('unknown_excluded'), { excluded: { shared: 1, listed: 0, infra: 2, internal: 1 } }),
+      zh: '全部 4 个并发地址都已排除（共享出口 1、忽略名单 0、本机节点 / 中转 2、内网 1），不下结论',
+    },
+    {
+      name: 'unknown_geo_off',
+      r: v2(why('unknown_geo_off'), { coverage: { placed: 0, unplaced: 2, region_known: 0, city_known: 0 } }),
+      zh: '地区库不可用，不下结论',
+    },
+    {
+      name: 'unknown_low_ratio',
+      r: v2(why('unknown_low_ratio'), { coverage: { placed: 1, unplaced: 2, region_known: 1, city_known: 1 } }),
+      zh: '3 个地址中只有 1 个能定位（至少需要 50%）',
+    },
+    {
+      name: 'suspect, country tier',
+      r: v2(why('suspect', { tier: 'country' }), { spread: spread({ countries: 2 }) }, { over_streak: 1 }),
+      zh: '同时在 2 个国家（容错 1），连续 1 / 3 次',
+    },
+    {
+      name: 'suspect, city tier',
+      r: v2(why('suspect', { tier: 'city' }),
+        { spread: spread({ countries: 1, regions: 1, region_country: 'JP', cities: 3, city_country: 'JP' }) },
+        { over_streak: 1 }),
+      zh: '同时在 JP 的 3 个城市（容错 2），连续 1 / 3 次',
+    },
+    {
+      name: 'flagged_sustained, region tier',
+      r: v2(why('flagged_sustained', { tier: 'region' }),
+        { spread: spread({ countries: 1, regions: 2, region_country: 'CN', cities: 2, city_country: 'CN' }) },
+        { over_streak: 3 }),
+      zh: '同时在 CN 的 2 个省 / 州（容错 1），已持续 3 / 3 次',
+    },
+    {
+      name: 'flagged_clearing, with the tier that raised it',
+      r: v2(why('flagged_clearing', { tier: 'region' }), {}, { under_streak: 1 }),
+      zh: '已连续 1 / 6 次在容错内，满 6 次后解除；标记原因：跨省',
+    },
+    {
+      name: 'clean_unplaced',
+      r: v2(why('clean_unplaced', { min_placed_ratio: 0 }), { coverage: { placed: 0, unplaced: 1, region_known: 0, city_known: 0 } }),
+      zh: '有连接，但没有地址能被定位',
+    },
+    {
+      name: 'clean_within',
+      r: v2(why('clean_within'), { spread: spread({ countries: 1, regions: 1, cities: 2 }) }),
+      zh: '在容错内：1 个国家；最多的国家内 1 个省、2 个城市；容错 1 / 1 / 2（判到城市）',
+    },
+  ]
+
+  it.each(cases)('renders $name in the admin\'s language from the stored why', ({ r, zh: want }) => {
+    expect(reasonText(r, zhT)).toBe(want)
+  })
+
+  it('covers every reason code the server writes', () => {
+    // A code added server-side without a case here is a sentence nobody has
+    // checked renders at all.
+    expect(new Set(cases.map(c => c.r.evidence.why?.code))).toEqual(new Set(GEO_REASON_CODES))
+  })
+
+  it('fills every placeholder in English too', () => {
+    // The strings are per language; a placeholder only the en-US text uses
+    // would reach an English admin as a literal "{{name}}".
+    for (const { name, r } of cases) {
+      const got = reasonText(r, enT)
+      expect(got, name).not.toMatch(/\{\{|\}\}/)
+      expect(got, name).not.toBe(r.reason)
+    }
+  })
+
+  it('prints the group\'s own tolerance, not the default', () => {
+    // The policy is resolved per group. An account in a group that allows
+    // three provinces must read "tolerance 3", which is why the SPA reads
+    // the stored snapshot instead of geoTolerances(global settings).
+    const r = v2(why('flagged_sustained', { tier: 'region', tol: { countries: 1, regions: 3, cities: 2 } }),
+      { spread: spread({ countries: 1, regions: 4, region_country: 'CN' }) }, { over_streak: 3 })
+    expect(reasonText(r, zhT)).toContain('容错 3')
+  })
+
+  it('leaves the tier clause out of a latch stored without a tier', () => {
+    // An older build could latch a flag without recording its tier; the
+    // server's sentence leaves the clause out then, and so must this one.
+    const r = v2(why('flagged_clearing', { tier: '' }), {}, { under_streak: 1 })
+    expect(reasonText(r, zhT)).toBe('已连续 1 / 6 次在容错内，满 6 次后解除')
+    expect(reasonText(v2(why('flagged_clearing'), {}, { under_streak: 1 }), zhT))
+      .toBe('已连续 1 / 6 次在容错内，满 6 次后解除')
+  })
+
+  describe('falls back to the stored English', () => {
+    it('for a row written before why existed', () => {
+      // v1 evidence has no why. A v1 row that somehow carries one is still
+      // v1: the version, not the shape, says what the row is.
+      const r = v2(why('idle_none'))
+      expect(reasonText({ ...r, evidence: { ...r.evidence, v: 1 } }, zhT)).toBe('STORED ENGLISH')
+      expect(reasonText({ ...r, evidence: { ...r.evidence, v: 0 } }, zhT)).toBe('STORED ENGLISH')
+    })
+
+    it('for a v2 row with no why', () => {
+      const r = v2(why('idle_none'))
+      expect(reasonText({ ...r, evidence: { ...r.evidence, why: undefined } }, zhT)).toBe('STORED ENGLISH')
+    })
+
+    it('for a code this build does not know', () => {
+      // A newer server may add a branch before this SPA learns it.
+      expect(reasonText(v2(why('teleported' as GeoReasonCode)), zhT)).toBe('STORED ENGLISH')
+    })
+
+    it('for an over verdict whose tier this build cannot place', () => {
+      for (const tier of ['', 'planet'] as const) {
+        const r = v2(why('suspect', { tier: tier as GeoWhy['tier'] }), {}, { over_streak: 1 })
+        expect(reasonText(r, zhT)).toBe('STORED ENGLISH')
+      }
+    })
+
+    it('for a missing string, whole — never half localized', () => {
+      // The suffix and the tier clause are separate strings. Were only the
+      // head missing, gluing a localized suffix onto the English sentence
+      // would print its streak twice, once in each language.
+      const over = v2(why('suspect', { tier: 'region' }),
+        { spread: spread({ regions: 2, region_country: 'CN' }) }, { over_streak: 1 })
+      expect(reasonText(over, translator(zh as Nested, ['geo_anomalies.reason_over_region']))).toBe('STORED ENGLISH')
+
+      const clearing = v2(why('flagged_clearing', { tier: 'city' }), {}, { under_streak: 2 })
+      expect(reasonText(clearing, translator(zh as Nested, ['geo_anomalies.reason_flagged_clearing']))).toBe('STORED ENGLISH')
+
+      expect(reasonText(v2(why('disabled')), translator(zh as Nested, ['geo_anomalies.reason_disabled']))).toBe('STORED ENGLISH')
+    })
   })
 })

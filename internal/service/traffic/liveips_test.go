@@ -728,6 +728,42 @@ func TestObserveLiveIPs_StoredRegionToleranceChangesTheVerdict(t *testing.T) {
 	}
 }
 
+// The policy a verdict records is the one its GROUP resolved, not the
+// process default. An admin reading a row in a group that raised the region
+// tolerance to 3 must see 3 — a UI that recomputed it from global settings
+// would print 1 next to a verdict that was judged against 3. Two regions, so
+// the verdict is clean only under the group's number, which also proves the
+// record's Why and its State came from the same policy.
+func TestObserveLiveIPs_GroupOverrideIsRecordedInTheWhy(t *testing.T) {
+	metrics.Reset()
+	geo := &stubGeo{available: true, places: map[string]domain.GeoLocation{
+		"1.1.1.1": placeIn("JP", "Kanto", "Tokyo"),
+		"1.1.1.2": placeIn("JP", "Kansai", "Osaka"),
+	}}
+	store := &memStreaks{}
+	s := newObserver(geo, store, domain.DefaultGeoPolicy())
+	s.settings = &fakeScoped{byGroup: map[int64]ports.UISettings{3: {GeoAnomalyMaxRegions: 3}}}
+	observe(s, []*domain.User{{ID: 7, GroupID: 3}}, []*domain.PSPClient{client(7, 1, "u7@x")},
+		func(int64) (map[string][]string, error) {
+			return map[string][]string{"u7@x": {"1.1.1.1", "1.1.1.2"}}, nil
+		}, panelsOf(1))
+
+	rec, ok := store.data[7]
+	if !ok {
+		t.Fatal("nothing persisted for user 7")
+	}
+	why := rec.Evidence.Why
+	if why == nil {
+		t.Fatalf("stored evidence carries no why: %+v", rec.Evidence)
+	}
+	if why.Tol.Regions != 3 || why.Scope != domain.GeoScopeCity {
+		t.Fatalf("why = %+v, want the group's region tolerance 3 at scope city", *why)
+	}
+	if rec.State != domain.GeoStateClean || why.Code != domain.GeoWhyCleanWithin {
+		t.Fatalf("state %q / code %q, want clean / clean_within under the group's tolerance", rec.State, why.Code)
+	}
+}
+
 // Whether the stored AUTOMATIC-SUSPENSION settings reach the policy. The
 // suspension streak is the observable: it only counts when suspension is
 // armed, and only for samples over the suspension tolerances. Three groups,

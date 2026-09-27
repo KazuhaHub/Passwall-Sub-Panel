@@ -933,6 +933,15 @@ type SubLog struct {
 	UA          string    `json:"ua"`
 	ClientType  string    `json:"client_type"`
 	AccessedAt  time.Time `json:"accessed_at"`
+	// DeviceID is the keyed per-user digest of the client's declared x-hwid
+	// (subdevice.Hasher), never the raw header; DeviceLabel is the sanitized
+	// OS/version/model the same fetch declared. Both are admin-only, and the
+	// sub-log API is staff-visible and serves this struct by embedding, so
+	// they are NEVER serialized from here: an admin-only view copies them
+	// into its own fields. "" = nothing declared, capture off, or a row that
+	// predates capture.
+	DeviceID    string `json:"-"`
+	DeviceLabel string `json:"-"`
 }
 
 // AuditEntry is one immutable line in the admin audit log.

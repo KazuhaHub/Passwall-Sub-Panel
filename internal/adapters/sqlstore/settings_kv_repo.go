@@ -463,6 +463,27 @@ func settingDescriptors(s *ports.UISettings) []settingDescriptor {
 		intField("geo_anomaly", "ban_after_polls", &s.GeoAnomalyBanAfterPolls),
 		intField("geo_anomaly", "ban_duration_minutes", &s.GeoAnomalyBanDurationMinutes),
 
+		// risk --- risk signals (observe only). Every key but
+		// hwid_capture_off is per-group overridable; hwid_capture_off is
+		// GLOBAL only (absent from ports.OverridableScopeKeys): /sub reads it
+		// from the global settings it already loaded.
+		//
+		// None of them is defaulted in applyUISettingsDefaults. The switches
+		// are negative, so false (signal on, capture on) already is the
+		// default; each number stores 0 for "never configured", and
+		// domain.RiskPolicyFromSettings owns what 0 means — a group override
+		// of 0 has to mean the same thing, which a filled-in global default
+		// would break.
+		boolField("risk", "sub_spread_off", &s.RiskSubSpreadOff),
+		boolField("risk", "devices_off", &s.RiskDevicesOff),
+		boolField("risk", "usage_shift_off", &s.RiskUsageShiftOff),
+		boolField("risk", "login_country_off", &s.RiskLoginCountryOff),
+		intField("risk", "min_days", &s.RiskMinDays),
+		intField("risk", "max_devices", &s.RiskMaxDevices),
+		floatField("risk", "usage_ratio", &s.RiskUsageRatio),
+		intField("risk", "usage_floor_gb", &s.RiskUsageFloorGB),
+		boolField("risk", "hwid_capture_off", &s.RiskHWIDCaptureOff),
+
 		// geo --- IP geolocation for access-log region display (offline .mmdb)
 		boolField("geo", "geo_ip_enabled", &s.GeoIPEnabled),
 		strField("geo", "geo_ip_db_file", &s.GeoIPDBFile),

@@ -17,6 +17,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/log"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/operationgate"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/panelpath"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/subdevice"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/alert"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/audit"
@@ -76,7 +77,22 @@ type Deps struct {
 	// bell's geo_anomaly entry — in practice the same store as GeoRecords, a
 	// separate field because the bell needs a COUNT and the Geo tab the rows.
 	// Optional like every alert source: absent, the bell has no such entry.
-	GeoFlags         alert.GeoFlagCounter
+	GeoFlags alert.GeoFlagCounter
+	// RiskSignals is the read side of the observe-only risk signals, the rows
+	// the hourly worker writes. Optional like GeoRecords: absent, the
+	// endpoint answers 503 rather than an empty list.
+	RiskSignals handler.RiskSignalLister
+	// RiskFlags counts accounts with any risk signal flagged, for the bell's
+	// risk_signals entry — the same store as RiskSignals, a separate field
+	// for the reason GeoFlags is one. Optional: absent, no such entry.
+	RiskFlags alert.RiskFlagCounter
+	// DeviceHasher keys the device a subscription client declares (x-hwid)
+	// into the per-account digest sub_logs keeps. Nil disables capture: /sub
+	// serves exactly as before and every fetch logs as anonymous. Built by
+	// the composition root from the panel secret, so the handler never sees
+	// key material; TestBuildRecordsTheDeclaredDeviceOnEveryLoggedFetch
+	// guards that it is actually handed over.
+	DeviceHasher     *subdevice.Hasher
 	Pool             ports.XUIPool
 	Auth             *auth.Service
 	SAML             *auth.SAMLService
@@ -242,13 +258,16 @@ func NewRouter(d Deps) stdhttp.Handler {
 	// is satisfied structurally, so a ports declaration would add a name
 	// without adding a guarantee.
 	geoAnomalyH := handler.NewAdminGeoAnomalyHandler(d.GeoRecords, d.Repos.User)
+	// The risk signals, with each account's geo verdict beside them, read
+	// from the same rows the Geo tab lists rather than a second copy.
+	riskSignalsH := handler.NewAdminRiskSignalHandler(d.RiskSignals, d.GeoRecords)
 	// Node self-enrollment handler. Constructed here rather than inside the
 	// admin block because one of its three routes is admin-only and two are
 	// public, and they must share the same token store.
 	enrollPublic := handler.NewNodeEnrollHandler(d.Repos.AuthToken, d.Repos.XUIPanel, d.Pool, d.EnrollProbe)
 	var bootstrapPublic *handler.NodeBootstrapHandler
 
-	subHandler := handler.NewSubHandler(d.User, d.Render, d.Repos.SubLog, d.Repos.ScopedSettings, d.Repos.User, d.Mail, d.Async)
+	subHandler := handler.NewSubHandler(d.User, d.Render, d.Repos.SubLog, d.Repos.ScopedSettings, d.Repos.User, d.Mail, d.Async, d.DeviceHasher)
 	subLimiter := middleware.NewPerIPLimiter(d.SubPerIPPerMin, time.Minute)
 	subLimiter.SetLimitFunc(newSettingsIntCache(d.Repos.Settings, d.SubPerIPPerMin, func(s ports.UISettings) int { return s.SubPerIPPerMin }).get)
 
@@ -574,6 +593,11 @@ func NewRouter(d Deps) stdhttp.Handler {
 		// not staffGroup: it names people on a signal rather than proof, and
 		// what to do about that is the owner's call.
 		adminGroup.GET("/geo-anomalies", geoAnomalyH.List)
+		// The observe-only risk signals. adminGroup for the same reason, and
+		// TestRiskSignalsRouteIsAdminOnly drives the assembled router: the
+		// staff and admin groups share this prefix, so the path alone says
+		// nothing about the gate.
+		adminGroup.GET("/risk-signals", riskSignalsH.List)
 		adminGroup.GET("/diagnostics/metrics", diagH.Metrics)
 		adminGroup.POST("/diagnostics/metrics/reset", diagH.ResetMetrics)
 
@@ -629,6 +653,10 @@ func NewRouter(d Deps) stdhttp.Handler {
 			// TestBuildWiresTheGeoAlerts drives the assembled router.
 			GeoFlags:     d.GeoFlags,
 			ServiceHolds: d.Repos.User,
+			// The risk signals' one admin-only entry: accounts with any
+			// signal flagged. Nil-tolerant too, so TestBuildWiresTheRiskSignals
+			// reads the feed through the assembled router.
+			RiskFlags: d.RiskFlags,
 		})
 		staffGroup.GET("/alerts", handler.NewAdminAlertsHandler(alertSvc).List)
 
