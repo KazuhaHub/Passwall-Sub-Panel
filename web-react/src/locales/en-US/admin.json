@@ -1132,6 +1132,12 @@
       }
     }
   },
+  "risk_center": {
+    "title": "Risk center",
+    "subtitle": "Who is connected now, concurrent locations, risk signals, flag records and everything about one user. Observation only: nothing here changes an account by itself, except the optional automatic suspension marked on the Locations tab.",
+    "tab_geo": "Locations",
+    "tab_risk": "Risk signals"
+  },
   "logs": {
     "title": "Logs",
     "load_failed": "Log data is temporarily unavailable",
@@ -1142,8 +1148,6 @@
     "tab_auth": "Auth logs",
     "tab_email": "Email logs",
     "tab_certs": "Certificates",
-    "tab_geo": "Locations",
-    "tab_risk": "Risk signals",
     "cert_table": {
       "at": "Time",
       "cert": "Certificate",

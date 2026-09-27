@@ -45,8 +45,6 @@ import { pushSnack } from '@/components/SnackbarHost'
 import { PagedTableFooter } from '@/components/PagedTableFooter'
 import { AsyncButton } from '@/components/AsyncButton'
 import { useTabParam } from '@/hooks/useTabParam'
-import GeoAnomaliesTab from './GeoAnomaliesTab'
-import RiskSignalsTab from './RiskSignalsTab'
 import { formatDualTz } from '@/utils/datetime'
 import CertEventsTab from './CertEventsTab'
 import { useSiteStore } from '@/stores/site'
@@ -78,7 +76,10 @@ export default function LogsView() {
   const canConfig = useCan('config.write')
   const panelTz = useSiteStore(s => s.timezone)
 
-  const [tab, setTab] = useTabParam<'sub' | 'audit' | 'auth' | 'email' | 'certs' | 'geo' | 'risk'>('tab', 'sub', ['sub', 'audit', 'auth', 'email', 'certs', 'geo', 'risk'])
+  // The location and risk tabs moved to the admin-only risk center; their old
+  // ?tab=geo|risk links are sent on by LogsRoute (admins) or fall back to 'sub'
+  // here (operators, who cannot open the risk center).
+  const [tab, setTab] = useTabParam<'sub' | 'audit' | 'auth' | 'email' | 'certs'>('tab', 'sub', ['sub', 'audit', 'auth', 'email', 'certs'])
 
   // Sub logs
   const [subPage, setSubPage] = useState(1)
@@ -306,20 +307,7 @@ export default function LogsView() {
         <Tab value="auth" label={t('admin:logs.tab_auth', { defaultValue: '认证日志' })} />
         <Tab value="email" label={t('admin:logs.tab_email')} />
         <Tab value="certs" label={t('admin:logs.tab_certs')} />
-        {/* admin only, matching the endpoint's RequireRole(RoleAdmin). Without
-            the gate an operator sees a tab that can only ever answer 403 —
-            the API is the authority either way, this just stops offering a
-            door that is always locked. */}
-        {canConfig && <Tab value="geo" label={t('admin:logs.tab_geo', { defaultValue: '异地并发' })} />}
-        {/* Admin only for the same reason: /admin/risk-signals is adminGroup. */}
-        {canConfig && <Tab value="risk" label={t('admin:logs.tab_risk', { defaultValue: '风险信号' })} />}
       </Tabs>
-      {/* Lives beside the logs rather than on its own page: it is a record of
-          what the fleet did, read the same way and by the same person. */}
-      {tab === 'geo' && canConfig && <GeoAnomaliesTab />}
-      {/* Each risk row carries the account's concurrent-location verdict;
-          its chip opens that tab, where the evidence behind it is. */}
-      {tab === 'risk' && canConfig && <RiskSignalsTab onOpenGeo={() => setTab('geo')} />}
       {tab === 'sub' && (
         <>
           <Box component="form" onSubmit={onSubFilter} sx={{ display: 'flex', gap: 1.5, mb: 2, alignItems: 'center', flexWrap: 'wrap' }}>

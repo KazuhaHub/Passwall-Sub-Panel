@@ -104,9 +104,9 @@ describe('NotificationBell', () => {
     fireEvent.click(await screen.findByLabelText('notifications'))
     fireEvent.click(await screen.findByRole('menuitem'))
 
-    // The tab lists the accounts with the evidence beside each; the Logs
-    // page's default tab (subscription logs) would say nothing about them.
-    await waitFor(() => expect(screen.getByTestId('location').textContent).toBe('/admin/logs?tab=geo'))
+    // The tab lists the accounts with the evidence beside each, so the link
+    // names it rather than trusting whichever tab the risk center opens on.
+    await waitFor(() => expect(screen.getByTestId('location').textContent).toBe('/admin/risk?tab=geo'))
   })
 
   it('renders the risk_signals title with its count and the shield', async () => {
@@ -127,6 +127,6 @@ describe('NotificationBell', () => {
     fireEvent.click(await screen.findByLabelText('notifications'))
     fireEvent.click(await screen.findByRole('menuitem'))
 
-    await waitFor(() => expect(screen.getByTestId('location').textContent).toBe('/admin/logs?tab=risk'))
+    await waitFor(() => expect(screen.getByTestId('location').textContent).toBe('/admin/risk?tab=risk'))
   })
 })
