@@ -462,6 +462,16 @@ func settingDescriptors(s *ports.UISettings) []settingDescriptor {
 		intField("geo_anomaly", "ban_max_cities", &s.GeoAnomalyBanMaxCities),
 		intField("geo_anomaly", "ban_after_polls", &s.GeoAnomalyBanAfterPolls),
 		intField("geo_anomaly", "ban_duration_minutes", &s.GeoAnomalyBanDurationMinutes),
+		// geo_anomaly --- the detector's fleet-wide runtime (the former
+		// constants). GLOBAL only (absent from ports.OverridableScopeKeys),
+		// and, like the knobs above, 0 is "never configured":
+		// domain.GeoRuntimeFromSettings owns both that and the clamps.
+		intField("geo_anomaly", "fresh_window_seconds", &s.GeoAnomalyFreshWindowSeconds),
+		intField("geo_anomaly", "shared_exit_min_users", &s.GeoAnomalySharedExitMinUsers),
+		intField("geo_anomaly", "ban_max_per_poll", &s.GeoAnomalyBanMaxPerPoll),
+		intField("geo_anomaly", "lift_max_per_poll", &s.GeoAnomalyLiftMaxPerPoll),
+		intField("geo_anomaly", "infra_refresh_minutes", &s.GeoAnomalyInfraRefreshMinutes),
+		intField("geo_anomaly", "infra_host_ttl_minutes", &s.GeoAnomalyInfraHostTTLMinutes),
 
 		// risk --- risk signals (observe only). Every key but
 		// hwid_capture_off is per-group overridable; hwid_capture_off is

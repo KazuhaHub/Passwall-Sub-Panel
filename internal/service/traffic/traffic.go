@@ -583,8 +583,14 @@ func (s *Service) PollOnce(ctx context.Context) (err error) {
 	// it.
 	//
 	// pc outlives this phase on purpose: Phase 4 reads each user's
-	// suspension duration through the same per-group resolution.
+	// suspension duration through the same per-group resolution, and the
+	// lift cap from the same fleet-wide runtime. That runtime (freshness
+	// window, shared-exit threshold, per-poll caps) is global only, so it is
+	// resolved once here from the settings this poll loaded; a poll with no
+	// settings wired, or a failed load with nothing cached, runs on the
+	// shipped defaults (GeoRuntimeFromSettings reads 0 as unset).
 	pc := s.newGeoPolicyCache(ctx, users)
+	pc.rt = domain.GeoRuntimeFromSettings(pollCfg.GeoRuntimeSettings())
 	bans := s.observeLiveIPs(ctx, liveIPInput{
 		users:    users,
 		clients:  sharedClients,

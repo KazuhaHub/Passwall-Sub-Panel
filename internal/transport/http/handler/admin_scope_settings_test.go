@@ -163,6 +163,45 @@ func TestScopeSettingsHandler_RejectsHWIDCaptureOff(t *testing.T) {
 	}
 }
 
+// The detector's fleet-wide knobs — the former constants — are global only,
+// each for a reason that does not depend on the group: freshness is judged
+// per NODE before any user is known, the shared-exit rule counts accounts
+// across the whole fleet, the per-poll caps bound one poll and the
+// infrastructure cadences one loop. A group value would be stored, shown in
+// the group editor and never read. Absence from OverridableScopeKeys is the
+// mechanism, so the refusal is pinned at the write seam.
+//
+// Guard: green on arrival. Adding any one of these keys to
+// OverridableScopeKeys turns it red.
+func TestScopeSettingsHandler_RejectsGeoRuntimeKeys(t *testing.T) {
+	for _, name := range []string{
+		"fresh_window_seconds",
+		"shared_exit_min_users",
+		"ban_max_per_poll",
+		"lift_max_per_poll",
+		"infra_refresh_minutes",
+		"infra_host_ttl_minutes",
+	} {
+		t.Run(name, func(t *testing.T) {
+			repo := newFakeScopeRepo()
+			h := NewAdminScopeSettingsHandler(fakeScopeGroups{exists: map[int64]bool{5: true}}, repo)
+			r := scopeRouter(h)
+			body, _ := json.Marshal(setScopeOverrideRequest{Type: "geo_anomaly", Name: name, Value: "2"})
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, httptest.NewRequest(http.MethodPut, "/api/admin/groups/5/scope-settings", bytes.NewReader(body)))
+			if w.Code != http.StatusBadRequest {
+				t.Fatalf("PUT geo_anomaly.%s = %d, want 400; body=%s", name, w.Code, w.Body.String())
+			}
+			if !strings.Contains(w.Body.String(), "not overridable per group") {
+				t.Errorf("the refusal must say why: %s", w.Body.String())
+			}
+			if len(repo.rows) != 0 {
+				t.Error("a rejected override must not be written")
+			}
+		})
+	}
+}
+
 // The eight risk-signal knobs are per-group, the counterpart of the refusal
 // above: a group whose members legitimately trip one signal gets that signal
 // switched off, or its tolerance raised, without touching the fleet. A knob

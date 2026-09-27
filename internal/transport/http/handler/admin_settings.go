@@ -105,6 +105,16 @@ type settingsDTO struct {
 	GeoAnomalyBanMaxCities       int  `json:"geo_anomaly_ban_max_cities"`
 	GeoAnomalyBanAfterPolls      int  `json:"geo_anomaly_ban_after_polls"`
 	GeoAnomalyBanDurationMinutes int  `json:"geo_anomaly_ban_duration_minutes"`
+	// The detector's fleet-wide runtime (the former constants). Global only;
+	// 0 means the shipped default, and the clamps are applied when read by
+	// domain.GeoRuntimeFromSettings — not validated on PUT, for the same
+	// reason as the policy knobs above.
+	GeoAnomalyFreshWindowSeconds  int `json:"geo_anomaly_fresh_window_seconds"`
+	GeoAnomalySharedExitMinUsers  int `json:"geo_anomaly_shared_exit_min_users"`
+	GeoAnomalyBanMaxPerPoll       int `json:"geo_anomaly_ban_max_per_poll"`
+	GeoAnomalyLiftMaxPerPoll      int `json:"geo_anomaly_lift_max_per_poll"`
+	GeoAnomalyInfraRefreshMinutes int `json:"geo_anomaly_infra_refresh_minutes"`
+	GeoAnomalyInfraHostTTLMinutes int `json:"geo_anomaly_infra_host_ttl_minutes"`
 	// Risk signals (observe only). Capture of the device a subscription
 	// client declares; global only, false = capture on.
 	RiskHWIDCaptureOff bool `json:"risk_hwid_capture_off"`
@@ -379,6 +389,14 @@ func settingsToDTO(s ports.UISettings) settingsDTO {
 		RiskUsageRatio:               s.RiskUsageRatio,
 		RiskUsageFloorGB:             s.RiskUsageFloorGB,
 
+		// The detector's fleet-wide runtime: the stored values, 0 = default.
+		GeoAnomalyFreshWindowSeconds:  s.GeoAnomalyFreshWindowSeconds,
+		GeoAnomalySharedExitMinUsers:  s.GeoAnomalySharedExitMinUsers,
+		GeoAnomalyBanMaxPerPoll:       s.GeoAnomalyBanMaxPerPoll,
+		GeoAnomalyLiftMaxPerPoll:      s.GeoAnomalyLiftMaxPerPoll,
+		GeoAnomalyInfraRefreshMinutes: s.GeoAnomalyInfraRefreshMinutes,
+		GeoAnomalyInfraHostTTLMinutes: s.GeoAnomalyInfraHostTTLMinutes,
+
 		NodeTaskOfflineReconcileDays: policy.OfflineReconcileDays,
 		NodeTaskBackupRestoreDays:    policy.BackupRestoreDays,
 		NodeTaskResultRetentionDays:  policy.ResultRetentionDays,
@@ -485,6 +503,12 @@ func (h *AdminSettingsHandler) Put(c *gin.Context) {
 		GeoAnomalyBanMaxCities:        req.GeoAnomalyBanMaxCities,
 		GeoAnomalyBanAfterPolls:       req.GeoAnomalyBanAfterPolls,
 		GeoAnomalyBanDurationMinutes:  req.GeoAnomalyBanDurationMinutes,
+		GeoAnomalyFreshWindowSeconds:  req.GeoAnomalyFreshWindowSeconds,
+		GeoAnomalySharedExitMinUsers:  req.GeoAnomalySharedExitMinUsers,
+		GeoAnomalyBanMaxPerPoll:       req.GeoAnomalyBanMaxPerPoll,
+		GeoAnomalyLiftMaxPerPoll:      req.GeoAnomalyLiftMaxPerPoll,
+		GeoAnomalyInfraRefreshMinutes: req.GeoAnomalyInfraRefreshMinutes,
+		GeoAnomalyInfraHostTTLMinutes: req.GeoAnomalyInfraHostTTLMinutes,
 		RiskHWIDCaptureOff:            req.RiskHWIDCaptureOff,
 		RiskSubSpreadOff:              req.RiskSubSpreadOff,
 		RiskDevicesOff:                req.RiskDevicesOff,

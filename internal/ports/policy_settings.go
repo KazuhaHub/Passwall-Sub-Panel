@@ -61,3 +61,25 @@ func (s UISettings) RiskPolicySettings() domain.RiskPolicySettings {
 		UsageFloorGB:    s.RiskUsageFloorGB,
 	}
 }
+
+// GeoRuntimeSettings is the ONE mapping from the fleet-wide geo_anomaly.*
+// knobs — the detector's former constants — to the domain's flat form, read
+// by the traffic poll (freshness, shared exits, the per-poll caps), the
+// infrastructure refresh (its cadence and hostname TTL) and the risk worker
+// (the shared-exit threshold of its fetch window).
+// domain.GeoRuntimeFromSettings then decides what an unset or out-of-range
+// value means.
+//
+// Global only, so always read from the global settings: none of these keys
+// is group-overridable, and a group-resolved UISettings would only echo the
+// global values.
+func (s UISettings) GeoRuntimeSettings() domain.GeoRuntimeSettings {
+	return domain.GeoRuntimeSettings{
+		FreshWindowSeconds:  s.GeoAnomalyFreshWindowSeconds,
+		SharedExitMinUsers:  s.GeoAnomalySharedExitMinUsers,
+		BanMaxPerPoll:       s.GeoAnomalyBanMaxPerPoll,
+		LiftMaxPerPoll:      s.GeoAnomalyLiftMaxPerPoll,
+		InfraRefreshMinutes: s.GeoAnomalyInfraRefreshMinutes,
+		InfraHostTTLMinutes: s.GeoAnomalyInfraHostTTLMinutes,
+	}
+}

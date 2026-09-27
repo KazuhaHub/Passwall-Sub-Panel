@@ -24,22 +24,21 @@ import (
 // are conditional writes: the suspension lands only on a row with no service
 // reason, and the lift clears only a geo_auto written before its cutoff.
 
-// Per-poll caps. Each applied transition pushes to every panel the user is on,
-// inline, so an unbounded batch would stretch one poll arbitrarily; a mass
-// event (or a broken location database with suspension on) is limited to
-// twenty accounts per poll either way. Neither cap loses work: an over-cap ban
-// keeps its streak at the threshold and fires on its next over-sample, and an
-// over-cap lift is simply due again next poll.
+// Per-poll caps: geo_anomaly.ban_max_per_poll and lift_max_per_poll, read from
+// the poll's fleet-wide runtime (geoPolicyCache.runtime). Each applied
+// transition pushes to every panel the user is on, inline, so an unbounded
+// batch would stretch one poll arbitrarily; a mass event (or a broken location
+// database with suspension on) is limited to that many accounts per poll
+// either way — twenty each by default, never more than
+// domain.GeoPerPollMax. Neither cap loses work: an over-cap ban keeps its
+// streak at the threshold and fires on its next over-sample (collectGeoBans),
+// and an over-cap lift is simply due again next poll. The lift cap is counted
+// over DUE lifts only (liftDueGeoSuspensions): counting every geo_auto row
+// would let long suspensions that began earlier crowd a due 60-minute one out
+// of every poll for a week.
 //
 // A cancelled poll is handled the same way, for the transitions it has not
 // started: see enforceGeo.
-const (
-	geoMaxSuspensionsPerPoll = 20
-	// Counted over DUE lifts only. Counting every geo_auto row would let
-	// twenty 7-day suspensions that began earlier crowd a due 60-minute one
-	// out of every poll for a week.
-	geoMaxLiftsPerPoll = 20
-)
 
 // geoFollowUpWriteTimeout bounds the writes Phase 4 makes after the poll's
 // context may already be cancelled: the audit row of a transition that has
@@ -243,9 +242,9 @@ func (s *Service) liftDueGeoSuspensions(ctx context.Context, users []*domain.Use
 		}
 		return due[i].u.ID < due[j].u.ID
 	})
-	if len(due) > geoMaxLiftsPerPoll {
-		geoAutoCount("lift_deferred", len(due)-geoMaxLiftsPerPoll)
-		due = due[:geoMaxLiftsPerPoll]
+	if limit := pc.runtime().LiftMaxPerPoll; len(due) > limit {
+		geoAutoCount("lift_deferred", len(due)-limit)
+		due = due[:limit]
 	}
 
 	for i, c := range due {

@@ -90,6 +90,12 @@ type geoPolicyCache struct {
 	ctx    context.Context
 	byUser map[int64]*domain.User
 	byKey  map[int64]geoPolicyEntry
+	// rt is the poll's fleet-wide runtime (the freshness window, the
+	// shared-exit threshold, the per-poll caps): global only, so one value
+	// for the whole poll, resolved by PollOnce from the settings it loaded.
+	// Kept here because Phase 1b and Phase 4 already share this cache, so
+	// both phases run on one reading. Read through runtime().
+	rt domain.GeoRuntime
 }
 
 // geoPolicyEntry is one group's policy for the poll, and whether it IS that
@@ -119,6 +125,17 @@ func (s *Service) newGeoPolicyCache(ctx context.Context, users []*domain.User) *
 		}
 	}
 	return &geoPolicyCache{s: s, ctx: ctx, byUser: byUser, byKey: map[int64]geoPolicyEntry{}}
+}
+
+// runtime is the poll's fleet-wide runtime. Nil-safe, and a cache nobody
+// filled in (a direct caller or a test that built its own) runs on the
+// shipped defaults — exactly the constants these knobs replaced — rather
+// than on zero caps and a zero freshness window.
+func (c *geoPolicyCache) runtime() domain.GeoRuntime {
+	if c == nil || c.rt == (domain.GeoRuntime{}) {
+		return domain.DefaultGeoRuntime()
+	}
+	return c.rt
 }
 
 // forUser is the effective policy for one user: the stored global values
@@ -184,12 +201,14 @@ func (c *geoPolicyCache) lookup(uid int64) geoPolicyEntry {
 //
 //   - only CONCURRENT addresses: the upstream remembers an address for 30
 //     minutes after its stream closed, so its list read as "at once" puts one
-//     commuter in several cities. domain.FreshLiveIPs keeps the addresses
-//     seen within a node's latest scans, against the reference map below;
+//     commuter in several cities. domain.FreshLiveIPsWithin keeps the
+//     addresses seen within the freshness window of a node's latest scan
+//     (geo_anomaly.fresh_window_seconds), against the reference map below;
 //   - only addresses that are not infrastructure or noise: carrier-grade NAT
 //     and private ranges, the admin's ignore list, PSP's own node and relay
-//     addresses, and an exit three or more accounts share at once are set
-//     aside (domain.ClassifyAddresses) and counted rather than placed;
+//     addresses, and an exit enough accounts share at once
+//     (geo_anomaly.shared_exit_min_users, three by default) are set aside
+//     (domain.ClassifyAddresses) and counted rather than placed;
 //   - at most once per half poll interval per user (in.minSpacing), so a
 //     manual poll cannot turn clicks into samples.
 //
@@ -223,6 +242,14 @@ func (s *Service) observeLiveIPs(ctx context.Context, in liveIPInput) []geoBan {
 		now = time.Now()
 	}
 
+	// The policy cache first: it carries the fleet-wide runtime that the
+	// freshness and the exclusions below are judged with.
+	pc := in.policies
+	if pc == nil {
+		pc = s.newGeoPolicyCache(ctx, in.users)
+	}
+	rt := pc.runtime()
+
 	panels := make([]domain.PanelLiveIPs, 0, len(in.panelIDs))
 	for pid := range in.panelIDs {
 		p := in.read(pid)
@@ -231,7 +258,7 @@ func (s *Service) observeLiveIPs(ctx context.Context, in liveIPInput) []geoBan {
 		p.PanelID = pid
 		panels = append(panels, p)
 	}
-	panels = s.freshLiveIPs(panels)
+	panels = s.freshLiveIPs(panels, rt.FreshWindowSeconds)
 
 	agg := domain.AggregateLiveIPsByUser(panels, owners)
 
@@ -246,7 +273,7 @@ func (s *Service) observeLiveIPs(ctx context.Context, in liveIPInput) []geoBan {
 	exclusions := domain.AddressExclusions{
 		Internal:       true,
 		Ignore:         ignore,
-		SharedMinUsers: domain.SharedExitMinUsers,
+		SharedMinUsers: rt.SharedExitMinUsers,
 	}
 	if s.infra != nil {
 		// A read lock and a map lookup per source; the DNS behind it ran
@@ -275,11 +302,6 @@ func (s *Service) observeLiveIPs(ctx context.Context, in liveIPInput) []geoBan {
 		} else if loaded != nil {
 			prev = loaded
 		}
-	}
-
-	pc := in.policies
-	if pc == nil {
-		pc = s.newGeoPolicyCache(ctx, in.users)
 	}
 
 	next := make(map[int64]domain.GeoRecord, len(agg))
@@ -406,8 +428,9 @@ func (s *Service) observeLiveIPs(ctx context.Context, in liveIPInput) []geoBan {
 //     emergency window, account disabled; see geoBanEligible): stays
 //     consumed and is counted skipped_held. These are handled BEFORE the cap
 //     so a crowd of held users cannot use up its slots;
-//   - eligible and inside geoMaxSuspensionsPerPoll, lowest user ID first so
-//     the choice is deterministic: returned;
+//   - eligible and inside the per-poll cap (geo_anomaly.ban_max_per_poll,
+//     from the poll's runtime), lowest user ID first so the choice is
+//     deterministic: returned;
 //   - eligible but over the cap: deferred. The consumption is undone by
 //     putting the streak back AT the threshold, so the user's next
 //     over-sample makes it due again; counted deferred.
@@ -426,6 +449,7 @@ func collectGeoBans(due []geoBan, users []*domain.User, next map[int64]domain.Ge
 	}
 	sort.Slice(due, func(i, j int) bool { return due[i].UserID < due[j].UserID })
 
+	limit := pc.runtime().BanMaxPerPoll
 	var bans []geoBan
 	var held, deferred int
 	for _, b := range due {
@@ -433,7 +457,7 @@ func collectGeoBans(due []geoBan, users []*domain.User, next map[int64]domain.Ge
 			held++
 			continue
 		}
-		if len(bans) < geoMaxSuspensionsPerPoll {
+		if len(bans) < limit {
 			// The row as it will be saved: only deferred users' rows are
 			// edited below, so this one is final.
 			b.Record = next[b.UserID]
@@ -454,28 +478,29 @@ func collectGeoBans(due []geoBan, users []*domain.User, next map[int64]domain.Ge
 	geoAutoCount("deferred", deferred)
 	if deferred > 0 {
 		log.Warn("geo auto-suspension: more suspensions due than one poll applies; the rest are deferred to their next over-sample",
-			"eligible", len(bans)+deferred, "cap", geoMaxSuspensionsPerPoll, "deferred", deferred)
+			"eligible", len(bans)+deferred, "cap", limit, "deferred", deferred)
 	}
 	return bans
 }
 
-// freshLiveIPs marks which sightings were live at poll time and advances the
-// per-node reference map, under its lock.
+// freshLiveIPs marks which sightings were live at poll time — within
+// windowSeconds of their node's newest scan, the poll's configured freshness
+// window — and advances the per-node reference map, under its lock.
 //
 // The merge is by max, never assignment. Two polls can overlap, and the
 // slower one may finish with the OLDER reference; letting it win would make
 // the next poll read a batch nobody rescanned as "advanced" and replay it as
 // a fresh sample. Pure domain logic does the deciding; this only owns the
 // state between polls.
-func (s *Service) freshLiveIPs(panels []domain.PanelLiveIPs) []domain.PanelLiveIPs {
+func (s *Service) freshLiveIPs(panels []domain.PanelLiveIPs, windowSeconds int) []domain.PanelLiveIPs {
 	s.liveRefsMu.Lock()
 	defer s.liveRefsMu.Unlock()
 	if s.liveRefs == nil {
 		s.liveRefs = map[domain.NodeRef]int64{}
 	}
-	// FreshLiveIPs only reads prev, and the lock is held throughout, so
-	// the live map is passed as is.
-	out, next := domain.FreshLiveIPs(panels, s.liveRefs)
+	// FreshLiveIPsWithin only reads prev, and the lock is held throughout,
+	// so the live map is passed as is.
+	out, next := domain.FreshLiveIPsWithin(panels, s.liveRefs, windowSeconds)
 	for k, v := range next {
 		if v > s.liveRefs[k] {
 			s.liveRefs[k] = v

@@ -218,7 +218,7 @@ func TestInfraAddresses_ResolveFailureKeepsThePreviousAddresses(t *testing.T) {
 	res.answers["edge.example.com"] = []string{"203.0.113.5"}
 	refreshOK(t, s)
 
-	clk.advance(infraHostTTL + time.Second)
+	clk.advance(defaultInfraHostTTL + time.Second)
 	res.failWith(errors.New("SERVFAIL"))
 	refreshOK(t, s)
 	if !s.infra.Contains(mustAddr("203.0.113.5")) {
@@ -265,7 +265,7 @@ func TestInfraAddresses_TTLAvoidsReResolving(t *testing.T) {
 	s, _, res, clk := newInfraFixture(infraNode(1, "edge.example.com"))
 	res.answers["edge.example.com"] = []string{"203.0.113.5"}
 	refreshOK(t, s)
-	clk.advance(infraHostTTL - time.Second)
+	clk.advance(defaultInfraHostTTL - time.Second)
 	refreshOK(t, s)
 	if res.total() != 1 {
 		t.Fatalf("lookups inside the TTL = %d, want 1", res.total())
@@ -363,7 +363,7 @@ func TestInfraAddresses_RefreshAndReadDoNotRace(t *testing.T) {
 	go func() {
 		defer close(done)
 		for i := 0; i < 50; i++ {
-			clk.advance(infraHostTTL)
+			clk.advance(defaultInfraHostTTL)
 			_ = s.RefreshInfraAddresses(context.Background())
 		}
 	}()
@@ -513,3 +513,7 @@ func TestInfraAddresses_LandingIsNodeAddressesOnly(t *testing.T) {
 		t.Fatal("a nil set reports landing addresses")
 	}
 }
+
+// defaultInfraHostTTL is the hostname TTL a refresh runs with when no
+// settings are wired: the shipped default of geo_anomaly.infra_host_ttl_minutes.
+var defaultInfraHostTTL = domain.DefaultGeoRuntime().InfraHostTTL

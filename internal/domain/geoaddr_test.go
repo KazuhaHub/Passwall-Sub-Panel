@@ -650,3 +650,38 @@ func TestAddressExclusion_AgreesWithClassifyAddresses(t *testing.T) {
 		t.Fatalf("checked %d cases, want %d", checked, len(rules)*len(addrs))
 	}
 }
+
+// The freshness window is a setting now (geo_anomaly.fresh_window_seconds),
+// so the judgement must use the window it is handed. A sighting 200 s behind
+// its node's newest scan is live under a 300 s window and memory under the
+// shipped 120 s one — on the same answer, against the same reference.
+func TestFreshLiveIPsWithin_UsesTheGivenWindow(t *testing.T) {
+	panels := []PanelLiveIPs{detailPanel(1, map[string][]LiveIPSighting{
+		"u7@x": {sighting("1.1.1.1", "n1", 1000), sighting("2.2.2.2", "n1", 800)},
+	})}
+	prev := map[NodeRef]int64{{PanelID: 1, Node: "n1"}: 900} // the node advanced
+
+	wide, _ := FreshLiveIPsWithin(panels, prev, 300)
+	if got := freshOf(t, wide, 1)["u7@x"]; !reflect.DeepEqual(got, []string{"1.1.1.1", "2.2.2.2"}) {
+		t.Fatalf("window 300: fresh = %v, want both — 800 is 200 s behind the node's newest", got)
+	}
+	narrow, _ := FreshLiveIPsWithin(panels, prev, 120)
+	if got := freshOf(t, narrow, 1)["u7@x"]; !reflect.DeepEqual(got, []string{"1.1.1.1"}) {
+		t.Fatalf("window 120: fresh = %v, want only the newest — 800 is memory under 120 s", got)
+	}
+}
+
+// (guard) FreshLiveIPs is the shipped default window, nothing wider and
+// nothing narrower: 110 s behind is live, 130 s behind is not. Every test
+// above that calls it pins the behaviour at 120 s through it.
+//
+// Mutation: the wrapper passing 0 (or any window other than
+// LiveIPFreshWindowSeconds) turns this red.
+func TestFreshLiveIPs_IsWithinTheDefaultWindow(t *testing.T) {
+	out, _ := FreshLiveIPs([]PanelLiveIPs{detailPanel(1, map[string][]LiveIPSighting{
+		"u7@x": {sighting("1.1.1.1", "n1", 1000), sighting("2.2.2.2", "n1", 890), sighting("3.3.3.3", "n1", 870)},
+	})}, nil)
+	if got := freshOf(t, out, 1)["u7@x"]; !reflect.DeepEqual(got, []string{"1.1.1.1", "2.2.2.2"}) {
+		t.Fatalf("fresh = %v, want 110 s behind kept and 130 s behind dropped (the 120 s default)", got)
+	}
+}

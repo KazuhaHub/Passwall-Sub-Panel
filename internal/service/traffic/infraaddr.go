@@ -14,6 +14,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/log"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/metrics"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/safego"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 )
 
 // PSP's own node and relay addresses, kept so the location detector can set
@@ -30,11 +31,12 @@ import (
 // The set also remembers which addresses are LANDING nodes (a node's own
 // server) as opposed to relays, for the risk worker's login check, which
 // skips the landings' countries but not the relays'.
+//
+// How long a hostname's answer is reused is geo_anomaly.infra_host_ttl_minutes
+// (ten minutes by default), read on every refresh: relay hostnames rarely
+// move, and the refresh loop runs more often than that, so most refreshes do
+// no DNS at all.
 const (
-	// infraHostTTL is how long a hostname's answer is reused. Relay
-	// hostnames rarely move, and the refresh loop runs far more often than
-	// this, so most refreshes do no DNS at all.
-	infraHostTTL = 10 * time.Minute
 	// infraResolveTimeout bounds one lookup. DNS only: the refresh never
 	// dials anything.
 	infraResolveTimeout = 2 * time.Second
@@ -168,6 +170,12 @@ func (s *Service) LandingAddresses() []netip.Addr {
 // Called by the app's refresh loop, never by the poll. A node list that
 // cannot be read leaves the previous set in place and returns the error, so
 // one database hiccup does not un-exclude every relay for a cycle.
+//
+// The hostname TTL is the fleet's geo_anomaly.infra_host_ttl_minutes, from a
+// global settings read here. No settings wired, or a read that fails, means
+// the shipped default: the TTL only decides how often DNS is asked, and an
+// unreadable setting is no reason to fail the refresh or to hammer the
+// resolver.
 func (s *Service) RefreshInfraAddresses(ctx context.Context) error {
 	if s.nodes == nil || s.infra == nil {
 		return nil
@@ -176,7 +184,15 @@ func (s *Service) RefreshInfraAddresses(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("list nodes for infrastructure addresses: %w", err)
 	}
-	s.infra.refresh(ctx, nodes)
+	var set ports.UISettings
+	if s.settings != nil {
+		if loaded, lerr := s.settings.Load(ctx, ports.UISettings{}); lerr == nil {
+			set = loaded
+		} else {
+			log.Warn("infra addresses: could not read the settings; using the default hostname TTL", "err", lerr)
+		}
+	}
+	s.infra.refresh(ctx, nodes, domain.GeoRuntimeFromSettings(set.GeoRuntimeSettings()).InfraHostTTL)
 	return nil
 }
 
@@ -192,7 +208,11 @@ func (s *Service) RefreshInfraAddresses(ctx context.Context) error {
 // subscription. Disabled ones are deliberately NOT kept: an address PSP does
 // not route through is not an exit, and excluding it would hide a user who
 // really is there.
-func (c *infraAddressSet) refresh(ctx context.Context, nodes []*domain.Node) {
+//
+// A hostname resolved on this refresh is reused for ttl; one cached by an
+// earlier refresh keeps the expiry it was given then, so a changed TTL takes
+// effect as each name comes due.
+func (c *infraAddressSet) refresh(ctx context.Context, nodes []*domain.Node, ttl time.Duration) {
 	resolve := c.resolve
 	if resolve == nil {
 		resolve = net.DefaultResolver.LookupHost
@@ -281,7 +301,7 @@ func (c *infraAddressSet) refresh(ctx context.Context, nodes []*domain.Node) {
 					addrs = append(addrs, a.Unmap().WithZone(""))
 				}
 			}
-			results[i] = hostResolution{addrs: addrs, expiresAt: now.Add(infraHostTTL)}
+			results[i] = hostResolution{addrs: addrs, expiresAt: now.Add(ttl)}
 		}()
 	}
 	wg.Wait()

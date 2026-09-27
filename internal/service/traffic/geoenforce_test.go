@@ -345,10 +345,11 @@ func twentyOneSharers() (*fakeUserRepo, map[string][]string, *stubGeo) {
 	return users, live, geo
 }
 
-// At most geoMaxSuspensionsPerPoll inline suspensions per poll (each pushes
-// to the panels). The overflow is DEFERRED, not lost: its ban streak is put
-// back at the threshold, so its next over-sample fires — which the second
-// poll shows, once the first twenty are held and no longer compete.
+// At most geo_anomaly.ban_max_per_poll (twenty by default) inline suspensions
+// per poll (each pushes to the panels). The overflow is DEFERRED, not lost:
+// its ban streak is put back at the threshold, so its next over-sample fires
+// — which the second poll shows, once the first twenty are held and no
+// longer compete.
 func TestPollOnce_GeoBanOverTheCapIsDeferredNotLost(t *testing.T) {
 	metrics.Reset()
 	users, live, geo := twentyOneSharers()

@@ -18,17 +18,25 @@ import (
 // operator acts on.
 
 const (
-	// LiveIPFreshWindowSeconds is how far behind its node's newest scan a
-	// sighting may be and still count as live. 3X-UI rescans every 10
-	// seconds and restamps every address whose stream is still open, so a
-	// live address is never more than one scan behind; 120 is 12 scans of
+	// LiveIPFreshWindowSeconds is the shipped default of
+	// geo_anomaly.fresh_window_seconds: how far behind its node's newest
+	// scan a sighting may be and still count as live. 3X-UI rescans every
+	// 10 seconds and restamps every address whose stream is still open, so
+	// a live address is never more than one scan behind; 120 is 12 scans of
 	// slack for a busy or briefly stalled job. Compared on the panel's own
-	// clock only (see LiveIPSighting).
+	// clock only (see LiveIPSighting). A setting because a forked or
+	// patched upstream can scan on another cadence; clamped to
+	// LiveIPFreshWindowMinSeconds..LiveIPFreshWindowMaxSeconds when read
+	// (GeoRuntimeFromSettings).
 	LiveIPFreshWindowSeconds = 120
-	// SharedExitMinUsers is how many distinct accounts must hold one
-	// source at the same moment before it reads as a shared exit (a
-	// campus, a carrier NAT, an office) rather than a place. Two accounts
-	// on one address is a household; three is infrastructure.
+	// SharedExitMinUsers is the shipped default of
+	// geo_anomaly.shared_exit_min_users: how many distinct accounts must
+	// hold one source at the same moment before it reads as a shared exit
+	// (a campus, a carrier NAT, an office) rather than a place. Two
+	// accounts on one address is a household; three is infrastructure. A
+	// setting because a family-plan fleet may call two an exit, and one
+	// knob serves both the live check and the risk worker's fetch window;
+	// clamped to SharedExitMinUsersFloor..SharedExitMinUsersMax when read.
 	SharedExitMinUsers = 3
 	// GeoIgnoreListMaxEntries bounds the admin ignore list, which
 	// Contains scans linearly for every kept source on every poll.
@@ -229,7 +237,7 @@ func SourceKey(ip string) (key string, addr netip.Addr, ok bool) {
 //     trusts the data once, as v1 always did);
 //   - a sighting is fresh when it has no timestamp (nothing to judge — read
 //     as live, the v1 behaviour and all a PSP-native node offers), or its
-//     node advanced and it is within LiveIPFreshWindowSeconds of ref.
+//     node advanced and it is within the freshness window of ref.
 //
 // A node nobody is streaming through stops being rescanned, so its frozen
 // batch keeps the same ref poll after poll and reads entirely stale — which
@@ -241,7 +249,20 @@ func SourceKey(ip string) (key string, addr netip.Addr, ok bool) {
 //
 // An unread panel passes through with Fresh nil and contributes no
 // reference. A plain-reader panel (Sightings nil) gets Fresh = ByEmail.
+//
+// FreshLiveIPs judges with the shipped window, LiveIPFreshWindowSeconds.
+// The poll judges with the configured one, through FreshLiveIPsWithin.
 func FreshLiveIPs(panels []PanelLiveIPs, prev map[NodeRef]int64) ([]PanelLiveIPs, map[NodeRef]int64) {
+	return FreshLiveIPsWithin(panels, prev, LiveIPFreshWindowSeconds)
+}
+
+// FreshLiveIPsWithin is FreshLiveIPs with the freshness window given in
+// seconds: geo_anomaly.fresh_window_seconds, as GeoRuntimeFromSettings
+// sanitised it. The window is used as given and never defaulted here — the
+// caller hands in a sanitised value, and a smaller one only marks fewer
+// addresses live, the direction that accuses nobody.
+func FreshLiveIPsWithin(panels []PanelLiveIPs, prev map[NodeRef]int64, windowSeconds int) ([]PanelLiveIPs, map[NodeRef]int64) {
+	window := int64(windowSeconds)
 	out := make([]PanelLiveIPs, len(panels))
 	next := map[NodeRef]int64{}
 	for i, p := range panels {
@@ -288,7 +309,7 @@ func FreshLiveIPs(panels []PanelLiveIPs, prev map[NodeRef]int64) ([]PanelLiveIPs
 				if ip == "" {
 					continue
 				}
-				if s.SeenAt <= 0 || (advanced[s.Node] && s.SeenAt >= ref[s.Node]-LiveIPFreshWindowSeconds) {
+				if s.SeenAt <= 0 || (advanced[s.Node] && s.SeenAt >= ref[s.Node]-window) {
 					set[ip] = struct{}{}
 				}
 			}

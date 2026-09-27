@@ -156,15 +156,65 @@ func TestUISettings_GeoPolicySettingsCarriesEveryGeoKnob(t *testing.T) {
 		}
 	}
 
-	stored := 0
+	// Split by scope, because the geo_anomaly_ settings now feed two
+	// mappings: the per-group ones are the judging policy, the global ones
+	// (less the ignore list) the fleet-wide detector runtime. Each side must
+	// count exactly its mapping's fields, so a stored knob that reaches
+	// neither fails here whichever side it was meant for.
+	overridable, global := 0, 0
 	ut := reflect.TypeOf(UISettings{})
 	for i := 0; i < ut.NumField(); i++ {
 		tag := strings.Split(ut.Field(i).Tag.Get("json"), ",")[0]
-		if strings.HasPrefix(tag, "geo_anomaly_") && tag != "geo_anomaly_ignore_addresses" {
-			stored++
+		rest, ok := strings.CutPrefix(tag, "geo_anomaly_")
+		if !ok || tag == "geo_anomaly_ignore_addresses" {
+			continue
+		}
+		if OverridableScopeKeys["geo_anomaly."+rest] {
+			overridable++
+		} else {
+			global++
 		}
 	}
-	if n := reflect.TypeOf(domain.GeoPolicySettings{}).NumField(); stored != n {
-		t.Errorf("%d geo_anomaly_ settings (less the ignore list) but domain.GeoPolicySettings has %d fields: a stored knob the policy does not carry is saved and judged with the default", stored, n)
+	if n := reflect.TypeOf(domain.GeoPolicySettings{}).NumField(); overridable != n {
+		t.Errorf("%d geo_anomaly_ settings are group-overridable but domain.GeoPolicySettings has %d fields: a stored knob the policy does not carry is saved and judged with the default", overridable, n)
+	}
+	if n := reflect.TypeOf(domain.GeoRuntimeSettings{}).NumField(); global != n {
+		t.Errorf("%d geo_anomaly_ settings are global only (less the ignore list) but domain.GeoRuntimeSettings has %d fields: a fleet-wide knob the runtime does not carry is saved and run with the default", global, n)
+	}
+}
+
+// GeoRuntimeSettings is the ONE mapping from the fleet-wide geo_anomaly.*
+// knobs — the detector's former constants — to the domain's flat form, read
+// by the traffic poll, the infrastructure refresh and the risk worker. The
+// same checks as the policy mappings: exact distinct values (two crossed
+// fields fail), and every result field non-zero (a domain field added
+// without a mapping fails). The count against the stored settings is in the
+// test above, split from the policy's.
+func TestUISettings_GeoRuntimeSettingsCarriesEveryKnob(t *testing.T) {
+	s := UISettings{
+		GeoAnomalyFreshWindowSeconds:  300,
+		GeoAnomalySharedExitMinUsers:  4,
+		GeoAnomalyBanMaxPerPoll:       5,
+		GeoAnomalyLiftMaxPerPoll:      6,
+		GeoAnomalyInfraRefreshMinutes: 7,
+		GeoAnomalyInfraHostTTLMinutes: 8,
+	}
+	want := domain.GeoRuntimeSettings{
+		FreshWindowSeconds:  300,
+		SharedExitMinUsers:  4,
+		BanMaxPerPoll:       5,
+		LiftMaxPerPoll:      6,
+		InfraRefreshMinutes: 7,
+		InfraHostTTLMinutes: 8,
+	}
+	got := s.GeoRuntimeSettings()
+	if got != want {
+		t.Fatalf("GeoRuntimeSettings() = %+v\nwant %+v", got, want)
+	}
+	v := reflect.ValueOf(got)
+	for i := 0; i < v.NumField(); i++ {
+		if v.Field(i).IsZero() {
+			t.Errorf("domain.GeoRuntimeSettings.%s is never filled from UISettings", v.Type().Field(i).Name)
+		}
 	}
 }

@@ -1685,13 +1685,34 @@ func (a *App) runTrafficLoop(ctx context.Context) {
 	}
 }
 
-// infraRefreshInterval is how often the node and relay addresses the
-// location detector excludes are rebuilt. A constant, not a setting: it is
-// background upkeep off the poll's critical path, like the sync-task, mail
-// and audit-cleanup cadences. Hostname answers are cached for twice this
-// (traffic's infraHostTTL), so roughly every other refresh is a node-list
-// read and no DNS at all.
-const infraRefreshInterval = 5 * time.Minute
+// infraIntervalFrom is how often the node and relay addresses the location
+// detector excludes are rebuilt: geo_anomaly.infra_refresh_minutes, as
+// domain.GeoRuntimeFromSettings sanitises it (five minutes by default, at
+// most an hour — how long a relay an admin just added can go on being judged
+// as a user's location). Hostname answers are cached for their own TTL
+// (geo_anomaly.infra_host_ttl_minutes, ten by default), so at the defaults
+// roughly every other refresh is a node-list read and no DNS at all.
+//
+// A settings read that failed gives the default, not the interval the loop
+// held: unlike the traffic cadence (nextTrafficInterval), which paces
+// metering and must not move on an outage, this is upkeep whose every value
+// in range is safe, and the default is the one the domain vouches for.
+func infraIntervalFrom(s ports.UISettings, err error) time.Duration {
+	if err != nil {
+		s = ports.UISettings{}
+	}
+	return domain.GeoRuntimeFromSettings(s.GeoRuntimeSettings()).InfraRefresh
+}
+
+// infraInterval reads the infrastructure refresh cadence for the next wait.
+// Nil-safe on a.settings: an App assembled without settings (a test harness)
+// runs on the default.
+func (a *App) infraInterval(ctx context.Context) time.Duration {
+	if a.settings == nil {
+		return infraIntervalFrom(ports.UISettings{}, nil)
+	}
+	return infraIntervalFrom(a.settings.Load(ctx, ports.UISettings{}))
+}
 
 // runInfraAddressLoop keeps traffic's infrastructure-address set current.
 //
@@ -1701,6 +1722,10 @@ const infraRefreshInterval = 5 * time.Minute
 // address as a user's location. Kept out of the poll entirely because
 // resolving relay hostnames is DNS, and DNS latency or failure has no
 // business inside the cycle that meters traffic.
+//
+// The cadence is re-read after every refresh, so an admin's edit takes
+// effect without a restart — one wait late, the same bargain the traffic,
+// health, geo and cert loops make.
 func (a *App) runInfraAddressLoop(ctx context.Context) {
 	if a.traffic == nil {
 		return
@@ -1711,7 +1736,8 @@ func (a *App) runInfraAddressLoop(ctx context.Context) {
 		}
 	}
 	refresh()
-	t := time.NewTicker(infraRefreshInterval)
+	interval := a.infraInterval(ctx)
+	t := time.NewTicker(interval)
 	defer t.Stop()
 	for {
 		select {
@@ -1719,6 +1745,11 @@ func (a *App) runInfraAddressLoop(ctx context.Context) {
 			return
 		case <-t.C:
 			refresh()
+			if next := a.infraInterval(ctx); next != interval {
+				interval = next
+				t.Reset(interval)
+				log.Info("infra address refresh interval changed", "interval", interval.String())
+			}
 		}
 	}
 }

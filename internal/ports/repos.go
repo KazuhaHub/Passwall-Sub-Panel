@@ -1287,12 +1287,13 @@ type UISettings struct {
 	// misjudged, and the two failure directions are not symmetric — a false
 	// flag accuses somebody who did nothing.
 	//
-	// Every knob here except GeoAnomalyIgnoreAddresses is per-group
-	// overridable (see OverridableScopeKeys), so a group of travelling staff
-	// can be exempted, or automatic suspension armed for one group, without
-	// changing the fleet. A group value REPLACES the global one whole, and a
-	// stored 0 means "the shipped default" — not "inherit", and not "zero
-	// tolerance" (domain.GeoPolicyFromSettings is the one place that reads it).
+	// Every knob here except GeoAnomalyIgnoreAddresses and the fleet-wide
+	// runtime block below is per-group overridable (see
+	// OverridableScopeKeys), so a group of travelling staff can be exempted,
+	// or automatic suspension armed for one group, without changing the
+	// fleet. A group value REPLACES the global one whole, and a stored 0
+	// means "the shipped default" — not "inherit", and not "zero tolerance"
+	// (domain.GeoPolicyFromSettings is the one place that reads it).
 	//
 	// GeoAnomalyScope names the FINEST tier judged; every coarser tier is
 	// judged too, each against its own tolerance: "city" (the default:
@@ -1405,6 +1406,46 @@ type UISettings struct {
 	// what lets a false positive heal without an admin, and a value long
 	// enough to be permanent in practice would defeat it.
 	GeoAnomalyBanDurationMinutes int `json:"geo_anomaly_ban_duration_minutes"`
+
+	// ---- Concurrent locations: the detector's fleet-wide runtime ----
+	// What used to be constants in the poll, the enforcement and the
+	// infrastructure refresh. Each stores 0 for "never configured", which
+	// means the former constant, and each is clamped to a safety bound when
+	// read; domain.GeoRuntimeFromSettings is the one place either rule
+	// lives, and nothing here is validated on save.
+	//
+	// GLOBAL ONLY — all six are deliberately absent from
+	// OverridableScopeKeys. Freshness is judged per NODE before any user is
+	// known, the shared-exit rule counts accounts across the whole fleet,
+	// the caps bound one poll and the infrastructure cadences one loop; a
+	// group value would be stored, shown and never read.
+	//
+	// GeoAnomalyFreshWindowSeconds is how far behind its node's newest scan
+	// an address may be and still count as connected now. Default 120 (12
+	// of 3X-UI's 10-second scans), clamped to 20..900: under two scans a
+	// live stream reads stale between scans, and past half the upstream's
+	// 30-minute memory "remembered" reads as "now".
+	GeoAnomalyFreshWindowSeconds int `json:"geo_anomaly_fresh_window_seconds"`
+	// GeoAnomalySharedExitMinUsers is how many accounts on one source at
+	// once make it a shared exit (an office, a carrier NAT) rather than a
+	// place. Default 3, clamped to 2..20. The risk worker's fetch window
+	// reads the same knob, so the two checks agree about what an exit is.
+	GeoAnomalySharedExitMinUsers int `json:"geo_anomaly_shared_exit_min_users"`
+	// GeoAnomalyBanMaxPerPoll / GeoAnomalyLiftMaxPerPoll cap the automatic
+	// suspensions applied, and the due ones lifted, in one poll. Default 20
+	// each, clamped to 1..200: every transition is an inline push to each
+	// panel the account is on, so the cap bounds one poll's latency. Nothing
+	// over a cap is lost — the rest wait for the next poll.
+	GeoAnomalyBanMaxPerPoll  int `json:"geo_anomaly_ban_max_per_poll"`
+	GeoAnomalyLiftMaxPerPoll int `json:"geo_anomaly_lift_max_per_poll"`
+	// GeoAnomalyInfraRefreshMinutes is how often PSP's own node and relay
+	// addresses are rebuilt for exclusion; re-read every cycle, so an edit
+	// lands after the current wait. Default 5, clamped to 1..60.
+	GeoAnomalyInfraRefreshMinutes int `json:"geo_anomaly_infra_refresh_minutes"`
+	// GeoAnomalyInfraHostTTLMinutes is how long a node or relay hostname's
+	// DNS answer is reused. Default 10, clamped to 1..1440: shorter for
+	// relays on dynamic DNS, longer for stable hosts.
+	GeoAnomalyInfraHostTTLMinutes int `json:"geo_anomaly_infra_host_ttl_minutes"`
 
 	// ---- Risk signals (observe only) ----
 	// Nothing in this block suspends, blocks or notifies an account holder:
@@ -1764,7 +1805,11 @@ var OverridableScopeKeys = map[string]bool{
 	//
 	// geo_anomaly.ignore_addresses is deliberately NOT here, and its absence
 	// is the whole global-only mechanism: whether an address is somebody's
-	// relay or office exit does not depend on which group is looking.
+	// relay or office exit does not depend on which group is looking. The
+	// detector's fleet-wide runtime (fresh_window_seconds,
+	// shared_exit_min_users, ban_max_per_poll, lift_max_per_poll,
+	// infra_refresh_minutes, infra_host_ttl_minutes) is absent for the same
+	// kind of reason: see UISettings.
 	"geo_anomaly.scope":             true,
 	"geo_anomaly.max_places":        true,
 	"geo_anomaly.max_regions":       true,
