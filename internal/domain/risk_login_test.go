@@ -198,8 +198,9 @@ func TestLoginCountry_SkippedLoginsAreNeitherPriorsNorEvents(t *testing.T) {
 
 // Logins older than the lookback are not read as history, and a login
 // stamped after the run's clock is not in it yet (the next run sees it).
-// The lookback is the auth-event retention when that is shorter, clamped to
-// 1..90; 0 means the full 90 days.
+// The lookback is the configured one or the auth-event retention when that
+// is shorter, clamped to 1..365 (a year bounds one run's memory); 0 means
+// the default 90 days.
 func TestLoginCountry_LookbackBoundsTheLogins(t *testing.T) {
 	logins := append(homeLogins(3), placedAt("CN", 40*day), placedAt("JP", day))
 	for i := range 3 {
@@ -213,7 +214,7 @@ func TestLoginCountry_LookbackBoundsTheLogins(t *testing.T) {
 		t.Fatalf("lookback %d, logins %d; want 45 and the two logins inside it", ev.LookbackDays, ev.Logins)
 	}
 
-	for lookback, want := range map[int]int{0: 90, -3: 90, 120: 90, 1: 1} {
+	for lookback, want := range map[int]int{0: 90, -3: 90, 120: 120, 400: 365, 1: 1} {
 		in.LookbackDays = lookback
 		_, ev = EvaluateLoginCountry(loginPolicy(), in)
 		if ev = mustLoginEvidence(t, ev); ev.LookbackDays != want {
@@ -456,5 +457,94 @@ func TestLoginCountry_CodesAreExactlyAllRiskCodes(t *testing.T) {
 	}
 	if !reflect.DeepEqual(reached, listed) {
 		t.Fatalf("login_country codes reached %v, AllRiskCodes lists %v", reached, listed)
+	}
+}
+
+// The warm-up and the hold are the group's policy now, not constants. A
+// group that signs in rarely can be judged after one earlier login; a group
+// that wants a new country kept on the table for a month can hold it that
+// long. The evidence records what the verdict was judged with, so the
+// admin's sentence reads the group's numbers, not the shipped ones.
+func TestEvaluateLoginCountry_WarmupAndHoldComeFromThePolicy(t *testing.T) {
+	// One earlier login: learning at the shipped warm-up of three, judged at
+	// a warm-up of one.
+	in := loginInput(append(homeLogins(1), placedAt("JP", day))...)
+	v, _ := EvaluateLoginCountry(loginPolicy(), in)
+	wantLogin(t, v, GeoStateUnknown, RiskCodeLearning)
+	p := loginPolicy()
+	p.WarmupLogins = 1
+	v, ev := EvaluateLoginCountry(p, in)
+	wantLogin(t, v, GeoStateFlagged, RiskCodeNewCountry)
+	if ev = mustLoginEvidence(t, ev); ev.Warmup != 1 || ev.Judged != 1 {
+		t.Fatalf("warm-up %d, judged %d; want the policy's 1 and the one login judged", ev.Warmup, ev.Judged)
+	}
+
+	// A new country 20 days ago, after a settled history: history at the
+	// shipped seven-day hold, still flagged at a hold of 30 days.
+	in = loginInput(placedAt("CN", 40*day), placedAt("CN", 41*day), placedAt("CN", 42*day), placedAt("JP", 20*day))
+	v, _ = EvaluateLoginCountry(loginPolicy(), in)
+	wantLogin(t, v, GeoStateIdle, RiskCodeNoRecentLogins)
+	p = loginPolicy()
+	p.HoldDays = 30
+	v, ev = EvaluateLoginCountry(p, in)
+	wantLogin(t, v, GeoStateFlagged, RiskCodeNewCountry)
+	if ev = mustLoginEvidence(t, ev); ev.HoldDays != 30 || ev.Recent != 1 || !reflect.DeepEqual(eventCountries(ev), []string{"JP"}) {
+		t.Fatalf("hold %d, recent %d, events %+v; want the policy's 30, one recent login and the JP event", ev.HoldDays, ev.Recent, ev.Events)
+	}
+}
+
+// The lookback is no longer capped at the old 90 days: an operator who keeps
+// the login log for a year can have a country that account signed in from
+// five months ago count as known. With the shipped 90, the same history is
+// out of reach and the recent login is learning.
+func TestEvaluateLoginCountry_LookbackBeyond90IsHonoured(t *testing.T) {
+	in := loginInput(placedAt("CN", 150*day), placedAt("CN", 151*day), placedAt("CN", 152*day), placedAt("CN", day))
+	in.LookbackDays = 200
+	v, ev := EvaluateLoginCountry(loginPolicy(), in)
+	wantLogin(t, v, GeoStateClean, RiskCodeKnownCountries)
+	if ev = mustLoginEvidence(t, ev); ev.LookbackDays != 200 || ev.Logins != 4 {
+		t.Fatalf("lookback %d, logins %d; want 200 and all four logins", ev.LookbackDays, ev.Logins)
+	}
+
+	in.LookbackDays = RiskLoginLookbackDays
+	v, ev = EvaluateLoginCountry(loginPolicy(), in)
+	wantLogin(t, v, GeoStateUnknown, RiskCodeLearning)
+	if ev = mustLoginEvidence(t, ev); ev.LookbackDays != 90 || ev.Logins != 1 {
+		t.Fatalf("lookback %d, logins %d; want 90 and only the recent login", ev.LookbackDays, ev.Logins)
+	}
+}
+
+// (guard) A LoginCountryPolicy built without the two knobs — every caller
+// before they existed, and any test double — judges exactly as the shipped
+// policy: 0 is "never configured", never a warm-up of nothing or a hold of
+// no days. Checked over every fixture that reaches a code, plus the two
+// threshold cases above.
+//
+// Mutation: reading p.WarmupLogins raw (0 judges an account's first login)
+// turns this red.
+func TestEvaluateLoginCountry_ZeroPolicyKnobsAreTheDefaults(t *testing.T) {
+	type fixture struct {
+		p  LoginCountryPolicy
+		in LoginCountryInput
+	}
+	var all []fixture
+	for _, f := range loginFixtures() {
+		all = append(all, fixture{f.p, f.in})
+	}
+	all = append(all,
+		fixture{loginPolicy(), loginInput(append(homeLogins(1), placedAt("JP", day))...)},
+		fixture{loginPolicy(), loginInput(placedAt("CN", 40*day), placedAt("CN", 41*day), placedAt("CN", 42*day), placedAt("JP", 20*day))},
+	)
+	for i, f := range all {
+		explicit := f.p
+		explicit.WarmupLogins, explicit.HoldDays = RiskLoginWarmupLogins, RiskLoginHoldDays
+		zv, zev := EvaluateLoginCountry(f.p, f.in)
+		ev, eev := EvaluateLoginCountry(explicit, f.in)
+		if zv != ev || !reflect.DeepEqual(zev, eev) {
+			t.Fatalf("fixture %d: zero knobs %+v %+v, explicit defaults %+v %+v", i, zv, zev, ev, eev)
+		}
+		if zev != nil && (zev.Warmup != 3 || zev.HoldDays != 7) {
+			t.Fatalf("fixture %d: evidence warm-up %d, hold %d; want the shipped 3 and 7", i, zev.Warmup, zev.HoldDays)
+		}
 	}
 }

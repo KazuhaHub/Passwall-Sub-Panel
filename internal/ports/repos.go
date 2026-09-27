@@ -95,6 +95,59 @@ type SubLogFilter struct {
 	Until  *time.Time
 }
 
+// ConnectionHistoryFilter narrows the admin's connection_history read. Every
+// field is optional; the zero value lists every visible row, newest last
+// sighting first. Sortable by last_seen (the default, newest first),
+// first_seen, count, ip and user_id; an unknown sort falls back to the
+// default.
+type ConnectionHistoryFilter struct {
+	Pagination
+	UserID, PanelID *int64
+	// Exclusion: "" any source; ConnExclusionKept the sources the detector
+	// judged; ConnExclusionExcluded the ones it set aside; or one reason
+	// (domain.AddressExcludedInternal, Listed, Infra or Shared). Anything
+	// else is a domain.ErrValidation, never an empty answer.
+	Exclusion string
+	// Since and Until bound the LAST sighting, both inclusive.
+	Since, Until *time.Time
+	// Search: case-insensitive substring across the address, the source,
+	// the country code, the region, the city and the account's upn.
+	Search string
+}
+
+// The two exclusion filters that are not a reason: every judged source, and
+// every source set aside for any reason.
+const (
+	ConnExclusionKept     = "kept"
+	ConnExclusionExcluded = "excluded"
+)
+
+// FlagRecordFilter narrows the admin's flag_records read. Every field is
+// optional; the zero value lists every visible record, newest first. The
+// order is fixed (at_ms, then id, both descending): a history reads in time
+// order, and the id breaks a tie in the order the records were written.
+// Pagination's SortBy, SortDir and Keyword are not consulted. A source, level
+// or event the store does not know is a domain.ErrValidation, never an empty
+// answer: a typo must not read as "nothing ever happened".
+type FlagRecordFilter struct {
+	Pagination
+	UserID *int64
+	// Source: "" any, or one of domain.FlagSources().
+	Source string
+	// Level: "" any; "flagged", "suspect" or "suspended", the level a
+	// record moved TO; or FlagLevelCleared, the records that moved to no
+	// attention at all (every leave and every lift).
+	Level string
+	// Event: "" any, or one of domain.FlagEvents().
+	Event string
+	// Since and Until bound the record's time, both inclusive.
+	Since, Until *time.Time
+}
+
+// FlagLevelCleared is the level filter for records whose new level is none:
+// domain.FlagLevelNone is the empty string, which as a filter means "any".
+const FlagLevelCleared = "cleared"
+
 type SyncTaskFilter struct {
 	Pagination
 	Status *domain.SyncTaskStatus
@@ -852,7 +905,21 @@ type SubLogRepo interface {
 	// this is the window read for background aggregation, which holds a whole
 	// week of fetches in one pass and must not hold it in memory at once.
 	ScanSince(ctx context.Context, since time.Time, batch int, fn func([]domain.SubLog) error) error
+	// RecentForUsers returns the given accounts' fetches accessed at or
+	// after since, newest first, at most limit rows (limit <= 0 means
+	// SubLogRecentMaxRows), without the users join. It serves the risk
+	// center's device inference, which reads one page of accounts at a
+	// time: more than SubLogRecentMaxUsers ids is a domain.ErrValidation,
+	// never a fleet-wide scan. No ids is no rows.
+	RecentForUsers(ctx context.Context, userIDs []int64, since time.Time, limit int) ([]domain.SubLog, error)
 }
+
+// RecentForUsers' bounds: one page of accounts (the admin lists' page-size
+// cap) and the rows one read may hold.
+const (
+	SubLogRecentMaxUsers = 200
+	SubLogRecentMaxRows  = 20000
+)
 
 type SyncTaskRepo interface {
 	Create(ctx context.Context, task *domain.SyncTask) error
@@ -1287,12 +1354,13 @@ type UISettings struct {
 	// misjudged, and the two failure directions are not symmetric — a false
 	// flag accuses somebody who did nothing.
 	//
-	// Every knob here except GeoAnomalyIgnoreAddresses is per-group
-	// overridable (see OverridableScopeKeys), so a group of travelling staff
-	// can be exempted, or automatic suspension armed for one group, without
-	// changing the fleet. A group value REPLACES the global one whole, and a
-	// stored 0 means "the shipped default" — not "inherit", and not "zero
-	// tolerance" (domain.GeoPolicyFromSettings is the one place that reads it).
+	// Every knob here except GeoAnomalyIgnoreAddresses and the fleet-wide
+	// runtime block below is per-group overridable (see
+	// OverridableScopeKeys), so a group of travelling staff can be exempted,
+	// or automatic suspension armed for one group, without changing the
+	// fleet. A group value REPLACES the global one whole, and a stored 0
+	// means "the shipped default" — not "inherit", and not "zero tolerance"
+	// (domain.GeoPolicyFromSettings is the one place that reads it).
 	//
 	// GeoAnomalyScope names the FINEST tier judged; every coarser tier is
 	// judged too, each against its own tolerance: "city" (the default:
@@ -1406,6 +1474,46 @@ type UISettings struct {
 	// enough to be permanent in practice would defeat it.
 	GeoAnomalyBanDurationMinutes int `json:"geo_anomaly_ban_duration_minutes"`
 
+	// ---- Concurrent locations: the detector's fleet-wide runtime ----
+	// What used to be constants in the poll, the enforcement and the
+	// infrastructure refresh. Each stores 0 for "never configured", which
+	// means the former constant, and each is clamped to a safety bound when
+	// read; domain.GeoRuntimeFromSettings is the one place either rule
+	// lives, and nothing here is validated on save.
+	//
+	// GLOBAL ONLY — all six are deliberately absent from
+	// OverridableScopeKeys. Freshness is judged per NODE before any user is
+	// known, the shared-exit rule counts accounts across the whole fleet,
+	// the caps bound one poll and the infrastructure cadences one loop; a
+	// group value would be stored, shown and never read.
+	//
+	// GeoAnomalyFreshWindowSeconds is how far behind its node's newest scan
+	// an address may be and still count as connected now. Default 120 (12
+	// of 3X-UI's 10-second scans), clamped to 20..900: under two scans a
+	// live stream reads stale between scans, and past half the upstream's
+	// 30-minute memory "remembered" reads as "now".
+	GeoAnomalyFreshWindowSeconds int `json:"geo_anomaly_fresh_window_seconds"`
+	// GeoAnomalySharedExitMinUsers is how many accounts on one source at
+	// once make it a shared exit (an office, a carrier NAT) rather than a
+	// place. Default 3, clamped to 2..20. The risk worker's fetch window
+	// reads the same knob, so the two checks agree about what an exit is.
+	GeoAnomalySharedExitMinUsers int `json:"geo_anomaly_shared_exit_min_users"`
+	// GeoAnomalyBanMaxPerPoll / GeoAnomalyLiftMaxPerPoll cap the automatic
+	// suspensions applied, and the due ones lifted, in one poll. Default 20
+	// each, clamped to 1..200: every transition is an inline push to each
+	// panel the account is on, so the cap bounds one poll's latency. Nothing
+	// over a cap is lost — the rest wait for the next poll.
+	GeoAnomalyBanMaxPerPoll  int `json:"geo_anomaly_ban_max_per_poll"`
+	GeoAnomalyLiftMaxPerPoll int `json:"geo_anomaly_lift_max_per_poll"`
+	// GeoAnomalyInfraRefreshMinutes is how often PSP's own node and relay
+	// addresses are rebuilt for exclusion; re-read every cycle, so an edit
+	// lands after the current wait. Default 5, clamped to 1..60.
+	GeoAnomalyInfraRefreshMinutes int `json:"geo_anomaly_infra_refresh_minutes"`
+	// GeoAnomalyInfraHostTTLMinutes is how long a node or relay hostname's
+	// DNS answer is reused. Default 10, clamped to 1..1440: shorter for
+	// relays on dynamic DNS, longer for stable hosts.
+	GeoAnomalyInfraHostTTLMinutes int `json:"geo_anomaly_infra_host_ttl_minutes"`
+
 	// ---- Risk signals (observe only) ----
 	// Nothing in this block suspends, blocks or notifies an account holder:
 	// the signals are for an admin to read, next to the concurrent-location
@@ -1444,7 +1552,8 @@ type UISettings struct {
 	// account's panel logins may come from. It plays the "sustained, not a
 	// one-off" role that FlagAfterPolls plays for the live verdict, measured
 	// in days because the evidence is a week of fetch logs. Default 3,
-	// clamped to 1..7 when read (the window is at most a week).
+	// clamped to 1..risk.window_days when read: a pattern cannot recur on
+	// more days than the window holds.
 	RiskMinDays int `json:"risk_min_days"`
 	// RiskMaxDevices is how many distinct declared devices an account may
 	// fetch from before the devices signal speaks. Default 3 — a phone, a
@@ -1460,6 +1569,116 @@ type UISettings struct {
 	// counts as over whatever the ratio says — so a light account going from
 	// 10 MB to 50 MB is not a "fivefold surge". Default 3.
 	RiskUsageFloorGB int `json:"risk_usage_floor_gb"`
+	// RiskLoginWarmupLogins is how many earlier placed panel logins an
+	// account needs before login_country judges a login at all — before
+	// that there is nothing to call a country new against. Default 3,
+	// clamped to 1..50 when read: past 50 a signal that expects rare logins
+	// never finishes learning.
+	RiskLoginWarmupLogins int `json:"risk_login_warmup_logins"`
+	// RiskLoginHoldDays is how many days one login from a new country keeps
+	// the account flagged, and so which logins count as recent. Default 7,
+	// clamped to 1..risk.login_lookback_days when read: a login cannot stay
+	// recent longer than the log is read.
+	RiskLoginHoldDays int `json:"risk_login_hold_days"`
+	// RiskUsageWarmupDays is how many days of its own history (from its
+	// first day of use, inside the baseline) an account needs before
+	// usage_shift judges it. Default 14, raised to 7 when read — under a
+	// week the median is taken over setup — and held to
+	// risk.usage_baseline_days: a longer warm-up would never end.
+	RiskUsageWarmupDays int `json:"risk_usage_warmup_days"`
+	// RiskUsageFlagDays and RiskUsageSuspectDays are on how many of the
+	// judged days (risk.usage_recent_days) an account must be over to read
+	// flagged, or suspect. Defaults 4 and 2, each raised to 2 when read (one
+	// day over is a download) and held to the judged days; suspect is held
+	// to flag on top — equal to it means no suspect stage.
+	RiskUsageFlagDays    int `json:"risk_usage_flag_days"`
+	RiskUsageSuspectDays int `json:"risk_usage_suspect_days"`
+
+	// ---- Risk signals: the worker's fleet-wide runtime ----
+	// What used to be constants in the worker loop, the fetch window, the
+	// login read, the bell and usage_shift's series. Each stores 0 for
+	// "never configured", which means the former constant, and each is
+	// clamped to a safety bound when read; domain.RiskRuntimeFromSettings is
+	// the one place either rule lives, and nothing here is validated on
+	// save.
+	//
+	// GLOBAL ONLY — all twelve are deliberately absent from
+	// OverridableScopeKeys. The loop runs once for the fleet, the fetch
+	// window and the login log are each read once per run for every account
+	// together, the bell counts the fleet, usage_shift reads ONE fleet
+	// series that every account's fleet factor is taken from, so every
+	// account's series has the same days, one hourly pass prunes every
+	// account's connection history and flag records, and the risk center
+	// holds one live snapshot for the fleet; a group value would be stored,
+	// shown and never read.
+	//
+	// RiskRefreshIntervalMinutes is how often the signals are recomputed.
+	// Default 60, clamped to 10..1440: each run streams a week of fetches
+	// and weeks of hourly traffic per account, and a day is as stale as a
+	// flag may get. Re-read after every run, so an edit lands one run late.
+	RiskRefreshIntervalMinutes int `json:"risk_refresh_interval_minutes"`
+	// RiskFirstDelayMinutes is how long after start the first run waits, so
+	// it does not compete with the boot probes and the first infrastructure
+	// refresh. Default 2, clamped to 1..60. Read once when the loop starts:
+	// a change takes effect on the next restart.
+	RiskFirstDelayMinutes int `json:"risk_first_delay_minutes"`
+	// RiskAlertFreshnessHours is how long a flag nobody re-judged keeps the
+	// notification bell lit, for both the concurrent-location and the risk
+	// entry. Default 24, clamped to 1..720, and raised to two worker
+	// refreshes (and, for the concurrent-location entry, to two traffic
+	// polls) so a latched flag never flickers off the bell between two
+	// judgements.
+	RiskAlertFreshnessHours int `json:"risk_alert_freshness_hours"`
+	// RiskWindowDays is the fetch window the place and device signals read,
+	// in panel-local days. Default 7, clamped to 1..7 (every day mask is a
+	// uint8). A shorter sub-log retention still shortens the window where
+	// the logs are read — and a group's min_days is bounded by THIS value,
+	// not by the retention, so a too-short retention reads retention_short.
+	RiskWindowDays int `json:"risk_window_days"`
+	// RiskLoginLookbackDays is how far back login_country reads the login
+	// log. Default 90, clamped to 7..365; a shorter auth-event retention
+	// still shortens it where the log is read.
+	RiskLoginLookbackDays int `json:"risk_login_lookback_days"`
+	// RiskUsageBaselineDays is how many days before the judged ones an
+	// account's usage median is taken over. Default 28, clamped to 14..56:
+	// two of every weekday at least, and a bound on the hourly rows one run
+	// reads per account.
+	RiskUsageBaselineDays int `json:"risk_usage_baseline_days"`
+	// RiskUsageRecentDays is how many of the latest whole days usage_shift
+	// judges. Default 7, clamped to 3..14. The series is the two together,
+	// so traffic_history_days must be longer than their sum or the verdict
+	// reads retention_short.
+	RiskUsageRecentDays int `json:"risk_usage_recent_days"`
+	// RiskConnectionRetentionDays is how many days connection_history keeps
+	// a source after its LAST sighting. Default 7, clamped to 1..90 when
+	// read. That table holds IP addresses — the one place the detector's
+	// data does — so 0 and a negative value mean the default week, NEVER
+	// "keep forever" as they do for sub_log_retention_days: an IP-bearing
+	// table must always age out, and the 90-day ceiling is a privacy bound.
+	// Pruned by the hourly cleanup, which also deletes a deleted account's
+	// rows whatever their age.
+	RiskConnectionRetentionDays int `json:"risk_connection_retention_days"`
+	// RiskFlagRecordRetentionDays is how many days flag_records keeps an
+	// attention change. Default 90, clamped to 1..3650 when read; 0 and a
+	// negative value mean the default, never "keep forever", like the
+	// connection history's. The records hold no address, so the ceiling
+	// bounds growth, not a privacy promise. Pruned by the hourly cleanup,
+	// which also deletes a deleted account's records whatever their age.
+	RiskFlagRecordRetentionDays int `json:"risk_flag_record_retention_days"`
+	// The risk center's live view (实时连接). RiskLiveSnapshotStaleMinutes
+	// is how old its snapshot may get before the view warns: default 15,
+	// clamped to 1..1440, and never less than two traffic polls where it is
+	// read, since a poll snapshot is only replaced by the next poll.
+	// RiskLiveRefreshCooldownSeconds is how long one on-demand refresh holds
+	// off the next, for every admin at once (a refresh reads every panel):
+	// default 30, clamped to 5..3600. RiskDeviceInferHours is how far back
+	// the view reads the fetch log to infer a connection's device: default
+	// 24, clamped to 1..168, and shortened by sub_log_retention_days where
+	// the log is read. Global like the rest of this block: there is one
+	// snapshot and one refresh for the whole fleet.
+	RiskLiveSnapshotStaleMinutes   int `json:"risk_live_snapshot_stale_minutes"`
+	RiskLiveRefreshCooldownSeconds int `json:"risk_live_refresh_cooldown_seconds"`
+	RiskDeviceInferHours           int `json:"risk_device_infer_hours"`
 
 	// ---- IP geolocation (access-log region display, offline .mmdb) ----
 	// Resolution is fully offline against a local .mmdb in <ConfigDir>/geoip/;
@@ -1764,7 +1983,11 @@ var OverridableScopeKeys = map[string]bool{
 	//
 	// geo_anomaly.ignore_addresses is deliberately NOT here, and its absence
 	// is the whole global-only mechanism: whether an address is somebody's
-	// relay or office exit does not depend on which group is looking.
+	// relay or office exit does not depend on which group is looking. The
+	// detector's fleet-wide runtime (fresh_window_seconds,
+	// shared_exit_min_users, ban_max_per_poll, lift_max_per_poll,
+	// infra_refresh_minutes, infra_host_ttl_minutes) is absent for the same
+	// kind of reason: see UISettings.
 	"geo_anomaly.scope":             true,
 	"geo_anomaly.max_places":        true,
 	"geo_anomaly.max_regions":       true,
@@ -1789,15 +2012,27 @@ var OverridableScopeKeys = map[string]bool{
 	//
 	// risk.hwid_capture_off is deliberately NOT here: /sub reads it from the
 	// global settings it has already loaded, and whether the panel records a
-	// device identifier at all is a panel-wide privacy decision.
-	"risk.sub_spread_off":    true,
-	"risk.devices_off":       true,
-	"risk.usage_shift_off":   true,
-	"risk.login_country_off": true,
-	"risk.min_days":          true,
-	"risk.max_devices":       true,
-	"risk.usage_ratio":       true,
-	"risk.usage_floor_gb":    true,
+	// device identifier at all is a panel-wide privacy decision. The
+	// worker's fleet-wide runtime (refresh_interval_minutes,
+	// first_delay_minutes, alert_freshness_hours, window_days,
+	// login_lookback_days, usage_baseline_days, usage_recent_days,
+	// connection_retention_days, flag_record_retention_days,
+	// live_snapshot_stale_minutes, live_refresh_cooldown_seconds,
+	// device_infer_hours) is absent for the same kind of reason: see
+	// UISettings.
+	"risk.sub_spread_off":      true,
+	"risk.devices_off":         true,
+	"risk.usage_shift_off":     true,
+	"risk.login_country_off":   true,
+	"risk.min_days":            true,
+	"risk.max_devices":         true,
+	"risk.usage_ratio":         true,
+	"risk.usage_floor_gb":      true,
+	"risk.login_warmup_logins": true,
+	"risk.login_hold_days":     true,
+	"risk.usage_warmup_days":   true,
+	"risk.usage_flag_days":     true,
+	"risk.usage_suspect_days":  true,
 	// 2FA methods (login / enroll) — auth_local / twofa / passkey / login2fa.
 	"security.totp_enabled":      true,
 	"security.passkey_enabled":   true,

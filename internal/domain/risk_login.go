@@ -25,9 +25,11 @@ import (
 //     week's days). The fetches are where the clients actually are, so a
 //     subscriber who never signed in from home is not accused the first
 //     time they do.
-//   - A recent login (the last RiskLoginHoldDays) is JUDGED once the
-//     account has RiskLoginWarmupLogins earlier placed logins; before that
-//     there is nothing to call it new against. A judged login from a country
+//   - A recent login (the last hold days, RiskLoginHoldDays by default) is
+//     JUDGED once the account has the warm-up's earlier placed logins
+//     (RiskLoginWarmupLogins by default); before that there is nothing to
+//     call it new against. Both are per-group policy (risk.login_warmup_logins,
+//     risk.login_hold_days). A judged login from a country
 //     that is not known is an EVENT, and any event flags the account. Each
 //     new country is one event — its second login finds it known — and the
 //     flag decays as the event leaves the recent days.
@@ -41,9 +43,11 @@ import (
 //
 // Evidence never carries an address: country codes, times and methods.
 
-// The login_country constants: how many earlier placed logins a login needs
+// The login_country defaults: how many earlier placed logins a login needs
 // before it is judged, how many days an event keeps the account flagged, and
-// how far back the login log is read.
+// how far back the login log is read. Each is now a setting whose shipped
+// value is this constant — the first two per group (RiskPolicy), the
+// lookback fleet-wide (RiskRuntime, at most RiskLoginLookbackMaxDays).
 const (
 	RiskLoginWarmupLogins = 3
 	RiskLoginHoldDays     = 7
@@ -80,20 +84,28 @@ type LoginSighting struct {
 }
 
 // LoginCountryPolicy is what login_country judges with: the signal's own
-// switch and the account's group geo policy, whose scope (off only) and
-// exemption it reuses. The tolerances do not apply — one new country is the
-// event.
+// switch, the account's group geo policy, whose scope (off only) and
+// exemption it reuses, and the group's two thresholds. The geo tolerances do
+// not apply — one new country is the event.
 type LoginCountryPolicy struct {
 	Off bool
 	Geo GeoAnomalyPolicy
+	// WarmupLogins is how many earlier placed logins a login needs before
+	// it is judged; HoldDays how many days an event keeps the account
+	// flagged. 0 (or negative) is "never configured" and judges with
+	// RiskLoginWarmupLogins / RiskLoginHoldDays — never with a warm-up of
+	// nothing, which would judge an account's first login ever, or a hold of
+	// no days. The worker hands over RiskPolicy's values, already clamped.
+	WarmupLogins, HoldDays int
 }
 
 // LoginCountryInput is one account's logins over the lookback.
 type LoginCountryInput struct {
 	NowMS int64
-	// LookbackDays is how far back the logins reach: RiskLoginLookbackDays,
-	// or the auth-event retention when that is shorter. Clamped to
-	// 1..RiskLoginLookbackDays; 0 means the full lookback.
+	// LookbackDays is how far back the logins reach: the configured
+	// risk.login_lookback_days, or the auth-event retention when that is
+	// shorter. Clamped to 1..RiskLoginLookbackMaxDays; 0 means the default
+	// RiskLoginLookbackDays.
 	LookbackDays int
 	GeoAvailable bool
 	Logins       []LoginSighting
@@ -156,7 +168,7 @@ const loginDayMS = int64(24 * 60 * 60 * 1000)
 //  2. the group's geo scope is off → disabled / scope_off, no evidence.
 //     (Scope country leaves it on: countries are what it judges.)
 //  3. AllowAnywhere → exempt / allow_anywhere, no evidence.
-//  4. no login in the last RiskLoginHoldDays, skipped or not → idle /
+//  4. no login in the last hold days, skipped or not → idle /
 //     no_recent_logins, no evidence.
 //  5. no geo database → unknown / geo_unavailable.
 //  6. no recent login was placed → unknown / unplaced.
@@ -181,17 +193,27 @@ func EvaluateLoginCountry(p LoginCountryPolicy, in LoginCountryInput) (RiskVerdi
 	}
 
 	lookback := in.LookbackDays
-	if lookback <= 0 || lookback > RiskLoginLookbackDays {
+	if lookback <= 0 {
 		lookback = RiskLoginLookbackDays
 	}
+	lookback = min(lookback, RiskLoginLookbackMaxDays)
+	warmup, hold := p.WarmupLogins, p.HoldDays
+	if warmup <= 0 {
+		warmup = RiskLoginWarmupLogins
+	}
+	if hold <= 0 {
+		hold = RiskLoginHoldDays
+	}
 	from := in.NowMS - int64(lookback)*loginDayMS
-	recentFrom := in.NowMS - RiskLoginHoldDays*loginDayMS
+	recentFrom := in.NowMS - int64(hold)*loginDayMS
 
+	// The evidence records the numbers this verdict was judged with — the
+	// group's, not the shipped ones — so the admin's sentence reads them.
 	ev := &LoginCountryEvidence{
 		V:            RiskEvidenceVersion,
 		LookbackDays: lookback,
-		HoldDays:     RiskLoginHoldDays,
-		Warmup:       RiskLoginWarmupLogins,
+		HoldDays:     hold,
+		Warmup:       warmup,
 		Known:        []string{},
 		Events:       []LoginEventEvidence{},
 	}
@@ -257,7 +279,7 @@ func EvaluateLoginCountry(p LoginCountryPolicy, in LoginCountryInput) (RiskVerdi
 				continue
 			}
 			recentPlaced++
-			if priors < RiskLoginWarmupLogins {
+			if priors < warmup {
 				continue // learning: too little history to call anything new
 			}
 			ev.Judged++

@@ -1,4 +1,5 @@
 import { client } from './client'
+import type { ReadOptions } from './requestOptions'
 import type {
   CreateUserRequest,
   CreateUserResponse,
@@ -49,8 +50,13 @@ export async function listUsers(params: UserListParams = {}, signal?: AbortSigna
   return data
 }
 
-export async function getUser(id: number) {
-  const { data } = await client.get<User>(`/admin/users/${id}`)
+/** One account. `silent` skips the global error toast, for a caller that
+ *  shows its own answer (the risk center's lookup says "not found" itself). */
+export async function getUser(id: number, opts: ReadOptions = {}) {
+  const { data } = await client.get<User>(`/admin/users/${id}`, {
+    signal: opts.signal,
+    ...(opts.silent ? { _skipErrorToast: true } : {}),
+  })
   return data
 }
 

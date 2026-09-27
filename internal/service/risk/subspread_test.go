@@ -230,6 +230,30 @@ func TestRefresh_SharedExitAcrossThreeUsersIsExcluded(t *testing.T) {
 	}
 }
 
+// The shared-exit threshold is the fleet's geo_anomaly.shared_exit_min_users,
+// the same knob the live check reads: an operator who lowers it to two
+// declares that two accounts on one source are an exit, and the week of
+// fetches must agree with the live verdict about it. With the shipped three,
+// the same two accounts spread over two provinces
+// (TestRefresh_FetchesOfUnknownUsersAreIgnored).
+func TestSubSpread_SharedExitThresholdComesFromSettings(t *testing.T) {
+	h := newSpreadHarness(usersInGroups(0, 0), rowsOf(
+		everyDay(t, phone(1, ipHomeGD)), everyDay(t, client(1, ipOffice, "office-proxy/1")),
+		everyDay(t, phone(2, ipHomeGD2)), everyDay(t, client(2, ipOffice, "office-proxy/1")),
+	))
+	h.settings.global.GeoAnomalySharedExitMinUsers = 2
+	if err := h.service().RefreshOnce(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	for uid := int64(1); uid <= 2; uid++ {
+		r, ev := spreadRow(t, h, uid)
+		wantSpreadRow(t, r, domain.GeoStateClean, domain.RiskCodeWithin)
+		if ev.Excluded.Shared != 1 {
+			t.Fatalf("user %d: excluded %+v, want the office set aside as shared at threshold 2", uid, ev.Excluded)
+		}
+	}
+}
+
 // A fetch arriving from one of PSP's own relays carries the relay's address,
 // not the user's: set aside. Without the infrastructure test the same week
 // reads as two provinces.

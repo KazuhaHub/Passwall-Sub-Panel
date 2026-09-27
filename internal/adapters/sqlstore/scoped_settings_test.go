@@ -302,12 +302,12 @@ func TestScopedSettings_GeoTierAndBanKeysOverridable(t *testing.T) {
 	}
 }
 
-// TestScopedSettings_RiskKeysOverridable: the eight risk-signal knobs resolve
-// per group, which is how one group has a signal it legitimately trips
-// switched off, or its tolerance raised, while the fleet keeps the default.
-// Bites if any of the eight is missing from OverridableScopeKeys: the row is
-// stored and the resolver silently skips it, so the group editor would show
-// a value the worker never judges with.
+// TestScopedSettings_RiskKeysOverridable: the thirteen risk-signal knobs
+// resolve per group, which is how one group has a signal it legitimately
+// trips switched off, or its tolerance raised, while the fleet keeps the
+// default. Bites if any of the thirteen is missing from OverridableScopeKeys:
+// the row is stored and the resolver silently skips it, so the group editor
+// would show a value the worker never judges with.
 //
 // Device capture is the deliberate exception: /sub reads it from the global
 // settings, and whether the panel records a device identifier at all is a
@@ -325,6 +325,11 @@ func TestScopedSettings_RiskKeysOverridable(t *testing.T) {
 		{Type: "risk", Name: "max_devices", Value: "5"},
 		{Type: "risk", Name: "usage_ratio", Value: "2.5"},
 		{Type: "risk", Name: "usage_floor_gb", Value: "6"},
+		{Type: "risk", Name: "login_warmup_logins", Value: "7"},
+		{Type: "risk", Name: "login_hold_days", Value: "8"},
+		{Type: "risk", Name: "usage_warmup_days", Value: "9"},
+		{Type: "risk", Name: "usage_flag_days", Value: "10"},
+		{Type: "risk", Name: "usage_suspect_days", Value: "11"},
 		// Written straight to the repo, which (unlike the admin handler)
 		// does not gate on the overridable set.
 		{Type: "risk", Name: "hwid_capture_off", Value: "1"},
@@ -350,6 +355,11 @@ func TestScopedSettings_RiskKeysOverridable(t *testing.T) {
 		{"max_devices", g.RiskMaxDevices, 5},
 		{"usage_ratio", g.RiskUsageRatio, 2.5},
 		{"usage_floor_gb", g.RiskUsageFloorGB, 6},
+		{"login_warmup_logins", g.RiskLoginWarmupLogins, 7},
+		{"login_hold_days", g.RiskLoginHoldDays, 8},
+		{"usage_warmup_days", g.RiskUsageWarmupDays, 9},
+		{"usage_flag_days", g.RiskUsageFlagDays, 10},
+		{"usage_suspect_days", g.RiskUsageSuspectDays, 11},
 	} {
 		if c.got != c.want {
 			t.Errorf("group override risk.%s must apply: got %v, want %v", c.key, c.got, c.want)

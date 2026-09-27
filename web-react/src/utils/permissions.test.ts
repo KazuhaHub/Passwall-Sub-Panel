@@ -11,6 +11,7 @@ describe('roleCan', () => {
     'users.elevate',
     'traffic.write',
     'sync.operate',
+    'risk.view',
   ]
 
   it('grants every built-in capability to admins', () => {
@@ -23,6 +24,14 @@ describe('roleCan', () => {
     expect(roleCan('operator', 'sync.operate')).toBe(true)
     expect(roleCan('operator', 'config.write')).toBe(false)
     expect(roleCan('operator', 'users.elevate')).toBe(false)
+  })
+
+  // The risk center is a read, not a config mutation, so it has its own
+  // capability rather than borrowing config.write — but it reads adminGroup
+  // endpoints only, so an operator offered it would collect nothing but 403s.
+  it('keeps the risk center admin-only', () => {
+    expect(roleCan('admin', 'risk.view')).toBe(true)
+    expect(roleCan('operator', 'risk.view')).toBe(false)
   })
 
   it('fails closed for users and missing roles', () => {

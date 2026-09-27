@@ -16,7 +16,7 @@ import (
 // The widths of risk_signals' bounded columns, checked by Save before anything
 // is written. Left to the database, an over-long value is stored by SQLite,
 // refused by PostgreSQL and truncated or refused by MySQL depending on its
-// SQL mode — one hourly batch would succeed on one install and fail on the
+// SQL mode — one refresh's batch would succeed on one install and fail on the
 // next. Checked here, it fails the same way everywhere. They must equal the
 // size tags on riskSignalRow (TestRiskSignalRow_WidthsMatchTheColumns).
 const (
@@ -31,10 +31,12 @@ const (
 
 // riskSignalRow is one account's latest verdict for one observe-only signal.
 //
-// Overwritten every hour; no history. The worker recomputes each signal from
-// a whole window every run, so an older row is an older window, not a fact
-// the next run needs — and keeping them would grow without bound for values
-// nothing reads twice.
+// Overwritten every run (hourly by default); no history here. The worker
+// recomputes each signal from a whole window every run, so an older row is
+// an older window, not a fact the next run needs — and keeping them would
+// grow without bound for values nothing reads twice. What an admin does
+// need from the past — when a signal became suspect or flagged, and when it
+// stopped — Save records in flag_records as it overwrites the row.
 //
 // No foreign key to users. Deleting a user cascades nothing
 // (user_repo.go's hard delete), so reads JOIN users to hide what a deleted
@@ -79,7 +81,8 @@ type RiskSignalRepo struct{ db *gorm.DB }
 
 func NewRiskSignalRepo(db *gorm.DB) *RiskSignalRepo { return &RiskSignalRepo{db: db} }
 
-// Save upserts this run's rows by (user_id, kind).
+// Save upserts this run's rows by (user_id, kind), and records in
+// flag_records every (user, kind) whose attention level the run changed.
 //
 // The whole batch is checked before anything is written. A kind that is empty
 // or wider than its column, a state or code wider than its column, evidence
@@ -90,10 +93,31 @@ func NewRiskSignalRepo(db *gorm.DB) *RiskSignalRepo { return &RiskSignalRepo{db:
 // refused because the dialects disagree about it — PostgreSQL rejects an
 // upsert that touches one row twice, SQLite and MySQL silently keep the last.
 //
+// THE TRANSITIONS ARE FOUND HERE because nowhere else can find them. The
+// worker never reads its own rows — risk.Deps.Store is Save and PurgeOrphans
+// only (TestRiskServiceCannotWriteServiceState) — so the previous state
+// exists only in this table, until the upsert overwrites it. Inside one
+// explicit transaction Save therefore reads every row's (user_id, kind,
+// state) — the whole table, at most four rows per account, three narrow
+// columns — then upserts, then inserts a flag record for each saved signal
+// whose level moved (domain.RiskFlagTransition: suspect and flagged are the
+// levels, unknown included in "none", as the bell reads it). Either write
+// failing rolls back both: a verdict saved without its record would read as
+// the previous state next run, and the change would never be recorded at
+// all. The records are built from rows that passed validateRiskSignal, and
+// flag_records' columns are at least as wide, so the history cannot stall
+// the worker on data.
+//
+// EVERY STATEMENT RUNS ON tx. On SQLite the transaction holds the pool's one
+// connection (conn.go), and a statement on r.db would wait for it until the
+// context gave up (TestRiskSignalRepo_SaveUsesOnlyTheTransaction). The
+// worker is a single goroutine, so no two Saves read the same previous state.
+//
 // Upsert rather than delete-then-insert, so a crash mid-write can never leave
-// the table empty; and 200 rows per statement inside one transaction (GORM
-// wraps a multi-batch CreateInBatches in one), so a failed batch rolls back
-// the batches before it and the run keeps its previous rows whole.
+// the table empty; 200 rows per statement, batched by hand inside the one
+// transaction (CreateInBatches would nest a transaction — a SAVEPOINT — for
+// more than one batch), so a failed batch rolls back the batches before it
+// and the run keeps its previous rows whole.
 //
 // Every mutable column is named in DoUpdates. An upsert rewrites only the
 // columns it names, so one left out keeps its FIRST value forever — last
@@ -101,23 +125,19 @@ func NewRiskSignalRepo(db *gorm.DB) *RiskSignalRepo { return &RiskSignalRepo{db:
 // explicitly, not left to the dialect to infer from the key.
 //
 // Nil, empty and JSON-null evidence are all stored as NULL, the one form of
-// "no evidence". UpdatedAtMS, UPN and DisplayName are ignored: the store
-// stamps the time itself, and the names belong to users.
+// "no evidence", in either table. UpdatedAtMS, UPN and DisplayName are
+// ignored: the store stamps the time itself, and the names belong to users.
 func (r *RiskSignalRepo) Save(ctx context.Context, signals []domain.RiskSignal) error {
 	if len(signals) == 0 {
 		return nil
 	}
-	type key struct {
-		userID int64
-		kind   domain.RiskKind
-	}
-	seen := make(map[key]struct{}, len(signals))
+	seen := make(map[riskSignalKey]struct{}, len(signals))
 	rows := make([]riskSignalRow, 0, len(signals))
 	for _, s := range signals {
 		if err := validateRiskSignal(s); err != nil {
 			return err
 		}
-		k := key{s.UserID, s.Kind}
+		k := riskSignalKey{s.UserID, string(s.Kind)}
 		if _, dup := seen[k]; dup {
 			return fmt.Errorf("%w: risk signal %q for user %d appears twice in one save", domain.ErrValidation, s.Kind, s.UserID)
 		}
@@ -130,10 +150,63 @@ func (r *RiskSignalRepo) Save(ctx context.Context, signals []domain.RiskSignal) 
 			Evidence: riskEvidenceColumn(s.Evidence),
 		})
 	}
-	return r.db.WithContext(ctx).Clauses(clause.OnConflict{
+	upsert := clause.OnConflict{
 		Columns:   []clause.Column{{Name: "user_id"}, {Name: "kind"}},
 		DoUpdates: clause.AssignmentColumns([]string{"state", "code", "evidence", "updated_at"}),
-	}).CreateInBatches(rows, 200).Error
+	}
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		prev, err := riskSignalStates(tx)
+		if err != nil {
+			return err
+		}
+		for start := 0; start < len(rows); start += riskSignalBatch {
+			batch := rows[start:min(start+riskSignalBatch, len(rows))]
+			if err := tx.Clauses(upsert).Create(&batch).Error; err != nil {
+				return err
+			}
+		}
+		atMS := time.Now().UnixMilli()
+		var flags []domain.FlagRecord
+		for _, s := range signals {
+			before, had := prev[riskSignalKey{s.UserID, string(s.Kind)}]
+			if rec, ok := domain.RiskFlagTransition(before, had, s, atMS); ok {
+				flags = append(flags, rec)
+			}
+		}
+		if err := insertFlagRecords(tx, flags); err != nil {
+			return fmt.Errorf("record risk signal transitions: %w", err)
+		}
+		return nil
+	})
+}
+
+// riskSignalBatch is how many rows one upsert statement carries.
+const riskSignalBatch = 200
+
+// riskSignalKey is a row's primary key.
+type riskSignalKey struct {
+	userID int64
+	kind   string
+}
+
+// riskSignalStates reads the stored state of every row, on tx and only tx
+// (see Save). The whole table rather than the saved keys: it holds at most
+// four rows per account, and one three-column scan is cheaper and simpler
+// than an IN list chunked under each dialect's parameter limit.
+func riskSignalStates(tx *gorm.DB) (map[riskSignalKey]domain.GeoState, error) {
+	var rows []struct {
+		UserID int64  `gorm:"column:user_id"`
+		Kind   string `gorm:"column:kind"`
+		State  string `gorm:"column:state"`
+	}
+	if err := tx.Table("risk_signals").Select("user_id, kind, state").Find(&rows).Error; err != nil {
+		return nil, fmt.Errorf("read risk signal states: %w", err)
+	}
+	out := make(map[riskSignalKey]domain.GeoState, len(rows))
+	for _, row := range rows {
+		out[riskSignalKey{row.UserID, row.Kind}] = domain.GeoState(row.State)
+	}
+	return out, nil
 }
 
 // validateRiskSignal refuses a row the store cannot hold identically on every
@@ -249,7 +322,7 @@ func (r *RiskSignalRepo) CountFlaggedUsers(ctx context.Context, since time.Time)
 }
 
 // PurgeOrphans deletes the rows of accounts that no longer exist and returns
-// how many it deleted. The worker runs it every hour, so what a deleted
+// how many it deleted. The worker runs it every refresh, so what a deleted
 // account left lasts at most one run (and List hides it meanwhile).
 //
 // A NOT IN subquery on another table is portable as written: MySQL's

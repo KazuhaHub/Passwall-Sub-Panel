@@ -71,14 +71,20 @@ type identityAgg struct {
 	clientMS, lastMS int64
 }
 
-// windowDays is how many days the fetch window holds: a week, or the
-// sub-log retention when that is shorter — the rows before it are gone, and
-// a week-long window would read those days as days without fetches.
-func windowDays(retention int) int {
-	if retention > 0 && retention < domain.RiskWindowDays {
+// windowDays is how many days the fetch window holds: the configured
+// risk.window_days (a week by default), or the sub-log retention when that
+// is shorter — the rows before it are gone, and a longer window would read
+// those days as days without fetches. 0 (keep forever) leaves the configured
+// window.
+//
+// The retention applies here, where the log is read, and nowhere else: the
+// groups' min_days is bounded by the configured window (RiskPolicy.Bounded),
+// so a retention shorter than min_days still reads retention_short.
+func windowDays(retention, configured int) int {
+	if retention > 0 && retention < configured {
 		return retention
 	}
-	return domain.RiskWindowDays
+	return configured
 }
 
 // readWindow streams the fetch log from the first window day's first
@@ -95,7 +101,7 @@ func windowDays(retention int) int {
 // before, and every fetch of the window's last day — today's — fell out of
 // it. The scan starts at the day's real first instant (see dayStart).
 func (s *Service) readWindow(ctx context.Context, r *refresh) (*fetchWindow, error) {
-	w := &fetchWindow{days: windowDays(r.global.SubLogRetentionDays), users: map[int64]*userWindow{}}
+	w := &fetchWindow{days: windowDays(r.global.SubLogRetentionDays, r.rt.WindowDays), users: map[int64]*userWindow{}}
 	day0 := localNoon(r.now, -(w.days - 1), r.loc)
 	w.start = paneltz.DateString(day0, r.loc)
 
@@ -141,33 +147,31 @@ func (w *fetchWindow) add(row *domain.SubLog, day0 time.Time, loc *time.Location
 	ip := strings.TrimSpace(row.IP)
 
 	// A declared device id is the client; without one, the exact client
-	// string is. That errs toward linking: two people on the same app and
-	// version are one client here, which can hide a spread but never
-	// invents one.
-	key, kind := "u:"+row.UA, "ua"
-	if row.DeviceID != "" {
-		key, kind = "d:"+row.DeviceID, "hwid"
-	}
+	// string is (domain.SubLogIdentity, the one rule the live view's device
+	// inference uses too, so "one device" means the same in both). That
+	// errs toward linking: two people on the same app and version are one
+	// client here, which can hide a spread but never invents one.
+	key, kind := domain.SubLogIdentity(*row)
 	at := row.AccessedAt.UnixMilli()
 	agg := uw.identities[key]
 	if agg == nil {
 		agg = &identityAgg{kind: kind, lastMS: at}
-		if kind == "hwid" {
-			agg.hwid4 = truncateRunes(row.DeviceID, 4)
+		if kind == domain.SubLogIdentityHWID {
+			agg.hwid4 = truncateRunes(row.DeviceID, domain.DeviceIDShownLen)
 		} else {
 			agg.label = truncateRunes(row.UA, windowLabelRunes)
 		}
 		uw.identities[key] = agg
 	}
 	uw.fetches++
-	if kind == "hwid" {
+	if kind == domain.SubLogIdentityHWID {
 		uw.withHWID++
 	}
 	agg.days |= 1 << day
 	agg.lastMS = max(agg.lastMS, at)
 	// The newest label and client name, by fetch time; a later fetch that
 	// declared none (or was not recognised) does not erase them.
-	if kind == "hwid" && row.DeviceLabel != "" && (agg.label == "" || at >= agg.labelMS) {
+	if kind == domain.SubLogIdentityHWID && row.DeviceLabel != "" && (agg.label == "" || at >= agg.labelMS) {
 		agg.label, agg.labelMS = row.DeviceLabel, at
 	}
 	if row.ClientType != "" && (agg.client == "" || at >= agg.clientMS) {

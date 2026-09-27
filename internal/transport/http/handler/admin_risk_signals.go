@@ -75,7 +75,9 @@ type riskSignalDTO struct {
 	UpdatedAtMS int64           `json:"updated_at_ms"`
 }
 
-// List returns every account with at least one signal row, by user_id.
+// List returns every account with at least one signal row, by user_id — or,
+// with ?user_id=, that one account's item alone (the risk center's
+// single-account lookup), in the same shape.
 //
 // Every state is returned, not only flagged and suspect. Unknown, idle,
 // disabled and exempt all look like "nothing wrong" if the server filters,
@@ -90,6 +92,11 @@ func (h *AdminRiskSignalHandler) List(c *gin.Context) {
 		c.JSON(http.StatusServiceUnavailable, gin.H{
 			"error": "risk signals are not wired in this deployment",
 		})
+		return
+	}
+	only, err := queryID(c, "user_id")
+	if err != nil {
+		respondError(c, err)
 		return
 	}
 	ctx := c.Request.Context()
@@ -133,6 +140,9 @@ func (h *AdminRiskSignalHandler) List(c *gin.Context) {
 	byUser := map[int64]*riskUserRow{}
 	for _, s := range signals {
 		if _, known := rank[s.Kind]; !known {
+			continue
+		}
+		if only != nil && s.UserID != *only {
 			continue
 		}
 		row := byUser[s.UserID]

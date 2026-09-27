@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"encoding/json"
 	"net/http"
 	"strings"
 	"time"
@@ -105,6 +106,16 @@ type settingsDTO struct {
 	GeoAnomalyBanMaxCities       int  `json:"geo_anomaly_ban_max_cities"`
 	GeoAnomalyBanAfterPolls      int  `json:"geo_anomaly_ban_after_polls"`
 	GeoAnomalyBanDurationMinutes int  `json:"geo_anomaly_ban_duration_minutes"`
+	// The detector's fleet-wide runtime (the former constants). Global only;
+	// 0 means the shipped default, and the clamps are applied when read by
+	// domain.GeoRuntimeFromSettings — not validated on PUT, for the same
+	// reason as the policy knobs above.
+	GeoAnomalyFreshWindowSeconds  int `json:"geo_anomaly_fresh_window_seconds"`
+	GeoAnomalySharedExitMinUsers  int `json:"geo_anomaly_shared_exit_min_users"`
+	GeoAnomalyBanMaxPerPoll       int `json:"geo_anomaly_ban_max_per_poll"`
+	GeoAnomalyLiftMaxPerPoll      int `json:"geo_anomaly_lift_max_per_poll"`
+	GeoAnomalyInfraRefreshMinutes int `json:"geo_anomaly_infra_refresh_minutes"`
+	GeoAnomalyInfraHostTTLMinutes int `json:"geo_anomaly_infra_host_ttl_minutes"`
 	// Risk signals (observe only). Capture of the device a subscription
 	// client declares; global only, false = capture on.
 	RiskHWIDCaptureOff bool `json:"risk_hwid_capture_off"`
@@ -123,6 +134,50 @@ type settingsDTO struct {
 	RiskMaxDevices      int     `json:"risk_max_devices"`
 	RiskUsageRatio      float64 `json:"risk_usage_ratio"`
 	RiskUsageFloorGB    int     `json:"risk_usage_floor_gb"`
+	// login_country's two thresholds and usage_shift's three, per-group like
+	// the tolerances above and read by the same domain.RiskPolicyFromSettings
+	// (which raises usage_shift's to their floors of 7 and 2 days).
+	RiskLoginWarmupLogins int `json:"risk_login_warmup_logins"`
+	RiskLoginHoldDays     int `json:"risk_login_hold_days"`
+	RiskUsageWarmupDays   int `json:"risk_usage_warmup_days"`
+	RiskUsageFlagDays     int `json:"risk_usage_flag_days"`
+	RiskUsageSuspectDays  int `json:"risk_usage_suspect_days"`
+	// The risk worker's fleet-wide runtime (the former constants of the
+	// loop, the fetch window, the login read, the bell and usage_shift's
+	// series). Global only; 0 means the shipped default, and the clamps are
+	// applied when read by domain.RiskRuntimeFromSettings — not validated on
+	// PUT, for the same reason as the policy knobs.
+	RiskRefreshIntervalMinutes int `json:"risk_refresh_interval_minutes"`
+	RiskFirstDelayMinutes      int `json:"risk_first_delay_minutes"`
+	RiskAlertFreshnessHours    int `json:"risk_alert_freshness_hours"`
+	RiskWindowDays             int `json:"risk_window_days"`
+	RiskLoginLookbackDays      int `json:"risk_login_lookback_days"`
+	RiskUsageBaselineDays      int `json:"risk_usage_baseline_days"`
+	RiskUsageRecentDays        int `json:"risk_usage_recent_days"`
+	// connection_history's retention in days. Global; 0 means the shipped
+	// week (never "keep forever", unlike sub_log_retention_days), and the
+	// 1..90 clamp is applied when read.
+	RiskConnectionRetentionDays int `json:"risk_connection_retention_days"`
+	// flag_records' retention in days. Global; 0 means the shipped 90 days
+	// (never "keep forever"), and the 1..3650 clamp is applied when read.
+	RiskFlagRecordRetentionDays int `json:"risk_flag_record_retention_days"`
+	// The risk center's live view: its staleness warning (minutes, floored
+	// at two polls where read), the refresh cooldown (seconds) and how far
+	// back devices are inferred from the fetch log (hours). Global; 0 means
+	// the shipped 15 / 30 / 24, and the clamps are applied when read.
+	RiskLiveSnapshotStaleMinutes   int `json:"risk_live_snapshot_stale_minutes"`
+	RiskLiveRefreshCooldownSeconds int `json:"risk_live_refresh_cooldown_seconds"`
+	RiskDeviceInferHours           int `json:"risk_device_infer_hours"`
+	// Read-only, response only: for each of the 23 geo and risk runtime
+	// knobs above, the number the panel runs with and the shipped default
+	// an unset knob falls back to (ports.RuntimeEffective), keyed by the
+	// knob's json tag. The fields above echo what is STORED (0 = unset, and
+	// out-of-range values as typed); these say what that became, so the
+	// settings page shows "in effect" and a default placeholder without
+	// holding a copy of any default or clamp. settingsRequest shadows both
+	// keys, so a PUT never reads them, whatever the client sends back.
+	RuntimeEffective map[string]int `json:"runtime_effective"`
+	RuntimeDefaults  map[string]int `json:"runtime_defaults"`
 	// Geo IP (access-log region display, offline .mmdb).
 	GeoIPEnabled             bool   `json:"geo_ip_enabled"`
 	GeoIPDBFile              string `json:"geo_ip_db_file"`
@@ -200,6 +255,12 @@ type settingsRequest struct {
 	NodeTaskOfflineReconcileDays *int `json:"node_task_offline_reconcile_days"`
 	NodeTaskBackupRestoreDays    *int `json:"node_task_backup_restore_days"`
 	NodeTaskResultRetentionDays  *int `json:"node_task_result_retention_days"`
+	// The response-only runtime maps, shadowed as raw JSON so the embedded
+	// DTO's typed maps are never decoded. The SPA posts back the whole
+	// object it read, maps included; a tab loaded before a change to their
+	// shape must still save, and nothing in them is ever stored.
+	RuntimeEffective json.RawMessage `json:"runtime_effective"`
+	RuntimeDefaults  json.RawMessage `json:"runtime_defaults"`
 }
 
 func nodeTaskLifecyclePolicyFromSettings(s ports.UISettings) domain.NodeTaskLifecyclePolicy {
@@ -260,7 +321,13 @@ func (h *AdminSettingsHandler) Get(c *gin.Context) {
 // other (the drift that briefly broke the 2FA totp_enabled round-trip).
 func settingsToDTO(s ports.UISettings) settingsDTO {
 	policy := nodeTaskLifecyclePolicyFromSettings(s)
+	// From the same settings the DTO echoes: after a PUT that is what was
+	// just saved, so the page reads the new values in effect off the save.
+	effective, defaults := ports.RuntimeEffective(s)
 	return settingsDTO{
+		RuntimeEffective: effective,
+		RuntimeDefaults:  defaults,
+
 		LoginMode:                   s.LoginMode,
 		SiteTitle:                   s.SiteTitle,
 		AppTitle:                    s.AppTitle,
@@ -378,6 +445,36 @@ func settingsToDTO(s ports.UISettings) settingsDTO {
 		RiskMaxDevices:               s.RiskMaxDevices,
 		RiskUsageRatio:               s.RiskUsageRatio,
 		RiskUsageFloorGB:             s.RiskUsageFloorGB,
+		RiskLoginWarmupLogins:        s.RiskLoginWarmupLogins,
+		RiskLoginHoldDays:            s.RiskLoginHoldDays,
+		RiskUsageWarmupDays:          s.RiskUsageWarmupDays,
+		RiskUsageFlagDays:            s.RiskUsageFlagDays,
+		RiskUsageSuspectDays:         s.RiskUsageSuspectDays,
+
+		// The risk worker's fleet-wide runtime: the stored values, 0 = default.
+		RiskRefreshIntervalMinutes: s.RiskRefreshIntervalMinutes,
+		RiskFirstDelayMinutes:      s.RiskFirstDelayMinutes,
+		RiskAlertFreshnessHours:    s.RiskAlertFreshnessHours,
+		RiskWindowDays:             s.RiskWindowDays,
+		RiskLoginLookbackDays:      s.RiskLoginLookbackDays,
+		RiskUsageBaselineDays:      s.RiskUsageBaselineDays,
+		RiskUsageRecentDays:        s.RiskUsageRecentDays,
+		// connection_history's retention: the stored value, 0 = the week.
+		RiskConnectionRetentionDays: s.RiskConnectionRetentionDays,
+		// flag_records' retention: the stored value, 0 = 90 days.
+		RiskFlagRecordRetentionDays: s.RiskFlagRecordRetentionDays,
+		// The live view's knobs: the stored values, 0 = default.
+		RiskLiveSnapshotStaleMinutes:   s.RiskLiveSnapshotStaleMinutes,
+		RiskLiveRefreshCooldownSeconds: s.RiskLiveRefreshCooldownSeconds,
+		RiskDeviceInferHours:           s.RiskDeviceInferHours,
+
+		// The detector's fleet-wide runtime: the stored values, 0 = default.
+		GeoAnomalyFreshWindowSeconds:  s.GeoAnomalyFreshWindowSeconds,
+		GeoAnomalySharedExitMinUsers:  s.GeoAnomalySharedExitMinUsers,
+		GeoAnomalyBanMaxPerPoll:       s.GeoAnomalyBanMaxPerPoll,
+		GeoAnomalyLiftMaxPerPoll:      s.GeoAnomalyLiftMaxPerPoll,
+		GeoAnomalyInfraRefreshMinutes: s.GeoAnomalyInfraRefreshMinutes,
+		GeoAnomalyInfraHostTTLMinutes: s.GeoAnomalyInfraHostTTLMinutes,
 
 		NodeTaskOfflineReconcileDays: policy.OfflineReconcileDays,
 		NodeTaskBackupRestoreDays:    policy.BackupRestoreDays,
@@ -485,6 +582,12 @@ func (h *AdminSettingsHandler) Put(c *gin.Context) {
 		GeoAnomalyBanMaxCities:        req.GeoAnomalyBanMaxCities,
 		GeoAnomalyBanAfterPolls:       req.GeoAnomalyBanAfterPolls,
 		GeoAnomalyBanDurationMinutes:  req.GeoAnomalyBanDurationMinutes,
+		GeoAnomalyFreshWindowSeconds:  req.GeoAnomalyFreshWindowSeconds,
+		GeoAnomalySharedExitMinUsers:  req.GeoAnomalySharedExitMinUsers,
+		GeoAnomalyBanMaxPerPoll:       req.GeoAnomalyBanMaxPerPoll,
+		GeoAnomalyLiftMaxPerPoll:      req.GeoAnomalyLiftMaxPerPoll,
+		GeoAnomalyInfraRefreshMinutes: req.GeoAnomalyInfraRefreshMinutes,
+		GeoAnomalyInfraHostTTLMinutes: req.GeoAnomalyInfraHostTTLMinutes,
 		RiskHWIDCaptureOff:            req.RiskHWIDCaptureOff,
 		RiskSubSpreadOff:              req.RiskSubSpreadOff,
 		RiskDevicesOff:                req.RiskDevicesOff,
@@ -494,6 +597,26 @@ func (h *AdminSettingsHandler) Put(c *gin.Context) {
 		RiskMaxDevices:                req.RiskMaxDevices,
 		RiskUsageRatio:                req.RiskUsageRatio,
 		RiskUsageFloorGB:              req.RiskUsageFloorGB,
+		RiskLoginWarmupLogins:         req.RiskLoginWarmupLogins,
+		RiskLoginHoldDays:             req.RiskLoginHoldDays,
+		RiskRefreshIntervalMinutes:    req.RiskRefreshIntervalMinutes,
+		RiskFirstDelayMinutes:         req.RiskFirstDelayMinutes,
+		RiskAlertFreshnessHours:       req.RiskAlertFreshnessHours,
+		RiskWindowDays:                req.RiskWindowDays,
+		RiskLoginLookbackDays:         req.RiskLoginLookbackDays,
+		RiskUsageWarmupDays:           req.RiskUsageWarmupDays,
+		RiskUsageFlagDays:             req.RiskUsageFlagDays,
+		RiskUsageSuspectDays:          req.RiskUsageSuspectDays,
+		RiskUsageBaselineDays:         req.RiskUsageBaselineDays,
+		RiskUsageRecentDays:           req.RiskUsageRecentDays,
+		RiskConnectionRetentionDays:   req.RiskConnectionRetentionDays,
+		RiskFlagRecordRetentionDays:   req.RiskFlagRecordRetentionDays,
+
+		// The live view's knobs, stored as sent like the runtime above.
+		RiskLiveSnapshotStaleMinutes:   req.RiskLiveSnapshotStaleMinutes,
+		RiskLiveRefreshCooldownSeconds: req.RiskLiveRefreshCooldownSeconds,
+		RiskDeviceInferHours:           req.RiskDeviceInferHours,
+
 		GeoIPEnabled:                  req.GeoIPEnabled,
 		GeoIPDBFile:                   strings.TrimSpace(req.GeoIPDBFile),
 		GeoIPAutoUpdate:               req.GeoIPAutoUpdate,

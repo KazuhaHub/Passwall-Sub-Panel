@@ -64,11 +64,12 @@ func (s *Service) subSpread(ctx context.Context, r *refresh, w *fetchWindow, pl 
 //
 // The exclusions are v2's, in v2's order — internal ranges, the admin ignore
 // list, PSP's own nodes and relays, then shared exits — and one IPv6 /64 is
-// one source. "Shared" here means three or more accounts fetched from one
-// source within the window, which is why the fleet is classified together:
-// an office or a carrier gateway says nothing about where any one account
-// is. Only listed accounts are in the window, so a ghost account cannot tip
-// a household into an office.
+// one source. "Shared" here means enough accounts fetched from one source
+// within the window (geo_anomaly.shared_exit_min_users, three by default),
+// which is why the fleet is classified together: an office or a carrier
+// gateway says nothing about where any one account is. Only listed accounts
+// are in the window, so a ghost account cannot tip a household into an
+// office.
 //
 // The ignore list's invalid entries are skipped, not fatal. The Warn names
 // no entry: the traffic poll logs them every cycle, and this package logs no
@@ -89,11 +90,15 @@ func (s *Service) placeWindow(ctx context.Context, r *refresh, w *fetchWindow) p
 		// is the sample, and nothing here is about being connected now.
 		live[uid] = domain.UserLiveIPs{UserID: uid, IPs: ips, Fresh: ips}
 	}
+	// The shared-exit threshold is the fleet's own knob, the one the live
+	// check reads (geo_anomaly.shared_exit_min_users): the two checks must
+	// agree about what an exit is, or an address the live verdict sets aside
+	// would place a whole office in the fetch window.
 	addrs := domain.ClassifyAddresses(live, domain.AddressExclusions{
 		Internal:       true,
 		Ignore:         ignore,
 		Infra:          s.d.IsInfra,
-		SharedMinUsers: domain.SharedExitMinUsers,
+		SharedMinUsers: domain.GeoRuntimeFromSettings(r.global.GeoRuntimeSettings()).SharedExitMinUsers,
 	})
 
 	pl := placement{

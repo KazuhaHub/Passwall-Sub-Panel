@@ -63,6 +63,21 @@ func (f *fakeSubLogRepo) ScanSince(_ context.Context, since time.Time, _ int, fn
 	return fn(out)
 }
 
+func (f *fakeSubLogRepo) RecentForUsers(_ context.Context, userIDs []int64, since time.Time, limit int) ([]domain.SubLog, error) {
+	want := map[int64]bool{}
+	for _, id := range userIDs {
+		want[id] = true
+	}
+	var out []domain.SubLog
+	for i := len(f.rows) - 1; i >= 0; i-- {
+		r := f.rows[i]
+		if want[r.UserID] && !r.AccessedAt.Before(since) && (limit <= 0 || len(out) < limit) {
+			out = append(out, *r)
+		}
+	}
+	return out, nil
+}
+
 // THE DEVICE A CLIENT DECLARES IS FOR ADMINS, AND THE SUB-LOG LIST IS NOT.
 //
 // GET /api/admin/sub-logs is on the staff group, so operators read it too. A

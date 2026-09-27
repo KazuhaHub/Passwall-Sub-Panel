@@ -87,6 +87,34 @@ type Service struct {
 	// tests build &Service{} directly.
 	liveRefsMu sync.Mutex
 	liveRefs   map[domain.NodeRef]int64
+	// liveRefsAdvancedAt is when a poll last moved a reference forward
+	// (freshLiveIPs), under liveRefsMu with the map it describes. It is
+	// what holds a refresh off right after a poll (RefreshLiveConnections):
+	// the fact that matters is that these references are newer than any
+	// rescan since, which the snapshot on display cannot tell — a refresh
+	// that finished after the poll replaces the poll's snapshot, and a poll
+	// merges its references before it stores its snapshot. Zero until the
+	// first advance.
+	liveRefsAdvancedAt time.Time
+	// liveSnap is the latest live-connection snapshot (liveconn.go): what
+	// the risk center shows by default. Memory only, replaced whole by each
+	// newer reading and never mutated once stored, so readers share the
+	// pointer under the read lock. nil until the first poll.
+	liveSnapMu sync.RWMutex
+	liveSnap   *domain.LiveConnSnapshot
+	// geoJudgeMu makes one observation's streak load, judging and streak
+	// save a single step (judgeLiveIPs), so overlapping polls never judge
+	// the same accounts from the same stored state. Only that step: the
+	// panel reads and liveRefsMu's merge happen before it, and the history
+	// write after it.
+	geoJudgeMu sync.Mutex
+	// connRec is the connection history (connection_history) the poll
+	// records each judged sample into; late-bound, nil records nothing.
+	connRec ConnectionRecorder
+	// flagRec is the flag history (flag_records) the poll appends each
+	// change of geo attention and each geo_auto transition to; late-bound,
+	// nil records nothing. Append-only by type (FlagRecorder).
+	flagRec FlagRecorder
 	// configPusher is wired lazily (user.Service is the implementor and
 	// is created before traffic.Service). nil = skip floor refresh on poll.
 	configPusher UserConfigPusher
@@ -420,10 +448,12 @@ func (s *Service) PollOnce(ctx context.Context) (err error) {
 	// last_online, nor node traffic update at all. Fetch the shared clients ONCE here
 	// (reused by the shared-metering pass below) and add their panels to the set.
 	var sharedClients []*domain.PSPClient
+	// sharedErr travels on to Phase 1b, which must tell "the list failed"
+	// from "the list is empty": only the second is a live view of nobody.
+	var sharedErr error
 	if s.pspClient != nil {
-		var serr error
-		if sharedClients, serr = s.pspClient.ListAll(ctx); serr != nil {
-			log.Warn("traffic poll shared-client list failed; shared metering skipped this cycle", "err", serr)
+		if sharedClients, sharedErr = s.pspClient.ListAll(ctx); sharedErr != nil {
+			log.Warn("traffic poll shared-client list failed; shared metering skipped this cycle", "err", sharedErr)
 			sharedClients = nil
 		}
 	}
@@ -517,27 +547,13 @@ func (s *Service) PollOnce(ctx context.Context) (err error) {
 			// talking to, and the by-guid endpoint returns the whole panel
 			// in that one call regardless of user count.
 			//
-			// Optional capability, best reader first. The detail reader
-			// (3X-UI) keeps each address's node and last-seen time, which
-			// is what separates "connected now" from "still remembered";
-			// the plain reader (PSP-native nodes) has no timestamps, so its
-			// addresses all read as live. An adapter with neither (S-UI
-			// has no equivalent) is counted as unread — never as zero,
-			// which would read as "nobody is connected".
-			var live map[string][]string
-			var sightings map[string][]domain.LiveIPSighting
-			var liveErr error
-			readable := true
-			switch reader := c.(type) {
-			case ports.LiveIPDetailReader:
-				sightings, liveErr = reader.ListLiveClientIPDetails(ctx)
-			case ports.LiveIPReader:
-				live, liveErr = reader.ListLiveClientIPs(ctx)
-			default:
-				readable = false
-				liveErr = ports.ErrPanelCapabilityUnsupported
-			}
-			if readable && liveErr != nil {
+			// Best reader first, through the one reader the risk center's
+			// refresh uses too (readPanelLiveIPs, liveconn.go). An adapter
+			// with no live read (S-UI) answers
+			// ErrPanelCapabilityUnsupported and is counted as unread —
+			// never as zero, which would read as "nobody is connected".
+			live, sightings, liveErr := readPanelLiveIPs(ctx, c)
+			if liveReadFailed(liveErr) {
 				// Warn, do not fail the panel: the traffic numbers
 				// above are good and are what this poll exists for.
 				log.Warn("traffic poll: live client IPs unavailable for this panel",
@@ -583,12 +599,19 @@ func (s *Service) PollOnce(ctx context.Context) (err error) {
 	// it.
 	//
 	// pc outlives this phase on purpose: Phase 4 reads each user's
-	// suspension duration through the same per-group resolution.
+	// suspension duration through the same per-group resolution, and the
+	// lift cap from the same fleet-wide runtime. That runtime (freshness
+	// window, shared-exit threshold, per-poll caps) is global only, so it is
+	// resolved once here from the settings this poll loaded; a poll with no
+	// settings wired, or a failed load with nothing cached, runs on the
+	// shipped defaults (GeoRuntimeFromSettings reads 0 as unset).
 	pc := s.newGeoPolicyCache(ctx, users)
+	pc.rt = domain.GeoRuntimeFromSettings(pollCfg.GeoRuntimeSettings())
 	bans := s.observeLiveIPs(ctx, liveIPInput{
-		users:    users,
-		clients:  sharedClients,
-		panelIDs: panelsToFetch,
+		users:      users,
+		clients:    sharedClients,
+		clientsErr: sharedErr,
+		panelIDs:   panelsToFetch,
 		read: func(pid int64) domain.PanelLiveIPs {
 			d, ok := panelData[pid]
 			if !ok {
@@ -597,13 +620,9 @@ func (s *Service) PollOnce(ctx context.Context) (err error) {
 				// read exactly like a panel that answered "nobody online".
 				return domain.PanelLiveIPs{PanelID: pid, Err: errPanelNotRead}
 			}
-			byEmail := d.liveIPs
-			if d.liveSightings != nil {
-				// One flattening rule for both readers, so the window
-				// count cannot drift between them.
-				byEmail = domain.LiveIPsOf(d.liveSightings)
-			}
-			return domain.PanelLiveIPs{PanelID: pid, ByEmail: byEmail, Sightings: d.liveSightings, Err: d.liveErr}
+			// Shaped as the refresh shapes its own reads (liveAnswer), so
+			// the two cannot flatten a panel's answer differently.
+			return liveAnswer(pid, d.liveIPs, d.liveSightings, d.liveErr)
 		},
 		ignore:     pollCfg.GeoAnomalyIgnoreAddresses,
 		policies:   pc,

@@ -24,3 +24,18 @@ export function riskSignalsQuery(scope: QueryScope) {
 export function useRiskSignals(scope: QueryScope) {
   return useQuery(riskSignalsQuery(scope))
 }
+
+/** One account's signals, or null when it has none yet — read with
+ *  `?user_id=`, for geoAnomalyForUserQuery's reason. */
+export function riskSignalsForUserQuery(scope: QueryScope, userId: number) {
+  return queryOptions({
+    queryKey: riskSignalKeys.user(scope, userId),
+    queryFn: async ({ signal }): Promise<RiskUserRow | null> =>
+      (await listRiskSignals(signal, { user_id: userId })).find(r => r.user_id === userId) ?? null,
+    ...freshness(policies.riskSignals),
+  })
+}
+
+export function useRiskSignalsForUser(scope: QueryScope, userId: number) {
+  return useQuery(riskSignalsForUserQuery(scope, userId))
+}

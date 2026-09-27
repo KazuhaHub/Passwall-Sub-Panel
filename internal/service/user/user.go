@@ -90,6 +90,13 @@ type Service struct {
 	// funnels through SetServiceSuspendedAndSync — never blocks on SMTP.
 	mailer MailNotifier
 
+	// flagRec is the flag history (flag_records) the two ends of the
+	// automatic location suspension that happen outside the poll are
+	// recorded in: a staff resume, and another suspension written over it.
+	// Late-bound via SetFlagRecorder; nil records nothing. Append-only by
+	// type (FlagRecorder).
+	flagRec FlagRecorder
+
 	emergencyMu sync.Mutex
 
 	// resyncLocks serializes ResyncMembership PER USER. The same user can be resynced
@@ -378,6 +385,52 @@ type MailNotifier interface {
 // SetMailNotifier late-binds the mailer used for service suspend / restore emails
 // (same late-binding rationale as SetBackgroundRunner). nil = no email.
 func (s *Service) SetMailNotifier(m MailNotifier) { s.mailer = m }
+
+// FlagRecorder is the flag history (flag_records) as this service may use
+// it: Append, and nothing else, so no service decision can read the history
+// back and nothing here can rewrite what it says happened
+// (TestFlagRecorderIsAppendOnly). Implemented by sqlstore.FlagRecordRepo; a
+// local interface, like MailNotifier, keeps the service decoupled from the
+// store and nil-tolerant.
+//
+// This service records only what ends a geo_auto suspension outside the
+// poll: a staff resume through ResumeServiceAndSync (auto_lifted_admin), and
+// a suspension of another reason written over it by
+// SetServiceSuspendedAndSync — a staff pause, a human geo suspension, the
+// blocked-client policy (auto_replaced). The suspension itself and its expiry
+// are the traffic poll's to record: its conditional writes
+// (SuspendServiceIfClear, LiftServiceIfHeldSince) report back to it, and it
+// records them beside their audit rows.
+type FlagRecorder interface {
+	Append(ctx context.Context, recs []domain.FlagRecord) error
+}
+
+// SetFlagRecorder late-binds the flag history. nil = no records: the
+// transitions happen exactly as without it, so an empty geo_auto history is
+// the only symptom of forgetting the wiring (TestBuildWiresTheFlagRecorders).
+func (s *Service) SetFlagRecorder(r FlagRecorder) { s.flagRec = r }
+
+// recordFlag appends one record of a transition that has already committed.
+// Detached from the caller's cancellation and bounded on its own
+// (detachedFollowUp, flagRecordTimeout), like the rest of a committed
+// transition's follow-up: a staff member closing the tab right after the
+// write must not leave a transition the history never shows.
+//
+// Never fails the caller, whose transition stands: a refused write is
+// counted (psp_flag_record_write_errors_total) and logged by account and
+// event, never by params.
+func (s *Service) recordFlag(ctx context.Context, rec domain.FlagRecord) {
+	if s.flagRec == nil {
+		return
+	}
+	wctx, cancel := detachedFollowUp(ctx, flagRecordTimeout)
+	defer cancel()
+	if err := s.flagRec.Append(wctx, []domain.FlagRecord{rec}); err != nil {
+		metrics.FlagRecordWriteErrorsTotal.Inc()
+		log.Warn("flag records: could not record a geo_auto transition; the transition itself stands",
+			"user_id", rec.UserID, "event", rec.Event, "err", err)
+	}
+}
 
 // notifyServiceSuspended / notifyServiceRestored fire the service-axis email off
 // the caller's hot path (the traffic poll suspends through this service). nil
@@ -2443,9 +2496,20 @@ func (s *Service) SetServiceSuspendedAndSync(ctx context.Context, userID int64, 
 	if reason == domain.DisabledTrafficExceeded && domain.HardServiceHold(u.ServiceDisabledReason) {
 		return fmt.Errorf("%w: service is held (%s)", domain.ErrConflict, u.ServiceDisabledReason)
 	}
+	prior := u.ServiceDisabledReason
 	now := time.Now()
 	if err := s.updateServiceState(ctx, userID, reason, detail, &now); err != nil {
 		return err
+	}
+	// Written over the detector's own suspension, this ends it as surely as
+	// a resume, and hands the account to a hold no clock lifts: the flag
+	// history records geo_auto as replaced, and by what. Judged on the row
+	// read above; the same accepted race as the quota check (a geo_auto
+	// written or lifted between that read and this write) can misname or
+	// miss one record, and never changes the write.
+	if prior == domain.DisabledGeoAutoSuspend && reason != domain.DisabledGeoAutoSuspend {
+		s.recordFlag(ctx, domain.GeoAutoFlag(userID, domain.FlagAutoReplaced, "replaced",
+			map[string]any{"replaced_by": string(reason)}, now))
 	}
 	u.ServiceDisabledReason = reason
 	u.ServiceDisableDetail = detail
@@ -2490,6 +2554,9 @@ func (s *Service) SetServiceSuspendedAndSync(ctx context.Context, userID int64, 
 const (
 	transitionPushTimeout  = 2 * time.Minute
 	transitionQueueTimeout = 30 * time.Second
+	// flagRecordTimeout bounds the flag-history record of a committed
+	// transition (recordFlag): one small insert, bounded like the enqueue.
+	flagRecordTimeout = 30 * time.Second
 )
 
 // detachedFollowUp is the context for one step of that follow-up.
@@ -2642,8 +2709,15 @@ func (s *Service) ResumeServiceAndSync(ctx context.Context, userID int64) error 
 	// countable false-positive signal. The automatic lift never comes through
 	// here (LiftServiceIfHeldSince), and neither the quota rollover nor a
 	// profile edit resumes geo_auto, so every geo_auto seen here is an admin's.
+	//
+	// The flag history records it too (auto_lifted_admin), on the same
+	// pre-read and with the same accepted race: this write is unconditional
+	// and takes no per-user lock, so an expiry lift landing between the read
+	// and the write records its own auto_lifted_expiry as well, just as
+	// that one lift is then counted both lifted_expiry and lifted_admin.
 	if u.ServiceDisabledReason == domain.DisabledGeoAutoSuspend {
 		metrics.GeoAutoSuspensionTotal.With("lifted_admin").Inc()
+		s.recordFlag(ctx, domain.GeoAutoFlag(userID, domain.FlagAutoLiftedAdmin, "admin_resume", nil, time.Now()))
 	}
 	u.ServiceDisabledReason = domain.DisabledNone
 	u.ServiceDisableDetail = ""

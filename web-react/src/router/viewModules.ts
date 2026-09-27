@@ -17,6 +17,7 @@ export const viewLoaders = {
   '/admin/templates': () => import('@/views/admin/TemplatesView'),
   '/admin/sub-clients': () => import('@/views/admin/SubClientsView'),
   '/admin/logs': () => import('@/views/admin/LogsView'),
+  '/admin/risk': () => import('@/views/admin/risk/RiskCenterView'),
   '/admin/sync-tasks': () => import('@/views/admin/SyncTasksView'),
   '/admin/node-issues': () => import('@/views/admin/NodeIssuesView'),
   '/admin/diagnostics': () => import('@/views/admin/DiagnosticsView'),

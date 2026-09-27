@@ -130,6 +130,40 @@ export const policies = {
     note: 'Recomputed hourly server-side; revalidates on tab focus.',
   },
   /**
+   * The risk center's live view. Not polled, like the verdicts beside it:
+   * the snapshot lives in the server's memory and moves only when a traffic
+   * poll or an admin's refresh replaces it, and the refresh is rationed for
+   * the whole fleet — a timer here would re-read the same snapshot, never a
+   * newer one.
+   */
+  riskCenterLive: {
+    staleTime: 30 * SECOND,
+    gcTime: 5 * MINUTE,
+    refetchInterval: false,
+    note: 'In-memory snapshot; moves only per poll or refresh; revalidates on focus.',
+  },
+  /** Connection history: written once per poll, read on demand. */
+  riskCenterHistory: {
+    staleTime: 60 * SECOND,
+    gcTime: 5 * MINUTE,
+    refetchInterval: false,
+    note: 'Appended per traffic poll; paged and filtered on demand; focus revalidation only.',
+  },
+  /** Flag records: written only when an attention level changes. */
+  riskCenterFlags: {
+    staleTime: 60 * SECOND,
+    gcTime: 5 * MINUTE,
+    refetchInterval: false,
+    note: 'Appended on attention changes only; focus revalidation only.',
+  },
+  /** One account's record, as the risk center's lookup shows it. */
+  userDetail: {
+    staleTime: 15 * SECOND,
+    gcTime: 5 * MINUTE,
+    refetchInterval: false,
+    note: 'Keyed by user id; a users write invalidates it through userKeys.all.',
+  },
+  /**
    * The sync-task queue. NOT polled: it is a bounded list whose contents only
    * change when an operator acts or the retry loop runs, and an operator
    * watching it has an explicit Refresh. Polling it would also mean polling

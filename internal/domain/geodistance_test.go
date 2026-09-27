@@ -254,12 +254,25 @@ func TestNoStoredTypeHoldsACoordinate(t *testing.T) {
 		reflect.TypeFor[DevicesEvidence](),
 		reflect.TypeFor[UsageShiftEvidence](),
 		reflect.TypeFor[LoginCountryEvidence](),
+		// The live-connection snapshot is served to admins with an address
+		// beside every place, and the connection history stores the same
+		// shape: a coordinate there is a map pin per subscriber.
+		reflect.TypeFor[LiveConnection](),
+		reflect.TypeFor[LiveConnSnapshot](),
+		// connection_history keeps that shape for up to 90 days.
+		reflect.TypeFor[ConnectionRecord](),
+		// A flag record keeps a verdict's evidence for months, with no
+		// address and so no pin either.
+		reflect.TypeFor[FlagRecord](),
+		reflect.TypeFor[GeoFlagParams](),
+		// An inferred device is served beside the connection's address.
+		reflect.TypeFor[ConnDevice](),
 	} {
 		walk(root.Name(), root)
 	}
 	// Not vacuous: the walk reached the nested types a coordinate would
 	// most plausibly be added to.
-	for _, typ := range []reflect.Type{reflect.TypeFor[GeoSpot](), reflect.TypeFor[GeoSpread](), reflect.TypeFor[SubProvince]()} {
+	for _, typ := range []reflect.Type{reflect.TypeFor[GeoSpot](), reflect.TypeFor[GeoSpread](), reflect.TypeFor[SubProvince](), reflect.TypeFor[ConnPlace]()} {
 		if !seen[typ] {
 			t.Errorf("the walk never reached %s", typ)
 		}

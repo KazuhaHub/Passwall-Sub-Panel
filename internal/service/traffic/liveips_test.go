@@ -19,10 +19,13 @@ type stubGeo struct {
 	places    map[string]domain.GeoLocation
 	available bool
 	lookups   int
+	// asked is every address any Lookup was asked about, in call order.
+	asked []string
 }
 
 func (g *stubGeo) Lookup(_ context.Context, ips []string) map[string]domain.GeoLocation {
 	g.lookups++
+	g.asked = append(g.asked, ips...)
 	out := map[string]domain.GeoLocation{}
 	for _, ip := range ips {
 		if p, ok := g.places[ip]; ok {

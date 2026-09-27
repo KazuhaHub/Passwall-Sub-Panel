@@ -5,6 +5,7 @@ package sqlstore
 import (
 	"context"
 	"database/sql"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -12,6 +13,7 @@ import (
 	nodeprotocol "github.com/KazuhaHub/passwall-protocol/protocol"
 	"gorm.io/gorm"
 
+	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 )
 
@@ -708,7 +710,9 @@ func TestSettingsKV_RiskKeysRoundTrip(t *testing.T) {
 	}
 	if fresh.RiskSubSpreadOff || fresh.RiskDevicesOff || fresh.RiskUsageShiftOff ||
 		fresh.RiskLoginCountryOff || fresh.RiskHWIDCaptureOff || fresh.RiskMinDays != 0 ||
-		fresh.RiskMaxDevices != 0 || fresh.RiskUsageRatio != 0 || fresh.RiskUsageFloorGB != 0 {
+		fresh.RiskMaxDevices != 0 || fresh.RiskUsageRatio != 0 || fresh.RiskUsageFloorGB != 0 ||
+		fresh.RiskLoginWarmupLogins != 0 || fresh.RiskLoginHoldDays != 0 ||
+		fresh.RiskUsageWarmupDays != 0 || fresh.RiskUsageFlagDays != 0 || fresh.RiskUsageSuspectDays != 0 {
 		t.Fatalf("a fresh install must read every risk key as unset (signals on, capture on), got %+v", fresh)
 	}
 
@@ -722,6 +726,11 @@ func TestSettingsKV_RiskKeysRoundTrip(t *testing.T) {
 	in.RiskMaxDevices = 5
 	in.RiskUsageRatio = 2.5
 	in.RiskUsageFloorGB = 6
+	in.RiskLoginWarmupLogins = 7
+	in.RiskLoginHoldDays = 8
+	in.RiskUsageWarmupDays = 9
+	in.RiskUsageFlagDays = 10
+	in.RiskUsageSuspectDays = 11
 	if err := repo.Save(ctx, in); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
@@ -742,6 +751,11 @@ func TestSettingsKV_RiskKeysRoundTrip(t *testing.T) {
 		{"RiskMaxDevices", out.RiskMaxDevices, in.RiskMaxDevices},
 		{"RiskUsageRatio", out.RiskUsageRatio, in.RiskUsageRatio},
 		{"RiskUsageFloorGB", out.RiskUsageFloorGB, in.RiskUsageFloorGB},
+		{"RiskLoginWarmupLogins", out.RiskLoginWarmupLogins, in.RiskLoginWarmupLogins},
+		{"RiskLoginHoldDays", out.RiskLoginHoldDays, in.RiskLoginHoldDays},
+		{"RiskUsageWarmupDays", out.RiskUsageWarmupDays, in.RiskUsageWarmupDays},
+		{"RiskUsageFlagDays", out.RiskUsageFlagDays, in.RiskUsageFlagDays},
+		{"RiskUsageSuspectDays", out.RiskUsageSuspectDays, in.RiskUsageSuspectDays},
 	} {
 		if c.got != c.want {
 			t.Errorf("%s: got %v, want %v", c.name, c.got, c.want)
@@ -757,15 +771,20 @@ func TestSettingsKV_RiskKeysRoundTrip(t *testing.T) {
 		stored[r.Name] = r.Value
 	}
 	for name, want := range map[string]string{
-		"sub_spread_off":    "1",
-		"devices_off":       "1",
-		"usage_shift_off":   "1",
-		"login_country_off": "1",
-		"hwid_capture_off":  "1",
-		"min_days":          "4",
-		"max_devices":       "5",
-		"usage_ratio":       "2.5",
-		"usage_floor_gb":    "6",
+		"sub_spread_off":      "1",
+		"devices_off":         "1",
+		"usage_shift_off":     "1",
+		"login_country_off":   "1",
+		"hwid_capture_off":    "1",
+		"min_days":            "4",
+		"max_devices":         "5",
+		"usage_ratio":         "2.5",
+		"usage_floor_gb":      "6",
+		"login_warmup_logins": "7",
+		"login_hold_days":     "8",
+		"usage_warmup_days":   "9",
+		"usage_flag_days":     "10",
+		"usage_suspect_days":  "11",
 	} {
 		got, ok := stored[name]
 		if !ok {
@@ -775,5 +794,251 @@ func TestSettingsKV_RiskKeysRoundTrip(t *testing.T) {
 		if got != want {
 			t.Errorf("risk.%s stored as %q, want %q", name, got, want)
 		}
+	}
+}
+
+// TestSettingsKV_GeoRuntimeKeysRoundTrip: the six fleet-wide detector knobs —
+// the former constants — survive Save → Load under the exact
+// "geo_anomaly.<name>" keys the admin form and the scope refusal address them
+// by. Never configured, each reads as 0: domain.GeoRuntimeFromSettings owns
+// "0 means the shipped default", so the settings layer must not fill them in.
+func TestSettingsKV_GeoRuntimeKeysRoundTrip(t *testing.T) {
+	db, err := openTestDB(t)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	t.Cleanup(func() {
+		if sqlDB, _ := db.DB(); sqlDB != nil {
+			_ = sqlDB.Close()
+		}
+	})
+	if err := ensureTestSchema(db); err != nil {
+		t.Fatalf("schema: %v", err)
+	}
+	repo := newKVSettingsRepo(db)
+	ctx := context.Background()
+
+	fresh, err := repo.Load(ctx, ports.UISettings{})
+	if err != nil {
+		t.Fatalf("Load fresh: %v", err)
+	}
+	if fresh.GeoAnomalyFreshWindowSeconds != 0 || fresh.GeoAnomalySharedExitMinUsers != 0 ||
+		fresh.GeoAnomalyBanMaxPerPoll != 0 || fresh.GeoAnomalyLiftMaxPerPoll != 0 ||
+		fresh.GeoAnomalyInfraRefreshMinutes != 0 || fresh.GeoAnomalyInfraHostTTLMinutes != 0 {
+		t.Fatalf("a fresh install must read every runtime key as unset, got %+v", fresh.GeoRuntimeSettings())
+	}
+
+	in := fresh
+	in.GeoAnomalyFreshWindowSeconds = 300
+	in.GeoAnomalySharedExitMinUsers = 4
+	in.GeoAnomalyBanMaxPerPoll = 5
+	in.GeoAnomalyLiftMaxPerPoll = 6
+	in.GeoAnomalyInfraRefreshMinutes = 7
+	in.GeoAnomalyInfraHostTTLMinutes = 8
+	if err := repo.Save(ctx, in); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	out, err := repo.Load(ctx, ports.UISettings{})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got, want := out.GeoRuntimeSettings(), in.GeoRuntimeSettings(); got != want {
+		t.Fatalf("round trip = %+v, want %+v", got, want)
+	}
+
+	var rows []settingRow
+	if err := db.Where("type = ?", "geo_anomaly").Find(&rows).Error; err != nil {
+		t.Fatalf("read rows: %v", err)
+	}
+	stored := map[string]string{}
+	for _, r := range rows {
+		stored[r.Name] = r.Value
+	}
+	for name, want := range map[string]string{
+		"fresh_window_seconds":   "300",
+		"shared_exit_min_users":  "4",
+		"ban_max_per_poll":       "5",
+		"lift_max_per_poll":      "6",
+		"infra_refresh_minutes":  "7",
+		"infra_host_ttl_minutes": "8",
+	} {
+		got, ok := stored[name]
+		if !ok {
+			t.Errorf("no row stored under geo_anomaly.%s", name)
+			continue
+		}
+		if got != want {
+			t.Errorf("geo_anomaly.%s stored as %q, want %q", name, got, want)
+		}
+	}
+}
+
+// TestSettingsKV_RiskRuntimeKeysRoundTrip: the twelve fleet-wide risk knobs —
+// the worker's cadence, its first delay, the bell's freshness, the fetch
+// window, the login lookback and usage_shift's baseline and judged days, all
+// former constants, the connection history's and the flag records'
+// retentions, and the live view's staleness, refresh cooldown and device
+// window — survive Save → Load
+// under the exact "risk.<name>" keys the admin form and the scope refusal
+// address them by. Never configured, each reads as 0:
+// domain.RiskRuntimeFromSettings owns "0 means the shipped default", so the
+// settings layer must not fill them in.
+func TestSettingsKV_RiskRuntimeKeysRoundTrip(t *testing.T) {
+	db, err := openTestDB(t)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	t.Cleanup(func() {
+		if sqlDB, _ := db.DB(); sqlDB != nil {
+			_ = sqlDB.Close()
+		}
+	})
+	if err := ensureTestSchema(db); err != nil {
+		t.Fatalf("schema: %v", err)
+	}
+	repo := newKVSettingsRepo(db)
+	ctx := context.Background()
+
+	fresh, err := repo.Load(ctx, ports.UISettings{})
+	if err != nil {
+		t.Fatalf("Load fresh: %v", err)
+	}
+	if got := fresh.RiskRuntimeSettings(); got != (domain.RiskRuntimeSettings{}) {
+		t.Fatalf("a fresh install must read every risk runtime key as unset, got %+v", got)
+	}
+
+	in := fresh
+	in.RiskRefreshIntervalMinutes = 30
+	in.RiskFirstDelayMinutes = 4
+	in.RiskAlertFreshnessHours = 5
+	in.RiskWindowDays = 6
+	in.RiskLoginLookbackDays = 120
+	in.RiskUsageBaselineDays = 21
+	in.RiskUsageRecentDays = 5
+	in.RiskConnectionRetentionDays = 14
+	in.RiskFlagRecordRetentionDays = 400
+	in.RiskLiveSnapshotStaleMinutes = 45
+	in.RiskLiveRefreshCooldownSeconds = 90
+	in.RiskDeviceInferHours = 36
+	if err := repo.Save(ctx, in); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	out, err := repo.Load(ctx, ports.UISettings{})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got, want := out.RiskRuntimeSettings(), in.RiskRuntimeSettings(); got != want {
+		t.Fatalf("round trip = %+v, want %+v", got, want)
+	}
+
+	var rows []settingRow
+	if err := db.Where("type = ?", "risk").Find(&rows).Error; err != nil {
+		t.Fatalf("read rows: %v", err)
+	}
+	stored := map[string]string{}
+	for _, r := range rows {
+		stored[r.Name] = r.Value
+	}
+	for name, want := range map[string]string{
+		"refresh_interval_minutes":   "30",
+		"first_delay_minutes":        "4",
+		"alert_freshness_hours":      "5",
+		"window_days":                "6",
+		"login_lookback_days":        "120",
+		"usage_baseline_days":        "21",
+		"usage_recent_days":          "5",
+		"connection_retention_days":  "14",
+		"flag_record_retention_days": "400",
+
+		"live_snapshot_stale_minutes":   "45",
+		"live_refresh_cooldown_seconds": "90",
+		"device_infer_hours":            "36",
+	} {
+		got, ok := stored[name]
+		if !ok {
+			t.Errorf("no row stored under risk.%s", name)
+			continue
+		}
+		if got != want {
+			t.Errorf("risk.%s stored as %q, want %q", name, got, want)
+		}
+	}
+}
+
+// descriptorGuardedPrefixes are the settings families whose every UISettings
+// field must be persisted: the detector's knobs, the same prefixes the admin
+// settings drift guard watches (handler.guardedSettingPrefixes).
+var descriptorGuardedPrefixes = []string{"geo_anomaly_", "risk_"}
+
+// TestSettingsKV_EveryGuardedFieldHasADescriptor (guard): a UISettings field
+// with no descriptor is never stored, and nothing anywhere reports it — the
+// form saves, the PUT answers 200 with the request echoed, and the value is
+// gone on the next Load, so the knob reads as configured while the detector
+// runs its default. The per-family round trips above only cover the fields
+// they name; this one covers every field of the guarded families, including
+// the next one added.
+//
+// A descriptor holds its field only inside closures, so the pointer cannot be
+// compared directly. Instead each guarded field is set alone, and some
+// descriptor's marshalled value must change with it.
+//
+// Mutation: dropping one intField line for a geo_anomaly or risk knob turns
+// this red.
+func TestSettingsKV_EveryGuardedFieldHasADescriptor(t *testing.T) {
+	marshalAll := func(s *ports.UISettings) map[string]string {
+		out := map[string]string{}
+		for _, d := range settingDescriptors(s) {
+			v, err := d.Marshal()
+			if err != nil {
+				t.Fatalf("marshal %s.%s: %v", d.Type, d.Name, err)
+			}
+			out[d.Type+"."+d.Name] = v
+		}
+		return out
+	}
+	var zero ports.UISettings
+	base := marshalAll(&zero)
+
+	ut := reflect.TypeOf(ports.UISettings{})
+	guarded := 0
+	for i := 0; i < ut.NumField(); i++ {
+		f := ut.Field(i)
+		tag := strings.Split(f.Tag.Get("json"), ",")[0]
+		matched := false
+		for _, p := range descriptorGuardedPrefixes {
+			if strings.HasPrefix(tag, p) {
+				matched = true
+			}
+		}
+		if !matched {
+			continue
+		}
+		guarded++
+		var s ports.UISettings
+		fv := reflect.ValueOf(&s).Elem().Field(i)
+		switch fv.Kind() {
+		case reflect.Int:
+			fv.SetInt(7)
+		case reflect.Float64:
+			fv.SetFloat(1.5)
+		case reflect.Bool:
+			fv.SetBool(true)
+		case reflect.String:
+			fv.SetString("x")
+		default:
+			t.Fatalf("%s: kind %s is not handled by this guard; extend it", f.Name, fv.Kind())
+		}
+		changed := false
+		for k, v := range marshalAll(&s) {
+			if base[k] != v {
+				changed = true
+			}
+		}
+		if !changed {
+			t.Errorf("UISettings.%s (%q) has no settings descriptor: it is saved by the form and lost on the next Load", f.Name, tag)
+		}
+	}
+	if guarded == 0 {
+		t.Fatal("no guarded fields found in UISettings; the guard is pointed at nothing")
 	}
 }

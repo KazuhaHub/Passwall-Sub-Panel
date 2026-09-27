@@ -61,6 +61,21 @@ export interface GlobalAnnouncement {
   updated_at: string
 }
 
+/** The 23 geo and risk runtime knobs, by the json tag the server keys
+ *  runtime_effective / runtime_defaults with (ports.RuntimeEffective). */
+export type RuntimeKnob =
+  | 'geo_anomaly_fresh_window_seconds' | 'geo_anomaly_shared_exit_min_users'
+  | 'geo_anomaly_ban_max_per_poll' | 'geo_anomaly_lift_max_per_poll'
+  | 'geo_anomaly_infra_refresh_minutes' | 'geo_anomaly_infra_host_ttl_minutes'
+  | 'risk_refresh_interval_minutes' | 'risk_first_delay_minutes' | 'risk_alert_freshness_hours'
+  | 'risk_window_days' | 'risk_usage_baseline_days' | 'risk_usage_recent_days'
+  | 'risk_usage_warmup_days' | 'risk_usage_flag_days' | 'risk_usage_suspect_days'
+  | 'risk_login_warmup_logins' | 'risk_login_hold_days' | 'risk_login_lookback_days'
+  | 'risk_connection_retention_days' | 'risk_flag_record_retention_days'
+  | 'risk_live_snapshot_stale_minutes' | 'risk_live_refresh_cooldown_seconds' | 'risk_device_infer_hours'
+
+export type RuntimeKnobValues = Partial<Record<RuntimeKnob, number>>
+
 export interface UISettings {
   login_mode: LoginMode
   site_title: string
@@ -191,8 +206,8 @@ export interface UISettings {
   geo_anomaly_ban_duration_minutes: number
 
   // ---- Risk signals (observe only) ----
-  // Four signals beside concurrent locations, recomputed hourly; none of them
-  // acts on an account. The switches are NEGATIVE keys, so the zero value of
+  // Four signals beside concurrent locations, recomputed at the risk refresh
+  // interval (hourly by default); none of them acts on an account. The switches are NEGATIVE keys, so the zero value of
   // an install that never saved them is "on". A stored 0 in a number means
   // "the shipped default" — utils/riskSignals.riskPolicy mirrors how the
   // server resolves them. Every field is per-group overridable EXCEPT
@@ -214,6 +229,46 @@ export interface UISettings {
   /** Stops recording the x-hwid a subscription client declares. GLOBAL only;
    *  stored digests expire with the sub log. */
   risk_hwid_capture_off: boolean
+  // login_country's and usage_shift's thresholds, per-group like the
+  // tolerances above. 0 = the shipped default (3 logins, 7 days; 14, 4 and 2
+  // days); the server raises and bounds them (runtime_effective says to what).
+  risk_login_warmup_logins: number
+  risk_login_hold_days: number
+  risk_usage_warmup_days: number
+  risk_usage_flag_days: number
+  risk_usage_suspect_days: number
+
+  // ---- The detectors' fleet-wide runtime (GLOBAL only) ----
+  // What used to be constants in the poll, the enforcement, the infrastructure
+  // refresh, the risk worker and the bell, plus the risk center's retentions
+  // and live view. 0 = the shipped default; the server clamps a stored value
+  // when it reads it and never rejects one on save. The numbers in effect and
+  // the defaults come back in runtime_effective / runtime_defaults — the SPA
+  // keeps no copy of either.
+  geo_anomaly_fresh_window_seconds: number
+  geo_anomaly_shared_exit_min_users: number
+  geo_anomaly_ban_max_per_poll: number
+  geo_anomaly_lift_max_per_poll: number
+  geo_anomaly_infra_refresh_minutes: number
+  geo_anomaly_infra_host_ttl_minutes: number
+  risk_refresh_interval_minutes: number
+  risk_first_delay_minutes: number
+  risk_alert_freshness_hours: number
+  risk_window_days: number
+  risk_usage_baseline_days: number
+  risk_usage_recent_days: number
+  risk_login_lookback_days: number
+  risk_connection_retention_days: number
+  risk_flag_record_retention_days: number
+  risk_live_snapshot_stale_minutes: number
+  risk_live_refresh_cooldown_seconds: number
+  risk_device_infer_hours: number
+  /** Read-only (the PUT ignores them): for each runtime knob, the number the
+   *  panel runs with — the server's clamps, floors and bounds applied to what
+   *  is stored — and the shipped default an unset knob falls back to. Absent
+   *  from an older server, so every reader tolerates a missing map or key. */
+  runtime_effective?: RuntimeKnobValues
+  runtime_defaults?: RuntimeKnobValues
 
   // ---- IP geolocation (offline .mmdb region display in access logs) ----
   /** Master toggle. Off by default; resolution is fully offline against a

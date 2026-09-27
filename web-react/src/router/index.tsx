@@ -6,6 +6,7 @@ import { homeForRole } from './home'
 import { useAuthStore } from '@/stores/auth'
 import { panelPath } from '@/panelPath'
 import { viewLoaders } from './viewModules'
+import LogsRoute from './LogsRoute'
 
 const LoginView = lazy(() => import('@/views/LoginView'))
 const SsoCallbackView = lazy(() => import('@/views/SsoCallbackView'))
@@ -30,6 +31,7 @@ const RuleSetsView = lazy(viewLoaders['/admin/rules'])
 const TemplatesView = lazy(viewLoaders['/admin/templates'])
 const SubClientsView = lazy(viewLoaders['/admin/sub-clients'])
 const LogsView = lazy(viewLoaders['/admin/logs'])
+const RiskCenterView = lazy(viewLoaders['/admin/risk'])
 const SyncTasksView = lazy(viewLoaders['/admin/sync-tasks'])
 const NodeIssuesView = lazy(viewLoaders['/admin/node-issues'])
 const DiagnosticsView = lazy(viewLoaders['/admin/diagnostics'])
@@ -96,7 +98,10 @@ export const router = createBrowserRouter([
           { path: 'rules', element: <RuleSetsView /> },
           { path: 'templates', element: <TemplatesView /> },
           { path: 'sub-clients', element: <SubClientsView /> },
-          { path: 'logs', element: <LogsView /> },
+          // LogsRoute sends an admin's old ?tab=geo|risk links on to the risk
+          // center, where those two tabs now live.
+          { path: 'logs', element: <LogsRoute><LogsView /></LogsRoute> },
+          { path: 'risk', element: <RiskCenterView /> },
           { path: 'sync-tasks', element: <SyncTasksView /> },
           { path: 'node-issues', element: <NodeIssuesView /> },
           { path: 'diagnostics', element: <DiagnosticsView /> },

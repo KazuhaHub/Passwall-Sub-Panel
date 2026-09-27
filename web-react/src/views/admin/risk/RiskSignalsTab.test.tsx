@@ -209,6 +209,48 @@ describe('RiskSignalsTab rows', () => {
     expect(screen.queryByText('去过：广东')).not.toBeNull()
   })
 
+  it('usage title shows the series length', async () => {
+    // The series is baseline + judged days, both settings now: a 14 + 3
+    // series is 17 bars, and the title and caption say 17 and 3 — the days
+    // this verdict was judged on, never the shipped 35 and 7.
+    serve([user(1, 'alice', [
+      sig('usage_shift', 'flagged', {
+        code: 'sustained',
+        evidence: {
+          v: 1, end_date: '2026-09-24', series: new Array(17).fill(2 ** 30), history_days: 14,
+          median: 2 ** 30, ratio: 3, floor: 3 * 2 ** 30, thresholds: [1, 1, 1], over: [true, true, false],
+          over_days: 2, fleet_factors: [1, 1, 1],
+          baseline_days: 14, recent_days: 3, warmup_days: 7, flag_days: 2, suspect_days: 2,
+        },
+      }),
+    ])])
+    mount()
+
+    await screen.findByText('alice')
+    fireEvent.click(within(rowOf('alice')).getByRole('button', { name: '查看证据' }))
+
+    expect(await screen.findByText('最近 17 天每日用量（截至 2026-09-24）')).toBeTruthy()
+    expect(screen.getByText(/；最近 3 天超标 2 天$/)).toBeTruthy()
+  })
+
+  it('login counts name the hold days the verdict was judged with', async () => {
+    serve([user(1, 'alice', [
+      sig('login_country', 'flagged', {
+        code: 'known_countries',
+        evidence: {
+          v: 1, lookback_days: 30, hold_days: 3, warmup: 2, logins: 6, recent: 2, judged: 2,
+          skipped: { infra: 0, internal: 0, listed: 0, node_country: 0, unplaced: 0 }, known: ['CN'], events: [],
+        },
+      }),
+    ])])
+    mount()
+
+    await screen.findByText('alice')
+    fireEvent.click(within(rowOf('alice')).getByRole('button', { name: '查看证据' }))
+
+    expect(await screen.findByText(/^30 天内登录 6 次；最近 3 天 2 次，其中已判断 2 次；/)).toBeTruthy()
+  })
+
   it('opens the Geo tab from the concurrent-location chip', async () => {
     serve([user(1, 'alice', [sig('devices', 'clean')],
       { geo: { state: 'idle', flagged: true, tier: 'region', updated_at_ms: 1 } })])

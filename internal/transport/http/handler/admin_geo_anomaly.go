@@ -91,7 +91,8 @@ type geoAnomalyRow struct {
 	ServiceDisabledAtMS   int64  `json:"service_disabled_at_ms,omitempty"`
 }
 
-// List returns every judged user, newest first.
+// List returns every judged user, newest first — or, with ?user_id=, that
+// one account's row alone (the risk center's single-account lookup).
 //
 // Every state is returned, not only the flagged ones. "unknown", "exempt" and
 // "disabled" all look identical to "no flags" if a reader filters to flagged
@@ -107,6 +108,11 @@ func (h *AdminGeoAnomalyHandler) List(c *gin.Context) {
 		})
 		return
 	}
+	only, err := queryID(c, "user_id")
+	if err != nil {
+		respondError(c, err)
+		return
+	}
 	recs, err := h.records.List(c.Request.Context())
 	if err != nil {
 		// respondError, not err.Error(): the helper exists precisely to stop
@@ -116,6 +122,19 @@ func (h *AdminGeoAnomalyHandler) List(c *gin.Context) {
 		// of the codebase.
 		respondError(c, err)
 		return
+	}
+	if only != nil {
+		// Filtered BEFORE the rows are named below: each row costs one user
+		// read, and a single-account lookup must cost one, not one per
+		// judged account in the fleet. The store's read is the whole table
+		// either way (it is small: one row per client-holding account).
+		kept := recs[:0:0]
+		for _, r := range recs {
+			if r.UserID == *only {
+				kept = append(kept, r)
+			}
+		}
+		recs = kept
 	}
 
 	rows := make([]geoAnomalyRow, 0, len(recs))

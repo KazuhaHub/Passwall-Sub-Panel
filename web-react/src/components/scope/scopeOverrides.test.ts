@@ -158,8 +158,11 @@ describe('geo catalog', () => {
 describe('risk catalog', () => {
   const riskRows = () => SCOPE_KEYS.filter(k => k.cat === 'risk')
 
-  it('has exactly the eight overridable risk keys, in order', () => {
-    // The mirror of ports.OverridableScopeKeys' risk block.
+  it('has exactly the thirteen overridable risk keys, in order', () => {
+    // The mirror of ports.OverridableScopeKeys' risk block: the four
+    // switches, the four tolerances, then usage_shift's three thresholds and
+    // login_country's two, which became per-group settings with the risk
+    // center.
     expect(SCOPE_CATEGORIES.find(c => c.id === 'risk')).toEqual({ id: 'risk', labelKey: 'cat_risk', def: '风险信号（只提示）' })
     expect(riskRows().map(k => k.key)).toEqual([
       'risk.sub_spread_off',
@@ -170,8 +173,14 @@ describe('risk catalog', () => {
       'risk.max_devices',
       'risk.usage_ratio',
       'risk.usage_floor_gb',
+      'risk.usage_warmup_days',
+      'risk.usage_flag_days',
+      'risk.usage_suspect_days',
+      'risk.login_warmup_logins',
+      'risk.login_hold_days',
     ])
-    expect(riskRows().map(k => k.kind)).toEqual(['bool', 'bool', 'bool', 'bool', 'int', 'int', 'float', 'int'])
+    expect(riskRows().map(k => k.kind)).toEqual(
+      ['bool', 'bool', 'bool', 'bool', 'int', 'int', 'float', 'int', 'int', 'int', 'int', 'int', 'int'])
   })
 
   it('never offers hwid capture per group', () => {
@@ -182,11 +191,20 @@ describe('risk catalog', () => {
   })
 
   it('names the shipped default of every numeric row, and writes what it shows', () => {
-    // domain.DefaultRiskPolicy: a stored 0 means "never configured", which is
-    // 3 for each of them — never "no device allowed" or "a zero-byte floor".
-    for (const k of riskRows().filter(k => k.kind !== 'bool')) {
-      expect(k.unsetValue, k.key).toBe('3')
-    }
+    // domain.DefaultRiskPolicy: a stored 0 means "never configured" — never
+    // "no device allowed", "a zero-byte floor" or "flag on no days".
+    const unset = Object.fromEntries(riskRows().filter(k => k.kind !== 'bool').map(k => [k.key, k.unsetValue]))
+    expect(unset).toEqual({
+      'risk.min_days': '3',
+      'risk.max_devices': '3',
+      'risk.usage_ratio': '3',
+      'risk.usage_floor_gb': '3',
+      'risk.usage_warmup_days': '14',
+      'risk.usage_flag_days': '4',
+      'risk.usage_suspect_days': '2',
+      'risk.login_warmup_logins': '3',
+      'risk.login_hold_days': '7',
+    })
     for (const k of riskRows()) {
       expect(`${k.type}.${k.name}`).toBe(k.key)
       expect(k.field).toBe(`risk_${k.name}`)

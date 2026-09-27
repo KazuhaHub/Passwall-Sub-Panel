@@ -650,3 +650,139 @@ func TestAddressExclusion_AgreesWithClassifyAddresses(t *testing.T) {
 		t.Fatalf("checked %d cases, want %d", checked, len(rules)*len(addrs))
 	}
 }
+
+// The freshness window is a setting now (geo_anomaly.fresh_window_seconds),
+// so the judgement must use the window it is handed. A sighting 200 s behind
+// its node's newest scan is live under a 300 s window and memory under the
+// shipped 120 s one — on the same answer, against the same reference.
+func TestFreshLiveIPsWithin_UsesTheGivenWindow(t *testing.T) {
+	panels := []PanelLiveIPs{detailPanel(1, map[string][]LiveIPSighting{
+		"u7@x": {sighting("1.1.1.1", "n1", 1000), sighting("2.2.2.2", "n1", 800)},
+	})}
+	prev := map[NodeRef]int64{{PanelID: 1, Node: "n1"}: 900} // the node advanced
+
+	wide, _ := FreshLiveIPsWithin(panels, prev, 300)
+	if got := freshOf(t, wide, 1)["u7@x"]; !reflect.DeepEqual(got, []string{"1.1.1.1", "2.2.2.2"}) {
+		t.Fatalf("window 300: fresh = %v, want both — 800 is 200 s behind the node's newest", got)
+	}
+	narrow, _ := FreshLiveIPsWithin(panels, prev, 120)
+	if got := freshOf(t, narrow, 1)["u7@x"]; !reflect.DeepEqual(got, []string{"1.1.1.1"}) {
+		t.Fatalf("window 120: fresh = %v, want only the newest — 800 is memory under 120 s", got)
+	}
+}
+
+// (guard) FreshLiveIPs is the shipped default window, nothing wider and
+// nothing narrower: 110 s behind is live, 130 s behind is not. Every test
+// above that calls it pins the behaviour at 120 s through it.
+//
+// Mutation: the wrapper passing 0 (or any window other than
+// LiveIPFreshWindowSeconds) turns this red.
+func TestFreshLiveIPs_IsWithinTheDefaultWindow(t *testing.T) {
+	out, _ := FreshLiveIPs([]PanelLiveIPs{detailPanel(1, map[string][]LiveIPSighting{
+		"u7@x": {sighting("1.1.1.1", "n1", 1000), sighting("2.2.2.2", "n1", 890), sighting("3.3.3.3", "n1", 870)},
+	})}, nil)
+	if got := freshOf(t, out, 1)["u7@x"]; !reflect.DeepEqual(got, []string{"1.1.1.1", "2.2.2.2"}) {
+		t.Fatalf("fresh = %v, want 110 s behind kept and 130 s behind dropped (the 120 s default)", got)
+	}
+}
+
+// The live-connection view lists every source with the rule that set it
+// aside, so the reason has to be kept per SOURCE, not only counted per rule.
+// Every rule is named, keyed by the source it removed — an IPv6 /64 once,
+// however many of its addresses were live — and a kept source has no entry,
+// so "absent" and "judged" are the same statement. The names and the counts
+// are one decision, never two that could disagree.
+func TestClassifyAddresses_NamesTheReasonPerExcludedSource(t *testing.T) {
+	list, _ := ParseGeoIgnoreList("198.51.100.7")
+	relay := netip.MustParseAddr("203.0.113.9")
+	got := ClassifyAddresses(map[int64]UserLiveIPs{
+		1: live(1, "10.0.0.1", "198.51.100.7", "203.0.113.9", "192.0.2.50",
+			"8.8.8.8", "2001:db8:1:2::5", "2001:db8:1:2::9", "fd00::1", "fd00::2"),
+		2: live(2, "192.0.2.50"),
+		3: live(3, "192.0.2.50", "9.9.9.9"),
+		4: live(4),
+	}, AddressExclusions{
+		Internal:       true,
+		Ignore:         list,
+		Infra:          func(a netip.Addr) bool { return a == relay },
+		SharedMinUsers: SharedExitMinUsers,
+	})
+
+	want := map[string]string{
+		"10.0.0.1":     AddressExcludedInternal,
+		"fd00::/64":    AddressExcludedInternal,
+		"198.51.100.7": AddressExcludedListed,
+		"203.0.113.9":  AddressExcludedInfra,
+		"192.0.2.50":   AddressExcludedShared,
+	}
+	if !reflect.DeepEqual(got[1].ExcludedBy, want) {
+		t.Fatalf("user 1 ExcludedBy = %v, want %v — kept sources (8.8.8.8, 2001:db8:1:2::/64) must have no entry", got[1].ExcludedBy, want)
+	}
+	if n := got[1].Excluded.Total(); n != len(got[1].ExcludedBy) {
+		t.Fatalf("user 1 counts %d excluded sources but names %d", n, len(got[1].ExcludedBy))
+	}
+	if got := got[3].ExcludedBy; !reflect.DeepEqual(got, map[string]string{"192.0.2.50": AddressExcludedShared}) {
+		t.Fatalf("user 3 ExcludedBy = %v, want only the shared exit named", got)
+	}
+	if n := len(got[4].ExcludedBy); n != 0 {
+		t.Fatalf("idle user ExcludedBy has %d entries, want none", n)
+	}
+}
+
+// The live-connection snapshot lists each live address on the node that
+// reported it, with the time the node last saw it. FreshLiveIPsWithin
+// already decides which sightings are live; it keeps those sightings
+// themselves, not only their flattened addresses, under exactly the rule
+// Fresh is decided by — so the snapshot can never list an address the
+// detector judged stale, or miss one it judged live.
+func TestFreshLiveIPsWithin_KeepsTheFreshSightings(t *testing.T) {
+	timed := detailPanel(1, map[string][]LiveIPSighting{
+		"u7@x": {
+			sighting(" 2.2.2.2 ", "n1", 950),
+			sighting("1.1.1.1", "n1", 1000),
+			sighting("3.3.3.3", "n1", 700), // 300 s behind: memory
+			sighting("4.4.4.4", "n2", 0),   // no timestamp: live
+			sighting("  ", "n1", 1000),     // nothing to list
+		},
+		"u8@x": {sighting("5.5.5.5", "n1", 600)}, // stale: no entry at all
+		"":     {sighting("6.6.6.6", "n1", 1000)},
+	})
+	frozen := detailPanel(2, map[string][]LiveIPSighting{"u7@x": {sighting("7.7.7.7", "n1", 500)}})
+	plain := PanelLiveIPs{PanelID: 3, ByEmail: map[string][]string{"u7@x": {"8.8.8.8"}}}
+	unread := detailPanel(4, map[string][]LiveIPSighting{"u7@x": {sighting("9.9.9.9", "n1", 1000)}})
+	unread.Err = errors.New("timeout")
+	prev := map[NodeRef]int64{{PanelID: 1, Node: "n1"}: 900, {PanelID: 2, Node: "n1"}: 500}
+
+	out, _ := FreshLiveIPsWithin([]PanelLiveIPs{timed, frozen, plain, unread}, prev, 120)
+
+	want := map[string][]LiveIPSighting{"u7@x": {
+		sighting("1.1.1.1", "n1", 1000),
+		sighting("2.2.2.2", "n1", 950),
+		sighting("4.4.4.4", "n2", 0),
+	}}
+	if got := out[0].FreshSightings; !reflect.DeepEqual(got, want) {
+		t.Fatalf("FreshSightings = %v, want %v (trimmed, sorted by address)", got, want)
+	}
+	// One rule: the sightings' distinct addresses are Fresh, email by email.
+	for email, list := range out[0].FreshSightings {
+		set := map[string]struct{}{}
+		for _, s := range list {
+			set[s.IP] = struct{}{}
+		}
+		if ips := sortedKeys(set); !reflect.DeepEqual(ips, out[0].Fresh[email]) {
+			t.Fatalf("%s: sightings %v disagree with Fresh %v", email, ips, out[0].Fresh[email])
+		}
+	}
+	if len(out[0].FreshSightings) != len(out[0].Fresh) {
+		t.Fatalf("FreshSightings has %d emails, Fresh %d", len(out[0].FreshSightings), len(out[0].Fresh))
+	}
+	if got := out[1].FreshSightings; got == nil || len(got) != 0 {
+		t.Fatalf("frozen node: FreshSightings = %#v, want a non-nil empty map (computed, nobody live)", got)
+	}
+	if out[2].FreshSightings != nil {
+		t.Fatalf("plain reader: FreshSightings = %v, want nil — it has no sightings to keep", out[2].FreshSightings)
+	}
+	if out[3].FreshSightings != nil {
+		t.Fatalf("unread panel: FreshSightings = %v, want nil", out[3].FreshSightings)
+	}
+}

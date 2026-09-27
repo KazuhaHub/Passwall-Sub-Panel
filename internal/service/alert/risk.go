@@ -25,8 +25,9 @@ type RiskFlagCounter interface {
 // One entry for the four kinds rather than one per kind: the bell's job is
 // "look at the risk tab", and the tab says which signal and why.
 //
-// Bounded by geoAlertFreshness, for the reason that bound exists. The worker
-// rewrites every row hourly, so a flag stays in the window while it is still
+// Bounded by freshness (see bellFreshness), for the reason that bound
+// exists. The worker rewrites every row once per refresh, and the freshness
+// is at least two refreshes, so a flag stays in the window while it is still
 // being judged; what falls out is a row the worker stopped rewriting — a
 // dead loop, a kind skipped for days — which is history, and the tab's
 // "last computed" column is where it shows.
@@ -38,11 +39,11 @@ type RiskFlagCounter interface {
 // A warning, admin-only (Type.AdminOnly), nil-tolerant, and a failing count
 // is logged and skipped like every other source here, never blanking the
 // feed.
-func (s *Service) riskAlerts(ctx context.Context) []Alert {
+func (s *Service) riskAlerts(ctx context.Context, freshness time.Duration) []Alert {
 	if s.d.RiskFlags == nil {
 		return nil
 	}
-	n, err := s.d.RiskFlags.CountFlaggedUsers(ctx, s.now().Add(-geoAlertFreshness))
+	n, err := s.d.RiskFlags.CountFlaggedUsers(ctx, s.now().Add(-freshness))
 	if err != nil {
 		log.Warn("alert: count risk-flagged users", "err", err)
 		return nil

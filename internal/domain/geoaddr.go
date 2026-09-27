@@ -18,17 +18,25 @@ import (
 // operator acts on.
 
 const (
-	// LiveIPFreshWindowSeconds is how far behind its node's newest scan a
-	// sighting may be and still count as live. 3X-UI rescans every 10
-	// seconds and restamps every address whose stream is still open, so a
-	// live address is never more than one scan behind; 120 is 12 scans of
+	// LiveIPFreshWindowSeconds is the shipped default of
+	// geo_anomaly.fresh_window_seconds: how far behind its node's newest
+	// scan a sighting may be and still count as live. 3X-UI rescans every
+	// 10 seconds and restamps every address whose stream is still open, so
+	// a live address is never more than one scan behind; 120 is 12 scans of
 	// slack for a busy or briefly stalled job. Compared on the panel's own
-	// clock only (see LiveIPSighting).
+	// clock only (see LiveIPSighting). A setting because a forked or
+	// patched upstream can scan on another cadence; clamped to
+	// LiveIPFreshWindowMinSeconds..LiveIPFreshWindowMaxSeconds when read
+	// (GeoRuntimeFromSettings).
 	LiveIPFreshWindowSeconds = 120
-	// SharedExitMinUsers is how many distinct accounts must hold one
-	// source at the same moment before it reads as a shared exit (a
-	// campus, a carrier NAT, an office) rather than a place. Two accounts
-	// on one address is a household; three is infrastructure.
+	// SharedExitMinUsers is the shipped default of
+	// geo_anomaly.shared_exit_min_users: how many distinct accounts must
+	// hold one source at the same moment before it reads as a shared exit
+	// (a campus, a carrier NAT, an office) rather than a place. Two
+	// accounts on one address is a household; three is infrastructure. A
+	// setting because a family-plan fleet may call two an exit, and one
+	// knob serves both the live check and the risk worker's fetch window;
+	// clamped to SharedExitMinUsersFloor..SharedExitMinUsersMax when read.
 	SharedExitMinUsers = 3
 	// GeoIgnoreListMaxEntries bounds the admin ignore list, which
 	// Contains scans linearly for every kept source on every poll.
@@ -188,6 +196,15 @@ type UserAddresses struct {
 	// Kept is sorted by Key.
 	Kept     []SourceAddr
 	Excluded GeoExcluded
+	// ExcludedBy names the rule that set each excluded source aside, keyed
+	// by SourceAddr.Key: AddressExcludedInternal, AddressExcludedListed,
+	// AddressExcludedInfra or AddressExcludedShared. A kept source has no
+	// entry; nil when nothing was excluded. Excluded only counts per rule,
+	// which is all a verdict needs; the live-connection view lists each
+	// source with its reason, and the shared-exit reason in particular can
+	// only be decided here, over the whole fleet at once (AddressExclusion
+	// cannot see it).
+	ExcludedBy map[string]string
 	// Stale is how many window addresses were not live at poll time.
 	Stale int
 }
@@ -229,7 +246,7 @@ func SourceKey(ip string) (key string, addr netip.Addr, ok bool) {
 //     trusts the data once, as v1 always did);
 //   - a sighting is fresh when it has no timestamp (nothing to judge — read
 //     as live, the v1 behaviour and all a PSP-native node offers), or its
-//     node advanced and it is within LiveIPFreshWindowSeconds of ref.
+//     node advanced and it is within the freshness window of ref.
 //
 // A node nobody is streaming through stops being rescanned, so its frozen
 // batch keeps the same ref poll after poll and reads entirely stale — which
@@ -241,11 +258,27 @@ func SourceKey(ip string) (key string, addr netip.Addr, ok bool) {
 //
 // An unread panel passes through with Fresh nil and contributes no
 // reference. A plain-reader panel (Sightings nil) gets Fresh = ByEmail.
+// FreshSightings is Fresh with each live sighting's node and time kept, for
+// a timestamped panel only (nil on a plain-reader or unread one).
+//
+// FreshLiveIPs judges with the shipped window, LiveIPFreshWindowSeconds.
+// The poll judges with the configured one, through FreshLiveIPsWithin.
 func FreshLiveIPs(panels []PanelLiveIPs, prev map[NodeRef]int64) ([]PanelLiveIPs, map[NodeRef]int64) {
+	return FreshLiveIPsWithin(panels, prev, LiveIPFreshWindowSeconds)
+}
+
+// FreshLiveIPsWithin is FreshLiveIPs with the freshness window given in
+// seconds: geo_anomaly.fresh_window_seconds, as GeoRuntimeFromSettings
+// sanitised it. The window is used as given and never defaulted here — the
+// caller hands in a sanitised value, and a smaller one only marks fewer
+// addresses live, the direction that accuses nobody.
+func FreshLiveIPsWithin(panels []PanelLiveIPs, prev map[NodeRef]int64, windowSeconds int) ([]PanelLiveIPs, map[NodeRef]int64) {
+	window := int64(windowSeconds)
 	out := make([]PanelLiveIPs, len(panels))
 	next := map[NodeRef]int64{}
 	for i, p := range panels {
 		out[i] = p
+		out[i].FreshSightings = nil
 		if p.Err != nil {
 			out[i].Fresh = nil
 			continue
@@ -278,27 +311,52 @@ func FreshLiveIPs(panels []PanelLiveIPs, prev map[NodeRef]int64) ([]PanelLiveIPs
 		// Non-nil even when empty: "computed, nobody is live" must not read
 		// as "not computed", which the aggregator would fill from ByEmail.
 		fresh := make(map[string][]string, len(p.Sightings))
+		// The same decision, with each live sighting's node and time kept
+		// for the live-connection view. Filled in the one loop that decides
+		// Fresh, so the two can never disagree about who is live.
+		freshSightings := make(map[string][]LiveIPSighting, len(p.Sightings))
 		for email, list := range p.Sightings {
 			if email == "" {
 				continue
 			}
 			set := map[string]struct{}{}
+			var kept []LiveIPSighting
 			for _, s := range list {
 				ip := strings.TrimSpace(s.IP)
 				if ip == "" {
 					continue
 				}
-				if s.SeenAt <= 0 || (advanced[s.Node] && s.SeenAt >= ref[s.Node]-LiveIPFreshWindowSeconds) {
+				if s.SeenAt <= 0 || (advanced[s.Node] && s.SeenAt >= ref[s.Node]-window) {
 					set[ip] = struct{}{}
+					kept = append(kept, LiveIPSighting{IP: ip, Node: s.Node, SeenAt: s.SeenAt})
 				}
 			}
 			if len(set) > 0 {
 				fresh[email] = sortedKeys(set)
+				sortSightings(kept)
+				freshSightings[email] = kept
 			}
 		}
 		out[i].Fresh = fresh
+		out[i].FreshSightings = freshSightings
 	}
 	return out, next
+}
+
+// sortSightings orders one email's sightings by address, then node, then
+// time, so a reader comparing two snapshots is not reading the adapter's
+// map order.
+func sortSightings(list []LiveIPSighting) {
+	sort.Slice(list, func(i, j int) bool {
+		a, b := list[i], list[j]
+		if a.IP != b.IP {
+			return a.IP < b.IP
+		}
+		if a.Node != b.Node {
+			return a.Node < b.Node
+		}
+		return a.SeenAt < b.SeenAt
+	})
 }
 
 // ClassifyAddresses applies the exclusions to every user's LIVE addresses
@@ -351,18 +409,31 @@ func ClassifyAddresses(users map[int64]UserLiveIPs, ex AddressExclusions) map[in
 			Stale:  max(0, len(u.IPs)-len(u.Fresh)),
 		}
 		for key, m := range perUser[uid] {
+			var reason string
 			switch {
 			case ex.Internal && m.any(isInternalAddr):
 				row.Excluded.Internal++
+				reason = AddressExcludedInternal
 			case m.any(ex.Ignore.Contains):
 				row.Excluded.Listed++
+				reason = AddressExcludedListed
 			case ex.Infra != nil && m.any(ex.Infra):
 				row.Excluded.Infra++
+				reason = AddressExcludedInfra
 			case ex.SharedMinUsers > 0 && holders[key] >= ex.SharedMinUsers:
 				row.Excluded.Shared++
+				reason = AddressExcludedShared
 			default:
 				row.Kept = append(row.Kept, m.source(key))
+				continue
 			}
+			// Named in the same branch that counted it, so the per-source
+			// reasons and the per-rule counts are one decision and cannot
+			// disagree.
+			if row.ExcludedBy == nil {
+				row.ExcludedBy = map[string]string{}
+			}
+			row.ExcludedBy[key] = reason
 		}
 		sort.Slice(row.Kept, func(i, j int) bool { return row.Kept[i].Key < row.Kept[j].Key })
 		out[uid] = row
@@ -424,13 +495,16 @@ func isInternalAddr(a netip.Addr) bool {
 		a.IsUnspecified()
 }
 
-// The single-address exclusion reasons AddressExclusion names. The first
-// three are ClassifyAddresses' own rules, spelled as its GeoExcluded
-// counters are; the fourth is an address no rule can read.
+// The exclusion reasons, spelled as the GeoExcluded counters are. The first
+// four are ClassifyAddresses' own rules and the values of
+// UserAddresses.ExcludedBy; AddressExclusion names the first three (never
+// shared, a question one address on its own does not pose) and
+// AddressUnparseable, an address no rule can read.
 const (
 	AddressExcludedInternal = "internal"
 	AddressExcludedListed   = "listed"
 	AddressExcludedInfra    = "infra"
+	AddressExcludedShared   = "shared"
 	AddressUnparseable      = "unparseable"
 )
 

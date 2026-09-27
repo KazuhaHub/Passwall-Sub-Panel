@@ -86,6 +86,12 @@ type Deps struct {
 	// risk_signals entry — the same store as RiskSignals, a separate field
 	// for the reason GeoFlags is one. Optional: absent, no such entry.
 	RiskFlags alert.RiskFlagCounter
+	// RiskCenter is the risk center's read side (风控中心): the live
+	// connections and their refresh, the connection history, the flag
+	// records. An interface, so a deployment that leaves it out passes a
+	// true nil and its routes answer 503 rather than an empty list;
+	// TestBuildWiresTheRiskCenter guards that Build does not.
+	RiskCenter handler.RiskCenterService
 	// DeviceHasher keys the device a subscription client declares (x-hwid)
 	// into the per-account digest sub_logs keeps. Nil disables capture: /sub
 	// serves exactly as before and every fetch logs as anonymous. Built by
@@ -261,6 +267,7 @@ func NewRouter(d Deps) stdhttp.Handler {
 	// The risk signals, with each account's geo verdict beside them, read
 	// from the same rows the Geo tab lists rather than a second copy.
 	riskSignalsH := handler.NewAdminRiskSignalHandler(d.RiskSignals, d.GeoRecords)
+	riskCenterH := handler.NewAdminRiskCenterHandler(d.RiskCenter)
 	// Node self-enrollment handler. Constructed here rather than inside the
 	// admin block because one of its three routes is admin-only and two are
 	// public, and they must share the same token store.
@@ -598,6 +605,16 @@ func NewRouter(d Deps) stdhttp.Handler {
 		// staff and admin groups share this prefix, so the path alone says
 		// nothing about the gate.
 		adminGroup.GET("/risk-signals", riskSignalsH.List)
+		// The risk center: accounts beside their IP addresses (the live
+		// connections, and connection_history, the one table that keeps
+		// addresses) and the flag records. adminGroup for the Geo tab's
+		// reason, and more so: TestRiskCenterRoutesAreAdminOnly drives all
+		// four through the assembled router. The refresh is a POST, so every
+		// click — refused or not — leaves an audit row (AuditWrites).
+		adminGroup.GET("/risk-center/live", riskCenterH.Live)
+		adminGroup.POST("/risk-center/live/refresh", riskCenterH.Refresh)
+		adminGroup.GET("/risk-center/connections", riskCenterH.Connections)
+		adminGroup.GET("/risk-center/flags", riskCenterH.Flags)
 		adminGroup.GET("/diagnostics/metrics", diagH.Metrics)
 		adminGroup.POST("/diagnostics/metrics/reset", diagH.ResetMetrics)
 

@@ -3,6 +3,7 @@ import type { AuthEventFilter } from '@/api/authEvents'
 import type { EmailLogFilter } from '@/api/emailLogs'
 import type { GroupListParams } from '@/api/groups'
 import type { NodeListParams } from '@/api/nodes'
+import type { ConnectionHistoryParams, FlagRecordParams, LiveParams } from '@/api/riskCenter'
 import type { RuleSetListParams } from '@/api/rules'
 import type { ServerListParams } from '@/api/servers'
 import type { SubLogFilter } from '@/api/subLogs'
@@ -36,6 +37,9 @@ export const userKeys = {
   all: (s: QueryScope) => [...privateRoot(s), 'users'] as const,
   lists: (s: QueryScope) => [...userKeys.all(s), 'list'] as const,
   list: (s: QueryScope, params: UserListParams) => [...userKeys.lists(s), params] as const,
+  /** One account, by id (the risk center's lookup). Under `all`, so a write
+   *  that invalidates the users invalidates this too. */
+  detail: (s: QueryScope, userId: number) => [...userKeys.all(s), 'detail', userId] as const,
 }
 
 export const trafficKeys = {
@@ -49,6 +53,8 @@ export const trafficKeys = {
   userNodes: (s: QueryScope, userId: number) => [...trafficKeys.all(s), 'user', userId, 'nodes'] as const,
   /** One user's per-server usage breakdown. */
   userServers: (s: QueryScope, userId: number) => [...trafficKeys.all(s), 'user', userId, 'servers'] as const,
+  /** One user's lifetime / period / today totals. */
+  userUsage: (s: QueryScope, userId: number) => [...trafficKeys.all(s), 'user', userId, 'usage'] as const,
 }
 
 export const dashboardKeys = {
@@ -158,14 +164,33 @@ export const meKeys = {
   usage: (s: QueryScope) => [...meKeys.all(s), 'usage'] as const,
 }
 
-/** Concurrent-location verdicts, as shown on the Geo anomalies tab. */
+/** Concurrent-location verdicts, as shown on the risk center's Geo tab. */
 export const geoAnomalyKeys = {
   all: (s: QueryScope) => [...privateRoot(s), 'geo-anomalies'] as const,
+  /** One account's verdict alone (`?user_id=`), for the lookup. Its own
+   *  entry, never a slice of the fleet list: the lookup must not load the
+   *  fleet to show one row. */
+  user: (s: QueryScope, userId: number) => [...geoAnomalyKeys.all(s), 'user', userId] as const,
 }
 
-/** The observe-only risk signals, as shown on the Logs page's risk tab. */
+/** The observe-only risk signals, as shown on the risk center's risk tab. */
 export const riskSignalKeys = {
   all: (s: QueryScope) => [...privateRoot(s), 'risk-signals'] as const,
+  /** One account's row alone (`?user_id=`), for the lookup. */
+  user: (s: QueryScope, userId: number) => [...riskSignalKeys.all(s), 'user', userId] as const,
+}
+
+/**
+ * The risk center's own reads. `lives` is the prefix of every live-view page
+ * (each filter set is its own entry), so a refresh invalidates them all: the
+ * snapshot behind every page has changed.
+ */
+export const riskCenterKeys = {
+  all: (s: QueryScope) => [...privateRoot(s), 'risk-center'] as const,
+  lives: (s: QueryScope) => [...riskCenterKeys.all(s), 'live'] as const,
+  live: (s: QueryScope, params: LiveParams) => [...riskCenterKeys.lives(s), params] as const,
+  history: (s: QueryScope, params: ConnectionHistoryParams) => [...riskCenterKeys.all(s), 'history', params] as const,
+  flags: (s: QueryScope, params: FlagRecordParams) => [...riskCenterKeys.all(s), 'flags', params] as const,
 }
 
 /** The upstream sync-task queue, as shown on the Sync tasks page. */

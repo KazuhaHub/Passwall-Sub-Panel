@@ -42,8 +42,10 @@ type subLogView struct {
 	DeviceIDPrefix      string `json:"device_id4,omitempty"`
 }
 
-// deviceIDPrefixLen is how much of the stored device digest an admin sees.
-const deviceIDPrefixLen = 4
+// deviceIDPrefixLen is how much of the stored device digest an admin sees:
+// domain.DeviceIDShownLen, the one length every admin view shows (the risk
+// center's inferred devices show the same four characters).
+const deviceIDPrefixLen = domain.DeviceIDShownLen
 
 func (h *AdminSubLogHandler) List(c *gin.Context) {
 	p := parsePagination(c)

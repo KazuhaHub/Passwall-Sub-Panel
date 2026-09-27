@@ -1,5 +1,8 @@
 import React, { useEffect, useState, type FormEvent } from 'react'
 import {
+  Accordion,
+  AccordionDetails,
+  AccordionSummary,
   Autocomplete,
   Box,
   Button,
@@ -30,6 +33,7 @@ import {
   useTheme,
 } from '@mui/material'
 import SaveIcon from '@mui/icons-material/Save'
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import VisibilityIcon from '@mui/icons-material/Visibility'
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined'
 import HelpOutlineIcon from '@mui/icons-material/HelpOutlined'
@@ -63,6 +67,7 @@ import {
   type SAMLConfig,
   type SSOGroupRule,
   type SSORoleRule,
+  type RuntimeKnob,
   type UISettings,
 } from '@/api/settings'
 import AddIcon from '@mui/icons-material/Add'
@@ -90,6 +95,7 @@ import { useMailSettings, useOidcConfig, useSamlConfig, useUISettings } from '@/
 import { useQueryScope } from '@/query/useQueryScope'
 import type { Group } from '@/api/types'
 import { normalizeRegistry } from './subclients/clientRegistry'
+import { ADVANCED_GEO_KNOBS, ADVANCED_RISK_KNOBS, advancedKnobConfigured } from './settingsRuntimeKnobs'
 import ScopeOverridesEditor from '@/components/scope/ScopeOverridesEditor'
 import { loadScopeState, saveScopeState, type ScopeState } from '@/components/scope/scopeOverrides'
 import { geoTolerances } from '@/utils/geoAnomaly'
@@ -448,8 +454,27 @@ export default function SettingsView() {
   const geoTiered = (settings.geo_anomaly_scope || 'city') === 'city'
   // The risk policy the server will judge with for the draft, the same way:
   // an unset 0 is the default and a nonsense value is repaired toward not
-  // accusing (a ratio under 1.5 is raised, min_days is clamped to 7).
+  // accusing (a ratio under 1.5 is raised, min_days is held to the window).
   const riskEff = riskPolicy(settings)
+  // One geo/risk runtime knob, its label and hint under settings.<ns>.<name>
+  // (the knob's json tag less its geo_anomaly_ / risk_ prefix). The value in
+  // effect and the default are the server's (runtime_effective /
+  // runtime_defaults); this page keeps no copy of either.
+  const runtimeField = (knob: RuntimeKnob, ns: 'geo_anomaly' | 'risk' | 'risk_center') => {
+    const name = knob.replace(/^(geo_anomaly|risk)_/, '')
+    return (
+      <RuntimeField key={knob}
+        label={t(`settings.${ns}.${name}`)}
+        hint={t(`settings.${ns}.${name}_hint`)}
+        value={settings[knob]}
+        onChange={v => patch(knob, v)}
+        effective={settings.runtime_effective?.[knob]}
+        fallback={settings.runtime_defaults?.[knob]} />
+    )
+  }
+  // The former constants live in a closed panel — until one of them is
+  // configured, which must not hide behind it.
+  const advancedConfigured = advancedKnobConfigured(settings)
 
   const tabs: { key: TabKey; labelKey: string }[] = [
     { key: 'general', labelKey: 'settings.tab_general' },
@@ -1285,7 +1310,7 @@ export default function SettingsView() {
               value={settings.geo_anomaly_ignore_addresses ?? ''}
               onChange={e => patch('geo_anomaly_ignore_addresses', e.target.value)}
               placeholder={'203.0.113.7\n198.51.100.0/24  # office exit'}
-              helperText={t('settings.geo_anomaly.ignore_addresses_hint', { defaultValue: '一行或逗号分隔一个，最多 256 条，# 后为注释。用于没在面板登记的中转、CDN、公司出口。节点与中转地址、100.64.0.0/10 与内网地址、同时被 3 个以上账号使用的地址已自动排除。仅全局生效。' })} />
+              helperText={t('settings.geo_anomaly.ignore_addresses_hint', { defaultValue: '一行或逗号分隔一个，最多 256 条，# 后为注释。用于没在面板登记的中转、CDN、公司出口。节点与中转地址、100.64.0.0/10 与内网地址、同时被「共享出口账号数」（默认 3）个以上账号使用的地址已自动排除。仅全局生效。' })} />
 
             {/* Automatic temporary suspension. Off by default, its own
                 (looser) thresholds, time-boxed, and never over anybody
@@ -1354,12 +1379,12 @@ export default function SettingsView() {
               caption shows what that repair gives. */}
           <Section title={t('settings.risk.section', { defaultValue: '风险信号（只提示）' })} md={md}>
             <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant }}>
-              {t('settings.risk.hint', { defaultValue: '除「异地并发」之外的四种信号，每小时计算一次，结果在「日志管理 → 风险信号」，有账号被标记时通知铃提醒。它们不会暂停、禁用或修改任何账号。「订阅多地」沿用上面「异地并发」的判定粒度、省级容错和「允许任何地方」。' })}
+              {t('settings.risk.hint', { defaultValue: '除「异地并发」之外的四种信号，按「风险信号计算间隔」（默认每小时）计算，结果在「风控中心 → 风险信号」，有账号被标记时通知铃提醒。它们不会暂停、禁用或修改任何账号。「订阅多地」沿用上面「异地并发」的判定粒度、省级容错和「允许任何地方」。' })}
             </Typography>
             {([
               ['risk_sub_spread_off', 'sub_spread', '订阅多地：跨天从互不相连的省份拉取订阅'],
               ['risk_devices_off', 'devices', '设备数：客户端声明的设备'],
-              ['risk_usage_shift_off', 'usage_shift', '用量变化：与自己过去 4 周相比'],
+              ['risk_usage_shift_off', 'usage_shift', '用量变化：与自己的基线期相比'],
               ['risk_login_country_off', 'login_country', '登录国家：面板登录出现新国家'],
             ] as const).map(([field, name, def]) => (
               <React.Fragment key={field}>
@@ -1381,7 +1406,7 @@ export default function SettingsView() {
                 value={settings.risk_min_days ?? 0}
                 onChange={v => patch('risk_min_days', v)}
                 max={7}
-                helperText={t('settings.risk.min_days_hint', { defaultValue: '一个省或一台设备在最近 7 天（受订阅日志保留天数限制）里至少出现几天才算常驻，按面板时区的自然日计。默认 3，范围 1–7。0 = 默认。' })} />
+                helperText={t('settings.risk.min_days_hint', { defaultValue: '一个省或一台设备在订阅窗口内（受订阅日志保留天数限制）至少出现几天才算常驻，按面板时区的自然日计。默认 3，范围 1–窗口天数。0 = 默认。' })} />
               <NumField
                 label={t('settings.risk.max_devices', { defaultValue: '设备上限' })}
                 value={settings.risk_max_devices ?? 0}
@@ -1394,7 +1419,7 @@ export default function SettingsView() {
                 value={settings.risk_usage_ratio ?? 0}
                 onChange={v => patch('risk_usage_ratio', v)}
                 step="any"
-                helperText={t('settings.risk.usage_ratio_hint', { defaultValue: '某天用量超过「开始使用以来、过去 4 周内日用量中位数 × 倍数」即为超标日；7 天内 4 天超标即标记，2–3 天为疑似。默认 3，最小 1.5。0 = 默认。' })} />
+                helperText={t('settings.risk.usage_ratio_hint', { defaultValue: '某天用量超过「开始使用以来、基线期内日用量中位数 × 倍数」即为超标日；判定天数内超标达到「超标几天即标记」即标记，达到「超标几天即疑似」为疑似。默认 3，最小 1.5。0 = 默认。' })} />
               <NumField
                 label={t('settings.risk.usage_floor_gb', { defaultValue: '每日用量下限（GB）' })}
                 value={settings.risk_usage_floor_gb ?? 0}
@@ -1408,6 +1433,21 @@ export default function SettingsView() {
               })}
             </Typography>
 
+            {/* usage_shift's and login_country's thresholds: per-group like
+                the tolerances above (the rail on the left). The server holds
+                the warm-up, the over-days and the hold to the fleet-wide
+                lengths in the advanced panel below (and suspect to flag), so
+                the caption under each says what the global value became. */}
+            <Pair>
+              {runtimeField('risk_usage_warmup_days', 'risk')}
+              {runtimeField('risk_usage_flag_days', 'risk')}
+              {runtimeField('risk_usage_suspect_days', 'risk')}
+            </Pair>
+            <Pair>
+              {runtimeField('risk_login_warmup_logins', 'risk')}
+              {runtimeField('risk_login_hold_days', 'risk')}
+            </Pair>
+
             {/* Global only: /sub reads it on every fetch, before it knows the
                 account's group, so it has no row in the per-group rail. It
                 only records; it never blocks a fetch. */}
@@ -1420,6 +1460,47 @@ export default function SettingsView() {
             <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant, mt: -1 }}>
               {t('settings.risk.hwid_capture_hint', { defaultValue: '只有部分客户端会在更新订阅时带上设备标识（x-hwid），多数客户端不带。只保存按用户加密的摘要（无法还原）和系统 / 机型，随订阅日志一起过期，仅管理员可见；只提示，从不拦截拉取。关闭后不再采集，已保存的摘要随订阅日志过期。仅全局生效。' })}
             </Typography>
+          </Section>
+
+          {/* The risk center's records and live view, and the detectors'
+              former constants. Every knob here is fleet-wide — freshness is
+              judged per node, the worker and the prunes run once for the
+              fleet, the live view is one snapshot — so none has a row in the
+              per-group rail, and a group sees this section not at all. */}
+          <Section title={t('settings.risk_center.section')} md={md}>
+            <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant }}>
+              {t('settings.risk_center.hint')}
+            </Typography>
+            <Pair>
+              {runtimeField('risk_connection_retention_days', 'risk_center')}
+              {runtimeField('risk_flag_record_retention_days', 'risk_center')}
+            </Pair>
+            <Pair>
+              {runtimeField('risk_live_snapshot_stale_minutes', 'risk_center')}
+              {runtimeField('risk_live_refresh_cooldown_seconds', 'risk_center')}
+              {runtimeField('risk_device_infer_hours', 'risk_center')}
+            </Pair>
+            <Accordion disableGutters elevation={0} defaultExpanded={advancedConfigured}
+              sx={{ bgcolor: 'transparent', border: `1px solid ${md.outlineVariant}`, borderRadius: 2, '&::before': { display: 'none' } }}>
+              <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                <Typography sx={{ fontWeight: 600, fontSize: 13, color: md.onSurface }}>
+                  {t('settings.risk_center.advanced')}
+                </Typography>
+              </AccordionSummary>
+              <AccordionDetails sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+                <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant }}>
+                  {t('settings.risk_center.advanced_hint')}
+                </Typography>
+                <Typography sx={{ fontWeight: 600, fontSize: 13, color: md.onSurface }}>
+                  {t('settings.risk_center.advanced_geo')}
+                </Typography>
+                <Pair>{ADVANCED_GEO_KNOBS.map(k => runtimeField(k, 'geo_anomaly'))}</Pair>
+                <Typography sx={{ fontWeight: 600, fontSize: 13, color: md.onSurface }}>
+                  {t('settings.risk_center.advanced_risk')}
+                </Typography>
+                <Pair>{ADVANCED_RISK_KNOBS.map(k => runtimeField(k, 'risk'))}</Pair>
+              </AccordionDetails>
+            </Accordion>
           </Section>
 
         </Box>
@@ -2615,6 +2696,47 @@ function NumField({ label, value, onChange, helperText, step, min = 0, max }: { 
       htmlInput: { min, max, step: step ?? 1 }
     }} />
   );
+}
+
+// RuntimeField is one geo/risk runtime knob. The field holds what is STORED,
+// and an unset knob (0, or a negative the server reads the same way) is an
+// empty field with the shipped default as its placeholder — a "0" would read
+// as "zero days" — so emptying the field is how an admin returns a knob to
+// its default. Under the hint is the number the server runs with: the
+// stored value clamped, floored and bounded, which can differ from what was
+// typed (a flag threshold of 1 is judged as 2). It is the SAVED value's
+// effect, from the last read or save, and it is the server's own: this page
+// keeps no copy of any default or clamp, so it cannot drift from them. An
+// older server sends neither map; the field then shows no default and no
+// caption rather than a guess.
+function RuntimeField({ label, hint, value, onChange, effective, fallback }: {
+  label: string
+  hint: string
+  value: number | undefined
+  onChange: (v: number) => void
+  effective?: number
+  fallback?: number
+}) {
+  const { t } = useTranslation('admin')
+  return (
+    <TextField fullWidth type="number" label={label}
+      value={value !== undefined && value > 0 ? value : ''}
+      placeholder={fallback === undefined ? undefined : String(fallback)}
+      onChange={e => onChange(e.target.value === '' ? 0 : Math.trunc(Number(e.target.value)) || 0)}
+      helperText={effective === undefined ? hint : (
+        <>
+          {hint}
+          <Box component="span" sx={{ display: 'block' }}>
+            {t('settings.risk_center.effective', { value: effective })}
+          </Box>
+        </>
+      )}
+      slotProps={{
+        htmlInput: { min: 0, step: 1 },
+        // Shrunk, so the placeholder (the default) shows in an empty field.
+        inputLabel: { shrink: true },
+      }} />
+  )
 }
 
 function ResetPeriodField({ value, onChange }: { value: string; onChange: (v: string) => void; md: MdShape }) {

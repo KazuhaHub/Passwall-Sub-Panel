@@ -35,12 +35,14 @@ const ROUTE: Partial<Record<AlertType, string>> = {
   cert_expiring: '/admin/certs',
   panel_upgrade: '/admin/servers',
   login_security: '/admin/logs',
-  // Both geo entries are counts, not accounts: the Geo tab is where the
-  // accounts are listed, with the evidence beside each.
-  geo_anomaly: '/admin/logs?tab=geo',
-  geo_auto_suspended: '/admin/logs?tab=geo',
+  // Both geo entries are counts, not accounts: the risk center's location tab
+  // is where the accounts are listed, with the evidence beside each. The tab is
+  // named, not left to the page's default, so the link does not depend on
+  // which tab the page happens to open on.
+  geo_anomaly: '/admin/risk?tab=geo',
+  geo_auto_suspended: '/admin/risk?tab=geo',
   // A count too; the risk tab lists the accounts with each signal's evidence.
-  risk_signals: '/admin/logs?tab=risk',
+  risk_signals: '/admin/risk?tab=risk',
 }
 
 const PSP_RELEASES_URL = 'https://github.com/KazuhaHub/passwall-sub-panel/releases'

@@ -100,13 +100,21 @@ function codeParams(sig: RiskSignal): Record<string, unknown> {
     }
     case 'usage_shift': {
       const ev = evidenceOf<UsageShiftEvidence>(sig)
-      // The series is 35 days, and hourly history must cover one more,
+      // The days this verdict was judged with, as the evidence records them.
+      // A row stored before they were settings has none of them and was
+      // judged with the shipped 28 + 7 days, a 14-day warm-up and flag at 4;
+      // its series is then the fixed 35 days.
+      const days = ev.baseline_days && ev.recent_days
+        ? ev.baseline_days + ev.recent_days
+        : (ev.series?.length || 35)
+      // Hourly history must cover the whole series and one day more,
       // whatever the fetch window is: the prune cuts at now minus the
-      // retention, so at 35 the series' first day is already partly gone
-      // (domain.EvaluateUsageShift's retention_short).
+      // retention, so at exactly the series length its first day is already
+      // partly gone (domain.EvaluateUsageShift's retention_short).
       return {
-        retention: ev.history_retention_days, needed: 36,
+        retention: ev.history_retention_days, needed: days + 1,
         over: ev.over_days, ratio: ev.ratio, history: ev.history_days,
+        recent: ev.recent_days ?? 7, warmup: ev.warmup_days ?? 14, flag: ev.flag_days ?? 4,
       }
     }
     case 'login_country': {
@@ -156,7 +164,8 @@ export function formatGB(bytes: number): string {
 
 // domain.RiskPolicyFromSettings' defaults and bounds, copied rather than
 // fetched: the server returns what is STORED (0 = unset), not what is in
-// effect.
+// effect, for these four tolerances. RISK_WINDOW_DAYS is the fetch window's
+// structural ceiling, used when the server reports no window in effect.
 const RISK_WINDOW_DAYS = 7
 const RISK_DEFAULT = { minDays: 3, maxDevices: 3, ratio: 3, floorGB: 3 }
 const RISK_RATIO_MIN = 1.5
@@ -167,13 +176,16 @@ function positive(v: number | undefined): v is number {
 
 /**
  * The risk policy actually in effect for these settings, mirroring
- * domain.RiskPolicyFromSettings: an unset (≤ 0 or missing) value is the
- * shipped default, and every repair errs toward not accusing — min_days is
- * clamped to the seven-day window, the ratio is raised to 1.5.
+ * domain.RiskPolicyFromSettings and RiskPolicy.Bounded: an unset (≤ 0 or
+ * missing) value is the shipped default, and every repair errs toward not
+ * accusing — min_days is held to the fetch window (the window in effect the
+ * server reports, else its seven-day ceiling), the ratio is raised to 1.5.
  */
 export function riskPolicy(s: UISettings): { minDays: number; maxDevices: number; ratio: number; floorGB: number } {
+  const window = s.runtime_effective?.risk_window_days
+  const days = positive(window) ? Math.min(window, RISK_WINDOW_DAYS) : RISK_WINDOW_DAYS
   return {
-    minDays: positive(s.risk_min_days) ? Math.min(s.risk_min_days, RISK_WINDOW_DAYS) : RISK_DEFAULT.minDays,
+    minDays: Math.min(positive(s.risk_min_days) ? s.risk_min_days : RISK_DEFAULT.minDays, days),
     maxDevices: positive(s.risk_max_devices) ? s.risk_max_devices : RISK_DEFAULT.maxDevices,
     ratio: positive(s.risk_usage_ratio) ? Math.max(s.risk_usage_ratio, RISK_RATIO_MIN) : RISK_DEFAULT.ratio,
     floorGB: positive(s.risk_usage_floor_gb) ? s.risk_usage_floor_gb : RISK_DEFAULT.floorGB,

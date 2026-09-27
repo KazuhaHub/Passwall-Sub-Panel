@@ -289,18 +289,65 @@ var (
 		"psp_infra_address_resolve_failures_total",
 		"Node or relay hostnames that failed to resolve during an infrastructure-address refresh. The previous addresses are kept.",
 	)
-	// Hourly risk-signal refreshes, by outcome. The signals are observe-only
-	// and a failed run keeps the previous rows, so nothing else shows a
-	// worker that has quietly stopped judging: ok means every signal was
-	// recomputed and saved; partial means a source failed (a group's settings,
-	// a traffic read, the fetch log) and the kinds or accounts it feeds kept
-	// their previous rows; infra_pending means the place signals were skipped
-	// because PSP's own node and relay addresses had not been collected yet;
-	// error means nothing was written at all. A fleet reading partial or
-	// infra_pending for hours is judging from stale rows.
+	// Connections in the latest live-connection snapshot, the risk
+	// center's default view: one per account, panel node and source,
+	// capped per account. Set whenever a snapshot is stored, so it is the
+	// size of what an admin is shown. Not a detector sample — nothing
+	// judges on it — and it carries no address.
+	LiveConnections = NewGauge(
+		"psp_live_connections",
+		"Live connections (account, panel node, source) in the latest stored live-connection snapshot.",
+	)
+	// The risk center's on-demand live-connection refreshes (立即刷新), by
+	// outcome. ok and partial read every panel (partial: at least one read
+	// failed, so the view is missing connections; a panel with no live read
+	// at all, S-UI, is never partial). just_polled answered with the poll's
+	// snapshot and read nothing; cooldown and in_progress were refused and
+	// read nothing; error means the refresh could not run (the shared
+	// clients were unreadable, or it timed out). A refresh is never a
+	// detector sample, so none of this moves a verdict — this is the cost
+	// admins' clicks put on the panels.
+	LiveConnRefreshTotal = NewCounterVec(
+		"psp_live_conn_refresh_total",
+		"Risk-center live-connection refreshes by outcome: ok, partial (a panel read failed), just_polled (answered with the poll's snapshot), cooldown, in_progress (refused), error.",
+		"outcome",
+	)
+	// Polls whose judged connections could not be recorded into the
+	// connection history (connection_history). The poll carries on —
+	// metering is its job — so without this a history that has stopped
+	// growing shows only as a Warn. Any steady climb means the history
+	// holds less than it appears to: the samples of those polls are not in
+	// it and are never written later.
+	ConnectionHistoryWriteErrorsTotal = NewCounter(
+		"psp_connection_history_write_errors_total",
+		"Traffic polls whose judged connections could not be recorded into the connection history. The poll itself is unaffected.",
+	)
+	// Flag-record writes (flag_records) that failed on the paths that do
+	// not fail with them: the traffic poll's geo attention changes and
+	// geo_auto transitions, and the user service's staff resume and
+	// replacement of a geo_auto. Each has already happened when its record
+	// is written, so the poll or the request carries on and the record is
+	// lost; without this that shows only as a Warn. One per failed write,
+	// which may carry several records. The risk signals' records are not
+	// counted here: they are written in the transaction of the upsert that
+	// caused them, and fail it.
+	FlagRecordWriteErrorsTotal = NewCounter(
+		"psp_flag_record_write_errors_total",
+		"Flag-record writes of the location detector and its automatic suspension that failed; the transitions they describe happened and are not undone.",
+	)
+	// Risk-signal refreshes (hourly by default, risk.refresh_interval_minutes),
+	// by outcome. The signals are observe-only and a failed run keeps the
+	// previous rows, so nothing else shows a worker that has quietly stopped
+	// judging: ok means every signal was recomputed and saved; partial means
+	// a source failed (a group's settings, a traffic read, the fetch log) and
+	// the kinds or accounts it feeds kept their previous rows; infra_pending
+	// means the place signals were skipped because PSP's own node and relay
+	// addresses had not been collected yet; error means nothing was written
+	// at all. A fleet reading partial or infra_pending for hours is judging
+	// from stale rows.
 	RiskRefreshTotal = NewCounterVec(
 		"psp_risk_refresh_total",
-		"Hourly risk-signal refreshes by outcome: ok; partial (a source failed and what it feeds kept its previous rows); infra_pending (place signals skipped: infrastructure addresses not loaded yet); error (nothing written).",
+		"Risk-signal refreshes by outcome: ok; partial (a source failed and what it feeds kept its previous rows); infra_pending (place signals skipped: infrastructure addresses not loaded yet); error (nothing written).",
 		"outcome",
 	)
 	// P in the cost model.

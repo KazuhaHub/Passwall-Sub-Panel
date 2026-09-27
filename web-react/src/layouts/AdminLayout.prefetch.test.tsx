@@ -76,5 +76,17 @@ describe('AdminLayout view prefetching', () => {
     // Operators never see the admin-only items, so their chunks are not fetched.
     expect(paths).not.toContain('/admin/servers')
     expect(paths).not.toContain('/admin/settings')
+    expect(paths).not.toContain('/admin/risk')
+  })
+
+  // The risk center is a nav item like any other for an admin, so its chunk is
+  // warmed with the rest; the operator case above proves the adminOnly flag
+  // keeps it out of an operator's queue.
+  it("queues the risk center for an admin's idle loading", async () => {
+    mountLayout()
+    await waitFor(() => expect(prefetch.prefetchViewsWhenIdle).toHaveBeenCalled())
+    const paths = prefetch.prefetchViewsWhenIdle.mock.calls.at(-1)![0]
+    expect(paths).toContain('/admin/risk')
+    expect(paths).toContain('/admin/settings')
   })
 })

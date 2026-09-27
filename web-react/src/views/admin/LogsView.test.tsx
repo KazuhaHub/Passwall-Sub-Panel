@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { ThemeProvider } from '@mui/material/styles'
 import { MemoryRouter } from 'react-router'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createAppTheme } from '@/theme'
 import { makeTestQueryClient, queryWrapper } from '@/test/queryTestUtils'
@@ -48,11 +48,11 @@ describe('LogsView', () => {
   })
 })
 
-// The risk tab and the device column carry what only an admin may read: the
-// risk endpoint is adminGroup, and the sub-log API adds the device fields for
-// admins only. An operator offered either would see a tab that can only 403,
-// or a column that is always empty.
-describe('LogsView admin-only risk views', () => {
+// The device column carries what only an admin may read: the sub-log API adds
+// the device fields for admins only, so an operator offered the column would
+// see it always empty. (The location and risk tabs that used to sit here moved
+// to the admin-only risk center; LogsRoute.test covers their old links.)
+describe('LogsView admin-only device column', () => {
   const list = (items: unknown[]) => ({ items, total: items.length })
   const subLogs = [
     { id: 1, user_id: 7, user_upn: 'alice', ip: '203.0.113.7', ua: 'ClashMeta/1.0', client_type: 'mihomo',
@@ -68,27 +68,11 @@ describe('LogsView admin-only risk views', () => {
       if (url === '/admin/sub-logs') return { data: list(subLogs) }
       if (url === '/admin/audit' || url === '/admin/auth-events' || url === '/admin/email-logs') return { data: list([]) }
       if (url === '/admin/settings/ui') return { data: {} }
-      if (url === '/admin/risk-signals') return { data: { items: [] } }
       throw new Error(`Unexpected GET ${url}`)
     })
   }
 
   afterEach(() => useAuthStore.setState({ role: '' }))
-
-  it('offers the risk tab to admins only', async () => {
-    serve()
-    useAuthStore.setState({ role: 'admin', userId: 1, hasToken: true })
-    mount()
-
-    fireEvent.click(await screen.findByRole('tab', { name: '风险信号' }))
-    await waitFor(() => expect(api.get).toHaveBeenCalledWith('/admin/risk-signals', expect.anything()))
-    cleanup()
-
-    useAuthStore.setState({ role: 'operator', userId: 2, hasToken: true })
-    mount()
-    await screen.findByText('curl/8')
-    expect(screen.queryByRole('tab', { name: '风险信号' })).toBeNull()
-  })
 
   it('shows the declared device to admins only', async () => {
     serve()

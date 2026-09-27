@@ -25,9 +25,14 @@ export type Capability =
   | 'traffic.write'
   // Retry / cancel sync tasks.
   | 'sync.operate'
+  // Open the risk center. A read, not a config mutation, so it is its own
+  // capability rather than config.write — but every endpoint behind it is
+  // adminGroup, so it is admin-only. Also gates LogsRoute's redirect of the
+  // old /admin/logs?tab=geo|risk links.
+  | 'risk.view'
 
 const ROLE_CAPS: Record<Role, Capability[]> = {
-  admin: ['config.write', 'users.write', 'users.elevate', 'traffic.write', 'sync.operate'],
+  admin: ['config.write', 'users.write', 'users.elevate', 'traffic.write', 'sync.operate', 'risk.view'],
   operator: ['users.write', 'traffic.write', 'sync.operate'],
   user: [],
 }

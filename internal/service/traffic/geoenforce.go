@@ -24,22 +24,21 @@ import (
 // are conditional writes: the suspension lands only on a row with no service
 // reason, and the lift clears only a geo_auto written before its cutoff.
 
-// Per-poll caps. Each applied transition pushes to every panel the user is on,
-// inline, so an unbounded batch would stretch one poll arbitrarily; a mass
-// event (or a broken location database with suspension on) is limited to
-// twenty accounts per poll either way. Neither cap loses work: an over-cap ban
-// keeps its streak at the threshold and fires on its next over-sample, and an
-// over-cap lift is simply due again next poll.
+// Per-poll caps: geo_anomaly.ban_max_per_poll and lift_max_per_poll, read from
+// the poll's fleet-wide runtime (geoPolicyCache.runtime). Each applied
+// transition pushes to every panel the user is on, inline, so an unbounded
+// batch would stretch one poll arbitrarily; a mass event (or a broken location
+// database with suspension on) is limited to that many accounts per poll
+// either way — twenty each by default, never more than
+// domain.GeoPerPollMax. Neither cap loses work: an over-cap ban keeps its
+// streak at the threshold and fires on its next over-sample (collectGeoBans),
+// and an over-cap lift is simply due again next poll. The lift cap is counted
+// over DUE lifts only (liftDueGeoSuspensions): counting every geo_auto row
+// would let long suspensions that began earlier crowd a due 60-minute one out
+// of every poll for a week.
 //
 // A cancelled poll is handled the same way, for the transitions it has not
 // started: see enforceGeo.
-const (
-	geoMaxSuspensionsPerPoll = 20
-	// Counted over DUE lifts only. Counting every geo_auto row would let
-	// twenty 7-day suspensions that began earlier crowd a due 60-minute one
-	// out of every poll for a week.
-	geoMaxLiftsPerPoll = 20
-)
 
 // geoFollowUpWriteTimeout bounds the writes Phase 4 makes after the poll's
 // context may already be cancelled: the audit row of a transition that has
@@ -243,11 +242,12 @@ func (s *Service) liftDueGeoSuspensions(ctx context.Context, users []*domain.Use
 		}
 		return due[i].u.ID < due[j].u.ID
 	})
-	if len(due) > geoMaxLiftsPerPoll {
-		geoAutoCount("lift_deferred", len(due)-geoMaxLiftsPerPoll)
-		due = due[:geoMaxLiftsPerPoll]
+	if limit := pc.runtime().LiftMaxPerPoll; len(due) > limit {
+		geoAutoCount("lift_deferred", len(due)-limit)
+		due = due[:limit]
 	}
 
+	var flags []domain.FlagRecord
 	for i, c := range due {
 		if err := ctx.Err(); err != nil {
 			// The poll was cancelled: start no further lift. Each is due
@@ -290,10 +290,22 @@ func (s *Service) liftDueGeoSuspensions(ctx context.Context, users []*domain.Use
 			AfterJSON:  geoAuditJSON(map[string]any{"duration_minutes": minutes}),
 			At:         now,
 		})
+		// The flag history's record of the same lift: how long the box was
+		// and when it began, as a unix-ms number the SPA formats (null for a
+		// row with no timestamp, lifted at once).
+		var suspendedAtMS any
+		if u.ServiceDisabledAt != nil {
+			suspendedAtMS = u.ServiceDisabledAt.UnixMilli()
+		}
+		flags = append(flags, domain.GeoAutoFlag(u.ID, domain.FlagAutoLiftedExpiry, "expired",
+			map[string]any{"duration_minutes": minutes, "suspended_at_ms": suspendedAtMS}, now))
 		u.ServiceDisabledReason = domain.DisabledNone
 		u.ServiceDisableDetail = ""
 		u.ServiceDisabledAt = nil
 	}
+	// Only the lifts that committed are here, and they have committed, so
+	// a cancelled poll still records them (appendFlags runs detached).
+	s.appendFlags(ctx, flags)
 }
 
 // applyGeoBans applies the bans Phase 1b collected, re-checking eligibility
@@ -321,6 +333,7 @@ func (s *Service) applyGeoBans(ctx context.Context, users []*domain.User, bans [
 		}
 	}
 	var rearm map[int64]domain.GeoRecord
+	var flags []domain.FlagRecord
 	for _, b := range bans {
 		u := byID[b.UserID]
 		if !geoBanEligible(u, now) {
@@ -370,11 +383,20 @@ func (s *Service) applyGeoBans(ctx context.Context, users []*domain.User, bans [
 			}),
 			At: now,
 		})
+		// The flag history's record of the same suspension, coded by its
+		// tier, with the numbers the user's own text was built from. NOT the
+		// reason the audit row carries: that sentence names the places, and
+		// the flag history keeps no location beside an account for months.
+		flags = append(flags, domain.GeoAutoFlag(u.ID, domain.FlagAutoSuspended, string(b.Tier),
+			map[string]any{"tier": string(b.Tier), "spread": b.Spread, "duration_minutes": minutes}, now))
 		u.ServiceDisabledReason = domain.DisabledGeoAutoSuspend
 		u.ServiceDisableDetail = detail
 		at := now
 		u.ServiceDisabledAt = &at
 	}
+	// Committed suspensions only, recorded detached like their audit rows:
+	// a poll cancelled after a write landed still records it.
+	s.appendFlags(ctx, flags)
 	if len(rearm) > 0 {
 		geoAutoCount("deferred", len(rearm))
 		log.Info("geo auto-suspension: the poll was cancelled; the remaining due suspensions are deferred to their next over-sample",

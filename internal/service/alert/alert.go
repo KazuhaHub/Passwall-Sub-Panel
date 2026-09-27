@@ -200,9 +200,15 @@ func (s *Service) List(ctx context.Context) ([]Alert, Counts) {
 	out = append(out, s.loginSecurity(ctx)...)
 	// Listed explicitly: a category that is wired through Deps but never
 	// appended here is silently absent from the bell (node_resource is, on
-	// purpose — see nodeResource).
-	out = append(out, s.geoAlerts(ctx)...)
-	out = append(out, s.riskAlerts(ctx)...)
+	// purpose — see nodeResource). The two flag counts share one settings
+	// read for their freshness, skipped when neither is wired (the
+	// geo_auto_suspended count needs none).
+	var geoFresh, riskFresh time.Duration
+	if s.d.GeoFlags != nil || s.d.RiskFlags != nil {
+		geoFresh, riskFresh = s.bellFreshness(ctx)
+	}
+	out = append(out, s.geoAlerts(ctx, geoFresh)...)
+	out = append(out, s.riskAlerts(ctx, riskFresh)...)
 	return out, Tally(out)
 }
 

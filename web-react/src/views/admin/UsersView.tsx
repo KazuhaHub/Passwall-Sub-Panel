@@ -276,6 +276,9 @@ export default function UsersView() {
   // operators may only manage role=user targets. canManageUser mirrors the
   // backend's ensureOperatorAllowed guard so we don't show buttons that 403.
   const canElevate = useCan('users.elevate')
+  // The risk center is admin-only; an operator is not offered a link that
+  // could only land on a redirect.
+  const canRisk = useCan('risk.view')
   const canManageUser = (target: User) => canElevate || target.role === 'user'
 
   // Local controlled value for the search input (committed to the
@@ -1847,6 +1850,13 @@ export default function UsersView() {
                   to={`/admin/traffic?tab=trend&scope=user&user=${editing.id}`}
                   sx={{ alignSelf: 'flex-start', mt: 0.5, textTransform: 'none' }}>
                   {t('admin:users.detail.view_usage', { defaultValue: '查看用量' })} →
+                </Button>
+              )}
+              {editing && canRisk && (
+                <Button size="small" variant="outlined" component={RouterLink}
+                  to={`/admin/risk?tab=user&id=${editing.id}`}
+                  sx={{ alignSelf: 'flex-start', mt: 0.5, textTransform: 'none' }}>
+                  {t('admin:users.risk_lookup', { defaultValue: '风控查询' })} →
                 </Button>
               )}
               <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant }}>

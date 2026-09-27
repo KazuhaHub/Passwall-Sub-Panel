@@ -1,5 +1,6 @@
-// Package risk computes the observe-only risk signals once an hour and
-// stores one verdict per account per signal in risk_signals.
+// Package risk computes the observe-only risk signals on the worker's
+// cadence (risk.refresh_interval_minutes, hourly by default) and stores one
+// verdict per account per signal in risk_signals.
 //
 // Observation only, by construction: every dependency is a read-only
 // interface except the store, whose only writer is its own table. Nothing
@@ -28,10 +29,12 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 )
 
-// Deps is everything the worker reads, and the one table it writes.
+// Deps is everything the worker reads, and the one store it writes.
 //
 // Every dependency is read-only except Store, which writes only
-// risk_signals. No user-state writer can be passed in: each field is a narrow
+// risk_signals — and, inside the same transaction, the flag_records of the
+// attention changes a save makes, which the worker never sees. No
+// user-state writer can be passed in: each field is a narrow
 // interface, TestRiskServiceCannotWriteServiceState pins each method set, and
 // it forbids type assertions in this package, so a wider value handed in
 // cannot be recovered either.
@@ -85,14 +88,18 @@ type UserLister interface {
 
 // SignalStore is the worker's view of risk_signals: write this run's rows,
 // drop what deleted accounts left. It cannot read, so the worker never
-// judges from its own previous output.
+// judges from its own previous output. Which rows changed their attention
+// level is the store's business (sqlstore.RiskSignalRepo.Save records them
+// in flag_records as part of the same write), for the same reason: finding
+// a change needs the previous state, and the worker must not read it.
 type SignalStore interface {
 	Save(ctx context.Context, rows []domain.RiskSignal) error
 	PurgeOrphans(ctx context.Context) (int64, error)
 }
 
 // HourlyReader is the hourly traffic rollup — the one traffic source that
-// reaches back 35 days (raw snapshots are kept about a week).
+// reaches back over usage_shift's series (35 days shipped, up to 70
+// configured; raw snapshots are kept about a week).
 type HourlyReader interface {
 	ListHourlyByUser(ctx context.Context, userID int64, since, until time.Time) ([]domain.HourlyTraffic, error)
 	SumHourlyAllUsers(ctx context.Context, since, until time.Time) ([]domain.HourlyTraffic, error)
@@ -156,7 +163,14 @@ type refresh struct {
 	now    time.Time
 	loc    *time.Location
 	global ports.UISettings
-	users  []*domain.User
+	// rt is the fleet-wide runtime, resolved once per run from the global
+	// settings: the fetch window and the login lookback as CONFIGURED. The
+	// sub-log and auth-event retentions shorten each where its log is read
+	// (windowDays, loginLookbackDays), never here — the groups' policies
+	// are bounded by rt, and a retention-shortened bound would hide
+	// retention_short.
+	rt    domain.RiskRuntime
+	users []*domain.User
 	// policies holds each readable group's policies. A group whose settings
 	// could not be read is absent, and its accounts get no rows.
 	policies map[int64]groupPolicy
@@ -196,6 +210,7 @@ func (s *Service) RefreshOnce(ctx context.Context) (err error) {
 		return fmt.Errorf("risk refresh: load settings: %w", err)
 	}
 	r.loc = paneltz.LocationOf(r.global.Timezone)
+	r.rt = domain.RiskRuntimeFromSettings(r.global.RiskRuntimeSettings())
 	if r.users, err = s.listUsers(ctx); err != nil {
 		return fmt.Errorf("risk refresh: %w", err)
 	}
@@ -346,9 +361,12 @@ func (s *Service) loadPolicies(ctx context.Context, r *refresh) error {
 		}
 		// The geo policy through the same mapping and the same defaults
 		// the traffic poll judges with, so a group's tolerance means one
-		// thing on both sides.
+		// thing on both sides. The risk policy is bounded by the fleet's
+		// configured runtime — a min_days no window could satisfy, or a
+		// hold longer than the log is read, would describe what the worker
+		// never looks at.
 		r.policies[gid] = groupPolicy{
-			risk: domain.RiskPolicyFromSettings(set.RiskPolicySettings()),
+			risk: domain.RiskPolicyFromSettings(set.RiskPolicySettings()).Bounded(r.rt),
 			geo:  domain.GeoPolicyFromSettings(set.GeoPolicySettings()),
 		}
 	}

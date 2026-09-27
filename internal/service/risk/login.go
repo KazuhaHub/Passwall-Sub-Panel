@@ -28,15 +28,18 @@ type accountLogin struct {
 	ip     string
 }
 
-// loginLookbackDays is how far back the login log is read: 90 days, or the
-// auth-event retention when that is shorter — the rows before it are gone,
-// and a lookback reaching past them would read those days as days without
-// logins. 0 (keep forever) is the full 90.
-func loginLookbackDays(retention int) int {
-	if retention > 0 && retention < domain.RiskLoginLookbackDays {
+// loginLookbackDays is how far back the login log is read: the configured
+// risk.login_lookback_days (90 by default), or the auth-event retention when
+// that is shorter — the rows before it are gone, and a lookback reaching
+// past them would read those days as days without logins. 0 (keep forever)
+// leaves the configured lookback. As with the fetch window, the retention
+// applies only here, where the log is read; a group's hold is bounded by
+// the configured value.
+func loginLookbackDays(retention, configured int) int {
+	if retention > 0 && retention < configured {
 		return retention
 	}
-	return domain.RiskLoginLookbackDays
+	return configured
 }
 
 // loginCountry judges every account's successful panel logins
@@ -50,7 +53,7 @@ func loginLookbackDays(retention int) int {
 // cannot be read costs this kind its rows for the run — the stored ones
 // stay — and the run is partial.
 func (s *Service) loginCountry(ctx context.Context, r *refresh, pl placement) error {
-	lookback := loginLookbackDays(r.global.AuthEventRetentionDays)
+	lookback := loginLookbackDays(r.global.AuthEventRetentionDays, r.rt.LoginLookbackDays)
 	logins, err := s.readLogins(ctx, r, r.now.Add(-time.Duration(lookback)*24*time.Hour))
 	if err != nil {
 		if ctx.Err() != nil {
@@ -76,8 +79,15 @@ func (s *Service) loginCountry(ctx context.Context, r *refresh, pl placement) er
 		if pw := pl.users[u.ID]; pw != nil {
 			known = domain.EstablishedCountries(pw.sightings, policy.risk.MinDays)
 		}
+		// The warm-up and the hold are the group's (already bounded by the
+		// configured lookback in loadPolicies).
 		v, ev := domain.EvaluateLoginCountry(
-			domain.LoginCountryPolicy{Off: policy.risk.LoginCountryOff, Geo: policy.geo},
+			domain.LoginCountryPolicy{
+				Off:          policy.risk.LoginCountryOff,
+				Geo:          policy.geo,
+				WarmupLogins: policy.risk.LoginWarmupLogins,
+				HoldDays:     policy.risk.LoginHoldDays,
+			},
 			domain.LoginCountryInput{
 				NowMS:        nowMS,
 				LookbackDays: lookback,
@@ -99,8 +109,9 @@ func (s *Service) loginCountry(ctx context.Context, r *refresh, pl placement) er
 // logins land after the highest id; newest-first paging would push every
 // row one place down, read one twice and never see the new one. The hourly
 // retention prune deletes from the low end, and inside the read: with a
-// retention of 90 days or fewer the store's bound below is a day older than
-// the prune's cutoff, so the band it cuts holds the read's lowest ids.
+// retention no longer than the configured lookback the lookback IS the
+// retention (loginLookbackDays), so the store's bound below is a day older
+// than the prune's cutoff, and the band it cuts holds the read's lowest ids.
 // Under offset paging every row after the deleted ones would move up past a
 // page boundary and never be read, and a missed earlier login from a
 // country makes a later one from there read as new — a flag raised on

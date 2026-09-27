@@ -69,10 +69,10 @@ type UAClientSighting struct {
 
 // DeviceInput is one account's fetch window, folded by device.
 type DeviceInput struct {
-	// WindowDays is how many days the window holds: 7, or the sub-log
-	// retention when that is shorter. RetentionDays is
-	// sub_log_retention_days as stored (0 = never pruned), shown to explain
-	// a short window.
+	// WindowDays is how many days the window holds: risk.window_days (7 by
+	// default), or the sub-log retention when that is shorter.
+	// RetentionDays is sub_log_retention_days as stored (0 = never pruned),
+	// shown to explain a short window.
 	WindowDays, RetentionDays int
 	// WindowStart is the panel-local date of window day 0.
 	WindowStart string

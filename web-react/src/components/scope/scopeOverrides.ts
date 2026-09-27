@@ -126,6 +126,16 @@ export const SCOPE_KEYS: ScopeKeyMeta[] = [
   { cat: 'risk', key: 'risk.max_devices', type: 'risk', name: 'max_devices', kind: 'int', field: 'risk_max_devices', labelKey: 'risk_max_devices', def: '设备上限', unsetValue: '3' },
   { cat: 'risk', key: 'risk.usage_ratio', type: 'risk', name: 'usage_ratio', kind: 'float', field: 'risk_usage_ratio', labelKey: 'risk_usage_ratio', def: '用量倍数', unsetValue: '3' },
   { cat: 'risk', key: 'risk.usage_floor_gb', type: 'risk', name: 'usage_floor_gb', kind: 'int', field: 'risk_usage_floor_gb', labelKey: 'risk_usage_floor_gb', def: '每日用量下限（GB）', unsetValue: '3' },
+  // usage_shift's and login_country's thresholds, per-group since the risk
+  // center (they were constants). The unsetValues are domain.DefaultRiskPolicy
+  // too; the server raises usage_shift's to their floors (7, 2, 2) and holds
+  // each to the fleet's configured series and lookback, which the settings
+  // page's "in effect" captions show for the global value.
+  { cat: 'risk', key: 'risk.usage_warmup_days', type: 'risk', name: 'usage_warmup_days', kind: 'int', field: 'risk_usage_warmup_days', labelKey: 'risk_usage_warmup_days', def: '用量学习期（天）', unsetValue: '14' },
+  { cat: 'risk', key: 'risk.usage_flag_days', type: 'risk', name: 'usage_flag_days', kind: 'int', field: 'risk_usage_flag_days', labelKey: 'risk_usage_flag_days', def: '超标几天即标记', unsetValue: '4' },
+  { cat: 'risk', key: 'risk.usage_suspect_days', type: 'risk', name: 'usage_suspect_days', kind: 'int', field: 'risk_usage_suspect_days', labelKey: 'risk_usage_suspect_days', def: '超标几天即疑似', unsetValue: '2' },
+  { cat: 'risk', key: 'risk.login_warmup_logins', type: 'risk', name: 'login_warmup_logins', kind: 'int', field: 'risk_login_warmup_logins', labelKey: 'risk_login_warmup_logins', def: '登录学习次数', unsetValue: '3' },
+  { cat: 'risk', key: 'risk.login_hold_days', type: 'risk', name: 'login_hold_days', kind: 'int', field: 'risk_login_hold_days', labelKey: 'risk_login_hold_days', def: '新国家保持天数', unsetValue: '7' },
 ]
 
 // edit[key].on distinguishes "overridden" (sparse row exists) from "inherit"
