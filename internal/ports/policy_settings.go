@@ -167,9 +167,15 @@ const runtimeDefaultPollMinutes = 5
 // only differs once a poll is longer than half the freshness, and the hint
 // states that floor.
 //
-// A duration is converted to its unit rounding UP. Every conversion is exact
-// except the bell freshness, whose floor of two refresh intervals need not
-// be whole hours; rounding down would state a window the bell does not keep.
+// A duration is shown in its unit with no rounding, because every one is a
+// whole number of it: each comes from an integer setting in that unit, the
+// staleness floor is two whole-minute polls, and the bell freshness's floor
+// of two refreshes is completed to the hour by RiskRuntimeFromSettings
+// itself. That last one is deliberate. Two refreshes need not be whole hours,
+// and rounded here the page would state a window the bell does not keep in
+// either direction — rounded up, a flag already off the bell is "still lit";
+// rounded down, one still on it is "gone". Made whole where the bell reads
+// it, the number shown is the window applied.
 func RuntimeEffective(global UISettings) (effective, defaults map[string]int) {
 	poll := time.Duration(runtimeDefaultPollMinutes) * time.Minute
 	if global.CronTrafficPullMinutes > 0 {
@@ -195,9 +201,12 @@ func RuntimeEffective(global UISettings) (effective, defaults map[string]int) {
 }
 
 // runtimeKnobValues lays the resolved runtimes out as the 23 knobs, each in
-// the unit its setting is typed in.
+// the unit its setting is typed in. The division is exact (see
+// RuntimeEffective); TestRuntimeEffective_BellFreshnessIsTheWindowTheBellKeeps
+// holds the bell freshness, the one whose floor is whole only because the
+// domain makes it so.
 func runtimeKnobValues(geo domain.GeoRuntime, rt domain.RiskRuntime, p domain.RiskPolicy, poll time.Duration) map[string]int {
-	in := func(d, unit time.Duration) int { return int((d + unit - 1) / unit) }
+	in := func(d, unit time.Duration) int { return int(d / unit) }
 	return map[string]int{
 		"geo_anomaly_fresh_window_seconds":   geo.FreshWindowSeconds,
 		"geo_anomaly_shared_exit_min_users":  geo.SharedExitMinUsers,

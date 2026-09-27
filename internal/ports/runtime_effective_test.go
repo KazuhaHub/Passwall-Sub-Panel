@@ -5,6 +5,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 )
@@ -247,14 +248,29 @@ func TestRuntimeEffective_StalenessCoversTwoPolls(t *testing.T) {
 	}
 }
 
-// The bell's freshness is raised to two refresh intervals, which need not
-// be whole hours (a 100-minute cadence gives 200 minutes). The value is shown
-// in the setting's own unit, rounded UP: the floor is a promise that a flag
-// stays on the bell at least that long, and a rounded-down number would
-// state a window the bell does not keep.
-func TestRuntimeEffective_BellFreshnessRoundsUpToTheHour(t *testing.T) {
-	eff, _ := RuntimeEffective(UISettings{RiskRefreshIntervalMinutes: 100, RiskAlertFreshnessHours: 1})
-	if got := eff["risk_alert_freshness_hours"]; got != 4 {
-		t.Errorf("refresh 100 min, freshness 1 h: in effect %d h, want 4 (200 min rounded up)", got)
+// The bell freshness shown "in effect" is the window the bell applies, not
+// a rounding of it: the risk entry's window is exactly
+// RiskRuntimeFromSettings(...).AlertFreshness (alert.bellFreshness), and the
+// page shows the number times an hour. Two refreshes need not be whole hours
+// (a 100-minute cadence gives 3h20m); shown rounded up as 4, the page
+// promised a flag still on the bell at 3h30m that was already off it, and
+// rounded down as 3 it would call a flag at 3h10m gone that is still lit.
+// Every cadence and a spread of stored freshnesses, so no refresh interval
+// can bring the two apart again.
+func TestRuntimeEffective_BellFreshnessIsTheWindowTheBellKeeps(t *testing.T) {
+	for refresh := domain.RiskRefreshMinMinutes; refresh <= domain.RiskRefreshMaxMinutes; refresh++ {
+		for _, fresh := range []int{0, 1, 3, 24, domain.RiskAlertFreshnessMaxHours} {
+			set := UISettings{RiskRefreshIntervalMinutes: refresh, RiskAlertFreshnessHours: fresh}
+			eff, _ := RuntimeEffective(set)
+			shown := time.Duration(eff["risk_alert_freshness_hours"]) * time.Hour
+			if kept := domain.RiskRuntimeFromSettings(set.RiskRuntimeSettings()).AlertFreshness; shown != kept {
+				t.Fatalf("refresh %d min, freshness %d h: in effect %v, but the bell keeps a flag %v", refresh, fresh, shown, kept)
+			}
+		}
+	}
+	// The case the rounding got wrong, by name: two 100-minute refreshes
+	// completed to four whole hours, on the page and on the bell alike.
+	if eff, _ := RuntimeEffective(UISettings{RiskRefreshIntervalMinutes: 100, RiskAlertFreshnessHours: 1}); eff["risk_alert_freshness_hours"] != 4 {
+		t.Errorf("refresh 100 min, freshness 1 h: in effect %d h, want 4", eff["risk_alert_freshness_hours"])
 	}
 }

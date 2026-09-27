@@ -33,7 +33,9 @@ const defaultPollInterval = 5 * time.Minute
 // at the next.
 //
 // The risk entry is floored at two worker refreshes for the same reason;
-// RiskRuntimeFromSettings already folds that floor into AlertFreshness.
+// RiskRuntimeFromSettings already folds that floor into AlertFreshness,
+// completed to the whole hour, so this window is exactly the hours the
+// settings page shows as in effect.
 //
 // Unreadable settings are the shipped values — a 24-hour window at a
 // five-minute poll — never a bell gone dark because the settings table did.

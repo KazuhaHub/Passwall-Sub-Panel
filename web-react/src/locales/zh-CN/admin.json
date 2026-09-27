@@ -326,7 +326,7 @@
       "first_delay_minutes": "启动后首次计算延迟（分钟）",
       "first_delay_minutes_hint": "默认 2，范围 1–60，重启后生效。",
       "alert_freshness_hours": "通知铃新鲜度（小时）",
-      "alert_freshness_hours_hint": "多久没被重新判定的标记不再点亮通知铃。默认 24；异地并发不短于两个流量轮询间隔，风险信号不短于两个计算间隔。",
+      "alert_freshness_hours_hint": "多久没被重新判定的标记不再点亮通知铃。默认 24；异地并发不短于两个流量轮询间隔，风险信号不短于两个计算间隔（补足到整小时）；「当前生效」是风险信号那一条实际用的窗口。",
       "window_days": "订阅窗口（天）",
       "window_days_hint": "订阅多地与设备数看的天数。默认 7，范围 1–7；订阅日志保留期更短时按保留期。",
       "usage_baseline_days": "用量基线（天）",

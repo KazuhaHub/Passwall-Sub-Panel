@@ -547,6 +547,9 @@ func TestRiskAlertsUseTheConfiguredFreshness(t *testing.T) {
 	}{
 		{"the configured six hours", stubSettings{s: ports.UISettings{RiskAlertFreshnessHours: 6}}, 6 * time.Hour},
 		{"a daily refresh raises one hour to two days", stubSettings{s: ports.UISettings{RiskAlertFreshnessHours: 1, RiskRefreshIntervalMinutes: 1440}}, 48 * time.Hour},
+		// Two 100-minute refreshes are 3h20m; the bell keeps the four whole
+		// hours the settings page says are in effect, not 3h20m under a 4.
+		{"a 100-minute refresh raises one hour to four whole hours", stubSettings{s: ports.UISettings{RiskAlertFreshnessHours: 1, RiskRefreshIntervalMinutes: 100}}, 4 * time.Hour},
 		{"an unreadable setting is the shipped day", failingSettings{}, 24 * time.Hour},
 	} {
 		t.Run(c.name, func(t *testing.T) {

@@ -97,6 +97,10 @@ func TestRiskRuntimeFromSettings_AlertFreshnessCoversTwoRefreshes(t *testing.T) 
 		{"a half-hourly refresh leaves one hour alone", 30, 1, time.Hour},
 		{"the defaults are the former 24 hours", 0, 0, 24 * time.Hour},
 		{"a stored freshness above the floor is kept", 60, 6, 6 * time.Hour},
+		// Two 100-minute refreshes are 3h20m: the floor is completed to the
+		// next whole hour, never cut to the one below.
+		{"a 100-minute refresh raises one hour to four whole hours", 100, 1, 4 * time.Hour},
+		{"a 700-minute refresh raises one hour to a whole day", 700, 1, 24 * time.Hour},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			got := RiskRuntimeFromSettings(RiskRuntimeSettings{RefreshIntervalMinutes: c.refresh, AlertFreshnessHours: c.freshest}).AlertFreshness
@@ -104,6 +108,36 @@ func TestRiskRuntimeFromSettings_AlertFreshnessCoversTwoRefreshes(t *testing.T) 
 				t.Fatalf("AlertFreshness = %v, want %v", got, c.want)
 			}
 		})
+	}
+}
+
+// The freshness is typed in hours and the settings page says, in hours, what
+// is in effect. Two refreshes need not be whole hours (10..1440 minutes, so
+// 20 minutes to 48 hours), and a window of 3h20m can only be said as 3 — a
+// flag the bell still shows at 3h10m is "gone" by the page — or as 4 — a
+// flag already off the bell at 3h30m is "still lit". So the window itself is
+// whole hours, for every cadence: the configured hours when they already
+// cover two refreshes, and otherwise at least two refreshes (the flicker
+// bound above) but less than an hour past them — completed to the hour,
+// never a whole extra hour.
+func TestRiskRuntimeFromSettings_AlertFreshnessIsWholeHours(t *testing.T) {
+	for refresh := RiskRefreshMinMinutes; refresh <= RiskRefreshMaxMinutes; refresh++ {
+		for _, fresh := range []int{0, 1, 3, 24, RiskAlertFreshnessMaxHours} {
+			rt := RiskRuntimeFromSettings(RiskRuntimeSettings{RefreshIntervalMinutes: refresh, AlertFreshnessHours: fresh})
+			got, two := rt.AlertFreshness, 2*rt.RefreshInterval
+			configured := time.Duration(fresh) * time.Hour
+			if fresh == 0 {
+				configured = RiskDefaultAlertFreshnessHours * time.Hour
+			}
+			switch {
+			case got%time.Hour != 0:
+				t.Fatalf("refresh %d min, freshness %d h: AlertFreshness = %v, not a whole number of hours", refresh, fresh, got)
+			case configured >= two && got != configured:
+				t.Fatalf("refresh %d min, freshness %d h: AlertFreshness = %v, want the configured %v", refresh, fresh, got, configured)
+			case configured < two && (got < two || got >= two+time.Hour):
+				t.Fatalf("refresh %d min, freshness %d h: AlertFreshness = %v, want two refreshes (%v) completed to the hour", refresh, fresh, got, two)
+			}
+		}
 	}
 }
 

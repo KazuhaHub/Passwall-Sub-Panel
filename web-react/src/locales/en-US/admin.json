@@ -326,7 +326,7 @@
       "first_delay_minutes": "First run after start (minutes)",
       "first_delay_minutes_hint": "Default 2, range 1–60; takes effect on restart.",
       "alert_freshness_hours": "Bell freshness (hours)",
-      "alert_freshness_hours_hint": "A flag not re-judged for this long stops lighting the bell. Default 24; never shorter than two traffic polls for locations, or two refresh intervals for risk signals.",
+      "alert_freshness_hours_hint": "A flag not re-judged for this long stops lighting the bell. Default 24; never shorter than two traffic polls for locations, or two refresh intervals (completed to a whole hour) for risk signals; the value in effect is the risk entry's exact window.",
       "window_days": "Fetch window (days)",
       "window_days_hint": "Days subscription spread and devices read. Default 7, range 1–7; shorter when sub-log retention is.",
       "usage_baseline_days": "Usage baseline (days)",

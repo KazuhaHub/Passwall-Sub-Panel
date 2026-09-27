@@ -142,9 +142,9 @@ type RiskRuntime struct {
 	// FirstDelay: how long after start the first run waits. 1..60 min.
 	FirstDelay time.Duration
 	// AlertFreshness: how long a flag nobody re-judged keeps the bell lit.
-	// 1..720 h, and never less than two RefreshIntervals (see
-	// RiskRuntimeFromSettings); the geo entry is floored by the poll
-	// interval on top (GeoBellFreshness).
+	// 1..720 h, and never less than two RefreshIntervals completed to the
+	// hour, so it is always whole hours (see RiskRuntimeFromSettings); the
+	// geo entry is floored by the poll interval on top (GeoBellFreshness).
 	AlertFreshness time.Duration
 	// WindowDays: the fetch window the place and device signals read, in
 	// panel-local days. 1..RiskWindowDays.
@@ -220,13 +220,25 @@ func DefaultRiskRuntime() RiskRuntime {
 // it back — a lit, dark, lit bell for an account nothing changed about. The
 // raised value IS the value in effect, for both bell entries: one knob, one
 // number an admin can check.
+//
+// That number is in hours, the knob's unit, and two refreshes need not be
+// whole hours: at a 100-minute cadence they are 3h20m. So the floor is
+// completed to the next whole hour here, where the bell reads it, and the
+// window is always whole hours. Rounding only where it is SHOWN cannot be
+// right either way — 4 promises a flag at 3h30m is still lit when it is
+// already off the bell, 3 calls a flag at 3h10m gone when it is still on it
+// — and rounding the floor down would undercut the two refreshes the floor
+// exists for. Completing it adds under an hour, and nothing at the shipped
+// cadence (two hourly refreshes are two whole hours) or at any cadence that
+// is a multiple of half an hour.
 func RiskRuntimeFromSettings(s RiskRuntimeSettings) RiskRuntime {
 	refresh := time.Duration(settingOr(s.RefreshIntervalMinutes, RiskDefaultRefreshMinutes, RiskRefreshMinMinutes, RiskRefreshMaxMinutes)) * time.Minute
 	fresh := time.Duration(settingOr(s.AlertFreshnessHours, RiskDefaultAlertFreshnessHours, 1, RiskAlertFreshnessMaxHours)) * time.Hour
+	twoRefreshes := (2*refresh + time.Hour - 1).Truncate(time.Hour)
 	return RiskRuntime{
 		RefreshInterval:   refresh,
 		FirstDelay:        time.Duration(settingOr(s.FirstDelayMinutes, RiskDefaultFirstDelayMinutes, 1, RiskFirstDelayMaxMinutes)) * time.Minute,
-		AlertFreshness:    max(fresh, 2*refresh),
+		AlertFreshness:    max(fresh, twoRefreshes),
 		WindowDays:        settingOr(s.WindowDays, RiskDefaultWindowDays, 1, RiskWindowDays),
 		LoginLookbackDays: settingOr(s.LoginLookbackDays, RiskLoginLookbackDays, RiskLoginLookbackMinDays, RiskLoginLookbackMaxDays),
 		UsageBaselineDays: settingOr(s.UsageBaselineDays, RiskUsageBaselineDays, RiskUsageBaselineMinDays, RiskUsageBaselineMaxDays),
