@@ -375,3 +375,68 @@ func (s *Service) liveExclusions(ignoreRaw string, rt domain.GeoRuntime) (domain
 	}
 	return ex, err
 }
+
+// ConnectionRecorder is where the poll records the connections of the
+// accounts it judged: the connection history (connection_history, the risk
+// center's 连接历史), the one table the detector's data keeps addresses in.
+// Record merges one detector sample into it, stamped with the sample's
+// instant, and writes that table and nothing else. An interface, like the
+// streak store, so the poll runs on a fake in tests and on nothing at all
+// where the history is not wired.
+type ConnectionRecorder interface {
+	Record(ctx context.Context, conns []domain.LiveConnection, at time.Time) error
+}
+
+// SetConnectionRecorder late-binds the connection history. Nil is a
+// supported state: the poll judges and fills the live view exactly as
+// without it and records nothing, so an empty connection history is the only
+// symptom of forgetting the wiring (TestBuildWiresTheConnectionRecorder).
+func (s *Service) SetConnectionRecorder(r ConnectionRecorder) { s.connRec = r }
+
+// recordConnections records one detector sample into the connection
+// history: conns are the stored snapshot's connections of the accounts this
+// poll JUDGED (judgedConnections). So a history row's count counts samples.
+// An account the spacing rule skipped was not sampled and is not recorded
+// again — a manual "poll now" cannot turn clicks into counts — and a refresh
+// never gets here at all: it is never a sample.
+//
+// Detached from the poll's cancellation and bounded on its own
+// (geoFollowUpWriteTimeout), like the audit row of a committed transition.
+// By the time it runs the sample has been judged and its streaks saved, so
+// it records something that has already happened; a poll cancelled at that
+// point (a closed "poll now" tab, a shutdown) would otherwise leave a
+// judged sample the history never counted.
+//
+// Never fails the poll: metering is what the poll is for. A refused write
+// is counted (psp_connection_history_write_errors_total) and logged with
+// the number of connections and the store's error — never the connections
+// themselves, which are addresses, and whose store names columns rather
+// than values in its errors.
+func (s *Service) recordConnections(ctx context.Context, conns []domain.LiveConnection, at time.Time) {
+	if s.connRec == nil || len(conns) == 0 {
+		return
+	}
+	wctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), geoFollowUpWriteTimeout)
+	defer cancel()
+	if err := s.connRec.Record(wctx, conns, at); err != nil {
+		metrics.ConnectionHistoryWriteErrorsTotal.Inc()
+		log.Warn("connection history: could not record this poll's judged connections; the poll itself is unaffected",
+			"connections", len(conns), "err", err)
+	}
+}
+
+// judgedConnections is the part of a poll's live view that was a detector
+// sample: the connections of the accounts judged this poll (the keys of the
+// records it saved). The view lists every connected account, the spaced ones
+// included, because spacing decides who is judged, not who is connected; the
+// history counts samples, so it takes only these. A new slice, in the
+// view's order: the stored snapshot is shared and never modified.
+func judgedConnections(conns []domain.LiveConnection, judged map[int64]domain.GeoRecord) []domain.LiveConnection {
+	out := make([]domain.LiveConnection, 0, len(conns))
+	for _, c := range conns {
+		if _, ok := judged[c.UserID]; ok {
+			out = append(out, c)
+		}
+	}
+	return out
+}

@@ -505,7 +505,8 @@ func TestRefreshLiveConnections_ReadsEachPanelOnce(t *testing.T) {
 // But nothing the detector keeps between polls may change: not the
 // per-node references (the next poll judges "rescanned since" against
 // them), not a streak, not the poll's settings cache, not one detector
-// metric. Only the size of the stored view moves.
+// metric, not one row of the connection history (which counts detector
+// samples). Only the size of the stored view moves.
 func TestRefreshLiveConnections_LeavesDetectorStateAlone(t *testing.T) {
 	metrics.Reset()
 	panel := detailPanel(map[string][]domain.LiveIPSighting{
@@ -514,6 +515,8 @@ func TestRefreshLiveConnections_LeavesDetectorStateAlone(t *testing.T) {
 	s := newRefresher(map[int64]ports.XUIClient{1: panel}, client(7, 1, "u7@x"))
 	streaks := &countingStreaks{}
 	s.SetGeoStreakStore(streaks)
+	history := &fakeRecorder{}
+	s.SetConnectionRecorder(history)
 	s.SetGeoResolver(twoCountries())
 	s.WithSettings(&fakeScoped{global: ports.UISettings{CronTrafficPullMinutes: 5}})
 	cached := ports.UISettings{CronTrafficPullMinutes: 7, GeoAnomalyIgnoreAddresses: "9.9.9.9"}
@@ -538,6 +541,9 @@ func TestRefreshLiveConnections_LeavesDetectorStateAlone(t *testing.T) {
 	}
 	if streaks.loads != 0 || streaks.saves != 0 {
 		t.Errorf("streak loads %d saves %d, want none", streaks.loads, streaks.saves)
+	}
+	if got := len(history.calls()); got != 0 {
+		t.Errorf("connection history writes = %d, want none", got)
 	}
 	if !reflect.DeepEqual(s.pollCfgCache, cached) {
 		t.Errorf("poll settings cache = %+v, want it untouched", s.pollCfgCache)

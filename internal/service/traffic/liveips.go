@@ -210,15 +210,18 @@ func (c *geoPolicyCache) lookup(uid int64) geoPolicyEntry {
 //     (geo_anomaly.shared_exit_min_users, three by default) are set aside
 //     (domain.ClassifyAddresses) and counted rather than placed;
 //   - at most once per half poll interval per user (in.minSpacing), so a
-//     manual poll cannot turn clicks into samples.
+//     manual poll cannot turn clicks into samples. Overlapping polls judge
+//     one at a time (judgeLiveIPs), so the second of two finds the first
+//     one's accounts judged and spaces them.
 //
 // It changes no user's state and writes to no panel. Beyond the verdict it
 // stores the live-connection snapshot (in memory, for the risk center; see
-// liveconn.go) and hands back the automatic suspensions that are due (only
-// where a group has armed them; off by default), for PollOnce to apply at
-// the end of the cycle (enforceGeo). Which of them are handed back is
-// decided here, before the streaks are saved, because that decision is also
-// a streak write: see collectGeoBans.
+// liveconn.go), records the connections of the accounts it judged into the
+// connection history (recordConnections), and hands back the automatic
+// suspensions that are due (only where a group has armed them; off by
+// default), for PollOnce to apply at the end of the cycle (enforceGeo).
+// Which of them are handed back is decided here, before the streaks are
+// saved, because that decision is also a streak write: see collectGeoBans.
 //
 // Never fails the poll. Traffic metering is what PollOnce exists for, and a
 // missing geo database or an unreadable panel must not cost the cycle its
@@ -287,7 +290,8 @@ func (s *Service) observeLiveIPs(ctx context.Context, in liveIPInput) []geoBan {
 	// judging and for EVERY account, the spaced ones included — spacing
 	// decides who is judged again, not who is connected. It is memory only
 	// and changes nothing the verdict reads.
-	s.storeLiveSnapshot(s.buildLiveSnapshot(ctx, panels, owners, addrs, unreferenced, domain.LiveSnapshotFromPoll, now))
+	snap := s.buildLiveSnapshot(ctx, panels, owners, addrs, unreferenced, domain.LiveSnapshotFromPoll, now)
+	s.storeLiveSnapshot(snap)
 
 	geoAvailable := s.geo != nil && s.geo.Available(ctx)
 	var lookup domain.GeoLookup
@@ -296,6 +300,45 @@ func (s *Service) observeLiveIPs(ctx context.Context, in liveIPInput) []geoBan {
 			return s.geo.Lookup(ctx, ips)
 		}
 	}
+
+	bans, next := s.judgeLiveIPs(ctx, in, pc, agg, addrs, lookup, geoAvailable, len(panels), now)
+
+	// This poll's detector sample, into the connection history: the
+	// connections of the accounts just judged, never of the spaced ones
+	// (see recordConnections). After the step above has released the
+	// judging lock, so an overlapping poll's judging never waits on this
+	// write.
+	s.recordConnections(ctx, judgedConnections(snap.Conns, next), now)
+	return bans
+}
+
+// judgeLiveIPs is the judging step of one observation, taken under
+// geoJudgeMu: load the streaks, judge every account not judged too recently,
+// decide the due suspensions, save. It returns those suspensions for Phase 4
+// and the records it saved, whose keys are exactly the accounts this poll
+// judged.
+//
+// One step per poll, because polls overlap: the scheduled one and a staff
+// "poll now" run PollOnce at once with nothing else between them. Two that
+// both loaded before either saved would judge the same accounts from the
+// same stored state, and one moment would be sampled twice — two verdicts
+// counted, two connection-history counts for one connection. Serialized, the
+// second poll loads the first one's write, finds those accounts judged a
+// moment ago, and spaces them (in.minSpacing); a sequence of polls that do
+// not overlap is judged exactly as before. The panel reads, the freshness
+// merge and the live view stay outside the lock, so what waits is one
+// streak load and save.
+//
+// The lock is released by a defer, so a panic while judging cannot leave it
+// held. The manual poll runs under the router's gin.Recovery, which would
+// swallow such a panic and let the process go on; every later poll, the
+// scheduled one included, would then block here for good, and with it the
+// traffic metering it shares a cycle with.
+func (s *Service) judgeLiveIPs(ctx context.Context, in liveIPInput, pc *geoPolicyCache,
+	agg map[int64]domain.UserLiveIPs, addrs map[int64]domain.UserAddresses,
+	lookup domain.GeoLookup, geoAvailable bool, panels int, now time.Time) (bans []geoBan, next map[int64]domain.GeoRecord) {
+	s.geoJudgeMu.Lock()
+	defer s.geoJudgeMu.Unlock()
 
 	// Load the streaks once. A failure here degrades to "every user starts
 	// from a clean streak this cycle", which under-reports (nobody reaches
@@ -311,7 +354,7 @@ func (s *Service) observeLiveIPs(ctx context.Context, in liveIPInput) []geoBan {
 		}
 	}
 
-	next := make(map[int64]domain.GeoRecord, len(agg))
+	next = make(map[int64]domain.GeoRecord, len(agg))
 	var due []geoBan
 	var incomplete, spaced int
 	for uid, u := range agg {
@@ -409,17 +452,17 @@ func (s *Service) observeLiveIPs(ctx context.Context, in liveIPInput) []geoBan {
 	if incomplete > 0 {
 		metrics.LiveIPUsersIncompleteTotal.Add(int64(incomplete))
 		log.Warn("live-ip observe: some users' totals are floors, not totals",
-			"users", incomplete, "panels", len(panels))
+			"users", incomplete, "panels", panels)
 	}
 
-	bans := collectGeoBans(due, in.users, next, pc, now)
+	bans = collectGeoBans(due, in.users, next, pc, now)
 
 	if s.geoStreaks != nil {
 		if err := s.geoStreaks.Save(ctx, next); err != nil {
 			log.Warn("live-ip observe: could not persist geo streaks; hysteresis restarts next cycle", "err", err)
 		}
 	}
-	return bans
+	return bans, next
 }
 
 // collectGeoBans turns this cycle's due suspensions into the ones PollOnce

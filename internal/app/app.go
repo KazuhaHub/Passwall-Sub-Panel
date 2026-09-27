@@ -571,9 +571,13 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	riskSignals := sqlstore.NewRiskSignalRepo(db)
 	// The connection history: the one table the detector's data keeps IP
 	// addresses in. Built the same way, so its only consumers are the ones
-	// handed a narrow view of it — the hourly cleanup below prunes it. Its
-	// statements log without their bound values (sqlstore.redactParams).
+	// handed a narrow view of it — the traffic poll records each judged
+	// sample into it, and the hourly cleanup below prunes it. Its statements
+	// log without their bound values (sqlstore.redactParams). The setter is
+	// nil-tolerant, so leaving it out compiles and the history just stays
+	// empty; TestBuildWiresTheConnectionRecorder guards it.
 	connHistory := sqlstore.NewConnectionHistoryRepo(db)
+	trafficSvc.SetConnectionRecorder(connHistory)
 
 	// --- transport layer ---
 	// The Node installation template is fetched from the release that published it

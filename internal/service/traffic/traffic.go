@@ -93,6 +93,15 @@ type Service struct {
 	// pointer under the read lock. nil until the first poll.
 	liveSnapMu sync.RWMutex
 	liveSnap   *domain.LiveConnSnapshot
+	// geoJudgeMu makes one observation's streak load, judging and streak
+	// save a single step (judgeLiveIPs), so overlapping polls never judge
+	// the same accounts from the same stored state. Only that step: the
+	// panel reads and liveRefsMu's merge happen before it, and the history
+	// write after it.
+	geoJudgeMu sync.Mutex
+	// connRec is the connection history (connection_history) the poll
+	// records each judged sample into; late-bound, nil records nothing.
+	connRec ConnectionRecorder
 	// configPusher is wired lazily (user.Service is the implementor and
 	// is created before traffic.Service). nil = skip floor refresh on poll.
 	configPusher UserConfigPusher

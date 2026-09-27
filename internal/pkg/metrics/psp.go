@@ -298,6 +298,16 @@ var (
 		"psp_live_connections",
 		"Live connections (account, panel node, source) in the latest stored live-connection snapshot.",
 	)
+	// Polls whose judged connections could not be recorded into the
+	// connection history (connection_history). The poll carries on —
+	// metering is its job — so without this a history that has stopped
+	// growing shows only as a Warn. Any steady climb means the history
+	// holds less than it appears to: the samples of those polls are not in
+	// it and are never written later.
+	ConnectionHistoryWriteErrorsTotal = NewCounter(
+		"psp_connection_history_write_errors_total",
+		"Traffic polls whose judged connections could not be recorded into the connection history. The poll itself is unaffected.",
+	)
 	// Risk-signal refreshes (hourly by default, risk.refresh_interval_minutes),
 	// by outcome. The signals are observe-only and a failed run keeps the
 	// previous rows, so nothing else shows a worker that has quietly stopped
