@@ -1,6 +1,6 @@
 # 节点审查（目的地策略与访问记录）：任务规划书
 
-- **状态**：规划已定稿（2026-09-28），待派工。**§12 有一项仍待所有者确认**（白名单语义），不阻塞 Phase 0–2。
+- **状态**：规划已定稿（2026-09-28），待派工。所有者决定已全部给出（§1），无待确认项。
 - **涉及仓库**：Passwall-Protocol（线上类型）、Passwall-Node（执行与采集）、Passwall-Sub-Panel（策略、存储、界面）
 - **核对基线**：Passwall-Node `origin/main` `753d3a6`、Passwall-Protocol `v0.2.0`（PSP `go.mod` 钉的版本）、
   PSP `origin/main` `fb12a6c1`。**本地 Passwall-Node 检出落后 origin/main 33 个提交，开工前先 fetch，
@@ -26,6 +26,8 @@ PSP 定义「哪些目的地拦截 / 只观察 / 放行」，编进原生节点�
 | 2 | 适用范围 | **只做 PSP 原生节点**。3X-UI / S-UI 的 Xray 路由模板归运营者，PSP 不写；它们显示「不支持」 |
 | 3 | 记录粒度 | **默认 A 档**（只记规则命中）；**管理员可按节点开启 B 档**（每用户每小时按主域名聚合）。C 档（原始日志）不回传 |
 | 4 | 对用户披露 | 做一个**隐私与协议页面**，**默认关闭** |
+| 5 | 白名单的含义（2026-09-28） | **按分组的白名单模式：该分组的用户只能访问名单内的目的地，其他一律拒绝**。设计见 §12。放行例外（`allow` 动作）与用户豁免同样保留 |
+| 6 | 默认值（2026-09-28） | 存在启用的策略时，A 档对所有原生节点默认开启；命中保留 30 天、用量保留 7 天 |
 
 ---
 
@@ -132,6 +134,11 @@ type DestinationRule struct {
     Ports          string        `json:"ports,omitempty"`    // "25,465,587" / "6881-6889"
     Network        string        `json:"network,omitempty"`  // "tcp" | "udp" | ""
     Protocols      []string      `json:"protocols,omitempty"` // 仅 "bittorrent"
+    // CatchAll marks a rule with no match fields that applies to every connection
+    // of its Subjects — the default-deny tail of a whitelist group (§12). It must
+    // be explicit: a rule whose match lists merely came out empty (a list failed
+    // to load) must be rejected, never silently widened into "match everything".
+    CatchAll       bool          `json:"catch_all,omitempty"`
 }
 ```
 
@@ -140,6 +147,8 @@ type DestinationRule struct {
 - **校验（`validate.go`，发送方和接收方共用）**：规则数 ≤ 256；所有规则 `Domains` 合计 ≤ 50 000 条；
   `regexp:` 合计 ≤ 256 条且必须能被 Go `regexp` 编译；`CIDRs` 合计 ≤ 20 000；Policy 序列化后 ≤ 4 MiB；
   ID 唯一且符合字符集；`Subjects` 与 `ExceptSubjects` 都用现有 `SubjectKey` 校验。
+  **匹配字段全空的规则必须 `CatchAll: true` 且 `Subjects` 非空**，否则整份 Policy 拒收；反过来
+  `CatchAll: true` 的规则不许带任何匹配字段。
   上限写进 `limits.go`，是**编译期常量**，不进设置（它们保护的是 16 MiB 的 sync 体）。
 - **ETag**：沿用现有「规范序列化的 sha256」。`Policy == nil` 时序列化结果必须与 v0.2.0 **逐字节相同**，
   加一条 conformance 测试锁住。
@@ -482,8 +491,8 @@ PSP 必须在「所有节点都是旧版」时照常工作（策略页显示「�
 | **2c** | P1 hits 表、P4、P5 保留、P6 风险信号、P7 hits、§7 命中 tab + 用户抽屉 + 服务器详情区块 | PSP | 2a | 与 2b 并行 |
 | **3** | §8 隐私与协议页 | PSP | 无 | 可与 1、2 任意并行 |
 | **4** | B 档：N2 用量聚合、`audit.usage.v1`、P1 usage 表、P7 usage、§7 用量视图 | 三仓 | 2、3（B 档上线前隐私页已可用） | |
-| **5** | sing-box 采集调研 → 实现 | Node | 2 | |
-| **6** | 白名单模式（见 §12） | 三仓 | 所有者确认 | |
+| **5** | 白名单模式（§12） | 三仓 | 1（执行）、2（试运行要看命中） | 可与 4 并行 |
+| **6** | sing-box 采集调研 → 实现 | Node | 2 | |
 
 每个阶段一个或多个 PR，分支从各自仓库的 `origin/main` 切，命名 `kazuha/access-control-<阶段>`；
 **每个 WP 先写失败测试再实现**。
@@ -515,18 +524,124 @@ PSP 必须在「所有节点都是旧版」时照常工作（策略页显示「�
 
 ---
 
-## 12. 待所有者确认
 
-**白名单指哪一种？**（本计划的 Phase 0–4 已包含 a 与 b；c 列为 Phase 6，等确认）
+## 12. 白名单模式（按分组：只能访问名单内的目的地，其余一律拒绝）
 
-| | 含义 | 本计划中的位置 |
-|---|---|---|
-| a. 放行例外 | 某域名虽在拦截列表里，但放行（修误伤） | 已含：`allow` 动作，永远优先 |
-| b. 用户豁免 | 某些用户不受拦截约束 | 已含：`dest_exemptions` |
-| c. 白名单模式 | 某分组**只能**访问列表内目的地，其余全拒 | 未含。实现方式：该分组的规则末尾加一条 `user: [...] → psp-deny-default`；注意这会让该分组所有未列出的流量（含 DNS、系统更新）被拒，需要一套「基础放行」预设，设计另写 |
+所有者 2026-09-28 确认的含义。**能做到**，但它和「拦截名单」的风险方向相反：拦截名单出了问题，结果是漏拦；
+白名单出了问题，结果要么是**用户什么都打不开**，要么是**白名单形同虚设**。所以本节的大部分篇幅不在
+「怎么拒绝」（一条规则的事），而在下面四件事：
 
-另外两处等所有者拍板时顺带确认：
+1. **能不能保证执行**：用户可能根本没连到会执行规则的节点上；
+2. **DNS**：客户端的 DNS 查询也要走代理，不放行就全断；
+3. **网站依赖**：一个网站会从很多其他域名加载资源；
+4. **切换过程**：从「不限」到「白名单」中间有一段空窗。
 
-- A 档默认对**所有**原生节点开启（`panels.audit_collect` 默认 `hits`），但前提是存在至少一条启用的策略；
-  没有策略时节点上什么都不采。是否认可？
-- 命中保留默认 30 天、用量默认 7 天，是否认可？
+### 12.1 规则形状
+
+一个分组设为白名单模式后，编译顺序是（F13：按 subject 指人；一个用户只属于一个分组）：
+
+```
+1. 全局 allow 策略                                   → direct
+2. 全局 block / observe 策略（禁止 BT、发信等照样生效） → psp-deny-* / psp-watch-*
+3. 该分组的白名单列表     subjects = 分组成员          → direct
+4. 该分组的基础放行（DNS 等，§12.3） subjects = 分组成员 → direct
+5. 该分组的兜底规则       subjects = 分组成员, CatchAll → 试运行：psp-watch-g<gid>
+                                                      执行中：psp-deny-g<gid>
+```
+
+- 豁免用户（`dest_exemptions`）同样不受第 5 条约束（放进 `ExceptSubjects`），界面上明说
+  「豁免 = 不受任何访问限制，包括白名单」。
+- 第 2 条排在第 3 条之前，是刻意的：白名单里的网站也不许跑 BT、不许发信。
+- 兜底规则只靠 `user` 一个条件匹配。Xray 和 sing-box 都接受只有用户条件的规则，但实现时要用真二进制
+  `-test` / `check` 确认（不凭文档）。
+- 域名匹配依赖嗅探（N1 第 4 步）。白名单模式下，客户端用 IP 发起、又没有 SNI 的连接**会被拒绝**。
+  方向是安全的（宁拒不放），但界面帮助要写明。
+
+### 12.2 执行保证：不支持的节点上根本不给这个用户开账号（关键）
+
+白名单只在「用户认证所在的那台 PSP 原生节点、而且策略已生效」时才成立。以下情况都会让白名单失效：
+3X-UI / S-UI 节点、旧版原生节点、策略超限而保留旧版的节点（P3 第 5 步）。
+
+**只在订阅里隐藏这些节点是不够的**：用户在那些面板上的 client 仍然存在，旧订阅、手抄的配置照样能连。
+所以必须在**成员同步**这一层就把它们排除，让 client 根本不被创建（已有的被删除）。
+
+1. **一个判断，全仓共用。** 今天「分组选中哪些节点」散在 5 处：
+   `service/render/render.go:108`、`service/user/user.go:302,1475,2179,2231`（经 `NodesFor`），
+   以及 `service/reconcile/reconcile.go:429`、`service/node/node.go:597,1362`（直接调 `group.Matches`）。
+   新增唯一的判断 `group.Service.Eligible(ctx, node, group) bool`，并把 `NodesFor` 改为调它：
+   - 分组不是白名单模式 → 等同今天的 tag_filter 匹配；
+   - 是白名单模式 → 另外要求该节点所在面板 `kind == psp`、且 agent 的 `observed_capabilities` 含
+     `policy.destination.v1`。
+   **5 处调用全部改为走这个判断**，然后加一条测试：用 `go/ast` 扫 `internal/service`，除 `group` 包外
+   不得再出现对 `group.Matches` 的直接调用（防止以后新增第 6 处时绕过去）。
+2. 这个判断**只看能力、不看「是否已生效」**。能力是稳定的，生效状态每个同步周期都会变，
+   拿它驱动成员同步会让 client 反复创建、删除。「未生效」的空窗由 §12.5 处理。
+3. 分组切到白名单模式、或节点能力消失（降级安装）时，触发该分组所有用户的 `ResyncMembership`，
+   让不合格面板上的 client 被删掉。删除走现有同步任务队列，面板离线时排队重试。
+4. 界面：分组设置页列出「白名单模式下，以下 N 个节点将不再对本组用户开放」，保存前确认。
+
+### 12.3 DNS 与基础放行
+
+默认模板会让一部分 DNS 查询**经由代理**发出。已核实的两处：
+
+- `internal/seed/files/templates/default-mihomo.yaml`：境外域名走
+  `https://l9f26nnn5d.cloudflare-gateway.com/dns-query#🚀 节点选择`，即通过所选节点发出；
+  `default-nameserver` 含 `https://1.1.1.1/dns-query`。
+- `internal/seed/files/templates/default-sing-box.yaml`：`cloudflare-gateway`、`1.1.1.1`、`1.0.0.1` 三个 DoH 服务器。
+
+白名单分组如果不放行这些，**用户连境外域名都解析不出来**，表现是「所有网站都打不开」，而不是「只有名单外的打不开」。
+
+做法：
+
+1. 每个白名单分组都自带一份「基础放行」列表（`dest_group_modes.base_list_id`，见 12.6），创建时预填：
+   上面模板里经代理发出的 DoH 主机名与 IP（`l9f26nnn5d.cloudflare-gateway.com`、`1.1.1.1`、`1.0.0.1`）。
+   **预填内容由实现者在开工时重新从当前模板里读一遍**，不要照抄本文（模板是运营者可改的文件，
+   `internal/seed` 只在文件不存在时写入）。
+2. 基础放行**不包括**任意 53 端口：放开 53 等于放开 DNS 隧道。
+3. 「测试目的地」工具（P7 `/dest/test`）对白名单分组要能回答「这个域名对该组用户是放行还是拒绝、命中哪条」。
+
+### 12.4 网站依赖：先试运行，再执行
+
+白名单里写 `example.com`，只放行 `example.com` 及其子域（`domain:` 语义）。但网页的字体、脚本、图片、
+视频往往来自别的域名（CDN、第三方登录、统计），只放主域名，页面会残缺或登录失败。
+
+所以白名单有两个阶段，**新建时强制从「试运行」开始**：
+
+| 阶段 | 兜底规则动作 | 用户体验 | 管理员看到 |
+|---|---|---|---|
+| 试运行 | `observe`（`psp-watch-g<gid>`） | 一切照常 | 「试运行报告」：过去 N 天**本应被拒绝**的目的地，按次数排序，按主域名折叠；每行一键「加入白名单」 |
+| 执行 | `block`（`psp-deny-g<gid>`） | 名单外拒绝 | 被拒记录（同一份命中表） |
+
+- 试运行报告的数据就是 A 档命中（兜底规则的 observe 命中），**不需要开 B 档**。
+- 从试运行切到执行，是管理员在界面上的一次显式操作，确认框写明「切换后本组用户访问名单外目的地将被拒绝」。
+- 兜底规则的命中量会很大（每个后台 App 的心跳都算）。它**不计入风险信号**（`counts_as_risk` 恒为 false），
+  并受 N2 的聚合上限约束；溢出计入 `Dropped`，报告页显示「本期有 X 条记录因上限未统计」。
+
+### 12.5 切换空窗
+
+- 分组从「不限」切到白名单，或新用户加入白名单分组：新策略最晚在「去抖间隔（默认 60s）+ 一个同步周期
+  （默认 30s）」后生效，节点 core 重启一次。这段时间内该用户在已有 client 的节点上**不受限制**。
+  本计划接受这个空窗，写进界面帮助文字，**不**为它新增门禁。
+- 反方向（从白名单切回不限、或用户移出分组）：空窗期里用户仍受限，方向安全。
+- 服务器详情页的「访问控制」区块显示每台节点「白名单策略：已生效 / 下发中 / 未支持」，数据来自 P7 `/dest/status`。
+
+### 12.6 数据与接口增量
+
+| 位置 | 内容 |
+|---|---|
+| 新表 `dest_group_modes` | `group_id`（PK）、`mode`（`open` / `allowlist`）、`stage`（`trial` / `enforce`）、`list_ids` text(JSON)、`base_list_id`、`stage_changed_at`、`updated_at`。**不往 `groups_` 加列**：分组行被多处按列写，单独一张表不碰那些写路径 |
+| 协议 | §4.1 的 `CatchAll` 字段（已写入） |
+| P3 编译 | 按 §12.1 的顺序输出；兜底规则 ID 为 `g<groupID>`，入库时反解为「分组兜底」，不是 policy_id |
+| `dest_hits` | `policy_id` 列改为 `source` varchar(24)：`p<id>` 或 `g<id>`（开工前定，避免入库后再改主键） |
+| API | `GET/PUT /api/admin/dest/groups/:group_id`（模式、阶段、列表）；`GET /api/admin/dest/groups/:group_id/trial-report?days=7` |
+| 前端 | 分组编辑页加「访问模式」段：不限 / 白名单；白名单时显示列表选择、基础放行、阶段、受影响节点、试运行报告入口。访问控制页「策略」tab 顶部列出所有白名单分组及其阶段 |
+
+### 12.7 验收场景（追加到 §11）
+
+19. 分组设为白名单（试运行）：用户访问名单外网站**成功**，试运行报告出现该域名；一键加入后报告里消失。
+20. 切到执行：名单外网站被拒；名单内网站正常；境外域名解析正常（证明基础放行生效）。
+21. 同组用户在 3X-UI 节点上的 client 被删除，订阅里也不再出现该节点；用旧订阅连接失败。
+22. 白名单分组里的用户跑 BT，仍被「禁止 BT」拦截（全局 block 优先于白名单放行）。
+23. 豁免用户在白名单分组里不受限制。
+24. 某节点策略超限保留旧版时，界面显示「白名单策略：未生效」，并出现 sync issue。
+25. `go/ast` 守卫测试：在 `internal/service` 里新增一处直接 `group.Matches` 调用时测试失败。
