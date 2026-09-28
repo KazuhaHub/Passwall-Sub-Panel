@@ -1,7 +1,7 @@
 /** @vitest-environment jsdom */
 import { ThemeProvider } from '@mui/material/styles'
 import { MemoryRouter } from 'react-router'
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { AxiosError, type AxiosResponse } from 'axios'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createAppTheme } from '@/theme'
@@ -10,6 +10,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useSiteStore } from '@/stores/site'
 import { formatMsDualTz } from '@/utils/datetime'
 import type { RiskUserSummary } from '@/api/riskCenter'
+import ConfirmHost, { confirm } from '@/components/ConfirmHost'
 import RiskUserDrawer, { riskDrawerZIndex } from './RiskUserDrawer'
 
 const api = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() }))
@@ -171,6 +172,32 @@ afterEach(() => {
 describe('RiskUserDrawer', () => {
   it('stacks above dialogs, so it can open from the Users edit dialog', () => {
     expect(riskDrawerZIndex(theme)).toBeGreaterThan(theme.zIndex.modal)
+  })
+
+  it('stays below a confirm raised while it is open, so the confirm can be answered', async () => {
+    // The policy page's leave guard: a route link in the drawer (查看用量趋势,
+    // the logs links) leaves a dirty 策略 tab, and the guard asks through the
+    // app's one confirm. Beneath the drawer's backdrop it could not be
+    // clicked, and a click meant for it closed the drawer instead.
+    serve()
+    render(
+      <MemoryRouter>
+        <ThemeProvider theme={theme}>
+          <RiskUserDrawer userId={7} onClose={vi.fn()} host="risk" />
+          <ConfirmHost />
+        </ThemeProvider>
+      </MemoryRouter>,
+      { wrapper: queryWrapper(makeTestQueryClient()) },
+    )
+    await header()
+
+    act(() => { void confirm({ title: 'leave-guard', message: 'unsaved' }) })
+
+    const asked = (await screen.findByText('leave-guard')).closest('.MuiDialog-root')!
+    const drawer = document.querySelector('.MuiDrawer-root')!
+    const z = (el: Element) => Number(getComputedStyle(el).zIndex)
+    expect(z(drawer)).toBe(riskDrawerZIndex(theme))
+    expect(z(asked)).toBeGreaterThan(z(drawer))
   })
 
   it.each([

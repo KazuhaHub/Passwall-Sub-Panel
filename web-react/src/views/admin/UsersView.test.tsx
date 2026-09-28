@@ -309,17 +309,28 @@ describe('the risk column', () => {
     expect(s.className).toMatch(/MuiChip-filled/)
     expect(s.className).toMatch(/MuiChip-colorWarning/)
 
-    // Held with no fresh verdict: the hold is the reason it is listed.
+    // Held with no fresh verdict: the hold is the reason it is listed. The
+    // chip says it in the risk center's short level word — the status column
+    // beside it already names the hold in full, and a six-character chip
+    // widened the list past the screen — and names it in full on hover.
     const h = await chipOf('held')
-    expect(h.textContent).toBe('admin:users.status.geo_auto')
+    expect(h.textContent).toBe('admin:risk_center.flags.level.suspended')
+    expect(h.className).toMatch(/MuiChip-filled/)
     expect(h.className).toMatch(/MuiChip-colorError/)
+    fireEvent.mouseOver(h)
+    expect((await screen.findByRole('tooltip')).textContent).toBe('admin:users.status.geo_auto')
+    fireEvent.mouseLeave(h)
+    await waitFor(() => expect(screen.queryByRole('tooltip')).toBeNull())
 
-    // Dismissed: still there, drawn outlined, and says why on hover.
+    // Dismissed: still there, drawn outlined, and SAYS it is dismissed — a
+    // label reading 已标记 read as open to anyone who did not hover. The
+    // level it was dismissed at is on hover.
     const d = await chipOf('dismissed')
-    expect(d.textContent).toBe('admin:risk_center.state.flagged')
+    expect(d.textContent).toBe('admin:risk_center.review.badge_dismissed')
     expect(d.className).toMatch(/MuiChip-outlined/)
+    expect(d.className).toMatch(/MuiChip-colorError/)
     fireEvent.mouseOver(d)
-    expect(await screen.findByText('admin:risk_center.review.badge_dismissed')).toBeTruthy()
+    expect((await screen.findByRole('tooltip')).textContent).toBe('admin:risk_center.state.flagged')
 
     // Trusted with nothing at attention: an outlined 已信任.
     const tr = await chipOf('trusted')
@@ -335,6 +346,54 @@ describe('the risk column', () => {
     expect(cols.indexOf('admin:users.table.risk')).toBe(cols.indexOf('admin:users.table.status') + 1)
     expect(cols[cols.indexOf('admin:users.table.risk') + 1]).toBe('admin:users.table.last_online')
     expect(new Set(levelsCalls().map(c => c[0])).size).toBe(1)
+  })
+
+  it("re-reads the column after this page's own resume, so a lifted hold's chip goes", async () => {
+    // /levels has no interval: nothing but an invalidation re-reads it while
+    // the admin stays on the page, and the row's status would say active
+    // beside a chip still naming the hold.
+    const onHold = { ...held, service_status: 'manual_suspended', service_disabled_reason: 'geo_auto' }
+    serveRisk([onHold])
+    mountAt('/admin/users')
+    const row = await rowOf('held')
+    expect((await within(row).findByRole('button', { name: CHIP })).textContent)
+      .toBe('admin:risk_center.flags.level.suspended')
+
+    serveRisk([held], {})
+    fireEvent.click(within(row).getByTestId('MoreVertIcon').closest('button')!)
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'admin:users.more_menu.resume_service' }))
+
+    await waitFor(() => expect(within(row).queryByRole('button', { name: CHIP })).toBeNull())
+  })
+
+  it("re-reads the column after this page's own suspend", async () => {
+    serveRisk([suspect])
+    mountAt('/admin/users')
+    const row = await rowOf('suspect')
+    await within(row).findByRole('button', { name: CHIP })
+    await waitFor(() => expect(levelsCalls().length).toBeGreaterThan(0))
+    const before = levelsCalls().length
+
+    fireEvent.click(within(row).getByTestId('MoreVertIcon').closest('button')!)
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'admin:users.more_menu.suspend_service' }))
+
+    await waitFor(() => expect(levelsCalls().length).toBeGreaterThan(before))
+  })
+
+  it('is only as wide as its chip, so the list still fits a laptop screen', async () => {
+    // At 1440×900 the list had about 57px to spare; a column at the table's
+    // default 16px side padding around a default small chip took 90 and cut
+    // off 操作. The neighbours' padding spaces this one, and the chip is dense.
+    serveRisk([flagged])
+    mountAt('/admin/users')
+    const chip = await within(await rowOf('flagged')).findByRole('button', { name: CHIP })
+    const th = screen.getAllByRole('columnheader').find(el => el.textContent === 'admin:users.table.risk')!
+    for (const cell of [th, chip.closest('td')!]) {
+      expect(getComputedStyle(cell).paddingLeft).toBe('0px')
+      expect(getComputedStyle(cell).paddingRight).toBe('0px')
+    }
+    expect(getComputedStyle(chip).height).toBe('20px')
+    expect(getComputedStyle(chip).fontSize).toBe('12px')
   })
 
   it('spans the empty row across the extra column for an admin', async () => {
@@ -398,6 +457,23 @@ describe('the in-place risk drawer', () => {
     expect(where()).toMatch(/^\/admin\/users/)
     expect(riskParam()).toBeNull()
     await waitFor(() => expect(screen.queryByTestId('risk-drawer-header')).toBeNull())
+  })
+
+  it('closed with its X, leaves no entry behind: ONE Back then leaves the page', async () => {
+    // The list's own URL sync runs on every URL change; had it replaced the
+    // pushed entry, the drawer's mark would be gone, close() would replace
+    // the param away, and the pushed entry would stay behind as a dead one.
+    serveRisk([flagged, clean])
+    mountAt('/admin/users')
+    fireEvent.click(await within(await rowOf('flagged')).findByRole('button', { name: CHIP }))
+    const header = await screen.findByTestId('risk-drawer-header')
+
+    fireEvent.click(within(header).getByRole('button', { name: 'admin:risk_center.drawer.close' }))
+    await waitFor(() => expect(riskParam()).toBeNull())
+    expect(where()).toMatch(/^\/admin\/users/)
+
+    act(() => { fireEvent.click(screen.getByText('history-back')) })
+    await waitFor(() => expect(where()).toBe('/admin/dashboard'))
   })
 
   it('opens for a deep link to ?risk=<id>', async () => {

@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import { useSearchParams } from 'react-router'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useLocation, useSearchParams } from 'react-router'
 
 /**
  * The request object a paged fetcher turns into a query string
@@ -95,8 +95,21 @@ export function usePageState(opts: UsePageStateOptions = {}): UsePageStateResult
   const [sortBy, setSortBy] = useState(initialSortBy)
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>(initialSortDir)
 
+  // The current entry's history state, carried through the sync's replace
+  // below. A ref, not a dep: a replace hands back a new state object, and the
+  // sync must not re-run for its own write.
+  const location = useLocation()
+  const entryState = useRef(location.state)
+  entryState.current = location.state
+
   // URL sync. Default values (page=1, no keyword, no sort) stay omitted so URLs
   // stay short and bookmarks for the "default view" aren't polluted.
+  //
+  // It runs on every URL change (setParams is a new function per search), so
+  // it rewrites entries it did not make — and a replace without `state` wipes
+  // that entry's history state. That is where the risk drawer's open() marks
+  // the entry it pushed: wiped, its close() cannot go Back, and the page is
+  // left holding a dead entry. The same entry keeps the same state.
   useEffect(() => {
     setParams(prev => {
       const next = new URLSearchParams(prev)
@@ -104,7 +117,7 @@ export function usePageState(opts: UsePageStateOptions = {}): UsePageStateResult
       if (!keyword) next.delete(keyOf('q')); else next.set(keyOf('q'), keyword)
       if (!sortBy) next.delete(keyOf('sort')); else next.set(keyOf('sort'), `${sortBy}-${sortDir}`)
       return next
-    }, { replace: true })
+    }, { replace: true, state: entryState.current })
   }, [page, keyword, sortBy, sortDir, keyOf, setParams])
 
   // Reverse URL → state sync. Without this the browser Back/Forward moved the

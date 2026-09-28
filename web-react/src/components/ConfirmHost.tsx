@@ -62,9 +62,15 @@ export default function ConfirmHost() {
   const opts = state.opts
   const destructive = opts?.destructive
   return (
+    // Above every modal: a confirm asks about the last thing the admin did,
+    // wherever that was — including the risk drawer (zIndex.modal + 1) and
+    // the dialogs it raises over itself (+ 2). A route link in that drawer
+    // can trip the policy page's leave guard, whose confirm at the default
+    // level opened beneath the drawer's backdrop, where no click could reach it.
     <Dialog
       open={state.open}
       onClose={() => close(false)}
+      sx={{ zIndex: t => t.zIndex.modal + 3 }}
       slotProps={{
         paper: { sx: { borderRadius: 3, bgcolor: md.surfaceContainerHigh, minWidth: 320, maxWidth: 480 } }
       }}

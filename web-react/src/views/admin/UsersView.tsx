@@ -101,7 +101,7 @@ import { PagedTableFooter } from '@/components/PagedTableFooter'
 import { SortableTableCell } from '@/components/SortableTableCell'
 import { usePageState } from '@/hooks/usePageState'
 import { useQueryClient } from '@tanstack/react-query'
-import { trafficKeys, userKeys } from '@/query/keys'
+import { riskCenterKeys, trafficKeys, userKeys } from '@/query/keys'
 import { useTopTraffic } from '@/query/traffic'
 import { useRiskLevels } from '@/query/riskCenter'
 import { useUsersList } from '@/query/users'
@@ -459,6 +459,17 @@ export default function UsersView() {
   /** Drop the usage leaderboard so the next observer re-reads it. */
   function invalidateUsage() {
     void queryClient.invalidateQueries({ queryKey: trafficKeys.all(scope) })
+  }
+
+  /**
+   * Drop what the risk center shows for the accounts, after this page moves
+   * one's service axis: a location hold is listed there as one (the 风控
+   * chip, the drawer's summary), and /levels has no interval — nothing else
+   * re-reads it while the admin stays here, so a lifted hold's chip would
+   * outlive the hold beside a row that already says active.
+   */
+  function invalidateRisk() {
+    void queryClient.invalidateQueries({ queryKey: riskCenterKeys.all(scope) })
   }
 
   async function loadGroups() {
@@ -1054,6 +1065,7 @@ export default function UsersView() {
     try {
       await setServiceStatus(u.id, true)
       pushSnack(t('admin:users.toast.service_resumed', { defaultValue: '服务已恢复' }), 'success')
+      invalidateRisk()
       await load()
     } finally { setMoreActionBusy(null) }
   }
@@ -1064,6 +1076,7 @@ export default function UsersView() {
     try {
       await setServiceStatus(u.id, false, 'service_manual')
       pushSnack(t('admin:users.toast.service_suspended', { defaultValue: '服务已暂停' }), 'success')
+      invalidateRisk()
       await load()
     } finally { setMoreActionBusy(null) }
   }
@@ -1189,26 +1202,37 @@ export default function UsersView() {
   }
 
   // The 风控 cell. An account the risk center lists shows ONE chip: its
-  // attention level, or — held with no fresh verdict — the hold's own name.
-  // Red for what the bell counts (flagged, or held), amber for suspect; drawn
-  // OUTLINED once a dismissal is in force, so a dismissed account stays
-  // visible here without reading as open. A trusted account with nothing at
-  // attention still gets an outlined 已信任: trust is a standing exemption an
-  // admin should be able to see from the list. Any other account: blank.
-  // Every chip opens the drawer in place (`risk=`).
+  // attention level, or — held with no fresh verdict — 已暂停, the risk
+  // center's level word for a hold. Red for what the bell counts (flagged, or
+  // held), amber for suspect; once a dismissal is in force the chip is drawn
+  // OUTLINED and SAYS 已忽略: a dismissed account stays visible here, but a
+  // label still reading 已标记 read as open to anyone who did not hover. A
+  // trusted account with nothing at attention still gets an outlined 已信任:
+  // trust is a standing exemption an admin should be able to see from the
+  // list. Any other account: blank. Every chip opens the drawer in place
+  // (`risk=`).
+  //
+  // Short words and a dense chip keep the column narrow: the list had about
+  // 57px to spare at 1440×900, and the hold's full name (异地自动暂停, the
+  // status column's word right beside it) cut off 操作. A chip whose word is
+  // not the full state — a hold, a dismissal — names it on hover.
   function riskCell(u: User) {
     const entry = riskLevels?.[String(u.id)]
     if (!entry) return null
     const attention = entry.level !== '' || entry.auto_suspended
     if (!attention && !entry.trusted) return null
+    const named = entry.level !== ''
+      ? t(`admin:risk_center.state.${entry.level}`)
+      : t('admin:users.status.geo_auto')
+    const dismissed = attention && !entry.open
     const label = !attention
       ? t('admin:risk_center.review.badge_trusted')
-      : entry.level !== ''
-        ? t(`admin:risk_center.state.${entry.level}`)
-        : t('admin:users.status.geo_auto')
+      : dismissed
+        ? t('admin:risk_center.review.badge_dismissed')
+        : entry.level !== '' ? named : t('admin:risk_center.flags.level.suspended')
     const color = !attention ? 'default' : entry.level === 'suspect' && !entry.auto_suspended ? 'warning' : 'error'
     const notes = [
-      attention && !entry.open ? t('admin:risk_center.review.badge_dismissed') : '',
+      attention && (dismissed || entry.level === '') ? named : '',
       attention && entry.trusted ? t('admin:risk_center.review.badge_trusted') : '',
     ].filter(Boolean)
     return (
@@ -1217,7 +1241,8 @@ export default function UsersView() {
       <Tooltip describeChild placement="top"
         title={notes.length > 0 ? notes.join(' · ') : t('admin:users.risk_chip_hint')}>
         <Chip size="small" color={color} variant={attention && entry.open ? 'filled' : 'outlined'} label={label}
-          aria-label={t('admin:users.risk_chip_hint')} onClick={() => riskDrawer.open(u.id)} />
+          aria-label={t('admin:users.risk_chip_hint')} onClick={() => riskDrawer.open(u.id)}
+          sx={{ height: 20, fontSize: 12, '& .MuiChip-label': { px: 0.75 } }} />
       </Tooltip>
     )
   }
@@ -1475,7 +1500,8 @@ export default function UsersView() {
                 <SortableTableCell column="enabled" activeColumn={sortBy} activeDir={sortDir} onSort={setSort}>
                   {t('admin:users.table.status')}
                 </SortableTableCell>
-                {canRisk && <TableCell>{t('admin:users.table.risk')}</TableCell>}
+                {/* No side padding of its own: the neighbours' spaces it (see riskCell). */}
+                {canRisk && <TableCell sx={{ px: 0 }}>{t('admin:users.table.risk')}</TableCell>}
                 <SortableTableCell column="last_online_at" activeColumn={sortBy} activeDir={sortDir} onSort={setSort} initialDir="desc">
                   {t('admin:users.table.last_online', { defaultValue: '最近活跃' })}
                 </SortableTableCell>
@@ -1512,7 +1538,7 @@ export default function UsersView() {
                   <TableCell>{trafficCell(u)}</TableCell>
                   <TableCell>{expireBadge(u)}</TableCell>
                   <TableCell>{statusBadge(u)}</TableCell>
-                  {canRisk && <TableCell>{riskCell(u)}</TableCell>}
+                  {canRisk && <TableCell sx={{ px: 0 }}>{riskCell(u)}</TableCell>}
                   <TableCell>{lastOnlineCell(u)}</TableCell>
                   <TableCell align="right">
                     <Tooltip title={t('admin:users.action.edit')}>
