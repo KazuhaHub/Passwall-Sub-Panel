@@ -7,7 +7,6 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/alert"
@@ -122,77 +121,38 @@ func TestAdminAlerts_MixedBackendsKeepUpgradeTargetsAndCountsIsolated(t *testing
 	}
 }
 
-type alGeoFlags struct{ n int64 }
-
-func (a alGeoFlags) CountFlagged(context.Context, time.Time) (int64, error) { return a.n, nil }
-
-type alServiceHolds struct{ n int64 }
-
-func (a alServiceHolds) CountByServiceDisabledReason(_ context.Context, r domain.AutoDisabledReason) (int64, error) {
-	if r == domain.DisabledGeoAutoSuspend {
-		return a.n, nil
-	}
-	return 0, nil
+type alRiskQueue struct {
+	n     int64
+	calls int
 }
 
-// The feed route is staff-visible; the Geo tab both entries lead to is not,
-// because it names people on a signal rather than proof. An operator must
-// get neither entry nor a badge count that includes them — the admin, on the
-// same service, gets both.
-func TestAdminAlerts_OperatorNeverSeesGeoAlerts(t *testing.T) {
-	svc := alert.New(alert.Deps{
-		Nodes:        alNodes{n: []*domain.Node{{ID: 1, DisplayName: "n1", Enabled: true, HealthState: domain.NodeHealthUnreachable}}},
-		GeoFlags:     alGeoFlags{n: 2},
-		ServiceHolds: alServiceHolds{n: 1},
-	})
-	h := NewAdminAlertsHandler(svc)
-
-	c, rr := claimsCtx(domain.RoleAdmin)
-	c.Request = httptest.NewRequest(http.MethodGet, "/api/admin/alerts", nil)
-	h.List(c)
-	admin := rr.Body.String()
-	if !strings.Contains(admin, `"geo_anomaly"`) || !strings.Contains(admin, `"geo_auto_suspended"`) {
-		t.Fatalf("admin must see both geo entries: %s", admin)
-	}
-
-	c, rr = claimsCtx(domain.RoleOperator)
-	c.Request = httptest.NewRequest(http.MethodGet, "/api/admin/alerts", nil)
-	h.List(c)
-	op := rr.Body.String()
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status=%d, want 200", rr.Code)
-	}
-	if !strings.Contains(op, `"node_health"`) {
-		t.Fatalf("operator must still see node_health: %s", op)
-	}
-	if strings.Contains(op, `"geo_anomaly"`) || strings.Contains(op, `"geo_auto_suspended"`) {
-		t.Fatalf("operator must NOT see the geo entries (the Geo tab is admin-only): %s", op)
-	}
-	if !strings.Contains(op, `"warning":0`) {
-		t.Fatalf("counts must be recomputed without the geo warnings: %s", op)
-	}
+func (a *alRiskQueue) CountUrgent(context.Context) (int64, error) {
+	a.calls++
+	return a.n, nil
 }
 
-type alRiskFlags struct{ n int64 }
-
-func (a alRiskFlags) CountFlaggedUsers(context.Context, time.Time) (int64, error) { return a.n, nil }
-
-// The risk entry leads to the risk tab, admin-only for the Geo tab's reason:
-// it names people on signals, not proof. On the staff-visible feed route an
-// operator must get neither the entry nor a badge count that includes it;
-// the admin, on the same service, gets it.
-func TestAdminAlerts_OperatorNeverSeesRiskSignals(t *testing.T) {
+// The feed route is staff-visible; the risk center the risk_queue entry leads
+// to is not, because it names people on signals rather than proof. An
+// operator gets neither the entry nor a badge count that includes it — the
+// admin, on the same service, gets it. The handler tells the service who is
+// asking, so the fleet-wide count is not even computed for an operator; its
+// admin-only filter stays as the second line.
+func TestAdminAlerts_OperatorNeverSeesTheRiskQueue(t *testing.T) {
+	q := &alRiskQueue{n: 2}
 	svc := alert.New(alert.Deps{
 		Nodes:     alNodes{n: []*domain.Node{{ID: 1, DisplayName: "n1", Enabled: true, HealthState: domain.NodeHealthUnreachable}}},
-		RiskFlags: alRiskFlags{n: 3},
+		RiskQueue: q,
 	})
 	h := NewAdminAlertsHandler(svc)
 
 	c, rr := claimsCtx(domain.RoleAdmin)
 	c.Request = httptest.NewRequest(http.MethodGet, "/api/admin/alerts", nil)
 	h.List(c)
-	if admin := rr.Body.String(); !strings.Contains(admin, `"risk_signals"`) || !strings.Contains(admin, `"warning":1`) {
-		t.Fatalf("admin must see the risk_signals entry and its warning: %s", admin)
+	if admin := rr.Body.String(); !strings.Contains(admin, `"risk_queue"`) || !strings.Contains(admin, `"warning":1`) {
+		t.Fatalf("admin must see the risk_queue entry and its warning: %s", admin)
+	}
+	if q.calls != 1 {
+		t.Fatalf("CountUrgent called %d times for the admin's request, want 1", q.calls)
 	}
 
 	c, rr = claimsCtx(domain.RoleOperator)
@@ -205,10 +165,13 @@ func TestAdminAlerts_OperatorNeverSeesRiskSignals(t *testing.T) {
 	if !strings.Contains(op, `"node_health"`) {
 		t.Fatalf("operator must still see node_health: %s", op)
 	}
-	if strings.Contains(op, `"risk_signals"`) {
-		t.Fatalf("operator must NOT see the risk_signals entry (the risk tab is admin-only): %s", op)
+	if strings.Contains(op, `"risk_queue"`) {
+		t.Fatalf("operator must NOT see the risk_queue entry (the risk center is admin-only): %s", op)
 	}
 	if !strings.Contains(op, `"warning":0`) {
-		t.Fatalf("counts must be recomputed without the risk warning: %s", op)
+		t.Fatalf("counts must not include the risk-queue warning: %s", op)
+	}
+	if q.calls != 1 {
+		t.Fatalf("CountUrgent called %d times after an operator's request, want still 1 (never computed for an operator)", q.calls)
 	}
 }

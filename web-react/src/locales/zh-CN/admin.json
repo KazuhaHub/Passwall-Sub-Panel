@@ -45,9 +45,7 @@
       "panel_upgrade": "{{name}}：3X-UI {{version}} 可升级",
       "psp_upgrade": "面板新版本 {{version}} 可更新",
       "login_security": "近期发生 {{count}} 次登录锁定",
-      "geo_anomaly": "{{count}} 个账号被标记为异地并发",
-      "geo_auto_suspended": "{{count}} 个账号因异地并发被自动临时暂停",
-      "risk_signals": "{{count}} 个账号有风险信号"
+      "risk_queue": "{{count}} 个账号需立即处理"
     }
   },
   "validation": {

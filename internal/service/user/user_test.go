@@ -610,16 +610,6 @@ func (r *memoryUserRepo) ClearServiceStateIfReason(ctx context.Context, userID i
 	return true, nil
 }
 
-func (r *memoryUserRepo) CountByServiceDisabledReason(ctx context.Context, reason domain.AutoDisabledReason) (int64, error) {
-	var n int64
-	for _, u := range r.byID {
-		if u.ServiceDisabledReason == reason {
-			n++
-		}
-	}
-	return n, nil
-}
-
 // ListByIDs / ListServiceHolds answer like the production reads: existing
 // ids in id order, each once; the exact reason, by id, the hold time in ms.
 func (r *memoryUserRepo) ListByIDs(ctx context.Context, ids []int64) ([]*domain.User, error) {

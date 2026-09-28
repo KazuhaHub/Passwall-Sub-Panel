@@ -73,19 +73,17 @@ type Deps struct {
 	// without it gets a 503 from the endpoint rather than an empty list, so
 	// "nothing to report" stays distinguishable from "cannot report".
 	GeoRecords handler.GeoRecordLister
-	// GeoFlags counts latched concurrent-location flags for the notification
-	// bell's geo_anomaly entry — in practice the same store as GeoRecords, a
-	// separate field because the bell needs a COUNT and the Geo tab the rows.
-	// Optional like every alert source: absent, the bell has no such entry.
-	GeoFlags alert.GeoFlagCounter
 	// RiskSignals is the read side of the observe-only risk signals, the rows
 	// the hourly worker writes. Optional like GeoRecords: absent, the
 	// endpoint answers 503 rather than an empty list.
 	RiskSignals handler.RiskSignalLister
-	// RiskFlags counts accounts with any risk signal flagged, for the bell's
-	// risk_signals entry — the same store as RiskSignals, a separate field
-	// for the reason GeoFlags is one. Optional: absent, no such entry.
-	RiskFlags alert.RiskFlagCounter
+	// RiskQueue counts the accounts that need action now, for the
+	// notification bell's one risk entry — in practice the same service as
+	// RiskCenter, a separate field because the bell needs a COUNT and the
+	// risk center the rows. Optional like every alert source: absent, the
+	// bell has no such entry; TestBuildWiresTheRiskQueueBell guards that
+	// Build does not leave it out.
+	RiskQueue alert.RiskQueueCounter
 	// RiskCenter is the risk center's read side (风控中心): the attention
 	// queue, one account's drawer and the levels, the live connections and
 	// their refresh, the connection history, the flag records. An
@@ -695,16 +693,11 @@ func NewRouter(d Deps) stdhttp.Handler {
 			// it through the evaluator, so the bell and the node detail page can
 			// never disagree about whether a condition is active.
 			NodeResource: nodeHealthSource,
-			// The location detector's two admin-only entries: latched flags,
-			// and accounts it suspended itself (geo_auto), counted from the
-			// users table. Both nil-tolerant, which is why
-			// TestBuildWiresTheGeoAlerts drives the assembled router.
-			GeoFlags:     d.GeoFlags,
-			ServiceHolds: d.Repos.User,
-			// The risk signals' one admin-only entry: accounts with any
-			// signal flagged. Nil-tolerant too, so TestBuildWiresTheRiskSignals
-			// reads the feed through the assembled router.
-			RiskFlags: d.RiskFlags,
+			// The risk center's one admin-only entry: the accounts open and
+			// flagged or held by the detector, the queue's own count.
+			// Nil-tolerant, which is why TestBuildWiresTheRiskQueueBell
+			// drives the assembled router.
+			RiskQueue: d.RiskQueue,
 		})
 		staffGroup.GET("/alerts", handler.NewAdminAlertsHandler(alertSvc).List)
 

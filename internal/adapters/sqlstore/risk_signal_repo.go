@@ -360,28 +360,6 @@ func (r *RiskSignalRepo) AttentionLevels(ctx context.Context, since time.Time) (
 	return out, nil
 }
 
-// CountFlaggedUsers counts the ACCOUNTS with any signal flagged and written at
-// or after since — the notification bell's risk_signals count, one COUNT per
-// feed request.
-//
-// Distinct accounts, not rows: one account flagged on two signals is one
-// account to review, and a row count would make the bell's number mean
-// nothing an admin can check. Flagged only — suspect is below the line, as it
-// is for the geo entry. Joined to users because there is no foreign key: a
-// deleted account's row is not somebody the admin can look up. Bounded by
-// updated_at so a row the worker stopped rewriting stops lighting the bell;
-// updated_at is unix milliseconds, so the comparison is an integer one and
-// identical on every dialect.
-func (r *RiskSignalRepo) CountFlaggedUsers(ctx context.Context, since time.Time) (int64, error) {
-	var n int64
-	err := r.db.WithContext(ctx).Table("risk_signals").
-		Select("COUNT(DISTINCT risk_signals.user_id)").
-		Joins("JOIN users ON users.id = risk_signals.user_id").
-		Where("risk_signals.state = ? AND risk_signals.updated_at >= ?", string(domain.GeoStateFlagged), since.UnixMilli()).
-		Scan(&n).Error
-	return n, err
-}
-
 // PurgeOrphans deletes the rows of accounts that no longer exist and returns
 // how many it deleted. The worker runs it every refresh, so what a deleted
 // account left lasts at most one run (and List hides it meanwhile).

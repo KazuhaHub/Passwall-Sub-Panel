@@ -18,13 +18,14 @@ import ErrorOutlineIcon from '@mui/icons-material/ErrorOutlined'
 import ScheduleIcon from '@mui/icons-material/Schedule'
 import SystemUpdateAltIcon from '@mui/icons-material/SystemUpdateAlt'
 import ShieldOutlinedIcon from '@mui/icons-material/ShieldOutlined'
-import PauseCircleOutlinedIcon from '@mui/icons-material/PauseCircleOutlined'
 import CheckCircleIcon from '@mui/icons-material/CheckCircle'
 import { useNavigate } from 'react-router'
 import { useTranslation } from 'react-i18next'
+import { useQueryClient } from '@tanstack/react-query'
 
 import type { Alert, AlertSeverity, AlertType } from '@/api/alerts'
 import { useAlerts } from '@/query/alerts'
+import { riskCenterKeys } from '@/query/keys'
 import { useQueryScope } from '@/query/useQueryScope'
 
 // In-app deep links per alert type. psp_upgrade is intentionally absent — it opens
@@ -35,14 +36,11 @@ const ROUTE: Partial<Record<AlertType, string>> = {
   cert_expiring: '/admin/certs',
   panel_upgrade: '/admin/servers',
   login_security: '/admin/logs',
-  // Both geo entries are counts, not accounts: the risk center's location tab
-  // is where the accounts are listed, with the evidence beside each. The tab is
-  // named, not left to the page's default, so the link does not depend on
-  // which tab the page happens to open on.
-  geo_anomaly: '/admin/risk?tab=geo',
-  geo_auto_suspended: '/admin/risk?tab=geo',
-  // A count too; the risk tab lists the accounts with each signal's evidence.
-  risk_signals: '/admin/risk?tab=risk',
+  // A count, not accounts: the queue lists them, with the evidence beside
+  // each. Filtered to the very accounts the count is of (needing action now),
+  // so "2" never lands on a list of seven; the tab is named, not left to the
+  // page's default, so the link does not depend on which tab it opens on.
+  risk_queue: '/admin/risk?tab=queue&urgent=1',
 }
 
 const PSP_RELEASES_URL = 'https://github.com/KazuhaHub/passwall-sub-panel/releases'
@@ -59,13 +57,8 @@ function typeIcon(type: AlertType, severity: AlertSeverity) {
     case 'psp_upgrade':
       return <SystemUpdateAltIcon fontSize="small" />
     case 'login_security':
-    case 'geo_anomaly':
-    case 'risk_signals':
+    case 'risk_queue':
       return <ShieldOutlinedIcon fontSize="small" />
-    case 'geo_auto_suspended':
-      // Not the shield: this entry says the panel already ACTED (paused the
-      // service), where the flag only asks for a look.
-      return <PauseCircleOutlinedIcon fontSize="small" />
     case 'node_health':
     default:
       return severity === 'error' ? <ErrorOutlineIcon fontSize="small" /> : <WarningAmberIcon fontSize="small" />
@@ -77,6 +70,7 @@ export default function NotificationBell() {
   const md = theme.palette.md
   const { t } = useTranslation(['admin'])
   const navigate = useNavigate()
+  const qc = useQueryClient()
 
   const scope = useQueryScope()
   const [anchor, setAnchor] = useState<HTMLElement | null>(null)
@@ -114,12 +108,8 @@ export default function NotificationBell() {
         return t('alerts.title.psp_upgrade', { version: a.latest_version, defaultValue: `面板新版本 ${a.latest_version} 可更新` })
       case 'login_security':
         return t('alerts.title.login_security', { count: a.count, defaultValue: `近期发生 ${a.count} 次登录锁定` })
-      case 'geo_anomaly':
-        return t('alerts.title.geo_anomaly', { count: a.count, defaultValue: `${a.count} 个账号被标记为异地并发` })
-      case 'geo_auto_suspended':
-        return t('alerts.title.geo_auto_suspended', { count: a.count, defaultValue: `${a.count} 个账号因异地并发被自动临时暂停` })
-      case 'risk_signals':
-        return t('alerts.title.risk_signals', { count: a.count, defaultValue: `${a.count} 个账号有风险信号` })
+      case 'risk_queue':
+        return t('alerts.title.risk_queue', { count: a.count })
       default:
         return name
     }
@@ -153,6 +143,11 @@ export default function NotificationBell() {
       window.open(PSP_RELEASES_URL, '_blank', 'noopener,noreferrer')
       return
     }
+    // The bell's count may be fresher than a queue page cached from a visit a
+    // minute ago; landing on that page would show a list that disagrees with
+    // the number just clicked. Marked stale first, so the queue refetches as
+    // it mounts.
+    if (a.type === 'risk_queue') void qc.invalidateQueries({ queryKey: riskCenterKeys.queues(scope) })
     navigate(ROUTE[a.type] ?? '/admin/dashboard')
   }
 

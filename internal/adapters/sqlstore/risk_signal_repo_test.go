@@ -269,52 +269,6 @@ func TestRiskSignalRepo_PurgeOrphansDeletesOnlyOrphans(t *testing.T) {
 	}
 }
 
-// The bell's risk_signals entry counts ACCOUNTS, not rows: one account flagged
-// on two signals is one account to review. Only flagged counts (suspect is
-// below the line), only rows the worker judged since the cutoff (a row it
-// stopped rewriting must not keep the bell lit), and only accounts that still
-// exist (the admin could not open the others).
-func TestRiskSignalRepo_CountFlaggedUsersCountsDistinctFreshExistingUsers(t *testing.T) {
-	r, users, db := newRiskSignalRepo(t)
-	ctx := context.Background()
-	twice := createRiskUser(t, users, 1, "")
-	suspect := createRiskUser(t, users, 2, "")
-	stale := createRiskUser(t, users, 3, "")
-	deleted := createRiskUser(t, users, 4, "")
-	once := createRiskUser(t, users, 5, "")
-	const neverExisted = int64(987654)
-	flag := func(uid int64, kind domain.RiskKind) domain.RiskSignal {
-		return domain.RiskSignal{UserID: uid, Kind: kind, State: domain.GeoStateFlagged, Code: domain.RiskCodeOver}
-	}
-	if err := r.Save(ctx, []domain.RiskSignal{
-		flag(twice.ID, domain.RiskKindDevices),
-		flag(twice.ID, domain.RiskKindSubSpread),
-		{UserID: suspect.ID, Kind: domain.RiskKindDevices, State: domain.GeoStateSuspect, Code: domain.RiskCodeOverBuilding},
-		flag(stale.ID, domain.RiskKindDevices),
-		flag(deleted.ID, domain.RiskKindDevices),
-		flag(once.ID, domain.RiskKindUsageShift),
-		flag(neverExisted, domain.RiskKindDevices),
-	}); err != nil {
-		t.Fatalf("save: %v", err)
-	}
-	now := time.Now()
-	if err := db.Exec("UPDATE risk_signals SET updated_at = ? WHERE user_id = ?",
-		now.Add(-25*time.Hour).UnixMilli(), stale.ID).Error; err != nil {
-		t.Fatalf("age the row: %v", err)
-	}
-	if err := users.Delete(ctx, deleted.ID); err != nil {
-		t.Fatalf("delete user: %v", err)
-	}
-
-	n, err := r.CountFlaggedUsers(ctx, now.Add(-24*time.Hour))
-	if err != nil {
-		t.Fatalf("CountFlaggedUsers: %v", err)
-	}
-	if n != 2 {
-		t.Fatalf("CountFlaggedUsers = %d, want 2 (the twice-flagged account once, plus the other fresh flagged account)", n)
-	}
-}
-
 // saveMustRefuse asserts Save rejects the batch as a validation error and that
 // NOTHING was written — not even the valid row ahead of the bad one.
 func saveMustRefuse(t *testing.T, r *RiskSignalRepo, db *gorm.DB, rows []domain.RiskSignal) {

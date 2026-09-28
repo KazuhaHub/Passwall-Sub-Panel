@@ -9,13 +9,10 @@ export type AlertType =
   | 'panel_upgrade'
   | 'psp_upgrade'
   | 'login_security'
-  // The location detector's two admin-only singletons, each with a `count`:
-  // accounts whose flag is latched, and accounts it has auto-suspended.
-  | 'geo_anomaly'
-  | 'geo_auto_suspended'
-  // The observe-only risk signals' one admin-only singleton, with a `count`:
-  // accounts with any risk signal flagged, judged within the last day.
-  | 'risk_signals'
+  // The risk center's one admin-only singleton, with a `count`: accounts the
+  // risk center lists as open and flagged or auto-suspended — the queue's
+  // 需立即处理, never the whole queue (suspect-only accounts do not ring).
+  | 'risk_queue'
 
 export interface Alert {
   key: string

@@ -16,7 +16,6 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/jwtutil"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/operationgate"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
-	"github.com/KazuhaHub/passwall-sub-panel/internal/service/alert"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/risk"
 )
 
@@ -40,9 +39,11 @@ import (
 // one and a missing one both read geo_unavailable — and neither can the
 // landing addresses, which matter only through the countries it would name.
 //
-// The read side is optional in the same way: the admin endpoint and the
-// bell's count are router deps that compile when left out, so the test ends
-// by reading both through the assembled router.
+// The read side is optional in the same way: the admin endpoint is a
+// router dep that compiles when left out, so the test ends by reading it
+// through the assembled router. (The bell no longer counts these rows on its
+// own — its one risk entry is the risk center's queue, which
+// TestBuildWiresTheRiskQueueBell drives.)
 func TestBuildWiresTheRiskSignals(t *testing.T) {
 	ctx := t.Context()
 	directory := t.TempDir()
@@ -180,11 +181,10 @@ func TestBuildWiresTheRiskSignals(t *testing.T) {
 			login.State, login.Code, lev.Recent)
 	}
 
-	// The read side. Both the endpoint's store and the bell's count are
-	// optional router deps, so leaving either out compiles: the endpoint
-	// answers 503 and the bell never lights. A flagged row, written through
-	// the same store the worker uses, has to reach both through the
-	// assembled router.
+	// The read side. The endpoint's store is an optional router dep, so
+	// leaving it out compiles and the endpoint answers 503. A flagged row,
+	// written through the same store the worker uses, has to reach it
+	// through the assembled router.
 	if err := sqlstore.NewRiskSignalRepo(db).Save(ctx, []domain.RiskSignal{{
 		UserID: u.ID, Kind: domain.RiskKindDevices, State: domain.GeoStateFlagged, Code: domain.RiskCodeOver,
 		Evidence: json.RawMessage(`{"v":1}`),
@@ -221,27 +221,7 @@ func TestBuildWiresTheRiskSignals(t *testing.T) {
 		return rec
 	}
 
-	rec := get("/api/admin/alerts")
-	if rec.Code != http.StatusOK {
-		t.Fatalf("GET /api/admin/alerts = %d: %s", rec.Code, rec.Body.String())
-	}
-	var feed struct {
-		Alerts []alert.Alert `json:"alerts"`
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &feed); err != nil {
-		t.Fatalf("decode: %v (%s)", err, rec.Body.String())
-	}
-	riskCount := 0
-	for _, item := range feed.Alerts {
-		if item.Type == alert.TypeRiskSignals {
-			riskCount = item.Count
-		}
-	}
-	if riskCount != 1 {
-		t.Fatalf("risk_signals count = %d in %s, want 1 — is the risk store wired into the alert service?", riskCount, rec.Body.String())
-	}
-
-	rec = get("/api/admin/risk-signals")
+	rec := get("/api/admin/risk-signals")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("GET /api/admin/risk-signals = %d: %s — is the risk store wired into the router?", rec.Code, rec.Body.String())
 	}

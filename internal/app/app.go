@@ -677,17 +677,17 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 		Cfg:           cfg,
 		Repos:         repos,
 		GeoRecords:    geoStreaks,
-		// The same store again, as the bell's count of latched flags.
-		GeoFlags: geoStreaks,
-		// The risk store twice over, the same way: the risk view's rows and
-		// the bell's count of flagged accounts. Both optional, so leaving
-		// either out would compile — TestBuildWiresTheRiskSignals reads both
-		// through the assembled router.
+		// The risk view's rows. Optional, so leaving it out would compile —
+		// TestBuildWiresTheRiskSignals reads it through the assembled router.
 		RiskSignals: riskSignals,
-		RiskFlags:   riskSignals,
 		RiskCenter:  riskCenterSvc,
-		RiskReview:  reviewSvc,
-		// Optional like GeoFlags, so leaving it out would compile and quietly
+		// The risk center again, as the bell's count of the accounts that
+		// need action now — the queue's own number, so the bell and the
+		// queue cannot disagree. Optional like every alert source;
+		// TestBuildWiresTheRiskQueueBell reads it through the assembled router.
+		RiskQueue:  riskCenterSvc,
+		RiskReview: reviewSvc,
+		// Optional like RiskQueue, so leaving it out would compile and quietly
 		// record every subscription fetch as anonymous.
 		DeviceHasher: deviceHasher,
 		Pool:         pool,

@@ -45,9 +45,7 @@
       "panel_upgrade": "{{name}}: 3X-UI {{version}} available",
       "psp_upgrade": "Panel update {{version}} available",
       "login_security": "{{count}} login lockouts recently",
-      "geo_anomaly": "{{count}} account(s) flagged for concurrent locations",
-      "geo_auto_suspended": "{{count}} account(s) auto-suspended for concurrent locations",
-      "risk_signals": "{{count}} account(s) have risk signals"
+      "risk_queue": "{{count}} account(s) need action now"
     }
   },
   "validation": {
