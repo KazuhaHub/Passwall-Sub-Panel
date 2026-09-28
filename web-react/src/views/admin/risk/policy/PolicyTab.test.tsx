@@ -9,6 +9,7 @@ import { makeTestQueryClient } from '@/test/queryTestUtils'
 import { useAuthStore } from '@/stores/auth'
 import AppRouter from '@/router/AppRouter'
 import type { RiskPolicySettings, RiskPolicyView } from '@/api/riskCenter'
+import type { Group } from '@/api/types'
 
 // A page of forty-eight fields and a group editor, mounted per test: heavier
 // than the default budget on a loaded runner.
@@ -36,6 +37,7 @@ vi.mock('react-i18next', () => ({
 
 import zh from '@/locales/zh-CN/admin.json'
 import { flatten, type Nested } from '@/i18n/options'
+import { allGroupsQuery } from '@/query/groups'
 import { settingsKeys } from '@/query/keys'
 import { sessionScope } from '@/query/session'
 import { POLICY_KEYS } from './policyKeys'
@@ -191,8 +193,7 @@ function TabSwitch() {
   )
 }
 
-function mount(url = '/admin/risk?tab=policy'): { client: QueryClient } {
-  const client = makeTestQueryClient()
+function mount(url = '/admin/risk?tab=policy', client: QueryClient = makeTestQueryClient()): { client: QueryClient } {
   const router = createMemoryRouter([
     { path: '/admin/risk', element: <><PolicyTab /><TabSwitch /><Where /></> },
   ], { initialEntries: [url] })
@@ -537,6 +538,43 @@ describe('PolicyTab, group exceptions', () => {
     await waitFor(() => expect(within(groups).getByText('城市容错')).toBeTruthy())
     expect(within(groups).getByText(L('settings.geo_anomaly.max_cities_hint'))).toBeTruthy()
     expect(api.get).toHaveBeenCalledWith('/admin/groups/2/scope-settings', expect.anything())
+  })
+
+  // The list endpoint pages at 200. The picker reads every page, as the
+  // settings scope rail it replaces did: group 201+ is on offer, and a link
+  // to one (the group dialog's) shows it picked and names it.
+  it('offers every group, past the first page of 200', async () => {
+    serve()
+    const many = Array.from({ length: 201 }, (_, i) => ({ id: i + 2, slug: `g${i + 2}`, name: `Group ${i + 2}` }))
+    const base = api.get.getMockImplementation()!
+    api.get.mockImplementation(async (url: string, cfg?: { params?: { page?: number; page_size?: number } }) => {
+      if (url !== '/admin/groups') return base(url, cfg)
+      const page = cfg?.params?.page ?? 1
+      const size = cfg?.params?.page_size ?? 200
+      return { data: { items: many.slice((page - 1) * size, page * size), total: many.length, page, page_size: size } }
+    })
+    mount('/admin/risk?tab=policy&group=202')
+    await loaded()
+    const picker = await within(card('risk_center.policy.card.groups'))
+      .findByRole('combobox', { name: L('risk_center.policy.pick_group') })
+    await waitFor(() => expect(picker.textContent).toBe('Group 202'))
+    await waitFor(() => expect(within(card('risk_center.policy.card.groups')).getByText('城市容错')).toBeTruthy())
+    fireEvent.click(within(groupRow('城市容错')).getByRole('switch'))
+    expect(screen.getByText('未保存：分组「Group 202」的例外')).toBeTruthy()
+  })
+
+  // The group dialog patches the list it shows, not this catalogue, so each
+  // open of the page reads the groups again: a group made since is on offer.
+  it('reads the groups again on every open', async () => {
+    serve()
+    const client = makeTestQueryClient()
+    const scope = sessionScope({ userId: 1, role: 'admin', authEpoch: useAuthStore.getState().authEpoch })
+    client.setQueryData(allGroupsQuery(scope).queryKey, [{ id: 2, slug: 'team-a', name: 'Team A' }] as Group[])
+    mount('/admin/risk?tab=policy&group=3', client)
+    await loaded()
+    const picker = await within(card('risk_center.policy.card.groups'))
+      .findByRole('combobox', { name: L('risk_center.policy.pick_group') })
+    await waitFor(() => expect(picker.textContent).toBe('Team B'))
   })
 
   it('writes the picked group to the URL', async () => {

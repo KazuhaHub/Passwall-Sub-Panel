@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 import { ThemeProvider } from '@mui/material/styles'
-import { MemoryRouter, Route, Routes, useLocation } from 'react-router'
+import { MemoryRouter, Route, Routes, useLocation, useNavigate, type NavigateFunction } from 'react-router'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { AxiosError, type AxiosResponse } from 'axios'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -155,6 +155,14 @@ function Where() {
   return <p data-testid="location">{loc.pathname + loc.search}</p>
 }
 
+// What moves the URL from outside the tab — the bell's entry, Back and
+// Forward — while the tab stays mounted.
+let navigateTo: NavigateFunction = () => undefined
+function Navigator() {
+  navigateTo = useNavigate()
+  return null
+}
+
 const openLive = vi.fn()
 const openPolicy = vi.fn()
 
@@ -166,6 +174,7 @@ function Page() {
       <QueueTab onOpenUser={drawer.open} onOpenLive={openLive} onOpenPolicy={openPolicy} />
       <RiskUserDrawer userId={drawer.id} onClose={drawer.close} host="risk" />
       <Where />
+      <Navigator />
     </>
   )
 }
@@ -412,6 +421,75 @@ describe('QueueTab filters', () => {
     expect(new Set(seen.slice(before)).size).toBe(1)
   })
 
+  // The URL moves under the mounted tab — the bell's entry drops the search —
+  // and the box follows it rather than show a search that is not applied.
+  it('the search box follows the URL when the bell drops the search', async () => {
+    serve()
+    mount('?tab=queue&q=alice')
+    await rowOf('alice')
+    const box = screen.getByRole('textbox', { name: '搜索用户' }) as HTMLInputElement
+    expect(box.value).toBe('alice')
+    act(() => { void navigateTo('/admin/risk?tab=queue&urgent=1') })
+    await waitFor(() => expect(lastQueueRead()).toEqual({ status: 'open', urgent: true, page: 1, page_size: 25 }))
+    expect(box.value).toBe('')
+  })
+
+  it('the search box follows Back and Forward', async () => {
+    serve()
+    mount()
+    await rowOf('alice')
+    // The bell pushes; the search then replaces that entry.
+    act(() => { void navigateTo('/admin/risk?tab=queue&urgent=1') })
+    vi.useFakeTimers()
+    const box = screen.getByRole('textbox', { name: '搜索用户' }) as HTMLInputElement
+    fireEvent.change(box, { target: { value: 'bob' } })
+    act(() => { vi.advanceTimersByTime(300) })
+    expect(urlParams().get('q')).toBe('bob')
+
+    act(() => { void navigateTo(-1) })
+    expect(location()).toBe('/admin/risk?tab=queue')
+    expect(box.value).toBe('')
+    act(() => { void navigateTo(1) })
+    expect(urlParams().get('q')).toBe('bob')
+    expect(box.value).toBe('bob')
+  })
+
+  // A search still waiting when the URL moves the box is the old text: it
+  // must not be written over the new URL.
+  it('drops a search still waiting when the URL moves the box', async () => {
+    serve()
+    mount('?tab=queue&q=alice')
+    await rowOf('alice')
+    vi.useFakeTimers()
+    const box = screen.getByRole('textbox', { name: '搜索用户' }) as HTMLInputElement
+    fireEvent.change(box, { target: { value: 'alicex' } })
+    act(() => { void navigateTo('/admin/risk?tab=queue&urgent=1') })
+    expect(box.value).toBe('')
+    act(() => { vi.advanceTimersByTime(1000) })
+    expect(location()).toBe('/admin/risk?tab=queue&urgent=1')
+    expect(box.value).toBe('')
+  })
+
+  // The tab's own write is not a move to follow: a key typed while it lands
+  // (a navigation renders as a transition, after the keystroke) stays.
+  it('keeps a key typed while its own search write lands', async () => {
+    serve()
+    mount()
+    await rowOf('alice')
+    vi.useFakeTimers()
+    const box = screen.getByRole('textbox', { name: '搜索用户' }) as HTMLInputElement
+    fireEvent.change(box, { target: { value: 'ali' } })
+    act(() => {
+      vi.advanceTimersByTime(300)
+      fireEvent.change(box, { target: { value: 'alic' } })
+    })
+    expect(urlParams().get('q')).toBe('ali')
+    expect(box.value).toBe('alic')
+    act(() => { vi.advanceTimersByTime(300) })
+    expect(urlParams().get('q')).toBe('alic')
+    expect(box.value).toBe('alic')
+  })
+
   // The bell's filter: a chip that says what the list is narrowed to, and
   // takes the narrowing away.
   it('shows the urgent filter as a removable chip', async () => {
@@ -423,6 +501,38 @@ describe('QueueTab filters', () => {
     fireEvent.click(within(chip).getByTestId('CancelIcon'))
     await waitFor(() => expect(urlParams().has('urgent')).toBe(false))
     expect(screen.queryByText('仅需立即处理')).toBeNull()
+  })
+
+  // The bell's filter is where the admin lands, not a narrowing under every
+  // later choice: urgent is open by definition, so kept under 已忽略 it
+  // would list nobody while the card counts its accounts. A card or a status
+  // replaces it; the other filters keep it.
+  it.each<[string, () => void, Record<string, unknown>]>([
+    ['the dismissed card', () => fireEvent.click(card('已忽略')), { status: 'dismissed' }],
+    ['the hold card', () => fireEvent.click(card('异地自动暂停')), { status: 'all', auto_suspended: true }],
+    ['the flagged card', () => fireEvent.click(card('已标记')), { status: 'open', level: 'flagged' }],
+    ['the dismissed status', () => fireEvent.click(
+      within(screen.getByRole('group', { name: '状态' })).getByRole('button', { name: '已忽略' })), { status: 'dismissed' }],
+    ['the trusted status', () => fireEvent.click(
+      within(screen.getByRole('group', { name: '状态' })).getByRole('button', { name: '已信任' })), { status: 'trusted' }],
+  ])('%s drops the urgent filter', async (_, click, read) => {
+    serve()
+    mount('?tab=queue&urgent=1')
+    await rowOf('alice')
+    click()
+    await waitFor(() => expect(urlParams().has('urgent')).toBe(false))
+    expect(screen.queryByText('仅需立即处理')).toBeNull()
+    await waitFor(() => expect(lastQueueRead()).toEqual({ ...read, page: 1, page_size: 25 }))
+  })
+
+  it('a source keeps the urgent filter', async () => {
+    serve()
+    mount('?tab=queue&urgent=1')
+    await rowOf('alice')
+    fireEvent.mouseDown(screen.getByRole('combobox', { name: '来源' }))
+    fireEvent.click(within(await screen.findByRole('listbox')).getByRole('option', { name: '设备数' }))
+    await waitFor(() => expect(urlParams().get('source')).toBe('devices'))
+    expect(urlParams().get('urgent')).toBe('1')
   })
 })
 

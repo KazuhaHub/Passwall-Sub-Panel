@@ -6,7 +6,7 @@ import { isAxiosError } from 'axios'
 
 import type { UISettings } from '@/api/settings'
 import { pushSnack } from '@/components/SnackbarHost'
-import { useGroupsList } from '@/query/groups'
+import { useAllGroups } from '@/query/groups'
 import { useRiskPolicy, useSaveRiskPolicy } from '@/query/riskCenter'
 import { useGeoIPStatus } from '@/query/settings'
 import { useQueryScope } from '@/query/useQueryScope'
@@ -86,7 +86,7 @@ function PolicyBody({ loaded }: { loaded: RiskPolicyView }) {
   const scope = useQueryScope()
   const save = useSaveRiskPolicy(scope)
   const { data: geoip } = useGeoIPStatus(scope)
-  const groupsQ = useGroupsList(scope)
+  const groupsQ = useAllGroups(scope)
   const [params, setParams] = useSearchParams()
   const groupId = parsePolicyGroup(params)
   const exceptions = useGroupExceptions(groupId)
@@ -109,7 +109,7 @@ function PolicyBody({ loaded }: { loaded: RiskPolicyView }) {
   const dirty = changed.length > 0
   const stale = POLICY_KEYS.some(k => !changed.includes(k) && loaded.settings[k] !== seed[k])
   const invalid = POLICY_CARDS.flatMap(cardFields).filter(f => outOfRange(f, draft[f.key])).length
-  const groups = groupsQ.data?.items
+  const groups = groupsQ.data
   const groupName = groups?.find(g => g.id === groupId)?.name ?? `#${groupId}`
 
   useLeaveGuard(dirty || exceptions.dirty, {

@@ -42,7 +42,11 @@ const CARD_FILTERS: Record<MetricCard, Partial<QueueParams>> = {
   auto: { auto_suspended: true, status: 'all' },
   dismissed: { status: 'dismissed' },
 }
-const NO_CARD: Partial<QueueParams> = { level: undefined, auto_suspended: false, status: 'open' }
+// The bell's `urgent` goes too, as it does on any status choice: it is where
+// the admin lands, not a narrowing under every later choice. Urgent is open
+// by definition, so kept under 已忽略 it would list nobody while the card
+// counts its accounts. The chip is the way to drop it without a new choice.
+const NO_CARD: Partial<QueueParams> = { level: undefined, auto_suspended: false, status: 'open', urgent: false }
 
 /** The card whose filter is the one in force, or null. */
 function activeCard(p: QueueParams): MetricCard | null {
@@ -103,13 +107,29 @@ export default function QueueTab({ onOpenUser, onOpenLive, onOpenPolicy }: {
   const update = (patch: Partial<QueueParams>) => setUrlParams(prev => queueSearch(prev, patch), { replace: true })
 
   // The search box: the text is local, the URL is written once the typing
-  // pauses. The write reads the URL as it is THEN (a ref kept current after
-  // every render), so a card clicked while the timer waits is kept rather
-  // than undone by a stale copy, and nothing is written when the text trims
-  // to the search already in force. No effect depends on the input.
-  const [search, setSearch] = useState(params.q ?? '')
-  const current = useRef(urlParams)
-  useEffect(() => { current.current = urlParams })
+  // pauses. The write reads the URL and the text as they are THEN (a ref kept
+  // current after every render), so a card clicked while the timer waits is
+  // kept rather than undone by a stale copy, and nothing is written when the
+  // text trims to the search already in force. No effect depends on the input.
+  //
+  // The URL also moves under the mounted tab — the bell's entry, Back and
+  // Forward — and the box follows it: when the URL's q changes to what the
+  // box does not say, the text becomes the URL's, and a write still waiting
+  // then reads that text and writes nothing. The tab's own write is not such
+  // a move: a navigation renders as a transition, after a key typed
+  // meanwhile, and taking its q for the URL's would undo that key. So the q
+  // it sent is remembered until the URL's q next changes.
+  const urlQ = params.q ?? ''
+  const [search, setSearch] = useState(urlQ)
+  const [seenQ, setSeenQ] = useState(urlQ)
+  const [sentQ, setSentQ] = useState<string | null>(null)
+  if (urlQ !== seenQ) {
+    setSeenQ(urlQ)
+    setSentQ(null)
+    if (urlQ !== sentQ && urlQ !== search.trim()) setSearch(urlQ)
+  }
+  const current = useRef({ urlParams, search })
+  useEffect(() => { current.current = { urlParams, search } })
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   useEffect(() => {
     const pending = timer
@@ -119,9 +139,11 @@ export default function QueueTab({ onOpenUser, onOpenLive, onOpenPolicy }: {
     setSearch(value)
     clearTimeout(timer.current)
     timer.current = setTimeout(() => {
-      const now = current.current
-      if ((now.get('q') ?? '') === value.trim()) return
-      setUrlParams(queueSearch(now, { q: value }), { replace: true })
+      const { urlParams: now, search: text } = current.current
+      const q = text.trim()
+      if ((now.get('q') ?? '') === q) return
+      setSentQ(q)
+      setUrlParams(queueSearch(now, { q }), { replace: true })
     }, SEARCH_DEBOUNCE_MS)
   }
 
@@ -192,7 +214,7 @@ export default function QueueTab({ onOpenUser, onOpenLive, onOpenPolicy }: {
       <Box sx={{ display: 'flex', gap: 1.5, flexWrap: 'wrap', alignItems: 'center' }}>
         <ToggleButtonGroup exclusive size="small" value={params.status}
           aria-label={t('admin:risk_center.queue.filter_status')}
-          onChange={(_, v: QueueStatus | null) => { if (v) update({ status: v }) }}>
+          onChange={(_, v: QueueStatus | null) => { if (v) update({ status: v, urgent: false }) }}>
           {STATUSES.map(s => (
             <ToggleButton key={s} value={s} sx={{ px: 1.5 }}>
               {t(`admin:risk_center.queue.status_${s}`)}
