@@ -238,8 +238,6 @@
       "emergency_access_quota_gb_hint": "0 = unlimited; once exceeded the panel ends the window early and re-disables the user"
     },
     "geo_anomaly": {
-      "section": "Concurrent-location detection",
-      "hint": "Combines one user's live source IPs across every panel; being in several places at once is the signal for a shared account. Needs the IP location database above — without it every verdict is \"unknown\", never \"clean\". By default it only observes and notifies admins through the bell; automatic temporary suspension below is optional.",
       "scope": "Granularity",
       "scope_hint": "How fine the judgement goes: \"City, tiered\" judges countries, regions and cities; \"Region / state\" skips cities; \"Country only\" judges countries alone.",
       "scope_country": "Country only",
@@ -291,13 +289,7 @@
       "infra_host_ttl_minutes_hint": "Default 10, range 1–1440."
     },
     "risk": {
-      "section": "Risk signals (observe only)",
-      "hint": "Four signals beside concurrent locations, recomputed at the risk refresh interval (hourly by default) and listed under Risk center → Risk signals; the bell lights when an account is flagged. None of them suspends, disables or changes an account. Subscription spread reuses the concurrent-location granularity, region tolerance and allow-anywhere above.",
-      "sub_spread": "Subscription spread: fetches from unconnected provinces across days",
       "sub_spread_hint": "Provinces one client (same device id or client string) was seen in count as one group; more groups than the concurrent-location region tolerance is flagged. Only the country with the most recurring provinces is judged; cross-border is not judged here.",
-      "devices": "Devices: devices the client declares",
-      "usage_shift": "Usage change: against the account's own baseline",
-      "login_country": "Login country: a panel login from a new country",
       "min_days": "Recurring days",
       "min_days_hint": "Days a province or device must appear on within the fetch window (bounded by sub-log retention), counted as calendar days in the panel timezone; at most the window's days.",
       "max_devices": "Device limit",
@@ -306,7 +298,6 @@
       "usage_ratio_hint": "A day above the daily median of the baseline days (since first use) times this ratio is an over-day; within the judged days, reaching the over-days to flag is flagged and reaching the over-days for suspect is suspect.",
       "usage_floor_gb": "Daily floor (GB)",
       "usage_floor_gb_hint": "Days below this are never over-days, so an account with a tiny baseline is not flagged for light use.",
-      "effective": "In effect: recurring at {{min_days}} days, {{max_devices}} devices, usage ratio {{ratio}}, daily floor {{floor}} GB",
       "usage_warmup_days": "Usage warm-up (days)",
       "usage_warmup_days_hint": "Default 14, at least 7, at most the baseline days.",
       "usage_flag_days": "Over-days to flag",
@@ -335,8 +326,6 @@
       "login_lookback_days_hint": "Default 90, range 7–365; shorter when auth-event retention is."
     },
     "risk_center": {
-      "section": "Risk center: records and refresh",
-      "hint": "Global only. Empty or 0 is the shipped default (the grey number in the field).",
       "effective": "In effect: {{value}}",
       "connection_retention_days": "Connection history retention (days)",
       "connection_retention_days_hint": "Holds IP addresses. Default 7, range 1–90; never kept forever.",
@@ -347,11 +336,7 @@
       "live_refresh_cooldown_seconds": "Refresh-now cooldown (seconds)",
       "live_refresh_cooldown_seconds_hint": "Each refresh asks every panel once. Default 30, range 5–3600.",
       "device_infer_hours": "Device inference window (hours)",
-      "device_infer_hours_hint": "Default 24, range 1–168, and never beyond sub-log retention.",
-      "advanced": "Detector runtime (advanced)",
-      "advanced_hint": "These used to be fixed in code; the shipped defaults are exactly the old values. Empty or 0 is the shipped default.",
-      "advanced_geo": "Concurrent-location detection",
-      "advanced_risk": "Risk signals"
+      "device_infer_hours_hint": "Default 24, range 1–168, and never beyond sub-log retention."
     },
     "geo": {
       "section": "IP region (logs)",
@@ -383,6 +368,8 @@
       "update_now": "Update now",
       "update_hint": "“Update now” saves your settings first, then downloads. MaxMind databases must be refreshed within 30 days (EULA) — enabling auto-update is recommended.",
       "attribution": "Attribution required where the data is used: MaxMind (GeoLite2) / DB-IP / IPinfo — depending on the database in use.",
+      "policy_pointer": "Concurrent-location and risk-signal settings are in Risk center › Policy.",
+      "open_policy": "Open policy",
       "update_ok": "Database updated: ",
       "update_running": "Update still running in the background; refresh later to see the result."
     },
@@ -2525,7 +2512,9 @@
       "on": "On",
       "off": "Off",
       "save_error": "Some overrides failed to save — reopen to verify",
-      "create_hint": "Save the group first, then set per-group overrides here."
+      "create_hint": "Save the group first, then set per-group overrides here.",
+      "policy_pointer": "Group exceptions for locations and risk signals are set in Risk center › Policy.",
+      "open_policy": "Open in a new tab"
     },
     "tabs": {
       "node_access": "Node access",

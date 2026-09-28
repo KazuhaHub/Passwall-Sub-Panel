@@ -8,10 +8,10 @@ vi.mock('@/api/client', () => ({ client: {} }))
 import zh from '@/locales/zh-CN/admin.json'
 import en from '@/locales/en-US/admin.json'
 import { GEO_REASON_CODES, type GeoAnomaly, type GeoReasonCode, type GeoSpot, type GeoWhy } from '@/api/geoAnomalies'
-import type { GeoIPStatus, UISettings } from '@/api/settings'
+import type { GeoIPStatus } from '@/api/settings'
 import { flatten, type Nested } from '@/i18n/options'
 import {
-  activeDbIsCountryOnly, geoTolerances, groupSpots, reasonText, spreadKm, tierLabelKey, type Translate,
+  activeDbIsCountryOnly, groupSpots, reasonText, spreadKm, tierLabelKey, type Translate,
 } from './geoAnomaly'
 
 function row(over: Partial<GeoAnomaly>): GeoAnomaly {
@@ -155,47 +155,6 @@ describe('activeDbIsCountryOnly', () => {
   })
 })
 
-describe('geoTolerances', () => {
-  const s = (over: Partial<UISettings>) => over as UISettings
-
-  it('reads unset (0 or missing) as the shipped defaults, never as zero tolerance', () => {
-    expect(geoTolerances(s({}))).toEqual({
-      flag: { countries: 1, regions: 1, cities: 2 },
-      ban: { countries: 1, regions: 2, cities: 3 },
-      banAfterPolls: 6,
-      banMinutes: 60,
-    })
-    expect(geoTolerances(s({
-      geo_anomaly_max_places: 0, geo_anomaly_max_regions: -1, geo_anomaly_max_cities: 0,
-      geo_anomaly_ban_max_countries: 0, geo_anomaly_ban_max_regions: 0, geo_anomaly_ban_max_cities: -3,
-      geo_anomaly_ban_after_polls: 0, geo_anomaly_ban_duration_minutes: -5,
-    }))).toEqual({
-      flag: { countries: 1, regions: 1, cities: 2 },
-      ban: { countries: 1, regions: 2, cities: 3 },
-      banAfterPolls: 6,
-      banMinutes: 60,
-    })
-  })
-
-  it('raises each ban tolerance to at least its flag tolerance', () => {
-    // The server does the same (sanitized), so ban-over always implies
-    // flag-over; the caption must say what will actually happen.
-    const got = geoTolerances(s({
-      geo_anomaly_max_places: 3, geo_anomaly_max_regions: 4, geo_anomaly_max_cities: 5,
-      geo_anomaly_ban_max_countries: 2, geo_anomaly_ban_max_regions: 9, geo_anomaly_ban_max_cities: 1,
-    }))
-    expect(got.flag).toEqual({ countries: 3, regions: 4, cities: 5 })
-    expect(got.ban).toEqual({ countries: 3, regions: 9, cities: 5 })
-  })
-
-  it('clamps the suspension length to seven days', () => {
-    expect(geoTolerances(s({ geo_anomaly_ban_duration_minutes: 99999 })).banMinutes).toBe(10080)
-    expect(geoTolerances(s({ geo_anomaly_ban_duration_minutes: 10080 })).banMinutes).toBe(10080)
-    expect(geoTolerances(s({ geo_anomaly_ban_duration_minutes: 1 })).banMinutes).toBe(1)
-    expect(geoTolerances(s({ geo_anomaly_ban_after_polls: 2 })).banAfterPolls).toBe(2)
-  })
-})
-
 // A stand-in for i18next's t over one shipped bundle: the admin namespace
 // flattened the way the SPA registers it, `{{name}}` interpolation, and the
 // defaultValue only when the key is absent. Backed by the REAL locale files,
@@ -320,7 +279,7 @@ describe('reasonText', () => {
   it('prints the group\'s own tolerance, not the default', () => {
     // The policy is resolved per group. An account in a group that allows
     // three provinces must read "tolerance 3", which is why the SPA reads
-    // the stored snapshot instead of geoTolerances(global settings).
+    // the stored snapshot instead of the global settings.
     const r = v2(why('flagged_sustained', { tier: 'region', tol: { countries: 1, regions: 3, cities: 2 } }),
       { spread: spread({ countries: 1, regions: 4, region_country: 'CN' }) }, { over_streak: 3 })
     expect(reasonText(r, zhT)).toContain('容错 3')

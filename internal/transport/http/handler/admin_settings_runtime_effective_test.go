@@ -75,9 +75,10 @@ func TestSettingsGET_ServesRuntimeEffective(t *testing.T) {
 
 // The maps are output only. The SPA posts back the whole object it read,
 // maps included, and an older tab may hold maps of another shape: neither
-// may change what is saved or fail the save. The response carries maps
-// recomputed from what was just saved, so the page shows the new values
-// in effect without a second read.
+// may fail the save. Nor may the knob it sends move anything: the risk
+// center's policy endpoint owns every risk_* key, so this save keeps the
+// stored value, and the maps it answers with are recomputed from what was
+// just saved — the kept value, not the one that was sent.
 func TestSettingsPUT_IgnoresRuntimeEffective(t *testing.T) {
 	for name, maps := range map[string]map[string]any{
 		"stale numbers": {
@@ -90,7 +91,7 @@ func TestSettingsPUT_IgnoresRuntimeEffective(t *testing.T) {
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
-			repo := &nodeTaskLifecycleSettingsRepo{settings: ports.UISettings{LoginMode: "local_only"}}
+			repo := &nodeTaskLifecycleSettingsRepo{settings: ports.UISettings{LoginMode: "local_only", RiskUsageFlagDays: 5}}
 			body := map[string]any{
 				"login_mode":             "local_only",
 				"risk_usage_flag_days":   3,
@@ -104,13 +105,13 @@ func TestSettingsPUT_IgnoresRuntimeEffective(t *testing.T) {
 			if res.Code != http.StatusOK {
 				t.Fatalf("PUT status %d: %s", res.Code, res.Body.String())
 			}
-			if repo.saves != 1 || repo.settings.RiskUsageFlagDays != 3 || repo.settings.RiskWindowDays != 0 {
-				t.Fatalf("saved flag days %d, window %d (saves %d); want the 3 that was sent and the window untouched",
+			if repo.saves != 1 || repo.settings.RiskUsageFlagDays != 5 || repo.settings.RiskWindowDays != 0 {
+				t.Fatalf("saved flag days %d, window %d (saves %d); want the stored 5 unchanged by the 3 that was sent, and the window untouched",
 					repo.settings.RiskUsageFlagDays, repo.settings.RiskWindowDays, repo.saves)
 			}
 			eff, def := runtimeMaps(t, res.Body.Bytes())
-			if eff["risk_usage_flag_days"] != 3 || eff["risk_window_days"] != 7 || def["risk_usage_flag_days"] != 4 {
-				t.Errorf("response maps: flag in effect %d (want 3), window %d (want 7), flag default %d (want 4)",
+			if eff["risk_usage_flag_days"] != 5 || eff["risk_window_days"] != 7 || def["risk_usage_flag_days"] != 4 {
+				t.Errorf("response maps: flag in effect %d (want the kept 5), window %d (want 7), flag default %d (want 4)",
 					eff["risk_usage_flag_days"], eff["risk_window_days"], def["risk_usage_flag_days"])
 			}
 		})

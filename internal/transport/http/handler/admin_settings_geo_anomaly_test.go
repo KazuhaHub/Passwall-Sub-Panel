@@ -11,12 +11,13 @@ import (
 
 // Drift guard for the settings transport.
 //
-// A UISettings field reaches the admin form through THREE hand-written
-// mappings — the DTO struct, the GET direction and the PUT direction — and
-// missing any one of them fails silently in the worst possible way: the form
-// renders the control, the admin sets it, the save returns 200, and the value
-// is discarded. That is the same "writes succeed and do nothing" shape this
-// whole area keeps producing, one layer up.
+// A UISettings field reaches the admin settings page through two hand-written
+// mappings — the DTO struct and the GET direction — and missing either fails
+// silently: the page (and the scope editor, whose inheritance baseline reads
+// this GET) shows the zero value as if it were stored. The PUT direction is
+// deliberately absent for these prefixes: the risk center's policy endpoint
+// owns them, and TestSettingsPut_NeverReadsPolicyFieldsFromTheRequest pins
+// that this page's save never reads them off the request.
 //
 // Scoped to named prefixes rather than every setting because retrofitting the
 // rule to the existing surface would fail on fields that are deliberately
@@ -46,17 +47,16 @@ func TestSettingsDTOCarriesEveryGeoAnomalyField(t *testing.T) {
 	}
 }
 
-// The DTO alone is not enough — a field can be declared and then never
-// assigned in either direction. Both mappings are inline in the handler, so
-// this reads the source and requires each Go field name to appear on both
-// sides of an assignment.
+// The DTO alone is not enough — a field can be declared and never assigned.
+// The mapping is inline in settingsToDTO, so this reads the source and
+// requires each Go field name to be read out of the stored settings.
 //
-// Source inspection rather than a round trip because the mappings live inside
+// Source inspection rather than a round trip because the mapping lives beside
 // gin handlers that need a repo, a router and an authenticated context; a
 // harness for that would be several hundred lines and would still only prove
-// what these two lines prove. Deleting either assignment is the regression
-// this exists to catch, and it does catch it.
-func TestSettingsHandlerMapsEveryGeoAnomalyFieldBothWays(t *testing.T) {
+// what this check proves. Deleting the assignment is the regression this
+// exists to catch, and it does catch it.
+func TestSettingsHandlerServesEveryGeoAnomalyField(t *testing.T) {
 	src := readHandlerSource(t, "admin_settings.go")
 	for _, prefix := range guardedSettingPrefixes {
 		t.Run(prefix, func(t *testing.T) {
@@ -66,14 +66,8 @@ func TestSettingsHandlerMapsEveryGeoAnomalyFieldBothWays(t *testing.T) {
 			}
 			for _, name := range names {
 				// GET: dto{... Field: s.Field ...}
-				if !strings.Contains(src, name+":                s."+name) &&
-					!strings.Contains(src, name+":             s."+name) &&
-					!strings.Contains(src, "s."+name+",") {
-					t.Errorf("%s is never read out of UISettings — the form would always show the zero value", name)
-				}
-				// PUT: UISettings{... Field: req.Field ...}
-				if !strings.Contains(src, "req."+name) {
-					t.Errorf("%s is never read off the request — the admin's change would be silently discarded", name)
+				if !strings.Contains(src, "s."+name+",") {
+					t.Errorf("%s is never read out of UISettings — the page would always show the zero value", name)
 				}
 			}
 		})

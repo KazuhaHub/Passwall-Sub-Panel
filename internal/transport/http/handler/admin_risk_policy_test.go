@@ -411,8 +411,10 @@ func TestSettingsWritesAreSerialized(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		// The system page at this commit still sends the policy keys it
-		// holds; this tab's copy says max_devices 3.
+		// An older system page still sends the policy keys it holds (this
+		// tab's copy says max_devices 3). The settings PUT ignores them but
+		// writes back the policy it LOADED, so unserialized it would still
+		// put the 3 back over the policy PUT's 5.
 		settingsRec = requestRiskPolicy(router, http.MethodPut, "/api/admin/settings/ui",
 			`{"login_mode":"local_only","site_title":"after","risk_max_devices":3}`)
 	}()

@@ -1,11 +1,9 @@
-// Pure helpers for the risk signals' evidence and its settings block. No I/O,
-// no React: each one either mirrors a server rule (riskPolicy) or decides what
-// an admin reads (riskCodeText, the day strips), so all of them are pinned by
-// unit tests rather than by rendering.
+// Pure helpers for the risk signals' evidence. No I/O, no React: each one
+// decides what an admin reads (riskCodeText, the day strips), so all of them
+// are pinned by unit tests rather than by rendering.
 import type {
   DevicesEvidence, LoginCountryEvidence, RiskSignal, SubSpreadEvidence, UsageShiftEvidence,
 } from '@/api/riskSignals'
-import type { UISettings } from '@/api/settings'
 import type { Translate } from './geoAnomaly'
 import type { RegionNamer, RegionRef } from './regionName'
 
@@ -105,36 +103,6 @@ export function dayLabels(start: string, days: number): string[] {
 /** Bytes as GiB — the unit the daily floor is typed in. */
 export function formatGB(bytes: number): string {
   return `${(bytes / 2 ** 30).toFixed(2)} GB`
-}
-
-// domain.RiskPolicyFromSettings' defaults and bounds, copied rather than
-// fetched: the server returns what is STORED (0 = unset), not what is in
-// effect, for these four tolerances. RISK_WINDOW_DAYS is the fetch window's
-// structural ceiling, used when the server reports no window in effect.
-const RISK_WINDOW_DAYS = 7
-const RISK_DEFAULT = { minDays: 3, maxDevices: 3, ratio: 3, floorGB: 3 }
-const RISK_RATIO_MIN = 1.5
-
-function positive(v: number | undefined): v is number {
-  return typeof v === 'number' && v > 0
-}
-
-/**
- * The risk policy actually in effect for these settings, mirroring
- * domain.RiskPolicyFromSettings and RiskPolicy.Bounded: an unset (≤ 0 or
- * missing) value is the shipped default, and every repair errs toward not
- * accusing — min_days is held to the fetch window (the window in effect the
- * server reports, else its seven-day ceiling), the ratio is raised to 1.5.
- */
-export function riskPolicy(s: UISettings): { minDays: number; maxDevices: number; ratio: number; floorGB: number } {
-  const window = s.runtime_effective?.risk_window_days
-  const days = positive(window) ? Math.min(window, RISK_WINDOW_DAYS) : RISK_WINDOW_DAYS
-  return {
-    minDays: Math.min(positive(s.risk_min_days) ? s.risk_min_days : RISK_DEFAULT.minDays, days),
-    maxDevices: positive(s.risk_max_devices) ? s.risk_max_devices : RISK_DEFAULT.maxDevices,
-    ratio: positive(s.risk_usage_ratio) ? Math.max(s.risk_usage_ratio, RISK_RATIO_MIN) : RISK_DEFAULT.ratio,
-    floorGB: positive(s.risk_usage_floor_gb) ? s.risk_usage_floor_gb : RISK_DEFAULT.floorGB,
-  }
 }
 
 /**

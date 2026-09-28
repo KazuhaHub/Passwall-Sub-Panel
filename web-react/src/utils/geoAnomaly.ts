@@ -1,10 +1,10 @@
-// Pure helpers for the concurrent-location views: the risk center's queue and
-// drawer, the geo settings section and the per-group editor. No I/O, no React
-// — each one either mirrors a server rule (geoTolerances) or decides what an
-// admin reads (reasonText, the place tree), so both are pinned by unit tests
-// rather than by rendering.
+// Pure helpers for the risk center's concurrent-location views: the queue,
+// the drawer, the records and the policy page. No I/O, no React — each one
+// decides what an admin reads (reasonText, the place tree, the location
+// database banner), so they are pinned by unit tests rather than by
+// rendering.
 import type { GeoAnomaly, GeoEvidence, GeoSpot, GeoTier, GeoWhy } from '@/api/geoAnomalies'
-import type { GeoIPStatus, UISettings } from '@/api/settings'
+import type { GeoIPStatus } from '@/api/settings'
 
 /**
  * The i18n key for a tier chip, or null when the row has no tier (clean,
@@ -49,8 +49,8 @@ function overAt(why: GeoWhy, ev: GeoEvidence): { spread: number; tolerance: numb
  * v<2 row, an unknown code or a missing key renders the stored English.
  *
  * The numbers come from the row, never from the settings: the policy is
- * resolved per group, and geoTolerances(global) would print the default
- * tolerance for an account whose group allows more. Unlike the English, the
+ * resolved per group, and the global tolerances would print the default for
+ * an account whose group allows more. Unlike the English, the
  * sentence does not repeat the place list — the Places column beside it
  * already shows every spot, by country, region and city.
  */
@@ -212,58 +212,4 @@ export function spreadKm(ev: GeoEvidence | undefined): number {
  */
 export function activeDbIsCountryOnly(s: GeoIPStatus | undefined): boolean {
   return (s?.available ?? []).some(d => d.active && d.granularity === 'country')
-}
-
-export interface GeoTierCounts {
-  countries: number
-  regions: number
-  cities: number
-}
-
-// The shipped defaults and the ceiling, as domain.DefaultGeoPolicy and
-// domain.GeoBanMaxDurationMinutes define them. Copied, not fetched: the
-// server returns what is STORED (0 = unset), not what is in effect.
-const FLAG_DEFAULT: GeoTierCounts = { countries: 1, regions: 1, cities: 2 }
-const BAN_DEFAULT: GeoTierCounts = { countries: 1, regions: 2, cities: 3 }
-const BAN_AFTER_DEFAULT = 6
-const BAN_MINUTES_DEFAULT = 60
-const BAN_MINUTES_MAX = 10080
-
-/** A stored value that is not a positive number means "never configured". */
-function orDefault(v: number | undefined, def: number): number {
-  return typeof v === 'number' && v > 0 ? v : def
-}
-
-/**
- * The tolerances actually in effect for these settings, mirroring the server's
- * GeoPolicyFromSettings + sanitized(): an unset (<= 0 or missing) value is the
- * shipped default, never zero tolerance; each ban tolerance is raised to at
- * least its flag tolerance, so a ban-over sample is always a flag-over one;
- * the suspension length is clamped to 1..10080 minutes.
- *
- * These are TOLERANCES — how many are allowed at once. The first count that is
- * over is one more.
- */
-export function geoTolerances(s: UISettings): {
-  flag: GeoTierCounts
-  ban: GeoTierCounts
-  banAfterPolls: number
-  banMinutes: number
-} {
-  const flag: GeoTierCounts = {
-    countries: orDefault(s.geo_anomaly_max_places, FLAG_DEFAULT.countries),
-    regions: orDefault(s.geo_anomaly_max_regions, FLAG_DEFAULT.regions),
-    cities: orDefault(s.geo_anomaly_max_cities, FLAG_DEFAULT.cities),
-  }
-  const ban: GeoTierCounts = {
-    countries: Math.max(orDefault(s.geo_anomaly_ban_max_countries, BAN_DEFAULT.countries), flag.countries),
-    regions: Math.max(orDefault(s.geo_anomaly_ban_max_regions, BAN_DEFAULT.regions), flag.regions),
-    cities: Math.max(orDefault(s.geo_anomaly_ban_max_cities, BAN_DEFAULT.cities), flag.cities),
-  }
-  return {
-    flag,
-    ban,
-    banAfterPolls: orDefault(s.geo_anomaly_ban_after_polls, BAN_AFTER_DEFAULT),
-    banMinutes: Math.min(orDefault(s.geo_anomaly_ban_duration_minutes, BAN_MINUTES_DEFAULT), BAN_MINUTES_MAX),
-  }
 }

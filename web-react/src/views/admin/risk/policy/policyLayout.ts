@@ -8,8 +8,9 @@ import type { PresetDetector } from './presets'
 // describing every number beside it — are checked key by key without
 // rendering the page (policyLayout.test).
 //
-// Labels and hints are the settings page's own keys (settings.*): the same
-// words for the same knob wherever it is edited, the group editor included.
+// Labels and hints keep the keys they had on the system settings page
+// (settings.*), which no longer shows these knobs: the same words for the
+// same knob wherever it is edited, the group editor's hints included.
 //
 // Bounds are the server's sanitizers', none invented, so the page stops an
 // admin only where the server would silently change the number:
@@ -77,7 +78,7 @@ export interface PolicyCardSpec {
 const GEO = 'admin:settings.geo_anomaly.'
 const RISK = 'admin:settings.risk.'
 
-/** A geo tolerance or check count: a † field with the settings page's words. */
+/** A geo tolerance or check count: a † field under settings.geo_anomaly.*. */
 function geoNumber(key: RiskPolicyKey, name: string, hint = `${name}_hint`): PolicyFieldSpec {
   return { key, kind: 'number', label: `${GEO}${name}`, hint: `${GEO}${hint}`, tail: true }
 }

@@ -8,11 +8,10 @@ vi.mock('@/api/client', () => ({ client: {} }))
 import zh from '@/locales/zh-CN/admin.json'
 import en from '@/locales/en-US/admin.json'
 import { RISK_CODES, RISK_KINDS, type RiskKind, type RiskSignal } from '@/api/riskSignals'
-import type { UISettings } from '@/api/settings'
 import { flatten, type Nested } from '@/i18n/options'
 import type { Translate } from './geoAnomaly'
 import {
-  dayBits, dayLabels, formatGB, placeLabel, riskCodeText, riskPolicy,
+  dayBits, dayLabels, formatGB, placeLabel, riskCodeText,
 } from './riskSignals'
 
 // A stand-in for i18next's t over one shipped bundle: the admin namespace
@@ -167,36 +166,6 @@ describe('dayLabels', () => {
   it('labels nothing for a start it cannot read, one cell per day all the same', () => {
     expect(dayLabels('', 2)).toEqual(['', ''])
     expect(dayLabels('not-a-date', 1)).toEqual([''])
-  })
-})
-
-describe('riskPolicy', () => {
-  const s = (over: Partial<UISettings>) => over as UISettings
-
-  it('reads unset (0, negative or missing) as the shipped defaults', () => {
-    const def = { minDays: 3, maxDevices: 3, ratio: 3, floorGB: 3 }
-    expect(riskPolicy(s({}))).toEqual(def)
-    expect(riskPolicy(s({ risk_min_days: 0, risk_max_devices: 0, risk_usage_ratio: 0, risk_usage_floor_gb: 0 }))).toEqual(def)
-    expect(riskPolicy(s({ risk_min_days: -2, risk_max_devices: -1, risk_usage_ratio: -3, risk_usage_floor_gb: -4 }))).toEqual(def)
-  })
-
-  it('holds min_days to the fetch window in effect', () => {
-    // RiskPolicy.Bounded: a place cannot recur on more days than the window
-    // holds, and the window is a setting whose value in effect the server
-    // reports. Without the map (an older server) the structural 7 applies.
-    expect(riskPolicy(s({ risk_min_days: 5, runtime_effective: { risk_window_days: 3 } })).minDays).toBe(3)
-    expect(riskPolicy(s({ runtime_effective: { risk_window_days: 2 } })).minDays).toBe(2)
-    expect(riskPolicy(s({ risk_min_days: 5, runtime_effective: {} })).minDays).toBe(5)
-    expect(riskPolicy(s({ risk_min_days: 9 })).minDays).toBe(7)
-  })
-
-  it('repairs toward not accusing, as the server does', () => {
-    // domain.RiskPolicyFromSettings: a ratio below 1.5 is raised to it, and
-    // min_days is clamped to the seven-day window it counts within.
-    expect(riskPolicy(s({ risk_usage_ratio: 1 })).ratio).toBe(1.5)
-    expect(riskPolicy(s({ risk_min_days: 9 })).minDays).toBe(7)
-    expect(riskPolicy(s({ risk_min_days: 1, risk_max_devices: 5, risk_usage_ratio: 2.5, risk_usage_floor_gb: 10 })))
-      .toEqual({ minDays: 1, maxDevices: 5, ratio: 2.5, floorGB: 10 })
   })
 })
 

@@ -15,11 +15,12 @@ import { flatten, type Nested } from './options'
 // parenthesis that says so ("（默认每小时）", "(hourly by default)"). A
 // sentence about one verdict takes its numbers from the verdict's evidence.
 //
-// Scanned: the zh-CN and en-US values under the settings page's geo, risk and
-// risk-center blocks, the risk-signal and risk-center tabs, and the group
-// editor's risk rows; plus the Chinese defaultValue copies in the settings
-// view, which an i18n miss would show instead. The risk center's views carry
-// no Chinese copies at all (riskKeys.test.ts).
+// Scanned: the zh-CN and en-US values under the settings.geo_anomaly, risk
+// and risk_center blocks (the policy page's labels and hints), the
+// risk-signal and risk-center tabs, and the group editor's risk rows; plus
+// the Chinese defaultValue copies in the settings view, which an i18n miss
+// would show instead. The risk center's views carry no Chinese copies at all
+// (riskKeys.test.ts).
 const scanned = ['settings.geo_anomaly.', 'settings.risk.', 'settings.risk_center.', 'risk_signals.', 'risk_center.', 'groups.scope.risk_']
 
 const literals: Record<'zh' | 'en', string[]> = {
