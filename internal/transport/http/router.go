@@ -637,6 +637,15 @@ func NewRouter(d Deps) stdhttp.Handler {
 		adminGroup.DELETE("/risk-center/users/:id/dismiss", riskReviewH.Undismiss)
 		adminGroup.POST("/risk-center/users/:id/trust", riskReviewH.Trust)
 		adminGroup.DELETE("/risk-center/users/:id/trust", riskReviewH.Untrust)
+		// The policy: every concurrent-location and risk-signal setting,
+		// with the shipped defaults and the runtime values in effect.
+		// adminGroup for the same reason — it decides whom the detectors
+		// accuse and when one suspends somebody's service. The PUT is
+		// audited like every write here, and it shares the system
+		// settings PUT's write lock: both save the whole settings record.
+		riskPolicyH := handler.NewAdminRiskPolicyHandler(d.Repos.Settings)
+		adminGroup.GET("/risk-center/policy", riskPolicyH.Get)
+		adminGroup.PUT("/risk-center/policy", riskPolicyH.Put)
 		adminGroup.GET("/diagnostics/metrics", diagH.Metrics)
 		adminGroup.POST("/diagnostics/metrics/reset", diagH.ResetMetrics)
 

@@ -2,6 +2,7 @@ package http
 
 import (
 	"context"
+	"io"
 	stdhttp "net/http"
 	"net/http/httptest"
 	"strings"
@@ -80,6 +81,23 @@ func (r *routerRiskCenter) Untrust(_ context.Context, id int64, _ riskreview.Act
 	return domain.RiskReview{UserID: id}, nil
 }
 
+// routerPolicySettings is the settings store behind the policy routes; a
+// save is the policy PUT reaching it.
+type routerPolicySettings struct {
+	settings ports.UISettings
+	saves    int
+}
+
+func (r *routerPolicySettings) Load(context.Context, ports.UISettings) (ports.UISettings, error) {
+	return r.settings, nil
+}
+
+func (r *routerPolicySettings) Save(_ context.Context, s ports.UISettings) error {
+	r.settings = s
+	r.saves++
+	return nil
+}
+
 // THE RISK CENTER IS THE OWNER'S. It lists accounts beside their IP
 // addresses — live, and for up to 90 days in the connection history — and
 // every change the detectors made about them, on signals rather than proof.
@@ -90,8 +108,12 @@ func (r *routerRiskCenter) Untrust(_ context.Context, id int64, _ riskreview.Act
 // history, the records, and the queue, one account's drawer and the Users
 // page's levels, which name accounts beside their verdicts, and the four
 // review actions, which decide what the owner is shown about an account and
-// can lift the detector's hold — each as anonymous, operator and
-// administrator.
+// can lift the detector's hold, and the policy, which decides whom the
+// detectors accuse and when one suspends — each as anonymous, operator and
+// administrator. A route reaches either the risk center's services or, for
+// the policy, the settings store: the policy GET has no side effect to
+// count, so it is held to its answer, which a refused request must never
+// carry.
 func TestRiskCenterRoutesAreAdminOnly(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	admin := &domain.User{ID: 1, UPN: "admin@example.test", Enabled: true, Role: domain.RoleAdmin}
@@ -110,23 +132,33 @@ func TestRiskCenterRoutesAreAdminOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	svc := &routerRiskCenter{}
+	settings := &routerPolicySettings{}
 	router := NewRouter(Deps{
 		Cfg:   &config.Config{ConfigDir: t.TempDir()},
-		Repos: ports.Repos{User: users, Settings: &dispatchSettingsRepo{}},
+		Repos: ports.Repos{User: users, Settings: settings},
 		Auth:  authSvc, User: user.New(users, nil, nil, nil, nil, nil, nil, nil), RiskCenter: svc, RiskReview: svc,
 	})
-	for _, route := range []struct{ method, path, body string }{
-		{stdhttp.MethodGet, "/api/admin/risk-center/live", `"upn":"alice"`},
-		{stdhttp.MethodPost, "/api/admin/risk-center/live/refresh", `"refreshed":true`},
-		{stdhttp.MethodGet, "/api/admin/risk-center/connections", `"ip":"203.0.113.7"`},
-		{stdhttp.MethodGet, "/api/admin/risk-center/flags", `"id":1`},
-		{stdhttp.MethodGet, "/api/admin/risk-center/queue", `"upn":"alice"`},
-		{stdhttp.MethodGet, "/api/admin/risk-center/users/7", `"upn":"alice"`},
-		{stdhttp.MethodGet, "/api/admin/risk-center/levels", `"7":{"level":"flagged"`},
-		{stdhttp.MethodPost, "/api/admin/risk-center/users/7/dismiss", `"dismissed":true`},
-		{stdhttp.MethodDelete, "/api/admin/risk-center/users/7/dismiss", `"dismissed":false`},
-		{stdhttp.MethodPost, "/api/admin/risk-center/users/7/trust", `"resumed":false`},
-		{stdhttp.MethodDelete, "/api/admin/risk-center/users/7/trust", `"trusted":false`},
+	services := func() int { return svc.calls }
+	saves := func() int { return settings.saves }
+	for _, route := range []struct {
+		method, path, reqBody, body string
+		// reached counts what the route reaches; nil for a read with
+		// nothing to count, held to its answer alone.
+		reached func() int
+	}{
+		{stdhttp.MethodGet, "/api/admin/risk-center/live", "", `"upn":"alice"`, services},
+		{stdhttp.MethodPost, "/api/admin/risk-center/live/refresh", "", `"refreshed":true`, services},
+		{stdhttp.MethodGet, "/api/admin/risk-center/connections", "", `"ip":"203.0.113.7"`, services},
+		{stdhttp.MethodGet, "/api/admin/risk-center/flags", "", `"id":1`, services},
+		{stdhttp.MethodGet, "/api/admin/risk-center/queue", "", `"upn":"alice"`, services},
+		{stdhttp.MethodGet, "/api/admin/risk-center/users/7", "", `"upn":"alice"`, services},
+		{stdhttp.MethodGet, "/api/admin/risk-center/levels", "", `"7":{"level":"flagged"`, services},
+		{stdhttp.MethodPost, "/api/admin/risk-center/users/7/dismiss", "", `"dismissed":true`, services},
+		{stdhttp.MethodDelete, "/api/admin/risk-center/users/7/dismiss", "", `"dismissed":false`, services},
+		{stdhttp.MethodPost, "/api/admin/risk-center/users/7/trust", "", `"resumed":false`, services},
+		{stdhttp.MethodDelete, "/api/admin/risk-center/users/7/trust", "", `"trusted":false`, services},
+		{stdhttp.MethodGet, "/api/admin/risk-center/policy", "", `"defaults":{`, nil},
+		{stdhttp.MethodPut, "/api/admin/risk-center/policy", `{"settings":{"risk_max_devices":5}}`, `"risk_max_devices":5`, saves},
 	} {
 		for _, test := range []struct {
 			name, token string
@@ -137,8 +169,19 @@ func TestRiskCenterRoutesAreAdminOnly(t *testing.T) {
 			{"administrator", adminToken, stdhttp.StatusOK},
 		} {
 			t.Run(route.method+" "+route.path+" as "+test.name, func(t *testing.T) {
-				before := svc.calls
-				req := httptest.NewRequest(route.method, "https://panel.example"+route.path, nil)
+				reached := route.reached
+				if reached == nil {
+					reached = func() int { return 0 }
+				}
+				before := reached()
+				var reqBody io.Reader
+				if route.reqBody != "" {
+					reqBody = strings.NewReader(route.reqBody)
+				}
+				req := httptest.NewRequest(route.method, "https://panel.example"+route.path, reqBody)
+				if reqBody != nil {
+					req.Header.Set("Content-Type", "application/json")
+				}
 				if test.token != "" {
 					req.Header.Set("Authorization", "Bearer "+test.token)
 				}
@@ -149,12 +192,12 @@ func TestRiskCenterRoutesAreAdminOnly(t *testing.T) {
 				}
 				switch test.status {
 				case stdhttp.StatusOK:
-					if svc.calls != before+1 || !strings.Contains(w.Body.String(), route.body) {
-						t.Fatalf("the administrator's request did not reach the service: calls %d→%d, body %s", before, svc.calls, w.Body.String())
+					if (route.reached != nil && reached() != before+1) || !strings.Contains(w.Body.String(), route.body) {
+						t.Fatalf("the administrator's request did not reach the service: calls %d→%d, body %s", before, reached(), w.Body.String())
 					}
 				default:
-					if svc.calls != before {
-						t.Fatal("a refused request reached the service")
+					if reached() != before || strings.Contains(w.Body.String(), route.body) {
+						t.Fatalf("a refused request reached the service: calls %d→%d, body %s", before, reached(), w.Body.String())
 					}
 				}
 			})

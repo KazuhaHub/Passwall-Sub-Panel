@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	nodeprotocol "github.com/KazuhaHub/passwall-protocol/protocol"
@@ -17,6 +18,17 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/captcha"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/geo"
 )
+
+// uiSettingsWriteMu serializes the two writers of the settings record: this
+// page's PUT and the risk center's policy PUT (AdminRiskPolicyHandler.Put).
+// The store saves whole records only (the KV repo rewrites every key), so
+// each writer loads the whole record, changes its part and saves the whole
+// record back; two of them interleaving would each write the other's part
+// back as it was before they loaded, and the later save would silently
+// revert the earlier (D6). Held from the load to the last save (or
+// rollback) and nothing else is locked inside it. Package-level because
+// the two writers are separate handlers sharing one store.
+var uiSettingsWriteMu sync.Mutex
 
 // AdminSettingsHandler exposes /api/admin/settings/ui — every runtime-editable
 // preference (branding, login mode, email domains, cron cadence, JWT TTLs,
@@ -495,6 +507,10 @@ func (h *AdminSettingsHandler) Put(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Login_mode must be sso_redirect | sso_first | dual | local_only"})
 		return
 	}
+	// From the load to the last save or rollback, no other settings writer
+	// may load: see uiSettingsWriteMu.
+	uiSettingsWriteMu.Lock()
+	defer uiSettingsWriteMu.Unlock()
 	// Load the prior state so normalizeGlobalAnnouncement can decide
 	// whether to bump UpdatedAt (only on meaningful change).
 	prev, prevErr := h.repo.Load(c.Request.Context(), h.defaults())

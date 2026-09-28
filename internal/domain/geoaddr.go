@@ -90,13 +90,37 @@ func ParseGeoIgnoreList(raw string) (GeoIgnoreList, error) {
 		}
 	}
 	if len(bad) > 0 {
-		return list, fmt.Errorf("%w: invalid ignore-list entries: %s", ErrValidation, strings.Join(bad, ", "))
+		return list, &GeoIgnoreListError{
+			Bad: bad,
+			msg: fmt.Sprintf("%v: invalid ignore-list entries: %s", ErrValidation, strings.Join(bad, ", ")),
+		}
 	}
 	if n := len(list.prefixes); n > GeoIgnoreListMaxEntries {
-		return list, fmt.Errorf("%w: at most %d ignore-list entries (got %d)", ErrValidation, GeoIgnoreListMaxEntries, n)
+		return list, &GeoIgnoreListError{
+			msg: fmt.Sprintf("%v: at most %d ignore-list entries (got %d)", ErrValidation, GeoIgnoreListMaxEntries, n),
+		}
 	}
 	return list, nil
 }
+
+// GeoIgnoreListError is ParseGeoIgnoreList's refusal: a validation error
+// (errors.Is ErrValidation) that also carries the entries that did not
+// parse, as typed and in the order typed. The risk policy's save names them
+// in its answer so the page can mark the field and list the lines to fix;
+// carried here rather than re-derived by the caller, because re-deriving
+// them would need a second copy of the list's grammar (lines, commas,
+// comments), and the two would drift. Bad is empty when the list is refused
+// for its length alone.
+type GeoIgnoreListError struct {
+	Bad []string
+	msg string
+}
+
+func (e *GeoIgnoreListError) Error() string { return e.msg }
+
+// Unwrap keeps the refusal a validation error for every caller that only
+// asks errors.Is(err, ErrValidation) — the system settings save among them.
+func (e *GeoIgnoreListError) Unwrap() error { return ErrValidation }
 
 // parseIgnoreEntry turns one token into the prefix Contains matches against.
 //

@@ -491,6 +491,33 @@ func TestParseGeoIgnoreList_ReportsEveryBadEntry(t *testing.T) {
 	}
 }
 
+// The refusal also carries the bad entries as typed, in the order typed,
+// so the risk policy page can mark the field and list what to fix without
+// splitting the list again with a second copy of its grammar. Only the
+// entries: a list refused for its length alone has none to name.
+func TestParseGeoIgnoreList_ErrorCarriesTheBadEntries(t *testing.T) {
+	_, err := ParseGeoIgnoreList("203.0.113.7 # office\n1.2.3.999, 198.51.100.0/24\n10.0.0.0/33 # 1.1.1.x")
+	var listErr *GeoIgnoreListError
+	if !errors.As(err, &listErr) {
+		t.Fatalf("err = %v (%T), want a *GeoIgnoreListError", err, err)
+	}
+	if want := []string{"1.2.3.999", "10.0.0.0/33"}; !reflect.DeepEqual(listErr.Bad, want) {
+		t.Errorf("Bad = %q, want %q", listErr.Bad, want)
+	}
+	if !errors.Is(err, ErrValidation) {
+		t.Errorf("err = %v, want it still a validation error", err)
+	}
+
+	var b strings.Builder
+	for i := 0; i < GeoIgnoreListMaxEntries+1; i++ {
+		fmt.Fprintf(&b, "10.%d.%d.1\n", i/256, i%256)
+	}
+	_, err = ParseGeoIgnoreList(b.String())
+	if !errors.As(err, &listErr) || len(listErr.Bad) != 0 {
+		t.Fatalf("a list refused for its length: err = %v, Bad = %v; want a *GeoIgnoreListError naming no entry", err, listErr)
+	}
+}
+
 func TestParseGeoIgnoreList_RejectsMoreThan256(t *testing.T) {
 	var b strings.Builder
 	for i := 0; i < GeoIgnoreListMaxEntries+1; i++ {
