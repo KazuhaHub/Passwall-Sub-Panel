@@ -2229,6 +2229,7 @@
       "traffic": "流量",
       "expire": "到期",
       "status": "状态",
+      "risk": "风控",
       "last_online": "最近活跃",
       "actions": "操作"
     },
@@ -2324,7 +2325,8 @@
       "passkeys": "管理通行密钥",
       "resume_service": "恢复代理服务",
       "suspend_service": "暂停代理服务",
-      "account_security": "账号安全"
+      "account_security": "账号安全",
+      "risk_details": "风控详情"
     },
     "security": {
       "subtitle": "管理员可重置 / 吊销 / 重新生成凭据，但无法代用户新增 2FA 或通行密钥（需要用户本人的设备）。",
@@ -2414,7 +2416,8 @@
       "load_failed": "加载通行密钥失败",
       "close": "关闭"
     },
-    "risk_lookup": "风控查询"
+    "risk_lookup": "风控查询",
+    "risk_chip_hint": "打开风控详情"
   },
   "groups": {
     "title": "分组管理",

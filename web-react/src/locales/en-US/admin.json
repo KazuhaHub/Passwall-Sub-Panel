@@ -2231,6 +2231,7 @@
       "traffic": "Traffic",
       "expire": "Expires",
       "status": "Status",
+      "risk": "Risk",
       "last_online": "Last online",
       "actions": "Actions"
     },
@@ -2326,7 +2327,8 @@
       "passkeys": "Manage passkeys",
       "resume_service": "Resume proxy service",
       "suspend_service": "Suspend proxy service",
-      "account_security": "Account security"
+      "account_security": "Account security",
+      "risk_details": "Risk details"
     },
     "security": {
       "subtitle": "Admins can reset / revoke / regenerate credentials, but can't enroll 2FA or passkeys for a user (that needs their own device).",
@@ -2416,7 +2418,8 @@
       "load_failed": "Failed to load passkeys",
       "close": "Close"
     },
-    "risk_lookup": "Risk lookup"
+    "risk_lookup": "Risk lookup",
+    "risk_chip_hint": "Open risk details"
   },
   "groups": {
     "title": "Groups",
