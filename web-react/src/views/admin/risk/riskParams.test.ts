@@ -6,7 +6,8 @@ import { describe, expect, it, vi } from 'vitest'
 vi.mock('@/api/client', () => ({ client: {} }))
 
 import {
-  legacyRedirect, liveSearch, parseLiveParams, parseQueueParams, parseRiskTab, parseUserId, queueSearch, RISK_TABS,
+  legacyRedirect, liveSearch, parseLiveParams, parseQueueParams, parseRecordsParams, parseRiskTab, parseUserId,
+  queueSearch, recordsSearch, RISK_TABS,
 } from './riskParams'
 
 const q = (search: string) => new URLSearchParams(search)
@@ -172,5 +173,57 @@ describe('live params', () => {
     expect(next.get('level')).toBe('flagged')
     expect(liveSearch(at, { page: 5 }).get('live_page')).toBe('5')
     expect(liveSearch(q('live_user=7'), { user_id: undefined }).has('live_user')).toBe(false)
+  })
+})
+
+// The records tab's filters, under their own `rec_` names. The time bounds
+// are kept as the datetime-local text the admin typed (browser time); the
+// tab turns them into instants when it asks.
+describe('records params', () => {
+  it('reads the defaults from an empty URL', () => {
+    expect(parseRecordsParams(q(''))).toEqual({ page: 1, page_size: 25 })
+  })
+
+  it('reads every filter', () => {
+    expect(parseRecordsParams(q('rec_user=7&rec_source=review&rec_since=2026-09-01T08:00&rec_until=2026-09-02T09:30:15'
+      + '&rec_level=cleared&rec_event=dismissed&rec_page=3&rec_size=50')))
+      .toEqual({
+        user_id: 7, source: 'review', since: '2026-09-01T08:00', until: '2026-09-02T09:30:15',
+        level: 'cleared', event: 'dismissed', page: 3, page_size: 50,
+      })
+  })
+
+  // A value this build does not offer filters nothing: an old link's source,
+  // a mistyped time, an event from a newer server.
+  it('ignores malformed values', () => {
+    expect(parseRecordsParams(q('rec_user=abc&rec_source=travel&rec_since=yesterday&rec_until=2026-13&rec_level=bogus'
+      + '&rec_event=bogus&rec_page=0&rec_size=7')))
+      .toEqual({ page: 1, page_size: 25 })
+  })
+
+  it.each([
+    { page: 1, page_size: 25 },
+    { user_id: 7, source: 'geo_auto', since: '2026-09-01T08:00', level: 'suspended', page: 2, page_size: 100 },
+    { source: 'review', event: 'trusted', until: '2026-09-02T09:30', page: 1, page_size: 50 },
+  ])('round-trips %j', params => {
+    expect(parseRecordsParams(recordsSearch(q(''), params))).toEqual(params)
+  })
+
+  it('omits the defaults', () => {
+    expect(recordsSearch(q('rec_source=geo&rec_page=3&rec_size=50'), { source: '', page: 1, page_size: 25 }).toString())
+      .toBe('')
+  })
+
+  it('resets the page on a filter change and keeps every other param', () => {
+    const at = q('tab=records&user=9&level=flagged&live_panel=2&rec_page=3')
+    const next = recordsSearch(at, { event: 'dismissed' })
+    expect(next.has('rec_page')).toBe(false)
+    expect(next.get('rec_event')).toBe('dismissed')
+    expect(next.get('tab')).toBe('records')
+    expect(next.get('user')).toBe('9')
+    expect(next.get('level')).toBe('flagged')
+    expect(next.get('live_panel')).toBe('2')
+    expect(recordsSearch(at, { page: 5 }).get('rec_page')).toBe('5')
+    expect(recordsSearch(q('rec_user=7'), { user_id: undefined }).has('rec_user')).toBe(false)
   })
 })

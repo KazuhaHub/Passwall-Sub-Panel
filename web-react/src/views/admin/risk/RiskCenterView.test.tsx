@@ -209,6 +209,15 @@ describe('RiskCenterView', () => {
     expect(await screen.findByText(/^每个需要处理的账号一行，最紧急的在前/)).toBeTruthy()
   })
 
+  // The records tab's paragraph moved behind its "?" like the others'.
+  it('the records tab explains itself behind a help button', async () => {
+    serve()
+    mount('/admin/risk?tab=records')
+    await screen.findByRole('heading', { name: '风控中心' })
+    fireEvent.click(screen.getByRole('button', { name: '说明' }))
+    expect(await screen.findByText(/^每次进入或离开「疑似」「已标记」/)).toBeTruthy()
+  })
+
   it('the online card switches to the live tab', async () => {
     serve()
     mount('/admin/risk')

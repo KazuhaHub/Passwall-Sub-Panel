@@ -6,10 +6,10 @@ import UserAutocomplete from '@/components/UserAutocomplete'
 import { useCan } from '@/utils/permissions'
 import RiskUserDrawer from './drawer/RiskUserDrawer'
 import { useDrawerParam } from './drawerParam'
-import FlagRecordsTab from './FlagRecordsTab'
 import HelpTip from './HelpTip'
 import LiveConnectionsTab from './LiveConnectionsTab'
 import QueueTab from './queue/QueueTab'
+import RecordsTab from './RecordsTab'
 import { legacyRedirect, parseRiskTab, type RiskTab } from './riskParams'
 
 /**
@@ -93,7 +93,12 @@ export default function RiskCenterView() {
           <LiveConnectionsTab onOpenUser={drawer.open} />
         </>
       )}
-      {tab === 'records' && <FlagRecordsTab onOpenUser={drawer.open} />}
+      {tab === 'records' && (
+        <>
+          <HelpTip textKey="admin:risk_center.help.records" />
+          <RecordsTab onOpenUser={drawer.open} />
+        </>
+      )}
       <RiskUserDrawer userId={drawer.id} onClose={drawer.close} host="risk" />
     </Box>
   )

@@ -1165,7 +1165,8 @@
     "help": {
       "label": "说明",
       "queue": "每个需要处理的账号一行，最紧急的在前：已标记且被自动暂停、已标记、异地自动暂停、疑似，再按最近变化。通知铃只数需立即处理的账号（已标记或异地自动暂停）。「忽略」让账号离开这里，直到出现新的或更严重的信号；「信任此账号」长期豁免地点类检测。只提示的信号不会改动任何账号；只有开启了自动临时暂停时，系统才会自行暂停账号。",
-      "live": "最近一次流量轮询（或手动刷新）时每块面板上此刻在连的地址。这是快照，可能过时，时间见上方。立即刷新不计入判定。"
+      "live": "最近一次流量轮询（或手动刷新）时每块面板上此刻在连的地址。这是快照，可能过时，时间见上方。立即刷新不计入判定。",
+      "records": "每次进入或离开「疑似」「已标记」、每次自动临时暂停的施加与解除，以及管理员的忽略与信任操作。每条都带当时的依据，不含 IP、人名或备注。"
     },
     "queue": {
       "metric_online": "在线账号",
@@ -1267,7 +1268,6 @@
       "hide_connections": "收起连接"
     },
     "flags": {
-      "intro": "异地并发与四个风险信号每一次进入或离开「疑似」「已标记」，以及每一次自动临时暂停的施加与解除。「无数据」与「正常」之间的来回不记录。每条都带当时的判定代码和证据（不含 IP）。",
       "empty": "没有符合条件的记录",
       "filter_source": "来源",
       "filter_level": "级别",
@@ -1280,7 +1280,8 @@
         "sub_spread": "订阅多地",
         "devices": "设备数",
         "usage_shift": "用量变化",
-        "login_country": "登录国家"
+        "login_country": "登录国家",
+        "review": "管理员处理"
       },
       "level": {
         "flagged": "已标记",
@@ -1296,7 +1297,11 @@
         "auto_suspended": "自动临时暂停",
         "auto_lifted_expiry": "到期自动恢复",
         "auto_lifted_admin": "人工恢复",
-        "auto_replaced": "被另一种暂停替换"
+        "auto_replaced": "被另一种暂停替换",
+        "dismissed": "忽略",
+        "undismissed": "取消忽略",
+        "trusted": "信任",
+        "untrusted": "取消信任"
       },
       "col_at": "时间",
       "col_user": "用户",
@@ -1315,7 +1320,32 @@
         "geo_anomaly": "异地人工暂停"
       },
       "evidence_show": "查看证据",
-      "evidence_hide": "收起证据"
+      "evidence_hide": "收起证据",
+      "review": {
+        "dismissed": "由 {{by}} 忽略（当时：{{levels}}）",
+        "undismissed": "由 {{by}} 取消忽略",
+        "trusted": "由 {{by}} 设为信任",
+        "untrusted": "由 {{by}} 取消信任"
+      },
+      "more_filters": "更多筛选",
+      "raw_show": "原始数据",
+      "raw_hide": "收起原始数据",
+      "browser_time": "（浏览器时间）",
+      "value_yes": "是",
+      "value_no": "否",
+      "param": {
+        "over": "连续超限次数",
+        "under": "连续在容错内次数",
+        "ban_over": "连续超过暂停阈值次数",
+        "tier": "级别",
+        "flagged": "标记锁定",
+        "spread": "地点数",
+        "duration_minutes": "暂停时长（分钟）",
+        "suspended_at_ms": "暂停开始",
+        "replaced_by": "替换为",
+        "by": "操作人",
+        "levels": "当时的级别"
+      }
     },
     "load_failed": "读取失败：{{error}}",
     "retry": "重试",

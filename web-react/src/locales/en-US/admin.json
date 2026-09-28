@@ -1167,7 +1167,8 @@
     "help": {
       "label": "About this tab",
       "queue": "One row per account that needs a look, most urgent first: flagged and auto-suspended, flagged, auto-suspended, suspect, then latest change. The bell counts only accounts that need action now (flagged or auto-suspended). Dismissing removes an account until a new or more severe signal appears; trusting exempts it from location checks for good. Observe-only signals never change an account; the panel only suspends on its own when automatic suspension is on.",
-      "live": "The addresses connected on every panel at the last traffic poll or refresh. It is a snapshot and may be stale; its time is shown above. A refresh never counts as a detector sample."
+      "live": "The addresses connected on every panel at the last traffic poll or refresh. It is a snapshot and may be stale; its time is shown above. A refresh never counts as a detector sample.",
+      "records": "Every entry into or out of suspect or flagged, every automatic suspension applied or lifted, and every admin dismiss or trust action, each with the reason at the time and never an IP, a name or a note."
     },
     "queue": {
       "metric_online": "Online",
@@ -1269,7 +1270,6 @@
       "hide_connections": "Hide connections"
     },
     "flags": {
-      "intro": "Every time concurrent locations or a risk signal enters or leaves suspect or flagged, and every automatic suspension applied or lifted. Movement between no-data and clean is not recorded. Each record carries the code and evidence of that moment, never an IP.",
       "empty": "No matching records",
       "filter_source": "Source",
       "filter_level": "Level",
@@ -1282,7 +1282,8 @@
         "sub_spread": "Subscription spread",
         "devices": "Devices",
         "usage_shift": "Usage change",
-        "login_country": "Login country"
+        "login_country": "Login country",
+        "review": "Admin review"
       },
       "level": {
         "flagged": "Flagged",
@@ -1298,7 +1299,11 @@
         "auto_suspended": "Automatically suspended",
         "auto_lifted_expiry": "Lifted on expiry",
         "auto_lifted_admin": "Resumed by staff",
-        "auto_replaced": "Replaced by another suspension"
+        "auto_replaced": "Replaced by another suspension",
+        "dismissed": "Dismissed",
+        "undismissed": "Dismiss undone",
+        "trusted": "Trusted",
+        "untrusted": "Trust withdrawn"
       },
       "col_at": "Time",
       "col_user": "User",
@@ -1317,7 +1322,32 @@
         "geo_anomaly": "Suspended for locations (manual)"
       },
       "evidence_show": "Show evidence",
-      "evidence_hide": "Hide evidence"
+      "evidence_hide": "Hide evidence",
+      "review": {
+        "dismissed": "Dismissed by {{by}} (at the time: {{levels}})",
+        "undismissed": "Dismiss undone by {{by}}",
+        "trusted": "Trusted by {{by}}",
+        "untrusted": "Trust withdrawn by {{by}}"
+      },
+      "more_filters": "More filters",
+      "raw_show": "Raw data",
+      "raw_hide": "Hide raw data",
+      "browser_time": "(browser time)",
+      "value_yes": "Yes",
+      "value_no": "No",
+      "param": {
+        "over": "Checks over",
+        "under": "Checks within",
+        "ban_over": "Checks over the suspend line",
+        "tier": "Tier",
+        "flagged": "Latched",
+        "spread": "Places",
+        "duration_minutes": "Suspension (minutes)",
+        "suspended_at_ms": "Suspended at",
+        "replaced_by": "Replaced by",
+        "by": "By",
+        "levels": "Levels at the time"
+      }
     },
     "load_failed": "Could not load: {{error}}",
     "retry": "Retry",

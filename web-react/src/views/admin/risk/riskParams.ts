@@ -1,13 +1,15 @@
 import {
-  EXCLUSION_EXCLUDED, EXCLUSION_KEPT, EXCLUSION_REASONS, QUEUE_SOURCE_FILTERS,
+  EXCLUSION_EXCLUDED, EXCLUSION_KEPT, EXCLUSION_REASONS, FLAG_EVENTS, FLAG_LEVELS, QUEUE_SOURCE_FILTERS,
   type LiveParams, type QueueParams, type QueueStatus,
 } from '@/api/riskCenter'
+import { FLAG_SOURCES } from '@/utils/riskCenter'
 
 // THE RISK CENTER'S URL. The page, its tabs' filters and the drawer's
 // account all live in the query string, so a copied link, a reload, the bell
 // and Back all mean the same view. Each tab's params carry their own prefix
-// (none for the queue, the default tab; `live_` for the live view), so a tab
-// switch keeps every tab's filters. Pure: parse and build, no router.
+// (none for the queue, the default tab; `live_` for the live view, `rec_` for
+// the records), so a tab switch keeps every tab's filters. Pure: parse and
+// build, no router.
 
 export const RISK_TABS = ['queue', 'live', 'records'] as const
 export type RiskTab = (typeof RISK_TABS)[number]
@@ -184,5 +186,79 @@ export function liveSearch(prev: URLSearchParams, patch: Partial<LiveParams>): U
   }
   if ('page' in patch) put('live_page', patch.page && patch.page > 1 ? String(patch.page) : undefined)
   else out.delete('live_page')
+  return out
+}
+
+/**
+ * The records tab's filters as the URL holds them. `since` / `until` are the
+ * datetime-local text the admin typed, in BROWSER time (the field labels say
+ * so); the tab turns them into instants when it asks, so the URL shows what
+ * the fields show.
+ */
+export interface RecordsFilters {
+  user_id?: number
+  source?: string
+  since?: string
+  until?: string
+  level?: string
+  event?: string
+  page: number
+  page_size: number
+}
+
+export const RECORDS_PAGE_SIZES = [25, 50, 100]
+const RECORDS_DEFAULT_SIZE = 25
+
+// What a datetime-local field writes: a date and a time to the minute, with
+// optional seconds and fraction. Anything else — "yesterday", a half-typed
+// date — bounds nothing.
+const LOCAL_TIME = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])T([01]\d|2[0-3]):[0-5]\d(:[0-5]\d(\.\d{1,3})?)?$/
+
+/** One of `allowed`, else undefined: a value this build does not offer (an
+ *  event from a newer server, a mistyped link) filters nothing. */
+function oneOf(raw: string | null, allowed: readonly string[]): string | undefined {
+  return raw !== null && allowed.includes(raw) ? raw : undefined
+}
+
+/** The records tab's filters, read off its `rec_` params. Only what is set is
+ *  present, so the request names exactly the filters in force. */
+export function parseRecordsParams(params: URLSearchParams): RecordsFilters {
+  const user = parseUserId(params.get('rec_user'))
+  const source = oneOf(params.get('rec_source'), FLAG_SOURCES)
+  const level = oneOf(params.get('rec_level'), FLAG_LEVELS)
+  const event = oneOf(params.get('rec_event'), FLAG_EVENTS)
+  const since = params.get('rec_since') ?? ''
+  const until = params.get('rec_until') ?? ''
+  return {
+    ...(user ? { user_id: user } : {}),
+    ...(source ? { source } : {}),
+    ...(LOCAL_TIME.test(since) ? { since } : {}),
+    ...(LOCAL_TIME.test(until) ? { until } : {}),
+    ...(level ? { level } : {}),
+    ...(event ? { event } : {}),
+    page: pageOf(params.get('rec_page')),
+    page_size: sizeOf(params.get('rec_size'), RECORDS_PAGE_SIZES, RECORDS_DEFAULT_SIZE),
+  }
+}
+
+/** The URL after a change to the records' filters: queueSearch's rules under
+ *  the `rec_` names. */
+export function recordsSearch(prev: URLSearchParams, patch: Partial<RecordsFilters>): URLSearchParams {
+  const out = new URLSearchParams(prev)
+  const put = (name: string, value: string | undefined) => {
+    if (value) out.set(name, value)
+    else out.delete(name)
+  }
+  if ('user_id' in patch) put('rec_user', patch.user_id ? String(patch.user_id) : undefined)
+  if ('source' in patch) put('rec_source', patch.source)
+  if ('since' in patch) put('rec_since', patch.since)
+  if ('until' in patch) put('rec_until', patch.until)
+  if ('level' in patch) put('rec_level', patch.level)
+  if ('event' in patch) put('rec_event', patch.event)
+  if ('page_size' in patch) {
+    put('rec_size', patch.page_size === RECORDS_DEFAULT_SIZE ? undefined : String(patch.page_size ?? ''))
+  }
+  if ('page' in patch) put('rec_page', patch.page && patch.page > 1 ? String(patch.page) : undefined)
+  else out.delete('rec_page')
   return out
 }

@@ -195,13 +195,17 @@ export interface ConnectionHistoryParams {
   sort_dir?: 'asc' | 'desc'
 }
 
-/** Mirrors domain.FlagEvent. */
+/** Mirrors domain.FlagEvent: the attention moves, the automatic
+ *  suspension's, then an admin's four review actions (source `review`). */
 export type FlagEvent = 'enter_suspect' | 'enter_flagged' | 'leave_suspect' | 'leave_flagged'
   | 'auto_suspended' | 'auto_lifted_expiry' | 'auto_lifted_admin' | 'auto_replaced'
+  | 'dismissed' | 'undismissed' | 'trusted' | 'untrusted'
 
+/** domain.FlagEvents(), in its order: the review events come last. */
 export const FLAG_EVENTS: readonly FlagEvent[] = [
   'enter_suspect', 'enter_flagged', 'leave_suspect', 'leave_flagged',
   'auto_suspended', 'auto_lifted_expiry', 'auto_lifted_admin', 'auto_replaced',
+  'dismissed', 'undismissed', 'trusted', 'untrusted',
 ]
 
 /** The level filter's values: the level a record moved TO, or 'cleared' for
@@ -209,10 +213,12 @@ export const FLAG_EVENTS: readonly FlagEvent[] = [
 export const FLAG_LEVELS = ['flagged', 'suspect', 'suspended', 'cleared'] as const
 
 /**
- * One attention change on one source. `source` is 'geo', 'geo_auto' or a risk
- * kind. `params` is address-free: GeoFlagParams for geo, the verdict's stored
- * evidence for a risk kind, the producer's numbers for geo_auto; null when
- * the record has none.
+ * One attention change on one source, or one admin review action. `source`
+ * is 'geo', 'geo_auto', a risk kind or 'review'. `params` is address-free:
+ * GeoFlagParams for geo, the verdict's stored evidence for a risk kind, the
+ * producer's numbers for geo_auto, `{by, levels?}` for a review (the admin's
+ * id and, for a dismissal, the levels accepted — never a name, never the
+ * note); null when the record has none.
  */
 export interface FlagRecord {
   id: number
@@ -221,13 +227,17 @@ export interface FlagRecord {
   display_name: string
   source: string
   event: FlagEvent | string
-  /** '' = none (a leave or a lift). */
+  /** '' = none (a leave or a lift, and every review record). */
   level: '' | 'suspect' | 'flagged' | 'suspended' | string
   prev_level: '' | 'suspect' | 'flagged' | 'suspended' | string
   state: string
   code: string
   params: unknown | null
   at_ms: number
+  /** A review record's admin by the CURRENT UPN, resolved when listed;
+   *  absent on every other record and once that admin is gone (the page then
+   *  names `#<by>`). */
+  actor_upn?: string
 }
 
 export interface FlagRecordParams {
