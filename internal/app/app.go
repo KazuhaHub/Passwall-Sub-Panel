@@ -622,12 +622,16 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	// The risk center's read side, over the very sources the detectors
 	// write: the traffic service's live snapshot and its on-demand refresh
 	// (never a detector sample), the connection history and flag records
-	// built above, and the page of fetches it infers devices from. Every
-	// field is a narrow read interface (riskcenter.Deps); the users and
-	// panels repos are handed whole but only GetByID and List are
+	// built above, the page of fetches it infers devices from, and the
+	// attention queue's sources — the geo verdicts, the risk signals, the
+	// review rows and the detector's holds (read from the users table).
+	// Every field is a narrow read interface (riskcenter.Deps); the users,
+	// panels and groups repos are handed whole but only their reads are
 	// reachable through them. The router dep is optional, so leaving this
-	// out compiles and every risk-center route answers 503;
-	// TestBuildWiresTheRiskCenter drives them through the assembled router.
+	// out compiles and every risk-center route answers 503; and each
+	// attention source is optional too — left out, it contributes nothing,
+	// and the queue silently never lists what it would have said.
+	// TestBuildWiresTheRiskCenter drives each through the assembled router.
 	riskCenterSvc := riskcenter.New(riskcenter.Deps{
 		Live:     trafficSvc,
 		Settings: repos.Settings,
@@ -636,6 +640,11 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 		Fetches:  repos.SubLog,
 		History:  connHistory,
 		Flags:    flagRecords,
+		Geo:      geoStreaks,
+		Signals:  riskSignals,
+		Reviews:  riskReviews,
+		Holds:    repos.User,
+		Groups:   repos.Group,
 	})
 
 	// --- transport layer ---

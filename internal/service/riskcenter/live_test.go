@@ -312,9 +312,9 @@ func TestHistoryAndFlags_PassTheFilterThrough(t *testing.T) {
 
 	h.flags.rows = []domain.FlagRecord{{ID: 1, UserID: 7}}
 	h.flags.total = 1
-	recs, n, err := h.svc.Flags(t.Context(), ports.FlagRecordFilter{Source: domain.FlagSourceGeo})
-	if err != nil || len(recs) != 1 || n != 1 || h.flags.got.Source != domain.FlagSourceGeo {
-		t.Fatalf("flags = %+v of %d (%v), filter %+v", recs, n, err, h.flags.got)
+	pg, err := h.svc.Flags(t.Context(), ports.FlagRecordFilter{Source: domain.FlagSourceGeo})
+	if err != nil || len(pg.Records) != 1 || pg.Total != 1 || h.flags.got.Source != domain.FlagSourceGeo {
+		t.Fatalf("flags = %+v (%v), filter %+v", pg, err, h.flags.got)
 	}
 
 	h.history.err = errors.New("history unreadable")

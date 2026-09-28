@@ -37,9 +37,24 @@ func (r *routerRiskCenter) History(context.Context, ports.ConnectionHistoryFilte
 	return []domain.ConnectionRecord{{UserID: 7, IP: "203.0.113.7"}}, nil, 1, nil
 }
 
-func (r *routerRiskCenter) Flags(context.Context, ports.FlagRecordFilter) ([]domain.FlagRecord, int64, error) {
+func (r *routerRiskCenter) Flags(context.Context, ports.FlagRecordFilter) (riskcenter.FlagPage, error) {
 	r.calls++
-	return []domain.FlagRecord{{ID: 1, UserID: 7}}, 1, nil
+	return riskcenter.FlagPage{Records: []domain.FlagRecord{{ID: 1, UserID: 7}}, Total: 1}, nil
+}
+
+func (r *routerRiskCenter) Queue(context.Context, riskcenter.QueueQuery) (riskcenter.QueueView, error) {
+	r.calls++
+	return riskcenter.QueueView{Rows: []riskcenter.QueueRow{{User: &domain.User{ID: 7, UPN: "alice"}}}, Total: 1, Page: 1, PageSize: 25}, nil
+}
+
+func (r *routerRiskCenter) UserSummary(_ context.Context, id int64) (riskcenter.UserSummary, error) {
+	r.calls++
+	return riskcenter.UserSummary{User: &domain.User{ID: id, UPN: "alice"}}, nil
+}
+
+func (r *routerRiskCenter) Levels(context.Context) (map[int64]riskcenter.UserLevel, error) {
+	r.calls++
+	return map[int64]riskcenter.UserLevel{7: {Level: domain.FlagLevelFlagged, Open: true}}, nil
 }
 
 // THE RISK CENTER IS THE OWNER'S. It lists accounts beside their IP
@@ -48,8 +63,10 @@ func (r *routerRiskCenter) Flags(context.Context, ports.FlagRecordFilter) ([]dom
 // staffGroup shares the /api/admin prefix, so a path says nothing about its
 // gate: only a request through the assembled router shows which group each
 // route landed in, and the gate is only real if a refused request never
-// reaches the service. All four routes, each as anonymous, operator and
-// administrator.
+// reaches the service. Every route — the live view, its refresh, the
+// history, the records, and the queue, one account's drawer and the Users
+// page's levels, which name accounts beside their verdicts — each as
+// anonymous, operator and administrator.
 func TestRiskCenterRoutesAreAdminOnly(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	admin := &domain.User{ID: 1, UPN: "admin@example.test", Enabled: true, Role: domain.RoleAdmin}
@@ -78,6 +95,9 @@ func TestRiskCenterRoutesAreAdminOnly(t *testing.T) {
 		{stdhttp.MethodPost, "/api/admin/risk-center/live/refresh", `"refreshed":true`},
 		{stdhttp.MethodGet, "/api/admin/risk-center/connections", `"ip":"203.0.113.7"`},
 		{stdhttp.MethodGet, "/api/admin/risk-center/flags", `"id":1`},
+		{stdhttp.MethodGet, "/api/admin/risk-center/queue", `"upn":"alice"`},
+		{stdhttp.MethodGet, "/api/admin/risk-center/users/7", `"upn":"alice"`},
+		{stdhttp.MethodGet, "/api/admin/risk-center/levels", `"7":{"level":"flagged"`},
 	} {
 		for _, test := range []struct {
 			name, token string

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -30,7 +31,8 @@ import (
 // has run, so no snapshot, stale), a refresh reads every panel — there are
 // none, so it reads nothing — and stores its snapshot, which the live view
 // then shows, and a flag record appended to the store Build opened reaches
-// the flag list.
+// the flag list. Then the queue, one account's drawer and the levels answer
+// from the verdict, signal, hold and review stores Build opened.
 func TestBuildWiresTheRiskCenter(t *testing.T) {
 	ctx := t.Context()
 	directory := t.TempDir()
@@ -127,5 +129,85 @@ func TestBuildWiresTheRiskCenter(t *testing.T) {
 	history := call(http.MethodGet, "/api/admin/risk-center/connections")
 	if history["total"] != float64(0) {
 		t.Fatalf("connections = %v, want the empty history", history)
+	}
+
+	// The queue, the drawer and the levels read the stores the detectors and
+	// the review actions write — each of which is an optional risk-center
+	// dep that contributes nothing when left out. One account per store: a
+	// latched geo verdict (geo_streaks), a flagged risk signal
+	// (risk_signals), the detector's hold (users), and a trust with nothing
+	// to show (risk_reviews) — all in one group, which the drawer names
+	// (groups).
+	group := &domain.Group{Slug: "center-team", Name: "Center Team"}
+	if err := a.repos.Group.Create(ctx, group); err != nil {
+		t.Fatal(err)
+	}
+	newUser := func(name, uuid string) *domain.User {
+		t.Helper()
+		u := &domain.User{
+			UPN: name + "@example.test", Email: name + "@example.test", SSOProvider: domain.SSOProviderLocal,
+			SSOSubject: name + "@example.test", Role: domain.RoleUser, Enabled: true, UUID: uuid, GroupID: group.ID,
+			SubToken: "fixture-" + name + "-subscription-token", TrafficResetPeriod: domain.ResetMonthly,
+		}
+		if err := a.repos.User.Create(ctx, u); err != nil {
+			t.Fatal(err)
+		}
+		return u
+	}
+	latched := newUser("center-latched", "88888888-8888-4888-8888-000000000001")
+	devices := newUser("center-devices", "88888888-8888-4888-8888-000000000002")
+	held := newUser("center-held", "88888888-8888-4888-8888-000000000003")
+	trusted := newUser("center-trusted", "88888888-8888-4888-8888-000000000004")
+	if err := sqlstore.NewGeoStreakRepo(db).Save(ctx, map[int64]domain.GeoRecord{
+		latched.ID: {UserID: latched.ID, State: domain.GeoStateIdle, Streak: domain.GeoStreak{Over: 3, Flagged: true}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := sqlstore.NewRiskSignalRepo(db).Save(ctx, []domain.RiskSignal{{
+		UserID: devices.ID, Kind: domain.RiskKindDevices, State: domain.GeoStateFlagged, Code: domain.RiskCodeOver,
+		Evidence: json.RawMessage(`{"v":1}`),
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	heldAt := time.Now()
+	if err := a.repos.User.UpdateServiceState(ctx, held.ID, domain.DisabledGeoAutoSuspend, "detail", &heldAt); err != nil {
+		t.Fatal(err)
+	}
+	if err := sqlstore.NewRiskReviewRepo(db).Save(ctx,
+		domain.RiskReview{UserID: trusted.ID, Trusted: true, TrustedAtMS: 1, TrustedBy: admin.ID, UpdatedAtMS: 1},
+		domain.ReviewFlag(trusted.ID, domain.FlagReviewTrusted, domain.ReviewFlagParams{By: admin.ID}, time.Now())); err != nil {
+		t.Fatal(err)
+	}
+
+	queue := call(http.MethodGet, "/api/admin/risk-center/queue")
+	listed := map[float64]bool{}
+	items, _ = queue["items"].([]any)
+	for _, it := range items {
+		row, _ := it.(map[string]any)
+		listed[row["user_id"].(float64)] = true
+	}
+	for _, u := range []*domain.User{latched, devices, held} {
+		if !listed[float64(u.ID)] {
+			t.Fatalf("queue = %v, want %s listed — is its store wired into the risk center?", queue["items"], u.UPN)
+		}
+	}
+	if counts, _ := queue["counts"].(map[string]any); counts["trusted"] != float64(1) || counts["auto_suspended"] != float64(1) {
+		t.Fatalf("queue counts = %v, want the trusted and the held account counted", queue["counts"])
+	}
+
+	levels := call(http.MethodGet, "/api/admin/risk-center/levels")
+	for id, want := range map[int64]string{latched.ID: "flagged", devices.ID: "flagged", held.ID: "", trusted.ID: ""} {
+		lv, _ := levels[strconv.FormatInt(id, 10)].(map[string]any)
+		if lv == nil || lv["level"] != want {
+			t.Fatalf("levels = %v, want account %d at %q", levels, id, want)
+		}
+	}
+
+	summary := call(http.MethodGet, "/api/admin/risk-center/users/"+strconv.FormatInt(latched.ID, 10))
+	if u, _ := summary["user"].(map[string]any); u["upn"] != latched.UPN || u["group_name"] != group.Name {
+		t.Fatalf("summary user = %v, want %s in %s — are the groups wired into the risk center?", summary["user"], latched.UPN, group.Name)
+	}
+	if geo, _ := summary["geo"].(map[string]any); geo == nil || geo["flagged"] != true {
+		t.Fatalf("summary geo = %v, want the latched row", summary["geo"])
 	}
 }

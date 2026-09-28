@@ -86,10 +86,11 @@ type Deps struct {
 	// risk_signals entry — the same store as RiskSignals, a separate field
 	// for the reason GeoFlags is one. Optional: absent, no such entry.
 	RiskFlags alert.RiskFlagCounter
-	// RiskCenter is the risk center's read side (风控中心): the live
-	// connections and their refresh, the connection history, the flag
-	// records. An interface, so a deployment that leaves it out passes a
-	// true nil and its routes answer 503 rather than an empty list;
+	// RiskCenter is the risk center's read side (风控中心): the attention
+	// queue, one account's drawer and the levels, the live connections and
+	// their refresh, the connection history, the flag records. An
+	// interface, so a deployment that leaves it out passes a true nil and
+	// its routes answer 503 rather than an empty list;
 	// TestBuildWiresTheRiskCenter guards that Build does not.
 	RiskCenter handler.RiskCenterService
 	// DeviceHasher keys the device a subscription client declares (x-hwid)
@@ -607,10 +608,15 @@ func NewRouter(d Deps) stdhttp.Handler {
 		adminGroup.GET("/risk-signals", riskSignalsH.List)
 		// The risk center: accounts beside their IP addresses (the live
 		// connections, and connection_history, the one table that keeps
-		// addresses) and the flag records. adminGroup for the Geo tab's
-		// reason, and more so: TestRiskCenterRoutesAreAdminOnly drives all
-		// four through the assembled router. The refresh is a POST, so every
+		// addresses), the flag records, and the attention reads — the queue,
+		// one account's drawer and the Users page's levels, which name
+		// accounts beside their verdicts. adminGroup for the Geo tab's
+		// reason, and more so: TestRiskCenterRoutesAreAdminOnly drives every
+		// one through the assembled router. The refresh is a POST, so every
 		// click — refused or not — leaves an audit row (AuditWrites).
+		adminGroup.GET("/risk-center/queue", riskCenterH.Queue)
+		adminGroup.GET("/risk-center/users/:id", riskCenterH.User)
+		adminGroup.GET("/risk-center/levels", riskCenterH.Levels)
 		adminGroup.GET("/risk-center/live", riskCenterH.Live)
 		adminGroup.POST("/risk-center/live/refresh", riskCenterH.Refresh)
 		adminGroup.GET("/risk-center/connections", riskCenterH.Connections)

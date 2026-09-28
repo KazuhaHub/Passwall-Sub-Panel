@@ -21,7 +21,11 @@ import (
 // (RefreshLiveConnections), which reads and writes nothing but the in-memory
 // snapshot it is shown from. That is enforced by what it is HANDED: every
 // dependency is a narrow interface, pinned here to an allowlist. Widen Users
-// to ports.UserRepo and the view could suspend people; this fails.
+// to ports.UserRepo and the view could suspend people; this fails. The
+// queue's reads are no exception: the review rows are read with Get and
+// List, never Save — dismissing and trusting are riskreview's, a separate
+// package precisely so that nothing here can write them — and the service
+// holds are listed, never written.
 //
 // Reflection cannot see a type assertion — d.Users.(ports.UserRepo) would
 // recover the writer from the very value this test approved — so the
@@ -35,11 +39,16 @@ func TestRiskCenterCannotWriteServiceState(t *testing.T) {
 	allowed := map[string][]string{
 		"Live":     {"LiveSnapshot", "RefreshLiveConnections"},
 		"Settings": {"Load"},
-		"Users":    {"GetByID"},
+		"Users":    {"GetByID", "ListByIDs"},
 		"Panels":   {"List"},
 		"Fetches":  {"RecentForUsers"},
 		"History":  {"List"},
-		"Flags":    {"List"},
+		"Flags":    {"LatestByUsers", "List", "StepsSince"},
+		"Geo":      {"AttentionLevels", "CountFreshUnknown", "ListByUsers"},
+		"Signals":  {"AttentionLevels", "ListByUsers"},
+		"Reviews":  {"Get", "List"},
+		"Holds":    {"ListServiceHolds"},
+		"Groups":   {"List"},
 	}
 	deps := reflect.TypeFor[Deps]()
 	seen := map[string]bool{}

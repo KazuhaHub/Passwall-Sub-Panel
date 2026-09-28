@@ -469,3 +469,126 @@ func InferConnectionDevices(conns []LiveConnection, fetches []SubLog, since time
 	}
 	return out
 }
+
+// UserDeviceSourcesMax caps the sources listed per device in the risk
+// center's drawer, newest first; the rest are counted (UserDevice.SourcesMore).
+// A phone on mobile data changes address all day, and a list that long says
+// nothing a count does not.
+const UserDeviceSourcesMax = 8
+
+// UserDevice is one client behind an account's fetches in a window, told
+// apart by SubLogIdentity — the drawer's 设备 tab, which answers "what does
+// this account fetch with, and from where" over the window rather than per
+// connection.
+type UserDevice struct {
+	// Label, DeviceID4, ClientType and UA are as on ConnDevice: the newest
+	// of each (UA cut to ConnDeviceUARunes characters), the digest's first
+	// DeviceIDShownLen characters for a declared device.
+	Label, DeviceID4, ClientType, UA string
+	// Fetches is how many fetches in the window this client made;
+	// FirstAtMS and LastAtMS the oldest and the newest (unix ms).
+	Fetches             int
+	FirstAtMS, LastAtMS int64
+	// Sources are the distinct sources (SourceKey: an IPv4 address or an
+	// IPv6 /64) it fetched from, newest first, at most
+	// UserDeviceSourcesMax; SourcesMore counts the rest.
+	Sources     []string
+	SourcesMore int
+}
+
+// UserDevices groups fetches at or after since by SubLogIdentity, newest
+// LastAtMS first (a tie by the identity key, so the order is stable). The
+// caller passes ONE account's fetches: a device is an account's client, and
+// the identity rule does not include the account.
+//
+// Unlike InferConnectionDevices, every fetch counts, whatever its source: a
+// client fetching through PSP's own relay is still the account's client,
+// and here the question is the client, not the connection. A fetch with no
+// address counts as a fetch and adds no source. Never nil, so a DTO built
+// from it serializes as [].
+func UserDevices(fetches []SubLog, since time.Time) []UserDevice {
+	type agg struct {
+		key                     string
+		dev                     UserDevice
+		labelMS, clientMS, uaMS int64
+		lastID                  int64
+		sources                 map[string]int64 // source → newest fetch from it
+	}
+	byID := map[string]*agg{}
+	for i := range fetches {
+		f := &fetches[i]
+		if f.AccessedAt.Before(since) {
+			continue
+		}
+		idKey, kind := SubLogIdentity(*f)
+		a := byID[idKey]
+		if a == nil {
+			a = &agg{key: idKey, sources: map[string]int64{}}
+			if kind == SubLogIdentityHWID && len(f.DeviceID) >= DeviceIDShownLen {
+				a.dev.DeviceID4 = f.DeviceID[:DeviceIDShownLen]
+			}
+			byID[idKey] = a
+		}
+		at := f.AccessedAt.UnixMilli()
+		a.dev.Fetches++
+		// The newest value of each field, as InferConnectionDevices takes
+		// it: by fetch time, a tie by the id (insert order), and a later
+		// fetch that sent none does not erase an earlier one.
+		newer := func(ms int64) bool { return at > ms || (at == ms && f.ID > a.lastID) }
+		if f.DeviceLabel != "" && (a.dev.Label == "" || newer(a.labelMS)) {
+			a.dev.Label, a.labelMS = f.DeviceLabel, at
+		}
+		if f.ClientType != "" && (a.dev.ClientType == "" || newer(a.clientMS)) {
+			a.dev.ClientType, a.clientMS = f.ClientType, at
+		}
+		if a.dev.Fetches == 1 || newer(a.uaMS) {
+			a.dev.UA, a.uaMS = firstRunes(f.UA, ConnDeviceUARunes), at
+		}
+		if a.dev.Fetches == 1 || newer(a.dev.LastAtMS) {
+			a.dev.LastAtMS, a.lastID = at, f.ID
+		}
+		if a.dev.Fetches == 1 || at < a.dev.FirstAtMS {
+			a.dev.FirstAtMS = at
+		}
+		if strings.TrimSpace(f.IP) != "" {
+			key, _, _ := SourceKey(f.IP)
+			// Cut as a live connection's key is cut, so the drawer's two
+			// lists name one source the same way.
+			key = cutBytes(key, LiveConnKeyMaxBytes)
+			if prev, seen := a.sources[key]; !seen || at > prev {
+				a.sources[key] = at
+			}
+		}
+	}
+
+	list := make([]*agg, 0, len(byID))
+	for _, a := range byID {
+		list = append(list, a)
+	}
+	sort.Slice(list, func(i, j int) bool {
+		if list[i].dev.LastAtMS != list[j].dev.LastAtMS {
+			return list[i].dev.LastAtMS > list[j].dev.LastAtMS
+		}
+		return list[i].key < list[j].key
+	})
+	out := make([]UserDevice, 0, len(list))
+	for _, a := range list {
+		keys := make([]string, 0, len(a.sources))
+		for k := range a.sources {
+			keys = append(keys, k)
+		}
+		sort.Slice(keys, func(i, j int) bool {
+			if a.sources[keys[i]] != a.sources[keys[j]] {
+				return a.sources[keys[i]] > a.sources[keys[j]]
+			}
+			return keys[i] < keys[j]
+		})
+		if len(keys) > UserDeviceSourcesMax {
+			a.dev.SourcesMore = len(keys) - UserDeviceSourcesMax
+			keys = keys[:UserDeviceSourcesMax]
+		}
+		a.dev.Sources = keys
+		out = append(out, a.dev)
+	}
+	return out
+}
