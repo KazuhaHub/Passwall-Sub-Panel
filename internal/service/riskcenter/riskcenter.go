@@ -97,13 +97,16 @@ type HistoryLister interface {
 }
 
 // FlagLister is flag_records' reads: the admin list, each account's latest
-// record (the queue's 最近变化) and the records since a dismissal (the
-// reopen rule's steps). Review records are excluded from the last two by
-// the store.
+// record (the queue's 最近变化), the records since a dismissal (the reopen
+// rule's steps) and the time of the oldest record stored (how far back the
+// history still reaches, for the lapse; false when none is). Review records
+// are excluded from the latest and the steps by the store, and counted by
+// the oldest.
 type FlagLister interface {
 	List(ctx context.Context, f ports.FlagRecordFilter) ([]domain.FlagRecord, int64, error)
 	LatestByUsers(ctx context.Context, userIDs []int64) (map[int64]int64, error)
 	StepsSince(ctx context.Context, since map[int64]int64) (map[int64][]domain.FlagStep, error)
+	OldestAtMS(ctx context.Context) (int64, bool, error)
 }
 
 // GeoReader is geo_streaks' reads: the fleet's fresh verdicts at attention

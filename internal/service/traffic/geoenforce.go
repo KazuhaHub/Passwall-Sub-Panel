@@ -57,8 +57,9 @@ const geoFollowUpWriteTimeout = 30 * time.Second
 // follow-up push failed and could not be queued; it is still a transition.
 type GeoSuspender interface {
 	// SuspendServiceIfClear writes reason/detail only while the row carries
-	// no service reason at all.
-	SuspendServiceIfClear(ctx context.Context, userID int64, reason domain.AutoDisabledReason, detail string) (bool, error)
+	// no service reason at all, and reports the time it wrote as
+	// service_disabled_at (zero when it wrote nothing).
+	SuspendServiceIfClear(ctx context.Context, userID int64, reason domain.AutoDisabledReason, detail string) (applied bool, at time.Time, err error)
 	// LiftServiceIfHeldSince clears the service reason only while the FRESH
 	// row still carries reason, written at or before suspendedAtOrBefore.
 	LiftServiceIfHeldSince(ctx context.Context, userID int64, reason domain.AutoDisabledReason, suspendedAtOrBefore time.Time) (bool, error)
@@ -355,7 +356,7 @@ func (s *Service) applyGeoBans(ctx context.Context, users []*domain.User, bans [
 		}
 		minutes := int(pc.forUser(u.ID).BanDuration() / time.Minute)
 		detail := geoAutoSuspendDetail(b.Tier, b.Spread, minutes)
-		applied, err := s.geoSuspender.SuspendServiceIfClear(ctx, u.ID, domain.DisabledGeoAutoSuspend, detail)
+		applied, at, err := s.geoSuspender.SuspendServiceIfClear(ctx, u.ID, domain.DisabledGeoAutoSuspend, detail)
 		if !applied {
 			if err != nil {
 				geoAutoCount("suspend_error", 1)
@@ -389,11 +390,18 @@ func (s *Service) applyGeoBans(ctx context.Context, users []*domain.User, bans [
 		// tier, with the numbers the user's own text was built from. NOT the
 		// reason the audit row carries: that sentence names the places, and
 		// the flag history keeps no location beside an account for months.
+		//
+		// Stamped with the service_disabled_at the write stored, not the
+		// phase's now: every due lift and every earlier ban ran since, each
+		// pushing inline, and the write waited for the user's lock. A
+		// dismissal read before the hold landed does not snapshot geo_auto,
+		// so the reopen rule counts this record only if it is after the
+		// dismissal — which a stamp minutes early would not be, and the
+		// escalation would be forgotten once the hold was lifted.
 		flags = append(flags, domain.GeoAutoFlag(u.ID, domain.FlagAutoSuspended, string(b.Tier),
-			map[string]any{"tier": string(b.Tier), "spread": b.Spread, "duration_minutes": minutes}, now))
+			map[string]any{"tier": string(b.Tier), "spread": b.Spread, "duration_minutes": minutes}, at))
 		u.ServiceDisabledReason = domain.DisabledGeoAutoSuspend
 		u.ServiceDisableDetail = detail
-		at := now
 		u.ServiceDisabledAt = &at
 	}
 	// Committed suspensions only, recorded detached like their audit rows:

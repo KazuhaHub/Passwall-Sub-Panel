@@ -2591,25 +2591,28 @@ func detachedFollowUp(ctx context.Context, d time.Duration) (context.Context, co
 // whenever the write won, even if the push was only queued; an error beside
 // applied=true means the push failed AND could not be queued.
 //
+// at is the time written as service_disabled_at (zero when nothing was),
+// for the caller's flag record: taken under the user's lock just before the
+// write, it is when the suspension landed. A time the caller took before
+// calling would be earlier by the wait for that lock — a membership
+// resync's panel push among them — and a dismissal made in that gap would
+// read the record as older than itself.
+//
 // The write runs on the caller's context: a caller already gone starts no
 // suspension. Everything after it runs detached (see detachedFollowUp).
-func (s *Service) SuspendServiceIfClear(ctx context.Context, userID int64, reason domain.AutoDisabledReason, detail string) (bool, error) {
+func (s *Service) SuspendServiceIfClear(ctx context.Context, userID int64, reason domain.AutoDisabledReason, detail string) (applied bool, at time.Time, err error) {
 	if reason == domain.DisabledNone || !domain.ServiceSuspensionReason(reason) {
-		return false, fmt.Errorf("%w: invalid service suspension reason %q", domain.ErrValidation, reason)
+		return false, time.Time{}, fmt.Errorf("%w: invalid service suspension reason %q", domain.ErrValidation, reason)
 	}
 	unlock := s.lockUser(userID)
 	defer unlock()
 
-	var (
-		applied bool
-		err     error
-	)
 	now := time.Now()
 	s.WithEmergencyLock(func() {
 		applied, err = s.users.SetServiceStateIfClear(ctx, userID, reason, detail, now)
 	})
 	if err != nil || !applied {
-		return false, err
+		return false, time.Time{}, err
 	}
 	s.invalidateAuth(userID)
 	// Committed, so the mail is true whatever happens to the push below.
@@ -2628,10 +2631,10 @@ func (s *Service) SuspendServiceIfClear(ctx context.Context, userID int64, reaso
 		defer cancelQueue()
 		if taskErr := s.enqueueUserTask(queueCtx, domain.SyncTaskUserPushConfig, userID, fmt.Sprintf("sync service status for user %s", who)); taskErr != nil {
 			log.Warn("enqueue user service-status push failed", "user_id", userID, "err", taskErr)
-			return true, errUnqueuedPush("suspend proxy service", pushErr, taskErr)
+			return true, now, errUnqueuedPush("suspend proxy service", pushErr, taskErr)
 		}
 	}
-	return true, nil
+	return true, now, nil
 }
 
 // LiftServiceIfHeldSince lifts a suspension carrying reason, but only one

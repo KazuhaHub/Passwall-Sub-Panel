@@ -604,3 +604,34 @@ func TestFlagRecordRepo_StepsSince(t *testing.T) {
 		t.Fatalf("StepsSince(nil) = %v, %v after %d reads; want empty with no statement", empty, err, reads())
 	}
 }
+
+// OldestAtMS is how far back the history still reaches: the at_ms of the
+// oldest record stored — any account, any source, review records included
+// (a dismissal's own record is the witness the lapse reads) — and false when
+// nothing is stored at all. It moves with the prune, never with the setting.
+func TestFlagRecordRepo_OldestAtMS(t *testing.T) {
+	r, users, _ := newFlagRecordRepo(t)
+	ctx := context.Background()
+	a := createRiskUser(t, users, 1, "")
+	b := createRiskUser(t, users, 2, "")
+
+	if at, ok, err := r.OldestAtMS(ctx); err != nil || ok || at != 0 {
+		t.Fatalf("empty: OldestAtMS = %d, %v, %v; want 0, false, nil", at, ok, err)
+	}
+	if err := r.Append(ctx, []domain.FlagRecord{
+		geoFlag(a.ID, domain.FlagEnterSuspect, domain.FlagLevelSuspect, domain.FlagLevelNone, 3000),
+		reviewFlagAt(b.ID, domain.FlagReviewDismissed, 1500),
+		geoFlag(b.ID, domain.FlagEnterSuspect, domain.FlagLevelSuspect, domain.FlagLevelNone, 2000),
+	}); err != nil {
+		t.Fatalf("append: %v", err)
+	}
+	if at, ok, err := r.OldestAtMS(ctx); err != nil || !ok || at != 1500 {
+		t.Fatalf("OldestAtMS = %d, %v, %v; want the review record's 1500", at, ok, err)
+	}
+	if _, err := r.DeleteBefore(ctx, time.UnixMilli(1600)); err != nil {
+		t.Fatalf("prune: %v", err)
+	}
+	if at, ok, err := r.OldestAtMS(ctx); err != nil || !ok || at != 2000 {
+		t.Fatalf("after the prune: OldestAtMS = %d, %v, %v; want 2000", at, ok, err)
+	}
+}

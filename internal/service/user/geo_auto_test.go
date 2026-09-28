@@ -69,7 +69,7 @@ func TestSuspendServiceIfClear_NeverOverwritesAnotherReason(t *testing.T) {
 				&domain.User{ID: 8, Enabled: true},
 			)
 
-			applied, err := h.svc.SuspendServiceIfClear(context.Background(), 7, domain.DisabledGeoAutoSuspend, "ours")
+			applied, _, err := h.svc.SuspendServiceIfClear(context.Background(), 7, domain.DisabledGeoAutoSuspend, "ours")
 			if err != nil || applied {
 				t.Fatalf("held row: applied=%v err=%v, want false, nil", applied, err)
 			}
@@ -78,7 +78,7 @@ func TestSuspendServiceIfClear_NeverOverwritesAnotherReason(t *testing.T) {
 					got.ServiceDisabledReason, got.ServiceDisableDetail, got.ServiceDisabledAt, held, heldAt)
 			}
 
-			applied, err = h.svc.SuspendServiceIfClear(context.Background(), 8, domain.DisabledGeoAutoSuspend, "ours")
+			applied, _, err = h.svc.SuspendServiceIfClear(context.Background(), 8, domain.DisabledGeoAutoSuspend, "ours")
 			if err != nil || !applied {
 				t.Fatalf("clear row (control): applied=%v err=%v, want true, nil", applied, err)
 			}
@@ -98,11 +98,13 @@ func TestSuspendServiceIfClear_NeverOverwritesAnotherReason(t *testing.T) {
 
 // When the CAS wins: the auth cache is dropped, one suspension mail carries
 // the reason and the detail, and the push reads the FRESH row, so the
-// upstream client goes out disabled. When it loses, none of that happens.
+// upstream client goes out disabled; the call reports the time it wrote as
+// service_disabled_at, which the caller stamps its record with. When it
+// loses, none of that happens.
 func TestSuspendServiceIfClear_EmailsAndPushesOnlyWhenApplied(t *testing.T) {
 	h := newGeoAutoHarness(&domain.User{ID: 7, Enabled: true})
 
-	applied, err := h.svc.SuspendServiceIfClear(context.Background(), 7, domain.DisabledGeoAutoSuspend, "about 60 minutes")
+	applied, at, err := h.svc.SuspendServiceIfClear(context.Background(), 7, domain.DisabledGeoAutoSuspend, "about 60 minutes")
 	if err != nil || !applied {
 		t.Fatalf("applied=%v err=%v, want true, nil", applied, err)
 	}
@@ -110,6 +112,9 @@ func TestSuspendServiceIfClear_EmailsAndPushesOnlyWhenApplied(t *testing.T) {
 	if got.ServiceDisabledReason != domain.DisabledGeoAutoSuspend || got.ServiceDisableDetail != "about 60 minutes" || got.ServiceDisabledAt == nil {
 		t.Fatalf("row = %q/%q/%v, want geo_auto with detail and a timestamp",
 			got.ServiceDisabledReason, got.ServiceDisableDetail, got.ServiceDisabledAt)
+	}
+	if !at.Equal(*got.ServiceDisabledAt) {
+		t.Fatalf("reported time %v, want the service_disabled_at written, %v", at, *got.ServiceDisabledAt)
 	}
 	if len(h.mail.suspended) != 1 || h.mail.suspended[0] != (suspendMail{7, string(domain.DisabledGeoAutoSuspend), "about 60 minutes"}) {
 		t.Fatalf("suspension mail = %+v, want exactly one {7, geo_auto, about 60 minutes}", h.mail.suspended)
@@ -121,9 +126,9 @@ func TestSuspendServiceIfClear_EmailsAndPushesOnlyWhenApplied(t *testing.T) {
 		t.Fatalf("auth invalidations = %v, want [7]", h.invalidated)
 	}
 
-	applied, err = h.svc.SuspendServiceIfClear(context.Background(), 7, domain.DisabledGeoAutoSuspend, "again")
-	if err != nil || applied {
-		t.Fatalf("second call: applied=%v err=%v, want false, nil", applied, err)
+	applied, at, err = h.svc.SuspendServiceIfClear(context.Background(), 7, domain.DisabledGeoAutoSuspend, "again")
+	if err != nil || applied || !at.IsZero() {
+		t.Fatalf("second call: applied=%v at=%v err=%v, want false, zero, nil", applied, at, err)
 	}
 	if len(h.mail.suspended) != 1 || len(h.life.calls) != 1 || len(h.invalidated) != 1 {
 		t.Fatalf("a lost CAS mailed/pushed/invalidated: mail=%d push=%d invalidate=%d, want 1/1/1",
@@ -141,7 +146,7 @@ func TestSuspendServiceIfClear_PushFailureIsQueued(t *testing.T) {
 	life := &failingSharedLife{fail: true}
 	svc := migratedSvc(u, life, tasks)
 
-	applied, err := svc.SuspendServiceIfClear(context.Background(), 42, domain.DisabledGeoAutoSuspend, "d")
+	applied, _, err := svc.SuspendServiceIfClear(context.Background(), 42, domain.DisabledGeoAutoSuspend, "d")
 	if err != nil || !applied {
 		t.Fatalf("applied=%v err=%v, want true, nil (the failure is queued, not returned)", applied, err)
 	}
@@ -164,7 +169,7 @@ func TestSuspendServiceIfClear_WaitsForTheEmergencyLock(t *testing.T) {
 
 	h.svc.WithEmergencyLock(func() {
 		go func() {
-			applied, _ := h.svc.SuspendServiceIfClear(context.Background(), 7, domain.DisabledGeoAutoSuspend, "d")
+			applied, _, _ := h.svc.SuspendServiceIfClear(context.Background(), 7, domain.DisabledGeoAutoSuspend, "d")
 			done <- applied
 		}()
 		time.Sleep(50 * time.Millisecond)
@@ -199,7 +204,7 @@ func TestSuspendServiceIfClear_WaitsForTheUserLock(t *testing.T) {
 
 	unlock := h.svc.lockUser(7)
 	go func() {
-		applied, _ := h.svc.SuspendServiceIfClear(context.Background(), 7, domain.DisabledGeoAutoSuspend, "d")
+		applied, _, _ := h.svc.SuspendServiceIfClear(context.Background(), 7, domain.DisabledGeoAutoSuspend, "d")
 		done <- applied
 	}()
 	time.Sleep(50 * time.Millisecond)
@@ -423,7 +428,7 @@ func TestResumeServiceAndSync_CountsAnAdminLiftOfGeoAuto(t *testing.T) {
 func TestSuspendServiceIfClear_RejectsANonServiceReason(t *testing.T) {
 	h := newGeoAutoHarness(&domain.User{ID: 7, Enabled: true})
 	for _, r := range []domain.AutoDisabledReason{domain.DisabledNone, domain.DisabledManual} {
-		if _, err := h.svc.SuspendServiceIfClear(context.Background(), 7, r, "d"); !errors.Is(err, domain.ErrValidation) {
+		if _, _, err := h.svc.SuspendServiceIfClear(context.Background(), 7, r, "d"); !errors.Is(err, domain.ErrValidation) {
 			t.Fatalf("reason %q: err = %v, want ErrValidation", r, err)
 		}
 	}
@@ -595,7 +600,7 @@ func TestSuspendServiceIfClear_FinishesThePushWhenTheCallerIsCancelledAfterTheWr
 	t.Run("panel up: pushed", func(t *testing.T) {
 		svc, life, tasks, ctx := abortAfterWrite(clear(), false)
 
-		applied, err := svc.SuspendServiceIfClear(ctx, 7, domain.DisabledGeoAutoSuspend, "d")
+		applied, _, err := svc.SuspendServiceIfClear(ctx, 7, domain.DisabledGeoAutoSuspend, "d")
 
 		if err != nil || !applied {
 			t.Fatalf("applied=%v err=%v, want true, nil (the caller went away after the write, not before it)", applied, err)
@@ -614,7 +619,7 @@ func TestSuspendServiceIfClear_FinishesThePushWhenTheCallerIsCancelledAfterTheWr
 	t.Run("panel down: queued", func(t *testing.T) {
 		svc, _, tasks, ctx := abortAfterWrite(clear(), true)
 
-		applied, err := svc.SuspendServiceIfClear(ctx, 7, domain.DisabledGeoAutoSuspend, "d")
+		applied, _, err := svc.SuspendServiceIfClear(ctx, 7, domain.DisabledGeoAutoSuspend, "d")
 
 		if err != nil || !applied {
 			t.Fatalf("applied=%v err=%v, want true, nil (the failed push is queued, not returned)", applied, err)

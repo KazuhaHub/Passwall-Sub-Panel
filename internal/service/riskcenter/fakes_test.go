@@ -156,6 +156,12 @@ type fakeFlags struct {
 	steps      map[int64][]domain.FlagStep
 	stepsAsked []map[int64]int64
 	stepsErr   error
+	// oldest is OldestAtMS' answer — 0, "unknown", by default, so a test
+	// that does not set it lapses nothing by it; oldestNone answers that no
+	// record is stored at all. oldestAsked counts the calls.
+	oldest      int64
+	oldestNone  bool
+	oldestAsked int
 }
 
 func (f *fakeFlags) List(_ context.Context, flt ports.FlagRecordFilter) ([]domain.FlagRecord, int64, error) {
@@ -172,6 +178,14 @@ func (f *fakeFlags) LatestByUsers(_ context.Context, ids []int64) (map[int64]int
 		}
 	}
 	return out, nil
+}
+
+func (f *fakeFlags) OldestAtMS(context.Context) (int64, bool, error) {
+	f.oldestAsked++
+	if f.oldestNone {
+		return 0, false, nil
+	}
+	return f.oldest, true, nil
 }
 
 func (f *fakeFlags) StepsSince(_ context.Context, since map[int64]int64) (map[int64][]domain.FlagStep, error) {

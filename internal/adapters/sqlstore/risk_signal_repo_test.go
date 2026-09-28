@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -556,6 +557,132 @@ func TestRiskSignalRepo_SaveRecordsNothingForIdleCleanChurn(t *testing.T) {
 	}
 }
 
+// A leave to unknown is not a clear to the reopen rule, and unknown → clean
+// moves no level, so without a record of its own the clean verdict that
+// ended the situation would never be written. Save writes it once — the
+// leave again, with the definite state and code — when a stored unknown gets
+// a verdict at no attention and the signal's latest record is still that
+// leave. Back at attention records its own enter and settles nothing; churn
+// with no attention behind it, or after the leave was already settled,
+// records nothing.
+func TestRiskSignalRepo_SaveRecordsTheClearThatSettlesAnUnknown(t *testing.T) {
+	r, users, db := newRiskSignalRepo(t)
+	ctx := context.Background()
+	a := createRiskUser(t, users, 1, "")
+	b := createRiskUser(t, users, 2, "")
+	sub, dev, login := domain.RiskKindSubSpread, domain.RiskKindDevices, domain.RiskKindLoginCountry
+	cleanEv := json.RawMessage(`{"v":1,"provinces":[]}`)
+	runs := [][]domain.RiskSignal{
+		{
+			{UserID: a.ID, Kind: sub, State: domain.GeoStateFlagged, Code: domain.RiskCodeSpread},
+			{UserID: a.ID, Kind: dev, State: domain.GeoStateSuspect, Code: domain.RiskCodeOverBuilding},
+			{UserID: b.ID, Kind: sub, State: domain.GeoStateFlagged, Code: domain.RiskCodeSpread},
+			{UserID: b.ID, Kind: login, State: domain.GeoStateClean, Code: domain.RiskCodeKnownCountries},
+		},
+		{
+			{UserID: a.ID, Kind: sub, State: domain.GeoStateUnknown, Code: domain.RiskCodeGeoUnavailable},
+			{UserID: a.ID, Kind: dev, State: domain.GeoStateUnknown, Code: domain.RiskCodeCaptureOff},
+			{UserID: b.ID, Kind: sub, State: domain.GeoStateUnknown, Code: domain.RiskCodeGeoUnavailable},
+			{UserID: b.ID, Kind: login, State: domain.GeoStateUnknown, Code: domain.RiskCodeGeoUnavailable},
+		},
+		{
+			{UserID: a.ID, Kind: sub, State: domain.GeoStateClean, Code: domain.RiskCodeWithin, Evidence: cleanEv},
+			{UserID: a.ID, Kind: dev, State: domain.GeoStateUnknown, Code: domain.RiskCodeCaptureOff},
+			{UserID: b.ID, Kind: sub, State: domain.GeoStateFlagged, Code: domain.RiskCodeSpread},
+			{UserID: b.ID, Kind: login, State: domain.GeoStateClean, Code: domain.RiskCodeKnownCountries},
+		},
+		{
+			{UserID: a.ID, Kind: sub, State: domain.GeoStateUnknown, Code: domain.RiskCodeLowPlaced},
+			{UserID: a.ID, Kind: dev, State: domain.GeoStateExempt, Code: domain.RiskCodeAllowAnywhere},
+		},
+		{
+			{UserID: a.ID, Kind: sub, State: domain.GeoStateIdle, Code: domain.RiskCodeNoFetches},
+			{UserID: a.ID, Kind: dev, State: domain.GeoStateClean, Code: domain.RiskCodeWithin},
+		},
+	}
+	for i, run := range runs {
+		if err := r.Save(ctx, run); err != nil {
+			t.Fatalf("save %d: %v", i, err)
+		}
+	}
+
+	var got []string
+	for _, row := range flagRowsInOrder(t, db) {
+		params := "null"
+		if row.Params != nil {
+			params = *row.Params
+		}
+		got = append(got, fmt.Sprintf("%d %s %s %q<-%q %s/%s %s", row.UserID, row.Source, row.Event,
+			row.Level, row.PrevLevel, row.State, row.Code, params))
+	}
+	want := []string{
+		fmt.Sprintf("%d sub_spread enter_flagged %q<-%q flagged/spread null", a.ID, "flagged", ""),
+		fmt.Sprintf("%d devices enter_suspect %q<-%q suspect/over_building null", a.ID, "suspect", ""),
+		fmt.Sprintf("%d sub_spread enter_flagged %q<-%q flagged/spread null", b.ID, "flagged", ""),
+		fmt.Sprintf("%d sub_spread leave_flagged %q<-%q unknown/geo_unavailable null", a.ID, "", "flagged"),
+		fmt.Sprintf("%d devices leave_suspect %q<-%q unknown/capture_off null", a.ID, "", "suspect"),
+		fmt.Sprintf("%d sub_spread leave_flagged %q<-%q unknown/geo_unavailable null", b.ID, "", "flagged"),
+		// run 3: a's sub_spread is settled clean, with the clean verdict's
+		// evidence; b's comes straight back to flagged (an enter, no
+		// settling); b's login_country churned with no attention behind it.
+		fmt.Sprintf("%d sub_spread leave_flagged %q<-%q clean/within %s", a.ID, "", "flagged", cleanEv),
+		fmt.Sprintf("%d sub_spread enter_flagged %q<-%q flagged/spread null", b.ID, "flagged", ""),
+		// run 4: devices, unknown for two runs, is settled exempt; the
+		// sub_spread already settled goes unknown again, recording nothing.
+		fmt.Sprintf("%d devices leave_suspect %q<-%q exempt/allow_anywhere null", a.ID, "", "suspect"),
+		// run 5: both already settled — nothing more.
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("flag records:\n got %s\nwant %s", strings.Join(got, "\n     "), strings.Join(want, "\n     "))
+	}
+}
+
+// The case the settling record exists for, end to end on the real store: a
+// sub_spread flag is dismissed, its evidence goes missing (unknown), it comes
+// back clean, and days later the account starts sharing again. The clean
+// verdict is a clear, so the new episode reopens the dismissal instead of
+// hiding under it until the dismissal lapses.
+func TestRiskSignalRepo_AClearAfterUnknownReopensADismissal(t *testing.T) {
+	r, users, _ := newRiskSignalRepo(t)
+	flags := NewFlagRecordRepo(r.db)
+	ctx := context.Background()
+	u := createRiskUser(t, users, 1, "")
+	save := func(state domain.GeoState, code domain.RiskCode) {
+		t.Helper()
+		if err := r.Save(ctx, []domain.RiskSignal{{UserID: u.ID, Kind: domain.RiskKindSubSpread, State: state, Code: code}}); err != nil {
+			t.Fatalf("save %s: %v", state, err)
+		}
+	}
+	save(domain.GeoStateFlagged, domain.RiskCodeSpread)
+	rows, err := r.ListByUsers(ctx, []int64{u.ID})
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("list = %+v, %v", rows, err)
+	}
+	verdict := rows[0].UpdatedAtMS
+	dismissed := verdict + 1
+	for time.Now().UnixMilli() <= dismissed {
+		time.Sleep(time.Millisecond)
+	}
+	rev := domain.RiskReview{UserID: u.ID, DismissedAtMS: dismissed, DismissedBy: 1,
+		Accepted: domain.DismissSnapshot{"sub_spread": {Level: domain.FlagLevelFlagged, AtMS: verdict}}}
+
+	save(domain.GeoStateUnknown, domain.RiskCodeGeoUnavailable)
+	save(domain.GeoStateClean, domain.RiskCodeWithin)
+	save(domain.GeoStateSuspect, domain.RiskCodeSpreadBuilding)
+	save(domain.GeoStateFlagged, domain.RiskCodeSpread)
+
+	steps, err := flags.StepsSince(ctx, map[int64]int64{u.ID: rev.CutoffMS()})
+	if err != nil {
+		t.Fatalf("steps: %v", err)
+	}
+	st := domain.EvaluateReview(rev, domain.ReviewInputs{
+		Now: domain.AttentionLevels{"sub_spread": domain.FlagLevelFlagged}, Steps: steps[u.ID],
+	})
+	if !st.Reopened || !slices.Equal(st.Escalated, []string{"sub_spread"}) {
+		t.Fatalf("review state = %+v over steps %+v; want reopened by sub_spread: the clean verdict ended the dismissed episode", st, steps[u.ID])
+	}
+}
+
 // The upsert and the records of what it changed are one transaction. If the
 // records cannot be written the verdicts are not either — otherwise the next
 // run would read the new state as the previous one and the change would
@@ -599,8 +726,9 @@ func TestRiskSignalRepo_SaveRollsBackBothTablesTogether(t *testing.T) {
 // statement of Save issued on the store's handle instead of the
 // transaction's would wait for that connection until its context gave up —
 // a worker that hangs every run. Run on a one-connection pool with a
-// bounded context, a save that transitions both reads, upserts and inserts:
-// it finishes, or one of its statements left the transaction.
+// bounded context, a save that transitions both reads, upserts and inserts
+// — and one that settles a leave to unknown also reads the signal's latest
+// record: it finishes, or one of its statements left the transaction.
 func TestRiskSignalRepo_SaveUsesOnlyTheTransaction(t *testing.T) {
 	r, users, db := newRiskSignalRepo(t)
 	sqlDB, err := db.DB()
@@ -609,7 +737,9 @@ func TestRiskSignalRepo_SaveUsesOnlyTheTransaction(t *testing.T) {
 	}
 	sqlDB.SetMaxOpenConns(1)
 	u := createRiskUser(t, users, 1, "")
-	for i, state := range []domain.GeoState{domain.GeoStateSuspect, domain.GeoStateFlagged, domain.GeoStateClean} {
+	for i, state := range []domain.GeoState{
+		domain.GeoStateSuspect, domain.GeoStateFlagged, domain.GeoStateUnknown, domain.GeoStateClean,
+	} {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		err := r.Save(ctx, []domain.RiskSignal{{UserID: u.ID, Kind: domain.RiskKindDevices, State: state, Code: domain.RiskCodeOver}})
 		cancel()
@@ -617,8 +747,8 @@ func TestRiskSignalRepo_SaveUsesOnlyTheTransaction(t *testing.T) {
 			t.Fatalf("save %d on a one-connection pool: %v — a statement ran outside the transaction", i, err)
 		}
 	}
-	if n := countFlagRows(t, db, ""); n != 3 {
-		t.Fatalf("flag records = %d, want 3 (enter suspect, enter flagged, leave flagged)", n)
+	if n := countFlagRows(t, db, ""); n != 4 {
+		t.Fatalf("flag records = %d, want 4 (enter suspect, enter flagged, leave flagged to unknown, and its settling clean)", n)
 	}
 }
 

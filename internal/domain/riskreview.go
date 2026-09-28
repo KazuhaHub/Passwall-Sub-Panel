@@ -286,7 +286,7 @@ func (r RiskReview) SourceCutoffMS(s string) int64 {
 
 // CutoffMS is how far back the store must read for this dismissal: the
 // minimum of SourceCutoffMS over every snapshot source and DismissedAtMS (0
-// when not dismissed). It is also what decides a lapse.
+// when not dismissed). It is also what decides a lapse by the retention.
 func (r RiskReview) CutoffMS() int64 {
 	if !r.Dismissed() {
 		return 0
@@ -296,6 +296,26 @@ func (r RiskReview) CutoffMS() int64 {
 		c = min(c, r.SourceCutoffMS(s))
 	}
 	return c
+}
+
+// Lapsed reports a dismissal whose history may have been pruned
+// (ReviewInputs.HistoryFromMS, ReviewInputs.KeptFromMS; 0 is unknown for
+// either): its oldest cutoff before the retention's — CutoffMS() <
+// historyFromMS — or the dismissal itself before the oldest record still
+// stored — DismissedAtMS < keptFromMS. Never for a row with no dismissal.
+//
+// The retention alone is not enough: it says what the prune deletes from
+// now on, not what it already deleted. Raised, it would read a history an
+// earlier, shorter retention already pruned as complete, and a dismissal
+// that had lapsed would cover the account again. The dismissal's own review
+// record is written with it, at DismissedAtMS, and the prune deletes by
+// time — so that record, and everything recorded before it, is gone exactly
+// when the oldest record stored is younger than the dismissal.
+func (r RiskReview) Lapsed(historyFromMS, keptFromMS int64) bool {
+	if !r.Dismissed() {
+		return false
+	}
+	return (historyFromMS > 0 && r.CutoffMS() < historyFromMS) || (keptFromMS > 0 && r.DismissedAtMS < keptFromMS)
 }
 
 // FlagStep is one non-review flag record reduced to what the reopen rule
@@ -314,7 +334,9 @@ type FlagStep struct {
 // writes a leave for every row — counting those as clears would reopen
 // every dismissal in the fleet. Disabled and exempt are policy decisions
 // (trust included) and do clear. A geo_auto lift has no state and always
-// clears.
+// clears. When the evidence comes back and the verdict is definite at no
+// attention, the store records the leave again with that verdict's state
+// (RiskUnknownSettled), and that record is the clear.
 func (s FlagStep) IsClear() bool {
 	return s.Level == FlagLevelNone && (s.Source == FlagSourceGeoAuto || s.State != GeoStateUnknown)
 }
@@ -325,7 +347,12 @@ type ReviewInputs struct {
 	Trusted       bool            // location sources are ignored entirely
 	HeldSinceMS   int64           // service_disabled_at of a current geo_auto hold; 0 otherwise
 	Steps         []FlagStep      // non-review records with AtMS > r.CutoffMS(), ordered by (AtMS, id)
-	HistoryFromMS int64           // now − flag-record retention; 0 = unknown (never lapses)
+	HistoryFromMS int64           // now − flag-record retention; 0 = unknown (never lapses by it)
+	// KeptFromMS is how far back the stored records still reach: the at_ms
+	// of the oldest one (any account, any source, review included), or the
+	// time of the read when none is stored; 0 = unknown (never lapses by
+	// it). Read after the review row, whose record is written with it.
+	KeptFromMS int64
 }
 
 // ReviewState is what the reopen rule decides about one account now.
@@ -367,8 +394,9 @@ type ReviewState struct {
 // Trusted accounts skip the location sources entirely: trust exempts them,
 // and their records up to the trust are about a judgement no longer made.
 //
-// A dismissal LAPSES when its oldest cutoff is older than the flag-record
-// retention: its history may have been pruned, so its records can no longer
+// A dismissal LAPSES when its history may have been pruned (RiskReview.Lapsed:
+// its oldest cutoff older than the flag-record retention, or the dismissal
+// older than the oldest record still stored), so its records can no longer
 // prove nothing happened. Every accepted level then reads as none and any
 // current attention reopens it — the alternative, trusting the snapshot
 // alone after a prune, would make a dismissal permanent, the opposite of
@@ -384,7 +412,7 @@ func EvaluateReview(r RiskReview, in ReviewInputs) ReviewState {
 		return ReviewState{}
 	}
 	st := ReviewState{Dismissed: true}
-	st.Lapsed = in.HistoryFromMS > 0 && r.CutoffMS() < in.HistoryFromMS
+	st.Lapsed = r.Lapsed(in.HistoryFromMS, in.KeptFromMS)
 	for _, s := range AttentionSources() {
 		if in.Trusted && isLocationSource(s) {
 			continue

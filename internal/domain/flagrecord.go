@@ -101,6 +101,9 @@ func FlagSources() []string {
 // changes that matter under ones the bell never showed. The geo and risk
 // producers derive the event from the two levels (GeoFlagTransition,
 // RiskFlagTransition); the geo_auto producers name theirs (GeoAutoFlag).
+// The one record of no change of level is the risk signal's leave to
+// unknown settled by a definite verdict (RiskUnknownSettled), once per
+// leave: the clear the reopen rule could not otherwise see.
 //
 // ADDRESS-FREE, like the evidence it copies: Code is a branch name, Params
 // the numbers and places the verdict was drawn from. A record is kept for
@@ -296,6 +299,54 @@ func RiskFlagTransition(prev GeoState, hadPrev bool, next RiskSignal, atMS int64
 	}
 	return FlagRecord{
 		UserID: next.UserID, Source: string(next.Kind), Event: ev, Level: to, PrevLevel: from,
+		State: next.State, Code: string(next.Code), Params: params, AtMS: atMS,
+	}, true
+}
+
+// SettlesUnknown reports whether a risk verdict could settle a leave to
+// unknown (RiskUnknownSettled): the stored state was unknown, and the new
+// one is definite and at no attention. Only for these does the store read
+// the signal's latest record.
+func SettlesUnknown(prev, next GeoState) bool {
+	return prev == GeoStateUnknown && next != GeoStateUnknown && RiskAttention(next) == FlagLevelNone
+}
+
+// RiskUnknownSettled is the record of a risk verdict that settles a leave to
+// unknown: prev is the state stored before this run ("" when the account had
+// no row for this kind), last the latest record of this (user, kind) (the
+// zero record when there is none), next the signal being saved.
+//
+// A leave to unknown is not a clear (FlagStep.IsClear): the evidence went
+// missing, the situation did not end. And the definite verdict that DID end
+// it moves no level — RiskAttention reads unknown and clean alike as none —
+// so RiskFlagTransition records nothing for it. Without this record that
+// clear would never be written, and a dismissal that accepted the flag would
+// read a later re-entry at the accepted level as the same episode until the
+// dismissal lapsed.
+//
+// So once — when SettlesUnknown(prev, next.State) and last is still that
+// leave to unknown — the leave is recorded again with the definite verdict:
+// the same event, from the same level, to none, with next's state, code and
+// evidence (copied, as RiskFlagTransition copies it). Its state is not
+// unknown, so the reopen rule reads it as the clear it is. A latest record
+// that is anything else — none at all (never at attention, or pruned), one
+// already settled, an enter — settles nothing, so a signal churning between
+// unknown and clean with no attention behind it records nothing, as before.
+func RiskUnknownSettled(prev GeoState, last FlagRecord, next RiskSignal, atMS int64) (FlagRecord, bool) {
+	if !SettlesUnknown(prev, next.State) || last.Source != string(next.Kind) ||
+		last.Level != FlagLevelNone || last.State != GeoStateUnknown {
+		return FlagRecord{}, false
+	}
+	ev, ok := AttentionEvent(last.PrevLevel, FlagLevelNone)
+	if !ok {
+		return FlagRecord{}, false
+	}
+	var params json.RawMessage
+	if len(next.Evidence) > 0 {
+		params = bytes.Clone(next.Evidence)
+	}
+	return FlagRecord{
+		UserID: next.UserID, Source: string(next.Kind), Event: ev, Level: FlagLevelNone, PrevLevel: last.PrevLevel,
 		State: next.State, Code: string(next.Code), Params: params, AtMS: atMS,
 	}, true
 }

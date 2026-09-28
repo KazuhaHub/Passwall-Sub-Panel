@@ -2,6 +2,7 @@ package sqlstore
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"slices"
@@ -415,4 +416,19 @@ func (r *FlagRecordRepo) StepsSince(ctx context.Context, since map[int64]int64) 
 		}
 	}
 	return out, nil
+}
+
+// OldestAtMS returns the at_ms of the oldest record stored — any account,
+// any source, review records included — and false when none is: how far
+// back the history still reaches, which the risk center's lapse reads
+// (domain.RiskReview.Lapsed). The retention setting cannot say that once it
+// has been raised: the prune already deleted by the shorter one. Orphans
+// count too; they age out by the same time, so they never reach back past
+// what the prune kept. One MIN over at_ms, served by idx_flag_at.
+func (r *FlagRecordRepo) OldestAtMS(ctx context.Context) (int64, bool, error) {
+	var oldest sql.NullInt64
+	if err := r.db.WithContext(ctx).Table("flag_records").Select("MIN(at_ms)").Scan(&oldest).Error; err != nil {
+		return 0, false, fmt.Errorf("oldest flag record: %w", err)
+	}
+	return oldest.Int64, oldest.Valid, nil
 }

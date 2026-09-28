@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"time"
 
 	"gorm.io/gorm"
@@ -102,12 +103,17 @@ func NewRiskSignalRepo(db *gorm.DB) *RiskSignalRepo { return &RiskSignalRepo{db:
 // state) — the whole table, at most four rows per account, three narrow
 // columns — then upserts, then inserts a flag record for each saved signal
 // whose level moved (domain.RiskFlagTransition: suspect and flagged are the
-// levels, unknown included in "none", as the bell reads it). Either write
-// failing rolls back both: a verdict saved without its record would read as
-// the previous state next run, and the change would never be recorded at
-// all. The records are built from rows that passed validateRiskSignal, and
-// flag_records' columns are at least as wide, so the history cannot stall
-// the worker on data.
+// levels, unknown included in "none", as the bell reads it) — and, for a
+// stored unknown whose verdict is now definite at no attention, the clear
+// that settles its leave to unknown when that leave is still the signal's
+// latest record (domain.RiskUnknownSettled, read by latestRiskFlags): the
+// reopen rule does not count a leave to unknown as a clear, and the clean
+// verdict after it moves no level, so without it that clear would never be
+// written. Either write failing rolls back both: a verdict saved without
+// its record would read as the previous state next run, and the change
+// would never be recorded at all. The records are built from rows that
+// passed validateRiskSignal, and flag_records' columns are at least as wide,
+// so the history cannot stall the worker on data.
 //
 // EVERY STATEMENT RUNS ON tx. On SQLite the transaction holds the pool's one
 // connection (conn.go), and a statement on r.db would wait for it until the
@@ -166,11 +172,24 @@ func (r *RiskSignalRepo) Save(ctx context.Context, signals []domain.RiskSignal) 
 				return err
 			}
 		}
+		var settling []domain.RiskSignal
+		for _, s := range signals {
+			if domain.SettlesUnknown(prev[riskSignalKey{s.UserID, string(s.Kind)}], s.State) {
+				settling = append(settling, s)
+			}
+		}
+		last, err := latestRiskFlags(tx, settling)
+		if err != nil {
+			return err
+		}
 		atMS := time.Now().UnixMilli()
 		var flags []domain.FlagRecord
 		for _, s := range signals {
-			before, had := prev[riskSignalKey{s.UserID, string(s.Kind)}]
+			k := riskSignalKey{s.UserID, string(s.Kind)}
+			before, had := prev[k]
 			if rec, ok := domain.RiskFlagTransition(before, had, s, atMS); ok {
+				flags = append(flags, rec)
+			} else if rec, ok := domain.RiskUnknownSettled(before, last[k], s, atMS); ok {
 				flags = append(flags, rec)
 			}
 		}
@@ -179,6 +198,63 @@ func (r *RiskSignalRepo) Save(ctx context.Context, signals []domain.RiskSignal) 
 		}
 		return nil
 	})
+}
+
+// latestRiskFlags reads, on tx and only tx (see Save), the latest flag
+// record of each (user, kind) of signals — what domain.RiskUnknownSettled
+// decides on. A key with no record is absent.
+//
+// Latest is the highest id, the order written: a risk kind's records are
+// written only here, by the one worker, one run after another. One statement
+// per idReadChunk accounts, the kinds asked in its IN list, each (user,
+// source)'s MAX(id) found by a subquery served by idx_flag_user_at; the
+// pairs nobody asked for (another kind of the same account) are dropped
+// here. Three narrow columns, never params. Only the signals whose stored
+// state was unknown and whose verdict now is definite are asked about, so a
+// run with none of those issues no statement here at all.
+func latestRiskFlags(tx *gorm.DB, signals []domain.RiskSignal) (map[riskSignalKey]domain.FlagRecord, error) {
+	if len(signals) == 0 {
+		return nil, nil
+	}
+	asked := make(map[riskSignalKey]struct{}, len(signals))
+	ids := make([]int64, 0, len(signals))
+	var kinds []string
+	for _, s := range signals {
+		asked[riskSignalKey{s.UserID, string(s.Kind)}] = struct{}{}
+		ids = append(ids, s.UserID)
+		if !slices.Contains(kinds, string(s.Kind)) {
+			kinds = append(kinds, string(s.Kind))
+		}
+	}
+	out := make(map[riskSignalKey]domain.FlagRecord, len(signals))
+	for _, chunk := range idChunks(ids) {
+		var rows []struct {
+			UserID    int64  `gorm:"column:user_id"`
+			Source    string `gorm:"column:source"`
+			Level     string `gorm:"column:level"`
+			PrevLevel string `gorm:"column:prev_level"`
+			State     string `gorm:"column:state"`
+		}
+		latest := tx.Table("flag_records").Select("MAX(id)").
+			Where("user_id IN ? AND source IN ?", chunk, kinds).Group("user_id, source")
+		if err := tx.Table("flag_records").
+			Select("user_id, source, level, prev_level, state").
+			Where("id IN (?)", latest).
+			Scan(&rows).Error; err != nil {
+			return nil, fmt.Errorf("read the latest risk flag records: %w", err)
+		}
+		for _, row := range rows {
+			k := riskSignalKey{row.UserID, row.Source}
+			if _, ok := asked[k]; !ok {
+				continue
+			}
+			out[k] = domain.FlagRecord{
+				UserID: row.UserID, Source: row.Source, Level: domain.FlagLevel(row.Level),
+				PrevLevel: domain.FlagLevel(row.PrevLevel), State: domain.GeoState(row.State),
+			}
+		}
+	}
+	return out, nil
 }
 
 // riskSignalBatch is how many rows one upsert statement carries.

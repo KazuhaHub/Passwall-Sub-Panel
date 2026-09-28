@@ -318,6 +318,54 @@ func TestQueue_LapsedDismissalIsOpen(t *testing.T) {
 	}
 }
 
+// The retention decides how far back the prune deletes from now on; raising
+// it cannot bring back what a shorter one already deleted. So a dismissal
+// whose own record the prune took lapses whatever the setting says now:
+// retention 30 days, a dismissal 45 days old with its history gone, the
+// admin raises the retention to 90 — the dismissal must not start covering
+// the account again. The queue and the drawer read it alike; with its record
+// still kept it covers, and with nothing kept at all it lapses. Nothing is
+// asked of the records' age while no dismissal is stored.
+func TestQueue_DismissalLapsesWhenItsRecordsWerePrunedBeforeARaise(t *testing.T) {
+	h := newHarness()
+	h.settings.set = ports.UISettings{RiskFlagRecordRetentionDays: 90}
+	h.user(7, "alice")
+	d := testNow.Add(-45 * 24 * time.Hour)
+	h.geo.rows = []domain.GeoRecord{geoAt(7, false, 1, domain.GeoStateSuspect, testNow)}
+	h.queue(t, QueueQuery{})
+	if h.flags.oldestAsked != 0 {
+		t.Fatalf("read the oldest record %d times with no dismissal stored, want none", h.flags.oldestAsked)
+	}
+	h.dismiss(7, d, domain.DismissSnapshot{"geo": accepted(domain.FlagLevelSuspect, d.Add(-time.Minute))})
+	h.flags.oldest = testNow.Add(-30 * 24 * time.Hour).UnixMilli()
+
+	v := h.queue(t, QueueQuery{})
+	if got := rowIDs(v); !slices.Equal(got, []int64{7}) {
+		t.Fatalf("open = %v, want [7]: its history was pruned before the raise", got)
+	}
+	if st := rowOf(t, v, 7).Attention.State; !st.Lapsed || !st.Reopened {
+		t.Fatalf("review state = %+v, want lapsed and reopened", st)
+	}
+	if len(h.flags.stepsAsked) != 0 {
+		t.Fatalf("read the records of %v, want none: a lapsed dismissal's history is not consulted", h.flags.stepsAsked)
+	}
+	a, err := h.svc.UserAttention(t.Context(), 7)
+	if err != nil || !a.State.Lapsed || !a.Open() {
+		t.Fatalf("drawer: %+v, %v; want lapsed and open, as the queue", a.State, err)
+	}
+
+	h.flags.oldest = d.UnixMilli()
+	if v := h.queue(t, QueueQuery{Status: "dismissed"}); !slices.Equal(rowIDs(v), []int64{7}) ||
+		!rowOf(t, v, 7).Attention.DismissedInForce() {
+		t.Fatalf("dismissed = %v, want [7] in force: its own record is still kept", rowIDs(v))
+	}
+
+	h.flags.oldestNone = true
+	if st := rowOf(t, h.queue(t, QueueQuery{}), 7).Attention.State; !st.Lapsed {
+		t.Fatalf("review state = %+v with no record stored at all, want lapsed", st)
+	}
+}
+
 // The reopen rule's records are read ONLY for accounts it can change: a
 // dismissal in force (not lapsed) over current attention. Not for an
 // account never dismissed, nor one dismissed with nothing to cover, nor one

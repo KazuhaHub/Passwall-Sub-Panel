@@ -69,7 +69,7 @@ func TestBuildNeverGeoAutoSuspendsATrustedAccount(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	applied, err := a.user.SuspendServiceIfClear(ctx, trusted.ID, domain.DisabledGeoAutoSuspend, "")
+	applied, _, err := a.user.SuspendServiceIfClear(ctx, trusted.ID, domain.DisabledGeoAutoSuspend, "")
 	if err != nil || applied {
 		t.Fatalf("geo_auto on the trusted account = %v, %v; want false, nil", applied, err)
 	}
@@ -81,7 +81,7 @@ func TestBuildNeverGeoAutoSuspendsATrustedAccount(t *testing.T) {
 		t.Fatalf("trusted account's service = %q at %v, want clear", got.ServiceDisabledReason, got.ServiceDisabledAt)
 	}
 
-	applied, err = a.user.SuspendServiceIfClear(ctx, untrusted.ID, domain.DisabledGeoAutoSuspend, "")
+	applied, _, err = a.user.SuspendServiceIfClear(ctx, untrusted.ID, domain.DisabledGeoAutoSuspend, "")
 	if !applied {
 		t.Fatalf("geo_auto on the untrusted account = %v, %v; want it applied", applied, err)
 	}

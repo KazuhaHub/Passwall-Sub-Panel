@@ -396,6 +396,12 @@ func TestObserveLiveIPs_FlagRecorderFailureIsCounted(t *testing.T) {
 // from — and never the ban's reason, which names the places beside the
 // account in a sentence built for the audit log. A due ban the row refused
 // (someone else's hold) did not happen and is not recorded.
+//
+// Stamped with the time the suspender wrote as service_disabled_at, not the
+// phase's start: every due lift and every earlier ban runs in between, each
+// with an inline push, and a dismissal landing in that gap must still read
+// the suspension as after it (the reopen rule counts a source it did not
+// snapshot only from the dismissal on).
 func TestApplyGeoBans_RecordsTheSuspension(t *testing.T) {
 	metrics.Reset()
 	users := &fakeUserRepo{users: map[int64]*domain.User{
@@ -405,19 +411,30 @@ func TestApplyGeoBans_RecordsTheSuspension(t *testing.T) {
 	s, _, _ := newEnforcer(users, nil)
 	flags := &fakeFlagRecorder{}
 	s.SetFlagRecorder(flags)
-	now := time.Now()
+	phase := time.Now().Add(-5 * time.Minute)
+	list := listed(users)
 
-	s.enforceGeo(context.Background(), listed(users), []geoBan{ban(1), ban(2)}, nil, now)
+	s.enforceGeo(context.Background(), list, []geoBan{ban(1), ban(2)}, nil, phase)
 
 	recs := flags.records()
 	if len(recs) != 1 {
 		t.Fatalf("records = %+v, want one: user 1's suspension", recs)
 	}
 	r := recs[0]
+	wrote := users.users[1].ServiceDisabledAt
+	if wrote == nil || !wrote.After(phase) {
+		t.Fatalf("precondition: service_disabled_at = %v, want the suspender's own time, after the phase began at %v", wrote, phase)
+	}
 	if r.UserID != 1 || r.Source != domain.FlagSourceGeoAuto || r.Event != domain.FlagAutoSuspended ||
 		r.Level != domain.FlagLevelSuspended || r.PrevLevel != domain.FlagLevelNone || r.State != "" ||
-		r.Code != string(domain.GeoTierCountry) || r.AtMS != now.UnixMilli() {
-		t.Fatalf("record = %+v, want user 1 geo_auto auto_suspended none→suspended, code country, at the poll's instant", r)
+		r.Code != string(domain.GeoTierCountry) || r.AtMS != wrote.UnixMilli() {
+		t.Fatalf("record = %+v, want user 1 geo_auto auto_suspended none→suspended, code country, at the service_disabled_at written (%d), not the phase's start (%d)",
+			r, wrote.UnixMilli(), phase.UnixMilli())
+	}
+	for _, u := range list {
+		if u.ID == 1 && (u.ServiceDisabledAt == nil || !u.ServiceDisabledAt.Equal(*wrote)) {
+			t.Fatalf("the poll's copy of user 1 holds service_disabled_at %v, want the written %v", u.ServiceDisabledAt, wrote)
+		}
 	}
 	want := map[string]any{"tier": "country", "spread": float64(2), "duration_minutes": float64(60)}
 	if got := autoParams(t, r); !reflect.DeepEqual(got, want) {

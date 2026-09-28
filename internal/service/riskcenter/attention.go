@@ -52,6 +52,11 @@ type readWindow struct {
 	// the hourly prune deletes before, so a dismissal older than it may
 	// have lost its history (it lapses).
 	historyFromMS int64
+	// keptFromMS is how far back the stored records still reach
+	// (domain.ReviewInputs.KeptFromMS), read by keptFrom once the review
+	// rows are: after a raise of the retention, the prune has deleted more
+	// than historyFromMS says. 0 until read, and when no dismissal needs it.
+	keptFromMS int64
 }
 
 func (s *Service) window(ctx context.Context) readWindow {
@@ -76,8 +81,28 @@ func knownKind(k domain.RiskKind) bool { return slices.Contains(domain.RiskKinds
 // attention (nothing to list either way), lapsed (every accepted level
 // already reads as none). Shared by the fleet read and the one-account read
 // so both ask for the same accounts.
-func needsSteps(rev domain.RiskReview, now domain.AttentionLevels, historyFromMS int64) bool {
-	return rev.Dismissed() && !now.Empty() && rev.CutoffMS() >= historyFromMS
+func needsSteps(rev domain.RiskReview, now domain.AttentionLevels, w readWindow) bool {
+	return rev.Dismissed() && !now.Empty() && !rev.Lapsed(w.historyFromMS, w.keptFromMS)
+}
+
+// keptFrom reads how far back the stored records reach, for the lapse
+// (domain.RiskReview.Lapsed) — only when a dismissal is stored, and only
+// AFTER its review row was read: the row's own record is committed with it,
+// so a dismissal read first is never judged against a history read before
+// its record existed. No record stored at all means every one written
+// before now is gone: the read's time.
+func (s *Service) keptFrom(ctx context.Context, w readWindow, anyDismissed bool) (int64, error) {
+	if !anyDismissed {
+		return 0, nil
+	}
+	at, ok, err := s.d.Flags.OldestAtMS(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("risk center: the oldest flag record: %w", err)
+	}
+	if !ok {
+		return w.now.UnixMilli(), nil
+	}
+	return at, nil
 }
 
 // assemble is the last step both reads share: mask the location sources
@@ -85,7 +110,7 @@ func needsSteps(rev domain.RiskReview, now domain.AttentionLevels, historyFromMS
 // apply the reopen rule. A review row not in force (all cleared) is no
 // review.
 func assemble(levels domain.AttentionLevels, at map[string]int64, heldSinceMS int64,
-	rev domain.RiskReview, hasReview bool, steps []domain.FlagStep, historyFromMS int64) domain.AccountAttention {
+	rev domain.RiskReview, hasReview bool, steps []domain.FlagStep, w readWindow) domain.AccountAttention {
 	if !hasReview {
 		rev = domain.RiskReview{}
 	}
@@ -102,7 +127,8 @@ func assemble(levels domain.AttentionLevels, at map[string]int64, heldSinceMS in
 	}
 	a := domain.AccountAttention{Levels: levels, AtMS: kept, HeldSinceMS: heldSinceMS, Review: rev, HasReview: hasReview}
 	a.State = domain.EvaluateReview(rev, domain.ReviewInputs{
-		Now: levels, Trusted: rev.Trusted, HeldSinceMS: heldSinceMS, Steps: steps, HistoryFromMS: historyFromMS,
+		Now: levels, Trusted: rev.Trusted, HeldSinceMS: heldSinceMS, Steps: steps,
+		HistoryFromMS: w.historyFromMS, KeptFromMS: w.keptFromMS,
 	})
 	return a
 }
@@ -165,6 +191,7 @@ func (s *Service) accounts(ctx context.Context, w readWindow, includeReviewed bo
 		}
 	}
 	reviews := map[int64]domain.RiskReview{}
+	anyDismissed := false
 	if s.d.Reviews != nil {
 		list, err := s.d.Reviews.List(ctx)
 		if err != nil {
@@ -173,15 +200,21 @@ func (s *Service) accounts(ctx context.Context, w readWindow, includeReviewed bo
 		for _, r := range list {
 			if inForce(r) {
 				reviews[r.UserID] = r
+				anyDismissed = anyDismissed || r.Dismissed()
 			}
 		}
 	}
+	kept, err := s.keptFrom(ctx, w, anyDismissed)
+	if err != nil {
+		return nil, err
+	}
+	w.keptFromMS = kept
 
 	// The reopen rule's records, for the accounts it can change only, in
 	// one read — after the trust mask, as the rule sees the levels.
 	need := map[int64]int64{}
 	for uid, rev := range reviews {
-		if needsSteps(rev, domain.MaskTrusted(levels[uid], rev.Trusted), w.historyFromMS) {
+		if needsSteps(rev, domain.MaskTrusted(levels[uid], rev.Trusted), w) {
 			need[uid] = rev.CutoffMS()
 		}
 	}
@@ -196,7 +229,7 @@ func (s *Service) accounts(ctx context.Context, w readWindow, includeReviewed bo
 	out := make(map[int64]*domain.AccountAttention, len(levels))
 	add := func(uid int64) {
 		rev, has := reviews[uid]
-		a := assemble(levels[uid], at[uid], held[uid], rev, has, steps[uid], w.historyFromMS)
+		a := assemble(levels[uid], at[uid], held[uid], rev, has, steps[uid], w)
 		// A trusted account whose only attention was a location source
 		// has none left; it is listed only among the reviewed.
 		if a.Levels.Empty() && !(includeReviewed && has) {
@@ -316,15 +349,20 @@ func (s *Service) attentionOf(ctx context.Context, w readWindow, u *domain.User,
 		}
 		rev, has = r, found && inForce(r)
 	}
+	kept, err := s.keptFrom(ctx, w, has && rev.Dismissed())
+	if err != nil {
+		return domain.AccountAttention{}, err
+	}
+	w.keptFromMS = kept
 	var steps []domain.FlagStep
-	if has && needsSteps(rev, domain.MaskTrusted(levels, rev.Trusted), w.historyFromMS) {
+	if has && needsSteps(rev, domain.MaskTrusted(levels, rev.Trusted), w) {
 		got, err := s.d.Flags.StepsSince(ctx, map[int64]int64{u.ID: rev.CutoffMS()})
 		if err != nil {
 			return domain.AccountAttention{}, fmt.Errorf("risk center: records since the dismissal of %d: %w", u.ID, err)
 		}
 		steps = got[u.ID]
 	}
-	return assemble(levels, at, heldSinceMS, rev, has, steps, w.historyFromMS), nil
+	return assemble(levels, at, heldSinceMS, rev, has, steps, w), nil
 }
 
 // Levels is the Users page's risk column: every account at attention now,

@@ -43,7 +43,7 @@ func TestRiskCenterCannotWriteServiceState(t *testing.T) {
 		"Panels":   {"List"},
 		"Fetches":  {"RecentForUsers"},
 		"History":  {"List"},
-		"Flags":    {"LatestByUsers", "List", "StepsSince"},
+		"Flags":    {"LatestByUsers", "List", "OldestAtMS", "StepsSince"},
 		"Geo":      {"AttentionLevels", "CountFreshUnknown", "ListByUsers"},
 		"Signals":  {"AttentionLevels", "ListByUsers"},
 		"Reviews":  {"Get", "List"},

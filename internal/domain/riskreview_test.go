@@ -64,6 +64,7 @@ func TestEvaluateReview_Table(t *testing.T) {
 		heldSince    int64
 		trusted      bool
 		historyFrom  int64
+		keptFrom     int64
 		want         ReviewState
 	}{
 		{name: "1 not dismissed", notDismissed: true,
@@ -199,13 +200,41 @@ func TestEvaluateReview_Table(t *testing.T) {
 			steps:    []FlagStep{step(srcDev, suspect, GeoStateSuspect, D-50), step(srcDev, none, GeoStateClean, D-20)},
 			now:      AttentionLevels{srcGeo: flagged},
 			want:     ReviewState{Dismissed: true}},
+		// The store settles a leave to unknown with a record of the definite
+		// verdict that followed (RiskUnknownSettled): that one is a clear.
+		{name: "28 unknown, then clean, then re-entered: new",
+			snapshot: DismissSnapshot{srcSub: accepted(flagged)},
+			steps: []FlagStep{step(srcSub, none, GeoStateUnknown, D+10), step(srcSub, none, GeoStateClean, D+20),
+				step(srcSub, suspect, GeoStateSuspect, D+30), step(srcSub, flagged, GeoStateFlagged, D+40)},
+			now:  AttentionLevels{srcSub: flagged},
+			want: ReviewState{Dismissed: true, Reopened: true, Escalated: []string{srcSub}}},
+		{name: "29 unknown, then back through suspect without a clean: the same",
+			snapshot: DismissSnapshot{srcSub: accepted(flagged)},
+			steps: []FlagStep{step(srcSub, none, GeoStateUnknown, D+10), step(srcSub, suspect, GeoStateSuspect, D+20),
+				step(srcSub, flagged, GeoStateFlagged, D+30)},
+			now:  AttentionLevels{srcSub: flagged},
+			want: ReviewState{Dismissed: true}},
+		// The retention was raised after the prune had deleted past the
+		// dismissal: the setting says its history is kept, the records say
+		// it is not — the dismissal's own record, written at D, is gone.
+		{name: "30 lapsed: records pruned past D, retention since raised",
+			snapshot:    DismissSnapshot{srcGeo: accepted(suspect, D-100)},
+			historyFrom: D - 1000, keptFrom: D + 1,
+			now:  AttentionLevels{srcGeo: suspect},
+			want: ReviewState{Dismissed: true, Lapsed: true, Reopened: true, Escalated: []string{srcGeo}}},
+		{name: "31 not lapsed: the dismissal's own record is the oldest kept",
+			snapshot:    DismissSnapshot{srcGeo: accepted(suspect, D-100)},
+			historyFrom: D - 1000, keptFrom: D,
+			now:  AttentionLevels{srcGeo: suspect},
+			want: ReviewState{Dismissed: true}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			r := RiskReview{UserID: 7, DismissedAtMS: D, DismissedBy: 1, Accepted: c.snapshot}
 			if c.notDismissed {
 				r = RiskReview{UserID: 7}
 			}
-			in := ReviewInputs{Now: c.now, Trusted: c.trusted, HeldSinceMS: c.heldSince, Steps: c.steps, HistoryFromMS: c.historyFrom}
+			in := ReviewInputs{Now: c.now, Trusted: c.trusted, HeldSinceMS: c.heldSince, Steps: c.steps,
+				HistoryFromMS: c.historyFrom, KeptFromMS: c.keptFrom}
 			got := EvaluateReview(r, in)
 			if got.Dismissed != c.want.Dismissed || got.Lapsed != c.want.Lapsed || got.Reopened != c.want.Reopened ||
 				!slices.Equal(got.Escalated, c.want.Escalated) {
@@ -426,6 +455,36 @@ func TestMaskTrusted(t *testing.T) {
 	}
 	if MaskTrusted(AttentionLevels{srcGeo: FlagLevelFlagged}, true) != nil {
 		t.Fatal("masking every source did not read as empty (nil)")
+	}
+}
+
+// A dismissal lapses when its history may be gone, by either measure: its
+// oldest cutoff before the retention's (what the prune deletes before now),
+// or the dismissal itself before the oldest record still stored (what the
+// prune already deleted — more than the retention says once it is raised).
+// Both boundaries are kept; 0 is "unknown" for each; nothing that is not a
+// dismissal ever lapses.
+func TestRiskReview_Lapsed(t *testing.T) {
+	const D = reviewD
+	r := RiskReview{DismissedAtMS: D, Accepted: DismissSnapshot{srcGeo: accepted(FlagLevelFlagged, D-100)}}
+	for _, c := range []struct {
+		history, kept int64
+		want          bool
+	}{
+		{0, 0, false},
+		{D - 100, 0, false},
+		{D - 99, 0, true},
+		{0, D, false},
+		{0, D + 1, true},
+		{D - 1000, D + 1, true},
+		{D - 1000, D - 5000, false},
+	} {
+		if got := r.Lapsed(c.history, c.kept); got != c.want {
+			t.Errorf("Lapsed(history %d, kept %d) = %v, want %v", c.history, c.kept, got, c.want)
+		}
+	}
+	if (RiskReview{}).Lapsed(D, D) {
+		t.Fatal("a row with no dismissal lapsed")
 	}
 }
 
