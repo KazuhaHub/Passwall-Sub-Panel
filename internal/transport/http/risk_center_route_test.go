@@ -16,10 +16,12 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/auth"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/riskcenter"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/riskreview"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/user"
 )
 
-// routerRiskCenter counts every call, whichever route made it.
+// routerRiskCenter counts every call, whichever route made it: the read
+// side's and the review actions', which it serves both of.
 type routerRiskCenter struct{ calls int }
 
 func (r *routerRiskCenter) Live(context.Context, riskcenter.LiveQuery) (riskcenter.LiveView, error) {
@@ -57,6 +59,27 @@ func (r *routerRiskCenter) Levels(context.Context) (map[int64]riskcenter.UserLev
 	return map[int64]riskcenter.UserLevel{7: {Level: domain.FlagLevelFlagged, Open: true}}, nil
 }
 
+func (r *routerRiskCenter) Dismiss(_ context.Context, id int64, by riskreview.Actor, _ string, _ domain.AttentionLevels) (domain.RiskReview, error) {
+	r.calls++
+	return domain.RiskReview{UserID: id, DismissedAtMS: 1, DismissedBy: by.ID,
+		Accepted: domain.DismissSnapshot{"geo": {Level: domain.FlagLevelFlagged}}}, nil
+}
+
+func (r *routerRiskCenter) Undismiss(_ context.Context, id int64, _ riskreview.Actor) (domain.RiskReview, error) {
+	r.calls++
+	return domain.RiskReview{UserID: id}, nil
+}
+
+func (r *routerRiskCenter) Trust(_ context.Context, id int64, by riskreview.Actor, _ bool) (riskreview.TrustResult, error) {
+	r.calls++
+	return riskreview.TrustResult{Review: domain.RiskReview{UserID: id, Trusted: true, TrustedAtMS: 1, TrustedBy: by.ID}}, nil
+}
+
+func (r *routerRiskCenter) Untrust(_ context.Context, id int64, _ riskreview.Actor) (domain.RiskReview, error) {
+	r.calls++
+	return domain.RiskReview{UserID: id}, nil
+}
+
 // THE RISK CENTER IS THE OWNER'S. It lists accounts beside their IP
 // addresses — live, and for up to 90 days in the connection history — and
 // every change the detectors made about them, on signals rather than proof.
@@ -65,8 +88,10 @@ func (r *routerRiskCenter) Levels(context.Context) (map[int64]riskcenter.UserLev
 // route landed in, and the gate is only real if a refused request never
 // reaches the service. Every route — the live view, its refresh, the
 // history, the records, and the queue, one account's drawer and the Users
-// page's levels, which name accounts beside their verdicts — each as
-// anonymous, operator and administrator.
+// page's levels, which name accounts beside their verdicts, and the four
+// review actions, which decide what the owner is shown about an account and
+// can lift the detector's hold — each as anonymous, operator and
+// administrator.
 func TestRiskCenterRoutesAreAdminOnly(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	admin := &domain.User{ID: 1, UPN: "admin@example.test", Enabled: true, Role: domain.RoleAdmin}
@@ -88,7 +113,7 @@ func TestRiskCenterRoutesAreAdminOnly(t *testing.T) {
 	router := NewRouter(Deps{
 		Cfg:   &config.Config{ConfigDir: t.TempDir()},
 		Repos: ports.Repos{User: users, Settings: &dispatchSettingsRepo{}},
-		Auth:  authSvc, User: user.New(users, nil, nil, nil, nil, nil, nil, nil), RiskCenter: svc,
+		Auth:  authSvc, User: user.New(users, nil, nil, nil, nil, nil, nil, nil), RiskCenter: svc, RiskReview: svc,
 	})
 	for _, route := range []struct{ method, path, body string }{
 		{stdhttp.MethodGet, "/api/admin/risk-center/live", `"upn":"alice"`},
@@ -98,6 +123,10 @@ func TestRiskCenterRoutesAreAdminOnly(t *testing.T) {
 		{stdhttp.MethodGet, "/api/admin/risk-center/queue", `"upn":"alice"`},
 		{stdhttp.MethodGet, "/api/admin/risk-center/users/7", `"upn":"alice"`},
 		{stdhttp.MethodGet, "/api/admin/risk-center/levels", `"7":{"level":"flagged"`},
+		{stdhttp.MethodPost, "/api/admin/risk-center/users/7/dismiss", `"dismissed":true`},
+		{stdhttp.MethodDelete, "/api/admin/risk-center/users/7/dismiss", `"dismissed":false`},
+		{stdhttp.MethodPost, "/api/admin/risk-center/users/7/trust", `"resumed":false`},
+		{stdhttp.MethodDelete, "/api/admin/risk-center/users/7/trust", `"trusted":false`},
 	} {
 		for _, test := range []struct {
 			name, token string

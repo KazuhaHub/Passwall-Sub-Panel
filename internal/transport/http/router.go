@@ -93,6 +93,12 @@ type Deps struct {
 	// its routes answer 503 rather than an empty list;
 	// TestBuildWiresTheRiskCenter guards that Build does not.
 	RiskCenter handler.RiskCenterService
+	// RiskReview is the risk center's review actions: dismiss an account's
+	// signals until they escalate, trust an account (and, when asked, lift
+	// the location detector's own hold). An interface for RiskCenter's
+	// reason: left out, the four routes answer 503 rather than pretend;
+	// TestBuildWiresTheRiskReview guards that Build does not leave it out.
+	RiskReview handler.RiskReviewService
 	// DeviceHasher keys the device a subscription client declares (x-hwid)
 	// into the per-account digest sub_logs keeps. Nil disables capture: /sub
 	// serves exactly as before and every fetch logs as anonymous. Built by
@@ -269,6 +275,7 @@ func NewRouter(d Deps) stdhttp.Handler {
 	// from the same rows the Geo tab lists rather than a second copy.
 	riskSignalsH := handler.NewAdminRiskSignalHandler(d.RiskSignals, d.GeoRecords)
 	riskCenterH := handler.NewAdminRiskCenterHandler(d.RiskCenter)
+	riskReviewH := handler.NewAdminRiskReviewHandler(d.RiskReview)
 	// Node self-enrollment handler. Constructed here rather than inside the
 	// admin block because one of its three routes is admin-only and two are
 	// public, and they must share the same token store.
@@ -621,6 +628,15 @@ func NewRouter(d Deps) stdhttp.Handler {
 		adminGroup.POST("/risk-center/live/refresh", riskCenterH.Refresh)
 		adminGroup.GET("/risk-center/connections", riskCenterH.Connections)
 		adminGroup.GET("/risk-center/flags", riskCenterH.Flags)
+		// The review actions: what an admin decides about an account the
+		// queue lists. adminGroup for the same reason — deciding that an
+		// account's signals need no action is the owner's call, and a trust
+		// can lift the detector's hold. Each is a POST or DELETE, so each
+		// leaves one audit row, the note included (AuditWrites).
+		adminGroup.POST("/risk-center/users/:id/dismiss", riskReviewH.Dismiss)
+		adminGroup.DELETE("/risk-center/users/:id/dismiss", riskReviewH.Undismiss)
+		adminGroup.POST("/risk-center/users/:id/trust", riskReviewH.Trust)
+		adminGroup.DELETE("/risk-center/users/:id/trust", riskReviewH.Untrust)
 		adminGroup.GET("/diagnostics/metrics", diagH.Metrics)
 		adminGroup.POST("/diagnostics/metrics/reset", diagH.ResetMetrics)
 

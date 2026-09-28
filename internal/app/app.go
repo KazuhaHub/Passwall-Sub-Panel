@@ -51,6 +51,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/render"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/risk"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/riskcenter"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/riskreview"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/rollup"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/servermigration"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/sharedclient"
@@ -646,6 +647,20 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 		Holds:    repos.User,
 		Groups:   repos.Group,
 	})
+	// The review actions — dismiss and trust — write the review rows the
+	// risk center reads, and judge each action on the attention the risk
+	// center computes (so a dismissal accepts exactly what the queue shows).
+	// The one account write they may make is the user service's geo_auto-only
+	// lift, when a trust asks for it. The router dep is optional, so leaving
+	// this out compiles and the drawer's buttons just answer 503;
+	// TestBuildWiresTheRiskReview drives both actions through the assembled
+	// router.
+	reviewSvc := riskreview.New(riskreview.Deps{
+		Store:     riskReviews,
+		Attention: riskCenterSvc,
+		Users:     repos.User,
+		Resumer:   userSvc,
+	})
 
 	// --- transport layer ---
 	// The Node installation template is fetched from the release that published it
@@ -671,6 +686,7 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 		RiskSignals: riskSignals,
 		RiskFlags:   riskSignals,
 		RiskCenter:  riskCenterSvc,
+		RiskReview:  reviewSvc,
 		// Optional like GeoFlags, so leaving it out would compile and quietly
 		// record every subscription fetch as anonymous.
 		DeviceHasher: deviceHasher,
