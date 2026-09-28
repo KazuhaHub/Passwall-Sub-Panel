@@ -78,8 +78,27 @@ export async function setEnabled(id: number, enabled: boolean, reason?: string) 
   await client.post(`/admin/users/${id}/set-enabled`, { enabled, reason })
 }
 
-export async function setServiceStatus(id: number, enabled: boolean, reason?: string, detail?: string) {
-  await client.post(`/admin/users/${id}/set-service-status`, { enabled, reason, detail })
+export interface ServiceStatusOptions {
+  /**
+   * Resume only while the account's hold still carries this reason (a 409
+   * `reason_changed` otherwise), so a stale view never lifts a hold another
+   * admin or the detector wrote after it was read.
+   */
+  expectReason?: string
+  /** For a caller that reports every outcome itself (the risk center). */
+  skipErrorToast?: boolean
+}
+
+export async function setServiceStatus(
+  id: number, enabled: boolean, reason?: string, detail?: string, opts: ServiceStatusOptions = {},
+) {
+  const body = { enabled, reason, detail, ...(opts.expectReason ? { expect_reason: opts.expectReason } : {}) }
+  // The Users page's calls stay exactly the request they always were.
+  if (opts.skipErrorToast) {
+    await client.post(`/admin/users/${id}/set-service-status`, body, { _skipErrorToast: true })
+  } else {
+    await client.post(`/admin/users/${id}/set-service-status`, body)
+  }
 }
 
 export async function resetCredentials(id: number) {

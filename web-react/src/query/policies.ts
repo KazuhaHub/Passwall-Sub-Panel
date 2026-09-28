@@ -156,6 +156,32 @@ export const policies = {
     refetchInterval: false,
     note: 'Appended on attention changes only; focus revalidation only.',
   },
+  /**
+   * The attention queue. Polled while the page is visible — the bell polls at
+   * the same rate, so the list and the bell move together — and the previous
+   * page is kept on screen while the next loads (the query sets
+   * placeholderData), so a filter change never blanks the table.
+   */
+  riskCenterQueue: {
+    staleTime: 30 * SECOND,
+    gcTime: 5 * MINUTE,
+    refetchInterval: 60 * SECOND,
+    note: 'Recomputed from stored verdicts; the bell polls at the same rate, so the list and the bell move together.',
+  },
+  /** One account's drawer. Every review or service action invalidates it. */
+  riskCenterUser: {
+    staleTime: 15 * SECOND,
+    gcTime: 5 * MINUTE,
+    refetchInterval: false,
+    note: 'Keyed by user id; the actions invalidate riskCenterKeys.all; focus revalidation otherwise.',
+  },
+  /** The Users page's risk column: decoration, one read for the whole list. */
+  riskCenterLevels: {
+    staleTime: 60 * SECOND,
+    gcTime: 5 * MINUTE,
+    refetchInterval: false,
+    note: 'One read per list view; verdicts move per poll or hourly; actions invalidate it.',
+  },
   /** One account's record, as the risk center's lookup shows it. */
   userDetail: {
     staleTime: 15 * SECOND,

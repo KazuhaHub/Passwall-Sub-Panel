@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { ThemeProvider } from '@mui/material/styles'
-import { MemoryRouter } from 'react-router'
-import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import { MemoryRouter, useLocation } from 'react-router'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createAppTheme } from '@/theme'
 import { makeTestQueryClient, queryWrapper } from '@/test/queryTestUtils'
@@ -13,20 +13,37 @@ vi.mock('@/api/client', () => ({ client: api }))
 vi.mock('@/i18n', () => ({ default: { t: (k: string) => k, language: 'zh-CN' } }))
 vi.mock('@/components/SnackbarHost', () => ({ pushSnack: vi.fn(), default: () => null }))
 vi.mock('@/components/ConfirmHost', () => ({ confirm: vi.fn(async () => true) }))
+// t over the REAL zh-CN admin bundle (then the defaultValue, then the key),
+// so a key the page asks for but the bundle lacks shows up as its raw key.
+const dict = vi.hoisted(() => ({ current: {} as Record<string, string> }))
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
-    t: (_k: string, o?: { defaultValue?: string }) => o?.defaultValue ?? _k,
+    t: (k: string, o?: Record<string, unknown>) => {
+      const flat = k.startsWith('admin:') ? k.slice('admin:'.length) : k
+      const raw = dict.current[flat] ?? (typeof o?.defaultValue === 'string' ? o.defaultValue : k)
+      return raw.replace(/\{\{(\w+)\}\}/g, (m, name: string) => (o && name in o ? String(o[name]) : m))
+    },
     i18n: { language: 'zh-CN' },
   }),
 }))
 
+import zh from '@/locales/zh-CN/admin.json'
+import { flatten, type Nested } from '@/i18n/options'
+dict.current = flatten(zh as Nested)
+
 const theme = createAppTheme({ mode: 'light', sourceColor: '#6750a4', language: 'en-US' })
 
-function mount() {
+function Where() {
+  const loc = useLocation()
+  return <p data-testid="location">{loc.pathname + loc.search}</p>
+}
+
+function mount(url = '/admin/logs') {
   render(
-    <MemoryRouter>
+    <MemoryRouter initialEntries={[url]}>
       <ThemeProvider theme={theme}>
         <LogsView />
+        <Where />
       </ThemeProvider>
     </MemoryRouter>,
     { wrapper: queryWrapper(makeTestQueryClient()) },
@@ -94,5 +111,57 @@ describe('LogsView admin-only device column', () => {
     expect(screen.queryByRole('columnheader', { name: '设备' })).toBeNull()
     expect(screen.queryByText('iOS 17.5 · iPhone15,2')).toBeNull()
     expect(screen.queryByText('#cd34')).toBeNull()
+  })
+})
+
+// The risk center's drawer links here with the account's id (exact) and its
+// UPN (display only): `q` would be a fuzzy search over user, IP, UA and
+// client, and would match other accounts whose names contain it.
+describe('LogsView exact user filter', () => {
+  const list = (items: unknown[]) => ({ items, total: items.length })
+
+  function serve() {
+    api.get.mockImplementation(async (url: string) => {
+      if (url === '/admin/sub-logs' || url === '/admin/audit' || url === '/admin/auth-events'
+        || url === '/admin/email-logs') return { data: list([]) }
+      if (url === '/admin/settings/ui') return { data: {} }
+      throw new Error(`Unexpected GET ${url}`)
+    })
+  }
+
+  const lastParams = (url: string) =>
+    [...api.get.mock.calls].reverse().find(([u]) => u === url)?.[1]?.params as Record<string, unknown> | undefined
+
+  beforeEach(() => useAuthStore.setState({ role: 'admin', userId: 1, hasToken: true }))
+  afterEach(() => useAuthStore.setState({ role: '' }))
+
+  it('filters the sub log by user_id behind a removable chip', async () => {
+    serve()
+    mount('/admin/logs?tab=sub&user_id=7&upn=alice')
+
+    const chip = (await screen.findByText('用户：alice')).closest('.MuiChip-root') as HTMLElement
+    await waitFor(() => expect(lastParams('/admin/sub-logs')).toMatchObject({ user_id: 7 }))
+
+    fireEvent.click(within(chip).getByTestId('CancelIcon'))
+    await waitFor(() => expect(screen.getByTestId('location').textContent).toBe('/admin/logs?tab=sub'))
+    expect(screen.queryByText('用户：alice')).toBeNull()
+    await waitFor(() => expect(lastParams('/admin/sub-logs')?.user_id).toBeUndefined())
+  })
+
+  it('filters the auth log the same way', async () => {
+    serve()
+    mount('/admin/logs?tab=auth&user_id=7&upn=alice')
+
+    expect(await screen.findByText('用户：alice')).toBeTruthy()
+    await waitFor(() => expect(lastParams('/admin/auth-events')).toMatchObject({ user_id: 7 }))
+  })
+
+  it('ignores a malformed id', async () => {
+    serve()
+    mount('/admin/logs?tab=sub&user_id=7x&upn=alice')
+
+    await waitFor(() => expect(lastParams('/admin/sub-logs')).toBeDefined())
+    expect(lastParams('/admin/sub-logs')?.user_id).toBeUndefined()
+    expect(screen.queryByText('用户：alice')).toBeNull()
   })
 })

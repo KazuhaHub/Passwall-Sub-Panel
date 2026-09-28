@@ -1,8 +1,9 @@
-import { queryOptions, useQuery } from '@tanstack/react-query'
-import { getUser, listUsers, type UserListParams } from '@/api/users'
+import { queryOptions, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { getUser, listUsers, setServiceStatus, type UserListParams } from '@/api/users'
 import type { ListResponse, User } from '@/api/types'
 import { userKeys } from './keys'
 import { freshness, policies } from './policies'
+import { invalidateAfterRiskAction } from './riskCenter'
 import type { QueryScope } from './session'
 
 /**
@@ -39,4 +40,29 @@ export function userDetailQuery(scope: QueryScope, userId: number) {
 
 export function useUserDetail(scope: QueryScope, userId: number) {
   return useQuery(userDetailQuery(scope, userId))
+}
+
+export interface SetServiceStatusVars {
+  userId: number
+  enabled: boolean
+  reason?: string
+  detail?: string
+  /** Resume only while the hold still carries this reason (409 otherwise). */
+  expectReason?: string
+}
+
+/**
+ * Pause or resume the proxy service from the risk center. Every outcome is
+ * the caller's to report (the global toast is off), and a service change
+ * moves what the risk center shows as much as the Users list — the hold
+ * chip, the queue's hold card, the bell — so it refreshes all three.
+ */
+export function useSetServiceStatus(scope: QueryScope) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (v: SetServiceStatusVars) => setServiceStatus(v.userId, v.enabled, v.reason, v.detail, {
+      expectReason: v.expectReason, skipErrorToast: true,
+    }),
+    onSettled: () => { void invalidateAfterRiskAction(qc, scope) },
+  })
 }

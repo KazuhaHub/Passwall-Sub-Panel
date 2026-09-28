@@ -3,6 +3,8 @@ import { Navigate, useSearchParams } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import PageHeader from '@/components/PageHeader'
 import { useCan } from '@/utils/permissions'
+import RiskUserDrawer from './drawer/RiskUserDrawer'
+import { parseUserId, useDrawerParam } from './drawerParam'
 import FlagRecordsTab from './FlagRecordsTab'
 import GeoAnomaliesTab from './GeoAnomaliesTab'
 import LiveConnectionsTab from './LiveConnectionsTab'
@@ -17,14 +19,6 @@ function parseTab(raw: string | null): RiskTab {
   return (TABS as readonly string[]).includes(raw ?? '') ? raw as RiskTab : DEFAULT_TAB
 }
 
-/** The looked-up account from ?id=, or null for anything that is not a
- *  positive integer: a malformed link asks for nobody rather than for #0. */
-function parseId(raw: string | null): number | null {
-  if (!raw || !/^\d+$/.test(raw)) return null
-  const id = Number(raw)
-  return Number.isSafeInteger(id) && id > 0 ? id : null
-}
-
 /**
  * THE RISK CENTER: one admin-only page for everything the panel observes about
  * who is using an account — who is connected now, the concurrent-location and
@@ -36,10 +30,11 @@ function parseId(raw: string | null): number | null {
  * whole: the `risk.view` capability, ADMIN_ONLY_ROUTES and the nav item's
  * adminOnly flag all name it.
  *
- * The URL owns the tab and the looked-up account. `useTabParam` is not used
- * because it drops the default from the URL; here every switch writes `tab`
- * explicitly, so a copied link, a bell entry (`?tab=geo`) or an old Logs link
- * sent on by LogsRoute means the same tab whatever the page's default is.
+ * The URL owns the tab, the looked-up account and the drawer's account
+ * (`user=`, useDrawerParam). `useTabParam` is not used because it drops the
+ * default from the URL; here every switch writes `tab` explicitly, so a
+ * copied link, a bell entry (`?tab=geo`) or an old Logs link sent on by
+ * LogsRoute means the same tab whatever the page's default is.
  */
 export default function RiskCenterView() {
   const { t } = useTranslation(['admin'])
@@ -47,7 +42,10 @@ export default function RiskCenterView() {
   const canView = useCan('risk.view')
   const [params, setParams] = useSearchParams()
   const tab = parseTab(params.get('tab'))
-  const userId = parseId(params.get('id'))
+  // The looked-up account (?id=): a malformed link asks for nobody.
+  const userId = parseUserId(params.get('id'))
+  // The drawer's account (?user=), over whichever tab is open.
+  const drawer = useDrawerParam('user')
 
   // Replace, not push, like every other tabbed page: a tab switch is a view
   // of the same page, and Back should leave the page rather than step through
@@ -58,11 +56,10 @@ export default function RiskCenterView() {
     return out
   }, { replace: true })
 
-  // Opening an account from a row is a drill-down, so it PUSHES: Back returns
-  // to the list it was opened from. Tab and id are ONE update — two would
-  // pass through a URL naming the lookup with no account (or an account on
-  // the tab it came from), and the second write could read a stale first.
-  const openUser = (id: number) => setParams({ tab: 'user', id: String(id) })
+  // Opening an account from a row is a drill-down: the drawer opens over the
+  // tab it was opened from, PUSHING `user=` (every other param kept) so Back
+  // closes it and the list underneath is exactly as it was.
+  const openUser = drawer.open
 
   // Picking another account inside the lookup is the same view, like a tab
   // switch: it replaces.
@@ -94,6 +91,7 @@ export default function RiskCenterView() {
       {tab === 'risk' && <RiskSignalsTab onOpenGeo={() => setTab('geo')} onOpenUser={openUser} />}
       {tab === 'flags' && <FlagRecordsTab onOpenUser={openUser} />}
       {tab === 'user' && <UserLookupTab userId={userId} onPick={pickUser} />}
+      <RiskUserDrawer userId={drawer.id} onClose={drawer.close} host="risk" />
     </Box>
   )
 }

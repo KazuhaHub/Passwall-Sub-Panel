@@ -73,9 +73,24 @@ const alice = { id: 7, upn: 'alice', display_name: 'Alice', role: 'user', group_
 // 7 itself; its sections' other reads fail as unexpected, which costs these
 // tests nothing: they ask which account the page looked up, not what the
 // sections say about it.
+// The drawer's summary of account 7: nothing at attention, nothing judged,
+// nobody connected — enough to name the account the drawer opened.
+const aliceSummary = {
+  user: { id: 7, upn: 'alice', display_name: 'Alice', role: 'user', group_id: 1, group_name: 'Team A', enabled: true,
+    traffic_limit_bytes: 0 },
+  attention: [],
+  review: { dismissed: false, dismissed_at_ms: 0, dismissed_by: 0, dismissed_by_upn: '', note: '', levels: {},
+    reopened: false, lapsed: false, escalated: [], trusted: false, trusted_at_ms: 0, trusted_by: 0, trusted_by_upn: '' },
+  geo: null, signals: [], live: liveView, devices: [], device_window_hours: 24, devices_unavailable: false,
+}
+
 function serve(risk: RiskUserRow[] = [], geo: unknown[] = []) {
   api.get.mockImplementation(async (url: string) => {
     if (url === '/admin/users/7') return { data: alice }
+    if (url === '/admin/risk-center/users/7') return { data: aliceSummary }
+    if (url === '/admin/traffic/user/7') {
+      return { data: { user_id: 7, permanent_total_bytes: 0, period_used_bytes: 0, today_used_bytes: 0 } }
+    }
     if (url === '/admin/geo-anomalies') return { data: { items: geo } }
     if (url === '/admin/risk-signals') return { data: { items: risk } }
     if (url === '/admin/risk-center/live') return { data: liveView }
@@ -90,7 +105,10 @@ function fetched(url: string): boolean {
 }
 
 function selectedTab(): string {
-  const tab = screen.getAllByRole('tab').find(el => el.getAttribute('aria-selected') === 'true')
+  // The page's own tabs: the drawer, portaled after the page, has its own,
+  // and while it is open the page behind it is aria-hidden.
+  const [page] = screen.getAllByRole('tablist', { hidden: true })
+  const tab = within(page).getAllByRole('tab', { hidden: true }).find(el => el.getAttribute('aria-selected') === 'true')
   return tab?.textContent ?? ''
 }
 
@@ -134,10 +152,10 @@ describe('RiskCenterView', () => {
     expect(selectedTab()).toBe('标记记录')
   })
 
-  // A row on any tab opens its account in the lookup. The tab and the id
-  // are written in ONE update: two in a row would pass through a URL that
-  // names the lookup with no account, or an account on the wrong tab.
-  it('openUser sets tab and id in one update', async () => {
+  // A row on any tab opens its account in the drawer, over the tab it was
+  // opened from. The drawer is a drill-down, so it PUSHES `user=` — in ONE
+  // update, keeping the tab — and Back closes it.
+  it('a row opens the drawer over the current tab', async () => {
     serve([], [{
       user_id: 7, upn: 'alice', state: 'suspect', reason: 'stored', tier: 'region', flagged: false, places: ['CN'],
       live_ips: 3, concurrent_ips: 3, excluded_ips: 0, complete: true, over_streak: 1, under_streak: 0, ban_streak: 0,
@@ -152,10 +170,36 @@ describe('RiskCenterView', () => {
     const before = seen.length
     fireEvent.click(within(row).getByRole('button', { name: '查看用户' }))
 
-    await waitFor(() => expect(screen.getByTestId('location').textContent).toBe('/admin/risk?tab=user&id=7'))
-    expect(selectedTab()).toBe('用户查询')
+    await waitFor(() => expect(screen.getByTestId('location').textContent).toBe('/admin/risk?tab=geo&user=7'))
+    expect(selectedTab()).toBe('异地并发')
     const passed = [...new Set(seen.slice(before))]
-    expect(passed).toEqual(['/admin/risk?tab=user&id=7'])
+    expect(passed).toEqual(['/admin/risk?tab=geo&user=7'])
+    const header = await screen.findByTestId('risk-drawer-header')
+    expect(within(header).getByText('alice')).toBeTruthy()
+    expect(fetched('/admin/risk-center/users/7')).toBe(true)
+  })
+
+  // A copied or bell link names the account in `user=`; the drawer opens over
+  // whichever tab the link names.
+  it('a ?user= link opens the drawer over the current tab', async () => {
+    serve()
+    mount('/admin/risk?tab=flags&user=7')
+
+    const header = await screen.findByTestId('risk-drawer-header')
+    expect(within(header).getByText('alice')).toBeTruthy()
+    expect(selectedTab()).toBe('标记记录')
+    await waitFor(() => expect(fetched('/admin/risk-center/flags')).toBe(true))
+  })
+
+  // A malformed id asks for nobody: no drawer, and no read at all — never a
+  // summary of #0 or of whatever Number() made of the text.
+  it.each(['abc', '0', '-7', '7.5', '07x'])('a malformed user=%s opens nothing', async raw => {
+    serve()
+    mount(`/admin/risk?tab=flags&user=${raw}`)
+
+    await waitFor(() => expect(fetched('/admin/risk-center/flags')).toBe(true))
+    expect(screen.queryByTestId('risk-drawer-header')).toBeNull()
+    expect(api.get.mock.calls.some(([u]) => String(u).startsWith('/admin/risk-center/users/'))).toBe(false)
   })
 
   // The link the Users page and every "open user" button write. Driven

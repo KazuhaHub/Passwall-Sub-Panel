@@ -3,7 +3,7 @@ import type { AuthEventFilter } from '@/api/authEvents'
 import type { EmailLogFilter } from '@/api/emailLogs'
 import type { GroupListParams } from '@/api/groups'
 import type { NodeListParams } from '@/api/nodes'
-import type { ConnectionHistoryParams, FlagRecordParams, LiveParams } from '@/api/riskCenter'
+import type { ConnectionHistoryParams, FlagRecordParams, LiveParams, QueueParams } from '@/api/riskCenter'
 import type { RuleSetListParams } from '@/api/rules'
 import type { ServerListParams } from '@/api/servers'
 import type { SubLogFilter } from '@/api/subLogs'
@@ -183,7 +183,10 @@ export const riskSignalKeys = {
 /**
  * The risk center's own reads. `lives` is the prefix of every live-view page
  * (each filter set is its own entry), so a refresh invalidates them all: the
- * snapshot behind every page has changed.
+ * snapshot behind every page has changed. `queues` is the prefix of every
+ * queue page, for the same reason after a review action or a policy save.
+ * Every action invalidates `all`: an account's summary, its queue row, the
+ * Users column and its records all move together.
  */
 export const riskCenterKeys = {
   all: (s: QueryScope) => [...privateRoot(s), 'risk-center'] as const,
@@ -191,6 +194,12 @@ export const riskCenterKeys = {
   live: (s: QueryScope, params: LiveParams) => [...riskCenterKeys.lives(s), params] as const,
   history: (s: QueryScope, params: ConnectionHistoryParams) => [...riskCenterKeys.all(s), 'history', params] as const,
   flags: (s: QueryScope, params: FlagRecordParams) => [...riskCenterKeys.all(s), 'flags', params] as const,
+  queues: (s: QueryScope) => [...riskCenterKeys.all(s), 'queue'] as const,
+  queue: (s: QueryScope, params: QueueParams) => [...riskCenterKeys.queues(s), params] as const,
+  /** One account's drawer summary. */
+  user: (s: QueryScope, userId: number) => [...riskCenterKeys.all(s), 'user', userId] as const,
+  /** The Users page's risk column: one read for the whole list. */
+  levels: (s: QueryScope) => [...riskCenterKeys.all(s), 'levels'] as const,
 }
 
 /** The upstream sync-task queue, as shown on the Sync tasks page. */
