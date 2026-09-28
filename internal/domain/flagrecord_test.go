@@ -495,16 +495,19 @@ func TestGeoAutoFlag_LevelsAndParams(t *testing.T) {
 }
 
 // The sources a record can name: the concurrent-location verdict, its
-// automatic suspension, and each risk signal by its kind — the list the
-// admin filter is checked against.
-func TestFlagSources_AreGeoGeoAutoAndEveryRiskKind(t *testing.T) {
-	want := []string{"geo", "geo_auto", "sub_spread", "devices", "usage_shift", "login_country"}
+// automatic suspension, each risk signal by its kind, and — last, because it
+// is no attention source — an admin's review action. The list the admin
+// filter is checked against. The events are the eight attention changes and
+// the four review actions, in that order.
+func TestFlagSources_AreGeoGeoAutoEveryRiskKindAndReview(t *testing.T) {
+	want := []string{"geo", "geo_auto", "sub_spread", "devices", "usage_shift", "login_country", "review"}
 	if got := FlagSources(); !slices.Equal(got, want) {
 		t.Fatalf("FlagSources() = %v, want %v", got, want)
 	}
 	events := []FlagEvent{
 		FlagEnterSuspect, FlagEnterFlagged, FlagLeaveSuspect, FlagLeaveFlagged,
 		FlagAutoSuspended, FlagAutoLiftedExpiry, FlagAutoLiftedAdmin, FlagAutoReplaced,
+		"dismissed", "undismissed", "trusted", "untrusted",
 	}
 	if got := FlagEvents(); !slices.Equal(got, events) {
 		t.Fatalf("FlagEvents() = %v, want %v", got, events)
