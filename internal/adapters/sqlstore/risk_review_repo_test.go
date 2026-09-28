@@ -261,8 +261,10 @@ func TestRiskReviewRepo_ListTrusted(t *testing.T) {
 // bounded in CHARACTERS — varchar(200) is characters on PostgreSQL and
 // MySQL — so 200 CJK characters (600 bytes) fit and 201 do not. A snapshot
 // that could not be read back the same way, a dismissal without a snapshot
-// (or a snapshot without a dismissal), and a record that is not this
-// account's review are all refused as validation errors.
+// (but the stored one carried through,
+// TestRiskReviewRepo_TrustAndUntrustKeepAnUnreadableDismissal) or a snapshot
+// without a dismissal, and a record that is not this account's review are all
+// refused as validation errors.
 func TestRiskReviewRepo_RejectsLongNotesAndBadSnapshots(t *testing.T) {
 	r, users, db := newRiskReviewRepo(t)
 	ctx := context.Background()
@@ -388,6 +390,127 @@ func TestRiskReviewRepo_UnreadableLevelsReadAsAnEmptySnapshot(t *testing.T) {
 		if !rev.Dismissed() || len(rev.Accepted) != 0 {
 			t.Fatalf("List row %+v, want a dismissal with an empty snapshot", rev)
 		}
+	}
+}
+
+// A trust or an untrust rewrites the whole row it read, the dismissal
+// included. When the stored snapshot could not be read, that dismissal comes
+// back with an empty snapshot, and it must go back exactly as stored: the
+// action changes the trust and nothing else, the column keeps its value (a
+// build that can read it still finds it), and the account never has to be
+// undismissed before it can be trusted or untrusted. Only that dismissal: one
+// without a snapshot that is not the stored one, or that drops a snapshot the
+// store can read, is refused as before and changes nothing.
+func TestRiskReviewRepo_TrustAndUntrustKeepAnUnreadableDismissal(t *testing.T) {
+	r, users, db := newRiskReviewRepo(t)
+	ctx := context.Background()
+	storedLevels := func(uid int64) *string {
+		t.Helper()
+		var rows []riskReviewRow
+		if err := db.Where("user_id = ?", uid).Find(&rows).Error; err != nil || len(rows) != 1 {
+			t.Fatalf("read the row of %d: %d rows, %v", uid, len(rows), err)
+		}
+		return rows[0].DismissedLevels
+	}
+	sameColumn := func(a, b *string) bool { return (a == nil) == (b == nil) && (a == nil || *a == *b) }
+	store := func(uid int64, col *string) {
+		t.Helper()
+		var err error
+		if col == nil {
+			err = db.Exec("UPDATE risk_reviews SET dismissed_levels = NULL WHERE user_id = ?", uid).Error
+		} else {
+			err = db.Exec("UPDATE risk_reviews SET dismissed_levels = ? WHERE user_id = ?", *col, uid).Error
+		}
+		if err != nil {
+			t.Fatalf("overwrite the snapshot of %d: %v", uid, err)
+		}
+	}
+	reviewRecords := func(uid int64) int64 {
+		return countFlagRows(t, db, fmt.Sprintf("source = 'review' AND user_id = %d", uid))
+	}
+	untrustedDismissal := func(uid int64) domain.RiskReview {
+		rev := dismissedReview(uid)
+		rev.Trusted, rev.TrustedAtMS, rev.TrustedBy = false, 0, 0
+		return rev
+	}
+
+	// A source this build does not know (a downgrade), a hand edit, and a
+	// dismissal stored with no snapshot at all: all read as accepting nothing.
+	unknownSource, notJSON := `{"future_source":{"level":"flagged","at_ms":1}}`, "not json"
+	for i, stored := range []*string{&unknownSource, &notJSON, nil} {
+		name := "NULL"
+		if stored != nil {
+			name = *stored
+		}
+		u := createRiskUser(t, users, i+1, "")
+		if err := r.Save(ctx, untrustedDismissal(u.ID), reviewRecord(u.ID, domain.FlagReviewDismissed)); err != nil {
+			t.Fatalf("%s: save: %v", name, err)
+		}
+		store(u.ID, stored)
+
+		trusted, _ := getReview(t, r, u.ID)
+		trusted.Trusted, trusted.TrustedAtMS, trusted.TrustedBy = true, 1_790_000_200_000, 8
+		trusted.UpdatedAtMS = 1_790_000_200_000
+		if err := r.Save(ctx, trusted, reviewRecord(u.ID, domain.FlagReviewTrusted)); err != nil {
+			t.Fatalf("%s: trusting an account whose dismissal is unreadable: %v", name, err)
+		}
+		if got, ok := getReview(t, r, u.ID); !ok || !reflect.DeepEqual(got, trusted) {
+			t.Fatalf("%s: after the trust Get = %+v, %v; want %+v", name, got, ok, trusted)
+		}
+		if got := storedLevels(u.ID); !sameColumn(got, stored) {
+			t.Fatalf("%s: the trust rewrote the stored snapshot to %v", name, got)
+		}
+
+		untrusted, _ := getReview(t, r, u.ID)
+		untrusted.Trusted, untrusted.TrustedAtMS, untrusted.TrustedBy = false, 0, 0
+		untrusted.UpdatedAtMS = 1_790_000_300_000
+		if err := r.Save(ctx, untrusted, reviewRecord(u.ID, domain.FlagReviewUntrusted)); err != nil {
+			t.Fatalf("%s: untrusting an account whose dismissal is unreadable: %v", name, err)
+		}
+		if got, ok := getReview(t, r, u.ID); !ok || !reflect.DeepEqual(got, untrusted) {
+			t.Fatalf("%s: after the untrust Get = %+v, %v; want %+v", name, got, ok, untrusted)
+		}
+		if got := storedLevels(u.ID); !sameColumn(got, stored) {
+			t.Fatalf("%s: the untrust rewrote the stored snapshot to %v", name, got)
+		}
+		if n := reviewRecords(u.ID); n != 3 {
+			t.Fatalf("%s: review records = %d, want 3 (dismissed, trusted, untrusted)", name, n)
+		}
+	}
+
+	// Not the stored dismissal: a new one that accepts nothing.
+	unreadable := createRiskUser(t, users, 4, "")
+	if err := r.Save(ctx, untrustedDismissal(unreadable.ID), reviewRecord(unreadable.ID, domain.FlagReviewDismissed)); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	store(unreadable.ID, &notJSON)
+	before, _ := getReview(t, r, unreadable.ID)
+	redismissed := before
+	redismissed.DismissedAtMS++
+	if err := r.Save(ctx, redismissed, reviewRecord(unreadable.ID, domain.FlagReviewDismissed)); !errors.Is(err, domain.ErrValidation) {
+		t.Fatalf("a new dismissal accepting nothing: Save error = %v, want domain.ErrValidation", err)
+	}
+	if after, _ := getReview(t, r, unreadable.ID); !reflect.DeepEqual(after, before) || !sameColumn(storedLevels(unreadable.ID), &notJSON) {
+		t.Fatalf("after the refused save: %+v, want %+v with the stored snapshot kept", after, before)
+	}
+
+	// A snapshot the store CAN read, dropped by the caller.
+	readable := createRiskUser(t, users, 5, "")
+	if err := r.Save(ctx, untrustedDismissal(readable.ID), reviewRecord(readable.ID, domain.FlagReviewDismissed)); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	before, _ = getReview(t, r, readable.ID)
+	dropped := before
+	dropped.Accepted = nil
+	dropped.Trusted, dropped.TrustedAtMS, dropped.TrustedBy = true, 1_790_000_200_000, 8
+	if err := r.Save(ctx, dropped, reviewRecord(readable.ID, domain.FlagReviewTrusted)); !errors.Is(err, domain.ErrValidation) {
+		t.Fatalf("a readable snapshot dropped: Save error = %v, want domain.ErrValidation", err)
+	}
+	if after, _ := getReview(t, r, readable.ID); !reflect.DeepEqual(after, before) {
+		t.Fatalf("after the refused save: %+v, want %+v", after, before)
+	}
+	if a, b := reviewRecords(unreadable.ID), reviewRecords(readable.ID); a != 1 || b != 1 {
+		t.Fatalf("review records after the refused saves = %d and %d, want 1 and 1", a, b)
 	}
 }
 

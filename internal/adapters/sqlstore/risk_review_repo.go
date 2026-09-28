@@ -131,8 +131,12 @@ func (r *RiskReviewRepo) ListTrusted(ctx context.Context) ([]int64, error) {
 // dismissal is (a dismissal that accepted nothing would be reopened by
 // anything, and a snapshot without a dismissal is a contradiction the reopen
 // rule would silently ignore); and rec being this account's review record.
-// The record's own columns are then checked by insertFlagRecords, inside the
-// transaction, and its refusal rolls the upsert back.
+// The one dismissal without a snapshot let through is the stored one handed
+// back unchanged with a snapshot that read as empty — checked against the
+// stored row inside the transaction, before the upsert (storedEmptySnapshot)
+// — and its column is then written back as it is. The record's own columns
+// are checked by insertFlagRecords, inside the transaction too, and its
+// refusal rolls the upsert back.
 //
 // One transaction because the row and its record are one fact: a state
 // saved without its record would read, later, as a state nobody chose, and
@@ -163,6 +167,13 @@ func (r *RiskReviewRepo) Save(ctx context.Context, rev domain.RiskReview, rec do
 		DoUpdates: clause.AssignmentColumns(riskReviewColumns),
 	}
 	if err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if rev.Dismissed() && len(rev.Accepted) == 0 {
+			kept, err := storedEmptySnapshot(tx, rev)
+			if err != nil {
+				return err
+			}
+			row.DismissedLevels = kept
+		}
 		if err := tx.Clauses(upsert).Create(&row).Error; err != nil {
 			return err
 		}
@@ -183,8 +194,6 @@ func validateRiskReview(rev domain.RiskReview, rec domain.FlagRecord) error {
 	case utf8.RuneCountInString(rev.Note) > domain.ReviewNoteMaxRunes:
 		return fmt.Errorf("%w: note too long: the review note of user %d is over %d characters",
 			domain.ErrValidation, rev.UserID, domain.ReviewNoteMaxRunes)
-	case rev.Dismissed() && len(rev.Accepted) == 0:
-		return fmt.Errorf("%w: the dismissal of user %d accepts no level", domain.ErrValidation, rev.UserID)
 	case !rev.Dismissed() && len(rev.Accepted) > 0:
 		return fmt.Errorf("%w: user %d is not dismissed but carries accepted levels", domain.ErrValidation, rev.UserID)
 	case rec.UserID != rev.UserID:
@@ -196,6 +205,29 @@ func validateRiskReview(rev domain.RiskReview, rec domain.FlagRecord) error {
 		return fmt.Errorf("risk review of user %d: %w", rev.UserID, err)
 	}
 	return nil
+}
+
+// storedEmptySnapshot is Save's check of a dismissal that carries no
+// snapshot, and returns the column to write for it. Exactly one such
+// dismissal is legitimate: the stored one — same time, same admin — whose
+// stored snapshot reads as empty (dismissSnapshotFrom: unreadable, or NULL),
+// handed back by an action that rewrote only the rest of the row, a trust or
+// an untrust. That row must cost only its own snapshot, never the action, so
+// it is accepted and its column is returned AS STORED: rewriting it NULL
+// would lose a snapshot a build that knows its sources can still read.
+// Anything else — no stored row, another dismissal, a readable snapshot the
+// caller dropped — is refused as before.
+func storedEmptySnapshot(tx *gorm.DB, rev domain.RiskReview) (*string, error) {
+	var rows []riskReviewRow
+	if err := tx.Where("user_id = ?", rev.UserID).Limit(1).Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	if len(rows) == 1 && rows[0].DismissedAtMS == rev.DismissedAtMS && rows[0].DismissedBy == rev.DismissedBy {
+		if snap, _ := dismissSnapshotFrom(rows[0].DismissedLevels); len(snap) == 0 {
+			return rows[0].DismissedLevels, nil
+		}
+	}
+	return nil, fmt.Errorf("%w: the dismissal of user %d accepts no level", domain.ErrValidation, rev.UserID)
 }
 
 // dismissSnapshotColumn maps a snapshot to its column: NULL for none (nil or
@@ -215,7 +247,8 @@ func dismissSnapshotColumn(d domain.DismissSnapshot) (*string, error) {
 // a value that is not a snapshot domain.ValidateDismissSnapshot accepts —
 // unparsable, another shape, a level or source this build does not know, a
 // negative time — reads as an EMPTY one, reported as unreadable. Save never
-// writes such a value, but a row edited behind its back, or written by a
+// writes such a value of its own (it only keeps one it found:
+// storedEmptySnapshot), but a row edited behind its back, or written by a
 // build that knew other sources, must cost only its own snapshot: the
 // dismissal then accepted nothing, so every current attention reopens it —
 // the safe direction — where an error would fail the whole queue for one row.
