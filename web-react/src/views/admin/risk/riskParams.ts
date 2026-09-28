@@ -8,10 +8,10 @@ import { FLAG_SOURCES } from '@/utils/riskCenter'
 // account all live in the query string, so a copied link, a reload, the bell
 // and Back all mean the same view. Each tab's params carry their own prefix
 // (none for the queue, the default tab; `live_` for the live view, `rec_` for
-// the records), so a tab switch keeps every tab's filters. Pure: parse and
-// build, no router.
+// the records; the policy's one `group`), so a tab switch keeps every tab's
+// filters. Pure: parse and build, no router.
 
-export const RISK_TABS = ['queue', 'live', 'records'] as const
+export const RISK_TABS = ['queue', 'live', 'records', 'policy'] as const
 export type RiskTab = (typeof RISK_TABS)[number]
 
 /** Anything else reads as the queue: the page opens on what needs a look. */
@@ -260,5 +260,23 @@ export function recordsSearch(prev: URLSearchParams, patch: Partial<RecordsFilte
   }
   if ('page' in patch) put('rec_page', patch.page && patch.page > 1 ? String(patch.page) : undefined)
   else out.delete('rec_page')
+  return out
+}
+
+/**
+ * The group whose exceptions the policy tab opens on (`?group=`), or null:
+ * the link the group dialog writes, so an admin editing a group lands on its
+ * detector exceptions. A malformed id names no group.
+ */
+export function parsePolicyGroup(params: URLSearchParams): number | null {
+  return parseUserId(params.get('group'))
+}
+
+/** The URL after the policy tab picks a group (null: none); every other
+ *  param is kept. */
+export function policyGroupSearch(prev: URLSearchParams, groupId: number | null): URLSearchParams {
+  const out = new URLSearchParams(prev)
+  if (groupId) out.set('group', String(groupId))
+  else out.delete('group')
   return out
 }

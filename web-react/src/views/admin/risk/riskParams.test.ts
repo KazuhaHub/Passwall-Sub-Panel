@@ -6,15 +6,15 @@ import { describe, expect, it, vi } from 'vitest'
 vi.mock('@/api/client', () => ({ client: {} }))
 
 import {
-  legacyRedirect, liveSearch, parseLiveParams, parseQueueParams, parseRecordsParams, parseRiskTab, parseUserId,
-  queueSearch, recordsSearch, RISK_TABS,
+  legacyRedirect, liveSearch, parseLiveParams, parsePolicyGroup, parseQueueParams, parseRecordsParams, parseRiskTab,
+  parseUserId, policyGroupSearch, queueSearch, recordsSearch, RISK_TABS,
 } from './riskParams'
 
 const q = (search: string) => new URLSearchParams(search)
 
 describe('parseRiskTab', () => {
   it('lists the tabs in order', () => {
-    expect(RISK_TABS).toEqual(['queue', 'live', 'records'])
+    expect(RISK_TABS).toEqual(['queue', 'live', 'records', 'policy'])
   })
 
   // The default is the queue: the page opens on what needs a look.
@@ -22,7 +22,7 @@ describe('parseRiskTab', () => {
     expect(parseRiskTab(raw)).toBe('queue')
   })
 
-  it.each(['queue', 'live', 'records'])('reads %s', raw => {
+  it.each(['queue', 'live', 'records', 'policy'])('reads %s', raw => {
     expect(parseRiskTab(raw)).toBe(raw)
   })
 })
@@ -62,7 +62,7 @@ describe('legacyRedirect', () => {
     expect(legacyRedirect(q('?tab=connections&id=3&live_panel=2'))).toBe('?tab=live&live_panel=2')
   })
 
-  it.each(['', '?tab=queue', '?tab=live', '?tab=records', '?tab=bogus', '?user=7'])(
+  it.each(['', '?tab=queue', '?tab=live', '?tab=records', '?tab=policy', '?tab=policy&group=3', '?tab=bogus', '?user=7'])(
     '%j is not a redirect', search => {
       expect(legacyRedirect(q(search))).toBeNull()
     })
@@ -225,5 +225,22 @@ describe('records params', () => {
     expect(next.get('live_panel')).toBe('2')
     expect(recordsSearch(at, { page: 5 }).get('rec_page')).toBe('5')
     expect(recordsSearch(q('rec_user=7'), { user_id: undefined }).has('rec_user')).toBe(false)
+  })
+})
+
+// The policy tab's one param: the group whose exceptions the page opens on,
+// the link GroupsView writes. Replace, like every filter.
+describe('policy params', () => {
+  it('reads the group', () => {
+    expect(parsePolicyGroup(q('tab=policy&group=3'))).toBe(3)
+  })
+
+  it.each(['', 'group=abc', 'group=0', 'group=-2', 'group=1.5'])('reads %j as no group', search => {
+    expect(parsePolicyGroup(q(search))).toBeNull()
+  })
+
+  it('writes and clears the group, keeping every other param', () => {
+    expect(policyGroupSearch(q('tab=policy&user=7'), 4).toString()).toBe('tab=policy&user=7&group=4')
+    expect(policyGroupSearch(q('tab=policy&group=4&user=7'), null).toString()).toBe('tab=policy&user=7')
   })
 })

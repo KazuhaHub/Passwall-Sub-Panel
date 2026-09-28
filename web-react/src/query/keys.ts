@@ -186,6 +186,8 @@ export const riskCenterKeys = {
   user: (s: QueryScope, userId: number) => [...riskCenterKeys.all(s), 'user', userId] as const,
   /** The Users page's risk column: one read for the whole list. */
   levels: (s: QueryScope) => [...riskCenterKeys.all(s), 'levels'] as const,
+  /** The policy tab: the 48 keys with their defaults and values in effect. */
+  policy: (s: QueryScope) => [...riskCenterKeys.all(s), 'policy'] as const,
 }
 
 /** The upstream sync-task queue, as shown on the Sync tasks page. */

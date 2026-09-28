@@ -79,9 +79,11 @@ function errorText(err: unknown): string {
  * show the same list. Filters are written by REPLACE and each resets the
  * page.
  */
-export default function QueueTab({ onOpenUser, onOpenLive }: {
+export default function QueueTab({ onOpenUser, onOpenLive, onOpenPolicy }: {
   onOpenUser: (userId: number) => void
   onOpenLive: () => void
+  /** The policy tab, where the detectors' switches are. */
+  onOpenPolicy: () => void
 }) {
   const { t, i18n } = useTranslation(['admin'])
   const theme = useTheme()
@@ -267,10 +269,15 @@ export default function QueueTab({ onOpenUser, onOpenLive }: {
               <TableRow>
                 <TableCell colSpan={cols}>
                   <Typography sx={{ fontSize: 13, color: md.onSurfaceVariant }}>{emptyText}</Typography>
+                  {/* Empty because nothing is judged, not because nobody is
+                      sharing: say so, and offer the switches. */}
                   {!narrowed && params.status === 'open' && data.global_detectors_off && (
-                    <Typography sx={{ fontSize: 13, color: md.onSurfaceVariant, mt: 0.5 }}>
-                      {t('admin:risk_center.queue.global_off')}
-                    </Typography>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap', mt: 0.5 }}>
+                      <Typography sx={{ fontSize: 13, color: md.onSurfaceVariant }}>
+                        {t('admin:risk_center.queue.global_off')}
+                      </Typography>
+                      <Button size="small" onClick={onOpenPolicy}>{t('admin:risk_center.queue.open_policy')}</Button>
+                    </Box>
                   )}
                 </TableCell>
               </TableRow>

@@ -1,11 +1,12 @@
 /** @vitest-environment jsdom */
 import { ThemeProvider } from '@mui/material/styles'
-import { MemoryRouter, Route, Routes, useLocation, useNavigationType } from 'react-router'
+import { createMemoryRouter, useLocation, useNavigationType } from 'react-router'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createAppTheme } from '@/theme'
 import { makeTestQueryClient, queryWrapper } from '@/test/queryTestUtils'
 import { useAuthStore } from '@/stores/auth'
+import AppRouter from '@/router/AppRouter'
 import type { QueueRow, QueueView } from '@/api/riskCenter'
 import RiskCenterView from './RiskCenterView'
 
@@ -45,16 +46,15 @@ function Where() {
   return <p data-testid="location">{loc.pathname + loc.search}</p>
 }
 
+// A DATA router, as production mounts the page (createBrowserRouter): the
+// policy tab's leave guard (useBlocker) exists only under one.
 function mount(url: string) {
+  const router = createMemoryRouter([
+    { path: '/admin/risk', element: <><RiskCenterView /><Where /></> },
+    { path: '/admin/dashboard', element: <><p>dashboard</p><Where /></> },
+  ], { initialEntries: [url] })
   render(
-    <MemoryRouter initialEntries={[url]}>
-      <ThemeProvider theme={theme}>
-        <Routes>
-          <Route path="/admin/risk" element={<><RiskCenterView /><Where /></>} />
-          <Route path="/admin/dashboard" element={<><p>dashboard</p><Where /></>} />
-        </Routes>
-      </ThemeProvider>
-    </MemoryRouter>,
+    <ThemeProvider theme={theme}><AppRouter router={router} /></ThemeProvider>,
     { wrapper: queryWrapper(makeTestQueryClient()) },
   )
 }
@@ -111,6 +111,8 @@ function serve(rows: QueueRow[] = []) {
     if (url === '/admin/risk-center/live') return { data: liveView }
     if (url === '/admin/risk-center/flags') return { data: { items: [], total: 0, page: 1, page_size: 25 } }
     if (url === '/admin/users') return { data: { items: [alice], total: 1, page: 1, page_size: 50 } }
+    if (url === '/admin/risk-center/policy') return { data: { settings: {}, defaults: {}, effective: {} } }
+    if (url === '/admin/groups') return { data: { items: [], total: 0, page: 1, page_size: 200 } }
     throw new Error(`unexpected GET ${url}`)
   })
 }
@@ -164,11 +166,11 @@ describe('RiskCenterView', () => {
     expect(location()).toBe('/admin/risk')
   })
 
-  it('offers the three tabs in order', async () => {
+  it('offers the four tabs in order', async () => {
     serve()
     mount('/admin/risk')
     await screen.findByRole('heading', { name: '风控中心' })
-    expect(screen.getAllByRole('tab').map(el => el.textContent)).toEqual(['待处理', '在线', '记录'])
+    expect(screen.getAllByRole('tab').map(el => el.textContent)).toEqual(['待处理', '在线', '记录', '策略'])
   })
 
   it('says what the page is in one line', async () => {
@@ -180,6 +182,7 @@ describe('RiskCenterView', () => {
   it.each([
     ['live', '在线', '/admin/risk-center/live'],
     ['records', '记录', '/admin/risk-center/flags'],
+    ['policy', '策略', '/admin/risk-center/policy'],
   ])('?tab=%s reads only its own list', async (tab, label, url) => {
     serve()
     mount(`/admin/risk?tab=${tab}`)
@@ -216,6 +219,33 @@ describe('RiskCenterView', () => {
     await screen.findByRole('heading', { name: '风控中心' })
     fireEvent.click(screen.getByRole('button', { name: '说明' }))
     expect(await screen.findByText(/^每次进入或离开「疑似」「已标记」/)).toBeTruthy()
+  })
+
+  it('the policy tab explains itself behind a help button', async () => {
+    serve()
+    mount('/admin/risk?tab=policy')
+    await screen.findByRole('heading', { name: '风控中心' })
+    fireEvent.click(screen.getByRole('button', { name: '说明' }))
+    expect(await screen.findByText(/^每张卡片是一个检测项/)).toBeTruthy()
+  })
+
+  // Every detector off leaves an empty queue; the switches are one click
+  // away, on the policy tab.
+  it("the empty queue's policy button switches to the policy tab", async () => {
+    serve()
+    api.get.mockImplementation(async (url: string) => {
+      if (url === '/admin/risk-center/queue') return { data: { ...queue([]), global_detectors_off: true } }
+      if (url === '/admin/settings/geoip/status') {
+        return { data: { enabled: true, dir: '', active: 'city.mmdb', available: [], update: { updating: false } } }
+      }
+      if (url === '/admin/risk-center/policy') return { data: { settings: {}, defaults: {}, effective: {} } }
+      if (url === '/admin/groups') return { data: { items: [], total: 0, page: 1, page_size: 200 } }
+      throw new Error(`unexpected GET ${url}`)
+    })
+    mount('/admin/risk')
+    fireEvent.click(await screen.findByRole('button', { name: '前往策略' }))
+    await waitFor(() => expect(location()).toBe('/admin/risk?tab=policy'))
+    expect(selectedTab()).toBe('策略')
   })
 
   it('the online card switches to the live tab', async () => {

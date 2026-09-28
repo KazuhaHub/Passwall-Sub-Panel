@@ -2,6 +2,7 @@ import { client } from './client'
 import type { GeoAnomaly } from './geoAnomalies'
 import type { ReadOptions } from './requestOptions'
 import { RISK_KINDS, type RiskKind, type RiskSignal } from './riskSignals'
+import type { RuntimeKnobValues, UISettings } from './settings'
 import type { Role, ServiceStatus, UserAccess } from './types'
 
 // The risk center's own reads (handler/admin_risk_center.go, adminGroup
@@ -578,4 +579,72 @@ export async function untrustRiskUser(userId: number): Promise<ReviewResult> {
     _skipErrorToast: true,
   })
   return data
+}
+
+// ---- The policy page (handler/admin_risk_policy.go, adminGroup only) ----
+
+/**
+ * The 48 keys of ports.RiskCenterPolicy: every geo_anomaly_* and risk_*
+ * setting. views/admin/risk/policy/policyKeys.json lists the same keys in the
+ * server's order, and a Go test holds that file to the struct; the page's
+ * record of the union (policyKeys.ts) holds the file to this type.
+ */
+export type RiskPolicyKey =
+  | 'geo_anomaly_scope' | 'geo_anomaly_max_places' | 'geo_anomaly_max_regions' | 'geo_anomaly_max_cities'
+  | 'geo_anomaly_flag_after_polls' | 'geo_anomaly_clear_after_polls' | 'geo_anomaly_min_placed_ratio'
+  | 'geo_anomaly_co_travel' | 'geo_anomaly_allow_anywhere' | 'geo_anomaly_ignore_addresses'
+  | 'geo_anomaly_ban_enabled' | 'geo_anomaly_ban_max_countries' | 'geo_anomaly_ban_max_regions'
+  | 'geo_anomaly_ban_max_cities' | 'geo_anomaly_ban_after_polls' | 'geo_anomaly_ban_duration_minutes'
+  | 'geo_anomaly_fresh_window_seconds' | 'geo_anomaly_shared_exit_min_users' | 'geo_anomaly_ban_max_per_poll'
+  | 'geo_anomaly_lift_max_per_poll' | 'geo_anomaly_infra_refresh_minutes' | 'geo_anomaly_infra_host_ttl_minutes'
+  | 'risk_hwid_capture_off' | 'risk_sub_spread_off' | 'risk_devices_off' | 'risk_usage_shift_off'
+  | 'risk_login_country_off' | 'risk_min_days' | 'risk_max_devices' | 'risk_usage_ratio' | 'risk_usage_floor_gb'
+  | 'risk_login_warmup_logins' | 'risk_login_hold_days' | 'risk_usage_warmup_days' | 'risk_usage_flag_days'
+  | 'risk_usage_suspect_days' | 'risk_refresh_interval_minutes' | 'risk_first_delay_minutes'
+  | 'risk_alert_freshness_hours' | 'risk_window_days' | 'risk_login_lookback_days' | 'risk_usage_baseline_days'
+  | 'risk_usage_recent_days' | 'risk_connection_retention_days' | 'risk_flag_record_retention_days'
+  | 'risk_live_snapshot_stale_minutes' | 'risk_live_refresh_cooldown_seconds' | 'risk_device_infer_hours'
+
+/** The stored policy, as stored: 0 (or '') is unset and the default applies;
+ *  a value out of range is shown as typed — the server clamps where it reads. */
+export type RiskPolicySettings = Pick<UISettings, RiskPolicyKey>
+
+export interface RiskPolicyView {
+  settings: RiskPolicySettings
+  /** The shipped value of every numeric key (ports.RiskCenterPolicyDefaults):
+   *  the empty field's placeholder, the presets' reference and the "in
+   *  effect" lines' fallback. The page keeps no copy of any of them. */
+  defaults: Record<string, number>
+  /** For the 23 runtime knobs, the number the panel runs with. */
+  effective: RuntimeKnobValues
+}
+
+/** The policy with its defaults and values in effect. A map the server did
+ *  not send reads as empty: the page then shows no placeholder and no "in
+ *  effect" caption rather than a guess. */
+export async function getRiskPolicy(opts: ReadOptions = {}): Promise<RiskPolicyView> {
+  const { data } = await client.get<Partial<RiskPolicyView>>('/admin/risk-center/policy', { signal: opts.signal })
+  return policyView(data)
+}
+
+/**
+ * Saves the keys the admin CHANGED, and only those (D10): the server merges
+ * them onto the stored policy, so a tab opened before another admin's save
+ * cannot revert it. Silent: a refused ignore list is a 400 naming the field
+ * and its bad entries, which the page puts on that field, and any other
+ * failure is reported by the page in its own words.
+ */
+export async function putRiskPolicy(changed: Partial<RiskPolicySettings>): Promise<RiskPolicyView> {
+  const { data } = await client.put<Partial<RiskPolicyView>>('/admin/risk-center/policy', { settings: changed }, {
+    _skipErrorToast: true,
+  })
+  return policyView(data)
+}
+
+function policyView(data: Partial<RiskPolicyView> | undefined): RiskPolicyView {
+  return {
+    settings: (data?.settings ?? {}) as RiskPolicySettings,
+    defaults: data?.defaults ?? {},
+    effective: data?.effective ?? {},
+  }
 }

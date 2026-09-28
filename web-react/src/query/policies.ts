@@ -159,6 +159,14 @@ export const policies = {
     refetchInterval: false,
     note: 'One read per list view; verdicts move per poll or hourly; actions invalidate it.',
   },
+  /** The policy tab. Its draft is local and seeded once; a newer policy
+   *  read on focus is offered, never merged in behind the admin's back. */
+  riskCenterPolicy: {
+    staleTime: 5 * MINUTE,
+    gcTime: 5 * MINUTE,
+    refetchInterval: false,
+    note: 'The policy page keeps a local draft seeded once; its save writes through.',
+  },
   /** One account's record, as the user picker names a picked account. */
   userDetail: {
     staleTime: 15 * SECOND,

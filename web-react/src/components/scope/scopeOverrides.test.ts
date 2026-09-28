@@ -13,6 +13,9 @@ import {
   setGroupScopeOverride,
 } from '@/api/scopeSettings'
 import { getUISettings } from '@/api/settings'
+import zhBundle from '@/locales/zh-CN/admin.json'
+import enBundle from '@/locales/en-US/admin.json'
+import { flatten, type Nested } from '@/i18n/options'
 import {
   kvFromGlobal,
   loadScopeState,
@@ -210,5 +213,47 @@ describe('risk catalog', () => {
       expect(k.field).toBe(`risk_${k.name}`)
       expect(k.labelKey).toBe(`risk_${k.name}`)
     }
+  })
+})
+
+// The group editor on the risk center's policy page shows each geo and risk
+// row's hint under its label (showHints), so a group admin reads the same
+// explanation the global field carries. The hints are the policy page's own
+// settings.* texts, which is why none of them may point at a place on a page
+// (「上面」「下方」) or restate "0 = default": the editor is not that page,
+// and its inherited value already says the default.
+describe('geo and risk hints', () => {
+  const HINTLESS = ['risk.devices_off', 'risk.usage_shift_off', 'risk.login_country_off']
+  const rows = () => SCOPE_KEYS.filter(k => ['geo', 'geo_ban', 'risk'].includes(k.cat))
+  const zh = flatten(zhBundle as Nested)
+  const en = flatten(enBundle as Nested)
+
+  it('gives every geo and risk row a hint both bundles have, the three plain switches excepted', () => {
+    const missing: string[] = []
+    for (const k of rows()) {
+      if (HINTLESS.includes(k.key)) {
+        expect(k.hintKey, k.key).toBeUndefined()
+        continue
+      }
+      expect(k.hintKey, k.key).toMatch(/^admin:settings\./)
+      const flat = (k.hintKey ?? '').slice('admin:'.length)
+      for (const [lang, dict] of Object.entries({ zh, en })) {
+        if (typeof dict[flat] !== 'string' || dict[flat] === '') missing.push(`${lang}: ${k.key} → ${k.hintKey}`)
+      }
+    }
+    expect(missing).toEqual([])
+  })
+
+  it('points at no place on a page and restates no default', () => {
+    const found: string[] = []
+    for (const k of rows()) {
+      if (!k.hintKey) continue
+      const flat = k.hintKey.slice('admin:'.length)
+      for (const word of ['上面', '下方', '0 = 默认']) if (zh[flat]?.includes(word)) found.push(`zh ${flat}: ${word}`)
+      // English "above"/"below" also compare numbers ("keep it above the
+      // checks to flag"), so only the default phrase is checked there.
+      if (en[flat]?.includes('0 = default')) found.push(`en ${flat}: 0 = default`)
+    }
+    expect(found).toEqual([])
   })
 })

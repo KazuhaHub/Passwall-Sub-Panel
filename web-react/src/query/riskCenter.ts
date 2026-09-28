@@ -1,11 +1,11 @@
 import { keepPreviousData, queryOptions, useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
 import {
-  dismissRiskUser, getLiveConnections, getRiskLevels, getRiskQueue, getRiskUser, listConnectionHistory,
-  listFlagRecords, refreshLiveConnections, trustRiskUser, undismissRiskUser, untrustRiskUser,
+  dismissRiskUser, getLiveConnections, getRiskLevels, getRiskPolicy, getRiskQueue, getRiskUser, listConnectionHistory,
+  listFlagRecords, putRiskPolicy, refreshLiveConnections, trustRiskUser, undismissRiskUser, untrustRiskUser,
   type ConnectionHistoryParams, type FlagRecordParams, type LiveParams, type QueueParams, type ReviewResult,
-  type TrustResult,
+  type RiskPolicySettings, type TrustResult,
 } from '@/api/riskCenter'
-import { alertKeys, riskCenterKeys, userKeys } from './keys'
+import { alertKeys, riskCenterKeys, settingsKeys, userKeys } from './keys'
 import { freshness, policies } from './policies'
 import type { QueryScope } from './session'
 
@@ -146,5 +146,40 @@ export function useReviewAction(scope: QueryScope) {
   return useMutation({
     mutationFn: runReview,
     onSettled: () => { void invalidateAfterRiskAction(qc, scope) },
+  })
+}
+
+/** The policy tab's read: the stored policy, its defaults, its values in
+ *  effect. */
+export function riskPolicyQuery(scope: QueryScope) {
+  return queryOptions({
+    queryKey: riskCenterKeys.policy(scope),
+    queryFn: ({ signal }) => getRiskPolicy({ signal }),
+    ...freshness(policies.riskCenterPolicy),
+  })
+}
+
+export function useRiskPolicy(scope: QueryScope) {
+  return useQuery(riskPolicyQuery(scope))
+}
+
+/**
+ * Saves the changed keys. The answer IS the new policy, so it is written
+ * straight into the cache the page reseeds from. What the policy decides is
+ * read elsewhere too, and each is refreshed: the settings read (the system
+ * settings page and the group editor's inherited baseline show the same
+ * keys), the queue (a threshold or a switch changes who is listed) and the
+ * bell (the same count).
+ */
+export function useSaveRiskPolicy(scope: QueryScope) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (changed: Partial<RiskPolicySettings>) => putRiskPolicy(changed),
+    onSuccess: view => {
+      qc.setQueryData(riskCenterKeys.policy(scope), view)
+      void qc.invalidateQueries({ queryKey: settingsKeys.ui(scope) })
+      void qc.invalidateQueries({ queryKey: riskCenterKeys.queues(scope) })
+      void qc.invalidateQueries({ queryKey: alertKeys.all(scope) })
+    },
   })
 }

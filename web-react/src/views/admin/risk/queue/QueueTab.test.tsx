@@ -156,13 +156,14 @@ function Where() {
 }
 
 const openLive = vi.fn()
+const openPolicy = vi.fn()
 
 // The tab as the page hosts it: rows open the page's drawer through the URL.
 function Page() {
   const drawer = useDrawerParam('user')
   return (
     <>
-      <QueueTab onOpenUser={drawer.open} onOpenLive={openLive} />
+      <QueueTab onOpenUser={drawer.open} onOpenLive={openLive} onOpenPolicy={openPolicy} />
       <RiskUserDrawer userId={drawer.id} onClose={drawer.close} host="risk" />
       <Where />
     </>
@@ -529,6 +530,16 @@ describe('QueueTab states', () => {
     mount()
     expect(await screen.findByText('没有需要处理的账号')).toBeTruthy()
     expect(screen.getByText('全局设置关闭了所有检测（分组例外可能仍开启部分检测）。')).toBeTruthy()
+    // The switches are on the policy tab, one click away.
+    fireEvent.click(screen.getByRole('button', { name: '前往策略' }))
+    expect(openPolicy).toHaveBeenCalledOnce()
+  })
+
+  it('offers the policy only when the detectors are off', async () => {
+    serve(view({ items: [], total: 0, global_detectors_off: false }))
+    mount()
+    expect(await screen.findByText('没有需要处理的账号')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: '前往策略' })).toBeNull()
   })
 
   it.each([

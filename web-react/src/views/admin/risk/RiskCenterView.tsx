@@ -8,6 +8,7 @@ import RiskUserDrawer from './drawer/RiskUserDrawer'
 import { useDrawerParam } from './drawerParam'
 import HelpTip from './HelpTip'
 import LiveConnectionsTab from './LiveConnectionsTab'
+import PolicyTab from './policy/PolicyTab'
 import QueueTab from './queue/QueueTab'
 import RecordsTab from './RecordsTab'
 import { legacyRedirect, parseRiskTab, type RiskTab } from './riskParams'
@@ -15,8 +16,9 @@ import { legacyRedirect, parseRiskTab, type RiskTab } from './riskParams'
 /**
  * THE RISK CENTER: one admin-only page for what the panel observes about who
  * is using an account — the accounts that need a look (待处理), who is
- * connected now (在线), and the record of every change (记录) — with one
- * drawer, over any tab, for everything about one account.
+ * connected now (在线), the record of every change (记录) and what the
+ * detectors judge by (策略) — with one drawer, over any tab, for everything
+ * about one account.
  *
  * The location and risk verdicts used to sit on the Logs page, gated per
  * tab. They moved here because they are not logs — they are verdicts about
@@ -79,12 +81,13 @@ export default function RiskCenterView() {
         <Tab value="queue" label={t('admin:risk_center.tab_queue')} />
         <Tab value="live" label={t('admin:risk_center.tab_live')} />
         <Tab value="records" label={t('admin:risk_center.tab_records')} />
+        <Tab value="policy" label={t('admin:risk_center.tab_policy')} />
       </Tabs>
       {/* Only the open tab mounts, so only its lists are read. */}
       {tab === 'queue' && (
         <>
           <HelpTip textKey="admin:risk_center.help.queue" />
-          <QueueTab onOpenUser={drawer.open} onOpenLive={() => setTab('live')} />
+          <QueueTab onOpenUser={drawer.open} onOpenLive={() => setTab('live')} onOpenPolicy={() => setTab('policy')} />
         </>
       )}
       {tab === 'live' && (
@@ -97,6 +100,12 @@ export default function RiskCenterView() {
         <>
           <HelpTip textKey="admin:risk_center.help.records" />
           <RecordsTab onOpenUser={drawer.open} />
+        </>
+      )}
+      {tab === 'policy' && (
+        <>
+          <HelpTip textKey="admin:risk_center.help.policy" />
+          <PolicyTab />
         </>
       )}
       <RiskUserDrawer userId={drawer.id} onClose={drawer.close} host="risk" />
