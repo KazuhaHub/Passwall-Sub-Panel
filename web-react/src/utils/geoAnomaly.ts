@@ -70,6 +70,10 @@ export function reasonText(row: GeoAnomaly, t: Translate): string {
       return t(`${REASON}reason_disabled`, d)
     case 'exempt':
       return t(`${REASON}reason_exempt`, d)
+    case 'trusted':
+      // An admin's trust in this one account (risk center), not the group's
+      // allow_anywhere: the sentence says who exempted it.
+      return t(`${REASON}reason_trusted`, d)
     case 'idle_stale':
       return t(`${REASON}reason_idle_stale`, { ...d, stale: ev.stale })
     case 'idle_none':

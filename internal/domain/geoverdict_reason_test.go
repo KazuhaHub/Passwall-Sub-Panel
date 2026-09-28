@@ -36,6 +36,13 @@ func reasonFixtures() []reasonFixture {
 			code:   GeoWhyDisabled,
 		},
 		{
+			name:   "trusted by an admin",
+			p:      pol(func(p *GeoAnomalyPolicy) { p.Trusted = true }),
+			o:      GeoObservation{GeoAvailable: true},
+			reason: "an admin trusts this account; location is not judged",
+			code:   GeoWhyTrusted,
+		},
+		{
 			name:   "allow anywhere",
 			p:      pol(func(p *GeoAnomalyPolicy) { p.AllowAnywhere = true }),
 			o:      GeoObservation{GeoAvailable: true},
@@ -203,6 +210,62 @@ func TestEvaluateGeo_WhySnapshotsTheSanitizedPolicy(t *testing.T) {
 		FlagAfter: 1, ClearAfter: 6, MinPlacedRatio: 0.5}
 	if why != want {
 		t.Fatalf("why = %+v\nwant  %+v", why, want)
+	}
+}
+
+// An admin's trust is an exemption for ONE account (the risk center's
+// 信任此账号), so it reads exactly like allow_anywhere does for a whole
+// group: exempt, not clean — clean would read as evidence nobody gathered —
+// with its own code so the admin sees WHO exempted the account. It resets
+// every streak, the ban streak included: an account trusted mid-ramp must not
+// carry a due suspension into the poll that judges it, and one untrusted
+// later starts from a clean slate instead of a streak accrued while nobody
+// was judging it.
+func TestEvaluateGeo_TrustedIsExemptAndResetsTheStreak(t *testing.T) {
+	p := pol(func(p *GeoAnomalyPolicy) {
+		p.Trusted = true
+		p.BanEnabled = true
+		p.FlagAfterPolls = 1
+		p.BanAfterPolls = 1
+	})
+	prev := GeoStreak{Over: 9, Flagged: true, Tier: GeoTierCity, BanOver: 5}
+	v := EvaluateGeo(p, tiers(3, 3, 4), prev)
+	if v.State != GeoStateExempt {
+		t.Fatalf("state = %s, want exempt — a trusted account is not judged, and NOT clean", v.State)
+	}
+	if v.Reason != "an admin trusts this account; location is not judged" {
+		t.Fatalf("reason = %q", v.Reason)
+	}
+	want := whySnapshot(p)
+	want.Code = GeoWhyTrusted
+	if v.Why != want {
+		t.Fatalf("why = %+v\nwant  %+v", v.Why, want)
+	}
+	if v.Streak != (GeoStreak{}) || v.BanDue {
+		t.Fatalf("streak = %+v, banDue = %v; want a reset streak and no ban", v.Streak, v.BanDue)
+	}
+}
+
+// Disabled outranks trust: scope off is the group's policy decision that
+// nothing is judged, and it must keep saying so whatever an admin did to one
+// account — "trusted" would hide that the detector is off for everyone.
+func TestEvaluateGeo_DisabledOutranksTrusted(t *testing.T) {
+	p := pol(func(p *GeoAnomalyPolicy) { p.Scope = GeoScopeOff; p.Trusted = true })
+	v := EvaluateGeo(p, tiers(3, 3, 4), GeoStreak{Over: 2})
+	if v.State != GeoStateDisabled || v.Why.Code != GeoWhyDisabled {
+		t.Fatalf("state/code = %s/%s, want disabled/%s", v.State, v.Why.Code, GeoWhyDisabled)
+	}
+}
+
+// Trust outranks allow_anywhere: both exempt, but the per-account decision is
+// the more specific one and is what the admin who made it expects to read. A
+// group exemption lifted later still leaves the account exempt, and the code
+// has to say why.
+func TestEvaluateGeo_TrustedOutranksAllowAnywhere(t *testing.T) {
+	p := pol(func(p *GeoAnomalyPolicy) { p.Trusted = true; p.AllowAnywhere = true })
+	v := EvaluateGeo(p, tiers(2, 1, 1), GeoStreak{})
+	if v.State != GeoStateExempt || v.Why.Code != GeoWhyTrusted {
+		t.Fatalf("state/code = %s/%s, want exempt/%s", v.State, v.Why.Code, GeoWhyTrusted)
 	}
 }
 

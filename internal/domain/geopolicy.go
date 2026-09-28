@@ -183,6 +183,13 @@ type GeoAnomalyPolicy struct {
 	ClearAfterPolls int
 	// AllowAnywhere exempts the principal outright.
 	AllowAnywhere bool
+	// Trusted says an admin trusts this account (risk_reviews): its location
+	// is not judged, by this verdict nor by the two risk signals that read
+	// the geo policy (sub_spread, login_country). Set per user by the traffic
+	// poll and the risk worker, NEVER read from settings — a group cannot
+	// trust its members, which is what allow_anywhere is for, and
+	// GeoPolicyFromSettings always leaves it false.
+	Trusted bool
 	// CoTravel groups COUNTRIES that do not count as separate from each
 	// other. Each entry is a set of upper-case country codes; occupying two
 	// in the same set counts as one country. Sets that share a country merge

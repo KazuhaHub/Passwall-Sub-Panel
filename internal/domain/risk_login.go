@@ -167,14 +167,16 @@ const loginDayMS = int64(24 * 60 * 60 * 1000)
 //  1. Off → disabled / signal_off, no evidence.
 //  2. the group's geo scope is off → disabled / scope_off, no evidence.
 //     (Scope country leaves it on: countries are what it judges.)
-//  3. AllowAnywhere → exempt / allow_anywhere, no evidence.
-//  4. no login in the last hold days, skipped or not → idle /
+//  3. an admin trusts the account (geo policy Trusted) → exempt / trusted,
+//     no evidence; before AllowAnywhere, the more specific decision first.
+//  4. AllowAnywhere → exempt / allow_anywhere, no evidence.
+//  5. no login in the last hold days, skipped or not → idle /
 //     no_recent_logins, no evidence.
-//  5. no geo database → unknown / geo_unavailable.
-//  6. no recent login was placed → unknown / unplaced.
-//  7. any event → flagged / new_country.
-//  8. no recent placed login had the warm-up behind it → unknown / learning.
-//  9. otherwise clean / known_countries.
+//  6. no geo database → unknown / geo_unavailable.
+//  7. no recent login was placed → unknown / unplaced.
+//  8. any event → flagged / new_country.
+//  9. no recent placed login had the warm-up behind it → unknown / learning.
+//  10. otherwise clean / known_countries.
 //
 // "Cannot tell" is never clean. Only logins inside the lookback count —
 // neither older ones (the store's bound is only a coarse pre-filter) nor
@@ -188,6 +190,8 @@ func EvaluateLoginCountry(p LoginCountryPolicy, in LoginCountryInput) (RiskVerdi
 		return RiskVerdict{State: GeoStateDisabled, Code: RiskCodeSignalOff}, nil
 	case geo.Scope == GeoScopeOff:
 		return RiskVerdict{State: GeoStateDisabled, Code: RiskCodeScopeOff}, nil
+	case geo.Trusted:
+		return RiskVerdict{State: GeoStateExempt, Code: RiskCodeTrusted}, nil
 	case geo.AllowAnywhere:
 		return RiskVerdict{State: GeoStateExempt, Code: RiskCodeAllowAnywhere}, nil
 	}

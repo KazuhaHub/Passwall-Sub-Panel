@@ -271,6 +271,7 @@ describe('reasonText', () => {
   const cases: { name: string; r: GeoAnomaly; zh: string }[] = [
     { name: 'disabled', r: v2(why('disabled', { scope: 'off' })), zh: '此账号的地区检测已关闭' },
     { name: 'exempt', r: v2(why('exempt')), zh: '此账号允许从任何地方连接' },
+    { name: 'trusted', r: v2(why('trusted')), zh: '管理员已信任此账号，不做地区判定' },
     {
       name: 'idle_stale', r: v2(why('idle_stale'), { stale: 2 }),
       zh: '此刻没有并发连接；上游窗口里还有 2 个更早见过的地址',

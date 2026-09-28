@@ -278,6 +278,10 @@ func TestGeoFlagTransition_DisabledResetIsLeaveFlagged(t *testing.T) {
 	off.Scope = GeoScopeOff
 	exempt := p
 	exempt.AllowAnywhere = true
+	// An admin's trust is a policy decision too: its leave is a clear (state
+	// exempt), so after an untrust any re-entry reads as new.
+	trusted := p
+	trusted.Trusted = true
 	for _, c := range []struct {
 		policy GeoAnomalyPolicy
 		state  GeoState
@@ -285,6 +289,7 @@ func TestGeoFlagTransition_DisabledResetIsLeaveFlagged(t *testing.T) {
 	}{
 		{off, GeoStateDisabled, GeoWhyDisabled},
 		{exempt, GeoStateExempt, GeoWhyExempt},
+		{trusted, GeoStateExempt, GeoWhyTrusted},
 	} {
 		next := judgeFlag(c.policy, flagged, flagObs(c.policy, "over"))
 		rec, ok := GeoFlagTransition(flagged, true, next, 1)

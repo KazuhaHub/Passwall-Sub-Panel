@@ -21,7 +21,7 @@ export const RISK_KINDS: readonly RiskKind[] = ['sub_spread', 'devices', 'usage_
  */
 export const RISK_CODES: Readonly<Record<RiskKind, readonly string[]>> = {
   sub_spread: [
-    'signal_off', 'scope_off', 'scope_country', 'allow_anywhere',
+    'signal_off', 'scope_off', 'scope_country', 'allow_anywhere', 'trusted',
     'no_fetches', 'retention_short', 'all_excluded', 'geo_unavailable',
     'low_placed', 'no_regions',
     'spread', 'spread_building', 'within',
@@ -35,7 +35,7 @@ export const RISK_CODES: Readonly<Record<RiskKind, readonly string[]>> = {
     'sustained', 'building', 'within',
   ],
   login_country: [
-    'signal_off', 'scope_off', 'allow_anywhere', 'no_recent_logins',
+    'signal_off', 'scope_off', 'allow_anywhere', 'trusted', 'no_recent_logins',
     'geo_unavailable', 'unplaced', 'learning',
     'new_country', 'known_countries',
   ],

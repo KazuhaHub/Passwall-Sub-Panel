@@ -286,6 +286,32 @@ func TestLoginCountry_AllowAnywhereIsExempt(t *testing.T) {
 	}
 }
 
+// An account an admin trusts is exempt with its own code and no evidence: a
+// login country is a location judgement, which trust switches off for that
+// one account. After scope off (the group judges nothing) and before
+// allow_anywhere (the per-account decision is the more specific one).
+func TestLoginCountry_TrustedIsExempt(t *testing.T) {
+	flagged := loginInput(append(homeLogins(3), placedAt("JP", day))...)
+	p := loginPolicy()
+	p.Geo.Trusted = true
+	v, ev := EvaluateLoginCountry(p, flagged)
+	wantLogin(t, v, GeoStateExempt, RiskCodeTrusted)
+	if ev != nil {
+		t.Fatalf("evidence %+v for a trusted account, want none", ev)
+	}
+
+	p.Geo.AllowAnywhere = true
+	v, _ = EvaluateLoginCountry(p, flagged)
+	wantLogin(t, v, GeoStateExempt, RiskCodeTrusted)
+
+	p.Geo.Scope = GeoScopeOff
+	v, _ = EvaluateLoginCountry(p, flagged)
+	wantLogin(t, v, GeoStateDisabled, RiskCodeScopeOff)
+	p.Off = true
+	v, _ = EvaluateLoginCountry(p, flagged)
+	wantLogin(t, v, GeoStateDisabled, RiskCodeSignalOff)
+}
+
 // Without a geo database no login can be placed: unknown, not clean — and
 // not idle either, when there were recent logins to judge.
 func TestLoginCountry_GeoUnavailableIsUnknown(t *testing.T) {
@@ -433,6 +459,7 @@ func loginFixtures() []struct {
 	}{
 		{with(func(p *LoginCountryPolicy) { p.Off = true }), flagged()},
 		{with(func(p *LoginCountryPolicy) { p.Geo.Scope = GeoScopeOff }), flagged()},
+		{with(func(p *LoginCountryPolicy) { p.Geo.Trusted = true }), flagged()},
 		{with(func(p *LoginCountryPolicy) { p.Geo.AllowAnywhere = true }), flagged()},
 		{loginPolicy(), loginInput(homeLogins(3)...)},
 		{loginPolicy(), change(func(in *LoginCountryInput) { in.GeoAvailable = false })},

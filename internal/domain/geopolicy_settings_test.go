@@ -76,6 +76,27 @@ func TestGeoPolicyFromSettings_AllowAnywhereCarriesThrough(t *testing.T) {
 	}
 }
 
+// Trust is one account's review state (risk_reviews), set per user by the
+// traffic poll and the risk worker. It is not a setting: no group can trust
+// its members, and every stored value an admin can type — the group
+// exemption included — must leave it false. A policy built from settings
+// that came out trusted would exempt a whole fleet nobody reviewed.
+func TestGeoPolicyFromSettings_NeverTrusts(t *testing.T) {
+	for _, s := range []GeoPolicySettings{
+		{},
+		{AllowAnywhere: true},
+		{
+			Scope: "region", MaxPlaces: 3, MaxRegions: 3, MaxCities: 4, FlagAfterPolls: 2, ClearAfterPolls: 4,
+			MinPlacedRatio: 0.7, CoTravel: "JP,TW", AllowAnywhere: true, BanEnabled: true,
+			BanMaxCountries: 3, BanMaxRegions: 4, BanMaxCities: 5, BanAfterPolls: 8, BanDurationMinutes: 30,
+		},
+	} {
+		if GeoPolicyFromSettings(s).Trusted {
+			t.Fatalf("settings %+v produced a trusted policy; trust is never read from settings", s)
+		}
+	}
+}
+
 // Co-travel sets are typed as "JP,TW". Country codes are compared
 // upper-cased, so a set typed lowercase that silently never matched would be
 // indistinguishable from one that was ignored — and an admin would have no

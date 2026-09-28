@@ -441,6 +441,39 @@ func TestSubSpread_AllowAnywhereIsExempt(t *testing.T) {
 	}
 }
 
+// An account an admin trusts is exempt with its own code and no evidence:
+// subscription places are a location judgement, and trust is exactly "stop
+// judging where this account is". It sits after the two scope guards — a
+// group that judges no provinces reads disabled whatever one account's review
+// says — and before allow_anywhere, because the per-account decision is the
+// more specific one and is what the admin who made it expects to read.
+func TestSubSpread_TrustedIsExempt(t *testing.T) {
+	p := spreadPolicy()
+	p.Geo.Trusted = true
+	v, ev := EvaluateSubSpread(p, flaggedWeek())
+	wantSpread(t, v, GeoStateExempt, RiskCodeTrusted)
+	if ev != nil {
+		t.Fatalf("evidence %+v for a trusted account, want none", ev)
+	}
+
+	p.Geo.AllowAnywhere = true
+	v, _ = EvaluateSubSpread(p, flaggedWeek())
+	wantSpread(t, v, GeoStateExempt, RiskCodeTrusted)
+
+	for scope, code := range map[GeoScope]RiskCode{GeoScopeOff: RiskCodeScopeOff, GeoScopeCountry: RiskCodeScopeCountry} {
+		p := spreadPolicy()
+		p.Geo.Trusted = true
+		p.Geo.Scope = scope
+		v, _ := EvaluateSubSpread(p, flaggedWeek())
+		wantSpread(t, v, GeoStateDisabled, code)
+	}
+	p = spreadPolicy()
+	p.Geo.Trusted = true
+	p.Off = true
+	v, _ = EvaluateSubSpread(p, flaggedWeek())
+	wantSpread(t, v, GeoStateDisabled, RiskCodeSignalOff)
+}
+
 func TestSubSpread_NoFetchIsIdle(t *testing.T) {
 	v, ev := EvaluateSubSpread(spreadPolicy(), SubSpreadInput{WindowDays: RiskWindowDays, WindowStart: "2026-09-19", GeoAvailable: true})
 	wantSpread(t, v, GeoStateIdle, RiskCodeNoFetches)
@@ -861,6 +894,7 @@ func spreadFixtures() []struct {
 		{with(func(p *SubSpreadPolicy) { p.Off = true }), flaggedWeek()},
 		{with(func(p *SubSpreadPolicy) { p.Geo.Scope = GeoScopeOff }), flaggedWeek()},
 		{with(func(p *SubSpreadPolicy) { p.Geo.Scope = GeoScopeCountry }), flaggedWeek()},
+		{with(func(p *SubSpreadPolicy) { p.Geo.Trusted = true }), flaggedWeek()},
 		{with(func(p *SubSpreadPolicy) { p.Geo.AllowAnywhere = true }), flaggedWeek()},
 		{spreadPolicy(), change(func(in *SubSpreadInput) { in.Fetched = false })},
 		{spreadPolicy(), change(func(in *SubSpreadInput) { in.WindowDays = 2 })},

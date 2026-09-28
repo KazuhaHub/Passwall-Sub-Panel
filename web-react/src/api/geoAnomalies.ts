@@ -38,13 +38,13 @@ export interface GeoExcluded {
  * Which EvaluateGeo branch wrote the verdict's English `reason`. Mirrors
  * domain.GeoReasonCode: stable strings, stored in the evidence and sent as-is.
  */
-export type GeoReasonCode = 'disabled' | 'exempt' | 'idle_stale' | 'idle_none' | 'unknown_excluded'
-  | 'unknown_geo_off' | 'unknown_low_ratio' | 'suspect' | 'flagged_sustained' | 'flagged_clearing'
-  | 'clean_unplaced' | 'clean_within'
+export type GeoReasonCode = 'disabled' | 'exempt' | 'trusted' | 'idle_stale' | 'idle_none'
+  | 'unknown_excluded' | 'unknown_geo_off' | 'unknown_low_ratio' | 'suspect' | 'flagged_sustained'
+  | 'flagged_clearing' | 'clean_unplaced' | 'clean_within'
 
 /** Every code, in domain.AllGeoReasonCodes order. */
 export const GEO_REASON_CODES: readonly GeoReasonCode[] = [
-  'disabled', 'exempt',
+  'disabled', 'exempt', 'trusted',
   'idle_stale', 'idle_none',
   'unknown_excluded', 'unknown_geo_off', 'unknown_low_ratio',
   'suspect', 'flagged_sustained', 'flagged_clearing',

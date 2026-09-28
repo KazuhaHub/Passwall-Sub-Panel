@@ -20,6 +20,7 @@ import (
 var geoReasonLocaleKeys = map[GeoReasonCode][]string{
 	GeoWhyDisabled:        {"reason_disabled"},
 	GeoWhyExempt:          {"reason_exempt"},
+	GeoWhyTrusted:         {"reason_trusted"},
 	GeoWhyIdleStale:       {"reason_idle_stale"},
 	GeoWhyIdleNone:        {"reason_idle_none"},
 	GeoWhyUnknownExcluded: {"reason_unknown_excluded"},

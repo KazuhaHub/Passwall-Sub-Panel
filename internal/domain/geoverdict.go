@@ -146,7 +146,9 @@ type GeoVerdict struct {
 // they mean "do not evaluate", not "evaluated and found clean", and an
 // operator reading the state should see that distinction rather than a Clean
 // they might mistake for evidence; both reset every streak, the ban streak
-// included, so nothing accrued before is waiting when judging resumes. Idle,
+// included, so nothing accrued before is waiting when judging resumes.
+// Exempt has two branches, in this order: an admin's trust in this one
+// account (p.Trusted), then the group's allow_anywhere. Idle,
 // "all excluded" and every Unknown then FREEZE the streaks — flag and ban
 // alike — because counting a sample nobody could judge as clean would let a
 // sharer clear a flag by disconnecting or by routing through a relay.
@@ -171,6 +173,21 @@ func EvaluateGeo(p GeoAnomalyPolicy, obs GeoObservation, prev GeoStreak) GeoVerd
 		v.State = GeoStateDisabled
 		v.Reason = "location checks are switched off for this account"
 		v.Why = mk(GeoWhyDisabled, GeoTierNone)
+		v.Streak = GeoStreak{}
+		return v
+	}
+	if p.Trusted {
+		// One account an admin reviewed and trusts: exempt, like
+		// allow_anywhere, with its own code so the reader sees who exempted
+		// it. After Disabled, which is the group's decision and must keep
+		// saying the detector is off; before AllowAnywhere, because the
+		// per-account decision is the more specific one. The streak resets
+		// for the same reason an exemption's does, and resetting BanOver
+		// here is what keeps a ban that was due from reaching an account the
+		// moment it is trusted.
+		v.State = GeoStateExempt
+		v.Reason = "an admin trusts this account; location is not judged"
+		v.Why = mk(GeoWhyTrusted, GeoTierNone)
 		v.Streak = GeoStreak{}
 		return v
 	}

@@ -16,6 +16,7 @@ type GeoReasonCode string
 const (
 	GeoWhyDisabled         GeoReasonCode = "disabled"
 	GeoWhyExempt           GeoReasonCode = "exempt"
+	GeoWhyTrusted          GeoReasonCode = "trusted"
 	GeoWhyIdleStale        GeoReasonCode = "idle_stale"
 	GeoWhyIdleNone         GeoReasonCode = "idle_none"
 	GeoWhyUnknownExcluded  GeoReasonCode = "unknown_excluded"
@@ -37,7 +38,7 @@ const (
 // it to the branches.
 func AllGeoReasonCodes() []GeoReasonCode {
 	return []GeoReasonCode{
-		GeoWhyDisabled, GeoWhyExempt,
+		GeoWhyDisabled, GeoWhyExempt, GeoWhyTrusted,
 		GeoWhyIdleStale, GeoWhyIdleNone,
 		GeoWhyUnknownExcluded, GeoWhyUnknownGeoOff, GeoWhyUnknownLowRatio,
 		GeoWhySuspect, GeoWhyFlaggedSustained, GeoWhyFlaggedClearing,
