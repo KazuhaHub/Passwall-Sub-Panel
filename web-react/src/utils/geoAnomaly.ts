@@ -5,6 +5,7 @@
 // rendering.
 import type { GeoAnomaly, GeoEvidence, GeoSpot, GeoTier, GeoWhy } from '@/api/geoAnomalies'
 import type { GeoIPStatus } from '@/api/settings'
+import { sentence } from './sentence'
 
 /**
  * The i18n key for a tier chip, or null when the row has no tier (clean,
@@ -31,13 +32,15 @@ const REASON = 'admin:geo_anomalies.'
  * against which tolerance. The same choice the server's describeOver makes,
  * so the localized sentence and the stored English cannot disagree on them.
  * null for a tier this build does not know, which the caller renders as the
- * stored English rather than a sentence with a hole in it.
+ * stored English rather than a sentence with a hole in it. A block the
+ * evidence lacks leaves its numbers undefined, and the sentence is read
+ * without them.
  */
 function overAt(why: GeoWhy, ev: GeoEvidence): { spread: number; tolerance: number; country: string } | null {
   switch (why.tier) {
-    case 'country': return { spread: ev.spread.countries, tolerance: why.tol.countries, country: '' }
-    case 'region': return { spread: ev.spread.regions, tolerance: why.tol.regions, country: ev.spread.region_country }
-    case 'city': return { spread: ev.spread.cities, tolerance: why.tol.cities, country: ev.spread.city_country }
+    case 'country': return { spread: ev.spread?.countries, tolerance: why.tol?.countries, country: '' }
+    case 'region': return { spread: ev.spread?.regions, tolerance: why.tol?.regions, country: ev.spread?.region_country }
+    case 'city': return { spread: ev.spread?.cities, tolerance: why.tol?.cities, country: ev.spread?.city_country }
     default: return null
   }
 }
@@ -53,12 +56,19 @@ function overAt(why: GeoWhy, ev: GeoEvidence): { spread: number; tolerance: numb
  * an account whose group allows more. Unlike the English, the
  * sentence does not repeat the place list — the Places column beside it
  * already shows every spot, by country, region and city.
+ *
+ * A row whose evidence lacks a number its sentence names reads the same
+ * sentence without numbers (`<key>_bare`, utils/sentence), and a streak
+ * clause it cannot count is left out: never a sentence with holes in it.
  */
 export function reasonText(row: GeoAnomaly, t: Translate): string {
   const ev = row.evidence
   const why = ev && ev.v >= 2 ? ev.why : undefined
   if (!why) return row.reason
   const d = { defaultValue: row.reason }
+  // A sentence with numbers, or the same sentence without them.
+  const filled = (key: string, values: Record<string, unknown>) => sentence(t, `${REASON}${key}`, values,
+    () => t(`${REASON}${key}_bare`, d), row.reason)
   // Two strings make one sentence, and they fall back together. With the
   // head missing, t has already returned the whole stored English, streak
   // included; a localized tail glued onto it would print the streak twice,
@@ -75,21 +85,21 @@ export function reasonText(row: GeoAnomaly, t: Translate): string {
       // allow_anywhere: the sentence says who exempted it.
       return t(`${REASON}reason_trusted`, d)
     case 'idle_stale':
-      return t(`${REASON}reason_idle_stale`, { ...d, stale: ev.stale })
+      return filled('reason_idle_stale', { stale: ev.stale })
     case 'idle_none':
       return t(`${REASON}reason_idle_none`, d)
     case 'unknown_excluded': {
       const x = ev.excluded
-      return t(`${REASON}reason_unknown_excluded`, {
-        ...d, total: x.shared + x.listed + x.infra + x.internal,
-        shared: x.shared, listed: x.listed, infra: x.infra, internal: x.internal,
+      return filled('reason_unknown_excluded', {
+        total: x && x.shared + x.listed + x.infra + x.internal,
+        shared: x?.shared, listed: x?.listed, infra: x?.infra, internal: x?.internal,
       })
     }
     case 'unknown_geo_off':
       return t(`${REASON}reason_unknown_geo_off`, d)
     case 'unknown_low_ratio':
-      return t(`${REASON}reason_unknown_low_ratio`, {
-        ...d, placed: ev.coverage.placed, sample: ev.coverage.placed + ev.coverage.unplaced,
+      return filled('reason_unknown_low_ratio', {
+        placed: ev.coverage?.placed, sample: ev.coverage && ev.coverage.placed + ev.coverage.unplaced,
         ratio: Math.round(why.min_placed_ratio * 100),
       })
     case 'suspect':
@@ -97,11 +107,11 @@ export function reasonText(row: GeoAnomaly, t: Translate): string {
       const at = overAt(why, ev)
       if (!at) return row.reason
       const suffix = why.code === 'suspect' ? 'reason_suspect_suffix' : 'reason_flagged_suffix'
-      return glue(t(`${REASON}reason_over_${why.tier}`, { ...d, ...at }),
-        () => t(`${REASON}${suffix}`, { over: row.over_streak, need: why.flag_after, defaultValue: '' }))
+      return glue(filled(`reason_over_${why.tier}`, at),
+        () => sentence(t, `${REASON}${suffix}`, { over: row.over_streak, need: why.flag_after }, () => '', ''))
     }
     case 'flagged_clearing': {
-      const head = t(`${REASON}reason_flagged_clearing`, { ...d, under: row.under_streak, need: why.clear_after })
+      const head = filled('reason_flagged_clearing', { under: row.under_streak, need: why.clear_after })
       // The tier that RAISED the flag, named with the Geo tab's own chip
       // label. A latch stored without one gets no clause, as on the server.
       const tierKey = tierLabelKey(why.tier ?? '')
@@ -113,9 +123,9 @@ export function reasonText(row: GeoAnomaly, t: Translate): string {
     case 'clean_unplaced':
       return t(`${REASON}reason_clean_unplaced`, d)
     case 'clean_within':
-      return t(`${REASON}reason_clean_within`, {
-        ...d, countries: ev.spread.countries, regions: ev.spread.regions, cities: ev.spread.cities,
-        tol_countries: why.tol.countries, tol_regions: why.tol.regions, tol_cities: why.tol.cities,
+      return filled('reason_clean_within', {
+        countries: ev.spread?.countries, regions: ev.spread?.regions, cities: ev.spread?.cities,
+        tol_countries: why.tol?.countries, tol_regions: why.tol?.regions, tol_cities: why.tol?.cities,
         scope: t(`${REASON}reason_scope_${why.scope}`, { defaultValue: why.scope }),
       })
     default:

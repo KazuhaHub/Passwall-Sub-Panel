@@ -1003,19 +1003,27 @@
     "reason_exempt": "此账号允许从任何地方连接",
     "reason_trusted": "管理员已信任此账号，不做地区判定",
     "reason_idle_stale": "此刻没有并发连接；上游窗口里还有 {{stale}} 个更早见过的地址",
+    "reason_idle_stale_bare": "此刻没有并发连接；上游窗口里还有更早见过的地址",
     "reason_idle_none": "此刻没有连接",
     "reason_unknown_excluded": "全部 {{total}} 个并发地址都已排除（共享出口 {{shared}}、忽略名单 {{listed}}、本机节点 / 中转 {{infra}}、内网 {{internal}}），不下结论",
+    "reason_unknown_excluded_bare": "全部并发地址都已排除，不下结论",
     "reason_unknown_geo_off": "地区库不可用，不下结论",
     "reason_unknown_low_ratio": "{{sample}} 个地址中只有 {{placed}} 个能定位（至少需要 {{ratio}}%）",
+    "reason_unknown_low_ratio_bare": "能定位的地址太少，不下结论",
     "reason_over_country": "同时在 {{spread}} 个国家（容错 {{tolerance}}）",
+    "reason_over_country_bare": "同时在多个国家，超过容错",
     "reason_over_region": "同时在 {{country}} 的 {{spread}} 个省 / 州（容错 {{tolerance}}）",
+    "reason_over_region_bare": "同一国家同时在多个省 / 州，超过容错",
     "reason_over_city": "同时在 {{country}} 的 {{spread}} 个城市（容错 {{tolerance}}）",
+    "reason_over_city_bare": "同一国家同时在多个城市，超过容错",
     "reason_suspect_suffix": "，连续 {{over}} / {{need}} 次",
     "reason_flagged_suffix": "，已持续 {{over}} / {{need}} 次",
     "reason_flagged_clearing": "已连续 {{under}} / {{need}} 次在容错内，满 {{need}} 次后解除",
+    "reason_flagged_clearing_bare": "已回到容错内，连续满足所需次数后解除",
     "reason_flagged_clearing_tier": "；标记原因：{{tier}}",
     "reason_clean_unplaced": "有连接，但没有地址能被定位",
     "reason_clean_within": "在容错内：{{countries}} 个国家；最多的国家内 {{regions}} 个省、{{cities}} 个城市；容错 {{tol_countries}} / {{tol_regions}} / {{tol_cities}}（{{scope}}）",
+    "reason_clean_within_bare": "在容错内",
     "reason_scope_city": "判到城市",
     "reason_scope_region": "判到省",
     "reason_scope_country": "仅判国家",
@@ -1137,6 +1145,33 @@
         "new_country": "从新国家登录：{{countries}}",
         "known_countries": "最近的登录都来自已知国家"
       }
+    },
+    "code_bare": {
+      "sub_spread": {
+        "retention_short": "订阅日志保留的天数少于判断所需",
+        "all_excluded": "全部拉取来源都已排除",
+        "low_placed": "能定位的来源太少",
+        "spread": "有多组互不相连的常驻省份，超过容错",
+        "spread_building": "有多组互不相连的省份，但还没有都出现满所需天数",
+        "within": "省份分组在容错内"
+      },
+      "devices": {
+        "retention_short": "订阅日志保留的天数少于判断所需",
+        "over": "常用设备超过上限",
+        "over_building": "设备超过上限，但常用的还没有超过",
+        "within": "设备数在上限内"
+      },
+      "usage_shift": {
+        "retention_short": "流量历史保留的天数少于判断所需",
+        "warmup": "用量历史还不够，暂不判断",
+        "sustained": "最近多天的用量超过自身基线",
+        "building": "最近有几天的用量超过自身基线，还没到标记天数",
+        "within": "最近的用量没有持续超过自身基线"
+      },
+      "login_country": {
+        "learning": "之前的登录次数还不够，还在学习",
+        "new_country": "从新国家登录"
+      }
     }
   },
   "risk_center": {
@@ -1231,7 +1266,7 @@
       "col_panel": "面板 / 节点",
       "col_region": "地区",
       "col_status": "判定",
-      "col_seen": "面板最后看到",
+      "col_seen": "仍有连接",
       "col_device": "推断设备",
       "kept": "参与判定",
       "exclusion": {
@@ -1241,7 +1276,8 @@
         "shared": "共享出口"
       },
       "source_key": "来源 {{key}}",
-      "seen_panel_clock": "{{time}}（面板时钟）",
+      "still_connected": "仍有连接（截至 {{time}}）",
+      "still_connected_hint": "3X-UI 只报告此刻仍有连接的地址；这里是面板扫描的时间，不是这个地址最后一次使用的时间。",
       "seen_none": "无时间戳",
       "node_hint": "3X-UI 的节点标识，原样显示",
       "device_inferred": "推断",
@@ -1304,6 +1340,11 @@
         "admin_resume": "管理员或运维员恢复了服务",
         "replaced": "被「{{reason}}」暂停替换"
       },
+      "geo_auto_bare": {
+        "country": "同时在多个国家或地区，已自动暂停",
+        "region": "同一国家同时在多个省或州，已自动暂停",
+        "city": "同一国家同时在多个城市，已自动暂停"
+      },
       "hold": {
         "geo_anomaly": "异地人工暂停"
       },
@@ -1364,6 +1405,8 @@
       "devices_empty": "这段时间没有订阅拉取",
       "devices_unavailable": "订阅日志暂时读不到",
       "open_sub_logs": "在日志管理中查看全部订阅记录",
+      "open_records": "在记录中查看全部",
+      "records_capped": "仅显示最近 {{shown}} 条（共 {{total}} 条）",
       "logins_title": "最近登录",
       "open_auth_logs": "在认证日志中查看"
     },

@@ -32,9 +32,10 @@ import { parseRecordsParams, RECORDS_PAGE_SIZES, recordsSearch, type RecordsFilt
  * The event chip's colour, by the level the record moved TO: into a flag or
  * a suspension is the alarm, into suspect the ramp, and every leave or lift
  * (level none) is neutral — a cleared flag is news, not good news. A review
- * record has no level and is neutral too.
+ * record has no level and is neutral too. The drawer's 时间线 colours its
+ * chips the same way.
  */
-function levelColor(level: string): 'error' | 'warning' | 'default' {
+export function levelColor(level: string): 'error' | 'warning' | 'default' {
   switch (level) {
     case 'flagged':
     case 'suspended':
@@ -59,11 +60,6 @@ function isRiskKind(source: string): boolean {
 }
 
 export interface RecordsTabProps {
-  /** Fixes the list to one account (the drawer's 时间线): no user filter or
-   *  column, and the filters are the instance's own, not the page's URL. */
-  userId?: number
-  /** The drawer's form: a longer page. */
-  compact?: boolean
   onOpenUser?: (userId: number) => void
 }
 
@@ -78,32 +74,27 @@ export interface RecordsTabProps {
  * who, which source, when; level and change sit behind 更多筛选, with a badge
  * counting the ones set, so a filter in force is never out of sight.
  *
- * The page's instance keeps its filters in the URL (`rec_*`, riskParams), so
- * opening an account, following a drawer link and coming Back, a reload or a
- * copied link shows the same filtered page; written by REPLACE, like every
- * filter on the page. The drawer's instance (`userId`) keeps the same params
- * in its own state: it lives as long as the drawer, and the page's URL is not
- * its to write.
+ * The tab keeps its filters in the URL (`rec_*`, riskParams), so opening an
+ * account, following a drawer link and coming Back, a reload or a copied
+ * link shows the same filtered page; written by REPLACE, like every filter on
+ * the page. The drawer's 时间线 links here filtered to its account, and lists
+ * that account's records itself in a form made for a side panel.
  */
-export default function RecordsTab({ userId, compact = false, onOpenUser }: RecordsTabProps) {
+export default function RecordsTab({ onOpenUser }: RecordsTabProps) {
   const { t, i18n } = useTranslation(['admin'])
   const md = useTheme().palette.md
   const scope = useQueryScope()
-  const ownsUrl = userId === undefined
   const [urlParams, setUrlParams] = useSearchParams()
-  // The drawer's list is longer by default: it is the account's whole story.
-  const [localParams, setLocalParams] = useState(() => new URLSearchParams(compact ? 'rec_size=50' : ''))
-  const filters = parseRecordsParams(ownsUrl ? urlParams : localParams)
+  const filters = parseRecordsParams(urlParams)
   // recordsSearch starts any filter change again at the first page: page 3
   // of one filter is not a page of another.
   const update = (patch: Partial<RecordsFilters>) => {
-    if (ownsUrl) setUrlParams(prev => recordsSearch(prev, patch), { replace: true })
-    else setLocalParams(prev => recordsSearch(prev, patch))
+    setUrlParams(prev => recordsSearch(prev, patch), { replace: true })
   }
   const [moreAnchor, setMoreAnchor] = useState<HTMLElement | null>(null)
   const [open, setOpen] = useState<ReadonlySet<number>>(() => new Set())
 
-  const who = userId ?? filters.user_id
+  const who = filters.user_id
   const sinceAt = toInstant(filters.since)
   const untilAt = toInstant(filters.until)
   const params: FlagRecordParams = {
@@ -126,8 +117,7 @@ export default function RecordsTab({ userId, compact = false, onOpenUser }: Reco
     return next
   })
 
-  const showUser = userId === undefined
-  const cols = showUser ? 6 : 5
+  const cols = 6
   const err = error
     ? (isAxiosError(error) ? String(error.response?.data?.error ?? error.message) : String(error))
     : ''
@@ -138,10 +128,8 @@ export default function RecordsTab({ userId, compact = false, onOpenUser }: Reco
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
       <Box sx={{ display: 'flex', gap: 1.5, flexWrap: 'wrap', alignItems: 'center' }}>
-        {showUser && (
-          <UserAutocomplete value={filters.user_id ?? null} onChange={id => update({ user_id: id ?? undefined })}
-            label={t('admin:risk_center.flags.col_user')} width={220} />
-        )}
+        <UserAutocomplete value={filters.user_id ?? null} onChange={id => update({ user_id: id ?? undefined })}
+          label={t('admin:risk_center.flags.col_user')} width={220} />
         <TextField select size="small" label={t('admin:risk_center.flags.filter_source')} sx={{ width: 170 }}
           value={filters.source ?? ''} onChange={e => update({ source: e.target.value || undefined })}>
           <MenuItem value="">{t('admin:risk_center.live.opt_all')}</MenuItem>
@@ -183,7 +171,7 @@ export default function RecordsTab({ userId, compact = false, onOpenUser }: Reco
           <TableHead>
             <TableRow>
               <TableCell>{t('admin:risk_center.flags.col_at')}</TableCell>
-              {showUser && <TableCell>{t('admin:risk_center.flags.col_user')}</TableCell>}
+              <TableCell>{t('admin:risk_center.flags.col_user')}</TableCell>
               <TableCell>{t('admin:risk_center.flags.col_source')}</TableCell>
               <TableCell>{t('admin:risk_center.flags.col_event')}</TableCell>
               <TableCell>{t('admin:risk_center.flags.col_detail')}</TableCell>
@@ -200,7 +188,7 @@ export default function RecordsTab({ userId, compact = false, onOpenUser }: Reco
               </TableCell></TableRow>
             )}
             {rows.map(r => (
-              <FlagRow key={r.id} rec={r} showUser={showUser} cols={cols} open={open.has(r.id)}
+              <FlagRow key={r.id} rec={r} cols={cols} open={open.has(r.id)}
                 onToggle={() => toggle(r.id)} onOpenUser={onOpenUser} />
             ))}
           </TableBody>
@@ -215,9 +203,8 @@ export default function RecordsTab({ userId, compact = false, onOpenUser }: Reco
   )
 }
 
-function FlagRow({ rec, showUser, cols, open, onToggle, onOpenUser }: {
+function FlagRow({ rec, cols, open, onToggle, onOpenUser }: {
   rec: FlagRecord
-  showUser: boolean
   cols: number
   open: boolean
   onToggle: () => void
@@ -231,20 +218,18 @@ function FlagRow({ rec, showUser, cols, open, onToggle, onOpenUser }: {
     <>
       <TableRow hover>
         <TableCell sx={{ fontSize: 12, whiteSpace: 'nowrap' }}>{formatMsDualTz(rec.at_ms, panelTz)}</TableCell>
-        {showUser && (
-          <TableCell>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-              <span>{userLabel(rec)}</span>
-              {onOpenUser && (
-                <Tooltip title={t('admin:risk_center.open_user')}>
-                  <IconButton size="small" onClick={() => onOpenUser(rec.user_id)}>
-                    <PersonSearchOutlinedIcon fontSize="inherit" />
-                  </IconButton>
-                </Tooltip>
-              )}
-            </Box>
-          </TableCell>
-        )}
+        <TableCell>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+            <span>{userLabel(rec)}</span>
+            {onOpenUser && (
+              <Tooltip title={t('admin:risk_center.open_user')}>
+                <IconButton size="small" onClick={() => onOpenUser(rec.user_id)}>
+                  <PersonSearchOutlinedIcon fontSize="inherit" />
+                </IconButton>
+              </Tooltip>
+            )}
+          </Box>
+        </TableCell>
         <TableCell>
           <Chip size="small" variant="outlined" label={t(flagSourceKey(rec.source), { defaultValue: rec.source })} />
         </TableCell>
@@ -283,8 +268,11 @@ function FlagRow({ rec, showUser, cols, open, onToggle, onOpenUser }: {
  * labels, tiers, hold names, panel-time instants, never a raw code). The
  * params as sent are one click further, under 原始数据, for the case the
  * rows do not cover.
+ *
+ * The drawer's 时间线 expands its entries with it too, `sentence` off: its
+ * entry already reads the sentence on the line above.
  */
-function RecordDetail({ rec }: { rec: FlagRecord }) {
+export function RecordDetail({ rec, sentence = true }: { rec: FlagRecord; sentence?: boolean }) {
   const { t, i18n } = useTranslation(['admin'])
   const md = useTheme().palette.md
   const panelTz = useSiteStore(s => s.timezone)
@@ -299,7 +287,7 @@ function RecordDetail({ rec }: { rec: FlagRecord }) {
   const rows = risk ? [] : paramRows(rec, t, panelTz, i18n.language)
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, fontSize: 13, py: 0.5 }}>
-      <Typography sx={{ fontSize: 13, color: md.onSurface }}>{flagText(rec, t, i18n.language)}</Typography>
+      {sentence && <Typography sx={{ fontSize: 13, color: md.onSurface }}>{flagText(rec, t, i18n.language)}</Typography>}
       {geoEvidence && (
         <Box sx={{ fontSize: 13 }}>
           <GeoPlaces row={{ places: [], evidence: geoEvidence }} />

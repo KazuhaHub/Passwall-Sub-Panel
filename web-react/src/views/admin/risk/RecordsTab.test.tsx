@@ -71,15 +71,14 @@ function Where() {
   return <p data-testid="location">{loc.pathname + loc.search}</p>
 }
 
-// Both instances live under the page's router: the page's keeps its filters
-// in the URL, the drawer's must not touch it.
-function mount(props: { userId?: number; compact?: boolean } = {}, search = '?tab=records') {
+// Under the page's router, which the tab keeps its filters in.
+function mount(search = '?tab=records') {
   client = makeTestQueryClient()
   render(
     <MemoryRouter initialEntries={[`/admin/risk${search}`]}>
       <ThemeProvider theme={theme}>
         <Routes>
-          <Route path="/admin/risk" element={<><RecordsTab {...props} /><Where /></>} />
+          <Route path="/admin/risk" element={<><RecordsTab /><Where /></>} />
         </Routes>
       </ThemeProvider>
     </MemoryRouter>,
@@ -313,7 +312,7 @@ describe('RecordsTab', () => {
   // following a drawer link, a reload or a copied link shows the same page.
   it('keeps the page instance’s filters in the URL, and they survive a remount', async () => {
     serve([rec({})])
-    mount({}, '?tab=records&user=9&rec_page=2')
+    mount('?tab=records&user=9&rec_page=2')
     await screen.findByText('alice')
     await pick('来源', '管理员处理')
     await waitFor(() => expect(urlParams().get('rec_source')).toBe('review'))
@@ -337,36 +336,11 @@ describe('RecordsTab', () => {
 
     vi.clearAllMocks()
     serve([rec({})])
-    mount({}, search)
+    mount(search)
     await screen.findByText('alice')
     expect(flagParams().at(-1)).toEqual(want)
     expect(screen.getByRole('combobox', { name: '来源' }).textContent).toBe('管理员处理')
     expect((screen.getByLabelText('开始（浏览器时间）') as HTMLInputElement).value).toBe('2026-09-01T08:00')
-  })
-
-  // The drawer's list is one account's and lives only as long as the
-  // drawer: its filters are its own, and the page's URL is not its to write.
-  it('the compact instance writes nothing to the URL', async () => {
-    serve([rec({})])
-    mount({ userId: 7, compact: true }, '?tab=queue&user=7')
-    await screen.findAllByText('进入疑似')
-    await pick('来源', '管理员处理')
-    await waitFor(() => expect(flagParams().some(p => p.source === 'review' && p.user_id === 7)).toBe(true))
-    fireEvent.click(screen.getByRole('button', { name: '更多筛选' }))
-    await pick('级别', '已标记')
-    await waitFor(() => expect(flagParams().some(p => p.level === 'flagged')).toBe(true))
-    expect(location()).toBe('/admin/risk?tab=queue&user=7')
-  })
-
-  // Inside the drawer the account is fixed: no user filter, no user column,
-  // and every request names the account.
-  it('scopes a compact list to one account', async () => {
-    serve([rec({ params: null })])
-    mount({ userId: 7, compact: true })
-    await screen.findAllByText('进入疑似')
-    expect(flagParams().every(p => p.user_id === 7 && p.page_size === 50)).toBe(true)
-    expect(screen.queryByRole('columnheader', { name: '用户' })).toBeNull()
-    expect(screen.queryByRole('combobox', { name: '用户' })).toBeNull()
   })
 
   // Every other page reads times in the panel's timezone; the records read

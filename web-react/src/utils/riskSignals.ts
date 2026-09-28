@@ -6,6 +6,7 @@ import type {
 } from '@/api/riskSignals'
 import type { Translate } from './geoAnomaly'
 import type { RegionNamer, RegionRef } from './regionName'
+import { sentence } from './sentence'
 
 /** The evidence as a record, or an empty one for a verdict that carries none
  *  (idle, disabled, exempt): those codes' sentences have no numbers. */
@@ -20,13 +21,15 @@ function codeParams(sig: RiskSignal): Record<string, unknown> {
   switch (sig.kind) {
     case 'sub_spread': {
       const ev = evidenceOf<SubSpreadEvidence>(sig)
-      const x = ev.excluded ?? { shared: 0, listed: 0, infra: 0, internal: 0 }
+      // No exclusions on record are no numbers, not four zeros: the
+      // sentence then reads without them (riskCodeText).
+      const x = ev.excluded
       return {
         // retention_days is left out when the logs are never pruned, and then
         // the window is the whole seven days.
         retention: ev.retention_days ?? ev.window_days, needed: ev.min_days,
-        total: x.shared + x.listed + x.infra + x.internal,
-        shared: x.shared, listed: x.listed, infra: x.infra, internal: x.internal,
+        total: x && x.shared + x.listed + x.infra + x.internal,
+        shared: x?.shared, listed: x?.listed, infra: x?.infra, internal: x?.internal,
         sources: ev.coverage?.sources, placed: ev.coverage?.placed, ratio: ev.min_placed_pct,
         country: ev.country, min_days: ev.min_days, tolerance: ev.tolerance,
         // A flag counts the groups holding a RECURRING province; the ramp and
@@ -77,9 +80,14 @@ function codeParams(sig: RiskSignal): Record<string, unknown> {
  * evidence. The default is the code itself: a code a newer server wrote
  * before this build learned it still says something, where a blank tooltip
  * would say nothing.
+ *
+ * A verdict stored without a number its sentence names — no evidence, or
+ * evidence missing the field — reads the code's sentence without numbers
+ * (`risk_signals.code_bare.<kind>.<code>`), never one with holes in it.
  */
 export function riskCodeText(sig: RiskSignal, t: Translate): string {
-  return t(`admin:risk_signals.code.${sig.kind}.${sig.code}`, { ...codeParams(sig), defaultValue: sig.code })
+  return sentence(t, `admin:risk_signals.code.${sig.kind}.${sig.code}`, codeParams(sig),
+    () => t(`admin:risk_signals.code_bare.${sig.kind}.${sig.code}`, { defaultValue: sig.code }), sig.code)
 }
 
 /** A day mask as one flag per window day, oldest first (bit i = day i). */

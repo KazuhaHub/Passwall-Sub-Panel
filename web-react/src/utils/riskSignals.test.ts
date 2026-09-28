@@ -117,6 +117,40 @@ describe('riskCodeText', () => {
     // code is still more than a blank tooltip.
     expect(riskCodeText(sig('devices', 'unknown', { code: 'teleported' }), zhT)).toBe('teleported')
   })
+
+  // 「有 组互不相连的常驻省份（容错 ）」: a verdict stored without the numbers
+  // its sentence names — no evidence at all, or evidence missing a field —
+  // reads the same sentence without numbers, never one with holes in it.
+  const zhDict = flatten(zh as Nested)
+  const enDict = flatten(en as Nested)
+  const withNumbers = RISK_KINDS.flatMap(k => RISK_CODES[k]
+    .filter(c => [zhDict, enDict].some(d => /\{\{/.test(d[`risk_signals.code.${k}.${c}`] ?? '')))
+    .map(c => [k, c] as const))
+
+  it('has a sentence without numbers for exactly the codes whose sentence has numbers', () => {
+    for (const dict of [zhDict, enDict]) {
+      const bare = Object.keys(dict).filter(k => k.startsWith('risk_signals.code_bare.')).sort()
+      expect(bare).toEqual(withNumbers.map(([k, c]) => `risk_signals.code_bare.${k}.${c}`).sort())
+      for (const key of bare) expect(dict[key], key).not.toMatch(/\{\{|\}\}/)
+    }
+  })
+
+  it.each(withNumbers)('%s.%s without its numbers reads its sentence without them, in both languages', (kind, code) => {
+    for (const [t, dict] of [[zhT, zhDict], [enT, enDict]] as const) {
+      const want = dict[`risk_signals.code_bare.${kind}.${code}`]
+      expect(riskCodeText(sig(kind, 'flagged', { code, evidence: null }), t)).toBe(want)
+      expect(riskCodeText(sig(kind, 'flagged', { code, evidence: {} }), t)).toBe(want)
+    }
+  })
+
+  it('reads the verdicts seen with holes as whole sentences', () => {
+    expect(riskCodeText(sig('sub_spread', 'flagged', { code: 'spread' }), zhT)).toBe('有多组互不相连的常驻省份，超过容错')
+    expect(riskCodeText(sig('usage_shift', 'clean', { code: 'within' }), zhT)).toBe('最近的用量没有持续超过自身基线')
+    // The events are there, but none names a country.
+    expect(riskCodeText(sig('login_country', 'flagged', {
+      code: 'new_country', evidence: { ...evidence.login_country, events: [] },
+    }), enT)).toBe('Login from a new country')
+  })
 })
 
 describe('usage_shift reasons', () => {

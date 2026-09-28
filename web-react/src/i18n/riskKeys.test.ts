@@ -194,3 +194,21 @@ describe('the risk center reads every word from the bundles', () => {
     expect(found).toEqual([])
   })
 })
+
+// ONE ACTION, ONE NAME (spec §3.7). The risk center's service actions are the
+// Users page's: an admin who suspends a user from the row menu and then opens
+// the risk drawer from the same row must meet the same words, and the toast
+// and the resulting state must not call it something else.
+describe('the service actions read as the Users page names them', () => {
+  it.each(Object.entries(bundles))('%s: pause and resume are the row menu\'s words', (_lang, dict) => {
+    expect(dict['risk_center.actions.pause']).toBe(dict['users.more_menu.suspend_service'])
+    expect(dict['risk_center.actions.resume']).toBe(dict['users.more_menu.resume_service'])
+  })
+
+  it('never calls suspending proxy service "pausing" it in English', () => {
+    const paused = Object.entries(bundles.en)
+      .filter(([, v]) => /paus\w*\s+proxy service|proxy service\s+(is\s+)?paused/i.test(v))
+      .map(([k]) => k)
+    expect(paused).toEqual([])
+  })
+})

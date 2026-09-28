@@ -264,7 +264,7 @@
       "ignore_addresses": "Ignored addresses (IP or CIDR)",
       "ignore_addresses_hint": "One per line or comma-separated, up to 256; text after # is a comment. For relays, CDNs or office exits the panel does not know. Node and relay addresses, 100.64.0.0/10 and private ranges, and addresses held at once by at least the shared-exit account count (3 by default) are excluded automatically. Global only.",
       "ban_section": "Automatic temporary suspension (off by default)",
-      "ban_hint": "When on, accounts that stay over the suspension thresholds have proxy service paused and restored automatically when the time is up. Panel login is kept, no other suspension is overwritten, and accounts in an emergency window, expired or over quota are never auto-suspended. An account still over the line after it is restored is suspended again — trust a confirmed false positive from its risk details. Thresholds are raised to at least the flag tolerances.",
+      "ban_hint": "When on, accounts that stay over the suspension thresholds have proxy service suspended and restored automatically when the time is up. Panel login is kept, no other suspension is overwritten, and accounts in an emergency window, expired or over quota are never auto-suspended. An account still over the line after it is restored is suspended again — trust a confirmed false positive from its risk details. Thresholds are raised to at least the flag tolerances.",
       "ban_enabled": "Enable automatic suspension",
       "ban_max_countries": "Suspend threshold: countries",
       "ban_max_regions": "Suspend threshold: regions",
@@ -1005,19 +1005,27 @@
     "reason_exempt": "This account is allowed to connect from anywhere",
     "reason_trusted": "An admin trusts this account; its location is not judged",
     "reason_idle_stale": "No concurrent connections; {{stale}} address(es) seen earlier in the upstream window",
+    "reason_idle_stale_bare": "No concurrent connections; addresses seen earlier remain in the upstream window",
     "reason_idle_none": "No live connections",
     "reason_unknown_excluded": "All {{total}} concurrent address(es) are excluded (shared {{shared}}, listed {{listed}}, infrastructure {{infra}}, internal {{internal}}); no conclusion drawn",
+    "reason_unknown_excluded_bare": "All concurrent addresses are excluded; no conclusion drawn",
     "reason_unknown_geo_off": "Location lookup unavailable; no conclusion drawn",
     "reason_unknown_low_ratio": "Only {{placed}} of {{sample}} addresses could be located ({{ratio}}% required)",
+    "reason_unknown_low_ratio_bare": "Too few addresses could be located; no conclusion drawn",
     "reason_over_country": "In {{spread}} countries at once (tolerance {{tolerance}})",
+    "reason_over_country_bare": "In several countries at once, over the tolerance",
     "reason_over_region": "In {{spread}} regions of {{country}} at once (tolerance {{tolerance}})",
+    "reason_over_region_bare": "In several regions of one country at once, over the tolerance",
     "reason_over_city": "In {{spread}} cities of {{country}} at once (tolerance {{tolerance}})",
+    "reason_over_city_bare": "In several cities of one country at once, over the tolerance",
     "reason_suspect_suffix": ", {{over}} of {{need}} checks so far",
     "reason_flagged_suffix": ", sustained for {{over}} of {{need}} checks",
     "reason_flagged_clearing": "Within tolerance for {{under}} of the {{need}} checks needed to clear",
+    "reason_flagged_clearing_bare": "Back within tolerance; the flag clears after enough checks in a row",
     "reason_flagged_clearing_tier": "; flagged as {{tier}}",
     "reason_clean_unplaced": "Connected, but no address could be placed",
     "reason_clean_within": "Within tolerance: {{countries}} country(ies); {{regions}} region(s) and {{cities}} city(ies) in the widest country; tolerances {{tol_countries}}/{{tol_regions}}/{{tol_cities}} ({{scope}})",
+    "reason_clean_within_bare": "Within tolerance",
     "reason_scope_city": "judged down to cities",
     "reason_scope_region": "judged down to regions",
     "reason_scope_country": "countries only",
@@ -1139,6 +1147,33 @@
         "new_country": "Login from a new country: {{countries}}",
         "known_countries": "Recent logins all came from known countries"
       }
+    },
+    "code_bare": {
+      "sub_spread": {
+        "retention_short": "Subscription logs are not kept long enough to judge",
+        "all_excluded": "All fetch sources are excluded",
+        "low_placed": "Too few sources could be located",
+        "spread": "Several unconnected groups of recurring provinces, over the tolerance",
+        "spread_building": "Several unconnected groups of provinces, not all seen on enough days yet",
+        "within": "Groups of provinces within tolerance"
+      },
+      "devices": {
+        "retention_short": "Subscription logs are not kept long enough to judge",
+        "over": "Recurring devices over the limit",
+        "over_building": "Devices over the limit, but not yet the recurring ones",
+        "within": "Devices within the limit"
+      },
+      "usage_shift": {
+        "retention_short": "Traffic history is not kept long enough to judge",
+        "warmup": "Not enough usage history to judge yet",
+        "sustained": "Usage above the account's own baseline on too many recent days",
+        "building": "Usage above the account's own baseline on some recent days, not yet enough to flag",
+        "within": "Recent usage has not stayed above the account's own baseline"
+      },
+      "login_country": {
+        "learning": "Too few earlier logins; still learning",
+        "new_country": "Login from a new country"
+      }
     }
   },
   "risk_center": {
@@ -1233,7 +1268,7 @@
       "col_panel": "Panel / node",
       "col_region": "Region",
       "col_status": "Judgement",
-      "col_seen": "Last seen by panel",
+      "col_seen": "Still connected",
       "col_device": "Inferred device",
       "kept": "Judged",
       "exclusion": {
@@ -1243,7 +1278,8 @@
         "shared": "Shared exit"
       },
       "source_key": "Source {{key}}",
-      "seen_panel_clock": "{{time}} (panel clock)",
+      "still_connected": "Still connected (as of {{time}})",
+      "still_connected_hint": "3X-UI only reports addresses that still have an open connection; this is the panel's scan time, not when the address was last used.",
       "seen_none": "No timestamp",
       "node_hint": "3X-UI node id, shown as is",
       "device_inferred": "Inferred",
@@ -1306,6 +1342,11 @@
         "admin_resume": "Staff resumed the service",
         "replaced": "Replaced by a “{{reason}}” suspension"
       },
+      "geo_auto_bare": {
+        "country": "In several countries at once; suspended automatically",
+        "region": "In several regions of one country at once; suspended automatically",
+        "city": "In several cities of one country at once; suspended automatically"
+      },
       "hold": {
         "geo_anomaly": "Suspended for locations (manual)"
       },
@@ -1366,11 +1407,13 @@
       "devices_empty": "No fetches in this window",
       "devices_unavailable": "The subscription log could not be read",
       "open_sub_logs": "See every fetch in Logs",
+      "open_records": "See all in Records",
+      "records_capped": "Showing the latest {{shown}} of {{total}} records",
       "logins_title": "Recent logins",
       "open_auth_logs": "Open in auth logs"
     },
     "actions": {
-      "pause": "Pause proxy service",
+      "pause": "Suspend proxy service",
       "resume": "Resume proxy service",
       "convert_manual": "Keep suspended (manual)",
       "dismiss": "Dismiss",
@@ -1379,8 +1422,8 @@
       "trust": "Trust this account",
       "untrust": "Stop trusting",
       "more": "More actions",
-      "pause_title": "Pause proxy service for {{upn}}?",
-      "pause_message": "Pauses proxy and subscription only; panel login stays. Recorded as \"{{state}}\"; it does not lift by itself.",
+      "pause_title": "Suspend proxy service for {{upn}}?",
+      "pause_message": "Suspends proxy and subscription only; panel login stays. Recorded as \"{{state}}\"; it does not lift by itself.",
       "pause_note": "Message to the user (optional)",
       "pause_note_hint": "Shown in the user's portal and mail; do not include places, IPs or other users.",
       "convert_title": "Keep {{upn}} suspended manually?",
@@ -1400,7 +1443,7 @@
       "trust_resume": "Also resume proxy service (auto-suspended for locations now)",
       "untrust_title": "Stop trusting {{upn}}?",
       "untrust_message": "From the next check it is judged by its group's policy again.",
-      "done_pause": "Proxy service paused",
+      "done_pause": "Proxy service suspended",
       "done_convert": "Now suspended manually",
       "done_resume": "Proxy service resumed",
       "done_dismiss": "Dismissed",

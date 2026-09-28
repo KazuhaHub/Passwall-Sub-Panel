@@ -106,9 +106,23 @@ describe('LiveConnectionList', () => {
     useSiteStore.setState({ timezone: PANEL_TZ })
     mount([{ ...alice, connections: [conn({ devices: [{ label: 'Pixel', device_id4: 'ab12', client_type: 'clash-meta',
       ua: 'ClashMeta/1.0', fetches: 3, last_at_ms: 1_789_000_000_000 }] })] }])
-    expect(screen.getByText(`${formatMsDualTz(1_790_000_000_000, PANEL_TZ)}（面板时钟）`)).toBeTruthy()
+    expect(screen.getAllByText(`仍有连接（截至 ${formatMsDualTz(1_790_000_000_000, PANEL_TZ)}）`)).toHaveLength(1)
     fireEvent.mouseOver(screen.getByText('Pixel'))
     const tip = await screen.findByRole('tooltip')
     expect(tip.textContent ?? '').toContain(`3 次拉取，最近 ${formatMsDualTz(1_789_000_000_000, PANEL_TZ)}`)
+  })
+
+  // 3X-UI lists an address while any connection from it is open, and its
+  // scan stamps every such address with the scan's time: the same time for
+  // all of an account's addresses, not when each was last used. The column
+  // says what the time is, and why it is not a last-use time.
+  it('says a live address is still connected as of the panel’s scan, not when it was last used', async () => {
+    mount([alice])
+    expect(screen.getByRole('columnheader', { name: /^仍有连接/ })).toBeTruthy()
+    const hint = '3X-UI 只报告此刻仍有连接的地址；这里是面板扫描的时间，不是这个地址最后一次使用的时间。'
+    fireEvent.mouseOver(screen.getByLabelText(hint))
+    expect((await screen.findByRole('tooltip')).textContent).toBe(hint)
+    expect(screen.getAllByText(/^仍有连接（截至 .+）$/)).toHaveLength(alice.connections.length)
+    expect(screen.queryByText(/面板时钟|最后看到/)).toBeNull()
   })
 })

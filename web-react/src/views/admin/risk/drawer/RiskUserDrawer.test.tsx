@@ -110,10 +110,19 @@ const history = {
   total: 1, page: 1, page_size: 200,
 }
 
+// Two of the account's 120 records: a verdict with its evidence, and an
+// admin's trust, which stores no evidence to show.
 const flags = {
-  items: [{ id: 1, user_id: 7, upn: 'alice', display_name: 'Alice', source: 'devices', event: 'enter_suspect',
-    level: 'suspect', prev_level: '', state: 'suspect', code: 'over_building', params: null, at_ms: JUDGED_MS }],
-  total: 1, page: 1, page_size: 50,
+  items: [
+    { id: 1, user_id: 7, upn: 'alice', display_name: 'Alice', source: 'devices', event: 'enter_suspect',
+      level: 'suspect', prev_level: '', state: 'suspect', code: 'over_building', at_ms: JUDGED_MS,
+      params: { v: 1, window_days: 7, window_start: '2026-09-21', min_days: 3, max_devices: 3, recurrent: 2,
+        distinct: 4, fetches_with_hwid: 10, fetches_without: 0, clients: [],
+        devices: [{ label: 'iPad Air', hwid4: 'cd34', days: 2, last_ms: JUDGED_MS, client: '', recurrent: false }] } },
+    { id: 2, user_id: 7, upn: 'alice', display_name: 'Alice', source: 'review', event: 'trusted', level: '',
+      prev_level: '', state: '', code: 'trusted', params: null, at_ms: JUDGED_MS - 60_000 },
+  ],
+  total: 120, page: 1, page_size: 50,
 }
 
 const logins = { items: [{ id: 9, user_id: 7, upn: 'alice', method: 'local', outcome: 'success', ip: '192.0.2.44',
@@ -296,6 +305,29 @@ describe('RiskUserDrawer', () => {
     expect(screen.queryByRole('button', { name: '立即刷新' })).toBeNull()
   })
 
+  // The node is 3X-UI's raw id, explained as it is on the Live tab. The
+  // upstream time of a live source is the panel's scan, the same for every
+  // address still connected, never when this one was last used.
+  it('连接: the node id says what it is, and a live source is still connected as of the panel’s scan', async () => {
+    serve()
+    mount(7)
+    await header()
+    fireEvent.click(screen.getByRole('tab', { name: '连接' }))
+    await waitFor(() => expect(screen.getAllByTestId('conn-entry')).toHaveLength(2))
+    const [online] = screen.getAllByTestId('conn-entry')
+    const panelTz = useSiteStore.getState().timezone
+    const tips = async () => (await screen.findAllByRole('tooltip')).map(el => el.textContent ?? '')
+
+    fireEvent.mouseOver(within(online).getByText('n1'))
+    expect(await tips()).toContain('3X-UI 的节点标识，原样显示')
+
+    fireEvent.mouseOver(within(online).getByText(`最近 ${formatMsDualTz(TAKEN_MS, panelTz)}`, { exact: false }))
+    await waitFor(async () => expect((await tips()).some(tip =>
+      tip.includes(`仍有连接（截至 ${formatMsDualTz(1_790_000_000_000, panelTz)}）`)
+      && tip.includes('这里是面板扫描的时间，不是这个地址最后一次使用的时间'))).toBe(true))
+    expect(screen.queryByText(/面板时钟/)).toBeNull()
+  })
+
   it('设备: two-line entries and an exact link to the sub logs', async () => {
     serve()
     mount(7)
@@ -321,15 +353,52 @@ describe('RiskUserDrawer', () => {
     expect(screen.queryByText('这段时间没有订阅拉取')).toBeNull()
   })
 
-  it('时间线: the account’s flag records, its logins and an exact auth-log link', async () => {
+  // A side panel is no place for the Records page's table: one entry per
+  // record in two lines — when, which source, what changed; then why — with
+  // the evidence one click away, one filter, and the whole list a link away.
+  it('时间线: the account’s records as a two-line list, then its logins and an exact auth-log link', async () => {
     serve()
     mount(7)
     await header()
     fireEvent.click(screen.getByRole('tab', { name: '时间线' }))
 
-    await waitFor(() => expect(api.get.mock.calls.some(([u]) => u === '/admin/risk-center/flags')).toBe(true))
-    const flagCall = api.get.mock.calls.find(([u]) => u === '/admin/risk-center/flags')
-    expect(flagCall?.[1]?.params).toMatchObject({ user_id: 7 })
+    const entries = await screen.findAllByTestId('timeline-entry')
+    expect(entries).toHaveLength(2)
+    const first = within(entries[0])
+    expect(first.getByText('设备数')).toBeTruthy()
+    expect(first.getByText('进入疑似')).toBeTruthy()
+    expect(first.getByText('共 4 台设备，其中常用 2 台（上限 3）')).toBeTruthy()
+    // The exact time, in panel time, behind the short one.
+    const panelTz = useSiteStore.getState().timezone
+    fireEvent.mouseOver(first.getByTestId('timeline-time'))
+    expect((await screen.findByRole('tooltip')).textContent).toBe(formatMsDualTz(JUDGED_MS, panelTz))
+
+    // The evidence, drawn as on the Records page, without the sentence twice.
+    fireEvent.click(first.getByRole('button', { name: '查看证据' }))
+    const detail = within(first.getByTestId('record-detail'))
+    expect(detail.getByText('iPad Air')).toBeTruthy()
+    expect(detail.getByRole('button', { name: '原始数据' })).toBeTruthy()
+    expect(screen.getAllByText('共 4 台设备，其中常用 2 台（上限 3）')).toHaveLength(1)
+    // A record without params has nothing to expand.
+    expect(within(entries[1]).getByText('管理员处理')).toBeTruthy()
+    expect(within(entries[1]).queryByRole('button', { name: '查看证据' })).toBeNull()
+
+    // No table, no time range, no filters behind a button: those are the
+    // Records page's, one link away, filtered to this account.
+    expect(screen.queryByRole('table')).toBeNull()
+    expect(screen.queryByLabelText('开始（浏览器时间）')).toBeNull()
+    expect(screen.queryByRole('button', { name: '更多筛选' })).toBeNull()
+    expect(screen.getByText('仅显示最近 2 条（共 120 条）')).toBeTruthy()
+    const all = screen.getByRole('link', { name: '在记录中查看全部' })
+    expect(all.getAttribute('href')).toBe('/admin/risk?tab=records&rec_user=7')
+
+    // The one filter: the source, read for this account only.
+    const flagParams = () => api.get.mock.calls.filter(([u]) => u === '/admin/risk-center/flags').map(([, c]) => c?.params)
+    expect(flagParams()[0]).toMatchObject({ user_id: 7, page: 1, page_size: 50 })
+    fireEvent.mouseDown(screen.getByRole('combobox', { name: '来源' }))
+    fireEvent.click(await screen.findByRole('option', { name: '管理员处理' }))
+    await waitFor(() => expect(flagParams().at(-1)).toMatchObject({ user_id: 7, source: 'review' }))
+
     expect(await screen.findByText('192.0.2.44', { exact: false })).toBeTruthy()
     expect(screen.getByText('最近登录')).toBeTruthy()
     const link = screen.getByRole('link', { name: '在认证日志中查看' })

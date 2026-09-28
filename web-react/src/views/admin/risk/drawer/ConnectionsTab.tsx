@@ -23,24 +23,17 @@ function Entry({ c }: { c: MergedConnection }) {
   const { t } = useTranslation(['admin'])
   const md = useTheme().palette.md
   const panelTz = useSiteStore(s => s.timezone)
+  const scanned = c.online && c.seen_at > 0
   const detail = [
     c.count > 0 ? t('admin:risk_center.drawer.seen_detail', { first: formatMsDualTz(c.first_seen_ms, panelTz), count: c.count }) : '',
-    // The upstream's own time for a live source, labelled as the panel's
-    // clock: it is not PSP's, and a skewed panel would contradict the line.
-    c.online && c.seen_at > 0
-      ? t('admin:risk_center.live.seen_panel_clock', { time: formatMsDualTz(c.seen_at * 1000, panelTz) })
-      : '',
+    // The upstream's own time for a live source, in the Live tab's words:
+    // the panel's scan that still saw it connected, on the panel's clock,
+    // the same for every address still connected — not when this one was
+    // last used.
+    scanned ? t('admin:risk_center.live.still_connected', { time: formatMsDualTz(c.seen_at * 1000, panelTz) }) : '',
+    scanned ? t('admin:risk_center.live.still_connected_hint') : '',
   ].filter(Boolean).join('\n')
-  const line2 = (
-    <Box sx={{ fontSize: 12, color: md.onSurfaceVariant, display: 'flex', flexWrap: 'wrap', columnGap: 0.75 }}>
-      <span>{regionText(c.region)}</span>
-      <span>·</span>
-      <span>{c.panel_name || `#${c.panel_id}`}</span>
-      {c.node && <Box component="span" sx={{ fontFamily: 'monospace' }}>{c.node}</Box>}
-      <span>·</span>
-      <span>{t('admin:risk_center.drawer.last_seen', { time: formatMsDualTz(c.last_seen_ms, panelTz) })}</span>
-    </Box>
-  )
+  const lastSeen = <span>{t('admin:risk_center.drawer.last_seen', { time: formatMsDualTz(c.last_seen_ms, panelTz) })}</span>
   return (
     <Box data-testid="conn-entry" sx={{ py: 1, borderTop: `1px solid ${md.outlineVariant}`, display: 'flex', flexDirection: 'column', gap: 0.25 }}>
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
@@ -48,7 +41,22 @@ function Entry({ c }: { c: MergedConnection }) {
         {c.online && <Chip size="small" color="success" label={t('admin:risk_center.drawer.online')} />}
         <JudgementChip exclusion={c.exclusion} />
       </Box>
-      {detail ? <Tooltip title={<Box sx={{ whiteSpace: 'pre-line' }}>{detail}</Box>}>{line2}</Tooltip> : line2}
+      <Box sx={{ fontSize: 12, color: md.onSurfaceVariant, display: 'flex', flexWrap: 'wrap', columnGap: 0.75 }}>
+        <span>{regionText(c.region)}</span>
+        <span>·</span>
+        <span>{c.panel_name || `#${c.panel_id}`}</span>
+        {/* The raw 3X-UI node id, explained as the Live tab's PanelCell
+            explains it: PSP has no name for a node. */}
+        {c.node && (
+          <Tooltip title={t('admin:risk_center.live.node_hint')}>
+            <Box component="span" sx={{ fontFamily: 'monospace', wordBreak: 'break-all' }}>{c.node}</Box>
+          </Tooltip>
+        )}
+        <span>·</span>
+        {/* The times behind "last seen" on the part of the line they are
+            about, so the node's own tooltip never opens inside this one. */}
+        {detail ? <Tooltip title={<Box sx={{ whiteSpace: 'pre-line' }}>{detail}</Box>}>{lastSeen}</Tooltip> : lastSeen}
+      </Box>
     </Box>
   )
 }

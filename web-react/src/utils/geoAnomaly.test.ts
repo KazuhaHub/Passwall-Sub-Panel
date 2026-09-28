@@ -334,4 +334,68 @@ describe('reasonText', () => {
       expect(reasonText(v2(why('disabled')), translator(zh as Nested, ['geo_anomalies.reason_disabled']))).toBe('STORED ENGLISH')
     })
   })
+
+  // 「同时在 CN 的 个省 / 州（容错 ）」: a verdict whose evidence lacks a number
+  // its sentence names — a field missing, or a whole block of the evidence —
+  // reads that sentence without numbers, in either language: never a hole,
+  // never a crash, and never the stored English beside localized neighbours.
+  describe('reads the sentence without numbers when one is missing', () => {
+    const zhDict = flatten(zh as Nested)
+    const enDict = flatten(en as Nested)
+    // The row with one part of its evidence (or of its why) taken away.
+    const without = (r: GeoAnomaly, k: keyof GeoAnomaly['evidence']): GeoAnomaly => {
+      const ev: Partial<GeoAnomaly['evidence']> = { ...r.evidence }
+      delete ev[k]
+      return { ...r, evidence: ev as GeoAnomaly['evidence'] }
+    }
+    const whyWithout = (w: GeoWhy, k: keyof GeoWhy): GeoWhy => {
+      const out: Partial<GeoWhy> = { ...w }
+      delete out[k]
+      return out as GeoWhy
+    }
+    const overRegion = v2(why('suspect', { tier: 'region' }),
+      { spread: spread({ regions: 2, region_country: 'CN' }) }, { over_streak: 1 })
+
+    const cases: { name: string; r: GeoAnomaly; key: string; tail?: { zh: string; en: string } }[] = [
+      { name: 'idle_stale without the stale count', r: without(v2(why('idle_stale')), 'stale'),
+        key: 'reason_idle_stale_bare' },
+      { name: 'unknown_excluded without its exclusions', r: without(v2(why('unknown_excluded')), 'excluded'),
+        key: 'reason_unknown_excluded_bare' },
+      { name: 'unknown_low_ratio without its coverage', r: without(v2(why('unknown_low_ratio')), 'coverage'),
+        key: 'reason_unknown_low_ratio_bare' },
+      { name: 'unknown_low_ratio without the ratio', r: v2(whyWithout(why('unknown_low_ratio'), 'min_placed_ratio')),
+        key: 'reason_unknown_low_ratio_bare' },
+      { name: 'a country-tier over without its tolerances',
+        r: v2(whyWithout(why('suspect', { tier: 'country' }), 'tol'), { spread: spread({ countries: 2 }) }, { over_streak: 1 }),
+        key: 'reason_over_country_bare', tail: { zh: '，连续 1 / 3 次', en: ', 1 of 3 checks so far' } },
+      { name: 'a region-tier over without the country it counted in',
+        r: v2(why('flagged_sustained', { tier: 'region' }), { spread: spread({ regions: 2, region_country: '' }) },
+          { over_streak: 3 }),
+        key: 'reason_over_region_bare', tail: { zh: '，已持续 3 / 3 次', en: ', sustained for 3 of 3 checks' } },
+      { name: 'a city-tier over without its spread',
+        r: without(v2(why('suspect', { tier: 'city' }), {}, { over_streak: 2 }), 'spread'),
+        key: 'reason_over_city_bare', tail: { zh: '，连续 2 / 3 次', en: ', 2 of 3 checks so far' } },
+      { name: 'a latch clearing without the checks it needs',
+        r: v2(whyWithout(why('flagged_clearing', { tier: 'region' }), 'clear_after'), {}, { under_streak: 1 }),
+        key: 'reason_flagged_clearing_bare', tail: { zh: '；标记原因：跨省', en: '; flagged as Cross-region' } },
+      { name: 'clean_within without its tolerances', r: v2(whyWithout(why('clean_within'), 'tol')),
+        key: 'reason_clean_within_bare' },
+    ]
+
+    it.each(cases)('$name', ({ r, key, tail }) => {
+      for (const [lang, t, dict] of [['zh', zhT, zhDict], ['en', enT, enDict]] as const) {
+        const bare = dict[`geo_anomalies.${key}`]
+        expect(bare, `${lang}: ${key}`).toBeTruthy()
+        expect(bare, `${lang}: ${key}`).not.toMatch(/\{\{|\}\}/)
+        expect(reasonText(r, t), lang).toBe(bare + (tail?.[lang] ?? ''))
+      }
+    })
+
+    it('keeps a whole head and leaves out a streak it cannot count', () => {
+      const r = v2(whyWithout(why('suspect', { tier: 'region' }), 'flag_after'),
+        { spread: spread({ regions: 2, region_country: 'CN' }) }, { over_streak: 1 })
+      expect(reasonText(r, zhT)).toBe('同时在 CN 的 2 个省 / 州（容错 1）')
+      expect(reasonText(overRegion, zhT)).toBe('同时在 CN 的 2 个省 / 州（容错 1），连续 1 / 3 次')
+    })
+  })
 })

@@ -2,6 +2,7 @@ import { useState } from 'react'
 import {
   Box, Chip, IconButton, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Tooltip, Typography, useTheme,
 } from '@mui/material'
+import HelpOutlineIcon from '@mui/icons-material/HelpOutlined'
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown'
 import KeyboardArrowUpIcon from '@mui/icons-material/KeyboardArrowUp'
 import PersonSearchOutlinedIcon from '@mui/icons-material/PersonSearchOutlined'
@@ -32,7 +33,8 @@ export interface LiveConnectionListProps {
 /**
  * The live connections, one row per account, each expanding to a table of its
  * connections: address and source, panel and node, place, judgement, the
- * panel's last sighting and the devices inferred behind it.
+ * panel scan that still saw it connected, and the devices inferred behind
+ * it.
  *
  * The Live tab's list. The drawer's 连接 tab draws the same connections with
  * the same pieces (AddressCell, JudgementChip, regionText), so the two cannot
@@ -153,7 +155,14 @@ function ConnectionTable({ conns, deviceWindowHours, devicesUnavailable }: {
           <TableCell>{t('admin:risk_center.live.col_panel')}</TableCell>
           <TableCell>{t('admin:risk_center.live.col_region')}</TableCell>
           <TableCell>{t('admin:risk_center.live.col_status')}</TableCell>
-          <TableCell>{t('admin:risk_center.live.col_seen')}</TableCell>
+          <TableCell>
+            <Box component="span" sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.25, whiteSpace: 'nowrap' }}>
+              {t('admin:risk_center.live.col_seen')}
+              <Tooltip title={t('admin:risk_center.live.still_connected_hint')}>
+                <IconButton size="small" sx={{ p: 0.25 }}><HelpOutlineIcon fontSize="inherit" /></IconButton>
+              </Tooltip>
+            </Box>
+          </TableCell>
           <TableCell>{t('admin:risk_center.live.col_device')}</TableCell>
         </TableRow>
       </TableHead>
@@ -165,11 +174,14 @@ function ConnectionTable({ conns, deviceWindowHours, devicesUnavailable }: {
             <TableCell sx={{ fontSize: 12 }}>{regionText(c.region)}</TableCell>
             <TableCell><JudgementChip exclusion={c.exclusion} /></TableCell>
             <TableCell sx={{ fontSize: 12, whiteSpace: 'nowrap' }}>
-              {/* The PANEL's clock, said so: a skewed node clock would
-                  otherwise read as a connection in the future or the past.
-                  Printed in the panel's timezone like every other time. */}
+              {/* Not when this address was last used. Xray keeps an address
+                  while any connection from it is open, and 3X-UI's scan
+                  stamps each one it still lists with the scan's own time,
+                  on the panel's clock — one time for all of an account's
+                  addresses. Printed in the panel's timezone like every
+                  other time. */}
               {c.seen_at > 0
-                ? t('admin:risk_center.live.seen_panel_clock', { time: formatMsDualTz(c.seen_at * 1000, panelTz) })
+                ? t('admin:risk_center.live.still_connected', { time: formatMsDualTz(c.seen_at * 1000, panelTz) })
                 : t('admin:risk_center.live.seen_none')}
             </TableCell>
             <TableCell>

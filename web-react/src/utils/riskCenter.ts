@@ -6,6 +6,7 @@ import { ATTENTION_SOURCES, EXCLUSION_REASONS, type FlagRecord } from '@/api/ris
 import { RISK_CODES, RISK_KINDS, type RiskKind, type RiskState } from '@/api/riskSignals'
 import { reasonText, type Translate } from './geoAnomaly'
 import { riskCodeText } from './riskSignals'
+import { sentence } from './sentence'
 
 const RC = 'admin:risk_center.'
 
@@ -157,7 +158,8 @@ function reviewText(rec: FlagRecord, t: Translate, language: string | undefined)
  *
  * - geo: the params are the streak counters plus the evidence
  *   (domain.GeoFlagParams); they are laid out as the row the Geo tab's
- *   reasonText reads, with the record's code as the stored reason.
+ *   reasonText reads, with the localized event as the stored reason — what
+ *   reasonText says for evidence it cannot read.
  * - a risk kind: the params ARE the verdict's evidence, read by its kind's
  *   own sentence.
  * - geo_auto: the producer's numbers (tier, spread, minutes; or the hold that
@@ -168,7 +170,9 @@ function reviewText(rec: FlagRecord, t: Translate, language: string | undefined)
  * Anything missing — no params where the sentence needs them, a source or
  * code this build does not know — falls back to the localized EVENT, never
  * to the code: a record always says something, and a code in the 当时的依据
- * column would read as a broken page rather than a reason.
+ * column would read as a broken page rather than a reason. Params that are
+ * there but lack a number the sentence names read the sentence without its
+ * numbers (utils/sentence), or the event where it would say no more.
  */
 export function flagText(rec: FlagRecord, t: Translate, language?: string): string {
   const p = paramsOf(rec)
@@ -178,7 +182,7 @@ export function flagText(rec: FlagRecord, t: Translate, language?: string): stri
     const ev = p.evidence as GeoEvidence | undefined
     if (!ev || typeof ev !== 'object') return fallback()
     const row: GeoAnomaly = {
-      user_id: rec.user_id, state: rec.state as GeoAnomaly['state'], reason: rec.code,
+      user_id: rec.user_id, state: rec.state as GeoAnomaly['state'], reason: fallback(),
       tier: (p.tier as GeoTier | undefined) ?? '', flagged: p.flagged === true,
       over_streak: Number(p.over ?? 0), under_streak: Number(p.under ?? 0), ban_streak: Number(p.ban_over ?? 0),
       evidence: ev, places: [], live_ips: 0, concurrent_ips: 0, excluded_ips: 0, complete: true,
@@ -193,16 +197,19 @@ export function flagText(rec: FlagRecord, t: Translate, language?: string): stri
       case 'country':
       case 'region':
       case 'city':
+        // Without its numbers the tier still says where it was spread.
         return hasParams
-          ? t(`${RC}flags.geo_auto.${rec.code}`, { spread: p.spread, minutes: p.duration_minutes })
+          ? sentence(t, `${RC}flags.geo_auto.${rec.code}`, { spread: p.spread, minutes: p.duration_minutes },
+            () => t(`${RC}flags.geo_auto_bare.${rec.code}`))
           : fallback()
+      // Without the minutes or the hold, the event says all there is.
       case 'expired':
-        return hasParams ? t(`${RC}flags.geo_auto.expired`, { minutes: p.duration_minutes }) : fallback()
+        return hasParams ? sentence(t, `${RC}flags.geo_auto.expired`, { minutes: p.duration_minutes }, fallback) : fallback()
       case 'admin_resume':
         return t(`${RC}flags.geo_auto.admin_resume`)
       case 'replaced':
         return hasParams
-          ? t(`${RC}flags.geo_auto.replaced`, { reason: holdLabel(String(p.replaced_by ?? ''), t) })
+          ? sentence(t, `${RC}flags.geo_auto.replaced`, { reason: holdLabel(String(p.replaced_by ?? ''), t) }, fallback)
           : fallback()
       default:
         return fallback()
