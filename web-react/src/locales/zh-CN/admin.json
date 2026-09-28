@@ -1014,13 +1014,6 @@
     "col_ips": "并发 / 窗口 IP",
     "col_reason": "依据",
     "col_updated": "最后判定",
-    "state_flagged": "已标记",
-    "state_suspect": "疑似",
-    "state_clean": "正常",
-    "state_unknown": "无法判断",
-    "state_idle": "无连接",
-    "state_exempt": "已豁免",
-    "state_disabled": "未启用",
     "tier_country": "跨国",
     "tier_region": "跨省",
     "tier_city": "跨城",
@@ -1096,7 +1089,6 @@
     "empty": "还没有计算结果——风险信号按设定的间隔（默认每小时）计算。",
     "empty_attention": "目前没有需要关注的账号。",
     "show_all": "显示全部账号",
-    "not_computed": "尚未计算",
     "col_user": "用户",
     "col_geo": "异地并发",
     "col_updated": "最后计算",
@@ -1105,15 +1097,6 @@
       "devices": "设备数",
       "usage_shift": "用量变化",
       "login_country": "登录国家"
-    },
-    "state": {
-      "flagged": "已标记",
-      "suspect": "疑似",
-      "clean": "正常",
-      "unknown": "无法判断",
-      "idle": "无数据",
-      "exempt": "已豁免",
-      "disabled": "未启用"
     },
     "geo_open": "在「异地并发」中查看",
     "expand": "查看证据",
@@ -1197,6 +1180,17 @@
     "tab_flags": "标记记录",
     "tab_user": "用户查询",
     "open_user": "查看用户",
+    "state": {
+      "flagged": "已标记",
+      "suspect": "疑似",
+      "clean": "正常",
+      "idle": "无数据",
+      "unknown": "无法判断",
+      "exempt": "已豁免",
+      "trusted": "已信任",
+      "disabled": "未启用",
+      "not_computed": "尚未计算"
+    },
     "live": {
       "snapshot_poll": "快照 {{time}}（{{ago}}，来自定时轮询）",
       "snapshot_refresh": "快照 {{time}}（{{ago}}，手动刷新）",
@@ -1299,7 +1293,7 @@
         "replaced": "被「{{reason}}」暂停替换"
       },
       "hold": {
-        "geo_anomaly": "异地并发（人工）"
+        "geo_anomaly": "异地人工暂停"
       },
       "evidence_show": "查看证据",
       "evidence_hide": "收起证据"

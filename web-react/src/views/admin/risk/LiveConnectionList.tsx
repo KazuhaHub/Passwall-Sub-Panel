@@ -9,6 +9,8 @@ import WarningAmberIcon from '@mui/icons-material/WarningAmber'
 import { useTranslation } from 'react-i18next'
 
 import type { ConnDevice, ConnRegion, LiveConnection, LiveUser } from '@/api/riskCenter'
+import { useSiteStore } from '@/stores/site'
+import { formatMsDualTz } from '@/utils/datetime'
 import { formatRegion } from '@/utils/geo'
 import { exclusionLabelKey, judgementColor, userLabel } from '@/utils/riskCenter'
 
@@ -141,6 +143,7 @@ function ConnectionTable({ conns, deviceWindowHours, devicesUnavailable }: {
   devicesUnavailable: boolean
 }) {
   const { t } = useTranslation(['admin'])
+  const panelTz = useSiteStore(s => s.timezone)
   return (
     <Table size="small">
       <TableHead>
@@ -162,9 +165,10 @@ function ConnectionTable({ conns, deviceWindowHours, devicesUnavailable }: {
             <TableCell><JudgementChip exclusion={c.exclusion} /></TableCell>
             <TableCell sx={{ fontSize: 12, whiteSpace: 'nowrap' }}>
               {/* The PANEL's clock, said so: a skewed node clock would
-                  otherwise read as a connection in the future or the past. */}
+                  otherwise read as a connection in the future or the past.
+                  Printed in the panel's timezone like every other time. */}
               {c.seen_at > 0
-                ? t('admin:risk_center.live.seen_panel_clock', { time: new Date(c.seen_at * 1000).toLocaleString() })
+                ? t('admin:risk_center.live.seen_panel_clock', { time: formatMsDualTz(c.seen_at * 1000, panelTz) })
                 : t('admin:risk_center.live.seen_none')}
             </TableCell>
             <TableCell>
@@ -253,11 +257,12 @@ function DeviceCell({ conn, hours, unavailable }: { conn: LiveConnection; hours:
 function DeviceLine({ device, hours }: { device: ConnDevice; hours: number }) {
   const { t } = useTranslation(['admin'])
   const md = useTheme().palette.md
+  const panelTz = useSiteStore(s => s.timezone)
   const name = device.label || (device.device_id4 ? `#${device.device_id4}` : device.client_type || device.ua || '—')
   const detail = [
     t('admin:risk_center.live.device_hint', { hours }),
     t('admin:risk_center.live.device_fetches', {
-      count: device.fetches, time: device.last_at_ms ? new Date(device.last_at_ms).toLocaleString() : '—',
+      count: device.fetches, time: formatMsDualTz(device.last_at_ms, panelTz),
     }),
     device.ua,
   ].filter(Boolean).join('\n')

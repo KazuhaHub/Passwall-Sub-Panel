@@ -19,6 +19,18 @@ export function formatDualTz(s: string | undefined | null, panelTz: string): str
   return `${panelStr} (${browserStr})`
 }
 
+// formatMsDualTz is formatDualTz for epoch milliseconds, the shape every
+// risk-center time travels in. 0 and absent read '—' (the risk center's
+// "never"), not '-' and not 1970: a zero there means nothing was recorded.
+// A value outside the Date range is guarded here because toISOString throws
+// on it rather than returning something formatDualTz could reject.
+export function formatMsDualTz(ms: number | null | undefined, panelTz: string): string {
+  if (!ms) return '—'
+  const d = new Date(ms)
+  if (Number.isNaN(d.getTime())) return '—'
+  return formatDualTz(d.toISOString(), panelTz)
+}
+
 // formatDualDate is formatDualTz's DATE-ONLY sibling: panel-tz calendar day
 // first, the browser-local day in parens, only when they differ. For fields
 // shown as a date without a time (expiry, build date, cert expiry) — using

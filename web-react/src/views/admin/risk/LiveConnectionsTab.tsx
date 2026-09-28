@@ -15,6 +15,8 @@ import {
 } from '@/api/riskCenter'
 import { useLiveConnections, useRefreshLiveConnections } from '@/query/riskCenter'
 import { useQueryScope } from '@/query/useQueryScope'
+import { useSiteStore } from '@/stores/site'
+import { formatDualTz } from '@/utils/datetime'
 import { agoText } from '@/utils/riskCenter'
 import LiveConnectionList from './LiveConnectionList'
 
@@ -32,6 +34,7 @@ const names = (refs: PanelRef[]) => refs.map(r => r.name || `#${r.id}`).join(', 
 export function LiveSnapshotHeader({ view }: { view: LiveView }) {
   const { t } = useTranslation(['admin'])
   const md = useTheme().palette.md
+  const panelTz = useSiteStore(st => st.timezone)
   const s = view.snapshot
   if (!s.taken_at) {
     return (
@@ -40,7 +43,9 @@ export function LiveSnapshotHeader({ view }: { view: LiveView }) {
       </Typography>
     )
   }
-  const args = { time: new Date(s.taken_at).toLocaleString(), ago: agoText(s.age_seconds, t) }
+  // The panel's timezone, like every other time in the admin; the relative
+  // age beside it is what says how fresh the list is.
+  const args = { time: formatDualTz(s.taken_at, panelTz), ago: agoText(s.age_seconds, t) }
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
       <Typography sx={{ fontSize: 13, color: md.onSurfaceVariant }}>

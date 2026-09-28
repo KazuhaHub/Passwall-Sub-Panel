@@ -14,6 +14,8 @@ import UserAutocomplete from '@/components/UserAutocomplete'
 import { FLAG_EVENTS, FLAG_LEVELS, type FlagRecord, type FlagRecordParams } from '@/api/riskCenter'
 import { useFlagRecords } from '@/query/riskCenter'
 import { useQueryScope } from '@/query/useQueryScope'
+import { useSiteStore } from '@/stores/site'
+import { formatMsDualTz } from '@/utils/datetime'
 import { FLAG_SOURCES, flagEventKey, flagLevelKey, flagSourceKey, flagText, userLabel } from '@/utils/riskCenter'
 
 /**
@@ -182,11 +184,12 @@ function FlagRow({ rec, showUser, cols, open, onToggle, onOpenUser }: {
 }) {
   const { t } = useTranslation(['admin'])
   const md = useTheme().palette.md
+  const panelTz = useSiteStore(s => s.timezone)
   const hasParams = rec.params !== null && rec.params !== undefined
   return (
     <>
       <TableRow hover>
-        <TableCell sx={{ fontSize: 12, whiteSpace: 'nowrap' }}>{new Date(rec.at_ms).toLocaleString()}</TableCell>
+        <TableCell sx={{ fontSize: 12, whiteSpace: 'nowrap' }}>{formatMsDualTz(rec.at_ms, panelTz)}</TableCell>
         {showUser && (
           <TableCell>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>

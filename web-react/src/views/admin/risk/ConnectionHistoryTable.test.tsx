@@ -4,6 +4,8 @@ import { cleanup, render, screen, waitFor, within } from '@testing-library/react
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createAppTheme } from '@/theme'
 import { makeTestQueryClient, queryWrapper } from '@/test/queryTestUtils'
+import { useSiteStore } from '@/stores/site'
+import { formatMsDualTz } from '@/utils/datetime'
 import type { ConnectionRecord } from '@/api/riskCenter'
 import ConnectionHistoryTable from './ConnectionHistoryTable'
 
@@ -49,7 +51,14 @@ function mount() {
 }
 
 beforeEach(() => vi.clearAllMocks())
-afterEach(cleanup)
+afterEach(() => {
+  cleanup()
+  useSiteStore.setState({ timezone: '' })
+})
+
+// A panel timezone no CI browser runs in, so a time rendered in the
+// browser's zone cannot pass for one rendered in the panel's.
+const PANEL_TZ = 'Pacific/Chatham'
 
 describe('ConnectionHistoryTable', () => {
   it("reads one account's history and shows each source it was judged from", async () => {
@@ -73,5 +82,14 @@ describe('ConnectionHistoryTable', () => {
     serve([])
     mount()
     expect(await screen.findByText('没有符合条件的记录')).toBeTruthy()
+  })
+
+  it('prints first and last sightings in panel time', async () => {
+    useSiteStore.setState({ timezone: PANEL_TZ })
+    serve([record({})])
+    mount()
+    const row = (await screen.findByText('2001:db8:1:2::5')).closest('tr') as HTMLElement
+    expect(within(row).getByText(formatMsDualTz(1_789_000_000_000, PANEL_TZ))).toBeTruthy()
+    expect(within(row).getByText(formatMsDualTz(1_790_000_000_000, PANEL_TZ))).toBeTruthy()
   })
 })

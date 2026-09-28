@@ -3,6 +3,8 @@ import { ThemeProvider } from '@mui/material/styles'
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createAppTheme } from '@/theme'
+import { useSiteStore } from '@/stores/site'
+import { formatMsDualTz } from '@/utils/datetime'
 import type { LiveConnection, LiveUser } from '@/api/riskCenter'
 import LiveConnectionList from './LiveConnectionList'
 
@@ -50,7 +52,14 @@ function mount(users: LiveUser[], extra: { onOpenUser?: (id: number) => void } =
   )
 }
 
-afterEach(cleanup)
+afterEach(() => {
+  cleanup()
+  useSiteStore.setState({ timezone: '' })
+})
+
+// A panel timezone no CI browser runs in, so a time rendered in the
+// browser's zone cannot pass for one rendered in the panel's.
+const PANEL_TZ = 'Pacific/Chatham'
 
 describe('LiveConnectionList', () => {
   // A source the detector set aside was never judged. In the success colour
@@ -89,5 +98,17 @@ describe('LiveConnectionList', () => {
     mount([alice], { onOpenUser })
     fireEvent.click(screen.getByRole('button', { name: '查看用户' }))
     expect(onOpenUser).toHaveBeenCalledWith(7)
+  })
+
+  // The upstream's sighting and the inferred device's last fetch read in the
+  // panel's timezone like every other time in the admin.
+  it('prints the sighting and the device fetch in panel time', async () => {
+    useSiteStore.setState({ timezone: PANEL_TZ })
+    mount([{ ...alice, connections: [conn({ devices: [{ label: 'Pixel', device_id4: 'ab12', client_type: 'clash-meta',
+      ua: 'ClashMeta/1.0', fetches: 3, last_at_ms: 1_789_000_000_000 }] })] }])
+    expect(screen.getByText(`${formatMsDualTz(1_790_000_000_000, PANEL_TZ)}（面板时钟）`)).toBeTruthy()
+    fireEvent.mouseOver(screen.getByText('Pixel'))
+    const tip = await screen.findByRole('tooltip')
+    expect(tip.textContent ?? '').toContain(`3 次拉取，最近 ${formatMsDualTz(1_789_000_000_000, PANEL_TZ)}`)
   })
 })

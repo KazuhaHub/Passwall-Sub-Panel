@@ -7,80 +7,26 @@ import WarningAmberIcon from '@mui/icons-material/WarningAmber'
 import { useTranslation } from 'react-i18next'
 import { isAxiosError } from 'axios'
 
-import type { GeoAnomaly } from '@/api/geoAnomalies'
 import { useGeoAnomalies } from '@/query/geoAnomalies'
 import { useGeoIPStatus } from '@/query/settings'
 import { useQueryScope } from '@/query/useQueryScope'
-import { countryFlag } from '@/utils/geo'
-import {
-  activeDbIsCountryOnly, groupSpots, reasonText, sortBySeverity, spreadKm, tierLabelKey, type SpotTree,
-} from '@/utils/geoAnomaly'
-import { regionNamer, type RegionNamer } from '@/utils/regionName'
-
-/**
- * Colour carries meaning here, so it is assigned by what the operator should
- * DO rather than by how alarming the word sounds.
- *
- * Only `flagged` is actionable. `suspect` is the visible ramp and must look
- * different from both a flag and a clean row — hiding it would make the
- * eventual flag appear out of nowhere. Everything else means the detector is
- * not in a position to judge, and those states are deliberately NOT green:
- * `unknown` on a fleet whose geo database has stopped working looks exactly
- * like a clean fleet if it is coloured like one.
- */
-export function stateColor(state: GeoAnomaly['state']): 'error' | 'warning' | 'success' | 'info' | 'default' {
-  switch (state) {
-    case 'flagged': return 'error'
-    case 'suspect': return 'warning'
-    case 'clean': return 'success'
-    case 'unknown': return 'info'
-    default: return 'default'   // exempt / disabled / idle
-  }
-}
+import { useSiteStore } from '@/stores/site'
+import { formatMsDualTz } from '@/utils/datetime'
+import { activeDbIsCountryOnly, reasonText, sortBySeverity, tierLabelKey } from '@/utils/geoAnomaly'
+import { DetectorStateChip } from './evidence/DetectorStateChip'
+import { GeoDistance, GeoPlaces } from './evidence/GeoEvidence'
 
 const TIER_DEFAULT: Record<string, string> = { country: '跨国', region: '跨省', city: '跨城' }
-
-/**
- * One line per country: "🇨🇳 CN 3: Guangdong 2 (Shenzhen 2) · Hunan 1".
- * Counts are judged sources, so the line reads as "how many were where". A
- * name the database did not resolve prints as "?" — it is a real source that
- * could only be placed as far as its parent, and dropping it would make the
- * counts stop adding up. Country-only evidence prints as the country alone.
- *
- * "Resolved below the country" means a region OR a city. A location record
- * can carry a city and no subdivision (the geoip reader takes the two from
- * separate fields), and the server counts that city for the city tier on its
- * own (ObserveGeo adds regions and cities independently). Keyed on the region
- * alone, such a country printed as its head only, so a city-tier flag could
- * stand next to a Places cell that names no city. It prints as
- * "? n (City n, …)" instead.
- *
- * Regions are named by nameRegion: a Chinese UI reads a CN province with a
- * known ISO code in Chinese, every other region and UI reads the database's
- * name. Cities always print as the database gives them.
- */
-function spotLine(c: SpotTree, nameRegion: RegionNamer): string {
-  const name = (s: string) => s || '?'
-  const named = c.regions.some(r => r.region !== '' || r.cities.some(ci => ci.city !== ''))
-  const regions = c.regions.map(r => {
-    const cities = r.cities.some(ci => ci.city !== '')
-      ? ` (${r.cities.map(ci => `${name(ci.city)} ${ci.n}`).join(', ')})`
-      : ''
-    return `${nameRegion({ cc: c.cc, region: r.region, rc: r.rc }) || '?'} ${r.n}${cities}`
-  })
-  const head = [countryFlag(c.cc), c.cc, String(c.n)].filter(Boolean).join(' ')
-  return named ? `${head}: ${regions.join(' · ')}` : head
-}
 
 export default function GeoAnomaliesTab({ onOpenUser }: {
   /** Opens the account in the risk center's lookup; no button without it. */
   onOpenUser?: (userId: number) => void
 }) {
-  const { t, i18n } = useTranslation(['admin'])
-  const nameRegion = regionNamer(t, i18n.language)
+  const { t } = useTranslation(['admin'])
   const theme = useTheme()
   const md = theme.palette.md
   const scope = useQueryScope()
+  const panelTz = useSiteStore(s => s.timezone)
   const { data, isPending, error } = useGeoAnomalies(scope)
   // Advisory only. A failed read yields no banner rather than an error: no
   // evidence of a coarse database is not evidence of one.
@@ -143,12 +89,8 @@ export default function GeoAnomaliesTab({ onOpenUser }: {
             )}
             {rows.map(r => {
               const tierKey = tierLabelKey(r.tier)
-              // evidence.v 0 is a row an older build wrote: nothing recorded,
-              // so its places (whatever that build stored) are all there is.
-              const spots = r.evidence?.v > 0 && r.evidence.spots.length ? groupSpots(r.evidence.spots) : null
               const ex = r.evidence?.excluded ?? { shared: 0, listed: 0, infra: 0, internal: 0 }
-              const km = spreadKm(r.evidence)
-              const since = r.service_disabled_at_ms ? new Date(r.service_disabled_at_ms).toLocaleString() : '—'
+              const since = formatMsDualTz(r.service_disabled_at_ms, panelTz)
               return (
                 <TableRow key={r.user_id} hover>
                   <TableCell>
@@ -165,8 +107,9 @@ export default function GeoAnomaliesTab({ onOpenUser }: {
                   </TableCell>
                   <TableCell>
                     <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, alignItems: 'center' }}>
-                      <Chip size="small" color={stateColor(r.state)}
-                        label={t(`admin:geo_anomalies.state_${r.state}`, { defaultValue: r.state })} />
+                      {/* The why's code tells a trusted account's exemption
+                          from a setting's; a row without one reads exempt. */}
+                      <DetectorStateChip state={r.state} code={r.evidence?.why?.code} />
                       {/* The tier is WHY: cross-border, cross-region or
                           cross-city. Coloured by the latch, not the state, so
                           a flag that went idle still reads as a flag. */}
@@ -196,24 +139,8 @@ export default function GeoAnomaliesTab({ onOpenUser }: {
                     </Box>
                   </TableCell>
                   <TableCell sx={{ fontSize: 12 }}>
-                    {spots
-                      ? spots.map(c => <Box key={c.cc} sx={{ whiteSpace: 'nowrap' }}>{spotLine(c, nameRegion)}</Box>)
-                      : r.places.length ? r.places.join(' · ') : '—'}
-                    {/* Its own line under the places, never inside the reason:
-                        the verdict does not read it, and a distance woven into
-                        "flagged" would read as a travel finding it is not. */}
-                    {km > 0 && (
-                      <Tooltip title={t('admin:geo_anomalies.max_km_hint', {
-                        defaultValue: '此刻同时在连的来源里相距最远的两处：按地区库给出的两个位置算直线距离，减去两边的精度半径，按 10 公里取整。这是地区库对网络位置的估计，不是设备的真实位置；只定位到国家的来源不参与。只作参考，不参与判定。',
-                      })}>
-                        <Box sx={{ whiteSpace: 'nowrap', color: md.onSurfaceVariant }}>
-                          {/* String(km), not a locale-grouped number: the server
-                              already rounded it, and a separator would differ
-                              by browser locale. */}
-                          {t('admin:geo_anomalies.max_km', { km: String(km), defaultValue: `相距约 ${km} 公里` })}
-                        </Box>
-                      </Tooltip>
-                    )}
+                    <GeoPlaces row={r} />
+                    <GeoDistance evidence={r.evidence} />
                   </TableCell>
                   <TableCell align="right">
                     <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.5 }}>
@@ -246,7 +173,7 @@ export default function GeoAnomaliesTab({ onOpenUser }: {
                       stored English. */}
                   <TableCell sx={{ fontSize: 12, color: md.onSurfaceVariant, maxWidth: 420 }}>{reasonText(r, t)}</TableCell>
                   <TableCell sx={{ fontSize: 12, whiteSpace: 'nowrap' }}>
-                    {r.updated_at_ms ? new Date(r.updated_at_ms).toLocaleString() : '—'}
+                    {formatMsDualTz(r.updated_at_ms, panelTz)}
                   </TableCell>
                 </TableRow>
               )

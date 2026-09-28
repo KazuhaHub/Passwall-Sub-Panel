@@ -8,6 +8,8 @@ import { isAxiosError } from 'axios'
 import { PagedTableFooter } from '@/components/PagedTableFooter'
 import { useConnectionHistory } from '@/query/riskCenter'
 import { useQueryScope } from '@/query/useQueryScope'
+import { useSiteStore } from '@/stores/site'
+import { formatMsDualTz } from '@/utils/datetime'
 import { AddressCell, JudgementChip, PanelCell, regionText } from './LiveConnectionList'
 
 /**
@@ -16,8 +18,6 @@ import { AddressCell, JudgementChip, PanelCell, regionText } from './LiveConnect
  * value in effect is the settings page's to show.
  */
 const RETENTION_DEFAULT_DAYS = 7
-
-const when = (ms: number) => (ms ? new Date(ms).toLocaleString() : '—')
 
 /**
  * One account's connection history: every source the location detector saw
@@ -30,6 +30,7 @@ export default function ConnectionHistoryTable({ userId }: { userId: number }) {
   const { t } = useTranslation(['admin'])
   const md = useTheme().palette.md
   const scope = useQueryScope()
+  const panelTz = useSiteStore(s => s.timezone)
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(25)
   const { data, isPending, error } = useConnectionHistory(scope, { user_id: userId, page, page_size: pageSize })
@@ -72,8 +73,8 @@ export default function ConnectionHistoryTable({ userId }: { userId: number }) {
                 <TableCell><PanelCell name={r.panel_name} id={r.panel_id} node={r.node} /></TableCell>
                 <TableCell sx={{ fontSize: 12 }}>{regionText(r.region)}</TableCell>
                 <TableCell><JudgementChip exclusion={r.exclusion} /></TableCell>
-                <TableCell sx={{ fontSize: 12, whiteSpace: 'nowrap' }}>{when(r.first_seen_ms)}</TableCell>
-                <TableCell sx={{ fontSize: 12, whiteSpace: 'nowrap' }}>{when(r.last_seen_ms)}</TableCell>
+                <TableCell sx={{ fontSize: 12, whiteSpace: 'nowrap' }}>{formatMsDualTz(r.first_seen_ms, panelTz)}</TableCell>
+                <TableCell sx={{ fontSize: 12, whiteSpace: 'nowrap' }}>{formatMsDualTz(r.last_seen_ms, panelTz)}</TableCell>
                 <TableCell align="right">{r.count}</TableCell>
               </TableRow>
             ))}

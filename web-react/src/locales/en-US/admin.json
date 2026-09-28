@@ -1016,13 +1016,6 @@
     "col_ips": "Concurrent / window IPs",
     "col_reason": "Basis",
     "col_updated": "Last judged",
-    "state_flagged": "Flagged",
-    "state_suspect": "Suspect",
-    "state_clean": "Clean",
-    "state_unknown": "Cannot tell",
-    "state_idle": "Idle",
-    "state_exempt": "Exempt",
-    "state_disabled": "Off",
     "tier_country": "Cross-border",
     "tier_region": "Cross-region",
     "tier_city": "Cross-city",
@@ -1098,7 +1091,6 @@
     "empty": "Nothing computed yet — risk signals are recomputed at the configured interval (hourly by default).",
     "empty_attention": "No account needs attention right now.",
     "show_all": "Show all accounts",
-    "not_computed": "Not computed yet",
     "col_user": "User",
     "col_geo": "Concurrent locations",
     "col_updated": "Last computed",
@@ -1107,15 +1099,6 @@
       "devices": "Devices",
       "usage_shift": "Usage change",
       "login_country": "Login country"
-    },
-    "state": {
-      "flagged": "Flagged",
-      "suspect": "Suspect",
-      "clean": "Clean",
-      "unknown": "Cannot tell",
-      "idle": "No data",
-      "exempt": "Exempt",
-      "disabled": "Off"
     },
     "geo_open": "Open in Concurrent locations",
     "expand": "Show evidence",
@@ -1199,6 +1182,17 @@
     "tab_flags": "Flag records",
     "tab_user": "User lookup",
     "open_user": "Open user",
+    "state": {
+      "flagged": "Flagged",
+      "suspect": "Suspect",
+      "clean": "Clean",
+      "idle": "No data",
+      "unknown": "Cannot tell",
+      "exempt": "Exempt",
+      "trusted": "Trusted",
+      "disabled": "Off",
+      "not_computed": "Not computed yet"
+    },
     "live": {
       "snapshot_poll": "Snapshot {{time}} ({{ago}}, from the scheduled poll)",
       "snapshot_refresh": "Snapshot {{time}} ({{ago}}, manual refresh)",
@@ -1264,7 +1258,7 @@
       "filter_since": "From",
       "filter_until": "To",
       "source": {
-        "geo": "Locations",
+        "geo": "Concurrent locations",
         "geo_auto": "Auto-suspension",
         "sub_spread": "Subscription spread",
         "devices": "Devices",
@@ -1301,7 +1295,7 @@
         "replaced": "Replaced by a “{{reason}}” suspension"
       },
       "hold": {
-        "geo_anomaly": "Locations (manual)"
+        "geo_anomaly": "Suspended for locations (manual)"
       },
       "evidence_show": "Show evidence",
       "evidence_hide": "Hide evidence"

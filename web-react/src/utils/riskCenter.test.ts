@@ -82,11 +82,12 @@ describe('flagText', () => {
       '被「流量已用尽」暂停替换'],
     // A person's suspension from the location evidence, kept apart from
     // service_manual in the domain (resuming it counts a false positive), so
-    // it is named as itself rather than as a generic staff suspension.
+    // it is named as itself rather than as a generic staff suspension — and
+    // by the hold's one name, the word the Users page and the drawer use.
     ['a suspension replaced by a manual location suspension, by its name',
       rec({ source: 'geo_auto', event: 'auto_replaced', level: '', prev_level: 'suspended', state: '',
         code: 'replaced', params: { replaced_by: 'geo_anomaly' } }),
-      '被「异地并发（人工）」暂停替换'],
+      '被「异地人工暂停」暂停替换'],
     ['a replacement by a hold this build cannot name, as the raw reason',
       rec({ source: 'geo_auto', event: 'auto_replaced', level: '', prev_level: 'suspended', state: '',
         code: 'replaced', params: { replaced_by: 'future_hold' } }),

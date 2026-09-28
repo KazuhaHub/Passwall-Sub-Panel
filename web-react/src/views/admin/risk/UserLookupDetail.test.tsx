@@ -6,6 +6,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createAppTheme } from '@/theme'
 import { makeTestQueryClient, queryWrapper } from '@/test/queryTestUtils'
 import { useAuthStore } from '@/stores/auth'
+import { useSiteStore } from '@/stores/site'
+import { formatMsDualTz } from '@/utils/datetime'
 import UserLookupDetail from './UserLookupDetail'
 
 const api = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() }))
@@ -110,7 +112,10 @@ beforeEach(() => {
   vi.clearAllMocks()
   useAuthStore.setState({ role: 'admin', userId: 1, hasToken: true })
 })
-afterEach(cleanup)
+afterEach(() => {
+  cleanup()
+  useSiteStore.setState({ timezone: '' })
+})
 
 const SECTIONS = ['概况', '实时连接', '异地并发', '风险信号', '连接历史', '标记记录', '最近订阅拉取', '最近登录', '用量']
 
@@ -174,6 +179,21 @@ describe('UserLookupDetail', () => {
     const chip = (await within(section).findByText('正常')).closest('.MuiChip-root') as HTMLElement
     expect(chip.className).toMatch(/colorSuccess/)
     expect(within(section).queryByLabelText('有面板读取失败，这个数字是下限而不是总数。')).toBeNull()
+  })
+
+  // An exemption by an admin's trust reads as trust, and the judgement time
+  // reads in the panel's timezone like every other time in the admin.
+  it('names a trusted verdict as trusted and times it in panel time', async () => {
+    useSiteStore.setState({ timezone: 'Pacific/Chatham' })
+    serve({ '/admin/geo-anomalies': { items: [{
+      ...geoRow, state: 'exempt', reason: 'trusted', tier: '',
+      evidence: { ...geoRow.evidence, why: { ...geoRow.evidence.why, code: 'trusted', tier: '' } },
+    }] } })
+    mount()
+    const section = (await screen.findByRole('heading', { name: '异地并发' })).closest('section') as HTMLElement
+    expect(await within(section).findByText('已信任')).toBeTruthy()
+    expect(within(section).queryByText('已豁免')).toBeNull()
+    expect(section.textContent).toContain(formatMsDualTz(1_790_000_000_000, 'Pacific/Chatham'))
   })
 
   // The live view holds a row only for an account with a connection, so an

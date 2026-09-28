@@ -8,7 +8,6 @@ import { Link as RouterLink } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import { isAxiosError } from 'axios'
 
-import type { GeoAnomaly } from '@/api/geoAnomalies'
 import type { User } from '@/api/types'
 import { RISK_KINDS } from '@/api/riskSignals'
 import { useGeoAnomalyForUser } from '@/query/geoAnomalies'
@@ -19,7 +18,7 @@ import { useUserUsage } from '@/query/traffic'
 import { useQueryScope } from '@/query/useQueryScope'
 import { useUserDetail } from '@/query/users'
 import { useSiteStore } from '@/stores/site'
-import { formatDualTz } from '@/utils/datetime'
+import { formatDualTz, formatMsDualTz } from '@/utils/datetime'
 import { formatRegion } from '@/utils/geo'
 import { reasonText, tierLabelKey, type Translate } from '@/utils/geoAnomaly'
 import { formatGB } from '@/utils/riskSignals'
@@ -27,11 +26,12 @@ import { accountStateOf, serviceStateOf } from '@/utils/userAccess'
 import { UserActivity } from '../UserActivity'
 import { UserServerUsage } from '../UserServerUsage'
 import ConnectionHistoryTable from './ConnectionHistoryTable'
+import { DetectorStateChip } from './evidence/DetectorStateChip'
+import { RiskKindChip } from './evidence/RiskEvidence'
 import FlagRecordsTab from './FlagRecordsTab'
-import { stateColor } from './GeoAnomaliesTab'
 import LiveConnectionList from './LiveConnectionList'
 import { LiveEmpty, LiveRefreshButton, LiveSnapshotHeader } from './LiveConnectionsTab'
-import { RiskEvidencePanel, RiskKindChip } from './RiskSignalsTab'
+import { RiskEvidencePanel } from './RiskSignalsTab'
 
 /** A read's failure as one line: the server's message when it gave one. */
 function errorText(error: unknown): string {
@@ -182,22 +182,11 @@ function LiveSection({ userId }: { userId: number }) {
   )
 }
 
-/**
- * The verdict chip's colour. A clean verdict judged while some panel could
- * not be read stands on a floor of the account's sources — "clean as far as
- * could be seen" — so it is never drawn green, the colour of a clean bill of
- * health. A suspect or flagged verdict on a floor is, if anything, an
- * understatement, and keeps its colour.
- */
-function verdictColor(row: Pick<GeoAnomaly, 'state' | 'complete'>): ReturnType<typeof stateColor> {
-  const c = stateColor(row.state)
-  return !row.complete && c === 'success' ? 'default' : c
-}
-
 function GeoSection({ userId }: { userId: number }) {
   const { t } = useTranslation(['admin'])
   const md = useTheme().palette.md
   const scope = useQueryScope()
+  const panelTz = useSiteStore(s => s.timezone)
   const { data: row, isPending, error } = useGeoAnomalyForUser(scope, userId)
   if (isPending) return <CircularProgress size={20} />
   if (error) return <Typography color="error" sx={{ fontSize: 13 }}>{errorText(error)}</Typography>
@@ -208,8 +197,9 @@ function GeoSection({ userId }: { userId: number }) {
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.75 }}>
       <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, alignItems: 'center' }}>
-        <Chip size="small" color={verdictColor(row)}
-          label={t(`admin:geo_anomalies.state_${row.state}`, { defaultValue: row.state })} />
+        {/* A verdict on a floor of its sources is never drawn green (the
+            chip's complete rule), and trust reads as trust (the why's code). */}
+        <DetectorStateChip state={row.state} code={row.evidence?.why?.code} complete={row.complete} />
         {tierKey && (
           <Chip size="small" variant="outlined" color={row.flagged ? 'error' : row.state === 'suspect' ? 'warning' : 'default'}
             label={t(tierKey, { defaultValue: row.tier })} />
@@ -234,7 +224,7 @@ function GeoSection({ userId }: { userId: number }) {
             <WarningAmberIcon fontSize="inherit" color="warning" sx={{ verticalAlign: 'middle', ml: 0.5 }} />
           </Tooltip>
         )}
-        {` · ${t('admin:geo_anomalies.col_updated')}: ${row.updated_at_ms ? new Date(row.updated_at_ms).toLocaleString() : '—'}`}
+        {` · ${t('admin:geo_anomalies.col_updated')}: ${formatMsDualTz(row.updated_at_ms, panelTz)}`}
       </Typography>
     </Box>
   )

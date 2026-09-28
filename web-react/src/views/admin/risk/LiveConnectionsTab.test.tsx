@@ -5,6 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createAppTheme } from '@/theme'
 import { makeTestQueryClient, queryWrapper } from '@/test/queryTestUtils'
 import { useAuthStore } from '@/stores/auth'
+import { useSiteStore } from '@/stores/site'
+import { formatDualTz } from '@/utils/datetime'
 import { LIVE_REFRESH_TIMEOUT_MS, type LiveSnapshotInfo, type LiveUser, type LiveView } from '@/api/riskCenter'
 import LiveConnectionsTab from './LiveConnectionsTab'
 
@@ -91,7 +93,10 @@ beforeEach(() => {
   vi.clearAllMocks()
   useAuthStore.setState({ role: 'admin', userId: 1, hasToken: true })
 })
-afterEach(cleanup)
+afterEach(() => {
+  cleanup()
+  useSiteStore.setState({ timezone: '' })
+})
 
 describe('LiveConnectionsTab', () => {
   it('shows the snapshot time and source', async () => {
@@ -103,6 +108,16 @@ describe('LiveConnectionsTab', () => {
     serve(view({ source: 'refresh', age_seconds: 20 }))
     mount()
     expect(await screen.findByText(/^快照 .+（刚刚，手动刷新）$/)).toBeTruthy()
+  })
+
+  // The snapshot's time reads in the panel's timezone like every other time
+  // in the admin, not in whatever zone the admin's browser is in.
+  it('prints the snapshot time in panel time', async () => {
+    useSiteStore.setState({ timezone: 'Pacific/Chatham' })
+    serve(view())
+    mount()
+    const time = formatDualTz('2026-09-26T10:00:05Z', 'Pacific/Chatham')
+    expect(await screen.findByText(`快照 ${time}（2 分钟前，来自定时轮询）`)).toBeTruthy()
   })
 
   it('says so when there is no snapshot yet', async () => {

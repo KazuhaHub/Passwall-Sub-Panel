@@ -4,8 +4,10 @@ import { cleanup, render, screen, waitFor, within } from '@testing-library/react
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createAppTheme } from '@/theme'
 import { makeTestQueryClient, queryWrapper } from '@/test/queryTestUtils'
+import { useSiteStore } from '@/stores/site'
+import { formatMsDualTz } from '@/utils/datetime'
 import type { GeoAnomaly } from '@/api/geoAnomalies'
-import GeoAnomaliesTab, { stateColor } from './GeoAnomaliesTab'
+import GeoAnomaliesTab from './GeoAnomaliesTab'
 
 const api = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() }))
 vi.mock('@/api/client', () => ({ client: api }))
@@ -31,6 +33,15 @@ vi.mock('react-i18next', () => ({
   }),
 }))
 
+// The shared evidence renderers (the state chip, the distance line) read the
+// bundle alone, with no Chinese default, so their keys come from zh-CN as
+// shipped.
+import zhBundle from '@/locales/zh-CN/admin.json'
+import { flatten, type Nested } from '@/i18n/options'
+for (const [k, v] of Object.entries(flatten(zhBundle as Nested))) {
+  if (k.startsWith('risk_center.state.') || k === 'geo_anomalies.max_km_hint') zh[`admin:${k}`] = v
+}
+
 const theme = createAppTheme({ mode: 'light', sourceColor: '#6750a4', language: 'en-US' })
 
 function mount() {
@@ -46,38 +57,7 @@ beforeEach(() => vi.clearAllMocks())
 afterEach(() => {
   cleanup()
   lang.current = 'zh-CN'
-})
-
-// Colour is the first thing an operator reads on this table, so it has to
-// track what they should DO rather than how alarming the word sounds.
-describe('stateColor', () => {
-  // Only flagged is actionable, and it must be the only one that looks like an
-  // emergency — otherwise the ramp and the verdict are indistinguishable.
-  it('reserves the alarm colour for the one actionable state', () => {
-    expect(stateColor('flagged')).toBe('error')
-    for (const s of ['suspect', 'clean', 'unknown', 'idle', 'exempt', 'disabled'] as const) {
-      expect(stateColor(s)).not.toBe('error')
-    }
-  })
-
-  // The single most important rule here. "Cannot tell" on a fleet whose geo
-  // database has quietly stopped working looks EXACTLY like a clean fleet if
-  // it is coloured like one — a detector that has stopped detecting would read
-  // as a fleet with nobody sharing.
-  it('never colours a non-verdict as clean', () => {
-    for (const s of ['unknown', 'exempt', 'disabled', 'idle'] as const) {
-      expect(stateColor(s)).not.toBe('success')
-    }
-    expect(stateColor('clean')).toBe('success')
-  })
-
-  // Suspect is the visible ramp: distinct from both a flag and a clean row, so
-  // the eventual flag does not appear out of nowhere.
-  it('gives the ramp its own colour', () => {
-    const suspect = stateColor('suspect')
-    expect(suspect).not.toBe(stateColor('flagged'))
-    expect(suspect).not.toBe(stateColor('clean'))
-  })
+  useSiteStore.setState({ timezone: '' })
 })
 
 describe('GeoAnomaliesTab read states', () => {
@@ -363,6 +343,45 @@ describe('GeoAnomaliesTab rows', () => {
 
     await screen.findByText('alice')
     expect(within(rowOf('alice')).queryByText('DE · JP')).not.toBeNull()
+  })
+})
+
+describe('GeoAnomaliesTab vocabulary and times', () => {
+  // One word per state on every surface: idle was 无连接 here and 无数据 on
+  // the risk tab for the same "nothing to judge".
+  it('labels states with the one vocabulary', async () => {
+    serve([
+      row({ user_id: 1, upn: 'alice', state: 'idle' }),
+      row({ user_id: 2, upn: 'bob', state: 'exempt',
+        evidence: { ...row({}).evidence, v: 3, why: {
+          code: 'trusted', scope: 'city', tol: { countries: 1, regions: 1, cities: 2 },
+          flag_after: 3, clear_after: 6, min_placed_ratio: 0.5,
+        } } }),
+      row({ user_id: 3, upn: 'carol', state: 'exempt' }),
+    ])
+    mount()
+
+    await screen.findByText('alice')
+    expect(within(rowOf('alice')).queryByText('无数据')).not.toBeNull()
+    expect(within(rowOf('alice')).queryByText('无连接')).toBeNull()
+    // Trusted by an admin is not a setting's exemption, and reads so.
+    expect(within(rowOf('bob')).queryByText('已信任')).not.toBeNull()
+    expect(within(rowOf('carol')).queryByText('已豁免')).not.toBeNull()
+  })
+
+  // Every other page reads times in the panel's timezone; this tab read the
+  // browser's, so one instant printed two ways across the admin.
+  it('prints the judgement and hold times in panel time', async () => {
+    useSiteStore.setState({ timezone: 'Pacific/Chatham' })
+    serve([row({ upn: 'alice', state: 'flagged', flagged: true, tier: 'region', updated_at_ms: 1_790_000_000_000,
+      service_disabled_reason: 'geo_auto', service_disabled_at_ms: 1_789_000_000_000 })])
+    mount()
+
+    await screen.findByText('alice')
+    const cells = rowOf('alice').querySelectorAll('td')
+    expect(cells[5]?.textContent).toBe(formatMsDualTz(1_790_000_000_000, 'Pacific/Chatham'))
+    const hold = within(rowOf('alice')).getByText('自动暂停中').closest('[aria-label]')
+    expect(hold?.getAttribute('aria-label') ?? '').toContain(formatMsDualTz(1_789_000_000_000, 'Pacific/Chatham'))
   })
 })
 

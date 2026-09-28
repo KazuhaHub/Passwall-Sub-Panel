@@ -4,6 +4,8 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createAppTheme } from '@/theme'
 import { makeTestQueryClient, queryWrapper } from '@/test/queryTestUtils'
+import { useSiteStore } from '@/stores/site'
+import { formatMsDualTz } from '@/utils/datetime'
 import type { RiskSignal, RiskUserRow } from '@/api/riskSignals'
 import RiskSignalsTab from './RiskSignalsTab'
 
@@ -59,8 +61,18 @@ function rowOf(name: string): HTMLElement {
   return screen.getByText(name).closest('tr') as HTMLElement
 }
 
-beforeEach(() => vi.clearAllMocks())
-afterEach(cleanup)
+// A panel timezone no CI browser runs in, so a time rendered in the
+// browser's zone cannot pass for one rendered in the panel's.
+const PANEL_TZ = 'Pacific/Chatham'
+
+beforeEach(() => {
+  vi.clearAllMocks()
+  useSiteStore.setState({ timezone: PANEL_TZ })
+})
+afterEach(() => {
+  cleanup()
+  useSiteStore.setState({ timezone: '' })
+})
 
 describe('RiskSignalsTab read states', () => {
   it('reports an unwired worker as its own message, not as an empty table', async () => {
@@ -140,101 +152,23 @@ describe('RiskSignalsTab rows', () => {
     await screen.findByText('alice')
     const tip = within(rowOf('alice')).getByText('已标记').closest('[aria-label]')?.getAttribute('aria-label') ?? ''
     expect(tip).toContain('CN 有 2 组互不相连的常驻省份（容错 1）')
-    expect(tip).toContain(new Date(1_700_000_000_000).toLocaleString())
+    expect(tip).toContain(formatMsDualTz(1_700_000_000_000, PANEL_TZ))
   })
 
-  it('draws one day cell per window day', async () => {
+  // Each kind's evidence renderer is pinned in evidence/evidence.test.tsx;
+  // here only that the expanded row hands each kind's evidence to it.
+  it('expands a row into the evidence of each kind that carries one', async () => {
     serve([user(1, 'alice', [
       sig('sub_spread', 'suspect', {
         code: 'spread_building',
         evidence: {
           v: 1, window_days: 5, window_start: '2026-09-18', retention_days: 5, min_days: 3, min_placed_pct: 50,
           tolerance: 1, country: 'CN', groups: 1, groups_all: 2,
-          provinces: [
-            { cc: 'CN', region: 'Guangdong', days: 0b10101, established: true, group: 1 },
-            { cc: 'CN', region: 'Hunan', days: 0b00100, established: false, group: 2 },
-          ],
-          identities: [{ kind: 'ua', label: 'ClashMeta/1.0', days: 0b11111, provinces: [0] }],
-          foreign: [], excluded: { shared: 0, listed: 0, infra: 0, internal: 0 },
+          provinces: [{ cc: 'CN', region: 'Hunan', days: 0b00100, established: false, group: 2 }],
+          identities: [], foreign: [], excluded: { shared: 0, listed: 0, infra: 0, internal: 0 },
           coverage: { sources: 3, placed: 3, region_known: 3 },
         },
       }),
-    ])])
-    mount()
-
-    await screen.findByText('alice')
-    fireEvent.click(within(rowOf('alice')).getByRole('button', { name: '查看证据' }))
-
-    const strips = await screen.findAllByTestId('day-strip')
-    expect(strips.length).toBe(3) // two provinces, one client
-    for (const s of strips) expect(s.children.length).toBe(5)
-    // Guangdong's mask 0b10101: window days 0, 2 and 4, oldest first.
-    const gd = strips[0]
-    expect([...gd.children].map(c => c.getAttribute('data-on'))).toEqual(['true', 'false', 'true', 'false', 'true'])
-    // Each cell names its panel-local day.
-    expect([...gd.children].map(c => c.getAttribute('title'))).toEqual(
-      ['2026-09-18', '2026-09-19', '2026-09-20', '2026-09-21', '2026-09-22'])
-    expect(screen.queryByText('Guangdong')).not.toBeNull()
-    expect(screen.queryByText('第 2 组')).not.toBeNull()
-  })
-
-  it('names a province in the admin\'s language where its ISO code is known', async () => {
-    // zh-CN from the real bundle: the province line and the client's
-    // "visited" line both read 广东, and a province without a code keeps the
-    // database's name.
-    serve([user(1, 'alice', [
-      sig('sub_spread', 'suspect', {
-        code: 'spread_building',
-        evidence: {
-          v: 1, window_days: 3, window_start: '2026-09-18', retention_days: 3, min_days: 3, min_placed_pct: 50,
-          tolerance: 1, country: 'CN', groups: 1, groups_all: 2,
-          provinces: [
-            { cc: 'CN', region: 'Guangdong', rc: 'GD', days: 0b111, established: true, group: 1 },
-            { cc: 'CN', region: 'Hunan', days: 0b001, established: false, group: 2 },
-          ],
-          identities: [{ kind: 'ua', label: 'ClashMeta/1.0', days: 0b111, provinces: [0] }],
-          foreign: [], excluded: { shared: 0, listed: 0, infra: 0, internal: 0 },
-          coverage: { sources: 3, placed: 3, region_known: 3 },
-        },
-      }),
-    ])])
-    mount()
-
-    await screen.findByText('alice')
-    fireEvent.click(within(rowOf('alice')).getByRole('button', { name: '查看证据' }))
-
-    expect(await screen.findByText('广东')).toBeTruthy()
-    expect(screen.queryByText('Guangdong')).toBeNull()
-    expect(screen.queryByText('Hunan')).not.toBeNull()
-    expect(screen.queryByText('去过：广东')).not.toBeNull()
-  })
-
-  it('usage title shows the series length', async () => {
-    // The series is baseline + judged days, both settings now: a 14 + 3
-    // series is 17 bars, and the title and caption say 17 and 3 — the days
-    // this verdict was judged on, never the shipped 35 and 7.
-    serve([user(1, 'alice', [
-      sig('usage_shift', 'flagged', {
-        code: 'sustained',
-        evidence: {
-          v: 1, end_date: '2026-09-24', series: new Array(17).fill(2 ** 30), history_days: 14,
-          median: 2 ** 30, ratio: 3, floor: 3 * 2 ** 30, thresholds: [1, 1, 1], over: [true, true, false],
-          over_days: 2, fleet_factors: [1, 1, 1],
-          baseline_days: 14, recent_days: 3, warmup_days: 7, flag_days: 2, suspect_days: 2,
-        },
-      }),
-    ])])
-    mount()
-
-    await screen.findByText('alice')
-    fireEvent.click(within(rowOf('alice')).getByRole('button', { name: '查看证据' }))
-
-    expect(await screen.findByText('最近 17 天每日用量（截至 2026-09-24）')).toBeTruthy()
-    expect(screen.getByText(/；最近 3 天超标 2 天$/)).toBeTruthy()
-  })
-
-  it('login counts name the hold days the verdict was judged with', async () => {
-    serve([user(1, 'alice', [
       sig('login_country', 'flagged', {
         code: 'known_countries',
         evidence: {
@@ -246,9 +180,12 @@ describe('RiskSignalsTab rows', () => {
     mount()
 
     await screen.findByText('alice')
+    expect(screen.queryByTestId('day-strip')).toBeNull()
     fireEvent.click(within(rowOf('alice')).getByRole('button', { name: '查看证据' }))
 
-    expect(await screen.findByText(/^30 天内登录 6 次；最近 3 天 2 次，其中已判断 2 次；/)).toBeTruthy()
+    expect((await screen.findAllByTestId('day-strip')).length).toBe(1)
+    expect(screen.queryByText('第 2 组')).not.toBeNull()
+    expect(screen.queryByText(/^30 天内登录 6 次；/)).not.toBeNull()
   })
 
   it('opens the Geo tab from the concurrent-location chip', async () => {
@@ -259,6 +196,9 @@ describe('RiskSignalsTab rows', () => {
     await screen.findByText('alice')
     // The latch outlives the state, as on the Geo tab itself.
     expect(within(rowOf('alice')).queryByText('仍在标记中')).not.toBeNull()
+    // Idle reads as every other detector's idle, not as its own word.
+    expect(within(rowOf('alice')).queryByText('无数据')).not.toBeNull()
+    expect(within(rowOf('alice')).queryByText('无连接')).toBeNull()
     fireEvent.click(within(rowOf('alice')).getByRole('button', { name: '在「异地并发」中查看' }))
     expect(onOpenGeo).toHaveBeenCalledOnce()
   })
@@ -291,6 +231,6 @@ describe('RiskSignalsTab rows', () => {
 
     await screen.findByText('alice')
     const cells = rowOf('alice').querySelectorAll('td')
-    expect(cells[6]?.textContent).toBe(new Date(1_700_000_100_000).toLocaleString())
+    expect(cells[6]?.textContent).toBe(formatMsDualTz(1_700_000_100_000, PANEL_TZ))
   })
 })

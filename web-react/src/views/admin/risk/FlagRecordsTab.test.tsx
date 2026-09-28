@@ -6,6 +6,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createAppTheme } from '@/theme'
 import { makeTestQueryClient, queryWrapper } from '@/test/queryTestUtils'
 import { useAuthStore } from '@/stores/auth'
+import { useSiteStore } from '@/stores/site'
+import { formatMsDualTz } from '@/utils/datetime'
 import type { GeoWhy } from '@/api/geoAnomalies'
 import type { FlagRecord } from '@/api/riskCenter'
 import FlagRecordsTab from './FlagRecordsTab'
@@ -73,7 +75,14 @@ beforeEach(() => {
   vi.clearAllMocks()
   useAuthStore.setState({ role: 'admin', userId: 1, hasToken: true })
 })
-afterEach(cleanup)
+afterEach(() => {
+  cleanup()
+  useSiteStore.setState({ timezone: '' })
+})
+
+// A panel timezone no CI browser runs in, so a time rendered in the
+// browser's zone cannot pass for one rendered in the panel's.
+const PANEL_TZ = 'Pacific/Chatham'
 
 describe('FlagRecordsTab', () => {
   it('renders a geo suspect record with its over/need suffix from params', async () => {
@@ -160,5 +169,14 @@ describe('FlagRecordsTab', () => {
     expect(flagParams().every(p => p.user_id === 7 && p.page_size === 50)).toBe(true)
     expect(screen.queryByRole('columnheader', { name: '用户' })).toBeNull()
     expect(screen.queryByRole('combobox', { name: '用户' })).toBeNull()
+  })
+
+  // Every other page reads times in the panel's timezone; the records read
+  // the browser's, so one instant printed two ways across the admin.
+  it("prints each record's time in panel time", async () => {
+    useSiteStore.setState({ timezone: PANEL_TZ })
+    serve([rec({})])
+    mount()
+    expect(await screen.findByText(formatMsDualTz(1_790_000_000_000, PANEL_TZ))).toBeTruthy()
   })
 })
