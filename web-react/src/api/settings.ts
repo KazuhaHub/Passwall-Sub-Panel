@@ -413,9 +413,10 @@ export interface GeoIPStatus {
 
 export async function getGeoIPStatus(opts: ReadOptions = {}) {
   // Options only when asked for: the settings page (which polls this during an
-  // update) keeps the exact request it has always made, while the Geo tab's
-  // banner read passes its query signal and stays quiet on failure — a failed
-  // read there just means no banner, not a toast over the page's real data.
+  // update) keeps the exact request it has always made, while the risk
+  // center's notice read passes its query signal and stays quiet on failure —
+  // a failed read there just means no notice, not a toast over the page's real
+  // data.
   const { data } = opts.signal || opts.silent
     ? await client.get<GeoIPStatus>('/admin/settings/geoip/status', {
       signal: opts.signal,

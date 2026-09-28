@@ -1,8 +1,8 @@
-import { useState } from 'react'
 import {
   Alert, Box, Button, CircularProgress, MenuItem, TextField, Tooltip, Typography, useTheme,
 } from '@mui/material'
 import RefreshIcon from '@mui/icons-material/Refresh'
+import { useSearchParams } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import { isAxiosError } from 'axios'
 
@@ -19,6 +19,7 @@ import { useSiteStore } from '@/stores/site'
 import { formatDualTz } from '@/utils/datetime'
 import { agoText } from '@/utils/riskCenter'
 import LiveConnectionList from './LiveConnectionList'
+import { liveSearch, parseLiveParams } from './riskParams'
 
 // A panel deleted since the snapshot is named by its id.
 const names = (refs: PanelRef[]) => refs.map(r => r.name || `#${r.id}`).join(', ')
@@ -28,8 +29,8 @@ const names = (refs: PanelRef[]) => refs.map(r => r.name || `#${r.id}`).join(', 
  * what (a poll or a refresh), and each reason the list may be short — stale,
  * panels that failed, panels that cannot tell (S-UI, info not failure),
  * nodes with no reference yet (taken as still scanning), the per-account cap,
- * and fetches that could not be read for devices. Shared with the user
- * lookup.
+ * and fetches that could not be read for devices. Shared with the drawer's
+ * connections tab.
  */
 export function LiveSnapshotHeader({ view }: { view: LiveView }) {
   const { t } = useTranslation(['admin'])
@@ -93,7 +94,7 @@ export function LiveSnapshotHeader({ view }: { view: LiveView }) {
 /**
  * What an EMPTY page of the live view says, claiming no more than the page
  * knows. Only for a snapshot that exists (the header says when there is
- * none). Shared with the user lookup.
+ * none).
  *
  * - `narrowed` (a filter is set, or the page is past the first): no match,
  *   not "nobody" — the snapshot may list many connections the filter
@@ -102,22 +103,14 @@ export function LiveSnapshotHeader({ view }: { view: LiveView }) {
  *   view holds a row only for an account with a connection, so an account
  *   whose only panel failed has no row and no count of its own; the fleet's
  *   unread panels are all the page can qualify its "none" with.
- * - `oneAccount` (the lookup): the sentence is about that account, not the
- *   fleet.
  */
-export function LiveEmpty({ view, narrowed = false, oneAccount = false }: {
-  view: LiveView
-  narrowed?: boolean
-  oneAccount?: boolean
-}) {
+function LiveEmpty({ view, narrowed = false }: { view: LiveView; narrowed?: boolean }) {
   const { t } = useTranslation(['admin'])
   const md = useTheme().palette.md
   const unread = view.snapshot.panels_unread.length
   const text = narrowed
     ? t('admin:risk_center.live.empty_filtered')
-    : oneAccount
-      ? (unread > 0 ? t('admin:risk_center.live.empty_user_unread', { count: unread }) : t('admin:risk_center.live.empty_user'))
-      : (unread > 0 ? t('admin:risk_center.live.empty_unread', { count: unread }) : t('admin:risk_center.live.empty'))
+    : (unread > 0 ? t('admin:risk_center.live.empty_unread', { count: unread }) : t('admin:risk_center.live.empty'))
   return <Typography sx={{ fontSize: 13, color: md.onSurfaceVariant }}>{text}</Typography>
 }
 
@@ -173,31 +166,33 @@ export function LiveRefreshButton() {
  * Only a snapshot: nothing here is a detector sample, and nothing here is
  * written anywhere. Filters are the server's (user, panel, source judgement),
  * so a page is always a page of the filtered accounts.
+ *
+ * The filters and the page live in the URL (`live_*`, riskParams), so opening
+ * an account and coming Back, a reload or a copied link shows the same
+ * filtered page. Written by REPLACE: a filter is a view of the same tab, and
+ * Back should leave the page rather than undo filters one by one.
  */
 export default function LiveConnectionsTab({ onOpenUser }: { onOpenUser?: (userId: number) => void }) {
   const { t } = useTranslation(['admin'])
   const scope = useQueryScope()
-  const [page, setPage] = useState(1)
-  const [pageSize, setPageSize] = useState(25)
-  const [userId, setUserId] = useState<number | null>(null)
-  const [panelId, setPanelId] = useState<number | ''>('')
-  const [exclusion, setExclusion] = useState('')
-
-  const params: LiveParams = {
-    page, page_size: pageSize,
-    ...(userId ? { user_id: userId } : {}),
-    ...(panelId !== '' ? { panel_id: panelId } : {}),
-    ...(exclusion ? { exclusion } : {}),
-  }
+  const [urlParams, setUrlParams] = useSearchParams()
+  const params: LiveParams = parseLiveParams(urlParams)
+  const { page = 1, page_size: pageSize = 25 } = params
   const { data, isPending, error } = useLiveConnections(scope, params)
   // Read off what was actually asked for, so "no match" and the request
   // cannot disagree about whether a filter was set.
   const narrowed = params.user_id !== undefined || params.panel_id !== undefined
     || params.exclusion !== undefined || page > 1
 
-  // Any filter change starts again at the first page: page 3 of one filter
-  // is not a page of another.
-  const filter = <T,>(set: (v: T) => void) => (v: T) => { set(v); setPage(1) }
+  // liveSearch starts any filter change again at the first page: page 3 of
+  // one filter is not a page of another.
+  const update = (patch: Partial<LiveParams>) => setUrlParams(prev => liveSearch(prev, patch), { replace: true })
+
+  // A panel the URL names but the snapshot no longer lists (deleted since the
+  // link was copied) stays selectable by its id, so the select never reads
+  // "all" while the list is still filtered by it.
+  const panels = [...(data?.panels ?? [])]
+  if (params.panel_id && !panels.some(p => p.id === params.panel_id)) panels.push({ id: params.panel_id, name: '' })
 
   const err = error
     ? (isAxiosError(error) ? String(error.response?.data?.error ?? error.message) : String(error))
@@ -206,16 +201,16 @@ export default function LiveConnectionsTab({ onOpenUser }: { onOpenUser?: (userI
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
       <Box sx={{ display: 'flex', gap: 1.5, flexWrap: 'wrap', alignItems: 'center' }}>
-        <UserAutocomplete value={userId} onChange={filter(setUserId)}
+        <UserAutocomplete value={params.user_id ?? null} onChange={id => update({ user_id: id ?? undefined })}
           label={t('admin:risk_center.live.filter_user')} width={240} />
         <TextField select size="small" label={t('admin:risk_center.live.filter_panel')} sx={{ width: 180 }}
-          value={panelId === '' ? '' : String(panelId)}
-          onChange={e => filter(setPanelId)(e.target.value === '' ? '' : Number(e.target.value))}>
+          value={params.panel_id ? String(params.panel_id) : ''}
+          onChange={e => update({ panel_id: e.target.value === '' ? undefined : Number(e.target.value) })}>
           <MenuItem value="">{t('admin:risk_center.live.opt_all')}</MenuItem>
-          {(data?.panels ?? []).map(p => <MenuItem key={p.id} value={String(p.id)}>{p.name || `#${p.id}`}</MenuItem>)}
+          {panels.map(p => <MenuItem key={p.id} value={String(p.id)}>{p.name || `#${p.id}`}</MenuItem>)}
         </TextField>
         <TextField select size="small" label={t('admin:risk_center.live.filter_sources')} sx={{ width: 180 }}
-          value={exclusion} onChange={e => filter(setExclusion)(e.target.value)}>
+          value={params.exclusion ?? ''} onChange={e => update({ exclusion: e.target.value || undefined })}>
           <MenuItem value="">{t('admin:risk_center.live.opt_all')}</MenuItem>
           <MenuItem value={EXCLUSION_KEPT}>{t('admin:risk_center.live.opt_kept')}</MenuItem>
           <MenuItem value={EXCLUSION_EXCLUDED}>{t('admin:risk_center.live.opt_excluded')}</MenuItem>
@@ -242,7 +237,7 @@ export default function LiveConnectionsTab({ onOpenUser }: { onOpenUser?: (userI
               devicesUnavailable={data.devices_unavailable} onOpenUser={onOpenUser} />
           )}
           <PagedTableFooter total={data.total} page={page} pageSize={pageSize}
-            onPageChange={setPage} onPageSizeChange={n => { setPageSize(n); setPage(1) }} />
+            onPageChange={p => update({ page: p })} onPageSizeChange={n => update({ page_size: n })} />
         </>
       )}
     </Box>

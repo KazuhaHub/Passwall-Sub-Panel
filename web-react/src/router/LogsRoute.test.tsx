@@ -35,11 +35,17 @@ afterEach(() => {
 // Logs page's tab parser would quietly fall back to subscription logs — a page
 // that answers "who is sharing?" with a list of fetches.
 describe('LogsRoute', () => {
-  it.each(['geo', 'risk'])("redirects an admin's ?tab=%s to the risk center", tab => {
+  // Straight to the tab that answers the question now, not to the risk
+  // center's own legacy redirect: one hop, not two. The location tab became
+  // the queue narrowed to that detector; the risk tab, the whole queue.
+  it.each([
+    ['geo', '/admin/risk?tab=queue&source=geo'],
+    ['risk', '/admin/risk?tab=queue'],
+  ])("redirects an admin's ?tab=%s to %s", (tab, target) => {
     signIn('admin')
     mount(`/admin/logs?tab=${tab}`)
 
-    expect(screen.getByTestId('location').textContent).toBe(`/admin/risk?tab=${tab}`)
+    expect(screen.getByTestId('location').textContent).toBe(target)
     expect(screen.getByText('risk center')).toBeTruthy()
     expect(screen.queryByText('logs page')).toBeNull()
   })

@@ -1,68 +1,13 @@
-// Pure helpers for the risk-signals tab and its settings block. No I/O, no
-// React: each one either mirrors a server rule (riskPolicy) or decides what an
-// admin reads first (needsAttention, sortRiskRows, riskCodeText), so all of
-// them are pinned by unit tests rather than by rendering.
-import {
-  RISK_KINDS, type DevicesEvidence, type LoginCountryEvidence, type RiskKind, type RiskSignal, type RiskState,
-  type RiskUserRow, type SubSpreadEvidence, type UsageShiftEvidence,
+// Pure helpers for the risk signals' evidence and its settings block. No I/O,
+// no React: each one either mirrors a server rule (riskPolicy) or decides what
+// an admin reads (riskCodeText, the day strips), so all of them are pinned by
+// unit tests rather than by rendering.
+import type {
+  DevicesEvidence, LoginCountryEvidence, RiskSignal, SubSpreadEvidence, UsageShiftEvidence,
 } from '@/api/riskSignals'
 import type { UISettings } from '@/api/settings'
 import type { Translate } from './geoAnomaly'
 import type { RegionNamer, RegionRef } from './regionName'
-
-/** Whether this build draws a column for the kind. A newer server's kind has
- *  no column here, so it neither lists a row nor ages one. */
-function knownKind(kind: string): kind is RiskKind {
-  return (RISK_KINDS as readonly string[]).includes(kind)
-}
-
-/**
- * Whether the row belongs in the default "needs attention" list: any shown
- * signal flagged or suspect, or a concurrent-location verdict that is.
- *
- * The geo LATCH counts, not only its state: a flagged account that went idle
- * reads state idle and is still flagged, and disconnecting for a while would
- * otherwise take it off the list. Unknown does not count — it is "cannot
- * tell", and on a fleet whose clients send no x-hwid every row reads
- * devices: unknown; listing them would bury the accounts worth opening. The
- * switch beside the table shows every row.
- */
-export function needsAttention(row: RiskUserRow): boolean {
-  const loud = (s: RiskState) => s === 'flagged' || s === 'suspect'
-  if (row.signals.some(s => knownKind(s.kind) && loud(s.state))) return true
-  return !!row.geo && (row.geo.flagged || loud(row.geo.state))
-}
-
-function stateRank(s: RiskState): number {
-  switch (s) {
-    case 'flagged': return 0
-    case 'suspect': return 1
-    case 'unknown': return 2
-    case 'clean': return 3
-    default: return 4 // idle / exempt / disabled
-  }
-}
-
-/** The row's most severe shown signal, its geo verdict included. A geo latch
- *  ranks as a flag for the reason needsAttention counts it. */
-function rowRank(row: RiskUserRow): number {
-  let rank = 4
-  for (const s of row.signals) {
-    if (knownKind(s.kind)) rank = Math.min(rank, stateRank(s.state))
-  }
-  if (row.geo) rank = Math.min(rank, row.geo.flagged ? 0 : stateRank(row.geo.state))
-  return rank
-}
-
-function rowName(row: RiskUserRow): string {
-  return row.upn || `#${row.user_id}`
-}
-
-/** A sorted COPY (the input is the query cache's): most severe first, then by
- *  name, so equal rows keep one order across refreshes. */
-export function sortRiskRows(rows: RiskUserRow[]): RiskUserRow[] {
-  return [...rows].sort((a, b) => rowRank(a) - rowRank(b) || rowName(a).localeCompare(rowName(b)))
-}
 
 /** The evidence as a record, or an empty one for a verdict that carries none
  *  (idle, disabled, exempt): those codes' sentences have no numbers. */
@@ -190,20 +135,6 @@ export function riskPolicy(s: UISettings): { minDays: number; maxDevices: number
     ratio: positive(s.risk_usage_ratio) ? Math.max(s.risk_usage_ratio, RISK_RATIO_MIN) : RISK_DEFAULT.ratio,
     floorGB: positive(s.risk_usage_floor_gb) ? s.risk_usage_floor_gb : RISK_DEFAULT.floorGB,
   }
-}
-
-/**
- * The OLDEST computed time among the row's shown signals, 0 for none. Not the
- * newest: a kind skipped for days (infrastructure never loaded, a scan
- * failing) must show its age rather than hide behind a fresh sibling. Each
- * kind's own time is in its chip's tooltip.
- */
-export function oldestUpdate(row: RiskUserRow): number {
-  let oldest = 0
-  for (const s of row.signals) {
-    if (knownKind(s.kind) && (oldest === 0 || s.updated_at_ms < oldest)) oldest = s.updated_at_ms
-  }
-  return oldest
 }
 
 /**

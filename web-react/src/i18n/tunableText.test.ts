@@ -17,8 +17,9 @@ import { flatten, type Nested } from './options'
 //
 // Scanned: the zh-CN and en-US values under the settings page's geo, risk and
 // risk-center blocks, the risk-signal and risk-center tabs, and the group
-// editor's risk rows; plus the Chinese defaultValue copies in the two views
-// that duplicate those strings, which an i18n miss would show instead.
+// editor's risk rows; plus the Chinese defaultValue copies in the settings
+// view, which an i18n miss would show instead. The risk center's views carry
+// no Chinese copies at all (riskKeys.test.ts).
 const scanned = ['settings.geo_anomaly.', 'settings.risk.', 'settings.risk_center.', 'risk_signals.', 'risk_center.', 'groups.scope.risk_']
 
 const literals: Record<'zh' | 'en', string[]> = {
@@ -52,7 +53,7 @@ describe('no hard-coded tunable text remains', () => {
     expect(found).toEqual([])
   })
 
-  it.each(['../views/admin/SettingsView.tsx', '../views/admin/risk/RiskSignalsTab.tsx'])(
+  it.each(['../views/admin/SettingsView.tsx'])(
     'the Chinese defaultValue copies in %s', async file => {
       const fs = await import('node:fs')
       const source = fs.readFileSync(new URL(file, import.meta.url), 'utf8')

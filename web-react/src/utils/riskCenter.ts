@@ -137,6 +137,13 @@ export function flagText(rec: FlagRecord, t: Translate): string {
   return rec.code
 }
 
+/** A list's separator in the UI's language: 「、」 for Chinese, ", "
+ *  otherwise. Here rather than in the views, which carry no Chinese text of
+ *  their own (i18n/riskKeys.test.ts). */
+export function listSeparator(language: string | undefined): string {
+  return (language ?? '').toLowerCase().startsWith('zh') ? '、' : ', '
+}
+
 /** How long ago, in the coarsest whole unit, with the Users page's words. */
 export function agoText(seconds: number, t: Translate): string {
   const s = Math.max(0, Math.floor(seconds))

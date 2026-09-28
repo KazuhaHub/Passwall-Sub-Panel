@@ -1,5 +1,3 @@
-import { client } from './client'
-
 /**
  * The tier a verdict was over at, coarsest first: two COUNTRIES is a stronger
  * statement than the cities that come with them. '' when nothing was over.
@@ -156,19 +154,4 @@ export interface GeoAnomaly {
    *  the detector itself suspended it; anything else is somebody else's hold. */
   service_disabled_reason?: string
   service_disabled_at_ms?: number
-}
-
-/**
- * Every judged user, newest first. Unfiltered by design: the denominator has
- * to stay reachable so a detector that has stopped working is visible.
- *
- * `user_id` asks for that one account's verdict alone (the risk center's
- * lookup). The server applies it before it names the rows, so one account
- * costs one user read rather than one per judged account.
- */
-export async function listGeoAnomalies(
-  signal?: AbortSignal, params: { user_id?: number } = {},
-): Promise<GeoAnomaly[]> {
-  const { data } = await client.get<{ items: GeoAnomaly[] }>('/admin/geo-anomalies', { params, signal })
-  return data.items ?? []
 }

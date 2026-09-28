@@ -1,4 +1,3 @@
-import { client } from './client'
 import type { GeoAnomaly, GeoExcluded, GeoTier } from './geoAnomalies'
 
 /**
@@ -162,19 +161,4 @@ export interface RiskUserRow {
   display_name?: string
   geo: { state: RiskState; flagged: boolean; tier: GeoTier; updated_at_ms: number } | null
   signals: RiskSignal[]
-}
-
-/**
- * Every account with at least one signal row, by user id. Unfiltered by
- * design: the attention filter is the tab's, on a switch the admin can turn
- * off, so a signal that quietly stopped judging stays visible.
- *
- * `user_id` asks for that one account's row alone (the risk center's lookup),
- * instead of the fleet list filtered here.
- */
-export async function listRiskSignals(
-  signal?: AbortSignal, params: { user_id?: number } = {},
-): Promise<RiskUserRow[]> {
-  const { data } = await client.get<{ items: RiskUserRow[] }>('/admin/risk-signals', { params, signal })
-  return data.items ?? []
 }

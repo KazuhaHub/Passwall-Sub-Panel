@@ -14,7 +14,7 @@ import { useSiteStore } from '@/stores/site'
 export function UserActivity({ userId, showTitle = true }: {
   userId: number
   /** false where the caller already heads the list (the risk center's
-   *  lookup), so the same words do not stand twice in a row. */
+   *  drawer), so the same words do not stand twice in a row. */
   showTitle?: boolean
 }) {
   const { t } = useTranslation('admin')

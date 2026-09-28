@@ -13,7 +13,7 @@ import { useSiteStore } from '@/stores/site'
 import { formatMsDualTz } from '@/utils/datetime'
 import { activeDbIsCountryOnly, reasonText, tierLabelKey } from '@/utils/geoAnomaly'
 import { riskCodeText } from '@/utils/riskSignals'
-import { flagSourceKey } from '@/utils/riskCenter'
+import { flagSourceKey, listSeparator } from '@/utils/riskCenter'
 import { DetectorStateChip } from '../evidence/DetectorStateChip'
 import { GeoDistance, GeoPlaces } from '../evidence/GeoEvidence'
 import { RiskKindEvidence } from '../evidence/RiskEvidence'
@@ -180,9 +180,7 @@ function ReviewLines({ review }: { review: RiskReview }) {
     })))
     if (review.note) lines.push(line(t(`${R}note`, { note: review.note })))
     if (review.reopened) {
-      // The list separator of the language: a Chinese list reads 「、」.
-      const sep = i18n.language?.startsWith('zh') ? '、' : ', '
-      const sources = review.escalated.map(s => t(flagSourceKey(s))).join(sep)
+      const sources = review.escalated.map(s => t(flagSourceKey(s))).join(listSeparator(i18n.language))
       lines.push(line(t(`${R}reopened`, { sources }), md.error))
     }
     if (review.lapsed) lines.push(line(t(`${R}lapsed`), md.error))

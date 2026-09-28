@@ -25,7 +25,7 @@ export interface LiveConnectionListProps {
   /** The fetches could not be read: devices are absent, not "none". */
   devicesUnavailable?: boolean
   onOpenUser?: (userId: number) => void
-  /** Every account starts expanded (the single-account lookup). */
+  /** Every account starts expanded, for a list meant to be read whole. */
   initiallyOpen?: boolean
 }
 
@@ -34,8 +34,9 @@ export interface LiveConnectionListProps {
  * connections: address and source, panel and node, place, judgement, the
  * panel's last sighting and the devices inferred behind it.
  *
- * Shared by the Live tab and the user lookup, so the two cannot describe the
- * same connection differently.
+ * The Live tab's list. The drawer's 连接 tab draws the same connections with
+ * the same pieces (AddressCell, JudgementChip, regionText), so the two cannot
+ * describe one connection differently.
  */
 export default function LiveConnectionList({
   users, deviceWindowHours, devicesUnavailable = false, onOpenUser, initiallyOpen = false,

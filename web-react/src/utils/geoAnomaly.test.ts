@@ -11,7 +11,7 @@ import { GEO_REASON_CODES, type GeoAnomaly, type GeoReasonCode, type GeoSpot, ty
 import type { GeoIPStatus, UISettings } from '@/api/settings'
 import { flatten, type Nested } from '@/i18n/options'
 import {
-  activeDbIsCountryOnly, geoTolerances, groupSpots, reasonText, sortBySeverity, spreadKm, tierLabelKey, type Translate,
+  activeDbIsCountryOnly, geoTolerances, groupSpots, reasonText, spreadKm, tierLabelKey, type Translate,
 } from './geoAnomaly'
 
 function row(over: Partial<GeoAnomaly>): GeoAnomaly {
@@ -131,37 +131,6 @@ describe('spreadKm', () => {
     expect(spreadKm(ev(3, -5))).toBe(0)
     expect(spreadKm(ev(3, Number.NaN))).toBe(0)
     expect(spreadKm(ev(3, Number.POSITIVE_INFINITY))).toBe(0)
-  })
-})
-
-describe('sortBySeverity', () => {
-  it('puts what needs a decision first, and a latched idle flag above the ramp', () => {
-    const rows = [
-      row({ user_id: 1, state: 'clean', updated_at_ms: 50 }),
-      row({ user_id: 2, state: 'suspect', updated_at_ms: 40 }),
-      // Flagged, then disconnected: the streak froze with the latch on. It is
-      // still flagged, and sorting it by its "idle" state would bury it under
-      // every clean row — the easiest evasion there is.
-      row({ user_id: 3, state: 'idle', flagged: true, updated_at_ms: 10 }),
-      row({ user_id: 4, state: 'flagged', flagged: true, updated_at_ms: 20 }),
-      row({ user_id: 5, state: 'unknown', updated_at_ms: 30 }),
-      row({ user_id: 6, state: 'exempt', updated_at_ms: 60 }),
-      row({ user_id: 7, state: 'unknown', flagged: true, updated_at_ms: 5 }),
-      row({ user_id: 8, state: 'idle', updated_at_ms: 70 }),
-    ]
-    expect(sortBySeverity(rows).map(r => r.user_id)).toEqual([4, 3, 7, 2, 5, 1, 8, 6])
-  })
-
-  it('breaks ties newest first and leaves the input alone', () => {
-    const rows = [
-      row({ user_id: 1, state: 'suspect', updated_at_ms: 1 }),
-      row({ user_id: 2, state: 'suspect', updated_at_ms: 7 }),
-    ]
-    const sorted = sortBySeverity(rows)
-    expect(sorted.map(r => r.user_id)).toEqual([2, 1])
-    // A new array: the input is the query cache's, shared with every reader.
-    expect(sorted).not.toBe(rows)
-    expect(rows.map(r => r.user_id)).toEqual([1, 2])
   })
 })
 

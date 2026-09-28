@@ -24,8 +24,9 @@ export function useUsersList(scope: QueryScope, params: UserListParams) {
 }
 
 /**
- * One account, by id. Silent: its reader (the risk center's lookup) answers a
- * 404 with its own "not found", and a toast beside it would say it twice.
+ * One account, by id. Silent: its reader (the user picker, naming the account
+ * it holds) falls back to "#id" by itself, and a toast over the page would
+ * report a failure nobody asked about.
  * Disabled for an id that is not a positive integer, so an unparsed URL never
  * asks for /admin/users/0.
  */

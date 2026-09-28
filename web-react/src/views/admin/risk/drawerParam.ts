@@ -1,16 +1,7 @@
 import { useCallback } from 'react'
 import { useLocation, useNavigate, useSearchParams } from 'react-router'
 
-/**
- * An account id from the URL, or null for anything that is not a positive
- * safe integer: a malformed link asks for nobody rather than for #0 or for
- * whatever Number() makes of the text ("7.5", "07x", "-7").
- */
-export function parseUserId(raw: string | null): number | null {
-  if (!raw || !/^\d+$/.test(raw)) return null
-  const id = Number(raw)
-  return Number.isSafeInteger(id) && id > 0 ? id : null
-}
+import { parseUserId } from './riskParams'
 
 /** The state an open() push carries, naming the param it opened. */
 interface DrawerState { riskDrawer?: string }

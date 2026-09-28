@@ -49,7 +49,7 @@ import { AsyncButton } from '@/components/AsyncButton'
 import { useTabParam } from '@/hooks/useTabParam'
 import { formatDualTz } from '@/utils/datetime'
 import CertEventsTab from './CertEventsTab'
-import { parseUserId } from './risk/drawerParam'
+import { parseUserId } from './risk/riskParams'
 import { useSiteStore } from '@/stores/site'
 
 // Initial page size pulled from the shared psp_page_size key so the

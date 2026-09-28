@@ -1,8 +1,8 @@
-// Pure helpers for the concurrent-location views: the Geo tab, the geo
-// settings section and the per-group editor. No I/O, no React — each one
-// either mirrors a server rule (geoTolerances) or decides what an admin reads
-// (sortBySeverity, reasonText), so both are pinned by unit tests rather than
-// by rendering.
+// Pure helpers for the concurrent-location views: the risk center's queue and
+// drawer, the geo settings section and the per-group editor. No I/O, no React
+// — each one either mirrors a server rule (geoTolerances) or decides what an
+// admin reads (reasonText, the place tree), so both are pinned by unit tests
+// rather than by rendering.
 import type { GeoAnomaly, GeoEvidence, GeoSpot, GeoTier, GeoWhy } from '@/api/geoAnomalies'
 import type { GeoIPStatus, UISettings } from '@/api/settings'
 
@@ -201,29 +201,6 @@ export function groupSpots(spots: GeoSpot[]): SpotTree[] {
 export function spreadKm(ev: GeoEvidence | undefined): number {
   const km = ev && ev.v >= 3 ? ev.spread?.max_km : undefined
   return typeof km === 'number' && Number.isFinite(km) && km > 0 ? Math.round(km) : 0
-}
-
-/**
- * Rank by what the admin should look at first. The LATCH outranks the state:
- * a flagged account that went idle or unreadable is still flagged (the streak
- * froze), and ranking it by its "idle" would bury it below every clean row —
- * disconnecting for a while is the easiest evasion there is. It still sits
- * below a live flag, which is the stronger, current statement.
- */
-function severityRank(r: GeoAnomaly): number {
-  if (r.state === 'flagged') return 0
-  if (r.flagged && (r.state === 'idle' || r.state === 'unknown')) return 1
-  switch (r.state) {
-    case 'suspect': return 2
-    case 'unknown': return 3
-    case 'clean': return 4
-    default: return 5 // idle / exempt / disabled
-  }
-}
-
-/** A sorted COPY (the input is the query cache's); ties newest first. */
-export function sortBySeverity(rows: GeoAnomaly[]): GeoAnomaly[] {
-  return [...rows].sort((a, b) => severityRank(a) - severityRank(b) || b.updated_at_ms - a.updated_at_ms)
 }
 
 /**

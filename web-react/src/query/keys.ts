@@ -37,8 +37,9 @@ export const userKeys = {
   all: (s: QueryScope) => [...privateRoot(s), 'users'] as const,
   lists: (s: QueryScope) => [...userKeys.all(s), 'list'] as const,
   list: (s: QueryScope, params: UserListParams) => [...userKeys.lists(s), params] as const,
-  /** One account, by id (the risk center's lookup). Under `all`, so a write
-   *  that invalidates the users invalidates this too. */
+  /** One account, by id (the user picker's name for a picked account).
+   *  Under `all`, so a write that invalidates the users invalidates this
+   *  too. */
   detail: (s: QueryScope, userId: number) => [...userKeys.all(s), 'detail', userId] as const,
 }
 
@@ -101,9 +102,10 @@ export const settingsKeys = {
   mail: (s: QueryScope) => [...settingsKeys.all(s), 'mail'] as const,
   saml: (s: QueryScope) => [...settingsKeys.all(s), 'saml'] as const,
   oidc: (s: QueryScope) => [...settingsKeys.all(s), 'oidc'] as const,
-  /** The offline location databases and which one is active. Read by the Geo
-   *  tab's coarse-database banner; the settings page keeps its own copy in
-   *  local state because it polls it tightly while an update downloads. */
+  /** The offline location databases and which one is active. Read by the
+   *  risk center's database notices (the queue, the drawer's location row);
+   *  the settings page keeps its own copy in local state because it polls it
+   *  tightly while an update downloads. */
   geoIPStatus: (s: QueryScope) => [...settingsKeys.all(s), 'geoip-status'] as const,
 }
 
@@ -162,22 +164,6 @@ export const meKeys = {
   all: (s: QueryScope) => [...privateRoot(s), 'me'] as const,
   profile: (s: QueryScope) => [...meKeys.all(s), 'profile'] as const,
   usage: (s: QueryScope) => [...meKeys.all(s), 'usage'] as const,
-}
-
-/** Concurrent-location verdicts, as shown on the risk center's Geo tab. */
-export const geoAnomalyKeys = {
-  all: (s: QueryScope) => [...privateRoot(s), 'geo-anomalies'] as const,
-  /** One account's verdict alone (`?user_id=`), for the lookup. Its own
-   *  entry, never a slice of the fleet list: the lookup must not load the
-   *  fleet to show one row. */
-  user: (s: QueryScope, userId: number) => [...geoAnomalyKeys.all(s), 'user', userId] as const,
-}
-
-/** The observe-only risk signals, as shown on the risk center's risk tab. */
-export const riskSignalKeys = {
-  all: (s: QueryScope) => [...privateRoot(s), 'risk-signals'] as const,
-  /** One account's row alone (`?user_id=`), for the lookup. */
-  user: (s: QueryScope, userId: number) => [...riskSignalKeys.all(s), 'user', userId] as const,
 }
 
 /**

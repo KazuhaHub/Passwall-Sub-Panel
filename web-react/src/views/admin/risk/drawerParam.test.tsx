@@ -2,7 +2,7 @@
 import { MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it } from 'vitest'
-import { parseUserId, useDrawerParam } from './drawerParam'
+import { useDrawerParam } from './drawerParam'
 
 // The drawer's URL rule (§3.4): opening PUSHES `param=<id>` with a state mark,
 // so Back closes it; closing an entry that open pushed goes Back, so the
@@ -95,16 +95,5 @@ describe('useDrawerParam', () => {
   it('reads only a positive integer id', () => {
     mount(['/admin/risk?user=abc'])
     expect(screen.getByTestId('id').textContent).toBe('none')
-  })
-})
-
-describe('parseUserId', () => {
-  it.each(['abc', '0', '-7', '7.5', '07x', '', '9007199254740993'])('rejects %j', raw => {
-    expect(parseUserId(raw)).toBeNull()
-  })
-
-  it('accepts a positive safe integer', () => {
-    expect(parseUserId('7')).toBe(7)
-    expect(parseUserId(null)).toBeNull()
   })
 })

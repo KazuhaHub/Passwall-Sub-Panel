@@ -13,8 +13,8 @@ import { dayBits, dayLabels, formatGB, placeLabel, riskCodeText } from '@/utils/
 import { DetectorStateChip } from './DetectorStateChip'
 
 // The renderers of the four risk kinds' evidence, shared by every surface that
-// shows one (the risk tab, the lookup, and the drawer and records after them),
-// so one verdict never reads two ways. Field names are the server's wire
+// shows one (the drawer, and the records after it), so one verdict never reads
+// two ways. Field names are the server's wire
 // contract (domain.*Evidence); every list is present, empty rather than null,
 // but each renderer still defaults them: a record's params or an older row is
 // read through the same code. Every absolute time is the panel's timezone.
@@ -64,7 +64,7 @@ function Place({ cc, name }: { cc: string; name: string }) {
 export function SubSpreadPanel({ ev }: { ev: SubSpreadEvidence }) {
   const { t, i18n } = useTranslation(['admin'])
   // Provinces only: a Chinese UI names a CN province by its ISO code, as the
-  // Geo tab does. The foreign lines below stay country codes.
+  // location evidence does. The foreign lines below stay country codes.
   const name = regionNamer(t, i18n.language)
   const labels = dayLabels(ev.window_start, ev.window_days)
   const provinces = ev.provinces ?? []

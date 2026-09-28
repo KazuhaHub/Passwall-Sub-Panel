@@ -7,12 +7,12 @@ vi.mock('@/api/client', () => ({ client: {} }))
 
 import zh from '@/locales/zh-CN/admin.json'
 import en from '@/locales/en-US/admin.json'
-import { RISK_CODES, RISK_KINDS, type RiskKind, type RiskSignal, type RiskUserRow } from '@/api/riskSignals'
+import { RISK_CODES, RISK_KINDS, type RiskKind, type RiskSignal } from '@/api/riskSignals'
 import type { UISettings } from '@/api/settings'
 import { flatten, type Nested } from '@/i18n/options'
 import type { Translate } from './geoAnomaly'
 import {
-  dayBits, dayLabels, formatGB, needsAttention, oldestUpdate, placeLabel, riskCodeText, riskPolicy, sortRiskRows,
+  dayBits, dayLabels, formatGB, placeLabel, riskCodeText, riskPolicy,
 } from './riskSignals'
 
 // A stand-in for i18next's t over one shipped bundle: the admin namespace
@@ -35,74 +35,6 @@ const enT = translator(en as Nested)
 function sig(kind: string, state: RiskSignal['state'], over: Partial<RiskSignal> = {}): RiskSignal {
   return { kind: kind as RiskKind, state, code: 'within', evidence: null, updated_at_ms: 1, ...over }
 }
-
-function user(id: number, signals: RiskSignal[], over: Partial<RiskUserRow> = {}): RiskUserRow {
-  return { user_id: id, upn: `u${id}`, geo: null, signals, ...over }
-}
-
-describe('needsAttention', () => {
-  it('holds a row with a flagged or suspect signal', () => {
-    expect(needsAttention(user(1, [sig('devices', 'flagged')]))).toBe(true)
-    expect(needsAttention(user(1, [sig('usage_shift', 'suspect')]))).toBe(true)
-  })
-
-  it('does not hold a row that only cannot tell, has no data, or is clean', () => {
-    // "Cannot tell" is not a finding. On a fleet where no client sends
-    // x-hwid, every row reads devices: unknown, and listing them all would
-    // bury the one account that matters under the whole fleet.
-    const quiet = ['unknown', 'idle', 'clean', 'exempt', 'disabled'] as const
-    expect(needsAttention(user(1, quiet.map((s, i) => sig(RISK_KINDS[i % 4], s))))).toBe(false)
-    expect(needsAttention(user(1, []))).toBe(false)
-  })
-
-  it('counts the concurrent-location latch, not only its state', () => {
-    // A flagged account that disconnected reads state idle and is still
-    // flagged — the easiest evasion there is, if the filter reads the state.
-    expect(needsAttention(user(1, [], { geo: { state: 'idle', flagged: true, tier: 'region', updated_at_ms: 1 } }))).toBe(true)
-    expect(needsAttention(user(1, [], { geo: { state: 'suspect', flagged: false, tier: 'city', updated_at_ms: 1 } }))).toBe(true)
-    expect(needsAttention(user(1, [], { geo: { state: 'flagged', flagged: true, tier: 'country', updated_at_ms: 1 } }))).toBe(true)
-    expect(needsAttention(user(1, [], { geo: { state: 'unknown', flagged: false, tier: '', updated_at_ms: 1 } }))).toBe(false)
-  })
-
-  it('ignores a kind this build does not show', () => {
-    // A row listed for a flag nobody can see in it is a row nobody can act on.
-    expect(needsAttention(user(1, [sig('travel', 'flagged')]))).toBe(false)
-  })
-})
-
-describe('sortRiskRows', () => {
-  it('orders by the most severe signal, a geo latch counting as a flag', () => {
-    const rows = [
-      user(1, [sig('sub_spread', 'clean')], { upn: 'clean' }),
-      user(2, [sig('devices', 'suspect'), sig('usage_shift', 'clean')], { upn: 'suspect' }),
-      user(3, [sig('sub_spread', 'idle')], { upn: 'idle' }),
-      user(4, [sig('usage_shift', 'unknown')], { upn: 'unknown' }),
-      user(5, [sig('login_country', 'clean')], {
-        upn: 'latched', geo: { state: 'idle', flagged: true, tier: 'region', updated_at_ms: 1 },
-      }),
-      user(6, [sig('devices', 'clean'), sig('login_country', 'flagged')], { upn: 'flagged' }),
-    ]
-    expect(sortRiskRows(rows).map(r => r.upn)).toEqual(['flagged', 'latched', 'suspect', 'unknown', 'clean', 'idle'])
-  })
-
-  it('breaks ties by name, "#id" for an account without one', () => {
-    const rows = [
-      user(9, [sig('devices', 'flagged')], { upn: 'bob' }),
-      user(7, [sig('devices', 'flagged')], { upn: undefined }),
-      user(8, [sig('devices', 'flagged')], { upn: 'alice' }),
-    ]
-    expect(sortRiskRows(rows).map(r => r.user_id)).toEqual([7, 8, 9])
-  })
-
-  it('returns a new array and leaves the input alone', () => {
-    // The input is the query cache's, shared with every reader.
-    const rows = [user(1, [sig('devices', 'clean')]), user(2, [sig('devices', 'flagged')])]
-    const sorted = sortRiskRows(rows)
-    expect(sorted).not.toBe(rows)
-    expect(rows.map(r => r.user_id)).toEqual([1, 2])
-    expect(sorted.map(r => r.user_id)).toEqual([2, 1])
-  })
-})
 
 // One evidence body per kind, carrying every field a code's sentence reads.
 const evidence: Record<RiskKind, object> = {
@@ -273,22 +205,6 @@ describe('formatGB', () => {
     expect(formatGB(0)).toBe('0.00 GB')
     expect(formatGB(2.5 * 2 ** 30)).toBe('2.50 GB')
     expect(formatGB(1536 * 2 ** 20)).toBe('1.50 GB')
-  })
-})
-
-describe('oldestUpdate', () => {
-  it('is the oldest signal time, so one kind stuck for days shows', () => {
-    const row = user(1, [
-      sig('sub_spread', 'clean', { updated_at_ms: 300 }),
-      sig('devices', 'clean', { updated_at_ms: 100 }),
-      sig('usage_shift', 'clean', { updated_at_ms: 200 }),
-    ])
-    expect(oldestUpdate(row)).toBe(100)
-  })
-
-  it('is 0 for no signals, and ignores a kind this build does not show', () => {
-    expect(oldestUpdate(user(1, []))).toBe(0)
-    expect(oldestUpdate(user(1, [sig('travel', 'clean', { updated_at_ms: 5 }), sig('devices', 'clean', { updated_at_ms: 50 })]))).toBe(50)
   })
 })
 

@@ -44,9 +44,10 @@ function toInstant(local: string): string | undefined {
 }
 
 export interface FlagRecordsTabProps {
-  /** Fixes the list to one account (the lookup): no user filter or column. */
+  /** Fixes the list to one account (the drawer's timeline): no user filter
+   *  or column. */
   userId?: number
-  /** The lookup's form: no intro, a longer page. */
+  /** The drawer's form: no intro, a longer page. */
   compact?: boolean
   onOpenUser?: (userId: number) => void
 }

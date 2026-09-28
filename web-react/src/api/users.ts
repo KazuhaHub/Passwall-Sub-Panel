@@ -51,7 +51,7 @@ export async function listUsers(params: UserListParams = {}, signal?: AbortSigna
 }
 
 /** One account. `silent` skips the global error toast, for a caller that
- *  shows its own answer (the risk center's lookup says "not found" itself). */
+ *  answers a failure itself (the user picker falls back to "#id"). */
 export async function getUser(id: number, opts: ReadOptions = {}) {
   const { data } = await client.get<User>(`/admin/users/${id}`, {
     signal: opts.signal,
