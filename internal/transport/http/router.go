@@ -630,7 +630,9 @@ func NewRouter(d Deps) stdhttp.Handler {
 		// queue lists. adminGroup for the same reason — deciding that an
 		// account's signals need no action is the owner's call, and a trust
 		// can lift the detector's hold. Each is a POST or DELETE, so each
-		// leaves one audit row, the note included (AuditWrites).
+		// leaves one audit row, the note included (AuditWrites) — a row the
+		// staff-readable audit read leaves out for anyone but an admin, like
+		// every row under /risk-center/ (TestRiskCenterAuditRowsAreAdminOnly).
 		adminGroup.POST("/risk-center/users/:id/dismiss", riskReviewH.Dismiss)
 		adminGroup.DELETE("/risk-center/users/:id/dismiss", riskReviewH.Undismiss)
 		adminGroup.POST("/risk-center/users/:id/trust", riskReviewH.Trust)
@@ -649,7 +651,8 @@ func NewRouter(d Deps) stdhttp.Handler {
 
 		auditH := handler.NewAdminAuditHandler(d.Repos.Audit, d.Geo)
 		// Read so operators can review their own actions; only admin can
-		// wipe history.
+		// wipe history. The risk center's rows are admin-only like its
+		// routes: an operator's read leaves them out (adminOnlyAuditTargets).
 		staffGroup.GET("/audit", auditH.List)
 		adminGroup.DELETE("/audit", auditH.Clear)
 

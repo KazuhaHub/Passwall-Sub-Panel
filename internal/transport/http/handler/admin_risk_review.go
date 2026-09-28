@@ -29,7 +29,8 @@ type RiskReviewService interface {
 // withdraw that). adminGroup only, like every risk-center route. Each is a
 // POST or DELETE under /api/admin, so AuditWrites keeps one audit row per
 // request — the only place the admin's note is kept besides the review row
-// itself; the flag record the service writes is name- and note-free.
+// itself, and a row only an admin reads (adminOnlyAuditTargets); the flag
+// record the service writes is name- and note-free.
 type AdminRiskReviewHandler struct{ svc RiskReviewService }
 
 // NewAdminRiskReviewHandler wraps svc. Nil is a deployment that did not wire

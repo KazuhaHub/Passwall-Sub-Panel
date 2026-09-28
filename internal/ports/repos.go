@@ -63,6 +63,12 @@ type AuditFilter struct {
 	Search string
 	Since  *time.Time
 	Until  *time.Time
+	// ExcludeTargetPrefixes leaves out every row whose target starts with
+	// one of these (literally: no wildcards), from the page and from the
+	// total alike. The audit read sets it for any caller who is not an
+	// administrator, so the rows only an administrator may read never
+	// reach an operator; empty = no exclusion.
+	ExcludeTargetPrefixes []string
 }
 
 // AuthEventFilter scopes a query over the authentication-event log.

@@ -9,6 +9,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/geo"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/transport/http/middleware"
 )
 
 // AdminAuditHandler exposes /api/admin/audit — paginated audit log
@@ -21,6 +22,17 @@ type AdminAuditHandler struct {
 func NewAdminAuditHandler(repo ports.AuditRepo, geoSvc *geo.Service) *AdminAuditHandler {
 	return &AdminAuditHandler{repo: repo, geo: geoSvc}
 }
+
+// adminOnlyAuditTargets are the audit rows only an administrator reads: the
+// risk center's writes. Its routes are all adminGroup, but AuditWrites keeps
+// every write's route, params and body, and this read is staffGroup — so,
+// unfiltered, an operator would read a dismissal's note (which the dialog
+// promises is for admins only, and which may carry an address), the
+// detector levels it accepted, and which accounts were dismissed or
+// trusted. Matched as a prefix of the stored target, which is the route
+// template (the raw path when no route matched), so a route added under it
+// is covered without touching this list.
+var adminOnlyAuditTargets = []string{"/api/admin/risk-center/"}
 
 // auditView is an AuditEntry plus its resolved IP region (omitted when geo is
 // disabled, the IP is private/unmapped, or no .mmdb is loaded — lookups are
@@ -47,6 +59,13 @@ func (h *AdminAuditHandler) List(c *gin.Context) {
 		if t, err := time.Parse(time.RFC3339, v); err == nil {
 			filter.Until = &t
 		}
+	}
+	// Left out in the query, not after it, so the total and every page
+	// agree. Nil claims (a route mounted without auth, a test harness)
+	// reads as "not an admin": the rows are shown on a positive admin
+	// check only.
+	if claims := middleware.ClaimsFrom(c); claims == nil || claims.Role != domain.RoleAdmin {
+		filter.ExcludeTargetPrefixes = adminOnlyAuditTargets
 	}
 	items, total, err := h.repo.List(c.Request.Context(), filter)
 	if err != nil {

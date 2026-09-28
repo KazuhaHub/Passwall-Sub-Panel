@@ -2,19 +2,24 @@ package http
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	stdhttp "net/http"
 	"net/http/httptest"
+	"net/url"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/KazuhaHub/passwall-sub-panel/internal/adapters/sqlstore"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/config"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/jwtutil"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/audit"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/auth"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/riskcenter"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/riskreview"
@@ -203,4 +208,144 @@ func TestRiskCenterRoutesAreAdminOnly(t *testing.T) {
 			})
 		}
 	}
+}
+
+// ITS AUDIT ROWS ARE THE OWNER'S TOO. Every write under /api/admin leaves an
+// audit row with its route, params and body, and the audit read is
+// staffGroup — so unless the read leaves them out, an operator reads what
+// a risk-center write carried: the dismissal's note, which the dialog
+// promises is for admins only and which may carry an address, the
+// detector levels the admin accepted, and which accounts were dismissed
+// or trusted. Driven through the assembled router against the real audit
+// store, since the rows are the ones AuditWrites wrote: the operator's
+// page and total both leave them out, whatever it searches for or filters
+// by, and still show the rest; the administrator's show them all.
+func TestRiskCenterAuditRowsAreAdminOnly(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db, err := sqlstore.Open("sqlite", filepath.Join(t.TempDir(), "audit.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if s, e := db.DB(); e == nil {
+			_ = s.Close()
+		}
+	})
+	if err := sqlstore.EnsureSchema(db); err != nil {
+		t.Fatal(err)
+	}
+	auditRepo := sqlstore.NewRepos(db).Audit
+	admin := &domain.User{ID: 1, UPN: "admin@example.test", Enabled: true, Role: domain.RoleAdmin}
+	operator := &domain.User{ID: 2, UPN: "operator@example.test", Enabled: true, Role: domain.RoleOperator}
+	users := routerReleaseUsers{users: map[int64]*domain.User{1: admin, 2: operator}}
+	issuer := jwtutil.NewIssuer(strings.Repeat("test-only-key", 3), func() jwtutil.Params {
+		return jwtutil.Params{AccessTTL: time.Hour, RefreshTTL: time.Hour, Issuer: "risk-center-audit-test"}
+	})
+	authSvc := auth.New(issuer)
+	adminToken, _, err := authSvc.IssueTokens(admin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	operatorToken, _, err := authSvc.IssueTokens(operator)
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := &routerRiskCenter{}
+	router := NewRouter(Deps{
+		Cfg:   &config.Config{ConfigDir: t.TempDir()},
+		Repos: ports.Repos{User: users, Settings: &routerPolicySettings{}, Audit: auditRepo},
+		Auth:  authSvc, User: user.New(users, nil, nil, nil, nil, nil, nil, nil),
+		Audit: audit.New(auditRepo), RiskCenter: svc, RiskReview: svc,
+	})
+	do := func(method, target, token, body string) *httptest.ResponseRecorder {
+		t.Helper()
+		var reqBody io.Reader
+		if body != "" {
+			reqBody = strings.NewReader(body)
+		}
+		req := httptest.NewRequest(method, "https://panel.example"+target, reqBody)
+		if reqBody != nil {
+			req.Header.Set("Content-Type", "application/json")
+		}
+		req.Header.Set("Authorization", "Bearer "+token)
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		return w
+	}
+
+	const note = "shares with his brother, 203.0.113.9"
+	for _, w := range []*httptest.ResponseRecorder{
+		do(stdhttp.MethodPost, "/api/admin/risk-center/users/7/dismiss", adminToken, `{"note":"`+note+`","expected":{"geo":"flagged"}}`),
+		do(stdhttp.MethodPost, "/api/admin/risk-center/users/8/trust", adminToken, ""),
+	} {
+		if w.Code != stdhttp.StatusOK {
+			t.Fatalf("the administrator's review action = %d: %s", w.Code, w.Body.String())
+		}
+	}
+	// A row outside the risk center: the operator's own day-to-day work,
+	// which the audit read is staffGroup for.
+	if err := auditRepo.Insert(context.Background(), &domain.AuditEntry{
+		Actor: operator.UPN, Action: "update /api/admin/users/:id", Target: "/api/admin/users/:id", At: time.Now(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	type auditPage struct {
+		Items []struct {
+			Target string `json:"target"`
+		} `json:"items"`
+		Total int64 `json:"total"`
+	}
+	read := func(token, query string) (auditPage, string) {
+		t.Helper()
+		w := do(stdhttp.MethodGet, "/api/admin/audit"+query, token, "")
+		if w.Code != stdhttp.StatusOK {
+			t.Fatalf("GET /api/admin/audit%s = %d: %s", query, w.Code, w.Body.String())
+		}
+		var page auditPage
+		if err := json.Unmarshal(w.Body.Bytes(), &page); err != nil {
+			t.Fatalf("decode: %v: %s", err, w.Body.String())
+		}
+		return page, w.Body.String()
+	}
+
+	for _, query := range []string{
+		"",
+		"?page_size=1",
+		"?search=risk-center",
+		"?search=203.0.113.9",
+		"?actor=" + url.QueryEscape(admin.UPN),
+		"?action=" + url.QueryEscape("create_or_run /api/admin/risk-center/users/:id/dismiss"),
+	} {
+		t.Run("operator reads audit"+query, func(t *testing.T) {
+			page, raw := read(operatorToken, query)
+			for _, leak := range []string{"risk-center", "203.0.113.9", "brother", "flagged"} {
+				if strings.Contains(raw, leak) {
+					t.Fatalf("the operator's audit page carries %q: %s", leak, raw)
+				}
+			}
+			switch query {
+			case "", "?page_size=1":
+				if page.Total != 1 || len(page.Items) != 1 || page.Items[0].Target != "/api/admin/users/:id" {
+					t.Fatalf("the operator's page = total %d, items %+v; want the one row outside the risk center", page.Total, page.Items)
+				}
+			default:
+				if page.Total != 0 || len(page.Items) != 0 {
+					t.Fatalf("the operator's filtered page = total %d, items %+v; want nothing", page.Total, page.Items)
+				}
+			}
+		})
+	}
+
+	t.Run("administrator reads audit", func(t *testing.T) {
+		page, raw := read(adminToken, "")
+		if page.Total != 3 || len(page.Items) != 3 {
+			t.Fatalf("the administrator's page = total %d, items %+v; want all 3 rows", page.Total, page.Items)
+		}
+		for _, want := range []string{"/api/admin/risk-center/users/:id/dismiss", "/api/admin/risk-center/users/:id/trust", note, "flagged"} {
+			if !strings.Contains(raw, want) {
+				t.Fatalf("the administrator's audit page lacks %q: %s", want, raw)
+			}
+		}
+	})
 }
