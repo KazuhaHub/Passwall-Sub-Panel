@@ -771,3 +771,174 @@ func TestGeoStreakRepo_ReSaveAdvancesUpdatedAt(t *testing.T) {
 		t.Fatalf("CountFlagged = %d, want 1 — a latch judged just now is inside a 24-hour window", n)
 	}
 }
+
+// ---- the risk center's evidence-free reads ----
+
+// setStreakUpdatedAt pins a row's judgement time, for the freshness bounds.
+func setStreakUpdatedAt(t *testing.T, db *gorm.DB, uid, ms int64) {
+	t.Helper()
+	if err := db.Exec("UPDATE geo_streaks SET updated_at = ? WHERE user_id = ?", ms, uid).Error; err != nil {
+		t.Fatalf("set updated_at: %v", err)
+	}
+}
+
+// AttentionLevels is the queue's geo read: the rows at attention — the LATCH
+// (flagged, whatever the last state: an idle or unreadable latched account
+// is still flagged, because those samples freeze the streak) or a ramp
+// (over > 0, suspect) — judged at or after since. A clean row is not
+// attention and a row the poll stopped judging is not fresh. The boundary is
+// inclusive, the bell's comparison.
+func TestGeoStreakRepo_AttentionLevelsIsLatchedOrRampingAndFresh(t *testing.T) {
+	r, users, db := newStreakRepoWithUsers(t)
+	ctx := context.Background()
+	since := time.Now().Add(-24 * time.Hour)
+	recs := map[int64]domain.GeoRecord{}
+	var ids []int64
+	for i, rec := range []domain.GeoRecord{
+		{State: domain.GeoStateFlagged, Streak: domain.GeoStreak{Over: 3, Flagged: true, Tier: domain.GeoTierCity}},
+		{State: domain.GeoStateIdle, Streak: domain.GeoStreak{Over: 3, Flagged: true, Tier: domain.GeoTierCity}},
+		{State: domain.GeoStateUnknown, Streak: domain.GeoStreak{Under: 2, Flagged: true, Tier: domain.GeoTierCountry}},
+		{State: domain.GeoStateSuspect, Streak: domain.GeoStreak{Over: 2, Tier: domain.GeoTierRegion}},
+		{State: domain.GeoStateClean, Streak: domain.GeoStreak{Under: 6}},
+		{State: domain.GeoStateFlagged, Streak: domain.GeoStreak{Over: 3, Flagged: true}}, // stale
+		{State: domain.GeoStateSuspect, Streak: domain.GeoStreak{Over: 1}},                // judged exactly at since
+	} {
+		u := createServiceStateUser(t, users, i+1)
+		rec.UserID = u.ID
+		rec.Evidence = sampleEvidence()
+		recs[u.ID] = rec
+		ids = append(ids, u.ID)
+	}
+	if err := r.Save(ctx, recs); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	setStreakUpdatedAt(t, db, ids[5], since.UnixMilli()-1)
+	setStreakUpdatedAt(t, db, ids[6], since.UnixMilli())
+	loaded, err := r.Load(ctx)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+
+	got, err := r.AttentionLevels(ctx, since)
+	if err != nil {
+		t.Fatalf("AttentionLevels: %v", err)
+	}
+	var want []ports.GeoAttentionRow
+	for _, i := range []int{0, 1, 2, 3, 6} {
+		rec := loaded[ids[i]]
+		want = append(want, ports.GeoAttentionRow{
+			UserID: ids[i], Flagged: rec.Streak.Flagged, Over: rec.Streak.Over, UpdatedAtMS: rec.UpdatedAtMS,
+		})
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("AttentionLevels = %+v\nwant %+v", got, want)
+	}
+	if got[4].UpdatedAtMS != since.UnixMilli() {
+		t.Fatalf("the boundary row reads updated_at %d, want %d", got[4].UpdatedAtMS, since.UnixMilli())
+	}
+}
+
+// geo_streaks has no foreign key: a deleted account's row stays until the
+// poll stops judging it, and an id that never existed is nobody to review.
+func TestGeoStreakRepo_AttentionLevelsSkipsDeletedAccounts(t *testing.T) {
+	r, users, _ := newStreakRepoWithUsers(t)
+	ctx := context.Background()
+	kept := createServiceStateUser(t, users, 1)
+	gone := createServiceStateUser(t, users, 2)
+	const neverExisted = int64(987654)
+	flagged := domain.GeoRecord{State: domain.GeoStateFlagged, Streak: domain.GeoStreak{Over: 3, Flagged: true}}
+	if err := r.Save(ctx, map[int64]domain.GeoRecord{kept.ID: flagged, gone.ID: flagged, neverExisted: flagged}); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	if err := users.Delete(ctx, gone.ID); err != nil {
+		t.Fatalf("delete user: %v", err)
+	}
+	got, err := r.AttentionLevels(ctx, time.Now().Add(-24*time.Hour))
+	if err != nil {
+		t.Fatalf("AttentionLevels: %v", err)
+	}
+	if len(got) != 1 || got[0].UserID != kept.ID || !got[0].Flagged || got[0].Over != 3 {
+		t.Fatalf("AttentionLevels = %+v, want only the existing account's latched row", got)
+	}
+}
+
+// ListByUsers is the page's evidence: the whole row of each asked account,
+// any state, evidence included; an account with no row is absent. Asked in
+// chunks of 500, so a long page never meets a dialect's parameter limit.
+func TestGeoStreakRepo_ListByUsers(t *testing.T) {
+	r, users, db := newStreakRepoWithUsers(t)
+	ctx := context.Background()
+	a := createServiceStateUser(t, users, 1)
+	b := createServiceStateUser(t, users, 2)
+	c := createServiceStateUser(t, users, 3)
+	noRow := createServiceStateUser(t, users, 4)
+	recs := map[int64]domain.GeoRecord{
+		a.ID: {UserID: a.ID, State: domain.GeoStateClean, Streak: domain.GeoStreak{Under: 6}, Complete: true},
+		b.ID: {UserID: b.ID, State: domain.GeoStateFlagged, Streak: domain.GeoStreak{Over: 3, Flagged: true}, Evidence: sampleEvidence(), Complete: true},
+		c.ID: {UserID: c.ID, State: domain.GeoStateSuspect, Streak: domain.GeoStreak{Over: 1}, Evidence: sampleEvidence(), Places: []string{"CN", "US"}, Complete: true},
+	}
+	if err := r.Save(ctx, recs); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	full := map[int64]domain.GeoRecord{}
+	for _, rec := range []int64{a.ID, b.ID, c.ID} {
+		full[rec] = listed(t, r, rec)
+	}
+	want := []domain.GeoRecord{full[a.ID], full[c.ID]}
+
+	got, err := r.ListByUsers(ctx, []int64{c.ID, noRow.ID, a.ID})
+	if err != nil {
+		t.Fatalf("ListByUsers: %v", err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("ListByUsers = %+v\nwant %+v", got, want)
+	}
+	if got[1].Evidence.V == 0 {
+		t.Fatal("ListByUsers dropped the evidence")
+	}
+
+	reads := countReads(t, db, "geo_streaks")
+	got, err = r.ListByUsers(ctx, chunkSpanningIDs(a.ID, c.ID, noRow.ID))
+	if err != nil {
+		t.Fatalf("ListByUsers over 1100 ids: %v", err)
+	}
+	if !reflect.DeepEqual(got, want) || reads() != 3 {
+		t.Fatalf("ListByUsers over 1100 ids = %d rows in %d reads, want %d in 3", len(got), reads(), len(want))
+	}
+}
+
+// CountFreshUnknown is the queue's "the database cannot place N accounts"
+// line: existing accounts whose LAST verdict is unknown, judged at or after
+// since.
+func TestGeoStreakRepo_CountFreshUnknown(t *testing.T) {
+	r, users, db := newStreakRepoWithUsers(t)
+	ctx := context.Background()
+	since := time.Now().Add(-24 * time.Hour)
+	unknown := domain.GeoRecord{State: domain.GeoStateUnknown, Streak: domain.GeoStreak{Under: 1}}
+	recs := map[int64]domain.GeoRecord{}
+	var ids []int64
+	for i, rec := range []domain.GeoRecord{
+		unknown, // fresh: in
+		unknown, // stale: out
+		unknown, // deleted: out
+		{State: domain.GeoStateFlagged, Streak: domain.GeoStreak{Over: 3, Flagged: true}},
+		unknown, // judged exactly at since: in
+	} {
+		u := createServiceStateUser(t, users, i+1)
+		recs[u.ID] = rec
+		ids = append(ids, u.ID)
+	}
+	if err := r.Save(ctx, recs); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	setStreakUpdatedAt(t, db, ids[1], since.UnixMilli()-1)
+	setStreakUpdatedAt(t, db, ids[4], since.UnixMilli())
+	if err := users.Delete(ctx, ids[2]); err != nil {
+		t.Fatalf("delete user: %v", err)
+	}
+
+	n, err := r.CountFreshUnknown(ctx, since)
+	if err != nil || n != 2 {
+		t.Fatalf("CountFreshUnknown = %d, %v; want 2, nil", n, err)
+	}
+}

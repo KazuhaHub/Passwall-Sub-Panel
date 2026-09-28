@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -373,5 +374,156 @@ func TestUserRepo_CountByServiceDisabledReason(t *testing.T) {
 		if got != want {
 			t.Fatalf("CountByServiceDisabledReason(%s) = %d, want %d", reason, got, want)
 		}
+	}
+}
+
+// An account an admin trusts is never suspended by the location detector,
+// even by a poll that judged it before the trust committed: the guard is in
+// the conditional write itself (NOT EXISTS a trusted risk_reviews row), so
+// it is atomic with the write on every dialect. It is the detector's reason
+// alone — an admin can still pause a trusted account — a dismissal is not a
+// trust, and an untrust makes the account suspendable again.
+func TestUserRepo_SetServiceStateIfClear_RefusesGeoAutoForTrusted(t *testing.T) {
+	repo, db := serviceStateFixture(t)
+	ctx := context.Background()
+	reviews := NewRiskReviewRepo(db)
+	trusted := createServiceStateUser(t, repo, 1)
+	untrusted := createServiceStateUser(t, repo, 2)
+	dismissedOnly := createServiceStateUser(t, repo, 3)
+	pausedByAdmin := createServiceStateUser(t, repo, 4)
+	trust := func(uid int64, on bool) {
+		t.Helper()
+		rev := domain.RiskReview{UserID: uid, UpdatedAtMS: 1}
+		ev := domain.FlagReviewUntrusted
+		if on {
+			rev.Trusted, rev.TrustedAtMS, rev.TrustedBy, ev = true, 1, 1, domain.FlagReviewTrusted
+		}
+		if err := reviews.Save(ctx, rev, domain.ReviewFlag(uid, ev, domain.ReviewFlagParams{By: 1}, time.Now())); err != nil {
+			t.Fatalf("save review of %d: %v", uid, err)
+		}
+	}
+	trust(trusted.ID, true)
+	trust(pausedByAdmin.ID, true)
+	if err := reviews.Save(ctx, domain.RiskReview{
+		UserID: dismissedOnly.ID, DismissedAtMS: 1, DismissedBy: 1, UpdatedAtMS: 1,
+		Accepted: domain.DismissSnapshot{domain.FlagSourceGeo: {Level: domain.FlagLevelFlagged, AtMS: 1}},
+	}, domain.ReviewFlag(dismissedOnly.ID, domain.FlagReviewDismissed, domain.ReviewFlagParams{By: 1}, time.Now())); err != nil {
+		t.Fatalf("save dismissal: %v", err)
+	}
+	at := time.Date(2026, 9, 27, 12, 0, 0, 0, time.UTC)
+
+	wrote, err := repo.SetServiceStateIfClear(ctx, trusted.ID, domain.DisabledGeoAutoSuspend, "geo", at)
+	if err != nil || wrote {
+		t.Fatalf("geo_auto on a trusted account = %v, %v; want false, nil", wrote, err)
+	}
+	got, err := repo.GetByID(ctx, trusted.ID)
+	if err != nil {
+		t.Fatalf("get trusted: %v", err)
+	}
+	if got.ServiceDisabledReason != domain.DisabledNone || got.ServiceDisableDetail != "" || got.ServiceDisabledAt != nil {
+		t.Fatalf("trusted row = %q/%q/%v, want untouched", got.ServiceDisabledReason, got.ServiceDisableDetail, got.ServiceDisabledAt)
+	}
+	for name, uid := range map[string]int64{"untrusted": untrusted.ID, "dismissed only": dismissedOnly.ID} {
+		if wrote, err := repo.SetServiceStateIfClear(ctx, uid, domain.DisabledGeoAutoSuspend, "geo", at); err != nil || !wrote {
+			t.Fatalf("geo_auto on the %s account = %v, %v; want true, nil", name, wrote, err)
+		}
+	}
+	if wrote, err := repo.SetServiceStateIfClear(ctx, pausedByAdmin.ID, domain.DisabledServiceManual, "admin", at); err != nil || !wrote {
+		t.Fatalf("service_manual on a trusted account = %v, %v; want true, nil (trust is about the detector)", wrote, err)
+	}
+
+	trust(trusted.ID, false)
+	if wrote, err := repo.SetServiceStateIfClear(ctx, trusted.ID, domain.DisabledGeoAutoSuspend, "geo", at); err != nil || !wrote {
+		t.Fatalf("geo_auto after the untrust = %v, %v; want true, nil", wrote, err)
+	}
+}
+
+// ListByIDs names the queue's accounts in one read per 500 ids: the ones
+// that exist, resolved like GetByID, in id order, each once. A missing id is
+// simply absent — the account was deleted since the ids were gathered.
+func TestUserRepo_ListByIDs(t *testing.T) {
+	repo, db := serviceStateFixture(t)
+	ctx := context.Background()
+	a := createServiceStateUser(t, repo, 1)
+	b := createServiceStateUser(t, repo, 2)
+	c := createServiceStateUser(t, repo, 3)
+	want := make([]*domain.User, 0, 3)
+	for _, u := range []*domain.User{a, b, c} {
+		got, err := repo.GetByID(ctx, u.ID)
+		if err != nil {
+			t.Fatalf("get: %v", err)
+		}
+		want = append(want, got)
+	}
+
+	got, err := repo.ListByIDs(ctx, []int64{c.ID, 987654, a.ID, b.ID, a.ID})
+	if err != nil {
+		t.Fatalf("ListByIDs: %v", err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("ListByIDs = %+v\nwant %+v", got, want)
+	}
+
+	reads := countReads(t, db, "users")
+	got, err = repo.ListByIDs(ctx, chunkSpanningIDs(a.ID, b.ID, c.ID))
+	if err != nil {
+		t.Fatalf("ListByIDs over 1100 ids: %v", err)
+	}
+	if !reflect.DeepEqual(got, want) || reads() != 3 {
+		t.Fatalf("ListByIDs over 1100 ids = %d users in %d reads, want 3 in 3 (500 ids a statement)", len(got), reads())
+	}
+	if none, err := repo.ListByIDs(ctx, nil); err != nil || len(none) != 0 || reads() != 3 {
+		t.Fatalf("ListByIDs(nil) = %v, %v after %d reads; want empty with no statement", none, err, reads())
+	}
+}
+
+// ListServiceHolds is the queue's geo_auto source: every account carrying
+// exactly the reason asked, with the time the hold was written, to the
+// millisecond on every dialect (the reopen rule compares it with the time a
+// dismissal accepted). A hold with no time reads 0. An empty reason is no
+// hold and is refused.
+func TestUserRepo_ListServiceHolds(t *testing.T) {
+	repo, _ := serviceStateFixture(t)
+	ctx := context.Background()
+	utc := time.Date(2026, 9, 24, 12, 0, 0, 123_000_000, time.UTC)
+	east := time.Date(2026, 9, 25, 3, 4, 5, 678_000_000, time.FixedZone("UTC+8", 8*3600))
+	first := createServiceStateUser(t, repo, 1)
+	human := createServiceStateUser(t, repo, 2)
+	noTime := createServiceStateUser(t, repo, 3)
+	createServiceStateUser(t, repo, 4) // no hold: never listed
+	last := createServiceStateUser(t, repo, 5)
+	for _, h := range []struct {
+		uid    int64
+		reason domain.AutoDisabledReason
+		at     *time.Time
+	}{
+		{last.ID, domain.DisabledGeoAutoSuspend, &east},
+		{first.ID, domain.DisabledGeoAutoSuspend, &utc},
+		{human.ID, domain.DisabledGeoAnomaly, &utc},
+		{noTime.ID, domain.DisabledGeoAutoSuspend, nil},
+	} {
+		if err := repo.UpdateServiceState(ctx, h.uid, h.reason, "d", h.at); err != nil {
+			t.Fatalf("hold %d: %v", h.uid, err)
+		}
+	}
+
+	got, err := repo.ListServiceHolds(ctx, domain.DisabledGeoAutoSuspend)
+	if err != nil {
+		t.Fatalf("ListServiceHolds: %v", err)
+	}
+	want := []ports.ServiceHold{
+		{UserID: first.ID, SinceMS: utc.UnixMilli()},
+		{UserID: noTime.ID, SinceMS: 0},
+		{UserID: last.ID, SinceMS: east.UnixMilli()},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("ListServiceHolds(geo_auto) = %+v\nwant %+v", got, want)
+	}
+	got, err = repo.ListServiceHolds(ctx, domain.DisabledGeoAnomaly)
+	if err != nil || !reflect.DeepEqual(got, []ports.ServiceHold{{UserID: human.ID, SinceMS: utc.UnixMilli()}}) {
+		t.Fatalf("ListServiceHolds(geo_anomaly) = %+v, %v; want only the human's hold", got, err)
+	}
+	if _, err := repo.ListServiceHolds(ctx, domain.DisabledNone); !errors.Is(err, domain.ErrValidation) {
+		t.Fatalf("ListServiceHolds(\"\") error = %v, want domain.ErrValidation", err)
 	}
 }

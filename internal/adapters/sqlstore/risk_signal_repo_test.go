@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -664,5 +665,130 @@ func TestRiskSignalRepo_SaveUsesOnlyTheTransaction(t *testing.T) {
 	}
 	if n := countFlagRows(t, db, ""); n != 3 {
 		t.Fatalf("flag records = %d, want 3 (enter suspect, enter flagged, leave flagged)", n)
+	}
+}
+
+// ---- the risk center's evidence-free reads ----
+
+// AttentionLevels is the queue's risk read: rows at attention (suspect or
+// flagged — unknown is "cannot tell", not attention) of existing accounts,
+// written at or after since, by account then kind, without the evidence.
+// The boundary is inclusive, the bell's comparison.
+func TestRiskSignalRepo_AttentionLevelsIsSuspectOrFlaggedAndFresh(t *testing.T) {
+	r, users, db := newRiskSignalRepo(t)
+	ctx := context.Background()
+	since := time.Now().Add(-time.Hour)
+	a := createRiskUser(t, users, 1, "")
+	clean := createRiskUser(t, users, 2, "")
+	unknown := createRiskUser(t, users, 3, "")
+	stale := createRiskUser(t, users, 4, "")
+	boundary := createRiskUser(t, users, 5, "")
+	gone := createRiskUser(t, users, 6, "")
+	sig := func(uid int64, kind domain.RiskKind, state domain.GeoState) domain.RiskSignal {
+		return domain.RiskSignal{UserID: uid, Kind: kind, State: state, Code: domain.RiskCodeOver, Evidence: json.RawMessage(`{"v":1}`)}
+	}
+	if err := r.Save(ctx, []domain.RiskSignal{
+		sig(a.ID, domain.RiskKindSubSpread, domain.GeoStateSuspect),
+		sig(a.ID, domain.RiskKindDevices, domain.GeoStateFlagged),
+		sig(a.ID, domain.RiskKindUsageShift, domain.GeoStateClean),
+		sig(clean.ID, domain.RiskKindUsageShift, domain.GeoStateClean),
+		sig(unknown.ID, domain.RiskKindLoginCountry, domain.GeoStateUnknown),
+		sig(stale.ID, domain.RiskKindDevices, domain.GeoStateFlagged),
+		sig(boundary.ID, domain.RiskKindDevices, domain.GeoStateFlagged),
+		sig(gone.ID, domain.RiskKindDevices, domain.GeoStateFlagged),
+	}); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	for uid, ms := range map[int64]int64{stale.ID: since.UnixMilli() - 1, boundary.ID: since.UnixMilli()} {
+		if err := db.Exec("UPDATE risk_signals SET updated_at = ? WHERE user_id = ?", ms, uid).Error; err != nil {
+			t.Fatalf("set updated_at: %v", err)
+		}
+	}
+	if err := users.Delete(ctx, gone.ID); err != nil {
+		t.Fatalf("delete user: %v", err)
+	}
+	stamped := map[riskSignalKey]int64{}
+	all, err := r.List(ctx)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	for _, s := range all {
+		stamped[riskSignalKey{s.UserID, string(s.Kind)}] = s.UpdatedAtMS
+	}
+
+	got, err := r.AttentionLevels(ctx, since)
+	if err != nil {
+		t.Fatalf("AttentionLevels: %v", err)
+	}
+	row := func(uid int64, kind domain.RiskKind, state domain.GeoState) ports.SignalAttentionRow {
+		return ports.SignalAttentionRow{UserID: uid, Kind: kind, State: state, UpdatedAtMS: stamped[riskSignalKey{uid, string(kind)}]}
+	}
+	want := []ports.SignalAttentionRow{
+		row(a.ID, domain.RiskKindDevices, domain.GeoStateFlagged),
+		row(a.ID, domain.RiskKindSubSpread, domain.GeoStateSuspect),
+		row(boundary.ID, domain.RiskKindDevices, domain.GeoStateFlagged),
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("AttentionLevels = %+v\nwant %+v", got, want)
+	}
+	if got[2].UpdatedAtMS != since.UnixMilli() {
+		t.Fatalf("the boundary row reads updated_at %d, want %d", got[2].UpdatedAtMS, since.UnixMilli())
+	}
+}
+
+// ListByUsers is the page's evidence: every row of each asked existing
+// account, with its evidence and names, by account then kind. Asked in
+// chunks of 500.
+func TestRiskSignalRepo_ListByUsers(t *testing.T) {
+	r, users, db := newRiskSignalRepo(t)
+	ctx := context.Background()
+	a := createRiskUser(t, users, 1, "Alice")
+	b := createRiskUser(t, users, 2, "Bob")
+	notAsked := createRiskUser(t, users, 3, "")
+	gone := createRiskUser(t, users, 4, "")
+	sig := func(uid int64, kind domain.RiskKind, state domain.GeoState) domain.RiskSignal {
+		return domain.RiskSignal{UserID: uid, Kind: kind, State: state, Code: domain.RiskCodeOver, Evidence: json.RawMessage(`{"v":1,"n":2}`)}
+	}
+	if err := r.Save(ctx, []domain.RiskSignal{
+		sig(b.ID, domain.RiskKindDevices, domain.GeoStateClean),
+		sig(a.ID, domain.RiskKindUsageShift, domain.GeoStateSuspect),
+		sig(a.ID, domain.RiskKindDevices, domain.GeoStateFlagged),
+		sig(notAsked.ID, domain.RiskKindDevices, domain.GeoStateFlagged),
+		sig(gone.ID, domain.RiskKindDevices, domain.GeoStateFlagged),
+	}); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	if err := users.Delete(ctx, gone.ID); err != nil {
+		t.Fatalf("delete user: %v", err)
+	}
+	all, err := r.List(ctx)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	var want []domain.RiskSignal
+	for _, s := range all {
+		if s.UserID == a.ID || s.UserID == b.ID {
+			want = append(want, s)
+		}
+	}
+	if len(want) != 3 || want[0].UPN == "" || want[0].DisplayName != "Alice" || want[0].Evidence == nil {
+		t.Fatalf("fixture: %+v", want)
+	}
+
+	got, err := r.ListByUsers(ctx, []int64{b.ID, gone.ID, a.ID})
+	if err != nil {
+		t.Fatalf("ListByUsers: %v", err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("ListByUsers = %+v\nwant %+v", got, want)
+	}
+
+	reads := countReads(t, db, "risk_signals")
+	got, err = r.ListByUsers(ctx, chunkSpanningIDs(a.ID, b.ID, gone.ID))
+	if err != nil {
+		t.Fatalf("ListByUsers over 1100 ids: %v", err)
+	}
+	if !reflect.DeepEqual(got, want) || reads() != 3 {
+		t.Fatalf("ListByUsers over 1100 ids = %d rows in %d reads, want %d in 3", len(got), reads(), len(want))
 	}
 }

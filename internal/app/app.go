@@ -156,6 +156,12 @@ type App struct {
 	// for the same two passes. Nothing else keeps that history bounded, so a
 	// nil store compiles and it grows for ever: TestBuildPrunesFlagRecords.
 	flagRecords flagRecordPruner
+	// riskReviews is the risk_reviews store as the hourly cleanup sees it:
+	// the orphan purge only. A review row is current state, not history, so
+	// it has no retention; but it has no foreign key either, and a deleted
+	// account's row — an admin's note about somebody nobody can open — would
+	// otherwise stay for ever: TestBuildPrunesRiskReviewOrphans.
+	riskReviews riskReviewPruner
 	saml        *auth.SAMLService
 	// repos kept around so Run() can call initAdminIfNeeded AFTER the
 	// listen socket is bound — that way a bind failure (port busy / TLS
@@ -582,6 +588,15 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	flagRecords := sqlstore.NewFlagRecordRepo(db)
 	trafficSvc.SetFlagRecorder(flagRecords)
 	userSvc.SetFlagRecorder(flagRecords)
+	// The admins' review of accounts in the risk center: a dismissal until
+	// something new or worse happens, and a trust that exempts an account
+	// from the location judgements. Built the same way, so each consumer is
+	// handed only the narrow view it declares; the hourly cleanup below
+	// purges what deleted accounts left. The one guard that matters
+	// most needs no wiring: the user repo refuses a geo_auto suspension of a
+	// trusted account inside its own conditional write
+	// (TestBuildNeverGeoAutoSuspendsATrustedAccount).
+	riskReviews := sqlstore.NewRiskReviewRepo(db)
 	// The observe-only risk signals' store: a concrete repo built from the
 	// database handle like the geo streak store, not a ports.Repos field, so
 	// each consumer is handed only the narrow interface it declares — the
@@ -714,6 +729,7 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	a.nodeMetrics = nodeMetrics
 	a.connHistory = connHistory
 	a.flagRecords = flagRecords
+	a.riskReviews = riskReviews
 	// The observe-only risk signals. The worker is handed read-only views and
 	// one store that writes only risk_signals (and, in the same transaction,
 	// the flag records of what each save changed) — the store built above,
@@ -1288,6 +1304,7 @@ func (a *App) runAuditCleanupLoop(ctx context.Context) {
 		a.pruneSubLogs(ctx)
 		a.pruneConnectionHistory(ctx)
 		a.pruneFlagRecords(ctx)
+		a.pruneRiskReviews(ctx)
 		a.pruneCertEvents(ctx)
 		select {
 		case <-ctx.Done():
@@ -1585,6 +1602,31 @@ func (a *App) pruneFlagRecords(ctx context.Context) {
 		log.Warn("flag record orphan purge", "err", err)
 	case purged > 0:
 		log.Info("flag record orphan purge", "deleted", purged)
+	}
+}
+
+// riskReviewPruner is what the hourly cleanup needs of the risk_reviews
+// store, and all it is handed.
+type riskReviewPruner interface {
+	PurgeOrphans(ctx context.Context) (int64, error)
+}
+
+// pruneRiskReviews deletes the review rows of accounts that no longer exist.
+// No retention pass: a review row is an admin's standing decision, which
+// only an admin clears (a dismissal's lapse is decided when it is read, never
+// by deleting the row). The reads JOIN users, so a deleted account's row is
+// invisible from the moment of the delete; this makes it gone within the
+// hour. Counts only in the log.
+func (a *App) pruneRiskReviews(ctx context.Context) {
+	if a.riskReviews == nil {
+		return
+	}
+	purged, err := a.riskReviews.PurgeOrphans(ctx)
+	switch {
+	case err != nil:
+		log.Warn("risk review orphan purge", "err", err)
+	case purged > 0:
+		log.Info("risk review orphan purge", "deleted", purged)
 	}
 }
 

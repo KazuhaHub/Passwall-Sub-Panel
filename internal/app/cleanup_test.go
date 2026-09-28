@@ -421,3 +421,101 @@ func TestBuildPrunesFlagRecords(t *testing.T) {
 		t.Fatalf("after the prune: %d rows stored, listed %+v; want only the current record of the existing account — is the store wired into App?", n, rows)
 	}
 }
+
+// risk_reviews has no foreign key to users: a deleted account's review row
+// would outlive it, holding an admin's note about somebody nobody can open.
+// The hourly cleanup loop purges those on its first pass — no retention, a
+// review row in force is current state, not history.
+func TestAuditCleanupLoopPurgesRiskReviewOrphans(t *testing.T) {
+	store := &connHistoryStore{}
+	a := &App{riskReviews: store}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan struct{})
+	go func() { defer close(done); a.runAuditCleanupLoop(ctx) }()
+
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, purges := store.calls(); purges == 1 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if cutoffs, purges := store.calls(); purges != 1 || len(cutoffs) != 0 {
+		t.Fatalf("after the first pass: purge %d, prune %d; want one purge and no retention pass", purges, len(cutoffs))
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("cleanup loop did not exit on context cancel")
+	}
+}
+
+// Build hands the loop the real store: after one pass the review row of a
+// deleted account is gone and the existing account's stays. Without the
+// wiring the purge returns at once on a nil store.
+func TestBuildPrunesRiskReviewOrphans(t *testing.T) {
+	ctx := t.Context()
+	directory := t.TempDir()
+	cfg := &config.Config{
+		Listen: "127.0.0.1:0", JWTSecret: strings.Repeat("j", 48), EncryptionKey: strings.Repeat("e", 48),
+		ConfigDir: filepath.Join(directory, "config"), DataDir: filepath.Join(directory, "data"),
+	}
+	a, err := Build(ctx, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := a.Shutdown(shutdownCtx); err != nil {
+			t.Error(err)
+		}
+		sqlstore.ConfigureSecretKey("")
+	})
+	newUser := func(n int) *domain.User {
+		t.Helper()
+		u := &domain.User{
+			UPN: fmt.Sprintf("reviews-%d@example.test", n), Email: fmt.Sprintf("reviews-%d@example.test", n),
+			SSOProvider: domain.SSOProviderLocal, SSOSubject: fmt.Sprintf("reviews-%d@example.test", n),
+			Role: domain.RoleUser, Enabled: true, UUID: fmt.Sprintf("88888888-8888-4888-8888-%012d", n),
+			SubToken: fmt.Sprintf("fixture-reviews-subscription-token-%d", n), TrafficResetPeriod: domain.ResetMonthly,
+		}
+		if err := a.repos.User.Create(ctx, u); err != nil {
+			t.Fatal(err)
+		}
+		return u
+	}
+	kept, gone := newUser(1), newUser(2)
+
+	db, err := sqlstore.Open(cfg.DBKind(), cfg.DBDSN())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if sqlDB, err := db.DB(); err == nil {
+			_ = sqlDB.Close()
+		}
+	})
+	repo := sqlstore.NewRiskReviewRepo(db)
+	for _, u := range []*domain.User{kept, gone} {
+		rev := domain.RiskReview{UserID: u.ID, Trusted: true, TrustedAtMS: 1, TrustedBy: 1, UpdatedAtMS: 1}
+		if err := repo.Save(ctx, rev, domain.ReviewFlag(u.ID, domain.FlagReviewTrusted, domain.ReviewFlagParams{By: 1}, time.Now())); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := a.repos.User.Delete(ctx, gone.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	a.pruneRiskReviews(ctx)
+
+	var n int64
+	if err := db.Raw("SELECT COUNT(*) FROM risk_reviews").Scan(&n).Error; err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, err := repo.Get(ctx, kept.ID); n != 1 || !ok || err != nil {
+		t.Fatalf("after the purge: %d rows stored, the existing account's present = %v (%v); want only that one — is the store wired into App?", n, ok, err)
+	}
+}

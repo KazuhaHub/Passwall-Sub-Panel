@@ -336,6 +336,18 @@ func (r *userRepo) UpdateServiceState(ctx context.Context, userID int64, reason 
 // must not read as held forever. The reason is required to be non-empty so
 // the reason column always changes: MySQL's RowsAffected counts CHANGED rows,
 // and a write that changed nothing would report a won race as lost.
+//
+// It never writes geo_auto for an account an admin trusts (a risk_reviews
+// row with trusted set), even one a poll judged before the trust committed:
+// that poll read the trusted accounts before the admin's Save and can still
+// carry a due ban into its apply phase. The refusal is a NOT EXISTS in the
+// same UPDATE, so it is as atomic as the clear-row check on every dialect,
+// with no lock: the trust either committed before this statement (refused)
+// or after it (the hold landed first, and the admin sees the account trusted
+// AND held, with the resume action). The id is bound rather than correlated,
+// so no dialect's subquery rules come into it — MySQL's 1093 is about the
+// table being updated, and this reads another. Only the detector's reason:
+// an admin can still pause a trusted account.
 func (r *userRepo) SetServiceStateIfClear(ctx context.Context, userID int64, reason domain.AutoDisabledReason, detail string, at time.Time) (bool, error) {
 	if userID == 0 {
 		return false, fmt.Errorf("%w: SetServiceStateIfClear requires a non-zero user ID", domain.ErrValidation)
@@ -344,9 +356,13 @@ func (r *userRepo) SetServiceStateIfClear(ctx context.Context, userID int64, rea
 		return false, fmt.Errorf("%w: SetServiceStateIfClear requires a non-empty reason", domain.ErrValidation)
 	}
 	at = at.UTC()
-	res := r.db.WithContext(ctx).
+	q := r.db.WithContext(ctx).
 		Model(&userRow{}).
-		Where("id = ? AND (service_disabled_reason = '' OR service_disabled_reason IS NULL)", userID).
+		Where("id = ? AND (service_disabled_reason = '' OR service_disabled_reason IS NULL)", userID)
+	if reason == domain.DisabledGeoAutoSuspend {
+		q = q.Where("NOT EXISTS (SELECT 1 FROM risk_reviews WHERE risk_reviews.user_id = ? AND risk_reviews.trusted = ?)", userID, true)
+	}
+	res := q.
 		Updates(map[string]any{
 			"service_disabled_reason": string(reason),
 			"service_disable_detail":  detail,
@@ -698,6 +714,64 @@ var userSortAllowlist = map[string]string{
 	"created_at":     "created_at",
 	"expire_at":      "expire_at",
 	"last_online_at": "last_online_at",
+}
+
+// ListByIDs returns the accounts among ids that exist, in id order, each
+// once, resolved like GetByID (resolveAll, so their limits are the group's
+// where they inherit). The risk center names a page of accounts, or a
+// review's admins, with it: one read per idReadChunk ids instead of one
+// GetByID per account. A missing id is simply absent — the account was
+// deleted since the ids were gathered, which is not an error for a list.
+func (r *userRepo) ListByIDs(ctx context.Context, ids []int64) ([]*domain.User, error) {
+	var out []*domain.User
+	for _, chunk := range idChunks(ids) {
+		var rows []userRow
+		if err := r.db.WithContext(ctx).Where("id IN ?", chunk).Order("id").Find(&rows).Error; err != nil {
+			return nil, fmt.Errorf("list users by id: %w", err)
+		}
+		for i := range rows {
+			out = append(out, rows[i].toDomain())
+		}
+	}
+	if len(out) == 0 {
+		return nil, nil
+	}
+	return r.resolveAll(ctx, out)
+}
+
+// ListServiceHolds returns every account whose service axis carries exactly
+// reason, with the time the hold was written, ascending by id: the risk
+// center's geo_auto source, read from the users row itself.
+//
+// The time is read into a *time.Time exactly as GetByID reads the column —
+// SQLite keeps it as text in the writer's location, so it is compared as an
+// instant in Go, never in SQL — and returned in unix ms, 0 when NULL (a hold
+// written without a time is still a hold). Exact match on the reason:
+// geo_auto must not pick up a human's geo_anomaly or an admin's pause.
+func (r *userRepo) ListServiceHolds(ctx context.Context, reason domain.AutoDisabledReason) ([]ports.ServiceHold, error) {
+	if reason == domain.DisabledNone {
+		return nil, fmt.Errorf("%w: ListServiceHolds requires a non-empty reason", domain.ErrValidation)
+	}
+	var rows []struct {
+		ID                int64      `gorm:"column:id"`
+		ServiceDisabledAt *time.Time `gorm:"column:service_disabled_at"`
+	}
+	if err := r.db.WithContext(ctx).Model(&userRow{}).
+		Select("id", "service_disabled_at").
+		Where("service_disabled_reason = ?", string(reason)).
+		Order("id").
+		Find(&rows).Error; err != nil {
+		return nil, fmt.Errorf("list service holds: %w", err)
+	}
+	out := make([]ports.ServiceHold, 0, len(rows))
+	for _, row := range rows {
+		h := ports.ServiceHold{UserID: row.ID}
+		if row.ServiceDisabledAt != nil {
+			h.SinceMS = row.ServiceDisabledAt.UnixMilli()
+		}
+		out = append(out, h)
+	}
+	return out, nil
 }
 
 func (r *userRepo) ListByGroup(ctx context.Context, groupID int64) ([]*domain.User, error) {

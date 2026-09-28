@@ -1,9 +1,11 @@
 package user
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -576,6 +578,9 @@ func (r *memoryUserRepo) UpdateServiceState(ctx context.Context, userID int64, r
 // SetServiceStateIfClear / ClearServiceStateIfReason mirror the production
 // conditional writes (same predicates, same "did it write", same refusal of an
 // empty reason), so a service test cannot pass against code that overwrites.
+// Not emulated: the production refusal of geo_auto for an account an admin
+// trusts (risk_reviews), which app's TestBuildNeverGeoAutoSuspendsATrustedAccount
+// pins end to end.
 func (r *memoryUserRepo) SetServiceStateIfClear(ctx context.Context, userID int64, reason domain.AutoDisabledReason, detail string, at time.Time) (bool, error) {
 	if reason == domain.DisabledNone {
 		return false, fmt.Errorf("%w: empty service reason", domain.ErrValidation)
@@ -613,6 +618,40 @@ func (r *memoryUserRepo) CountByServiceDisabledReason(ctx context.Context, reaso
 		}
 	}
 	return n, nil
+}
+
+// ListByIDs / ListServiceHolds answer like the production reads: existing
+// ids in id order, each once; the exact reason, by id, the hold time in ms.
+func (r *memoryUserRepo) ListByIDs(ctx context.Context, ids []int64) ([]*domain.User, error) {
+	seen := make(map[int64]bool, len(ids))
+	var out []*domain.User
+	for _, id := range ids {
+		if u, ok := r.byID[id]; ok && !seen[id] {
+			seen[id] = true
+			out = append(out, cloneUser(u))
+		}
+	}
+	slices.SortFunc(out, func(a, b *domain.User) int { return cmp.Compare(a.ID, b.ID) })
+	return out, nil
+}
+
+func (r *memoryUserRepo) ListServiceHolds(ctx context.Context, reason domain.AutoDisabledReason) ([]ports.ServiceHold, error) {
+	if reason == domain.DisabledNone {
+		return nil, fmt.Errorf("%w: empty service reason", domain.ErrValidation)
+	}
+	var out []ports.ServiceHold
+	for _, u := range r.byID {
+		if u.ServiceDisabledReason != reason {
+			continue
+		}
+		h := ports.ServiceHold{UserID: u.ID}
+		if u.ServiceDisabledAt != nil {
+			h.SinceMS = u.ServiceDisabledAt.UnixMilli()
+		}
+		out = append(out, h)
+	}
+	slices.SortFunc(out, func(a, b ports.ServiceHold) int { return cmp.Compare(a.UserID, b.UserID) })
+	return out, nil
 }
 
 func (r *memoryUserRepo) UpdateTrafficState(ctx context.Context, u *domain.User) error {

@@ -11,6 +11,7 @@ import (
 	"gorm.io/gorm/clause"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 )
 
 // The widths of risk_signals' bounded columns, checked by Save before anything
@@ -263,6 +264,31 @@ func riskEvidenceFrom(col *string) json.RawMessage {
 // because the view shows the fleet; the table holds at most one row per
 // account per kind.
 func (r *RiskSignalRepo) List(ctx context.Context) ([]domain.RiskSignal, error) {
+	out, err := listRiskSignals(r.db.WithContext(ctx))
+	if err != nil {
+		return nil, fmt.Errorf("list risk signals: %w", err)
+	}
+	return out, nil
+}
+
+// ListByUsers is List for the asked accounts only — every row, evidence and
+// names included, by user_id then kind: the evidence for one page of the
+// risk center's queue, or one account's drawer. Read in IN lists of
+// idReadChunk ids.
+func (r *RiskSignalRepo) ListByUsers(ctx context.Context, userIDs []int64) ([]domain.RiskSignal, error) {
+	var out []domain.RiskSignal
+	for _, chunk := range idChunks(userIDs) {
+		rows, err := listRiskSignals(r.db.WithContext(ctx).Where("risk_signals.user_id IN ?", chunk))
+		if err != nil {
+			return nil, fmt.Errorf("list risk signals by user: %w", err)
+		}
+		out = append(out, rows...)
+	}
+	return out, nil
+}
+
+// listRiskSignals runs List's JOIN on q, which may narrow it.
+func listRiskSignals(q *gorm.DB) ([]domain.RiskSignal, error) {
 	var rows []struct {
 		UserID      int64
 		Kind        string
@@ -273,7 +299,7 @@ func (r *RiskSignalRepo) List(ctx context.Context) ([]domain.RiskSignal, error) 
 		UPN         string
 		DisplayName string
 	}
-	err := r.db.WithContext(ctx).Table("risk_signals").
+	err := q.Table("risk_signals").
 		Select("risk_signals.user_id AS user_id, risk_signals.kind AS kind, risk_signals.state AS state, " +
 			"risk_signals.code AS code, risk_signals.evidence AS evidence, risk_signals.updated_at AS updated_at, " +
 			"users.upn AS upn, users.display_name AS display_name").
@@ -281,7 +307,7 @@ func (r *RiskSignalRepo) List(ctx context.Context) ([]domain.RiskSignal, error) 
 		Order("risk_signals.user_id, risk_signals.kind").
 		Scan(&rows).Error
 	if err != nil {
-		return nil, fmt.Errorf("list risk signals: %w", err)
+		return nil, err
 	}
 	out := make([]domain.RiskSignal, 0, len(rows))
 	for _, row := range rows {
@@ -294,6 +320,41 @@ func (r *RiskSignalRepo) List(ctx context.Context) ([]domain.RiskSignal, error) 
 			UpdatedAtMS: row.UpdatedAt,
 			UPN:         row.UPN,
 			DisplayName: row.DisplayName,
+		})
+	}
+	return out, nil
+}
+
+// AttentionLevels returns the risk center's risk-signal read: the rows of
+// existing accounts at attention — suspect or flagged; unknown is "cannot
+// tell", which domain.RiskAttention reads as none — written at or after
+// since, by user_id then kind. Four narrow columns and never the evidence,
+// for GeoStreakRepo.AttentionLevels' reason. JOIN users because there is no
+// foreign key; bounded by updated_at so a row the worker stopped rewriting
+// (a dead loop, a skipped kind) stops counting. updated_at is unix ms, so the
+// bound is an integer comparison on every dialect, and inclusive.
+func (r *RiskSignalRepo) AttentionLevels(ctx context.Context, since time.Time) ([]ports.SignalAttentionRow, error) {
+	var rows []struct {
+		UserID    int64  `gorm:"column:user_id"`
+		Kind      string `gorm:"column:kind"`
+		State     string `gorm:"column:state"`
+		UpdatedAt int64  `gorm:"column:updated_at"`
+	}
+	err := r.db.WithContext(ctx).Table("risk_signals").
+		Select("risk_signals.user_id AS user_id, risk_signals.kind AS kind, risk_signals.state AS state, "+
+			"risk_signals.updated_at AS updated_at").
+		Joins("JOIN users ON users.id = risk_signals.user_id").
+		Where("risk_signals.state IN ? AND risk_signals.updated_at >= ?",
+			[]string{string(domain.GeoStateSuspect), string(domain.GeoStateFlagged)}, since.UnixMilli()).
+		Order("risk_signals.user_id, risk_signals.kind").
+		Scan(&rows).Error
+	if err != nil {
+		return nil, fmt.Errorf("risk signal attention levels: %w", err)
+	}
+	out := make([]ports.SignalAttentionRow, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, ports.SignalAttentionRow{
+			UserID: row.UserID, Kind: domain.RiskKind(row.Kind), State: domain.GeoState(row.State), UpdatedAtMS: row.UpdatedAt,
 		})
 	}
 	return out, nil

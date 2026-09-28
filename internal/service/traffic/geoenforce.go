@@ -362,8 +362,10 @@ func (s *Service) applyGeoBans(ctx context.Context, users []*domain.User, bans [
 				log.Warn("geo auto-suspension: suspend failed; the ban streak rebuilds before it is due again",
 					"user_id", u.ID, "tier", b.Tier, "err", err)
 			} else {
-				// The row gained a reason since the poll's read: someone
-				// else's decision, which the detector does not overwrite.
+				// The row gained a reason since the poll's read — someone
+				// else's decision, which the detector does not overwrite —
+				// or an admin trusted it since (the repo's write refuses
+				// geo_auto for a trusted account).
 				geoAutoCount("skipped_held", 1)
 			}
 			continue
