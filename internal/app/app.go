@@ -596,7 +596,15 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	// most needs no wiring: the user repo refuses a geo_auto suspension of a
 	// trusted account inside its own conditional write
 	// (TestBuildNeverGeoAutoSuspendsATrustedAccount).
+	//
+	// The detectors read the trusted accounts from it, once per judging
+	// step: the poll here, the risk worker through its Deps below. Both are
+	// nil-tolerant, so leaving either out compiles and the detector just
+	// goes on judging a trusted account's location — the guard above still
+	// stops the suspension, so nothing would look broken;
+	// TestBuildWiresTheTrustedAccounts guards both.
 	riskReviews := sqlstore.NewRiskReviewRepo(db)
+	trafficSvc.SetTrustedLister(riskReviews)
 	// The observe-only risk signals' store: a concrete repo built from the
 	// database handle like the geo streak store, not a ports.Repos field, so
 	// each consumer is handed only the narrow interface it declares — the
@@ -741,7 +749,8 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	// service: the worker needs "is this PSP's own address", "has the set
 	// been built yet" and "which of them are landing nodes", and nothing
 	// else that service can do. The login log is handed over as the whole
-	// repo, but the worker's field is an interface with List alone.
+	// repo, but the worker's field is an interface with List alone; the
+	// review store likewise, behind an interface with ListTrusted alone.
 	a.risk = risk.New(risk.Deps{
 		Users:        repos.User,
 		Store:        riskSignals,
@@ -753,6 +762,7 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 		InfraLoaded:  trafficSvc.InfraLoaded,
 		AuthEvents:   repos.AuthEvent,
 		LandingAddrs: trafficSvc.LandingAddresses,
+		Trust:        riskReviews,
 	})
 	a.trafficInterval = time.Duration(sysSettings.CronTrafficPullMinutes) * time.Minute
 	// Rollup's gap heartbeat is derived from the poll cadence so a coarse poll

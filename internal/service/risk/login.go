@@ -51,8 +51,13 @@ func loginLookbackDays(retention, configured int) int {
 // a loaded infrastructure set: the window's countries are the known ones,
 // and a login is placed with the same address rules. A login log that
 // cannot be read costs this kind its rows for the run — the stored ones
-// stay — and the run is partial.
+// stay — and the run is partial. So do unreadable trusted accounts
+// (readTrusted), and then the log is not even read; an account an admin
+// trusts reads exempt / trusted.
 func (s *Service) loginCountry(ctx context.Context, r *refresh, pl placement) error {
+	if r.trustUnreadable {
+		return nil
+	}
 	lookback := loginLookbackDays(r.global.AuthEventRetentionDays, r.rt.LoginLookbackDays)
 	logins, err := s.readLogins(ctx, r, r.now.Add(-time.Duration(lookback)*24*time.Hour))
 	if err != nil {
@@ -84,7 +89,7 @@ func (s *Service) loginCountry(ctx context.Context, r *refresh, pl placement) er
 		v, ev := domain.EvaluateLoginCountry(
 			domain.LoginCountryPolicy{
 				Off:          policy.risk.LoginCountryOff,
-				Geo:          policy.geo,
+				Geo:          r.geoPolicyFor(u, policy),
 				WarmupLogins: policy.risk.LoginWarmupLogins,
 				HoldDays:     policy.risk.LoginHoldDays,
 			},

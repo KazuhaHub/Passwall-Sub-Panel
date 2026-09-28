@@ -209,6 +209,28 @@ func TestRefresh_SubSpreadJudgesTheWindow(t *testing.T) {
 	wantOutcome(t, before, "ok")
 }
 
+// An account an admin trusts is not judged on where it fetches from: the
+// same week that flags the control reads exempt / trusted for it, with no
+// evidence, like any exemption. Mutation: judge with the group's geo policy
+// as loaded, and user 1 is flagged too.
+func TestSubSpread_TrustedAccountIsExemptTrusted(t *testing.T) {
+	h := newSpreadHarness(usersInGroups(0, 0), rowsOf(
+		everyDay(t, phone(1, ipHomeGD)), everyDay(t, client(1, ipHunan, "ClashX Pro/1.118.0")),
+		everyDay(t, phone(2, ipHomeGD2)), everyDay(t, client(2, ipOffice, "ClashX Pro/1.118.0")),
+	))
+	h.trust = &fakeTrust{ids: []int64{1}}
+	if err := h.service().RefreshOnce(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	control, _ := spreadRow(t, h, 2)
+	wantSpreadRow(t, control, domain.GeoStateFlagged, domain.RiskCodeSpread)
+	r, _ := spreadRow(t, h, 1)
+	wantSpreadRow(t, r, domain.GeoStateExempt, domain.RiskCodeTrusted)
+	if r.Evidence != nil {
+		t.Fatalf("a trusted account's row has evidence %s", r.Evidence)
+	}
+}
+
 // An office exit three accounts fetch from says nothing about where any of
 // them is. It is set aside for all three, and each reads as its phone at
 // home.

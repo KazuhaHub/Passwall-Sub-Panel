@@ -74,6 +74,9 @@ type liveIPInput struct {
 	minSpacing time.Duration
 	// now is the judging instant; zero means time.Now().
 	now time.Time
+	// trusted is the accounts an admin trusts, judged exempt (trust.go).
+	// nil: read through the lister, once, right before the judging step.
+	trusted map[int64]bool
 }
 
 // geoPolicyCache resolves the location policy per GROUP, not per user, for
@@ -219,6 +222,10 @@ func (c *geoPolicyCache) lookup(uid int64) geoPolicyEntry {
 //     one at a time (judgeLiveIPs), so the second of two finds the first
 //     one's accounts judged and spaces them.
 //
+// An account an admin trusts is still observed — it is connected, and the
+// live view shows it — but its location is not judged: the verdict is
+// exempt/trusted (trust.go).
+//
 // It changes no user's state and writes to no panel. Beyond the verdict it
 // stores the live-connection snapshot (in memory, for the risk center; see
 // liveconn.go), records the connections of the accounts it judged into the
@@ -316,6 +323,16 @@ func (s *Service) observeLiveIPs(ctx context.Context, in liveIPInput) []geoBan {
 		lookup = func(ips []string) map[string]domain.GeoLocation {
 			return s.geo.Lookup(ctx, ips)
 		}
+	}
+
+	// The trusted accounts, once for the whole step and before its lock: one
+	// read for every account the step judges, and none holding up an
+	// overlapping poll's judging. Only here, where something is about to be
+	// judged — the early returns above judge nobody and read nothing. What a
+	// trust landing between this read and the judging does is described at
+	// trustedSet.
+	if in.trusted == nil {
+		in.trusted = s.trustedSet(ctx)
 	}
 
 	bans, next, flags := s.judgeLiveIPs(ctx, in, pc, agg, addrs, lookup, geoAvailable, len(panels), now)
@@ -424,6 +441,15 @@ func (s *Service) judgeLiveIPs(ctx context.Context, in liveIPInput, pc *geoPolic
 		}
 
 		policy := pc.forUser(uid)
+		// An account an admin trusts: its location is not judged. Set on this
+		// copy of the group's policy, never in the cache, so the trust is one
+		// account's and not its group's. EvaluateGeo answers exempt/trusted
+		// with every streak reset — no ban can fall due — and the saved row's
+		// leave from any attention is recorded like any other change
+		// (geoFlagTransitions), coded trusted.
+		if in.trusted[uid] {
+			policy.Trusted = true
+		}
 		a := addrs[uid]
 
 		obs := domain.ObserveGeo(policy, a, lookup, geoAvailable)
