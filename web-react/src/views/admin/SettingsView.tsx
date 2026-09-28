@@ -1,8 +1,5 @@
 import React, { useEffect, useState, type FormEvent } from 'react'
 import {
-  Accordion,
-  AccordionDetails,
-  AccordionSummary,
   Autocomplete,
   Box,
   Button,
@@ -33,7 +30,6 @@ import {
   useTheme,
 } from '@mui/material'
 import SaveIcon from '@mui/icons-material/Save'
-import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import VisibilityIcon from '@mui/icons-material/Visibility'
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined'
 import HelpOutlineIcon from '@mui/icons-material/HelpOutlined'
@@ -43,6 +39,7 @@ import ContentCopyIcon from '@mui/icons-material/ContentCopy'
 import CheckCircleIcon from '@mui/icons-material/CheckCircle'
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutlined'
 import { useTranslation } from 'react-i18next'
+import { Link as RouterLink } from 'react-router'
 import { panelPath } from '@/panelPath'
 
 import {
@@ -67,7 +64,6 @@ import {
   type SAMLConfig,
   type SSOGroupRule,
   type SSORoleRule,
-  type RuntimeKnob,
   type UISettings,
 } from '@/api/settings'
 import AddIcon from '@mui/icons-material/Add'
@@ -95,11 +91,8 @@ import { useMailSettings, useOidcConfig, useSamlConfig, useUISettings } from '@/
 import { useQueryScope } from '@/query/useQueryScope'
 import type { Group } from '@/api/types'
 import { normalizeRegistry } from './subclients/clientRegistry'
-import { ADVANCED_GEO_KNOBS, ADVANCED_RISK_KNOBS, advancedKnobConfigured } from './settingsRuntimeKnobs'
 import ScopeOverridesEditor from '@/components/scope/ScopeOverridesEditor'
 import { loadScopeState, saveScopeState, type ScopeState } from '@/components/scope/scopeOverrides'
-import { geoTolerances } from '@/utils/geoAnomaly'
-import { riskPolicy } from '@/utils/riskSignals'
 
 type TabKey = 'general' | 'security' | 'brand' | 'subscription' | 'portal' | 'mail' | 'sso'
 
@@ -441,40 +434,6 @@ export default function SettingsView() {
   if (!settings) {
     return <Box sx={{ p: 3, display: 'grid', placeItems: 'center', minHeight: 400 }}><CircularProgress /></Box>
   }
-
-  // What the server will actually judge with, for the draft as it stands: an
-  // unset (0 / '') geo value is the shipped default and each suspension
-  // threshold is raised to its flag tolerance. The captions print the first
-  // count that is OVER (tolerance + 1) — "2 countries" reads as the line
-  // itself, where "tolerance 1" leaves the admin to do the arithmetic.
-  const geoTol = geoTolerances(settings)
-  // The captions name all three tiers, and only the city scope (the default,
-  // stored as '') judges all three. Under region, country or off they would
-  // promise a line the detector never draws, so they are not shown there.
-  const geoTiered = (settings.geo_anomaly_scope || 'city') === 'city'
-  // The risk policy the server will judge with for the draft, the same way:
-  // an unset 0 is the default and a nonsense value is repaired toward not
-  // accusing (a ratio under 1.5 is raised, min_days is held to the window).
-  const riskEff = riskPolicy(settings)
-  // One geo/risk runtime knob, its label and hint under settings.<ns>.<name>
-  // (the knob's json tag less its geo_anomaly_ / risk_ prefix). The value in
-  // effect and the default are the server's (runtime_effective /
-  // runtime_defaults); this page keeps no copy of either.
-  const runtimeField = (knob: RuntimeKnob, ns: 'geo_anomaly' | 'risk' | 'risk_center') => {
-    const name = knob.replace(/^(geo_anomaly|risk)_/, '')
-    return (
-      <RuntimeField key={knob}
-        label={t(`settings.${ns}.${name}`)}
-        hint={t(`settings.${ns}.${name}_hint`)}
-        value={settings[knob]}
-        onChange={v => patch(knob, v)}
-        effective={settings.runtime_effective?.[knob]}
-        fallback={settings.runtime_defaults?.[knob]} />
-    )
-  }
-  // The former constants live in a closed panel — until one of them is
-  // configured, which must not hide behind it.
-  const advancedConfigured = advancedKnobConfigured(settings)
 
   const tabs: { key: TabKey; labelKey: string }[] = [
     { key: 'general', labelKey: 'settings.tab_general' },
@@ -972,7 +931,7 @@ export default function SettingsView() {
           </Section>
         </Box>
       ))}
-      {tab === 'general' && renderScopeTab(['notify', 'emergency', 'geo', 'geo_ban', 'risk'], (
+      {tab === 'general' && renderScopeTab(['notify', 'emergency'], (
         <Box component="form" onSubmit={save} sx={{ display: 'flex', flexDirection: 'column', gap: 2.5, maxWidth: 880 }}>          <Section title={t('settings.general.section_runtime')} md={md}>
             <Autocomplete
               freeSolo
@@ -1208,299 +1167,20 @@ export default function SettingsView() {
             <Typography sx={{ fontSize: 11, color: md.onSurfaceVariant }}>
               {t('settings.geo.attribution', { defaultValue: '数据来源需在使用处署名：MaxMind（GeoLite2）/ DB-IP / IPinfo —— 视所用库而定。' })}
             </Typography>
-          </Section>
-
-          {/* Concurrent-location anomaly. Deliberately its own section rather
-              than folded into the geo one above: that section is about
-              DISPLAYING a region in the access log, this one JUDGES people.
-              Every field below except the ignore list is per-group
-              overridable (the rail on the left), so a team that works across
-              borders is loosened — or armed for auto-suspension — without
-              touching the fleet. */}
-          <Section title={t('settings.geo_anomaly.section', { defaultValue: '异地并发检测' })} md={md}>
-            <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant }}>
-              {t('settings.geo_anomaly.hint', { defaultValue: '把一个用户在所有面板上的并发源 IP 合起来看，同时出现在多个地方就是共享账号的信号。需要上面的 IP 地区库可用，否则一律判为「无法判断」而不是「正常」。默认只观测并在通知铃提醒管理员；可选开启下方的「自动临时暂停」。' })}
-            </Typography>
-
-            {/* '' is what the server stores when nobody chose, and it judges
-                that as city. Shown as city rather than blank, which reads as
-                "off". */}
-            <TextField select fullWidth size="small"
-              label={t('settings.geo_anomaly.scope', { defaultValue: '判定粒度' })}
-              value={settings.geo_anomaly_scope || 'city'}
-              onChange={e => patch('geo_anomaly_scope', e.target.value as typeof settings.geo_anomaly_scope)}
-              helperText={t('settings.geo_anomaly.scope_hint', { defaultValue: '决定最细判到哪一级：「城市·分级」同时判国家、省、城市三级；「省 / 州」不判城市；「仅国家」只判国家。' })}>
-              <MenuItem value="city">{t('settings.geo_anomaly.scope_city', { defaultValue: '城市·分级（推荐）' })}</MenuItem>
-              <MenuItem value="region">{t('settings.geo_anomaly.scope_region', { defaultValue: '省 / 州' })}</MenuItem>
-              <MenuItem value="country">{t('settings.geo_anomaly.scope_country', { defaultValue: '仅国家' })}</MenuItem>
-              <MenuItem value="off">{t('settings.geo_anomaly.scope_off', { defaultValue: '关闭检测' })}</MenuItem>
-            </TextField>
-
-            <Pair>
-              <NumField
-                label={t('settings.geo_anomaly.max_places', { defaultValue: '国家容错：允许同时几个国家' })}
-                value={settings.geo_anomaly_max_places ?? 0}
-                onChange={v => patch('geo_anomaly_max_places', v)}
-                helperText={t('settings.geo_anomaly.max_places_hint', { defaultValue: '1 = 同时两个国家即超限。0 = 默认（1）。' })} />
-              <NumField
-                label={t('settings.geo_anomaly.max_regions', { defaultValue: '省级容错：同一国家允许同时几个省 / 州' })}
-                value={settings.geo_anomaly_max_regions ?? 0}
-                onChange={v => patch('geo_anomaly_max_regions', v)}
-                helperText={t('settings.geo_anomaly.max_regions_hint', { defaultValue: '1 = 同一国家同时两个省即超限。家里常开的路由器 + 外地的手机也会触发，误报多就调到 2。0 = 默认（1）。' })} />
-              <NumField
-                label={t('settings.geo_anomaly.max_cities', { defaultValue: '城市容错：同一国家允许同时几个城市' })}
-                value={settings.geo_anomaly_max_cities ?? 0}
-                onChange={v => patch('geo_anomaly_max_cities', v)}
-                helperText={t('settings.geo_anomaly.max_cities_hint', { defaultValue: '2 = 同一国家同时三个城市即超限；只定位到国家的地址不算城市。0 = 默认（2）。' })} />
-            </Pair>
-            {geoTiered && (
-              <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant, mt: -0.5 }}>
-                {t('settings.geo_anomaly.effective', {
-                  countries: geoTol.flag.countries + 1, regions: geoTol.flag.regions + 1, cities: geoTol.flag.cities + 1,
-                  defaultValue: `当前生效：同时 ${geoTol.flag.countries + 1} 个国家，或同一国家 ${geoTol.flag.regions + 1} 个省，或 ${geoTol.flag.cities + 1} 个城市，即算超限`,
-                })}
+            {/* The detectors that judge people by these regions — concurrent
+                locations and the risk signals — are set on the risk center's
+                policy tab, which owns them on the server too: this page's
+                save keeps whatever policy it loaded. They read this database,
+                so an admin who comes looking for them here finds the way. */}
+            <Divider sx={{ my: 0.5, borderColor: md.outlineVariant }} />
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap' }}>
+              <Typography sx={{ fontSize: 13, color: md.onSurfaceVariant, flex: '1 1 240px' }}>
+                {t('settings.geo.policy_pointer')}
               </Typography>
-            )}
-
-            <Pair>
-              <NumField
-                label={t('settings.geo_anomaly.min_placed_ratio', { defaultValue: '最低可定位比例' })}
-                value={settings.geo_anomaly_min_placed_ratio}
-                onChange={v => patch('geo_anomaly_min_placed_ratio', v)}
-                step="any"
-                helperText={t('settings.geo_anomaly.min_placed_ratio_hint', { defaultValue: '0–1。低于这个比例的地址能被定位时判「无法判断」，防止陈旧或残缺的库悄悄变成「全员清白」。' })} />
-            </Pair>
-
-            <Pair>
-              <NumField
-                label={t('settings.geo_anomaly.flag_after', { defaultValue: '连续几次才标记' })}
-                value={settings.geo_anomaly_flag_after_polls}
-                onChange={v => patch('geo_anomaly_flag_after_polls', v)}
-                helperText={t('settings.geo_anomaly.flag_after_hint', { defaultValue: '一次噪声不报警——未达次数时只显示「疑似」。设成 1 等于关掉迟滞，会让检测器抖动，不建议。' })} />
-              <NumField
-                label={t('settings.geo_anomaly.clear_after', { defaultValue: '连续几次才解除' })}
-                value={settings.geo_anomaly_clear_after_polls}
-                onChange={v => patch('geo_anomaly_clear_after_polls', v)}
-                helperText={t('settings.geo_anomaly.clear_after_hint', { defaultValue: '刻意比上面大：否则账号在两次检查之间踩到线下就能甩掉标记。断线不计入解除。' })} />
-            </Pair>
-
-            <TextField fullWidth size="small" multiline minRows={2}
-              label={t('settings.geo_anomaly.co_travel', { defaultValue: '视为同一地点的组合' })}
-              value={settings.geo_anomaly_co_travel ?? ''}
-              onChange={e => patch('geo_anomaly_co_travel', e.target.value)}
-              placeholder={'JP,TW\nDE,AT,CH'}
-              helperText={t('settings.geo_anomaly.co_travel_hint', { defaultValue: '一行一组，组内用逗号分隔国家代码（大小写不限）。只支持国家；含「/」的省、城市条目会被忽略。组外的第三个国家仍然会触发。' })} />
-
-            <FormControlLabel
-              label={t('settings.geo_anomaly.allow_anywhere', { defaultValue: '本范围内允许任何地方（不检测）' })}
-              control={<Switch checked={settings.geo_anomaly_allow_anywhere}
-                onChange={(_, c) => patch('geo_anomaly_allow_anywhere', c)} />}
-              sx={{ ml: 0, '& .MuiFormControlLabel-label': { ml: 1.5 } }} />
-            <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant, mt: -1 }}>
-              {t('settings.geo_anomaly.allow_anywhere_hint', { defaultValue: '整体豁免，而不是抬高阈值——抬阈值会连带放松那些没在出差的人。在「分组」里对某个组单独打开，就只豁免那个组。' })}
-            </Typography>
-
-            {/* Global only: it names fleet infrastructure, not a population,
-                so it has no row in the per-group rail. The one geo field the
-                server validates — a typo would fail OPEN (the address keeps
-                being judged) with nothing to repair it — and a rejected entry
-                comes back as a 400 naming it, through the normal save error. */}
-            <TextField fullWidth size="small" multiline minRows={3}
-              label={t('settings.geo_anomaly.ignore_addresses', { defaultValue: '忽略的地址（IP 或 CIDR）' })}
-              value={settings.geo_anomaly_ignore_addresses ?? ''}
-              onChange={e => patch('geo_anomaly_ignore_addresses', e.target.value)}
-              placeholder={'203.0.113.7\n198.51.100.0/24  # office exit'}
-              helperText={t('settings.geo_anomaly.ignore_addresses_hint', { defaultValue: '一行或逗号分隔一个，最多 256 条，# 后为注释。用于没在面板登记的中转、CDN、公司出口。节点与中转地址、100.64.0.0/10 与内网地址、同时被「共享出口账号数」（默认 3）个以上账号使用的地址已自动排除。仅全局生效。' })} />
-
-            {/* Automatic temporary suspension. Off by default, its own
-                (looser) thresholds, time-boxed, and never over anybody
-                else's hold — the hint says all of that because an admin
-                arming it is deciding to let the panel act on a signal. */}
-            <Divider sx={{ my: 0.5 }} />
-            <Typography sx={{ fontWeight: 600, fontSize: 13, color: md.onSurface }}>
-              {t('settings.geo_anomaly.ban_section', { defaultValue: '自动临时暂停（默认关闭）' })}
-            </Typography>
-            <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant }}>
-              {t('settings.geo_anomaly.ban_hint', { defaultValue: '开启后，持续超过「暂停阈值」的账号会被自动暂停代理服务，到时自动恢复；不锁面板登录，不覆盖管理员或其他原因的暂停；紧急访问期间、已到期或已超流量的账号不会被自动暂停。恢复后仍持续超限会再次暂停——确认是误报的账号请移入关闭了自动暂停（或允许任何地方）的分组。暂停阈值会被自动抬到不低于上面的标记容错。' })}
-            </Typography>
-            <FormControlLabel
-              label={t('settings.geo_anomaly.ban_enabled', { defaultValue: '启用自动临时暂停' })}
-              control={<Switch checked={!!settings.geo_anomaly_ban_enabled}
-                onChange={(_, c) => patch('geo_anomaly_ban_enabled', c)} />}
-              sx={{ ml: 0, '& .MuiFormControlLabel-label': { ml: 1.5 } }} />
-            <Pair>
-              <NumField
-                label={t('settings.geo_anomaly.ban_max_countries', { defaultValue: '暂停阈值：国家' })}
-                value={settings.geo_anomaly_ban_max_countries ?? 0}
-                onChange={v => patch('geo_anomaly_ban_max_countries', v)} />
-              <NumField
-                label={t('settings.geo_anomaly.ban_max_regions', { defaultValue: '暂停阈值：省 / 州' })}
-                value={settings.geo_anomaly_ban_max_regions ?? 0}
-                onChange={v => patch('geo_anomaly_ban_max_regions', v)} />
-              <NumField
-                label={t('settings.geo_anomaly.ban_max_cities', { defaultValue: '暂停阈值：城市' })}
-                value={settings.geo_anomaly_ban_max_cities ?? 0}
-                onChange={v => patch('geo_anomaly_ban_max_cities', v)} />
-            </Pair>
-            <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant, mt: -0.5 }}>
-              {t('settings.geo_anomaly.ban_tolerance_hint', { defaultValue: '含义同上面的容错，只用于自动暂停。0 = 默认（1 / 2 / 3）。' })}
-            </Typography>
-            <Pair>
-              <NumField
-                label={t('settings.geo_anomaly.ban_after', { defaultValue: '连续几次才暂停' })}
-                value={settings.geo_anomaly_ban_after_polls ?? 0}
-                onChange={v => patch('geo_anomaly_ban_after_polls', v)}
-                helperText={t('settings.geo_anomaly.ban_after_hint', { defaultValue: '默认 6（按 5 分钟一次轮询约 30 分钟）。手动「立即拉取」间隔不足半个轮询周期时不计入。0 = 默认。' })} />
-              <NumField
-                label={t('settings.geo_anomaly.ban_duration', { defaultValue: '暂停时长（分钟）' })}
-                value={settings.geo_anomaly_ban_duration_minutes ?? 0}
-                onChange={v => patch('geo_anomaly_ban_duration_minutes', v)}
-                max={10080}
-                helperText={t('settings.geo_anomaly.ban_duration_hint', { defaultValue: '默认 60，最长 10080（7 天）。到时自动恢复，管理员可随时手动恢复。修改会作用于正在暂停中的账号。' })} />
-            </Pair>
-            {geoTiered && (
-              <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant, mt: -0.5 }}>
-                {t('settings.geo_anomaly.ban_effective', {
-                  countries: geoTol.ban.countries + 1, regions: geoTol.ban.regions + 1, cities: geoTol.ban.cities + 1,
-                  polls: geoTol.banAfterPolls, minutes: geoTol.banMinutes,
-                  defaultValue: `当前生效：同时 ${geoTol.ban.countries + 1} 个国家，或同一国家 ${geoTol.ban.regions + 1} 个省，或 ${geoTol.ban.cities + 1} 个城市，连续 ${geoTol.banAfterPolls} 次，暂停 ${geoTol.banMinutes} 分钟`,
-                })}
-              </Typography>
-            )}
-          </Section>
-
-          {/* Observe-only risk signals. Beside the concurrent-location
-              section because sub_spread judges with that section's scope,
-              region tolerance and allow-anywhere, and an admin tuning one
-              should read the other. The switches read positively ("signal
-              on") over NEGATIVE keys (risk_*_off), whose zero value — every
-              install that never saved them — is on. Nothing here validates:
-              the server repairs a nonsense value toward not accusing, and the
-              caption shows what that repair gives. */}
-          <Section title={t('settings.risk.section', { defaultValue: '风险信号（只提示）' })} md={md}>
-            <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant }}>
-              {t('settings.risk.hint', { defaultValue: '除「异地并发」之外的四种信号，按「风险信号计算间隔」（默认每小时）计算，结果在「风控中心 → 风险信号」，有账号被标记时通知铃提醒。它们不会暂停、禁用或修改任何账号。「订阅多地」沿用上面「异地并发」的判定粒度、省级容错和「允许任何地方」。' })}
-            </Typography>
-            {([
-              ['risk_sub_spread_off', 'sub_spread', '订阅多地：跨天从互不相连的省份拉取订阅'],
-              ['risk_devices_off', 'devices', '设备数：客户端声明的设备'],
-              ['risk_usage_shift_off', 'usage_shift', '用量变化：与自己的基线期相比'],
-              ['risk_login_country_off', 'login_country', '登录国家：面板登录出现新国家'],
-            ] as const).map(([field, name, def]) => (
-              <React.Fragment key={field}>
-                <FormControlLabel
-                  label={t(`settings.risk.${name}`, { defaultValue: def })}
-                  control={<Switch checked={!settings[field]} onChange={(_, c) => patch(field, !c)} />}
-                  sx={{ ml: 0, '& .MuiFormControlLabel-label': { ml: 1.5 } }} />
-                {name === 'sub_spread' && (
-                  <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant, mt: -1 }}>
-                    {t('settings.risk.sub_spread_hint', { defaultValue: '同一个客户端（同一设备标识或同一客户端标识）去过的省份算作同一组，组数超过上面的省级容错即标记。只判常驻省份最多的那个国家，跨国不在这里判断。' })}
-                  </Typography>
-                )}
-              </React.Fragment>
-            ))}
-
-            <Pair>
-              <NumField
-                label={t('settings.risk.min_days', { defaultValue: '常驻天数' })}
-                value={settings.risk_min_days ?? 0}
-                onChange={v => patch('risk_min_days', v)}
-                max={7}
-                helperText={t('settings.risk.min_days_hint', { defaultValue: '一个省或一台设备在订阅窗口内（受订阅日志保留天数限制）至少出现几天才算常驻，按面板时区的自然日计。默认 3，范围 1–窗口天数。0 = 默认。' })} />
-              <NumField
-                label={t('settings.risk.max_devices', { defaultValue: '设备上限' })}
-                value={settings.risk_max_devices ?? 0}
-                onChange={v => patch('risk_max_devices', v)}
-                helperText={t('settings.risk.max_devices_hint', { defaultValue: '常用设备超过这个数即标记，只统计带 x-hwid 的客户端。默认 3。0 = 默认。' })} />
-            </Pair>
-            <Pair>
-              <NumField
-                label={t('settings.risk.usage_ratio', { defaultValue: '用量倍数' })}
-                value={settings.risk_usage_ratio ?? 0}
-                onChange={v => patch('risk_usage_ratio', v)}
-                step="any"
-                helperText={t('settings.risk.usage_ratio_hint', { defaultValue: '某天用量超过「开始使用以来、基线期内日用量中位数 × 倍数」即为超标日；判定天数内超标达到「超标几天即标记」即标记，达到「超标几天即疑似」为疑似。默认 3，最小 1.5。0 = 默认。' })} />
-              <NumField
-                label={t('settings.risk.usage_floor_gb', { defaultValue: '每日用量下限（GB）' })}
-                value={settings.risk_usage_floor_gb ?? 0}
-                onChange={v => patch('risk_usage_floor_gb', v)}
-                helperText={t('settings.risk.usage_floor_gb_hint', { defaultValue: '低于这个量的日子不算超标，避免基线很低的账号因少量使用被标记。默认 3。0 = 默认。' })} />
-            </Pair>
-            <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant, mt: -0.5 }}>
-              {t('settings.risk.effective', {
-                min_days: riskEff.minDays, max_devices: riskEff.maxDevices, ratio: riskEff.ratio, floor: riskEff.floorGB,
-                defaultValue: `当前生效：常驻 ${riskEff.minDays} 天，设备上限 ${riskEff.maxDevices}，用量倍数 ${riskEff.ratio}，每日下限 ${riskEff.floorGB} GB`,
-              })}
-            </Typography>
-
-            {/* usage_shift's and login_country's thresholds: per-group like
-                the tolerances above (the rail on the left). The server holds
-                the warm-up, the over-days and the hold to the fleet-wide
-                lengths in the advanced panel below (and suspect to flag), so
-                the caption under each says what the global value became. */}
-            <Pair>
-              {runtimeField('risk_usage_warmup_days', 'risk')}
-              {runtimeField('risk_usage_flag_days', 'risk')}
-              {runtimeField('risk_usage_suspect_days', 'risk')}
-            </Pair>
-            <Pair>
-              {runtimeField('risk_login_warmup_logins', 'risk')}
-              {runtimeField('risk_login_hold_days', 'risk')}
-            </Pair>
-
-            {/* Global only: /sub reads it on every fetch, before it knows the
-                account's group, so it has no row in the per-group rail. It
-                only records; it never blocks a fetch. */}
-            <Divider sx={{ my: 0.5 }} />
-            <FormControlLabel
-              label={t('settings.risk.hwid_capture', { defaultValue: '采集客户端设备标识（x-hwid）' })}
-              control={<Switch checked={!settings.risk_hwid_capture_off}
-                onChange={(_, c) => patch('risk_hwid_capture_off', !c)} />}
-              sx={{ ml: 0, '& .MuiFormControlLabel-label': { ml: 1.5 } }} />
-            <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant, mt: -1 }}>
-              {t('settings.risk.hwid_capture_hint', { defaultValue: '只有部分客户端会在更新订阅时带上设备标识（x-hwid），多数客户端不带。只保存按用户加密的摘要（无法还原）和系统 / 机型，随订阅日志一起过期，仅管理员可见；只提示，从不拦截拉取。关闭后不再采集，已保存的摘要随订阅日志过期。仅全局生效。' })}
-            </Typography>
-          </Section>
-
-          {/* The risk center's records and live view, and the detectors'
-              former constants. Every knob here is fleet-wide — freshness is
-              judged per node, the worker and the prunes run once for the
-              fleet, the live view is one snapshot — so none has a row in the
-              per-group rail, and a group sees this section not at all. */}
-          <Section title={t('settings.risk_center.section')} md={md}>
-            <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant }}>
-              {t('settings.risk_center.hint')}
-            </Typography>
-            <Pair>
-              {runtimeField('risk_connection_retention_days', 'risk_center')}
-              {runtimeField('risk_flag_record_retention_days', 'risk_center')}
-            </Pair>
-            <Pair>
-              {runtimeField('risk_live_snapshot_stale_minutes', 'risk_center')}
-              {runtimeField('risk_live_refresh_cooldown_seconds', 'risk_center')}
-              {runtimeField('risk_device_infer_hours', 'risk_center')}
-            </Pair>
-            <Accordion disableGutters elevation={0} defaultExpanded={advancedConfigured}
-              sx={{ bgcolor: 'transparent', border: `1px solid ${md.outlineVariant}`, borderRadius: 2, '&::before': { display: 'none' } }}>
-              <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-                <Typography sx={{ fontWeight: 600, fontSize: 13, color: md.onSurface }}>
-                  {t('settings.risk_center.advanced')}
-                </Typography>
-              </AccordionSummary>
-              <AccordionDetails sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
-                <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant }}>
-                  {t('settings.risk_center.advanced_hint')}
-                </Typography>
-                <Typography sx={{ fontWeight: 600, fontSize: 13, color: md.onSurface }}>
-                  {t('settings.risk_center.advanced_geo')}
-                </Typography>
-                <Pair>{ADVANCED_GEO_KNOBS.map(k => runtimeField(k, 'geo_anomaly'))}</Pair>
-                <Typography sx={{ fontWeight: 600, fontSize: 13, color: md.onSurface }}>
-                  {t('settings.risk_center.advanced_risk')}
-                </Typography>
-                <Pair>{ADVANCED_RISK_KNOBS.map(k => runtimeField(k, 'risk'))}</Pair>
-              </AccordionDetails>
-            </Accordion>
+              <Button size="small" variant="outlined" component={RouterLink} to="/admin/risk?tab=policy">
+                {t('settings.geo.open_policy')}
+              </Button>
+            </Box>
           </Section>
 
         </Box>
@@ -2696,47 +2376,6 @@ function NumField({ label, value, onChange, helperText, step, min = 0, max }: { 
       htmlInput: { min, max, step: step ?? 1 }
     }} />
   );
-}
-
-// RuntimeField is one geo/risk runtime knob. The field holds what is STORED,
-// and an unset knob (0, or a negative the server reads the same way) is an
-// empty field with the shipped default as its placeholder — a "0" would read
-// as "zero days" — so emptying the field is how an admin returns a knob to
-// its default. Under the hint is the number the server runs with: the
-// stored value clamped, floored and bounded, which can differ from what was
-// typed (a flag threshold of 1 is judged as 2). It is the SAVED value's
-// effect, from the last read or save, and it is the server's own: this page
-// keeps no copy of any default or clamp, so it cannot drift from them. An
-// older server sends neither map; the field then shows no default and no
-// caption rather than a guess.
-function RuntimeField({ label, hint, value, onChange, effective, fallback }: {
-  label: string
-  hint: string
-  value: number | undefined
-  onChange: (v: number) => void
-  effective?: number
-  fallback?: number
-}) {
-  const { t } = useTranslation('admin')
-  return (
-    <TextField fullWidth type="number" label={label}
-      value={value !== undefined && value > 0 ? value : ''}
-      placeholder={fallback === undefined ? undefined : String(fallback)}
-      onChange={e => onChange(e.target.value === '' ? 0 : Math.trunc(Number(e.target.value)) || 0)}
-      helperText={effective === undefined ? hint : (
-        <>
-          {hint}
-          <Box component="span" sx={{ display: 'block' }}>
-            {t('settings.risk_center.effective', { value: effective })}
-          </Box>
-        </>
-      )}
-      slotProps={{
-        htmlInput: { min: 0, step: 1 },
-        // Shrunk, so the placeholder (the default) shows in an empty field.
-        inputLabel: { shrink: true },
-      }} />
-  )
 }
 
 function ResetPeriodField({ value, onChange }: { value: string; onChange: (v: string) => void; md: MdShape }) {

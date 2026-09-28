@@ -1,9 +1,9 @@
 // Package alert is the unified notification center. It DERIVES alerts from
 // current state on every request — node health, certificate status, panel
-// versions, recent lockouts, the location detector's flags and suspensions,
-// the risk signals' flags — rather than maintaining an events table. A
-// condition that clears simply stops producing its alert; there is no
-// lifecycle to manage and the feed always reflects reality.
+// versions, recent lockouts, the risk center's accounts that need action —
+// rather than maintaining an events table. A condition that clears simply
+// stops producing its alert; there is no lifecycle to manage and the feed
+// always reflects reality.
 //
 // One AlertService is the single source the admin top-bar bell and (via a
 // drift test) the dashboard cards both rely on, so a category can't be shown in
@@ -52,13 +52,11 @@ const (
 	TypePanelUpgrade  Type = "panel_upgrade"
 	TypePSPUpgrade    Type = "psp_upgrade"
 	TypeLoginSecurity Type = "login_security"
-	// TypeGeoAnomaly and TypeGeoAutoSuspended are the location detector's two
-	// bell entries — see geo.go.
-	TypeGeoAnomaly       Type = "geo_anomaly"
-	TypeGeoAutoSuspended Type = "geo_auto_suspended"
-	// TypeRiskSignals is the observe-only risk signals' single entry — see
-	// risk.go.
-	TypeRiskSignals Type = "risk_signals"
+	// TypeRiskQueue is the risk center's one entry: the accounts that need
+	// action now — see riskqueue.go. It replaced geo_anomaly,
+	// geo_auto_suspended and risk_signals; an SPA older than it maps those
+	// three and simply never receives them again.
+	TypeRiskQueue Type = "risk_queue"
 )
 
 // Alert is one derived notification. Type-specific fields are optional; the
@@ -78,21 +76,20 @@ type Alert struct {
 	CurrentVersion string     `json:"current_version,omitempty"` // panel_upgrade / psp_upgrade
 	LatestVersion  string     `json:"latest_version,omitempty"`  // panel_upgrade / psp_upgrade
 	ExpireAt       *time.Time `json:"expire_at,omitempty"`       // cert_expiring
-	Count          int        `json:"count,omitempty"`           // login_security / node_resource / geo_anomaly / geo_auto_suspended / risk_signals
+	Count          int        `json:"count,omitempty"`           // login_security / node_resource / risk_queue
 	Since          *time.Time `json:"since,omitempty"`
 }
 
 // AdminOnly reports whether this alert type deep-links to an admin-only page
-// (certificates, 3X-UI servers, the Geo and risk tabs). The feed hides these
-// from operators so the bell never offers them a link to a page they're
-// forbidden to open. The geo and risk entries are admin-only for the reason
-// those tabs are: they are about people suspected of sharing an account on
-// evidence that is a signal rather than proof, and what to do about that is
-// the owner's call.
+// (certificates, 3X-UI servers, the risk center). The feed hides these from
+// operators so the bell never offers them a link to a page they're forbidden
+// to open. The risk-queue entry is admin-only for the reason the risk center
+// is: it is about people suspected of sharing an account on evidence that is
+// a signal rather than proof, and what to do about that is the owner's call.
 func (t Type) AdminOnly() bool {
 	switch t {
 	case TypeCertFailed, TypeCertExpiring, TypePanelUpgrade, TypePSPUpgrade, TypeNodeResource,
-		TypeGeoAnomaly, TypeGeoAutoSuspended, TypeRiskSignals:
+		TypeRiskQueue:
 		return true
 	default:
 		return false
@@ -162,15 +159,9 @@ type Deps struct {
 	// no node_resource alerts, which is what a build without host telemetry
 	// wants rather than an empty list it would have to distinguish from none.
 	NodeResource NodeResourceSource
-	// GeoFlags counts accounts whose concurrent-location flag is latched (the
-	// geo_streaks store). nil → no geo_anomaly entry.
-	GeoFlags GeoFlagCounter
-	// ServiceHolds counts accounts by service-suspension reason (the user
-	// repository). nil → no geo_auto_suspended entry.
-	ServiceHolds ServiceReasonCounter
-	// RiskFlags counts accounts with any observe-only risk signal flagged
-	// (the risk_signals store). nil → no risk_signals entry.
-	RiskFlags RiskFlagCounter
+	// RiskQueue counts the accounts the risk center says need action now
+	// (the risk center service). nil → no risk_queue entry.
+	RiskQueue RiskQueueCounter
 	// Now defaults to time.Now.
 	Now func() time.Time
 }
@@ -191,7 +182,14 @@ func New(d Deps) *Service {
 
 // List gathers every active alert (best-effort: a failing source is logged and
 // skipped, never blanking the whole feed) and the per-severity counts.
-func (s *Service) List(ctx context.Context) ([]Alert, Counts) {
+//
+// admin says whether the caller is an administrator. The risk-queue count is
+// a fleet-wide read — every account's attention and review state, what the
+// risk center's queue computes — and an operator could never be shown its
+// result, so it is not computed for one at all rather than on every operator
+// tab's poll and thrown away. Every other category is computed for both; the
+// handler's admin-only filter stays as the second line for those.
+func (s *Service) List(ctx context.Context, admin bool) ([]Alert, Counts) {
 	var out []Alert
 	out = append(out, s.nodeHealth(ctx)...)
 	out = append(out, s.panelUpgrades(ctx)...)
@@ -200,15 +198,10 @@ func (s *Service) List(ctx context.Context) ([]Alert, Counts) {
 	out = append(out, s.loginSecurity(ctx)...)
 	// Listed explicitly: a category that is wired through Deps but never
 	// appended here is silently absent from the bell (node_resource is, on
-	// purpose — see nodeResource). The two flag counts share one settings
-	// read for their freshness, skipped when neither is wired (the
-	// geo_auto_suspended count needs none).
-	var geoFresh, riskFresh time.Duration
-	if s.d.GeoFlags != nil || s.d.RiskFlags != nil {
-		geoFresh, riskFresh = s.bellFreshness(ctx)
+	// purpose — see nodeResource).
+	if admin {
+		out = append(out, s.riskQueueAlerts(ctx)...)
 	}
-	out = append(out, s.geoAlerts(ctx, geoFresh)...)
-	out = append(out, s.riskAlerts(ctx, riskFresh)...)
 	return out, Tally(out)
 }
 

@@ -82,21 +82,106 @@ describe('flagText', () => {
       '被「流量已用尽」暂停替换'],
     // A person's suspension from the location evidence, kept apart from
     // service_manual in the domain (resuming it counts a false positive), so
-    // it is named as itself rather than as a generic staff suspension.
+    // it is named as itself rather than as a generic staff suspension — and
+    // by the hold's one name, the word the Users page and the drawer use.
     ['a suspension replaced by a manual location suspension, by its name',
       rec({ source: 'geo_auto', event: 'auto_replaced', level: '', prev_level: 'suspended', state: '',
         code: 'replaced', params: { replaced_by: 'geo_anomaly' } }),
-      '被「异地并发（人工）」暂停替换'],
+      '被「异地人工暂停」暂停替换'],
     ['a replacement by a hold this build cannot name, as the raw reason',
       rec({ source: 'geo_auto', event: 'auto_replaced', level: '', prev_level: 'suspended', state: '',
         code: 'replaced', params: { replaced_by: 'future_hold' } }),
       '被「future_hold」暂停替换'],
-    // A record whose numbers are missing, or from a source this build does
-    // not know, still says something: its code, never a blank.
-    ['a geo record without params, as its code', rec({ params: null }), 'suspect'],
-    ['a source this build does not know, as its code', rec({ source: 'future', code: 'odd' }), 'odd'],
+    // A record whose numbers are missing, or whose source or code this build
+    // does not know, still says something — the change it records, in the
+    // admin's words. Never the code: 'suspect' or 'odd' in the 当时的依据
+    // column reads as a broken page, not as a reason.
+    ['a geo record without params, as its event', rec({ params: null }), '进入疑似'],
+    ['a source this build does not know, as its event', rec({ source: 'future', code: 'odd' }), '进入疑似'],
+    ['an automatic suspension with a code this build does not know, as its event',
+      rec({ source: 'geo_auto', event: 'auto_suspended', level: 'suspended', state: '', code: 'planet',
+        params: { tier: 'planet', spread: 2, duration_minutes: 60 } }),
+      '自动临时暂停'],
+    ['an automatic suspension whose numbers are missing, as its event',
+      rec({ source: 'geo_auto', event: 'auto_suspended', level: 'suspended', state: '', code: 'country',
+        params: null }),
+      '自动临时暂停'],
+    ['a risk record with a code this build does not know, as its event',
+      rec({ source: 'devices', event: 'enter_flagged', level: 'flagged', state: 'flagged', code: 'future_code',
+        params: { v: 1, recurrent: 5, max_devices: 3, distinct: 6 } }),
+      '进入已标记'],
+    // A judged verdict (flagged, suspect, clean) is always stored with its
+    // evidence; without it the sentence would print its numbers as blanks.
+    ['a judged risk record without its evidence, as its event',
+      rec({ source: 'devices', event: 'enter_flagged', level: 'flagged', state: 'flagged', code: 'over',
+        params: null }),
+      '进入已标记'],
+    ['a geo record whose evidence predates the stored why, as its event',
+      rec({ params: { over: 2, under: 0, ban_over: 0, flagged: false, tier: 'region',
+        evidence: { ...evidence(why({})), v: 1, why: undefined } } }),
+      '进入疑似'],
+    // Params that are there but lack a number the sentence names read the
+    // same sentence without numbers — never 「同一国家同时在 个省或州，暂停 分钟」.
+    ['a geo record whose evidence lacks a count, without it',
+      rec({ params: { over: 2, under: 0, ban_over: 0, flagged: false, tier: 'region',
+        evidence: { ...evidence(why({})), spread: { countries: 1, regions: 3, region_country: '', cities: 3, city_country: 'CN' } } } }),
+      '同一国家同时在多个省 / 州，超过容错，连续 2 / 6 次'],
+    ['an automatic suspension whose params lack its numbers, by its tier without them',
+      rec({ source: 'geo_auto', event: 'auto_suspended', level: 'suspended', state: '', code: 'region',
+        params: { tier: 'region' } }),
+      '同一国家同时在多个省或州，已自动暂停'],
+    ['an automatic suspension with empty params, by its tier without numbers',
+      rec({ source: 'geo_auto', event: 'auto_suspended', level: 'suspended', state: '', code: 'country', params: {} }),
+      '同时在多个国家或地区，已自动暂停'],
+    ['a suspension lifted on expiry without its minutes, as its event',
+      rec({ source: 'geo_auto', event: 'auto_lifted_expiry', level: '', prev_level: 'suspended', state: '',
+        code: 'expired', params: { suspended_at_ms: 1 } }),
+      '到期自动恢复'],
+    ['a replacement that does not name the hold, as its event',
+      rec({ source: 'geo_auto', event: 'auto_replaced', level: '', prev_level: 'suspended', state: '',
+        code: 'replaced', params: {} }),
+      '被另一种暂停替换'],
+    ['a risk record whose params lack its numbers, without them',
+      rec({ source: 'devices', event: 'enter_flagged', level: 'flagged', state: 'flagged', code: 'over',
+        params: { v: 1 } }),
+      '常用设备超过上限'],
+    ['a risk record that could not judge, stored without params, whose sentence has numbers',
+      rec({ source: 'sub_spread', event: 'leave_suspect', level: '', prev_level: 'suspect', state: 'unknown',
+        code: 'retention_short', params: null }),
+      '订阅日志保留的天数少于判断所需'],
   ])('%s', (_name, r, want) => {
-    expect(flagText(r, zhT)).toBe(want)
+    expect(flagText(r, zhT, 'zh-CN')).toBe(want)
+  })
+})
+
+// An admin's review action: who did it — by the admin's CURRENT name, read
+// when listed (the record itself stores only the id: flag records are
+// name-free) — and, for a dismissal, the levels the admin accepted.
+describe('flagText of a review record', () => {
+  const review = (over: Partial<FlagRecord>): FlagRecord => rec({
+    source: 'review', event: 'dismissed', level: '', prev_level: '', state: '', code: 'dismissed',
+    params: { by: 3, levels: { sub_spread: 'suspect', geo: 'flagged' } }, actor_upn: 'root', ...over,
+  })
+
+  it.each<[string, FlagRecord, string]>([
+    // The levels in the queue's source order, whatever order the JSON had.
+    ['a dismissal, with the levels it accepted', review({}), '由 root 忽略（当时：异地并发 已标记、订阅多地 疑似）'],
+    ['a dismissal of a hold', review({ params: { by: 3, levels: { geo_auto: 'suspended' } } }),
+      '由 root 忽略（当时：自动临时暂停 已暂停）'],
+    ['a dismissal undone', review({ event: 'undismissed', code: 'undismissed', params: { by: 3 } }), '由 root 取消忽略'],
+    ['a trust', review({ event: 'trusted', code: 'trusted', params: { by: 3 } }), '由 root 设为信任'],
+    ['a trust withdrawn', review({ event: 'untrusted', code: 'untrusted', params: { by: 3 } }), '由 root 取消信任'],
+    // The admin's account is gone: the id is all that is left to name.
+    ['an admin no longer on file, by id', review({ event: 'trusted', code: 'trusted', params: { by: 3 }, actor_upn: undefined }),
+      '由 #3 设为信任'],
+    ['a review record without params, as its event', review({ params: null }), '忽略'],
+  ])('%s', (_name, r, want) => {
+    expect(flagText(r, zhT, 'zh-CN')).toBe(want)
+  })
+
+  it('joins the levels in the UI language', () => {
+    expect(flagText(review({}), enT, 'en-US'))
+      .toBe('Dismissed by root (at the time: Concurrent locations Flagged, Subscription spread Suspect)')
   })
 })
 
@@ -149,7 +234,7 @@ describe('the record labels', () => {
       ...FLAG_SOURCES.map(flagSourceKey),
       ...EXCLUSION_REASONS.map(r => exclusionLabelKey(r) as string),
     ]
-    expect(keys.length).toBe(8 + 4 + 6 + 4)
+    expect(keys.length).toBe(12 + 4 + 7 + 4)
     for (const k of keys) {
       const flat = k.replace(/^admin:/, '')
       expect(zhDict[flat], `zh-CN ${flat}`).toBeTruthy()
@@ -157,8 +242,14 @@ describe('the record labels', () => {
     }
   })
 
-  it('lists the sources the server records, geo first', () => {
-    expect(FLAG_SOURCES).toEqual(['geo', 'geo_auto', 'sub_spread', 'devices', 'usage_shift', 'login_country'])
+  // domain.FlagSources(): the admin's review actions are recorded too, and
+  // come last — they are never attention.
+  it('lists the sources the server records, geo first and review last', () => {
+    expect(FLAG_SOURCES).toEqual(['geo', 'geo_auto', 'sub_spread', 'devices', 'usage_shift', 'login_country', 'review'])
+  })
+
+  it('lists the review events after the attention ones', () => {
+    expect(FLAG_EVENTS.slice(-4)).toEqual(['dismissed', 'undismissed', 'trusted', 'untrusted'])
   })
 
   // The record's level is '' when it moved to no attention; the filter calls

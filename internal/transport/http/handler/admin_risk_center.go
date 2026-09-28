@@ -24,12 +24,16 @@ type RiskCenterService interface {
 	Live(ctx context.Context, q riskcenter.LiveQuery) (riskcenter.LiveView, error)
 	Refresh(ctx context.Context) (riskcenter.RefreshResult, error)
 	History(ctx context.Context, f ports.ConnectionHistoryFilter) ([]domain.ConnectionRecord, map[int64]string, int64, error)
-	Flags(ctx context.Context, f ports.FlagRecordFilter) ([]domain.FlagRecord, int64, error)
+	Flags(ctx context.Context, f ports.FlagRecordFilter) (riskcenter.FlagPage, error)
+	Queue(ctx context.Context, q riskcenter.QueueQuery) (riskcenter.QueueView, error)
+	UserSummary(ctx context.Context, userID int64) (riskcenter.UserSummary, error)
+	Levels(ctx context.Context) (map[int64]riskcenter.UserLevel, error)
 }
 
-// AdminRiskCenterHandler serves the risk center (风控中心): the live
-// connections and their on-demand refresh, the connection history and the
-// flag records.
+// AdminRiskCenterHandler serves the risk center (风控中心): the attention
+// queue, one account's drawer and the Users page's levels (admin_risk_queue.go),
+// the live connections and their on-demand refresh, the connection history
+// and the flag records.
 //
 // adminGroup only, every route. These are accounts named beside their IP
 // addresses — the connection history is the one table that keeps them —
@@ -175,7 +179,13 @@ func (h *AdminRiskCenterHandler) Live(c *gin.Context) {
 		respondError(c, err)
 		return
 	}
+	c.JSON(http.StatusOK, liveViewDTO(v, q.Page, q.PageSize))
+}
 
+// liveViewDTO is one page of the live view as every admin read serves it —
+// the 在线 tab, and the drawer's embedded view of one account, which must be
+// exactly what the tab would show for that account.
+func liveViewDTO(v riskcenter.LiveView, page, size int) liveDTO {
 	names := make(map[int64]string, len(v.Panels))
 	panels := make([]panelRefDTO, 0, len(v.Panels))
 	for _, ref := range v.Panels {
@@ -198,8 +208,8 @@ func (h *AdminRiskCenterHandler) Live(c *gin.Context) {
 		Panels:             panels,
 		Items:              make([]liveUserDTO, 0, len(v.Users)),
 		Total:              v.Total,
-		Page:               q.Page,
-		PageSize:           q.PageSize,
+		Page:               page,
+		PageSize:           size,
 	}
 	if snap := v.Snapshot; snap != nil {
 		taken := snap.TakenAt
@@ -237,7 +247,7 @@ func (h *AdminRiskCenterHandler) Live(c *gin.Context) {
 		}
 		out.Items = append(out.Items, item)
 	}
-	c.JSON(http.StatusOK, out)
+	return out
 }
 
 // Refresh reads every panel's live connections now: POST
@@ -372,11 +382,18 @@ type flagRecordDTO struct {
 	// when the record has none.
 	Params json.RawMessage `json:"params"`
 	AtMS   int64           `json:"at_ms"`
+	// ActorUPN names the admin of a review record by the admin's CURRENT
+	// UPN, resolved when listed (the record stores the id only). Omitted on
+	// every other record, and when that admin no longer exists (the SPA
+	// shows params.by).
+	ActorUPN string `json:"actor_upn,omitempty"`
 }
 
 // Flags serves one page of the flag records, newest first: GET
 // /risk-center/flags with page, page_size, user_id, source, level, event,
-// since and until (RFC3339). The store validates source, level and event.
+// since and until (RFC3339). The store validates source, level and event. A
+// review record carries its admin's name (actor_upn) as the service
+// resolved it.
 func (h *AdminRiskCenterHandler) Flags(c *gin.Context) {
 	if h.unwired(c) {
 		return
@@ -401,26 +418,30 @@ func (h *AdminRiskCenterHandler) Flags(c *gin.Context) {
 		respondError(c, err)
 		return
 	}
-	recs, total, err := h.svc.Flags(c.Request.Context(), f)
+	pg, err := h.svc.Flags(c.Request.Context(), f)
 	if err != nil {
 		respondError(c, err)
 		return
 	}
-	items := make([]flagRecordDTO, 0, len(recs))
-	for _, r := range recs {
+	items := make([]flagRecordDTO, 0, len(pg.Records))
+	for _, r := range pg.Records {
 		params := r.Params
 		if len(params) == 0 {
 			// Nil marshals as null; an empty non-nil value would fail the
 			// whole response.
 			params = nil
 		}
-		items = append(items, flagRecordDTO{
+		dto := flagRecordDTO{
 			ID: r.ID, UserID: r.UserID, UPN: r.UPN, DisplayName: r.DisplayName,
 			Source: r.Source, Event: string(r.Event), Level: string(r.Level), PrevLevel: string(r.PrevLevel),
 			State: string(r.State), Code: r.Code, Params: params, AtMS: r.AtMS,
-		})
+		}
+		if by, ok := riskcenter.ReviewActor(r); ok {
+			dto.ActorUPN = pg.Actors[by]
+		}
+		items = append(items, dto)
 	}
-	c.JSON(http.StatusOK, pagedEnvelope(items, total, p))
+	c.JSON(http.StatusOK, pagedEnvelope(items, pg.Total, p))
 }
 
 // panelRefs names panel ids from names; a panel deleted since reads by id

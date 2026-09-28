@@ -394,8 +394,8 @@ func (s *Service) SetMailNotifier(m MailNotifier) { s.mailer = m }
 // store and nil-tolerant.
 //
 // This service records only what ends a geo_auto suspension outside the
-// poll: a staff resume through ResumeServiceAndSync (auto_lifted_admin), and
-// a suspension of another reason written over it by
+// poll: a staff resume through ResumeServiceAndSync or ResumeServiceIfReason
+// (auto_lifted_admin), and a suspension of another reason written over it by
 // SetServiceSuspendedAndSync — a staff pause, a human geo suspension, the
 // blocked-client policy (auto_replaced). The suspension itself and its expiry
 // are the traffic poll's to record: its conditional writes
@@ -2591,25 +2591,28 @@ func detachedFollowUp(ctx context.Context, d time.Duration) (context.Context, co
 // whenever the write won, even if the push was only queued; an error beside
 // applied=true means the push failed AND could not be queued.
 //
+// at is the time written as service_disabled_at (zero when nothing was),
+// for the caller's flag record: taken under the user's lock just before the
+// write, it is when the suspension landed. A time the caller took before
+// calling would be earlier by the wait for that lock — a membership
+// resync's panel push among them — and a dismissal made in that gap would
+// read the record as older than itself.
+//
 // The write runs on the caller's context: a caller already gone starts no
 // suspension. Everything after it runs detached (see detachedFollowUp).
-func (s *Service) SuspendServiceIfClear(ctx context.Context, userID int64, reason domain.AutoDisabledReason, detail string) (bool, error) {
+func (s *Service) SuspendServiceIfClear(ctx context.Context, userID int64, reason domain.AutoDisabledReason, detail string) (applied bool, at time.Time, err error) {
 	if reason == domain.DisabledNone || !domain.ServiceSuspensionReason(reason) {
-		return false, fmt.Errorf("%w: invalid service suspension reason %q", domain.ErrValidation, reason)
+		return false, time.Time{}, fmt.Errorf("%w: invalid service suspension reason %q", domain.ErrValidation, reason)
 	}
 	unlock := s.lockUser(userID)
 	defer unlock()
 
-	var (
-		applied bool
-		err     error
-	)
 	now := time.Now()
 	s.WithEmergencyLock(func() {
 		applied, err = s.users.SetServiceStateIfClear(ctx, userID, reason, detail, now)
 	})
 	if err != nil || !applied {
-		return false, err
+		return false, time.Time{}, err
 	}
 	s.invalidateAuth(userID)
 	// Committed, so the mail is true whatever happens to the push below.
@@ -2628,10 +2631,10 @@ func (s *Service) SuspendServiceIfClear(ctx context.Context, userID int64, reaso
 		defer cancelQueue()
 		if taskErr := s.enqueueUserTask(queueCtx, domain.SyncTaskUserPushConfig, userID, fmt.Sprintf("sync service status for user %s", who)); taskErr != nil {
 			log.Warn("enqueue user service-status push failed", "user_id", userID, "err", taskErr)
-			return true, errUnqueuedPush("suspend proxy service", pushErr, taskErr)
+			return true, now, errUnqueuedPush("suspend proxy service", pushErr, taskErr)
 		}
 	}
-	return true, nil
+	return true, now, nil
 }
 
 // LiftServiceIfHeldSince lifts a suspension carrying reason, but only one
@@ -2739,6 +2742,97 @@ func (s *Service) ResumeServiceAndSync(ctx context.Context, userID int64) error 
 		return nil
 	}
 	return nil
+}
+
+// ResumeServiceIfReason lifts the account's service hold ONLY while it still
+// carries reason, and reports whether it did. It is the resume of a screen
+// that showed one particular hold — the risk center's drawer names the
+// reason it rendered — so a hold another admin or the detector wrote since
+// then is never lifted on the strength of a view that predates it.
+// ResumeServiceAndSync, the Users page's resume, stays unconditional.
+//
+// Under lockUser the FRESH row decides, and the clear itself is conditional
+// (ClearServiceStateIfReason): SetServiceSuspendedAndSync takes no per-user
+// lock, so a pause landing between the read and the clear is only kept out
+// by the clear's own predicate. lockUser is what keeps a resync in flight
+// from pushing its older lifecycle over this one, as in the detector's own
+// transitions.
+//
+// When it lifts, the side effects are ResumeServiceAndSync's: a geo_auto
+// hold is the detector's false positive (psp_geo_auto_suspension_total
+// {outcome="lifted_admin"} and an auto_lifted_admin record, "admin_resume");
+// a blocked_client hold has its violation counter reset so the next allowed
+// fetch does not re-suspend at once; the auth cache is dropped; the user is
+// mailed that service is back. The push and its queued retry run detached,
+// as in LiftServiceIfHeldSince: once the clear has committed PSP calls the
+// user served, and the upstream client must follow even if the admin closed
+// the tab. (true, err) means lifted but the push failed AND could not be
+// queued.
+//
+// reason must be a service reason and not empty (ErrValidation otherwise):
+// anything else names no hold this could lift.
+func (s *Service) ResumeServiceIfReason(ctx context.Context, userID int64, reason domain.AutoDisabledReason) (bool, error) {
+	if reason == domain.DisabledNone || !domain.ServiceSuspensionReason(reason) {
+		return false, fmt.Errorf("%w: invalid service resume reason %q", domain.ErrValidation, reason)
+	}
+	unlock := s.lockUser(userID)
+	defer unlock()
+
+	u, err := s.users.GetByID(ctx, userID)
+	if err != nil {
+		return false, err
+	}
+	if u.ServiceDisabledReason != reason {
+		return false, nil
+	}
+	lifted, err := s.users.ClearServiceStateIfReason(ctx, userID, reason)
+	if err != nil || !lifted {
+		return false, err
+	}
+	s.invalidateAuth(userID)
+	// Judged on the fresh read, and the clear proved the row still carried
+	// it, so unlike ResumeServiceAndSync this counts and records exactly the
+	// hold that was lifted. Every caller is a person (the drawer's resume,
+	// the trust action's "also resume"), never the expiry lift.
+	if reason == domain.DisabledGeoAutoSuspend {
+		metrics.GeoAutoSuspensionTotal.With("lifted_admin").Inc()
+		s.recordFlag(ctx, domain.GeoAutoFlag(userID, domain.FlagAutoLiftedAdmin, "admin_resume", nil, time.Now()))
+	}
+	u.ServiceDisabledReason = domain.DisabledNone
+	u.ServiceDisableDetail = ""
+	u.ServiceDisabledAt = nil
+	s.notifyServiceRestored(userID)
+	if reason == domain.DisabledBlockedClient {
+		// Part of the committed resume's follow-up, so detached like the push
+		// and bounded like the enqueue: a request gone right after the clear
+		// must not leave a counter that re-suspends on the next fetch.
+		resetCtx, cancelReset := detachedFollowUp(ctx, transitionQueueTimeout)
+		if err := s.users.ClearBlockViolation(resetCtx, userID); err != nil {
+			log.Warn("ResumeServiceIfReason: ClearBlockViolation failed; service restored but violation counter not reset",
+				"user_id", userID, "err", err)
+		}
+		cancelReset()
+	}
+	pushCtx, cancelPush := detachedFollowUp(ctx, transitionPushTimeout)
+	defer cancelPush()
+	if pushErr := s.pushClientConfigToAll(pushCtx, u); pushErr != nil {
+		queueCtx, cancelQueue := detachedFollowUp(ctx, transitionQueueTimeout)
+		defer cancelQueue()
+		if taskErr := s.enqueueUserTask(queueCtx, domain.SyncTaskUserPushConfig, userID, fmt.Sprintf("sync service resume for user %s", u.UPN)); taskErr != nil {
+			log.Warn("enqueue user service-resume push failed", "user_id", userID, "err", taskErr)
+			return true, errUnqueuedPush("resume proxy service", pushErr, taskErr)
+		}
+	}
+	return true, nil
+}
+
+// ResumeGeoAutoIfHeld is ResumeServiceIfReason(ctx, userID, geo_auto): the
+// only service write the risk center's review actions may make — an admin
+// trusting an account and asking to lift the location detector's OWN
+// suspension with it. A person's hold, geo_anomaly included, is never
+// touched by it.
+func (s *Service) ResumeGeoAutoIfHeld(ctx context.Context, userID int64) (bool, error) {
+	return s.ResumeServiceIfReason(ctx, userID, domain.DisabledGeoAutoSuspend)
 }
 
 // PushClientConfig is the public entry the traffic poll worker calls after

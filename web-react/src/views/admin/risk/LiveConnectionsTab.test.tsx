@@ -1,10 +1,13 @@
 /** @vitest-environment jsdom */
 import { ThemeProvider } from '@mui/material/styles'
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createAppTheme } from '@/theme'
 import { makeTestQueryClient, queryWrapper } from '@/test/queryTestUtils'
 import { useAuthStore } from '@/stores/auth'
+import { useSiteStore } from '@/stores/site'
+import { formatDualTz } from '@/utils/datetime'
 import { LIVE_REFRESH_TIMEOUT_MS, type LiveSnapshotInfo, type LiveUser, type LiveView } from '@/api/riskCenter'
 import LiveConnectionsTab from './LiveConnectionsTab'
 
@@ -68,6 +71,7 @@ function serve(v: LiveView | ((params: Record<string, unknown>) => LiveView)) {
   api.get.mockImplementation(async (url: string, cfg: { params?: Record<string, unknown> } = {}) => {
     if (url === '/admin/risk-center/live') return { data: typeof v === 'function' ? v(cfg.params ?? {}) : v }
     if (url === '/admin/users') return { data: { items: [], total: 0, page: 1, page_size: 50 } }
+    if (url === '/admin/users/7') return { data: { id: 7, upn: 'alice', display_name: 'Alice' } }
     throw new Error(`unexpected GET ${url}`)
   })
 }
@@ -76,11 +80,33 @@ function liveReads(): number {
   return api.get.mock.calls.filter(([u]) => u === '/admin/risk-center/live').length
 }
 
-function mount() {
+function Where() {
+  const loc = useLocation()
+  return <p data-testid="location">{loc.pathname + loc.search}</p>
+}
+
+// The tab keeps its filters in the page's URL, so it is mounted under a
+// router at the page's path.
+function mount(search = '?tab=live') {
   render(
-    <ThemeProvider theme={theme}><LiveConnectionsTab /></ThemeProvider>,
+    <MemoryRouter initialEntries={[`/admin/risk${search}`]}>
+      <ThemeProvider theme={theme}>
+        <Routes>
+          <Route path="/admin/risk" element={<><LiveConnectionsTab /><Where /></>} />
+        </Routes>
+      </ThemeProvider>
+    </MemoryRouter>,
     { wrapper: queryWrapper(makeTestQueryClient()) },
   )
+}
+
+function urlParams(): URLSearchParams {
+  return new URLSearchParams((screen.getByTestId('location').textContent ?? '').split('?')[1] ?? '')
+}
+
+function lastLiveRead(): Record<string, unknown> {
+  const reads = api.get.mock.calls.filter(([u]) => u === '/admin/risk-center/live')
+  return (reads[reads.length - 1]?.[1] as { params?: Record<string, unknown> } | undefined)?.params ?? {}
 }
 
 async function expandAlice() {
@@ -91,7 +117,10 @@ beforeEach(() => {
   vi.clearAllMocks()
   useAuthStore.setState({ role: 'admin', userId: 1, hasToken: true })
 })
-afterEach(cleanup)
+afterEach(() => {
+  cleanup()
+  useSiteStore.setState({ timezone: '' })
+})
 
 describe('LiveConnectionsTab', () => {
   it('shows the snapshot time and source', async () => {
@@ -103,6 +132,16 @@ describe('LiveConnectionsTab', () => {
     serve(view({ source: 'refresh', age_seconds: 20 }))
     mount()
     expect(await screen.findByText(/^快照 .+（刚刚，手动刷新）$/)).toBeTruthy()
+  })
+
+  // The snapshot's time reads in the panel's timezone like every other time
+  // in the admin, not in whatever zone the admin's browser is in.
+  it('prints the snapshot time in panel time', async () => {
+    useSiteStore.setState({ timezone: 'Pacific/Chatham' })
+    serve(view())
+    mount()
+    const time = formatDualTz('2026-09-26T10:00:05Z', 'Pacific/Chatham')
+    expect(await screen.findByText(`快照 ${time}（2 分钟前，来自定时轮询）`)).toBeTruthy()
   })
 
   it('says so when there is no snapshot yet', async () => {
@@ -253,6 +292,39 @@ describe('LiveConnectionsTab', () => {
     mount()
     expect(await screen.findByText('没有列出任何连接，但有 1 块面板读取失败，那里的连接无从得知')).toBeTruthy()
     expect(screen.queryByText('此刻没有在连的账号')).toBeNull()
+  })
+
+  // The filters are the page's URL, so opening an account and coming back,
+  // a reload or a copied link shows the same filtered page.
+  it('keeps its filters in the URL, and they survive a remount', async () => {
+    serve(view())
+    mount('?tab=live&user=9&live_page=2')
+    await screen.findByText('alice')
+    fireEvent.mouseDown(screen.getByRole('combobox', { name: '来源' }))
+    fireEvent.click(await screen.findByRole('option', { name: '共享出口' }))
+    await waitFor(() => expect(urlParams().get('live_excl')).toBe('shared'))
+    // A new filter starts at the first page; the page's other params stay.
+    expect(urlParams().has('live_page')).toBe(false)
+    expect(urlParams().get('tab')).toBe('live')
+    expect(urlParams().get('user')).toBe('9')
+    await waitFor(() => expect(lastLiveRead()).toEqual({ page: 1, page_size: 25, exclusion: 'shared' }))
+    const search = `?${urlParams().toString()}`
+    cleanup()
+
+    vi.clearAllMocks()
+    serve(view())
+    mount(search)
+    await screen.findByText('alice')
+    expect(lastLiveRead()).toEqual({ page: 1, page_size: 25, exclusion: 'shared' })
+    expect(screen.getByRole('combobox', { name: '来源' }).textContent).toBe('共享出口')
+  })
+
+  it('reads every filter and the page from the URL', async () => {
+    serve(view())
+    mount('?tab=live&live_user=7&live_panel=2&live_excl=kept&live_page=3&live_size=50')
+    await screen.findByText('alice')
+    expect(lastLiveRead()).toEqual({ page: 3, page_size: 50, user_id: 7, panel_id: 2, exclusion: 'kept' })
+    expect(screen.getByRole('combobox', { name: '面板' }).textContent).toBe('hk-1')
   })
 
   it('filters by source', async () => {

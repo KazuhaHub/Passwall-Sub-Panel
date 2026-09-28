@@ -34,9 +34,21 @@ type fakeRiskCenter struct {
 	histName map[int64]string
 	histN    int64
 
-	flagQ ports.FlagRecordFilter
-	flags []domain.FlagRecord
-	flagN int64
+	flagQ  ports.FlagRecordFilter
+	flags  []domain.FlagRecord
+	flagN  int64
+	actors map[int64]string
+
+	queueQ   riskcenter.QueueQuery
+	queue    riskcenter.QueueView
+	queueErr error
+
+	summaryID  int64
+	summary    riskcenter.UserSummary
+	summaryErr error
+
+	levels    map[int64]riskcenter.UserLevel
+	levelsErr error
 }
 
 func (f *fakeRiskCenter) Live(_ context.Context, q riskcenter.LiveQuery) (riskcenter.LiveView, error) {
@@ -56,10 +68,27 @@ func (f *fakeRiskCenter) History(_ context.Context, q ports.ConnectionHistoryFil
 	return f.hist, f.histName, f.histN, nil
 }
 
-func (f *fakeRiskCenter) Flags(_ context.Context, q ports.FlagRecordFilter) ([]domain.FlagRecord, int64, error) {
+func (f *fakeRiskCenter) Flags(_ context.Context, q ports.FlagRecordFilter) (riskcenter.FlagPage, error) {
 	f.calls++
 	f.flagQ = q
-	return f.flags, f.flagN, nil
+	return riskcenter.FlagPage{Records: f.flags, Total: f.flagN, Actors: f.actors}, nil
+}
+
+func (f *fakeRiskCenter) Queue(_ context.Context, q riskcenter.QueueQuery) (riskcenter.QueueView, error) {
+	f.calls++
+	f.queueQ = q
+	return f.queue, f.queueErr
+}
+
+func (f *fakeRiskCenter) UserSummary(_ context.Context, id int64) (riskcenter.UserSummary, error) {
+	f.calls++
+	f.summaryID = id
+	return f.summary, f.summaryErr
+}
+
+func (f *fakeRiskCenter) Levels(context.Context) (map[int64]riskcenter.UserLevel, error) {
+	f.calls++
+	return f.levels, f.levelsErr
 }
 
 func serveRiskCenter(t *testing.T, h func(*gin.Context), method, target string) *httptest.ResponseRecorder {
@@ -412,6 +441,9 @@ func TestAdminRiskCenter_UnwiredIs503(t *testing.T) {
 		{"refresh", h.Refresh, http.MethodPost},
 		{"connections", h.Connections, http.MethodGet},
 		{"flags", h.Flags, http.MethodGet},
+		{"queue", h.Queue, http.MethodGet},
+		{"user", h.User, http.MethodGet},
+		{"levels", h.Levels, http.MethodGet},
 	} {
 		if rec := serveRiskCenter(t, c.handle, c.method, "/"); rec.Code != http.StatusServiceUnavailable {
 			t.Fatalf("%s unwired = %d, want 503", c.name, rec.Code)

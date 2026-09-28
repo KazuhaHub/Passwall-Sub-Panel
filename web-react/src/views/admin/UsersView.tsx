@@ -5,6 +5,7 @@ import {
   Button,
   Card,
   Checkbox,
+  Chip,
   FormControlLabel,
   CircularProgress,
   Dialog,
@@ -49,6 +50,7 @@ import RuleIcon from '@mui/icons-material/Rule'
 import EmergencyIcon from '@mui/icons-material/MedicalServices'
 import LinkOffIcon from '@mui/icons-material/LinkOff'
 import ShieldIcon from '@mui/icons-material/GppMaybe'
+import ShieldOutlinedIcon from '@mui/icons-material/ShieldOutlined'
 import SyncIcon from '@mui/icons-material/Sync'
 import HelpOutlineIcon from '@mui/icons-material/HelpOutlined'
 import { useTranslation } from 'react-i18next'
@@ -83,6 +85,8 @@ import { UserActivity } from './UserActivity'
 import SyncStatusCard from '@/components/SyncStatusCard'
 import AdminPasskeysDialog from './AdminPasskeysDialog'
 import AccountSecurityDrawer from './AccountSecurityDrawer'
+import RiskUserDrawer from './risk/drawer/RiskUserDrawer'
+import { useDrawerParam } from './risk/drawerParam'
 import { AsyncButton, AsyncIconButton } from '@/components/AsyncButton'
 import { Link as RouterLink } from 'react-router'
 import { useAuthStore } from '@/stores/auth'
@@ -97,10 +101,12 @@ import { PagedTableFooter } from '@/components/PagedTableFooter'
 import { SortableTableCell } from '@/components/SortableTableCell'
 import { usePageState } from '@/hooks/usePageState'
 import { useQueryClient } from '@tanstack/react-query'
-import { trafficKeys, userKeys } from '@/query/keys'
+import { riskCenterKeys, trafficKeys, userKeys } from '@/query/keys'
 import { useTopTraffic } from '@/query/traffic'
+import { useRiskLevels } from '@/query/riskCenter'
 import { useUsersList } from '@/query/users'
 import { useQueryScope } from '@/query/useQueryScope'
+import { formatRelativeTimeShort } from '@/utils/relativeTime'
 import {
   type FieldErrors,
   firstError,
@@ -216,33 +222,6 @@ function avatarColor(seed: string): string {
   for (const c of seed) h = (h + c.charCodeAt(0) * 7) % 360
   return `hsl(${h} 42% 42%)`
 }
-// formatRelativeTimeShort renders a "X 分钟前" / "X 小时前" / "X 天前" style
-// label. Chunked rather than using Intl.RelativeTimeFormat directly because we
-// want a single integer pick per call (no auto-pluralization in EN that adds
-// "(s)"), and i18n keys give translators full control of the phrase. Buckets:
-//   < 1m  : just now
-//   < 1h  : minutes_ago
-//   < 1d  : hours_ago
-//   < 30d : days_ago
-//   ≥ 30d : long_ago_date (fall back to YYYY-MM-DD so the tooltip still has
-//           the exact timestamp but the column doesn't shout "9999天前")
-function formatRelativeTimeShort(diffMs: number, t: (k: string, opts?: Record<string, unknown>) => string): string {
-  if (diffMs < 0) diffMs = 0
-  const sec = Math.floor(diffMs / 1000)
-  if (sec < 60) return t('admin:users.relative_time.just_now', { defaultValue: '刚刚' })
-  const min = Math.floor(sec / 60)
-  if (min < 60) return t('admin:users.relative_time.minutes_ago', { count: min, defaultValue: '{{count}} 分钟前' })
-  const hr = Math.floor(min / 60)
-  if (hr < 24) return t('admin:users.relative_time.hours_ago', { count: hr, defaultValue: '{{count}} 小时前' })
-  const day = Math.floor(hr / 24)
-  if (day < 30) return t('admin:users.relative_time.days_ago', { count: day, defaultValue: '{{count}} 天前' })
-  // Long ago — emit YYYY-MM-DD instead of a relative label.
-  const d = new Date(Date.now() - diffMs)
-  const y = d.getFullYear()
-  const m = String(d.getMonth() + 1).padStart(2, '0')
-  const dd = String(d.getDate()).padStart(2, '0')
-  return `${y}-${m}-${dd}`
-}
 function canQuickRenew(u: User) { return !!u.expire_at && accountStateOf(u) !== 'pending_delete' }
 function canSelect(u: User) { return accountStateOf(u) !== 'pending_delete' }
 function canResumeService(u: User) {
@@ -276,15 +255,11 @@ export default function UsersView() {
   // operators may only manage role=user targets. canManageUser mirrors the
   // backend's ensureOperatorAllowed guard so we don't show buttons that 403.
   const canElevate = useCan('users.elevate')
-  // The risk center is admin-only; an operator is not offered a link that
-  // could only land on a redirect.
+  // The risk center is admin-only; an operator is shown neither its column
+  // nor its drawer, and never reads /levels — every one of those would 403.
   const canRisk = useCan('risk.view')
   const canManageUser = (target: User) => canElevate || target.role === 'user'
 
-  // Local controlled value for the search input (committed to the
-  // hook's keyword on submit, so admin can type without firing a
-  // request per keystroke).
-  const [search, setSearch] = useState('')
   const [groupFilter, setGroupFilter] = useState<number | ''>('')
   const [groups, setGroups] = useState<Group[]>([])
   // Panels, purely so the two connection-cap fields can say when a value
@@ -305,6 +280,25 @@ export default function UsersView() {
   const { page, pageSize, keyword, sortBy, sortDir, setPage, setPageSize, setKeyword, setSort, resetPage } = ps
   const scope = useQueryScope()
   const queryClient = useQueryClient()
+
+  // Local controlled value for the search input (committed to the
+  // hook's keyword on submit, so admin can type without firing a
+  // request per keystroke). Seeded from the keyword the URL arrived with:
+  // the risk drawer's 「在用户管理中处理」 lands here as ?q=<upn>, and a box
+  // left empty would hide the filter the list is already applying.
+  const [search, setSearch] = useState(keyword)
+
+  // The risk center's drawer, in place over this list: `?risk=<id>` (pushed
+  // by a risk chip, the row menu's 风控详情 and the edit dialog's 风控查询),
+  // so a copied link reopens it and the phone's Back closes it rather than
+  // leaving the page.
+  const riskDrawer = useDrawerParam('risk')
+  // The 风控 column: ONE read for the whole list, keyed by account id, not a
+  // read per row. Decoration only — a failed read leaves the column blank
+  // (the read itself skips the error toast) and the list works as before.
+  const { data: riskLevels } = useRiskLevels(scope, { enabled: canRisk })
+  // The checkbox column plus nine, plus 风控 when it is shown.
+  const colCount = canRisk ? 11 : 10
 
   // groupFilter belongs in the query key, not in a fetcher closure. As a closure
   // it was invisible to the hook's deps and had to be patched with a follow-up
@@ -465,6 +459,17 @@ export default function UsersView() {
   /** Drop the usage leaderboard so the next observer re-reads it. */
   function invalidateUsage() {
     void queryClient.invalidateQueries({ queryKey: trafficKeys.all(scope) })
+  }
+
+  /**
+   * Drop what the risk center shows for the accounts, after this page moves
+   * one's service axis: a location hold is listed there as one (the 风控
+   * chip, the drawer's summary), and /levels has no interval — nothing else
+   * re-reads it while the admin stays here, so a lifted hold's chip would
+   * outlive the hold beside a row that already says active.
+   */
+  function invalidateRisk() {
+    void queryClient.invalidateQueries({ queryKey: riskCenterKeys.all(scope) })
   }
 
   async function loadGroups() {
@@ -1060,6 +1065,7 @@ export default function UsersView() {
     try {
       await setServiceStatus(u.id, true)
       pushSnack(t('admin:users.toast.service_resumed', { defaultValue: '服务已恢复' }), 'success')
+      invalidateRisk()
       await load()
     } finally { setMoreActionBusy(null) }
   }
@@ -1070,6 +1076,7 @@ export default function UsersView() {
     try {
       await setServiceStatus(u.id, false, 'service_manual')
       pushSnack(t('admin:users.toast.service_suspended', { defaultValue: '服务已暂停' }), 'success')
+      invalidateRisk()
       await load()
     } finally { setMoreActionBusy(null) }
   }
@@ -1194,6 +1201,63 @@ export default function UsersView() {
     )
   }
 
+  // The 风控 cell. An account the risk center lists shows ONE chip: its
+  // attention level, or — held with no fresh verdict — 已暂停, the risk
+  // center's level word for a hold. Red for what the bell counts (flagged, or
+  // held), amber for suspect; once a dismissal is in force the chip is drawn
+  // OUTLINED and SAYS 已忽略: a dismissed account stays visible here, but a
+  // label still reading 已标记 read as open to anyone who did not hover. A
+  // trusted account with nothing at attention still gets an outlined 已信任:
+  // trust is a standing exemption an admin should be able to see from the
+  // list. Any other account: blank. Every chip opens the drawer in place
+  // (`risk=`).
+  //
+  // Short words and a dense chip keep the column narrow: the list had about
+  // 57px to spare at 1440×900, and the hold's full name (异地自动暂停, the
+  // status column's word right beside it) cut off 操作. A chip whose word is
+  // not the full state — a hold, a dismissal — names it on hover.
+  function riskCell(u: User) {
+    const entry = riskLevels?.[String(u.id)]
+    if (!entry) return null
+    const attention = entry.level !== '' || entry.auto_suspended
+    if (!attention && !entry.trusted) return null
+    const named = entry.level !== ''
+      ? t(`admin:risk_center.state.${entry.level}`)
+      : t('admin:users.status.geo_auto')
+    const dismissed = attention && !entry.open
+    const label = !attention
+      ? t('admin:risk_center.review.badge_trusted')
+      : dismissed
+        ? t('admin:risk_center.review.badge_dismissed')
+        : entry.level !== '' ? named : t('admin:risk_center.flags.level.suspended')
+    const color = !attention ? 'default' : entry.level === 'suspect' && !entry.auto_suspended ? 'warning' : 'error'
+    const notes = [
+      attention && (dismissed || entry.level === '') ? named : '',
+      attention && entry.trusted ? t('admin:risk_center.review.badge_trusted') : '',
+    ].filter(Boolean)
+    return (
+      // describeChild: the tooltip DESCRIBES the chip; its name stays the
+      // action (open the details), not the state it happens to show.
+      <Tooltip describeChild placement="top"
+        title={notes.length > 0 ? notes.join(' · ') : t('admin:users.risk_chip_hint')}>
+        <Chip size="small" color={color} variant={attention && entry.open ? 'filled' : 'outlined'} label={label}
+          aria-label={t('admin:users.risk_chip_hint')} onClick={() => riskDrawer.open(u.id)}
+          sx={{ height: 20, fontSize: 12, '& .MuiChip-label': { px: 0.75 } }} />
+      </Tooltip>
+    )
+  }
+
+  // The two location holds are one state (manual_suspended) with two stored
+  // reasons; both are named as the risk center names them, so one hold never
+  // reads two ways across the two pages. Every other hold keeps its label.
+  function suspendedLabel(u: User) {
+    switch (u.service_disabled_reason) {
+      case 'geo_auto': return t('admin:users.status.geo_auto')
+      case 'geo_anomaly': return t('admin:users.status.geo_manual')
+      default: return t('admin:users.status.service_suspended')
+    }
+  }
+
   function statusBadge(u: User) {
     const accountStatus = accountStateOf(u)
     const accountBadge = (() => {
@@ -1221,7 +1285,7 @@ export default function UsersView() {
       case 'blocked_client':
         return badge(t('admin:users.status.blocked'), md.errorContainer, md.onErrorContainer)
       case 'manual_suspended':
-        return badge(t('admin:users.status.service_suspended'), md.errorContainer, md.onErrorContainer)
+        return badge(suspendedLabel(u), md.errorContainer, md.onErrorContainer)
       case 'account_disabled':
         return badge(t('admin:users.status.service_unavailable'), md.surfaceContainerHighest, md.onSurfaceVariant)
       default:
@@ -1245,7 +1309,7 @@ export default function UsersView() {
       case 'blocked_client':
         return t('admin:users.status.blocked')
       case 'manual_suspended':
-        return t('admin:users.status.service_suspended', { defaultValue: '服务暂停' })
+        return suspendedLabel(u)
       case 'account_disabled':
         return t('admin:users.status.account_disabled', { defaultValue: '账号已停用' })
       default:
@@ -1436,6 +1500,8 @@ export default function UsersView() {
                 <SortableTableCell column="enabled" activeColumn={sortBy} activeDir={sortDir} onSort={setSort}>
                   {t('admin:users.table.status')}
                 </SortableTableCell>
+                {/* No side padding of its own: the neighbours' spaces it (see riskCell). */}
+                {canRisk && <TableCell sx={{ px: 0 }}>{t('admin:users.table.risk')}</TableCell>}
                 <SortableTableCell column="last_online_at" activeColumn={sortBy} activeDir={sortDir} onSort={setSort} initialDir="desc">
                   {t('admin:users.table.last_online', { defaultValue: '最近活跃' })}
                 </SortableTableCell>
@@ -1444,12 +1510,12 @@ export default function UsersView() {
             </TableHead>
             <TableBody>
               {loading && items.length === 0 && (
-                <TableRow><TableCell colSpan={10} sx={{ textAlign: 'center', py: 6 }}>
+                <TableRow><TableCell colSpan={colCount} sx={{ textAlign: 'center', py: 6 }}>
                   <CircularProgress size={24} />
                 </TableCell></TableRow>
               )}
               {!loading && items.length === 0 && (
-                <TableRow><TableCell colSpan={10} sx={{ textAlign: 'center', py: 6, color: md.onSurfaceVariant }}>—</TableCell></TableRow>
+                <TableRow><TableCell colSpan={colCount} sx={{ textAlign: 'center', py: 6, color: md.onSurfaceVariant }}>—</TableCell></TableRow>
               )}
               {items.map(u => (
                 <TableRow key={u.id} hover sx={{
@@ -1472,6 +1538,7 @@ export default function UsersView() {
                   <TableCell>{trafficCell(u)}</TableCell>
                   <TableCell>{expireBadge(u)}</TableCell>
                   <TableCell>{statusBadge(u)}</TableCell>
+                  {canRisk && <TableCell sx={{ px: 0 }}>{riskCell(u)}</TableCell>}
                   <TableCell>{lastOnlineCell(u)}</TableCell>
                   <TableCell align="right">
                     <Tooltip title={t('admin:users.action.edit')}>
@@ -1548,6 +1615,14 @@ export default function UsersView() {
           <ListItemIcon><ShieldIcon fontSize="small" /></ListItemIcon>
           <ListItemText>{t('admin:users.more_menu.account_security', { defaultValue: '账号安全' })}</ListItemText>
         </MenuItem>
+        {/* Any account, not only the ones the 风控 column lists: a quiet
+            account's connections and devices are worth a look too. */}
+        {canRisk && (
+          <MenuItem onClick={() => { if (moreUser) riskDrawer.open(moreUser.id); closeMore() }}>
+            <ListItemIcon><ShieldOutlinedIcon fontSize="small" /></ListItemIcon>
+            <ListItemText>{t('admin:users.more_menu.risk_details')}</ListItemText>
+          </MenuItem>
+        )}
       </Menu>
       <AdminPasskeysDialog open={!!passkeysUser} user={passkeysUser} md={md}
         onClose={() => setPasskeysUser(null)} />
@@ -1561,6 +1636,10 @@ export default function UsersView() {
         onReset2FA={actionReset2FA}
         onManagePasskeys={actionManagePasskeys}
       />
+      {/* Above every modal (riskDrawerZIndex), so the edit dialog's 风控查询
+          opens it OVER the dialog, and closing it returns there. Not mounted
+          for an operator: a deep link to ?risk= would only read a 403. */}
+      {canRisk && <RiskUserDrawer userId={riskDrawer.id} onClose={riskDrawer.close} host="users" />}
       {/* Create dialog */}
       <Dialog open={createOpen} onClose={() => !createBusy && setCreateOpen(false)}
         slotProps={{
@@ -1852,11 +1931,13 @@ export default function UsersView() {
                   {t('admin:users.detail.view_usage', { defaultValue: '查看用量' })} →
                 </Button>
               )}
+              {/* Opens the drawer over this dialog instead of leaving for the
+                  risk center: the dialog (and any unsaved edit in it) stays,
+                  and its row refreshes from the list an action invalidates. */}
               {editing && canRisk && (
-                <Button size="small" variant="outlined" component={RouterLink}
-                  to={`/admin/risk?tab=user&id=${editing.id}`}
+                <Button size="small" variant="outlined" onClick={() => riskDrawer.open(editing.id)}
                   sx={{ alignSelf: 'flex-start', mt: 0.5, textTransform: 'none' }}>
-                  {t('admin:users.risk_lookup', { defaultValue: '风控查询' })} →
+                  {t('admin:users.risk_lookup', { defaultValue: '风控查询' })}
                 </Button>
               )}
               <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant }}>

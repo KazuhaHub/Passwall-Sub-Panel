@@ -8,9 +8,10 @@ import (
 
 // FlagEvent names one change recorded in flag_records: an account's
 // ATTENTION LEVEL moving on one source — what that source's bell entry or
-// admin tab would show — or its automatic suspension being applied or
-// lifted. Stored (flag_records.event is varchar(24)), filtered on and
-// localized by the SPA, so the values are stable strings.
+// admin tab would show — its automatic suspension being applied or lifted,
+// or an admin reviewing it (dismiss / trust). Stored (flag_records.event is
+// varchar(24)), filtered on and localized by the SPA, so the values are
+// stable strings.
 type FlagEvent string
 
 const (
@@ -31,12 +32,24 @@ const (
 	FlagAutoReplaced     FlagEvent = "auto_replaced"
 )
 
-// FlagEvents is every event, in the order above: the closed set the admin
-// filter is checked against. A fresh slice per call.
+// Review events, named by the admin action (source FlagSourceReview). They
+// move no attention level: Level and PrevLevel are always "", and the reopen
+// rule never reads them (ReviewFlag).
+const (
+	FlagReviewDismissed   FlagEvent = "dismissed"
+	FlagReviewUndismissed FlagEvent = "undismissed"
+	FlagReviewTrusted     FlagEvent = "trusted"
+	FlagReviewUntrusted   FlagEvent = "untrusted"
+)
+
+// FlagEvents is every event, in the order above — the eight attention
+// changes, then the four review actions: the closed set the admin filter is
+// checked against. A fresh slice per call.
 func FlagEvents() []FlagEvent {
 	return []FlagEvent{
 		FlagEnterSuspect, FlagEnterFlagged, FlagLeaveSuspect, FlagLeaveFlagged,
 		FlagAutoSuspended, FlagAutoLiftedExpiry, FlagAutoLiftedAdmin, FlagAutoReplaced,
+		FlagReviewDismissed, FlagReviewUndismissed, FlagReviewTrusted, FlagReviewUntrusted,
 	}
 }
 
@@ -60,17 +73,24 @@ const (
 const (
 	FlagSourceGeo     = "geo"
 	FlagSourceGeoAuto = "geo_auto"
+	// FlagSourceReview is an admin's review action (dismiss / trust). Its
+	// records never carry an attention level and are excluded from every
+	// attention computation: they say what an admin did, not what the
+	// account did.
+	FlagSourceReview = "review"
 )
 
 // FlagSources is every source in display order: the two geo sources, then
-// each risk kind (RiskKinds). The closed set the admin filter is checked
-// against; a fresh slice per call.
+// each risk kind (RiskKinds), then review — LAST, because it is the one
+// source that is no attention source (AttentionSources is this list without
+// it). The closed set the admin filter is checked against; a fresh slice per
+// call.
 func FlagSources() []string {
 	out := []string{FlagSourceGeo, FlagSourceGeoAuto}
 	for _, k := range RiskKinds() {
 		out = append(out, string(k))
 	}
-	return out
+	return append(out, FlagSourceReview)
 }
 
 // FlagRecord is one row of flag_records: one account's attention changing on
@@ -81,6 +101,9 @@ func FlagSources() []string {
 // changes that matter under ones the bell never showed. The geo and risk
 // producers derive the event from the two levels (GeoFlagTransition,
 // RiskFlagTransition); the geo_auto producers name theirs (GeoAutoFlag).
+// The one record of no change of level is the risk signal's leave to
+// unknown settled by a definite verdict (RiskUnknownSettled), once per
+// leave: the clear the reopen rule could not otherwise see.
 //
 // ADDRESS-FREE, like the evidence it copies: Code is a branch name, Params
 // the numbers and places the verdict was drawn from. A record is kept for
@@ -88,10 +111,16 @@ func FlagSources() []string {
 // describes, so an address in it would be a log of where a subscriber
 // connected from. No name either: UPN and DisplayName are read from users
 // when listed, and a deleted account's records go with it.
+//
+// Source review: an admin's dismiss/trust action. Params hold the admin's id
+// and, for a dismissal, the accepted levels — never a name and never the
+// admin's note (the note is free text and could carry an address); both are
+// read from users / risk_reviews when listed.
 type FlagRecord struct {
 	// ID is the store's; a writer's value is ignored.
 	ID, UserID int64
-	// Source: FlagSourceGeo, FlagSourceGeoAuto, or a RiskKind string.
+	// Source: FlagSourceGeo, FlagSourceGeoAuto, a RiskKind string, or
+	// FlagSourceReview.
 	Source string
 	Event  FlagEvent
 	// Level is the level the account moved to, PrevLevel the one it left.
@@ -100,8 +129,9 @@ type FlagRecord struct {
 	// the geo verdict and every risk signal); "" for geo_auto, which has
 	// none.
 	State GeoState
-	// Code is the verdict's branch — a GeoReasonCode or a RiskCode — or the
-	// geo_auto producer's word. What the SPA localizes the record by.
+	// Code is the verdict's branch — a GeoReasonCode or a RiskCode — the
+	// geo_auto producer's word, or a review record's event. What the SPA
+	// localizes the record by.
 	Code string
 	// Params is what the SPA renders the sentence with, as JSON: a
 	// GeoFlagParams for geo, the verdict's stored evidence verbatim for a
@@ -142,10 +172,18 @@ type GeoFlagParams struct {
 // RESET the streak, latch included, so an account the policy stops judging
 // does leave — the record's state and code say it was the policy.
 func GeoAttention(r GeoRecord) FlagLevel {
+	return GeoAttentionOf(r.Streak.Flagged, r.Streak.Over)
+}
+
+// GeoAttentionOf is GeoAttention on the two streak fields alone, for the
+// evidence-free reads (latched → flagged, over > 0 → suspect, else none):
+// the risk center's queue reads two columns of every fresh geo row, not the
+// whole record, and must judge exactly as the bell does.
+func GeoAttentionOf(flagged bool, over int) FlagLevel {
 	switch {
-	case r.Streak.Flagged:
+	case flagged:
 		return FlagLevelFlagged
-	case r.Streak.Over > 0:
+	case over > 0:
 		return FlagLevelSuspect
 	}
 	return FlagLevelNone
@@ -261,6 +299,54 @@ func RiskFlagTransition(prev GeoState, hadPrev bool, next RiskSignal, atMS int64
 	}
 	return FlagRecord{
 		UserID: next.UserID, Source: string(next.Kind), Event: ev, Level: to, PrevLevel: from,
+		State: next.State, Code: string(next.Code), Params: params, AtMS: atMS,
+	}, true
+}
+
+// SettlesUnknown reports whether a risk verdict could settle a leave to
+// unknown (RiskUnknownSettled): the stored state was unknown, and the new
+// one is definite and at no attention. Only for these does the store read
+// the signal's latest record.
+func SettlesUnknown(prev, next GeoState) bool {
+	return prev == GeoStateUnknown && next != GeoStateUnknown && RiskAttention(next) == FlagLevelNone
+}
+
+// RiskUnknownSettled is the record of a risk verdict that settles a leave to
+// unknown: prev is the state stored before this run ("" when the account had
+// no row for this kind), last the latest record of this (user, kind) (the
+// zero record when there is none), next the signal being saved.
+//
+// A leave to unknown is not a clear (FlagStep.IsClear): the evidence went
+// missing, the situation did not end. And the definite verdict that DID end
+// it moves no level — RiskAttention reads unknown and clean alike as none —
+// so RiskFlagTransition records nothing for it. Without this record that
+// clear would never be written, and a dismissal that accepted the flag would
+// read a later re-entry at the accepted level as the same episode until the
+// dismissal lapsed.
+//
+// So once — when SettlesUnknown(prev, next.State) and last is still that
+// leave to unknown — the leave is recorded again with the definite verdict:
+// the same event, from the same level, to none, with next's state, code and
+// evidence (copied, as RiskFlagTransition copies it). Its state is not
+// unknown, so the reopen rule reads it as the clear it is. A latest record
+// that is anything else — none at all (never at attention, or pruned), one
+// already settled, an enter — settles nothing, so a signal churning between
+// unknown and clean with no attention behind it records nothing, as before.
+func RiskUnknownSettled(prev GeoState, last FlagRecord, next RiskSignal, atMS int64) (FlagRecord, bool) {
+	if !SettlesUnknown(prev, next.State) || last.Source != string(next.Kind) ||
+		last.Level != FlagLevelNone || last.State != GeoStateUnknown {
+		return FlagRecord{}, false
+	}
+	ev, ok := AttentionEvent(last.PrevLevel, FlagLevelNone)
+	if !ok {
+		return FlagRecord{}, false
+	}
+	var params json.RawMessage
+	if len(next.Evidence) > 0 {
+		params = bytes.Clone(next.Evidence)
+	}
+	return FlagRecord{
+		UserID: next.UserID, Source: string(next.Kind), Event: ev, Level: FlagLevelNone, PrevLevel: last.PrevLevel,
 		State: next.State, Code: string(next.Code), Params: params, AtMS: atMS,
 	}, true
 }

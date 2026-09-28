@@ -211,3 +211,48 @@ describe('ScopeOverridesEditor, multi-line strings', () => {
     expect(box.value).toBe('JP,TW\nDE,AT')
   })
 })
+
+describe('ScopeOverridesEditor, hints', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  function mountWithHints(scope: ScopeState) {
+    render(<ScopeOverridesEditor scope={scope} onChange={vi.fn()} categories={['geo', 'geo_ban', 'risk']} showHints />)
+  }
+
+  // The risk center's group card explains each row where the global field
+  // is explained; the other hosts keep their compact rows.
+  it('shows the hint under the label only when asked', () => {
+    mountWithHints(state('geo_anomaly.max_cities', '0', { on: false, value: '0' }))
+    expect(screen.getByText('admin:settings.geo_anomaly.max_cities_hint')).toBeTruthy()
+    cleanup()
+    mount(state('geo_anomaly.max_cities', '0', { on: false, value: '0' }))
+    expect(screen.queryByText('admin:settings.geo_anomaly.max_cities_hint')).toBeNull()
+  })
+
+  // U11: three fixed columns beside a hint leave the label a sliver on a
+  // phone. There the label and its hint take a line of their own, and the
+  // switch and the value share the line under it.
+  it('gives the label and hint their own line on a phone', () => {
+    vi.stubGlobal('matchMedia', (query: string) => ({
+      matches: true, media: query, onchange: null, addListener: vi.fn(), removeListener: vi.fn(),
+      addEventListener: vi.fn(), removeEventListener: vi.fn(), dispatchEvent: vi.fn(),
+    }))
+    mountWithHints(state('geo_anomaly.max_cities', '4', { on: false, value: '4' }))
+    const hint = screen.getByText('admin:settings.geo_anomaly.max_cities_hint')
+    const labelLine = hint.parentElement as HTMLElement
+    expect(within(labelLine).getByText('城市容错')).toBeTruthy()
+    expect(within(labelLine).queryByRole('switch')).toBeNull()
+    const row = labelLine.parentElement as HTMLElement
+    expect(row.children).toHaveLength(2)
+    const controls = row.children[1] as HTMLElement
+    expect(within(controls).getByRole('switch')).toBeTruthy()
+    expect(within(controls).getByText('Global: 4')).toBeTruthy()
+  })
+
+  it('keeps label, switch and value on one line on a wide screen', () => {
+    mountWithHints(state('geo_anomaly.max_cities', '4', { on: false, value: '4' }))
+    const hint = screen.getByText('admin:settings.geo_anomaly.max_cities_hint')
+    const row = (hint.parentElement as HTMLElement).parentElement as HTMLElement
+    expect(row.children).toHaveLength(3)
+  })
+})

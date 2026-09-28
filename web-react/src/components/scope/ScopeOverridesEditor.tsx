@@ -5,8 +5,10 @@
 //
 // Each row is three columns — label (flex) | toggle + state (fixed) | value
 // (fixed, right-aligned) — so the switches and values line up across every row
-// regardless of inherit/override state.
-import { Box, MenuItem, Switch, TextField, Typography } from '@mui/material'
+// regardless of inherit/override state. On a phone the two fixed columns leave
+// the label a sliver, so there the label (and its hint) takes a line of its
+// own and the toggle and value share the line under it.
+import { Box, MenuItem, Switch, TextField, Typography, useMediaQuery, useTheme } from '@mui/material'
 import { useTranslation } from 'react-i18next'
 
 import { goParseFloat } from '@/utils/goParseFloat'
@@ -21,6 +23,7 @@ export default function ScopeOverridesEditor({
   onChange,
   categories,
   hideCategoryCaptions,
+  showHints,
 }: {
   scope: ScopeState
   onChange: (next: ScopeState) => void
@@ -29,8 +32,13 @@ export default function ScopeOverridesEditor({
   /** Suppress the per-category caption (e.g. when the surrounding tab already
    *  names the single category being shown). */
   hideCategoryCaptions?: boolean
+  /** Show each row's hint (ScopeKeyMeta.hintKey) under its label. The risk
+   *  center's group card asks for it: there the rows stand without the
+   *  global fields beside them that explain the same knobs. */
+  showHints?: boolean
 }) {
   const { t } = useTranslation(['admin', 'common'])
+  const phone = useMediaQuery(useTheme().breakpoints.down('sm'))
   const cats = categories
     ? SCOPE_CATEGORIES.filter(c => categories.includes(c.id))
     : SCOPE_CATEGORIES
@@ -127,11 +135,18 @@ export default function ScopeOverridesEditor({
               const st = scope.edit[k.key]
               const setEdit = (v: { on: boolean; value: string }) =>
                 onChange({ ...scope, edit: { ...scope.edit, [k.key]: v } })
-              return (
-                <Box key={k.key} sx={{ display: 'flex', alignItems: 'center', gap: 2, minHeight: 38, py: 0.25 }}>
-                  <Box sx={{ flex: 1, minWidth: 0, fontSize: 14 }}>
-                    {t(`admin:groups.scope.${k.labelKey}`, { defaultValue: k.def })}
-                  </Box>
+              const label = (
+                <Box sx={{ flex: 1, minWidth: 0, fontSize: 14 }}>
+                  <span>{t(`admin:groups.scope.${k.labelKey}`, { defaultValue: k.def })}</span>
+                  {showHints && k.hintKey && (
+                    <Typography variant="caption" component="div" sx={{ color: 'text.secondary', lineHeight: 1.5 }}>
+                      {t(k.hintKey)}
+                    </Typography>
+                  )}
+                </Box>
+              )
+              const controls = (
+                <>
                   {/* toggle + state — fixed column so switches line up across rows */}
                   <Box sx={{ width: TOGGLE_COL, flexShrink: 0, display: 'flex', alignItems: 'center', gap: 1 }}>
                     <Switch size="small" checked={st.on}
@@ -182,6 +197,19 @@ export default function ScopeOverridesEditor({
                       </Typography>
                     )}
                   </Box>
+                </>
+              )
+              return phone ? (
+                <Box key={k.key} sx={{ display: 'flex', flexDirection: 'column', gap: 0.5, py: 0.75 }}>
+                  {label}
+                  <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2, minHeight: 38 }}>
+                    {controls}
+                  </Box>
+                </Box>
+              ) : (
+                <Box key={k.key} sx={{ display: 'flex', alignItems: 'center', gap: 2, minHeight: 38, py: 0.25 }}>
+                  {label}
+                  {controls}
                 </Box>
               );
             })}

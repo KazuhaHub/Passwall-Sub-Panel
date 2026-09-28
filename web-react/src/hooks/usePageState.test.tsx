@@ -71,4 +71,25 @@ describe('usePageState', () => {
     act(() => result.current.ps.setPage(1))
     expect(result.current.search).not.toContain('page=')
   })
+
+  it("keeps the entry's history state through its URL sync", () => {
+    // The sync runs on every URL change and replaces the entry it finds.
+    // Replacing it without its state wipes the mark the risk drawer's open()
+    // leaves there to go Back on close — so a closed drawer left a dead entry
+    // and the page took two Backs to leave.
+    function Harness({ children }: PropsWithChildren) {
+      return (
+        <MemoryRouter initialEntries={[{ pathname: '/', search: '?sort=id-desc', state: { riskDrawer: 'risk' } }]}>
+          {children}
+        </MemoryRouter>
+      )
+    }
+    const { result } = renderHook(() => {
+      usePageState({ defaultSortBy: 'id' })
+      return useLocation()
+    }, { wrapper: Harness })
+
+    expect(result.current.search).toBe('?sort=id-desc')
+    expect(result.current.state).toEqual({ riskDrawer: 'risk' })
+  })
 })

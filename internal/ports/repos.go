@@ -63,6 +63,12 @@ type AuditFilter struct {
 	Search string
 	Since  *time.Time
 	Until  *time.Time
+	// ExcludeTargetPrefixes leaves out every row whose target starts with
+	// one of these (literally: no wildcards), from the page and from the
+	// total alike. The audit read sets it for any caller who is not an
+	// administrator, so the rows only an administrator may read never
+	// reach an operator; empty = no exclusion.
+	ExcludeTargetPrefixes []string
 }
 
 // AuthEventFilter scopes a query over the authentication-event log.
@@ -136,7 +142,8 @@ type FlagRecordFilter struct {
 	Source string
 	// Level: "" any; "flagged", "suspect" or "suspended", the level a
 	// record moved TO; or FlagLevelCleared, the records that moved to no
-	// attention at all (every leave and every lift).
+	// attention at all (every leave and every lift — never a review record,
+	// whose level is "" because an admin's action moves no level).
 	Level string
 	// Event: "" any, or one of domain.FlagEvents().
 	Event string
@@ -219,17 +226,17 @@ type UserRepo interface {
 	// reason must be non-empty (ErrValidation otherwise), so the reason column
 	// always changes and "wrote" is exact on every dialect — MySQL reports
 	// CHANGED rows, which an unchanged value would read as a lost race.
+	//
+	// It never writes geo_auto for an account an admin trusts (risk_reviews),
+	// even one a poll judged before the trust committed: the refusal is part
+	// of the same conditional UPDATE, so it is atomic on every dialect and
+	// needs no lock. Test fakes do not emulate this.
 	SetServiceStateIfClear(ctx context.Context, userID int64, reason domain.AutoDisabledReason, detail string, at time.Time) (bool, error)
 	// ClearServiceStateIfReason clears reason/detail/at ONLY while the row
 	// still carries reason (non-empty, ErrValidation otherwise) and reports
 	// whether it wrote. The automatic lift's second guard: a row an admin
 	// resumed or re-suspended under another reason is left alone.
 	ClearServiceStateIfReason(ctx context.Context, userID int64, reason domain.AutoDisabledReason) (bool, error)
-	// CountByServiceDisabledReason counts the users whose service axis
-	// currently carries exactly reason — one COUNT, so the notification bell
-	// can say "N accounts are held by the location detector" on every poll
-	// of the feed without materialising those rows.
-	CountByServiceDisabledReason(ctx context.Context, reason domain.AutoDisabledReason) (int64, error)
 	// BatchUpdateTrafficState runs N UpdateTrafficState writes in one
 	// transaction. The traffic poll calls it ONCE at end-of-cycle instead
 	// of issuing N inline UPDATEs while it walks the user list. On SQLite
@@ -271,6 +278,18 @@ type UserRepo interface {
 	GetBySubToken(ctx context.Context, token string) (*domain.User, error)
 	List(ctx context.Context, filter UserFilter) (items []*domain.User, total int64, err error)
 	ListByGroup(ctx context.Context, groupID int64) ([]*domain.User, error)
+	// ListByIDs returns the accounts among ids that exist, resolved like
+	// GetByID, in id order, each once. Missing ids are simply absent (the
+	// account was deleted since the ids were gathered). Read in IN lists of
+	// 500, so a fleet-sized list never meets a dialect's parameter limit.
+	ListByIDs(ctx context.Context, ids []int64) ([]*domain.User, error)
+	// ListServiceHolds returns every account whose service axis carries
+	// exactly reason (non-empty, ErrValidation otherwise), with the time the
+	// hold was written — service_disabled_at read the way GetByID reads it,
+	// 0 when NULL — ascending by id. The risk center's geo_auto source: the
+	// hold is state of the users row, so it is read from there, exactly,
+	// rather than from best-effort records.
+	ListServiceHolds(ctx context.Context, reason domain.AutoDisabledReason) ([]ServiceHold, error)
 
 	// ---- 2FA / TOTP (column-scoped; secret encrypted at rest, codes hashed) ----
 	// SetTOTP writes the secret + enabled flag + recovery-code hashes.

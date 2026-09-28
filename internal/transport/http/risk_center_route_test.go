@@ -2,24 +2,32 @@ package http
 
 import (
 	"context"
+	"encoding/json"
+	"io"
 	stdhttp "net/http"
 	"net/http/httptest"
+	"net/url"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/KazuhaHub/passwall-sub-panel/internal/adapters/sqlstore"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/config"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/jwtutil"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/audit"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/auth"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/riskcenter"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/riskreview"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/user"
 )
 
-// routerRiskCenter counts every call, whichever route made it.
+// routerRiskCenter counts every call, whichever route made it: the read
+// side's and the review actions', which it serves both of.
 type routerRiskCenter struct{ calls int }
 
 func (r *routerRiskCenter) Live(context.Context, riskcenter.LiveQuery) (riskcenter.LiveView, error) {
@@ -37,9 +45,62 @@ func (r *routerRiskCenter) History(context.Context, ports.ConnectionHistoryFilte
 	return []domain.ConnectionRecord{{UserID: 7, IP: "203.0.113.7"}}, nil, 1, nil
 }
 
-func (r *routerRiskCenter) Flags(context.Context, ports.FlagRecordFilter) ([]domain.FlagRecord, int64, error) {
+func (r *routerRiskCenter) Flags(context.Context, ports.FlagRecordFilter) (riskcenter.FlagPage, error) {
 	r.calls++
-	return []domain.FlagRecord{{ID: 1, UserID: 7}}, 1, nil
+	return riskcenter.FlagPage{Records: []domain.FlagRecord{{ID: 1, UserID: 7}}, Total: 1}, nil
+}
+
+func (r *routerRiskCenter) Queue(context.Context, riskcenter.QueueQuery) (riskcenter.QueueView, error) {
+	r.calls++
+	return riskcenter.QueueView{Rows: []riskcenter.QueueRow{{User: &domain.User{ID: 7, UPN: "alice"}}}, Total: 1, Page: 1, PageSize: 25}, nil
+}
+
+func (r *routerRiskCenter) UserSummary(_ context.Context, id int64) (riskcenter.UserSummary, error) {
+	r.calls++
+	return riskcenter.UserSummary{User: &domain.User{ID: id, UPN: "alice"}}, nil
+}
+
+func (r *routerRiskCenter) Levels(context.Context) (map[int64]riskcenter.UserLevel, error) {
+	r.calls++
+	return map[int64]riskcenter.UserLevel{7: {Level: domain.FlagLevelFlagged, Open: true}}, nil
+}
+
+func (r *routerRiskCenter) Dismiss(_ context.Context, id int64, by riskreview.Actor, _ string, _ domain.AttentionLevels) (domain.RiskReview, error) {
+	r.calls++
+	return domain.RiskReview{UserID: id, DismissedAtMS: 1, DismissedBy: by.ID,
+		Accepted: domain.DismissSnapshot{"geo": {Level: domain.FlagLevelFlagged}}}, nil
+}
+
+func (r *routerRiskCenter) Undismiss(_ context.Context, id int64, _ riskreview.Actor) (domain.RiskReview, error) {
+	r.calls++
+	return domain.RiskReview{UserID: id}, nil
+}
+
+func (r *routerRiskCenter) Trust(_ context.Context, id int64, by riskreview.Actor, _ bool) (riskreview.TrustResult, error) {
+	r.calls++
+	return riskreview.TrustResult{Review: domain.RiskReview{UserID: id, Trusted: true, TrustedAtMS: 1, TrustedBy: by.ID}}, nil
+}
+
+func (r *routerRiskCenter) Untrust(_ context.Context, id int64, _ riskreview.Actor) (domain.RiskReview, error) {
+	r.calls++
+	return domain.RiskReview{UserID: id}, nil
+}
+
+// routerPolicySettings is the settings store behind the policy routes; a
+// save is the policy PUT reaching it.
+type routerPolicySettings struct {
+	settings ports.UISettings
+	saves    int
+}
+
+func (r *routerPolicySettings) Load(context.Context, ports.UISettings) (ports.UISettings, error) {
+	return r.settings, nil
+}
+
+func (r *routerPolicySettings) Save(_ context.Context, s ports.UISettings) error {
+	r.settings = s
+	r.saves++
+	return nil
 }
 
 // THE RISK CENTER IS THE OWNER'S. It lists accounts beside their IP
@@ -48,8 +109,16 @@ func (r *routerRiskCenter) Flags(context.Context, ports.FlagRecordFilter) ([]dom
 // staffGroup shares the /api/admin prefix, so a path says nothing about its
 // gate: only a request through the assembled router shows which group each
 // route landed in, and the gate is only real if a refused request never
-// reaches the service. All four routes, each as anonymous, operator and
-// administrator.
+// reaches the service. Every route — the live view, its refresh, the
+// history, the records, and the queue, one account's drawer and the Users
+// page's levels, which name accounts beside their verdicts, and the four
+// review actions, which decide what the owner is shown about an account and
+// can lift the detector's hold, and the policy, which decides whom the
+// detectors accuse and when one suspends — each as anonymous, operator and
+// administrator. A route reaches either the risk center's services or, for
+// the policy, the settings store: the policy GET has no side effect to
+// count, so it is held to its answer, which a refused request must never
+// carry.
 func TestRiskCenterRoutesAreAdminOnly(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	admin := &domain.User{ID: 1, UPN: "admin@example.test", Enabled: true, Role: domain.RoleAdmin}
@@ -68,16 +137,33 @@ func TestRiskCenterRoutesAreAdminOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	svc := &routerRiskCenter{}
+	settings := &routerPolicySettings{}
 	router := NewRouter(Deps{
 		Cfg:   &config.Config{ConfigDir: t.TempDir()},
-		Repos: ports.Repos{User: users, Settings: &dispatchSettingsRepo{}},
-		Auth:  authSvc, User: user.New(users, nil, nil, nil, nil, nil, nil, nil), RiskCenter: svc,
+		Repos: ports.Repos{User: users, Settings: settings},
+		Auth:  authSvc, User: user.New(users, nil, nil, nil, nil, nil, nil, nil), RiskCenter: svc, RiskReview: svc,
 	})
-	for _, route := range []struct{ method, path, body string }{
-		{stdhttp.MethodGet, "/api/admin/risk-center/live", `"upn":"alice"`},
-		{stdhttp.MethodPost, "/api/admin/risk-center/live/refresh", `"refreshed":true`},
-		{stdhttp.MethodGet, "/api/admin/risk-center/connections", `"ip":"203.0.113.7"`},
-		{stdhttp.MethodGet, "/api/admin/risk-center/flags", `"id":1`},
+	services := func() int { return svc.calls }
+	saves := func() int { return settings.saves }
+	for _, route := range []struct {
+		method, path, reqBody, body string
+		// reached counts what the route reaches; nil for a read with
+		// nothing to count, held to its answer alone.
+		reached func() int
+	}{
+		{stdhttp.MethodGet, "/api/admin/risk-center/live", "", `"upn":"alice"`, services},
+		{stdhttp.MethodPost, "/api/admin/risk-center/live/refresh", "", `"refreshed":true`, services},
+		{stdhttp.MethodGet, "/api/admin/risk-center/connections", "", `"ip":"203.0.113.7"`, services},
+		{stdhttp.MethodGet, "/api/admin/risk-center/flags", "", `"id":1`, services},
+		{stdhttp.MethodGet, "/api/admin/risk-center/queue", "", `"upn":"alice"`, services},
+		{stdhttp.MethodGet, "/api/admin/risk-center/users/7", "", `"upn":"alice"`, services},
+		{stdhttp.MethodGet, "/api/admin/risk-center/levels", "", `"7":{"level":"flagged"`, services},
+		{stdhttp.MethodPost, "/api/admin/risk-center/users/7/dismiss", "", `"dismissed":true`, services},
+		{stdhttp.MethodDelete, "/api/admin/risk-center/users/7/dismiss", "", `"dismissed":false`, services},
+		{stdhttp.MethodPost, "/api/admin/risk-center/users/7/trust", "", `"resumed":false`, services},
+		{stdhttp.MethodDelete, "/api/admin/risk-center/users/7/trust", "", `"trusted":false`, services},
+		{stdhttp.MethodGet, "/api/admin/risk-center/policy", "", `"defaults":{`, nil},
+		{stdhttp.MethodPut, "/api/admin/risk-center/policy", `{"settings":{"risk_max_devices":5}}`, `"risk_max_devices":5`, saves},
 	} {
 		for _, test := range []struct {
 			name, token string
@@ -88,8 +174,19 @@ func TestRiskCenterRoutesAreAdminOnly(t *testing.T) {
 			{"administrator", adminToken, stdhttp.StatusOK},
 		} {
 			t.Run(route.method+" "+route.path+" as "+test.name, func(t *testing.T) {
-				before := svc.calls
-				req := httptest.NewRequest(route.method, "https://panel.example"+route.path, nil)
+				reached := route.reached
+				if reached == nil {
+					reached = func() int { return 0 }
+				}
+				before := reached()
+				var reqBody io.Reader
+				if route.reqBody != "" {
+					reqBody = strings.NewReader(route.reqBody)
+				}
+				req := httptest.NewRequest(route.method, "https://panel.example"+route.path, reqBody)
+				if reqBody != nil {
+					req.Header.Set("Content-Type", "application/json")
+				}
 				if test.token != "" {
 					req.Header.Set("Authorization", "Bearer "+test.token)
 				}
@@ -100,15 +197,155 @@ func TestRiskCenterRoutesAreAdminOnly(t *testing.T) {
 				}
 				switch test.status {
 				case stdhttp.StatusOK:
-					if svc.calls != before+1 || !strings.Contains(w.Body.String(), route.body) {
-						t.Fatalf("the administrator's request did not reach the service: calls %d→%d, body %s", before, svc.calls, w.Body.String())
+					if (route.reached != nil && reached() != before+1) || !strings.Contains(w.Body.String(), route.body) {
+						t.Fatalf("the administrator's request did not reach the service: calls %d→%d, body %s", before, reached(), w.Body.String())
 					}
 				default:
-					if svc.calls != before {
-						t.Fatal("a refused request reached the service")
+					if reached() != before || strings.Contains(w.Body.String(), route.body) {
+						t.Fatalf("a refused request reached the service: calls %d→%d, body %s", before, reached(), w.Body.String())
 					}
 				}
 			})
 		}
 	}
+}
+
+// ITS AUDIT ROWS ARE THE OWNER'S TOO. Every write under /api/admin leaves an
+// audit row with its route, params and body, and the audit read is
+// staffGroup — so unless the read leaves them out, an operator reads what
+// a risk-center write carried: the dismissal's note, which the dialog
+// promises is for admins only and which may carry an address, the
+// detector levels the admin accepted, and which accounts were dismissed
+// or trusted. Driven through the assembled router against the real audit
+// store, since the rows are the ones AuditWrites wrote: the operator's
+// page and total both leave them out, whatever it searches for or filters
+// by, and still show the rest; the administrator's show them all.
+func TestRiskCenterAuditRowsAreAdminOnly(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db, err := sqlstore.Open("sqlite", filepath.Join(t.TempDir(), "audit.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if s, e := db.DB(); e == nil {
+			_ = s.Close()
+		}
+	})
+	if err := sqlstore.EnsureSchema(db); err != nil {
+		t.Fatal(err)
+	}
+	auditRepo := sqlstore.NewRepos(db).Audit
+	admin := &domain.User{ID: 1, UPN: "admin@example.test", Enabled: true, Role: domain.RoleAdmin}
+	operator := &domain.User{ID: 2, UPN: "operator@example.test", Enabled: true, Role: domain.RoleOperator}
+	users := routerReleaseUsers{users: map[int64]*domain.User{1: admin, 2: operator}}
+	issuer := jwtutil.NewIssuer(strings.Repeat("test-only-key", 3), func() jwtutil.Params {
+		return jwtutil.Params{AccessTTL: time.Hour, RefreshTTL: time.Hour, Issuer: "risk-center-audit-test"}
+	})
+	authSvc := auth.New(issuer)
+	adminToken, _, err := authSvc.IssueTokens(admin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	operatorToken, _, err := authSvc.IssueTokens(operator)
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := &routerRiskCenter{}
+	router := NewRouter(Deps{
+		Cfg:   &config.Config{ConfigDir: t.TempDir()},
+		Repos: ports.Repos{User: users, Settings: &routerPolicySettings{}, Audit: auditRepo},
+		Auth:  authSvc, User: user.New(users, nil, nil, nil, nil, nil, nil, nil),
+		Audit: audit.New(auditRepo), RiskCenter: svc, RiskReview: svc,
+	})
+	do := func(method, target, token, body string) *httptest.ResponseRecorder {
+		t.Helper()
+		var reqBody io.Reader
+		if body != "" {
+			reqBody = strings.NewReader(body)
+		}
+		req := httptest.NewRequest(method, "https://panel.example"+target, reqBody)
+		if reqBody != nil {
+			req.Header.Set("Content-Type", "application/json")
+		}
+		req.Header.Set("Authorization", "Bearer "+token)
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		return w
+	}
+
+	const note = "shares with his brother, 203.0.113.9"
+	for _, w := range []*httptest.ResponseRecorder{
+		do(stdhttp.MethodPost, "/api/admin/risk-center/users/7/dismiss", adminToken, `{"note":"`+note+`","expected":{"geo":"flagged"}}`),
+		do(stdhttp.MethodPost, "/api/admin/risk-center/users/8/trust", adminToken, ""),
+	} {
+		if w.Code != stdhttp.StatusOK {
+			t.Fatalf("the administrator's review action = %d: %s", w.Code, w.Body.String())
+		}
+	}
+	// A row outside the risk center: the operator's own day-to-day work,
+	// which the audit read is staffGroup for.
+	if err := auditRepo.Insert(context.Background(), &domain.AuditEntry{
+		Actor: operator.UPN, Action: "update /api/admin/users/:id", Target: "/api/admin/users/:id", At: time.Now(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	type auditPage struct {
+		Items []struct {
+			Target string `json:"target"`
+		} `json:"items"`
+		Total int64 `json:"total"`
+	}
+	read := func(token, query string) (auditPage, string) {
+		t.Helper()
+		w := do(stdhttp.MethodGet, "/api/admin/audit"+query, token, "")
+		if w.Code != stdhttp.StatusOK {
+			t.Fatalf("GET /api/admin/audit%s = %d: %s", query, w.Code, w.Body.String())
+		}
+		var page auditPage
+		if err := json.Unmarshal(w.Body.Bytes(), &page); err != nil {
+			t.Fatalf("decode: %v: %s", err, w.Body.String())
+		}
+		return page, w.Body.String()
+	}
+
+	for _, query := range []string{
+		"",
+		"?page_size=1",
+		"?search=risk-center",
+		"?search=203.0.113.9",
+		"?actor=" + url.QueryEscape(admin.UPN),
+		"?action=" + url.QueryEscape("create_or_run /api/admin/risk-center/users/:id/dismiss"),
+	} {
+		t.Run("operator reads audit"+query, func(t *testing.T) {
+			page, raw := read(operatorToken, query)
+			for _, leak := range []string{"risk-center", "203.0.113.9", "brother", "flagged"} {
+				if strings.Contains(raw, leak) {
+					t.Fatalf("the operator's audit page carries %q: %s", leak, raw)
+				}
+			}
+			switch query {
+			case "", "?page_size=1":
+				if page.Total != 1 || len(page.Items) != 1 || page.Items[0].Target != "/api/admin/users/:id" {
+					t.Fatalf("the operator's page = total %d, items %+v; want the one row outside the risk center", page.Total, page.Items)
+				}
+			default:
+				if page.Total != 0 || len(page.Items) != 0 {
+					t.Fatalf("the operator's filtered page = total %d, items %+v; want nothing", page.Total, page.Items)
+				}
+			}
+		})
+	}
+
+	t.Run("administrator reads audit", func(t *testing.T) {
+		page, raw := read(adminToken, "")
+		if page.Total != 3 || len(page.Items) != 3 {
+			t.Fatalf("the administrator's page = total %d, items %+v; want all 3 rows", page.Total, page.Items)
+		}
+		for _, want := range []string{"/api/admin/risk-center/users/:id/dismiss", "/api/admin/risk-center/users/:id/trust", note, "flagged"} {
+			if !strings.Contains(raw, want) {
+				t.Fatalf("the administrator's audit page lacks %q: %s", want, raw)
+			}
+		}
+	})
 }

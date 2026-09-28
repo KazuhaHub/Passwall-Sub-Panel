@@ -230,6 +230,28 @@ func TestRefresh_LoginCountryJudgesTheLogins(t *testing.T) {
 	wantOutcome(t, before, "ok")
 }
 
+// An account an admin trusts is not judged on where it signs in from: the
+// login from Tokyo that flags the control reads exempt / trusted for it,
+// with no evidence. Mutation: judge with the group's geo policy as loaded,
+// and user 1 is flagged too.
+func TestLoginCountry_TrustedAccountIsExemptTrusted(t *testing.T) {
+	events := append(settledAt(1, ipHomeGD), signIn(1, ipTokyo, day))
+	events = append(events, settledAt(2, ipHomeGD2)...)
+	events = append(events, signIn(2, ipTokyo2, day))
+	h := newLoginHarness(t, usersInGroups(0, 0), events...)
+	h.trust = &fakeTrust{ids: []int64{1}}
+	if err := h.service().RefreshOnce(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	control, _ := loginRow(t, h, 2)
+	wantLoginRow(t, control, domain.GeoStateFlagged, domain.RiskCodeNewCountry)
+	r, _ := loginRow(t, h, 1)
+	wantLoginRow(t, r, domain.GeoStateExempt, domain.RiskCodeTrusted)
+	if r.Evidence != nil {
+		t.Fatalf("a trusted account's row has evidence %s", r.Evidence)
+	}
+}
+
 // An account holder's browser often reaches the panel through their own
 // proxy, and its egress is the landing node's. A login from a country one of
 // PSP's landing nodes is in is set aside — even from another address there —

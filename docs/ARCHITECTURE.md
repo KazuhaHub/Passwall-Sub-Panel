@@ -217,6 +217,9 @@
 │  ├─ 运维：ReconcileSvc（周期对账，轴 A + 轴 B）、AuditSvc、      │
 │  │   MailerSvc（到期/停用/公告）、CertSvc（ACME 证书自动化）、   │
 │  │   GeoIPSvc（IP 归属地库自动更新）                             │
+│  ├─ 风控：RiskCenterSvc（riskcenter，只读：待处理队列、用户      │
+│  │   抽屉、风控等级、通知铃计数、在线快照与刷新）、              │
+│  │   RiskReviewSvc（riskreview，忽略 / 信任，写 risk_reviews）   │
 └──────┬─────────────────────────────────────┬────────────────┘
        ▼                                     ▼
 ┌─────────────────────┐              ┌─────────────────────┐
@@ -814,7 +817,7 @@ rules:
 | 页面 | 分区 | 列表显示 | 操作 |
 |---|---|---|---|
 | **总览 (Dashboard)** | Dashboard | 统计概览 + 告警 | - |
-| **用户管理** | Directory | UPN / 显示名 / 分组 / 到期 / 配额 / 已用 / 账号状态 / 服务状态 | 新增、编辑、改组、改到期、改配额、重置 UUID、启用/禁用账号(含原因)、暂停/恢复服务(含原因)、重置 sub_token、重置密码、重置 2FA、管理 passkey、解绑 SSO、删除、批量延期、批量改组 |
+| **用户管理** | Directory | UPN / 显示名 / 分组 / 到期 / 配额 / 已用 / 账号状态 / 服务状态 / 风控（仅管理员） | 新增、编辑、改组、改到期、改配额、重置 UUID、启用/禁用账号(含原因)、暂停/恢复服务(含原因)、重置 sub_token、重置密码、重置 2FA、管理 passkey、解绑 SSO、删除、批量延期、批量改组、风控详情（仅管理员，就地打开风控中心的用户抽屉） |
 | **分组** | Directory | 分组名 / slug / 成员数 | 新增、编辑、编辑 layout（Node access）、编辑覆盖设置（Policies，见 §6.3）、删除 |
 | **服务器** | Infrastructure | 3X-UI 面板列表 + 版本感知 | 新增、编辑、删除、连接测试、升级 3X-UI / Xray |
 | **节点管理** | Infrastructure | 显示名 / 协议 / 端口 / region / tags / 启用 / 健康状态 / 配置同步状态 | 新增 inbound、编辑（连接配置本地优先）、改 region/tag/sort、启用/禁用、删除、导入未纳管 inbound、认领 client、生成 Reality 密钥对、管理分隔符 |
@@ -825,7 +828,7 @@ rules:
 | **流量统计** | Reporting | Top-N 排行 / 用户维度 / 节点维度 | 查看详情、手动设置用量、手动触发轮询 |
 | **日志管理** | Reporting | 订阅日志 / 审计日志 / 认证事件 / 邮件日志 / 证书事件 | 查看详情、清空、按策略清理 |
 | **同步任务** | Reporting | 任务列表 | 重试、取消、清理已完成 |
-| **风控中心**（仅管理员） | 独立一项（Reporting 之后） | 实时连接 / 异地并发 / 风险信号 / 标记记录 / 用户查询（异地并发与风险信号 2026-09-27 从日志管理迁来） | 立即刷新实时连接（每块面板读一次在线地址，全机队共用冷却）；其余只读，不改任何账号（见 [connection-limits.md](connection-limits.md) §14） |
+| **风控中心**（仅管理员） | 独立一项（Reporting 之后） | 待处理（一人一行）/ 在线 / 记录 / 策略，加一个用户抽屉，用户管理页也能打开（2026-09-28 改版；2026-09-27 是实时连接 / 异地并发 / 风险信号 / 标记记录 / 用户查询五个标签） | 忽略 / 取消忽略、信任 / 取消信任；在抽屉里暂停 / 恢复代理服务（用户管理页同一个接口）；立即刷新在线快照（每块面板读一次在线地址，全机队共用冷却）；编辑异地并发与风险信号的策略和分组例外（见 [connection-limits.md](connection-limits.md) §14） |
 | **系统设置** | Settings | - | 基本设置、账户安全（scope 轨，见 §6.3）、站点品牌、订阅策略（scope 轨）、邮件提醒、SSO 认证、运行时与数据（cron/留存/GeoIP/JWT） |
 
 ### 6.2 用户自助页 (role=user)
@@ -1162,7 +1165,7 @@ GET /{sub_path}/abc123 (UA: mihomo)
 | GET/PUT/DELETE | `/users/:id` | 详情 / 更新 / 删除 |
 | POST | `/users/:id/reset-credentials` \| `/reset-password` \| `/reset-emergency-usage` | 重置类操作 |
 | POST | `/users/:id/set-enabled` | 账号状态（登录权限） |
-| POST | `/users/:id/set-service-status` | 服务状态（代理/订阅可用性，v3.9.0） |
+| POST | `/users/:id/set-service-status` | 服务状态（代理/订阅可用性，v3.9.0）；恢复时可带 `expect_reason`，只解除仍是这个原因的暂停，否则 409 `reason_changed`（2026-09-28） |
 | POST | `/users/:id/reset-2fa` \| `/2fa/recovery/regenerate` | 管理员重置用户 2FA |
 | GET/DELETE | `/users/:id/passkeys[/:pkid]` | 管理员查看/撤销用户 passkey |
 | POST | `/users/:id/unlink-sso` | 解绑 SSO |
@@ -1225,6 +1228,7 @@ GET /{sub_path}/abc123 (UA: mihomo)
 | GET | `/auth-events` | 认证事件日志（v3.7.0） |
 | POST | `/sub-logs/purge` \| `/email-logs/purge` | 按策略清理 |
 | GET | `/dashboard/summary` \| `/alerts` | 仪表盘摘要 / 告警 |
+| GET/POST/DELETE | `/risk-center/*` | 风控中心（仅管理员）：待处理、用户抽屉、风控等级、忽略 / 信任、在线与刷新、连接历史、记录——全表见 [connection-limits.md](connection-limits.md) §14.13 |
 | GET/POST | `/sync-tasks[/:id/retry\|/cancel]` \| POST `/sync-tasks/purge` | 同步任务管理 |
 | POST | `/reconcile/run` | 手动触发对账 |
 
@@ -1232,7 +1236,8 @@ GET /{sub_path}/abc123 (UA: mihomo)
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| GET/PUT | `/settings/ui` | 全局 UI 设置（含 §6.3 的可覆盖字段） |
+| GET/PUT | `/settings/ui` | 全局 UI 设置（含 §6.3 的可覆盖字段）。异地并发与风险信号的 48 个键 `GET` 仍返回，`PUT` 不改（2026-09-28 起归 `/risk-center/policy`） |
+| GET/PUT | `/risk-center/policy` | 异地并发与风险信号策略（仅管理员；`PUT` 只合并送来的键，与 `/settings/ui` 共用一把写锁） |
 | GET/PUT | `/settings/mail` \| PUT `/settings/mail/templates/:kind` | 邮件设置 / 模板 |
 | POST | `/settings/mail/templates/:kind/preview` \| `/reset` \| `/test` \| `/announcement` | 模板预览/重置、测试邮件、群发公告 |
 | GET/PUT | `/settings/saml` \| `/settings/oidc` | SSO 配置 |

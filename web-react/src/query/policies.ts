@@ -108,33 +108,10 @@ export const policies = {
     note: 'Self-service profile; the page has nothing to show without it.',
   },
   /**
-   * Concurrent-location verdicts. Not polled: the verdicts themselves only move
-   * when the traffic poll runs, so re-reading on a browser timer buys nothing
-   * and would keep a background tab querying.
-   */
-  geoAnomalies: {
-    staleTime: 60 * SECOND,
-    gcTime: 5 * MINUTE,
-    refetchInterval: false,
-    note: 'Revalidates on tab focus; the server-side cadence is the traffic poll.',
-  },
-  /**
-   * The risk signals. Not polled, for the Geo tab's reason and more so: the
-   * worker recomputes them once an hour, so a browser timer would re-read
-   * the same rows sixty times over.
-   */
-  riskSignals: {
-    staleTime: 60 * SECOND,
-    gcTime: 5 * MINUTE,
-    refetchInterval: false,
-    note: 'Recomputed hourly server-side; revalidates on tab focus.',
-  },
-  /**
-   * The risk center's live view. Not polled, like the verdicts beside it:
-   * the snapshot lives in the server's memory and moves only when a traffic
-   * poll or an admin's refresh replaces it, and the refresh is rationed for
-   * the whole fleet — a timer here would re-read the same snapshot, never a
-   * newer one.
+   * The risk center's live view. Not polled: the snapshot lives in the
+   * server's memory and moves only when a traffic poll or an admin's refresh
+   * replaces it, and the refresh is rationed for the whole fleet — a timer
+   * here would re-read the same snapshot, never a newer one.
    */
   riskCenterLive: {
     staleTime: 30 * SECOND,
@@ -156,7 +133,41 @@ export const policies = {
     refetchInterval: false,
     note: 'Appended on attention changes only; focus revalidation only.',
   },
-  /** One account's record, as the risk center's lookup shows it. */
+  /**
+   * The attention queue. Polled while the page is visible — the bell polls at
+   * the same rate, so the list and the bell move together — and the previous
+   * page is kept on screen while the next loads (the query sets
+   * placeholderData), so a filter change never blanks the table.
+   */
+  riskCenterQueue: {
+    staleTime: 30 * SECOND,
+    gcTime: 5 * MINUTE,
+    refetchInterval: 60 * SECOND,
+    note: 'Recomputed from stored verdicts; the bell polls at the same rate, so the list and the bell move together.',
+  },
+  /** One account's drawer. Every review or service action invalidates it. */
+  riskCenterUser: {
+    staleTime: 15 * SECOND,
+    gcTime: 5 * MINUTE,
+    refetchInterval: false,
+    note: 'Keyed by user id; the actions invalidate riskCenterKeys.all; focus revalidation otherwise.',
+  },
+  /** The Users page's risk column: decoration, one read for the whole list. */
+  riskCenterLevels: {
+    staleTime: 60 * SECOND,
+    gcTime: 5 * MINUTE,
+    refetchInterval: false,
+    note: 'One read per list view; verdicts move per poll or hourly; actions invalidate it.',
+  },
+  /** The policy tab. Its draft is local and seeded once; a newer policy
+   *  read on focus is offered, never merged in behind the admin's back. */
+  riskCenterPolicy: {
+    staleTime: 5 * MINUTE,
+    gcTime: 5 * MINUTE,
+    refetchInterval: false,
+    note: 'The policy page keeps a local draft seeded once; its save writes through.',
+  },
+  /** One account's record, as the user picker names a picked account. */
   userDetail: {
     staleTime: 15 * SECOND,
     gcTime: 5 * MINUTE,
@@ -252,15 +263,15 @@ export const policies = {
     note: 'Form-backed record; editors keep drafts locally, writes invalidate.',
   },
   /**
-   * Which location database is active, for the Geo tab's banner. Not polled:
-   * it changes only when an admin swaps or updates the database, and a banner
-   * a minute late costs nothing.
+   * Which location database is active, for the risk center's database
+   * notices. Not polled: it changes only when an admin swaps or updates the
+   * database, and a notice a minute late costs nothing.
    */
   geoIPStatus: {
     staleTime: 60 * SECOND,
     gcTime: 5 * MINUTE,
     refetchInterval: false,
-    note: 'Advisory banner input; revalidates on tab focus like the verdicts beside it.',
+    note: 'Advisory notice input; revalidates on tab focus like the queue beside it.',
   },
 } as const satisfies Record<string, ResourcePolicy>
 

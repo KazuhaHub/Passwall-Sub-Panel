@@ -108,6 +108,14 @@ type Service struct {
 	// panel reads and liveRefsMu's merge happen before it, and the history
 	// write after it.
 	geoJudgeMu sync.Mutex
+	// trusted lists the accounts an admin trusts (risk_reviews), whose
+	// location the poll does not judge (trust.go); late-bound, nil trusts
+	// nobody. Read once per judging step, before geoJudgeMu and never under
+	// it. trustedLast is the last set read successfully, what a failed read
+	// answers with; guarded by trustedMu, a leaf lock held only for the swap.
+	trusted     TrustedLister
+	trustedMu   sync.Mutex
+	trustedLast map[int64]bool
 	// connRec is the connection history (connection_history) the poll
 	// records each judged sample into; late-bound, nil records nothing.
 	connRec ConnectionRecorder

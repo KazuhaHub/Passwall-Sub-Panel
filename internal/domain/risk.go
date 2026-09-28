@@ -47,6 +47,7 @@ const (
 	RiskCodeScopeOff       RiskCode = "scope_off"
 	RiskCodeScopeCountry   RiskCode = "scope_country"
 	RiskCodeAllowAnywhere  RiskCode = "allow_anywhere"
+	RiskCodeTrusted        RiskCode = "trusted"
 	RiskCodeNoFetches      RiskCode = "no_fetches"
 	RiskCodeRetentionShort RiskCode = "retention_short"
 	RiskCodeGeoUnavailable RiskCode = "geo_unavailable"
@@ -81,7 +82,7 @@ const (
 func AllRiskCodes() map[RiskKind][]RiskCode {
 	return map[RiskKind][]RiskCode{
 		RiskKindSubSpread: {
-			RiskCodeSignalOff, RiskCodeScopeOff, RiskCodeScopeCountry, RiskCodeAllowAnywhere,
+			RiskCodeSignalOff, RiskCodeScopeOff, RiskCodeScopeCountry, RiskCodeAllowAnywhere, RiskCodeTrusted,
 			RiskCodeNoFetches, RiskCodeRetentionShort, RiskCodeAllExcluded, RiskCodeGeoUnavailable,
 			RiskCodeLowPlaced, RiskCodeNoRegions,
 			RiskCodeSpread, RiskCodeSpreadBuilding, RiskCodeWithin,
@@ -95,7 +96,7 @@ func AllRiskCodes() map[RiskKind][]RiskCode {
 			RiskCodeSustained, RiskCodeBuilding, RiskCodeWithin,
 		},
 		RiskKindLoginCountry: {
-			RiskCodeSignalOff, RiskCodeScopeOff, RiskCodeAllowAnywhere, RiskCodeNoRecentLogins,
+			RiskCodeSignalOff, RiskCodeScopeOff, RiskCodeAllowAnywhere, RiskCodeTrusted, RiskCodeNoRecentLogins,
 			RiskCodeGeoUnavailable, RiskCodeUnplaced, RiskCodeLearning,
 			RiskCodeNewCountry, RiskCodeKnownCountries,
 		},

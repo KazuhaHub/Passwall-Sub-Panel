@@ -2,6 +2,7 @@ package sqlstore
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"slices"
@@ -274,6 +275,11 @@ func (r *FlagRecordRepo) List(ctx context.Context, f ports.FlagRecordFilter) ([]
 		if f.Level != "" {
 			q = q.Where("flag_records.level = ?", level)
 		}
+		if f.Level == ports.FlagLevelCleared {
+			// A review record's level is "" too, because an admin's action
+			// moves no level; it is not an account leaving one.
+			q = q.Where("flag_records.source <> ?", domain.FlagSourceReview)
+		}
 		if f.Event != "" {
 			q = q.Where("flag_records.event = ?", f.Event)
 		}
@@ -335,4 +341,94 @@ func (r *FlagRecordRepo) PurgeOrphans(ctx context.Context) (int64, error) {
 		return 0, fmt.Errorf("purge flag record orphans: %w", res.Error)
 	}
 	return res.RowsAffected, nil
+}
+
+// LatestByUsers returns the newest at_ms of each asked account's records,
+// review records excluded — the queue's 最近变化 column: what the account
+// last did, and an admin dismissing or trusting it is not that. An account
+// with no such record is absent from the map. One GROUP BY per idReadChunk
+// ids, served by idx_flag_user_at (user_id, at_ms).
+func (r *FlagRecordRepo) LatestByUsers(ctx context.Context, userIDs []int64) (map[int64]int64, error) {
+	out := make(map[int64]int64)
+	for _, chunk := range idChunks(userIDs) {
+		var rows []struct {
+			UserID int64 `gorm:"column:user_id"`
+			AtMS   int64 `gorm:"column:at_ms"`
+		}
+		if err := r.db.WithContext(ctx).Table("flag_records").
+			Select("user_id, MAX(at_ms) AS at_ms").
+			Where("user_id IN ? AND source <> ?", chunk, domain.FlagSourceReview).
+			Group("user_id").
+			Scan(&rows).Error; err != nil {
+			return nil, fmt.Errorf("latest flag records: %w", err)
+		}
+		for _, row := range rows {
+			out[row.UserID] = row.AtMS
+		}
+	}
+	return out, nil
+}
+
+// StepsSince returns, for each account key of since, its non-review records
+// with at_ms STRICTLY after since[uid], reduced to domain.FlagStep, oldest
+// first and, within one millisecond, in the order written (id) — the input
+// of the reopen rule (domain.EvaluateReview), which folds them in order.
+// Accounts with no such record are absent.
+//
+// Per idReadChunk accounts, one statement reads from the LOWEST cutoff in
+// the chunk (user_id IN (…) AND source <> 'review' AND at_ms > min), and
+// each account's own cutoff is applied here: one range per account would be
+// one statement per account. It reads five narrow columns (and orders by
+// the id) — never params, the widest — and is bounded by the retention; the
+// risk center asks only for dismissed accounts with attention now.
+func (r *FlagRecordRepo) StepsSince(ctx context.Context, since map[int64]int64) (map[int64][]domain.FlagStep, error) {
+	out := make(map[int64][]domain.FlagStep)
+	ids := make([]int64, 0, len(since))
+	for uid := range since {
+		ids = append(ids, uid)
+	}
+	for _, chunk := range idChunks(ids) {
+		from := since[chunk[0]]
+		for _, uid := range chunk[1:] {
+			from = min(from, since[uid])
+		}
+		var rows []struct {
+			UserID int64  `gorm:"column:user_id"`
+			Source string `gorm:"column:source"`
+			Level  string `gorm:"column:level"`
+			State  string `gorm:"column:state"`
+			AtMS   int64  `gorm:"column:at_ms"`
+		}
+		if err := r.db.WithContext(ctx).Table("flag_records").
+			Select("user_id, source, level, state, at_ms").
+			Where("user_id IN ? AND source <> ? AND at_ms > ?", chunk, domain.FlagSourceReview, from).
+			Order("at_ms").Order("id").
+			Scan(&rows).Error; err != nil {
+			return nil, fmt.Errorf("flag record steps: %w", err)
+		}
+		for _, row := range rows {
+			if row.AtMS <= since[row.UserID] {
+				continue
+			}
+			out[row.UserID] = append(out[row.UserID], domain.FlagStep{
+				Source: row.Source, Level: domain.FlagLevel(row.Level), State: domain.GeoState(row.State), AtMS: row.AtMS,
+			})
+		}
+	}
+	return out, nil
+}
+
+// OldestAtMS returns the at_ms of the oldest record stored — any account,
+// any source, review records included — and false when none is: how far
+// back the history still reaches, which the risk center's lapse reads
+// (domain.RiskReview.Lapsed). The retention setting cannot say that once it
+// has been raised: the prune already deleted by the shorter one. Orphans
+// count too; they age out by the same time, so they never reach back past
+// what the prune kept. One MIN over at_ms, served by idx_flag_at.
+func (r *FlagRecordRepo) OldestAtMS(ctx context.Context) (int64, bool, error) {
+	var oldest sql.NullInt64
+	if err := r.db.WithContext(ctx).Table("flag_records").Select("MIN(at_ms)").Scan(&oldest).Error; err != nil {
+		return 0, false, fmt.Errorf("oldest flag record: %w", err)
+	}
+	return oldest.Int64, oldest.Valid, nil
 }

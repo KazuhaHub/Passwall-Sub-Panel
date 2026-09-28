@@ -79,6 +79,10 @@ type Deps struct {
 	// landing's. A function, like IsInfra. Nil: no country is a node
 	// country.
 	LandingAddrs func() []netip.Addr
+	// Trust lists the accounts an admin trusts (risk_reviews): the place
+	// signals judge them exempt / trusted. Read once per run. Nil: nobody is
+	// trusted.
+	Trust TrustedLister
 }
 
 // UserLister pages through the accounts (ports.UserRepo's List, alone).
@@ -118,6 +122,13 @@ type FetchScanner interface {
 // the login guard's counters either.
 type LoginLister interface {
 	List(ctx context.Context, f ports.AuthEventFilter) ([]*domain.AuthEvent, int64, error)
+}
+
+// TrustedLister lists the accounts an admin trusts (the risk_reviews
+// store's ListTrusted, alone): ids, never the review itself, and nothing that
+// could write one.
+type TrustedLister interface {
+	ListTrusted(ctx context.Context) ([]int64, error)
 }
 
 // GeoResolver places addresses (the geo service's read side). Available is
@@ -179,6 +190,11 @@ type refresh struct {
 	// infraPending: the place signals were skipped because the
 	// infrastructure set has not been built yet.
 	infraPending bool
+	// trusted is the accounts an admin trusts, read once for the run (nil:
+	// nobody). trustUnreadable says that read failed, and the place signals,
+	// whose verdict it decides, are skipped (readTrusted).
+	trusted         map[int64]bool
+	trustUnreadable bool
 }
 
 // groupPolicy is what one group's settings resolve to: the risk policy, and
@@ -227,6 +243,9 @@ func (s *Service) RefreshOnce(ctx context.Context) (err error) {
 	}
 
 	if err := s.loadPolicies(ctx, r); err != nil {
+		return err
+	}
+	if err := s.readTrusted(ctx, r); err != nil {
 		return err
 	}
 	if s.d.Traffic != nil {
@@ -371,6 +390,50 @@ func (s *Service) loadPolicies(ctx context.Context, r *refresh) error {
 		}
 	}
 	return nil
+}
+
+// readTrusted reads the accounts an admin trusts, once for the whole run, so
+// both place signals judge from one answer.
+//
+// A read that fails skips the two signals it decides — sub_spread and
+// login_country keep their previous rows, the package's rule for a source it
+// cannot read — and the run is partial. Judged as if nobody were trusted,
+// every trusted account in two provinces would be flagged for an hour and
+// cleared on the next good read, each flip a flag record nobody caused.
+// Devices and usage change never read trust, and are judged as usual.
+//
+// A trust that commits during the run is judged on the next one (hourly by
+// default); the risk center's reads mask a trusted account's location
+// sources meanwhile (domain.MaskTrusted), and nothing here can suspend
+// anyone either way.
+func (s *Service) readTrusted(ctx context.Context, r *refresh) error {
+	if s.d.Trust == nil {
+		return nil
+	}
+	ids, err := s.d.Trust.ListTrusted(ctx)
+	if err != nil {
+		if ctx.Err() != nil {
+			return fmt.Errorf("risk refresh: %w", ctx.Err())
+		}
+		r.trustUnreadable = true
+		r.partial = true
+		log.Warn("risk signals: the trusted accounts are unreadable; sub_spread and login_country keep their previous rows", "err", err)
+		return nil
+	}
+	r.trusted = make(map[int64]bool, len(ids))
+	for _, id := range ids {
+		r.trusted[id] = true
+	}
+	return nil
+}
+
+// geoPolicyFor is the geo policy one account's place signals are judged
+// with: its group's, with the account's own trust on this copy only — the
+// trust is one account's, never its group's.
+func (r *refresh) geoPolicyFor(u *domain.User, policy groupPolicy) domain.GeoAnomalyPolicy {
+	geo := policy.geo
+	geo.Trusted = r.trusted[u.ID]
+	return geo
 }
 
 // addVerdict appends one verdict as a row. A nil evidence pointer is stored as

@@ -163,6 +163,22 @@ func (f *fakeTraffic) SumHourlyAllUsers(_ context.Context, since, until time.Tim
 	return f.fleet, nil
 }
 
+// fakeTrust is the trusted-account list (risk_reviews): ids, or err on
+// every read. It counts the reads.
+type fakeTrust struct {
+	ids   []int64
+	err   error
+	calls int
+}
+
+func (f *fakeTrust) ListTrusted(context.Context) ([]int64, error) {
+	f.calls++
+	if f.err != nil {
+		return nil, f.err
+	}
+	return slices.Clone(f.ids), nil
+}
+
 // ---- helpers -----------------------------------------------------------
 
 // refreshNow is 12:00 on 2026-09-25 in Shanghai. The usage series is then
@@ -245,6 +261,8 @@ type harness struct {
 	// The login log and the landing addresses, wired only when set too.
 	logins  *fakeLogins
 	landing func() []netip.Addr
+	// trust is the trusted-account list, wired only when set.
+	trust *fakeTrust
 	// now is the run's clock; zero is refreshNow.
 	now time.Time
 }
@@ -278,6 +296,9 @@ func (h *harness) service() *Service {
 	}
 	if h.logins != nil {
 		d.AuthEvents = h.logins
+	}
+	if h.trust != nil {
+		d.Trust = h.trust
 	}
 	d.LandingAddrs = h.landing
 	return New(d)
@@ -660,6 +681,64 @@ func TestRefresh_ZeroValueDepsDoNotPanic(t *testing.T) {
 	}
 	if rows := h.store.saved(t); len(rows) != 0 {
 		t.Fatalf("saved %v with no traffic source, want nothing", rows)
+	}
+}
+
+// The trusted accounts cannot be read: the place signals, whose verdict
+// depends on them, are skipped and keep their previous rows — judged as if
+// nobody were trusted, every trusted account would flip to flagged and back
+// on the next good read, each flip a record. Devices and usage change never
+// read trust, and are written as usual. The run is partial. Mutation: judge
+// with an empty set, and user 1's sub_spread row is saved (flagged).
+func TestRefresh_UnreadableTrustSkipsThePlaceSignalsOnly(t *testing.T) {
+	h := newLoginHarness(t, usersInGroups(0), append(settledAt(1, ipHomeGD), signIn(1, ipTokyo, day))...)
+	h.scanner.rows = append(h.scanner.rows, everyDay(t, client(1, ipHunan, "ClashX Pro/1.118.0"))...)
+	h.trust = &fakeTrust{err: errors.New("risk_reviews locked")}
+	before := outcomes()
+	if err := h.service().RefreshOnce(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	rows := h.store.saved(t)[1]
+	for _, kind := range []domain.RiskKind{domain.RiskKindSubSpread, domain.RiskKindLoginCountry} {
+		if r, ok := rows[kind]; ok {
+			t.Fatalf("%s judged without the trusted accounts: %s/%s", kind, r.State, r.Code)
+		}
+	}
+	for _, kind := range []domain.RiskKind{domain.RiskKindUsageShift, domain.RiskKindDevices} {
+		if _, ok := rows[kind]; !ok {
+			t.Fatalf("the unreadable trusted set cost the %s row too", kind)
+		}
+	}
+	if len(h.logins.calls) != 0 {
+		t.Fatalf("read the login log %d times for a kind that was skipped", len(h.logins.calls))
+	}
+	wantOutcome(t, before, "partial")
+}
+
+// One read of the trusted accounts per run, whatever the number of accounts,
+// groups and place signals: both place signals judge from that one answer.
+// Mutation: read it per account or per signal.
+func TestRefresh_ReadsTheTrustedSetOnce(t *testing.T) {
+	var events []*domain.AuthEvent
+	for uid := int64(1); uid <= 3; uid++ {
+		events = append(events, settledAt(uid, ipHomeGD)...)
+		events = append(events, signIn(uid, ipTokyo, day))
+	}
+	h := newLoginHarness(t, usersInGroups(5, 6, 6), events...)
+	h.trust = &fakeTrust{ids: []int64{2}}
+	if err := h.service().RefreshOnce(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if h.trust.calls != 1 {
+		t.Fatalf("read the trusted accounts %d times in one run, want 1", h.trust.calls)
+	}
+	rows := h.store.saved(t)
+	for _, kind := range []domain.RiskKind{domain.RiskKindSubSpread, domain.RiskKindLoginCountry} {
+		for uid, row := range map[int64]domain.RiskSignal{1: rows[1][kind], 2: rows[2][kind], 3: rows[3][kind]} {
+			if trusted := row.Code == domain.RiskCodeTrusted; trusted != (uid == 2) {
+				t.Fatalf("user %d %s = %s/%s; only user 2 is trusted", uid, kind, row.State, row.Code)
+			}
+		}
 	}
 }
 

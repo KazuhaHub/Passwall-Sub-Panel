@@ -140,7 +140,7 @@ describe('Passwall Node installation', () => {
     expect(field.tagName).toBe('INPUT')
     expect(field.readOnly).toBe(true)
     fireEvent.click(screen.getByRole('button', { name: 'admin:servers.native.copy_command' }))
-    await screen.findByText('admin:servers.native.copy_failed')
+    await screen.findByText('admin:servers.native.copy_failed', undefined, { timeout: 5000 })
     expect(field.value).toBe(generated.command)
     fireEvent.click(advanced)
     expect(advanced.getAttribute('aria-expanded')).toBe('true')

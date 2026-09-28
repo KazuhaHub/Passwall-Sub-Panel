@@ -167,12 +167,19 @@ export interface UISettings {
   mail_sent_retention_days: number
 
   // ---- Concurrent-location anomaly detection ----
+  // READ-ONLY here, like every geo_anomaly_* and risk_* field below: the
+  // risk center's policy endpoint (api/riskCenter, PUT /risk-center/policy)
+  // is their one writer, and a PUT of these settings keeps the stored values
+  // whatever it sends. They are still served because the group scope editor
+  // reads its inherited baseline from this record.
+  //
   // Every field is per-group overridable EXCEPT geo_anomaly_ignore_addresses,
   // which names fleet infrastructure rather than a population's tolerance and
   // is global only; see docs/connection-limits.md §12.3 for why each knob
   // exists. A stored 0 (or '' for the scope) means "the shipped default",
-  // never "zero tolerance" — utils/geoAnomaly.geoTolerances mirrors how the
-  // server resolves them.
+  // never "zero tolerance" — the policy page's effectiveGeo
+  // (views/admin/risk/policy/effective.ts) mirrors how the server resolves
+  // them, from the served defaults.
   /** The FINEST tier judged; '' = the default, city (all three tiers). */
   geo_anomaly_scope: 'off' | 'country' | 'region' | 'city' | ''
   /** COUNTRY tolerance (the key predates tiers). 0 = default 1. */
@@ -189,7 +196,8 @@ export interface UISettings {
   geo_anomaly_co_travel: string
   geo_anomaly_allow_anywhere: boolean
   /** IPs/CIDRs, newline/comma separated, '#' comments, <=256. GLOBAL only.
-   *  The one geo field the server validates: a bad entry is a 400 naming it. */
+   *  The one geo field the policy PUT validates: a bad entry is a 400 naming
+   *  it. */
   geo_anomaly_ignore_addresses: string
   // Automatic temporary suspension (off by default). Its own thresholds,
   // raised server-side to at least the flag tolerances per tier.
@@ -209,7 +217,7 @@ export interface UISettings {
   // Four signals beside concurrent locations, recomputed at the risk refresh
   // interval (hourly by default); none of them acts on an account. The switches are NEGATIVE keys, so the zero value of
   // an install that never saved them is "on". A stored 0 in a number means
-  // "the shipped default" — utils/riskSignals.riskPolicy mirrors how the
+  // "the shipped default" — the policy page's effectiveRisk mirrors how the
   // server resolves them. Every field is per-group overridable EXCEPT
   // risk_hwid_capture_off, which /sub reads before it knows the account's
   // group and is global only.
@@ -413,9 +421,10 @@ export interface GeoIPStatus {
 
 export async function getGeoIPStatus(opts: ReadOptions = {}) {
   // Options only when asked for: the settings page (which polls this during an
-  // update) keeps the exact request it has always made, while the Geo tab's
-  // banner read passes its query signal and stays quiet on failure — a failed
-  // read there just means no banner, not a toast over the page's real data.
+  // update) keeps the exact request it has always made, while the risk
+  // center's notice read passes its query signal and stays quiet on failure —
+  // a failed read there just means no notice, not a toast over the page's real
+  // data.
   const { data } = opts.signal || opts.silent
     ? await client.get<GeoIPStatus>('/admin/settings/geoip/status', {
       signal: opts.signal,

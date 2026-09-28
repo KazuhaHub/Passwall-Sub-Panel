@@ -139,47 +139,59 @@ func (h *AdminGeoAnomalyHandler) List(c *gin.Context) {
 
 	rows := make([]geoAnomalyRow, 0, len(recs))
 	for _, r := range recs {
-		row := geoAnomalyRow{
-			UserID:        r.UserID,
-			State:         string(r.State),
-			Reason:        r.Reason,
-			Tier:          string(r.Streak.Tier),
-			Flagged:       r.Streak.Flagged,
-			Places:        r.Places,
-			LiveIPs:       r.LiveIPs,
-			ConcurrentIPs: r.Concurrent,
-			ExcludedIPs:   r.Excluded,
-			Complete:      r.Complete,
-			OverStreak:    r.Streak.Over,
-			UnderStreak:   r.Streak.Under,
-			BanStreak:     r.Streak.BanOver,
-			Evidence:      r.Evidence,
-			UpdatedAtMS:   r.UpdatedAtMS,
-		}
-		if row.Places == nil {
-			// So the client renders an empty list rather than null.
-			row.Places = []string{}
-		}
-		if row.Evidence.Spots == nil {
-			// Same, for a row an older build wrote (evidence NULL, v 0): the
-			// client reads spots.length on every row, and v — not a null —
-			// is how it tells "not recorded" from "nothing found".
-			row.Evidence.Spots = []domain.GeoSpot{}
-		}
 		// Names are a convenience: a numeric id is not something an operator
 		// can act on. A user that has since been deleted keeps its row with no
 		// name rather than disappearing — dropping it would silently shrink a
 		// list somebody is auditing.
+		var u *domain.User
 		if h.users != nil {
-			if u, uerr := h.users.GetByID(c.Request.Context(), r.UserID); uerr == nil && u != nil {
-				row.UPN, row.Display = u.UPN, u.DisplayName
-				row.ServiceDisabledReason = string(u.ServiceDisabledReason)
-				if u.ServiceDisabledAt != nil {
-					row.ServiceDisabledAtMS = u.ServiceDisabledAt.UnixMilli()
-				}
+			if found, uerr := h.users.GetByID(c.Request.Context(), r.UserID); uerr == nil {
+				u = found
 			}
 		}
-		rows = append(rows, row)
+		rows = append(rows, geoAnomalyRowOf(r, u))
 	}
 	c.JSON(http.StatusOK, gin.H{"items": rows})
+}
+
+// geoAnomalyRowOf is one verdict as every admin read serves it — this list,
+// and the risk center's queue and drawer, which must show exactly the same
+// thing. u names the row and carries the account's current service hold; nil
+// leaves both out (an account deleted since).
+func geoAnomalyRowOf(r domain.GeoRecord, u *domain.User) geoAnomalyRow {
+	row := geoAnomalyRow{
+		UserID:        r.UserID,
+		State:         string(r.State),
+		Reason:        r.Reason,
+		Tier:          string(r.Streak.Tier),
+		Flagged:       r.Streak.Flagged,
+		Places:        r.Places,
+		LiveIPs:       r.LiveIPs,
+		ConcurrentIPs: r.Concurrent,
+		ExcludedIPs:   r.Excluded,
+		Complete:      r.Complete,
+		OverStreak:    r.Streak.Over,
+		UnderStreak:   r.Streak.Under,
+		BanStreak:     r.Streak.BanOver,
+		Evidence:      r.Evidence,
+		UpdatedAtMS:   r.UpdatedAtMS,
+	}
+	if row.Places == nil {
+		// So the client renders an empty list rather than null.
+		row.Places = []string{}
+	}
+	if row.Evidence.Spots == nil {
+		// Same, for a row an older build wrote (evidence NULL, v 0): the
+		// client reads spots.length on every row, and v — not a null —
+		// is how it tells "not recorded" from "nothing found".
+		row.Evidence.Spots = []domain.GeoSpot{}
+	}
+	if u != nil {
+		row.UPN, row.Display = u.UPN, u.DisplayName
+		row.ServiceDisabledReason = string(u.ServiceDisabledReason)
+		if u.ServiceDisabledAt != nil {
+			row.ServiceDisabledAtMS = u.ServiceDisabledAt.UnixMilli()
+		}
+	}
+	return row
 }

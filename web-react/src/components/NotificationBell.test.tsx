@@ -5,18 +5,31 @@ import { fireEvent, cleanup, render, screen, waitFor } from '@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createAppTheme } from '@/theme'
 import { makeTestQueryClient, queryWrapper } from '@/test/queryTestUtils'
+import { riskCenterKeys } from '@/query/keys'
+import { sessionScope } from '@/query/session'
 import NotificationBell from './NotificationBell'
 
 const api = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() }))
 vi.mock('@/api/client', () => ({ client: api }))
 
-// Render the default value so assertions read as the copy a user would see.
+// t over the REAL zh-CN admin bundle (then the defaultValue, then the key),
+// so assertions read as the copy a user sees and a key the bell asks for but
+// the bundle lacks shows up as its raw key.
+const dict = vi.hoisted(() => ({ current: {} as Record<string, string> }))
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
-    t: (_k: string, o?: { defaultValue?: string }) => o?.defaultValue ?? _k,
-    i18n: { language: 'en-US' },
+    t: (k: string, o?: Record<string, unknown>) => {
+      const flat = k.startsWith('admin:') ? k.slice('admin:'.length) : k
+      const raw = dict.current[flat] ?? (typeof o?.defaultValue === 'string' ? o.defaultValue : k)
+      return raw.replace(/\{\{(\w+)\}\}/g, (m, name: string) => (o && name in o ? String(o[name]) : m))
+    },
+    i18n: { language: 'zh-CN' },
   }),
 }))
+
+import zh from '@/locales/zh-CN/admin.json'
+import { flatten, type Nested } from '@/i18n/options'
+dict.current = flatten(zh as Nested)
 
 const theme = createAppTheme({ mode: 'light', sourceColor: '#6750a4', language: 'en-US' })
 
@@ -62,7 +75,7 @@ describe('NotificationBell', () => {
     fireEvent.click(await screen.findByLabelText('notifications'))
 
     await waitFor(() => expect(screen.getByText('通知暂时不可用')).toBeTruthy())
-    expect(screen.queryByText('暂无通知')).toBeNull()
+    expect(screen.queryByText('暂无需要处理的通知')).toBeNull()
   })
 
   it('reports an empty feed as empty when the request succeeds', async () => {
@@ -71,62 +84,52 @@ describe('NotificationBell', () => {
 
     fireEvent.click(await screen.findByLabelText('notifications'))
 
-    await waitFor(() => expect(screen.getByText('暂无通知')).toBeTruthy())
+    await waitFor(() => expect(screen.getByText('暂无需要处理的通知')).toBeTruthy())
     expect(screen.queryByText('通知暂时不可用')).toBeNull()
   })
 
-  it('renders the geo_anomaly title with its count', async () => {
-    api.get.mockResolvedValue(feed({ key: 'geo_anomaly', type: 'geo_anomaly', severity: 'warning', count: 3 }))
+  it('renders the risk_queue title with its count and the shield', async () => {
+    api.get.mockResolvedValue(feed({ key: 'risk_queue', type: 'risk_queue', severity: 'warning', count: 3 }))
     mount()
 
     fireEvent.click(await screen.findByLabelText('notifications'))
 
-    // A singleton with a count, not a row per account: the title is the
-    // whole message, and without a case it would render as an empty line.
-    await waitFor(() => expect(screen.queryByText('3 个账号被标记为异地并发')).not.toBeNull())
+    // One entry for every account that needs action now, not a row each; the
+    // words say "needs action now" because suspect-only accounts do not ring,
+    // so the number is not the size of the whole queue.
+    await waitFor(() => expect(screen.queryByText('3 个账号需立即处理')).not.toBeNull())
+    expect(screen.queryByTestId('ShieldOutlinedIcon')).not.toBeNull()
   })
 
-  it('renders the geo_auto_suspended title with its count and its own icon', async () => {
-    api.get.mockResolvedValue(feed({ key: 'geo_auto_suspended', type: 'geo_auto_suspended', severity: 'warning', count: 2 }))
-    mount()
+  it('opens the queue filtered to the accounts that need action now, and refreshes it', async () => {
+    api.get.mockResolvedValue(feed({ key: 'risk_queue', type: 'risk_queue', severity: 'warning', count: 1 }))
+    const client = mount()
+    // A queue page already in the cache (the bell lives in the top bar, so the
+    // risk center may have been open a minute ago): clicking the entry must
+    // not land on that stale page.
+    const scope = sessionScope({ userId: null, role: '', authEpoch: 0 })
+    const cached = riskCenterKeys.queue(scope, { urgent: true })
+    client.setQueryData(cached, { items: [], total: 0 })
 
     fireEvent.click(await screen.findByLabelText('notifications'))
+    fireEvent.click(await screen.findByRole('menuitem'))
 
-    await waitFor(() => expect(screen.queryByText('2 个账号因异地并发被自动临时暂停')).not.toBeNull())
-    // Distinct from the flag's shield: this one says the panel already ACTED.
-    expect(screen.queryByTestId('PauseCircleOutlinedIcon')).not.toBeNull()
+    await waitFor(() => expect(screen.getByTestId('location').textContent).toBe('/admin/risk?tab=queue&urgent=1'))
+    expect(client.getQueryState(cached)?.isInvalidated).toBe(true)
   })
 
-  it.each(['geo_anomaly', 'geo_auto_suspended'])('opens the Geo tab from %s', async type => {
+  // The entries the risk center's one entry replaced have no deep link any
+  // more: a feed that still carried one (a cached response across the
+  // upgrade) falls back to the dashboard rather than to a retired tab. The
+  // AlertType union no longer names any of the three, so tsc's excess-property
+  // check keeps them out of ROUTE; this pins the behaviour for two of them.
+  it.each(['geo_anomaly', 'risk_signals'])('has no route for the retired %s entry', async type => {
     api.get.mockResolvedValue(feed({ key: type, type, severity: 'warning', count: 1 }))
     mount()
 
     fireEvent.click(await screen.findByLabelText('notifications'))
     fireEvent.click(await screen.findByRole('menuitem'))
 
-    // The tab lists the accounts with the evidence beside each, so the link
-    // names it rather than trusting whichever tab the risk center opens on.
-    await waitFor(() => expect(screen.getByTestId('location').textContent).toBe('/admin/risk?tab=geo'))
-  })
-
-  it('renders the risk_signals title with its count and the shield', async () => {
-    api.get.mockResolvedValue(feed({ key: 'risk_signals', type: 'risk_signals', severity: 'warning', count: 2 }))
-    mount()
-
-    fireEvent.click(await screen.findByLabelText('notifications'))
-
-    // One entry for every flagged account, not a row each (V3-D5).
-    await waitFor(() => expect(screen.queryByText('2 个账号有风险信号')).not.toBeNull())
-    expect(screen.queryByTestId('ShieldOutlinedIcon')).not.toBeNull()
-  })
-
-  it('opens the risk tab from risk_signals', async () => {
-    api.get.mockResolvedValue(feed({ key: 'risk_signals', type: 'risk_signals', severity: 'warning', count: 1 }))
-    mount()
-
-    fireEvent.click(await screen.findByLabelText('notifications'))
-    fireEvent.click(await screen.findByRole('menuitem'))
-
-    await waitFor(() => expect(screen.getByTestId('location').textContent).toBe('/admin/risk?tab=risk'))
+    await waitFor(() => expect(screen.getByTestId('location').textContent).toBe('/admin/dashboard'))
   })
 })

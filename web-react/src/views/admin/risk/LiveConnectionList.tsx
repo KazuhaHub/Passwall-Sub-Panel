@@ -2,6 +2,7 @@ import { useState } from 'react'
 import {
   Box, Chip, IconButton, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Tooltip, Typography, useTheme,
 } from '@mui/material'
+import HelpOutlineIcon from '@mui/icons-material/HelpOutlined'
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown'
 import KeyboardArrowUpIcon from '@mui/icons-material/KeyboardArrowUp'
 import PersonSearchOutlinedIcon from '@mui/icons-material/PersonSearchOutlined'
@@ -9,6 +10,8 @@ import WarningAmberIcon from '@mui/icons-material/WarningAmber'
 import { useTranslation } from 'react-i18next'
 
 import type { ConnDevice, ConnRegion, LiveConnection, LiveUser } from '@/api/riskCenter'
+import { useSiteStore } from '@/stores/site'
+import { formatMsDualTz } from '@/utils/datetime'
 import { formatRegion } from '@/utils/geo'
 import { exclusionLabelKey, judgementColor, userLabel } from '@/utils/riskCenter'
 
@@ -23,17 +26,19 @@ export interface LiveConnectionListProps {
   /** The fetches could not be read: devices are absent, not "none". */
   devicesUnavailable?: boolean
   onOpenUser?: (userId: number) => void
-  /** Every account starts expanded (the single-account lookup). */
+  /** Every account starts expanded, for a list meant to be read whole. */
   initiallyOpen?: boolean
 }
 
 /**
  * The live connections, one row per account, each expanding to a table of its
  * connections: address and source, panel and node, place, judgement, the
- * panel's last sighting and the devices inferred behind it.
+ * panel scan that still saw it connected, and the devices inferred behind
+ * it.
  *
- * Shared by the Live tab and the user lookup, so the two cannot describe the
- * same connection differently.
+ * The Live tab's list. The drawer's 连接 tab draws the same connections with
+ * the same pieces (AddressCell, JudgementChip, regionText), so the two cannot
+ * describe one connection differently.
  */
 export default function LiveConnectionList({
   users, deviceWindowHours, devicesUnavailable = false, onOpenUser, initiallyOpen = false,
@@ -141,6 +146,7 @@ function ConnectionTable({ conns, deviceWindowHours, devicesUnavailable }: {
   devicesUnavailable: boolean
 }) {
   const { t } = useTranslation(['admin'])
+  const panelTz = useSiteStore(s => s.timezone)
   return (
     <Table size="small">
       <TableHead>
@@ -149,7 +155,14 @@ function ConnectionTable({ conns, deviceWindowHours, devicesUnavailable }: {
           <TableCell>{t('admin:risk_center.live.col_panel')}</TableCell>
           <TableCell>{t('admin:risk_center.live.col_region')}</TableCell>
           <TableCell>{t('admin:risk_center.live.col_status')}</TableCell>
-          <TableCell>{t('admin:risk_center.live.col_seen')}</TableCell>
+          <TableCell>
+            <Box component="span" sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.25, whiteSpace: 'nowrap' }}>
+              {t('admin:risk_center.live.col_seen')}
+              <Tooltip title={t('admin:risk_center.live.still_connected_hint')}>
+                <IconButton size="small" sx={{ p: 0.25 }}><HelpOutlineIcon fontSize="inherit" /></IconButton>
+              </Tooltip>
+            </Box>
+          </TableCell>
           <TableCell>{t('admin:risk_center.live.col_device')}</TableCell>
         </TableRow>
       </TableHead>
@@ -161,10 +174,14 @@ function ConnectionTable({ conns, deviceWindowHours, devicesUnavailable }: {
             <TableCell sx={{ fontSize: 12 }}>{regionText(c.region)}</TableCell>
             <TableCell><JudgementChip exclusion={c.exclusion} /></TableCell>
             <TableCell sx={{ fontSize: 12, whiteSpace: 'nowrap' }}>
-              {/* The PANEL's clock, said so: a skewed node clock would
-                  otherwise read as a connection in the future or the past. */}
+              {/* Not when this address was last used. Xray keeps an address
+                  while any connection from it is open, and 3X-UI's scan
+                  stamps each one it still lists with the scan's own time,
+                  on the panel's clock — one time for all of an account's
+                  addresses. Printed in the panel's timezone like every
+                  other time. */}
               {c.seen_at > 0
-                ? t('admin:risk_center.live.seen_panel_clock', { time: new Date(c.seen_at * 1000).toLocaleString() })
+                ? t('admin:risk_center.live.still_connected', { time: formatMsDualTz(c.seen_at * 1000, panelTz) })
                 : t('admin:risk_center.live.seen_none')}
             </TableCell>
             <TableCell>
@@ -253,11 +270,12 @@ function DeviceCell({ conn, hours, unavailable }: { conn: LiveConnection; hours:
 function DeviceLine({ device, hours }: { device: ConnDevice; hours: number }) {
   const { t } = useTranslation(['admin'])
   const md = useTheme().palette.md
+  const panelTz = useSiteStore(s => s.timezone)
   const name = device.label || (device.device_id4 ? `#${device.device_id4}` : device.client_type || device.ua || '—')
   const detail = [
     t('admin:risk_center.live.device_hint', { hours }),
     t('admin:risk_center.live.device_fetches', {
-      count: device.fetches, time: device.last_at_ms ? new Date(device.last_at_ms).toLocaleString() : '—',
+      count: device.fetches, time: formatMsDualTz(device.last_at_ms, panelTz),
     }),
     device.ua,
   ].filter(Boolean).join('\n')

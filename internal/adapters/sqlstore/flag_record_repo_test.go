@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -422,5 +423,215 @@ func TestFlagRecordRow_WidthsMatchTheColumns(t *testing.T) {
 		if len(ev) > flagEventWidth {
 			t.Errorf("event %q is over %d bytes", ev, flagEventWidth)
 		}
+	}
+}
+
+// ---- the reads the risk center's queue needs ----
+
+// reviewFlagAt is an admin's review record at a given time: level "", like
+// every leave, which is exactly why the queue's reads must tell them apart.
+func reviewFlagAt(uid int64, ev domain.FlagEvent, at int64) domain.FlagRecord {
+	return domain.ReviewFlag(uid, ev, domain.ReviewFlagParams{By: 1}, time.UnixMilli(at))
+}
+
+// The review records are part of the history an admin reads: every review
+// event is accepted by Append and filterable by source and event.
+func TestFlagRecordRepo_AcceptsReviewSourceAndEvents(t *testing.T) {
+	r, users, _ := newFlagRecordRepo(t)
+	ctx := context.Background()
+	u := createRiskUser(t, users, 1, "")
+	events := []domain.FlagEvent{
+		domain.FlagReviewDismissed, domain.FlagReviewUndismissed, domain.FlagReviewTrusted, domain.FlagReviewUntrusted,
+	}
+	var recs []domain.FlagRecord
+	for i, ev := range events {
+		rec := domain.ReviewFlag(u.ID, ev, domain.ReviewFlagParams{By: 3, Levels: domain.AttentionLevels{
+			domain.FlagSourceGeo: domain.FlagLevelFlagged,
+		}}, time.UnixMilli(int64(1000+i)))
+		recs = append(recs, rec)
+	}
+	if err := r.Append(ctx, recs); err != nil {
+		t.Fatalf("append: %v", err)
+	}
+	got, total, err := r.List(ctx, ports.FlagRecordFilter{Source: domain.FlagSourceReview})
+	if err != nil || total != 4 || len(got) != 4 {
+		t.Fatalf("source review = %d rows (total %d), %v; want 4", len(got), total, err)
+	}
+	if string(got[0].Params) != `{"by":3,"levels":{"geo":"flagged"}}` {
+		t.Fatalf("params = %s, want them verbatim", got[0].Params)
+	}
+	for _, ev := range events {
+		got, total, err := r.List(ctx, ports.FlagRecordFilter{Source: domain.FlagSourceReview, Event: string(ev)})
+		if err != nil || total != 1 || len(got) != 1 || got[0].Event != ev || got[0].Code != string(ev) {
+			t.Fatalf("event %s = %+v (total %d), %v; want its one record", ev, got, total, err)
+		}
+	}
+}
+
+// "Cleared" is the records that moved an account to no attention. A review
+// record also has level "", but an admin's action is not the account
+// leaving a level, and the records view's 已解除 filter must not list it.
+func TestFlagRecordRepo_ClearedFilterExcludesReviewRecords(t *testing.T) {
+	r, users, _ := newFlagRecordRepo(t)
+	ctx := context.Background()
+	u := createRiskUser(t, users, 1, "")
+	if err := r.Append(ctx, []domain.FlagRecord{
+		geoFlag(u.ID, domain.FlagLeaveFlagged, domain.FlagLevelNone, domain.FlagLevelFlagged, 1000),
+		reviewFlagAt(u.ID, domain.FlagReviewDismissed, 2000),
+		reviewFlagAt(u.ID, domain.FlagReviewTrusted, 3000),
+	}); err != nil {
+		t.Fatalf("append: %v", err)
+	}
+	got, total, err := r.List(ctx, ports.FlagRecordFilter{Level: ports.FlagLevelCleared})
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if total != 1 || len(got) != 1 || got[0].Event != domain.FlagLeaveFlagged {
+		t.Fatalf("cleared = %+v (total %d), want only the geo leave", got, total)
+	}
+}
+
+// LatestByUsers is the queue's 最近变化: the newest at_ms of each asked
+// account's records, review records excluded — dismissing an account is not
+// a change in what it did. An account with only review records, or none, is
+// absent.
+func TestFlagRecordRepo_LatestByUsersIgnoresReviewRecords(t *testing.T) {
+	r, users, db := newFlagRecordRepo(t)
+	ctx := context.Background()
+	geo := createRiskUser(t, users, 1, "")
+	reviewedOnly := createRiskUser(t, users, 2, "")
+	risk := createRiskUser(t, users, 3, "")
+	notAsked := createRiskUser(t, users, 4, "")
+	silent := createRiskUser(t, users, 5, "")
+	if err := r.Append(ctx, []domain.FlagRecord{
+		geoFlag(geo.ID, domain.FlagEnterSuspect, domain.FlagLevelSuspect, domain.FlagLevelNone, 1000),
+		geoFlag(geo.ID, domain.FlagEnterFlagged, domain.FlagLevelFlagged, domain.FlagLevelSuspect, 3000),
+		reviewFlagAt(geo.ID, domain.FlagReviewDismissed, 5000),
+		reviewFlagAt(reviewedOnly.ID, domain.FlagReviewTrusted, 4000),
+		{UserID: risk.ID, Source: string(domain.RiskKindDevices), Event: domain.FlagEnterFlagged,
+			Level: domain.FlagLevelFlagged, State: domain.GeoStateFlagged, Code: string(domain.RiskCodeOver), AtMS: 2000},
+		geoFlag(notAsked.ID, domain.FlagEnterSuspect, domain.FlagLevelSuspect, domain.FlagLevelNone, 9000),
+	}); err != nil {
+		t.Fatalf("append: %v", err)
+	}
+
+	want := map[int64]int64{geo.ID: 3000, risk.ID: 2000}
+	got, err := r.LatestByUsers(ctx, []int64{geo.ID, reviewedOnly.ID, risk.ID, silent.ID})
+	if err != nil {
+		t.Fatalf("LatestByUsers: %v", err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("LatestByUsers = %v, want %v", got, want)
+	}
+
+	reads := countReads(t, db, "flag_records")
+	got, err = r.LatestByUsers(ctx, chunkSpanningIDs(geo.ID, reviewedOnly.ID, risk.ID))
+	if err != nil {
+		t.Fatalf("LatestByUsers over 1100 ids: %v", err)
+	}
+	if !reflect.DeepEqual(got, want) || reads() != 3 {
+		t.Fatalf("LatestByUsers over 1100 ids = %v in %d reads, want %v in 3 (500 ids a statement)", got, reads(), want)
+	}
+	if empty, err := r.LatestByUsers(ctx, nil); err != nil || len(empty) != 0 || reads() != 3 {
+		t.Fatalf("LatestByUsers(nil) = %v, %v after %d reads; want empty with no statement", empty, err, reads())
+	}
+}
+
+// StepsSince feeds the reopen rule: for each asked account, its non-review
+// records STRICTLY after that account's own cutoff, oldest first and, within
+// one millisecond, in the order written. The cutoff is per account even
+// where a chunk's statement reads from the lowest cutoff in it.
+func TestFlagRecordRepo_StepsSince(t *testing.T) {
+	r, users, db := newFlagRecordRepo(t)
+	ctx := context.Background()
+	a := createRiskUser(t, users, 1, "")
+	b := createRiskUser(t, users, 2, "")
+	quiet := createRiskUser(t, users, 3, "")
+	notAsked := createRiskUser(t, users, 4, "")
+	devices := func(uid int64, ev domain.FlagEvent, level domain.FlagLevel, state domain.GeoState, at int64) domain.FlagRecord {
+		return domain.FlagRecord{UserID: uid, Source: string(domain.RiskKindDevices), Event: ev, Level: level,
+			State: state, Code: string(domain.RiskCodeOver), AtMS: at}
+	}
+	if err := r.Append(ctx, []domain.FlagRecord{
+		geoFlag(a.ID, domain.FlagEnterSuspect, domain.FlagLevelSuspect, domain.FlagLevelNone, 900),
+		geoFlag(a.ID, domain.FlagEnterFlagged, domain.FlagLevelFlagged, domain.FlagLevelSuspect, 1000), // at the cutoff: out
+		geoFlag(a.ID, domain.FlagLeaveFlagged, domain.FlagLevelNone, domain.FlagLevelFlagged, 1500),
+		devices(a.ID, domain.FlagEnterSuspect, domain.FlagLevelSuspect, domain.GeoStateSuspect, 1500),
+		reviewFlagAt(a.ID, domain.FlagReviewDismissed, 1600),
+		geoFlag(a.ID, domain.FlagEnterSuspect, domain.FlagLevelSuspect, domain.FlagLevelNone, 2000),
+		geoFlag(b.ID, domain.FlagEnterSuspect, domain.FlagLevelSuspect, domain.FlagLevelNone, 2500),
+		devices(b.ID, domain.FlagLeaveSuspect, domain.FlagLevelNone, domain.GeoStateUnknown, 3500),
+		geoFlag(notAsked.ID, domain.FlagEnterSuspect, domain.FlagLevelSuspect, domain.FlagLevelNone, 5000),
+	}); err != nil {
+		t.Fatalf("append: %v", err)
+	}
+	want := map[int64][]domain.FlagStep{
+		a.ID: {
+			{Source: domain.FlagSourceGeo, Level: domain.FlagLevelNone, State: domain.GeoState(domain.FlagLevelNone), AtMS: 1500},
+			{Source: string(domain.RiskKindDevices), Level: domain.FlagLevelSuspect, State: domain.GeoStateSuspect, AtMS: 1500},
+			{Source: domain.FlagSourceGeo, Level: domain.FlagLevelSuspect, State: domain.GeoStateSuspect, AtMS: 2000},
+		},
+		b.ID: {
+			{Source: string(domain.RiskKindDevices), Level: domain.FlagLevelNone, State: domain.GeoStateUnknown, AtMS: 3500},
+		},
+	}
+
+	got, err := r.StepsSince(ctx, map[int64]int64{a.ID: 1000, b.ID: 3000, quiet.ID: 0})
+	if err != nil {
+		t.Fatalf("StepsSince: %v", err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("StepsSince = %+v\nwant %+v", got, want)
+	}
+
+	// Over 1100 accounts: a is the last of the first chunk, b opens the
+	// second, and every other id asks from 0 — the lowest cutoff in each
+	// chunk, which the statement reads from.
+	since := map[int64]int64{}
+	for _, id := range chunkSpanningIDs(a.ID, b.ID) {
+		since[id] = 0
+	}
+	since[a.ID], since[b.ID] = 1000, 3000
+	reads := countReads(t, db, "flag_records")
+	got, err = r.StepsSince(ctx, since)
+	if err != nil {
+		t.Fatalf("StepsSince over 1101 accounts: %v", err)
+	}
+	if !reflect.DeepEqual(got, want) || reads() != 3 {
+		t.Fatalf("StepsSince over 1101 accounts = %+v in %d reads\nwant %+v in 3", got, reads(), want)
+	}
+	if empty, err := r.StepsSince(ctx, nil); err != nil || len(empty) != 0 || reads() != 3 {
+		t.Fatalf("StepsSince(nil) = %v, %v after %d reads; want empty with no statement", empty, err, reads())
+	}
+}
+
+// OldestAtMS is how far back the history still reaches: the at_ms of the
+// oldest record stored — any account, any source, review records included
+// (a dismissal's own record is the witness the lapse reads) — and false when
+// nothing is stored at all. It moves with the prune, never with the setting.
+func TestFlagRecordRepo_OldestAtMS(t *testing.T) {
+	r, users, _ := newFlagRecordRepo(t)
+	ctx := context.Background()
+	a := createRiskUser(t, users, 1, "")
+	b := createRiskUser(t, users, 2, "")
+
+	if at, ok, err := r.OldestAtMS(ctx); err != nil || ok || at != 0 {
+		t.Fatalf("empty: OldestAtMS = %d, %v, %v; want 0, false, nil", at, ok, err)
+	}
+	if err := r.Append(ctx, []domain.FlagRecord{
+		geoFlag(a.ID, domain.FlagEnterSuspect, domain.FlagLevelSuspect, domain.FlagLevelNone, 3000),
+		reviewFlagAt(b.ID, domain.FlagReviewDismissed, 1500),
+		geoFlag(b.ID, domain.FlagEnterSuspect, domain.FlagLevelSuspect, domain.FlagLevelNone, 2000),
+	}); err != nil {
+		t.Fatalf("append: %v", err)
+	}
+	if at, ok, err := r.OldestAtMS(ctx); err != nil || !ok || at != 1500 {
+		t.Fatalf("OldestAtMS = %d, %v, %v; want the review record's 1500", at, ok, err)
+	}
+	if _, err := r.DeleteBefore(ctx, time.UnixMilli(1600)); err != nil {
+		t.Fatalf("prune: %v", err)
+	}
+	if at, ok, err := r.OldestAtMS(ctx); err != nil || !ok || at != 2000 {
+		t.Fatalf("after the prune: OldestAtMS = %d, %v, %v; want 2000", at, ok, err)
 	}
 }

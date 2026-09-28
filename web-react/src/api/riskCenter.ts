@@ -1,5 +1,9 @@
 import { client } from './client'
+import type { GeoAnomaly } from './geoAnomalies'
 import type { ReadOptions } from './requestOptions'
+import { RISK_KINDS, type RiskKind, type RiskSignal } from './riskSignals'
+import type { RuntimeKnobValues, UISettings } from './settings'
+import type { Role, ServiceStatus, UserAccess } from './types'
 
 // The risk center's own reads (handler/admin_risk_center.go, adminGroup
 // only). Field names are the server's wire contract. None of these endpoints
@@ -192,13 +196,17 @@ export interface ConnectionHistoryParams {
   sort_dir?: 'asc' | 'desc'
 }
 
-/** Mirrors domain.FlagEvent. */
+/** Mirrors domain.FlagEvent: the attention moves, the automatic
+ *  suspension's, then an admin's four review actions (source `review`). */
 export type FlagEvent = 'enter_suspect' | 'enter_flagged' | 'leave_suspect' | 'leave_flagged'
   | 'auto_suspended' | 'auto_lifted_expiry' | 'auto_lifted_admin' | 'auto_replaced'
+  | 'dismissed' | 'undismissed' | 'trusted' | 'untrusted'
 
+/** domain.FlagEvents(), in its order: the review events come last. */
 export const FLAG_EVENTS: readonly FlagEvent[] = [
   'enter_suspect', 'enter_flagged', 'leave_suspect', 'leave_flagged',
   'auto_suspended', 'auto_lifted_expiry', 'auto_lifted_admin', 'auto_replaced',
+  'dismissed', 'undismissed', 'trusted', 'untrusted',
 ]
 
 /** The level filter's values: the level a record moved TO, or 'cleared' for
@@ -206,10 +214,12 @@ export const FLAG_EVENTS: readonly FlagEvent[] = [
 export const FLAG_LEVELS = ['flagged', 'suspect', 'suspended', 'cleared'] as const
 
 /**
- * One attention change on one source. `source` is 'geo', 'geo_auto' or a risk
- * kind. `params` is address-free: GeoFlagParams for geo, the verdict's stored
- * evidence for a risk kind, the producer's numbers for geo_auto; null when
- * the record has none.
+ * One attention change on one source, or one admin review action. `source`
+ * is 'geo', 'geo_auto', a risk kind or 'review'. `params` is address-free:
+ * GeoFlagParams for geo, the verdict's stored evidence for a risk kind, the
+ * producer's numbers for geo_auto, `{by, levels?}` for a review (the admin's
+ * id and, for a dismissal, the levels accepted — never a name, never the
+ * note); null when the record has none.
  */
 export interface FlagRecord {
   id: number
@@ -218,13 +228,17 @@ export interface FlagRecord {
   display_name: string
   source: string
   event: FlagEvent | string
-  /** '' = none (a leave or a lift). */
+  /** '' = none (a leave or a lift, and every review record). */
   level: '' | 'suspect' | 'flagged' | 'suspended' | string
   prev_level: '' | 'suspect' | 'flagged' | 'suspended' | string
   state: string
   code: string
   params: unknown | null
   at_ms: number
+  /** A review record's admin by the CURRENT UPN, resolved when listed;
+   *  absent on every other record and once that admin is gone (the page then
+   *  names `#<by>`). */
+  actor_upn?: string
 }
 
 export interface FlagRecordParams {
@@ -304,4 +318,333 @@ export async function listFlagRecords(
     params: sent(params), signal: opts.signal,
   })
   return { ...data, items: data.items ?? [] }
+}
+
+// ---------------------------------------------------------------------------
+// The attention reads (handler/admin_risk_queue.go) and the review actions
+// (handler/admin_risk_review.go). Every list arrives as [] and every optional
+// object as null, never absent: the server pins that, so nothing below needs
+// a null check beyond the ones the types name.
+
+/**
+ * What can put an account on the queue: the concurrent-location verdict, its
+ * automatic suspension (geo_auto, level "suspended"), and each risk kind. The
+ * flag records' `review` source is not one — an admin's decision is never
+ * attention.
+ */
+export type AttentionSource = 'geo' | 'geo_auto' | RiskKind
+
+export const ATTENTION_SOURCES: readonly AttentionSource[] = ['geo', 'geo_auto', ...RISK_KINDS]
+
+/** The queue's source filter: geo_auto is shown by its card and level chip
+ *  instead, so offering it here would say one fact twice. */
+export const QUEUE_SOURCE_FILTERS: readonly AttentionSource[] = ['geo', ...RISK_KINDS]
+
+/** The sources an admin's trust exempts (domain: the location detectors). */
+export const LOCATION_SOURCES: readonly AttentionSource[] = ['geo', 'sub_spread', 'login_country']
+
+export type QueueStatus = 'open' | 'dismissed' | 'trusted' | 'all'
+
+export interface QueueParams {
+  status?: QueueStatus
+  /** A comma list of sources. */
+  source?: string
+  level?: 'flagged' | 'suspect'
+  auto_suspended?: boolean
+  urgent?: boolean
+  q?: string
+  page?: number
+  page_size?: number
+}
+
+/** One attention source and its level. A source or level this build does not
+ *  know is kept as a string rather than dropped. */
+export interface AttentionEntry {
+  source: AttentionSource | string
+  level: 'flagged' | 'suspect' | 'suspended' | string
+}
+
+/** A queue row's review state: a stored dismissal, whether it no longer
+ *  covers the account (reopened, naming the sources that escalated) or
+ *  lapsed, and trust. */
+export interface ReviewBadge {
+  dismissed: boolean
+  reopened: boolean
+  lapsed: boolean
+  trusted: boolean
+  escalated: string[]
+}
+
+/** One account on the queue. `geo` is the /geo-anomalies item, null unless
+ *  geo is among `sources`; `signals` hold only the kinds at attention. The
+ *  hold's reason and time are omitted while the service is active. */
+export interface QueueRow {
+  user_id: number
+  upn: string
+  display_name: string
+  group_id: number
+  group_name: string
+  level: '' | 'suspect' | 'flagged'
+  auto_suspended: boolean
+  urgent: boolean
+  service_state: ServiceStatus
+  service_disabled_reason?: string
+  service_disabled_at_ms?: number
+  sources: AttentionEntry[]
+  geo: GeoAnomaly | null
+  signals: RiskSignal[]
+  /** 0 when nothing changed on record (a trusted account with no attention). */
+  changed_at_ms: number
+  review: ReviewBadge
+}
+
+export interface QueueCounts {
+  /** Null before the first snapshot. */
+  online: number | null
+  online_taken_at: string | null
+  online_stale: boolean
+  urgent: number
+  flagged: number
+  suspect: number
+  auto_suspended: number
+  dismissed: number
+  trusted: number
+  geo_unknown: number
+}
+
+export interface QueueView extends PagedResult<QueueRow> {
+  counts: QueueCounts
+  global_detectors_off: boolean
+}
+
+/**
+ * The drawer's review: the stored dismissal with the levels it accepted
+ * (display only) and the admin's note (admin-only, never in a flag record),
+ * trust, and what the reopen rule decides now. An admin is named by the
+ * CURRENT UPN, '' once that admin is gone — the page shows `#id` then.
+ */
+export interface RiskReview {
+  dismissed: boolean
+  dismissed_at_ms: number
+  dismissed_by: number
+  dismissed_by_upn: string
+  note: string
+  levels: Record<string, string>
+  reopened: boolean
+  lapsed: boolean
+  escalated: string[]
+  trusted: boolean
+  trusted_at_ms: number
+  trusted_by: number
+  trusted_by_upn: string
+}
+
+/** The drawer's account. The hold (reason, detail, time) is sent only while
+ *  the service axis carries one; `access` is the Users page's decision. */
+export interface RiskUserBasics {
+  id: number
+  upn: string
+  display_name: string
+  role: Role
+  group_id: number
+  group_name: string
+  enabled: boolean
+  traffic_limit_bytes: number
+  service_disabled_reason?: string
+  service_disable_detail?: string
+  service_disabled_at_ms?: number
+  access?: UserAccess
+}
+
+/** One client behind the account's subscription fetches in the device window.
+ *  `sources` are addresses: admin-only, like every risk-center read. */
+export interface UserDevice {
+  label: string
+  device_id4: string
+  client_type: string
+  ua: string
+  fetches: number
+  first_at_ms: number
+  last_at_ms: number
+  sources: string[]
+  sources_more: number
+}
+
+/**
+ * Everything the drawer shows about one account in one read. `stale` marks a
+ * verdict nobody re-judged within the freshness window: it is history and
+ * counts toward nothing. `live` is exactly what GET
+ * /risk-center/live?user_id=<id>&page=1&page_size=1 serves.
+ */
+export interface RiskUserSummary {
+  user: RiskUserBasics
+  attention: AttentionEntry[]
+  review: RiskReview
+  geo: (GeoAnomaly & { stale: boolean }) | null
+  signals: (RiskSignal & { stale: boolean })[]
+  live: LiveView
+  devices: UserDevice[]
+  device_window_hours: number
+  devices_unavailable: boolean
+}
+
+/** The Users page's risk column, keyed by the decimal account id: every
+ *  account at attention and every trusted one (level '' when it has none). */
+export type RiskLevels = Record<string, {
+  level: '' | 'suspect' | 'flagged'
+  auto_suspended: boolean
+  open: boolean
+  dismissed: boolean
+  trusted: boolean
+}>
+
+/** The 409 codes of the review routes: a stale tab or a second admin must
+ *  never write a duplicate record or act on a state it did not see. */
+export type ReviewConflictCode = 'nothing_to_dismiss' | 'already_dismissed' | 'not_dismissed' | 'already_trusted'
+  | 'not_trusted' | 'changed'
+
+export interface ReviewResult {
+  review: RiskReview
+}
+
+/** A trust, and what became of the resume it was asked to make: lifted
+ *  (`resumed`), lifted with the push neither made nor queued
+ *  (`resume_warning`), or not lifted (`resume_error`). A failed lift is not a
+ *  failed trust — the trust stands either way. */
+export interface TrustResult extends ReviewResult {
+  resumed: boolean
+  resume_warning?: string
+  resume_error?: string
+}
+
+/** The queue's params as sent: a false switch is left out like an empty
+ *  filter, so a request says only what the admin chose. */
+export async function getRiskQueue(params: QueueParams = {}, opts: ReadOptions = {}): Promise<QueueView> {
+  const { auto_suspended, urgent, ...rest } = params
+  const { data } = await client.get<QueueView>('/admin/risk-center/queue', {
+    params: sent({ ...rest, auto_suspended: auto_suspended || undefined, urgent: urgent || undefined }),
+    signal: opts.signal,
+  })
+  return { ...data, items: data.items ?? [] }
+}
+
+/** One account's drawer. Silent: the drawer answers a 404 (and every other
+ *  failure) itself, and a toast beside it would say it twice. */
+export async function getRiskUser(userId: number, opts: ReadOptions = {}): Promise<RiskUserSummary> {
+  const { data } = await client.get<RiskUserSummary>(`/admin/risk-center/users/${userId}`, {
+    signal: opts.signal, _skipErrorToast: true,
+  })
+  return data
+}
+
+/** The Users page's column. Silent: a failed read leaves the column blank,
+ *  never a toast over the list it only decorates. */
+export async function getRiskLevels(opts: ReadOptions = {}): Promise<RiskLevels> {
+  const { data } = await client.get<RiskLevels>('/admin/risk-center/levels', {
+    signal: opts.signal, _skipErrorToast: true,
+  })
+  return data ?? {}
+}
+
+// The four review actions. Each skips the global error toast: every outcome —
+// done, each 409 code, a note too long — is reported by the caller in its own
+// words, and a generic toast beside it would say the same thing worse.
+
+/** `expected` is every level the admin saw (source → level); a level worse
+ *  than that now is a 409 `changed` and nothing is written. */
+export async function dismissRiskUser(
+  userId: number, body: { note?: string; expected?: Record<string, string> } = {},
+): Promise<ReviewResult> {
+  const { data } = await client.post<ReviewResult>(`/admin/risk-center/users/${userId}/dismiss`, body, {
+    _skipErrorToast: true,
+  })
+  return data
+}
+
+export async function undismissRiskUser(userId: number): Promise<ReviewResult> {
+  const { data } = await client.delete<ReviewResult>(`/admin/risk-center/users/${userId}/dismiss`, {
+    _skipErrorToast: true,
+  })
+  return data
+}
+
+export async function trustRiskUser(userId: number, resumeService: boolean): Promise<TrustResult> {
+  const { data } = await client.post<TrustResult>(`/admin/risk-center/users/${userId}/trust`,
+    { resume_service: resumeService }, { _skipErrorToast: true })
+  return data
+}
+
+export async function untrustRiskUser(userId: number): Promise<ReviewResult> {
+  const { data } = await client.delete<ReviewResult>(`/admin/risk-center/users/${userId}/trust`, {
+    _skipErrorToast: true,
+  })
+  return data
+}
+
+// ---- The policy page (handler/admin_risk_policy.go, adminGroup only) ----
+
+/**
+ * The 48 keys of ports.RiskCenterPolicy: every geo_anomaly_* and risk_*
+ * setting. views/admin/risk/policy/policyKeys.json lists the same keys in the
+ * server's order, and a Go test holds that file to the struct; the page's
+ * record of the union (policyKeys.ts) holds the file to this type.
+ */
+export type RiskPolicyKey =
+  | 'geo_anomaly_scope' | 'geo_anomaly_max_places' | 'geo_anomaly_max_regions' | 'geo_anomaly_max_cities'
+  | 'geo_anomaly_flag_after_polls' | 'geo_anomaly_clear_after_polls' | 'geo_anomaly_min_placed_ratio'
+  | 'geo_anomaly_co_travel' | 'geo_anomaly_allow_anywhere' | 'geo_anomaly_ignore_addresses'
+  | 'geo_anomaly_ban_enabled' | 'geo_anomaly_ban_max_countries' | 'geo_anomaly_ban_max_regions'
+  | 'geo_anomaly_ban_max_cities' | 'geo_anomaly_ban_after_polls' | 'geo_anomaly_ban_duration_minutes'
+  | 'geo_anomaly_fresh_window_seconds' | 'geo_anomaly_shared_exit_min_users' | 'geo_anomaly_ban_max_per_poll'
+  | 'geo_anomaly_lift_max_per_poll' | 'geo_anomaly_infra_refresh_minutes' | 'geo_anomaly_infra_host_ttl_minutes'
+  | 'risk_hwid_capture_off' | 'risk_sub_spread_off' | 'risk_devices_off' | 'risk_usage_shift_off'
+  | 'risk_login_country_off' | 'risk_min_days' | 'risk_max_devices' | 'risk_usage_ratio' | 'risk_usage_floor_gb'
+  | 'risk_login_warmup_logins' | 'risk_login_hold_days' | 'risk_usage_warmup_days' | 'risk_usage_flag_days'
+  | 'risk_usage_suspect_days' | 'risk_refresh_interval_minutes' | 'risk_first_delay_minutes'
+  | 'risk_alert_freshness_hours' | 'risk_window_days' | 'risk_login_lookback_days' | 'risk_usage_baseline_days'
+  | 'risk_usage_recent_days' | 'risk_connection_retention_days' | 'risk_flag_record_retention_days'
+  | 'risk_live_snapshot_stale_minutes' | 'risk_live_refresh_cooldown_seconds' | 'risk_device_infer_hours'
+
+/** The stored policy, as stored: 0 (or '') is unset and the default applies;
+ *  a value out of range is shown as typed — the server clamps where it reads. */
+export type RiskPolicySettings = Pick<UISettings, RiskPolicyKey>
+
+export interface RiskPolicyView {
+  settings: RiskPolicySettings
+  /** The shipped value of every numeric key (ports.RiskCenterPolicyDefaults):
+   *  the empty field's placeholder, the presets' reference and the "in
+   *  effect" lines' fallback. The page keeps no copy of any of them. */
+  defaults: Record<string, number>
+  /** For the 23 runtime knobs, the number the panel runs with. */
+  effective: RuntimeKnobValues
+}
+
+/** The policy with its defaults and values in effect. A map the server did
+ *  not send reads as empty: the page then shows no placeholder and no "in
+ *  effect" caption rather than a guess. */
+export async function getRiskPolicy(opts: ReadOptions = {}): Promise<RiskPolicyView> {
+  const { data } = await client.get<Partial<RiskPolicyView>>('/admin/risk-center/policy', { signal: opts.signal })
+  return policyView(data)
+}
+
+/**
+ * Saves the keys the admin CHANGED, and only those (D10): the server merges
+ * them onto the stored policy, so a tab opened before another admin's save
+ * cannot revert it. Silent: a refused ignore list is a 400 naming the field
+ * and its bad entries, which the page puts on that field, and any other
+ * failure is reported by the page in its own words.
+ */
+export async function putRiskPolicy(changed: Partial<RiskPolicySettings>): Promise<RiskPolicyView> {
+  const { data } = await client.put<Partial<RiskPolicyView>>('/admin/risk-center/policy', { settings: changed }, {
+    _skipErrorToast: true,
+  })
+  return policyView(data)
+}
+
+function policyView(data: Partial<RiskPolicyView> | undefined): RiskPolicyView {
+  return {
+    settings: (data?.settings ?? {}) as RiskPolicySettings,
+    defaults: data?.defaults ?? {},
+    effective: data?.effective ?? {},
+  }
 }

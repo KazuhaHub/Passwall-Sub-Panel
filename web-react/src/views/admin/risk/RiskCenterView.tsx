@@ -1,53 +1,51 @@
 import { Box, Tab, Tabs, useTheme } from '@mui/material'
-import { Navigate, useSearchParams } from 'react-router'
+import { Navigate, useLocation, useSearchParams } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import PageHeader from '@/components/PageHeader'
+import UserAutocomplete from '@/components/UserAutocomplete'
 import { useCan } from '@/utils/permissions'
-import FlagRecordsTab from './FlagRecordsTab'
-import GeoAnomaliesTab from './GeoAnomaliesTab'
+import RiskUserDrawer from './drawer/RiskUserDrawer'
+import { useDrawerParam } from './drawerParam'
+import HelpTip from './HelpTip'
 import LiveConnectionsTab from './LiveConnectionsTab'
-import RiskSignalsTab from './RiskSignalsTab'
-import UserLookupTab from './UserLookupTab'
-
-const TABS = ['connections', 'geo', 'risk', 'flags', 'user'] as const
-type RiskTab = (typeof TABS)[number]
-const DEFAULT_TAB: RiskTab = 'connections'
-
-function parseTab(raw: string | null): RiskTab {
-  return (TABS as readonly string[]).includes(raw ?? '') ? raw as RiskTab : DEFAULT_TAB
-}
-
-/** The looked-up account from ?id=, or null for anything that is not a
- *  positive integer: a malformed link asks for nobody rather than for #0. */
-function parseId(raw: string | null): number | null {
-  if (!raw || !/^\d+$/.test(raw)) return null
-  const id = Number(raw)
-  return Number.isSafeInteger(id) && id > 0 ? id : null
-}
+import PolicyTab from './policy/PolicyTab'
+import QueueTab from './queue/QueueTab'
+import RecordsTab from './RecordsTab'
+import { legacyRedirect, parseRiskTab, type RiskTab } from './riskParams'
 
 /**
- * THE RISK CENTER: one admin-only page for everything the panel observes about
- * who is using an account — who is connected now, the concurrent-location and
- * risk verdicts, the record of every flag, and one account's everything.
+ * THE RISK CENTER: one admin-only page for what the panel observes about who
+ * is using an account — the accounts that need a look (待处理), who is
+ * connected now (在线), the record of every change (记录) and what the
+ * detectors judge by (策略) — with one drawer, over any tab, for everything
+ * about one account.
  *
- * The location and risk tabs used to sit on the Logs page, gated per tab. They
- * moved here because they are not logs — they are verdicts about people, read
- * by the one role their endpoints admit — and a page of their own can be gated
- * whole: the `risk.view` capability, ADMIN_ONLY_ROUTES and the nav item's
- * adminOnly flag all name it.
+ * The location and risk verdicts used to sit on the Logs page, gated per
+ * tab. They moved here because they are not logs — they are verdicts about
+ * people, read by the one role their endpoints admit — and a page of their
+ * own can be gated whole: the `risk.view` capability, ADMIN_ONLY_ROUTES and
+ * the nav item's adminOnly flag all name it.
  *
- * The URL owns the tab and the looked-up account. `useTabParam` is not used
- * because it drops the default from the URL; here every switch writes `tab`
- * explicitly, so a copied link, a bell entry (`?tab=geo`) or an old Logs link
- * sent on by LogsRoute means the same tab whatever the page's default is.
+ * The URL owns the tab, every tab's filters (riskParams) and the drawer's
+ * account (`user=`, useDrawerParam). `useTabParam` is not used because it
+ * drops the default from the URL; here every switch writes `tab` explicitly,
+ * so a copied link, the bell's entry (`?tab=queue&urgent=1`) or an old Logs
+ * link sent on by LogsRoute means the same tab whatever the page's default
+ * is. Links written for the old five tabs are rewritten before any tab
+ * mounts (legacyRedirect).
  */
 export default function RiskCenterView() {
   const { t } = useTranslation(['admin'])
   const md = useTheme().palette.md
   const canView = useCan('risk.view')
+  const location = useLocation()
   const [params, setParams] = useSearchParams()
-  const tab = parseTab(params.get('tab'))
-  const userId = parseId(params.get('id'))
+  const tab = parseRiskTab(params.get('tab'))
+  // The drawer's account (?user=), over whichever tab is open. Opening an
+  // account from a row or the picker is a drill-down: it PUSHES `user=`
+  // (every other param kept) so Back closes it and the list underneath is
+  // exactly as it was.
+  const drawer = useDrawerParam('user')
 
   // Replace, not push, like every other tabbed page: a tab switch is a view
   // of the same page, and Back should leave the page rather than step through
@@ -58,42 +56,59 @@ export default function RiskCenterView() {
     return out
   }, { replace: true })
 
-  // Opening an account from a row is a drill-down, so it PUSHES: Back returns
-  // to the list it was opened from. Tab and id are ONE update — two would
-  // pass through a URL naming the lookup with no account (or an account on
-  // the tab it came from), and the second write could read a stale first.
-  const openUser = (id: number) => setParams({ tab: 'user', id: String(id) })
-
-  // Picking another account inside the lookup is the same view, like a tab
-  // switch: it replaces.
-  const pickUser = (id: number | null) => setParams(
-    id ? { tab: 'user', id: String(id) } : { tab: 'user' }, { replace: true })
-
   // After the hooks, so they run in the same order on every render. The route
   // is admin-only already (RequireAuth bounces an operator on
   // ADMIN_ONLY_ROUTES); this is the page's own check, so it never asks an
   // adminGroup endpoint for an answer that can only be 403.
   if (!canView) return <Navigate to="/admin/dashboard" replace />
 
+  // An old link lands on the tab that answers it now, in one replace and
+  // before any tab mounts: nothing is read with the old link's meaning.
+  const redirect = legacyRedirect(params)
+  if (redirect !== null) return <Navigate to={{ pathname: location.pathname, search: redirect }} replace />
+
   return (
     <Box sx={{ p: 3 }}>
-      <PageHeader title={t('admin:risk_center.title')} subtitle={t('admin:risk_center.subtitle')} />
+      <PageHeader title={t('admin:risk_center.title')} subtitle={t('admin:risk_center.subtitle')}
+        actions={
+          // Any account, from any tab: the picker opens the drawer, whether or
+          // not the account is on the list in front of the admin.
+          <UserAutocomplete value={null} onChange={id => { if (id) drawer.open(id) }}
+            label={t('admin:risk_center.pick_user')} width={260} />
+        } />
       <Tabs value={tab} onChange={(_, v: RiskTab) => setTab(v)} variant="scrollable" allowScrollButtonsMobile
         sx={{ mb: 2, borderBottom: `1px solid ${md.outlineVariant}` }}>
-        <Tab value="connections" label={t('admin:risk_center.tab_connections')} />
-        <Tab value="geo" label={t('admin:risk_center.tab_geo')} />
-        <Tab value="risk" label={t('admin:risk_center.tab_risk')} />
-        <Tab value="flags" label={t('admin:risk_center.tab_flags')} />
-        <Tab value="user" label={t('admin:risk_center.tab_user')} />
+        <Tab value="queue" label={t('admin:risk_center.tab_queue')} />
+        <Tab value="live" label={t('admin:risk_center.tab_live')} />
+        <Tab value="records" label={t('admin:risk_center.tab_records')} />
+        <Tab value="policy" label={t('admin:risk_center.tab_policy')} />
       </Tabs>
       {/* Only the open tab mounts, so only its lists are read. */}
-      {tab === 'connections' && <LiveConnectionsTab onOpenUser={openUser} />}
-      {tab === 'geo' && <GeoAnomaliesTab onOpenUser={openUser} />}
-      {/* Each risk row carries the account's concurrent-location verdict;
-          its chip opens that tab, where the evidence behind it is. */}
-      {tab === 'risk' && <RiskSignalsTab onOpenGeo={() => setTab('geo')} onOpenUser={openUser} />}
-      {tab === 'flags' && <FlagRecordsTab onOpenUser={openUser} />}
-      {tab === 'user' && <UserLookupTab userId={userId} onPick={pickUser} />}
+      {tab === 'queue' && (
+        <>
+          <HelpTip textKey="admin:risk_center.help.queue" />
+          <QueueTab onOpenUser={drawer.open} onOpenLive={() => setTab('live')} onOpenPolicy={() => setTab('policy')} />
+        </>
+      )}
+      {tab === 'live' && (
+        <>
+          <HelpTip textKey="admin:risk_center.help.live" />
+          <LiveConnectionsTab onOpenUser={drawer.open} />
+        </>
+      )}
+      {tab === 'records' && (
+        <>
+          <HelpTip textKey="admin:risk_center.help.records" />
+          <RecordsTab onOpenUser={drawer.open} />
+        </>
+      )}
+      {tab === 'policy' && (
+        <>
+          <HelpTip textKey="admin:risk_center.help.policy" />
+          <PolicyTab />
+        </>
+      )}
+      <RiskUserDrawer userId={drawer.id} onClose={drawer.close} host="risk" />
     </Box>
   )
 }

@@ -14,6 +14,7 @@ import (
 	"gorm.io/gorm/schema"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 )
 
 // geoStreakRow persists the between-poll state that makes a concurrent-location
@@ -202,30 +203,90 @@ func (r *GeoStreakRepo) List(ctx context.Context) ([]domain.GeoRecord, error) {
 	return out, nil
 }
 
-// CountFlagged counts the accounts whose flag is latched and whose row the
-// detector judged at or after since — the notification bell's geo_anomaly
-// count, one COUNT per feed request.
+// AttentionLevels returns the risk center's geo read: the rows of existing
+// accounts that are at attention — latched (flagged) or mid-ramp (over > 0),
+// what domain.GeoAttentionOf turns into flagged and suspect — and that the
+// detector judged at or after since, by user id. Four narrow columns and
+// never the evidence: the queue, the bell and the Users page's levels read
+// this for the whole fleet on every request, and only a page of accounts
+// ever needs the explanation (ListByUsers).
 //
-// The LATCH (flagged), not the last state. A flagged account that went idle
-// or unreadable keeps its flag, because those samples freeze the streak; a
-// count of state='flagged' would let it leave the bell by disconnecting.
+// The latch and not the last state: an idle or unreadable sample freezes
+// the streak, so a latched account that went quiet is still flagged, and a
+// read of state='flagged' would let it leave the queue by disconnecting.
+// JOIN users because there is no foreign key — a deleted account's row is
+// nobody an admin can open. Bounded by updated_at because Save never deletes
+// an unjudged row: every judged user is re-saved each cycle, idle ones
+// included, so the bound drops only rows the poll stopped judging. updated_at
+// is unix ms, so the comparison is an integer one on every dialect;
+// inclusive, so "judged at since" is fresh.
 //
-// Joined to users because geo_streaks has no foreign key: a deleted account
-// leaves its row behind, and a bell entry nobody can look up is noise.
-//
-// Bounded by updated_at because Save deliberately never deletes an unjudged
-// row. Every judged user is re-saved each cycle, idle ones included, so the
-// bound drops only rows the poll stopped judging — a user with no clients
-// left, or a dead poll — rather than keeping their last latch lit forever.
-// updated_at is unix milliseconds, so the comparison is an integer one and
-// identical on every dialect.
-func (r *GeoStreakRepo) CountFlagged(ctx context.Context, since time.Time) (int64, error) {
+// over is a reserved word on MySQL 8 (window functions), so it is never
+// written raw: the predicate and the select name it as clause.Column, which
+// GORM quotes for the dialect it runs on.
+func (r *GeoStreakRepo) AttentionLevels(ctx context.Context, since time.Time) ([]ports.GeoAttentionRow, error) {
+	col := func(name string) clause.Column { return clause.Column{Table: "geo_streaks", Name: name} }
+	var rows []struct {
+		UserID    int64 `gorm:"column:user_id"`
+		Flagged   bool  `gorm:"column:flagged"`
+		Over      int   `gorm:"column:over"`
+		UpdatedAt int64 `gorm:"column:updated_at"`
+	}
+	err := r.db.WithContext(ctx).Table("geo_streaks").
+		Clauses(clause.Select{Columns: []clause.Column{col("user_id"), col("flagged"), col("over"), col("updated_at")}}).
+		Joins("JOIN users ON users.id = geo_streaks.user_id").
+		Where(clause.Or(
+			clause.Eq{Column: col("flagged"), Value: true},
+			clause.Gt{Column: col("over"), Value: 0},
+		)).
+		Where(clause.Gte{Column: col("updated_at"), Value: since.UnixMilli()}).
+		Order(clause.OrderByColumn{Column: col("user_id")}).
+		Scan(&rows).Error
+	if err != nil {
+		return nil, fmt.Errorf("geo attention levels: %w", err)
+	}
+	out := make([]ports.GeoAttentionRow, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, ports.GeoAttentionRow{
+			UserID: row.UserID, Flagged: row.Flagged, Over: row.Over, UpdatedAtMS: row.UpdatedAt,
+		})
+	}
+	return out, nil
+}
+
+// ListByUsers returns the full rows — evidence included — of the asked
+// accounts, any state, by user id; an account with no row is absent. The
+// read for one page of the queue, or one account's drawer: the explanation
+// AttentionLevels leaves out. Read in IN lists of idReadChunk ids.
+func (r *GeoStreakRepo) ListByUsers(ctx context.Context, userIDs []int64) ([]domain.GeoRecord, error) {
+	var out []domain.GeoRecord
+	for _, chunk := range idChunks(userIDs) {
+		var rows []geoStreakRow
+		if err := r.db.WithContext(ctx).Where("user_id IN ?", chunk).Order("user_id").Find(&rows).Error; err != nil {
+			return nil, fmt.Errorf("list geo streaks by user: %w", err)
+		}
+		for _, row := range rows {
+			out = append(out, row.toDomain())
+		}
+	}
+	return out, nil
+}
+
+// CountFreshUnknown counts the existing accounts whose LAST verdict is
+// unknown — the detector could not place them — judged at or after since.
+// The queue shows it beside a GeoIP database warning, so a dead or
+// country-only database is never silent: an account nobody can place is
+// also an account the queue cannot list.
+func (r *GeoStreakRepo) CountFreshUnknown(ctx context.Context, since time.Time) (int64, error) {
 	var n int64
 	err := r.db.WithContext(ctx).Table("geo_streaks").
 		Joins("JOIN users ON users.id = geo_streaks.user_id").
-		Where("geo_streaks.flagged = ? AND geo_streaks.updated_at >= ?", true, since.UnixMilli()).
+		Where("geo_streaks.state = ? AND geo_streaks.updated_at >= ?", string(domain.GeoStateUnknown), since.UnixMilli()).
 		Count(&n).Error
-	return n, err
+	if err != nil {
+		return 0, fmt.Errorf("count unknown geo verdicts: %w", err)
+	}
+	return n, nil
 }
 
 func (row geoStreakRow) toDomain() domain.GeoRecord {

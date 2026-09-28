@@ -199,133 +199,50 @@ describe('native-task lifecycle settings', () => {
   })
 })
 
-describe('concurrent-location settings', () => {
-  const geo = (name: string) => screen.getByRole('spinbutton', { name: `admin:settings.geo_anomaly.${name}` }) as HTMLInputElement
-
-  it('shows the ignore-list and auto-suspension fields in All users', async () => {
-    await mountSettings(generalSettings({
-      geo_anomaly_max_regions: 2,
-      geo_anomaly_max_cities: 3,
-      geo_anomaly_ignore_addresses: '203.0.113.7\n198.51.100.0/24 # office exit',
-      geo_anomaly_ban_enabled: true,
-      geo_anomaly_ban_max_countries: 1,
-      geo_anomaly_ban_max_regions: 4,
-      geo_anomaly_ban_max_cities: 5,
-      geo_anomaly_ban_after_polls: 8,
-      geo_anomaly_ban_duration_minutes: 90,
-    }))
-
-    // An unset scope ('') is judged as city; the select says so rather than
-    // showing blank, which would read as "off".
-    expect(screen.queryByText('admin:settings.geo_anomaly.scope_city')).not.toBeNull()
-    expect(geo('max_regions')?.value).toBe('2')
-    expect(geo('max_cities')?.value).toBe('3')
-    expect(screen.queryByText('admin:settings.geo_anomaly.effective')).not.toBeNull()
-
-    // The ignore list is a multi-line field: one entry per line, # comments.
-    const ignore = screen.getByRole('textbox', { name: 'admin:settings.geo_anomaly.ignore_addresses' }) as HTMLTextAreaElement
-    expect(ignore.tagName).toBe('TEXTAREA')
-    expect(ignore.value).toBe('203.0.113.7\n198.51.100.0/24 # office exit')
-
-    expect(screen.queryByText('admin:settings.geo_anomaly.ban_section')).not.toBeNull()
-    expect(screen.queryByText('admin:settings.geo_anomaly.ban_hint')).not.toBeNull()
-    expect((screen.getByRole('switch', { name: 'admin:settings.geo_anomaly.ban_enabled' }) as HTMLInputElement).checked).toBe(true)
-    expect(geo('ban_max_countries').value).toBe('1')
-    expect(geo('ban_max_regions').value).toBe('4')
-    expect(geo('ban_max_cities').value).toBe('5')
-    expect(geo('ban_after').value).toBe('8')
-    expect(geo('ban_duration').value).toBe('90')
-    // The server clamps to 7 days; the field says where the ceiling is.
-    expect(geo('ban_duration').max).toBe('10080')
-    expect(screen.queryByText('admin:settings.geo_anomaly.ban_effective')).not.toBeNull()
-  })
-
-  it.each(['country', 'region', 'off'] as const)('states no three-tier caption under scope %s', async scope => {
-    // The captions name all three tiers. Only the (default) city scope judges
-    // all three, so under any other scope they would promise a region or city
-    // line the detector never draws.
-    await mountSettings(generalSettings({ geo_anomaly_scope: scope }))
-    expect(screen.queryByText('admin:settings.geo_anomaly.effective')).toBeNull()
-    expect(screen.queryByText('admin:settings.geo_anomaly.ban_effective')).toBeNull()
-  })
-
-  it('sends the edited geo fields on save', async () => {
-    await mountSettings()
-    api.put.mockImplementationOnce(async (_url: string, data: UISettings) => ({ data }))
-
-    fireEvent.change(screen.getByRole('textbox', { name: 'admin:settings.geo_anomaly.ignore_addresses' }),
-      { target: { value: '203.0.113.7' } })
-    fireEvent.click(screen.getByRole('switch', { name: 'admin:settings.geo_anomaly.ban_enabled' }))
-    fireEvent.change(geo('max_cities'), { target: { value: '4' } })
-    fireEvent.change(geo('ban_duration'), { target: { value: '120' } })
-    save()
-
-    await waitFor(() => expect(api.put).toHaveBeenCalledOnce())
-    expect(api.put).toHaveBeenCalledWith('/admin/settings/ui', expect.objectContaining({
-      geo_anomaly_ignore_addresses: '203.0.113.7',
-      geo_anomaly_ban_enabled: true,
-      geo_anomaly_max_cities: 4,
-      geo_anomaly_ban_duration_minutes: 120,
-    }))
-  })
-})
-
-describe('risk signal settings', () => {
-  const sw = (name: string) => screen.getByRole('switch', { name: `admin:settings.risk.${name}` }) as HTMLInputElement
-  const num = (name: string) => screen.getByRole('spinbutton', { name: `admin:settings.risk.${name}` }) as HTMLInputElement
-
-  it('shows the four signals and device capture on by default', async () => {
-    // Every switch reads positively ("signal on") over a negative stored key
-    // (risk_*_off), whose zero value — the state of every install that never
-    // saved these — is on.
+// The detector policy moved to the risk center's 策略 tab, which owns it on
+// the server too (the settings PUT keeps whatever policy it loaded). A copy
+// of those fields left here would be a second editor whose saves are
+// silently discarded, so the page keeps none — only the way there.
+describe('the risk policy lives in the risk center', () => {
+  it('shows no detector section in General, only a pointer to the policy tab', async () => {
     await mountSettings()
 
-    expect(screen.queryByText('admin:settings.risk.section')).not.toBeNull()
-    expect(screen.queryByText('admin:settings.risk.hint')).not.toBeNull()
-    for (const name of ['sub_spread', 'devices', 'usage_shift', 'login_country', 'hwid_capture']) {
-      expect(sw(name).checked, name).toBe(true)
+    for (const section of ['settings.geo_anomaly.section', 'settings.risk.section', 'settings.risk_center.section']) {
+      expect(screen.queryByText(`admin:${section}`), section).toBeNull()
     }
-    expect(num('min_days').value).toBe('0')
-    expect(num('min_days').max).toBe('7')
-    expect(num('usage_ratio').step).toBe('any')
-    expect(screen.queryByText('admin:settings.risk.effective')).not.toBeNull()
-    expect(screen.queryByText('admin:settings.risk.hwid_capture_hint')).not.toBeNull()
+    // Not one of the policy's fields is left to edit on this page.
+    const policyField = /^admin:settings\.(geo_anomaly|risk|risk_center)\./
+    expect(screen.queryAllByRole('spinbutton', { name: policyField })).toEqual([])
+    expect(screen.queryAllByRole('switch', { name: policyField })).toEqual([])
+    expect(screen.queryAllByRole('textbox', { name: policyField })).toEqual([])
+
+    expect(screen.getByText('admin:settings.geo.policy_pointer')).toBeTruthy()
+    const link = screen.getByRole('link', { name: 'admin:settings.geo.open_policy' })
+    expect(link.getAttribute('href')).toBe('/admin/risk?tab=policy')
   })
 
-  it('saves a switched-off signal as risk_*_off=true and leaves the rest on', async () => {
-    await mountSettings()
-    api.put.mockImplementationOnce(async (_url: string, data: UISettings) => ({ data }))
-
-    fireEvent.click(sw('devices'))
-    fireEvent.click(sw('hwid_capture'))
-    fireEvent.change(num('usage_ratio'), { target: { value: '2.5' } })
-    fireEvent.change(num('max_devices'), { target: { value: '4' } })
-    save()
-
-    await waitFor(() => expect(api.put).toHaveBeenCalledOnce())
-    expect(api.put).toHaveBeenCalledWith('/admin/settings/ui', expect.objectContaining({
-      risk_devices_off: true,
-      risk_hwid_capture_off: true,
-      risk_sub_spread_off: false,
-      risk_usage_shift_off: false,
-      risk_login_country_off: false,
-      risk_usage_ratio: 2.5,
-      risk_max_devices: 4,
-    }))
-  })
-
-  it('offers the risk category in a group\'s override rail', async () => {
+  it("offers only notify and emergency in a group's General rail", async () => {
     installReads({
       '/admin/settings/ui': generalSettings(),
       '/admin/groups': list([{ id: 1, slug: 'test', name: 'group', tag_filter: { all: true, tags: [], mode: 'all' }, members: 0, remark: '', require_2fa: false }]),
-      '/admin/groups/1/scope-settings': { overrides: {}, overridable: ['risk.min_days', 'risk.usage_ratio'] },
+      '/admin/groups/1/scope-settings': {
+        overrides: {},
+        overridable: [
+          'notify.expire_before_days', 'security.emergency_access_enabled',
+          'geo_anomaly.max_places', 'geo_anomaly.ban_enabled', 'risk.min_days', 'risk.usage_ratio',
+        ],
+      },
     })
     mount(<SettingsView />)
     fireEvent.click(await screen.findByRole('button', { name: 'group' }))
 
-    expect(await screen.findByText('admin:groups.scope.cat_risk')).toBeTruthy()
-    expect(screen.queryByText('admin:groups.scope.risk_min_days')).not.toBeNull()
-    expect(screen.queryByText('admin:groups.scope.risk_usage_ratio')).not.toBeNull()
+    expect(await screen.findByText('admin:groups.scope.cat_notify')).toBeTruthy()
+    expect(screen.getByText('admin:groups.scope.cat_emergency')).toBeTruthy()
+    for (const text of [
+      'cat_geo', 'cat_geo_ban', 'cat_risk', 'geo_max_countries', 'geo_ban_enabled', 'risk_min_days', 'risk_usage_ratio',
+    ]) {
+      expect(screen.queryByText(`admin:groups.scope.${text}`), text).toBeNull()
+    }
   })
 })
 

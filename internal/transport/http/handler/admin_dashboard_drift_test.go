@@ -42,7 +42,7 @@ func TestDashboardCategoriesCoveredByAlertService(t *testing.T) {
 		Certs: driftCerts{},
 		Now:   func() time.Time { return time.Date(2026, 6, 7, 0, 0, 0, 0, time.UTC) },
 	})
-	alerts, _ := svc.List(context.Background())
+	alerts, _ := svc.List(context.Background(), true)
 	got := map[alert.Type]bool{}
 	for _, a := range alerts {
 		got[a.Type] = true

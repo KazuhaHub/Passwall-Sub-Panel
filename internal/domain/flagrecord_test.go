@@ -278,6 +278,10 @@ func TestGeoFlagTransition_DisabledResetIsLeaveFlagged(t *testing.T) {
 	off.Scope = GeoScopeOff
 	exempt := p
 	exempt.AllowAnywhere = true
+	// An admin's trust is a policy decision too: its leave is a clear (state
+	// exempt), so after an untrust any re-entry reads as new.
+	trusted := p
+	trusted.Trusted = true
 	for _, c := range []struct {
 		policy GeoAnomalyPolicy
 		state  GeoState
@@ -285,6 +289,7 @@ func TestGeoFlagTransition_DisabledResetIsLeaveFlagged(t *testing.T) {
 	}{
 		{off, GeoStateDisabled, GeoWhyDisabled},
 		{exempt, GeoStateExempt, GeoWhyExempt},
+		{trusted, GeoStateExempt, GeoWhyTrusted},
 	} {
 		next := judgeFlag(c.policy, flagged, flagObs(c.policy, "over"))
 		rec, ok := GeoFlagTransition(flagged, true, next, 1)
@@ -421,6 +426,86 @@ func TestRiskFlagTransition_Table(t *testing.T) {
 	}
 }
 
+// A leave to unknown is not a clear, and unknown → clean moves no level, so
+// the definite verdict that ended the situation needs its own record: once,
+// when a stored unknown gets a verdict at no attention and the latest record
+// of that signal is still the leave to unknown. The leave is recorded again
+// with the definite state and code — the same event, from the same level —
+// so the reopen rule reads it as the clear it is. Anything else settles
+// nothing: a verdict still unknown or back at attention (RiskFlagTransition
+// records that), a stored state that was not unknown, and a latest record
+// that is not a leave to unknown — no record at all, one already settled,
+// another signal's — so unknown ↔ clean churn with no attention behind it
+// records nothing, as before.
+func TestRiskUnknownSettled_Table(t *testing.T) {
+	leftTo := func(from FlagLevel, st GeoState) FlagRecord {
+		return FlagRecord{UserID: 9, Source: string(RiskKindSubSpread), Event: FlagLeaveFlagged, Level: FlagLevelNone,
+			PrevLevel: from, State: st, Code: string(RiskCodeGeoUnavailable)}
+	}
+	unknownFromFlagged, unknownFromSuspect := leftTo(FlagLevelFlagged, GeoStateUnknown), leftTo(FlagLevelSuspect, GeoStateUnknown)
+	unknownFromSuspect.Event = FlagLeaveSuspect
+	otherKind := unknownFromFlagged
+	otherKind.Source = string(RiskKindDevices)
+	for _, c := range []struct {
+		name  string
+		prev  GeoState
+		last  FlagRecord
+		next  GeoState
+		code  RiskCode
+		event FlagEvent // "" = nothing recorded
+		from  FlagLevel
+	}{
+		{"flagged, unknown, clean", GeoStateUnknown, unknownFromFlagged, GeoStateClean, RiskCodeWithin, FlagLeaveFlagged, FlagLevelFlagged},
+		{"suspect, unknown, idle", GeoStateUnknown, unknownFromSuspect, GeoStateIdle, RiskCodeNoFetches, FlagLeaveSuspect, FlagLevelSuspect},
+		{"flagged, unknown, exempt", GeoStateUnknown, unknownFromFlagged, GeoStateExempt, RiskCodeAllowAnywhere, FlagLeaveFlagged, FlagLevelFlagged},
+		{"flagged, unknown, disabled", GeoStateUnknown, unknownFromFlagged, GeoStateDisabled, RiskCodeSignalOff, FlagLeaveFlagged, FlagLevelFlagged},
+		{"still unknown", GeoStateUnknown, unknownFromFlagged, GeoStateUnknown, RiskCodeLowPlaced, "", ""},
+		{"back at attention", GeoStateUnknown, unknownFromFlagged, GeoStateSuspect, RiskCodeSpreadBuilding, "", ""},
+		{"stored state was not unknown", GeoStateClean, unknownFromFlagged, GeoStateClean, RiskCodeWithin, "", ""},
+		{"no row before", "", unknownFromFlagged, GeoStateClean, RiskCodeWithin, "", ""},
+		{"no record at all", GeoStateUnknown, FlagRecord{}, GeoStateClean, RiskCodeWithin, "", ""},
+		{"already settled", GeoStateUnknown, leftTo(FlagLevelFlagged, GeoStateClean), GeoStateClean, RiskCodeWithin, "", ""},
+		{"latest record entered", GeoStateUnknown, FlagRecord{Source: string(RiskKindSubSpread), Event: FlagEnterSuspect,
+			Level: FlagLevelSuspect, State: GeoStateSuspect}, GeoStateClean, RiskCodeWithin, "", ""},
+		{"another signal's record", GeoStateUnknown, otherKind, GeoStateClean, RiskCodeWithin, "", ""},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			var ev json.RawMessage
+			if c.next == GeoStateClean {
+				ev = json.RawMessage(`{"v":1,"provinces":[]}`)
+			}
+			next := RiskSignal{UserID: 9, Kind: RiskKindSubSpread, State: c.next, Code: c.code, Evidence: ev}
+			rec, ok := RiskUnknownSettled(c.prev, c.last, next, 1_758_000_000_000)
+			if got := SettlesUnknown(c.prev, c.next); got != (c.prev == GeoStateUnknown && c.next != GeoStateUnknown &&
+				RiskAttention(c.next) == FlagLevelNone) {
+				t.Fatalf("SettlesUnknown(%q, %q) = %v", c.prev, c.next, got)
+			}
+			if c.event == "" {
+				if ok {
+					t.Fatalf("recorded %+v; want nothing", rec)
+				}
+				return
+			}
+			want := FlagRecord{
+				UserID: 9, Source: string(RiskKindSubSpread), Event: c.event, Level: FlagLevelNone, PrevLevel: c.from,
+				State: c.next, Code: string(c.code), Params: ev, AtMS: 1_758_000_000_000,
+			}
+			if !ok || !reflect.DeepEqual(rec, want) {
+				t.Fatalf("record %+v, %v\nwant   %+v", rec, ok, want)
+			}
+			if !(FlagStep{Source: rec.Source, Level: rec.Level, State: rec.State, AtMS: rec.AtMS}).IsClear() {
+				t.Fatalf("the settling record %+v is not a clear to the reopen rule", rec)
+			}
+			if len(ev) > 0 {
+				ev[2] = 'X'
+				if rec.Params[2] == 'X' {
+					t.Fatal("params alias the caller's evidence buffer")
+				}
+			}
+		})
+	}
+}
+
 // A risk record's params are the verdict's stored evidence, byte for byte:
 // the evidence is what the risk tab renders the verdict from, so the record
 // renders the same way, and it is already address-free (each evaluator's
@@ -495,16 +580,19 @@ func TestGeoAutoFlag_LevelsAndParams(t *testing.T) {
 }
 
 // The sources a record can name: the concurrent-location verdict, its
-// automatic suspension, and each risk signal by its kind — the list the
-// admin filter is checked against.
-func TestFlagSources_AreGeoGeoAutoAndEveryRiskKind(t *testing.T) {
-	want := []string{"geo", "geo_auto", "sub_spread", "devices", "usage_shift", "login_country"}
+// automatic suspension, each risk signal by its kind, and — last, because it
+// is no attention source — an admin's review action. The list the admin
+// filter is checked against. The events are the eight attention changes and
+// the four review actions, in that order.
+func TestFlagSources_AreGeoGeoAutoEveryRiskKindAndReview(t *testing.T) {
+	want := []string{"geo", "geo_auto", "sub_spread", "devices", "usage_shift", "login_country", "review"}
 	if got := FlagSources(); !slices.Equal(got, want) {
 		t.Fatalf("FlagSources() = %v, want %v", got, want)
 	}
 	events := []FlagEvent{
 		FlagEnterSuspect, FlagEnterFlagged, FlagLeaveSuspect, FlagLeaveFlagged,
 		FlagAutoSuspended, FlagAutoLiftedExpiry, FlagAutoLiftedAdmin, FlagAutoReplaced,
+		"dismissed", "undismissed", "trusted", "untrusted",
 	}
 	if got := FlagEvents(); !slices.Equal(got, events) {
 		t.Fatalf("FlagEvents() = %v, want %v", got, events)

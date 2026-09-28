@@ -193,18 +193,22 @@ type SubCoverage struct {
 //  1. Off → disabled / signal_off, no evidence.
 //  2. scope off → disabled / scope_off; scope country (or an unrecognised
 //     scope, which v2 reads as country) → disabled / scope_country.
-//  3. allow_anywhere → exempt / allow_anywhere, no evidence.
-//  4. nothing fetched → idle / no_fetches, no evidence.
-//  5. WindowDays < min_days → unknown / retention_short: the logs are not
+//  3. an admin trusts the account (geo policy Trusted) → exempt / trusted,
+//     no evidence. After the scope guards, which are the group's decision
+//     that nothing is judged; before allow_anywhere, because the per-account
+//     decision is the more specific one.
+//  4. allow_anywhere → exempt / allow_anywhere, no evidence.
+//  5. nothing fetched → idle / no_fetches, no evidence.
+//  6. WindowDays < min_days → unknown / retention_short: the logs are not
 //     kept long enough for anything to recur that often.
-//  6. no source left after exclusion → unknown / all_excluded.
-//  7. no geo database → unknown / geo_unavailable.
-//  8. placed/sources below min_placed_ratio → unknown / low_placed.
-//  9. no source placed to a region → unknown / no_regions.
-//  10. groups > tolerance → flagged / spread; groups_all > tolerance →
+//  7. no source left after exclusion → unknown / all_excluded.
+//  8. no geo database → unknown / geo_unavailable.
+//  9. placed/sources below min_placed_ratio → unknown / low_placed.
+//  10. no source placed to a region → unknown / no_regions.
+//  11. groups > tolerance → flagged / spread; groups_all > tolerance →
 //     suspect / spread_building; otherwise clean / within.
 //
-// "Cannot tell" is never clean: every guard from 5 on is unknown.
+// "Cannot tell" is never clean: every guard from 6 on is unknown.
 func EvaluateSubSpread(p SubSpreadPolicy, in SubSpreadInput) (RiskVerdict, *SubSpreadEvidence) {
 	geo := p.Geo.sanitized()
 	minDays := min(max(p.MinDays, 1), RiskWindowDays)
@@ -215,6 +219,8 @@ func EvaluateSubSpread(p SubSpreadPolicy, in SubSpreadInput) (RiskVerdict, *SubS
 		return RiskVerdict{State: GeoStateDisabled, Code: RiskCodeScopeOff}, nil
 	case geo.Scope == GeoScopeCountry:
 		return RiskVerdict{State: GeoStateDisabled, Code: RiskCodeScopeCountry}, nil
+	case geo.Trusted:
+		return RiskVerdict{State: GeoStateExempt, Code: RiskCodeTrusted}, nil
 	case geo.AllowAnywhere:
 		return RiskVerdict{State: GeoStateExempt, Code: RiskCodeAllowAnywhere}, nil
 	case !in.Fetched:

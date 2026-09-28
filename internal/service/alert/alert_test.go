@@ -84,7 +84,7 @@ func TestNodeHealthAlerts(t *testing.T) {
 		Settings: stubSettings{},
 	}, now)
 
-	alerts, _ := svc.List(context.Background())
+	alerts, _ := svc.List(context.Background(), true)
 	nh := byType(alerts, TypeNodeHealth)
 	if len(nh) != 2 {
 		t.Fatalf("want 2 node_health alerts (enabled+unhealthy only), got %d", len(nh))
@@ -114,7 +114,7 @@ func TestPanelUpgradeAlerts(t *testing.T) {
 			return "", false
 		},
 	}, now)
-	alerts, _ := svc.List(context.Background())
+	alerts, _ := svc.List(context.Background(), true)
 	up := byType(alerts, TypePanelUpgrade)
 	if len(up) != 1 {
 		t.Fatalf("want 1 panel_upgrade alert, got %d", len(up))
@@ -149,7 +149,7 @@ func TestPanelUpgradeAlertsSkipOtherProducts(t *testing.T) {
 					return "3.7.0", true
 				},
 			})
-			alerts, counts := svc.List(context.Background())
+			alerts, counts := svc.List(context.Background(), true)
 			if calls != 0 {
 				t.Fatalf("3X-UI upgrade callback called %d times for kind %q", calls, tt.kind)
 			}
@@ -180,7 +180,7 @@ func TestPanelUpgradeAlertsMixedKindsPreserve3XUIAndLegacy(t *testing.T) {
 		Certs:    stubCerts{active: []*domain.TLSCertificate{{ID: 8, Name: "expiring", Status: domain.CertStatusActive, NotAfter: tPtr(now.Add(3 * 24 * time.Hour))}}},
 		Settings: stubSettings{s: ports.UISettings{CertRenewBeforeDays: 14}},
 	}, now)
-	alerts, counts := svc.List(context.Background())
+	alerts, counts := svc.List(context.Background(), true)
 	if len(compared) != 3 || compared[0] != "3.4.2" || compared[1] != "3.4.2" || compared[2] != "3.7.0" {
 		t.Fatalf("only normalized 3X-UI versions should be compared, got %q", compared)
 	}
@@ -216,7 +216,7 @@ func TestCertAlerts(t *testing.T) {
 			},
 		},
 	}, now)
-	alerts, _ := svc.List(context.Background())
+	alerts, _ := svc.List(context.Background(), true)
 
 	failed := byType(alerts, TypeCertFailed)
 	if len(failed) != 1 || failed[0].Severity != SeverityError || failed[0].LastError != "dns timeout" {
@@ -261,7 +261,7 @@ func TestLoginSecurityAlert(t *testing.T) {
 	now := time.Now()
 	// Lockout off → no alert even if events exist.
 	off := newSvc(Deps{Settings: stubSettings{}, Events: stubEvents{count: 9}}, now)
-	if a, _ := off.List(context.Background()); len(byType(a, TypeLoginSecurity)) != 0 {
+	if a, _ := off.List(context.Background(), true); len(byType(a, TypeLoginSecurity)) != 0 {
 		t.Fatal("login_security must be silent when lockout is disabled")
 	}
 	// Lockout on + recent locked_out events → one aggregate alert.
@@ -283,282 +283,120 @@ func TestCountsAggregate(t *testing.T) {
 		Panels:     stubPanels{panels: []*domain.XUIPanel{{ID: 3, Name: "p", PanelVersion: "3.2.6"}}},
 		Settings:   stubSettings{s: ports.UISettings{CertRenewBeforeDays: 14}},
 		UpgradeFor: func(string) (string, bool) { return "3.2.8", true }, // 1 info
-		// Two geo singletons and the risk singleton: one warning each,
-		// however many users are behind them — the badge counts things to
-		// look at, not accounts.
-		GeoFlags:     &stubGeoFlags{n: 4},
-		ServiceHolds: &stubServiceHolds{byReason: map[domain.AutoDisabledReason]int64{domain.DisabledGeoAutoSuspend: 2}},
-		RiskFlags:    &stubRiskFlags{n: 6},
+		// The risk queue's singleton: one warning however many accounts are
+		// behind it — the badge counts things to look at, not accounts.
+		RiskQueue: &stubRiskQueue{n: 4},
 	}, now)
-	_, counts := svc.List(context.Background())
-	if counts.Error != 1 || counts.Warning != 4 || counts.Info != 1 {
-		t.Fatalf("counts wrong: %+v, want error 1, warning 4 (cert + two geo entries + risk signals), info 1", counts)
+	_, counts := svc.List(context.Background(), true)
+	if counts.Error != 1 || counts.Warning != 2 || counts.Info != 1 {
+		t.Fatalf("counts wrong: %+v, want error 1, warning 2 (cert + the risk queue), info 1", counts)
 	}
 }
 
 func mustList(t *testing.T, s *Service) []Alert {
 	t.Helper()
-	a, _ := s.List(context.Background())
+	a, _ := s.List(context.Background(), true)
 	return a
 }
 
-// ---- location detector (geo.go) ----
+// ---- the risk queue (riskqueue.go) ----
 
-type stubGeoFlags struct {
+type stubRiskQueue struct {
 	n     int64
 	err   error
-	since time.Time
 	calls int
 }
 
-func (s *stubGeoFlags) CountFlagged(_ context.Context, since time.Time) (int64, error) {
+func (s *stubRiskQueue) CountUrgent(context.Context) (int64, error) {
 	s.calls++
-	s.since = since
 	return s.n, s.err
 }
 
-type stubServiceHolds struct {
-	byReason map[domain.AutoDisabledReason]int64
-	err      error
-	asked    []domain.AutoDisabledReason
-}
-
-func (s *stubServiceHolds) CountByServiceDisabledReason(_ context.Context, r domain.AutoDisabledReason) (int64, error) {
-	s.asked = append(s.asked, r)
-	return s.byReason[r], s.err
-}
-
-// One entry for however many accounts are flagged, counted from the latch
-// and bounded to rows the detector judged in the last day. The bound is
-// passed through, not reinvented: the bell must stop lighting for a user the
-// poll stopped judging (a deleted client, a dead poll) rather than keep a
-// week-old latch on screen forever.
-func TestGeoAnomalyAlert_CountsFlaggedUsers(t *testing.T) {
-	now := time.Date(2026, 9, 25, 12, 0, 0, 0, time.UTC)
-	flags := &stubGeoFlags{n: 3}
-	got := byType(mustList(t, newSvc(Deps{GeoFlags: flags}, now)), TypeGeoAnomaly)
+// ONE entry for the risk center, whatever the number of accounts and signals
+// behind it: the count is the accounts the queue lists as needing action now
+// (open, and flagged or held by the detector), and the entry is a warning —
+// something to review, never an outage. A count and no name, because every
+// open admin tab polls the feed; one count per feed request for the same
+// reason. Admin-only, because the risk center it leads to names people on
+// signals rather than proof.
+func TestRiskQueueAlert_CountsAndIsAdminOnly(t *testing.T) {
+	q := &stubRiskQueue{n: 3}
+	got := byType(mustList(t, newSvc(Deps{RiskQueue: q}, time.Now())), TypeRiskQueue)
 	if len(got) != 1 {
-		t.Fatalf("geo_anomaly alerts = %+v, want exactly one singleton", got)
+		t.Fatalf("risk_queue alerts = %+v, want exactly one singleton", got)
 	}
 	a := got[0]
-	if a.Key != "geo_anomaly" || a.Severity != SeverityWarning || a.Count != 3 {
-		t.Fatalf("geo_anomaly = %+v, want key geo_anomaly, severity warning, count 3", a)
-	}
-	if want := now.Add(-24 * time.Hour); !flags.since.Equal(want) {
-		t.Fatalf("CountFlagged since = %v, want %v (24 hours before now)", flags.since, want)
-	}
-}
-
-// No flagged account, no entry — and a failing count is skipped rather than
-// blanking the feed, like every other source here.
-func TestGeoAnomalyAlert_SilentWhenNoneFlagged(t *testing.T) {
-	now := time.Date(2026, 9, 25, 12, 0, 0, 0, time.UTC)
-	if got := byType(mustList(t, newSvc(Deps{GeoFlags: &stubGeoFlags{}}, now)), TypeGeoAnomaly); len(got) != 0 {
-		t.Fatalf("geo_anomaly with nobody flagged = %+v, want none", got)
-	}
-	failing := newSvc(Deps{
-		GeoFlags: &stubGeoFlags{n: 5, err: errors.New("db down")},
-		Nodes:    stubNodes{nodes: []*domain.Node{{ID: 1, Enabled: true, HealthState: domain.NodeHealthUnreachable}}},
-	}, now)
-	all := mustList(t, failing)
-	if got := byType(all, TypeGeoAnomaly); len(got) != 0 {
-		t.Fatalf("geo_anomaly on a count error = %+v, want none", got)
-	}
-	if len(byType(all, TypeNodeHealth)) != 1 {
-		t.Fatal("a failing geo count blanked the rest of the feed")
-	}
-}
-
-// The second entry counts only geo_auto — the detector's own time-boxed
-// suspension. geo_anomaly is a person's decision and service_manual is an
-// admin pause; neither is news the bell should repeat.
-func TestGeoAutoSuspendedAlert_CountsGeoAutoOnly(t *testing.T) {
-	holds := &stubServiceHolds{byReason: map[domain.AutoDisabledReason]int64{
-		domain.DisabledGeoAutoSuspend: 2,
-		domain.DisabledGeoAnomaly:     5,
-		domain.DisabledServiceManual:  7,
-	}}
-	got := byType(mustList(t, newSvc(Deps{ServiceHolds: holds}, time.Now())), TypeGeoAutoSuspended)
-	if len(got) != 1 {
-		t.Fatalf("geo_auto_suspended alerts = %+v, want exactly one singleton", got)
-	}
-	a := got[0]
-	if a.Key != "geo_auto_suspended" || a.Severity != SeverityWarning || a.Count != 2 {
-		t.Fatalf("geo_auto_suspended = %+v, want key geo_auto_suspended, severity warning, count 2", a)
-	}
-	for _, r := range holds.asked {
-		if r != domain.DisabledGeoAutoSuspend {
-			t.Fatalf("asked for reason %q; the entry is about geo_auto only", r)
-		}
-	}
-
-	none := &stubServiceHolds{byReason: map[domain.AutoDisabledReason]int64{domain.DisabledGeoAnomaly: 5}}
-	if got := byType(mustList(t, newSvc(Deps{ServiceHolds: none}, time.Now())), TypeGeoAutoSuspended); len(got) != 0 {
-		t.Fatalf("geo_auto_suspended with no geo_auto rows = %+v, want none", got)
-	}
-	failing := &stubServiceHolds{byReason: map[domain.AutoDisabledReason]int64{domain.DisabledGeoAutoSuspend: 2}, err: errors.New("db down")}
-	if got := byType(mustList(t, newSvc(Deps{ServiceHolds: failing}, time.Now())), TypeGeoAutoSuspended); len(got) != 0 {
-		t.Fatalf("geo_auto_suspended on a count error = %+v, want none", got)
-	}
-}
-
-// Both entries lead to the Geo tab, which is admin-only because it names
-// people on a signal rather than proof. The feed route is staff-visible, so
-// AdminOnly is what keeps an operator from being handed that link.
-func TestGeoAlertsAreAdminOnly(t *testing.T) {
-	for _, typ := range []Type{TypeGeoAnomaly, TypeGeoAutoSuspended} {
-		if !typ.AdminOnly() {
-			t.Errorf("%s must be admin-only (the Geo tab is the owner's call, not an operator's)", typ)
-		}
-	}
-}
-
-// ---- risk signals (risk.go) ----
-
-type stubRiskFlags struct {
-	n     int64
-	err   error
-	since time.Time
-	calls int
-}
-
-func (s *stubRiskFlags) CountFlaggedUsers(_ context.Context, since time.Time) (int64, error) {
-	s.calls++
-	s.since = since
-	return s.n, s.err
-}
-
-// ONE entry for the risk signals, whatever the number of accounts and kinds
-// behind it (V3-D5): the count is accounts with any signal flagged, and the
-// entry is a warning like the geo ones — something to review, never an
-// outage. One count per feed request, because every open admin tab polls
-// the feed.
-func TestRiskAlert_CountsFlaggedUsers(t *testing.T) {
-	now := time.Date(2026, 9, 26, 12, 0, 0, 0, time.UTC)
-	flags := &stubRiskFlags{n: 3}
-	got := byType(mustList(t, newSvc(Deps{RiskFlags: flags}, now)), TypeRiskSignals)
-	if len(got) != 1 {
-		t.Fatalf("risk_signals alerts = %+v, want exactly one singleton", got)
-	}
-	a := got[0]
-	if a.Key != "risk_signals" || string(a.Type) != "risk_signals" || a.Severity != SeverityWarning || a.Count != 3 {
-		t.Fatalf("risk_signals = %+v, want key and type risk_signals, severity warning, count 3", a)
+	if a.Key != "risk_queue" || string(a.Type) != "risk_queue" || a.Severity != SeverityWarning || a.Count != 3 {
+		t.Fatalf("risk_queue = %+v, want key and type risk_queue, severity warning, count 3", a)
 	}
 	if a.TargetID != 0 || a.TargetName != "" {
-		t.Fatalf("risk_signals = %+v names an account; the bell carries a count, the tab carries the names", a)
+		t.Fatalf("risk_queue = %+v names an account; the bell carries a count, the queue carries the names", a)
 	}
-	if flags.calls != 1 {
-		t.Fatalf("CountFlaggedUsers called %d times for one feed request, want 1", flags.calls)
+	if q.calls != 1 {
+		t.Fatalf("CountUrgent called %d times for one feed request, want 1", q.calls)
+	}
+	if !TypeRiskQueue.AdminOnly() {
+		t.Fatal("risk_queue must be admin-only (the risk center is the owner's call, not an operator's)")
 	}
 }
 
-// Nobody flagged, no entry. And a failing count costs only this entry: the
-// geo entries and node health beside it must survive, as they do for every
-// other failing source here.
-func TestRiskAlert_SilentWhenNone(t *testing.T) {
-	now := time.Date(2026, 9, 26, 12, 0, 0, 0, time.UTC)
-	if got := byType(mustList(t, newSvc(Deps{RiskFlags: &stubRiskFlags{}}, now)), TypeRiskSignals); len(got) != 0 {
-		t.Fatalf("risk_signals with nobody flagged = %+v, want none", got)
+// Nobody needing action, no entry: a bell reading "0 accounts" is a bell
+// that is lit for nothing.
+func TestRiskQueueAlert_AbsentAtZero(t *testing.T) {
+	if got := byType(mustList(t, newSvc(Deps{RiskQueue: &stubRiskQueue{}}, time.Now())), TypeRiskQueue); len(got) != 0 {
+		t.Fatalf("risk_queue with nobody urgent = %+v, want none", got)
 	}
-	failing := newSvc(Deps{
-		RiskFlags: &stubRiskFlags{n: 5, err: errors.New("db down")},
-		GeoFlags:  &stubGeoFlags{n: 2},
+}
+
+// A failing count costs only this entry: node health beside it must survive,
+// as it does for every other failing source here.
+func TestRiskQueueAlert_CounterErrorIsSkipped(t *testing.T) {
+	svc := newSvc(Deps{
+		RiskQueue: &stubRiskQueue{n: 5, err: errors.New("db down")},
 		Nodes:     stubNodes{nodes: []*domain.Node{{ID: 1, Enabled: true, HealthState: domain.NodeHealthUnreachable}}},
-	}, now)
-	all := mustList(t, failing)
-	if got := byType(all, TypeRiskSignals); len(got) != 0 {
-		t.Fatalf("risk_signals on a count error = %+v, want none", got)
+	}, time.Now())
+	all := mustList(t, svc)
+	if got := byType(all, TypeRiskQueue); len(got) != 0 {
+		t.Fatalf("risk_queue on a count error = %+v, want none", got)
 	}
-	if len(byType(all, TypeNodeHealth)) != 1 || len(byType(all, TypeGeoAnomaly)) != 1 {
-		t.Fatalf("a failing risk count took other entries with it: %+v", all)
-	}
-}
-
-// The count is bounded to rows the worker wrote in the last day, the geo
-// entry's window: a flag the hourly worker stopped rewriting — a dead loop,
-// a kind skipped for days — must stop lighting the bell rather than stay on
-// screen as if it were current.
-func TestRiskAlert_UsesTheFreshnessWindow(t *testing.T) {
-	now := time.Date(2026, 9, 26, 12, 0, 0, 0, time.UTC)
-	flags := &stubRiskFlags{n: 1}
-	mustList(t, newSvc(Deps{RiskFlags: flags}, now))
-	if want := now.Add(-24 * time.Hour); !flags.since.Equal(want) {
-		t.Fatalf("CountFlaggedUsers since = %v, want %v (24 hours before now)", flags.since, want)
+	if len(byType(all, TypeNodeHealth)) != 1 {
+		t.Fatalf("a failing risk-queue count took the rest of the feed with it: %+v", all)
 	}
 }
 
-// The entry leads to the risk tab, which is admin-only for the Geo tab's
-// reason: it names people on signals, not proof. The feed route is
-// staff-visible, so AdminOnly is what keeps an operator from being handed
-// the link or a badge that counts it.
-func TestRiskAlertIsAdminOnly(t *testing.T) {
-	if !TypeRiskSignals.AdminOnly() {
-		t.Fatal("risk_signals must be admin-only (the risk tab is the owner's call, not an operator's)")
+// A deployment that leaves the counter out gets no entry and a working feed —
+// every alert source is optional.
+func TestRiskQueueAlert_NilCounter(t *testing.T) {
+	svc := newSvc(Deps{
+		Nodes: stubNodes{nodes: []*domain.Node{{ID: 1, Enabled: true, HealthState: domain.NodeHealthUnreachable}}},
+	}, time.Now())
+	all := mustList(t, svc)
+	if got := byType(all, TypeRiskQueue); len(got) != 0 {
+		t.Fatalf("risk_queue without a counter = %+v, want none", got)
+	}
+	if len(byType(all, TypeNodeHealth)) != 1 {
+		t.Fatalf("feed without a risk-queue counter = %+v, want node health intact", all)
 	}
 }
 
-// ---- bell freshness (risk.alert_freshness_hours) ----
-
-type failingSettings struct{}
-
-func (failingSettings) Load(context.Context, ports.UISettings) (ports.UISettings, error) {
-	return ports.UISettings{}, errors.New("db down")
-}
-
-// The geo bell's window is risk.alert_freshness_hours, raised to two poll
-// intervals: the poll re-judges every latched account once per poll, so a
-// window shorter than two polls would drop a flag off the bell between two
-// judgements and bring it back at the next — a lit, dark, lit bell for an
-// account nothing changed about. Six hours at a five-minute poll is six
-// hours; at a ten-hour poll it is twenty.
-func TestGeoAlertsUseTheConfiguredFreshnessAndThePollFloor(t *testing.T) {
-	now := time.Date(2026, 9, 26, 12, 0, 0, 0, time.UTC)
-	for _, c := range []struct {
-		name string
-		poll int
-		want time.Duration
-	}{
-		{"a five-minute poll keeps the configured six hours", 5, 6 * time.Hour},
-		{"a ten-hour poll raises it to two polls", 600, 20 * time.Hour},
-		{"an unset poll is the shipped five minutes", 0, 6 * time.Hour},
-	} {
-		t.Run(c.name, func(t *testing.T) {
-			flags := &stubGeoFlags{n: 1}
-			set := ports.UISettings{RiskAlertFreshnessHours: 6, CronTrafficPullMinutes: c.poll}
-			mustList(t, newSvc(Deps{GeoFlags: flags, Settings: stubSettings{s: set}}, now))
-			if want := now.Add(-c.want); !flags.since.Equal(want) {
-				t.Fatalf("CountFlagged since = %v, want %v (%v before now)", flags.since, want, c.want)
-			}
-		})
+// The count is a fleet-wide read (every account's attention and review), and
+// an operator could never be shown its result — the handler drops admin-only
+// entries. So the service does not compute it at all for a non-admin, rather
+// than computing it on every operator tab's poll and throwing it away.
+func TestList_NonAdminNeverComputesTheRiskQueue(t *testing.T) {
+	q := &stubRiskQueue{n: 3}
+	svc := newSvc(Deps{
+		RiskQueue: q,
+		Nodes:     stubNodes{nodes: []*domain.Node{{ID: 1, Enabled: true, HealthState: domain.NodeHealthUnreachable}}},
+	}, time.Now())
+	alerts, counts := svc.List(context.Background(), false)
+	if q.calls != 0 {
+		t.Fatalf("CountUrgent called %d times for a non-admin feed, want 0", q.calls)
 	}
-}
-
-// The risk bell's window is the same setting, raised to two worker
-// refreshes instead: the worker rewrites every row once per refresh, so a
-// daily refresh with a one-hour window would show a flag for an hour a day.
-// Unreadable settings are the shipped 24 hours — the bell must not go dark
-// because the settings table did.
-func TestRiskAlertsUseTheConfiguredFreshness(t *testing.T) {
-	now := time.Date(2026, 9, 26, 12, 0, 0, 0, time.UTC)
-	for _, c := range []struct {
-		name     string
-		settings SettingsLoader
-		want     time.Duration
-	}{
-		{"the configured six hours", stubSettings{s: ports.UISettings{RiskAlertFreshnessHours: 6}}, 6 * time.Hour},
-		{"a daily refresh raises one hour to two days", stubSettings{s: ports.UISettings{RiskAlertFreshnessHours: 1, RiskRefreshIntervalMinutes: 1440}}, 48 * time.Hour},
-		// Two 100-minute refreshes are 3h20m; the bell keeps the four whole
-		// hours the settings page says are in effect, not 3h20m under a 4.
-		{"a 100-minute refresh raises one hour to four whole hours", stubSettings{s: ports.UISettings{RiskAlertFreshnessHours: 1, RiskRefreshIntervalMinutes: 100}}, 4 * time.Hour},
-		{"an unreadable setting is the shipped day", failingSettings{}, 24 * time.Hour},
-	} {
-		t.Run(c.name, func(t *testing.T) {
-			flags := &stubRiskFlags{n: 1}
-			geo := &stubGeoFlags{n: 1}
-			mustList(t, newSvc(Deps{RiskFlags: flags, GeoFlags: geo, Settings: c.settings}, now))
-			if want := now.Add(-c.want); !flags.since.Equal(want) {
-				t.Fatalf("CountFlaggedUsers since = %v, want %v (%v before now)", flags.since, want, c.want)
-			}
-		})
+	if got := byType(alerts, TypeRiskQueue); len(got) != 0 {
+		t.Fatalf("non-admin feed has risk_queue %+v", got)
+	}
+	if len(byType(alerts, TypeNodeHealth)) != 1 || counts != (Counts{Error: 1}) {
+		t.Fatalf("non-admin feed = %+v, counts %+v; want node health and error 1", alerts, counts)
 	}
 }

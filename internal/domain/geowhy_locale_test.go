@@ -11,7 +11,9 @@ import (
 // reasonText (web-react/src/utils/geoAnomaly.ts) reads to localize a code.
 // The over tiers and the scope labels are listed whole rather than per tier:
 // the code does not say which tier or scope a row will carry, so a code is
-// only localized when every one it can meet is.
+// only localized when every one it can meet is. A sentence with numbers has
+// a *_bare sibling, the same sentence without them, which reasonText reads
+// for a row whose evidence lacks one of those numbers.
 //
 // A missing key does not fail anywhere at runtime. reasonText passes the
 // stored English as the default, so the row quietly renders in English, and
@@ -20,26 +22,30 @@ import (
 var geoReasonLocaleKeys = map[GeoReasonCode][]string{
 	GeoWhyDisabled:        {"reason_disabled"},
 	GeoWhyExempt:          {"reason_exempt"},
-	GeoWhyIdleStale:       {"reason_idle_stale"},
+	GeoWhyTrusted:         {"reason_trusted"},
+	GeoWhyIdleStale:       {"reason_idle_stale", "reason_idle_stale_bare"},
 	GeoWhyIdleNone:        {"reason_idle_none"},
-	GeoWhyUnknownExcluded: {"reason_unknown_excluded"},
+	GeoWhyUnknownExcluded: {"reason_unknown_excluded", "reason_unknown_excluded_bare"},
 	GeoWhyUnknownGeoOff:   {"reason_unknown_geo_off"},
-	GeoWhyUnknownLowRatio: {"reason_unknown_low_ratio"},
+	GeoWhyUnknownLowRatio: {"reason_unknown_low_ratio", "reason_unknown_low_ratio_bare"},
 	GeoWhySuspect: {
 		"reason_over_country", "reason_over_region", "reason_over_city", "reason_suspect_suffix",
+		"reason_over_country_bare", "reason_over_region_bare", "reason_over_city_bare",
 	},
 	GeoWhyFlaggedSustained: {
 		"reason_over_country", "reason_over_region", "reason_over_city", "reason_flagged_suffix",
+		"reason_over_country_bare", "reason_over_region_bare", "reason_over_city_bare",
 	},
 	// The tier clause names the tier with the chip labels the Geo tab
 	// already ships, so those are part of this code's sentence too.
 	GeoWhyFlaggedClearing: {
-		"reason_flagged_clearing", "reason_flagged_clearing_tier",
+		"reason_flagged_clearing", "reason_flagged_clearing_bare", "reason_flagged_clearing_tier",
 		"tier_country", "tier_region", "tier_city",
 	},
 	GeoWhyCleanUnplaced: {"reason_clean_unplaced"},
 	GeoWhyCleanWithin: {
-		"reason_clean_within", "reason_scope_country", "reason_scope_region", "reason_scope_city",
+		"reason_clean_within", "reason_clean_within_bare",
+		"reason_scope_country", "reason_scope_region", "reason_scope_city",
 	},
 }
 

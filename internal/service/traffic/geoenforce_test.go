@@ -40,22 +40,26 @@ type fakeGeoSuspender struct {
 
 // The writes run on the caller's context, as user.Service's do: a context
 // already cancelled fails the call before anything is written.
-func (f *fakeGeoSuspender) SuspendServiceIfClear(ctx context.Context, userID int64, reason domain.AutoDisabledReason, detail string) (bool, error) {
+func (f *fakeGeoSuspender) SuspendServiceIfClear(ctx context.Context, userID int64, reason domain.AutoDisabledReason, detail string) (bool, time.Time, error) {
 	f.suspendCalls = append(f.suspendCalls, userID)
 	if err := ctx.Err(); err != nil {
-		return false, err
+		return false, time.Time{}, err
 	}
 	if err := f.errFor[userID]; err != nil && !f.appliedWithErr[userID] {
-		return false, err
+		return false, time.Time{}, err
 	}
-	applied, err := f.repo.SetServiceStateIfClear(ctx, userID, reason, detail, time.Now())
-	if applied && f.afterWrite != nil {
+	now := time.Now()
+	applied, err := f.repo.SetServiceStateIfClear(ctx, userID, reason, detail, now)
+	if !applied {
+		return false, time.Time{}, err
+	}
+	if f.afterWrite != nil {
 		f.afterWrite()
 	}
 	if err == nil {
 		err = f.errFor[userID]
 	}
-	return applied, err
+	return true, now, err
 }
 
 func (f *fakeGeoSuspender) LiftServiceIfHeldSince(ctx context.Context, userID int64, reason domain.AutoDisabledReason, cutoff time.Time) (bool, error) {

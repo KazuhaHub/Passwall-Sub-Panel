@@ -2,6 +2,7 @@ package sqlstore
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -49,6 +50,17 @@ func (r *auditRepo) List(ctx context.Context, filter ports.AuditFilter) ([]*doma
 	}
 	if filter.Until != nil {
 		q = q.Where("at <= ?", *filter.Until)
+	}
+	// The rows this caller may not read (the audit read's admin-only
+	// targets, for anyone but an administrator). Part of q, so the Count
+	// below leaves them out too and the pager never promises rows it
+	// cannot show. Escaped like a keyword and lowered like likeCols, so
+	// the prefix is literal and the same rows drop out on every dialect;
+	// COALESCE because target is nullable and NOT LIKE on NULL is NULL,
+	// which would hide a row nobody asked to hide.
+	for _, prefix := range filter.ExcludeTargetPrefixes {
+		q = q.Where("LOWER(COALESCE(target, '')) NOT LIKE ? ESCAPE '"+likeEscapeChar+"'",
+			likeEscaper.Replace(strings.ToLower(prefix))+"%")
 	}
 
 	// `at` is non-unique (admin actions can land within the same ms on a

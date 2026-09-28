@@ -1,4 +1,3 @@
-import { client } from './client'
 import type { GeoAnomaly, GeoExcluded, GeoTier } from './geoAnomalies'
 
 /**
@@ -21,7 +20,7 @@ export const RISK_KINDS: readonly RiskKind[] = ['sub_spread', 'devices', 'usage_
  */
 export const RISK_CODES: Readonly<Record<RiskKind, readonly string[]>> = {
   sub_spread: [
-    'signal_off', 'scope_off', 'scope_country', 'allow_anywhere',
+    'signal_off', 'scope_off', 'scope_country', 'allow_anywhere', 'trusted',
     'no_fetches', 'retention_short', 'all_excluded', 'geo_unavailable',
     'low_placed', 'no_regions',
     'spread', 'spread_building', 'within',
@@ -35,7 +34,7 @@ export const RISK_CODES: Readonly<Record<RiskKind, readonly string[]>> = {
     'sustained', 'building', 'within',
   ],
   login_country: [
-    'signal_off', 'scope_off', 'allow_anywhere', 'no_recent_logins',
+    'signal_off', 'scope_off', 'allow_anywhere', 'trusted', 'no_recent_logins',
     'geo_unavailable', 'unplaced', 'learning',
     'new_country', 'known_countries',
   ],
@@ -162,19 +161,4 @@ export interface RiskUserRow {
   display_name?: string
   geo: { state: RiskState; flagged: boolean; tier: GeoTier; updated_at_ms: number } | null
   signals: RiskSignal[]
-}
-
-/**
- * Every account with at least one signal row, by user id. Unfiltered by
- * design: the attention filter is the tab's, on a switch the admin can turn
- * off, so a signal that quietly stopped judging stays visible.
- *
- * `user_id` asks for that one account's row alone (the risk center's lookup),
- * instead of the fleet list filtered here.
- */
-export async function listRiskSignals(
-  signal?: AbortSignal, params: { user_id?: number } = {},
-): Promise<RiskUserRow[]> {
-  const { data } = await client.get<{ items: RiskUserRow[] }>('/admin/risk-signals', { params, signal })
-  return data.items ?? []
 }

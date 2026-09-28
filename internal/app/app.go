@@ -51,6 +51,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/render"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/risk"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/riskcenter"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/riskreview"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/rollup"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/servermigration"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/sharedclient"
@@ -156,6 +157,12 @@ type App struct {
 	// for the same two passes. Nothing else keeps that history bounded, so a
 	// nil store compiles and it grows for ever: TestBuildPrunesFlagRecords.
 	flagRecords flagRecordPruner
+	// riskReviews is the risk_reviews store as the hourly cleanup sees it:
+	// the orphan purge only. A review row is current state, not history, so
+	// it has no retention; but it has no foreign key either, and a deleted
+	// account's row — an admin's note about somebody nobody can open — would
+	// otherwise stay for ever: TestBuildPrunesRiskReviewOrphans.
+	riskReviews riskReviewPruner
 	saml        *auth.SAMLService
 	// repos kept around so Run() can call initAdminIfNeeded AFTER the
 	// listen socket is bound — that way a bind failure (port busy / TLS
@@ -582,6 +589,23 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	flagRecords := sqlstore.NewFlagRecordRepo(db)
 	trafficSvc.SetFlagRecorder(flagRecords)
 	userSvc.SetFlagRecorder(flagRecords)
+	// The admins' review of accounts in the risk center: a dismissal until
+	// something new or worse happens, and a trust that exempts an account
+	// from the location judgements. Built the same way, so each consumer is
+	// handed only the narrow view it declares; the hourly cleanup below
+	// purges what deleted accounts left. The one guard that matters
+	// most needs no wiring: the user repo refuses a geo_auto suspension of a
+	// trusted account inside its own conditional write
+	// (TestBuildNeverGeoAutoSuspendsATrustedAccount).
+	//
+	// The detectors read the trusted accounts from it, once per judging
+	// step: the poll here, the risk worker through its Deps below. Both are
+	// nil-tolerant, so leaving either out compiles and the detector just
+	// goes on judging a trusted account's location — the guard above still
+	// stops the suspension, so nothing would look broken;
+	// TestBuildWiresTheTrustedAccounts guards both.
+	riskReviews := sqlstore.NewRiskReviewRepo(db)
+	trafficSvc.SetTrustedLister(riskReviews)
 	// The observe-only risk signals' store: a concrete repo built from the
 	// database handle like the geo streak store, not a ports.Repos field, so
 	// each consumer is handed only the narrow interface it declares — the
@@ -599,12 +623,16 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	// The risk center's read side, over the very sources the detectors
 	// write: the traffic service's live snapshot and its on-demand refresh
 	// (never a detector sample), the connection history and flag records
-	// built above, and the page of fetches it infers devices from. Every
-	// field is a narrow read interface (riskcenter.Deps); the users and
-	// panels repos are handed whole but only GetByID and List are
+	// built above, the page of fetches it infers devices from, and the
+	// attention queue's sources — the geo verdicts, the risk signals, the
+	// review rows and the detector's holds (read from the users table).
+	// Every field is a narrow read interface (riskcenter.Deps); the users,
+	// panels and groups repos are handed whole but only their reads are
 	// reachable through them. The router dep is optional, so leaving this
-	// out compiles and every risk-center route answers 503;
-	// TestBuildWiresTheRiskCenter drives them through the assembled router.
+	// out compiles and every risk-center route answers 503; and each
+	// attention source is optional too — left out, it contributes nothing,
+	// and the queue silently never lists what it would have said.
+	// TestBuildWiresTheRiskCenter drives each through the assembled router.
 	riskCenterSvc := riskcenter.New(riskcenter.Deps{
 		Live:     trafficSvc,
 		Settings: repos.Settings,
@@ -613,6 +641,25 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 		Fetches:  repos.SubLog,
 		History:  connHistory,
 		Flags:    flagRecords,
+		Geo:      geoStreaks,
+		Signals:  riskSignals,
+		Reviews:  riskReviews,
+		Holds:    repos.User,
+		Groups:   repos.Group,
+	})
+	// The review actions — dismiss and trust — write the review rows the
+	// risk center reads, and judge each action on the attention the risk
+	// center computes (so a dismissal accepts exactly what the queue shows).
+	// The one account write they may make is the user service's geo_auto-only
+	// lift, when a trust asks for it. The router dep is optional, so leaving
+	// this out compiles and the drawer's buttons just answer 503;
+	// TestBuildWiresTheRiskReview drives both actions through the assembled
+	// router.
+	reviewSvc := riskreview.New(riskreview.Deps{
+		Store:     riskReviews,
+		Attention: riskCenterSvc,
+		Users:     repos.User,
+		Resumer:   userSvc,
 	})
 
 	// --- transport layer ---
@@ -630,16 +677,17 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 		Cfg:           cfg,
 		Repos:         repos,
 		GeoRecords:    geoStreaks,
-		// The same store again, as the bell's count of latched flags.
-		GeoFlags: geoStreaks,
-		// The risk store twice over, the same way: the risk view's rows and
-		// the bell's count of flagged accounts. Both optional, so leaving
-		// either out would compile — TestBuildWiresTheRiskSignals reads both
-		// through the assembled router.
+		// The risk view's rows. Optional, so leaving it out would compile —
+		// TestBuildWiresTheRiskSignals reads it through the assembled router.
 		RiskSignals: riskSignals,
-		RiskFlags:   riskSignals,
 		RiskCenter:  riskCenterSvc,
-		// Optional like GeoFlags, so leaving it out would compile and quietly
+		// The risk center again, as the bell's count of the accounts that
+		// need action now — the queue's own number, so the bell and the
+		// queue cannot disagree. Optional like every alert source;
+		// TestBuildWiresTheRiskQueueBell reads it through the assembled router.
+		RiskQueue:  riskCenterSvc,
+		RiskReview: reviewSvc,
+		// Optional like RiskQueue, so leaving it out would compile and quietly
 		// record every subscription fetch as anonymous.
 		DeviceHasher: deviceHasher,
 		Pool:         pool,
@@ -714,6 +762,7 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	a.nodeMetrics = nodeMetrics
 	a.connHistory = connHistory
 	a.flagRecords = flagRecords
+	a.riskReviews = riskReviews
 	// The observe-only risk signals. The worker is handed read-only views and
 	// one store that writes only risk_signals (and, in the same transaction,
 	// the flag records of what each save changed) — the store built above,
@@ -725,7 +774,8 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	// service: the worker needs "is this PSP's own address", "has the set
 	// been built yet" and "which of them are landing nodes", and nothing
 	// else that service can do. The login log is handed over as the whole
-	// repo, but the worker's field is an interface with List alone.
+	// repo, but the worker's field is an interface with List alone; the
+	// review store likewise, behind an interface with ListTrusted alone.
 	a.risk = risk.New(risk.Deps{
 		Users:        repos.User,
 		Store:        riskSignals,
@@ -737,6 +787,7 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 		InfraLoaded:  trafficSvc.InfraLoaded,
 		AuthEvents:   repos.AuthEvent,
 		LandingAddrs: trafficSvc.LandingAddresses,
+		Trust:        riskReviews,
 	})
 	a.trafficInterval = time.Duration(sysSettings.CronTrafficPullMinutes) * time.Minute
 	// Rollup's gap heartbeat is derived from the poll cadence so a coarse poll
@@ -1288,6 +1339,7 @@ func (a *App) runAuditCleanupLoop(ctx context.Context) {
 		a.pruneSubLogs(ctx)
 		a.pruneConnectionHistory(ctx)
 		a.pruneFlagRecords(ctx)
+		a.pruneRiskReviews(ctx)
 		a.pruneCertEvents(ctx)
 		select {
 		case <-ctx.Done():
@@ -1585,6 +1637,31 @@ func (a *App) pruneFlagRecords(ctx context.Context) {
 		log.Warn("flag record orphan purge", "err", err)
 	case purged > 0:
 		log.Info("flag record orphan purge", "deleted", purged)
+	}
+}
+
+// riskReviewPruner is what the hourly cleanup needs of the risk_reviews
+// store, and all it is handed.
+type riskReviewPruner interface {
+	PurgeOrphans(ctx context.Context) (int64, error)
+}
+
+// pruneRiskReviews deletes the review rows of accounts that no longer exist.
+// No retention pass: a review row is an admin's standing decision, which
+// only an admin clears (a dismissal's lapse is decided when it is read, never
+// by deleting the row). The reads JOIN users, so a deleted account's row is
+// invisible from the moment of the delete; this makes it gone within the
+// hour. Counts only in the log.
+func (a *App) pruneRiskReviews(ctx context.Context) {
+	if a.riskReviews == nil {
+		return
+	}
+	purged, err := a.riskReviews.PurgeOrphans(ctx)
+	switch {
+	case err != nil:
+		log.Warn("risk review orphan purge", "err", err)
+	case purged > 0:
+		log.Info("risk review orphan purge", "deleted", purged)
 	}
 }
 

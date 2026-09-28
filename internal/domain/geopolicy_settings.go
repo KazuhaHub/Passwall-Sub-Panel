@@ -72,6 +72,9 @@ func GeoPolicyFromSettings(s GeoPolicySettings) GeoAnomalyPolicy {
 	// cannot express as a zero. Carried through verbatim.
 	p.AllowAnywhere = s.AllowAnywhere
 	p.BanEnabled = s.BanEnabled
+	// Trusted is deliberately not read here: it is one account's review
+	// state, set per user by the traffic poll and the risk worker after this
+	// returns. A settings value that could set it would trust a whole group.
 	p.CoTravel = parseCoTravel(s.CoTravel)
 	return p.sanitized()
 }

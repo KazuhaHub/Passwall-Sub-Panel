@@ -5,12 +5,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"time"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 )
 
 // The widths of risk_signals' bounded columns, checked by Save before anything
@@ -101,12 +103,17 @@ func NewRiskSignalRepo(db *gorm.DB) *RiskSignalRepo { return &RiskSignalRepo{db:
 // state) — the whole table, at most four rows per account, three narrow
 // columns — then upserts, then inserts a flag record for each saved signal
 // whose level moved (domain.RiskFlagTransition: suspect and flagged are the
-// levels, unknown included in "none", as the bell reads it). Either write
-// failing rolls back both: a verdict saved without its record would read as
-// the previous state next run, and the change would never be recorded at
-// all. The records are built from rows that passed validateRiskSignal, and
-// flag_records' columns are at least as wide, so the history cannot stall
-// the worker on data.
+// levels, unknown included in "none", as the bell reads it) — and, for a
+// stored unknown whose verdict is now definite at no attention, the clear
+// that settles its leave to unknown when that leave is still the signal's
+// latest record (domain.RiskUnknownSettled, read by latestRiskFlags): the
+// reopen rule does not count a leave to unknown as a clear, and the clean
+// verdict after it moves no level, so without it that clear would never be
+// written. Either write failing rolls back both: a verdict saved without
+// its record would read as the previous state next run, and the change
+// would never be recorded at all. The records are built from rows that
+// passed validateRiskSignal, and flag_records' columns are at least as wide,
+// so the history cannot stall the worker on data.
 //
 // EVERY STATEMENT RUNS ON tx. On SQLite the transaction holds the pool's one
 // connection (conn.go), and a statement on r.db would wait for it until the
@@ -165,11 +172,24 @@ func (r *RiskSignalRepo) Save(ctx context.Context, signals []domain.RiskSignal) 
 				return err
 			}
 		}
+		var settling []domain.RiskSignal
+		for _, s := range signals {
+			if domain.SettlesUnknown(prev[riskSignalKey{s.UserID, string(s.Kind)}], s.State) {
+				settling = append(settling, s)
+			}
+		}
+		last, err := latestRiskFlags(tx, settling)
+		if err != nil {
+			return err
+		}
 		atMS := time.Now().UnixMilli()
 		var flags []domain.FlagRecord
 		for _, s := range signals {
-			before, had := prev[riskSignalKey{s.UserID, string(s.Kind)}]
+			k := riskSignalKey{s.UserID, string(s.Kind)}
+			before, had := prev[k]
 			if rec, ok := domain.RiskFlagTransition(before, had, s, atMS); ok {
+				flags = append(flags, rec)
+			} else if rec, ok := domain.RiskUnknownSettled(before, last[k], s, atMS); ok {
 				flags = append(flags, rec)
 			}
 		}
@@ -178,6 +198,63 @@ func (r *RiskSignalRepo) Save(ctx context.Context, signals []domain.RiskSignal) 
 		}
 		return nil
 	})
+}
+
+// latestRiskFlags reads, on tx and only tx (see Save), the latest flag
+// record of each (user, kind) of signals — what domain.RiskUnknownSettled
+// decides on. A key with no record is absent.
+//
+// Latest is the highest id, the order written: a risk kind's records are
+// written only here, by the one worker, one run after another. One statement
+// per idReadChunk accounts, the kinds asked in its IN list, each (user,
+// source)'s MAX(id) found by a subquery served by idx_flag_user_at; the
+// pairs nobody asked for (another kind of the same account) are dropped
+// here. Three narrow columns, never params. Only the signals whose stored
+// state was unknown and whose verdict now is definite are asked about, so a
+// run with none of those issues no statement here at all.
+func latestRiskFlags(tx *gorm.DB, signals []domain.RiskSignal) (map[riskSignalKey]domain.FlagRecord, error) {
+	if len(signals) == 0 {
+		return nil, nil
+	}
+	asked := make(map[riskSignalKey]struct{}, len(signals))
+	ids := make([]int64, 0, len(signals))
+	var kinds []string
+	for _, s := range signals {
+		asked[riskSignalKey{s.UserID, string(s.Kind)}] = struct{}{}
+		ids = append(ids, s.UserID)
+		if !slices.Contains(kinds, string(s.Kind)) {
+			kinds = append(kinds, string(s.Kind))
+		}
+	}
+	out := make(map[riskSignalKey]domain.FlagRecord, len(signals))
+	for _, chunk := range idChunks(ids) {
+		var rows []struct {
+			UserID    int64  `gorm:"column:user_id"`
+			Source    string `gorm:"column:source"`
+			Level     string `gorm:"column:level"`
+			PrevLevel string `gorm:"column:prev_level"`
+			State     string `gorm:"column:state"`
+		}
+		latest := tx.Table("flag_records").Select("MAX(id)").
+			Where("user_id IN ? AND source IN ?", chunk, kinds).Group("user_id, source")
+		if err := tx.Table("flag_records").
+			Select("user_id, source, level, prev_level, state").
+			Where("id IN (?)", latest).
+			Scan(&rows).Error; err != nil {
+			return nil, fmt.Errorf("read the latest risk flag records: %w", err)
+		}
+		for _, row := range rows {
+			k := riskSignalKey{row.UserID, row.Source}
+			if _, ok := asked[k]; !ok {
+				continue
+			}
+			out[k] = domain.FlagRecord{
+				UserID: row.UserID, Source: row.Source, Level: domain.FlagLevel(row.Level),
+				PrevLevel: domain.FlagLevel(row.PrevLevel), State: domain.GeoState(row.State),
+			}
+		}
+	}
+	return out, nil
 }
 
 // riskSignalBatch is how many rows one upsert statement carries.
@@ -263,6 +340,31 @@ func riskEvidenceFrom(col *string) json.RawMessage {
 // because the view shows the fleet; the table holds at most one row per
 // account per kind.
 func (r *RiskSignalRepo) List(ctx context.Context) ([]domain.RiskSignal, error) {
+	out, err := listRiskSignals(r.db.WithContext(ctx))
+	if err != nil {
+		return nil, fmt.Errorf("list risk signals: %w", err)
+	}
+	return out, nil
+}
+
+// ListByUsers is List for the asked accounts only — every row, evidence and
+// names included, by user_id then kind: the evidence for one page of the
+// risk center's queue, or one account's drawer. Read in IN lists of
+// idReadChunk ids.
+func (r *RiskSignalRepo) ListByUsers(ctx context.Context, userIDs []int64) ([]domain.RiskSignal, error) {
+	var out []domain.RiskSignal
+	for _, chunk := range idChunks(userIDs) {
+		rows, err := listRiskSignals(r.db.WithContext(ctx).Where("risk_signals.user_id IN ?", chunk))
+		if err != nil {
+			return nil, fmt.Errorf("list risk signals by user: %w", err)
+		}
+		out = append(out, rows...)
+	}
+	return out, nil
+}
+
+// listRiskSignals runs List's JOIN on q, which may narrow it.
+func listRiskSignals(q *gorm.DB) ([]domain.RiskSignal, error) {
 	var rows []struct {
 		UserID      int64
 		Kind        string
@@ -273,7 +375,7 @@ func (r *RiskSignalRepo) List(ctx context.Context) ([]domain.RiskSignal, error) 
 		UPN         string
 		DisplayName string
 	}
-	err := r.db.WithContext(ctx).Table("risk_signals").
+	err := q.Table("risk_signals").
 		Select("risk_signals.user_id AS user_id, risk_signals.kind AS kind, risk_signals.state AS state, " +
 			"risk_signals.code AS code, risk_signals.evidence AS evidence, risk_signals.updated_at AS updated_at, " +
 			"users.upn AS upn, users.display_name AS display_name").
@@ -281,7 +383,7 @@ func (r *RiskSignalRepo) List(ctx context.Context) ([]domain.RiskSignal, error) 
 		Order("risk_signals.user_id, risk_signals.kind").
 		Scan(&rows).Error
 	if err != nil {
-		return nil, fmt.Errorf("list risk signals: %w", err)
+		return nil, err
 	}
 	out := make([]domain.RiskSignal, 0, len(rows))
 	for _, row := range rows {
@@ -299,26 +401,39 @@ func (r *RiskSignalRepo) List(ctx context.Context) ([]domain.RiskSignal, error) 
 	return out, nil
 }
 
-// CountFlaggedUsers counts the ACCOUNTS with any signal flagged and written at
-// or after since — the notification bell's risk_signals count, one COUNT per
-// feed request.
-//
-// Distinct accounts, not rows: one account flagged on two signals is one
-// account to review, and a row count would make the bell's number mean
-// nothing an admin can check. Flagged only — suspect is below the line, as it
-// is for the geo entry. Joined to users because there is no foreign key: a
-// deleted account's row is not somebody the admin can look up. Bounded by
-// updated_at so a row the worker stopped rewriting stops lighting the bell;
-// updated_at is unix milliseconds, so the comparison is an integer one and
-// identical on every dialect.
-func (r *RiskSignalRepo) CountFlaggedUsers(ctx context.Context, since time.Time) (int64, error) {
-	var n int64
+// AttentionLevels returns the risk center's risk-signal read: the rows of
+// existing accounts at attention — suspect or flagged; unknown is "cannot
+// tell", which domain.RiskAttention reads as none — written at or after
+// since, by user_id then kind. Four narrow columns and never the evidence,
+// for GeoStreakRepo.AttentionLevels' reason. JOIN users because there is no
+// foreign key; bounded by updated_at so a row the worker stopped rewriting
+// (a dead loop, a skipped kind) stops counting. updated_at is unix ms, so the
+// bound is an integer comparison on every dialect, and inclusive.
+func (r *RiskSignalRepo) AttentionLevels(ctx context.Context, since time.Time) ([]ports.SignalAttentionRow, error) {
+	var rows []struct {
+		UserID    int64  `gorm:"column:user_id"`
+		Kind      string `gorm:"column:kind"`
+		State     string `gorm:"column:state"`
+		UpdatedAt int64  `gorm:"column:updated_at"`
+	}
 	err := r.db.WithContext(ctx).Table("risk_signals").
-		Select("COUNT(DISTINCT risk_signals.user_id)").
+		Select("risk_signals.user_id AS user_id, risk_signals.kind AS kind, risk_signals.state AS state, "+
+			"risk_signals.updated_at AS updated_at").
 		Joins("JOIN users ON users.id = risk_signals.user_id").
-		Where("risk_signals.state = ? AND risk_signals.updated_at >= ?", string(domain.GeoStateFlagged), since.UnixMilli()).
-		Scan(&n).Error
-	return n, err
+		Where("risk_signals.state IN ? AND risk_signals.updated_at >= ?",
+			[]string{string(domain.GeoStateSuspect), string(domain.GeoStateFlagged)}, since.UnixMilli()).
+		Order("risk_signals.user_id, risk_signals.kind").
+		Scan(&rows).Error
+	if err != nil {
+		return nil, fmt.Errorf("risk signal attention levels: %w", err)
+	}
+	out := make([]ports.SignalAttentionRow, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, ports.SignalAttentionRow{
+			UserID: row.UserID, Kind: domain.RiskKind(row.Kind), State: domain.GeoState(row.State), UpdatedAtMS: row.UpdatedAt,
+		})
+	}
+	return out, nil
 }
 
 // PurgeOrphans deletes the rows of accounts that no longer exist and returns

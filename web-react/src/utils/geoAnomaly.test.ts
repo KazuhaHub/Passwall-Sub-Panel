@@ -8,10 +8,10 @@ vi.mock('@/api/client', () => ({ client: {} }))
 import zh from '@/locales/zh-CN/admin.json'
 import en from '@/locales/en-US/admin.json'
 import { GEO_REASON_CODES, type GeoAnomaly, type GeoReasonCode, type GeoSpot, type GeoWhy } from '@/api/geoAnomalies'
-import type { GeoIPStatus, UISettings } from '@/api/settings'
+import type { GeoIPStatus } from '@/api/settings'
 import { flatten, type Nested } from '@/i18n/options'
 import {
-  activeDbIsCountryOnly, geoTolerances, groupSpots, reasonText, sortBySeverity, spreadKm, tierLabelKey, type Translate,
+  activeDbIsCountryOnly, groupSpots, reasonText, spreadKm, tierLabelKey, type Translate,
 } from './geoAnomaly'
 
 function row(over: Partial<GeoAnomaly>): GeoAnomaly {
@@ -134,37 +134,6 @@ describe('spreadKm', () => {
   })
 })
 
-describe('sortBySeverity', () => {
-  it('puts what needs a decision first, and a latched idle flag above the ramp', () => {
-    const rows = [
-      row({ user_id: 1, state: 'clean', updated_at_ms: 50 }),
-      row({ user_id: 2, state: 'suspect', updated_at_ms: 40 }),
-      // Flagged, then disconnected: the streak froze with the latch on. It is
-      // still flagged, and sorting it by its "idle" state would bury it under
-      // every clean row — the easiest evasion there is.
-      row({ user_id: 3, state: 'idle', flagged: true, updated_at_ms: 10 }),
-      row({ user_id: 4, state: 'flagged', flagged: true, updated_at_ms: 20 }),
-      row({ user_id: 5, state: 'unknown', updated_at_ms: 30 }),
-      row({ user_id: 6, state: 'exempt', updated_at_ms: 60 }),
-      row({ user_id: 7, state: 'unknown', flagged: true, updated_at_ms: 5 }),
-      row({ user_id: 8, state: 'idle', updated_at_ms: 70 }),
-    ]
-    expect(sortBySeverity(rows).map(r => r.user_id)).toEqual([4, 3, 7, 2, 5, 1, 8, 6])
-  })
-
-  it('breaks ties newest first and leaves the input alone', () => {
-    const rows = [
-      row({ user_id: 1, state: 'suspect', updated_at_ms: 1 }),
-      row({ user_id: 2, state: 'suspect', updated_at_ms: 7 }),
-    ]
-    const sorted = sortBySeverity(rows)
-    expect(sorted.map(r => r.user_id)).toEqual([2, 1])
-    // A new array: the input is the query cache's, shared with every reader.
-    expect(sorted).not.toBe(rows)
-    expect(rows.map(r => r.user_id)).toEqual([1, 2])
-  })
-})
-
 describe('activeDbIsCountryOnly', () => {
   const db = (granularity: string, active: boolean) =>
     ({ file: `${granularity}.mmdb`, type: '', granularity, build_epoch: 0, active })
@@ -183,47 +152,6 @@ describe('activeDbIsCountryOnly', () => {
     // one would tell the admin two tiers are dead when they may be fine.
     expect(activeDbIsCountryOnly(undefined)).toBe(false)
     expect(activeDbIsCountryOnly({} as GeoIPStatus)).toBe(false)
-  })
-})
-
-describe('geoTolerances', () => {
-  const s = (over: Partial<UISettings>) => over as UISettings
-
-  it('reads unset (0 or missing) as the shipped defaults, never as zero tolerance', () => {
-    expect(geoTolerances(s({}))).toEqual({
-      flag: { countries: 1, regions: 1, cities: 2 },
-      ban: { countries: 1, regions: 2, cities: 3 },
-      banAfterPolls: 6,
-      banMinutes: 60,
-    })
-    expect(geoTolerances(s({
-      geo_anomaly_max_places: 0, geo_anomaly_max_regions: -1, geo_anomaly_max_cities: 0,
-      geo_anomaly_ban_max_countries: 0, geo_anomaly_ban_max_regions: 0, geo_anomaly_ban_max_cities: -3,
-      geo_anomaly_ban_after_polls: 0, geo_anomaly_ban_duration_minutes: -5,
-    }))).toEqual({
-      flag: { countries: 1, regions: 1, cities: 2 },
-      ban: { countries: 1, regions: 2, cities: 3 },
-      banAfterPolls: 6,
-      banMinutes: 60,
-    })
-  })
-
-  it('raises each ban tolerance to at least its flag tolerance', () => {
-    // The server does the same (sanitized), so ban-over always implies
-    // flag-over; the caption must say what will actually happen.
-    const got = geoTolerances(s({
-      geo_anomaly_max_places: 3, geo_anomaly_max_regions: 4, geo_anomaly_max_cities: 5,
-      geo_anomaly_ban_max_countries: 2, geo_anomaly_ban_max_regions: 9, geo_anomaly_ban_max_cities: 1,
-    }))
-    expect(got.flag).toEqual({ countries: 3, regions: 4, cities: 5 })
-    expect(got.ban).toEqual({ countries: 3, regions: 9, cities: 5 })
-  })
-
-  it('clamps the suspension length to seven days', () => {
-    expect(geoTolerances(s({ geo_anomaly_ban_duration_minutes: 99999 })).banMinutes).toBe(10080)
-    expect(geoTolerances(s({ geo_anomaly_ban_duration_minutes: 10080 })).banMinutes).toBe(10080)
-    expect(geoTolerances(s({ geo_anomaly_ban_duration_minutes: 1 })).banMinutes).toBe(1)
-    expect(geoTolerances(s({ geo_anomaly_ban_after_polls: 2 })).banAfterPolls).toBe(2)
   })
 })
 
@@ -271,6 +199,7 @@ describe('reasonText', () => {
   const cases: { name: string; r: GeoAnomaly; zh: string }[] = [
     { name: 'disabled', r: v2(why('disabled', { scope: 'off' })), zh: '此账号的地区检测已关闭' },
     { name: 'exempt', r: v2(why('exempt')), zh: '此账号允许从任何地方连接' },
+    { name: 'trusted', r: v2(why('trusted')), zh: '管理员已信任此账号，不做地区判定' },
     {
       name: 'idle_stale', r: v2(why('idle_stale'), { stale: 2 }),
       zh: '此刻没有并发连接；上游窗口里还有 2 个更早见过的地址',
@@ -350,7 +279,7 @@ describe('reasonText', () => {
   it('prints the group\'s own tolerance, not the default', () => {
     // The policy is resolved per group. An account in a group that allows
     // three provinces must read "tolerance 3", which is why the SPA reads
-    // the stored snapshot instead of geoTolerances(global settings).
+    // the stored snapshot instead of the global settings.
     const r = v2(why('flagged_sustained', { tier: 'region', tol: { countries: 1, regions: 3, cities: 2 } }),
       { spread: spread({ countries: 1, regions: 4, region_country: 'CN' }) }, { over_streak: 3 })
     expect(reasonText(r, zhT)).toContain('容错 3')
@@ -403,6 +332,70 @@ describe('reasonText', () => {
       expect(reasonText(clearing, translator(zh as Nested, ['geo_anomalies.reason_flagged_clearing']))).toBe('STORED ENGLISH')
 
       expect(reasonText(v2(why('disabled')), translator(zh as Nested, ['geo_anomalies.reason_disabled']))).toBe('STORED ENGLISH')
+    })
+  })
+
+  // 「同时在 CN 的 个省 / 州（容错 ）」: a verdict whose evidence lacks a number
+  // its sentence names — a field missing, or a whole block of the evidence —
+  // reads that sentence without numbers, in either language: never a hole,
+  // never a crash, and never the stored English beside localized neighbours.
+  describe('reads the sentence without numbers when one is missing', () => {
+    const zhDict = flatten(zh as Nested)
+    const enDict = flatten(en as Nested)
+    // The row with one part of its evidence (or of its why) taken away.
+    const without = (r: GeoAnomaly, k: keyof GeoAnomaly['evidence']): GeoAnomaly => {
+      const ev: Partial<GeoAnomaly['evidence']> = { ...r.evidence }
+      delete ev[k]
+      return { ...r, evidence: ev as GeoAnomaly['evidence'] }
+    }
+    const whyWithout = (w: GeoWhy, k: keyof GeoWhy): GeoWhy => {
+      const out: Partial<GeoWhy> = { ...w }
+      delete out[k]
+      return out as GeoWhy
+    }
+    const overRegion = v2(why('suspect', { tier: 'region' }),
+      { spread: spread({ regions: 2, region_country: 'CN' }) }, { over_streak: 1 })
+
+    const cases: { name: string; r: GeoAnomaly; key: string; tail?: { zh: string; en: string } }[] = [
+      { name: 'idle_stale without the stale count', r: without(v2(why('idle_stale')), 'stale'),
+        key: 'reason_idle_stale_bare' },
+      { name: 'unknown_excluded without its exclusions', r: without(v2(why('unknown_excluded')), 'excluded'),
+        key: 'reason_unknown_excluded_bare' },
+      { name: 'unknown_low_ratio without its coverage', r: without(v2(why('unknown_low_ratio')), 'coverage'),
+        key: 'reason_unknown_low_ratio_bare' },
+      { name: 'unknown_low_ratio without the ratio', r: v2(whyWithout(why('unknown_low_ratio'), 'min_placed_ratio')),
+        key: 'reason_unknown_low_ratio_bare' },
+      { name: 'a country-tier over without its tolerances',
+        r: v2(whyWithout(why('suspect', { tier: 'country' }), 'tol'), { spread: spread({ countries: 2 }) }, { over_streak: 1 }),
+        key: 'reason_over_country_bare', tail: { zh: '，连续 1 / 3 次', en: ', 1 of 3 checks so far' } },
+      { name: 'a region-tier over without the country it counted in',
+        r: v2(why('flagged_sustained', { tier: 'region' }), { spread: spread({ regions: 2, region_country: '' }) },
+          { over_streak: 3 }),
+        key: 'reason_over_region_bare', tail: { zh: '，已持续 3 / 3 次', en: ', sustained for 3 of 3 checks' } },
+      { name: 'a city-tier over without its spread',
+        r: without(v2(why('suspect', { tier: 'city' }), {}, { over_streak: 2 }), 'spread'),
+        key: 'reason_over_city_bare', tail: { zh: '，连续 2 / 3 次', en: ', 2 of 3 checks so far' } },
+      { name: 'a latch clearing without the checks it needs',
+        r: v2(whyWithout(why('flagged_clearing', { tier: 'region' }), 'clear_after'), {}, { under_streak: 1 }),
+        key: 'reason_flagged_clearing_bare', tail: { zh: '；标记原因：跨省', en: '; flagged as Cross-region' } },
+      { name: 'clean_within without its tolerances', r: v2(whyWithout(why('clean_within'), 'tol')),
+        key: 'reason_clean_within_bare' },
+    ]
+
+    it.each(cases)('$name', ({ r, key, tail }) => {
+      for (const [lang, t, dict] of [['zh', zhT, zhDict], ['en', enT, enDict]] as const) {
+        const bare = dict[`geo_anomalies.${key}`]
+        expect(bare, `${lang}: ${key}`).toBeTruthy()
+        expect(bare, `${lang}: ${key}`).not.toMatch(/\{\{|\}\}/)
+        expect(reasonText(r, t), lang).toBe(bare + (tail?.[lang] ?? ''))
+      }
+    })
+
+    it('keeps a whole head and leaves out a streak it cannot count', () => {
+      const r = v2(whyWithout(why('suspect', { tier: 'region' }), 'flag_after'),
+        { spread: spread({ regions: 2, region_country: 'CN' }) }, { over_streak: 1 })
+      expect(reasonText(r, zhT)).toBe('同时在 CN 的 2 个省 / 州（容错 1）')
+      expect(reasonText(overRegion, zhT)).toBe('同时在 CN 的 2 个省 / 州（容错 1），连续 1 / 3 次')
     })
   })
 })

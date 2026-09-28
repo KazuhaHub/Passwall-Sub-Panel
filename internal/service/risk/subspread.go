@@ -29,8 +29,13 @@ type placement struct {
 }
 
 // subSpread judges every account's fetch window (domain.EvaluateSubSpread)
-// and appends one sub_spread row per account of a readable group.
+// and appends one sub_spread row per account of a readable group. An account
+// an admin trusts reads exempt / trusted; with the trusted accounts
+// unreadable nothing is judged and the stored rows stay (readTrusted).
 func (s *Service) subSpread(ctx context.Context, r *refresh, w *fetchWindow, pl placement) error {
+	if r.trustUnreadable {
+		return nil
+	}
 	for _, u := range r.users {
 		if err := ctx.Err(); err != nil {
 			return fmt.Errorf("risk refresh: %w", err)
@@ -52,7 +57,7 @@ func (s *Service) subSpread(ctx context.Context, r *refresh, w *fetchWindow, pl 
 			in.Sightings, in.Identities = pw.sightings, pw.identities
 		}
 		v, ev := domain.EvaluateSubSpread(domain.SubSpreadPolicy{
-			Off: policy.risk.SubSpreadOff, Geo: policy.geo, MinDays: policy.risk.MinDays,
+			Off: policy.risk.SubSpreadOff, Geo: r.geoPolicyFor(u, policy), MinDays: policy.risk.MinDays,
 		}, in)
 		addVerdict(r, u.ID, domain.RiskKindSubSpread, v, ev)
 	}

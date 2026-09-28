@@ -86,6 +86,9 @@ func (r *fakeUserRepo) UpdateServiceState(ctx context.Context, userID int64, rea
 // conditional writes: the same predicates, the same "did it write" answer,
 // the same refusal of an empty reason. A fake that wrote unconditionally
 // would let the enforcement tests pass against code that overwrites holds.
+// Not emulated: the production refusal of geo_auto for an account an admin
+// trusts (risk_reviews), which app's TestBuildNeverGeoAutoSuspendsATrustedAccount
+// pins end to end.
 func (r *fakeUserRepo) SetServiceStateIfClear(ctx context.Context, userID int64, reason domain.AutoDisabledReason, detail string, at time.Time) (bool, error) {
 	if reason == domain.DisabledNone {
 		return false, fmt.Errorf("%w: empty service reason", domain.ErrValidation)
@@ -115,14 +118,46 @@ func (r *fakeUserRepo) ClearServiceStateIfReason(ctx context.Context, userID int
 	return true, nil
 }
 
-func (r *fakeUserRepo) CountByServiceDisabledReason(ctx context.Context, reason domain.AutoDisabledReason) (int64, error) {
-	var n int64
-	for _, u := range r.users {
-		if u.ServiceDisabledReason == reason {
-			n++
+// ListByIDs / ListServiceHolds answer like the production reads (existing
+// ids in id order; exact reason, by id, the hold time in ms). Not exercised
+// by the traffic tests — present to satisfy ports.UserRepo.
+func (r *fakeUserRepo) ListByIDs(ctx context.Context, ids []int64) ([]*domain.User, error) {
+	var out []*domain.User
+	for _, id := range ids {
+		if u, ok := r.users[id]; ok && !containsUser(out, id) {
+			out = append(out, u)
 		}
 	}
-	return n, nil
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out, nil
+}
+
+func containsUser(us []*domain.User, id int64) bool {
+	for _, u := range us {
+		if u.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
+func (r *fakeUserRepo) ListServiceHolds(ctx context.Context, reason domain.AutoDisabledReason) ([]ports.ServiceHold, error) {
+	if reason == domain.DisabledNone {
+		return nil, fmt.Errorf("%w: empty service reason", domain.ErrValidation)
+	}
+	var out []ports.ServiceHold
+	for _, u := range r.users {
+		if u.ServiceDisabledReason != reason {
+			continue
+		}
+		h := ports.ServiceHold{UserID: u.ID}
+		if u.ServiceDisabledAt != nil {
+			h.SinceMS = u.ServiceDisabledAt.UnixMilli()
+		}
+		out = append(out, h)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].UserID < out[j].UserID })
+	return out, nil
 }
 
 func (r *fakeUserRepo) UpdateTrafficState(ctx context.Context, u *domain.User) error {

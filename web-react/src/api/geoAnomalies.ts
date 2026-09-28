@@ -1,5 +1,3 @@
-import { client } from './client'
-
 /**
  * The tier a verdict was over at, coarsest first: two COUNTRIES is a stronger
  * statement than the cities that come with them. '' when nothing was over.
@@ -38,13 +36,13 @@ export interface GeoExcluded {
  * Which EvaluateGeo branch wrote the verdict's English `reason`. Mirrors
  * domain.GeoReasonCode: stable strings, stored in the evidence and sent as-is.
  */
-export type GeoReasonCode = 'disabled' | 'exempt' | 'idle_stale' | 'idle_none' | 'unknown_excluded'
-  | 'unknown_geo_off' | 'unknown_low_ratio' | 'suspect' | 'flagged_sustained' | 'flagged_clearing'
-  | 'clean_unplaced' | 'clean_within'
+export type GeoReasonCode = 'disabled' | 'exempt' | 'trusted' | 'idle_stale' | 'idle_none'
+  | 'unknown_excluded' | 'unknown_geo_off' | 'unknown_low_ratio' | 'suspect' | 'flagged_sustained'
+  | 'flagged_clearing' | 'clean_unplaced' | 'clean_within'
 
 /** Every code, in domain.AllGeoReasonCodes order. */
 export const GEO_REASON_CODES: readonly GeoReasonCode[] = [
-  'disabled', 'exempt',
+  'disabled', 'exempt', 'trusted',
   'idle_stale', 'idle_none',
   'unknown_excluded', 'unknown_geo_off', 'unknown_low_ratio',
   'suspect', 'flagged_sustained', 'flagged_clearing',
@@ -156,19 +154,4 @@ export interface GeoAnomaly {
    *  the detector itself suspended it; anything else is somebody else's hold. */
   service_disabled_reason?: string
   service_disabled_at_ms?: number
-}
-
-/**
- * Every judged user, newest first. Unfiltered by design: the denominator has
- * to stay reachable so a detector that has stopped working is visible.
- *
- * `user_id` asks for that one account's verdict alone (the risk center's
- * lookup). The server applies it before it names the rows, so one account
- * costs one user read rather than one per judged account.
- */
-export async function listGeoAnomalies(
-  signal?: AbortSignal, params: { user_id?: number } = {},
-): Promise<GeoAnomaly[]> {
-  const { data } = await client.get<{ items: GeoAnomaly[] }>('/admin/geo-anomalies', { params, signal })
-  return data.items ?? []
 }

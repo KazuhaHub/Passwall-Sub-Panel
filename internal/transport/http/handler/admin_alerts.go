@@ -24,12 +24,18 @@ func NewAdminAlertsHandler(alerts *alert.Service) *AdminAlertsHandler {
 // List returns {alerts, counts}. counts is the per-severity tally the bell
 // badge renders (badge number = error+warning+info, colour = highest present).
 func (h *AdminAlertsHandler) List(c *gin.Context) {
-	items, counts := h.alerts.List(c.Request.Context())
+	claims := middleware.ClaimsFrom(c)
+	admin := claims != nil && claims.Role == domain.RoleAdmin
+	// The service is told who is asking so it can skip what only an admin
+	// may see and is costly to compute (the risk queue's fleet-wide count).
+	items, counts := h.alerts.List(c.Request.Context(), admin)
 
 	// This route is staff-visible (admin + operator), but cert / panel-upgrade
 	// alerts deep-link to admin-only pages. Hide them from operators so the bell
 	// never offers a link to a 403 page; recompute counts so the badge matches.
-	if claims := middleware.ClaimsFrom(c); claims == nil || claims.Role != domain.RoleAdmin {
+	// Kept as the second line for the risk queue too: a category that forgets
+	// to consult admin in the service still never reaches an operator.
+	if !admin {
 		filtered := make([]alert.Alert, 0, len(items))
 		for _, a := range items {
 			if a.Type.AdminOnly() {

@@ -32,8 +32,8 @@ export interface UserAutocompleteProps {
  * larger than one page, and an account past it must still be findable. The
  * keyword is debounced, so typing "alice" asks once, not five times. The
  * picked account keeps its name even when the current search does not
- * return it (a deep link, or a row opened from another tab): it is read by
- * id through the same entry the lookup's own detail reads.
+ * return it (a filter read back from the URL): it is read by id
+ * (userKeys.detail).
  */
 export default function UserAutocomplete({ value, onChange, label, width = 280 }: UserAutocompleteProps) {
   const { t } = useTranslation(['admin'])
@@ -76,7 +76,7 @@ export default function UserAutocomplete({ value, onChange, label, width = 280 }
       getOptionLabel={o => o.label}
       sx={{ width, maxWidth: '100%' }}
       renderInput={params => (
-        <TextField {...params} label={label ?? t('admin:risk_center.lookup.pick', { defaultValue: '选择用户' })} />
+        <TextField {...params} label={label ?? t('admin:risk_center.pick_user')} />
       )}
     />
   )

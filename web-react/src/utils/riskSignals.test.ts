@@ -7,12 +7,11 @@ vi.mock('@/api/client', () => ({ client: {} }))
 
 import zh from '@/locales/zh-CN/admin.json'
 import en from '@/locales/en-US/admin.json'
-import { RISK_CODES, RISK_KINDS, type RiskKind, type RiskSignal, type RiskUserRow } from '@/api/riskSignals'
-import type { UISettings } from '@/api/settings'
+import { RISK_CODES, RISK_KINDS, type RiskKind, type RiskSignal } from '@/api/riskSignals'
 import { flatten, type Nested } from '@/i18n/options'
 import type { Translate } from './geoAnomaly'
 import {
-  dayBits, dayLabels, formatGB, needsAttention, oldestUpdate, placeLabel, riskCodeText, riskPolicy, sortRiskRows,
+  dayBits, dayLabels, formatGB, placeLabel, riskCodeText,
 } from './riskSignals'
 
 // A stand-in for i18next's t over one shipped bundle: the admin namespace
@@ -35,74 +34,6 @@ const enT = translator(en as Nested)
 function sig(kind: string, state: RiskSignal['state'], over: Partial<RiskSignal> = {}): RiskSignal {
   return { kind: kind as RiskKind, state, code: 'within', evidence: null, updated_at_ms: 1, ...over }
 }
-
-function user(id: number, signals: RiskSignal[], over: Partial<RiskUserRow> = {}): RiskUserRow {
-  return { user_id: id, upn: `u${id}`, geo: null, signals, ...over }
-}
-
-describe('needsAttention', () => {
-  it('holds a row with a flagged or suspect signal', () => {
-    expect(needsAttention(user(1, [sig('devices', 'flagged')]))).toBe(true)
-    expect(needsAttention(user(1, [sig('usage_shift', 'suspect')]))).toBe(true)
-  })
-
-  it('does not hold a row that only cannot tell, has no data, or is clean', () => {
-    // "Cannot tell" is not a finding. On a fleet where no client sends
-    // x-hwid, every row reads devices: unknown, and listing them all would
-    // bury the one account that matters under the whole fleet.
-    const quiet = ['unknown', 'idle', 'clean', 'exempt', 'disabled'] as const
-    expect(needsAttention(user(1, quiet.map((s, i) => sig(RISK_KINDS[i % 4], s))))).toBe(false)
-    expect(needsAttention(user(1, []))).toBe(false)
-  })
-
-  it('counts the concurrent-location latch, not only its state', () => {
-    // A flagged account that disconnected reads state idle and is still
-    // flagged — the easiest evasion there is, if the filter reads the state.
-    expect(needsAttention(user(1, [], { geo: { state: 'idle', flagged: true, tier: 'region', updated_at_ms: 1 } }))).toBe(true)
-    expect(needsAttention(user(1, [], { geo: { state: 'suspect', flagged: false, tier: 'city', updated_at_ms: 1 } }))).toBe(true)
-    expect(needsAttention(user(1, [], { geo: { state: 'flagged', flagged: true, tier: 'country', updated_at_ms: 1 } }))).toBe(true)
-    expect(needsAttention(user(1, [], { geo: { state: 'unknown', flagged: false, tier: '', updated_at_ms: 1 } }))).toBe(false)
-  })
-
-  it('ignores a kind this build does not show', () => {
-    // A row listed for a flag nobody can see in it is a row nobody can act on.
-    expect(needsAttention(user(1, [sig('travel', 'flagged')]))).toBe(false)
-  })
-})
-
-describe('sortRiskRows', () => {
-  it('orders by the most severe signal, a geo latch counting as a flag', () => {
-    const rows = [
-      user(1, [sig('sub_spread', 'clean')], { upn: 'clean' }),
-      user(2, [sig('devices', 'suspect'), sig('usage_shift', 'clean')], { upn: 'suspect' }),
-      user(3, [sig('sub_spread', 'idle')], { upn: 'idle' }),
-      user(4, [sig('usage_shift', 'unknown')], { upn: 'unknown' }),
-      user(5, [sig('login_country', 'clean')], {
-        upn: 'latched', geo: { state: 'idle', flagged: true, tier: 'region', updated_at_ms: 1 },
-      }),
-      user(6, [sig('devices', 'clean'), sig('login_country', 'flagged')], { upn: 'flagged' }),
-    ]
-    expect(sortRiskRows(rows).map(r => r.upn)).toEqual(['flagged', 'latched', 'suspect', 'unknown', 'clean', 'idle'])
-  })
-
-  it('breaks ties by name, "#id" for an account without one', () => {
-    const rows = [
-      user(9, [sig('devices', 'flagged')], { upn: 'bob' }),
-      user(7, [sig('devices', 'flagged')], { upn: undefined }),
-      user(8, [sig('devices', 'flagged')], { upn: 'alice' }),
-    ]
-    expect(sortRiskRows(rows).map(r => r.user_id)).toEqual([7, 8, 9])
-  })
-
-  it('returns a new array and leaves the input alone', () => {
-    // The input is the query cache's, shared with every reader.
-    const rows = [user(1, [sig('devices', 'clean')]), user(2, [sig('devices', 'flagged')])]
-    const sorted = sortRiskRows(rows)
-    expect(sorted).not.toBe(rows)
-    expect(rows.map(r => r.user_id)).toEqual([1, 2])
-    expect(sorted.map(r => r.user_id)).toEqual([2, 1])
-  })
-})
 
 // One evidence body per kind, carrying every field a code's sentence reads.
 const evidence: Record<RiskKind, object> = {
@@ -186,6 +117,40 @@ describe('riskCodeText', () => {
     // code is still more than a blank tooltip.
     expect(riskCodeText(sig('devices', 'unknown', { code: 'teleported' }), zhT)).toBe('teleported')
   })
+
+  // 「有 组互不相连的常驻省份（容错 ）」: a verdict stored without the numbers
+  // its sentence names — no evidence at all, or evidence missing a field —
+  // reads the same sentence without numbers, never one with holes in it.
+  const zhDict = flatten(zh as Nested)
+  const enDict = flatten(en as Nested)
+  const withNumbers = RISK_KINDS.flatMap(k => RISK_CODES[k]
+    .filter(c => [zhDict, enDict].some(d => /\{\{/.test(d[`risk_signals.code.${k}.${c}`] ?? '')))
+    .map(c => [k, c] as const))
+
+  it('has a sentence without numbers for exactly the codes whose sentence has numbers', () => {
+    for (const dict of [zhDict, enDict]) {
+      const bare = Object.keys(dict).filter(k => k.startsWith('risk_signals.code_bare.')).sort()
+      expect(bare).toEqual(withNumbers.map(([k, c]) => `risk_signals.code_bare.${k}.${c}`).sort())
+      for (const key of bare) expect(dict[key], key).not.toMatch(/\{\{|\}\}/)
+    }
+  })
+
+  it.each(withNumbers)('%s.%s without its numbers reads its sentence without them, in both languages', (kind, code) => {
+    for (const [t, dict] of [[zhT, zhDict], [enT, enDict]] as const) {
+      const want = dict[`risk_signals.code_bare.${kind}.${code}`]
+      expect(riskCodeText(sig(kind, 'flagged', { code, evidence: null }), t)).toBe(want)
+      expect(riskCodeText(sig(kind, 'flagged', { code, evidence: {} }), t)).toBe(want)
+    }
+  })
+
+  it('reads the verdicts seen with holes as whole sentences', () => {
+    expect(riskCodeText(sig('sub_spread', 'flagged', { code: 'spread' }), zhT)).toBe('有多组互不相连的常驻省份，超过容错')
+    expect(riskCodeText(sig('usage_shift', 'clean', { code: 'within' }), zhT)).toBe('最近的用量没有持续超过自身基线')
+    // The events are there, but none names a country.
+    expect(riskCodeText(sig('login_country', 'flagged', {
+      code: 'new_country', evidence: { ...evidence.login_country, events: [] },
+    }), enT)).toBe('Login from a new country')
+  })
 })
 
 describe('usage_shift reasons', () => {
@@ -238,57 +203,11 @@ describe('dayLabels', () => {
   })
 })
 
-describe('riskPolicy', () => {
-  const s = (over: Partial<UISettings>) => over as UISettings
-
-  it('reads unset (0, negative or missing) as the shipped defaults', () => {
-    const def = { minDays: 3, maxDevices: 3, ratio: 3, floorGB: 3 }
-    expect(riskPolicy(s({}))).toEqual(def)
-    expect(riskPolicy(s({ risk_min_days: 0, risk_max_devices: 0, risk_usage_ratio: 0, risk_usage_floor_gb: 0 }))).toEqual(def)
-    expect(riskPolicy(s({ risk_min_days: -2, risk_max_devices: -1, risk_usage_ratio: -3, risk_usage_floor_gb: -4 }))).toEqual(def)
-  })
-
-  it('holds min_days to the fetch window in effect', () => {
-    // RiskPolicy.Bounded: a place cannot recur on more days than the window
-    // holds, and the window is a setting whose value in effect the server
-    // reports. Without the map (an older server) the structural 7 applies.
-    expect(riskPolicy(s({ risk_min_days: 5, runtime_effective: { risk_window_days: 3 } })).minDays).toBe(3)
-    expect(riskPolicy(s({ runtime_effective: { risk_window_days: 2 } })).minDays).toBe(2)
-    expect(riskPolicy(s({ risk_min_days: 5, runtime_effective: {} })).minDays).toBe(5)
-    expect(riskPolicy(s({ risk_min_days: 9 })).minDays).toBe(7)
-  })
-
-  it('repairs toward not accusing, as the server does', () => {
-    // domain.RiskPolicyFromSettings: a ratio below 1.5 is raised to it, and
-    // min_days is clamped to the seven-day window it counts within.
-    expect(riskPolicy(s({ risk_usage_ratio: 1 })).ratio).toBe(1.5)
-    expect(riskPolicy(s({ risk_min_days: 9 })).minDays).toBe(7)
-    expect(riskPolicy(s({ risk_min_days: 1, risk_max_devices: 5, risk_usage_ratio: 2.5, risk_usage_floor_gb: 10 })))
-      .toEqual({ minDays: 1, maxDevices: 5, ratio: 2.5, floorGB: 10 })
-  })
-})
-
 describe('formatGB', () => {
   it('prints bytes as GiB with two decimals', () => {
     expect(formatGB(0)).toBe('0.00 GB')
     expect(formatGB(2.5 * 2 ** 30)).toBe('2.50 GB')
     expect(formatGB(1536 * 2 ** 20)).toBe('1.50 GB')
-  })
-})
-
-describe('oldestUpdate', () => {
-  it('is the oldest signal time, so one kind stuck for days shows', () => {
-    const row = user(1, [
-      sig('sub_spread', 'clean', { updated_at_ms: 300 }),
-      sig('devices', 'clean', { updated_at_ms: 100 }),
-      sig('usage_shift', 'clean', { updated_at_ms: 200 }),
-    ])
-    expect(oldestUpdate(row)).toBe(100)
-  })
-
-  it('is 0 for no signals, and ignores a kind this build does not show', () => {
-    expect(oldestUpdate(user(1, []))).toBe(0)
-    expect(oldestUpdate(user(1, [sig('travel', 'clean', { updated_at_ms: 5 }), sig('devices', 'clean', { updated_at_ms: 50 })]))).toBe(50)
   })
 })
 

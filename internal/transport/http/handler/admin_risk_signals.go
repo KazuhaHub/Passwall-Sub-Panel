@@ -150,19 +150,7 @@ func (h *AdminRiskSignalHandler) List(c *gin.Context) {
 			row = &riskUserRow{UserID: s.UserID, UPN: s.UPN, Display: s.DisplayName, Geo: geo[s.UserID]}
 			byUser[s.UserID] = row
 		}
-		evidence := s.Evidence
-		if len(evidence) == 0 {
-			// Nil marshals as null; an empty non-nil value would make the
-			// whole response fail to encode.
-			evidence = nil
-		}
-		row.Signals = append(row.Signals, riskSignalDTO{
-			Kind:        string(s.Kind),
-			State:       string(s.State),
-			Code:        string(s.Code),
-			Evidence:    evidence,
-			UpdatedAtMS: s.UpdatedAtMS,
-		})
+		row.Signals = append(row.Signals, riskSignalDTOOf(s))
 	}
 
 	// Ordered here rather than trusted from the store: the store orders
@@ -177,4 +165,22 @@ func (h *AdminRiskSignalHandler) List(c *gin.Context) {
 	}
 	sort.Slice(rows, func(i, j int) bool { return rows[i].UserID < rows[j].UserID })
 	c.JSON(http.StatusOK, gin.H{"items": rows})
+}
+
+// riskSignalDTOOf is one signal as every admin read serves it — this list,
+// and the risk center's queue and drawer.
+func riskSignalDTOOf(s domain.RiskSignal) riskSignalDTO {
+	evidence := s.Evidence
+	if len(evidence) == 0 {
+		// Nil marshals as null; an empty non-nil value would make the
+		// whole response fail to encode.
+		evidence = nil
+	}
+	return riskSignalDTO{
+		Kind:        string(s.Kind),
+		State:       string(s.State),
+		Code:        string(s.Code),
+		Evidence:    evidence,
+		UpdatedAtMS: s.UpdatedAtMS,
+	}
 }

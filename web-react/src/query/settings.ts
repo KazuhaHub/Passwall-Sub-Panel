@@ -81,10 +81,11 @@ export function useOidcConfig(scope: QueryScope) {
 }
 
 /**
- * The location databases and which is active — for the Geo tab, which only
- * needs to know whether the active one resolves countries only. Quiet on
- * failure: the banner is advisory, and a toast over a page whose real data
- * loaded fine would say something broke when nothing the admin asked for did.
+ * The location databases and which is active — for the risk center, which
+ * needs to know whether a database is active at all and whether it resolves
+ * countries only. Quiet on failure: the notices are advisory, and a toast over
+ * a page whose real data loaded fine would say something broke when nothing
+ * the admin asked for did.
  */
 export function geoIPStatusQuery(scope: QueryScope) {
   return queryOptions({
