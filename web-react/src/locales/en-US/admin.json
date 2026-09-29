@@ -1489,6 +1489,7 @@
         "groups_desc": "Override the detector settings above for one group; anything not overridden is inherited."
       },
       "enabled": "On",
+      "disabled": "Off",
       "preset": "Preset",
       "preset_loose": "Loose",
       "preset_standard": "Standard",
