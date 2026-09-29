@@ -13,6 +13,13 @@ import QueueTab from './queue/QueueTab'
 import RecordsTab from './RecordsTab'
 import { legacyRedirect, parseRiskTab, type RiskTab } from './riskParams'
 
+const HELP_KEY: Record<RiskTab, string> = {
+  queue: 'admin:risk_center.help.queue',
+  live: 'admin:risk_center.help.live',
+  records: 'admin:risk_center.help.records',
+  policy: 'admin:risk_center.help.policy',
+}
+
 /**
  * THE RISK CENTER: one admin-only page for what the panel observes about who
  * is using an account — the accounts that need a look (待处理), who is
@@ -76,37 +83,28 @@ export default function RiskCenterView() {
           <UserAutocomplete value={null} onChange={id => { if (id) drawer.open(id) }}
             label={t('admin:risk_center.pick_user')} width={260} />
         } />
-      <Tabs value={tab} onChange={(_, v: RiskTab) => setTab(v)} variant="scrollable" allowScrollButtonsMobile
-        sx={{ mb: 2, borderBottom: `1px solid ${md.outlineVariant}` }}>
-        <Tab value="queue" label={t('admin:risk_center.tab_queue')} />
-        <Tab value="live" label={t('admin:risk_center.tab_live')} />
-        <Tab value="records" label={t('admin:risk_center.tab_records')} />
-        <Tab value="policy" label={t('admin:risk_center.tab_policy')} />
-      </Tabs>
+      <Box sx={{ display: 'flex', alignItems: 'stretch', mb: 2, borderBottom: `1px solid ${md.outlineVariant}` }}>
+        <Tabs value={tab} onChange={(_, v: RiskTab) => setTab(v)} variant="scrollable" allowScrollButtonsMobile
+          sx={{ flex: 1, minWidth: 0 }}>
+          <Tab value="queue" label={t('admin:risk_center.tab_queue')} />
+          <Tab value="live" label={t('admin:risk_center.tab_live')} />
+          <Tab value="records" label={t('admin:risk_center.tab_records')} />
+          <Tab value="policy" label={t('admin:risk_center.tab_policy')} />
+        </Tabs>
+        <HelpTip textKey={HELP_KEY[tab]} />
+      </Box>
       {/* Only the open tab mounts, so only its lists are read. */}
       {tab === 'queue' && (
-        <>
-          <HelpTip textKey="admin:risk_center.help.queue" />
-          <QueueTab onOpenUser={drawer.open} onOpenLive={() => setTab('live')} onOpenPolicy={() => setTab('policy')} />
-        </>
+        <QueueTab onOpenUser={drawer.open} onOpenLive={() => setTab('live')} onOpenPolicy={() => setTab('policy')} />
       )}
       {tab === 'live' && (
-        <>
-          <HelpTip textKey="admin:risk_center.help.live" />
-          <LiveConnectionsTab onOpenUser={drawer.open} />
-        </>
+        <LiveConnectionsTab onOpenUser={drawer.open} />
       )}
       {tab === 'records' && (
-        <>
-          <HelpTip textKey="admin:risk_center.help.records" />
-          <RecordsTab onOpenUser={drawer.open} />
-        </>
+        <RecordsTab onOpenUser={drawer.open} />
       )}
       {tab === 'policy' && (
-        <>
-          <HelpTip textKey="admin:risk_center.help.policy" />
-          <PolicyTab />
-        </>
+        <PolicyTab />
       )}
       <RiskUserDrawer userId={drawer.id} onClose={drawer.close} host="risk" />
     </Box>

@@ -16,7 +16,7 @@ export default function HelpTip({ textKey }: { textKey: string }) {
   const md = useTheme().palette.md
   const [anchor, setAnchor] = useState<HTMLElement | null>(null)
   return (
-    <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: -1 }}>
+    <Box sx={{ display: 'flex', flex: '0 0 auto', alignSelf: 'stretch', alignItems: 'center' }}>
       <IconButton size="small" aria-label={t('admin:risk_center.help.label')} aria-haspopup="dialog"
         onClick={e => setAnchor(e.currentTarget)}>
         <HelpOutlineIcon fontSize="small" />

@@ -77,7 +77,8 @@ export default function DetectorCard({
       <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2, flexWrap: 'wrap' }}>
         <Typography id={titleId} component="h2" sx={{ fontSize: 16, fontWeight: 600 }}>{t(card.title)}</Typography>
         {onToggle && (
-          <FormControlLabel label={t(`${P}enabled`)} labelPlacement="start" sx={{ mr: 0 }}
+          <FormControlLabel label={t(`${P}${on === true ? 'enabled' : 'disabled'}`)} labelPlacement="start"
+            sx={{ m: 0, gap: 0.5, '& .MuiFormControlLabel-label': { minWidth: '3em', textAlign: 'right', color: md.onSurfaceVariant } }}
             control={<Switch checked={on === true} onChange={(_, c) => onToggle(c)} />} />
         )}
       </Box>

@@ -1486,7 +1486,8 @@
         "groups": "分组例外",
         "groups_desc": "为某个分组覆盖上面的检测参数；未覆盖的项继承全局。"
       },
-      "enabled": "启用",
+      "enabled": "开启",
+      "disabled": "关闭",
       "preset": "预设",
       "preset_loose": "宽松",
       "preset_standard": "标准",
