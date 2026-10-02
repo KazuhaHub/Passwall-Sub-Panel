@@ -131,6 +131,30 @@ export const FAMILY_CATALOG: Record<string, FamilyInfo> = {
   psp_sso_claim_silent_total: c('sso', true),
 }
 
+/**
+ * The label group (admin:diagnostics.labels.<group>) that names each labelled
+ * family's children, for the families whose children an operator reads by
+ * name. A family left out shows its children as their raw `label=value`,
+ * which is what an unnamed value would show anyway (labelFor's fallback).
+ */
+export const FAMILY_LABEL_GROUP: Record<string, string> = {
+  psp_poll_stage_ms: 'stage',
+  psp_lifecycle_sync_write_reason_total: 'write_reason',
+  psp_lifecycle_sync_error_stage_total: 'lifecycle_stage',
+  psp_lifecycle_sync_error_panel_kind_total: 'panel_kind',
+  psp_capability_gap_total: 'capability',
+  psp_panel_rtt_ms: 'op',
+  psp_panel_op_total: 'op',
+  psp_panel_op_error_total: 'op',
+  psp_geo_auto_suspension_total: 'geo_auto',
+  psp_risk_refresh_total: 'risk_refresh',
+  psp_live_conn_refresh_total: 'live_conn_refresh',
+  psp_node_host_report_total: 'node_host_report',
+  psp_node_sync_refused_total: 'node_refused',
+  psp_saml_acs_failure_total: 'saml',
+  psp_sso_claim_silent_total: 'sso_kind',
+}
+
 /** Families on one card, in catalogue order. */
 export function familiesOfCard(card: CardId): string[] {
   return Object.keys(FAMILY_CATALOG).filter(f => FAMILY_CATALOG[f].card === card)

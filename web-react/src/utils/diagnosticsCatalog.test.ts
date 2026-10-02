@@ -7,6 +7,7 @@ import { flatten, type Nested } from '@/i18n/options'
 import {
   CARD_ORDER,
   FAMILY_CATALOG,
+  FAMILY_LABEL_GROUP,
   STAGE_GROUP_ORDER,
   WRITE_REASON_GROUP_ORDER,
   LIFECYCLE_ERROR_KINDS,
@@ -169,6 +170,35 @@ describe('lifecycle failure breakdowns', () => {
   it('has a label for every step and every panel kind in both bundles', () => {
     expectCopy(LIFECYCLE_ERROR_STAGES.map(st => `labels.lifecycle_stage.${labelKey(st)}`))
     expectCopy(LIFECYCLE_ERROR_KINDS.map(k => `labels.panel_kind.${labelKey(k)}`))
+  })
+})
+
+// The raw area names a labelled family's children through these groups. A
+// group named here without copy would print every child under its raw value
+// while looking translated everywhere else.
+describe('FAMILY_LABEL_GROUP', () => {
+  it('names only labelled families the catalogue knows', () => {
+    for (const family of Object.keys(FAMILY_LABEL_GROUP)) {
+      expect(FAMILY_CATALOG[family]?.labelled, family).toBe(true)
+    }
+  })
+
+  it('points every family at a label group both bundles have', () => {
+    for (const [lang, bundle] of BUNDLES) {
+      for (const [family, group] of Object.entries(FAMILY_LABEL_GROUP)) {
+        const any = [...bundle].some(k => k.startsWith(`diagnostics.labels.${group}.`))
+        expect(any, `${lang} labels.${group} for ${family}`).toBe(true)
+      }
+    }
+  })
+
+  it('names the children the cards translate, with the groups they use', () => {
+    expect(FAMILY_LABEL_GROUP).toMatchObject({
+      psp_poll_stage_ms: 'stage',
+      psp_panel_op_total: 'op',
+      psp_lifecycle_sync_error_stage_total: 'lifecycle_stage',
+      psp_saml_acs_failure_total: 'saml',
+    })
   })
 })
 

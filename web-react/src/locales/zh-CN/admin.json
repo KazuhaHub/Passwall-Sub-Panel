@@ -3259,8 +3259,7 @@
       "ok_notices": "未发现问题 · 另有提示 {{count}} 条",
       "measuring": "测量中：统计时间还不够长，约 {{remaining}} 后给出结论",
       "measuring_unknown": "测量中：无法确定流量采集间隔，暂不下结论",
-      "blackout": "刚开始统计：第一轮流量采集尚未完成（每 {{interval}} 一轮）",
-      "problems": "发现 {{count}} 项问题"
+      "blackout": "刚开始统计：第一轮流量采集尚未完成（每 {{interval}} 一轮）"
     },
     "state": {
       "failing": "需要处理",
@@ -3292,22 +3291,19 @@
       "push_capacity_zero": {
         "title": "流量服务没有启动",
         "impact": "流量采集和配额兜底刷新都不会运行：计量、超额停用和在线 IP 采集全部停止，本页其余数字因此没有意义。",
-        "action": "查看服务端启动日志中的错误，处理后重启面板。",
-        "detail": "容量在构造时写入一次，所以 0 意味着流量服务从未被构造。推送一族的所有指标此刻都不描述任何真实的东西。检查启动日志。"
+        "action": "查看服务端启动日志中的错误，处理后重启面板。"
       },
       "poll_dead": {
         "title": "流量采集已停止：{{window}} 内一轮也没有运行",
         "impact": "流量不再计量，超额和到期不会自动停用，在线 IP 采集和异地判定也随之停止。",
         "action": "查看服务端运行日志中的错误或崩溃记录，处理后重启面板。",
-        "log": "traffic loop started · traffic poll",
-        "detail": "它死了、从未启动、或在入口就 panic。下游的计量、配额执法、在线 IP 全部停摆。去服务端日志找 traceback。"
+        "log": "traffic loop started · traffic poll"
       },
       "poll_errors": {
         "title": "{{errors}} 轮流量采集因读不到用户列表而整轮跳过（共 {{polls}} 轮）",
         "impact": "这几轮没有计量流量，也没有检查超额和到期。面板连不上不会计入这里。",
         "action": "检查数据库能否连接、磁盘是否已满。",
-        "log": "traffic poll",
-        "detail": "注意这只统计用户列表读取这一条错误路径；面板不可达、快照写入失败等都不计入这里。"
+        "log": "traffic poll"
       },
       "poll_behind": {
         "title": "流量采集比预期少了约 {{missing}} 轮（已运行 {{polls}} 轮，按间隔至少应有 {{expected}} 轮）",
@@ -3322,16 +3318,14 @@
         "retry": "由管理操作、成员变更或自动停用与恢复引起的失败会记入「同步任务」，可以在那里查看错误并重试；此外，定期修复会再次核对所有用户，补上仍不一致的状态。每次重试失败都会再计一次，所以次数不等于受影响的用户数。",
         "action": "打开「同步任务」，查看有没有未完成或已取消的用户任务及其错误信息；再到「服务器」确认相关面板可以连接、原生节点在线。",
         "log": "shared-client lifecycle push failed",
-        "log_note": "用这个关键字能搜到两种日志：每位用户一条，只含第一个错误；以及每个失败的客户端一条（以「for a client」结尾），带面板编号 panel_id 和失败的步骤 stage，可以据此区分不同面板上的失败。",
-        "detail": "启用状态、到期时间或配额没能写进面板。停用指令走的就是这条路。"
+        "log_note": "用这个关键字能搜到两种日志：每位用户一条，只含第一个错误；以及每个失败的客户端一条（以「for a client」结尾），带面板编号 panel_id 和失败的步骤 stage，可以据此区分不同面板上的失败。"
       },
       "push_errors": {
         "title": "{{errors}} 次配额兜底刷新失败（共 {{attempted}} 次，{{pct}}）",
         "impact": "相关用户在面板上的剩余额度没有更新到最新。PSP 在线时仍会在下一轮采集按实际用量停用超额用户；只有 PSP 离线期间，面板才依赖这个额度自行断流。写入面板失败的那部分同时计入「用户状态写入失败」，两处次数会有重叠。",
         "retry": "这类失败不进入「同步任务」：该用户下次产生流量时会再刷新，定期修复也会补上。",
         "action": "到「服务器」检查相关面板能否连接。",
-        "log": "traffic floor push failed",
-        "detail": "这条路径没有重试队列——只有一行日志，且下次重试的前提是该用户再产生流量。搜日志 traffic floor push failed / shared-client lifecycle push failed，并核对面板可达性。"
+        "log": "traffic floor push failed"
       },
       "push_backlog": {
         "title": "{{cycles}} 轮采集因上一轮的兜底刷新还在排队而跳过了刷新（共跳过 {{suppressed}} 次）",
@@ -3343,8 +3337,7 @@
         "impact": "采集时有面板没有返回在线 IP，这些用户的在线 IP 数和异地判定只是「至少」。同一用户每轮各计一次。",
         "sui": "已接入 S-UI 面板：S-UI 不提供在线 IP，使用这些面板的用户每轮都会计入，所以这个数会持续增长。如果受影响的只有 S-UI 上的用户，这是预期现象。",
         "action": "到「服务器」检查其他面板能否连接，并在服务端日志中搜索下面的关键字，看是哪个面板没有返回。",
-        "log": "live client IPs unavailable for this panel",
-        "detail": "有面板没答上来。这些用户的在线 IP 数和异地判定都只是下限，不能当总数读。"
+        "log": "live client IPs unavailable for this panel"
       },
       "history_write_errors": {
         "title": "{{errors}} 轮在线连接没能写入连接历史",
@@ -3380,25 +3373,7 @@
         "impact": "这些限制会写入面板，但不会生效：S-UI 和 PSP 原生节点不支持 IP 上限与设备上限，3X-UI 3.7.0 以下的版本存不下设备上限。只要情况不变，每次核对都会再计一次，这是持续状态而不是故障。",
         "note": "另外，设备上限目前在任何面板上都不会执行，3.7.0 及以上的 3X-UI 也只是保存这个值，所以这里没有计数并不代表设备上限已经生效。",
         "action": "在「服务器」查看各面板支持哪些限制；把这些用户换到支持的面板，或升级面板。",
-        "log": "panel cannot enforce a setting PSP is pushing",
-        "detail": "面板存不下 PSP 要写的字段。注意：设备上限这一项即使没有缺口，也不代表它被执行了——PSP 架构下任何面板版本都不执行设备上限。"
-      },
-      "title": "发现（{{count}}）",
-      "push_suppressed": {
-        "title": "{{suppressed}} 次推送被跨周期守卫抑制",
-        "detail": "上一周期的推送还没排空，整个周期的 floor 推送被跳过。偶发可接受；持续出现说明推送侧开始追不上。"
-      },
-      "push_carryover": {
-        "title": "推送溢出到下一周期 {{carryover}} 次",
-        "detail": "这是 data-plane-plan.md 里「重开自研数据面」的三条判据之一。注意它在周期开始时就计数，所以刚启动时出现一两次是正常的。"
-      },
-      "invariant_poll_ms": {
-        "title": "轮询耗时样本数与轮询次数不符",
-        "detail": "观测到 {{observed}} 个样本，但记录了 {{expected}} 轮。差 1 是快照非原子造成的噪声；差得多说明有周期在中途退出。"
-      },
-      "invariant_push_enqueue": {
-        "title": "推送执行数超过入队数",
-        "detail": "执行 {{started}} 次、入队 {{enqueued}} 次。每次执行都应当先入队，所以这个方向的差值不该出现。"
+        "log": "panel cannot enforce a setting PSP is pushing"
       }
     },
     "self_check": {
@@ -3569,6 +3544,7 @@
       "version": "版本",
       "build": "构建",
       "build_local": "本地构建",
+      "copy_build": "复制构建号",
       "uptime": "面板已运行",
       "since": "统计起点",
       "window": "统计时长",
@@ -3637,9 +3613,7 @@
       "confirm": "清零",
       "done": "已清零，新的统计从 {{time}} 开始。",
       "kept": "已清零。清零前 {{window}} 的统计可以下载保存，离开本页后不再保留。",
-      "download_previous": "下载清零前的数据",
-      "action": "清零并重新计时",
-      "nothing": "窗口是空的，没有可清零的内容"
+      "download_previous": "下载清零前的数据"
     },
     "fmt": {
       "duration_s": "{{s}} 秒",
@@ -3908,8 +3882,7 @@
       "psp_sso_claim_silent_total": {
         "label": "单点登录缺少角色或分组信息",
         "desc": "配置了角色或分组规则、但身份提供方没有返回规则所需属性的单点登录次数；此时沿用原有的角色和分组。"
-      },
-      "panel_fetch": "轮询中「等面板回话」那一段，通常占整轮的绝大部分"
+      }
     },
     "labels": {
       "stage": {
@@ -4045,41 +4018,7 @@
         "role": "角色",
         "group": "分组"
       }
-    },
-    "refresh": "刷新",
-    "window": "测量窗口 {{window}} · 进程已运行 {{uptime}}",
-    "was_reset": "计数被手动清零过，所以窗口短于进程运行时长",
-    "blackout": "窗口还不足一个轮询周期（{{interval}}），一轮都可能没跑完。此时的 0 不代表正常，所以数字暂不显示——已观测到的问题仍会在上方列出。",
-    "precondition": {
-      "poll_running": {
-        "label": "轮询在跑",
-        "help": "流量轮询是下面一切的驱动来源。它没跑，下面所有的 0 都只有这一个原因。"
-      },
-      "push_capacity": {
-        "label": "推送闸已建",
-        "help": "并发闸容量在构造时写入一次。读到 0 不是「池子小」，是流量服务从未被构造，这一族指标描述的全是空气。"
-      },
-      "push_reaching": {
-        "label": "推送在执行",
-        "help": "配额 floor 推送是否真的进入执行。没有尝试就没有成功率——那是缺分母，不是 0%。"
-      },
-      "lifecycle_running": {
-        "label": "生命周期同步在跑",
-        "help": "共享客户端的启用/到期/配额下发是否在发生。"
-      },
-      "liveip_complete": {
-        "label": "在线 IP 读取完整",
-        "help": "有任何一个面板没读到，下游每个数字都只是下限而不是总数。"
-      }
-    },
-    "table": {
-      "metric": "指标",
-      "value": "值",
-      "means": "含义"
-    },
-    "never_observed": "本窗口内从未观测到",
-    "too_few_samples": "样本仅 {{count}} 个 · 最大 {{max}}",
-    "footer": "版本 {{version}} · commit {{commit}} · goroutine {{goroutines}} · 推送并发闸容量 {{capacity}}"
+    }
   },
   "nodeMetrics": {
     "title": "{{name}} 的主机指标",

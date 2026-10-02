@@ -7,10 +7,18 @@ import type {
 } from '@/api/diagnostics'
 import {
   CARD_ORDER,
+  FAMILY_CATALOG,
+  STAGE_GROUP,
+  STAGE_GROUP_ORDER,
+  WRITE_REASON_GROUP,
+  WRITE_REASON_GROUP_ORDER,
   familyOf,
   type CardId,
   type FindingLink,
+  type MetricType,
+  type StageGroup,
   type Translate,
+  type WriteReasonGroup,
 } from './diagnosticsCatalog'
 
 export type { FindingLink } from './diagnosticsCatalog'
@@ -1120,20 +1128,222 @@ export function findingInterpolation(f: Finding, fmt: FindingFormatters): Record
 }
 
 // ---------------------------------------------------------------------------
-// verdict
+// page models — what the cards and the raw area render, kept pure
 // ---------------------------------------------------------------------------
 
-export type Verdict = 'problems' | 'blackout' | 'measuring' | 'ok'
+export interface PanelOpRow {
+  op: string
+  requests: number
+  errors: number
+  rtt?: HistogramSnapshot
+}
 
 /**
- * Findings outrank the window. A short window means a zero proves nothing — it
- * does not mean an error that already happened is unproven, and letting
- * MEASURING outrank PROBLEMS would hide findings during exactly the incident
- * the page is for.
+ * The three 3X-UI request families joined by operation, busiest first and
+ * ties by name, so a refresh does not reshuffle equal rows. An operation
+ * that shows up in only one family (a failure with no success yet, a
+ * latency recorded before its count was read) is still a row: the registry
+ * reads each series on its own, and dropping the row would hide a request
+ * the panel was asked for.
  */
-export function verdict(findings: Finding[], mode: WindowMode): Verdict {
-  if (findings.length > 0) return 'problems'
-  if (mode === 'blackout') return 'blackout'
-  if (mode === 'measuring') return 'measuring'
-  return 'ok'
+export function panelOpRows(m: MetricsSnapshot): PanelOpRow[] {
+  const rows = new Map<string, PanelOpRow>()
+  const row = (op: string) => {
+    let r = rows.get(op)
+    if (!r) {
+      r = { op, requests: 0, errors: 0 }
+      rows.set(op, r)
+    }
+    return r
+  }
+  for (const c of m.counters) {
+    const { family, value } = familyOf(c.name)
+    if (value === undefined) continue
+    if (family === 'psp_panel_op_total') row(value).requests += c.value
+    else if (family === 'psp_panel_op_error_total') row(value).errors += c.value
+  }
+  for (const h of m.histograms) {
+    const { family, value } = familyOf(h.name)
+    if (family === 'psp_panel_rtt_ms' && value !== undefined) row(value).rtt = h
+  }
+  return [...rows.values()].sort((a, b) => b.requests - a.requests || a.op.localeCompare(b.op))
+}
+
+export interface StageGroupTime {
+  group: StageGroup
+  /** Mean milliseconds per poll spent in the group's stages. */
+  avgMs: number
+}
+
+/**
+ * Where an average poll's time goes, by the five groups an operator can act
+ * on. Each stage histogram's SUM is the stage's total time, so a group's
+ * share of an average poll is the sum of its stages' sums over the number of
+ * polls timed. Never an average of quantiles: those do not add up. A stage
+ * the catalogue does not group is left out here (diagnosticsCatalog.test.ts
+ * fails until it is placed) and still shows in the raw area.
+ */
+export function stageGroups(m: MetricsSnapshot): StageGroupTime[] | null {
+  const polls = histogram(m, 'psp_poll_ms')?.count ?? 0
+  if (!(polls > 0)) return null
+  const totals = new Map<StageGroup, number>(STAGE_GROUP_ORDER.map(g => [g, 0]))
+  for (const h of m.histograms) {
+    const { family, value } = familyOf(h.name)
+    if (family !== 'psp_poll_stage_ms' || value === undefined) continue
+    const group = STAGE_GROUP[value]
+    if (group) totals.set(group, (totals.get(group) ?? 0) + h.sum)
+  }
+  return STAGE_GROUP_ORDER.map(group => ({ group, avgMs: (totals.get(group) ?? 0) / polls }))
+}
+
+export interface WriteReasonGroupCount {
+  group: WriteReasonGroup
+  count: number
+  /** The raw reasons behind the count, largest first. */
+  reasons: LabelCount[]
+}
+
+/** The lifecycle's write reasons folded into the five groups the card lists. */
+export function writeReasonGroups(m: MetricsSnapshot): WriteReasonGroupCount[] {
+  const children = counterChildren(m, 'psp_lifecycle_sync_write_reason_total')
+  return WRITE_REASON_GROUP_ORDER.map(group => {
+    const reasons = children.filter(r => WRITE_REASON_GROUP[r.value] === group)
+    return { group, count: reasons.reduce((sum, r) => sum + r.count, 0), reasons }
+  })
+}
+
+export interface BucketRow {
+  le: number
+  inf: boolean
+  cumulative: number
+  /** Samples in this bucket alone: the cumulative count minus the previous. */
+  count: number
+}
+
+/** A histogram's cumulative buckets with each bucket's own count beside it. */
+export function bucketRows(h: HistogramSnapshot): BucketRow[] {
+  let prev = 0
+  return h.buckets.map(b => {
+    const out = { le: b.le, inf: !!b.inf, cumulative: b.count, count: b.count - prev }
+    prev = b.count
+    return out
+  })
+}
+
+export interface RawSeries {
+  /** The full series name, `family{label=value}` for a child. */
+  name: string
+  label?: string
+  value?: string
+  counter?: CounterSnapshot
+  gauge?: GaugeSnapshot
+  histogram?: HistogramSnapshot
+}
+
+export interface RawFamily {
+  family: string
+  /** 'other' for a family the catalogue does not know yet. */
+  card: CardId | 'other'
+  type: MetricType
+  labelled: boolean
+  /** The family's one series when unlabelled, its children when labelled. */
+  series: RawSeries[]
+  /** The server's help string, from the first series that carries one. */
+  help: string
+  /** Catalogued but missing from this reading. */
+  absent: boolean
+}
+
+/**
+ * Every metric family the raw area shows: the catalogue's, in its order, and
+ * then every family the server sent that the catalogue does not know, by
+ * name. The union is the point. Walking only the catalogue would drop a
+ * family Go added after this page was built; walking only the reading would
+ * drop the explanation of an absence. A catalogued family the reading lacks
+ * is kept, marked absent: for an unlabelled family that means an older
+ * server, for a labelled one that nothing has happened yet.
+ */
+export function rawFamilies(m: MetricsSnapshot): RawFamily[] {
+  const seen = new Map<string, RawFamily>()
+  const add = (name: string, type: MetricType, s: Omit<RawSeries, 'name' | 'label' | 'value'>, help: string) => {
+    const parsed = familyOf(name)
+    let f = seen.get(parsed.family)
+    if (!f) {
+      const info = FAMILY_CATALOG[parsed.family]
+      f = {
+        family: parsed.family,
+        card: info?.card ?? 'other',
+        type: info?.type ?? type,
+        labelled: info?.labelled ?? parsed.value !== undefined,
+        series: [],
+        help: '',
+        absent: false,
+      }
+      seen.set(parsed.family, f)
+    }
+    f.series.push({ name, label: parsed.label, value: parsed.value, ...s })
+    if (!f.help && help) f.help = help
+  }
+  for (const c of m.counters) add(c.name, 'counter', { counter: c }, c.help)
+  for (const g of m.gauges) add(g.name, 'gauge', { gauge: g }, g.help)
+  for (const h of m.histograms) add(h.name, 'histogram', { histogram: h }, h.help)
+
+  const catalogued = Object.entries(FAMILY_CATALOG).map(([family, info]): RawFamily =>
+    seen.get(family) ?? { family, card: info.card, type: info.type, labelled: info.labelled, series: [], help: '', absent: true })
+  const unknown = [...seen.values()]
+    .filter(f => !(f.family in FAMILY_CATALOG))
+    .sort((a, b) => a.family.localeCompare(b.family))
+  return [...catalogued, ...unknown]
+}
+
+/** The families present in a reading and the series they hold. */
+export function rawSummary(m: MetricsSnapshot): { families: number; series: number } {
+  const families = new Set<string>()
+  for (const s of [...m.counters, ...m.gauges, ...m.histograms]) families.add(familyOf(s.name).family)
+  return { families: families.size, series: m.counters.length + m.gauges.length + m.histograms.length }
+}
+
+/** Whether a series has recorded anything. A gauge's peak counts: a queue
+ *  that is empty now but was eight deep is not "zero". */
+export function seriesNonZero(s: RawSeries): boolean {
+  if (s.counter) return s.counter.value !== 0
+  if (s.gauge) return s.gauge.value !== 0 || s.gauge.peak !== 0
+  if (s.histogram) return s.histogram.count > 0
+  return false
+}
+
+export interface RawFilter {
+  /** Matched case-insensitively; empty matches everything. */
+  query: string
+  nonZero: boolean
+  /**
+   * The words a reader sees for a family, or for one of its children: the
+   * translated names and descriptions in the current language. The filter
+   * matches them too, so a search for what the page calls a row finds it.
+   */
+  words: (f: RawFamily, s?: RawSeries) => string[]
+}
+
+/**
+ * The raw area's search and non-zero filter. A family that matches by its
+ * own name, help or words keeps every (remaining) child; otherwise only the
+ * children that match are kept. An absent family has nothing non-zero, so
+ * it survives only an all-values search that names it.
+ */
+export function filterRawFamilies(families: RawFamily[], filter: RawFilter): RawFamily[] {
+  const q = filter.query.trim().toLowerCase()
+  const hit = (texts: Array<string | undefined>) => texts.some(t => !!t && t.toLowerCase().includes(q))
+  const out: RawFamily[] = []
+  for (const f of families) {
+    if (f.absent) {
+      if (!filter.nonZero && (q === '' || hit([f.family, ...filter.words(f)]))) out.push(f)
+      continue
+    }
+    let series = filter.nonZero ? f.series.filter(seriesNonZero) : f.series
+    if (q !== '' && !hit([f.family, f.help, ...filter.words(f)])) {
+      series = series.filter(s => hit([s.name, s.value, ...filter.words(f, s)]))
+    }
+    if (series.length > 0) out.push({ ...f, series })
+  }
+  return out
 }

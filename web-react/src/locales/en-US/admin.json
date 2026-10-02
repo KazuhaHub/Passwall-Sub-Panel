@@ -3261,8 +3261,7 @@
       "ok_notices": "No problems found · notices: {{count}}",
       "measuring": "Measuring: the window is still too short; a verdict in about {{remaining}}",
       "measuring_unknown": "Measuring: the traffic poll interval is unknown, so no verdict yet",
-      "blackout": "Just started: the first traffic poll has not finished yet (one every {{interval}})",
-      "problems": "{{count}} finding(s)"
+      "blackout": "Just started: the first traffic poll has not finished yet (one every {{interval}})"
     },
     "state": {
       "failing": "Needs action",
@@ -3294,22 +3293,19 @@
       "push_capacity_zero": {
         "title": "The traffic service did not start",
         "impact": "Neither traffic polling nor quota safety refreshes will run: metering, over-quota suspension and live-IP collection have all stopped, so the other numbers on this page mean nothing.",
-        "action": "Check the server's startup log for errors, fix them and restart the panel.",
-        "detail": "Capacity is set once at construction, so 0 means the traffic service was never built. Every metric in the push family is currently describing nothing real. Check the startup log."
+        "action": "Check the server's startup log for errors, fix them and restart the panel."
       },
       "poll_dead": {
         "title": "Traffic polling has stopped: not one poll in {{window}}",
         "impact": "Traffic is no longer metered, over-quota and expired users are not suspended automatically, and live-IP collection and location checks have stopped too.",
         "action": "Check the server's log for errors or a crash, fix the cause and restart the panel.",
-        "log": "traffic loop started · traffic poll",
-        "detail": "It is dead, was never started, or panics on entry. Metering, quota enforcement and live-IP collection are all stopped. Look for the traceback in the server log."
+        "log": "traffic loop started · traffic poll"
       },
       "poll_errors": {
         "title": "{{errors}} of {{polls}} polls were skipped entirely because the user list could not be read",
         "impact": "Those polls metered no traffic and checked no quotas or expiry dates. An unreachable panel is not counted here.",
         "action": "Check that the database is reachable and its disk is not full.",
-        "log": "traffic poll",
-        "detail": "Note this counts only the user-list read. An unreachable panel or a failed snapshot write is not counted here."
+        "log": "traffic poll"
       },
       "poll_behind": {
         "title": "About {{missing}} polls are missing ({{polls}} ran; the interval implies at least {{expected}})",
@@ -3324,16 +3320,14 @@
         "retry": "Failures caused by admin actions, membership changes or automatic suspend and resume are recorded in Sync tasks, where you can see the error and retry. The periodic repair also re-checks every user and fixes whatever is still out of step. Every failed retry counts again, so this is not the number of affected users.",
         "action": "Open Sync tasks and look for unfinished or cancelled user tasks and their errors; then check on Servers that the panels are reachable and native nodes are online.",
         "log": "shared-client lifecycle push failed",
-        "log_note": "This finds two kinds of line: one per user, carrying only the first error; and one per failed client (ending in \"for a client\"), carrying the panel id (panel_id) and the step that failed (stage), so failures on different panels can be told apart.",
-        "detail": "Enable state, expiry or quota did not reach the panel. This is the path a disable travels."
+        "log_note": "This finds two kinds of line: one per user, carrying only the first error; and one per failed client (ending in \"for a client\"), carrying the panel id (panel_id) and the step that failed (stage), so failures on different panels can be told apart."
       },
       "push_errors": {
         "title": "{{errors}} of {{attempted}} quota safety refreshes failed ({{pct}})",
         "impact": "The remaining allowance stored on the panel is out of date for those users. While PSP is running it still suspends over-quota users at the next poll; the panel relies on this allowance only while PSP is offline. The part that failed to write to a panel is also counted under status write failures, so the two counts overlap.",
         "retry": "These failures are not queued as sync tasks: the user is refreshed again the next time they use traffic, and the periodic repair also catches up.",
         "action": "Check on Servers that the panels involved are reachable.",
-        "log": "traffic floor push failed",
-        "detail": "This path has no retry queue — only a log line, and the next attempt requires that user to move bytes again. Search the log for 'traffic floor push failed' and 'shared-client lifecycle push failed', then check panel reachability."
+        "log": "traffic floor push failed"
       },
       "push_backlog": {
         "title": "{{cycles}} polls skipped their quota refreshes because refreshes from an earlier poll were still queued ({{suppressed}} refreshes skipped)",
@@ -3345,8 +3339,7 @@
         "impact": "A panel returned no live IPs during polling, so those users' live-IP counts and location verdicts are only \"at least\". The same user counts again every poll.",
         "sui": "S-UI panels are connected: S-UI does not report live IPs, so users on those panels count every poll and this number keeps growing. If only S-UI users are affected, this is expected.",
         "action": "Check on Servers that the other panels are reachable, and search the server log for the keywords below to see which panel did not answer.",
-        "log": "live client IPs unavailable for this panel",
-        "detail": "A panel did not answer. Their live-IP counts and location verdicts are floors, not totals, and must not be read as totals."
+        "log": "live client IPs unavailable for this panel"
       },
       "history_write_errors": {
         "title": "Live connections could not be written to the connection history in {{errors}} polls",
@@ -3382,25 +3375,7 @@
         "impact": "These limits are written to the panel but have no effect: S-UI and PSP native nodes support neither the IP limit nor the device limit, and 3X-UI below 3.7.0 cannot store the device limit. Every check counts again while this lasts; it is a standing condition, not a fault.",
         "note": "Also, the device limit is not enforced on any panel today; 3X-UI 3.7.0 and later only store the value. A zero here does not mean device limits are in effect.",
         "action": "See on Servers which limits each panel supports; move these users to a panel that does, or upgrade the panel.",
-        "log": "panel cannot enforce a setting PSP is pushing",
-        "detail": "A panel cannot store a field PSP writes. Note the device-limit row: a clean reading means the panel can STORE the field, not that any device cap is enforced — nothing in PSP's architecture enforces one on any panel version."
-      },
-      "title": "Findings ({{count}})",
-      "push_suppressed": {
-        "title": "{{suppressed}} pushes suppressed by the cross-cycle guard",
-        "detail": "The previous cycle's pushes had not drained, so a whole cycle of floor pushes was skipped. Occasional is tolerable; sustained means the push side is falling behind."
-      },
-      "push_carryover": {
-        "title": "Pushes spilled into the next cycle {{carryover}} times",
-        "detail": "One of the three reopen triggers for a self-hosted data plane in data-plane-plan.md. Note it is counted at cycle open, so one or two right after a restart are expected."
-      },
-      "invariant_poll_ms": {
-        "title": "Poll-duration samples disagree with the cycle count",
-        "detail": "{{observed}} samples observed against {{expected}} recorded cycles. A difference of one is snapshot non-atomicity; more means cycles are exiting early."
-      },
-      "invariant_push_enqueue": {
-        "title": "More pushes executed than were enqueued",
-        "detail": "{{started}} started against {{enqueued}} enqueued. Every execution is enqueued first, so a difference in this direction should not occur."
+        "log": "panel cannot enforce a setting PSP is pushing"
       }
     },
     "self_check": {
@@ -3571,6 +3546,7 @@
       "version": "Version",
       "build": "Build",
       "build_local": "Local build",
+      "copy_build": "Copy build",
       "uptime": "Panel up for",
       "since": "Statistics since",
       "window": "Statistics window",
@@ -3639,9 +3615,7 @@
       "confirm": "Clear",
       "done": "Cleared. New statistics start at {{time}}.",
       "kept": "Cleared. The {{window}} of statistics from before can be downloaded until you leave this page.",
-      "download_previous": "Download data from before clearing",
-      "action": "Clear and restart the window",
-      "nothing": "The window is empty — nothing to clear"
+      "download_previous": "Download data from before clearing"
     },
     "fmt": {
       "duration_s": "{{s}} s",
@@ -3910,8 +3884,7 @@
       "psp_sso_claim_silent_total": {
         "label": "Single sign-ins without role or group",
         "desc": "Single sign-ins where role or group rules exist but the identity provider sent none of the attributes they read; the existing role and group were kept."
-      },
-      "panel_fetch": "The waiting-on-panels part of a cycle, normally most of it"
+      }
     },
     "labels": {
       "stage": {
@@ -4047,41 +4020,7 @@
         "role": "Role",
         "group": "Group"
       }
-    },
-    "refresh": "Refresh",
-    "window": "Measured over {{window}} · process up {{uptime}}",
-    "was_reset": "counters were cleared by hand, so the window is shorter than the uptime",
-    "blackout": "The window is under one poll interval ({{interval}}), so not even one cycle need have finished. A zero here is not evidence of health, so the numbers are withheld — anything already observed is still listed above.",
-    "precondition": {
-      "poll_running": {
-        "label": "Poll running",
-        "help": "The traffic poll drives everything below. If it is not running, that is the single reason for every zero on this page."
-      },
-      "push_capacity": {
-        "label": "Push gate built",
-        "help": "Capacity is set once at construction. Reading 0 does not mean a small pool — it means the traffic service was never built and this whole family describes nothing."
-      },
-      "push_reaching": {
-        "label": "Pushes executing",
-        "help": "Whether quota-floor pushes actually reach execution. Nothing attempted means no success rate — an absent denominator, not 0%."
-      },
-      "lifecycle_running": {
-        "label": "Lifecycle syncing",
-        "help": "Whether enable/expiry/quota are being written to shared clients at all."
-      },
-      "liveip_complete": {
-        "label": "Live-IP read complete",
-        "help": "If any panel went unread, every figure downstream is a floor rather than a total."
-      }
-    },
-    "table": {
-      "metric": "Metric",
-      "value": "Value",
-      "means": "Means"
-    },
-    "never_observed": "never observed in this window",
-    "too_few_samples": "only {{count}} samples · max {{max}}",
-    "footer": "version {{version}} · commit {{commit}} · goroutines {{goroutines}} · push gate capacity {{capacity}}"
+    }
   },
   "nodeMetrics": {
     "title": "{{name}} host metrics",

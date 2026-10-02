@@ -33,9 +33,15 @@ import {
   quantileReading,
   quantileUsable,
   sessionDelta,
-  verdict,
   wasReset,
   windowMode,
+  bucketRows,
+  filterRawFamilies,
+  panelOpRows,
+  rawFamilies,
+  rawSummary,
+  stageGroups,
+  writeReasonGroups,
   type CardState,
   type Finding,
   type PanelFacts,
@@ -43,6 +49,7 @@ import {
 import {
   CARD_ORDER,
   CARD_LINK,
+  FAMILY_CATALOG,
   LIFECYCLE_ERROR_KINDS,
   LIFECYCLE_ERROR_STAGES,
   LINK_TARGET,
@@ -119,7 +126,8 @@ describe('the asymmetry rule: zeros are gated by the window, non-zeros are not',
     })
     const found = deriveFindings(s, INTERVAL)
     expect(found.map(f => f.id)).toContain('push_errors')
-    expect(verdict(found, windowMode(s.metrics.window_ms, INTERVAL))).toBe('problems')
+    const cards = deriveCards(s, INTERVAL, found)
+    expect(pageVerdict(found, cards, s.metrics.window_ms, INTERVAL).tone).toBe('attention')
   })
 
   it('does NOT call a zero-cycle poll dead while the window is young', () => {
@@ -134,21 +142,6 @@ describe('the asymmetry rule: zeros are gated by the window, non-zeros are not',
       gauges: [g('psp_push_sem_capacity', 8)],
     })
     expect(deriveFindings(s, INTERVAL).map(f => f.id)).toContain('poll_dead')
-  })
-})
-
-describe('verdict', () => {
-  it('is ok only when the window settled AND nothing was found', () => {
-    expect(verdict([], 'settled')).toBe('ok')
-  })
-  // "Cannot tell" is never green.
-  it('is never ok on a young window', () => {
-    expect(verdict([], 'blackout')).toBe('blackout')
-    expect(verdict([], 'measuring')).toBe('measuring')
-  })
-  it('lets findings outrank the window', () => {
-    const f: Finding[] = [{ id: 'x', severity: 'error', key: 'x', card: 'poll', series: [] }]
-    expect(verdict(f, 'blackout')).toBe('problems')
   })
 })
 
@@ -1404,5 +1397,197 @@ describe('effectivePollIntervalMs', () => {
     // hides real findings instead of merely delaying them.
     const m = metrics({ gauges: [g('psp_poll_interval_ms', 0)] })
     expect(effectivePollIntervalMs(m, 60_000)).toBe(60_000)
+  })
+})
+
+// --- page models -----------------------------------------------------------
+
+describe('panelOpRows', () => {
+  const rtt = (op: string, count: number) => ({ ...h(`psp_panel_rtt_ms{op=${op}}`, count), p50: 300 })
+
+  it('joins the three panel request families by operation, busiest first', () => {
+    const m = metrics({
+      counters: [
+        c('psp_panel_op_total{op=GetClient}', 40),
+        c('psp_panel_op_total{op=ListInboundsSlim}', 1774),
+        c('psp_panel_op_error_total{op=GetClient}', 3),
+        c('psp_panel_op_total{op=other}', 2),
+      ],
+      histograms: [rtt('ListInboundsSlim', 1774), rtt('GetClient', 40)],
+    })
+    const rows = panelOpRows(m)
+    expect(rows.map(r => r.op)).toEqual(['ListInboundsSlim', 'GetClient', 'other'])
+    expect(rows[1]).toMatchObject({ op: 'GetClient', requests: 40, errors: 3 })
+    expect(rows[1].rtt?.count).toBe(40)
+    expect(rows[2]).toMatchObject({ op: 'other', requests: 2, errors: 0 })
+    expect(rows[2].rtt).toBeUndefined()
+  })
+
+  // An operation seen only as a failure or only as a latency is still an
+  // operation the panel was asked for; dropping it would hide the row.
+  it('keeps an operation that appears in only one family', () => {
+    const m = metrics({ counters: [c('psp_panel_op_error_total{op=UpdateClient}', 1)], histograms: [rtt('GetInbound', 1)] })
+    expect(panelOpRows(m).map(r => r.op).sort()).toEqual(['GetInbound', 'UpdateClient'])
+  })
+
+  it('orders equal counts by name, so a refresh does not reshuffle them', () => {
+    const m = metrics({ counters: [c('psp_panel_op_total{op=b}', 1), c('psp_panel_op_total{op=a}', 1)] })
+    expect(panelOpRows(m).map(r => r.op)).toEqual(['a', 'b'])
+  })
+})
+
+describe('stageGroups', () => {
+  const stage = (s: string, sum: number) => ({ ...h(`psp_poll_stage_ms{stage=${s}}`, 10), sum })
+
+  it('averages each group over the polls, summing its stages', () => {
+    const m = metrics({
+      histograms: [
+        { ...h('psp_poll_ms', 10), sum: 10_000 },
+        stage('list_users', 100), stage('latest_prefetch', 200),
+        stage('panel_fetch', 6_550),
+        stage('live_ips', 50), stage('user_loop', 150),
+        stage('sink_flush', 300),
+        stage('geo_enforce', 20),
+      ],
+    })
+    expect(stageGroups(m)).toEqual([
+      { group: 'db', avgMs: 30 },
+      { group: 'panels', avgMs: 655 },
+      { group: 'compute', avgMs: 20 },
+      { group: 'write', avgMs: 30 },
+      { group: 'geo', avgMs: 2 },
+    ])
+  })
+
+  it('has nothing to show before the first poll has been timed', () => {
+    expect(stageGroups(metrics())).toBeNull()
+    expect(stageGroups(metrics({ histograms: [h('psp_poll_ms', 0)] }))).toBeNull()
+  })
+})
+
+describe('writeReasonGroups', () => {
+  it('folds the raw reasons into the five groups, keeping each raw count', () => {
+    const m = metrics({
+      counters: [
+        c('psp_lifecycle_sync_write_reason_total{reason=total_gb}', 5),
+        c('psp_lifecycle_sync_write_reason_total{reason=enable}', 2),
+        c('psp_lifecycle_sync_write_reason_total{reason=expiry}', 1),
+        c('psp_lifecycle_sync_write_reason_total{reason=panel_unread}', 4),
+      ],
+    })
+    expect(writeReasonGroups(m)).toEqual([
+      { group: 'quota', count: 5, reasons: [{ value: 'total_gb', count: 5 }] },
+      { group: 'state', count: 3, reasons: [{ value: 'enable', count: 2 }, { value: 'expiry', count: 1 }] },
+      { group: 'limits', count: 0, reasons: [] },
+      { group: 'credentials', count: 0, reasons: [] },
+      { group: 'unread', count: 4, reasons: [{ value: 'panel_unread', count: 4 }] },
+    ])
+  })
+})
+
+describe('bucketRows', () => {
+  it('differences adjacent cumulative buckets into per-bucket counts', () => {
+    const hist: HistogramSnapshot = {
+      ...h('psp_poll_ms', 9),
+      buckets: [{ le: 100, count: 2 }, { le: 500, count: 7 }, { le: 1000, count: 7 }, { le: 0, inf: true, count: 9 }],
+    }
+    expect(bucketRows(hist)).toEqual([
+      { le: 100, inf: false, cumulative: 2, count: 2 },
+      { le: 500, inf: false, cumulative: 7, count: 5 },
+      { le: 1000, inf: false, cumulative: 7, count: 0 },
+      { le: 0, inf: true, cumulative: 9, count: 2 },
+    ])
+  })
+})
+
+describe('rawFamilies', () => {
+  // Every catalogued family, then whatever the server sent that the
+  // catalogue does not know: nothing the API returns may be dropped.
+  const m = metrics({
+    counters: [
+      c('psp_poll_total', 12),
+      c('psp_panel_op_total{op=GetClient}', 3),
+      c('psp_panel_op_total{op=other}', 0),
+      c('psp_brand_new_total', 1),
+      c('psp_brand_new_vec_total{kind=a}', 2),
+    ],
+    gauges: [g('psp_push_sem_capacity', 8)],
+    histograms: [h('psp_node_host_snapshot_bytes', 0)],
+  })
+  const fams = rawFamilies(m)
+  const byName = Object.fromEntries(fams.map(f => [f.family, f]))
+
+  it('lists every catalogued family, in catalogue order, then the unknown ones', () => {
+    const catalogued = Object.keys(FAMILY_CATALOG)
+    expect(fams.slice(0, catalogued.length).map(f => f.family)).toEqual(catalogued)
+    expect(fams.slice(catalogued.length).map(f => f.family)).toEqual(['psp_brand_new_total', 'psp_brand_new_vec_total'])
+  })
+
+  it('places an unknown family under "other", typed by where it arrived', () => {
+    expect(byName.psp_brand_new_total).toMatchObject({ card: 'other', type: 'counter', labelled: false, absent: false })
+    expect(byName.psp_brand_new_vec_total).toMatchObject({ card: 'other', type: 'counter', labelled: true })
+    expect(byName.psp_brand_new_vec_total.series[0]).toMatchObject({ label: 'kind', value: 'a' })
+  })
+
+  it('carries every child of a labelled family, zero ones included', () => {
+    expect(byName.psp_panel_op_total.series.map(s => s.name)).toEqual([
+      'psp_panel_op_total{op=GetClient}', 'psp_panel_op_total{op=other}',
+    ])
+  })
+
+  it('marks a catalogued family the reading does not have as absent', () => {
+    expect(byName.psp_poll_error_total).toMatchObject({ absent: true, series: [] })
+    expect(byName.psp_poll_total).toMatchObject({ absent: false })
+    expect(byName.psp_node_host_snapshot_bytes).toMatchObject({ absent: false, type: 'histogram' })
+  })
+
+  it('counts the families present and every series', () => {
+    expect(rawSummary(m)).toEqual({ families: 6, series: 7 })
+  })
+})
+
+describe('filterRawFamilies', () => {
+  const m = metrics({
+    counters: [
+      c('psp_poll_total', 12),
+      c('psp_poll_error_total', 0),
+      c('psp_panel_op_total{op=GetClient}', 3),
+      c('psp_panel_op_total{op=ListInbounds}', 0),
+    ],
+    gauges: [g('psp_push_sem_waiting', 0, 2)],
+    histograms: [h('psp_poll_ms', 0)],
+  })
+  const fams = rawFamilies(m)
+  const words = (f: { family: string }, s?: { value?: string }) =>
+    s ? (s.value === 'GetClient' ? ['Read client'] : []) : (f.family === 'psp_poll_total' ? ['Traffic polls'] : [])
+  const names = (out: ReturnType<typeof filterRawFamilies>) =>
+    out.flatMap(f => f.series.length ? f.series.map(s => s.name) : [`${f.family} (absent)`])
+
+  it('keeps only what moved under "non-zero only", a peak counting as movement', () => {
+    const out = filterRawFamilies(fams, { query: '', nonZero: true, words })
+    expect(names(out)).toEqual(['psp_poll_total', 'psp_push_sem_waiting', 'psp_panel_op_total{op=GetClient}'])
+  })
+
+  it('matches the family name, its translated words, a label value or a child\'s translated name', () => {
+    expect(names(filterRawFamilies(fams, { query: 'traffic polls', nonZero: false, words }))).toEqual(['psp_poll_total'])
+    expect(names(filterRawFamilies(fams, { query: 'LISTINBOUNDS', nonZero: false, words }))).toEqual(['psp_panel_op_total{op=ListInbounds}'])
+    expect(names(filterRawFamilies(fams, { query: 'read client', nonZero: false, words }))).toEqual(['psp_panel_op_total{op=GetClient}'])
+  })
+
+  it('keeps every child when the family itself matches', () => {
+    expect(names(filterRawFamilies(fams, { query: 'psp_panel_op_total', nonZero: false, words }))).toEqual([
+      'psp_panel_op_total{op=GetClient}', 'psp_panel_op_total{op=ListInbounds}',
+    ])
+  })
+
+  it('matches the server\'s own help text', () => {
+    const helped = rawFamilies(metrics({ counters: [{ name: 'psp_poll_total', help: 'Traffic poll cycles started.', value: 1 }] }))
+    expect(names(filterRawFamilies(helped, { query: 'cycles started', nonZero: false, words }))).toEqual(['psp_poll_total'])
+  })
+
+  it('keeps an absent family only when nothing but the name is asked about', () => {
+    expect(names(filterRawFamilies(fams, { query: 'psp_live_connections', nonZero: false, words })))
+      .toEqual(['psp_live_connections (absent)'])
+    expect(names(filterRawFamilies(fams, { query: 'psp_live_connections', nonZero: true, words }))).toEqual([])
   })
 })
