@@ -3348,7 +3348,7 @@
         "log": "connection history: could not record"
       },
       "flag_write_errors": {
-        "title": "{{errors}} flag records could not be saved",
+        "title": "Flag records failed to save {{errors}} times (each failure may cover several records)",
         "impact": "The flags, automatic suspensions or resumes themselves took effect; only their entries are missing from the Risk Center's Records.",
         "action": "Check that the database accepts writes and its disk is not full.",
         "log": "flag records: could not record"
@@ -3505,7 +3505,7 @@
           "risk": "Risk signal runs",
           "risk_value": "{{ok}} OK of {{total}}",
           "risk_none": "did not run in this window",
-          "records": "Records not saved",
+          "records": "Record writes failed",
           "records_value": "connection history {{history}} · flag records {{flags}}",
           "auto": "Auto suspend / lift failures",
           "auto_value": "{{suspend}} / {{lift}}"
@@ -3843,7 +3843,7 @@
       },
       "psp_flag_record_write_errors_total": {
         "label": "Flag record write failures",
-        "desc": "Flag records that could not be saved. The flag, automatic suspension or resume itself took effect; only its record is missing."
+        "desc": "Flag-record writes that failed; each may carry several records. The flags, automatic suspensions or resumes themselves took effect; only their records are missing."
       },
       "psp_risk_refresh_total": {
         "label": "Risk signal runs",

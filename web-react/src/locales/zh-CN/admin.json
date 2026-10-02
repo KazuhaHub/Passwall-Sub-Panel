@@ -3346,7 +3346,7 @@
         "log": "connection history: could not record"
       },
       "flag_write_errors": {
-        "title": "{{errors}} 条标记记录没能保存",
+        "title": "{{errors}} 次标记记录写入失败（每次可能包含多条记录）",
         "impact": "对应的标记、自动暂停或恢复已经生效，只是在风控中心的「记录」里看不到。",
         "action": "检查数据库能否写入、磁盘是否已满。",
         "log": "flag records: could not record"
@@ -3503,7 +3503,7 @@
           "risk": "风险信号计算",
           "risk_value": "成功 {{ok}} / 共 {{total}} 次",
           "risk_none": "本区间未运行",
-          "records": "记录保存失败",
+          "records": "记录写入失败",
           "records_value": "连接历史 {{history}} · 标记记录 {{flags}}",
           "auto": "自动暂停 / 解除失败",
           "auto_value": "{{suspend}} / {{lift}}"
@@ -3841,7 +3841,7 @@
       },
       "psp_flag_record_write_errors_total": {
         "label": "标记记录写入失败",
-        "desc": "标记记录没能保存的次数。对应的标记、自动暂停或恢复已经生效，只是记录里看不到。"
+        "desc": "标记记录写入失败的次数，每次可能包含多条记录。对应的标记、自动暂停或恢复已经生效，只是记录里看不到。"
       },
       "psp_risk_refresh_total": {
         "label": "风险信号计算",
