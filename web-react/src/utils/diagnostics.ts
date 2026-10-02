@@ -506,7 +506,12 @@ export function deriveFindings(
   }
 
   // Red, not amber: enable, expiry and the quota cap all travel this path, so
-  // a failure can leave a user connected who should not be.
+  // a failure can leave a user connected who should not be. Not every
+  // counted failure missed the panel, though: confirm_read and
+  // confirm_mismatch come after a write the panel accepted, and
+  // record_credentials after one it confirmed (sharedclient.pushLifecycle).
+  // So the copy calls them sync failures, and the breakdown sentence says
+  // which steps mean the write itself failed.
   const pushErrors = val(m, 'psp_push_client_config_error_total')
   const lifecycleErrors = val(m, 'psp_lifecycle_sync_error_total')
   if (lifecycleErrors > 0) {

@@ -133,12 +133,12 @@ describe('the status line', () => {
 })
 
 describe('the production reading', () => {
-  it('lists the status write failures with their share, origin and where to go', async () => {
+  it('lists the status sync failures with their share, origin and where to go', async () => {
     serve(productionSnapshot())
     mount()
     await loaded()
     const finding = screen.getByTestId('finding-lifecycle_errors')
-    expect(within(finding).getByText('17 次未能把用户状态写入面板（共核对 900 次，1.9%）')).toBeTruthy()
+    expect(within(finding).getByText('17 次用户状态同步失败（共核对 900 次，1.9%）')).toBeTruthy()
     expect(within(finding).getByText(/配额兜底刷新本区间没有失败/)).toBeTruthy()
     const link = within(finding).getByRole('link', { name: '前往同步任务' })
     expect(link.getAttribute('href')).toBe('/admin/sync-tasks')

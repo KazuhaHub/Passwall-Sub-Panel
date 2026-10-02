@@ -1350,6 +1350,17 @@ describe('copy for the lifecycle failure breakdown', () => {
       }
     })
 
+    // Not every counted failure missed the panel: record_credentials is
+    // counted after the write was confirmed. The sentence beside the lists says
+    // what each step means, quoting the step by the name the list uses.
+    it(`${lang} explains every step the breakdown can name`, () => {
+      const sentence = flat['diagnostics.findings.lifecycle_errors.breakdown'] as string
+      for (const s of LIFECYCLE_ERROR_STAGES) {
+        const name = label('lifecycle_stage', s)
+        expect(sentence, s).toContain(lang === 'zh-CN' ? `「${name}」` : `"${name}"`)
+      }
+    })
+
     it(`${lang} renders the finding's breakdown sentence with both lists`, () => {
       const f = deriveFindings(snap(everyStepAndKind), INTERVAL).find(x => x.id === 'lifecycle_errors')
       const values = breakdownInterpolation(f!, label, String)

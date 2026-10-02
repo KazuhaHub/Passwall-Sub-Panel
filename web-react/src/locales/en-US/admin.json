@@ -3313,10 +3313,10 @@
         "action": "Check the longest poll duration under Traffic polling and the slowest operations under Panel requests on this page; if needed, lengthen the traffic poll interval in Settings."
       },
       "lifecycle_errors": {
-        "title": "{{errors}} of {{checks}} status checks failed to reach the panel ({{pct}})",
-        "impact": "These carry enable and disable, expiry and traffic caps. Until a write succeeds, a disabled, expired or over-quota user may still be able to connect through that panel.",
+        "title": "{{errors}} of {{checks}} status checks failed ({{pct}})",
+        "impact": "These carry enable and disable, expiry and traffic caps. Where the status did not reach the panel, a disabled, expired or over-quota user may still be able to connect through it.",
         "origin": "Quota safety refreshes had no failures in this window, so none of these came from them. They came from admin actions, automatic suspend and resume (including over-quota and location suspensions triggered by polling), sync-task retries, or the startup and periodic repairs.",
-        "breakdown": "By step: {{stages}}; by panel type: {{kinds}}.",
+        "breakdown": "By step: {{stages}}; by panel type: {{kinds}}. \"Panel not found\" and \"Write\" mean the write itself failed; \"Read-back\" and \"Read-back mismatch\" mean the write went out but could not be confirmed; \"Saving the result\" means the panel was updated and confirmed, and only PSP's own record failed.",
         "retry": "Failures caused by admin actions, membership changes or automatic suspend and resume are recorded in Sync tasks, where you can see the error and retry. The periodic repair also re-checks every user and fixes whatever is still out of step. Every failed retry counts again, so this is not the number of affected users.",
         "action": "Open Sync tasks and look for unfinished or cancelled user tasks and their errors; then check on Servers that the panels are reachable and native nodes are online.",
         "log": "shared-client lifecycle push failed",
@@ -3324,7 +3324,7 @@
       },
       "push_errors": {
         "title": "{{errors}} of {{attempted}} quota safety refreshes failed ({{pct}})",
-        "impact": "The remaining allowance stored on the panel is out of date for those users. While PSP is running it still suspends over-quota users at the next poll; the panel relies on this allowance only while PSP is offline. The part that failed to write to a panel is also counted under status write failures, so the two counts overlap.",
+        "impact": "The remaining allowance stored on the panel is out of date for those users. While PSP is running it still suspends over-quota users at the next poll; the panel relies on this allowance only while PSP is offline. The part that failed to write to a panel is also counted under status sync failures, so the two counts overlap.",
         "retry": "These failures are not queued as sync tasks: the user is refreshed again the next time they use traffic, and the periodic repair also catches up.",
         "action": "Check on Servers that the panels involved are reachable.",
         "log": "traffic floor push failed"
@@ -3439,12 +3439,12 @@
           "skipped_caption": "matched the panel; nothing written",
           "writes": "Writes",
           "writes_caption": "reasons below",
-          "errors": "Write failures",
+          "errors": "Sync failures",
           "errors_caption": "{{pct}} of checks"
         },
         "not_provisioned": "Another {{count}} checks were skipped because the client is not yet set up on the panel.",
-        "errors_by_stage": "Write failures by step: {{list}}",
-        "errors_by_kind": "Write failures by panel type: {{list}}",
+        "errors_by_stage": "Sync failures by step: {{list}}",
+        "errors_by_kind": "Sync failures by panel type: {{list}}",
         "reasons_title": "Why writes happened",
         "limits": {
           "title": "Can the limits be applied?",
@@ -3680,7 +3680,7 @@
       },
       "psp_lifecycle_sync_write_total": {
         "label": "Writes to panels",
-        "desc": "Writes issued because something differed, or because the panel's current state could not be read. These are attempts; failures are also counted under \"Write failures\"."
+        "desc": "Writes issued because something differed, or because the panel's current state could not be read. These are attempts; failures are also counted under \"Sync failures\"."
       },
       "psp_lifecycle_sync_write_reason_total": {
         "label": "Why writes happened",
@@ -3691,16 +3691,16 @@
         "desc": "Checks skipped because the user's client is not yet confirmed on the panel. Normal briefly after adding nodes or users; steady growth means setting up clients keeps failing."
       },
       "psp_lifecycle_sync_error_total": {
-        "label": "Write failures",
-        "desc": "Checks or writes that failed: panel unavailable, write rejected, read-back missing or not matching, or the result could not be saved. Counted per client; every failed retry counts again."
+        "label": "Sync failures",
+        "desc": "User status syncs that failed: panel not found, write failed, read-back failed or did not match, or PSP could not save the result (the panel was already updated then). Counted per client; every failed retry counts again."
       },
       "psp_lifecycle_sync_error_stage_total": {
-        "label": "Write failures by step",
-        "desc": "Write failures by the step that failed: panel not found, the write, reading back after the write, a read-back that does not match, saving the result. The steps add up to \"Write failures\". Each failed client is also logged once with its panel id."
+        "label": "Sync failures by step",
+        "desc": "Sync failures by the step that failed: panel not found, the write, reading back after the write, a read-back that does not match, saving the result. The steps add up to \"Sync failures\". Each failed client is also logged once with its panel id."
       },
       "psp_lifecycle_sync_error_panel_kind_total": {
-        "label": "Write failures by panel type",
-        "desc": "Write failures by the type of panel the client is on: 3X-UI, S-UI, PSP native node; \"Unknown\" when the panel could not be found. The types add up to \"Write failures\"."
+        "label": "Sync failures by panel type",
+        "desc": "Sync failures by the type of panel the client is on: 3X-UI, S-UI, PSP native node; \"Unknown\" when the panel could not be found. The types add up to \"Sync failures\"."
       },
       "psp_lifecycle_quota_delta_bytes": {
         "label": "Panel cap drift",
