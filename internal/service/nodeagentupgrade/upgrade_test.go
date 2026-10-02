@@ -346,9 +346,13 @@ func TestUpgradeStatusRequiresTypedReceiptAndFreshPostReceiptObservation(t *test
 		{"indeterminate", "manual_attention", func(task *domain.NodeAgentTask, _ *domain.XUIPanel, _ *domain.NodeAgent) {
 			task.Status = domain.NodeAgentTaskIndeterminate
 		}},
+		// THE FAILURE REASON IS NO LONGER WITHHELD, so this case no longer plants
+		// one to prove it stays hidden. What the status shows for an unsuccessful
+		// end is asserted on its own in
+		// TestUpgradeStatusCarriesTheNodeReasonOnlyForAnUnsuccessfulEnd;
+		// the receipt cases above still prove the RECEIPT is never echoed.
 		{"failed", "failed", func(task *domain.NodeAgentTask, _ *domain.XUIPanel, _ *domain.NodeAgent) {
 			task.Status = domain.NodeAgentTaskFailed
-			task.ResultError = "private raw error"
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -364,6 +368,82 @@ func TestUpgradeStatusRequiresTypedReceiptAndFreshPostReceiptObservation(t *test
 			wire, _ := json.Marshal(got)
 			if strings.Contains(string(wire), "private") {
 				t.Fatal("status leaked private evidence")
+			}
+		})
+	}
+}
+
+// AN UNSUCCESSFUL END CARRIES THE NODE'S OWN REASON; NOTHING ELSE DOES.
+//
+// A Docker NAS node with no shell access failed an upgrade, and the dialog could
+// only say "failed": the reason the node reported was stored on the task and
+// then dropped here. The reason is shown for exactly the two ends where an
+// operator has to act on it — failed and indeterminate — and is keyed on the
+// TASK's status rather than on the derived upgrade state, so a succeeded task
+// whose receipt is merely unverifiable (also "manual_attention") does not start
+// echoing text the protocol says a success never carries.
+func TestUpgradeStatusCarriesTheNodeReasonOnlyForAnUnsuccessfulEnd(t *testing.T) {
+	f := newUpgradeFixture(t)
+	ctx := context.Background()
+	requested, _, err := f.service.Request(ctx, f.panel.ID, validUpgradeRequest, upgradeRequestKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored, err := f.repos.NodeAgentTask.GetByTaskID(ctx, requested.TaskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const code = "docker_label_mismatch"
+	const reason = `label psp.agent: expected "agt_upgrade", got "agt_other"`
+	completed := f.now
+	for _, tc := range []struct {
+		name       string
+		status     domain.NodeAgentTaskStatus
+		closed     bool
+		wantState  string
+		wantReason bool
+	}{
+		{"failed", domain.NodeAgentTaskFailed, false, "failed", true},
+		{"indeterminate", domain.NodeAgentTaskIndeterminate, false, "manual_attention", true},
+		// The rows below never carry a reason in practice; they carry one here to
+		// prove the status would not repeat it if a row ever did.
+		{"queued", domain.NodeAgentTaskQueued, false, "queued", false},
+		{"offered", domain.NodeAgentTaskOffered, false, "offered", false},
+		{"dispatch closed", domain.NodeAgentTaskQueued, true, "dispatch_closed", false},
+		{"succeeded with an unverifiable receipt", domain.NodeAgentTaskSucceeded, false, "manual_attention", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			task := *stored
+			task.Status = tc.status
+			task.ResultErrorCode = code
+			task.ResultError = reason
+			if tc.status.Terminal() {
+				task.CompletedAt = &completed
+			}
+			if tc.closed {
+				task.DispatchClosedAt = &completed
+				task.DispatchClosedReason = "task_authorization_expired"
+			}
+			got, err := f.service.status(&task, f.panel, f.agent, f.now)
+			if err != nil || got.UpgradeState != tc.wantState {
+				t.Fatalf("state=%+v err=%v", got, err)
+			}
+			wire, _ := json.Marshal(got)
+			var fields map[string]any
+			if err := json.Unmarshal(wire, &fields); err != nil {
+				t.Fatal(err)
+			}
+			if tc.wantReason {
+				if fields["result_error_code"] != code || fields["result_error"] != reason {
+					t.Fatalf("an unsuccessful end lost the node's reason: %s", wire)
+				}
+				return
+			}
+			if _, present := fields["result_error_code"]; present {
+				t.Fatalf("a reason code was shown for %s: %s", tc.name, wire)
+			}
+			if _, present := fields["result_error"]; present {
+				t.Fatalf("a reason was shown for %s: %s", tc.name, wire)
 			}
 		})
 	}

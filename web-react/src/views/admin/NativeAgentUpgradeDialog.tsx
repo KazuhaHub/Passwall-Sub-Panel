@@ -31,6 +31,13 @@ export function NativeAgentUpgradeDialog({ server, onClose }: { server: Server |
   // to the node's reported version as well, which put the shape decision in the
   // wrong place.
   const exact = (s: string) => canonicalReleaseVersion(s) !== undefined
+  // THE NODE'S OWN REASON, shown only where the operator has to act on it. A node
+  // on a UI-only Docker host has no shell to read the updater's log from, so this
+  // is the one diagnostic its operator can reach. It is the node's string: render
+  // it as text (React escapes it) and never as markup.
+  const reason = task && ['failed', 'manual_attention'].includes(task.upgrade_state)
+    ? [task.result_error_code, task.result_error].filter(Boolean).join(': ')
+    : ''
 
   useEffect(() => {
     requestController.current?.abort()
@@ -119,6 +126,12 @@ export function NativeAgentUpgradeDialog({ server, onClose }: { server: Server |
           <Alert severity={task.upgrade_state === 'verified' ? 'success' : ['failed', 'manual_attention', 'dispatch_closed'].includes(task.upgrade_state) ? 'warning' : 'info'}>
             {t(`admin:servers.agent_upgrade.state.${task.upgrade_state}`)}
           </Alert>
+          {reason && <Box>
+            <Typography variant="body2">{t('admin:servers.agent_upgrade.reason')}</Typography>
+            <Typography variant="caption" component="div" sx={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace', overflowWrap: 'anywhere', whiteSpace: 'pre-wrap' }}>
+              {reason}
+            </Typography>
+          </Box>}
           <Typography variant="body2" sx={{ overflowWrap: 'anywhere' }}>{t('admin:servers.agent_upgrade.task', { id: task.task_id })}</Typography>
           {task.binary_sha256 && <Typography variant="caption" sx={{ overflowWrap: 'anywhere' }}>SHA-256: {task.binary_sha256}</Typography>}
           {(error || task.dispatch_closed) && <Button onClick={() => {

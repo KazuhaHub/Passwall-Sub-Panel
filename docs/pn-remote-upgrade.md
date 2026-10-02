@@ -6,7 +6,10 @@ Xray/sing-box。管理员选择已发布的精确版本并确认短暂连接中�
 `POST /api/admin/servers/:id/upgrade-node-agent` 接收 `{version,expected_version}` 和必需的
 `Idempotency-Key`；同键相同输入返回同一个原任务，不延长启动截止。更改同键输入返回冲突。
 `GET /api/admin/servers/:id/node-agent-upgrades/:task_id` 只查询该服务器绑定 agent 的该任务，
-不暴露原始任务参数、凭据或未经核验的结果。两接口仅管理员可用、响应禁止共享缓存。
+不暴露原始任务参数、凭据或未经核验的结果。任务以失败或无法确认结束时，响应额外带上节点自己上报的
+`result_error_code` / `result_error`（协议在入库时已限长：代码 ≤128 字节、文本 ≤4 KiB），升级弹窗原样
+显示；成功或进行中的任务不带这两个字段。旧节点对所有失败只报同一句通用文本，新节点会写明哪一项检查
+失败。两接口仅管理员可用、响应禁止共享缓存。
 
 使用现有 Passwall Node 主动同步的 durable task 通道，不使用 SSH、sync_tasks 或另一个公网节点接口。
 启动授权默认十分钟；当轮报告必须同时声明 execution、expiry 与 `task.agent.upgrade.v1` 才下发。

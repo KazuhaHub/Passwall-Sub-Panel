@@ -105,6 +105,54 @@ func TestNativeUpgradeHTTPAdministratorBoundaryAndPrivateStatus(t *testing.T) {
 	}
 }
 
+// THE NODE'S REASON REACHES THE ADMINISTRATOR, AND ONLY THE ADMINISTRATOR.
+//
+// The status lookup is what the upgrade dialog polls, so it is the one place an
+// operator of a shell-less node can learn WHY an upgrade failed. The service
+// decides when a reason exists; this asserts the wire carries it under stable
+// names when it does, leaves both names out when it does not, and that a
+// non-administrator never reaches the service that would produce it.
+func TestNativeUpgradeHTTPStatusCarriesTheNodeReasonToAdministrators(t *testing.T) {
+	const reason = `label psp.agent: expected "agt_test", got "agt_other"`
+	failed := &nodeagentupgrade.Status{TaskID: "tsk1_test", AgentID: "agt_test", Version: "4.0.1", ExpectedVersion: "4.0.0",
+		Status: domain.NodeAgentTaskFailed, UpgradeState: "failed", NotAfterMS: 123456789,
+		ResultErrorCode: "docker_label_mismatch", ResultError: reason}
+	service := &nativeUpgradeHTTPStub{status: failed}
+	w := upgradeHTTPRequest(service, domain.RoleAdmin, http.MethodGet, "41/node-agent-upgrades/tsk1_test", "", "")
+	var fields map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &fields); w.Code != http.StatusOK || err != nil {
+		t.Fatalf("code=%d err=%v body=%s", w.Code, err, w.Body)
+	}
+	if fields["result_error_code"] != "docker_label_mismatch" || fields["result_error"] != reason {
+		t.Fatalf("the failure reason did not reach the administrator: %s", w.Body)
+	}
+	if w.Header().Get("Cache-Control") != "no-store, private" {
+		t.Fatal("a status carrying the node's reason must not be cached")
+	}
+
+	service.status = &nodeagentupgrade.Status{TaskID: "tsk1_test", AgentID: "agt_test", Version: "4.0.1", ExpectedVersion: "4.0.0",
+		Status: domain.NodeAgentTaskOffered, UpgradeState: "offered", NotAfterMS: 123456789}
+	w = upgradeHTTPRequest(service, domain.RoleAdmin, http.MethodGet, "41/node-agent-upgrades/tsk1_test", "", "")
+	fields = nil
+	if err := json.Unmarshal(w.Body.Bytes(), &fields); w.Code != http.StatusOK || err != nil {
+		t.Fatalf("code=%d err=%v body=%s", w.Code, err, w.Body)
+	}
+	for _, name := range []string{"result_error_code", "result_error"} {
+		if _, present := fields[name]; present {
+			t.Fatalf("%s appeared on a status with no reason: %s", name, w.Body)
+		}
+	}
+
+	service.status = failed
+	for _, role := range []domain.Role{"", domain.RoleUser, domain.RoleOperator} {
+		before := service.calls
+		w := upgradeHTTPRequest(service, role, http.MethodGet, "41/node-agent-upgrades/tsk1_test", "", "")
+		if w.Code != http.StatusUnauthorized && w.Code != http.StatusForbidden || service.calls != before || strings.Contains(w.Body.String(), "agt_other") {
+			t.Fatalf("role=%q reached the node's reason: code=%d body=%s", role, w.Code, w.Body)
+		}
+	}
+}
+
 func TestNativeUpgradeHTTPStrictBoundedMetadataAndIdempotency(t *testing.T) {
 	// A TARGET OLDER THAN THE CURRENT VERSION IS NOT IN THIS LIST ANY MORE. It was
 	// refused while the panel ordered versions, and removing that rule is a
