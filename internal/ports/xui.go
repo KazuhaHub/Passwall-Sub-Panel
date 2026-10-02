@@ -617,5 +617,15 @@ type PanelKindValidator interface {
 	SupportsKind(kind domain.PanelKind) bool
 }
 
+// PanelKindResolver is an optional pool capability: the adapter kind behind a
+// registered panel id, without handing out the panel definition. The lifecycle
+// failure breakdown labels each failure by it, because "17 failures" means one
+// thing on a native node whose agent is offline and another on a 3X-UI panel
+// that rejects writes. A pool that does not implement it, or an id it does not
+// hold, reads as unknown; nothing guesses a kind.
+type PanelKindResolver interface {
+	KindOf(panelID int64) (domain.PanelKind, bool)
+}
+
 // XUIPool is a source-compatibility alias for the generic pool contract.
 type XUIPool = PanelPool

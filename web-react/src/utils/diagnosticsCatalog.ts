@@ -49,6 +49,8 @@ export const FAMILY_CATALOG: Record<string, FamilyInfo> = {
   psp_lifecycle_sync_write_reason_total: c('lifecycle', true),
   psp_lifecycle_sync_not_provisioned_total: c('lifecycle'),
   psp_lifecycle_sync_error_total: c('lifecycle'),
+  psp_lifecycle_sync_error_stage_total: c('lifecycle', true),
+  psp_lifecycle_sync_error_panel_kind_total: c('lifecycle', true),
   psp_lifecycle_quota_delta_bytes: h('lifecycle'),
   psp_lifecycle_quota_band_skip_total: c('lifecycle'),
   psp_capability_gap_total: c('lifecycle', true),
@@ -162,6 +164,19 @@ export const WRITE_REASON_GROUP: Record<string, WriteReasonGroup> = {
   auth: 'credentials',
   panel_unread: 'unread',
 }
+
+/**
+ * The two breakdowns of psp_lifecycle_sync_error_total, in the order a write
+ * happens. Every counted failure lands in exactly one child of each family
+ * (sharedclient.countLifecycleFailure), so either list sums to the total.
+ * "unknown" is a panel the pool does not hold, which is exactly a pool_get
+ * failure.
+ */
+export const LIFECYCLE_ERROR_STAGES = [
+  'pool_get', 'update', 'confirm_read', 'confirm_mismatch', 'record_credentials',
+] as const
+
+export const LIFECYCLE_ERROR_KINDS = ['3xui', 'sui', 'psp', 'unknown'] as const
 
 /**
  * Split a series name into its family and, for a labelled child, the one

@@ -4,6 +4,8 @@ import { describe, expect, it } from 'vitest'
 import {
   CARD_ORDER,
   FAMILY_CATALOG,
+  LIFECYCLE_ERROR_KINDS,
+  LIFECYCLE_ERROR_STAGES,
   STAGE_GROUP,
   WRITE_REASON_GROUP,
   familyOf,
@@ -95,6 +97,43 @@ describe('WRITE_REASON_GROUP', () => {
   })
 
   it.todo('has a label for every reason and every group in both bundles')
+})
+
+// The two breakdowns of psp_lifecycle_sync_error_total. Their label values are
+// fixed sets on the Go side (constants in psp.go for the step; the panel kinds
+// in domain plus "unknown"), and the page names each one, so a new step or a
+// new kind of panel has to arrive here as well.
+function lifecycleErrorStages(): string[] {
+  const src = goSource('internal/pkg/metrics/psp.go')
+  const out = [...src.matchAll(/LifecycleErrorStage\w+\s*=\s*"([a-z_]+)"/g)].map(m => m[1])
+  if (out.length === 0) throw new Error('psp.go no longer declares LifecycleErrorStage* constants; update this test')
+  return out
+}
+
+function lifecycleErrorKinds(): string[] {
+  const domain = goSource('internal/domain/types.go')
+  const kinds = [...domain.matchAll(/PanelKind\w+\s+PanelKind\s*=\s*"([a-z0-9_]+)"/g)].map(m => m[1])
+  const unknown = /LifecycleErrorPanelKindUnknown\s*=\s*"([a-z_]+)"/.exec(goSource('internal/pkg/metrics/psp.go'))
+  if (kinds.length === 0 || !unknown) throw new Error('panel kinds or the unknown kind label moved; update this test')
+  return [...kinds, unknown[1]]
+}
+
+describe('lifecycle failure breakdowns', () => {
+  it('know every step psp.go can count a failure under', () => {
+    expect([...LIFECYCLE_ERROR_STAGES].sort()).toEqual(lifecycleErrorStages().sort())
+  })
+
+  it('know every panel kind a failure can be counted under', () => {
+    expect([...LIFECYCLE_ERROR_KINDS].sort()).toEqual(lifecycleErrorKinds().sort())
+  })
+
+  it('are catalogued as labelled counters on the user status sync card', () => {
+    for (const family of ['psp_lifecycle_sync_error_stage_total', 'psp_lifecycle_sync_error_panel_kind_total']) {
+      expect(FAMILY_CATALOG[family], family).toEqual({ card: 'lifecycle', type: 'counter', labelled: true })
+    }
+  })
+
+  it.todo('has a label for every step and every panel kind in both bundles')
 })
 
 describe('familyOf', () => {
