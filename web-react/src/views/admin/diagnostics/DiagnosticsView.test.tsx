@@ -173,6 +173,17 @@ describe('the production reading', () => {
     expect(screen.queryByTestId('finding-poll_behind')).toBeNull()
   })
 
+  // Each "?" names what it explains, so a screen reader can tell them apart.
+  it('names each help button after what it explains', async () => {
+    serve(productionSnapshot())
+    mount()
+    await loaded()
+    expect(screen.getByRole('button', { name: '说明' })).toBeTruthy()
+    expect(within(card('poll')).getByRole('button', { name: '关于「流量采集」' })).toBeTruthy()
+    expect(within(card('lifecycle')).getByRole('button', { name: '关于「用户状态同步」' })).toBeTruthy()
+    expect(within(screen.getByTestId('diag-system')).getByRole('button', { name: '关于「后台协程数」' })).toBeTruthy()
+  })
+
   // Colour is never the only signal: every badge carries its words and an icon.
   it('draws each card state as an icon and words', async () => {
     serve(productionSnapshot())

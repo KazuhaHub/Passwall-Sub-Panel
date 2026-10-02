@@ -6,9 +6,13 @@ import { createAppTheme } from '@/theme'
 import HelpTip from './HelpTip'
 
 // t over the REAL bundles' flattened keys is not needed here: the point is
-// which KEY the button and the popover ask for, so t echoes it back.
+// which KEY the button and the popover ask for, so t echoes it back, with any
+// values it was given after a bar.
 vi.mock('react-i18next', () => ({
-  useTranslation: () => ({ t: (k: string) => k, i18n: { language: 'en-US' } }),
+  useTranslation: () => ({
+    t: (k: string, o?: Record<string, string>) => (o ? `${k}|${Object.values(o).join('|')}` : k),
+    i18n: { language: 'en-US' },
+  }),
 }))
 
 const theme = createAppTheme({ mode: 'light', sourceColor: '#6750a4', language: 'en-US' })
@@ -31,6 +35,14 @@ describe('HelpTip', () => {
     mount(<HelpTip textKey="admin:diagnostics.help" labelKey="admin:diagnostics.help_label" />)
     expect(screen.getByRole('button', { name: 'admin:diagnostics.help_label' })).toBeTruthy()
     expect(screen.queryByRole('button', { name: 'admin:risk_center.help.label' })).toBeNull()
+  })
+
+  // One label per button: a card's "?" names the card it explains, so a
+  // screen reader does not hear nine identical "About this page" buttons.
+  it('fills its label with the values a page passes', () => {
+    mount(<HelpTip textKey="admin:diagnostics.cards.poll.purpose" labelKey="admin:diagnostics.help_label_card"
+      labelValues={{ title: 'Traffic polling' }} />)
+    expect(screen.getByRole('button', { name: 'admin:diagnostics.help_label_card|Traffic polling' })).toBeTruthy()
   })
 
   it('opens the text behind the button', () => {

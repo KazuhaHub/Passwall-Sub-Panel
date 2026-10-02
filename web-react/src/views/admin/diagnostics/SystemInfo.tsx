@@ -54,7 +54,8 @@ export default function SystemInfo({ snap, settingsIntervalMs, panelTz, fmt }: {
     [t('admin:diagnostics.system.goroutines'), (
       <Box component="span" sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.25 }}>
         {fmt.count(snap.goroutines)}
-        <HelpTip textKey="admin:diagnostics.system.goroutines_note" labelKey="admin:diagnostics.help_label" />
+        <HelpTip textKey="admin:diagnostics.system.goroutines_note" labelKey="admin:diagnostics.help_label_card"
+          labelValues={{ title: t('admin:diagnostics.system.goroutines') }} />
       </Box>
     )],
   ]

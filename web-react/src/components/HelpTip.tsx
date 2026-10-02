@@ -13,21 +13,25 @@ import { useTranslation } from 'react-i18next'
  * `textKey` and `labelKey` are whole keys, namespace included, so the key
  * check (i18n/riskKeys.test.ts) sees every help text a page names. The label
  * defaults to the risk center's, which is what its pages always read; a page
- * with its own wording for the button passes its own key.
+ * with its own wording for the button passes its own key, and `labelValues`
+ * when one label serves several buttons, so each is named after what it
+ * explains (a screen reader otherwise hears the same name on every one).
  */
 export default function HelpTip({
   textKey,
   labelKey = 'admin:risk_center.help.label',
+  labelValues,
 }: {
   textKey: string
   labelKey?: string
+  labelValues?: Record<string, string>
 }) {
   const { t } = useTranslation(['admin'])
   const md = useTheme().palette.md
   const [anchor, setAnchor] = useState<HTMLElement | null>(null)
   return (
     <Box sx={{ display: 'flex', flex: '0 0 auto', alignSelf: 'stretch', alignItems: 'center' }}>
-      <IconButton size="small" aria-label={t(labelKey)} aria-haspopup="dialog"
+      <IconButton size="small" aria-label={labelValues ? t(labelKey, labelValues) : t(labelKey)} aria-haspopup="dialog"
         onClick={e => setAnchor(e.currentTarget)}>
         <HelpOutlineIcon fontSize="small" />
       </IconButton>

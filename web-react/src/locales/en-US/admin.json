@@ -3230,6 +3230,7 @@
     "title": "Diagnostics",
     "subtitle": "Troubleshoot traffic polling, user status sync and panel connections.",
     "help_label": "About this page",
+    "help_label_card": "About {{title}}",
     "help": "This page summarises what PSP's background jobs record about themselves, to troubleshoot traffic polling, user status sync and panel connections. Every number is a running total over the statistics window, which opens when the panel starts and again whenever the statistics are cleared, so \"17 times\" does not mean it is still happening. The page refreshes every minute, and most problems show whether they have grown since you opened the page. A zero proves little while the window is short, so no verdict is given until the window spans three poll intervals; errors that have already happened are listed at once. \"Typical\" means half the cases were faster; \"95% within X\" means only 5% were slower; both are estimated from buckets. All raw metrics are kept at the bottom of the page and can be copied or downloaded for support.",
     "load_failed": "Could not load diagnostics. Refresh to try again.",
     "actions": {

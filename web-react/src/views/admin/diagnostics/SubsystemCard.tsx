@@ -48,14 +48,16 @@ export default function SubsystemCard({ card, sentence, extra, children, familie
   const target = link ? LINK_TARGET[link] : undefined
   const seriesCount = families.reduce((n, f) => n + f.series.length, 0)
   const copyGroup = () => void copyToClipboard(JSON.stringify({ card: card.id, ...cardSeries(families) }, null, 2))
+  const title = t(`admin:diagnostics.cards.${card.id}.title`)
 
   return (
     <Card id={`diag-card-${card.id}`} data-state={card.state} component="section"
       sx={{ p: 2, bgcolor: md.surfaceContainerLow, minWidth: 0, gridColumn: wide ? '1 / -1' : undefined, scrollMarginTop: 72 }}>
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
-        <Typography component="h3" sx={{ fontWeight: 600, fontSize: 16 }}>{t(`admin:diagnostics.cards.${card.id}.title`)}</Typography>
+        <Typography component="h3" sx={{ fontWeight: 600, fontSize: 16 }}>{title}</Typography>
         <CardStateBadge state={card.state} />
-        <HelpTip textKey={`admin:diagnostics.cards.${card.id}.purpose`} labelKey="admin:diagnostics.help_label" />
+        <HelpTip textKey={`admin:diagnostics.cards.${card.id}.purpose`} labelKey="admin:diagnostics.help_label_card"
+          labelValues={{ title }} />
       </Box>
       <Typography variant="body2" sx={{ mt: 0.75 }}>{sentence}</Typography>
       {card.notices && (
