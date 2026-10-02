@@ -52,6 +52,13 @@ type Status struct {
 	ObservedVersion      string                     `json:"observed_version,omitempty"`
 	LastSeen             *time.Time                 `json:"last_seen,omitempty"`
 	CompletedAt          *time.Time                 `json:"completed_at,omitempty"`
+	// THE NODE'S OWN ACCOUNT OF AN UNSUCCESSFUL END, set only for a failed or
+	// indeterminate task (see status). It is the code and text the node put in
+	// its result, bounded by the protocol at ingest (a token of at most 128
+	// bytes, UTF-8 text of at most 4 KiB). Older nodes send one generic sentence
+	// for every failure; a newer one names the check that failed.
+	ResultErrorCode string `json:"result_error_code,omitempty"`
+	ResultError     string `json:"result_error,omitempty"`
 }
 
 type IDSource interface{ Next() (string, error) }
@@ -302,6 +309,19 @@ func (s *Service) status(task *domain.NodeAgentTask, panel *domain.XUIPanel, age
 	}
 	if !task.Status.Terminal() && task.DispatchClosedAt != nil {
 		status.UpgradeState = "dispatch_closed"
+	}
+	// THE NODE'S REASON USED TO STOP AT THE TASK ROW, and the dialog could only
+	// say "failed". A node on a UI-only Docker host has no shell to read the
+	// updater's log from, so "inspect the logs" was advice its operator could not
+	// follow; the reason the node reported is the one diagnostic they have. This
+	// endpoint is administrator-only and never shared-cached, the same audience
+	// that already reads the node's diagnostics.
+	//
+	// KEYED ON THE TASK'S STATUS, NOT THE DERIVED STATE. A succeeded task whose
+	// receipt cannot be verified is "manual_attention" too, but a success carries
+	// no reason by protocol, so nothing such a row might hold is repeated here.
+	if task.Status == domain.NodeAgentTaskFailed || task.Status == domain.NodeAgentTaskIndeterminate {
+		status.ResultErrorCode, status.ResultError = task.ResultErrorCode, task.ResultError
 	}
 	return status, nil
 }
