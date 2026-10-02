@@ -3366,7 +3366,7 @@
         "log": "native node sync refused"
       },
       "sso_claim_silent": {
-        "title": "{{count}} single sign-ins brought back no role or group information (role {{role}}, group {{group}})",
+        "title": "Single sign-on brought back nothing the role or group rules read (counted per kind: role {{role}}, group {{group}})",
         "impact": "Those users kept their existing role and group; if the identity provider has revoked their access, the panel still keeps it.",
         "action": "Check the single sign-on attribute mapping in Settings, and confirm the identity provider actually sends those attributes."
       },
@@ -3883,7 +3883,7 @@
       },
       "psp_sso_claim_silent_total": {
         "label": "Single sign-ins without role or group",
-        "desc": "Single sign-ins where role or group rules exist but the identity provider sent none of the attributes they read; the existing role and group were kept."
+        "desc": "Single sign-ins where role or group rules exist but the identity provider sent none of the attributes they read, counted per kind: one sign-in can count once for each. The existing role and group were kept."
       }
     },
     "labels": {

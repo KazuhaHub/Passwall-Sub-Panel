@@ -1360,6 +1360,24 @@ describe('copy for the lifecycle failure breakdown', () => {
   }
 })
 
+// One sign-in with both rule sets and neither attribute counts once per kind
+// (user.reconcileSSOUser), so the family total is not a number of sign-ins and
+// the title may only state the per-kind figures.
+describe('copy for single sign-on without claims', () => {
+  const both = snap(metrics({
+    counters: [c('psp_sso_claim_silent_total{kind=role}', 1), c('psp_sso_claim_silent_total{kind=group}', 1)],
+  }))
+  for (const [lang, t] of [['zh-CN', tZh], ['en-US', tEn]] as const) {
+    it(`${lang} never presents the per-kind total as a number of sign-ins`, () => {
+      const f = deriveFindings(both, INTERVAL).find(x => x.id === 'sso_claim_silent')!
+      const title = t('diagnostics.findings.sso_claim_silent.title',
+        findingInterpolation(f, { count: String, duration: String, pct: () => '' }))
+      expect(title).not.toContain('2')
+      expect(title).toContain('1')
+    })
+  }
+})
+
 // The live check that this test was written from: the settings row said one
 // minute while the traffic loop's ticker was still on five, so a four-minute
 // window looked settled, psp_poll_total was legitimately 0, and the page

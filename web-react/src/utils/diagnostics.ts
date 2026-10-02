@@ -638,7 +638,10 @@ export function deriveFindings(
 
   // A deliberate fail-open in the SSO rules: with no claim, the stored role
   // and group are kept, so someone the directory has already demoted keeps
-  // their access here.
+  // their access here. Counted PER KIND: one sign-in with both rule sets and
+  // neither attribute adds to role and to group (user.reconcileSSOUser), so
+  // `count` is the family total for the export and the copy never calls it a
+  // number of sign-ins.
   const silent = counterFamilyTotal(m, 'psp_sso_claim_silent_total')
   if (silent > 0) {
     add({
