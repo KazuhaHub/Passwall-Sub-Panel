@@ -7,13 +7,14 @@ import zh from '@/locales/zh-CN/admin.json'
 import en from '@/locales/en-US/admin.json'
 import { flatten, type Nested } from './options'
 
-// THE RISK CENTER READS EVERY WORD FROM THE BUNDLES. Its views pass no
-// Chinese defaultValue to t() and carry no Chinese text of their own: a
-// defaultValue is what an English admin reads the day a key goes missing,
-// and a Chinese one there is a silent untranslated string. So two rules hold
-// for every non-test source under views/admin/risk: each literal
-// 'admin:<key>' names a key both bundles have, and no CJK character appears
-// outside a comment (comments may name a tab by its Chinese label).
+// THE RISK CENTER AND THE DIAGNOSTICS PAGE READ EVERY WORD FROM THE BUNDLES.
+// Their views pass no Chinese defaultValue to t() and carry no Chinese text
+// of their own: a defaultValue is what an English admin reads the day a key
+// goes missing, and a Chinese one there is a silent untranslated string. So
+// two rules hold for every non-test source under views/admin/risk and
+// views/admin/diagnostics: each literal 'admin:<key>' names a key both
+// bundles have, and no CJK character appears outside a comment (comments may
+// name a tab by its Chinese label).
 
 const bundles = { zh: flatten(zh as Nested), en: flatten(en as Nested) }
 
@@ -139,7 +140,7 @@ function cjkOutsideComments(src: string): string[] {
   return withoutComments(src).match(/[　-〿一-鿿＀-￯]+/g) ?? []
 }
 
-const RISK_DIR = fileURLToPath(new URL('../views/admin/risk', import.meta.url))
+const viewDir = (rel: string) => fileURLToPath(new URL(rel, import.meta.url))
 
 function sources(dir: string): string[] {
   return readdirSync(dir).flatMap(name => {
@@ -149,7 +150,7 @@ function sources(dir: string): string[] {
   })
 }
 
-describe('the risk center reads every word from the bundles', () => {
+describe('the key checkers', () => {
   // The checkers themselves, on planted input: a guard that finds nothing
   // because it looks at nothing must fail here first.
   it('finds a planted missing key and ignores prefixes and built keys', () => {
@@ -177,19 +178,26 @@ describe('the risk center reads every word from the bundles', () => {
     ].join('\n')
     expect(cjkOutsideComments(fixture)).toEqual(['选择用户', '设备'])
   })
+})
 
-  const files = sources(RISK_DIR)
+describe.each([
+  // The floor on files keeps a moved or renamed directory from passing by
+  // scanning nothing.
+  { dir: '../views/admin/risk', name: 'views/admin/risk', atLeast: 11 },
+  { dir: '../views/admin/diagnostics', name: 'views/admin/diagnostics', atLeast: 10 },
+])('$name reads every word from the bundles', ({ dir, name, atLeast }) => {
+  const files = sources(viewDir(dir))
 
-  it('scans the risk views', () => {
-    expect(files.length).toBeGreaterThan(10)
+  it(`scans the views under ${name}`, () => {
+    expect(files.length).toBeGreaterThanOrEqual(atLeast)
   })
 
-  it('every literal admin key under views/admin/risk exists in both bundles', () => {
+  it(`every literal admin key under ${name} exists in both bundles`, () => {
     const found = files.flatMap(f => missingKeys(readFileSync(f, 'utf8')).map(k => `${f}: ${k}`))
     expect(found).toEqual([])
   })
 
-  it('no Chinese text outside comments under views/admin/risk', () => {
+  it(`no Chinese text outside comments under ${name}`, () => {
     const found = files.flatMap(f => cjkOutsideComments(readFileSync(f, 'utf8')).map(s => `${f}: ${s}`))
     expect(found).toEqual([])
   })

@@ -3226,116 +3226,805 @@
   },
   "diagnostics": {
     "title": "运行诊断",
-    "subtitle": "进程内的实测指标。计数在重启或手动清零时归零，所以每个数字都要连同它的窗口一起读。",
-    "refresh": "刷新",
-    "load_failed": "读取诊断数据失败。",
-    "window": "测量窗口 {{window}} · 进程已运行 {{uptime}}",
-    "was_reset": "计数被手动清零过，所以窗口短于进程运行时长",
-    "blackout": "窗口还不足一个轮询周期（{{interval}}），一轮都可能没跑完。此时的 0 不代表正常，所以数字暂不显示——已观测到的问题仍会在上方列出。",
-    "verdict": {
-      "problems": "发现 {{count}} 项问题",
-      "blackout": "测量中——窗口还不足一个轮询周期",
-      "measuring": "测量中——窗口还太短，0 值暂不能作为结论",
-      "ok": "本窗口内未发现问题"
+    "subtitle": "排查流量采集、用户状态同步和面板连接的问题。",
+    "help_label": "说明",
+    "help_label_card": "关于「{{title}}」",
+    "help": "本页汇总 PSP 后台任务自己记录的运行数据，用于排查流量采集、用户状态同步和面板连接的问题。所有数字都是「统计区间」内的累计值：面板启动时开始计数，手动清零时重新开始，所以「累计 N 次」不代表现在仍在发生。页面每分钟自动刷新，多数问题会注明本页打开后是否有新增。统计时间太短时，0 不代表正常，统计时长达到 3 个采集间隔后才会给出结论；已经发生的错误则会立即列出。「典型」指一半的情况比它快，「95% 在 X 以内」指只有 5% 比它慢，二者都按分桶估算。页面底部保留了全部原始指标，可以复制或下载后提供给技术支持。",
+    "load_failed": "无法读取运行诊断数据，请稍后刷新重试。",
+    "actions": {
+      "refresh": "刷新",
+      "more": "更多操作",
+      "copy_json": "复制全部数据（JSON）",
+      "download_json": "下载全部数据（JSON）",
+      "export_note": "包含用户数、面板数等部署规模信息，不含主机名、用户名或密钥。",
+      "reset": "清零统计…",
+      "reset_disabled_blackout": "统计时长还不到一个采集间隔，暂时无需清零",
+      "reset_disabled_empty": "统计刚刚开始，没有可清零的数据"
     },
-    "precondition": {
-      "poll_running": {
-        "label": "轮询在跑",
-        "help": "流量轮询是下面一切的驱动来源。它没跑，下面所有的 0 都只有这一个原因。"
-      },
-      "push_capacity": {
-        "label": "推送闸已建",
-        "help": "并发闸容量在构造时写入一次。读到 0 不是「池子小」，是流量服务从未被构造，这一族指标描述的全是空气。"
-      },
-      "push_reaching": {
-        "label": "推送在执行",
-        "help": "配额 floor 推送是否真的进入执行。没有尝试就没有成功率——那是缺分母，不是 0%。"
-      },
-      "lifecycle_running": {
-        "label": "生命周期同步在跑",
-        "help": "共享客户端的启用/到期/配额下发是否在发生。"
-      },
-      "liveip_complete": {
-        "label": "在线 IP 读取完整",
-        "help": "有任何一个面板没读到，下游每个数字都只是下限而不是总数。"
-      }
+    "links": {
+      "open": "前往{{page}}"
+    },
+    "status": {
+      "window": "统计区间：自 {{since}} 起，共 {{window}}",
+      "window_after_reset": "统计区间：自 {{since}} 手动清零起，共 {{window}}（面板已连续运行 {{uptime}}）",
+      "interval": "流量采集每 {{interval}} 一轮",
+      "interval_unknown": "流量采集间隔未知",
+      "read_at": "数据读取于 {{time}} · 每分钟自动刷新",
+      "list_separator": "、"
+    },
+    "verdict": {
+      "critical": "严重问题：{{cards}}",
+      "action": "需要处理：{{cards}}",
+      "attention": "需要留意：{{cards}}",
+      "ok": "未发现问题",
+      "ok_notices": "未发现问题 · 另有提示 {{count}} 条",
+      "measuring": "测量中：统计时间还不够长，约 {{remaining}} 后给出结论",
+      "measuring_unknown": "测量中：无法确定流量采集间隔，暂不下结论",
+      "blackout": "刚开始统计：统计时长还不到一个采集间隔（{{interval}}），暂不下结论"
+    },
+    "state": {
+      "failing": "需要处理",
+      "attention": "需留意",
+      "ok": "运行中",
+      "idle": "无活动",
+      "measuring": "测量中",
+      "inhibited": "无法判断",
+      "not_applicable": "未接入",
+      "none": "无记录",
+      "recorded": "有记录"
+    },
+    "severity": {
+      "critical": "严重",
+      "error": "需要处理",
+      "warn": "需留意",
+      "notice": "提示"
+    },
+    "problems": {
+      "title": "需要处理",
+      "notices_title": "提示",
+      "show_data": "查看数据",
+      "log_label": "日志关键字",
+      "session_new": "本页打开后（{{minutes}} 分钟）新增 {{count}} 次",
+      "session_none": "本页打开后（{{minutes}} 分钟）没有新增",
+      "session_wait": "刚打开本页，下次刷新后可以看出是否仍在增加",
+      "session_new_rebuilt": "统计在本页打开后重新开始，此后（{{minutes}} 分钟）新增 {{count}} 次",
+      "session_none_rebuilt": "统计在本页打开后重新开始，此后（{{minutes}} 分钟）没有新增",
+      "session_wait_rebuilt": "统计在本页打开后刚重新开始，下次刷新后可以看出是否仍在增加"
     },
     "findings": {
-      "title": "发现（{{count}}）",
       "push_capacity_zero": {
-        "title": "推送并发闸容量为 0",
-        "detail": "容量在构造时写入一次，所以 0 意味着流量服务从未被构造。推送一族的所有指标此刻都不描述任何真实的东西。检查启动日志。"
+        "title": "流量服务没有启动",
+        "impact": "流量采集和配额兜底刷新都不会运行：计量、超额停用和在线 IP 采集全部停止，这几部分的数字因此没有意义。",
+        "action": "查看服务端启动日志中的错误，处理后重启面板。"
       },
       "poll_dead": {
-        "title": "流量轮询已 {{minutes}} 分钟没有进入过一个周期",
-        "detail": "它死了、从未启动、或在入口就 panic。下游的计量、配额执法、在线 IP 全部停摆。去服务端日志找 traceback。"
-      },
-      "push_errors": {
-        "title": "{{errors}} 次配额 floor 推送失败（共尝试 {{attempted}} 次）",
-        "detail": "这条路径没有重试队列——只有一行日志，且下次重试的前提是该用户再产生流量。搜日志 traffic floor push failed / shared-client lifecycle push failed，并核对面板可达性。"
+        "title": "流量采集已停止：{{window}} 内一轮也没有运行",
+        "impact": "流量不再计量，超额用户不会自动停用，配额兜底刷新、在线 IP 采集和异地判定也随之停止。到期不依赖流量采集，不受影响。",
+        "action": "查看服务端运行日志中的错误或崩溃记录，处理后重启面板。",
+        "log": "traffic loop started · traffic poll"
       },
       "poll_errors": {
-        "title": "{{errors}} 轮流量轮询失败",
-        "detail": "注意这只统计用户列表读取这一条错误路径；面板不可达、快照写入失败等都不计入这里。"
+        "title": "{{errors}} 轮流量采集因读不到用户列表而整轮跳过（共 {{polls}} 轮）",
+        "impact": "这几轮没有计量流量，也没有检查超额。面板连不上不会计入这里。",
+        "action": "检查数据库能否连接、磁盘是否已满。",
+        "log": "traffic poll"
+      },
+      "poll_behind": {
+        "title": "流量采集比预期少了约 {{missing}} 轮（已运行 {{polls}} 轮，按间隔至少应有 {{expected}} 轮）",
+        "impact": "有轮次被跳过：可能某一轮连同其后的数据汇总耗时超过了采集间隔，或采集暂时被挡住。流量不会丢失，下一轮会一并计入，但超额停用会延后。",
+        "action": "查看本页「流量采集」中每轮耗时的最长值和「面板请求」中最慢的操作；必要时在系统设置中延长流量采集间隔。"
       },
       "lifecycle_errors": {
-        "title": "{{errors}} 次共享客户端生命周期下发失败",
-        "detail": "启用状态、到期时间或配额没能写进面板。停用指令走的就是这条路。"
+        "title": "{{errors}} 次用户状态同步失败（共核对 {{checks}} 次，{{pct}}）",
+        "impact": "涉及启用与停用、到期时间和流量上限。状态没能写进面板时，已停用、已到期或已超额的用户可能仍能连接对应面板。",
+        "origin": "配额兜底刷新本区间没有失败，所以这些失败都不是来自兜底刷新，而是来自管理操作、自动停用与恢复（包括采集中触发的超额停用和异地暂停）、同步任务的重试，或启动时及定期的修复。",
+        "breakdown": "按步骤：{{stages}}；按面板类型：{{kinds}}。「找不到面板」和「写入」表示写入本身失败；「写入后读回」和「读回不一致」表示已写入但没能确认；「保存结果」表示面板已更新并确认，只是 PSP 没能记下。",
+        "retry": "由管理操作、成员变更或自动停用与恢复引起的失败会记入「同步任务」，可以在那里查看错误并重试；此外，定期修复会再次核对所有用户，补上仍不一致的状态。每次重试失败都会再计一次，所以次数不等于受影响的用户数。",
+        "action": "打开「同步任务」，查看有没有未完成或已取消的用户任务及其错误信息；再到「服务器」确认相关面板可以连接、原生节点在线。",
+        "log": "shared-client lifecycle push failed",
+        "log_note": "用这个关键字能搜到两种日志：每位用户一条，只含第一个错误；以及每个失败的客户端一条（消息为「shared-client lifecycle push failed for a client」），带面板编号 panel_id 和失败的步骤 stage，可以据此区分不同面板上的失败。"
       },
-      "push_suppressed": {
-        "title": "{{suppressed}} 次推送被跨周期守卫抑制",
-        "detail": "上一周期的推送还没排空，整个周期的 floor 推送被跳过。偶发可接受；持续出现说明推送侧开始追不上。"
+      "push_errors": {
+        "title": "{{errors}} 次配额兜底刷新失败（共 {{attempted}} 次，{{pct}}）",
+        "impact": "相关用户在面板上的剩余额度没有更新到最新。PSP 在线时仍会在下一轮采集按实际用量停用超额用户；只有 PSP 离线期间，面板才依赖这个额度自行断流。写入面板失败的那部分同时计入「用户状态同步失败」，两处次数会有重叠。",
+        "retry": "这类失败不进入「同步任务」：该用户下次产生流量时会再刷新，定期修复也会补上。",
+        "action": "到「服务器」检查相关面板能否连接。",
+        "log": "traffic floor push failed"
       },
-      "push_carryover": {
-        "title": "推送溢出到下一周期 {{carryover}} 次",
-        "detail": "这是 data-plane-plan.md 里「重开自研数据面」的三条判据之一。注意它在周期开始时就计数，所以刚启动时出现一两次是正常的。"
-      },
-      "capability_gaps": {
-        "title": "{{gaps}} 次能力缺口",
-        "detail": "面板存不下 PSP 要写的字段。注意：设备上限这一项即使没有缺口，也不代表它被执行了——PSP 架构下任何面板版本都不执行设备上限。"
+      "push_backlog": {
+        "title": "{{cycles}} 轮采集因上一轮的兜底刷新还在排队而跳过了刷新（共跳过 {{suppressed}} 次）",
+        "impact": "面板响应跟不上采集节奏。被跳过的用户在之后的轮次再产生流量时会补上；启用、停用和到期不走这条路，不受影响。",
+        "action": "在本页「面板请求」中查看哪类操作最慢，并在「服务器」对相关面板「测试连接」；持续出现时可延长流量采集间隔。"
       },
       "liveip_incomplete": {
-        "title": "{{incomplete}} 个用户的在线 IP 读取不完整",
-        "detail": "有面板没答上来。这些用户的在线 IP 数和异地判定都只是下限，不能当总数读。"
+        "title": "有 {{incomplete}} 人次的在线 IP 没能读全",
+        "impact": "采集时有面板没有返回在线 IP，这些用户的在线 IP 数和异地判定只是「至少」。同一用户每轮各计一次。",
+        "sui": "已接入 S-UI 面板：S-UI 不提供在线 IP，使用这些面板的用户每轮都会计入，所以这个数会持续增长。如果受影响的只有 S-UI 上的用户，这是预期现象。",
+        "action": "到「服务器」检查其他面板能否连接，并在服务端日志中搜索下面的关键字，看是哪个面板没有返回。",
+        "log": "live client IPs unavailable for this panel"
       },
-      "invariant_poll_ms": {
-        "title": "轮询耗时样本数与轮询次数不符",
-        "detail": "观测到 {{observed}} 个样本，但记录了 {{expected}} 轮。差 1 是快照非原子造成的噪声；差得多说明有周期在中途退出。"
+      "history_write_errors": {
+        "title": "{{errors}} 轮在线连接没能写入连接历史",
+        "impact": "风控中心的连接历史在这些时段留有缺口，不会补写；采集本身不受影响。",
+        "action": "检查数据库能否写入、磁盘是否已满。",
+        "log": "connection history: could not record"
       },
-      "invariant_push_enqueue": {
-        "title": "推送执行数超过入队数",
-        "detail": "执行 {{started}} 次、入队 {{enqueued}} 次。每次执行都应当先入队，所以这个方向的差值不该出现。"
+      "flag_write_errors": {
+        "title": "{{errors}} 次标记记录写入失败（每次可能包含多条记录）",
+        "impact": "对应的标记、自动暂停或恢复已经生效，只是在风控中心的「记录」里看不到。",
+        "action": "检查数据库能否写入、磁盘是否已满。",
+        "log": "flag records: could not record"
+      },
+      "geo_auto_errors": {
+        "title": "异地自动暂停失败 {{suspend}} 次，自动解除失败 {{lift}} 次",
+        "impact": "暂停失败时，被判定异地的用户仍可使用，需要再次累积到触发条件才会重新暂停；解除失败会在下一轮采集时重试。",
+        "action": "到风控中心查看自动暂停的用户，必要时手动处理。",
+        "log": "geo auto-suspension: suspend failed · geo auto-suspension: lift failed"
+      },
+      "node_sync_refused": {
+        "title": "原生节点的同步上报被拒 {{count}} 次（版本不兼容 {{proto}} 次，内容无效 {{invalid}} 次）",
+        "impact": "被拒的同步不会带回用户变更，节点上报的流量和在线状态也不会记录。版本不兼容会让每次同步都被拒，该节点实际处于离线状态。",
+        "action": "到「服务器」查看节点的兼容状态，升级节点程序或面板，使两者版本匹配。",
+        "log": "native node sync refused"
+      },
+      "sso_claim_silent": {
+        "title": "单点登录没有带回角色或分组规则所需的信息（按类别计：角色 {{role}} 次，分组 {{group}} 次）",
+        "impact": "这些用户沿用了原有的角色和分组；如果身份提供方已撤销其权限，面板里仍然保留。",
+        "action": "在「系统设置」中检查单点登录的属性映射，并核对身份提供方是否发出了这些属性。"
+      },
+      "capability_gaps": {
+        "title": "有用户设置了所在面板无法执行的限制（IP 上限 {{ip}} 次，设备上限 {{device}} 次）",
+        "impact": "这些限制会写入面板，但不会生效：S-UI 和 PSP 原生节点不支持 IP 上限与设备上限，3X-UI 3.7.0 以下的版本存不下设备上限。只要情况不变，每次核对都会再计一次，这是持续状态而不是故障。",
+        "note": "另外，设备上限目前在任何面板上都不会执行，3.7.0 及以上的 3X-UI 也只是保存这个值，所以这里没有计数并不代表设备上限已经生效。",
+        "action": "在「服务器」查看各面板的类型和版本，对照上面的说明判断哪些面板执行不了这些限制；编辑用户时，上限输入框下方也会列出这些面板。把这些用户换到支持的面板，或升级面板。",
+        "log": "panel cannot enforce a setting PSP is pushing"
+      }
+    },
+    "self_check": {
+      "title": "数据自检",
+      "note": "检查几组相关数字是否自洽，只用于排查统计本身，不影响上方结论。",
+      "pass": "通过",
+      "fail": "不一致",
+      "poll_ms": {
+        "pass": "采集耗时记录 {{observed}} 条，与已开始的 {{expected}} 轮一致（允许相差 1）。",
+        "fail": "采集耗时记录 {{observed}} 条，已开始 {{expected}} 轮，相差超过 1：说明读取时有不止一轮正在运行，通常是「立即采集」与定时采集重叠，或某一轮卡住时又手动触发了采集。"
+      },
+      "push_enqueue": {
+        "pass": "兜底刷新执行 {{started}} 次，不多于排队的 {{enqueued}} 次。",
+        "fail": "兜底刷新执行 {{started}} 次，多于排队的 {{enqueued}} 次。统计清零时还在排队的兜底刷新，排队计在清零前、执行计在清零后，所以清零后的整个统计区间都会多出这些次数（等于当时排队的数量），并不影响使用。只有统计区间从面板启动时开始、没有清零过时仍出现不一致，才需要反馈给开发者。"
+      }
+    },
+    "cards": {
+      "section_title": "各部分运行情况",
+      "common": {
+        "failing": "有问题需要处理，详情见页面上方。",
+        "attention": "有情况需要留意，详情见页面上方。",
+        "notices": "另有提示，见页面上方。",
+        "measuring": "统计时间还短，约 {{remaining}} 后给出结论。",
+        "measuring_unknown": "无法确定流量采集间隔，暂不下结论。",
+        "blackout": "统计时长还不到一个采集间隔，暂不显示数字。",
+        "inhibited": "流量采集没有运行，这部分无法判断。",
+        "depends": "依赖流量采集：{{state}}",
+        "details": "详细数据（{{count}} 项）",
+        "copy_group": "复制本组数据（JSON）"
+      },
+      "poll": {
+        "title": "流量采集",
+        "purpose": "按采集间隔定期从各面板读取用量，据此计量流量、停用超额用户，之后进行配额兜底刷新，并采集在线 IP 供风控使用。它停止时，配额兜底刷新和在线 IP 与风控数据也随之停止，其他部分仍会继续计数。",
+        "ok": "按计划运行：每 {{interval}} 一轮，本区间已运行 {{polls}} 轮。",
+        "kpi": {
+          "polls": "已运行",
+          "polls_expected": "按间隔至少应有 {{expected}} 轮",
+          "duration": "每轮耗时",
+          "scope": "每轮处理（平均）",
+          "scope_value": "{{users}} 位用户 · {{panels}} 个面板",
+          "scope_active": "其中约 {{active}} 位有流量"
+        },
+        "stages": {
+          "title": "一轮的时间花在哪里（平均）",
+          "db": "读取用户与记录",
+          "panels": "读取面板",
+          "compute": "汇总、计量与判定",
+          "write": "写入数据库",
+          "geo": "异地暂停与解除",
+          "note": "「读取面板」包括各面板的流量和在线 IP。采集中触发的停用会当场写入面板，所以「汇总、计量与判定」和「异地暂停与解除」也可能包含等待面板的时间。"
+        }
+      },
+      "lifecycle": {
+        "title": "用户状态同步",
+        "purpose": "把每位用户的启用状态、到期时间、流量上限和连接数上限写入其所在的每个面板。停用、暂停和超额断流都通过这一步生效。每次先读取面板上的现状，一致就跳过，不一致才写入。",
+        "ok": "本区间已核对 {{checks}} 次，其中 {{skipped}} 无需改动。",
+        "idle": "本区间没有核对过任何用户：用户的客户端可能尚未在面板上建好，也可能这段时间既没有管理操作，也没有需要刷新的用户。",
+        "kpi": {
+          "checks": "核对",
+          "skipped": "无需改动",
+          "skipped_caption": "面板上已一致，没有写入",
+          "writes": "实际写入",
+          "writes_caption": "原因见下方",
+          "errors": "同步失败",
+          "errors_caption": "占核对的 {{pct}}"
+        },
+        "not_provisioned": "另有 {{count}} 次因客户端尚未在面板上建好而跳过核对。",
+        "errors_by_stage": "同步失败按步骤：{{list}}",
+        "errors_by_kind": "同步失败按面板类型：{{list}}",
+        "reasons_title": "写入原因",
+        "limits": {
+          "title": "上限能否执行",
+          "ip_gaps": "IP 上限：{{count}} 次核对涉及不支持 IP 上限的面板",
+          "ip_none": "IP 上限：本区间没有发现设了上限却不支持的情况",
+          "device": "设备上限：PSP 目前在任何面板上都不执行设备上限，设定值只会保存到面板",
+          "device_gaps": "另有 {{count}} 次核对涉及连设备上限都存不下的面板",
+          "servers_note": "各节点能否真正执行 IP 上限，见「服务器」页。"
+        }
+      },
+      "floor": {
+        "title": "配额兜底刷新",
+        "purpose": "每轮采集后，把有流量、设了流量上限且尚未超额的用户的剩余额度写进面板。这样即使 PSP 暂时离线，面板也能在额度用完时自行断流。PSP 在线时，超额停用由流量采集负责，不依赖这一步。",
+        "ok": "本区间已刷新 {{count}} 次，约每轮 {{perPoll}} 次。",
+        "idle": "本区间没有需要刷新的用户：没有既设了流量上限、尚未超额、又产生了流量的用户。",
+        "kpi": {
+          "pushes": "已刷新",
+          "errors": "失败",
+          "errors_caption": "占 {{pct}}",
+          "concurrency": "同时刷新（最多）",
+          "concurrency_value": "{{peak}} / {{capacity}}",
+          "concurrency_caption": "排队最多 {{waiting}} 个",
+          "wait": "排队等待",
+          "backlog": "积压跳过",
+          "backlog_caption": "共跳过 {{suppressed}} 次刷新"
+        }
+      },
+      "panel_api": {
+        "title": "面板请求（3X-UI）",
+        "purpose": "PSP 向 3X-UI 面板发出的每一次请求的次数、失败和耗时，按操作类型统计，不区分是哪个面板。",
+        "ok": "本区间向 3X-UI 面板发出 {{count}} 次请求，失败 {{pct}}。",
+        "idle": "本区间没有向 3X-UI 面板发出请求。",
+        "not_applicable": "未接入 3X-UI 面板。",
+        "table": {
+          "op": "操作",
+          "requests": "请求",
+          "errors": "失败",
+          "p50": "典型",
+          "p95": "95% 以内",
+          "max": "最长"
+        },
+        "show_all": "显示全部（{{count}} 项）",
+        "show_less": "收起",
+        "note_scope": "只统计 3X-UI 面板；S-UI 与 PSP 原生节点不在此统计。自动重试的每一次都单独计数。",
+        "note_get_client": "「读取客户端」的失败包含客户端尚未建立时的正常查询，不一定是故障。",
+        "note_timeout": "最长接近 30 s 表示请求等到了超时。"
+      },
+      "liveip": {
+        "title": "在线 IP 与风控数据",
+        "purpose": "风控中心所用数据的采集情况：在线 IP 是否读全、记录是否保存成功、自动暂停是否执行成功。判定结果本身请到风控中心查看。",
+        "ok": "每轮都读到了所有面板的在线 IP，平均每轮约 {{judged}} 位用户参与判定。",
+        "idle": "本区间没有用户参与在线 IP 判定。没有人在线时用户照样会参与判定，所以这通常是因为：还没有用户在任何面板上建好客户端；或者采集读不到用户的客户端列表——请在服务端日志中搜索「traffic poll shared-client list failed」，出现时这些轮次的共享客户端流量也没有计量。",
+        "kpi": {
+          "judged": "每轮判定用户（平均）",
+          "judged_value": "约 {{count}} 位",
+          "incomplete": "在线 IP 读取不完整",
+          "incomplete_caption": "同一用户每轮各计一次",
+          "risk": "风险信号计算",
+          "risk_value": "成功 {{ok}} / 共 {{total}} 次",
+          "risk_none": "本区间未运行",
+          "records": "记录写入失败",
+          "records_value": "连接历史 {{history}} · 标记记录 {{flags}}",
+          "auto": "自动暂停 / 解除失败",
+          "auto_value": "{{suspend}} / {{lift}}"
+        },
+        "sui_note": "已接入 S-UI 面板：S-UI 不提供在线 IP，使用这些面板的用户每轮都会计为「读取不完整」。"
+      },
+      "node": {
+        "title": "原生节点",
+        "purpose": "PSP 原生节点上报的主机指标与同步请求是否被正常接收和保存。",
+        "ok": "本区间已接收 {{count}} 次主机指标上报。",
+        "idle": "本区间没有收到原生节点的上报。",
+        "not_applicable": "未接入 PSP 原生节点。",
+        "kpi": {
+          "accepted": "主机指标上报",
+          "accepted_value": "已接收 {{count}} 次",
+          "accepted_caption": "其他结果 {{other}} 次",
+          "refused": "同步上报被拒",
+          "refused_caption": "版本不兼容 {{proto}} · 内容无效 {{invalid}}",
+          "storage": "保存失败",
+        "storage_caption": "其中 {{history}} 次含历史样本",
+          "persist": "保存耗时",
+          "persist_caption": "预算 500 ms"
+        }
+      },
+      "sso": {
+        "title": "单点登录",
+        "purpose": "单点登录中被拒绝或缺少信息的情况。",
+        "none": "本区间没有单点登录相关的记录。",
+        "recorded": "本区间有 {{count}} 次 SAML 登录被拒，原因见下方。",
+        "kpi": {
+          "saml": "SAML 登录被拒",
+          "claims": "缺少角色或分组信息",
+          "claims_value": "角色 {{role}} · 分组 {{group}}"
+        }
+      }
+    },
+    "system": {
+      "title": "系统信息",
+      "version": "版本",
+      "build": "构建",
+      "build_local": "本地构建",
+      "copy_build": "复制构建号",
+      "uptime": "面板已运行",
+      "since": "统计起点",
+      "window": "统计时长",
+      "interval": "实际采集间隔",
+      "interval_peak": "本区间内最长 {{peak}}",
+      "interval_setting": "设置中的采集间隔",
+      "goroutines": "后台协程数",
+      "goroutines_note": "开发者信息：只有在多次刷新之间持续上涨、而负载不变时才值得关注。"
+    },
+    "raw": {
+      "title": "全部原始指标",
+      "summary": "{{families}} 项指标 · {{series}} 条序列",
+      "search": "按名称、标签或说明搜索",
+      "filter_all": "全部",
+      "filter_nonzero": "仅非零",
+      "view_current": "当前",
+      "view_previous": "清零前（{{window}}）",
+      "previous_note": "正在查看清零前的数据（截至 {{time}}），只读。",
+      "blackout_note": "统计时长还不到一个采集间隔，数字仅供参考，0 不代表正常。",
+      "absence_note": "不带标签的指标总会出现，缺失表示服务端版本较早；带标签的指标只在第一次发生后才出现，缺失即为 0。",
+      "group_count": "{{series}} 条，非零 {{nonzero}} 条",
+      "group_other": "其他指标",
+      "no_match": "没有匹配的指标",
+      "col": {
+        "name": "名称",
+        "type": "类型",
+        "value": "数值",
+        "desc": "说明"
+      },
+      "type": {
+        "counter": "计数",
+        "gauge": "当前值",
+        "histogram": "分布"
+      },
+      "absent": "此服务端版本没有该指标",
+      "no_children": "尚未出现任何取值（即全部为 0）",
+      "family_total": "合计 {{value}}",
+      "family_total_samples": "共 {{value}} 个样本",
+      "gauge_value": "当前 {{value}} · 峰值 {{peak}}",
+      "peak_note": "峰值为本统计区间内的最高值。",
+      "hist_value": "{{count}} 个样本 · 典型 {{p50}} · 95% 在 {{p95}} 以内",
+      "server_help": "服务端说明",
+      "copy_name": "复制指标名",
+      "stats": {
+        "unit": "单位",
+        "count": "样本数",
+        "sum": "总和",
+        "mean": "平均",
+        "max": "最大",
+        "p50": "p50（中位数）",
+        "p90": "p90",
+        "p95": "p95",
+        "p99": "p99"
+      },
+      "quantile_note": "分位数按分桶估算；样本少于 10 个时，看最大值即可。",
+      "buckets": "分桶",
+      "bucket": {
+        "le": "≤ 上界",
+        "inf": "超过最后一档",
+        "cumulative": "累计次数",
+        "count": "本档次数"
       }
     },
     "reset": {
-      "action": "清零并重新计时",
-      "title": "清零计数？",
-      "message": "这会丢弃已经测量了 {{window}} 的窗口，重新开始计时。清零前的快照会在响应里返回，但界面不会保留它。",
-      "done": "计数已清零，新的测量窗口开始",
-      "nothing": "窗口是空的，没有可清零的内容"
+      "title": "清零统计并重新计时？",
+      "message": "当前 {{window}} 的统计会全部清零，包括本页显示的风控和原生节点相关计数；风控中心本身的数据不受影响。清零后，本页会保留清零前的数据供下载；离开本页后不再保留。",
+      "confirm": "清零",
+      "done": "已清零，新的统计从 {{time}} 开始。",
+      "kept": "已清零。清零前 {{window}} 的统计可以下载保存，离开本页后不再保留。",
+      "download_previous": "下载清零前的数据"
     },
-    "table": {
-      "metric": "指标",
-      "value": "值",
-      "means": "含义"
+    "fmt": {
+      "duration_s": "{{s}} 秒",
+      "duration_m": "{{m}} 分钟",
+      "duration_hm": "{{h}} 小时 {{m}} 分",
+      "duration_dh": "{{d}} 天 {{h}} 小时",
+      "times": "{{count}} 次",
+      "polls": "{{count}} 轮",
+      "occurrences": "{{count}} 人次",
+      "per_hour": "约每小时 {{rate}}",
+      "per_hour_times": "约每小时 {{rate}} 次",
+      "per_poll": "约每轮 {{rate}} 次",
+      "typical": "典型 {{value}}",
+      "p95_within": "95% 在 {{value}} 以内",
+      "p95_over": "最慢的 5% 超过 {{ceiling}}，超出统计分桶范围",
+      "pct_of_interval": "约为采集间隔的 {{pct}}",
+      "few_samples": "样本仅 {{count}} 个 · 最长 {{max}}",
+      "no_samples": "本区间没有样本",
+      "no_denominator": "没有尝试，因此没有比例",
+      "pct_tiny": "<0.01%"
     },
-    "never_observed": "本窗口内从未观测到",
-    "too_few_samples": "样本仅 {{count}} 个 · 最大 {{max}}",
-    "footer": "版本 {{version}} · commit {{commit}} · goroutine {{goroutines}} · 推送并发闸容量 {{capacity}}",
     "metric": {
-      "psp_poll_total": "流量轮询完成的周期数",
-      "psp_poll_error_total": "轮询失败次数（仅统计用户列表读取这一条错误路径）",
-      "psp_poll_ms": "一轮轮询的墙钟耗时",
-      "panel_fetch": "轮询中「等面板回话」那一段，通常占整轮的绝大部分",
-      "psp_push_client_config_total": "配额 floor 推送开始执行的次数（仅流量轮询这条路径）",
-      "psp_push_client_config_error_total": "其中失败的次数",
-      "psp_push_suppressed_total": "因跨周期守卫被跳过的推送",
-      "psp_push_sem_carryover_total": "推送溢出到下一周期的次数",
-      "psp_push_sem_wait_ms": "在并发闸上的等待时间（只由挤过队列的推送写入，因此是下限）",
-      "psp_lifecycle_sync_total": "共享客户端生命周期检查次数",
-      "psp_lifecycle_sync_write_total": "其中真的写入面板的次数",
-      "psp_lifecycle_sync_error_total": "其中写入失败的次数",
-      "psp_capability_gap_total": "面板存不下 PSP 要写的字段的次数"
+      "psp_poll_total": {
+        "label": "流量采集轮次",
+        "desc": "已开始的流量采集轮数，包括定时采集和手动「立即采集」。正常约等于统计时长 ÷ 采集间隔。"
+      },
+      "psp_poll_error_total": {
+        "label": "整轮未执行",
+        "desc": "因读不到用户列表而整轮跳过的采集轮数，通常是数据库问题。面板连不上、单个用户出错不计入这里。"
+      },
+      "psp_poll_ms": {
+        "label": "每轮耗时",
+        "desc": "一轮流量采集从开始到结束的总耗时，不含之后异步执行的配额兜底刷新。应明显短于采集间隔。"
+      },
+      "psp_poll_stage_ms": {
+        "label": "每轮各阶段耗时",
+        "desc": "一轮采集中各阶段分别花了多久。「读取面板」通常占大部分，是等待网络的时间。"
+      },
+      "psp_poll_interval_ms": {
+        "label": "当前采集间隔",
+        "desc": "流量采集实际使用的间隔。修改设置后，要等下一轮采集完成才会改用新间隔；峰值是本区间内用过的最长间隔。"
+      },
+      "psp_poll_users": {
+        "label": "每轮读取的用户数",
+        "desc": "每轮读取的全部用户数，包括管理员和已停用的用户。"
+      },
+      "psp_poll_active_users": {
+        "label": "每轮有流量的用户数",
+        "desc": "每轮中流量有变化的用户数，不论是否设了流量上限。"
+      },
+      "psp_poll_panels": {
+        "label": "每轮读取的面板数",
+        "desc": "每轮读取的面板数，只含上面有用户客户端的面板。"
+      },
+      "psp_lifecycle_sync_total": {
+        "label": "状态核对次数",
+        "desc": "把用户应有的状态与面板上的实际设置逐一核对的次数，每个用户在每个面板上的客户端各算一次。来源包括采集后的兜底刷新、管理操作、自动停用与恢复、同步任务和定期修复。"
+      },
+      "psp_lifecycle_sync_skipped_total": {
+        "label": "无需改动",
+        "desc": "面板上已与应有状态一致、因此没有写入的核对次数。比例越高，对面板的写入越少。"
+      },
+      "psp_lifecycle_sync_write_total": {
+        "label": "实际写入",
+        "desc": "发现不一致（或读不到面板现状）而向面板写入的次数。这里计的是尝试次数，其中失败的同时计入「同步失败」。"
+      },
+      "psp_lifecycle_sync_write_reason_total": {
+        "label": "写入原因",
+        "desc": "每次写入的原因，取第一个不一致的项。「读不到面板现状」表示读取失败或面板上找不到该客户端，只能直接写入。"
+      },
+      "psp_lifecycle_sync_not_provisioned_total": {
+        "label": "尚未建好而跳过",
+        "desc": "用户的客户端还没有在面板上确认建好、因此跳过核对的次数。新增节点或用户后短暂出现属正常；长期增长说明建立客户端一直失败。"
+      },
+      "psp_lifecycle_sync_error_total": {
+        "label": "同步失败",
+        "desc": "用户状态同步失败的次数：找不到面板、写入失败、写入后无法读回或读回不一致，或 PSP 没能保存结果（此时面板已更新）。按客户端计，每次重试失败会再计一次。"
+      },
+      "psp_lifecycle_sync_error_stage_total": {
+        "label": "同步失败的步骤",
+        "desc": "按失败发生在哪一步统计的同步失败：找不到面板、写入、写入后读回、读回不一致、保存结果。各项之和等于「同步失败」。每个失败的客户端还会在日志中各记一条，带面板编号。"
+      },
+      "psp_lifecycle_sync_error_panel_kind_total": {
+        "label": "同步失败的面板类型",
+        "desc": "按客户端所在面板的类型统计的同步失败：3X-UI、S-UI、PSP 原生节点；找不到面板时记为「未知」。各项之和等于「同步失败」。"
+      },
+      "psp_lifecycle_quota_delta_bytes": {
+        "label": "面板上限偏差",
+        "desc": "每次核对时，面板上记录的流量上限与应有值相差多少。用于评估容差设置，日常无需关注。"
+      },
+      "psp_lifecycle_quota_band_skip_total": {
+        "label": "容差内免写",
+        "desc": "面板上的流量上限略有偏差、但仍在容差内而不必为它写入的次数（其他项不一致时仍可能写入）。"
+      },
+      "psp_capability_gap_total": {
+        "label": "面板无法执行的限制",
+        "desc": "核对时发现用户设了所在面板不支持的 IP 上限或设备上限的次数。情况不变时每次核对都会再计一次。"
+      },
+      "psp_ip_limit_enforcement_total": {
+        "label": "IP 上限执行能力探测",
+        "desc": "对各 3X-UI 节点 fail2ban 状态的探测结果，用来判断 IP 上限能否真正执行。按节点的结果见「服务器」页。"
+      },
+      "psp_user_client_count": {
+        "label": "每用户客户端数",
+        "desc": "每位用户在所有面板上共有几个客户端，每次同步该用户时记录一次。通常约等于其分组覆盖的面板数。"
+      },
+      "psp_user_clients_per_panel": {
+        "label": "每面板客户端数",
+        "desc": "一位用户在单个面板上需要几个客户端。大于 1 时，每个客户端各自带一份 IP 上限，实际允许的 IP 数会相应放大。"
+      },
+      "psp_sync_user_lifecycle_ms": {
+        "label": "单个用户同步耗时",
+        "desc": "把一位用户的状态同步到其全部面板所需的时间。各面板并行进行，所以约等于最慢的那个面板。"
+      },
+      "psp_push_client_config_total": {
+        "label": "兜底刷新次数",
+        "desc": "采集后为有流量、设了流量上限且尚未超额的用户刷新面板剩余额度的次数，每位用户每轮最多一次。"
+      },
+      "psp_push_client_config_error_total": {
+        "label": "兜底刷新失败",
+        "desc": "兜底刷新失败的次数。失败不进入同步任务，该用户下次产生流量或下次定期修复时会再刷新。"
+      },
+      "psp_push_client_config_ms": {
+        "label": "兜底刷新耗时",
+        "desc": "一次兜底刷新从开始执行到完成的时间，不含排队等待。"
+      },
+      "psp_push_sem_capacity": {
+        "label": "同时刷新上限",
+        "desc": "同时进行的兜底刷新最多几个。固定为 8；为 0 表示流量服务没有启动。"
+      },
+      "psp_push_sem_inflight": {
+        "label": "正在刷新",
+        "desc": "此刻正在进行的兜底刷新数；峰值是本区间内的最高值。"
+      },
+      "psp_push_sem_waiting": {
+        "label": "排队中的刷新",
+        "desc": "此刻在排队等待的兜底刷新数；峰值持续增大说明面板跟不上。"
+      },
+      "psp_push_sem_wait_ms": {
+        "label": "排队等待时间",
+        "desc": "每次兜底刷新开始前排队等待的时间，无需等待的也记录（约为 0）。读取时仍在排队的还没有计入，所以积压时这里偏低。"
+      },
+      "psp_push_sem_carryover_total": {
+        "label": "积压跳过的轮次",
+        "desc": "开始时上一轮的兜底刷新仍在排队、因而整轮跳过兜底刷新的采集轮数。服务启动后的第一轮不会出现，正常为 0。"
+      },
+      "psp_push_suppressed_total": {
+        "label": "积压跳过的刷新",
+        "desc": "因上述积压而跳过的单次兜底刷新数。被跳过的用户在之后的轮次再产生流量时会补上。"
+      },
+      "psp_poll_floor_push_enqueued_total": {
+        "label": "兜底刷新排队次数",
+        "desc": "交给刷新队列的兜底刷新数。正常时与「兜底刷新次数」相差无几，差值是仍在排队的。"
+      },
+      "psp_panel_rtt_ms": {
+        "label": "面板请求耗时",
+        "desc": "PSP 向 3X-UI 面板发出的单次请求耗时，按操作类型统计，包含自动重新登录。接近 30 秒表示请求等到了超时。"
+      },
+      "psp_panel_op_total": {
+        "label": "面板请求次数",
+        "desc": "PSP 向 3X-UI 面板发出的请求数，按操作类型统计；自动重试的每一次都单独计数。S-UI 与原生节点不统计。"
+      },
+      "psp_panel_op_error_total": {
+        "label": "面板请求失败",
+        "desc": "返回错误的 3X-UI 请求数：连接失败、HTTP 错误或面板拒绝。「读取客户端」在客户端尚未建立时也会计为失败，不一定是故障。"
+      },
+      "psp_user_live_ips": {
+        "label": "每用户在线 IP 数",
+        "desc": "每轮每位被判定用户的不同来源 IP 数，取自面板约 30 分钟内的记录。读取不完整时只是「至少」。"
+      },
+      "psp_live_ip_users_incomplete_total": {
+        "label": "在线 IP 读取不完整",
+        "desc": "有面板没能返回在线 IP 时受影响用户的累计人次，同一用户每轮各计一次。S-UI 面板不提供在线 IP，所以有用户在 S-UI 上时这个数会一直增长。"
+      },
+      "psp_user_concurrent_ips": {
+        "label": "同时在线来源数",
+        "desc": "每轮每位被判定用户同时在线的来源数（IPv6 按 /64 合并，已排除忽略的地址），即异地判定所依据的数字。"
+      },
+      "psp_live_ip_stale_total": {
+        "label": "过时的在线地址",
+        "desc": "判定时被视为过时（在其节点最近一次扫描的有效期内没有再出现）的地址累计数。繁忙的 3X-UI 机群上长时间为 0，可能说明时间戳不再上报。"
+      },
+      "psp_live_ip_excluded_total": {
+        "label": "排除的来源",
+        "desc": "判定前按规则排除的来源数：共享、已列入忽略名单、PSP 自身的节点或中转、内网地址。"
+      },
+      "psp_geo_verdict_total": {
+        "label": "异地判定结果",
+        "desc": "每轮每位用户的异地判定结果分布。具体用户请到风控中心查看。"
+      },
+      "psp_geo_over_tier_total": {
+        "label": "超出容忍的层级",
+        "desc": "超出容忍范围的判定样本，按超出的最粗层级（国家、地区、城市）统计。"
+      },
+      "psp_geo_spread_km": {
+        "label": "来源最远距离",
+        "desc": "同一用户同时在线的来源中最远两处的距离（已扣除定位误差），只统计有两个以上可定位来源的用户。"
+      },
+      "psp_geo_samples_spaced_total": {
+        "label": "间隔过短未重判",
+        "desc": "因距上次判定不到半个采集间隔而本轮不再判定的用户数，通常由手动「立即采集」引起。"
+      },
+      "psp_geo_auto_suspension_total": {
+        "label": "异地自动暂停结果",
+        "desc": "异地自动暂停与解除的各种结果。「暂停失败」和「解除失败」是执行失败；「管理员解除」与「已暂停」之比可用来估计误判率。"
+      },
+      "psp_infra_addresses": {
+        "label": "基础设施地址数",
+        "desc": "当前作为 PSP 自身节点或中转而不参与异地判定的地址数。已配置节点却为 0，说明地址刷新失败。"
+      },
+      "psp_infra_address_resolve_failures_total": {
+        "label": "节点域名解析失败",
+        "desc": "刷新基础设施地址时节点或中转域名解析失败的次数，失败时沿用之前的地址。持续出现请检查节点域名和 DNS。"
+      },
+      "psp_live_connections": {
+        "label": "当前在线连接数",
+        "desc": "最近一次在线快照中的连接数，即风控中心「在线」页显示的内容。"
+      },
+      "psp_live_conn_refresh_total": {
+        "label": "在线快照手动刷新",
+        "desc": "风控中心「立即刷新」的结果分布。出现「失败」或「部分完成」说明有面板没能按需读取。"
+      },
+      "psp_connection_history_write_errors_total": {
+        "label": "连接历史写入失败",
+        "desc": "判定后的在线连接没能写入连接历史的采集轮数。这些时段的历史会留下缺口，不会补写。"
+      },
+      "psp_flag_record_write_errors_total": {
+        "label": "标记记录写入失败",
+        "desc": "标记记录写入失败的次数，每次可能包含多条记录。对应的标记、自动暂停或恢复已经生效，只是记录里看不到。"
+      },
+      "psp_risk_refresh_total": {
+        "label": "风险信号计算",
+        "desc": "风险信号重新计算的结果分布（默认每小时一次）。「部分完成」「等待节点地址」「失败」持续出现，说明风控中心依据的是旧数据。"
+      },
+      "psp_node_host_report_total": {
+        "label": "主机指标上报",
+        "desc": "处理原生节点主机指标上报的结果分布。上报失败不影响节点同步本身。"
+      },
+      "psp_node_host_history_total": {
+        "label": "主机指标历史",
+        "desc": "主机指标历史记录的写入结果：写入、限流跳过、重复、保存失败。"
+      },
+      "psp_node_host_persist_ms": {
+        "label": "主机指标保存耗时",
+        "desc": "保存一次主机指标上报所用的时间，预算为 500 ms。"
+      },
+      "psp_node_host_snapshot_bytes": {
+        "label": "主机指标大小",
+        "desc": "保存的一份主机指标的编码大小，上限 128 KiB。"
+      },
+      "psp_node_host_rollup_total": {
+        "label": "主机指标小时汇总",
+        "desc": "每个节点每小时一次的主机指标汇总结果；「失败」应为 0。"
+      },
+      "psp_node_host_pruned_rows_total": {
+        "label": "主机指标清理",
+        "desc": "按保留期限删除的主机指标行数，持续增长是正常的。"
+      },
+      "psp_node_sync_refused_total": {
+        "label": "节点同步上报被拒",
+        "desc": "已通过认证、但被面板拒收的原生节点同步上报。「版本不兼容」意味着该节点实际处于离线状态。"
+      },
+      "psp_saml_acs_failure_total": {
+        "label": "SAML 登录被拒",
+        "desc": "被拒绝的 SAML 登录（及登录发起）按原因分类。配置类原因指向身份提供方设置；「断言被重放」需要调查。"
+      },
+      "psp_sso_claim_silent_total": {
+        "label": "单点登录缺少角色或分组信息",
+        "desc": "配置了角色或分组规则、但身份提供方没有返回规则所需属性的情况，按角色和分组分别计数，同一次登录可能两项各计一次；此时沿用原有的角色和分组。"
+      }
+    },
+    "labels": {
+      "stage": {
+        "list_users": "读取用户列表",
+        "latest_prefetch": "读取最新流量记录",
+        "ownership_prefetch": "读取客户端归属",
+        "panel_fetch": "读取面板（流量与在线 IP）",
+        "live_ips": "汇总在线 IP 与异地判定",
+        "inbound_processing": "处理入站流量",
+        "node_snapshots": "保存节点流量",
+        "shared_metering": "共享客户端计量",
+        "user_loop": "用户计量与超额判定",
+        "baseline_reseed": "新周期基线",
+        "sink_flush": "写入数据库",
+        "geo_enforce": "执行异地暂停与解除"
+      },
+      "write_reason": {
+        "total_gb": "流量上限",
+        "ip_limit": "IP 上限",
+        "device_limit": "设备上限",
+        "enable": "启用状态",
+        "expiry": "到期时间",
+        "id": "用户 ID（UUID）",
+        "password": "密码",
+        "flow": "流控（flow）",
+        "auth": "认证信息",
+        "panel_unread": "读不到面板现状"
+      },
+      "write_reason_group": {
+        "quota": "流量上限刷新",
+        "limits": "连接数上限变更",
+        "state": "启停或到期变更",
+        "credentials": "凭据变更",
+        "unread": "读不到面板现状"
+      },
+      "capability": {
+        "client_iplimit": "IP 上限",
+        "client_devicelimit": "设备上限"
+      },
+      "lifecycle_stage": {
+        "pool_get": "找不到面板",
+        "update": "写入",
+        "confirm_read": "写入后读回",
+        "confirm_mismatch": "读回不一致",
+        "record_credentials": "保存结果"
+      },
+      "panel_kind": {
+        "3xui": "3X-UI",
+        "sui": "S-UI",
+        "psp": "PSP 原生节点",
+        "unknown": "未知（找不到面板）"
+      },
+      "op": {
+        "AddClient": "新增客户端",
+        "AddClientToInbounds": "新增客户端到多个入站",
+        "AddInbound": "新增入站",
+        "AttachClient": "关联客户端到入站",
+        "BulkAttach": "批量关联客户端",
+        "BulkCreateClients": "批量新增客户端",
+        "BulkDelByEmail": "批量删除客户端",
+        "DelClientByEmail": "删除客户端",
+        "DelInbound": "删除入站",
+        "DetachClient": "解除客户端关联",
+        "GetClient": "读取客户端",
+        "GetCoreVersionList": "读取内核版本列表",
+        "GetFail2banStatus": "读取 fail2ban 状态",
+        "GetInbound": "读取入站",
+        "GetPanelUpdateInfo": "读取面板更新信息",
+        "GetServerStatus": "读取服务器状态",
+        "GetWebCertFiles": "读取面板证书",
+        "GetXrayVersionList": "读取 Xray 版本列表",
+        "InstallCore": "安装内核",
+        "InstallXray": "安装 Xray",
+        "ListClientInbounds": "读取客户端所在入站",
+        "ListInbounds": "读取全部入站",
+        "ListInboundsSlim": "读取流量（入站精简列表）",
+        "ListLiveClientIPs": "读取在线 IP",
+        "ScanRealityTargets": "扫描 REALITY 目标",
+        "SetInboundEnable": "启用或停用入站",
+        "UpdateClient": "更新客户端",
+        "UpdateInbound": "更新入站",
+        "UpdatePanel": "升级面板",
+        "other": "其他（未标注）"
+      },
+      "node_refused": {
+        "protocol_generation": "版本不兼容",
+        "report_invalid": "内容无效"
+      },
+      "node_host_report": {
+        "accepted": "已接收",
+        "no_host": "无主机数据",
+        "invalid": "内容无效",
+        "identity_conflict": "身份冲突",
+        "storage_error": "保存失败"
+      },
+      "geo_auto": {
+        "suspended": "已暂停",
+        "skipped_held": "已有暂停，跳过",
+        "skipped_unwired": "未接通，跳过",
+        "deferred": "延后",
+        "suspend_error": "暂停失败",
+        "lifted_expiry": "到期解除",
+        "lifted_admin": "管理员解除",
+        "lift_skipped": "解除跳过",
+        "lift_deferred": "解除延后",
+        "lift_error": "解除失败"
+      },
+      "risk_refresh": {
+        "ok": "成功",
+        "partial": "部分完成",
+        "infra_pending": "等待节点地址",
+        "error": "失败"
+      },
+      "live_conn_refresh": {
+        "ok": "成功",
+        "partial": "部分完成",
+        "just_polled": "刚采集过",
+        "cooldown": "冷却中",
+        "in_progress": "进行中",
+        "error": "失败"
+      },
+      "saml": {
+        "saml_assertion_invalid": "断言无效",
+        "saml_assertion_replayed": "断言被重放",
+        "saml_replay_store_error": "防重放存储出错",
+        "saml_weak_signature": "签名算法过弱",
+        "saml_multiple_assertions": "包含多个断言",
+        "saml_destination": "目标地址不符",
+        "saml_request_invalid": "请求无效",
+        "saml_entry_point": "无法发起登录"
+      },
+      "sso_kind": {
+        "role": "角色",
+        "group": "分组"
+      }
     }
   },
   "nodeMetrics": {

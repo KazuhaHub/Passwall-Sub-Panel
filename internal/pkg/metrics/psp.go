@@ -55,6 +55,23 @@ var (
 // (§1.2 predicts ~0 for active users) and "how many clients does a user
 // have?" (P in the cost model).
 // ---------------------------------------------------------------------
+
+// The label values of the two lifecycle failure breakdowns declared below.
+// Fixed sets, like the node host outcomes further down: the diagnostics page
+// labels each one and its test reads these constants, so a new step is added
+// here or nowhere.
+const (
+	LifecycleErrorStagePoolGet           = "pool_get"
+	LifecycleErrorStageUpdate            = "update"
+	LifecycleErrorStageConfirmRead       = "confirm_read"
+	LifecycleErrorStageConfirmMismatch   = "confirm_mismatch"
+	LifecycleErrorStageRecordCredentials = "record_credentials"
+
+	// The kind label is the panel's normalised domain.PanelKind, or this when
+	// the pool cannot name one (the panel is not registered).
+	LifecycleErrorPanelKindUnknown = "unknown"
+)
+
 var (
 	LifecycleTotal = NewCounter(
 		"psp_lifecycle_sync_total",
@@ -84,6 +101,29 @@ var (
 	LifecycleErrorTotal = NewCounter(
 		"psp_lifecycle_sync_error_total",
 		"SyncLifecycle calls that failed.",
+	)
+	// The same failures broken down two ways, because the total alone
+	// cannot tell an operator where to look: a native node whose agent is
+	// offline fails the read-back after the write, a panel that rejects the
+	// write fails the write itself, and a panel deleted from PSP fails before
+	// either. Each failure counted in LifecycleErrorTotal increments exactly
+	// one child of EACH family below, so the children of either family sum
+	// to that total, which is left unlabelled and unchanged so its history
+	// stays comparable.
+	//
+	// Two single-label families rather than one with two labels, because a
+	// Vec here carries one label (vec.go). Neither carries the panel id: that
+	// would grow the label space with the deployment, so the id goes to the
+	// per-client Warn in sharedclient.SyncUserLifecycle instead.
+	LifecycleErrorStageTotal = NewCounterVec(
+		"psp_lifecycle_sync_error_stage_total",
+		"Failed SyncLifecycle calls by the step that failed: pool_get (panel not registered), update (the write), confirm_read (reading the client back after the write), confirm_mismatch (the read-back differs from what was written), record_credentials (saving the confirmed credentials). Sums to psp_lifecycle_sync_error_total.",
+		"stage",
+	)
+	LifecycleErrorPanelKindTotal = NewCounterVec(
+		"psp_lifecycle_sync_error_panel_kind_total",
+		"Failed SyncLifecycle calls by the kind of panel the client is on: 3xui, sui, psp; unknown when the panel is not registered. Sums to psp_lifecycle_sync_error_total.",
+		"kind",
 	)
 	// The gap between this and the quota floor's true value is the
 	// staleness a Phase 1 deadband would introduce, so measuring the
@@ -198,7 +238,7 @@ var (
 	// means psp_user_live_ips understates, and so does anything drawn from it.
 	LiveIPUsersIncompleteTotal = NewCounter(
 		"psp_live_ip_users_incomplete_total",
-		"Users whose fleet-wide live-IP count was a floor this poll because a panel could not be read.",
+		"User-poll occurrences where a panel holding the user's clients could not be live-read, so that user's live-IP count was a floor. The same user counts again every poll; an S-UI panel is always unread.",
 	)
 	// What the detector actually JUDGED, as opposed to what the upstream
 	// remembered. psp_user_live_ips is the 30-minute window; this is the
@@ -358,7 +398,7 @@ var (
 	)
 	SyncUserDuration = NewHistogram(
 		"psp_sync_user_lifecycle_ms",
-		"Wall time for one user's full lifecycle fan-out across all their clients. P x 2 serial round trips today.",
+		"Wall time for one user's full lifecycle fan-out across all their clients. Clients are handled in parallel, so this is roughly the slowest panel's read, write and confirm.",
 		"ms", LatencyBucketsMS,
 	)
 )
@@ -390,7 +430,7 @@ var (
 var (
 	PushSemCapacity = NewGauge(
 		"psp_push_sem_capacity",
-		"Configured push-semaphore capacity. Set once at construction.",
+		"Push-semaphore capacity, fixed at construction (8). Zero means the traffic service was never built.",
 	)
 	PushSemInflight = NewGauge(
 		"psp_push_sem_inflight",

@@ -33,4 +33,12 @@ describe('route access helpers', () => {
     expect(isAdminOnlyPath('/admin/risk/x')).toBe(true)
     expect(isAdminOnlyPath('/admin/risky')).toBe(false)
   })
+
+  // The diagnostics page reads and clears the metrics registry through
+  // adminGroup endpoints only, so an operator is turned away at the route.
+  it('keeps diagnostics and anything under it admin-only', () => {
+    expect(isAdminOnlyPath('/admin/diagnostics')).toBe(true)
+    expect(isAdminOnlyPath('/admin/diagnostics/x')).toBe(true)
+    expect(isAdminOnlyPath('/admin/diagnosticsx')).toBe(false)
+  })
 })

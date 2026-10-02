@@ -3228,116 +3228,805 @@
   },
   "diagnostics": {
     "title": "Diagnostics",
-    "subtitle": "In-process measurements. Counters reset on restart or when cleared by hand, so every number has to be read together with its window.",
-    "refresh": "Refresh",
-    "load_failed": "Could not load diagnostics.",
-    "window": "Measured over {{window}} · process up {{uptime}}",
-    "was_reset": "counters were cleared by hand, so the window is shorter than the uptime",
-    "blackout": "The window is under one poll interval ({{interval}}), so not even one cycle need have finished. A zero here is not evidence of health, so the numbers are withheld — anything already observed is still listed above.",
-    "verdict": {
-      "problems": "{{count}} finding(s)",
-      "blackout": "Measuring — the window is under one poll interval",
-      "measuring": "Measuring — the window is still too short for a zero to mean anything",
-      "ok": "Nothing found in this window"
+    "subtitle": "Troubleshoot traffic polling, user status sync and panel connections.",
+    "help_label": "About this page",
+    "help_label_card": "About {{title}}",
+    "help": "This page summarises what PSP's background jobs record about themselves, to troubleshoot traffic polling, user status sync and panel connections. Every number is a running total over the statistics window, which opens when the panel starts and again whenever the statistics are cleared, so \"17 times\" does not mean it is still happening. The page refreshes every minute, and most problems show whether they have grown since you opened the page. A zero proves little while the window is short, so no verdict is given until the window spans three poll intervals; errors that have already happened are listed at once. \"Typical\" means half the cases were faster; \"95% within X\" means only 5% were slower; both are estimated from buckets. All raw metrics are kept at the bottom of the page and can be copied or downloaded for support.",
+    "load_failed": "Could not load diagnostics. Refresh to try again.",
+    "actions": {
+      "refresh": "Refresh",
+      "more": "More actions",
+      "copy_json": "Copy all data (JSON)",
+      "download_json": "Download all data (JSON)",
+      "export_note": "Includes deployment size such as user and panel counts; no hostnames, user names or secrets.",
+      "reset": "Clear statistics…",
+      "reset_disabled_blackout": "The window is shorter than one poll interval; nothing to clear yet",
+      "reset_disabled_empty": "The statistics have only just started; nothing to clear"
     },
-    "precondition": {
-      "poll_running": {
-        "label": "Poll running",
-        "help": "The traffic poll drives everything below. If it is not running, that is the single reason for every zero on this page."
-      },
-      "push_capacity": {
-        "label": "Push gate built",
-        "help": "Capacity is set once at construction. Reading 0 does not mean a small pool — it means the traffic service was never built and this whole family describes nothing."
-      },
-      "push_reaching": {
-        "label": "Pushes executing",
-        "help": "Whether quota-floor pushes actually reach execution. Nothing attempted means no success rate — an absent denominator, not 0%."
-      },
-      "lifecycle_running": {
-        "label": "Lifecycle syncing",
-        "help": "Whether enable/expiry/quota are being written to shared clients at all."
-      },
-      "liveip_complete": {
-        "label": "Live-IP read complete",
-        "help": "If any panel went unread, every figure downstream is a floor rather than a total."
-      }
+    "links": {
+      "open": "Open {{page}}"
+    },
+    "status": {
+      "window": "Statistics window: since {{since}}, {{window}}",
+      "window_after_reset": "Statistics window: since the manual clear at {{since}}, {{window}} (panel up {{uptime}})",
+      "interval": "traffic polled every {{interval}}",
+      "interval_unknown": "traffic poll interval unknown",
+      "read_at": "Read at {{time}} · refreshes every minute",
+      "list_separator": ", "
+    },
+    "verdict": {
+      "critical": "Critical: {{cards}}",
+      "action": "Needs action: {{cards}}",
+      "attention": "Needs attention: {{cards}}",
+      "ok": "No problems found",
+      "ok_notices": "No problems found · notices: {{count}}",
+      "measuring": "Measuring: the window is still too short; a verdict in about {{remaining}}",
+      "measuring_unknown": "Measuring: the traffic poll interval is unknown, so no verdict yet",
+      "blackout": "Just started: the window is shorter than one poll interval ({{interval}}), so no verdict yet"
+    },
+    "state": {
+      "failing": "Needs action",
+      "attention": "Attention",
+      "ok": "Running",
+      "idle": "No activity",
+      "measuring": "Measuring",
+      "inhibited": "Can't tell",
+      "not_applicable": "Not in use",
+      "none": "Nothing recorded",
+      "recorded": "Recorded"
+    },
+    "severity": {
+      "critical": "Critical",
+      "error": "Needs action",
+      "warn": "Attention",
+      "notice": "Notice"
+    },
+    "problems": {
+      "title": "Needs attention",
+      "notices_title": "Notices",
+      "show_data": "Show data",
+      "log_label": "Log keywords",
+      "session_new": "{{count}} more since you opened this page ({{minutes}} min ago)",
+      "session_none": "No new ones since you opened this page ({{minutes}} min ago)",
+      "session_wait": "Just opened; the next refresh will show whether it is still growing",
+      "session_new_rebuilt": "The statistics restarted after you opened this page; {{count}} more since then ({{minutes}} min)",
+      "session_none_rebuilt": "The statistics restarted after you opened this page; none since then ({{minutes}} min)",
+      "session_wait_rebuilt": "The statistics restarted just after you opened this page; the next refresh will show whether it is still growing"
     },
     "findings": {
-      "title": "Findings ({{count}})",
       "push_capacity_zero": {
-        "title": "Push semaphore capacity is 0",
-        "detail": "Capacity is set once at construction, so 0 means the traffic service was never built. Every metric in the push family is currently describing nothing real. Check the startup log."
+        "title": "The traffic service did not start",
+        "impact": "Neither traffic polling nor quota safety refreshes will run: metering, over-quota suspension and live-IP collection have all stopped, so the numbers for those areas mean nothing.",
+        "action": "Check the server's startup log for errors, fix them and restart the panel."
       },
       "poll_dead": {
-        "title": "The traffic poll has not entered a cycle in {{minutes}} min",
-        "detail": "It is dead, was never started, or panics on entry. Metering, quota enforcement and live-IP collection are all stopped. Look for the traceback in the server log."
-      },
-      "push_errors": {
-        "title": "{{errors}} quota-floor pushes failed of {{attempted}} attempted",
-        "detail": "This path has no retry queue — only a log line, and the next attempt requires that user to move bytes again. Search the log for 'traffic floor push failed' and 'shared-client lifecycle push failed', then check panel reachability."
+        "title": "Traffic polling has stopped: not one poll in {{window}}",
+        "impact": "Traffic is no longer metered, over-quota users are not suspended automatically, and quota safety refreshes, live-IP collection and location checks have stopped too. Expiry does not depend on traffic polling and is unaffected.",
+        "action": "Check the server's log for errors or a crash, fix the cause and restart the panel.",
+        "log": "traffic loop started · traffic poll"
       },
       "poll_errors": {
-        "title": "{{errors}} traffic poll cycles failed",
-        "detail": "Note this counts only the user-list read. An unreachable panel or a failed snapshot write is not counted here."
+        "title": "{{errors}} of {{polls}} polls were skipped entirely because the user list could not be read",
+        "impact": "Those polls metered no traffic and checked no quotas. An unreachable panel is not counted here.",
+        "action": "Check that the database is reachable and its disk is not full.",
+        "log": "traffic poll"
+      },
+      "poll_behind": {
+        "title": "About {{missing}} polls are missing ({{polls}} ran; the interval implies at least {{expected}})",
+        "impact": "Some polls were skipped: a poll plus the rollup after it may have taken longer than the interval, or polling was briefly held back. No traffic is lost, since the next poll picks it up, but over-quota suspensions are delayed.",
+        "action": "Check the longest poll duration under Traffic polling and the slowest operations under Panel requests on this page; if needed, lengthen the traffic poll interval in Settings."
       },
       "lifecycle_errors": {
-        "title": "{{errors}} shared-client lifecycle writes failed",
-        "detail": "Enable state, expiry or quota did not reach the panel. This is the path a disable travels."
+        "title": "{{errors}} of {{checks}} status checks failed ({{pct}})",
+        "impact": "These carry enable and disable, expiry and traffic caps. Where the status did not reach the panel, a disabled, expired or over-quota user may still be able to connect through it.",
+        "origin": "Quota safety refreshes had no failures in this window, so none of these came from them. They came from admin actions, automatic suspend and resume (including over-quota and location suspensions triggered by polling), sync-task retries, or the startup and periodic repairs.",
+        "breakdown": "By step: {{stages}}; by panel type: {{kinds}}. \"Panel not found\" and \"Write\" mean the write itself failed; \"Read-back\" and \"Read-back mismatch\" mean the write went out but could not be confirmed; \"Saving the result\" means the panel was updated and confirmed, and only PSP's own record failed.",
+        "retry": "Failures caused by admin actions, membership changes or automatic suspend and resume are recorded in Sync tasks, where you can see the error and retry. The periodic repair also re-checks every user and fixes whatever is still out of step. Every failed retry counts again, so this is not the number of affected users.",
+        "action": "Open Sync tasks and look for unfinished or cancelled user tasks and their errors; then check on Servers that the panels are reachable and native nodes are online.",
+        "log": "shared-client lifecycle push failed",
+        "log_note": "This finds two kinds of line: one per user, carrying only the first error; and one per failed client, whose message reads \"shared-client lifecycle push failed for a client\", carrying the panel id (panel_id) and the step that failed (stage), so failures on different panels can be told apart."
       },
-      "push_suppressed": {
-        "title": "{{suppressed}} pushes suppressed by the cross-cycle guard",
-        "detail": "The previous cycle's pushes had not drained, so a whole cycle of floor pushes was skipped. Occasional is tolerable; sustained means the push side is falling behind."
+      "push_errors": {
+        "title": "{{errors}} of {{attempted}} quota safety refreshes failed ({{pct}})",
+        "impact": "The remaining allowance stored on the panel is out of date for those users. While PSP is running it still suspends over-quota users at the next poll; the panel relies on this allowance only while PSP is offline. The part that failed to write to a panel is also counted under status sync failures, so the two counts overlap.",
+        "retry": "These failures are not queued as sync tasks: the user is refreshed again the next time they use traffic, and the periodic repair also catches up.",
+        "action": "Check on Servers that the panels involved are reachable.",
+        "log": "traffic floor push failed"
       },
-      "push_carryover": {
-        "title": "Pushes spilled into the next cycle {{carryover}} times",
-        "detail": "One of the three reopen triggers for a self-hosted data plane in data-plane-plan.md. Note it is counted at cycle open, so one or two right after a restart are expected."
-      },
-      "capability_gaps": {
-        "title": "{{gaps}} capability gaps",
-        "detail": "A panel cannot store a field PSP writes. Note the device-limit row: a clean reading means the panel can STORE the field, not that any device cap is enforced — nothing in PSP's architecture enforces one on any panel version."
+      "push_backlog": {
+        "title": "{{cycles}} polls skipped their quota refreshes because refreshes from an earlier poll were still queued ({{suppressed}} refreshes skipped)",
+        "impact": "Panels are not keeping up with the polling pace. Skipped users are refreshed in a later poll once they use traffic again; enable, disable and expiry do not travel this path and are unaffected.",
+        "action": "Under Panel requests on this page, see which kind of operation is slowest, and use Test connection on Servers; if it keeps happening, lengthen the traffic poll interval."
       },
       "liveip_incomplete": {
-        "title": "Live-IP read incomplete for {{incomplete}} users",
-        "detail": "A panel did not answer. Their live-IP counts and location verdicts are floors, not totals, and must not be read as totals."
+        "title": "Live IPs were incomplete {{incomplete}} times (user × poll)",
+        "impact": "A panel returned no live IPs during polling, so those users' live-IP counts and location verdicts are only \"at least\". The same user counts again every poll.",
+        "sui": "S-UI panels are connected: S-UI does not report live IPs, so users on those panels count every poll and this number keeps growing. If only S-UI users are affected, this is expected.",
+        "action": "Check on Servers that the other panels are reachable, and search the server log for the keywords below to see which panel did not answer.",
+        "log": "live client IPs unavailable for this panel"
       },
-      "invariant_poll_ms": {
-        "title": "Poll-duration samples disagree with the cycle count",
-        "detail": "{{observed}} samples observed against {{expected}} recorded cycles. A difference of one is snapshot non-atomicity; more means cycles are exiting early."
+      "history_write_errors": {
+        "title": "Live connections could not be written to the connection history in {{errors}} polls",
+        "impact": "The Risk Center's connection history has gaps for those periods; they are not backfilled. Polling itself is unaffected.",
+        "action": "Check that the database accepts writes and its disk is not full.",
+        "log": "connection history: could not record"
       },
-      "invariant_push_enqueue": {
-        "title": "More pushes executed than were enqueued",
-        "detail": "{{started}} started against {{enqueued}} enqueued. Every execution is enqueued first, so a difference in this direction should not occur."
+      "flag_write_errors": {
+        "title": "Flag records failed to save {{errors}} times (each failure may cover several records)",
+        "impact": "The flags, automatic suspensions or resumes themselves took effect; only their entries are missing from the Risk Center's Records.",
+        "action": "Check that the database accepts writes and its disk is not full.",
+        "log": "flag records: could not record"
+      },
+      "geo_auto_errors": {
+        "title": "Automatic location suspension failed {{suspend}} times; automatic lifting failed {{lift}} times",
+        "impact": "When a suspension fails, the user judged to be elsewhere keeps working until the trigger builds up again; a failed lift is retried at the next poll.",
+        "action": "Review the automatically suspended users in the Risk Center and act on them by hand if needed.",
+        "log": "geo auto-suspension: suspend failed · geo auto-suspension: lift failed"
+      },
+      "node_sync_refused": {
+        "title": "Native-node sync reports were refused {{count}} times (incompatible version {{proto}}, invalid report {{invalid}})",
+        "impact": "A refused sync brings back no user changes, and the traffic and online state it carried are not recorded. An incompatible version gets every sync refused, so that node is effectively offline.",
+        "action": "Check the node's compatibility on Servers and upgrade the node agent or the panel so their versions match.",
+        "log": "native node sync refused"
+      },
+      "sso_claim_silent": {
+        "title": "Single sign-on brought back nothing the role or group rules read (counted per kind: role {{role}}, group {{group}})",
+        "impact": "Those users kept their existing role and group; if the identity provider has revoked their access, the panel still keeps it.",
+        "action": "Check the single sign-on attribute mapping in Settings, and confirm the identity provider actually sends those attributes."
+      },
+      "capability_gaps": {
+        "title": "Some users have limits their panel cannot apply (IP limit {{ip}} times, device limit {{device}} times)",
+        "impact": "These limits are written to the panel but have no effect: S-UI and PSP native nodes support neither the IP limit nor the device limit, and 3X-UI below 3.7.0 cannot store the device limit. Every check counts again while this lasts; it is a standing condition, not a fault.",
+        "note": "Also, the device limit is not enforced on any panel today; 3X-UI 3.7.0 and later only store the value. A zero here does not mean device limits are in effect.",
+        "action": "On Servers, check each panel's type and version against the explanation above to see which cannot apply these limits; the limit fields in the user editor also name those panels. Move these users to a panel that can, or upgrade the panel.",
+        "log": "panel cannot enforce a setting PSP is pushing"
+      }
+    },
+    "self_check": {
+      "title": "Consistency checks",
+      "note": "Checks that related numbers agree. Only for troubleshooting the statistics themselves; they do not affect the verdict above.",
+      "pass": "Pass",
+      "fail": "Mismatch",
+      "poll_ms": {
+        "pass": "{{observed}} poll-duration records match the {{expected}} polls started (a difference of 1 is allowed).",
+        "fail": "{{observed}} poll-duration records against {{expected}} polls started, a difference of more than 1: more than one poll was running when this was read, usually a \"Poll now\" overlapping a scheduled poll, or a manual poll started while another was stuck."
+      },
+      "push_enqueue": {
+        "pass": "{{started}} quota safety refreshes ran, no more than the {{enqueued}} queued.",
+        "fail": "{{started}} quota safety refreshes ran, more than the {{enqueued}} queued. Refreshes still queued when the statistics were cleared were counted as queued before the clear and as run after it, so the excess, the number that were queued then, stays for the whole window; it is harmless. Report it to the developers only if it appears in a window that has not been cleared since the panel started."
+      }
+    },
+    "cards": {
+      "section_title": "How each part is doing",
+      "common": {
+        "failing": "Something needs action; see the top of the page.",
+        "attention": "Something needs attention; see the top of the page.",
+        "notices": "There are notices; see the top of the page.",
+        "measuring": "The window is still short; a verdict in about {{remaining}}.",
+        "measuring_unknown": "The traffic poll interval is unknown, so no verdict yet.",
+        "blackout": "The window is shorter than one poll interval; numbers are held back.",
+        "inhibited": "Traffic polling is not running, so this part can't be judged.",
+        "depends": "Depends on traffic polling: {{state}}",
+        "details": "Detailed data ({{count}})",
+        "copy_group": "Copy this group (JSON)"
+      },
+      "poll": {
+        "title": "Traffic polling",
+        "purpose": "Reads usage from every panel at the poll interval, meters traffic from it and suspends over-quota users, then runs the quota safety refresh and collects live IPs for the Risk Center. When it stops, the quota safety refresh and the live-IP and risk data stop with it; the other areas keep counting.",
+        "ok": "On schedule: one poll every {{interval}}, {{polls}} in this window.",
+        "kpi": {
+          "polls": "Polls run",
+          "polls_expected": "The interval implies at least {{expected}}",
+          "duration": "Poll duration",
+          "scope": "Per poll (average)",
+          "scope_value": "{{users}} users · {{panels}} panels",
+          "scope_active": "about {{active}} with traffic"
+        },
+        "stages": {
+          "title": "Where a poll's time goes (average)",
+          "db": "Read users and records",
+          "panels": "Read panels",
+          "compute": "Aggregate, meter and judge",
+          "write": "Write to database",
+          "geo": "Location suspensions",
+          "note": "\"Read panels\" covers each panel's traffic and live IPs. Suspensions triggered during a poll are written to the panel on the spot, so \"Aggregate, meter and judge\" and \"Location suspensions\" can also include time spent waiting on panels."
+        }
+      },
+      "lifecycle": {
+        "title": "User status sync",
+        "purpose": "Writes each user's enabled state, expiry, traffic cap and connection limits to every panel they are on. Disabling, pausing and over-quota cut-off all take effect through this step. Each time, the panel's current state is read first: if it matches, nothing is written.",
+        "ok": "{{checks}} checks in this window; {{skipped}} needed no change.",
+        "idle": "No user was checked in this window: users' clients may not be set up on the panels yet, or there were no admin actions and no users to refresh in this period.",
+        "kpi": {
+          "checks": "Checks",
+          "skipped": "Already in sync",
+          "skipped_caption": "matched the panel; nothing written",
+          "writes": "Writes",
+          "writes_caption": "reasons below",
+          "errors": "Sync failures",
+          "errors_caption": "{{pct}} of checks"
+        },
+        "not_provisioned": "Another {{count}} checks were skipped because the client is not yet set up on the panel.",
+        "errors_by_stage": "Sync failures by step: {{list}}",
+        "errors_by_kind": "Sync failures by panel type: {{list}}",
+        "reasons_title": "Why writes happened",
+        "limits": {
+          "title": "Can the limits be applied?",
+          "ip_gaps": "IP limit: {{count}} checks involved a panel without IP-limit support",
+          "ip_none": "IP limit: no limit set on an unsupported panel in this window",
+          "device": "Device limit: PSP does not enforce it on any panel today; the value is only stored on the panel",
+          "device_gaps": "Another {{count}} checks involved a panel that cannot even store the device limit",
+          "servers_note": "Whether each node can actually enforce the IP limit is shown on the Servers page."
+        }
+      },
+      "floor": {
+        "title": "Quota safety refresh",
+        "purpose": "After each poll, writes the remaining allowance of users who used traffic, have a traffic cap and are still under it to the panels. That way a panel can cut a user off by itself when the allowance runs out, even while PSP is offline. While PSP is running, over-quota suspension is done by traffic polling and does not depend on this step.",
+        "ok": "{{count}} refreshes in this window, about {{perPoll}} per poll.",
+        "idle": "No user needed a refresh in this window: nobody with a traffic cap, still under it, used traffic.",
+        "kpi": {
+          "pushes": "Refreshes",
+          "errors": "Failures",
+          "errors_caption": "{{pct}}",
+          "concurrency": "Concurrent (highest)",
+          "concurrency_value": "{{peak}} / {{capacity}}",
+          "concurrency_caption": "at most {{waiting}} waiting",
+          "wait": "Queue wait",
+          "backlog": "Skipped for backlog",
+          "backlog_caption": "{{suppressed}} refreshes skipped"
+        }
+      },
+      "panel_api": {
+        "title": "Panel requests (3X-UI)",
+        "purpose": "Count, failures and duration of every request PSP sends to 3X-UI panels, by kind of operation, without telling panels apart.",
+        "ok": "{{count}} requests to 3X-UI panels in this window, {{pct}} failed.",
+        "idle": "No requests were sent to 3X-UI panels in this window.",
+        "not_applicable": "No 3X-UI panels are connected.",
+        "table": {
+          "op": "Operation",
+          "requests": "Requests",
+          "errors": "Failed",
+          "p50": "Typical",
+          "p95": "95% within",
+          "max": "Longest"
+        },
+        "show_all": "Show all ({{count}})",
+        "show_less": "Show less",
+        "note_scope": "3X-UI panels only; S-UI and PSP native nodes are not counted. Each automatic retry counts separately.",
+        "note_get_client": "\"Read client\" failures include normal lookups for clients not yet created, which are not necessarily faults.",
+        "note_timeout": "A longest time close to 30 s means the request hit its timeout."
+      },
+      "liveip": {
+        "title": "Live IPs and risk data",
+        "purpose": "How well the Risk Center's data is being collected: whether live IPs are read in full, whether records are saved, and whether automatic suspensions go through. For the verdicts themselves, see the Risk Center.",
+        "ok": "Every poll read live IPs from every panel; about {{judged}} users judged per poll on average.",
+        "idle": "No user was judged for live IPs in this window. Users are judged even when nobody is online, so this usually means no user has a client set up on any panel yet, or polling could not list users' clients: search the server log for \"traffic poll shared-client list failed\"; where it appears, shared clients' traffic went unmetered in those polls too.",
+        "kpi": {
+          "judged": "Users judged per poll (average)",
+          "judged_value": "about {{count}}",
+          "incomplete": "Incomplete live-IP reads",
+          "incomplete_caption": "the same user counts every poll",
+          "risk": "Risk signal runs",
+          "risk_value": "{{ok}} OK of {{total}}",
+          "risk_none": "did not run in this window",
+          "records": "Record writes failed",
+          "records_value": "connection history {{history}} · flag records {{flags}}",
+          "auto": "Auto suspend / lift failures",
+          "auto_value": "{{suspend}} / {{lift}}"
+        },
+        "sui_note": "S-UI panels are connected: S-UI does not report live IPs, so users on those panels count as incomplete every poll."
+      },
+      "node": {
+        "title": "Native nodes",
+        "purpose": "Whether host metric reports and sync requests from PSP native nodes are received and saved.",
+        "ok": "{{count}} host metric reports received in this window.",
+        "idle": "No reports from native nodes in this window.",
+        "not_applicable": "No PSP native nodes are connected.",
+        "kpi": {
+          "accepted": "Host metric reports",
+          "accepted_value": "{{count}} received",
+          "accepted_caption": "{{other}} other outcomes",
+          "refused": "Sync reports refused",
+          "refused_caption": "incompatible version {{proto}} · invalid {{invalid}}",
+          "storage": "Save failures",
+        "storage_caption": "{{history}} of them carried a history sample",
+          "persist": "Save time",
+          "persist_caption": "budget 500 ms"
+        }
+      },
+      "sso": {
+        "title": "Single sign-on",
+        "purpose": "Single sign-ins that were refused or arrived without information.",
+        "none": "Nothing related to single sign-on was recorded in this window.",
+        "recorded": "{{count}} SAML sign-ins were refused in this window; reasons below.",
+        "kpi": {
+          "saml": "SAML sign-ins refused",
+          "claims": "Missing role or group",
+          "claims_value": "role {{role}} · group {{group}}"
+        }
+      }
+    },
+    "system": {
+      "title": "System information",
+      "version": "Version",
+      "build": "Build",
+      "build_local": "Local build",
+      "copy_build": "Copy build",
+      "uptime": "Panel up for",
+      "since": "Statistics since",
+      "window": "Statistics window",
+      "interval": "Actual poll interval",
+      "interval_peak": "longest in this window {{peak}}",
+      "interval_setting": "Poll interval in settings",
+      "goroutines": "Background goroutines",
+      "goroutines_note": "Developer information: only worth a look if it keeps rising across refreshes while the load stays flat."
+    },
+    "raw": {
+      "title": "All raw metrics",
+      "summary": "{{families}} metrics · {{series}} series",
+      "search": "Search by name, label or description",
+      "filter_all": "All",
+      "filter_nonzero": "Non-zero only",
+      "view_current": "Current",
+      "view_previous": "Before clearing ({{window}})",
+      "previous_note": "Viewing the data from before clearing (up to {{time}}), read-only.",
+      "blackout_note": "The window is shorter than one poll interval; numbers are for reference only, and a zero does not mean healthy.",
+      "absence_note": "Metrics without labels always appear, so a missing one means an older server. Labelled metrics appear only once something has happened, so a missing one means zero.",
+      "group_count": "{{series}} series, {{nonzero}} non-zero",
+      "group_other": "Other metrics",
+      "no_match": "No matching metrics",
+      "col": {
+        "name": "Name",
+        "type": "Type",
+        "value": "Value",
+        "desc": "Description"
+      },
+      "type": {
+        "counter": "Count",
+        "gauge": "Current value",
+        "histogram": "Distribution"
+      },
+      "absent": "This server version does not have this metric",
+      "no_children": "No values yet (all zero)",
+      "family_total": "Total {{value}}",
+      "family_total_samples": "{{value}} samples in total",
+      "gauge_value": "now {{value}} · peak {{peak}}",
+      "peak_note": "The peak is the highest value in this statistics window.",
+      "hist_value": "{{count}} samples · typical {{p50}} · 95% within {{p95}}",
+      "server_help": "Server description",
+      "copy_name": "Copy metric name",
+      "stats": {
+        "unit": "Unit",
+        "count": "Samples",
+        "sum": "Sum",
+        "mean": "Mean",
+        "max": "Max",
+        "p50": "p50 (median)",
+        "p90": "p90",
+        "p95": "p95",
+        "p99": "p99"
+      },
+      "quantile_note": "Percentiles are estimated from buckets; under 10 samples, read the maximum instead.",
+      "buckets": "Buckets",
+      "bucket": {
+        "le": "≤ upper bound",
+        "inf": "above the last bucket",
+        "cumulative": "Cumulative",
+        "count": "In this bucket"
       }
     },
     "reset": {
-      "action": "Clear and restart the window",
-      "title": "Clear the counters?",
-      "message": "This discards the {{window}} already measured and starts a new window. The pre-reset snapshot is returned in the response, but this page does not keep it.",
-      "done": "Counters cleared; a new measurement window has started",
-      "nothing": "The window is empty — nothing to clear"
+      "title": "Clear the statistics and start again?",
+      "message": "All {{window}} of statistics will be cleared, including the risk and native-node counts shown on this page; the Risk Center's own data is not affected. Afterwards this page keeps the data from before clearing for download until you leave it.",
+      "confirm": "Clear",
+      "done": "Cleared. New statistics start at {{time}}.",
+      "kept": "Cleared. The {{window}} of statistics from before can be downloaded until you leave this page.",
+      "download_previous": "Download data from before clearing"
     },
-    "table": {
-      "metric": "Metric",
-      "value": "Value",
-      "means": "Means"
+    "fmt": {
+      "duration_s": "{{s}} s",
+      "duration_m": "{{m}} min",
+      "duration_hm": "{{h}} h {{m}} min",
+      "duration_dh": "{{d}} d {{h}} h",
+      "times": "{{count}}",
+      "polls": "{{count}}",
+      "occurrences": "{{count}}",
+      "per_hour": "about {{rate}} per hour",
+      "per_hour_times": "about {{rate}} per hour",
+      "per_poll": "about {{rate}} per poll",
+      "typical": "typical {{value}}",
+      "p95_within": "95% within {{value}}",
+      "p95_over": "the slowest 5% exceed {{ceiling}}, beyond the measured buckets",
+      "pct_of_interval": "about {{pct}} of the poll interval",
+      "few_samples": "only {{count}} samples · longest {{max}}",
+      "no_samples": "no samples in this window",
+      "no_denominator": "nothing attempted, so no rate",
+      "pct_tiny": "<0.01%"
     },
-    "never_observed": "never observed in this window",
-    "too_few_samples": "only {{count}} samples · max {{max}}",
-    "footer": "version {{version}} · commit {{commit}} · goroutines {{goroutines}} · push gate capacity {{capacity}}",
     "metric": {
-      "psp_poll_total": "Traffic-poll cycles completed",
-      "psp_poll_error_total": "Cycles that failed (counts only the user-list read)",
-      "psp_poll_ms": "Wall time for one poll cycle",
-      "panel_fetch": "The waiting-on-panels part of a cycle, normally most of it",
-      "psp_push_client_config_total": "Quota-floor pushes that began executing (traffic-poll path only)",
-      "psp_push_client_config_error_total": "How many of those failed",
-      "psp_push_suppressed_total": "Pushes skipped by the cross-cycle guard",
-      "psp_push_sem_carryover_total": "Times pushes spilled into the next cycle",
-      "psp_push_sem_wait_ms": "Wait on the push semaphore (written only by pushes that escaped the queue, so it is a floor)",
-      "psp_lifecycle_sync_total": "Shared-client lifecycle checks",
-      "psp_lifecycle_sync_write_total": "How many of those actually wrote to a panel",
-      "psp_lifecycle_sync_error_total": "How many of those writes failed",
-      "psp_capability_gap_total": "Times a panel could not store a field PSP writes"
+      "psp_poll_total": {
+        "label": "Traffic polls",
+        "desc": "Traffic polls started, scheduled and manual (\"Poll now\") alike. Normally about the window divided by the poll interval."
+      },
+      "psp_poll_error_total": {
+        "label": "Polls that failed outright",
+        "desc": "Polls abandoned because the user list could not be read, usually a database problem. An unreachable panel or a single user's error is not counted here."
+      },
+      "psp_poll_ms": {
+        "label": "Poll duration",
+        "desc": "Time from the start to the end of one poll, excluding the quota safety refreshes that run afterwards in the background. Should stay well below the poll interval."
+      },
+      "psp_poll_stage_ms": {
+        "label": "Poll duration by stage",
+        "desc": "How long each stage of a poll took. \"Read panels\" is usually the largest share; it is time spent waiting on the network."
+      },
+      "psp_poll_interval_ms": {
+        "label": "Current poll interval",
+        "desc": "The interval traffic polling actually runs on. After the setting changes, the new interval applies once the next poll has run; the peak is the longest interval used in this window."
+      },
+      "psp_poll_users": {
+        "label": "Users read per poll",
+        "desc": "All users read per poll, including admins and disabled users."
+      },
+      "psp_poll_active_users": {
+        "label": "Users with traffic per poll",
+        "desc": "Users whose traffic changed in a poll, whether or not they have a traffic cap."
+      },
+      "psp_poll_panels": {
+        "label": "Panels read per poll",
+        "desc": "Panels read per poll; only panels that host at least one user's client are counted."
+      },
+      "psp_lifecycle_sync_total": {
+        "label": "Status checks",
+        "desc": "Checks comparing a user's intended status with what a panel actually holds, counted once per client per panel. Triggered by the post-poll quota safety refresh, admin actions, automatic suspend and resume, sync tasks and the periodic repair."
+      },
+      "psp_lifecycle_sync_skipped_total": {
+        "label": "Already in sync",
+        "desc": "Checks where the panel already matched, so nothing was written. The higher the share, the fewer writes the panels receive."
+      },
+      "psp_lifecycle_sync_write_total": {
+        "label": "Writes to panels",
+        "desc": "Writes issued because something differed, or because the panel's current state could not be read. These are attempts; failures are also counted under \"Sync failures\"."
+      },
+      "psp_lifecycle_sync_write_reason_total": {
+        "label": "Why writes happened",
+        "desc": "The reason for each write, taken from the first field that differed. \"Panel state unreadable\" means the read failed or the client was missing, so PSP wrote without comparing."
+      },
+      "psp_lifecycle_sync_not_provisioned_total": {
+        "label": "Skipped: not set up yet",
+        "desc": "Checks skipped because the user's client is not yet confirmed on the panel. Normal briefly after adding nodes or users; steady growth means setting up clients keeps failing."
+      },
+      "psp_lifecycle_sync_error_total": {
+        "label": "Sync failures",
+        "desc": "User status syncs that failed: panel not found, write failed, read-back failed or did not match, or PSP could not save the result (the panel was already updated then). Counted per client; every failed retry counts again."
+      },
+      "psp_lifecycle_sync_error_stage_total": {
+        "label": "Sync failures by step",
+        "desc": "Sync failures by the step that failed: panel not found, the write, reading back after the write, a read-back that does not match, saving the result. The steps add up to \"Sync failures\". Each failed client is also logged once with its panel id."
+      },
+      "psp_lifecycle_sync_error_panel_kind_total": {
+        "label": "Sync failures by panel type",
+        "desc": "Sync failures by the type of panel the client is on: 3X-UI, S-UI, PSP native node; \"Unknown\" when the panel could not be found. The types add up to \"Sync failures\"."
+      },
+      "psp_lifecycle_quota_delta_bytes": {
+        "label": "Panel cap drift",
+        "desc": "How far the traffic cap stored on the panel was from the intended value at each check. Used to size the tolerance; not something to watch day to day."
+      },
+      "psp_lifecycle_quota_band_skip_total": {
+        "label": "Within tolerance",
+        "desc": "Checks where the panel's traffic cap differed but stayed within tolerance, so it did not by itself cause a write (another field may still have)."
+      },
+      "psp_capability_gap_total": {
+        "label": "Limits the panel cannot apply",
+        "desc": "Checks where a user has an IP or device limit their panel does not support. Counted again at every check while the situation lasts."
+      },
+      "psp_ip_limit_enforcement_total": {
+        "label": "IP-limit enforcement probes",
+        "desc": "Results of probing each 3X-UI node's fail2ban, which decides whether an IP limit can actually be enforced. Per-node results are on the Servers page."
+      },
+      "psp_user_client_count": {
+        "label": "Clients per user",
+        "desc": "How many clients a user has across all panels, recorded each time the user is synced. Usually about the number of panels the user's group spans."
+      },
+      "psp_user_clients_per_panel": {
+        "label": "Clients per user per panel",
+        "desc": "How many clients one user needs on a single panel. Above 1, each client carries its own copy of the IP limit, so the effective allowance is multiplied."
+      },
+      "psp_sync_user_lifecycle_ms": {
+        "label": "Per-user sync time",
+        "desc": "Time to sync one user's status to all of their panels. Panels are handled in parallel, so this is roughly the slowest panel."
+      },
+      "psp_push_client_config_total": {
+        "label": "Quota safety refreshes",
+        "desc": "Refreshes of the remaining allowance on the panels for users who used traffic, have a traffic cap and are still under it; at most once per user per poll."
+      },
+      "psp_push_client_config_error_total": {
+        "label": "Quota safety refresh failures",
+        "desc": "Quota safety refreshes that failed. They are not queued as sync tasks; the user is refreshed again the next time they use traffic or at the next periodic repair."
+      },
+      "psp_push_client_config_ms": {
+        "label": "Quota safety refresh duration",
+        "desc": "Time one quota safety refresh took once it started, excluding time spent queued."
+      },
+      "psp_push_sem_capacity": {
+        "label": "Concurrent refresh limit",
+        "desc": "The most quota safety refreshes that run at once. Fixed at 8; 0 means the traffic service did not start."
+      },
+      "psp_push_sem_inflight": {
+        "label": "Refreshes running",
+        "desc": "Quota safety refreshes running right now; the peak is the highest in this window."
+      },
+      "psp_push_sem_waiting": {
+        "label": "Refreshes waiting",
+        "desc": "Quota safety refreshes waiting for a slot right now; a peak that keeps growing means the panels cannot keep up."
+      },
+      "psp_push_sem_wait_ms": {
+        "label": "Queue wait",
+        "desc": "Time each quota safety refresh waited before starting, including those that did not wait (about 0). Refreshes still queued when read are not yet included, so this understates a backlog."
+      },
+      "psp_push_sem_carryover_total": {
+        "label": "Polls skipped for backlog",
+        "desc": "Polls that skipped all their quota safety refreshes because refreshes from an earlier poll were still queued. Cannot happen on the first poll after start; normally 0."
+      },
+      "psp_push_suppressed_total": {
+        "label": "Refreshes skipped for backlog",
+        "desc": "Individual quota safety refreshes skipped because of that backlog. A skipped user is refreshed in a later poll once they use traffic again."
+      },
+      "psp_poll_floor_push_enqueued_total": {
+        "label": "Quota safety refreshes queued",
+        "desc": "Quota safety refreshes handed to the queue. Normally almost equal to \"Quota safety refreshes\"; the difference is still queued."
+      },
+      "psp_panel_rtt_ms": {
+        "label": "Panel request time",
+        "desc": "Time of one request from PSP to a 3X-UI panel, by operation, including automatic re-login. Close to 30 s means the request hit its timeout."
+      },
+      "psp_panel_op_total": {
+        "label": "Panel requests",
+        "desc": "Requests PSP sent to 3X-UI panels, by operation; each automatic retry counts separately. S-UI and native nodes are not counted."
+      },
+      "psp_panel_op_error_total": {
+        "label": "Panel request failures",
+        "desc": "3X-UI requests that returned an error: connection failure, HTTP error or refusal by the panel. \"Read client\" also counts a lookup for a client not yet created, which is not necessarily a fault."
+      },
+      "psp_user_live_ips": {
+        "label": "Live IPs per user",
+        "desc": "Distinct source IPs per judged user per poll, from the panels' memory of roughly the last 30 minutes. Only \"at least\" when the read was incomplete."
+      },
+      "psp_live_ip_users_incomplete_total": {
+        "label": "Incomplete live-IP reads",
+        "desc": "User-poll occurrences where a panel holding the user's clients returned no live IPs; the same user counts again every poll. S-UI panels do not report live IPs, so this keeps growing while users are on S-UI."
+      },
+      "psp_user_concurrent_ips": {
+        "label": "Concurrent sources per user",
+        "desc": "Concurrent sources per judged user per poll (IPv6 folded by /64, ignored addresses excluded): the number the location check judges."
+      },
+      "psp_live_ip_stale_total": {
+        "label": "Stale live addresses",
+        "desc": "Addresses treated as stale at judging time (not seen within the freshness window of their node's latest scan). Zero for hours on a busy 3X-UI fleet may mean timestamps stopped arriving."
+      },
+      "psp_live_ip_excluded_total": {
+        "label": "Excluded sources",
+        "desc": "Sources set aside before judging, by rule: shared, on the ignore list, PSP's own nodes or relays, internal addresses."
+      },
+      "psp_geo_verdict_total": {
+        "label": "Location verdicts",
+        "desc": "Distribution of per-user location verdicts per poll. See the Risk Center for the users themselves."
+      },
+      "psp_geo_over_tier_total": {
+        "label": "Tolerance exceeded, by level",
+        "desc": "Judged samples beyond tolerance, by the coarsest level exceeded (country, region, city)."
+      },
+      "psp_geo_spread_km": {
+        "label": "Source spread",
+        "desc": "Distance between the two farthest concurrent sources of one user, after subtracting location accuracy; only users with two or more located sources."
+      },
+      "psp_geo_samples_spaced_total": {
+        "label": "Skipped: judged too recently",
+        "desc": "Users not judged again because their last verdict was less than half a poll interval ago, usually after a manual \"Poll now\"."
+      },
+      "psp_geo_auto_suspension_total": {
+        "label": "Automatic location suspensions",
+        "desc": "Outcomes of automatic location suspension and lifting. \"Suspend failed\" and \"Lift failed\" are failures; \"Lifted by admin\" against \"Suspended\" estimates the false-positive rate."
+      },
+      "psp_infra_addresses": {
+        "label": "Infrastructure addresses",
+        "desc": "Addresses currently excluded from location checks as PSP's own nodes or relays. Zero while nodes are configured means the refresh is failing."
+      },
+      "psp_infra_address_resolve_failures_total": {
+        "label": "Node hostname lookups failed",
+        "desc": "Node or relay hostnames that failed to resolve during the infrastructure refresh; the previous addresses are kept. If it persists, check node hostnames and DNS."
+      },
+      "psp_live_connections": {
+        "label": "Live connections",
+        "desc": "Connections in the latest stored live snapshot: what the Risk Center's Live tab shows."
+      },
+      "psp_live_conn_refresh_total": {
+        "label": "Live snapshot refreshes",
+        "desc": "Outcomes of the Risk Center's \"Refresh now\". \"Failed\" or \"Partial\" means some panels could not be read on demand."
+      },
+      "psp_connection_history_write_errors_total": {
+        "label": "Connection history write failures",
+        "desc": "Polls whose judged connections could not be written to the connection history. Those periods stay missing; they are not backfilled."
+      },
+      "psp_flag_record_write_errors_total": {
+        "label": "Flag record write failures",
+        "desc": "Flag-record writes that failed; each may carry several records. The flags, automatic suspensions or resumes themselves took effect; only their records are missing."
+      },
+      "psp_risk_refresh_total": {
+        "label": "Risk signal runs",
+        "desc": "Outcomes of risk-signal recomputation (hourly by default). Repeated \"Partial\", \"Waiting for node addresses\" or \"Failed\" means the Risk Center is judging from old data."
+      },
+      "psp_node_host_report_total": {
+        "label": "Host metric reports",
+        "desc": "Outcomes of handling native-node host metric reports. A failed report never fails the node's sync itself."
+      },
+      "psp_node_host_history_total": {
+        "label": "Host metric history",
+        "desc": "Results of writing host metric history: inserted, throttled, duplicate, storage error."
+      },
+      "psp_node_host_persist_ms": {
+        "label": "Host metric save time",
+        "desc": "Time to save one host metric report; the budget is 500 ms."
+      },
+      "psp_node_host_snapshot_bytes": {
+        "label": "Host metric size",
+        "desc": "Encoded size of one stored host metric snapshot; the limit is 128 KiB."
+      },
+      "psp_node_host_rollup_total": {
+        "label": "Hourly host metric rollups",
+        "desc": "Results of the hourly per-node host metric rollup; \"error\" should be 0."
+      },
+      "psp_node_host_pruned_rows_total": {
+        "label": "Host metrics pruned",
+        "desc": "Host metric rows removed by retention; steady growth is normal."
+      },
+      "psp_node_sync_refused_total": {
+        "label": "Node sync reports refused",
+        "desc": "Authenticated native-node sync reports this panel refused. \"Incompatible version\" means the node is effectively offline."
+      },
+      "psp_saml_acs_failure_total": {
+        "label": "SAML sign-ins refused",
+        "desc": "Refused SAML sign-ins (and sign-in starts), by reason. Configuration reasons point at identity-provider settings; \"Assertion replayed\" needs investigating."
+      },
+      "psp_sso_claim_silent_total": {
+        "label": "Single sign-ins without role or group",
+        "desc": "Single sign-ins where role or group rules exist but the identity provider sent none of the attributes they read, counted per kind: one sign-in can count once for each. The existing role and group were kept."
+      }
+    },
+    "labels": {
+      "stage": {
+        "list_users": "Read user list",
+        "latest_prefetch": "Read latest traffic records",
+        "ownership_prefetch": "Read client ownership",
+        "panel_fetch": "Read panels (traffic and live IPs)",
+        "live_ips": "Aggregate live IPs and judge locations",
+        "inbound_processing": "Process inbound traffic",
+        "node_snapshots": "Save node traffic",
+        "shared_metering": "Meter shared clients",
+        "user_loop": "Meter users and check quotas",
+        "baseline_reseed": "Reseed new-period baselines",
+        "sink_flush": "Write to database",
+        "geo_enforce": "Apply location suspensions and lifts"
+      },
+      "write_reason": {
+        "total_gb": "Traffic cap",
+        "ip_limit": "IP limit",
+        "device_limit": "Device limit",
+        "enable": "Enabled state",
+        "expiry": "Expiry",
+        "id": "User ID (UUID)",
+        "password": "Password",
+        "flow": "Flow",
+        "auth": "Auth",
+        "panel_unread": "Panel state unreadable"
+      },
+      "write_reason_group": {
+        "quota": "Traffic cap refresh",
+        "limits": "IP or device limit change",
+        "state": "Enable or expiry change",
+        "credentials": "Credential change",
+        "unread": "Panel state unreadable"
+      },
+      "capability": {
+        "client_iplimit": "IP limit",
+        "client_devicelimit": "Device limit"
+      },
+      "lifecycle_stage": {
+        "pool_get": "Panel not found",
+        "update": "Write",
+        "confirm_read": "Read-back",
+        "confirm_mismatch": "Read-back mismatch",
+        "record_credentials": "Saving the result"
+      },
+      "panel_kind": {
+        "3xui": "3X-UI",
+        "sui": "S-UI",
+        "psp": "PSP native node",
+        "unknown": "Unknown (panel not found)"
+      },
+      "op": {
+        "AddClient": "Add client",
+        "AddClientToInbounds": "Add client to inbounds",
+        "AddInbound": "Add inbound",
+        "AttachClient": "Attach client",
+        "BulkAttach": "Bulk attach clients",
+        "BulkCreateClients": "Bulk create clients",
+        "BulkDelByEmail": "Bulk delete clients",
+        "DelClientByEmail": "Delete client",
+        "DelInbound": "Delete inbound",
+        "DetachClient": "Detach client",
+        "GetClient": "Read client",
+        "GetCoreVersionList": "List core versions",
+        "GetFail2banStatus": "Read fail2ban status",
+        "GetInbound": "Read inbound",
+        "GetPanelUpdateInfo": "Read panel update info",
+        "GetServerStatus": "Read server status",
+        "GetWebCertFiles": "Read panel certificate",
+        "GetXrayVersionList": "List Xray versions",
+        "InstallCore": "Install core",
+        "InstallXray": "Install Xray",
+        "ListClientInbounds": "List a client's inbounds",
+        "ListInbounds": "List inbounds",
+        "ListInboundsSlim": "Read traffic (inbound list)",
+        "ListLiveClientIPs": "Read live IPs",
+        "ScanRealityTargets": "Scan REALITY targets",
+        "SetInboundEnable": "Enable or disable inbound",
+        "UpdateClient": "Update client",
+        "UpdateInbound": "Update inbound",
+        "UpdatePanel": "Upgrade panel",
+        "other": "Other (untagged)"
+      },
+      "node_refused": {
+        "protocol_generation": "Incompatible version",
+        "report_invalid": "Invalid report"
+      },
+      "node_host_report": {
+        "accepted": "Accepted",
+        "no_host": "No host data",
+        "invalid": "Invalid",
+        "identity_conflict": "Identity conflict",
+        "storage_error": "Storage error"
+      },
+      "geo_auto": {
+        "suspended": "Suspended",
+        "skipped_held": "Skipped: already held",
+        "skipped_unwired": "Skipped: not wired",
+        "deferred": "Deferred",
+        "suspend_error": "Suspend failed",
+        "lifted_expiry": "Lifted on expiry",
+        "lifted_admin": "Lifted by admin",
+        "lift_skipped": "Lift skipped",
+        "lift_deferred": "Lift deferred",
+        "lift_error": "Lift failed"
+      },
+      "risk_refresh": {
+        "ok": "OK",
+        "partial": "Partial",
+        "infra_pending": "Waiting for node addresses",
+        "error": "Failed"
+      },
+      "live_conn_refresh": {
+        "ok": "OK",
+        "partial": "Partial",
+        "just_polled": "Just polled",
+        "cooldown": "Cooling down",
+        "in_progress": "In progress",
+        "error": "Failed"
+      },
+      "saml": {
+        "saml_assertion_invalid": "Invalid assertion",
+        "saml_assertion_replayed": "Assertion replayed",
+        "saml_replay_store_error": "Replay store error",
+        "saml_weak_signature": "Weak signature",
+        "saml_multiple_assertions": "Multiple assertions",
+        "saml_destination": "Wrong destination",
+        "saml_request_invalid": "Invalid request",
+        "saml_entry_point": "Could not start sign-in"
+      },
+      "sso_kind": {
+        "role": "Role",
+        "group": "Group"
+      }
     }
   },
   "nodeMetrics": {

@@ -12,6 +12,7 @@ describe('roleCan', () => {
     'traffic.write',
     'sync.operate',
     'risk.view',
+    'diagnostics.view',
   ]
 
   it('grants every built-in capability to admins', () => {
@@ -32,6 +33,13 @@ describe('roleCan', () => {
   it('keeps the risk center admin-only', () => {
     expect(roleCan('admin', 'risk.view')).toBe(true)
     expect(roleCan('operator', 'risk.view')).toBe(false)
+  })
+
+  // Every diagnostics endpoint is adminGroup (the registry read and the
+  // clear), so the page is admin-only for the same reason the risk center is.
+  it('keeps diagnostics admin-only', () => {
+    expect(roleCan('admin', 'diagnostics.view')).toBe(true)
+    expect(roleCan('operator', 'diagnostics.view')).toBe(false)
   })
 
   it('fails closed for users and missing roles', () => {

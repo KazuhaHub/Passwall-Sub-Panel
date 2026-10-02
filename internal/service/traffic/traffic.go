@@ -226,8 +226,13 @@ func New(users ports.UserRepo, ownership ports.OwnershipRepo, traffic ports.Traf
 		infra: newInfraAddressSet(),
 	}
 	// Published so a snapshot is self-contained: "peak in-flight 8" only
-	// means saturation if the reader also knows the capacity is 8, and
-	// that value comes from a setting the operator can change.
+	// means saturation if the reader also knows the capacity is 8. The
+	// capacity is FIXED at paneltz.ResolveMaxPanelConcurrency(0), the
+	// default of 8: it is resolved here, before WithSettings attaches the
+	// settings, and never re-read, so the admin's MaxPanelConcurrency does
+	// not move it. The gauge's help states that number and the diagnostics
+	// page shows the help verbatim, so TestNew_PushSemCapacityHelpStates-
+	// TheCapacityNewPublishes holds the two together.
 	metrics.PushSemCapacity.Set(int64(capacity))
 	return svc
 }

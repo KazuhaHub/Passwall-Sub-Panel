@@ -103,6 +103,19 @@ func (p *Pool) Remove(panelID int64) error {
 	return nil
 }
 
+// KindOf reports the normalised adapter kind of a registered panel. The kind
+// is normalised on the way in (Add, Replace, NewPool), so a legacy row with no
+// kind reads as 3X-UI here exactly as it does everywhere else.
+func (p *Pool) KindOf(panelID int64) (domain.PanelKind, bool) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	def, ok := p.panels[panelID]
+	if !ok {
+		return "", false
+	}
+	return def.Kind, true
+}
+
 func (p *Pool) SupportsKind(kind domain.PanelKind) bool {
 	return p.registry.Has(kind)
 }
@@ -123,4 +136,7 @@ func (p *Pool) Replace(def *domain.Panel) error {
 	return nil
 }
 
-var _ ports.PanelPool = (*Pool)(nil)
+var (
+	_ ports.PanelPool         = (*Pool)(nil)
+	_ ports.PanelKindResolver = (*Pool)(nil)
+)

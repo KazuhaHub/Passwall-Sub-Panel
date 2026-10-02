@@ -197,3 +197,12 @@ export const syncTaskKeys = {
   all: (s: QueryScope) => [...privateRoot(s), 'sync-tasks'] as const,
   list: (s: QueryScope, params: SyncTaskListParams) => [...syncTaskKeys.all(s), 'list', params] as const,
 }
+
+/**
+ * The admin diagnostics page's registry read. One entry: the response is the
+ * whole registry, and the reset writes through it (invalidated after a clear).
+ */
+export const diagnosticsKeys = {
+  all: (s: QueryScope) => [...privateRoot(s), 'diagnostics'] as const,
+  metrics: (s: QueryScope) => [...diagnosticsKeys.all(s), 'metrics'] as const,
+}
