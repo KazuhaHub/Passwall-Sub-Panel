@@ -195,8 +195,17 @@ function Desc({ f, fmt }: { f: RawFamily; fmt: DiagFormat }) {
   )
 }
 
-function familyTotal(f: RawFamily): number {
-  return f.series.reduce((sum, s) => sum + (s.counter?.value ?? s.histogram?.count ?? s.gauge?.value ?? 0), 0)
+/**
+ * What a labelled family's parent row shows. A counter family's children add
+ * up to a count; a distribution family's add up only as samples (stages x
+ * polls, requests timed), so it is labelled as such, never left bare beside a
+ * family whose unit is a time or a distance; gauges do not add up at all.
+ */
+function familyTotal(f: RawFamily, fmt: DiagFormat): string {
+  if (f.type === 'gauge') return ''
+  const total = f.series.reduce((sum, s) => sum + (s.counter?.value ?? s.histogram?.count ?? 0), 0)
+  return fmt.t(f.type === 'histogram' ? 'admin:diagnostics.raw.family_total_samples' : 'admin:diagnostics.raw.family_total',
+    { value: fmt.exact(total) })
 }
 
 export default function RawMetricTable({ families, fmt, windowMs }: {
@@ -269,7 +278,7 @@ export default function RawMetricTable({ families, fmt, windowMs }: {
               {nameCell(title, f.family)}
               <TypeCell f={f} fmt={fmt} />
               <Typography variant="body2" sx={{ fontVariantNumeric: 'tabular-nums' }}>
-                {f.type === 'gauge' ? '' : t('admin:diagnostics.raw.family_total', { value: fmt.exact(familyTotal(f)) })}
+                {familyTotal(f, fmt)}
               </Typography>
               <Desc f={f} fmt={fmt} />
             </Row>

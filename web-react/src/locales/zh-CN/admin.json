@@ -3586,6 +3586,7 @@
       "absent": "此服务端版本没有该指标",
       "no_children": "尚未出现任何取值（即全部为 0）",
       "family_total": "合计 {{value}}",
+      "family_total_samples": "共 {{value}} 个样本",
       "gauge_value": "当前 {{value}} · 峰值 {{peak}}",
       "peak_note": "峰值为本统计区间内的最高值。",
       "hist_value": "{{count}} 个样本 · 典型 {{p50}} · 95% 在 {{p95}} 以内",

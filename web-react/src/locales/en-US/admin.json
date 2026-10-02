@@ -3588,6 +3588,7 @@
       "absent": "This server version does not have this metric",
       "no_children": "No values yet (all zero)",
       "family_total": "Total {{value}}",
+      "family_total_samples": "{{value}} samples in total",
       "gauge_value": "now {{value}} · peak {{peak}}",
       "peak_note": "The peak is the highest value in this statistics window.",
       "hist_value": "{{count}} samples · typical {{p50}} · 95% within {{p95}}",

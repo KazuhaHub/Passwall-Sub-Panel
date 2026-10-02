@@ -238,6 +238,18 @@ describe('the raw metrics', () => {
     expect(within(buckets).getByText('超过最后一档')).toBeTruthy()
   })
 
+  // A labelled distribution's children add up only as a number of samples;
+  // a bare total beside a duration or distance family reads as a time.
+  it('totals a labelled distribution as samples, not as a bare number', async () => {
+    serve(productionSnapshot())
+    mount()
+    await loaded()
+    const raw = openRaw()
+    search(raw, 'psp_poll_stage_ms')
+    expect(within(raw).getByText('共 1,774 个样本')).toBeTruthy()
+    expect(within(raw).queryByText('合计 1,774')).toBeNull()
+  })
+
   it('labels each sub-millisecond bucket by its exact bound', async () => {
     const m = productionMetrics()
     m.histograms = [...m.histograms, hist('psp_poll_stage_ms{stage=list_users}', {
