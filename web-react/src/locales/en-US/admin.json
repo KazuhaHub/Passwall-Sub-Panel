@@ -3389,7 +3389,7 @@
       },
       "push_enqueue": {
         "pass": "{{started}} quota safety refreshes ran, no more than the {{enqueued}} queued.",
-        "fail": "{{started}} quota safety refreshes ran, more than the {{enqueued}} queued. This should not happen; right after clearing the statistics it should vanish on refresh; if it persists, report it to the developers."
+        "fail": "{{started}} quota safety refreshes ran, more than the {{enqueued}} queued. Refreshes still queued when the statistics were cleared were counted as queued before the clear and as run after it, so the excess, the number that were queued then, stays for the whole window; it is harmless. Report it to the developers only if it appears in a window that has not been cleared since the panel started."
       }
     },
     "cards": {

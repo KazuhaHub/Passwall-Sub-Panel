@@ -700,7 +700,11 @@ export function deriveSelfChecks(m: MetricsSnapshot): SelfCheck[] {
   const pollPass = !(pollMs && polls > 0 && Math.abs(observed - polls) > 1)
 
   // Every started refresh was queued first, so only MORE started than queued
-  // is a disagreement; fewer is a refresh still waiting for a slot.
+  // is a disagreement; fewer is a refresh still waiting for a slot. A clear
+  // taken while refreshes were queued splits each of them across it (queued
+  // before, started after, traffic.go then user.PushClientConfig), so a
+  // window a clear opened can carry that excess for its whole life; the
+  // copy says so rather than calling it a bug.
   const enqueued = val(m, 'psp_poll_floor_push_enqueued_total')
   const started = val(m, 'psp_push_client_config_total')
 
