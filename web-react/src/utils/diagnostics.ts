@@ -222,6 +222,32 @@ export function wasReset(snap: DiagnosticsSnapshot): boolean {
   return snap.uptime_ms - snap.metrics.window_ms > 60_000
 }
 
+/** Slack granted to the traffic loop's first tick, on top of start-up time. */
+const POLL_START_SLACK_MS = 60_000
+
+/**
+ * The fewest polls the window can have held, or null when the loop's own
+ * interval is not published. Every input is read in the direction that LOWERS
+ * the expectation, because its one use that colours anything (poll_behind)
+ * must never fire on a healthy loop:
+ *
+ *  - the interval is the gauge's PEAK, the longest one used in the window, so
+ *    shortening the interval cannot make polls run at the old one look missing,
+ *    and lengthening it only lowers the count;
+ *  - the registry opens its window at process start, before the schema
+ *    migration and Build, while the loop starts after; that gap is
+ *    window − uptime on a fresh boot (zero after a reset, when the loop was
+ *    already running) and it is taken off along with a fixed slack;
+ *  - the result is floored.
+ */
+export function expectedPollsMin(snap: DiagnosticsSnapshot): number | null {
+  const interval = gauge(snap.metrics, 'psp_poll_interval_ms')?.peak ?? 0
+  if (!(interval > 0)) return null
+  const window = snap.metrics.window_ms
+  const slack = POLL_START_SLACK_MS + Math.max(0, window - snap.uptime_ms)
+  return Math.max(0, Math.floor((window - slack) / interval))
+}
+
 // ---------------------------------------------------------------------------
 // histograms
 // ---------------------------------------------------------------------------
@@ -413,6 +439,21 @@ export function deriveFindings(
     })
   }
 
+  // Fewer polls than the interval allows. The traffic loop is a sequential
+  // ticker that runs the poll and the rollup after it in one tick and drops
+  // the ticks it overran (app.go runTrafficLoop), so a run of long polls loses
+  // ticks rather than queueing them. Zero polls is poll_dead's; a manual
+  // "poll now" only adds polls, so it can hide a shortfall but never invent
+  // one. The tolerance, max(2, 5%), is on top of an already floored bound.
+  const expected = expectedPollsMin(snap)
+  if (expected !== null && mode === 'settled' && polls > 0 &&
+      polls < expected - Math.max(2, Math.ceil(0.05 * expected))) {
+    add({
+      id: 'poll_behind', severity: 'warn', card: 'poll', series: [], link: 'settings',
+      values: { polls, expected, missing: expected - polls },
+    })
+  }
+
   // Amber: while PSP runs, the next poll still suspends an over-quota user from
   // the real usage; the stale allowance only matters while PSP is offline.
   if (pushErrors > 0) {
@@ -446,6 +487,75 @@ export function deriveFindings(
       series: ['psp_live_ip_users_incomplete_total'], link: 'servers',
       values: { incomplete },
       variants: hasPanelKind(facts, 'sui') ? ['sui'] : [],
+    })
+  }
+
+  // The next four are failures that otherwise exist only as a Warn log: the
+  // poll and the request that hit them carry on, so nothing else on the admin
+  // surface shows them.
+
+  // A poll whose judged connections were not written leaves a gap in the
+  // connection history that is never backfilled.
+  const historyErrors = val(m, 'psp_connection_history_write_errors_total')
+  if (historyErrors > 0) {
+    add({
+      id: 'history_write_errors', severity: 'warn', card: 'liveip',
+      series: ['psp_connection_history_write_errors_total'],
+      values: { errors: historyErrors },
+    })
+  }
+
+  const flagErrors = val(m, 'psp_flag_record_write_errors_total')
+  if (flagErrors > 0) {
+    add({
+      id: 'flag_write_errors', severity: 'warn', card: 'liveip',
+      series: ['psp_flag_record_write_errors_total'],
+      values: { errors: flagErrors },
+    })
+  }
+
+  // Only the two failure outcomes: everything else the suspension does is
+  // already counted by the bell.
+  const suspendError = 'psp_geo_auto_suspension_total{outcome=suspend_error}'
+  const liftError = 'psp_geo_auto_suspension_total{outcome=lift_error}'
+  const suspendFailed = val(m, suspendError)
+  const liftFailed = val(m, liftError)
+  if (suspendFailed + liftFailed > 0) {
+    add({
+      id: 'geo_auto_errors', severity: 'warn', card: 'liveip',
+      series: [suspendError, liftError], link: 'risk',
+      values: { suspend: suspendFailed, lift: liftFailed },
+    })
+  }
+
+  // An incompatible protocol generation gets every sync from that node
+  // refused, which makes it offline in all but name.
+  const refused = counterFamilyTotal(m, 'psp_node_sync_refused_total')
+  if (refused > 0) {
+    add({
+      id: 'node_sync_refused', severity: 'warn', card: 'node',
+      series: ['psp_node_sync_refused_total'], link: 'servers',
+      values: {
+        count: refused,
+        proto: val(m, 'psp_node_sync_refused_total{reason=protocol_generation}'),
+        invalid: val(m, 'psp_node_sync_refused_total{reason=report_invalid}'),
+      },
+    })
+  }
+
+  // A deliberate fail-open in the SSO rules: with no claim, the stored role
+  // and group are kept, so someone the directory has already demoted keeps
+  // their access here.
+  const silent = counterFamilyTotal(m, 'psp_sso_claim_silent_total')
+  if (silent > 0) {
+    add({
+      id: 'sso_claim_silent', severity: 'warn', card: 'sso',
+      series: ['psp_sso_claim_silent_total'], link: 'settings',
+      values: {
+        count: silent,
+        role: val(m, 'psp_sso_claim_silent_total{kind=role}'),
+        group: val(m, 'psp_sso_claim_silent_total{kind=group}'),
+      },
     })
   }
 

@@ -5,7 +5,9 @@ import {
   deriveFindings,
   deriveSelfChecks,
   effectivePollIntervalMs,
+  expectedPollsMin,
   derivePreconditions,
+  FINDING_ORDER,
   panelFacts,
   quantileUsable,
   verdict,
@@ -403,6 +405,11 @@ describe('finding metadata', () => {
       c('psp_push_sem_carryover_total', 1),
       c('psp_live_ip_users_incomplete_total', 1),
       c('psp_capability_gap_total{capability=client.iplimit}', 1),
+      c('psp_connection_history_write_errors_total', 1),
+      c('psp_flag_record_write_errors_total', 1),
+      c('psp_geo_auto_suspension_total{outcome=lift_error}', 1),
+      c('psp_node_sync_refused_total{reason=report_invalid}', 1),
+      c('psp_sso_claim_silent_total{kind=role}', 1),
     ],
     gauges: [g('psp_push_sem_capacity', 0)],
   }), INTERVAL)
@@ -415,6 +422,14 @@ describe('finding metadata', () => {
     ['push_backlog', 'floor', ['psp_push_sem_carryover_total'], 'servers'],
     ['liveip_incomplete', 'liveip', ['psp_live_ip_users_incomplete_total'], 'servers'],
     ['capability_gaps', 'lifecycle', ['psp_capability_gap_total'], 'servers'],
+    ['history_write_errors', 'liveip', ['psp_connection_history_write_errors_total'], undefined],
+    ['flag_write_errors', 'liveip', ['psp_flag_record_write_errors_total'], undefined],
+    ['geo_auto_errors', 'liveip', [
+      'psp_geo_auto_suspension_total{outcome=suspend_error}',
+      'psp_geo_auto_suspension_total{outcome=lift_error}',
+    ], 'risk'],
+    ['node_sync_refused', 'node', ['psp_node_sync_refused_total'], 'servers'],
+    ['sso_claim_silent', 'sso', ['psp_sso_claim_silent_total'], 'settings'],
   ])('%s sits on %s, watches %j and links to %s', (id, card, series, link) => {
     const f = all().find(x => x.id === id)
     expect(f, id).toBeDefined()
@@ -473,6 +488,161 @@ describe('wasReset', () => {
   })
 })
 
+// poll_behind: the poll ran, but fewer times than the interval allows. Built
+// to never fire on a healthy loop, so every input is read conservatively.
+describe('poll_behind', () => {
+  const POLL = 120_000
+  // A window that holds exactly `expected` polls once the 60 s start-up slack
+  // is taken off, with the uptime equal to it (a fresh boot, no reset).
+  const windowFor = (expected: number) => expected * POLL + 60_000
+  const behind = (polls: number, over: { window?: number; uptime?: number; gauge?: ReturnType<typeof g> | null } = {}) => {
+    const window = over.window ?? windowFor(100)
+    const s = snap({
+      window_ms: window,
+      counters: [c('psp_poll_total', polls)],
+      gauges: [
+        g('psp_push_sem_capacity', 8),
+        ...(over.gauge === null ? [] : [over.gauge ?? g('psp_poll_interval_ms', POLL)]),
+      ],
+    }, over.uptime ?? window)
+    return deriveFindings(s, POLL).find(f => f.id === 'poll_behind')
+  }
+
+  it('stays silent until the window is settled', () => {
+    expect(behind(0, { window: POLL * 2 })).toBeUndefined()
+    expect(behind(1, { window: POLL * 2 })).toBeUndefined()
+  })
+
+  it('leaves zero polls to poll_dead', () => {
+    const s = snap({
+      window_ms: windowFor(100), counters: [c('psp_poll_total', 0)],
+      gauges: [g('psp_push_sem_capacity', 8), g('psp_poll_interval_ms', POLL)],
+    })
+    const ids = deriveFindings(s, POLL).map(f => f.id)
+    expect(ids).toContain('poll_dead')
+    expect(ids).not.toContain('poll_behind')
+  })
+
+  // Tolerance is max(2, 5%): 5 of 100 expected, 2 of 20.
+  it('fires one poll past the 5% tolerance and not at it', () => {
+    expect(behind(95)).toBeUndefined()
+    expect(behind(94)?.values).toEqual({ polls: 94, expected: 100, missing: 6 })
+  })
+
+  it('never tolerates fewer than two missing polls', () => {
+    expect(behind(18, { window: windowFor(20) })).toBeUndefined()
+    expect(behind(17, { window: windowFor(20) })?.values).toEqual({ polls: 17, expected: 20, missing: 3 })
+  })
+
+  it('carries severity, card and a link to the settings', () => {
+    const f = behind(50)
+    expect(f).toMatchObject({ severity: 'warn', card: 'poll', link: 'settings', series: [] })
+  })
+
+  // The peak is the longest interval used in the window, so a shortened
+  // interval cannot make the polls that ran at the old, longer one look
+  // missing — and a lengthened one only lowers the expectation.
+  it('judges against the longest interval used, so changing it never misfires', () => {
+    const window = 2 * 3600_000
+    const shortened = g('psp_poll_interval_ms', 60_000, 300_000)
+    expect(behind(24, { window, gauge: shortened })).toBeUndefined()
+    const lengthened = g('psp_poll_interval_ms', 300_000, 300_000)
+    expect(behind(60, { window, gauge: lengthened })).toBeUndefined()
+  })
+
+  it('stays silent without the interval gauge', () => {
+    expect(behind(10, { gauge: null })).toBeUndefined()
+    expect(behind(10, { gauge: g('psp_poll_interval_ms', 0) })).toBeUndefined()
+  })
+
+  // The registry opens its window at process start; the loop starts after the
+  // schema migration. That gap (window − uptime) is added to the slack.
+  it('allows for the time the process spent starting up', () => {
+    const window = 12_360_000 // 100 polls + 60 s + 300 s of start-up
+    expect(behind(95, { window, uptime: window - 300_000 })).toBeUndefined()
+    expect(behind(95, { window, uptime: window })?.values).toEqual({ polls: 95, expected: 102, missing: 7 })
+  })
+
+  // After a reset the window is shorter than the uptime; the loop was already
+  // running, so only the 60 s slack applies.
+  it('uses only the fixed slack after a reset', () => {
+    expect(behind(94, { window: windowFor(100), uptime: 10 * 3600_000 })?.values)
+      .toEqual({ polls: 94, expected: 100, missing: 6 })
+  })
+})
+
+describe('expectedPollsMin', () => {
+  it('is the conservative lower bound the poll card shows', () => {
+    const s = snap({ window_ms: 100 * 120_000 + 60_000, gauges: [g('psp_poll_interval_ms', 120_000)] })
+    expect(expectedPollsMin(s)).toBe(100)
+  })
+  it('is unknown without a usable interval gauge', () => {
+    expect(expectedPollsMin(snap({ gauges: [] }))).toBeNull()
+    expect(expectedPollsMin(snap({ gauges: [g('psp_poll_interval_ms', 0)] }))).toBeNull()
+  })
+})
+
+// Failures that nothing else on PSP's admin surface reports: each has only a
+// Warn log behind it otherwise.
+describe('findings nothing else surfaces', () => {
+  const find = (counters: ReturnType<typeof c>[], id: string) =>
+    deriveFindings(snap({ ...healthy(), counters: [...healthy().counters, ...counters] }), INTERVAL)
+      .find(f => f.id === id)
+
+  it('reports connection history write failures', () => {
+    expect(find([c('psp_connection_history_write_errors_total', 3)], 'history_write_errors'))
+      .toMatchObject({ severity: 'warn', values: { errors: 3 } })
+  })
+
+  it('reports flag record write failures', () => {
+    expect(find([c('psp_flag_record_write_errors_total', 2)], 'flag_write_errors'))
+      .toMatchObject({ severity: 'warn', values: { errors: 2 } })
+  })
+
+  it('reports automatic location suspensions and lifts that failed', () => {
+    expect(find([
+      c('psp_geo_auto_suspension_total{outcome=suspend_error}', 2),
+      c('psp_geo_auto_suspension_total{outcome=lift_error}', 1),
+    ], 'geo_auto_errors')).toMatchObject({ severity: 'warn', values: { suspend: 2, lift: 1 } })
+  })
+
+  // The bell already counts what was suspended; only what failed is new here.
+  it('ignores every outcome of the automatic suspension that is not a failure', () => {
+    expect(find([
+      c('psp_geo_auto_suspension_total{outcome=suspended}', 9),
+      c('psp_geo_auto_suspension_total{outcome=lifted_admin}', 3),
+      c('psp_geo_auto_suspension_total{outcome=deferred}', 4),
+    ], 'geo_auto_errors')).toBeUndefined()
+  })
+
+  it('splits refused native-node syncs into version and content refusals', () => {
+    expect(find([
+      c('psp_node_sync_refused_total{reason=protocol_generation}', 5),
+      c('psp_node_sync_refused_total{reason=report_invalid}', 2),
+    ], 'node_sync_refused')).toMatchObject({ severity: 'warn', values: { count: 7, proto: 5, invalid: 2 } })
+  })
+
+  it('splits single sign-ins without claims into role and group', () => {
+    expect(find([
+      c('psp_sso_claim_silent_total{kind=role}', 1),
+      c('psp_sso_claim_silent_total{kind=group}', 4),
+    ], 'sso_claim_silent')).toMatchObject({ severity: 'warn', values: { count: 5, role: 1, group: 4 } })
+  })
+
+  it('stays silent while each of them is zero', () => {
+    const ids = deriveFindings(snap({
+      ...healthy(),
+      counters: [
+        ...healthy().counters,
+        c('psp_connection_history_write_errors_total', 0),
+        c('psp_flag_record_write_errors_total', 0),
+        c('psp_node_sync_refused_total{reason=report_invalid}', 0),
+      ],
+    }), INTERVAL).map(f => f.id)
+    expect(ids).toEqual([])
+  })
+})
+
 // Every finding the page can raise, from one fixture, so a new finding cannot
 // be added without this list noticing. The locale half of this check (every
 // part of every finding in both bundles) lands with the copy.
@@ -489,17 +659,27 @@ describe('finding coverage', () => {
       c('psp_live_ip_users_incomplete_total', 1),
       c('psp_push_client_config_total', 9),
       c('psp_poll_floor_push_enqueued_total', 0),
+      c('psp_connection_history_write_errors_total', 1),
+      c('psp_flag_record_write_errors_total', 1),
+      c('psp_geo_auto_suspension_total{outcome=suspend_error}', 1),
+      c('psp_node_sync_refused_total{reason=protocol_generation}', 1),
+      c('psp_sso_claim_silent_total{kind=group}', 1),
     ],
     gauges: [g('psp_push_sem_capacity', 0)],
     histograms: [],
   })
+  // poll_dead and poll_behind cannot fire on one reading (zero polls versus
+  // too few), so the second one comes from its own snapshot.
+  const behind = snap({
+    window_ms: 100 * 120_000 + 60_000,
+    counters: [c('psp_poll_total', 10)],
+    gauges: [g('psp_push_sem_capacity', 8), g('psp_poll_interval_ms', 120_000)],
+  })
+  const allFindings = () => [...deriveFindings(everything, INTERVAL), ...deriveFindings(behind, 120_000)]
 
-  it('emits every finding id from the fixture', () => {
-    const ids = deriveFindings(everything, INTERVAL).map(f => f.id).sort()
-    expect(ids).toEqual([
-      'capability_gaps', 'lifecycle_errors', 'liveip_incomplete', 'poll_dead', 'poll_errors',
-      'push_backlog', 'push_capacity_zero', 'push_errors',
-    ])
+  it('emits every finding id across the fixtures', () => {
+    const ids = [...new Set(allFindings().map(f => f.id))].sort()
+    expect(ids).toEqual([...FINDING_ORDER].sort())
   })
 
   it.todo('has a title, impact and action for every finding in both bundles')
