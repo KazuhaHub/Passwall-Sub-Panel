@@ -4,6 +4,7 @@ import DownloadIcon from '@mui/icons-material/Download'
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined'
 import RefreshIcon from '@mui/icons-material/Refresh'
 import { useQueryClient } from '@tanstack/react-query'
+import { Navigate } from 'react-router'
 import { resetDiagnostics, type MetricsSnapshot } from '@/api/diagnostics'
 import type { ServerListParams } from '@/api/servers'
 import { AsyncButton } from '@/components/AsyncButton'
@@ -18,6 +19,7 @@ import { useUISettings } from '@/query/settings'
 import { useQueryScope } from '@/query/useQueryScope'
 import { useSiteStore } from '@/stores/site'
 import { copyToClipboard } from '@/utils/clipboard'
+import { useCan } from '@/utils/permissions'
 import {
   UNKNOWN_FACTS,
   deriveCards,
@@ -51,7 +53,15 @@ import { useDiagFormat } from './useDiagFormat'
  *  is incomplete, and an incomplete list is never used to prove anything. */
 const SERVER_LIST: ServerListParams = { page: 1, page_size: 200 }
 
+/**
+ * The capability check comes before the page mounts, not after its hooks:
+ * the page's queries fire on mount, so a check inside it would already have
+ * asked an adminGroup endpoint for an answer that can only be 403. The route
+ * is admin-only too (ADMIN_ONLY_ROUTES); this is the page's own check.
+ */
 export default function DiagnosticsView() {
+  const canView = useCan('diagnostics.view')
+  if (!canView) return <Navigate to="/admin/dashboard" replace />
   return <DiagnosticsPage />
 }
 

@@ -30,9 +30,12 @@ export type Capability =
   // adminGroup, so it is admin-only. Also gates LogsRoute's redirect of the
   // old /admin/logs?tab=geo|risk links.
   | 'risk.view'
+  // Open the diagnostics page. A read like risk.view, and admin-only for the
+  // same reason: the registry read and its clear are both adminGroup.
+  | 'diagnostics.view'
 
 const ROLE_CAPS: Record<Role, Capability[]> = {
-  admin: ['config.write', 'users.write', 'users.elevate', 'traffic.write', 'sync.operate', 'risk.view'],
+  admin: ['config.write', 'users.write', 'users.elevate', 'traffic.write', 'sync.operate', 'risk.view', 'diagnostics.view'],
   operator: ['users.write', 'traffic.write', 'sync.operate'],
   user: [],
 }

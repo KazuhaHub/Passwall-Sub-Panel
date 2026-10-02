@@ -342,3 +342,17 @@ describe('panel facts', () => {
     expect(within(screen.getByTestId('finding-liveip_incomplete')).queryByText(/已接入 S-UI 面板/)).toBeNull()
   })
 })
+
+describe('access', () => {
+  // The route is admin-only already (ADMIN_ONLY_ROUTES bounces an operator in
+  // RequireAuth); the page checks its own capability as well, so it never
+  // asks an adminGroup endpoint for an answer that can only be 403.
+  it('redirects an operator to the dashboard without a single read', async () => {
+    serve(productionSnapshot())
+    useAuthStore.setState({ role: 'operator', userId: 2, hasToken: true })
+    mount()
+    expect(await screen.findByText('dashboard')).toBeTruthy()
+    expect(screen.queryByTestId('diag-status')).toBeNull()
+    expect(api.get).not.toHaveBeenCalled()
+  })
+})
