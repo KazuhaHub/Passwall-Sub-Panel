@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
+  formatBound,
   formatBytes,
   formatCount,
   formatDuration,
@@ -28,6 +29,8 @@ export interface DiagFormat {
   rate: (r: number) => string
   /** A histogram value in its own unit: ms as latency, bytes in 1024 steps. */
   unit: (value: number, unit: string) => string
+  /** A bucket's upper bound, exact, in its unit (formatBound). */
+  bound: (le: number, unit: string) => string
   /** Whether a key exists in the bundles, so optional copy is never shown
    *  as its own key path. */
   has: (key: string) => boolean
@@ -61,6 +64,7 @@ export function useDiagFormat(): DiagFormat {
       latency: formatLatency,
       rate,
       unit,
+      bound: (le: number, u: string) => formatBound(le, u, lang),
       has: exists,
       label: (group: string, value: string) => labelFor(tt, exists, group, value),
       quantile: (r: QuantileReading, u: string) => {

@@ -21,6 +21,7 @@ import {
   findingInterpolation,
   findingParts,
   formatBreakdownList,
+  formatBound,
   formatBytes,
   formatDuration,
   formatLatency,
@@ -1130,6 +1131,22 @@ describe('formatBytes', () => {
     [300 * 1024 ** 4, '300 TiB'],
   ])('%i bytes reads %s', (n, want) => {
     expect(formatBytes(n)).toBe(want)
+  })
+})
+
+// A bucket bound is a raw value: the sub-millisecond latency bounds exist so
+// the stage breakdown can tell them apart (metrics.LatencyBucketsMS), and a
+// latency format rounding to whole ms would print three "0 ms" rows.
+describe('formatBound', () => {
+  it('keeps every latency bound distinct and unrounded', () => {
+    const labels = [0.05, 0.1, 0.25, 0.5, 1, 2, 10000].map(le => formatBound(le, 'ms', 'en-US'))
+    expect(labels).toEqual(['0.05 ms', '0.1 ms', '0.25 ms', '0.5 ms', '1 ms', '2 ms', '10,000 ms'])
+  })
+
+  it('writes bytes in 1024 steps, kilometres and plain counts exactly', () => {
+    expect(formatBound(1024, 'bytes', 'en-US')).toBe('1.00 KiB')
+    expect(formatBound(20020, 'km', 'en-US')).toBe('20,020 km')
+    expect(formatBound(12, 'ips', 'en-US')).toBe('12')
   })
 })
 

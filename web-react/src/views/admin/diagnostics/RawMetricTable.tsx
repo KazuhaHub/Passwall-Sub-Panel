@@ -107,7 +107,7 @@ function HistogramDetails({ h, fmt }: { h: HistogramSnapshot; fmt: DiagFormat })
               <TableBody>
                 {bucketRows(h).map((b, i) => (
                   <TableRow key={i}>
-                    <TableCell>{b.inf ? t('admin:diagnostics.raw.bucket.inf') : fmt.unit(b.le, h.unit)}</TableCell>
+                    <TableCell>{b.inf ? t('admin:diagnostics.raw.bucket.inf') : fmt.bound(b.le, h.unit)}</TableCell>
                     <TableCell align="right">{fmt.exact(b.cumulative)}</TableCell>
                     <TableCell align="right">{fmt.exact(b.count)}</TableCell>
                   </TableRow>

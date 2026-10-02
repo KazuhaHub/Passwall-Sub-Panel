@@ -221,6 +221,27 @@ describe('the raw metrics', () => {
     expect(within(buckets).getByText('超过最后一档')).toBeTruthy()
   })
 
+  it('labels each sub-millisecond bucket by its exact bound', async () => {
+    const m = productionMetrics()
+    m.histograms = [...m.histograms, hist('psp_poll_stage_ms{stage=list_users}', {
+      count: 20, sum: 4, mean: 0.2, max: 0.9, p50: 0.2, p90: 0.6, p95: 0.7, p99: 0.9,
+      buckets: [
+        { le: 0.05, count: 2 }, { le: 0.1, count: 5 }, { le: 0.25, count: 9 },
+        { le: 0.5, count: 15 }, { le: 1, count: 20 }, { le: 0, inf: true, count: 20 },
+      ],
+    })]
+    serve({ ...productionSnapshot(), metrics: m })
+    mount()
+    await loaded()
+    const raw = openRaw()
+    search(raw, 'list_users')
+    fireEvent.click(within(raw).getByRole('button', { name: /20 个样本/ }))
+    const buckets = within(within(raw).getByTestId('hist-psp_poll_stage_ms{stage=list_users}')).getByRole('table')
+    for (const bound of ['0.05 ms', '0.1 ms', '0.25 ms', '0.5 ms', '1 ms']) {
+      expect(within(buckets).getByText(bound)).toBeTruthy()
+    }
+  })
+
   it('tells an older server from a value that has not happened yet', async () => {
     serve(productionSnapshot())
     mount()

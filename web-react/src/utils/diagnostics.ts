@@ -1017,6 +1017,19 @@ export function formatBytes(n: number): string {
   return `${v.toFixed(digits)} ${units[i]}`
 }
 
+/**
+ * A histogram bucket's upper bound, exactly as the registry set it. Never the
+ * latency format: that rounds to whole milliseconds, and the latency bounds
+ * start at 0.05, 0.1 and 0.25 ms precisely so the poll's stage timings can be
+ * told apart (metrics.LatencyBucketsMS), so three buckets would read "0 ms".
+ * Bytes keep their 1024 steps, which the byte bounds land on exactly.
+ */
+export function formatBound(le: number, unit: string, lang: string): string {
+  if (unit === 'bytes') return formatBytes(le)
+  const exact = formatExact(le, lang)
+  return unit === 'ms' || unit === 'km' ? `${exact} ${unit}` : exact
+}
+
 /** A rate (per hour, per poll): whole above 10, finer below. */
 export function formatRate(r: number, lang: string): string {
   const digits = r >= 10 ? 0 : r >= 0.1 ? 1 : 2
