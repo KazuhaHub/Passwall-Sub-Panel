@@ -3320,7 +3320,7 @@
         "retry": "Failures caused by admin actions, membership changes or automatic suspend and resume are recorded in Sync tasks, where you can see the error and retry. The periodic repair also re-checks every user and fixes whatever is still out of step. Every failed retry counts again, so this is not the number of affected users.",
         "action": "Open Sync tasks and look for unfinished or cancelled user tasks and their errors; then check on Servers that the panels are reachable and native nodes are online.",
         "log": "shared-client lifecycle push failed",
-        "log_note": "This finds two kinds of line: one per user, carrying only the first error; and one per failed client (ending in \"for a client\"), carrying the panel id (panel_id) and the step that failed (stage), so failures on different panels can be told apart."
+        "log_note": "This finds two kinds of line: one per user, carrying only the first error; and one per failed client, whose message reads \"shared-client lifecycle push failed for a client\", carrying the panel id (panel_id) and the step that failed (stage), so failures on different panels can be told apart."
       },
       "push_errors": {
         "title": "{{errors}} of {{attempted}} quota safety refreshes failed ({{pct}})",
