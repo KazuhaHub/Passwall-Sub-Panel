@@ -238,7 +238,7 @@ var (
 	// means psp_user_live_ips understates, and so does anything drawn from it.
 	LiveIPUsersIncompleteTotal = NewCounter(
 		"psp_live_ip_users_incomplete_total",
-		"Users whose fleet-wide live-IP count was a floor this poll because a panel could not be read.",
+		"User-poll occurrences where a panel holding the user's clients could not be live-read, so that user's live-IP count was a floor. The same user counts again every poll; an S-UI panel is always unread.",
 	)
 	// What the detector actually JUDGED, as opposed to what the upstream
 	// remembered. psp_user_live_ips is the 30-minute window; this is the
@@ -398,7 +398,7 @@ var (
 	)
 	SyncUserDuration = NewHistogram(
 		"psp_sync_user_lifecycle_ms",
-		"Wall time for one user's full lifecycle fan-out across all their clients. P x 2 serial round trips today.",
+		"Wall time for one user's full lifecycle fan-out across all their clients. Clients are handled in parallel, so this is roughly the slowest panel's read, write and confirm.",
 		"ms", LatencyBucketsMS,
 	)
 )
@@ -430,7 +430,7 @@ var (
 var (
 	PushSemCapacity = NewGauge(
 		"psp_push_sem_capacity",
-		"Configured push-semaphore capacity. Set once at construction.",
+		"Push-semaphore capacity, fixed at construction (8). Zero means the traffic service was never built.",
 	)
 	PushSemInflight = NewGauge(
 		"psp_push_sem_inflight",
