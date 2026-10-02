@@ -948,6 +948,57 @@ export function sessionDelta(
   return elapsed < 60_000 ? { kind: 'wait' } : { kind: 'flat', minutes }
 }
 
+/**
+ * The copy key, under admin:diagnostics.problems, for a finding's growth
+ * line. After a restart or a clear while the page was open the count runs
+ * from that restart, so the line says so rather than "since you opened".
+ */
+export function sessionLineKey(kind: SessionDelta['kind'], rebuilt: boolean): string {
+  const key = kind === 'grew' ? 'session_new' : kind === 'flat' ? 'session_none' : 'session_wait'
+  return rebuilt ? `${key}_rebuilt` : key
+}
+
+/** The reading the page's growth line is measured from. */
+export interface SessionBase {
+  metrics: MetricsSnapshot
+  /**
+   * The window the page opened on was replaced while it stayed open (a
+   * restart, or a clear by anyone), so the growth line counts from that
+   * restart and must say so: "since you opened this page" would be false.
+   */
+  rebuilt: boolean
+}
+
+/** The empty reading a window opens with. */
+function windowStart(m: MetricsSnapshot): MetricsSnapshot {
+  return { since_unix_ms: m.since_unix_ms, window_ms: 0, counters: [], gauges: [], histograms: [] }
+}
+
+/**
+ * The baseline after this reading, or `prev` itself when it still holds, so
+ * the page only sets state when something changed.
+ *
+ * A window that reopened after the page took its baseline is measured from
+ * its own start, not from its first reading: every count in it happened after
+ * the page opened, and starting at the first reading would drop whatever the
+ * new window held by the time the page next refreshed. A total that shrank
+ * inside the same window (the registry only lowers counters in a reset, which
+ * also moves since_unix_ms, so this is defensive) starts again from the
+ * reading, the one point the page can vouch for.
+ */
+export function nextSessionBase(
+  prev: SessionBase | undefined,
+  cur: MetricsSnapshot,
+  series: ReadonlyArray<readonly string[]>,
+): SessionBase {
+  if (!prev) return { metrics: cur, rebuilt: false }
+  if (prev.metrics.since_unix_ms !== cur.since_unix_ms) return { metrics: windowStart(cur), rebuilt: true }
+  if (series.some(s => s.length > 0 && sessionDelta(prev.metrics, cur, s).kind === 'rebuild')) {
+    return { metrics: cur, rebuilt: true }
+  }
+  return prev
+}
+
 // ---------------------------------------------------------------------------
 // formatting
 // ---------------------------------------------------------------------------

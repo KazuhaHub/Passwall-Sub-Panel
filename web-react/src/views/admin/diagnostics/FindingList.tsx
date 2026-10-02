@@ -10,8 +10,10 @@ import {
   findingInterpolation,
   findingParts,
   sessionDelta,
+  sessionLineKey,
   type Finding,
   type FindingId,
+  type SessionBase,
 } from '@/utils/diagnostics'
 import { LINK_TARGET, type CardId } from '@/utils/diagnosticsCatalog'
 import { SeverityBadge } from './StatusBadge'
@@ -32,14 +34,13 @@ function interpolation(f: Finding, fmt: DiagFormat): Record<string, string> {
   }
 }
 
-function SessionLine({ f, base, cur, fmt }: { f: Finding; base?: MetricsSnapshot; cur: MetricsSnapshot; fmt: DiagFormat }) {
+function SessionLine({ f, base, cur, fmt }: { f: Finding; base?: SessionBase; cur: MetricsSnapshot; fmt: DiagFormat }) {
   if (f.series.length === 0) return null
-  const d = sessionDelta(base, cur, f.series)
-  const text = d.kind === 'grew'
-    ? fmt.t('admin:diagnostics.problems.session_new', { count: fmt.count(d.count), minutes: fmt.count(d.minutes) })
-    : d.kind === 'flat'
-      ? fmt.t('admin:diagnostics.problems.session_none', { minutes: fmt.count(d.minutes) })
-      : fmt.t('admin:diagnostics.problems.session_wait')
+  const d = sessionDelta(base?.metrics, cur, f.series)
+  const text = fmt.t(`admin:diagnostics.problems.${sessionLineKey(d.kind, base?.rebuilt ?? false)}`, {
+    count: fmt.count(d.kind === 'grew' ? d.count : 0),
+    minutes: fmt.count(d.kind === 'grew' || d.kind === 'flat' ? d.minutes : 0),
+  })
   return <Typography variant="caption" data-testid="session-delta" data-kind={d.kind} sx={{ color: 'text.secondary' }}>{text}</Typography>
 }
 
@@ -88,7 +89,7 @@ function FindingActions({ f, fmt, onShowData }: { f: Finding; fmt: DiagFormat; o
 }
 
 function ProblemRow({ f, fmt, base, cur, onShowData }: {
-  f: Finding; fmt: DiagFormat; base?: MetricsSnapshot; cur: MetricsSnapshot; onShowData: (card: CardId) => void
+  f: Finding; fmt: DiagFormat; base?: SessionBase; cur: MetricsSnapshot; onShowData: (card: CardId) => void
 }) {
   const md = useTheme().palette.md
   return (
@@ -109,7 +110,7 @@ function ProblemRow({ f, fmt, base, cur, onShowData }: {
 }
 
 function NoticeRow({ f, fmt, base, cur, onShowData }: {
-  f: Finding; fmt: DiagFormat; base?: MetricsSnapshot; cur: MetricsSnapshot; onShowData: (card: CardId) => void
+  f: Finding; fmt: DiagFormat; base?: SessionBase; cur: MetricsSnapshot; onShowData: (card: CardId) => void
 }) {
   const md = useTheme().palette.md
   const [open, setOpen] = useState(false)
@@ -140,7 +141,7 @@ export default function FindingList({ findings, fmt, base, cur, onShowData }: {
   findings: Finding[]
   fmt: DiagFormat
   /** The reading taken when the page opened, for "since you opened this page". */
-  base?: MetricsSnapshot
+  base?: SessionBase
   cur: MetricsSnapshot
   onShowData: (card: CardId) => void
 }) {

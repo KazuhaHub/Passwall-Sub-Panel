@@ -3287,7 +3287,10 @@
       "log_label": "Log keywords",
       "session_new": "{{count}} more since you opened this page ({{minutes}} min ago)",
       "session_none": "No new ones since you opened this page ({{minutes}} min ago)",
-      "session_wait": "Just opened; the next refresh will show whether it is still growing"
+      "session_wait": "Just opened; the next refresh will show whether it is still growing",
+      "session_new_rebuilt": "The statistics restarted after you opened this page; {{count}} more since then ({{minutes}} min)",
+      "session_none_rebuilt": "The statistics restarted after you opened this page; none since then ({{minutes}} min)",
+      "session_wait_rebuilt": "The statistics restarted just after you opened this page; the next refresh will show whether it is still growing"
     },
     "findings": {
       "push_capacity_zero": {

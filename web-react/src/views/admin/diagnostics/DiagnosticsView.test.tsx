@@ -145,6 +145,23 @@ describe('the production reading', () => {
     expect(within(finding).getByText('shared-client lifecycle push failed')).toBeTruthy()
   })
 
+  // A restart or a clear while the page is open reopens the window; the line
+  // must then count from that restart, and say so, not from the page opening.
+  it('says the statistics restarted when the window reopens while the page is open', async () => {
+    serve(productionSnapshot())
+    mount()
+    await loaded()
+    served.snap = productionSnapshot({
+      since_unix_ms: productionMetrics().since_unix_ms + 7_200_000,
+      window_ms: 10 * 60_000,
+      counters: [c('psp_poll_total', 5), c('psp_lifecycle_sync_total', 20), c('psp_lifecycle_sync_error_total', 3)],
+    })
+    fireEvent.click(screen.getByRole('button', { name: '刷新' }))
+    const finding = screen.getByTestId('finding-lifecycle_errors')
+    await waitFor(() => expect(within(finding).getByText('3 次用户状态同步失败（共核对 20 次，15%）')).toBeTruthy())
+    expect(within(finding).getByTestId('session-delta').textContent).toBe('统计在本页打开后重新开始，此后（10 分钟）新增 3 次')
+  })
+
   it('shows the poll as running on schedule, with the least number of polls the interval implies', async () => {
     serve(productionSnapshot())
     mount()

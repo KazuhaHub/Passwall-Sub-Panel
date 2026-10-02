@@ -3285,7 +3285,10 @@
       "log_label": "日志关键字",
       "session_new": "本页打开后（{{minutes}} 分钟）新增 {{count}} 次",
       "session_none": "本页打开后（{{minutes}} 分钟）没有新增",
-      "session_wait": "刚打开本页，下次刷新后可以看出是否仍在增加"
+      "session_wait": "刚打开本页，下次刷新后可以看出是否仍在增加",
+      "session_new_rebuilt": "统计在本页打开后重新开始，此后（{{minutes}} 分钟）新增 {{count}} 次",
+      "session_none_rebuilt": "统计在本页打开后重新开始，此后（{{minutes}} 分钟）没有新增",
+      "session_wait_rebuilt": "统计在本页打开后刚重新开始，下次刷新后可以看出是否仍在增加"
     },
     "findings": {
       "push_capacity_zero": {

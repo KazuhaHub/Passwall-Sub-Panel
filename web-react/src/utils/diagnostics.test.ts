@@ -33,7 +33,9 @@ import {
   panelFacts,
   quantileReading,
   quantileUsable,
+  nextSessionBase,
   sessionDelta,
+  sessionLineKey,
   wasReset,
   windowMode,
   bucketRows,
@@ -1065,6 +1067,41 @@ describe('sessionDelta', () => {
   })
 })
 
+// The page's "since you opened this page" line, across a restart or a clear
+// that happens while the page stays open.
+describe('nextSessionBase', () => {
+  const at = (windowMs: number, value: number, since = 0) =>
+    metrics({ since_unix_ms: since, window_ms: windowMs, counters: [c('psp_lifecycle_sync_error_total', value)] })
+  const series = [['psp_lifecycle_sync_error_total']]
+
+  it('takes the first reading as the page-open baseline', () => {
+    const first = at(60_000, 3)
+    expect(nextSessionBase(undefined, first, series)).toEqual({ metrics: first, rebuilt: false })
+  })
+
+  it('keeps the same baseline while the window is the same', () => {
+    const base = nextSessionBase(undefined, at(60_000, 3), series)
+    expect(nextSessionBase(base, at(180_000, 5), series)).toBe(base)
+  })
+
+  // Everything in a window that opened after the page did is new since the
+  // page opened, so the line counts the whole new window, from its start.
+  it('counts from the start of a window that reopened after the page opened', () => {
+    const base = nextSessionBase(undefined, at(60_000, 3, 0), series)
+    const cur = at(10 * 60_000, 4, 999)
+    const next = nextSessionBase(base, cur, series)!
+    expect(next.rebuilt).toBe(true)
+    expect(sessionDelta(next.metrics, cur, series[0])).toEqual({ kind: 'grew', count: 4, minutes: 10 })
+    expect(nextSessionBase(next, cur, series)).toBe(next)
+  })
+
+  it('starts again from the reading when a total shrank in the same window', () => {
+    const base = nextSessionBase(undefined, at(60_000, 5), series)
+    const cur = at(120_000, 2)
+    expect(nextSessionBase(base, cur, series)).toEqual({ metrics: cur, rebuilt: true })
+  })
+})
+
 // --- formatting --------------------------------------------------------------
 
 describe('formatPct', () => {
@@ -1307,6 +1344,12 @@ describe('copy for computed keys', () => {
       for (const s of STATES) has(`state.${s}`)
       for (const s of ['critical', 'error', 'warn', 'notice']) has(`severity.${s}`)
       for (const v of VERDICTS) has(`verdict.${v}`)
+    })
+
+    it(`${lang} has every growth line, from the page opening and from a restart`, () => {
+      for (const kind of ['wait', 'rebuild', 'grew', 'flat'] as const) {
+        for (const rebuilt of [false, true]) has(`problems.${sessionLineKey(kind, rebuilt)}`)
+      }
     })
 
     it(`${lang} has both self-check sentences for each check`, () => {

@@ -5,7 +5,7 @@ import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined'
 import RefreshIcon from '@mui/icons-material/Refresh'
 import { useQueryClient } from '@tanstack/react-query'
 import { Navigate } from 'react-router'
-import { resetDiagnostics, type MetricsSnapshot } from '@/api/diagnostics'
+import { resetDiagnostics } from '@/api/diagnostics'
 import type { ServerListParams } from '@/api/servers'
 import { AsyncButton } from '@/components/AsyncButton'
 import { confirm } from '@/components/ConfirmHost'
@@ -27,11 +27,12 @@ import {
   deriveSelfChecks,
   effectivePollIntervalMs,
   expectedPollsMin,
+  nextSessionBase,
   pageVerdict,
   panelFacts,
   rawFamilies,
-  sessionDelta,
   windowMode,
+  type SessionBase,
 } from '@/utils/diagnostics'
 import type { CardId } from '@/utils/diagnosticsCatalog'
 import AreaCards from './AreaCards'
@@ -93,10 +94,10 @@ function DiagnosticsPage() {
 
   // The first reading this page took is the baseline for "since you opened
   // this page". It lives in component state only, and is retaken whenever the
-  // window was reopened (a restart, or a clear by anyone) — adjusted during
-  // render, so the stale baseline is never drawn.
-  const [base, setBase] = useState<MetricsSnapshot>()
-  if (snap && (!base || base.since_unix_ms !== snap.metrics.since_unix_ms)) setBase(snap.metrics)
+  // window was reopened (a restart, or a clear by anyone), marked as such so
+  // the line says it counts from the restart (nextSessionBase). Adjusted
+  // during render, so the stale baseline is never drawn.
+  const [base, setBase] = useState<SessionBase>()
 
   const derived = useMemo(() => {
     if (!snap) return null
@@ -120,10 +121,9 @@ function DiagnosticsPage() {
     }
   }, [snap, settingsIntervalMs, facts])
 
-  // A total that shrank without the window reopening cannot be a growth to
-  // report: start the baseline again rather than print a negative.
-  if (snap && base && derived?.findings.some(f => f.series.length > 0 && sessionDelta(base, snap.metrics, f.series).kind === 'rebuild')) {
-    setBase(snap.metrics)
+  if (snap && derived) {
+    const next = nextSessionBase(base, snap.metrics, derived.findings.map(f => f.series))
+    if (next !== base) setBase(next)
   }
 
   if (diag.isPending) {
