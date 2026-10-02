@@ -156,7 +156,7 @@ function LifecycleBody({ c }: { c: Ctx }) {
         <KpiTile label={t('admin:diagnostics.cards.lifecycle.kpi.errors')}
           value={t('admin:diagnostics.fmt.times', { count: fmt.count(errors) })}
           color={errors > 0 ? md.error : undefined}
-          caption={t('admin:diagnostics.cards.lifecycle.kpi.errors_caption', { pct: fmt.pct(errors, total) })} />
+          caption={total > 0 ? t('admin:diagnostics.cards.lifecycle.kpi.errors_caption', { pct: fmt.pct(errors, total) }) : t('admin:diagnostics.fmt.no_denominator')} />
       </KpiGrid>
       {notProvisioned > 0 && <Line>{t('admin:diagnostics.cards.lifecycle.not_provisioned', { count: fmt.count(notProvisioned) })}</Line>}
       {lifecycleCardBreakdown(m).map(line => (
@@ -209,7 +209,7 @@ function FloorBody({ c }: { c: Ctx }) {
         caption={perPoll === null ? undefined : t('admin:diagnostics.fmt.per_poll', { rate: fmt.rate(perPoll) })} />
       <KpiTile label={t('admin:diagnostics.cards.floor.kpi.errors')}
         value={t('admin:diagnostics.fmt.times', { count: fmt.count(errors) })}
-        caption={t('admin:diagnostics.cards.floor.kpi.errors_caption', { pct: fmt.pct(errors, pushes) })} />
+        caption={pushes > 0 ? t('admin:diagnostics.cards.floor.kpi.errors_caption', { pct: fmt.pct(errors, pushes) }) : t('admin:diagnostics.fmt.no_denominator')} />
       <KpiTile label={t('admin:diagnostics.cards.floor.kpi.concurrency')}
         value={t('admin:diagnostics.cards.floor.kpi.concurrency_value', {
           peak: fmt.count(gauge(m, 'psp_push_sem_inflight')?.peak ?? 0),

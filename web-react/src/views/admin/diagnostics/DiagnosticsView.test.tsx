@@ -175,6 +175,25 @@ describe('the production reading', () => {
   })
 
   // Each "?" names what it explains, so a screen reader can tell them apart.
+  it('says there is no rate on its own when nothing was attempted, instead of splicing it into a share', async () => {
+    const zeroed = new Set([
+      'psp_lifecycle_sync_total', 'psp_lifecycle_sync_skipped_total', 'psp_lifecycle_sync_write_total',
+      'psp_lifecycle_sync_error_total', 'psp_push_client_config_total', 'psp_push_client_config_error_total',
+      'psp_poll_floor_push_enqueued_total',
+    ])
+    const base = productionMetrics()
+    serve(productionSnapshot({
+      counters: base.counters.map(x => (zeroed.has(x.name) ? { ...x, value: 0 } : x)),
+    }))
+    mount()
+    await loaded()
+    for (const id of ['lifecycle', 'floor']) {
+      const text = card(id).textContent ?? ''
+      expect(text).not.toMatch(/占(核对的)?\s*没有尝试/)
+      expect(within(card(id)).getAllByText('没有尝试，因此没有比例').length).toBeGreaterThan(0)
+    }
+  })
+
   it('names each help button after what it explains', async () => {
     serve(productionSnapshot())
     mount()
