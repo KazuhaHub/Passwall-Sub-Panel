@@ -5,6 +5,7 @@ import {
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import type { MetricsSnapshot } from '@/api/diagnostics'
 import {
+  deriveSelfChecks,
   filterRawFamilies,
   rawFamilies,
   rawSummary,
@@ -67,11 +68,10 @@ function SelfChecks({ checks, fmt }: { checks: SelfCheck[]; fmt: DiagFormat }) {
   )
 }
 
-export default function RawMetrics({ current, previous, mode, selfChecks, panelTz, fmt }: {
+export default function RawMetrics({ current, previous, mode, panelTz, fmt }: {
   current: MetricsSnapshot
   previous: ClosedWindow | null
   mode: WindowMode
-  selfChecks: SelfCheck[]
   panelTz: string
   fmt: DiagFormat
 }) {
@@ -82,9 +82,13 @@ export default function RawMetrics({ current, previous, mode, selfChecks, panelT
   const [view, setView] = useState<'current' | 'previous'>('current')
   const [openGroups, setOpenGroups] = useState<ReadonlySet<Group>>(new Set())
 
+  // Everything below describes the window shown: the rows, the summary and
+  // the consistency checks. Checks taken from the current window beside the
+  // closed window's rows would compare one window's polls with another's.
   const showing = view === 'previous' && previous ? previous.metrics : current
   const families = useMemo(() => rawFamilies(showing), [showing])
-  const summary = rawSummary(current)
+  const selfChecks = useMemo(() => deriveSelfChecks(showing), [showing])
+  const summary = rawSummary(showing)
 
   const filtered = useMemo(() => filterRawFamilies(families, {
     query,

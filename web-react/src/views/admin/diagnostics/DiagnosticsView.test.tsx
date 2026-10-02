@@ -349,6 +349,9 @@ describe('clearing the statistics', () => {
     const raw = openRaw()
     fireEvent.click(within(raw).getByRole('button', { name: /^清零前/ }))
     expect(within(raw).getByText(/正在查看清零前的数据/)).toBeTruthy()
+    // The checks and the summary describe the window shown, not the current one.
+    expect(within(raw).getByTestId('self-check-poll_ms').textContent).toContain('与已开始的 1,774 轮一致')
+    expect(within(raw).getByText('10 项指标 · 10 条序列')).toBeTruthy()
     search(raw, 'psp_poll_error_total')
     expect(within(raw).getByText('4,242')).toBeTruthy()
   })

@@ -256,7 +256,7 @@ function DiagnosticsPage() {
         expected={expected} facts={facts} families={families} fmt={fmt} panelTz={panelTz}
         expanded={expanded} onToggle={toggleCard} />
 
-      <RawMetrics current={m} previous={previous} mode={mode} selfChecks={selfChecks} panelTz={panelTz} fmt={fmt} />
+      <RawMetrics current={m} previous={previous} mode={mode} panelTz={panelTz} fmt={fmt} />
     </Box>
   )
 }
