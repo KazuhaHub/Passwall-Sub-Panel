@@ -3132,16 +3132,7 @@ func (s *Service) runUserTask(ctx context.Context, task *domain.SyncTask) error 
 	case domain.SyncTaskUserDelete:
 		return s.runUserDeleteTask(ctx, task)
 	case domain.SyncTaskUserResync:
-		if err := s.ResyncMembership(ctx, task.TargetID); err != nil {
-			// User deleted between enqueue and run → nothing to resync, task is
-			// done. Without this the task fails and retries ~100x. Mirrors the
-			// SyncTaskUserPushConfig ErrNotFound handling below.
-			if errors.Is(err, domain.ErrNotFound) {
-				return nil
-			}
-			return err
-		}
-		return nil
+		return s.runUserResyncTask(ctx, task.TargetID)
 	case domain.SyncTaskUserPushConfig:
 		u, err := s.users.GetByID(ctx, task.TargetID)
 		if errors.Is(err, domain.ErrNotFound) {
@@ -3155,16 +3146,52 @@ func (s *Service) runUserTask(ctx context.Context, task *domain.SyncTask) error 
 		// Drive the migration through ResyncMembership: dual-write → provision →
 		// LIFECYCLE → delete legacy, so an auto-migrated disabled/expired/over-quota
 		// user's shared client gets the correct enable/expiry (no enforcement bypass).
-		if err := s.ResyncMembership(ctx, task.TargetID); err != nil {
-			if errors.Is(err, domain.ErrNotFound) {
-				return nil // user deleted between enqueue and run → done
-			}
-			return err // transient (e.g. 3X-UI down) → the queue retries with backoff
-		}
-		return nil
+		return s.runUserResyncTask(ctx, task.TargetID)
 	default:
 		return nil
 	}
+}
+
+// runUserResyncTask runs ResyncMembership for a user_resync or user_migrate
+// task. A user deleted between enqueue and run leaves nothing to converge, so
+// the task is done rather than retried ~100x — the same short-cut the
+// push-config and delete tasks take.
+//
+// That decision is made from the USER ROW, never from the resync's error.
+// ErrNotFound is not specific to users: a native node's "no reading"
+// sentinels (ports.ErrNativePanelAgentOffline, …SnapshotMissing,
+// …SnapshotStale) wrap it, and sharedclient carries them up with %w from the
+// provision and lifecycle read-backs. Reading ErrNotFound as "user deleted"
+// therefore marked a resync that failed only because an agent was offline as
+// SUCCEEDED: nothing retried it, and the user's shared client stayed
+// unprovisioned (or on a stale lifecycle) until the next heal sweep. So every
+// resync error is a retry; a user deleted mid-resync costs one retry, which
+// this check then completes.
+//
+// The same goes for the GROUP row. A user in no group (GroupID 0, which SSO
+// auto-create leaves when no default group or rule applies) or whose group row
+// is gone has nothing to converge to, and ResyncMembership fails its group
+// lookup with ErrNotFound on every attempt. Credential resets enqueue a
+// user_resync for exactly such users, so without this check each of those
+// tasks would retry ~100x, end cancelled with "not found", and keep
+// X-Sync-Pending on the user meanwhile. Decided here rather than inside
+// ResyncMembership so the request-path callers keep their current contract.
+func (s *Service) runUserResyncTask(ctx context.Context, userID int64) error {
+	u, err := s.users.GetByID(ctx, userID)
+	if errors.Is(err, domain.ErrNotFound) {
+		return nil
+	} else if err != nil {
+		return err
+	}
+	if u.GroupID == 0 {
+		return nil
+	}
+	if _, err := s.groups.GetByID(ctx, u.GroupID); errors.Is(err, domain.ErrNotFound) {
+		return nil
+	} else if err != nil {
+		return err
+	}
+	return s.ResyncMembership(ctx, userID)
 }
 
 func (s *Service) runUserDeleteTask(ctx context.Context, task *domain.SyncTask) error {
