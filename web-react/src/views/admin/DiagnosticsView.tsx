@@ -46,10 +46,11 @@ import { confirm } from '@/components/ConfirmHost'
 import { pushSnack } from '@/components/SnackbarHost'
 import PageHeader from '@/components/PageHeader'
 
-const SEVERITY_COLOR: Record<Severity, 'error' | 'warning'> = {
+const SEVERITY_COLOR: Record<Severity, 'error' | 'warning' | 'info'> = {
   critical: 'error',
   error: 'error',
   warn: 'warning',
+  notice: 'info',
 }
 
 function ms(v: number): string {
