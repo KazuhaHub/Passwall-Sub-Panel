@@ -3292,24 +3292,24 @@
     "findings": {
       "push_capacity_zero": {
         "title": "The traffic service did not start",
-        "impact": "Neither traffic polling nor quota safety refreshes will run: metering, over-quota suspension and live-IP collection have all stopped, so the other numbers on this page mean nothing.",
+        "impact": "Neither traffic polling nor quota safety refreshes will run: metering, over-quota suspension and live-IP collection have all stopped, so the numbers for those areas mean nothing.",
         "action": "Check the server's startup log for errors, fix them and restart the panel."
       },
       "poll_dead": {
         "title": "Traffic polling has stopped: not one poll in {{window}}",
-        "impact": "Traffic is no longer metered, over-quota and expired users are not suspended automatically, and live-IP collection and location checks have stopped too.",
+        "impact": "Traffic is no longer metered, over-quota users are not suspended automatically, and quota safety refreshes, live-IP collection and location checks have stopped too. Expiry does not depend on traffic polling and is unaffected.",
         "action": "Check the server's log for errors or a crash, fix the cause and restart the panel.",
         "log": "traffic loop started · traffic poll"
       },
       "poll_errors": {
         "title": "{{errors}} of {{polls}} polls were skipped entirely because the user list could not be read",
-        "impact": "Those polls metered no traffic and checked no quotas or expiry dates. An unreachable panel is not counted here.",
+        "impact": "Those polls metered no traffic and checked no quotas. An unreachable panel is not counted here.",
         "action": "Check that the database is reachable and its disk is not full.",
         "log": "traffic poll"
       },
       "poll_behind": {
         "title": "About {{missing}} polls are missing ({{polls}} ran; the interval implies at least {{expected}})",
-        "impact": "Some polls were skipped: a poll plus the rollup after it may have taken longer than the interval, or polling was briefly held back. No traffic is lost, since the next poll picks it up, but over-quota and expiry suspensions are delayed.",
+        "impact": "Some polls were skipped: a poll plus the rollup after it may have taken longer than the interval, or polling was briefly held back. No traffic is lost, since the next poll picks it up, but over-quota suspensions are delayed.",
         "action": "Check the longest poll duration under Traffic polling and the slowest operations under Panel requests on this page; if needed, lengthen the traffic poll interval in Settings."
       },
       "lifecycle_errors": {
@@ -3408,7 +3408,7 @@
       },
       "poll": {
         "title": "Traffic polling",
-        "purpose": "Reads usage from every panel at the poll interval, meters traffic from it, suspends over-quota and expired users, and collects live IPs. When it stops, every other number on this page stops with it.",
+        "purpose": "Reads usage from every panel at the poll interval, meters traffic from it and suspends over-quota users, then runs the quota safety refresh and collects live IPs for the Risk Center. When it stops, the quota safety refresh and the live-IP and risk data stop with it; the other areas keep counting.",
         "ok": "On schedule: one poll every {{interval}}, {{polls}} in this window.",
         "kpi": {
           "polls": "Polls run",
