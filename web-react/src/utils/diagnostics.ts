@@ -1172,6 +1172,21 @@ export function panelOpRows(m: MetricsSnapshot): PanelOpRow[] {
   return [...rows.values()].sort((a, b) => b.requests - a.requests || a.op.localeCompare(b.op))
 }
 
+/**
+ * Native-node host metric saves that failed, and how many of those carried a
+ * history sample. NOT a sum of the two storage_error children: one failed
+ * persist counts once under psp_node_host_report_total and, when a history
+ * sample was due, once more under psp_node_host_history_total, in the same
+ * error branch (nodemetrics.Ingest). The history child is a subset of the
+ * report child, so adding them shows one failed save as two.
+ */
+export function nodeSaveFailures(m: MetricsSnapshot): { failures: number; withHistory: number } {
+  return {
+    failures: val(m, 'psp_node_host_report_total{outcome=storage_error}'),
+    withHistory: val(m, 'psp_node_host_history_total{outcome=storage_error}'),
+  }
+}
+
 export interface StageGroupTime {
   group: StageGroup
   /** Mean milliseconds per poll spent in the group's stages. */

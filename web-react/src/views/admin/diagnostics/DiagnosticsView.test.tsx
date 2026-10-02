@@ -171,6 +171,26 @@ describe('the production reading', () => {
   })
 })
 
+describe('the native node card', () => {
+  // One failed persist that carried a history sample is counted under both
+  // families; the card must not show it as two failures.
+  it('counts a failed host-metric save once, and says how many carried history', async () => {
+    const m = productionMetrics()
+    m.counters = [
+      ...m.counters,
+      c('psp_node_host_report_total{outcome=accepted}', 50),
+      c('psp_node_host_report_total{outcome=storage_error}', 1),
+      c('psp_node_host_history_total{outcome=storage_error}', 1),
+    ]
+    serve({ ...productionSnapshot(), metrics: m })
+    mount()
+    await loaded()
+    const tile = within(card('node')).getByText('保存失败').parentElement as HTMLElement
+    expect(within(tile).getByText('1 次')).toBeTruthy()
+    expect(within(tile).getByText('其中 1 次含历史样本')).toBeTruthy()
+  })
+})
+
 describe('the raw metrics', () => {
   it('lists a series no card uses', async () => {
     serve(productionSnapshot())

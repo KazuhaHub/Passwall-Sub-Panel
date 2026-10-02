@@ -3525,6 +3525,7 @@
           "refused": "Sync reports refused",
           "refused_caption": "incompatible version {{proto}} · invalid {{invalid}}",
           "storage": "Save failures",
+        "storage_caption": "{{history}} of them carried a history sample",
           "persist": "Save time",
           "persist_caption": "budget 500 ms"
         }

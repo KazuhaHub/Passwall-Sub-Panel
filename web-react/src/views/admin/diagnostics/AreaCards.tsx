@@ -10,6 +10,7 @@ import {
   gauge,
   histogram,
   lifecycleCardBreakdown,
+  nodeSaveFailures,
   panelOpRows,
   quantileReading,
   ratePerHour,
@@ -267,7 +268,7 @@ function NodeBody({ c }: { c: Ctx }) {
   const reports = counterChildren(m, 'psp_node_host_report_total')
   const accepted = reports.find(r => r.value === 'accepted')?.count ?? 0
   const other = reports.reduce((n, r) => n + (r.value === 'accepted' ? 0 : r.count), 0)
-  const storage = val(m, 'psp_node_host_report_total{outcome=storage_error}') + val(m, 'psp_node_host_history_total{outcome=storage_error}')
+  const storage = nodeSaveFailures(m)
   const persist = fmt.quantile(quantileReading(histogram(m, 'psp_node_host_persist_ms')), 'ms')
   return (
     <KpiGrid>
@@ -281,7 +282,10 @@ function NodeBody({ c }: { c: Ctx }) {
           invalid: fmt.count(val(m, 'psp_node_sync_refused_total{reason=report_invalid}')),
         })} />
       <KpiTile label={t('admin:diagnostics.cards.node.kpi.storage')}
-        value={t('admin:diagnostics.fmt.times', { count: fmt.count(storage) })} />
+        value={t('admin:diagnostics.fmt.times', { count: fmt.count(storage.failures) })}
+        caption={storage.withHistory > 0
+          ? t('admin:diagnostics.cards.node.kpi.storage_caption', { history: fmt.count(storage.withHistory) })
+          : undefined} />
       <KpiTile label={t('admin:diagnostics.cards.node.kpi.persist')}
         value={persist.caption ?? persist.value}
         caption={t('admin:diagnostics.cards.node.kpi.persist_caption')} />

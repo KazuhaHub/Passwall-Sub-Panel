@@ -3523,6 +3523,7 @@
           "refused": "同步上报被拒",
           "refused_caption": "版本不兼容 {{proto}} · 内容无效 {{invalid}}",
           "storage": "保存失败",
+        "storage_caption": "其中 {{history}} 次含历史样本",
           "persist": "保存耗时",
           "persist_caption": "预算 500 ms"
         }

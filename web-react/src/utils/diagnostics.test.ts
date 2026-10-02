@@ -37,6 +37,7 @@ import {
   windowMode,
   bucketRows,
   filterRawFamilies,
+  nodeSaveFailures,
   panelOpRows,
   rawFamilies,
   rawSummary,
@@ -1419,6 +1420,25 @@ describe('effectivePollIntervalMs', () => {
 })
 
 // --- page models -----------------------------------------------------------
+
+// One failed persist is counted under report{storage_error} and, when a
+// history sample was due, under history{storage_error} as well
+// (nodemetrics.Ingest): the second is a subset of the first.
+describe('nodeSaveFailures', () => {
+  it('counts a failed save once, whether or not it carried history', () => {
+    expect(nodeSaveFailures(metrics({
+      counters: [
+        c('psp_node_host_report_total{outcome=storage_error}', 3),
+        c('psp_node_host_history_total{outcome=storage_error}', 2),
+        c('psp_node_host_report_total{outcome=accepted}', 40),
+      ],
+    }))).toEqual({ failures: 3, withHistory: 2 })
+  })
+
+  it('is zero when nothing failed', () => {
+    expect(nodeSaveFailures(metrics())).toEqual({ failures: 0, withHistory: 0 })
+  })
+})
 
 describe('panelOpRows', () => {
   const rtt = (op: string, count: number) => ({ ...h(`psp_panel_rtt_ms{op=${op}}`, count), p50: 300 })
