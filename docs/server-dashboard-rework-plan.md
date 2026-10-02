@@ -1,6 +1,10 @@
 # 服务器看板整改：任务规划书
 
-- **状态**：规划已定稿（2026-09-28，第二版：按实现视角复核后重写），待派工
+- **状态**：规划已定稿（2026-09-28，第二版：按实现视角复核后重写），待派工。
+  **2026-10-02 复核（只改了 WP-D4 相关的几处）**：对照 PSP `origin/main` `aa8a1b4b` 复核过。
+  - WP-D4 尚未实现：没有 `ServerDetailView.tsx`，也没有 `views/admin/serverDetail/`。
+  - `ServersView.tsx`、`NodeMetricsChart.tsx`、`NodeMetricsDialog.tsx`、`NodeDiagnosticsDialog.tsx` 与 `internal/service/nodemetrics` 自 `fb12a6c1` 以来都没有改动，WP-D1–D6 的行号仍然有效。
+  - 改动的是 D-2、D-4 的出处，§4.1 的时间写法，以及 §4.3 末尾为 [node-audit-plan.md](node-audit-plan.md) §7 S15 留出的「访问控制」区块。
 - **依据**：[psp-node-rootless-observability-plan.md](psp-node-rootless-observability-plan.md) §12（前端规格，已冻结）、
   [react-data-freshness-plan-review.md](react-data-freshness-plan-review.md) §6、§7.1、§10.2（查询缓存迁移规则）
 - **触发**：生产截图（加拿大节点「主机指标」弹窗 → 性能 tab）里，图例压住 X 轴标签，X 轴是原始 UTC ISO 串，
@@ -110,9 +114,9 @@
 | # | 决定 | 内容 | 理由 |
 |---|---|---|---|
 | D-1 | 详情页而非弹窗 | 路由 `/admin/servers/:id`，React.lazy | 规格 §12.2 原意；四 tab + 多张图放在弹窗里必须滚动，且不能分享链接 |
-| D-2 | 状态进 URL | `?tab=overview\|performance\|network\|diagnostics&range=1h\|24h\|7d\|30d\|90d&iface=<name>`；打开详情 push，切 tab/范围/网卡 replace；非法值回退到 `overview`/`1h`，不改写 URL | 沿用 `views/admin/risk/RiskCenterView.tsx:48-70` 的 `useSearchParams` 模式 |
+| D-2 | 状态进 URL | `?tab=overview\|performance\|network\|diagnostics&range=1h\|24h\|7d\|30d\|90d&iface=<name>`；打开详情 push，切 tab/范围/网卡 replace；非法值回退到 `overview`/`1h`，不改写 URL | 沿用风控中心的写法：切 tab 用 replace（`views/admin/risk/RiskCenterView.tsx:57-64`），打开详情用 push（`views/admin/risk/drawerParam.ts`；node-audit-plan §7.2 的 UI-0 会把它移到 `src/hooks/useDrawerParam.ts`，届时从新位置引用） |
 | D-3 | 所有服务器类型都能进详情页 | 3X-UI/S-UI 只显示基本信息 + 「此类型面板不提供主机指标」 | 名称链接对每一行一致 |
-| D-4 | 权限 | 整页 admin-only | 已在 `ADMIN_ONLY_ROUTES`（`router/home.ts:21-29`；`home.test.ts:21-26` 已断言 `/admin/servers/1`）；后端所有相关接口都在 `adminGroup` |
+| D-4 | 权限 | 整页 admin-only | 已在 `ADMIN_ONLY_ROUTES`（`router/home.ts:25-30`，#262/#267 之后还含 `/admin/risk`、`/admin/diagnostics`；`home.test.ts` 仍断言 `/admin/servers/1`）；后端所有相关接口都在 `adminGroup` |
 | D-5 | 远程诊断并入诊断 tab | 删掉独立入口与弹窗 | D4 |
 | D-6 | 详情页的服务器动作 | 删除与诊断在详情页本地执行；其余动作（编辑、重装、升级、选核心、轮换凭据）**跳回列表并自动打开对应对话框**：`/admin/servers?open=<action>&server=<id>` | 这些动作的对话框和状态全在 `ServersView` 里；把它们抽成可复用宿主是一个比本计划其余部分加起来还大的重构，列为后续 |
 | D-7 | 图表时间轴 | `xAxis.type: 'time'`，数据点为 `[epochMs, value, coverageSeconds]` | 解决 C2、C3；coverage 随点走，不再靠 `dataIndex` 回查 |
@@ -367,7 +371,7 @@ interface Props {
 | 版本 | `ServerVersionCell` |
 | 最后同步 / 最后指标 | `node-agent-status.last_seen` / `current.received_at` |
 
-- 时间一律 `formatDualTz(value, panelTz)`，不做「N 分钟前」（仓库没有共享的相对时间 helper）。
+- 页头的时间一律 `formatDualTz(value, panelTz)`，不做「N 分钟前」。原因是页头要给出确切时刻，并不是缺 helper：#262 之后仓库已有 `utils/relativeTime.ts:14` 的 `formatRelativeTimeShort`（风控中心的短格式）。页内列表若要写相对时间，就用它，并在悬停时显示 `formatMsDualTz`。
 - 「立即刷新」只对 PSP 显示（WP-D3 第 5 条）。
 - ⋮ 用 `ServerActionsMenu`，`onAction`：
   - `delete`：本地执行——确认框 → `deleteServer` → WP-D3 第 6 条的 `removeQueries` → `navigate('/admin/servers')` → toast；
@@ -399,6 +403,13 @@ interface Props {
 - `resource_scope === 'mixed'` 时显示 `nodeMetrics.scopeNote` 这条 Alert（key 已存在）。
 - 次要信息一行：部署方式（`deploymentValue.*` 翻译）/ 资源范围 / cgroup 版本 / 采集时间（`formatDualTz`）。
 - 当前活动告警：findings → Alert（沿用）。
+- **最后一个区块是「访问控制」**，规格见 [node-audit-plan.md](node-audit-plan.md) §7 S15：
+  - 只对 `kind = psp` 显示，渲染共享组件 `<NodePolicyStatusRow variant="block">`（`components/NodePolicyStatusRow.tsx`）。这个组件在 node-audit 阶段 1c 先随「节点覆盖」抽屉上线，本包**只挂载、不另写**。
+  - `GET /api/admin/dest/status` 读取失败或返回 503（未接线）时，整个区块不渲染，不影响其余区块。**不要写「404 = 访问控制尚未上线」这一支**：SPA 与 API 由同一个二进制发布，区块由后合并的一方挂上（见下），挂上时接口一定已经存在；而未注册的 `/api/...` 路径会落到 `NoRoute` → SPA，返回 200 加 index.html，根本不是 404（node-audit-plan F55）。
+  - 本包与 node-audit 没有先后依赖，由**后合并的那一方**负责把区块挂上：
+    - WP-D4 先合：本包不挂这个区块，由 node-audit 阶段 1c（或之后最先改到 `OverviewTab.tsx` 的那个阶段）的 PR 挂上；
+    - 1c 先合：组件已经存在，本包的 PR5 直接挂上。
+  - 测试 `serverDetail/OverviewTab.test.tsx` 加两例：`/dest/status` 读取失败时不出现「访问控制」区块，其余区块照常；有数据时区块出现。
 
 #### 4.4 性能 tab（规格 §12.2.2，限 API 现有字段）
 
