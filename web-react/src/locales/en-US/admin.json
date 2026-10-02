@@ -3239,7 +3239,7 @@
       "download_json": "Download all data (JSON)",
       "export_note": "Includes deployment size such as user and panel counts; no hostnames, user names or secrets.",
       "reset": "Clear statistics…",
-      "reset_disabled_blackout": "Less than one poll has run since the statistics started; nothing to clear yet",
+      "reset_disabled_blackout": "The window is shorter than one poll interval; nothing to clear yet",
       "reset_disabled_empty": "The statistics have only just started; nothing to clear"
     },
     "links": {
@@ -3261,7 +3261,7 @@
       "ok_notices": "No problems found · notices: {{count}}",
       "measuring": "Measuring: the window is still too short; a verdict in about {{remaining}}",
       "measuring_unknown": "Measuring: the traffic poll interval is unknown, so no verdict yet",
-      "blackout": "Just started: the first traffic poll has not finished yet (one every {{interval}})"
+      "blackout": "Just started: the window is shorter than one poll interval ({{interval}}), so no verdict yet"
     },
     "state": {
       "failing": "Needs action",
@@ -3400,7 +3400,7 @@
         "notices": "There are notices; see the top of the page.",
         "measuring": "The window is still short; a verdict in about {{remaining}}.",
         "measuring_unknown": "The traffic poll interval is unknown, so no verdict yet.",
-        "blackout": "The first poll has not finished; numbers are held back.",
+        "blackout": "The window is shorter than one poll interval; numbers are held back.",
         "inhibited": "Traffic polling is not running, so this part can't be judged.",
         "depends": "Depends on traffic polling: {{state}}",
         "details": "Detailed data ({{count}})",
@@ -3565,7 +3565,7 @@
       "view_current": "Current",
       "view_previous": "Before clearing ({{window}})",
       "previous_note": "Viewing the data from before clearing (up to {{time}}), read-only.",
-      "blackout_note": "Less than one poll has run since the statistics started; numbers are for reference only, and a zero does not mean healthy.",
+      "blackout_note": "The window is shorter than one poll interval; numbers are for reference only, and a zero does not mean healthy.",
       "absence_note": "Metrics without labels always appear, so a missing one means an older server. Labelled metrics appear only once something has happened, so a missing one means zero.",
       "group_count": "{{series}} series, {{nonzero}} non-zero",
       "group_other": "Other metrics",

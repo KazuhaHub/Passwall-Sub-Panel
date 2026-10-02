@@ -284,7 +284,7 @@ describe('the blackout', () => {
     await loaded()
     expect(statusLine().getAttribute('data-tone')).toBe('attention')
     expect(screen.getByTestId('finding-push_errors')).toBeTruthy()
-    expect(within(card('poll')).getByText('第一轮采集尚未完成，暂不显示数字。')).toBeTruthy()
+    expect(within(card('poll')).getByText('统计时长还不到一个采集间隔，暂不显示数字。')).toBeTruthy()
     expect(within(card('poll')).queryByText('已运行')).toBeNull()
     expect(within(card('floor')).queryByText('已刷新')).toBeNull()
   })
@@ -294,17 +294,32 @@ describe('the blackout', () => {
     mount()
     await loaded()
     const raw = openRaw()
-    expect(within(raw).getByText('统计开始还不到一轮采集，数字仅供参考，0 不代表正常。')).toBeTruthy()
+    expect(within(raw).getByText('统计时长还不到一个采集间隔，数字仅供参考，0 不代表正常。')).toBeTruthy()
   })
 
-  it('will not clear a window that has not finished one poll, and says why', async () => {
+  it('will not clear a window shorter than one poll interval, and says why', async () => {
     serve(young())
     mount()
     await loaded()
     const menu = openMenu()
     const item = within(menu).getByRole('menuitem', { name: /清零统计…/ })
     expect(item.getAttribute('aria-disabled')).toBe('true')
-    expect(within(menu).getByText('统计开始还不到一轮采集，暂时无需清零')).toBeTruthy()
+    expect(within(menu).getByText('统计时长还不到一个采集间隔，暂时无需清零')).toBeTruthy()
+  })
+
+  // The blackout is a matter of time alone: a scheduled tick right after a
+  // clear, or a "poll now", can finish a poll inside it. The copy may not
+  // claim that no poll has finished while the raw area shows one has.
+  it('words the blackout as a window shorter than one interval, even after a poll has run', async () => {
+    serve({ ...productionSnapshot({
+      window_ms: 30_000,
+      counters: [c('psp_poll_total', 1), c('psp_lifecycle_sync_total', 4)],
+    }), uptime_ms: 30_000 })
+    mount()
+    await loaded()
+    expect(statusLine().getAttribute('data-tone')).toBe('blackout')
+    expect(within(statusLine()).getByText('刚开始统计：统计时长还不到一个采集间隔（2 分钟），暂不下结论')).toBeTruthy()
+    expect(screen.queryByText(/尚未完成/)).toBeNull()
   })
 })
 

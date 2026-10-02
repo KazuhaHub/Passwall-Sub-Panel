@@ -3237,7 +3237,7 @@
       "download_json": "下载全部数据（JSON）",
       "export_note": "包含用户数、面板数等部署规模信息，不含主机名、用户名或密钥。",
       "reset": "清零统计…",
-      "reset_disabled_blackout": "统计开始还不到一轮采集，暂时无需清零",
+      "reset_disabled_blackout": "统计时长还不到一个采集间隔，暂时无需清零",
       "reset_disabled_empty": "统计刚刚开始，没有可清零的数据"
     },
     "links": {
@@ -3259,7 +3259,7 @@
       "ok_notices": "未发现问题 · 另有提示 {{count}} 条",
       "measuring": "测量中：统计时间还不够长，约 {{remaining}} 后给出结论",
       "measuring_unknown": "测量中：无法确定流量采集间隔，暂不下结论",
-      "blackout": "刚开始统计：第一轮流量采集尚未完成（每 {{interval}} 一轮）"
+      "blackout": "刚开始统计：统计时长还不到一个采集间隔（{{interval}}），暂不下结论"
     },
     "state": {
       "failing": "需要处理",
@@ -3398,7 +3398,7 @@
         "notices": "另有提示，见页面上方。",
         "measuring": "统计时间还短，约 {{remaining}} 后给出结论。",
         "measuring_unknown": "无法确定流量采集间隔，暂不下结论。",
-        "blackout": "第一轮采集尚未完成，暂不显示数字。",
+        "blackout": "统计时长还不到一个采集间隔，暂不显示数字。",
         "inhibited": "流量采集没有运行，这部分无法判断。",
         "depends": "依赖流量采集：{{state}}",
         "details": "详细数据（{{count}} 项）",
@@ -3563,7 +3563,7 @@
       "view_current": "当前",
       "view_previous": "清零前（{{window}}）",
       "previous_note": "正在查看清零前的数据（截至 {{time}}），只读。",
-      "blackout_note": "统计开始还不到一轮采集，数字仅供参考，0 不代表正常。",
+      "blackout_note": "统计时长还不到一个采集间隔，数字仅供参考，0 不代表正常。",
       "absence_note": "不带标签的指标总会出现，缺失表示服务端版本较早；带标签的指标只在第一次发生后才出现，缺失即为 0。",
       "group_count": "{{series}} 条，非零 {{nonzero}} 条",
       "group_other": "其他指标",

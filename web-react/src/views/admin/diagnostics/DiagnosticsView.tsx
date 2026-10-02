@@ -197,8 +197,10 @@ function DiagnosticsPage() {
     }
   }
 
-  // Clearing an empty window does nothing; clearing one that has not seen a
-  // poll throws away the measurement the operator is waiting for.
+  // Clearing an empty window does nothing; clearing one shorter than an
+  // interval throws away the measurement the operator is waiting for. Judged
+  // on time alone, like the blackout itself: a poll may already have finished
+  // inside it, so the reason given never claims one has not.
   const resetDisabledReason = m.window_ms < 1000
     ? t('admin:diagnostics.actions.reset_disabled_empty')
     : mode === 'blackout' ? t('admin:diagnostics.actions.reset_disabled_blackout') : undefined
