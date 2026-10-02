@@ -9,8 +9,10 @@ import type { DiagFormat } from './useDiagFormat'
 /**
  * The page's "⋮": copy or download everything it read, and clear the
  * statistics. The clear sits below a divider because it is the one action
- * here that changes anything, and for every other page that reads these
- * counters too (the risk center, native nodes).
+ * here that changes anything: it restarts the window for every admin who
+ * opens this page. Nothing else reads these counters (only the diagnostics
+ * handler calls metrics.Take); the risk center and the node pages read the
+ * database, which a clear does not touch.
  */
 export default function ExportMenu({ fmt, onCopy, onDownload, onReset, resetting, resetDisabledReason }: {
   fmt: DiagFormat

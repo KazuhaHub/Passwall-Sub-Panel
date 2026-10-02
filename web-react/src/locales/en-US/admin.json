@@ -3611,7 +3611,7 @@
     },
     "reset": {
       "title": "Clear the statistics and start again?",
-      "message": "All {{window}} of statistics will be cleared, including the counts the Risk Center and native nodes use. Afterwards this page keeps the data from before clearing for download until you leave it.",
+      "message": "All {{window}} of statistics will be cleared, including the risk and native-node counts shown on this page; the Risk Center's own data is not affected. Afterwards this page keeps the data from before clearing for download until you leave it.",
       "confirm": "Clear",
       "done": "Cleared. New statistics start at {{time}}.",
       "kept": "Cleared. The {{window}} of statistics from before can be downloaded until you leave this page.",

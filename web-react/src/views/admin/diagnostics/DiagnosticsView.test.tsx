@@ -256,6 +256,9 @@ describe('clearing the statistics', () => {
     fireEvent.click(within(openMenu()).getByRole('menuitem', { name: '清零统计…' }))
     await waitFor(() => expect(api.post).toHaveBeenCalledWith('/admin/diagnostics/metrics/reset'))
     expect(confirmMock).toHaveBeenCalledWith(expect.objectContaining({ destructive: true, confirmText: '清零' }))
+    // The scope it states is the registry's alone: nothing outside this page
+    // reads it, so the Risk Center's own data is untouched.
+    expect(confirmMock).toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining('风控中心本身的数据不受影响') }))
 
     const kept = await screen.findByTestId('reset-kept')
     expect(kept.textContent).toMatch(/已清零。清零前 2 天 11 小时 的统计可以下载保存/)
