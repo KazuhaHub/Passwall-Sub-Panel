@@ -3374,7 +3374,7 @@
         "title": "Some users have limits their panel cannot apply (IP limit {{ip}} times, device limit {{device}} times)",
         "impact": "These limits are written to the panel but have no effect: S-UI and PSP native nodes support neither the IP limit nor the device limit, and 3X-UI below 3.7.0 cannot store the device limit. Every check counts again while this lasts; it is a standing condition, not a fault.",
         "note": "Also, the device limit is not enforced on any panel today; 3X-UI 3.7.0 and later only store the value. A zero here does not mean device limits are in effect.",
-        "action": "See on Servers which limits each panel supports; move these users to a panel that does, or upgrade the panel.",
+        "action": "On Servers, check each panel's type and version against the explanation above to see which cannot apply these limits; the limit fields in the user editor also name those panels. Move these users to a panel that can, or upgrade the panel.",
         "log": "panel cannot enforce a setting PSP is pushing"
       }
     },
