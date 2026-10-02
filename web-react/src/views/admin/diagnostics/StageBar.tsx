@@ -1,7 +1,25 @@
 import { Box, Typography, useTheme } from '@mui/material'
 import type { StageGroupTime } from '@/utils/diagnostics'
 import type { StageGroup } from '@/utils/diagnosticsCatalog'
+import type { M3Tokens } from '@/theme/tokensFromSource'
 import type { DiagFormat } from './useDiagFormat'
+
+/**
+ * One colour per stage group, none of them a state colour: red means "needs
+ * action" on this page, and the bar only says where the time of a poll that
+ * may be perfectly healthy went. The location stage takes the tertiary
+ * container, the compute stage's family at the opposite tone in both modes
+ * (40 against 90 in light, 80 against 30 in dark), so the two stay apart.
+ */
+export function stageGroupColors(md: M3Tokens): Record<StageGroup, string> {
+  return {
+    db: md.secondary,
+    panels: md.primary,
+    compute: md.tertiary,
+    write: md.outline,
+    geo: md.tertiaryContainer,
+  }
+}
 
 /**
  * Where an average poll's time goes: one bar, a segment per group in poll
@@ -10,13 +28,7 @@ import type { DiagFormat } from './useDiagFormat'
  */
 export default function StageBar({ groups, fmt }: { groups: StageGroupTime[]; fmt: DiagFormat }) {
   const md = useTheme().palette.md
-  const color: Record<StageGroup, string> = {
-    db: md.secondary,
-    panels: md.primary,
-    compute: md.tertiary,
-    write: md.outline,
-    geo: md.error,
-  }
+  const color = stageGroupColors(md)
   const shown = groups.filter(g => g.avgMs > 0)
   if (shown.length === 0) return null
   const { t } = fmt

@@ -45,6 +45,7 @@ dict.current = {
 }
 
 import DiagnosticsView from './DiagnosticsView'
+import { stageGroupColors } from './StageBar'
 
 const theme = createAppTheme({ mode: 'light', sourceColor: '#6750a4', language: 'zh-CN' })
 
@@ -197,6 +198,21 @@ describe('the production reading', () => {
     expect(failing.getAttribute('data-state')).toBe('failing')
     expect(failing.textContent).toBe('需要处理')
   })
+})
+
+// Red means "needs action" on this page. The stage bar is a breakdown of
+// time on a poll that may be perfectly healthy, so none of its segments may
+// borrow a state colour, and each must be told apart from the others.
+describe('the poll stage bar', () => {
+  for (const mode of ['light', 'dark'] as const) {
+    it(`uses no state colour and five distinct colours in ${mode} mode`, () => {
+      const md = createAppTheme({ mode, sourceColor: '#6750a4', language: 'zh-CN' }).palette.md
+      const colors = Object.values(stageGroupColors(md))
+      expect(colors).not.toContain(md.error)
+      expect(colors).not.toContain(md.errorContainer)
+      expect(new Set(colors).size).toBe(colors.length)
+    })
+  }
 })
 
 describe('the native node card', () => {
