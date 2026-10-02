@@ -3167,8 +3167,26 @@ func (s *Service) runUserTask(ctx context.Context, task *domain.SyncTask) error 
 // unprovisioned (or on a stale lifecycle) until the next heal sweep. So every
 // resync error is a retry; a user deleted mid-resync costs one retry, which
 // this check then completes.
+//
+// The same goes for the GROUP row. A user in no group (GroupID 0, which SSO
+// auto-create leaves when no default group or rule applies) or whose group row
+// is gone has nothing to converge to, and ResyncMembership fails its group
+// lookup with ErrNotFound on every attempt. Credential resets enqueue a
+// user_resync for exactly such users, so without this check each of those
+// tasks would retry ~100x, end cancelled with "not found", and keep
+// X-Sync-Pending on the user meanwhile. Decided here rather than inside
+// ResyncMembership so the request-path callers keep their current contract.
 func (s *Service) runUserResyncTask(ctx context.Context, userID int64) error {
-	if _, err := s.users.GetByID(ctx, userID); errors.Is(err, domain.ErrNotFound) {
+	u, err := s.users.GetByID(ctx, userID)
+	if errors.Is(err, domain.ErrNotFound) {
+		return nil
+	} else if err != nil {
+		return err
+	}
+	if u.GroupID == 0 {
+		return nil
+	}
+	if _, err := s.groups.GetByID(ctx, u.GroupID); errors.Is(err, domain.ErrNotFound) {
 		return nil
 	} else if err != nil {
 		return err

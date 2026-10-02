@@ -132,6 +132,55 @@ func TestProcessDueTasks_DeletedUserResyncCompletes(t *testing.T) {
 	}
 }
 
+// A user in NO group (GroupID 0 — what SSO auto-create leaves when no default
+// group or group rule applies) has no node set to converge to, and
+// ResyncMembership answers its group lookup with domain.ErrNotFound, exactly as
+// the sqlstore repo does for id 0. Credential resets enqueue a user_resync for
+// such a user whenever the shared model is wired, and before the task runner
+// stopped reading ErrNotFound as "done" those tasks completed. They must keep
+// completing: a retry can never succeed, so it would only burn ~100 attempts,
+// end cancelled with "not found", and hold X-Sync-Pending on the user for the
+// whole stretch. The same holds for a group row that vanished under the user.
+func TestProcessDueTasks_GrouplessUserResyncCompletes(t *testing.T) {
+	cases := []struct {
+		name    string
+		groupID int64
+	}{
+		{"no group", 0},
+		{"group since deleted", 5},
+	}
+	for _, typ := range []domain.SyncTaskType{domain.SyncTaskUserResync, domain.SyncTaskUserMigrate} {
+		for _, tc := range cases {
+			t.Run(fmt.Sprintf("%s/%s", typ, tc.name), func(t *testing.T) {
+				tasks := &dueTaskRepo{due: []*domain.SyncTask{{ID: 1, Type: typ, TargetType: "user", TargetID: 7}}}
+				svc := &Service{
+					users:    &memoryUserRepo{byID: map[int64]*domain.User{7: {ID: 7, UPN: "u7@example.com", Enabled: true, GroupID: tc.groupID}}},
+					groups:   newMultiGroupRepo(&domain.Group{ID: 1, Slug: "default"}), // ErrNotFound for 0 and 5
+					selector: bfSelector{nodes: []*domain.Node{{ID: 10, PanelID: 1, DesiredProtocol: "vless"}}},
+					settings: bfSettings{},
+					tasks:    tasks,
+				}
+				mig := &resyncMigrator{}
+				svc.SetSharedMigrator(mig)
+				svc.SetSharedLifecycleSyncer(&failingSharedLife{})
+
+				if err := svc.ProcessDueTasks(context.Background(), 20); err != nil {
+					t.Fatalf("ProcessDueTasks: %v", err)
+				}
+				if len(tasks.succeeded) != 1 || tasks.succeeded[0] != 1 {
+					t.Fatalf("a resync for a user with no group to converge to must complete; succeeded=%v retried=%v", tasks.succeeded, tasks.retried)
+				}
+				if len(tasks.retried) != 0 || len(tasks.canceled) != 0 {
+					t.Fatalf("a resync for a user with no group must not be retried or cancelled; retried=%v canceled=%v", tasks.retried, tasks.canceled)
+				}
+				if len(mig.provisioned) != 0 {
+					t.Fatalf("nothing may be provisioned for a user with no group: %v", mig.provisioned)
+				}
+			})
+		}
+	}
+}
+
 // erroringSharedLife fails every lifecycle push with a fixed error.
 type erroringSharedLife struct{ err error }
 
