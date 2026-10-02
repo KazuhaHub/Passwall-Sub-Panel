@@ -33,8 +33,9 @@ import type { DiagFormat } from './useDiagFormat'
 // THE SEVEN AREAS, IN A FIXED ORDER. Each card says one plain sentence about
 // its state and shows two to four figures with what they are out of. The
 // figures are withheld in the blackout (a zero on screen gets read, however
-// grey) and on a card proven not in use; an inhibited card keeps its figures,
-// uncoloured, because they are still what was recorded.
+// grey), except on the single sign-on card, which no window gates, and on a
+// card proven not in use; an inhibited card keeps its figures, uncoloured,
+// because they are still what was recorded.
 
 const WIDE: ReadonlySet<CardId> = new Set(['poll', 'lifecycle'])
 
@@ -327,9 +328,14 @@ function body(id: CardId, c: Ctx): ReactNode {
   }
 }
 
-/** Whether a card shows its figures at all. */
+/**
+ * Whether a card shows its figures at all. Single sign-on is exempt from the
+ * blackout as it is from every window gate in deriveCards: a refusal is a
+ * record, not a rate, and its "recorded" sentence points at the reasons the
+ * body lists.
+ */
 function showsFigures(card: CardSummary, mode: WindowMode): boolean {
-  if (mode === 'blackout') return false
+  if (mode === 'blackout' && card.id !== 'sso') return false
   return card.state !== 'not_applicable' && card.state !== 'none'
 }
 

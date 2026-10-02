@@ -353,6 +353,22 @@ describe('the blackout', () => {
     expect(within(raw).getByText('统计时长还不到一个采集间隔，数字仅供参考，0 不代表正常。')).toBeTruthy()
   })
 
+  // A refusal is a record, not a rate, so the single sign-on card skips the
+  // window gates; its sentence points at the reasons below, which must be
+  // there in the blackout too.
+  it('still lists the single sign-on refusals its sentence points at', async () => {
+    serve({ ...productionSnapshot({
+      window_ms: 30_000,
+      counters: [c('psp_saml_acs_failure_total{reason=saml_destination}', 2)],
+    }), uptime_ms: 30_000 })
+    mount()
+    await loaded()
+    const sso = card('sso')
+    expect(within(sso).getByText('本区间有 2 次 SAML 登录被拒，原因见下方。')).toBeTruthy()
+    expect(within(sso).getByText('目标地址不符 2')).toBeTruthy()
+    expect(within(card('poll')).queryByText('已运行')).toBeNull()
+  })
+
   it('will not clear a window shorter than one poll interval, and says why', async () => {
     serve(young())
     mount()
