@@ -71,8 +71,8 @@ export interface ResetResult {
   previous: MetricsSnapshot
 }
 
-export async function getDiagnostics(): Promise<DiagnosticsSnapshot> {
-  const { data } = await client.get<DiagnosticsSnapshot>('/admin/diagnostics/metrics')
+export async function getDiagnostics(opts: { signal?: AbortSignal } = {}): Promise<DiagnosticsSnapshot> {
+  const { data } = await client.get<DiagnosticsSnapshot>('/admin/diagnostics/metrics', { signal: opts.signal })
   return data
 }
 

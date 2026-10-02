@@ -273,6 +273,18 @@ export const policies = {
     refetchInterval: false,
     note: 'Advisory notice input; revalidates on tab focus like the queue beside it.',
   },
+  /**
+   * The diagnostics page's registry read. Polled while visible, because the
+   * page reports whether each problem is still growing since it was opened,
+   * and that line is only as fresh as the last read. One read a minute is a
+   * walk over an in-memory registry: no database, no panel.
+   */
+  diagnostics: {
+    staleTime: 30 * SECOND,
+    gcTime: 5 * MINUTE,
+    refetchInterval: 60 * SECOND,
+    note: 'One registry read per minute per visible page; paused while hidden (refetchIntervalInBackground=false). Feeds the per-session growth line.',
+  },
 } as const satisfies Record<string, ResourcePolicy>
 
 export type PolicyName = keyof typeof policies

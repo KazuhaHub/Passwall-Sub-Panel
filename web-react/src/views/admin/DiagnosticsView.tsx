@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useState } from 'react'
 import {
   Alert,
   Box,
@@ -20,13 +20,16 @@ import RefreshIcon from '@mui/icons-material/Refresh'
 import RestartAltIcon from '@mui/icons-material/RestartAlt'
 import { useTranslation } from 'react-i18next'
 
+import { useQueryClient } from '@tanstack/react-query'
 import {
-  getDiagnostics,
   resetDiagnostics,
   type DiagnosticsSnapshot,
   type HistogramSnapshot,
 } from '@/api/diagnostics'
-import { getUISettings } from '@/api/settings'
+import { useDiagnostics } from '@/query/diagnostics'
+import { diagnosticsKeys } from '@/query/keys'
+import { useUISettings } from '@/query/settings'
+import { useQueryScope } from '@/query/useQueryScope'
 import {
   counter,
   counterFamilyTotal,
@@ -66,30 +69,17 @@ function duration(v: number): string {
 
 export default function DiagnosticsView() {
   const { t } = useTranslation(['admin', 'common'])
-  const [snap, setSnap] = useState<DiagnosticsSnapshot | null>(null)
-  const [intervalMs, setIntervalMs] = useState(0)
-  const [loading, setLoading] = useState(true)
+  const scope = useQueryScope()
+  const qc = useQueryClient()
+  const diag = useDiagnostics(scope)
+  // The poll interval is what makes a window long or short, so a reading
+  // without it cannot be judged — windowMode refuses to settle on 0.
+  const settings = useUISettings(scope)
+  const snap = diag.data ?? null
+  const intervalMs = (settings.data?.cron_traffic_pull_minutes ?? 0) * 60_000
+  const loading = diag.isFetching
   const [busy, setBusy] = useState(false)
-
-  const load = useCallback(async () => {
-    setLoading(true)
-    try {
-      // The poll interval is what makes a window long or short, so a reading
-      // without it cannot be judged — windowMode refuses to settle on 0.
-      const [d, s] = await Promise.all([
-        getDiagnostics(),
-        getUISettings().catch(() => null),
-      ])
-      setSnap(d)
-      setIntervalMs((s?.cron_traffic_pull_minutes ?? 0) * 60_000)
-    } catch {
-      /* axios interceptor toasted */
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  useEffect(() => { void load() }, [load])
+  const load = () => diag.refetch()
 
   const onReset = async () => {
     if (!snap) return
@@ -102,7 +92,7 @@ export default function DiagnosticsView() {
     try {
       await resetDiagnostics()
       pushSnack(t('admin:diagnostics.reset.done'), 'success')
-      await load()
+      await qc.invalidateQueries({ queryKey: diagnosticsKeys.metrics(scope) })
     } catch {
       /* toast */
     } finally {
@@ -110,7 +100,7 @@ export default function DiagnosticsView() {
     }
   }
 
-  if (loading && !snap) {
+  if (diag.isPending) {
     return <Box sx={{ p: 3, display: 'flex', justifyContent: 'center' }}><CircularProgress /></Box>
   }
   if (!snap) {
