@@ -3496,7 +3496,7 @@
         "title": "Live IPs and risk data",
         "purpose": "How well the Risk Center's data is being collected: whether live IPs are read in full, whether records are saved, and whether automatic suspensions go through. For the verdicts themselves, see the Risk Center.",
         "ok": "Every poll read live IPs from every panel; about {{judged}} users judged per poll on average.",
-        "idle": "No live IPs were collected in this window; possibly nobody was online.",
+        "idle": "No user was judged for live IPs in this window. Users are judged even when nobody is online, so this usually means no user has a client set up on any panel yet, or polling could not list users' clients: search the server log for \"traffic poll shared-client list failed\"; where it appears, shared clients' traffic went unmetered in those polls too.",
         "kpi": {
           "judged": "Users judged per poll (average)",
           "judged_value": "about {{count}}",
