@@ -145,7 +145,7 @@ function LifecycleBody({ c }: { c: Ctx }) {
       <KpiGrid>
         <KpiTile label={t('admin:diagnostics.cards.lifecycle.kpi.checks')}
           value={t('admin:diagnostics.fmt.times', { count: fmt.count(total) })}
-          caption={perHour === null ? undefined : t('admin:diagnostics.fmt.per_hour', { rate: fmt.rate(perHour) })} />
+          caption={perHour === null ? undefined : t('admin:diagnostics.fmt.per_hour_times', { rate: fmt.rate(perHour) })} />
         <KpiTile label={t('admin:diagnostics.cards.lifecycle.kpi.skipped')}
           value={fmt.pct(val(m, 'psp_lifecycle_sync_skipped_total'), total)}
           caption={t('admin:diagnostics.cards.lifecycle.kpi.skipped_caption')} />

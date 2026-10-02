@@ -126,6 +126,8 @@ function SeriesValue({ s, fmt, windowMs, open, onToggle }: {
 }) {
   const { t } = fmt
   if (s.counter) {
+    // Unit-neutral: a raw counter may count rows, addresses or sources, not
+    // only events, so the rate carries no unit of its own.
     const perHour = s.counter.value > 0 ? ratePerHour(s.counter.value, windowMs) : null
     return (
       <Box>

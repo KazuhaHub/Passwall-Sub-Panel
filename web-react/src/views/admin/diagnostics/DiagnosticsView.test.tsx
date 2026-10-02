@@ -232,6 +232,18 @@ describe('the raw metrics', () => {
     expect(within(raw).getByText('尚未出现任何取值（即全部为 0）')).toBeTruthy()
   })
 
+  // Raw counters count rows, addresses and sources as well as events, so
+  // their hourly rate carries no unit; the status checks KPI counts times.
+  it('writes a raw counter\'s hourly rate without a unit, and the checks rate in times', async () => {
+    serve(productionSnapshot())
+    mount()
+    await loaded()
+    expect(within(card('lifecycle')).getByText('约每小时 15 次')).toBeTruthy()
+    const raw = openRaw()
+    search(raw, 'psp_poll_total')
+    expect(within(raw).getByText('约每小时 30')).toBeTruthy()
+  })
+
   it('shows the server\'s own description as it was sent', async () => {
     serve(productionSnapshot())
     mount()

@@ -1301,7 +1301,7 @@ describe('copy for computed keys', () => {
 
     it(`${lang} has every duration and count format`, () => {
       for (const k of ['duration_s', 'duration_m', 'duration_hm', 'duration_dh', 'no_denominator', 'pct_tiny',
-        'few_samples', 'no_samples', 'p95_over', 'typical', 'p95_within']) has(`fmt.${k}`)
+        'few_samples', 'no_samples', 'p95_over', 'typical', 'p95_within', 'per_hour', 'per_hour_times', 'per_poll']) has(`fmt.${k}`)
     })
   }
 

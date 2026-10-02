@@ -3627,6 +3627,7 @@
       "polls": "{{count}}",
       "occurrences": "{{count}}",
       "per_hour": "about {{rate}} per hour",
+      "per_hour_times": "about {{rate}} per hour",
       "per_poll": "about {{rate}} per poll",
       "typical": "typical {{value}}",
       "p95_within": "95% within {{value}}",
