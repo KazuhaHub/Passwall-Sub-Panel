@@ -1,21 +1,43 @@
 import { describe, expect, it } from 'vitest'
-import type { DiagnosticsSnapshot, MetricsSnapshot } from '@/api/diagnostics'
+import zh from '@/locales/zh-CN/admin.json'
+import en from '@/locales/en-US/admin.json'
+import zhNav from '@/locales/zh-CN/nav.json'
+import enNav from '@/locales/en-US/nav.json'
+import type { DiagnosticsSnapshot, HistogramSnapshot, MetricsSnapshot } from '@/api/diagnostics'
+import { flatten, type Nested } from '@/i18n/options'
 import {
+  FINDING_LOGS,
+  FINDING_PARTS,
   SETTLED_INTERVALS,
+  cardSentenceKey,
+  deriveCards,
   deriveFindings,
   deriveSelfChecks,
   effectivePollIntervalMs,
   expectedPollsMin,
   derivePreconditions,
   FINDING_ORDER,
+  breakdownInterpolation,
+  findingInterpolation,
+  findingParts,
+  formatBytes,
+  formatDuration,
+  formatLatency,
+  formatPct,
+  formatRate,
+  pageVerdict,
   panelFacts,
+  quantileReading,
   quantileUsable,
+  sessionDelta,
   verdict,
   wasReset,
   windowMode,
+  type CardState,
   type Finding,
   type PanelFacts,
 } from './diagnostics'
+import { CARD_ORDER, CARD_LINK, LINK_TARGET, type CardId } from './diagnosticsCatalog'
 
 const INTERVAL = 5 * 60_000
 
@@ -321,8 +343,8 @@ describe('lifecycle_errors breakdown', () => {
       ],
     }), INTERVAL).find(x => x.id === 'lifecycle_errors')
     expect(f?.breakdown).toEqual({
-      stage: [{ value: 'confirm_read', count: 4 }, { value: 'update', count: 1 }],
-      kind: [{ value: 'psp', count: 4 }, { value: '3xui', count: 1 }],
+      stages: [{ value: 'confirm_read', count: 4 }, { value: 'update', count: 1 }],
+      kinds: [{ value: 'psp', count: 4 }, { value: '3xui', count: 1 }],
     })
   })
 
@@ -682,7 +704,515 @@ describe('finding coverage', () => {
     expect(ids).toEqual([...FINDING_ORDER].sort())
   })
 
-  it.todo('has a title, impact and action for every finding in both bundles')
+  // Findings are looked up by a key COMPUTED at runtime, so one added without
+  // copy renders as a raw key path instead of failing to compile — and this
+  // repo has already shipped an en-US key that silently fell back to Chinese.
+  for (const [lang, bundle] of BUNDLES) {
+    it(`${lang} has a title, impact and action, and every extra part, for every finding`, () => {
+      for (const id of FINDING_ORDER) {
+        for (const part of ['title', 'impact', 'action', ...FINDING_PARTS[id], ...FINDING_LOGS[id]]) {
+          expect(bundle.has(`diagnostics.findings.${id}.${part}`), `${lang} findings.${id}.${part}`).toBe(true)
+        }
+      }
+    })
+  }
+})
+
+// --- copy lookup ---------------------------------------------------------
+
+const BUNDLES: Array<[string, Set<string>]> = [
+  ['zh-CN', new Set(Object.keys(flatten(zh as Nested)))],
+  ['en-US', new Set(Object.keys(flatten(en as Nested)))],
+]
+
+/** A t() over one real bundle, enough to run the formatters on real copy. */
+function tFor(bundle: unknown): (key: string, opts?: Record<string, unknown>) => string {
+  const flat = flatten(bundle as Nested)
+  return (key, opts = {}) => {
+    const k = key.replace(/^admin:/, '')
+    const raw = flat[k]
+    if (typeof raw !== 'string') throw new Error(`missing ${key}`)
+    return raw.replace(/\{\{(\w+)\}\}/g, (_, name: string) => String(opts[name]))
+  }
+}
+const tZh = tFor(zh)
+const tEn = tFor(en)
+
+// --- cards ---------------------------------------------------------------
+
+const cardStates = (s: DiagnosticsSnapshot, interval = INTERVAL, facts?: PanelFacts) =>
+  Object.fromEntries(deriveCards(s, interval, deriveFindings(s, interval, facts), facts).map(x => [x.id, x.state]))
+
+describe('deriveCards', () => {
+  it('returns the seven cards in page order', () => {
+    expect(deriveCards(snap(healthy()), INTERVAL, []).map(x => x.id)).toEqual([...CARD_ORDER])
+  })
+
+  // "Running" says the driver moved, nothing more; a card with nothing to do
+  // on a settled window is idle, which needs its own sentence.
+  it('reads each card from its own driver on a settled window', () => {
+    const s = snap({
+      ...healthy(),
+      counters: [...healthy().counters, c('psp_panel_op_total{op=GetClient}', 5)],
+    })
+    expect(cardStates(s)).toEqual({
+      poll: 'ok', lifecycle: 'ok', floor: 'ok', panel_api: 'ok', liveip: 'idle', node: 'idle', sso: 'none',
+    })
+  })
+
+  it('colours a card by its worst finding, and a notice not at all', () => {
+    const s = snap({
+      ...healthy(),
+      counters: [
+        ...healthy().counters,
+        c('psp_lifecycle_sync_error_total', 1),
+        c('psp_push_client_config_error_total', 1),
+        c('psp_capability_gap_total{capability=client.iplimit}', 1),
+      ],
+    })
+    const cards = deriveCards(s, INTERVAL, deriveFindings(s, INTERVAL))
+    expect(cards.find(x => x.id === 'lifecycle')).toMatchObject({ state: 'failing', notices: true })
+    expect(cards.find(x => x.id === 'floor')).toMatchObject({ state: 'attention', notices: false })
+  })
+
+  it('leaves a card with only a notice in its activity state', () => {
+    const s = snap({
+      ...healthy(),
+      counters: [...healthy().counters, c('psp_capability_gap_total{capability=client.iplimit}', 1)],
+    })
+    const card = deriveCards(s, INTERVAL, deriveFindings(s, INTERVAL)).find(x => x.id === 'lifecycle')
+    expect(card).toMatchObject({ state: 'ok', notices: true })
+  })
+
+  // Nothing downstream of a dead poll can be judged, so those cards say so
+  // rather than "idle" — but only while they have no fact of their own, and the
+  // status sync, which admin actions and repairs also drive, is not affected.
+  it.each([
+    ['a dead poll', { counters: [c('psp_lifecycle_sync_total', 0)], gauges: [g('psp_push_sem_capacity', 8)] }],
+    ['a zero capacity', { ...healthy(), gauges: [g('psp_push_sem_capacity', 0)] }],
+  ])('marks the refresh and live-IP cards undecidable after %s', (_label, m) => {
+    const states = cardStates(snap({ window_ms: INTERVAL * 10, ...m }))
+    expect(states.floor).toBe('inhibited')
+    expect(states.liveip).toBe('inhibited')
+    expect(states.lifecycle).not.toBe('inhibited')
+  })
+
+  it('still shows an observed failure on an inhibited card', () => {
+    const s = snap({
+      window_ms: INTERVAL * 10,
+      counters: [c('psp_live_ip_users_incomplete_total', 3)],
+      gauges: [g('psp_push_sem_capacity', 8)],
+    })
+    expect(cardStates(s).liveip).toBe('attention')
+    expect(cardStates(s).floor).toBe('inhibited')
+  })
+
+  // Not in use is proven from the server list, never inferred from a zero.
+  it('says a card is not in use only from a complete list with no such panel and no activity', () => {
+    const quiet = snap(healthy())
+    const onlySui = panelFacts([{ panel_type: 'sui' }], 1)
+    expect(cardStates(quiet, INTERVAL, onlySui)).toMatchObject({ panel_api: 'not_applicable', node: 'not_applicable' })
+    expect(cardStates(quiet, INTERVAL, panelFacts([{ panel_type: 'sui' }], 2)))
+      .toMatchObject({ panel_api: 'idle', node: 'idle' })
+    expect(cardStates(quiet)).toMatchObject({ panel_api: 'idle', node: 'idle' })
+  })
+
+  it('never calls an active card not in use, whatever the list says', () => {
+    const busy = snap({
+      ...healthy(),
+      counters: [
+        ...healthy().counters,
+        c('psp_panel_op_total{op=ListInboundsSlim}', 3),
+        c('psp_node_host_report_total{outcome=accepted}', 2),
+      ],
+    })
+    expect(cardStates(busy, INTERVAL, panelFacts([{ panel_type: 'sui' }], 1)))
+      .toMatchObject({ panel_api: 'ok', node: 'ok' })
+  })
+
+  // An always-registered histogram with no samples is not activity.
+  it('reads an empty node histogram as no activity', () => {
+    const s = snap({ ...healthy(), histograms: [...healthy().histograms, h('psp_node_host_persist_ms', 0)] })
+    expect(cardStates(s, INTERVAL, panelFacts([{ panel_type: '3xui' }], 1)).node).toBe('not_applicable')
+  })
+
+  it('withholds every verdict in the blackout', () => {
+    const s = snap({ ...healthy(), window_ms: INTERVAL - 1 })
+    const states = cardStates(s)
+    for (const id of ['poll', 'lifecycle', 'floor', 'panel_api', 'liveip', 'node'] as CardId[]) {
+      expect(states[id], id).toBe('measuring')
+    }
+  })
+
+  it('calls a card running while measuring once its driver moved, and measuring otherwise', () => {
+    const s = snap({ ...healthy(), window_ms: INTERVAL * 2 })
+    expect(cardStates(s)).toMatchObject({ poll: 'ok', floor: 'ok', liveip: 'measuring', node: 'measuring' })
+  })
+
+  it('reads the single sign-on card as none, recorded or attention', () => {
+    expect(cardStates(snap(healthy())).sso).toBe('none')
+    // A reset zeroes a child but never removes it: that is still nothing.
+    expect(cardStates(snap({
+      ...healthy(), counters: [...healthy().counters, c('psp_saml_acs_failure_total{reason=saml_destination}', 0)],
+    })).sso).toBe('none')
+    expect(cardStates(snap({
+      ...healthy(), counters: [...healthy().counters, c('psp_saml_acs_failure_total{reason=saml_destination}', 2)],
+    })).sso).toBe('recorded')
+    expect(cardStates(snap({
+      ...healthy(), counters: [...healthy().counters, c('psp_sso_claim_silent_total{kind=role}', 1)],
+    })).sso).toBe('attention')
+  })
+})
+
+// --- page verdict ----------------------------------------------------------
+
+describe('pageVerdict', () => {
+  const verdictOf = (s: DiagnosticsSnapshot, interval = INTERVAL) => {
+    const f = deriveFindings(s, interval)
+    return pageVerdict(f, deriveCards(s, interval, f), s.metrics.window_ms, interval)
+  }
+
+  // Amber stays amber: a page with only warnings must not turn red.
+  it('is attention, never red, when the worst finding is a warning', () => {
+    const v = verdictOf(snap({ ...healthy(), counters: [...healthy().counters, c('psp_push_sem_carryover_total', 1)] }))
+    expect(v).toMatchObject({ tone: 'attention', key: 'attention', cards: ['floor'] })
+  })
+
+  it('is action and lists the failing cards when an error is present', () => {
+    const v = verdictOf(snap({
+      ...healthy(),
+      counters: [...healthy().counters, c('psp_lifecycle_sync_error_total', 1), c('psp_push_sem_carryover_total', 1)],
+    }))
+    expect(v).toMatchObject({ tone: 'action', key: 'action', cards: ['lifecycle'] })
+  })
+
+  it('is critical and lists the cards holding a critical finding', () => {
+    const v = verdictOf(snap({ ...healthy(), gauges: [g('psp_push_sem_capacity', 0)] }))
+    expect(v).toMatchObject({ tone: 'critical', key: 'critical', cards: ['poll'] })
+  })
+
+  it('says "no problems found" with the number of notices when only notices exist', () => {
+    const v = verdictOf(snap({
+      ...healthy(), counters: [...healthy().counters, c('psp_capability_gap_total{capability=client.iplimit}', 1)],
+    }))
+    expect(v).toMatchObject({ tone: 'ok', key: 'ok_notices', notices: 1 })
+  })
+
+  it('is ok only on a settled window', () => {
+    expect(verdictOf(snap(healthy()))).toMatchObject({ tone: 'ok', key: 'ok' })
+    expect(verdictOf(snap({ ...healthy(), window_ms: INTERVAL * 2 }))).toMatchObject({
+      tone: 'measuring', key: 'measuring', remainingMs: INTERVAL,
+    })
+    expect(verdictOf(snap({ ...healthy(), window_ms: 1_000 }))).toMatchObject({ tone: 'blackout', key: 'blackout' })
+  })
+
+  it('does not promise a time when the interval is unknown', () => {
+    expect(verdictOf(snap(healthy()), 0)).toMatchObject({ tone: 'measuring', key: 'measuring_unknown' })
+  })
+
+  // A warning that already happened outranks a short window.
+  it('lets findings outrank the window', () => {
+    const v = verdictOf(snap({
+      ...healthy(), window_ms: 1_000, counters: [...healthy().counters, c('psp_push_client_config_error_total', 1)],
+    }))
+    expect(v.tone).toBe('attention')
+  })
+})
+
+// --- session delta -----------------------------------------------------------
+
+describe('sessionDelta', () => {
+  const at = (windowMs: number, value: number, since = 0) =>
+    metrics({ since_unix_ms: since, window_ms: windowMs, counters: [c('psp_lifecycle_sync_error_total', value)] })
+  const series = ['psp_lifecycle_sync_error_total']
+
+  it('waits for a second reading', () => {
+    expect(sessionDelta(undefined, at(1_000, 3), series)).toEqual({ kind: 'wait' })
+    expect(sessionDelta(at(1_000, 3), at(1_000, 3), series)).toEqual({ kind: 'wait' })
+  })
+
+  it('reports growth since the page was opened', () => {
+    expect(sessionDelta(at(60_000, 3), at(12 * 60_000 + 60_000, 5), series)).toEqual({ kind: 'grew', count: 2, minutes: 12 })
+  })
+
+  it('reports no growth once a refresh has happened', () => {
+    expect(sessionDelta(at(60_000, 3), at(121_000, 3), series)).toEqual({ kind: 'flat', minutes: 1 })
+  })
+
+  // A restart or someone else's reset opens a new window; the old baseline
+  // means nothing in it.
+  it('rebuilds when the window was reopened', () => {
+    expect(sessionDelta(at(60_000, 3, 0), at(30_000, 0, 999), series)).toEqual({ kind: 'rebuild' })
+  })
+
+  it('never shows a negative growth', () => {
+    expect(sessionDelta(at(60_000, 5), at(120_000, 2), series)).toEqual({ kind: 'rebuild' })
+  })
+
+  it('sums a whole labelled family', () => {
+    const base = metrics({ window_ms: 60_000, counters: [c('psp_node_sync_refused_total{reason=report_invalid}', 1)] })
+    const cur = metrics({
+      window_ms: 180_000,
+      counters: [
+        c('psp_node_sync_refused_total{reason=report_invalid}', 2),
+        c('psp_node_sync_refused_total{reason=protocol_generation}', 4),
+      ],
+    })
+    expect(sessionDelta(base, cur, ['psp_node_sync_refused_total'])).toEqual({ kind: 'grew', count: 5, minutes: 2 })
+  })
+})
+
+// --- formatting --------------------------------------------------------------
+
+describe('formatPct', () => {
+  it.each([
+    [17, 0, 'no_denominator'],
+    [0, 40, '0%'],
+    [10, 100, '10%'],
+    [123, 1000, '12%'],
+    [1, 100, '1.0%'],
+    [17, 1000, '1.7%'],
+    [1, 10_000, '0.01%'],
+    [17, 2312, '0.74%'],
+    [1, 1_000_000, '<0.01%'],
+  ])('%i of %i reads %s', (n, d, want) => {
+    const t = (k: string) => k.endsWith('no_denominator') ? 'no_denominator' : tEn(k)
+    expect(formatPct(n, d, t)).toBe(want)
+  })
+
+  // Rounding must not push a value into the next band's format.
+  it('does not print "10.0%" or "1.00%" at the band edges', () => {
+    expect(formatPct(9.97, 100, tEn)).toBe('10%')
+    expect(formatPct(0.998, 100, tEn)).toBe('1.0%')
+  })
+
+  it('uses the localised denominator wording', () => {
+    expect(formatPct(3, 0, tZh)).toBe(zh.diagnostics.fmt.no_denominator)
+  })
+})
+
+describe('formatLatency', () => {
+  it.each([
+    [0.4, '0 ms'],
+    [999, '999 ms'],
+    [999.6, '1.00 s'],
+    [1000, '1.00 s'],
+    [3260, '3.26 s'],
+    [9999, '10.0 s'],
+    [10_000, '10.0 s'],
+    [29_870, '29.9 s'],
+  ])('%f ms reads %s', (ms, want) => {
+    expect(formatLatency(ms)).toBe(want)
+  })
+})
+
+describe('formatDuration', () => {
+  it.each([
+    [42_000, '42 秒', '42 s'],
+    [125_000, '2 分钟', '2 min'],
+    [59 * 60_000 + 40_000, '1 小时 0 分', '1 h 0 min'],
+    [3 * 3600_000 + 7 * 60_000, '3 小时 7 分', '3 h 7 min'],
+    [59 * 3600_000, '2 天 11 小时', '2 d 11 h'],
+  ])('%i ms', (ms, zhWant, enWant) => {
+    expect(formatDuration(ms, tZh)).toBe(zhWant)
+    expect(formatDuration(ms, tEn)).toBe(enWant)
+  })
+})
+
+describe('formatBytes', () => {
+  it.each([
+    [512, '512 B'],
+    [1536, '1.50 KiB'],
+    [50 * 1024 * 1024, '50.0 MiB'],
+    [5 * 1024 ** 3, '5.00 GiB'],
+    [300 * 1024 ** 4, '300 TiB'],
+  ])('%i bytes reads %s', (n, want) => {
+    expect(formatBytes(n)).toBe(want)
+  })
+})
+
+describe('formatRate', () => {
+  it.each([
+    [0, '0'], [0.04, '0.04'], [1.94, '1.9'], [12.4, '12'], [1234.5, '1,235'],
+  ])('%f reads %s', (r, want) => {
+    expect(formatRate(r, 'en-US')).toBe(want)
+  })
+})
+
+describe('quantileReading', () => {
+  const hist = (over: Partial<HistogramSnapshot>): HistogramSnapshot => ({
+    ...h('psp_poll_ms', 0),
+    buckets: [{ le: 5000, count: 0 }, { le: 10000, count: 0 }, { le: 0, inf: true, count: 0 }],
+    ...over,
+  })
+
+  it('has nothing to say without samples', () => {
+    expect(quantileReading(hist({ count: 0 }))).toEqual({ kind: 'none' })
+    expect(quantileReading(undefined)).toEqual({ kind: 'none' })
+  })
+
+  it('reports only the longest under ten samples', () => {
+    expect(quantileReading(hist({ count: 9, max: 812 }))).toEqual({ kind: 'few', count: 9, max: 812 })
+  })
+
+  it('reports the typical and 95% figures with enough samples', () => {
+    expect(quantileReading(hist({ count: 40, p50: 835, p95: 3260 }))).toEqual({
+      kind: 'ok', p50: 835, p95: 3260, over: false, ceiling: 10000,
+    })
+  })
+
+  // Past the last finite bucket the estimate is pulled toward the max, so the
+  // number is withheld and only the ceiling is stated.
+  it('flags a p95 beyond the last bucket', () => {
+    expect(quantileReading(hist({ count: 40, p50: 900, p95: 14_000 }))).toMatchObject({ over: true, ceiling: 10000 })
+  })
+})
+
+describe('findingInterpolation', () => {
+  const fmt = {
+    count: (n: number) => `#${n}`,
+    duration: (ms: number) => `${ms / 60_000}min`,
+    pct: (n: number, d: number) => `${n}/${d}`,
+  }
+
+  it('formats counts, the window, and the percentage from the ratio', () => {
+    const f: Finding = {
+      id: 'lifecycle_errors', key: 'lifecycle_errors', severity: 'error', card: 'lifecycle', series: [],
+      values: { errors: 17, checks: 2312 }, ratio: { n: 17, d: 2312 },
+    }
+    expect(findingInterpolation(f, fmt)).toEqual({ errors: '#17', checks: '#2312', pct: '17/2312' })
+    const dead: Finding = { id: 'poll_dead', key: 'poll_dead', severity: 'critical', card: 'poll', series: [], values: { window: 600_000 } }
+    expect(findingInterpolation(dead, fmt)).toEqual({ window: '10min' })
+  })
+})
+
+// The breakdown sentence names each step and panel kind with its count; the
+// keys are the copy's own placeholders, so nothing renames them in between.
+describe('breakdownInterpolation', () => {
+  it('lists each item as label and count, joined, under the copy placeholder', () => {
+    const f: Finding = {
+      id: 'lifecycle_errors', key: 'lifecycle_errors', severity: 'error', card: 'lifecycle', series: [],
+      breakdown: {
+        stages: [{ value: 'confirm_read', count: 4 }, { value: 'update', count: 1 }],
+        kinds: [{ value: 'psp', count: 5 }],
+      },
+    }
+    const label = (group: string, value: string) => `${group}:${value}`
+    expect(breakdownInterpolation(f, label, n => `#${n}`)).toEqual({
+      stages: 'lifecycle_stage:confirm_read #4 · lifecycle_stage:update #1',
+      kinds: 'panel_kind:psp #5',
+    })
+  })
+
+  it('says nothing for a finding without a breakdown', () => {
+    const f: Finding = { id: 'poll_errors', key: 'poll_errors', severity: 'error', card: 'poll', series: [] }
+    expect(breakdownInterpolation(f, () => '', String)).toEqual({})
+  })
+})
+
+describe('findingParts', () => {
+  const base: Finding = { id: 'lifecycle_errors', key: 'lifecycle_errors', severity: 'error', card: 'lifecycle', series: [] }
+
+  it('shows a conditional sentence only when the reading carries it', () => {
+    expect(findingParts(base)).toEqual(['retry'])
+    expect(findingParts({ ...base, variants: ['origin'] })).toEqual(['origin', 'retry'])
+    expect(findingParts({ ...base, variants: ['origin'], breakdown: { stages: [], kinds: [] } }))
+      .toEqual(['origin', 'breakdown', 'retry'])
+  })
+})
+
+// --- computed key coverage -------------------------------------------------------
+
+describe('copy for computed keys', () => {
+  // Every (card, state) the derivation can produce, from fixtures that walk
+  // each branch, mapped through the same key function the page uses.
+  const sentenceKeys = () => {
+    const keys = new Set<string>()
+    const add = (s: DiagnosticsSnapshot, interval: number, facts?: PanelFacts) => {
+      const mode = windowMode(s.metrics.window_ms, interval)
+      for (const card of deriveCards(s, interval, deriveFindings(s, interval, facts), facts)) {
+        keys.add(cardSentenceKey(card, mode, interval > 0))
+      }
+    }
+    const busy = metrics({
+      ...healthy(),
+      counters: [
+        ...healthy().counters,
+        c('psp_panel_op_total{op=GetClient}', 1),
+        c('psp_node_host_report_total{outcome=accepted}', 1),
+        c('psp_saml_acs_failure_total{reason=saml_destination}', 1),
+      ],
+      histograms: [...healthy().histograms, { ...h('psp_user_live_ips', 4) }],
+    })
+    add(snap(busy), INTERVAL)
+    add(snap(metrics({ gauges: [g('psp_push_sem_capacity', 8)] })), INTERVAL)
+    add(snap(metrics({ counters: [c('psp_poll_total', 40)], gauges: [g('psp_push_sem_capacity', 8)] })), INTERVAL)
+    add(snap(metrics({ window_ms: INTERVAL * 2 })), INTERVAL)
+    add(snap(metrics({ window_ms: 1_000 })), INTERVAL)
+    add(snap(metrics()), 0)
+    add(snap(metrics({ gauges: [g('psp_push_sem_capacity', 0)] })), INTERVAL)
+    add(snap(healthy()), INTERVAL, panelFacts([], 0))
+    add(snap({
+      ...healthy(),
+      counters: [...healthy().counters, c('psp_lifecycle_sync_error_total', 1), c('psp_push_sem_carryover_total', 1)],
+    }), INTERVAL)
+    return keys
+  }
+
+  it('reaches every sentence a card can show', () => {
+    expect([...sentenceKeys()].sort()).toEqual([
+      'cards.common.attention', 'cards.common.blackout', 'cards.common.failing', 'cards.common.inhibited',
+      'cards.common.measuring', 'cards.common.measuring_unknown',
+      'cards.floor.idle', 'cards.floor.ok', 'cards.lifecycle.idle', 'cards.lifecycle.ok',
+      'cards.liveip.idle', 'cards.liveip.ok', 'cards.node.idle', 'cards.node.not_applicable', 'cards.node.ok',
+      'cards.panel_api.idle', 'cards.panel_api.not_applicable', 'cards.panel_api.ok', 'cards.poll.ok',
+      'cards.sso.none', 'cards.sso.recorded',
+    ])
+  })
+
+  const STATES: CardState[] = ['failing', 'attention', 'ok', 'idle', 'measuring', 'inhibited', 'not_applicable', 'none', 'recorded']
+  const VERDICTS = ['critical', 'action', 'attention', 'ok', 'ok_notices', 'measuring', 'measuring_unknown', 'blackout']
+
+  for (const [lang, bundle] of BUNDLES) {
+    const has = (k: string) => expect(bundle.has(`diagnostics.${k}`), `${lang} diagnostics.${k}`).toBe(true)
+
+    it(`${lang} has every card sentence, title and purpose`, () => {
+      for (const k of sentenceKeys()) has(k)
+      for (const id of CARD_ORDER) {
+        has(`cards.${id}.title`)
+        has(`cards.${id}.purpose`)
+      }
+    })
+
+    it(`${lang} has every state, severity and verdict wording`, () => {
+      for (const s of STATES) has(`state.${s}`)
+      for (const s of ['critical', 'error', 'warn', 'notice']) has(`severity.${s}`)
+      for (const v of VERDICTS) has(`verdict.${v}`)
+    })
+
+    it(`${lang} has both self-check sentences for each check`, () => {
+      for (const check of deriveSelfChecks(healthy())) {
+        has(`self_check.${check.id}.pass`)
+        has(`self_check.${check.id}.fail`)
+      }
+    })
+
+    it(`${lang} has every duration and count format`, () => {
+      for (const k of ['duration_s', 'duration_m', 'duration_hm', 'duration_dh', 'no_denominator', 'pct_tiny',
+        'few_samples', 'no_samples', 'p95_over', 'typical', 'p95_within']) has(`fmt.${k}`)
+    })
+  }
+
+  // Every place a link can point has a page name in the navigation bundle,
+  // because the link text reuses it.
+  it('names every link target in both navigation bundles', () => {
+    const navs = [flatten(zhNav as Nested), flatten(enNav as Nested)]
+    const targets = new Set([...Object.values(CARD_LINK).filter(Boolean), ...Object.keys(LINK_TARGET)])
+    for (const link of targets) {
+      const nav = LINK_TARGET[link as keyof typeof LINK_TARGET].nav.replace(/^nav:/, '')
+      for (const flat of navs) expect(flat[nav], nav).toBeTruthy()
+    }
+  })
 })
 
 // The live check that this test was written from: the settings row said one

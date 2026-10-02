@@ -15,6 +15,28 @@ export const CARD_ORDER: readonly CardId[] = [
   'poll', 'lifecycle', 'floor', 'panel_api', 'liveip', 'node', 'sso',
 ]
 
+/** The pages a finding or a card sends the operator to. */
+export type FindingLink = 'sync_tasks' | 'settings' | 'servers' | 'risk'
+
+/** Where each link goes, and the navigation name its text reuses. */
+export const LINK_TARGET: Record<FindingLink, { path: string; nav: string }> = {
+  sync_tasks: { path: '/admin/sync-tasks', nav: 'nav:admin.sync_tasks' },
+  settings: { path: '/admin/settings', nav: 'nav:admin.settings' },
+  servers: { path: '/admin/servers', nav: 'nav:admin.servers' },
+  risk: { path: '/admin/risk', nav: 'nav:admin.risk_center' },
+}
+
+/** The page each card's footer links to; single sign-on has none of its own. */
+export const CARD_LINK: Record<CardId, FindingLink | undefined> = {
+  poll: 'settings',
+  lifecycle: 'sync_tasks',
+  floor: 'servers',
+  panel_api: 'servers',
+  liveip: 'risk',
+  node: 'servers',
+  sso: undefined,
+}
+
 export type MetricType = 'counter' | 'gauge' | 'histogram'
 
 export interface FamilyInfo {

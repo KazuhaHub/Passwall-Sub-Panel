@@ -1,9 +1,14 @@
 import fs from 'node:fs'
 import { describe, expect, it } from 'vitest'
+import zh from '@/locales/zh-CN/admin.json'
+import en from '@/locales/en-US/admin.json'
+import { flatten, type Nested } from '@/i18n/options'
 
 import {
   CARD_ORDER,
   FAMILY_CATALOG,
+  STAGE_GROUP_ORDER,
+  WRITE_REASON_GROUP_ORDER,
   LIFECYCLE_ERROR_KINDS,
   LIFECYCLE_ERROR_STAGES,
   STAGE_GROUP,
@@ -22,6 +27,18 @@ import {
 // write reason added in Go would vanish from the breakdown it belongs to.
 // Reading the declarations straight from the source turns each of those into
 // a failing test on the day the Go side changes.
+
+const BUNDLES: Array<[string, Set<string>]> = [
+  ['zh-CN', new Set(Object.keys(flatten(zh as Nested)))],
+  ['en-US', new Set(Object.keys(flatten(en as Nested)))],
+]
+
+/** Assert `diagnostics.<key>` exists in both bundles. */
+function expectCopy(keys: string[]) {
+  for (const [lang, bundle] of BUNDLES) {
+    for (const k of keys) expect(bundle.has(`diagnostics.${k}`), `${lang} diagnostics.${k}`).toBe(true)
+  }
+}
 
 function goSource(rel: string): string {
   return fs.readFileSync(new URL(`../../../${rel}`, import.meta.url), 'utf8')
@@ -78,7 +95,9 @@ describe('FAMILY_CATALOG', () => {
     }
   })
 
-  it.todo('has a label and a description for every family in both bundles')
+  it('has a label and a description for every family in both bundles', () => {
+    expectCopy(Object.keys(FAMILY_CATALOG).flatMap(f => [`metric.${f}.label`, `metric.${f}.desc`]))
+  })
 })
 
 describe('STAGE_GROUP', () => {
@@ -86,7 +105,14 @@ describe('STAGE_GROUP', () => {
     expect(Object.keys(STAGE_GROUP).sort()).toEqual([...new Set(pollStages())].sort())
   })
 
-  it.todo('has a label for every stage in both bundles')
+  it('has a label for every stage and every group in both bundles', () => {
+    expectCopy(Object.keys(STAGE_GROUP).map(st => `labels.stage.${labelKey(st)}`))
+    expectCopy(STAGE_GROUP_ORDER.map(gr => `cards.poll.stages.${gr}`))
+  })
+
+  it('orders every group it uses', () => {
+    expect([...new Set(Object.values(STAGE_GROUP))].sort()).toEqual([...STAGE_GROUP_ORDER].sort())
+  })
 })
 
 describe('WRITE_REASON_GROUP', () => {
@@ -96,7 +122,14 @@ describe('WRITE_REASON_GROUP', () => {
     expect(Object.keys(WRITE_REASON_GROUP).sort()).toEqual([...reasons].sort())
   })
 
-  it.todo('has a label for every reason and every group in both bundles')
+  it('has a label for every reason and every group in both bundles', () => {
+    expectCopy(Object.keys(WRITE_REASON_GROUP).map(r => `labels.write_reason.${labelKey(r)}`))
+    expectCopy(WRITE_REASON_GROUP_ORDER.map(gr => `labels.write_reason_group.${gr}`))
+  })
+
+  it('orders every group it uses', () => {
+    expect([...new Set(Object.values(WRITE_REASON_GROUP))].sort()).toEqual([...WRITE_REASON_GROUP_ORDER].sort())
+  })
 })
 
 // The two breakdowns of psp_lifecycle_sync_error_total. Their label values are
@@ -133,7 +166,10 @@ describe('lifecycle failure breakdowns', () => {
     }
   })
 
-  it.todo('has a label for every step and every panel kind in both bundles')
+  it('has a label for every step and every panel kind in both bundles', () => {
+    expectCopy(LIFECYCLE_ERROR_STAGES.map(st => `labels.lifecycle_stage.${labelKey(st)}`))
+    expectCopy(LIFECYCLE_ERROR_KINDS.map(k => `labels.panel_kind.${labelKey(k)}`))
+  })
 })
 
 describe('familyOf', () => {

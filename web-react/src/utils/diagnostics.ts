@@ -5,7 +5,15 @@ import type {
   HistogramSnapshot,
   MetricsSnapshot,
 } from '@/api/diagnostics'
-import { familyOf, type CardId } from './diagnosticsCatalog'
+import {
+  CARD_ORDER,
+  familyOf,
+  type CardId,
+  type FindingLink,
+  type Translate,
+} from './diagnosticsCatalog'
+
+export type { FindingLink } from './diagnosticsCatalog'
 
 // Derivation for the admin diagnostics page. Pure, so the rules that decide
 // what an operator is told can be tested without rendering anything.
@@ -58,9 +66,6 @@ export type EvidenceState =
  */
 export type Severity = 'critical' | 'error' | 'warn' | 'notice'
 
-/** Where a finding sends the operator next. */
-export type FindingLink = 'sync_tasks' | 'settings' | 'servers' | 'risk'
-
 export interface LabelCount {
   value: string
   count: number
@@ -86,7 +91,10 @@ export interface Finding {
   ratio?: { n: number; d: number }
   /** Optional sentences that apply to THIS reading, by i18n key suffix. */
   variants?: string[]
-  /** Children of the labelled families that explain the count, largest first. */
+  /**
+   * Children of the labelled families that explain the count, largest first,
+   * keyed by the copy's own placeholder (see BREAKDOWN_LABELS).
+   */
   breakdown?: Record<string, LabelCount[]>
 }
 
@@ -264,6 +272,26 @@ export function quantileUsable(h: HistogramSnapshot | undefined): boolean {
   return !!h && h.count >= MIN_QUANTILE_SAMPLES
 }
 
+/** What a histogram can honestly be said to show. */
+export type QuantileReading =
+  | { kind: 'none' }
+  /** Under MIN_QUANTILE_SAMPLES: the longest sample is the only true figure. */
+  | { kind: 'few'; count: number; max: number }
+  /**
+   * over: the p95 lies beyond the last finite bucket, where interpolation has
+   * no upper bound but the observed max, so the estimate is pulled toward it.
+   * The number is then withheld and only the ceiling is stated (for the
+   * latency buckets that ceiling is 10 s).
+   */
+  | { kind: 'ok'; p50: number; p95: number; over: boolean; ceiling: number }
+
+export function quantileReading(h: HistogramSnapshot | undefined): QuantileReading {
+  if (!h || h.count === 0) return { kind: 'none' }
+  if (!quantileUsable(h)) return { kind: 'few', count: h.count, max: h.max }
+  const ceiling = h.buckets.reduce((top, b) => (b.inf ? top : Math.max(top, b.le)), 0)
+  return { kind: 'ok', p50: h.p50, p95: h.p95, over: ceiling > 0 && h.p95 > ceiling, ceiling }
+}
+
 // ---------------------------------------------------------------------------
 // preconditions — does a whole downstream area have any input at all
 // ---------------------------------------------------------------------------
@@ -358,6 +386,60 @@ export const FINDING_ORDER = [
 export type FindingId = (typeof FINDING_ORDER)[number]
 
 /**
+ * The sentences each finding may show between its impact and its action, in
+ * order. Two kinds: conditional ones apply to a reading only when the finding
+ * carries them (origin and sui in `variants`, breakdown when it has one); the
+ * rest always show. The copy test reads this table, so a part added here
+ * without copy in both bundles fails.
+ */
+export const FINDING_PARTS: Record<FindingId, readonly string[]> = {
+  push_capacity_zero: [],
+  poll_dead: [],
+  poll_errors: [],
+  lifecycle_errors: ['origin', 'breakdown', 'retry'],
+  poll_behind: [],
+  push_errors: ['retry'],
+  push_backlog: [],
+  liveip_incomplete: ['sui'],
+  history_write_errors: [],
+  flag_write_errors: [],
+  geo_auto_errors: [],
+  node_sync_refused: [],
+  sso_claim_silent: [],
+  capability_gaps: ['note'],
+}
+
+const CONDITIONAL_PARTS = new Set(['origin', 'sui', 'breakdown'])
+
+/** The log keywords each finding offers, and whether it explains them. */
+export const FINDING_LOGS: Record<FindingId, readonly ('log' | 'log_note')[]> = {
+  push_capacity_zero: [],
+  poll_dead: ['log'],
+  poll_errors: ['log'],
+  lifecycle_errors: ['log', 'log_note'],
+  poll_behind: [],
+  push_errors: ['log'],
+  push_backlog: [],
+  liveip_incomplete: ['log'],
+  history_write_errors: ['log'],
+  flag_write_errors: ['log'],
+  geo_auto_errors: ['log'],
+  node_sync_refused: ['log'],
+  sso_claim_silent: [],
+  capability_gaps: ['log'],
+}
+
+/** The parts of FINDING_PARTS that apply to this reading of the finding. */
+export function findingParts(f: Finding): string[] {
+  const parts = FINDING_PARTS[f.id as FindingId] ?? []
+  return parts.filter(part => {
+    if (!CONDITIONAL_PARTS.has(part)) return true
+    if (part === 'breakdown') return f.breakdown !== undefined
+    return f.variants?.includes(part) ?? false
+  })
+}
+
+/**
  * Findings are one-way: each may APPEAR, and its absence is never evidence of
  * health. That is what keeps the page from turning an unmeasured fleet green.
  *
@@ -424,8 +506,8 @@ export function deriveFindings(
     // earliest counted one, happens after the total is incremented
     // (sharedclient.pushLifecycle), so errors/checks is a real ratio.
     const checks = val(m, 'psp_lifecycle_sync_total')
-    const stage = counterChildren(m, 'psp_lifecycle_sync_error_stage_total')
-    const kind = counterChildren(m, 'psp_lifecycle_sync_error_panel_kind_total')
+    const stages = counterChildren(m, 'psp_lifecycle_sync_error_stage_total')
+    const kinds = counterChildren(m, 'psp_lifecycle_sync_error_panel_kind_total')
     add({
       id: 'lifecycle_errors', severity: 'error', card: 'lifecycle',
       series: ['psp_lifecycle_sync_error_total'], link: 'sync_tasks',
@@ -435,7 +517,7 @@ export function deriveFindings(
       // refresh path. A refresh failure that DID happen is a write failure
       // too, so the sentence is offered only when it is true.
       variants: pushErrors === 0 ? ['origin'] : [],
-      ...(stage.length > 0 || kind.length > 0 ? { breakdown: { stage, kind } } : {}),
+      ...(stages.length > 0 || kinds.length > 0 ? { breakdown: { stages, kinds } } : {}),
     })
   }
 
@@ -612,6 +694,365 @@ export function deriveSelfChecks(m: MetricsSnapshot): SelfCheck[] {
     { id: 'poll_ms', pass: pollPass, values: { observed, expected: polls } },
     { id: 'push_enqueue', pass: started - enqueued <= 1, values: { started, enqueued } },
   ]
+}
+
+// ---------------------------------------------------------------------------
+// cards — one state per area, from a closed vocabulary
+// ---------------------------------------------------------------------------
+
+/**
+ * The closed vocabulary every card badge renders through, so no card can draw
+ * "cannot tell" as "fine". `ok` claims only that the card's driver moved; it
+ * never claims health, because a finding can accuse but nothing here can
+ * acquit.
+ */
+export type CardState =
+  /** Worst finding on the card is critical or error. */
+  | 'failing'
+  /** Worst finding on the card is a warning. */
+  | 'attention'
+  | 'ok'
+  /** Settled window, nothing found, and the driver never moved. */
+  | 'idle'
+  /** Blackout, or a young window in which the driver has not moved yet. */
+  | 'measuring'
+  /** Its upstream (the traffic poll) is not running, so a zero says nothing. */
+  | 'inhibited'
+  /** Proven from a complete server list. Never inferred from a zero. */
+  | 'not_applicable'
+  /** Single sign-on only: no refusal and no finding in the window. */
+  | 'none'
+  /** Single sign-on only: SAML refusals were recorded but none is a finding. */
+  | 'recorded'
+
+export interface CardSummary {
+  id: CardId
+  state: CardState
+  /** The card also has notice-level findings: one extra line, no colour. */
+  notices: boolean
+  /** The count whose movement separates ok from idle or measuring. */
+  driver: number
+}
+
+/** Activity on any psp_node_* series: a counter that moved or a histogram
+ *  with samples. The unlabelled node histograms are registered at start, so
+ *  their mere presence is not activity. */
+function nodeActivity(m: MetricsSnapshot): number {
+  const counters = m.counters
+    .filter(c => c.name.startsWith('psp_node_'))
+    .reduce((sum, c) => sum + c.value, 0)
+  const samples = m.histograms
+    .filter(h => h.name.startsWith('psp_node_'))
+    .reduce((sum, h) => sum + h.count, 0)
+  return counters + samples
+}
+
+function cardDriver(m: MetricsSnapshot, id: CardId): number {
+  switch (id) {
+    case 'poll': return val(m, 'psp_poll_total')
+    case 'lifecycle': return val(m, 'psp_lifecycle_sync_total')
+    case 'floor': return val(m, 'psp_push_client_config_total')
+    case 'panel_api': return counterFamilyTotal(m, 'psp_panel_op_total')
+    case 'liveip': return histogram(m, 'psp_user_live_ips')?.count ?? 0
+    case 'node':
+      return counterFamilyTotal(m, 'psp_node_host_report_total') + counterFamilyTotal(m, 'psp_node_sync_refused_total')
+    case 'sso': return counterFamilyTotal(m, 'psp_saml_acs_failure_total')
+  }
+}
+
+/**
+ * Not in use, proven: the server list is complete, holds no panel of the
+ * kind the card measures, AND the card has seen no activity. Activity always
+ * wins over the list, which may be stale by a minute.
+ */
+function provenNotApplicable(m: MetricsSnapshot, id: CardId, facts: PanelFacts): boolean {
+  if (!facts.complete) return false
+  if (id === 'panel_api') return !facts.types.has('3xui') && counterFamilyTotal(m, 'psp_panel_op_total') === 0
+  if (id === 'node') return !facts.types.has('psp') && nodeActivity(m) === 0
+  return false
+}
+
+/** Cards whose only input is the traffic poll's work. The status sync is not
+ *  one: admin actions, sync tasks and the periodic repair also drive it. */
+const POLL_FED_CARDS: ReadonlySet<CardId> = new Set(['floor', 'liveip'])
+
+/**
+ * One state per card, in this precedence: the card's own findings; proven not
+ * in use; undecidable because the poll is not running; then the window.
+ * Findings come first because an observed failure is a fact even on a card
+ * whose upstream has stopped.
+ */
+export function deriveCards(
+  snap: DiagnosticsSnapshot,
+  pollIntervalMs: number,
+  findings: Finding[],
+  facts: PanelFacts = UNKNOWN_FACTS,
+): CardSummary[] {
+  const m = snap.metrics
+  const mode = windowMode(m.window_ms, pollIntervalMs)
+  const upstreamDown = findings.some(f => f.id === 'poll_dead' || f.id === 'push_capacity_zero')
+
+  return CARD_ORDER.map(id => {
+    const own = findings.filter(f => f.card === id)
+    const notices = own.some(f => f.severity === 'notice')
+    const driver = cardDriver(m, id)
+    const state = ((): CardState => {
+      if (own.some(f => f.severity === 'critical' || f.severity === 'error')) return 'failing'
+      if (own.some(f => f.severity === 'warn')) return 'attention'
+      // A refusal is a record, not a rate: the window cannot make one more or
+      // less meaningful, so this card skips every gate below.
+      if (id === 'sso') return driver > 0 ? 'recorded' : 'none'
+      if (provenNotApplicable(m, id, facts)) return 'not_applicable'
+      if (upstreamDown && POLL_FED_CARDS.has(id)) return 'inhibited'
+      if (mode === 'blackout') return 'measuring'
+      if (mode === 'measuring') return driver > 0 ? 'ok' : 'measuring'
+      return driver > 0 ? 'ok' : 'idle'
+    })()
+    return { id, state, notices, driver }
+  })
+}
+
+/** The sentence a card shows under its title, as a key under admin:diagnostics. */
+export function cardSentenceKey(card: CardSummary, mode: WindowMode, intervalKnown: boolean): string {
+  switch (card.state) {
+    case 'failing':
+    case 'attention':
+    case 'inhibited':
+      return `cards.common.${card.state}`
+    case 'measuring':
+      if (mode === 'blackout') return 'cards.common.blackout'
+      return intervalKnown ? 'cards.common.measuring' : 'cards.common.measuring_unknown'
+    case 'none':
+    case 'recorded':
+      return `cards.sso.${card.state}`
+    default:
+      return `cards.${card.id}.${card.state}`
+  }
+}
+
+// ---------------------------------------------------------------------------
+// page verdict — one line, coloured by the worst finding
+// ---------------------------------------------------------------------------
+
+export type VerdictTone = 'critical' | 'action' | 'attention' | 'blackout' | 'measuring' | 'ok'
+
+export interface PageVerdict {
+  tone: VerdictTone
+  /** Key suffix under admin:diagnostics.verdict. */
+  key: 'critical' | 'action' | 'attention' | 'blackout' | 'measuring' | 'measuring_unknown' | 'ok' | 'ok_notices'
+  /** The cards the verdict names, in page order. */
+  cards: CardId[]
+  /** measuring only: time until the window settles. */
+  remainingMs?: number
+  notices: number
+}
+
+/**
+ * Findings outrank the window, and the colour is the WORST finding's: a page
+ * with only warnings is amber, never red. A short window means a zero proves
+ * nothing; it does not unprove an error that already happened, and letting it
+ * outrank one would hide findings during exactly the incident the page is for.
+ * Only a settled window with nothing found reads "no problems found", which is
+ * all the page can say: findings accuse, nothing here acquits.
+ */
+export function pageVerdict(
+  findings: Finding[],
+  cards: CardSummary[],
+  windowMs: number,
+  pollIntervalMs: number,
+): PageVerdict {
+  const notices = findings.filter(f => f.severity === 'notice').length
+  const cardsWhere = (pred: (c: CardSummary) => boolean) => cards.filter(pred).map(c => c.id)
+
+  if (findings.some(f => f.severity === 'critical')) {
+    const named = new Set(findings.filter(f => f.severity === 'critical').map(f => f.card))
+    return { tone: 'critical', key: 'critical', cards: CARD_ORDER.filter(id => named.has(id)), notices }
+  }
+  if (findings.some(f => f.severity === 'error')) {
+    return { tone: 'action', key: 'action', cards: cardsWhere(c => c.state === 'failing'), notices }
+  }
+  if (findings.some(f => f.severity === 'warn')) {
+    return { tone: 'attention', key: 'attention', cards: cardsWhere(c => c.state === 'attention'), notices }
+  }
+  const mode = windowMode(windowMs, pollIntervalMs)
+  if (mode === 'blackout') return { tone: 'blackout', key: 'blackout', cards: [], notices }
+  if (mode === 'measuring') {
+    return pollIntervalMs > 0
+      ? {
+          tone: 'measuring', key: 'measuring', cards: [], notices,
+          remainingMs: Math.max(0, SETTLED_INTERVALS * pollIntervalMs - windowMs),
+        }
+      : { tone: 'measuring', key: 'measuring_unknown', cards: [], notices }
+  }
+  return { tone: 'ok', key: notices > 0 ? 'ok_notices' : 'ok', cards: [], notices }
+}
+
+// ---------------------------------------------------------------------------
+// session delta — "is it still happening?", within what this page has seen
+// ---------------------------------------------------------------------------
+
+export type SessionDelta =
+  /** No second reading yet, or too soon after the first to say "none". */
+  | { kind: 'wait' }
+  /** The window was reopened (restart or reset): start a new baseline. */
+  | { kind: 'rebuild' }
+  | { kind: 'grew'; count: number; minutes: number }
+  | { kind: 'flat'; minutes: number }
+
+/**
+ * Growth of a finding's series since the page took its baseline. A hint, not
+ * a verdict: it never changes a severity, because two people opening the page
+ * at different times must see the same colours. Elapsed time is taken from the
+ * server's own window, not the browser clock, and a shrinking total (a reset
+ * by someone else that kept since_unix_ms aside) is read as a new baseline
+ * rather than shown as a negative.
+ */
+export function sessionDelta(
+  base: MetricsSnapshot | undefined,
+  cur: MetricsSnapshot,
+  series: readonly string[],
+): SessionDelta {
+  if (!base) return { kind: 'wait' }
+  if (base.since_unix_ms !== cur.since_unix_ms) return { kind: 'rebuild' }
+  const elapsed = cur.window_ms - base.window_ms
+  if (elapsed <= 0) return { kind: 'wait' }
+  const sum = (m: MetricsSnapshot) => series.reduce((total, name) => total + counterFamilyTotal(m, name), 0)
+  const count = sum(cur) - sum(base)
+  if (count < 0) return { kind: 'rebuild' }
+  const minutes = Math.max(1, Math.round(elapsed / 60_000))
+  if (count > 0) return { kind: 'grew', count, minutes }
+  // "No new ones" needs at least a refresh interval behind it to mean anything.
+  return elapsed < 60_000 ? { kind: 'wait' } : { kind: 'flat', minutes }
+}
+
+// ---------------------------------------------------------------------------
+// formatting
+// ---------------------------------------------------------------------------
+
+const FMT = 'admin:diagnostics.fmt'
+
+/** A count with grouping, as the reader's locale writes it. */
+export function formatCount(n: number, lang: string): string {
+  return new Intl.NumberFormat(lang).format(n)
+}
+
+/** An API value as delivered: grouped, never rounded. For the raw area. */
+export function formatExact(n: number, lang: string): string {
+  return new Intl.NumberFormat(lang, { maximumFractionDigits: 20 }).format(n)
+}
+
+/**
+ * A share. Zero attempts is not 0%: there is no rate, and saying so is the
+ * difference between "nothing failed" and "nothing was tried". Bands are cut
+ * after rounding, so a value never prints in the next band's format
+ * ("10.0%", "1.00%").
+ */
+export function formatPct(n: number, d: number, t: Translate): string {
+  if (!(d > 0)) return t(`${FMT}.no_denominator`)
+  const p = (n / d) * 100
+  if (p === 0) return '0%'
+  if (p >= 9.95) return `${Math.round(p)}%`
+  if (p >= 0.995) return `${p.toFixed(1)}%`
+  if (p >= 0.01) return `${p.toFixed(2)}%`
+  return t(`${FMT}.pct_tiny`)
+}
+
+/** Latency: whole ms under a second, then seconds to two places, then one.
+ *  SI symbols in both languages, one space before the unit. */
+export function formatLatency(ms: number): string {
+  if (Math.round(ms) < 1000) return `${Math.round(ms)} ms`
+  const s = ms / 1000
+  return Number(s.toFixed(2)) < 10 ? `${s.toFixed(2)} s` : `${s.toFixed(1)} s`
+}
+
+/**
+ * A span of time in the reader's language. Each band is chosen after
+ * rounding into it, so 59.6 s reads "1 min" rather than "60 s".
+ */
+export function formatDuration(ms: number, t: Translate): string {
+  const safe = Number.isFinite(ms) && ms > 0 ? ms : 0
+  const s = Math.round(safe / 1000)
+  if (s < 60) return t(`${FMT}.duration_s`, { s })
+  const min = Math.round(safe / 60_000)
+  if (min < 60) return t(`${FMT}.duration_m`, { m: min })
+  if (min < 24 * 60) return t(`${FMT}.duration_hm`, { h: Math.floor(min / 60), m: min % 60 })
+  const hours = Math.floor(min / 60)
+  return t(`${FMT}.duration_dh`, { d: Math.floor(hours / 24), h: hours % 24 })
+}
+
+/** Bytes in 1024 steps, three significant figures above a KiB. */
+export function formatBytes(n: number): string {
+  const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB']
+  let v = Math.max(0, n)
+  let i = 0
+  while (v >= 1024 && i < units.length - 1) {
+    v /= 1024
+    i++
+  }
+  if (i === 0) return `${Math.round(v)} B`
+  const digits = v < 10 ? 2 : v < 100 ? 1 : 0
+  return `${v.toFixed(digits)} ${units[i]}`
+}
+
+/** A rate (per hour, per poll): whole above 10, finer below. */
+export function formatRate(r: number, lang: string): string {
+  const digits = r >= 10 ? 0 : r >= 0.1 ? 1 : 2
+  return new Intl.NumberFormat(lang, { maximumFractionDigits: digits }).format(r)
+}
+
+/** value per hour of window, or null when the window is empty. */
+export function ratePerHour(value: number, windowMs: number): number | null {
+  return windowMs > 0 ? value / (windowMs / 3_600_000) : null
+}
+
+/** value per poll, or null when no poll has run. */
+export function ratePerPoll(value: number, polls: number): number | null {
+  return polls > 0 ? value / polls : null
+}
+
+/** The label group (admin:diagnostics.labels.<group>) for each breakdown
+ *  placeholder a finding's copy uses. */
+export const BREAKDOWN_LABELS: Record<string, string> = {
+  stages: 'lifecycle_stage',
+  kinds: 'panel_kind',
+}
+
+/**
+ * The breakdown sentence's values: each item as "label count", joined with the
+ * same middle dot the cards use between figures. `label` resolves a value in a
+ * label group, falling back to the raw value (diagnosticsCatalog.labelFor).
+ */
+export function breakdownInterpolation(
+  f: Finding,
+  label: (group: string, value: string) => string,
+  count: (n: number) => string,
+): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const [key, items] of Object.entries(f.breakdown ?? {})) {
+    const group = BREAKDOWN_LABELS[key] ?? key
+    out[key] = items.map(item => `${label(group, item.value)} ${count(item.count)}`).join(' · ')
+  }
+  return out
+}
+
+export interface FindingFormatters {
+  count: (n: number) => string
+  duration: (ms: number) => string
+  pct: (n: number, d: number) => string
+}
+
+/**
+ * The interpolation values for a finding's copy. Every value is a count
+ * except `window` (a duration); `pct` is derived from the ratio, never stored,
+ * so the export carries the raw numerator and denominator.
+ */
+export function findingInterpolation(f: Finding, fmt: FindingFormatters): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const [k, v] of Object.entries(f.values ?? {})) {
+    out[k] = k === 'window' ? fmt.duration(v) : fmt.count(v)
+  }
+  if (f.ratio) out.pct = fmt.pct(f.ratio.n, f.ratio.d)
+  return out
 }
 
 // ---------------------------------------------------------------------------

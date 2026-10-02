@@ -268,6 +268,12 @@ export default function DiagnosticsView() {
   )
 }
 
+// Family descriptions are {label, desc} objects now; panel_fetch is a stage,
+// not a family, and keeps its plain string until this page is rebuilt.
+function metricKey(name: string): string {
+  return name === 'panel_fetch' ? `diagnostics.metric.${name}` : `diagnostics.metric.${name}.desc`
+}
+
 function Row({ name, value, means }: { name: string; value: string; means: string }) {
   return (
     <TableRow>
@@ -284,13 +290,13 @@ function CounterRow({ snap, name }: { snap: DiagnosticsSnapshot; name: string })
   // Absent is not zero: a metric that was never registered is a different fact
   // from one that has not been incremented.
   const value = c === undefined ? '—' : String(c.value)
-  return <Row name={name} value={value} means={t(`diagnostics.metric.${name}`, { defaultValue: c?.help ?? '' })} />
+  return <Row name={name} value={value} means={t(metricKey(name), { defaultValue: c?.help ?? '' })} />
 }
 
 function FamilyRow({ snap, name }: { snap: DiagnosticsSnapshot; name: string }) {
   const { t } = useTranslation('admin')
   const total = counterFamilyTotal(snap.metrics, name)
-  return <Row name={name} value={String(total)} means={t(`diagnostics.metric.${name}`, { defaultValue: '' })} />
+  return <Row name={name} value={String(total)} means={t(metricKey(name), { defaultValue: '' })} />
 }
 
 function HistRow({ h, name }: { h: HistogramSnapshot | undefined; name: string }) {
@@ -303,5 +309,5 @@ function HistRow({ h, name }: { h: HistogramSnapshot | undefined; name: string }
   const value = quantileUsable(h)
     ? `p50 ${ms(h.p50)} · p95 ${ms(h.p95)}`
     : t('diagnostics.too_few_samples', { count: h.count, max: ms(h.max) })
-  return <Row name={name} value={value} means={t(`diagnostics.metric.${name}`, { defaultValue: h.help })} />
+  return <Row name={name} value={value} means={t(metricKey(name), { defaultValue: h.help })} />
 }
