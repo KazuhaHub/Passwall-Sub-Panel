@@ -506,8 +506,7 @@ export function deriveFindings(
     // earliest counted one, happens after the total is incremented
     // (sharedclient.pushLifecycle), so errors/checks is a real ratio.
     const checks = val(m, 'psp_lifecycle_sync_total')
-    const stages = counterChildren(m, 'psp_lifecycle_sync_error_stage_total')
-    const kinds = counterChildren(m, 'psp_lifecycle_sync_error_panel_kind_total')
+    const breakdown = lifecycleErrorBreakdown(m)
     add({
       id: 'lifecycle_errors', severity: 'error', card: 'lifecycle',
       series: ['psp_lifecycle_sync_error_total'], link: 'sync_tasks',
@@ -517,7 +516,11 @@ export function deriveFindings(
       // refresh path. A refresh failure that DID happen is a write failure
       // too, so the sentence is offered only when it is true.
       variants: pushErrors === 0 ? ['origin'] : [],
-      ...(stages.length > 0 || kinds.length > 0 ? { breakdown: { stages, kinds } } : {}),
+      // Both or nothing: the sentence names both lists, and the registry reads
+      // each counter on its own, so a reading taken between a failure's step
+      // child and its kind child being counted can hold one without the other.
+      // The next refresh has both.
+      ...(breakdown.stages.length > 0 && breakdown.kinds.length > 0 ? { breakdown } : {}),
     })
   }
 
@@ -1018,10 +1021,22 @@ export const BREAKDOWN_LABELS: Record<string, string> = {
 }
 
 /**
- * The breakdown sentence's values: each item as "label count", joined with the
- * same middle dot the cards use between figures. `label` resolves a value in a
+ * One breakdown as text: each item as "label count", joined with the same
+ * middle dot the cards use between figures. `label` resolves a value in a
  * label group, falling back to the raw value (diagnosticsCatalog.labelFor).
+ * The card lines and the finding sentence both go through here, so the two
+ * can never write the same reading two ways.
  */
+export function formatBreakdownList(
+  items: readonly LabelCount[],
+  group: string,
+  label: (group: string, value: string) => string,
+  count: (n: number) => string,
+): string {
+  return items.map(item => `${label(group, item.value)} ${count(item.count)}`).join(' · ')
+}
+
+/** The breakdown sentence's values, one formatted list per placeholder. */
 export function breakdownInterpolation(
   f: Finding,
   label: (group: string, value: string) => string,
@@ -1029,10 +1044,59 @@ export function breakdownInterpolation(
 ): Record<string, string> {
   const out: Record<string, string> = {}
   for (const [key, items] of Object.entries(f.breakdown ?? {})) {
-    const group = BREAKDOWN_LABELS[key] ?? key
-    out[key] = items.map(item => `${label(group, item.value)} ${count(item.count)}`).join(' · ')
+    out[key] = formatBreakdownList(items, BREAKDOWN_LABELS[key] ?? key, label, count)
   }
   return out
+}
+
+// ---------------------------------------------------------------------------
+// lifecycle failure breakdown — where the status write failures happened
+// ---------------------------------------------------------------------------
+
+// A type rather than an interface so it fits Finding.breakdown's record.
+export type LifecycleErrorBreakdown = {
+  /** By the step that failed (labels.lifecycle_stage). */
+  stages: LabelCount[]
+  /** By the kind of panel the client is on (labels.panel_kind). */
+  kinds: LabelCount[]
+}
+
+/**
+ * The two breakdowns of psp_lifecycle_sync_error_total, non-zero children
+ * largest first. The server counts every failure in exactly one child of each
+ * (sharedclient.countLifecycleFailure), so either list sums to the total;
+ * both are empty on a server that predates the breakdown and right after a
+ * clear. The finding and the user status sync card both read it from here,
+ * so they can never list different steps for one reading.
+ */
+export function lifecycleErrorBreakdown(m: MetricsSnapshot): LifecycleErrorBreakdown {
+  return {
+    stages: counterChildren(m, 'psp_lifecycle_sync_error_stage_total'),
+    kinds: counterChildren(m, 'psp_lifecycle_sync_error_panel_kind_total'),
+  }
+}
+
+export interface BreakdownLine {
+  /** Key under admin:diagnostics; the copy takes the list as {{list}}. */
+  key: string
+  /** Label group (admin:diagnostics.labels.<group>) naming the items. */
+  group: string
+  items: LabelCount[]
+}
+
+/**
+ * The user status sync card's breakdown lines, the step first because it is
+ * what says where to look. Unlike the finding's one sentence, each line stands
+ * alone, so an empty list is simply left out rather than printed as "by step:"
+ * with nothing after it.
+ */
+export function lifecycleCardBreakdown(m: MetricsSnapshot): BreakdownLine[] {
+  const { stages, kinds } = lifecycleErrorBreakdown(m)
+  const lines: BreakdownLine[] = [
+    { key: 'cards.lifecycle.errors_by_stage', group: BREAKDOWN_LABELS.stages, items: stages },
+    { key: 'cards.lifecycle.errors_by_kind', group: BREAKDOWN_LABELS.kinds, items: kinds },
+  ]
+  return lines.filter(line => line.items.length > 0)
 }
 
 export interface FindingFormatters {

@@ -20,11 +20,14 @@ import {
   breakdownInterpolation,
   findingInterpolation,
   findingParts,
+  formatBreakdownList,
   formatBytes,
   formatDuration,
   formatLatency,
   formatPct,
   formatRate,
+  lifecycleCardBreakdown,
+  lifecycleErrorBreakdown,
   pageVerdict,
   panelFacts,
   quantileReading,
@@ -37,7 +40,15 @@ import {
   type Finding,
   type PanelFacts,
 } from './diagnostics'
-import { CARD_ORDER, CARD_LINK, LINK_TARGET, type CardId } from './diagnosticsCatalog'
+import {
+  CARD_ORDER,
+  CARD_LINK,
+  LIFECYCLE_ERROR_KINDS,
+  LIFECYCLE_ERROR_STAGES,
+  LINK_TARGET,
+  labelKey,
+  type CardId,
+} from './diagnosticsCatalog'
 
 const INTERVAL = 5 * 60_000
 
@@ -353,6 +364,103 @@ describe('lifecycle_errors breakdown', () => {
       ...healthy(), counters: [...healthy().counters, c('psp_lifecycle_sync_error_total', 2)],
     }), INTERVAL).find(x => x.id === 'lifecycle_errors')
     expect(f?.breakdown).toBeUndefined()
+  })
+
+  // The registry reads each counter on its own, so a reading taken in the
+  // instant between a failure's step child and its kind child being counted
+  // can hold one without the other. The sentence names both, and printing
+  // "by panel type: ." for a minute says something false.
+  it('carries no breakdown while one of the two is still empty', () => {
+    const f = deriveFindings(snap({
+      ...healthy(),
+      counters: [
+        ...healthy().counters,
+        c('psp_lifecycle_sync_error_total', 1),
+        c('psp_lifecycle_sync_error_stage_total{stage=update}', 1),
+      ],
+    }), INTERVAL).find(x => x.id === 'lifecycle_errors')
+    expect(f?.breakdown).toBeUndefined()
+  })
+})
+
+// The finding and the user status sync card read the breakdowns through one
+// function, so the two can never list different steps for the same reading.
+describe('lifecycleErrorBreakdown', () => {
+  it('reads both breakdowns, largest first, without the zeroed children a clear leaves', () => {
+    const m = metrics({
+      counters: [
+        c('psp_lifecycle_sync_error_total', 6),
+        c('psp_lifecycle_sync_error_stage_total{stage=confirm_mismatch}', 0),
+        c('psp_lifecycle_sync_error_stage_total{stage=pool_get}', 2),
+        c('psp_lifecycle_sync_error_stage_total{stage=confirm_read}', 4),
+        c('psp_lifecycle_sync_error_panel_kind_total{kind=unknown}', 2),
+        c('psp_lifecycle_sync_error_panel_kind_total{kind=psp}', 4),
+        c('psp_lifecycle_sync_error_panel_kind_total{kind=sui}', 0),
+      ],
+    })
+    expect(lifecycleErrorBreakdown(m)).toEqual({
+      stages: [{ value: 'confirm_read', count: 4 }, { value: 'pool_get', count: 2 }],
+      kinds: [{ value: 'psp', count: 4 }, { value: 'unknown', count: 2 }],
+    })
+  })
+
+  it('is empty for a server that predates the breakdown', () => {
+    expect(lifecycleErrorBreakdown(metrics({ counters: [c('psp_lifecycle_sync_error_total', 3)] })))
+      .toEqual({ stages: [], kinds: [] })
+  })
+})
+
+// The user status sync card shows the same two breakdowns as the finding, one
+// line each, so where the failures happen is visible on the card without
+// opening the raw metrics. Each line stands alone: an empty list is left out
+// rather than printed as "by step: ".
+describe('lifecycleCardBreakdown', () => {
+  const failures = (...extra: ReturnType<typeof c>[]) => metrics({
+    counters: [c('psp_lifecycle_sync_error_total', 5), ...extra],
+  })
+
+  it('gives one line per breakdown, the step first, each with its label group', () => {
+    const m = failures(
+      c('psp_lifecycle_sync_error_stage_total{stage=update}', 1),
+      c('psp_lifecycle_sync_error_stage_total{stage=confirm_read}', 4),
+      c('psp_lifecycle_sync_error_panel_kind_total{kind=psp}', 4),
+      c('psp_lifecycle_sync_error_panel_kind_total{kind=3xui}', 1),
+    )
+    expect(lifecycleCardBreakdown(m)).toEqual([
+      {
+        key: 'cards.lifecycle.errors_by_stage', group: 'lifecycle_stage',
+        items: [{ value: 'confirm_read', count: 4 }, { value: 'update', count: 1 }],
+      },
+      {
+        key: 'cards.lifecycle.errors_by_kind', group: 'panel_kind',
+        items: [{ value: 'psp', count: 4 }, { value: '3xui', count: 1 }],
+      },
+    ])
+  })
+
+  it('leaves out a breakdown with nothing in it', () => {
+    const m = failures(c('psp_lifecycle_sync_error_stage_total{stage=update}', 5))
+    expect(lifecycleCardBreakdown(m).map(line => line.key)).toEqual(['cards.lifecycle.errors_by_stage'])
+  })
+
+  it('has nothing to show after a clear, or from a server without the breakdown', () => {
+    expect(lifecycleCardBreakdown(failures())).toEqual([])
+    expect(lifecycleCardBreakdown(metrics({
+      counters: [
+        c('psp_lifecycle_sync_error_stage_total{stage=update}', 0),
+        c('psp_lifecycle_sync_error_panel_kind_total{kind=sui}', 0),
+      ],
+    }))).toEqual([])
+  })
+})
+
+// One list format for the card lines and the finding sentence alike.
+describe('formatBreakdownList', () => {
+  it('writes each item as label and count, joined by the middle dot the cards use', () => {
+    const label = (group: string, value: string) => `${group}:${value}`
+    expect(formatBreakdownList(
+      [{ value: 'psp', count: 5 }, { value: 'sui', count: 2 }], 'panel_kind', label, n => `#${n}`,
+    )).toBe('panel_kind:psp #5 · panel_kind:sui #2')
   })
 })
 
@@ -1213,6 +1321,50 @@ describe('copy for computed keys', () => {
       for (const flat of navs) expect(flat[nav], nav).toBeTruthy()
     }
   })
+})
+
+// The lifecycle breakdowns reach the page as two card lines and one finding
+// sentence, all looked up by computed keys and filled through placeholders,
+// so a renamed placeholder would print "{{list}}" rather than fail to build.
+// Rendering them through the real bundles, with every step and every panel
+// kind failing, proves the keys, the placeholders and the label names at once.
+describe('copy for the lifecycle failure breakdown', () => {
+  const everyStepAndKind = metrics({
+    counters: [
+      c('psp_lifecycle_sync_error_total', LIFECYCLE_ERROR_STAGES.length),
+      ...LIFECYCLE_ERROR_STAGES.map(s => c(`psp_lifecycle_sync_error_stage_total{stage=${s}}`, 1)),
+      ...LIFECYCLE_ERROR_KINDS.map(k => c(`psp_lifecycle_sync_error_panel_kind_total{kind=${k}}`, 1)),
+    ],
+  })
+
+  for (const [lang, bundle, t] of [['zh-CN', zh, tZh], ['en-US', en, tEn]] as const) {
+    const flat = flatten(bundle as Nested)
+    const label = (group: string, value: string) => {
+      const name = flat[`diagnostics.labels.${group}.${labelKey(value)}`]
+      if (typeof name !== 'string') throw new Error(`${lang} has no label for ${group}.${value}`)
+      return name
+    }
+
+    it(`${lang} renders both card lines with every step and panel kind named`, () => {
+      const lines = lifecycleCardBreakdown(everyStepAndKind)
+      expect(lines).toHaveLength(2)
+      for (const line of lines) {
+        const list = formatBreakdownList(line.items, line.group, label, String)
+        const text = t(`diagnostics.${line.key}`, { list })
+        expect(text, line.key).toContain(list)
+        expect(text, line.key).not.toContain('{{')
+      }
+    })
+
+    it(`${lang} renders the finding's breakdown sentence with both lists`, () => {
+      const f = deriveFindings(snap(everyStepAndKind), INTERVAL).find(x => x.id === 'lifecycle_errors')
+      const values = breakdownInterpolation(f!, label, String)
+      const text = t('diagnostics.findings.lifecycle_errors.breakdown', values)
+      expect(text).toContain(values.stages)
+      expect(text).toContain(values.kinds)
+      expect(text).not.toContain('undefined')
+    })
+  }
 })
 
 // The live check that this test was written from: the settings row said one
