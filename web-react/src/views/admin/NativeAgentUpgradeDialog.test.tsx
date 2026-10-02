@@ -81,6 +81,42 @@ it('requires the verified status and checksum returned by the original task look
   expect(api.post).toHaveBeenCalledTimes(1)
 })
 
+// THE NODE'S REASON IS SHOWN WHERE THE OPERATOR IS LOOKING.
+//
+// A Docker NAS node has no shell, so "inspect maintenance logs" under a bare
+// "failed" was advice nobody could follow. The status now carries the code and
+// text the node reported, and the dialog shows them under the state — as TEXT:
+// the reason is the node's own string, so markup in it must arrive as markup
+// characters, never as elements.
+it('shows the reason the node reported for an unsuccessful end, as plain text', async () => {
+  const reason = 'managed Docker container label psp.agent: expected "agt_7", got "<b>agt_other</b>"'
+  for (const ended of [
+    { status: 'failed' as const, upgrade_state: 'failed' as const },
+    { status: 'indeterminate' as const, upgrade_state: 'manual_attention' as const },
+  ]) {
+    api.post.mockResolvedValue({ data: { ...queued, ...ended, result_error_code: 'docker_label_mismatch', result_error: reason } })
+    const view = mount(<NativeAgentUpgradeDialog server={server} onClose={() => {}} />)
+    await selectRelease()
+    fireEvent.click(screen.getByRole('button', { name: 'admin:servers.agent_upgrade.confirm' }))
+    await screen.findByText(`admin:servers.agent_upgrade.state.${ended.upgrade_state}`)
+    expect(screen.getByText('admin:servers.agent_upgrade.reason')).toBeTruthy()
+    const shown = screen.getByText(`docker_label_mismatch: ${reason}`)
+    expect(shown.querySelector('b')).toBeNull()
+    view.unmount()
+  }
+})
+
+// NO REASON, NO LABEL. A node too old to say why — or a task that has not ended —
+// must not grow an empty "reason" heading that suggests something was lost.
+it('shows no reason heading when the node reported none', async () => {
+  api.post.mockResolvedValue({ data: { ...queued, status: 'failed', upgrade_state: 'failed' } })
+  mount(<NativeAgentUpgradeDialog server={server} onClose={() => {}} />)
+  await selectRelease()
+  fireEvent.click(screen.getByRole('button', { name: 'admin:servers.agent_upgrade.confirm' }))
+  await screen.findByText('admin:servers.agent_upgrade.state.failed')
+  expect(screen.queryByText('admin:servers.agent_upgrade.reason')).toBeNull()
+})
+
 it('uses the saved beta preference but still requires an exact reviewed version and confirmation; temporary changes never save it', async () => {
   const saved = { ...server, update_channel: 'beta' as const }
   function Parent() {

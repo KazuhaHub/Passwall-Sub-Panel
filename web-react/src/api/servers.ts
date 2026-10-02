@@ -385,6 +385,11 @@ export interface NativeAgentUpgrade {
   observed_version?: string
   last_seen?: string
   completed_at?: string
+  // The node's own code and text for an unsuccessful end — set only when the
+  // task ended failed or indeterminate. Older nodes send one generic sentence
+  // for every failure; a newer one names the check that failed.
+  result_error_code?: string
+  result_error?: string
 }
 
 export async function requestNativeAgentUpgrade(id: number, version: string, expectedVersion: string, key: string, signal?: AbortSignal) {

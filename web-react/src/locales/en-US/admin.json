@@ -2835,6 +2835,7 @@
       "request_failed": "The request outcome could not be confirmed. Retrying reuses the same identity and does not create another task.",
       "poll_failed": "Status lookup failed; the original upgrade is not cancelled. Check it again.",
       "task": "Task: {{id}}",
+      "reason": "Reason reported by the node",
       "state": {
         "queued": "Queued, waiting for an upgrade-capable agent. Not upgraded yet.",
         "offered": "Dispatched, awaiting evidence of the actual outcome.",
