@@ -166,8 +166,8 @@ func TestInspectProxyGroupsRejectsCycleAndWarnsWithoutRemaining(t *testing.T) {
 }
 
 // A group left on its defaults still references other groups, and those edges
-// are rendered just like configured ones. ⚡ QUIC控制 delegates to 🎮 UDP控制 by
-// default, so pointing 🎮 UDP控制 back at ⚡ QUIC控制 forms a loop that both
+// are rendered just like configured ones. ⚡ QUIC控制 offers 🎮 UDP控制 as a
+// member, so pointing 🎮 UDP控制 back at ⚡ QUIC控制 forms a loop that both
 // Mihomo and sing-box refuse to load; the validator has to see it.
 func TestInspectProxyGroupsRejectsCycleThroughDefaultMembers(t *testing.T) {
 	rules := "- AND,((NETWORK,UDP),(DST-PORT,443)),⚡ QUIC控制\n- NETWORK,udp,🎮 UDP控制\n- MATCH,🚀 节点选择\n"

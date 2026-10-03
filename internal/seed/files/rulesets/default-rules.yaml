@@ -51,13 +51,22 @@ content: |
   - IP-CIDR6,fe80::/10,🎯 全球直连,no-resolve
   - IP-CIDR6,fd00::/8,🎯 全球直连,no-resolve
   # HTTP/3's usual transport (UDP/443) has its own runtime selector. It defaults
-  # to the general 🎮 UDP控制 selector, so one switch governs all UDP; a
-  # subscriber can still select the proxy, DIRECT, or REJECT (which lets
-  # browsers fall back to TCP) for QUIC alone.
+  # to REJECT so browsers fall back to TCP; subscribers can still select DIRECT,
+  # the proxy, or the general UDP selector to allow QUIC explicitly.
   # This intentionally contains no country assumption: overseas users and
   # return-to-China profiles need the same safe controls in the opposite
   # direction. Non-443 QUIC is handled by the general UDP selector below.
   - AND,((NETWORK,UDP),(DST-PORT,443)),⚡ QUIC控制
+  # Claude keeps the AI exit after the global QUIC policy, before general UDP.
+  # Include the short-link domain and IP-only connections to official inbound ranges.
+  # https://platform.claude.com/docs/en/api/ip-addresses
+  - DOMAIN-SUFFIX,clau.de,💬 Ai平台
+  - DOMAIN-SUFFIX,claude.ai,💬 Ai平台
+  - DOMAIN-SUFFIX,claude.com,💬 Ai平台
+  - DOMAIN-SUFFIX,anthropic.com,💬 Ai平台
+  - DOMAIN-SUFFIX,claudeusercontent.com,💬 Ai平台
+  - IP-CIDR,160.79.104.0/23,💬 Ai平台,no-resolve
+  - IP-CIDR6,2607:6bc0::/48,💬 Ai平台,no-resolve
   # All remaining non-local UDP -> the 🎮 UDP控制 selector, default DIRECT.
   # DIRECT allows UDP without relying on the proxy node's UDP support; it
   # leaves from the local exit IP, which can differ from the TCP proxy exit.

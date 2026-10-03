@@ -93,6 +93,7 @@ func TestEnsureUpgradesPreviousIndependentRoutingDefaults(t *testing.T) {
 		t.Fatal(err)
 	}
 	currentRules := rules
+	rules = rulesBeforeClaudeCoverage(t, rules)
 	rules = []byte(strings.ReplaceAll(string(rules), "\r\n", "\n"))
 	// The REJECT-QUIC / PASS-UDP defaults were replaced by DIRECT UDP with QUIC
 	// following it. Only the explanatory comments differ in the file; the
@@ -209,6 +210,78 @@ func TestEnsureUpgradesPreviousIndependentRoutingDefaults(t *testing.T) {
 				assertManagedTestFile(t, dir, "rulesets/default-rules.yaml", wantRules)
 			}
 		})
+	}
+}
+
+func rulesBeforeClaudeCoverage(t *testing.T, body []byte) []byte {
+	t.Helper()
+	text := strings.ReplaceAll(string(body), "\r\n", "\n")
+	start := strings.Index(text, "  # Claude keeps the AI exit")
+	end := strings.Index(text, "  # All remaining non-local UDP")
+	if start < 0 || end <= start {
+		t.Fatal("Claude routing block is missing or misplaced")
+	}
+	previous := text[:start] + text[end:]
+	previous = strings.Replace(previous,
+		"  # to REJECT so browsers fall back to TCP; subscribers can still select DIRECT,\n"+
+			"  # the proxy, or the general UDP selector to allow QUIC explicitly.\n",
+		"  # to the general 🎮 UDP控制 selector, so one switch governs all UDP; a\n"+
+			"  # subscriber can still select the proxy, DIRECT, or REJECT (which lets\n"+
+			"  # browsers fall back to TCP) for QUIC alone.\n", 1)
+	return []byte(previous)
+}
+
+func TestEnsureUpgradesClaudeRulesWithoutOverwritingCustomization(t *testing.T) {
+	current, err := defaultsFS.ReadFile("files/rulesets/default-rules.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	previousLF := rulesBeforeClaudeCoverage(t, current)
+	previousCRLF := []byte(strings.ReplaceAll(string(previousLF), "\n", "\r\n"))
+	for _, source := range []struct {
+		name string
+		body []byte
+		hash string
+	}{
+		{"LF", previousLF, "c01ee0f606137c543324517816117c30c9f3c5f5815073c10af81d81592dee8b"},
+		{"CRLF", previousCRLF, "ebb8aab2ef90c66ecfc3e63fd7bec1a9cde62482c012465aab015211df32349d"},
+	} {
+		if got := testSHA256(source.body); got != source.hash {
+			t.Fatalf("previous official %s rules hash = %s, want %s", source.name, got, source.hash)
+		}
+		for _, customized := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/customized_rules=%t", source.name, customized), func(t *testing.T) {
+				dir := t.TempDir()
+				if err := Ensure(dir); err != nil {
+					t.Fatal(err)
+				}
+				// The rules upgrade must work even when both client templates are customized.
+				for _, name := range []string{"default-mihomo.yaml", "default-sing-box.yaml"} {
+					path := filepath.Join(dir, "templates", name)
+					if err := os.WriteFile(path, []byte("# customized template\n"), 0o644); err != nil {
+						t.Fatal(err)
+					}
+				}
+				previous := append([]byte(nil), source.body...)
+				want := current
+				if customized {
+					previous = append(previous, []byte("# customized rules\n")...)
+					want = previous
+				}
+				if err := os.WriteFile(filepath.Join(dir, "rulesets/default-rules.yaml"), previous, 0o644); err != nil {
+					t.Fatal(err)
+				}
+				for attempt := 0; attempt < 2; attempt++ {
+					if err := Ensure(dir); err != nil {
+						t.Fatal(err)
+					}
+					assertManagedTestFile(t, dir, "rulesets/default-rules.yaml", want)
+					for _, name := range []string{"default-mihomo.yaml", "default-sing-box.yaml"} {
+						assertManagedTestFile(t, dir, "templates/"+name, []byte("# customized template\n"))
+					}
+				}
+			})
+		}
 	}
 }
 
