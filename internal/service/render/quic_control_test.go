@@ -32,13 +32,12 @@ func TestSeedRulesSeparateQUICFromGeneralUDP(t *testing.T) {
 	}
 }
 
-// TestSeedControlsDefaultToDirectUDPAndQUICFollowsUDP pins the shipped
-// defaults: general UDP goes DIRECT (allowed, local exit, never disabled) and
-// QUIC delegates to the UDP selector, so one switch governs all UDP while QUIC
-// can still be overridden on its own. Both formats get the same defaults.
+// TestSeedControlsDefaultToDirectUDPAndRejectedQUIC pins the shipped
+// defaults: general UDP goes DIRECT and Internet UDP/443 goes REJECT.
+// QUIC can still be overridden on its own. Both formats get the same defaults.
 // Mihomo's UDP selector also offers PASS; sing-box has no PASS outbound, so it
 // drops that member and keeps every other choice, the node selector included.
-func TestSeedControlsDefaultToDirectUDPAndQUICFollowsUDP(t *testing.T) {
+func TestSeedControlsDefaultToDirectUDPAndRejectedQUIC(t *testing.T) {
 	body, err := os.ReadFile("../../seed/files/rulesets/default-rules.yaml")
 	if err != nil {
 		t.Fatal(err)
@@ -72,7 +71,7 @@ func TestSeedControlsDefaultToDirectUDPAndQUICFollowsUDP(t *testing.T) {
 			}
 			assertMemberStrings(t, []string{groups[0].Name, groups[1].Name, groups[2].Name}, []string{"🚀 节点选择", "🎮 UDP控制", "⚡ QUIC控制"})
 			assertMemberStrings(t, groups[1].Proxies, []string{"DIRECT", "PASS", "🚀 节点选择", "REJECT"})
-			assertMemberStrings(t, groups[2].Proxies, []string{"🎮 UDP控制", "🚀 节点选择", "DIRECT", "REJECT"})
+			assertMemberStrings(t, groups[2].Proxies, []string{"REJECT", "🎮 UDP控制", "🚀 节点选择", "DIRECT"})
 
 			outbounds := buildSingBoxSelectorOutboundsWithMembers(defaults.Content, items, tc.order, nil)
 			if len(outbounds) < 3 {
@@ -84,8 +83,8 @@ func TestSeedControlsDefaultToDirectUDPAndQUICFollowsUDP(t *testing.T) {
 				}
 			}
 			assertMemberStrings(t, outbounds[1]["outbounds"].([]string), []string{"direct", "🚀 节点选择", "block"})
-			if outbounds[1]["default"] != "direct" || outbounds[2]["default"] != "🎮 UDP控制" {
-				t.Fatalf("sing-box defaults must delegate QUIC to direct UDP: %#v", outbounds[:3])
+			if outbounds[1]["default"] != "direct" || outbounds[2]["default"] != "block" {
+				t.Fatalf("sing-box must reject QUIC and keep general UDP direct: %#v", outbounds[:3])
 			}
 		})
 	}

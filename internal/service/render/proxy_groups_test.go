@@ -157,11 +157,11 @@ func TestBuildProxyGroupsYAML_UDPControl(t *testing.T) {
 	}
 }
 
-// TestBuildProxyGroupsYAML_QUICControlFollowsUDP pins the QUIC selector's
-// default: it delegates to 🎮 UDP控制, so a rule set that declares only the
+// TestBuildProxyGroupsYAML_QUICControlDefaultsToReject pins the QUIC selector's
+// default and optional UDP delegation, so a rule set that declares only the
 // QUIC rule must still emit the UDP selector and, through it, the node
 // selector; otherwise the rendered group would reference a missing group.
-func TestBuildProxyGroupsYAML_QUICControlFollowsUDP(t *testing.T) {
+func TestBuildProxyGroupsYAML_QUICControlDefaultsToReject(t *testing.T) {
 	raw, err := buildProxyGroupsYAML("- AND,((NETWORK,UDP),(DST-PORT,443)),⚡ QUIC控制\n", nil)
 	if err != nil {
 		t.Fatal(err)
@@ -178,7 +178,7 @@ func TestBuildProxyGroupsYAML_QUICControlFollowsUDP(t *testing.T) {
 	if !ok {
 		t.Fatalf("QUIC selector missing: %#v", groups)
 	}
-	assertMemberStrings(t, quic.Proxies, []string{"🎮 UDP控制", "🚀 节点选择", "DIRECT", "REJECT"})
+	assertMemberStrings(t, quic.Proxies, []string{"REJECT", "🎮 UDP控制", "🚀 节点选择", "DIRECT"})
 	if _, ok := byName["🎮 UDP控制"]; !ok {
 		t.Fatalf("QUIC selector must pull in its UDP dependency: %#v", groups)
 	}

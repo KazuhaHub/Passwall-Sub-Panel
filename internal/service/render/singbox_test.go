@@ -160,19 +160,20 @@ func TestBuildSingBoxRouteRules_QUICAndUDPStayIndependent(t *testing.T) {
 	for _, selector := range buildSingBoxSelectorOutboundsWithMembers(raw, nil, nil, nil) {
 		defaults[selector["tag"].(string)] = selector["default"]
 	}
-	if defaults["⚡ QUIC控制"] != "🎮 UDP控制" || defaults["🎮 UDP控制"] != "direct" {
-		t.Fatalf("QUIC must follow UDP and UDP must default to direct: %#v", defaults)
+	if defaults["⚡ QUIC控制"] != "block" || defaults["🎮 UDP控制"] != "direct" {
+		t.Fatalf("QUIC must default to block and UDP must default to direct: %#v", defaults)
 	}
 }
 
-// QUIC follows UDP by default, so an administrator who switches UDP to PASS
-// carries QUIC along. sing-box has to omit both routes and both selectors:
+// When QUIC explicitly follows UDP and an administrator switches UDP to PASS,
+// sing-box has to omit both routes and both selectors:
 // keeping the QUIC selector would leave its default pointing at a UDP
 // selector that is never emitted.
 func TestSingBoxQUICFollowsAdministratorPassUDP(t *testing.T) {
 	raw := "- AND,((NETWORK,UDP),(DST-PORT,443)),⚡ QUIC控制\n- NETWORK,udp,🎮 UDP控制\n- MATCH,🚀 节点选择\n"
 	members := map[string][]domain.ProxyGroupMember{
-		"🎮 UDP控制": {{Kind: "builtin", Value: "PASS"}, {Kind: "builtin", Value: "DIRECT"}},
+		"🎮 UDP控制":  {{Kind: "builtin", Value: "PASS"}, {Kind: "builtin", Value: "DIRECT"}},
+		"⚡ QUIC控制": {{Kind: "proxy_group", Value: "🎮 UDP控制"}},
 	}
 	passThrough := singBoxPassThroughProxyGroups(nil, members, raw)
 	if !passThrough["🎮 UDP控制"] || !passThrough["⚡ QUIC控制"] {

@@ -143,13 +143,37 @@ func Ensure(configDir string) error {
 	if err := upgradeUnmodifiedRoutingDefaults(configDir); err != nil {
 		return err
 	}
-	return upgradeUnmodifiedDNSDefaults(configDir)
+	if err := upgradeUnmodifiedDNSDefaults(configDir); err != nil {
+		return err
+	}
+	return upgradeUnmodifiedClaudeDefaults(configDir)
 }
 
 type managedDefaultUpdate struct {
 	relPath    string
 	oldSHA256s []string
 	newBody    []byte
+}
+
+// upgradeUnmodifiedClaudeDefaults adds Claude domains and inbound IP ranges
+// after the global QUIC policy and ahead of general UDP. Only the shared ruleset
+// changes, so a customized client template does not prevent an untouched
+// ruleset from receiving the fix.
+func upgradeUnmodifiedClaudeDefaults(configDir string) error {
+	const relPath = "rulesets/default-rules.yaml"
+	body, err := defaultsFS.ReadFile("files/" + relPath)
+	if err != nil {
+		return fmt.Errorf("read managed default files/%s: %w", relPath, err)
+	}
+	return upgradeManagedDefaults(configDir, []managedDefaultUpdate{{
+		relPath: relPath,
+		oldSHA256s: []string{
+			// Official LF and CRLF rules before Claude short-link/IP coverage.
+			"c01ee0f606137c543324517816117c30c9f3c5f5815073c10af81d81592dee8b",
+			"ebb8aab2ef90c66ecfc3e63fd7bec1a9cde62482c012465aab015211df32349d",
+		},
+		newBody: body,
+	}})
 }
 
 // upgradeUnmodifiedRoutingDefaults upgrades known official routing defaults to

@@ -209,7 +209,7 @@ func withRequiredProxyGroupDependencies(targets []string) []string {
 			}
 		}
 	}
-	// The QUIC selector delegates to the UDP selector by default, and UDP's own
+	// The QUIC selector offers delegation to the UDP selector, and UDP's own
 	// alternatives reference the canonical node selector. Close that transitive
 	// dependency even when an administrator defines only a QUIC rule.
 	if needsUDPSelector && !hasUDPSelector {
@@ -258,20 +258,16 @@ func normalizeRulePart(raw string) string {
 func proxyGroupChoices(name string) []string {
 	switch {
 	case strings.Contains(name, "QUIC控制"):
-		// HTTP/3 over UDP/443 is independently selectable. Delegating to the
-		// general UDP selector first keeps one switch for all UDP, while the
-		// remaining members let a subscriber override QUIC without changing
-		// other UDP traffic. No PASS member at all: in the shipped rule set the
-		// rule right after the QUIC rule is the general UDP rule, so a QUIC PASS
-		// would land there and duplicate the 🎮 UDP控制 member. A PASS default
-		// would also be dropped from sing-box output with its whole selector.
-		return []string{"🎮 UDP控制", "🚀 节点选择", "DIRECT", "REJECT"}
+		// Disable Internet UDP/443 by default so browsers fall back to TCP.
+		// Users can explicitly allow QUIC directly, via the node, or through
+		// the general UDP selector. PASS has no equivalent sing-box outbound.
+		return []string{"REJECT", "🎮 UDP控制", "🚀 节点选择", "DIRECT"}
 	case strings.Contains(name, "UDP控制"):
 		// General non-local UDP defaults to the local DIRECT exit, independently
 		// of the main node selection. This allows UDP; it neither blocks it nor
 		// depends on the selected node's UDP support, and it does not promise a
-		// proxied source IP. QUIC delegates here by default, while either selector
-		// can still be overridden by subscribers.
+		// proxied source IP. QUIC is rejected by default; either selector can
+		// still be overridden by subscribers.
 		//
 		// PASS hands UDP to the service rules below (YouTube to its group,
 		// mainland IPs to 🇨🇳 中国大陆, the rest to the final MATCH), which the
