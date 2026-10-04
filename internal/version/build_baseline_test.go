@@ -23,7 +23,7 @@ func TestPSPBuildBaselinesStayAligned(t *testing.T) {
 		if err != nil {
 			t.Fatalf("read build baseline %s: %v", path, err)
 		}
-		return string(raw)
+		return strings.ReplaceAll(string(raw), "\r\n", "\n")
 	}
 	toolchains := regexp.MustCompile(`(?m)^toolchain go(\d+\.\d+\.\d+)$`).FindAllStringSubmatch(read("go.mod"), -1)
 	if len(toolchains) != 1 {

@@ -236,7 +236,7 @@ func TestCompatV4FetchAppliesPublishedShape(t *testing.T) {
 	if err := fetchAndApplyAll(context.Background(), sources); err != nil {
 		t.Fatal(err)
 	}
-	if ActiveMinXUI() != MinXUI || ActiveMaxTestedXUI() != "3.8.5" || ActiveMinSUI() != "" || ActiveMaxTestedSUI() != "1.6.3" {
+	if ActiveMinXUI() != MinXUI || ActiveMaxTestedXUI() != "3.9.0" || ActiveMinSUI() != "" || ActiveMaxTestedSUI() != "1.6.3" {
 		t.Fatal("runtime did not apply the V4 XUI/SUI bounds")
 	}
 	if a, ok := LookupXUIAdvisory("v3.7.0"); !ok || a.AffectsXray || a.Text == "" {
@@ -244,6 +244,15 @@ func TestCompatV4FetchAppliesPublishedShape(t *testing.T) {
 	}
 	if a, ok := LookupXUIAdvisory("v3.8.0"); !ok || !a.AffectsXray || a.Severity != "warning" || a.Text == "" {
 		t.Fatal("runtime lost the XUI 3.8.0 core upgrade warning")
+	}
+	if a, ok := LookupXUIAdvisory("v3.9.0"); !ok || !a.AffectsXray || a.Severity != "warning" || a.Text == "" {
+		t.Fatal("runtime lost the XUI 3.9.0 core upgrade warning")
+	}
+	if got := CheckXUI("3.9.0"); got != CompatSupported {
+		t.Fatalf("reviewed 3X-UI 3.9.0 status=%v, want supported", got)
+	}
+	if got := CheckXUI("3.9.1"); got != CompatUntested {
+		t.Fatalf("unreviewed 3X-UI 3.9.1 status=%v, want untested", got)
 	}
 	if a, ok := LookupSUIAdvisory("v1.6.0"); !ok || !a.AffectsXray || a.Text == "" {
 		t.Fatal("runtime lost the canonical SUI advisory")

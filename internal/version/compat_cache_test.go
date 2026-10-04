@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"testing"
@@ -18,6 +19,13 @@ func isolatedCompatCache(t *testing.T, version string) string {
 	t.Helper()
 	oldVersion, oldDir, oldMax, oldMin := Version, getCacheDir(), ActiveMaxTestedXUI(), ActiveMinXUI()
 	oldSUI := ActiveMaxTestedSUI()
+	// Revision guards belong to the same isolated runtime state as the bounds.
+	// Otherwise a freshly reviewed shipped document makes a later test's older
+	// fixture look like a rollback, depending on which test happened to run first.
+	appliedRevisionMu.Lock()
+	oldRevisions := maps.Clone(appliedRevision)
+	appliedRevision = map[string]string{}
+	appliedRevisionMu.Unlock()
 	dir := t.TempDir()
 	Version = version
 	SetCacheDir(dir)
@@ -30,6 +38,9 @@ func isolatedCompatCache(t *testing.T, version string) string {
 		SetActiveMaxTestedXUI(oldMax)
 		SetActiveMinXUI(oldMin)
 		SetActiveMaxTestedSUI(oldSUI)
+		appliedRevisionMu.Lock()
+		appliedRevision = oldRevisions
+		appliedRevisionMu.Unlock()
 	})
 	return dir
 }
@@ -68,7 +79,7 @@ func snapshotDocument(t *testing.T, snapshot *policySnapshot) policySnapshotDocu
 // clock: a document carries a window, and a test that moved with the wall clock
 // would start failing on the day the window closes rather than on the day the
 // document changes.
-var compatCacheNow = time.Date(2026, 9, 20, 12, 0, 0, 0, time.UTC)
+var compatCacheNow = time.Date(2026, 10, 4, 12, 0, 0, 0, time.UTC)
 
 // shippedPolicy parses one of the published per-product documents.
 func shippedPolicy(t *testing.T, name string) PanelRangesPolicy {
@@ -121,9 +132,9 @@ func TestPolicySnapshotOnlyInstallsWhereTheDocumentApplies(t *testing.T) {
 		wantErr    bool
 		wantUnread bool
 	}{
-		{name: "the released line", current: "4.0.0", wantMax: "3.8.5"},
-		{name: "a later release on the same line", current: "4.0.1", wantMax: "3.8.5"},
-		{name: "the top of the reviewed window", current: "4.99.99", wantMax: "3.8.5"},
+		{name: "the released line", current: "4.0.0", wantMax: "3.9.0"},
+		{name: "a later release on the same line", current: "4.0.1", wantMax: "3.9.0"},
+		{name: "the top of the reviewed window", current: "4.99.99", wantMax: "3.9.0"},
 		// A LEGACY STAMP IS NOT AN IDENTITY ANY MORE, so it cannot be matched
 		// against a window either: the document does not apply, and no range is
 		// established for it.
@@ -180,8 +191,8 @@ func TestAnUnwritableSnapshotDirectoryDoesNotFailTheApply(t *testing.T) {
 	if err := applyXUICompatDocument(raw, time.Now().UTC()); err != nil {
 		t.Fatalf("an unwritable snapshot directory failed the apply: %v", err)
 	}
-	if got := ActiveMaxTestedXUI(); got != "3.8.5" {
-		t.Fatalf("active range=%q, want 3.8.5 — the document was validated and must have taken effect", got)
+	if got := ActiveMaxTestedXUI(); got != "3.9.0" {
+		t.Fatalf("active range=%q, want 3.9.0 — the document was validated and must have taken effect", got)
 	}
 }
 
@@ -332,7 +343,7 @@ func TestPolicySnapshotRoundTripsAndKeepsItsProvenance(t *testing.T) {
 
 	// Replay installs, then a different major does not — without the file
 	// having changed between the two.
-	if err := LoadPolicySnapshot(); err != nil || ActiveMaxTestedXUI() != "3.8.5" {
+	if err := LoadPolicySnapshot(); err != nil || ActiveMaxTestedXUI() != "3.9.0" {
 		t.Fatalf("same-major replay: active=%q error=%v", ActiveMaxTestedXUI(), err)
 	}
 	SetActiveMaxTestedXUI("")

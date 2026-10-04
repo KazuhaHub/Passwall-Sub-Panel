@@ -9,7 +9,8 @@ PSP 通过 `/panel/api/*` 对接 3X-UI 面板。本文档维护两件事：
 
 | PSP 版本 | 最低 3X-UI | 已实测通过 | 备注 |
 |---|---|---|---|
-| **v4.0.0-beta.9+ / v4 stable** | **3.4.2** | **3.8.5** | beta.9 已包含负数 `subSortIndex` 修复及 REALITY ML-KEM 订阅适配；schema-v3 overlay 精确区分 prerelease |
+| **v4 stable（4.0.0–4.99.99）** | **3.4.2** | **3.9.0** | 当前 v4 适配器已在官方 3.9.0 / Xray 26.9.30 发布包上实测；详见下方验证记录 |
+| **v4.0.0-beta.9+** | **3.4.2** | **3.8.5** | 历史 beta 验证记录；不将当前 v4 源码的 3.9.0 结果套用于旧二进制 |
 | **v4.0.0-beta.1–beta.8** | **3.4.2** | 3.7.0 | 历史二进制缺少 3X-UI 3.8.x 所需修复，不随远程清单误抬上限 |
 | **v3.9.3+** | **3.4.2** | **3.8.5** | V3 稳定维护线；补齐 Xray 26.9.8+ REALITY ML-KEM 订阅处理，并保留 3X-UI 3.8.x 的负数 `subSortIndex` |
 | **v3.9.1–v3.9.2** | **3.4.2** | 3.7.0 | 新增由所选节点执行的 REALITY 目标扫描；旧发行版没有 3.8.x 所需的两项兼容修复 |
@@ -40,6 +41,50 @@ PSP 通过 `/panel/api/*` 对接 3X-UI 面板。本文档维护两件事：
 - 抬高 `max_tested_xui` / `max_tested_sui` 时，**同一个改动**里把 `.github/workflows/test.yml` 中 `third-party-isolated` 的 `PSP_LIVE_3XUI_IMAGE` / `PSP_LIVE_SUI_IMAGE` 默认镜像改成新上限的 `tag@sha256:digest`；CI 跑的就是评审过的上限，`deploy/test_workflow_test.mjs` 会拒绝两者不一致
 
 ## 历史兼容性事件
+
+### 2026-10-03（洛杉矶）/ 3X-UI 3.9.0 适配器复核 → v4 已测上限 3.8.5 抬到 3.9.0
+
+[v3.9.0](https://github.com/MHSanaei/3x-ui/releases/tag/v3.9.0) 发布于 2026-10-03，
+内置 Xray-core 升级到 **26.9.30**。源码核对上游提交
+`3cd4bf504c3cd8ea9b1c1fdb032a9796c5c43ddb` 的路由、认证、入站、客户端写路径与启动迁移，
+并使用官方 `x-ui-windows-amd64.zip` 发布包启动全新本地 SQLite 隔离面板。
+发布包 SHA-256 为 `0f90b41c95ce081cc4081ab532bf6ae77e8cbaf55f66c39989d01547c84931a6`，
+与 GitHub release asset 的摘要一致；PSP checkout 为 `b0b11571`，Go 1.27.1，windows/amd64。
+面板实际回报 `panelVersion=3.9.0`、`xrayVersion=26.9.30`、`xrayState=running`。
+
+**接口兼容，无需改生产适配器。** 上游普通入站更新现在保留存储的客户端集合、生命周期
+和入站启用状态，避免旧快照覆盖并发操作。PSP 已通过 `/clients/*` 更新客户端，
+通过 `/inbounds/setEnable/:id` 启停入站；配置更新只负责配置，符合新契约。
+临时 Go test overlay 另通过真实 PSP 适配器验证：负数 `subSortIndex=-3` 保留；
+修改入站备注时，其独立启用状态和客户端 UUID、启用、配额、到期不变；
+预置 `resetWeekday=3` 后，PSP `UpdateClient` 将其清零，继续由 PSP 管理续期。
+
+`go test -json -count=1 -timeout=10m ./internal/adapters/xui -run '^TestLive_'`
+的 **9 项 required 测试全部通过**：接口生命周期、REALITY 扫描、连接限制、五组流量底线，
+以及共享客户端、迁移、批量删除和两种并发写入检查。
+`deploy/compat/check-go-results.mjs` 按 `third-party-3xui-live` profile 判定 `pass`，
+无缺失、失败或未声明跳过；两项 fail2ban 测试按现有 profile 记为 **N/A**，不计覆盖。
+GitHub 更新信息和 Xray 版本列表均实际返回成功，远端 REALITY 扫描返回
+`CurveID=X25519MLKEM768`、TLS 1.3、H2 及有效证书。
+机器可读结果与制品身份见 [3x-ui-3.9.0.json](compat/evidence/3x-ui-3.9.0.json)。
+
+升级注意事项：
+
+- 启动迁移会改写 XDNS finalmask 的旧字符串列表、WireGuard outbound 的 DNS 策略并新增表/字段；
+  迁移失败会阻止启动。上游入站保存和 Xray 配置生成路径也会转换旧 XDNS 形状，但使用 XDNS
+  的客户端内核必须支持 26.9.30 新格式。PSP 的普通生成配置不使用 XDNS；手工掩码配置需单独核对。
+- REALITY 延续 26.9.8+ 的 ML-KEM 要求，仍需支持相应选项的客户端及刷新订阅。
+- 请勿在 3X-UI 为 PSP 受管客户端开启每周或其他面板侧续期/重置周期。
+- 新增原生 TUIC、自家节点上的 TUIC/AmneziaWG/MTProto、Telegram 与订阅控制功能不属于本次 PSP 认证。
+
+只更新 `docs/compat/3x-ui-v4.json` 的上限、revision、签发/到期时间与 3.9.0 advisory；
+最低版本仍为 3.4.2，V3 与历史 beta 的既有认证范围不变。
+CI `third-party-isolated` 同步固定为
+`ghcr.io/mhsanaei/3x-ui:v3.9.0@sha256:93a7a68e3d0a65be1b02d2bfc1f3ca02d0e800516a403e103cea2d7c7090855d`，
+摘要从 GHCR OCI index 读取。本地没有容器运行时，因此 **Linux 容器验证仍由 CI 执行**。
+该 job 不在 `pull_request` 上运行；合并前手动触发候选分支的 Test workflow 验证。
+本次只验证当前源码适配器与全新面板；未运行 PSP 历史发布二进制、已有面板数据库升级、
+完整代理流量、完整 PSP traffic/reconcile 链路，或面板/内核自升级操作。
 
 ### 2026-09-16 UTC / 3X-UI 3.8.5、S-UI 1.6.3 与 V3 稳定维护线
 

@@ -38,7 +38,7 @@ func suiPanelRangesJSON(min, max string) []byte {
 	}`, min, max, min, max))
 }
 
-var panelRangesApplyNow = time.Date(2026, 9, 20, 0, 0, 0, 0, time.UTC)
+var panelRangesApplyNow = time.Date(2026, 10, 4, 12, 0, 0, 0, time.UTC)
 
 // applyTestDocuments installs the pair of documents a build at the given window
 // would receive, through the two entry points the fetch uses.
@@ -187,7 +187,7 @@ func TestTheShippedDocumentsYieldTheReviewedCeilings(t *testing.T) {
 		apply   func([]byte, time.Time) error
 		wantMax string
 	}{
-		{name: "3x-ui", apply: applyXUICompatDocument, wantMax: "3.8.5"},
+		{name: "3x-ui", apply: applyXUICompatDocument, wantMax: "3.9.0"},
 		{name: "sui", apply: applySUICompatDocument, wantMax: "1.6.3"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
