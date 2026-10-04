@@ -74,6 +74,9 @@ func (f *Fetcher) Fetch(ctx context.Context, raw string) (FetchResult, error) {
 	if err != nil {
 		return FetchResult{HTTPStatus: status, Bytes: len(body)}, err
 	}
+	if parsed.EntryCount == 0 {
+		return FetchResult{Parsed: parsed, HTTPStatus: status, Bytes: len(body)}, &Error{Code: "dest_list_empty"}
+	}
 	return FetchResult{Parsed: parsed, HTTPStatus: status, Bytes: len(body)}, nil
 }
 

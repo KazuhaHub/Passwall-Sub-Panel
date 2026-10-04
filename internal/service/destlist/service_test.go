@@ -240,3 +240,20 @@ func TestListFailedRoundsAreBoundedAndChangedSourceRetries(t *testing.T) {
 		t.Fatalf("hot shorter interval ignored: %v calls=%d", err, calls.Load())
 	}
 }
+
+func TestListEmptyRemoteRefreshRetainsSuccessfulContent(t *testing.T) {
+	s, store := newListService(t)
+	version := time.UnixMilli(1791000000000).UTC()
+	report := &domain.DestParseReport{Accepted: 1}
+	store.lists[1] = domain.DestList{ID: 1, Name: "remote", Kind: domain.DestListRemote, SourceURL: "https://rules.example.com/list", UpdatedAt: version, LastFetchedAt: &version, Entries: []byte("domain:example.com\n"), EntryCount: 1, ContentSHA256: "old", ParseReport: report}
+	s.fetcher.client.Transport = fetchTransport(func(r *http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(strings.NewReader("#comment\n"))}, nil
+	})
+	if err := s.RefreshList(t.Context(), 1); err == nil || err.Error() != "dest_list_empty" {
+		t.Fatalf("empty remote committed: %v", err)
+	}
+	v, _ := store.GetList(t.Context(), 1)
+	if v.EntryCount != 1 || v.ContentSHA256 != "old" || v.ParseReport != report || !v.LastFetchedAt.Equal(version) || v.LastError != "dest_list_empty" {
+		t.Fatalf("old usable content lost: %+v", v)
+	}
+}

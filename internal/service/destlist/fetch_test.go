@@ -100,6 +100,19 @@ func TestFetchNon2xxAndReadErrorsReturnNoCandidate(t *testing.T) {
 	}
 }
 
+func TestFetchEmptyOrEntirelyIgnoredRemoteSourceIsNotUsable(t *testing.T) {
+	for _, body := range []string{"", "#comment\n", "payload: []\n", "@@||example.com^\n"} {
+		f := NewFetcher()
+		f.client.Transport = fetchTransport(func(r *http.Request) (*http.Response, error) {
+			return &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(body))}, nil
+		})
+		result, err := f.Fetch(t.Context(), "https://rules.example.com/list")
+		if err == nil || err.Error() != "dest_list_empty" || result.HTTPStatus != 200 || result.Bytes != len(body) || result.Parsed.EntryCount != 0 {
+			t.Fatalf("empty input falsely usable: %q %+v / %v", body, result, err)
+		}
+	}
+}
+
 type fetchTransport func(*http.Request) (*http.Response, error)
 
 func (f fetchTransport) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }

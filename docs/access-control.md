@@ -39,6 +39,11 @@ entries. A remote URL containing a broad entry fails as a whole. Clash records
 use CSV parsing: quote values containing commas or use a raw `regexp:` entry;
 ambiguous records are reported instead of silently truncating a regexp.
 
+An empty remote result (including comments-only, empty payloads and entirely
+ignored input) fails with `dest_list_empty`; it cannot overwrite an existing
+usable list or be saved as successful content. Custom empty drafts retain their
+separate behavior and require reference validation before becoming policy matches.
+
 Remote downloads use the existing safehttp transport, require HTTPS through
 redirects, limit redirects, enforce a 60-second request timeout and read one
 byte beyond the body limit to detect overflow. Stored errors omit URL-bearing
