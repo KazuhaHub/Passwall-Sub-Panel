@@ -82,6 +82,7 @@ GitHub 更新信息和 Xray 版本列表均实际返回成功，远端 REALITY �
 CI `third-party-isolated` 同步固定为
 `ghcr.io/mhsanaei/3x-ui:v3.9.0@sha256:93a7a68e3d0a65be1b02d2bfc1f3ca02d0e800516a403e103cea2d7c7090855d`，
 摘要从 GHCR OCI index 读取。本地没有容器运行时，因此 **Linux 容器验证仍由 CI 执行**。
+该 job 不在 `pull_request` 上运行；合并前手动触发候选分支的 Test workflow 验证。
 本次只验证当前源码适配器与全新面板；未运行 PSP 历史发布二进制、已有面板数据库升级、
 完整代理流量、完整 PSP traffic/reconcile 链路，或面板/内核自升级操作。
 
