@@ -737,6 +737,7 @@ type AuditUsage struct {
    - 用 `safehttp` 客户端，超时 60s，非 2xx 算错误；
    - 读取 `limit+1` 字节来判断，**超过 16 MiB 报错，不截断**（不要照抄 F37 的截断写法）；
    - 另支持 Clash rule-provider YAML（`payload:` 列表，`+.x` / `.x` 视为 `domain:x`）；
+   - 解析后没有有效条目时返回 `dest_list_empty`，本次刷新失败并保留旧条目、摘要、last_fetched_at 与成功报告；不能用空文件、只有注释或全部无效的文件覆盖正在使用的列表。首次这样的输入保持未就绪，不能借已收到 2xx 标记就绪。
    - 计算 `content_sha256`，**只有摘要变化才更新 `entries` 并让 generation +1**（F13：否则每次刷新都会让全部 core 重启）。
 3. **v2fly 分类**：
    - 下载 `https://github.com/v2fly/domain-list-community/releases/latest/download/dlc.dat_plain.yml` 与 `.sha256sum`，**校验 sha256 之后**才解析（F47）；
@@ -753,7 +754,7 @@ type AuditUsage struct {
    处理方式：
    - 自定义列表保存时，这些条目逐行列进报告的「忽略」部分；
    - **社区分类**：按 §1.3 逐条剔除，计入报告 ignored，并记录条目与原因；有剩余有效条目时刷新成功，清除旧 last_error。报告中的剔除提示不是刷新故障，不应让有效列表显示 failed。过滤结果为空则失败，`last_error = "dest_list_empty_after_filter"`，保留旧 entries、摘要、last_fetched_at 和成功报告；首次刷新遇到它保持未就绪；
-   - **远程 URL**：出现过宽条目，本次预览或刷新算失败（`last_error = "broad_entry: <条目>"`），保留旧条目；
+   - **远程 URL**：出现过宽条目，本次预览或刷新算失败（`last_error = "broad_entry: <条目>"`），保留旧条目；空解析结果同样按第 2 条失败处理。
    - 策略或白名单引用了含过宽条目的列表 → 400 `dest_list_too_broad`。
 5. **未就绪**：`last_fetched_at IS NULL`，或 `entry_count = 0 且 kind ≠ custom`。自定义列表为空时，被策略引用会被 API 拒绝（400 `dest_policy_no_match`）。
 6. **刷新循环** `dest-list-refresh`：
@@ -1041,7 +1042,7 @@ CompiledPolicy 含 `Policy *protocol.DestinationPolicy` 与 `MintMetadata{kind,g
 - 加一条路由测试断言这一行存在，并且运维员读审计日志时看不到它（它在 `/api/admin/dest/` 前缀下）。
 
 **错误码汇总**：
-- 列表：`dest_list_parse_failed`、`dest_list_in_use`、`dest_list_not_ready`、`dest_list_insecure_url`、`dest_list_too_broad`、`dest_list_too_large`、`dest_list_empty_after_filter`、`dest_list_stale`
+- 列表：`dest_list_parse_failed`、`dest_list_in_use`、`dest_list_not_ready`、`dest_list_insecure_url`、`dest_list_too_broad`、`dest_list_too_large`、`dest_list_empty`、`dest_list_empty_after_filter`、`dest_list_stale`
 - 策略：`dest_policy_invalid`（带 field）、`dest_policy_no_match`、`dest_policy_over_limit`（带 `{kind,used,limit}`）、`dest_policy_stale`、`dest_policy_order_stale`、`dest_name_taken`
 - 分组与豁免：`dest_group_not_found`、`dest_mode_invalid_transition`、`dest_exemption_exists`
 - 其他：`dest_usage_user_required`、`dest_geosite_unavailable`
@@ -1887,6 +1888,7 @@ tab 条：策略 policies | 列表 lists | 白名单分组 allowlist | 记录 re
   - **自定义列表**：按 P2 第 4 条，过宽的行在保存时进「忽略」，以 amber 列在报告里，**不禁用保存**——保存下来的列表本来就不含它们；
   - **社区分类**：过宽条目以 amber 列在解析报告的「忽略」部分，写「已剔除，不会下发」；保留有效条目时允许保存，显示有效数量。过滤后为空时 failing「过滤后没有可用条目」，禁用此次内容提交；已存在列表继续用旧内容，首次列表未就绪。
   - **远程 URL**：预览出现过宽条目时，以 failing 列出并禁用此次保存，任何引用动作都不能绕过整份拒绝规则（P2 第 4 条）。
+  - **远程 URL 的空内容**：预览没有有效条目时 failing「没有可用条目」，禁用此次内容保存；后台遇到同样结果按刷新失败显示，保留旧内容或首次未就绪。
 - 远程地址：
   - 非 https 地址在输入时就报错「只支持 https 地址」，不发请求；
   - **只在点 [测试拉取] 时**才调用预览，不随输入触发（远程预览会真的去拉一次）；读取中显示进度；结果行的 HTTP 状态与大小来自响应的 `http_status`、`bytes`；
@@ -3049,7 +3051,7 @@ tab 条：策略 policies | 列表 lists | 白名单分组 allowlist | 记录 re
 | UI-0 | [PSP #272](https://github.com/KazuhaHub/Passwall-Sub-Panel/pull/272)，draft，`d8722e89`，必需检查成功；第三方面板真实检查为 skipped，不计已验证；附有部分浏览器截图 | 补齐 §7.6 全部截图和交互矩阵、§7.5 无障碍清单，再由所有者审阅实际界面；当前截图不等于批准 |
 | 1a | [Protocol #4](https://github.com/KazuhaHub/Passwall-Protocol/pull/4)，draft，`0175987`，两项 PR 检查成功 | 完成评审、合并后的 consumer toolchains 等门禁，再发布模块 tag v0.3.0；伪版本不等于正式模块发布 |
 | 1b | [Node #78](https://github.com/KazuhaHub/Passwall-Node/pull/78)，draft，`8cda96e`，本次核对全部检查成功，临时依赖前置包 | 前置包合并、依赖正式模块 tag、完整 N8 与 §12 执行/状态实测，再按 Node 发布门槛交付 |
-| 1c | PSP 分支 `Kazuha/access-control-1c`：schema 基础提交 `8d96dd67` 已通过完整 CI；定义事务与发布 CAS 提交 `9b475324` 已通过 [完整 Test workflow](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37188909110)，含三方言及 Linux race；文档提交 `67c18dae` 记录证据。C2 解析草稿尚未提交，真实分类暴露的问题按本版 §1.3 修订，不能记为已通过 | 继续 §11.6；表已存在不能说明定义服务、下发、API、页面或采集已接通；工作区未提交草稿不算交付证据 |
+| 1c | [PSP #273](https://github.com/KazuhaHub/Passwall-Sub-Panel/pull/273)，draft，临时以 UI-0 #272 为 base；定义事务 `9b475324` 已通过完整 CI。解析、缓存与报告 `54ec95b6` 已通过 [完整 Test workflow](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37191810887)，含三方言、Linux race 和固定真实分类数据。服务与循环 `d44e45ca` 的 [PR CI](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37192459421) 尚在运行；Windows 应用控制阻止本地服务测试程序，不能继承前一个 SHA 的通过结果 | 继续 §11.6；应用、持久设置、API、编译/下发、页面和联调尚未接通。所有后续提交各自验证，空表、缓存和草稿 PR 都不表示阶段完成 |
 | 1c′、2a–2c、3、4、5 | 尚无本次核对可确认的交付证据 | 按 §11.1 依赖和对应验收启动；不因前置表存在跳过工作包 |
 | N0-S | Linux 实际环境验证尚未完成 | 按 Q1 先验证，再决定修复提交；保持与首轮主路径分开 |
 
@@ -3104,6 +3106,7 @@ tab 条：策略 policies | 列表 lists | 白名单分组 allowlist | 记录 re
     - 15a　**刷新并发**：阻塞一次旧来源下载，修改 URL/分类或删除列表，再释放下载；旧内容和旧失败均不覆盖新状态、不复活已删除行、不推进错误 generation。相同摘要只更新元数据，完整测试在三方言重复。
     - 15b　**分类过滤与真实数据**：固定 release `20261004053124` 的 YAML 及校验文件，记录 sha256 `c0f7da9a7f95c86b354002650e8268b9d6bb0b638229274d3afa5651a7cf74b8`；离线回归验证 category-finance 可得到非空有效结果、`domain:hsbc` 被剔除、其余合法域名保留，报告列出原因，任何 action 的下发内容均无过宽条目。另用小 fixture 覆盖四种过宽判定、多个属性（含 !cn 与两种分隔兼容）、属性筛选后原始序号、去重与报告样本上限；全部被剔除时不覆盖旧内容或标就绪。后台刷新与重启后 S6/S7 可读同一成功报告；摘要未变只改报告时 generation 与节点部署次数不变；旧刷新报告不能覆盖新版本。checksum、YAML 或原子缓存写入失败时旧缓存与列表继续可用。远程 URL 同一过宽输入仍整份失败；缓存解析与分类过滤的测试必跑，真实 release fixture 固定并在 CI 离线运行，不能仅用本机可选环境变量跳过。
 16. **未就绪列表**：新建一个从未拉取成功的远程列表并在策略中引用它 → 其他策略照常下发；白名单引用它时不能切到执行（409）。
+    - 16a　**空远程内容保护**：有已成功列表时，远程返回空文件、只有注释、空 payload 或全部无法识别的行；预览及刷新均返回 dest_list_empty，旧 entries、摘要、成功报告与 last_fetched_at 保留，generation 不变。首次输入不标就绪、不允许作为有效内容保存。自定义空草稿仍按 P2 第 5 条处理。
 17. **超额度**：导入 60 000 条域名 → 保存接口直接返回 400 `dest_policy_over_limit`；绕过接口（直接改远程列表的内容）→ 刷新判为失败、保留旧条目；构造两次各自合法、叠加后超额的并发写入 → **发布被拒**：`published_generation` 不推进，各节点继续执行当前版本，结论条显示「改动没有下发：…超出额度」，没有任何节点进入回退。
     - 17a　**定义与发布事务**：同一毫秒用同一个 updated_at 保存两次，第二次必须冲突；并发创建 priority 不碰撞；排序缺失/重复 ID 拒绝，排序后旧表单冲突。定义写入或快照插入故障时 generation/定义/发布状态全部回滚；读 G 后插入新定义，旧候选不能标成新 G；旧失败晚于新发布完成，不能重写 publish_error。已发布快照缺失/损坏返回存储错误，不 mint 空策略。以上在 SQLite/MySQL/PG 验证。
 18. **嗅探不足时名单照常下发**：把一个入站改成 metadataOnly → PSP 同时预检 desired 与 LKG；LKG 同样需要域名嗅探时直接转 empty，界面显示「上一版也无法执行，当前没有执行访问策略」，不反复下发 LKG；停用一个用户，2 分钟内他在该节点无法连接。另用仅端口 LKG 验证回退仍可成功，此时显示「仍在执行上一版」。
