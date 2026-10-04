@@ -1174,7 +1174,7 @@ tab 条：策略 policies | 列表 lists | 白名单分组 allowlist | 记录 re
 | 动作 | 从 | 到 |
 |---|---|---|
 | 抽出 `Tone`、`amber`、`stateTone`、徽章组件（现为未导出的 `Badge`，`:66`） | `views/admin/diagnostics/StatusBadge.tsx` | `components/ToneBadge.tsx`，导出 `ToneBadge({ tone, label, testId?, data? })`；诊断页的 `CardStateBadge`/`SeverityBadge` 改为调用它 |
-| **修正对比度**（F56）：`attention` 与 `ok` 的**文字**改用 `md.onSurface`，图标保留 amber / `success` 色，照 `StatusLine` 的 attention 已有的 `text: md.onSurface`（`diagnostics/StatusLine.tsx:25,31`）。这是 UI-0 里唯一一处会改变诊断页外观的地方 | 同上 | 同上；新增 `components/ToneBadge.contrast.test.ts`：浅色与深色主题下，逐个 tone 计算文字与底色的对比度，必须 ≥ 4.5 |
+| **修正对比度**（F56）：`attention`、`warn`、`ok`、`notice` 的**文字**改用 `md.onSurface`，图标保留 amber / `success` / `info` 色，照 `StatusLine` 的 attention 已有的 `text: md.onSurface`（`diagnostics/StatusLine.tsx:25,31`）。实际对浅/深色卡片表面合成 alpha 底色后，warn 与 notice 也未达到 4.5:1，不能只修 attention/ok。这是 UI-0 里唯一一处会改变诊断页外观的地方 | 同上 | 同上；新增 `components/ToneBadge.contrast.test.ts`：浅色与深色主题下，逐个 tone 计算文字与合成后的底色的对比度，必须 ≥ 4.5 |
 | 抽出结论条外壳（底色 + 图标 + 标题 + 副行 + 动作槽）。现在的 props 绑死在 `DiagnosticsSnapshot` 上（`:48-57`） | `views/admin/diagnostics/StatusLine.tsx` | `components/StatusLine.tsx`，props `{ tone: 'failing'\|'attention'\|'measuring'\|'ok'\|'quiet', title, detail?, actions?, meta? }`；`quiet` 是新增的一档：底 `md.surfaceContainerHighest`、文字 `md.onSurfaceVariant`、图标 `RadioButtonUnchecked`；诊断页把自己的 `VerdictTone` 映射过来 |
 | 移动 `KpiTile` 与 `KpiGrid`（两者都已存在，`KpiTile.tsx:32`），并让 `KpiTile` 支持可点：`<KpiTile pressed? onToggle? />`。可点时外层是 `CardActionArea` + `aria-pressed`，尺寸、底色、字号与静态砖完全相同；按下时用 `md.secondaryContainer` 底加 `1px md.primary` 描边 | `views/admin/diagnostics/KpiTile.tsx` | `components/KpiTile.tsx` |
 | `FieldHint` 加 `tone='amber'`：图标用 `amber(theme).fg`，文字用 `md.onSurface`。原来的 `'warning'`（`warning.main` 文字，约 3:1）保留给旧页面，新页面不用 | `components/FieldHint.tsx` | 原地 |
@@ -1184,7 +1184,7 @@ tab 条：策略 policies | 列表 lists | 白名单分组 allowlist | 记录 re
 | 新增 `useDirtyClose(dirty, copy)`：给对话框的 `onClose` 用（✕、Esc、点背景都不是导航，`useLeaveGuard` 拦不到），内部调 `confirm()` | — | `src/hooks/useDirtyClose.ts` |
 | 移动并泛化 `useDrawerParam` | `views/admin/risk/drawerParam.ts` | `src/hooks/useDrawerParam.ts`（§7.1） |
 
-完成判据：除 import 路径与上面写明的对比度修正之外，诊断页、风控中心的现有测试不改。`drawerParam.test.tsx`、`queue/QueueTab.test.tsx` 等直接 import 旧路径的测试只改 import；旧路径各保留一行 re-export，下一个 PR 再删。新页面只从 `components/` 与 `hooks/` 引用这些部件。
+完成判据：除 import 路径、上面写明的对比度修正与 §7.1 明确要求的 history 标记字段 `riskDrawer` → `drawer` 的断言迁移之外，诊断页、风控中心的现有测试不改。`drawerParam.test.tsx`、`queue/QueueTab.test.tsx` 等直接 import 旧路径的测试只改 import（涉及上述标记的断言仅更名字段）；旧路径各保留 re-export，下一个 PR 再删。新页面只从 `components/` 与 `hooks/` 引用这些部件。
 
 **复用清单**（新页面必须用这些，不另写）：
 
