@@ -3884,6 +3884,10 @@
         "label": "Node sync reports refused",
         "desc": "Authenticated native-node sync reports this panel refused. \"Incompatible version\" means the node is effectively offline."
       },
+      "psp_node_policy_status_dropped_total": {
+        "label": "Access control status reports dropped",
+        "desc": "Access control status reports dropped because their format, contents or node capabilities are invalid; config and roster synchronization continues."
+      },
       "psp_saml_acs_failure_total": {
         "label": "SAML sign-ins refused",
         "desc": "Refused SAML sign-ins (and sign-in starts), by reason. Configuration reasons point at identity-provider settings; \"Assertion replayed\" needs investigating."

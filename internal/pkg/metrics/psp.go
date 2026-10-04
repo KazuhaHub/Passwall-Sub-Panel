@@ -564,6 +564,10 @@ const (
 )
 
 var (
+	NodePolicyStatusDroppedTotal = NewCounter(
+		"psp_node_policy_status_dropped_total",
+		"Policy status subtrees dropped after decoding, validation or capability binding failed.",
+	)
 	NodeHostReportTotal = NewCounterVec(
 		"psp_node_host_report_total",
 		"Host telemetry reports handled, by outcome.",

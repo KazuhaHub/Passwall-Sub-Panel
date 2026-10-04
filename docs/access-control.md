@@ -20,7 +20,7 @@ The concrete destination repository now provides policy/list/exemption writes, p
 - Policy/list edit versions advance by at least one millisecond. Column updates persist the exact returned version, including false booleans and nil expiry values. Policy priority is assigned by the server; reorder validates the complete action-specific ID set, including disabled policies, and invalidates affected edit versions.
 - Refresh results compare the captured list version and source under the same lock. Deleted or edited sources reject old success and error results. Failures retain usable entries; successful unchanged content updates only metadata. Disabled policy and group references prevent list deletion.
 - Definition reads start with generation inside a read transaction. MySQL and PostgreSQL explicitly use repeatable read. Publication compares both definition generation and previous published generation and commits the snapshot and publication state atomically. Error recording has the same version preconditions. Missing or malformed published snapshots return an unavailable error rather than an empty policy.
-- Snapshot format compilation, policy validation, candidate minting, pause publication, global exception bundles and custom-entry edits remain application/service work. The repository's JSON integrity check does not establish semantic policy validity.
+- Snapshot format compilation and validation are now provided by the policy service below. Candidate minting, pause publication, global exception bundles and custom-entry edits remain application/service work. The repository's JSON integrity check alone does not establish semantic policy validity.
 
 Local validation: thirteen new repository tests passed, along with the full SQL-store and domain suites and `go vet`. Initial tests failed against empty repository implementations; additional tests caught no-op generation changes and the ORM replacing explicit edit timestamps. Windows race execution is unavailable with the current CGO-disabled toolchain. Implementation commit `9b47532422d77aae7db2cfae32579215d931c4e7` passed the [complete Test workflow](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37188909110): MySQL/PostgreSQL full repository suites, all Linux race shards, static checks, frontend, release-target builds, published Node contracts, Docker baselines and isolated real third-party panels. The server-dialect tests include a writer committing between the generation read and the definition read, proving both reads remain in the older snapshot.
 
@@ -100,7 +100,62 @@ Control initially blocked the service test binary at `d44e45ca`. After the empty
 remote-content regression was added and fixed, the new binary at `e7697f51`
 ran normally without changing security settings: the complete destlist,
 SQL-store, domain and safehttp suites passed locally. Relevant static checks
-also pass. The latest PR CI must still verify that implementation's Linux race
-and server-dialect results; earlier SHA results are separate evidence.
+also pass. The [complete PR Test workflow](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37192773685)
+at `00e8678087c2db1090f424d15dd6f8db7793a536` succeeded, including Linux race,
+MySQL/PostgreSQL and the fixed category fixture. Earlier SHA results remain
+separate evidence.
+
+## Policy compilation and publication service foundations
+
+`internal/service/destpolicy` now builds deterministic ordinary candidates in
+allow/exempt/block/group/observe order. It filters scoped subjects and exemptions
+to the local roster, splits address and protocol matches, omits empty regular
+rules, preserves group allow/catch-all order, and computes the collection level
+and revision from current panel settings, capabilities and engine. Paused or
+empty policies retain only explicitly supported usage collection.
+
+Publication uses a consistent definition read and a generation/publication CAS.
+It supports trailing debounce, maximum wait and forced publication, rechecks
+the debounce window after the read, discards stale candidates/errors and retains
+the prior publication on invalid definitions. The default builder checks active
+aggregate rule/domain/regexp/CIDR quotas, inactive policy syntax and stored list
+integrity, including broad entries. It checks scoped and catch-all rules with
+synthetic subjects that never enter the saved snapshot. Actual subjects and
+final encoded bytes remain node-specific checks. Snapshots have a versioned,
+canonical format containing executable definitions without roster enumeration,
+source URLs, administrator comments or parse reports. Semantic corruption or a
+generation mismatch returns unavailable.
+
+Xray sniffing preflight follows the shared Protocol conformance vectors and
+only checks enabled listeners for domain or protocol rules. Sing-box and
+port-only policies skip that check. Malformed listener data retains its existing
+listener-error attribution rather than becoming a policy sniffing failure.
+
+The sync handler now shadows `policy_status` with a raw JSON field, then validates
+it separately after the control report. Invalid types, content or missing
+capability discard only that observation; configuration and roster synchronization
+continue. A bounded diagnostic reason is logged at most once per agent per
+minute, and `psp_node_policy_status_dropped_total` counts each drop. Its diagnostic
+catalog and explanations are present in both languages. Invalid control fields
+and trailing JSON still reject the report.
+
+Development pins Protocol PR #4's reviewed commit `01759871165c` through the
+fetchable pseudo-version `v0.2.1-0.20261004033110-01759871165c`, with no `replace`.
+The released-node `contract_source` remains unchanged as required for 1c; the
+formal Protocol v0.3.0 dependency and later 1c′ contract update remain release
+gates. Tests first failed against the new builders/stubs and typed status
+decoder. Local Go 1.26.8 tests pass for policy compilation/publication/snapshots,
+sniffing, sync handlers, nodesync and metrics. The diagnostics catalog's 23 tests
+and TypeScript build check pass, as do relevant Go static checks. Three preexisting
+SQLite test helpers now close their connections before Windows temporary-directory
+cleanup. A separate destlist test invocation was blocked by Windows Application
+Control for its new binary; security settings were not changed. These local
+results do not establish CI results for this policy implementation.
+
+This is an unconnected C3 increment. It does not implement the full C3 acceptance:
+candidate mint transactions, ObserveStatus/LKG/exhausted transitions, fallback
+pruning, eligibility/member accounting, policy caches, immediate pause wiring,
+settings and application integration remain outstanding. Existing nodes still
+receive the existing configuration because the compiler is not wired into sync.
 
 Stage 1c still requires complete repository operations for multi-row service transactions and application wiring, policy compilation and candidate minting, fallback handling, settings/API boundaries, access-control views and complete browser acceptance. List services are not connected to app lifecycle, persisted settings or HTTP yet; C2's end-to-end acceptance remains incomplete. Audit ingestion, group modes, privacy/consent and subsequent stages remain governed by the full plan. Repository tests and green CI do not establish completion of these requirements.

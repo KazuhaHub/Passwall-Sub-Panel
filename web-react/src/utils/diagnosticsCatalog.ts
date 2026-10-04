@@ -125,6 +125,7 @@ export const FAMILY_CATALOG: Record<string, FamilyInfo> = {
   psp_node_host_rollup_total: c('node', true),
   psp_node_host_pruned_rows_total: c('node', true),
   psp_node_sync_refused_total: c('node', true),
+  psp_node_policy_status_dropped_total: c('node'),
 
   // --- single sign-on ---
   psp_saml_acs_failure_total: c('sso', true),

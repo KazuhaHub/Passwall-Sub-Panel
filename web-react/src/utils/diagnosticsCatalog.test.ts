@@ -42,7 +42,7 @@ function expectCopy(keys: string[]) {
 }
 
 function goSource(rel: string): string {
-  return fs.readFileSync(new URL(`../../../${rel}`, import.meta.url), 'utf8')
+  return fs.readFileSync(new URL(`../../../${rel}`, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
 }
 
 interface Declared { type: 'counter' | 'gauge' | 'histogram'; labelled: boolean }
