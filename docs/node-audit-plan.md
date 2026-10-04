@@ -162,7 +162,7 @@ R21 同时使用持久化的采集 revision：每次档位实际变化都递增�
 |---|---|---|
 | F47 | v2fly 每个 release 都发布 `dlc.dat_plain.yml`（约 3.6 MB，已展开 `include:`）和 `.sha256sum`。条目只有 `domain:`/`full:`/`regexp:` 三种前缀，属性以后缀 `:@attr` 表示 | PSP 下载并校验后按分类取条目，不用解析 protobuf |
 | F48 | `category-finance` 收的是**正规**银行和券商；`category-cryptocurrency` 235 条（无正则）；`category-porn` 6660 条，其中 140 条是 `regexp:`；**没有**博彩总分类，只有仅覆盖俄罗斯的 `category-betting-ru`（13 条）。2026-10-02 用下载的 `dlc.dat_plain.yml` 复核，sha256 与发布的 `.sha256sum` 一致 | 「高风险金融」没有现成分类；成人内容模板会占用 140 条正则额度 |
-| F49 | 属性有**否定形式**：同一份文件里 `:@ads` 4 535 条、`:@cn` 4 354 条、`:@!cn` 723 条（如 `domain:airchina.ae:@!cn`）。当前文件每个条目最多带一个属性，但格式允许多个 `:@` 后缀 | P2 第 3 条按字面剥离和匹配属性；`!cn` 与 `cn` 是两个不同的属性名 |
+| F49 | 属性有**否定形式**，如 `domain:airchina.ae:@!cn`。2026-10-04 核对上游 [datdump 导出器](https://github.com/v2fly/domain-list-community/blob/master/cmd/datdump/main.go)：首个属性用 `:@`，后续属性用 `,@`（如 `domain:example.com:@cn,@ads`）；兼容读取多个 `:@` 的旧输入。release `20261004053124` 的 YAML 为 3 614 228 字节，sha256 与同版 `.sha256sum` 一致，当前样本仍只有单属性 | P2 第 3 条按字面剥离和匹配属性；`!cn` 与 `cn` 是两个不同的属性名；不能把第二个属性残留在下发域名里 |
 
 ### 2.5 第三版复核时补充核实的事实（2026-10-02）
 
@@ -735,7 +735,7 @@ type AuditUsage struct {
 3. **v2fly 分类**：
    - 下载 `https://github.com/v2fly/domain-list-community/releases/latest/download/dlc.dat_plain.yml` 与 `.sha256sum`，**校验 sha256 之后**才解析（F47）；
    - 整份缓存到 `<DataDir>/destlists/dlc_plain.yml`，所有 geosite 列表共用一次下载；
-   - 条目先剥掉全部 `:@attr` 后缀再下发。属性可以是否定形式 `!attr`（如 `:@!cn`，F49），一个条目可能带多个 `:@` 后缀；剥离和筛选都**按字面**处理属性名，`!cn` 与 `cn` 是两个不同的属性。
+   - 条目先剥掉全部属性后缀再下发。首个属性是 `:@attr`，后续是 `,@attr`，并兼容多个 `:@attr` 的旧输入。属性可以是否定形式 `!attr`（如 `:@!cn`，F49）；剥离和筛选都**按字面**处理属性名，`!cn` 与 `cn` 是两个不同的属性。
    - `geosite_attrs` 为空表示取全部条目，非空表示条目必须含所列的全部属性。可选的属性由 `GET /geosite/categories` 按分类给出（P7），界面只列这些值。
 4. **过宽条目**（适用于所有列表；列表被放行类引用时是硬错误，即 allow 策略、白名单名单、基础放行、补充）：
    - `regexp:` 对一组固定探针（8 个随机域名，写成常量）全部匹配；
