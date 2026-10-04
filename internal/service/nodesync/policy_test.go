@@ -165,3 +165,29 @@ func TestPolicySyncRejectsCompilerPolicyWithoutCapability(t *testing.T) {
 		t.Fatalf("unsupported policy persisted: %+v / %v", stream, err)
 	}
 }
+
+func TestPolicySyncUnsupportedEmptyCandidatePreservesLegacyBytesAndETag(t *testing.T) {
+	f := newConfigAppliedFixture(t)
+	before := f.mint(t)
+	want, err := json.Marshal(before.Config.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.service.policyCandidates = f.repos.NodeAgent.(ports.NodePolicyCandidateRepo)
+	f.service.policies = &testPolicyCoordinator{
+		observe: func(context.Context, string, *protocol.PolicyStatus, []string) error { return nil },
+		compile: func(context.Context, *domain.NodeAgent, *ports.NativeDesiredSnapshot, []string, protocol.ConfigBody) (PolicyCandidate, error) {
+			return PolicyCandidate{Mint: domain.DestPolicyMint{Kind: domain.DestCandidateEmpty, Context: strings.Repeat("b", 64)}}, nil
+		},
+	}
+	report := policySyncReport(f)
+	report.Capabilities = nil
+	after, err := f.service.Sync(t.Context(), report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := json.Marshal(after.Config.Body)
+	if err != nil || string(got) != string(want) || after.Config.ETag != before.Config.ETag || after.Config.Version != before.Config.Version {
+		t.Fatalf("legacy wire changed: before=%+v after=%+v err=%v", before.Config, after.Config, err)
+	}
+}

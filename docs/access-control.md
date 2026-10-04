@@ -201,7 +201,8 @@ these behaviors, missing agents/bodies, stale reports and initial no-op state;
 new boundaries first failed before implementation or repair. Full local SQL-store,
 policy, domain, nodesync and HTTP-handler suites and relevant static checks pass.
 Application wiring remains outstanding. This increment's [published-node systemd acceptance](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37199488550)
-at `ff182925ffb5429d345f6991e655fe2837454645` passed; its full Test CI is pending.
+at `ff182925ffb5429d345f6991e655fe2837454645` passed. Its full Test run was
+superseded by the subsequent boundary commit, whose complete Test CI below passed.
 
 The optional `nodesync.PolicyCoordinator` boundary now observes policy status
 after control ingestion and before outbound compilation, then attaches only the
@@ -215,11 +216,29 @@ first failed before implementation; full local nodesync, HTTP-handler, SQL-store
 and policy suites plus relevant static checks pass. Tests inject the compiler
 and real durable observer/repositories, proving that a rejection influences
 the same response. The production compiler/state machine and application
-activation remain outstanding; this boundary increment's CI is pending.
+activation remain outstanding. At `48bfb4becb0495089ef3e024efd67531008fa8eb`,
+the [complete Test workflow](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37199824644)
+and [published-node systemd acceptance](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37199824648)
+both succeeded, covering the durable observer and optional sync boundary.
+
+The fallback-pruning increment adds pure `PruneFallback` against one published
+definition snapshot. It preserves confirmed matches, action and rule order,
+removes disabled/deleted policy sources, removes all rules of retired allowlist
+groups and filters scoped subjects to the current roster without adding members.
+Current published exemptions replace old exemptions; collection and revision
+come from current capabilities, engine and panel settings. Pause takes priority.
+An absent LKG returns nil or the supported usage-only candidate; malformed LKG
+is observable as unavailable, and an invalid/over-limit pruned policy is rejected
+before minting. Returned rule slices do not alias LKG. Five pruning tests first
+failed against the stub and now pass, along with full local policy, nodesync,
+SQL-store and HTTP-handler suites and static checks. The shared compiler/candidate
+types now live in `ports`, avoiding service import cycles. An additional sync
+test confirms that capability-less empty candidates preserve legacy bytes,
+ETags and versions. This increment's CI is pending.
 
 This is a C3 foundation with an optional tested sync boundary. It does not
-implement the full C3 acceptance: production compiler and observer assembly, fallback
-pruning, eligibility/member accounting, policy caches, immediate pause wiring,
+implement the full C3 acceptance: production compiler/state-machine and observer
+assembly, pruning integration, eligibility/member accounting, policy caches, immediate pause wiring,
 settings and application integration remain outstanding. Existing nodes still
 receive the existing configuration because the compiler is not wired into sync.
 

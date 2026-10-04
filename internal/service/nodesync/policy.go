@@ -12,17 +12,8 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 )
 
-// PolicyCoordinator owns durable status transitions and compiles only the
-// destination subtree. The sync coordinator remains the sole config minter.
-type PolicyCoordinator interface {
-	ObserveStatus(context.Context, string, *protocol.PolicyStatus, []string) error
-	Compile(context.Context, *domain.NodeAgent, *ports.NativeDesiredSnapshot, []string, protocol.ConfigBody) (PolicyCandidate, error)
-}
-
-type PolicyCandidate struct {
-	Policy *protocol.DestinationPolicy
-	Mint   domain.DestPolicyMint
-}
+type PolicyCoordinator = ports.DestPolicyCompiler
+type PolicyCandidate = ports.DestPolicyCandidate
 
 func (s *Service) mintConfig(ctx context.Context, agent *domain.NodeAgent, snapshot *ports.NativeDesiredSnapshot, capabilities []string, body protocol.ConfigBody, now time.Time) (protocol.ConfigBody, *domain.NodeAgentStream, error) {
 	if s.policies == nil {
