@@ -28,6 +28,33 @@ func destinationTestPolicy(name string) domain.DestPolicy {
 	return domain.DestPolicy{Name: name, Action: domain.DestBlock, Scope: domain.DestScopeAll, Inline: domain.DestInline{Ports: "25,465,587"}, Enabled: true}
 }
 
+func TestDestinationPauseAndPublishedStateKeepBodyAndLiveFlagConsistent(t *testing.T) {
+	r := newDestDefinitionRepo(t)
+	now := time.UnixMilli(1791000000000).UTC()
+	p := destinationTestPolicy("pause")
+	if err := r.SavePolicy(t.Context(), &p, time.Time{}, now); err != nil {
+		t.Fatal(err)
+	}
+	body := []byte(`{"generation":1}`)
+	if err := r.Publish(t.Context(), 1, 0, body, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.SetPaused(t.Context(), true, now.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	state, snapshot, found, err := r.PublishedState(t.Context())
+	if err != nil || !found || !state.Paused || state.Generation != 2 || state.PublishedGeneration != 1 || snapshot.Generation != state.PublishedGeneration || !bytes.Equal(snapshot.Body, body) || state.FirstUnpublishedAt == nil {
+		t.Fatalf("pause read mixed state/snapshot: %+v %+v / %v", state, snapshot, err)
+	}
+	if err := r.SetPaused(t.Context(), true, now.Add(2*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	after, _, _, err := r.PublishedState(t.Context())
+	if err != nil || after.Generation != state.Generation || !after.LastWriteAt.Equal(*state.LastWriteAt) {
+		t.Fatalf("repeated pause advanced generation: %+v / %v", after, err)
+	}
+}
+
 func TestDestinationDefinitionWriteAdvancesGenerationWithTheRow(t *testing.T) {
 	r := newDestDefinitionRepo(t)
 	first := time.UnixMilli(1791000000000).UTC()

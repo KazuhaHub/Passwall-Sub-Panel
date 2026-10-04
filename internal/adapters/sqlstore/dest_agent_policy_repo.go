@@ -112,7 +112,7 @@ func (r *DestAgentPolicyRepo) Update(ctx context.Context, agentID string, now ti
 		if len(updates) == 0 {
 			return nil
 		}
-		if old.AppliedSHA256 != next.AppliedSHA256 || !bytes.Equal(old.AppliedBody, next.AppliedBody) || !runtimeTimeEqual(old.AppliedAt, next.AppliedAt) || old.AppliedRuleCount != next.AppliedRuleCount || !reflect.DeepEqual(old.AppliedGroups, next.AppliedGroups) {
+		if old.AppliedSHA256 != next.AppliedSHA256 || !bytes.Equal(old.AppliedBody, next.AppliedBody) || !runtimeTimeEqual(old.AppliedAt, next.AppliedAt) || old.AppliedRuleCount != next.AppliedRuleCount || !slices.Equal(old.AppliedGroups, next.AppliedGroups) {
 			if err := validateRuntimeApplied(next); err != nil {
 				return err
 			}
@@ -199,6 +199,12 @@ func runtimePolicyUpdates(old, next destAgentPolicyRow) map[string]any {
 	before, after := runtimePolicyFields(old), runtimePolicyFields(next)
 	updates := map[string]any{}
 	for key, value := range after {
+		// SQL JSON scans can materialize [] where the domain representation
+		// uses nil. Empty sets are identical and must not trigger an LKG rewrite
+		// or validation against bodies deliberately omitted from this read.
+		if key == "applied_groups" && slices.Equal(old.AppliedGroups, next.AppliedGroups) || key == "precheck_listeners" && slices.Equal(old.PrecheckListeners, next.PrecheckListeners) || key == "reported_listeners" && slices.Equal(old.ReportedListeners, next.ReportedListeners) || key == "applied_at" && runtimeTimeEqual(old.AppliedAt, next.AppliedAt) || key == "reported_at" && runtimeTimeEqual(old.ReportedAt, next.ReportedAt) {
+			continue
+		}
 		if !reflect.DeepEqual(before[key], value) {
 			updates[key] = value
 		}

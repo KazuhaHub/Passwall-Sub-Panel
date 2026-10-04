@@ -295,10 +295,19 @@ func (r *DestDefinitionRepo) RecordPublishError(ctx context.Context, generation,
 }
 
 func (r *DestDefinitionRepo) Published(ctx context.Context) (domain.DestPolicySnapshot, bool, error) {
+	_, snapshot, found, err := r.PublishedState(ctx)
+	return snapshot, found, err
+}
+
+// PublishedState returns the live pause flag and its selected published body
+// from one consistent read, so an older pause read cannot override a new one.
+func (r *DestDefinitionRepo) PublishedState(ctx context.Context) (domain.DestPolicyState, domain.DestPolicySnapshot, bool, error) {
+	var state domain.DestPolicyState
 	var snapshot domain.DestPolicySnapshot
 	found := false
 	err := r.readTransaction(ctx, func(tx *gorm.DB) error {
-		state, err := readDestState(tx)
+		var err error
+		state, err = readDestState(tx)
 		if err != nil {
 			return err
 		}
@@ -317,7 +326,7 @@ func (r *DestDefinitionRepo) Published(ctx context.Context) (domain.DestPolicySn
 		return nil
 	})
 	if err != nil {
-		return domain.DestPolicySnapshot{}, false, err
+		return domain.DestPolicyState{}, domain.DestPolicySnapshot{}, false, err
 	}
-	return snapshot, found, nil
+	return state, snapshot, found, nil
 }

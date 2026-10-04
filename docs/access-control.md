@@ -252,12 +252,43 @@ the three relevant capabilities, desired core engine/version and enabled-listene
 sniffing fingerprints. Task capabilities, roster, destination policy and unrelated
 listener fields do not unlock a retry. Context tests first failed against the stub.
 Latest local policy/SQL-store test executables were blocked by Windows Application
-Control after compilation; security settings were unchanged. CI validation for
-this increment is pending, and the production compiler remains to be connected.
+Control after compilation; security settings were unchanged. At
+`b681d906d99d2cd1584925250f5117a8648b28da`, all backend CI checks succeeded.
+The first frontend run had one installation-view test exceed 5 seconds; its
+24-test file passed locally, and rerunning only failed CI jobs succeeded.
+The [complete Test workflow, attempt 2](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37230887464)
+and [published-node systemd acceptance](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37230887467)
+are successful at that SHA.
+
+The candidate-selection and compiler increment joins publication, current input
+capabilities, node quota/preflight, durable decisions, lazy LKG loading and the
+existing atomic config/candidate mint boundary. The independent quota candidate
+uses all tag-matched members, surviving removal of ineligible roster clients.
+Same-context rejection selects pruned LKG; exhausted fallback stays empty across
+roster changes and restarts; core/publication/sniffing context changes retry
+without erasing the original rejection before desired confirmation. Preflight
+and full validation run on fallback too. `SetPaused` advances definition generation
+atomically and idempotently. `PublishedState` reads its live pause flag and
+selected published body in the same consistent transaction; pause changes force
+publication before compiling and dominate LKG. Invalid new definitions retain
+the prior valid snapshot without vetoing the live pause flag.
+
+Five candidate tests first failed against the stub. Three production-compiler
+sync tests use real SQL repositories and prove rejection/recovery, immediate
+pause without replacing LKG, and rejected fallback exhaustion surviving compiler
+restart. The initial compiler integration and pause repository tests failed
+before implementation. Integration also exposed a report-only JSON empty-set
+comparison bug: SQL `[]` and domain nil must be equivalent rather than triggering
+confirmed-body validation against omitted blobs. A dedicated regression first
+failed and now passes. Full local policy, nodesync, SQL-store and HTTP-handler
+suites and relevant static checks pass; all three production integration tests
+pass. This increment's CI is pending. The production input provider (panel
+settings, group lookup and tag-matched membership), issue/resync integration,
+compile/config caches and application activation remain outstanding.
 
 This is a C3 foundation with an optional tested sync boundary. It does not
-implement the full C3 acceptance: production compiler/state-machine and observer
-assembly, pruning integration, eligibility/member accounting, policy caches, immediate pause wiring,
+implement the full C3 acceptance: production input-provider and application
+assembly, issue/resync integration, eligibility/member accounting, policy caches, immediate pause UI/API wiring,
 settings and application integration remain outstanding. Existing nodes still
 receive the existing configuration because the compiler is not wired into sync.
 

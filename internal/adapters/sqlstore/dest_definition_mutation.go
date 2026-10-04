@@ -10,6 +10,19 @@ import (
 	"gorm.io/gorm"
 )
 
+func (r *DestDefinitionRepo) SetPaused(ctx context.Context, paused bool, now time.Time) error {
+	return r.mutate(ctx, now, func(tx *gorm.DB) (bool, error) {
+		var state destPolicyStateRow
+		if err := tx.First(&state, "id = ?", 1).Error; err != nil {
+			return false, err
+		}
+		if state.Paused == paused {
+			return false, nil
+		}
+		return true, tx.Model(&destPolicyStateRow{}).Where("id = ?", 1).UpdateColumn("paused", paused).Error
+	})
+}
+
 func (r *DestDefinitionRepo) ReorderPolicies(ctx context.Context, action domain.DestAction, ids []int64, now time.Time) error {
 	if action != domain.DestAllow && action != domain.DestBlock && action != domain.DestObserve {
 		return domain.ErrValidation

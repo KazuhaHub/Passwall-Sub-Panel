@@ -280,3 +280,21 @@ func TestDestinationObserverPersistsRejectionContextAndTracksSameGenerationRetry
 		t.Fatalf("retry rejection stayed on old context: %+v / %v invalidated=%d", state, err, invalidated)
 	}
 }
+
+func TestDestinationObserverReportOnlyPreservesConfirmedEmptyGroupSet(t *testing.T) {
+	db, _, repo, meta, now := policyObserverFixture(t)
+	o := destpolicy.NewObserver(repo, func() time.Time { return now })
+	caps := []string{protocol.CapabilityDestinationPolicy}
+	if err := o.ObserveStatus(t.Context(), "agt_policy_mint", &protocol.PolicyStatus{State: "applied", Digest: meta.DesiredSHA256}, caps); err != nil {
+		t.Fatal(err)
+	}
+	remove := assertRuntimeMetadataOnly(t, db)
+	defer remove()
+	if err := o.ObserveStatus(t.Context(), "agt_policy_mint", &protocol.PolicyStatus{State: "applied", Digest: strings.Repeat("c", 64)}, caps); err != nil {
+		t.Fatalf("report-only update revalidated omitted LKG body: %v", err)
+	}
+	state, err := repo.Get(t.Context(), "agt_policy_mint", false)
+	if err != nil || state.AppliedSHA256 != meta.DesiredSHA256 || len(state.AppliedGroups) != 0 {
+		t.Fatalf("confirmed state changed: %+v / %v", state, err)
+	}
+}
