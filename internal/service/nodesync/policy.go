@@ -2,7 +2,6 @@ package nodesync
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"slices"
 	"time"
@@ -31,7 +30,7 @@ func (s *Service) mintConfig(ctx context.Context, agent *domain.NodeAgent, snaps
 		return body, nil, fmt.Errorf("%w: destination policy requires node capability", domain.ErrValidation)
 	}
 	body.Policy = candidate.Policy
-	canonical, err := json.Marshal(body)
+	canonical, err := s.encodePolicyConfig(body, candidate.CacheKey)
 	if err != nil {
 		return body, nil, fmt.Errorf("nodesync: encode policy config: %w", err)
 	}

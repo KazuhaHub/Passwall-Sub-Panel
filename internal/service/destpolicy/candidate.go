@@ -159,15 +159,18 @@ func setCandidateCollect(result *ports.DestPolicyCandidate) {
 		result.Mint.CollectEffective = string(result.Policy.Collect)
 	}
 }
-func candidateDecision(s domain.DestAgentPolicy) any {
-	return struct {
-		Reason             string
-		RejectedGeneration int64
-		RejectedContext    string
-		Exhausted          bool
-		Limit              *domain.DestPublishError
-		Listeners          []string
-	}{s.FallbackReason, s.RejectedGeneration, s.RejectedContext, s.FallbackExhausted, s.OverLimit, s.PrecheckListeners}
+
+type candidateDecisionFields struct {
+	Reason             string
+	RejectedGeneration int64
+	RejectedContext    string
+	Exhausted          bool
+	Limit              *domain.DestPublishError
+	Listeners          []string
+}
+
+func candidateDecision(s domain.DestAgentPolicy) candidateDecisionFields {
+	return candidateDecisionFields{s.FallbackReason, s.RejectedGeneration, s.RejectedContext, s.FallbackExhausted, s.OverLimit, s.PrecheckListeners}
 }
 func nodePolicyLimit(p *protocol.DestinationPolicy) *domain.DestPublishError {
 	if p == nil {

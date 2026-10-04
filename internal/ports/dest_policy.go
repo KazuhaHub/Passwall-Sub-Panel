@@ -18,6 +18,9 @@ type DestPolicyCompiler interface {
 type DestPolicyCandidate struct {
 	Policy *protocol.DestinationPolicy
 	Mint   domain.DestPolicyMint
+	// CacheKey is produced by the compiler for immutable compiled output.
+	// Empty disables canonical-config caching. Source minting is never skipped.
+	CacheKey string
 }
 
 // UserMembershipRepo reads only identity/group columns. Quota membership includes

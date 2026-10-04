@@ -346,11 +346,44 @@ counter/activation wiring remain outstanding; this increment does not enable
 the policy compiler in the application.
 Full local policy/group/nodesync/HTTP-handler suites and static checks pass;
 the actual-service integration, user/node suites and relevant static checks
-also pass. This increment awaits its own CI.
+also pass. At `db5554307dc76e7f7ce3bbf60fc6eaf9e7562834`, the
+[complete Test workflow](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37234279420)
+and [published-node systemd acceptance](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37234279421)
+both succeeded.
+
+The compiler now caches prepared policies and selected candidates separately,
+each bounded to 64 entries and a 32 MiB conservative weight budget. Only inputs
+with a tracked, matching membership generation are eligible. Keys include agent
+and panel scope, roster identities, membership generation, publication/context,
+collection mode/revision, engine and pause; selection additionally includes the
+confirmed digest, rejection attribution and exhaustion/limit/precheck decisions.
+Every call still checks current controls and durable runtime metadata. Selection
+entries become visible only after the runtime transaction succeeds. Returned
+policies are isolated from cached slices; untracked inputs remain fresh.
+
+Nodesync caches canonical ConfigBody bytes by the policy-free base digest and
+compiler key, bounded to 64 entries and 32 MiB. Listener/base changes and changed
+compiler keys encode anew. Empty compiler keys and oversized payloads remain
+uncached, and encoding errors cannot poison later attempts. Even a cache hit
+calls the atomic candidate minter: source-only generation changes persist with
+the same wire ETag, and transaction failures remain errors. Repository adapters
+receive their own byte slice. The SQL minter still repeats canonical decoding,
+policy validation and JSON serialization; eliminating that remaining idle cost
+is a separate pending increment, with durable source checks retained.
+
+Initial compiler and canonical-config regressions failed before implementation.
+Tests now cover idle compilation/encoding, post-commit publication, changed
+membership/context/collection/capabilities/roster, LKG digest changes, corrupt-LKG
+recovery, panel-scope isolation, source-only mint and persistence failure. The
+panel-scope regression exposed a missing panel key and first failed before its
+fix. Weighted eviction/replacement and concurrent cache bounds are covered.
+Full local policy, nodesync, SQL-store and cache suites and relevant static
+checks pass. This increment awaits its own CI; application activation remains
+pending.
 
 This is a C3 foundation with an optional tested sync boundary. It does not
 implement the full C3 acceptance: application assembly, issue/resync integration,
-eligibility integration and membership-change invalidation, policy caches, immediate pause UI/API wiring,
+eligibility integration and membership-change invalidation wiring, remaining idle mint preprocessing, immediate pause UI/API wiring,
 settings and application integration remain outstanding. Existing nodes still
 receive the existing configuration because the compiler is not wired into sync.
 

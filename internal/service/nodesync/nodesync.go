@@ -19,6 +19,7 @@ import (
 	nodeprotocol "github.com/KazuhaHub/passwall-protocol/protocol"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/boundedcache"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/keyedmutex"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/log"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
@@ -62,9 +63,11 @@ type Service struct {
 	// host ingests the optional telemetry subtree. NIL MEANS THIS BUILD DOES NOT
 	// COLLECT IT, which is what keeps a panel with no metrics repository from
 	// advertising a cadence it cannot honour.
-	host             *nodemetrics.Service
-	policies         PolicyCoordinator
-	policyCandidates ports.NodePolicyCandidateRepo
+	host               *nodemetrics.Service
+	policies           PolicyCoordinator
+	policyCandidates   ports.NodePolicyCandidateRepo
+	policyConfigCache  *boundedcache.Cache[[]byte]
+	policyConfigEncode func(nodeprotocol.ConfigBody) ([]byte, error)
 }
 
 // receivedFullReport keeps the control plane's receipt time beside the latest
@@ -121,6 +124,7 @@ func New(options Options) (*Service, error) {
 		grants:   make(map[string]map[nodeprotocol.ClientKey]int64),
 		host:     options.Host,
 		policies: options.Policies, policyCandidates: options.PolicyCandidates,
+		policyConfigCache: boundedcache.New[[]byte](64, 32<<20),
 	}, nil
 }
 

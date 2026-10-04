@@ -11,6 +11,7 @@ import (
 
 	"github.com/KazuhaHub/passwall-protocol/protocol"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/boundedcache"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 )
 
@@ -47,6 +48,10 @@ type Compiler struct {
 	publicationMu          sync.Mutex
 	publicationCached      bool
 	publicationDefinitions domain.DestDefinitions
+	prepare                func(domain.DestDefinitions, RosterInput, RosterInput, protocol.ConfigBody) (*PreparedCandidate, error)
+	selectCandidate        func(*PreparedCandidate, *domain.DestAgentPolicy) (ports.DestPolicyCandidate, bool, error)
+	preparedCache          *boundedcache.Cache[*PreparedCandidate]
+	selectionCache         *boundedcache.Cache[cachedSelection]
 }
 
 func NewCompiler(options CompilerOptions) (*Compiler, error) {
@@ -60,6 +65,9 @@ func NewCompiler(options CompilerOptions) (*Compiler, error) {
 		options.MinSeconds = func(context.Context) (int, error) { return 60, nil }
 	}
 	c := &Compiler{definitions: options.Definitions, runtime: options.Runtime, inputs: options.Inputs, minSeconds: options.MinSeconds, now: options.Now}
+	c.prepare, c.selectCandidate = PrepareCandidate, SelectCandidate
+	c.preparedCache = boundedcache.New[*PreparedCandidate](64, 32<<20)
+	c.selectionCache = boundedcache.New[cachedSelection](64, 32<<20)
 	c.publisher = NewPublisher(options.Definitions, nil)
 	c.publisher.now = options.Now
 	c.observer = NewObserver(options.Runtime, options.Now)
@@ -131,34 +139,61 @@ func (c *Compiler) Compile(ctx context.Context, agent *domain.NodeAgent, snapsho
 	for id, groupID := range roster.UserGroups {
 		quota.UserGroups[id] = groupID
 	}
-	prepared, err := PrepareCandidate(defs, roster, quota, base)
+	prepared, inputKey, err := c.prepareCached(agent.AgentID, agent.PanelID, defs, roster, quota, base)
 	if err != nil {
 		return ports.DestPolicyCandidate{}, err
 	}
 	var result ports.DestPolicyCandidate
+	var beforeKey, afterKey string
+	var pending *cachedSelection
 	changed, err := c.runtime.Update(ctx, agent.AgentID, c.now().UTC(), func(runtime *domain.DestAgentPolicy, loadBodies func() error) (bool, error) {
-		candidate, changed, err := SelectCandidate(prepared, runtime)
+		pending = nil
+		key := selectionKey(inputKey, *runtime)
+		if key != "" {
+			if cached, found := c.selectionCache.Get(key); found {
+				changed := cached.decision.apply(runtime)
+				result = cached.candidate
+				return changed, nil
+			}
+		}
+		candidate, changed, err := c.selectCandidate(prepared, runtime)
 		if errors.Is(err, errPolicyBodiesRequired) {
 			if err := loadBodies(); err != nil {
 				return false, err
 			}
-			candidate, changed, err = SelectCandidate(prepared, runtime)
+			candidate, changed, err = c.selectCandidate(prepared, runtime)
 			if errors.Is(err, errPolicyBodiesRequired) {
 				return false, fmt.Errorf("%w: missing exact confirmed policy body", domain.ErrUnavailable)
 			}
 		}
 		if err == nil {
 			result = candidate
+			if key != "" {
+				beforeKey, afterKey = key, selectionKey(inputKey, *runtime)
+				result.CacheKey = afterKey
+				value := cachedSelection{candidate: cloneCandidate(result), decision: cloneDecision(candidateDecision(*runtime))}
+				pending = &value
+			}
 		}
 		return changed, err
 	})
 	if err != nil {
 		return ports.DestPolicyCandidate{}, err
 	}
+	if pending != nil {
+		weight := policyWeight(pending.candidate.Policy) + 512
+		for _, listener := range pending.decision.Listeners {
+			weight += len(listener) + 32
+		}
+		c.selectionCache.Put(beforeKey, *pending, weight)
+		if afterKey != beforeKey {
+			c.selectionCache.Put(afterKey, *pending, weight)
+		}
+	}
 	if changed && c.invalidate != nil {
 		c.invalidate(agent.AgentID)
 	}
-	return result, nil
+	return cloneCandidate(result), nil
 }
 
 func (c *Compiler) publishedDefinitions(ctx context.Context) (domain.DestDefinitions, domain.DestPolicyState, error) {
