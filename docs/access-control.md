@@ -76,4 +76,23 @@ new report/cache implementation; those require CI on this code's SHA.
 
 ## Remaining implementation
 
-Stage 1c still requires complete repository operations for multi-row service transactions and application wiring, the list service's preview/save/refresh operations and tracked refresh loop, policy compilation and candidate minting, fallback handling, settings/API boundaries, access-control views and complete browser acceptance. The parser and cache are not connected to app lifecycle or HTTP yet; C2 remains incomplete. Audit ingestion, group modes, privacy/consent and subsequent stages remain governed by the full plan. Repository tests and green CI do not establish completion of these requirements.
+The list service now provides read-only previews, immutable-kind saves preserving
+custom source text, pending remote sources on transient fetch failures, and
+version-checked refreshes. A refresh round reads lightweight source metadata,
+downloads the shared catalog once, selects each category and commits each result
+against its captured version. Manual and scheduled refreshes use the same per-list
+singleflight gate. Failed attempts are bounded by the current refresh interval;
+changing a source allows a new attempt. The `dest-list-refresh` worker registers
+through `safego.GoTracked`, rereads the supplied setting each round, wakes after
+a setting notification and stops with its lifecycle context. It has not yet
+been registered by the app or exposed by HTTP.
+
+Service tests cover preview side effects, original source/report retention,
+pending versus invalid remote sources, empty-category preservation, edits/deletion
+during a slow fetch, shared downloads, interval changes, failed-attempt bounds,
+tracked shutdown and recovery from a settings read failure. Windows Application
+Control blocked execution of the newly built service test binary; local static
+checks pass, but the service behavior and loop tests require the Linux CI run on
+their implementation SHA before they count as verified.
+
+Stage 1c still requires complete repository operations for multi-row service transactions and application wiring, policy compilation and candidate minting, fallback handling, settings/API boundaries, access-control views and complete browser acceptance. List services are not connected to app lifecycle, persisted settings or HTTP yet; C2's end-to-end acceptance remains incomplete. Audit ingestion, group modes, privacy/consent and subsequent stages remain governed by the full plan. Repository tests and green CI do not establish completion of these requirements.

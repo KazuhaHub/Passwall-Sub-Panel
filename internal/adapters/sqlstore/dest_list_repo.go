@@ -12,6 +12,29 @@ import (
 	"gorm.io/gorm"
 )
 
+func (r *DestDefinitionRepo) GetList(ctx context.Context, id int64) (domain.DestList, error) {
+	if id <= 0 {
+		return domain.DestList{}, domain.ErrValidation
+	}
+	var row destListRow
+	if err := r.db.WithContext(ctx).First(&row, "id = ?", id).Error; err != nil {
+		return domain.DestList{}, destinationRowError(err)
+	}
+	return destListToDomain(row), nil
+}
+
+func (r *DestDefinitionRepo) ListRefreshTargets(ctx context.Context) ([]domain.DestList, error) {
+	var rows []destListRow
+	if err := r.db.WithContext(ctx).Select("id", "name", "kind", "source_url", "geosite_category", "geosite_attrs", "last_fetched_at", "last_error", "updated_at").Where("kind IN ?", []string{string(domain.DestListRemote), string(domain.DestListGeosite)}).Order("id").Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	result := make([]domain.DestList, 0, len(rows))
+	for _, row := range rows {
+		result = append(result, destListToDomain(row))
+	}
+	return result, nil
+}
+
 func (r *DestDefinitionRepo) SaveList(ctx context.Context, list *domain.DestList, expected, now time.Time) error {
 	if list == nil || list.ID < 0 || list.Name == "" || list.OwnerGroupID < 0 || (list.ID > 0 && expected.IsZero()) {
 		return domain.ErrValidation

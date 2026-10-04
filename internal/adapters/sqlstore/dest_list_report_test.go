@@ -70,3 +70,30 @@ func TestDestinationLegacyListReportRemainsAbsentUntilSuccessfulParse(t *testing
 		t.Fatalf("report-only edit lost/published: %+v / %v", defs, err)
 	}
 }
+
+func TestDestinationRefreshTargetsExcludeCustomAndLargeBodies(t *testing.T) {
+	r := newDestDefinitionRepo(t)
+	now := time.UnixMilli(1791000000000).UTC()
+	for _, kind := range []domain.DestListKind{domain.DestListCustom, domain.DestListRemote, domain.DestListGeosite} {
+		v := domain.DestList{Name: string(kind), Kind: kind, SourceURL: "https://rules.example.com/list", GeositeCategory: "finance", Entries: []byte("domain:example.com\n"), SourceText: []byte("#source"), ParseReport: &domain.DestParseReport{Accepted: 1}, EntryCount: 1}
+		if err := r.SaveList(t.Context(), &v, time.Time{}, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	targets, err := r.ListRefreshTargets(t.Context())
+	if err != nil || len(targets) != 2 {
+		t.Fatalf("wrong refresh targets: %+v / %v", targets, err)
+	}
+	for _, v := range targets {
+		if v.Kind == domain.DestListCustom || len(v.Entries) != 0 || len(v.SourceText) != 0 || v.ParseReport != nil || v.ID == 0 || v.UpdatedAt.IsZero() {
+			t.Fatalf("body loaded/missing CAS metadata: %+v", v)
+		}
+		full, err := r.GetList(t.Context(), v.ID)
+		if err != nil || len(full.Entries) == 0 || full.ParseReport == nil {
+			t.Fatalf("detail missing: %+v / %v", full, err)
+		}
+	}
+	if _, err := r.GetList(t.Context(), 999); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("missing list not 404: %v", err)
+	}
+}
