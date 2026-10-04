@@ -3,6 +3,7 @@ package destpolicy
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 	"strconv"
@@ -13,7 +14,9 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 )
 
-// ApplyPolicyStatus is the status transition used inside the future durable
+var errPolicyBodiesRequired = errors.New("policy observation requires exact candidate bodies")
+
+// ApplyPolicyStatus is the status transition used inside the durable
 // observer transaction. It changes no published definitions and never infers
 // a candidate from the current generation: the exact minted source is authority.
 func ApplyPolicyStatus(state *domain.DestAgentPolicy, status *protocol.PolicyStatus, capabilities []string, now time.Time) (bool, error) {
@@ -54,6 +57,9 @@ func ApplyPolicyStatus(state *domain.DestAgentPolicy, status *protocol.PolicySta
 			return false, fmt.Errorf("%w: unknown minted policy source", domain.ErrUnavailable)
 		}
 		if !settled {
+			if len(next.MintedBody) == 0 {
+				return false, errPolicyBodiesRequired
+			}
 			var policy *protocol.DestinationPolicy
 			if json.Unmarshal(next.MintedBody, &policy) != nil || protocol.ValidateDestinationPolicy(policy) != nil || protocol.PolicyDigest(policy) != next.MintedSHA256 {
 				return false, fmt.Errorf("%w: corrupt minted policy", domain.ErrUnavailable)

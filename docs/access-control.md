@@ -183,10 +183,27 @@ Paused, empty and collection-only candidates cannot replace LKG. Repeated settle
 observations preserve timestamps and skip candidate decoding. Corrupt matching
 candidate bodies return unavailable without partial mutation. Seven status tests
 first failed against the stub and pass after implementation. This function has
-not yet been connected to a durable observer transaction or sync.
+now has successful [complete Test CI](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37197533086)
+and [published-node systemd acceptance](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37197533146)
+at `d1f887e54c83f9b878e88acfac48569f165b6185`.
+
+The durable observer increment implements `ports.DestAgentPolicyRepo` and
+`destpolicy.Observer`. Runtime changes lock the same native-agent owner as
+candidate minting, load metadata first, and lazily read exact candidate/LKG
+bodies inside that transaction only when a new transition requires them.
+Runtime callbacks cannot overwrite the minted source. Confirmed rule/group
+metadata must match the exact confirmed policy; failed writes roll back both
+reported state and LKG. Cache invalidation runs only after commit and also
+includes a change in rejected generation even when digest and reason repeat.
+Repeated settled observations preserve timestamps, omit policy blobs and write
+no runtime row, including after an observer restart. Ten repository tests cover
+these behaviors, missing agents/bodies, stale reports and initial no-op state;
+new boundaries first failed before implementation or repair. Full local SQL-store,
+policy, domain, nodesync and HTTP-handler suites and relevant static checks pass.
+Sync and application wiring remain outstanding; this increment's CI is pending.
 
 This is an unconnected C3 increment. It does not implement the full C3 acceptance:
-candidate mint wiring, durable ObserveStatus/LKG/exhausted transitions, fallback
+candidate mint and observer wiring, fallback
 pruning, eligibility/member accounting, policy caches, immediate pause wiring,
 settings and application integration remain outstanding. Existing nodes still
 receive the existing configuration because the compiler is not wired into sync.

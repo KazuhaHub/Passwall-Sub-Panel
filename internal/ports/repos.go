@@ -545,6 +545,14 @@ type NodePolicyCandidateRepo interface {
 	MintConfigWithPolicyCandidate(ctx context.Context, agentID string, canonicalBody []byte, metadata domain.DestPolicyMint, now time.Time) (*domain.NodeAgentStream, bool, error)
 }
 
+// DestAgentPolicyRepo serializes runtime state changes with candidate minting.
+// Mutation starts with metadata; loadBodies lazily reads the exact minted/LKG
+// bytes in the same owner transaction. Callbacks must perform no external I/O.
+type DestAgentPolicyRepo interface {
+	Get(ctx context.Context, agentID string, includeBodies bool) (*domain.DestAgentPolicy, error)
+	Update(ctx context.Context, agentID string, now time.Time, mutate func(*domain.DestAgentPolicy, func() error) (bool, error)) (bool, error)
+}
+
 type NodeAgentRepo interface {
 	Create(ctx context.Context, agent *domain.NodeAgent) error
 	List(ctx context.Context) ([]*domain.NodeAgent, error)
@@ -2225,6 +2233,7 @@ type Repos struct {
 	Ownership               OwnershipRepo
 	PSPClient               PSPClientRepo
 	NodeAgent               NodeAgentRepo
+	DestAgentPolicy         DestAgentPolicyRepo
 	NativeAgentProvisioning NativeAgentProvisioningRepo
 	ServerMigration         ServerMigrationRepo
 	NodeAgentIssue          NodeAgentIssueRepo
