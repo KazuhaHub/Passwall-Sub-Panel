@@ -1,6 +1,6 @@
 # 节点访问控制（目的地策略、命中记录、白名单分组、隐私页）：最终实施计划
 
-- **状态**：第五版／最终执行版（2026-10-04），按 §11 执行。部分工作包已有开发实现，但尚未完成阶段验收或发布；本文的测试与验收都是交付要求，实际进度单独记录在 §11.5。
+- **状态**：第六版／最终执行版（2026-10-04），按 §11 执行。部分工作包已有开发实现，但尚未完成阶段验收或发布；本文的测试与验收都是交付要求，实际进度单独记录在 §11.5。
 - **文档来源**：第三版 `bb50b09f12f0bdaeb234c1390ce97c57af53b9bb`，原分支 `kazuha/access-control-and-dashboard-plans`。本版保留完整的界面、权限与发布设计，将七项复核问题落实到正文、协议、表结构、测试与验收，不另留待解释的补丁清单：
   1. 回退按实际 mint 的候选摘要与来源判定，修剪后的 LKG 被拒也能退出；
   2. 拦截、全局观察、白名单试运行、用量从聚合器到批次、队列、预算分别隔离；
@@ -10,11 +10,11 @@
   6. B 档统计正常放行与仅观察连接，命中与用量分别计数；
   7. 采集关闭或降档时，节点清理旧版本待发数据，PSP 投递与每块入库检查当前档位及持久化 revision；快速关闭再开启也不复活旧批次。
 
-  第五版进一步明确并发编辑版本、后台刷新提交条件、发布错误的 CAS、分阶段迁移边界和工作包交接证据，保留第四版七项修订及完整 23 屏设计。
+  第六版保留第五版的并发编辑版本、后台刷新提交条件、发布错误 CAS、分阶段迁移边界和工作包交接证据，落实所有者确认的「社区分类剔除过宽条目并显示解析报告」，同步存储、API、界面、空结果保护与真实数据验收；保留第四版七项修订及完整 23 屏设计。
 
-  所有者决定仍是 §1 的 6 条。§1.2 的两项按已写明的默认执行，不阻塞核心功能；其中 N0-S 必须先完成真实环境验证。
+  §1 原有 6 条所有者决定保持不变；本次分类处理选择另记在 §1.3。§1.2 的两项按已写明的默认执行，不阻塞核心功能；其中 N0-S 必须先完成真实环境验证。
 - **涉及仓库**：Passwall-Protocol（线上类型）、Passwall-Node（执行与采集）、Passwall-Sub-Panel（策略、存储、界面）
-- **核对基线（2026-10-03 刷新远端后复核）**：
+- **核对基线（2026-10-04 重新 fetch 三个仓库，main 与 2026-10-03 一致）**：
   - PSP `origin/main` `0ae05e1e40170c030acd23cdf637310b740b50a6`：含第三版基线 `aa8a1b4b`，以及 #269（Claude 路由与 QUIC 默认值）、#270（3X-UI 3.9.0 兼容性）。这两项没有改变本计划依赖的节点同步、成员同步与审计控制路径；DNS 基础放行仍按开工时实际模板读取。
   - Passwall-Node `origin/main` `8e5e3db`（tag `v4.0.1.8`）：`753d3a6` 之后合入 #73（每次上报重新判断升级就绪）、#74（预发布不再审批）、#75（Docker updater 跟随 agent 自升级）、#76（updater 拒绝原因转发给 PSP）。
   - Passwall-Protocol `origin/main` `d8b2713`：PSP 与 Node 都钉 `v0.2.0`（= `c678bd5`），之后两个提交只改了 `.github`、README 和测试。
@@ -79,6 +79,7 @@ PSP 定义两件事：哪些目的地拦截、只观察或放行；哪些分组�
 | R20 | Audit 是尽力交付的非持久遥测；重试与时间窗口固定，去重窗口更长 | 48 小时积压仍可能在重启时全部丢失；已入库而响应丢失的批次必须在整个有效重试期内保持幂等 | §4.2、N6、P1、P4、P5 |
 | R21 | 采集档位以 PSP 当前保存值作为入库闸门；关闭不删除已经入库的历史数据 | 防止旧配置、冻结重发与后台队列在关闭后继续写入；已有数据照保留期清理 | N6、P4、S14 |
 | R22 | 定义写入统一串行化；编辑版本严格单调，后台刷新与发布错误只提交到自己读到的版本 | UTC 毫秒时间可能碰撞，慢刷新与旧发布失败可能覆盖新修改；仅把写入放进事务并不能防止这些问题 | P1、P2、P3、P7、§12 15a/17a |
+| R23 | 社区分类先筛选属性，再剔除过宽条目，保存解析报告；过滤后为空不覆盖旧列表 | 已校验的真实金融分类包含 `domain:hsbc`，整份拒绝会使正常分类不可用；逐条剔除仍保证过宽条目不下发。远程 URL 的整份拒绝规则不变 | §1.3、F49、P1/P2/P7、S6/S7、§12 15b |
 
 R21 同时使用持久化的采集 revision：每次档位实际变化都递增，批次冻结时带上已部署的 revision；PSP 只接收当前 revision。先 off 再开启、节点尚未收到中间 off 配置或 PSP 重启，都不能让旧 pending 复活。
 
@@ -88,6 +89,10 @@ R21 同时使用持久化的采集 revision：每次档位实际变化都递增�
 |---|---|---|---|
 | Q1 | sing-box 节点是否默认拦截私有与保留地址（N0-S）？ | Node `singbox/compiler.go:121` 的路由只有 `final: direct`，没有任何私有地址拦截（F9）。也就是说，今天的 sing-box 原生节点允许代理用户访问节点本机的回环服务和云厂商元数据 `169.254.169.254`，与本功能是否上线无关。补上会改变现有行为：家用节点上有人可能正通过代理访问家里的局域网（Xray 节点本来就不允许，F9） | **先在 `psp-node` VM 上用真 sing-box 1.14 确认能否访问；确认能访问后，在 Node 下一个修复版里加无条件的 `{"ip_is_private":true,"action":"reject"}`，不加 `resolve`**。所有者说「保留现状」就只写进 §10 |
 | Q2 | 白名单组员在用户中心是否看到一行「你所在的分组只能访问指定网站」？ | 这是面向用户的披露，而决定 4 把披露页默认关闭；两者需要所有者一起权衡 | **不显示**，S23 保留位置但不实现 |
+
+### 1.3 本次所有者确认的补充决定（2026-10-04）
+
+社区分类库中的过宽条目采用**剔除并显示解析报告**，不采用整份分类拒绝。过宽判定标准不放松；被剔除的条目绝不进入下发内容。适用于该分类被 block、observe、allow 或白名单引用的情况。远程 URL 列表仍按 P2 整份拒绝，自定义列表仍逐行忽略。分类过滤后为空时，保留旧内容并标记刷新失败；从未成功的列表保持未就绪。存储、API、界面及验收统一按 P2 与 §12 15b 执行。
 
 ---
 
@@ -160,9 +165,9 @@ R21 同时使用持久化的采集 revision：每次档位实际变化都递增�
 
 | # | 事实 | 影响 |
 |---|---|---|
-| F47 | v2fly 每个 release 都发布 `dlc.dat_plain.yml`（约 3.6 MB，已展开 `include:`）和 `.sha256sum`。条目只有 `domain:`/`full:`/`regexp:` 三种前缀，属性以后缀 `:@attr` 表示 | PSP 下载并校验后按分类取条目，不用解析 protobuf |
+| F47 | v2fly 每个 release 都发布 `dlc.dat_plain.yml`（约 3.6 MB，已展开 `include:`）和 `.sha256sum`。导出器支持 `domain:`/`full:`/`keyword:`/`regexp:`；属性首项以后缀 `:@attr` 表示，后续项用 `,@attr`（F49） | PSP 下载并校验后按分类取条目，不用解析 protobuf |
 | F48 | `category-finance` 收的是**正规**银行和券商；`category-cryptocurrency` 235 条（无正则）；`category-porn` 6660 条，其中 140 条是 `regexp:`；**没有**博彩总分类，只有仅覆盖俄罗斯的 `category-betting-ru`（13 条）。2026-10-02 用下载的 `dlc.dat_plain.yml` 复核，sha256 与发布的 `.sha256sum` 一致 | 「高风险金融」没有现成分类；成人内容模板会占用 140 条正则额度 |
-| F49 | 属性有**否定形式**，如 `domain:airchina.ae:@!cn`。2026-10-04 核对上游 [datdump 导出器](https://github.com/v2fly/domain-list-community/blob/master/cmd/datdump/main.go)：首个属性用 `:@`，后续属性用 `,@`（如 `domain:example.com:@cn,@ads`）；兼容读取多个 `:@` 的旧输入。release `20261004053124` 的 YAML 为 3 614 228 字节，sha256 与同版 `.sha256sum` 一致，当前样本仍只有单属性 | P2 第 3 条按字面剥离和匹配属性；`!cn` 与 `cn` 是两个不同的属性名；不能把第二个属性残留在下发域名里 |
+| F49 | 属性有**否定形式**，如 `domain:airchina.ae:@!cn`。2026-10-04 核对上游 [datdump 导出器](https://github.com/v2fly/domain-list-community/blob/master/cmd/datdump/main.go)：首个属性用 `:@`，后续属性用 `,@`（如 `domain:example.com:@cn,@ads`）；兼容读取多个 `:@` 的旧输入。release `20261004053124` 的 YAML 为 3 614 228 字节，sha256 与同版 `.sha256sum` 一致，当前样本仍只有单属性。该版 `category-finance` 含 `domain:hsbc`，现有公共后缀判定会拒绝它；这是实际解析复现，不是对分类名称的推测 | P2 第 3 条按字面剥离和匹配属性；`!cn` 与 `cn` 是两个不同的属性名；不能把第二个属性残留在下发域名里 |
 
 ### 2.5 第三版复核时补充核实的事实（2026-10-02）
 
@@ -694,7 +699,7 @@ type AuditUsage struct {
 
 | 表 | 列 | 说明 |
 |---|---|---|
-| `dest_lists` | `id`；`name` varchar(128)；`kind` varchar(16)（`custom`/`remote`/`geosite`）；`source_url` varchar(1024)；`geosite_category` varchar(128)；`geosite_attrs` varchar(128)；**`entries` `[]byte`**（规范化条目，一行一条；MySQL 映射 longblob，F36）；**`source_text` `[]byte`**（只对 custom：管理员粘贴的原文，含注释和行号，≤ 4 MiB；S7 编辑时回填用）；`entry_count` int；`regexp_count` int；`content_sha256` varchar(64)；`last_fetched_at`；`last_error` varchar(512)；**`owner_group_id` bigint NOT NULL DEFAULT 0**；`created_at`/`updated_at` | `owner_group_id` 非 0 表示这是某个白名单分组自带的列表（基础放行或补充），只能在那个分组里使用（§9.3）。三方言测试插入 2 MiB 的 entries。**没有**每列表的刷新间隔：远程与分类列表一律按全局 `dest.list_refresh_hours` 刷新（S6、S7 只显示全局值） |
+| `dest_lists` | `id`；`name` varchar(128)；`kind` varchar(16)（`custom`/`remote`/`geosite`）；`source_url` varchar(1024)；`geosite_category` varchar(128)；`geosite_attrs` varchar(128)；**`entries` `[]byte`**（规范化条目，一行一条；MySQL 映射 longblob，F36）；**`source_text` `[]byte`**（只对 custom：管理员粘贴的原文，含注释和行号，≤ 4 MiB；S7 编辑时回填用）；**`parse_report` text(JSON，可空、无 DEFAULT)**（最近成功内容的解析报告，P2）；`entry_count` int；`regexp_count` int；`content_sha256` varchar(64)；`last_fetched_at`；`last_error` varchar(512)；**`owner_group_id` bigint NOT NULL DEFAULT 0**；`created_at`/`updated_at` | `owner_group_id` 非 0 表示这是某个白名单分组自带的列表（基础放行或补充），只能在那个分组里使用（§9.3）。三方言测试插入 2 MiB 的 entries。**没有**每列表的刷新间隔：远程与分类列表一律按全局 `dest.list_refresh_hours` 刷新（S6、S7 只显示全局值） |
 | `dest_policies` | `id`；`name` varchar(128) 唯一；`action` varchar(16)；`list_ids` text(JSON)；`inline` text(JSON：cidrs、ports、network、protocols、private)；`scope` varchar(16)（`all`/`groups`）；`group_ids` text(JSON)；`priority` int；`enabled` bool；`counts_as_risk` bool；**`template_key` varchar(32) NOT NULL DEFAULT ''**（由哪个模板创建，S4 的「已添加」徽章用）；时间戳 | `PUT` 带 `updated_at` 作为前置条件，冲突返回 409 `dest_policy_stale`。`priority` 由服务端分配（P7） |
 | `dest_exemptions` | `user_id` PK；`reason` varchar(255)；`created_by` bigint；`created_at`；**`expires_at`（可空）** | R8；过期行由清理循环删除，删除算一次定义写入 |
 | `dest_group_modes` | `group_id` PK；`mode` varchar(16)（`open`/`allowlist`）；`stage` varchar(16)（`trial`/`enforce`）；`list_ids` text(JSON)；`base_list_id` bigint；**`extra_list_id` bigint**；`stage_changed_at`；`updated_at` | §9。不往 `groups_` 加列（分组行被多处按列写） |
@@ -725,7 +730,8 @@ type AuditUsage struct {
 
    **规范化**：小写；IDN 转 punycode；去尾点。规范化之后去重。
    **大小**：上限 4 MiB 或 50 000 条，超出返回 400 `dest_list_too_large`。
-   **解析报告**：`{accepted, ignored, rewritten, samples:[{line, text, reason}]}`，samples 最多 20 条。
+   **解析报告**：`{accepted, ignored, ignored_broad, rewritten, samples:[{line, text, reason}]}`，samples 最多 20 条。`accepted` 是最终规范化并去重的有效条目数；`ignored` 计被丢弃条目（含过宽与重复），`ignored_broad` 只计过宽条目且包含在 ignored 内；`rewritten` 计规范化改写，允许与 accepted 重叠；samples 的单条 text 最多 512 UTF-8 字节且不得截断字符。自定义的 line 是原文行号；分类的 line 是所选分类原始 rules 中的 1 基序号，属性筛选后仍保留原序号，界面标为「源条目」而非编辑器行号。
+   保存成功时把报告与 entries、摘要及来源版本在同一事务提交到 `parse_report`；预览不写库。列表详情返回该报告，后台刷新后或 PSP 重启后仍可查看；同摘要只更新报告等元数据，不推进 generation。旧行无报告时返回 null，不伪造一次成功解析；下一次成功保存或刷新补齐。失败刷新保留上一次成功报告，另写 last_error；旧版本的报告与失败都遵守第 6 条提交条件。
 2. **远程 URL**：
    - **只允许 `https://`**，否则 400 `dest_list_insecure_url`；
    - 用 `safehttp` 客户端，超时 60s，非 2xx 算错误；
@@ -734,10 +740,11 @@ type AuditUsage struct {
    - 计算 `content_sha256`，**只有摘要变化才更新 `entries` 并让 generation +1**（F13：否则每次刷新都会让全部 core 重启）。
 3. **v2fly 分类**：
    - 下载 `https://github.com/v2fly/domain-list-community/releases/latest/download/dlc.dat_plain.yml` 与 `.sha256sum`，**校验 sha256 之后**才解析（F47）；
-   - 整份缓存到 `<DataDir>/destlists/dlc_plain.yml`，所有 geosite 列表共用一次下载；
+   - 整份缓存到 `<DataDir>/destlists/dlc_plain.yml`，所有 geosite 列表共用一次下载；YAML 仍受 16 MiB 上限约束，校验文件读取上限 4 KiB。并发刷新合并一次下载；先校验并解析成功，再临时文件写入、同步并原子替换，失败不替换旧缓存或已成功列表。重启从成功缓存恢复；缓存不存在或损坏时返回 503，不创建空分类库。
    - 条目先剥掉全部属性后缀再下发。首个属性是 `:@attr`，后续是 `,@attr`，并兼容多个 `:@attr` 的旧输入。属性可以是否定形式 `!attr`（如 `:@!cn`，F49）；剥离和筛选都**按字面**处理属性名，`!cn` 与 `cn` 是两个不同的属性。
    - `geosite_attrs` 为空表示取全部条目，非空表示条目必须含所列的全部属性。可选的属性由 `GET /geosite/categories` 按分类给出（P7），界面只列这些值。
-4. **过宽条目**（适用于所有列表；列表被放行类引用时是硬错误，即 allow 策略、白名单名单、基础放行、补充）：
+   - 依次做属性筛选、剥离属性并规范化、第 4 条过宽过滤、去重，计算 entry_count、regexp_count 和 content_sha256。分类目录中的 count 与 regexp_count 是无属性筛选时的有效数量，另返回 source_count 与 ignored_broad_count；属性组合的准确数量及报告以 preview 为准。缓存可以保留上游原始规则，任何下发内容都只能来自过滤结果。
+4. **过宽条目**（判定适用于所有列表；过滤后的有效内容还须在策略引用与发布时防御校验）：
    - `regexp:` 对一组固定探针（8 个随机域名，写成常量）全部匹配；
    - `keyword:` 少于 4 个字符；
    - `domain:`/`full:` 本身就是公共后缀（`publicsuffix.PublicSuffix(x) == x`，如 `com`、`co.uk`）；
@@ -745,7 +752,8 @@ type AuditUsage struct {
 
    处理方式：
    - 自定义列表保存时，这些条目逐行列进报告的「忽略」部分；
-   - 远程或分类列表刷新时出现，本次刷新算失败（`last_error = "broad_entry: <条目>"`），保留旧条目；
+   - **社区分类**：按 §1.3 逐条剔除，计入报告 ignored，并记录条目与原因；有剩余有效条目时刷新成功，清除旧 last_error。报告中的剔除提示不是刷新故障，不应让有效列表显示 failed。过滤结果为空则失败，`last_error = "dest_list_empty_after_filter"`，保留旧 entries、摘要、last_fetched_at 和成功报告；首次刷新遇到它保持未就绪；
+   - **远程 URL**：出现过宽条目，本次预览或刷新算失败（`last_error = "broad_entry: <条目>"`），保留旧条目；
    - 策略或白名单引用了含过宽条目的列表 → 400 `dest_list_too_broad`。
 5. **未就绪**：`last_fetched_at IS NULL`，或 `entry_count = 0 且 kind ≠ custom`。自定义列表为空时，被策略引用会被 API 拒绝（400 `dest_policy_no_match`）。
 6. **刷新循环** `dest-list-refresh`：
@@ -757,7 +765,7 @@ type AuditUsage struct {
 8. **完成判据**：
    - 解析器对每种格式都有表驱动测试；
    - 规范化测试：`Example.COM`、`example.com.`、`例子.cn` 各自得到唯一一个规范条目；
-   - 超限报错、http 地址被拒、过宽条目（每类一例）的测试；
+   - 超限报错、http 地址被拒、过宽条目（每类一例）的测试；分类剔除与报告、远程整份拒绝、过滤后为空保护及真实 release 回归按 §12 15b 验证；
    - 摘要不变时 generation 不变的测试；
    - 慢刷新期间修改来源、删除列表、两次刷新交错，以及旧失败迟到的测试；确认旧结果不提交，摘要变化与 generation 原子推进；
    - `safehttp` 拒绝回环地址的测试沿用现有的。
@@ -997,13 +1005,13 @@ CompiledPolicy 含 `Policy *protocol.DestinationPolicy` 与 `MintMetadata{kind,g
 
 | 方法 | 路径 | 请求 / 响应 |
 |---|---|---|
-| GET | `/api/admin/dest/lists` | `{items:[{id,name,kind,entry_count,regexp_count,state:"ready"\|"refreshing"\|"failed"\|"pending",last_fetched_at,last_error,owner_group_id,updated_at,used_by:[{kind:"policy"\|"group",id,name}]}], refresh_hours, budget}`。`used_by` 与 409 `dest_list_in_use` 同形；`refresh_hours` 是全局 `dest.list_refresh_hours` 的生效值 |
+| GET | `/api/admin/dest/lists` | `{items:[{id,name,kind,entry_count,regexp_count,state:"ready"\|"refreshing"\|"failed"\|"pending",last_fetched_at,last_error,parse_report_summary,owner_group_id,updated_at,used_by:[{kind:"policy"\|"group",id,name}]}], refresh_hours, budget}`。`parse_report_summary` 只含 accepted、ignored、ignored_broad、rewritten，完整 samples 从详情读取；无成功报告为 null。`used_by` 与 409 `dest_list_in_use` 同形；`refresh_hours` 是全局 `dest.list_refresh_hours` 的生效值 |
 | POST | `/api/admin/dest/lists/preview` | 请求体同新建，**不写库、不写审计**；返回解析报告与前 50 条规范化后的条目。远程类型会实际拉取一次（同样走 safehttp、同样的上限），另返回 `http_status` 与 `bytes` |
 | POST / PUT / DELETE | `/api/admin/dest/lists[/:id]` | 请求 `{name,kind,source_url?,geosite_category?,geosite_attrs?,text?}`；`PUT` 另带 `updated_at`，冲突返回 409 `dest_list_stale`。自定义列表把 `text` 原样存进 `source_text`。响应含解析报告。删除被引用的列表 → 409 `dest_list_in_use`，带 `used_by` |
-| GET | `/api/admin/dest/lists/:id` | 统计 + 前 200 条规范化样本，不返回全量；`?text=1` 时（只对自定义列表）另返回 `source_text`，供 S7 编辑框回填 |
+| GET | `/api/admin/dest/lists/:id` | 统计 + parse_report + 前 200 条规范化样本，不返回全量；`?text=1` 时（只对自定义列表）另返回 `source_text`，供 S7 编辑框回填 |
 | POST | `/api/admin/dest/lists/:id/entries` | `{add:[…], remove?:[…]}`，只对自定义列表；服务端在一个事务里读出原文、追加或删除行、重新解析并保存，generation 只 +1 一次；返回解析报告。列表被放行类引用时出现过宽条目 → 400 `dest_list_too_broad`。S10「加入白名单」、S12「加入放行例外」一律调用它，**前端不重建全文** |
 | POST | `/api/admin/dest/lists/:id/refresh` | 202；状态随 GET 返回 |
-| GET | `/api/admin/dest/geosite/categories` | `{categories:[{name,count,regexp_count,attrs:[…]}], updated_at}`；`attrs` 是该分类里出现过的属性名（字面量，含 `!cn` 这种，F49）；从未下载过 → 503 `dest_geosite_unavailable`；`POST …/geosite/refresh` 触发下载 |
+| GET | `/api/admin/dest/geosite/categories` | `{categories:[{name,count,regexp_count,source_count,ignored_broad_count,attrs:[…]}], updated_at}`；`count`/`regexp_count` 是过滤去重后的有效数量，`source_count` 是上游原始规则数，`ignored_broad_count` 是过宽条目数；这些分类总数不代表任意属性组合，组合计数以 preview 为准。`attrs` 是该分类里出现过的属性名（字面量，含 `!cn` 这种，F49）；从未下载过 → 503 `dest_geosite_unavailable`；`POST …/geosite/refresh` 触发下载 |
 | GET | `/api/admin/dest/policies` | `{allow:[Policy],block:[Policy],observe:[Policy], exemptions:{count}, allowlist_groups:[{group_id,name,stage,stage_days}], hit_window_days, budget}`；Policy 带 `hits_recent`（窗口 `hit_window_days = min(7, dest.hit_retention_days)` 内的次数；2c 之前或没有节点在记录时是 null）、`last_hit_at`、`list_states`（含 `empty`）、`scope_missing:bool`、`template_key`、`updated_at`；按 `(source, day)` 聚合并做 60s 进程内缓存 |
 | POST | `/api/admin/dest/policies/preview` | **不写库、不写审计**；返回「假设保存后」的 `budget` |
 | POST / PUT / DELETE | `/api/admin/dest/policies[/:id]` | Policy 全字段（含 `template_key`）；`PUT` 带 `updated_at`，冲突 409 `dest_policy_stale`；超额 400 `dest_policy_over_limit`，带 `{kind,used,limit}`。priority 规则见上 |
@@ -1033,7 +1041,7 @@ CompiledPolicy 含 `Policy *protocol.DestinationPolicy` 与 `MintMetadata{kind,g
 - 加一条路由测试断言这一行存在，并且运维员读审计日志时看不到它（它在 `/api/admin/dest/` 前缀下）。
 
 **错误码汇总**：
-- 列表：`dest_list_parse_failed`、`dest_list_in_use`、`dest_list_not_ready`、`dest_list_insecure_url`、`dest_list_too_broad`、`dest_list_too_large`、`dest_list_stale`
+- 列表：`dest_list_parse_failed`、`dest_list_in_use`、`dest_list_not_ready`、`dest_list_insecure_url`、`dest_list_too_broad`、`dest_list_too_large`、`dest_list_empty_after_filter`、`dest_list_stale`
 - 策略：`dest_policy_invalid`（带 field）、`dest_policy_no_match`、`dest_policy_over_limit`（带 `{kind,used,limit}`）、`dest_policy_stale`、`dest_policy_order_stale`、`dest_name_taken`
 - 分组与豁免：`dest_group_not_found`、`dest_mode_invalid_transition`、`dest_exemption_exists`
 - 其他：`dest_usage_user_required`、`dest_geosite_unavailable`
@@ -1806,6 +1814,7 @@ tab 条：策略 policies | 列表 lists | 白名单分组 allowlist | 记录 re
   - 等待首次下载：被启用的策略引用时用 failing「从未下载，引用它的部分暂不生效」，未被引用时用 measuring；
   - **下载失败，从未成功**（`failed` 且 `last_fetched_at` 为空）：failing，第二行写错误原文。这时没有旧内容可用，不能写「仍用旧内容」；
   - 「白名单「X」专用」不是状态，写在「使用情况」一列，纯文字，不画徽章。
+- 社区分类行的 parse_report_summary.ignored_broad > 0 时，显示 amber 提示「已剔除 {{n}} 条过宽条目」，可打开条目抽屉查看最近成功解析报告；不把它算作 failed 或「有问题」筛选。过滤后为空的刷新按失败状态显示，区分有无旧内容。
 - 社区分类数据整体不可用（503）：表格上方 Alert info「社区分类数据尚未下载」+ AsyncButton「立即下载」，与 S4、S7 同一句话。
 - 额度砖：阈值与 S2 相同（≥ 80% amber，> 100% failing），写「超出额度时新版本不会下发，节点继续执行上一版」。
 - `lst_state` 只有一个取值 `problem`：`problem` = `failed`（含从未成功），或「被启用的策略引用、但仍在等待首次下载」。
@@ -1823,6 +1832,7 @@ tab 条：策略 policies | 列表 lists | 白名单分组 allowlist | 记录 re
   - 类型数字可点即筛选；条目用等宽字体；
   - [测试此目的地]：打开 S13，用 history state 预填该条目；
   - 搜索框只在组件状态里。
+  - 抽屉显示持久化的最近成功解析报告（最多 20 条样本及其余数量）；无报告显示「暂无解析报告」。分类源条目不跳转编辑器。
 
 **文案**：
 - 类型：自定义 / 远程地址 / 社区分类
@@ -1875,7 +1885,8 @@ tab 条：策略 policies | 列表 lists | 白名单分组 allowlist | 记录 re
   - 超过大小上限：对话框顶部 Alert error，保存禁用。
 - 过宽条目：
   - **自定义列表**：按 P2 第 4 条，过宽的行在保存时进「忽略」，以 amber 列在报告里，**不禁用保存**——保存下来的列表本来就不含它们；
-  - **远程或分类列表**：被放行类（allow 策略、白名单）引用、而 [测试拉取] 的预览里出现过宽条目时，以 failing 列出并禁用保存，因为保存之后的刷新会被判为失败（P2 第 4 条）。
+  - **社区分类**：过宽条目以 amber 列在解析报告的「忽略」部分，写「已剔除，不会下发」；保留有效条目时允许保存，显示有效数量。过滤后为空时 failing「过滤后没有可用条目」，禁用此次内容提交；已存在列表继续用旧内容，首次列表未就绪。
+  - **远程 URL**：预览出现过宽条目时，以 failing 列出并禁用此次保存，任何引用动作都不能绕过整份拒绝规则（P2 第 4 条）。
 - 远程地址：
   - 非 https 地址在输入时就报错「只支持 https 地址」，不发请求；
   - **只在点 [测试拉取] 时**才调用预览，不随输入触发（远程预览会真的去拉一次）；读取中显示进度；结果行的 HTTP 状态与大小来自响应的 `http_status`、`bytes`；
@@ -1889,7 +1900,7 @@ tab 条：策略 policies | 列表 lists | 白名单分组 allowlist | 记录 re
 
 **交互**：
 - 切换类型：已有输入时先弹 S20 的「切换列表类型」确认框。
-- 点报告里的行号：调用 CodeEditor 的 `revealLine(n)`（UI-0），跳到该行并选中。
+- 自定义报告里的行号可点：调用 CodeEditor 的 `revealLine(n)`（UI-0），跳到该行并选中。分类报告标为「源条目 {{n}}」，展示原条目与原因，没有编辑器跳转。
 - 「支持的写法」折叠区：示例覆盖 `domain:` / `full:` / `keyword:` / `regexp:` / `*.x` / `.x` / hosts 行 / AdGuard `||x^` / IP / CIDR / `#` 注释，并说明规范化规则（转小写、去尾点、中文域名转 punycode、CIDR 对齐到网络号）。
 - 保存成功：snack，并打开条目抽屉让管理员确认结果。
 - 白名单分组自带的列表也用这个对话框编辑，类型锁定为自定义。
@@ -2742,7 +2753,7 @@ tab 条：策略 policies | 列表 lists | 白名单分组 allowlist | 记录 re
 - **列表**：
   > 支持的写法：纯域名、`domain:` / `full:` / `keyword:` / `regexp:`、`*.x`、hosts 行、AdGuard `||x^`、Clash 规则、IP 与 IP 段；`#` 开头是注释。保存时统一转小写、去尾点、中文域名转 punycode、IP 段对齐到网络号。
   > 远程与分类列表每 {{hours}} 小时刷新一次，只在内容变化时才下发；刷新失败时继续用旧内容。
-  > 过宽的条目（几乎匹配所有域名的正则、少于 4 个字符的关键词、公共后缀本身、太大的 IP 段）在自定义列表里会被忽略；放行策略或白名单引用的远程、分类列表里出现它们时，这次刷新算失败，继续用旧内容。
+  > 过宽的条目（几乎匹配所有域名的正则、少于 4 个字符的关键词、公共后缀本身、太大的 IP 段）在自定义列表和社区分类里会被剔除，并显示解析报告；远程 URL 列表出现它们时，整次刷新失败并继续用旧内容。社区分类过滤后为空时也保留旧内容，首次下载的列表仍未就绪。剔除的条目不会下发。
 - **白名单分组**：
   > 白名单分组的成员只能访问名单里的目的地。全局拦截策略照常对他们生效；豁免的账号不受白名单限制。
   > 先试运行：试运行期间不拦截，只记录本应被拒绝的目的地。试运行只记到「分组 × 主域名」，看不到是谁，也看不到完整主机名。
@@ -3038,7 +3049,7 @@ tab 条：策略 policies | 列表 lists | 白名单分组 allowlist | 记录 re
 | UI-0 | [PSP #272](https://github.com/KazuhaHub/Passwall-Sub-Panel/pull/272)，draft，`d8722e89`，必需检查成功；第三方面板真实检查为 skipped，不计已验证；附有部分浏览器截图 | 补齐 §7.6 全部截图和交互矩阵、§7.5 无障碍清单，再由所有者审阅实际界面；当前截图不等于批准 |
 | 1a | [Protocol #4](https://github.com/KazuhaHub/Passwall-Protocol/pull/4)，draft，`0175987`，两项 PR 检查成功 | 完成评审、合并后的 consumer toolchains 等门禁，再发布模块 tag v0.3.0；伪版本不等于正式模块发布 |
 | 1b | [Node #78](https://github.com/KazuhaHub/Passwall-Node/pull/78)，draft，`8cda96e`，本次核对全部检查成功，临时依赖前置包 | 前置包合并、依赖正式模块 tag、完整 N8 与 §12 执行/状态实测，再按 Node 发布门槛交付 |
-| 1c | PSP 分支 `Kazuha/access-control-1c`：schema 基础提交 `8d96dd67` 已通过 [完整 Test workflow](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37186124723)，含三方言；分支文档提交 `2231abcb` 记录剩余范围 | 继续 §11.6；表已存在不能说明定义服务、下发、API、页面或采集已接通；工作区未提交草稿不算交付证据 |
+| 1c | PSP 分支 `Kazuha/access-control-1c`：schema 基础提交 `8d96dd67` 已通过完整 CI；定义事务与发布 CAS 提交 `9b475324` 已通过 [完整 Test workflow](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37188909110)，含三方言及 Linux race；文档提交 `67c18dae` 记录证据。C2 解析草稿尚未提交，真实分类暴露的问题按本版 §1.3 修订，不能记为已通过 | 继续 §11.6；表已存在不能说明定义服务、下发、API、页面或采集已接通；工作区未提交草稿不算交付证据 |
 | 1c′、2a–2c、3、4、5 | 尚无本次核对可确认的交付证据 | 按 §11.1 依赖和对应验收启动；不因前置表存在跳过工作包 |
 | N0-S | Linux 实际环境验证尚未完成 | 按 Q1 先验证，再决定修复提交；保持与首轮主路径分开 |
 
@@ -3049,7 +3060,7 @@ tab 条：策略 policies | 列表 lists | 白名单分组 allowlist | 记录 re
 | 顺序 | 子包 | 验收与后续依赖 |
 |---|---|---|
 | C1 | 具体 repo、定义写入口、列表/策略/豁免 CRUD、排序、generation、一致读、快照发布 CAS | SQLite/MySQL/PG 的并发交错与故障回滚；同毫秒编辑、旧发布失败、缺失快照均有测试。schema 基础归入此包，但不能单独关闭 C1 |
-| C2 | 列表解析、规范化、safehttp、分类下载校验、缓存与刷新循环 | 格式/大小/过宽/来源版本测试；相同摘要不重启；旧刷新结果不覆盖新定义；无网络 I/O 持锁 |
+| C2 | 列表解析、规范化、safehttp、分类下载校验、缓存与刷新循环 | 格式/大小/过宽/来源版本测试；分类剔除与持久报告、真实 release 和空结果保护（15b）；相同摘要不重启；旧刷新结果不覆盖新定义；无网络 I/O 持锁 |
 | C3 | 编译、预检、ObserveStatus、原子 candidate mint、LKG 修剪/耗尽、paused、缓存与接线 | 真内核和 Node 1b 联调；策略故障不阻断 roster；实际候选与 stream 一起回滚；nil/旧节点字节及 ETag 不变 |
 | C4 | settings、全部 1c API、权限/审计/日志边界、清理、指标、架构与升级文档 | 路由与接线守卫，预览免审计且 test 留审计，查询串不泄漏，诊断目录和三方言通过 |
 | C5 | UI-0 后的 1c 页面、抽屉、编辑器、深链、访问状态与设置 | §7.5、§7.6 和 1c 屏幕矩阵全部满足；附真实截图和中英文/主题/移动端证据 |
@@ -3091,6 +3102,7 @@ tab 条：策略 policies | 列表 lists | 白名单分组 allowlist | 记录 re
 14. **去抖窗口内新成员**：管理员改一条策略之后马上把一个用户加入白名单分组 → 该用户在下一轮就受限。
 15. **远程列表**：内容不变的刷新不触发任何节点重启（看 core 部署记录与节点日志）；内容变化只触发一次。
     - 15a　**刷新并发**：阻塞一次旧来源下载，修改 URL/分类或删除列表，再释放下载；旧内容和旧失败均不覆盖新状态、不复活已删除行、不推进错误 generation。相同摘要只更新元数据，完整测试在三方言重复。
+    - 15b　**分类过滤与真实数据**：固定 release `20261004053124` 的 YAML 及校验文件，记录 sha256 `c0f7da9a7f95c86b354002650e8268b9d6bb0b638229274d3afa5651a7cf74b8`；离线回归验证 category-finance 可得到非空有效结果、`domain:hsbc` 被剔除、其余合法域名保留，报告列出原因，任何 action 的下发内容均无过宽条目。另用小 fixture 覆盖四种过宽判定、多个属性（含 !cn 与两种分隔兼容）、属性筛选后原始序号、去重与报告样本上限；全部被剔除时不覆盖旧内容或标就绪。后台刷新与重启后 S6/S7 可读同一成功报告；摘要未变只改报告时 generation 与节点部署次数不变；旧刷新报告不能覆盖新版本。checksum、YAML 或原子缓存写入失败时旧缓存与列表继续可用。远程 URL 同一过宽输入仍整份失败；缓存解析与分类过滤的测试必跑，真实 release fixture 固定并在 CI 离线运行，不能仅用本机可选环境变量跳过。
 16. **未就绪列表**：新建一个从未拉取成功的远程列表并在策略中引用它 → 其他策略照常下发；白名单引用它时不能切到执行（409）。
 17. **超额度**：导入 60 000 条域名 → 保存接口直接返回 400 `dest_policy_over_limit`；绕过接口（直接改远程列表的内容）→ 刷新判为失败、保留旧条目；构造两次各自合法、叠加后超额的并发写入 → **发布被拒**：`published_generation` 不推进，各节点继续执行当前版本，结论条显示「改动没有下发：…超出额度」，没有任何节点进入回退。
     - 17a　**定义与发布事务**：同一毫秒用同一个 updated_at 保存两次，第二次必须冲突；并发创建 priority 不碰撞；排序缺失/重复 ID 拒绝，排序后旧表单冲突。定义写入或快照插入故障时 generation/定义/发布状态全部回滚；读 G 后插入新定义，旧候选不能标成新 G；旧失败晚于新发布完成，不能重写 publish_error。已发布快照缺失/损坏返回存储错误，不 mint 空策略。以上在 SQLite/MySQL/PG 验证。
@@ -3187,7 +3199,7 @@ tab 条：策略 policies | 列表 lists | 白名单分组 allowlist | 记录 re
 | Node | `internal/agent/auditlog/filter_test.go` | 真实行 fixture、背压、watch/trial 同时贡献命中与用量而 deny 不计用量、故障退出且不泄漏访问行、逐行校验 |
 | Node | `internal/agent/report_test.go`（追加） | 分类 pending 与七槽公平性、冻结重发逐字节相同、仅确认 AuditBatchIDSent；deferred 后控制成功不清 pending；仅计数批次、过期、Count 饱和、off/revision 清空与降档后新 Hits；非法数据不阻断 SyncOnce |
 | Node | `internal/agent/capability_gate_test.go`、`cmd/node/main_test.go`（追加） | 新能力在静态切片里，不在 CapabilitySource 里；sink 监听失败时不声明 `audit.hits.v1` |
-| PSP | `internal/service/destlist/parse_test.go`、`normalize_test.go`、`broad_test.go`、`refresh_test.go` | 各种格式、规范化、过宽条目、超限、摘要；来源编辑/删除与慢刷新交错、旧失败迟到不覆盖新状态 |
+| PSP | `internal/service/destlist/parse_test.go`、`normalize_test.go`、`broad_test.go`、`geosite_test.go`、`geosite_cache_test.go`、`refresh_test.go` | 各种格式、规范化、过宽条目、超限、摘要；分类剔除与持久报告、固定真实 release、属性组合、空结果与原子缓存保护（15b）；来源编辑/删除与慢刷新交错、旧失败迟到不覆盖新状态 |
 | PSP | `internal/service/destpolicy/compile_test.go`、`publish_test.go`、`sniff_test.go`、`fallback_test.go` | P3 全部判据：一致读与原子 CAS、CatchAll 占位校验、修剪后摘要不同仍能转 empty、exhausted 持久化与上下文重试、已撤销豁免、候选超额、paused 不覆盖 LKG、Subjects 不振荡 |
 | PSP | `internal/adapters/sqlstore/dest_*_repo_test.go` | 三方言定义/generation 原子写、同毫秒版本与 priority/排序并发、一致读、发布和错误 CAS、缺失/损坏快照、注入故障回滚；upsert、2 MiB entries、AuditCollect 保留、72h 去重与 budget/loss 清理；合法 trial 不被用户孤儿清理。PG 的 block 批次中 p12x1/p12x2 映射同一主键须归并；直接向 repo 注入两条同一 trial 主键的行也归并（这是 repo 防御测试，线上重复聚合键仍被拒）。重复批次 RowsAffected=0 且不扣预算；预算与首块原子提交、重启不重置 |
 | PSP | `internal/adapters/sqlstore/user_repo_test.go`（追加） | `GroupIDsByIDs` 三方言 |
