@@ -368,8 +368,9 @@ uncached, and encoding errors cannot poison later attempts. Even a cache hit
 calls the atomic candidate minter: source-only generation changes persist with
 the same wire ETag, and transaction failures remain errors. Repository adapters
 receive their own byte slice. The SQL minter still repeats canonical decoding,
-policy validation and JSON serialization; eliminating that remaining idle cost
-is a separate pending increment, with durable source checks retained.
+policy validation and JSON serialization at this increment; the following
+repository increment removes that remaining idle cost with durable source
+checks retained.
 
 Initial compiler and canonical-config regressions failed before implementation.
 Tests now cover idle compilation/encoding, post-commit publication, changed
@@ -378,12 +379,33 @@ recovery, panel-scope isolation, source-only mint and persistence failure. The
 panel-scope regression exposed a missing panel key and first failed before its
 fix. Weighted eviction/replacement and concurrent cache bounds are covered.
 Full local policy, nodesync, SQL-store and cache suites and relevant static
-checks pass. This increment awaits its own CI; application activation remains
-pending.
+checks pass. At `00252e64fc460da7611fdad441227a9790cea1bd`, the
+[complete Test workflow](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37236223877)
+and [published-node systemd acceptance](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37236223870)
+both succeeded; application activation remains pending.
+
+The atomic SQL minter now caches canonical-config validation by the actual
+SHA-256 of the supplied bytes. It retains only canonical policy bytes, config
+ETag, policy digest and the small policy shape used to validate mint metadata;
+decoded listener configs and rule trees are discarded. A 64-entry/32-MiB
+weighted cache shares concurrent cold loads; invalid input is never cached and
+over-budget proofs remain complete and uncached. SHA-256 equivalence has the
+same collision rationale as the existing stream idle path. Each call still
+checks body size, source generation/kind/context/desired digest/collection mode,
+timestamp and owner existence, and runs the stream/candidate transaction.
+Cache hits cannot certify a committed source or bypass a failed SQL write.
+SQL update callbacks receive isolated policy bytes.
+
+The initial repository regressions failed on repeated decoding. They now prove
+one decode across idle and source-only minting, rejected inconsistent metadata,
+failed source-update rollback and recovery even when a callback mutates bytes,
+uncached invalid canonical input, shared concurrent cold reads and uncached
+over-budget proofs. Full SQL-store/policy/nodesync suites and relevant static
+checks pass. This repository increment awaits its own CI.
 
 This is a C3 foundation with an optional tested sync boundary. It does not
 implement the full C3 acceptance: application assembly, issue/resync integration,
-eligibility integration and membership-change invalidation wiring, remaining idle mint preprocessing, immediate pause UI/API wiring,
+eligibility integration and membership-change invalidation wiring, immediate pause UI/API wiring,
 settings and application integration remain outstanding. Existing nodes still
 receive the existing configuration because the compiler is not wired into sync.
 

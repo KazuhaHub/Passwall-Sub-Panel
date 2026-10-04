@@ -1,10 +1,8 @@
 package sqlstore
 
 import (
-	"bytes"
 	"context"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -24,27 +22,23 @@ import (
 // value's DesiredBody is omitted on the unchanged path; callers already hold
 // that canonical body and only need stream metadata to build the response.
 func (r *nodeAgentRepo) MintConfigWithPolicyCandidate(ctx context.Context, agentID string, canonical []byte, meta domain.DestPolicyMint, now time.Time) (*domain.NodeAgentStream, bool, error) {
-	var config protocol.ConfigBody
-	if agentID == "" || len(canonical) == 0 || int64(len(canonical)) > protocol.MaxSyncBodyBytes || json.Unmarshal(canonical, &config) != nil || protocol.ValidateDestinationPolicy(config.Policy) != nil {
+	if agentID == "" || len(canonical) == 0 || int64(len(canonical)) > protocol.MaxSyncBodyBytes {
 		return nil, false, fmt.Errorf("%w: destination candidate config", domain.ErrValidation)
 	}
-	if !validPolicyMint(meta, config.Policy) {
-		return nil, false, fmt.Errorf("%w: destination candidate metadata", domain.ErrValidation)
+	proof, err := r.policyConfig(canonical)
+	if err != nil {
+		return nil, false, err
 	}
-	encoded, err := json.Marshal(config)
-	if err != nil || !bytes.Equal(encoded, canonical) {
-		return nil, false, fmt.Errorf("%w: noncanonical destination candidate config", domain.ErrValidation)
+	if !proof.validMint(meta) {
+		return nil, false, fmt.Errorf("%w: destination candidate metadata", domain.ErrValidation)
 	}
 	now, err = destWriteTime(now)
 	if err != nil {
 		return nil, false, err
 	}
-	policyBody, err := json.Marshal(config.Policy)
-	if err != nil {
-		return nil, false, err
-	}
+	policyBody := proof.policyBody
 	body := append([]byte(nil), canonical...)
-	etag, digest := contentETag(body), protocol.PolicyDigest(config.Policy)
+	etag, digest := proof.etag, proof.digest
 	for attempt := 0; attempt < 8; attempt++ {
 		var minted *domain.NodeAgentStream
 		changed := false
@@ -84,7 +78,7 @@ func (r *nodeAgentRepo) MintConfigWithPolicyCandidate(ctx context.Context, agent
 			} else if err != nil {
 				return err
 			} else if candidate.DesiredSHA256 != meta.DesiredSHA256 || candidate.MintedSHA256 != digest || candidate.MintedKind != string(meta.Kind) || candidate.MintedGeneration != meta.Generation || candidate.MintedContext != meta.Context || candidate.CollectEffective != meta.CollectEffective {
-				if err := tx.Model(&destAgentPolicyRow{}).Where("agent_id = ?", agentID).UpdateColumns(map[string]any{"desired_sha256": meta.DesiredSHA256, "minted_sha256": digest, "minted_body": policyBody, "minted_kind": string(meta.Kind), "minted_generation": meta.Generation, "minted_context": meta.Context, "minted_at": now, "collect_effective": meta.CollectEffective, "updated_at": now}).Error; err != nil {
+				if err := tx.Model(&destAgentPolicyRow{}).Where("agent_id = ?", agentID).UpdateColumns(map[string]any{"desired_sha256": meta.DesiredSHA256, "minted_sha256": digest, "minted_body": append([]byte(nil), policyBody...), "minted_kind": string(meta.Kind), "minted_generation": meta.Generation, "minted_context": meta.Context, "minted_at": now, "collect_effective": meta.CollectEffective, "updated_at": now}).Error; err != nil {
 					return err
 				}
 			}
@@ -102,25 +96,20 @@ func (r *nodeAgentRepo) MintConfigWithPolicyCandidate(ctx context.Context, agent
 	return nil, false, fmt.Errorf("%w: destination candidate mint retry limit", domain.ErrConflict)
 }
 
-func validPolicyMint(meta domain.DestPolicyMint, p *protocol.DestinationPolicy) bool {
+func (p policyConfigProof) validMint(meta domain.DestPolicyMint) bool {
 	if meta.Generation < 0 || !policyDigestValid(meta.Context, false) || !policyDigestValid(meta.DesiredSHA256, true) {
 		return false
 	}
-	collect := ""
-	if p != nil {
-		collect = string(p.Collect)
-	}
-	if meta.CollectEffective != collect {
+	if meta.CollectEffective != p.collect {
 		return false
 	}
-	active := p != nil && len(p.Rules) > 0
 	switch meta.Kind {
 	case domain.DestCandidateDesired:
-		return active && meta.Generation > 0 && meta.DesiredSHA256 == protocol.PolicyDigest(p)
+		return p.active && meta.Generation > 0 && meta.DesiredSHA256 == p.digest
 	case domain.DestCandidateFallback:
-		return active && meta.Generation > 0
+		return p.active && meta.Generation > 0
 	case domain.DestCandidateEmpty, domain.DestCandidatePaused:
-		return !active && (p == nil || p.Collect == protocol.CollectHitsAndUsage && len(p.Exempt) == 0)
+		return !p.active && p.emptyAllowed
 	default:
 		return false
 	}

@@ -10,6 +10,7 @@ import (
 	"math"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	nodeprotocol "github.com/KazuhaHub/passwall-protocol/protocol"
@@ -17,6 +18,7 @@ import (
 	"gorm.io/gorm/clause"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/boundedcache"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 )
 
@@ -70,7 +72,12 @@ type nodeAgentStreamRow struct {
 
 func (nodeAgentStreamRow) TableName() string { return "node_agent_streams" }
 
-type nodeAgentRepo struct{ db *gorm.DB }
+type nodeAgentRepo struct {
+	db                 *gorm.DB
+	policyConfigDecode func([]byte) (policyConfigProof, error)
+	policyConfigMu     sync.Mutex
+	policyConfigProofs *boundedcache.Cache[policyConfigProof]
+}
 
 func (r *nodeAgentRepo) Create(ctx context.Context, agent *domain.NodeAgent) error {
 	if err := validateNewNodeAgent(agent); err != nil {
