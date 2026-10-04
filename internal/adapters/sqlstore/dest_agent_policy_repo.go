@@ -166,7 +166,7 @@ func runtimePolicyDomain(r destAgentPolicyRow) (*domain.DestAgentPolicy, error) 
 	}
 	return &domain.DestAgentPolicy{
 		AgentID: r.AgentID, DesiredSHA256: r.DesiredSHA256, MintedSHA256: r.MintedSHA256, MintedBody: append([]byte(nil), r.MintedBody...), MintedKind: domain.DestCandidateKind(r.MintedKind), MintedGeneration: r.MintedGeneration, MintedContext: r.MintedContext, MintedAt: runtimeTimeCopy(r.MintedAt),
-		FallbackReason: r.FallbackReason, RejectedGeneration: r.RejectedGeneration, FallbackExhausted: r.FallbackExhausted, OverLimit: over, PrecheckListeners: append([]string(nil), r.PrecheckListeners...),
+		FallbackReason: r.FallbackReason, RejectedGeneration: r.RejectedGeneration, RejectedContext: r.RejectedContext, FallbackExhausted: r.FallbackExhausted, OverLimit: over, PrecheckListeners: append([]string(nil), r.PrecheckListeners...),
 		AppliedSHA256: r.AppliedSHA256, AppliedBody: append([]byte(nil), r.AppliedBody...), AppliedAt: runtimeTimeCopy(r.AppliedAt), AppliedRuleCount: r.AppliedRuleCount, AppliedGroups: append([]int64(nil), r.AppliedGroups...),
 		CollectEffective: r.CollectEffective, ReportedSHA256: r.ReportedSHA256, ReportedState: r.ReportedState, ReportedIssue: r.ReportedIssue, ReportedListeners: append([]string(nil), r.ReportedListeners...), ReportedAt: runtimeTimeCopy(r.ReportedAt), UpdatedAt: r.UpdatedAt.UTC(),
 	}, nil
@@ -183,14 +183,14 @@ func runtimePolicyRow(s domain.DestAgentPolicy) (destAgentPolicyRow, error) {
 	}
 	return destAgentPolicyRow{
 		AgentID: s.AgentID, DesiredSHA256: s.DesiredSHA256, MintedSHA256: s.MintedSHA256, MintedBody: destBytes(s.MintedBody), MintedKind: string(s.MintedKind), MintedGeneration: s.MintedGeneration, MintedContext: s.MintedContext, MintedAt: s.MintedAt,
-		FallbackReason: s.FallbackReason, RejectedGeneration: s.RejectedGeneration, FallbackExhausted: s.FallbackExhausted, OverLimit: over, PrecheckListeners: jsonStrings(s.PrecheckListeners),
+		FallbackReason: s.FallbackReason, RejectedGeneration: s.RejectedGeneration, RejectedContext: s.RejectedContext, FallbackExhausted: s.FallbackExhausted, OverLimit: over, PrecheckListeners: jsonStrings(s.PrecheckListeners),
 		AppliedSHA256: s.AppliedSHA256, AppliedBody: destBytes(s.AppliedBody), AppliedAt: s.AppliedAt, AppliedRuleCount: s.AppliedRuleCount, AppliedGroups: jsonInt64s(s.AppliedGroups),
 		CollectEffective: s.CollectEffective, ReportedSHA256: s.ReportedSHA256, ReportedState: s.ReportedState, ReportedIssue: s.ReportedIssue, ReportedListeners: jsonStrings(s.ReportedListeners), ReportedAt: s.ReportedAt, UpdatedAt: s.UpdatedAt,
 	}, nil
 }
 func runtimePolicyFields(r destAgentPolicyRow) map[string]any {
 	return map[string]any{
-		"fallback_reason": r.FallbackReason, "rejected_generation": r.RejectedGeneration, "fallback_exhausted": r.FallbackExhausted, "over_limit": r.OverLimit, "precheck_listeners": r.PrecheckListeners,
+		"fallback_reason": r.FallbackReason, "rejected_generation": r.RejectedGeneration, "rejected_context": r.RejectedContext, "fallback_exhausted": r.FallbackExhausted, "over_limit": r.OverLimit, "precheck_listeners": r.PrecheckListeners,
 		"applied_sha256": r.AppliedSHA256, "applied_body": r.AppliedBody, "applied_at": r.AppliedAt, "applied_rule_count": r.AppliedRuleCount, "applied_groups": r.AppliedGroups,
 		"reported_sha256": r.ReportedSHA256, "reported_state": r.ReportedState, "reported_issue": r.ReportedIssue, "reported_listeners": r.ReportedListeners, "reported_at": r.ReportedAt,
 	}

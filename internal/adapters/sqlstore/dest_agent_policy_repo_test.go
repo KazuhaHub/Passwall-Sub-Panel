@@ -244,3 +244,39 @@ func TestDestinationStateRejectsIncorrectConfirmedGroups(t *testing.T) {
 		t.Fatalf("fabricated group acceptance persisted: %v / %v", changed, err)
 	}
 }
+
+func TestDestinationObserverPersistsRejectionContextAndTracksSameGenerationRetry(t *testing.T) {
+	_, mint, repo, meta, now := policyObserverFixture(t)
+	o := destpolicy.NewObserver(repo, func() time.Time { return now })
+	invalidated := 0
+	o.SetInvalidator(func(string) { invalidated++ })
+	status := &protocol.PolicyStatus{State: "rejected", Digest: meta.DesiredSHA256, IssueCode: protocol.IssueDestinationPolicyRejected}
+	caps := []string{protocol.CapabilityDestinationPolicy}
+	if err := o.ObserveStatus(t.Context(), "agt_policy_mint", status, caps); err != nil {
+		t.Fatal(err)
+	}
+	state, err := repo.Get(t.Context(), "agt_policy_mint", true)
+	if err != nil || state.RejectedContext != meta.Context {
+		t.Fatalf("rejection context not durable: %+v / %v", state, err)
+	}
+	var p *protocol.DestinationPolicy
+	if err := json.Unmarshal(state.MintedBody, &p); err != nil {
+		t.Fatal(err)
+	}
+	body, _ := json.Marshal(protocol.ConfigBody{Listeners: []protocol.Listener{}, Policy: p})
+	meta.Context = strings.Repeat("c", 64)
+	if _, _, err := mint.MintConfigWithPolicyCandidate(t.Context(), "agt_policy_mint", body, meta, now.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	state, err = repo.Get(t.Context(), "agt_policy_mint", false)
+	if err != nil || state.RejectedContext == meta.Context {
+		t.Fatalf("mint rewrote the rejected source: %+v / %v", state, err)
+	}
+	if err := o.ObserveStatus(t.Context(), "agt_policy_mint", status, caps); err != nil {
+		t.Fatal(err)
+	}
+	state, err = repo.Get(t.Context(), "agt_policy_mint", false)
+	if err != nil || state.RejectedContext != meta.Context || state.RejectedGeneration != meta.Generation || invalidated != 2 {
+		t.Fatalf("retry rejection stayed on old context: %+v / %v invalidated=%d", state, err, invalidated)
+	}
+}

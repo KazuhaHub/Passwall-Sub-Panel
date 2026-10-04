@@ -48,7 +48,7 @@ func ApplyPolicyStatus(state *domain.DestAgentPolicy, status *protocol.PolicySta
 		settled := false
 		switch next.MintedKind {
 		case domain.DestCandidateDesired:
-			settled = status.State == "applied" && next.AppliedSHA256 == next.MintedSHA256 && next.AppliedAt != nil && next.FallbackReason == "" && !next.FallbackExhausted && next.RejectedGeneration == 0 && next.OverLimit == nil && len(next.PrecheckListeners) == 0 || status.State == "rejected" && next.FallbackReason == "rejected" && next.RejectedGeneration == next.MintedGeneration
+			settled = status.State == "applied" && next.AppliedSHA256 == next.MintedSHA256 && next.AppliedAt != nil && next.FallbackReason == "" && !next.FallbackExhausted && next.RejectedGeneration == 0 && next.RejectedContext == "" && next.OverLimit == nil && len(next.PrecheckListeners) == 0 || status.State == "rejected" && next.FallbackReason == "rejected" && next.RejectedGeneration == next.MintedGeneration && next.RejectedContext == next.MintedContext
 		case domain.DestCandidateFallback:
 			settled = status.State == "applied" && next.AppliedSHA256 == next.MintedSHA256 && next.AppliedAt != nil || status.State == "rejected" && next.FallbackExhausted && next.AppliedSHA256 == "" && len(next.AppliedBody) == 0
 		case domain.DestCandidateEmpty, domain.DestCandidatePaused:
@@ -77,9 +77,10 @@ func ApplyPolicyStatus(state *domain.DestAgentPolicy, status *protocol.PolicySta
 					next.AppliedGroups = appliedPolicyGroups(policy)
 					changed = true
 				}
-				if next.MintedKind == domain.DestCandidateDesired && (next.FallbackReason != "" || next.RejectedGeneration != 0 || next.FallbackExhausted || next.OverLimit != nil || len(next.PrecheckListeners) > 0) {
+				if next.MintedKind == domain.DestCandidateDesired && (next.FallbackReason != "" || next.RejectedGeneration != 0 || next.RejectedContext != "" || next.FallbackExhausted || next.OverLimit != nil || len(next.PrecheckListeners) > 0) {
 					next.FallbackReason = ""
 					next.RejectedGeneration = 0
+					next.RejectedContext = ""
 					next.FallbackExhausted = false
 					next.OverLimit = nil
 					next.PrecheckListeners = nil
@@ -88,9 +89,10 @@ func ApplyPolicyStatus(state *domain.DestAgentPolicy, status *protocol.PolicySta
 			} else if status.State == "rejected" {
 				switch next.MintedKind {
 				case domain.DestCandidateDesired:
-					if next.FallbackReason != "rejected" || next.RejectedGeneration != next.MintedGeneration {
+					if next.FallbackReason != "rejected" || next.RejectedGeneration != next.MintedGeneration || next.RejectedContext != next.MintedContext {
 						next.FallbackReason = "rejected"
 						next.RejectedGeneration = next.MintedGeneration
+						next.RejectedContext = next.MintedContext
 						changed = true
 					}
 				case domain.DestCandidateFallback:

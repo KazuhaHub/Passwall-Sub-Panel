@@ -198,6 +198,7 @@ type DestAgentPolicy struct {
 	MintedAt                                     *time.Time
 	FallbackReason                               string
 	RejectedGeneration                           int64
+	RejectedContext                              string
 	FallbackExhausted                            bool
 	OverLimit                                    *DestPublishError
 	PrecheckListeners                            []string

@@ -38,6 +38,7 @@ func (o *Observer) ObserveStatus(ctx context.Context, agentID string, status *pr
 	_, err := o.store.Update(ctx, agentID, now, func(state *domain.DestAgentPolicy, loadBodies func() error) (bool, error) {
 		oldDigest, oldReason, oldExhausted := state.AppliedSHA256, state.FallbackReason, state.FallbackExhausted
 		oldRejected, oldLimit, oldListeners := state.RejectedGeneration, state.OverLimit, state.PrecheckListeners
+		oldRejectedContext := state.RejectedContext
 		changed, err := ApplyPolicyStatus(state, status, capabilities, now)
 		if errors.Is(err, errPolicyBodiesRequired) {
 			if err := loadBodies(); err != nil {
@@ -49,7 +50,7 @@ func (o *Observer) ObserveStatus(ctx context.Context, agentID string, status *pr
 			}
 		}
 		if err == nil && changed {
-			invalidate = oldDigest != state.AppliedSHA256 || oldReason != state.FallbackReason || oldExhausted != state.FallbackExhausted || oldRejected != state.RejectedGeneration || !reflect.DeepEqual(oldLimit, state.OverLimit) || !slices.Equal(oldListeners, state.PrecheckListeners)
+			invalidate = oldDigest != state.AppliedSHA256 || oldReason != state.FallbackReason || oldExhausted != state.FallbackExhausted || oldRejected != state.RejectedGeneration || oldRejectedContext != state.RejectedContext || !reflect.DeepEqual(oldLimit, state.OverLimit) || !slices.Equal(oldListeners, state.PrecheckListeners)
 		}
 		return changed, err
 	})

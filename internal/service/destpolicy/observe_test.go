@@ -31,15 +31,16 @@ func TestObservePromotesOnlyMatchingExactCandidateAndIsIdle(t *testing.T) {
 			state, now := observedCandidate(t, kind)
 			state.FallbackReason = "rejected"
 			state.RejectedGeneration = 7
+			state.RejectedContext = state.MintedContext
 			status := &protocol.PolicyStatus{State: "applied", Digest: state.MintedSHA256}
 			changed, err := ApplyPolicyStatus(&state, status, observedCaps(), now.Add(time.Minute))
 			if err != nil || !changed || !bytes.Equal(state.AppliedBody, state.MintedBody) || state.AppliedSHA256 != state.MintedSHA256 || state.AppliedRuleCount != 1 || !reflect.DeepEqual(state.AppliedGroups, []int64{8}) {
 				t.Fatalf("exact candidate not promoted: %+v / %v", state, err)
 			}
-			if kind == domain.DestCandidateDesired && (state.FallbackReason != "" || state.RejectedGeneration != 0) {
+			if kind == domain.DestCandidateDesired && (state.FallbackReason != "" || state.RejectedGeneration != 0 || state.RejectedContext != "") {
 				t.Fatal("desired apply did not clear fallback")
 			}
-			if kind == domain.DestCandidateFallback && (state.FallbackReason != "rejected" || state.RejectedGeneration != 7) {
+			if kind == domain.DestCandidateFallback && (state.FallbackReason != "rejected" || state.RejectedGeneration != 7 || state.RejectedContext != state.MintedContext) {
 				t.Fatal("fallback success was treated as desired success")
 			}
 			first := state

@@ -234,7 +234,26 @@ failed against the stub and now pass, along with full local policy, nodesync,
 SQL-store and HTTP-handler suites and static checks. The shared compiler/candidate
 types now live in `ports`, avoiding service import cycles. An additional sync
 test confirms that capability-less empty candidates preserve legacy bytes,
-ETags and versions. This increment's CI is pending.
+ETags and versions. At `c1afeb675f76a0f18657ac2ec9973cc33d2c4b54`,
+the [complete Test workflow](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37200158504)
+and [published-node systemd acceptance](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37200158484)
+both succeeded.
+
+The retry-context increment persists `rejected_context` beside the actual
+rejected generation. A same-generation core/sniffing retry can otherwise inherit
+the old rejected lock after mint replaces `minted_context`; the separate field
+retains the source of that rejection until desired success. Desired status
+transitions and post-commit invalidation compare it, while source-only mint leaves
+it untouched. One new durable repository regression first failed without the
+field's behavior and passed after implementation, including a second rejection
+with unchanged generation/digest but changed context. Desired apply clears it;
+fallback success preserves it. `PolicyContext` hashes only publication generation,
+the three relevant capabilities, desired core engine/version and enabled-listener
+sniffing fingerprints. Task capabilities, roster, destination policy and unrelated
+listener fields do not unlock a retry. Context tests first failed against the stub.
+Latest local policy/SQL-store test executables were blocked by Windows Application
+Control after compilation; security settings were unchanged. CI validation for
+this increment is pending, and the production compiler remains to be connected.
 
 This is a C3 foundation with an optional tested sync boundary. It does not
 implement the full C3 acceptance: production compiler/state-machine and observer
