@@ -169,11 +169,24 @@ consistency are validated before any write. This method is not called by sync
 yet. Seven focused repository tests passed after first failing against the stub;
 fault injection proves rollback in both write directions and query guards check
 the idle blob path. The complete local SQL-store, policy and domain suites pass
-for this increment. Its own CI still needs to run; `c1ef001b` results do not prove
-the subsequent mint implementation.
+for this increment. The [complete Test workflow](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37196767969)
+at `b8ed6ad784b6704d58aa3515f9ba488c8f4522f4` subsequently succeeded, including
+SQLite race and both server dialects. [Published-node systemd acceptance](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37196767923)
+also succeeded at that SHA. These results are separate from `c1ef001b` evidence.
+
+The next increment adds pure `ApplyPolicyStatus` transitions. Matching applied
+status promotes the exact minted desired/fallback body and records its rules
+and groups; only desired success clears the desired rejection state. A rejection
+of a fallback uses the actual minted digest even after pruning changed it, then
+clears LKG and sets exhausted. Stale statuses update only reported fields.
+Paused, empty and collection-only candidates cannot replace LKG. Repeated settled
+observations preserve timestamps and skip candidate decoding. Corrupt matching
+candidate bodies return unavailable without partial mutation. Seven status tests
+first failed against the stub and pass after implementation. This function has
+not yet been connected to a durable observer transaction or sync.
 
 This is an unconnected C3 increment. It does not implement the full C3 acceptance:
-candidate mint wiring, ObserveStatus/LKG/exhausted transitions, fallback
+candidate mint wiring, durable ObserveStatus/LKG/exhausted transitions, fallback
 pruning, eligibility/member accounting, policy caches, immediate pause wiring,
 settings and application integration remain outstanding. Existing nodes still
 receive the existing configuration because the compiler is not wired into sync.

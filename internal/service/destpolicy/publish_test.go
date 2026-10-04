@@ -156,7 +156,7 @@ func TestPublisherDefaultBuilderChecksDefinitionsBeforePublish(t *testing.T) {
 	p.now = func() time.Time { return now }
 	store.defs.Policies = []domain.DestPolicy{rulePolicy(1, domain.DestBlock, 1)}
 	store.defs.Policies[0].Inline.Ports = "70000"
-	if err := p.EnsurePublished(t.Context(), 60, true); err != nil || store.published != 0 || store.issue == nil || store.issue.Kind != "invalid" {
+	if err := p.EnsurePublished(t.Context(), 60, true); err != nil || store.published != 0 || store.issue == nil || store.issue.Kind != "invalid" || store.issue.Field != "rule.p1" {
 		t.Fatalf("invalid definitions published: %+v / %v", store, err)
 	}
 	store.defs.Policies[0].Inline.Ports = "443"

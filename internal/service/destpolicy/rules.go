@@ -226,7 +226,7 @@ func finishPolicy(p *protocol.DestinationPolicy, validate bool) (*protocol.Desti
 	return p, nil
 }
 func invalid(field string) error {
-	return fmt.Errorf("%w: dest_policy_invalid: %s", domain.ErrValidation, field)
+	return &DefinitionError{Detail: domain.DestPublishError{Kind: "invalid", Field: field}}
 }
 func unique[T ~string](values []T) []T {
 	if len(values) == 0 {
