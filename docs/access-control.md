@@ -165,8 +165,8 @@ still update metadata when the wire ETag is unchanged, while confirmed LKG and
 reported status fields remain untouched. Unchanged calls read only stream and
 candidate metadata, omitting `desired_body`, `minted_body` and `applied_body`, and
 perform no candidate write. Canonical config bytes, policy shape and metadata
-consistency are validated before any write. This method is not called by sync
-yet. Seven focused repository tests passed after first failing against the stub;
+consistency are validated before any write. The optional sync boundary below
+now uses this method. Seven focused repository tests passed after first failing against the stub;
 fault injection proves rollback in both write directions and query guards check
 the idle blob path. The complete local SQL-store, policy and domain suites pass
 for this increment. The [complete Test workflow](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37196767969)
@@ -200,10 +200,25 @@ no runtime row, including after an observer restart. Ten repository tests cover
 these behaviors, missing agents/bodies, stale reports and initial no-op state;
 new boundaries first failed before implementation or repair. Full local SQL-store,
 policy, domain, nodesync and HTTP-handler suites and relevant static checks pass.
-Sync and application wiring remain outstanding; this increment's CI is pending.
+Application wiring remains outstanding. This increment's [published-node systemd acceptance](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37199488550)
+at `ff182925ffb5429d345f6991e655fe2837454645` passed; its full Test CI is pending.
 
-This is an unconnected C3 increment. It does not implement the full C3 acceptance:
-candidate mint and observer wiring, fallback
+The optional `nodesync.PolicyCoordinator` boundary now observes policy status
+after control ingestion and before outbound compilation, then attaches only the
+compiled Policy subtree and mints config plus candidate atomically. Partial
+reports still observe policy status, and one-shot status is stripped from the
+full-report cache. Policies and the atomic mint repository must be configured
+together; both nil preserve the existing sync path. A compiler cannot emit a
+policy without the node's current destination capability. Observation, compiler
+or mint failure returns before a new config is offered. Five integration tests
+first failed before implementation; full local nodesync, HTTP-handler, SQL-store
+and policy suites plus relevant static checks pass. Tests inject the compiler
+and real durable observer/repositories, proving that a rejection influences
+the same response. The production compiler/state machine and application
+activation remain outstanding; this boundary increment's CI is pending.
+
+This is a C3 foundation with an optional tested sync boundary. It does not
+implement the full C3 acceptance: production compiler and observer assembly, fallback
 pruning, eligibility/member accounting, policy caches, immediate pause wiring,
 settings and application integration remain outstanding. Existing nodes still
 receive the existing configuration because the compiler is not wired into sync.
