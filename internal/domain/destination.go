@@ -47,6 +47,25 @@ type DestList struct {
 	CreatedAt, UpdatedAt                     time.Time
 }
 
+// DestListRefresh contains only fields a background fetch is allowed to write.
+// A nonempty LastError preserves the previously usable entries and fetch time.
+type DestListRefresh struct {
+	Entries                  []byte
+	EntryCount, RegexpCount  int
+	ContentSHA256, LastError string
+}
+
+type DestReference struct {
+	Kind string `json:"kind"`
+	ID   int64  `json:"id"`
+	Name string `json:"name"`
+}
+
+type DestListInUseError struct{ UsedBy []DestReference }
+
+func (e *DestListInUseError) Error() string { return "dest_list_in_use" }
+func (e *DestListInUseError) Unwrap() error { return ErrConflict }
+
 type DestAction string
 
 const (
@@ -122,6 +141,16 @@ type DestPolicySnapshot struct {
 	Generation int64
 	Body       []byte
 	CreatedAt  time.Time
+}
+
+// DestDefinitions is one consistent database read, before publication. Member
+// and roster data deliberately live outside the definition generation.
+type DestDefinitions struct {
+	State      DestPolicyState
+	Lists      []DestList
+	Policies   []DestPolicy
+	Exemptions []DestExemption
+	Groups     []DestGroupMode
 }
 
 type DestCandidateKind string
