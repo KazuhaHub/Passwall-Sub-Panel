@@ -301,6 +301,17 @@ scoped subjects, group moves and collection-off updates. Production input-provid
 assembly is available; caching, issue/resync integration and application activation
 remain outstanding.
 
+The compiler caches one decoded immutable publication by published generation.
+Every call still reads the small live state, retaining immediate pause and new
+publication visibility; concurrent cold loads share one snapshot read. Failed
+new-generation loads cannot return the old cached definitions or poison a later
+successful reload. A real SQL query guard first failed on an idle snapshot read
+before implementation; it now proves zero snapshot-body reads on unchanged
+syncs and one read on a new publication. Concurrent-load/live-pause and failed
+reload regressions pass, as do the full local policy/nodesync suites and static
+checks. This caches only published definitions: full candidate, membership and
+canonical ConfigBody caching remain outstanding.
+
 This is a C3 foundation with an optional tested sync boundary. It does not
 implement the full C3 acceptance: application assembly, issue/resync integration,
 eligibility integration and membership-change invalidation, policy caches, immediate pause UI/API wiring,

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"sync"
 	"time"
 
 	"github.com/KazuhaHub/passwall-protocol/protocol"
@@ -35,14 +36,17 @@ type CompilerOptions struct {
 }
 
 type Compiler struct {
-	definitions CompilerDefinitions
-	runtime     ports.DestAgentPolicyRepo
-	inputs      CompilerInputs
-	minSeconds  func(context.Context) (int, error)
-	now         func() time.Time
-	publisher   *Publisher
-	observer    *Observer
-	invalidate  func(string)
+	definitions            CompilerDefinitions
+	runtime                ports.DestAgentPolicyRepo
+	inputs                 CompilerInputs
+	minSeconds             func(context.Context) (int, error)
+	now                    func() time.Time
+	publisher              *Publisher
+	observer               *Observer
+	invalidate             func(string)
+	publicationMu          sync.Mutex
+	publicationCached      bool
+	publicationDefinitions domain.DestDefinitions
 }
 
 func NewCompiler(options CompilerOptions) (*Compiler, error) {
@@ -158,15 +162,45 @@ func (c *Compiler) Compile(ctx context.Context, agent *domain.NodeAgent, snapsho
 }
 
 func (c *Compiler) publishedDefinitions(ctx context.Context) (domain.DestDefinitions, domain.DestPolicyState, error) {
+	state, err := c.definitions.State(ctx)
+	if err != nil {
+		return domain.DestDefinitions{}, domain.DestPolicyState{}, err
+	}
+	if state.Generation < 0 || state.PublishedGeneration < 0 || state.PublishedGeneration > state.Generation {
+		return domain.DestDefinitions{}, domain.DestPolicyState{}, fmt.Errorf("%w: invalid destination publication state", domain.ErrUnavailable)
+	}
+	// Publication generations identify immutable executable snapshots. Read the
+	// small live state on every call so pause/publication changes stay visible,
+	// but load and decode the selected body only once per generation. Serialize
+	// cold loads to avoid one multi-MiB read per concurrent node. Cached slices
+	// stay private to read-only compiler helpers; only the value state is edited.
+	c.publicationMu.Lock()
+	defer c.publicationMu.Unlock()
+	if c.publicationCached && c.publicationDefinitions.State.PublishedGeneration == state.PublishedGeneration {
+		return c.publicationDefinitions, state, nil
+	}
 	state, snapshot, found, err := c.definitions.PublishedState(ctx)
 	if err != nil {
 		return domain.DestDefinitions{}, domain.DestPolicyState{}, err
 	}
 	if !found {
+		if state.PublishedGeneration != 0 {
+			return domain.DestDefinitions{}, state, fmt.Errorf("%w: missing destination snapshot", domain.ErrUnavailable)
+		}
+		c.publicationDefinitions = domain.DestDefinitions{}
+		c.publicationCached = true
 		return domain.DestDefinitions{}, state, nil
 	}
 	defs, err := DecodeDefinitionSnapshot(snapshot)
-	return defs, state, err
+	if err != nil {
+		return domain.DestDefinitions{}, state, err
+	}
+	if defs.State.Generation != state.PublishedGeneration {
+		return domain.DestDefinitions{}, state, fmt.Errorf("%w: mismatched destination snapshot", domain.ErrUnavailable)
+	}
+	c.publicationDefinitions = defs
+	c.publicationCached = true
+	return defs, state, nil
 }
 
 var _ ports.DestPolicyCompiler = (*Compiler)(nil)

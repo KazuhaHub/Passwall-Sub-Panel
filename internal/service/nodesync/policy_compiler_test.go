@@ -2,6 +2,7 @@ package nodesync
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"reflect"
 	"testing"
@@ -12,9 +13,61 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/destpolicy"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/group"
+	"gorm.io/gorm"
 )
 
 type compilerFixtureInputs struct{}
+
+func TestProductionPolicyPublicationCacheAvoidsIdleSnapshotReads(t *testing.T) {
+	f := newConfigAppliedFixture(t)
+	definitions := sqlstore.NewDestDefinitionRepo(f.db)
+	p := &domain.DestPolicy{Name: "cached publication", Enabled: true, Action: domain.DestBlock, Scope: domain.DestScopeAll, Inline: domain.DestInline{Ports: "443"}}
+	if err := definitions.SavePolicy(t.Context(), p, p.UpdatedAt, f.now); err != nil {
+		t.Fatal(err)
+	}
+	publishCompilerFixture(t, f, definitions)
+	compiler, err := destpolicy.NewCompiler(destpolicy.CompilerOptions{Definitions: definitions, Runtime: f.repos.DestAgentPolicy, Inputs: compilerFixtureInputs{}, Now: f.service.now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.service.policies, f.service.policyCandidates = compiler, f.repos.NodeAgent.(ports.NodePolicyCandidateRepo)
+	report := policySyncReport(f)
+	first, err := f.service.Sync(t.Context(), report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	block, reads := true, 0
+	f.db.Callback().Query().After("gorm:query").Register("publication-cache-guard", func(tx *gorm.DB) {
+		if tx.Statement.Table != "dest_policy_snapshots" {
+			return
+		}
+		reads++
+		if block {
+			tx.AddError(errors.New("idle compilation read snapshot body"))
+		}
+	})
+	t.Cleanup(func() { _ = f.db.Callback().Query().Remove("publication-cache-guard") })
+	for range 2 {
+		again, err := f.service.Sync(t.Context(), report)
+		if err != nil || again.Config.ETag != first.Config.ETag || reads != 0 {
+			t.Fatalf("idle publication cache: reads=%d / %v", reads, err)
+		}
+	}
+	p.Inline.Ports = "80"
+	if err := definitions.SavePolicy(t.Context(), p, p.UpdatedAt, f.now); err != nil {
+		t.Fatal(err)
+	}
+	publishCompilerFixture(t, f, definitions)
+	block = false
+	updated, err := f.service.Sync(t.Context(), report)
+	if err != nil || updated.Config.Body == nil || updated.Config.Body.Policy == nil || updated.Config.Body.Policy.Rules[0].Ports != "80" || reads != 1 {
+		t.Fatalf("new publication not loaded once: reads=%d / %v", reads, err)
+	}
+	block = true
+	if _, err := f.service.Sync(t.Context(), report); err != nil || reads != 1 {
+		t.Fatalf("new snapshot not cached: reads=%d / %v", reads, err)
+	}
+}
 
 func TestProductionPolicyInputsSyncTracksGroupAndCollectionChanges(t *testing.T) {
 	f := newConfigAppliedFixture(t)
