@@ -466,7 +466,7 @@ jobs:
     # repository variables still override both, and the drive step records the
     # digest that actually ran, so an override is never anonymous.
     env:
-      PSP_LIVE_3XUI_IMAGE: ${{ vars.PSP_LIVE_3XUI_IMAGE || 'ghcr.io/mhsanaei/3x-ui:v3.8.5@sha256:e0f90c10902e0e74f947d5a9efe017b273804477430233bbfc4918542ffe366c' }}
+      PSP_LIVE_3XUI_IMAGE: ${{ vars.PSP_LIVE_3XUI_IMAGE || 'ghcr.io/mhsanaei/3x-ui:v3.9.0@sha256:93a7a68e3d0a65be1b02d2bfc1f3ca02d0e800516a403e103cea2d7c7090855d' }}
       PSP_LIVE_SUI_IMAGE: ${{ vars.PSP_LIVE_SUI_IMAGE || 'ghcr.io/alireza0/s-ui:v1.6.3@sha256:51cdb0036118dbcac12cba28fed13e36c53f8cdcb72bff88a062b5d6f243bd64' }}
     steps:
       - uses: actions/checkout@v7

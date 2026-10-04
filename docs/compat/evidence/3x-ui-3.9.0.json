@@ -1,0 +1,96 @@
+{
+  "schema_version": 1,
+  "verified_at": "2026-10-04T01:10:13Z",
+  "scope": "current PSP source adapter against a fresh isolated upstream release",
+  "psp_commit": "b0b115717806343a63ca6a3f0c87dee46c41a381",
+  "upstream": {
+    "version": "3.9.0",
+    "commit": "3cd4bf504c3cd8ea9b1c1fdb032a9796c5c43ddb",
+    "release_url": "https://github.com/MHSanaei/3x-ui/releases/tag/v3.9.0",
+    "asset": "x-ui-windows-amd64.zip",
+    "asset_sha256": "0f90b41c95ce081cc4081ab532bf6ae77e8cbaf55f66c39989d01547c84931a6",
+    "xray_version": "26.9.30",
+    "xray_state": "running"
+  },
+  "environment": {
+    "platform": "windows/amd64",
+    "go_version": "1.27.1",
+    "database": "fresh SQLite",
+    "authentication": "admin-scoped Bearer token"
+  },
+  "ci_image": "ghcr.io/mhsanaei/3x-ui:v3.9.0@sha256:93a7a68e3d0a65be1b02d2bfc1f3ca02d0e800516a403e103cea2d7c7090855d",
+  "ci_image_locally_executed": false,
+  "command": "go test -json -count=1 -timeout=10m ./internal/adapters/xui -run '^TestLive_'",
+  "log_sha256": "56804dd82a4c8373fdc6e9a7921d1090e625a796434b8e6755da3e7b8399e784",
+  "checker": "deploy/compat/check-go-results.mjs --profiles deploy/compat/profiles-third-party.json --profile third-party-3xui-live",
+  "result": {
+    "profile": "third-party-3xui-live",
+    "package": "github.com/KazuhaHub/passwall-sub-panel/internal/adapters/xui",
+    "verdict": "pass",
+    "goExitCode": 0,
+    "requiredTests": [
+      "TestLive_BulkDelPreservesSharedClient",
+      "TestLive_ConcurrentSameClientNoCorruption",
+      "TestLive_MultiInboundClientSurface",
+      "TestLive_SharedClientMigrationFlow",
+      "TestLive_TwoClientsSameBackendNoCorruption",
+      "TestLive_XUIConnectionLimits",
+      "TestLive_XUIRealityScan",
+      "TestLive_XUISurface",
+      "TestLive_XUITrafficFloorMatrix"
+    ],
+    "passed": [
+      "TestLive_BulkDelPreservesSharedClient",
+      "TestLive_ConcurrentSameClientNoCorruption",
+      "TestLive_MultiInboundClientSurface",
+      "TestLive_SharedClientMigrationFlow",
+      "TestLive_TwoClientsSameBackendNoCorruption",
+      "TestLive_XUIConnectionLimits",
+      "TestLive_XUIRealityScan",
+      "TestLive_XUISurface",
+      "TestLive_XUITrafficFloorMatrix"
+    ],
+    "missing": [],
+    "failed": [],
+    "skipped": [],
+    "unexpected": [
+      "TestLive_XUIConnectionLimits/an_unrelated_update_does_not_wipe_the_device_cap",
+      "TestLive_XUIConnectionLimits/create_carries_both_caps",
+      "TestLive_XUIConnectionLimits/update_carries_both_caps",
+      "TestLive_XUIConnectionLimits/zero_clears_both_caps",
+      "TestLive_XUITrafficFloorMatrix/an_exhausted_user_is_cut_the_moment_they_move_traffic",
+      "TestLive_XUITrafficFloorMatrix/first_period,_deep_into_quota",
+      "TestLive_XUITrafficFloorMatrix/first_period,_past_half_quota",
+      "TestLive_XUITrafficFloorMatrix/fresh_period,_zero_used,_aged_client",
+      "TestLive_XUITrafficFloorMatrix/the_pushed_cap_does_not_move_as_traffic_accrues"
+    ],
+    "notApplicable": [
+      {
+        "test": "TestLive_Fail2banStatus",
+        "reason": "needs a fail2ban endpoint the 3X-UI image does not run; not part of the panel-backed surface"
+      },
+      {
+        "test": "TestLive_Fail2banStatusUnknownRouteIsUnsupported",
+        "reason": "same fail2ban endpoint as TestLive_Fail2banStatus"
+      }
+    ]
+  },
+  "supplementary": {
+    "test": "TestReview390InboundAndWeeklyRenewal",
+    "method": "temporary Go test overlay using the production adapter",
+    "verdict": "pass",
+    "checks": [
+      "negative subSortIndex=-3 preserved",
+      "config update preserves independent inbound enable and client UUID/enable/quota/expiry",
+      "PSP UpdateClient clears a pre-existing resetWeekday=3"
+    ]
+  },
+  "limits": [
+    "fail2ban probes N/A; declared subtests may appear in checker unexpected and do not count as top-level failures",
+    "Linux container execution pending CI",
+    "no historical PSP binary verification",
+    "no existing database upgrade verification",
+    "no full proxy dataplane or PSP traffic/reconcile verification",
+    "no destructive panel/core update execution"
+  ]
+}

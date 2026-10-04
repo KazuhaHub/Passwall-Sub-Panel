@@ -14,7 +14,7 @@ import { test } from 'node:test'
 // The workflow is read as text rather than parsed as YAML, matching the release
 // guard, so these assertions keep working on a machine that has no YAML library.
 
-const workflow = readFileSync(new URL('../.github/workflows/test.yml', import.meta.url), 'utf8')
+const workflow = readFileSync(new URL('../.github/workflows/test.yml', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
 
 function job(name) {
   const marker = `  ${name}:\n`

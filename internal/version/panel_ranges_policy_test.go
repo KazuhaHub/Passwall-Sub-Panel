@@ -258,7 +258,7 @@ func TestTheShippedPanelRangesDocumentsParse(t *testing.T) {
 		product     string
 		wantCeiling string
 	}{
-		{product: "3x-ui", wantCeiling: "3.8.5"},
+		{product: "3x-ui", wantCeiling: "3.9.0"},
 		{product: "sui", wantCeiling: "1.6.3"},
 	} {
 		t.Run(tc.product, func(t *testing.T) {
