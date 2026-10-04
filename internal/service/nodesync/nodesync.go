@@ -68,6 +68,7 @@ type Service struct {
 	policyCandidates   ports.NodePolicyCandidateRepo
 	policyConfigCache  *boundedcache.Cache[[]byte]
 	policyConfigEncode func(nodeprotocol.ConfigBody) ([]byte, error)
+	allowlistResync    func(context.Context, int64)
 }
 
 // receivedFullReport keeps the control plane's receipt time beside the latest
@@ -129,6 +130,13 @@ func New(options Options) (*Service, error) {
 }
 
 func (s *Service) SetRenderInvalidator(invalidate func()) { s.invalidateRender = invalidate }
+
+// SetAllowlistResyncer is wired before serving. The callback must invalidate
+// eligibility first, then enqueue asynchronous member resync without waiting
+// on the current agent sync lock. Nil leaves recovery to the periodic heal.
+func (s *Service) SetAllowlistResyncer(resync func(context.Context, int64)) {
+	s.allowlistResync = resync
+}
 
 func (s *Service) SetRealityFingerprintNormalizer(normalize func(context.Context, int64, string) (int, error)) {
 	s.normalizeRealityFingerprints = normalize
@@ -499,6 +507,9 @@ func (s *Service) ingestReport(ctx context.Context, agent *domain.NodeAgent, sna
 	// upgrade helper immediately revokes future task admission.
 	if err := s.agents.UpdateProtocolObservation(ctx, agent.AgentID, report.ProtocolVersion, report.Capabilities, now); err != nil {
 		return fmt.Errorf("nodesync: record protocol observation: %w", err)
+	}
+	if s.allowlistResync != nil && slices.Contains(agent.ObservedCapabilities, nodeprotocol.CapabilityDestinationPolicy) != slices.Contains(report.Capabilities, nodeprotocol.CapabilityDestinationPolicy) {
+		s.allowlistResync(ctx, agent.PanelID)
 	}
 	results := make([]domain.NodeAgentTaskResult, len(report.TaskResults))
 	for i := range report.TaskResults {

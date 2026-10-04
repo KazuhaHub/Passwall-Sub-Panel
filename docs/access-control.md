@@ -401,7 +401,34 @@ one decode across idle and source-only minting, rejected inconsistent metadata,
 failed source-update rollback and recovery even when a callback mutates bytes,
 uncached invalid canonical input, shared concurrent cold reads and uncached
 over-budget proofs. Full SQL-store/policy/nodesync suites and relevant static
-checks pass. This repository increment awaits its own CI.
+checks pass. At `96b3156432f453bd391752739919ad0703fd8e34`, the
+[complete Test workflow](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37236758479)
+and [published-node systemd acceptance](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37236758560)
+both succeeded.
+
+Optional allowlist resync hooks now expose the committed eligibility event
+boundary. Nodesync compares only presence of `policy.destination.v1` before and
+after persisting the current observation, including partial reports. Changes to
+audit/task/host capabilities do not enqueue member resync. A later sync failure
+does not erase the already committed capability change, and replay cannot
+duplicate its notification. Failed observation writes do not notify.
+
+Compiler and observer hooks notify only when the combined fallback-reason/
+exhaustion state changes between eligible and blocked. Notification happens
+after the owner transaction succeeds, including cached selection transitions;
+failed transactions and idle/stale statuses do not notify. Observer retries
+reset pending effects on each callback attempt. Desired recovery and exhausted
+fallback without a reason-column change are covered by a real SQL regression.
+The application callback must invalidate panel eligibility before enqueueing
+asynchronous group resync and must not wait on the active agent sync lock.
+Compiler callbacks provide agent identity for panel resolution; nodesync
+callbacks already have panel identity. Nil hooks leave recovery to periodic
+heal. These are event boundaries, not application wiring or complete membership
+removal/eligibility enforcement.
+
+Compiler and capability regressions first failed against the missing hooks.
+Full local policy/nodesync/SQL-store/group suites and relevant static checks
+pass. This resync-hook increment awaits its own CI.
 
 This is a C3 foundation with an optional tested sync boundary. It does not
 implement the full C3 acceptance: application assembly, issue/resync integration,

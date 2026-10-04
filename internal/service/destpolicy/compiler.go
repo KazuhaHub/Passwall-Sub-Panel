@@ -45,6 +45,7 @@ type Compiler struct {
 	publisher              *Publisher
 	observer               *Observer
 	invalidate             func(string)
+	allowlistResync        func(context.Context, string)
 	publicationMu          sync.Mutex
 	publicationCached      bool
 	publicationDefinitions domain.DestDefinitions
@@ -80,6 +81,14 @@ func NewCompiler(options CompilerOptions) (*Compiler, error) {
 }
 
 func (c *Compiler) SetInvalidator(invalidate func(string)) { c.invalidate = invalidate }
+
+// SetAllowlistResyncer receives an agent identity only after a committed change
+// of allowlist eligibility. Assembly resolves the panel, invalidates its cache
+// and enqueues asynchronous member resync; nil leaves periodic heal as fallback.
+func (c *Compiler) SetAllowlistResyncer(resync func(context.Context, string)) {
+	c.allowlistResync = resync
+	c.observer.SetAllowlistResyncer(resync)
+}
 func (c *Compiler) ObserveStatus(ctx context.Context, agentID string, status *protocol.PolicyStatus, caps []string) error {
 	if c == nil || c.observer == nil {
 		return domain.ErrUnavailable
@@ -146,13 +155,17 @@ func (c *Compiler) Compile(ctx context.Context, agent *domain.NodeAgent, snapsho
 	var result ports.DestPolicyCandidate
 	var beforeKey, afterKey string
 	var pending *cachedSelection
+	resync := false
 	changed, err := c.runtime.Update(ctx, agent.AgentID, c.now().UTC(), func(runtime *domain.DestAgentPolicy, loadBodies func() error) (bool, error) {
 		pending = nil
+		resync = false
+		blocked := fallbackBlocksAllowlist(*runtime)
 		key := selectionKey(inputKey, *runtime)
 		if key != "" {
 			if cached, found := c.selectionCache.Get(key); found {
 				changed := cached.decision.apply(runtime)
 				result = cached.candidate
+				resync = blocked != fallbackBlocksAllowlist(*runtime)
 				return changed, nil
 			}
 		}
@@ -168,6 +181,7 @@ func (c *Compiler) Compile(ctx context.Context, agent *domain.NodeAgent, snapsho
 		}
 		if err == nil {
 			result = candidate
+			resync = blocked != fallbackBlocksAllowlist(*runtime)
 			if key != "" {
 				beforeKey, afterKey = key, selectionKey(inputKey, *runtime)
 				result.CacheKey = afterKey
@@ -192,6 +206,9 @@ func (c *Compiler) Compile(ctx context.Context, agent *domain.NodeAgent, snapsho
 	}
 	if changed && c.invalidate != nil {
 		c.invalidate(agent.AgentID)
+	}
+	if resync && c.allowlistResync != nil {
+		c.allowlistResync(ctx, agent.AgentID)
 	}
 	return cloneCandidate(result), nil
 }
