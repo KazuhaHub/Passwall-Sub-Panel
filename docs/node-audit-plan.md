@@ -1,6 +1,6 @@
 # 节点访问控制（目的地策略、命中记录、白名单分组、隐私页）：最终实施计划
 
-- **状态**：第四版／最终实施版（2026-10-03），可按 §11 派工；尚未实现，本文的测试与验收都是交付要求，不表示已经通过。
+- **状态**：第五版／最终执行版（2026-10-04），按 §11 执行。部分工作包已有开发实现，但尚未完成阶段验收或发布；本文的测试与验收都是交付要求，实际进度单独记录在 §11.5。
 - **文档来源**：第三版 `bb50b09f12f0bdaeb234c1390ce97c57af53b9bb`，原分支 `kazuha/access-control-and-dashboard-plans`。本版保留完整的界面、权限与发布设计，将七项复核问题落实到正文、协议、表结构、测试与验收，不另留待解释的补丁清单：
   1. 回退按实际 mint 的候选摘要与来源判定，修剪后的 LKG 被拒也能退出；
   2. 拦截、全局观察、白名单试运行、用量从聚合器到批次、队列、预算分别隔离；
@@ -9,6 +9,8 @@
   5. 明确内存积压与重启丢失的真实边界，删除「最多一个同步周期」保证；
   6. B 档统计正常放行与仅观察连接，命中与用量分别计数；
   7. 采集关闭或降档时，节点清理旧版本待发数据，PSP 投递与每块入库检查当前档位及持久化 revision；快速关闭再开启也不复活旧批次。
+
+  第五版进一步明确并发编辑版本、后台刷新提交条件、发布错误的 CAS、分阶段迁移边界和工作包交接证据，保留第四版七项修订及完整 23 屏设计。
 
   所有者决定仍是 §1 的 6 条。§1.2 的两项按已写明的默认执行，不阻塞核心功能；其中 N0-S 必须先完成真实环境验证。
 - **涉及仓库**：Passwall-Protocol（线上类型）、Passwall-Node（执行与采集）、Passwall-Sub-Panel（策略、存储、界面）
@@ -76,6 +78,7 @@ PSP 定义两件事：哪些目的地拦截、只观察或放行；哪些分组�
 | R19 | 一个 Audit 批次只含一个种类与一个 UTC 小时桶；四种数据各有 pending、队列槽与入库预算 | 只拆聚合器仍会在报告、冻结重发、队列和共享预算处挤掉拦截记录；拦截保证仅覆盖低优先级数据不能消耗它的配额，不承诺故障下零丢失 | §4.2、N4–N6、P4 |
 | R20 | Audit 是尽力交付的非持久遥测；重试与时间窗口固定，去重窗口更长 | 48 小时积压仍可能在重启时全部丢失；已入库而响应丢失的批次必须在整个有效重试期内保持幂等 | §4.2、N6、P1、P4、P5 |
 | R21 | 采集档位以 PSP 当前保存值作为入库闸门；关闭不删除已经入库的历史数据 | 防止旧配置、冻结重发与后台队列在关闭后继续写入；已有数据照保留期清理 | N6、P4、S14 |
+| R22 | 定义写入统一串行化；编辑版本严格单调，后台刷新与发布错误只提交到自己读到的版本 | UTC 毫秒时间可能碰撞，慢刷新与旧发布失败可能覆盖新修改；仅把写入放进事务并不能防止这些问题 | P1、P2、P3、P7、§12 15a/17a |
 
 R21 同时使用持久化的采集 revision：每次档位实际变化都递增，批次冻结时带上已部署的 revision；PSP 只接收当前 revision。先 off 再开启、节点尚未收到中间 off 配置或 PSP 重启，都不能让旧 pending 复活。
 
@@ -681,6 +684,14 @@ type AuditUsage struct {
 - 新 repo 照 flagRecords、riskReviews 那段在 `app.go` 里构造（`:589,607`）；setter 一律 nil-tolerant，并写明降级行为。
 - 照 `TestBuildWiresTheFlagRecorders` 加接线守卫测试 `TestBuildWiresTheDestinationRepos`。
 
+**定义写事务与编辑版本**：
+- 策略、列表、豁免、分组模式及阶段、自带列表、排序和到期清理，共用定义写事务入口：先确保并锁住 `dest_policy_state(id=1)`，再读写涉及的定义行，最后在同一事务推进 generation 和去抖时间。任何一步失败全部回滚；不允许先改定义、再另开事务加 generation。所有入口保持这个锁顺序。
+- `PUT` 的 `updated_at` 比较在该事务内执行。该字段是 UTC 毫秒编辑版本：成功修改时取 `max(now_ms, previous_updated_at_ms + 1)`，即使同一毫秒内连续保存或时钟回拨，也不能沿用旧版本。比较完整的毫秒值，不转成秒、不宽松接受旧值；冲突时定义、generation 和调用方成功结果均不推进。
+- 排序入口在锁内核对该动作的全部 ID（含停用策略），拒绝重复、缺失或额外 ID；被改动 priority 的策略同时推进自己的编辑版本，避免旧编辑表单随后写回旧顺序。创建及改变动作的服务端 priority 分配也在锁内完成。
+- 一次请求包含多行改动时只推进一次 generation（如首次创建全局例外、open→trial、排序）；没有有效改动不推进。后台刷新摘要不变时只更新刷新元数据，不推进 generation。
+- 三方言测试必须证明同毫秒编辑、过期编辑、并发创建 priority、完整排序校验和注入故障的事务回滚，不能仅检查表是否存在。
+- 可以提前创建后续阶段的空表以简化加性迁移，但这只算 schema 准备：相应阶段之前不得启动采集、入库、查询 API 或清理作业，不得产生逐人 Usage。阶段完成仍按 §11.1 的行为与验收范围判定。
+
 | 表 | 列 | 说明 |
 |---|---|---|
 | `dest_lists` | `id`；`name` varchar(128)；`kind` varchar(16)（`custom`/`remote`/`geosite`）；`source_url` varchar(1024)；`geosite_category` varchar(128)；`geosite_attrs` varchar(128)；**`entries` `[]byte`**（规范化条目，一行一条；MySQL 映射 longblob，F36）；**`source_text` `[]byte`**（只对 custom：管理员粘贴的原文，含注释和行号，≤ 4 MiB；S7 编辑时回填用）；`entry_count` int；`regexp_count` int；`content_sha256` varchar(64)；`last_fetched_at`；`last_error` varchar(512)；**`owner_group_id` bigint NOT NULL DEFAULT 0**；`created_at`/`updated_at` | `owner_group_id` 非 0 表示这是某个白名单分组自带的列表（基础放行或补充），只能在那个分组里使用（§9.3）。三方言测试插入 2 MiB 的 entries。**没有**每列表的刷新间隔：远程与分类列表一律按全局 `dest.list_refresh_hours` 刷新（S6、S7 只显示全局值） |
@@ -741,12 +752,14 @@ type AuditUsage struct {
    - 用 `safego.GoTracked` 启动；间隔读设置 `dest.list_refresh_hours`（每轮重读，改了即时生效）；单飞；
    - 失败时保留旧 `entries` 并写 `last_error`。刷新得到的条目超过 50 000 条（§4.1 的域名上限）也算失败，`last_error = "dest_list_too_large"`，保留旧条目：否则一次远程更新就会让所有引用它的策略在发布时被拦下（P3 第 1 条）；
    - 登记在 `docs/access-control.md` 与 `docs/ARCHITECTURE.md`（§13 文档交付），标为「间隔可热改」。PSP 的 `CLAUDE.md` 被 `.gitignore:80` 忽略，不随 PR 提交，由所有者本地自行同步，不作为交付物。
+   - **刷新提交的版本条件**：拉取前记住列表 ID、编辑版本和来源参数（kind、URL 或分类/属性），网络下载与解析在 SQL 事务外执行。提交时进入 P1 的定义写事务，重新核对版本和来源；列表已删除或被编辑时丢弃这次旧结果，不重建列表、不覆盖新内容，下次按当前来源重试。成功内容和失败 `last_error` 都遵守该条件，不能让旧来源的迟到失败覆盖新来源的成功状态。只列级更新刷新拥有的字段，不整行 Save 回旧 name、owner_group_id 或 source_text。
 7. 管理端「立即刷新」与地理库更新同形：POST 触发、返回状态、前端轮询。
 8. **完成判据**：
    - 解析器对每种格式都有表驱动测试；
    - 规范化测试：`Example.COM`、`example.com.`、`例子.cn` 各自得到唯一一个规范条目；
    - 超限报错、http 地址被拒、过宽条目（每类一例）的测试；
    - 摘要不变时 generation 不变的测试；
+   - 慢刷新期间修改来源、删除列表、两次刷新交错，以及旧失败迟到的测试；确认旧结果不提交，摘要变化与 generation 原子推进；
    - `safehttp` 拒绝回环地址的测试沿用现有的。
 
 ### P3　策略编译（`internal/service/destpolicy`，新包）
@@ -773,6 +786,7 @@ CompiledPolicy 含 `Policy *protocol.DestinationPolicy` 与 `MintMetadata{kind,g
      - 收到「立即下发」（`POST /dest/publish`）；
      - `paused` 发生变化（R7，立即发布）。
    - **一致快照与原子发布**：在同一个一致读事务中**先**读 `generation = G`，**再**读全部定义并编出候选 body。PG/MySQL 显式指定 REPEATABLE READ，不依赖服务器默认；SQLite 同样使用读事务，单连接本身不能替代事务一致性。发布写事务原子插入 body 与 CAS 更新状态，条件同时包含 `published_generation = <旧值>`、`generation = G`；成功才清空对应未发布时间与错误。CAS 失败回滚候选，下一轮重读，不把旧 body 标成新 generation，也不清掉并发新写的去抖时间。
+     一致读期间不做网络拉取或真实内核检查。发布失败写 `publish_error` 也必须同时比较读到的 generation 和 published_generation：旧候选的错误不能覆盖新定义或已经成功的发布；相同错误不反复刷新首次错误时间。发布状态与快照的读取必须一致；published_generation > 0 而对应 body 缺失或损坏时返回可观测的存储错误，不能伪装成「没有策略」并 mint 空配置。
      反过来「先读定义、后读 generation」的话，两次读之间提交的一次写入会让 generation 变成 G+1，而 body 里没有它；记成已发布 G+1 之后 `generation > published_generation` 不再成立，这次改动**永远不会下发**，直到有人再写一次定义。
    - **发布前校验**（R16）：用快照编译覆盖全部定义的检查策略，不展开真实 Subjects 与 Exempt；对需要 Subjects 的 CatchAll 放入一个规范的测试占位 SubjectKey，只用于调用 `ValidateDestinationPolicy`，绝不 mint 给节点。定义额度不计占位主体，真实主体数与最终字节数在每节点检查；不能把空 Subjects 的 CatchAll 直接送校验，否则白名单发布必然失败。规则数、域名、正则、IP 段在这里一次判断。
      - 超额或整份无效：**不推进** `published_generation`，保留上一份快照，各节点继续执行当前版本；写 `dest_policy_state.publish_error`（`{kind,used,limit}` 或 `{kind:"invalid",field}`）与 `publish_error_at`，由 `/dest/status` 返回（S1 结论条显示）。下一次发布成功时清空。
@@ -979,7 +993,7 @@ CompiledPolicy 含 `Policy *protocol.DestinationPolicy` 与 `MintMetadata{kind,g
 - 400 响应一律是 `{error, field?, bad?:[…]}`。
 - **额度的形状**（`/lists`、`/policies`、`/policies/preview` 三处相同）：`budget: {rules, domains, regexps, cidrs, subjects, bytes}`，每项都是 `{used, limit}`。前四项与 `bytes` 按 P3 第 1 条的上界计算（与面板无关）；`subjects` 取各面板按 TagFilter 计数（P3 第 6 条）的最大值。
 - **策略的写法只有一种**（R18）：`POST` 与 `PUT` 都带完整的 Policy，`PUT` 另带 `updated_at` 作为前置条件。**priority 由服务端分配**：`POST`，以及改变了 `action` 的 `PUT`，把 priority 设为该动作现有最大值 + 1（排在本段末尾）；同一动作内的 `PUT` 不改 priority；调整顺序只能用 `PUT /policies/order`。
-- 时间字段一律 UTC 毫秒；`apply_eta_ms` 一类的「还要多久」由服务端算好，前端不自己推导（前端拿不到同步周期）。
+- 时间字段一律 UTC 毫秒；用于编辑 CAS 的 `updated_at` 按 P1 严格单调，并直接回传成功写入后的新值。`apply_eta_ms` 一类的「还要多久」由服务端算好，前端不自己推导（前端拿不到同步周期）。
 
 | 方法 | 路径 | 请求 / 响应 |
 |---|---|---|
@@ -2962,7 +2976,7 @@ tab 条：策略 policies | 列表 lists | 白名单分组 allowlist | 记录 re
 | **1c′** | `docs/compat/verification-v1.json` 的 `contract_source` 切到 1b 的 tag 与 commit，contract-agent 声明 `policy.destination.v1`，覆盖 PolicyStatus 的往返 | PSP | 1b **已发布**、1c | 随下一个 PSP 版本 |
 | **2a** | §4.2 Audit（Kind/Hour/CollectRevision、仅计数批次、时间常量）、ValidateAuditObservation、fuzz 目标 | Protocol | 1a | tag `v0.4.0` |
 | **2b** | N4（block/observe/trial 独立聚合、鉴权、sink lifecycle）、N5 的逐行校验入口、N6（分类 pending、七槽调度、冻结、过期与 off 清空）、N7 的 audit.hits.v1 | Node | 2a、1b | Node 预发布 |
-| **2c** | P1 的 hits/batches/loss/budget 表、P4（隔离解码、分类队列、分块调度、持久去重/预算、档位闸门）、P5 的保留与匿名孤儿清理、P6、P7 的 hits、losses 与 users/:id 命中接口、P9 中 2c family；S12、S14/S15 的记录方式、S16 命中、S19 与完整性提示。此时 usage 协议/队列/预算可以就绪，但不开放 B 档，不创建逐人用量，真实 usage 表到 4 才加入 | PSP | 2a、1c | PSP 预发布 |
+| **2c** | P1 的 hits/batches/loss/budget 表、P4（隔离解码、分类队列、分块调度、持久去重/预算、档位闸门）、P5 的保留与匿名孤儿清理、P6、P7 的 hits、losses 与 users/:id 命中接口、P9 中 2c family；S12、S14/S15 的记录方式、S16 命中、S19 与完整性提示。此时 usage 协议/队列/预算可以就绪，但不开放 B 档、不创建逐人用量；空 usage 表可以按 P1 提前迁移，实际写入与查询在 4 才接通 | PSP | 2a、1c | PSP 预发布 |
 | **3** | §8 隐私与协议页；界面 S21–S23 | PSP | 无 | 可与 1、2 任意并行 |
 | **4** | B 档：N5（watch 也计用量、deny 不计用量、过滤器故障退出）、audit.usage.v1、P1 usage 表、usage 档位闸门与 loss 清理、P7 usage 与读取审计、S14 第三项、S16 用量、隐私页更新。Usage 的协议字段已在 2a，这一阶段不动 Protocol | Node + PSP | 2、3（B 档上线前隐私页已可用） | Node 先、PSP 后，各自预发布 |
 | **5** | §9 白名单模式（含 §9.2 第 6 条对 `ResyncMembership` 的修改）；P7 的 groups 接口、`exceptions` 的分组一支、`GET /groups` 的 `dest_mode`；界面 S8–S11、S17 | PSP（Node 只加测试） | 1（执行）、2（试运行报告要看命中） | 可与 4 并行 |
@@ -2970,6 +2984,7 @@ tab 条：策略 policies | 列表 lists | 白名单分组 allowlist | 记录 re
 | **N0-S（条件热修）** | sing-box 私有地址拦截 | Node | 按 §1.2 Q1 默认先完成 VM 验证；不阻塞 N0 与 1–5 | 验证后随 Node 下一修复版 |
 
 - 每个阶段在各自的仓库里开一个或多个 PR，分支从最新 origin/main 切，命名 `Kazuha/access-control-<阶段>`（N0 用 `Kazuha/xray-access-log-off`）。版本号都是基线下的目标值，开工与打 tag 前核对是否已占用；不覆盖已有 tag。
+  开发中允许基于尚未合并的前置 PR 临时叠加分支，但必须在 PR 写明 base 和依赖，检查 diff 只包含本包改动。按依赖顺序合并；前置包合并后重新对齐最新 main、更新 PR base，并重新验证受影响的组合，不能把叠加分支的绿灯当成最终合并结果。
 - 1b 与 1c 可以在 1a 打 tag 之前用伪版本并行开发（§4.3 第 6 条）；合并前换成正式 tag。
 - 每个 PR 的描述里贴对应小节完成判据的勾选情况；**前端 PR 附 §7.6 的截图，并取得所有者批准**。
 - **发版方式**：
@@ -2996,7 +3011,7 @@ tab 条：策略 policies | 列表 lists | 白名单分组 allowlist | 记录 re
 
 ### 11.3 执行入口与阶段完成门槛
 
-首轮范围为 **0、UI-0、1a–1c′、2a–2c、3、4、5**。N0-S 按验证结果单独修复，阶段 6 另立计划。当前所有实施阶段均为「未开始」，不得将本次文档修订计作功能完成。
+首轮范围为 **0、UI-0、1a–1c′、2a–2c、3、4、5**。N0-S 按验证结果单独修复，阶段 6 另立计划。实际阶段状态见 §11.5；不得将文档定稿、基础表迁移或单个 PR 的 CI 通过计作首轮功能完成。
 
 1. **先执行 N0**：只关闭 Xray 默认访问日志，先写失败测试、再修编译器；测试与 main CI、真实二进制及 systemd/Docker 验收完成后发布 Node 修复预发布版。它没有 Protocol、PSP 或 UI 前置依赖。
 2. **建立执行能力**：1a 发布 Protocol v0.3.0，随后 1b（Node）与 1c（PSP）开发，UI-0 先于 1c 前端；对外发布遵守 Node → PSP，1c′ 在已发布 Node 上锁住契约。
@@ -3012,6 +3027,37 @@ tab 条：策略 policies | 列表 lists | 白名单分组 allowlist | 记录 re
 - N0 开工先确认可用的 Linux 验收环境、systemd 与 Docker 两种部署、PSP 远程升级通路及三个 catalog Xray 二进制；后续阶段再准备 sing-box、三方言数据库与浏览器截图环境。`psp-node` Lima VM 是验收环境的历史名称，不能假定每台开发机都已具备；可使用能完成同等场景的 Linux VM/测试主机，并在 PR 记录实际环境。
 - 证据分为「文档检查」「单元/集成测试」「PR CI」「合并后 main CI」「真实部署验收」。跳过的测试、未接通的 VM 或未运行的方言都记为未验证；真实内核 `-test` 只证明配置可接受，不能替代代理连接、采集、升级和日志验收。
 - 首轮完成以 §11.3 的全部范围和 §12 对应场景为准；N0 的单独交付只能标记阶段 0 完成。阶段 6 与条件热修 N0-S 分别记录，不能混入首轮已完成清单。
+
+### 11.5 已有工作与未完成项（2026-10-04 核对）
+
+以下为本版定稿时的证据快照，PR 的后续提交、合并与发布状态以实际记录更新；三个仓库 main 仍是首页的复核基线。**当前没有任何阶段被本计划认定为已完成或已发布。**
+
+| 工作包 | 已有证据 | 下一完成门槛 |
+|---|---|---|
+| 0 / N0 | [Node #77](https://github.com/KazuhaHub/Passwall-Node/pull/77)，draft，`48b52a1`，本次核对全部检查成功 | systemd/Docker 实际代理连接、首次同步失败窗口与远程升级日志验收；合并后 main CI 与预发布 |
+| UI-0 | [PSP #272](https://github.com/KazuhaHub/Passwall-Sub-Panel/pull/272)，draft，`d8722e89`，必需检查成功；第三方面板真实检查为 skipped，不计已验证；附有部分浏览器截图 | 补齐 §7.6 全部截图和交互矩阵、§7.5 无障碍清单，再由所有者审阅实际界面；当前截图不等于批准 |
+| 1a | [Protocol #4](https://github.com/KazuhaHub/Passwall-Protocol/pull/4)，draft，`0175987`，两项 PR 检查成功 | 完成评审、合并后的 consumer toolchains 等门禁，再发布模块 tag v0.3.0；伪版本不等于正式模块发布 |
+| 1b | [Node #78](https://github.com/KazuhaHub/Passwall-Node/pull/78)，draft，`8cda96e`，本次核对全部检查成功，临时依赖前置包 | 前置包合并、依赖正式模块 tag、完整 N8 与 §12 执行/状态实测，再按 Node 发布门槛交付 |
+| 1c | PSP 分支 `Kazuha/access-control-1c`：schema 基础提交 `8d96dd67` 已通过 [完整 Test workflow](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37186124723)，含三方言；分支文档提交 `2231abcb` 记录剩余范围 | 继续 §11.6；表已存在不能说明定义服务、下发、API、页面或采集已接通；工作区未提交草稿不算交付证据 |
+| 1c′、2a–2c、3、4、5 | 尚无本次核对可确认的交付证据 | 按 §11.1 依赖和对应验收启动；不因前置表存在跳过工作包 |
+| N0-S | Linux 实际环境验证尚未完成 | 按 Q1 先验证，再决定修复提交；保持与首轮主路径分开 |
+
+### 11.6 接下来的实施工作包与交接
+
+1c 可拆为以下连续 PR；拆分仅用于控制评审规模，不减少 §11.1 的范围。每个子包都先有失败测试，再提交实现和文档；某一子包完成只更新子包状态，直到全部条件满足才标记 1c 完成。
+
+| 顺序 | 子包 | 验收与后续依赖 |
+|---|---|---|
+| C1 | 具体 repo、定义写入口、列表/策略/豁免 CRUD、排序、generation、一致读、快照发布 CAS | SQLite/MySQL/PG 的并发交错与故障回滚；同毫秒编辑、旧发布失败、缺失快照均有测试。schema 基础归入此包，但不能单独关闭 C1 |
+| C2 | 列表解析、规范化、safehttp、分类下载校验、缓存与刷新循环 | 格式/大小/过宽/来源版本测试；相同摘要不重启；旧刷新结果不覆盖新定义；无网络 I/O 持锁 |
+| C3 | 编译、预检、ObserveStatus、原子 candidate mint、LKG 修剪/耗尽、paused、缓存与接线 | 真内核和 Node 1b 联调；策略故障不阻断 roster；实际候选与 stream 一起回滚；nil/旧节点字节及 ETag 不变 |
+| C4 | settings、全部 1c API、权限/审计/日志边界、清理、指标、架构与升级文档 | 路由与接线守卫，预览免审计且 test 留审计，查询串不泄漏，诊断目录和三方言通过 |
+| C5 | UI-0 后的 1c 页面、抽屉、编辑器、深链、访问状态与设置 | §7.5、§7.6 和 1c 屏幕矩阵全部满足；附真实截图和中英文/主题/移动端证据 |
+| C6 | 整包联调与兼容、升级降级演练、发布准备 | 对应 §12 实测记录逐条关联到实现 SHA；全部子包及前置依赖完成后才能进入 1c 发布门槛，随后执行 1c′ |
+
+每个 PR 的交接记录统一包含：工作包及对应正文小节、base/依赖 PR、实现 SHA 与工具链/模块版本、失败测试与最终测试结果、真实环境/截图证据、未验证项和下一依赖。CI 结果绑定被测 SHA；代码再变时补跑受影响的检查。最终发布记录另附合并后 main CI、实际 tag 和升级降级结果。
+
+没有可用 Linux 真实验收环境时，继续不依赖它的实现和 CI，把运行验收保留为未验证；不默认满足、也不因此删除该门槛。界面批准发生在可审阅的完整截图和交互证据准备好之后。
 
 ---
 
@@ -3044,8 +3090,10 @@ tab 条：策略 policies | 列表 lists | 白名单分组 allowlist | 记录 re
 13. **去抖**：一分钟内连改三条策略 → 每台节点只重启一次；改完立即点「立即下发」→ 不等窗口直接生效。
 14. **去抖窗口内新成员**：管理员改一条策略之后马上把一个用户加入白名单分组 → 该用户在下一轮就受限。
 15. **远程列表**：内容不变的刷新不触发任何节点重启（看 core 部署记录与节点日志）；内容变化只触发一次。
+    - 15a　**刷新并发**：阻塞一次旧来源下载，修改 URL/分类或删除列表，再释放下载；旧内容和旧失败均不覆盖新状态、不复活已删除行、不推进错误 generation。相同摘要只更新元数据，完整测试在三方言重复。
 16. **未就绪列表**：新建一个从未拉取成功的远程列表并在策略中引用它 → 其他策略照常下发；白名单引用它时不能切到执行（409）。
 17. **超额度**：导入 60 000 条域名 → 保存接口直接返回 400 `dest_policy_over_limit`；绕过接口（直接改远程列表的内容）→ 刷新判为失败、保留旧条目；构造两次各自合法、叠加后超额的并发写入 → **发布被拒**：`published_generation` 不推进，各节点继续执行当前版本，结论条显示「改动没有下发：…超出额度」，没有任何节点进入回退。
+    - 17a　**定义与发布事务**：同一毫秒用同一个 updated_at 保存两次，第二次必须冲突；并发创建 priority 不碰撞；排序缺失/重复 ID 拒绝，排序后旧表单冲突。定义写入或快照插入故障时 generation/定义/发布状态全部回滚；读 G 后插入新定义，旧候选不能标成新 G；旧失败晚于新发布完成，不能重写 publish_error。已发布快照缺失/损坏返回存储错误，不 mint 空策略。以上在 SQLite/MySQL/PG 验证。
 18. **嗅探不足时名单照常下发**：把一个入站改成 metadataOnly → PSP 同时预检 desired 与 LKG；LKG 同样需要域名嗅探时直接转 empty，界面显示「上一版也无法执行，当前没有执行访问策略」，不反复下发 LKG；停用一个用户，2 分钟内他在该节点无法连接。另用仅端口 LKG 验证回退仍可成功，此时显示「仍在执行上一版」。
 19. **内核拒绝**：人为构造一个内核不接受、但能通过校验的策略 → `PolicyStatus.rejected`，界面显示「节点拒绝了新策略」，节点继续跑上一版；点「重新下发」会再试一次。
     - 19a　**不是策略的错不算被拒**：让某个 listener 的配置被核心拒绝（与策略无关），或让 `-test` 超时 → PolicyStatus 不变、不进入回退、白名单组员的 client 不被删除；只出现 `core_convergence_failed`。
@@ -3139,9 +3187,9 @@ tab 条：策略 policies | 列表 lists | 白名单分组 allowlist | 记录 re
 | Node | `internal/agent/auditlog/filter_test.go` | 真实行 fixture、背压、watch/trial 同时贡献命中与用量而 deny 不计用量、故障退出且不泄漏访问行、逐行校验 |
 | Node | `internal/agent/report_test.go`（追加） | 分类 pending 与七槽公平性、冻结重发逐字节相同、仅确认 AuditBatchIDSent；deferred 后控制成功不清 pending；仅计数批次、过期、Count 饱和、off/revision 清空与降档后新 Hits；非法数据不阻断 SyncOnce |
 | Node | `internal/agent/capability_gate_test.go`、`cmd/node/main_test.go`（追加） | 新能力在静态切片里，不在 CapabilitySource 里；sink 监听失败时不声明 `audit.hits.v1` |
-| PSP | `internal/service/destlist/parse_test.go`、`normalize_test.go`、`broad_test.go`、`refresh_test.go` | 各种格式、规范化、过宽条目、超限、摘要 |
+| PSP | `internal/service/destlist/parse_test.go`、`normalize_test.go`、`broad_test.go`、`refresh_test.go` | 各种格式、规范化、过宽条目、超限、摘要；来源编辑/删除与慢刷新交错、旧失败迟到不覆盖新状态 |
 | PSP | `internal/service/destpolicy/compile_test.go`、`publish_test.go`、`sniff_test.go`、`fallback_test.go` | P3 全部判据：一致读与原子 CAS、CatchAll 占位校验、修剪后摘要不同仍能转 empty、exhausted 持久化与上下文重试、已撤销豁免、候选超额、paused 不覆盖 LKG、Subjects 不振荡 |
-| PSP | `internal/adapters/sqlstore/dest_*_repo_test.go` | 三方言 upsert、2 MiB entries、AuditCollect 保留、72h 去重与 budget/loss 清理；合法 trial 不被用户孤儿清理。PG 的 block 批次中 p12x1/p12x2 映射同一主键须归并；直接向 repo 注入两条同一 trial 主键的行也归并（这是 repo 防御测试，线上重复聚合键仍被拒）。重复批次 RowsAffected=0 且不扣预算；预算与首块原子提交、重启不重置 |
+| PSP | `internal/adapters/sqlstore/dest_*_repo_test.go` | 三方言定义/generation 原子写、同毫秒版本与 priority/排序并发、一致读、发布和错误 CAS、缺失/损坏快照、注入故障回滚；upsert、2 MiB entries、AuditCollect 保留、72h 去重与 budget/loss 清理；合法 trial 不被用户孤儿清理。PG 的 block 批次中 p12x1/p12x2 映射同一主键须归并；直接向 repo 注入两条同一 trial 主键的行也归并（这是 repo 防御测试，线上重复聚合键仍被拒）。重复批次 RowsAffected=0 且不扣预算；预算与首块原子提交、重启不重置 |
 | PSP | `internal/adapters/sqlstore/user_repo_test.go`（追加） | `GroupIDsByIDs` 三方言 |
 | PSP | `internal/adapters/sqlstore/node_agent_repo_test.go`（追加） | MintStream 等值路径不读 desired_body；MintConfigWithPolicyCandidate 在一个事务提交 stream 与实际候选，来源变化但 ETag 相同仍更新元数据；故障全回滚 |
 | PSP | `internal/service/nodesync/*_test.go`（追加） | ObserveStatus 先于 Compile；分类投递/in-flight 不被 LRU 淘汰；七槽分块公平性与字节上限；26h 后跨清理/重启去重；持久独立预算；off/降档、快速关闭再开启与 revision 拒旧批次、入库屏障交错；loss 的面板口径；能力与回退变化在重同步前失效合格性缓存 |
