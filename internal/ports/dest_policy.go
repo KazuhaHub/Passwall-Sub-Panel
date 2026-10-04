@@ -19,3 +19,18 @@ type DestPolicyCandidate struct {
 	Policy *protocol.DestinationPolicy
 	Mint   domain.DestPolicyMint
 }
+
+// UserMembershipRepo reads only identity/group columns. Quota membership includes
+// disabled members and is independent of roster presence and node eligibility.
+type UserMembershipRepo interface {
+	GroupIDsByIDs(context.Context, []int64) (map[int64]int64, error)
+	MembersByGroupIDs(context.Context, []int64) (map[int64][]int64, error)
+}
+
+type PanelAuditSettings struct {
+	Collect  domain.AuditCollect
+	Revision uint64
+}
+type PanelAuditSettingsRepo interface {
+	GetAuditSettings(context.Context, int64) (PanelAuditSettings, error)
+}

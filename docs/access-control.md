@@ -282,13 +282,28 @@ comparison bug: SQL `[]` and domain nil must be equivalent rather than triggerin
 confirmed-body validation against omitted blobs. A dedicated regression first
 failed and now passes. Full local policy, nodesync, SQL-store and HTTP-handler
 suites and relevant static checks pass; all three production integration tests
-pass. This increment's CI is pending. The production input provider (panel
-settings, group lookup and tag-matched membership), issue/resync integration,
-compile/config caches and application activation remain outstanding.
+pass. At `e6579af86886afd42e46e6747ba35ebac848efb7`, the
+[complete Test workflow](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37231717404)
+and [published-node systemd acceptance](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37231717330)
+both succeeded. The latter verifies the released Node baseline, not the unmerged
+destination-policy Node implementation.
+
+The production input provider reads panel collection mode/revision through a
+credential-free four-column query and batch-loads only user/group IDs in chunks
+of at most 500 IDs. Tag-matched quota membership comes from all members of groups
+selected by enabled nodes on the panel, including disabled users without client
+rows. It never uses eligibility or current roster presence to reduce quota.
+Roster group scope uses current user rows, and collection-only/paused/old-node
+paths avoid membership reads. Narrow-query guards, chunking/full-member tests,
+tag-filter tests and the input-provider regression passed after their initial
+stub failures. A real SQL sync integration proves full quota membership, current
+scoped subjects, group moves and collection-off updates. Production input-provider
+assembly is available; caching, issue/resync integration and application activation
+remain outstanding.
 
 This is a C3 foundation with an optional tested sync boundary. It does not
-implement the full C3 acceptance: production input-provider and application
-assembly, issue/resync integration, eligibility/member accounting, policy caches, immediate pause UI/API wiring,
+implement the full C3 acceptance: application assembly, issue/resync integration,
+eligibility integration and membership-change invalidation, policy caches, immediate pause UI/API wiring,
 settings and application integration remain outstanding. Existing nodes still
 receive the existing configuration because the compiler is not wired into sync.
 

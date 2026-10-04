@@ -2,6 +2,8 @@ package nodesync
 
 import (
 	"context"
+	"fmt"
+	"reflect"
 	"testing"
 
 	"github.com/KazuhaHub/passwall-protocol/protocol"
@@ -9,9 +11,96 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/destpolicy"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/group"
 )
 
 type compilerFixtureInputs struct{}
+
+func TestProductionPolicyInputsSyncTracksGroupAndCollectionChanges(t *testing.T) {
+	f := newConfigAppliedFixture(t)
+	panel := &domain.Panel{ID: f.agent.PanelID, Kind: domain.PanelKindPSP, Name: "production-inputs", URL: "psp://agt_config_ack"}
+	if err := f.repos.XUIPanel.Save(t.Context(), panel); err != nil {
+		t.Fatal(err)
+	}
+	matched := &domain.Group{Slug: "matched", Name: "Matched", TagFilter: domain.TagFilter{All: true}}
+	other := &domain.Group{Slug: "other", Name: "Other", TagFilter: domain.TagFilter{Tags: []string{"region:JP"}}}
+	for _, g := range []*domain.Group{matched, other} {
+		if err := f.repos.Group.Create(t.Context(), g); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var users []*domain.User
+	for n := range 2 {
+		u := &domain.User{UPN: fmt.Sprintf("input%d@example.test", n), Role: domain.RoleUser, SubToken: fmt.Sprintf("input-token-%d", n), UUID: fmt.Sprintf("00000000-0000-0000-0000-%012d", n+1), GroupID: matched.ID, Enabled: n == 0}
+		if err := f.repos.User.Create(t.Context(), u); err != nil {
+			t.Fatal(err)
+		}
+		users = append(users, u)
+	}
+	client := &domain.PSPClient{UserID: users[0].ID, PanelID: panel.ID, Email: "production@psp.local", UUID: users[0].UUID, DesiredEnable: true, DesiredMinted: true}
+	id, err := f.repos.PSPClient.Create(t.Context(), client)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client.ID = id
+	if err := f.repos.PSPClient.SetInbounds(t.Context(), id, []domain.PSPClientInbound{{ClientID: id, NodeID: f.node.ID, State: domain.ClientApplyPending}}); err != nil {
+		t.Fatal(err)
+	}
+	membership := f.repos.User.(ports.UserMembershipRepo)
+	groupService := group.New(f.repos.Group, f.repos.Node, nil)
+	groupService.SetMembershipRepo(membership)
+	inputs, err := destpolicy.NewInputs(f.repos.XUIPanel.(ports.PanelAuditSettingsRepo), membership, groupService)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := f.repos.NativeDesired.Load(t.Context(), panel.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	roster, quota, err := inputs.ForNode(t.Context(), panel.ID, snapshot, true)
+	if err != nil || !reflect.DeepEqual(roster.UserIDs, []int64{users[0].ID}) || !reflect.DeepEqual(quota.UserIDs, []int64{users[0].ID, users[1].ID}) {
+		t.Fatalf("production quota lost disabled member without client: roster=%+v quota=%+v / %v", roster, quota, err)
+	}
+	definitions := sqlstore.NewDestDefinitionRepo(f.db)
+	p := &domain.DestPolicy{Name: "scoped input", Enabled: true, Action: domain.DestBlock, Scope: domain.DestScopeGroups, GroupIDs: []int64{matched.ID}, Inline: domain.DestInline{Ports: "443"}}
+	if err := definitions.SavePolicy(t.Context(), p, p.UpdatedAt, f.now); err != nil {
+		t.Fatal(err)
+	}
+	publishCompilerFixture(t, f, definitions)
+	compiler, err := destpolicy.NewCompiler(destpolicy.CompilerOptions{Definitions: definitions, Runtime: f.repos.DestAgentPolicy, Inputs: inputs, Now: f.service.now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.service.policies, f.service.policyCandidates = compiler, f.repos.NodeAgent.(ports.NodePolicyCandidateRepo)
+	report := policySyncReport(f)
+	report.Capabilities = append(report.Capabilities, "audit.hits.v1")
+	first, err := f.service.Sync(t.Context(), report)
+	if err != nil || first.Config.Body == nil || first.Config.Body.Policy == nil || len(first.Config.Body.Policy.Rules) != 1 || !reflect.DeepEqual(first.Config.Body.Policy.Rules[0].Subjects, []protocol.SubjectKey{protocol.NewSubjectKey(users[0].ID)}) {
+		t.Fatalf("production scoped rule: %+v / %v", first.Config, err)
+	}
+	if first.Config.Body.Policy.Collect != protocol.CollectHits || first.Config.Body.Policy.CollectRevision != 1 {
+		t.Fatalf("production collection defaults not compiled: %+v", first.Config.Body.Policy)
+	}
+	users[0].GroupID = other.ID
+	if err := f.repos.User.Update(t.Context(), users[0]); err != nil {
+		t.Fatal(err)
+	}
+	writer := f.repos.XUIPanel.(interface {
+		UpdateNativeMetadata(context.Context, int64, *string, *string, *domain.PanelUpdateChannel, *domain.AuditCollect) error
+	})
+	off := domain.AuditCollectOff
+	if err := writer.UpdateNativeMetadata(t.Context(), panel.ID, nil, nil, nil, &off); err != nil {
+		t.Fatal(err)
+	}
+	second, err := f.service.Sync(t.Context(), report)
+	if err != nil || second.Config.Body == nil || second.Config.Body.Policy != nil || second.Config.ETag == first.Config.ETag {
+		t.Fatalf("group/control change retained stale policy: %+v / %v", second.Config, err)
+	}
+	state, err := f.repos.DestAgentPolicy.Get(t.Context(), f.agent.AgentID, false)
+	if err != nil || state.CollectEffective != "" {
+		t.Fatalf("collection off retained effective collection: %+v / %v", state, err)
+	}
+}
 
 func (compilerFixtureInputs) ForNode(context.Context, int64, *ports.NativeDesiredSnapshot, bool) (destpolicy.RosterInput, destpolicy.RosterInput, error) {
 	input := destpolicy.RosterInput{Collect: domain.AuditCollectOff, CollectRevision: 1, UserGroups: map[int64]int64{}}

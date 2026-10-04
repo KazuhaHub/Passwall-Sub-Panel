@@ -12,14 +12,17 @@ import (
 )
 
 type Service struct {
-	groups ports.GroupRepo
-	nodes  ports.NodeRepo
-	scope  ports.ScopeSettingsRepo
+	groups     ports.GroupRepo
+	nodes      ports.NodeRepo
+	scope      ports.ScopeSettingsRepo
+	membership ports.UserMembershipRepo
 	// enabledCache memoizes nodes.ListEnabled for a short TTL (NodesFor → /sub
 	// render); now is its clock seam (defaults to time.Now).
 	enabledCache *nodeListCache
 	now          func() time.Time
 }
+
+func (s *Service) SetMembershipRepo(repo ports.UserMembershipRepo) { s.membership = repo }
 
 func New(groups ports.GroupRepo, nodes ports.NodeRepo, scope ports.ScopeSettingsRepo) *Service {
 	return &Service{
