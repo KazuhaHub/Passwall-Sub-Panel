@@ -96,8 +96,11 @@ Service tests cover preview side effects, original source/report retention,
 pending versus invalid remote sources, empty-category preservation, edits/deletion
 during a slow fetch, shared downloads, interval changes, failed-attempt bounds,
 tracked shutdown and recovery from a settings read failure. Windows Application
-Control blocked execution of the newly built service test binary; local static
-checks pass, but the service behavior and loop tests require the Linux CI run on
-their implementation SHA before they count as verified.
+Control initially blocked the service test binary at `d44e45ca`. After the empty
+remote-content regression was added and fixed, the new binary at `e7697f51`
+ran normally without changing security settings: the complete destlist,
+SQL-store, domain and safehttp suites passed locally. Relevant static checks
+also pass. The latest PR CI must still verify that implementation's Linux race
+and server-dialect results; earlier SHA results are separate evidence.
 
 Stage 1c still requires complete repository operations for multi-row service transactions and application wiring, policy compilation and candidate minting, fallback handling, settings/API boundaries, access-control views and complete browser acceptance. List services are not connected to app lifecycle, persisted settings or HTTP yet; C2's end-to-end acceptance remains incomplete. Audit ingestion, group modes, privacy/consent and subsequent stages remain governed by the full plan. Repository tests and green CI do not establish completion of these requirements.
