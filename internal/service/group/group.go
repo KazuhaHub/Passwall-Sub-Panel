@@ -12,10 +12,11 @@ import (
 )
 
 type Service struct {
-	groups     ports.GroupRepo
-	nodes      ports.NodeRepo
-	scope      ports.ScopeSettingsRepo
-	membership ports.UserMembershipRepo
+	groups                ports.GroupRepo
+	nodes                 ports.NodeRepo
+	scope                 ports.ScopeSettingsRepo
+	membership            ports.UserMembershipRepo
+	membershipInvalidator func()
 	// enabledCache memoizes nodes.ListEnabled for a short TTL (NodesFor → /sub
 	// render); now is its clock seam (defaults to time.Now).
 	enabledCache *nodeListCache
@@ -66,11 +67,19 @@ func (s *Service) Create(ctx context.Context, g *domain.Group) error {
 	if g.Slug == "" || g.Name == "" {
 		return fmt.Errorf("%w: slug and name required", domain.ErrValidation)
 	}
-	return s.groups.Create(ctx, g)
+	if err := s.groups.Create(ctx, g); err != nil {
+		return err
+	}
+	s.invalidateMembership()
+	return nil
 }
 
 func (s *Service) Update(ctx context.Context, g *domain.Group) error {
-	return s.groups.Update(ctx, g)
+	if err := s.groups.Update(ctx, g); err != nil {
+		return err
+	}
+	s.invalidateMembership()
+	return nil
 }
 
 // Delete refuses to remove a group that still has members; the admin must
@@ -86,6 +95,7 @@ func (s *Service) Delete(ctx context.Context, id int64) error {
 	if err := s.groups.Delete(ctx, id); err != nil {
 		return err
 	}
+	s.invalidateMembership()
 	// Clean up the group's per-scope setting overrides so they don't linger as
 	// orphan rows. (Group IDs never recycle, so they'd be inert anyway, but tidy.)
 	if s.scope != nil {

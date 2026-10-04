@@ -13,12 +13,14 @@ import (
 )
 
 type RosterInput struct {
-	UserIDs         []int64
-	UserGroups      map[int64]int64
-	Capabilities    []string
-	Engine          string
-	Collect         domain.AuditCollect
-	CollectRevision uint64
+	UserIDs              []int64
+	UserGroups           map[int64]int64
+	Capabilities         []string
+	Engine               string
+	Collect              domain.AuditCollect
+	CollectRevision      uint64
+	MembershipGeneration uint64
+	MembershipTracked    bool
 }
 
 func EffectiveCollect(level domain.AuditCollect, capabilities []string, engine string) protocol.CollectLevel {

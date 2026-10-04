@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"sync/atomic"
 	"testing"
 
 	"github.com/KazuhaHub/passwall-protocol/protocol"
@@ -13,6 +14,8 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/destpolicy"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/group"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/node"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/user"
 	"gorm.io/gorm"
 )
 
@@ -106,6 +109,14 @@ func TestProductionPolicyInputsSyncTracksGroupAndCollectionChanges(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
+	var memberGeneration atomic.Uint64
+	notifyMembership := func() { memberGeneration.Add(1) }
+	inputs.SetMembershipGeneration(memberGeneration.Load)
+	groupService.SetMembershipInvalidator(notifyMembership)
+	userService := user.New(f.repos.User, f.repos.Group, f.repos.Ownership, nil, groupService, nil, nil, f.repos.ScopedSettings)
+	userService.SetMembershipInvalidator(notifyMembership)
+	nodeService := node.New(f.repos.Node, nil, nil, nil, nil, f.repos.Group, f.repos.User)
+	nodeService.SetSubscriptionInvalidator(func() { notifyMembership(); groupService.InvalidateNodeCache() })
 	snapshot, err := f.repos.NativeDesired.Load(t.Context(), panel.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -114,6 +125,17 @@ func TestProductionPolicyInputsSyncTracksGroupAndCollectionChanges(t *testing.T)
 	if err != nil || !reflect.DeepEqual(roster.UserIDs, []int64{users[0].ID}) || !reflect.DeepEqual(quota.UserIDs, []int64{users[0].ID, users[1].ID}) {
 		t.Fatalf("production quota lost disabled member without client: roster=%+v quota=%+v / %v", roster, quota, err)
 	}
+	probe := true
+	f.db.Callback().Query().After("gorm:query").Register("membership-cache-guard", func(tx *gorm.DB) {
+		if probe && (tx.Statement.Table == "users" || tx.Statement.Table == "groups_" || tx.Statement.Table == "nodes") {
+			tx.AddError(errors.New("idle inputs queried membership or tag selection"))
+		}
+	})
+	t.Cleanup(func() { _ = f.db.Callback().Query().Remove("membership-cache-guard") })
+	if _, _, err := inputs.ForNode(t.Context(), panel.ID, snapshot, true); err != nil {
+		t.Fatalf("production membership cache missed: %v", err)
+	}
+	probe = false
 	definitions := sqlstore.NewDestDefinitionRepo(f.db)
 	p := &domain.DestPolicy{Name: "scoped input", Enabled: true, Action: domain.DestBlock, Scope: domain.DestScopeGroups, GroupIDs: []int64{matched.ID}, Inline: domain.DestInline{Ports: "443"}}
 	if err := definitions.SavePolicy(t.Context(), p, p.UpdatedAt, f.now); err != nil {
@@ -134,8 +156,7 @@ func TestProductionPolicyInputsSyncTracksGroupAndCollectionChanges(t *testing.T)
 	if first.Config.Body.Policy.Collect != protocol.CollectHits || first.Config.Body.Policy.CollectRevision != 1 {
 		t.Fatalf("production collection defaults not compiled: %+v", first.Config.Body.Policy)
 	}
-	users[0].GroupID = other.ID
-	if err := f.repos.User.Update(t.Context(), users[0]); err != nil {
+	if err := userService.ChangeGroupAndSync(t.Context(), users[0].ID, other.ID); err != nil {
 		t.Fatal(err)
 	}
 	writer := f.repos.XUIPanel.(interface {
@@ -152,6 +173,26 @@ func TestProductionPolicyInputsSyncTracksGroupAndCollectionChanges(t *testing.T)
 	state, err := f.repos.DestAgentPolicy.Get(t.Context(), f.agent.AgentID, false)
 	if err != nil || state.CollectEffective != "" {
 		t.Fatalf("collection off retained effective collection: %+v / %v", state, err)
+	}
+	_, quota, err = inputs.ForNode(t.Context(), panel.ID, snapshot, true)
+	if err != nil || !reflect.DeepEqual(quota.UserIDs, []int64{users[1].ID}) {
+		t.Fatalf("group move kept old tag quota: %+v / %v", quota, err)
+	}
+	f.node.Region = "JP"
+	if err := nodeService.UpdateMetadata(t.Context(), f.node); err != nil {
+		t.Fatal(err)
+	}
+	_, quota, err = inputs.ForNode(t.Context(), panel.ID, snapshot, true)
+	if err != nil || !reflect.DeepEqual(quota.UserIDs, []int64{users[0].ID, users[1].ID}) {
+		t.Fatalf("node metadata did not invalidate quota selection: %+v / %v", quota, err)
+	}
+	other.TagFilter = domain.TagFilter{Tags: []string{"region:TW"}}
+	if err := groupService.Update(t.Context(), other); err != nil {
+		t.Fatal(err)
+	}
+	_, quota, err = inputs.ForNode(t.Context(), panel.ID, snapshot, true)
+	if err != nil || !reflect.DeepEqual(quota.UserIDs, []int64{users[1].ID}) {
+		t.Fatalf("group filter did not invalidate quota selection: %+v / %v", quota, err)
 	}
 }
 

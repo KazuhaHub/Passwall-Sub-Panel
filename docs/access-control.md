@@ -321,6 +321,33 @@ they now pass along with full local user/auth/policy/group suites and relevant
 static checks. This provides the membership-generation event boundary; the
 counter, cache provider and application wiring are still pending.
 
+At `ad4e930a45277893bf8d2e8a336879fe49aabc3f`, the
+[complete Test workflow](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37233436553)
+and [published-node systemd acceptance](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37233436529)
+both succeeded, covering the decoded publication cache and user membership hooks.
+
+Membership inputs now cache identity-only roster mappings and full tag-matched
+quota membership by panel, sorted roster IDs and an injected change generation.
+Cold loads share one flight; results crossing a generation change are discarded
+and retried, with an unavailable result after three unsettled reads. Errors are
+never cached. Returned maps/slices are isolated from cached data, and panel
+collection mode/revision stay live. The LRU holds at most 64 entries with an
+8 MiB conservative identity-weight budget; oversized results remain complete
+and uncached. Nil generation callbacks always read fresh. Group create/update/
+delete now notify after committed writes, including a delete whose later scope
+cleanup fails. Failed/rejected writes do not notify.
+
+The membership/cache and group-hook regressions first failed before implementation.
+Real SQL integration proves idle membership/tag reads are omitted, user moves
+through the actual user service update policy, and node-region/group-filter
+changes through their services invalidate quota membership. Disabled users
+without clients still count. Full candidate/canonical-config caching and app
+counter/activation wiring remain outstanding; this increment does not enable
+the policy compiler in the application.
+Full local policy/group/nodesync/HTTP-handler suites and static checks pass;
+the actual-service integration, user/node suites and relevant static checks
+also pass. This increment awaits its own CI.
+
 This is a C3 foundation with an optional tested sync boundary. It does not
 implement the full C3 acceptance: application assembly, issue/resync integration,
 eligibility integration and membership-change invalidation, policy caches, immediate pause UI/API wiring,
