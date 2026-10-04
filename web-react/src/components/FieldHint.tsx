@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { Link, Popover, Typography } from '@mui/material'
+import { Link, Popover, Typography, useTheme } from '@mui/material'
+import { amber } from './ToneBadge'
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined'
 
 /**
@@ -24,10 +25,11 @@ export default function FieldHint({
   summary: string
   detail: string
   /** 'warning' for a broken or misleading cap; 'muted' for merely informational. */
-  tone?: 'warning' | 'muted'
+  tone?: 'warning' | 'muted' | 'amber'
 }) {
   const [anchor, setAnchor] = useState<HTMLElement | null>(null)
-  const color = tone === 'warning' ? 'warning.main' : 'text.secondary'
+  const theme = useTheme()
+  const color = tone === 'amber' ? theme.palette.md.onSurface : tone === 'warning' ? 'warning.main' : 'text.secondary'
   return (
     <>
       <Link
@@ -51,7 +53,7 @@ export default function FieldHint({
         }}
       >
         {summary}
-        <InfoOutlinedIcon sx={{ fontSize: 13 }} />
+        <InfoOutlinedIcon sx={{ fontSize: 13, color: tone === 'amber' ? amber(theme).fg : undefined }} />
       </Link>
       <Popover
         open={Boolean(anchor)}

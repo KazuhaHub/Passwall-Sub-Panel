@@ -23,7 +23,7 @@ vi.mock('react-i18next', () => ({
 import zh from '@/locales/zh-CN/admin.json'
 import { flatten, type Nested } from '@/i18n/options'
 import { cardFields, POLICY_CARDS, type PolicyFieldSpec } from './policyLayout'
-import PolicyField from './PolicyField'
+import PolicyField from '@/components/PolicyField'
 dict.current = flatten(zh as Nested)
 
 const theme = createAppTheme({ mode: 'light', sourceColor: '#6750a4', language: 'zh-CN' })

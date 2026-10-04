@@ -13,7 +13,7 @@ import type { GeoAnomaly } from '@/api/geoAnomalies'
 import type { QueueCounts, QueueRow, QueueView } from '@/api/riskCenter'
 import type { GeoIPStatus } from '@/api/settings'
 import RiskUserDrawer from '../drawer/RiskUserDrawer'
-import { useDrawerParam } from '../drawerParam'
+import { useDrawerParam } from '@/hooks/useDrawerParam'
 import QueueTab from './QueueTab'
 
 const api = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() }))
