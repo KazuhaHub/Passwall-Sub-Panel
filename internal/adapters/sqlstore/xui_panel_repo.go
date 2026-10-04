@@ -3,9 +3,11 @@ package sqlstore
 import (
 	"context"
 	"fmt"
+	"math"
 	"time"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
@@ -93,7 +95,10 @@ func (r *xuiPanelRepo) Save(ctx context.Context, p *domain.XUIPanel) error {
 		return err
 	}
 	db := r.db.WithContext(ctx)
-	if row.ID == 0 {
+	creating := row.ID == 0
+	if creating {
+		row.AuditCollect = string(domain.NormalizeAuditCollect(p.AuditCollect))
+		row.AuditCollectRevision = 1
 		err = db.Create(row).Error
 	} else {
 		// domain.XUIPanel carries no created_at, so a full Save would write the
@@ -101,12 +106,18 @@ func (r *xuiPanelRepo) Save(ctx context.Context, p *domain.XUIPanel) error {
 		// ("Incorrect datetime value: '0000-00-00'"). Omit it: created_at stays
 		// as first written, updated_at still refreshes. SQLite/Postgres tolerated
 		// the zero date; the cross-DB CI surfaced this MySQL-only bug.
-		err = db.Omit("CreatedAt").Save(row).Error
+		err = db.Omit("CreatedAt", "AuditCollect", "AuditCollectRevision").Save(row).Error
 	}
 	if err != nil {
 		return err
 	}
 	p.ID = row.ID
+	if creating {
+		// Creation initialized these fields; callers updating an existing row
+		// must read the separate control state rather than infer it from Save.
+		p.AuditCollect = domain.AuditCollect(row.AuditCollect)
+		p.AuditCollectRevision = row.AuditCollectRevision
+	}
 	return nil
 }
 
@@ -115,9 +126,12 @@ func (r *xuiPanelRepo) Save(ctx context.Context, p *domain.XUIPanel) error {
 // when an administrator only changes a native server's display/preference.
 // Input channel validation belongs to the HTTP boundary: rollback must be able
 // to restore the exact empty/unknown preference read from an existing row.
-func (r *xuiPanelRepo) UpdateNativeMetadata(ctx context.Context, id int64, name, remark *string, channel *domain.PanelUpdateChannel) error {
+func (r *xuiPanelRepo) UpdateNativeMetadata(ctx context.Context, id int64, name, remark *string, channel *domain.PanelUpdateChannel, collect *domain.AuditCollect) error {
 	if id <= 0 || (name != nil && *name == "") {
 		return fmt.Errorf("%w: invalid native server metadata", domain.ErrValidation)
+	}
+	if collect != nil && !collect.Valid() {
+		return fmt.Errorf("%w: invalid audit collection mode", domain.ErrValidation)
 	}
 	updates := map[string]any{}
 	if name != nil {
@@ -129,33 +143,28 @@ func (r *xuiPanelRepo) UpdateNativeMetadata(ctx context.Context, id int64, name,
 	if channel != nil {
 		updates["update_channel"] = string(*channel)
 	}
-	db := r.db.WithContext(ctx)
-	var row xuiPanelRow
-	if err := db.Select("id", "kind").First(&row, id).Error; err != nil {
-		return wrapNotFound(err)
-	}
-	if domain.NormalizePanelKind(domain.PanelKind(row.Kind)) != domain.PanelKindPSP {
-		return fmt.Errorf("%w: native metadata requires a Passwall Node server", domain.ErrValidation)
-	}
-	if len(updates) == 0 {
-		return nil
-	}
-	result := db.Model(&xuiPanelRow{}).Where("id = ? AND kind = ?", id, string(domain.PanelKindPSP)).Updates(updates)
-	if result.Error != nil {
-		return result.Error
-	}
-	if result.RowsAffected == 0 {
-		// MySQL may report zero changed rows for a no-op; distinguish that from
-		// deletion/backend change instead of claiming a missing row was saved.
-		var current xuiPanelRow
-		if err := db.Select("id", "kind").First(&current, id).Error; err != nil {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// Serialize the comparison with the revision increment. Two equal
+		// writes must not both invalidate the same collection generation.
+		var row xuiPanelRow
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select("id", "kind", "audit_collect", "audit_collect_revision").First(&row, id).Error; err != nil {
 			return wrapNotFound(err)
 		}
-		if domain.NormalizePanelKind(domain.PanelKind(current.Kind)) != domain.PanelKindPSP {
-			return fmt.Errorf("%w: native server backend changed", domain.ErrConflict)
+		if domain.NormalizePanelKind(domain.PanelKind(row.Kind)) != domain.PanelKindPSP {
+			return fmt.Errorf("%w: native metadata requires a Passwall Node server", domain.ErrValidation)
 		}
-	}
-	return nil
+		if collect != nil && string(*collect) != row.AuditCollect {
+			if row.AuditCollectRevision < 1 || row.AuditCollectRevision == math.MaxInt64 {
+				return fmt.Errorf("%w: invalid audit collection revision", domain.ErrValidation)
+			}
+			updates["audit_collect"] = string(*collect)
+			updates["audit_collect_revision"] = gorm.Expr("audit_collect_revision + 1")
+		}
+		if len(updates) == 0 {
+			return nil
+		}
+		return tx.Model(&xuiPanelRow{}).Where("id = ?", id).Updates(updates).Error
+	})
 }
 
 // Delete removes a panel row, but refuses the operation when any nodes

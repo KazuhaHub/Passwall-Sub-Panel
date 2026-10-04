@@ -711,7 +711,7 @@ func (h *AdminServersHandler) Update(c *gin.Context) {
 	// and their rollback must never clobber runtime probe/identity columns.
 	persist := func(panel *domain.Panel) error {
 		if writer, ok := h.repo.(interface {
-			UpdateNativeMetadata(context.Context, int64, *string, *string, *domain.PanelUpdateChannel) error
+			UpdateNativeMetadata(context.Context, int64, *string, *string, *domain.PanelUpdateChannel, *domain.AuditCollect) error
 		}); ok && domain.NormalizePanelKind(before.Kind) == domain.PanelKindPSP {
 			var name, remark *string
 			var channel *domain.PanelUpdateChannel
@@ -724,7 +724,7 @@ func (h *AdminServersHandler) Update(c *gin.Context) {
 			if req.UpdateChannel != nil {
 				channel = &panel.UpdateChannel
 			}
-			return writer.UpdateNativeMetadata(c.Request.Context(), id, name, remark, channel)
+			return writer.UpdateNativeMetadata(c.Request.Context(), id, name, remark, channel, nil)
 		}
 		return h.repo.Save(c.Request.Context(), panel)
 	}
