@@ -48,6 +48,7 @@ func (r *DestDefinitionRepo) SaveList(ctx context.Context, list *domain.DestList
 			"geosite_attrs": row.GeositeAttrs, "entries": row.Entries, "source_text": row.SourceText,
 			"entry_count": row.EntryCount, "regexp_count": row.RegexpCount, "content_sha256": row.ContentSHA256,
 			"last_fetched_at": row.LastFetchedAt, "last_error": row.LastError, "updated_at": row.UpdatedAt,
+			"parse_report": row.ParseReport,
 		}).Error
 	})
 	if err == nil {
@@ -58,7 +59,7 @@ func (r *DestDefinitionRepo) SaveList(ctx context.Context, list *domain.DestList
 
 func equalDestList(a, b destListRow) bool {
 	return a.Name == b.Name && a.Kind == b.Kind && a.SourceURL == b.SourceURL && a.GeositeCategory == b.GeositeCategory && a.GeositeAttrs == b.GeositeAttrs &&
-		bytes.Equal(a.Entries, b.Entries) && bytes.Equal(a.SourceText, b.SourceText) && a.EntryCount == b.EntryCount && a.RegexpCount == b.RegexpCount && a.ContentSHA256 == b.ContentSHA256 && a.LastError == b.LastError && equalDestTime(a.LastFetchedAt, b.LastFetchedAt)
+		bytes.Equal(a.Entries, b.Entries) && bytes.Equal(a.SourceText, b.SourceText) && equalDestReport(a.ParseReport, b.ParseReport) && a.EntryCount == b.EntryCount && a.RegexpCount == b.RegexpCount && a.ContentSHA256 == b.ContentSHA256 && a.LastError == b.LastError && equalDestTime(a.LastFetchedAt, b.LastFetchedAt)
 }
 
 func (r *DestDefinitionRepo) CommitListRefresh(ctx context.Context, captured domain.DestList, result domain.DestListRefresh, now time.Time) error {
@@ -81,6 +82,7 @@ func (r *DestDefinitionRepo) CommitListRefresh(ctx context.Context, captured dom
 		changed := false
 		if result.LastError == "" {
 			updates["last_fetched_at"] = now
+			updates["parse_report"] = destReportFromDomain(result.ParseReport)
 			if result.ContentSHA256 != row.ContentSHA256 {
 				updates["entries"] = destBytes(result.Entries)
 				updates["entry_count"], updates["regexp_count"], updates["content_sha256"] = result.EntryCount, result.RegexpCount, result.ContentSHA256

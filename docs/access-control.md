@@ -30,6 +30,50 @@ Commit `8d96dd67738c6d0901dded0b6064669c3561198c` passed the [full Test workflow
 
 New tests verify all twelve durable tables, list bodies larger than 2 MiB, exact candidate/LKG bytes, nullable initial publication state, zero user/port identifiers for trial records, repeated boot migrations, additive panel defaults, preservation during stale ordinary saves, and concurrent collection-mode writes.
 
+## List parsing, fetching and shared category cache
+
+The new `internal/service/destlist` package parses custom text and remote rule
+providers, canonicalizes and deduplicates entries, bounds body and entry sizes,
+and produces a bounded parse report. Custom text ignores unsupported and broad
+entries. A remote URL containing a broad entry fails as a whole. Clash records
+use CSV parsing: quote values containing commas or use a raw `regexp:` entry;
+ambiguous records are reported instead of silently truncating a regexp.
+
+Remote downloads use the existing safehttp transport, require HTTPS through
+redirects, limit redirects, enforce a 60-second request timeout and read one
+byte beyond the body limit to detect overflow. Stored errors omit URL-bearing
+transport error strings. Production requests cannot reach loopback addresses.
+
+Per the sixth final plan and the owner's confirmed choice, geosite selection
+matches attributes literally, strips their suffixes, removes broad entries and
+retains a report with the original category rule ordinal. Effective category
+counts exclude broad entries and duplicates. A completely filtered selection
+returns `dest_list_empty_after_filter` with its report and no usable content.
+Every consumer must handle that error before committing a refresh.
+
+The shared cache verifies the upstream SHA256 before parsing and replaces
+`<DataDir>/destlists/dlc_plain.yml` through a synced temporary file and atomic
+rename. Concurrent refreshes share one operation; cached reads continue during
+downloads. Failed downloads, checksum/parse failures and failed disk replacement
+retain the usable catalog. Missing or corrupt caches return unavailable.
+Restart restores the last successful local cache without a network request.
+
+`dest_lists.parse_report` is nullable JSON TEXT without a default. A successful
+save or refresh persists a separate copy of the report. Report-only changes
+advance the edit version without advancing generation. Failed refreshes retain
+the last successful report; stale refreshes cannot overwrite it. Legacy rows
+without a report remain null until a successful parse is committed.
+
+Validation first demonstrated failures for the real category, filtering/report
+accounting, empty selections, cache operations and report persistence. The
+implemented parser/fetch/cache suite, complete local SQL-store/domain/safehttp
+suites and relevant `go vet` checks pass. A fixed, compressed upstream release
+fixture runs offline on every test run, verifies the published checksum and
+parses all 1,542 categories; category-finance has 612 retained entries and
+excludes `domain:hsbc`. Its source and MIT license are in `destlist/testdata`.
+These checks do not establish Linux race or MySQL/PostgreSQL results for the
+new report/cache implementation; those require CI on this code's SHA.
+
 ## Remaining implementation
 
-Stage 1c still requires complete repository operations for multi-row service transactions and application wiring, list parsing/fetching, policy compilation and candidate minting, fallback handling, settings/API boundaries, access-control views and complete browser acceptance. Audit ingestion, group modes, privacy/consent and subsequent stages remain governed by the full plan. Repository tests and green CI do not establish completion of these requirements.
+Stage 1c still requires complete repository operations for multi-row service transactions and application wiring, the list service's preview/save/refresh operations and tracked refresh loop, policy compilation and candidate minting, fallback handling, settings/API boundaries, access-control views and complete browser acceptance. The parser and cache are not connected to app lifecycle or HTTP yet; C2 remains incomplete. Audit ingestion, group modes, privacy/consent and subsequent stages remain governed by the full plan. Repository tests and green CI do not establish completion of these requirements.

@@ -25,6 +25,20 @@ func NormalizeAuditCollect(c AuditCollect) AuditCollect {
 
 type DestListKind string
 
+type DestParseSample struct {
+	Line   int    `json:"line"`
+	Text   string `json:"text"`
+	Reason string `json:"reason"`
+}
+
+type DestParseReport struct {
+	Accepted     int               `json:"accepted"`
+	Ignored      int               `json:"ignored"`
+	IgnoredBroad int               `json:"ignored_broad"`
+	Rewritten    int               `json:"rewritten"`
+	Samples      []DestParseSample `json:"samples"`
+}
+
 const (
 	DestListCustom  DestListKind = "custom"
 	DestListRemote  DestListKind = "remote"
@@ -39,6 +53,7 @@ type DestList struct {
 	Kind                                     DestListKind
 	SourceURL, GeositeCategory, GeositeAttrs string
 	Entries, SourceText                      []byte
+	ParseReport                              *DestParseReport
 	EntryCount, RegexpCount                  int
 	ContentSHA256                            string
 	LastFetchedAt                            *time.Time
@@ -51,6 +66,7 @@ type DestList struct {
 // A nonempty LastError preserves the previously usable entries and fetch time.
 type DestListRefresh struct {
 	Entries                  []byte
+	ParseReport              *DestParseReport
 	EntryCount, RegexpCount  int
 	ContentSHA256, LastError string
 }

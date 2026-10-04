@@ -81,6 +81,7 @@ type destListRow struct {
 	GeositeCategory         string `gorm:"size:128"`
 	GeositeAttrs            string `gorm:"size:128"`
 	Entries, SourceText     destBytes
+	ParseReport             *jsonDestParseReport
 	EntryCount, RegexpCount int
 	ContentSHA256           string `gorm:"size:64"`
 	LastFetchedAt           *time.Time

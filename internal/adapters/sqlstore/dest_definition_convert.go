@@ -14,9 +14,9 @@ func destPolicyToDomain(v destPolicyRow) domain.DestPolicy {
 }
 
 func destListFromDomain(v domain.DestList) destListRow {
-	return destListRow{ID: v.ID, Name: v.Name, Kind: string(v.Kind), SourceURL: v.SourceURL, GeositeCategory: v.GeositeCategory, GeositeAttrs: v.GeositeAttrs, Entries: append(destBytes(nil), v.Entries...), SourceText: append(destBytes(nil), v.SourceText...), EntryCount: v.EntryCount, RegexpCount: v.RegexpCount, ContentSHA256: v.ContentSHA256, LastFetchedAt: v.LastFetchedAt, LastError: v.LastError, OwnerGroupID: v.OwnerGroupID, CreatedAt: v.CreatedAt, UpdatedAt: v.UpdatedAt}
+	return destListRow{ID: v.ID, Name: v.Name, Kind: string(v.Kind), SourceURL: v.SourceURL, GeositeCategory: v.GeositeCategory, GeositeAttrs: v.GeositeAttrs, ParseReport: destReportFromDomain(v.ParseReport), Entries: append(destBytes(nil), v.Entries...), SourceText: append(destBytes(nil), v.SourceText...), EntryCount: v.EntryCount, RegexpCount: v.RegexpCount, ContentSHA256: v.ContentSHA256, LastFetchedAt: v.LastFetchedAt, LastError: v.LastError, OwnerGroupID: v.OwnerGroupID, CreatedAt: v.CreatedAt, UpdatedAt: v.UpdatedAt}
 }
 
 func destListToDomain(v destListRow) domain.DestList {
-	return domain.DestList{ID: v.ID, Name: v.Name, Kind: domain.DestListKind(v.Kind), SourceURL: v.SourceURL, GeositeCategory: v.GeositeCategory, GeositeAttrs: v.GeositeAttrs, Entries: append([]byte(nil), v.Entries...), SourceText: append([]byte(nil), v.SourceText...), EntryCount: v.EntryCount, RegexpCount: v.RegexpCount, ContentSHA256: v.ContentSHA256, LastFetchedAt: v.LastFetchedAt, LastError: v.LastError, OwnerGroupID: v.OwnerGroupID, CreatedAt: v.CreatedAt, UpdatedAt: v.UpdatedAt}
+	return domain.DestList{ID: v.ID, Name: v.Name, Kind: domain.DestListKind(v.Kind), SourceURL: v.SourceURL, GeositeCategory: v.GeositeCategory, GeositeAttrs: v.GeositeAttrs, ParseReport: destReportToDomain(v.ParseReport), Entries: append([]byte(nil), v.Entries...), SourceText: append([]byte(nil), v.SourceText...), EntryCount: v.EntryCount, RegexpCount: v.RegexpCount, ContentSHA256: v.ContentSHA256, LastFetchedAt: v.LastFetchedAt, LastError: v.LastError, OwnerGroupID: v.OwnerGroupID, CreatedAt: v.CreatedAt, UpdatedAt: v.UpdatedAt}
 }
