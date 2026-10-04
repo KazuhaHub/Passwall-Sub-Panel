@@ -555,6 +555,7 @@ type AuditUsage struct {
 
   其余部署失败一律**不改** PolicyStatus，保持上一个值，交给已有的 `core_convergence_failed` 处理：core 安装或下载失败、`-test` 超时、stop 失败、去掉策略之后仍然失败（多半是某个 listener 的配置被新核心拒绝）。否则 PSP 会把一个与策略无关的故障当成「策略被拒」，进入回退，再按 §9.2 把这台节点判为对白名单分组不合格，删掉组员的 client；而 `rejected_generation` 锁住之后，同一 generation 内不会再试。
 - supervisor 导出可判别的错误 `process.ErrCandidateRejected`（用 `errors.Is` 判断）：`validateCandidate` 里 `-test` 进程正常结束但退出码非 0 时包它；超时（`checkCtx.Err() != nil`）与 exec 失败**不**包它。去掉策略的复检只在 `ErrCandidateRejected` 时做，只多跑一次 `-test`，不部署。
+- **安装器的提前校验**：`install.execVerifier.Verify` 也会校验 `Request.CurrentConfiguration`。带 Policy 的 converge 不向安装器传候选配置，安装器仍验证 catalog、下载校验和与二进制版本；候选配置统一交给 supervisor 在任何 stop/switch/start 之前校验。否则策略会在安装路径被拒而没有 `ErrCandidateRejected`，PSP 无法启动策略回退。无 Policy 时保留现有安装器预检。测试断言该分工，并覆盖 supervisor 拒绝时旧部署和对象的 retryable 语义。
 - **重启恢复**（F26）：新增 `(*Runtime).RestoreStatus(ctx) error`：
   - 读 `store.CoreDeployment(ctx)`，解出 `ConfigBody.Policy` 与 `RosterBody`；
    - 设置 PolicyStatus 的已应用摘要，并调用 N4 的 sink.SetRoster(saved roster, ruleIDs, saved.Policy 的 Collect/CollectRevision)；阶段 4 的 stdout 初始部署 Writer 同样绑定保存的 revision，不从 PSP 当前期望值反推旧进程；
