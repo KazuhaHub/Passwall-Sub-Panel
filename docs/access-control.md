@@ -150,10 +150,30 @@ and TypeScript build check pass, as do relevant Go static checks. Three preexist
 SQLite test helpers now close their connections before Windows temporary-directory
 cleanup. A separate destlist test invocation was blocked by Windows Application
 Control for its new binary; security settings were not changed. These local
-results do not establish CI results for this policy implementation.
+results alone do not establish CI results. The [complete Test workflow](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37196196283)
+at `c1ef001b6eba4de39724601cd603227cb84a6db5` subsequently succeeded, including
+all SQL dialects, Linux race, frontend checks and release-target builds. The
+[published-node systemd acceptance](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37196196154)
+also succeeded at that SHA; it verifies the released node, not the unmerged
+destination-policy Node implementation.
+
+The subsequent candidate-mint increment adds the narrow
+`ports.NodePolicyCandidateRepo` boundary. `MintConfigWithPolicyCandidate` locks
+the native-agent owner, then commits the config stream and exact policy body,
+digest, source, generation and context in one transaction. Source-only changes
+still update metadata when the wire ETag is unchanged, while confirmed LKG and
+reported status fields remain untouched. Unchanged calls read only stream and
+candidate metadata, omitting `desired_body`, `minted_body` and `applied_body`, and
+perform no candidate write. Canonical config bytes, policy shape and metadata
+consistency are validated before any write. This method is not called by sync
+yet. Seven focused repository tests passed after first failing against the stub;
+fault injection proves rollback in both write directions and query guards check
+the idle blob path. The complete local SQL-store, policy and domain suites pass
+for this increment. Its own CI still needs to run; `c1ef001b` results do not prove
+the subsequent mint implementation.
 
 This is an unconnected C3 increment. It does not implement the full C3 acceptance:
-candidate mint transactions, ObserveStatus/LKG/exhausted transitions, fallback
+candidate mint wiring, ObserveStatus/LKG/exhausted transitions, fallback
 pruning, eligibility/member accounting, policy caches, immediate pause wiring,
 settings and application integration remain outstanding. Existing nodes still
 receive the existing configuration because the compiler is not wired into sync.

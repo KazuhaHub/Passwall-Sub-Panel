@@ -538,6 +538,13 @@ type PSPClientRepo interface {
 // desired/applied streams. MintStream accepts canonical JSON and performs the
 // compare-before-CAS rule: identical content returns minted=false and never
 // advances DesiredVersion.
+// NodePolicyCandidateRepo is the narrow atomic mint boundary for the optional
+// destination compiler. Unchanged calls return stream metadata without its
+// desired body; the caller already holds the canonical config bytes.
+type NodePolicyCandidateRepo interface {
+	MintConfigWithPolicyCandidate(ctx context.Context, agentID string, canonicalBody []byte, metadata domain.DestPolicyMint, now time.Time) (*domain.NodeAgentStream, bool, error)
+}
+
 type NodeAgentRepo interface {
 	Create(ctx context.Context, agent *domain.NodeAgent) error
 	List(ctx context.Context) ([]*domain.NodeAgent, error)

@@ -171,6 +171,14 @@ type DestDefinitions struct {
 
 type DestCandidateKind string
 
+// DestPolicyMint describes the executable candidate's source. Exact candidate
+// bytes and digest are derived from the config body inside the mint boundary.
+type DestPolicyMint struct {
+	Kind                                     DestCandidateKind
+	Generation                               int64
+	Context, DesiredSHA256, CollectEffective string
+}
+
 const (
 	DestCandidateDesired  DestCandidateKind = "desired"
 	DestCandidateFallback DestCandidateKind = "fallback"
