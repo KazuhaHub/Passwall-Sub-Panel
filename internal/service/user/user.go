@@ -60,6 +60,9 @@ type Service struct {
 	// changes. It is wired once during router construction and is nil in tests
 	// that do not exercise HTTP authentication.
 	authInvalidator func(int64)
+	// Wired once during app assembly. Membership changes must invalidate policy
+	// inputs synchronously after persistence and before any panel resync.
+	membershipInvalidator func()
 	// bg, when set via SetBackgroundRunner, routes fire-and-forget background
 	// work (group-member resync) through the app's tracked async dispatcher so
 	// App.Shutdown drains it and it runs under a cancellable background context.
@@ -359,6 +362,7 @@ func (s *Service) deleteUser(ctx context.Context, userID int64) error {
 		return err
 	}
 	s.invalidateAuth(userID)
+	s.invalidateMembership()
 	return nil
 }
 
@@ -729,6 +733,7 @@ func (s *Service) CreateLocal(ctx context.Context, in CreateLocalInput) (*Create
 	if err := s.users.Create(ctx, u); err != nil {
 		return nil, err
 	}
+	s.invalidateMembership()
 	return &CreateLocalResult{User: u, InitialPassword: pwd}, nil
 }
 
@@ -1007,6 +1012,7 @@ func (s *Service) EnsureSSO(ctx context.Context, in EnsureSSOInput) (*domain.Use
 	if err := s.users.Create(ctx, u); err != nil {
 		return nil, fmt.Errorf("create sso user: %w", err)
 	}
+	s.invalidateMembership()
 	return u, nil
 }
 
@@ -1095,6 +1101,7 @@ func (s *Service) reconcileSSOUser(ctx context.Context, u *domain.User, in Ensur
 		}
 	}
 	if groupChanged {
+		s.invalidateMembership()
 		// The new OU's node membership AND its inherited entitlements
 		// have to reach the panels; the stored row alone changes
 		// nothing on the nodes. Same mechanism an admin-side group move
@@ -1816,6 +1823,9 @@ func (s *Service) UpdateProfile(ctx context.Context, userID int64, in UpdateInpu
 		return err
 	}
 	now := time.Now()
+	if groupChanged {
+		s.invalidateMembership()
+	}
 	serviceStateChanged := false
 	if u.ServiceDisabledReason == domain.DisabledExpired && !u.IsExpired(now) {
 		u.ServiceDisabledReason = domain.DisabledNone
@@ -2098,6 +2108,7 @@ func (s *Service) ChangeGroupAndSync(ctx context.Context, userID, newGroupID int
 	if err := s.updateUser(ctx, u); err != nil {
 		return err
 	}
+	s.invalidateMembership()
 	if err := s.ResyncMembershipOrEnqueue(ctx, userID, fmt.Sprintf("sync node membership for user %s", u.UPN)); err != nil {
 		log.Warn("enqueue user membership resync failed", "user_id", userID, "err", err)
 		return errUnqueuedPush("resync node membership", err, err)

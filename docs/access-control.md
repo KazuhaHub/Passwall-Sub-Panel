@@ -312,6 +312,15 @@ reload regressions pass, as do the full local policy/nodesync suites and static
 checks. This caches only published definitions: full candidate, membership and
 canonical ConfigBody caching remain outstanding.
 
+User membership invalidation is now an optional synchronous service hook. Local
+and SSO creation, committed deletion, administrator/profile group changes and
+SSO rule-driven moves notify after persistence and before remote resync. Equal
+moves, unchanged SSO logins, display-only edits and failed database writes do not
+notify. Three focused regressions first failed on the missing creation hooks;
+they now pass along with full local user/auth/policy/group suites and relevant
+static checks. This provides the membership-generation event boundary; the
+counter, cache provider and application wiring are still pending.
+
 This is a C3 foundation with an optional tested sync boundary. It does not
 implement the full C3 acceptance: application assembly, issue/resync integration,
 eligibility integration and membership-change invalidation, policy caches, immediate pause UI/API wiring,
