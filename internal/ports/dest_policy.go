@@ -2,10 +2,17 @@ package ports
 
 import (
 	"context"
+	"time"
 
 	"github.com/KazuhaHub/passwall-protocol/protocol"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 )
+
+// DestPolicyRetryRepo clears retry locks and retires old candidate receipts in
+// one native-agent owner transaction, without rewriting the config or LKG.
+type DestPolicyRetryRepo interface {
+	RetryDestinationPolicy(context.Context, string, time.Time) (bool, error)
+}
 
 // DestPolicyCompiler owns durable status transitions and compiles only the
 // destination subtree. The sync coordinator remains the sole config minter.

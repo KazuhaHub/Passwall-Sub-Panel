@@ -69,7 +69,7 @@ func (r *nodeAgentRepo) MintConfigWithPolicyCandidate(ctx context.Context, agent
 				changed = true
 			}
 			var candidate destAgentPolicyRow
-			err := tx.Select("agent_id", "desired_sha256", "minted_sha256", "minted_kind", "minted_generation", "minted_context", "collect_effective").Where("agent_id = ?", agentID).First(&candidate).Error
+			err := tx.Select("agent_id", "desired_sha256", "minted_sha256", "minted_kind", "minted_generation", "minted_context", "minted_at", "collect_effective").Where("agent_id = ?", agentID).First(&candidate).Error
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				candidate = destAgentPolicyRow{AgentID: agentID, DesiredSHA256: meta.DesiredSHA256, MintedSHA256: digest, MintedBody: append(destBytes(nil), policyBody...), MintedKind: string(meta.Kind), MintedGeneration: meta.Generation, MintedContext: meta.Context, MintedAt: &now, CollectEffective: meta.CollectEffective, UpdatedAt: now}
 				if err := tx.Create(&candidate).Error; err != nil {
@@ -77,7 +77,7 @@ func (r *nodeAgentRepo) MintConfigWithPolicyCandidate(ctx context.Context, agent
 				}
 			} else if err != nil {
 				return err
-			} else if candidate.DesiredSHA256 != meta.DesiredSHA256 || candidate.MintedSHA256 != digest || candidate.MintedKind != string(meta.Kind) || candidate.MintedGeneration != meta.Generation || candidate.MintedContext != meta.Context || candidate.CollectEffective != meta.CollectEffective {
+			} else if candidate.MintedAt == nil || candidate.DesiredSHA256 != meta.DesiredSHA256 || candidate.MintedSHA256 != digest || candidate.MintedKind != string(meta.Kind) || candidate.MintedGeneration != meta.Generation || candidate.MintedContext != meta.Context || candidate.CollectEffective != meta.CollectEffective {
 				if err := tx.Model(&destAgentPolicyRow{}).Where("agent_id = ?", agentID).UpdateColumns(map[string]any{"desired_sha256": meta.DesiredSHA256, "minted_sha256": digest, "minted_body": append([]byte(nil), policyBody...), "minted_kind": string(meta.Kind), "minted_generation": meta.Generation, "minted_context": meta.Context, "minted_at": now, "collect_effective": meta.CollectEffective, "updated_at": now}).Error; err != nil {
 					return err
 				}

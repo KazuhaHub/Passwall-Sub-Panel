@@ -69,6 +69,7 @@ type Deps struct {
 	Cfg                       *config.Config
 	Repos                     ports.Repos
 	DestinationRefreshChanged func()
+	DestinationPolicyRetry    handler.DestinationPolicyRetrier
 	// GeoRecords is the read side of the concurrent-location detector, the
 	// same rows the traffic poll writes each cycle. Optional: a deployment
 	// without it gets a 503 from the endpoint rather than an empty list, so
@@ -807,6 +808,8 @@ func NewRouter(d Deps) stdhttp.Handler {
 		destinationSettings := handler.NewAdminDestinationSettingsHandler(d.Repos.Settings, d.DestinationRefreshChanged)
 		adminGroup.GET("/dest/settings", destinationSettings.Get)
 		adminGroup.PUT("/dest/settings", destinationSettings.Put)
+		destinationRetry := handler.NewAdminDestinationRetryHandler(d.DestinationPolicyRetry)
+		adminGroup.POST("/dest/agents/:agent_id/retry", destinationRetry.Retry)
 
 		// Offline geo database status + manual update (touches the update token
 		// + fetches an external DB — admin only).

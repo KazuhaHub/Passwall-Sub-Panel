@@ -756,6 +756,7 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 		Cfg:                       cfg,
 		Repos:                     repos,
 		DestinationRefreshChanged: a.destLists.NotifySettingsChanged,
+		DestinationPolicyRetry:    nativeSync,
 		GeoRecords:                geoStreaks,
 		// The risk view's rows. Optional, so leaving it out would compile —
 		// TestBuildWiresTheRiskSignals reads it through the assembled router.

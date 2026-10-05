@@ -30,3 +30,14 @@ export async function putAccessControlSettings(changed: Partial<AccessControlSet
   })
   return data
 }
+
+export interface DestinationPolicyRetryResult {
+  retry_requested: boolean
+}
+
+export async function retryDestinationPolicy(agentId: string): Promise<DestinationPolicyRetryResult> {
+  const { data } = await client.post<DestinationPolicyRetryResult>(
+    `/admin/dest/agents/${encodeURIComponent(agentId)}/retry`, undefined, { _skipErrorToast: true },
+  )
+  return data
+}

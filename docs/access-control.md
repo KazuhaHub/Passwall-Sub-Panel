@@ -570,15 +570,44 @@ new nonempty desired candidate is confirmed. Removal retains zero-attachment
 roster identities for counters; scoped rules still use those subjects in a new
 publication, so confirmation can restore their attachments. Publication alone
 and empty-policy success retain rejection. No empty, paused or fallback success
-is used to claim desired recovery. The separate explicit retry operation and
-its end-to-end acceptance remain required.
+is used to claim desired recovery.
 
 Local app, policy, nodesync, group, user, node, reconcile, SQL-store and HTTP
-suites and static checks passed. This assembly increment awaits its own CI;
-released-node acceptance does not establish unmerged Node #78's kernel behavior.
+suites and static checks passed. Assembly head ff1c4fb0 passed the complete Test
+workflow and released-node systemd acceptance. Released-node acceptance does
+not establish unmerged Node #78's kernel behavior.
+
+Explicit retry is now available at admin-only
+`POST /api/admin/dest/agents/:agent_id/retry`. It serializes with the entire
+agent sync and atomically clears rejected/exhausted locks under the same SQL
+owner lock as candidate minting. Current sniffing/limit failures remain intact.
+Confirmed policy, exact candidate bytes/source and config stream are preserved.
+Unknown agents return 404; fresh or already-reset agents return an idempotent
+`retry_requested: false` without creating candidate provenance.
+
+The reset retires `minted_at` as a receipt-confirmation marker until the next
+candidate mint. Otherwise the old rejected receipt arriving before that mint
+would immediately relock the requested retry. The sole config minter rearms
+the marker even for identical candidate bytes. This explicit new attempt resets
+its dispatch time; ordinary unchanged syncs retain the existing timestamp and
+do not write policy blobs. Retry never invents an applied confirmation or changes
+the confirmed policy's timestamp. Compiled/config caches and eligibility are
+invalidated only after persistence, before asynchronous member resync.
+
+Missing-retry and missing-rearm regressions first failed before implementation.
+SQL tests prove metadata-only reads, atomic rollback, unchanged LKG/stream,
+fresh/corrupt/missing-state boundaries, receipt retirement and same-byte rearm.
+Real Build/HTTP/SQL checks prove administrator authorization, user/operator
+rejection, stale-receipt suppression and warm-selector recovery. Coordinator
+checks keep retry behind the full active sync while other agents remain
+concurrent, and reject cancellation after waiting. Compiler tests preserve warm
+caches on failed writes and rebuild after committed resets. All relevant local
+Go suites/static checks and frontend TypeScript compilation passed. This retry
+increment awaits its CI and true Node 1b/kernel retry acceptance; its frontend
+API client is present, but the retry button and browser acceptance remain pending.
 
 Stage 1c still requires complete repository operations for multi-row service
-transactions, explicit retry and mode orchestration, remaining API boundaries,
+transactions and mode orchestration, remaining API boundaries,
 access-control views and complete browser acceptance. List HTTP endpoints and
 C2's end-to-end browser acceptance remain outstanding. Audit ingestion,
 retention, privacy/consent and subsequent stages retain the full final-plan
