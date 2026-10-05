@@ -75,6 +75,9 @@ func (c *GeositeCache) Refresh(ctx context.Context) error {
 	result := c.beginRefresh(ctx)
 	select {
 	case <-ctx.Done():
+		// A caller owning a tracked refresh must not drain while download or
+		// disk-cache cleanup continues in singleflight's goroutine.
+		<-result
 		return ctx.Err()
 	case outcome := <-result:
 		return outcome.Err

@@ -11,6 +11,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/operationgate"
 	"golang.org/x/sync/singleflight"
 )
 
@@ -35,11 +36,16 @@ type Service struct {
 	attempts        map[int64]listAttempt
 	wake            chan struct{}
 	loopOnce        sync.Once
+	operationGate   *operationgate.Gate
 }
 
 func NewService(store DefinitionStore, cache *GeositeCache) *Service {
 	return &Service{store: store, cache: cache, fetcher: NewFetcher(), now: time.Now, attempts: map[int64]listAttempt{}, wake: make(chan struct{}, 1)}
 }
+
+// Configure at assembly time. Admission spans downloads and their final writes,
+// so an online backend switch cannot cross an old backend's pending response.
+func (s *Service) SetOperationGate(gate *operationgate.Gate) { s.operationGate = gate }
 
 // Preview is read-only, including a missing geosite cache. Downloading the
 // shared catalog is an explicit action, never a side effect of opening a form.
@@ -131,23 +137,25 @@ func (s *Service) RefreshList(ctx context.Context, id int64) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	return s.withListFlight(ctx, id, func() (any, error) {
-		captured, err := s.store.GetList(ctx, id)
-		if err != nil {
-			return nil, err
-		}
-		if captured.Kind != domain.DestListRemote && captured.Kind != domain.DestListGeosite {
-			return nil, domain.ErrValidation
-		}
-		var cacheError error
-		if captured.Kind == domain.DestListGeosite {
-			if s.cache == nil {
-				cacheError = domain.ErrUnavailable
-			} else {
-				cacheError = s.cache.Refresh(ctx)
+	return s.operationGate.RunRead(ctx, func(ctx context.Context) error {
+		return s.withListFlight(ctx, id, func() (any, error) {
+			captured, err := s.store.GetList(ctx, id)
+			if err != nil {
+				return nil, err
 			}
-		}
-		return nil, s.refreshCaptured(ctx, captured, cacheError)
+			if captured.Kind != domain.DestListRemote && captured.Kind != domain.DestListGeosite {
+				return nil, domain.ErrValidation
+			}
+			var cacheError error
+			if captured.Kind == domain.DestListGeosite {
+				if s.cache == nil {
+					cacheError = domain.ErrUnavailable
+				} else {
+					cacheError = s.cache.Refresh(ctx)
+				}
+			}
+			return nil, s.refreshCaptured(ctx, captured, cacheError)
+		})
 	})
 }
 
@@ -155,6 +163,10 @@ func (s *Service) withListFlight(ctx context.Context, id int64, work func() (any
 	result := s.flights.DoChan(strconv.FormatInt(id, 10), work)
 	select {
 	case <-ctx.Done():
+		// Join the flight before releasing lifecycle/admission ownership.
+		// Its context has been canceled, but database/download cleanup may
+		// still be running. A shared flight's leader must drain as well.
+		<-result
 		return ctx.Err()
 	case result := <-result:
 		return result.Err
@@ -186,6 +198,10 @@ func (s *Service) refreshCaptured(ctx context.Context, captured domain.DestList,
 // and HTTP parsing occur outside definition transactions; commit rechecks the
 // captured row/source. Attempts bound repeated failures to the current interval.
 func (s *Service) RefreshDue(ctx context.Context, hours int) error {
+	return s.operationGate.RunRead(ctx, func(ctx context.Context) error { return s.refreshDue(ctx, hours) })
+}
+
+func (s *Service) refreshDue(ctx context.Context, hours int) error {
 	if s.store == nil {
 		return domain.ErrUnavailable
 	}
@@ -250,6 +266,7 @@ func (s *Service) RefreshDue(ctx context.Context, hours int) error {
 	})
 	select {
 	case <-ctx.Done():
+		<-result
 		return ctx.Err()
 	case result := <-result:
 		return result.Err

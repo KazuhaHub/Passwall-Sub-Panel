@@ -39,6 +39,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/auth"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/cert"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/clientprov"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/destlist"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/geo"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/group"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/health"
@@ -121,23 +122,25 @@ func (a *asyncDispatcher) Go(name string, fn func(ctx context.Context)) {
 // ListenAndServe and runs the background workers in goroutines; Shutdown
 // cancels both.
 type App struct {
-	database      *sql.DB
-	operationGate *operationgate.Gate
-	cfg           *config.Config
-	server        *http.Server
-	traffic       *traffic.Service
-	reconcile     *reconcile.Service
-	user          *user.Service
-	node          *node.Service
-	cert          *cert.Service
-	audit         *audit.Service
-	mail          *mailer.Service
-	health        *health.Service
-	geo           *geo.Service
-	render        *render.Service
-	risk          *risk.Service
-	settings      ports.SettingsRepo
-	syncTasks     ports.SyncTaskRepo
+	database        *sql.DB
+	operationGate   *operationgate.Gate
+	cfg             *config.Config
+	server          *http.Server
+	traffic         *traffic.Service
+	reconcile       *reconcile.Service
+	user            *user.Service
+	node            *node.Service
+	cert            *cert.Service
+	audit           *audit.Service
+	mail            *mailer.Service
+	health          *health.Service
+	geo             *geo.Service
+	render          *render.Service
+	risk            *risk.Service
+	settings        ports.SettingsRepo
+	destLists       *destlist.Service
+	destDefinitions *sqlstore.DestDefinitionRepo
+	syncTasks       ports.SyncTaskRepo
 	// trafficRepo / nodeTraffic kept for the retention cron — PruneBefore is
 	// outside traffic.Service's surface (it's a maintenance concern, not a
 	// poll-cycle concern), so app.go reaches into the repos directly.
@@ -552,13 +555,16 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 		}
 	}()
 	a := &App{
-		database:      sqlDB,
-		operationGate: operationgate.New(),
-		cfg:           cfg,
-		bgCancel:      cancel,
-		bgRootCtx:     bgCtx,
-		render:        renderSvc,
+		database:        sqlDB,
+		operationGate:   operationgate.New(),
+		cfg:             cfg,
+		bgCancel:        cancel,
+		bgRootCtx:       bgCtx,
+		render:          renderSvc,
+		destDefinitions: sqlstore.NewDestDefinitionRepo(db),
 	}
+	a.destLists = destlist.NewService(a.destDefinitions, destlist.NewGeositeCache(cfg.DataDir))
+	a.destLists.SetOperationGate(a.operationGate)
 	dispatcher := &asyncDispatcher{ctx: bgCtx, wg: &a.bgWG, gate: a.operationGate}
 	// Wire traffic.Service into the panel-wide WaitGroup. Its async
 	// floor-push + quota-event email goroutines (`safego.GoTracked`)
@@ -692,11 +698,12 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 		return nil, err
 	}
 	httpHandler := httptransport.NewRouter(httptransport.Deps{
-		OperationGate: a.operationGate,
-		Async:         dispatcher,
-		Cfg:           cfg,
-		Repos:         repos,
-		GeoRecords:    geoStreaks,
+		OperationGate:             a.operationGate,
+		Async:                     dispatcher,
+		Cfg:                       cfg,
+		Repos:                     repos,
+		DestinationRefreshChanged: a.destLists.NotifySettingsChanged,
+		GeoRecords:                geoStreaks,
 		// The risk view's rows. Optional, so leaving it out would compile —
 		// TestBuildWiresTheRiskSignals reads it through the assembled router.
 		RiskSignals: riskSignals,
@@ -863,6 +870,7 @@ func (a *App) Run() error {
 	}
 
 	bgCtx := a.bgRootCtx
+	a.startDestinationListRefresh()
 
 	// Every background worker runs under safego.GoTracked: the *recover*
 	// shield keeps a single nil-deref / map race in a 3X-UI response from
@@ -1844,7 +1852,7 @@ func (a *App) runSyncTaskLoop(ctx context.Context) {
 //     (the old order) handed every drained request's write an already-
 //     cancelled context, so the last batch of audit/sub-log rows was dropped.
 //  2. cancel bgRootCtx — every loop sees ctx.Done() and exits its select.
-//  3. wait for bgWG up to the caller-supplied deadline — guarantees a
+//  3. wait for bgWG and admitted operations up to the caller-supplied deadline — guarantees a
 //     stuck SMTP / 3X-UI HTTP call doesn't leave a half-committed
 //     transaction or leaked connection behind, and lets the just-dispatched
 //     audit writes finish.
@@ -1862,10 +1870,15 @@ func (a *App) Shutdown(ctx context.Context) error {
 	var databaseErr error
 	go func() {
 		a.bgWG.Wait()
-		// If the caller's deadline expires, the workers still own this pool
-		// until they exit. Close it here rather than underneath their writes.
+		// A timed-out HTTP drain or an exclusive backend operation may still
+		// own the pool after background workers finish. Admission must drain
+		// too. Eventual closure continues after the caller's deadline.
 		if a.database != nil {
-			databaseErr = a.database.Close()
+			if a.operationGate == nil {
+				databaseErr = a.database.Close()
+			} else {
+				databaseErr = a.operationGate.Exclusive(context.Background(), func(context.Context) error { return a.database.Close() })
+			}
 		}
 		close(done)
 	}()
@@ -1873,9 +1886,9 @@ func (a *App) Shutdown(ctx context.Context) error {
 	case <-done:
 		return errors.Join(httpErr, databaseErr)
 	case <-ctx.Done():
-		log.Warn("shutdown: background workers did not exit before deadline")
+		log.Warn("shutdown: background workers or admitted operations did not exit before deadline")
 	}
-	return httpErr
+	return errors.Join(httpErr, ctx.Err())
 }
 
 // nextTrafficInterval decides the cadence the traffic loop should run on next,

@@ -521,4 +521,29 @@ resets and stale-page preservation; guards cover DTO membership and every
 destination field's ownership. Frontend API types/client calls are present,
 but the S18 settings dialog and retention workers are still outstanding.
 
-Stage 1c still requires complete repository operations for multi-row service transactions and application wiring, production policy/eligibility activation, remaining API boundaries, access-control views and complete browser acceptance. List services are not connected to app lifecycle or list HTTP endpoints yet; the persisted refresh setting's application callback remains unwired. C2's end-to-end acceptance remains incomplete. Audit ingestion, group modes, privacy/consent and subsequent stages remain governed by the full plan. Repository tests and green CI do not establish completion of these requirements.
+Settings head 582b8d5b passed the complete Test workflow and released-node
+systemd acceptance. Application assembly now creates the definition store and
+list service, loading the category cache from DataDir without a network fetch.
+Run starts one tracked refresh loop. It reads bounded persisted refresh hours
+each cycle, skips a round on settings-read failure, and is woken after a
+successful refresh-hours save through the assembled settings route.
+
+Refresh round, individual-list and category-download singleflights now drain
+their underlying work on cancellation before returning to their owner. The
+list service holds shared operation admission across downloads and final writes,
+preventing an online backend switch from crossing an old backend's response.
+Shutdown waits for background work and admitted operations before closing the
+database; a caller deadline returns an error while eventual closure continues
+after all owners exit.
+
+The missing-assembly and premature-drain regressions first failed before the
+fix. Real App Run/HTTP/SQL checks prove startup, due-row refresh status, actual
+settings-save notification and a 168-to-6-hour change without a minute's wait.
+A seeded insecure legacy URL is rejected before external network I/O, allowing
+the test to observe the actual persisted worker result. Cancellation tests hold
+target reads, final commits and downloads until their cleanup exits. Admission
+tests keep exclusive operations outside that work; shutdown tests keep the real
+database available to admitted readers until they release, including eventual
+closure after a caller deadline. The lifecycle increment awaits its own CI.
+
+Stage 1c still requires complete repository operations for multi-row service transactions and production policy/eligibility activation, remaining API boundaries, access-control views and complete browser acceptance. List HTTP endpoints and C2's end-to-end browser acceptance remain outstanding. Audit ingestion, group modes, privacy/consent and subsequent stages remain governed by the full plan. Repository tests and green CI do not establish completion of these requirements.
