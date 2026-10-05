@@ -159,6 +159,11 @@ func (a *Administrator) prepare(ctx context.Context, candidate domain.DestPolicy
 	if candidate.ID > 0 && index < 0 {
 		return domain.DestDefinitions{}, domain.ErrNotFound
 	}
+	if candidate.TemplateKey == domain.DestGlobalExceptionTemplateKey || index >= 0 && defs.Policies[index].TemplateKey == domain.DestGlobalExceptionTemplateKey {
+		if index < 0 || candidate.TemplateKey != defs.Policies[index].TemplateKey {
+			return domain.DestDefinitions{}, invalid("template_key")
+		}
+	}
 	if index < 0 || defs.Policies[index].Action != candidate.Action {
 		if highest == math.MaxInt {
 			return domain.DestDefinitions{}, domain.ErrResourceExhausted

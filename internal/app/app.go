@@ -144,6 +144,8 @@ type App struct {
 	destCompiler    *destpolicy.Compiler
 	destTagMembers  destpolicy.TagMatchedMemberReader
 	destAdmin       *destpolicy.Administrator
+	destExemptions  *destpolicy.ExemptionManager
+	destExceptions  *destpolicy.ExceptionManager
 	syncTasks       ports.SyncTaskRepo
 	// trafficRepo / nodeTraffic kept for the retention cron — PruneBefore is
 	// outside traffic.Service's surface (it's a maintenance concern, not a
@@ -608,6 +610,10 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	a.destLists.SetSaveValidator(a.validateDestinationListSave)
 	a.destAdmin = destpolicy.NewAdministrator(a.destDefinitions, a.destinationPolicyContext, a.destinationBudget)
 	a.destAdmin.SetOperationGate(a.operationGate)
+	a.destExemptions = destpolicy.NewExemptionManager(a.destDefinitions)
+	a.destExemptions.SetOperationGate(a.operationGate)
+	a.destExceptions = destpolicy.NewExceptionManager(a.destDefinitions)
+	a.destExceptions.SetOperationGate(a.operationGate)
 	dispatcher := &asyncDispatcher{ctx: bgCtx, wg: &a.bgWG, gate: a.operationGate}
 	// Wire traffic.Service into the panel-wide WaitGroup. Its async
 	// floor-push + quota-event email goroutines (`safego.GoTracked`)
@@ -766,6 +772,8 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 		DestinationLists:          a.destLists,
 		DestinationListOverview:   a.destinationListOverview,
 		DestinationPolicies:       a.destAdmin,
+		DestinationExemptions:     a.destExemptions,
+		DestinationExceptions:     a.destExceptions,
 		GeoRecords:                geoStreaks,
 		// The risk view's rows. Optional, so leaving it out would compile —
 		// TestBuildWiresTheRiskSignals reads it through the assembled router.

@@ -84,6 +84,15 @@ func (e *DestListInUseError) Unwrap() error { return ErrConflict }
 
 type DestAction string
 
+// This identity belongs to the global-exception writer. It survives display
+// renames and must not be assigned by ordinary policy forms.
+const DestGlobalExceptionTemplateKey = "global-exceptions"
+
+type DestGlobalExceptionCommit struct {
+	ListID, PolicyID int64
+	Created          bool
+}
+
 const (
 	DestAllow   DestAction = "allow"
 	DestBlock   DestAction = "block"

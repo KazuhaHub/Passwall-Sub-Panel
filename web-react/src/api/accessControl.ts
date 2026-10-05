@@ -196,3 +196,45 @@ export async function deleteDestinationPolicy(id: number): Promise<void> {
 export async function orderDestinationPolicies(action: DestinationPolicyAction, ids: number[]): Promise<void> {
   await client.put('/admin/dest/policies/order', { action, ids }, { _skipErrorToast: true })
 }
+
+export interface DestinationExemptionInput { reason: string; expires_at?: number | null }
+export interface DestinationExemptionView {
+  user_id: number
+  upn: string | null
+  reason: string
+  created_by: number
+  created_by_upn: string | null
+  created_at: number
+  expires_at: number | null
+  expired: boolean
+}
+export async function getDestinationExemptions(opts: ReadOptions = {}): Promise<{ items: DestinationExemptionView[] }> {
+  const { data } = await client.get<{ items: DestinationExemptionView[] }>('/admin/dest/exemptions', { signal: opts.signal, _skipErrorToast: opts.silent })
+  return data
+}
+export async function getDestinationExemption(userId: number, opts: ReadOptions = {}): Promise<DestinationExemptionView> {
+  const { data } = await client.get<DestinationExemptionView>(`/admin/dest/exemptions/${userId}`, { signal: opts.signal, _skipErrorToast: opts.silent })
+  return data
+}
+export async function createDestinationExemption(input: DestinationExemptionInput & { user_id: number }): Promise<DestinationExemptionView> {
+  const { data } = await client.post<DestinationExemptionView>('/admin/dest/exemptions', input, { _skipErrorToast: true })
+  return data
+}
+export async function putDestinationExemption(userId: number, input: DestinationExemptionInput & { user_id?: number }): Promise<DestinationExemptionView> {
+  const { data } = await client.put<DestinationExemptionView>(`/admin/dest/exemptions/${userId}`, input, { _skipErrorToast: true })
+  return data
+}
+export async function deleteDestinationExemption(userId: number): Promise<void> {
+  await client.delete(`/admin/dest/exemptions/${userId}`, { _skipErrorToast: true })
+}
+export interface DestinationGlobalExceptionInput { target: string; match: 'site' | 'host'; scope: 'global' }
+export interface DestinationExceptionResult {
+  list_id: number
+  policy_id: number
+  entry: string
+  created?: { list_id: number; policy_id: number }
+}
+export async function createDestinationGlobalException(input: DestinationGlobalExceptionInput): Promise<DestinationExceptionResult> {
+  const { data } = await client.post<DestinationExceptionResult>('/admin/dest/exceptions', input, { _skipErrorToast: true })
+  return data
+}

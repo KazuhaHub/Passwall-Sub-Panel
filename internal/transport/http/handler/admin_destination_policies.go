@@ -32,6 +32,8 @@ func (h *AdminDestinationPoliciesHandler) available(c *gin.Context) bool {
 }
 func destinationPolicyError(c *gin.Context, err error) {
 	switch {
+	case errors.Is(err, domain.ErrConflict) && strings.Contains(err.Error(), "dest_exception_conflict"):
+		c.JSON(409, gin.H{"error": "dest_policy_invalid", "field": "exception_bundle"})
 	case errors.Is(err, domain.ErrAlreadyExists):
 		c.JSON(409, gin.H{"error": "dest_name_taken"})
 	case errors.Is(err, domain.ErrConflict) && strings.Contains(err.Error(), "dest_policy_stale"):

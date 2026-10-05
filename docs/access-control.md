@@ -14,13 +14,13 @@ Implementation follows the [final audit plan](https://github.com/KazuhaHub/Passw
 
 ## Definition and publication repository
 
-The concrete destination repository provides policy/list/exemption writes, per-action ordering, expiry removal, consistent definition reads and snapshot publication. Application assembly connects compilation and list refresh to this store. Settings, retry, list and policy management have HTTP boundaries; exemption management remains pending.
+The concrete destination repository provides policy/list/exemption writes, per-action ordering, expiry removal, consistent definition reads and snapshot publication. Application assembly connects compilation and list refresh to this store. Settings, retry, list, policy, exemption and global exception management have HTTP boundaries.
 
 - Definition writers acquire the singleton publication-state row before changing definitions. The row change and generation advance share one transaction; a failed write rolls both back. No-op writes and unchanged refresh digests do not advance generation.
 - Policy/list edit versions advance by at least one millisecond. Column updates persist the exact returned version, including false booleans and nil expiry values. Policy priority is assigned by the server; reorder validates the complete action-specific ID set, including disabled policies, and invalidates affected edit versions.
 - Refresh results compare the captured list version and source under the same lock. Deleted or edited sources reject old success and error results. Failures retain usable entries; successful unchanged content updates only metadata. Disabled policy and group references prevent list deletion.
 - Definition reads start with generation inside a read transaction. MySQL and PostgreSQL explicitly use repeatable read. Publication compares both definition generation and previous published generation and commits the snapshot and publication state atomically. Error recording has the same version preconditions. Missing or malformed published snapshots return an unavailable error rather than an empty policy.
-- Snapshot format compilation and validation are provided by the policy service below. Candidate minting commits with the native config stream; custom-entry edits use the definition transaction. Pause management and global exception bundles remain application/service work. The repository's JSON integrity check alone does not establish semantic policy validity.
+- Snapshot format compilation and validation are provided by the policy service below. Candidate minting commits with the native config stream; custom-entry edits and global exception bundles use the definition transaction. Pause management remains application/service work. The repository's JSON integrity check alone does not establish semantic policy validity.
 
 Local validation: thirteen new repository tests passed, along with the full SQL-store and domain suites and `go vet`. Initial tests failed against empty repository implementations; additional tests caught no-op generation changes and the ORM replacing explicit edit timestamps. Windows race execution is unavailable with the current CGO-disabled toolchain. Implementation commit `9b47532422d77aae7db2cfae32579215d931c4e7` passed the [complete Test workflow](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37188909110): MySQL/PostgreSQL full repository suites, all Linux race shards, static checks, frontend, release-target builds, published Node contracts, Docker baselines and isolated real third-party panels. The server-dialect tests include a writer committing between the generation read and the definition read, proving both reads remain in the older snapshot.
 
@@ -741,10 +741,73 @@ published and synced to a native candidate, verifying subjects and exact durable
 candidate digest. An injected generation failure proves HTTP rollback and safe
 error responses; a direct failed service save preserves form identity/version.
 Complete local app, policy, HTTP router/handler/middleware and SQL-store suites,
-static checks and TypeScript compilation passed. Policy-API head CI is pending.
-Frontend DTOs/client methods are included; policy views and browser acceptance,
-exemption/exception/status/test/publish/pause APIs and subsequent stages remain
-pending.
+static checks and TypeScript compilation passed. Policy-API head
+`461f8791cc5040007979e74da672cb132941b109` passed the
+[complete Test workflow](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37265050796)
+and [released-node systemd acceptance](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37265050807).
+Real third-party panel jobs were skipped. Released-node acceptance does not
+establish unmerged Node #78 kernel acceptance. Frontend DTOs/client methods are
+included; policy views, browser acceptance and subsequent stages remain pending.
+
+## Exemption management API
+
+Administrator-only exemption routes provide list, detail, create, update and
+delete. Creation records the authenticated administrator; request fields cannot
+forge the creator or timestamps. Updates preserve the original creator and
+creation time. Reasons are required and limited to 255 characters. Expiry uses
+positive UTC milliseconds; null or omission on PUT makes the exemption permanent.
+An already elapsed expiry is accepted and returned as expired. Duplicate creation
+returns `dest_exemption_exists`; unchanged updates preserve generation.
+
+List responses retain expired rows until cleanup and sort active exemptions
+first. User names are resolved with batched reads of only user ID and UPN;
+missing historical identities return null. These reads do not load list bodies,
+credentials or entitlements. Owner existence is rechecked under the definition
+lock, and each write commits its generation atomically.
+
+Actual Build/HTTP/SQL tests cover authorization, creator protection, expiry,
+permanent updates, duplicate and concurrent creation, no-op writes, deletion and
+injected generation failure. An expired exemption still appears in a published
+native candidate until durable cleanup removes it; republishing then removes
+the subject and changes the candidate digest. This exercises the repository
+cleanup path. The hourly cleanup worker is still pending.
+
+## Global allow exceptions API
+
+Administrator-only POST `/api/admin/dest/exceptions` currently implements the
+stage-1c global branch. Targets are normalized locally without DNS resolution.
+URLs contribute only their hostname; `host` keeps an exact canonical hostname,
+while `site` uses the registrable domain, including private public-suffix rules.
+IP targets always produce one `/32` or `/128` address. Public suffixes, credentials
+in URLs, unsupported schemes, zones and invalid ports are rejected.
+
+First use creates the custom list and enabled global allow policy, puts that
+policy first in the allow segment, preserves the order of existing allow
+policies (including disabled policies), and advances generation in one transaction.
+The response is 201 with both IDs in `created`. Later calls return 200 and append
+against the fresh list under the same lock. Duplicate entries preserve content,
+version and generation. Definition quota is checked before writing; late SQL
+failure rolls back the whole bundle and priority changes.
+
+The reserved `global-exceptions` template identity survives display-name edits.
+Ordinary policy creation cannot forge it or erase it through an update. An
+unrelated same-name policy is not adopted; creation chooses a unique policy
+name. If the identified bundle has been disabled, repurposed or made invalid,
+appending returns a conflict rather than silently changing those edits. The
+group branch belongs to stage 5 and remains pending.
+
+Missing-route and authorization regressions failed before implementation.
+SQL-backed checks cover concurrent first use and append, same-name collision,
+idempotence, reserved identity, explicit disablement, quota rejection and injected
+policy/generation failures. An HTTP-created exception is published and synced
+to a native candidate; the shared Protocol matcher allows the selected site
+before the block rule while still blocking an unrelated site. This is candidate
+and matcher evidence, not real packet or kernel acceptance. Complete local app,
+SQL-store, list, policy, domain and HTTP suites, relevant static checks and
+TypeScript compilation pass. Current exemption/exception-head CI remains pending.
+Frontend DTOs and API clients are included; views and browser acceptance remain
+pending. Status/test/publish/pause/user-access APIs and the remaining C4 work are
+still required.
 
 ## Storage and privacy
 

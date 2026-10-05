@@ -78,7 +78,9 @@ func patchCustomText(old []byte, add, remove []string) ([]byte, error) {
 	return []byte(result.String()), nil
 }
 
-func prepareEntryPatch(list domain.DestList, allow bool, add, remove []string) (domain.DestList, error) {
+// PrepareEntryPatch performs only local parsing and leaves its input unchanged.
+// Transactional editors can use it after reading the current source under lock.
+func PrepareEntryPatch(list domain.DestList, allow bool, add, remove []string) (domain.DestList, error) {
 	if list.Kind != domain.DestListCustom {
 		return domain.DestList{}, domain.ErrValidation
 	}
@@ -117,7 +119,7 @@ func (s *Service) Entries(ctx context.Context, id int64, add, remove []string) (
 	if err != nil {
 		return domain.DestList{}, err
 	}
-	preflight, err := prepareEntryPatch(old, false, add, remove)
+	preflight, err := PrepareEntryPatch(old, false, add, remove)
 	if err != nil {
 		return domain.DestList{}, err
 	}
@@ -127,6 +129,6 @@ func (s *Service) Entries(ctx context.Context, id int64, add, remove []string) (
 		}
 	}
 	return store.EditListEntries(ctx, id, s.now(), func(current domain.DestList, allow bool) (domain.DestList, error) {
-		return prepareEntryPatch(current, allow, add, remove)
+		return PrepareEntryPatch(current, allow, add, remove)
 	})
 }
