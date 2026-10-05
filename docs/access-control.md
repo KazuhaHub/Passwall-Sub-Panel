@@ -603,11 +603,39 @@ checks keep retry behind the full active sync while other agents remain
 concurrent, and reject cancellation after waiting. Compiler tests preserve warm
 caches on failed writes and rebuild after committed resets. All relevant local
 Go suites/static checks and frontend TypeScript compilation passed. This retry
-increment awaits its CI and true Node 1b/kernel retry acceptance; its frontend
+increment passed the complete Test workflow and released-node systemd
+acceptance at bb9fa18b. True Node 1b/kernel retry acceptance remains pending; its frontend
 API client is present, but the retry button and browser acceptance remain pending.
 
-Stage 1c still requires complete repository operations for multi-row service
-transactions and mode orchestration, remaining API boundaries,
+The definition repository now supports atomic group-mode initialization and
+edits. First activation requires trial and creates both group-owned custom lists
+with the mode and one definition generation. Ownership is derived from the
+group, not caller-supplied list IDs. Existing owned contents survive close/reopen.
+Edit versions advance even within one millisecond; unchanged edits leave the
+generation and version intact. Switching to enforce checks list readiness,
+including fetched remote/category references, while ready empty lists remain
+valid. Shared lists may be selected; private lists cannot be reused by ordinary
+policies or another group.
+
+Deleting a group now removes its mode and all owned lists in the same SQL
+transaction. A closed group's owned list can be deleted: its retained mode
+pointer is detached and the edit version advances atomically. Reopening creates
+only the missing list and preserves the other list's user edits. Active group
+references and disabled policy references still prevent list deletion. Failed
+generation writes roll back group/list/mode deletion together.
+
+The missing-mode, private-reference, closed-list-deletion and group-cleanup
+regressions failed before implementation. Actual SQL tests cover initialization,
+stale/no-op edits, ready-empty enforcement, concurrent first activation,
+cross-group ownership, preserved user content and injected write failures.
+The complete local SQL-store, list, policy, group, user, node, reconcile, app and
+ports suites and relevant static checks passed. Server-dialect/race CI for this
+increment is pending. These are repository foundations for P8 cleanup and later
+stage-5 mode orchestration; no group-mode HTTP route is exposed yet. Template
+DNS host discovery, commit-following eligibility/resync orchestration and the
+trial-report prerequisites remain part of stage 5.
+
+Stage 1c still requires the remaining multi-row service operations, API boundaries,
 access-control views and complete browser acceptance. List HTTP endpoints and
 C2's end-to-end browser acceptance remain outstanding. Audit ingestion,
 retention, privacy/consent and subsequent stages retain the full final-plan

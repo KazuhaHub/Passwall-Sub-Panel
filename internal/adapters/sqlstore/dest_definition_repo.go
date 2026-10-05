@@ -122,6 +122,9 @@ func (r *DestDefinitionRepo) SavePolicy(ctx context.Context, p *domain.DestPolic
 	}
 	row := destPolicyFromDomain(*p)
 	err = r.mutate(ctx, now, func(tx *gorm.DB) (bool, error) {
+		if err := destinationListReferences(tx, row.ListIDs, 0, false); err != nil {
+			return false, err
+		}
 		if row.ID == 0 {
 			row.Priority, err = nextDestPriority(tx, p.Action)
 			if err != nil {
