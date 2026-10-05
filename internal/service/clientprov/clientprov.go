@@ -42,9 +42,14 @@ func New(clients ports.PSPClientRepo) *Service { return &Service{clients: client
 // from the panel. A retired email either belongs to a stale row pruned after a
 // non-empty repartition, or to a retained row whose attachments became empty.
 func (s *Service) Sync(ctx context.Context, userID int64, userUUID string, panelID int64, rules domain.EmailRules, nodes []clientplan.NodeCred) ([]string, error) {
+	retired, err := s.syncRetirements(ctx, userID, userUUID, panelID, rules, nodes)
+	return retired.Emails, err
+}
+
+func (s *Service) syncRetirements(ctx context.Context, userID int64, userUUID string, panelID int64, rules domain.EmailRules, nodes []clientplan.NodeCred) (domain.RetiredPanelClients, error) {
 	allExisting, err := s.clients.ListByUser(ctx, userID)
 	if err != nil {
-		return nil, fmt.Errorf("list existing clients: %w", err)
+		return domain.RetiredPanelClients{}, fmt.Errorf("list existing clients: %w", err)
 	}
 	existing := make([]*domain.PSPClient, 0, len(allExisting))
 	stable := make([]clientplan.ExistingClient, 0, len(allExisting))
@@ -54,7 +59,7 @@ func (s *Service) Sync(ctx context.Context, userID int64, userUUID string, panel
 		}
 		inbounds, ierr := s.clients.ListInbounds(ctx, c.ID)
 		if ierr != nil {
-			return nil, fmt.Errorf("list inbounds for stable client %d: %w", c.ID, ierr)
+			return domain.RetiredPanelClients{}, fmt.Errorf("list inbounds for stable client %d: %w", c.ID, ierr)
 		}
 		nodeIDs := make([]int64, len(inbounds))
 		for i, in := range inbounds {
@@ -72,11 +77,11 @@ func (s *Service) Sync(ctx context.Context, userID int64, userUUID string, panel
 		retired := make([]string, 0, len(existing))
 		for _, e := range existing {
 			if err := s.clients.SetInbounds(ctx, e.ID, nil); err != nil {
-				return retired, fmt.Errorf("detach retired client %s: %w", e.Email, err)
+				return domain.RetiredPanelClients{Emails: retired, PanelRemoved: true}, fmt.Errorf("detach retired client %s: %w", e.Email, err)
 			}
 			retired = append(retired, e.Email)
 		}
-		return retired, nil
+		return domain.RetiredPanelClients{Emails: retired, PanelRemoved: true}, nil
 	}
 
 	keep := make(map[int64]struct{}, len(desired))
@@ -86,10 +91,10 @@ func (s *Service) Sync(ctx context.Context, userID int64, userUUID string, panel
 		if id == 0 {
 			id, err = s.clients.Create(ctx, &c)
 			if err != nil {
-				return nil, fmt.Errorf("create psp_client %s: %w", c.Email, err)
+				return domain.RetiredPanelClients{}, fmt.Errorf("create psp_client %s: %w", c.Email, err)
 			}
 		} else if err = s.clients.UpdateDefinition(ctx, &c); err != nil {
-			return nil, fmt.Errorf("update stable psp_client %d: %w", id, err)
+			return domain.RetiredPanelClients{}, fmt.Errorf("update stable psp_client %d: %w", id, err)
 		}
 		inbs := make([]domain.PSPClientInbound, len(d.Inbounds))
 		for i, in := range d.Inbounds {
@@ -97,7 +102,7 @@ func (s *Service) Sync(ctx context.Context, userID int64, userUUID string, panel
 			inbs[i] = in
 		}
 		if err := s.clients.SetInbounds(ctx, id, inbs); err != nil {
-			return nil, fmt.Errorf("set inbounds for %s: %w", d.Client.Email, err)
+			return domain.RetiredPanelClients{}, fmt.Errorf("set inbounds for %s: %w", d.Client.Email, err)
 		}
 		keep[id] = struct{}{}
 	}
@@ -108,11 +113,11 @@ func (s *Service) Sync(ctx context.Context, userID int64, userUUID string, panel
 			continue
 		}
 		if err := s.clients.DeleteByID(ctx, e.ID); err != nil {
-			return pruned, fmt.Errorf("prune stale client %s: %w", e.Email, err)
+			return domain.RetiredPanelClients{Emails: pruned}, fmt.Errorf("prune stale client %s: %w", e.Email, err)
 		}
 		pruned = append(pruned, e.Email)
 	}
-	return pruned, nil
+	return domain.RetiredPanelClients{Emails: pruned}, nil
 }
 
 // SyncUser reconciles ALL of a user's psp_clients across every panel from their
@@ -124,6 +129,22 @@ func (s *Service) Sync(ctx context.Context, userID int64, userUUID string, panel
 // Returns, per panel, the emails to remove upstream, plus the first per-panel
 // error (it attempts every panel regardless).
 func (s *Service) SyncUser(ctx context.Context, userID int64, userUUID string, rules domain.EmailRules, desiredNodes []*domain.Node) (map[int64][]string, error) {
+	retired, err := s.SyncUserRetirements(ctx, userID, userUUID, rules, desiredNodes)
+	if retired == nil {
+		return nil, err
+	}
+	emails := make(map[int64][]string, len(retired))
+	for panelID, batch := range retired {
+		emails[panelID] = batch.Emails
+	}
+	return emails, err
+}
+
+// SyncUserRetirements is the membership path: it retains the reason a client
+// became retired so whole-panel removals can proceed independently of failures
+// provisioning replacements on other panels. Partial results describe only
+// locally committed retirements and remain actionable alongside an error.
+func (s *Service) SyncUserRetirements(ctx context.Context, userID int64, userUUID string, rules domain.EmailRules, desiredNodes []*domain.Node) (domain.SharedClientRetirements, error) {
 	byPanel := map[int64][]*domain.Node{}
 	for _, n := range desiredNodes {
 		if n == nil || n.Kind == domain.NodeKindSeparator {
@@ -146,12 +167,12 @@ func (s *Service) SyncUser(ctx context.Context, userID int64, userUUID string, r
 		panels[c.PanelID] = struct{}{}
 	}
 
-	retired := map[int64][]string{}
+	retired := domain.SharedClientRetirements{}
 	var firstErr error
 	for panelID := range panels {
 		creds := clientplan.NodeCredsFromNodes(byPanel[panelID]) // empty slice → retires live access
-		p, serr := s.Sync(ctx, userID, userUUID, panelID, rules, creds)
-		if len(p) > 0 {
+		p, serr := s.syncRetirements(ctx, userID, userUUID, panelID, rules, creds)
+		if len(p.Emails) > 0 {
 			retired[panelID] = p
 		}
 		if serr != nil && firstErr == nil {

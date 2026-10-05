@@ -476,4 +476,26 @@ eligibility activation, full member removal and membership-change invalidation w
 settings and application integration remain outstanding. Existing nodes still
 receive the existing configuration because the compiler is not wired into sync.
 
+Plan F54's member-removal path is now implemented: client provisioning reports
+whole-panel retirement separately from replacement within a still-desired
+panel. User membership resync deletes committed whole-panel retirements before
+unrelated remote lifecycle/provisioning work, including partial local successes.
+Replacement retirement retains the successful local-plan, lifecycle and
+provisioning prerequisites. Eligibility read errors abort before plan writes
+or any deletion. Deletion attempts every retired panel/client and returns joined
+failures so user_resync persists a retry rather than relying on logs. Retained
+empty attachment rows preserve counter identity and yield retirements on retry.
+
+The initial removal regressions failed on cross-panel coupling and dropped
+delete errors. Local clientprov/user/SQL/shared-client/group/nodesync/node/
+reconcile/app suites and relevant static checks pass. Actual SQL, selector,
+provisioner and user-service integration proves trial-mode removal despite a
+different native panel's outage, deletion failure propagation into a durable
+task, retry from the retained row and no deletion after an eligibility read
+failure. Provisioner tests distinguish same-panel replacement and removed-panel
+partial success; user regressions keep old replacements on failed provisioning
+or lifecycle/local-plan writes. This increment awaits its own CI. Group-mode
+CRUD, mode-transition orchestration and production policy/eligibility activation
+remain outstanding; these tests do not establish complete stage 5 acceptance.
+
 Stage 1c still requires complete repository operations for multi-row service transactions and application wiring, policy compilation and candidate minting, fallback handling, settings/API boundaries, access-control views and complete browser acceptance. List services are not connected to app lifecycle, persisted settings or HTTP yet; C2's end-to-end acceptance remains incomplete. Audit ingestion, group modes, privacy/consent and subsequent stages remain governed by the full plan. Repository tests and green CI do not establish completion of these requirements.

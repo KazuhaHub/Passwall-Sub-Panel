@@ -54,7 +54,7 @@ type bfPSP struct {
 	synced []int64
 }
 
-func (p *bfPSP) SyncUser(_ context.Context, userID int64, _ string, _ domain.EmailRules, _ []*domain.Node) (map[int64][]string, error) {
+func (p *bfPSP) SyncUserRetirements(_ context.Context, userID int64, _ string, _ domain.EmailRules, _ []*domain.Node) (domain.SharedClientRetirements, error) {
 	p.mu.Lock()
 	p.synced = append(p.synced, userID)
 	p.mu.Unlock()
