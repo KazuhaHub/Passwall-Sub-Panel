@@ -19,15 +19,15 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/geo"
 )
 
-// uiSettingsWriteMu serializes the two writers of the settings record: this
-// page's PUT and the risk center's policy PUT (AdminRiskPolicyHandler.Put).
+// uiSettingsWriteMu serializes the settings page, risk policy and destination
+// settings writers of the shared settings record.
 // The store saves whole records only (the KV repo rewrites every key), so
 // each writer loads the whole record, changes its part and saves the whole
 // record back; two of them interleaving would each write the other's part
 // back as it was before they loaded, and the later save would silently
 // revert the earlier (D6). Held from the load to the last save (or
 // rollback) and nothing else is locked inside it. Package-level because
-// the two writers are separate handlers sharing one store.
+// the writers are separate handlers sharing one store.
 var uiSettingsWriteMu sync.Mutex
 
 // AdminSettingsHandler exposes /api/admin/settings/ui — every runtime-editable
@@ -54,6 +54,11 @@ type settingsDTO struct {
 	LogoURLDark                string                   `json:"logo_url_dark"`
 	EmailDomain                string                   `json:"email_domain"`
 	AuditRetentionDays         int                      `json:"audit_retention_days"`
+	DestHitRetentionDays       int                      `json:"dest_hit_retention_days"`
+	DestTrialRetentionDays     int                      `json:"dest_trial_retention_days"`
+	DestUsageRetentionDays     int                      `json:"dest_usage_retention_days"`
+	DestListRefreshHours       int                      `json:"dest_list_refresh_hours"`
+	DestPolicyApplyMinSeconds  int                      `json:"dest_policy_apply_min_seconds"`
 	SubBaseURL                 string                   `json:"sub_base_url"`
 	PanelPath                  string                   `json:"panel_path"`
 	Timezone                   string                   `json:"timezone"`
@@ -268,9 +273,16 @@ type settingsDTO struct {
 // Explicit zero remains a nonnil pointer and fails the shared policy validator.
 type settingsRequest struct {
 	settingsDTO
-	NodeTaskOfflineReconcileDays *int `json:"node_task_offline_reconcile_days"`
-	NodeTaskBackupRestoreDays    *int `json:"node_task_backup_restore_days"`
-	NodeTaskResultRetentionDays  *int `json:"node_task_result_retention_days"`
+	// Destination settings have one writer: PUT /dest/settings. Ignore echoed
+	// stale values, including shapes an older tab may send.
+	DestHitRetentionDays         json.RawMessage `json:"dest_hit_retention_days"`
+	DestTrialRetentionDays       json.RawMessage `json:"dest_trial_retention_days"`
+	DestUsageRetentionDays       json.RawMessage `json:"dest_usage_retention_days"`
+	DestListRefreshHours         json.RawMessage `json:"dest_list_refresh_hours"`
+	DestPolicyApplyMinSeconds    json.RawMessage `json:"dest_policy_apply_min_seconds"`
+	NodeTaskOfflineReconcileDays *int            `json:"node_task_offline_reconcile_days"`
+	NodeTaskBackupRestoreDays    *int            `json:"node_task_backup_restore_days"`
+	NodeTaskResultRetentionDays  *int            `json:"node_task_result_retention_days"`
 	// The response-only runtime maps, shadowed as raw JSON so the embedded
 	// DTO's typed maps are never decoded. The SPA posts back the whole
 	// object it read, maps included; a tab loaded before a change to their
@@ -336,6 +348,7 @@ func (h *AdminSettingsHandler) Get(c *gin.Context) {
 // a newly-added field can't be echoed by one path and silently dropped by the
 // other (the drift that briefly broke the 2FA totp_enabled round-trip).
 func settingsToDTO(s ports.UISettings) settingsDTO {
+	destination := destinationSettingsFrom(s)
 	policy := nodeTaskLifecyclePolicyFromSettings(s)
 	// From the same settings the DTO echoes: after a PUT that is what was
 	// just saved, so the page reads the new values in effect off the save.
@@ -352,6 +365,11 @@ func settingsToDTO(s ports.UISettings) settingsDTO {
 		LogoURLDark:                 s.LogoURLDark,
 		EmailDomain:                 s.EmailDomain,
 		AuditRetentionDays:          s.AuditRetentionDays,
+		DestHitRetentionDays:        destination.HitRetentionDays,
+		DestTrialRetentionDays:      destination.TrialRetentionDays,
+		DestUsageRetentionDays:      destination.UsageRetentionDays,
+		DestListRefreshHours:        destination.ListRefreshHours,
+		DestPolicyApplyMinSeconds:   destination.PolicyApplyMinSeconds,
 		SubBaseURL:                  s.SubBaseURL,
 		PanelPath:                   s.PanelPath,
 		Timezone:                    s.Timezone,
@@ -527,7 +545,13 @@ func (h *AdminSettingsHandler) Put(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": policyErr.Error()})
 		return
 	}
+	destination := destinationSettingsFrom(prev)
 	s := ports.UISettings{
+		DestHitRetentionDays:          destination.HitRetentionDays,
+		DestTrialRetentionDays:        destination.TrialRetentionDays,
+		DestUsageRetentionDays:        destination.UsageRetentionDays,
+		DestListRefreshHours:          destination.ListRefreshHours,
+		DestPolicyApplyMinSeconds:     destination.PolicyApplyMinSeconds,
 		LoginMode:                     req.LoginMode,
 		SiteTitle:                     req.SiteTitle,
 		AppTitle:                      req.AppTitle,

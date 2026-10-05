@@ -61,9 +61,11 @@ export interface GlobalAnnouncement {
   updated_at: string
 }
 
-/** The 23 geo and risk runtime knobs, by the json tag the server keys
+/** Geo, risk and destination runtime controls, by the json tag the server keys
  *  runtime_effective / runtime_defaults with (ports.RuntimeEffective). */
 export type RuntimeKnob =
+  | 'dest_hit_retention_days' | 'dest_trial_retention_days' | 'dest_usage_retention_days'
+  | 'dest_list_refresh_hours' | 'dest_policy_apply_min_seconds'
   | 'geo_anomaly_fresh_window_seconds' | 'geo_anomaly_shared_exit_min_users'
   | 'geo_anomaly_ban_max_per_poll' | 'geo_anomaly_lift_max_per_poll'
   | 'geo_anomaly_infra_refresh_minutes' | 'geo_anomaly_infra_host_ttl_minutes'
@@ -77,6 +79,12 @@ export type RuntimeKnob =
 export type RuntimeKnobValues = Partial<Record<RuntimeKnob, number>>
 
 export interface UISettings {
+  /** Read-only here; /admin/dest/settings owns writes. Optional for old snapshots. */
+  dest_hit_retention_days?: number
+  dest_trial_retention_days?: number
+  dest_usage_retention_days?: number
+  dest_list_refresh_hours?: number
+  dest_policy_apply_min_seconds?: number
   login_mode: LoginMode
   site_title: string
   app_title: string

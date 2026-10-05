@@ -1154,6 +1154,13 @@ type UISettings struct {
 	// AuditRetentionDays controls automatic audit cleanup. 0 means never
 	// delete audit entries automatically.
 	AuditRetentionDays int `yaml:"audit_retention_days" json:"audit_retention_days"`
+	// Destination controls are fleet-wide, bounded and never group overrides.
+	// Zero selects the product default, never permanent retention.
+	DestHitRetentionDays      int `json:"dest_hit_retention_days"`
+	DestTrialRetentionDays    int `json:"dest_trial_retention_days"`
+	DestUsageRetentionDays    int `json:"dest_usage_retention_days"`
+	DestListRefreshHours      int `json:"dest_list_refresh_hours"`
+	DestPolicyApplyMinSeconds int `json:"dest_policy_apply_min_seconds"`
 	// SubBaseURL is the panel's public base URL used to render absolute
 	// subscription URLs ("<base>/sub/<token>"). Empty falls back to relative
 	// paths.

@@ -92,6 +92,42 @@ func TestSettingsPut_PreservesEveryPolicyKey(t *testing.T) {
 	}
 }
 
+func TestSettingsPut_PreservesEveryDestKey(t *testing.T) {
+	stored := storedEverywhere()
+	repo := &policySettingsRepo{settings: stored}
+	body := map[string]any{"login_mode": "local_only", "site_title": "changed"}
+	dto := reflect.TypeOf(ports.AccessControlSettings{})
+	for i := 0; i < dto.NumField(); i++ {
+		body[strings.Split(dto.Field(i).Tag.Get("json"), ",")[0]] = "ignored stale shape"
+	}
+	payload, _ := json.Marshal(body)
+	response := requestRiskPolicy(riskPolicyRouter(repo), http.MethodPut, "/api/admin/settings/ui", string(payload))
+	got, saves, _ := repo.snapshot()
+	if response.Code != http.StatusOK || saves != 1 || got.SiteTitle != "changed" || got.AccessControlSettings() != stored.AccessControlSettings() {
+		t.Fatalf("system settings moved destination-owned fields: HTTP=%d saves=%d", response.Code, saves)
+	}
+}
+
+func TestSettingsPut_NeverReadsDestFieldsFromTheRequest(t *testing.T) {
+	file, err := parser.ParseFile(token.NewFileSet(), "admin_settings.go", nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dest := map[string]bool{}
+	typ := reflect.TypeOf(ports.AccessControlSettings{})
+	for i := 0; i < typ.NumField(); i++ {
+		dest[typ.Field(i).Name] = true
+	}
+	ast.Inspect(file, func(n ast.Node) bool {
+		if selector, ok := n.(*ast.SelectorExpr); ok {
+			if receiver, ok := selector.X.(*ast.Ident); ok && receiver.Name == "req" && dest[selector.Sel.Name] {
+				t.Errorf("system settings reads destination field req.%s", selector.Sel.Name)
+			}
+		}
+		return true
+	})
+}
+
 // Source-level, because a request field read into the saved record is the
 // whole regression, and a round trip can only sample it: a new policy key
 // copied off the request by habit would pass every value-based test that

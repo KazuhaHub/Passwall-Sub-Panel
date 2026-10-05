@@ -24,7 +24,8 @@ func NewAdminAuditHandler(repo ports.AuditRepo, geoSvc *geo.Service) *AdminAudit
 }
 
 // adminOnlyAuditTargets are the audit rows only an administrator reads: the
-// risk center's writes. Its routes are all adminGroup, but AuditWrites keeps
+// risk center's and destination-control writes. Their routes are adminGroup,
+// but AuditWrites keeps
 // every write's route, params and body, and this read is staffGroup — so,
 // unfiltered, an operator would read a dismissal's note (which the dialog
 // promises is for admins only, and which may carry an address), the
@@ -32,7 +33,7 @@ func NewAdminAuditHandler(repo ports.AuditRepo, geoSvc *geo.Service) *AdminAudit
 // trusted. Matched as a prefix of the stored target, which is the route
 // template (the raw path when no route matched), so a route added under it
 // is covered without touching this list.
-var adminOnlyAuditTargets = []string{"/api/admin/risk-center/"}
+var adminOnlyAuditTargets = []string{"/api/admin/risk-center/", "/api/admin/dest/"}
 
 // auditView is an AuditEntry plus its resolved IP region (omitted when geo is
 // disabled, the IP is private/unmapped, or no .mmdb is loaded — lookups are

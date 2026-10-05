@@ -10,12 +10,18 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 )
 
-// runtimeKnobTags are the 23 geo and risk tunables that used to be
+// runtimeKnobTags cover the geo, risk and destination runtime controls.
+// The geo and risk tunables used to be
 // constants (or are new with the risk center): the six fleet-wide geo
 // knobs, the twelve fleet-wide risk knobs and the five per-group risk
 // thresholds. The settings page shows the value in effect for each of them,
 // and nothing else is in the maps.
 var runtimeKnobTags = []string{
+	"dest_hit_retention_days",
+	"dest_trial_retention_days",
+	"dest_usage_retention_days",
+	"dest_list_refresh_hours",
+	"dest_policy_apply_min_seconds",
 	"geo_anomaly_fresh_window_seconds",
 	"geo_anomaly_shared_exit_min_users",
 	"geo_anomaly_ban_max_per_poll",
@@ -56,7 +62,7 @@ func sortedKeys(m map[string]int) []string {
 // of any default or clamp (D18), so this is the one place a wrong number
 // could come from, and the checks below hold it to the domain.
 //
-//   - the keys are exactly the 23 knobs, in both maps, so the page never
+//   - the keys are exactly the 28 knobs, in both maps, so the page never
 //     looks up a knob that is missing and never shows one it has no field for;
 //   - every fleet-wide geo_anomaly_/risk_ integer setting is among them (a
 //     knob added later without a value in effect fails here, whatever else
@@ -67,8 +73,8 @@ func sortedKeys(m map[string]int) []string {
 func TestRuntimeEffective_CoversEveryRuntimeKey(t *testing.T) {
 	eff, def := RuntimeEffective(UISettings{})
 	want := slices.Sorted(slices.Values(runtimeKnobTags))
-	if len(want) != 23 {
-		t.Fatalf("the knob list has %d entries, want 23", len(want))
+	if len(want) != 28 {
+		t.Fatalf("the knob list has %d entries, want 28", len(want))
 	}
 	if got := sortedKeys(eff); !slices.Equal(got, want) {
 		t.Errorf("runtime_effective keys = %v\nwant %v", got, want)
@@ -83,6 +89,8 @@ func TestRuntimeEffective_CoversEveryRuntimeKey(t *testing.T) {
 		tag := strings.Split(f.Tag.Get("json"), ",")[0]
 		var key string
 		switch {
+		case strings.HasPrefix(tag, "dest_"):
+			key = "dest." + strings.TrimPrefix(tag, "dest_")
 		case strings.HasPrefix(tag, "geo_anomaly_"):
 			key = "geo_anomaly." + strings.TrimPrefix(tag, "geo_anomaly_")
 		case strings.HasPrefix(tag, "risk_"):
@@ -103,6 +111,11 @@ func TestRuntimeEffective_CoversEveryRuntimeKey(t *testing.T) {
 	}
 
 	shipped := map[string]int{
+		"dest_hit_retention_days":            30,
+		"dest_trial_retention_days":          7,
+		"dest_usage_retention_days":          7,
+		"dest_list_refresh_hours":            24,
+		"dest_policy_apply_min_seconds":      60,
 		"geo_anomaly_fresh_window_seconds":   domain.LiveIPFreshWindowSeconds,
 		"geo_anomaly_shared_exit_min_users":  domain.SharedExitMinUsers,
 		"geo_anomaly_ban_max_per_poll":       domain.GeoPerPollDefault,

@@ -472,7 +472,7 @@ awaits its own CI.
 
 This is a C3 foundation with an optional tested sync boundary. It does not
 implement the full C3 acceptance: application assembly, issue/resync integration,
-eligibility activation, full member removal and membership-change invalidation wiring, immediate pause UI/API wiring,
+eligibility activation, mode-transition orchestration and membership-change invalidation wiring, immediate pause UI/API wiring,
 settings and application integration remain outstanding. Existing nodes still
 receive the existing configuration because the compiler is not wired into sync.
 
@@ -494,8 +494,31 @@ different native panel's outage, deletion failure propagation into a durable
 task, retry from the retained row and no deletion after an eligibility read
 failure. Provisioner tests distinguish same-panel replacement and removed-panel
 partial success; user regressions keep old replacements on failed provisioning
-or lifecycle/local-plan writes. This increment awaits its own CI. Group-mode
+or lifecycle/local-plan writes. Head c3baee97 passed its complete Test workflow
+and released-node systemd acceptance. Group-mode
 CRUD, mode-transition orchestration and production policy/eligibility activation
 remain outstanding; these tests do not establish complete stage 5 acceptance.
 
-Stage 1c still requires complete repository operations for multi-row service transactions and application wiring, policy compilation and candidate minting, fallback handling, settings/API boundaries, access-control views and complete browser acceptance. List services are not connected to app lifecycle, persisted settings or HTTP yet; C2's end-to-end acceptance remains incomplete. Audit ingestion, group modes, privacy/consent and subsequent stages remain governed by the full plan. Repository tests and green CI do not establish completion of these requirements.
+The destination settings boundary now implements GET/PUT
+`/api/admin/dest/settings`, with partial writes under the shared settings lock.
+PUT takes `{ "settings": { ...edited destination keys... } }`; the response
+contains `settings`, `defaults` and `effective`. `ports.AccessControlSettings`
+is held to every `dest_` field in UISettings by a prefix-based guard. The five
+fleet settings are hit retention (30 days, 1–365), trial retention (7 days,
+1–30), usage retention (7 days, 1–30), list refresh (24 hours, 6–168), and policy
+apply debounce (60 seconds, 30–3600). Stored zero selects the domain default;
+it never means permanent retention. Domain reads bound all values and cap trial
+retention at hit retention. Writes reject invalid values and a trial window
+larger than the resolved hit window, attributing that error to both fields.
+
+Missing or null fields retain their stored values. Decode/validation failures
+save nothing; refresh notification follows only a successful refresh-hours
+change. The system settings page preserves destination values loaded under
+the same lock and ignores stale request echoes. Risk-policy diagnostics keep
+their own keys. Destination writes' audit rows are excluded from operator
+queries, including totals and filtered pages. Real SQL-backed endpoint tests cover persistent zero/default
+resets and stale-page preservation; guards cover DTO membership and every
+destination field's ownership. Frontend API types/client calls are present,
+but the S18 settings dialog and retention workers are still outstanding.
+
+Stage 1c still requires complete repository operations for multi-row service transactions and application wiring, production policy/eligibility activation, remaining API boundaries, access-control views and complete browser acceptance. List services are not connected to app lifecycle or list HTTP endpoints yet; the persisted refresh setting's application callback remains unwired. C2's end-to-end acceptance remains incomplete. Audit ingestion, group modes, privacy/consent and subsequent stages remain governed by the full plan. Repository tests and green CI do not establish completion of these requirements.

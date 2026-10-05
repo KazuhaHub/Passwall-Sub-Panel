@@ -65,9 +65,10 @@ type AsyncDispatcher interface {
 // Deps bundles every dependency the HTTP layer needs. App-startup wiring
 // populates this and passes it to NewRouter.
 type Deps struct {
-	OperationGate *operationgate.Gate
-	Cfg           *config.Config
-	Repos         ports.Repos
+	OperationGate             *operationgate.Gate
+	Cfg                       *config.Config
+	Repos                     ports.Repos
+	DestinationRefreshChanged func()
 	// GeoRecords is the read side of the concurrent-location detector, the
 	// same rows the traffic poll writes each cycle. Optional: a deployment
 	// without it gets a 503 from the endpoint rather than an empty list, so
@@ -803,6 +804,9 @@ func NewRouter(d Deps) stdhttp.Handler {
 		settings := handler.NewAdminSettingsHandler(d.Repos.Settings, d.JWTParams, paths, panelPathSSO)
 		adminGroup.GET("/settings/ui", settings.Get)
 		adminGroup.PUT("/settings/ui", settings.Put)
+		destinationSettings := handler.NewAdminDestinationSettingsHandler(d.Repos.Settings, d.DestinationRefreshChanged)
+		adminGroup.GET("/dest/settings", destinationSettings.Get)
+		adminGroup.PUT("/dest/settings", destinationSettings.Put)
 
 		// Offline geo database status + manual update (touches the update token
 		// + fetches an external DB — admin only).
