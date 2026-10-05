@@ -26,6 +26,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/captcha"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/cert"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/destlist"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/destpolicy"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/geo"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/group"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/login2fa"
@@ -73,6 +74,7 @@ type Deps struct {
 	DestinationPolicyRetry    handler.DestinationPolicyRetrier
 	DestinationLists          *destlist.Service
 	DestinationListOverview   func(context.Context) (handler.DestinationListOverview, error)
+	DestinationPolicies       *destpolicy.Administrator
 	// GeoRecords is the read side of the concurrent-location detector, the
 	// same rows the traffic poll writes each cycle. Optional: a deployment
 	// without it gets a 503 from the endpoint rather than an empty list, so
@@ -832,6 +834,13 @@ func NewRouter(d Deps) stdhttp.Handler {
 		adminGroup.POST("/dest/lists/:id/entries", destinationLists.Entries)
 		adminGroup.GET("/dest/geosite/categories", destinationLists.Categories)
 		adminGroup.POST("/dest/geosite/refresh", destinationLists.RefreshCategories)
+		destinationPolicies := handler.NewAdminDestinationPoliciesHandler(d.DestinationPolicies, d.DestinationLists)
+		adminGroup.GET("/dest/policies", destinationPolicies.List)
+		adminGroup.POST("/dest/policies/preview", destinationPolicies.Preview)
+		adminGroup.POST("/dest/policies", destinationPolicies.Create)
+		adminGroup.PUT("/dest/policies/order", destinationPolicies.Order)
+		adminGroup.PUT("/dest/policies/:id", destinationPolicies.Put)
+		adminGroup.DELETE("/dest/policies/:id", destinationPolicies.Delete)
 
 		// Offline geo database status + manual update (touches the update token
 		// + fetches an external DB — admin only).

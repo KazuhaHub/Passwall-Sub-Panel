@@ -14,7 +14,7 @@ Implementation follows the [final audit plan](https://github.com/KazuhaHub/Passw
 
 ## Definition and publication repository
 
-The concrete destination repository provides policy/list/exemption writes, per-action ordering, expiry removal, consistent definition reads and snapshot publication. Application assembly connects compilation and list refresh to this store. Settings, retry and list management have HTTP boundaries; policy and exemption management interfaces remain pending.
+The concrete destination repository provides policy/list/exemption writes, per-action ordering, expiry removal, consistent definition reads and snapshot publication. Application assembly connects compilation and list refresh to this store. Settings, retry, list and policy management have HTTP boundaries; exemption management remains pending.
 
 - Definition writers acquire the singleton publication-state row before changing definitions. The row change and generation advance share one transaction; a failed write rolls both back. No-op writes and unchanged refresh digests do not advance generation.
 - Policy/list edit versions advance by at least one millisecond. Column updates persist the exact returned version, including false booleans and nil expiry values. Policy priority is assigned by the server; reorder validates the complete action-specific ID set, including disabled policies, and invalidates affected edit versions.
@@ -701,9 +701,50 @@ local SQL-store, list, policy, app, handler, router and middleware suites, relev
 static checks and frontend TypeScript compilation passed. Final service and
 middleware reruns passed; the App rerun could not launch because Windows
 Application Control blocked its executable. The earlier complete App suite and
-the subsequent focused App boundary tests passed. CI on the list API commit
-remains pending. Frontend API types are present; list views and browser
+the subsequent focused App boundary tests passed. List API head 722a7f21 passed
+the [complete Test workflow](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37263135607)
+and [released-node systemd acceptance](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37263135672).
+Frontend API types are present; list views and browser
 acceptance remain pending.
+
+## Policy management API
+
+Administrator-only policy routes now provide action-segment overview, create,
+full-field PUT, delete, complete-segment ordering and readonly previews. Unknown
+request fields and client-assigned priorities are rejected. Mutable booleans and
+inline matching are explicit; PUT requires the last returned UTC-millisecond
+version. Stale edits return `dest_policy_stale`, duplicate names return
+`dest_name_taken`, and incomplete or duplicate reorder sets return
+`dest_policy_order_stale`. Reorder includes disabled policies. New policies and
+action changes append to their action segment; same-action edits preserve order.
+Unchanged edits preserve generation and version. Source/group references and
+definition quota are checked before persistence; private lists and empty custom
+drafts cannot become ordinary policy matches. Pending remote/category references
+retain their pending behavior. Repeated references are normalized before commit.
+The SQL writer commits policy, priority and generation together; failed commits
+do not change the caller's form or expose driver errors to the API.
+
+Preview creates or replaces only a hypothetical definition, computes the shared
+budget, and writes neither definitions nor audit rows. Quota uses full
+tag-matched panel membership; candidate compilation uses the actual current
+roster. Overview includes disabled policies, list readiness (including empty
+and missing), missing scope, template identity, exemptions count and active
+allowlist stages. The hit window is `min(7, effective hit retention)`.
+Before stage 2c ingestion, `hits_recent` and `last_hit_at` remain null.
+
+Missing endpoint/validation/authorization regressions first failed against SPA
+fallback. Real Build/HTTP/SQL checks cover CRUD, stale/no-op edits, concurrent CAS,
+priority changes, disabled-policy reorder, readonly create/edit previews,
+duplicate names, empty/private references, quota rejection, missing scope,
+pending sources and live hit-window settings. A committed HTTP policy is
+published and synced to a native candidate, verifying subjects and exact durable
+candidate digest. An injected generation failure proves HTTP rollback and safe
+error responses; a direct failed service save preserves form identity/version.
+Complete local app, policy, HTTP router/handler/middleware and SQL-store suites,
+static checks and TypeScript compilation passed. Policy-API head CI is pending.
+Frontend DTOs/client methods are included; policy views and browser acceptance,
+exemption/exception/status/test/publish/pause APIs and subsequent stages remain
+pending.
 
 ## Storage and privacy
 

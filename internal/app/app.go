@@ -143,6 +143,7 @@ type App struct {
 	destDefinitions *sqlstore.DestDefinitionRepo
 	destCompiler    *destpolicy.Compiler
 	destTagMembers  destpolicy.TagMatchedMemberReader
+	destAdmin       *destpolicy.Administrator
 	syncTasks       ports.SyncTaskRepo
 	// trafficRepo / nodeTraffic kept for the retention cron — PruneBefore is
 	// outside traffic.Service's surface (it's a maintenance concern, not a
@@ -605,6 +606,8 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	a.destLists = destlist.NewService(a.destDefinitions, destlist.NewGeositeCache(cfg.DataDir))
 	a.destLists.SetOperationGate(a.operationGate)
 	a.destLists.SetSaveValidator(a.validateDestinationListSave)
+	a.destAdmin = destpolicy.NewAdministrator(a.destDefinitions, a.destinationPolicyContext, a.destinationBudget)
+	a.destAdmin.SetOperationGate(a.operationGate)
 	dispatcher := &asyncDispatcher{ctx: bgCtx, wg: &a.bgWG, gate: a.operationGate}
 	// Wire traffic.Service into the panel-wide WaitGroup. Its async
 	// floor-push + quota-event email goroutines (`safego.GoTracked`)
@@ -762,6 +765,7 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 		DestinationPolicyRetry:    nativeSync,
 		DestinationLists:          a.destLists,
 		DestinationListOverview:   a.destinationListOverview,
+		DestinationPolicies:       a.destAdmin,
 		GeoRecords:                geoStreaks,
 		// The risk view's rows. Optional, so leaving it out would compile —
 		// TestBuildWiresTheRiskSignals reads it through the assembled router.

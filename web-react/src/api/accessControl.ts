@@ -133,3 +133,66 @@ export async function getDestinationCategories(opts: ReadOptions = {}): Promise<
 export async function refreshDestinationCategories(): Promise<void> {
   await client.post('/admin/dest/geosite/refresh', undefined, { _skipErrorToast: true })
 }
+
+export type DestinationPolicyAction = 'allow' | 'block' | 'observe'
+export interface DestinationPolicyInline {
+  cidrs?: string[]
+  ports?: string
+  network?: '' | 'tcp' | 'udp'
+  protocols?: string[]
+  private?: boolean
+}
+export interface DestinationPolicyInput {
+  name: string
+  action: DestinationPolicyAction
+  list_ids: number[]
+  inline: DestinationPolicyInline
+  scope: 'all' | 'groups'
+  group_ids: number[]
+  enabled: boolean
+  counts_as_risk: boolean
+  template_key: string
+}
+export interface DestinationPolicyView extends DestinationPolicyInput {
+  id: number
+  priority: number
+  created_at: number
+  updated_at: number
+  hits_recent: number | null
+  last_hit_at: number | null
+}
+export interface DestinationPolicyOverviewItem extends DestinationPolicyView {
+  list_states: Array<{ id: number; name: string; state: 'ready' | 'refreshing' | 'failed' | 'pending' | 'empty' | 'missing' }>
+  scope_missing: boolean
+}
+export interface DestinationPoliciesView {
+  allow: DestinationPolicyOverviewItem[]
+  block: DestinationPolicyOverviewItem[]
+  observe: DestinationPolicyOverviewItem[]
+  exemptions: { count: number }
+  allowlist_groups: Array<{ group_id: number; name: string; stage: 'trial' | 'enforce'; stage_days: number }>
+  hit_window_days: number
+  budget: DestinationBudget
+}
+export async function getDestinationPolicies(opts: ReadOptions = {}): Promise<DestinationPoliciesView> {
+  const { data } = await client.get<DestinationPoliciesView>('/admin/dest/policies', { signal: opts.signal, _skipErrorToast: opts.silent })
+  return data
+}
+export async function previewDestinationPolicy(input: DestinationPolicyInput & { id?: number; updated_at?: number }, signal?: AbortSignal): Promise<{ budget: DestinationBudget }> {
+  const { data } = await client.post<{ budget: DestinationBudget }>('/admin/dest/policies/preview', input, { signal, _skipErrorToast: true })
+  return data
+}
+export async function createDestinationPolicy(input: DestinationPolicyInput): Promise<DestinationPolicyView> {
+  const { data } = await client.post<DestinationPolicyView>('/admin/dest/policies', input, { _skipErrorToast: true })
+  return data
+}
+export async function putDestinationPolicy(id: number, input: DestinationPolicyInput & { updated_at: number }): Promise<DestinationPolicyView> {
+  const { data } = await client.put<DestinationPolicyView>(`/admin/dest/policies/${id}`, input, { _skipErrorToast: true })
+  return data
+}
+export async function deleteDestinationPolicy(id: number): Promise<void> {
+  await client.delete(`/admin/dest/policies/${id}`, { _skipErrorToast: true })
+}
+export async function orderDestinationPolicies(action: DestinationPolicyAction, ids: number[]): Promise<void> {
+  await client.put('/admin/dest/policies/order', { action, ids }, { _skipErrorToast: true })
+}

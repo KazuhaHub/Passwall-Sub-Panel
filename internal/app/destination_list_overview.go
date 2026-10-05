@@ -22,15 +22,23 @@ func (a *App) destinationListOverview(ctx context.Context) (handler.DestinationL
 	if err != nil {
 		return handler.DestinationListOverview{}, err
 	}
-	panels, err := a.repos.XUIPanel.List(ctx)
+	budget, err := a.destinationBudget(ctx, defs)
 	if err != nil {
 		return handler.DestinationListOverview{}, err
+	}
+	return handler.DestinationListOverview{Lists: defs.Lists, UsedBy: refs, RefreshHours: hours, Budget: budget}, nil
+}
+
+func (a *App) destinationBudget(ctx context.Context, defs domain.DestDefinitions) (destpolicy.Budget, error) {
+	panels, err := a.repos.XUIPanel.List(ctx)
+	if err != nil {
+		return destpolicy.Budget{}, err
 	}
 	var inputs []destpolicy.RosterInput
 	for _, panel := range panels {
 		members, err := a.destTagMembers.TagMatchedMembers(ctx, panel.ID)
 		if err != nil {
-			return handler.DestinationListOverview{}, err
+			return destpolicy.Budget{}, err
 		}
 		input := destpolicy.RosterInput{UserGroups: map[int64]int64{}}
 		for groupID, users := range members {
@@ -41,11 +49,7 @@ func (a *App) destinationListOverview(ctx context.Context) (handler.DestinationL
 		}
 		inputs = append(inputs, input)
 	}
-	budget, err := destpolicy.DefinitionBudget(defs, inputs)
-	if err != nil {
-		return handler.DestinationListOverview{}, err
-	}
-	return handler.DestinationListOverview{Lists: defs.Lists, UsedBy: refs, RefreshHours: hours, Budget: budget}, nil
+	return destpolicy.DefinitionBudget(defs, inputs)
 }
 
 func (a *App) validateDestinationListSave(ctx context.Context, list domain.DestList) error {
