@@ -58,3 +58,29 @@ func (c *Cache[T]) Put(key string, value T, weight int) {
 		c.order.Remove(last)
 	}
 }
+
+func (c *Cache[T]) Delete(key string) {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if item, found := c.items[key]; found {
+		c.weight -= item.Value.(entry[T]).weight
+		c.order.Remove(item)
+		delete(c.items, key)
+	}
+}
+
+func (c *Cache[T]) Clear() {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.items = map[string]*list.Element{}
+	if c.order != nil {
+		c.order.Init()
+	}
+	c.weight = 0
+}

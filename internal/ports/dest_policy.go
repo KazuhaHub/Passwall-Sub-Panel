@@ -37,3 +37,18 @@ type PanelAuditSettings struct {
 type PanelAuditSettingsRepo interface {
 	GetAuditSettings(context.Context, int64) (PanelAuditSettings, error)
 }
+
+// DestinationEligibilityRepo projects only mode and enforcement facts. Readers
+// must return errors for corrupt or failed reads, never convert them to a verdict.
+type DestinationEligibilityRepo interface {
+	GroupEligibilityMode(context.Context, int64) (string, error)
+	PanelDestinationEligibility(context.Context, int64) (DestinationPanelEligibility, error)
+}
+
+type DestinationPanelEligibility struct {
+	Native, PolicyCapable, FallbackBlocked bool
+}
+
+type GroupNodeEligibility interface {
+	Eligible(context.Context, *domain.Node, *domain.Group) (bool, error)
+}

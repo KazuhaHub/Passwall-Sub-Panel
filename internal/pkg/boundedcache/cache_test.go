@@ -56,3 +56,28 @@ func TestCacheConcurrentNodesStayBoundedAndCoherent(t *testing.T) {
 		t.Fatalf("concurrent cache exceeded budget: weight=%d entries=%d order=%d", c.weight, len(c.items), c.order.Len())
 	}
 }
+
+func TestCacheInvalidationReclaimsBudgetAndPreservesOtherEntries(t *testing.T) {
+	c := New[string](2, 8)
+	c.Put("changed", "old", 4)
+	c.Put("unrelated", "keep", 4)
+	c.Delete("changed")
+	if _, found := c.Get("changed"); found {
+		t.Fatal("deleted state retained")
+	}
+	if value, found := c.Get("unrelated"); !found || value != "keep" {
+		t.Fatal("targeted invalidation evicted another identity")
+	}
+	c.Put("fresh", "new", 4)
+	if c.weight != 8 || len(c.items) != 2 {
+		t.Fatal("deleted budget was not reclaimed")
+	}
+	c.Clear()
+	if c.weight != 0 || len(c.items) != 0 || c.order.Len() != 0 {
+		t.Fatal("clear did not reclaim all entries")
+	}
+	c.Put("after-clear", "usable", 8)
+	if value, found := c.Get("after-clear"); !found || value != "usable" {
+		t.Fatal("cleared cache unusable")
+	}
+}

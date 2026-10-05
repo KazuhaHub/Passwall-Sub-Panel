@@ -456,6 +456,7 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	syncSvc.SetPSPClientRepo(repos.PSPClient)
 	userSvc := user.New(repos.User, repos.Group, repos.Ownership, repos.SyncTask, groupSvc, syncSvc, pool, repos.ScopedSettings)
 	nodeSvc := node.New(repos.Node, repos.Separator, pool, syncSvc, repos.SyncTask, repos.Group, repos.User)
+	nodeSvc.SetGroupEligibility(groupSvc)
 	nativeSync.SetRealityFingerprintNormalizer(nodeSvc.NormalizeRealityFingerprintsForPanel)
 	trafficSvc := traffic.New(repos.User, repos.Ownership, repos.Traffic, repos.Node, repos.NodeTraffic, pool, userSvc).WithSettings(repos.ScopedSettings)
 	// traffic needs user to push the per-client floor into 3X-UI after each
@@ -493,6 +494,7 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	// a service-only suspension.)
 	userSvc.SetMailNotifier(mailSvc)
 	reconcileSvc := reconcile.New(repos.User, repos.Ownership, repos.Node, repos.Group, repos.Settings, repos.Audit, pool, syncSvc)
+	reconcileSvc.SetGroupEligibility(groupSvc)
 	reconcileSvc.SetPSPClientRepo(repos.PSPClient)
 	healthSvc := health.New(repos.Node)
 	renderSvc := render.New(repos, pool, groupSvc)

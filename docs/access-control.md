@@ -428,11 +428,42 @@ removal/eligibility enforcement.
 
 Compiler and capability regressions first failed against the missing hooks.
 Full local policy/nodesync/SQL-store/group suites and relevant static checks
-pass. This resync-hook increment awaits its own CI.
+pass. At `a86bc0bf17a8d9a71375096a9422bf90173f92ef`, the
+[complete Test workflow](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37237494438)
+and [published-node systemd acceptance](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37237494444)
+both succeeded.
+
+Group selection now exposes one destination-aware eligibility decision. With
+the destination reader configured, allowlist groups in both trial and enforce
+select only native panels advertising destination-policy capability and having
+neither fallback reason nor exhaustion. Open groups retain tag matching. Narrow
+SQL reads exclude credentials and policy bodies; missing identities, corrupt
+controls and database failures remain errors rather than ineligible verdicts.
+Mode and panel facts use separate bounded caches with a 30-second TTL, shared
+cold reads, uncached errors and invalidation that discards in-flight old facts.
+Panel invalidation leaves unrelated facts warm; mode/stage changes clear both.
+
+NodesFor, including its all-tags path, applies the same decision. New-node and
+recreated-node member additions and reconcile's missing-ownership additions now
+delegate to that selector. Reconcile checks the whole group's additions before
+writing any, so a later eligibility read error cannot partially add members.
+An AST guard rejects raw group.Matches references outside the group package,
+while independent quota membership intentionally remains pure tag matching.
+
+Initial eligibility and addition regressions failed before implementation.
+Local cache/SQL/group/node/reconcile/user/render/policy/nodesync/HTTP-handler
+suites and relevant static checks pass. Real SQL/service integration proves
+rejection and recovery invalidate warm membership facts before resync reads,
+and covers trial/enforce, capability removal and return to open mode. The app
+suite's trusted-account wiring test fails on Windows temporary-database cleanup:
+Shutdown does not yet close the application's primary database connection.
+Its assertions pass; the lifecycle leak remains to be fixed. This increment
+awaits its own CI. App assembly passes the shared selector to node/reconcile,
+but does not yet configure destination eligibility or activate the compiler.
 
 This is a C3 foundation with an optional tested sync boundary. It does not
 implement the full C3 acceptance: application assembly, issue/resync integration,
-eligibility integration and membership-change invalidation wiring, immediate pause UI/API wiring,
+eligibility activation, full member removal and membership-change invalidation wiring, immediate pause UI/API wiring,
 settings and application integration remain outstanding. Existing nodes still
 receive the existing configuration because the compiler is not wired into sync.
 
