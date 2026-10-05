@@ -3886,6 +3886,10 @@
         "label": "访问控制状态上报被丢弃",
         "desc": "因格式、内容或节点能力不符而丢弃的访问控制状态上报次数；配置和名单同步继续正常处理。"
       },
+      "psp_dest_pruned_rows_total": {
+        "label": "访问控制数据清理行数",
+        "desc": "已接通的访问控制清理任务删除的行数。过期豁免每小时清理，其余保留期任务在后续阶段接通。"
+      },
       "psp_saml_acs_failure_total": {
         "label": "SAML 登录被拒",
         "desc": "被拒绝的 SAML 登录（及登录发起）按原因分类。配置类原因指向身份提供方设置；「断言被重放」需要调查。"
@@ -3896,6 +3900,16 @@
       }
     },
     "labels": {
+      "dest_table": {
+        "hits": "规则命中",
+        "trial": "白名单试运行命中",
+        "usage": "目的地用量",
+        "batches": "审计批次",
+        "loss": "审计丢失计数",
+        "budget": "入库预算",
+        "exemptions": "过期豁免",
+        "orphans": "孤儿数据"
+      },
       "stage": {
         "list_users": "读取用户列表",
         "latest_prefetch": "读取最新流量记录",

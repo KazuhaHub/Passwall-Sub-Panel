@@ -563,7 +563,23 @@ const (
 	NodeHostPruneHourlyTable    = "hourly"
 )
 
+const (
+	DestPruneHits       = "hits"
+	DestPruneTrial      = "trial"
+	DestPruneUsage      = "usage"
+	DestPruneBatches    = "batches"
+	DestPruneLoss       = "loss"
+	DestPruneBudget     = "budget"
+	DestPruneExemptions = "exemptions"
+	DestPruneOrphans    = "orphans"
+)
+
 var (
+	DestPrunedRowsTotal = NewCounterVec(
+		"psp_dest_pruned_rows_total",
+		"Durably deleted destination rows, by bounded table category. Only connected cleanup paths contribute.",
+		"table",
+	)
 	NodePolicyStatusDroppedTotal = NewCounter(
 		"psp_node_policy_status_dropped_total",
 		"Policy status subtrees dropped after decoding, validation or capability binding failed.",

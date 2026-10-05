@@ -1440,6 +1440,7 @@ func (a *App) runAuditCleanupLoop(ctx context.Context) {
 		a.pruneConnectionHistory(ctx)
 		a.pruneFlagRecords(ctx)
 		a.pruneRiskReviews(ctx)
+		a.pruneDestExemptions(ctx)
 		a.pruneCertEvents(ctx)
 		select {
 		case <-ctx.Done():

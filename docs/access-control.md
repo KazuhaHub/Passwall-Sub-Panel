@@ -770,7 +770,13 @@ permanent updates, duplicate and concurrent creation, no-op writes, deletion and
 injected generation failure. An expired exemption still appears in a published
 native candidate until durable cleanup removes it; republishing then removes
 the subject and changes the candidate digest. This exercises the repository
-cleanup path. The hourly cleanup worker is still pending.
+cleanup path. The existing tracked hourly audit-cleanup loop now also removes
+expired destination exemptions on its startup pass and every hour, before
+certificate-event cleanup. The write shares operation admission with destination
+management and backend switching. Failed commits retain rows and generation,
+leave the delete counter unchanged and retry on a later pass; unchanged passes
+advance neither generation nor the counter. Shutdown cancellation releases a
+waiting admission without writing.
 
 ## Global allow exceptions API
 
@@ -807,7 +813,11 @@ SQL-store, list, policy, domain and HTTP suites, relevant static checks and
 TypeScript compilation pass. Current exemption/exception-head CI remains pending.
 Frontend DTOs and API clients are included; views and browser acceptance remain
 pending. Status/test/publish/pause/user-access APIs and the remaining C4 work are
-still required.
+still required. The expiry-loop increment passed the complete local app/metrics
+suites, static checks, TypeScript compilation and 23 diagnostics-catalog tests;
+its own CI remains pending. Tests reproduce the missing loop call and verify
+expiry versus permanent/future rows, one committed generation, failure/retry,
+no-op passes and cancellation while backend-switch admission is held.
 
 ## Storage and privacy
 

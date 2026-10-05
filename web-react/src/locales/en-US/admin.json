@@ -3888,6 +3888,10 @@
         "label": "Access control status reports dropped",
         "desc": "Access control status reports dropped because their format, contents or node capabilities are invalid; config and roster synchronization continues."
       },
+      "psp_dest_pruned_rows_total": {
+        "label": "Access control rows cleaned up",
+        "desc": "Rows removed by connected access control cleanup tasks. Expired exemptions are cleaned up hourly; other retention tasks arrive in later stages."
+      },
       "psp_saml_acs_failure_total": {
         "label": "SAML sign-ins refused",
         "desc": "Refused SAML sign-ins (and sign-in starts), by reason. Configuration reasons point at identity-provider settings; \"Assertion replayed\" needs investigating."
@@ -3898,6 +3902,16 @@
       }
     },
     "labels": {
+      "dest_table": {
+        "hits": "Rule hits",
+        "trial": "Allowlist trial hits",
+        "usage": "Destination usage",
+        "batches": "Audit batches",
+        "loss": "Audit loss counts",
+        "budget": "Ingestion budgets",
+        "exemptions": "Expired exemptions",
+        "orphans": "Orphan rows"
+      },
       "stage": {
         "list_users": "Read user list",
         "latest_prefetch": "Read latest traffic records",

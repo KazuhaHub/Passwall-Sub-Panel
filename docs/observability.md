@@ -166,6 +166,17 @@ skip 命中率 = psp_lifecycle_sync_skipped_total / psp_lifecycle_sync_total
 
 `active_users` 与 `floor_push_enqueued` 之间有个缺口：用户动了流量，也可能到不了入队（inbound 拉取失败被跳过、或已因配额停用）。**这个缺口本身有诊断价值**——它大，说明模型里的 N 高估了负载。
 
+### 4.7 目的地访问控制清理
+
+`psp_dest_pruned_rows_total{table=exemptions}` 只在过期豁免删除事务完整提交
+后增加，数值为实际删除行数。失败回滚和空清理不计数。清理运行于现有每小时
+`audit-cleanup-loop`，启动时先执行一轮；更新后的 generation 进入正常发布去抖
+和节点同步流程，不代表节点已经确认应用。
+
+`table` 使用固定集合 `hits|trial|usage|batches|loss|budget|exemptions|orphans`。
+当前仅过期豁免清理接通，其余标签随对应保留期任务接通后才产生数据；指标子项
+不存在不能解释为该类数据已经全部清理。诊断目录与中英文标签同步维护。
+
 ## 5. 已知限制
 
 - **快照跨指标非原子。** 并发跑着的 poll 可能只被记了一半，两个相关计数最多差一个周期的量。要做成原子的就得在每次记录上加锁，用热路径的真实成本，去买一个以小时计的测量窗口根本不需要的一致性。
