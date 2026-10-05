@@ -544,6 +544,43 @@ the test to observe the actual persisted worker result. Cancellation tests hold
 target reads, final commits and downloads until their cleanup exits. Admission
 tests keep exclusive operations outside that work; shutdown tests keep the real
 database available to admitted readers until they release, including eventual
-closure after a caller deadline. The lifecycle increment awaits its own CI.
+closure after a caller deadline. Lifecycle head 140092d1 passed its complete
+Test workflow and released-node systemd acceptance.
 
-Stage 1c still requires complete repository operations for multi-row service transactions and production policy/eligibility activation, remaining API boundaries, access-control views and complete browser acceptance. List HTTP endpoints and C2's end-to-end browser acceptance remain outstanding. Audit ingestion, group modes, privacy/consent and subsequent stages remain governed by the full plan. Repository tests and green CI do not establish completion of these requirements.
+Application Build now activates the same definition store in the compiler and
+list service. Native sync receives both that compiler and its atomic candidate
+mint repository. Group selection receives the narrow destination eligibility
+reader; node additions and reconcile share that group service. Missing
+membership, collection-control or atomic-mint dependencies fail assembly.
+Publication debounce reads bounded persisted settings on every compile.
+
+One membership generation is shared by policy inputs, committed user/group
+changes and subscription-invalidating node changes. Capability-presence and
+fallback transitions invalidate eligibility and rendered subscriptions before
+tracked asynchronous member resync. Agent-to-panel resolution runs outside the
+active sync owner's lock. Member/mode read failures enqueue no partial group
+changes; periodic heal provides recovery.
+
+Missing-compiler and missing-eligibility assembly regressions first failed
+before the wiring. Actual Build/HTTP/SQL tests prove scoped subjects, durable
+exact candidate identity, legacy config bytes/version/ETag stability, user-group
+cache invalidation and a live 60-to-30-second debounce change. Warm-selector
+checks cover capability gain/loss, rejection removal and restoration after a
+new nonempty desired candidate is confirmed. Removal retains zero-attachment
+roster identities for counters; scoped rules still use those subjects in a new
+publication, so confirmation can restore their attachments. Publication alone
+and empty-policy success retain rejection. No empty, paused or fallback success
+is used to claim desired recovery. The separate explicit retry operation and
+its end-to-end acceptance remain required.
+
+Local app, policy, nodesync, group, user, node, reconcile, SQL-store and HTTP
+suites and static checks passed. This assembly increment awaits its own CI;
+released-node acceptance does not establish unmerged Node #78's kernel behavior.
+
+Stage 1c still requires complete repository operations for multi-row service
+transactions, explicit retry and mode orchestration, remaining API boundaries,
+access-control views and complete browser acceptance. List HTTP endpoints and
+C2's end-to-end browser acceptance remain outstanding. Audit ingestion,
+retention, privacy/consent and subsequent stages retain the full final-plan
+scope. Repository tests and green CI do not establish completion of these
+requirements.

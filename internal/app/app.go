@@ -40,6 +40,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/cert"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/clientprov"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/destlist"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/destpolicy"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/geo"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/group"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/health"
@@ -140,6 +141,7 @@ type App struct {
 	settings        ports.SettingsRepo
 	destLists       *destlist.Service
 	destDefinitions *sqlstore.DestDefinitionRepo
+	destCompiler    *destpolicy.Compiler
 	syncTasks       ports.SyncTaskRepo
 	// trafficRepo / nodeTraffic kept for the retention cron — PruneBefore is
 	// outside traffic.Service's surface (it's a maintenance concern, not a
@@ -340,6 +342,37 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	// it is configured here rather than passed through NewRepos because that
 	// constructor has a dozen callers that have no business naming a core catalog.
 	sqlstore.ConfigureCoreCatalog(coreCatalog)
+	groupSvc := group.New(repos.Group, repos.Node, repos.ScopeSettings)
+	membership, ok := repos.User.(ports.UserMembershipRepo)
+	if !ok || repos.DestinationEligibility == nil {
+		return nil, errors.New("destination policy: membership and eligibility repositories are required")
+	}
+	auditSettings, ok := repos.XUIPanel.(ports.PanelAuditSettingsRepo)
+	if !ok {
+		return nil, errors.New("destination policy: panel audit controls are required")
+	}
+	policyCandidates, ok := repos.NodeAgent.(ports.NodePolicyCandidateRepo)
+	if !ok {
+		return nil, errors.New("destination policy: atomic candidate mint repository is required")
+	}
+	groupSvc.SetMembershipRepo(membership)
+	groupSvc.SetDestinationEligibilityRepo(repos.DestinationEligibility)
+	destDefinitions := sqlstore.NewDestDefinitionRepo(db)
+	destInputs, err := destpolicy.NewInputs(auditSettings, membership, groupSvc)
+	if err != nil {
+		return nil, fmt.Errorf("destination policy inputs: %w", err)
+	}
+	var membershipGeneration atomic.Uint64
+	invalidateMembership := func() { membershipGeneration.Add(1) }
+	destInputs.SetMembershipGeneration(membershipGeneration.Load)
+	groupSvc.SetMembershipInvalidator(invalidateMembership)
+	destCompiler, err := destpolicy.NewCompiler(destpolicy.CompilerOptions{
+		Definitions: destDefinitions, Runtime: repos.DestAgentPolicy, Inputs: destInputs,
+		MinSeconds: func(ctx context.Context) (int, error) { return destinationPolicyMinSeconds(ctx, repos.Settings) },
+	})
+	if err != nil {
+		return nil, fmt.Errorf("destination policy compiler: %w", err)
+	}
 	nativeSync, err := nodesync.New(nodesync.Options{
 		Desired: repos.NativeDesired, Agents: repos.NodeAgent, Issues: repos.NodeAgentIssue, Tasks: repos.NodeAgentTask, Users: repos.User,
 		Clients: repos.PSPClient, Nodes: repos.Node, Settings: repos.ScopedSettings, Panels: repos.XUIPanel,
@@ -348,6 +381,7 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 		// being dispatched to the fleet.
 		CoreCatalog: coreCatalog,
 		Host:        nodeMetrics,
+		Policies:    destCompiler, PolicyCandidates: policyCandidates,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("native node sync: %w", err)
@@ -464,12 +498,12 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 		return nil, fmt.Errorf("init oidc: %w", err)
 	}
 	auditSvc := audit.New(repos.Audit)
-	groupSvc := group.New(repos.Group, repos.Node, repos.ScopeSettings)
 	syncSvc := syncsvc.New(pool, repos.Ownership)
 	// v3.9.0: let the inbound-deletable guard recognise shared clients as managed,
 	// so node deletion isn't blocked once users are migrated off the ownership table.
 	syncSvc.SetPSPClientRepo(repos.PSPClient)
 	userSvc := user.New(repos.User, repos.Group, repos.Ownership, repos.SyncTask, groupSvc, syncSvc, pool, repos.ScopedSettings)
+	userSvc.SetMembershipInvalidator(invalidateMembership)
 	nodeSvc := node.New(repos.Node, repos.Separator, pool, syncSvc, repos.SyncTask, repos.Group, repos.User)
 	nodeSvc.SetGroupEligibility(groupSvc)
 	nativeSync.SetRealityFingerprintNormalizer(nodeSvc.NormalizeRealityFingerprintsForPanel)
@@ -517,11 +551,13 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	// enabled-node snapshots and final subscriptions. Clear both cache layers
 	// after the DB write commits so the next refresh sees the current nodes.
 	invalidateSubscriptions := func() {
+		invalidateMembership()
 		groupSvc.InvalidateNodeCache()
 		renderSvc.InvalidateAll()
 	}
 	nativeSync.SetRenderInvalidator(invalidateSubscriptions)
 	nodeSvc.SetSubscriptionInvalidator(invalidateSubscriptions)
+	destCompiler.SetInvalidator(func(string) { renderSvc.InvalidateAll() })
 	// Geo IP resolution for access-log region display — fully offline against a
 	// local .mmdb in <ConfigDir>/geoip/. No per-IP external calls. Reads
 	// enabled/active-file live from settings and hot-reloads the DB on change.
@@ -561,7 +597,8 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 		bgCancel:        cancel,
 		bgRootCtx:       bgCtx,
 		render:          renderSvc,
-		destDefinitions: sqlstore.NewDestDefinitionRepo(db),
+		destDefinitions: destDefinitions,
+		destCompiler:    destCompiler,
 	}
 	a.destLists = destlist.NewService(a.destDefinitions, destlist.NewGeositeCache(cfg.DataDir))
 	a.destLists.SetOperationGate(a.operationGate)
@@ -574,6 +611,22 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	// Route the handler-triggered group-member resync through the tracked
 	// dispatcher so Shutdown drains it (it was an untracked safego.Go).
 	userSvc.SetBackgroundRunner(dispatcher.Go)
+	resyncAllowlist := destinationAllowlistResyncer(groupSvc, userSvc, repos.DestinationEligibility, renderSvc.InvalidateAll, dispatcher.Go)
+	nativeSync.SetAllowlistResyncer(resyncAllowlist)
+	destCompiler.SetAllowlistResyncer(func(_ context.Context, agentID string) {
+		// Clear synchronously before resolving the panel off the sync owner
+		// lock. Read failures leave healing to the periodic membership sweep.
+		groupSvc.InvalidateEligibility(0)
+		renderSvc.InvalidateAll()
+		dispatcher.Go("destination.resolve-agent-panel", func(ctx context.Context) {
+			agent, err := repos.NodeAgent.GetByAgentID(ctx, agentID)
+			if err != nil {
+				log.Warn("destination allowlist panel resolution failed")
+				return
+			}
+			resyncAllowlist(ctx, agent.PanelID)
+		})
+	})
 	// Same for node.Service's handler-spawned background work (post-recreate
 	// member provisioning + sync-existing-users) — previously untracked safego.Go.
 	nodeSvc.SetBackgroundRunner(dispatcher.Go)
