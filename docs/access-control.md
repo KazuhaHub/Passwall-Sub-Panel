@@ -1,6 +1,6 @@
 # Destination access control
 
-Implementation follows the [final audit plan](https://github.com/KazuhaHub/Passwall-Sub-Panel/pull/271). The feature is under development; the schema foundation alone does not enable policy enforcement or destination collection.
+Implementation follows the [final audit plan](https://github.com/KazuhaHub/Passwall-Sub-Panel/pull/271). Definition publication, native candidate compilation and list management are connected to the application. The feature remains under development: the remaining management interfaces, audit ingestion, browser acceptance and real Node kernel acceptance are pending.
 
 ## Current implementation
 
@@ -8,19 +8,19 @@ Implementation follows the [final audit plan](https://github.com/KazuhaHub/Passw
 - Publication and runtime state: `dest_policy_state`, `dest_policy_snapshots`, `dest_agent_policy`.
 - Durable audit storage: `dest_hits`, `dest_usage_hourly`, `dest_audit_batches`, `dest_audit_loss_hourly`, `dest_audit_ingest_budget`. Collection and ingestion are not connected yet.
 - New tables participate in the normal boot migration. JSON columns use TEXT without defaults. Binary list content, original custom-list text, snapshots and policy bodies use SQLite BLOB, PostgreSQL BYTEA and MySQL LONGBLOB.
-- Candidate bytes are stored independently from confirmed policy bytes. The latter are the basis for the later last-known-good fallback implementation; persistence does not yet implement that state machine.
+- Candidate bytes are stored independently from confirmed policy bytes. The compiler and candidate observer use the latter for pruned last-known-good fallback and durable exhaustion, as described below.
 - Native panel collection settings are stored as `audit_collect` (`off`, `hits`, `hits_and_usage`) and `audit_collect_revision`. Creation and migration initialize `hits` and revision `1`. A normal panel `Save` omits these columns.
 - The native metadata writer validates collection mode and compares it under a transaction lock. A mode change increments revision atomically; repeated writes of the same mode do not. This write is not yet exposed by the HTTP request DTO. The future ingestion gate will use the same collection state to reject outdated batches.
 
 ## Definition and publication repository
 
-The concrete destination repository now provides policy/list/exemption writes, per-action ordering, expiry removal, consistent definition reads and snapshot publication. These methods are not wired into the application or HTTP API yet.
+The concrete destination repository provides policy/list/exemption writes, per-action ordering, expiry removal, consistent definition reads and snapshot publication. Application assembly connects compilation and list refresh to this store. Settings, retry and list management have HTTP boundaries; policy and exemption management interfaces remain pending.
 
 - Definition writers acquire the singleton publication-state row before changing definitions. The row change and generation advance share one transaction; a failed write rolls both back. No-op writes and unchanged refresh digests do not advance generation.
 - Policy/list edit versions advance by at least one millisecond. Column updates persist the exact returned version, including false booleans and nil expiry values. Policy priority is assigned by the server; reorder validates the complete action-specific ID set, including disabled policies, and invalidates affected edit versions.
 - Refresh results compare the captured list version and source under the same lock. Deleted or edited sources reject old success and error results. Failures retain usable entries; successful unchanged content updates only metadata. Disabled policy and group references prevent list deletion.
 - Definition reads start with generation inside a read transaction. MySQL and PostgreSQL explicitly use repeatable read. Publication compares both definition generation and previous published generation and commits the snapshot and publication state atomically. Error recording has the same version preconditions. Missing or malformed published snapshots return an unavailable error rather than an empty policy.
-- Snapshot format compilation and validation are now provided by the policy service below. Candidate minting, pause publication, global exception bundles and custom-entry edits remain application/service work. The repository's JSON integrity check alone does not establish semantic policy validity.
+- Snapshot format compilation and validation are provided by the policy service below. Candidate minting commits with the native config stream; custom-entry edits use the definition transaction. Pause management and global exception bundles remain application/service work. The repository's JSON integrity check alone does not establish semantic policy validity.
 
 Local validation: thirteen new repository tests passed, along with the full SQL-store and domain suites and `go vet`. Initial tests failed against empty repository implementations; additional tests caught no-op generation changes and the ORM replacing explicit edit timestamps. Windows race execution is unavailable with the current CGO-disabled toolchain. Implementation commit `9b47532422d77aae7db2cfae32579215d931c4e7` passed the [complete Test workflow](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37188909110): MySQL/PostgreSQL full repository suites, all Linux race shards, static checks, frontend, release-target builds, published Node contracts, Docker baselines and isolated real third-party panels. The server-dialect tests include a writer committing between the generation read and the definition read, proving both reads remain in the older snapshot.
 
@@ -629,8 +629,8 @@ regressions failed before implementation. Actual SQL tests cover initialization,
 stale/no-op edits, ready-empty enforcement, concurrent first activation,
 cross-group ownership, preserved user content and injected write failures.
 The complete local SQL-store, list, policy, group, user, node, reconcile, app and
-ports suites and relevant static checks passed. Server-dialect/race CI for this
-increment is pending. These are repository foundations for P8 cleanup and later
+ports suites and relevant static checks passed. Server-dialect/race CI passed at
+owner-cleanup head e0f01fa1. These are repository foundations for P8 cleanup and later
 stage-5 mode orchestration; no group-mode HTTP route is exposed yet. Template
 DNS host discovery, commit-following eligibility/resync orchestration and the
 trial-report prerequisites remain part of stage 5.
@@ -655,12 +655,70 @@ group-transaction head 14da448d passed released-node systemd acceptance;
 its PostgreSQL lane failed two whole-struct comparisons that mixed caller UTC
 timestamps with SQL-driver timestamp locations. Those comparisons now normalize
 timestamps to UTC while retaining all content/identity checks. SQLite race and
-MySQL lanes passed at that head. Current-head complete CI, including PostgreSQL,
-remains pending.
+MySQL lanes passed at that head. Owner-cleanup head e0f01fa1 then passed the
+[complete Test workflow](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37260343995),
+including PostgreSQL, and
+[released-node systemd acceptance](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37260344016).
+
+## List management API
+
+Admin-only list routes now provide overview, create, preview, detail, versioned
+update, delete, custom-entry edits and asynchronous refresh. Category routes
+expose the cached catalog and queue a refresh. Missing catalogs return
+`dest_geosite_unavailable`; ordinary users and operators cannot use these routes.
+Unknown request fields are rejected. Custom originals retain comments and line
+endings; editing requires the returned UTC-millisecond `updated_at`. Stale edits
+return `dest_list_stale`. The decoded custom source remains bounded to four MiB;
+route-specific JSON limits admit escaped content without raising other routes'
+limits. Detail returns at most 200 normalized entries, preview at most 50;
+only custom detail with `?text=1` returns original text. Overview includes report
+counts, references (including disabled policies), effective global refresh hours
+and the expanded definition budget. Subject quota uses each panel's full
+tag-matched membership, including disabled users without client rows.
+
+Custom-entry edits reread source and references under the definition lock,
+then parse and save in one transaction, preserving concurrent additions.
+Removing one hostname from a hosts line preserves its other hostnames.
+Changed effective content advances generation once; unchanged content does not.
+Source parsing and definition validation precede saves; transaction-local
+reference checks reject broad custom content used by allow rules or active
+allowlist groups. Community classifications still remove broad entries and
+retain the report, including when used by allow rules. A filtering report is
+not treated as a fetch failure. Remote sources retain whole-refresh rejection.
+
+Queued and active refreshes expose `refreshing`; background dispatch owns them
+after HTTP cancellation. Network work and final persistence share operation
+admission, and canceled flights drain before releasing it. Failed refreshes
+keep the last successful contents and persist their safe error code.
+
+Missing-route, privacy and transactional-entry regressions failed before these
+changes. Actual Build/HTTP/SQL regressions verify CRUD/CAS, source preservation,
+large payloads, bounded responses, concurrent appends, referenced deletion,
+quota rejection before persistence, full-membership overview, filtered finance
+catalog editing and asynchronous refresh persistence. Service checks cover
+queued/active state and exclusive-operation admission during downloads. Complete
+local SQL-store, list, policy, app, handler, router and middleware suites, relevant
+static checks and frontend TypeScript compilation passed. Final service and
+middleware reruns passed; the App rerun could not launch because Windows
+Application Control blocked its executable. The earlier complete App suite and
+the subsequent focused App boundary tests passed. CI on the list API commit
+remains pending. Frontend API types are present; list views and browser
+acceptance remain pending.
+
+## Storage and privacy
+
+List previews and policy previews are excluded from write-audit logging by
+exact POST path. Other destination writes, including `/dest/test`, retain normal
+audit behavior; destination audit rows remain restricted to administrators.
+PSP's access logger strips query strings from `/api/admin/dest/` paths. Reverse
+proxies may still record API query parameters in their own access logs. Record
+search terms will remain component state rather than page URL state, but API
+queries can still reach those external logs. Audit ingestion, retention and
+consent enforcement remain part of the later implementation stages.
 
 Stage 1c still requires the remaining multi-row service operations, API boundaries,
-access-control views and complete browser acceptance. List HTTP endpoints and
-C2's end-to-end browser acceptance remain outstanding. Audit ingestion,
+access-control views and complete browser acceptance. C2's end-to-end browser
+acceptance remains outstanding. Audit ingestion,
 retention, privacy/consent and subsequent stages retain the full final-plan
 scope. Repository tests and green CI do not establish completion of these
 requirements.

@@ -60,6 +60,15 @@ func (r *DestDefinitionRepo) SaveList(ctx context.Context, list *domain.DestList
 			return false, fmt.Errorf("%w: dest_list_stale", domain.ErrConflict)
 		}
 		row.CreatedAt, row.OwnerGroupID = old.CreatedAt, old.OwnerGroupID
+		if row.Kind == string(domain.DestListCustom) && row.ParseReport != nil && row.ParseReport.IgnoredBroad > 0 {
+			allow, err := destListUsedForAllow(tx, row.ID)
+			if err != nil {
+				return false, err
+			}
+			if allow {
+				return false, fmt.Errorf("%w: dest_list_too_broad", domain.ErrValidation)
+			}
+		}
 		if row.OwnerGroupID != 0 && row.Kind != string(domain.DestListCustom) {
 			return false, fmt.Errorf("%w: dest_list_group_owned", domain.ErrValidation)
 		}

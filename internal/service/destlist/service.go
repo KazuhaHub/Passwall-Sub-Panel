@@ -37,19 +37,35 @@ type Service struct {
 	wake            chan struct{}
 	loopOnce        sync.Once
 	operationGate   *operationgate.Gate
+	validateSave    func(context.Context, domain.DestList) error
+	refreshing      map[int64]int
 }
 
 func NewService(store DefinitionStore, cache *GeositeCache) *Service {
-	return &Service{store: store, cache: cache, fetcher: NewFetcher(), now: time.Now, attempts: map[int64]listAttempt{}, wake: make(chan struct{}, 1)}
+	return &Service{store: store, cache: cache, fetcher: NewFetcher(), now: time.Now, attempts: map[int64]listAttempt{}, refreshing: map[int64]int{}, wake: make(chan struct{}, 1)}
 }
 
 // Configure at assembly time. Admission spans downloads and their final writes,
 // so an online backend switch cannot cross an old backend's pending response.
 func (s *Service) SetOperationGate(gate *operationgate.Gate) { s.operationGate = gate }
 
+// Nil leaves parser/source validation enabled but omits fleet definition quota
+// checks. Production assembly supplies the same checker used by publication.
+func (s *Service) SetSaveValidator(validate func(context.Context, domain.DestList) error) {
+	s.validateSave = validate
+}
+
 // Preview is read-only, including a missing geosite cache. Downloading the
 // shared catalog is an explicit action, never a side effect of opening a form.
 func (s *Service) Preview(ctx context.Context, list domain.DestList) (FetchResult, error) {
+	ctx, release, err := s.operationGate.Read(ctx)
+	if err != nil {
+		return FetchResult{}, err
+	}
+	defer release()
+	if err := ctx.Err(); err != nil {
+		return FetchResult{}, err
+	}
 	switch list.Kind {
 	case domain.DestListCustom:
 		p, err := ParseCustom(list.SourceText)
@@ -75,6 +91,11 @@ func attributeFields(text string) []string {
 }
 
 func (s *Service) Save(ctx context.Context, list *domain.DestList, expected time.Time) error {
+	ctx, release, err := s.operationGate.Read(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
 	if s.store == nil {
 		return domain.ErrUnavailable
 	}
@@ -120,11 +141,41 @@ func (s *Service) Save(ctx context.Context, list *domain.DestList, expected time
 	if candidate.Kind != domain.DestListCustom {
 		candidate.SourceText = nil
 	}
+	if s.validateSave != nil {
+		if err := s.validateSave(ctx, candidate); err != nil {
+			return err
+		}
+	}
 	if err := s.store.SaveList(ctx, &candidate, expected, now); err != nil {
 		return err
 	}
 	*list = candidate
 	return nil
+}
+
+func (s *Service) Get(ctx context.Context, id int64) (domain.DestList, error) {
+	if s == nil || s.store == nil {
+		return domain.DestList{}, domain.ErrUnavailable
+	}
+	ctx, release, err := s.operationGate.Read(ctx)
+	if err != nil {
+		return domain.DestList{}, err
+	}
+	defer release()
+	return s.store.GetList(ctx, id)
+}
+
+func (s *Service) Delete(ctx context.Context, id int64) error {
+	if s == nil || s.store == nil {
+		return domain.ErrUnavailable
+	}
+	store, ok := s.store.(interface {
+		DeleteList(context.Context, int64, time.Time) error
+	})
+	if !ok {
+		return domain.ErrUnavailable
+	}
+	return s.operationGate.RunRead(ctx, func(ctx context.Context) error { return store.DeleteList(ctx, id, s.now()) })
 }
 
 func (s *Service) RefreshList(ctx context.Context, id int64) error {
@@ -160,7 +211,20 @@ func (s *Service) RefreshList(ctx context.Context, id int64) error {
 }
 
 func (s *Service) withListFlight(ctx context.Context, id int64, work func() (any, error)) error {
-	result := s.flights.DoChan(strconv.FormatInt(id, 10), work)
+	result := s.flights.DoChan(strconv.FormatInt(id, 10), func() (any, error) {
+		s.mu.Lock()
+		s.refreshing[id]++
+		s.mu.Unlock()
+		defer func() {
+			s.mu.Lock()
+			s.refreshing[id]--
+			if s.refreshing[id] == 0 {
+				delete(s.refreshing, id)
+			}
+			s.mu.Unlock()
+		}()
+		return work()
+	})
 	select {
 	case <-ctx.Done():
 		// Join the flight before releasing lifecycle/admission ownership.

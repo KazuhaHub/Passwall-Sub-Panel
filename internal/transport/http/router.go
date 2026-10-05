@@ -25,6 +25,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/authpolicy"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/captcha"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/cert"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/destlist"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/geo"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/group"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/login2fa"
@@ -70,6 +71,8 @@ type Deps struct {
 	Repos                     ports.Repos
 	DestinationRefreshChanged func()
 	DestinationPolicyRetry    handler.DestinationPolicyRetrier
+	DestinationLists          *destlist.Service
+	DestinationListOverview   func(context.Context) (handler.DestinationListOverview, error)
 	// GeoRecords is the read side of the concurrent-location detector, the
 	// same rows the traffic poll writes each cycle. Optional: a deployment
 	// without it gets a 503 from the endpoint rather than an empty list, so
@@ -230,7 +233,11 @@ func NewRouter(d Deps) stdhttp.Handler {
 	// 16 MiB limit for full fleet reports. Audit middleware later does
 	// io.ReadAll(body) — without these caps that's a memory-exhaustion vector.
 	g.Use(middleware.BodyLimitByPath(1<<20, map[string]int64{
-		"/v1/node/sync": nodeprotocol.MaxSyncBodyBytes,
+		"/v1/node/sync":                     nodeprotocol.MaxSyncBodyBytes,
+		"/api/admin/dest/lists":             handler.DestinationListJSONLimit,
+		"/api/admin/dest/lists/preview":     handler.DestinationListJSONLimit,
+		"/api/admin/dest/lists/:id":         handler.DestinationListJSONLimit,
+		"/api/admin/dest/lists/:id/entries": handler.DestinationListJSONLimit,
 	}))
 	// Audit middleware lives at the engine level so it covers admin
 	// endpoints AND the login attempt AND user self-service writes. The
@@ -810,6 +817,21 @@ func NewRouter(d Deps) stdhttp.Handler {
 		adminGroup.PUT("/dest/settings", destinationSettings.Put)
 		destinationRetry := handler.NewAdminDestinationRetryHandler(d.DestinationPolicyRetry)
 		adminGroup.POST("/dest/agents/:agent_id/retry", destinationRetry.Retry)
+		destinationLists := handler.NewAdminDestinationListsHandler(d.DestinationLists)
+		destinationLists.SetOverview(d.DestinationListOverview)
+		if d.Async != nil {
+			destinationLists.SetDispatcher(d.Async.Go)
+		}
+		adminGroup.GET("/dest/lists", destinationLists.List)
+		adminGroup.POST("/dest/lists/preview", destinationLists.Preview)
+		adminGroup.POST("/dest/lists", destinationLists.Create)
+		adminGroup.GET("/dest/lists/:id", destinationLists.Get)
+		adminGroup.PUT("/dest/lists/:id", destinationLists.Put)
+		adminGroup.DELETE("/dest/lists/:id", destinationLists.Delete)
+		adminGroup.POST("/dest/lists/:id/refresh", destinationLists.Refresh)
+		adminGroup.POST("/dest/lists/:id/entries", destinationLists.Entries)
+		adminGroup.GET("/dest/geosite/categories", destinationLists.Categories)
+		adminGroup.POST("/dest/geosite/refresh", destinationLists.RefreshCategories)
 
 		// Offline geo database status + manual update (touches the update token
 		// + fetches an external DB — admin only).

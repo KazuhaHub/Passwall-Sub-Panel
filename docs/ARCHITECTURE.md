@@ -1112,6 +1112,17 @@ GET /{sub_path}/abc123 (UA: mihomo)
 
 ---
 
+### 7.11 目的地名单刷新（开发中）
+
+`App.Run` 启动受后台 WaitGroup 与 operation gate 管理的名单刷新任务。
+远程和分类名单统一读取 `dest.list_refresh_hours` 的有效值（默认 24 小时，
+范围 6–168 小时）；成功保存设置后通知任务重新检查周期，不需要重启。
+分类缓存位于 `<DataDir>/destlists/dlc_plain.yml`，下载与校验成功后原子替换。
+手动刷新返回 202，由同一应用生命周期管理，GET 可读取排队或执行中的状态。
+刷新以捕获的名单版本和来源提交结果，旧刷新不能覆盖后来的管理员修改；
+失败保留上次成功内容和解析报告。关闭应用时先取消并排空下载、写入与后台
+任务，再关闭 SQL 连接池。详细实现与尚未完成的验收见 [access-control.md](access-control.md)。
+
 ## 8. API 端点
 
 > 下表按功能分组列出路由前缀与代表性端点；完整逐路由清单以 [internal/transport/http/router.go](../internal/transport/http/router.go) 为准（本文档不追求逐路由重复，避免重蹈过去脱节的覆辙）。

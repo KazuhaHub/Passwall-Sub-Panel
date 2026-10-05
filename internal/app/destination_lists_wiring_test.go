@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -20,8 +21,21 @@ import (
 )
 
 func buildDestinationListsFixture(t *testing.T) *App {
+	return buildDestinationListsFixtureWithCatalog(t, nil)
+}
+
+func buildDestinationListsFixtureWithCatalog(t *testing.T, catalog []byte) *App {
 	t.Helper()
 	directory := t.TempDir()
+	if catalog != nil {
+		path := filepath.Join(directory, "data", "destlists")
+		if err := os.MkdirAll(path, 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(path, "dlc_plain.yml"), catalog, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
 	a, err := Build(t.Context(), &config.Config{Listen: "127.0.0.1:0", JWTSecret: strings.Repeat("j", 48), EncryptionKey: strings.Repeat("e", 48), ConfigDir: filepath.Join(directory, "config"), DataDir: filepath.Join(directory, "data")})
 	if err != nil {
 		t.Fatal(err)

@@ -41,3 +41,95 @@ export async function retryDestinationPolicy(agentId: string): Promise<Destinati
   )
   return data
 }
+
+export type DestinationListKind = 'custom' | 'remote' | 'geosite'
+export interface DestinationParseReport {
+  accepted: number
+  ignored: number
+  ignored_broad: number
+  rewritten: number
+  samples: Array<{ line: number; text: string; reason: string }>
+}
+export interface DestinationReference { kind: 'policy' | 'group'; id: number; name: string }
+export interface DestinationListSummary {
+  id: number
+  name: string
+  kind: DestinationListKind
+  source_url: string
+  geosite_category: string
+  geosite_attrs: string
+  entry_count: number
+  regexp_count: number
+  state: 'ready' | 'refreshing' | 'failed' | 'pending'
+  last_fetched_at: number | null
+  last_error: string
+  owner_group_id: number
+  updated_at: number
+  parse_report_summary: Omit<DestinationParseReport, 'samples'> | null
+  used_by: DestinationReference[]
+}
+export interface DestinationListDetail extends Omit<DestinationListSummary, 'parse_report_summary' | 'used_by'> {
+  parse_report: DestinationParseReport | null
+  entries: string[]
+  source_text?: string
+}
+export type DestinationBudget = Record<'rules' | 'domains' | 'regexps' | 'cidrs' | 'subjects' | 'bytes', { used: number; limit: number }>
+export interface DestinationListsView { items: DestinationListSummary[]; refresh_hours: number; budget: DestinationBudget }
+export interface DestinationListInput {
+  name: string
+  kind: DestinationListKind
+  source_url?: string
+  geosite_category?: string
+  geosite_attrs?: string
+  text?: string
+}
+export interface DestinationListPreview {
+  parse_report: DestinationParseReport
+  entries: string[]
+  entry_count: number
+  regexp_count: number
+  http_status: number
+  bytes: number
+}
+export interface DestinationCategoriesView {
+  categories: Array<{ name: string; count: number; regexp_count: number; source_count: number; ignored_broad_count: number; attrs: string[] }>
+  updated_at: number
+}
+
+export async function getDestinationLists(opts: ReadOptions = {}): Promise<DestinationListsView> {
+  const { data } = await client.get<DestinationListsView>('/admin/dest/lists', { signal: opts.signal, _skipErrorToast: opts.silent })
+  return data
+}
+export async function getDestinationList(id: number, text = false, opts: ReadOptions = {}): Promise<DestinationListDetail> {
+  const { data } = await client.get<DestinationListDetail>(`/admin/dest/lists/${id}`, { params: text ? { text: 1 } : undefined, signal: opts.signal, _skipErrorToast: opts.silent })
+  return data
+}
+export async function previewDestinationList(input: DestinationListInput, signal?: AbortSignal): Promise<DestinationListPreview> {
+  const { data } = await client.post<DestinationListPreview>('/admin/dest/lists/preview', input, { signal, _skipErrorToast: true })
+  return data
+}
+export async function createDestinationList(input: DestinationListInput): Promise<DestinationListDetail> {
+  const { data } = await client.post<DestinationListDetail>('/admin/dest/lists', input, { _skipErrorToast: true })
+  return data
+}
+export async function putDestinationList(id: number, input: DestinationListInput & { updated_at: number }): Promise<DestinationListDetail> {
+  const { data } = await client.put<DestinationListDetail>(`/admin/dest/lists/${id}`, input, { _skipErrorToast: true })
+  return data
+}
+export async function deleteDestinationList(id: number): Promise<void> {
+  await client.delete(`/admin/dest/lists/${id}`, { _skipErrorToast: true })
+}
+export async function patchDestinationListEntries(id: number, add: string[], remove?: string[]): Promise<DestinationListDetail> {
+  const { data } = await client.post<DestinationListDetail>(`/admin/dest/lists/${id}/entries`, { add, remove }, { _skipErrorToast: true })
+  return data
+}
+export async function refreshDestinationList(id: number): Promise<void> {
+  await client.post(`/admin/dest/lists/${id}/refresh`, undefined, { _skipErrorToast: true })
+}
+export async function getDestinationCategories(opts: ReadOptions = {}): Promise<DestinationCategoriesView> {
+  const { data } = await client.get<DestinationCategoriesView>('/admin/dest/geosite/categories', { signal: opts.signal, _skipErrorToast: opts.silent })
+  return data
+}
+export async function refreshDestinationCategories(): Promise<void> {
+  await client.post('/admin/dest/geosite/refresh', undefined, { _skipErrorToast: true })
+}

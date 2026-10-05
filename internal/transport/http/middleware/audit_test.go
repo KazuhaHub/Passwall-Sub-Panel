@@ -10,6 +10,19 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+func TestDestPreviewEndpointsAreNotAudited(t *testing.T) {
+	for _, path := range []string{"/api/admin/dest/lists/preview", "/api/admin/dest/policies/preview"} {
+		if shouldAuditPath(path, http.MethodPost) {
+			t.Fatal("read-only preview was audited")
+		}
+	}
+	for _, path := range []string{"/api/admin/dest/test", "/api/admin/dest/lists/preview/extra", "/api/admin/dest/lists"} {
+		if !shouldAuditPath(path, http.MethodPost) {
+			t.Fatal("preview exemption swallowed a write")
+		}
+	}
+}
+
 // captureBodyFor builds a test gin.Context around a request with the given
 // content type + raw body and returns what captureRequestBody records.
 func captureBodyFor(t *testing.T, contentType, body string) any {

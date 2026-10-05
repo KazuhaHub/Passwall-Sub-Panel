@@ -11,6 +11,18 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+func TestDestinationAccessLogOmitsQueryString(t *testing.T) {
+	for _, path := range []string{"/api/admin/dest/hits?q=private.example.test", "/api/admin/dest/lists/4?text=1"} {
+		line := xrayAccessLogFormatter(gin.LogFormatterParams{Path: path})
+		if strings.Contains(line, "?") || strings.Contains(line, "private.example.test") {
+			t.Fatal("destination query leaked into access log")
+		}
+	}
+	if line := xrayAccessLogFormatter(gin.LogFormatterParams{Path: "/ordinary?q=keep"}); !strings.Contains(line, "?q=keep") {
+		t.Fatal("ordinary log query disappeared")
+	}
+}
+
 func TestAccessLoggerUsesXrayStyleLine(t *testing.T) {
 	params := gin.LogFormatterParams{
 		TimeStamp:  time.Date(2026, 9, 16, 3, 4, 5, 600, time.FixedZone("local", -7*60*60)),
