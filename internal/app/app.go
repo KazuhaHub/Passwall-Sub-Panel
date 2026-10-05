@@ -5,6 +5,7 @@ package app
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"net"
@@ -120,6 +121,7 @@ func (a *asyncDispatcher) Go(name string, fn func(ctx context.Context)) {
 // ListenAndServe and runs the background workers in goroutines; Shutdown
 // cancels both.
 type App struct {
+	database      *sql.DB
 	operationGate *operationgate.Gate
 	cfg           *config.Config
 	server        *http.Server
@@ -234,6 +236,16 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	if err != nil {
 		return nil, fmt.Errorf("db open: %w", err)
 	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		return nil, fmt.Errorf("db connection: %w", err)
+	}
+	assembled := false
+	defer func() {
+		if !assembled {
+			_ = sqlDB.Close()
+		}
+	}()
 	if err := sqlstore.EnsureSchema(db); err != nil {
 		return nil, fmt.Errorf("db schema: %w", err)
 	}
@@ -534,7 +546,13 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	// (e.g. an admin POST after Build but before Run), and Shutdown will
 	// fire bgCancel even if Run never started.
 	bgCtx, cancel := context.WithCancel(context.Background())
+	defer func() {
+		if !assembled {
+			cancel()
+		}
+	}()
 	a := &App{
+		database:      sqlDB,
 		operationGate: operationgate.New(),
 		cfg:           cfg,
 		bgCancel:      cancel,
@@ -819,6 +837,7 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 		IdleTimeout:       2 * time.Minute,
 		MaxHeaderBytes:    1 << 20, // 1 MiB
 	}
+	assembled = true
 	return a, nil
 }
 
@@ -1840,12 +1859,19 @@ func (a *App) Shutdown(ctx context.Context) error {
 	}
 
 	done := make(chan struct{})
+	var databaseErr error
 	go func() {
 		a.bgWG.Wait()
+		// If the caller's deadline expires, the workers still own this pool
+		// until they exit. Close it here rather than underneath their writes.
+		if a.database != nil {
+			databaseErr = a.database.Close()
+		}
 		close(done)
 	}()
 	select {
 	case <-done:
+		return errors.Join(httpErr, databaseErr)
 	case <-ctx.Done():
 		log.Warn("shutdown: background workers did not exit before deadline")
 	}

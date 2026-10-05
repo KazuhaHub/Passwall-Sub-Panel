@@ -461,6 +461,15 @@ Its assertions pass; the lifecycle leak remains to be fixed. This increment
 awaits its own CI. App assembly passes the shared selector to node/reconcile,
 but does not yet configure destination eligibility or activate the compiler.
 
+The application now owns its primary SQL pool explicitly. Failed assembly
+closes it, while successful Shutdown closes it only after tracked background
+readers/writers drain. If the shutdown deadline expires, draining and eventual
+pool closure continue together rather than closing beneath an active worker.
+The real-database lifecycle regression first failed because the pool remained
+open. It and the formerly failing trusted-account fixture now pass, and the
+complete local app suite and static checks pass. This lifecycle increment
+awaits its own CI.
+
 This is a C3 foundation with an optional tested sync boundary. It does not
 implement the full C3 acceptance: application assembly, issue/resync integration,
 eligibility activation, full member removal and membership-change invalidation wiring, immediate pause UI/API wiring,
