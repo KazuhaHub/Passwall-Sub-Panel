@@ -28,6 +28,17 @@ func requireGroupModeStore(t *testing.T, r *DestDefinitionRepo) groupModeDefinit
 	return store
 }
 
+// SQL drivers may attach different locations to the same UTC instant.
+// Compare every mode field while normalizing timestamp representation.
+func comparableDestinationMode(mode domain.DestGroupMode) domain.DestGroupMode {
+	mode.UpdatedAt = mode.UpdatedAt.UTC()
+	if mode.StageChangedAt != nil {
+		instant := mode.StageChangedAt.UTC()
+		mode.StageChangedAt = &instant
+	}
+	return mode
+}
+
 func modeGroupFixture(t *testing.T) (*DestDefinitionRepo, *domain.Group, time.Time) {
 	t.Helper()
 	r := newDestDefinitionRepo(t)
@@ -129,7 +140,7 @@ func TestDestinationGroupModeRejectsDirectEnforceAndUnreadyReferences(t *testing
 		t.Fatal("unready remote list entered enforce")
 	}
 	after, err := store.GetGroupMode(t.Context(), g.ID)
-	if err != nil || !reflect.DeepEqual(before, after) {
+	if err != nil || !reflect.DeepEqual(comparableDestinationMode(before), comparableDestinationMode(after)) {
 		t.Fatal("failed readiness transition changed stored mode")
 	}
 	if err := r.CommitListRefresh(t.Context(), remote, domain.DestListRefresh{ContentSHA256: "empty-ready"}, now.Add(time.Second)); err != nil {
@@ -274,6 +285,8 @@ func TestDestinationModeClosedListDeletionAndReopenPreserveOtherContents(t *test
 	}
 	kept, err := r.GetList(t.Context(), m.ExtraListID)
 	defs, readErr := r.ReadDefinitions(t.Context())
+	extra.CreatedAt, extra.UpdatedAt = extra.CreatedAt.UTC(), extra.UpdatedAt.UTC()
+	kept.CreatedAt, kept.UpdatedAt = kept.CreatedAt.UTC(), kept.UpdatedAt.UTC()
 	if err != nil || readErr != nil || len(defs.Lists) != 2 || m.BaseListID == deleted || !reflect.DeepEqual(extra, kept) {
 		t.Fatal("reopening duplicated lists or overwrote retained user content")
 	}

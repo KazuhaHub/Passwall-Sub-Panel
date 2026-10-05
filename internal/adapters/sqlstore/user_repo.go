@@ -524,7 +524,19 @@ func (r *userRepo) GrantEmergencyAccess(ctx context.Context, userID int64, until
 }
 
 func (r *userRepo) Delete(ctx context.Context, id int64) error {
-	return r.db.WithContext(ctx).Delete(&userRow{}, id).Error
+	if id <= 0 {
+		return domain.ErrValidation
+	}
+	return NewDestDefinitionRepo(r.db).mutate(ctx, time.Now(), func(tx *gorm.DB) (bool, error) {
+		exemptions := tx.Where("user_id = ?", id).Delete(&destExemptionRow{})
+		if exemptions.Error != nil {
+			return false, exemptions.Error
+		}
+		if err := tx.Delete(&userRow{}, id).Error; err != nil {
+			return false, err
+		}
+		return exemptions.RowsAffected > 0, nil
+	})
 }
 
 func (r *userRepo) GetByID(ctx context.Context, id int64) (*domain.User, error) {

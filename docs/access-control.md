@@ -635,6 +635,29 @@ stage-5 mode orchestration; no group-mode HTTP route is exposed yet. Template
 DNS host discovery, commit-following eligibility/resync orchestration and the
 trial-report prerequisites remain part of stage 5.
 
+User deletion now removes its destination exemption and advances the definition
+generation in the same transaction. Exemption writes check the user's existence
+after taking that generation lock, preventing a concurrent write from recreating
+an orphan exemption. A generation failure restores both the user and exemption;
+deleting a user without an exemption does not advance the definition generation.
+
+Converged native-panel retirement synchronously removes its runtime candidate
+under the existing agent owner lock. Candidate cleanup joins the panel/agent
+retirement transaction, so failure restores both identities and their runtime
+state. Nonconverged retirement preserves the candidate. Runtime cleanup does not
+advance the definition generation. Historical audit and consent cleanup remains
+with the later retention/orphan workers.
+
+Missing owner cleanup and concurrent orphan regressions failed before these
+changes. The complete local SQL-store, user, group, policy, nodesync, app,
+HTTP-handler and HTTP-router suites and relevant static checks passed. The
+group-transaction head 14da448d passed released-node systemd acceptance;
+its PostgreSQL lane failed two whole-struct comparisons that mixed caller UTC
+timestamps with SQL-driver timestamp locations. Those comparisons now normalize
+timestamps to UTC while retaining all content/identity checks. SQLite race and
+MySQL lanes passed at that head. Current-head complete CI, including PostgreSQL,
+remains pending.
+
 Stage 1c still requires the remaining multi-row service operations, API boundaries,
 access-control views and complete browser acceptance. List HTTP endpoints and
 C2's end-to-end browser acceptance remain outstanding. Audit ingestion,

@@ -75,6 +75,13 @@ func (r *DestDefinitionRepo) SaveExemption(ctx context.Context, ex *domain.DestE
 	}
 	row := destExemptionRow{UserID: ex.UserID, Reason: ex.Reason, CreatedBy: ex.CreatedBy, ExpiresAt: ex.ExpiresAt}
 	err = r.mutate(ctx, now, func(tx *gorm.DB) (bool, error) {
+		// User deletion takes the same generation lock before removing its
+		// exemption. This read must follow that lock so a concurrent create
+		// cannot recreate a definition for an already deleted owner.
+		var owner userRow
+		if err := tx.Select("id").First(&owner, "id = ?", row.UserID).Error; err != nil {
+			return false, destinationRowError(err)
+		}
 		if create {
 			row.CreatedAt = now
 			err := tx.Create(&row).Error
