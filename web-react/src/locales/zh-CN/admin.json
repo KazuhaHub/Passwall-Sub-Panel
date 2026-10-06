@@ -498,7 +498,8 @@
       "failed": "保存失败，选择已保留。",
       "created": "已创建放行例外列表和策略，并加入 {{entry}}；等待下发。",
       "saved": "已加入 {{entry}}；等待下发。"
-    }
+    },
+    "view_account": "查看账号…"
   },
   "languagePacks": {
     "title": "语言包",

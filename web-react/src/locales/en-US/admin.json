@@ -498,7 +498,8 @@
       "failed": "Save failed; your selection is preserved.",
       "created": "Created the allow-exception list and policy and added {{entry}}; awaiting publication.",
       "saved": "Added {{entry}}; awaiting publication."
-    }
+    },
+    "view_account": "View account…"
   },
   "languagePacks": {
     "title": "Language packs",

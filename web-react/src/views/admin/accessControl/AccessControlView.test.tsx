@@ -19,6 +19,40 @@ vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string, opti
 vi.mock('@/components/CodeEditor', () => ({ default: (p: { value: string; onChange: (s: string) => void; ariaLabel: string; readOnly: boolean }) => <textarea aria-label={p.ariaLabel} value={p.value} readOnly={p.readOnly} onChange={e => p.onChange(e.target.value)} /> }))
 import AccessControlView from './AccessControlView'
 const P = 'admin:access_control.'
+it('opens the account Access drawer from the header and closes back to the page', async () => {
+  const original = api.get.getMockImplementation()!
+  api.get.mockImplementation(async (url: string, config?: unknown) => {
+    if (url === '/admin/users') return { data: { items: [{ id: 13, upn: 'alice@example.test' }], total: 1 } }
+    if (url === '/admin/users/13') return { data: { id: 13, upn: 'alice@example.test' } }
+    if (url === '/admin/dest/users/13') return { data: { group: null, exemption: null } }
+    if (url === '/admin/risk-center/users/13') return { data: { user: { id: 13, upn: 'alice@example.test', display_name: '', role: 'user', enabled: true, group_id: 0, group_name: '', traffic_limit_bytes: 0 }, attention: [], review: { dismissed: false, trusted: false, escalated: [] }, geo: null, signals: [], live: {}, devices: [], device_window_hours: 24, devices_unavailable: false } }
+    if (url.startsWith('/admin/risk-center/')) throw err(503, 'unavailable')
+    return original(url, config)
+  })
+  const router = mount()
+  fireEvent.mouseDown(await screen.findByRole('combobox', { name: `${P}view_account` }))
+  fireEvent.click(await screen.findByRole('option', { name: 'alice@example.test' }))
+  await screen.findByRole('tab', { name: 'admin:risk_center.drawer.tab_access', selected: true })
+  expect(router.state.location.search).toBe('?user=13')
+  fireEvent.click(screen.getByRole('button', { name: 'admin:risk_center.drawer.close' }))
+  await waitFor(() => expect(router.state.location.search).toBe(''))
+})
+it('opens list refresh settings focused on the refresh interval', async () => {
+  listsAPI([listSummary]); settingsAPI(); mount('/admin/access-control?tab=lists')
+  fireEvent.click(await screen.findByRole('button', { name: `${P}list_editor.change_refresh` }))
+  const refresh = await screen.findByRole('textbox', { name: `${P}settings.dest_list_refresh_hours` })
+  await waitFor(() => expect(document.activeElement).toBe(refresh))
+})
+it('replaces a cold list sheet with refresh settings and closes in place', async () => {
+  listsAPI([listSummary]); settingsAPI(); const router = mount('/admin/access-control?tab=lists&sheet=list&list=7')
+  fireEvent.click(await screen.findByRole('button', { name: 'common:actions.edit' }))
+  const editor = await screen.findByRole('dialog', { name: `${P}list_editor.edit_title` })
+  fireEvent.click(within(editor).getByRole('button', { name: `${P}list_editor.change_refresh` }))
+  const settings = await screen.findByRole('dialog', { name: `${P}settings.title` })
+  await waitFor(() => expect(router.state.location.search).toBe('?tab=lists&sheet=settings'))
+  fireEvent.click(within(settings).getByRole('button', { name: 'common:actions.close' }))
+  await waitFor(() => expect(router.state.location.search).toBe('?tab=lists'))
+})
 it('replaces a cold list drawer with a state-prefilled test and closes in place', async () => {
   listsAPI([listSummary]); const router = mount('/admin/access-control?tab=lists&sheet=list&list=7')
   fireEvent.click(await screen.findByRole('button', { name: `${P}test.test_entry domain:bank.example` }))
@@ -115,6 +149,11 @@ const listDetail: DestinationListDetail = { id: 7, name: 'Finance', kind: 'geosi
 const listSummary: DestinationListSummary = { ...listDetail, parse_report_summary: listReport, used_by: [] }
 function listsAPI(items: DestinationListSummary[]) {
   api.get.mockImplementation(async (url: string) => ({ data: url.endsWith('/policies') ? destinationPolicies() : url.endsWith('/status') ? destinationStatus() : url.endsWith('/lists') ? { items, budget: destinationBudget, refresh_hours: 12 } : url.endsWith('/lists/7') ? listDetail : { settings: {}, effective: {} } }))
+}
+function settingsAPI() {
+  const original = api.get.getMockImplementation()!
+  const defaults = { dest_hit_retention_days: 30, dest_trial_retention_days: 7, dest_usage_retention_days: 7, dest_list_refresh_hours: 24, dest_policy_apply_min_seconds: 60 }
+  api.get.mockImplementation(async (url: string, config?: unknown) => url.endsWith('/dest/settings') ? { data: { settings: { ...defaults }, defaults, effective: defaults } } : original(url, config))
 }
 it('shows filtered broad entries as a usable category, excluded from the problem filter', async () => {
   listsAPI([listSummary]); mount('/admin/access-control?tab=lists')

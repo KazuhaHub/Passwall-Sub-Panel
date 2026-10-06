@@ -22,6 +22,8 @@ import ExemptionsSheet from './sheets/ExemptionsSheet'
 import RiskUserDrawer from '../risk/drawer/RiskUserDrawer'
 import TestSheet from './sheets/TestSheet'
 import type { DrawerHistoryState } from '@/hooks/useDrawerParam'
+import type { AccessControlSettingKey } from '@/api/accessControl'
+import UserAutocomplete from '@/components/UserAutocomplete'
 const P = 'admin:access_control.'
 export default function AccessControlView() {
   const scope = useQueryScope()
@@ -42,6 +44,15 @@ function AccessControlPage({ scope }: { scope: QueryScope }) {
   const tab = params.get('tab') === 'lists' ? 'lists' : 'policies'
   const [newListRequest, setNewListRequest] = useState(0)
   const [policyRequest, setPolicyRequest] = useState<{ id: number; token: number } | null>(null)
+  const [settingsFocus, setSettingsFocus] = useState<AccessControlSettingKey | undefined>(undefined)
+  const openSettings = (focus?: AccessControlSettingKey) => {
+    setSettingsFocus(focus)
+    const replacing = sheet.id !== null || user.id !== null, state = { ...location.state }
+    delete state.prefill
+    if (!replacing || state.drawer === 'sheet' || state.drawer === 'user') state.drawer = 'sheet'
+    else delete state.drawer
+    setParams(prev => { const next = new URLSearchParams(prev); next.set('sheet', 'settings'); next.delete('user'); next.delete('list'); next.delete('node_state'); return next }, { replace: replacing, state: Object.keys(state).length ? state : null })
+  }
   const openTest = (target?: string) => {
     const replacing = sheet.id !== null || user.id !== null, state = { ...location.state, prefill: target ? { target } : undefined }
     if (!replacing || state.drawer === 'sheet' || state.drawer === 'user') state.drawer = 'sheet'
@@ -57,10 +68,12 @@ function AccessControlPage({ scope }: { scope: QueryScope }) {
   const rawList = params.get('list'), listId = rawList && /^\d+$/.test(rawList) && Number.isSafeInteger(Number(rawList)) && Number(rawList) > 0 ? Number(rawList) : null
   const openList = (id: number) => setParams(prev => { const next = new URLSearchParams(prev); next.set('sheet', 'list'); next.set('list', String(id)); next.delete('node_state'); next.delete('user'); return next }, { replace: sheet.id === 'list', state: { ...location.state, drawer: 'sheet' } })
   const openUser = (id: number) => {
+    const replacing = sheet.id !== null || user.id !== null
     const state = { ...location.state }
-    if (state.drawer === 'sheet') state.drawer = 'user'
+    delete state.prefill
+    if (!replacing || state.drawer === 'sheet' || state.drawer === 'user') state.drawer = 'user'
     else delete state.drawer
-    setParams(prev => { const next = new URLSearchParams(prev); next.set('user', String(id)); next.delete('sheet'); next.delete('node_state'); next.delete('list'); return next }, { replace: true, state: Object.keys(state).length ? state : null })
+    setParams(prev => { const next = new URLSearchParams(prev); next.set('user', String(id)); next.delete('sheet'); next.delete('node_state'); next.delete('list'); return next }, { replace: replacing, state: Object.keys(state).length ? state : null })
   }
   const [busy, setBusy] = useState(false)
   const admission = useRef(false)
@@ -80,19 +93,19 @@ function AccessControlPage({ scope }: { scope: QueryScope }) {
   }
   return <Box sx={{ p: { xs: 2, sm: 3 } }}>
     {busy && <PendingActionGuard />}
-    <PageHeader title={t(`${P}title`)} subtitle={t(`${P}subtitle`)} actions={<Stack direction="row" sx={{ flexWrap: 'wrap', gap: 1 }}><Button onClick={() => openTest()}>{t(`${P}test.title`)}</Button><Button onClick={() => sheet.open('nodes')}>{t(`${P}coverage.open`)}</Button><Button onClick={() => sheet.open('settings')}>{t(`${P}settings.title`)}</Button></Stack>} />
+    <PageHeader title={t(`${P}title`)} subtitle={t(`${P}subtitle`)} actions={<Stack direction="row" sx={{ flexWrap: 'wrap', alignItems: 'center', gap: 1 }}><Button onClick={() => openTest()}>{t(`${P}test.title`)}</Button><UserAutocomplete key={user.id ?? 'lookup'} label={t(`${P}view_account`)} value={null} onChange={id => { if (id) openUser(id) }} /><Button onClick={() => sheet.open('nodes')}>{t(`${P}coverage.open`)}</Button><Button onClick={() => openSettings()}>{t(`${P}settings.title`)}</Button></Stack>} />
     {unavailable ? <Alert severity="info">{t(`${P}unwired`)}</Alert> : <>
       <StatusLine stackActionsOnMobile tone={status.error ? 'attention' : verdict?.tone ?? 'quiet'} title={status.error ? t(`${P}status_failed`) : title} announcement={status.error ? t(`${P}status_failed`) : title}
         detail={<>{status.data?.next_publish_at != null && <Typography component="span" aria-label={t(`${P}publish_at`, { time: new Date(status.data.next_publish_at).toLocaleString() })}>{t(`${P}countdown`, { seconds: Math.max(0, Math.ceil((status.data.next_publish_at - now) / 1000)) })}</Typography>}{status.data?.publish_error && <Typography component="span">{t(`${P}publish_error`, { kind: status.data.publish_error.kind, used: status.data.publish_error.used, limit: status.data.publish_error.limit })}</Typography>}</>}
         actions={<Stack direction="row" sx={{ flexWrap: 'wrap', gap: 1 }}>{status.error && <Button onClick={() => void status.refetch()}>{t('common:actions.retry')}</Button>}{status.data && <><Button disabled={busy} onClick={() => void perform()}>{t(`${P}publish`)}</Button><Button disabled={busy} color={status.data.paused ? 'primary' : 'error'} onClick={() => void perform(!status.data!.paused)}>{t(`${P}${status.data.paused ? 'resume' : 'pause'}`)}</Button></>}</Stack>} />
       <Tabs value={tab} sx={{ mb: 2 }} onChange={(_, value) => setParams(prev => { const next = new URLSearchParams(prev); next.set('tab', value); return next }, { replace: true, state: location.state })} aria-label={t(`${P}tabs`)}><Tab value="policies" label={t(`${P}policies.title`)} /><Tab value="lists" label={t(`${P}lists.title`)} /></Tabs>
       {tab === 'policies' && (definitions.data ? <>{definitions.error && <Alert sx={{ mb: 2 }} severity="warning" action={<Button onClick={() => void definitions.refetch()}>{t('common:actions.retry')}</Button>}>{t(`${P}definitions_stale`)}</Alert>}<PoliciesTab data={definitions.data} status={status.data} seconds={settings.data?.effective.dest_policy_apply_min_seconds} onCreateList={createList} onExemptions={() => sheet.open('exemptions')} openRequest={policyRequest} /></> : definitions.error ? <Alert severity="error" action={<Button onClick={() => void definitions.refetch()}>{t('common:actions.retry')}</Button>}>{t(`${P}definitions_failed`)}</Alert> : <Stack spacing={1} aria-busy="true">{[0,1,2,3,4].map(key => <Skeleton key={key} variant="rounded" height={56} />)}</Stack>)}
-      <ListsTab active={tab === 'lists'} selectedId={activeSheet === 'list' ? listId : null} onCloseSheet={sheet.close} onOpenList={openList} onSettings={() => sheet.open('settings')} onTest={openTest} newListRequest={newListRequest} policies={definitions.data} status={status.data} />
+      <ListsTab active={tab === 'lists'} selectedId={activeSheet === 'list' ? listId : null} onCloseSheet={sheet.close} onOpenList={openList} onSettings={() => openSettings('dest_list_refresh_hours')} onTest={openTest} newListRequest={newListRequest} policies={definitions.data} status={status.data} />
     </>}
     {activeSheet === 'nodes' && <NodeCoverageDrawer status={status.data} onClose={sheet.close} />}
     {activeSheet === 'exemptions' && <ExemptionsSheet onClose={sheet.close} onOpenUser={openUser} etaMs={status.data?.apply_eta_ms} />}
     {activeSheet === 'test' && <TestSheet onClose={sheet.close} onOpenPolicy={openPolicy} status={status.data} prefill={(location.state as DrawerHistoryState | null)?.prefill} />}
     <RiskUserDrawer userId={user.id} onClose={user.close} host="access" />
-    <AccessSettingsDialog open={activeSheet === 'settings'} onClose={sheet.close} />
+    <AccessSettingsDialog open={activeSheet === 'settings'} onClose={sheet.close} focusKey={settingsFocus} />
   </Box>
 }

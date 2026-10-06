@@ -1325,7 +1325,32 @@ worker. The preceding two-worker run exited with a Windows native worker fault
 refined; it is not counted as a passing run. Final verdict-tone and asynchronous
 button changes were followed by 251 passing focused tests. TypeScript, changed-source
 lint, locale generation and production builds passed. Exact-head CI for this
-increment remains a separate draft-PR gate.
+increment remains a separate draft-PR gate. Simulation head `3ffbffcc` subsequently
+passed [complete Test](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37528643108)
+and [released-node systemd acceptance](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37528643110).
+Real third-party panels were skipped; the systemd job still covers released Node
+beta4, not unmerged Node #78 policy-kernel behavior.
+
+## Account launcher and refresh-setting navigation
+
+The header now uses the shared server-backed account autocomplete. Selection
+pushes an account drawer on its Access tab; closing returns to the previous
+page/tab. The lookup resets across account open/close edges. Sheet-to-account
+navigation retains history replacement, cold closing and parameter cleanup.
+
+The list page and list editor open destination settings focused on
+`dest_list_refresh_hours`. Opening settings replaces an existing sheet without
+retaining its list/filter/target prefill; a cold sheet closes settings in place.
+Opening from the page creates the normal owned history entry. The header's
+settings action clears the specialized focus.
+
+The account, focus and cold-navigation regressions failed before implementation.
+The page, account autocomplete, settings and drawer-history checks passed 63
+tests; the final check including locale parity passed 70. TypeScript, changed
+source lint, locale generation and production build also passed. Isolated
+browser fixtures verified account selection on the Access tab,
+return to the list tab, actual refresh-field focus and a 375px header without
+horizontal overflow. Those fixtures were removed after validation.
 
 ## Storage and privacy
 
