@@ -894,8 +894,49 @@ static checks, TypeScript compilation and 23 diagnostics-catalog tests pass.
 Windows Application Control blocked the final service/handler test executables;
 security settings were not changed. Earlier focused service tests ran normally,
 but the current full service/handler suites require Linux CI on this increment.
-Current publication-control-head CI remains pending. Frontend DTOs/client calls
-are included; the publication/pause controls and browser acceptance remain pending.
+Publication-control head `0ff2c3397fc8abace20c21bc2cc4c0654bbd384c` passed its
+[complete Test workflow](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37394505871)
+and [released-node systemd acceptance](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37394505648).
+Real third-party panel jobs were skipped; this does not establish unmerged
+Node #78 kernel acceptance. Frontend DTOs/client calls are included; the
+publication/pause controls and browser acceptance remain pending.
+
+## Server collection preferences
+
+The existing administrator-only server list includes `audit_collect` on native
+PSP rows. Third-party rows omit it. PUT `/api/admin/servers/:id` accepts `off`,
+`hits` or `hits_and_usage` only for native PSP servers. Omitted or null values
+preserve the saved preference. Invalid values and explicit third-party modes
+fail before any submitted display metadata is saved.
+
+The HTTP path uses the existing narrow native metadata writer. Collection mode,
+its revision and any submitted display metadata commit in one SQL transaction.
+Only a changed mode increments revision; repeated saves preserve it. The
+client cannot assign revision, and normal full-row saves continue to omit both
+collection fields. An unavailable narrow writer returns 503 instead of reporting
+a successful save that silently discards the preference. Failed SQL writes
+preserve all prior fields and return an opaque error. A failed pool replacement
+restores the prior mode through the same writer, retaining monotonic revision.
+
+Saved collection settings remain distinct from effective node collection. Every
+sync reads the current mode and revision, so a warm candidate cannot reuse an
+older collection epoch. Turning collection off retains enforcement rules;
+re-enabling uses the new revision. A node reporting only hit capability receives
+hits even when the saved mode requests usage. Collection changes advance neither
+definition nor publication generation.
+
+Initial actual-HTTP regressions proved ignored collection input could still
+commit submitted display metadata. Focused Build/HTTP/SQL and handler checks now
+cover saved DTOs, omission/null, no-op revision, off/re-enable, invalid modes,
+third-party rejection, administrator boundaries, storage rollback, pool rollback,
+missing atomic writers and warm native candidates with capability downgrade.
+Complete local app and HTTP-handler suites, relevant static checks and
+TypeScript compilation pass. Windows Application Control blocked the HTTP-router
+test executable; security settings were not changed and Linux CI must complete
+that coverage. Current server-collection head CI remains pending. The recording
+controls remain deferred to the planned
+collection UI stages; audit ingestion and its shared collection gate still
+belong to stage 2.
 
 ## Storage and privacy
 

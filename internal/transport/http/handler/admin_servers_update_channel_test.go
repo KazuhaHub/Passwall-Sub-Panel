@@ -35,7 +35,7 @@ func (r *channelPanelRepo) Save(_ context.Context, panel *domain.Panel) error {
 	r.panel = &copy
 	return nil
 }
-func (r *channelPanelRepo) UpdateNativeMetadata(_ context.Context, _ int64, name, remark *string, channel *domain.PanelUpdateChannel, _ *domain.AuditCollect) error {
+func (r *channelPanelRepo) UpdateNativeMetadata(_ context.Context, _ int64, name, remark *string, channel *domain.PanelUpdateChannel, collect *domain.AuditCollect) error {
 	r.narrowWrites++
 	if name != nil {
 		r.panel.Name = *name
@@ -45,6 +45,10 @@ func (r *channelPanelRepo) UpdateNativeMetadata(_ context.Context, _ int64, name
 	}
 	if channel != nil {
 		r.panel.UpdateChannel = *channel
+	}
+	if collect != nil && *collect != r.panel.AuditCollect {
+		r.panel.AuditCollect = *collect
+		r.panel.AuditCollectRevision++
 	}
 	return nil
 }
