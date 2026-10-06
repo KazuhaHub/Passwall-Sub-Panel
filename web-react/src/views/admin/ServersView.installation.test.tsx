@@ -117,12 +117,8 @@ describe('Passwall Node installation', () => {
     expect(api.post).not.toHaveBeenCalled()
     expect(api.put).not.toHaveBeenCalled()
   })
-  it('keeps identity, credentials and full scripts folded by default, with a labeled advanced control and one-line command feedback', async () => {
+  it('keeps identity, credentials and full scripts folded by default, with a labeled advanced control', async () => {
     reads()
-    const generated = { server_id: 7, command: 'curl -fsSL https://panel.test/bootstrap/private-ticket -o /tmp/install',
-      expires_at: new Date(Date.now() + 15 * 60_000).toISOString() }
-    api.post.mockResolvedValue({ data: generated })
-    copy.mockResolvedValue(false)
     mount(<NativeInstallationDialog server={nativeServer} initialProvisioning={provisioning} onClose={vi.fn()} onRotate={vi.fn()} />)
     expect(screen.queryByLabelText('admin:servers.native.credential')).toBeNull()
     expect(screen.queryByLabelText('admin:servers.native.agent_id')).toBeNull()
@@ -133,6 +129,19 @@ describe('Passwall Node installation', () => {
     expect(advanced.tagName).toBe('BUTTON')
     expect(advanced.getAttribute('aria-expanded')).toBe('false')
     expect(advanced.getAttribute('tabindex')).not.toBe('-1')
+    fireEvent.click(advanced)
+    expect(advanced.getAttribute('aria-expanded')).toBe('true')
+    expect((await screen.findByLabelText('admin:servers.native.credential') as HTMLInputElement).value).toBe(provisioning.credential)
+    expect(api.post).not.toHaveBeenCalled()
+    expect(api.put).not.toHaveBeenCalled()
+  })
+  it('shows the generated command on one line and retains it when copy fails, without unfolding credentials', async () => {
+    reads()
+    const generated = { server_id: 7, command: 'curl -fsSL https://panel.test/bootstrap/private-ticket -o /tmp/install',
+      expires_at: new Date(Date.now() + 15 * 60_000).toISOString() }
+    api.post.mockResolvedValue({ data: generated })
+    copy.mockResolvedValue(false)
+    mount(<NativeInstallationDialog server={nativeServer} initialProvisioning={provisioning} onClose={vi.fn()} onRotate={vi.fn()} />)
     await selectVersion('4.1.0')
     expect(screen.queryByText('Reviewed contract fixture')).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'admin:servers.native.generate_command' }))
@@ -142,9 +151,8 @@ describe('Passwall Node installation', () => {
     fireEvent.click(screen.getByRole('button', { name: 'admin:servers.native.copy_command' }))
     await screen.findByText('admin:servers.native.copy_failed', undefined, { timeout: 5000 })
     expect(field.value).toBe(generated.command)
-    fireEvent.click(advanced)
-    expect(advanced.getAttribute('aria-expanded')).toBe('true')
-    expect((await screen.findByLabelText('admin:servers.native.credential') as HTMLInputElement).value).toBe(provisioning.credential)
+    expect(screen.queryByLabelText('admin:servers.native.credential')).toBeNull()
+    expect(screen.queryByLabelText('admin:servers.native.agent_id')).toBeNull()
     expect(api.post).toHaveBeenCalledTimes(1)
     expect(api.put).not.toHaveBeenCalled()
   })
