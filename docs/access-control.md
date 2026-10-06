@@ -1021,8 +1021,29 @@ Before later ingestion stages, `hits_24h` and `losses` remain null.
 The initial HTTP regression failed against SPA fallback. Full local SQL-store
 and domain suites, relevant static checks and frontend TypeScript compilation
 pass. Windows Application Control blocked application, policy and HTTP test
-executables; full Linux CI validation remains pending for this increment.
+executables. Status head `bdc134d9c85eae48b19243fae35d1f3c91d55479` passed
+the [complete Test workflow](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37399543455)
+and [released-node systemd acceptance](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37399543473).
+Linux CI completed all blocked test coverage; real third-party jobs were skipped.
 The status views and browser/real-node acceptance remain outstanding.
+
+## Compiler and list-refresh diagnostics
+
+The remaining stage-1c metrics `psp_dest_policy_compile_total`,
+`psp_dest_policy_compile_ms` and `psp_dest_list_refresh_total` now record actual
+compiler calls and executed refresh work. Compiler outcomes use the seven
+planned labels, with transaction failures counted as `invalid` rather than
+successful cache hits. Refresh outcomes use four planned labels; remote broad
+rejection retains old content and category filtering retains its report.
+Previews and joined refresh waiters do not create extra refresh attempts.
+All families and bounded label values share the existing native-node diagnostic
+card, both language bundles and catalog consistency tests. Exact semantics are
+documented in [observability](observability.md#49-目的地编译与列表刷新指标).
+
+Initial actual compiler/refresh regressions failed before implementation.
+Full local compiler, list-service and metrics suites and focused catalog tests
+pass. Full current-increment CI remains pending; counters do not establish
+node enforcement, recording availability or later ingestion-stage completion.
 
 ## Storage and privacy
 

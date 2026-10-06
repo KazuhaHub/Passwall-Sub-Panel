@@ -3900,6 +3900,18 @@
         "label": "Access control publication checks failed",
         "desc": "Publication attempts rejected by validation with their error saved. Storage failures and superseded attempts do not count; the previous published version stays in use."
       },
+      "psp_dest_policy_compile_total": {
+        "label": "Access control candidate compilation calls",
+        "desc": "Each compiler call has one result: candidate produced, complete cache reused, fallback or failure. Cached results must complete their storage transaction; this does not establish node acknowledgement."
+      },
+      "psp_dest_policy_compile_ms": {
+        "label": "Access control compilation time",
+        "desc": "Total time per compiler call, including cache reads, storage and failed attempts, in milliseconds."
+      },
+      "psp_dest_list_refresh_total": {
+        "label": "Access control list refresh attempts",
+        "desc": "One result per executed refresh. Broad entries mean a remote list was rejected with previous content retained, or a category was successfully saved after filtering. Download, cancellation and storage errors count as failed."
+      },
       "psp_saml_acs_failure_total": {
         "label": "SAML sign-ins refused",
         "desc": "Refused SAML sign-ins (and sign-in starts), by reason. Configuration reasons point at identity-provider settings; \"Assertion replayed\" needs investigating."
@@ -3910,6 +3922,21 @@
       }
     },
     "labels": {
+      "dest_compile": {
+        "cache_hit": "Complete cache reused",
+        "compiled": "Candidate produced",
+        "fallback_rejected": "Fallback after rejection",
+        "fallback_sniffing": "Fallback after insufficient sniffing",
+        "fallback_over_limit": "Fallback after exceeding limits",
+        "fallback_nil": "Fallback to empty policy",
+        "invalid": "No usable result"
+      },
+      "dest_list_refresh": {
+        "unchanged": "Content unchanged",
+        "updated": "Content updated",
+        "failed": "Refresh failed",
+        "broad": "Broad entries handled"
+      },
       "dest_publish": {
         "debounced": "After the edit delay",
         "max_wait": "Maximum edit wait reached",

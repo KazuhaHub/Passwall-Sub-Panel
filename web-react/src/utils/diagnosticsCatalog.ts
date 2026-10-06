@@ -129,6 +129,9 @@ export const FAMILY_CATALOG: Record<string, FamilyInfo> = {
   psp_dest_pruned_rows_total: c('node', true),
   psp_dest_policy_publish_total: c('node', true),
   psp_dest_policy_publish_rejected_total: c('node'),
+  psp_dest_policy_compile_total: c('node', true),
+  psp_dest_policy_compile_ms: h('node'),
+  psp_dest_list_refresh_total: c('node', true),
 
   // --- single sign-on ---
   psp_saml_acs_failure_total: c('sso', true),
@@ -157,6 +160,8 @@ export const FAMILY_LABEL_GROUP: Record<string, string> = {
   psp_node_sync_refused_total: 'node_refused',
   psp_dest_pruned_rows_total: 'dest_table',
   psp_dest_policy_publish_total: 'dest_publish',
+  psp_dest_policy_compile_total: 'dest_compile',
+  psp_dest_list_refresh_total: 'dest_list_refresh',
   psp_saml_acs_failure_total: 'saml',
   psp_sso_claim_silent_total: 'sso_kind',
 }

@@ -220,6 +220,24 @@ describe('familyOf', () => {
   })
 })
 
+describe('destination compiler and list refresh diagnostics', () => {
+  it('keeps the planned metrics on the native node card', () => {
+    expect(FAMILY_CATALOG.psp_dest_policy_compile_total).toEqual({ card: 'node', type: 'counter', labelled: true })
+    expect(FAMILY_CATALOG.psp_dest_policy_compile_ms).toEqual({ card: 'node', type: 'histogram', labelled: false })
+    expect(FAMILY_CATALOG.psp_dest_list_refresh_total).toEqual({ card: 'node', type: 'counter', labelled: true })
+    expect(FAMILY_LABEL_GROUP).toMatchObject({ psp_dest_policy_compile_total: 'dest_compile', psp_dest_list_refresh_total: 'dest_list_refresh' })
+  })
+
+  it('translates every bounded compiler and refresh outcome in both languages', () => {
+    const src = goSource('internal/pkg/metrics/psp.go')
+    for (const [prefix, group, count] of [['DestCompile', 'dest_compile', 7], ['DestListRefresh', 'dest_list_refresh', 4]] as const) {
+      const values = [...src.matchAll(new RegExp(`${prefix}\\w+\\s*=\\s*"([a-z_]+)"`, 'g'))].map(m => m[1])
+      expect(values).toHaveLength(count)
+      expectCopy(values.map(v => `labels.${group}.${v}`))
+    }
+  })
+})
+
 describe('labelKey and labelFor', () => {
   // i18next reads "." as nothing special here (keySeparator is false) but a
   // flattened bundle key with a dot in it is still a trap for every tool that

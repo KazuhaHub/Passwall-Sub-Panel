@@ -564,21 +564,47 @@ const (
 )
 
 const (
-	DestPruneHits        = "hits"
-	DestPruneTrial       = "trial"
-	DestPruneUsage       = "usage"
-	DestPruneBatches     = "batches"
-	DestPruneLoss        = "loss"
-	DestPruneBudget      = "budget"
-	DestPruneExemptions  = "exemptions"
-	DestPruneOrphans     = "orphans"
-	DestPublishDebounced = "debounced"
-	DestPublishMaxWait   = "max_wait"
-	DestPublishManual    = "manual"
-	DestPublishPause     = "pause"
+	DestPruneHits                = "hits"
+	DestPruneTrial               = "trial"
+	DestPruneUsage               = "usage"
+	DestPruneBatches             = "batches"
+	DestPruneLoss                = "loss"
+	DestPruneBudget              = "budget"
+	DestPruneExemptions          = "exemptions"
+	DestPruneOrphans             = "orphans"
+	DestPublishDebounced         = "debounced"
+	DestPublishMaxWait           = "max_wait"
+	DestPublishManual            = "manual"
+	DestPublishPause             = "pause"
+	DestCompileCacheHit          = "cache_hit"
+	DestCompileCompiled          = "compiled"
+	DestCompileFallbackRejected  = "fallback_rejected"
+	DestCompileFallbackSniffing  = "fallback_sniffing"
+	DestCompileFallbackOverLimit = "fallback_over_limit"
+	DestCompileFallbackNil       = "fallback_nil"
+	DestCompileInvalid           = "invalid"
+	DestListRefreshUnchanged     = "unchanged"
+	DestListRefreshUpdated       = "updated"
+	DestListRefreshFailed        = "failed"
+	DestListRefreshBroad         = "broad"
 )
 
 var (
+	DestPolicyCompileTotal = NewCounterVec(
+		"psp_dest_policy_compile_total",
+		"Destination compiler calls by bounded outcome. Cache hits require successful runtime persistence; invalid means no usable result, including storage/cancellation failures.",
+		"result",
+	)
+	DestPolicyCompileMS = NewHistogram(
+		"psp_dest_policy_compile_ms",
+		"Elapsed destination compiler call time, including cached calls and failures. A candidate result does not establish node acknowledgement.",
+		"ms", LatencyBucketsMS,
+	)
+	DestListRefreshTotal = NewCounterVec(
+		"psp_dest_list_refresh_total",
+		"Executed list refresh attempts by one bounded outcome. Broad means a durably recorded remote broad-entry rejection or successful category filtering; failed includes other download, parsing, cancellation and commit failures.",
+		"result",
+	)
 	DestPolicyPublishTotal = NewCounterVec(
 		"psp_dest_policy_publish_total",
 		"Committed destination snapshot publications, by bounded trigger. No-op requests and failed CAS writes do not count.",

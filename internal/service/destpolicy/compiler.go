@@ -12,6 +12,7 @@ import (
 	"github.com/KazuhaHub/passwall-protocol/protocol"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/boundedcache"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/metrics"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 )
 
@@ -97,6 +98,12 @@ func (c *Compiler) ObserveStatus(ctx context.Context, agentID string, status *pr
 }
 
 func (c *Compiler) Compile(ctx context.Context, agent *domain.NodeAgent, snapshot *ports.NativeDesiredSnapshot, caps []string, base protocol.ConfigBody) (ports.DestPolicyCandidate, error) {
+	started := time.Now()
+	outcome := metrics.DestCompileInvalid
+	defer func() {
+		metrics.DestPolicyCompileTotal.With(outcome).Inc()
+		metrics.DestPolicyCompileMS.ObserveSince(started)
+	}()
 	if c == nil || c.publisher == nil {
 		return ports.DestPolicyCandidate{}, domain.ErrUnavailable
 	}
@@ -163,9 +170,11 @@ func (c *Compiler) Compile(ctx context.Context, agent *domain.NodeAgent, snapsho
 	var beforeKey, afterKey string
 	var pending *cachedSelection
 	resync := false
+	selectedOutcome := metrics.DestCompileInvalid
 	changed, err := c.runtime.Update(ctx, agent.AgentID, c.now().UTC(), func(runtime *domain.DestAgentPolicy, loadBodies func() error) (bool, error) {
 		pending = nil
 		resync = false
+		selectedOutcome = metrics.DestCompileInvalid
 		blocked := fallbackBlocksAllowlist(*runtime)
 		key := selectionKey(inputKey, *runtime)
 		if key != "" {
@@ -173,6 +182,7 @@ func (c *Compiler) Compile(ctx context.Context, agent *domain.NodeAgent, snapsho
 				changed := cached.decision.apply(runtime)
 				result = cached.candidate
 				resync = blocked != fallbackBlocksAllowlist(*runtime)
+				selectedOutcome = metrics.DestCompileCacheHit
 				return changed, nil
 			}
 		}
@@ -188,6 +198,7 @@ func (c *Compiler) Compile(ctx context.Context, agent *domain.NodeAgent, snapsho
 		}
 		if err == nil {
 			result = candidate
+			selectedOutcome = compileResultOutcome(candidate, prepared, *runtime)
 			resync = blocked != fallbackBlocksAllowlist(*runtime)
 			if key != "" {
 				beforeKey, afterKey = key, selectionKey(inputKey, *runtime)
@@ -201,6 +212,9 @@ func (c *Compiler) Compile(ctx context.Context, agent *domain.NodeAgent, snapsho
 	if err != nil {
 		return ports.DestPolicyCandidate{}, err
 	}
+	// A cached decision is not a successful result until its owner transaction
+	// completes. Failed persistence keeps the attempt in the invalid bucket.
+	outcome = selectedOutcome
 	if pending != nil {
 		weight := policyWeight(pending.candidate.Policy) + 512
 		for _, listener := range pending.decision.Listeners {
@@ -218,6 +232,28 @@ func (c *Compiler) Compile(ctx context.Context, agent *domain.NodeAgent, snapsho
 		c.allowlistResync(ctx, agent.AgentID)
 	}
 	return cloneCandidate(result), nil
+}
+
+func compileResultOutcome(candidate ports.DestPolicyCandidate, prepared *PreparedCandidate, state domain.DestAgentPolicy) string {
+	if candidate.Mint.Kind == domain.DestCandidateFallback {
+		switch state.FallbackReason {
+		case "rejected":
+			return metrics.DestCompileFallbackRejected
+		case "sniffing":
+			return metrics.DestCompileFallbackSniffing
+		case "over_limit":
+			return metrics.DestCompileFallbackOverLimit
+		default:
+			return metrics.DestCompileInvalid
+		}
+	}
+	if candidate.Mint.Kind == domain.DestCandidateEmpty && !prepared.defs.State.Paused {
+		fallback := prepared.limit != nil || len(prepared.precheck) > 0 || state.FallbackExhausted && state.MintedContext == prepared.context || state.RejectedGeneration > 0 && state.RejectedGeneration == prepared.defs.State.Generation && state.RejectedContext == prepared.context
+		if fallback {
+			return metrics.DestCompileFallbackNil
+		}
+	}
+	return metrics.DestCompileCompiled
 }
 
 func (c *Compiler) publishedDefinitions(ctx context.Context) (domain.DestDefinitions, domain.DestPolicyState, error) {

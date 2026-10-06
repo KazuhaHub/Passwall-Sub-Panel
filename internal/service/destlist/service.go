@@ -11,6 +11,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/metrics"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/operationgate"
 	"golang.org/x/sync/singleflight"
 )
@@ -238,6 +239,9 @@ func (s *Service) withListFlight(ctx context.Context, id int64, work func() (any
 }
 
 func (s *Service) refreshCaptured(ctx context.Context, captured domain.DestList, cacheError error) error {
+	outcome := metrics.DestListRefreshFailed
+	// Record once in the actual single-flight work, not for every waiter.
+	defer func() { metrics.DestListRefreshTotal.With(outcome).Inc() }()
 	result, err := FetchResult{}, cacheError
 	if err == nil {
 		result, err = s.Preview(ctx, captured)
@@ -254,6 +258,19 @@ func (s *Service) refreshCaptured(ctx context.Context, captured domain.DestList,
 	}
 	if commitErr := s.store.CommitListRefresh(ctx, captured, refresh, s.now().UTC()); commitErr != nil {
 		return commitErr
+	}
+	var parseError *Error
+	if errors.As(err, &parseError) && parseError.Code == "broad_entry" {
+		outcome = metrics.DestListRefreshBroad
+	} else if err == nil {
+		switch {
+		case result.Parsed.Report.IgnoredBroad > 0:
+			outcome = metrics.DestListRefreshBroad
+		case result.Parsed.ContentSHA256 == captured.ContentSHA256:
+			outcome = metrics.DestListRefreshUnchanged
+		default:
+			outcome = metrics.DestListRefreshUpdated
+		}
 	}
 	return err
 }
