@@ -45,7 +45,13 @@
       "resume_message": "Restrictions resume after each node successfully applies the version and restarts its proxy once. Offline or failed nodes need separate checks."
     },
     "title": "Access control",
-    "subtitle": "Manage destination policies and check native node execution.",
+    "subtitle": "Decide which destinations users can access through native nodes.",
+    "more": "More access control actions",
+    "help": {
+      "label": "About {{name}}",
+      "policies": "Access control is enforced by nodes; blocked connections are disconnected. The rule library only determines client routing, which users can change themselves. Only PSP native nodes enforce these policies; operators manage 3X-UI and S-UI routing themselves.\n\nRules are evaluated from top to bottom and stop at the first match. After an observation match, later rules do not apply to that connection. Ordering within one action only determines the policy name attributed to the match; place blocking policies that count toward risk above others.\n\nNodes can see the destination (domain or IP), but cannot see URL paths. Policies can be bypassed with ECH, resolving through DoH then connecting directly to an IP, or a client's own encrypted tunnel.\n\nIP ranges apply only to connections initiated with an IP; IPs resolved from domain names do not participate in matching. BT detection only recognizes plaintext handshakes and uTP; encrypted BT and DHT cannot be detected.\n\nRegular expressions are matched individually for every connection and consume resources; the limit is {{max_regexps}}.\n\nEach deployment restarts the node's proxy once and interrupts active connections once. Deployment waits {{seconds}} seconds after the last change; consecutive changes are combined into one deployment.",
+      "lists": "Supported formats: plain domains; domain: / full: / keyword: / regexp:; *.x; hosts lines; AdGuard ||x^; Clash rules; IPs and IP ranges. Lines beginning with # are comments. Saving lowercases domains, removes trailing dots, converts international domain names to punycode and aligns IP ranges to their network address.\n\nRemote and category lists refresh every {{hours}} hours. Only changed content is deployed; failed refreshes keep the previous content.\n\nBroad entries (expressions matching almost all domains, keywords shorter than four characters, public suffixes themselves and excessively large IP ranges) are excluded from custom lists and community categories, with a parse report. A remote URL list containing them fails the entire refresh and keeps its previous content. Community categories also keep previous content when filtering leaves no entries; a first download remains unready. Excluded entries are never deployed."
+    },
     "unwired": "The access control service is unavailable",
     "status_unknown": "Reading node execution status",
     "status_failed": "Status could not be read; node execution is unconfirmed",

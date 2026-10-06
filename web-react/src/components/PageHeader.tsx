@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { Box, Typography } from '@mui/material'
+import { Box, Typography, type SxProps, type Theme } from '@mui/material'
 
 // PageHeader is the ONE canonical admin-page header — title (h4) + optional
 // subtitle + optional right-aligned actions, with uniform spacing — so every
@@ -9,10 +9,12 @@ export default function PageHeader({
   title,
   subtitle,
   actions,
+  actionsSx,
 }: {
   title: ReactNode
   subtitle?: ReactNode
   actions?: ReactNode
+  actionsSx?: SxProps<Theme>
 }) {
   return (
     <Box sx={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', flexWrap: 'wrap', gap: 2, mb: 2 }}>
@@ -22,7 +24,7 @@ export default function PageHeader({
           <Typography variant="body2" sx={{ mt: 0.5, color: 'text.secondary' }}>{subtitle}</Typography>
         ) : null}
       </Box>
-      {actions ? <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>{actions}</Box> : null}
+      {actions ? <Box sx={[{ display: 'flex', gap: 1, flexWrap: 'wrap' }, ...(Array.isArray(actionsSx) ? actionsSx : actionsSx ? [actionsSx] : [])]}>{actions}</Box> : null}
     </Box>
   )
 }

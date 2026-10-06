@@ -1426,8 +1426,44 @@ locale generation and production build passed. Chinese desktop and 375px English
 dark fixtures verified first-failure retry, cached-503 explanations, actual
 upgrade/excluded filters, default drawer depth, phone width and wrapped stale
 text. Fixtures were removed. These checks do not replace live backend/node or
-full-matrix acceptance. Remaining S1 header/menu/help details and recording
-summaries in stage 2c retain their planned scope.
+full-matrix acceptance. Recording summaries in stage 2c retain their planned
+scope.
+
+The status head `ef87d48b58c6ad755ff4044afe11f172dc3a7200` passed
+[complete Test](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37534440698)
+and [released-node systemd acceptance](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37534440847).
+Real third-party panels were skipped; released-node installation does not
+establish unmerged Node #78 policy-kernel acceptance.
+
+## Header actions and tab help
+
+The page menu opens data/deployment settings and confirms pause or resume using
+the existing guarded write. An unknown status disables that menu's state-changing
+action. A paused conclusion retains its direct resume action. Opening settings
+keeps active list filters and owned history. On phones, testing is an accessible
+icon and account selection occupies its own full row; desktop keeps the text
+action. The scrollable tab strip reserves space for help about only the current
+tab. No group/record tab or legal-settings link is invented before its target
+exists; the legal menu entry remains stage-3 work.
+
+Policy and list help follow the final plan's complete wording, including native
+node enforcement, matching order, observation termination, bypasses, IP/BT
+limits, deployment interruptions and broad-entry exclusion/report behavior.
+Quota and interval values come from the actual definitions/effective settings;
+unread values show an em dash rather than a fabricated default. The shared help
+component accepts independent text interpolation, preserves paragraphs and
+names its popover as a dialog. Phone help has bounded width and scrollable
+height. PageHeader's optional action styling leaves existing callers unchanged.
+
+Four new menu/help regressions failed before implementation. The final page,
+status, help, history, risk/diagnostic shared-component and locale checks passed
+182 tests after the width adjustment. Three menu-state checks passed after
+adding unknown-status and resume coverage. TypeScript, changed-source lint,
+locale generation and production build passed.
+[Browser evidence](access-control-acceptance/README.md) records
+Chinese desktop and 375px English dark fixtures, actual non-default interpolation,
+pause cancellation and help margins. This partial evidence does not replace
+live acceptance, the full screen matrix or owner approval.
 
 ## Storage and privacy
 

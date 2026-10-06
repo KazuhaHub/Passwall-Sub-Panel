@@ -53,6 +53,6 @@ export default function StatusOverview({ data, verdict, failed, refreshing, read
       <Button disabled={busy} onClick={() => onOpenNodes()}>{t(`${P}coverage.open`)}</Button>
       {(listIssue || listQuota) && <Button disabled={busy} onClick={() => onOpenLists(listIssue)}>{t(`${P}open_lists`)}</Button>}
       <AsyncButton pending={busy} onClick={onPublish}>{t(`${P}publish`)}</AsyncButton>
-      <AsyncButton pending={busy} color={data.paused ? 'primary' : 'error'} onClick={() => onPause(!data.paused)}>{t(`${P}${data.paused ? 'resume' : 'pause'}`)}</AsyncButton>
+      {data.paused && <AsyncButton pending={busy} onClick={() => onPause(false)}>{t(`${P}resume`)}</AsyncButton>}
     </Stack>} />
 }

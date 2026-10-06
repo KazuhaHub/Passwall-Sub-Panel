@@ -21,10 +21,12 @@ export default function HelpTip({
   textKey,
   labelKey = 'admin:risk_center.help.label',
   labelValues,
+  textValues,
 }: {
   textKey: string
   labelKey?: string
   labelValues?: Record<string, string>
+  textValues?: Record<string, string | number>
 }) {
   const { t } = useTranslation(['admin'])
   const md = useTheme().palette.md
@@ -38,8 +40,8 @@ export default function HelpTip({
       <Popover open={anchor !== null} anchorEl={anchor} onClose={() => setAnchor(null)}
         anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
         transformOrigin={{ vertical: 'top', horizontal: 'right' }}
-        slotProps={{ paper: { sx: { maxWidth: 420, p: 2 } } }}>
-        <Typography sx={{ fontSize: 13, lineHeight: 1.6, color: md.onSurface }}>{t(textKey)}</Typography>
+        slotProps={{ paper: { role: 'dialog', 'aria-label': labelValues ? t(labelKey, labelValues) : t(labelKey), sx: { maxWidth: 'min(420px, calc(100vw - 32px))', boxSizing: 'border-box', p: 2 } } }}>
+        <Typography sx={{ fontSize: 13, lineHeight: 1.6, color: md.onSurface, whiteSpace: 'pre-line' }}>{textValues ? t(textKey, textValues) : t(textKey)}</Typography>
       </Popover>
     </Box>
   )

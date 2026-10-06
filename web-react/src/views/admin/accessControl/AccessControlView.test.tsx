@@ -19,6 +19,57 @@ vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string, opti
 vi.mock('@/components/CodeEditor', () => ({ default: (p: { value: string; onChange: (s: string) => void; ariaLabel: string; readOnly: boolean }) => <textarea aria-label={p.ariaLabel} value={p.value} readOnly={p.readOnly} onChange={e => p.onChange(e.target.value)} /> }))
 import AccessControlView from './AccessControlView'
 const P = 'admin:access_control.'
+it('opens settings from the page menu without publishing or losing list filters', async () => {
+  settingsAPI(); const router = mount('/admin/access-control?tab=lists&lst_state=problem')
+  fireEvent.click(await screen.findByRole('button', { name: `${P}more` }))
+  fireEvent.click(screen.getByRole('menuitem', { name: `${P}settings.title` }))
+  await screen.findByRole('dialog', { name: `${P}settings.title` })
+  expect(router.state.location.search).toBe('?tab=lists&lst_state=problem&sheet=settings')
+  expect(screen.queryByRole('menu')).toBeNull()
+  expect(api.post).not.toHaveBeenCalled(); expect(api.put).not.toHaveBeenCalled()
+})
+it('requires confirmation before the menu pauses execution and preserves cancellation', async () => {
+  confirmation.mockResolvedValue(false); mount()
+  await screen.findByRole('status')
+  fireEvent.click(screen.getByRole('button', { name: `${P}more` }))
+  fireEvent.click(screen.getByRole('menuitem', { name: `${P}pause` }))
+  await waitFor(() => expect(confirmation).toHaveBeenCalledWith(expect.objectContaining({ title: `${P}confirm.pause_title`, destructive: true })))
+  expect(api.put).not.toHaveBeenCalled(); expect(api.post).not.toHaveBeenCalled()
+  expect(screen.queryByRole('menu')).toBeNull()
+})
+it('disables menu pause when the first status read failed', async () => {
+  const original = api.get.getMockImplementation()!
+  api.get.mockImplementation(async (url: string, config?: unknown) => { if (url.endsWith('/status')) throw err(500, 'unavailable'); return original(url, config) })
+  mount(); await screen.findByRole('alert')
+  fireEvent.click(screen.getByRole('button', { name: `${P}more` }))
+  const pause = screen.getByRole('menuitem', { name: `${P}pause` })
+  expect(pause.getAttribute('aria-disabled')).toBe('true')
+  fireEvent.click(pause)
+  expect(confirmation).not.toHaveBeenCalled(); expect(api.put).not.toHaveBeenCalled()
+})
+it('offers resume rather than pause after a confirmed paused status', async () => {
+  const original = api.get.getMockImplementation()!
+  api.get.mockImplementation(async (url: string, config?: unknown) => url.endsWith('/status') ? { data: destinationStatus({ paused: true }) } : original(url, config))
+  mount(); await screen.findByRole('status')
+  fireEvent.click(screen.getByRole('button', { name: `${P}more` }))
+  fireEvent.click(screen.getByRole('menuitem', { name: `${P}resume` }))
+  await waitFor(() => expect(api.put).toHaveBeenCalledWith('/admin/dest/pause', { paused: false }, { _skipErrorToast: true }))
+  expect(confirmation).toHaveBeenCalledWith(expect.objectContaining({ title: `${P}confirm.resume_title`, destructive: false }))
+  expect(api.post).not.toHaveBeenCalled()
+})
+it('explains only the selected tab and preserves its filters without writing', async () => {
+  const router = mount('/admin/access-control?lst_state=problem')
+  fireEvent.click(await screen.findByRole('button', { name: `${P}help.label ${P}policies.title` }))
+  expect(screen.getByText(`${P}help.policies`)).toBeTruthy()
+  fireEvent.keyDown(screen.getByText(`${P}help.policies`), { key: 'Escape' })
+  await waitFor(() => expect(screen.queryByText(`${P}help.policies`)).toBeNull())
+  fireEvent.click(screen.getByRole('tab', { name: `${P}lists.title` }))
+  fireEvent.click(screen.getByRole('button', { name: `${P}help.label ${P}lists.title` }))
+  expect(screen.getByText(`${P}help.lists`)).toBeTruthy()
+  expect(screen.queryByText(`${P}help.policies`)).toBeNull()
+  expect(router.state.location.search).toBe('?lst_state=problem&tab=lists')
+  expect(api.post).not.toHaveBeenCalled(); expect(api.put).not.toHaveBeenCalled()
+})
 it('keeps policies usable after a first status failure and retries only the status read', async () => {
   const original = api.get.getMockImplementation()!; let statusReads = 0
   api.get.mockImplementation(async (url: string, config?: unknown) => { if (url.endsWith('/status') && ++statusReads === 1) throw err(500, 'unavailable'); return original(url, config) })
@@ -536,7 +587,7 @@ it('does not claim fallback exhaustion is applied until the empty candidate is c
 })
 it('reports saved pause state after a failed publication instead of claiming the fleet is paused', async () => {
   api.put.mockRejectedValue({ isAxiosError: true, response: { status: 503, data: { error: 'dest_policy_publish_unavailable', pause_saved: true, paused: true } } })
-  mount(); fireEvent.click(await screen.findByRole('button', { name: `${P}pause` }))
+  mount(); await screen.findByRole('status'); fireEvent.click(screen.getByRole('button', { name: `${P}more` })); fireEvent.click(screen.getByRole('menuitem', { name: `${P}pause` }))
   await waitFor(() => expect(snack).toHaveBeenCalledWith(`${P}pause_saved`, 'error'))
   expect(api.put).toHaveBeenCalledWith('/admin/dest/pause', { paused: true }, { _skipErrorToast: true })
 })
