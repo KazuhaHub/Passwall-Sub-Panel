@@ -1,6 +1,7 @@
-import { lazy, Suspense, useEffect, useRef, useState } from 'react'
-import { Alert, Autocomplete, Box, Button, Checkbox, Dialog, DialogActions, DialogContent, DialogTitle, FormControlLabel, IconButton, MenuItem, Skeleton, Stack, Switch, TextField, ToggleButton, ToggleButtonGroup, Typography, useMediaQuery, useTheme } from '@mui/material'
+import { lazy, Suspense, useEffect, useId, useRef, useState } from 'react'
+import { Accordion, AccordionDetails, AccordionSummary, Alert, Autocomplete, Box, Button, Checkbox, Dialog, DialogActions, DialogContent, DialogTitle, FormControlLabel, IconButton, MenuItem, Skeleton, Stack, Switch, TextField, ToggleButton, ToggleButtonGroup, Typography, useMediaQuery, useTheme } from '@mui/material'
 import CloseIcon from '@mui/icons-material/Close'
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import { useTranslation } from 'react-i18next'
 import { useQuery } from '@tanstack/react-query'
 import { getDestinationPolicies, previewDestinationPolicy, type DestinationPoliciesView, type DestinationPolicyInput, type DestinationPolicyOverviewItem, type DestinationStatus } from '@/api/accessControl'
@@ -23,6 +24,9 @@ import { listPreviewBlocksSave } from '../lists/listDraft'
 const CodeEditor = lazy(() => import('@/components/CodeEditor'))
 const P = 'admin:access_control.editor.'
 interface Props { initial: DestinationPolicyInput; existing?: DestinationPolicyOverviewItem; policies: DestinationPoliciesView; status?: DestinationStatus; seconds?: number; onClose: () => void }
+function hasAdditionalConditions(input: DestinationPolicyInput) {
+  return !!(input.inline.ports?.trim() || input.inline.network || input.inline.cidrs?.some(line => line.trim()) || input.inline.protocols?.length || input.inline.private)
+}
 export default function PolicyEditorDialog({ initial, existing, policies, status, seconds, onClose }: Props) {
   const { t } = useTranslation(['admin', 'common'])
   const scope = useQueryScope()
@@ -30,6 +34,8 @@ export default function PolicyEditorDialog({ initial, existing, policies, status
   const mobile = useMediaQuery(theme.breakpoints.down('sm'))
   const [seed, setSeed] = useState(() => policyInput(initial))
   const [draft, setDraft] = useState(seed)
+  const [conditionsOpen, setConditionsOpen] = useState(() => hasAdditionalConditions(seed))
+  const conditionsId = useId()
   const [version, setVersion] = useState(existing?.updated_at)
   const [error, setError] = useState<{ error: string; field?: string }>({ error: '' })
   const [busy, setBusy] = useState(false)
@@ -68,6 +74,7 @@ export default function PolicyEditorDialog({ initial, existing, policies, status
       const details = destinationError(err)
       const field = details.error === 'dest_name_taken' ? 'name' : details.field
       setError({ error: details.error, field: field && ['name', 'ports', 'cidrs', 'group_ids'].includes(field) ? field : undefined })
+      if (field === 'ports' || field === 'cidrs') setConditionsOpen(true)
     } finally { admission.current = false; setBusy(false) }
   }
   const reload = async () => {
@@ -77,17 +84,18 @@ export default function PolicyEditorDialog({ initial, existing, policies, status
       const latest = await getDestinationPolicies({ silent: true })
       const row = [...latest.allow, ...latest.block, ...latest.observe].find(row => row.id === existing?.id)
       if (!row) { setError({ error: 'dest_policy_missing' }); return }
-      const next = policyInput(row); setSeed(next); setDraft(next); setVersion(row.updated_at); setError({ error: '' })
+      const next = policyInput(row); setSeed(next); setDraft(next); setConditionsOpen(hasAdditionalConditions(next)); setVersion(row.updated_at); setError({ error: '' })
     } catch (err) { setError(destinationError(err)) } finally { admission.current = false; setBusy(false) }
   }
   const listChoices = (lists.data?.items ?? []).filter(list => !list.owner_group_id)
   const names = new Map(listChoices.map(list => [list.id, list.name]))
   const match = matchSummary(draft)
+  const additionalSummary = summaryText(t, { ...draft, list_ids: [], new_list: undefined }, names)
   const nodeCount = status?.nodes.filter(node => node.kind === 'psp' && node.supports.policy && !['offline', 'unsupported_version'].includes(node.state)).length
   const rows = policies[draft.action]
   const position = existing && existing.action === draft.action ? Math.max(1, rows.findIndex(row => row.id === existing.id) + 1) : rows.length + 1
   return <Dialog open fullWidth maxWidth="md" fullScreen={mobile} onClose={close} aria-labelledby="access-policy-title">
-    <DialogTitle id="access-policy-title" sx={{ display: 'flex', alignItems: 'center' }}><Box component="span" sx={{ flex: 1 }}>{t(existing ? `${P}edit_title` : `${P}create_title`, { name: seed.name })}</Box><IconButton aria-label={t('common:actions.close')} disabled={busy} onClick={close}><CloseIcon /></IconButton></DialogTitle>
+    <DialogTitle component="div" id="access-policy-heading" sx={{ display: 'flex', alignItems: 'center' }}><Typography component="h2" variant="h6" id="access-policy-title" sx={{ flex: 1 }}>{t(existing ? `${P}edit_title` : `${P}create_title`, { name: seed.name })}</Typography><IconButton aria-label={t('common:actions.close')} disabled={busy} onClick={close}><CloseIcon /></IconButton></DialogTitle>
     <DialogContent dividers><Stack spacing={2.5}>
       {error.error && !error.field && <Alert severity="error" action={error.error === 'dest_policy_stale' ? <Button color="inherit" disabled={busy} onClick={() => void reload()}>{t(`${P}reload`)}</Button> : undefined}>{t(`${P}${error.error}`, { defaultValue: error.error })}</Alert>}
       <Box component="fieldset" disabled={busy} sx={{ border: 0, p: 0, m: 0, minWidth: 0 }}><Stack spacing={2.5}>
@@ -107,13 +115,20 @@ export default function PolicyEditorDialog({ initial, existing, policies, status
           getOptionDisabled={id => listChoices.some(list => list.id === id && list.kind === 'custom' && !list.entry_count)}
           onChange={(_, list_ids) => change({ list_ids })} renderInput={p => <TextField {...p} label={t(`${P}lists`)} />} />
         {draft.list_ids.some(id => { const list = listChoices.find(list => list.id === id); return !list || list.state !== 'ready' || !list.entry_count }) && <Alert severity="warning">{t(`${P}list_pending`)}</Alert>}
-        <Typography variant="subtitle2">{t(`${P}more_conditions`)}</Typography>
+        <Accordion disableGutters elevation={0} expanded={conditionsOpen} onChange={(_, expanded) => setConditionsOpen(expanded)} disabled={busy} sx={{ border: 1, borderColor: 'divider', borderRadius: 2, '&:before': { display: 'none' } }}>
+          <AccordionSummary expandIcon={<ExpandMoreIcon />} aria-label={t(`${P}more_conditions`)} aria-describedby={additionalSummary ? `${conditionsId}-summary` : undefined} aria-controls={`${conditionsId}-content`} id={`${conditionsId}-toggle`} sx={{ '& .MuiAccordionSummary-content': { flexWrap: 'wrap', gap: 1, alignItems: 'center', minWidth: 0 } }}>
+            <Typography component="span" variant="subtitle2" sx={{ flex: '1 1 auto' }}>{t(`${P}more_conditions`)}</Typography>
+            {additionalSummary && <Typography component="span" id={`${conditionsId}-summary`} variant="caption" color="text.secondary" sx={{ overflowWrap: 'anywhere' }}>{t(`${P}conditions_set`)} {additionalSummary}</Typography>}
+          </AccordionSummary>
+          <AccordionDetails><Stack spacing={2}>
         <Box><Typography variant="body2" sx={{ mb: 1 }}>{t(`${P}cidrs`)}</Typography><Suspense fallback={<Skeleton height={140} />}><CodeEditor language="plain" minRows={6} ariaLabel={t(`${P}cidrs`)} value={(draft.inline.cidrs ?? []).join('\n')} readOnly={busy} onChange={value => change({ inline: { ...draft.inline, cidrs: value.split('\n') } })} /></Suspense>
           <Typography variant="caption" color={fieldError('cidrs') ? 'error' : 'text.secondary'}>{fieldMessage('cidrs') ?? t(`${P}cidrs_hint`)}</Typography></Box>
         <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}><TextField sx={{ flex: 1 }} label={t(`${P}ports`)} value={draft.inline.ports ?? ''} error={!!fieldError('ports')} helperText={fieldMessage('ports') ?? t(`${P}ports_hint`)} onChange={e => change({ inline: { ...draft.inline, ports: e.target.value } })} /><TextField select label={t(`${P}network`)} value={draft.inline.network ?? ''} sx={{ minWidth: 160 }} onChange={e => change({ inline: { ...draft.inline, network: e.target.value as '' | 'tcp' | 'udp' } })}>{['', 'tcp', 'udp'].map(network => <MenuItem key={network} value={network}>{network ? network.toUpperCase() : t(`${P}any`)}</MenuItem>)}</TextField></Stack>
         <FormControlLabel control={<Checkbox checked={match.bt} onChange={(_, checked) => change({ inline: { ...draft.inline, protocols: checked ? ['bittorrent'] : [] } })} />} label={t(`${P}bt`)} />
         <Typography variant="caption" color="text.secondary">{t(`${P}bt_hint`)}</Typography>
         <FormControlLabel control={<Checkbox checked={match.private} onChange={(_, checked) => change({ inline: { ...draft.inline, private: checked } })} />} label={t(`${P}private`)} />
+          </Stack></AccordionDetails>
+        </Accordion>
         {validation.match && <Alert severity="error">{t(`${P}no_match`)}</Alert>}
         <TextField select label={t(`${P}scope`)} value={draft.scope} onChange={e => change({ scope: e.target.value as 'all' | 'groups', group_ids: e.target.value === 'all' ? [] : draft.group_ids })}>{['all', 'groups'].map(scope => <MenuItem key={scope} value={scope}>{t(`${P}${scope}`)}</MenuItem>)}</TextField>
         {draft.scope === 'groups' && <><Autocomplete multiple options={(groups.data ?? []).map(group => group.id)} value={draft.group_ids} disabled={busy} loading={groups.isPending} getOptionLabel={id => groups.data?.find(group => group.id === id)?.name ?? `#${id}`} onChange={(_, group_ids) => change({ group_ids })} renderInput={p => <TextField {...p} label={t(`${P}groups`)} error={!!fieldError('group_ids')} helperText={fieldMessage('group_ids')} />} />{groups.error && <Alert severity="error" action={<Button onClick={() => void groups.refetch()}>{t('common:actions.retry')}</Button>}>{t(`${P}groups_failed`)}</Alert>}</>}

@@ -1465,6 +1465,34 @@ Chinese desktop and 375px English dark fixtures, actual non-default interpolatio
 pause cancellation and help margins. This partial evidence does not replace
 live acceptance, the full screen matrix or owner approval.
 
+The header head `a5923d7d2d2904d174f5a1b8865d189908add8e5` passed
+[complete Test](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37535638879)
+and [released-node systemd acceptance](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37535638849).
+Real third-party panels remained skipped; installation remains a released-node
+baseline.
+
+## Additional conditions
+
+The policy editor's additional conditions now use a controlled accordion. Blank
+policies start collapsed; any saved inline condition starts expanded. Collapsing
+keeps parent-owned values and exposes a live inline-only summary using the same
+matching grammar as the footer. Explicit stale reload resets expansion from the
+new record. Server port/CIDR field errors reopen the section on every failed
+save, including repeated errors after manual collapse; an initial effect keyed
+only by field name missed that repeated-error case and was repaired. Busy saves
+disable its toggle. The title and dialog have one shared label target containing
+only the title, with the close action outside the heading.
+
+Both initial accordion regressions failed against the prior implementation;
+the repeated-error regression also failed before repair. Final page/draft/template
+and locale/text guards passed 117 tests, with TypeScript, changed-source lint,
+locale generation and production build passing. Chinese desktop and
+375px English dark fixtures checked initial collapse, retained BT/port values,
+summary, repeated field errors, phone width and title semantics. Temporary
+fixtures/server/tabs were removed. This does not complete all S3 layout details
+or live acceptance; [partial screenshots](access-control-acceptance/README.md)
+retain those limits.
+
 ## Storage and privacy
 
 List previews and policy previews are excluded from write-audit logging by
