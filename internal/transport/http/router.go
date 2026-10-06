@@ -79,6 +79,7 @@ type Deps struct {
 	DestinationExceptions     *destpolicy.ExceptionManager
 	DestinationUserAccess     func(context.Context, int64) (domain.DestUserAccess, error)
 	DestinationControls       *destpolicy.Controls
+	DestinationTest           func(context.Context, destpolicy.DestinationTestInput) (destpolicy.DestinationTestResult, error)
 	// GeoRecords is the read side of the concurrent-location detector, the
 	// same rows the traffic poll writes each cycle. Optional: a deployment
 	// without it gets a 503 from the endpoint rather than an empty list, so
@@ -858,6 +859,7 @@ func NewRouter(d Deps) stdhttp.Handler {
 		destinationControls := handler.NewAdminDestinationControlsHandler(d.DestinationControls)
 		adminGroup.POST("/dest/publish", destinationControls.Publish)
 		adminGroup.PUT("/dest/pause", destinationControls.Pause)
+		adminGroup.POST("/dest/test", handler.NewAdminDestinationTestHandler(d.DestinationTest).Test)
 
 		// Offline geo database status + manual update (touches the update token
 		// + fetches an external DB — admin only).

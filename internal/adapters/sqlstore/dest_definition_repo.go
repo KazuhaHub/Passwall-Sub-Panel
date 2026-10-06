@@ -314,22 +314,25 @@ func (r *DestDefinitionRepo) PublishedState(ctx context.Context) (domain.DestPol
 		if err != nil {
 			return err
 		}
-		if state.PublishedGeneration == 0 {
-			return nil
-		}
-		var rows []destPolicySnapshotRow
-		if err := tx.Where("generation = ?", state.PublishedGeneration).Find(&rows).Error; err != nil {
-			return err
-		}
-		if len(rows) != 1 || !json.Valid(rows[0].Body) || len(rows[0].Body) == 0 || rows[0].Body[0] != '{' {
-			return fmt.Errorf("%w: missing or corrupt destination snapshot", domain.ErrUnavailable)
-		}
-		snapshot = domain.DestPolicySnapshot{Generation: rows[0].Generation, Body: append([]byte(nil), rows[0].Body...), CreatedAt: rows[0].CreatedAt}
-		found = true
-		return nil
+		snapshot, found, err = readDestPublishedSnapshot(tx, state)
+		return err
 	})
 	if err != nil {
 		return domain.DestPolicyState{}, domain.DestPolicySnapshot{}, false, err
 	}
 	return state, snapshot, found, nil
+}
+
+func readDestPublishedSnapshot(tx *gorm.DB, state domain.DestPolicyState) (domain.DestPolicySnapshot, bool, error) {
+	if state.PublishedGeneration == 0 {
+		return domain.DestPolicySnapshot{}, false, nil
+	}
+	var rows []destPolicySnapshotRow
+	if err := tx.Where("generation = ?", state.PublishedGeneration).Find(&rows).Error; err != nil {
+		return domain.DestPolicySnapshot{}, false, err
+	}
+	if len(rows) != 1 || !json.Valid(rows[0].Body) || len(rows[0].Body) == 0 || rows[0].Body[0] != '{' {
+		return domain.DestPolicySnapshot{}, false, fmt.Errorf("%w: missing or corrupt destination snapshot", domain.ErrUnavailable)
+	}
+	return domain.DestPolicySnapshot{Generation: rows[0].Generation, Body: append([]byte(nil), rows[0].Body...), CreatedAt: rows[0].CreatedAt}, true, nil
 }

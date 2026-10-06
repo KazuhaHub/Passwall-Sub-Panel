@@ -933,10 +933,56 @@ missing atomic writers and warm native candidates with capability downgrade.
 Complete local app and HTTP-handler suites, relevant static checks and
 TypeScript compilation pass. Windows Application Control blocked the HTTP-router
 test executable; security settings were not changed and Linux CI must complete
-that coverage. Current server-collection head CI remains pending. The recording
-controls remain deferred to the planned
+that coverage. Server-collection head `64441286327f3e00132486c689e04e293ee493f3`
+passed its [complete Test workflow](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37395531055)
+and [released-node systemd acceptance](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37395531369).
+Real third-party panel jobs were skipped; these results do not establish unmerged
+Node #78 kernel acceptance. The recording controls remain deferred to the planned
 collection UI stages; audit ingestion and its shared collection gate still
 belong to stage 2.
+
+## Destination simulation
+
+Administrator-only POST `/api/admin/dest/test` evaluates a domain or literal IP
+through `protocol.MatchDestination`. The optional port defaults to 443 and network
+to TCP. HTTP/HTTPS URLs contribute only their host; paths and URL credentials
+cannot influence matching. Unicode names normalize through IDNA. Validation rejects
+malformed targets, networks, ports, identities and unknown request fields.
+
+Executable rules come only from the selected published snapshot. Saved unpublished
+changes set `unpublished:true` and do not alter the result. Live emergency pause
+still takes priority. The simulation never publishes, invokes the runtime compiler,
+or mints config/roster streams. Its normal write-audit capture remains enabled.
+
+An explicit panel selects that panel's current client scope. A user without an
+explicit panel selects the first native panel with a client, ordered by panel ID.
+If no native client exists, the result is untestable with `no_native_client`, rather
+than inheriting an anonymous scope. With neither selection, anonymous virtual
+evaluation has no group or exemption membership. Current roster subjects and group
+membership are read alongside publication and display/status metadata in one
+consistent SQL transaction. User, panel, agent and client credentials, listener
+configs, current list originals and minted/confirmed runtime bodies are not read.
+
+The response preserves Protocol hit/miss/n/a/shadowed/skipped/untestable traces,
+source policy/group IDs, available display names and matching list-entry provenance.
+An earlier protocol-dependent rule makes the destination-only verdict untestable
+and removes a definitive terminating step. Node states accompany the logical
+result: a new publication is pending until the node confirms its candidate; a
+logical match alone does not prove what a live packet will do. Deleted display
+names remain absent while published source IDs remain available.
+
+Initial missing-route regressions failed against SPA fallback. Actual Build/HTTP
+checks now prove published-only behavior, current membership, bounded validation,
+missing owners, safe corruption errors, audit retention, unchanged definition and
+stream/runtime state, and applied-to-pending transition after new publication.
+A resolver interception proves these in-process requests make zero DNS attempts;
+domain targets do not match addresses derived from their names. SQL query guards
+prove transaction ownership and narrow reads. Service checks cover URL/IP
+normalization, source provenance, shadowing, exemptions, group trial, anonymous
+scope and protocol uncertainty. Complete local app, policy, SQL-store, handler,
+router and domain suites, relevant static checks and TypeScript compilation pass.
+Current simulation-head CI remains pending. The S13 drawer, browser acceptance and
+VM packet-capture/real-node comparisons remain outstanding under the final plan.
 
 ## Storage and privacy
 

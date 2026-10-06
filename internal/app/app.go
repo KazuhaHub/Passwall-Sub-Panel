@@ -779,6 +779,7 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 		DestinationExceptions:     a.destExceptions,
 		DestinationUserAccess:     a.destinationUserAccess,
 		DestinationControls:       a.destControls,
+		DestinationTest:           a.destinationTest,
 		GeoRecords:                geoStreaks,
 		// The risk view's rows. Optional, so leaving it out would compile —
 		// TestBuildWiresTheRiskSignals reads it through the assembled router.

@@ -2,6 +2,42 @@ import { client } from './client'
 import type { ReadOptions } from './requestOptions'
 import type { UISettings } from './settings'
 
+export type DestinationTestStepName = 'allow' | 'exemption' | 'block' | 'group' | 'observe' | 'direct'
+export type DestinationNodeState =
+  | 'none' | 'paused' | 'unsupported_kind' | 'unsupported_version' | 'pending'
+  | 'applied' | 'rejected' | 'over_limit' | 'sniffing' | 'offline'
+export interface DestinationTestInput {
+  target: string
+  port?: number
+  network?: 'tcp' | 'udp'
+  user_id?: number
+  panel_id?: number
+}
+export interface DestinationTestResult {
+  verdict: 'allow' | 'block' | 'observe' | 'exempt' | 'direct' | 'untestable'
+  terminating_step: DestinationTestStepName | null
+  steps: Array<{
+    step: DestinationTestStepName
+    policy_id?: number
+    group_id?: number
+    name?: string
+    result: 'miss' | 'n/a' | 'hit' | 'shadowed' | 'skipped' | 'untestable'
+    list_id?: number
+    entry?: string
+  }>
+  notes: string[]
+  unpublished: boolean
+  nodes: Array<{ panel_id: number; name: string; state: DestinationNodeState }>
+}
+
+/** Readonly simulation with write-audit capture; target stays in the POST body. */
+export async function testDestination(input: DestinationTestInput, opts: ReadOptions = {}): Promise<DestinationTestResult> {
+  const { data } = await client.post<DestinationTestResult>('/admin/dest/test', input, {
+    signal: opts.signal, _skipErrorToast: true,
+  })
+  return data
+}
+
 export type AccessControlSettingKey =
   | 'dest_hit_retention_days' | 'dest_trial_retention_days' | 'dest_usage_retention_days'
   | 'dest_list_refresh_hours' | 'dest_policy_apply_min_seconds'
