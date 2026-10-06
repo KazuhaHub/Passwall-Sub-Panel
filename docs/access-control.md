@@ -1104,8 +1104,8 @@ acknowledgement conditions and explicit retry. Filter replacement preserves
 owned history, and closing a cold deep link removes its node filter. Settings
 open from the same page. Three inline templates prefill editable policies.
 
-This is a functional increment, not completion of S1–S3/S14 or C5. List
-management, category templates and promotion, exemptions, destination simulation,
+This is a functional increment, not completion of S1–S3/S14 or C5. Category
+templates and promotion, exemptions, destination simulation,
 account access inspection, target-page deep links and the remaining final-plan
 screen details still need integration. Recording controls and stage-5 allowlist
 tabs remain scoped to their respective stages. Complete browser screenshots,
@@ -1120,6 +1120,55 @@ previews checked the desktop Chinese page and 375px editor/coverage layouts,
 English dark-mode editor/discard confirmation, live announcements and horizontal
 overflow. These fixture checks do not replace live backend/node or the complete
 final-plan screenshot matrix.
+
+## List management increment
+
+The administrator page now has policies and lists tabs. List management uses
+the administrator APIs for creation, versioned editing, deletion and explicit
+refresh. Failed first downloads are distinguished from failed refreshes that
+retain previous content. The problem filter includes failed lists and pending
+lists referenced by enabled policies; filtered community entries are a warning,
+not a failed list. References and group ownership prevent deletion.
+
+Custom editing loads original source text with comments and line numbers.
+Abortable previews start after 500ms; only settled content owns a preview cache
+entry. Remote previews run on explicit test-fetch actions and do not refetch on
+focus, reconnect or cache invalidation. HTTPS validation happens before that
+request. Temporary fetch failures permit saving the source for retry; known
+broad, empty, oversized or invalid remote content blocks submission. Community
+data is downloaded only on request and attributes retain literal names such as
+`!cn`. Community broad entries are excluded and shown in an amber report; valid
+remaining entries can be saved. Empty filtered categories block submission.
+
+Persistent reports show bounded source samples, normalization replacements and
+omitted sample counts. Custom report line buttons reveal the source line in the
+plain-text CodeEditor. Preview and detail responses expose the complete
+canonical SHA-256 independently of their first 50/200 entry samples. Detail type
+totals cover the full list; older responses without those totals clearly label
+sample-only counts. Search stays in component state. Conflicts preserve the
+draft until explicit reload. Saving opens the resulting entry drawer after the
+editor's navigation guard unmounts. The phone drawer occupies the full viewport.
+
+All current mutation hooks have session-isolation and dependent-cache tests,
+including conflict invalidation and active preview non-refetch behavior. A
+refreshing list polls every five seconds while visible, stops when settled and
+refreshes an open detail drawer when its overview changes. Settings, list,
+policy, publication and retry mutations remain separately scoped.
+
+Local validation: 1,951 frontend tests passed (one skipped), followed by 151
+focused checks after browser fixes; TypeScript, lint and production build
+passed. Full destination-list service and HTTP-handler tests passed. Application
+integration verified canonical identity, complete type totals beyond the 200
+sample bound and original normalization metadata. A subsequent application
+rerun was blocked by Windows Application Control; current-head Linux CI remains
+the final verification for that run. Chinese desktop/375px list, entry and
+category-editor fixtures, English dark custom editing and discard confirmation
+were checked in the browser. Fixtures do not prove live backend/node acceptance.
+
+Remaining list-screen details include reference navigation, destination testing
+from an entry and focusing the refresh interval in settings. The broader C5,
+actual policy-node acceptance and full screenshot/owner approval requirements
+remain outstanding. Green CI does not complete the approved plan.
 
 ## Storage and privacy
 

@@ -7,7 +7,8 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createAppTheme } from '@/theme'
 import AppRouter from '@/router/AppRouter'
 import { useAuthStore } from '@/stores/auth'
-import { destinationNode, destinationPolicies, destinationStatus, samplePolicy } from '@/test/accessControlFixtures'
+import { destinationBudget, destinationNode, destinationPolicies, destinationStatus, samplePolicy } from '@/test/accessControlFixtures'
+import type { DestinationListDetail, DestinationListSummary } from '@/api/accessControl'
 const api = vi.hoisted(() => ({ get: vi.fn(), put: vi.fn(), post: vi.fn(), delete: vi.fn() }))
 vi.mock('@/api/client', () => ({ client: api }))
 const confirmation = vi.hoisted(() => vi.fn())
@@ -34,6 +35,55 @@ beforeEach(() => {
   confirmation.mockResolvedValue(true)
 })
 afterEach(cleanup)
+const listReport = { accepted: 1, ignored: 1, ignored_broad: 1, rewritten: 0, samples: [{ line: 1, text: 'domain:hsbc', reason: 'broad_entry' }] }
+const listDetail: DestinationListDetail = { id: 7, name: 'Finance', kind: 'geosite', source_url: '', geosite_category: 'category-finance', geosite_attrs: '', owner_group_id: 0, updated_at: 3000, entry_count: 1, regexp_count: 0, state: 'ready', last_fetched_at: 1000, last_error: '', entries: ['domain:bank.example'], content_sha256: 'full-digest', parse_report: listReport }
+const listSummary: DestinationListSummary = { ...listDetail, parse_report_summary: listReport, used_by: [] }
+function listsAPI(items: DestinationListSummary[]) {
+  api.get.mockImplementation(async (url: string) => ({ data: url.endsWith('/policies') ? destinationPolicies() : url.endsWith('/status') ? destinationStatus() : url.endsWith('/lists') ? { items, budget: destinationBudget, refresh_hours: 12 } : url.endsWith('/lists/7') ? listDetail : { settings: {}, effective: {} } }))
+}
+it('shows filtered broad entries as a usable category, excluded from the problem filter', async () => {
+  listsAPI([listSummary]); mount('/admin/access-control?tab=lists')
+  const title = await screen.findAllByText('Finance'); expect(title.length).toBeGreaterThan(0)
+  expect(screen.getAllByText(`${P}parse_report.broad_removed`).length).toBeGreaterThan(0)
+  const tile = screen.getByRole('button', { name: `${P}lists.problem 0` })
+  fireEvent.click(tile)
+  await waitFor(() => expect(screen.queryByText('Finance')).toBeNull())
+})
+it('opens a bounded entry drawer and preserves the list tab when closing its cold link', async () => {
+  listsAPI([listSummary]); const router = mount('/admin/access-control?tab=lists&sheet=list&list=7')
+  const dialog = await screen.findByRole('dialog', { name: 'Finance' })
+  expect(within(dialog).getByText('domain:bank.example')).toBeTruthy()
+  expect(within(dialog).getByText('domain:hsbc')).toBeTruthy()
+  fireEvent.change(within(dialog).getByRole('textbox', { name: `${P}list_entries.search` }), { target: { value: 'missing' } })
+  expect(router.state.location.search).not.toContain('missing')
+  fireEvent.click(within(dialog).getByRole('button', { name: 'common:actions.close' }))
+  await waitFor(() => expect(router.state.location.search).toBe('?tab=lists'))
+})
+it('opens the saved entries after list creation without a competing discard prompt', async () => {
+  listsAPI([]); api.post.mockImplementation(async (url: string) => ({ data: url.endsWith('/preview') ? { parse_report: listReport, entries: ['domain:bank.example'], entry_count: 1, content_sha256: 'full-digest' } : { ...listDetail, kind: 'custom' } }))
+  const router = mount('/admin/access-control?tab=lists')
+  fireEvent.click(await screen.findByRole('button', { name: `${P}lists.create` }))
+  fireEvent.change(await screen.findByRole('textbox', { name: `${P}list_editor.name` }), { target: { value: 'New list' } })
+  fireEvent.change(screen.getByRole('textbox', { name: `${P}list_editor.text` }), { target: { value: 'bank.example' } })
+  fireEvent.click(screen.getByRole('button', { name: 'common:actions.save' }))
+  await waitFor(() => expect(router.state.location.search).toBe('?tab=lists&sheet=list&list=7'))
+  expect(confirmation).not.toHaveBeenCalled()
+})
+it('distinguishes a first failed download from refresh failure retaining old content', async () => {
+  listsAPI([{ ...listSummary, state: 'failed', last_fetched_at: null }, { ...listSummary, id: 8, name: 'Older list', state: 'failed', last_fetched_at: 1000 }]); mount('/admin/access-control?tab=lists')
+  expect((await screen.findAllByText(`${P}lists.state_failed_first`)).length).toBeGreaterThan(0)
+  expect(screen.getAllByText(`${P}lists.state_failed_old`).length).toBeGreaterThan(0)
+})
+it('keeps the entry drawer and its editor as distinct React children', async () => {
+  const errors = vi.spyOn(console, 'error').mockImplementation(() => {})
+  try {
+    listsAPI([listSummary]); mount('/admin/access-control?tab=lists&sheet=list&list=7')
+    const dialog = await screen.findByRole('dialog', { name: 'Finance' })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'common:actions.edit' }))
+    await screen.findByRole('textbox', { name: `${P}list_editor.name` })
+    expect(errors.mock.calls.some(args => args.some(value => String(value).includes('same key')))).toBe(false)
+  } finally { errors.mockRestore() }
+})
 it.each(['operator', 'user'] as const)('does not read access APIs for %s', async role => {
   useAuthStore.setState({ role }); mount()
   await screen.findByText('Dashboard')

@@ -163,6 +163,16 @@ func destinationEntrySamples(entries []byte, limit int) []string {
 }
 
 func destinationListView(list domain.DestList, text bool) gin.H {
+	view := destinationListBaseView(list)
+	view["entries"] = destinationEntrySamples(list.Entries, 200)
+	view["content_sha256"] = list.ContentSHA256
+	view["entry_types"] = destinationEntryTypes(list.Entries)
+	if text && list.Kind == domain.DestListCustom {
+		view["source_text"] = string(list.SourceText)
+	}
+	return view
+}
+func destinationListBaseView(list domain.DestList) gin.H {
 	state := "ready"
 	if list.Kind != domain.DestListCustom && list.LastFetchedAt == nil {
 		state = "pending"
@@ -170,11 +180,24 @@ func destinationListView(list domain.DestList, text bool) gin.H {
 	if list.LastError != "" {
 		state = "failed"
 	}
-	view := gin.H{"id": list.ID, "name": list.Name, "kind": list.Kind, "source_url": list.SourceURL, "geosite_category": list.GeositeCategory, "geosite_attrs": list.GeositeAttrs, "entry_count": list.EntryCount, "regexp_count": list.RegexpCount, "state": state, "last_fetched_at": destinationTime(list.LastFetchedAt), "last_error": list.LastError, "parse_report": list.ParseReport, "owner_group_id": list.OwnerGroupID, "updated_at": list.UpdatedAt.UnixMilli(), "entries": destinationEntrySamples(list.Entries, 200)}
-	if text && list.Kind == domain.DestListCustom {
-		view["source_text"] = string(list.SourceText)
+	return gin.H{"id": list.ID, "name": list.Name, "kind": list.Kind, "source_url": list.SourceURL, "geosite_category": list.GeositeCategory, "geosite_attrs": list.GeositeAttrs, "entry_count": list.EntryCount, "regexp_count": list.RegexpCount, "state": state, "last_fetched_at": destinationTime(list.LastFetchedAt), "last_error": list.LastError, "parse_report": list.ParseReport, "owner_group_id": list.OwnerGroupID, "updated_at": list.UpdatedAt.UnixMilli()}
+}
+func destinationEntryTypes(entries []byte) map[string]int {
+	counts := map[string]int{"domain": 0, "full": 0, "keyword": 0, "regexp": 0, "cidr": 0}
+	text := string(entries)
+	for text != "" {
+		line, rest, _ := strings.Cut(text, "\n")
+		text = rest
+		if line == "" {
+			continue
+		}
+		kind, _, _ := strings.Cut(line, ":")
+		if _, known := counts[kind]; !known || kind == "cidr" {
+			kind = "cidr"
+		}
+		counts[kind]++
 	}
-	return view
+	return counts
 }
 
 func (h *AdminDestinationListsHandler) available(c *gin.Context) bool {
@@ -197,7 +220,7 @@ func (h *AdminDestinationListsHandler) Preview(c *gin.Context) {
 		destinationListError(c, err)
 		return
 	}
-	c.JSON(200, gin.H{"parse_report": result.Parsed.Report, "entries": destinationEntrySamples(result.Parsed.Entries, 50), "entry_count": result.Parsed.EntryCount, "regexp_count": result.Parsed.RegexpCount, "http_status": result.HTTPStatus, "bytes": result.Bytes})
+	c.JSON(200, gin.H{"parse_report": result.Parsed.Report, "entries": destinationEntrySamples(result.Parsed.Entries, 50), "content_sha256": result.Parsed.ContentSHA256, "entry_count": result.Parsed.EntryCount, "regexp_count": result.Parsed.RegexpCount, "http_status": result.HTTPStatus, "bytes": result.Bytes})
 }
 func (h *AdminDestinationListsHandler) Create(c *gin.Context) {
 	if !h.available(c) {
@@ -312,8 +335,7 @@ func (h *AdminDestinationListsHandler) List(c *gin.Context) {
 	}
 	items := make([]gin.H, 0, len(view.Lists))
 	for _, list := range view.Lists {
-		item := destinationListView(list, false)
-		delete(item, "entries")
+		item := destinationListBaseView(list)
 		delete(item, "parse_report")
 		if list.ParseReport == nil {
 			item["parse_report_summary"] = nil

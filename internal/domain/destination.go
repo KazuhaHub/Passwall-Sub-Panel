@@ -26,9 +26,10 @@ func NormalizeAuditCollect(c AuditCollect) AuditCollect {
 type DestListKind string
 
 type DestParseSample struct {
-	Line   int    `json:"line"`
-	Text   string `json:"text"`
-	Reason string `json:"reason"`
+	Line       int    `json:"line"`
+	Text       string `json:"text"`
+	Reason     string `json:"reason"`
+	Normalized string `json:"normalized,omitempty"`
 }
 
 type DestParseReport struct {

@@ -84,7 +84,7 @@ export interface DestinationParseReport {
   ignored: number
   ignored_broad: number
   rewritten: number
-  samples: Array<{ line: number; text: string; reason: string }>
+  samples: Array<{ line: number; text: string; reason: string; normalized?: string }>
 }
 export interface DestinationReference { kind: 'policy' | 'group'; id: number; name: string }
 export interface DestinationListSummary {
@@ -105,6 +105,8 @@ export interface DestinationListSummary {
   used_by: DestinationReference[]
 }
 export interface DestinationListDetail extends Omit<DestinationListSummary, 'parse_report_summary' | 'used_by'> {
+  content_sha256: string
+  entry_types?: Record<'domain' | 'full' | 'keyword' | 'regexp' | 'cidr', number>
   parse_report: DestinationParseReport | null
   entries: string[]
   source_text?: string
@@ -120,6 +122,7 @@ export interface DestinationListInput {
   text?: string
 }
 export interface DestinationListPreview {
+  content_sha256: string
   parse_report: DestinationParseReport
   entries: string[]
   entry_count: number

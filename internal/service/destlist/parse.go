@@ -114,7 +114,7 @@ func parse(raw []byte, remote bool) (Parsed, error) {
 			}
 			if entry != text {
 				p.Report.Rewritten++
-				p.sample(line, "normalized")
+				p.normalizedSample(line, entry)
 			}
 		}
 	}
@@ -337,6 +337,11 @@ func (p *Parsed) ignore(line inputLine, reason string) {
 func (p *Parsed) sample(line inputLine, reason string) {
 	if len(p.Report.Samples) < MaxSamples {
 		p.Report.Samples = append(p.Report.Samples, Sample{Line: line.number, Text: boundedText(line.text), Reason: reason})
+	}
+}
+func (p *Parsed) normalizedSample(line inputLine, entry string) {
+	if len(p.Report.Samples) < MaxSamples {
+		p.Report.Samples = append(p.Report.Samples, Sample{Line: line.number, Text: boundedText(line.text), Reason: "normalized", Normalized: boundedText(entry)})
 	}
 }
 func boundedText(text string) string {

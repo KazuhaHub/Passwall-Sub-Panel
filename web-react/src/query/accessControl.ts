@@ -4,6 +4,8 @@ import { accessControlKeys, settingsKeys } from './keys'
 import type { QueryScope } from './session'
 import { freshness, policies } from './policies'
 import { statusNeedsPolling } from '@/utils/accessControl'
+import { getDestinationList, getDestinationCategories, createDestinationList, putDestinationList, deleteDestinationList, refreshDestinationList, refreshDestinationCategories, type DestinationListInput } from '@/api/accessControl'
+import { groupKeys } from './keys'
 
 export function useAccessControlSettings(scope: QueryScope, enabled: boolean) {
   return useQuery({
@@ -35,8 +37,37 @@ export function useDestinationStatus(scope: QueryScope, enabled = true) { return
 export function useDestinationPolicies(scope: QueryScope) {
   return useQuery({ queryKey: accessControlKeys.policies(scope), queryFn: ({ signal }) => getDestinationPolicies({ signal, silent: true }), ...freshness(policies.destDefinitions) })
 }
-export function useDestinationLists(scope: QueryScope) {
-  return useQuery({ queryKey: accessControlKeys.lists(scope), queryFn: ({ signal }) => getDestinationLists({ signal, silent: true }), ...freshness(policies.destDefinitions) })
+export function destinationListsQuery(scope: QueryScope, enabled = true) {
+  return queryOptions({ queryKey: accessControlKeys.lists(scope), queryFn: ({ signal }) => getDestinationLists({ signal, silent: true }), ...freshness(policies.destListRefreshing),
+    enabled, staleTime: q => q.state.data?.items?.some(list => list.state === 'refreshing') ? 0 : policies.destDefinitions.staleTime,
+    refetchIntervalInBackground: false, refetchInterval: q => q.state.data?.items?.some(list => list.state === 'refreshing') ? policies.destListRefreshing.refetchInterval : false })
+}
+export function useDestinationLists(scope: QueryScope, enabled = true) { return useQuery(destinationListsQuery(scope, enabled)) }
+export function useDestinationList(scope: QueryScope, id: number, text = false) {
+  return useQuery({ queryKey: accessControlKeys.listDetail(scope, id, text), queryFn: ({ signal }) => getDestinationList(id, text, { signal, silent: true }), ...freshness(policies.destDefinitions) })
+}
+export function useDestinationCategories(scope: QueryScope, enabled: boolean) {
+  return useQuery({ queryKey: accessControlKeys.categories(scope), queryFn: ({ signal }) => getDestinationCategories({ signal, silent: true }), enabled, ...freshness(policies.destDefinitions), retry: false })
+}
+function useInvalidateLists(scope: QueryScope) {
+  const client = useQueryClient()
+  return () => Promise.all([accessControlKeys.lists(scope), accessControlKeys.listDetails(scope), accessControlKeys.listPreviews(scope), accessControlKeys.policyPreviews(scope), accessControlKeys.policies(scope), accessControlKeys.status(scope), groupKeys.all(scope)]
+    .map(queryKey => client.invalidateQueries({ queryKey, refetchType: queryKey.some(key => key === 'list-preview' || key === 'policy-preview') ? 'none' : 'active' })))
+}
+export function useSaveDestinationList(scope: QueryScope) {
+  const invalidate = useInvalidateLists(scope)
+  return useMutation({ mutationFn: ({ input, existing }: { input: DestinationListInput; existing?: { id: number; updated_at: number } }) => existing
+    ? putDestinationList(existing.id, { ...input, updated_at: existing.updated_at }) : createDestinationList(input), onSettled: invalidate })
+}
+export function useDeleteDestinationList(scope: QueryScope) {
+  return useMutation({ mutationFn: deleteDestinationList, onSettled: useInvalidateLists(scope) })
+}
+export function useRefreshDestinationList(scope: QueryScope) {
+  return useMutation({ mutationFn: refreshDestinationList, onSettled: useInvalidateLists(scope) })
+}
+export function useRefreshDestinationCategories(scope: QueryScope) {
+  const client = useQueryClient(), invalidate = useInvalidateLists(scope)
+  return useMutation({ mutationFn: refreshDestinationCategories, onSettled: () => Promise.all([invalidate(), client.invalidateQueries({ queryKey: accessControlKeys.categories(scope) })]) })
 }
 function useInvalidatePolicies(scope: QueryScope) {
   const client = useQueryClient()
