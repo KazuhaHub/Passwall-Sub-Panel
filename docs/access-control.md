@@ -1224,13 +1224,54 @@ TypeScript, changed-view lint and production build passed. Chinese desktop and
 375px editors, English dark mode, manual category download, cancellation,
 first-publish confirmation, regexp-over-quota save blocking and the financial
 new-list entry were checked with isolated browser fixtures. Fixtures are not
-live node acceptance. Exact-head CI is tracked in draft PR #274.
+live node acceptance. Category-template head `8c1d9ace98f20987a88a67e0cbc8c4494e8aaefc`
+passed [complete Test](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37417980966)
+and [released-node systemd acceptance](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37417980924).
+Real third-party panels were skipped, and released Node beta4 installation does
+not establish new Node #78 policy-kernel acceptance.
 
 The prior conversion head's web CI failed when a combined installation privacy
 and command-feedback test exceeded its five-second timeout. The follow-up splits
 those two behaviors into focused cases while retaining their assertions, with
 no global timeout increase. Its installation test file and the full frontend
 suite passed locally; the new head still needs its own CI results.
+
+## Exemptions and account access increment
+
+The policy rail now opens `sheet=exemptions`; the template empty view retains a
+management entry. The page drawer loads current exemptions, shows attribution
+and expiry, moves expired rows to the end and never displays a negative expiry.
+Its add/edit dialog sits above the normal page drawer. The same editor is used
+from the account view with the account locked. Reasons are required and limited
+to 255 Unicode characters. Temporary presets resolve from actual submission time;
+reason-only edits preserve the exact stored expiry, including seconds and
+milliseconds hidden by the browser time control. Dirty cancellation and pending
+write/navigation guards prevent losing drafts or admitting duplicate writes.
+
+Cancellation uses the ordinary S20 confirmation. Shared mutation hooks refresh
+exemptions, user-access views, the policy overview, node status and budget
+previews within the current session on success or conflict. Other sessions are
+not invalidated. Opening an account from the exemptions drawer clears sheet-owned
+parameters in the same history replacement, and opens the existing RiskUserDrawer on
+its administrator-only Access tab. Other hosts retain their overview default.
+This follows the general history rule in final-plan section 7.0: closing the
+account returns to the page without reviving the replaced sheet. Cold account
+links close in place and conflicting account/sheet parameters show only one
+drawer.
+The Access tab reads `/dest/users/:id` only while mounted and shows the stage-1c
+group and exemption rows; destination hit/usage reads are not introduced here.
+
+Query, route and account-tab regressions failed before implementation. The
+exemption query, dialog, sheet and account/page tests passed, along with
+TypeScript and changed-source lint. The full frontend run passed 1,992 tests
+(one skipped). A later browser-discovered phone tab clipping problem was fixed
+by using swipeable tabs without space-consuming scroll buttons. A later history
+regression proved that closing an account revived its sheet; replacement and
+cold-link handling fixed it, followed by focused retesting. Chinese desktop/375px editing and cancellation, account
+navigation, English dark-mode account add/cancel and visible selected mobile
+tabs were checked with isolated API fixtures. These are not live node acceptance
+or completion of the full screen matrix. Exact-head CI remains tracked in draft
+PR #274.
 
 ## Storage and privacy
 

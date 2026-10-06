@@ -152,7 +152,7 @@ function serve(user: () => RiskUserSummary | Error = () => summary()) {
   })
 }
 
-function tree(userId: number | null, onClose = vi.fn(), host: 'risk' | 'users' = 'risk') {
+function tree(userId: number | null, onClose = vi.fn(), host: 'risk' | 'users' | 'access' = 'risk') {
   return (
     <MemoryRouter>
       <ThemeProvider theme={theme}>
@@ -162,7 +162,7 @@ function tree(userId: number | null, onClose = vi.fn(), host: 'risk' | 'users' =
   )
 }
 
-function mount(userId: number | null, onClose = vi.fn(), host: 'risk' | 'users' = 'risk') {
+function mount(userId: number | null, onClose = vi.fn(), host: 'risk' | 'users' | 'access' = 'risk') {
   return render(tree(userId, onClose, host), { wrapper: queryWrapper(makeTestQueryClient()) })
 }
 
@@ -468,5 +468,33 @@ describe('RiskUserDrawer', () => {
     serve()
     mount(null)
     expect(api.get).not.toHaveBeenCalled()
+  })
+  it('loads access only after tab selection, without later-stage usage reads', async () => {
+    serve(); const original = api.get.getMockImplementation()!
+    api.get.mockImplementation(async (url: string) => url === '/admin/dest/users/7' ? { data: { group: { id: 2, name: 'Students', mode: 'open', stage: '' }, exemption: null } } : original(url))
+    mount(7); await header()
+    expect(api.get.mock.calls.some(([url]) => url.startsWith('/admin/dest/'))).toBe(false)
+    fireEvent.click(screen.getByRole('tab', { name: '访问' }))
+    await screen.findByText('Students')
+    expect(api.get.mock.calls.filter(([url]) => url === '/admin/dest/users/7')).toHaveLength(1)
+    expect(api.get.mock.calls.some(([url]) => url.includes('usage='))).toBe(false)
+  })
+  it('starts the access host on access', async () => {
+    serve(); api.get.mockImplementation(async (url: string) => ({ data: url.startsWith('/admin/dest/') ? { group: null, exemption: null } : summary() }))
+    mount(7, vi.fn(), 'access'); await header()
+    expect(selectedTab()).toBe('访问')
+  })
+  it('does not show or read destination access for operators', async () => {
+    serve(); useAuthStore.setState({ role: 'operator' })
+    mount(7, vi.fn(), 'access'); await header()
+    expect(screen.queryByRole('tab', { name: '访问' })).toBeNull()
+    expect(selectedTab()).toBe('概览')
+    expect(api.get.mock.calls.some(([url]) => url.startsWith('/admin/dest/'))).toBe(false)
+  })
+  it('also offers access from the users host while keeping its overview default', async () => {
+    serve(); mount(7, vi.fn(), 'users'); await header()
+    expect(screen.getByRole('tab', { name: '访问' })).toBeTruthy()
+    expect(selectedTab()).toBe('概览')
+    expect(api.get.mock.calls.some(([url]) => url.startsWith('/admin/dest/'))).toBe(false)
   })
 })

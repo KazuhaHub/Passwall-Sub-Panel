@@ -19,6 +19,51 @@ vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string, opti
 vi.mock('@/components/CodeEditor', () => ({ default: (p: { value: string; onChange: (s: string) => void; ariaLabel: string; readOnly: boolean }) => <textarea aria-label={p.ariaLabel} value={p.value} readOnly={p.readOnly} onChange={e => p.onChange(e.target.value)} /> }))
 import AccessControlView from './AccessControlView'
 const P = 'admin:access_control.'
+it('opens exemptions with owned history and preserves the list tab on cold close', async () => {
+  api.get.mockImplementation(async (url: string) => ({ data: url.endsWith('/exemptions') ? { items: [] } : url.endsWith('/policies') ? destinationPolicies() : url.endsWith('/status') ? destinationStatus() : url.endsWith('/lists') ? { items: [] } : { effective: {} } }))
+  const router = mount('/admin/access-control?tab=lists&sheet=exemptions')
+  const drawer = await screen.findByRole('dialog', { name: `${P}exemptions.title` })
+  expect(await within(drawer).findByText(`${P}exemptions.empty`)).toBeTruthy()
+  fireEvent.click(within(drawer).getByRole('button', { name: 'common:actions.close' }))
+  await waitFor(() => expect(router.state.location.search).toBe('?tab=lists'))
+})
+it('opens an exempt account in one navigation that clears sheet-owned parameters', async () => {
+  api.get.mockImplementation(async (url: string) => {
+    if (url.startsWith('/admin/risk-center/')) throw err(503, 'unavailable')
+    return { data: url.endsWith('/exemptions') ? { items: [{ user_id: 13, upn: 'alice@test', reason: 'Diagnostics', created_by: 42, created_by_upn: 'admin@test', created_at: Date.now(), expires_at: null, expired: false }] } : url.endsWith('/policies') ? destinationPolicies() : url.endsWith('/status') ? destinationStatus() : url.endsWith('/lists') ? { items: [] } : { effective: {} } }
+  })
+  const router = mount('/admin/access-control?tab=lists&sheet=exemptions&list=7&node_state=problem')
+  fireEvent.click(await screen.findByRole('button', { name: `${P}exemptions.menu` }))
+  fireEvent.click(screen.getByRole('menuitem', { name: `${P}exemptions.open_account` }))
+  await waitFor(() => expect(router.state.location.search).toBe('?tab=lists&user=13'))
+  expect(router.state.location.state).toBeNull()
+  expect(screen.queryByRole('dialog', { name: `${P}exemptions.title` })).toBeNull()
+})
+it('replaces an owned exemptions sheet so closing the account returns to the page without reviving it', async () => {
+  api.get.mockImplementation(async (url: string) => {
+    if (url.startsWith('/admin/risk-center/')) throw err(503, 'unavailable')
+    return { data: url.endsWith('/exemptions') ? { items: [{ user_id: 13, upn: 'alice@test', reason: 'Diagnostics', created_by: 42, created_by_upn: 'admin@test', created_at: Date.now(), expires_at: null, expired: false }] } : url.endsWith('/policies') ? destinationPolicies() : url.endsWith('/status') ? destinationStatus() : url.endsWith('/lists') ? { items: [] } : { effective: {} } }
+  })
+  const router = mount()
+  fireEvent.click(await screen.findByRole('button', { name: `${P}exemptions.manage` }))
+  fireEvent.click(await screen.findByRole('button', { name: `${P}exemptions.menu` }))
+  fireEvent.click(screen.getByRole('menuitem', { name: `${P}exemptions.open_account` }))
+  fireEvent.click(await screen.findByRole('button', { name: 'admin:risk_center.drawer.close' }))
+  await waitFor(() => expect(router.state.location.search).toBe(''))
+  expect(screen.queryByRole('dialog', { name: `${P}exemptions.title` })).toBeNull()
+})
+it('opens only the account on conflicting cold drawer parameters and clears the inactive sheet on close', async () => {
+  api.get.mockImplementation(async (url: string) => {
+    if (url.startsWith('/admin/risk-center/')) throw err(503, 'unavailable')
+    return { data: url.endsWith('/policies') ? destinationPolicies() : url.endsWith('/status') ? destinationStatus() : url.endsWith('/lists') ? { items: [] } : { effective: {} } }
+  })
+  const router = mount('/admin/access-control?tab=lists&user=13&sheet=exemptions&list=7&node_state=problem')
+  const close = await screen.findByRole('button', { name: 'admin:risk_center.drawer.close' })
+  expect(screen.queryByRole('dialog', { name: `${P}exemptions.title` })).toBeNull()
+  expect(api.get.mock.calls.some(([url]) => url.endsWith('/exemptions'))).toBe(false)
+  fireEvent.click(close)
+  await waitFor(() => expect(router.state.location.search).toBe('?tab=lists'))
+})
 const err = (status: number, error: string) => ({ isAxiosError: true, response: { status, data: { error } }, message: error })
 function mount(initial = '/admin/access-control') {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })

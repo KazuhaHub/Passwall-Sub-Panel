@@ -6,6 +6,7 @@ import { freshness, policies } from './policies'
 import { statusNeedsPolling } from '@/utils/accessControl'
 import { getDestinationList, getDestinationCategories, createDestinationList, putDestinationList, deleteDestinationList, refreshDestinationList, refreshDestinationCategories, type DestinationListInput } from '@/api/accessControl'
 import { groupKeys } from './keys'
+import { getDestinationExemptions, getDestinationUserAccess, createDestinationExemption, putDestinationExemption, deleteDestinationExemption, type DestinationExemptionInput } from '@/api/accessControl'
 
 export function useAccessControlSettings(scope: QueryScope, enabled: boolean) {
   return useQuery({
@@ -95,4 +96,23 @@ export function useDestinationPublication(scope: QueryScope) {
 export function useRetryDestinationPolicy(scope: QueryScope) {
   const client = useQueryClient()
   return useMutation({ mutationFn: retryDestinationPolicy, onSettled: () => client.invalidateQueries({ queryKey: accessControlKeys.status(scope) }) })
+}
+
+export function useDestinationExemptions(scope: QueryScope, enabled = true) {
+  return useQuery({ queryKey: accessControlKeys.exemptions(scope), queryFn: ({ signal }) => getDestinationExemptions({ signal, silent: true }), enabled, ...freshness(policies.destDefinitions) })
+}
+export function useDestinationUserAccess(scope: QueryScope, id: number, enabled = true) {
+  return useQuery({ queryKey: accessControlKeys.userAccess(scope, id), queryFn: ({ signal }) => getDestinationUserAccess(id, { signal, silent: true }), enabled: enabled && id > 0, ...freshness(policies.destDefinitions) })
+}
+function useInvalidateExemptions(scope: QueryScope) {
+  const client = useQueryClient()
+  return () => Promise.all([accessControlKeys.exemptions(scope), accessControlKeys.userAccessRoot(scope), accessControlKeys.policies(scope), accessControlKeys.status(scope), accessControlKeys.policyPreviews(scope)]
+    .map(queryKey => client.invalidateQueries({ queryKey })))
+}
+export function useSaveDestinationExemption(scope: QueryScope) {
+  return useMutation({ mutationFn: ({ userId, input, existing }: { userId: number; input: DestinationExemptionInput; existing?: boolean }) => existing
+    ? putDestinationExemption(userId, input) : createDestinationExemption({ ...input, user_id: userId }), onSettled: useInvalidateExemptions(scope) })
+}
+export function useDeleteDestinationExemption(scope: QueryScope) {
+  return useMutation({ mutationFn: deleteDestinationExemption, onSettled: useInvalidateExemptions(scope) })
 }

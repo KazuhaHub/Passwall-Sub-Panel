@@ -21,8 +21,8 @@ import TemplateGrid from './TemplateGrid'
 import TemplateMenu from './TemplateMenu'
 import { templatePolicy, type PolicyTemplate } from './templates'
 const P = 'admin:access_control.policies.'
-interface Props { data: DestinationPoliciesView; status?: DestinationStatus; seconds?: number; onCreateList: () => void }
-export default function PoliciesTab({ data, status, seconds, onCreateList }: Props) {
+interface Props { data: DestinationPoliciesView; status?: DestinationStatus; seconds?: number; onCreateList: () => void; onExemptions: () => void }
+export default function PoliciesTab({ data, status, seconds, onCreateList, onExemptions }: Props) {
   const { t } = useTranslation(['admin', 'common'])
   const scope = useQueryScope()
   const save = useSaveDestinationPolicy(scope)
@@ -70,11 +70,12 @@ export default function PoliciesTab({ data, status, seconds, onCreateList }: Pro
     <QuotaMeters compact budget={data.budget} />
     <Stack direction="row" sx={{ alignItems: 'center', justifyContent: 'space-between', gap: 1 }}><Typography variant="body2" color="text.secondary">{any ? t(`${P}order_hint`) : ''}</Typography><TemplateMenu {...catalog} added={added} onOpen={setTemplateMenuOpen} onCreate={fromTemplate} onBlank={() => create('block')} onFinance={() => setFinance(true)} /></Stack>
     {!any && <TemplateGrid {...catalog} budget={data.budget} added={added} onCreate={fromTemplate} onBlank={() => create('block')} onCreateList={onCreateList} />}
+    {!any && <Button sx={{ alignSelf: 'flex-start' }} onClick={onExemptions}>{t('admin:access_control.exemptions.manage')}</Button>}
     {any && <Box sx={{ borderLeft: theme => `2px solid ${theme.palette.md.outlineVariant}`, ml: { xs: 1, sm: 1.5 }, pl: { xs: 2, sm: 3 } }}>
       {pipelineSteps(false).map((step, index) => <Box key={step} sx={{ position: 'relative', mb: 3 }}>
         <Box aria-hidden sx={{ position: 'absolute', left: { xs: -27, sm: -37 }, top: 5, width: 24, height: 24, borderRadius: '50%', bgcolor: theme => theme.palette.md.surfaceContainerHighest, display: 'grid', placeItems: 'center', fontSize: 13, fontWeight: 600 }}>{index + 1}</Box>
         <Stack direction="row" spacing={1} sx={{ mb: 1, alignItems: 'center', justifyContent: 'space-between' }}><Typography component="h2" variant="subtitle1">{t(`${P}${step}`, { count: data.exemptions.count })}</Typography>
-          {['allow', 'block', 'observe'].includes(step) && <IconButton disabled={busy !== null} aria-label={t(`${P}create_${step}`)} onClick={() => create(step as DestinationPolicyAction)}><AddIcon /></IconButton>}</Stack>
+          {step === 'exemption' && <Button disabled={busy !== null} onClick={onExemptions}>{t('admin:access_control.exemptions.manage')}</Button>}{['allow', 'block', 'observe'].includes(step) && <IconButton disabled={busy !== null} aria-label={t(`${P}create_${step}`)} onClick={() => create(step as DestinationPolicyAction)}><AddIcon /></IconButton>}</Stack>
         {['allow', 'block', 'observe'].includes(step) && <Stack spacing={1}>{data[step as DestinationPolicyAction].length ? data[step as DestinationPolicyAction].map(row => <Paper key={row.id} variant="outlined" sx={{ p: 1.5, opacity: row.enabled ? 1 : .6 }}>
           <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}><Button sx={{ justifyContent: 'flex-start', minWidth: 0, textAlign: 'left', flex: 1, overflowWrap: 'anywhere' }} aria-label={t(`${P}edit`, { name: row.name })} disabled={busy !== null} onClick={() => setEditor({ initial: policyInput(row), existing: row })}>{row.name}</Button>
             {busy === row.id && <CircularProgress size={18} />}

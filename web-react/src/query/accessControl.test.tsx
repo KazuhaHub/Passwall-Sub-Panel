@@ -5,7 +5,7 @@ import { act, cleanup, renderHook } from '@testing-library/react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { sessionScope } from './session'
 import { accessControlKeys, groupKeys, settingsKeys } from './keys'
-import { destinationListsQuery, useSaveDestinationList, useDeleteDestinationList, useRefreshDestinationList, useRefreshDestinationCategories, useSaveDestinationPolicy, useDeleteDestinationPolicy, useOrderDestinationPolicies, useDestinationPublication, useRetryDestinationPolicy, useSaveAccessControlSettings } from './accessControl'
+import { destinationListsQuery, useSaveDestinationList, useDeleteDestinationList, useRefreshDestinationList, useRefreshDestinationCategories, useSaveDestinationPolicy, useDeleteDestinationPolicy, useOrderDestinationPolicies, useDestinationPublication, useRetryDestinationPolicy, useSaveAccessControlSettings, useSaveDestinationExemption, useDeleteDestinationExemption } from './accessControl'
 import { destinationBudget, samplePolicy } from '@/test/accessControlFixtures'
 import type { DestinationListSummary, DestinationListsView } from '@/api/accessControl'
 const api = vi.hoisted(() => ({ post: vi.fn(), put: vi.fn(), delete: vi.fn() }))
@@ -15,7 +15,11 @@ const sibling = sessionScope({ userId: 2, role: 'admin', authEpoch: 1 })
 const list = { name: 'List', kind: 'custom' as const, text: 'example.com' }
 const listKeys = ['lists', 'detail', 'listPreview', 'policyPreview', 'policies', 'status', 'groups']
 const policyKeys = ['policies', 'status', 'lists', 'policyPreview']
+const exemptionKeys = ['exemptions', 'userAccess', 'policies', 'status', 'policyPreview']
 const cases: Array<{ name: string; keys: string[]; successOnly?: boolean; useRun: () => () => Promise<unknown> }> = [
+  { name: 'create exemption', keys: exemptionKeys, useRun: () => { const m = useSaveDestinationExemption(scope); return () => m.mutateAsync({ userId: 7, input: { reason: 'Diagnostics', expires_at: null } }) } },
+  { name: 'edit exemption', keys: exemptionKeys, useRun: () => { const m = useSaveDestinationExemption(scope); return () => m.mutateAsync({ userId: 7, existing: true, input: { reason: 'Updated', expires_at: 1900000000000 } }) } },
+  { name: 'cancel exemption', keys: exemptionKeys, useRun: () => { const m = useDeleteDestinationExemption(scope); return () => m.mutateAsync(7) } },
   { name: 'create list', keys: listKeys, useRun: () => { const m = useSaveDestinationList(scope); return () => m.mutateAsync({ input: list }) } },
   { name: 'edit list', keys: listKeys, useRun: () => { const m = useSaveDestinationList(scope); return () => m.mutateAsync({ input: list, existing: { id: 7, updated_at: 3000 } }) } },
   { name: 'delete list', keys: listKeys, useRun: () => { const m = useDeleteDestinationList(scope); return () => m.mutateAsync(7) } },
@@ -32,7 +36,7 @@ const cases: Array<{ name: string; keys: string[]; successOnly?: boolean; useRun
   { name: 'settings', keys: ['settings', 'status', 'ui', 'lists'], successOnly: true, useRun: () => { const m = useSaveAccessControlSettings(scope); return () => m.mutateAsync({ dest_list_refresh_hours: 12 }) } },
 ]
 function keys(s = scope) {
-  return { lists: accessControlKeys.lists(s), detail: accessControlKeys.listDetail(s, 7, true), listPreview: [...accessControlKeys.listPreviews(s), 'input'], policyPreview: [...accessControlKeys.policyPreviews(s), 'input'], policies: accessControlKeys.policies(s), status: accessControlKeys.status(s), groups: groupKeys.catalogue(s), categories: accessControlKeys.categories(s), settings: accessControlKeys.settings(s), ui: settingsKeys.ui(s) }
+  return { exemptions: accessControlKeys.exemptions(s), userAccess: accessControlKeys.userAccess(s, 7), lists: accessControlKeys.lists(s), detail: accessControlKeys.listDetail(s, 7, true), listPreview: [...accessControlKeys.listPreviews(s), 'input'], policyPreview: [...accessControlKeys.policyPreviews(s), 'input'], policies: accessControlKeys.policies(s), status: accessControlKeys.status(s), groups: groupKeys.catalogue(s), categories: accessControlKeys.categories(s), settings: accessControlKeys.settings(s), ui: settingsKeys.ui(s) }
 }
 beforeEach(() => { vi.clearAllMocks(); for (const method of [api.post, api.put, api.delete]) method.mockResolvedValue({ data: {} }) })
 afterEach(cleanup)

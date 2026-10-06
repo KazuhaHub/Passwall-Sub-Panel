@@ -40,6 +40,9 @@ export const accessControlKeys = {
   listPreviews: (s: QueryScope) => [...accessControlKeys.all(s), 'list-preview'] as const,
   categories: (s: QueryScope) => [...accessControlKeys.all(s), 'categories'] as const,
   policyPreviews: (s: QueryScope) => [...accessControlKeys.all(s), 'policy-preview'] as const,
+  exemptions: (s: QueryScope) => [...accessControlKeys.all(s), 'exemptions'] as const,
+  userAccessRoot: (s: QueryScope) => [...accessControlKeys.all(s), 'user-access'] as const,
+  userAccess: (s: QueryScope, id: number) => [...accessControlKeys.userAccessRoot(s), id] as const,
 }
 
 export const alertKeys = {
