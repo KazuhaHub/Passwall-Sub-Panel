@@ -18,8 +18,9 @@ import { destinationError } from '../errors'
 import { listIsProblem, listSourceLabel } from './listDraft'
 import ListDialog from './ListDialog'
 import ListEntriesSheet from './ListEntriesSheet'
+import UsedByPopover from './UsedByPopover'
 const P = 'admin:access_control.lists.'
-export default function ListsTab({ active, selectedId, onCloseSheet, onOpenList, onSettings, onTest, newListRequest = 0, policies, status }: { active: boolean; selectedId: number | null; onCloseSheet: () => void; onOpenList: (id: number) => void; onSettings: () => void; onTest?: (target: string) => void; newListRequest?: number; policies?: DestinationPoliciesView; status?: DestinationStatus }) {
+export default function ListsTab({ active, selectedId, onCloseSheet, onOpenList, onOpenPolicy, onSettings, onTest, newListRequest = 0, policies, status }: { active: boolean; selectedId: number | null; onCloseSheet: () => void; onOpenList: (id: number) => void; onOpenPolicy: (id: number) => void; onSettings: () => void; onTest?: (target: string) => void; newListRequest?: number; policies?: DestinationPoliciesView; status?: DestinationStatus }) {
   const { t } = useTranslation(['admin', 'common']), scope = useQueryScope(), theme = useTheme()
   const query = useDestinationLists(scope, active || !!selectedId), remove = useDeleteDestinationList(scope), refresh = useRefreshDestinationList(scope)
   const [params, setParams] = useSearchParams(), location = useLocation()
@@ -62,7 +63,7 @@ export default function ListsTab({ active, selectedId, onCloseSheet, onOpenList,
     const tone = list.state === 'ready' ? 'ok' : list.state === 'failed' ? list.last_fetched_at ? 'attention' : 'failing' : key === 'pending_used' ? 'failing' : 'measuring'
     return <Stack spacing={.5}><Box><ToneBadge tone={stateTone(theme, tone)} label={t(`${P}state_${key}`)} /></Box>{!!list.parse_report_summary?.ignored_broad && <Typography variant="caption" color="warning.main">{t('admin:access_control.parse_report.broad_removed', { count: list.parse_report_summary.ignored_broad })}</Typography>}{list.last_error ? <Typography variant="caption" color="error" title={list.last_error} sx={{ overflowWrap: 'anywhere' }}>{list.last_error}</Typography> : list.last_fetched_at != null && <Typography variant="caption" color="text.secondary">{new Date(list.last_fetched_at).toLocaleString()}</Typography>}</Stack>
   }
-  const usage = (list: DestinationListSummary) => list.owner_group_id ? <Typography variant="body2">{t(`${P}owner`, { name: list.used_by.find(ref => ref.kind === 'group')?.name ?? `#${list.owner_group_id}` })}</Typography> : <Typography variant="body2">{list.used_by.length ? list.used_by.map(ref => ref.name).join(' · ') : t(`${P}unused`)}</Typography>
+  const usage = (list: DestinationListSummary) => <UsedByPopover name={list.name} references={list.used_by} ownerGroupId={list.owner_group_id} onOpenPolicy={onOpenPolicy} />
   const name = (list: DestinationListSummary) => <><Button sx={{ p: 0, justifyContent: 'flex-start', textAlign: 'left', overflowWrap: 'anywhere' }} onClick={() => onOpenList(list.id)}>{list.name}</Button><Typography variant="caption" color="text.secondary" sx={{ display: 'block', overflowWrap: 'anywhere' }}>{t(`${P}${list.kind}`)}{list.kind !== 'custom' && ` · ${listSourceLabel(list)}`}</Typography></>
   const actions = (list: DestinationListSummary) => <IconButton disabled={busy} aria-label={t(`${P}menu`, { name: list.name })} onClick={e => setMenu({ anchor: e.currentTarget, list })}><MoreVertIcon /></IconButton>
   return <>

@@ -22,8 +22,8 @@ import TemplateMenu from './TemplateMenu'
 import { templatePolicy, type PolicyTemplate } from './templates'
 import { PipelineRail, PipelineStep } from '../PipelineRail'
 const P = 'admin:access_control.policies.'
-interface Props { data: DestinationPoliciesView; status?: DestinationStatus; seconds?: number; onCreateList: () => void; onExemptions: () => void; openRequest?: { id: number; token: number } | null }
-export default function PoliciesTab({ data, status, seconds, onCreateList, onExemptions, openRequest }: Props) {
+interface Props { data: DestinationPoliciesView; status?: DestinationStatus; seconds?: number; onCreateList: () => void; onExemptions: () => void; openRequest?: { id: number; token: number } | null; onOpenRequestHandled?: (token: number) => void }
+export default function PoliciesTab({ data, status, seconds, onCreateList, onExemptions, openRequest, onOpenRequestHandled }: Props) {
   const { t } = useTranslation(['admin', 'common'])
   const scope = useQueryScope()
   const save = useSaveDestinationPolicy(scope)
@@ -40,11 +40,12 @@ export default function PoliciesTab({ data, status, seconds, onCreateList, onExe
   useEffect(() => {
     if (!openRequest || openedRequest.current === openRequest.token) return
     const row = [...data.allow, ...data.block, ...data.observe].find(row => row.id === openRequest.id)
-    if (!row) { openedRequest.current = openRequest.token; pushSnack(t('admin:access_control.test.policy_missing'), 'warning'); return }
+    if (!row) { openedRequest.current = openRequest.token; onOpenRequestHandled?.(openRequest.token); pushSnack(t('admin:access_control.test.policy_missing'), 'warning'); return }
     openedRequest.current = openRequest.token
+    onOpenRequestHandled?.(openRequest.token)
     rowsRef.current.get(row.id)?.scrollIntoView?.({ block: 'center', behavior: 'smooth' })
     setHighlight(row.id); setEditor({ initial: policyInput(row), existing: row })
-  }, [openRequest, data, t])
+  }, [openRequest, data, t, onOpenRequestHandled])
   useEffect(() => { if (highlight === null) return; const timer = window.setTimeout(() => setHighlight(null), 2000); return () => window.clearTimeout(timer) }, [highlight])
   const reportError = (error: unknown) => {
     const details = destinationError(error)

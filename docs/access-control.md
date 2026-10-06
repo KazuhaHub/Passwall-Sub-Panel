@@ -1352,6 +1352,40 @@ browser fixtures verified account selection on the Access tab,
 return to the list tab, actual refresh-field focus and a 375px header without
 horizontal overflow. Those fixtures were removed after validation.
 
+The account-navigation head `4b2ab6d6` passed released-node systemd acceptance,
+but its complete Test workflow failed on a five-second installation command-copy
+test timeout. The other frontend tests, all backend/dialect/race checks and
+compatibility jobs passed. The failing integration test now waits for the
+already-selected stable version instead of redundantly opening its autocomplete,
+and scopes queries to its dialog. Command, copy-failure, folded-credential and
+write-count assertions remain; the shared command component covers copy success,
+false/throw failures, expiry and stale feedback. No global timeout was increased.
+
+## List references
+
+Desktop usage cells and phone cards open a shared reference popover, using the
+server's `used_by` identities and separate policy/group counts. Policy actions
+open the existing editor, with the same missing-policy warning and navigation
+cleanup as simulation results. Popovers dismiss before opening the editor.
+Consumed requests are cleared, with monotonically increasing request tokens;
+closing the editor and switching tabs cannot replay an old request, while an
+explicit second reference action can still reopen it.
+
+Owned-list labels remain plain text rather than status badges. Owner lookup
+matches the actual `owner_group_id`, and absent references do not invent a link.
+Group names are readable; their navigation callback remains optional until the
+stage-5 group destination exists. Full S6 group deep-link acceptance is pending.
+
+Reference, missing-policy and consumed-request regressions failed before
+implementation. The final page/policy/history/locale check passed 107 tests;
+installation-copy/component/page checks passed 75. TypeScript, changed-source
+lint, locale generation and production build passed. Isolated browser fixtures
+checked Chinese desktop, English dark mode at 375px, policy identity, dismissed
+popovers and no automatic editor replay. The phone popover stayed within the
+viewport with no horizontal overflow. Fixtures were removed; these checks do
+not establish live backend/node or the full screenshot matrix. Full local
+frontend validation and exact-head CI remain separate checks.
+
 ## Storage and privacy
 
 List previews and policy previews are excluded from write-audit logging by

@@ -44,6 +44,7 @@ function AccessControlPage({ scope }: { scope: QueryScope }) {
   const tab = params.get('tab') === 'lists' ? 'lists' : 'policies'
   const [newListRequest, setNewListRequest] = useState(0)
   const [policyRequest, setPolicyRequest] = useState<{ id: number; token: number } | null>(null)
+  const policySequence = useRef(0)
   const [settingsFocus, setSettingsFocus] = useState<AccessControlSettingKey | undefined>(undefined)
   const openSettings = (focus?: AccessControlSettingKey) => {
     setSettingsFocus(focus)
@@ -62,8 +63,9 @@ function AccessControlPage({ scope }: { scope: QueryScope }) {
   const openPolicy = (id: number) => {
     const state = { ...location.state }; delete state.drawer; delete state.prefill
     setParams(prev => { const next = new URLSearchParams(prev); next.set('tab', 'policies'); next.delete('sheet'); next.delete('list'); next.delete('node_state'); next.delete('user'); return next }, { replace: true, state: Object.keys(state).length ? state : null })
-    setPolicyRequest(previous => ({ id, token: (previous?.token ?? 0) + 1 }))
+    setPolicyRequest({ id, token: ++policySequence.current })
   }
+  const consumePolicyRequest = (token: number) => setPolicyRequest(current => current?.token === token ? null : current)
   const createList = () => { setNewListRequest(value => value + 1); setParams(prev => { const next = new URLSearchParams(prev); next.set('tab', 'lists'); return next }, { replace: true, state: location.state }) }
   const rawList = params.get('list'), listId = rawList && /^\d+$/.test(rawList) && Number.isSafeInteger(Number(rawList)) && Number(rawList) > 0 ? Number(rawList) : null
   const openList = (id: number) => setParams(prev => { const next = new URLSearchParams(prev); next.set('sheet', 'list'); next.set('list', String(id)); next.delete('node_state'); next.delete('user'); return next }, { replace: sheet.id === 'list', state: { ...location.state, drawer: 'sheet' } })
@@ -99,8 +101,8 @@ function AccessControlPage({ scope }: { scope: QueryScope }) {
         detail={<>{status.data?.next_publish_at != null && <Typography component="span" aria-label={t(`${P}publish_at`, { time: new Date(status.data.next_publish_at).toLocaleString() })}>{t(`${P}countdown`, { seconds: Math.max(0, Math.ceil((status.data.next_publish_at - now) / 1000)) })}</Typography>}{status.data?.publish_error && <Typography component="span">{t(`${P}publish_error`, { kind: status.data.publish_error.kind, used: status.data.publish_error.used, limit: status.data.publish_error.limit })}</Typography>}</>}
         actions={<Stack direction="row" sx={{ flexWrap: 'wrap', gap: 1 }}>{status.error && <Button onClick={() => void status.refetch()}>{t('common:actions.retry')}</Button>}{status.data && <><Button disabled={busy} onClick={() => void perform()}>{t(`${P}publish`)}</Button><Button disabled={busy} color={status.data.paused ? 'primary' : 'error'} onClick={() => void perform(!status.data!.paused)}>{t(`${P}${status.data.paused ? 'resume' : 'pause'}`)}</Button></>}</Stack>} />
       <Tabs value={tab} sx={{ mb: 2 }} onChange={(_, value) => setParams(prev => { const next = new URLSearchParams(prev); next.set('tab', value); return next }, { replace: true, state: location.state })} aria-label={t(`${P}tabs`)}><Tab value="policies" label={t(`${P}policies.title`)} /><Tab value="lists" label={t(`${P}lists.title`)} /></Tabs>
-      {tab === 'policies' && (definitions.data ? <>{definitions.error && <Alert sx={{ mb: 2 }} severity="warning" action={<Button onClick={() => void definitions.refetch()}>{t('common:actions.retry')}</Button>}>{t(`${P}definitions_stale`)}</Alert>}<PoliciesTab data={definitions.data} status={status.data} seconds={settings.data?.effective.dest_policy_apply_min_seconds} onCreateList={createList} onExemptions={() => sheet.open('exemptions')} openRequest={policyRequest} /></> : definitions.error ? <Alert severity="error" action={<Button onClick={() => void definitions.refetch()}>{t('common:actions.retry')}</Button>}>{t(`${P}definitions_failed`)}</Alert> : <Stack spacing={1} aria-busy="true">{[0,1,2,3,4].map(key => <Skeleton key={key} variant="rounded" height={56} />)}</Stack>)}
-      <ListsTab active={tab === 'lists'} selectedId={activeSheet === 'list' ? listId : null} onCloseSheet={sheet.close} onOpenList={openList} onSettings={() => openSettings('dest_list_refresh_hours')} onTest={openTest} newListRequest={newListRequest} policies={definitions.data} status={status.data} />
+      {tab === 'policies' && (definitions.data ? <>{definitions.error && <Alert sx={{ mb: 2 }} severity="warning" action={<Button onClick={() => void definitions.refetch()}>{t('common:actions.retry')}</Button>}>{t(`${P}definitions_stale`)}</Alert>}<PoliciesTab data={definitions.data} status={status.data} seconds={settings.data?.effective.dest_policy_apply_min_seconds} onCreateList={createList} onExemptions={() => sheet.open('exemptions')} openRequest={policyRequest} onOpenRequestHandled={consumePolicyRequest} /></> : definitions.error ? <Alert severity="error" action={<Button onClick={() => void definitions.refetch()}>{t('common:actions.retry')}</Button>}>{t(`${P}definitions_failed`)}</Alert> : <Stack spacing={1} aria-busy="true">{[0,1,2,3,4].map(key => <Skeleton key={key} variant="rounded" height={56} />)}</Stack>)}
+      <ListsTab active={tab === 'lists'} selectedId={activeSheet === 'list' ? listId : null} onCloseSheet={sheet.close} onOpenList={openList} onOpenPolicy={openPolicy} onSettings={() => openSettings('dest_list_refresh_hours')} onTest={openTest} newListRequest={newListRequest} policies={definitions.data} status={status.data} />
     </>}
     {activeSheet === 'nodes' && <NodeCoverageDrawer status={status.data} onClose={sheet.close} />}
     {activeSheet === 'exemptions' && <ExemptionsSheet onClose={sheet.close} onOpenUser={openUser} etaMs={status.data?.apply_eta_ms} />}
