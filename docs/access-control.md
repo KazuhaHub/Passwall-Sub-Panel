@@ -1187,12 +1187,50 @@ row, and explicitly awaits publication and node acknowledgement. Desktop and
 375px Chinese layouts, English dark-mode disabled-policy wording, conversion
 success and discard behavior were checked with browser API fixtures. These
 fixtures do not establish live backend or node acceptance; stage-2c impact data
-and the remaining category-template work are still outstanding.
+and the complete screen matrix are still outstanding.
 
 Validation: 1,961 frontend tests passed (one skipped) with a single worker after
 an earlier Windows worker exit; the affected installation-materials file also
 passed all 14 tests independently. The 72 focused page/query/source-guard checks,
 TypeScript, changed-view lint and production build passed.
+
+## Category-template increment
+
+The empty policy view now offers five templates and a financial-category
+explanation. BT and TCP mail templates block and count as risk; private/cloud
+metadata blocks without risk inclusion. Cryptocurrency and adult-content
+templates default to observation. Counts come from the current cached catalog,
+including regexps; opening the page does not download category data. The main
+creation menu also offers templates once policies exist. Financial categories
+include banks and payment services, so the explanation leads to a custom or
+trusted remote list rather than labeling those categories high risk.
+
+Policy creation and unsaved previews accept an optional `new_list` containing a
+name and cached geosite category/attributes. PUT rejects it. Opening or canceling
+the editor creates no list. The preview returns the actual definition budget and
+the category parse report, including excluded broad entries. The storage writer
+creates the list and referencing policy under one destination generation lock
+and one transaction. It validates existing references before allocating the new
+identity and checks the committed definition budget again inside the transaction.
+Any validation, uniqueness, allocation or storage failure rolls back both rows
+and leaves caller identities unchanged. Category lists retain normal management
+and parsed-report provenance after creation.
+
+New handler, SQLite and application integration regressions failed before the
+implementation. The full SQL-store, destination-policy service and HTTP-handler
+suites and the application template integration passed locally. The frontend
+suite passed 1,969 tests (one skipped); focused page/model/source checks passed.
+TypeScript, changed-view lint and production build passed. Chinese desktop and
+375px editors, English dark mode, manual category download, cancellation,
+first-publish confirmation, regexp-over-quota save blocking and the financial
+new-list entry were checked with isolated browser fixtures. Fixtures are not
+live node acceptance. Exact-head CI is tracked in draft PR #274.
+
+The prior conversion head's web CI failed when a combined installation privacy
+and command-feedback test exceeded its five-second timeout. The follow-up splits
+those two behaviors into focused cases while retaining their assertions, with
+no global timeout increase. Its installation test file and the full frontend
+suite passed locally; the new head still needs its own CI results.
 
 ## Storage and privacy
 

@@ -123,9 +123,13 @@
       "template_mail_hint": "Block TCP 25, 465 and 587; count as risk.",
       "template_bt": "Block BT",
       "template_bt_hint": "Detect plaintext handshakes and uTP, counting as risk; encrypted BT and DHT cannot be identified.",
-      "template_private": "Block private destinations",
-      "template_private_hint": "Block private and cloud metadata destinations without counting as risk.",
-      "use_template": "Use template"
+      "template_private": "Block private networks and cloud metadata",
+      "template_private_hint": "Xray already blocks private addresses. This policy supports consistent management and later hit recording. Other engines must support destination policies.",
+      "use_template": "Use template",
+      "template_crypto": "Cryptocurrency exchanges",
+      "template_crypto_hint": "Uses the community cryptocurrency category and defaults to observation. Broad entries are excluded with a report.",
+      "template_porn": "Adult content",
+      "template_porn_hint": "Uses the community adult-content category and defaults to observation. Check the regexp quota."
     },
     "editor": {
       "name": "Name",
@@ -335,6 +339,28 @@
       "dest_policy_missing": "This policy no longer exists. Close this dialog and refresh policies.",
       "dest_policy_over_limit": "Converted rules exceed the budget and were not saved; reduce rules first.",
       "already_changed": "The policy action has already changed; it can no longer be converted from the original observation state."
+    },
+    "templates": {
+      "empty_title": "No access policies yet",
+      "empty_hint": "Start from a template or a blank policy. Category templates default to observation; once hit recording is enabled, observe for a week before deciding to block.",
+      "use": "Use the “{{name}}” template",
+      "added": "Added",
+      "again": "Add another",
+      "blank": "New blank policy",
+      "count": "Entries {{count}} · Regexps {{regexps}}",
+      "category_missing": "This community category is absent from the current cache. Update the catalog manually.",
+      "over_summary": "Would exceed the regexp quota",
+      "over_detail": "This category has {{count}} regexps; adding it would exceed the {{limit}} limit. An over-limit version will not be published. Reduce other lists with many regexps first.",
+      "finance_title": "High-risk financial sites",
+      "finance_question": "Why is there no high-risk finance template?",
+      "finance_hint": "Community finance categories include banks and payment sites and do not identify high-risk financial sites. Use your own list or a remote list from a trusted source.",
+      "betting_hint": "The optional category-betting-ru covers Russia only, with {{count}} entries in the current cache.",
+      "create_list": "New list",
+      "list_name": "{{name}} (category list)",
+      "list_name_field": "New category list name",
+      "paired_save": "The category list is saved with the policy. Canceling creates no list.",
+      "remove_category": "Remove this category condition",
+      "category_match": "Community category “{{name}}”"
     }
   },
   "languagePacks": {

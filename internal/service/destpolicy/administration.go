@@ -99,7 +99,7 @@ func (a *Administrator) Read(ctx context.Context) (PolicyOverview, error) {
 // prepare validates the proposed definition without changing stored definitions
 // or the caller's form. Priority here models the SQL writer's segment assignment;
 // only the writer allocates the committed ID, priority and edit version.
-func (a *Administrator) prepare(ctx context.Context, candidate domain.DestPolicy, expected time.Time) (domain.DestDefinitions, error) {
+func (a *Administrator) prepare(ctx context.Context, candidate domain.DestPolicy, expected time.Time, additional ...domain.DestList) (domain.DestDefinitions, error) {
 	if candidate.ID < 0 {
 		return domain.DestDefinitions{}, invalid("id")
 	}
@@ -154,6 +154,19 @@ func (a *Administrator) prepare(ctx context.Context, candidate domain.DestPolicy
 		if list.Kind == domain.DestListCustom && list.EntryCount == 0 {
 			return domain.DestDefinitions{}, fmt.Errorf("%w: dest_policy_no_match", domain.ErrValidation)
 		}
+	}
+	if len(additional) != 0 {
+		var highest int64
+		for _, list := range defs.Lists {
+			highest = max(highest, list.ID)
+		}
+		if highest == math.MaxInt64 {
+			return domain.DestDefinitions{}, domain.ErrResourceExhausted
+		}
+		list := additional[0]
+		list.ID = highest + 1
+		defs.Lists = append(slices.Clone(defs.Lists), list)
+		candidate.ListIDs = append(slices.Clone(candidate.ListIDs), list.ID)
 	}
 	if len(candidate.ListIDs) == 0 && len(candidate.Inline.CIDRs) == 0 && candidate.Inline.Ports == "" && candidate.Inline.Network == "" && len(candidate.Inline.Protocols) == 0 && !candidate.Inline.Private {
 		return domain.DestDefinitions{}, fmt.Errorf("%w: dest_policy_no_match", domain.ErrValidation)

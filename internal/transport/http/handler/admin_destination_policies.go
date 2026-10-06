@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/destlist"
@@ -62,23 +63,24 @@ func destinationPolicyDecode(c *gin.Context, target any) bool {
 }
 
 type destinationPolicyInput struct {
-	ID           *int64             `json:"id"`
-	Name         string             `json:"name"`
-	Action       domain.DestAction  `json:"action"`
-	ListIDs      []int64            `json:"list_ids"`
-	Inline       *domain.DestInline `json:"inline"`
-	Scope        domain.DestScope   `json:"scope"`
-	GroupIDs     []int64            `json:"group_ids"`
-	Enabled      *bool              `json:"enabled"`
-	CountsAsRisk *bool              `json:"counts_as_risk"`
-	TemplateKey  string             `json:"template_key"`
-	UpdatedAt    *int64             `json:"updated_at"`
+	ID           *int64                `json:"id"`
+	Name         string                `json:"name"`
+	Action       domain.DestAction     `json:"action"`
+	ListIDs      []int64               `json:"list_ids"`
+	Inline       *domain.DestInline    `json:"inline"`
+	Scope        domain.DestScope      `json:"scope"`
+	GroupIDs     []int64               `json:"group_ids"`
+	Enabled      *bool                 `json:"enabled"`
+	CountsAsRisk *bool                 `json:"counts_as_risk"`
+	TemplateKey  string                `json:"template_key"`
+	UpdatedAt    *int64                `json:"updated_at"`
+	NewList      *destinationListInput `json:"new_list"`
 }
 
-func decodeDestinationPolicy(c *gin.Context, update, preview bool) (domain.DestPolicy, time.Time, bool) {
+func decodeDestinationPolicy(c *gin.Context, update, preview bool) (domain.DestPolicy, time.Time, *destinationListInput, bool) {
 	var req destinationPolicyInput
 	if !destinationPolicyDecode(c, &req) {
-		return domain.DestPolicy{}, time.Time{}, false
+		return domain.DestPolicy{}, time.Time{}, nil, false
 	}
 	field := ""
 	if req.Enabled == nil {
@@ -94,9 +96,14 @@ func decodeDestinationPolicy(c *gin.Context, update, preview bool) (domain.DestP
 	if update && (req.UpdatedAt == nil || *req.UpdatedAt <= 0) || req.UpdatedAt != nil && (*req.UpdatedAt <= 0 || !update && (!preview || req.ID == nil)) {
 		field = "updated_at"
 	}
+	if list := req.NewList; list != nil {
+		if update || req.ID != nil || list.Kind != domain.DestListGeosite || strings.TrimSpace(list.Name) == "" || utf8.RuneCountInString(list.Name) > 128 || list.Category == "" || len(list.Category) > 128 || len(list.Attrs) > 128 || list.SourceURL != "" || list.Text != "" || list.UpdatedAt != nil {
+			field = "new_list"
+		}
+	}
 	if field != "" {
 		c.JSON(400, gin.H{"error": "dest_policy_invalid", "field": field})
-		return domain.DestPolicy{}, time.Time{}, false
+		return domain.DestPolicy{}, time.Time{}, nil, false
 	}
 	policy := domain.DestPolicy{Name: req.Name, Action: req.Action, ListIDs: req.ListIDs, Inline: *req.Inline, Scope: req.Scope, GroupIDs: req.GroupIDs, Enabled: *req.Enabled, CountsAsRisk: *req.CountsAsRisk, TemplateKey: req.TemplateKey}
 	if req.ID != nil {
@@ -106,7 +113,22 @@ func decodeDestinationPolicy(c *gin.Context, update, preview bool) (domain.DestP
 	if req.UpdatedAt != nil {
 		expected = time.UnixMilli(*req.UpdatedAt).UTC()
 	}
-	return policy, expected, true
+	return policy, expected, req.NewList, true
+}
+
+func (h *AdminDestinationPoliciesHandler) cachedTemplateList(c *gin.Context, input *destinationListInput) (domain.DestList, destlist.FetchResult, error) {
+	if h.lists == nil {
+		return domain.DestList{}, destlist.FetchResult{}, domain.ErrUnavailable
+	}
+	list := domain.DestList{Name: strings.TrimSpace(input.Name), Kind: domain.DestListGeosite, GeositeCategory: input.Category, GeositeAttrs: input.Attrs}
+	result, err := h.lists.Preview(c.Request.Context(), list)
+	if err != nil {
+		return domain.DestList{}, result, err
+	}
+	now := time.Now().UTC()
+	list.Entries, list.EntryCount, list.RegexpCount = result.Parsed.Entries, result.Parsed.EntryCount, result.Parsed.RegexpCount
+	list.ContentSHA256, list.ParseReport, list.LastFetchedAt = result.Parsed.ContentSHA256, &result.Parsed.Report, &now
+	return list, result, nil
 }
 func destinationPolicyID(c *gin.Context) (int64, bool) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
@@ -130,11 +152,21 @@ func (h *AdminDestinationPoliciesHandler) Create(c *gin.Context) {
 	if !h.available(c) {
 		return
 	}
-	p, expected, ok := decodeDestinationPolicy(c, false, false)
+	p, expected, newList, ok := decodeDestinationPolicy(c, false, false)
 	if !ok {
 		return
 	}
-	if err := h.admin.Save(c.Request.Context(), &p, expected); err != nil {
+	var err error
+	if newList != nil {
+		var list domain.DestList
+		list, _, err = h.cachedTemplateList(c, newList)
+		if err == nil {
+			err = h.admin.SaveWithList(c.Request.Context(), &p, &list)
+		}
+	} else {
+		err = h.admin.Save(c.Request.Context(), &p, expected)
+	}
+	if err != nil {
 		destinationPolicyError(c, err)
 		return
 	}
@@ -148,7 +180,7 @@ func (h *AdminDestinationPoliciesHandler) Put(c *gin.Context) {
 	if !ok {
 		return
 	}
-	p, expected, ok := decodeDestinationPolicy(c, true, false)
+	p, expected, _, ok := decodeDestinationPolicy(c, true, false)
 	if !ok {
 		return
 	}
@@ -163,16 +195,30 @@ func (h *AdminDestinationPoliciesHandler) Preview(c *gin.Context) {
 	if !h.available(c) {
 		return
 	}
-	p, expected, ok := decodeDestinationPolicy(c, false, true)
+	p, expected, newList, ok := decodeDestinationPolicy(c, false, true)
 	if !ok {
 		return
 	}
-	budget, err := h.admin.Preview(c.Request.Context(), p, expected)
+	var budget destpolicy.Budget
+	var err error
+	response := gin.H{}
+	if newList != nil {
+		var list domain.DestList
+		var result destlist.FetchResult
+		list, result, err = h.cachedTemplateList(c, newList)
+		if err == nil {
+			budget, err = h.admin.PreviewWithList(c.Request.Context(), p, list)
+			response["new_list_preview"] = gin.H{"parse_report": result.Parsed.Report, "entries": destinationEntrySamples(result.Parsed.Entries, 50), "content_sha256": result.Parsed.ContentSHA256, "entry_count": result.Parsed.EntryCount, "regexp_count": result.Parsed.RegexpCount, "http_status": result.HTTPStatus, "bytes": result.Bytes}
+		}
+	} else {
+		budget, err = h.admin.Preview(c.Request.Context(), p, expected)
+	}
 	if err != nil {
 		destinationPolicyError(c, err)
 		return
 	}
-	c.JSON(200, gin.H{"budget": budget})
+	response["budget"] = budget
+	c.JSON(200, response)
 }
 func (h *AdminDestinationPoliciesHandler) Delete(c *gin.Context) {
 	if !h.available(c) {

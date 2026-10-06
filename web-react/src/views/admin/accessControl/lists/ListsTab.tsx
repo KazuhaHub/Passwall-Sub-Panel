@@ -19,13 +19,15 @@ import { listIsProblem, listSourceLabel } from './listDraft'
 import ListDialog from './ListDialog'
 import ListEntriesSheet from './ListEntriesSheet'
 const P = 'admin:access_control.lists.'
-export default function ListsTab({ active, selectedId, onCloseSheet, onOpenList, onSettings, policies, status }: { active: boolean; selectedId: number | null; onCloseSheet: () => void; onOpenList: (id: number) => void; onSettings: () => void; policies?: DestinationPoliciesView; status?: DestinationStatus }) {
+export default function ListsTab({ active, selectedId, onCloseSheet, onOpenList, onSettings, newListRequest = 0, policies, status }: { active: boolean; selectedId: number | null; onCloseSheet: () => void; onOpenList: (id: number) => void; onSettings: () => void; newListRequest?: number; policies?: DestinationPoliciesView; status?: DestinationStatus }) {
   const { t } = useTranslation(['admin', 'common']), scope = useQueryScope(), theme = useTheme()
   const query = useDestinationLists(scope, active || !!selectedId), remove = useDeleteDestinationList(scope), refresh = useRefreshDestinationList(scope)
   const [params, setParams] = useSearchParams(), location = useLocation()
   const problem = params.get('lst_state') === 'problem'
   const [sort, setSort] = useState({ key: 'name', dir: 'asc' as 'asc' | 'desc' })
   const [editor, setEditor] = useState<{ existing?: DestinationListSummary } | null>(null)
+  const lastNewListRequest = useRef(0)
+  useEffect(() => { if (!active || newListRequest === lastNewListRequest.current) return; lastNewListRequest.current = newListRequest; setEditor({}) }, [active, newListRequest])
   const [afterClose, setAfterClose] = useState<number | 'settings' | null>(null)
   useEffect(() => { if (editor || afterClose === null) return; if (afterClose === 'settings') onSettings(); else onOpenList(afterClose); setAfterClose(null) }, [editor, afterClose, onOpenList, onSettings])
   const [menu, setMenu] = useState<{ anchor: HTMLElement; list: DestinationListSummary } | null>(null)

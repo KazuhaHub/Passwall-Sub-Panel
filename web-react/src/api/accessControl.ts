@@ -191,6 +191,8 @@ export interface DestinationPolicyInput {
   enabled: boolean
   counts_as_risk: boolean
   template_key: string
+  /** Unsaved cached category; create/preview only, committed with the policy. */
+  new_list?: { name: string; kind: 'geosite'; geosite_category: string; geosite_attrs: string }
 }
 export interface DestinationPolicyView extends DestinationPolicyInput {
   id: number
@@ -220,8 +222,8 @@ export async function getDestinationPolicies(opts: ReadOptions = {}): Promise<De
   const { data } = await client.get<DestinationPoliciesView>('/admin/dest/policies', { signal: opts.signal, _skipErrorToast: opts.silent })
   return data
 }
-export async function previewDestinationPolicy(input: DestinationPolicyInput & { id?: number; updated_at?: number }, signal?: AbortSignal): Promise<{ budget: DestinationBudget }> {
-  const { data } = await client.post<{ budget: DestinationBudget }>('/admin/dest/policies/preview', input, { signal, _skipErrorToast: true })
+export async function previewDestinationPolicy(input: DestinationPolicyInput & { id?: number; updated_at?: number }, signal?: AbortSignal): Promise<{ budget: DestinationBudget; new_list_preview?: DestinationListPreview }> {
+  const { data } = await client.post<{ budget: DestinationBudget; new_list_preview?: DestinationListPreview }>('/admin/dest/policies/preview', input, { signal, _skipErrorToast: true })
   return data
 }
 export async function createDestinationPolicy(input: DestinationPolicyInput): Promise<DestinationPolicyView> {

@@ -3,7 +3,8 @@ import type { DestinationPolicyInput } from '@/api/accessControl'
 export function policyInput(policy: DestinationPolicyInput): DestinationPolicyInput {
   return { name: policy.name, action: policy.action, list_ids: [...policy.list_ids], inline: structuredClone(policy.inline),
     scope: policy.scope, group_ids: [...policy.group_ids], enabled: policy.enabled,
-    counts_as_risk: policy.action === 'block' && policy.counts_as_risk, template_key: policy.template_key }
+    counts_as_risk: policy.action === 'block' && policy.counts_as_risk, template_key: policy.template_key,
+    ...(policy.new_list ? { new_list: { ...policy.new_list } } : {}) }
 }
 export const emptyPolicy = (): DestinationPolicyInput => ({ name: '', action: 'block', list_ids: [], inline: {}, scope: 'all', group_ids: [], enabled: false, counts_as_risk: false, template_key: '' })
 export function isCIDR(value: string): boolean {
@@ -20,7 +21,8 @@ export function validatePolicyDraft(input: DestinationPolicyInput): Record<strin
   const errors: Record<string, string> = {}
   if (!input.name.trim()) errors.name = 'required'
   const { ports, cidrs = [], protocols = [], private: privateIP } = input.inline
-  if (!input.list_ids.length && !ports?.trim() && !cidrs.some(line => line.trim()) && !protocols.length && !privateIP) errors.match = 'no_match'
+  if (!input.list_ids.length && !input.new_list?.geosite_category && !ports?.trim() && !cidrs.some(line => line.trim()) && !protocols.length && !privateIP) errors.match = 'no_match'
+  if (input.new_list && (!input.new_list.name.trim() || [...input.new_list.name].length > 128 || !input.new_list.geosite_category)) errors.new_list = 'invalid'
   if (input.scope === 'groups' && !input.group_ids.length) errors.group_ids = 'groups_required'
   if (ports && !ports.split(',').every(part => {
     if (!/^\d+(?:-\d+)?$/.test(part)) return false

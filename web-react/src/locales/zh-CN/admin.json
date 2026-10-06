@@ -123,9 +123,13 @@
       "template_mail_hint": "拦截 TCP 25、465、587，计入风险。",
       "template_bt": "禁止 BT",
       "template_bt_hint": "识别明文握手与 uTP，计入风险；不能识别加密 BT 和 DHT。",
-      "template_private": "禁止访问内网",
-      "template_private_hint": "拦截内网与云元数据地址，不计入风险。",
-      "use_template": "使用模板"
+      "template_private": "禁止访问内网与云元数据",
+      "template_private_hint": "Xray 已有内网拦截；此策略便于统一管理以及后续命中记录。其他引擎需支持访问策略。",
+      "use_template": "使用模板",
+      "template_crypto": "加密货币交易所",
+      "template_crypto_hint": "采用社区的加密货币分类，默认仅观察。过宽条目会剔除并显示报告。",
+      "template_porn": "成人内容",
+      "template_porn_hint": "采用社区的成人内容分类，默认仅观察；请留意正则额度。"
     },
     "editor": {
       "name": "名称",
@@ -335,6 +339,28 @@
       "dest_policy_missing": "此策略已不存在。关闭此窗口并刷新策略。",
       "dest_policy_over_limit": "转换后的规则超过额度，未保存；请先减少规则。",
       "already_changed": "此策略的动作已改变，不能再按原来的观察策略转换。"
+    },
+    "templates": {
+      "empty_title": "还没有访问策略",
+      "empty_hint": "从模板开始，或新建空白策略。分类模板默认仅观察；启用命中记录后，可以先观察一周再决定拦截。",
+      "use": "使用「{{name}}」模板",
+      "added": "已添加",
+      "again": "再添加一条",
+      "blank": "新建空白策略",
+      "count": "条目 {{count}} · 正则 {{regexps}}",
+      "category_missing": "当前缓存没有这个社区分类，请手动更新分类数据。",
+      "over_summary": "会超出正则额度",
+      "over_detail": "这个分类有 {{count}} 条正则，加上现有的会超过 {{limit}} 条上限。超出时新版本不会下发；可以先减少其他正则较多的列表。",
+      "finance_title": "高风险金融网站",
+      "finance_question": "高风险金融网站为什么没有模板？",
+      "finance_hint": "社区金融分类包含银行和支付网站，不能代表高风险金融网站。请用自己维护的列表或可信来源的远程列表。",
+      "betting_hint": "可选的 category-betting-ru 仅覆盖俄罗斯，当前缓存有 {{count}} 条。",
+      "create_list": "新建列表",
+      "list_name": "{{name}}（分类列表）",
+      "list_name_field": "新分类列表名称",
+      "paired_save": "分类列表会与策略一起保存；取消不会创建列表。",
+      "remove_category": "移除这个分类条件",
+      "category_match": "社区分类「{{name}}」"
     }
   },
   "languagePacks": {

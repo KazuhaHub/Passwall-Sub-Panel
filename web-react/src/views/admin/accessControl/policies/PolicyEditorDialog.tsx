@@ -17,6 +17,9 @@ import { destinationError } from '../errors'
 import { executionChanged, matchSummary, policyInput, validatePolicyDraft } from './policyDraft'
 import { summaryText } from './summaryText'
 import QuotaMeters, { budgetExceeded } from './QuotaMeters'
+import GeositeCategoryPicker from '../lists/GeositeCategoryPicker'
+import ParseReport from '../lists/ParseReport'
+import { listPreviewBlocksSave } from '../lists/listDraft'
 const CodeEditor = lazy(() => import('@/components/CodeEditor'))
 const P = 'admin:access_control.editor.'
 interface Props { initial: DestinationPolicyInput; existing?: DestinationPolicyOverviewItem; policies: DestinationPoliciesView; status?: DestinationStatus; seconds?: number; onClose: () => void }
@@ -38,7 +41,7 @@ export default function PolicyEditorDialog({ initial, existing, policies, status
   const validation = validatePolicyDraft(draft)
   const valid = !Object.keys(validation).length
   const input = { ...draft, inline: { ...draft.inline, cidrs: draft.inline.cidrs?.map(line => line.trim()).filter(Boolean) },
-    name: draft.name.trim(), ...(existing ? { id: existing.id, updated_at: version } : {}) }
+    name: draft.name.trim(), ...(draft.new_list ? { new_list: { ...draft.new_list, name: draft.new_list.name.trim() } } : {}), ...(existing ? { id: existing.id, updated_at: version } : {}) }
   const serialized = JSON.stringify(input)
   const [settled, setSettled] = useState(serialized)
   useEffect(() => { const timer = window.setTimeout(() => setSettled(serialized), 400); return () => window.clearTimeout(timer) }, [serialized])
@@ -46,6 +49,7 @@ export default function PolicyEditorDialog({ initial, existing, policies, status
     queryFn: ({ signal }) => previewDestinationPolicy(JSON.parse(settled), signal), enabled: valid && settled === serialized,
     staleTime: 0, retry: false })
   const quotaError = settled === serialized && (budgetExceeded(preview.data?.budget) || destinationError(preview.error).error === 'dest_policy_over_limit')
+  const categoryError = settled === serialized && !!draft.new_list && listPreviewBlocksSave('geosite', preview.error ? destinationError(preview.error).error : '', preview.data?.new_list_preview?.entry_count)
   const closeCheck = useDirtyClose(dirty, discardSettingsCopy(t))
   useLeaveGuard(dirty, discardSettingsCopy(t), (next, current) => next.pathname !== current.pathname || next.search !== current.search, busy)
   const close = () => { if (!busy) void closeCheck().then(ok => { if (ok) onClose() }) }
@@ -53,7 +57,7 @@ export default function PolicyEditorDialog({ initial, existing, policies, status
   const fieldError = (key: string) => error.field === key ? error.error : validation[key]
   const fieldMessage = (key: string) => fieldError(key) ? t(`${P}${key === 'cidrs' && validation.cidrs ? 'cidrs_invalid' : fieldError(key)}`, { lines: validation.cidrs, defaultValue: t(`${P}invalid`) }) : undefined
   const submit = async () => {
-    if (admission.current || !valid || quotaError || (!dirty && !!existing) || error.error === 'dest_policy_stale') return
+    if (admission.current || !valid || quotaError || categoryError || (!dirty && !!existing) || error.error === 'dest_policy_stale') return
     admission.current = true; setBusy(true)
     try {
       if (needsFirstPublishConfirm(policies, [], input) && !(await confirm(firstPublishCopy(t, status, seconds)))) return
@@ -91,6 +95,12 @@ export default function PolicyEditorDialog({ initial, existing, policies, status
         <ToggleButtonGroup exclusive value={draft.action} aria-label={t(`${P}action`)} onChange={(_, action) => { if (action) change({ action, counts_as_risk: action === 'block' && draft.counts_as_risk }) }}>{(['block', 'observe', 'allow'] as const).map(action => <ToggleButton key={action} value={action}>{t(`${P}action_${action}`)}</ToggleButton>)}</ToggleButtonGroup>
         <Typography variant="body2" color="text.secondary">{t(`${P}${draft.action}_hint`)}</Typography>
         {draft.action === 'allow' && <Alert severity="warning">{t(`${P}allow_warning`)}</Alert>}
+        {draft.new_list && <Stack spacing={2}>
+          <TextField label={t('admin:access_control.templates.list_name_field')} value={draft.new_list.name} error={!!validation.new_list} helperText={validation.new_list ? t(`${P}invalid`) : t('admin:access_control.templates.paired_save')} onChange={e => change({ new_list: { ...draft.new_list!, name: e.target.value } })} />
+          <GeositeCategoryPicker category={draft.new_list.geosite_category} attrs={draft.new_list.geosite_attrs} disabled={busy} onChange={(geosite_category, geosite_attrs) => change({ new_list: { ...draft.new_list!, geosite_category, geosite_attrs } })} />
+          {settled === serialized && preview.data?.new_list_preview && <ParseReport report={preview.data.new_list_preview.parse_report} kind="geosite" />}
+          <Button disabled={busy} onClick={() => change({ new_list: undefined })}>{t('admin:access_control.templates.remove_category')}</Button>
+        </Stack>}
         {lists.error && <Alert severity="error" action={<Button onClick={() => void lists.refetch()}>{t('common:actions.retry')}</Button>}>{t(`${P}lists_failed`)}</Alert>}
         <Autocomplete multiple options={listChoices.map(list => list.id)} value={draft.list_ids} loading={lists.isPending} disabled={busy}
           getOptionLabel={id => { const list = listChoices.find(list => list.id === id); return list ? t(`${P}list_option`, { name: list.name, kind: t(`admin:access_control.lists.${list.kind}`), count: list.entry_count, regexps: list.regexp_count }) : `#${id}` }}
@@ -111,13 +121,14 @@ export default function PolicyEditorDialog({ initial, existing, policies, status
         <FormControlLabel control={<Switch checked={draft.enabled} onChange={(_, enabled) => change({ enabled })} />} label={t(`${P}enabled`)} />
       </Stack></Box>
       <Typography variant="subtitle2">{t(`${P}quota`)}</Typography>
-      {preview.error ? <Alert severity={quotaError ? 'error' : 'warning'} action={<Button disabled={busy} onClick={() => void preview.refetch()}>{t('common:actions.retry')}</Button>}>{t(quotaError ? 'admin:access_control.quota.exceeded' : `${P}preview_failed`)}</Alert> : <QuotaMeters budget={settled === serialized ? preview.data?.budget : undefined} />}
+      {preview.error ? <Alert severity={quotaError || categoryError ? 'error' : 'warning'} action={<Button disabled={busy} onClick={() => void preview.refetch()}>{t('common:actions.retry')}</Button>}>{t(quotaError ? 'admin:access_control.quota.exceeded' : categoryError ? `admin:access_control.list_editor.${destinationError(preview.error).error}` : `${P}preview_failed`, { defaultValue: t(`${P}preview_failed`) })}</Alert> : <QuotaMeters budget={settled === serialized ? preview.data?.budget : undefined} />}
+      {categoryError && !preview.error && <Alert severity="error">{t('admin:access_control.list_editor.dest_list_empty_after_filter')}</Alert>}
     </Stack></DialogContent>
     <DialogActions sx={{ position: 'sticky', bottom: 0, bgcolor: 'background.paper', flexWrap: 'wrap', px: 3, py: 2, gap: 1 }}>
       <Box sx={{ flex: '1 1 100%' }}><Typography variant="body2">{t(`${P}action_${draft.action}`)} · {t(`${P}${draft.scope}`)} · {summaryText(t, draft, names)} · {t(`${P}position`, { step: { allow: 1, block: 3, observe: 4 }[draft.action], position })}</Typography>
         {match.split && <Typography variant="caption">{t(`${P}split`)}</Typography>}
         <Typography variant="caption" sx={{ display: 'block' }} color="text.secondary">{t(!draft.enabled ? `${P}disabled_hint` : existing && !executionChanged(draft, seed) ? `${P}metadata_hint` : `${P}apply_hint`, { nodes: nodeCount === undefined ? t('admin:access_control.confirm.each_node') : t('admin:access_control.confirm.node_count', { count: nodeCount }), eta: status?.apply_eta_ms ? t('admin:access_control.confirm.eta_minutes', { minutes: Math.ceil(status.apply_eta_ms / 60000) }) : t('admin:access_control.confirm.eta_unknown') })}</Typography>
-      </Box><Button disabled={busy} onClick={close}>{t('common:actions.cancel')}</Button><Button variant="contained" disabled={busy || !valid || quotaError || (!!existing && !dirty) || error.error === 'dest_policy_stale'} onClick={() => void submit()}>{t(busy ? 'admin:access_control.settings.saving' : 'common:actions.save')}</Button>
+      </Box><Button disabled={busy} onClick={close}>{t('common:actions.cancel')}</Button><Button variant="contained" disabled={busy || !valid || quotaError || categoryError || (!!existing && !dirty) || error.error === 'dest_policy_stale'} onClick={() => void submit()}>{t(busy ? 'admin:access_control.settings.saving' : 'common:actions.save')}</Button>
     </DialogActions>
   </Dialog>
 }

@@ -204,6 +204,19 @@ func (r *DestDefinitionRepo) ReadDefinitions(ctx context.Context) (domain.DestDe
 	var defs domain.DestDefinitions
 	err := r.readTransaction(ctx, func(tx *gorm.DB) error {
 		var err error
+		defs, err = readDestinationDefinitions(tx)
+		return err
+	})
+	if err != nil {
+		return domain.DestDefinitions{}, err
+	}
+	return defs, err
+}
+
+func readDestinationDefinitions(tx *gorm.DB) (domain.DestDefinitions, error) {
+	var defs domain.DestDefinitions
+	err := func() error {
+		var err error
 		// The generation read establishes the snapshot before definitions.
 		defs.State, err = readDestState(tx)
 		if err != nil {
@@ -238,7 +251,7 @@ func (r *DestDefinitionRepo) ReadDefinitions(ctx context.Context) (domain.DestDe
 			defs.Groups = append(defs.Groups, domain.DestGroupMode{GroupID: row.GroupID, Mode: row.Mode, Stage: row.Stage, ListIDs: append([]int64(nil), row.ListIDs...), BaseListID: row.BaseListID, ExtraListID: row.ExtraListID, StageChangedAt: row.StageChangedAt, UpdatedAt: row.UpdatedAt})
 		}
 		return nil
-	})
+	}()
 	if err != nil {
 		return domain.DestDefinitions{}, err
 	}
