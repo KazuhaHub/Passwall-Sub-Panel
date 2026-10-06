@@ -185,6 +185,7 @@ describe.each([
   // scanning nothing.
   { dir: '../views/admin/risk', name: 'views/admin/risk', atLeast: 11 },
   { dir: '../views/admin/diagnostics', name: 'views/admin/diagnostics', atLeast: 10 },
+  { dir: '../views/admin/accessControl', name: 'views/admin/accessControl', atLeast: 12 },
 ])('$name reads every word from the bundles', ({ dir, name, atLeast }) => {
   const files = sources(viewDir(dir))
 

@@ -1,6 +1,6 @@
 import { forwardRef, useImperativeHandle, useMemo, useRef } from 'react'
 import { useTheme } from '@mui/material'
-import CodeMirror, { type ReactCodeMirrorRef } from '@uiw/react-codemirror'
+import CodeMirror, { EditorView, type ReactCodeMirrorRef } from '@uiw/react-codemirror'
 import { yaml } from '@codemirror/lang-yaml'
 
 // CodeEditor wraps CodeMirror 6 for editing rule-set content (Clash/Mihomo
@@ -19,6 +19,7 @@ const CodeEditor = forwardRef<CodeEditorHandle, {
   dark?: boolean
   language?: 'yaml' | 'plain' | 'markdown'
   minRows?: number
+  ariaLabel?: string
 }>(function CodeEditor({
   value,
   onChange,
@@ -27,11 +28,13 @@ const CodeEditor = forwardRef<CodeEditorHandle, {
   dark,
   language = 'yaml',
   minRows,
+  ariaLabel,
 }, ref) {
   const theme = useTheme()
   const editor = useRef<ReactCodeMirrorRef>(null)
   // Markdown uses plain text until its separate language extension is added.
-  const extensions = useMemo(() => language === 'yaml' ? [yaml()] : [], [language])
+  const extensions = useMemo(() => [...(language === 'yaml' ? [yaml()] : []),
+    ...(ariaLabel ? [EditorView.contentAttributes.of({ 'aria-label': ariaLabel })] : [])], [language, ariaLabel])
   useImperativeHandle(ref, () => ({ revealLine(n) {
     const view = editor.current?.view
     if (!view || !Number.isFinite(n)) return

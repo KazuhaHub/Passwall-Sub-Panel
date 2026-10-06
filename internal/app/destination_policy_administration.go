@@ -22,3 +22,19 @@ func (a *App) destinationPolicyContext(ctx context.Context) (destpolicy.Administ
 	}
 	return destpolicy.AdministrationContext{GroupNames: names, HitWindowDays: min(7, settings.DestinationSettings().Effective().HitRetentionDays)}, nil
 }
+
+func (a *App) destinationPublishedAccessContext(ctx context.Context) (int64, bool, error) {
+	state, snapshot, published, err := a.destDefinitions.PublishedState(ctx)
+	if err != nil {
+		return 0, false, err
+	}
+	hasAccessControl := false
+	if published {
+		defs, err := destpolicy.DecodeDefinitionSnapshot(snapshot)
+		if err != nil {
+			return 0, false, err
+		}
+		hasAccessControl = destpolicy.HasEnabledAccessControl(defs)
+	}
+	return state.PublishedGeneration, hasAccessControl, nil
+}

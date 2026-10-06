@@ -5,14 +5,20 @@ import { cleanup, render } from '@testing-library/react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createAppTheme } from '@/theme'
 const probe = vi.hoisted(() => ({ props: {} as Record<string, unknown>, dispatch: vi.fn(), focus: vi.fn() }))
-vi.mock('@uiw/react-codemirror', () => ({ default: forwardRef((props: Record<string, unknown>, ref) => {
+vi.mock('@uiw/react-codemirror', async importOriginal => ({ ...await importOriginal<object>(), default: forwardRef((props: Record<string, unknown>, ref) => {
   probe.props = props
   useImperativeHandle(ref, () => ({ view: { state: { doc: { lines: 3, line: (n: number) => [{ from: 0, to: 1 }, { from: 2, to: 4 }, { from: 5, to: 8 }][n - 1] } }, dispatch: probe.dispatch, focus: probe.focus } }))
   return null
 }) }))
 import CodeEditor, { type CodeEditorHandle } from './CodeEditor'
+import { EditorState, EditorView, type Extension } from '@uiw/react-codemirror'
 afterEach(cleanup)
 beforeEach(() => { probe.dispatch.mockClear(); probe.focus.mockClear() })
+it('attaches the supplied accessible label to the editing surface', () => {
+  render(<CodeEditor value="10.0.0.0/8" onChange={() => {}} language="plain" ariaLabel="CIDRs (one per line)" />)
+  const state = EditorState.create({ extensions: probe.props.extensions as Extension[] })
+  expect(state.facet(EditorView.contentAttributes)).toContainEqual({ 'aria-label': 'CIDRs (one per line)' })
+})
 
 it('defaults to the active theme, supports plain text and converts minimum rows', () => {
   const theme = createAppTheme({ mode: 'dark', sourceColor: '#6750a4', language: 'en-US' })

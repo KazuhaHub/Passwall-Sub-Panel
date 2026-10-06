@@ -611,6 +611,7 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	a.destLists.SetOperationGate(a.operationGate)
 	a.destLists.SetSaveValidator(a.validateDestinationListSave)
 	a.destAdmin = destpolicy.NewAdministrator(a.destDefinitions, a.destinationPolicyContext, a.destinationBudget)
+	a.destAdmin.SetPublishedContextReader(a.destinationPublishedAccessContext)
 	a.destAdmin.SetOperationGate(a.operationGate)
 	a.destExemptions = destpolicy.NewExemptionManager(a.destDefinitions)
 	a.destExemptions.SetOperationGate(a.operationGate)

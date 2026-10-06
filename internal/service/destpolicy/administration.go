@@ -21,8 +21,17 @@ type AdministrationStore interface {
 }
 
 type AdministrationContext struct {
-	GroupNames    map[int64]string
-	HitWindowDays int
+	GroupNames                map[int64]string
+	HitWindowDays             int
+	PublishedGeneration       int64
+	PublishedHasAccessControl bool
+}
+
+// HasEnabledAccessControl reads published definitions, not current drafts or
+// node receipts. A pause preserves the enabled definitions for resume.
+func HasEnabledAccessControl(defs domain.DestDefinitions) bool {
+	return slices.ContainsFunc(defs.Policies, func(p domain.DestPolicy) bool { return p.Enabled }) ||
+		slices.ContainsFunc(defs.Groups, func(g domain.DestGroupMode) bool { return g.Mode == "allowlist" })
 }
 
 type PolicyOverview struct {
@@ -33,17 +42,24 @@ type PolicyOverview struct {
 }
 
 type Administrator struct {
-	store       AdministrationStore
-	readContext func(context.Context) (AdministrationContext, error)
-	budget      func(context.Context, domain.DestDefinitions) (Budget, error)
-	gate        *operationgate.Gate
-	now         func() time.Time
+	store                AdministrationStore
+	readContext          func(context.Context) (AdministrationContext, error)
+	readPublishedContext func(context.Context) (int64, bool, error)
+	budget               func(context.Context, domain.DestDefinitions) (Budget, error)
+	gate                 *operationgate.Gate
+	now                  func() time.Time
 }
 
 func NewAdministrator(store AdministrationStore, readContext func(context.Context) (AdministrationContext, error), budget func(context.Context, domain.DestDefinitions) (Budget, error)) *Administrator {
 	return &Administrator{store: store, readContext: readContext, budget: budget, now: time.Now}
 }
 func (a *Administrator) SetOperationGate(gate *operationgate.Gate) { a.gate = gate }
+
+// Published facts belong to the overview only. Draft preview/write paths must
+// remain able to repair definitions when an old published snapshot is corrupt.
+func (a *Administrator) SetPublishedContextReader(reader func(context.Context) (int64, bool, error)) {
+	a.readPublishedContext = reader
+}
 func (a *Administrator) available() error {
 	if a == nil || a.store == nil || a.readContext == nil || a.budget == nil {
 		return domain.ErrUnavailable
@@ -66,6 +82,12 @@ func (a *Administrator) Read(ctx context.Context) (PolicyOverview, error) {
 	metadata, err := a.readContext(ctx)
 	if err != nil {
 		return PolicyOverview{}, err
+	}
+	if a.readPublishedContext != nil {
+		metadata.PublishedGeneration, metadata.PublishedHasAccessControl, err = a.readPublishedContext(ctx)
+		if err != nil {
+			return PolicyOverview{}, err
+		}
 	}
 	budget, err := a.budget(ctx, defs)
 	if err != nil {

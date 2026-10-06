@@ -202,6 +202,9 @@ export interface DestinationPolicyOverviewItem extends DestinationPolicyView {
   scope_missing: boolean
 }
 export interface DestinationPoliciesView {
+  /** Facts from the selected published snapshot, independent of unsent edits. */
+  published_generation: number
+  published_has_access_control: boolean
   allow: DestinationPolicyOverviewItem[]
   block: DestinationPolicyOverviewItem[]
   observe: DestinationPolicyOverviewItem[]

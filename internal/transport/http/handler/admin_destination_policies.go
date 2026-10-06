@@ -281,5 +281,6 @@ func (h *AdminDestinationPoliciesHandler) List(c *gin.Context) {
 		}
 		groups = append(groups, gin.H{"group_id": g.GroupID, "name": overview.Context.GroupNames[g.GroupID], "stage": g.Stage, "stage_days": days})
 	}
-	c.JSON(200, gin.H{"allow": segments[domain.DestAllow], "block": segments[domain.DestBlock], "observe": segments[domain.DestObserve], "exemptions": gin.H{"count": len(overview.Definitions.Exemptions)}, "allowlist_groups": groups, "hit_window_days": overview.Context.HitWindowDays, "budget": overview.Budget})
+	c.JSON(200, gin.H{"allow": segments[domain.DestAllow], "block": segments[domain.DestBlock], "observe": segments[domain.DestObserve], "exemptions": gin.H{"count": len(overview.Definitions.Exemptions)}, "allowlist_groups": groups, "hit_window_days": overview.Context.HitWindowDays, "budget": overview.Budget,
+		"published_generation": overview.Context.PublishedGeneration, "published_has_access_control": overview.Context.PublishedHasAccessControl})
 }

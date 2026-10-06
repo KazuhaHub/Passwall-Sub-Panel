@@ -14,6 +14,131 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/destpolicy"
 )
 
+func TestBuildDestinationPolicyOverviewUsesPublishedAccessDefinition(t *testing.T) {
+	a := buildDestinationListsFixture(t)
+	token := destinationRefreshAdminToken(t, a)
+	check := func(want bool) {
+		t.Helper()
+		w := destinationListRequest(t, a, token, "GET", "policies", nil)
+		var body struct {
+			PublishedHasAccessControl *bool `json:"published_has_access_control"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &body); w.Code != 200 || err != nil || body.PublishedHasAccessControl == nil || *body.PublishedHasAccessControl != want {
+			t.Fatalf("published access fact: HTTP=%d, want=%v", w.Code, want)
+		}
+	}
+	check(false)
+	input := destinationPolicyInput("First publish", "block")
+	input["enabled"] = false
+	w := destinationListRequest(t, a, token, "POST", "policies", input)
+	var p destinationPolicyAPIResult
+	if err := json.Unmarshal(w.Body.Bytes(), &p); w.Code != 201 || err != nil {
+		t.Fatal("create disabled policy")
+	}
+	publish := func() {
+		t.Helper()
+		if err := destpolicy.NewPublisher(a.destDefinitions, nil).EnsurePublished(t.Context(), 60, true); err != nil {
+			t.Fatal(err)
+		}
+	}
+	publish()
+	check(false)
+	input["enabled"], input["updated_at"] = true, p.UpdatedAt
+	w = destinationListRequest(t, a, token, "PUT", fmt.Sprintf("policies/%d", p.ID), input)
+	if err := json.Unmarshal(w.Body.Bytes(), &p); w.Code != 200 || err != nil {
+		t.Fatal("enable policy")
+	}
+	check(false) // Saved enabled definitions are not yet a published first policy.
+	publish()
+	check(true)
+	for _, paused := range []bool{true, false} {
+		w = destinationListRequest(t, a, token, "PUT", "pause", map[string]any{"paused": paused})
+		if w.Code != 200 {
+			t.Fatal("pause/resume policy fixture")
+		}
+		check(true) // Pausing retains enabled definitions for resume.
+	}
+	input["enabled"], input["updated_at"] = false, p.UpdatedAt
+	w = destinationListRequest(t, a, token, "PUT", fmt.Sprintf("policies/%d", p.ID), input)
+	if w.Code != 200 {
+		t.Fatal("disable policy")
+	}
+	check(true) // The published version still has access control until removal deploys.
+	publish()
+	check(false)
+}
+
+func TestBuildDestinationPolicyOverviewIncludesPublishedAllowlistOnly(t *testing.T) {
+	f := buildDestinationPolicyFixture(t)
+	a := f.a
+	token := destinationRefreshAdminToken(t, a)
+	prepared, err := destlist.ParseCustom([]byte("domain:example.test\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	owned := [2]domain.DestList{}
+	for i := range owned {
+		owned[i] = domain.DestList{Name: fmt.Sprintf("Allowlist fact %d", i), Kind: domain.DestListCustom, Entries: prepared.Entries, ContentSHA256: prepared.ContentSHA256, EntryCount: prepared.EntryCount, ParseReport: &prepared.Report}
+	}
+	mode := &domain.DestGroupMode{GroupID: f.group.ID, Mode: "allowlist", Stage: "trial"}
+	if err := a.destDefinitions.SaveGroupMode(t.Context(), mode, time.Time{}, owned, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	publisher := destpolicy.NewPublisher(a.destDefinitions, nil)
+	if err := publisher.EnsurePublished(t.Context(), 60, true); err != nil {
+		t.Fatal(err)
+	}
+	check := func(want bool) {
+		t.Helper()
+		w := destinationListRequest(t, a, token, "GET", "policies", nil)
+		var body struct {
+			PublishedHasAccessControl *bool `json:"published_has_access_control"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &body); w.Code != 200 || err != nil || body.PublishedHasAccessControl == nil || *body.PublishedHasAccessControl != want {
+			t.Fatalf("published allowlist-only fact: HTTP=%d want=%v", w.Code, want)
+		}
+	}
+	check(true)
+	version := mode.UpdatedAt
+	mode.Mode, mode.Stage = "open", ""
+	if err := a.destDefinitions.SaveGroupMode(t.Context(), mode, version, [2]domain.DestList{}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	check(true) // Saved open mode has not removed the published allowlist yet.
+	if err := publisher.EnsurePublished(t.Context(), 60, true); err != nil {
+		t.Fatal(err)
+	}
+	check(false)
+}
+
+func TestBuildDestinationPolicyWritesDoNotDecodePublishedOverviewFacts(t *testing.T) {
+	a := buildDestinationListsFixture(t)
+	token := destinationRefreshAdminToken(t, a)
+	if w := destinationListRequest(t, a, token, "POST", "policies", destinationPolicyInput("Published fixture", "block")); w.Code != 201 {
+		t.Fatal("published policy fixture")
+	}
+	if err := destpolicy.NewPublisher(a.destDefinitions, nil).EnsurePublished(t.Context(), 60, true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.database.ExecContext(t.Context(), "UPDATE dest_policy_snapshots SET body = ?", []byte(`{"schema":9}`)); err != nil {
+		t.Fatal(err)
+	}
+	w := destinationListRequest(t, a, token, "GET", "policies", nil)
+	if w.Code == 200 {
+		t.Fatal("corrupt snapshot must not fabricate a published first-enable fact")
+	}
+	for _, path := range []string{"policies/preview", "policies"} {
+		w = destinationListRequest(t, a, token, "POST", path, destinationPolicyInput("Repair draft", "block"))
+		want := 200
+		if path == "policies" {
+			want = 201
+		}
+		if w.Code != want {
+			t.Fatalf("published overview decode obstructed draft repair: %s HTTP=%d", path, w.Code)
+		}
+	}
+}
+
 func TestBuildDestinationPolicyAPICompilesAndUsesFullQuotaMembership(t *testing.T) {
 	f := buildDestinationPolicyFixture(t)
 	a := f.a

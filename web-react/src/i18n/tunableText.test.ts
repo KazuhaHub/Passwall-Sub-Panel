@@ -21,7 +21,7 @@ import { flatten, type Nested } from './options'
 // the Chinese defaultValue copies in the settings view, which an i18n miss
 // would show instead. The risk center's views carry no Chinese copies at all
 // (riskKeys.test.ts).
-const scanned = ['settings.geo_anomaly.', 'settings.risk.', 'settings.risk_center.', 'risk_signals.', 'risk_center.', 'groups.scope.risk_']
+const scanned = ['settings.geo_anomaly.', 'settings.risk.', 'settings.risk_center.', 'risk_signals.', 'risk_center.', 'groups.scope.risk_', 'access_control.', 'groups.destination.', 'servers.access.', 'settings.legal.']
 
 const literals: Record<'zh' | 'en', string[]> = {
   zh: ['每小时', '4 周', '最近 7 天', '3 个以上', '35 天', '满 14 天', '满 4 天'],

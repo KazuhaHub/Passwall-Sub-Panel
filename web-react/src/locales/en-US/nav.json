@@ -16,7 +16,8 @@
     "node_issues": "Node issues",
     "language_packs": "Language packs",
     "settings": "Settings",
-    "diagnostics": "Diagnostics"
+    "diagnostics": "Diagnostics",
+    "access_control": "Access control"
   },
   "section": {
     "directory": "Directory",

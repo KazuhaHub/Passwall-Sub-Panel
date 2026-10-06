@@ -1025,7 +1025,8 @@ executables. Status head `bdc134d9c85eae48b19243fae35d1f3c91d55479` passed
 the [complete Test workflow](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37399543455)
 and [released-node systemd acceptance](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37399543473).
 Linux CI completed all blocked test coverage; real third-party jobs were skipped.
-The status views and browser/real-node acceptance remain outstanding.
+The status page and coverage drawer are described below; complete browser and
+real-node acceptance remain outstanding.
 
 ## Compiler and list-refresh diagnostics
 
@@ -1063,9 +1064,9 @@ parsing is opt-in for destination settings, preserving existing policy-field
 typing. The dialog has loading/retry/unwired states, requested-field focus,
 mobile full-screen layout and Chinese/English copy. Initial tests exposed the
 missing numeric error display and competing navigation confirmation before
-their fixes. The dialog is a component foundation: the access-control page/menu
-entry and its invocation are still pending, as are complete browser screenshots
-and owner approval. It does not complete C5 or the stage-1c screen matrix.
+their fixes. The dialog is now invoked from the access-control page. Complete
+browser screenshots and owner approval remain pending; this does not complete
+C5 or the stage-1c screen matrix.
 
 Protocol fields and capability/receipt boundaries are documented in
 [the native-node extension](psp-node-agent.md#11-目的地访问控制扩展开发中).
@@ -1073,6 +1074,52 @@ The [upgrade guide](UPGRADE-v4.md#访问控制版本的升级与降级) now incl
 required warning: downgrading PSP withdraws allowlist guarantees, while offline
 or failed-deployment nodes may continue enforcing an old artifact. Actual
 per-node upgrade/downgrade acceptance remains pending.
+
+## Policy management page increment
+
+The administrator-only `/admin/access-control` route, capability and sidebar
+entry now open the real policy page. Operator/user guards run before destination
+reads, and sidebar prefetch excludes the operator. Policy creation, editing,
+full-field/versioned enablement, copying, deletion and whole-segment ordering
+use the destination administration APIs. Editor conflicts preserve the draft
+until explicit reload; duplicate names attach to the name field. CIDRs are
+validated by original line number in a lazy CodeEditor with an accessible label.
+Debounced, abortable previews expose the server budget. Over-limit previews
+prevent saving; failed preview reads leave final validation to the save endpoint.
+
+The first-enable confirmation uses `published_generation` and
+`published_has_access_control` from the selected validated snapshot. Saved
+enable/disable changes do not pretend to change this published fact. Published
+allowlist-only definitions count, and pause retains enabled definitions for
+resume. Snapshot reads are confined to the overview, so a corrupt old snapshot
+does not block draft preview/write repairs. Read failures do not fabricate a
+first-enable answer. No schema or protocol field changes are needed.
+
+The status verdict distinguishes publication, application, unsupported panels,
+failed preflight and list readiness. Only outstanding publication/candidate
+acknowledgements poll; the countdown is excluded from the primary live region.
+Pause publication failure reports the committed pause state without claiming
+fleet convergence. The coverage drawer uses five state filters, exact fallback
+acknowledgement conditions and explicit retry. Filter replacement preserves
+owned history, and closing a cold deep link removes its node filter. Settings
+open from the same page. Three inline templates prefill editable policies.
+
+This is a functional increment, not completion of S1–S3/S14 or C5. List
+management, category templates and promotion, exemptions, destination simulation,
+account access inspection, target-page deep links and the remaining final-plan
+screen details still need integration. Recording controls and stage-5 allowlist
+tabs remain scoped to their respective stages. Complete browser screenshots,
+owner approval and actual policy-node acceptance remain outstanding.
+
+Validation for this increment includes 1,908 passing frontend tests (one skipped),
+followed by 20 passing focused cases after the final responsive changes, passing
+TypeScript/lint/production build checks, full destination-service and HTTP-handler
+tests, and destination application integration tests. The published-fact and
+corrupt-snapshot repair regressions failed before their fixes. Browser fixture
+previews checked the desktop Chinese page and 375px editor/coverage layouts,
+English dark-mode editor/discard confirmation, live announcements and horizontal
+overflow. These fixture checks do not replace live backend/node or the complete
+final-plan screenshot matrix.
 
 ## Storage and privacy
 
@@ -1085,8 +1132,8 @@ search terms will remain component state rather than page URL state, but API
 queries can still reach those external logs. Audit ingestion, retention and
 consent enforcement remain part of the later implementation stages.
 
-Stage 1c still requires the remaining multi-row service operations, API boundaries,
-access-control views and complete browser acceptance. C2's end-to-end browser
+Stage 1c still requires the remaining access-control views and complete browser
+acceptance. C2's end-to-end browser
 acceptance remains outstanding. Audit ingestion,
 retention, privacy/consent and subsequent stages retain the full final-plan
 scope. Repository tests and green CI do not establish completion of these
