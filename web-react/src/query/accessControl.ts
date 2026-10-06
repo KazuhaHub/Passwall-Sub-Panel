@@ -7,6 +7,7 @@ import { statusNeedsPolling } from '@/utils/accessControl'
 import { getDestinationList, getDestinationCategories, createDestinationList, putDestinationList, deleteDestinationList, refreshDestinationList, refreshDestinationCategories, type DestinationListInput } from '@/api/accessControl'
 import { groupKeys } from './keys'
 import { getDestinationExemptions, getDestinationUserAccess, createDestinationExemption, putDestinationExemption, deleteDestinationExemption, type DestinationExemptionInput } from '@/api/accessControl'
+import { createDestinationGlobalException } from '@/api/accessControl'
 
 export function useAccessControlSettings(scope: QueryScope, enabled: boolean) {
   return useQuery({
@@ -115,4 +116,7 @@ export function useSaveDestinationExemption(scope: QueryScope) {
 }
 export function useDeleteDestinationExemption(scope: QueryScope) {
   return useMutation({ mutationFn: deleteDestinationExemption, onSettled: useInvalidateExemptions(scope) })
+}
+export function useCreateDestinationException(scope: QueryScope) {
+  return useMutation({ mutationFn: createDestinationGlobalException, onSettled: useInvalidateLists(scope) })
 }

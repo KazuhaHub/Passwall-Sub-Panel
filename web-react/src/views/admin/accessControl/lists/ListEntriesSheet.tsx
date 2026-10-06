@@ -7,7 +7,7 @@ import { useQueryScope } from '@/query/useQueryScope'
 import ParseReport from './ParseReport'
 const P = 'admin:access_control.list_entries.'
 function entryKind(entry: string): string { const kind = entry.split(':', 1)[0]; return ['domain', 'full', 'keyword', 'regexp'].includes(kind) ? kind : 'cidr' }
-export default function ListEntriesSheet({ id, onClose, onEdit, onRefresh, busy, refreshing = false }: { id: number; onClose: () => void; onEdit: () => void; onRefresh: () => void; busy: boolean; refreshing?: boolean }) {
+export default function ListEntriesSheet({ id, onClose, onEdit, onRefresh, onTest, busy, refreshing = false }: { id: number; onClose: () => void; onEdit: () => void; onRefresh: () => void; onTest?: (target: string) => void; busy: boolean; refreshing?: boolean }) {
   const { t } = useTranslation(['admin', 'common']), query = useDestinationList(useQueryScope(), id)
   const [search, setSearch] = useState(''), [type, setType] = useState<string | null>(null)
   const entries = query.data?.entries ?? [], counts = query.data?.entry_types ?? Object.fromEntries(['domain', 'full', 'keyword', 'regexp', 'cidr'].map(kind => [kind, entries.filter(entry => entryKind(entry) === kind).length]))
@@ -20,7 +20,10 @@ export default function ListEntriesSheet({ id, onClose, onEdit, onRefresh, busy,
       <Stack direction="row" sx={{ flexWrap: 'wrap', gap: 1 }}>{Object.entries(counts).map(([kind, count]) => <Chip key={kind} label={`${kind} ${count}`} clickable variant={type === kind ? 'filled' : 'outlined'} onClick={() => setType(type === kind ? null : kind)} />)}</Stack>
       <Typography variant="caption" color="text.secondary">{t(`${P}${query.data.entry_types ? 'bounded_totals' : 'bounded'}`, { count: query.data.entry_count, shown: entries.length })}</Typography>
       <TextField label={t(`${P}search`)} value={search} onChange={e => setSearch(e.target.value)} />
-      <Box sx={{ minHeight: 80 }}>{filtered.map(entry => <Typography key={entry} variant="body2" sx={{ fontFamily: 'monospace', overflowWrap: 'anywhere', py: .5 }}>{entry}</Typography>)}</Box>
+      <Box sx={{ minHeight: 80 }}>{filtered.map(entry => {
+        const target = /^(domain|full):/.test(entry) ? entry.replace(/^[^:]+:/, '') : /^\d+\.\d+\.\d+\.\d+\/32$/.test(entry) || /^[a-f\d:]+\/128$/i.test(entry) ? entry.replace(/\/\d+$/, '') : null
+        return <Stack key={entry} direction="row" sx={{ alignItems: 'center', gap: 1 }}><Typography variant="body2" sx={{ flex: 1, minWidth: 0, fontFamily: 'monospace', overflowWrap: 'anywhere', py: .5 }}>{entry}</Typography>{onTest && target && <Button disabled={busy} size="small" onClick={() => onTest(target)} aria-label={t('admin:access_control.test.test_entry', { name: entry })}>{t('admin:access_control.test.submit')}</Button>}</Stack>
+      })}</Box>
       <Stack direction="row" spacing={1}><Button disabled={busy} onClick={onEdit}>{t('common:actions.edit')}</Button>{query.data.kind !== 'custom' && <Button disabled={busy || refreshing || query.data.state === 'refreshing'} onClick={onRefresh}>{t('admin:access_control.lists.refresh_now')}</Button>}</Stack>
       <ParseReport report={query.data.parse_report} kind={query.data.kind} />
     </Stack> : query.error ? <Alert severity="error" action={<Button onClick={() => void query.refetch()}>{t('common:actions.retry')}</Button>}>{t(`${P}failed`)}</Alert> : <Skeleton height={300} />}</DialogContent>

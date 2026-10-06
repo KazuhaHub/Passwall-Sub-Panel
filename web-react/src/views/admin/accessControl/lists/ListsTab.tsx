@@ -19,7 +19,7 @@ import { listIsProblem, listSourceLabel } from './listDraft'
 import ListDialog from './ListDialog'
 import ListEntriesSheet from './ListEntriesSheet'
 const P = 'admin:access_control.lists.'
-export default function ListsTab({ active, selectedId, onCloseSheet, onOpenList, onSettings, newListRequest = 0, policies, status }: { active: boolean; selectedId: number | null; onCloseSheet: () => void; onOpenList: (id: number) => void; onSettings: () => void; newListRequest?: number; policies?: DestinationPoliciesView; status?: DestinationStatus }) {
+export default function ListsTab({ active, selectedId, onCloseSheet, onOpenList, onSettings, onTest, newListRequest = 0, policies, status }: { active: boolean; selectedId: number | null; onCloseSheet: () => void; onOpenList: (id: number) => void; onSettings: () => void; onTest?: (target: string) => void; newListRequest?: number; policies?: DestinationPoliciesView; status?: DestinationStatus }) {
   const { t } = useTranslation(['admin', 'common']), scope = useQueryScope(), theme = useTheme()
   const query = useDestinationLists(scope, active || !!selectedId), remove = useDeleteDestinationList(scope), refresh = useRefreshDestinationList(scope)
   const [params, setParams] = useSearchParams(), location = useLocation()
@@ -86,7 +86,7 @@ export default function ListsTab({ active, selectedId, onCloseSheet, onOpenList,
       ...(menu.list.kind === 'custom' ? [] : [<MenuItem key="refresh" disabled={menu.list.state === 'refreshing'} onClick={() => { refreshList(menu.list); setMenu(null) }}>{t(`${P}refresh_now`)}</MenuItem>]),
       <Tooltip key="delete" title={menu.list.used_by.length || menu.list.owner_group_id ? t(`${P}in_use_message`) : ''}><span><MenuItem disabled={!!menu.list.used_by.length || !!menu.list.owner_group_id} onClick={() => { deleteList(menu.list); setMenu(null) }}>{t('common:actions.delete')}</MenuItem></span></Tooltip>,
     ]}</Menu>
-    {selectedId && <ListEntriesSheet key={`sheet-${selectedId}`} id={selectedId} refreshing={selected?.state === 'refreshing'} onClose={onCloseSheet} busy={busy} onEdit={() => { const existing = items.find(list => list.id === selectedId); if (existing) setEditor({ existing }) }} onRefresh={() => { const list = items.find(list => list.id === selectedId); if (list) refreshList(list) }} />}
+    {selectedId && <ListEntriesSheet key={`sheet-${selectedId}`} id={selectedId} onTest={onTest} refreshing={selected?.state === 'refreshing'} onClose={onCloseSheet} busy={busy} onEdit={() => { const existing = items.find(list => list.id === selectedId); if (existing) setEditor({ existing }) }} onRefresh={() => { const list = items.find(list => list.id === selectedId); if (list) refreshList(list) }} />}
     {editor && <ListDialog key={`editor-${editor.existing?.id ?? 'new'}`} existing={editor.existing} policies={policies} status={status} refreshHours={query.data?.refresh_hours ?? 24} onClose={() => setEditor(null)} onSaved={list => { setAfterClose(list.id); setEditor(null) }} onSettings={() => { setAfterClose('settings'); setEditor(null) }} />}
   </>
 }

@@ -19,6 +19,36 @@ vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string, opti
 vi.mock('@/components/CodeEditor', () => ({ default: (p: { value: string; onChange: (s: string) => void; ariaLabel: string; readOnly: boolean }) => <textarea aria-label={p.ariaLabel} value={p.value} readOnly={p.readOnly} onChange={e => p.onChange(e.target.value)} /> }))
 import AccessControlView from './AccessControlView'
 const P = 'admin:access_control.'
+it('replaces a cold list drawer with a state-prefilled test and closes in place', async () => {
+  listsAPI([listSummary]); const router = mount('/admin/access-control?tab=lists&sheet=list&list=7')
+  fireEvent.click(await screen.findByRole('button', { name: `${P}test.test_entry domain:bank.example` }))
+  const target = await screen.findByRole('textbox', { name: `${P}test.target` }) as HTMLInputElement
+  expect(target.value).toBe('bank.example'); expect(router.state.location.search).toBe('?tab=lists&sheet=test')
+  expect(router.state.location.state).toEqual({ prefill: { target: 'bank.example' } })
+  expect(api.post).not.toHaveBeenCalled()
+  fireEvent.click(screen.getByRole('button', { name: 'common:actions.close' }))
+  await waitFor(() => expect(router.state.location.search).toBe('?tab=lists'))
+  expect(router.state.location.state).toBeNull()
+})
+it('opens testing from the page without automatically posting any target', async () => {
+  const router = mount()
+  fireEvent.click(await screen.findByRole('button', { name: `${P}test.title` }))
+  await screen.findByRole('dialog', { name: `${P}test.title` })
+  expect(router.state.location.search).toBe('?sheet=test')
+  expect(api.post).not.toHaveBeenCalled()
+  fireEvent.click(screen.getByRole('button', { name: 'common:actions.close' }))
+  await waitFor(() => expect(router.state.location.search).toBe(''))
+})
+it('opens the matched policy and replaces the sheet history without leaking the target', async () => {
+  api.post.mockResolvedValue({ data: { verdict: 'block', terminating_step: 'block', unpublished: false, steps: [{ step: 'block', result: 'hit', policy_id: 12, name: 'No mail' }], notes: [], nodes: [] } })
+  const router = mount('/admin/access-control?tab=lists&sheet=test')
+  fireEvent.change(await screen.findByRole('textbox', { name: `${P}test.target` }), { target: { value: 'secret.example.test' } })
+  fireEvent.click(screen.getByRole('button', { name: `${P}test.submit` }))
+  fireEvent.click(await screen.findByRole('button', { name: `${P}test.open_policy No mail` }))
+  await screen.findByRole('dialog', { name: `${P}editor.edit_title No mail` })
+  expect(router.state.location.search).toBe('?tab=policies')
+  expect(screen.queryByRole('dialog', { name: `${P}test.title` })).toBeNull()
+})
 it('opens exemptions with owned history and preserves the list tab on cold close', async () => {
   api.get.mockImplementation(async (url: string) => ({ data: url.endsWith('/exemptions') ? { items: [] } : url.endsWith('/policies') ? destinationPolicies() : url.endsWith('/status') ? destinationStatus() : url.endsWith('/lists') ? { items: [] } : { effective: {} } }))
   const router = mount('/admin/access-control?tab=lists&sheet=exemptions')

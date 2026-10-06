@@ -5,7 +5,7 @@ import { act, cleanup, renderHook } from '@testing-library/react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { sessionScope } from './session'
 import { accessControlKeys, groupKeys, settingsKeys } from './keys'
-import { destinationListsQuery, useSaveDestinationList, useDeleteDestinationList, useRefreshDestinationList, useRefreshDestinationCategories, useSaveDestinationPolicy, useDeleteDestinationPolicy, useOrderDestinationPolicies, useDestinationPublication, useRetryDestinationPolicy, useSaveAccessControlSettings, useSaveDestinationExemption, useDeleteDestinationExemption } from './accessControl'
+import { destinationListsQuery, useSaveDestinationList, useDeleteDestinationList, useRefreshDestinationList, useRefreshDestinationCategories, useSaveDestinationPolicy, useDeleteDestinationPolicy, useOrderDestinationPolicies, useDestinationPublication, useRetryDestinationPolicy, useSaveAccessControlSettings, useSaveDestinationExemption, useDeleteDestinationExemption, useCreateDestinationException } from './accessControl'
 import { destinationBudget, samplePolicy } from '@/test/accessControlFixtures'
 import type { DestinationListSummary, DestinationListsView } from '@/api/accessControl'
 const api = vi.hoisted(() => ({ post: vi.fn(), put: vi.fn(), delete: vi.fn() }))
@@ -17,6 +17,7 @@ const listKeys = ['lists', 'detail', 'listPreview', 'policyPreview', 'policies',
 const policyKeys = ['policies', 'status', 'lists', 'policyPreview']
 const exemptionKeys = ['exemptions', 'userAccess', 'policies', 'status', 'policyPreview']
 const cases: Array<{ name: string; keys: string[]; successOnly?: boolean; useRun: () => () => Promise<unknown> }> = [
+  { name: 'global exception', keys: listKeys, useRun: () => { const m = useCreateDestinationException(scope); return () => m.mutateAsync({ target: 'example.test', match: 'site', scope: 'global' }) } },
   { name: 'create exemption', keys: exemptionKeys, useRun: () => { const m = useSaveDestinationExemption(scope); return () => m.mutateAsync({ userId: 7, input: { reason: 'Diagnostics', expires_at: null } }) } },
   { name: 'edit exemption', keys: exemptionKeys, useRun: () => { const m = useSaveDestinationExemption(scope); return () => m.mutateAsync({ userId: 7, existing: true, input: { reason: 'Updated', expires_at: 1900000000000 } }) } },
   { name: 'cancel exemption', keys: exemptionKeys, useRun: () => { const m = useDeleteDestinationExemption(scope); return () => m.mutateAsync(7) } },

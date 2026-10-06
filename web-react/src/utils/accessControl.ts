@@ -1,5 +1,28 @@
 import type { DestinationNodeStatus, DestinationPoliciesView, DestinationStatus } from '@/api/accessControl'
 import type { StatusLineTone } from '@/components/StatusLine'
+import type { Theme } from '@mui/material'
+import { stateTone, type Tone } from '@/components/ToneBadge'
+import BlockIcon from '@mui/icons-material/Block'
+import LockOutlinedIcon from '@mui/icons-material/LockOutlined'
+import VisibilityOutlinedIcon from '@mui/icons-material/VisibilityOutlined'
+import ScienceOutlinedIcon from '@mui/icons-material/ScienceOutlined'
+import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutlineOutlined'
+import VerifiedUserOutlinedIcon from '@mui/icons-material/VerifiedUserOutlined'
+
+export type DestinationVerdictToneKind = 'block' | 'deny' | 'observe' | 'trial' | 'allow' | 'exempt' | 'direct' | 'untestable'
+export function accessTone(theme: Theme, kind: DestinationVerdictToneKind): Tone {
+  const md = theme.palette.md
+  switch (kind) {
+    case 'block': return { bg: md.surfaceContainerHighest, fg: md.error, Icon: BlockIcon }
+    case 'deny': return { bg: md.surfaceContainerHighest, fg: md.error, Icon: LockOutlinedIcon }
+    case 'observe': return { bg: md.secondaryContainer, fg: md.onSecondaryContainer, Icon: VisibilityOutlinedIcon }
+    case 'trial': return { bg: md.secondaryContainer, fg: md.onSecondaryContainer, Icon: ScienceOutlinedIcon }
+    case 'allow': return { bg: md.surfaceContainerHighest, fg: md.onSurfaceVariant, Icon: CheckCircleOutlineIcon }
+    case 'exempt': return { bg: md.surfaceContainerHigh, fg: md.onSurface, Icon: VerifiedUserOutlinedIcon }
+    case 'direct': return stateTone(theme, 'quiet')
+    case 'untestable': return stateTone(theme, 'inhibited')
+  }
+}
 
 export type AccessVerdictKind = 'paused' | 'publication' | 'rejected' | 'over_limit' | 'sniffing' | 'no_coverage' | 'upgrade' | 'offline' | 'list_failed' | 'list_pending' | 'unpublished' | 'pending' | 'applied' | 'quiet'
 export interface AccessVerdict { kind: AccessVerdictKind; tone: StatusLineTone; done: number; total: number; count: number; name?: string }

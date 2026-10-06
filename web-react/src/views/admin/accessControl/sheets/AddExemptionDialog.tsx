@@ -14,7 +14,7 @@ import { discardSettingsCopy } from '../confirmCopy'
 import { destinationError } from '../errors'
 import { exemptionExpiry, localExpiry, validateExemption, type ExemptionExpiry } from './exemptionDraft'
 const P = 'admin:access_control.exemptions.'
-export default function AddExemptionDialog({ userId: lockedId, upn, existing, etaMs, onClose }: { userId?: number; upn?: string; existing?: DestinationExemptionView; etaMs?: number; onClose: () => void }) {
+export default function AddExemptionDialog({ userId: lockedId, upn, existing, etaMs, accessWarning, onClose, onSaved }: { userId?: number; upn?: string; existing?: DestinationExemptionView; etaMs?: number; accessWarning?: boolean; onClose: () => void; onSaved?: () => void }) {
   const { t } = useTranslation(['admin', 'common']), theme = useTheme(), mobile = useMediaQuery(theme.breakpoints.down('sm'))
   const scope = useQueryScope(), save = useSaveDestinationExemption(scope)
   const [userId, setUserId] = useState<number | null>(existing?.user_id ?? lockedId ?? null)
@@ -40,7 +40,7 @@ export default function AddExemptionDialog({ userId: lockedId, upn, existing, et
     admission.current = true; setBusy(true)
     try {
       const result = await save.mutateAsync({ userId: userId!, existing: !!existing, input: { reason: reason.trim(), expires_at: expiry } })
-      pushSnack(t(`${P}saved`, { upn: result.upn ?? upn ?? `#${userId}` }), 'success'); onClose()
+      pushSnack(t(`${P}saved`, { upn: result.upn ?? upn ?? `#${userId}` }), 'success'); (onSaved ?? onClose)()
     } catch (err) { setError(destinationError(err)) } finally { admission.current = false; setBusy(false) }
   }
   return <Dialog open fullWidth maxWidth="sm" fullScreen={mobile} onClose={close} aria-labelledby="exemption-editor-title">
@@ -50,6 +50,7 @@ export default function AddExemptionDialog({ userId: lockedId, upn, existing, et
       <Box component="fieldset" disabled={busy} sx={{ p: 0, m: 0, border: 0, minWidth: 0 }}><Stack spacing={2.5}>
         {lockedId || existing ? <TextField label={t(`${P}account`)} value={existing?.upn ?? upn ?? `#${userId}`} slotProps={{ input: { readOnly: true } }} /> : <UserAutocomplete value={userId} onChange={id => { setUserId(id); setError({ error: '' }) }} label={t(`${P}account`)} />}
         {duplicate && <Alert severity="error">{t(`${P}dest_exemption_exists`)}</Alert>}
+        {accessWarning && <FieldHint tone="amber" summary={t('admin:access_control.exception.account_summary')} detail={t('admin:access_control.exception.account_detail')} />}
         {access.data?.group?.mode === 'allowlist' && <FieldHint tone="amber" summary={t(`${P}allowlist_summary`, { group: access.data.group.name })} detail={t(`${P}allowlist_detail`)} />}
         <TextField autoFocus label={t(`${P}reason`)} multiline minRows={2} value={reason} onChange={e => { setReason(e.target.value); setError(old => old.error === 'dest_exemption_exists' ? old : { error: '' }) }} error={invalid.reason && !!reason || error.field === 'reason'} helperText={t(`${P}reason_count`, { count: Array.from(reason).length, limit: 255 })} />
         <Typography variant="subtitle2">{t(`${P}expiry`)}</Typography>

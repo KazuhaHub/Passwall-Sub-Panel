@@ -23,6 +23,7 @@ export interface UserAutocompleteProps {
   onChange: (userId: number | null) => void
   label?: string
   width?: number
+  disabled?: boolean
 }
 
 /**
@@ -35,7 +36,7 @@ export interface UserAutocompleteProps {
  * return it (a filter read back from the URL): it is read by id
  * (userKeys.detail).
  */
-export default function UserAutocomplete({ value, onChange, label, width = 280 }: UserAutocompleteProps) {
+export default function UserAutocomplete({ value, onChange, label, width = 280, disabled = false }: UserAutocompleteProps) {
   const { t } = useTranslation(['admin'])
   const scope = useQueryScope()
   const [input, setInput] = useState('')
@@ -64,6 +65,7 @@ export default function UserAutocomplete({ value, onChange, label, width = 280 }
   return (
     <Autocomplete
       size="small"
+      disabled={disabled}
       options={all}
       value={selected}
       loading={isFetching}

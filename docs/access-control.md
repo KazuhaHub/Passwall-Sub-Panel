@@ -1273,6 +1273,60 @@ tabs were checked with isolated API fixtures. These are not live node acceptance
 or completion of the full screen matrix. Exact-head CI remains tracked in draft
 PR #274.
 
+## Destination simulation and exceptions increment
+
+The page header opens `sheet=test`. List-entry actions prefill exact domains,
+hostnames and single-address CIDRs through history state; keyword/regexp rules
+and whole CIDR networks do not fabricate test targets. Destination, port and
+account inputs remain outside the URL. Switching a list sheet into testing
+replaces its history entry; cold links retain in-place closing. Opening the
+matched policy removes the test sheet, selects the policy tab, scrolls and
+briefly highlights the row, then opens the existing versioned editor. Deleted
+policies produce a warning rather than a synthetic editor.
+
+Tests run only from explicit submit or retry. The audited POST sends a validated
+host/IP, integer port, network and optional account/node identities. HTTP/HTTPS
+URLs contribute only their host, with an explanation; no DNS is performed.
+Pending requests cannot be duplicated and abort on unmount. Changing inputs
+clears stale results. The trace preserves API result kinds, shadowed matches and
+entry provenance, sharing the policy rail's line/dot primitives. Empty uncertain
+traces do not fabricate evaluated steps. Verdict tones distinguish blocking,
+allowlist denial, observation, trial, allow, exempt, direct and uncertainty in
+both themes. Existing group traces can be explained without exposing new
+stage-5 configuration controls.
+
+Node explanations follow actual API states and show at most five until
+expanded; a selected unapplied node warns that actual behavior may differ.
+Unpublished changes show an explicit publish action. Publishing refreshes
+metadata without repeating the audited test or claiming node application.
+Published-version and IP/protocol/scope limitations remain visible.
+
+The shared allow-exception dialog calls the existing atomic global-exception
+API. It explains that all accounts bypass blocking, the server determines the
+registrable domain, and first use creates the list and first allow policy.
+IP exceptions remain one address. Save feedback follows the response's actual
+`created` facts. Conflicts preserve the match choice; dirty/pending guards retain
+the draft. The account-only choice reuses the exemption editor, required reason
+and expiry validation, warns about account-wide exemption and closes the flow
+after saving. Exception mutations invalidate only the session's relevant list,
+policy, status and group caches without repeating network previews.
+
+The exemption head `e99f2fab` passed complete Test and released-node systemd
+acceptance. Simulation regressions covered API calls, admission, aborted reads,
+manual retry/publication, uncertain/group results, navigation and shared
+exception/exemption actions. Chinese desktop and 375px English dark-mode
+browser fixtures checked host normalization, result traces, offline-node/IP
+notes, above-drawer exception saves and policy navigation. Fixtures were removed
+after validation; they are not live backend/node or full-matrix acceptance.
+
+Local full frontend validation passed 2,025 tests (one skipped) in a single
+worker. The preceding two-worker run exited with a Windows native worker fault
+`3221225477` and a host-normalization assertion while that code was being
+refined; it is not counted as a passing run. Final verdict-tone and asynchronous
+button changes were followed by 251 passing focused tests. TypeScript, changed-source
+lint, locale generation and production builds passed. Exact-head CI for this
+increment remains a separate draft-PR gate.
+
 ## Storage and privacy
 
 List previews and policy previews are excluded from write-audit logging by
