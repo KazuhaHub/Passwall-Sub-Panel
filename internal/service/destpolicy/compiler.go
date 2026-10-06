@@ -107,23 +107,30 @@ func (c *Compiler) Compile(ctx context.Context, agent *domain.NodeAgent, snapsho
 	if err != nil {
 		return ports.DestPolicyCandidate{}, err
 	}
-	if err := c.publisher.EnsurePublished(ctx, minimum, false); err != nil {
-		return ports.DestPolicyCandidate{}, err
-	}
+	publicationErr := c.publisher.EnsurePublished(ctx, minimum, false)
 	defs, state, err := c.publishedDefinitions(ctx)
 	if err != nil {
 		return ports.DestPolicyCandidate{}, err
 	}
+	if publicationErr != nil && !state.Paused {
+		return ports.DestPolicyCandidate{}, publicationErr
+	}
 	if defs.State.Paused != state.Paused {
 		if err := c.publisher.EnsurePublished(ctx, minimum, true); err != nil {
-			return ports.DestPolicyCandidate{}, err
-		}
-		defs, state, err = c.publishedDefinitions(ctx)
-		if err != nil {
-			return ports.DestPolicyCandidate{}, err
+			if !state.Paused {
+				return ports.DestPolicyCandidate{}, err
+			}
+		} else {
+			defs, state, err = c.publishedDefinitions(ctx)
+			if err != nil {
+				return ports.DestPolicyCandidate{}, err
+			}
 		}
 		// Invalid new definitions retain the prior snapshot, but cannot veto
 		// the operator's emergency pause or resume of that valid snapshot.
+		// A failed snapshot write likewise cannot veto a saved emergency pause.
+		// publishedDefinitions above still verifies the durable prior snapshot;
+		// missing/corrupt publication storage never becomes a fabricated policy.
 		defs.State.Paused = state.Paused
 	}
 	roster, quota, err := c.inputs.ForNode(ctx, agent.PanelID, snapshot, !defs.State.Paused && slices.Contains(caps, protocol.CapabilityDestinationPolicy))

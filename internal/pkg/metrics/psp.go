@@ -564,17 +564,30 @@ const (
 )
 
 const (
-	DestPruneHits       = "hits"
-	DestPruneTrial      = "trial"
-	DestPruneUsage      = "usage"
-	DestPruneBatches    = "batches"
-	DestPruneLoss       = "loss"
-	DestPruneBudget     = "budget"
-	DestPruneExemptions = "exemptions"
-	DestPruneOrphans    = "orphans"
+	DestPruneHits        = "hits"
+	DestPruneTrial       = "trial"
+	DestPruneUsage       = "usage"
+	DestPruneBatches     = "batches"
+	DestPruneLoss        = "loss"
+	DestPruneBudget      = "budget"
+	DestPruneExemptions  = "exemptions"
+	DestPruneOrphans     = "orphans"
+	DestPublishDebounced = "debounced"
+	DestPublishMaxWait   = "max_wait"
+	DestPublishManual    = "manual"
+	DestPublishPause     = "pause"
 )
 
 var (
+	DestPolicyPublishTotal = NewCounterVec(
+		"psp_dest_policy_publish_total",
+		"Committed destination snapshot publications, by bounded trigger. No-op requests and failed CAS writes do not count.",
+		"trigger",
+	)
+	DestPolicyPublishRejectedTotal = NewCounter(
+		"psp_dest_policy_publish_rejected_total",
+		"Destination publication attempts rejected by validation with their error durably recorded. Storage failures and stale attempts do not count.",
+	)
 	DestPrunedRowsTotal = NewCounterVec(
 		"psp_dest_pruned_rows_total",
 		"Durably deleted destination rows, by bounded table category. Only connected cleanup paths contribute.",

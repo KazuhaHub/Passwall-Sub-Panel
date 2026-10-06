@@ -20,7 +20,7 @@ The concrete destination repository provides policy/list/exemption writes, per-a
 - Policy/list edit versions advance by at least one millisecond. Column updates persist the exact returned version, including false booleans and nil expiry values. Policy priority is assigned by the server; reorder validates the complete action-specific ID set, including disabled policies, and invalidates affected edit versions.
 - Refresh results compare the captured list version and source under the same lock. Deleted or edited sources reject old success and error results. Failures retain usable entries; successful unchanged content updates only metadata. Disabled policy and group references prevent list deletion.
 - Definition reads start with generation inside a read transaction. MySQL and PostgreSQL explicitly use repeatable read. Publication compares both definition generation and previous published generation and commits the snapshot and publication state atomically. Error recording has the same version preconditions. Missing or malformed published snapshots return an unavailable error rather than an empty policy.
-- Snapshot format compilation and validation are provided by the policy service below. Candidate minting commits with the native config stream; custom-entry edits and global exception bundles use the definition transaction. Pause management remains application/service work. The repository's JSON integrity check alone does not establish semantic policy validity.
+- Snapshot format compilation and validation are provided by the policy service below. Candidate minting commits with the native config stream; custom-entry edits and global exception bundles use the definition transaction. Manual publication and pause management are connected through administrator-only HTTP routes. The repository's JSON integrity check alone does not establish semantic policy validity.
 
 Local validation: thirteen new repository tests passed, along with the full SQL-store and domain suites and `go vet`. Initial tests failed against empty repository implementations; additional tests caught no-op generation changes and the ORM replacing explicit edit timestamps. Windows race execution is unavailable with the current CGO-disabled toolchain. Implementation commit `9b47532422d77aae7db2cfae32579215d931c4e7` passed the [complete Test workflow](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37188909110): MySQL/PostgreSQL full repository suites, all Linux race shards, static checks, frontend, release-target builds, published Node contracts, Docker baselines and isolated real third-party panels. The server-dialect tests include a writer committing between the generation read and the definition read, proving both reads remain in the older snapshot.
 
@@ -812,7 +812,7 @@ and matcher evidence, not real packet or kernel acceptance. Complete local app,
 SQL-store, list, policy, domain and HTTP suites, relevant static checks and
 TypeScript compilation pass. Current exemption/exception-head CI remains pending.
 Frontend DTOs and API clients are included; views and browser acceptance remain
-pending. Status/test/publish/pause APIs and the remaining C4 work are
+pending. Status/test APIs and the remaining C4 work are
 still required. The expiry-loop increment passed the complete local app/metrics
 suites, static checks, TypeScript compilation and 23 diagnostics-catalog tests;
 its own CI remains pending. Tests reproduce the missing loop call and verify
@@ -844,7 +844,58 @@ identities and corruption errors without partial responses. Frontend DTO/client
 methods are included; account drawer integration and browser acceptance remain
 pending. Complete local app, SQL-store, HTTP router/handler/middleware and domain
 suites, relevant static checks and TypeScript compilation pass. Current
-account-access-head CI remains pending.
+account-access head `3f72eb2dea050babba05170c8f2233875b05b475` passed its
+[complete Test workflow](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37392283019)
+and [released-node systemd acceptance](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37392283122).
+Real third-party panel jobs were skipped; this does not establish unmerged
+Node #78 kernel acceptance.
+
+## Manual publication and emergency pause
+
+Administrator-only POST `/api/admin/dest/publish` bypasses debounce and returns
+the generation actually committed. Validation rejection returns 409
+`dest_policy_over_limit` with structured `publish_error`, including invalid
+definition fields or quota kind/used/limit. It retains the previous snapshot
+and candidate. A corrected definition publishes normally and clears the stored
+error. No-op publication preserves generation; a lost CAS retries from fresh
+definitions, with at most three attempts before returning a conflict. Definition
+read failures are not mistaken for commit conflicts or publication success.
+
+Administrator-only PUT `/api/admin/dest/pause` requires an explicit boolean and
+rejects forged fields. It commits pause and definition generation atomically,
+then immediately attempts publication without depending on a debounce-setting
+read. Repeated pause values preserve generation but can retry a pending
+publication. Pause and resume leave all definitions and confirmed policy bytes
+intact. The response includes generation, published generation, pause and any
+publication error; successful publication is separate from node confirmation.
+
+Invalid new definitions cannot veto emergency pause. A saved pause remains in
+force when a snapshot write fails; the API returns 503
+`dest_policy_publish_unavailable` with `pause_saved:true` and the saved pause
+value, without driver details. Clients must refresh status after this response.
+The compiler verifies the prior durable publication and creates a paused
+candidate even if the new snapshot cannot be written. Missing/corrupt prior
+publication storage still returns unavailable, and an unpaused compiler retains
+normal publication-error handling. A failed pause-definition transaction leaves
+both the flag and generation unchanged and does not claim the pause was saved.
+
+Missing-route regressions first failed against SPA fallback. An injected
+snapshot write failure then exposed a 500 node-sync response after pause had
+already committed; the corrected path now stops policy execution while retaining
+confirmed bytes, and an idempotent retry publishes the same generation after
+storage recovery. Actual Build/HTTP/SQL checks cover forced publication,
+validation rejection and recovery, immediate pause/resume, no-op writes,
+authorization, forged requests, definition rollback and preserved candidates.
+Service checks cover structured quota rejection, fresh/bounded CAS retries,
+read errors, corrupt prior snapshots and committed publication metrics.
+
+Complete local app, SQL-store, router, middleware, metrics and domain suites,
+static checks, TypeScript compilation and 23 diagnostics-catalog tests pass.
+Windows Application Control blocked the final service/handler test executables;
+security settings were not changed. Earlier focused service tests ran normally,
+but the current full service/handler suites require Linux CI on this increment.
+Current publication-control-head CI remains pending. Frontend DTOs/client calls
+are included; the publication/pause controls and browser acceptance remain pending.
 
 ## Storage and privacy
 

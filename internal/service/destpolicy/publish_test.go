@@ -17,6 +17,7 @@ type publicationStore struct {
 	beforeRead                    func()
 	beforePublish                 func()
 	publishError, errorWriteError error
+	readError                     error
 }
 
 func (s *publicationStore) State(context.Context) (domain.DestPolicyState, error) {
@@ -26,6 +27,9 @@ func (s *publicationStore) ReadDefinitions(context.Context) (domain.DestDefiniti
 	s.reads++
 	if s.beforeRead != nil {
 		s.beforeRead()
+	}
+	if s.readError != nil {
+		return domain.DestDefinitions{}, s.readError
 	}
 	return s.defs, nil
 }

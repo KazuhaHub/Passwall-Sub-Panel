@@ -3892,6 +3892,14 @@
         "label": "Access control rows cleaned up",
         "desc": "Rows removed by connected access control cleanup tasks. Expired exemptions are cleaned up hourly; other retention tasks arrive in later stages."
       },
+      "psp_dest_policy_publish_total": {
+        "label": "Access control versions published",
+        "desc": "Successfully committed access control versions, by trigger. Unchanged requests, failures and concurrent attempts that lost the commit do not count."
+      },
+      "psp_dest_policy_publish_rejected_total": {
+        "label": "Access control publication checks failed",
+        "desc": "Publication attempts rejected by validation with their error saved. Storage failures and superseded attempts do not count; the previous published version stays in use."
+      },
       "psp_saml_acs_failure_total": {
         "label": "SAML sign-ins refused",
         "desc": "Refused SAML sign-ins (and sign-in starts), by reason. Configuration reasons point at identity-provider settings; \"Assertion replayed\" needs investigating."
@@ -3902,6 +3910,12 @@
       }
     },
     "labels": {
+      "dest_publish": {
+        "debounced": "After the edit delay",
+        "max_wait": "Maximum edit wait reached",
+        "manual": "Publish now",
+        "pause": "Pause or resume"
+      },
       "dest_table": {
         "hits": "Rule hits",
         "trial": "Allowlist trial hits",

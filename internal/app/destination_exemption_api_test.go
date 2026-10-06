@@ -90,7 +90,7 @@ func TestBuildDestinationExemptionAuthorizationAndInputOwnership(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, route := range []struct{ method, path string }{{"GET", "exemptions"}, {"GET", "exemptions/1"}, {"POST", "exemptions"}, {"PUT", "exemptions/1"}, {"DELETE", "exemptions/1"}, {"POST", "exceptions"}, {"GET", "users/1"}} {
+	for _, route := range []struct{ method, path string }{{"GET", "exemptions"}, {"GET", "exemptions/1"}, {"POST", "exemptions"}, {"PUT", "exemptions/1"}, {"DELETE", "exemptions/1"}, {"POST", "exceptions"}, {"GET", "users/1"}, {"POST", "publish"}, {"PUT", "pause"}} {
 		for _, auth := range []struct {
 			token  string
 			status int
