@@ -321,6 +321,20 @@
       "dest_list_empty_after_filter": "No usable entries remain after filtering. This content cannot be saved; existing lists retain previous content.",
       "dest_list_fetch_failed": "Fetch failed. You can save the source for later retries; existing lists retain previous content.",
       "dest_list_parse_failed": "Could not parse the list; check the source format."
+    },
+    "promotion": {
+      "title": "Convert “{{name}}” to blocking?",
+      "action": "Convert to blocking",
+      "impact": "Matching connections will be rejected after conversion. Blocking is evaluated before allowlists, so allowlist group members are also affected. Connections previously attributed to earlier observation policies may also be blocked. The actual impact can exceed observation records.",
+      "risk": "Also count as a risk signal",
+      "disabled": "This policy is disabled; conversion keeps it disabled.",
+      "saved": "Converted to blocking; publication and node confirmation are pending.",
+      "saved_position": "Converted to blocking at position {{position}} in the blocking segment; publication and node confirmation are pending.",
+      "reload": "Load latest",
+      "dest_policy_stale": "This policy was modified elsewhere. Your choice is preserved until you load the latest.",
+      "dest_policy_missing": "This policy no longer exists. Close this dialog and refresh policies.",
+      "dest_policy_over_limit": "Converted rules exceed the budget and were not saved; reduce rules first.",
+      "already_changed": "The policy action has already changed; it can no longer be converted from the original observation state."
     }
   },
   "languagePacks": {

@@ -321,6 +321,20 @@
       "dest_list_empty_after_filter": "过滤后没有可用条目，不能提交此次内容；已有列表继续使用旧内容。",
       "dest_list_fetch_failed": "拉取失败。仍可保存来源，后台会重试；已有列表保留旧内容。",
       "dest_list_parse_failed": "无法解析列表，请检查来源格式。"
+    },
+    "promotion": {
+      "title": "把「{{name}}」改为拦截？",
+      "action": "改为拦截",
+      "impact": "改为拦截后，匹配这些条件的连接会被断开。拦截会在白名单之前判断，白名单分组的成员也会被拦截；之前被更靠前的观察策略记走的连接也可能被拦截。实际影响可能比观察记录更大。",
+      "risk": "同时计入风险信号",
+      "disabled": "此策略目前未启用；转换会保留未启用状态。",
+      "saved": "已改为拦截；等待发布和节点确认。",
+      "saved_position": "已改为拦截，排在「拦截」第 {{position}} 位；等待发布和节点确认。",
+      "reload": "载入最新",
+      "dest_policy_stale": "此策略刚被其他人修改。载入最新前保留当前选择。",
+      "dest_policy_missing": "此策略已不存在。关闭此窗口并刷新策略。",
+      "dest_policy_over_limit": "转换后的规则超过额度，未保存；请先减少规则。",
+      "already_changed": "此策略的动作已改变，不能再按原来的观察策略转换。"
     }
   },
   "languagePacks": {

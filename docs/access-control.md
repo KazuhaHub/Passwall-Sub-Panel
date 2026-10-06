@@ -1105,7 +1105,7 @@ owned history, and closing a cold deep link removes its node filter. Settings
 open from the same page. Three inline templates prefill editable policies.
 
 This is a functional increment, not completion of S1–S3/S14 or C5. Category
-templates and promotion, exemptions, destination simulation,
+templates, exemptions, destination simulation,
 account access inspection, target-page deep links and the remaining final-plan
 screen details still need integration. Recording controls and stage-5 allowlist
 tabs remain scoped to their respective stages. Complete browser screenshots,
@@ -1169,6 +1169,30 @@ Remaining list-screen details include reference navigation, destination testing
 from an entry and focusing the refresh interval in settings. The broader C5,
 actual policy-node acceptance and full screenshot/owner approval requirements
 remain outstanding. Green CI does not complete the approved plan.
+
+## Observation conversion increment
+
+Observation rows now offer a conversion dialog that uses the existing full-field,
+versioned policy PUT. It preserves match conditions, list references, group scope,
+template identity and enabled state; the risk checkbox is an explicit choice and
+starts unchecked. Stale writes preserve that choice until explicit reload. A
+reload that finds another action prevents conversion. Pending saves prevent
+duplicate writes and closing, and canceling a changed checkbox uses the existing
+discard guard.
+
+This stage-1c dialog explains blocking order and impact without requesting hit,
+record or usage data or presenting invented counts. The success notification
+uses a position only when the refreshed policy overview contains the converted
+row, and explicitly awaits publication and node acknowledgement. Desktop and
+375px Chinese layouts, English dark-mode disabled-policy wording, conversion
+success and discard behavior were checked with browser API fixtures. These
+fixtures do not establish live backend or node acceptance; stage-2c impact data
+and the remaining category-template work are still outstanding.
+
+Validation: 1,961 frontend tests passed (one skipped) with a single worker after
+an earlier Windows worker exit; the affected installation-materials file also
+passed all 14 tests independently. The 72 focused page/query/source-guard checks,
+TypeScript, changed-view lint and production build passed.
 
 ## Storage and privacy
 

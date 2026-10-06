@@ -16,6 +16,7 @@ import { emptyPolicy, policyInput } from './policyDraft'
 import { summaryText } from './summaryText'
 import QuotaMeters from './QuotaMeters'
 import PolicyEditorDialog from './PolicyEditorDialog'
+import ConvertToBlockDialog from './ConvertToBlockDialog'
 const P = 'admin:access_control.policies.'
 interface Props { data: DestinationPoliciesView; status?: DestinationStatus; seconds?: number }
 export default function PoliciesTab({ data, status, seconds }: Props) {
@@ -26,6 +27,7 @@ export default function PoliciesTab({ data, status, seconds }: Props) {
   const order = useOrderDestinationPolicies(scope)
   const [editor, setEditor] = useState<{ initial: DestinationPolicyInput; existing?: DestinationPolicyOverviewItem } | null>(null)
   const [menu, setMenu] = useState<{ anchor: HTMLElement; row: DestinationPolicyOverviewItem } | null>(null)
+  const [promotion, setPromotion] = useState<DestinationPolicyOverviewItem | null>(null)
   const [busy, setBusy] = useState<number | null>(null)
   const admission = useRef(false)
   const reportError = (error: unknown) => {
@@ -82,9 +84,11 @@ export default function PoliciesTab({ data, status, seconds }: Props) {
     <Menu anchorEl={menu?.anchor} open={!!menu} onClose={() => setMenu(null)}>{menu && (() => { const row = menu.row; const rows = data[row.action]; const index = rows.findIndex(p => p.id === row.id); return [
       <MenuItem key="edit" onClick={() => { setMenu(null); setEditor({ initial: policyInput(row), existing: row }) }}>{t(`${P}edit`, { name: row.name })}</MenuItem>,
       <MenuItem key="copy" onClick={() => { setMenu(null); setEditor({ initial: { ...policyInput(row), name: t(`${P}copy_name`, { name: row.name }), enabled: false, template_key: row.template_key === 'global-exceptions' ? '' : row.template_key } }) }}>{t(`${P}copy`)}</MenuItem>,
+      ...(row.action === 'observe' ? [<MenuItem key="promote" onClick={() => { setMenu(null); setPromotion(row) }}>{t('admin:access_control.promotion.action')}</MenuItem>] : []),
       ...[{ key: 'up', to: index - 1 }, { key: 'down', to: index + 1 }, { key: 'top', to: 0 }, { key: 'bottom', to: rows.length - 1 }].map(item => <MenuItem key={item.key} disabled={item.to < 0 || item.to >= rows.length || item.to === index} onClick={() => { setMenu(null); move(row, item.to) }}>{t(`${P}${item.key}`)}</MenuItem>),
       <MenuItem key="delete" sx={{ color: 'error.main' }} onClick={() => { setMenu(null); deleting(row) }}>{t('common:actions.delete')}</MenuItem>,
     ] })()}</Menu>
     {editor && <PolicyEditorDialog {...editor} policies={data} status={status} seconds={seconds} onClose={() => setEditor(null)} />}
+    {promotion && <ConvertToBlockDialog policy={promotion} onClose={() => setPromotion(null)} />}
   </Stack>
 }
