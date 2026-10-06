@@ -1,4 +1,37 @@
 {
+  "access_control": {
+    "settings": {
+      "title": "数据与下发设置",
+      "retention": "记录保留",
+      "refresh": "列表刷新",
+      "apply": "下发",
+      "dest_hit_retention_days": "命中记录保留（天）",
+      "dest_trial_retention_days": "试运行记录保留（天）",
+      "dest_usage_retention_days": "按网站用量保留（天）",
+      "dest_list_refresh_hours": "远程与分类列表刷新间隔（小时）",
+      "dest_policy_apply_min_seconds": "策略下发等待（秒）",
+      "apply_hint": "最后一次修改后等这么久再下发；连续修改合并为一次。每次下发，节点会重启代理程序一次。",
+      "range": "请输入 {{min}}–{{max}} 范围内的整数，或留空使用默认值。",
+      "trial_exceeds_hit": "试运行记录保留不能超过命中记录保留。",
+      "trial_hint": "不超过命中记录保留。",
+      "changed": "已修改 {{count}} 项",
+      "discard": "放弃",
+      "saving": "保存中…",
+      "saved": "已保存",
+      "load_failed": "读取失败：{{error}}",
+      "save_failed": "保存失败：{{error}}",
+      "unwired": "设置未接线",
+      "forbidden": "仅管理员可以修改访问控制设置。"
+    },
+    "confirm": {
+      "discard_title": "放弃未保存的修改？",
+      "discard_message": "关闭后，这次的修改不会保存。",
+      "discard_action": "放弃",
+      "shorten_title": "缩短保留期？",
+      "shorten_message": "超过 {{days}} 天的记录会在一小时内删除，无法恢复。",
+      "shorten_action": "缩短"
+    }
+  },
   "languagePacks": {
     "title": "语言包",
     "load_failed": "暂时无法加载语言包",

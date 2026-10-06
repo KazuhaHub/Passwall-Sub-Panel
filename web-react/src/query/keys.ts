@@ -29,6 +29,12 @@ import type { QueryScope } from './session'
  */
 const privateRoot = (s: QueryScope) => ['private', s] as const
 
+export const accessControlKeys = {
+  all: (s: QueryScope) => [...privateRoot(s), 'access-control'] as const,
+  settings: (s: QueryScope) => [...accessControlKeys.all(s), 'settings'] as const,
+  status: (s: QueryScope) => [...accessControlKeys.all(s), 'status'] as const,
+}
+
 export const alertKeys = {
   all: (s: QueryScope) => [...privateRoot(s), 'alerts'] as const,
 }

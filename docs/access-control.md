@@ -1042,8 +1042,37 @@ documented in [observability](observability.md#49-目的地编译与列表刷新
 
 Initial actual compiler/refresh regressions failed before implementation.
 Full local compiler, list-service and metrics suites and focused catalog tests
-pass. Full current-increment CI remains pending; counters do not establish
+pass. This increment passed the [complete Test workflow](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37402299093)
+and [released-node systemd acceptance](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37402299028).
+Counters do not establish
 node enforcement, recording availability or later ingestion-stage completion.
+
+## Settings dialog foundation
+
+The stage-1c S18 `AccessSettingsDialog` now reads the administrator-only settings
+endpoint, keeps zero as an empty default field and sends only changed keys.
+It validates integer ranges and the effective trial/hit retention relationship,
+maps server field errors and confirms reduced effective retention before writing.
+Dirty close and navigation preserve edits on cancellation. Navigation waits for
+an active confirmation or save instead of opening a competing prompt; failed
+writes preserve the draft. Saved settings invalidate the same session's settings,
+status and general UI-settings caches.
+
+The shared numeric `PolicyField` now displays server errors; strict integer
+parsing is opt-in for destination settings, preserving existing policy-field
+typing. The dialog has loading/retry/unwired states, requested-field focus,
+mobile full-screen layout and Chinese/English copy. Initial tests exposed the
+missing numeric error display and competing navigation confirmation before
+their fixes. The dialog is a component foundation: the access-control page/menu
+entry and its invocation are still pending, as are complete browser screenshots
+and owner approval. It does not complete C5 or the stage-1c screen matrix.
+
+Protocol fields and capability/receipt boundaries are documented in
+[the native-node extension](psp-node-agent.md#11-目的地访问控制扩展开发中).
+The [upgrade guide](UPGRADE-v4.md#访问控制版本的升级与降级) now includes the
+required warning: downgrading PSP withdraws allowlist guarantees, while offline
+or failed-deployment nodes may continue enforcing an old artifact. Actual
+per-node upgrade/downgrade acceptance remains pending.
 
 ## Storage and privacy
 

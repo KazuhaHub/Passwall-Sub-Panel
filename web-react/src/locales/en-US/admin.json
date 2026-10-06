@@ -1,4 +1,37 @@
 {
+  "access_control": {
+    "settings": {
+      "title": "Data and deployment settings",
+      "retention": "Record retention",
+      "refresh": "List refresh",
+      "apply": "Deployment",
+      "dest_hit_retention_days": "Hit retention (days)",
+      "dest_trial_retention_days": "Trial retention (days)",
+      "dest_usage_retention_days": "Website usage retention (days)",
+      "dest_list_refresh_hours": "Remote and category list refresh interval (hours)",
+      "dest_policy_apply_min_seconds": "Policy deployment delay (seconds)",
+      "apply_hint": "Wait this long after the last edit before deploying; consecutive edits are combined. Each deployment restarts the proxy process once on each node.",
+      "range": "Enter an integer from {{min}} to {{max}}, or leave blank to use the default.",
+      "trial_exceeds_hit": "Trial retention cannot exceed hit retention.",
+      "trial_hint": "Cannot exceed hit retention.",
+      "changed": "{{count}} settings changed",
+      "discard": "Discard",
+      "saving": "Saving…",
+      "saved": "Saved",
+      "load_failed": "Failed to load: {{error}}",
+      "save_failed": "Failed to save: {{error}}",
+      "unwired": "Settings are not connected",
+      "forbidden": "Only administrators can change access control settings."
+    },
+    "confirm": {
+      "discard_title": "Discard unsaved changes?",
+      "discard_message": "Closing will discard these changes.",
+      "discard_action": "Discard",
+      "shorten_title": "Shorten retention?",
+      "shorten_message": "Records older than {{days}} days will be deleted within an hour and cannot be recovered.",
+      "shorten_action": "Shorten"
+    }
+  },
   "languagePacks": {
     "title": "Language packs",
     "load_failed": "Language packs are temporarily unavailable",

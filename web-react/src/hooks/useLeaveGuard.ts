@@ -12,8 +12,10 @@ import { confirm, type ConfirmOpts } from '@/components/ConfirmHost'
  * (createBrowserRouter), and tests mount
  * createMemoryRouter for the same reason.
  */
-export function useLeaveGuard(dirty: boolean, copy: ConfirmOpts, leaves: (next: Location, current: Location) => boolean = (next, current) => next.pathname !== current.pathname) {
-  const blocker = useBlocker(({ currentLocation, nextLocation }) => dirty && leaves(nextLocation, currentLocation))
+export function useLeaveGuard(dirty: boolean, copy: ConfirmOpts, leaves: (next: Location, current: Location) => boolean = (next, current) => next.pathname !== current.pathname, hold = false) {
+  // A save or another confirmation owns the dialog while hold is true. Keep
+  // the requested navigation blocked without opening a competing prompt.
+  const blocker = useBlocker(({ currentLocation, nextLocation }) => (dirty || hold) && leaves(nextLocation, currentLocation))
 
   // The dialog's words, read when a navigation is blocked. A ref, so the
   // effect below runs once per blocked navigation rather than once per
@@ -22,7 +24,8 @@ export function useLeaveGuard(dirty: boolean, copy: ConfirmOpts, leaves: (next: 
   useEffect(() => { words.current = copy })
 
   useEffect(() => {
-    if (blocker.state !== 'blocked') return
+    if (blocker.state !== 'blocked' || hold) return
+    if (!dirty) { blocker.proceed(); return }
     let live = true
     void confirm(words.current).then(ok => {
       if (!live) return
@@ -30,14 +33,14 @@ export function useLeaveGuard(dirty: boolean, copy: ConfirmOpts, leaves: (next: 
       else blocker.reset()
     })
     return () => { live = false }
-  }, [blocker])
+  }, [blocker, dirty, hold])
 
   // A reload or a closed window: the browser's own prompt, the only one a
   // page may show there.
   useEffect(() => {
-    if (!dirty) return
+    if (!dirty && !hold) return
     const onBeforeUnload = (e: BeforeUnloadEvent) => { e.preventDefault() }
     window.addEventListener('beforeunload', onBeforeUnload)
     return () => window.removeEventListener('beforeunload', onBeforeUnload)
-  }, [dirty])
+  }, [dirty, hold])
 }

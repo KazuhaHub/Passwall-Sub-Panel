@@ -13,6 +13,15 @@ vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string, opts
 import PolicyField from './PolicyField'
 afterEach(cleanup)
 
+it('shows a server error on numeric fields', () => {
+  render(<ThemeProvider theme={createAppTheme({ mode: 'light', sourceColor: '#6750a4', language: 'en-US' })}>
+    <PolicyField spec={{ key: 'days', label: 'Retention', min: 1, max: 365 }} value={30}
+      onChange={() => {}} defaults={{ days: 30 }} error="Retention was rejected" />
+  </ThemeProvider>)
+  expect(screen.getByRole('textbox', { name: 'Retention' }).getAttribute('aria-invalid')).toBe('true')
+  expect(screen.getByText('Retention was rejected')).toBeTruthy()
+})
+
 it('edits a domain-neutral numeric setting and resets it to its served default', () => {
   const theme = createAppTheme({ mode: 'light', sourceColor: '#6750a4', language: 'en-US' })
   const saved: number[] = []

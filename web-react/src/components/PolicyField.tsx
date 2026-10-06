@@ -16,6 +16,8 @@ export interface PolicyFieldSpec {
   min?: number
   max?: number
   step?: number
+  /** Reject partial/invalid integer input instead of reading its numeric prefix. */
+  integerOnly?: boolean
   tail?: boolean
   effective?: boolean
   multiline?: boolean
@@ -94,10 +96,10 @@ export default function PolicyField({ spec, value, onChange, defaults, effective
   }
 
   return <NumberField spec={spec} label={label} hint={hint} value={value} onChange={onChange}
-    defaults={defaults} effective={effective} />
+    defaults={defaults} effective={effective} error={error} />
 }
 
-function NumberField({ spec, label, hint, value, onChange, defaults, effective }: {
+function NumberField({ spec, label, hint, value, onChange, defaults, effective, error }: {
   spec: PolicyFieldSpec
   label: string
   hint: string
@@ -105,18 +107,25 @@ function NumberField({ spec, label, hint, value, onChange, defaults, effective }
   onChange: (v: PolicyValue) => void
   defaults: Record<string, number>
   effective?: number
+  error?: string
 }) {
   const { t } = useTranslation(['common', 'admin'])
   // The text as typed, while the field has focus; null otherwise.
   const [text, setText] = useState<string | null>(null)
   const stored = typeof value === 'number' ? value : 0
-  const set = stored > 0
+  const set = spec.integerOnly ? stored !== 0 : stored > 0
   const fallback = defaults[spec.key]
-  const invalid = outOfRange(spec, stored)
+  const invalid = outOfRange(spec, stored) || (spec.integerOnly && (!Number.isSafeInteger(stored) || stored < 0))
 
   const onText = (raw: string) => {
     setText(raw)
     if (raw.trim() === '') { onChange(0); return }
+    if (spec.integerOnly) {
+      // A literal zero remains the documented reset-to-default value. Other
+      // incomplete text stays visible and invalid until the admin fixes it.
+      onChange(/^-?\d+$/.test(raw.trim()) ? Number(raw) : NaN)
+      return
+    }
     // parseFloat reads the numeric prefix: "0." is 0 and "1e" is 1 while the
     // admin is still typing. Text with no number in it changes nothing.
     const n = Number.parseFloat(raw)
@@ -135,6 +144,7 @@ function NumberField({ spec, label, hint, value, onChange, defaults, effective }
         : t(spec.copy?.default_only ?? DEFAULT_COPY.default_only, d)
   }
   const lines: ReactNode[] = [
+    error,
     invalid && t(spec.copy?.out_of_range ?? DEFAULT_COPY.out_of_range),
     [hint, tail].filter(Boolean).join(' '),
     spec.effective && effective !== undefined && t(spec.copy?.effective ?? DEFAULT_COPY.effective, { value: effective }),
@@ -159,9 +169,9 @@ function NumberField({ spec, label, hint, value, onChange, defaults, effective }
     <TextField fullWidth label={label}
       value={text ?? (set ? String(stored) : '')}
       placeholder={fallback === undefined ? undefined : String(fallback)}
-      error={invalid}
-      onFocus={() => setText(set ? String(stored) : '')}
-      onBlur={() => setText(null)}
+      error={invalid || !!error}
+      onFocus={() => setText(current => spec.integerOnly && invalid && current !== null ? current : (set ? String(stored) : ''))}
+      onBlur={() => { if (!spec.integerOnly || !invalid) setText(null) }}
       onChange={e => onText(e.target.value)}
       helperText={lines.length > 0
         ? lines.map((line, i) => <Box key={i} component="span" sx={{ display: 'block' }}>{line}</Box>)
