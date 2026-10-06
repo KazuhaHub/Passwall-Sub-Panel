@@ -812,12 +812,39 @@ and matcher evidence, not real packet or kernel acceptance. Complete local app,
 SQL-store, list, policy, domain and HTTP suites, relevant static checks and
 TypeScript compilation pass. Current exemption/exception-head CI remains pending.
 Frontend DTOs and API clients are included; views and browser acceptance remain
-pending. Status/test/publish/pause/user-access APIs and the remaining C4 work are
+pending. Status/test/publish/pause APIs and the remaining C4 work are
 still required. The expiry-loop increment passed the complete local app/metrics
 suites, static checks, TypeScript compilation and 23 diagnostics-catalog tests;
 its own CI remains pending. Tests reproduce the missing loop call and verify
 expiry versus permanent/future rows, one committed generation, failure/retry,
 no-op passes and cancellation while backend-switch admission is held.
+
+## Account access API
+
+Administrator-only GET `/api/admin/dest/users/:id` returns the current group
+identity, open/trial/enforce metadata and exemption, including an expired row
+awaiting cleanup. A missing user returns 404; a missing group or historical
+exemption creator returns null. An absent mode row means open mode; malformed
+persisted mode data returns unavailable rather than a permissive response.
+
+The account, group, mode, exemption and creator display identifier share one
+consistent SQL read transaction under backend operation admission. The read
+selects only account ID/UPN/group ID and group ID/name; it does not resolve user
+entitlements or load credentials or private list bodies. It changes neither
+definitions nor generation. Before later collection stages, `hits_available`,
+`recent_hits`, `usage_available` and `usage_nodes` are present and null. Usage
+query parameters are rejected until their separately audited stage-4 read is
+implemented.
+
+The missing-route regression first failed against SPA fallback. Actual
+Build/HTTP tests verify group defaults, persisted trial mode, expired exemption
+visibility, administrator boundaries, missing/invalid IDs and unchanged
+generation. SQL query guards verify display-only reads, missing historical
+identities and corruption errors without partial responses. Frontend DTO/client
+methods are included; account drawer integration and browser acceptance remain
+pending. Complete local app, SQL-store, HTTP router/handler/middleware and domain
+suites, relevant static checks and TypeScript compilation pass. Current
+account-access-head CI remains pending.
 
 ## Storage and privacy
 

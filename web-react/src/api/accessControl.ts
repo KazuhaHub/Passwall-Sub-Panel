@@ -228,6 +228,18 @@ export async function deleteDestinationExemption(userId: number): Promise<void> 
   await client.delete(`/admin/dest/exemptions/${userId}`, { _skipErrorToast: true })
 }
 export interface DestinationGlobalExceptionInput { target: string; match: 'site' | 'host'; scope: 'global' }
+export interface DestinationUserAccessView {
+  group: { id: number; name: string; mode: 'open' | 'allowlist'; stage: '' | 'trial' | 'enforce' } | null
+  exemption: DestinationExemptionView | null
+  hits_available: null
+  recent_hits: null
+  usage_available: null
+  usage_nodes: null
+}
+export async function getDestinationUserAccess(userId: number, opts: ReadOptions = {}): Promise<DestinationUserAccessView> {
+  const { data } = await client.get<DestinationUserAccessView>(`/admin/dest/users/${userId}`, { signal: opts.signal, _skipErrorToast: opts.silent })
+  return data
+}
 export interface DestinationExceptionResult {
   list_id: number
   policy_id: number

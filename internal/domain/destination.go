@@ -136,6 +136,19 @@ type DestExemption struct {
 	ExpiresAt *time.Time
 }
 
+// DestUserAccess contains only the stage-1c account access metadata.
+type DestUserAccess struct {
+	UPN          string
+	Group        *DestUserAccessGroup
+	Exemption    *DestExemption
+	CreatedByUPN *string
+}
+
+type DestUserAccessGroup struct {
+	ID                int64
+	Name, Mode, Stage string
+}
+
 type DestGroupMode struct {
 	GroupID                 int64
 	Mode, Stage             string
