@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { Alert, Box, Button, Dialog, DialogContent, DialogTitle, IconButton, Stack, Typography, useTheme } from '@mui/material'
+import { useRef, useState } from 'react'
+import { Alert, Box, Button, Drawer, DialogContent, DialogTitle, IconButton, Stack, Typography, useTheme } from '@mui/material'
 import CloseIcon from '@mui/icons-material/Close'
 import PauseCircleOutlineIcon from '@mui/icons-material/PauseCircleOutlined'
 import RemoveCircleOutlineIcon from '@mui/icons-material/RemoveCircleOutlineOutlined'
@@ -13,6 +13,7 @@ import { ToneBadge, stateTone } from '@/components/ToneBadge'
 import KpiTile, { KpiGrid } from '@/components/KpiTile'
 import { pushSnack } from '@/components/SnackbarHost'
 import { destinationError } from './errors'
+import { AsyncButton } from '@/components/AsyncButton'
 const P = 'admin:access_control.coverage.'
 const filters = ['applied', 'pending', 'problem', 'upgrade', 'excluded'] as const
 export default function NodeCoverageDrawer({ status, onClose }: { status?: DestinationStatus; onClose: () => void }) {
@@ -24,8 +25,16 @@ export default function NodeCoverageDrawer({ status, onClose }: { status?: Desti
   const filter: 'all' | NodeFilter = filters.find(filter => filter === raw) ?? 'all'
   const retry = useRetryDestinationPolicy(useQueryScope())
   const [error, setError] = useState('')
+  const admission = useRef(false)
+  const retryNode = async (agentId: string) => {
+    if (admission.current) return
+    admission.current = true; setError('')
+    try { await retry.mutateAsync(agentId); pushSnack(t(`${P}retry_requested`), 'success') }
+    catch (error) { setError(destinationError(error).error) }
+    finally { admission.current = false }
+  }
   const now = Date.now()
-  return <Dialog open fullWidth maxWidth="md" onClose={onClose} aria-labelledby="coverage-title" slotProps={{ paper: { sx: { position: 'absolute', right: 0, height: '100%', maxHeight: '100%', m: 0, width: { xs: '100%', sm: 640 }, borderRadius: { xs: 0, sm: '16px 0 0 16px' } } } }}>
+  return <Drawer open anchor="right" onClose={onClose} slotProps={{ paper: { role: 'dialog', 'aria-modal': true, 'aria-labelledby': 'coverage-title', sx: { width: { xs: '100vw', sm: 560 }, maxWidth: '100vw', bgcolor: theme.palette.md.surfaceContainerLow, borderTopLeftRadius: 16 } } }}>
     <DialogTitle id="coverage-title" sx={{ display: 'flex', alignItems: 'center' }}><Box component="span" sx={{ flex: 1 }}>{t(`${P}title`)}</Box><IconButton aria-label={t('common:actions.close')} onClick={onClose}><CloseIcon /></IconButton></DialogTitle>
     <DialogContent><Stack spacing={2}>
       <Typography variant="body2" color="text.secondary">{t(`${P}hint`)}</Typography>
@@ -44,10 +53,10 @@ export default function NodeCoverageDrawer({ status, onClose }: { status?: Desti
           {node.over_limit && <Typography color="error">{t(`${P}over_limit`, { kind: node.over_limit.kind, used: node.over_limit.used, limit: node.over_limit.limit })}</Typography>}
           {node.sniffing_insufficient.map(listener => <Typography key={listener.listener} color="error">{t(`${P}sniffing`, { listener: listener.label })}</Typography>)}
           {fallback !== 'none' && <Alert sx={{ mt: 1 }} severity={fallback === 'exhausted' || fallback === 'stopping' ? 'error' : 'warning'}>{t(`${P}fallback_${fallback}`, { reason: node.fallback_reason })}</Alert>}
-          {node.agent_id && node.kind === 'psp' && node.supports.policy && ['pending', 'rejected', 'over_limit', 'sniffing'].includes(node.state) && <Button disabled={retry.isPending} onClick={() => { setError(''); void retry.mutateAsync(node.agent_id!).then(() => pushSnack(t(`${P}retry_requested`), 'success')).catch(error => setError(destinationError(error).error)) }}>{t(`${P}retry`)}</Button>}
+          {node.agent_id && node.kind === 'psp' && node.supports.policy && ['pending', 'rejected', 'over_limit', 'sniffing'].includes(node.state) && <AsyncButton pending={retry.isPending} onClick={() => retryNode(node.agent_id!)}>{t(`${P}retry`)}</AsyncButton>}
         </Box>
       })}
       {status && !status.nodes.some(node => filter === 'all' || nodeFilter(node, now) === filter) && <Typography color="text.secondary">{t(`${P}empty`)}</Typography>}
     </Stack></DialogContent>
-  </Dialog>
+  </Drawer>
 }

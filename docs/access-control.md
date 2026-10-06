@@ -1384,7 +1384,50 @@ checked Chinese desktop, English dark mode at 375px, policy identity, dismissed
 popovers and no automatic editor replay. The phone popover stayed within the
 viewport with no horizontal overflow. Fixtures were removed; these checks do
 not establish live backend/node or the full screenshot matrix. Full local
-frontend validation and exact-head CI remain separate checks.
+frontend validation and exact-head CI remain separate checks. List-reference
+head `eade0aa0` subsequently passed 2,037 local frontend tests (one skipped),
+[complete Test](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37531699616)
+and [released-node systemd acceptance](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37531699687).
+Real third-party panels were skipped; the installation job covers released Node
+beta4 rather than the unmerged policy kernel.
+
+## Status reads and coverage navigation
+
+The conclusion area now distinguishes its first load, a first read failure and
+a failed refresh with cached data. Initial loading uses a skeleton; first
+failure offers an explicit status retry while policy definitions remain usable.
+A cached refresh failure retains the previous verdict and marks the data as
+possibly stale. A refresh returning 503 cannot erase the page as though the
+feature had never been available. Successful-read time and publication countdown
+stay outside the primary live announcement; countdowns keep an absolute schedule
+label and do not announce every tick. Invalid publication reasons do not invent
+numeric quotas, and quota names are localized.
+
+Non-execution summaries count actual third-party panels, native upgrades and
+native offline nodes separately, omitting zero segments. Third-party exclusion
+does not change the primary verdict. Upgrade opens the upgrade filter; offline
+and third-party summaries open the existing excluded filter, which also includes
+other non-executing nodes. Opening writes sheet/filter parameters atomically and
+preserves owned-history closing. List failures open problem lists, while list
+quota refusal opens all lists rather than hiding healthy quota consumers.
+
+Node coverage now uses a real page-level drawer at the default drawer layer,
+560px on desktop and full viewport width on phones. Node retry uses shared
+asynchronous feedback and immediate admission, preventing two requests from a
+fast double click. All prior filters, fallback explanations and receipt-based
+states remain available.
+
+The four initial page regressions failed before wiring the overview. Further
+regressions reproduced the cached-503 page loss and two retry requests from one
+double click before their repairs. The overview/page/query/history/model checks
+passed 245 tests; after the final wrapping and plural-language changes, 83
+page/overview/locale/text-guard checks passed. TypeScript, changed-source lint,
+locale generation and production build passed. Chinese desktop and 375px English
+dark fixtures verified first-failure retry, cached-503 explanations, actual
+upgrade/excluded filters, default drawer depth, phone width and wrapped stale
+text. Fixtures were removed. These checks do not replace live backend/node or
+full-matrix acceptance. Remaining S1 header/menu/help details and recording
+summaries in stage 2c retain their planned scope.
 
 ## Storage and privacy
 

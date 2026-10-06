@@ -19,6 +19,62 @@ vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string, opti
 vi.mock('@/components/CodeEditor', () => ({ default: (p: { value: string; onChange: (s: string) => void; ariaLabel: string; readOnly: boolean }) => <textarea aria-label={p.ariaLabel} value={p.value} readOnly={p.readOnly} onChange={e => p.onChange(e.target.value)} /> }))
 import AccessControlView from './AccessControlView'
 const P = 'admin:access_control.'
+it('keeps policies usable after a first status failure and retries only the status read', async () => {
+  const original = api.get.getMockImplementation()!; let statusReads = 0
+  api.get.mockImplementation(async (url: string, config?: unknown) => { if (url.endsWith('/status') && ++statusReads === 1) throw err(500, 'unavailable'); return original(url, config) })
+  mount()
+  expect((await screen.findByRole('alert')).textContent).toContain(`${P}status_failed`)
+  expect(screen.getByRole('button', { name: `${P}policies.edit No mail` })).toBeTruthy()
+  fireEvent.click(screen.getByRole('button', { name: 'common:actions.retry' }))
+  await waitFor(() => expect(screen.getByRole('status').textContent).toBe(`${P}verdict.applied`))
+  expect(statusReads).toBe(2)
+  expect(api.post).not.toHaveBeenCalled()
+})
+it.each([500, 503])('keeps the last status verdict when an invalidated refresh fails with %s', async code => {
+  const original = api.get.getMockImplementation()!; let failStatus = false
+  api.get.mockImplementation(async (url: string, config?: unknown) => { if (url.endsWith('/status') && failStatus) throw err(code, 'unavailable'); return original(url, config) })
+  mount(); const live = await screen.findByRole('status')
+  await waitFor(() => expect(live.textContent).toBe(`${P}verdict.applied`))
+  failStatus = true; fireEvent.click(screen.getByRole('button', { name: `${P}publish` }))
+  await screen.findByText(`${P}status_stale`)
+  expect(live.textContent).toBe(`${P}verdict.applied`)
+  expect(live.textContent).not.toContain('read_at')
+  expect(screen.getByRole('button', { name: `${P}policies.edit No mail` })).toBeTruthy()
+})
+it('opens upgrade coverage atomically from its summary and closes back to the list tab', async () => {
+  const original = api.get.getMockImplementation()!
+  api.get.mockImplementation(async (url: string, config?: unknown) => url.endsWith('/status') ? { data: destinationStatus({ nodes: [destinationNode(), destinationNode({ panel_id: 2, panel_name: 'Old node', state: 'unsupported_version', supports: { policy: false, hits: false, usage: false } }), destinationNode({ panel_id: 3, panel_name: 'Offline node', state: 'offline' })] }) } : original(url, config))
+  const router = mount('/admin/access-control?tab=lists')
+  fireEvent.click(await screen.findByRole('button', { name: `${P}not_executing.upgrade` }))
+  const drawer = await screen.findByRole('dialog', { name: `${P}coverage.title` })
+  expect(router.state.location.search).toBe('?tab=lists&sheet=nodes&node_state=upgrade')
+  expect(within(drawer).getByText('Old node')).toBeTruthy()
+  expect(within(drawer).queryByText('Offline node')).toBeNull()
+  fireEvent.click(within(drawer).getByRole('button', { name: 'common:actions.close' }))
+  await waitFor(() => expect(router.state.location.search).toBe('?tab=lists'))
+})
+it('opens the full list view for a publication quota error without carrying a problem filter', async () => {
+  const original = api.get.getMockImplementation()!
+  api.get.mockImplementation(async (url: string, config?: unknown) => url.endsWith('/status') ? { data: destinationStatus({ publish_error: { kind: 'domains', used: 51000, limit: 50000 } }) } : original(url, config))
+  const router = mount('/admin/access-control?lst_state=problem')
+  fireEvent.click(await screen.findByRole('button', { name: `${P}open_lists` }))
+  await waitFor(() => expect(router.state.location.search).toBe('?tab=lists'))
+  expect(screen.getByRole('tab', { name: `${P}lists.title`, selected: true })).toBeTruthy()
+  expect(api.post).not.toHaveBeenCalled()
+})
+it('admits a node retry only once while its request is pending', async () => {
+  const original = api.get.getMockImplementation()!
+  api.get.mockImplementation(async (url: string, config?: unknown) => url.endsWith('/status') ? { data: destinationStatus({ nodes: [destinationNode({ state: 'rejected' })] }) } : original(url, config))
+  let finish!: (value: unknown) => void
+  api.post.mockImplementation(() => new Promise(resolve => { finish = resolve }))
+  mount('/admin/access-control?sheet=nodes')
+  const retry = await screen.findByRole('button', { name: `${P}coverage.retry` })
+  fireEvent.click(retry); fireEvent.click(retry)
+  await waitFor(() => expect(api.post).toHaveBeenCalledTimes(1))
+  expect(retry.getAttribute('aria-busy')).toBe('true')
+  finish({ data: { retry_requested: true } })
+  await waitFor(() => expect(snack).toHaveBeenCalledWith(`${P}coverage.retry_requested`, 'success'))
+})
 it('opens the account Access drawer from the header and closes back to the page', async () => {
   const original = api.get.getMockImplementation()!
   api.get.mockImplementation(async (url: string, config?: unknown) => {
