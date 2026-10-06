@@ -981,8 +981,48 @@ prove transaction ownership and narrow reads. Service checks cover URL/IP
 normalization, source provenance, shadowing, exemptions, group trial, anonymous
 scope and protocol uncertainty. Complete local app, policy, SQL-store, handler,
 router and domain suites, relevant static checks and TypeScript compilation pass.
-Current simulation-head CI remains pending. The S13 drawer, browser acceptance and
+Simulation head `9982b46ec39b1e661f5d65e8c9e19e70903c6fc1` passed the
+[complete Test workflow](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37397780498)
+and [released-node systemd acceptance](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37397780269).
+Real third-party panel jobs were skipped. The S13 drawer, browser acceptance and
 VM packet-capture/real-node comparisons remain outstanding under the final plan.
+
+## Destination fleet status
+
+Administrator-only GET `/api/admin/dest/status` returns the current definition
+and published generations, pause/error state, publication deadline and server
+calculated ETA. ETA uses the same debounce/maximum-wait deadline as publication,
+plus the effective native-node poll period. Missing pending-write timestamps fail
+unavailable. All timestamps are nullable UTC milliseconds.
+
+Node metadata exposes capabilities, saved/effective collection levels, candidate
+and fallback state, pending/applied times, last heartbeat, confirmed rule/group
+counts and narrow listener display labels. Totals count each node state plus
+`total` and `collecting`. Missing historical group names are null. A newly
+published generation is pending until the node's corresponding candidate is
+confirmed. Confirmed empty/paused candidates show no executing rules or groups,
+while the stored LKG remains intact for resume.
+
+`collecting` requires an online Xray agent, matching capabilities and current
+collection preference, applied acknowledgement of the exact minted digest, and
+canonical digest-verified candidate bytes with block/observe rules. Candidate
+collection revision must equal the saved panel revision: an off/on transition
+cannot reactivate an old acknowledgement. Allow-only candidates and sing-box do
+not prove hit recording. A pending newer publication can coexist with recording
+from a still-confirmed previous candidate; these facts are reported separately.
+
+One repeatable-read transaction reads fleet metadata and lazily loads only
+eligible current candidate bodies. A 256-entry cache retains verified facts,
+not executable bytes. Every request rechecks current metadata and collection
+revision. Reads exclude credentials, client data, list originals, snapshots,
+listener configurations and LKG bodies; they do not publish, compile or mint.
+Before later ingestion stages, `hits_24h` and `losses` remain null.
+
+The initial HTTP regression failed against SPA fallback. Full local SQL-store
+and domain suites, relevant static checks and frontend TypeScript compilation
+pass. Windows Application Control blocked application, policy and HTTP test
+executables; full Linux CI validation remains pending for this increment.
+The status views and browser/real-node acceptance remain outstanding.
 
 ## Storage and privacy
 

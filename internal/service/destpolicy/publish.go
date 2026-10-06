@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"time"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
@@ -166,16 +165,11 @@ func (p *Publisher) publishAttempt(ctx context.Context, minSeconds int, force bo
 }
 
 func publicationDue(state domain.DestPolicyState, delay time.Duration, now time.Time, force bool) (bool, error) {
-	if state.Generation < 0 || state.PublishedGeneration < 0 || state.PublishedGeneration > state.Generation {
-		return false, fmt.Errorf("%w: invalid destination publication state", domain.ErrUnavailable)
+	deadline, err := PublicationDeadline(state, delay)
+	if err != nil || deadline == nil {
+		return false, err
 	}
-	if state.Generation == state.PublishedGeneration {
-		return false, nil
-	}
-	if state.LastWriteAt == nil || state.FirstUnpublishedAt == nil {
-		return false, fmt.Errorf("%w: missing destination publication times", domain.ErrUnavailable)
-	}
-	return force || now.Sub(*state.LastWriteAt) >= delay || now.Sub(*state.FirstUnpublishedAt) >= 5*delay, nil
+	return force || !now.Before(*deadline), nil
 }
 
 type DefinitionError struct{ Detail domain.DestPublishError }

@@ -142,6 +142,7 @@ type App struct {
 	destLists       *destlist.Service
 	destDefinitions *sqlstore.DestDefinitionRepo
 	destCompiler    *destpolicy.Compiler
+	destFacts       destpolicy.CollectionFactsCache
 	destTagMembers  destpolicy.TagMatchedMemberReader
 	destAdmin       *destpolicy.Administrator
 	destExemptions  *destpolicy.ExemptionManager
@@ -780,6 +781,7 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 		DestinationUserAccess:     a.destinationUserAccess,
 		DestinationControls:       a.destControls,
 		DestinationTest:           a.destinationTest,
+		DestinationStatus:         a.destinationStatus,
 		GeoRecords:                geoStreaks,
 		// The risk view's rows. Optional, so leaving it out would compile —
 		// TestBuildWiresTheRiskSignals reads it through the assembled router.

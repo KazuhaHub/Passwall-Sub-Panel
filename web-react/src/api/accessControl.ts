@@ -300,3 +300,41 @@ export async function createDestinationGlobalException(input: DestinationGlobalE
   const { data } = await client.post<DestinationExceptionResult>('/admin/dest/exceptions', input, { _skipErrorToast: true })
   return data
 }
+
+export interface DestinationNodeStatus {
+  panel_id: number
+  agent_id: string | null
+  panel_name: string
+  kind: string
+  engine: string | null
+  agent_version: string | null
+  supports: { policy: boolean; hits: boolean; usage: boolean }
+  collect: 'off' | 'hits' | 'hits_and_usage'
+  collect_effective: '' | 'hits' | 'hits_and_usage'
+  collecting: boolean
+  state: DestinationNodeState
+  fallback_reason: string
+  fallback_exhausted: boolean
+  minted_kind: '' | 'desired' | 'fallback' | 'empty' | 'paused'
+  losses: number | null
+  over_limit: DestinationPublicationView['publish_error']
+  sniffing_insufficient: Array<{ listener: string; label: string; node_id: number | null }>
+  minted_at: number | null
+  pending_since: number | null
+  applied_at: number | null
+  applied_rules: number
+  allowlist_groups: Array<{ id: number; name: string | null }>
+  last_report_at: number | null
+  hits_24h: number | null
+}
+export interface DestinationStatus extends DestinationPublicationView {
+  last_write_at: number | null
+  next_publish_at: number | null
+  apply_eta_ms: number
+  totals: Record<DestinationNodeState | 'collecting' | 'total', number>
+  nodes: DestinationNodeStatus[]
+}
+export async function getDestinationStatus(opts: ReadOptions = {}): Promise<DestinationStatus> {
+  const { data } = await client.get<DestinationStatus>('/admin/dest/status', { signal: opts.signal, _skipErrorToast: opts.silent })
+  return data
+}
