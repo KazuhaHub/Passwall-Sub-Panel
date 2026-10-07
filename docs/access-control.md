@@ -1493,6 +1493,36 @@ fixtures/server/tabs were removed. This does not complete all S3 layout details
 or live acceptance; [partial screenshots](access-control-acceptance/README.md)
 retain those limits.
 
+The conditions head `6628f9beb55df207647c40f08d3fc62640d6998e` passed
+[complete Test](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37536596750)
+and [released-node systemd acceptance](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37536596751).
+This released-node baseline does not establish unmerged Node #78 execution.
+
+## Editor controls and quota accessibility
+
+Desktop editing is bounded at 720px. Full-screen phone editing places Close on
+the left and exactly one Save action on the right. Both placements share the
+same asynchronous save, validation, dirty/stale checks and admission guard;
+pending writes show progress and disable editor/close controls. Action and
+network choices expose exclusive segmented buttons. Arrow keys wrap through
+choices, Home/End select boundaries and focus follows selection. Selecting Any
+preserves the explicit empty network value instead of rejecting it as falsy.
+
+Full quota meters use 4px rounded bars, with phone counts beneath each bar.
+Each bar exposes its translated quota name and actual used/limit counts; visual
+percentages remain capped at 100 without concealing over-limit counts. Subjects
+and bytes retain the 80-percent visibility threshold and unknown budgets retain
+loading placeholders. Existing quota refusal and severity semantics are preserved.
+
+Three editor regressions and two quota-accessibility checks failed before their
+repairs. Final page/draft/template, quota, shared asynchronous button and locale
+checks passed 128 tests. TypeScript, changed-source lint and production build
+passed. Chinese desktop and 375px English dark browser fixtures checked actual
+width, keyboard focus/selection, phone Save, meter order/counts and a double-click
+producing one mock write. Temporary fixtures/server/tabs were removed. Evidence
+remains partial: template titles, prescribed field hints, later group-mode UI,
+the full screen matrix and live backend/node acceptance are still outstanding.
+
 ## Storage and privacy
 
 List previews and policy previews are excluded from write-audit logging by

@@ -18,6 +18,9 @@ stage. Privacy settings and group/record tabs retain their later-stage scope.
 | [Desktop header](header-zh-CN-light-1440.jpg) | Chinese, light, 1440 × 1000 | Desktop actions and policy/list tab help entry |
 | [Collapsed conditions](conditions-collapsed-en-US-dark-375.jpg) | English, dark, 375 × 812 | Preserved inline summary and draft, full-width phone editor |
 | [Field error](conditions-error-en-US-dark-375.jpg) | English, dark, 375 × 812 | A fixture's forced 400 port error reopens conditions and preserves the draft |
+| [Phone editor controls](editor-controls-en-US-dark-375.jpg) | English, dark, 375 × 812 | Close on the left, one Save on the right, full-width action choices and no horizontal overflow |
+| [Phone budget](editor-budget-en-US-dark-375.jpg) | English, dark, 375 × 812 | Counts below 4px bars, actual quota names and counts exposed to assistive technology |
+| [Desktop editor controls](editor-controls-zh-CN-light-1440.jpg) | Chinese, light, 1440 × 1000 | Measured 720px dialog and network segmented choices beside ports |
 
 Browser interaction also checked Chinese policy-help interpolation and pause
 confirmation/cancellation. Cancellation leaves the existing execution verdict;
@@ -29,6 +32,9 @@ The additional-condition fixture also checked Chinese blank-policy initial
 collapse, BT/port summary and retained values. The phone fixture used an existing
 policy; it forced the same port-field error twice, each time reopening a manually
 collapsed section. Dialog and heading names contain only the title, with one
-label target. The captures do not establish all remaining S3 details: the mobile
-top-bar save placement, desktop sizing, network segmented control and other
-final-plan presentation still require work.
+label target. A subsequent editor fixture checked desktop width at 720px,
+keyboard selection from TCP to UDP to Any with matching focus, mobile top-bar
+Save, and budget counts below their bars. Double-clicking Save issued one mock
+PUT; controls were disabled while pending and success closed the dialog. These
+checks do not establish live backend writes. Template-specific titles, prescribed
+field hints and later group-mode presentation retain their final-plan scope.

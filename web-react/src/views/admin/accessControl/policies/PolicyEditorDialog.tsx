@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useId, useRef, useState } from 'react'
-import { Accordion, AccordionDetails, AccordionSummary, Alert, Autocomplete, Box, Button, Checkbox, Dialog, DialogActions, DialogContent, DialogTitle, FormControlLabel, IconButton, MenuItem, Skeleton, Stack, Switch, TextField, ToggleButton, ToggleButtonGroup, Typography, useMediaQuery, useTheme } from '@mui/material'
+import { Accordion, AccordionDetails, AccordionSummary, Alert, Autocomplete, Box, Button, Checkbox, Dialog, DialogActions, DialogContent, DialogTitle, FormControlLabel, IconButton, MenuItem, Skeleton, Stack, Switch, TextField, Typography, useMediaQuery, useTheme } from '@mui/material'
 import CloseIcon from '@mui/icons-material/Close'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import { useTranslation } from 'react-i18next'
@@ -21,6 +21,8 @@ import QuotaMeters, { budgetExceeded } from './QuotaMeters'
 import GeositeCategoryPicker from '../lists/GeositeCategoryPicker'
 import ParseReport from '../lists/ParseReport'
 import { listPreviewBlocksSave } from '../lists/listDraft'
+import PolicySegments from './PolicySegments'
+import { AsyncButton } from '@/components/AsyncButton'
 const CodeEditor = lazy(() => import('@/components/CodeEditor'))
 const P = 'admin:access_control.editor.'
 interface Props { initial: DestinationPolicyInput; existing?: DestinationPolicyOverviewItem; policies: DestinationPoliciesView; status?: DestinationStatus; seconds?: number; onClose: () => void }
@@ -94,13 +96,17 @@ export default function PolicyEditorDialog({ initial, existing, policies, status
   const nodeCount = status?.nodes.filter(node => node.kind === 'psp' && node.supports.policy && !['offline', 'unsupported_version'].includes(node.state)).length
   const rows = policies[draft.action]
   const position = existing && existing.action === draft.action ? Math.max(1, rows.findIndex(row => row.id === existing.id) + 1) : rows.length + 1
-  return <Dialog open fullWidth maxWidth="md" fullScreen={mobile} onClose={close} aria-labelledby="access-policy-title">
-    <DialogTitle component="div" id="access-policy-heading" sx={{ display: 'flex', alignItems: 'center' }}><Typography component="h2" variant="h6" id="access-policy-title" sx={{ flex: 1 }}>{t(existing ? `${P}edit_title` : `${P}create_title`, { name: seed.name })}</Typography><IconButton aria-label={t('common:actions.close')} disabled={busy} onClick={close}><CloseIcon /></IconButton></DialogTitle>
+  const saveButton = <AsyncButton variant="contained" pending={busy} disabled={!valid || quotaError || categoryError || (!!existing && !dirty) || error.error === 'dest_policy_stale'} onClick={submit}>{t('common:actions.save')}</AsyncButton>
+  const closeButton = <IconButton aria-label={t('common:actions.close')} disabled={busy} onClick={close}><CloseIcon /></IconButton>
+  return <Dialog open fullWidth maxWidth={false} slotProps={{ paper: { sx: { maxWidth: mobile ? 'none' : 720 } } }} fullScreen={mobile} onClose={close} aria-labelledby="access-policy-title">
+    <DialogTitle component="div" id="access-policy-heading" sx={{ display: 'flex', alignItems: 'center', gap: 1, px: { xs: 1, sm: 3 } }}>
+      {mobile && closeButton}<Typography component="h2" variant="h6" id="access-policy-title" sx={{ flex: 1, minWidth: 0, overflowWrap: 'anywhere' }}>{t(existing ? `${P}edit_title` : `${P}create_title`, { name: seed.name })}</Typography>{mobile ? saveButton : closeButton}
+    </DialogTitle>
     <DialogContent dividers><Stack spacing={2.5}>
       {error.error && !error.field && <Alert severity="error" action={error.error === 'dest_policy_stale' ? <Button color="inherit" disabled={busy} onClick={() => void reload()}>{t(`${P}reload`)}</Button> : undefined}>{t(`${P}${error.error}`, { defaultValue: error.error })}</Alert>}
       <Box component="fieldset" disabled={busy} sx={{ border: 0, p: 0, m: 0, minWidth: 0 }}><Stack spacing={2.5}>
         <TextField autoFocus label={t(`${P}name`)} value={draft.name} onChange={e => change({ name: e.target.value })} error={!!fieldError('name')} helperText={fieldMessage('name')} />
-        <ToggleButtonGroup exclusive value={draft.action} aria-label={t(`${P}action`)} onChange={(_, action) => { if (action) change({ action, counts_as_risk: action === 'block' && draft.counts_as_risk }) }}>{(['block', 'observe', 'allow'] as const).map(action => <ToggleButton key={action} value={action}>{t(`${P}action_${action}`)}</ToggleButton>)}</ToggleButtonGroup>
+        <PolicySegments value={draft.action} label={t(`${P}action`)} disabled={busy} options={(['block', 'observe', 'allow'] as const).map(value => ({ value, label: t(`${P}action_${value}`) }))} onChange={action => change({ action, counts_as_risk: action === 'block' && draft.counts_as_risk })} />
         <Typography variant="body2" color="text.secondary">{t(`${P}${draft.action}_hint`)}</Typography>
         {draft.action === 'allow' && <Alert severity="warning">{t(`${P}allow_warning`)}</Alert>}
         {draft.new_list && <Stack spacing={2}>
@@ -123,7 +129,7 @@ export default function PolicyEditorDialog({ initial, existing, policies, status
           <AccordionDetails><Stack spacing={2}>
         <Box><Typography variant="body2" sx={{ mb: 1 }}>{t(`${P}cidrs`)}</Typography><Suspense fallback={<Skeleton height={140} />}><CodeEditor language="plain" minRows={6} ariaLabel={t(`${P}cidrs`)} value={(draft.inline.cidrs ?? []).join('\n')} readOnly={busy} onChange={value => change({ inline: { ...draft.inline, cidrs: value.split('\n') } })} /></Suspense>
           <Typography variant="caption" color={fieldError('cidrs') ? 'error' : 'text.secondary'}>{fieldMessage('cidrs') ?? t(`${P}cidrs_hint`)}</Typography></Box>
-        <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}><TextField sx={{ flex: 1 }} label={t(`${P}ports`)} value={draft.inline.ports ?? ''} error={!!fieldError('ports')} helperText={fieldMessage('ports') ?? t(`${P}ports_hint`)} onChange={e => change({ inline: { ...draft.inline, ports: e.target.value } })} /><TextField select label={t(`${P}network`)} value={draft.inline.network ?? ''} sx={{ minWidth: 160 }} onChange={e => change({ inline: { ...draft.inline, network: e.target.value as '' | 'tcp' | 'udp' } })}>{['', 'tcp', 'udp'].map(network => <MenuItem key={network} value={network}>{network ? network.toUpperCase() : t(`${P}any`)}</MenuItem>)}</TextField></Stack>
+        <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}><TextField sx={{ flex: 1 }} label={t(`${P}ports`)} value={draft.inline.ports ?? ''} error={!!fieldError('ports')} helperText={fieldMessage('ports') ?? t(`${P}ports_hint`)} onChange={e => change({ inline: { ...draft.inline, ports: e.target.value } })} /><Box sx={{ flex: { xs: 1, sm: '0 1 220px' }, minWidth: { sm: 200 } }}><Typography variant="caption" color="text.secondary">{t(`${P}network`)}</Typography><PolicySegments value={draft.inline.network ?? ''} label={t(`${P}network`)} disabled={busy} fullWidth options={(['', 'tcp', 'udp'] as const).map(value => ({ value, label: value ? value.toUpperCase() : t(`${P}any`) }))} onChange={network => change({ inline: { ...draft.inline, network } })} /></Box></Stack>
         <FormControlLabel control={<Checkbox checked={match.bt} onChange={(_, checked) => change({ inline: { ...draft.inline, protocols: checked ? ['bittorrent'] : [] } })} />} label={t(`${P}bt`)} />
         <Typography variant="caption" color="text.secondary">{t(`${P}bt_hint`)}</Typography>
         <FormControlLabel control={<Checkbox checked={match.private} onChange={(_, checked) => change({ inline: { ...draft.inline, private: checked } })} />} label={t(`${P}private`)} />
@@ -143,7 +149,7 @@ export default function PolicyEditorDialog({ initial, existing, policies, status
       <Box sx={{ flex: '1 1 100%' }}><Typography variant="body2">{t(`${P}action_${draft.action}`)} · {t(`${P}${draft.scope}`)} · {summaryText(t, draft, names)} · {t(`${P}position`, { step: { allow: 1, block: 3, observe: 4 }[draft.action], position })}</Typography>
         {match.split && <Typography variant="caption">{t(`${P}split`)}</Typography>}
         <Typography variant="caption" sx={{ display: 'block' }} color="text.secondary">{t(!draft.enabled ? `${P}disabled_hint` : existing && !executionChanged(draft, seed) ? `${P}metadata_hint` : `${P}apply_hint`, { nodes: nodeCount === undefined ? t('admin:access_control.confirm.each_node') : t('admin:access_control.confirm.node_count', { count: nodeCount }), eta: status?.apply_eta_ms ? t('admin:access_control.confirm.eta_minutes', { minutes: Math.ceil(status.apply_eta_ms / 60000) }) : t('admin:access_control.confirm.eta_unknown') })}</Typography>
-      </Box><Button disabled={busy} onClick={close}>{t('common:actions.cancel')}</Button><Button variant="contained" disabled={busy || !valid || quotaError || categoryError || (!!existing && !dirty) || error.error === 'dest_policy_stale'} onClick={() => void submit()}>{t(busy ? 'admin:access_control.settings.saving' : 'common:actions.save')}</Button>
+      </Box><Button disabled={busy} onClick={close}>{t('common:actions.cancel')}</Button>{!mobile && saveButton}
     </DialogActions>
   </Dialog>
 }
