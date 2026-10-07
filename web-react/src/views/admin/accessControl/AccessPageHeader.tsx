@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Box, Button, Divider, IconButton, Menu, MenuItem, Stack, useMediaQuery, useTheme } from '@mui/material'
 import MoreHorizIcon from '@mui/icons-material/MoreHoriz'
 import SearchIcon from '@mui/icons-material/Search'
-import { useTranslation } from 'react-i18next'
+import { useAccessTranslation } from '@/views/admin/accessControl/useAccessTranslation'
 import PageHeader from '@/components/PageHeader'
 import UserAutocomplete from '@/components/UserAutocomplete'
 
@@ -16,7 +16,7 @@ export default function AccessPageHeader({ userId, paused, busy, onTest, onOpenU
   onSettings: () => void
   onPause: (paused: boolean) => Promise<void>
 }) {
-  const { t } = useTranslation(['admin'])
+  const { t } = useAccessTranslation(['admin'])
   const mobile = useMediaQuery(useTheme().breakpoints.down('sm'))
   const [anchor, setAnchor] = useState<HTMLElement | null>(null)
   return <>

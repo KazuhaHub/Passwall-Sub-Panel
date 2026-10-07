@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Box, Button, CircularProgress, Dialog, DialogActions, DialogContent, DialogTitle, IconButton, Menu, MenuItem, Paper, Stack, Switch, Typography } from '@mui/material'
 import MoreVertIcon from '@mui/icons-material/MoreVert'
 import AddIcon from '@mui/icons-material/Add'
-import { useTranslation } from 'react-i18next'
+import { useAccessTranslation } from '@/views/admin/accessControl/useAccessTranslation'
 import type { DestinationPoliciesView, DestinationPolicyAction, DestinationPolicyInput, DestinationPolicyOverviewItem, DestinationStatus } from '@/api/accessControl'
 import { useQueryScope } from '@/query/useQueryScope'
 import { useDeleteDestinationPolicy, useDestinationCategories, useOrderDestinationPolicies, useRefreshDestinationCategories, useSaveDestinationPolicy } from '@/query/accessControl'
@@ -26,7 +26,7 @@ import { PipelineRail, PipelineStep } from '../PipelineRail'
 const P = 'admin:access_control.policies.'
 interface Props { data: DestinationPoliciesView; status?: DestinationStatus; seconds?: number; onCreateList: () => void; onExemptions: () => void; openRequest?: { id: number; token: number } | null; onOpenRequestHandled?: (token: number) => void }
 export default function PoliciesTab({ data, status, seconds, onCreateList, onExemptions, openRequest, onOpenRequestHandled }: Props) {
-  const { t } = useTranslation(['admin', 'common'])
+  const { t } = useAccessTranslation(['admin', 'common'])
   const scope = useQueryScope()
   const save = useSaveDestinationPolicy(scope)
   const remove = useDeleteDestinationPolicy(scope)

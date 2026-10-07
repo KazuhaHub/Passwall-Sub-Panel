@@ -1,6 +1,6 @@
 import { useId, useState } from 'react'
 import { Box, Button, List, ListItem, Popover, Stack, Typography } from '@mui/material'
-import { useTranslation } from 'react-i18next'
+import { useAccessTranslation } from '@/views/admin/accessControl/useAccessTranslation'
 import type { DestinationReference } from '@/api/accessControl'
 const P = 'admin:access_control.lists.'
 interface Props {
@@ -11,7 +11,7 @@ interface Props {
   onOpenGroup?: (id: number) => void
 }
 export default function UsedByPopover({ name, references, ownerGroupId, onOpenPolicy, onOpenGroup }: Props) {
-  const { t } = useTranslation('admin'), titleId = useId()
+  const { t } = useAccessTranslation('admin'), titleId = useId()
   const [anchor, setAnchor] = useState<HTMLElement | null>(null)
   const policies = references.filter(ref => ref.kind === 'policy').length
   const groups = references.filter(ref => ref.kind === 'group').length

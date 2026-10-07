@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Alert, Box, Button, Drawer, IconButton, MenuItem, Skeleton, Stack, TextField, ToggleButton, ToggleButtonGroup, Typography, useTheme } from '@mui/material'
 import CloseIcon from '@mui/icons-material/Close'
-import { useTranslation } from 'react-i18next'
+import { useAccessTranslation } from '@/views/admin/accessControl/useAccessTranslation'
 import { testDestination, type DestinationStatus, type DestinationTestInput, type DestinationTestResult } from '@/api/accessControl'
 import UserAutocomplete from '@/components/UserAutocomplete'
 import { AsyncButton } from '@/components/AsyncButton'
@@ -18,7 +18,7 @@ import GlobalExceptionDialog from './GlobalExceptionDialog'
 const P = 'admin:access_control.test.'
 const notes = ['ip_domain_rules_not_matched', 'no_native_client', 'virtual_scope', 'user_not_in_node_roster', 'protocol_not_testable', 'paused']
 export default function TestSheet({ onClose, onOpenPolicy, status, prefill }: { onClose: () => void; onOpenPolicy: (id: number) => void; status?: DestinationStatus; prefill?: DrawerHistoryState['prefill'] }) {
-  const { t } = useTranslation(['admin', 'common']), theme = useTheme(), publication = useDestinationPublication(useQueryScope())
+  const { t } = useAccessTranslation(['admin', 'common']), theme = useTheme(), publication = useDestinationPublication(useQueryScope())
   const [target, setTarget] = useState(prefill?.target ?? ''), [port, setPort] = useState(String(prefill?.port ?? 443)), [network, setNetwork] = useState<'tcp' | 'udp'>(prefill?.network === 'udp' ? 'udp' : 'tcp')
   const [userId, setUserId] = useState<number | null>(prefill?.userId ?? null), [panelId, setPanelId] = useState<number | null>(null)
   const [result, setResult] = useState<DestinationTestResult | null>(null), [error, setError] = useState(''), [pending, setPending] = useState(false), [validated, setValidated] = useState(false), [showAll, setShowAll] = useState(false)

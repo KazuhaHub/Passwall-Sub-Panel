@@ -1,5 +1,5 @@
 import { Alert, Autocomplete, CircularProgress, Stack, TextField, Typography } from '@mui/material'
-import { useTranslation } from 'react-i18next'
+import { useAccessTranslation } from '@/views/admin/accessControl/useAccessTranslation'
 import { useQueryScope } from '@/query/useQueryScope'
 import { useDestinationCategories, useRefreshDestinationCategories } from '@/query/accessControl'
 import { destinationError } from '../errors'
@@ -8,7 +8,7 @@ import GeositeDownloadNotice from './GeositeDownloadNotice'
 import { categoryRefreshState } from '@/utils/destinationCategories'
 const P = 'admin:access_control.categories.'
 export default function GeositeCategoryPicker({ category, attrs, disabled, onChange }: { category: string; attrs: string; disabled: boolean; onChange: (category: string, attrs: string) => void }) {
-  const { t } = useTranslation(['admin', 'common']), scope = useQueryScope()
+  const { t, dateTime } = useAccessTranslation(['admin', 'common']), scope = useQueryScope()
   const query = useDestinationCategories(scope, true), refresh = useRefreshDestinationCategories(scope)
   const state = categoryRefreshState(query.data, query.error), pending = refresh.isPending || state.refreshing
   const selected = query.data?.categories.find(item => item.name === category)
@@ -26,6 +26,6 @@ export default function GeositeCategoryPicker({ category, attrs, disabled, onCha
       onChange={(_, name) => onChange(name ?? '', '')} renderInput={p => <TextField {...p} label={t(`${P}category`)} />} />
     <Autocomplete multiple options={selected?.attrs ?? []} value={attrs ? attrs.split(',') : []} disabled={disabled || !selected}
       onChange={(_, values) => onChange(category, values.join(','))} renderInput={p => <TextField {...p} label={t(`${P}attrs`)} />} />
-    <Typography variant="caption" color="text.secondary">{t(`${P}source`, { time: new Date(query.data.updated_at).toLocaleString() })}</Typography>
+    <Typography variant="caption" color="text.secondary">{t(`${P}source`, { time: dateTime(query.data.updated_at) })}</Typography>
   </Stack>
 }

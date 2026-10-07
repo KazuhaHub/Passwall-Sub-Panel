@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Alert, Box, Button, Skeleton, Stack, Typography, useTheme } from '@mui/material'
-import { useTranslation } from 'react-i18next'
+import { useAccessTranslation } from '@/views/admin/accessControl/useAccessTranslation'
 import type { DestinationStatus } from '@/api/accessControl'
 import StatusLine from '@/components/StatusLine'
 import { AsyncButton } from '@/components/AsyncButton'
@@ -21,7 +21,7 @@ interface Props {
   onPause: (paused: boolean) => Promise<void>
 }
 export default function StatusOverview({ data, verdict, failed, refreshing, readAt, busy, onRetry, onOpenNodes, onOpenLists, onPublish, onPause }: Props) {
-  const { t } = useTranslation(['admin', 'common']), theme = useTheme()
+  const { t, dateTime, time } = useAccessTranslation(['admin', 'common']), theme = useTheme()
   const staleTone = stateTone(theme, 'attention'), StaleIcon = staleTone.Icon
   const [now, setNow] = useState(Date.now())
   useEffect(() => { if (data?.next_publish_at == null) return; const timer = window.setInterval(() => setNow(Date.now()), 1000); return () => window.clearInterval(timer) }, [data?.next_publish_at])
@@ -42,11 +42,11 @@ export default function StatusOverview({ data, verdict, failed, refreshing, read
   return <StatusLine stackActionsOnMobile tone={verdict?.tone ?? 'quiet'} title={title} announcement={title}
     detail={<Stack component="span" spacing={.5}>
       {!!fragments.length && <Box component="span">{t(`${P}not_executing.title`)} {fragments.map((key, index) => <Box component="span" key={key}>{index > 0 && ' · '}<Button size="small" color="inherit" sx={{ p: 0, minWidth: 0, textAlign: 'left' }} disabled={busy} onClick={() => onOpenNodes(key === 'upgrade' ? 'upgrade' : 'excluded')}>{t(`${P}not_executing.${key}`, { count: counts[key] })}</Button></Box>)}</Box>}
-      {data.next_publish_at != null && !data.paused && <Typography component="span" aria-hidden="true" aria-label={t(`${P}publish_at`, { time: new Date(data.next_publish_at).toLocaleString() })}>{t(`${P}countdown`, { seconds: Math.max(0, Math.ceil((data.next_publish_at - now) / 1000)) })}</Typography>}
+      {data.next_publish_at != null && !data.paused && <Typography component="span" aria-hidden="true" aria-label={t(`${P}publish_at`, { time: dateTime(data.next_publish_at) })}>{t(`${P}countdown`, { seconds: Math.max(0, Math.ceil((data.next_publish_at - now) / 1000)) })}</Typography>}
       {data.publish_error && <Typography component="span">{t(`${P}${quotaKind && data.publish_error.used != null && data.publish_error.limit != null ? 'publish_error' : 'publish_invalid'}`, { kind: quotaKind ? t(`${P}quota.${data.publish_error.kind}`) : '', used: data.publish_error.used, limit: data.publish_error.limit })}</Typography>}
     </Stack>}
     meta={<Stack component="span" spacing={.5}>
-      {readAt > 0 && <Box component="span" aria-hidden="true">{t(`${P}read_at`, { time: new Date(readAt).toLocaleTimeString() })}</Box>}
+      {readAt > 0 && <Box component="span" aria-hidden="true">{t(`${P}read_at`, { time: time(readAt) })}</Box>}
       {failed && <Stack component="span" direction="row" sx={{ alignItems: 'center', gap: 1, flexWrap: 'wrap' }}><Box component="span" sx={{ display: 'inline-flex', alignItems: 'flex-start', gap: .5, maxWidth: '100%', color: staleTone.fg }}><StaleIcon aria-hidden sx={{ fontSize: 16, flexShrink: 0, color: staleTone.iconColor }} /><Box component="span" sx={{ minWidth: 0, overflowWrap: 'anywhere' }}>{t(`${P}status_stale`)}</Box></Box>{retry}</Stack>}
     </Stack>}
     actions={<Stack direction="row" sx={{ flexWrap: 'wrap', gap: 1 }}>

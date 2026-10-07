@@ -1,10 +1,10 @@
 import { Box, Stack, Typography } from '@mui/material'
-import { useTranslation } from 'react-i18next'
+import { useAccessTranslation } from '@/views/admin/accessControl/useAccessTranslation'
 import type { DestinationTestResult } from '@/api/accessControl'
 import { pipelineSteps } from '@/utils/accessControl'
 import { PipelineRail, PipelineStep } from './PipelineRail'
 export default function EvalTrace({ result }: { result: DestinationTestResult }) {
-  const { t } = useTranslation(['admin'])
+  const { t } = useAccessTranslation(['admin'])
   return <PipelineRail>{pipelineSteps(result.steps.some(row => row.step === 'group')).map((step, index) => {
     const rows = result.steps.filter(row => row.step === step)
     return <PipelineStep key={step} index={index}><Typography component="h3" variant="subtitle1">{t(`admin:access_control.test.step_${step}`)}</Typography><Stack spacing={1}>{rows.length ? rows.map((row, i) => <Box key={i} data-result={row.result}>

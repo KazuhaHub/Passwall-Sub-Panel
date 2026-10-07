@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Alert, Box, Button, Drawer, IconButton, Menu, MenuItem, Skeleton, Stack, Tooltip, Typography, useTheme } from '@mui/material'
 import CloseIcon from '@mui/icons-material/Close'
 import MoreHorizIcon from '@mui/icons-material/MoreHoriz'
-import { useTranslation } from 'react-i18next'
+import { useAccessTranslation } from '@/views/admin/accessControl/useAccessTranslation'
 import type { DestinationExemptionView } from '@/api/accessControl'
 import { useDestinationExemptions, useDeleteDestinationExemption } from '@/query/accessControl'
 import { useQueryScope } from '@/query/useQueryScope'
@@ -15,7 +15,7 @@ import { destinationError } from '../errors'
 import AddExemptionDialog from './AddExemptionDialog'
 const P = 'admin:access_control.exemptions.'
 export default function ExemptionsSheet({ onClose, onOpenUser, etaMs }: { onClose: () => void; onOpenUser: (id: number) => void; etaMs?: number }) {
-  const { t } = useTranslation(['admin', 'common']), theme = useTheme(), scope = useQueryScope()
+  const { t, dateTime } = useAccessTranslation(['admin', 'common']), theme = useTheme(), scope = useQueryScope()
   const query = useDestinationExemptions(scope), remove = useDeleteDestinationExemption(scope)
   const [menu, setMenu] = useState<{ anchor: HTMLElement; row: DestinationExemptionView } | null>(null)
   const [editor, setEditor] = useState<{ existing?: DestinationExemptionView } | null>(null)
@@ -47,7 +47,7 @@ export default function ExemptionsSheet({ onClose, onOpenUser, etaMs }: { onClos
         const label = isExpired ? t(`${P}expired`) : left === null ? t(`${P}expiry_never`) : t(`${P}${left >= 3600000 ? 'expiry_hours' : 'expiry_minutes'}`, { count: Math.ceil(left / (left >= 3600000 ? 3600000 : 60000)) })
         return <Box key={row.user_id} sx={{ border: `1px solid ${theme.palette.md.outlineVariant}`, borderRadius: 2, p: 1.5 }}>
           <Stack direction="row" sx={{ alignItems: 'center', flexWrap: 'wrap', gap: 1 }}><Typography sx={{ flex: '1 1 auto', minWidth: 0, overflowWrap: 'anywhere' }}>{name}</Typography><Tooltip title={t(`${P}expiry_delay`)}><Box component="span"><ToneBadge data={isExpired ? 'expired' : left === null ? 'permanent' : 'active'} tone={stateTone(theme, isExpired ? 'measuring' : left !== null && left <= 86400000 ? 'attention' : 'quiet')} label={label} /></Box></Tooltip><IconButton disabled={busy} aria-label={t(`${P}menu`, { upn: name })} onClick={event => setMenu({ anchor: event.currentTarget, row })}><MoreHorizIcon /></IconButton></Stack>
-          <Typography variant="body2" color="text.secondary" sx={{ overflowWrap: 'anywhere' }}>{row.reason}</Typography><Typography variant="caption" title={new Date(row.created_at).toLocaleString()} color="text.secondary">{t(`${P}created`, { by: row.created_by_upn ?? `#${row.created_by}`, ago: agoText(Math.max(0, (now - row.created_at) / 1000), t) })}</Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ overflowWrap: 'anywhere' }}>{row.reason}</Typography><Typography variant="caption" title={dateTime(row.created_at)} color="text.secondary">{t(`${P}created`, { by: row.created_by_upn ?? `#${row.created_by}`, ago: agoText(Math.max(0, (now - row.created_at) / 1000), t) })}</Typography>
         </Box>
       })}
     </Stack>

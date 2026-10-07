@@ -1,9 +1,9 @@
 import { Alert, Box, Button, Stack, Typography } from '@mui/material'
-import { useTranslation } from 'react-i18next'
+import { useAccessTranslation } from '@/views/admin/accessControl/useAccessTranslation'
 import type { DestinationListKind, DestinationParseReport } from '@/api/accessControl'
 const P = 'admin:access_control.parse_report.'
 export default function ParseReport({ report, kind, onLine }: { report: DestinationParseReport | null; kind: DestinationListKind; onLine?: (line: number) => void }) {
-  const { t } = useTranslation('admin')
+  const { t } = useAccessTranslation('admin')
   if (!report) return <Typography color="text.secondary">{t(`${P}none`)}</Typography>
   const remaining = Math.max(0, report.ignored + report.rewritten - report.samples.length)
   return <Box sx={{ p: 2, borderRadius: 2, bgcolor: 'md.surfaceContainer', minWidth: 0 }}>

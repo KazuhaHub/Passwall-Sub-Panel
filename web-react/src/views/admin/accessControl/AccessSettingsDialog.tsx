@@ -2,7 +2,7 @@ import { useRef, useState, type ReactNode } from 'react'
 import { Alert, Box, Button, Dialog, DialogActions, DialogContent, DialogTitle, IconButton, Skeleton, Stack, Typography, useMediaQuery, useTheme } from '@mui/material'
 import CloseIcon from '@mui/icons-material/Close'
 import { isAxiosError } from 'axios'
-import { useTranslation } from 'react-i18next'
+import { useAccessTranslation } from '@/views/admin/accessControl/useAccessTranslation'
 import type { AccessControlSettingKey, AccessControlSettingsView } from '@/api/accessControl'
 import PolicyField from '@/components/PolicyField'
 import { confirm } from '@/components/ConfirmHost'
@@ -24,7 +24,7 @@ function errorText(error: unknown): string {
 }
 
 function Frame({ children, actions, onClose, onEntered, busy = false }: { children: ReactNode; actions?: ReactNode; onClose: () => void; onEntered?: () => void; busy?: boolean }) {
-  const { t } = useTranslation(['admin', 'common'])
+  const { t } = useAccessTranslation(['admin', 'common'])
   const theme = useTheme()
   const fullScreen = useMediaQuery(theme.breakpoints.down('sm'))
   return <Dialog open fullWidth maxWidth="sm" fullScreen={fullScreen} onClose={() => { if (!busy) onClose() }}
@@ -43,14 +43,14 @@ function Frame({ children, actions, onClose, onEntered, busy = false }: { childr
 export default function AccessSettingsDialog(props: Props) {
   const scope = useQueryScope()
   const canWrite = useCan('config.write')
-  const { t } = useTranslation('admin')
+  const { t } = useAccessTranslation('admin')
   if (!props.open) return null
   if (!canWrite) return <Frame onClose={props.onClose}><Alert severity="error">{t(`${P}forbidden`)}</Alert></Frame>
   return <SettingsRead key={scopeKey(scope)} {...props} scope={scope} />
 }
 
 function SettingsRead({ scope, ...props }: Props & { scope: QueryScope }) {
-  const { t } = useTranslation(['admin', 'common'])
+  const { t } = useAccessTranslation(['admin', 'common'])
   const q = useAccessControlSettings(scope, true)
   if (q.data) return <SettingsEditor {...props} scope={scope} loaded={q.data} />
   if (q.error) return <Frame onClose={props.onClose}>
@@ -66,7 +66,7 @@ function SettingsRead({ scope, ...props }: Props & { scope: QueryScope }) {
 }
 
 function SettingsEditor({ scope, loaded, onClose, focusKey }: Props & { scope: QueryScope; loaded: AccessControlSettingsView }) {
-  const { t } = useTranslation(['admin', 'common'])
+  const { t } = useAccessTranslation(['admin', 'common'])
   const [baseline, setBaseline] = useState(loaded)
   const [draft, setDraft] = useState(loaded.settings)
   const [serverErrors, setServerErrors] = useState<Partial<Record<AccessControlSettingKey, string>>>({})

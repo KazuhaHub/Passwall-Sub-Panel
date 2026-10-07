@@ -2,7 +2,7 @@ import { useRef, useState } from 'react'
 import { Alert, Box, Button, Checkbox, Dialog, DialogActions, DialogContent, DialogTitle, FormControlLabel, IconButton, Stack, Typography, useMediaQuery, useTheme } from '@mui/material'
 import CloseIcon from '@mui/icons-material/Close'
 import { useQueryClient } from '@tanstack/react-query'
-import { useTranslation } from 'react-i18next'
+import { useAccessTranslation } from '@/views/admin/accessControl/useAccessTranslation'
 import { getDestinationPolicies, type DestinationPoliciesView, type DestinationPolicyOverviewItem } from '@/api/accessControl'
 import { pushSnack } from '@/components/SnackbarHost'
 import { useDirtyClose } from '@/hooks/useDirtyClose'
@@ -15,7 +15,7 @@ import { destinationError } from '../errors'
 import { policyInput } from './policyDraft'
 const P = 'admin:access_control.promotion.'
 export default function ConvertToBlockDialog({ policy, onClose }: { policy: DestinationPolicyOverviewItem; onClose: () => void }) {
-  const { t } = useTranslation(['admin', 'common']), mobile = useMediaQuery(useTheme().breakpoints.down('sm')), scope = useQueryScope()
+  const { t } = useAccessTranslation(['admin', 'common']), mobile = useMediaQuery(useTheme().breakpoints.down('sm')), scope = useQueryScope()
   const [row, setRow] = useState(policy), [risk, setRisk] = useState(false), [busy, setBusy] = useState(false), [error, setError] = useState('')
   const admission = useRef(false), client = useQueryClient(), save = useSaveDestinationPolicy(scope)
   const copy = discardSettingsCopy(t), checkClose = useDirtyClose(risk, copy)

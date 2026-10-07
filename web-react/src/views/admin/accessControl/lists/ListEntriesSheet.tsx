@@ -1,14 +1,14 @@
 import { useState } from 'react'
 import { Alert, Box, Button, Chip, Dialog, DialogContent, DialogTitle, IconButton, Skeleton, Stack, TextField, Typography } from '@mui/material'
 import CloseIcon from '@mui/icons-material/Close'
-import { useTranslation } from 'react-i18next'
+import { useAccessTranslation } from '@/views/admin/accessControl/useAccessTranslation'
 import { useDestinationList } from '@/query/accessControl'
 import { useQueryScope } from '@/query/useQueryScope'
 import ParseReport from './ParseReport'
 const P = 'admin:access_control.list_entries.'
 function entryKind(entry: string): string { const kind = entry.split(':', 1)[0]; return ['domain', 'full', 'keyword', 'regexp'].includes(kind) ? kind : 'cidr' }
 export default function ListEntriesSheet({ id, onClose, onEdit, onRefresh, onTest, busy, refreshing = false }: { id: number; onClose: () => void; onEdit: () => void; onRefresh: () => void; onTest?: (target: string) => void; busy: boolean; refreshing?: boolean }) {
-  const { t } = useTranslation(['admin', 'common']), query = useDestinationList(useQueryScope(), id)
+  const { t, number } = useAccessTranslation(['admin', 'common']), query = useDestinationList(useQueryScope(), id)
   const [search, setSearch] = useState(''), [type, setType] = useState<string | null>(null)
   const entries = query.data?.entries ?? [], counts = query.data?.entry_types ?? Object.fromEntries(['domain', 'full', 'keyword', 'regexp', 'cidr'].map(kind => [kind, entries.filter(entry => entryKind(entry) === kind).length]))
   const filtered = entries.filter(entry => (!type || entryKind(entry) === type) && entry.toLowerCase().includes(search.toLowerCase()))
@@ -17,7 +17,7 @@ export default function ListEntriesSheet({ id, onClose, onEdit, onRefresh, onTes
     <DialogContent dividers>{query.data ? <Stack spacing={2}>
       {query.error && <Alert severity="warning" action={<Button onClick={() => void query.refetch()}>{t('common:actions.retry')}</Button>}>{t(`${P}stale`)}</Alert>}
       <Typography variant="body2" sx={{ overflowWrap: 'anywhere' }}>{t(`admin:access_control.lists.${query.data.kind}`)} · {query.data.kind === 'remote' ? query.data.source_url : query.data.geosite_category}</Typography>
-      <Stack direction="row" sx={{ flexWrap: 'wrap', gap: 1 }}>{Object.entries(counts).map(([kind, count]) => <Chip key={kind} label={`${kind} ${count}`} clickable variant={type === kind ? 'filled' : 'outlined'} onClick={() => setType(type === kind ? null : kind)} />)}</Stack>
+      <Stack direction="row" sx={{ flexWrap: 'wrap', gap: 1 }}>{Object.entries(counts).map(([kind, count]) => <Chip key={kind} label={`${kind} ${number(count)}`} clickable variant={type === kind ? 'filled' : 'outlined'} onClick={() => setType(type === kind ? null : kind)} />)}</Stack>
       <Typography variant="caption" color="text.secondary">{t(`${P}${query.data.entry_types ? 'bounded_totals' : 'bounded'}`, { count: query.data.entry_count, shown: entries.length })}</Typography>
       <TextField label={t(`${P}search`)} value={search} onChange={e => setSearch(e.target.value)} />
       <Box sx={{ minHeight: 80 }}>{filtered.map(entry => {

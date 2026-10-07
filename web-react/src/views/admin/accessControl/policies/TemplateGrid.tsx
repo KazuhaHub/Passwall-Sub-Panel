@@ -1,5 +1,5 @@
 import { Alert, Box, Button, Paper, Skeleton, Stack, Typography, useTheme } from '@mui/material'
-import { useTranslation } from 'react-i18next'
+import { useAccessTranslation } from '@/views/admin/accessControl/useAccessTranslation'
 import type { DestinationBudget, DestinationCategoriesView } from '@/api/accessControl'
 import FieldHint from '@/components/FieldHint'
 import GeositeDownloadNotice from '../lists/GeositeDownloadNotice'
@@ -9,7 +9,7 @@ const P = 'admin:access_control.templates.'
 export interface TemplateCatalogProps { catalog?: DestinationCategoriesView; loading: boolean; downloading: boolean; failed: boolean; disabled: boolean; onDownload: () => Promise<void> }
 interface Props extends TemplateCatalogProps { budget: DestinationBudget; added: Set<string>; onCreate: (template: PolicyTemplate) => void; onBlank: () => void; onCreateList: () => void }
 export default function TemplateGrid(props: Props) {
-  const { t } = useTranslation(['admin', 'common']), theme = useTheme()
+  const { t } = useAccessTranslation(['admin', 'common']), theme = useTheme()
   const betting = props.catalog?.categories?.find(category => category.name === 'category-betting-ru')
   return <Stack spacing={2}>
     <Box><Typography variant="h6">{t(`${P}empty_title`)}</Typography><Typography variant="body2" color="text.secondary">{t(`${P}empty_hint`)}</Typography></Box>

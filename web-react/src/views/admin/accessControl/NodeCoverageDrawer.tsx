@@ -3,7 +3,7 @@ import { Alert, Box, Button, Drawer, DialogContent, DialogTitle, IconButton, Sta
 import CloseIcon from '@mui/icons-material/Close'
 import PauseCircleOutlineIcon from '@mui/icons-material/PauseCircleOutlined'
 import RemoveCircleOutlineIcon from '@mui/icons-material/RemoveCircleOutlineOutlined'
-import { useTranslation } from 'react-i18next'
+import { useAccessTranslation } from '@/views/admin/accessControl/useAccessTranslation'
 import { useLocation, useSearchParams } from 'react-router'
 import type { DestinationStatus } from '@/api/accessControl'
 import { useQueryScope } from '@/query/useQueryScope'
@@ -17,7 +17,7 @@ import { AsyncButton } from '@/components/AsyncButton'
 const P = 'admin:access_control.coverage.'
 const filters = ['applied', 'pending', 'problem', 'upgrade', 'excluded'] as const
 export default function NodeCoverageDrawer({ status, onClose }: { status?: DestinationStatus; onClose: () => void }) {
-  const { t } = useTranslation(['admin', 'common'])
+  const { t, dateTime, number } = useAccessTranslation(['admin', 'common'])
   const theme = useTheme()
   const [params, setParams] = useSearchParams()
   const location = useLocation()
@@ -38,7 +38,7 @@ export default function NodeCoverageDrawer({ status, onClose }: { status?: Desti
     <Box sx={{ display: 'flex', alignItems: 'center' }}><DialogTitle id="coverage-title" sx={{ flex: 1, minWidth: 0 }}>{t(`${P}title`)}</DialogTitle><IconButton aria-label={t('common:actions.close')} onClick={onClose} sx={{ mr: 2, width: 44, height: 44 }}><CloseIcon /></IconButton></Box>
     <DialogContent><Stack spacing={2}>
       <Typography variant="body2" color="text.secondary">{t(`${P}hint`)}</Typography>
-      <KpiGrid>{filters.map(value => <KpiTile key={value} label={t(`${P}filter_${value}`)} value={status ? status.nodes.filter(node => nodeFilter(node, now) === value).length : '—'} pressed={filter === value} onToggle={() => setParams(prev => { const next = new URLSearchParams(prev); if (filter === value) next.delete('node_state'); else next.set('node_state', value); return next }, { replace: true, state: location.state })} />)}</KpiGrid>
+      <KpiGrid>{filters.map(value => <KpiTile key={value} label={t(`${P}filter_${value}`)} value={status ? number(status.nodes.filter(node => nodeFilter(node, now) === value).length) : '—'} pressed={filter === value} onToggle={() => setParams(prev => { const next = new URLSearchParams(prev); if (filter === value) next.delete('node_state'); else next.set('node_state', value); return next }, { replace: true, state: location.state })} />)}</KpiGrid>
       {filter !== 'all' && <Button onClick={() => setParams(prev => { const next = new URLSearchParams(prev); next.delete('node_state'); return next }, { replace: true, state: location.state })}>{t(`${P}clear_filter`)}</Button>}
       {error && <Alert severity="error">{error}</Alert>}
       {!status && <Alert severity="warning">{t(`${P}unavailable`)}</Alert>}
@@ -48,8 +48,8 @@ export default function NodeCoverageDrawer({ status, onClose }: { status?: Desti
         const fallback = fallbackState(node)
         return <Box key={node.panel_id} sx={{ border: `1px solid ${theme.palette.md.outlineVariant}`, p: 2, borderRadius: 2 }}><Stack direction="row" sx={{ flexWrap: 'wrap', alignItems: 'center', gap: 1 }}><Typography sx={{ flex: 1, fontWeight: 600 }}>{node.panel_name}</Typography><ToneBadge tone={tone} label={t(`${P}state_${node.state}`)} /></Stack>
           <Typography variant="caption" color="text.secondary">{node.kind} · {node.engine ?? '—'} · {node.agent_version ?? '—'}</Typography>
-          {node.applied_at !== null && <Typography variant="body2">{t(`${P}applied_at`, { time: new Date(node.applied_at).toLocaleString() })}</Typography>}
-          {node.pending_since !== null && <Typography variant="body2">{t(`${P}pending_since`, { time: new Date(node.pending_since).toLocaleString() })}</Typography>}
+          {node.applied_at !== null && <Typography variant="body2">{t(`${P}applied_at`, { time: dateTime(node.applied_at) })}</Typography>}
+          {node.pending_since !== null && <Typography variant="body2">{t(`${P}pending_since`, { time: dateTime(node.pending_since) })}</Typography>}
           {node.over_limit && <Typography color="error">{t(`${P}over_limit`, { kind: node.over_limit.kind, used: node.over_limit.used, limit: node.over_limit.limit })}</Typography>}
           {node.sniffing_insufficient.map(listener => <Typography key={listener.listener} color="error">{t(`${P}sniffing`, { listener: listener.label })}</Typography>)}
           {fallback !== 'none' && <Alert sx={{ mt: 1 }} severity={fallback === 'exhausted' || fallback === 'stopping' ? 'error' : 'warning'}>{t(`${P}fallback_${fallback}`, { reason: node.fallback_reason })}</Alert>}

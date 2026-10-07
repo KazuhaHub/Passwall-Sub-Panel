@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react'
 import { Alert, Box, Button, Dialog, DialogActions, DialogContent, DialogTitle, IconButton, Stack, TextField, ToggleButton, ToggleButtonGroup, Typography, useMediaQuery, useTheme } from '@mui/material'
 import CloseIcon from '@mui/icons-material/Close'
-import { useTranslation } from 'react-i18next'
+import { useAccessTranslation } from '@/views/admin/accessControl/useAccessTranslation'
 import type { DestinationExemptionView } from '@/api/accessControl'
 import UserAutocomplete from '@/components/UserAutocomplete'
 import FieldHint from '@/components/FieldHint'
@@ -15,7 +15,7 @@ import { destinationError } from '../errors'
 import { exemptionExpiry, localExpiry, validateExemption, type ExemptionExpiry } from './exemptionDraft'
 const P = 'admin:access_control.exemptions.'
 export default function AddExemptionDialog({ userId: lockedId, upn, existing, etaMs, accessWarning, onClose, onSaved }: { userId?: number; upn?: string; existing?: DestinationExemptionView; etaMs?: number; accessWarning?: boolean; onClose: () => void; onSaved?: () => void }) {
-  const { t } = useTranslation(['admin', 'common']), theme = useTheme(), mobile = useMediaQuery(theme.breakpoints.down('sm'))
+  const { t } = useAccessTranslation(['admin', 'common']), theme = useTheme(), mobile = useMediaQuery(theme.breakpoints.down('sm'))
   const scope = useQueryScope(), save = useSaveDestinationExemption(scope)
   const [userId, setUserId] = useState<number | null>(existing?.user_id ?? lockedId ?? null)
   const [reason, setReason] = useState(existing?.reason ?? '')

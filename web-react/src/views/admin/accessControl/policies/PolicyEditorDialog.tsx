@@ -2,7 +2,7 @@ import { lazy, Suspense, useEffect, useId, useRef, useState } from 'react'
 import { Accordion, AccordionDetails, AccordionSummary, Alert, Autocomplete, Box, Button, Checkbox, Dialog, DialogActions, DialogContent, DialogTitle, FormControlLabel, IconButton, MenuItem, Skeleton, Stack, Switch, TextField, Typography, useMediaQuery, useTheme } from '@mui/material'
 import CloseIcon from '@mui/icons-material/Close'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
-import { useTranslation } from 'react-i18next'
+import { useAccessTranslation } from '@/views/admin/accessControl/useAccessTranslation'
 import { useQuery } from '@tanstack/react-query'
 import { getDestinationPolicies, previewDestinationPolicy, type DestinationPoliciesView, type DestinationPolicyInput, type DestinationPolicyOverviewItem, type DestinationStatus } from '@/api/accessControl'
 import { useQueryScope } from '@/query/useQueryScope'
@@ -33,7 +33,7 @@ function hasAdditionalConditions(input: DestinationPolicyInput) {
   return !!(input.inline.ports?.trim() || input.inline.network || input.inline.cidrs?.some(line => line.trim()) || input.inline.protocols?.length || input.inline.private)
 }
 export default function PolicyEditorDialog({ initial, existing, templateName, policies, status, seconds, onClose }: Props) {
-  const { t } = useTranslation(['admin', 'common'])
+  const { t } = useAccessTranslation(['admin', 'common'])
   const scope = useQueryScope()
   const theme = useTheme()
   const mobile = useMediaQuery(theme.breakpoints.down('sm'))

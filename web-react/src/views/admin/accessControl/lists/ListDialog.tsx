@@ -3,7 +3,7 @@ import { Accordion, AccordionDetails, AccordionSummary, Alert, Box, Button, Circ
 import CloseIcon from '@mui/icons-material/Close'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import { useQuery } from '@tanstack/react-query'
-import { useTranslation } from 'react-i18next'
+import { useAccessTranslation } from '@/views/admin/accessControl/useAccessTranslation'
 import { getDestinationList, previewDestinationList, type DestinationListDetail, type DestinationListInput, type DestinationListSummary, type DestinationPoliciesView, type DestinationStatus } from '@/api/accessControl'
 import type { CodeEditorHandle } from '@/components/CodeEditor'
 import { confirm } from '@/components/ConfirmHost'
@@ -29,7 +29,7 @@ export default function ListDialog({ existing, policies, status, refreshHours, o
   existing?: DestinationListSummary; policies?: DestinationPoliciesView; status?: DestinationStatus; refreshHours: number
   onClose: () => void; onSaved: (list: DestinationListDetail) => void; onSettings?: () => void
 }) {
-  const { t } = useTranslation(['admin', 'common']), scope = useQueryScope(), mobile = useMediaQuery(useTheme().breakpoints.down('sm'))
+  const { t } = useAccessTranslation(['admin', 'common']), scope = useQueryScope(), mobile = useMediaQuery(useTheme().breakpoints.down('sm'))
   const [seed, setSeed] = useState(inputFrom()), [draft, setDraft] = useState(inputFrom())
   const [detail, setDetail] = useState<DestinationListDetail>(), [loaded, setLoaded] = useState(!existing)
   const [error, setError] = useState<{ error: string; field?: string }>({ error: '' })

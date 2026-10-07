@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react'
 import { Alert, Box, Button, Skeleton, Stack, Tab, Tabs } from '@mui/material'
 import { Navigate, useLocation, useSearchParams } from 'react-router'
-import { useTranslation } from 'react-i18next'
+import { useAccessTranslation } from '@/views/admin/accessControl/useAccessTranslation'
 import HelpTip from '@/components/HelpTip'
 import { confirm } from '@/components/ConfirmHost'
 import { pushSnack } from '@/components/SnackbarHost'
@@ -32,7 +32,7 @@ export default function AccessControlView() {
   return <AccessControlPage key={scopeKey(scope)} scope={scope} />
 }
 function AccessControlPage({ scope }: { scope: QueryScope }) {
-  const { t } = useTranslation(['admin', 'common'])
+  const { t } = useAccessTranslation(['admin', 'common'])
   const definitions = useDestinationPolicies(scope)
   const status = useDestinationStatus(scope)
   const settings = useAccessControlSettings(scope, true)

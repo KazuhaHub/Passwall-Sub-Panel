@@ -72,6 +72,40 @@ branches are covered by handler regressions and DEV fixtures, rather than a
 claimed live upstream outage. The complete matrix and owner approval remain
 pending.
 
+## Locale formatting and coverage matrix
+
+Access-control measures and timestamps use `Intl` with the selected interface
+language. Numeric plural inputs remain numbers; interpolation receives their
+formatted strings, and account identifiers keep their raw form. Quota labels
+and accessible values, list/type totals, reports and node KPIs use the same
+formatter. Date/time inputs retain the browser's input format and timezone.
+
+Three browser-language regressions failed before repair. Four formatting tests
+now verify a non-builtin German locale, grouped report counts, numeric plural
+selection/raw IDs and a Chinese-to-English date change outside the live region.
+The complete access-control focused suite plus style guard passed 211 tests;
+TypeScript, changed-view lint, production build, fixture-exclusion guard and four
+production browser smoke checks also passed.
+
+| Capture | Language/theme/viewport | Check |
+| --- | --- | --- |
+| [Light phone coverage](coverage-matrix-zh-CN-light-375.jpg) | Chinese, light, 375 × 812 | Named drawer, five KPI toggles and node status icons |
+| [Light desktop coverage](coverage-matrix-zh-CN-light-1440.jpg) | Chinese, light, 1440 × 900 | Right-hand drawer and localized pending timestamp |
+| [Dark phone coverage](coverage-matrix-zh-CN-dark-375.jpg) | Chinese, dark, 375 × 812 | Same node seed and bounded phone width |
+| [Dark desktop coverage](coverage-matrix-zh-CN-dark-1440.jpg) | Chinese, dark, 1440 × 900 | Same drawer and status structure |
+| [Chinese date](coverage-locale-zh-CN-dark-375.jpg) | Chinese, dark, 375 × 812 | Applied filter pressed and Chinese date/time |
+| [English date](coverage-locale-en-US-dark-375.jpg) | English, dark, 375 × 812 | Same applied node/time rendered in English |
+| [Coverage empty](coverage-matrix-empty-zh-CN-dark-375.jpg) | Chinese, dark, 375 × 812 | Zero KPI counts and explicit empty state |
+| [Coverage unavailable](coverage-matrix-error-zh-CN-dark-375.jpg) | Chinese, dark, 375 × 812 | Cold coverage deep link after failed reads shows unknown counts, not zero |
+
+The normal seed includes twelve nodes. Its pending node had passed the real
+ten-minute threshold during these captures, so it appears in Problems rather
+than Pending; this is expected age-based filtering. Browser interaction also
+confirmed `aria-pressed` on the applied filter, Escape closing and focus
+restoration to the coverage trigger. This fills the coverage screenshot variants
+only; the full per-view/dialog matrix, remaining §7.5 checks, real enforcement
+and owner approval are still outstanding.
+
 Fixture data deliberately differs from defaults: regular-expression limit 128,
 deployment delay 93 seconds and list refresh interval 17 hours. The policy help
 shows 128 and 93; list help shows 17. Only policy and list tabs exist at this

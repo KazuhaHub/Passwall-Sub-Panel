@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react'
 import { Alert, Box, Button, Dialog, DialogActions, DialogContent, DialogTitle, IconButton, Stack, TextField, ToggleButton, ToggleButtonGroup, Typography, useMediaQuery, useTheme } from '@mui/material'
 import CloseIcon from '@mui/icons-material/Close'
-import { useTranslation } from 'react-i18next'
+import { useAccessTranslation } from '@/views/admin/accessControl/useAccessTranslation'
 import { AsyncButton } from '@/components/AsyncButton'
 import FieldHint from '@/components/FieldHint'
 import { pushSnack } from '@/components/SnackbarHost'
@@ -15,7 +15,7 @@ import AddExemptionDialog from './AddExemptionDialog'
 import { testTarget } from './testDraft'
 const P = 'admin:access_control.exception.'
 export default function GlobalExceptionDialog({ target, userId, etaMs, onClose }: { target: string; userId?: number; etaMs?: number; onClose: () => void }) {
-  const { t } = useTranslation(['admin', 'common']), theme = useTheme(), mobile = useMediaQuery(theme.breakpoints.down('sm')), save = useCreateDestinationException(useQueryScope())
+  const { t } = useAccessTranslation(['admin', 'common']), theme = useTheme(), mobile = useMediaQuery(theme.breakpoints.down('sm')), save = useCreateDestinationException(useQueryScope())
   const normalized = testTarget(target), initial = normalized.ip ? 'host' : 'site'
   const [match, setMatch] = useState<'site' | 'host'>(initial), [accountOnly, setAccountOnly] = useState(false), [error, setError] = useState(''), [busy, setBusy] = useState(false), admission = useRef(false)
   const dirty = match !== initial, copy = discardSettingsCopy(t), closeCheck = useDirtyClose(dirty, copy)

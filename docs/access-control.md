@@ -1704,6 +1704,23 @@ restart; its 612-entry finance list and excluded broad-entry report remained
 persisted. Browser evidence is linked in the acceptance index. These checks do
 not complete the entire UI matrix or establish Node enforcement.
 
+Access-control timestamps and measures now follow the selected interface
+language through `Intl.DateTimeFormat` and `Intl.NumberFormat`. Translation
+interpolation uses formatted values without changing numeric plural selection;
+account identifiers stay raw. Explicit quota/KPI/list-type values use the same
+formatter. Read/scheduled timestamps remain outside the primary live status.
+Four formatting regressions and the access-control/style focused suite passed
+211 tests, with TypeScript, lint, production build and four browser smoke
+checks. The acceptance index now includes the coverage drawer's language/theme/
+screen/empty/error variants and actual Escape/focus-return checks. Other views,
+remaining accessibility requirements and owner approval remain pending.
+
+The cached-list/title commit `f16fd638` passed its full
+[Test workflow](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37673574750).
+Its [released-node systemd run](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37673574763)
+was still installing fixture prerequisites when this record was written and is
+not claimed as successful. This frontend formatting increment needs its own CI.
+
 List previews and policy previews are excluded from write-audit logging by
 exact POST path. Other destination writes, including `/dest/test`, retain normal
 audit behavior; destination audit rows remain restricted to administrators.
