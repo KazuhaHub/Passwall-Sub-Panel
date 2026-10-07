@@ -2,7 +2,7 @@
 import { ThemeProvider } from '@mui/material'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { createMemoryRouter } from 'react-router'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import AppRouter from '@/router/AppRouter'
 import { createAppTheme } from '@/theme'
@@ -23,6 +23,10 @@ function mount(userId?: number, target = 'sub.example.test') {
   render(<ThemeProvider theme={createAppTheme({ mode: 'light', sourceColor: '#6750a4', language: 'en-US' })}><QueryClientProvider client={new QueryClient()}><AppRouter router={router} /></QueryClientProvider></ThemeProvider>)
   return onClose
 }
+it('keeps the global exception title separate from its close button', () => {
+  mount()
+  expect(within(screen.getByRole('heading', { name: `${P}title` })).queryByRole('button')).toBeNull()
+})
 it('saves a global site exception once and reports the actual first-use result', async () => {
   const close = mount(); expect(screen.getByText(`${P}global_summary`)).toBeTruthy(); expect(screen.getByText(`${P}first_use`)).toBeTruthy()
   fireEvent.click(screen.getByRole('button', { name: `${P}save` })); await waitFor(() => expect(close).toHaveBeenCalledOnce())

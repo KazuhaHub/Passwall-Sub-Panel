@@ -81,7 +81,7 @@ export function accessControlFixtureSeed(now = Date.now()) {
   const policy = (id: number, name: string, action: DestinationPolicyOverviewItem['action'], ids: number[], over: Partial<DestinationPolicyOverviewItem> = {}): DestinationPolicyOverviewItem => ({
     ...structuredClone(samplePolicy), id, name, action, list_ids: ids, inline: {},
     counts_as_risk: action === 'block', priority: id - 100, created_at: at, updated_at: at,
-    list_states: ids.map(id => { const item = lists.find(l => l.id === id)!; return { id, name: item.name, state: item.state } }), ...over,
+    list_states: ids.map(id => { const item = lists.find(l => l.id === id)!; return { id, name: item.name, state: item.state, available: item.entry_count > 0 && (item.kind === 'custom' || item.last_fetched_at !== null) } }), ...over,
   })
   const policies = [
     policy(101, 'Fixture · 全局可信站点', 'allow', [1]),

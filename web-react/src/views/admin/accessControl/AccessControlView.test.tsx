@@ -19,6 +19,32 @@ vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string, opti
 vi.mock('@/components/CodeEditor', () => ({ default: (p: { value: string; onChange: (s: string) => void; ariaLabel: string; readOnly: boolean }) => <textarea aria-label={p.ariaLabel} value={p.value} readOnly={p.readOnly} onChange={e => p.onChange(e.target.value)} /> }))
 import AccessControlView from './AccessControlView'
 const P = 'admin:access_control.'
+it('keeps node coverage title separate from its close button', async () => {
+  mount('/admin/access-control?sheet=nodes')
+  const heading = await screen.findByRole('heading', { name: `${P}coverage.title` })
+  expect(within(heading).queryByRole('button')).toBeNull()
+  expect(screen.getByRole('dialog', { name: `${P}coverage.title` })).toBeTruthy()
+})
+function cachedListPolicyAPI() {
+  const policy = { ...samplePolicy, list_ids: [7], list_states: [{ id: 7, name: 'Finance', state: 'failed' as const, available: true }] }
+  const original = api.get.getMockImplementation()!
+  api.get.mockImplementation(async (url: string, config?: unknown) => {
+    if (url.endsWith('/policies')) return { data: destinationPolicies({ block: [policy] }) }
+    if (url.endsWith('/lists')) return { data: { items: [{ ...listSummary, state: 'failed', last_error: 'dest_list_fetch_failed' }] } }
+    return original(url, config)
+  })
+}
+it('keeps cached list entries active after a refresh failure in the overview', async () => {
+  cachedListPolicyAPI(); mount()
+  await screen.findByRole('button', { name: `${P}policies.edit No mail` })
+  expect(screen.queryByText(`${P}policies.list_pending`)).toBeNull()
+})
+it('keeps cached list entries active after a refresh failure in the editor', async () => {
+  cachedListPolicyAPI(); mount()
+  fireEvent.click(await screen.findByRole('button', { name: `${P}policies.edit No mail` }))
+  const dialog = await screen.findByRole('dialog', { name: `${P}editor.edit_title No mail` })
+  await waitFor(() => expect(within(dialog).queryByText(`${P}editor.list_pending_summary`)).toBeNull())
+})
 it('keeps the list editor title heading separate from its close action', async () => {
   listsAPI([]); mount('/admin/access-control?tab=lists')
   fireEvent.click(await screen.findByRole('button', { name: `${P}lists.create` }))

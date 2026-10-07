@@ -2,6 +2,7 @@ import type { DestinationNodeStatus, DestinationPoliciesView, DestinationStatus 
 import type { StatusLineTone } from '@/components/StatusLine'
 import type { Theme } from '@mui/material'
 import { stateTone, type Tone } from '@/components/ToneBadge'
+import { policyListAvailable } from './destinationListAvailability'
 import BlockIcon from '@mui/icons-material/Block'
 import LockOutlinedIcon from '@mui/icons-material/LockOutlined'
 import VisibilityOutlinedIcon from '@mui/icons-material/VisibilityOutlined'
@@ -47,7 +48,7 @@ export function accessVerdict(status: DestinationStatus, policies?: DestinationP
   const lists = enabled.flatMap(policy => policy.list_states)
   const failed = lists.find(list => list.state === 'failed')
   if (failed) return verdict('list_failed', 'attention', 1, failed.name)
-  const pending = lists.find(list => ['pending', 'refreshing', 'missing', 'empty'].includes(list.state))
+  const pending = lists.find(list => !policyListAvailable(list) && ['pending', 'refreshing', 'missing', 'empty'].includes(list.state))
   if (pending) return verdict('list_pending', 'attention', 1, pending.name)
   if (status.generation !== status.published_generation) return verdict('unpublished', 'measuring')
   if (native.some(node => node.state === 'pending' || node.pending_since !== null)) return verdict('pending', 'measuring')

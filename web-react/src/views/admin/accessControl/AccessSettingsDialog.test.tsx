@@ -2,7 +2,7 @@
 import { ThemeProvider } from '@mui/material/styles'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { createMemoryRouter, Link } from 'react-router'
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createAppTheme } from '@/theme'
 import AppRouter from '@/router/AppRouter'
@@ -62,6 +62,12 @@ beforeEach(() => {
   confirm.mockResolvedValue(true)
 })
 afterEach(cleanup)
+
+it('keeps the settings title separate from its close button', async () => {
+  mount()
+  const heading = await screen.findByRole('heading', { name: '数据与下发设置' })
+  expect(within(heading).queryByRole('button')).toBeNull()
+})
 
 it('displays zero as unset, uses served defaults, and focuses the requested field', async () => {
   mount('dest_list_refresh_hours')

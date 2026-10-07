@@ -9,6 +9,7 @@ import { useQueryScope } from '@/query/useQueryScope'
 import { accessControlKeys } from '@/query/keys'
 import { useDestinationLists, useSaveDestinationPolicy } from '@/query/accessControl'
 import { useAllGroups } from '@/query/groups'
+import { destinationListAvailable } from '@/utils/destinationListAvailability'
 import { useDirtyClose } from '@/hooks/useDirtyClose'
 import { useLeaveGuard } from '@/hooks/useLeaveGuard'
 import { confirm } from '@/components/ConfirmHost'
@@ -136,7 +137,7 @@ export default function PolicyEditorDialog({ initial, existing, templateName, po
             </li>
           }}
           onChange={(_, list_ids) => change({ list_ids })} renderInput={p => <TextField {...p} label={t(`${P}lists`)} />} />
-        {draft.list_ids.some(id => { const list = listChoices.find(list => list.id === id); return !list || list.state !== 'ready' || !list.entry_count }) && <Typography variant="caption"><FieldHint tone="amber" summary={t(`${P}list_pending_summary`)} detail={t(`${P}list_pending_detail`)} /></Typography>}
+        {draft.list_ids.some(id => { const list = listChoices.find(list => list.id === id); return !list || !destinationListAvailable(list) }) && <Typography variant="caption"><FieldHint tone="amber" summary={t(`${P}list_pending_summary`)} detail={t(`${P}list_pending_detail`)} /></Typography>}
         <Accordion disableGutters elevation={0} expanded={conditionsOpen} onChange={(_, expanded) => setConditionsOpen(expanded)} disabled={busy} sx={{ border: 1, borderColor: 'divider', borderRadius: 2, '&:before': { display: 'none' } }}>
           <AccordionSummary expandIcon={<ExpandMoreIcon />} aria-label={t(`${P}more_conditions`)} aria-describedby={additionalSummary ? `${conditionsId}-summary` : undefined} aria-controls={`${conditionsId}-content`} id={`${conditionsId}-toggle`} sx={{ '& .MuiAccordionSummary-content': { flexWrap: 'wrap', gap: 1, alignItems: 'center', minWidth: 0 } }}>
             <Typography component="span" variant="subtitle2" sx={{ flex: '1 1 auto' }}>{t(`${P}more_conditions`)}</Typography>

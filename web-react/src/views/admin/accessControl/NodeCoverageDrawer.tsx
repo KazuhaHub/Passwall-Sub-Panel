@@ -35,7 +35,7 @@ export default function NodeCoverageDrawer({ status, onClose }: { status?: Desti
   }
   const now = Date.now()
   return <Drawer open anchor="right" onClose={onClose} slotProps={{ paper: { role: 'dialog', 'aria-modal': true, 'aria-labelledby': 'coverage-title', sx: { width: { xs: '100vw', sm: 560 }, maxWidth: '100vw', bgcolor: theme.palette.md.surfaceContainerLow, borderTopLeftRadius: 16 } } }}>
-    <DialogTitle id="coverage-title" sx={{ display: 'flex', alignItems: 'center' }}><Box component="span" sx={{ flex: 1 }}>{t(`${P}title`)}</Box><IconButton aria-label={t('common:actions.close')} onClick={onClose}><CloseIcon /></IconButton></DialogTitle>
+    <Box sx={{ display: 'flex', alignItems: 'center' }}><DialogTitle id="coverage-title" sx={{ flex: 1, minWidth: 0 }}>{t(`${P}title`)}</DialogTitle><IconButton aria-label={t('common:actions.close')} onClick={onClose} sx={{ mr: 2, width: 44, height: 44 }}><CloseIcon /></IconButton></Box>
     <DialogContent><Stack spacing={2}>
       <Typography variant="body2" color="text.secondary">{t(`${P}hint`)}</Typography>
       <KpiGrid>{filters.map(value => <KpiTile key={value} label={t(`${P}filter_${value}`)} value={status ? status.nodes.filter(node => nodeFilter(node, now) === value).length : '—'} pressed={filter === value} onToggle={() => setParams(prev => { const next = new URLSearchParams(prev); if (filter === value) next.delete('node_state'); else next.set('node_state', value); return next }, { replace: true, state: location.state })} />)}</KpiGrid>

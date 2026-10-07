@@ -45,7 +45,7 @@ describe('reproducible access-control acceptance fixtures', () => {
 
   it('passes authentication and unrelated requests through, but never unknown fixture writes', async () => {
     const { client, fallback } = harness()
-    await client.post('/auth/login', { upn: 'local', password: 'disposable' })
+    await client.post('/auth/local/login', { upn: 'local', password: 'disposable' })
     await client.get('/admin/users')
     await client.get('https://elsewhere.example/api/admin/dest/status')
     expect(fallback).toHaveBeenCalledTimes(3)

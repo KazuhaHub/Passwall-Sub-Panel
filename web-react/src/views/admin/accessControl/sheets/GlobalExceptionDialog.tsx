@@ -31,7 +31,7 @@ export default function GlobalExceptionDialog({ target, userId, etaMs, onClose }
   }
   if (accountOnly && userId) return <AddExemptionDialog userId={userId} etaMs={etaMs} accessWarning onClose={() => setAccountOnly(false)} onSaved={onClose} />
   return <Dialog open fullWidth maxWidth="sm" fullScreen={mobile} onClose={close} aria-labelledby="global-exception-title">
-    <DialogTitle id="global-exception-title" sx={{ display: 'flex', alignItems: 'center' }}><Box component="span" sx={{ flex: 1 }}>{t(`${P}title`)}</Box><IconButton disabled={busy} aria-label={t('common:actions.close')} onClick={close}><CloseIcon /></IconButton></DialogTitle>
+    <Box sx={{ display: 'flex', alignItems: 'center' }}><DialogTitle id="global-exception-title" sx={{ flex: 1, minWidth: 0 }}>{t(`${P}title`)}</DialogTitle><IconButton disabled={busy} aria-label={t('common:actions.close')} onClick={close} sx={{ mr: 2, width: 44, height: 44 }}><CloseIcon /></IconButton></Box>
     <DialogContent dividers><Stack spacing={2.5}>
       {error && <Alert severity="error">{t(`${P}failed`)}<Typography variant="caption">{error}</Typography></Alert>}
       <TextField label={t('admin:access_control.test.target')} value={normalized.target ?? target} slotProps={{ input: { readOnly: true } }} />

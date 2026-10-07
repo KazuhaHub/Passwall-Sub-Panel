@@ -1,6 +1,7 @@
 import { AxiosError, AxiosHeaders, CanceledError, type AxiosAdapter, type AxiosResponse, type InternalAxiosRequestConfig } from 'axios'
 import type { AccessControlSettings, DestinationListDetail, DestinationListInput, DestinationListPreview, DestinationListSummary, DestinationPolicyInput, DestinationPolicyOverviewItem, DestinationTestResult, DestinationUserAccessView } from '@/api/accessControl'
 import type { RiskUserSummary } from '@/api/riskCenter'
+import { destinationListAvailable } from '@/utils/destinationListAvailability'
 import { accessControlFixtureSeed, destinationPolicies, destinationStatus } from '@/test/accessControlFixtures'
 
 export type AccessFixtureScenario = 'normal' | 'empty' | 'error' | 'catalog-missing' | 'catalog-failed'
@@ -132,7 +133,7 @@ export function createAccessControlMock(fallback: AxiosAdapter, options: { scena
       const { new_list: _newList, ...fields } = input
       return { ...fields, id, priority, created_at: createdAt, updated_at: lastWrite, hits_recent: null, last_hit_at: null, scope_missing: false,
         counts_as_risk: input.action === 'block' && input.counts_as_risk,
-        list_states: input.list_ids.map(id => { const list = findList(id); return { id, name: list.name, state: list.state } }) }
+        list_states: input.list_ids.map(id => { const list = findList(id); return { id, name: list.name, state: list.state, available: destinationListAvailable(list) } }) }
     }
     const detail = (list: DestinationListDetail) => ({ ...list, entries: list.entries.slice(0, 200),
       source_text: config.params?.text ? list.source_text : undefined })
@@ -184,7 +185,7 @@ export function createAccessControlMock(fallback: AxiosAdapter, options: { scena
       }
     }
     if (path === '/admin/dest/policies' && method === 'GET') {
-      const items = seed.policies.map(p => ({ ...p, list_states: p.list_ids.map(id => { const list = seed.lists.find(l => l.id === id); return { id, name: list?.name ?? '', state: list?.state ?? 'missing' as const } }) }))
+      const items = seed.policies.map(p => ({ ...p, list_states: p.list_ids.map(id => { const list = seed.lists.find(l => l.id === id); return { id, name: list?.name ?? '', state: list?.state ?? 'missing' as const, available: !!list && destinationListAvailable(list) } }) }))
       return response(destinationPolicies({ published_generation: publishedGeneration, published_has_access_control: published.some(p => p.enabled) || seed.allowlistGroups.length > 0,
         allow: items.filter(p => p.action === 'allow'), block: items.filter(p => p.action === 'block'), observe: items.filter(p => p.action === 'observe'),
         exemptions: { count: seed.exemptions.filter(e => !e.expired).length }, allowlist_groups: seed.allowlistGroups, budget: budget() }))

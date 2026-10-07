@@ -13,6 +13,7 @@ import { firstPublishCopy, needsFirstPublishConfirm } from '../confirmCopy'
 import PendingActionGuard from '../PendingActionGuard'
 import { destinationError } from '../errors'
 import { categoryRefreshState } from '@/utils/destinationCategories'
+import { policyListAvailable } from '@/utils/destinationListAvailability'
 import { emptyPolicy, policyInput } from './policyDraft'
 import { summaryText } from './summaryText'
 import QuotaMeters from './QuotaMeters'
@@ -96,7 +97,7 @@ export default function PoliciesTab({ data, status, seconds, onCreateList, onExe
             <Switch checked={row.enabled} disabled={busy !== null} slotProps={{ input: { 'aria-label': t(`${P}toggle`, { name: row.name }) } }} onChange={() => toggle(row)} />
             <IconButton disabled={busy !== null} aria-label={t(`${P}menu`, { name: row.name })} onClick={e => setMenu({ anchor: e.currentTarget, row })}><MoreVertIcon /></IconButton></Stack>
           <Typography variant="body2" color="text.secondary">{summaryText(t, row, new Map(row.list_states.map(list => [list.id, list.name])))} · {row.scope === 'all' ? t('admin:access_control.editor.all') : t(`${P}group_count`, { count: row.group_ids.length })}</Typography>
-          <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap' }}>{!row.enabled && <Typography variant="caption">{t(`${P}disabled`)}</Typography>}{row.counts_as_risk && <Typography variant="caption">{t('admin:access_control.editor.counts_as_risk')}</Typography>}{row.scope_missing && <Typography variant="caption" color="error">{t(`${P}scope_missing`)}</Typography>}{row.list_states.some(list => list.state !== 'ready') && <Typography variant="caption" color="warning.main">{t(`${P}list_pending`)}</Typography>}</Stack>
+          <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap' }}>{!row.enabled && <Typography variant="caption">{t(`${P}disabled`)}</Typography>}{row.counts_as_risk && <Typography variant="caption">{t('admin:access_control.editor.counts_as_risk')}</Typography>}{row.scope_missing && <Typography variant="caption" color="error">{t(`${P}scope_missing`)}</Typography>}{row.list_states.some(list => !policyListAvailable(list)) && <Typography variant="caption" color="warning.main">{t(`${P}list_pending`)}</Typography>}</Stack>
         </Paper>) : <Box sx={{ border: theme => `1px dashed ${theme.palette.md.outlineVariant}`, p: 2, borderRadius: 2 }}><Typography variant="body2" color="text.secondary">{t(`${P}empty_step`)}</Typography><Button disabled={busy !== null} onClick={() => create(step as DestinationPolicyAction)}>{t(`${P}create_${step}`)}</Button></Box>}</Stack>}
       </PipelineStep>)}
     </PipelineRail>}

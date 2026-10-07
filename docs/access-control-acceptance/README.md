@@ -47,10 +47,30 @@ Dimensions above describe the measured browser viewport. The current screenshot
 provider exports 811 image rows for an 812px phone viewport; the layout checks
 use `innerWidth`, `innerHeight` and document width, without resizing the images.
 
-These initial captures are not the complete §7.6 matrix. Browser inspection
-also identified a close button inside the node title and an inaccurate inactive
-warning for a failed refresh with usable old content; both require correction
-before the final acceptance matrix and owner approval.
+These initial captures are not the complete §7.6 matrix. Failed refreshes now
+retain independent content availability in the policy overview and editor.
+Lists that have never downloaded usable entries still show the inactive warning.
+Node, settings and global-exception close buttons are separate from their named
+headings and have 44 × 44px touch targets.
+
+| Capture | Language/theme/viewport | Check |
+| --- | --- | --- |
+| [Cached-list editor](cached-list-active-editor-en-US-dark-375.jpg) | English, dark, 375 × 812 | Usable cached list does not show an inactive warning |
+| [Fallback coverage](coverage-fallback-en-US-dark-375.jpg) | English, dark, 375 × 812 | Problem filter includes rejected nodes and their fallback status |
+| [Coverage title](coverage-title-en-US-dark-375.jpg) | English, dark, 375 × 812 | Dialog and heading names contain the title alone |
+| [Settings title](settings-title-en-US-dark-375.jpg) | English, dark, 375 × 812 | Separate close button and unique labelled heading |
+| [Exception title](exception-title-en-US-dark-375.jpg) | English, dark, 375 × 812 | Title-only accessible name, 44px close target and no horizontal overflow |
+
+Five frontend regressions and six real HTTP-handler cases reproduced the
+readiness/title issues before repair. The repaired package passed 279 focused
+frontend tests, the HTTP-handler and destination-policy service suites,
+TypeScript, changed-source lint, production build and four production browser
+smoke checks. The final adapter/availability/style-guard run passed 13 tests.
+An authenticated request to the restarted isolated real backend confirmed
+`available: true` on both cached policy list references. Failure/first-download
+branches are covered by handler regressions and DEV fixtures, rather than a
+claimed live upstream outage. The complete matrix and owner approval remain
+pending.
 
 Fixture data deliberately differs from defaults: regular-expression limit 128,
 deployment delay 93 seconds and list refresh interval 17 hours. The policy help

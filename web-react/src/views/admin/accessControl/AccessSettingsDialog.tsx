@@ -29,10 +29,10 @@ function Frame({ children, actions, onClose, onEntered, busy = false }: { childr
   const fullScreen = useMediaQuery(theme.breakpoints.down('sm'))
   return <Dialog open fullWidth maxWidth="sm" fullScreen={fullScreen} onClose={() => { if (!busy) onClose() }}
     slotProps={{ transition: { onEntered } }} aria-labelledby="access-settings-title">
-    <DialogTitle id="access-settings-title" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-      <Box component="span" sx={{ flex: 1 }}>{t(`${P}title`)}</Box>
-      <IconButton aria-label={t('common:actions.close')} onClick={onClose} disabled={busy}><CloseIcon /></IconButton>
-    </DialogTitle>
+    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+      <DialogTitle id="access-settings-title" sx={{ flex: 1, minWidth: 0 }}>{t(`${P}title`)}</DialogTitle>
+      <IconButton aria-label={t('common:actions.close')} onClick={onClose} disabled={busy} sx={{ mr: 2, width: 44, height: 44 }}><CloseIcon /></IconButton>
+    </Box>
     <DialogContent dividers>{children}</DialogContent>
     <DialogActions sx={{ position: 'sticky', bottom: 0, bgcolor: 'background.paper', flexWrap: 'wrap', gap: 1, px: 3, py: 2 }}>
       {actions ?? <Button onClick={onClose}>{t('common:actions.close')}</Button>}

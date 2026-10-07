@@ -304,7 +304,10 @@ func (h *AdminDestinationPoliciesHandler) List(c *gin.Context) {
 			if h.lists != nil && h.lists.IsRefreshing(id) {
 				state = "refreshing"
 			}
-			states = append(states, gin.H{"id": id, "name": list.Name, "state": state})
+			// A failed refresh retains previously usable content. Match the compiler's
+			// readiness check independently of the operational refresh state.
+			available := exists && list.EntryCount > 0 && (list.Kind == domain.DestListCustom || list.LastFetchedAt != nil)
+			states = append(states, gin.H{"id": id, "name": list.Name, "state": state, "available": available})
 		}
 		view["list_states"] = states
 		missing := false

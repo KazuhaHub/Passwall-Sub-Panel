@@ -205,7 +205,7 @@ export interface DestinationPolicyView extends DestinationPolicyInput {
   last_hit_at: number | null
 }
 export interface DestinationPolicyOverviewItem extends DestinationPolicyView {
-  list_states: Array<{ id: number; name: string; state: 'ready' | 'refreshing' | 'failed' | 'pending' | 'empty' | 'missing' }>
+  list_states: Array<{ id: number; name: string; state: 'ready' | 'refreshing' | 'failed' | 'pending' | 'empty' | 'missing'; available?: boolean }>
   scope_missing: boolean
 }
 export interface DestinationPoliciesView {

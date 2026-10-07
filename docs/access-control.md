@@ -1679,10 +1679,30 @@ The initial screenshots and remaining browser findings are listed in the
 Full frontend validation passed with 2088 tests and one skipped. The final
 adapter/client-focused run, TypeScript compilation, changed-source lint,
 production fixture exclusion and the production browser smoke also passed.
-The preceding `06877297` head completed both
-[Test](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37558078033) and
-[released-node systemd acceptance](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37558078038).
-This increment still needs its own CI and the remaining complete UI matrix.
+The fixture commit `4f8dde92` completed both
+[Test](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37559926623) and
+[released-node systemd acceptance](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37559926701).
+The remaining complete UI matrix is still pending.
+
+Policy overview list states now expose `available` independently of refresh
+state. Non-empty custom content is usable immediately; remote/category content
+requires a successful prior download. A failed or ongoing refresh does not
+disable that cached content. Policy rows and editor hints use the same rule as
+the compiler, while the list's refresh warning remains visible. Older overview
+responses without `available` retain the previous ready-state fallback.
+Node, settings and global-exception dialog headings now exclude their close
+buttons, which have 44px touch targets. The required access-control style guard
+rejects raw hex/RGB colours and severity-coloured Chips in these views and shared
+status components.
+
+This repair passed 279 focused frontend tests, full HTTP-handler and
+destination-policy service suites, TypeScript, changed-source lint, production
+build and four production browser smoke checks. A final 13-test run covers the
+adapter, availability utility and style guard. The isolated real backend
+returned the new availability field on both cached policy references after
+restart; its 612-entry finance list and excluded broad-entry report remained
+persisted. Browser evidence is linked in the acceptance index. These checks do
+not complete the entire UI matrix or establish Node enforcement.
 
 List previews and policy previews are excluded from write-audit logging by
 exact POST path. Other destination writes, including `/dest/test`, retain normal
