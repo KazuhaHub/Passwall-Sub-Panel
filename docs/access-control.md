@@ -1624,6 +1624,45 @@ This increment establishes the catalog download/finance-list path, not all C2
 browser cases, the complete screenshot matrix, Node enforcement or later audit
 stages.
 
+The catalog task-state head `7df2fa354e2e0dc373ae0fddeb6a3200d8e8e369` passed
+[complete Test](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37557450839)
+and [released-node systemd acceptance](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37557450971).
+All non-optional frontend, race, dialect, static, cross-build, Docker and
+compatibility jobs passed. Real third-party panels were skipped; the released
+Node baseline remains distinct from actual unmerged Node #78 enforcement.
+
+## Real template save and published-version simulation
+
+The same isolated backend exercised the actual cryptocurrency template. Its
+first-enable confirmation was canceled once: the renamed draft and template
+origin remained, and read-only SQLite counts stayed at one finance list and
+zero policies. Confirming afterward returned 201 and atomically saved one
+235-entry category list and an enabled observation policy referring to it;
+`counts_as_risk` remained false. No Node is configured in this fixture, and the
+header correctly reports that no node can execute the enabled policy.
+
+Before publication, the destination simulation for `binance.com` explicitly
+used the published version, returned direct allow and showed the unpublished
+warning. Publishing returned 200 without rerunning the audited test. An
+explicit second simulation returned observation at step four, named the saved
+policy and reported `domain:binance.com` as its matching entry. This verifies
+backend snapshot selection and matching; it does not establish traffic
+enforcement, audit collection or native Node application.
+
+The real save trace also exposed a redundant active policy-preview POST after
+the successful write, returning 409 for the newly saved name. Policy and
+exemption mutations now mark preview caches stale without automatically
+refetching them, following the existing list-write behavior. Definition/status
+reads still refresh normally, and session-scoped invalidation is unchanged.
+Two regressions failed before repair; all 130 focused query/page/simulation/
+exemption tests, TypeScript, changed-source lint and production build passed.
+After rebuilding/restarting, a real duplicate was saved disabled with HTTP 201
+at 01:35:59.525 UTC. The last deliberate draft preview was at 01:35:48.387;
+normal reads followed the save with no additional preview POST. Screenshots of
+the canceled draft, unpublished result, published match and disabled duplicate
+are recorded in the acceptance index. Full C5/C6 and later-stage gates remain
+pending.
+
 ## Storage and privacy
 
 List previews and policy previews are excluded from write-audit logging by

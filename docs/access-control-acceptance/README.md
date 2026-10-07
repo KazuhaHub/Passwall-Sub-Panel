@@ -87,3 +87,32 @@ Backend failure/cancellation and deduplication have service/HTTP regressions;
 they are not claimed here as live upstream outage simulations. Complete C2/C6,
 the full language/theme/screen matrix, real Node enforcement and owner acceptance
 remain pending.
+
+## Real backend template and simulation acceptance
+
+These use the same isolated backend/database as the catalog captures above,
+without Node fixtures. The template first-enable dialog was canceled once;
+SQLite still contained one finance list and zero policies, and the renamed
+template draft remained. Confirmation then returned 201 and atomically saved
+the 235-entry cryptocurrency list and its enabled observation policy, with no
+risk flag. A duplicate later remained disabled after a successful real save.
+
+| Capture | Check |
+| --- | --- |
+| [Canceled template draft](template-live-canceled-draft-en-US.jpg) | Renamed draft and template origin survive canceling first enable; no policy/list write |
+| [Unpublished result](template-live-unpublished-result-en-US.jpg) | `binance.com` simulation explicitly uses the published snapshot and warns about unpublished changes |
+| [Published observation](template-live-published-observation-en-US.jpg) | Explicit rerun after publication matches observation at step four; header reports no executable Node |
+| [Disabled duplicate](policy-live-disabled-copy-en-US.jpg) | Successful save keeps the copied policy disabled; original remains enabled |
+
+Publication returned 200 and did not automatically repeat the audited test.
+The explicit subsequent test reported the observation policy and
+`domain:binance.com` match. This demonstrates backend snapshot selection and
+matching, not native traffic enforcement or audit collection.
+
+The first real policy save caused an unwanted preview POST returning 409 after
+its 201. After query invalidation was repaired and the production build
+restarted, the deliberate edited-draft preview returned 200 at 01:35:48.387 UTC;
+the duplicate save returned 201 at 01:35:59.525 and normal reads followed with
+no additional preview POST. Query regressions also cover exemption mutations,
+preserved invalidation and session boundaries. Full C5/C6, responsive/language/
+theme matrix and owner approval remain pending.

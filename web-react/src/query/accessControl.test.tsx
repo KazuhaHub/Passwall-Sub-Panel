@@ -107,6 +107,14 @@ it('polls a refreshing list every five seconds, stops when settled and pauses in
   query.setData({ items: [{ ...item, state: 'failed' }], budget: destinationBudget, refresh_hours: 12 })
   expect(interval(query)).toBe(false)
 })
+it.each(cases.filter(row => row.name === 'create policy' || row.name === 'create exemption'))('does not refetch an active policy preview after $name', async row => {
+  const client = new QueryClient(), key = [...accessControlKeys.policyPreviews(scope), 'input'], fetch = vi.fn().mockResolvedValue({ fixture: true })
+  client.setQueryData(key, { fixture: true })
+  const { result } = renderHook(() => { useQuery({ queryKey: key, queryFn: fetch, staleTime: Infinity }); return row.useRun() }, { wrapper: ({ children }: { children: ReactNode }) => <QueryClientProvider client={client}>{children}</QueryClientProvider> })
+  await act(async () => { await result.current() })
+  expect(client.getQueryState(key)?.isInvalidated).toBe(true)
+  expect(fetch).not.toHaveBeenCalled()
+})
 it('does not refetch an active network preview as a side effect of a list mutation', async () => {
   const client = new QueryClient(), key = [...accessControlKeys.listPreviews(scope), 'remote-input'], fetch = vi.fn()
   client.setQueryData(key, { fixture: true })

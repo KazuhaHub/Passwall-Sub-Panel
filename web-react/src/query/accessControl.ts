@@ -79,7 +79,7 @@ export function useRefreshDestinationCategories(scope: QueryScope) {
 function useInvalidatePolicies(scope: QueryScope) {
   const client = useQueryClient()
   return () => Promise.all([accessControlKeys.policies(scope), accessControlKeys.status(scope), accessControlKeys.lists(scope), accessControlKeys.policyPreviews(scope)]
-    .map(queryKey => client.invalidateQueries({ queryKey })))
+    .map(queryKey => client.invalidateQueries({ queryKey, refetchType: queryKey.some(key => key === 'policy-preview') ? 'none' : 'active' })))
 }
 export function useSaveDestinationPolicy(scope: QueryScope) {
   const invalidate = useInvalidatePolicies(scope)
@@ -113,7 +113,7 @@ export function useDestinationUserAccess(scope: QueryScope, id: number, enabled 
 function useInvalidateExemptions(scope: QueryScope) {
   const client = useQueryClient()
   return () => Promise.all([accessControlKeys.exemptions(scope), accessControlKeys.userAccessRoot(scope), accessControlKeys.policies(scope), accessControlKeys.status(scope), accessControlKeys.policyPreviews(scope)]
-    .map(queryKey => client.invalidateQueries({ queryKey })))
+    .map(queryKey => client.invalidateQueries({ queryKey, refetchType: queryKey.some(key => key === 'policy-preview') ? 'none' : 'active' })))
 }
 export function useSaveDestinationExemption(scope: QueryScope) {
   return useMutation({ mutationFn: ({ userId, input, existing }: { userId: number; input: DestinationExemptionInput; existing?: boolean }) => existing
