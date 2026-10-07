@@ -265,6 +265,13 @@
       "failed": "Could not read lists",
       "references_unknown": "Policy state has not been read, so enabled references to pending lists are unknown. The problem filter currently shows known failures."
     },
+    "server": {
+      "line": "Access control: {{state}}",
+      "title": "{{name}} · Access control",
+      "menu": "Access control",
+      "open_access": "Open access control",
+      "unpublished": "Saved changes have not been published yet. This receipt describes the published version."
+    },
     "coverage": {
       "open": "Node coverage",
       "title": "Node coverage · {{n}} nodes",
@@ -322,7 +329,8 @@
       "applied_at": "Last successful application: {{time}}",
       "pending_since": "Waiting since: {{time}}",
       "over_limit": "Budget: {{kind}} {{used}} / {{limit}}",
-      "sniffing": "Enable sniffing on listener “{{listener}}”",
+      "sniffing": "Inbound “{{listener}}” cannot identify domains",
+      "sniffing_impact": "Impact: connections through this inbound are not covered by domain rules.",
       "fallback_waiting": "Trying a safe previous version; awaiting the node's confirmation.",
       "fallback_applied": "The node confirmed that it is executing a safe previous version.",
       "fallback_stopping": "The previous version cannot execute either; stopping access restrictions and awaiting confirmation.",

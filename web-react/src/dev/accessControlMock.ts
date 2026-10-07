@@ -1,6 +1,7 @@
 import { AxiosError, AxiosHeaders, CanceledError, type AxiosAdapter, type AxiosResponse, type InternalAxiosRequestConfig } from 'axios'
 import type { AccessControlSettings, DestinationListDetail, DestinationListInput, DestinationListPreview, DestinationListSummary, DestinationPolicyInput, DestinationPolicyOverviewItem, DestinationTestResult, DestinationUserAccessView } from '@/api/accessControl'
 import type { RiskUserSummary } from '@/api/riskCenter'
+import type { Server } from '@/api/servers'
 import { destinationListAvailable } from '@/utils/destinationListAvailability'
 import { accessControlFixtureSeed, destinationPolicies, destinationStatus } from '@/test/accessControlFixtures'
 
@@ -51,6 +52,15 @@ export function createAccessControlMock(fallback: AxiosAdapter, options: { scena
     seed.policies = []; seed.lists = []; seed.nodes = []; seed.groups = []; seed.allowlistGroups = []; seed.exemptions = []; seed.hits = []
     for (const value of Object.values(seed.budget)) value.used = 0
   }
+  const servers: Server[] = seed.nodes.map(node => ({
+    id: node.panel_id, name: node.panel_name, panel_type: node.kind === 'psp' ? 'psp' : '3xui',
+    url: `https://fixture-node-${node.panel_id}.example.invalid`, capabilities: ['inbound.read', 'inbound.update'],
+    has_api_token: true, has_password: false, auth_method: 'token', insecure_https: false,
+    panel_version: node.agent_version ?? undefined,
+    core_engine: node.kind === 'psp' ? node.engine === 'sing-box' ? 'sing-box' : 'xray' : undefined,
+    core_version: node.kind === 'psp' ? 'fixture-core' : undefined,
+    version_checked_at: new Date().toISOString(), audit_collect: 'off',
+  }))
   let generation = 12, publishedGeneration = 12, paused = false, lastWrite = Date.now() - 3_600_000
   let published = structuredClone(seed.policies)
   let catalogAvailable = scenario !== 'catalog-missing' && scenario !== 'catalog-failed'
@@ -68,7 +78,7 @@ export function createAccessControlMock(fallback: AxiosAdapter, options: { scena
 
   return async config => {
     const path = fixturePath(config)
-    const owned = path && (/^\/admin\/dest(?:\/|$)/.test(path) || /^\/admin\/risk-center\/users(?:\/|$)/.test(path) || /^\/admin\/groups(?:\/|$)/.test(path))
+    const owned = path && (/^\/admin\/dest(?:\/|$)/.test(path) || /^\/admin\/risk-center\/users(?:\/|$)/.test(path) || /^\/admin\/groups(?:\/|$)/.test(path) || /^\/admin\/servers(?:\/|$)/.test(path))
     if (!owned) return fallback(config)
     await delay(config, options.latency ?? 250)
     const method = (config.method ?? 'get').toUpperCase()
@@ -76,8 +86,22 @@ export function createAccessControlMock(fallback: AxiosAdapter, options: { scena
     const fail = (status: number, error: string, extra: object = {}): never => {
       throw new AxiosError(error, status >= 500 ? AxiosError.ERR_BAD_RESPONSE : AxiosError.ERR_BAD_REQUEST, config, undefined, response({ error, ...extra }, status))
     }
-    if (scenario === 'error') return fail(500, 'fixture_unavailable')
     const body = (typeof config.data === 'string' ? JSON.parse(config.data || '{}') : config.data ?? {}) as Record<string, unknown>
+    if (method === 'GET' && path === '/admin/servers') {
+      const keyword = String(config.params?.keyword ?? '').toLowerCase()
+      const items = servers.filter(server => `${server.name} ${server.url}`.toLowerCase().includes(keyword))
+      const dir = config.params?.sort_dir === 'desc' ? -1 : 1
+      items.sort((a, b) => dir * (config.params?.sort_by === 'name' ? a.name.localeCompare(b.name) : a.id - b.id))
+      const page = Math.max(1, Math.floor(Number(config.params?.page) || 1))
+      const pageSize = Math.min(200, Math.max(1, Math.floor(Number(config.params?.page_size) || 25)))
+      return response({ items: items.slice((page - 1) * pageSize, page * pageSize), total: items.length, page, page_size: pageSize })
+    }
+    if (method === 'POST' && path === '/admin/servers/probe') {
+      const node = seed.nodes.find(node => node.panel_id === body.id) ?? fail(404, 'not_found')
+      return response({ ok: node.state !== 'offline', error: node.state === 'offline' ? 'Fixture node is offline' : undefined, inbound_count: 1,
+        panel_version: node.agent_version ?? undefined })
+    }
+    if (scenario === 'error') return fail(500, 'fixture_unavailable')
     const summary = (list: DestinationListDetail): DestinationListSummary => {
       const { entries: _entries, source_text: _source, content_sha256: _digest, entry_types: _types, parse_report, ...rest } = list
       const used_by: DestinationListSummary['used_by'] = seed.policies.filter(p => p.list_ids.includes(list.id)).map(p => ({ kind: 'policy', id: p.id, name: p.name }))

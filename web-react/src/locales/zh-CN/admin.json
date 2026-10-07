@@ -265,6 +265,13 @@
       "failed": "无法读取列表",
       "references_unknown": "尚未读取到策略状态，无法确认待下载列表是否被启用的策略使用；问题筛选暂只展示已知失败。"
     },
+    "server": {
+      "line": "访问控制：{{state}}",
+      "title": "{{name}} · 访问控制",
+      "menu": "访问控制",
+      "open_access": "打开访问控制",
+      "unpublished": "已保存的修改尚未发布，此回执描述的是已发布版本。"
+    },
     "coverage": {
       "more": "{{name}} 的更多操作",
       "open_server": "打开服务器",
@@ -320,7 +327,8 @@
       "applied_at": "最近执行成功：{{time}}",
       "pending_since": "开始等待：{{time}}",
       "over_limit": "额度：{{kind}} {{used}} / {{limit}}",
-      "sniffing": "监听「{{listener}}」需要启用嗅探",
+      "sniffing": "入站「{{listener}}」没有识别域名",
+      "sniffing_impact": "影响：从此入站接入的连接不受域名策略约束。",
       "fallback_waiting": "正在尝试安全的上一版，等待节点确认。",
       "fallback_applied": "节点已确认仍在执行安全的上一版。",
       "fallback_stopping": "上一版也无法执行，正在停止执行访问策略，等待节点确认。",

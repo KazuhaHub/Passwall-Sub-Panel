@@ -222,6 +222,10 @@ export interface DestinationPoliciesView {
 }
 export async function getDestinationPolicies(opts: ReadOptions = {}): Promise<DestinationPoliciesView> {
   const { data } = await client.get<DestinationPoliciesView>('/admin/dest/policies', { signal: opts.signal, _skipErrorToast: opts.silent })
+  if (!data || typeof data !== 'object' || !Array.isArray(data.allow) || !Array.isArray(data.block) ||
+      !Array.isArray(data.observe) || !Array.isArray(data.allowlist_groups) || typeof data.published_has_access_control !== 'boolean') {
+    throw new Error('invalid_destination_policies_response')
+  }
   return data
 }
 export async function previewDestinationPolicy(input: DestinationPolicyInput & { id?: number; updated_at?: number }, signal?: AbortSignal): Promise<{ budget: DestinationBudget; new_list_preview?: DestinationListPreview }> {
@@ -346,5 +350,9 @@ export interface DestinationStatus extends DestinationPublicationView {
 }
 export async function getDestinationStatus(opts: ReadOptions = {}): Promise<DestinationStatus> {
   const { data } = await client.get<DestinationStatus>('/admin/dest/status', { signal: opts.signal, _skipErrorToast: opts.silent })
+  if (!data || typeof data !== 'object' || !Array.isArray(data.nodes) ||
+      !Number.isFinite(data.generation) || !Number.isFinite(data.published_generation)) {
+    throw new Error('invalid_destination_status_response')
+  }
   return data
 }

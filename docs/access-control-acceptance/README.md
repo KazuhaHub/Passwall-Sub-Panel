@@ -16,7 +16,10 @@ sets `psp_dev_fixtures=access` and reloads the normal product route; browser
 storage failures are reported without navigation. Disable fixtures from the
 same tool. Reloading resets all in-memory fixture mutations.
 
-The DEV-only axios adapter intercepts destination, risk-user and group routes.
+The DEV-only axios adapter intercepts destination, risk-user, group and server routes.
+Server reads use the same twelve panel IDs as coverage; connection probes are
+synthetic. Unsupported server writes, credential changes and diagnostics fail
+inside the fixture adapter and cannot reach real servers.
 Unknown operations in that scope fail with 501 instead of reaching the real
 backend. Authentication and unrelated requests still use the local PSP. An
 optional `PSP_DEV_PROXY_TARGET` sets Vite's local proxy target; it does not change
@@ -205,12 +208,67 @@ passed **342 tests in 30 files**; TypeScript, changed-source lint, production
 build/fixture exclusion and four production browser smoke checks passed.
 Existing unrelated lint warnings in the legacy server/node views remain.
 
-The new shared row is ready for S15's server-page integration. Full per-view
+The shared row also supplies the server-page integration described below. Full per-view
 acceptance, C2/C5/C6 closure, true new-kernel Node validation and owner approval
 remain pending. The earlier `a0e04318` passed both its
 [Test workflow](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37676483029)
 and [released-node systemd acceptance](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37676483279);
 that CI result does not cover these later edits.
+
+The coverage-actions commit `a90592ec` passed
+[released-node systemd acceptance](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37679967903),
+but its [Test workflow](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37679967889)
+failed one frontend deep-link assertion: it checked parameter removal before
+the asynchronous router commit. The assertion now waits for that commit while
+retaining the failed-read, retry and no-write checks. The focused deep-link
+suite passed all eleven cases after this repair.
+
+## Server access details (S15)
+
+Native server rows show a compact access-control status button when the fleet
+has saved enabled policies, allowlist groups or a still-published policy.
+Empty fleets, legacy servers, operators and failed destination reads omit the
+line. The native menu also opens a named detail dialog; its shared block shows
+the published receipt, problems and next actions. Unpublished saved changes
+receive a separate notice. Recording/hit/group cards retain their later stages.
+
+These captures use synthetic servers from the DEV adapter, including synthetic
+connection probes. The earlier server-search capture above used the real empty
+backend and does not establish native-server connectivity.
+
+| Capture | Language/theme/viewport | Check |
+| --- | --- | --- |
+| [Status line](server-access-line-zh-CN-dark-1440.jpg) | Chinese, dark, 1440 × 900 | Compact line below connection status, visible keyboard focus |
+| [Chinese dark desktop](server-access-dialog-zh-CN-dark-1440.jpg) | Chinese, dark, 1440 × 900 | Shared problem, impact and inbound action |
+| [Chinese dark phone](server-access-dialog-zh-CN-dark-375.jpg) | Chinese, dark, 375 × 812 | Full-screen detail, 44px targets |
+| [Chinese light desktop](server-access-dialog-zh-CN-light-1440.jpg) | Chinese, light, 1440 × 900 | 600px detail and published receipt metadata |
+| [Chinese light phone](server-access-dialog-zh-CN-light-375.jpg) | Chinese, light, 375 × 812 | Full-screen translated detail |
+| [English dark desktop](server-access-dialog-en-US-dark-1440.jpg) | English, dark, 1440 × 900 | Translated problem, impact and actions |
+| [English dark phone](server-access-dialog-en-US-dark-375.jpg) | English, dark, 375 × 812 | Wrapped title and domain-rule limitation |
+| [English light desktop](server-access-dialog-en-US-light-1440.jpg) | English, light, 1440 × 900 | Same shared block at desktop width |
+| [English light phone](server-access-dialog-en-US-light-375.jpg) | English, light, 375 × 812 | Same full-screen detail |
+| [Failed read](server-access-read-error-en-US-light-1440.jpg) | English, light, 1440 × 900 | Server list remains usable; detail offers GET retry |
+
+Keyboard Tab exposed a 2px focus outline on the status line. Enter opened the
+detail; Escape closed it and restored focus to the line. Phone details had no
+horizontal overflow, used the full-screen dialog class and exposed six targets
+measuring at least 44px in both dimensions. The failed-read scene also displayed
+the loading skeleton during a retry before returning to its failure message.
+Request-count tests establish that read retry does not post an application.
+
+Nine server-integration cases failed before implementation. Two malformed-200
+cases exposed render failures before API response guards were added. The final
+seventeen server-access cases cover fleet expectations, native/legacy/operator
+gates, session changes, stale/cold/failed reads, unpublished receipts and single
+application admission with shared status invalidation. The DEV adapter also
+checks matching server IDs, synthetic probes, blocked writes and isolated
+destination failure. Full UI/Node acceptance and owner approval remain pending.
+
+The final complete frontend run passed **2147 tests, with one existing skipped
+test, in 181 files** (180 passed, one skipped). TypeScript, changed-source lint,
+production build, fixture-exclusion guard and four production browser smoke
+checks passed. Lint retains three existing warnings in the legacy ServersView.
+This run includes the deep-link CI assertion repair and all seventeen S15 cases.
 
 ## Real backend catalog acceptance
 

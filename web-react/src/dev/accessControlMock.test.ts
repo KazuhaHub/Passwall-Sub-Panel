@@ -57,6 +57,34 @@ describe('reproducible access-control acceptance fixtures', () => {
     expect((await client.get('/panel/api/admin/dest/status')).data.nodes).toHaveLength(12)
   })
 
+  it('binds read-only server fixtures to the same node IDs and prevents real server writes', async () => {
+    const { client, fallback } = harness()
+    const status = (await client.get('/admin/dest/status')).data
+    const servers = (await client.get('/admin/servers', { params: { page: 1, page_size: 25 } })).data
+    expect(servers.items).toHaveLength(12)
+    for (const server of servers.items) {
+      const node = status.nodes.find((n: { panel_id: number }) => n.panel_id === server.id)
+      expect(server.name).toBe(node.panel_name)
+      expect(server.panel_type).toBe(node.kind === 'psp' ? 'psp' : '3xui')
+    }
+    const filtered = await client.get('/admin/servers', { params: { keyword: '节点 11' } })
+    expect(filtered.data.items.map((s: { id: number }) => s.id)).toEqual([11])
+    expect((await client.post('/admin/servers/probe', { id: 11 })).data.ok).toBe(true)
+    expect((await client.post('/admin/servers/probe', { id: 10 })).data.ok).toBe(false)
+    await expect(client.post('/admin/servers', {})).rejects.toMatchObject({ response: { status: 501 } })
+    await expect(client.put('/admin/servers/11', {})).rejects.toMatchObject({ response: { status: 501 } })
+    await expect(client.delete('/admin/servers/11')).rejects.toMatchObject({ response: { status: 501 } })
+    await expect(client.post('/admin/servers/11/rotate-credential', {})).rejects.toMatchObject({ response: { status: 501 } })
+    expect(fallback).not.toHaveBeenCalled()
+  })
+
+  it('keeps the server list usable during the synthetic destination-service failure', async () => {
+    const { client, fallback } = harness('error')
+    expect((await client.get('/admin/servers')).data.items).toHaveLength(12)
+    await expect(client.get('/admin/dest/status')).rejects.toMatchObject({ response: { status: 500 } })
+    expect(fallback).not.toHaveBeenCalled()
+  })
+
   it('returns fresh responses and keeps previews read-only, with compare-and-swap writes', async () => {
     const { client, fallback } = harness()
     const before = (await client.get('/admin/dest/policies')).data

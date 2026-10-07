@@ -13,6 +13,7 @@ function sourceFiles(directory: string): string[] {
 
 it('keeps access-control views and shared status primitives on theme tokens', () => {
   const files = sourceFiles(fileURLToPath(new URL('../views/admin/accessControl', import.meta.url)))
+  files.push(fileURLToPath(new URL('../views/admin/ServerAccessDialog.tsx', import.meta.url)))
   for (const name of ['ToneBadge', 'KpiTile', 'StatusLine', 'FieldHint']) {
     files.push(fileURLToPath(new URL(`../components/${name}.tsx`, import.meta.url)))
   }

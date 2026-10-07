@@ -1761,7 +1761,43 @@ coverage footer opens deployment settings with the interval field focused.
 Deep-link/action/category tests failed before implementation. The final focused
 frontend suite (342 tests in 30 files), TypeScript, changed-source lint, production build and four
 production browser smoke checks passed; counts and browser evidence are recorded
-in the acceptance index. Full stage-1c acceptance and S15 remain open.
+in the acceptance index. Full stage-1c acceptance remains open.
+
+Native server rows now reuse the shared status component as a compact access
+line. It appears only for administrators, native servers and a fleet with saved
+enabled policies, allowlist groups or a still-published policy. Failed status or
+definition reads omit the line without failing the server list. API adapters
+reject malformed 200 responses, including an HTML SPA fallback; missing APIs
+are not interpreted as a successful empty deployment.
+
+The native action menu and status line open a named, 600px server-access dialog
+that becomes full-screen on phones. It reuses the same receipt/problem block,
+states the effect of insufficient sniffing and links to coverage. Saved changes
+that differ from the published generation receive a separate notice. Cold
+reads show skeletons, failed reads offer GET retry, and stale refreshes retain
+the last receipt with a warning. Application retries use the existing agent
+endpoint with duplicate-admission protection and shared query invalidation.
+Session/permission changes remove the dialog. Later recording/hit/group cards
+remain gated to their planned stages.
+
+The S15 browser evidence includes both interface languages, both themes and
+desktop/phone details, keyboard focus/Enter/Escape, 44px phone targets and a
+failed-read scene with an intact server list. These server fixtures use
+synthetic reads/probes and block unsupported server writes. They do not prove
+real connectivity, kernel enforcement or the future WP-D4 server overview,
+whose prerequisite module has not landed.
+
+The preceding coverage-actions commit `a90592ec` passed
+[released-node systemd acceptance](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37679967903),
+but [Test CI](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37679967889)
+failed one asynchronous deep-link assertion. That assertion now waits for the
+router commit, with all eleven focused deep-link cases passing; it retains
+the failed-read/retry checks and the prohibition on configuration writes.
+
+The final frontend suite for these server/response-guard/deep-link edits passed
+2147 tests with one existing skip across 181 files. TypeScript, changed-source
+lint, production build, fixture-exclusion guard and four production browser
+smoke checks passed. Three existing legacy-server lint warnings remain.
 
 List previews and policy previews are excluded from write-audit logging by
 exact POST path. Other destination writes, including `/dest/test`, retain normal

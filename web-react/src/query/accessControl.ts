@@ -37,8 +37,8 @@ export function destinationStatusQuery(scope: QueryScope, enabled = true) {
     refetchInterval: q => statusNeedsPolling(q.state.data) ? policies.destStatus.refetchInterval : false })
 }
 export function useDestinationStatus(scope: QueryScope, enabled = true) { return useQuery(destinationStatusQuery(scope, enabled)) }
-export function useDestinationPolicies(scope: QueryScope) {
-  return useQuery({ queryKey: accessControlKeys.policies(scope), queryFn: ({ signal }) => getDestinationPolicies({ signal, silent: true }), ...freshness(policies.destDefinitions) })
+export function useDestinationPolicies(scope: QueryScope, enabled = true) {
+  return useQuery({ queryKey: accessControlKeys.policies(scope), queryFn: ({ signal }) => getDestinationPolicies({ signal, silent: true }), enabled, ...freshness(policies.destDefinitions) })
 }
 export function destinationListsQuery(scope: QueryScope, enabled = true) {
   return queryOptions({ queryKey: accessControlKeys.lists(scope), queryFn: ({ signal }) => getDestinationLists({ signal, silent: true }), ...freshness(policies.destListRefreshing),

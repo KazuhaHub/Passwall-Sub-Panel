@@ -161,6 +161,6 @@ it('shows a failed fresh configuration read with retry instead of editable defau
   expect(dialog.querySelector('#edit-inbound-form')).toBeNull()
   expect(screen.queryByRole('button', { name: 'common:actions.ok' })).toBeNull()
   expect(screen.getByRole('button', { name: 'common:actions.retry' })).toBeTruthy()
-  expect(route().get('inbound')).toBeNull()
+  await waitFor(() => expect(route().get('inbound')).toBeNull())
   expect(api.put).not.toHaveBeenCalled()
 })
