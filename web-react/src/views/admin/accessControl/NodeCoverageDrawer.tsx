@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react'
-import { Alert, Box, Button, Drawer, DialogContent, DialogTitle, IconButton, Stack, Typography, useTheme } from '@mui/material'
+import { Alert, Box, Button, Drawer, DialogContent, DialogTitle, IconButton, Skeleton, Stack, Typography, useTheme } from '@mui/material'
 import CloseIcon from '@mui/icons-material/Close'
 import PauseCircleOutlineIcon from '@mui/icons-material/PauseCircleOutlined'
 import RemoveCircleOutlineIcon from '@mui/icons-material/RemoveCircleOutlineOutlined'
@@ -16,7 +16,10 @@ import { destinationError } from './errors'
 import { AsyncButton } from '@/components/AsyncButton'
 const P = 'admin:access_control.coverage.'
 const filters = ['applied', 'pending', 'problem', 'upgrade', 'excluded'] as const
-export default function NodeCoverageDrawer({ status, onClose }: { status?: DestinationStatus; onClose: () => void }) {
+export default function NodeCoverageDrawer({ status, loading, failed, refreshing, onRetryRead, onClose }: {
+  status?: DestinationStatus; loading: boolean; failed: boolean; refreshing: boolean
+  onRetryRead: () => Promise<unknown>; onClose: () => void
+}) {
   const { t, dateTime, number } = useAccessTranslation(['admin', 'common'])
   const theme = useTheme()
   const [params, setParams] = useSearchParams()
@@ -34,14 +37,17 @@ export default function NodeCoverageDrawer({ status, onClose }: { status?: Desti
     finally { admission.current = false }
   }
   const now = Date.now()
+  const retryRead = <AsyncButton pending={refreshing} onClick={onRetryRead} sx={{ minHeight: 44 }}>{t('common:actions.retry')}</AsyncButton>
   return <Drawer open anchor="right" onClose={onClose} slotProps={{ paper: { role: 'dialog', 'aria-modal': true, 'aria-labelledby': 'coverage-title', sx: { width: { xs: '100vw', sm: 560 }, maxWidth: '100vw', bgcolor: theme.palette.md.surfaceContainerLow, borderTopLeftRadius: 16 } } }}>
     <Box sx={{ display: 'flex', alignItems: 'center' }}><DialogTitle id="coverage-title" sx={{ flex: 1, minWidth: 0 }}>{t(`${P}title`)}</DialogTitle><IconButton aria-label={t('common:actions.close')} onClick={onClose} sx={{ mr: 2, width: 44, height: 44 }}><CloseIcon /></IconButton></Box>
     <DialogContent><Stack spacing={2}>
       <Typography variant="body2" color="text.secondary">{t(`${P}hint`)}</Typography>
       <KpiGrid>{filters.map(value => <KpiTile key={value} label={t(`${P}filter_${value}`)} value={status ? number(status.nodes.filter(node => nodeFilter(node, now) === value).length) : '—'} pressed={filter === value} onToggle={() => setParams(prev => { const next = new URLSearchParams(prev); if (filter === value) next.delete('node_state'); else next.set('node_state', value); return next }, { replace: true, state: location.state })} />)}</KpiGrid>
-      {filter !== 'all' && <Button onClick={() => setParams(prev => { const next = new URLSearchParams(prev); next.delete('node_state'); return next }, { replace: true, state: location.state })}>{t(`${P}clear_filter`)}</Button>}
+      {filter !== 'all' && <Button sx={{ minHeight: 44 }} onClick={() => setParams(prev => { const next = new URLSearchParams(prev); next.delete('node_state'); return next }, { replace: true, state: location.state })}>{t(`${P}clear_filter`)}</Button>}
       {error && <Alert severity="error">{error}</Alert>}
-      {!status && <Alert severity="warning">{t(`${P}unavailable`)}</Alert>}
+      {!status && (loading ? <Stack spacing={1} role="progressbar" aria-label={t(`${P}loading`)} aria-busy="true">{[0, 1, 2, 3, 4, 5].map(id => <Skeleton key={id} variant="rounded" height={72} />)}</Stack>
+        : <Alert severity="error" action={retryRead}>{t(`${P}unavailable`)}</Alert>)}
+      {status && failed && <Alert severity="warning" action={retryRead}>{t(`${P}read_stale`)}</Alert>}
       {status?.nodes.filter(node => filter === 'all' || nodeFilter(node, now) === filter).map(node => {
         const colors = stateTone(theme, nodeAccessTone(node, now))
         const tone = node.state === 'paused' ? { ...colors, Icon: PauseCircleOutlineIcon } : node.state === 'unsupported_kind' ? { ...colors, Icon: RemoveCircleOutlineIcon } : colors
@@ -53,7 +59,7 @@ export default function NodeCoverageDrawer({ status, onClose }: { status?: Desti
           {node.over_limit && <Typography color="error">{t(`${P}over_limit`, { kind: node.over_limit.kind, used: node.over_limit.used, limit: node.over_limit.limit })}</Typography>}
           {node.sniffing_insufficient.map(listener => <Typography key={listener.listener} color="error">{t(`${P}sniffing`, { listener: listener.label })}</Typography>)}
           {fallback !== 'none' && <Alert sx={{ mt: 1 }} severity={fallback === 'exhausted' || fallback === 'stopping' ? 'error' : 'warning'}>{t(`${P}fallback_${fallback}`, { reason: node.fallback_reason })}</Alert>}
-          {node.agent_id && node.kind === 'psp' && node.supports.policy && ['pending', 'rejected', 'over_limit', 'sniffing'].includes(node.state) && <AsyncButton pending={retry.isPending} onClick={() => retryNode(node.agent_id!)}>{t(`${P}retry`)}</AsyncButton>}
+          {node.agent_id && node.kind === 'psp' && node.supports.policy && ['pending', 'rejected', 'over_limit', 'sniffing'].includes(node.state) && <AsyncButton pending={retry.isPending} onClick={() => retryNode(node.agent_id!)} sx={{ minHeight: 44 }}>{t(`${P}retry`)}</AsyncButton>}
         </Box>
       })}
       {status && !status.nodes.some(node => filter === 'all' || nodeFilter(node, now) === filter) && <Typography color="text.secondary">{t(`${P}empty`)}</Typography>}

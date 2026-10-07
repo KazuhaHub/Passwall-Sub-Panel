@@ -19,6 +19,49 @@ vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string, opti
 vi.mock('@/components/CodeEditor', () => ({ default: (p: { value: string; onChange: (s: string) => void; ariaLabel: string; readOnly: boolean }) => <textarea aria-label={p.ariaLabel} value={p.value} readOnly={p.readOnly} onChange={e => p.onChange(e.target.value)} /> }))
 import AccessControlView from './AccessControlView'
 const P = 'admin:access_control.'
+it('shows coverage loading separately from unavailable status', async () => {
+  const original = api.get.getMockImplementation()!
+  api.get.mockImplementation((url: string, config?: unknown) => url.endsWith('/status') ? new Promise(() => {}) : original(url, config))
+  mount('/admin/access-control?sheet=nodes')
+  const drawer = await screen.findByRole('dialog', { name: `${P}coverage.title` })
+  expect(within(drawer).getByRole('progressbar', { name: `${P}coverage.loading` }).querySelectorAll('.MuiSkeleton-root')).toHaveLength(6)
+  expect(within(drawer).queryByText(`${P}coverage.unavailable`)).toBeNull()
+})
+it('retries failed coverage reads without closing the cold sheet or posting a node retry', async () => {
+  const original = api.get.getMockImplementation()!
+  let failed = true
+  api.get.mockImplementation(async (url: string, config?: unknown) => {
+    if (url.endsWith('/status') && failed) throw err(500, 'status_failed')
+    return original(url, config)
+  })
+  const router = mount('/admin/access-control?sheet=nodes&node_state=applied')
+  const drawer = await screen.findByRole('dialog', { name: `${P}coverage.title` })
+  await within(drawer).findByText(`${P}coverage.unavailable`)
+  failed = false
+  fireEvent.click(within(drawer).getByRole('button', { name: 'common:actions.retry' }))
+  await within(drawer).findByText('Tokyo')
+  expect(router.state.location.search).toBe('?sheet=nodes&node_state=applied')
+  expect(api.get.mock.calls.filter(([url]) => url.endsWith('/status'))).toHaveLength(2)
+  expect(api.post).not.toHaveBeenCalled()
+})
+it('retains the last coverage rows and reports a failed refresh explicitly', async () => {
+  const original = api.get.getMockImplementation()!
+  let failed = false
+  api.get.mockImplementation(async (url: string, config?: unknown) => {
+    if (url.endsWith('/status')) {
+      if (failed) throw err(500, 'status_failed')
+      return { data: destinationStatus({ nodes: [destinationNode({ state: 'rejected' })] }) }
+    }
+    return original(url, config)
+  })
+  api.post.mockImplementation(async () => { failed = true; return { data: {} } })
+  mount('/admin/access-control?sheet=nodes')
+  const drawer = await screen.findByRole('dialog', { name: `${P}coverage.title` })
+  fireEvent.click(await within(drawer).findByRole('button', { name: `${P}coverage.retry` }))
+  await within(drawer).findByText(`${P}coverage.read_stale`)
+  expect(within(drawer).getByText('Tokyo')).toBeTruthy()
+  expect(within(drawer).getByRole('button', { name: 'common:actions.retry' })).toBeTruthy()
+})
 it('keeps node coverage title separate from its close button', async () => {
   mount('/admin/access-control?sheet=nodes')
   const heading = await screen.findByRole('heading', { name: `${P}coverage.title` })

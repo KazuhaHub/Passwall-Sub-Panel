@@ -1718,8 +1718,22 @@ remaining accessibility requirements and owner approval remain pending.
 The cached-list/title commit `f16fd638` passed its full
 [Test workflow](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37673574750).
 Its [released-node systemd run](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37673574763)
-was still installing fixture prerequisites when this record was written and is
-not claimed as successful. This frontend formatting increment needs its own CI.
+was superseded while installing fixture prerequisites and is not counted as a
+pass.
+
+The interface-formatting commit `9662fe61` passed both
+[released-node systemd acceptance](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37675414227).
+and the full [Test workflow](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37675414223).
+
+Coverage first reads show six skeleton rows instead of an unavailable warning.
+Read failures offer an explicit GET retry; stale refreshes retain the last
+node rows with a warning. Three failing page/query regressions now pass, and
+the complete access-control/style focused suite passed 214 tests. Retrying a
+read preserves the sheet/filter and cannot become a node-application POST.
+Read retry, node retry and clear-filter buttons have a 44px minimum height;
+the error-scene browser capture verifies the read retry's actual dimensions.
+S14's remaining explanatory/action links and the rest of the screen matrix
+retain their implementation/acceptance gates.
 
 List previews and policy previews are excluded from write-audit logging by
 exact POST path. Other destination writes, including `/dest/test`, retain normal

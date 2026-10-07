@@ -270,6 +270,8 @@
       "title": "Node coverage",
       "hint": "Only native nodes are supported. Status comes from node receipts; saving, minting and successful application are separate stages.",
       "unavailable": "Node status is unavailable",
+      "loading": "Loading node coverage",
+      "read_stale": "Could not refresh node status; showing the last read",
       "empty": "No matching nodes",
       "filter_all": "All",
       "filter_applied": "Applied",

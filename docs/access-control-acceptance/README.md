@@ -96,7 +96,7 @@ production browser smoke checks also passed.
 | [Chinese date](coverage-locale-zh-CN-dark-375.jpg) | Chinese, dark, 375 × 812 | Applied filter pressed and Chinese date/time |
 | [English date](coverage-locale-en-US-dark-375.jpg) | English, dark, 375 × 812 | Same applied node/time rendered in English |
 | [Coverage empty](coverage-matrix-empty-zh-CN-dark-375.jpg) | Chinese, dark, 375 × 812 | Zero KPI counts and explicit empty state |
-| [Coverage unavailable](coverage-matrix-error-zh-CN-dark-375.jpg) | Chinese, dark, 375 × 812 | Cold coverage deep link after failed reads shows unknown counts, not zero |
+| [Coverage unavailable](coverage-matrix-error-zh-CN-dark-375.jpg) | Chinese, dark, 375 × 812 | Cold coverage deep link after failed reads shows unknown counts and a 44px read-retry button |
 
 The normal seed includes twelve nodes. Its pending node had passed the real
 ten-minute threshold during these captures, so it appears in Problems rather
@@ -105,6 +105,18 @@ confirmed `aria-pressed` on the applied filter, Escape closing and focus
 restoration to the coverage trigger. This fills the coverage screenshot variants
 only; the full per-view/dialog matrix, remaining §7.5 checks, real enforcement
 and owner approval are still outstanding.
+
+Coverage reads now distinguish six skeleton rows during first load, a failed
+first read with explicit retry, and a stale refresh with the last node rows
+retained. Three page/query regressions failed before repair and now pass;
+the complete access-control/style focused suite passed 214 tests. Read retries
+preserve the cold sheet/filter and do not issue node-application POSTs. Browser
+interaction in the error scenario confirmed the loading transition and return
+to the same error sheet with a retry button, measured at 44px high. Clear-filter
+and node-application retry controls also measured 44px high; normal-scene KPI
+targets measured approximately 68px, and the drawer had no horizontal overflow.
+Escape again restored focus to the coverage trigger. This does
+not close the remaining S14 explanatory/action links or other screen gates.
 
 Fixture data deliberately differs from defaults: regular-expression limit 128,
 deployment delay 93 seconds and list refresh interval 17 hours. The policy help
