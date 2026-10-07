@@ -1581,6 +1581,49 @@ retry, list/editor preservation, no overflow and a unique title label. Fixtures,
 server and tabs were removed. These checks do not prove a real upstream download
 or replace full-matrix/live backend/Node acceptance.
 
+## Catalog task state and real download acceptance
+
+A real isolated backend exposed an asynchronous completion gap: the catalog
+download returned 202, the immediate catalog read still returned 503, and the
+page kept its missing-data notice after the cache file had been written. The
+catalog response now includes `refreshing` and `last_error` on both cached 200
+and unavailable 503 responses. The service reserves pending status before
+lifecycle dispatch and coalesces duplicate requests. Cached content and status
+are read together; downloads and disk writes remain outside those read locks.
+Individual and scheduled category-list refreshes use the same status path.
+
+The scoped frontend query polls every five seconds only while that status is
+pending, pauses in the background, and stops on completion or failure. A new
+read error takes precedence over cached status, preventing stale metadata from
+keeping polling alive. Manual downloads remain explicit; accepted HTTP requests
+do not count as completed downloads. Failed background work is visible and can
+be retried while existing catalog choices, list rows and drafts remain usable.
+
+On 2026-10-07 UTC, a loopback-only backend with independent SQLite/configuration
+downloaded the actual v2fly release. The trace showed POST 202 at 01:22:49.325,
+GET 503 at 01:22:49.338 and the automatic GET 200 at 01:22:54.342. The page
+removed its missing notice without a reload and retained its problem filter.
+The downloaded file was 3,614,228 bytes. Creating `category-finance` through the
+browser previewed 612 accepted entries and one removed broad entry,
+`domain:hsbc` (source entry 172), then saved successfully with HTTP 201.
+A read-only SQLite check confirmed 612 persisted entries, exclusion of that
+exact broad entry and the stored report sample. The content digest was
+`114fec2e85ccbd0019a85123181cea120f404529ecab3e279cd80d70d7e77542`.
+Restarting against the same isolated database/cache restored the list/report.
+The detail drawer also now gives its title a unique heading outside Close;
+its regression failed before the repair and passed afterward.
+
+The final focused page/query checks passed 114 tests, including actual timed
+query reads after 202 on both success and background failure, with no reads
+after settlement. The full frontend run passed 2,076 tests with one skipped.
+Destination-list service, HTTP-handler and application suites
+passed; TypeScript, changed-source lint and the production build passed. Real
+backend captures are recorded separately in
+[`access-control-acceptance/README.md`](access-control-acceptance/README.md).
+This increment establishes the catalog download/finance-list path, not all C2
+browser cases, the complete screenshot matrix, Node enforcement or later audit
+stages.
+
 ## Storage and privacy
 
 List previews and policy previews are excluded from write-audit logging by

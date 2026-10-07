@@ -374,8 +374,23 @@ func (h *AdminDestinationListsHandler) Categories(c *gin.Context) {
 	if !h.available(c) {
 		return
 	}
-	categories, at, err := h.lists.Categories(c.Request.Context())
+	categories, at, state, err := h.lists.CategoryView(c.Request.Context())
 	if err != nil {
+		if errors.Is(err, domain.ErrUnavailable) {
+			c.JSON(503, gin.H{"error": "dest_geosite_unavailable", "refreshing": state.Refreshing, "last_error": state.LastError})
+		} else {
+			destinationListError(c, err)
+		}
+		return
+	}
+	c.JSON(200, gin.H{"categories": categories, "updated_at": at.UnixMilli(), "refreshing": state.Refreshing, "last_error": state.LastError})
+}
+
+func (h *AdminDestinationListsHandler) RefreshCategories(c *gin.Context) {
+	if !h.available(c) {
+		return
+	}
+	if err := h.lists.QueueCategoryRefresh(c.Request.Context(), h.dispatch); err != nil {
 		if errors.Is(err, domain.ErrUnavailable) {
 			c.JSON(503, gin.H{"error": "dest_geosite_unavailable"})
 		} else {
@@ -383,17 +398,5 @@ func (h *AdminDestinationListsHandler) Categories(c *gin.Context) {
 		}
 		return
 	}
-	c.JSON(200, gin.H{"categories": categories, "updated_at": at.UnixMilli()})
-}
-
-func (h *AdminDestinationListsHandler) RefreshCategories(c *gin.Context) {
-	if !h.available(c) {
-		return
-	}
-	if h.dispatch == nil {
-		c.JSON(503, gin.H{"error": "dest_geosite_unavailable"})
-		return
-	}
-	h.dispatch("destination.geosite-refresh", func(ctx context.Context) { _ = h.lists.RefreshCategories(ctx) })
 	c.Status(http.StatusAccepted)
 }

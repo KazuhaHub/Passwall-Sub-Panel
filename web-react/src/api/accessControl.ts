@@ -133,6 +133,8 @@ export interface DestinationListPreview {
 export interface DestinationCategoriesView {
   categories: Array<{ name: string; count: number; regexp_count: number; source_count: number; ignored_broad_count: number; attrs: string[] }>
   updated_at: number
+  refreshing?: boolean
+  last_error?: string
 }
 
 export async function getDestinationLists(opts: ReadOptions = {}): Promise<DestinationListsView> {

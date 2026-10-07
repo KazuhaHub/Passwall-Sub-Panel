@@ -40,6 +40,9 @@ type Service struct {
 	operationGate   *operationgate.Gate
 	validateSave    func(context.Context, domain.DestList) error
 	refreshing      map[int64]int
+	catalogQueued   bool
+	catalogActive   int
+	catalogError    string
 }
 
 func NewService(store DefinitionStore, cache *GeositeCache) *Service {
@@ -203,7 +206,7 @@ func (s *Service) RefreshList(ctx context.Context, id int64) error {
 				if s.cache == nil {
 					cacheError = domain.ErrUnavailable
 				} else {
-					cacheError = s.cache.Refresh(ctx)
+					cacheError = s.RefreshCategories(ctx)
 				}
 			}
 			return nil, s.refreshCaptured(ctx, captured, cacheError)
@@ -327,7 +330,7 @@ func (s *Service) refreshDue(ctx context.Context, hours int) error {
 			if s.cache == nil {
 				cacheError = domain.ErrUnavailable
 			} else {
-				cacheError = s.cache.Refresh(ctx)
+				cacheError = s.RefreshCategories(ctx)
 			}
 		}
 		var failures []error

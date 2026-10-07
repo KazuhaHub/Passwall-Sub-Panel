@@ -1,9 +1,10 @@
 # Access-control browser evidence
 
-These screenshots cover the current stage-1c header and help increment. They
-use real page/components and built-in translations with mock API responses;
-they are not live backend or Node execution acceptance. The temporary fixture
-and development server were removed after checking.
+The fixture screenshots below use real page/components and built-in
+translations with mock API responses. Their temporary fixtures and development
+servers were removed after checking. Real backend catalog captures are recorded
+separately at the end of this file; neither set establishes Node enforcement or
+completion of the entire stage-1c acceptance matrix.
 
 Fixture data deliberately differs from defaults: regular-expression limit 128,
 deployment delay 93 seconds and list refresh interval 17 hours. The policy help
@@ -56,3 +57,33 @@ Failed list-page/editor downloads retained definitions/draft and allowed retry;
 the phone had no horizontal overflow. Actual download deduplication and query
 invalidation are covered by request-count regressions. These mock downloads do
 not establish live upstream availability or successful real list refresh.
+
+## Real backend catalog acceptance
+
+These captures use the production frontend and actual Go backend, normal admin
+login, a fresh isolated SQLite database and loopback-only HTTP. They are not
+mock API downloads. Credentials, config secrets and bootstrap logs are excluded
+from these artifacts. No nodes are configured in this environment.
+
+| Capture | Check |
+| --- | --- |
+| [Downloaded catalog](catalog-live-downloaded-en-US.jpg) | Actual v2fly download completed, missing notice disappeared without manual reload, selected problem filter retained |
+| [Finance preview](catalog-live-finance-report-en-US.jpg) | Actual `category-finance`: 612 accepted, one ignored broad entry; `domain:hsbc` explicitly excluded |
+| [Restored list/report](catalog-live-restored-report-en-US.jpg) | After backend restart: title-only drawer heading, full-list type totals and persisted removal report; the entry-sample search is deliberately filtered to make the report visible |
+
+The HTTP trace on 2026-10-07 UTC was POST 202 at 01:22:49.325, immediate GET 503
+at 01:22:49.338, then automatic GET 200 at 01:22:54.342. One manual request
+downloaded the 3,614,228-byte cache. Subsequent idle observation through list
+creation did not issue another catalog read. The real list save returned 201.
+A read-only SQLite check verified 612 full persisted entries, exclusion of the
+exact `domain:hsbc` entry, one ignored-broad report entry and its persisted sample.
+The stored content SHA-256 is
+`114fec2e85ccbd0019a85123181cea120f404529ecab3e279cd80d70d7e77542`.
+
+The pre-repair backend had written the same downloaded catalog while its page
+continued to show the missing notice. Timed query regressions now verify delayed
+success/failure after HTTP 202 and no additional polling after settlement.
+Backend failure/cancellation and deduplication have service/HTTP regressions;
+they are not claimed here as live upstream outage simulations. Complete C2/C6,
+the full language/theme/screen matrix, real Node enforcement and owner acceptance
+remain pending.

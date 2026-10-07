@@ -12,6 +12,7 @@ import { pipelineSteps } from '@/utils/accessControl'
 import { firstPublishCopy, needsFirstPublishConfirm } from '../confirmCopy'
 import PendingActionGuard from '../PendingActionGuard'
 import { destinationError } from '../errors'
+import { categoryRefreshState } from '@/utils/destinationCategories'
 import { emptyPolicy, policyInput } from './policyDraft'
 import { summaryText } from './summaryText'
 import QuotaMeters from './QuotaMeters'
@@ -75,7 +76,8 @@ export default function PoliciesTab({ data, status, seconds, onCreateList, onExe
   const any = data.allow.length + data.block.length + data.observe.length > 0
   const categories = useDestinationCategories(scope, !any || templateMenuOpen), categoryRefresh = useRefreshDestinationCategories(scope), categoryAdmission = useRef(false)
   const download = async () => { if (categoryAdmission.current) return; categoryAdmission.current = true; try { await categoryRefresh.mutateAsync() } catch { /* Render the failed download below. */ } finally { categoryAdmission.current = false } }
-  const catalog = { catalog: categories.data, loading: categories.isPending, downloading: categoryRefresh.isPending, failed: !!categoryRefresh.error || !!categories.error && destinationError(categories.error).status !== 503, disabled: busy !== null, onDownload: download }
+  const catalogState = categoryRefreshState(categories.data, categories.error)
+  const catalog = { catalog: categories.data, loading: categories.isPending, downloading: categoryRefresh.isPending || catalogState.refreshing, failed: !catalogState.refreshing && (!!categoryRefresh.error || catalogState.failed), disabled: busy !== null, onDownload: download }
   const fromTemplate = (template: PolicyTemplate) => { const name = t(`${P}template_${template.key}`); setEditor({ initial: templatePolicy(template, name, t('admin:access_control.templates.list_name', { name })), templateName: name }) }
   const added = new Set([...data.allow, ...data.block, ...data.observe].map(row => row.template_key))
   return <Stack spacing={2.5}>

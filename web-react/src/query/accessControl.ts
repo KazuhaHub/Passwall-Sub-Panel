@@ -4,6 +4,7 @@ import { accessControlKeys, settingsKeys } from './keys'
 import type { QueryScope } from './session'
 import { freshness, policies } from './policies'
 import { statusNeedsPolling } from '@/utils/accessControl'
+import { categoryRefreshState } from '@/utils/destinationCategories'
 import { getDestinationList, getDestinationCategories, createDestinationList, putDestinationList, deleteDestinationList, refreshDestinationList, refreshDestinationCategories, type DestinationListInput } from '@/api/accessControl'
 import { groupKeys } from './keys'
 import { getDestinationExemptions, getDestinationUserAccess, createDestinationExemption, putDestinationExemption, deleteDestinationExemption, type DestinationExemptionInput } from '@/api/accessControl'
@@ -48,9 +49,13 @@ export function useDestinationLists(scope: QueryScope, enabled = true) { return 
 export function useDestinationList(scope: QueryScope, id: number, text = false) {
   return useQuery({ queryKey: accessControlKeys.listDetail(scope, id, text), queryFn: ({ signal }) => getDestinationList(id, text, { signal, silent: true }), ...freshness(policies.destDefinitions) })
 }
-export function useDestinationCategories(scope: QueryScope, enabled: boolean) {
-  return useQuery({ queryKey: accessControlKeys.categories(scope), queryFn: ({ signal }) => getDestinationCategories({ signal, silent: true }), enabled, ...freshness(policies.destDefinitions), retry: false })
+export function destinationCategoriesQuery(scope: QueryScope, enabled = true) {
+  return queryOptions({ queryKey: accessControlKeys.categories(scope), queryFn: ({ signal }) => getDestinationCategories({ signal, silent: true }), enabled, ...freshness(policies.destDefinitions), retry: false,
+    refetchIntervalInBackground: false,
+    staleTime: q => categoryRefreshState(q.state.data, q.state.error).refreshing ? 0 : policies.destDefinitions.staleTime,
+    refetchInterval: q => categoryRefreshState(q.state.data, q.state.error).refreshing ? policies.destListRefreshing.refetchInterval : false })
 }
+export function useDestinationCategories(scope: QueryScope, enabled: boolean) { return useQuery(destinationCategoriesQuery(scope, enabled)) }
 function useInvalidateLists(scope: QueryScope) {
   const client = useQueryClient()
   return () => Promise.all([accessControlKeys.lists(scope), accessControlKeys.listDetails(scope), accessControlKeys.listPreviews(scope), accessControlKeys.policyPreviews(scope), accessControlKeys.policies(scope), accessControlKeys.status(scope), groupKeys.all(scope)]

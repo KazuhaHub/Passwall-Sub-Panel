@@ -28,6 +28,14 @@ it('keeps the list editor title heading separate from its close action', async (
   expect(within(dialog).getByRole('button', { name: 'common:actions.close' })).toBeTruthy()
   expect(document.querySelectorAll('#access-list-editor-title')).toHaveLength(1)
 })
+it('keeps a saved list drawer heading separate from its close action', async () => {
+  listsAPI([listSummary]); mount('/admin/access-control?tab=lists&sheet=list&list=7')
+  const dialog = await screen.findByRole('dialog', { name: 'Finance' })
+  const heading = within(dialog).getByRole('heading', { name: /^Finance$/ })
+  expect(within(heading).queryByRole('button')).toBeNull()
+  expect(within(dialog).getByRole('button', { name: 'common:actions.close' })).toBeTruthy()
+  expect(document.querySelectorAll('#access-list-entries-title')).toHaveLength(1)
+})
 it('downloads an unavailable catalog manually from lists without duplicate writes or losing filters', async () => {
   listsAPI([{ ...listSummary, state: 'failed', last_fetched_at: null }])
   const original = api.get.getMockImplementation()!
@@ -48,6 +56,37 @@ it('downloads an unavailable catalog manually from lists without duplicate write
   downloaded = true; finish({ data: {} })
   await waitFor(() => expect(screen.queryByText(`${P}categories.missing`)).toBeNull())
   expect(router.state.location.search).toBe('?tab=lists&lst_state=problem')
+})
+it('keeps the download busy after HTTP 202 until the backend task settles', async () => {
+  listsAPI([listSummary]); const original = api.get.getMockImplementation()!
+  let queued = false
+  api.get.mockImplementation(async (url: string, config?: unknown) => {
+    if (url.endsWith('/categories')) throw Object.assign(err(503, 'dest_geosite_unavailable'), { response: { status: 503, data: { error: 'dest_geosite_unavailable', refreshing: queued, last_error: '' } } })
+    return original(url, config)
+  })
+  api.post.mockImplementation(async () => { queued = true; return { data: {} } })
+  mount('/admin/access-control?tab=lists')
+  const button = await screen.findByRole('button', { name: `${P}categories.download` })
+  fireEvent.click(button)
+  await waitFor(() => expect(api.get.mock.calls.filter(([url]) => url.endsWith('/categories')).length).toBeGreaterThan(1))
+  expect(button.getAttribute('aria-busy')).toBe('true')
+  expect((button as HTMLButtonElement).disabled).toBe(true)
+  expect(api.post).toHaveBeenCalledTimes(1)
+  expect(screen.getAllByRole('button', { name: 'Finance' }).length).toBeGreaterThan(0)
+})
+it('shows a failed background download after its accepted HTTP request', async () => {
+  listsAPI([listSummary]); const original = api.get.getMockImplementation()!
+  let failed = false
+  api.get.mockImplementation(async (url: string, config?: unknown) => {
+    if (url.endsWith('/categories')) throw Object.assign(err(503, 'dest_geosite_unavailable'), { response: { status: 503, data: { error: 'dest_geosite_unavailable', refreshing: false, last_error: failed ? 'download_failed' : '' } } })
+    return original(url, config)
+  })
+  api.post.mockImplementation(async () => { failed = true; return { data: {} } })
+  mount('/admin/access-control?tab=lists')
+  fireEvent.click(await screen.findByRole('button', { name: `${P}categories.download` }))
+  await screen.findByText(`${P}categories.failed`)
+  await waitFor(() => expect(screen.getByRole('button', { name: `${P}categories.download` }).getAttribute('aria-busy')).toBeNull())
+  expect(api.post).toHaveBeenCalledTimes(1)
 })
 it('keeps list rows and the manual catalog retry after a failed download', async () => {
   listsAPI([listSummary]); const original = api.get.getMockImplementation()!

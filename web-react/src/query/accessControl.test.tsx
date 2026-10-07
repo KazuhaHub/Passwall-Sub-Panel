@@ -5,10 +5,10 @@ import { act, cleanup, renderHook } from '@testing-library/react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { sessionScope } from './session'
 import { accessControlKeys, groupKeys, settingsKeys } from './keys'
-import { destinationListsQuery, useSaveDestinationList, useDeleteDestinationList, useRefreshDestinationList, useRefreshDestinationCategories, useSaveDestinationPolicy, useDeleteDestinationPolicy, useOrderDestinationPolicies, useDestinationPublication, useRetryDestinationPolicy, useSaveAccessControlSettings, useSaveDestinationExemption, useDeleteDestinationExemption, useCreateDestinationException } from './accessControl'
+import { destinationCategoriesQuery, useDestinationCategories, destinationListsQuery, useSaveDestinationList, useDeleteDestinationList, useRefreshDestinationList, useRefreshDestinationCategories, useSaveDestinationPolicy, useDeleteDestinationPolicy, useOrderDestinationPolicies, useDestinationPublication, useRetryDestinationPolicy, useSaveAccessControlSettings, useSaveDestinationExemption, useDeleteDestinationExemption, useCreateDestinationException } from './accessControl'
 import { destinationBudget, samplePolicy } from '@/test/accessControlFixtures'
-import type { DestinationListSummary, DestinationListsView } from '@/api/accessControl'
-const api = vi.hoisted(() => ({ post: vi.fn(), put: vi.fn(), delete: vi.fn() }))
+import type { DestinationCategoriesView, DestinationListSummary, DestinationListsView } from '@/api/accessControl'
+const api = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() }))
 vi.mock('@/api/client', () => ({ client: api }))
 const scope = sessionScope({ userId: 1, role: 'admin', authEpoch: 1 })
 const sibling = sessionScope({ userId: 2, role: 'admin', authEpoch: 1 })
@@ -41,6 +41,48 @@ function keys(s = scope) {
 }
 beforeEach(() => { vi.clearAllMocks(); for (const method of [api.post, api.put, api.delete]) method.mockResolvedValue({ data: {} }) })
 afterEach(cleanup)
+it.each([true, false])('follows HTTP 202 with delayed catalog reads and stops after settlement (success=%s)', async success => {
+  vi.useFakeTimers()
+  try {
+    let queued = false, queuedReads = 0
+    const missing = (refreshing: boolean, last_error = '') => Object.assign(new Error('missing'), { isAxiosError: true, response: { status: 503, data: { error: 'dest_geosite_unavailable', refreshing, last_error } } })
+    api.get.mockImplementation(async () => {
+      if (!queued) throw missing(false)
+      if (++queuedReads === 1) throw missing(true)
+      if (!success) throw missing(false, 'download_failed')
+      return { data: { categories: [], updated_at: 4000, refreshing: false, last_error: '' } }
+    })
+    api.post.mockImplementation(async () => { queued = true; return { data: {} } })
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
+    const { result, unmount } = renderHook(() => ({ query: useDestinationCategories(scope, true), refresh: useRefreshDestinationCategories(scope) }), { wrapper: ({ children }: { children: ReactNode }) => <QueryClientProvider client={client}>{children}</QueryClientProvider> })
+    await act(async () => { await vi.advanceTimersByTimeAsync(20) })
+    expect(api.get).toHaveBeenCalledTimes(1)
+    await act(async () => { await result.current.refresh.mutateAsync(); await vi.advanceTimersByTimeAsync(20) })
+    expect(queuedReads).toBe(1)
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000) })
+    expect(queuedReads).toBe(2)
+    if (success) expect(result.current.query.data?.updated_at).toBe(4000)
+    else expect(result.current.query.error).toMatchObject({ response: { data: { last_error: 'download_failed' } } })
+    await act(async () => { await vi.advanceTimersByTimeAsync(15000) })
+    expect(queuedReads).toBe(2)
+    expect(api.post).toHaveBeenCalledTimes(1)
+    unmount(); client.clear()
+  } finally { vi.useRealTimers() }
+})
+it('polls queued catalog downloads on both 503 and cached 200, then stops on success or failure', () => {
+  const options = destinationCategoriesQuery(scope), client = new QueryClient()
+  const query = client.getQueryCache().build<DestinationCategoriesView, Error, DestinationCategoriesView, ReturnType<typeof accessControlKeys.categories>>(client, { queryKey: accessControlKeys.categories(scope) })
+  const interval = options.refetchInterval
+  if (typeof interval !== 'function') throw new Error('Catalog polling must depend on lifecycle status')
+  const unavailable = (refreshing: boolean, last_error = '') => Object.assign(new Error('missing'), { isAxiosError: true, response: { status: 503, data: { refreshing, last_error } } })
+  query.setState({ status: 'error', error: unavailable(false) }); expect(interval(query)).toBe(false)
+  query.setState({ error: unavailable(true) }); expect(interval(query)).toBe(5000)
+  expect(options.refetchIntervalInBackground).toBe(false)
+  query.setData({ categories: [], updated_at: 1000, refreshing: true }); expect(interval(query)).toBe(5000)
+  query.setState({ status: 'error', error: unavailable(false, 'download_failed') }); expect(interval(query)).toBe(false)
+  query.setState({ error: new Error('connection lost') }); expect(interval(query)).toBe(false)
+  query.setData({ categories: [], updated_at: 2000, refreshing: false, last_error: '' }); expect(interval(query)).toBe(false)
+})
 it.each(cases.flatMap(row => [true, false].map(success => ({ ...row, success }))))('$name updates precisely its dependent session caches (success=$success)', async row => {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
   for (const key of [...Object.values(keys()), ...Object.values(keys(sibling))]) client.setQueryData(key, { fixture: true })
