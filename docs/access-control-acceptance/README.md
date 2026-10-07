@@ -1,10 +1,56 @@
 # Access-control browser evidence
 
-The fixture screenshots below use real page/components and built-in
+The earlier fixture screenshots below use real page/components and built-in
 translations with mock API responses. Their temporary fixtures and development
-servers were removed after checking. Real backend catalog captures are recorded
+servers were removed after checking. A persistent DEV adapter is described
+below for subsequent reproducible checks. Real backend catalog captures are recorded
 separately at the end of this file; neither set establishes Node enforcement or
 completion of the entire stage-1c acceptance matrix.
+
+## Reproducible DEV acceptance data
+
+Run the local PSP and Vite, then open `/access-control-fixtures.html` on the
+Vite origin. Choose the normal, empty, error, missing-catalog or failed-catalog
+scenario and activate it. Sign in normally to the local PSP if needed. The tool
+sets `psp_dev_fixtures=access` and reloads the normal product route; browser
+storage failures are reported without navigation. Disable fixtures from the
+same tool. Reloading resets all in-memory fixture mutations.
+
+The DEV-only axios adapter intercepts destination, risk-user and group routes.
+Unknown operations in that scope fail with 501 instead of reaching the real
+backend. Authentication and unrelated requests still use the local PSP. An
+optional `PSP_DEV_PROXY_TARGET` sets Vite's local proxy target; it does not change
+the production server. Fixture import is inside `import.meta.env.DEV` and the
+production smoke test rejects fixture markers in every emitted script, HTML,
+CSS and source map, including nested chunks.
+
+The seed has eight policies, five lists, trial/enforcing group descriptors,
+twelve nodes covering all ten current states and the fallback variants, and
+300 future hit samples including a deleted policy and a long domain. The hit
+samples are not exposed through an invented future API. The adapter models UI
+states and limited synthetic interactions, not actual kernel enforcement.
+
+| Capture | Language/theme/viewport | Check |
+| --- | --- | --- |
+| [Seed policies](dev-seed-policies-zh-CN-light-1440.jpg) | Chinese, light, 1440 × 900 | Normal product route with seeded policies and node warning |
+| [Phone policies](dev-seed-policies-zh-CN-light-375.jpg) | Chinese, light, 375 × 812 | Document width equals viewport width |
+| [Dark desktop policies](dev-seed-policies-zh-CN-dark-1440.jpg) | Chinese, dark, 1440 × 900 | Same normal route and seed |
+| [Dark phone policies](dev-seed-policies-zh-CN-dark-375.jpg) | Chinese, dark, 375 × 812 | Same normal route and seed |
+| [English phone policies](dev-seed-policies-en-US-dark-375.jpg) | English, dark, 375 × 812 | Translated controls and no horizontal overflow |
+| [Empty policies](dev-seed-empty-en-US-dark-375.jpg) | English, dark, 375 × 812 | Template-driven empty state and zero quotas |
+| [Read failure](dev-seed-error-en-US-dark-375.jpg) | English, dark, 375 × 812 | Synthetic server failure |
+| [Phone nodes](dev-seed-nodes-zh-CN-light-375.jpg) | Chinese, light, 375 × 812 | Node matrix and KPI filters |
+| [Finance entries](dev-seed-finance-zh-CN-light-375.jpg) | Chinese, light, 375 × 812 | Bounded 200-entry sample and full-content counts |
+| [Finance report](dev-seed-finance-report-zh-CN-light-375.jpg) | Chinese, light, 375 × 812 | Synthetic 612-entry report and excluded `domain:hsbc` sample |
+
+Dimensions above describe the measured browser viewport. The current screenshot
+provider exports 811 image rows for an 812px phone viewport; the layout checks
+use `innerWidth`, `innerHeight` and document width, without resizing the images.
+
+These initial captures are not the complete §7.6 matrix. Browser inspection
+also identified a close button inside the node title and an inaccurate inactive
+warning for a failed refresh with usable old content; both require correction
+before the final acceptance matrix and owner approval.
 
 Fixture data deliberately differs from defaults: regular-expression limit 128,
 deployment delay 93 seconds and list refresh interval 17 hours. The policy help

@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+  <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Access-control development fixtures</title></head>
+  <body>
+    <main>
+      <h1>Access-control development fixtures</h1>
+      <p>This Vite-only tool uses synthetic data for UI acceptance. Authentication still uses the local PSP.</p>
+      <form id="fixtures">
+        <label for="scenario">Scenario</label>
+        <select id="scenario" name="scenario">
+          <option value="normal">All policy, list and node states</option>
+          <option value="empty">Empty state</option>
+          <option value="error">Service error</option>
+          <option value="catalog-missing">Catalog missing, refresh succeeds</option>
+          <option value="catalog-failed">Catalog missing, refresh fails</option>
+        </select>
+        <button type="submit">Activate and open access control</button>
+        <button id="disable" type="button">Disable fixtures</button>
+      </form>
+      <p id="status" role="status"></p>
+    </main>
+    <script type="module" src="/src/dev/accessControlFixtureTools.ts"></script>
+  </body>
+</html>

@@ -1665,6 +1665,25 @@ pending.
 
 ## Storage and privacy
 
+The reproducible DEV-only UI fixture adapter is now wired into the shared axios
+transport behind both the build-time DEV branch and explicit local-storage
+opt-in. It uses the final-plan seed counts, passes authentication/unrelated
+requests to the local PSP, and rejects unknown writes within its own scope.
+In-memory edits, stale-write errors, explicit publication and asynchronous
+catalog refresh can be exercised through the normal page. The fixture tool
+provides normal, empty, error and catalog success/failure scenarios; production
+builds exclude it, and `smoke:dist` scans all emitted text assets for fixture
+markers before the browser check. These are UI checks, not Node enforcement.
+The initial screenshots and remaining browser findings are listed in the
+[acceptance index](access-control-acceptance/README.md).
+Full frontend validation passed with 2088 tests and one skipped. The final
+adapter/client-focused run, TypeScript compilation, changed-source lint,
+production fixture exclusion and the production browser smoke also passed.
+The preceding `06877297` head completed both
+[Test](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37558078033) and
+[released-node systemd acceptance](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37558078038).
+This increment still needs its own CI and the remaining complete UI matrix.
+
 List previews and policy previews are excluded from write-audit logging by
 exact POST path. Other destination writes, including `/dest/test`, retain normal
 audit behavior; destination audit rows remain restricted to administrators.

@@ -26,6 +26,8 @@ const mocks = vi.hoisted(() => {
     state,
     http,
     baseAdapter,
+    fixtureAdapter: vi.fn(async (config: Record<string, unknown>) => ({ data: 'fixture', status: 200, config })),
+    createFixtures: vi.fn(),
     pushSnack: vi.fn(),
     translate: vi.fn((key: string, options?: { defaultValue?: string }) => options?.defaultValue ?? key),
   }
@@ -39,6 +41,7 @@ vi.mock('axios', () => ({
     getAdapter: vi.fn(() => mocks.baseAdapter),
   },
 }))
+vi.mock('@/dev/accessControlMock', () => ({ createAccessControlMock: mocks.createFixtures }))
 vi.mock('@/i18n', () => ({ default: { t: mocks.translate } }))
 vi.mock('@/components/SnackbarHost', () => ({ pushSnack: mocks.pushSnack }))
 vi.mock('@/panelPath', () => ({
@@ -72,10 +75,34 @@ beforeEach(() => {
   mocks.http.post.mockReset()
   mocks.pushSnack.mockReset()
   mocks.translate.mockClear()
+  mocks.baseAdapter.mockClear()
   vi.useRealTimers()
 })
 
 describe('shared API client interceptors', () => {
+  it('only activates DEV fixtures on explicit opt-in and coalesces initialization', async () => {
+    const { client } = await import('./client')
+    const adapter = client.defaults.adapter as unknown as (config: Record<string, unknown>) => Promise<{ data: unknown }>
+    const config = { method: 'get', url: '/admin/dest/status', headers: {} }
+    mocks.createFixtures.mockReturnValue(mocks.fixtureAdapter)
+    await adapter(config)
+    expect(mocks.baseAdapter).toHaveBeenCalledTimes(1)
+    expect(mocks.createFixtures).not.toHaveBeenCalled()
+    localStorage.setItem('psp_dev_fixtures', 'access')
+    const responses = await Promise.all([adapter(config), adapter(config)])
+    expect(responses.every(r => r.data === 'fixture')).toBe(true)
+    expect(mocks.createFixtures).toHaveBeenCalledTimes(1)
+    expect(mocks.baseAdapter).toHaveBeenCalledTimes(1)
+    localStorage.removeItem('psp_dev_fixtures')
+    await adapter(config)
+    expect(mocks.baseAdapter).toHaveBeenCalledTimes(2)
+    const storage = vi.spyOn(localStorage, 'getItem').mockImplementation(() => { throw new Error('Storage denied') })
+    try { await adapter(config); expect(mocks.baseAdapter).toHaveBeenCalledTimes(3) } finally { storage.mockRestore() }
+    localStorage.setItem('psp_dev_fixtures', 'access')
+    mocks.fixtureAdapter.mockRejectedValueOnce(new Error('Fixture failed'))
+    await expect(adapter({ ...config, method: 'post' })).rejects.toThrow('Fixture failed')
+    expect(mocks.baseAdapter).toHaveBeenCalledTimes(3)
+  })
   it('attaches the current access token to requests', () => {
     localStorage.setItem('psp_access', 'access-token')
     const config = { headers: {} as Record<string, string> }
