@@ -21,6 +21,9 @@ stage. Privacy settings and group/record tabs retain their later-stage scope.
 | [Phone editor controls](editor-controls-en-US-dark-375.jpg) | English, dark, 375 × 812 | Close on the left, one Save on the right, full-width action choices and no horizontal overflow |
 | [Phone budget](editor-budget-en-US-dark-375.jpg) | English, dark, 375 × 812 | Counts below 4px bars, actual quota names and counts exposed to assistive technology |
 | [Desktop editor controls](editor-controls-zh-CN-light-1440.jpg) | Chinese, light, 1440 × 1000 | Measured 720px dialog and network segmented choices beside ports |
+| [Allow explanation](editor-allow-hint-en-US-dark-375.jpg) | English, dark, 375 × 812 | Template title and named explanation dialog within 16px screen margins |
+| [Pending-list explanation](editor-list-hint-en-US-dark-375.jpg) | English, dark, 375 × 812 | Expandable explanation of partial execution and next-publication inclusion |
+| [List choices](editor-list-options-zh-CN-light-1440.jpg) | Chinese, light, 1440 × 1000 | Attention badge for a pending list; disabled empty custom option with its reason |
 
 Browser interaction also checked Chinese policy-help interpolation and pause
 confirmation/cancellation. Cancellation leaves the existing execution verdict;
@@ -36,5 +39,10 @@ label target. A subsequent editor fixture checked desktop width at 720px,
 keyboard selection from TCP to UDP to Any with matching focus, mobile top-bar
 Save, and budget counts below their bars. Double-clicking Save issued one mock
 PUT; controls were disabled while pending and success closed the dialog. These
-checks do not establish live backend writes. Template-specific titles, prescribed
-field hints and later group-mode presentation retain their final-plan scope.
+checks do not establish live backend writes. A later fixture checks the template
+origin title, allow/pending-list details, BT limits and list-choice readiness.
+The shared hint previously measured 380px wide with a left edge of -21px on a
+375px screen; after repair its measured edges are 16px and 359.33px. Named detail
+dialogs close with Escape. Empty custom choices remain disabled and expose the
+reason both visibly and on hover. Later group-mode hints and risk-threshold
+settings retain their final-plan scope.

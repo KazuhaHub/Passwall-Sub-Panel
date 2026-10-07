@@ -29,7 +29,7 @@ export default function PoliciesTab({ data, status, seconds, onCreateList, onExe
   const save = useSaveDestinationPolicy(scope)
   const remove = useDeleteDestinationPolicy(scope)
   const order = useOrderDestinationPolicies(scope)
-  const [editor, setEditor] = useState<{ initial: DestinationPolicyInput; existing?: DestinationPolicyOverviewItem } | null>(null)
+  const [editor, setEditor] = useState<{ initial: DestinationPolicyInput; existing?: DestinationPolicyOverviewItem; templateName?: string } | null>(null)
   const [menu, setMenu] = useState<{ anchor: HTMLElement; row: DestinationPolicyOverviewItem } | null>(null)
   const [promotion, setPromotion] = useState<DestinationPolicyOverviewItem | null>(null)
   const [templateMenuOpen, setTemplateMenuOpen] = useState(false), [finance, setFinance] = useState(false)
@@ -76,7 +76,7 @@ export default function PoliciesTab({ data, status, seconds, onCreateList, onExe
   const categories = useDestinationCategories(scope, !any || templateMenuOpen), categoryRefresh = useRefreshDestinationCategories(scope), categoryAdmission = useRef(false)
   const download = async () => { if (categoryAdmission.current) return; categoryAdmission.current = true; try { await categoryRefresh.mutateAsync() } catch { /* Render the failed download below. */ } finally { categoryAdmission.current = false } }
   const catalog = { catalog: categories.data, loading: categories.isPending, downloading: categoryRefresh.isPending, failed: !!categoryRefresh.error || !!categories.error && destinationError(categories.error).status !== 503, disabled: busy !== null, onDownload: download }
-  const fromTemplate = (template: PolicyTemplate) => { const name = t(`${P}template_${template.key}`); setEditor({ initial: templatePolicy(template, name, t('admin:access_control.templates.list_name', { name })) }) }
+  const fromTemplate = (template: PolicyTemplate) => { const name = t(`${P}template_${template.key}`); setEditor({ initial: templatePolicy(template, name, t('admin:access_control.templates.list_name', { name })), templateName: name }) }
   const added = new Set([...data.allow, ...data.block, ...data.observe].map(row => row.template_key))
   return <Stack spacing={2.5}>
     {busy !== null && <PendingActionGuard />}

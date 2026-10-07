@@ -1523,6 +1523,33 @@ producing one mock write. Temporary fixtures/server/tabs were removed. Evidence
 remains partial: template titles, prescribed field hints, later group-mode UI,
 the full screen matrix and live backend/node acceptance are still outstanding.
 
+## Template origin and field explanations
+
+Only creation from an explicit template supplies the template-origin title;
+renaming the draft preserves that title, while copying/editing keep their normal
+titles. Allow, pending-list, IP and BT fields now use the prescribed summary and
+expandable details. Non-block actions hide the risk signal control. Pending list
+options show an attention badge. Empty custom choices remain disabled, with a
+visible and hover reason; explicit click admission protects that disabled state
+while allowing the hover reason to receive pointer events. Group-owned lists
+stay excluded from the picker.
+
+Four editor regressions failed before implementation. An additional click check
+caught selection of an empty custom list when hover pointer events were restored,
+then passed after explicit admission was added. A shared FieldHint regression
+failed before details received a dialog name; it now verifies opening inside a
+form without submission and closing with Escape. Browser measurement reproduced
+380px hint width with a -21px left edge on a 375px screen. Hint width now respects
+16px margins and long details can scroll; measured edges became 16px/359.33px.
+
+Final editor/draft/template, shared hint and locale checks passed 125 tests.
+TypeScript, changed-source lint, locale generation and production build passed.
+Chinese desktop and English dark phone fixtures checked template titles,
+allow/pending-list explanations, BT limits, list state badges, disabled choices
+and hint bounds. Temporary fixtures/server/tabs were removed. Group-mode hints
+depend on the actual later group API; risk-threshold copy depends on stage-2c
+settings. Full-matrix and live backend/node acceptance remain outstanding.
+
 ## Storage and privacy
 
 List previews and policy previews are excluded from write-audit logging by

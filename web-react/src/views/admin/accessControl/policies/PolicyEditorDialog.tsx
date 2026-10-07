@@ -23,13 +23,15 @@ import ParseReport from '../lists/ParseReport'
 import { listPreviewBlocksSave } from '../lists/listDraft'
 import PolicySegments from './PolicySegments'
 import { AsyncButton } from '@/components/AsyncButton'
+import FieldHint from '@/components/FieldHint'
+import { ToneBadge, stateTone } from '@/components/ToneBadge'
 const CodeEditor = lazy(() => import('@/components/CodeEditor'))
 const P = 'admin:access_control.editor.'
-interface Props { initial: DestinationPolicyInput; existing?: DestinationPolicyOverviewItem; policies: DestinationPoliciesView; status?: DestinationStatus; seconds?: number; onClose: () => void }
+interface Props { initial: DestinationPolicyInput; existing?: DestinationPolicyOverviewItem; templateName?: string; policies: DestinationPoliciesView; status?: DestinationStatus; seconds?: number; onClose: () => void }
 function hasAdditionalConditions(input: DestinationPolicyInput) {
   return !!(input.inline.ports?.trim() || input.inline.network || input.inline.cidrs?.some(line => line.trim()) || input.inline.protocols?.length || input.inline.private)
 }
-export default function PolicyEditorDialog({ initial, existing, policies, status, seconds, onClose }: Props) {
+export default function PolicyEditorDialog({ initial, existing, templateName, policies, status, seconds, onClose }: Props) {
   const { t } = useTranslation(['admin', 'common'])
   const scope = useQueryScope()
   const theme = useTheme()
@@ -100,7 +102,7 @@ export default function PolicyEditorDialog({ initial, existing, policies, status
   const closeButton = <IconButton aria-label={t('common:actions.close')} disabled={busy} onClick={close}><CloseIcon /></IconButton>
   return <Dialog open fullWidth maxWidth={false} slotProps={{ paper: { sx: { maxWidth: mobile ? 'none' : 720 } } }} fullScreen={mobile} onClose={close} aria-labelledby="access-policy-title">
     <DialogTitle component="div" id="access-policy-heading" sx={{ display: 'flex', alignItems: 'center', gap: 1, px: { xs: 1, sm: 3 } }}>
-      {mobile && closeButton}<Typography component="h2" variant="h6" id="access-policy-title" sx={{ flex: 1, minWidth: 0, overflowWrap: 'anywhere' }}>{t(existing ? `${P}edit_title` : `${P}create_title`, { name: seed.name })}</Typography>{mobile ? saveButton : closeButton}
+      {mobile && closeButton}<Typography component="h2" variant="h6" id="access-policy-title" sx={{ flex: 1, minWidth: 0, overflowWrap: 'anywhere' }}>{t(existing ? `${P}edit_title` : templateName ? `${P}template_title` : `${P}create_title`, { ...(existing ? { name: seed.name } : {}), template: templateName })}</Typography>{mobile ? saveButton : closeButton}
     </DialogTitle>
     <DialogContent dividers><Stack spacing={2.5}>
       {error.error && !error.field && <Alert severity="error" action={error.error === 'dest_policy_stale' ? <Button color="inherit" disabled={busy} onClick={() => void reload()}>{t(`${P}reload`)}</Button> : undefined}>{t(`${P}${error.error}`, { defaultValue: error.error })}</Alert>}
@@ -108,7 +110,7 @@ export default function PolicyEditorDialog({ initial, existing, policies, status
         <TextField autoFocus label={t(`${P}name`)} value={draft.name} onChange={e => change({ name: e.target.value })} error={!!fieldError('name')} helperText={fieldMessage('name')} />
         <PolicySegments value={draft.action} label={t(`${P}action`)} disabled={busy} options={(['block', 'observe', 'allow'] as const).map(value => ({ value, label: t(`${P}action_${value}`) }))} onChange={action => change({ action, counts_as_risk: action === 'block' && draft.counts_as_risk })} />
         <Typography variant="body2" color="text.secondary">{t(`${P}${draft.action}_hint`)}</Typography>
-        {draft.action === 'allow' && <Alert severity="warning">{t(`${P}allow_warning`)}</Alert>}
+        {draft.action === 'allow' && <Typography variant="caption"><FieldHint tone="amber" summary={t(`${P}allow_summary`)} detail={t(`${P}allow_detail`)} /></Typography>}
         {draft.new_list && <Stack spacing={2}>
           <TextField label={t('admin:access_control.templates.list_name_field')} value={draft.new_list.name} error={!!validation.new_list} helperText={validation.new_list ? t(`${P}invalid`) : t('admin:access_control.templates.paired_save')} onChange={e => change({ new_list: { ...draft.new_list!, name: e.target.value } })} />
           <GeositeCategoryPicker category={draft.new_list.geosite_category} attrs={draft.new_list.geosite_attrs} disabled={busy} onChange={(geosite_category, geosite_attrs) => change({ new_list: { ...draft.new_list!, geosite_category, geosite_attrs } })} />
@@ -119,8 +121,22 @@ export default function PolicyEditorDialog({ initial, existing, policies, status
         <Autocomplete multiple options={listChoices.map(list => list.id)} value={draft.list_ids} loading={lists.isPending} disabled={busy}
           getOptionLabel={id => { const list = listChoices.find(list => list.id === id); return list ? t(`${P}list_option`, { name: list.name, kind: t(`admin:access_control.lists.${list.kind}`), count: list.entry_count, regexps: list.regexp_count }) : `#${id}` }}
           getOptionDisabled={id => listChoices.some(list => list.id === id && list.kind === 'custom' && !list.entry_count)}
+          renderOption={(props, id) => {
+            const { key, ...optionProps } = props
+            const list = listChoices.find(list => list.id === id)!
+            const empty = list.kind === 'custom' && !list.entry_count
+            return <li key={key} {...optionProps} title={empty ? t(`${P}list_empty`) : undefined}
+              onClick={empty ? event => { event.preventDefault(); event.stopPropagation() } : optionProps.onClick}
+              style={{ ...optionProps.style, ...(empty ? { pointerEvents: 'auto' as const } : {}) }}>
+              <Box sx={{ minWidth: 0, width: '100%' }}>
+                <Typography variant="body2" sx={{ overflowWrap: 'anywhere' }}>{t(`${P}list_option`, { name: list.name, kind: t(`admin:access_control.lists.${list.kind}`), count: list.entry_count, regexps: list.regexp_count })}</Typography>
+                {list.state !== 'ready' && <ToneBadge tone={stateTone(theme, 'attention')} label={t(`${P}list_attention`)} />}
+                {empty && <Typography variant="caption">{t(`${P}list_empty`)}</Typography>}
+              </Box>
+            </li>
+          }}
           onChange={(_, list_ids) => change({ list_ids })} renderInput={p => <TextField {...p} label={t(`${P}lists`)} />} />
-        {draft.list_ids.some(id => { const list = listChoices.find(list => list.id === id); return !list || list.state !== 'ready' || !list.entry_count }) && <Alert severity="warning">{t(`${P}list_pending`)}</Alert>}
+        {draft.list_ids.some(id => { const list = listChoices.find(list => list.id === id); return !list || list.state !== 'ready' || !list.entry_count }) && <Typography variant="caption"><FieldHint tone="amber" summary={t(`${P}list_pending_summary`)} detail={t(`${P}list_pending_detail`)} /></Typography>}
         <Accordion disableGutters elevation={0} expanded={conditionsOpen} onChange={(_, expanded) => setConditionsOpen(expanded)} disabled={busy} sx={{ border: 1, borderColor: 'divider', borderRadius: 2, '&:before': { display: 'none' } }}>
           <AccordionSummary expandIcon={<ExpandMoreIcon />} aria-label={t(`${P}more_conditions`)} aria-describedby={additionalSummary ? `${conditionsId}-summary` : undefined} aria-controls={`${conditionsId}-content`} id={`${conditionsId}-toggle`} sx={{ '& .MuiAccordionSummary-content': { flexWrap: 'wrap', gap: 1, alignItems: 'center', minWidth: 0 } }}>
             <Typography component="span" variant="subtitle2" sx={{ flex: '1 1 auto' }}>{t(`${P}more_conditions`)}</Typography>
@@ -128,10 +144,10 @@ export default function PolicyEditorDialog({ initial, existing, policies, status
           </AccordionSummary>
           <AccordionDetails><Stack spacing={2}>
         <Box><Typography variant="body2" sx={{ mb: 1 }}>{t(`${P}cidrs`)}</Typography><Suspense fallback={<Skeleton height={140} />}><CodeEditor language="plain" minRows={6} ariaLabel={t(`${P}cidrs`)} value={(draft.inline.cidrs ?? []).join('\n')} readOnly={busy} onChange={value => change({ inline: { ...draft.inline, cidrs: value.split('\n') } })} /></Suspense>
-          <Typography variant="caption" color={fieldError('cidrs') ? 'error' : 'text.secondary'}>{fieldMessage('cidrs') ?? t(`${P}cidrs_hint`)}</Typography></Box>
+          <Typography variant="caption" color={fieldError('cidrs') ? 'error' : 'text.secondary'}>{fieldError('cidrs') ? fieldMessage('cidrs') : <FieldHint tone="muted" summary={t(`${P}cidrs_summary`)} detail={t(`${P}cidrs_detail`)} />}</Typography></Box>
         <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}><TextField sx={{ flex: 1 }} label={t(`${P}ports`)} value={draft.inline.ports ?? ''} error={!!fieldError('ports')} helperText={fieldMessage('ports') ?? t(`${P}ports_hint`)} onChange={e => change({ inline: { ...draft.inline, ports: e.target.value } })} /><Box sx={{ flex: { xs: 1, sm: '0 1 220px' }, minWidth: { sm: 200 } }}><Typography variant="caption" color="text.secondary">{t(`${P}network`)}</Typography><PolicySegments value={draft.inline.network ?? ''} label={t(`${P}network`)} disabled={busy} fullWidth options={(['', 'tcp', 'udp'] as const).map(value => ({ value, label: value ? value.toUpperCase() : t(`${P}any`) }))} onChange={network => change({ inline: { ...draft.inline, network } })} /></Box></Stack>
         <FormControlLabel control={<Checkbox checked={match.bt} onChange={(_, checked) => change({ inline: { ...draft.inline, protocols: checked ? ['bittorrent'] : [] } })} />} label={t(`${P}bt`)} />
-        <Typography variant="caption" color="text.secondary">{t(`${P}bt_hint`)}</Typography>
+        <Typography variant="caption" color="text.secondary"><FieldHint tone="muted" summary={t(`${P}bt_summary`)} detail={t(`${P}bt_detail`)} /></Typography>
         <FormControlLabel control={<Checkbox checked={match.private} onChange={(_, checked) => change({ inline: { ...draft.inline, private: checked } })} />} label={t(`${P}private`)} />
           </Stack></AccordionDetails>
         </Accordion>
