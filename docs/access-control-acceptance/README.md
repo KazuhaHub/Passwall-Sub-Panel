@@ -24,6 +24,9 @@ stage. Privacy settings and group/record tabs retain their later-stage scope.
 | [Allow explanation](editor-allow-hint-en-US-dark-375.jpg) | English, dark, 375 × 812 | Template title and named explanation dialog within 16px screen margins |
 | [Pending-list explanation](editor-list-hint-en-US-dark-375.jpg) | English, dark, 375 × 812 | Expandable explanation of partial execution and next-publication inclusion |
 | [List choices](editor-list-options-zh-CN-light-1440.jpg) | Chinese, light, 1440 × 1000 | Attention badge for a pending list; disabled empty custom option with its reason |
+| [Catalog unavailable](catalog-missing-zh-CN-light-1440.jpg) | Chinese, light, 1440 × 1000 | List-page notice and manual download above existing definitions |
+| [Catalog download failure](catalog-failed-en-US-dark-375.jpg) | English, dark, 375 × 812 | Failed download retains the list card, selected problem filter and retry action |
+| [Editor catalog failure](catalog-editor-en-US-dark-375.jpg) | English, dark, 375 × 812 | Same manual download notice, preserved draft and title-only heading |
 
 Browser interaction also checked Chinese policy-help interpolation and pause
 confirmation/cancellation. Cancellation leaves the existing execution verdict;
@@ -46,3 +49,10 @@ The shared hint previously measured 380px wide with a left edge of -21px on a
 dialogs close with Escape. Empty custom choices remain disabled and expose the
 reason both visibly and on hover. Later group-mode hints and risk-threshold
 settings retain their final-plan scope.
+
+The catalog fixture also checked pending-button feedback and a successful
+download removing the notice without clearing the selected problem filter.
+Failed list-page/editor downloads retained definitions/draft and allowed retry;
+the phone had no horizontal overflow. Actual download deduplication and query
+invalidation are covered by request-count regressions. These mock downloads do
+not establish live upstream availability or successful real list refresh.

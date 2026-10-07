@@ -4,12 +4,14 @@ import { useQueryScope } from '@/query/useQueryScope'
 import { useDestinationCategories, useRefreshDestinationCategories } from '@/query/accessControl'
 import { destinationError } from '../errors'
 import { AsyncButton } from '@/components/AsyncButton'
+import GeositeDownloadNotice from './GeositeDownloadNotice'
 const P = 'admin:access_control.categories.'
 export default function GeositeCategoryPicker({ category, attrs, disabled, onChange }: { category: string; attrs: string; disabled: boolean; onChange: (category: string, attrs: string) => void }) {
   const { t } = useTranslation(['admin', 'common']), scope = useQueryScope()
   const query = useDestinationCategories(scope, true), refresh = useRefreshDestinationCategories(scope)
   const selected = query.data?.categories.find(item => item.name === category)
   const download = async () => { try { await refresh.mutateAsync() } catch { /* The mutation error is shown inline. */ } }
+  if (!query.data && destinationError(query.error).status === 503) return <GeositeDownloadNotice pending={refresh.isPending} disabled={disabled} failed={!!refresh.error} onDownload={download} />
   if (!query.data) return <Stack spacing={1}>
     {query.isPending ? <CircularProgress size={20} /> : <Alert severity={destinationError(query.error).status === 503 ? 'info' : 'error'}>{t(`${P}${destinationError(query.error).status === 503 ? 'missing' : 'failed'}`)}</Alert>}
     {!query.isPending && <AsyncButton disabled={disabled} pending={refresh.isPending} onClick={download}>{t(`${P}download`)}</AsyncButton>}

@@ -1550,6 +1550,37 @@ and hint bounds. Temporary fixtures/server/tabs were removed. Group-mode hints
 depend on the actual later group API; risk-threshold copy depends on stage-2c
 settings. Full-matrix and live backend/node acceptance remain outstanding.
 
+The explanation head `84c4c9c2cfc682211b9473b78a9d1df0f96dd85b` passed
+[complete Test](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37554829685)
+and [released-node systemd acceptance](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37554829562).
+All non-optional frontend, race, dialect, static, build and compatibility jobs
+passed. Real third-party panels were skipped; released-node installation remains
+a baseline rather than unmerged Node #78 policy execution.
+
+## Manual category catalog download
+
+The active list tab reads the catalog through the shared scoped query. A 503
+without cached catalog data shows the prescribed missing-data notice above
+definitions and a manual asynchronous download action. Template cards and
+category pickers share that notice/control. Mounting these views does not start
+a download. Pending clicks are guarded; completion invalidates the catalog and
+dependent definitions/previews. Success removes the missing notice, while
+failure keeps existing list rows, filters and editor drafts with a retry action.
+Existing successful cached catalogs remain usable on a subsequent read failure.
+
+Two list-page regressions failed before implementation; further editor coverage
+checks the same manual action, one write and preserved draft. Catalog fixtures
+now return real catalog response shapes when testing drawer/editor reads. Browser
+inspection also found Close included in the list editor heading; a regression
+failed before the title-only heading and separate close action were implemented.
+Final page/query/template, shared async-button and locale checks passed 141
+tests. TypeScript, changed-source lint, locale generation and production build
+passed. Chinese desktop and English dark phone fixtures checked manual/pending
+download, successful notice removal, retained problem filter, failed download
+retry, list/editor preservation, no overflow and a unique title label. Fixtures,
+server and tabs were removed. These checks do not prove a real upstream download
+or replace full-matrix/live backend/Node acceptance.
+
 ## Storage and privacy
 
 List previews and policy previews are excluded from write-audit logging by

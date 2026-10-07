@@ -98,7 +98,7 @@ export default function ListDialog({ existing, policies, status, refreshHours, o
     finally { admission.current = false; setBusy(false) }
   }
   return <Dialog open maxWidth="md" fullWidth fullScreen={mobile} onClose={() => void close()} aria-labelledby="access-list-editor-title">
-    <DialogTitle id="access-list-editor-title" sx={{ display: 'flex', alignItems: 'center' }}><Box component="span" sx={{ flex: 1 }}>{t(`${P}${existing ? 'edit_title' : 'create_title'}`)}</Box><IconButton aria-label={t('common:actions.close')} disabled={busy} onClick={() => void close()}><CloseIcon /></IconButton></DialogTitle>
+    <DialogTitle component="div" id="access-list-editor-heading" sx={{ display: 'flex', alignItems: 'center' }}><Typography component="h2" variant="h6" id="access-list-editor-title" sx={{ flex: 1 }}>{t(`${P}${existing ? 'edit_title' : 'create_title'}`)}</Typography><IconButton aria-label={t('common:actions.close')} disabled={busy} onClick={() => void close()}><CloseIcon /></IconButton></DialogTitle>
     <DialogContent dividers><Stack spacing={2}>
       {error.error && error.field !== 'name' && <Alert severity="error" action={existing && (!loaded || error.error === 'dest_list_stale') ? <Button disabled={busy} onClick={() => void reload()}>{t(`${P}reload`)}</Button> : undefined}>{t(`${P}${error.error}`, { defaultValue: error.error })}</Alert>}
       {!loaded ? <Skeleton variant="rounded" height={240} /> : <>

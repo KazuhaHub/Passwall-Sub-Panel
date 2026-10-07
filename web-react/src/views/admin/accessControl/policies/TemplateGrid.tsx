@@ -2,7 +2,7 @@ import { Alert, Box, Button, Paper, Skeleton, Stack, Typography, useTheme } from
 import { useTranslation } from 'react-i18next'
 import type { DestinationBudget, DestinationCategoriesView } from '@/api/accessControl'
 import FieldHint from '@/components/FieldHint'
-import { AsyncButton } from '@/components/AsyncButton'
+import GeositeDownloadNotice from '../lists/GeositeDownloadNotice'
 import { ToneBadge, stateTone } from '@/components/ToneBadge'
 import { policyTemplates, templateCategory, type PolicyTemplate } from './templates'
 const P = 'admin:access_control.templates.'
@@ -23,7 +23,7 @@ export default function TemplateGrid(props: Props) {
           <Typography variant="body2" color="text.secondary">{t(`admin:access_control.policies.template_${template.key}_hint`)}</Typography>
           {category && <Typography variant="caption">{t(`${P}count`, { count: category.count, regexps: category.regexp_count })}</Typography>}
           {over && <FieldHint tone="amber" summary={t(`${P}over_summary`)} detail={t(`${P}over_detail`, { count: category.regexp_count, limit: props.budget.regexps.limit })} />}
-          {needsCategory && !category ? props.loading ? <Skeleton height={40} /> : <><Alert severity="info">{t(props.catalog ? `${P}category_missing` : 'admin:access_control.categories.missing')}</Alert><AsyncButton pending={props.downloading} disabled={props.disabled} onClick={props.onDownload}>{t('admin:access_control.categories.download')}</AsyncButton></> : <Button aria-label={t(`${P}use`, { name: title })} disabled={props.disabled} onClick={() => props.onCreate(template)}>{t(added ? `${P}again` : 'admin:access_control.policies.use_template')}</Button>}
+          {needsCategory && !category ? props.loading ? <Skeleton height={40} /> : <GeositeDownloadNotice message={props.catalog ? t(`${P}category_missing`) : undefined} pending={props.downloading} disabled={props.disabled} onDownload={props.onDownload} /> : <Button aria-label={t(`${P}use`, { name: title })} disabled={props.disabled} onClick={() => props.onCreate(template)}>{t(added ? `${P}again` : 'admin:access_control.policies.use_template')}</Button>}
         </Stack></Paper>
       })}
       <Paper variant="outlined" sx={{ p: 2 }}><Stack spacing={1.5}><Typography component="h3" variant="subtitle1">{t(`${P}finance_title`)}</Typography><Typography variant="body2" color="text.secondary">{t(`${P}finance_hint`)}</Typography>{betting && <Typography variant="caption">{t(`${P}betting_hint`, { count: betting.count })}</Typography>}<Button disabled={props.disabled} onClick={props.onCreateList}>{t(`${P}create_list`)}</Button></Stack></Paper>

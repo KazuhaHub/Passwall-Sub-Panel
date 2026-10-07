@@ -19,6 +19,71 @@ vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string, opti
 vi.mock('@/components/CodeEditor', () => ({ default: (p: { value: string; onChange: (s: string) => void; ariaLabel: string; readOnly: boolean }) => <textarea aria-label={p.ariaLabel} value={p.value} readOnly={p.readOnly} onChange={e => p.onChange(e.target.value)} /> }))
 import AccessControlView from './AccessControlView'
 const P = 'admin:access_control.'
+it('keeps the list editor title heading separate from its close action', async () => {
+  listsAPI([]); mount('/admin/access-control?tab=lists')
+  fireEvent.click(await screen.findByRole('button', { name: `${P}lists.create` }))
+  const dialog = await screen.findByRole('dialog', { name: `${P}list_editor.create_title` })
+  const heading = within(dialog).getByRole('heading', { name: `${P}list_editor.create_title` })
+  expect(within(heading).queryByRole('button')).toBeNull()
+  expect(within(dialog).getByRole('button', { name: 'common:actions.close' })).toBeTruthy()
+  expect(document.querySelectorAll('#access-list-editor-title')).toHaveLength(1)
+})
+it('downloads an unavailable catalog manually from lists without duplicate writes or losing filters', async () => {
+  listsAPI([{ ...listSummary, state: 'failed', last_fetched_at: null }])
+  const original = api.get.getMockImplementation()!
+  let downloaded = false, finish!: (value: unknown) => void
+  api.get.mockImplementation(async (url: string, config?: unknown) => {
+    if (url.endsWith('/categories')) { if (!downloaded) throw err(503, 'dest_geosite_unavailable'); return { data: { categories: [], updated_at: 4000 } } }
+    return original(url, config)
+  })
+  api.post.mockImplementation(() => new Promise(resolve => { finish = resolve }))
+  const router = mount('/admin/access-control?tab=lists&lst_state=problem')
+  await screen.findByText(`${P}categories.missing`)
+  const download = screen.getByRole('button', { name: `${P}categories.download` })
+  expect(api.post).not.toHaveBeenCalled()
+  fireEvent.click(download); fireEvent.click(download)
+  await waitFor(() => expect(api.post).toHaveBeenCalledTimes(1))
+  expect(api.post).toHaveBeenCalledWith('/admin/dest/geosite/refresh', undefined, { _skipErrorToast: true })
+  expect(download.getAttribute('aria-busy')).toBe('true')
+  downloaded = true; finish({ data: {} })
+  await waitFor(() => expect(screen.queryByText(`${P}categories.missing`)).toBeNull())
+  expect(router.state.location.search).toBe('?tab=lists&lst_state=problem')
+})
+it('keeps list rows and the manual catalog retry after a failed download', async () => {
+  listsAPI([listSummary]); const original = api.get.getMockImplementation()!
+  api.get.mockImplementation(async (url: string, config?: unknown) => { if (url.endsWith('/categories')) throw err(503, 'dest_geosite_unavailable'); return original(url, config) })
+  api.post.mockRejectedValue(err(502, 'download_failed'))
+  mount('/admin/access-control?tab=lists')
+  fireEvent.click(await screen.findByRole('button', { name: `${P}categories.download` }))
+  await screen.findByText(`${P}categories.failed`)
+  expect(screen.getAllByRole('button', { name: 'Finance' }).length).toBeGreaterThan(0)
+  await waitFor(() => expect(screen.getByRole('button', { name: `${P}categories.download` }).getAttribute('aria-busy')).toBeNull())
+  expect(api.post).toHaveBeenCalledTimes(1)
+})
+it('uses the same manual catalog download in a list editor and preserves its draft', async () => {
+  listsAPI([]); const original = api.get.getMockImplementation()!
+  let downloaded = false, finish!: (value: unknown) => void
+  api.get.mockImplementation(async (url: string, config?: unknown) => {
+    if (url.endsWith('/categories')) { if (!downloaded) throw err(503, 'dest_geosite_unavailable'); return { data: { categories: [], updated_at: 4000 } } }
+    return original(url, config)
+  })
+  api.post.mockImplementation(() => new Promise(resolve => { finish = resolve }))
+  mount('/admin/access-control?tab=lists')
+  fireEvent.click(await screen.findByRole('button', { name: `${P}lists.create` }))
+  const dialog = await screen.findByRole('dialog', { name: `${P}list_editor.create_title` })
+  fireEvent.click(within(dialog).getByRole('button', { name: `${P}lists.geosite` }))
+  await within(dialog).findByText(`${P}categories.missing`)
+  const name = within(dialog).getByRole('textbox', { name: `${P}list_editor.name` }) as HTMLInputElement
+  fireEvent.change(name, { target: { value: 'Financial draft' } })
+  expect(api.post).not.toHaveBeenCalled()
+  const download = within(dialog).getByRole('button', { name: `${P}categories.download` })
+  fireEvent.click(download); fireEvent.click(download)
+  await waitFor(() => expect(api.post).toHaveBeenCalledTimes(1))
+  downloaded = true; finish({ data: {} })
+  await within(dialog).findByRole('combobox', { name: `${P}categories.category` })
+  expect(name.value).toBe('Financial draft')
+  expect(api.post).toHaveBeenCalledWith('/admin/dest/geosite/refresh', undefined, { _skipErrorToast: true })
+})
 it('keeps the template origin in a new policy title when its draft name changes', async () => {
   mount(); fireEvent.click(await screen.findByRole('button', { name: `${P}policies.create` }))
   fireEvent.click(screen.getByRole('menuitem', { name: new RegExp(`${P}policies.template_mail`) }))
@@ -387,7 +452,7 @@ function mount(initial = '/admin/access-control') {
 beforeEach(() => {
   vi.clearAllMocks()
   useAuthStore.setState({ userId: 42, role: 'admin', authEpoch: 5 })
-  api.get.mockImplementation(async (url: string) => ({ data: url.endsWith('/policies') ? destinationPolicies({ published_has_access_control: true }) : url.endsWith('/status') ? destinationStatus() : url.endsWith('/lists') ? { items: [] } : url.endsWith('/groups') ? { items: [], total: 0 } : { settings: {}, defaults: {}, effective: { dest_policy_apply_min_seconds: 75 } } }))
+  api.get.mockImplementation(async (url: string) => ({ data: url.endsWith('/policies') ? destinationPolicies({ published_has_access_control: true }) : url.endsWith('/status') ? destinationStatus() : url.endsWith('/categories') ? { categories: [], updated_at: 1000 } : url.endsWith('/lists') ? { items: [] } : url.endsWith('/groups') ? { items: [], total: 0 } : { settings: {}, defaults: {}, effective: { dest_policy_apply_min_seconds: 75 } } }))
   api.put.mockResolvedValue({ data: samplePolicy })
   api.post.mockResolvedValue({ data: { budget: destinationPolicies().budget } })
   confirmation.mockResolvedValue(true)
@@ -397,7 +462,7 @@ const listReport = { accepted: 1, ignored: 1, ignored_broad: 1, rewritten: 0, sa
 const listDetail: DestinationListDetail = { id: 7, name: 'Finance', kind: 'geosite', source_url: '', geosite_category: 'category-finance', geosite_attrs: '', owner_group_id: 0, updated_at: 3000, entry_count: 1, regexp_count: 0, state: 'ready', last_fetched_at: 1000, last_error: '', entries: ['domain:bank.example'], content_sha256: 'full-digest', parse_report: listReport }
 const listSummary: DestinationListSummary = { ...listDetail, parse_report_summary: listReport, used_by: [] }
 function listsAPI(items: DestinationListSummary[]) {
-  api.get.mockImplementation(async (url: string) => ({ data: url.endsWith('/policies') ? destinationPolicies() : url.endsWith('/status') ? destinationStatus() : url.endsWith('/lists') ? { items, budget: destinationBudget, refresh_hours: 12 } : url.endsWith('/lists/7') ? listDetail : { settings: {}, effective: {} } }))
+  api.get.mockImplementation(async (url: string) => ({ data: url.endsWith('/policies') ? destinationPolicies() : url.endsWith('/status') ? destinationStatus() : url.endsWith('/categories') ? { categories: [], updated_at: 1000 } : url.endsWith('/lists') ? { items, budget: destinationBudget, refresh_hours: 12 } : url.endsWith('/lists/7') ? listDetail : { settings: {}, effective: {} } }))
 }
 function settingsAPI() {
   const original = api.get.getMockImplementation()!

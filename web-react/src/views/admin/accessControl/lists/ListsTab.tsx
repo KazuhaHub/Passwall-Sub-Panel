@@ -10,7 +10,7 @@ import { ToneBadge, stateTone } from '@/components/ToneBadge'
 import { SortableTableCell } from '@/components/SortableTableCell'
 import { confirm } from '@/components/ConfirmHost'
 import { pushSnack } from '@/components/SnackbarHost'
-import { useDestinationLists, useDeleteDestinationList, useRefreshDestinationList } from '@/query/accessControl'
+import { useDestinationLists, useDeleteDestinationList, useRefreshDestinationList, useDestinationCategories, useRefreshDestinationCategories } from '@/query/accessControl'
 import { useQueryScope } from '@/query/useQueryScope'
 import { accessControlKeys } from '@/query/keys'
 import PendingActionGuard from '../PendingActionGuard'
@@ -19,10 +19,14 @@ import { listIsProblem, listSourceLabel } from './listDraft'
 import ListDialog from './ListDialog'
 import ListEntriesSheet from './ListEntriesSheet'
 import UsedByPopover from './UsedByPopover'
+import GeositeDownloadNotice from './GeositeDownloadNotice'
 const P = 'admin:access_control.lists.'
 export default function ListsTab({ active, selectedId, onCloseSheet, onOpenList, onOpenPolicy, onSettings, onTest, newListRequest = 0, policies, status }: { active: boolean; selectedId: number | null; onCloseSheet: () => void; onOpenList: (id: number) => void; onOpenPolicy: (id: number) => void; onSettings: () => void; onTest?: (target: string) => void; newListRequest?: number; policies?: DestinationPoliciesView; status?: DestinationStatus }) {
   const { t } = useTranslation(['admin', 'common']), scope = useQueryScope(), theme = useTheme()
   const query = useDestinationLists(scope, active || !!selectedId), remove = useDeleteDestinationList(scope), refresh = useRefreshDestinationList(scope)
+  const categories = useDestinationCategories(scope, active), categoryRefresh = useRefreshDestinationCategories(scope)
+  const catalogMissing = !categories.data && destinationError(categories.error).status === 503
+  const downloadCatalog = async () => { try { await categoryRefresh.mutateAsync() } catch { /* Keep definitions and show the download failure inline. */ } }
   const [params, setParams] = useSearchParams(), location = useLocation()
   const problem = params.get('lst_state') === 'problem'
   const [sort, setSort] = useState({ key: 'name', dir: 'asc' as 'asc' | 'desc' })
@@ -70,6 +74,7 @@ export default function ListsTab({ active, selectedId, onCloseSheet, onOpenList,
     {busy && <PendingActionGuard />}
     <Box hidden={!active}>
       <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'center', gap: 1 }}><Typography component="h2" variant="h6">{t(`${P}title`)}</Typography><Button disabled={busy} onClick={() => setEditor({})}>{t(`${P}create`)}</Button></Stack>
+      {catalogMissing && <GeositeDownloadNotice pending={categoryRefresh.isPending} disabled={busy} failed={!!categoryRefresh.error} onDownload={downloadCatalog} />}
       {query.data ? <>
         {query.error && <Alert severity="warning" action={<Button onClick={() => void query.refetch()}>{t('common:actions.retry')}</Button>}>{t(`${P}stale`)}</Alert>}
         {pendingUnknown && <Alert severity="warning">{t(`${P}references_unknown`)}</Alert>}
