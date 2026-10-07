@@ -19,6 +19,40 @@ vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string, opti
 vi.mock('@/components/CodeEditor', () => ({ default: (p: { value: string; onChange: (s: string) => void; ariaLabel: string; readOnly: boolean }) => <textarea aria-label={p.ariaLabel} value={p.value} readOnly={p.readOnly} onChange={e => p.onChange(e.target.value)} /> }))
 import AccessControlView from './AccessControlView'
 const P = 'admin:access_control.'
+it('connects coverage diagnostics, server search and managed inbound edits with encoded identities', async () => {
+  const original = api.get.getMockImplementation()!
+  api.get.mockImplementation(async (url: string, config?: unknown) => url.endsWith('/status') ? { data: destinationStatus({ nodes: [
+    destinationNode({ state: 'rejected', agent_id: 'agt_银行/42' }),
+    destinationNode({ panel_id: 2, panel_name: '银行 / East', state: 'unsupported_version' }),
+    destinationNode({ panel_id: 3, panel_name: 'Sniffing node', state: 'sniffing', sniffing_insufficient: [
+      { listener: 'one', label: 'Linked inbound', node_id: 42 }, { listener: 'two', label: 'Missing inbound', node_id: null },
+    ] }),
+  ] }) } : original(url, config))
+  mount('/admin/access-control?sheet=nodes')
+  const drawer = await screen.findByRole('dialog', { name: `${P}coverage.title` })
+  await within(drawer).findByText('Tokyo')
+  expect(within(drawer).getByRole('link', { name: `${P}coverage.issues` }).getAttribute('href')).toBe('/admin/node-issues?agent=agt_%E9%93%B6%E8%A1%8C%2F42')
+  expect(within(drawer).getByRole('link', { name: `${P}coverage.upgrade` }).getAttribute('href')).toBe('/admin/servers?q=%E9%93%B6%E8%A1%8C+%2F+East')
+  expect(within(drawer).getAllByRole('link', { name: `${P}coverage.edit_inbound` })).toHaveLength(1)
+  expect(within(drawer).getByRole('link', { name: `${P}coverage.edit_inbound` }).getAttribute('href')).toBe('/admin/nodes?inbound=42')
+  fireEvent.click(within(drawer).getByRole('button', { name: `${P}coverage.more Tokyo` }))
+  expect(screen.getByRole('menuitem', { name: `${P}coverage.open_server` }).getAttribute('href')).toBe('/admin/servers?q=Tokyo')
+  expect(screen.getByRole('menuitem', { name: `${P}coverage.issues` }).getAttribute('href')).toBe('/admin/node-issues?agent=agt_%E9%93%B6%E8%A1%8C%2F42')
+  expect(api.post).not.toHaveBeenCalled()
+})
+it('opens all lists from a node quota error and focuses the apply interval from coverage', async () => {
+  const original = api.get.getMockImplementation()!
+  api.get.mockImplementation(async (url: string, config?: unknown) => url.endsWith('/status') ? { data: destinationStatus({ nodes: [destinationNode({ state: 'over_limit', over_limit: { kind: 'domains', used: 50001, limit: 50000 } })] }) } : original(url, config))
+  const router = mount('/admin/access-control?sheet=nodes&node_state=problem&lst_state=problem')
+  fireEvent.click(await screen.findByRole('button', { name: `${P}coverage.view_lists` }))
+  await waitFor(() => expect(router.state.location.search).toBe('?tab=lists'))
+  fireEvent.click(screen.getByRole('button', { name: `${P}coverage.open` }))
+  fireEvent.click(await screen.findByRole('button', { name: `${P}coverage.modify_interval` }))
+  const dialog = await screen.findByRole('dialog', { name: `${P}settings.title` })
+  const interval = await within(dialog).findByRole('textbox', { name: `${P}settings.dest_policy_apply_min_seconds` })
+  await waitFor(() => expect(document.activeElement).toBe(interval))
+  expect(api.put).not.toHaveBeenCalled()
+})
 it('shows coverage loading separately from unavailable status', async () => {
   const original = api.get.getMockImplementation()!
   api.get.mockImplementation((url: string, config?: unknown) => url.endsWith('/status') ? new Promise(() => {}) : original(url, config))

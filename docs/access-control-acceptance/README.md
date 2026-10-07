@@ -170,6 +170,48 @@ the phone had no horizontal overflow. Actual download deduplication and query
 invalidation are covered by request-count regressions. These mock downloads do
 not establish live upstream availability or successful real list refresh.
 
+## Coverage actions and page deep links
+
+The shared node-policy row now provides fixed explanations, localized quota
+names, last-report times, prolonged-deployment labels and sing-box's execution-only
+badge. Its menu opens server-name search or exact agent diagnostics; sniffing
+failures link by managed Node.ID to the existing inbound editor. Quota actions
+open the complete list view, and the footer opens deployment settings with the
+interval input focused. Stage 2c recording controls remain absent.
+
+| Capture | Language/theme/viewport | Check |
+| --- | --- | --- |
+| [Phone coverage actions](coverage-actions-zh-CN-dark-375.jpg) | Chinese, dark, 375 × 812 | Problem filter, confirmed-vs-waiting fallback copy and next actions |
+| [English actions](coverage-actions-en-US-dark-375.jpg) | English, dark, 375 × 812 | Same problem filter and translated explanations |
+| [Desktop actions](coverage-actions-zh-CN-dark-1440.jpg) | Chinese, dark, 1440 × 900 | Same shared status rows in the right-hand drawer |
+| [Server search](server-deep-search-zh-CN-dark-375.jpg) | Chinese, dark, 375 × 812 | Coverage menu reaches the real server page; search text and `q` survive blur |
+| [Agent diagnostics](node-issues-deep-agent-zh-CN-dark-375.jpg) | Chinese, dark, 375 × 812 | Real node-issue page shows the agent identity; clearing removes its parameter |
+| [Deployment interval](coverage-interval-focus-en-US-dark-375.jpg) | English, dark, 375 × 812 | Coverage footer focuses the policy deployment delay input |
+
+Coverage buttons, menu triggers and links measured at least 44px in both
+dimensions at 375px, with no horizontal overflow. Escape from a drawer opened
+through its trigger restored focus to that trigger. The real backend has no
+managed nodes: following a sniffing fixture link showed the missing/unauthorized
+target warning, consumed the inbound parameter and opened no editor. This is
+a fail-safe navigation check, not real inbound editing or kernel enforcement.
+
+Eight deep-link tests and six coverage-action/category cases failed before
+implementation. Eleven final deep-link tests cover async readiness, exact
+managed-vs-upstream IDs, permission/capability gates, failed reads and retry,
+open-editor preservation, URL parameter preservation and Back/Forward. Six
+Chinese/English status-row cases check receipt-dependent fallback text/rule
+counts, quotas, prolonged pending state and sing-box. The final focused suite
+passed **342 tests in 30 files**; TypeScript, changed-source lint, production
+build/fixture exclusion and four production browser smoke checks passed.
+Existing unrelated lint warnings in the legacy server/node views remain.
+
+The new shared row is ready for S15's server-page integration. Full per-view
+acceptance, C2/C5/C6 closure, true new-kernel Node validation and owner approval
+remain pending. The earlier `a0e04318` passed both its
+[Test workflow](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37676483029)
+and [released-node systemd acceptance](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37676483279);
+that CI result does not cover these later edits.
+
 ## Real backend catalog acceptance
 
 These captures use the production frontend and actual Go backend, normal admin

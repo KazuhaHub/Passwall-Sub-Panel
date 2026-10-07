@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useLocation, useSearchParams } from 'react-router'
 import {
   Accordion, AccordionDetails, AccordionSummary, Alert, Box, Button, Card, Checkbox, CircularProgress, Dialog, DialogActions, DialogContent,
   DialogTitle, FormControl, FormControlLabel, IconButton, InputAdornment, InputLabel, LinearProgress,
@@ -53,6 +54,11 @@ export default function NodeIssuesView() {
   const { t, i18n } = useTranslation(['admin', 'common'])
   const canOperate = useCan('sync.operate')
   const panelTz = useSiteStore(s => s.timezone)
+  const [params, setParams] = useSearchParams()
+  const location = useLocation()
+  const routeAgent = params.get('agent') || ''
+  const [agent, setAgent] = useState(routeAgent)
+  const [agentDraft, setAgentDraft] = useState(routeAgent)
   const [items, setItems] = useState<NodeAgentIssue[]>([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
@@ -79,6 +85,23 @@ export default function NodeIssuesView() {
   const selectedIDs = pendingItems.filter(issue => selected.has(issue.id)).map(issue => issue.id)
   const actionBusy = busyID !== null || batchState !== ''
 
+  useEffect(() => {
+    setAgent(routeAgent)
+    setAgentDraft(routeAgent)
+    setPage(1)
+  }, [routeAgent])
+
+  function commitAgent(value: string) {
+    setAgent(value)
+    setAgentDraft(value)
+    setPage(1)
+    setParams(previous => {
+      const next = new URLSearchParams(previous)
+      if (value) next.set('agent', value); else next.delete('agent')
+      return next
+    }, { replace: true, state: location.state })
+  }
+
   const load = useCallback(async (retainIDs?: ReadonlySet<number>) => {
     loadController.current?.abort()
     const controller = new AbortController()
@@ -90,6 +113,7 @@ export default function NodeIssuesView() {
       const params: NodeIssueListParams = { page, page_size: pageSize, view: issueView }
       if (review !== '') params.acknowledged = review === 'true'
       if (keyword) params.keyword = keyword
+      if (agent) params.agent_id = agent
       const response = await listNodeIssues(params, controller.signal)
       if (controller.signal.aborted) return
       const lastPage = Math.max(1, Math.ceil(response.total / pageSize))
@@ -102,7 +126,7 @@ export default function NodeIssuesView() {
     } finally {
       if (!controller.signal.aborted) setLoading(false)
     }
-  }, [page, pageSize, review, keyword, issueView])
+  }, [page, pageSize, review, keyword, issueView, agent])
   const latestLoad = useRef(load)
   useEffect(() => {
     latestLoad.current = load
@@ -125,8 +149,10 @@ export default function NodeIssuesView() {
   function submitSearch() {
     if (actionLock.current) return
     const next = search.trim()
-    if (page === 1 && next === keyword) void load()
-    else { setPage(1); setKeyword(next) }
+    const nextAgent = agentDraft.trim()
+    if (page === 1 && next === keyword && nextAgent === agent) void load()
+    setKeyword(next)
+    commitAgent(nextAgent)
   }
 
   async function acknowledge(issue: NodeAgentIssue) {
@@ -299,6 +325,12 @@ export default function NodeIssuesView() {
             <MenuItem value="true">{t('admin:node_issues.filter.acknowledged')}</MenuItem>
           </Select>
         </FormControl>
+        <TextField size="small" value={agentDraft} label={t('admin:node_issues.agent_filter')} disabled={actionBusy}
+          onChange={event => setAgentDraft(event.target.value)} sx={{ flex: '1 1 220px', maxWidth: { sm: 360 } }}
+          slotProps={{ input: { endAdornment: agentDraft && <InputAdornment position="end">
+            <IconButton size="small" disabled={actionBusy} aria-label={t('admin:node_issues.clear_agent')} sx={{ width: 44, height: 44 }}
+              onClick={() => { if (!actionLock.current) commitAgent('') }}><ClearIcon fontSize="small" /></IconButton>
+          </InputAdornment> } }} />
         <TextField size="small" value={search} placeholder={t('admin:node_issues.search')} disabled={actionBusy}
           onChange={event => setSearch(event.target.value)} sx={{ flex: '1 1 240px', maxWidth: { sm: 460 } }}
           slotProps={{ htmlInput: { 'aria-label': t('admin:node_issues.search') }, input: {

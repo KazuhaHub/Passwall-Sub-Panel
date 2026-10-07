@@ -190,7 +190,10 @@ export default function ServersView() {
   const metadataDetailsID = useId()
   const canConfigure = useCan('config.write')
 
-  const [search, setSearch] = useState('')
+  const ps = usePageState({ defaultSortBy: 'id', defaultSortDir: 'asc' })
+  const { page, pageSize, sortBy, sortDir, setPage, setPageSize, setKeyword, setSort } = ps
+  const [search, setSearch] = useState(ps.keyword)
+  useEffect(() => { setSearch(ps.keyword) }, [ps.keyword])
   const [probeStates, setProbeStates] = useState<Record<number, ProbeState>>({})
   const [selected, setSelected] = useState<Set<number>>(new Set())
   const [batchBusy, setBatchBusy] = useState<'test' | 'delete' | 'upgrade_xray' | 'upgrade_panel' | ''>('')
@@ -244,8 +247,6 @@ export default function ServersView() {
   // case-insensitive). Kept strictly read-only and unpolled: the connection
   // probe below is a separate concern, so refreshing this list must never
   // imply an upstream request.
-  const ps = usePageState({ defaultSortBy: 'id', defaultSortDir: 'asc' })
-  const { page, pageSize, sortBy, sortDir, setPage, setPageSize, setKeyword, setSort } = ps
   const scope = useQueryScope()
   const queryClient = useQueryClient()
 

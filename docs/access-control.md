@@ -1722,7 +1722,7 @@ was superseded while installing fixture prerequisites and is not counted as a
 pass.
 
 The interface-formatting commit `9662fe61` passed both
-[released-node systemd acceptance](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37675414227).
+[released-node systemd acceptance](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37675414227)
 and the full [Test workflow](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37675414223).
 
 Coverage first reads show six skeleton rows instead of an unavailable warning.
@@ -1732,8 +1732,36 @@ the complete access-control/style focused suite passed 214 tests. Retrying a
 read preserves the sheet/filter and cannot become a node-application POST.
 Read retry, node retry and clear-filter buttons have a 44px minimum height;
 the error-scene browser capture verifies the read retry's actual dimensions.
-S14's remaining explanatory/action links and the rest of the screen matrix
-retain their implementation/acceptance gates.
+The coverage-read commit `a0e04318` passed the full
+[Test workflow](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37676483029)
+and [released-node systemd acceptance](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37676483279).
+
+Coverage now uses a shared node-policy status row, with fixed state explanations,
+last-reported timestamps, localized quota names and prolonged-deployment labels.
+Fallback confirmation, waiting for confirmation and stopping restrictions remain
+distinct; an exhausted confirmed empty version displays zero executing rules,
+while unconfirmed versions never reuse a historical rule count. A confirmed
+fallback explains the limitation for newly joined group members. Sing-box's
+applied badge explicitly says execution only; recording controls remain gated
+to stage 2c.
+
+Node menus link to server-name search and exact agent-filtered diagnostics.
+Sniffing errors link by managed Node.ID to the existing inbound editor. That
+consumer waits for successful node/server reads, checks configuration permissions
+and server update capability, reads fresh configuration, and consumes only its
+URL parameter. Read failures retain the request; another incoming link cannot
+replace an open editor. Missing targets give a warning without a configuration
+read or write. Server search is visible after a deep link and persists through
+blur and Back/Forward. Node-issue agent filters commit on submit, replace their
+URL parameter and preserve other filters. Four destination issue codes now
+belong to synchronization with Chinese/English titles and summaries.
+
+Node quota actions open the full list view, clearing the problem filter. The
+coverage footer opens deployment settings with the interval field focused.
+Deep-link/action/category tests failed before implementation. The final focused
+frontend suite (342 tests in 30 files), TypeScript, changed-source lint, production build and four
+production browser smoke checks passed; counts and browser evidence are recorded
+in the acceptance index. Full stage-1c acceptance and S15 remain open.
 
 List previews and policy previews are excluded from write-audit logging by
 exact POST path. Other destination writes, including `/dest/test`, retain normal

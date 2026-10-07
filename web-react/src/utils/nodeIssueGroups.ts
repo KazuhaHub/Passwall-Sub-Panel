@@ -5,6 +5,10 @@ export type NodeIssueCategory = 'statistics' | 'sync' | 'tasks' | 'other'
 const categories: Readonly<Record<string, NodeIssueCategory>> = {
   core_telemetry_failed: 'statistics',
   core_convergence_failed: 'sync',
+  destination_policy_over_limit: 'sync',
+  destination_policy_rejected: 'sync',
+  destination_policy_lkg_rejected: 'sync',
+  destination_policy_sniffing_insufficient: 'sync',
   object_pending_timeout: 'sync',
   object_rejected_timeout: 'sync',
   segment_rejected: 'sync',
