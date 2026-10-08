@@ -29,9 +29,19 @@ type DestinationTestStep struct {
 	Entry    string `json:"entry,omitempty"`
 }
 type DestinationTestNode struct {
-	PanelID int64  `json:"panel_id"`
-	Name    string `json:"name"`
-	State   string `json:"state"`
+	PanelID   int64                     `json:"panel_id"`
+	Name      string                    `json:"name"`
+	State     string                    `json:"state"`
+	Execution *DestinationTestExecution `json:"execution,omitempty"`
+}
+type DestinationTestExecution struct {
+	Engine            *string                  `json:"engine"`
+	MintedKind        domain.DestCandidateKind `json:"minted_kind"`
+	FallbackExhausted bool                     `json:"fallback_exhausted"`
+	MintedAt          *int64                   `json:"minted_at"`
+	AppliedAt         *int64                   `json:"applied_at"`
+	PendingSince      *int64                   `json:"pending_since"`
+	AppliedRules      *int                     `json:"applied_rules"`
 }
 type DestinationTestResult struct {
 	Verdict         string                `json:"verdict"`
@@ -106,7 +116,8 @@ func EvaluateDestinationTest(input DestinationTestInput, current domain.DestTest
 		poll = time.Duration(protocol.DefaultNextPollSeconds) * time.Second
 	}
 	for _, p := range current.Panels {
-		result.Nodes = append(result.Nodes, DestinationTestNode{PanelID: p.ID, Name: p.Name, State: destinationTestNodeState(p, current.State, poll, now)})
+		state := destinationTestNodeState(p, current.State, poll, now)
+		result.Nodes = append(result.Nodes, DestinationTestNode{PanelID: p.ID, Name: p.Name, State: state, Execution: destinationTestExecution(p, state)})
 	}
 	result.Notes = append(result.Notes, notes...)
 	defs := domain.DestDefinitions{}
@@ -183,6 +194,35 @@ func EvaluateDestinationTest(input DestinationTestInput, current domain.DestTest
 		result.Notes = append(result.Notes, "paused")
 	}
 	return result, nil
+}
+
+// The simulation carries its own receipt snapshot. Later fleet reads must not
+// replace these facts or turn a historical LKG into proof of current execution.
+func destinationTestExecution(p domain.DestTestPanel, state string) *DestinationTestExecution {
+	r := p.Runtime
+	if p.Kind != domain.PanelKindPSP || r == nil || state == "unsupported_version" {
+		return nil
+	}
+	e := &DestinationTestExecution{MintedKind: r.MintedKind, FallbackExhausted: r.FallbackExhausted, MintedAt: statusMillis(r.MintedAt), AppliedAt: statusMillis(r.AppliedAt)}
+	if p.Agent != nil && p.Agent.ObservedCoreEngine != "" {
+		engine := string(p.Agent.ObservedCoreEngine)
+		e.Engine = &engine
+	}
+	confirmed := r.MintedAt != nil && r.MintedSHA256 != "" && r.MintedSHA256 == r.ReportedSHA256 && r.ReportedState == "applied"
+	if r.MintedAt != nil && !confirmed {
+		e.PendingSince = statusMillis(r.MintedAt)
+	}
+	if confirmed && (r.MintedKind == domain.DestCandidateEmpty || r.MintedKind == domain.DestCandidatePaused) {
+		e.AppliedAt = statusMillis(r.ReportedAt)
+		if e.AppliedAt != nil && (state == "none" || state == "paused" || state == "rejected") {
+			zero := 0
+			e.AppliedRules = &zero
+		}
+	} else if confirmed && e.AppliedAt != nil && !r.FallbackExhausted && (r.MintedKind == domain.DestCandidateDesired || r.MintedKind == domain.DestCandidateFallback) && (state == "applied" || state == "rejected" && r.MintedKind == domain.DestCandidateFallback) {
+		rules := r.AppliedRuleCount
+		e.AppliedRules = &rules
+	}
+	return e
 }
 
 func testMatchedEntry(policy *protocol.DestinationPolicy, matched protocol.MatchStep, defs domain.DestDefinitions, subject protocol.SubjectKey, target string, port uint16, network string) (int64, string) {

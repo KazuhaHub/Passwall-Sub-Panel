@@ -14,6 +14,19 @@ function harness(scenario: 'normal' | 'empty' | 'error' | 'catalog-missing' | 'c
 afterEach(() => vi.useRealTimers())
 
 describe('reproducible access-control acceptance fixtures', () => {
+  it('keeps simulation execution receipts independent and unknown counts null', async () => {
+    const { client, fallback } = harness()
+    const before = (await client.get('/admin/dest/status')).data
+    const result = (await client.post('/admin/dest/test', { target: 'mail.example', port: 587, network: 'tcp' })).data
+    const nodes = new Map(result.nodes.map((n: { panel_id: number; execution?: Record<string, unknown> }) => [n.panel_id, n.execution]))
+    expect(nodes.get(6)).toMatchObject({ minted_kind: 'desired', applied_rules: 8 })
+    expect(nodes.get(7)).toMatchObject({ minted_kind: 'fallback', applied_rules: null })
+    expect(nodes.get(11)).toMatchObject({ minted_kind: 'fallback', pending_since: null, applied_rules: 8 })
+    expect(nodes.get(12)).toMatchObject({ minted_kind: 'empty', fallback_exhausted: true, applied_rules: null })
+    expect(nodes.get(4)).toBeUndefined()
+    expect((await client.get('/admin/dest/status')).data).toEqual(before)
+    expect(fallback).not.toHaveBeenCalled()
+  })
   it('covers the final-plan matrix without sharing mutable data between sessions', () => {
     const seed = accessControlFixtureSeed(1_800_000_000_000)
     expect(seed.policies).toHaveLength(8)

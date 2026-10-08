@@ -27,7 +27,16 @@ export interface DestinationTestResult {
   }>
   notes: string[]
   unpublished: boolean
-  nodes: Array<{ panel_id: number; name: string; state: DestinationNodeState }>
+  nodes: Array<{ panel_id: number; name: string; state: DestinationNodeState; execution?: DestinationTestExecution }>
+}
+export interface DestinationTestExecution {
+  engine: string | null
+  minted_kind: DestinationNodeStatus['minted_kind']
+  fallback_exhausted: boolean
+  minted_at: number | null
+  applied_at: number | null
+  pending_since: number | null
+  applied_rules: number | null
 }
 
 /** Readonly simulation with write-audit capture; target stays in the POST body. */

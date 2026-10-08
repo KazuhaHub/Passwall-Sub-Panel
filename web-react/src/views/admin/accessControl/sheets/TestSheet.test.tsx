@@ -2,7 +2,7 @@
 import { ThemeProvider } from '@mui/material'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { createMemoryRouter } from 'react-router'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import AppRouter from '@/router/AppRouter'
 import { createAppTheme } from '@/theme'
@@ -26,6 +26,41 @@ function mount(prefill?: { target?: string; port?: number; network?: string; use
   return { onClose, onOpenPolicy, client, router, ...rendered }
 }
 function submit(target = 'example.test') { fireEvent.change(screen.getByRole('textbox', { name: `${P}target` }), { target: { value: target } }); fireEvent.click(screen.getByRole('button', { name: `${P}submit` })) }
+it('keeps test input, result and navigation actions touch-accessible', async () => {
+  mount(); submit(); await screen.findByText(`${P}result_shadowed`)
+  for (const button of within(screen.getByRole('dialog')).getAllByRole('button')) expect(parseFloat(getComputedStyle(button).minHeight)).toBeGreaterThanOrEqual(44)
+})
+it('keeps native node selection options touch-accessible', async () => {
+  mount()
+  fireEvent.mouseDown(screen.getByRole('combobox', { name: `${P}node` }))
+  for (const option of await screen.findAllByRole('option')) expect(parseFloat(getComputedStyle(option).minHeight)).toBeGreaterThanOrEqual(44)
+})
+it('keeps explicit simulation retry touch-accessible', async () => {
+  api.post.mockRejectedValueOnce({ response: { status: 503, data: { error: 'unavailable' } } })
+  mount(); submit(); await screen.findByText(`${P}failed`)
+  expect(parseFloat(getComputedStyle(screen.getByRole('button', { name: 'common:actions.retry' })).minHeight)).toBeGreaterThanOrEqual(44)
+  expect(api.post).toHaveBeenCalledOnce()
+})
+it('uses the result execution snapshot for confirmed fallback without borrowing current coverage', async () => {
+  api.post.mockResolvedValue({ data: { ...result, nodes: [{ panel_id: 1, name: 'Snapshot node', state: 'rejected', execution: {
+    engine: 'xray', minted_kind: 'fallback', fallback_exhausted: false, minted_at: 1000, applied_at: 2000, pending_since: null, applied_rules: 7,
+  } }] } })
+  mount(); submit()
+  await screen.findByText('admin:access_control.coverage.fallback_applied')
+  expect(screen.getByText('admin:access_control.coverage.fallback_members')).toBeTruthy()
+  expect(screen.getByText('admin:access_control.coverage.description_rejected')).toBeTruthy()
+  expect(screen.queryByText('admin:access_control.coverage.fallback_waiting')).toBeNull()
+})
+it.each([
+  ['fallback', false, null, 'waiting'], ['empty', true, null, 'stopping'], ['empty', true, 2000, 'exhausted'],
+] as const)('distinguishes %s receipt state %s/%s in the test result', async (kind, exhausted, applied, state) => {
+  api.post.mockResolvedValue({ data: { ...result, nodes: [{ panel_id: 1, name: 'Snapshot node', state: 'rejected', execution: {
+    engine: 'xray', minted_kind: kind, fallback_exhausted: exhausted, minted_at: 1000, applied_at: applied, pending_since: applied ? null : 1000, applied_rules: applied ? 0 : null,
+  } }] } })
+  mount(); submit()
+  await screen.findByText(`admin:access_control.coverage.fallback_${state}`)
+  expect(screen.queryByText('admin:access_control.coverage.fallback_applied')).toBeNull()
+})
 it('opens with state-only prefill and never tests on open, focus, editing or query invalidation', async () => {
   const { client, router } = mount({ target: 'secret.example.test', port: 587, network: 'udp', userId: 13 })
   expect((screen.getByRole('textbox', { name: `${P}target` }) as HTMLInputElement).value).toBe('secret.example.test')
@@ -37,7 +72,7 @@ it('submits the normalized host through POST and renders exact trace and node st
   const { onOpenPolicy } = mount(); submit('https://EXAMPLE.test/path?secret=yes')
   await screen.findByText(`${P}result_shadowed`)
   expect(api.post).toHaveBeenCalledWith('/admin/dest/test', { target: 'example.test', port: 443, network: 'tcp' }, expect.objectContaining({ _skipErrorToast: true, signal: expect.any(AbortSignal) }))
-  expect(screen.getByText(`${P}url_host_only`)).toBeTruthy(); expect(screen.getByText(`${P}node_offline`)).toBeTruthy()
+  expect(screen.getByText(`${P}url_host_only`)).toBeTruthy(); expect(screen.getByText('admin:access_control.coverage.description_offline')).toBeTruthy()
   expect((screen.getByRole('textbox', { name: `${P}target` }) as HTMLInputElement).value).toBe('example.test')
   expect(screen.getByText('full:example.test')).toBeTruthy()
   fireEvent.click(screen.getByRole('button', { name: `${P}open_policy No mail` })); expect(onOpenPolicy).toHaveBeenCalledWith(12)

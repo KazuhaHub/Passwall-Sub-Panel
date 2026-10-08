@@ -971,6 +971,18 @@ result: a new publication is pending until the node confirms its candidate; a
 logical match alone does not prove what a live packet will do. Deleted display
 names remain absent while published source IDs remain available.
 
+Native-node results can include an optional `execution` snapshot from the same
+test context: `engine`, `minted_kind`, `fallback_exhausted`, `minted_at`,
+`applied_at`, `pending_since` and `applied_rules`. Nullable timestamps are UTC
+milliseconds. A rule count is known only for an eligible, exactly acknowledged
+candidate with its application timestamp; offline, unconfirmed, exhausted and
+unknown candidates retain null. Confirmed empty/paused execution reports zero
+using the stop receipt's timestamp. Unsupported kinds/versions omit this
+metadata. The drawer uses this snapshot for shared fleet explanations and
+fallback confirmation, without borrowing counts from a subsequent status read.
+Older responses without it still display the node-state explanation. The
+additional metadata requires no compiler, minting or network work.
+
 Initial missing-route regressions failed against SPA fallback. Actual Build/HTTP
 checks now prove published-only behavior, current membership, bounded validation,
 missing owners, safe corruption errors, audit retention, unchanged definition and
@@ -984,8 +996,9 @@ router and domain suites, relevant static checks and TypeScript compilation pass
 Simulation head `9982b46ec39b1e661f5d65e8c9e19e70903c6fc1` passed the
 [complete Test workflow](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37397780498)
 and [released-node systemd acceptance](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37397780269).
-Real third-party panel jobs were skipped. The S13 drawer, browser acceptance and
-VM packet-capture/real-node comparisons remain outstanding under the final plan.
+Real third-party panel jobs were skipped. Partial S13 browser evidence is now
+recorded in the acceptance index; complete browser acceptance and VM
+packet-capture/real-node comparisons remain outstanding under the final plan.
 
 ## Destination fleet status
 
@@ -1858,8 +1871,10 @@ fixture exclusion and four production browser smoke checks passed. The S7
 commit `5b331830` passed
 [complete Test CI](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37854908718)
 and [released-node systemd acceptance](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37854908770),
-with third-party live adapter jobs skipped; the later overview candidate needs
-its own CI. Full stage acceptance and new-kernel enforcement remain open.
+with third-party live adapter jobs skipped. The overview commit `9f64f633` also
+passed [complete Test CI](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37855921940)
+and [released-node systemd acceptance](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37855921941).
+Full stage acceptance and new-kernel enforcement remain open.
 
 The `01595a2f` Test workflow failed in Linux Chromium reinstallation acceptance
 because its fixture rejected the server page's new destination-status/policy

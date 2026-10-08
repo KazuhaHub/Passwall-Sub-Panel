@@ -76,7 +76,7 @@ export function nodeAccessTone(node: DestinationNodeStatus, now: number): Parame
     case 'paused': return 'idle'
   }
 }
-export function fallbackState(node: DestinationNodeStatus): 'none' | 'waiting' | 'applied' | 'stopping' | 'exhausted' {
+export function fallbackState(node: Pick<DestinationNodeStatus, 'minted_at' | 'pending_since' | 'applied_at' | 'fallback_exhausted' | 'minted_kind'>): 'none' | 'waiting' | 'applied' | 'stopping' | 'exhausted' {
   const confirmed = node.minted_at !== null && node.pending_since === null && node.applied_at !== null
   if (node.fallback_exhausted) return confirmed && node.minted_kind === 'empty' ? 'exhausted' : 'stopping'
   if (node.minted_kind === 'fallback') return confirmed ? 'applied' : 'waiting'

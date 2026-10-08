@@ -312,7 +312,14 @@ export function createAccessControlMock(fallback: AxiosAdapter, options: { scena
       }
       const node = seed.nodes.find(n => n.panel_id === body.panel_id)
       if (node?.state.startsWith('unsupported')) { verdict = 'untestable'; terminating = null }
-      const result: DestinationTestResult = { verdict, terminating_step: terminating, steps, notes: [], unpublished: generation !== publishedGeneration, nodes: seed.nodes.map(n => ({ panel_id: n.panel_id, name: n.panel_name, state: n.state })) }
+      const result: DestinationTestResult = { verdict, terminating_step: terminating, steps, notes: [], unpublished: generation !== publishedGeneration, nodes: seed.nodes.map(n => {
+        const node = { panel_id: n.panel_id, name: n.panel_name, state: n.state }
+        if (n.kind !== 'psp' || n.state === 'unsupported_version') return node
+        const confirmed = n.minted_at != null && n.pending_since == null && n.applied_at != null
+        const stopped = confirmed && (n.minted_kind === 'empty' || n.minted_kind === 'paused') && ['none', 'paused', 'rejected'].includes(n.state)
+        const executing = confirmed && !n.fallback_exhausted && (n.minted_kind === 'desired' || n.minted_kind === 'fallback') && (n.state === 'applied' || n.state === 'rejected' && n.minted_kind === 'fallback')
+        return { ...node, execution: { engine: n.engine, minted_kind: n.minted_kind, fallback_exhausted: n.fallback_exhausted, minted_at: n.minted_at, applied_at: n.applied_at, pending_since: n.pending_since, applied_rules: stopped ? 0 : executing ? n.applied_rules : null } }
+      }) }
       return response(result)
     }
     // Unknown endpoints in the fixture scope must not mutate the local PSP.

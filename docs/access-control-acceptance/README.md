@@ -377,6 +377,65 @@ and [released-node systemd acceptance](https://github.com/KazuhaHub/Passwall-Sub
 The third-party live adapter jobs were skipped; these runs do not establish
 new-kernel destination enforcement.
 
+## Destination-test drawer (S13)
+
+Each test now carries its own optional native-node execution snapshot. The
+drawer uses that result for the S14 explanations, fallback confirmation and
+rule counts, without replacing it with a later fleet read. A matching,
+nonempty candidate digest and applied receipt are required to expose a count;
+unknown, offline, exhausted or unconfirmed execution retains a null count.
+Confirmed empty/paused execution reports zero and uses the stop receipt's
+timestamp. Unsupported node versions omit historical execution metadata.
+Older responses without the optional snapshot retain the state explanation.
+
+Close, TCP/UDP, account indicators, submit, explicit retry, publication,
+node expansion and navigation actions have 44px minimum targets. The native
+account and node menus initially measured only 36px on desktop, despite the
+node-option jsdom test passing its mobile CSS default. After repair, both
+actual desktop menus measured 44px. Account-option sizing is opt-in for this
+drawer, and node options can wrap long names. Desktop drawers measure 560px;
+phones use the full 375px width, with equal drawer visible/content widths.
+Failure text stays localized and exposes an explicit retry.
+
+| Capture | Language/theme/viewport | Check |
+| --- | --- | --- |
+| [Desktop result](test-sheet-result-zh-CN-light-1440.jpg) | Chinese, light, 1440 × 900 | Published-policy result and 560px drawer |
+| [Dark desktop result](test-sheet-result-zh-CN-dark-1440.jpg) | Chinese, dark, 1440 × 900 | Translated result and trace |
+| [Phone result](test-sheet-result-zh-CN-light-375.jpg) | Chinese, light, 375 × 812 | Enter submission, full width and wrapped text |
+| [Dark phone result](test-sheet-result-zh-CN-dark-375.jpg) | Chinese, dark, 375 × 812 | Result with no horizontal overflow |
+| [English URL result](test-sheet-url-en-US-dark-375.jpg) | English, dark, 375 × 812 | Host-only normalization notice; target stays out of URL |
+| [Initial desktop](test-sheet-initial-zh-CN-light-1440.jpg) | Chinese, light, 1440 × 900 | Required destination, default port and optional selectors |
+| [Initial phone](test-sheet-initial-zh-CN-light-375.jpg) | Chinese, light, 375 × 812 | Initial instruction and full-width submit |
+| [Invalid port](test-sheet-invalid-port-zh-CN-light-375.jpg) | Chinese, light, 375 × 812 | 65536 is rejected and the previous result is cleared |
+| [Fallback waiting](test-sheet-fallback-waiting-zh-CN-light-375.jpg) | Chinese, light, 375 × 812 | No borrowed rule count while confirmation is pending |
+| [Confirmed fallback and stopping](test-sheet-fallback-confirmed-zh-CN-light-375.jpg) | Chinese, light, 375 × 812 | Confirmed count, new-member limitation and pending stop remain distinct |
+| [Account options](test-sheet-account-options-zh-CN-dark-1440.jpg) | Chinese, dark, 1440 × 900 | Real local account lookup; option and popup control measure 44px |
+| [Node options](test-sheet-node-options-zh-CN-dark-1440.jpg) | Chinese, dark, 1440 × 900 | All thirteen native menu choices measure 44px |
+| [Selected fallback](test-sheet-selected-fallback-zh-CN-dark-1440.jpg) | Chinese, dark, 1440 × 900 | Selected-node warning and receipt explanation |
+| [English selected fallback](test-sheet-selected-fallback-en-US-dark-375.jpg) | English, dark, 375 × 812 | Long fallback/member text wraps within drawer |
+| [Open matched policy](test-sheet-open-policy-en-US-dark-375.jpg) | English, dark, 375 × 812 | Test drawer closes and the existing policy editor opens without saving |
+| [Empty fleet](test-sheet-empty-en-US-dark-375.jpg) | English, dark, 375 × 812 | Logical result contains no fabricated node receipts |
+| [Test failure](test-sheet-error-en-US-dark-375.jpg) | English, dark, 375 × 812 | Synthetic failure, unavailable choices and explicit 44px retry |
+
+These seventeen captures use the DEV adapter for destination data and were
+visually checked. The adapter models limited matching and UI receipts; its
+trace and counts do not establish Protocol matching or live Node enforcement.
+Account search uses the isolated backend. Enter submitted the test, URL input
+became `example.test` while the address stayed `?sheet=test`, and the matched
+policy action opened its actual editor. No policy or exception was saved.
+Language, automatic theme, normal fixture scenario and viewport were restored.
+
+Nine initial backend snapshot cases, two receipt-edge cases, six drawer cases
+and the DEV receipt contract failed before repair. The expanded backend table
+also checks empty digests and missing timestamps. The relevant frontend suite
+passed 383 cases in 28 files, followed by 19 targeted cases after the final
+menu/error presentation changes. Destination-policy and HTTP-handler suites,
+TypeScript, changed-source lint, production build, fixture exclusion and four
+production browser smoke checks passed. Local Go was 1.26.8 with automatic
+toolchain download disabled; remote CI uses the project's configured toolchain.
+The new S13 candidate still needs its own CI. Full C2/C5/C6, other view matrices
+and new-kernel Node acceptance remain open.
+
 ## Lists overview and references (S6)
 
 Creation, list names, row menus, usage triggers/linked references, sorting,
@@ -420,8 +479,11 @@ production build, fixture exclusion and four production browser smoke checks
 passed. This is separate from the S7 commit `5b331830`, which passed both
 [complete Test CI](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37854908718)
 and [released-node systemd acceptance](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37854908770).
-Third-party live adapter jobs were skipped. The subsequent overview candidate
-still needs its own CI; full C2/C5/C6 and real Node enforcement remain open.
+The overview commit `9f64f633` also passed
+[complete Test CI](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37855921940)
+and [released-node systemd acceptance](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37855921941).
+Third-party live adapter jobs were skipped; full C2/C5/C6 and real Node
+enforcement remain open.
 
 ## List editor (S7)
 
