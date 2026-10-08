@@ -377,6 +377,52 @@ and [released-node systemd acceptance](https://github.com/KazuhaHub/Passwall-Sub
 The third-party live adapter jobs were skipped; these runs do not establish
 new-kernel destination enforcement.
 
+## Lists overview and references (S6)
+
+Creation, list names, row menus, usage triggers/linked references, sorting,
+refresh-setting links and list-read retries meet the 44px minimum. Desktop
+sort targets measure 52 × 44px and row menus 44 × 44px; phone menu choices
+measure 48px high. Referenced lists keep Delete disabled. The table reserves
+enough width for its row menu rather than placing the enlarged control across
+the cell boundary.
+
+| Capture | Language/theme/viewport | Check |
+| --- | --- | --- |
+| [Desktop table](list-overview-zh-CN-light-1440.jpg) | Chinese, light, 1440 × 900 | Names, usage, full totals and touch-sized sorting |
+| [Dark table](list-overview-zh-CN-dark-1440.jpg) | Chinese, dark, 1440 × 900 | Table and semantic list states |
+| [Phone cards](list-overview-zh-CN-light-375.jpg) | Chinese, light, 375 × 812 | Scrolled list cards with usable old remote content |
+| [Dark phone cards](list-overview-zh-CN-dark-375.jpg) | Chinese, dark, 375 × 812 | Card layout and owned-list usage |
+| [English cards](list-overview-en-US-light-375.jpg) | English, light, 375 × 812 | Translated states and usage actions |
+| [Long English state](list-overview-long-status-en-US-light-375.jpg) | English, light, 375 × 812 | Never-downloaded state wraps within its card |
+| [Usage popover](list-usage-en-US-light-375.jpg) | English, light, 375 × 812 | 343px popover with a 44px linked-policy action |
+| [Row menu](list-menu-en-US-light-375.jpg) | English, light, 375 × 812 | Explicit edit/refresh choices and disabled Delete |
+| [Problems filter](list-overview-problems-zh-CN-light-1440.jpg) | Chinese, light, 1440 × 900 | Pressed KPI, two problem lists and preserved URL filter; filtered finance remains healthy |
+| [Empty lists](list-overview-empty-zh-CN-light-375.jpg) | Chinese, light, 375 × 812 | Zero budget usage, translated empty notice and New list action |
+| [Failed read](list-overview-error-zh-CN-light-375.jpg) | Chinese, light, 375 × 812 | List-read failure has an explicit 44px retry; failure is not presented as empty |
+
+These eleven captures use the DEV adapter and were visually checked. An initial
+English-phone check found internal horizontal scrolling even though the
+document itself did not overflow: the never-downloaded badge forced one line.
+List states now opt into bounded wrapping in the shared badge; other callers
+retain their existing one-line layout. At 375px the main scroll area changed
+from 365px visible / 372px content to 365px / 365px. Desktop checks likewise
+found equal visible/content widths. Screenshots were retaken after repair.
+The actual name-sort click reversed table order, and selecting Problems kept
+only the failed remote and referenced never-downloaded category, leaving the
+filtered finance list out. Retry was explicit; it does not demonstrate upstream
+recovery in the always-failing scenario. Language, theme and viewport were
+restored afterward.
+
+Four touch regressions and one wrapping regression failed before their fixes;
+a sixth case also verifies referenced-list Delete remains disabled. The final
+relevant suite passed 354 cases in 26 files. TypeScript, changed-source lint,
+production build, fixture exclusion and four production browser smoke checks
+passed. This is separate from the S7 commit `5b331830`, which passed both
+[complete Test CI](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37854908718)
+and [released-node systemd acceptance](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37854908770).
+Third-party live adapter jobs were skipped. The subsequent overview candidate
+still needs its own CI; full C2/C5/C6 and real Node enforcement remain open.
+
 ## List editor (S7)
 
 The existing custom, remote and community-category editors use a 900px desktop
@@ -427,8 +473,9 @@ production build, fixture exclusion and four production browser smoke checks
 passed. This fills the three editor variants and documented extra states;
 initial original-read failure/reload has a unit regression but no editor
 browser capture yet. Complete C2/C5/C6, other per-view matrices, true Node
-enforcement and owner acceptance remain pending. The S7 candidate's remote CI
-is separate from the successful `8dfb38d7` runs above.
+enforcement and owner acceptance remain pending. S7 commit `5b331830` passed
+both remote workflows linked above, separately from the successful `8dfb38d7`
+runs. Later overview changes require their own candidate validation.
 
 ## Real backend catalog acceptance
 

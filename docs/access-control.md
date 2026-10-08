@@ -1843,6 +1843,24 @@ TypeScript, changed-source lint, production build, fixture exclusion and four
 production smoke checks passed. Initial original-read failure/reload still
 needs an editor browser capture, and full stage acceptance remains open.
 
+The S6 list overview and reference popover now also meet the 44px minimum for
+creation, names, menus, sorting, usage links, refresh settings and read retry.
+The enlarged row-menu cell has sufficient width. Long list status badges opt
+into bounded wrapping; this repaired a real English-phone internal overflow
+that a document-width-only check missed. The main scroll area now measures
+365px visible and 365px content. Eleven additional captures cover Chinese
+light/dark desktop/phone, English phone, long status, usage/menu, problems,
+empty and failed-read states. Actual sorting reversed rows, and the problem
+filter retains only failed or enabled referenced-pending lists; filtered
+finance remains healthy. Five regressions failed before repair, then 354
+relevant tests in 26 files, TypeScript, changed-source lint, production build,
+fixture exclusion and four production browser smoke checks passed. The S7
+commit `5b331830` passed
+[complete Test CI](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37854908718)
+and [released-node systemd acceptance](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37854908770),
+with third-party live adapter jobs skipped; the later overview candidate needs
+its own CI. Full stage acceptance and new-kernel enforcement remain open.
+
 The `01595a2f` Test workflow failed in Linux Chromium reinstallation acceptance
 because its fixture rejected the server page's new destination-status/policy
 GET requests. The exact reads now return empty fleet state; destination writes

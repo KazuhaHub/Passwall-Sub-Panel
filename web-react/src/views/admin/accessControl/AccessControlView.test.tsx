@@ -131,6 +131,48 @@ it('keeps the list editor title heading separate from its close action', async (
   expect(within(dialog).getByRole('button', { name: 'common:actions.close' })).toBeTruthy()
   expect(document.querySelectorAll('#access-list-editor-title')).toHaveLength(1)
 })
+it('keeps list overview creation, names, menus and refresh settings touch-accessible', async () => {
+  listsAPI([listSummary]); mount('/admin/access-control?tab=lists')
+  await screen.findAllByRole('button', { name: 'Finance' })
+  for (const name of [`${P}lists.create`, 'Finance', `${P}lists.menu Finance`, `${P}list_editor.change_refresh`]) {
+    for (const button of screen.getAllByRole('button', { name })) expect(parseFloat(getComputedStyle(button).minHeight)).toBeGreaterThanOrEqual(44)
+  }
+})
+it('keeps list table sorting touch-accessible while changing the actual sort order', async () => {
+  listsAPI([listSummary, { ...listSummary, id: 8, name: 'Older list' }]); mount('/admin/access-control?tab=lists')
+  await screen.findAllByRole('button', { name: 'Finance' })
+  const table = screen.getByRole('table')
+  const sort = within(table).getByRole('button', { name: `${P}lists.name` })
+  expect(parseFloat(getComputedStyle(sort).minHeight)).toBeGreaterThanOrEqual(44)
+  fireEvent.click(sort)
+  expect(within(table).getAllByRole('row')[1].textContent).toContain('Older list')
+})
+it('keeps list row menu choices touch-accessible and disabled when referenced', async () => {
+  listsAPI([{ ...listSummary, used_by: [{ kind: 'policy', id: 12, name: 'No mail' }] }]); mount('/admin/access-control?tab=lists')
+  fireEvent.click((await screen.findAllByRole('button', { name: `${P}lists.menu Finance` }))[0])
+  for (const item of screen.getAllByRole('menuitem')) expect(parseFloat(getComputedStyle(item).minHeight)).toBeGreaterThanOrEqual(44)
+  expect(screen.getByRole('menuitem', { name: 'common:actions.delete' }).getAttribute('aria-disabled')).toBe('true')
+  expect(api.delete).not.toHaveBeenCalled()
+})
+it('keeps a failed list read retry touch-accessible without issuing a write', async () => {
+  listsAPI([]); const original = api.get.getMockImplementation()!
+  api.get.mockImplementation(async (url: string, config?: unknown) => {
+    if (url.endsWith('/lists')) throw err(503, 'lists_unavailable')
+    return original(url, config)
+  })
+  mount('/admin/access-control?tab=lists')
+  await screen.findByText(`${P}lists.failed`)
+  const retry = screen.getByRole('button', { name: 'common:actions.retry' })
+  expect(parseFloat(getComputedStyle(retry).minHeight)).toBeGreaterThanOrEqual(44)
+  expect(api.post).not.toHaveBeenCalled()
+})
+it('wraps long list status labels inside narrow cards and table cells', async () => {
+  listsAPI([{ ...listSummary, state: 'failed', last_fetched_at: null }]); mount('/admin/access-control?tab=lists')
+  for (const label of await screen.findAllByText(`${P}lists.state_failed_first`)) {
+    expect(getComputedStyle(label).whiteSpace).toBe('normal')
+    expect(getComputedStyle(label).maxWidth).toBe('100%')
+  }
+})
 it('keeps a saved list drawer heading separate from its close action', async () => {
   listsAPI([listSummary]); mount('/admin/access-control?tab=lists&sheet=list&list=7')
   const dialog = await screen.findByRole('dialog', { name: 'Finance' })

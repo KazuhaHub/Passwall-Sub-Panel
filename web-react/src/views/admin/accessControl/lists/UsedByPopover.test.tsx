@@ -18,6 +18,14 @@ it('shows unused lists without opening an empty popover', () => {
   expect(screen.getByText(`${P}unused`)).toBeTruthy()
   expect(screen.queryByRole('button')).toBeNull()
 })
+it('keeps usage triggers and linked references touch-accessible', () => {
+  mount([{ kind: 'policy', id: 12, name: 'No mail' }])
+  const trigger = screen.getByRole('button', { name: `${P}open_references Finance` })
+  expect(parseFloat(getComputedStyle(trigger).minHeight)).toBeGreaterThanOrEqual(44)
+  fireEvent.click(trigger)
+  const link = screen.getByRole('button', { name: `${P}open_policy No mail` })
+  expect(parseFloat(getComputedStyle(link).minHeight)).toBeGreaterThanOrEqual(44)
+})
 it('opens the actual policy reference and dismisses the popover', async () => {
   const onOpenPolicy = mount([{ kind: 'policy', id: 12, name: 'No mail' }, { kind: 'group', id: 4, name: 'Guests' }])
   fireEvent.click(screen.getByRole('button', { name: `${P}open_references Finance` }))
