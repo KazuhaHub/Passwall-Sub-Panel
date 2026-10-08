@@ -248,11 +248,22 @@ export function createAccessControlMock(fallback: AxiosAdapter, options: { scena
       const userId = exemptionMatch ? Number(exemptionMatch[1]) : Number(body.user_id)
       const exemption = seed.exemptions.find(e => e.user_id === userId)
       if (exemptionMatch && method === 'GET') return response(exemption ?? fail(404, 'not_found'))
-      if (exemptionMatch && method === 'DELETE') { seed.exemptions = seed.exemptions.filter(e => e.user_id !== userId); tick(); return response(null, 204) }
-      if (method === 'POST' || method === 'PUT') {
-        if (!Number.isInteger(userId) || userId <= 0 || !String(body.reason ?? '').trim()) fail(422, 'dest_exemption_invalid')
+      if (exemptionMatch && method === 'DELETE') {
+        if (!exemption) fail(404, 'not_found')
+        seed.exemptions = seed.exemptions.filter(e => e.user_id !== userId); tick(); return response(null, 204)
+      }
+      if (method === 'POST' && !exemptionMatch || method === 'PUT' && exemptionMatch) {
+        if (!Number.isSafeInteger(userId) || userId <= 0 || exemptionMatch && body.user_id !== undefined && body.user_id !== userId) fail(400, 'dest_policy_invalid', { field: 'user_id' })
+        if (typeof body.reason !== 'string' || !body.reason.trim() || Array.from(body.reason).length > 255) fail(400, 'dest_policy_invalid', { field: 'reason' })
+        if (body.expires_at !== undefined && body.expires_at !== null && (!Number.isSafeInteger(body.expires_at) || Number(body.expires_at) <= 0)) fail(400, 'dest_policy_invalid', { field: 'expires_at' })
         const expiresAt = typeof body.expires_at === 'number' ? body.expires_at : null
-        const value = { user_id: userId, upn: `fixture-${userId}@example.invalid`, reason: String(body.reason), created_by: 1, created_by_upn: 'fixture-admin@example.invalid', created_at: tick(), expires_at: expiresAt, expired: !!expiresAt && expiresAt <= Date.now() }
+        if (method === 'POST' && exemption) fail(409, 'dest_exemption_exists')
+        if (method === 'PUT' && !exemption) fail(404, 'not_found')
+        if (exemption && exemption.reason === body.reason && exemption.expires_at === expiresAt) return response(exemption)
+        const writtenAt = tick()
+        const value = { user_id: userId, upn: `fixture-${userId}@example.invalid`, reason: String(body.reason),
+          created_by: exemption?.created_by ?? 1, created_by_upn: exemption?.created_by_upn ?? 'fixture-admin@example.invalid',
+          created_at: exemption?.created_at ?? writtenAt, expires_at: expiresAt, expired: !!expiresAt && expiresAt <= Date.now() }
         seed.exemptions = [...seed.exemptions.filter(e => e.user_id !== userId), value]; return response(value, method === 'POST' ? 201 : 200)
       }
     }

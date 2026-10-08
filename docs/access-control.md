@@ -1799,6 +1799,24 @@ The final frontend suite for these server/response-guard/deep-link edits passed
 lint, production build, fixture-exclusion guard and four production browser
 smoke checks passed. Three existing legacy-server lint warnings remain.
 
+Exemption management now uses title-only dialog names and separate 44px close
+buttons. Drawer/menu actions, account-picker indicators, expiry choices and
+footer actions meet that minimum; shared discard confirmations do too. Clean
+Escape closes return focus to the opening Add action or row menu. Canceling a
+dirty-close confirmation preserves the draft. A successful read immediately
+updates relative expiry calculations instead of waiting for the minute timer.
+
+The S5 acceptance index contains twenty captures spanning Chinese light/dark
+desktop/phone, English phone, duplicate-create conflicts, expired edits,
+discard, empty and failed-read states. Synthetic destination writes preserve
+the real contract's conflicts, creation attribution and no-op generations;
+account lookup uses the isolated backend. This does not establish real
+exemption writes or traffic enforcement. The full frontend suite passed 2157
+tests with one existing skip across 182 files; TypeScript, lint, build, fixture
+exclusion and four production browser smoke checks passed. The preceding
+`50b8061f` systemd CI succeeded, while its Test workflow was canceled during
+Playwright Chromium installation. The new candidate's remote CI remains pending.
+
 List previews and policy previews are excluded from write-audit logging by
 exact POST path. Other destination writes, including `/dest/test`, retain normal
 audit behavior; destination audit rows remain restricted to administrators.

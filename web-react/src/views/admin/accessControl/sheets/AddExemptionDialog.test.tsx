@@ -97,3 +97,14 @@ it('shows the allowlist exception warning from the selected account without crea
   expect(await screen.findByRole('button', { name: `${P}allowlist_summary` })).toBeTruthy()
   expect(api.post).not.toHaveBeenCalled()
 })
+it.each([undefined, existing])('keeps the exemption editor heading title-only and its actions at least 44px', async existing => {
+  mount({ userId: 13, existing })
+  const heading = screen.getByRole('heading', { name: `${P}${existing ? 'edit' : 'add'}` })
+  expect(heading.querySelector('button')).toBeNull()
+  for (const name of ['common:actions.close', 'common:actions.cancel', existing ? 'common:actions.save' : `${P}add`,
+    ...['never', 'day', 'week', 'custom'].map(value => `${P}expiry_${value}`)]) {
+    const button = screen.getByRole('button', { name })
+    expect(parseFloat(getComputedStyle(button).minHeight), name).toBeGreaterThanOrEqual(44)
+    expect(parseFloat(getComputedStyle(button).minWidth), name).toBeGreaterThanOrEqual(44)
+  }
+})

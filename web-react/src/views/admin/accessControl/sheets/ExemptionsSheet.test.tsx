@@ -13,7 +13,7 @@ vi.mock('@/api/client', () => ({ client: api }))
 const confirmation = vi.hoisted(() => vi.fn())
 vi.mock('@/components/ConfirmHost', () => ({ confirm: confirmation }))
 vi.mock('@/components/SnackbarHost', () => ({ pushSnack: vi.fn() }))
-vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string, args?: { upn?: string }) => key + (args?.upn ? ` ${args.upn}` : '') }) }))
+vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string, args?: { upn?: string; count?: number }) => key + (args?.upn ? ` ${args.upn}` : '') + (typeof args?.count === 'number' ? ` ${args.count}` : '') }) }))
 vi.mock('@/components/UserAutocomplete', () => ({ default: () => <p>Account picker</p> }))
 import ExemptionsSheet from './ExemptionsSheet'
 const P = 'admin:access_control.exemptions.', at = 1791260000000
@@ -73,4 +73,33 @@ it('keeps cancellation declined and supports load failure retry without fabricat
   fireEvent.click(await screen.findByRole('button', { name: `${P}menu alice@test` })); fireEvent.click(screen.getByRole('menuitem', { name: `${P}cancel` }))
   await waitFor(() => expect(confirmation).toHaveBeenCalledOnce())
   expect(api.delete).not.toHaveBeenCalled(); expect(onClose).not.toHaveBeenCalled()
+})
+it('keeps the sheet close, add, row and menu actions at least 44px', async () => {
+  mount()
+  const menu = await screen.findByRole('button', { name: `${P}menu alice@test` })
+  for (const button of [menu, screen.getByRole('button', { name: `${P}add` }), screen.getByRole('button', { name: 'common:actions.close' })]) {
+    expect(parseFloat(getComputedStyle(button).minHeight)).toBeGreaterThanOrEqual(44)
+    expect(parseFloat(getComputedStyle(button).minWidth)).toBeGreaterThanOrEqual(44)
+  }
+  fireEvent.click(menu)
+  for (const item of screen.getAllByRole('menuitem')) expect(parseFloat(getComputedStyle(item).minHeight)).toBeGreaterThanOrEqual(44)
+})
+it('gives the failed-read retry a 44px target without posting an exemption', async () => {
+  api.get.mockRejectedValue(new Error('offline'))
+  mount()
+  const retry = await screen.findByRole('button', { name: 'common:actions.retry' })
+  expect(parseFloat(getComputedStyle(retry).minHeight)).toBeGreaterThanOrEqual(44)
+  expect(api.post).not.toHaveBeenCalled()
+})
+it('uses the latest read time for expiry instead of the clock captured before loading', async () => {
+  let finish!: (value: unknown) => void
+  api.get.mockImplementation(() => new Promise(resolve => { finish = resolve }))
+  mount()
+  await waitFor(() => expect(api.get).toHaveBeenCalledOnce())
+  const readAt = at + 600000
+  vi.mocked(Date.now).mockReturnValue(readAt)
+  finish({ data: { items: [{ ...row, expires_at: readAt + 86400000 }] } })
+  await screen.findByText(`${P}expiry_hours 24`)
+  expect(screen.queryByText(`${P}expiry_hours 25`)).toBeNull()
+  expect(api.delete).not.toHaveBeenCalled()
 })

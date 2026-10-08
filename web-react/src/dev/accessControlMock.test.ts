@@ -112,6 +112,43 @@ describe('reproducible access-control acceptance fixtures', () => {
     expect(published.generation).toBe(published.published_generation)
   })
 
+  it('rejects duplicate exemption creation and missing edits/deletes without mutating definitions', async () => {
+    const { client, fallback } = harness()
+    const before = (await client.get('/admin/dest/exemptions')).data
+    const generation = (await client.get('/admin/dest/status')).data.generation
+    await expect(client.post('/admin/dest/exemptions', { user_id: 1, reason: 'Duplicate', expires_at: null }))
+      .rejects.toMatchObject({ response: { status: 409, data: { error: 'dest_exemption_exists' } } })
+    await expect(client.put('/admin/dest/exemptions/99', { reason: 'Missing', expires_at: null })).rejects.toMatchObject({ response: { status: 404 } })
+    await expect(client.delete('/admin/dest/exemptions/99')).rejects.toMatchObject({ response: { status: 404 } })
+    expect((await client.get('/admin/dest/exemptions')).data).toEqual(before)
+    expect((await client.get('/admin/dest/status')).data.generation).toBe(generation)
+    expect(fallback).not.toHaveBeenCalled()
+  })
+
+  it('preserves exemption attribution on edits and does not publish no-op edits', async () => {
+    const { client } = harness()
+    const before = (await client.get('/admin/dest/exemptions/1')).data
+    const input = { reason: 'Edited diagnostics', expires_at: null }
+    const updated = (await client.put('/admin/dest/exemptions/1', input)).data
+    expect(updated).toMatchObject({ ...input, created_at: before.created_at, created_by: before.created_by, created_by_upn: before.created_by_upn })
+    const generation = (await client.get('/admin/dest/status')).data.generation
+    expect((await client.put('/admin/dest/exemptions/1', input)).data).toEqual(updated)
+    expect((await client.get('/admin/dest/status')).data.generation).toBe(generation)
+  })
+
+  it('validates exemption reason and expiry like the administrator API', async () => {
+    const { client, fallback } = harness('empty')
+    for (const [input, field] of [
+      [{ user_id: 1, reason: '😀'.repeat(256), expires_at: null }, 'reason'],
+      [{ user_id: 1, reason: 'Reason', expires_at: 'tomorrow' }, 'expires_at'],
+      [{ user_id: 1, reason: 'Reason', expires_at: 1.5 }, 'expires_at'],
+    ] as const) {
+      await expect(client.post('/admin/dest/exemptions', input)).rejects.toMatchObject({ response: { status: 400, data: { error: 'dest_policy_invalid', field } } })
+    }
+    expect((await client.get('/admin/dest/exemptions')).data.items).toHaveLength(0)
+    expect(fallback).not.toHaveBeenCalled()
+  })
+
   it('shows explicit queued catalog refresh and its success or failure without real requests', async () => {
     vi.useFakeTimers()
     for (const scenario of ['catalog-missing', 'catalog-failed'] as const) {

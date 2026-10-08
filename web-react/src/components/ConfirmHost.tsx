@@ -93,14 +93,14 @@ export default function ConfirmHost() {
         </Typography>
       </DialogContent>
       <DialogActions>
-        <Button onClick={() => close(false)} variant="text">
+        <Button onClick={() => close(false)} variant="text" sx={{ minHeight: 44 }}>
           {opts?.cancelText ?? t('actions.cancel')}
         </Button>
         <Button
           onClick={() => close(true)}
           variant="contained"
           autoFocus
-          sx={destructive ? { bgcolor: md.error, color: md.onError, '&:hover': { bgcolor: md.error } } : undefined}
+          sx={{ minHeight: 44, ...(destructive ? { bgcolor: md.error, color: md.onError, '&:hover': { bgcolor: md.error } } : {}) }}
         >
           {opts?.confirmText ?? t('actions.ok')}
         </Button>

@@ -270,6 +270,59 @@ production build, fixture-exclusion guard and four production browser smoke
 checks passed. Lint retains three existing warnings in the legacy ServersView.
 This run includes the deep-link CI assertion repair and all seventeen S15 cases.
 
+## Exemption management (S5)
+
+The exemption drawer and add/edit dialogs now have title-only accessible names
+and separate 44px close buttons. Drawer actions, row menus, expiry choices,
+account-picker indicators and dialog footer actions meet the 44px minimum.
+The shared discard confirmation also uses 44px actions, including destructive
+confirmation. These captures use synthetic destination data; account lookup
+uses the isolated local backend. No real exemption was granted or changed.
+
+| Language/theme/viewport | Drawer | New draft | Edit |
+| --- | --- | --- | --- |
+| Chinese, dark, 1440 × 900 | [Drawer](exemptions-zh-CN-dark-1440.jpg) | [Add](exemption-add-zh-CN-dark-1440.jpg) | [Edit](exemption-edit-zh-CN-dark-1440.jpg) |
+| Chinese, dark, 375 × 812 | [Drawer](exemptions-zh-CN-dark-375.jpg) | [Add](exemption-add-zh-CN-dark-375.jpg) | [Edit](exemption-edit-zh-CN-dark-375.jpg) |
+| Chinese, light, 1440 × 900 | [Drawer](exemptions-zh-CN-light-1440.jpg) | [Add](exemption-add-zh-CN-light-1440.jpg) | [Edit](exemption-edit-zh-CN-light-1440.jpg) |
+| Chinese, light, 375 × 812 | [Drawer](exemptions-zh-CN-light-375.jpg) | [Add](exemption-add-zh-CN-light-375.jpg) | [Edit](exemption-edit-zh-CN-light-375.jpg) |
+| English, dark, 375 × 812 | [Drawer](exemptions-en-US-dark-375.jpg) | [Add](exemption-add-en-US-dark-375.jpg) | [Edit](exemption-edit-en-US-dark-375.jpg) |
+
+| English dark phone state | Check |
+| --- | --- |
+| [Discard confirmation](exemption-discard-en-US-dark-375.jpg) | Cancel preserves the reason draft; discard closes the editor |
+| [Duplicate account](exemption-add-conflict-en-US-dark-375.jpg) | Synthetic POST conflict retains the account/reason and disables resubmission |
+| [Expired edit](exemption-edit-invalid-en-US-dark-375.jpg) | Past stored expiry has an invalid field and disabled Save |
+| [Empty drawer](exemptions-empty-en-US-dark-375.jpg) | Explicit empty copy and Add action |
+| [Failed read](exemptions-read-error-en-US-dark-375.jpg) | Explicit failure and 44px GET-retry action |
+
+Phone captures have no horizontal overflow. Escape from a clean new draft
+returns focus to Add; Escape from a clean edit returns focus to its row menu.
+Canceling the actual mounted discard dialog preserves the dirty reason; a
+subsequent discard returns focus to the row menu. Relative expiry now uses at
+least the successful query-read time immediately, so a newly read 24-hour
+exemption does not briefly display 25 hours. The minute timer remains outside
+live announcements. Automated read-retry checks prohibit mutation requests.
+
+Ten regressions failed before their repairs: four exemption accessibility
+cases, two shared confirmation cases, one delayed-read expiry case and three
+DEV adapter contract cases. The adapter now refuses duplicate creates and
+missing edits/deletes, validates fields, preserves creation attribution on edit
+and leaves generation unchanged for no-op edits or rejected mutations. Those
+synthetic contracts are checked against the existing service/storage/HTTP
+behavior; this browser work does not establish real backend writes or Node
+enforcement.
+
+The complete frontend run passed **2157 tests, with one existing skip, across
+182 files** (181 passed, one skipped). TypeScript, changed-source lint,
+production build, fixture-exclusion guard and four production browser smoke
+checks passed. The preceding `50b8061f` passed
+[released-node systemd acceptance](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37683145894),
+but its [Test workflow](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37683145881)
+was canceled while installing pinned Playwright Chromium; frontend unit tests
+and production browser smoke were skipped in that run. It is not counted as
+a successful full CI result. The new candidate's remote CI, remaining per-view
+acceptance, C2/C5/C6, real Node validation and owner approval remain pending.
+
 ## Real backend catalog acceptance
 
 These captures use the production frontend and actual Go backend, normal admin
