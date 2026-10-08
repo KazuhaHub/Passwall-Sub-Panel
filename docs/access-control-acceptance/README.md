@@ -370,8 +370,65 @@ still returns 500. The real built-SPA
 [server-page capture](server-reinstall-empty-access-fixture-zh-CN.jpg)
 (Chinese, default viewport 1531 × 840) shows the three synthetic server rows
 without an access-status line. Syntax validation passed. This Windows preview
-is not a successful Linux reinstallation-gate run; the new candidate's remote
-gate remains pending.
+is not itself a successful Linux reinstallation-gate run. Commit `8dfb38d7`
+subsequently passed both the actual Linux Chromium gate in
+[Test CI](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37852527819)
+and [released-node systemd acceptance](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37852527807).
+The third-party live adapter jobs were skipped; these runs do not establish
+new-kernel destination enforcement.
+
+## List editor (S7)
+
+The existing custom, remote and community-category editors use a 900px desktop
+dialog and a full-screen phone dialog. All fifteen normal captures below were
+visually checked at their actual viewport dimensions; none has horizontal
+document overflow. Existing-list types remain locked. The native CodeMirror
+original-text editor measures 216px high with ten rows. Dialog names contain
+only the title, the type group has a translated accessible name, and close,
+type, fetch, refresh-setting, category/attribute indicator, download and footer
+actions meet the 44px minimum. Selected attribute tags and their removal hit
+areas also meet 44px; keyboard deletion preserves literal negative attributes.
+
+| Language/theme/viewport | Custom | Remote | Community category |
+| --- | --- | --- | --- |
+| Chinese, dark, 375 × 812 | [Original text](list-editor-custom-zh-CN-dark-375.jpg) | [Explicit fetch](list-editor-remote-zh-CN-dark-375.jpg) | [Filtered report](list-editor-category-zh-CN-dark-375.jpg) |
+| Chinese, dark, 1440 × 900 | [Original text](list-editor-custom-zh-CN-dark-1440.jpg) | [Explicit fetch](list-editor-remote-zh-CN-dark-1440.jpg) | [Filtered report](list-editor-category-zh-CN-dark-1440.jpg) |
+| Chinese, light, 375 × 812 | [Original text](list-editor-custom-zh-CN-light-375.jpg) | [Explicit fetch](list-editor-remote-zh-CN-light-375.jpg) | [Filtered report](list-editor-category-zh-CN-light-375.jpg) |
+| Chinese, light, 1440 × 900 | [Original text](list-editor-custom-zh-CN-light-1440.jpg) | [Explicit fetch](list-editor-remote-zh-CN-light-1440.jpg) | [Filtered report](list-editor-category-zh-CN-light-1440.jpg) |
+| English, dark, 375 × 812 | [Original text](list-editor-custom-en-US-dark-375.jpg) | [Explicit fetch](list-editor-remote-en-US-dark-375.jpg) | [Filtered report](list-editor-category-en-US-dark-375.jpg) |
+
+| Additional capture | Check |
+| --- | --- |
+| [Selected negative attribute](list-editor-category-attrs-en-US-dark-375.jpg) | `!cn` remains literal; selected tag and removal hit area measure 44px |
+| [Discard confirmation](list-editor-discard-en-US-dark-375.jpg) | Shared confirmation appears; cancel preserves the selected attribute draft |
+| [Remote fetch failure](list-editor-remote-fetch-error-en-US-dark-375.jpg) | Explicit synthetic fetch fails; cached four-entry report and old-content explanation remain |
+| [Blank custom draft](list-editor-empty-zh-CN-light-375.jpg) | Real-backend empty preview accepts zero entries; Save stays disabled |
+| [Real custom report](list-editor-live-custom-report-zh-CN-light-375.jpg) | Actual backend accepts two entries, normalizes two and ignores three, including one broad regexp |
+| [Real report line jump](list-editor-live-line-jump-zh-CN-light-375.jpg) | Clicking line four focuses CodeMirror and selects `regexp:.*`; report line targets measure 44 × 44px |
+| [Missing catalog](list-editor-catalog-missing-zh-CN-light-375.jpg) | Explicit 44px download action; no usable category and Save disabled |
+| [Catalog download failure](list-editor-catalog-failed-zh-CN-light-375.jpg) | Synthetic queued download settles to a translated read error with explicit retry and Save disabled |
+
+The normal matrix, attribute/discard, remote failure and missing/failed catalog
+use the DEV adapter. Its generated preview digests are synthetic and do not
+prove unchanged executable bytes or restart counts. The blank draft and two
+custom-report captures instead use the actual isolated Go backend, with fixtures
+disabled through their normal tool. The five original lines are a comment,
+`*.Example.COM.`, an unsupported modifier rule, `regexp:.*` and `192.0.2.1/24`.
+The accepted output is `domain:example.com` and `192.0.2.0/24`; the broad regexp
+is excluded. The native DOM selection after line-four activation was exactly
+`regexp:.*`, with focus on the original-text editor. Save was enabled after
+valid parsing, but the draft was discarded without saving. Locale, automatic
+theme and default viewport were restored after capture.
+
+Five accessibility regressions failed before repair. The final relevant
+access-control, query, fixture, shared-confirmation, risk drawer, style and
+contrast suite passed 348 cases in 26 files. TypeScript, changed-source lint,
+production build, fixture exclusion and four production browser smoke checks
+passed. This fills the three editor variants and documented extra states;
+initial original-read failure/reload has a unit regression but no editor
+browser capture yet. Complete C2/C5/C6, other per-view matrices, true Node
+enforcement and owner acceptance remain pending. The S7 candidate's remote CI
+is separate from the successful `8dfb38d7` runs above.
 
 ## Real backend catalog acceptance
 

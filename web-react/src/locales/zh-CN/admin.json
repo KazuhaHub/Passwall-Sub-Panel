@@ -378,6 +378,7 @@
     "list_editor": {
       "create_title": "新建列表",
       "edit_title": "编辑列表",
+      "type": "列表类型",
       "name": "名称",
       "text": "列表原文（每行一条）",
       "url": "HTTPS 地址",

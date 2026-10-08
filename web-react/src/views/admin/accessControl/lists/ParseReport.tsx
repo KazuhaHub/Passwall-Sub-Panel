@@ -11,7 +11,7 @@ export default function ParseReport({ report, kind, onLine }: { report: Destinat
     {!!report.ignored_broad && <Alert severity="warning" sx={{ my: 1 }}>{t(`${P}broad_removed`, { count: report.ignored_broad })}</Alert>}
     <Stack spacing={1} sx={{ mt: 1 }}>{report.samples.map((sample, index) => <Box key={`${sample.line}-${index}`} sx={{ minWidth: 0 }}>
       <Stack direction="row" spacing={1} sx={{ alignItems: 'baseline', flexWrap: 'wrap' }}>
-        {onLine && kind === 'custom' ? <Button size="small" sx={{ p: 0, minWidth: 0 }} onClick={() => onLine(sample.line)}>{t(`${P}line`, { line: sample.line })}</Button> : <Typography variant="caption">{t(`${P}${kind === 'geosite' ? 'source_entry' : 'line'}`, { line: sample.line })}</Typography>}
+        {onLine && kind === 'custom' ? <Button size="small" sx={{ p: 0, minWidth: 44, minHeight: 44 }} onClick={() => onLine(sample.line)}>{t(`${P}line`, { line: sample.line })}</Button> : <Typography variant="caption">{t(`${P}${kind === 'geosite' ? 'source_entry' : 'line'}`, { line: sample.line })}</Typography>}
         <Typography variant="caption" color={sample.reason === 'broad_entry' ? 'warning.main' : 'text.secondary'}>{t(`${P}reason.${sample.reason}`, { defaultValue: sample.reason })}</Typography>
       </Stack>
       <Typography variant="body2" sx={{ fontFamily: 'monospace', overflowWrap: 'anywhere' }}>{sample.text}</Typography>

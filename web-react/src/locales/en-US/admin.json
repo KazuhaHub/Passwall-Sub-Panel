@@ -380,6 +380,7 @@
     "list_editor": {
       "create_title": "New list",
       "edit_title": "Edit list",
+      "type": "List type",
       "name": "Name",
       "text": "Original list text (one entry per line)",
       "url": "HTTPS address",

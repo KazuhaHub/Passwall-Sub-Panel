@@ -1826,12 +1826,33 @@ UI/style checks passed 343 cases; TypeScript, lint, build, fixture exclusion and
 four production browser smoke checks passed. Lists-tab and editor acceptance
 still require their remaining checks.
 
+The S7 editor now gives its type group a translated accessible name and keeps
+the title separate from a 44px close button. Fetch, global refresh-setting,
+reload, report line, category/attribute, download and footer actions meet the
+same minimum. Selected category-attribute tags retain keyboard deletion,
+including literal negative attributes. The acceptance index adds twenty-three
+captures: all three editors in Chinese light/dark desktop/phone and English
+phone, plus selected attributes, discard, remote failure, blank draft, real
+custom parsing/line selection and missing/failed catalog. Native CodeMirror
+measured 216px high; desktops measured 900px and phones were full-screen
+without horizontal overflow. The real backend normalized two entries and
+excluded one broad regexp, and clicking its report line selected that exact
+original line. This preview draft was discarded without saving. Five
+accessibility failures became green; 348 relevant tests in 26 files,
+TypeScript, changed-source lint, production build, fixture exclusion and four
+production smoke checks passed. Initial original-read failure/reload still
+needs an editor browser capture, and full stage acceptance remains open.
+
 The `01595a2f` Test workflow failed in Linux Chromium reinstallation acceptance
 because its fixture rejected the server page's new destination-status/policy
 GET requests. The exact reads now return empty fleet state; destination writes
 remain rejected and the gate asserts no such mutation. Local HTTP and built-SPA
-preview checks passed, while the new Linux CI run remains pending. The same
-commit's released-node systemd acceptance passed.
+preview checks passed. Commit `8dfb38d7` subsequently passed actual Linux
+Chromium reinstallation acceptance in its complete
+[Test workflow](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37852527819)
+and [released-node systemd acceptance](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37852527807).
+Third-party live adapter jobs were skipped. These green results precede the
+S7 candidate and do not establish new-kernel enforcement.
 
 List previews and policy previews are excluded from write-audit logging by
 exact POST path. Other destination writes, including `/dest/test`, retain normal

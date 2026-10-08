@@ -12,7 +12,7 @@ export default function GeositeDownloadNotice({ message, pending, disabled, fail
   const { t } = useAccessTranslation('admin')
   return <Stack spacing={1}>
     <Alert severity="info">{message ?? t('admin:access_control.categories.missing')}</Alert>
-    <AsyncButton sx={{ alignSelf: 'flex-start' }} pending={pending} disabled={disabled} onClick={onDownload}>{t('admin:access_control.categories.download')}</AsyncButton>
+    <AsyncButton sx={{ alignSelf: 'flex-start', minHeight: 44 }} pending={pending} disabled={disabled} onClick={onDownload}>{t('admin:access_control.categories.download')}</AsyncButton>
     {failed && <Alert severity="error">{t('admin:access_control.categories.failed')}</Alert>}
   </Stack>
 }
