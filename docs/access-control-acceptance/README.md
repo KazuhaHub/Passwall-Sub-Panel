@@ -323,6 +323,56 @@ and production browser smoke were skipped in that run. It is not counted as
 a successful full CI result. The new candidate's remote CI, remaining per-view
 acceptance, C2/C5/C6, real Node validation and owner approval remain pending.
 
+## List entries drawer (S6)
+
+The entries surface now uses the default page-drawer layer (1200), with a
+560px desktop width and full phone width, instead of a 640px modal dialog.
+Its real list editor remains at layer 1300. Canceling that editor returns focus
+to Edit; opening a list with Enter and closing with Escape returns focus to the
+list-name button when the layout is unchanged. Type filters expose
+`aria-pressed` and toggle without refreshing content. Close, filters, entry
+tests, edit/refresh and failed/stale-read retry actions have 44px minimums.
+
+| Capture | Language/theme/viewport | Check |
+| --- | --- | --- |
+| [Chinese dark desktop](list-entries-zh-CN-dark-1440.jpg) | Chinese, dark, 1440 × 900 | 560px drawer and complete-count report |
+| [Chinese dark phone](list-entries-zh-CN-dark-375.jpg) | Chinese, dark, 375 × 812 | Wrapped type filters and report |
+| [Chinese light desktop](list-entries-zh-CN-light-1440.jpg) | Chinese, light, 1440 × 900 | Same drawer and report |
+| [Chinese light phone](list-entries-zh-CN-light-375.jpg) | Chinese, light, 375 × 812 | Full phone width and readable report |
+| [English phone](list-entries-en-US-dark-375.jpg) | English, dark, 375 × 812 | Full-content totals, bounded samples and entry-test actions |
+| [Empty entries](list-entries-empty-zh-CN-light-375.jpg) | Chinese, light, 375 × 812 | Never-downloaded list: zero entries and no parse report |
+| [Failed read](list-entries-read-error-zh-CN-light-375.jpg) | Chinese, light, 375 × 812 | Explicit read failure and 44px retry |
+
+These destination reads use the DEV adapter. Chinese report captures filter
+the accepted sample with `hsbc` to show the excluded broad entry in the report;
+the search stays out of the URL. Phone views have no horizontal overflow.
+Five cases failed before repair, including the real drawer-to-editor layering
+integration. The repaired page tests passed 86 cases; the wider relevant UI,
+adapter, shared confirmation, risk drawer, style and contrast checks passed
+343 cases in 25 files. TypeScript, changed-source lint, production build,
+fixture exclusion and four production browser smoke checks passed. This fills
+the entries-drawer variants, not the entire lists tab/editor acceptance.
+
+## Server reinstallation fixture contract
+
+Commit `01595a2f` passed
+[released-node systemd acceptance](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37851013928).
+Its [Test workflow](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37851013910)
+passed the frontend unit/build/smoke steps and backend/database checks, but the
+Linux Chromium reinstallation gate failed: the fixture did not recognize the
+native server row's GET `/api/admin/dest/status` and `/api/admin/dest/policies`.
+
+The fixture now answers only those exact reads with empty, unpublished fleet
+state. Destination writes still fail, and the Linux browser gate asserts both
+read requests and absence of destination mutations. Local HTTP verification
+changed both reads from 500 to 200 and confirmed a destination publish POST
+still returns 500. The real built-SPA
+[server-page capture](server-reinstall-empty-access-fixture-zh-CN.jpg)
+(Chinese, default viewport 1531 × 840) shows the three synthetic server rows
+without an access-status line. Syntax validation passed. This Windows preview
+is not a successful Linux reinstallation-gate run; the new candidate's remote
+gate remains pending.
+
 ## Real backend catalog acceptance
 
 These captures use the production frontend and actual Go backend, normal admin

@@ -1817,6 +1817,22 @@ exclusion and four production browser smoke checks passed. The preceding
 `50b8061f` systemd CI succeeded, while its Test workflow was canceled during
 Playwright Chromium installation. The new candidate's remote CI remains pending.
 
+The list-entry surface now follows the page-drawer specification: 560px on
+desktop, full phone width and default drawer layer below the actual list editor.
+Type filters expose their pressed state, and close/filter/test/edit/refresh/read
+retry actions meet the 44px minimum. Seven captures cover Chinese light/dark
+desktop/phone, English phone, empty entries and failed reads. The wider relevant
+UI/style checks passed 343 cases; TypeScript, lint, build, fixture exclusion and
+four production browser smoke checks passed. Lists-tab and editor acceptance
+still require their remaining checks.
+
+The `01595a2f` Test workflow failed in Linux Chromium reinstallation acceptance
+because its fixture rejected the server page's new destination-status/policy
+GET requests. The exact reads now return empty fleet state; destination writes
+remain rejected and the gate asserts no such mutation. Local HTTP and built-SPA
+preview checks passed, while the new Linux CI run remains pending. The same
+commit's released-node systemd acceptance passed.
+
 List previews and policy previews are excluded from write-audit logging by
 exact POST path. Other destination writes, including `/dest/test`, retain normal
 audit behavior; destination audit rows remain restricted to administrators.
