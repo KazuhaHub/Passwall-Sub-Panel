@@ -73,7 +73,7 @@ func validReceiverLossBatch(b domain.DestAuditLossBatch) bool {
 			return false
 		}
 		switch loss.Reason {
-		case "queue_full", "collect_off", "stale_collect_revision", "ingest_error":
+		case "queue_full", "collect_off", "stale_collect_revision", "ingest_error", "unknown_subject", "out_of_range", "over_budget":
 		default:
 			return false
 		}

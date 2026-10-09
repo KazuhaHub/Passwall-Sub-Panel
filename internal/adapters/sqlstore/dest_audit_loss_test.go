@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
+	mysqlsql "github.com/go-sql-driver/mysql"
+	mysqldriver "gorm.io/driver/mysql"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )
@@ -177,5 +179,40 @@ func TestDestAuditReceiverLossConcurrentRepositoryRetries(t *testing.T) {
 	var row destAuditLossHourlyRow
 	if err := r.db.Where("reason = ?", "queue_full").First(&row).Error; err != nil || row.Rows != 7 {
 		t.Fatalf("concurrent flush%+v %v", row, err)
+	}
+}
+
+func TestDestAuditReceiverLossMySQLFoundRowsConnectionRetriesOnce(t *testing.T) {
+	r, b := auditLossFixture(t)
+	if r.db.Dialector.Name() != "mysql" {
+		t.Skip("requires the actual MySQL dialect job")
+	}
+	dialect := r.db.Dialector
+	if wrapper, ok := dialect.(reusableSchemaDialector); ok {
+		dialect = wrapper.Dialector
+	}
+	config, err := mysqlsql.ParseDSN(dialect.(*mysqldriver.Dialector).Config.DSN)
+	if err != nil {
+		t.Fatal(err)
+	}
+	config.ClientFoundRows = true
+	other, err := Open("mysql", config.FormatDSN())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { closeGormDB(other) })
+	second := NewDestAuditRepo(other)
+	second.now = r.now
+	if err := r.FlushDestinationAuditLoss(t.Context(), b); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if err := second.FlushDestinationAuditLoss(t.Context(), b); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var row destAuditLossHourlyRow
+	if err := second.db.Where("reason = ?", "queue_full").First(&row).Error; err != nil || row.Rows != 7 {
+		t.Fatalf("MySQL found rows receiver replay%+v %v", row, err)
 	}
 }
