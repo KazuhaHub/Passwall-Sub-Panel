@@ -1,5 +1,6 @@
 /** @vitest-environment jsdom */
 import { ThemeProvider } from '@mui/material'
+import { useState } from 'react'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
 import { createAppTheme } from '@/theme'
@@ -7,6 +8,29 @@ import ConfirmHost, { confirm } from './ConfirmHost'
 
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key }) }))
 afterEach(cleanup)
+
+it.each(['cancel', 'escape'] as const)('returns to a temporarily disabled save action after %s', async action => {
+  const resolved = vi.fn()
+  function SaveAction() {
+    const [busy, setBusy] = useState(false)
+    return <button disabled={busy} onClick={async () => {
+      setBusy(true)
+      try { resolved(await confirm({ title: 'Enable first policy?', message: 'Consequence.', confirmText: 'Enable' })) }
+      finally { setBusy(false) }
+    }}>Save</button>
+  }
+  render(<ThemeProvider theme={createAppTheme({ mode: 'light', sourceColor: '#0061a4', language: 'en-US' })}><SaveAction /><ConfirmHost /></ThemeProvider>)
+  const trigger = screen.getByRole('button', { name: 'Save' })
+  trigger.focus(); fireEvent.click(trigger)
+  const dialog = await screen.findByRole('dialog')
+  expect(trigger.hasAttribute('disabled')).toBe(true)
+  if (action === 'escape') fireEvent.keyDown(dialog, { key: 'Escape' })
+  else fireEvent.click(screen.getByRole('button', { name: 'actions.cancel' }))
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+  expect(resolved).toHaveBeenCalledExactlyOnceWith(false)
+  expect(trigger.hasAttribute('disabled')).toBe(false)
+  await waitFor(() => expect(document.activeElement).toBe(trigger))
+})
 
 it.each(['cancel', 'confirm', 'escape'] as const)('returns focus to the persistent action button after %s when the menu item unmounts', async action => {
   const { rerender } = render(<ThemeProvider theme={createAppTheme({ mode: 'light', sourceColor: '#0061a4', language: 'en-US' })}><button key="trigger">Row actions</button><button key="menu">Transient menu item</button><ConfirmHost key="host" /></ThemeProvider>)

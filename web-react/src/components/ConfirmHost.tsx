@@ -38,8 +38,12 @@ export function confirm(opts: ConfirmOpts, returnFocus?: HTMLElement | null): Pr
       resolve(false)
       return
     }
+    // Capture before the caller's pending render can disable its action.
+    // Menu callers supply a stable trigger because the active item unmounts.
+    const active = document.activeElement
+    const origin = returnFocus ?? (active instanceof HTMLElement && active !== document.body ? active : null)
     resolver = resolve
-    setStateExternal({ open: true, opts, returnFocus })
+    setStateExternal({ open: true, opts, returnFocus: origin })
   })
 }
 

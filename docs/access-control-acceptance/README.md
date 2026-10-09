@@ -944,3 +944,27 @@ production smoke checks passed. The [catalog](../access-control-confirmations.md
 records the remaining dialogs and evidence boundaries. This package does not
 close the complete S20/per-view matrices, C2/C5/C6, candidate Node enforcement,
 owner acceptance or dependency/release gates.
+
+### First-enable and direct-action focus
+
+The next shared-host repair captures the origin synchronously before pending
+renders disable the initiating action. This preserves the explicit stable
+menu-trigger behavior and also covers direct actions inside an editor or page.
+
+| Native English light desktop capture (1280×720) | Check |
+| --- | --- |
+| [First-enable confirmation](s20-first-publish-focus-en-light-1280.jpg) | Confirmation is above the editor; the underlying Save is temporarily disabled |
+| [Canceled first enable](s20-first-publish-canceled-focus-en-light-1280.jpg) | Enter on Cancel returns focus to Save and retains the mail-template draft |
+| [Canceled direct Resume](s20-resume-canceled-focus-en-light-1280.jpg) | The page's Resume button regains focus after canceling its confirmation |
+
+Escape cancellation of first enable independently returned to Save; closing
+the clean editor then showed the unchanged empty-policy page. No policy was
+created. The direct Resume path was checked in normal synthetic fixtures;
+execution was restored afterward. English, automatic theme, normal fixtures
+and default viewport were retained with no open dialog.
+
+Two new save-action focus regressions failed before repair. All nine host tests
+and the final relevant suite (438 tests in 31 files) passed. TypeScript,
+changed-source lint, production build, fixture exclusion and four production
+smoke checks passed. This adds keyboard evidence without claiming full S20,
+owner approval or real candidate Node enforcement.

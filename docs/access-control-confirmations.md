@@ -76,3 +76,22 @@ light phone. Keyboard cancellation returns to the policy/list/header triggers;
 Tab and Shift+Tab stay inside the restore dialog. These are isolated synthetic
 UI checks, with no policy/list deletion performed. Complete S20, later group
 dialogs, real candidate Node enforcement and owner acceptance remain open.
+
+### Temporarily disabled direct actions
+
+A subsequent native check found that canceling the editor's first-enable
+confirmation preserved the draft but focused the dialog container instead of
+Save. Its pending render disables Save before MUI records the origin. The host
+now captures the active element synchronously in `confirm()`, before that
+render, and restores it after exit. Menu callers still provide their persistent
+trigger explicitly. Disconnected targets are ignored; calls without a usable
+origin retain MUI's default restoration.
+
+Two cancellation/Escape regressions failed before this change. All nine host
+tests and the final 438-test relevant suite passed, along with TypeScript,
+changed-source lint, production build, fixture exclusion and four production
+smoke checks. Native Enter cancellation and Escape cancellation returned to
+Save with the template intact and no created policy. The page's direct Resume
+action also regained focus after cancellation. Three additional screenshots
+are linked in the evidence index; the unchanged confirmation appearance uses
+the preceding twenty-image matrix. These checks remain synthetic UI evidence.
