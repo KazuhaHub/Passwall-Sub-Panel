@@ -14,6 +14,21 @@ function harness(scenario: AccessFixtureScenario = 'normal') {
 afterEach(() => vi.useRealTimers())
 
 describe('reproducible access-control acceptance fixtures', () => {
+  it('holds a synthetic node retry, then fails without changing node state or using live transport', async () => {
+    vi.useFakeTimers()
+    const { client, fallback } = harness('node-retry-pending')
+    const before = (await client.get('/admin/dest/status')).data
+    const agent = before.nodes.find((node: { state: string }) => node.state === 'rejected').agent_id
+    const outcome = client.post(`/admin/dest/agents/${encodeURIComponent(agent)}/retry`).then(() => 'retried', error => error)
+    await vi.advanceTimersByTimeAsync(1000)
+    expect((await client.get('/admin/dest/status')).data.nodes).toEqual(before.nodes)
+    await vi.advanceTimersByTimeAsync(29000)
+    expect(await outcome).toMatchObject({ response: { status: 503, data: { error: 'fixture_unavailable' } } })
+    const latest = (await client.get('/admin/dest/status')).data
+    expect(latest.nodes).toEqual(before.nodes)
+    expect([latest.generation, latest.published_generation, latest.paused]).toEqual([before.generation, before.published_generation, before.paused])
+    expect(fallback).not.toHaveBeenCalled(); expect(vi.getTimerCount()).toBe(0)
+  })
   it('holds a synthetic cancellation, then fails without mutating exemptions or using live transport', async () => {
     vi.useFakeTimers()
     const { client, fallback } = harness('account-cancel-pending')

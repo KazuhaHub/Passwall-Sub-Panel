@@ -1171,3 +1171,39 @@ The complete local frontend suite then passed 2,284 tests in 187 passing files,
 with one existing skipped test/file (188 files total). This includes the final
 admission fix; it does not replace the new commit's complete Linux CI or the
 remaining real-runtime/UI gates.
+
+### Node retry failures after leaving coverage
+
+S14 permits closing or navigating away from node coverage while an explicit
+deployment retry remains in flight. Previously, a failure then updated only
+the unmounted drawer and its explanation disappeared. A mounted drawer still
+shows its inline error; an unmounted drawer now sends the failure to the global
+snackbar. The same request completes without an automatic retry or a navigation
+lock. Successful retry requests retain their existing global notification.
+
+Two caller regressions reproduced lost failures after close and page departure
+before repair. A mounted-failure check preserves inline-only feedback and
+re-enabled retry, and an integration check uses the actual snackbar host.
+The isolated `node-retry-pending` adapter waits 30 seconds, fails with HTTP 503,
+and preserves node states, generation, publication and pause state. Its
+no-mutation contract also failed before the adapter scenario was added.
+The final relevant suite passed 479 tests in 35 files. TypeScript,
+changed-source lint, production build, fixture exclusion and four production
+smoke checks also passed.
+
+| Synthetic node retry state | Native English phone evidence |
+| --- | --- |
+| Node 7 remains rejected; retry controls are disabled while Close remains available | [Pending retry](s14-retry-pending-en-light-375.jpg) |
+| Drawer closed; the same request is still working | [Closed while pending](s14-retry-closed-pending-en-light-375.jpg) |
+| Request failed after close; the global failure notification is visible | [Late failure](s14-retry-late-failure-en-light-375.jpg) |
+
+The final capture was taken after the notification's entrance animation reached
+full opacity. Earlier delayed observations missed its four-second display;
+continuous observation of the same request established the result. These are
+synthetic UI checks, with no real deployment or node-state mutation, and do not
+establish candidate Node enforcement or the complete S14 acceptance matrix.
+
+The preceding `d101a960bd7f3aee455b62162537efdebf9b0c41` passed its own
+[complete Test CI](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37909648586)
+and [released-node systemd acceptance](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37909648576).
+Third-party live-panel adapters were skipped; a new head requires its own CI.

@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Alert, Box, Button, Drawer, DialogContent, DialogTitle, IconButton, Skeleton, Stack, Typography, useTheme } from '@mui/material'
 import CloseIcon from '@mui/icons-material/Close'
 import { useAccessTranslation } from '@/views/admin/accessControl/useAccessTranslation'
@@ -28,11 +28,17 @@ export default function NodeCoverageDrawer({ status, loading, failed, refreshing
   const retry = useRetryDestinationPolicy(useQueryScope())
   const [error, setError] = useState('')
   const admission = useRef(false)
+  const mounted = useRef(true)
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
   const retryNode = async (agentId: string) => {
     if (admission.current) return
     admission.current = true; setError('')
     try { await retry.mutateAsync(agentId); pushSnack(t(`${P}retry_requested`), 'success') }
-    catch (error) { setError(destinationError(error).error) }
+    catch (error) {
+      const reason = destinationError(error).error
+      if (mounted.current) setError(reason)
+      else pushSnack(t('admin:access_control.write_failed', { error: reason }), 'error')
+    }
     finally { admission.current = false }
   }
   const now = Date.now()

@@ -5,7 +5,7 @@ import type { Server } from '@/api/servers'
 import { destinationListAvailable } from '@/utils/destinationListAvailability'
 import { accessControlFixtureSeed, destinationPolicies, destinationStatus } from '@/test/accessControlFixtures'
 
-export const accessFixtureScenarios = ['normal', 'empty', 'error', 'catalog-missing', 'catalog-failed', 'policy-preview-error', 'policy-over-quota', 'policy-conflict', 'policy-save-pending', 'policy-lists-error', 'policy-groups-error', 'template-over-quota', 'templates-catalog-missing', 'list-original-read-error', 'settings-save-pending', 'list-delete-conflict', 'account-read-error', 'account-cancel-pending'] as const
+export const accessFixtureScenarios = ['normal', 'empty', 'error', 'catalog-missing', 'catalog-failed', 'policy-preview-error', 'policy-over-quota', 'policy-conflict', 'policy-save-pending', 'policy-lists-error', 'policy-groups-error', 'template-over-quota', 'templates-catalog-missing', 'list-original-read-error', 'settings-save-pending', 'list-delete-conflict', 'account-read-error', 'account-cancel-pending', 'node-retry-pending'] as const
 export type AccessFixtureScenario = typeof accessFixtureScenarios[number]
 
 function savedScenario(): AccessFixtureScenario {
@@ -342,7 +342,11 @@ export function createAccessControlMock(fallback: AxiosAdapter, options: { scena
       return response({ list_id: list.id, policy_id: policy.id, entry, ...(created ? { created } : {}) }, 201)
     }
     const retryMatch = path.match(/^\/admin\/dest\/agents\/([^/]+)\/retry$/)
-    if (retryMatch && method === 'POST') { const node = seed.nodes.find(n => n.agent_id === decodeURIComponent(retryMatch[1])) ?? fail(404, 'not_found'); node.state = 'pending'; node.pending_since = Date.now(); return response({ retry_requested: true }) }
+    if (retryMatch && method === 'POST') {
+      const node = seed.nodes.find(n => n.agent_id === decodeURIComponent(retryMatch[1])) ?? fail(404, 'not_found')
+      if (scenario === 'node-retry-pending') { await delay(config, 30000); return fail(503, 'fixture_unavailable') }
+      node.state = 'pending'; node.pending_since = Date.now(); return response({ retry_requested: true })
+    }
     if (path === '/admin/dest/test' && method === 'POST') {
       const steps: DestinationTestResult['steps'] = ['allow', 'exemption', 'block', 'group', 'observe', 'direct'].map(step => ({ step: step as DestinationTestResult['steps'][number]['step'], result: 'miss' }))
       const target = String(body.target ?? '').toLowerCase()

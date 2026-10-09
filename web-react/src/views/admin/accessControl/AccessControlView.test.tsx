@@ -709,6 +709,33 @@ it('opens the full list view for a publication quota error without carrying a pr
   expect(screen.getByRole('tab', { name: `${P}lists.title`, selected: true })).toBeTruthy()
   expect(api.post).not.toHaveBeenCalled()
 })
+it.each(['close', 'navigate'] as const)('reports a late failed node retry after %s without restarting it', async departure => {
+  const original = api.get.getMockImplementation()!
+  api.get.mockImplementation(async (url: string, config?: unknown) => url.endsWith('/status') ? { data: destinationStatus({ nodes: [destinationNode({ state: 'rejected' })] }) } : original(url, config))
+  let fail!: (error: unknown) => void
+  api.post.mockImplementation(() => new Promise((_resolve, reject) => { fail = reject }))
+  const router = mount('/admin/access-control?sheet=nodes')
+  fireEvent.click(await screen.findByRole('button', { name: `${P}coverage.retry` }))
+  await waitFor(() => expect(api.post).toHaveBeenCalledOnce())
+  if (departure === 'close') fireEvent.click(screen.getByRole('button', { name: 'common:actions.close' }))
+  else await act(async () => { void router.navigate('/admin/dashboard') })
+  await waitFor(() => expect(screen.queryByRole('dialog', { name: `${P}coverage.title` })).toBeNull())
+  fail(err(503, 'retry_failed'))
+  await waitFor(() => expect(snack).toHaveBeenCalledWith(`${P}write_failed`, 'error'))
+  expect(api.post).toHaveBeenCalledOnce()
+  expect(snack).not.toHaveBeenCalledWith(`${P}coverage.retry_requested`, 'success')
+})
+it('keeps a failed node retry inline while the coverage sheet remains open', async () => {
+  const original = api.get.getMockImplementation()!
+  api.get.mockImplementation(async (url: string, config?: unknown) => url.endsWith('/status') ? { data: destinationStatus({ nodes: [destinationNode({ state: 'rejected' })] }) } : original(url, config))
+  api.post.mockRejectedValueOnce(err(503, 'retry_failed'))
+  mount('/admin/access-control?sheet=nodes')
+  fireEvent.click(await screen.findByRole('button', { name: `${P}coverage.retry` }))
+  const drawer = screen.getByRole('dialog', { name: `${P}coverage.title` })
+  expect(await within(drawer).findByText('retry_failed')).toBeTruthy()
+  await waitFor(() => expect(within(drawer).getByRole('button', { name: `${P}coverage.retry` }).hasAttribute('disabled')).toBe(false))
+  expect(api.post).toHaveBeenCalledOnce(); expect(snack).not.toHaveBeenCalled()
+})
 it('admits a node retry only once while its request is pending', async () => {
   const original = api.get.getMockImplementation()!
   api.get.mockImplementation(async (url: string, config?: unknown) => url.endsWith('/status') ? { data: destinationStatus({ nodes: [destinationNode({ state: 'rejected' })] }) } : original(url, config))
