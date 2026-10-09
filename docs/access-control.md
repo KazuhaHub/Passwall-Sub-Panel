@@ -7,9 +7,9 @@ Implementation follows the [final audit plan](https://github.com/KazuhaHub/Passw
 - Definition tables: `dest_lists`, `dest_policies`, `dest_exemptions`, `dest_group_modes`.
 - Publication and runtime state: `dest_policy_state`, `dest_policy_snapshots`, `dest_agent_policy`.
 - Durable audit storage: `dest_hits`, `dest_usage_hourly`, `dest_audit_batches`, `dest_audit_loss_hourly`, `dest_audit_ingest_budget`. Collection and ingestion are not connected yet.
-- The sync HTTP boundary decodes `audit` separately, bounds its raw size and validates its shape and capabilities. Invalid telemetry is dropped without changing a valid control response. Audit batches are stripped from control caches; the asynchronous ingestion worker is still pending, so decoded acceptance does not mean durable storage.
+- The sync HTTP boundary decodes `audit` separately, bounds its raw size and validates its shape and capabilities. Invalid telemetry is dropped without changing a valid control response. Audit batches are stripped from control caches; the worker has not been connected to production sync, so decoded acceptance does not mean durable storage.
 - `psp_node_audit_report_total` uses the fixed `kind` and `outcome` enum labels. Diagnostics translate both labels in English and Chinese; existing single-label metric values keep their original interpretation. Logs for discarded audit subtrees contain only the authenticated agent identifier and a count, with per-agent rate limiting.
-- The audit queue foundation reserves independent batch/byte/per-agent capacity for block, observe, trial and usage, including processing batches. In-flight deduplication is independent of bounded recent caches. Its seven-slot scheduler yields after each future database chunk. Mapping merges final hit keys before persistence, preserves frozen actions and anonymous trial fields, and applies receiver-clock age bounds. The worker and production sync connection remain pending.
+- The audit queue foundation reserves independent batch/byte/per-agent capacity for block, observe, trial and usage, including processing batches. In-flight deduplication is independent of bounded recent caches. Its seven-slot scheduler yields after each database chunk. Mapping merges final hit keys before persistence, preserves frozen actions and anonymous trial fields, and applies receiver-clock age bounds. Production sync and application lifecycle connection remain pending.
 - New tables participate in the normal boot migration. JSON columns use TEXT without defaults. Binary list content, original custom-list text, snapshots and policy bodies use SQLite BLOB, PostgreSQL BYTEA and MySQL LONGBLOB.
 - Candidate bytes are stored independently from confirmed policy bytes. The compiler and candidate observer use the latter for pruned last-known-good fallback and durable exhaustion, as described below.
 - Native panel collection settings are stored as `audit_collect` (`off`, `hits`, `hits_and_usage`) and `audit_collect_revision`. Creation and migration initialize `hits` and revision `1`. A normal panel `Save` omits these columns.
@@ -35,9 +35,29 @@ value-bearing database errors become a fixed storage error at this boundary.
 
 Local SQLite transaction tests verify rollback, replay, partial failure, budget
 isolation, count/time upserts, anonymous trial rows, collection changes and SQL
-privacy. PostgreSQL/MySQL runtime verification and worker/sync integration remain
-pending. Usage persistence is prepared internally; production usage collection
+privacy. Storage foundation `7c55cd5a72f6515759b440934274b681349cbb2c`
+passed the [complete Test workflow](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37996403773),
+including actual PostgreSQL and MySQL repository suites and the MySQL
+`clientFoundRows=true` connection test. Worker/sync integration remains pending.
+Usage persistence is prepared internally; production usage collection
 remains inactive until its stage-4 acceptance.
+
+The worker engine handles one transaction per scheduling opportunity and keeps
+at most four mapped batches. It preserves the exact first receipt timestamp and
+the original budget hour, resolves distinct subject IDs in bounded queries, and
+rechecks receiver-clock age between chunks. The ID resolver reads only user IDs
+and disables tracing at the same private storage boundary; it does not load
+account metadata. Failed chunks stop the remainder, permission rejection stops
+the batch, and canceled progress cannot survive a collection-setting change.
+Graceful stopping refuses new offers before draining; forced cancellation
+returns the undrained batch/row counts.
+
+Worker regressions first failed against an empty engine. The current engine
+compiles and passes `go vet`; its Windows test executable was blocked by
+Application Control, so Linux execution is required before claiming these
+regressions pass. New ID-resolution tests and existing audit storage tests passed
+locally. Collection-state cache invalidation, bounded loss persistence, tracked
+worker startup/shutdown and the sync offer remain outstanding.
 
 ## Definition and publication repository
 

@@ -32,6 +32,31 @@ func NewDestAuditRepo(db *gorm.DB) *DestAuditRepo {
 	return &DestAuditRepo{db: db, gates: &keyedmutex.Map[int64]{}}
 }
 
+func (r *DestAuditRepo) ResolveDestinationAuditUsers(ctx context.Context, ids []int64) (map[int64]bool, error) {
+	if len(ids) > protocol.MaxAuditUsage {
+		return nil, domain.ErrValidation
+	}
+	for _, id := range ids {
+		if id <= 0 {
+			return nil, domain.ErrValidation
+		}
+	}
+	ids = slices.Clone(ids)
+	slices.Sort(ids)
+	ids = slices.Compact(ids)
+	known := make(map[int64]bool, len(ids))
+	for start := 0; start < len(ids); start += auditStatementRows {
+		var rows []struct{ ID int64 }
+		if err := r.privateDB(ctx).Model(&userRow{}).Select("id").Where("id IN ?", ids[start:min(start+auditStatementRows, len(ids))]).Find(&rows).Error; err != nil {
+			return nil, auditStorageError(err)
+		}
+		for _, row := range rows {
+			known[row.ID] = true
+		}
+	}
+	return known, nil
+}
+
 // BeginDestinationAudit commits the marker, whole-batch budget reservation,
 // node/mapping losses and first chunk together. There is no durable telemetry ACK.
 func (r *DestAuditRepo) BeginDestinationAudit(ctx context.Context, b domain.DestAuditBatch) (domain.DestAuditBegin, error) {

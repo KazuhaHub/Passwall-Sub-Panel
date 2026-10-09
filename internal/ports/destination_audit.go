@@ -6,6 +6,7 @@ import (
 )
 
 type DestAuditRepo interface {
+	ResolveDestinationAuditUsers(context.Context, []int64) (map[int64]bool, error)
 	BeginDestinationAudit(context.Context, domain.DestAuditBatch) (domain.DestAuditBegin, error)
 	WriteDestinationAuditChunk(context.Context, domain.DestAuditChunk) (string, error)
 }

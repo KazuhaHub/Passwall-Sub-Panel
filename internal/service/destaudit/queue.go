@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"slices"
 	"sync"
+	"time"
 
 	protocol "github.com/KazuhaHub/passwall-protocol/protocol"
 )
@@ -17,6 +18,7 @@ type queuedBatch struct {
 	agentID      string
 	panelID      int64
 	receivedHour int64
+	receivedAt   time.Time
 	body         protocol.AuditObservation
 	bytes        int
 	canceled     bool // accessed only while the queue mutex is held
@@ -61,6 +63,10 @@ func newBatchQueue() *batchQueue {
 // deduplication and all reservations together; processing retains its quota.
 // The caller checks current collection permission before calling this method.
 func (q *batchQueue) offer(agentID string, panelID, receivedHour int64, body protocol.AuditObservation) string {
+	return q.offerAt(agentID, panelID, receivedHour, time.UnixMilli(receivedHour).UTC(), body)
+}
+
+func (q *batchQueue) offerAt(agentID string, panelID, receivedHour int64, receivedAt time.Time, body protocol.AuditObservation) string {
 	if agentID == "" || panelID <= 0 || receivedHour <= 0 || receivedHour%protocol.AuditHourMS != 0 || protocol.ValidateAuditObservation(body) != nil {
 		return "invalid"
 	}
@@ -91,7 +97,7 @@ func (q *batchQueue) offer(agentID string, panelID, receivedHour int64, body pro
 	}
 	body.Hits = slices.Clone(body.Hits)
 	body.Usage = slices.Clone(body.Usage)
-	b := &queuedBatch{agentID: agentID, panelID: panelID, receivedHour: receivedHour, body: body, bytes: len(wire)}
+	b := &queuedBatch{agentID: agentID, panelID: panelID, receivedHour: receivedHour, receivedAt: receivedAt, body: body, bytes: len(wire)}
 	q.inflight[key] = b
 	lane.waiting = append(lane.waiting, b)
 	lane.batches++
@@ -99,6 +105,25 @@ func (q *batchQueue) offer(agentID string, panelID, receivedHour int64, body pro
 	lane.agents[agentID]++
 	q.signal()
 	return "accepted"
+}
+
+func (q *batchQueue) offerReceived(agentID string, panelID int64, receivedAt time.Time, body protocol.AuditObservation) string {
+	if receivedAt.IsZero() {
+		return "invalid"
+	}
+	return q.offerAt(agentID, panelID, receivedAt.UTC().Truncate(time.Hour).UnixMilli(), receivedAt.UTC(), body)
+}
+
+func (q *batchQueue) isCanceled(b *queuedBatch) bool {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return b.canceled || q.inflight[b.key()] != b
+}
+
+func (q *batchQueue) isClosed() bool {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return q.closed
 }
 
 // next is called by exactly one worker, once per database chunk rather than

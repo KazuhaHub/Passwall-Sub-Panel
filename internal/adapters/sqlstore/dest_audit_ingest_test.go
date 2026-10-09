@@ -55,6 +55,68 @@ func auditRowCount(t *testing.T, db *gorm.DB, model any) int64 {
 	return count
 }
 
+func TestDestAuditSubjectResolverOnlyReadsIDsAndBoundsStatements(t *testing.T) {
+	r, _ := auditIngestFixture(t, 0)
+	users := make([]userRow, 450)
+	for i := range users {
+		id := int64(i + 1)
+		users[i] = userRow{ID: id, UPN: fmt.Sprintf("audit-resolver%d@example.test", id), SubToken: fmt.Sprintf("audit-resolver-token%d", id), UUID: fmt.Sprintf("%036d", id), Enabled: i%2 == 0}
+	}
+	if err := r.db.CreateInBatches(&users, 100).Error; err != nil {
+		t.Fatal(err)
+	}
+	recorder := &auditTraceRecorder{Interface: logger.Discard}
+	r.db = r.db.Session(&gorm.Session{Logger: recorder})
+	queries := 0
+	if err := r.db.Callback().Query().Before("gorm:query").Register("audit_id_projection", func(tx *gorm.DB) {
+		if tx.Statement.Table != "users" {
+			t.Errorf("unexpected resolver table%s", tx.Statement.Table)
+		}
+		if len(tx.Statement.Selects) != 1 || tx.Statement.Selects[0] != "id" {
+			t.Error("resolver loads account fields")
+		}
+		queries++
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = r.db.Callback().Query().Remove("audit_id_projection") })
+	ids := []int64{9000, 1, 450}
+	for id := int64(450); id >= 1; id-- {
+		ids = append(ids, id)
+	}
+	known, err := r.ResolveDestinationAuditUsers(t.Context(), ids)
+	if err != nil || len(known) != 450 || !known[1] || !known[2] || !known[450] || known[9000] || queries != 3 {
+		t.Fatalf("known IDs%d queries%d error%v", len(known), queries, err)
+	}
+	if len(recorder.queries) != 0 {
+		t.Fatal("ID lookup reached debug tracing")
+	}
+	if empty, err := r.ResolveDestinationAuditUsers(t.Context(), nil); err != nil || len(empty) != 0 || queries != 3 {
+		t.Fatal("empty list queried accounts")
+	}
+	for _, bad := range [][]int64{{0}, {-1}, make([]int64, protocol.MaxAuditUsage+1)} {
+		if _, err := r.ResolveDestinationAuditUsers(t.Context(), bad); !errors.Is(err, domain.ErrValidation) {
+			t.Fatal("invalid ID input accepted")
+		}
+	}
+	if queries != 3 {
+		t.Fatal("invalid IDs reached storage")
+	}
+}
+
+func TestDestAuditSubjectResolverHidesDatabaseErrorValues(t *testing.T) {
+	r, _ := auditIngestFixture(t, 0)
+	recorder := &auditTraceRecorder{Interface: logger.Discard}
+	r.db = r.db.Session(&gorm.Session{Logger: recorder})
+	if err := r.db.Callback().Query().Before("gorm:query").Register("audit_id_private_error", func(tx *gorm.DB) { tx.AddError(errors.New("private account@example.test and SQL details")) }); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = r.db.Callback().Query().Remove("audit_id_private_error") })
+	if _, err := r.ResolveDestinationAuditUsers(t.Context(), []int64{7}); err != errAuditStorage || len(recorder.queries) != 0 {
+		t.Fatal("ID resolver leaked error or SQL tracing")
+	}
+}
+
 func assertAuditBudget(t *testing.T, r *DestAuditRepo, b domain.DestAuditBatch, want int64) {
 	t.Helper()
 	var row destAuditIngestBudgetRow
