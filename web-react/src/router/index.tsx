@@ -16,6 +16,7 @@ const LoggedOutView = lazy(() => import('@/views/LoggedOutView'))
 const ForgotPasswordView = lazy(() => import('@/views/ForgotPasswordView'))
 const ResetPasswordView = lazy(() => import('@/views/ResetPasswordView'))
 const RegisterView = lazy(() => import('@/views/RegisterView'))
+const LegalView = lazy(() => import('@/views/LegalView'))
 const Enroll2FAView = lazy(() => import('@/views/Enroll2FAView'))
 const VerifyEmailView = lazy(() => import('@/views/VerifyEmailView'))
 const AdminLayout = lazy(() => import('@/layouts/AdminLayout'))
@@ -80,6 +81,7 @@ export const router = createBrowserRouter([
   { path: '/forgot-password', element: <ForgotPasswordView /> },
   { path: '/reset-password', element: <ResetPasswordView /> },
   { path: '/register', element: <RegisterView /> },
+  { path: '/legal/:kind', element: <LegalView /> },
   { path: '/verify-email', element: <VerifyEmailView /> },
   {
     path: '/admin',

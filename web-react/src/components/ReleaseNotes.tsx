@@ -1,6 +1,6 @@
 import { Box, Link, Typography } from '@mui/material'
-import Markdown, { type Components } from 'react-markdown'
-import remarkGfm from 'remark-gfm'
+import type { Components } from 'react-markdown'
+import SafeMarkdown from './SafeMarkdown'
 
 // A RELEASE BODY IS MARKDOWN WRITTEN FOR A GITHUB RELEASE PAGE — a heading, one
 // bulleted pull request per line, a bold "Full Changelog" line — and GitHub
@@ -11,17 +11,6 @@ import remarkGfm from 'remark-gfm'
 // markup: raw HTML is dropped (skipHtml), a link is kept only for an absolute
 // http(s) target, and an image is shown as its alt text, because fetching it would
 // report the operator's address to whatever host the body names.
-
-const allowedProtocols = new Set(['http:', 'https:'])
-
-function safeURL(url: string): string | undefined {
-  try {
-    const parsed = new URL(url)
-    return allowedProtocols.has(parsed.protocol) ? parsed.href : undefined
-  } catch {
-    return undefined
-  }
-}
 
 // Headings are demoted to one small size: the dialog title is the page's
 // heading, and a release body's "##" would otherwise render larger than it.
@@ -42,8 +31,8 @@ const components: Components = {
 
 export default function ReleaseNotes({ children }: { children: string }) {
   return <Box sx={{ overflowWrap: 'anywhere' }}>
-    <Markdown remarkPlugins={[remarkGfm]} skipHtml components={components} urlTransform={url => safeURL(url)}>
+    <SafeMarkdown components={components}>
       {children}
-    </Markdown>
+    </SafeMarkdown>
   </Box>
 }

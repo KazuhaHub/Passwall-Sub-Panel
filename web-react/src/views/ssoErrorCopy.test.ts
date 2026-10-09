@@ -3,6 +3,7 @@ import { describe, it, expect } from 'vitest'
 import zhCN from '../locales/zh-CN/auth.json'
 import enUS from '../locales/en-US/auth.json'
 import { SSO_ERROR_KEYS } from './SsoErrorView'
+import { flatten, type Nested } from '@/i18n/options'
 
 // The codes the Go side can put in the failure redirect's `error` parameter.
 // This list is the cross-language pin: the handler's page codes live in
@@ -26,7 +27,7 @@ describe('SSO failure page copy', () => {
     expect(keys, `no key mapping for the code ${code}`).toBeDefined()
     for (const bundle of [zhCN, enUS]) {
       for (const key of [keys.title, keys.message]) {
-        const value = (bundle as Record<string, string>)[key]
+        const value = flatten(bundle as Nested)[key]
         expect(value, `missing ${key}`).toBeTruthy()
       }
     }
@@ -38,7 +39,7 @@ describe('SSO failure page copy', () => {
     const keys = SSO_ERROR_KEYS.__default
     for (const bundle of [zhCN, enUS]) {
       for (const key of [keys.title, keys.message]) {
-        expect((bundle as Record<string, string>)[key], `missing ${key}`).toBeTruthy()
+        expect(flatten(bundle as Nested)[key], `missing ${key}`).toBeTruthy()
       }
     }
   })
