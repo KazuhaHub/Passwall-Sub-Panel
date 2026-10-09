@@ -43,4 +43,5 @@ export function useLeaveGuard(dirty: boolean, copy: ConfirmOpts, leaves: (next: 
     window.addEventListener('beforeunload', onBeforeUnload)
     return () => window.removeEventListener('beforeunload', onBeforeUnload)
   }, [dirty, hold])
+  return blocker.state
 }

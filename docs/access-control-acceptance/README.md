@@ -1045,3 +1045,40 @@ The preceding exemption-focus head `57fa2d56da5c8bcd6b3f3e8c989c4c6e0f391831`
 passed its own [complete Test CI](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37901675984)
 and [released-node systemd acceptance](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37901675891).
 Those runs do not validate a subsequent commit; the third-party live-panel job was skipped.
+
+### S16 cancellation pending and failure
+
+Two more regressions reproduced incomplete pending protection: same-page
+account navigation proceeded while DELETE was unresolved, and close/tab/shared
+actions remained available. The account tab now reports its busy state to the
+drawer; close, Escape, tabs, usage navigation and competing actions remain
+locked until confirmation/write completion. The transient navigation guard
+covers pathname and search changes and stays mounted through release so queued
+navigation can proceed instead of disappearing on unmount.
+
+| Synthetic state | Native evidence |
+| --- | --- |
+| Pending cancellation, all ten actions/tabs disabled; Escape retains drawer | [English phone](s16-account-cancel-pending-en-light-375.jpg) |
+| Failed cancellation, actions restored and exemption retained | [English phone](s16-account-cancel-failed-en-light-375.jpg) |
+| Browser Back resumed after settlement; both original exemptions retained | [English phone](s16-account-cancel-preserved-en-light-375.jpg) |
+
+The `account-cancel-pending` DEV scenario waits 30 seconds and returns 503 before
+any deletion. A failing-before-repair adapter contract verifies unchanged
+exemptions throughout and after failure, no live fallthrough and no leftover
+timer. The native failure restored the close/action buttons; the second attempt
+held the drawer after browser Back and completed that navigation once settled.
+The browser address can reflect the POP target before router settlement; this
+evidence claims the retained drawer, not an unchanged address bar. Both original
+exemptions remained in the reopened sheet. No real backend exemption was changed.
+
+The final relevant suite passed 459 tests in 33 files, including the shared
+leave-guard tests. TypeScript, changed-source lint, production build, fixture
+exclusion and four production smoke checks passed. Normal fixtures, English,
+automatic theme and default viewport were restored. Additional S20/per-view
+acceptance, owner review, C2/C5/C6 and candidate Node enforcement remain open.
+
+The target/locale head `8e874bd6079e0c43a175070428f59a7e6d872a1e` passed its own
+[complete Test CI](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37904667672)
+and [released-node systemd acceptance](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37904667711).
+Third-party live-panel adapters were skipped; these results do not validate a
+subsequent pending-protection commit.

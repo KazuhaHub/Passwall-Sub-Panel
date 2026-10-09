@@ -14,6 +14,18 @@ function harness(scenario: AccessFixtureScenario = 'normal') {
 afterEach(() => vi.useRealTimers())
 
 describe('reproducible access-control acceptance fixtures', () => {
+  it('holds a synthetic cancellation, then fails without mutating exemptions or using live transport', async () => {
+    vi.useFakeTimers()
+    const { client, fallback } = harness('account-cancel-pending')
+    const before = (await client.get('/admin/dest/exemptions')).data
+    const outcome = client.delete('/admin/dest/exemptions/1').then(() => 'deleted', error => error)
+    await vi.advanceTimersByTimeAsync(1000)
+    expect((await client.get('/admin/dest/exemptions')).data).toEqual(before)
+    await vi.advanceTimersByTimeAsync(29000)
+    expect(await outcome).toMatchObject({ response: { status: 503, data: { error: 'fixture_unavailable' } } })
+    expect((await client.get('/admin/dest/exemptions')).data).toEqual(before)
+    expect(fallback).not.toHaveBeenCalled(); expect(vi.getTimerCount()).toBe(0)
+  })
   it('fails one account-access read per account, while preserving its summary and allowing isolated retry', async () => {
     const { client, fallback } = harness('account-read-error')
     const before = (await client.get('/admin/dest/exemptions')).data

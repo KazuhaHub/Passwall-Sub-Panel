@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 import { ThemeProvider } from '@mui/material/styles'
-import { MemoryRouter } from 'react-router'
+import { createMemoryRouter, MemoryRouter } from 'react-router'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { AxiosError, type AxiosResponse } from 'axios'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -11,6 +11,7 @@ import { useSiteStore } from '@/stores/site'
 import { formatMsDualTz } from '@/utils/datetime'
 import type { RiskUserSummary } from '@/api/riskCenter'
 import ConfirmHost, { confirm } from '@/components/ConfirmHost'
+import AppRouter from '@/router/AppRouter'
 import RiskUserDrawer, { riskDrawerZIndex } from './RiskUserDrawer'
 
 const api = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() }))
@@ -493,6 +494,28 @@ describe('RiskUserDrawer', () => {
     }
     fireEvent.click(screen.getByRole('button', { name: '更多操作' }))
     for (const item of await screen.findAllByRole('menuitem')) expect(parseFloat(getComputedStyle(item).minHeight)).toBeGreaterThanOrEqual(44)
+  })
+  it('holds close, Escape, tab changes and competing actions until an access cancellation settles', async () => {
+    serve(); const original = api.get.getMockImplementation()!
+    api.get.mockImplementation(async (url: string) => url === '/admin/dest/users/7' ? { data: { group: null, exemption: { user_id: 7, upn: 'alice', reason: 'Diagnostics', created_by: 1, created_at: Date.now(), expires_at: null, expired: false } } } : original(url))
+    let finish!: (value: unknown) => void
+    api.delete.mockImplementation(() => new Promise(resolve => { finish = resolve }))
+    const onClose = vi.fn()
+    const router = createMemoryRouter([{ path: '/', element: <><RiskUserDrawer userId={7} onClose={onClose} host="access" /><ConfirmHost /></> }])
+    render(<ThemeProvider theme={theme}><AppRouter router={router} /></ThemeProvider>, { wrapper: queryWrapper(makeTestQueryClient()) })
+    fireEvent.click(await screen.findByRole('button', { name: '取消豁免' }))
+    const dialog = await screen.findByRole('dialog', { name: '取消 alice 的豁免？' })
+    fireEvent.click(within(dialog).getByRole('button', { name: '取消豁免' }))
+    await waitFor(() => expect(api.delete).toHaveBeenCalledOnce())
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '取消 alice 的豁免？' })).toBeNull())
+    for (const target of [screen.getByRole('button', { name: '关闭' }), screen.getByRole('button', { name: '暂停代理服务' }), screen.getByRole('button', { name: '更多操作' }), screen.getByRole('link', { name: '查看用量趋势' }), ...screen.getAllByRole('tab')]) {
+      expect(target.getAttribute('disabled') !== null || target.getAttribute('aria-disabled') === 'true').toBe(true)
+    }
+    fireEvent.click(screen.getByRole('button', { name: '关闭' })); fireEvent.keyDown(screen.getByRole('dialog', { name: 'alice' }), { key: 'Escape' })
+    fireEvent.click(screen.getByRole('tab', { name: '概览' }))
+    expect(onClose).not.toHaveBeenCalled(); expect(selectedTab()).toBe('访问')
+    finish({ data: {} }); await waitFor(() => expect(screen.getByRole('button', { name: '关闭' }).hasAttribute('disabled')).toBe(false))
+    fireEvent.click(screen.getByRole('button', { name: '关闭' })); expect(onClose).toHaveBeenCalledOnce()
   })
   it('does not show or read destination access for operators', async () => {
     serve(); useAuthStore.setState({ role: 'operator' })

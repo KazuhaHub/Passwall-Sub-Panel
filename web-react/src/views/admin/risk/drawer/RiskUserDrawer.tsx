@@ -44,10 +44,11 @@ const TABS: readonly DrawerTab[] = ['overview', 'connections', 'devices', 'timel
 /** The actions shown as buttons; the rest (undo, trust) sit behind ⋯. */
 const PRIMARY: readonly RiskActionKind[] = ['pause', 'convert_manual', 'resume', 'dismiss', 'redismiss']
 
-function ActionBar({ subject, host, onStart }: {
+function ActionBar({ subject, host, onStart, disabled = false }: {
   subject: RiskSubject
   host: 'risk' | 'users' | 'access'
   onStart: (kind: RiskActionKind, subject: RiskSubject) => void
+  disabled?: boolean
 }) {
   const { t } = useTranslation(['admin'])
   const [anchor, setAnchor] = useState<HTMLElement | null>(null)
@@ -58,7 +59,7 @@ function ActionBar({ subject, host, onStart }: {
   return (
     <Box sx={{ px: 2.5, pb: 1.5, display: 'flex', gap: 1, flexWrap: 'wrap', alignItems: 'center' }}>
       {primary.map(k => (
-        <Button key={k} size="small" variant={k === 'pause' || k === 'convert_manual' ? 'outlined' : 'contained'}
+        <Button disabled={disabled} key={k} size="small" variant={k === 'pause' || k === 'convert_manual' ? 'outlined' : 'contained'}
           color={k === 'pause' || k === 'convert_manual' ? 'error' : 'primary'} sx={{ minWidth: 44, minHeight: 44 }} onClick={() => onStart(k, subject)}>
           {label(k)}
         </Button>
@@ -66,20 +67,20 @@ function ActionBar({ subject, host, onStart }: {
       {/* A hold the risk center did not write is not its to lift: the Users
           page owns it. Not offered on the Users page itself. */}
       {otherHold(subject) && host !== 'users' && (
-        <Button size="small" component={RouterLink} to={`/admin/users?q=${encodeURIComponent(subject.upn)}`}
+        <Button disabled={disabled} size="small" component={RouterLink} to={`/admin/users?q=${encodeURIComponent(subject.upn)}`}
           sx={{ textTransform: 'none', minWidth: 44, minHeight: 44 }}>
           {t('admin:risk_center.drawer.open_users')}
         </Button>
       )}
       {more.length > 0 && (
         <>
-          <IconButton size="small" aria-label={t('admin:risk_center.actions.more')} aria-haspopup="menu"
+          <IconButton disabled={disabled} size="small" aria-label={t('admin:risk_center.actions.more')} aria-haspopup="menu"
             sx={{ minWidth: 44, minHeight: 44 }} onClick={e => setAnchor(e.currentTarget)}>
             <MoreHorizIcon fontSize="small" />
           </IconButton>
           <Menu anchorEl={anchor} open={anchor !== null} onClose={() => setAnchor(null)}>
             {more.map(k => (
-              <MenuItem key={k} sx={{ minHeight: 44 }} onClick={() => { setAnchor(null); onStart(k, subject) }}>{label(k)}</MenuItem>
+              <MenuItem disabled={disabled} key={k} sx={{ minHeight: 44 }} onClick={() => { setAnchor(null); onStart(k, subject) }}>{label(k)}</MenuItem>
             ))}
           </Menu>
         </>
@@ -129,6 +130,8 @@ export default function RiskUserDrawer({ userId, onClose, host, initialTab }: {
   const firstTab = requestedTab === 'access' && !canAccess ? 'overview' : requestedTab
   const headingId = useId()
   const actions = useRiskActions()
+  const [accessBusy, setAccessBusy] = useState(false)
+  const close = () => { if (!accessBusy) onClose() }
   const open = userId !== null
 
   const [shown, setShown] = useState<number | null>(userId)
@@ -152,18 +155,18 @@ export default function RiskUserDrawer({ userId, onClose, host, initialTab }: {
   if (data) {
     body = (
       <>
-        <DrawerHeader summary={data} headingId={headingId} onClose={onClose} />
-        <ActionBar subject={subjectOfSummary(data)} host={host} onStart={actions.start} />
+        <DrawerHeader summary={data} headingId={headingId} onClose={close} disabled={accessBusy} />
+        <ActionBar subject={subjectOfSummary(data)} host={host} onStart={actions.start} disabled={accessBusy} />
         <Tabs value={visibleTab} onChange={(_, v: DrawerTab) => setTab(v)} variant={phone ? 'scrollable' : 'fullWidth'} scrollButtons={phone ? false : 'auto'}
           sx={{ px: 1, borderBottom: `1px solid ${md.outlineVariant}` }}>
-          {TABS.filter(k => k !== 'access' || canAccess).map(k => <Tab key={k} value={k} label={t(`admin:risk_center.drawer.tab_${k}`)} />)}
+          {TABS.filter(k => k !== 'access' || canAccess).map(k => <Tab disabled={accessBusy} key={k} value={k} label={t(`admin:risk_center.drawer.tab_${k}`)} />)}
         </Tabs>
         <Box sx={{ flex: 1, overflowY: 'auto', p: 2 }}>
           {visibleTab === 'overview' && <OverviewTab summary={data} />}
           {visibleTab === 'connections' && <ConnectionsTab summary={data} />}
           {visibleTab === 'devices' && <DevicesTab summary={data} />}
           {visibleTab === 'timeline' && <TimelineTab userId={data.user.id} upn={data.user.upn} />}
-          {visibleTab === 'access' && <AccessTab key={data.user.id} userId={data.user.id} upn={data.user.upn} />}
+          {visibleTab === 'access' && <AccessTab key={data.user.id} userId={data.user.id} upn={data.user.upn} onBusyChange={setAccessBusy} />}
         </Box>
       </>
     )
@@ -202,7 +205,7 @@ export default function RiskUserDrawer({ userId, onClose, host, initialTab }: {
   }
 
   return (
-    <Drawer anchor="right" open={open} onClose={onClose} transitionDuration={{ enter: 300, exit: 240 }}
+    <Drawer anchor="right" open={open} onClose={close} transitionDuration={{ enter: 300, exit: 240 }}
       sx={{ zIndex: riskDrawerZIndex }}
       slotProps={{
         paper: {

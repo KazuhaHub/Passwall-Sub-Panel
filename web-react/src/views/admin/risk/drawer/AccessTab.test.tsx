@@ -40,7 +40,7 @@ function mount() {
   const router = createMemoryRouter([{ path: '/admin/access-control', element: <AccessTab userId={13} upn={row.upn!} /> }], { initialEntries: ['/admin/access-control'] })
   const tree = () => <ThemeProvider theme={createAppTheme({ mode: 'light', sourceColor: '#6750a4', language: 'en-US' })}><QueryClientProvider client={client}><AppRouter router={router} /></QueryClientProvider></ThemeProvider>
   const result = render(tree())
-  return { rerender: () => result.rerender(tree()) }
+  return { router, rerender: () => result.rerender(tree()) }
 }
 it('formats expiry with the interface locale and updates it without another read', async () => {
   await translation.instance.changeLanguage('zh-CN')
@@ -83,6 +83,28 @@ it('admits one cancellation and keeps its action disabled while the write is pen
   expect(action.hasAttribute('disabled')).toBe(true)
   finish({ data: {} }); await waitFor(() => expect(action.hasAttribute('disabled')).toBe(false))
   expect(api.delete.mock.calls[0][0]).toBe('/admin/dest/exemptions/13')
+})
+it('holds same-page account navigation until cancellation settles', async () => {
+  let finish!: (value: unknown) => void
+  confirmation.mockResolvedValue(true); api.delete.mockImplementation(() => new Promise(resolve => { finish = resolve }))
+  const { router } = mount()
+  fireEvent.click(await screen.findByRole('button', { name: 'Cancel exemption' }))
+  await waitFor(() => expect(api.delete).toHaveBeenCalledOnce())
+  await act(async () => { void router.navigate('/admin/access-control?user=14') })
+  expect(router.state.location.search).toBe('')
+  finish({ data: {} }); await waitFor(() => expect(router.state.location.search).toBe('?user=14'))
+})
+it('releases a failed cancellation, keeps the exemption and permits a new declined attempt', async () => {
+  confirmation.mockResolvedValueOnce(true).mockResolvedValue(false)
+  api.delete.mockRejectedValueOnce(new Error('offline'))
+  mount(); const action = await screen.findByRole('button', { name: 'Cancel exemption' })
+  fireEvent.click(action)
+  await screen.findByText(/Could not cancel the exemption:/)
+  await waitFor(() => expect(action.hasAttribute('disabled')).toBe(false))
+  expect(screen.getByText(row.reason)).toBeTruthy()
+  fireEvent.click(action); await waitFor(() => expect(confirmation).toHaveBeenCalledTimes(2))
+  await waitFor(() => expect(action.hasAttribute('disabled')).toBe(false))
+  expect(api.delete).toHaveBeenCalledOnce()
 })
 it('retries only the failed account read with a 44px action and no fabricated empty state', async () => {
   api.get.mockRejectedValueOnce(new Error('offline')); mount()

@@ -13,16 +13,18 @@ import { destinationError } from '../../accessControl/errors'
 import { cancelExemptionCopy } from '../../accessControl/confirmCopy'
 const P = 'admin:access_control.account.'
 const E = 'admin:access_control.exemptions.'
-export default function AccessTab({ userId, upn }: { userId: number; upn: string }) {
+export default function AccessTab({ userId, upn, onBusyChange }: { userId: number; upn: string; onBusyChange?: (busy: boolean) => void }) {
   const { t, dateTime } = useAccessTranslation(['admin', 'common']), theme = useTheme(), scope = useQueryScope()
   const query = useDestinationUserAccess(scope, userId), remove = useDeleteDestinationExemption(scope)
   const [editor, setEditor] = useState(false), [busy, setBusy] = useState(false), admission = useRef(false), [error, setError] = useState('')
+  const [guarded, setGuarded] = useState(false)
   const [clock, setClock] = useState(Date.now())
   const now = Math.max(clock, query.dataUpdatedAt)
   useEffect(() => { const timer = window.setInterval(() => setClock(Date.now()), 60000); return () => window.clearInterval(timer) }, [])
+  useEffect(() => { onBusyChange?.(busy); return () => onBusyChange?.(false) }, [busy, onBusyChange])
   const cancel = async () => {
     if (admission.current) return
-    admission.current = true; setBusy(true); setError('')
+    admission.current = true; setGuarded(true); setBusy(true); setError('')
     try {
       if (!(await confirm(cancelExemptionCopy(t, upn)))) return
       await remove.mutateAsync(userId); pushSnack(t(`${E}canceled`, { upn }), 'success')
@@ -31,7 +33,7 @@ export default function AccessTab({ userId, upn }: { userId: number; upn: string
   const data = query.data, exemption = data?.exemption
   const expired = exemption && (exemption.expired || exemption.expires_at !== null && exemption.expires_at <= now)
   return <Stack spacing={2}>
-    {busy && <PendingActionGuard />}
+    {guarded && <PendingActionGuard blockSearch hold={busy} onReleased={() => setGuarded(false)} />}
     {query.error && <Alert severity="error" action={<Button disabled={query.isFetching} sx={{ minWidth: 44, minHeight: 44 }} onClick={() => void query.refetch()}>{t('common:actions.retry')}</Button>}>{t(`${P}load_failed`)}</Alert>}
     {!data && query.isPending && [0, 1].map(key => <Skeleton key={key} variant="rounded" height={64} />)}
     {error && <Alert severity="error">{t(`${E}cancel_failed`, { error })}</Alert>}
