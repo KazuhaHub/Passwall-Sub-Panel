@@ -12,6 +12,7 @@ import { scopeKey, type QueryScope } from '@/query/session'
 import { useAccessControlSettings, useDestinationPolicies, useDestinationPublication, useDestinationStatus } from '@/query/accessControl'
 import { useDrawerParam } from '@/hooks/useDrawerParam'
 import { destinationError } from './errors'
+import { pauseExecutionCopy } from './confirmCopy'
 import AccessSettingsDialog from './AccessSettingsDialog'
 import PoliciesTab from './policies/PoliciesTab'
 import NodeCoverageDrawer from './NodeCoverageDrawer'
@@ -96,7 +97,7 @@ function AccessControlPage({ scope }: { scope: QueryScope }) {
     if (admission.current) return
     admission.current = true; setBusy(true)
     try {
-      if (paused !== undefined && !(await confirm({ title: t(`${P}confirm.${paused ? 'pause' : 'resume'}_title`), message: t(`${P}confirm.${paused ? 'pause' : 'resume'}_message`), confirmText: t(`${P}${paused ? 'pause' : 'resume'}`), destructive: paused }))) return
+      if (paused !== undefined && !(await confirm(pauseExecutionCopy(t, paused)))) return
       await publication.mutateAsync({ paused }); pushSnack(t(`${P}publication_requested`), 'success')
     } catch (error) { const details = destinationError(error); pushSnack(t(`${P}${details.error === 'dest_policy_pause_saved' || details.error === 'dest_pause_saved' || (details.status === 503 && (error as { response?: { data?: { pause_saved?: boolean } } })?.response?.data?.pause_saved) ? 'pause_saved' : 'write_failed'}`, { error: details.error }), 'error') }
     finally { admission.current = false; setBusy(false) }

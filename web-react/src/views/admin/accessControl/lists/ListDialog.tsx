@@ -14,7 +14,7 @@ import { useLeaveGuard } from '@/hooks/useLeaveGuard'
 import { useSaveDestinationList } from '@/query/accessControl'
 import { accessControlKeys } from '@/query/keys'
 import { useQueryScope } from '@/query/useQueryScope'
-import { discardSettingsCopy } from '../confirmCopy'
+import { discardSettingsCopy, switchListKindCopy } from '../confirmCopy'
 import { destinationError, destinationListFailure } from '../errors'
 import ParseReport from './ParseReport'
 import GeositeCategoryPicker from './GeositeCategoryPicker'
@@ -78,7 +78,7 @@ export default function ListDialog({ existing, policies, status, refreshHours, o
     if (admission.current || kind === draft.kind) return
     admission.current = true; setBusy(true)
     try {
-      if (contentIdentity(draft) !== contentIdentity(inputFrom()) && !await confirm({ title: t(`${P}switch_title`), message: t(`${P}switch_message`), confirmText: t(`${P}switch_action`) })) return
+      if (contentIdentity(draft) !== contentIdentity(inputFrom()) && !await confirm(switchListKindCopy(t))) return
       setDraft({ name: draft.name, kind, ...(kind === 'custom' ? { text: '' } : kind === 'remote' ? { source_url: '' } : { geosite_category: '', geosite_attrs: '' }) }); setTested(null); setError({ error: '' })
     } finally { admission.current = false; setBusy(false) }
   }

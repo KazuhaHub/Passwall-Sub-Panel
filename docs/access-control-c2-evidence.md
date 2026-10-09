@@ -45,15 +45,20 @@ and overwrite that report from the cache.
 On Go 1.27.2, the existing complete destlist, destpolicy, SQL-store, application,
 domain and safehttp suites passed before the added checks. The new fixed-finance
 compiler check (all five uses), report-only native-config check and application
-reopen check passed locally. Windows Application Control blocked execution of
-the new destlist test binary; that check remains pending this commit's Linux CI.
+reopen check passed locally. Windows Application Control blocked local execution
+of the new destlist test binary; that check subsequently passed in Linux CI.
 No security setting was changed and the blocked binary was not relocated or
 executed through an alternative path.
 
 The repository's complete SQLite/race suite runs the mandatory offline fixture;
 PostgreSQL and MySQL repeat repository persistence/CAS tests. Each commit needs
-its own CI result. These are additional acceptance checks of existing behavior,
-not claims of newly repaired production defects.
+its own CI result. Head `43ef19417d4d89e5981538b0a2f9d3a6f0d46f3a` passed its
+[complete Test workflow](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37896690523)
+and [released-node systemd acceptance](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37896690520),
+including all three Linux full-race shards, SQLite full/race, PostgreSQL,
+MySQL, static checks, frontend and release-target cross-compilation. Third-party
+live-panel adapters were skipped. These are additional acceptance checks of
+existing behavior, not claims of newly repaired production defects.
 
 [Native browser evidence](access-control-acceptance/README.md#real-backend-catalog-acceptance)
 already records a real catalog download, finance save and report after restart.

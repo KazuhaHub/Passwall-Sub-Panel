@@ -9,7 +9,7 @@ import { useDeleteDestinationPolicy, useDestinationCategories, useOrderDestinati
 import { confirm } from '@/components/ConfirmHost'
 import { pushSnack } from '@/components/SnackbarHost'
 import { pipelineSteps } from '@/utils/accessControl'
-import { firstPublishCopy, needsFirstPublishConfirm } from '../confirmCopy'
+import { deletePolicyCopy, firstPublishCopy, needsFirstPublishConfirm } from '../confirmCopy'
 import PendingActionGuard from '../PendingActionGuard'
 import { destinationError } from '../errors'
 import { categoryRefreshState } from '@/utils/destinationCategories'
@@ -65,7 +65,7 @@ export default function PoliciesTab({ data, status, seconds, onCreateList, onExe
     pushSnack(t(`${P}saved`, { name: row.name }), 'success')
   })
   const deleting = (row: DestinationPolicyOverviewItem) => void run(row.id, async () => {
-    if (!(await confirm({ title: t(`${P}delete_title`, { name: row.name }), message: t(`${P}delete_message`), confirmText: t('common:actions.delete'), destructive: true }))) return
+    if (!(await confirm(deletePolicyCopy(t, row.name)))) return
     await remove.mutateAsync(row.id); pushSnack(t(`${P}deleted`, { name: row.name }), 'success')
   })
   const move = (row: DestinationPolicyOverviewItem, target: number) => void run(row.id, async () => {

@@ -843,6 +843,12 @@ its existing executable, config and database after the temporary processes
 were cleared; no new backend runtime validation is claimed for this UI repair.
 It does not complete S20's full catalog, C2/C5/C6 or real candidate Node acceptance.
 
+The subsequent [confirmation catalog consolidation](../access-control-confirmations.md)
+centralizes the remaining stage-1c plain-text copies without changing their
+keys, labels or actions. Its final relevant suite passed 415 tests in 29 files.
+The [C2 evidence index](../access-control-c2-evidence.md) records the separate
+fixed-release, refresh-identity and application-reopen checks and their CI.
+
 ## Real backend catalog acceptance
 
 These captures use the production frontend and actual Go backend, normal admin

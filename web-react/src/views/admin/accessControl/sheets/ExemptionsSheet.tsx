@@ -12,6 +12,7 @@ import { pushSnack } from '@/components/SnackbarHost'
 import { agoText } from '@/utils/riskCenter'
 import PendingActionGuard from '../PendingActionGuard'
 import { destinationError } from '../errors'
+import { cancelExemptionCopy } from '../confirmCopy'
 import AddExemptionDialog from './AddExemptionDialog'
 const P = 'admin:access_control.exemptions.'
 export default function ExemptionsSheet({ onClose, onOpenUser, etaMs }: { onClose: () => void; onOpenUser: (id: number) => void; etaMs?: number }) {
@@ -29,7 +30,7 @@ export default function ExemptionsSheet({ onClose, onOpenUser, etaMs }: { onClos
     if (admission.current) return
     admission.current = true; setBusy(true); setError('')
     try {
-      if (!(await confirm({ title: t(`${P}cancel_title`, { upn: row.upn ?? `#${row.user_id}` }), message: t(`${P}cancel_message`, { eta: etaMs ? t('admin:access_control.confirm.eta_minutes', { minutes: Math.ceil(etaMs / 60000) }) : t('admin:access_control.confirm.eta_unknown') }), confirmText: t(`${P}cancel`) }))) return
+      if (!(await confirm(cancelExemptionCopy(t, row.upn ?? `#${row.user_id}`, etaMs)))) return
       await remove.mutateAsync(row.user_id); pushSnack(t(`${P}canceled`, { upn: row.upn ?? `#${row.user_id}` }), 'success')
     } catch (err) { setError(destinationError(err).error) } finally { admission.current = false; setBusy(false) }
   }
