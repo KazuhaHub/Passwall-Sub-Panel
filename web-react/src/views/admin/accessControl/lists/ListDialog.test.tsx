@@ -34,6 +34,46 @@ beforeEach(() => {
   api.get.mockResolvedValue({ data: detail }); api.post.mockResolvedValue({ data: preview }); api.put.mockResolvedValue({ data: detail }); confirmation.mockResolvedValue(true)
 })
 afterEach(cleanup)
+it.each([
+  ['custom', 'remote'], ['custom', 'geosite'], ['remote', 'custom'],
+  ['remote', 'geosite'], ['geosite', 'custom'], ['geosite', 'remote'],
+] as const)('switches an empty %s source to %s without confirmation and preserves its name', async (from, to) => {
+  api.get.mockResolvedValue({ data: { categories: [], updated_at: 1000, refreshing: false } })
+  mount()
+  fireEvent.change(screen.getByRole('textbox', { name: `${P}name` }), { target: { value: 'Named draft' } })
+  if (from !== 'custom') {
+    fireEvent.click(screen.getByRole('button', { name: `admin:access_control.lists.${from}` }))
+    await waitFor(() => expect(screen.getByRole('button', { name: `admin:access_control.lists.${from}` }).getAttribute('aria-pressed')).toBe('true'))
+  }
+  confirmation.mockClear()
+  fireEvent.click(screen.getByRole('button', { name: `admin:access_control.lists.${to}` }))
+  await waitFor(() => expect(screen.getByRole('button', { name: `admin:access_control.lists.${to}` }).getAttribute('aria-pressed')).toBe('true'))
+  expect(confirmation).not.toHaveBeenCalled()
+  expect((screen.getByRole('textbox', { name: `${P}name` }) as HTMLInputElement).value).toBe('Named draft')
+  expect(api.put).not.toHaveBeenCalled()
+})
+it.each(['custom', 'remote'] as const)('preserves a filled %s source when type switching is declined, then clears only the source on acceptance', async kind => {
+  mount()
+  fireEvent.change(screen.getByRole('textbox', { name: `${P}name` }), { target: { value: 'Preserved draft' } })
+  if (kind === 'remote') fireEvent.click(screen.getByRole('button', { name: 'admin:access_control.lists.remote' }))
+  const sourceName = `${P}${kind === 'custom' ? 'text' : 'url'}`
+  const source = await screen.findByRole('textbox', { name: sourceName })
+  const text = kind === 'custom' ? 'domain:example.com' : 'https://example.org/list'
+  fireEvent.change(source, { target: { value: text } })
+  confirmation.mockResolvedValueOnce(false)
+  const target = kind === 'custom' ? 'remote' : 'custom'
+  fireEvent.click(screen.getByRole('button', { name: `admin:access_control.lists.${target}` }))
+  await waitFor(() => expect(confirmation).toHaveBeenCalledOnce())
+  await waitFor(() => expect(screen.getByRole('button', { name: `admin:access_control.lists.${target}` }).hasAttribute('disabled')).toBe(false))
+  expect((screen.getByRole('textbox', { name: sourceName }) as HTMLInputElement).value).toBe(text)
+  expect(screen.getByRole('button', { name: `admin:access_control.lists.${kind}` }).getAttribute('aria-pressed')).toBe('true')
+  fireEvent.click(screen.getByRole('button', { name: `admin:access_control.lists.${target}` }))
+  await waitFor(() => expect(screen.getByRole('button', { name: `admin:access_control.lists.${target}` }).getAttribute('aria-pressed')).toBe('true'))
+  expect(confirmation).toHaveBeenCalledTimes(2)
+  expect((screen.getByRole('textbox', { name: `${P}${target === 'custom' ? 'text' : 'url'}` }) as HTMLInputElement).value).toBe('')
+  expect((screen.getByRole('textbox', { name: `${P}name` }) as HTMLInputElement).value).toBe('Preserved draft')
+  expect(api.put).not.toHaveBeenCalled()
+})
 it('keeps a title-only editor name and touch-sized draft, report and save actions', async () => {
   mount()
   await screen.findByRole('dialog', { name: `${P}create_title` })

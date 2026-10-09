@@ -1207,3 +1207,38 @@ The preceding `d101a960bd7f3aee455b62162537efdebf9b0c41` passed its own
 [complete Test CI](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37909648586)
 and [released-node systemd acceptance](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37909648576).
 Third-party live-panel adapters were skipped; a new head requires its own CI.
+
+### List-type confirmation admission and matrix
+
+Native S20 checking found that an empty remote/category draft still prompted
+to clear its source when changing type: the gate compared the entire content
+identity, including the type, with a blank custom draft. The gate now checks
+the current type's source fields. An entered name alone is retained and does
+not require confirmation. Existing-list types remain locked.
+
+Four empty-source caller variants failed before repair. Six variants now cover
+every transition between blank custom, remote and category sources. Two more
+checks preserve filled custom text/remote URLs on decline and clear only the
+source on acceptance, retaining the name and issuing no list update.
+All 16 list-editor checks and the final relevant 487-test suite in 35 files
+passed, alongside TypeScript, changed-source lint, production build, fixture
+exclusion and four production smoke checks.
+
+| Filled-source confirmation | Native capture |
+| --- | --- |
+| Chinese light desktop, 1440 × 900 | [Confirmation](s20-switch-type-zh-light-1440.jpg) |
+| Chinese dark desktop, 1440 × 900 | [Confirmation](s20-switch-type-zh-dark-1440.jpg) |
+| Chinese light phone, 375 × 812 | [Confirmation](s20-switch-type-zh-light-375.jpg) |
+| Chinese dark phone, 375 × 812 | [Confirmation](s20-switch-type-zh-dark-375.jpg) |
+| English light phone, 375 × 812 | [Confirmation](s20-switch-type-en-light-375.jpg) |
+
+[Measured bounds](s20-switch-type-metrics.json) show no horizontal overflow and
+44px-high actions in all five variants. The confirmation uses ordinary primary
+styling and appears above the disabled editor. Native empty-source switching
+did not prompt. Enter and Escape cancellation retained the name/URL and
+returned focus to Custom. Tab/Shift+Tab wrapped between confirmation actions.
+[Accepted switching](s20-switch-type-accepted-zh-dark-375.jpg) retained the name
+with an empty custom editor; the unsaved draft was then discarded and focus
+returned to New list. No list was saved or deleted, and Test fetch was never
+invoked. These checks fill this dialog's normal matrix only; other S20 dialogs,
+remaining per-view acceptance and real candidate Node gates remain open.

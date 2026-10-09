@@ -78,7 +78,8 @@ export default function ListDialog({ existing, policies, status, refreshHours, o
     if (admission.current || kind === draft.kind) return
     admission.current = true; setBusy(true)
     try {
-      if (contentIdentity(draft) !== contentIdentity(inputFrom()) && !await confirm(switchListKindCopy(t))) return
+      const hasSource = draft.kind === 'custom' ? !!draft.text : draft.kind === 'remote' ? !!draft.source_url : !!(draft.geosite_category || draft.geosite_attrs)
+      if (hasSource && !await confirm(switchListKindCopy(t))) return
       setDraft({ name: draft.name, kind, ...(kind === 'custom' ? { text: '' } : kind === 'remote' ? { source_url: '' } : { geosite_category: '', geosite_attrs: '' }) }); setTested(null); setError({ error: '' })
     } finally { admission.current = false; setBusy(false) }
   }

@@ -1,0 +1,147 @@
+[
+  {
+    "label": "en-light-375",
+    "buttons": [
+      {
+        "color": "rgba(0, 0, 0, 0)",
+        "height": 44,
+        "text": "Cancel",
+        "width": 91.45833587646484
+      },
+      {
+        "color": "rgb(0, 97, 164)",
+        "height": 44,
+        "text": "Switch type",
+        "width": 121.65625
+      }
+    ],
+    "documentWidth": 375,
+    "rect": {
+      "height": 174.58334350585938,
+      "width": 320,
+      "x": 27.666667938232425,
+      "y": 318.7083435058594
+    },
+    "text": "Switch list type?Switching clears the current source input.CancelSwitch type",
+    "viewport": [
+      375,
+      812
+    ]
+  },
+  {
+    "label": "zh-light-375",
+    "buttons": [
+      {
+        "color": "rgba(0, 0, 0, 0)",
+        "height": 44,
+        "text": "取消",
+        "width": 76.20833587646484
+      },
+      {
+        "color": "rgb(0, 97, 164)",
+        "height": 44,
+        "text": "切换类型",
+        "width": 104.40625
+      }
+    ],
+    "documentWidth": 375,
+    "rect": {
+      "height": 174.58334350585938,
+      "width": 320,
+      "x": 27.666667938232425,
+      "y": 318.7083435058594
+    },
+    "text": "切换列表类型？切换会清空当前类型的来源输入。取消切换类型",
+    "viewport": [
+      375,
+      812
+    ]
+  },
+  {
+    "label": "zh-light-1440",
+    "buttons": [
+      {
+        "color": "rgba(0, 0, 0, 0)",
+        "height": 44,
+        "text": "取消",
+        "width": 76.20833587646484
+      },
+      {
+        "color": "rgb(0, 97, 164)",
+        "height": 44,
+        "text": "切换类型",
+        "width": 104.40625
+      }
+    ],
+    "documentWidth": 1440,
+    "rect": {
+      "height": 174.58334350585938,
+      "width": 320,
+      "x": 560,
+      "y": 362.7083435058594
+    },
+    "text": "切换列表类型？切换会清空当前类型的来源输入。取消切换类型",
+    "viewport": [
+      1440,
+      900
+    ]
+  },
+  {
+    "label": "zh-dark-1440",
+    "buttons": [
+      {
+        "color": "rgba(0, 0, 0, 0)",
+        "height": 44,
+        "text": "取消",
+        "width": 76.20833587646484
+      },
+      {
+        "color": "rgb(159, 202, 255)",
+        "height": 44,
+        "text": "切换类型",
+        "width": 104.40625
+      }
+    ],
+    "documentWidth": 1440,
+    "rect": {
+      "height": 174.58334350585938,
+      "width": 320,
+      "x": 560,
+      "y": 362.7083435058594
+    },
+    "text": "切换列表类型？切换会清空当前类型的来源输入。取消切换类型",
+    "viewport": [
+      1440,
+      900
+    ]
+  },
+  {
+    "label": "zh-dark-375",
+    "buttons": [
+      {
+        "color": "rgba(0, 0, 0, 0)",
+        "height": 44,
+        "text": "取消",
+        "width": 76.20833587646484
+      },
+      {
+        "color": "rgb(159, 202, 255)",
+        "height": 44,
+        "text": "切换类型",
+        "width": 104.40625
+      }
+    ],
+    "documentWidth": 375,
+    "rect": {
+      "height": 174.58334350585938,
+      "width": 320,
+      "x": 27.666667938232425,
+      "y": 318.7083435058594
+    },
+    "text": "切换列表类型？切换会清空当前类型的来源输入。取消切换类型",
+    "viewport": [
+      375,
+      812
+    ]
+  }
+]

@@ -119,3 +119,14 @@ is used without fabricating node counts or minutes. A real-language caller
 regression verifies the catalog, ordinary action and declined/no-DELETE path;
 native Enter on Cancel restores the 44px Cancel exemption button. Account
 drawer language/theme/read-state evidence is linked in the acceptance index.
+
+### List-type switching
+
+Source-clearing confirmation now examines the current type's source fields;
+the type itself and a retained name do not trigger it. Four blank remote/category
+transition regressions failed before repair. All six blank transitions and
+filled custom/remote decline-and-accept paths pass, without a list write.
+[Five native variants and measured bounds](access-control-acceptance/README.md#list-type-confirmation-admission-and-matrix)
+cover the Chinese theme/desktop/phone and English-phone matrix. Native checks
+also verify keyboard cancellation, focus restoration, action wrapping and
+accepted source clearing with the name retained. No list was saved or fetched.
