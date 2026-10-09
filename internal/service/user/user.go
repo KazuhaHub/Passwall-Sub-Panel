@@ -1860,8 +1860,9 @@ func (s *Service) UpdateProfile(ctx context.Context, userID int64, in UpdateInpu
 // The traffic poll uses this when it clears EmergencyUntil /
 // EmergencyBaselineBytes (period rollover, quota exhaustion) so the
 // write doesn't race a concurrent UseEmergencyAccess on the same user.
-// Caller-supplied fn typically loads the user, mutates the emergency
-// fields, and calls users.Update — all under the lock.
+// Caller-supplied fn writes the emergency columns through their targeted
+// writer (users.ClearEmergencyAccess) under the lock — never users.Update,
+// which omits those columns and would drop the write without an error.
 func (s *Service) WithEmergencyLock(fn func()) {
 	s.emergencyMu.Lock()
 	defer s.emergencyMu.Unlock()
@@ -1870,7 +1871,6 @@ func (s *Service) WithEmergencyLock(fn func()) {
 
 func (s *Service) UseEmergencyAccess(ctx context.Context, userID int64, trafficLimitExceeded bool) (*EmergencyAccessResult, error) {
 	var result *EmergencyAccessResult
-	var pushUser *domain.User
 	// Critical section: serialize the state mutation against the poll's
 	// emergency-clear (WithEmergencyLock) and concurrent grants. The 3X-UI push
 	// is deliberately done AFTER the lock is released — it's a slow per-panel
@@ -1954,7 +1954,6 @@ func (s *Service) UseEmergencyAccess(ctx context.Context, userID int64, trafficL
 		if err := s.users.GrantEmergencyAccess(ctx, u.ID, until, u.EmergencyUsedCount, u.EmergencyBaselineBytes); err != nil {
 			return err
 		}
-		pushUser = u
 		result = &EmergencyAccessResult{
 			User:          u,
 			ExtendedFrom:  from,
@@ -1968,13 +1967,14 @@ func (s *Service) UseEmergencyAccess(ctx context.Context, userID int64, trafficL
 		return nil, err
 	}
 
-	// Outside the lock: slow per-panel network push. On failure, enqueue the
-	// retryable sync task so 3X-UI converges without blocking this call.
-	if err := s.pushClientConfigToAll(ctx, pushUser); err != nil {
-		if taskErr := s.enqueueUserTask(ctx, domain.SyncTaskUserPushConfig, userID, fmt.Sprintf("sync emergency access for user %s", pushUser.UPN)); taskErr != nil {
-			log.Warn("enqueue emergency access sync failed", "user_id", userID, "err", taskErr)
-		}
-	}
+	// Outside the lock: the slow per-panel push, from a fresh read under the
+	// per-user lock so a reset's push cannot land over it (see
+	// pushEmergencyChange). A failed push queues the retryable sync task. If
+	// the push fails and the retry cannot be queued, that is logged there and
+	// not returned. The window is granted and the use is spent, and
+	// errUnqueuedPush's "repeat this action" would only spend another use or
+	// be refused as already active.
+	_ = s.pushEmergencyChange(ctx, userID, "grant emergency access", "sync emergency access")
 	return result, nil
 }
 
@@ -2062,21 +2062,116 @@ func EmergencyAccessStatusForUserWithTrafficLimit(u *domain.User, settings ports
 	return st
 }
 
+// ResetEmergencyUsage is the admin "reset emergency-access count" action. It
+// zeroes the used count and clears the window and quota baseline too —
+// otherwise an admin "reset" leaves the user mid-window with a stale baseline
+// that would mis-attribute future traffic the moment another window is granted.
+//
+// The write is the column-scoped users.ResetEmergencyAccess, never Update.
+// Update omits every emergency column (pollOwnedColumns), so while this went
+// through updateUser the reset answered 204 and changed nothing on any real
+// database. Read and write run under emergencyMu, like UseEmergencyAccess and
+// the poll's ClearEmergencyAccess: a grant landing between the two would
+// otherwise be wiped unseen, or one that read the old count would write it
+// back over the reset.
+//
+// A recorded window is part of what the panel-side client was told — expiry
+// is MAX(ExpireAt, EmergencyUntil), and an active window also sets the enable
+// bit and quota floor — so ending it in PSP's row alone would leave the
+// upstream client serving the revoked window: the poll does not re-push a user
+// it already holds as traffic-suspended. So the client is pushed afterwards,
+// outside emergencyMu as UseEmergencyAccess does, through the same
+// pushEmergencyChange: from a fresh read under the per-user lock, detached
+// from the request, with the usual queued retry. A count-only reset changes
+// nothing pushed and skips the fan-out, which keeps the batch reset cheap. No
+// auth-cache drop: that cache holds no emergency field.
+//
+// The read and the write run on the caller's context: a request already gone
+// starts no reset.
 func (s *Service) ResetEmergencyUsage(ctx context.Context, userID int64) error {
-	u, err := s.users.GetByID(ctx, userID)
-	if err != nil {
+	var endedWindow bool
+	if err := func() error {
+		s.emergencyMu.Lock()
+		defer s.emergencyMu.Unlock()
+
+		u, err := s.users.GetByID(ctx, userID)
+		if err != nil {
+			return err
+		}
+		if u.EmergencyUsedCount == 0 && u.EmergencyUntil == nil && u.EmergencyBaselineBytes == 0 {
+			return nil
+		}
+		if err := s.users.ResetEmergencyAccess(ctx, u.ID); err != nil {
+			return err
+		}
+		endedWindow = u.EmergencyUntil != nil
+		return nil
+	}(); err != nil {
 		return err
 	}
-	if u.EmergencyUsedCount == 0 && u.EmergencyUntil == nil && u.EmergencyBaselineBytes == 0 {
+	if !endedWindow {
 		return nil
 	}
-	u.EmergencyUsedCount = 0
-	// Clear the active window and quota baseline too — otherwise an admin
-	// "reset" leaves the user mid-window with a stale baseline that would mis-
-	// attribute future traffic the moment another window is granted.
-	u.EmergencyUntil = nil
-	u.EmergencyBaselineBytes = 0
-	return s.updateUser(ctx, u)
+	return s.pushEmergencyChange(ctx, userID, "end emergency access window", "sync emergency reset")
+}
+
+// pushEmergencyChange is the panel half of a committed emergency write: the
+// grant (UseEmergencyAccess) and the reset (ResetEmergencyUsage). Both commit
+// under emergencyMu and push after releasing it, because the push is a slow
+// per-panel fan-out that would otherwise stall the poll's emergency clears.
+//
+// Two of these pushes can therefore be in flight at once, and they used to
+// land in either order, each carrying the snapshot its own operation held.
+// A reset whose push was held up by a slow panel landed its pre-grant
+// lifecycle (enable off, no expiry) after a grant made in the meantime had
+// pushed its window. PSP showed the window active and a use spent, while the
+// panel kept the client disabled for the whole window. Nothing corrected it:
+// the poll does not re-push an active window or a user it already holds as
+// traffic-suspended, and reconcile replays the desired document the stale
+// push had just minted. A grant's slow push landing after a reset brought
+// the revoked window back in the same way.
+//
+// So the push takes lockUser, the per-user lock a membership resync and the
+// service transitions hold across their own push, and reads the row it
+// pushes. The pushes run one at a time, and each carries whatever is
+// committed when it runs. The order in which they take the lock need not
+// match the order of the commits, because a resync holding the lock can let
+// both commit first. Even so, the push that runs last always carries the
+// latest window. The lock is taken only after emergencyMu is released. It is
+// never taken inside emergencyMu, because the order is lockUser then
+// emergencyMu (SuspendServiceIfClear).
+//
+// The write has already committed, so the read, the push and the queued
+// retry run detached from ctx (detachedFollowUp), on the transitions'
+// budgets. An admin who closes the tab mid-batch, or a user who leaves the
+// portal, would otherwise cancel both the push and the enqueue meant to
+// catch it, leaving the panel on the old window with nothing queued.
+//
+// A failed read or push queues SyncTaskUserPushConfig, with summary followed
+// by " for user <upn>". The function returns errUnqueuedPush(op, ...) only
+// when that enqueue fails too.
+func (s *Service) pushEmergencyChange(ctx context.Context, userID int64, op, summary string) error {
+	unlock := s.lockUser(userID)
+	defer unlock()
+
+	pushCtx, cancelPush := detachedFollowUp(ctx, transitionPushTimeout)
+	defer cancelPush()
+	who := fmt.Sprintf("#%d", userID)
+	u, pushErr := s.users.GetByID(pushCtx, userID)
+	if pushErr == nil {
+		who = u.UPN
+		pushErr = s.pushClientConfigToAll(pushCtx, u)
+	}
+	if pushErr == nil {
+		return nil
+	}
+	queueCtx, cancelQueue := detachedFollowUp(ctx, transitionQueueTimeout)
+	defer cancelQueue()
+	if taskErr := s.enqueueUserTask(queueCtx, domain.SyncTaskUserPushConfig, userID, fmt.Sprintf("%s for user %s", summary, who)); taskErr != nil {
+		log.Warn("enqueue emergency access sync failed", "user_id", userID, "op", op, "err", taskErr)
+		return errUnqueuedPush(op, pushErr, taskErr)
+	}
+	return nil
 }
 
 // ChangeGroupAndSync moves a user to a different group and reconciles their
@@ -2573,9 +2668,11 @@ func detachedFollowUp(ctx context.Context, d time.Duration) (context.Context, co
 // UPDATE itself (users.SetServiceStateIfClear).
 //
 // Two locks, always lockUser then emergencyMu. That order is deadlock-free
-// because nothing takes emergencyMu and then lockUser: neither
-// UseEmergencyAccess's critical section nor the poll's WithEmergencyLock
-// callback takes the per-user lock.
+// because nothing takes emergencyMu and then lockUser. The critical sections
+// of UseEmergencyAccess and ResetEmergencyUsage do not take the per-user
+// lock, and neither does the poll's WithEmergencyLock callback. The grant and
+// the reset take it only for their push (pushEmergencyChange), after
+// emergencyMu is released.
 //
 //   - lockUser, the same per-user lock ResyncMembership holds, across the
 //     write AND the push, so the push cannot interleave with a membership

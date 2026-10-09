@@ -80,7 +80,14 @@ func (r *userRepo) Create(ctx context.Context, u *domain.User) error {
 // an admin's read-modify-Save that brackets a concurrent UseEmergencyAccess
 // grant (or the poll's ClearEmergencyAccess) reverts the just-granted window
 // from the dialog's stale snapshot. Emergency columns are written ONLY through
-// the targeted GrantEmergencyAccess / ClearEmergencyAccess writers.
+// the targeted GrantEmergencyAccess / ClearEmergencyAccess /
+// ResetEmergencyAccess writers.
+//
+// The flip side of every entry: a service method that sets one of these fields
+// and persists with Update writes NOTHING for it, with no error. That is how
+// the admin emergency reset shipped as a no-op. Test doubles of Update must
+// keep these columns too (user.memoryUserRepo, traffic.fakeUserRepo), or they
+// hide exactly that; TestUserUpdateOmitsOwnedColumns pins this list's effect.
 var pollOwnedColumns = []string{
 	// BatchUpdateTrafficState / UpdateTrafficState (userTrafficStateMap)
 	"lifetime_up_bytes", "lifetime_down_bytes", "lifetime_total_bytes",
@@ -90,7 +97,8 @@ var pollOwnedColumns = []string{
 	"last_online_at",
 	// AdvanceBlockViolation (sub.go blocked-client path)
 	"block_violation_count", "last_block_violation_at",
-	// GrantEmergencyAccess / ClearEmergencyAccess (emergency subsystem)
+	// GrantEmergencyAccess / ClearEmergencyAccess / ResetEmergencyAccess
+	// (emergency subsystem)
 	"emergency_until", "emergency_used_count", "emergency_baseline_bytes",
 	// 2FA — written ONLY via SetTOTP / SetRecoveryCodes / ClearTOTP so a stale
 	// edit-dialog Save can't re-enable a just-disabled factor (or wipe a secret).
@@ -529,6 +537,27 @@ func (r *userRepo) GrantEmergencyAccess(ctx context.Context, userID int64, until
 			"emergency_until":          until,
 			"emergency_used_count":     usedCount,
 			"emergency_baseline_bytes": baselineBytes,
+		}).Error
+}
+
+// ResetEmergencyAccess wipes one user's whole emergency record — used count,
+// window and quota baseline — in one targeted write (map so the zero/NULL
+// values land). The admin reset counterpart of ClearEmergencyAccess, which
+// keeps emergency_used_count: ending a window is not refunding a use, but an
+// admin reset is exactly that. user.Service.ResetEmergencyUsage calls it under
+// the emergency lock; before this writer it went through Update, which omits
+// all three columns, so the reset reported success and changed nothing.
+func (r *userRepo) ResetEmergencyAccess(ctx context.Context, userID int64) error {
+	if userID == 0 {
+		return fmt.Errorf("ResetEmergencyAccess requires a non-zero user ID")
+	}
+	return r.db.WithContext(ctx).
+		Model(&userRow{}).
+		Where("id = ?", userID).
+		Updates(map[string]any{
+			"emergency_until":          nil,
+			"emergency_used_count":     0,
+			"emergency_baseline_bytes": 0,
 		}).Error
 }
 

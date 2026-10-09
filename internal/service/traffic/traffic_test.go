@@ -26,9 +26,12 @@ func (r *fakeUserRepo) Update(ctx context.Context, u *domain.User) error {
 	cp := *u
 	// Mirror the production userRepo.Update's Omit(pollOwnedColumns...): the
 	// regular Update path does NOT persist poll-owned columns (lifetime /
-	// period baseline / period start / last-online / block-violation). A test
-	// using Update to write those silently no-ops in prod — pin that here so
-	// SetPeriodUsage (which must use UpdateTrafficState) can't regress to Update.
+	// period baseline / period start / last-online / block-violation /
+	// emergency / service state / totp). A test using Update to write those silently
+	// no-ops in prod — pin that here so SetPeriodUsage (which must use
+	// UpdateTrafficState) can't regress to Update. Exactly the omitted list:
+	// disable_detail is NOT in it, so it is written like every other column
+	// (keeping it here made the fake drop a write production performs).
 	if prev, ok := r.users[u.ID]; ok {
 		cp.LifetimeUpBytes = prev.LifetimeUpBytes
 		cp.LifetimeDownBytes = prev.LifetimeDownBytes
@@ -41,10 +44,13 @@ func (r *fakeUserRepo) Update(ctx context.Context, u *domain.User) error {
 		cp.LastOnlineAt = prev.LastOnlineAt
 		cp.BlockViolationCount = prev.BlockViolationCount
 		cp.LastBlockViolationAt = prev.LastBlockViolationAt
-		cp.DisableDetail = prev.DisableDetail
+		cp.EmergencyUntil = prev.EmergencyUntil
+		cp.EmergencyUsedCount = prev.EmergencyUsedCount
+		cp.EmergencyBaselineBytes = prev.EmergencyBaselineBytes
 		cp.ServiceDisabledReason = prev.ServiceDisabledReason
 		cp.ServiceDisableDetail = prev.ServiceDisableDetail
 		cp.ServiceDisabledAt = prev.ServiceDisabledAt
+		cp.TOTPEnabled = prev.TOTPEnabled
 	}
 	r.users[u.ID] = &cp
 	return nil
@@ -254,6 +260,15 @@ func (r *fakeUserRepo) GrantEmergencyAccess(ctx context.Context, userID int64, u
 		cur.EmergencyUntil = &u
 		cur.EmergencyUsedCount = usedCount
 		cur.EmergencyBaselineBytes = baselineBytes
+	}
+	return nil
+}
+
+func (r *fakeUserRepo) ResetEmergencyAccess(ctx context.Context, userID int64) error {
+	if cur, ok := r.users[userID]; ok {
+		cur.EmergencyUntil = nil
+		cur.EmergencyUsedCount = 0
+		cur.EmergencyBaselineBytes = 0
 	}
 	return nil
 }

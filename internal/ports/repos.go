@@ -271,6 +271,14 @@ type UserRepo interface {
 	// columns, can never revert a just-granted window from a concurrent admin
 	// edit's stale snapshot.
 	GrantEmergencyAccess(ctx context.Context, userID int64, until time.Time, usedCount int, baselineBytes int64) error
+	// ResetEmergencyAccess zeroes emergency_used_count AND clears
+	// emergency_until / emergency_baseline_bytes for one user in one targeted
+	// write — the admin "reset emergency usage" action, run under the
+	// emergency lock. Its own writer because neither sibling fits: Update
+	// omits all three columns (a reset through it is a silent no-op on every
+	// real database), and ClearEmergencyAccess deliberately keeps the used
+	// count, since a window ending is not a use refunded.
+	ResetEmergencyAccess(ctx context.Context, userID int64) error
 	Delete(ctx context.Context, id int64) error
 	GetByID(ctx context.Context, id int64) (*domain.User, error)
 	GetByUPN(ctx context.Context, upn string) (*domain.User, error)

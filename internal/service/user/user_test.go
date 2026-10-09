@@ -504,8 +504,9 @@ func TestResumeServiceAndSyncClearsBlockedClientViolation(t *testing.T) {
 }
 
 type memoryUserRepo struct {
-	byID        map[int64]*domain.User
-	updateCalls int
+	byID                map[int64]*domain.User
+	updateCalls         int
+	resetEmergencyCalls int
 }
 
 type emptyOwnershipRepo struct {
@@ -538,10 +539,53 @@ func (r *memoryUserRepo) Create(ctx context.Context, u *domain.User) error {
 	return nil
 }
 
+// Update mirrors the production userRepo.Update's Omit(pollOwnedColumns...):
+// the broad Save does NOT persist the columns a targeted writer owns, so this
+// fake keeps the stored value of every one of them and takes the rest from u.
+// A fake that stored the whole struct let a service method whose only write
+// was Update pass its tests while being a silent no-op in production —
+// ResetEmergencyUsage was exactly that. Keep keepUpdateOmittedFields in step
+// with pollOwnedColumns (TestUserUpdateOmitsOwnedColumns in sqlstore pins the
+// production side of the same list).
 func (r *memoryUserRepo) Update(ctx context.Context, u *domain.User) error {
 	r.updateCalls++
-	r.byID[u.ID] = cloneUser(u)
+	cp := cloneUser(u)
+	if prev, ok := r.byID[u.ID]; ok {
+		keepUpdateOmittedFields(cp, prev)
+	}
+	r.byID[u.ID] = cp
 	return nil
+}
+
+// keepUpdateOmittedFields copies onto dst, from prev, every domain field whose
+// column is in sqlstore's pollOwnedColumns — the fields userRepo.Update never
+// writes. (The TOTP secret, recovery codes and permission overrides are owned
+// too, but domain.User does not carry them, so there is nothing to keep.)
+func keepUpdateOmittedFields(dst, prev *domain.User) {
+	// UpdateTrafficState / BatchUpdateTrafficState (userTrafficStateMap)
+	dst.LifetimeUpBytes = prev.LifetimeUpBytes
+	dst.LifetimeDownBytes = prev.LifetimeDownBytes
+	dst.LifetimeTotalBytes = prev.LifetimeTotalBytes
+	dst.PeriodBaselineBytes = prev.PeriodBaselineBytes
+	dst.PeriodBaselineUpBytes = prev.PeriodBaselineUpBytes
+	dst.PeriodBaselineDownBytes = prev.PeriodBaselineDownBytes
+	dst.LifetimeBaselineAt = prev.LifetimeBaselineAt
+	dst.TrafficPeriodStart = prev.TrafficPeriodStart
+	// BatchUpdateLastOnline
+	dst.LastOnlineAt = prev.LastOnlineAt
+	// AdvanceBlockViolation / ClearBlockViolation
+	dst.BlockViolationCount = prev.BlockViolationCount
+	dst.LastBlockViolationAt = prev.LastBlockViolationAt
+	// GrantEmergencyAccess / ClearEmergencyAccess / ResetEmergencyAccess
+	dst.EmergencyUntil = prev.EmergencyUntil
+	dst.EmergencyUsedCount = prev.EmergencyUsedCount
+	dst.EmergencyBaselineBytes = prev.EmergencyBaselineBytes
+	// UpdateServiceState and its conditional siblings
+	dst.ServiceDisabledReason = prev.ServiceDisabledReason
+	dst.ServiceDisableDetail = prev.ServiceDisableDetail
+	dst.ServiceDisabledAt = prev.ServiceDisabledAt
+	// SetTOTP / ClearTOTP
+	dst.TOTPEnabled = prev.TOTPEnabled
 }
 
 func (r *memoryUserRepo) AdvanceBlockViolation(ctx context.Context, userID int64, notBefore, at time.Time, detail string) (int, bool, error) {
@@ -693,6 +737,16 @@ func (r *memoryUserRepo) GrantEmergencyAccess(ctx context.Context, userID int64,
 		cur.EmergencyUntil = &u
 		cur.EmergencyUsedCount = usedCount
 		cur.EmergencyBaselineBytes = baselineBytes
+	}
+	return nil
+}
+
+func (r *memoryUserRepo) ResetEmergencyAccess(ctx context.Context, userID int64) error {
+	r.resetEmergencyCalls++
+	if cur, ok := r.byID[userID]; ok {
+		cur.EmergencyUntil = nil
+		cur.EmergencyUsedCount = 0
+		cur.EmergencyBaselineBytes = 0
 	}
 	return nil
 }
