@@ -1,4 +1,6 @@
-import CodeMirror from '@uiw/react-codemirror'
+import { forwardRef, useImperativeHandle, useMemo, useRef } from 'react'
+import { useTheme } from '@mui/material'
+import CodeMirror, { EditorView, type ReactCodeMirrorRef } from '@uiw/react-codemirror'
 import { yaml } from '@codemirror/lang-yaml'
 
 // CodeEditor wraps CodeMirror 6 for editing rule-set content (Clash/Mihomo
@@ -7,27 +9,56 @@ import { yaml } from '@codemirror/lang-yaml'
 // keystroke. This module pulls in the heavy CM deps, so consumers should
 // React.lazy() it — that keeps it out of the initial SPA bundle (loaded only
 // when a rule-set editor opens). Default export for lazy().
-export default function CodeEditor({
-  value,
-  onChange,
-  height = '380px',
-  readOnly = false,
-  dark = false,
-}: {
+export interface CodeEditorHandle { revealLine(n: number): void; insertLine(text: string): void }
+
+const CodeEditor = forwardRef<CodeEditorHandle, {
   value: string
   onChange: (next: string) => void
   height?: string
   readOnly?: boolean
   dark?: boolean
-}) {
+  language?: 'yaml' | 'plain' | 'markdown'
+  minRows?: number
+  ariaLabel?: string
+}>(function CodeEditor({
+  value,
+  onChange,
+  height,
+  readOnly = false,
+  dark,
+  language = 'yaml',
+  minRows,
+  ariaLabel,
+}, ref) {
+  const theme = useTheme()
+  const editor = useRef<ReactCodeMirrorRef>(null)
+  // Markdown uses plain text until its separate language extension is added.
+  const extensions = useMemo(() => [...(language === 'yaml' ? [yaml()] : []),
+    ...(ariaLabel ? [EditorView.contentAttributes.of({ 'aria-label': ariaLabel })] : [])], [language, ariaLabel])
+  useImperativeHandle(ref, () => ({ revealLine(n) {
+    const view = editor.current?.view
+    if (!view || !Number.isFinite(n)) return
+    const line = view.state.doc.line(Math.max(1, Math.min(view.state.doc.lines, Math.trunc(n))))
+    view.dispatch({ selection: { anchor: line.from, head: line.to }, scrollIntoView: true })
+    view.focus()
+  }, insertLine(text) {
+    const view = editor.current?.view
+    if (!view || readOnly) return
+    const { from, to } = view.state.selection.main
+    const prefix = from > 0 && view.state.doc.sliceString(from - 1, from) !== '\n' ? '\n' : ''
+    const insert = prefix + text + '\n'
+    view.dispatch({ changes: { from, to, insert }, selection: { anchor: from + insert.length }, scrollIntoView: true })
+    view.focus()
+  } }), [readOnly])
   return (
     <CodeMirror
+      ref={editor}
       value={value}
-      height={height}
-      theme={dark ? 'dark' : 'light'}
+      height={height ?? (minRows != null && Number.isFinite(minRows) ? `${Math.max(1, Math.trunc(minRows)) * 20 + 16}px` : '380px')}
+      theme={(dark ?? (theme.palette.mode === 'dark')) ? 'dark' : 'light'}
       editable={!readOnly}
       readOnly={readOnly}
-      extensions={[yaml()]}
+      extensions={extensions}
       onChange={onChange}
       basicSetup={{
         lineNumbers: true,
@@ -38,4 +69,6 @@ export default function CodeEditor({
       style={{ fontSize: 13, borderRadius: 8, overflow: 'hidden' }}
     />
   )
-}
+})
+
+export default CodeEditor

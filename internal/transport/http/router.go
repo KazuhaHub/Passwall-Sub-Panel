@@ -805,6 +805,8 @@ func NewRouter(d Deps) stdhttp.Handler {
 		panelPathSSO := handler.NewPanelPathSSOMigrator(d.Repos.SAMLConfig, d.Repos.OIDCConfig, d.SAML, d.OIDC)
 		settings := handler.NewAdminSettingsHandler(d.Repos.Settings, d.JWTParams, paths, panelPathSSO)
 		legalAdmin := handler.NewLegalAdminHandler(d.Repos.Legal)
+		adminGroup.GET("/legal/data-collection", legalAdmin.Collection)
+		adminGroup.GET("/legal/:kind/latest", legalAdmin.Latest)
 		adminGroup.GET("/legal/affected-users", legalAdmin.AffectedUsers)
 		adminGroup.GET("/legal/:kind", legalAdmin.History)
 		adminGroup.POST("/legal/:kind", legalAdmin.Publish)

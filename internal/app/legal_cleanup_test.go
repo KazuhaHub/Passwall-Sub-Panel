@@ -61,6 +61,8 @@ func TestBuildPrunesLegalConsentOrphans(t *testing.T) {
 	}
 	for _, tc := range []struct{ method, path string }{
 		{http.MethodGet, "/api/admin/legal/affected-users"},
+		{http.MethodGet, "/api/admin/legal/data-collection"},
+		{http.MethodGet, "/api/admin/legal/terms/latest"},
 		{http.MethodGet, "/api/admin/legal/terms"},
 		{http.MethodPost, "/api/admin/legal/terms"},
 		{http.MethodPost, "/api/user/me/legal/accept"},

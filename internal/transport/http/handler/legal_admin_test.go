@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/jwtutil"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/transport/http/middleware"
 	"github.com/gin-gonic/gin"
 )
@@ -99,5 +101,66 @@ func TestLegalAdminHTTP_PublishRequiresActor(t *testing.T) {
 	h.Publish(c)
 	if w.Code != 401 {
 		t.Fatalf("unauthenticated publish %d %s", w.Code, w.Body.String())
+	}
+}
+
+func TestLegalAdminHTTP_CollectionBeforeEnablement(t *testing.T) {
+	repos := legalHTTPRepos(t)
+	settings := ports.UISettings{LegalEnabled: false, AuthEventRetentionDays: 30, RiskRefreshIntervalMinutes: 25, RiskHWIDCaptureOff: true}
+	if err := repos.Settings.Save(context.Background(), settings); err != nil {
+		t.Fatal(err)
+	}
+	r := gin.New()
+	r.GET("/legal/data-collection", NewLegalAdminHandler(repos.Legal).Collection)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/legal/data-collection", nil))
+	var data domain.LegalDataCollection
+	if err := json.Unmarshal(w.Body.Bytes(), &data); err != nil {
+		t.Fatal(err)
+	}
+	if w.Code != 200 || data.AuthEventRetentionDays != 30 || data.RiskAssessmentRefreshMinutes != 25 || data.ConnectionRetentionDays != 7 || data.HWIDCaptured || data.Access == nil {
+		t.Fatalf("disabled administrator disclosure %d %+v", w.Code, data)
+	}
+}
+
+func TestLegalAdminHTTP_LatestIsIndependentOfHistoryPageAndEnablement(t *testing.T) {
+	repos := legalHTTPRepos(t)
+	ctx := context.Background()
+	for _, draft := range []domain.LegalDraft{
+		{Kind: "terms", Locale: "zh-CN", Content: "中文", PublishedBy: 1},
+		{Kind: "terms", Locale: "en-US", Content: "English", PublishedBy: 1},
+		{Kind: "terms", Locale: "en-US", Content: "English updated", PublishedBy: 1},
+	} {
+		if _, err := repos.Legal.Publish(ctx, draft); err != nil {
+			t.Fatal(err)
+		}
+	}
+	r := gin.New()
+	r.GET("/legal/:kind/latest", NewLegalAdminHandler(repos.Legal).Latest)
+	for _, tc := range []struct {
+		query   string
+		status  int
+		content string
+		version int64
+	}{
+		{"", 200, "中文", 1},
+		{"?lang=en-US", 200, "English updated", 2},
+		{"?lang=fr-FR", 404, "", 0},
+		{"?lang=../bad", 400, "", 0},
+	} {
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/legal/terms/latest"+tc.query, nil))
+		if w.Code != tc.status {
+			t.Fatalf("latest %q status %d", tc.query, w.Code)
+		}
+		if tc.status == 200 {
+			var doc domain.LegalDocument
+			if err := json.Unmarshal(w.Body.Bytes(), &doc); err != nil {
+				t.Fatal(err)
+			}
+			if doc.Content != tc.content || doc.Version != tc.version {
+				t.Fatalf("latest %q => %+v", tc.query, doc)
+			}
+		}
 	}
 }

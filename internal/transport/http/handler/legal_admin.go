@@ -16,6 +16,34 @@ func NewLegalAdminHandler(repo ports.LegalRepo) *LegalAdminHandler {
 	return &LegalAdminHandler{repo: repo}
 }
 
+// Collection is authenticated so an administrator can preview the actual
+// saved collection policy before enabling or publishing legal documents.
+func (h *LegalAdminHandler) Collection(c *gin.Context) {
+	if h.repo == nil {
+		respondError(c, domain.ErrUnavailable)
+		return
+	}
+	data, err := h.repo.DataCollection(c.Request.Context())
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, data)
+}
+
+func (h *LegalAdminHandler) Latest(c *gin.Context) {
+	if h.repo == nil {
+		respondError(c, domain.ErrUnavailable)
+		return
+	}
+	doc, err := h.repo.Latest(c.Request.Context(), c.Param("kind"), c.DefaultQuery("lang", "zh-CN"))
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, doc)
+}
+
 func (h *LegalAdminHandler) History(c *gin.Context) {
 	if h.repo == nil {
 		respondError(c, domain.ErrUnavailable)
