@@ -1451,6 +1451,10 @@ type fakeOwnershipRepo struct {
 	// batchUpdateCountersCalls counts batched flushes for the v3.5.0-beta.9
 	// PollOnce perf-behavior test (ONCE per cycle instead of N×M times).
 	batchUpdateCountersCalls int
+	// batchErr, when set, fails BatchUpdateCounters before any row is
+	// written — the whole-batch rollback the production transaction gives —
+	// so a test can drive the poll's counter-flush failure path.
+	batchErr error
 }
 
 func (r *fakeOwnershipRepo) Add(ctx context.Context, e *domain.XUIClientEntry) error { return nil }
@@ -1517,6 +1521,9 @@ func (r *fakeOwnershipRepo) UpdateCounters(ctx context.Context, e *domain.XUICli
 // counter-write path PollOnce takes per cycle.
 func (r *fakeOwnershipRepo) BatchUpdateCounters(ctx context.Context, items []*domain.XUIClientEntry) error {
 	r.batchUpdateCountersCalls++
+	if r.batchErr != nil {
+		return r.batchErr
+	}
 	for _, e := range items {
 		if err := r.UpdateCounters(ctx, e); err != nil {
 			return err
@@ -1794,7 +1801,15 @@ func TestNodeReportForNilNodesRepoDoesNotPanic(t *testing.T) {
 // We catch this by injecting a disabler that, at the moment it's called,
 // re-reads the user from the SAME fake repo PollOnce writes through and
 // captures PeriodUsed(). The fix asserts that captured value reflects the
-// new period (≤ this cycle's delta), not the old one (~ TrafficLimitBytes).
+// new period, not the old one (~ TrafficLimitBytes).
+//
+// It reflects the new period WITHOUT this cycle's bytes (PeriodUsed 0): the
+// inline rollover write leaves those to the end-of-cycle batch, which runs
+// only once the client counters have landed. That also pins the second
+// regression: an inline write carrying the cycle's bytes (3072) is the one
+// that got them counted twice when a counter flush then failed, and the floor
+// pushed at the resume paired that fresh usage with a client counter the
+// flush had not advanced yet.
 func TestPollOnceRolloverWritesSynchronouslyForDisablerReread(t *testing.T) {
 	const gb = int64(1) << 30
 	const limit = 10 * gb
@@ -1858,13 +1873,20 @@ func TestPollOnceRolloverWritesSynchronouslyForDisablerReread(t *testing.T) {
 		t.Fatal("disabler was never called with enabled=true; rollover re-enable path didn't fire")
 	}
 	// After rollover: PeriodUsed = LifetimeTotalBytes - PeriodBaselineBytes.
-	// PeriodBaselineBytes is set to "lifetime BEFORE this poll's delta", so
-	// PeriodUsed at the moment the disabler reads should be ~this cycle's
-	// delta (1024 + 2048 = 3072 bytes). Anything anywhere near `limit`
+	// PeriodBaselineBytes is set to "lifetime BEFORE this poll's delta", and
+	// the inline write persists the lifetime from before it too, so PeriodUsed
+	// at the moment the disabler reads is 0. Anything anywhere near `limit`
 	// means the disabler saw stale data — the bug is back.
 	if seenPeriodUsedOnReenable > gb {
-		t.Errorf("disabler saw PeriodUsed = %d at re-enable; expected ~this-cycle-delta (3072 bytes), got near-limit. Rollover write was NOT flushed before SetEnabledAndSync — the v3.5.0-beta.9 stale-read regression is back.",
+		t.Errorf("disabler saw PeriodUsed = %d at re-enable; expected 0, got near-limit. Rollover write was NOT flushed before ResumeServiceAndSync — the v3.5.0-beta.9 stale-read regression is back.",
 			seenPeriodUsedOnReenable)
+	} else if seenPeriodUsedOnReenable != 0 {
+		t.Errorf("disabler saw PeriodUsed = %d at re-enable, want 0: the inline rollover write carried this cycle's bytes (3072) ahead of the client counter flush",
+			seenPeriodUsedOnReenable)
+	}
+	// The cycle's bytes still land, through the end-of-cycle batch.
+	if got := users.users[1].PeriodUsed(); got != 3072 {
+		t.Errorf("PeriodUsed after the poll = %d, want 3072 (this cycle's delta, in the new period)", got)
 	}
 }
 

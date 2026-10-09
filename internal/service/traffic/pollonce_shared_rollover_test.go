@@ -424,7 +424,8 @@ func TestPollOnce_MixedTierRolloverKeepsPeriodSumExact(t *testing.T) {
 // reseed. The poll must not trip over that: the user still rolls (quota
 // enforcement depends on it) and the psp_client rows are left exactly as
 // stored — no write at all, rather than a write built from nothing — and a
-// Warn says why the per-server period stays on the previous period.
+// Warn says why the per-server period stays on the previous period until
+// the next cycle reseeds it (TestPollOnce_SharedClientListFailureReseedsSharedTierNextCycle).
 func TestPollOnce_SharedClientListFailureStillRollsUser(t *testing.T) {
 	oldStart := time.Now().AddDate(-1, 0, 0)
 	users := &fakeUserRepo{users: map[int64]*domain.User{

@@ -1082,7 +1082,25 @@ TrafficSvc cron 每 N 分钟（默认 5）:
          （UserServerUsage 只展示其中一层：用户有任一 psp_client 时只读共享层，过渡期用户的遗留层用量见 UserNodeUsage）
        - 若 service_disabled_reason=traffic_exceeded → 调 user.ResumeServiceAndSync(userID)
            （清空 service_disabled_reason + SyncLifecycle(enable=true) + 异步"服务已恢复"邮件）
+       - 新周期（period_start + baseline，不含本轮 delta）在恢复服务前同步落库，恢复时推送的配额
+         因此与尚未写回的 client 计数器同属上一轮；本轮 delta 与其他用户一样随周期末批量写入
        - AuditLog
+  7. 周期末批量写入，按用户成对落库：client 计数器（先遗留 user_xui_clients，再共享 psp_clients）
+     先于用户流量状态，用户的 traffic_snapshots 行最后、且只随其流量状态一起写入：
+       - 某个计数器批次写失败 → 该批次涉及 client 的用户（只有这些用户）本轮从计数器派生的一切
+         都不落库：流量状态、用户快照（下一轮当 prev 读回，零 lifetime 的种子与缺失的 bootstrap
+         cutoff 都取自它），遗留批次失败时还有这些用户在共享批次里的 client；下一轮从未前进的
+         last_raw 重算，流量不会被计两次。其余用户照常落库
+       - 两个批次是两个事务：遗留批次已落库、共享批次随后失败时，同时持有两层 client 的过渡期用户
+         丢失本轮遗留层流量（少计，撤销不了）
+       - 用户流量状态批次本身失败（计数器已落库）→ 该批次所有用户丢失本轮流量（少计），
+         用户快照随之不写；本轮 rollover 的用户也一样（内联写入不含本轮 delta）
+       - client 级周期 baseline 的 rollover reseed 若没能与用户状态一起落库（计数器批次失败、用户状态
+         批次失败），或共享 client 列表读取失败、共享层根本没 reseed → 下一轮对相应层按同一公式重做，
+         两层 client 周期用量合计仍等于用户周期用量；其间管理员手动设置周期用量会取消它（以管理员的
+         reseed 为准）。仅内存记录，期间重启则 client 级周期用量停留在上一周期，用户级不受影响
+       - client_traffic_snapshots（poll 不读回）与节点计数器 / 快照（与用户状态互不依赖）不受上述约束，
+         照常写入
 
 账号状态（enabled + auto_disabled_reason）与服务状态（service_disabled_reason）是两条独立轴：
 超限只影响服务状态，用户仍可登录面板自助页查看暂停原因、申请紧急访问或联系管理员。
@@ -1520,7 +1538,7 @@ func (c *Client) UpgradeXray(ctx, tag string) error
 
 - 两列有符号、可为负，不做 clamp，也不能假设 up + down == `period_baseline_bytes`（仅当 lifetime_total == up + down 时成立）。
 - 管理员手动改用量（`SetPeriodUsage`）只给总量：按本周期**实测**上下行比例做精确整数拆分（本周期无实测流量 → 全部计入 download）。总量精确，方向是估算。
-- 分服务器周期用量（`UserServerUsage`）读 client 级 `period_baseline_*`：自然 rollover 时 poll 把该用户每个共享 `psp_clients` 行（及遗留 `user_xui_clients` 行）reseed 为 lifetime − 本轮该 client 的 delta，与用户级 baseline 同一时刻 freeze，故两层合计等于 `PeriodUsed()`。共享 client 的 delta 从不走 bootstrap 路径，无需遗留层的 cutoff 判断。若该轮 `psp_clients` 列表读取失败，用户照常滚动但共享 client baseline 不变（日志 Warn），分服务器周期用量将停留在上一周期直到下次 reseed。
+- 分服务器周期用量（`UserServerUsage`）读 client 级 `period_baseline_*`：自然 rollover 时 poll 把该用户每个共享 `psp_clients` 行（及遗留 `user_xui_clients` 行）reseed 为 lifetime − 本轮该 client 的 delta，与用户级 baseline 同一时刻 freeze，故两层合计等于 `PeriodUsed()`。共享 client 的 delta 从不走 bootstrap 路径，无需遗留层的 cutoff 判断。若该轮 `psp_clients` 列表读取失败，用户照常滚动，共享层 reseed 顺延到下一轮（日志 Warn），其间分服务器周期用量停留在上一周期；reseed 没能与用户状态一起落库（计数器或用户状态批写失败）时同样顺延到下一轮按同一公式重做（见 §7.9 第 7 步）。
 - 升级回填（一次性 marker `user_period_baseline_split_v1`）：`period_baseline_bytes <= 0` 的行 → 0/0（周期即全部 lifetime，拆分精确）；`> 0` 的行 → up baseline = lifetime_up，周期内存量全部计为 download（与旧版 header 逐字节一致），之后的流量按方向累计，下一次自然 rollover 起完全实测。reset=never 用户不会 rollover，却可能 baseline > 0（曾手动改用量，或由按周期重置改为 never）：其存量部分一直计为 download，直到管理员手动设置用量重新拆分（设为 0 时精确，否则按实测比例）。
 
 ### 11.3 超限 → 暂停服务

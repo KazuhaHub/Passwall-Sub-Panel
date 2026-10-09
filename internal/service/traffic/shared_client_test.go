@@ -13,22 +13,68 @@ type fakePSPClientRepo struct {
 	byUser       map[int64][]*domain.PSPClient
 	inbounds     map[int64][]domain.PSPClientInbound // clientID -> attachments
 	batchUpdated []*domain.PSPClient                 // last BatchUpdateCounters payload
+	// durable makes the fake behave like the table instead of sharing
+	// pointers: reads hand out copies, and only a successful
+	// BatchUpdateCounters writes the counter columns back. Without it a
+	// failed flush is invisible — the poll's in-memory mutations ARE the
+	// stored rows — so a multi-cycle test of a lost flush needs it on.
+	durable bool
+	// batchErr, when set, fails BatchUpdateCounters before anything is
+	// written (the production batch is one transaction).
+	batchErr error
+	// listErr, when set, fails ListAll — the poll's shared-client list read,
+	// whose failure skips shared metering for the cycle.
+	listErr error
+}
+
+// read is what a list returns: the stored pointers, or copies when durable.
+func (f *fakePSPClientRepo) read(cs []*domain.PSPClient) []*domain.PSPClient {
+	if !f.durable {
+		return cs
+	}
+	out := make([]*domain.PSPClient, len(cs))
+	for i, c := range cs {
+		cp := *c
+		out[i] = &cp
+	}
+	return out
 }
 
 func (f *fakePSPClientRepo) ListByUser(_ context.Context, uid int64) ([]*domain.PSPClient, error) {
-	return f.byUser[uid], nil
+	return f.read(f.byUser[uid]), nil
 }
 func (f *fakePSPClientRepo) ListInbounds(_ context.Context, clientID int64) ([]domain.PSPClientInbound, error) {
 	return f.inbounds[clientID], nil
 }
 func (f *fakePSPClientRepo) BatchUpdateCounters(_ context.Context, items []*domain.PSPClient) error {
+	if f.batchErr != nil {
+		return f.batchErr
+	}
 	f.batchUpdated = items
+	if !f.durable {
+		return nil
+	}
+	// The column set of pspClientCounterMap, nothing else.
+	for _, it := range items {
+		for _, c := range f.byUser[it.UserID] {
+			if c.ID != it.ID {
+				continue
+			}
+			c.LifetimeUpBytes, c.LifetimeDownBytes, c.LifetimeTotalBytes = it.LifetimeUpBytes, it.LifetimeDownBytes, it.LifetimeTotalBytes
+			c.LastRawUpBytes, c.LastRawDownBytes, c.LastRawTotalBytes = it.LastRawUpBytes, it.LastRawDownBytes, it.LastRawTotalBytes
+			c.LastCounterEpoch = it.LastCounterEpoch
+			c.PeriodBaselineUpBytes, c.PeriodBaselineDownBytes, c.PeriodBaselineTotalBytes = it.PeriodBaselineUpBytes, it.PeriodBaselineDownBytes, it.PeriodBaselineTotalBytes
+		}
+	}
 	return nil
 }
 func (f *fakePSPClientRepo) ListAll(_ context.Context) ([]*domain.PSPClient, error) {
+	if f.listErr != nil {
+		return nil, f.listErr
+	}
 	var all []*domain.PSPClient
 	for _, cs := range f.byUser {
-		all = append(all, cs...)
+		all = append(all, f.read(cs)...)
 	}
 	return all, nil
 }

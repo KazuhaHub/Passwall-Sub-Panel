@@ -161,6 +161,80 @@ type Service struct {
 	// load; read on every cycle even when the load fails.
 	pollCfgMu    sync.RWMutex
 	pollCfgCache ports.UISettings
+
+	// reseedRetry holds the users whose rollover reseed of their per-client
+	// period baselines did not land, and on which tiers (PollOnce). The
+	// reseeded baselines ride the client counter rows, so a counter flush
+	// that fails drops them with the counters, and a shared-client list that
+	// fails leaves the shared tier with nothing to reseed. A failed user
+	// batch loses them too, in effect: the baselines landed, frozen ahead of
+	// bytes the user's row then never got. The user's own
+	// rollover is durable regardless (persistRollover writes it inline), so
+	// no later cycle rolls that user again — without this set the client
+	// tier would keep the previous period's freeze until the next rollover.
+	// The next cycle reseeds them as though they had rolled then; see the
+	// reseed pass for why that freeze is exact. Memory only: a restart in
+	// between drops the retry and leaves just the per-client period stale
+	// (the user-level period, which quota enforcement reads, is unaffected),
+	// which the cycle that queues it says in its Warn. SetPeriodUsage
+	// forgets a user it re-baselines (dropReseedRetry): its own reseed is
+	// newer. Guarded by reseedRetryMu because polls can overlap (the
+	// scheduled one and a staff "poll now").
+	reseedRetryMu sync.Mutex
+	reseedRetry   map[int64]reseedTier
+}
+
+// reseedTier is a set of the client tiers a period-baseline reseed covers:
+// the legacy ownership rows and the shared psp_clients. A rollover reseeds
+// both; a retry can be owed on one only — a failed shared-client list
+// skips just the shared tier, and re-freezing the ownership tier then
+// would drop the bytes it has counted since.
+type reseedTier uint8
+
+const (
+	reseedOwnership reseedTier = 1 << iota
+	reseedShared
+
+	reseedBothTiers = reseedOwnership | reseedShared
+)
+
+// takeReseedRetry hands the calling cycle every user queued by retryReseed,
+// with their tiers, and forgets them; the cycle puts them back if they do
+// not land this time either. Always returns a writable map, so the caller
+// can add this cycle's rolls.
+func (s *Service) takeReseedRetry() map[int64]reseedTier {
+	s.reseedRetryMu.Lock()
+	defer s.reseedRetryMu.Unlock()
+	users := s.reseedRetry
+	s.reseedRetry = nil
+	if users == nil {
+		users = make(map[int64]reseedTier)
+	}
+	return users
+}
+
+// retryReseed queues users for the next cycle's period-baseline reseed on
+// the given tiers, adding to any tiers already queued for them.
+func (s *Service) retryReseed(users map[int64]reseedTier) {
+	s.reseedRetryMu.Lock()
+	defer s.reseedRetryMu.Unlock()
+	if s.reseedRetry == nil {
+		s.reseedRetry = make(map[int64]reseedTier, len(users))
+	}
+	for uid, tiers := range users {
+		s.reseedRetry[uid] |= tiers
+	}
+}
+
+// dropReseedRetry forgets a queued reseed for one user. SetPeriodUsage
+// calls it as it re-baselines that user's clients to the admin's figure: a
+// queued rollover reseed, run after it, would put the clients back on the
+// rollover's freeze and leave the per-client period short of the user's by
+// the admin's figure for the rest of the period.
+func (s *Service) dropReseedRetry(userID int64) {
+	s.reseedRetryMu.Lock()
+	defer s.reseedRetryMu.Unlock()
+	delete(s.reseedRetry, userID)
 }
 
 // SetBgWG wires the app-level WaitGroup the background goroutines (floor push)
@@ -879,34 +953,66 @@ func (s *Service) PollOnce(ctx context.Context) (err error) {
 	// advanced, and before the counter flushes below so the reseeded baselines
 	// are what they write.
 	//
+	// reseed adds to this cycle's rolls (both tiers) the users whose rollover
+	// reseed an earlier cycle could not land, on the tiers it owes them
+	// (takeReseedRetry; the flush section below says when one is owed). For
+	// them, too, "lifetime minus this cycle's delta" is the right freeze,
+	// because the user's row has counted none of that tier's bytes since the
+	// rollover beyond what this cycle's delta holds:
+	//   - a tier whose counters did not land (a failed flush, or a failed
+	//     shared-client list, which meters no shared client at all) still
+	//     has the LastRaw from before, so this cycle's delta re-measures the
+	//     lost bytes, and the user's row never got them either: the inline
+	//     rollover write carries no bytes, and the user's batch was held
+	//     back with the flush (or never had them, the list having metered
+	//     nothing). The freeze lands on the pre-rollover lifetime, where the
+	//     user's own baseline sits;
+	//   - a tier whose counters landed while the user's row did not (the
+	//     user batch failed, or a mixed user's ownership flush landed and
+	//     the shared one failed) advanced past bytes the row never got, and
+	//     freezing after them keeps Σ(client period) equal to the user's
+	//     period.
+	// A tier whose reseed landed together with the user's row is never owed:
+	// the user goes on counting its bytes from there, and re-freezing it would
+	// drop them.
+	//
 	// pspQueued is the set of shared clients already in sink.pspClientUpdates,
 	// built on first use (most cycles roll nobody, and of those that do, most
 	// users hold no shared client).
-	var pspQueued map[int64]bool
+	reseed := s.takeReseedRetry()
 	for uid := range sink.rolledOver {
-		cutoff := sink.userCutoff[uid] // may be nil
-		for _, e := range sink.clientsByUser[uid] {
-			d := sink.clientDeltas[e.ID] // zero value when this client had no delta
-			// counted = the portion of d that the user-level path folded into
-			// the new period. hadPrev deltas always count; a bootstrap delta
-			// counts only when createdAt > cutoff (mirrors recordAndEnforceWith),
-			// so a long-idle client's first transmission doesn't inflate the
-			// per-node period beyond what the user-level period recorded.
-			counted := d
-			if !d.hadPrev && cutoff != nil && !(!e.CreatedAt.IsZero() && e.CreatedAt.After(*cutoff)) {
-				counted = trafficDelta{}
+		reseed[uid] = reseedBothTiers
+	}
+	var pspQueued map[int64]bool
+	for uid, tiers := range reseed {
+		if tiers&reseedOwnership != 0 {
+			cutoff := sink.userCutoff[uid] // may be nil
+			for _, e := range sink.clientsByUser[uid] {
+				d := sink.clientDeltas[e.ID] // zero value when this client had no delta
+				// counted = the portion of d that the user-level path folded into
+				// the new period. hadPrev deltas always count; a bootstrap delta
+				// counts only when createdAt > cutoff (mirrors recordAndEnforceWith),
+				// so a long-idle client's first transmission doesn't inflate the
+				// per-node period beyond what the user-level period recorded.
+				counted := d
+				if !d.hadPrev && cutoff != nil && !(!e.CreatedAt.IsZero() && e.CreatedAt.After(*cutoff)) {
+					counted = trafficDelta{}
+				}
+				e.PeriodBaselineUpBytes = nonNeg(e.LifetimeUpBytes - counted.up)
+				e.PeriodBaselineDownBytes = nonNeg(e.LifetimeDownBytes - counted.down)
+				e.PeriodBaselineTotalBytes = nonNeg(e.LifetimeTotalBytes - counted.total)
+				// Persistence is keyed on the RAW delta, not counted: a client with a
+				// non-zero raw delta is already queued in ownershipUpdates
+				// (recordClientStats appended it) and its baseline rides that write
+				// via the shared pointer; a zero-raw-delta client isn't queued, so
+				// enqueue it now to persist the reseeded baseline.
+				if d.up == 0 && d.down == 0 && d.total == 0 {
+					sink.ownershipUpdates = append(sink.ownershipUpdates, e)
+				}
 			}
-			e.PeriodBaselineUpBytes = nonNeg(e.LifetimeUpBytes - counted.up)
-			e.PeriodBaselineDownBytes = nonNeg(e.LifetimeDownBytes - counted.down)
-			e.PeriodBaselineTotalBytes = nonNeg(e.LifetimeTotalBytes - counted.total)
-			// Persistence is keyed on the RAW delta, not counted: a client with a
-			// non-zero raw delta is already queued in ownershipUpdates
-			// (recordClientStats appended it) and its baseline rides that write
-			// via the shared pointer; a zero-raw-delta client isn't queued, so
-			// enqueue it now to persist the reseeded baseline.
-			if d.up == 0 && d.down == 0 && d.total == 0 {
-				sink.ownershipUpdates = append(sink.ownershipUpdates, e)
-			}
+		}
+		if tiers&reseedShared == 0 {
+			continue
 		}
 		// Shared-client tier, the source of a migrated user's per-server rows
 		// (serverUsageFromShared). Before this pass existed, only the ownership
@@ -943,32 +1049,31 @@ func (s *Service) PollOnce(ctx context.Context) (err error) {
 			}
 		}
 	}
-	// A failed shared-client list leaves nothing to reseed: the users above
-	// rolled (their user-level period is right), but their psp_client
-	// baselines keep the previous period's freeze until the next rollover or
-	// an admin period-usage set. Say so, or the stale per-server period usage
-	// has no explanation in the log. The count covers every rolled-over user,
-	// legacy-only and client-less ones included: the list that would tell the
-	// migrated ones apart is the one that failed, so it is an upper bound.
-	if sharedErr != nil && len(sink.rolledOver) > 0 {
-		log.Warn("traffic poll: shared-client period baselines not reseeded this rollover cycle (shared-client list failed); per-server period usage of any migrated users among the rolled-over ones stays on the previous period",
-			"rolled_over_users", len(sink.rolledOver), "err", sharedErr)
+	// A failed shared-client list leaves nothing to reseed on the shared tier:
+	// the users above rolled (their user-level period is right), but their
+	// psp_client baselines keep the previous period's freeze until a cycle
+	// whose list read works reseeds them — the flush section below queues
+	// that. Say so, or the per-server period usage that lags until then has
+	// no explanation in the log. The count covers every user the pass
+	// reseeds (retried ones included), legacy-only and client-less ones too:
+	// the list that would tell the migrated ones apart is the one that
+	// failed, so it is an upper bound.
+	if sharedErr != nil && len(reseed) > 0 {
+		log.Warn("traffic poll: shared-client period baselines not reseeded this cycle (shared-client list failed); retrying next cycle, per-server period usage of any migrated users among them stays on the previous period until then",
+			"rolled_over_users", len(reseed), "err", sharedErr)
 	}
 	mark("baseline_reseed", "period-baseline reseed (rolled-over users)")
 
-	// Drain the sink in three batched INSERTs. Order doesn't matter — the
-	// snapshots are independent — but client first so the most numerous
+	// Drain the snapshot sinks in batched INSERTs. Order doesn't matter —
+	// the snapshots are independent — but client first so the most numerous
 	// table lands while the connection is hot. Failures are logged and
 	// the poll continues; losing one batch is preferable to crashing the
-	// scheduler (subsequent polls will resnapshot).
+	// scheduler (subsequent polls will resnapshot). The user snapshots are
+	// not among them: they carry the user's lifetime, so they wait for the
+	// counter flushes below and land only with the user's own state.
 	if len(sink.clientSnaps) > 0 {
 		if err := s.traffic.InsertClientBatch(ctx, sink.clientSnaps); err != nil {
 			log.Warn("traffic poll flush client snapshots", "count", len(sink.clientSnaps), "err", err)
-		}
-	}
-	if len(sink.userSnaps) > 0 {
-		if err := s.traffic.InsertBatch(ctx, sink.userSnaps); err != nil {
-			log.Warn("traffic poll flush user snapshots", "count", len(sink.userSnaps), "err", err)
 		}
 	}
 	if len(sink.nodeCounterUpdates) > 0 {
@@ -991,15 +1096,19 @@ func (s *Service) PollOnce(ctx context.Context) (err error) {
 	// "Poll Now" wall time drops by an order of magnitude on a panel
 	// with non-trivial scale. MySQL/Postgres get the round-trip win.
 	//
-	// Failure semantics match the snapshot flushes above: log + continue.
-	// A skipped flush means this cycle's counters / state aren't persisted,
-	// the next cycle re-derives them (LastRawXxx untouched, so monotonicDelta
-	// still produces the right increment) and writes again.
-	if len(sink.ownershipUpdates) > 0 {
-		if err := s.ownership.BatchUpdateCounters(ctx, sink.ownershipUpdates); err != nil {
-			log.Warn("traffic poll flush ownership counters", "count", len(sink.ownershipUpdates), "err", err)
-		}
-	}
+	// Failure semantics: log + continue, but when a COUNTER flush fails, the
+	// users with a client in it are held back whole: nothing this cycle
+	// derived from their counters is persisted, so the next cycle re-derives
+	// all of it from the LastRawXxx the failure left untouched (monotonicDelta
+	// then yields the whole increment, this cycle's bytes included) and
+	// writes again. Persisting any of it anyway counts bytes twice: a user
+	// row that took this cycle's bytes, next to a client whose LastRaw stayed
+	// behind, takes the same bytes again next cycle. That covers the user's
+	// snapshot too — the next cycle reads it back as prev, which seeds a
+	// zero lifetime (the migration path) and stands in for a missing
+	// bootstrap cutoff, so a snapshot carrying bytes the row never got
+	// counts them twice or drops them through either door.
+	//
 	// ORDERING IS LOAD-BEARING: the per-client counters must land BEFORE the
 	// user's traffic state, and a failure of the first must suppress the second.
 	//
@@ -1012,30 +1121,122 @@ func (s *Service) PollOnce(ctx context.Context) (err error) {
 	// quota left. Persisting them the other way round errs the opposite way: a
 	// briefly over-generous cap, which the next cycle corrects. See
 	// docs/traffic-floor-defect.md.
-	countersStale := false
-	if len(sink.pspClientUpdates) > 0 && s.pspClient != nil {
-		if err := s.pspClient.BatchUpdateCounters(ctx, sink.pspClientUpdates); err != nil {
-			log.Warn("traffic poll flush shared-client counters", "count", len(sink.pspClientUpdates), "err", err)
-			countersStale = true
+	//
+	// stale is that suppression, per user: both the pairing above and the
+	// re-derivation are per user, so a failed batch holds back only the users
+	// it carried a client of, and everyone else's state lands with the
+	// counters that did. The ownership flush runs first; the shared flush then
+	// leaves out the clients of users it already failed for, or their LastRaw
+	// would move past bytes their held-back rows never received — lost
+	// instead of counted twice. Two batches are two transactions, though, so a
+	// shared flush that fails AFTER the ownership flush landed cannot take it
+	// back: a user with clients on both tiers (mid-migration) then loses that
+	// cycle's ownership bytes, the undercounting side this errs on.
+	stale := make(map[int64]bool)
+	if len(sink.ownershipUpdates) > 0 {
+		if err := s.ownership.BatchUpdateCounters(ctx, sink.ownershipUpdates); err != nil {
+			log.Warn("traffic poll flush ownership counters", "count", len(sink.ownershipUpdates), "err", err)
+			for _, e := range sink.ownershipUpdates {
+				stale[e.UserID] = true
+			}
 		}
 	}
-	if countersStale {
-		// Hold the user state back so the pair stays consistent. Both lag by one
-		// cycle and the next poll re-derives them together — LastRawXxx is
+	if len(sink.pspClientUpdates) > 0 && s.pspClient != nil {
+		flush := sink.pspClientUpdates
+		if len(stale) > 0 {
+			flush = make([]*domain.PSPClient, 0, len(sink.pspClientUpdates))
+			for _, c := range sink.pspClientUpdates {
+				if !stale[c.UserID] {
+					flush = append(flush, c)
+				}
+			}
+			if held := len(sink.pspClientUpdates) - len(flush); held > 0 {
+				log.Warn("traffic poll: holding shared-client counters back with their users' failed ownership flush",
+					"count", held)
+			}
+		}
+		if len(flush) > 0 {
+			if err := s.pspClient.BatchUpdateCounters(ctx, flush); err != nil {
+				log.Warn("traffic poll flush shared-client counters", "count", len(flush), "err", err)
+				for _, c := range flush {
+					stale[c.UserID] = true
+				}
+			}
+		}
+	}
+	if len(stale) > 0 {
+		// Hold their user state back so the pair stays consistent. Both lag by
+		// one cycle and the next poll re-derives them together — LastRawXxx is
 		// untouched, so monotonicDelta still produces the right increment.
 		log.Warn("traffic poll: holding user traffic state back to stay consistent with unflushed client counters",
-			"users", len(sink.userUpdates))
+			"users", len(stale))
 	}
-	if len(sink.userUpdates) > 0 && !countersStale {
-		// Local name `pending` avoids shadowing the outer `users` (the list
-		// loaded at the top of PollOnce). Iteration order is non-deterministic
-		// (map) but harmless: rows in the batch are independent.
-		pending := make([]*domain.User, 0, len(sink.userUpdates))
-		for _, u := range sink.userUpdates {
+	// Local name `pending` avoids shadowing the outer `users` (the list
+	// loaded at the top of PollOnce). Iteration order is non-deterministic
+	// (map) but harmless: rows in the batch are independent.
+	userStateLost := false
+	pending := make([]*domain.User, 0, len(sink.userUpdates))
+	for uid, u := range sink.userUpdates {
+		if !stale[uid] {
 			pending = append(pending, u)
 		}
+	}
+	if len(pending) > 0 {
 		if err := s.users.BatchUpdateTrafficState(ctx, pending); err != nil {
 			log.Warn("traffic poll flush user traffic state", "count", len(pending), "err", err)
+			userStateLost = true
+		}
+	}
+	// A user's snapshot records the lifetime their state batch just wrote,
+	// so it lands only with that write: a snapshot ahead of the row would be
+	// the next cycle's prev with bytes the row lacks (see the failure
+	// semantics above). Every user with a snapshot is in userUpdates — both
+	// are queued on the same metered path — so this is the users of pending.
+	if len(sink.userSnaps) > 0 && !userStateLost {
+		snaps := sink.userSnaps
+		if len(stale) > 0 {
+			snaps = make([]*domain.TrafficSnapshot, 0, len(sink.userSnaps))
+			for _, sn := range sink.userSnaps {
+				if !stale[sn.UserID] {
+					snaps = append(snaps, sn)
+				}
+			}
+		}
+		if len(snaps) > 0 {
+			if err := s.traffic.InsertBatch(ctx, snaps); err != nil {
+				log.Warn("traffic poll flush user snapshots", "count", len(snaps), "err", err)
+			}
+		}
+	}
+	// Owe a reseed (see the reseed pass) on the tiers that did not land
+	// together with the user's row. Those users' rollovers ARE durable, so no
+	// cycle rolls them again to redo it:
+	//   - a held-back user: their reseeded baselines rode counter rows that
+	//     did not land, or — for a mixed user whose ownership flush landed —
+	//     froze before bytes their row never got. Owed on every tier
+	//     reseeded this cycle;
+	//   - a user whose state batch failed: the baselines landed, frozen
+	//     ahead of bytes the row then did not get (an undercount this cycle
+	//     accepts, as for every user in that batch). Same tiers;
+	//   - a failed shared-client list: the shared tier was not reseeded.
+	if len(reseed) > 0 {
+		owed := make(map[int64]reseedTier)
+		for uid, tiers := range reseed {
+			var t reseedTier
+			if stale[uid] || (userStateLost && sink.userUpdates[uid] != nil) {
+				t = tiers
+			}
+			if sharedErr != nil {
+				t |= tiers & reseedShared
+			}
+			if t != 0 {
+				owed[uid] = t
+			}
+		}
+		if len(owed) > 0 {
+			s.retryReseed(owed)
+			log.Warn("traffic poll: rolled-over users' client period baselines not persisted this cycle; reseeding them next cycle (a restart before then leaves their per-client period usage on the previous period)",
+				"users", len(owed))
 		}
 	}
 	// v3.6.0-beta.4: convert per-user ms-since-epoch → time.Time on the way
@@ -1140,6 +1341,9 @@ type pollSink struct {
 	// cycle-wide FLAG, not one of the batched write buffers below.
 	skipFloorPush bool
 
+	// userSnaps is flushed last, and only the snapshots of the users whose
+	// state the userUpdates batch did write: each records the lifetime that
+	// write carries, and the next cycle reads it back as prev.
 	userSnaps   []*domain.TrafficSnapshot
 	clientSnaps []*domain.ClientTrafficSnapshot
 	nodeSnaps   []*domain.NodeTrafficSnapshot
@@ -1164,10 +1368,12 @@ type pollSink struct {
 	// userUpdates buffers per-user traffic-state writes from the snapshot
 	// hot path; flushed via BatchUpdateTrafficState at end-of-cycle. Keyed
 	// by user ID so repeated appends for the same user collapse into ONE
-	// write — the pointer state at flush time wins. The rollover branch
-	// (persistRollover) deliberately bypasses the sink and writes
-	// synchronously, then deletes itself from this map, because the
-	// immediately-following re-enable does a stale-sensitive GetByID.
+	// write — the pointer state at flush time wins. A rolled-over user stays
+	// in here too: the rollover branch (persistRollover) also writes the
+	// rollover itself inline, because the immediately-following resume does
+	// a stale-sensitive GetByID, but that inline write carries none of this
+	// cycle's bytes — those land only through this batch, which leaves out
+	// every user a failed counter flush carried a client of.
 	userUpdates map[int64]*domain.User
 	// latestByUser is the per-cycle pre-fetched latest snapshot per user,
 	// loaded ONCE via TrafficRepo.LatestForUsers at the top of PollOnce.
@@ -1415,6 +1621,9 @@ func (s *Service) recordAndEnforceWith(ctx context.Context, u *domain.User, tota
 		loc = time.Local
 	}
 	now := time.Now().In(loc)
+	// The bootstrap cutoff as loaded, before this cycle advances it below. A
+	// rollover's inline write persists this one (see persistRollover).
+	loadedBaselineAt := u.LifetimeBaselineAt
 
 	// Skip the snapshot entirely when 3X-UI returned no matching client rows.
 	// Inserting a zero would corrupt subsequent today/period delta math.
@@ -1586,32 +1795,53 @@ func (s *Service) recordAndEnforceWith(ctx context.Context, u *domain.User, tota
 		// When THIS rollover ends the window (the user was traffic-disabled and
 		// the new period hands quota back), clear it explicitly under the
 		// emergency lock so we don't race a concurrent UseEmergencyAccess.
+		//
+		// rolled is what that inline write persists. Outside a poll (nil sink)
+		// every counter was already written inline, so it is u itself. In the
+		// poll it is the rollover WITHOUT this cycle's bytes: the lifetimes
+		// back at the pre-delta values the baselines above froze at (period
+		// usage 0), and the bootstrap cutoff as loaded. This cycle's bytes
+		// reach the row only through sink.userUpdates, where u stays queued,
+		// and that batch leaves u out when a counter flush carrying one of
+		// u's clients fails — so the row never carries bytes whose client
+		// LastRaw did not advance with them. Writing them here, before the
+		// flushes run, is what used to count a rollover cycle's bytes twice
+		// when a flush failed: the next cycle measured them again from the
+		// old LastRaw and added them to a lifetime that already had them. The cutoff is held back for the
+		// same re-derivation: the next cycle must classify a re-measured
+		// bootstrap delta against the cutoff that classified it this cycle.
+		rolled := u
+		if sink != nil {
+			r := *u
+			r.LifetimeUpBytes -= totals.deltaUp
+			r.LifetimeDownBytes -= totals.deltaDown
+			r.LifetimeTotalBytes -= totals.deltaTotal
+			r.LifetimeBaselineAt = loadedBaselineAt
+			rolled = &r
+		}
 		persistRollover := func() {
 			// Rollover MUST write synchronously, even in the sink-batched poll.
-			// Reason: the immediately-following SetEnabledAndSync(true) re-enable
-			// (line ~825 below) does a GetByID + full-row Update + push of the
-			// per-client traffic floor. If our rolled-over lifetime / baseline /
-			// periodStart are still pending in sink.userUpdates, GetByID returns
-			// the OLD period state, u.PeriodUsed() computes "near the OLD limit",
-			// and the floor pushed to 3X-UI is ~0 — effectively keeping the user
-			// blocked for another poll cycle even though they were just
-			// re-enabled. The original (pre-beta.9) inline write avoided this by
-			// landing the rolled-over state in DB before the disabler ran.
+			// Reason: the immediately-following ResumeServiceAndSync (below)
+			// does a GetByID + push of the per-client traffic floor. If the
+			// rolled-over baseline / periodStart were still pending in
+			// sink.userUpdates, GetByID would return the OLD period state,
+			// u.PeriodUsed() computes "near the OLD limit", and the floor pushed
+			// to 3X-UI is ~0 — effectively keeping the user blocked for another
+			// poll cycle even though they were just resumed. The original
+			// (pre-beta.9) inline write avoided this by landing the rolled-over
+			// state in DB before the disabler ran.
 			//
-			// We also delete this user from the sink so the end-of-cycle batch
-			// flush doesn't redundantly rewrite the same row a second time. If
-			// the main-path snapshot branch ran above, it appended u to the
-			// sink; that entry is superseded by this inline write (the in-memory
-			// u carries the rolled-over fields already, so the inline write is
-			// strictly newer).
+			// Writing rolled (no bytes of this cycle) rather than u also pairs
+			// that floor correctly: the row's period usage and the client
+			// LastRaw on disk, which the end-of-cycle flush has not advanced
+			// yet, both predate this cycle — the same-cycle pair the ORDERING
+			// note in PollOnce requires. The batch then adds the cycle's bytes
+			// (a second write of this row, once per rollover).
 			//
 			// ClearEmergencyAccess writes a disjoint column set and MUST stay
 			// inline under the emergency lock so a concurrent UseEmergencyAccess
 			// can't race the clear (the v3.3.0-beta.6 invariant).
-			if sink != nil {
-				delete(sink.userUpdates, u.ID)
-			}
-			if err := s.users.UpdateTrafficState(ctx, u); err != nil {
+			if err := s.users.UpdateTrafficState(ctx, rolled); err != nil {
 				log.Warn("traffic period start update", "user_id", u.ID, "err", err)
 			}
 			if clearedEmergency {
@@ -2846,6 +3076,11 @@ func (s *Service) SetPeriodUsage(ctx context.Context, userID int64, usedBytes in
 	// the per-node display, not the override itself. Rewriting lifetime/last-raw
 	// to their loaded values alongside the new baseline is race-safe — they
 	// revert as a consistent pair, so a concurrent poll re-derives correctly.
+	// A rollover reseed the poll still owes this user is superseded by this
+	// one, so forget it: run next cycle, it would put the clients back on the
+	// rollover's freeze, short of the admin's figure for the rest of the
+	// period.
+	s.dropReseedRetry(userID)
 	s.reseedClientBaselines(ctx, userID, usedBytes)
 	if u.TrafficLimitBytes <= 0 {
 		return nil
