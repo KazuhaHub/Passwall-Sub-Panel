@@ -93,11 +93,11 @@ function AccessControlPage({ scope }: { scope: QueryScope }) {
   const admission = useRef(false)
   const verdict = status.data ? accessVerdict(status.data, definitions.data) : null
   const unavailable = [definitions.data ? null : definitions.error, status.data ? null : status.error].some(error => destinationError(error).status === 503)
-  const perform = async (paused?: boolean) => {
+  const perform = async (paused?: boolean, returnFocus?: HTMLElement | null) => {
     if (admission.current) return
     admission.current = true; setBusy(true)
     try {
-      if (paused !== undefined && !(await confirm(pauseExecutionCopy(t, paused)))) return
+      if (paused !== undefined && !(await confirm(pauseExecutionCopy(t, paused, status.data?.apply_eta_ms), returnFocus))) return
       await publication.mutateAsync({ paused }); pushSnack(t(`${P}publication_requested`), 'success')
     } catch (error) { const details = destinationError(error); pushSnack(t(`${P}${details.error === 'dest_policy_pause_saved' || details.error === 'dest_pause_saved' || (details.status === 503 && (error as { response?: { data?: { pause_saved?: boolean } } })?.response?.data?.pause_saved) ? 'pause_saved' : 'write_failed'}`, { error: details.error }), 'error') }
     finally { admission.current = false; setBusy(false) }

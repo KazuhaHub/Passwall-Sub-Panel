@@ -576,9 +576,10 @@ it('opens settings from the page menu without publishing or losing list filters'
 it('requires confirmation before the menu pauses execution and preserves cancellation', async () => {
   confirmation.mockResolvedValue(false); mount()
   await screen.findByRole('status')
-  fireEvent.click(screen.getByRole('button', { name: `${P}more` }))
+  const trigger = screen.getByRole('button', { name: `${P}more` })
+  fireEvent.click(trigger)
   fireEvent.click(screen.getByRole('menuitem', { name: `${P}pause` }))
-  await waitFor(() => expect(confirmation).toHaveBeenCalledWith(expect.objectContaining({ title: `${P}confirm.pause_title`, destructive: true })))
+  await waitFor(() => expect(confirmation).toHaveBeenCalledWith(expect.objectContaining({ title: `${P}confirm.pause_title`, destructive: true }), trigger))
   expect(api.put).not.toHaveBeenCalled(); expect(api.post).not.toHaveBeenCalled()
   expect(screen.queryByRole('menu')).toBeNull()
 })
@@ -596,10 +597,11 @@ it('offers resume rather than pause after a confirmed paused status', async () =
   const original = api.get.getMockImplementation()!
   api.get.mockImplementation(async (url: string, config?: unknown) => url.endsWith('/status') ? { data: destinationStatus({ paused: true }) } : original(url, config))
   mount(); await screen.findByRole('status')
-  fireEvent.click(screen.getByRole('button', { name: `${P}more` }))
+  const trigger = screen.getByRole('button', { name: `${P}more` })
+  fireEvent.click(trigger)
   fireEvent.click(screen.getByRole('menuitem', { name: `${P}resume` }))
   await waitFor(() => expect(api.put).toHaveBeenCalledWith('/admin/dest/pause', { paused: false }, { _skipErrorToast: true }))
-  expect(confirmation).toHaveBeenCalledWith(expect.objectContaining({ title: `${P}confirm.resume_title`, destructive: false }))
+  expect(confirmation).toHaveBeenCalledWith(expect.objectContaining({ title: `${P}confirm.resume_title`, destructive: false }), trigger)
   expect(api.post).not.toHaveBeenCalled()
 })
 it('explains only the selected tab and preserves its filters without writing', async () => {
@@ -1108,9 +1110,19 @@ it('submits every ID in the action segment when moving, including disabled polic
 })
 it('requires destructive confirmation for deletion and sends no delete on cancellation', async () => {
   confirmation.mockResolvedValue(false)
-  mount(); fireEvent.click(await screen.findByRole('button', { name: `${P}policies.menu No mail` }))
+  mount(); const trigger = await screen.findByRole('button', { name: `${P}policies.menu No mail` })
+  fireEvent.click(trigger)
   fireEvent.click(screen.getByRole('menuitem', { name: 'common:actions.delete' }))
-  await waitFor(() => expect(confirmation).toHaveBeenCalledWith(expect.objectContaining({ destructive: true })))
+  await waitFor(() => expect(confirmation).toHaveBeenCalledWith(expect.objectContaining({ destructive: true }), trigger))
+  expect(api.delete).not.toHaveBeenCalled()
+})
+it('returns an unused-list confirmation to its persistent trigger without deleting on cancellation', async () => {
+  listsAPI([listSummary]); confirmation.mockResolvedValue(false)
+  mount('/admin/access-control?tab=lists')
+  const trigger = (await screen.findAllByRole('button', { name: `${P}lists.menu Finance` }))[0]
+  fireEvent.click(trigger)
+  fireEvent.click(screen.getByRole('menuitem', { name: 'common:actions.delete' }))
+  await waitFor(() => expect(confirmation).toHaveBeenCalledWith(expect.objectContaining({ title: `${P}lists.delete_title Finance`, destructive: true }), trigger))
   expect(api.delete).not.toHaveBeenCalled()
 })
 it('blocks saving a preview that exceeds the server budget', async () => {

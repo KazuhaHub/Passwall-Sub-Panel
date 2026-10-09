@@ -907,3 +907,40 @@ the duplicate save returned 201 at 01:35:59.525 and normal reads followed with
 no additional preview POST. Query regressions also cover exemption mutations,
 preserved invalidation and session boundaries. Full C5/C6, responsive/language/
 theme matrix and owner approval remain pending.
+
+## Confirmation consequences and focus
+
+The S20 consequence package adds twenty visually inspected native browser
+captures. They use the normal and stale-unused-list DEV scenarios; the latter
+changes reference metadata to expose the unused-list confirmation. Deletion was always
+canceled: this does not establish successful deletion or live Node enforcement.
+Pause/resume mutations changed only the isolated in-memory fixture.
+
+| Confirmation | Chinese light desktop | Chinese dark desktop | Chinese light phone | Chinese dark phone | English light phone |
+| --- | --- | --- | --- | --- | --- |
+| Pause | [1440](s20-pause-zh-light-1440.jpg) | [1440](s20-pause-zh-dark-1440.jpg) | [375](s20-pause-zh-light-375.jpg) | [375](s20-pause-zh-dark-375.jpg) | [375](s20-pause-en-light-375.jpg) |
+| Resume | [1440](s20-resume-zh-light-1440.jpg) | [1440](s20-resume-zh-dark-1440.jpg) | [375](s20-resume-zh-light-375.jpg) | [375](s20-resume-zh-dark-375.jpg) | [375](s20-resume-en-light-375.jpg) |
+| Delete policy | [1440](s20-delete-policy-zh-light-1440.jpg) | [1440](s20-delete-policy-zh-dark-1440.jpg) | [375](s20-delete-policy-zh-light-375.jpg) | [375](s20-delete-policy-zh-dark-375.jpg) | [375](s20-delete-policy-en-light-375.jpg) |
+| Delete unused list | [1440](s20-delete-list-zh-light-1440.jpg) | [1440](s20-delete-list-zh-dark-1440.jpg) | [375](s20-delete-list-zh-light-375.jpg) | [375](s20-delete-list-zh-dark-375.jpg) | [375](s20-delete-list-en-light-375.jpg) |
+
+[DOM measurements](s20-confirmation-metrics.json) record each actual dialog's
+text, viewport, rectangle, horizontal overflow and button sizes/colors.
+Desktop CSS viewports were 1440×900; phones were 375×812. All twenty dialogs
+fit their viewport without horizontal overflow, with 44px-high actions.
+Danger buttons use the theme's error color in both modes; Resume uses primary.
+The longest English pause text fits a 320px-wide dialog without clipping.
+
+On the final source, Enter on Cancel preserved the policy/list and returned
+focus to its persistent row-actions button. Escape on Pause and cancellation
+of Resume returned focus to the header More button. Tab/Shift+Tab wrapped
+between the two Resume actions inside the dialog. Fixture pause/resume was
+confirmed using Enter, and the next menu offered the opposite action. Normal
+fixtures, English, automatic theme and the default viewport were restored.
+
+Eleven copy/ETA, two theme-color and three disappearing-menu focus regressions
+failed before repair. The final relevant suite passed 436 tests in 31 files;
+TypeScript, changed-source lint, production build, fixture exclusion and four
+production smoke checks passed. The [catalog](../access-control-confirmations.md)
+records the remaining dialogs and evidence boundaries. This package does not
+close the complete S20/per-view matrices, C2/C5/C6, candidate Node enforcement,
+owner acceptance or dependency/release gates.

@@ -1,0 +1,602 @@
+[
+  {
+    "name": "s20-delete-list-zh-light-1440",
+    "buttons": [
+      {
+        "background": "rgba(0, 0, 0, 0)",
+        "height": 44,
+        "text": "取消",
+        "width": 76.20833587646484
+      },
+      {
+        "background": "rgb(186, 26, 26)",
+        "height": 44,
+        "text": "删除",
+        "width": 76.20833587646484
+      }
+    ],
+    "overflow": false,
+    "rect": [
+      512.5,
+      358.7083435058594,
+      415,
+      182.58334350585935
+    ],
+    "text": "删除列表「Fixture · 全局例外」？这个列表没有被使用，删除不会影响节点。删除后无法恢复。取消删除",
+    "title": "删除列表「Fixture · 全局例外」？",
+    "viewport": [
+      1440,
+      900
+    ]
+  },
+  {
+    "name": "s20-delete-list-zh-light-375",
+    "buttons": [
+      {
+        "background": "rgba(0, 0, 0, 0)",
+        "height": 44,
+        "text": "取消",
+        "width": 76.20833587646484
+      },
+      {
+        "background": "rgb(186, 26, 26)",
+        "height": 44,
+        "text": "删除",
+        "width": 76.20833587646484
+      }
+    ],
+    "overflow": false,
+    "rect": [
+      27.666667938232425,
+      293.41668701171875,
+      320,
+      225.1666717529297
+    ],
+    "text": "删除列表「Fixture · 全局例外」？这个列表没有被使用，删除不会影响节点。删除后无法恢复。取消删除",
+    "title": "删除列表「Fixture · 全局例外」？",
+    "viewport": [
+      375,
+      812
+    ]
+  },
+  {
+    "name": "s20-delete-list-zh-dark-375",
+    "buttons": [
+      {
+        "background": "rgba(0, 0, 0, 0)",
+        "height": 44,
+        "text": "取消",
+        "width": 76.20833587646484
+      },
+      {
+        "background": "rgb(255, 180, 171)",
+        "height": 44,
+        "text": "删除",
+        "width": 76.20833587646484
+      }
+    ],
+    "overflow": false,
+    "rect": [
+      27.666667938232425,
+      293.41668701171875,
+      320,
+      225.1666717529297
+    ],
+    "text": "删除列表「Fixture · 全局例外」？这个列表没有被使用，删除不会影响节点。删除后无法恢复。取消删除",
+    "title": "删除列表「Fixture · 全局例外」？",
+    "viewport": [
+      375,
+      812
+    ]
+  },
+  {
+    "name": "s20-delete-list-zh-dark-1440",
+    "buttons": [
+      {
+        "background": "rgba(0, 0, 0, 0)",
+        "height": 44,
+        "text": "取消",
+        "width": 76.20833587646484
+      },
+      {
+        "background": "rgb(255, 180, 171)",
+        "height": 44,
+        "text": "删除",
+        "width": 76.20833587646484
+      }
+    ],
+    "overflow": false,
+    "rect": [
+      512.5,
+      358.7083435058594,
+      415,
+      182.58334350585935
+    ],
+    "text": "删除列表「Fixture · 全局例外」？这个列表没有被使用，删除不会影响节点。删除后无法恢复。取消删除",
+    "title": "删除列表「Fixture · 全局例外」？",
+    "viewport": [
+      1440,
+      900
+    ]
+  },
+  {
+    "name": "s20-delete-policy-zh-dark-1440",
+    "buttons": [
+      {
+        "background": "rgba(0, 0, 0, 0)",
+        "height": 44,
+        "text": "取消",
+        "width": 76.20833587646484
+      },
+      {
+        "background": "rgb(255, 180, 171)",
+        "height": 44,
+        "text": "删除",
+        "width": 76.20833587646484
+      }
+    ],
+    "overflow": false,
+    "rect": [
+      480,
+      349.41668701171875,
+      480,
+      201.1666717529297
+    ],
+    "text": "删除策略「Fixture · 全局可信站点」？删除无法撤销。预计约 2 分钟内，各节点应用新版本后不再执行此策略。历史命中保留，显示为「已删除的策略」。取消删除",
+    "title": "删除策略「Fixture · 全局可信站点」？",
+    "viewport": [
+      1440,
+      900
+    ]
+  },
+  {
+    "name": "s20-delete-policy-zh-dark-375",
+    "buttons": [
+      {
+        "background": "rgba(0, 0, 0, 0)",
+        "height": 44,
+        "text": "取消",
+        "width": 76.20833587646484
+      },
+      {
+        "background": "rgb(255, 180, 171)",
+        "height": 44,
+        "text": "删除",
+        "width": 76.20833587646484
+      }
+    ],
+    "overflow": false,
+    "rect": [
+      27.666667938232425,
+      284.125,
+      320,
+      243.75
+    ],
+    "text": "删除策略「Fixture · 全局可信站点」？删除无法撤销。预计约 2 分钟内，各节点应用新版本后不再执行此策略。历史命中保留，显示为「已删除的策略」。取消删除",
+    "title": "删除策略「Fixture · 全局可信站点」？",
+    "viewport": [
+      375,
+      812
+    ]
+  },
+  {
+    "name": "s20-delete-policy-zh-light-375",
+    "buttons": [
+      {
+        "background": "rgba(0, 0, 0, 0)",
+        "height": 44,
+        "text": "取消",
+        "width": 76.20833587646484
+      },
+      {
+        "background": "rgb(186, 26, 26)",
+        "height": 44,
+        "text": "删除",
+        "width": 76.20833587646484
+      }
+    ],
+    "overflow": false,
+    "rect": [
+      27.666667938232425,
+      284.125,
+      320,
+      243.75
+    ],
+    "text": "删除策略「Fixture · 全局可信站点」？删除无法撤销。预计约 2 分钟内，各节点应用新版本后不再执行此策略。历史命中保留，显示为「已删除的策略」。取消删除",
+    "title": "删除策略「Fixture · 全局可信站点」？",
+    "viewport": [
+      375,
+      812
+    ]
+  },
+  {
+    "name": "s20-delete-policy-zh-light-1440",
+    "buttons": [
+      {
+        "background": "rgba(0, 0, 0, 0)",
+        "height": 44,
+        "text": "取消",
+        "width": 76.20833587646484
+      },
+      {
+        "background": "rgb(186, 26, 26)",
+        "height": 44,
+        "text": "删除",
+        "width": 76.20833587646484
+      }
+    ],
+    "overflow": false,
+    "rect": [
+      480,
+      349.41668701171875,
+      480,
+      201.1666717529297
+    ],
+    "text": "删除策略「Fixture · 全局可信站点」？删除无法撤销。预计约 2 分钟内，各节点应用新版本后不再执行此策略。历史命中保留，显示为「已删除的策略」。取消删除",
+    "title": "删除策略「Fixture · 全局可信站点」？",
+    "viewport": [
+      1440,
+      900
+    ]
+  },
+  {
+    "name": "s20-pause-zh-light-1440",
+    "buttons": [
+      {
+        "background": "rgba(0, 0, 0, 0)",
+        "height": 44,
+        "text": "取消",
+        "width": 76.20833587646484
+      },
+      {
+        "background": "rgb(186, 26, 26)",
+        "height": 44,
+        "text": "暂停全部",
+        "width": 104.40625
+      }
+    ],
+    "overflow": false,
+    "rect": [
+      480,
+      330.8333435058594,
+      480,
+      238.33334350585935
+    ],
+    "text": "暂停全部访问控制？预计约 2 分钟内，各节点成功应用暂停版本后，才会停止执行策略和白名单，并各重启代理程序一次。定义全部保留，恢复后照原样执行。白名单分组的成员不会因此获得更多节点。离线或应用失败的节点可能继续执行旧规则。取消暂停全部",
+    "title": "暂停全部访问控制？",
+    "viewport": [
+      1440,
+      900
+    ]
+  },
+  {
+    "name": "s20-pause-zh-light-375",
+    "buttons": [
+      {
+        "background": "rgba(0, 0, 0, 0)",
+        "height": 44,
+        "text": "取消",
+        "width": 76.20833587646484
+      },
+      {
+        "background": "rgb(186, 26, 26)",
+        "height": 44,
+        "text": "暂停全部",
+        "width": 104.40625
+      }
+    ],
+    "overflow": false,
+    "rect": [
+      27.666667938232425,
+      268.25,
+      320,
+      275.5
+    ],
+    "text": "暂停全部访问控制？预计约 2 分钟内，各节点成功应用暂停版本后，才会停止执行策略和白名单，并各重启代理程序一次。定义全部保留，恢复后照原样执行。白名单分组的成员不会因此获得更多节点。离线或应用失败的节点可能继续执行旧规则。取消暂停全部",
+    "title": "暂停全部访问控制？",
+    "viewport": [
+      375,
+      812
+    ]
+  },
+  {
+    "name": "s20-pause-zh-dark-375",
+    "buttons": [
+      {
+        "background": "rgba(0, 0, 0, 0)",
+        "height": 44,
+        "text": "取消",
+        "width": 76.20833587646484
+      },
+      {
+        "background": "rgb(255, 180, 171)",
+        "height": 44,
+        "text": "暂停全部",
+        "width": 104.40625
+      }
+    ],
+    "overflow": false,
+    "rect": [
+      27.666667938232425,
+      268.25,
+      320,
+      275.5
+    ],
+    "text": "暂停全部访问控制？预计约 2 分钟内，各节点成功应用暂停版本后，才会停止执行策略和白名单，并各重启代理程序一次。定义全部保留，恢复后照原样执行。白名单分组的成员不会因此获得更多节点。离线或应用失败的节点可能继续执行旧规则。取消暂停全部",
+    "title": "暂停全部访问控制？",
+    "viewport": [
+      375,
+      812
+    ]
+  },
+  {
+    "name": "s20-pause-zh-dark-1440",
+    "buttons": [
+      {
+        "background": "rgba(0, 0, 0, 0)",
+        "height": 44,
+        "text": "取消",
+        "width": 76.20833587646484
+      },
+      {
+        "background": "rgb(255, 180, 171)",
+        "height": 44,
+        "text": "暂停全部",
+        "width": 104.40625
+      }
+    ],
+    "overflow": false,
+    "rect": [
+      480,
+      330.8333435058594,
+      480,
+      238.33334350585935
+    ],
+    "text": "暂停全部访问控制？预计约 2 分钟内，各节点成功应用暂停版本后，才会停止执行策略和白名单，并各重启代理程序一次。定义全部保留，恢复后照原样执行。白名单分组的成员不会因此获得更多节点。离线或应用失败的节点可能继续执行旧规则。取消暂停全部",
+    "title": "暂停全部访问控制？",
+    "viewport": [
+      1440,
+      900
+    ]
+  },
+  {
+    "name": "s20-resume-zh-dark-1440",
+    "buttons": [
+      {
+        "background": "rgba(0, 0, 0, 0)",
+        "height": 44,
+        "text": "取消",
+        "width": 76.20833587646484
+      },
+      {
+        "background": "rgb(159, 202, 255)",
+        "height": 44,
+        "text": "恢复执行",
+        "width": 104.40625
+      }
+    ],
+    "overflow": false,
+    "rect": [
+      480,
+      353.41668701171875,
+      480,
+      193.1666717529297
+    ],
+    "text": "恢复访问控制？预计约 2 分钟内，各节点成功应用恢复版本后，才会重新执行策略和白名单，并各重启代理程序一次。离线或应用失败的节点需要另行检查。取消恢复执行",
+    "title": "恢复访问控制？",
+    "viewport": [
+      1440,
+      900
+    ]
+  },
+  {
+    "name": "s20-resume-zh-dark-375",
+    "buttons": [
+      {
+        "background": "rgba(0, 0, 0, 0)",
+        "height": 44,
+        "text": "取消",
+        "width": 76.20833587646484
+      },
+      {
+        "background": "rgb(159, 202, 255)",
+        "height": 44,
+        "text": "恢复执行",
+        "width": 104.40625
+      }
+    ],
+    "overflow": false,
+    "rect": [
+      27.666667938232425,
+      290.8333435058594,
+      320,
+      230.33334350585935
+    ],
+    "text": "恢复访问控制？预计约 2 分钟内，各节点成功应用恢复版本后，才会重新执行策略和白名单，并各重启代理程序一次。离线或应用失败的节点需要另行检查。取消恢复执行",
+    "title": "恢复访问控制？",
+    "viewport": [
+      375,
+      812
+    ]
+  },
+  {
+    "name": "s20-resume-zh-light-375",
+    "buttons": [
+      {
+        "background": "rgba(0, 0, 0, 0)",
+        "height": 44,
+        "text": "取消",
+        "width": 76.20833587646484
+      },
+      {
+        "background": "rgb(0, 97, 164)",
+        "height": 44,
+        "text": "恢复执行",
+        "width": 104.40625
+      }
+    ],
+    "overflow": false,
+    "rect": [
+      27.666667938232425,
+      290.8333435058594,
+      320,
+      230.33334350585935
+    ],
+    "text": "恢复访问控制？预计约 2 分钟内，各节点成功应用恢复版本后，才会重新执行策略和白名单，并各重启代理程序一次。离线或应用失败的节点需要另行检查。取消恢复执行",
+    "title": "恢复访问控制？",
+    "viewport": [
+      375,
+      812
+    ]
+  },
+  {
+    "name": "s20-resume-zh-light-1440",
+    "buttons": [
+      {
+        "background": "rgba(0, 0, 0, 0)",
+        "height": 44,
+        "text": "取消",
+        "width": 76.20833587646484
+      },
+      {
+        "background": "rgb(0, 97, 164)",
+        "height": 44,
+        "text": "恢复执行",
+        "width": 104.40625
+      }
+    ],
+    "overflow": false,
+    "rect": [
+      480,
+      353.41668701171875,
+      480,
+      193.1666717529297
+    ],
+    "text": "恢复访问控制？预计约 2 分钟内，各节点成功应用恢复版本后，才会重新执行策略和白名单，并各重启代理程序一次。离线或应用失败的节点需要另行检查。取消恢复执行",
+    "title": "恢复访问控制？",
+    "viewport": [
+      1440,
+      900
+    ]
+  },
+  {
+    "name": "s20-resume-en-light-375",
+    "buttons": [
+      {
+        "background": "rgba(0, 0, 0, 0)",
+        "height": 44,
+        "text": "Cancel",
+        "width": 91.45833587646484
+      },
+      {
+        "background": "rgb(0, 97, 164)",
+        "height": 44,
+        "text": "Resume",
+        "width": 99.60417175292967
+      }
+    ],
+    "overflow": false,
+    "rect": [
+      27.666667938232425,
+      281.54168701171875,
+      320,
+      248.9166717529297
+    ],
+    "text": "Resume access control?Within about 2 minutes, each node should resume policies and allowlists after successfully applying the resumed version, and restart its proxy once. Offline or failed nodes need separate checks.CancelResume",
+    "title": "Resume access control?",
+    "viewport": [
+      375,
+      812
+    ]
+  },
+  {
+    "name": "s20-pause-en-light-375",
+    "buttons": [
+      {
+        "background": "rgba(0, 0, 0, 0)",
+        "height": 44,
+        "text": "Cancel",
+        "width": 91.45833587646484
+      },
+      {
+        "background": "rgb(186, 26, 26)",
+        "height": 44,
+        "text": "Pause all",
+        "width": 105.96875
+      }
+    ],
+    "overflow": false,
+    "rect": [
+      27.666667938232425,
+      246.95834350585935,
+      320,
+      318.0833435058594
+    ],
+    "text": "Pause all access control?Within about 2 minutes, each node should stop executing policies and allowlists after successfully applying the paused version, and restart its proxy once. Definitions are retained and resume unchanged. Allowlist group members do not gain more nodes. Offline or failed nodes may keep old rules.CancelPause all",
+    "title": "Pause all access control?",
+    "viewport": [
+      375,
+      812
+    ]
+  },
+  {
+    "name": "s20-delete-policy-en-light-375",
+    "buttons": [
+      {
+        "background": "rgba(0, 0, 0, 0)",
+        "height": 44,
+        "text": "Cancel",
+        "width": 91.45833587646484
+      },
+      {
+        "background": "rgb(186, 26, 26)",
+        "height": 44,
+        "text": "Delete",
+        "width": 88.46875
+      }
+    ],
+    "overflow": false,
+    "rect": [
+      27.666667938232425,
+      265.54168701171875,
+      320,
+      280.91668701171875
+    ],
+    "text": "Delete policy “Fixture · 全局可信站点”?Deletion cannot be undone. Each node should stop executing this policy within about 2 minutes, after applying the new version. Historical hits are retained and shown as “Deleted policy”.CancelDelete",
+    "title": "Delete policy “Fixture · 全局可信站点”?",
+    "viewport": [
+      375,
+      812
+    ]
+  },
+  {
+    "name": "s20-delete-list-en-light-375",
+    "buttons": [
+      {
+        "background": "rgba(0, 0, 0, 0)",
+        "height": 44,
+        "text": "Cancel",
+        "width": 91.45833587646484
+      },
+      {
+        "background": "rgb(186, 26, 26)",
+        "height": 44,
+        "text": "Delete",
+        "width": 88.46875
+      }
+    ],
+    "overflow": false,
+    "rect": [
+      27.666667938232425,
+      284.125,
+      320,
+      243.75
+    ],
+    "text": "Delete “Fixture · 全局例外”?This list is not in use; deleting it does not affect nodes. It cannot be recovered after deletion.CancelDelete",
+    "title": "Delete “Fixture · 全局例外”?",
+    "viewport": [
+      375,
+      812
+    ]
+  }
+]

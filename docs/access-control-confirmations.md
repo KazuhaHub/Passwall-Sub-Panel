@@ -42,3 +42,37 @@ lint, production build, fixture exclusion and four production smoke checks
 passed. Remote CI results are recorded by commit SHA in the PR. This refactor adds no native screenshots;
 [existing captures](access-control-acceptance/README.md) remain the visual
 evidence, and the full S20 screenshot/interaction matrix is still open.
+
+## Consequences, danger colors and focus return
+
+The subsequent S20 package expands the actual Chinese/English messages. Pause
+names both policies and allowlists, preserves definitions, and explains that
+allowlist membership does not grant more nodes. Resume names both mechanisms.
+Policy deletion preserves historical hits under the deleted-policy label;
+unused-list deletion has no node impact. Pause, resume and policy deletion use
+the current server ETA, rounded up to minutes, with the existing generic
+few-minutes fallback when unavailable. Applying a version remains a prerequisite;
+offline or failed nodes may retain old rules.
+
+The shared host assigns destructive actions MUI's error color so the theme's
+primary-button selector cannot override the danger color. Menu-origin actions
+also pass their persistent trigger separately from the pure copy. After the
+dialog exits, focus returns to that connected trigger; other callers retain
+MUI's normal restoration. Policy/list deletion and header pause/resume are wired
+to this path. A disappearing menu item no longer leaves keyboard focus on BODY.
+
+Eleven consequence/interpolation cases, two real-theme color cases and three
+menu-removal focus cases failed before their respective repairs. Page tests
+verify all four menu entry points pass the correct trigger and canceled
+deletions issue no DELETE. The final relevant suite passed 436 tests in 31 files
+(including the four existing disabled-button theme checks). TypeScript,
+changed-source lint, production build, fixture exclusion and all four production
+smoke checks passed. The final typed focus test was checked again after replacing
+its pre-API compatibility invocation with a direct call.
+
+[Twenty native captures and measured bounds](access-control-acceptance/README.md#confirmation-consequences-and-focus)
+cover these four dialogs across Chinese light/dark desktop/phone and English
+light phone. Keyboard cancellation returns to the policy/list/header triggers;
+Tab and Shift+Tab stay inside the restore dialog. These are isolated synthetic
+UI checks, with no policy/list deletion performed. Complete S20, later group
+dialogs, real candidate Node enforcement and owner acceptance remain open.

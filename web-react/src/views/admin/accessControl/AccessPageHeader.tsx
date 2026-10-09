@@ -14,7 +14,7 @@ export default function AccessPageHeader({ userId, paused, busy, onTest, onOpenU
   onTest: () => void
   onOpenUser: (id: number) => void
   onSettings: () => void
-  onPause: (paused: boolean) => Promise<void>
+  onPause: (paused: boolean, returnFocus?: HTMLElement | null) => Promise<void>
 }) {
   const { t } = useAccessTranslation(['admin'])
   const mobile = useMediaQuery(useTheme().breakpoints.down('sm'))
@@ -32,7 +32,7 @@ export default function AccessPageHeader({ userId, paused, busy, onTest, onOpenU
     <Menu anchorEl={anchor} open={!!anchor} onClose={() => setAnchor(null)}>
       <MenuItem onClick={() => { setAnchor(null); onSettings() }}>{t(`${P}settings.title`)}</MenuItem>
       <Divider />
-      <MenuItem disabled={busy || paused === undefined} sx={{ color: paused ? 'primary.main' : 'error.main' }} onClick={() => { setAnchor(null); void onPause(!paused) }}>{t(`${P}${paused ? 'resume' : 'pause'}`)}</MenuItem>
+      <MenuItem disabled={busy || paused === undefined} sx={{ color: paused ? 'primary.main' : 'error.main' }} onClick={() => { setAnchor(null); void onPause(!paused, anchor) }}>{t(`${P}${paused ? 'resume' : 'pause'}`)}</MenuItem>
     </Menu>
   </>
 }

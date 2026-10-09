@@ -67,7 +67,7 @@ export default function ListsTab({ active, selectedId, onCloseSheet, onOpenList,
     finally { admission.current = false; setBusy(false) }
   }
   const refreshList = (list: DestinationListSummary) => void run(async () => { await refresh.mutateAsync(list.id); pushSnack(t(`${P}refresh_requested`), 'success') })
-  const deleteList = (list: DestinationListSummary) => void run(async () => { if (!await confirm(deleteListCopy(t, list.name))) return; await remove.mutateAsync(list.id); pushSnack(t(`${P}deleted`), 'success') })
+  const deleteList = (list: DestinationListSummary) => void run(async () => { if (!await confirm(deleteListCopy(t, list.name), actionTrigger.current)) return; await remove.mutateAsync(list.id); pushSnack(t(`${P}deleted`), 'success') })
   const state = (list: DestinationListSummary) => {
     const key = list.state === 'failed' ? list.last_fetched_at ? 'failed_old' : 'failed_first' : list.state === 'pending' && listIsProblem(list, enabled) ? 'pending_used' : list.state
     const tone = list.state === 'ready' ? 'ok' : list.state === 'failed' ? list.last_fetched_at ? 'attention' : 'failing' : key === 'pending_used' ? 'failing' : 'measuring'

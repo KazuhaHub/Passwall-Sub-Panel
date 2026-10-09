@@ -64,8 +64,8 @@ export default function PoliciesTab({ data, status, seconds, onCreateList, onExe
     await save.mutateAsync({ input, existing: row })
     pushSnack(t(`${P}saved`, { name: row.name }), 'success')
   })
-  const deleting = (row: DestinationPolicyOverviewItem) => void run(row.id, async () => {
-    if (!(await confirm(deletePolicyCopy(t, row.name)))) return
+  const deleting = (row: DestinationPolicyOverviewItem, returnFocus?: HTMLElement | null) => void run(row.id, async () => {
+    if (!(await confirm(deletePolicyCopy(t, row.name, status?.apply_eta_ms), returnFocus))) return
     await remove.mutateAsync(row.id); pushSnack(t(`${P}deleted`, { name: row.name }), 'success')
   })
   const move = (row: DestinationPolicyOverviewItem, target: number) => void run(row.id, async () => {
@@ -106,7 +106,7 @@ export default function PoliciesTab({ data, status, seconds, onCreateList, onExe
       <MenuItem key="copy" onClick={() => { setMenu(null); setEditor({ initial: { ...policyInput(row), name: t(`${P}copy_name`, { name: row.name }), enabled: false, template_key: row.template_key === 'global-exceptions' ? '' : row.template_key } }) }}>{t(`${P}copy`)}</MenuItem>,
       ...(row.action === 'observe' ? [<MenuItem key="promote" onClick={() => { setMenu(null); setPromotion(row) }}>{t('admin:access_control.promotion.action')}</MenuItem>] : []),
       ...[{ key: 'up', to: index - 1 }, { key: 'down', to: index + 1 }, { key: 'top', to: 0 }, { key: 'bottom', to: rows.length - 1 }].map(item => <MenuItem key={item.key} disabled={item.to < 0 || item.to >= rows.length || item.to === index} onClick={() => { setMenu(null); move(row, item.to) }}>{t(`${P}${item.key}`)}</MenuItem>),
-      <MenuItem key="delete" sx={{ color: 'error.main' }} onClick={() => { setMenu(null); deleting(row) }}>{t('common:actions.delete')}</MenuItem>,
+      <MenuItem key="delete" sx={{ color: 'error.main' }} onClick={() => { setMenu(null); deleting(row, menu?.anchor) }}>{t('common:actions.delete')}</MenuItem>,
     ] })()}</Menu>
     {editor && <PolicyEditorDialog {...editor} policies={data} status={status} seconds={seconds} onClose={() => setEditor(null)} />}
     {promotion && <ConvertToBlockDialog policy={promotion} onClose={() => setPromotion(null)} />}
