@@ -259,6 +259,7 @@ func TestPSPClientUpdateCountersIsColumnScoped(t *testing.T) {
 	if err := repo.UpdateCounters(ctx, &domain.PSPClient{
 		ID: id, LifetimeTotalBytes: 999, LifetimeUpBytes: 400, LifetimeDownBytes: 599,
 		LastRawTotalBytes: 999, PeriodBaselineTotalBytes: 100,
+		PeriodBaselineUpBytes: 37, PeriodBaselineDownBytes: 63,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -268,6 +269,62 @@ func TestPSPClientUpdateCountersIsColumnScoped(t *testing.T) {
 	}
 	if got.LifetimeTotalBytes != 999 || got.PeriodBaselineTotalBytes != 100 {
 		t.Fatalf("counters not persisted: %+v", got)
+	}
+	// The per-direction baselines feed the per-server period up/down
+	// (UserServerUsage); the counter column map this writer shares with
+	// BatchUpdateCounters is the only way a rollover reseed persists them.
+	if got.PeriodBaselineUpBytes != 37 || got.PeriodBaselineDownBytes != 63 {
+		t.Fatalf("period baselines up/down = %d/%d, want 37/63", got.PeriodBaselineUpBytes, got.PeriodBaselineDownBytes)
+	}
+}
+
+// BatchUpdateCounters is the writer the traffic poll's end-of-cycle flush
+// uses, so it is what lands a natural rollover's reseeded psp_client period
+// baselines: all three, per client, without touching credentials.
+func TestPSPClientBatchUpdateCountersPersistsPeriodBaselines(t *testing.T) {
+	repo, ctx := newPSPClientTestRepo(t)
+	id1, err := repo.Create(ctx, &domain.PSPClient{
+		UserID: 1, PanelID: 10, Email: "u1@psp.local", UUID: "uuid-1", Password: "pw-1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	id2, err := repo.Create(ctx, &domain.PSPClient{
+		UserID: 1, PanelID: 11, Email: "u1@psp.local", UUID: "uuid-2", Password: "pw-2",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[int64][3]int64{id1: {5000, 7000, 12000}, id2: {300, 200, 500}}
+	if err := repo.BatchUpdateCounters(ctx, []*domain.PSPClient{
+		{ID: id1, LifetimeUpBytes: 5600, LifetimeDownBytes: 7400, LifetimeTotalBytes: 13000,
+			PeriodBaselineUpBytes: 5000, PeriodBaselineDownBytes: 7000, PeriodBaselineTotalBytes: 12000},
+		{ID: id2, LifetimeUpBytes: 300, LifetimeDownBytes: 200, LifetimeTotalBytes: 500,
+			PeriodBaselineUpBytes: 300, PeriodBaselineDownBytes: 200, PeriodBaselineTotalBytes: 500},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	list, err := repo.ListByUser(ctx, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 2 {
+		t.Fatalf("ListByUser = %d clients, want 2", len(list))
+	}
+	for _, c := range list {
+		got := [3]int64{c.PeriodBaselineUpBytes, c.PeriodBaselineDownBytes, c.PeriodBaselineTotalBytes}
+		if got != want[c.ID] {
+			t.Errorf("client %d period baselines up/down/total = %v, want %v", c.ID, got, want[c.ID])
+		}
+	}
+	for id, cred := range map[int64][2]string{id1: {"uuid-1", "pw-1"}, id2: {"uuid-2", "pw-2"}} {
+		got, err := repo.GetByID(ctx, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.UUID != cred[0] || got.Password != cred[1] {
+			t.Errorf("BatchUpdateCounters clobbered client %d credentials: uuid %q password %q", id, got.UUID, got.Password)
+		}
 	}
 }
 

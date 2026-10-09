@@ -1077,6 +1077,9 @@ TrafficSvc cron 每 N 分钟（默认 5）:
   6. 重置周期触发（每月 1 号 / 每季首日）:
        - period_start = now
        - period_baseline_bytes / _up_bytes / _down_bytes 同时 freeze 为本轮 delta 之前的 lifetime
+       - 该用户每个 client 的 period_baseline_* 同步 reseed 为 lifetime − 该 client 本轮 delta：
+         共享 psp_clients 与过渡期遗留 user_xui_clients 两层都做，两层 client 周期用量合计 == 用户周期用量
+         （UserServerUsage 只展示其中一层：用户有任一 psp_client 时只读共享层，过渡期用户的遗留层用量见 UserNodeUsage）
        - 若 service_disabled_reason=traffic_exceeded → 调 user.ResumeServiceAndSync(userID)
            （清空 service_disabled_reason + SyncLifecycle(enable=true) + 异步"服务已恢复"邮件）
        - AuditLog
@@ -1517,6 +1520,7 @@ func (c *Client) UpgradeXray(ctx, tag string) error
 
 - 两列有符号、可为负，不做 clamp，也不能假设 up + down == `period_baseline_bytes`（仅当 lifetime_total == up + down 时成立）。
 - 管理员手动改用量（`SetPeriodUsage`）只给总量：按本周期**实测**上下行比例做精确整数拆分（本周期无实测流量 → 全部计入 download）。总量精确，方向是估算。
+- 分服务器周期用量（`UserServerUsage`）读 client 级 `period_baseline_*`：自然 rollover 时 poll 把该用户每个共享 `psp_clients` 行（及遗留 `user_xui_clients` 行）reseed 为 lifetime − 本轮该 client 的 delta，与用户级 baseline 同一时刻 freeze，故两层合计等于 `PeriodUsed()`。共享 client 的 delta 从不走 bootstrap 路径，无需遗留层的 cutoff 判断。若该轮 `psp_clients` 列表读取失败，用户照常滚动但共享 client baseline 不变（日志 Warn），分服务器周期用量将停留在上一周期直到下次 reseed。
 - 升级回填（一次性 marker `user_period_baseline_split_v1`）：`period_baseline_bytes <= 0` 的行 → 0/0（周期即全部 lifetime，拆分精确）；`> 0` 的行 → up baseline = lifetime_up，周期内存量全部计为 download（与旧版 header 逐字节一致），之后的流量按方向累计，下一次自然 rollover 起完全实测。reset=never 用户不会 rollover，却可能 baseline > 0（曾手动改用量，或由按周期重置改为 never）：其存量部分一直计为 download，直到管理员手动设置用量重新拆分（设为 0 时精确，否则按实测比例）。
 
 ### 11.3 超限 → 暂停服务

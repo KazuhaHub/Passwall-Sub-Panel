@@ -78,6 +78,12 @@ type PSPClient struct {
 	// adapters cannot report epochs and retain the decrease-detection fallback.
 	LastCounterEpoch uint64
 
+	// PeriodBaselineXxx follows [XUIClientEntry]'s rollover rule: when the
+	// owning user's period rolls naturally, the traffic poll's post-loop pass
+	// sets it to lifetime minus that cycle's own delta (SetPeriodUsage reseeds
+	// it by the override's fraction instead). Before the poll reseeded this
+	// tier, only ownership rows were rolled, so a migrated user's per-server
+	// period usage kept counting from the previous period's freeze.
 	PeriodBaselineUpBytes    int64
 	PeriodBaselineDownBytes  int64
 	PeriodBaselineTotalBytes int64

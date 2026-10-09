@@ -912,12 +912,14 @@ type XUIClientEntry struct {
 	// PeriodBaselineXxx is LifetimeXxx as it stood when the owning user's
 	// TrafficPeriodStart last advanced — the per-client mirror of
 	// User.PeriodBaselineBytes. Per-client period usage is LifetimeXxx minus
-	// this; summed across a user's clients it equals the user's period usage
-	// (the rollover sets each client's baseline to lifetime minus that cycle's
-	// own delta, so the sum stays exact). Zero on a fresh ownership row and on
-	// existing rows after an upgrade — in both cases period usage reads as
-	// lifetime until the user's next rollover seeds it, which is correct for a
-	// client created in the current period and self-heals for upgrades.
+	// this; summed across a user's clients — these ownership rows plus any
+	// shared PSPClient rows, whose identical baselines the same rollover pass
+	// reseeds — it equals the user's period usage (the rollover sets each
+	// client's baseline to lifetime minus that cycle's own delta, so the sum
+	// stays exact for a mid-migration user too). Zero on a fresh ownership row
+	// and on existing rows after an upgrade — in both cases period usage reads
+	// as lifetime until the user's next rollover seeds it, which is correct for
+	// a client created in the current period and self-heals for upgrades.
 	PeriodBaselineUpBytes    int64
 	PeriodBaselineDownBytes  int64
 	PeriodBaselineTotalBytes int64

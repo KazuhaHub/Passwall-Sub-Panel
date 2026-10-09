@@ -382,6 +382,10 @@ func (s *Service) PollOnce(ctx context.Context) (err error) {
 		rolledOver:         make(map[int64]bool),
 		clientsByUser:      make(map[int64][]*domain.XUIClientEntry, len(users)),
 		userCutoff:         make(map[int64]*time.Time, len(users)),
+
+		// psp_clients twins of clientDeltas / clientsByUser (own ID space).
+		sharedClientDeltas:  make(map[int64]trafficDelta),
+		sharedClientsByUser: make(map[int64][]*domain.PSPClient),
 	}
 
 	// Pre-fetch every user's latest snapshot in ONE batched read. Replaces
@@ -470,6 +474,12 @@ func (s *Service) PollOnce(ctx context.Context) (err error) {
 			log.Warn("traffic poll shared-client list failed; shared metering skipped this cycle", "err", sharedErr)
 			sharedClients = nil
 		}
+	}
+	// Same pointers the shared-metering pass below advances — bucketed by user
+	// so the post-loop period-baseline pass can reseed a rolled-over user's
+	// shared clients, including ones the panel didn't report this cycle.
+	for _, c := range sharedClients {
+		sink.sharedClientsByUser[c.UserID] = append(sink.sharedClientsByUser[c.UserID], c)
 	}
 	panelsToFetch := make(map[int64]struct{}, len(byPanel)+len(sharedClients))
 	for pid := range byPanel {
@@ -810,6 +820,12 @@ func (s *Service) PollOnce(ctx context.Context) (err error) {
 					continue
 				}
 				delta := s.recordSharedClientStats(ctx, c, ct.up, ct.down, sink, ct.counterEpoch)
+				// Kept per client for the rollover reseed, which subtracts it
+				// from this client's lifetime exactly as the fold below adds it
+				// to the user's totals. Recorded ahead of the zero-delta skip so
+				// every reported client has an entry; a zero entry and an absent
+				// key read the same there.
+				sink.sharedClientDeltas[c.ID] = delta
 				// Advance last_online_at even when no NEW bytes accrued this cycle —
 				// the 3X-UI server-side timestamp is independent of our delta, and a
 				// migrated user has no per-node pass left to source it.
@@ -855,10 +871,18 @@ func (s *Service) PollOnce(ctx context.Context) (err error) {
 
 	// Per-client period-baseline reseed for users whose period rolled this
 	// cycle. Mirrors the user-level u.PeriodBaselineBytes write above, one tier
-	// down: each owned client's baseline becomes its current lifetime minus
-	// this cycle's own delta, so this cycle's traffic counts to the NEW period
-	// and Σ(client period usage) stays exactly equal to the user's period usage.
-	// Runs after the user loop so every client's Lifetime is already advanced.
+	// down: each owned client's baseline — legacy ownership row and shared
+	// psp_client alike — becomes its current lifetime minus this cycle's own
+	// delta, so this cycle's traffic counts to the NEW period and Σ(client
+	// period usage) across both tiers stays exactly equal to the user's period
+	// usage. Runs after the user loop so every client's Lifetime is already
+	// advanced, and before the counter flushes below so the reseeded baselines
+	// are what they write.
+	//
+	// pspQueued is the set of shared clients already in sink.pspClientUpdates,
+	// built on first use (most cycles roll nobody, and of those that do, most
+	// users hold no shared client).
+	var pspQueued map[int64]bool
 	for uid := range sink.rolledOver {
 		cutoff := sink.userCutoff[uid] // may be nil
 		for _, e := range sink.clientsByUser[uid] {
@@ -884,6 +908,51 @@ func (s *Service) PollOnce(ctx context.Context) (err error) {
 				sink.ownershipUpdates = append(sink.ownershipUpdates, e)
 			}
 		}
+		// Shared-client tier, the source of a migrated user's per-server rows
+		// (serverUsageFromShared). Before this pass existed, only the ownership
+		// loop above ran at the natural rollover, so a migrated user's psp_client
+		// baselines stayed at the previous period's freeze and UserServerUsage
+		// went on reporting last period's per-server usage after the month
+		// turned over, while the user-level period had already reset.
+		for _, c := range sink.sharedClientsByUser[uid] {
+			// No cutoff logic, unlike the ownership tier: recordSharedClientStats
+			// never returns a bootstrap delta (a first observation seeds LastRaw
+			// with a ZERO delta), so every shared delta was folded into the
+			// user's totals verbatim and counted == d. Absent key (client not
+			// reported this cycle) reads as zero → baseline = lifetime.
+			d := sink.sharedClientDeltas[c.ID]
+			c.PeriodBaselineUpBytes = nonNeg(c.LifetimeUpBytes - d.up)
+			c.PeriodBaselineDownBytes = nonNeg(c.LifetimeDownBytes - d.down)
+			c.PeriodBaselineTotalBytes = nonNeg(c.LifetimeTotalBytes - d.total)
+			// Enqueue through a set of what is already queued, NOT the ownership
+			// tier's "zero raw delta ⇒ not queued" rule: flushSharedCounters also
+			// queues a client with a ZERO delta when it seeds a first observation
+			// or adopts a new counter epoch, so that rule would queue those
+			// clients twice. An already-queued client needs nothing more — the
+			// baseline rides its counter write via the shared pointer
+			// (pspClientCounterMap writes all three period_baseline_* columns).
+			if pspQueued == nil {
+				pspQueued = make(map[int64]bool, len(sink.pspClientUpdates))
+				for _, q := range sink.pspClientUpdates {
+					pspQueued[q.ID] = true
+				}
+			}
+			if !pspQueued[c.ID] {
+				sink.pspClientUpdates = append(sink.pspClientUpdates, c)
+				pspQueued[c.ID] = true
+			}
+		}
+	}
+	// A failed shared-client list leaves nothing to reseed: the users above
+	// rolled (their user-level period is right), but their psp_client
+	// baselines keep the previous period's freeze until the next rollover or
+	// an admin period-usage set. Say so, or the stale per-server period usage
+	// has no explanation in the log. The count covers every rolled-over user,
+	// legacy-only and client-less ones included: the list that would tell the
+	// migrated ones apart is the one that failed, so it is an upper bound.
+	if sharedErr != nil && len(sink.rolledOver) > 0 {
+		log.Warn("traffic poll: shared-client period baselines not reseeded this rollover cycle (shared-client list failed); per-server period usage of any migrated users among the rolled-over ones stays on the previous period",
+			"rolled_over_users", len(sink.rolledOver), "err", sharedErr)
 	}
 	mark("baseline_reseed", "period-baseline reseed (rolled-over users)")
 
@@ -1086,8 +1155,11 @@ type pollSink struct {
 	// client that produced a non-zero delta this cycle.
 	ownershipUpdates []*domain.XUIClientEntry
 	// pspClientUpdates buffers per-shared-client counter writes (v3.9.0 Stage 3);
-	// flushed via PSPClientRepo.BatchUpdateCounters at end-of-cycle. One append per
-	// shared client that produced a non-zero delta this cycle.
+	// flushed via PSPClientRepo.BatchUpdateCounters at end-of-cycle. At most one
+	// append per shared client: metering appends a client that produced a
+	// non-zero delta, seeded a first observation or adopted a new counter epoch
+	// (the last two with a ZERO delta), and the rollover reseed appends a rolled
+	// user's remaining clients only after checking they aren't already queued.
 	pspClientUpdates []*domain.PSPClient
 	// userUpdates buffers per-user traffic-state writes from the snapshot
 	// hot path; flushed via BatchUpdateTrafficState at end-of-cycle. Keyed
@@ -1120,7 +1192,8 @@ type pollSink struct {
 	clientDeltas map[int64]trafficDelta
 	// rolledOver flags users whose traffic period advanced this cycle (set in
 	// recordAndEnforceWith). The post-loop baseline pass reseeds those users'
-	// per-client period baselines. Keyed by user ID.
+	// per-client period baselines on both tiers (ownership rows and shared
+	// psp_clients). Keyed by user ID.
 	rolledOver map[int64]bool
 	// clientsByUser is every owned ownership row this cycle bucketed by user —
 	// the post-loop baseline pass needs all of a rolled-over user's clients,
@@ -1136,6 +1209,20 @@ type pollSink struct {
 	// user's period for a long-provisioned-but-idle client's first transmission.
 	// A nil value (or absent key) means "no cutoff" (count every bootstrap).
 	userCutoff map[int64]*time.Time
+	// sharedClientDeltas is clientDeltas' shared-client twin: this cycle's
+	// delta per psp_clients.ID, recorded in Phase 2b from
+	// recordSharedClientStats' return. Its own map because psp_clients and
+	// user_xui_clients number their rows independently — sharing clientDeltas
+	// would let a shared client's delta reseed the ownership row that happens
+	// to carry the same ID. Read by the rollover reseed; absent key = no delta
+	// this cycle (the panel didn't report the client).
+	sharedClientDeltas map[int64]trafficDelta
+	// sharedClientsByUser is the cycle's shared-client ListAll bucketed by
+	// UserID — the same pointers Phase 2b meters and flushSharedCounters
+	// queues, so the rollover reseed sees current Lifetime fields and a
+	// baseline set on an already-queued client rides that client's counter
+	// write. Empty when ListAll failed or no shared-client repo is wired.
+	sharedClientsByUser map[int64][]*domain.PSPClient
 }
 
 // recordClientStats reconciles one client's raw 3X-UI counter against the
@@ -1477,7 +1564,8 @@ func (s *Service) recordAndEnforceWith(ctx context.Context, u *domain.User, tota
 		u.PeriodBaselineUpBytes = nonNeg(u.LifetimeUpBytes - totals.deltaUp)
 		u.PeriodBaselineDownBytes = nonNeg(u.LifetimeDownBytes - totals.deltaDown)
 		// Flag this user so the post-loop pass reseeds each owned client's
-		// per-client period baseline in lockstep with the user-level one above.
+		// per-client period baseline (ownership rows and shared psp_clients)
+		// in lockstep with the user-level one above.
 		// Done out-of-band (not here) because recordAndEnforceWith only has the
 		// user aggregate; the pass has every client entry + its cycle delta.
 		if sink != nil {
@@ -1927,7 +2015,9 @@ func (s *Service) UserServerUsage(ctx context.Context, userID int64) ([]ServerUs
 // serverUsageFromShared builds the per-(user, server) usage rows from the user's
 // shared psp_client rows — the v3.9.0 source. One psp_client is per (user, panel,
 // credClass); rows are aggregated by panel (a panel may carry >1 credClass). Period
-// = Lifetime − PeriodBaseline (identical semantics to the legacy ownership row).
+// = Lifetime − PeriodBaseline (identical semantics to the legacy ownership row,
+// reseeded the same way: at the user's natural rollover by PollOnce's post-loop
+// pass, and by SetPeriodUsage).
 // Today is left 0: a shared client spans inbounds and no per-client daily snapshot
 // is written (recordSharedClientStats), so a per-server "today" isn't reconstructable.
 // NodeCount = the distinct nodes attached to the user's clients on that panel.
