@@ -18,9 +18,13 @@
 
 - 发布存储的首批六个测试组实际失败后实现；覆盖不可变历史、首次起点、跨语言版本、缓存更新、回滚、并发和冲突重试。另有溢出、实际方言唯一约束、历史分页边界和首次设置保存交错检查。
 - Go 1.27.2 上，新增发布测试及原有节点任务策略设置测试通过；完整 SQL-store、领域、ports 和 HTTP handler 套件通过。
-- 项目首选 Go 1.27.1 上，最终 SQL-store、领域及 ports 完整套件通过，相关 `go vet` 通过；HTTP handler 测试二进制的运行被 Windows Application Control 阻止。没有修改策略、搬移被拒绝的二进制或通过替代路径执行。首选工具链的 handler 执行仍需 Linux CI 验证。
+- 升级前首选 Go 1.27.1 上，SQL-store、领域及 ports 完整套件通过，相关 `go vet` 通过；HTTP handler 测试二进制的运行被 Windows Application Control 阻止。没有修改策略、搬移被拒绝的二进制或通过替代路径执行。
 - Windows 应用套件的临时 SQLite 文件清理失败。未经修改的 `origin/main` `63b839854fed12f930afc63513ebfaed9515d9c0` 的相同测试也复现占用；该基线的 `App.Shutdown` 未关闭 SQL 池。已有访问控制基础 PR #273 包含关闭池的修复。本包不修改应用生命周期，也不将此本地结果记为通过。
 - 每个提交仍需自己的 Linux 完整 CI、SQLite/race、PostgreSQL/MySQL 方言检查。此前其他 PR 的成功不能代替本分支结果。
+
+首个提交 `9ce07cc3` 的 Linux CI 已通过全部功能/race、SQLite、PostgreSQL、MySQL、前端、交叉编译和 Docker 检查；工作流因基线 Go 1.27.1 的可达漏洞而失败，不计为整体成功。当前版本同步升级 Go 与源码 Docker 构建至 1.27.2，`x/net` 至 v0.60.0，保留所有静态分析器，并用隔离的校验和固定工具模块适配编译器导出格式。相关模块与静态分析缓存包含工具模块的版本和校验和。
+
+升级后的本地 SQL-store、领域、ports 套件通过；Linux/macOS/Windows 三个目标可达漏洞扫描均通过，另有六个模块级不可达提示。新版 Staticcheck 的本地执行被 Application Control 拒绝，已停止；当前提交的完整分析仍需自己的 Linux CI 结果。
 
 ## 阶段 3 未完成项
 
