@@ -10,10 +10,14 @@ import (
 	"gorm.io/gorm/clause"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/keyedmutex"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 )
 
-type xuiPanelRepo struct{ db *gorm.DB }
+type xuiPanelRepo struct {
+	db         *gorm.DB
+	auditGates *keyedmutex.Map[int64]
+}
 
 func (r *xuiPanelRepo) List(ctx context.Context) ([]*domain.XUIPanel, error) {
 	var rows []xuiPanelRow
@@ -132,6 +136,12 @@ func (r *xuiPanelRepo) UpdateNativeMetadata(ctx context.Context, id int64, name,
 	}
 	if collect != nil && !collect.Valid() {
 		return fmt.Errorf("%w: invalid audit collection mode", domain.ErrValidation)
+	}
+	// Share the short per-panel gate with every audit chunk. No transaction
+	// carrying an old revision can commit after this settings write succeeds.
+	if collect != nil && r.auditGates != nil {
+		unlock := r.auditGates.Lock(id)
+		defer unlock()
 	}
 	updates := map[string]any{}
 	if name != nil {

@@ -2241,6 +2241,7 @@ type Repos struct {
 	PSPClient               PSPClientRepo
 	NodeAgent               NodeAgentRepo
 	DestAgentPolicy         DestAgentPolicyRepo
+	DestAudit               DestAuditRepo
 	DestinationEligibility  DestinationEligibilityRepo
 	NativeAgentProvisioning NativeAgentProvisioningRepo
 	ServerMigration         ServerMigrationRepo

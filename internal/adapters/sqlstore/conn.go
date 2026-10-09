@@ -172,8 +172,8 @@ func openWithLogger(kind, dsn string, gormLogger logger.Interface) (*gorm.DB, er
 }
 
 // NewRepos wires up every repository implementation and returns the
-// aggregated ports.Repos for the service layer. Repositories are stateless
-// and safely share a single *gorm.DB.
+// aggregated ports.Repos for the service layer. Repositories share one database
+// and the domain caches/write gates that must stay consistent across owners.
 func NewRepos(db *gorm.DB) ports.Repos {
 	// Settings is wrapped in the in-process cache decorator (see below); the
 	// ScopedSettings resolver layers each group's sparse overrides on top of it.
@@ -189,6 +189,7 @@ func NewRepos(db *gorm.DB) ports.Repos {
 	// effect at once instead of within the TTL — same discipline as the scope
 	// settings cache above.
 	groupLimits := newGroupLimitsCache(db)
+	destAudit := NewDestAuditRepo(db)
 	return ports.Repos{
 		User:                    &userRepo{db: db, groupLimits: groupLimits},
 		Group:                   &groupRepo{db: db, limitsCache: groupLimits},
@@ -198,6 +199,7 @@ func NewRepos(db *gorm.DB) ports.Repos {
 		PSPClient:               &pspClientRepo{db: db},
 		NodeAgent:               &nodeAgentRepo{db: db},
 		DestAgentPolicy:         NewDestAgentPolicyRepo(db),
+		DestAudit:               destAudit,
 		DestinationEligibility:  NewDestinationEligibilityRepo(db),
 		NativeAgentProvisioning: &nativeAgentProvisioningRepo{db: db},
 		ServerMigration:         &serverMigrationRepo{db: db},
@@ -220,7 +222,7 @@ func NewRepos(db *gorm.DB) ports.Repos {
 		// config/rulesets/*.yaml, not the DB). A previous MySQL repo
 		// existed but was never actually injected, so it was dead code
 		// and got removed during the v3 schema cleanup.
-		XUIPanel: &xuiPanelRepo{db: db},
+		XUIPanel: &xuiPanelRepo{db: db, auditGates: destAudit.gates},
 		// Settings is wrapped in the in-process cache decorator so the
 		// hot paths (render, traffic poll, reconcile, paneltz) don't
 		// fan into the DB for the same row dozens of times per request

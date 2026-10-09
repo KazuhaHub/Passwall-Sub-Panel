@@ -17,3 +17,31 @@ type DestUsage struct {
 	Site                    string
 	Count                   int64
 }
+
+// DestAuditBatch is server-owned input to the first ingestion transaction.
+// Rows are validated and merged before this boundary. ReceivedAt determines
+// durable dedup retention; ReceivedHourMS is the receiver's budget bucket.
+type DestAuditBatch struct {
+	AgentID, BatchID, Kind          string
+	PanelID, HourMS, ReceivedHourMS int64
+	ReceivedAt                      time.Time
+	CollectRevision                 uint64
+	Hits                            []DestHit
+	Usage                           []DestUsage
+	Dropped, Unmatched              uint64
+	Losses                          map[string]int64
+}
+
+type DestAuditBegin struct {
+	Duplicate        bool
+	Rejected         string
+	Reserved, Stored int
+}
+
+type DestAuditChunk struct {
+	AgentID, BatchID, Kind string
+	PanelID                int64
+	CollectRevision        uint64
+	Hits                   []DestHit
+	Usage                  []DestUsage
+}

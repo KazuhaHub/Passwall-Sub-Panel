@@ -9,11 +9,35 @@ Implementation follows the [final audit plan](https://github.com/KazuhaHub/Passw
 - Durable audit storage: `dest_hits`, `dest_usage_hourly`, `dest_audit_batches`, `dest_audit_loss_hourly`, `dest_audit_ingest_budget`. Collection and ingestion are not connected yet.
 - The sync HTTP boundary decodes `audit` separately, bounds its raw size and validates its shape and capabilities. Invalid telemetry is dropped without changing a valid control response. Audit batches are stripped from control caches; the asynchronous ingestion worker is still pending, so decoded acceptance does not mean durable storage.
 - `psp_node_audit_report_total` uses the fixed `kind` and `outcome` enum labels. Diagnostics translate both labels in English and Chinese; existing single-label metric values keep their original interpretation. Logs for discarded audit subtrees contain only the authenticated agent identifier and a count, with per-agent rate limiting.
-- The audit queue foundation reserves independent batch/byte/per-agent capacity for block, observe, trial and usage, including processing batches. In-flight deduplication is independent of bounded recent caches. Its seven-slot scheduler yields after each future database chunk. Mapping merges final hit keys before persistence, preserves frozen actions and anonymous trial fields, and applies receiver-clock age bounds. The worker, durable transactions and production sync connection remain pending.
+- The audit queue foundation reserves independent batch/byte/per-agent capacity for block, observe, trial and usage, including processing batches. In-flight deduplication is independent of bounded recent caches. Its seven-slot scheduler yields after each future database chunk. Mapping merges final hit keys before persistence, preserves frozen actions and anonymous trial fields, and applies receiver-clock age bounds. The worker and production sync connection remain pending.
 - New tables participate in the normal boot migration. JSON columns use TEXT without defaults. Binary list content, original custom-list text, snapshots and policy bodies use SQLite BLOB, PostgreSQL BYTEA and MySQL LONGBLOB.
 - Candidate bytes are stored independently from confirmed policy bytes. The compiler and candidate observer use the latter for pruned last-known-good fallback and durable exhaustion, as described below.
 - Native panel collection settings are stored as `audit_collect` (`off`, `hits`, `hits_and_usage`) and `audit_collect_revision`. Creation and migration initialize `hits` and revision `1`. A normal panel `Save` omits these columns.
 - The native metadata writer validates collection mode and compares it under a transaction lock. A mode change increments revision atomically; repeated writes of the same mode do not. This write is not yet exposed by the HTTP request DTO. The future ingestion gate will use the same collection state to reject outdated batches.
+
+## Audit transaction foundation
+
+The destination audit repository commits the batch marker, whole-batch row-budget
+reservation, node/mapping loss counts and first chunk in one transaction. Later
+chunks preserve earlier commits on failure. A replay cannot fill a partially
+committed batch or reserve its budget twice. Transactions contain at most 1,000
+data rows and statements contain at most 200; final logical keys must be unique
+before entering the repository. Event counts, unmatched counts and dropped rows
+remain separate, and counter additions saturate at the signed storage limit.
+
+Each chunk checks the current panel collection revision, mode, agent ownership,
+engine and capabilities. Production repositories share a per-panel gate with
+collection-setting writes. The durable agent owner lock also serializes the batch
+identity check across connections. This check precedes the conflict-safe marker
+insert so MySQL `clientFoundRows=true` cannot disguise a replay as an insertion.
+Audit database operations disable SQL tracing independently of global Debug mode;
+value-bearing database errors become a fixed storage error at this boundary.
+
+Local SQLite transaction tests verify rollback, replay, partial failure, budget
+isolation, count/time upserts, anonymous trial rows, collection changes and SQL
+privacy. PostgreSQL/MySQL runtime verification and worker/sync integration remain
+pending. Usage persistence is prepared internally; production usage collection
+remains inactive until its stage-4 acceptance.
 
 ## Definition and publication repository
 
