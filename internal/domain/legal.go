@@ -71,11 +71,17 @@ type LegalDraft struct {
 	Content     string
 	ConsentBump bool
 	PublishedBy int64
+	// Optional for legacy callers; editors bind publication to the reviewed
+	// latest version (zero means no publication in this kind and locale).
+	ExpectedVersion *int64
 }
 
 func (d LegalDraft) Validate() error {
 	if err := ValidateLegalIdentity(d.Kind, d.Locale); err != nil {
 		return err
+	}
+	if d.ExpectedVersion != nil && *d.ExpectedVersion < 0 {
+		return fmt.Errorf("%w: legal expected version", ErrValidation)
 	}
 	if len(d.Content) > MaxLegalContentBytes {
 		return ErrLegalContentTooLarge

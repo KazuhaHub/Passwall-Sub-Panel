@@ -33,6 +33,8 @@ type legalRepo struct {
 	invalidate func()
 }
 
+var errLegalStaleDraft = errors.New("legal draft based on a stale version")
+
 func (r *legalRepo) Publish(ctx context.Context, draft domain.LegalDraft) (domain.LegalPublication, error) {
 	if err := draft.Validate(); err != nil {
 		return domain.LegalPublication{}, err
@@ -46,6 +48,9 @@ func (r *legalRepo) Publish(ctx context.Context, draft domain.LegalDraft) (domai
 			return publication, nil
 		}
 		if !errors.Is(err, domain.ErrLegalVersionConflict) {
+			return domain.LegalPublication{}, err
+		}
+		if errors.Is(err, errLegalStaleDraft) {
 			return domain.LegalPublication{}, err
 		}
 	}
@@ -83,6 +88,9 @@ func (r *legalRepo) publishOnce(ctx context.Context, draft domain.LegalDraft) (d
 		}
 		if last < 0 || last == math.MaxInt64 {
 			return fmt.Errorf("%w: legal document version exhausted", domain.ErrValidation)
+		}
+		if draft.ExpectedVersion != nil && last != *draft.ExpectedVersion {
+			return fmt.Errorf("%w: %w", domain.ErrLegalVersionConflict, errLegalStaleDraft)
 		}
 		doc := legalDocumentRow{Kind: draft.Kind, Locale: draft.Locale, Version: last + 1, Content: draft.Content, ConsentBump: draft.ConsentBump, PublishedBy: draft.PublishedBy, PublishedAt: time.Now().UTC()}
 		if err := tx.Create(&doc).Error; err != nil {

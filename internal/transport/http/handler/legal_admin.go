@@ -82,15 +82,16 @@ func (h *LegalAdminHandler) Publish(c *gin.Context) {
 		return
 	}
 	var req struct {
-		Locale      string `json:"locale"`
-		Content     string `json:"content"`
-		ConsentBump bool   `json:"consent_bump"`
+		Locale          string `json:"locale"`
+		Content         string `json:"content"`
+		ConsentBump     bool   `json:"consent_bump"`
+		ExpectedVersion *int64 `json:"expected_version"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		respondError(c, domain.ErrValidation)
 		return
 	}
-	p, err := h.repo.Publish(c.Request.Context(), domain.LegalDraft{Kind: c.Param("kind"), Locale: req.Locale, Content: req.Content, ConsentBump: req.ConsentBump, PublishedBy: claims.UserID})
+	p, err := h.repo.Publish(c.Request.Context(), domain.LegalDraft{Kind: c.Param("kind"), Locale: req.Locale, Content: req.Content, ConsentBump: req.ConsentBump, PublishedBy: claims.UserID, ExpectedVersion: req.ExpectedVersion})
 	if err != nil {
 		respondError(c, err)
 		return

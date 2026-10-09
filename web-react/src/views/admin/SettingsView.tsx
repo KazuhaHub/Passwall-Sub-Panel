@@ -93,8 +93,9 @@ import type { Group } from '@/api/types'
 import { normalizeRegistry } from './subclients/clientRegistry'
 import ScopeOverridesEditor from '@/components/scope/ScopeOverridesEditor'
 import { loadScopeState, saveScopeState, type ScopeState } from '@/components/scope/scopeOverrides'
+import LegalTab from './legal/LegalTab'
 
-type TabKey = 'general' | 'security' | 'brand' | 'subscription' | 'portal' | 'mail' | 'sso'
+type TabKey = 'general' | 'security' | 'brand' | 'subscription' | 'portal' | 'mail' | 'sso' | 'legal'
 
 // COMMON_TIMEZONES is the option set in the Settings → 面板时区 picker.
 // Uses the browser's own IANA database via Intl.supportedValuesOf, which
@@ -165,7 +166,7 @@ export default function SettingsView() {
   const site = useSiteStore()
 
   const [tab, setTab] = useTabParam<TabKey>('tab', 'general',
-    ['general', 'security', 'brand', 'subscription', 'portal', 'mail', 'sso'])
+    ['general', 'security', 'brand', 'subscription', 'portal', 'mail', 'sso', 'legal'])
   const qScope = useQueryScope()
   const settingsQuery = useUISettings(qScope)
   // The DRAFT. Seeded once from the first successful read; a background
@@ -444,13 +445,14 @@ export default function SettingsView() {
     { key: 'portal', labelKey: 'settings.tab_portal' },
     { key: 'mail', labelKey: 'settings.tab_mail' },
     { key: 'sso', labelKey: 'settings.tab_sso' },
+    { key: 'legal', labelKey: 'settings.tab_legal' },
   ]
 
   // Workspace-style sticky bottom action bar shared by the global-form tabs.
   // save() reads component state directly, so the bar lives outside the <form>
   // and just calls it; Cancel re-fetches, discarding unsaved edits. Shown only
   // on tabs whose global form is mounted (see render).
-  const showFormBar = tab === 'brand' || tab === 'portal'
+  const showFormBar = tab === 'brand' || tab === 'portal' || tab === 'legal'
     || ((tab === 'general' || tab === 'security' || tab === 'subscription') && scopeGroupId === 0)
   const actionBar = (
     <Box sx={{
@@ -560,7 +562,7 @@ export default function SettingsView() {
   return (
     <Box sx={{ p: 3 }}>
       <PageHeader title={t('settings.title')} />
-      <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ mt: 2, mb: 3, borderBottom: `1px solid ${md.outlineVariant}` }}>
+      <Tabs value={tab} onChange={(_, v) => setTab(v)} variant="scrollable" scrollButtons="auto" allowScrollButtonsMobile sx={{ mt: 2, mb: 3, borderBottom: `1px solid ${md.outlineVariant}`, '& button': { minHeight: 44 } }}>
         {tabs.map(tb => <Tab key={tb.key} value={tb.key} label={t(tb.labelKey)} />)}
       </Tabs>
       {tab === 'security' && renderScopeTab(['2fa', 'login'], (
@@ -1371,6 +1373,9 @@ export default function SettingsView() {
       )}
       {tab === 'mail' && <MailTab />}
       {tab === 'sso' && <SsoTab />}
+      {tab === 'legal' && <LegalTab enabled={settings.legal_enabled ?? false} consentVersion={settings.legal_consent_version ?? 0}
+        onEnabled={value => patch('legal_enabled', value)}
+        onPublished={result => setSettings(previous => previous ? { ...previous, legal_consent_version: result.consent_version } : previous)} />}
       {showFormBar && actionBar}
     </Box>
   );

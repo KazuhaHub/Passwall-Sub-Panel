@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useLayoutEffect, useRef, useState } from 'react'
 import { Button, CircularProgress, Stack, TextField, Typography } from '@mui/material'
 import ContentCopyIcon from '@mui/icons-material/ContentCopy'
 import { useTranslation } from 'react-i18next'
@@ -18,7 +18,7 @@ export default function NodeInstallCommand({ command, expiresAt, disabled = fals
   const [copying, setCopying] = useState(false)
   const intent = useRef(0)
   const observed = useRef({ command, expiresAt, disabled })
-  useEffect(() => {
+  useLayoutEffect(() => {
     const previous = observed.current
     const changed = previous.command !== command || previous.expiresAt !== expiresAt || previous.disabled !== disabled
     observed.current = { command, expiresAt, disabled }
@@ -26,6 +26,8 @@ export default function NodeInstallCommand({ command, expiresAt, disabled = fals
     // immediate copy click on a busy runner: the resolved clipboard result is
     // then discarded even though the command never changed. Dependency changes
     // still invalidate in-flight work, and cleanup covers unmount/StrictMode.
+    // Complete that lifecycle before the command can receive a click: passive
+    // mount cleanup may otherwise invalidate an already-started clipboard call.
     if (changed) {
       intent.current += 1
       setFeedback('')

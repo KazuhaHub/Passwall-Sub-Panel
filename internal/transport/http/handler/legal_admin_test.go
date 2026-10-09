@@ -104,6 +104,44 @@ func TestLegalAdminHTTP_PublishRequiresActor(t *testing.T) {
 	}
 }
 
+func TestLegalAdminHTTP_ExpectedPublicationVersion(t *testing.T) {
+	repos := legalHTTPRepos(t)
+	actor := legalHTTPUser(t, repos, domain.RoleAdmin, 1)
+	h := NewLegalAdminHandler(repos.Legal)
+	r := gin.New()
+	r.Use(func(c *gin.Context) { c.Set(middleware.CtxClaims, &jwtutil.Claims{UserID: actor.ID}); c.Next() })
+	r.POST("/legal/:kind", h.Publish)
+	for _, tc := range []struct {
+		body    string
+		status  int
+		version int64
+	}{
+		{`{"locale":"en-US","content":"first","expected_version":0}`, 200, 1},
+		{`{"locale":"en-US","content":"stale","consent_bump":true,"expected_version":0}`, 409, 0},
+		{`{"locale":"en-US","content":"next","expected_version":1}`, 200, 2},
+		{`{"locale":"en-US","content":"legacy"}`, 200, 3},
+		{`{"locale":"en-US","content":"bad","expected_version":-1}`, 400, 0},
+		{`{"locale":"en-US","content":"bad","expected_version":"3"}`, 400, 0},
+		{`{"locale":"en-US","content":"bad","expected_version":3.5}`, 400, 0},
+	} {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/legal/terms", strings.NewReader(tc.body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		if w.Code != tc.status {
+			t.Fatalf("%s: %d %s", tc.body, w.Code, w.Body.String())
+		}
+		if tc.status == 200 {
+			var publication domain.LegalPublication
+			if err := json.Unmarshal(w.Body.Bytes(), &publication); err != nil || publication.Document.Version != tc.version || publication.ConsentVersion != 1 {
+				t.Fatalf("publication = %+v, %v", publication, err)
+			}
+		} else if tc.status == 409 && decodeErrBody(t, w) != "legal_version_conflict" {
+			t.Fatalf("conflict body: %s", w.Body.String())
+		}
+	}
+}
+
 func TestLegalAdminHTTP_CollectionBeforeEnablement(t *testing.T) {
 	repos := legalHTTPRepos(t)
 	settings := ports.UISettings{LegalEnabled: false, AuthEventRetentionDays: 30, RiskRefreshIntervalMinutes: 25, RiskHWIDCaptureOff: true}
