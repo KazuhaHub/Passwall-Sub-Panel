@@ -10,14 +10,22 @@ import { useAuthStore } from '@/stores/auth'
 import { destinationStatus } from '@/test/accessControlFixtures'
 import type { DestinationTestResult } from '@/api/accessControl'
 const api = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn() }))
+const publicationNotification = vi.hoisted(() => ({ lagged: false }))
 vi.mock('@/api/client', () => ({ client: api }))
+vi.mock('@/query/accessControl', async importOriginal => {
+  const actual = await importOriginal<typeof import('@/query/accessControl')>()
+  return { ...actual, useDestinationPublication: (scope: Parameters<typeof actual.useDestinationPublication>[0]) => {
+    const mutation = actual.useDestinationPublication(scope)
+    return publicationNotification.lagged ? { ...mutation, isPending: false } : mutation
+  } }
+})
 vi.mock('@/components/SnackbarHost', () => ({ pushSnack: vi.fn() }))
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string, args?: Record<string, unknown>) => key + (args?.name ? ` ${args.name}` : '') }) }))
 vi.mock('@/components/UserAutocomplete', () => ({ default: (p: { value: number | null; onChange: (id: number | null) => void; label: string }) => <input aria-label={p.label} value={p.value ?? ''} onChange={e => p.onChange(Number(e.target.value) || null)} /> }))
 import TestSheet from './TestSheet'
 const P = 'admin:access_control.test.'
 const result: DestinationTestResult = { verdict: 'block', terminating_step: 'block', steps: [{ step: 'allow', result: 'miss' }, { step: 'exemption', result: 'n/a' }, { step: 'block', result: 'hit', name: 'No mail', policy_id: 12, entry: 'full:example.test' }, { step: 'observe', result: 'shadowed', name: 'Watch', policy_id: 15 }, { step: 'direct', result: 'skipped' }], notes: ['destination_only_preview'], unpublished: false, nodes: [{ panel_id: 1, name: 'Tokyo', state: 'offline' }] }
-beforeEach(() => { vi.clearAllMocks(); useAuthStore.setState({ userId: 42, role: 'admin', authEpoch: 5 }); api.post.mockResolvedValue({ data: result }) })
+beforeEach(() => { vi.clearAllMocks(); publicationNotification.lagged = false; useAuthStore.setState({ userId: 42, role: 'admin', authEpoch: 5 }); api.post.mockResolvedValue({ data: result }) })
 afterEach(() => cleanup())
 function mount(prefill?: { target?: string; port?: number; network?: string; userId?: number }) {
   const onClose = vi.fn(), onOpenPolicy = vi.fn(), client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -30,10 +38,17 @@ it.each(['/admin/access-control?sheet=exemptions', '/away'])('holds publication 
   let finish!: (value: unknown) => void
   api.post.mockImplementation((url: string) => url === '/admin/dest/publish' ? new Promise(resolve => { finish = resolve }) : Promise.resolve({ data: { ...result, unpublished: true } }))
   const { router } = mount(); submit(); await screen.findByText(`${P}unpublished`)
-  fireEvent.click(screen.getByRole('button', { name: 'admin:access_control.publish' }))
-  await waitFor(() => expect(api.post.mock.calls.filter(([url]) => url === '/admin/dest/publish')).toHaveLength(1))
-  await act(async () => { void router.navigate(target) })
-  expect(router.state.location.pathname + router.state.location.search).toBe('/admin/access-control?sheet=test')
+  // The API can start before React Query delivers its pending notification.
+  // Hold that notification to exercise the admission boundary deterministically.
+  publicationNotification.lagged = true
+  try {
+    fireEvent.click(screen.getByRole('button', { name: 'admin:access_control.publish' }))
+    await waitFor(() => expect(api.post.mock.calls.filter(([url]) => url === '/admin/dest/publish')).toHaveLength(1))
+    await act(async () => { void router.navigate(target) })
+    expect(router.state.location.pathname + router.state.location.search).toBe('/admin/access-control?sheet=test')
+  } finally {
+    publicationNotification.lagged = false
+  }
   finish({ data: {} })
   await waitFor(() => expect(router.state.location.pathname + router.state.location.search).toBe(target))
   expect(api.post.mock.calls.filter(([url]) => url === '/admin/dest/test')).toHaveLength(1)

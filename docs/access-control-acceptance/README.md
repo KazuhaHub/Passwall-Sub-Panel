@@ -1149,3 +1149,25 @@ definitions/pause changed; no real backend policy or node execution changed.
 Normal fixtures, English, automatic theme and default viewport were restored.
 These captures verify the demonstrated concurrent pair, not every combination
 of writes or the complete UI acceptance matrix.
+
+### Test-sheet publication admission
+
+The complete frontend CI for `5c96a161` and `29d03cce` caught the same timing
+gap: a publication POST had started before its mutation pending notification
+reached the sheet, allowing same-page departure. Publication now sets its own
+busy state at admission and releases it only after the mutation settles,
+including invalidation. Navigation, close, inputs and policy links use that
+state. The admission ref continues to reject duplicate requests.
+
+Two caller regressions with deliberately delayed pending-state delivery failed
+before repair for query and page departure. They keep the actual mutation/API
+flow and complete queued navigation without repeating destination simulation.
+After repair, all 18 test-sheet checks passed, as did TypeScript, changed-source
+lint, production build, fixture exclusion and four production smoke checks.
+This timing evidence comes from CI and caller tests; the native captures above
+cover sheet cancellation and concurrent actions, not publication admission.
+
+The complete local frontend suite then passed 2,284 tests in 187 passing files,
+with one existing skipped test/file (188 files total). This includes the final
+admission fix; it does not replace the new commit's complete Linux CI or the
+remaining real-runtime/UI gates.

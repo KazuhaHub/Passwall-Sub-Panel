@@ -22,7 +22,7 @@ export default function TestSheet({ onClose, onOpenPolicy, status, prefill }: { 
   const [target, setTarget] = useState(prefill?.target ?? ''), [port, setPort] = useState(String(prefill?.port ?? 443)), [network, setNetwork] = useState<'tcp' | 'udp'>(prefill?.network === 'udp' ? 'udp' : 'tcp')
   const [userId, setUserId] = useState<number | null>(prefill?.userId ?? null), [panelId, setPanelId] = useState<number | null>(null)
   const [result, setResult] = useState<DestinationTestResult | null>(null), [error, setError] = useState(''), [pending, setPending] = useState(false), [validated, setValidated] = useState(false), [showAll, setShowAll] = useState(false)
-  const [publishRequested, setPublishRequested] = useState(false), [publishError, setPublishError] = useState(''), publishAdmission = useRef(false)
+  const [publishRequested, setPublishRequested] = useState(false), [publishError, setPublishError] = useState(''), [publishing, setPublishing] = useState(false), publishAdmission = useRef(false)
   const [exception, setException] = useState(false)
   const [hostOnly, setHostOnly] = useState(false)
   const request = useRef<AbortController | null>(null), mounted = useRef(true)
@@ -40,20 +40,20 @@ export default function TestSheet({ onClose, onOpenPolicy, status, prefill }: { 
   }
   const publish = async () => {
     if (publishAdmission.current || publishRequested) return
-    publishAdmission.current = true; setPublishError('')
+    publishAdmission.current = true; setPublishing(true); setPublishError('')
     try { await publication.mutateAsync({}); if (mounted.current) setPublishRequested(true) }
     catch (err) { if (mounted.current) setPublishError(destinationError(err).error) }
-    finally { publishAdmission.current = false }
+    finally { publishAdmission.current = false; if (mounted.current) setPublishing(false) }
   }
   const close = () => { if (!publishAdmission.current && !exception) onClose() }
-  const blocked = pending || publication.isPending, hit = result?.steps.find(row => row.result === 'hit' && row.step === result.terminating_step)
+  const blocked = pending || publishing, hit = result?.steps.find(row => row.result === 'hit' && row.step === result.terminating_step)
   const label = result?.terminating_step === 'group' ? result.verdict === 'block' ? 'deny' : result.verdict === 'observe' ? 'trial' : result.verdict : result?.verdict
   const tone = accessTone(theme, label ?? 'direct')
   const unpublished = result?.unpublished || !!status && status.generation !== status.published_generation
   const visibleNodes = result?.nodes.filter(node => panelId === null || node.panel_id === panelId) ?? []
   return <Drawer anchor="right" open onClose={close} slotProps={{ paper: { role: 'dialog', 'aria-labelledby': 'test-sheet-title', sx: { width: { xs: '100vw', sm: 560 }, maxWidth: '100vw', bgcolor: theme.palette.md.surfaceContainerLow, borderTopLeftRadius: { xs: 0, sm: 16 } } } }}>
-    <PendingActionGuard hold={publication.isPending} />
-    <Box sx={{ p: 2.5, display: 'flex', alignItems: 'center' }}><Typography id="test-sheet-title" component="h2" variant="h6" sx={{ flex: 1, minWidth: 0, overflowWrap: 'anywhere' }}>{t(`${P}title`)}</Typography><IconButton disabled={publication.isPending} aria-label={t('common:actions.close')} onClick={close} sx={{ minWidth: 44, minHeight: 44 }}><CloseIcon /></IconButton></Box>
+    <PendingActionGuard hold={publishing} />
+    <Box sx={{ p: 2.5, display: 'flex', alignItems: 'center' }}><Typography id="test-sheet-title" component="h2" variant="h6" sx={{ flex: 1, minWidth: 0, overflowWrap: 'anywhere' }}>{t(`${P}title`)}</Typography><IconButton disabled={publishing} aria-label={t('common:actions.close')} onClick={close} sx={{ minWidth: 44, minHeight: 44 }}><CloseIcon /></IconButton></Box>
     <Stack spacing={2.5} sx={{ px: 2.5, pt: 1, pb: 2.5, overflowY: 'auto' }}>
       <Box component="form" aria-label={t(`${P}title`)} onSubmit={event => { event.preventDefault(); void run(input) }} noValidate>
         <Stack component="fieldset" disabled={blocked} spacing={2} sx={{ p: 0, m: 0, border: 0, minWidth: 0 }}>
@@ -65,7 +65,7 @@ export default function TestSheet({ onClose, onOpenPolicy, status, prefill }: { 
         </Stack>
       </Box>
       {pending ? <Stack spacing={1} aria-busy="true">{[0,1,2].map(key => <Skeleton key={key} height={72} variant="rounded" />)}</Stack> : error ? <Alert severity="error" action={<AsyncButton pending={pending} onClick={() => run(input)} sx={{ minHeight: 44 }}>{t('common:actions.retry')}</AsyncButton>}>{t(`${P}failed`)}</Alert> : result ? <Stack spacing={2}>
-        {unpublished && <Alert severity="warning" action={<AsyncButton pending={publication.isPending} disabled={blocked || publishRequested} onClick={publish} sx={{ minHeight: 44 }}>{t('admin:access_control.publish')}</AsyncButton>}>{t(`${P}unpublished`)}</Alert>}
+        {unpublished && <Alert severity="warning" action={<AsyncButton pending={publishing} disabled={blocked || publishRequested} onClick={publish} sx={{ minHeight: 44 }}>{t('admin:access_control.publish')}</AsyncButton>}>{t(`${P}unpublished`)}</Alert>}
         {publishRequested && <Alert severity="info">{t('admin:access_control.publication_requested')}</Alert>}{publishError && <Alert severity="error">{t('admin:access_control.write_failed', { error: publishError })}</Alert>}
         <Box role="status"><ToneBadge wrap tone={tone} label={t(`${P}verdict_${label}`)} />{hit && <Typography sx={{ mt: 1, overflowWrap: 'anywhere' }}>{t(`${P}terminated`, { step: pipelineIndex(result, hit.step), name: hit.name ?? t(`${P}step_${hit.step}`) })}</Typography>}</Box>
         {result.steps.length > 0 && <EvalTrace result={result} />}
@@ -74,7 +74,7 @@ export default function TestSheet({ onClose, onOpenPolicy, status, prefill }: { 
         {visibleNodes.length > 5 && <Button onClick={() => setShowAll(!showAll)} sx={{ minHeight: 44 }}>{t(`${P}${showAll ? 'less_nodes' : 'more_nodes'}`, { count: visibleNodes.length - 5 })}</Button>}
         <Typography variant="body2" color="text.secondary">{t(`${P}destination_only`)}</Typography>
         {notes.filter(note => result.notes.includes(note)).map(note => <Typography key={note} variant="body2" color="text.secondary">{t(`${P}note_${note}`)}</Typography>)}
-        {hit?.policy_id && <Button disabled={publication.isPending} onClick={() => onOpenPolicy(hit.policy_id!)} sx={{ minHeight: 44 }}>{t(`${P}open_policy`, { name: hit.name ?? `#${hit.policy_id}` })}</Button>}
+        {hit?.policy_id && <Button disabled={publishing} onClick={() => onOpenPolicy(hit.policy_id!)} sx={{ minHeight: 44 }}>{t(`${P}open_policy`, { name: hit.name ?? `#${hit.policy_id}` })}</Button>}
       </Stack> : <Typography color="text.secondary">{t(`${P}initial`)}</Typography>}
       {result && <Button disabled={blocked} onClick={() => setException(true)} sx={{ minHeight: 44 }}>{t('admin:access_control.exception.title')}</Button>}
     </Stack>
