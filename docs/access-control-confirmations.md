@@ -95,3 +95,18 @@ Save with the template intact and no created policy. The page's direct Resume
 action also regained focus after cancellation. Three additional screenshots
 are linked in the evidence index; the unchanged confirmation appearance uses
 the preceding twenty-image matrix. These checks remain synthetic UI evidence.
+
+### Exemption row-menu focus
+
+The exemption sheet's cancellation menu also supplies its persistent row
+button explicitly. Capturing the active menu item automatically cannot restore
+it after unmounting. Before repair, native Enter cancellation preserved the
+exemption but focused the drawer container. After repair, Enter cancellation
+and Escape return to the row button; the confirmation remains an ordinary
+action with unchanged server ETA and copy. Two caller-wiring regressions failed
+before repair and verify both accepted and declined answers. Declining issues
+no DELETE. Five additional language/theme/viewport captures and measured bounds
+are linked in the evidence index. The final relevant suite passed 440 tests in
+31 files, with TypeScript, changed-source lint, production build, fixture
+exclusion and all four production smoke checks passing. No exemption was
+actually canceled in the browser.

@@ -968,3 +968,35 @@ and the final relevant suite (438 tests in 31 files) passed. TypeScript,
 changed-source lint, production build, fixture exclusion and four production
 smoke checks passed. This adds keyboard evidence without claiming full S20,
 owner approval or real candidate Node enforcement.
+
+### Exemption cancellation menu focus
+
+The exemption sheet's menu-origin cancellation now passes its persistent row
+trigger to the shared host. The pre-repair native check retained both exemptions
+but left focus on a drawer DIV; the repaired check returns to that row's action
+button after Enter on Cancel or Escape. The underlying sheet then closes with
+Escape and returns to Manage exemptions. No exemption was canceled, and the
+confirmation's ordinary style, text and server ETA were preserved.
+
+| Chinese light desktop | Chinese dark desktop | Chinese light phone | Chinese dark phone | English light phone |
+| --- | --- | --- | --- | --- |
+| [1440](s20-exemption-cancel-zh-light-1440.jpg) | [1440](s20-exemption-cancel-zh-dark-1440.jpg) | [375](s20-exemption-cancel-zh-light-375.jpg) | [375](s20-exemption-cancel-zh-dark-375.jpg) | [375](s20-exemption-cancel-en-light-375.jpg) |
+
+[Measured bounds](s20-exemption-focus-metrics.json) show no horizontal overflow
+and action targets at least 44px in both dimensions. The English phone's long
+action wraps to two lines and grows to 61px high without clipping. Two
+caller-wiring cases failed before repair; accepted and declined answers pass
+the stable trigger, and declining performs no DELETE. The final relevant suite
+passed 440 tests in 31 files; TypeScript, changed-source lint, production build,
+fixture exclusion and four production smoke checks passed. English, automatic
+theme, normal fixtures and default viewport were restored with no open dialog.
+
+The preceding consequence/menu-focus head `6cbd0ec5305223acddb22d75f81824561910cff4`
+passed [complete Test CI](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37899824736)
+and [released-node systemd acceptance](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37899824725).
+The direct-action focus head `1b6e02aa25e3f76ae662511b560bc4899739519d` passed
+its own [complete Test CI](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37900578362)
+and [released-node systemd acceptance](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37900578360).
+Third-party live-panel adapters were skipped. These results do not validate a
+subsequent commit or establish candidate Node enforcement. Complete S20/C5,
+C2/C6, owner approval and dependency/release gates remain open.

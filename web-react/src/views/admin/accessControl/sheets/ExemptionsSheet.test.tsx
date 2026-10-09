@@ -45,6 +45,18 @@ it('opens account through its caller and does not perform any write', async () =
   fireEvent.click(screen.getByRole('menuitem', { name: `${P}open_account` }))
   expect(onOpenUser).toHaveBeenCalledWith(13); expect(api.delete).not.toHaveBeenCalled()
 })
+it.each([false, true])('passes the persistent row trigger to exemption confirmation (accepted=%s)', async accepted => {
+  confirmation.mockResolvedValue(accepted)
+  mount()
+  const trigger = await screen.findByRole('button', { name: `${P}menu alice@test` })
+  fireEvent.click(trigger)
+  fireEvent.click(screen.getByRole('menuitem', { name: `${P}cancel` }))
+  await waitFor(() => expect(confirmation).toHaveBeenCalledOnce())
+  expect(confirmation.mock.calls[0][1]).toBe(trigger)
+  await waitFor(() => expect(trigger.hasAttribute('disabled')).toBe(false))
+  if (accepted) expect(api.delete).toHaveBeenCalledOnce()
+  else expect(api.delete).not.toHaveBeenCalled()
+})
 it('opens its editor above the page drawer and locks the existing account', async () => {
   mount(); fireEvent.click(await screen.findByRole('button', { name: `${P}menu alice@test` }))
   fireEvent.click(screen.getByRole('menuitem', { name: `${P}edit` }))

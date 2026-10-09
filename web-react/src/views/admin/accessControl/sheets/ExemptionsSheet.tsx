@@ -26,11 +26,11 @@ export default function ExemptionsSheet({ onClose, onOpenUser, etaMs }: { onClos
   const now = Math.max(clock, query.dataUpdatedAt)
   const expired = (row: DestinationExemptionView) => row.expired || row.expires_at !== null && row.expires_at <= now
   const rows = [...(query.data?.items ?? [])].sort((a, b) => Number(expired(a)) - Number(expired(b)))
-  const cancel = async (row: DestinationExemptionView) => {
+  const cancel = async (row: DestinationExemptionView, returnFocus: HTMLElement) => {
     if (admission.current) return
     admission.current = true; setBusy(true); setError('')
     try {
-      if (!(await confirm(cancelExemptionCopy(t, row.upn ?? `#${row.user_id}`, etaMs)))) return
+      if (!(await confirm(cancelExemptionCopy(t, row.upn ?? `#${row.user_id}`, etaMs), returnFocus))) return
       await remove.mutateAsync(row.user_id); pushSnack(t(`${P}canceled`, { upn: row.upn ?? `#${row.user_id}` }), 'success')
     } catch (err) { setError(destinationError(err).error) } finally { admission.current = false; setBusy(false) }
   }
@@ -53,7 +53,7 @@ export default function ExemptionsSheet({ onClose, onOpenUser, etaMs }: { onClos
         </Box>
       })}
     </Stack>
-    <Menu anchorEl={menu?.anchor} open={!!menu} onClose={() => setMenu(null)} slotProps={{ list: { sx: { '& .MuiMenuItem-root': { minHeight: 44 } } } }}>{menu && [<MenuItem key="account" onClick={() => { const id = menu.row.user_id; setMenu(null); onOpenUser(id) }}>{t(`${P}open_account`)}</MenuItem>, <MenuItem key="edit" onClick={() => { const row = menu.row; setMenu(null); setEditor({ existing: row }) }}>{t(`${P}edit`)}</MenuItem>, <MenuItem key="cancel" onClick={() => { const row = menu.row; setMenu(null); void cancel(row) }}>{t(`${P}cancel`)}</MenuItem>]}</Menu>
+    <Menu anchorEl={menu?.anchor} open={!!menu} onClose={() => setMenu(null)} slotProps={{ list: { sx: { '& .MuiMenuItem-root': { minHeight: 44 } } } }}>{menu && [<MenuItem key="account" onClick={() => { const id = menu.row.user_id; setMenu(null); onOpenUser(id) }}>{t(`${P}open_account`)}</MenuItem>, <MenuItem key="edit" onClick={() => { const row = menu.row; setMenu(null); setEditor({ existing: row }) }}>{t(`${P}edit`)}</MenuItem>, <MenuItem key="cancel" onClick={() => { const { row, anchor } = menu; setMenu(null); void cancel(row, anchor) }}>{t(`${P}cancel`)}</MenuItem>]}</Menu>
     {editor && <AddExemptionDialog key={editor.existing?.user_id ?? 'new'} existing={editor.existing} etaMs={etaMs} onClose={() => setEditor(null)} />}
   </Drawer>
 }
