@@ -519,7 +519,16 @@ The separate repair selects Go 1.27.2 in both the preferred toolchain and Docker
 builder, and upgrades `golang.org/x/net` to v0.60.0. Module verification and build
 baseline tests passed with Go 1.27.2; govulncheck v1.8.0 found zero reachable
 vulnerabilities for Linux, macOS and Windows. Six advisories in required modules
-remain unreachable in these scans. The repair needs its own complete remote CI;
+remain unreachable in these scans. Repair head `1988c38f` passed Node systemd,
+frontend, databases, race, Docker and compatibility checks, but its
+[Test workflow](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37887597788)
+revealed that Staticcheck v0.8.1's original export reader rejects Go 1.27.2's
+format 5. The follow-up builds the same analyzer from an isolated, checksum-pinned
+tool module using PSP's existing `x/tools v0.50.0`; all checks stay enabled.
+Its build, module verification, binary dependency metadata, build-baseline tests
+and three focused workflow guards passed locally. Windows Application Control
+prevented local execution of the newly built analyzer; full analyzer execution
+and the complete workflow therefore require the new Linux CI run;
 complete C2/C5/C6, remaining per-view matrices, owner approval and real Node
 acceptance remain open.
 
