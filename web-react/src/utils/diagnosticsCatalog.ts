@@ -126,6 +126,7 @@ export const FAMILY_CATALOG: Record<string, FamilyInfo> = {
   psp_node_host_pruned_rows_total: c('node', true),
   psp_node_sync_refused_total: c('node', true),
   psp_node_policy_status_dropped_total: c('node'),
+  psp_node_audit_report_total: c('node', true),
   psp_dest_pruned_rows_total: c('node', true),
   psp_dest_policy_publish_total: c('node', true),
   psp_dest_policy_publish_rejected_total: c('node'),
@@ -158,6 +159,7 @@ export const FAMILY_LABEL_GROUP: Record<string, string> = {
   psp_live_conn_refresh_total: 'live_conn_refresh',
   psp_node_host_report_total: 'node_host_report',
   psp_node_sync_refused_total: 'node_refused',
+  psp_node_audit_report_total: 'node_audit_report',
   psp_dest_pruned_rows_total: 'dest_table',
   psp_dest_policy_publish_total: 'dest_publish',
   psp_dest_policy_compile_total: 'dest_compile',
@@ -237,10 +239,9 @@ export const LIFECYCLE_ERROR_KINDS = ['3xui', 'sui', 'psp', 'unknown'] as const
 
 /**
  * Split a series name into its family and, for a labelled child, the one
- * label it carries. The Go registry renders a child as `family{label=value}`
- * (metrics/vec.go) and supports exactly one label, so this is the whole
- * grammar. The value is everything after the first "=": nothing on the Go side
- * forbids one inside it.
+ * label it carries. Keep everything after the first "=" intact: legacy
+ * single-label values can contain equals and commas. Registered audit pairs
+ * are interpreted separately by pairLabelFor; other families keep this grammar.
  */
 export function familyOf(series: string): { family: string; label?: string; value?: string } {
   const open = series.indexOf('{')
@@ -267,4 +268,15 @@ export type Translate = (key: string, options?: Record<string, unknown>) => stri
 export function labelFor(t: Translate, exists: (key: string) => boolean, group: string, value: string): string {
   const key = `admin:diagnostics.labels.${group}.${labelKey(value)}`
   return exists(key) ? t(key) : value
+}
+
+/** Audit pair rendering is opt-in; existing single-label values stay intact. */
+export function pairLabelFor(label: (group: string, value: string) => string, family: string, key?: string, value?: string): string | undefined {
+  if (family !== 'psp_node_audit_report_total' || key !== 'kind' || value === undefined) return undefined
+  const split = value.indexOf(',outcome=')
+  if (split < 1 || value.indexOf(',') !== split) return undefined
+  const kind = value.slice(0, split)
+  const outcome = value.slice(split + ',outcome='.length)
+  if (!outcome || outcome.includes(',')) return undefined
+  return `${label('node_audit_report', `kind_${kind}`)} · ${label('node_audit_report', `outcome_${outcome}`)}`
 }

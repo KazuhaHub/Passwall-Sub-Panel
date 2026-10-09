@@ -72,6 +72,7 @@ type NodeSyncHandler struct {
 	// forever, which is how a real signal gets filtered out of a log.
 	drops       hostDropLog
 	policyDrops hostDropLog
+	auditDrops  hostDropLog
 }
 
 // hostDropLogInterval is how often one agent's telemetry failure may be logged.
@@ -250,6 +251,7 @@ func (h *NodeSyncHandler) ServeHTTP(w http.ResponseWriter, request *http.Request
 	var envelope struct {
 		nodeprotocol.NodeReport
 		PolicyStatus json.RawMessage `json:"policy_status"`
+		Audit        json.RawMessage `json:"audit"`
 	}
 	// Unmarshal rather than a streaming decoder: this makes a trailing second
 	// document a syntax error, instead of something a following Decode has to be
@@ -289,6 +291,7 @@ func (h *NodeSyncHandler) ServeHTTP(w http.ResponseWriter, request *http.Request
 	}
 	report.Host = h.sanitizeHost(body, report.Host, agentID)
 	report.PolicyStatus = h.sanitizePolicyStatus(envelope.PolicyStatus, report.Capabilities, agentID)
+	report.Audit = h.sanitizeAudit(envelope.Audit, report.Capabilities, agentID)
 	response, err := h.service.Sync(request.Context(), report)
 	if err != nil {
 		// The untrusted shape was already validated above. Everything after this

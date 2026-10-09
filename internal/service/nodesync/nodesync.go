@@ -158,6 +158,9 @@ func (s *Service) Sync(ctx context.Context, report nodeprotocol.NodeReport) (nod
 	// latest-full cache.
 	host := report.Host
 	report.Host = nil
+	// Audit ingestion belongs to the separate bounded worker, never control
+	// validation, accounting, observed-state persistence or the latest-full cache.
+	report.Audit = nil
 	policyStatus := report.PolicyStatus
 	report.PolicyStatus = nil
 	if err := nodeprotocol.ValidateNodeReportBase(report); err != nil {
@@ -758,6 +761,8 @@ func cloneReport(in nodeprotocol.NodeReport) nodeprotocol.NodeReport {
 	// per agent into the latest-full cache is the kind of regression that only
 	// shows up as memory, months later.
 	out.Host = nil
+	// Audit is a transient best-effort batch, never a cached control observation.
+	out.Audit = nil
 	out.PolicyStatus = nil
 	return out
 }

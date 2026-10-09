@@ -177,8 +177,8 @@
       "list_pending_detail": "Nodes still execute this policy's other conditions. After the list first downloads successfully, its entries join the next publication.",
       "list_attention": "Not ready",
       "list_empty": "This custom list has no entries and cannot be used in a policy.",
-        "more_conditions": "Additional conditions",
-        "conditions_set": "Set:",
+      "more_conditions": "Additional conditions",
+      "conditions_set": "Set:",
       "cidrs": "CIDRs (one per line)",
       "cidrs_hint": "Only matches connections addressed by IP; resolved domain IPs are not matched and nodes perform no extra DNS lookup.",
       "cidrs_summary": "Only matches connections addressed by IP",
@@ -4522,6 +4522,10 @@
       "psp_sso_claim_silent_total": {
         "label": "Single sign-ins without role or group",
         "desc": "Single sign-ins where role or group rules exist but the identity provider sent none of the attributes they read, counted per kind: one sign-in can count once for each. The existing role and group were kept."
+      },
+      "psp_node_audit_report_total": {
+        "label": "Audit batch receipt",
+        "desc": "Audit subtrees by kind and handling outcome. Acceptance does not imply durable storage, and these counts are incomplete."
       }
     },
     "labels": {
@@ -4688,6 +4692,20 @@
       "sso_kind": {
         "role": "Role",
         "group": "Group"
+      },
+      "node_audit_report": {
+        "kind_block": "Blocked",
+        "kind_observe": "Observed",
+        "kind_trial": "Anonymous trial",
+        "kind_usage": "Usage",
+        "kind_unknown": "Unknown",
+        "outcome_accepted": "Accepted",
+        "outcome_oversized": "Oversized",
+        "outcome_invalid": "Invalid",
+        "outcome_no_capability": "Capability missing",
+        "outcome_duplicate_batch": "Duplicate batch",
+        "outcome_queue_full": "Queue full",
+        "outcome_ingest_error": "Ingest failed"
       }
     }
   },

@@ -623,6 +623,11 @@ var (
 		"psp_node_policy_status_dropped_total",
 		"Policy status subtrees dropped after decoding, validation or capability binding failed.",
 	)
+	NodeAuditReportTotal = NewCounterPairVec(
+		"psp_node_audit_report_total",
+		"Audit subtrees handled, by bounded kind and outcome. Acceptance does not imply durable storage.",
+		"kind", "outcome",
+	)
 	NodeHostReportTotal = NewCounterVec(
 		"psp_node_host_report_total",
 		"Host telemetry reports handled, by outcome.",

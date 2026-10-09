@@ -177,8 +177,8 @@
       "list_pending_detail": "节点照常执行这条策略的其他条件；列表第一次下载成功后，下一次下发时补上。",
       "list_attention": "未就绪",
       "list_empty": "这个自定义列表没有内容，不能用于策略。",
-        "more_conditions": "更多条件",
-        "conditions_set": "已设：",
+      "more_conditions": "更多条件",
+      "conditions_set": "已设：",
       "cidrs": "IP 段（每行一个）",
       "cidrs_hint": "只对以 IP 发起的连接生效；域名解析出的 IP 不参与匹配，节点不做额外解析。",
       "cidrs_summary": "只对以 IP 发起的连接生效",
@@ -4518,6 +4518,10 @@
       "psp_sso_claim_silent_total": {
         "label": "单点登录缺少角色或分组信息",
         "desc": "配置了角色或分组规则、但身份提供方没有返回规则所需属性的情况，按角色和分组分别计数，同一次登录可能两项各计一次；此时沿用原有的角色和分组。"
+      },
+      "psp_node_audit_report_total": {
+        "label": "审计批次接收",
+        "desc": "按记录种类与处理结果统计审计子树。已接收不代表已经入库，统计不保证完整。"
       }
     },
     "labels": {
@@ -4684,6 +4688,20 @@
       "sso_kind": {
         "role": "角色",
         "group": "分组"
+      },
+      "node_audit_report": {
+        "kind_block": "拦截",
+        "kind_observe": "观察",
+        "kind_trial": "匿名试运行",
+        "kind_usage": "用量",
+        "kind_unknown": "未知",
+        "outcome_accepted": "已接收",
+        "outcome_oversized": "超过大小上限",
+        "outcome_invalid": "无效数据",
+        "outcome_no_capability": "能力未声明",
+        "outcome_duplicate_batch": "重复批次",
+        "outcome_queue_full": "队列已满",
+        "outcome_ingest_error": "入库失败"
       }
     }
   },
