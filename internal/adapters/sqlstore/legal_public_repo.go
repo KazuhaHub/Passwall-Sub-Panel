@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 	"golang.org/x/text/language"
 	"gorm.io/gorm"
 )
@@ -54,6 +55,14 @@ func (r *legalRepo) Public(ctx context.Context, kind, requested string) (domain.
 				return err
 			}
 			public = domain.LegalPublicDocument{Version: row.Version, ConsentVersion: state.ConsentVersion, Locale: row.Locale, Content: row.Content, PublishedAt: row.PublishedAt}
+			// Read durable collection settings in this transaction rather than
+			// combining the public body with a stale cached disclosure. Only the
+			// explicit public policy fields leave the repository.
+			settings, err := newKVSettingsRepo(tx).Load(ctx, ports.UISettings{})
+			if err != nil {
+				return err
+			}
+			public.DataCollection = ports.LegalDataCollectionFromSettings(settings)
 			if locale != requested {
 				public.FallbackFrom = requested
 			}

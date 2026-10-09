@@ -24,12 +24,34 @@ type LegalConsentStatus struct {
 
 // LegalPublicDocument omits publisher identity and internal document IDs.
 type LegalPublicDocument struct {
-	Version        int64     `json:"version"`
-	ConsentVersion int64     `json:"consent_version"`
-	Locale         string    `json:"locale"`
-	FallbackFrom   string    `json:"fallback_from,omitempty"`
-	Content        string    `json:"content"`
-	PublishedAt    time.Time `json:"published_at"`
+	Version        int64               `json:"version"`
+	ConsentVersion int64               `json:"consent_version"`
+	Locale         string              `json:"locale"`
+	FallbackFrom   string              `json:"fallback_from,omitempty"`
+	Content        string              `json:"content"`
+	PublishedAt    time.Time           `json:"published_at"`
+	DataCollection LegalDataCollection `json:"data_collection"`
+}
+
+// LegalDataCollection contains only public collection policy, never settings
+// secrets or account identifiers. Zero retention means forever only for the
+// subscription and authentication logs; risk values are runtime effective.
+type LegalDataCollection struct {
+	SubLogRetentionDays                 int                     `json:"sub_log_retention_days"`
+	AuthEventRetentionDays              int                     `json:"auth_event_retention_days"`
+	ConnectionRetentionDays             int                     `json:"connection_retention_days"`
+	HWIDCaptured                        bool                    `json:"hwid_captured"`
+	HWIDRetentionDays                   int                     `json:"hwid_retention_days"`
+	FlagRecordRetentionDays             int                     `json:"flag_record_retention_days"`
+	RiskAssessmentRefreshMinutes        int                     `json:"risk_assessment_refresh_minutes"`
+	RiskReviewPurgeAfterDeletionMinutes int                     `json:"risk_review_purge_after_deletion_minutes"`
+	Access                              []LegalAccessCollection `json:"access"`
+}
+
+type LegalAccessCollection struct {
+	Kind          string `json:"kind"`
+	Nodes         int    `json:"nodes"`
+	RetentionDays int    `json:"retention_days"`
 }
 
 func ValidateLegalIdentity(kind, locale string) error {

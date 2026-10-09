@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -48,6 +49,40 @@ func TestLegalPublic_FallbacksAndRedaction(t *testing.T) {
 	}
 	if doc, err := repos.Legal.Public(ctx, "privacy", "zh-TW"); err != nil || doc.Content != "繁體" || doc.FallbackFrom != "" {
 		t.Fatalf("exact locale %+v: %v", doc, err)
+	}
+}
+
+func TestLegalPublic_DisclosesDurableEffectiveSettings(t *testing.T) {
+	_, repos := legalTestRepos(t)
+	ctx := context.Background()
+	enableLegal(t, repos)
+	if _, err := repos.Legal.Publish(ctx, legalDraft("privacy", "en-US", "[[data-collection]]", false)); err != nil {
+		t.Fatal(err)
+	}
+	for _, settings := range []ports.UISettings{
+		{LegalEnabled: true},
+		{LegalEnabled: true, SubLogRetentionDays: 14, AuthEventRetentionDays: 30, RiskHWIDCaptureOff: true, RiskRefreshIntervalMinutes: 25,
+			RiskConnectionRetentionDays: 90, RiskFlagRecordRetentionDays: 365, CaptchaSecretKey: "private-captcha-secret", GeoIPUpdateToken: "private-update-token"},
+	} {
+		if err := repos.Settings.Save(ctx, settings); err != nil {
+			t.Fatal(err)
+		}
+		doc, err := repos.Legal.Public(ctx, "privacy", "en-US")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := ports.LegalDataCollectionFromSettings(settings); !reflect.DeepEqual(doc.DataCollection, want) {
+			t.Fatalf("disclosed %+v, want durable %+v", doc.DataCollection, want)
+		}
+		body, err := json.Marshal(doc)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, forbidden := range []string{"private-captcha-secret", "private-update-token", "captcha_secret_key", "geo_ip_update_token", "published_by"} {
+			if strings.Contains(string(body), forbidden) {
+				t.Fatalf("private setting or identity %q leaked", forbidden)
+			}
+		}
 	}
 }
 

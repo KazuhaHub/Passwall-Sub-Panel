@@ -246,6 +246,7 @@ func NewRouter(d Deps) stdhttp.Handler {
 	// Public endpoints
 	g.GET("/health", handler.Health)
 	g.GET("/api/version", handler.Version)
+	g.GET("/api/legal/:kind", handler.NewLegalPublicHandler(d.Repos.Legal).Get)
 	if d.NodeSync != nil && d.Repos.NodeAgent != nil {
 		nodeAuth, err := handler.NewNodeBearerAuthenticator(d.Repos.NodeAgent)
 		if err != nil {

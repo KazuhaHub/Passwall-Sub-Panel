@@ -77,6 +77,13 @@ func TestBuildPrunesLegalConsentOrphans(t *testing.T) {
 	if _, err := a.repos.Legal.Publish(ctx, domain.LegalDraft{Kind: "terms", Locale: "en-US", Content: "test", PublishedBy: 1}); err != nil {
 		t.Fatal(err)
 	}
+	// The public document route must be mounted outside authentication, with
+	// the actual repository; a handler-only fixture cannot prove that wiring.
+	w := httptest.NewRecorder()
+	a.server.Handler.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/legal/terms?lang=en-US", nil))
+	if w.Code != http.StatusOK || w.Header().Get("ETag") == "" {
+		t.Fatalf("anonymous document route: %d %s", w.Code, w.Body.String())
+	}
 	users := make([]*domain.User, 2)
 	for i := range users {
 		u := &domain.User{UPN: fmt.Sprintf("legal-cleanup-%d@example.test", i), Role: domain.RoleUser, SubToken: fmt.Sprintf("legal-cleanup-sub-%d", i), UUID: fmt.Sprintf("88888888-8888-4888-8888-%012d", i), Enabled: true}
