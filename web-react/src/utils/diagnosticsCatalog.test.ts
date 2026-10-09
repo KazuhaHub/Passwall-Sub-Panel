@@ -222,6 +222,21 @@ describe('familyOf', () => {
 })
 
 describe('audit metric label pairs', () => {
+
+  it('explains receiver rows separately from node event counters in both languages', () => {
+    for (const family of ['psp_dest_audit_rows_total', 'psp_dest_audit_node_dropped_total', 'psp_dest_audit_node_unmatched_total', 'psp_dest_audit_loss_buffer_dropped_total']) {
+      expect(FAMILY_CATALOG[family]).toEqual({ card: 'node', type: 'counter', labelled: family === 'psp_dest_audit_rows_total' })
+      for (const [, keys] of BUNDLES) {
+        expect(keys.has(`diagnostics.metric.${family}.label`)).toBe(true)
+        expect(keys.has(`diagnostics.metric.${family}.desc`)).toBe(true)
+      }
+    }
+    for (const [bundle, expected] of [[zh, '拦截 · 已入库'], [en, 'Blocked · Stored']] as const) {
+      const flat = flatten(bundle as Nested)
+      const label = (group: string, value: string) => flat[`diagnostics.labels.${group}.${value}`] ?? value
+      expect(pairLabelFor(label, 'psp_dest_audit_rows_total', 'kind', 'block,outcome=stored')).toBe(expected)
+    }
+  })
   it('translates the kind and outcome separately in both languages', () => {
     for (const [bundle, expected] of [[zh, '拦截 · 已接收'], [en, 'Blocked · Accepted']] as const) {
       const flat = flatten(bundle as Nested)

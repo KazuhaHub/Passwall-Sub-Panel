@@ -127,6 +127,11 @@ export const FAMILY_CATALOG: Record<string, FamilyInfo> = {
   psp_node_sync_refused_total: c('node', true),
   psp_node_policy_status_dropped_total: c('node'),
   psp_node_audit_report_total: c('node', true),
+  psp_dest_audit_rows_total: c('node', true),
+  psp_dest_audit_node_dropped_total: c('node'),
+  psp_dest_audit_node_unmatched_total: c('node'),
+  psp_dest_audit_loss_buffer_dropped_total: c('node'),
+  psp_dest_audit_loss_flush_errors_total: c('node'),
   psp_dest_pruned_rows_total: c('node', true),
   psp_dest_policy_publish_total: c('node', true),
   psp_dest_policy_publish_rejected_total: c('node'),
@@ -160,6 +165,7 @@ export const FAMILY_LABEL_GROUP: Record<string, string> = {
   psp_node_host_report_total: 'node_host_report',
   psp_node_sync_refused_total: 'node_refused',
   psp_node_audit_report_total: 'node_audit_report',
+  psp_dest_audit_rows_total: 'dest_rows',
   psp_dest_pruned_rows_total: 'dest_table',
   psp_dest_policy_publish_total: 'dest_publish',
   psp_dest_policy_compile_total: 'dest_compile',
@@ -272,11 +278,12 @@ export function labelFor(t: Translate, exists: (key: string) => boolean, group: 
 
 /** Audit pair rendering is opt-in; existing single-label values stay intact. */
 export function pairLabelFor(label: (group: string, value: string) => string, family: string, key?: string, value?: string): string | undefined {
-  if (family !== 'psp_node_audit_report_total' || key !== 'kind' || value === undefined) return undefined
+  const group = family === 'psp_node_audit_report_total' ? 'node_audit_report' : family === 'psp_dest_audit_rows_total' ? 'dest_rows' : undefined
+  if (!group || key !== 'kind' || value === undefined) return undefined
   const split = value.indexOf(',outcome=')
   if (split < 1 || value.indexOf(',') !== split) return undefined
   const kind = value.slice(0, split)
   const outcome = value.slice(split + ',outcome='.length)
   if (!outcome || outcome.includes(',')) return undefined
-  return `${label('node_audit_report', `kind_${kind}`)} · ${label('node_audit_report', `outcome_${outcome}`)}`
+  return `${label(group, `kind_${kind}`)} · ${label(group, `outcome_${outcome}`)}`
 }

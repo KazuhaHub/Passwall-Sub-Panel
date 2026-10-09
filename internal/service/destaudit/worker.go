@@ -12,9 +12,11 @@ const workerChunkRows = 1000
 
 // Events never carry destinations, accounts, raw SQL or driver errors.
 type workerEvent struct {
-	agentID, kind, outcome string
-	panelID, receivedHour  int64
-	rows                   int
+	agentID, kind, outcome     string
+	panelID, receivedHour      int64
+	rows                       int
+	persistedLoss              bool
+	nodeDropped, nodeUnmatched uint64
 }
 
 type workerSummary struct{ batches, rows int }
@@ -31,6 +33,7 @@ type ingestWorker struct {
 	now      func() time.Time
 	emit     func(workerEvent)
 	progress map[*queuedBatch]*batchProgress
+	forced   workerSummary
 }
 
 func newIngestWorker(q *batchQueue, repo ports.DestAuditRepo, now func() time.Time, emit func(workerEvent)) *ingestWorker {
@@ -45,6 +48,21 @@ func (w *ingestWorker) event(b *queuedBatch, outcome string, rows int) {
 	if w.emit != nil {
 		w.emit(workerEvent{agentID: b.agentID, kind: b.body.Kind, outcome: outcome, panelID: b.panelID, receivedHour: b.receivedHour, rows: rows})
 	}
+}
+
+func (w *ingestWorker) committedLoss(b *queuedBatch, outcome string, rows int) {
+	if w.emit != nil {
+		w.emit(workerEvent{agentID: b.agentID, kind: b.body.Kind, outcome: outcome, panelID: b.panelID, receivedHour: b.receivedHour, rows: rows, persistedLoss: true})
+	}
+}
+
+func (w *ingestWorker) failed(ctx context.Context, b *queuedBatch, rows int) {
+	w.event(b, "ingest_error", rows)
+	if ctx.Err() != nil {
+		w.forced.batches++
+		w.forced.rows += rows
+	}
+	w.finish(b)
 }
 
 func (w *ingestWorker) finish(b *queuedBatch) {
@@ -65,7 +83,7 @@ func (w *ingestWorker) discardCanceled() bool {
 	changed := false
 	for b := range w.progress {
 		if w.q.isCanceled(b) {
-			w.event(b, "stale_collect_revision", w.remaining(b))
+			w.event(b, w.q.cancellationReason(b), w.remaining(b))
 			w.finish(b)
 			changed = true
 		}
@@ -76,7 +94,12 @@ func (w *ingestWorker) discardCanceled() bool {
 // One call provides one transaction opportunity, never a whole batch.
 func (w *ingestWorker) step(ctx context.Context) bool {
 	changed := w.discardCanceled()
-	b := w.q.next()
+	b, retired := w.q.nextWithCanceled()
+	for _, canceled := range retired {
+		w.event(canceled, w.q.cancellationReason(canceled), w.remaining(canceled))
+		w.finish(canceled)
+		changed = true
+	}
 	if b == nil {
 		return changed
 	}
@@ -101,8 +124,7 @@ func (w *ingestWorker) step(ctx context.Context) bool {
 	// every transaction, including a setting change during this step.
 	rejected, err := w.repo.WriteDestinationAuditChunk(ctx, chunk)
 	if err != nil {
-		w.event(b, "ingest_error", w.remaining(b))
-		w.finish(b)
+		w.failed(ctx, b, w.remaining(b))
 		return true
 	}
 	if rejected != "" {
@@ -140,8 +162,7 @@ func (w *ingestWorker) begin(ctx context.Context, b *queuedBatch) {
 		for start := 0; start < len(ids); start += 200 {
 			found, err := w.repo.ResolveDestinationAuditUsers(ctx, ids[start:min(start+200, len(ids))])
 			if err != nil {
-				w.event(b, "ingest_error", w.remaining(b))
-				w.finish(b)
+				w.failed(ctx, b, w.remaining(b))
 				return
 			}
 			for id, present := range found {
@@ -155,8 +176,11 @@ func (w *ingestWorker) begin(ctx context.Context, b *queuedBatch) {
 	batch := domain.DestAuditBatch{AgentID: b.agentID, BatchID: b.body.BatchID, Kind: b.body.Kind, PanelID: b.panelID, HourMS: b.body.Hour, ReceivedHourMS: b.receivedHour, ReceivedAt: b.receivedAt, CollectRevision: b.body.CollectRevision, Hits: mapped.hits, Usage: mapped.usage, Dropped: b.body.Dropped, Unmatched: b.body.Unmatched, Losses: mapped.losses}
 	result, err := w.repo.BeginDestinationAudit(ctx, batch)
 	if err != nil {
-		w.event(b, "ingest_error", len(mapped.hits)+len(mapped.usage))
-		w.finish(b)
+		rows := len(mapped.hits) + len(mapped.usage)
+		for _, n := range mapped.losses {
+			rows += int(n)
+		}
+		w.failed(ctx, b, rows)
 		return
 	}
 	if result.Duplicate {
@@ -177,11 +201,14 @@ func (w *ingestWorker) begin(ctx context.Context, b *queuedBatch) {
 	}
 	for _, reason := range []string{"unknown_subject", "out_of_range"} {
 		if n := mapped.losses[reason]; n > 0 {
-			w.event(b, reason, int(n))
+			w.committedLoss(b, reason, int(n))
 		}
 	}
 	if rows > result.Reserved {
-		w.event(b, "over_budget", rows-result.Reserved)
+		w.committedLoss(b, "over_budget", rows-result.Reserved)
+	}
+	if w.emit != nil && (b.body.Dropped > 0 || b.body.Unmatched > 0) {
+		w.emit(workerEvent{agentID: b.agentID, kind: b.body.Kind, outcome: "node_diagnostics", panelID: b.panelID, receivedHour: b.receivedHour, nodeDropped: b.body.Dropped, nodeUnmatched: b.body.Unmatched})
 	}
 	if result.Stored > 0 {
 		w.event(b, "stored", result.Stored)
@@ -226,8 +253,17 @@ func (w *ingestWorker) run(ctx context.Context) workerSummary {
 func (w *ingestWorker) abandon() workerSummary {
 	w.q.stop()
 	w.discardCanceled()
-	summary := workerSummary{}
-	for b := w.q.next(); b != nil; b = w.q.next() {
+	summary := w.forced
+	w.forced = workerSummary{}
+	for {
+		b, retired := w.q.nextWithCanceled()
+		for _, canceled := range retired {
+			w.event(canceled, w.q.cancellationReason(canceled), w.remaining(canceled))
+			w.finish(canceled)
+		}
+		if b == nil {
+			break
+		}
 		rows := w.remaining(b)
 		summary.batches++
 		summary.rows += rows

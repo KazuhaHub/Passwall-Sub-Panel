@@ -4522,6 +4522,26 @@
       "psp_node_audit_report_total": {
         "label": "审计批次接收",
         "desc": "按记录种类与处理结果统计审计子树。已接收不代表已经入库，统计不保证完整。"
+      },
+      "psp_dest_audit_rows_total": {
+        "label": "目的地记录行数",
+        "desc": "按记录种类与结果统计已入库或估计丢失的行数。接收端损失尽力记录，不保证完整，也不与节点事件数相加。"
+      },
+      "psp_dest_audit_node_dropped_total": {
+        "label": "节点报告的丢失事件",
+        "desc": "首次提交的审计批次中节点报告的丢失事件数。单位是事件，与接收端估计丢行分开；未送达的节点计数不在其中。"
+      },
+      "psp_dest_audit_node_unmatched_total": {
+        "label": "节点报告的未匹配事件",
+        "desc": "首次提交的审计批次中节点无法匹配的事件数。单位是事件，统计不保证完整。"
+      },
+      "psp_dest_audit_loss_buffer_dropped_total": {
+        "label": "未保存的损失统计键",
+        "desc": "损失缓冲满、冻结增量重试超期或强制终止时未保存的面板、小时、种类、原因键数。仅用于诊断，不能反推历史丢行数。"
+      },
+      "psp_dest_audit_loss_flush_errors_total": {
+        "label": "损失统计刷写失败",
+        "desc": "接收端损失统计写库失败的尝试次数。增量仍保留待重试，与未保存键数分开统计。"
       }
     },
     "labels": {
@@ -4702,6 +4722,18 @@
         "outcome_duplicate_batch": "重复批次",
         "outcome_queue_full": "队列已满",
         "outcome_ingest_error": "入库失败"
+      },
+      "dest_rows": {
+        "kind_block": "拦截",
+        "kind_observe": "观察",
+        "kind_trial": "匿名试运行",
+        "kind_usage": "用量",
+        "outcome_stored": "已入库",
+        "outcome_unknown_subject": "账号不存在",
+        "outcome_out_of_range": "超出时间窗口",
+        "outcome_over_budget": "超过行数预算",
+        "outcome_collect_off": "当前档位未允许",
+        "outcome_stale_collect_revision": "采集版本已过期"
       }
     }
   },

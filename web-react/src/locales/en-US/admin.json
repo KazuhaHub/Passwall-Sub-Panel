@@ -4526,6 +4526,26 @@
       "psp_node_audit_report_total": {
         "label": "Audit batch receipt",
         "desc": "Audit subtrees by kind and handling outcome. Acceptance does not imply durable storage, and these counts are incomplete."
+      },
+      "psp_dest_audit_rows_total": {
+        "label": "Destination record rows",
+        "desc": "Stored or estimated lost rows by record kind and outcome. Receiver losses are best effort and incomplete; do not add them to node event counts."
+      },
+      "psp_dest_audit_node_dropped_total": {
+        "label": "Node-reported dropped events",
+        "desc": "Dropped events reported in first committed audit batches. Events are separate from receiver-estimated rows; undelivered node counters are absent."
+      },
+      "psp_dest_audit_node_unmatched_total": {
+        "label": "Node-reported unmatched events",
+        "desc": "Unmatched events reported in first committed audit batches. The unit is events and the counts are incomplete."
+      },
+      "psp_dest_audit_loss_buffer_dropped_total": {
+        "label": "Unsaved loss-statistic keys",
+        "desc": "Panel, hour, kind and reason keys not saved because the loss buffer was full, frozen increments expired or shutdown was forced. Diagnostic only; cannot reconstruct historical lost rows."
+      },
+      "psp_dest_audit_loss_flush_errors_total": {
+        "label": "Loss-statistic flush failures",
+        "desc": "Failed receiver loss flush attempts. Increments remain queued for retry; separate from unsaved key counts."
       }
     },
     "labels": {
@@ -4706,6 +4726,18 @@
         "outcome_duplicate_batch": "Duplicate batch",
         "outcome_queue_full": "Queue full",
         "outcome_ingest_error": "Ingest failed"
+      },
+      "dest_rows": {
+        "kind_block": "Blocked",
+        "kind_observe": "Observed",
+        "kind_trial": "Anonymous trial",
+        "kind_usage": "Usage",
+        "outcome_stored": "Stored",
+        "outcome_unknown_subject": "Account missing",
+        "outcome_out_of_range": "Outside time window",
+        "outcome_over_budget": "Row budget exceeded",
+        "outcome_collect_off": "Current collection mode disallows",
+        "outcome_stale_collect_revision": "Stale collection revision"
       }
     }
   },

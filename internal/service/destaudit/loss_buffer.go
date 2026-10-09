@@ -38,6 +38,12 @@ func newLossBuffer() *lossBuffer {
 	return &lossBuffer{slots: make(map[domain.DestAuditLoss]*pendingLoss)}
 }
 
+func (b *lossBuffer) pendingKeys() int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return len(b.slots)
+}
+
 // The producer only takes a short memory lock, never the flush/storage lock.
 // Frozen keys retain their slots; new increments on those keys stay separate.
 func (b *lossBuffer) add(loss domain.DestAuditLoss) bool {

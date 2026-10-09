@@ -22,6 +22,7 @@ type queuedBatch struct {
 	body         protocol.AuditObservation
 	bytes        int
 	canceled     bool // accessed only while the queue mutex is held
+	cancelReason string
 }
 
 func (b *queuedBatch) key() batchKey { return batchKey{b.agentID, b.body.BatchID} }
@@ -44,6 +45,7 @@ type batchQueue struct {
 	slot     int
 	closed   bool
 	wake     chan struct{}
+	admit    func(int64, protocol.AuditObservation) string // immutable; called under mu, memory only
 }
 
 var auditSlots = [...]string{"block", "block", "block", "block", "observe", "trial", "usage"}
@@ -61,7 +63,6 @@ func newBatchQueue() *batchQueue {
 
 // offer never waits on storage or the collection gate. The short mutex covers
 // deduplication and all reservations together; processing retains its quota.
-// The caller checks current collection permission before calling this method.
 func (q *batchQueue) offer(agentID string, panelID, receivedHour int64, body protocol.AuditObservation) string {
 	return q.offerAt(agentID, panelID, receivedHour, time.UnixMilli(receivedHour).UTC(), body)
 }
@@ -78,6 +79,11 @@ func (q *batchQueue) offerAt(agentID string, panelID, receivedHour int64, receiv
 	defer q.mu.Unlock()
 	if q.closed {
 		return "closed"
+	}
+	if q.admit != nil {
+		if reason := q.admit(panelID, body); reason != "" {
+			return reason
+		}
 	}
 	key := batchKey{agentID, body.BatchID}
 	if _, found := q.inflight[key]; found {
@@ -126,14 +132,32 @@ func (q *batchQueue) isClosed() bool {
 	return q.closed
 }
 
+func (q *batchQueue) cancellationReason(b *queuedBatch) string {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if b.cancelReason == "collect_off" {
+		return "collect_off"
+	}
+	return "stale_collect_revision"
+}
+
 // next is called by exactly one worker, once per database chunk rather than
 // once per batch. Each lane has at most one processing batch. Empty slots
 // favour block; otherwise the next occupied slot receives the opportunity.
 func (q *batchQueue) next() *queuedBatch {
+	b, _ := q.nextWithCanceled()
+	return b
+}
+
+// Return retired active payloads to the sole worker for loss accounting. No
+// secondary queue retains them outside the original bounded reservations.
+func (q *batchQueue) nextWithCanceled() (*queuedBatch, []*queuedBatch) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
+	var retired []*queuedBatch
 	for _, lane := range q.lanes {
 		if lane.active != nil && lane.active.canceled {
+			retired = append(retired, lane.active)
 			q.release(lane.active)
 			lane.active = nil
 		}
@@ -157,7 +181,7 @@ func (q *batchQueue) next() *queuedBatch {
 		}
 	}
 	if kind == "" {
-		return nil
+		return nil, retired
 	}
 	lane := q.lanes[kind]
 	if lane.active == nil {
@@ -165,7 +189,7 @@ func (q *batchQueue) next() *queuedBatch {
 		lane.waiting[0] = nil
 		lane.waiting = lane.waiting[1:]
 	}
-	return lane.active
+	return lane.active, retired
 }
 
 func (q *batchQueue) finish(b *queuedBatch) {
@@ -227,13 +251,19 @@ func (q *batchQueue) pending() (batches, bytes int) {
 func (q *batchQueue) discardPanel(panelID int64) int {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	removed := 0
+	waiting, active := q.discardPanelLocked(panelID, "stale_collect_revision")
+	return len(waiting) + active
+}
+
+// The control cache changes under this same lock, so admission cannot race
+// between checking an old revision and reserving its queue slot.
+func (q *batchQueue) discardPanelLocked(panelID int64, reason string) (waiting []*queuedBatch, active int) {
 	for _, lane := range q.lanes {
 		kept := lane.waiting[:0]
 		for _, b := range lane.waiting {
 			if b.panelID == panelID {
 				q.release(b)
-				removed++
+				waiting = append(waiting, b)
 			} else {
 				kept = append(kept, b)
 			}
@@ -242,9 +272,10 @@ func (q *batchQueue) discardPanel(panelID int64) int {
 		lane.waiting = kept
 		if lane.active != nil && lane.active.panelID == panelID && !lane.active.canceled {
 			lane.active.canceled = true
-			removed++
+			lane.active.cancelReason = reason
+			active++
 		}
 	}
 	q.signal()
-	return removed
+	return waiting, active
 }

@@ -31,6 +31,25 @@ func TestCounterAndGauge(t *testing.T) {
 	}
 }
 
+func TestCounterSaturatesUntrustedUnsignedDiagnostics(t *testing.T) {
+	c := NewCounter("test_unsigned_saturated", "")
+	c.AddSaturating(5)
+	c.AddSaturating(math.MaxUint64)
+	c.AddSaturating(1)
+	if c.Value() != math.MaxInt64 {
+		t.Fatalf("unsigned diagnostics overflowed%d", c.Value())
+	}
+	c.reset()
+	var wg sync.WaitGroup
+	for range 20 {
+		wg.Go(func() { c.AddSaturating(math.MaxInt64) })
+	}
+	wg.Wait()
+	if c.Value() != math.MaxInt64 {
+		t.Fatal("concurrent saturation overflowed")
+	}
+}
+
 func TestHistogramBucketing(t *testing.T) {
 	h := NewHistogram("test_hist", "", "ms", []float64{1, 10, 100})
 	// One sample per bucket including the +Inf overflow. Bounds are
