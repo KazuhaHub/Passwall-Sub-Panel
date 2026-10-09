@@ -19,6 +19,30 @@ vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string, opti
 vi.mock('@/components/CodeEditor', () => ({ default: (p: { value: string; onChange: (s: string) => void; ariaLabel: string; readOnly: boolean }) => <textarea aria-label={p.ariaLabel} value={p.value} readOnly={p.readOnly} onChange={e => p.onChange(e.target.value)} /> }))
 import AccessControlView from './AccessControlView'
 const P = 'admin:access_control.'
+it.each([
+  ['pause', 'pause'], ['pause', 'policy'], ['policy', 'pause'], ['policy', 'policy'],
+] as const)('retains queued departure until both writes settle (start %s, settle %s first)', async (start, first) => {
+  const finish: Record<string, (value: unknown) => void> = {}
+  api.put.mockImplementation((url: string) => new Promise(resolve => { finish[url] = resolve }))
+  const router = mount(); await screen.findByRole('status')
+  const beginPause = () => { fireEvent.click(screen.getByRole('button', { name: `${P}more` })); fireEvent.click(screen.getByRole('menuitem', { name: `${P}pause` })) }
+  const beginPolicy = () => fireEvent.click(screen.getByRole('switch', { name: `${P}policies.toggle No mail` }))
+  if (start === 'pause') beginPause(); else beginPolicy()
+  await waitFor(() => expect(api.put).toHaveBeenCalledOnce())
+  if (start === 'pause') beginPolicy(); else beginPause()
+  await waitFor(() => expect(api.put).toHaveBeenCalledTimes(2))
+  await act(async () => { void router.navigate('/admin/dashboard') })
+  expect(router.state.blockers.size).toBe(1)
+  expect(router.state.location.pathname).toBe('/admin/access-control')
+  const pauseUrl = '/admin/dest/pause', policyUrl = `/admin/dest/policies/${samplePolicy.id}`
+  const firstUrl = first === 'pause' ? pauseUrl : policyUrl, lastUrl = first === 'pause' ? policyUrl : pauseUrl
+  await act(async () => { finish[firstUrl]({ data: first === 'policy' ? samplePolicy : {} }) })
+  expect(router.state.location.pathname).toBe('/admin/access-control')
+  expect(screen.queryByText('Dashboard')).toBeNull()
+  finish[lastUrl]({ data: first === 'pause' ? samplePolicy : {} })
+  await screen.findByText('Dashboard')
+  expect(api.put).toHaveBeenCalledTimes(2)
+})
 it.each(['pause', 'policy', 'list'] as const)('holds both query and page departure during %s mutation and resumes it after settlement', async kind => {
   if (kind === 'list') listsAPI([listSummary])
   let finish!: (value: unknown) => void

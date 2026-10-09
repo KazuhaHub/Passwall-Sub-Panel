@@ -16,7 +16,7 @@ import { pauseExecutionCopy } from './confirmCopy'
 import AccessSettingsDialog from './AccessSettingsDialog'
 import PoliciesTab from './policies/PoliciesTab'
 import NodeCoverageDrawer from './NodeCoverageDrawer'
-import PendingActionGuard from './PendingActionGuard'
+import PendingActionGuard, { PendingActionScope } from './PendingActionGuard'
 import ListsTab from './lists/ListsTab'
 import ExemptionsSheet from './sheets/ExemptionsSheet'
 import RiskUserDrawer from '../risk/drawer/RiskUserDrawer'
@@ -30,7 +30,7 @@ export default function AccessControlView() {
   const scope = useQueryScope()
   const can = useCan('access.view')
   if (!can) return <Navigate to="/admin/dashboard" replace />
-  return <AccessControlPage key={scopeKey(scope)} scope={scope} />
+  return <PendingActionScope key={scopeKey(scope)}><AccessControlPage scope={scope} /></PendingActionScope>
 }
 function AccessControlPage({ scope }: { scope: QueryScope }) {
   const { t } = useAccessTranslation(['admin', 'common'])

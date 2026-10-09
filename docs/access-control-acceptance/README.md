@@ -1122,3 +1122,30 @@ The preceding account-pending head
 and [released-node systemd acceptance](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37905575422).
 Third-party live-panel adapters were skipped. A later commit needs its own CI;
 candidate Node enforcement and remaining C2/C5/C6 gates stay open.
+
+### Concurrent pending actions
+
+A further regression reproduced competing blockers: after both pause and a
+policy toggle started, finishing the policy first allowed departure while pause
+was still unresolved. React Router reported that only one blocker is supported.
+The access page now shares a single pending scope across its six action owners.
+The scope retains navigation until its last owner releases, while standalone
+account drawers retain their own guard. Idle scopes still register no blocker.
+
+Four caller variants cover both start orders and both completion orders. Shared
+and standalone guards also preserve dirty-editor confirmation and release
+before later editing. The final relevant suite passed 474 tests in 34 files;
+TypeScript, changed-source lint, production build, fixture exclusion and four
+production smoke checks passed.
+
+| Synthetic concurrent state | Native English desktop evidence |
+| --- | --- |
+| Policy toggle and pause pending; requested browser Forward has not opened the test sheet | [Both pending](s20-concurrent-forward-pending-en-light-1440.jpg) |
+| Pause completed; policy controls still disabled and navigation still held | [Pause settled](s20-concurrent-forward-pause-done-en-light-1440.jpg) |
+| Policy completed; queued Forward opened the empty test sheet without automatic simulation | [All settled](s20-concurrent-forward-settled-en-light-1440.jpg) |
+
+This uses the existing `policy-save-pending` DEV adapter. Only synthetic
+definitions/pause changed; no real backend policy or node execution changed.
+Normal fixtures, English, automatic theme and default viewport were restored.
+These captures verify the demonstrated concurrent pair, not every combination
+of writes or the complete UI acceptance matrix.
