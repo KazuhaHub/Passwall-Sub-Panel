@@ -4,7 +4,7 @@ import MoreVertIcon from '@mui/icons-material/MoreVert'
 import { useLocation, useSearchParams } from 'react-router'
 import { useAccessTranslation } from '@/views/admin/accessControl/useAccessTranslation'
 import { useQueryClient } from '@tanstack/react-query'
-import type { DestinationListSummary, DestinationPoliciesView, DestinationStatus } from '@/api/accessControl'
+import type { DestinationListSummary, DestinationPoliciesView, DestinationReference, DestinationStatus } from '@/api/accessControl'
 import KpiTile, { KpiGrid } from '@/components/KpiTile'
 import { ToneBadge, stateTone } from '@/components/ToneBadge'
 import { SortableTableCell } from '@/components/SortableTableCell'
@@ -14,12 +14,14 @@ import { useDestinationLists, useDeleteDestinationList, useRefreshDestinationLis
 import { useQueryScope } from '@/query/useQueryScope'
 import { accessControlKeys } from '@/query/keys'
 import PendingActionGuard from '../PendingActionGuard'
-import { destinationError } from '../errors'
+import { destinationError, destinationListReferences } from '../errors'
+import { deleteListCopy } from '../confirmCopy'
 import { listIsProblem, listSourceLabel } from './listDraft'
 import ListDialog from './ListDialog'
 import ListEntriesSheet from './ListEntriesSheet'
 import UsedByPopover from './UsedByPopover'
 import GeositeDownloadNotice from './GeositeDownloadNotice'
+import ListInUseDialog from './ListInUseDialog'
 import { categoryRefreshState } from '@/utils/destinationCategories'
 const P = 'admin:access_control.lists.'
 export default function ListsTab({ active, selectedId, onCloseSheet, onOpenList, onOpenPolicy, onSettings, onTest, newListRequest = 0, policies, status }: { active: boolean; selectedId: number | null; onCloseSheet: () => void; onOpenList: (id: number) => void; onOpenPolicy: (id: number) => void; onSettings: () => void; onTest?: (target: string) => void; newListRequest?: number; policies?: DestinationPoliciesView; status?: DestinationStatus }) {
@@ -39,6 +41,8 @@ export default function ListsTab({ active, selectedId, onCloseSheet, onOpenList,
   useEffect(() => { if (editor || afterClose === null) return; if (afterClose === 'settings') onSettings(); else onOpenList(afterClose); setAfterClose(null) }, [editor, afterClose, onOpenList, onSettings])
   const [menu, setMenu] = useState<{ anchor: HTMLElement; list: DestinationListSummary } | null>(null)
   const [busy, setBusy] = useState(false), admission = useRef(false)
+  const [inUse, setInUse] = useState<DestinationReference[] | null>(null)
+  const actionTrigger = useRef<HTMLElement | null>(null)
   const enabled = new Set(policies ? [...policies.allow, ...policies.block, ...policies.observe].filter(row => row.enabled).map(row => row.id) : [])
   const items = query.data?.items ?? [], problemCount = items.filter(list => listIsProblem(list, enabled)).length
   const pendingUnknown = !policies && items.some(list => list.state === 'pending' && list.used_by.some(ref => ref.kind === 'policy'))
@@ -59,11 +63,11 @@ export default function ListsTab({ active, selectedId, onCloseSheet, onOpenList,
   const run = async (work: () => Promise<void>) => {
     if (admission.current) return
     admission.current = true; setBusy(true)
-    try { await work() } catch (err) { const details = destinationError(err); if (details.error === 'dest_list_in_use') { await confirm({ title: t(`${P}in_use_title`), message: t(`${P}in_use_message`), confirmText: t('common:actions.close') }) } else pushSnack(t(`${P}write_failed`, { error: details.error }), 'error') }
+    try { await work() } catch (err) { const details = destinationError(err); if (details.error === 'dest_list_in_use') setInUse(destinationListReferences(err)); else pushSnack(t(`${P}write_failed`, { error: details.error }), 'error') }
     finally { admission.current = false; setBusy(false) }
   }
   const refreshList = (list: DestinationListSummary) => void run(async () => { await refresh.mutateAsync(list.id); pushSnack(t(`${P}refresh_requested`), 'success') })
-  const deleteList = (list: DestinationListSummary) => void run(async () => { if (!await confirm({ title: t(`${P}delete_title`, { name: list.name }), message: t(`${P}delete_message`), confirmText: t('common:actions.delete'), destructive: true })) return; await remove.mutateAsync(list.id); pushSnack(t(`${P}deleted`), 'success') })
+  const deleteList = (list: DestinationListSummary) => void run(async () => { if (!await confirm(deleteListCopy(t, list.name))) return; await remove.mutateAsync(list.id); pushSnack(t(`${P}deleted`), 'success') })
   const state = (list: DestinationListSummary) => {
     const key = list.state === 'failed' ? list.last_fetched_at ? 'failed_old' : 'failed_first' : list.state === 'pending' && listIsProblem(list, enabled) ? 'pending_used' : list.state
     const tone = list.state === 'ready' ? 'ok' : list.state === 'failed' ? list.last_fetched_at ? 'attention' : 'failing' : key === 'pending_used' ? 'failing' : 'measuring'
@@ -71,7 +75,7 @@ export default function ListsTab({ active, selectedId, onCloseSheet, onOpenList,
   }
   const usage = (list: DestinationListSummary) => <UsedByPopover name={list.name} references={list.used_by} ownerGroupId={list.owner_group_id} onOpenPolicy={onOpenPolicy} />
   const name = (list: DestinationListSummary) => <><Button sx={{ p: 0, minWidth: 44, minHeight: 44, justifyContent: 'flex-start', textAlign: 'left', overflowWrap: 'anywhere' }} onClick={() => onOpenList(list.id)}>{list.name}</Button><Typography variant="caption" color="text.secondary" sx={{ display: 'block', overflowWrap: 'anywhere' }}>{t(`${P}${list.kind}`)}{list.kind !== 'custom' && ` · ${listSourceLabel(list)}`}</Typography></>
-  const actions = (list: DestinationListSummary) => <IconButton disabled={busy} aria-label={t(`${P}menu`, { name: list.name })} onClick={e => setMenu({ anchor: e.currentTarget, list })} sx={{ minWidth: 44, minHeight: 44 }}><MoreVertIcon /></IconButton>
+  const actions = (list: DestinationListSummary) => <IconButton disabled={busy} aria-label={t(`${P}menu`, { name: list.name })} onClick={e => { actionTrigger.current = e.currentTarget; setMenu({ anchor: e.currentTarget, list }) }} sx={{ minWidth: 44, minHeight: 44 }}><MoreVertIcon /></IconButton>
   return <>
     {busy && <PendingActionGuard />}
     <Box hidden={!active} sx={{ '& .MuiTableSortLabel-root': { minWidth: 44, minHeight: 44 } }}>
@@ -96,5 +100,6 @@ export default function ListsTab({ active, selectedId, onCloseSheet, onOpenList,
     ]}</Menu>
     {selectedId && <ListEntriesSheet key={`sheet-${selectedId}`} id={selectedId} onTest={onTest} refreshing={selected?.state === 'refreshing'} onClose={onCloseSheet} busy={busy} onEdit={() => { const existing = items.find(list => list.id === selectedId); if (existing) setEditor({ existing }) }} onRefresh={() => { const list = items.find(list => list.id === selectedId); if (list) refreshList(list) }} />}
     {editor && <ListDialog key={`editor-${editor.existing?.id ?? 'new'}`} existing={editor.existing} policies={policies} status={status} refreshHours={query.data?.refresh_hours ?? 24} onClose={() => setEditor(null)} onSaved={list => { setAfterClose(list.id); setEditor(null) }} onSettings={() => { setAfterClose('settings'); setEditor(null) }} />}
+    {inUse !== null && <ListInUseDialog references={inUse} onClose={() => { setInUse(null); actionTrigger.current?.focus({ preventScroll: true }) }} onOpenPolicy={id => { setInUse(null); onOpenPolicy(id) }} />}
   </>
 }

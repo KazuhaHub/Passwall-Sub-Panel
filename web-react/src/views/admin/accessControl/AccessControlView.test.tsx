@@ -19,6 +19,51 @@ vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string, opti
 vi.mock('@/components/CodeEditor', () => ({ default: (p: { value: string; onChange: (s: string) => void; ariaLabel: string; readOnly: boolean }) => <textarea aria-label={p.ariaLabel} value={p.value} readOnly={p.readOnly} onChange={e => p.onChange(e.target.value)} /> }))
 import AccessControlView from './AccessControlView'
 const P = 'admin:access_control.'
+it('shows current references after a stale unused-list delete is rejected, and opens its policy without another delete', async () => {
+  listsAPI([listSummary])
+  api.delete.mockRejectedValueOnce({ isAxiosError: true, response: { status: 409, data: { error: 'dest_list_in_use', used_by: [
+    { kind: 'policy', id: 12, name: 'No mail' }, { kind: 'group', id: 9, name: 'Guests' },
+  ] } } })
+  const router = mount('/admin/access-control?tab=lists')
+  fireEvent.click((await screen.findAllByRole('button', { name: `${P}lists.menu Finance` }))[0])
+  fireEvent.click(screen.getByRole('menuitem', { name: 'common:actions.delete' }))
+  const dialog = await screen.findByRole('dialog', { name: `${P}lists.in_use_title` })
+  expect(within(dialog).getByText('Guests')).toBeTruthy()
+  expect(within(dialog).queryByRole('button', { name: /Guests/ })).toBeNull()
+  const link = within(dialog).getByRole('button', { name: `${P}lists.open_policy No mail` })
+  expect(parseFloat(getComputedStyle(link).minHeight)).toBeGreaterThanOrEqual(44)
+  fireEvent.click(link)
+  await screen.findByRole('dialog', { name: `${P}editor.edit_title No mail` })
+  expect(router.state.location.search).toBe('?tab=policies')
+  expect(screen.queryByRole('dialog', { name: `${P}lists.in_use_title` })).toBeNull()
+  expect(confirmation).toHaveBeenCalledOnce()
+  expect(api.delete).toHaveBeenCalledExactlyOnceWith('/admin/dest/lists/7', { _skipErrorToast: true })
+  expect(api.put).not.toHaveBeenCalled()
+})
+it('keeps an in-use rejection with missing references explicit and closes without retrying deletion', async () => {
+  listsAPI([listSummary]); api.delete.mockRejectedValueOnce(err(409, 'dest_list_in_use'))
+  mount('/admin/access-control?tab=lists')
+  fireEvent.click((await screen.findAllByRole('button', { name: `${P}lists.menu Finance` }))[0])
+  fireEvent.click(screen.getByRole('menuitem', { name: 'common:actions.delete' }))
+  const dialog = await screen.findByRole('dialog', { name: `${P}lists.in_use_title` })
+  expect(within(dialog).getByText(`${P}lists.in_use_unknown`)).toBeTruthy()
+  fireEvent.click(within(dialog).getByRole('button', { name: 'common:actions.close' }))
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+  expect(api.delete).toHaveBeenCalledOnce()
+  expect(api.put).not.toHaveBeenCalled()
+})
+it('returns focus to the list action trigger when closing an in-use rejection', async () => {
+  listsAPI([listSummary]); api.delete.mockRejectedValueOnce(err(409, 'dest_list_in_use'))
+  mount('/admin/access-control?tab=lists')
+  const trigger = (await screen.findAllByRole('button', { name: `${P}lists.menu Finance` }))[0]
+  trigger.focus(); fireEvent.click(trigger)
+  fireEvent.click(screen.getByRole('menuitem', { name: 'common:actions.delete' }))
+  const dialog = await screen.findByRole('dialog', { name: `${P}lists.in_use_title` })
+  fireEvent.click(within(dialog).getByRole('button', { name: 'common:actions.close' }))
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+  await waitFor(() => expect(document.activeElement).toBe(trigger))
+  expect(api.delete).toHaveBeenCalledOnce()
+})
 it('closes dirty settings with one discard confirmation and no write', async () => {
   settingsAPI(); const router = mount()
   fireEvent.click(await screen.findByRole('button', { name: `${P}more` }))

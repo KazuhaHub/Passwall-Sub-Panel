@@ -788,9 +788,56 @@ mutation, duplicate discard confirmation and duplicate close callbacks before
 repair. The relevant frontend suite passed 396 cases in 28 files; after the
 final retry-label layout adjustment, all 144 affected editor/view/fixture cases
 in three files passed. TypeScript, changed-source lint, production build,
-fixture exclusion and four production browser smoke checks passed. This
-candidate still needs its own complete remote CI. Remaining per-view matrices,
+fixture exclusion and four production browser smoke checks passed. Head
+`8526f9c8093c4515490669403b4ec4cda7e61ec7` passed its own
+[complete Test CI](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37893775461)
+and [Node systemd acceptance](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37893775469).
+Third-party live-panel checks were skipped. Remaining per-view matrices,
 C2/C5/C6, actual candidate Node acceptance and owner approval remain open.
+
+## Concurrent list references (S20 follow-up)
+
+A list that looked unused can acquire a reference before Delete reaches the
+server. The 409 `dest_list_in_use` response already includes `used_by`; the UI
+previously discarded that evidence and opened a generic confirmation. It now
+opens an informational dialog with the returned references. Policy actions
+open the existing editor without saving or repeating deletion. Group names
+remain readable; group navigation awaits its later-stage route. Missing or
+malformed references remain explicitly unknown, with no invented empty state.
+Reference targets require positive safe-integer IDs, known kinds and string
+names; duplicates are removed while order is preserved.
+
+| Language/theme/viewport | Delete confirmation | Current references |
+| --- | --- | --- |
+| Chinese, light, 1440 × 900 | [Confirm](list-delete-confirm-cn-light-1440.jpg) | [References](list-in-use-cn-light-1440.jpg) |
+| Chinese, dark, 1440 × 900 | [Confirm](list-delete-confirm-cn-dark-1440.jpg) | [References](list-in-use-cn-dark-1440.jpg) |
+| Chinese, light, 375 × 812 | [Confirm](list-delete-confirm-cn-light-375.jpg) | [References](list-in-use-cn-light-375.jpg) |
+| Chinese, dark, 375 × 812 | [Confirm](list-delete-confirm-cn-dark-375.jpg) | [References](list-in-use-cn-dark-375.jpg) |
+| English, light, 375 × 812 | [Confirm](list-delete-confirm-en-light-375.jpg) | [References](list-in-use-en-light-375.jpg) |
+
+[Opening the referenced original policy](list-in-use-policy-en-light-375.jpg)
+retains its name, list, enabled state and disabled Save. All 11 captures were
+visually checked. The informational dialog measures 480px on desktop and
+343px at a 375px viewport, with 44px actions and no content overflow. Enter on
+phone and Escape on desktop close it and restore the original list-actions
+trigger. Its transition must finish before restoring focus; a regression
+failed before that repair. The refreshed references then disable Delete.
+Cancelling the initial delete confirmation leaves the list unused in the
+synthetic scenario.
+
+Two page regressions and the DEV fixture contract failed before the references
+repair; the focus regression independently failed before repair. The fixture
+reports an initially stale unused read, refuses deletion with actual seed
+references, and keeps list content and policies unchanged without falling
+through to live transport. Parser cases cover malformed and duplicate targets.
+The final relevant frontend suite passed 406 tests in 29 files; TypeScript,
+changed-source lint, production build, fixture exclusion and four production
+browser smoke checks passed. This follow-up needs its own remote CI.
+English, automatic theme, normal fixtures and the default 1280 × 720 viewport
+were restored with no open dialogs. The isolated backend was restarted with
+its existing executable, config and database after the temporary processes
+were cleared; no new backend runtime validation is claimed for this UI repair.
+It does not complete S20's full catalog, C2/C5/C6 or real candidate Node acceptance.
 
 ## Real backend catalog acceptance
 

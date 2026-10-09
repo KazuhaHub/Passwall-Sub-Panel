@@ -1,11 +1,16 @@
 import { expect, it } from 'vitest'
 import { destinationPolicies } from '@/test/accessControlFixtures'
 import type { TFunction } from 'i18next'
-import { discardSettingsCopy, needsFirstPublishConfirm } from './confirmCopy'
+import { deleteListCopy, discardSettingsCopy, listInUseCopy, needsFirstPublishConfirm } from './confirmCopy'
 
 it('names the safe discard-dialog action as continuing to edit', () => {
   const t = ((key: string) => key) as TFunction
   expect(discardSettingsCopy(t)).toMatchObject({ cancelText: 'admin:access_control.confirm.continue_editing', confirmText: 'admin:access_control.confirm.discard_action' })
+})
+it('keeps deletion destructive and the rejected-reference explanation informational', () => {
+  const t = ((key: string, values?: { name?: string }) => key + (values?.name ? ` ${values.name}` : '')) as TFunction
+  expect(deleteListCopy(t, 'Finance')).toEqual({ title: 'admin:access_control.lists.delete_title Finance', message: 'admin:access_control.lists.delete_message', confirmText: 'common:actions.delete', destructive: true })
+  expect(listInUseCopy(t)).toEqual({ title: 'admin:access_control.lists.in_use_title', message: 'admin:access_control.lists.in_use_message', confirmText: 'common:actions.close' })
 })
 
 it.each(['switch', 'editor', 'template', 'allowlist'] as const)('uses published facts at the %s entry', origin => {

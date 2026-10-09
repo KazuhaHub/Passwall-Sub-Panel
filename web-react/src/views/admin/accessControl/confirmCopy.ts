@@ -3,6 +3,12 @@ import type { ConfirmOpts } from '@/components/ConfirmHost'
 import type { DestinationPoliciesView, DestinationStatus } from '@/api/accessControl'
 
 const P = 'admin:access_control.confirm.'
+export function deleteListCopy(t: TFunction, name: string): ConfirmOpts {
+  return { title: t('admin:access_control.lists.delete_title', { name }), message: t('admin:access_control.lists.delete_message'), confirmText: t('common:actions.delete'), destructive: true }
+}
+export function listInUseCopy(t: TFunction): ConfirmOpts {
+  return { title: t('admin:access_control.lists.in_use_title'), message: t('admin:access_control.lists.in_use_message'), confirmText: t('common:actions.close') }
+}
 export function discardSettingsCopy(t: TFunction): ConfirmOpts {
   return { title: t(`${P}discard_title`), message: t(`${P}discard_message`), confirmText: t(`${P}discard_action`), cancelText: t(`${P}continue_editing`) }
 }

@@ -14,6 +14,17 @@ function harness(scenario: AccessFixtureScenario = 'normal') {
 afterEach(() => vi.useRealTimers())
 
 describe('reproducible access-control acceptance fixtures', () => {
+  it('reports fresh references after a stale unused-list deletion without removing data or falling through', async () => {
+    const { client, fallback } = harness('list-delete-conflict')
+    const before = (await client.get('/admin/dest/lists/1', { params: { text: 1 } })).data
+    const policies = (await client.get('/admin/dest/policies')).data
+    expect((await client.get('/admin/dest/lists')).data.items.find((list: { id: number }) => list.id === 1).used_by).toEqual([])
+    await expect(client.delete('/admin/dest/lists/1')).rejects.toMatchObject({ response: { status: 409, data: { error: 'dest_list_in_use', used_by: [{ kind: 'policy', id: 101, name: 'Fixture · 全局可信站点' }] } } })
+    expect((await client.get('/admin/dest/lists/1', { params: { text: 1 } })).data).toEqual(before)
+    expect((await client.get('/admin/dest/policies')).data).toEqual(policies)
+    expect((await client.get('/admin/dest/lists')).data.items.find((list: { id: number }) => list.id === 1).used_by).toHaveLength(1)
+    expect(fallback).not.toHaveBeenCalled()
+  })
   it('cancels a slow settings save before mutation and then saves only the requested key', async () => {
     vi.useFakeTimers()
     const { client, fallback } = harness('settings-save-pending')

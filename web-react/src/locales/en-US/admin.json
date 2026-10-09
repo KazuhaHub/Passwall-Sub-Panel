@@ -260,6 +260,7 @@
       "refresh_requested": "Refresh requested; list status updates when it finishes",
       "in_use_title": "List is still in use",
       "in_use_message": "Remove policy or group references before deleting this list.",
+      "in_use_unknown": "The current references could not be read. Reload the lists before trying again.",
       "delete_title": "Delete “{{name}}”?",
       "delete_message": "This list cannot be recovered after deletion.",
       "deleted": "List deleted",

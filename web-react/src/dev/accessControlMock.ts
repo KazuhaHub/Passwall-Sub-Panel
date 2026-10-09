@@ -5,7 +5,7 @@ import type { Server } from '@/api/servers'
 import { destinationListAvailable } from '@/utils/destinationListAvailability'
 import { accessControlFixtureSeed, destinationPolicies, destinationStatus } from '@/test/accessControlFixtures'
 
-export const accessFixtureScenarios = ['normal', 'empty', 'error', 'catalog-missing', 'catalog-failed', 'policy-preview-error', 'policy-over-quota', 'policy-conflict', 'policy-save-pending', 'policy-lists-error', 'policy-groups-error', 'template-over-quota', 'templates-catalog-missing', 'list-original-read-error', 'settings-save-pending'] as const
+export const accessFixtureScenarios = ['normal', 'empty', 'error', 'catalog-missing', 'catalog-failed', 'policy-preview-error', 'policy-over-quota', 'policy-conflict', 'policy-save-pending', 'policy-lists-error', 'policy-groups-error', 'template-over-quota', 'templates-catalog-missing', 'list-original-read-error', 'settings-save-pending', 'list-delete-conflict'] as const
 export type AccessFixtureScenario = typeof accessFixtureScenarios[number]
 
 function savedScenario(): AccessFixtureScenario {
@@ -75,6 +75,7 @@ export function createAccessControlMock(fallback: AxiosAdapter, options: { scena
   let catalogDue = 0, catalogError = ''
   const defaults: AccessControlSettings = { dest_hit_retention_days: 30, dest_trial_retention_days: 7, dest_usage_retention_days: 7, dest_list_refresh_hours: 17, dest_policy_apply_min_seconds: 93 }
   let settings: AccessControlSettings = { ...defaults }
+  let freshListReferences = false
   const tick = () => { lastWrite = Math.max(Date.now(), lastWrite + 1); generation++; return lastWrite }
   const publication = () => ({ generation, published_generation: publishedGeneration, paused, publish_error: null })
   const budget = () => ({ ...structuredClone(seed.budget), rules: { used: seed.policies.filter(p => p.enabled).length, limit: seed.budget.rules.limit } })
@@ -117,7 +118,7 @@ export function createAccessControlMock(fallback: AxiosAdapter, options: { scena
       const used_by: DestinationListSummary['used_by'] = seed.policies.filter(p => p.list_ids.includes(list.id)).map(p => ({ kind: 'policy', id: p.id, name: p.name }))
       if (list.owner_group_id) used_by.push({ kind: 'group', id: list.owner_group_id, name: seed.groups.find(g => g.id === list.owner_group_id)?.name ?? '' })
       const report = parse_report && { accepted: parse_report.accepted, ignored: parse_report.ignored, ignored_broad: parse_report.ignored_broad, rewritten: parse_report.rewritten }
-      return { ...rest, used_by, parse_report_summary: report }
+      return { ...rest, used_by: scenario === 'list-delete-conflict' && list.id === 1 && !freshListReferences ? [] : used_by, parse_report_summary: report }
     }
     const findList = (id: number) => seed.lists.find(l => l.id === id) ?? fail(404, 'not_found')
     const findPolicy = (id: number) => seed.policies.find(p => p.id === id) ?? fail(404, 'not_found')
@@ -208,6 +209,7 @@ export function createAccessControlMock(fallback: AxiosAdapter, options: { scena
         return response(detail(list))
       }
       if (!operation && method === 'DELETE') {
+        if (scenario === 'list-delete-conflict' && id === 1) freshListReferences = true
         const references = summary(list).used_by
         if (references.length) return fail(409, 'dest_list_in_use', { used_by: references })
         seed.lists = seed.lists.filter(l => l.id !== id); tick(); return response(null, 204)
