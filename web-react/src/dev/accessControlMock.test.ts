@@ -14,6 +14,25 @@ function harness(scenario: AccessFixtureScenario = 'normal') {
 afterEach(() => vi.useRealTimers())
 
 describe('reproducible access-control acceptance fixtures', () => {
+  it('keeps template regex counts and the projected quota consistent, without creating an over-limit pair', async () => {
+    const { client, fallback } = harness('template-over-quota')
+    const before = (await client.get('/admin/dest/policies')).data
+    expect(before.observe).toEqual([])
+    expect(before.budget.regexps).toEqual({ used: 250, limit: 256 })
+    const category = (await client.get('/admin/dest/geosite/categories')).data.categories.find((item: { name: string }) => item.name === 'category-porn')
+    expect(category).toMatchObject({ count: 300, regexp_count: 18 })
+    const template = policyTemplates.find(item => item.key === 'porn')!
+    const input = { name: 'Template quota draft', action: template.action, enabled: true, counts_as_risk: template.risk, template_key: template.key,
+      scope: 'all', group_ids: [], list_ids: [], inline: {}, new_list: { name: 'Template quota list', kind: 'geosite', geosite_category: 'category-porn' } }
+    const projected = (await client.post('/admin/dest/policies/preview', input)).data
+    expect(projected.new_list_preview).toMatchObject({ entry_count: 300, regexp_count: 18, parse_report: { accepted: 300 } })
+    expect(projected.budget.regexps).toEqual({ used: 268, limit: 256 })
+    const lists = (await client.get('/admin/dest/lists')).data
+    await expect(client.post('/admin/dest/policies', input)).rejects.toMatchObject({ response: { status: 400, data: { error: 'dest_policy_over_limit' } } })
+    expect((await client.get('/admin/dest/policies')).data).toEqual(before)
+    expect((await client.get('/admin/dest/lists')).data).toEqual(lists)
+    expect(fallback).not.toHaveBeenCalled()
+  })
   it('fails only the editor preview without changing definitions or contacting the live transport', async () => {
     const { client, fallback } = harness('policy-preview-error')
     const before = (await client.get('/admin/dest/policies')).data
@@ -221,13 +240,13 @@ describe('reproducible access-control acceptance fixtures', () => {
 
   it('shows explicit queued catalog refresh and its success or failure without real requests', async () => {
     vi.useFakeTimers()
-    for (const scenario of ['catalog-missing', 'catalog-failed'] as const) {
+    for (const scenario of ['catalog-missing', 'catalog-failed', 'templates-catalog-missing'] as const) {
       const { client, fallback } = harness(scenario)
       await expect(client.get('/admin/dest/geosite/categories')).rejects.toMatchObject({ response: { status: 503, data: { refreshing: false } } })
       expect((await client.post('/admin/dest/geosite/refresh')).status).toBe(202)
       await expect(client.get('/admin/dest/geosite/categories')).rejects.toMatchObject({ response: { data: { refreshing: true } } })
       vi.advanceTimersByTime(2_000)
-      if (scenario === 'catalog-missing') {
+      if (scenario !== 'catalog-failed') {
         expect((await client.get('/admin/dest/geosite/categories')).data.categories.length).toBeGreaterThan(0)
       } else {
         await expect(client.get('/admin/dest/geosite/categories')).rejects.toMatchObject({ response: { data: { refreshing: false, last_error: 'dest_list_fetch_failed' } } })

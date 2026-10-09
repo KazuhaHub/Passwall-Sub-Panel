@@ -527,10 +527,76 @@ format 5. The follow-up builds the same analyzer from an isolated, checksum-pinn
 tool module using PSP's existing `x/tools v0.50.0`; all checks stay enabled.
 Its build, module verification, binary dependency metadata, build-baseline tests
 and three focused workflow guards passed locally. Windows Application Control
-prevented local execution of the newly built analyzer; full analyzer execution
-and the complete workflow therefore require the new Linux CI run;
+prevented local execution of the newly built analyzer. Follow-up `d32236ae`
+passed the complete [Test workflow](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37888539176),
+including full analyzer execution and all three target vulnerability scans,
+and [Node systemd acceptance](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37888539201).
+The third-party live-panel job was skipped;
 complete C2/C5/C6, remaining per-view matrices, owner approval and real Node
 acceptance remain open.
+
+## Templates and observation conversion (S4)
+
+Template cards, menu triggers/items, quota explanations, finance-dialog actions
+and conversion controls now have at least 44px targets. The conversion heading
+contains only its title; Close is a separate button. The menu's explicit
+download is one async action rather than a clickable item containing another
+click handler. It participates in MUI menu focus navigation: Home and four Down
+keys reach Download, skipping unavailable category choices, and Enter activates
+it once. A keyboard regression test failed before registering the async action
+as an actual MenuItem. No automatic download or nested download button is added.
+
+The empty grid keeps three columns at 1440px and one at 375px, with no horizontal
+overflow. The menu remains available after a policy is added. The category
+templates default to observation; BT/mail block and count as risk, while private
+addresses block without risk inclusion. The finance explanation opens list
+creation with `tab=lists`, without creating a financial policy.
+
+| Language/theme/viewport | Template grid | Template menu | Conversion |
+| --- | --- | --- | --- |
+| Chinese, light, 1440 × 900 | [Grid](templates-cn-light-1440.jpg) | [Menu](template-menu-cn-light-1440.jpg) | [Dialog](promotion-cn-light-1440.jpg) |
+| Chinese, dark, 1440 × 900 | [Grid](templates-cn-dark-1440.jpg) | [Menu with failed download](template-menu-cn-dark-1440.jpg) | [Dialog](promotion-cn-dark-1440.jpg) |
+| Chinese, light, 375 × 812 | [Rules](templates-cn-light-375-top.jpg), [categories](templates-cn-light-375-bottom.jpg) | [Keyboard download](template-menu-cn-light-375.jpg) | [Fullscreen](promotion-cn-light-375.jpg) |
+| Chinese, dark, 375 × 812 | [Empty state](templates-cn-dark-375-top.jpg), [categories](templates-cn-dark-375-bottom.jpg) | [Menu with failed download](template-menu-cn-dark-375.jpg) | [Fullscreen](promotion-cn-dark-375.jpg) |
+| English, light, 375 × 812 | [Rules](templates-en-light-375-top.jpg), [categories](templates-en-light-375-bottom.jpg) | [Wrapped menu](template-menu-en-light-375.jpg) | [Fullscreen](promotion-en-light-375.jpg) |
+
+All 39 screenshots in this S4 package were captured from the native browser and
+visually inspected. Additional checks:
+
+| Capture | Check |
+| --- | --- |
+| [BT prefill](template-bt-prefill-en-light-375.jpg) | Block action and BT condition; risk inclusion checked in the actual form |
+| [Mail prefill](template-mail-prefill-en-light-1440.jpg) | TCP and ports 25,465,587; risk inclusion checked |
+| [Private-address prefill](template-private-prefill-en-light-1440.jpg) | Private condition selected, risk inclusion off |
+| [Category prefill](template-crypto-prefill-en-light-1440.jpg) | Observe, cryptocurrency category, bounded parse summary and atomic list/policy explanation |
+| [Added template](template-added-en-light-1440.jpg) | Successful synthetic creation retains the New policy menu and quiet Added badge |
+| [Finance explanation](template-finance-explanation-en-light-1440.jpg), [New list](template-finance-new-list-en-light-1440.jpg) | Touch-sized explanation actions and native route to list creation |
+| [Missing catalog](templates-catalog-missing-en-light-1440.jpg) | Category cards retain explicit download controls; inline templates remain available |
+| [Downloading](template-download-pending-cn-light-375.jpg), [completed](template-download-completed-cn-light-375.jpg), [failed](template-download-failed-cn-light-375.jpg) | Keyboard submission has aria-busy/disabled feedback; success enables category choices; failure retains retry without a nested button |
+| [Quota explanation](template-quota-hint-en-light-1440.jpg), [category draft](template-quota-editor-en-light-1440.jpg), [budget](template-quota-budget-en-light-1440.jpg) | Synthetic current 250/256 plus 18 category regexps produces 268/256; the draft stays editable, Save is disabled |
+| [Discard confirmation](promotion-discard-cn-dark-375.jpg) | Continue editing retains the selected risk checkbox; confirmed discard closes without conversion |
+| [Conflict](promotion-conflict-cn-dark-1440.jpg), [reloaded](promotion-reloaded-cn-dark-1440.jpg), [saved](promotion-saved-cn-dark-1440.jpg) | 409 retains current risk choice and disables submit; explicit reload resets risk and reads the new revision; success appends the row after three existing block policies |
+| [Disabled observation](promotion-disabled-cn-dark-375.jpg) | Conversion explicitly retains disabled state |
+| [Pending desktop](promotion-pending-cn-dark-1440.jpg), [pending phone](promotion-pending-cn-dark-375.jpg) | Thirty-second conversion shows a spinner, locks Close/Cancel/checkbox, ignores Escape, then succeeds and closes |
+
+The two new DEV-only scenarios, `template-over-quota` and
+`templates-catalog-missing`, keep catalog counts, preview counts and projected
+quota consistent, reject over-limit paired creation before mutation, and use
+the isolated adapter. Their contracts failed before implementation. These
+fixtures do not prove kernel enforcement or real catalog sizes. Existing real
+parser and backend acceptance evidence remains separate. Stage 1c conversion
+reads no hit data and shows no statistical impact region; its PUT retains the
+full policy and revision.
+
+Download duplication, keyboard admission, undersized grid/menu/conversion and
+finance controls, and nested conversion heading content all failed before
+repair. Relevant frontend coverage passed 389 tests in 28 files after the final
+source change. TypeScript, changed-source lint, production build, fixture
+exclusion and four production browser smoke checks passed. English, automatic
+theme, normal fixture data and the default viewport were restored. This S4
+candidate needs its own complete remote CI; the earlier security head's green
+workflows do not substitute. Complete C2/C5/C6, remaining per-view matrices,
+owner approval and real candidate Node acceptance remain open.
 
 ## Lists overview and references (S6)
 

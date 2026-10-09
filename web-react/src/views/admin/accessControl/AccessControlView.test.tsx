@@ -19,6 +19,18 @@ vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string, opti
 vi.mock('@/components/CodeEditor', () => ({ default: (p: { value: string; onChange: (s: string) => void; ariaLabel: string; readOnly: boolean }) => <textarea aria-label={p.ariaLabel} value={p.value} readOnly={p.readOnly} onChange={e => p.onChange(e.target.value)} /> }))
 import AccessControlView from './AccessControlView'
 const P = 'admin:access_control.'
+it('keeps the observation-conversion heading separate from touch-accessible controls', async () => {
+  const original = api.get.getMockImplementation()!
+  api.get.mockImplementation(async (url: string, config?: unknown) => url.endsWith('/policies') ? { data: destinationPolicies({ block: [], observe: [{ ...samplePolicy, action: 'observe', name: 'Watch' }] }) } : original(url, config))
+  mount()
+  fireEvent.click(await screen.findByRole('button', { name: `${P}policies.menu Watch` }))
+  fireEvent.click(screen.getByRole('menuitem', { name: `${P}promotion.action` }))
+  const dialog = await screen.findByRole('dialog', { name: `${P}promotion.title Watch` })
+  const heading = within(dialog).getByRole('heading', { name: `${P}promotion.title Watch` })
+  expect(within(heading).queryByRole('button')).toBeNull()
+  for (const button of within(dialog).getAllByRole('button')) expect(parseFloat(getComputedStyle(button).minHeight), button.textContent || button.getAttribute('aria-label') || undefined).toBeGreaterThanOrEqual(44)
+  expect(parseFloat(getComputedStyle(within(dialog).getByRole('checkbox', { name: `${P}promotion.risk` }).closest('.MuiFormControlLabel-root')!).minHeight)).toBeGreaterThanOrEqual(44)
+})
 it.each(['block', 'observe', 'allow'] as const)('explains allowlist ordering for a selected group in a %s policy', async action => {
   const original = api.get.getMockImplementation()!
   const policy = { ...samplePolicy, action, scope: 'groups' as const, group_ids: [7] }
@@ -930,6 +942,18 @@ it('opens list creation from the finance explanation without writing a policy or
   api.get.mockImplementation(async (url: string) => ({ data: url.endsWith('/policies') ? destinationPolicies({ block: [] }) : url.endsWith('/status') ? destinationStatus() : url.endsWith('/categories') ? { categories: [], updated_at: 1000 } : url.endsWith('/lists') ? { items: [], budget: destinationBudget, refresh_hours: 24 } : { effective: {} } }))
   const router = mount()
   fireEvent.click(await screen.findByRole('button', { name: `${P}templates.create_list` }))
+  await screen.findByRole('textbox', { name: `${P}list_editor.name` })
+  expect(router.state.location.search).toBe('?tab=lists')
+  expect(api.post).not.toHaveBeenCalled()
+})
+it('keeps finance explanation actions touch-accessible and opens list creation from its menu', async () => {
+  api.get.mockImplementation(async (url: string) => ({ data: url.endsWith('/policies') ? destinationPolicies({ block: [] }) : url.endsWith('/status') ? destinationStatus() : url.endsWith('/categories') ? { categories: [], updated_at: 1000 } : url.endsWith('/lists') ? { items: [], budget: destinationBudget, refresh_hours: 24 } : { effective: {} } }))
+  const router = mount()
+  fireEvent.click(await screen.findByRole('button', { name: `${P}policies.create` }))
+  fireEvent.click(screen.getByRole('menuitem', { name: `${P}templates.finance_question` }))
+  const dialog = await screen.findByRole('dialog')
+  for (const button of within(dialog).getAllByRole('button')) expect(parseFloat(getComputedStyle(button).minHeight)).toBeGreaterThanOrEqual(44)
+  fireEvent.click(within(dialog).getByRole('button', { name: `${P}templates.create_list` }))
   await screen.findByRole('textbox', { name: `${P}list_editor.name` })
   expect(router.state.location.search).toBe('?tab=lists')
   expect(api.post).not.toHaveBeenCalled()

@@ -5,7 +5,7 @@ import type { Server } from '@/api/servers'
 import { destinationListAvailable } from '@/utils/destinationListAvailability'
 import { accessControlFixtureSeed, destinationPolicies, destinationStatus } from '@/test/accessControlFixtures'
 
-export const accessFixtureScenarios = ['normal', 'empty', 'error', 'catalog-missing', 'catalog-failed', 'policy-preview-error', 'policy-over-quota', 'policy-conflict', 'policy-save-pending', 'policy-lists-error', 'policy-groups-error'] as const
+export const accessFixtureScenarios = ['normal', 'empty', 'error', 'catalog-missing', 'catalog-failed', 'policy-preview-error', 'policy-over-quota', 'policy-conflict', 'policy-save-pending', 'policy-lists-error', 'policy-groups-error', 'template-over-quota', 'templates-catalog-missing'] as const
 export type AccessFixtureScenario = typeof accessFixtureScenarios[number]
 
 function savedScenario(): AccessFixtureScenario {
@@ -53,6 +53,11 @@ export function createAccessControlMock(fallback: AxiosAdapter, options: { scena
     seed.policies = []; seed.lists = []; seed.nodes = []; seed.groups = []; seed.allowlistGroups = []; seed.exemptions = []; seed.hits = []
     for (const value of Object.values(seed.budget)) value.used = 0
   }
+  if (scenario === 'template-over-quota') {
+    seed.policies = []
+    seed.budget.regexps = { used: 250, limit: 256 }
+  }
+  if (scenario === 'templates-catalog-missing') seed.policies = []
   const servers: Server[] = seed.nodes.map(node => ({
     id: node.panel_id, name: node.panel_name, panel_type: node.kind === 'psp' ? 'psp' : '3xui',
     url: `https://fixture-node-${node.panel_id}.example.invalid`, capabilities: ['inbound.read', 'inbound.update'],
@@ -65,7 +70,7 @@ export function createAccessControlMock(fallback: AxiosAdapter, options: { scena
   let generation = 12, publishedGeneration = 12, paused = false, lastWrite = Date.now() - 3_600_000
   let published = structuredClone(seed.policies)
   let conflictInjected = false
-  let catalogAvailable = scenario !== 'catalog-missing' && scenario !== 'catalog-failed'
+  let catalogAvailable = !['catalog-missing', 'catalog-failed', 'templates-catalog-missing'].includes(scenario)
   let catalogDue = 0, catalogError = ''
   const defaults: AccessControlSettings = { dest_hit_retention_days: 30, dest_trial_retention_days: 7, dest_usage_retention_days: 7, dest_list_refresh_hours: 17, dest_policy_apply_min_seconds: 93 }
   let settings: AccessControlSettings = { ...defaults }
@@ -125,7 +130,8 @@ export function createAccessControlMock(fallback: AxiosAdapter, options: { scena
           entries = [...accessControlFixtureSeed().lists[3].entries]
           report = accessControlFixtureSeed().lists[3].parse_report!
         } else if (category === 'category-cryptocurrency' || category === 'category-porn') {
-          entries = Array.from({ length: category === 'category-cryptocurrency' ? 235 : 300 }, (_, i) => `domain:category-${i}.example`)
+          entries = Array.from({ length: category === 'category-cryptocurrency' ? 235 : 300 }, (_, i) =>
+            scenario === 'template-over-quota' && category === 'category-porn' && i < 18 ? `regexp:^category-${i}\\.example$` : `domain:category-${i}.example`)
           report = { accepted: entries.length, ignored: 0, ignored_broad: 0, rewritten: 0, samples: [] }
         } else return fail(422, 'dest_geosite_unknown')
       } else if (input.kind === 'remote') {
@@ -183,7 +189,7 @@ export function createAccessControlMock(fallback: AxiosAdapter, options: { scena
       return response({ categories: [
         { name: 'category-finance', count: 612, regexp_count: 0, source_count: 613, ignored_broad_count: 1, attrs: ['cn', '!cn'] },
         { name: 'category-cryptocurrency', count: 235, regexp_count: 0, source_count: 235, ignored_broad_count: 0, attrs: [] },
-        { name: 'category-porn', count: 300, regexp_count: 0, source_count: 300, ignored_broad_count: 0, attrs: [] },
+        { name: 'category-porn', count: 300, regexp_count: scenario === 'template-over-quota' ? 18 : 0, source_count: 300, ignored_broad_count: 0, attrs: [] },
       ], updated_at: Date.now(), refreshing: !!catalogDue, last_error: catalogError })
     }
     if (path === '/admin/dest/lists' && method === 'GET') return response({ items: seed.lists.map(summary), refresh_hours: settings.dest_list_refresh_hours || defaults.dest_list_refresh_hours, budget: budget() })
@@ -224,12 +230,14 @@ export function createAccessControlMock(fallback: AxiosAdapter, options: { scena
       validatePolicy(input, body.id as number | undefined)
       const projected = budget()
       if (scenario === 'policy-over-quota') projected.domains = { used: 50001, limit: 50000 }
+      if (scenario === 'template-over-quota' && input.new_list) projected.regexps.used += preview(input.new_list).regexp_count
       return response({ budget: projected, ...(input.new_list ? { new_list_preview: preview(input.new_list) } : {}) })
     }
     if (path === '/admin/dest/policies' && method === 'POST') {
       if (scenario === 'policy-over-quota') return fail(400, 'dest_policy_over_limit')
       const input = structuredClone(body) as unknown as DestinationPolicyInput
       validatePolicy(input)
+      if (scenario === 'template-over-quota' && input.new_list && seed.budget.regexps.used + preview(input.new_list).regexp_count > seed.budget.regexps.limit) return fail(400, 'dest_policy_over_limit')
       const list = input.new_list ? newList(input.new_list) : null
       if (list) input.list_ids = [...input.list_ids, list.id]
       const id = Math.max(100, ...seed.policies.map(p => p.id)) + 1
