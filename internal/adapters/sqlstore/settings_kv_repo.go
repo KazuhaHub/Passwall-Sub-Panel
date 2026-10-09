@@ -56,6 +56,10 @@ func (r *kvSettingsRepo) Load(ctx context.Context, defaults ports.UISettings) (p
 	// into it directly. Start from defaults so missing keys keep their
 	// caller-provided default; applyDefaults at the bottom fills the rest.
 	out := defaults
+	// Legal enablement defaults off. The consent version comes only from its
+	// durable publication row, never from config/caller fallback values.
+	out.LegalEnabled = false
+	out.LegalConsentVersion = 0
 	byKey := map[string]settingRow{}
 	for _, row := range rows {
 		byKey[row.Type+"."+row.Name] = row
@@ -79,6 +83,9 @@ func (r *kvSettingsRepo) Load(ctx context.Context, defaults ports.UISettings) (p
 		if err := d.Unmarshal(raw); err != nil {
 			return defaults, fmt.Errorf("decode setting %s.%s: %w", d.Type, d.Name, err)
 		}
+	}
+	if out.LegalConsentVersion < 0 {
+		return defaults, fmt.Errorf("invalid stored legal consent version")
 	}
 
 	// 0 = "keep forever" for these retention fields (their UI hints say so), so
@@ -205,8 +212,19 @@ func (r *kvSettingsRepo) Save(ctx context.Context, s ports.UISettings) error {
 		// (2) Existing → pure UPDATE (never mints an id). Missing → collect.
 		var missing []settingRow
 		var taskPolicyDefaults []settingRow
+		var legalConsentDefault *settingRow
 		for i := range rows {
 			row := rows[i]
+			if row.Type == "legal" && row.Name == "consent_version" {
+				// Publication owns this key. Seed only its default; a stale or
+				// forged settings payload must never lower or raise it. DO NOTHING
+				// below also preserves a publication racing the first settings save.
+				if !have[row.Type+"\x00"+row.Name] {
+					row.Value = "0"
+					legalConsentDefault = &row
+				}
+				continue
+			}
 			if omitTaskPolicy && isNodeTaskLifecycleSetting(row.Type, row.Name) {
 				if !have[row.Type+"\x00"+row.Name] {
 					taskPolicyDefaults = append(taskPolicyDefaults, row)
@@ -250,6 +268,13 @@ func (r *kvSettingsRepo) Save(ctx context.Context, s ports.UISettings) error {
 				Columns:   []clause.Column{{Name: "type"}, {Name: "name"}},
 				DoNothing: true,
 			}).Create(&taskPolicyDefaults).Error; err != nil {
+				return err
+			}
+		}
+		if legalConsentDefault != nil {
+			if err := tx.Clauses(clause.OnConflict{
+				Columns: []clause.Column{{Name: "type"}, {Name: "name"}}, DoNothing: true,
+			}).Create(legalConsentDefault).Error; err != nil {
 				return err
 			}
 		}
@@ -333,6 +358,8 @@ func settingKeyEncrypted(typ, name string) (encrypted, known bool) {
 // then add one line in this list.
 func settingDescriptors(s *ports.UISettings) []settingDescriptor {
 	return []settingDescriptor{
+		boolField("legal", "enabled", &s.LegalEnabled),
+		int64Field("legal", "consent_version", &s.LegalConsentVersion),
 		// site --- branding / domain
 		strField("site", "site_title", &s.SiteTitle),
 		strField("site", "app_title", &s.AppTitle),

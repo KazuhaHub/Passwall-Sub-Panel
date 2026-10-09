@@ -1528,6 +1528,7 @@ func (j *jsonRelayHealth) Scan(value any) error {
 // schemaModels is every current row managed by AutoMigrate and inspected by
 // schema_guard_test. Retired V2 tables are never created by the V4 binary.
 var schemaModels = []any{
+	&legalDocumentRow{},
 	&schemaMigrationRow{},
 	&userRow{},
 	&roleRow{},
