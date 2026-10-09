@@ -375,12 +375,19 @@ test('the build job compiles every release target, and reports all of them', () 
 // on every event, until go.sum happens to change. With each `go run` and
 // `go install` pin in the key, the change that moves a pin moves the key, and the
 // next main push saves a cache that has built it.
+//
+// A `go get` IS A PIN TOO, EVERY MODULE ON IT. staticcheck is built in a throwaway
+// module so that it can be compiled against a newer x/tools than its own go.mod
+// requires (test.yml says why), and both versions on that line decide what is
+// compiled: reading only the first would let the x/tools pin move under a key that
+// never names it, and reading only `go run` lines would see two tools, not three.
 test('go_static\'s build cache key names every tool the job compiles, at its pin', () => {
   const steps = job('go_static').replace(/^\s*#.*$/gm, '')
   const keys = [...steps.matchAll(/^ +key: (go-build-static-.+)$/gm)].map((m) => m[1])
   assert.equal(keys.length, 2, 'go_static restores one build cache and saves it')
   assert.equal(keys[0], keys[1], 'go_static must save under the key it restores, or no run ever hits it')
-  const tools = [...steps.matchAll(/\bgo (?:run|install) \S*\/([a-z0-9-]+)@(v\d+\.\d+\.\d+)/g)]
+  const tools = [...steps.matchAll(/\bgo (?:-C \S+ )?(?:run|install|get)((?: \S*\/[a-z0-9-]+@v\d+\.\d+\.\d+)+)/g)]
+    .flatMap((m) => [...m[1].matchAll(/\/([a-z0-9-]+)@(v\d+\.\d+\.\d+)/g)])
   assert(tools.length >= 3, `go_static compiles actionlint, staticcheck and govulncheck at pinned versions; found ${tools.length}`)
   for (const [, tool, version] of tools) {
     assert(

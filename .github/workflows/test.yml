@@ -945,7 +945,7 @@ jobs:
       - uses: actions/cache/restore@v6
         with:
           path: ~/.cache/go-build
-          key: go-build-static-${{ runner.os }}-${{ hashFiles('go.sum') }}-actionlint-v1.7.12-staticcheck-v0.8.1-govulncheck-v1.8.0
+          key: go-build-static-${{ runner.os }}-${{ hashFiles('go.sum') }}-actionlint-v1.7.12-staticcheck-v0.8.1-tools-v0.51.0-govulncheck-v1.8.0
           restore-keys: go-build-static-${{ runner.os }}-
       - uses: actions/cache/restore@v6
         with:
@@ -1027,9 +1027,27 @@ jobs:
       # greater than maximum supported version 2", and v0.8.1 works. A toolchain bump
       # that turns this step red is asking for the staticcheck bump in the same PR.
       #
+      # AND WHEN NO STATICCHECK RELEASE CAN READ IT, ITS DECODER IS BUMPED INSTEAD.
+      # go1.27.2 writes export data version 5 (method order, go.dev/issue/81188), and
+      # v0.8.1, still the newest release, decodes through the golang.org/x/tools its
+      # go.mod requires, which stops at 4: every package failed with "export data
+      # version 5 is greater than maximum supported version 4". The decoder is
+      # x/tools's and v0.51.0 reads 5, so v0.8.1 is built against it. `go run
+      # tool@version` cannot do that, because it resolves the tool's own go.mod and
+      # nothing else, so a throwaway module asks for both pins: the same minimal
+      # version selection and the same checksum database, with one more root. When a
+      # staticcheck release requires an x/tools that reads the toolchain's export
+      # data, this goes back to one `go run` line and the key drops the x/tools pin.
+      #
       # ~18s on a cold analysis cache, measured locally, in a job off the critical path.
       - name: staticcheck
-        run: go run honnef.co/go/tools/cmd/staticcheck@v0.8.1 -tags node_reinstall_acceptance ./...
+        run: |
+          set -euo pipefail
+          tool=$(mktemp -d "$RUNNER_TEMP/staticcheck.XXXXXX")
+          go -C "$tool" mod init staticcheck-build
+          go -C "$tool" get honnef.co/go/tools/cmd/staticcheck@v0.8.1 golang.org/x/tools@v0.51.0
+          go -C "$tool" build -o "$tool/staticcheck" honnef.co/go/tools/cmd/staticcheck
+          "$tool/staticcheck" -tags node_reinstall_acceptance ./...
       # EVERY OS THE RELEASE SHIPS, NOT ONLY THE RUNNER'S. govulncheck analyses the
       # packages as they build for the current GOOS, so an advisory whose vulnerable
       # code lives only in a _windows.go or _darwin.go file is never evaluated on a
@@ -1060,7 +1078,7 @@ jobs:
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         with:
           path: ~/.cache/go-build
-          key: go-build-static-${{ runner.os }}-${{ hashFiles('go.sum') }}-actionlint-v1.7.12-staticcheck-v0.8.1-govulncheck-v1.8.0
+          key: go-build-static-${{ runner.os }}-${{ hashFiles('go.sum') }}-actionlint-v1.7.12-staticcheck-v0.8.1-tools-v0.51.0-govulncheck-v1.8.0
 
   # The race suite is sharded because it is the critical path: at 4m22s it was
   # still running while the other twenty-two checks had finished.
