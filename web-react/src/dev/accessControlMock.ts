@@ -5,7 +5,7 @@ import type { Server } from '@/api/servers'
 import { destinationListAvailable } from '@/utils/destinationListAvailability'
 import { accessControlFixtureSeed, destinationPolicies, destinationStatus } from '@/test/accessControlFixtures'
 
-export const accessFixtureScenarios = ['normal', 'empty', 'error', 'catalog-missing', 'catalog-failed', 'policy-preview-error', 'policy-over-quota', 'policy-conflict', 'policy-save-pending', 'policy-lists-error', 'policy-groups-error', 'template-over-quota', 'templates-catalog-missing', 'list-original-read-error', 'settings-save-pending', 'list-delete-conflict'] as const
+export const accessFixtureScenarios = ['normal', 'empty', 'error', 'catalog-missing', 'catalog-failed', 'policy-preview-error', 'policy-over-quota', 'policy-conflict', 'policy-save-pending', 'policy-lists-error', 'policy-groups-error', 'template-over-quota', 'templates-catalog-missing', 'list-original-read-error', 'settings-save-pending', 'list-delete-conflict', 'account-read-error'] as const
 export type AccessFixtureScenario = typeof accessFixtureScenarios[number]
 
 function savedScenario(): AccessFixtureScenario {
@@ -71,6 +71,7 @@ export function createAccessControlMock(fallback: AxiosAdapter, options: { scena
   let published = structuredClone(seed.policies)
   let conflictInjected = false
   const failedOriginalReads = new Set<number>()
+  const failedAccountReads = new Set<number>()
   let catalogAvailable = !['catalog-missing', 'catalog-failed', 'templates-catalog-missing'].includes(scenario)
   let catalogDue = 0, catalogError = ''
   const defaults: AccessControlSettings = { dest_hit_retention_days: 30, dest_trial_retention_days: 7, dest_usage_retention_days: 7, dest_list_refresh_hours: 17, dest_policy_apply_min_seconds: 93 }
@@ -300,7 +301,14 @@ export function createAccessControlMock(fallback: AxiosAdapter, options: { scena
       }
     }
     const userMatch = path.match(/^\/admin\/dest\/users\/(\d+)$/)
-    if (userMatch && method === 'GET') return response(userAccess(Number(userMatch[1])))
+    if (userMatch && method === 'GET') {
+      const id = Number(userMatch[1])
+      if (scenario === 'account-read-error' && !failedAccountReads.has(id)) {
+        failedAccountReads.add(id)
+        return fail(503, 'fixture_unavailable')
+      }
+      return response(userAccess(id))
+    }
     const riskMatch = path.match(/^\/admin\/risk-center\/users\/(\d+)$/)
     if (riskMatch && method === 'GET') {
       const id = Number(riskMatch[1]), access = userAccess(id)

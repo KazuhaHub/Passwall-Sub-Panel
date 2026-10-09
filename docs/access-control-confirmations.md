@@ -110,3 +110,12 @@ are linked in the evidence index. The final relevant suite passed 440 tests in
 31 files, with TypeScript, changed-source lint, production build, fixture
 exclusion and all four production smoke checks passing. No exemption was
 actually canceled in the browser.
+
+### Account Access cancellation
+
+The account Access tab also calls `cancelExemptionCopy`. Its user-access
+response does not include deployment ETA, so the shared unavailable-ETA phrase
+is used without fabricating node counts or minutes. A real-language caller
+regression verifies the catalog, ordinary action and declined/no-DELETE path;
+native Enter on Cancel restores the 44px Cancel exemption button. Account
+drawer language/theme/read-state evidence is linked in the acceptance index.

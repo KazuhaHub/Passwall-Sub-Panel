@@ -1000,3 +1000,48 @@ and [released-node systemd acceptance](https://github.com/KazuhaHub/Passwall-Sub
 Third-party live-panel adapters were skipped. These results do not validate a
 subsequent commit or establish candidate Node enforcement. Complete S20/C5,
 C2/C6, owner approval and dependency/release gates remain open.
+
+### S16 account Access drawer: targets, locale and read states
+
+The account drawer's shared close, usage link, primary actions and More menu
+now have at least 44px targets. Access cancellation, add and failed-read Retry
+also meet that minimum. Expiry uses the interface locale and the latest
+successful read time, so a slow response cannot temporarily present an already
+expired exemption as active. Cancellation uses the shared ordinary-action copy;
+the user-access response has no ETA, so this caller honestly says a few minutes.
+
+| Chinese light desktop | Chinese dark desktop | Chinese light phone | Chinese dark phone | English light phone |
+| --- | --- | --- | --- | --- |
+| [1440](s16-account-zh-light-1440.jpg) | [1440](s16-account-zh-dark-1440.jpg) | [375](s16-account-zh-light-375.jpg) | [375](s16-account-zh-dark-375.jpg) | [375](s16-account-en-light-375.jpg) |
+
+[Measured bounds](s16-account-metrics.json) cover those five views and the
+following three read states; no drawer overflow was observed. The selected
+Access tab remains visible after the phone tab strip finishes scrolling. The
+portaled More menu item was measured at 44px. Enter cancellation returns to
+Cancel exemption; Escape closes the account drawer and restores Manage exemptions.
+
+| State | Native evidence |
+| --- | --- |
+| Failed account read, header and other tabs retained | [Phone](s16-account-read-error-zh-dark-375.jpg) |
+| Explicit Retry restores group and exemption | [Phone](s16-account-read-recovered-zh-dark-375.jpg) |
+| No group and no exemption | [Phone](s16-account-empty-zh-dark-375.jpg) |
+| Add dialog locks the current account | [Phone](s16-account-add-locked-zh-dark-375.jpg) |
+
+The Vite-only `account-read-error` scenario fails once per account and allows an
+explicit retry. Its adapter contract proves summaries remain available,
+exemptions remain unchanged and owned reads never fall through to live transport.
+The locked-account dialog was closed cleanly and returned focus to Exempt this
+account. No exemption was granted or canceled. Normal fixtures, English,
+automatic theme and default viewport were restored after inspection.
+
+Seven focused regressions failed against the old implementation; after repair,
+36 account-access/shared-drawer tests passed. The relevant suite passed 452 tests
+in 32 files, with TypeScript, changed-source lint, production build, fixture
+exclusion and four production smoke checks. This closes the demonstrated target,
+date and read-state defects; it does not establish complete S16/C5 pending-write
+acceptance, later-stage telemetry or candidate Node enforcement.
+
+The preceding exemption-focus head `57fa2d56da5c8bcd6b3f3e8c989c4c6e0f391831`
+passed its own [complete Test CI](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37901675984)
+and [released-node systemd acceptance](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37901675891).
+Those runs do not validate a subsequent commit; the third-party live-panel job was skipped.

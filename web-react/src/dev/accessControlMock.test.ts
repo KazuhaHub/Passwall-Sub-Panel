@@ -14,6 +14,19 @@ function harness(scenario: AccessFixtureScenario = 'normal') {
 afterEach(() => vi.useRealTimers())
 
 describe('reproducible access-control acceptance fixtures', () => {
+  it('fails one account-access read per account, while preserving its summary and allowing isolated retry', async () => {
+    const { client, fallback } = harness('account-read-error')
+    const before = (await client.get('/admin/dest/exemptions')).data
+    for (const id of [1, 2]) {
+      expect((await client.get(`/admin/risk-center/users/${id}`)).data.user.id).toBe(id)
+      await expect(client.get(`/admin/dest/users/${id}`)).rejects.toMatchObject({ response: { status: 503, data: { error: 'fixture_unavailable' } } })
+      const latest = (await client.get(`/admin/dest/users/${id}`)).data
+      expect(latest.exemption.user_id).toBe(id)
+      expect((await client.get(`/admin/dest/users/${id}`)).data).toEqual(latest)
+    }
+    expect((await client.get('/admin/dest/exemptions')).data).toEqual(before)
+    expect(fallback).not.toHaveBeenCalled()
+  })
   it('reports fresh references after a stale unused-list deletion without removing data or falling through', async () => {
     const { client, fallback } = harness('list-delete-conflict')
     const before = (await client.get('/admin/dest/lists/1', { params: { text: 1 } })).data

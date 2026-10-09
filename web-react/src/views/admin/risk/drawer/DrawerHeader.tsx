@@ -97,7 +97,7 @@ export default function DrawerHeader({ summary, headingId, onClose }: {
             {u.group_name && <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant }}>{u.group_name}</Typography>}
           </Box>
         </Box>
-        <IconButton onClick={onClose} aria-label={t('admin:risk_center.drawer.close')}><CloseIcon /></IconButton>
+        <IconButton onClick={onClose} aria-label={t('admin:risk_center.drawer.close')} sx={{ minWidth: 44, minHeight: 44 }}><CloseIcon /></IconButton>
       </Box>
       <Box sx={{ display: 'flex', gap: 0.75, flexWrap: 'wrap', alignItems: 'center' }}>
         <Chip size="small" variant="outlined" label={t(accountLabelKey(u))} />
@@ -118,7 +118,7 @@ export default function DrawerHeader({ summary, headingId, onClose }: {
         </Typography>
         <span>{`${usage ? formatGB(usage.period_used_bytes) : '—'} / ${limit}`}</span>
         <Button size="small" component={RouterLink} to={`/admin/traffic?tab=trend&scope=user&user=${u.id}`}
-          sx={{ textTransform: 'none' }}>
+          sx={{ textTransform: 'none', minWidth: 44, minHeight: 44 }}>
           {t('admin:risk_center.drawer.open_traffic')}
         </Button>
       </Box>

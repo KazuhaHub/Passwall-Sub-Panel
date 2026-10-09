@@ -59,7 +59,7 @@ function ActionBar({ subject, host, onStart }: {
     <Box sx={{ px: 2.5, pb: 1.5, display: 'flex', gap: 1, flexWrap: 'wrap', alignItems: 'center' }}>
       {primary.map(k => (
         <Button key={k} size="small" variant={k === 'pause' || k === 'convert_manual' ? 'outlined' : 'contained'}
-          color={k === 'pause' || k === 'convert_manual' ? 'error' : 'primary'} onClick={() => onStart(k, subject)}>
+          color={k === 'pause' || k === 'convert_manual' ? 'error' : 'primary'} sx={{ minWidth: 44, minHeight: 44 }} onClick={() => onStart(k, subject)}>
           {label(k)}
         </Button>
       ))}
@@ -67,19 +67,19 @@ function ActionBar({ subject, host, onStart }: {
           page owns it. Not offered on the Users page itself. */}
       {otherHold(subject) && host !== 'users' && (
         <Button size="small" component={RouterLink} to={`/admin/users?q=${encodeURIComponent(subject.upn)}`}
-          sx={{ textTransform: 'none' }}>
+          sx={{ textTransform: 'none', minWidth: 44, minHeight: 44 }}>
           {t('admin:risk_center.drawer.open_users')}
         </Button>
       )}
       {more.length > 0 && (
         <>
           <IconButton size="small" aria-label={t('admin:risk_center.actions.more')} aria-haspopup="menu"
-            onClick={e => setAnchor(e.currentTarget)}>
+            sx={{ minWidth: 44, minHeight: 44 }} onClick={e => setAnchor(e.currentTarget)}>
             <MoreHorizIcon fontSize="small" />
           </IconButton>
           <Menu anchorEl={anchor} open={anchor !== null} onClose={() => setAnchor(null)}>
             {more.map(k => (
-              <MenuItem key={k} onClick={() => { setAnchor(null); onStart(k, subject) }}>{label(k)}</MenuItem>
+              <MenuItem key={k} sx={{ minHeight: 44 }} onClick={() => { setAnchor(null); onStart(k, subject) }}>{label(k)}</MenuItem>
             ))}
           </Menu>
         </>
@@ -175,7 +175,7 @@ export default function RiskUserDrawer({ userId, onClose, host, initialTab }: {
     body = (
       <Box sx={{ p: 2.5, display: 'flex', flexDirection: 'column', gap: 1.5 }}>
         <Box sx={{ display: 'flex', justifyContent: 'flex-end' }}>
-          <IconButton onClick={onClose} aria-label={t('admin:risk_center.drawer.close')}><CloseIcon /></IconButton>
+          <IconButton onClick={onClose} aria-label={t('admin:risk_center.drawer.close')} sx={{ minWidth: 44, minHeight: 44 }}><CloseIcon /></IconButton>
         </Box>
         {status === 404 ? (
           <Typography id={headingId} sx={{ fontSize: 14, color: md.onSurfaceVariant }}>
@@ -190,7 +190,7 @@ export default function RiskUserDrawer({ userId, onClose, host, initialTab }: {
             <Typography id={headingId} sx={{ fontSize: 14, color: md.error }}>
               {t('admin:risk_center.load_failed', { error: serverError })}
             </Typography>
-            <Button variant="outlined" size="small" sx={{ alignSelf: 'flex-start' }} onClick={() => void q.refetch()}>
+            <Button variant="outlined" size="small" sx={{ alignSelf: 'flex-start', minWidth: 44, minHeight: 44 }} onClick={() => void q.refetch()}>
               {t('admin:risk_center.retry')}
             </Button>
           </>

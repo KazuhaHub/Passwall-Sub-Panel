@@ -484,6 +484,16 @@ describe('RiskUserDrawer', () => {
     mount(7, vi.fn(), 'access'); await header()
     expect(selectedTab()).toBe('访问')
   })
+  it('provides 44px header, shared action and portaled menu targets', async () => {
+    serve(); mount(7); await header()
+    const targets = [screen.getByRole('button', { name: '关闭' }), screen.getByRole('button', { name: '暂停代理服务' }), screen.getByRole('button', { name: '更多操作' }), screen.getByRole('link', { name: '查看用量趋势' })]
+    for (const target of targets) {
+      expect(parseFloat(getComputedStyle(target).minHeight)).toBeGreaterThanOrEqual(44)
+      expect(parseFloat(getComputedStyle(target).minWidth)).toBeGreaterThanOrEqual(44)
+    }
+    fireEvent.click(screen.getByRole('button', { name: '更多操作' }))
+    for (const item of await screen.findAllByRole('menuitem')) expect(parseFloat(getComputedStyle(item).minHeight)).toBeGreaterThanOrEqual(44)
+  })
   it('does not show or read destination access for operators', async () => {
     serve(); useAuthStore.setState({ role: 'operator' })
     mount(7, vi.fn(), 'access'); await header()
