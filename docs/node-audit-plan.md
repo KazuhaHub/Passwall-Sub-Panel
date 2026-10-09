@@ -1,6 +1,6 @@
 # 节点访问控制（目的地策略、命中记录、白名单分组、隐私页）：最终实施计划
 
-- **状态**：第十版／最终执行版（2026-10-09），按 §11 执行。部分工作包已有开发实现，但尚未完成阶段验收或发布；本文的测试与验收都是交付要求，实际进度单独记录在 §11.5。
+- **状态**：第十一版／最终执行版（2026-10-09），按 §11 执行。部分工作包已有开发实现，但尚未完成阶段验收或发布；本文的测试与验收都是交付要求，实际进度单独记录在 §11.5。
 - **文档来源**：第三版 `bb50b09f12f0bdaeb234c1390ce97c57af53b9bb`，原分支 `kazuha/access-control-and-dashboard-plans`。本版保留完整的界面、权限与发布设计，将七项复核问题落实到正文、协议、表结构、测试与验收，不另留待解释的补丁清单：
   1. 回退按实际 mint 的候选摘要与来源判定，修剪后的 LKG 被拒也能退出；
   2. 拦截、全局观察、白名单试运行、用量从聚合器到批次、队列、预算分别隔离；
@@ -19,6 +19,8 @@
   第九版补齐审计指标的双标签实现边界：现有指标只支持一个标签，不能直接表达 P9 的 kind × outcome。新增受限的双标签计数器，保持既有单标签指标和诊断 JSON 兼容，并为审计指标的双标签组合补全中文、英文展示与测试；不改变业务范围、队列预算或验收门槛。
 
   第十版补齐三方言持久去重和日志边界：MySQL 的 `CLIENT_FOUND_ROWS` 会把无变化的冲突更新报告为一行，不能仅凭 affected rows 判断是否首次插入。首块事务在持久节点所有者锁内检查已有批次，再执行无异常冲突插入；重发不再次预留预算或累计计数。审计 SQL 参数及数据库错误详情可能带目的地，因此独立关闭此存储边界的 SQL tracing，仅向 worker 返回固定错误类别。增加真实 MySQL 开启该连接选项的测试；原阶段、默认值、23 屏和验收要求保持完整。
+
+  第十一版补齐接收端损失缓冲的重试幂等性：每次最多冻结 200 个键，固定随机批次 ID 与首次接收时间；写失败重试同一增量，新计数另存。数据库已提交但返回错误也不会重复累加。冻结增量最长重试 48 小时，持久标记保留 72 小时；超期未确认或强制终止时计入未保存键诊断，不把缺失损失记录当作完整历史。计划分支的构建工具链同步到 Go 1.27.2，修复当前 CI 在 1.27.1 标准库发现的可达漏洞，最低支持版本和功能范围不变。
 
   §1 原有 6 条所有者决定保持不变；本次分类处理选择另记在 §1.3。§1.2 的两项按已写明的默认执行，不阻塞核心功能；其中 N0-S 必须先完成真实环境验证。
 - **涉及仓库**：Passwall-Protocol（线上类型）、Passwall-Node（执行与采集）、Passwall-Sub-Panel（策略、存储、界面）
@@ -915,6 +917,7 @@ CompiledPolicy 含 `Policy *protocol.DestinationPolicy` 与 `MintMetadata{kind,g
    - **去重行**：首块事务锁住持久 `node_agents` 所有者行，核对当前面板身份和采集许可，并在此锁内检查 `(agent_id, batch_id)` 是否已经存在；存在则直接判重复。不存在时执行 `INSERT dest_audit_batches … ON CONFLICT DO NOTHING`（MySQL 使用键列自赋值的无异常冲突更新），插入的 `RowsAffected == 0` 同样判重复，但不能把非零值单独当作首次插入的证明：MySQL 的 `CLIENT_FOUND_ROWS` 会令自赋值返回 1，见 [MySQL 官方说明](https://dev.mysql.com/doc/refman/8.4/en/insert-on-duplicate.html)。重复不再扣预算、写损失计数或累加行。该事务同时预留该类预算、记录收到的 Dropped/Unmatched 与写第一块数据；三方言都用无异常冲突处理，不能靠捕获 PG 主键错误。首次 received_at 决定 72h 清理时间。增加真实 MySQL `clientFoundRows=true` 的跨连接重发测试，不用离线 SQL 或模拟结果代替该项验收。
    - **分块**：每个事务不超过 1 000 行，每条语句 200 行；`count` 累加，first/last 合并：PG 与 MySQL 用 `LEAST`/`GREATEST`，SQLite 用两参数的 `MIN(a,b)`/`MAX(a,b)`。照 `service/rollup/rollup.go:441` 的 `onConflictClause(dialect, …)` 写方言分支，三方言各有测试。
    - **失败**：某一块失败时，已提交块保留，其余不再写；首块提交过则去重行与整批预算预留保留，后续重发不补写未提交块，防止重计；首块回滚则本次未落任何数据。Warn 只带 agent_id、行数和固定错误类别，计 `ingest_error{kind}`；审计存储操作独立关闭 SQL tracing，即使全局 Debug、慢查询或失败也不输出原始目的地、账号及数据库值详情。错误计数进入独立的有界计数缓冲，由 worker 合并写 loss 表，不在 Sync 中等 DB；缓冲最多 10 000 个面板/小时/种类/原因键，满或写失败计诊断指标并将查询标为不完整，不能让损失记录再阻塞控制面。
+   - **损失刷写重试**：独立缓冲总共最多 10 000 个键，冻结与新增键一起计入上限；每个事务最多冻结 200 个键，固定一个 32 位小写十六进制随机 ID 和首次接收时间。失败不取走增量，也不把新计数合入失败批次；重试同一冻结批次，成功后只移除该批增量。接收端标记使用 `dest_audit_batches` 的空 `agent_id` 命名空间和 `kind=receiver_loss`，有效节点 ID 及 Node 入库均禁止空 ID；它不消耗 Node 行数预算，不含账号或目的地。该标记与 loss 累加在同一事务提交，同一进程的接收端批次只由单 worker 持有，刷写重试串行化；MySQL `CLIENT_FOUND_ROWS` 不改变重发结果。冻结批次只在 `[now−48h, now+1h]` 的首次接收时间窗口内首次入库，72h 标记清理后旧批次不能重新累加；已存在标记可直接确认。超期未确认仅丢该冻结增量并计入 `psp_dest_audit_loss_buffer_dropped_total`，新计数继续排队。常规写失败保留增量供重试，并计诊断，不阻塞 Sync。用故障注入覆盖提交已成功但返回错误、失败期间新计数、缓冲满、窗口与保留边界，三方言实际执行。
 5. **试运行行**：节点已经折叠好（§4.2，R15），PSP **只校验、不折叠**。执行阶段（`action = block`）的 `g*` 命中照常带账号与完整主机名，因为它们是真正的拦截，管理员要能回答「某人为什么打不开某站」。
 6. **入库预算与丢失口径**：按第 3 条表中四个独立预算执行。额度按**最终主键归并后的逻辑写入行数**计算，不是 Count 中的连接事件数，也不是数据库中首次出现的新键数。首块事务按原子条件更新 budget 桶，防止并发绕过；超出时按固定顺序保留额度内行，其余计 `over_budget{kind}`。部分块失败不退还已预留预算，PSP 重启不重置它；旧批次按已去重路径不再次消耗预算。
    - loss 表分别累加丢失行数、节点丢失事件数与无法解析事件数，计数批次也去重入库；队列满、档位关闭、worker 错误使用上述计数缓冲记录丢行。`dropped_in_range` 仅兼容表示 PSP 已观测的丢行估计，另返回 `losses:{rows,events,unmatched,scope:"panel",complete:false}`，**不得把行数与事件数相加**，不得把遥测描述成完整日志。
@@ -1085,7 +1088,7 @@ CompiledPolicy 含 `Policy *protocol.DestinationPolicy` 与 `MintMetadata{kind,g
 | `psp_node_audit_report_total` | CounterVec | `kind` = `block`\|`observe`\|`trial`\|`usage`\|`unknown`（非法或超大子树无法安全判定 Kind 时用 unknown）；`outcome` = `accepted`\|`oversized`\|`invalid`\|`no_capability`\|`duplicate_batch`\|`queue_full`\|`ingest_error`（`node_audit_report`） | 2c |
 | `psp_dest_audit_rows_total` | CounterVec | `kind` = `block`\|`observe`\|`trial`\|`usage`；`outcome` = `stored`\|`unknown_subject`\|`out_of_range`\|`over_budget`\|`collect_off`\|`stale_collect_revision`（`dest_rows`） | 2c |
 | `psp_dest_audit_node_dropped_total`、`psp_dest_audit_node_unmatched_total` | Counter | — | 2c |
-| `psp_dest_audit_loss_buffer_dropped_total` | Counter | 损失计数缓冲满或强制终止时未保存的键数；只用于诊断，不能倒算历史 losses | 2c |
+| `psp_dest_audit_loss_buffer_dropped_total` | Counter | 损失计数缓冲满、冻结增量重试超期或强制终止时未保存的键数；只用于诊断，不能倒算历史 losses | 2c |
 
 审计的两项 CounterVec family 使用新增的 `CounterPairVec`，只接收调用点已经校验并归一化的固定 kind/outcome 枚举，不把节点输入、agent_id 或面板 ID 用作标签。保持原单标签 `CounterVec` API 和诊断 JSON 形状；双标签的 series 名写为 `family{kind=block,outcome=accepted}`。诊断目录与原始指标表仅对这两项已登记 family 识别标签组合，并用既定标签组分别翻译种类与结果；其他 family 的单标签值仍按原语法完整保留（包括值内的等号或逗号）。双标签计数器的并发与不同组合隔离、series 名、旧单标签兼容和中英文组合展示均先写失败测试，再实施。
 
