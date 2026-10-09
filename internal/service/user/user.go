@@ -590,7 +590,29 @@ type CreateLocalInput struct {
 	PendingEmailVerify bool
 	// SelfRegistered marks the account as created via public signup, so it's
 	// excluded from silent first-time SSO linking (see User.SelfRegistered).
-	SelfRegistered bool
+	SelfRegistered         bool
+	AcceptedConsentVersion int64
+}
+
+// ResumeRegistration is distinct from an administrative password reset: the
+// SQL writer rechecks pending-account state and legal consent atomically.
+func (s *Service) ResumeRegistration(ctx context.Context, userID int64, password string, accepted int64) error {
+	if !IsMinimallyStrongPassword(password) {
+		return fmt.Errorf("%w: password too weak", domain.ErrValidation)
+	}
+	w, ok := s.users.(ports.RegisteredUserWriter)
+	if !ok {
+		return fmt.Errorf("%w: registration transaction unavailable", domain.ErrUnavailable)
+	}
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return err
+	}
+	if err := w.ResumeRegistration(ctx, userID, string(hash), accepted); err != nil {
+		return err
+	}
+	s.invalidateAuth(userID)
+	return nil
 }
 
 // CreateLocalResult conveys the generated initial password (shown to admin
@@ -726,7 +748,15 @@ func (s *Service) CreateLocal(ctx context.Context, in CreateLocalInput) (*Create
 		u.Enabled = false
 		u.AutoDisabledReason = domain.DisabledPendingEmailVerify
 	}
-	if err := s.users.Create(ctx, u); err != nil {
+	if in.SelfRegistered {
+		w, ok := s.users.(ports.RegisteredUserWriter)
+		if !ok {
+			return nil, fmt.Errorf("%w: registration transaction unavailable", domain.ErrUnavailable)
+		}
+		if err := w.CreateRegistered(ctx, u, in.AcceptedConsentVersion); err != nil {
+			return nil, err
+		}
+	} else if err := s.users.Create(ctx, u); err != nil {
 		return nil, err
 	}
 	return &CreateLocalResult{User: u, InitialPassword: pwd}, nil

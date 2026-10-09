@@ -1529,6 +1529,7 @@ func (j *jsonRelayHealth) Scan(value any) error {
 // schema_guard_test. Retired V2 tables are never created by the V4 binary.
 var schemaModels = []any{
 	&legalDocumentRow{},
+	&legalConsentRow{},
 	&schemaMigrationRow{},
 	&userRow{},
 	&roleRow{},

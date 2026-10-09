@@ -162,8 +162,9 @@ type App struct {
 	// it has no retention; but it has no foreign key either, and a deleted
 	// account's row — an admin's note about somebody nobody can open — would
 	// otherwise stay for ever: TestBuildPrunesRiskReviewOrphans.
-	riskReviews riskReviewPruner
-	saml        *auth.SAMLService
+	riskReviews   riskReviewPruner
+	legalConsents legalConsentPruner
+	saml          *auth.SAMLService
 	// repos kept around so Run() can call initAdminIfNeeded AFTER the
 	// listen socket is bound — that way a bind failure (port busy / TLS
 	// misconfig / EACCES) doesn't leave the user staring at a closed
@@ -763,6 +764,7 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	a.connHistory = connHistory
 	a.flagRecords = flagRecords
 	a.riskReviews = riskReviews
+	a.legalConsents = repos.Legal
 	// The observe-only risk signals. The worker is handed read-only views and
 	// one store that writes only risk_signals (and, in the same transaction,
 	// the flag records of what each save changed) — the store built above,
@@ -1340,6 +1342,7 @@ func (a *App) runAuditCleanupLoop(ctx context.Context) {
 		a.pruneConnectionHistory(ctx)
 		a.pruneFlagRecords(ctx)
 		a.pruneRiskReviews(ctx)
+		a.pruneLegalConsents(ctx)
 		a.pruneCertEvents(ctx)
 		select {
 		case <-ctx.Done():
@@ -1644,6 +1647,22 @@ func (a *App) pruneFlagRecords(ctx context.Context) {
 // store, and all it is handed.
 type riskReviewPruner interface {
 	PurgeOrphans(ctx context.Context) (int64, error)
+}
+
+type legalConsentPruner interface {
+	PurgeOrphans(context.Context) (int64, error)
+}
+
+func (a *App) pruneLegalConsents(ctx context.Context) {
+	if a.legalConsents == nil {
+		return
+	}
+	n, err := a.legalConsents.PurgeOrphans(ctx)
+	if err != nil {
+		log.Warn("legal consent orphan purge", "err", err)
+	} else if n > 0 {
+		log.Info("legal consent orphan purge", "deleted", n)
+	}
 }
 
 // pruneRiskReviews deletes the review rows of accounts that no longer exist.

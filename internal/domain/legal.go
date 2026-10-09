@@ -14,6 +14,13 @@ const MaxLegalContentBytes = 60000
 
 var ErrLegalContentTooLarge = errors.New("legal_content_too_large")
 var ErrLegalVersionConflict = errors.New("legal_version_conflict")
+var ErrLegalConsentOutdated = errors.New("legal_consent_outdated")
+
+type LegalConsentStatus struct {
+	Enabled        bool  `json:"enabled"`
+	ConsentVersion int64 `json:"consent_version"`
+	Pending        bool  `json:"pending"`
+}
 
 func ValidateLegalIdentity(kind, locale string) error {
 	if kind != "terms" && kind != "privacy" {
