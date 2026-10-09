@@ -381,6 +381,10 @@ test('go_static\'s build cache key names every tool the job compiles, at its pin
   assert.equal(keys.length, 2, 'go_static restores one build cache and saves it')
   assert.equal(keys[0], keys[1], 'go_static must save under the key it restores, or no run ever hits it')
   const tools = [...steps.matchAll(/\bgo (?:run|install) \S*\/([a-z0-9-]+)@(v\d+\.\d+\.\d+)/g)]
+  const toolModule = readFileSync(new URL('../tools/staticcheck/go.mod', import.meta.url), 'utf8')
+  const analyzer = /honnef\.co\/go\/tools (v\d+\.\d+\.\d+)/.exec(toolModule)
+  assert(analyzer, 'the isolated staticcheck module must pin an analyzer release')
+  tools.push(['', 'staticcheck', analyzer[1]])
   assert(tools.length >= 3, `go_static compiles actionlint, staticcheck and govulncheck at pinned versions; found ${tools.length}`)
   for (const [, tool, version] of tools) {
     assert(
@@ -388,6 +392,14 @@ test('go_static\'s build cache key names every tool the job compiles, at its pin
       `go_static compiles ${tool}@${version} and its build cache key does not name it: the key is written once per go.sum, so no main save would ever hold that build`,
     )
   }
+  assert(keys[0].includes("hashFiles('go.sum', 'tools/staticcheck/go.mod', 'tools/staticcheck/go.sum')"), 'the build cache must change when the isolated analyzer dependency graph changes')
+})
+
+test('staticcheck uses its pinned tool module and analyzes the application with acceptance files', () => {
+  const steps = job('go_static').replace(/^\s*#.*$/gm, '')
+  assert(steps.includes('go -C tools/staticcheck build -o "$RUNNER_TEMP/psp-staticcheck" honnef.co/go/tools/cmd/staticcheck'), 'build the analyzer from its isolated module so its export reader can follow the compiler')
+  assert(steps.includes('"$RUNNER_TEMP/psp-staticcheck" -tags node_reinstall_acceptance ./...'), 'run the resulting analyzer against the full application and acceptance files')
+  assert(!/staticcheck@\S+/.test(steps), 'go run package@version ignores the tool-module export reader pin')
 })
 
 // ONE PACKAGE IS HALF THE RACE SUITE, AND PACKAGES CANNOT BALANCE IT.
@@ -531,7 +543,7 @@ test('caches are restored on every event and saved only from the default branch'
 // key restored everywhere, and only go_static writes it, after govulncheck has loaded the
 // widest module set any job needs.
 test('setup-go caches nothing, and only go_static saves the module cache, after govulncheck', () => {
-  const modKey = "go-mod-${{ runner.os }}-${{ hashFiles('go.sum') }}"
+  const modKey = "go-mod-${{ runner.os }}-${{ hashFiles('go.sum', 'tools/staticcheck/go.mod', 'tools/staticcheck/go.sum') }}"
   const savers = []
   let setups = 0
   for (const [name, raw] of jobs()) {
