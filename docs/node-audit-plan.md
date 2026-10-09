@@ -1,6 +1,6 @@
 # 节点访问控制（目的地策略、命中记录、白名单分组、隐私页）：最终实施计划
 
-- **状态**：第六版／最终执行版（2026-10-04），按 §11 执行。部分工作包已有开发实现，但尚未完成阶段验收或发布；本文的测试与验收都是交付要求，实际进度单独记录在 §11.5。
+- **状态**：第十版／最终执行版（2026-10-09），按 §11 执行。部分工作包已有开发实现，但尚未完成阶段验收或发布；本文的测试与验收都是交付要求，实际进度单独记录在 §11.5。
 - **文档来源**：第三版 `bb50b09f12f0bdaeb234c1390ce97c57af53b9bb`，原分支 `kazuha/access-control-and-dashboard-plans`。本版保留完整的界面、权限与发布设计，将七项复核问题落实到正文、协议、表结构、测试与验收，不另留待解释的补丁清单：
   1. 回退按实际 mint 的候选摘要与来源判定，修剪后的 LKG 被拒也能退出；
   2. 拦截、全局观察、白名单试运行、用量从聚合器到批次、队列、预算分别隔离；
@@ -11,6 +11,14 @@
   7. 采集关闭或降档时，节点清理旧版本待发数据，PSP 投递与每块入库检查当前档位及持久化 revision；快速关闭再开启也不复活旧批次。
 
   第六版保留第五版的并发编辑版本、后台刷新提交条件、发布错误 CAS、分阶段迁移边界和工作包交接证据，落实所有者确认的「社区分类剔除过宽条目并显示解析报告」，同步存储、API、界面、空结果保护与真实数据验收；保留第四版七项修订及完整 23 屏设计。
+
+  第七版补充法律文档发布的基准版本检查：S21 始终提交所审阅正文的 `expected_version`，发布事务锁内检查当前种类和语言的最新版本。过期草稿返回 409，保留草稿并重新核对，不新增文档或提高同意版本；旧调用方省略该可选字段仍保持兼容。所有阶段、23 屏和真实验收门槛保持完整。
+
+  第八版补充 webhook 鉴权令牌的重启一致性：保存的 Xray artifact 已含令牌，sink 在重启时必须读取同一私有令牌，不能每次生成新值并等联网 converge 后才恢复命中记录。该要求只完善 N4 的启动与验收，不改变任何档位默认、采集隐私边界、阶段或完整验收范围。
+
+  第九版补齐审计指标的双标签实现边界：现有指标只支持一个标签，不能直接表达 P9 的 kind × outcome。新增受限的双标签计数器，保持既有单标签指标和诊断 JSON 兼容，并为审计指标的双标签组合补全中文、英文展示与测试；不改变业务范围、队列预算或验收门槛。
+
+  第十版补齐三方言持久去重和日志边界：MySQL 的 `CLIENT_FOUND_ROWS` 会把无变化的冲突更新报告为一行，不能仅凭 affected rows 判断是否首次插入。首块事务在持久节点所有者锁内检查已有批次，再执行无异常冲突插入；重发不再次预留预算或累计计数。审计 SQL 参数及数据库错误详情可能带目的地，因此独立关闭此存储边界的 SQL tracing，仅向 worker 返回固定错误类别。增加真实 MySQL 开启该连接选项的测试；原阶段、默认值、23 屏和验收要求保持完整。
 
   §1 原有 6 条所有者决定保持不变；本次分类处理选择另记在 §1.3。§1.2 的两项按已写明的默认执行，不阻塞核心功能；其中 N0-S 必须先完成真实环境验证。
 - **涉及仓库**：Passwall-Protocol（线上类型）、Passwall-Node（执行与采集）、Passwall-Sub-Panel（策略、存储、界面）
@@ -581,6 +589,8 @@ type AuditUsage struct {
    - `http.Server` 设 `ReadHeaderTimeout: 2s` 与 `MaxHeaderBytes`（如 8 KiB）；
    - **不用** Linux abstract socket（`@…`）：它绕过文件权限，本机任何进程都能伪造命中。
 
+   webhook 令牌首次用 `crypto/rand` 生成 32 字节并编码成 64 位小写 hex，以 0600 保存到 `<DataDir>/runtime/audit.token`。重启严格读取并复用该令牌；现有令牌文件必须是普通文件、权限 0600、内容合法，损坏或符号链接导致启动失败，不能偷偷换新值。数据目录迁移与备份保留令牌及已保存的部署 artifact；清理残留 socket 不删除令牌。测试令牌文件权限、重启复用、非法内容和符号链接；真实验收包含 PSP 不可达时 agent 重启后旧 artifact 的 webhook 仍能通过鉴权。
+
    监听成功后，才把 `AuditSocket` 交给编译器（N1-X）。
    **sink 作为 `lifecycle.Service` 运行**（与 `core supervisor` 等并列，`cmd/node/main.go:359-366`）：`Serve` 出错或 panic 就返回错误，让 agent 退出，由 systemd 或 Docker 重启，与 supervisor 的失败语义一致。**不允许在声明了 `audit.hits.v1` 之后悄悄降级**：那样 PSP 会继续下发 `Collect=hits`，webhook 全部失败，命中静默丢失，界面却仍显示「在记录」。
 2. 极简 HTTP handler：
@@ -640,7 +650,7 @@ type AuditUsage struct {
 三个新能力都加进 `cmd/node/main.go:308` 的**静态** `capabilities` 切片（与 `host.telemetry.v1` 同处），**不放进 `CapabilitySource`**（F24）：
 
 - `policy.destination.v1`：两种 engine 都支持执行，始终声明。
-- `audit.hits.v1`：N4 接收器监听成功才声明；监听失败则不声明，并打一条 Warn。声明之后 sink 出错就让 agent 退出重启（N4 第 1 条），不会出现「声明了却不在收」。
+- `audit.hits.v1`：N4 接收器监听成功才声明；平台不支持或 socket 监听失败则不声明，并打一条 Warn。令牌文件读取、权限或内容校验失败按 N4 视为启动失败，不能当成监听不可用而继续运行。声明之后 sink 出错就让 agent 退出重启（N4 第 1 条），不会出现「声明了却不在收」。
 - `audit.usage.v1`：阶段 4 起始终声明。sing-box 节点不发 Audit，PSP 按 engine 推导出「只执行」（R17），不需要节点另外表达。
 
 不按 engine 动态声明，是因为 PSP 可以在运行中更换 engine：动态声明会让能力随换核闪烁，触发 §9.2 的白名单重同步。
@@ -902,9 +912,9 @@ CompiledPolicy 含 `Policy *protocol.DestinationPolicy` 与 `MintMetadata{kind,g
 4. **worker 的入库**：
    - **逐行映射**：subject → user_id（试运行行的空 subject → 0）；rule_id → `source`（只做语法映射，见 §4.1）；未知 subject 丢弃并计 `unknown_subject`；`Hour` 不在 [now−48h, now+1h] 内的丢弃并计 `out_of_range`。
    - **先在内存里按最终主键归并**：`count` 相加，first 取 min，last 取 max。映射之后同一批里会出现主键相同的行（`p12x1` 和 `p12x2` 都映射到 `p12`），而 PostgreSQL 的多行 `INSERT … ON CONFLICT DO UPDATE` 遇到同一语句内的重复键会直接报错（`ON CONFLICT DO UPDATE command cannot affect row a second time`），整批失败。
-   - **去重行**：第一个事务先 `INSERT dest_audit_batches … ON CONFLICT DO NOTHING`，以 `RowsAffected == 0` 判重复；重复不再扣预算、写损失计数或累加行。该事务同时预留该类预算、记录收到的 Dropped/Unmatched 与写第一块数据；三方言都用无异常冲突处理，不能靠捕获 PG 主键错误。首次 received_at 决定 72h 清理时间。
+   - **去重行**：首块事务锁住持久 `node_agents` 所有者行，核对当前面板身份和采集许可，并在此锁内检查 `(agent_id, batch_id)` 是否已经存在；存在则直接判重复。不存在时执行 `INSERT dest_audit_batches … ON CONFLICT DO NOTHING`（MySQL 使用键列自赋值的无异常冲突更新），插入的 `RowsAffected == 0` 同样判重复，但不能把非零值单独当作首次插入的证明：MySQL 的 `CLIENT_FOUND_ROWS` 会令自赋值返回 1，见 [MySQL 官方说明](https://dev.mysql.com/doc/refman/8.4/en/insert-on-duplicate.html)。重复不再扣预算、写损失计数或累加行。该事务同时预留该类预算、记录收到的 Dropped/Unmatched 与写第一块数据；三方言都用无异常冲突处理，不能靠捕获 PG 主键错误。首次 received_at 决定 72h 清理时间。增加真实 MySQL `clientFoundRows=true` 的跨连接重发测试，不用离线 SQL 或模拟结果代替该项验收。
    - **分块**：每个事务不超过 1 000 行，每条语句 200 行；`count` 累加，first/last 合并：PG 与 MySQL 用 `LEAST`/`GREATEST`，SQLite 用两参数的 `MIN(a,b)`/`MAX(a,b)`。照 `service/rollup/rollup.go:441` 的 `onConflictClause(dialect, …)` 写方言分支，三方言各有测试。
-   - **失败**：某一块失败时，已提交块保留，其余不再写；首块提交过则去重行与整批预算预留保留，后续重发不补写未提交块，防止重计；首块回滚则本次未落任何数据。Warn 只带 agent_id、行数和错误，计 `ingest_error{kind}`。错误计数进入独立的有界计数缓冲，由 worker 合并写 loss 表，不在 Sync 中等 DB；缓冲最多 10 000 个面板/小时/种类/原因键，满或写失败计诊断指标并将查询标为不完整，不能让损失记录再阻塞控制面。
+   - **失败**：某一块失败时，已提交块保留，其余不再写；首块提交过则去重行与整批预算预留保留，后续重发不补写未提交块，防止重计；首块回滚则本次未落任何数据。Warn 只带 agent_id、行数和固定错误类别，计 `ingest_error{kind}`；审计存储操作独立关闭 SQL tracing，即使全局 Debug、慢查询或失败也不输出原始目的地、账号及数据库值详情。错误计数进入独立的有界计数缓冲，由 worker 合并写 loss 表，不在 Sync 中等 DB；缓冲最多 10 000 个面板/小时/种类/原因键，满或写失败计诊断指标并将查询标为不完整，不能让损失记录再阻塞控制面。
 5. **试运行行**：节点已经折叠好（§4.2，R15），PSP **只校验、不折叠**。执行阶段（`action = block`）的 `g*` 命中照常带账号与完整主机名，因为它们是真正的拦截，管理员要能回答「某人为什么打不开某站」。
 6. **入库预算与丢失口径**：按第 3 条表中四个独立预算执行。额度按**最终主键归并后的逻辑写入行数**计算，不是 Count 中的连接事件数，也不是数据库中首次出现的新键数。首块事务按原子条件更新 budget 桶，防止并发绕过；超出时按固定顺序保留额度内行，其余计 `over_budget{kind}`。部分块失败不退还已预留预算，PSP 重启不重置它；旧批次按已去重路径不再次消耗预算。
    - loss 表分别累加丢失行数、节点丢失事件数与无法解析事件数，计数批次也去重入库；队列满、档位关闭、worker 错误使用上述计数缓冲记录丢行。`dropped_in_range` 仅兼容表示 PSP 已观测的丢行估计，另返回 `losses:{rows,events,unmatched,scope:"panel",complete:false}`，**不得把行数与事件数相加**，不得把遥测描述成完整日志。
@@ -1076,6 +1086,8 @@ CompiledPolicy 含 `Policy *protocol.DestinationPolicy` 与 `MintMetadata{kind,g
 | `psp_dest_audit_rows_total` | CounterVec | `kind` = `block`\|`observe`\|`trial`\|`usage`；`outcome` = `stored`\|`unknown_subject`\|`out_of_range`\|`over_budget`\|`collect_off`\|`stale_collect_revision`（`dest_rows`） | 2c |
 | `psp_dest_audit_node_dropped_total`、`psp_dest_audit_node_unmatched_total` | Counter | — | 2c |
 | `psp_dest_audit_loss_buffer_dropped_total` | Counter | 损失计数缓冲满或强制终止时未保存的键数；只用于诊断，不能倒算历史 losses | 2c |
+
+审计的两项 CounterVec family 使用新增的 `CounterPairVec`，只接收调用点已经校验并归一化的固定 kind/outcome 枚举，不把节点输入、agent_id 或面板 ID 用作标签。保持原单标签 `CounterVec` API 和诊断 JSON 形状；双标签的 series 名写为 `family{kind=block,outcome=accepted}`。诊断目录与原始指标表仅对这两项已登记 family 识别标签组合，并用既定标签组分别翻译种类与结果；其他 family 的单标签值仍按原语法完整保留（包括值内的等号或逗号）。双标签计数器的并发与不同组合隔离、series 名、旧单标签兼容和中英文组合展示均先写失败测试，再实施。
 
 Node 同步记录 `audit_expired_dropped`、`audit_collect_off_dropped`、聚合溢出与过滤器故障的本地诊断计数，分别注明行数/事件数；这些未必能到达 PSP，不把 PSP 的 dropped 值当作完整丢失数。PSP 计数缓冲写失败保留待重试的增量；重启丢失、TTL 过期、无法确认的统计按 R20 披露。
 
@@ -2666,6 +2678,7 @@ tab 条：策略 policies | 列表 lists | 白名单分组 allowlist | 记录 re
 - 「插入『我们收集什么』」在光标处插入单独一行 `[[data-collection]]`；正文里已有时按钮禁用。
 - 预览与公开页用同一个渲染组件，输入停 300ms 后刷新。
 - 发布对话框：勾选「重大变更」时，正文实时显示受影响的普通用户数。
+- 发布绑定所审阅的 `expected_version`；同一语言的基准已更新时返回 409，保留草稿并重新载入基准。重载失败时不允许再次发布，直到成功读取。拒绝不新增文档、不提高同意版本、不使缓存失效。
 
 **文案**：tab「隐私与协议」；其余见线框。保留期一律从设置插值，订阅日志保留为 0 时写「永久保留」。
 
@@ -2857,7 +2870,7 @@ tab 条：策略 policies | 列表 lists | 白名单分组 allowlist | 记录 re
 | 设置 | `legal.enabled`（默认 false）、`legal.consent_version`（默认 0）。**单一写入方**：`consent_version` 只由发布接口写；系统设置 PUT 保留它，加 `TestSettingsPut_PreservesLegalConsentVersion`（照 `admin_settings_policy_preserve_test.go:55`） |
 | 公开 API | `GET /api/legal/:kind?lang=` → `{version, consent_version, locale, fallback_from?, content, published_at, data_collection:{…}}`，带 ETag（照 `handler/i18n_public.go:78`）；`GET /api/auth/methods`（`handler/auth_local.go:55-129`）加 `legal:{enabled, consent_version}` |
 | 用户 API | `POST /api/user/me/legal/accept {consent_version}`；profile 加 `legal_pending` |
-| 管理 API | `GET /api/admin/legal/:kind`（各语言的版本列表）；`POST /api/admin/legal/:kind`（发布新版本 `{locale, content, consent_bump}`）；`GET /api/admin/legal/affected-users`（重大变更会影响的普通用户数）。审计中间件会把单个字符串值截到 8192 字符（`middleware/audit.go:250`），审计行里的 `content` 只有开头，这是预期 |
+| 管理 API | `GET /api/admin/legal/:kind`（各语言的版本列表）；`POST /api/admin/legal/:kind`（发布新版本 `{locale, content, consent_bump, expected_version?}`；S21 必传 `expected_version`（首次为 0），事务锁内检查最新版，不匹配返回 409，旧调用方省略时兼容）；`GET /api/admin/legal/affected-users`（重大变更会影响的普通用户数）。审计中间件会把单个字符串值截到 8192 字符（`middleware/audit.go:250`），审计行里的 `content` 只有开头，这是预期 |
 | 前端 | §7 S21–S23 |
 
 本页只解决「告知」。条款内容是否符合节点所在地的法律，需要所有者自行确认；本计划不提供法律意见。
@@ -3041,7 +3054,7 @@ tab 条：策略 policies | 列表 lists | 白名单分组 allowlist | 记录 re
 - 证据分为「文档检查」「单元/集成测试」「PR CI」「合并后 main CI」「真实部署验收」。跳过的测试、未接通的 VM 或未运行的方言都记为未验证；真实内核 `-test` 只证明配置可接受，不能替代代理连接、采集、升级和日志验收。
 - 首轮完成以 §11.3 的全部范围和 §12 对应场景为准；N0 的单独交付只能标记阶段 0 完成。阶段 6 与条件热修 N0-S 分别记录，不能混入首轮已完成清单。
 
-### 11.5 已有工作与未完成项（2026-10-04 核对）
+### 11.5 已有工作与未完成项（2026-10-04 基线、2026-10-09 增量核对）
 
 以下为本版定稿时的证据快照，PR 的后续提交、合并与发布状态以实际记录更新；三个仓库 main 仍是首页的复核基线。**当前没有任何阶段被本计划认定为已完成或已发布。**
 
@@ -3054,6 +3067,18 @@ tab 条：策略 policies | 列表 lists | 白名单分组 allowlist | 记录 re
 | 1c | [PSP #273](https://github.com/KazuhaHub/Passwall-Sub-Panel/pull/273)，draft，临时以 UI-0 #272 为 base；定义事务 `9b475324` 已通过完整 CI。解析、缓存与报告 `54ec95b6` 已通过 [完整 Test workflow](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37191810887)，含三方言、Linux race 和固定真实分类数据。列表服务、循环和空远程保护 `e7697f51` 的完整本地 destlist/SQL-store/domain/safehttp 套件通过；先前 Windows 拦截未在新程序出现，未修改安全设置。文档提交 `00e86780` 的 [PR CI](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37192773685) 已完整成功，之前两个被新提交取代而取消的 workflow 不算完整成功。新增 [PSP #274](https://github.com/KazuhaHub/Passwall-Sub-Panel/pull/274)（draft，base #273）在 `c1ef001b` 提供普通编译、定义快照/发布、嗅探预检及 PolicyStatus 隔离；相关本地 Go 测试、静态检查、诊断目录 23 项与 TypeScript 检查通过，[该 SHA 的完整 CI](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37196196283) 已成功（含三方言、Linux race、前端与发布目标编译），[已发布节点 systemd 验收](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37196196154) 同样成功。开发期依赖 Protocol #4 的可拉取伪版本，没有 replace；候选事务与同步服务接线、LKG、缓存及应用集成尚未完成 | 继续 §11.6；应用、持久设置、API、编译/下发、页面和联调尚未接通。所有后续提交各自验证，空表、缓存和草稿 PR 都不表示阶段完成 |
 | 1c′、2a–2c、3、4、5 | 尚无本次核对可确认的交付证据 | 按 §11.1 依赖和对应验收启动；不因前置表存在跳过工作包 |
 | N0-S | Linux 实际环境验证尚未完成 | 按 Q1 先验证，再决定修复提交；保持与首轮主路径分开 |
+
+以下为 2026-10-09 绑定具体 SHA 的增量证据；上表保留 2026-10-04 的历史核对。仍没有阶段满足全部交付及发布门槛，不能将下列开发进展计作阶段完成。
+
+| 工作包 | 增量实现与证据 | 尚未满足的门槛 |
+|---|---|---|
+| 1c | [PSP #274](https://github.com/KazuhaHub/Passwall-Sub-Panel/pull/274) 当前 `1cb25956ef04dbb44f50a771f31262ab16f5ba1f`；[Test](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37923500179) 与 [已发布 Node systemd 验收](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37923500178) 成功；第三方面板在该 PR 路径为 skipped，不计此次真实验证 | 正式前置依赖、完整 UI 原生验收、策略真实联调、兼容与升级降级、评审合并及发布门槛继续保留 |
+| 2a | [Protocol #5](https://github.com/KazuhaHub/Passwall-Protocol/pull/5) 当前 `11a90e9bc95a4c8ea1f0d8debd8527a967b5d84c`；[Test](https://github.com/KazuhaHub/Passwall-Protocol/actions/runs/37983416755) 和 [Harness](https://github.com/KazuhaHub/Passwall-Protocol/actions/runs/37983416763) 成功 | 评审、前置包合并与正式模块 tag；开发伪版本不视为模块发布 |
+| 2b | [Node #79](https://github.com/KazuhaHub/Passwall-Node/pull/79) 当前 `d226c4e9bbf73aa6fecdeea3cd866820b2255e18`；真实 core、PSP 契约、公开安装器，以及常规测试、Linux race、六目标编译和升级脚本 sandbox 已通过。container 和 Docker updater 在拉取镜像时遇到 Docker Hub 429，未得到其实际运行成功证据 | 私有 webhook、PSP 不可达时重启、实际入库、负载与日志隐私联调；容器/updater 门禁、正式依赖、完整 N8、合并后 main 与发布 |
+| 2c | [PSP #281](https://github.com/KazuhaHub/Passwall-Sub-Panel/pull/281) 当前 `f5237e047b038e102a05c1e866460cf5d5493abb`；隔离解码、四类有界队列、最终主键映射、事务去重/预算、私有 ID 查询和每块调度 engine 已实现。[本提交 Test](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37998575593) 的三方言、三组 Linux race、静态与前端检查成功，交叉编译仍在运行；worker 包在 Linux race 实际通过。[本提交已发布 Node systemd 验收](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37998575752) 成功；先前存储提交 `7c55cd5a72f6515759b440934274b681349cbb2c` 的 [完整 Test](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37996403773) 成功 | 生产 Sync 投递仍未接通；采集状态缓存/失效、损失缓冲与持久化、tracked worker 生命周期、保留清理、记录 API 与 S12/S14/S15/S16/S19 尚待完成。真实 VM 与浏览器验收、完整当前 CI、前置发布、合并和阶段发布仍未完成；B 档保持不开放 |
+| 3 | [PSP #280](https://github.com/KazuhaHub/Passwall-Sub-Panel/pull/280) 当前 `c4c098c9b0d35795cd03d27832c043fc7403ebbe`；[Test](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37981054242) 和 [已发布 Node systemd 验收](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37981054205) 成功；S21–S23、发布基准版本检查与同意流程已有实现 | 原生浏览器矩阵、实际采集数量/保留设置接线、评审合并、main 验证与发布仍未完成 |
+
+本机 Hyper-V 组件已安装但仍待所有者重启，`psp-node` VM 尚未创建。Ubuntu Server 镜像已从官方源下载并通过 SHA256 校验，这只证明测试介质就绪，不证明 N0-S 或任何真实节点验收。阶段 4、5 及条件性 N0-S 的全部原要求继续执行；阶段 6 仍另立计划。
 
 ### 11.6 接下来的实施工作包与交接
 
@@ -3198,7 +3223,7 @@ tab 条：策略 policies | 列表 lists | 白名单分组 allowlist | 记录 re
 | Node | `internal/core/sniff_test.go` | 跑完 `conformance.SniffingVectors` |
 | Node | `internal/core/runtime/runtime_test.go`（追加） | 只有策略变化时触发部署；空闲短路（含到期集合与只更新 `applied_at_ms`）；PolicyStatus 迁移；「被拒」的三例归因；`RestoreStatus` |
 | Node | `internal/core/process/supervisor_test.go`（追加） | `-test` 非 0 退出包 `ErrCandidateRejected`；超时与 exec 失败不包 |
-| Node | `internal/agent/auditsink/sink_test.go` | webhook 接收、令牌、丢弃 source、SplitHostPort、逐行校验入口、未知规则或用户、上限、试运行聚合器的折叠与独立上限、`Serve` 出错时返回错误、`runtime/` 目录不存在时也能监听 |
+| Node | `internal/agent/auditsink/sink_test.go` | webhook 接收、令牌及 0600 持久文件的重启复用、非法内容或符号链接拒绝、丢弃 source、SplitHostPort、逐行校验入口、未知规则或用户、上限、试运行聚合器的折叠与独立上限、`Serve` 出错时返回错误、`runtime/` 目录不存在时也能监听；真实重启还覆盖 PSP 离线 |
 | Node | `internal/agent/auditlog/filter_test.go` | 真实行 fixture、背压、watch/trial 同时贡献命中与用量而 deny 不计用量、故障退出且不泄漏访问行、逐行校验 |
 | Node | `internal/agent/report_test.go`（追加） | 分类 pending 与七槽公平性、冻结重发逐字节相同、仅确认 AuditBatchIDSent；deferred 后控制成功不清 pending；仅计数批次、过期、Count 饱和、off/revision 清空与降档后新 Hits；非法数据不阻断 SyncOnce |
 | Node | `internal/agent/capability_gate_test.go`、`cmd/node/main_test.go`（追加） | 新能力在静态切片里，不在 CapabilitySource 里；sink 监听失败时不声明 `audit.hits.v1` |
