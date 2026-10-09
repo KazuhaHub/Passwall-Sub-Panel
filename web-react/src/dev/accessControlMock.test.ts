@@ -14,6 +14,21 @@ function harness(scenario: AccessFixtureScenario = 'normal') {
 afterEach(() => vi.useRealTimers())
 
 describe('reproducible access-control acceptance fixtures', () => {
+  it('fails the first original-text read once per list and permits an explicit retry without writes or live transport', async () => {
+    const { client, fallback } = harness('list-original-read-error')
+    const before = (await client.get('/admin/dest/lists')).data
+    const policyBefore = (await client.get('/admin/dest/policies')).data
+    for (const id of [1, 5]) {
+      await expect(client.get(`/admin/dest/lists/${id}`, { params: { text: 1 } })).rejects.toMatchObject({ response: { status: 503, data: { error: 'dest_list_fetch_failed' } } })
+      const latest = (await client.get(`/admin/dest/lists/${id}`, { params: { text: 1 } })).data
+      const original = accessControlFixtureSeed().lists.find(list => list.id === id)!
+      expect(latest).toMatchObject({ id, name: original.name, source_text: original.source_text, content_sha256: original.content_sha256 })
+      expect((await client.get(`/admin/dest/lists/${id}`, { params: { text: 1 } })).data).toEqual(latest)
+    }
+    expect((await client.get('/admin/dest/lists')).data).toEqual(before)
+    expect((await client.get('/admin/dest/policies')).data).toEqual(policyBefore)
+    expect(fallback).not.toHaveBeenCalled()
+  })
   it('keeps template regex counts and the projected quota consistent, without creating an over-limit pair', async () => {
     const { client, fallback } = harness('template-over-quota')
     const before = (await client.get('/admin/dest/policies')).data

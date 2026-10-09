@@ -394,6 +394,7 @@
       "fetch_result": "拉取结果：HTTP {{code}} · {{bytes}} 字节 · 接受 {{count}} 条",
       "reload": "载入最新",
       "saved": "列表「{{name}}」已保存",
+      "read_error": "未能读取已保存的列表。请载入最新以重试；列表没有被修改。",
       "switch_title": "切换列表类型？",
       "switch_message": "切换会清空当前类型的来源输入。",
       "switch_action": "切换类型",

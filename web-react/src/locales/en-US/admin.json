@@ -396,6 +396,7 @@
       "fetch_result": "Fetched: HTTP {{code}} · {{bytes}} bytes · {{count}} accepted",
       "reload": "Load latest",
       "saved": "Saved “{{name}}”",
+      "read_error": "Could not load the saved list. Load latest to retry; nothing has been changed.",
       "switch_title": "Switch list type?",
       "switch_message": "Switching clears the current source input.",
       "switch_action": "Switch type",

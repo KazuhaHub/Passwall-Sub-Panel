@@ -593,9 +593,11 @@ finance controls, and nested conversion heading content all failed before
 repair. Relevant frontend coverage passed 389 tests in 28 files after the final
 source change. TypeScript, changed-source lint, production build, fixture
 exclusion and four production browser smoke checks passed. English, automatic
-theme, normal fixture data and the default viewport were restored. This S4
-candidate needs its own complete remote CI; the earlier security head's green
-workflows do not substitute. Complete C2/C5/C6, remaining per-view matrices,
+theme, normal fixture data and the default viewport were restored. S4 commit
+`62ee8429` passed its own complete
+[Test workflow](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37890046260)
+and [Node systemd acceptance](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37890046252).
+Third-party live-panel checks were skipped. Complete C2/C5/C6, remaining per-view matrices,
 owner approval and real candidate Node acceptance remain open.
 
 ## Lists overview and references (S6)
@@ -695,11 +697,45 @@ access-control, query, fixture, shared-confirmation, risk drawer, style and
 contrast suite passed 348 cases in 26 files. TypeScript, changed-source lint,
 production build, fixture exclusion and four production browser smoke checks
 passed. This fills the three editor variants and documented extra states;
-initial original-read failure/reload has a unit regression but no editor
-browser capture yet. Complete C2/C5/C6, other per-view matrices, true Node
+original-read failure/reload is covered by the follow-up below. Complete C2/C5/C6, other per-view matrices, true Node
 enforcement and owner acceptance remain pending. S7 commit `5b331830` passed
 both remote workflows linked above, separately from the successful `8dfb38d7`
 runs. Later overview changes require their own candidate validation.
+
+### Original-read failure and explicit reload (S7 follow-up)
+
+The first saved-list read now has its own translated failure explanation,
+instead of suggesting that an unavailable source can be saved. A failed read
+stops the skeleton animation and keeps Save disabled. Load latest is one async
+action with busy/disabled feedback; a read does not label the footer as Saving.
+Retry loads the preserved original text and name without a PUT. Cancellation
+returns focus to the same list-actions trigger.
+
+| Capture | Check |
+| --- | --- |
+| [English phone failure](list-editor-original-error-en-light-375.jpg), [reloaded](list-editor-original-reloaded-en-light-375.jpg) | No failed-read skeleton; explicit retry loads both original lines; Save remains disabled on the unchanged draft |
+| [Chinese dark desktop failure](list-editor-original-error-cn-dark-1440.jpg), [reloaded](list-editor-original-reloaded-cn-dark-1440.jpg) | Translated read-specific message; 900px dialog, 44px actions and preserved group-owned source |
+
+All four native captures were visually checked. At 375px the document width
+equals the viewport width; the failed-read retry meets 44px. Native DOM checks
+during both retries show Load latest busy and disabled, Close/Cancel disabled,
+and a disabled Save with its normal label. After cancellation the focused
+button is the originating list-actions trigger. The normal editor matrix
+above remains the baseline; these synthetic scenes do not prove an actual
+backend outage or node rule changes.
+
+The DEV-only `list-original-read-error` scenario fails the first original-text
+GET once per list and permits a later explicit retry, with no live transport
+fallthrough or definition mutation. Its contract failed before implementation.
+The editor regression also failed before the read-specific copy and async
+feedback repairs. It now checks the disabled save, absence of automatic preview
+before loading, exact preserved source/name, duplicate retry admission and no
+PUT. Relevant frontend coverage passed 390 tests in 28 files after the final
+source change. TypeScript, changed-source lint, production build, fixture
+exclusion and four production browser smoke checks passed. English, automatic
+theme, normal fixtures and the default viewport were restored. This follow-up needs
+its own remote CI. Complete C2/C5/C6, remaining per-view matrices, real candidate
+Node acceptance and owner approval remain open.
 
 ## Real backend catalog acceptance
 

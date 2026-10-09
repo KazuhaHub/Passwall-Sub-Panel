@@ -5,7 +5,7 @@ import type { Server } from '@/api/servers'
 import { destinationListAvailable } from '@/utils/destinationListAvailability'
 import { accessControlFixtureSeed, destinationPolicies, destinationStatus } from '@/test/accessControlFixtures'
 
-export const accessFixtureScenarios = ['normal', 'empty', 'error', 'catalog-missing', 'catalog-failed', 'policy-preview-error', 'policy-over-quota', 'policy-conflict', 'policy-save-pending', 'policy-lists-error', 'policy-groups-error', 'template-over-quota', 'templates-catalog-missing'] as const
+export const accessFixtureScenarios = ['normal', 'empty', 'error', 'catalog-missing', 'catalog-failed', 'policy-preview-error', 'policy-over-quota', 'policy-conflict', 'policy-save-pending', 'policy-lists-error', 'policy-groups-error', 'template-over-quota', 'templates-catalog-missing', 'list-original-read-error'] as const
 export type AccessFixtureScenario = typeof accessFixtureScenarios[number]
 
 function savedScenario(): AccessFixtureScenario {
@@ -70,6 +70,7 @@ export function createAccessControlMock(fallback: AxiosAdapter, options: { scena
   let generation = 12, publishedGeneration = 12, paused = false, lastWrite = Date.now() - 3_600_000
   let published = structuredClone(seed.policies)
   let conflictInjected = false
+  const failedOriginalReads = new Set<number>()
   let catalogAvailable = !['catalog-missing', 'catalog-failed', 'templates-catalog-missing'].includes(scenario)
   let catalogDue = 0, catalogError = ''
   const defaults: AccessControlSettings = { dest_hit_retention_days: 30, dest_trial_retention_days: 7, dest_usage_retention_days: 7, dest_list_refresh_hours: 17, dest_policy_apply_min_seconds: 93 }
@@ -198,7 +199,13 @@ export function createAccessControlMock(fallback: AxiosAdapter, options: { scena
     const listMatch = path.match(/^\/admin\/dest\/lists\/(\d+)(?:\/(entries|refresh))?$/)
     if (listMatch) {
       const id = Number(listMatch[1]), list = findList(id), operation = listMatch[2]
-      if (!operation && method === 'GET') return response(detail(list))
+      if (!operation && method === 'GET') {
+        if (scenario === 'list-original-read-error' && Number(config.params?.text) === 1 && !failedOriginalReads.has(id)) {
+          failedOriginalReads.add(id)
+          return fail(503, 'dest_list_fetch_failed')
+        }
+        return response(detail(list))
+      }
       if (!operation && method === 'DELETE') {
         const references = summary(list).used_by
         if (references.length) return fail(409, 'dest_list_in_use', { used_by: references })

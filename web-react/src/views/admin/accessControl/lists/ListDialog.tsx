@@ -8,6 +8,7 @@ import { getDestinationList, previewDestinationList, type DestinationListDetail,
 import type { CodeEditorHandle } from '@/components/CodeEditor'
 import { confirm } from '@/components/ConfirmHost'
 import { pushSnack } from '@/components/SnackbarHost'
+import { AsyncButton } from '@/components/AsyncButton'
 import { useDirtyClose } from '@/hooks/useDirtyClose'
 import { useLeaveGuard } from '@/hooks/useLeaveGuard'
 import { useSaveDestinationList } from '@/query/accessControl'
@@ -33,7 +34,7 @@ export default function ListDialog({ existing, policies, status, refreshHours, o
   const [seed, setSeed] = useState(inputFrom()), [draft, setDraft] = useState(inputFrom())
   const [detail, setDetail] = useState<DestinationListDetail>(), [loaded, setLoaded] = useState(!existing)
   const [error, setError] = useState<{ error: string; field?: string }>({ error: '' })
-  const [busy, setBusy] = useState(false), admission = useRef(false), editor = useRef<CodeEditorHandle>(null)
+  const [busy, setBusy] = useState(false), [reloading, setReloading] = useState(false), admission = useRef(false), editor = useRef<CodeEditorHandle>(null)
   const save = useSaveDestinationList(scope)
   useEffect(() => {
     if (!existing) return
@@ -84,9 +85,9 @@ export default function ListDialog({ existing, policies, status, refreshHours, o
   const testFetch = () => { if (validSource && !busy && !preview.isFetching) { if (tested === content) void preview.refetch(); else setTested(content) } }
   const reload = async () => {
     if (!existing || admission.current) return
-    admission.current = true; setBusy(true)
+    admission.current = true; setBusy(true); setReloading(true)
     try { const latest = await getDestinationList(existing.id, true, { silent: true }); const next = inputFrom(latest); setDetail(latest); setSeed(next); setDraft(next); setLoaded(true); setTested(null); setError({ error: '' }) }
-    catch (err) { setError(destinationError(err)) } finally { admission.current = false; setBusy(false) }
+    catch (err) { setError(destinationError(err)) } finally { admission.current = false; setBusy(false); setReloading(false) }
   }
   const submit = async () => {
     if (!canSave || admission.current) return
@@ -100,8 +101,8 @@ export default function ListDialog({ existing, policies, status, refreshHours, o
   return <Dialog open maxWidth="md" fullWidth fullScreen={mobile} onClose={() => void close()} aria-labelledby="access-list-editor-title">
     <Box id="access-list-editor-heading" sx={{ display: 'flex', alignItems: 'center' }}><DialogTitle component="h2" id="access-list-editor-title" sx={{ flex: 1, minWidth: 0, overflowWrap: 'anywhere' }}>{t(`${P}${existing ? 'edit_title' : 'create_title'}`)}</DialogTitle><IconButton aria-label={t('common:actions.close')} disabled={busy} onClick={() => void close()} sx={{ minWidth: 44, minHeight: 44, mr: 2 }}><CloseIcon /></IconButton></Box>
     <DialogContent dividers><Stack spacing={2}>
-      {error.error && error.field !== 'name' && <Alert severity="error" action={existing && (!loaded || error.error === 'dest_list_stale') ? <Button disabled={busy} onClick={() => void reload()} sx={{ minHeight: 44 }}>{t(`${P}reload`)}</Button> : undefined}>{t(`${P}${error.error}`, { defaultValue: error.error })}</Alert>}
-      {!loaded ? <Skeleton variant="rounded" height={240} /> : <>
+      {error.error && error.field !== 'name' && <Alert severity="error" action={existing && (!loaded || error.error === 'dest_list_stale') ? <AsyncButton disabled={busy && !reloading} pending={reloading} onClick={reload} sx={{ minHeight: 44 }}>{t(`${P}reload`)}</AsyncButton> : undefined}>{!loaded ? t(`${P}read_error`) : t(`${P}${error.error}`, { defaultValue: error.error })}</Alert>}
+      {!loaded ? (!error.error && <Skeleton variant="rounded" height={240} />) : <>
         <Box component="fieldset" disabled={busy} sx={{ border: 0, p: 0, m: 0, minWidth: 0 }}><Stack spacing={2}>
           <ToggleButtonGroup exclusive fullWidth aria-label={t(`${P}type`)} value={draft.kind} disabled={!!existing || busy} onChange={(_, kind) => { if (kind) void switchKind(kind) }}>{(['custom', 'remote', 'geosite'] as const).map(kind => <ToggleButton key={kind} value={kind} sx={{ minWidth: 44, minHeight: 44 }}>{t(`admin:access_control.lists.${kind}`)}</ToggleButton>)}</ToggleButtonGroup>
           <TextField autoFocus label={t(`${P}name`)} value={draft.name} error={error.field === 'name' || !!draft.name && !validName} helperText={error.field === 'name' ? t(`${P}${error.error}`, { defaultValue: error.error }) : undefined} onChange={e => change({ name: e.target.value })} />
@@ -120,6 +121,6 @@ export default function ListDialog({ existing, policies, status, refreshHours, o
         {!!previewData?.entries.length && <Accordion><AccordionSummary expandIcon={<ExpandMoreIcon />}>{t(`${P}preview_entries`)}</AccordionSummary><AccordionDetails><Typography component="pre" sx={{ fontSize: 13, m: 0, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{previewData.entries.join('\n')}</Typography></AccordionDetails></Accordion>}
       </>}
     </Stack></DialogContent>
-    <DialogActions sx={{ px: 3, py: 2, flexWrap: 'wrap', gap: 1 }}><Typography variant="body2" color="text.secondary" sx={{ flex: '1 1 100%' }}>{t(`${P}impact_${impact}`, { count: used, nodes: nodeCount === undefined ? t('admin:access_control.confirm.each_node') : t('admin:access_control.confirm.node_count', { count: nodeCount }) })}</Typography><Button disabled={busy} onClick={() => void close()} sx={{ minHeight: 44 }}>{t('common:actions.cancel')}</Button><Button variant="contained" disabled={busy || !canSave} onClick={() => void submit()} sx={{ minHeight: 44 }}>{t(busy ? 'admin:access_control.settings.saving' : 'common:actions.save')}</Button></DialogActions>
+    <DialogActions sx={{ px: 3, py: 2, flexWrap: 'wrap', gap: 1 }}><Typography variant="body2" color="text.secondary" sx={{ flex: '1 1 100%' }}>{t(`${P}impact_${impact}`, { count: used, nodes: nodeCount === undefined ? t('admin:access_control.confirm.each_node') : t('admin:access_control.confirm.node_count', { count: nodeCount }) })}</Typography><Button disabled={busy} onClick={() => void close()} sx={{ minHeight: 44 }}>{t('common:actions.cancel')}</Button><Button variant="contained" disabled={busy || !canSave} onClick={() => void submit()} sx={{ minHeight: 44 }}>{t(busy && !reloading ? 'admin:access_control.settings.saving' : 'common:actions.save')}</Button></DialogActions>
   </Dialog>
 }
