@@ -733,9 +733,64 @@ before loading, exact preserved source/name, duplicate retry admission and no
 PUT. Relevant frontend coverage passed 390 tests in 28 files after the final
 source change. TypeScript, changed-source lint, production build, fixture
 exclusion and four production browser smoke checks passed. English, automatic
-theme, normal fixtures and the default viewport were restored. This follow-up needs
-its own remote CI. Complete C2/C5/C6, remaining per-view matrices, real candidate
+theme, normal fixtures and the default viewport were restored. Follow-up
+`c7ec4155` passed its own complete
+[Test workflow](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37891075987)
+and [Node systemd acceptance](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37891075899).
+Third-party live-panel checks were skipped. Complete C2/C5/C6, remaining per-view matrices, real candidate
 Node acceptance and owner approval remain open.
+
+## Data and deployment settings (S18)
+
+The settings dialog keeps its title separate from Close, with a 600px desktop
+paper and a fullscreen phone layout. Reset, read-retry, footer and close actions
+now meet 44px in both dimensions. Native checks found five 30px reset buttons
+and 40px footer actions before repair. Async retry and saving expose progress;
+short labels such as the Chinese retry action keep one line.
+
+| Language/theme/viewport | Capture |
+| --- | --- |
+| Chinese, light, 1440 × 900 | [Desktop](settings-cn-light-1440.jpg) |
+| Chinese, dark, 1440 × 900 | [Desktop](settings-cn-dark-1440.jpg) |
+| Chinese, light, 375 × 812 | [Top](settings-cn-light-375-top.jpg), [bottom](settings-cn-light-375-bottom.jpg) |
+| Chinese, dark, 375 × 812 | [Top](settings-cn-dark-375-top.jpg), [bottom](settings-cn-dark-375-bottom.jpg) |
+| English, light, 375 × 812 | [Top](settings-en-light-375-top.jpg), [bottom](settings-en-light-375-bottom.jpg) |
+
+| Additional capture | Check |
+| --- | --- |
+| [Default draft](settings-default-draft-cn-dark-375.jpg), [saved defaults](settings-default-saved-cn-dark-375.jpg) | Five reset actions clear actual input values and expose served defaults 30/7/7/17/93; synthetic save clears the changed count without changing effective retention |
+| [Range error](settings-range-error-cn-dark-375.jpg) | Refresh value 5 shows the 6–168 integer range; Save stays disabled |
+| [Discard confirmation](settings-discard-confirm-cn-dark-375.jpg) | Continue editing retains value 5; one confirmed discard closes settings without a write and returns focus to More |
+| [Failed read](settings-read-error-cn-dark-375.jpg) | Error is not an empty editor; touch-sized explicit retry returns to the same synthetic failure |
+| [Pending desktop](settings-pending-cn-dark-1440.jpg), [pending phone](settings-pending-cn-dark-375.jpg), [saved](settings-saved-cn-dark-375.jpg) | Separate thirty-second saves retain all fields, lock inputs/reset/Close/Discard/Save, show one spinner and ignore Escape; success keeps the editor open and resets the changed count |
+
+All 16 native captures were visually checked. Phone document/content widths
+match the viewport and footer actions remain within it. Closing an unchanged
+dialog restores the persistent More trigger. Native dirty-close checks also
+found that the confirmed discard triggered a second route-leave confirmation;
+the editor now clears the discarded draft before closing. A shared admission
+guard prevents two close callbacks from one pending confirmation. Cancellation
+keeps the draft. This also preserves cold-link and existing field-focus behavior.
+
+The pending desktop capture changes refresh 17 to 48; the independent phone
+capture changes 48 to 72. Other fields retain 30/7/7/93. These use the DEV-only
+`settings-save-pending` scenario. Its contract verifies cancellation before
+mutation, timer cleanup and saving only the requested key without live
+transport fallthrough. No screenshot proves actual retention cleanup, kernel
+deployment or node enforcement.
+
+Both slow saves settled with zero changed fields; the phone save retained
+refresh 72 and other values 30/7/7/93. English, automatic theme, normal fixtures
+and the default 1280 × 720 viewport were restored with no dialog left open.
+
+Five regressions reproduced undersized actions/retry, immediate fixture
+mutation, duplicate discard confirmation and duplicate close callbacks before
+repair. The relevant frontend suite passed 396 cases in 28 files; after the
+final retry-label layout adjustment, all 144 affected editor/view/fixture cases
+in three files passed. TypeScript, changed-source lint, production build,
+fixture exclusion and four production browser smoke checks passed. This
+candidate still needs its own complete remote CI. Remaining per-view matrices,
+C2/C5/C6, actual candidate Node acceptance and owner approval remain open.
 
 ## Real backend catalog acceptance
 

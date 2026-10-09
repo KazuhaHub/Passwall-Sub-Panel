@@ -7,6 +7,7 @@ import type { AccessControlSettingKey, AccessControlSettingsView } from '@/api/a
 import PolicyField from '@/components/PolicyField'
 import { confirm } from '@/components/ConfirmHost'
 import { pushSnack } from '@/components/SnackbarHost'
+import { AsyncButton } from '@/components/AsyncButton'
 import { useDirtyClose } from '@/hooks/useDirtyClose'
 import { useLeaveGuard } from '@/hooks/useLeaveGuard'
 import { useQueryScope } from '@/query/useQueryScope'
@@ -28,7 +29,7 @@ function Frame({ children, actions, onClose, onEntered, busy = false }: { childr
   const theme = useTheme()
   const fullScreen = useMediaQuery(theme.breakpoints.down('sm'))
   return <Dialog open fullWidth maxWidth="sm" fullScreen={fullScreen} onClose={() => { if (!busy) onClose() }}
-    slotProps={{ transition: { onEntered } }} aria-labelledby="access-settings-title">
+    slotProps={{ transition: { onEntered }, paper: { sx: { '& button': { minWidth: 44, minHeight: 44 } } } }} aria-labelledby="access-settings-title">
     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
       <DialogTitle id="access-settings-title" sx={{ flex: 1, minWidth: 0 }}>{t(`${P}title`)}</DialogTitle>
       <IconButton aria-label={t('common:actions.close')} onClick={onClose} disabled={busy} sx={{ mr: 2, width: 44, height: 44 }}><CloseIcon /></IconButton>
@@ -56,7 +57,7 @@ function SettingsRead({ scope, ...props }: Props & { scope: QueryScope }) {
   if (q.error) return <Frame onClose={props.onClose}>
     {isAxiosError(q.error) && q.error.response?.status === 503
       ? <Alert severity="info">{t(`${P}unwired`)}</Alert>
-      : <Alert severity="error" action={<Button color="inherit" onClick={() => void q.refetch()}>{t('common:actions.retry')}</Button>}>
+      : <Alert severity="error" action={<AsyncButton color="inherit" sx={{ whiteSpace: 'nowrap' }} pending={q.isFetching} onClick={() => q.refetch()}>{t('common:actions.retry')}</AsyncButton>}>
         {t(`${P}load_failed`, { error: errorText(q.error) })}
       </Alert>}
   </Frame>
@@ -81,7 +82,16 @@ function SettingsEditor({ scope, loaded, onClose, focusKey }: Props & { scope: Q
   const dirty = count > 0
   const mayClose = useDirtyClose(dirty, discardSettingsCopy(t))
   useLeaveGuard(dirty, discardSettingsCopy(t), (next, current) => next.pathname !== current.pathname || next.search !== current.search, busy)
-  const close = () => { if (!busy) void mayClose().then(ok => { if (ok) onClose() }) }
+  const close = async () => {
+    if (busy || admission.current) return
+    admission.current = true
+    try {
+      if (await mayClose()) {
+        setDraft(baseline.settings)
+        onClose()
+      }
+    } finally { admission.current = false }
+  }
   const submit = async () => {
     if (admission.current || !dirty || Object.keys(errors).length || Object.keys(serverErrors).length) return
     admission.current = true
@@ -108,9 +118,9 @@ function SettingsEditor({ scope, loaded, onClose, focusKey }: Props & { scope: Q
   }} actions={<>
     <Typography sx={{ flex: 1, color: 'text.secondary', fontSize: 13 }}>{t(`${P}changed`, { count })}</Typography>
     <Button disabled={busy} onClick={close}>{t(`${P}discard`)}</Button>
-    <Button variant="contained" disabled={busy || !dirty || Object.keys(errors).length > 0 || Object.keys(serverErrors).length > 0} onClick={() => void submit()}>
+    <AsyncButton variant="contained" pending={busy} disabled={!dirty || Object.keys(errors).length > 0 || Object.keys(serverErrors).length > 0} onClick={submit}>
       {t(busy ? `${P}saving` : 'common:actions.save')}
-    </Button>
+    </AsyncButton>
   </>}>
     <Box component="fieldset" ref={fields} disabled={busy} sx={{ border: 0, m: 0, p: 0, minWidth: 0 }}>
       <Stack spacing={2.5}>

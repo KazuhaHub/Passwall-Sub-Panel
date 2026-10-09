@@ -5,7 +5,7 @@ import type { Server } from '@/api/servers'
 import { destinationListAvailable } from '@/utils/destinationListAvailability'
 import { accessControlFixtureSeed, destinationPolicies, destinationStatus } from '@/test/accessControlFixtures'
 
-export const accessFixtureScenarios = ['normal', 'empty', 'error', 'catalog-missing', 'catalog-failed', 'policy-preview-error', 'policy-over-quota', 'policy-conflict', 'policy-save-pending', 'policy-lists-error', 'policy-groups-error', 'template-over-quota', 'templates-catalog-missing', 'list-original-read-error'] as const
+export const accessFixtureScenarios = ['normal', 'empty', 'error', 'catalog-missing', 'catalog-failed', 'policy-preview-error', 'policy-over-quota', 'policy-conflict', 'policy-save-pending', 'policy-lists-error', 'policy-groups-error', 'template-over-quota', 'templates-catalog-missing', 'list-original-read-error', 'settings-save-pending'] as const
 export type AccessFixtureScenario = typeof accessFixtureScenarios[number]
 
 function savedScenario(): AccessFixtureScenario {
@@ -180,6 +180,7 @@ export function createAccessControlMock(fallback: AxiosAdapter, options: { scena
     if (groupMatch && method === 'GET') return response(seed.groups.find(g => g.id === Number(groupMatch[1])) ?? fail(404, 'not_found'))
     if (path === '/admin/dest/status' && method === 'GET') return response(destinationStatus({ ...publication(), nodes: seed.nodes, last_write_at: lastWrite, apply_eta_ms: defaults.dest_policy_apply_min_seconds * 1000 }))
     if (path === '/admin/dest/settings') {
+      if (scenario === 'settings-save-pending' && method === 'PUT') await delay(config, 30_000)
       if (method === 'PUT') { settings = { ...settings, ...(body.settings as Partial<AccessControlSettings>) }; tick() }
       if (method === 'GET' || method === 'PUT') return response({ settings, defaults, effective: Object.fromEntries(Object.entries(settings).map(([k, v]) => [k, v || defaults[k as keyof AccessControlSettings]])) })
     }

@@ -19,6 +19,31 @@ vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string, opti
 vi.mock('@/components/CodeEditor', () => ({ default: (p: { value: string; onChange: (s: string) => void; ariaLabel: string; readOnly: boolean }) => <textarea aria-label={p.ariaLabel} value={p.value} readOnly={p.readOnly} onChange={e => p.onChange(e.target.value)} /> }))
 import AccessControlView from './AccessControlView'
 const P = 'admin:access_control.'
+it('closes dirty settings with one discard confirmation and no write', async () => {
+  settingsAPI(); const router = mount()
+  fireEvent.click(await screen.findByRole('button', { name: `${P}more` }))
+  fireEvent.click(screen.getByRole('menuitem', { name: `${P}settings.title` }))
+  const dialog = await screen.findByRole('dialog', { name: `${P}settings.title` })
+  const refresh = await within(dialog).findByRole('textbox', { name: `${P}settings.dest_list_refresh_hours` })
+  fireEvent.focus(refresh); fireEvent.change(refresh, { target: { value: '48' } }); fireEvent.blur(refresh)
+  fireEvent.click(within(dialog).getByRole('button', { name: 'common:actions.close' }))
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+  expect(router.state.location.search).toBe('')
+  expect(confirmation).toHaveBeenCalledOnce()
+  expect(api.put).not.toHaveBeenCalled()
+})
+it('restores focus to the persistent menu trigger after closing settings opened from its menu', async () => {
+  settingsAPI(); mount()
+  const more = await screen.findByRole('button', { name: `${P}more` })
+  more.focus(); fireEvent.click(more)
+  fireEvent.click(screen.getByRole('menuitem', { name: `${P}settings.title` }))
+  const dialog = await screen.findByRole('dialog', { name: `${P}settings.title` })
+  await within(dialog).findByRole('textbox', { name: `${P}settings.dest_policy_apply_min_seconds` })
+  fireEvent.click(within(dialog).getByRole('button', { name: 'common:actions.close' }))
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+  await waitFor(() => expect(document.activeElement).toBe(more))
+  expect(api.put).not.toHaveBeenCalled()
+})
 it('keeps the observation-conversion heading separate from touch-accessible controls', async () => {
   const original = api.get.getMockImplementation()!
   api.get.mockImplementation(async (url: string, config?: unknown) => url.endsWith('/policies') ? { data: destinationPolicies({ block: [], observe: [{ ...samplePolicy, action: 'observe', name: 'Watch' }] }) } : original(url, config))

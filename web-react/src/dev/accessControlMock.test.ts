@@ -14,6 +14,23 @@ function harness(scenario: AccessFixtureScenario = 'normal') {
 afterEach(() => vi.useRealTimers())
 
 describe('reproducible access-control acceptance fixtures', () => {
+  it('cancels a slow settings save before mutation and then saves only the requested key', async () => {
+    vi.useFakeTimers()
+    const { client, fallback } = harness('settings-save-pending')
+    const before = (await client.get('/admin/dest/settings')).data
+    const controller = new AbortController()
+    const outcome = client.put('/admin/dest/settings', { settings: { dest_list_refresh_hours: 48 } }, { signal: controller.signal }).then(() => 'saved', error => error)
+    await vi.advanceTimersByTimeAsync(1000)
+    expect((await client.get('/admin/dest/settings')).data).toEqual(before)
+    controller.abort()
+    expect(await outcome).toMatchObject({ code: 'ERR_CANCELED' })
+    expect(vi.getTimerCount()).toBe(0)
+    expect((await client.get('/admin/dest/settings')).data).toEqual(before)
+    const successful = client.put('/admin/dest/settings', { settings: { dest_list_refresh_hours: 48 } })
+    await vi.advanceTimersByTimeAsync(30000)
+    expect((await successful).data.settings).toEqual({ ...before.settings, dest_list_refresh_hours: 48 })
+    expect(fallback).not.toHaveBeenCalled()
+  })
   it('fails the first original-text read once per list and permits an explicit retry without writes or live transport', async () => {
     const { client, fallback } = harness('list-original-read-error')
     const before = (await client.get('/admin/dest/lists')).data

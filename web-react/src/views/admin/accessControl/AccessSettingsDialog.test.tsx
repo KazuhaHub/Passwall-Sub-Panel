@@ -69,6 +69,47 @@ it('keeps the settings title separate from its close button', async () => {
   expect(within(heading).queryByRole('button')).toBeNull()
 })
 
+it('admits only one close while its discard confirmation is pending', async () => {
+  let answer!: (ok: boolean) => void
+  confirm.mockReturnValueOnce(new Promise(resolve => { answer = resolve }))
+  mount()
+  await screen.findByRole('textbox', { name: '策略下发等待（秒）' })
+  edit('策略下发等待（秒）', '120')
+  const trigger = screen.getByRole('button', { name: '关闭' })
+  fireEvent.click(trigger); fireEvent.click(trigger)
+  expect(confirm).toHaveBeenCalledOnce()
+  await act(async () => { answer(true) })
+  expect(close).toHaveBeenCalledOnce()
+  expect(api.put).not.toHaveBeenCalled()
+})
+
+it('keeps settings reset and footer actions at least 44px in both dimensions', async () => {
+  api.get.mockResolvedValue({ data: { ...structuredClone(base), settings: { ...base.defaults } } })
+  mount()
+  await screen.findByRole('textbox', { name: '策略下发等待（秒）' })
+  for (const button of within(screen.getByRole('dialog')).getAllByRole('button')) {
+    const style = getComputedStyle(button)
+    expect(Math.max(parseFloat(style.minHeight) || 0, parseFloat(style.height) || 0), button.textContent || button.getAttribute('aria-label') || undefined).toBeGreaterThanOrEqual(44)
+    expect(Math.max(parseFloat(style.minWidth) || 0, parseFloat(style.width) || 0), button.textContent || button.getAttribute('aria-label') || undefined).toBeGreaterThanOrEqual(44)
+  }
+})
+
+it('makes failed-read retry a touch-sized async action without a write or duplicate read', async () => {
+  api.get.mockRejectedValueOnce(httpError(500, { error: 'database unavailable' }))
+  let finish!: (value: { data: AccessControlSettingsView }) => void
+  mount()
+  const retry = await screen.findByRole('button', { name: '重试' })
+  expect(parseFloat(getComputedStyle(retry).minHeight)).toBeGreaterThanOrEqual(44)
+  api.get.mockReturnValueOnce(new Promise(resolve => { finish = resolve }))
+  fireEvent.click(retry)
+  await waitFor(() => expect(retry.getAttribute('aria-busy')).toBe('true'))
+  fireEvent.click(retry)
+  expect(api.get).toHaveBeenCalledTimes(2)
+  expect(api.put).not.toHaveBeenCalled()
+  finish({ data: structuredClone(base) })
+  await screen.findByRole('textbox', { name: '策略下发等待（秒）' })
+})
+
 it('displays zero as unset, uses served defaults, and focuses the requested field', async () => {
   mount('dest_list_refresh_hours')
   await screen.findByRole('textbox', { name: '远程与分类列表刷新间隔（小时）' })
@@ -197,6 +238,7 @@ it('blocks close and repeated writes while saving and preserves the draft on tra
   edit('策略下发等待（秒）', '120')
   fireEvent.click(screen.getByRole('button', { name: '保存' }))
   await waitFor(() => expect(api.put).toHaveBeenCalledTimes(1))
+  expect(screen.getByRole('button', { name: '保存中…' }).getAttribute('aria-busy')).toBe('true')
   fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape', code: 'Escape', keyCode: 27 })
   fireEvent.click(screen.getByRole('button', { name: '保存中…' }))
   expect(close).not.toHaveBeenCalled()
