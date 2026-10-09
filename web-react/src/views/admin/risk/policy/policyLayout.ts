@@ -1,3 +1,4 @@
+import type { PolicyFieldSpec as SharedPolicyFieldSpec } from '@/components/PolicyField'
 import type { RiskPolicyKey, RiskPolicySettings } from './policyKeys'
 import type { PresetDetector } from './presets'
 
@@ -35,7 +36,7 @@ export const RISK_WINDOW_DAYS = 7
 
 export type PolicyFieldKind = 'number' | 'float' | 'switch' | 'inverted' | 'select' | 'text'
 
-export interface PolicyFieldSpec {
+export interface PolicyFieldSpec extends SharedPolicyFieldSpec {
   key: RiskPolicyKey
   kind: PolicyFieldKind
   /** Full i18n keys, namespace included. */
@@ -96,7 +97,7 @@ function knob(key: RiskPolicyKey, ns: 'geo_anomaly' | 'risk' | 'risk_center', mi
   }
 }
 
-export const POLICY_CARDS: PolicyCardSpec[] = [
+export const POLICY_CARDS: PolicyCardSpec[] = withRiskCopy([
   {
     id: 'geo',
     title: 'admin:risk_center.policy.card.geo',
@@ -225,7 +226,7 @@ export const POLICY_CARDS: PolicyCardSpec[] = [
       knob('geo_anomaly_infra_host_ttl_minutes', 'geo_anomaly', 1, 1440),
     ],
   },
-]
+])
 
 /** Every field of a card, in page order. */
 export function cardFields(card: PolicyCardSpec): PolicyFieldSpec[] {
@@ -261,4 +262,16 @@ export function advancedConfigured(card: PolicyCardSpec, draft: Partial<RiskPoli
     if (typeof v === 'string') return v.trim() !== ''
     return v === true
   })
+}
+
+// Preserve the existing policy page's words while sharing its field renderer.
+function withRiskCopy(cards: PolicyCardSpec[]): PolicyCardSpec[] {
+  const copy = {
+    range_default: 'admin:risk_center.policy.range_default', min_default: 'admin:risk_center.policy.min_default',
+    default_only: 'admin:risk_center.policy.default_only', out_of_range: 'admin:risk_center.policy.out_of_range',
+    reset_default: 'admin:risk_center.policy.reset_default', default_adornment: 'admin:risk_center.policy.default_adornment',
+    effective: 'admin:settings.risk_center.effective',
+  }
+  const field = (spec: PolicyFieldSpec): PolicyFieldSpec => ({ ...spec, copy })
+  return cards.map(card => ({ ...card, fields: card.fields.map(field), disposal: card.disposal?.map(field), advanced: card.advanced?.map(field) }))
 }
