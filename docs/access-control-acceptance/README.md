@@ -511,7 +511,15 @@ and disabled-preview presentation failed before repair. Relevant frontend
 coverage passed 382 tests in 27 files after the final change. TypeScript,
 changed-source lint, production build, fixture exclusion and four production
 browser smoke checks passed. English, automatic theme, normal fixture data and
-the default viewport were restored. This candidate needs its own remote CI;
+the default viewport were restored. S3 commit `d31353f5` passed the frontend,
+database, race, build, compatibility and Node systemd jobs, but its
+[Test workflow](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37886239945)
+failed vulnerability scanning after the October 8 Go security advisories.
+The separate repair selects Go 1.27.2 in both the preferred toolchain and Docker
+builder, and upgrades `golang.org/x/net` to v0.60.0. Module verification and build
+baseline tests passed with Go 1.27.2; govulncheck v1.8.0 found zero reachable
+vulnerabilities for Linux, macOS and Windows. Six advisories in required modules
+remain unreachable in these scans. The repair needs its own complete remote CI;
 complete C2/C5/C6, remaining per-view matrices, owner approval and real Node
 acceptance remain open.
 
