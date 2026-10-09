@@ -11,7 +11,9 @@ completion of the entire stage-1c acceptance matrix.
 
 Run the local PSP and Vite, then open `/access-control-fixtures.html` on the
 Vite origin. Choose the normal, empty, error, missing-catalog or failed-catalog
-scenario and activate it. Sign in normally to the local PSP if needed. The tool
+scenario and activate it. Policy-editor scenarios also isolate preview failure,
+projected quota failure, a concurrent revision, a 30-second save and list/group
+read failures. Sign in normally to the local PSP if needed. The tool
 sets `psp_dev_fixtures=access` and reloads the normal product route; browser
 storage failures are reported without navigation. Disable fixtures from the
 same tool. Reloading resets all in-memory fixture mutations.
@@ -433,8 +435,85 @@ menu/error presentation changes. Destination-policy and HTTP-handler suites,
 TypeScript, changed-source lint, production build, fixture exclusion and four
 production browser smoke checks passed. Local Go was 1.26.8 with automatic
 toolchain download disabled; remote CI uses the project's configured toolchain.
-The new S13 candidate still needs its own CI. Full C2/C5/C6, other view matrices
+S13 commit `5a680eff92b4a724e547d649cdbab308349861eb` passed
+[complete Test CI](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37858669757)
+and [released-node systemd acceptance](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37858669634).
+Third-party live adapter jobs were skipped. Full C2/C5/C6, other view matrices
 and new-kernel Node acceptance remain open.
+
+## Policy editor (S3)
+
+Close, help, autocomplete indicators, list/group tag deletion, labels and menu
+options now have 44px minimum targets. Actual desktop list/group/scope options
+measured at least 44px, and tag deletion targets measured 44px. The editor
+measures 720px on desktop and fills the phone viewport; the 375px dialog's
+visible/content widths agree. The phone keeps Save in its header and a readable
+summary in its fixed footer. English help text fits the phone popover.
+
+The scope selector explicitly disables during a save: disabling its enclosing
+fieldset alone did not disable the div-based combobox. The slow-save scene
+confirmed disabled name/list/group/scope controls, close and cancel, a spinner
+and normal closure after settlement. Tests cancel that scene before mutation
+and verify that no timers remain and no request falls through to live transport.
+
+Selected allowlist groups expose the final-plan ordering explanation. A failed
+list catalog read preserves names, IDs and availability from the policy receipt;
+it no longer falsely reports an available list as inactive. Explicit conflict
+reload also refreshes that metadata. Pending downloaded lists still expose the
+inactive-list explanation. Group-owned lists are absent from the policy picker.
+
+Failed or disabled previews show unavailable values as `—`, with static bars
+and no borrowed counts or loading animation. Valid pending previews retain
+`…`. Preview failure allows a valid write and explicit retry; over-limit
+previews retain editable fields, show the full rejection explanation and disable
+Save. Concurrent writes preserve the local draft until Load latest is selected.
+The safe discard action reads Continue editing and preserves the draft.
+
+All 29 captures below were visually inspected. They use the synthetic DEV
+transport and actual product components; they establish UI behavior, not real
+kernel enforcement, upstream failures or complete later-stage acceptance.
+
+| Capture | Check |
+| --- | --- |
+| [Chinese light desktop](policy-editor-zh-CN-light-1440.jpg) | 720px editor, selected list/group tags and allowlist summary |
+| [Chinese dark desktop](policy-editor-zh-CN-dark-1440.jpg) | Dark-theme text and controls |
+| [Chinese light phone](policy-editor-zh-CN-light-375.jpg) | Header Save, full width and fixed summary |
+| [Chinese dark phone](policy-editor-zh-CN-dark-375.jpg) | Dark phone layout |
+| [English phone](policy-editor-en-US-light-375.jpg) | Long English labels and summary fit |
+| [Chinese light phone budgets](policy-editor-quota-zh-CN-light-375.jpg) | Numbers below bars and fixed footer |
+| [Chinese dark phone budgets](policy-editor-quota-zh-CN-dark-375.jpg) | Dark quota presentation |
+| [English phone budgets](policy-editor-quota-en-US-light-375.jpg) | Complete budget labels |
+| [Chinese group explanation](policy-editor-group-hint-zh-CN-light-1440.jpg) | Block-before/observe-after ordering |
+| [English group explanation](policy-editor-group-hint-en-US-light-375.jpg) | Full explanation fits the phone |
+| [Keyboard action change](policy-editor-keyboard-allow-en-US-light-375.jpg) | ArrowRight selects Allow, moves to step one and shows restart guidance |
+| [Discard confirmation](policy-editor-discard-en-US-light-375.jpg) | Continue editing retains the draft |
+| [Unavailable preview](policy-editor-preview-failure-en-US-light-375.jpg) | `—`, explicit retry and enabled Save |
+| [Saved after failed preview](policy-editor-preview-failure-saved-en-US-light-375.jpg) | Successful fixture write closes the dialog and retains the new name |
+| [Over-limit preview](policy-editor-over-quota-en-US-light-375.jpg) | True 50,001/50,000 count, full warning and disabled Save |
+| [Concurrent revision](policy-editor-conflict-en-US-light-375.jpg) | Local draft remains unsaved and Load latest is explicit |
+| [Loaded revision](policy-editor-reloaded-en-US-light-375.jpg) | Latest name replaces the draft only after explicit reload |
+| [Saving desktop](policy-editor-saving-en-US-light-1440.jpg) | Disabled scope, fields, close and cancel |
+| [Saving phone](policy-editor-saving-en-US-light-375.jpg) | Header spinner and disabled phone controls |
+| [List read failure](policy-editor-lists-read-failure-en-US-light-375.jpg) | Receipt name/availability retained with a clear read error |
+| [Group read failure](policy-editor-groups-read-failure-en-US-light-375.jpg) | Selected ID retained with explicit retry |
+| [Blank policy](policy-editor-blank-en-US-light-375.jpg) | Required name/match, collapsed conditions and disabled Save |
+| [Invalid port](policy-editor-invalid-conditions-en-US-light-375.jpg) | Range guidance and disabled Save |
+| [Invalid CIDR line](policy-editor-invalid-cidr-en-US-light-375.jpg) | Actual CodeMirror line two and its error are visible |
+| [BT split](policy-editor-bt-split-en-US-light-375.jpg) | OR destinations, AND port/network and complete two-rule explanation |
+| [Pending list](policy-editor-pending-list-en-US-light-1440.jpg) | Actual pending entries retain the inactive explanation |
+| [List menu](policy-editor-list-options-en-US-light-1440.jpg) | Counts, state hints, 44px options and no group-owned list |
+| [Scope menu](policy-editor-scope-options-en-US-light-1440.jpg) | Both actual options measure 44px |
+| [Group menu](policy-editor-group-options-en-US-light-1440.jpg) | Required group selection and 44px options |
+
+Touch targets, save-time scope mutation, three action-specific allowlist hints,
+fixture failure/conflict contracts, unavailable previews, list receipt fallback
+and disabled-preview presentation failed before repair. Relevant frontend
+coverage passed 382 tests in 27 files after the final change. TypeScript,
+changed-source lint, production build, fixture exclusion and four production
+browser smoke checks passed. English, automatic theme, normal fixture data and
+the default viewport were restored. This candidate needs its own remote CI;
+complete C2/C5/C6, remaining per-view matrices, owner approval and real Node
+acceptance remain open.
 
 ## Lists overview and references (S6)
 

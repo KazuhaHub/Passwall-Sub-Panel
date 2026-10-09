@@ -13,6 +13,12 @@
           <option value="error">Service error</option>
           <option value="catalog-missing">Catalog missing, refresh succeeds</option>
           <option value="catalog-failed">Catalog missing, refresh fails</option>
+          <option value="policy-preview-error">Policy editor: preview fails</option>
+          <option value="policy-over-quota">Policy editor: projected budget exceeds limit</option>
+          <option value="policy-conflict">Policy editor: concurrent edit requires reload</option>
+          <option value="policy-save-pending">Policy editor: save stays pending for 30 seconds</option>
+          <option value="policy-lists-error">Policy editor: lists read fails</option>
+          <option value="policy-groups-error">Policy editor: groups read fails</option>
         </select>
         <button type="submit">Activate and open access control</button>
         <button id="disable" type="button">Disable fixtures</button>

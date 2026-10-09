@@ -1,6 +1,12 @@
 import { expect, it } from 'vitest'
 import { destinationPolicies } from '@/test/accessControlFixtures'
-import { needsFirstPublishConfirm } from './confirmCopy'
+import type { TFunction } from 'i18next'
+import { discardSettingsCopy, needsFirstPublishConfirm } from './confirmCopy'
+
+it('names the safe discard-dialog action as continuing to edit', () => {
+  const t = ((key: string) => key) as TFunction
+  expect(discardSettingsCopy(t)).toMatchObject({ cancelText: 'admin:access_control.confirm.continue_editing', confirmText: 'admin:access_control.confirm.discard_action' })
+})
 
 it.each(['switch', 'editor', 'template', 'allowlist'] as const)('uses published facts at the %s entry', origin => {
   const pending = destinationPolicies({ published_has_access_control: false })

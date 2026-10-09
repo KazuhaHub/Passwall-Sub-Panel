@@ -19,6 +19,57 @@ vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string, opti
 vi.mock('@/components/CodeEditor', () => ({ default: (p: { value: string; onChange: (s: string) => void; ariaLabel: string; readOnly: boolean }) => <textarea aria-label={p.ariaLabel} value={p.value} readOnly={p.readOnly} onChange={e => p.onChange(e.target.value)} /> }))
 import AccessControlView from './AccessControlView'
 const P = 'admin:access_control.'
+it.each(['block', 'observe', 'allow'] as const)('explains allowlist ordering for a selected group in a %s policy', async action => {
+  const original = api.get.getMockImplementation()!
+  const policy = { ...samplePolicy, action, scope: 'groups' as const, group_ids: [7] }
+  api.get.mockImplementation(async (url: string, config?: unknown) => url.endsWith('/policies') ? { data: destinationPolicies({ block: [], [action]: [policy], allowlist_groups: [{ group_id: 7, name: 'Finance', stage: 'enforce', stage_days: 0 }] }) } : original(url, config))
+  mount()
+  fireEvent.click(await screen.findByRole('button', { name: `${P}policies.edit No mail` }))
+  const editor = await screen.findByRole('dialog', { name: `${P}editor.edit_title No mail` })
+  fireEvent.click(within(editor).getByRole('button', { name: `${P}editor.group_allowlist_summary` }))
+  expect(await screen.findByText(`${P}editor.group_allowlist_detail`)).toBeTruthy()
+})
+it.each(['all', 'groups'] as const)('does not label unrelated %s scope as a selected allowlist group', async scope => {
+  const original = api.get.getMockImplementation()!
+  api.get.mockImplementation(async (url: string, config?: unknown) => url.endsWith('/policies') ? { data: destinationPolicies({ block: [{ ...samplePolicy, scope, group_ids: scope === 'groups' ? [8] : [] }], allowlist_groups: [{ group_id: 7, name: 'Finance', stage: 'enforce', stage_days: 0 }] }) } : original(url, config))
+  mount()
+  fireEvent.click(await screen.findByRole('button', { name: `${P}policies.edit No mail` }))
+  const editor = await screen.findByRole('dialog', { name: `${P}editor.edit_title No mail` })
+  expect(within(editor).queryByRole('button', { name: `${P}editor.group_allowlist_summary` })).toBeNull()
+})
+it('keeps policy editor actions and field explanations touch-accessible', async () => {
+  mount()
+  fireEvent.click(await screen.findByRole('button', { name: `${P}policies.edit No mail` }))
+  const editor = await screen.findByRole('dialog', { name: `${P}editor.edit_title No mail` })
+  for (const button of within(editor).getAllByRole('button')) expect(parseFloat(getComputedStyle(button).minHeight), button.textContent || button.getAttribute('aria-label') || undefined).toBeGreaterThanOrEqual(44)
+})
+it('keeps selected policy list tags and their removal targets touch-accessible', async () => {
+  cachedListPolicyAPI(); mount()
+  fireEvent.click(await screen.findByRole('button', { name: `${P}policies.edit No mail` }))
+  const editor = await screen.findByRole('dialog', { name: `${P}editor.edit_title No mail` })
+  const tag = await within(editor).findByRole('button', { name: `${P}editor.list_option Finance` })
+  expect(parseFloat(getComputedStyle(tag).minHeight)).toBeGreaterThanOrEqual(44)
+  const remove = tag.querySelector('.MuiChip-deleteIcon')!
+  expect(parseFloat(getComputedStyle(remove).width)).toBeGreaterThanOrEqual(44)
+  expect(parseFloat(getComputedStyle(remove).height)).toBeGreaterThanOrEqual(44)
+})
+it('disables the policy scope selector while saving', async () => {
+  let finish!: (value: unknown) => void
+  api.put.mockImplementation(() => new Promise(resolve => { finish = resolve }))
+  mount()
+  fireEvent.click(await screen.findByRole('button', { name: `${P}policies.edit No mail` }))
+  const editor = await screen.findByRole('dialog', { name: `${P}editor.edit_title No mail` })
+  fireEvent.change(within(editor).getByRole('textbox', { name: `${P}editor.name` }), { target: { value: 'Changed' } })
+  fireEvent.click(within(editor).getByRole('button', { name: 'common:actions.save' }))
+  await waitFor(() => expect(api.put).toHaveBeenCalledOnce())
+  try {
+    const scope = within(editor).getByRole('combobox', { name: `${P}editor.scope` })
+    fireEvent.mouseDown(scope)
+    expect(screen.queryByRole('listbox')).toBeNull()
+    expect(scope.getAttribute('aria-disabled')).toBe('true')
+  }
+  finally { finish({ data: samplePolicy }); await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull()) }
+})
 it('connects coverage diagnostics, server search and managed inbound edits with encoded identities', async () => {
   const original = api.get.getMockImplementation()!
   api.get.mockImplementation(async (url: string, config?: unknown) => url.endsWith('/status') ? { data: destinationStatus({ nodes: [
@@ -111,6 +162,24 @@ function cachedListPolicyAPI() {
     return original(url, config)
   })
 }
+it.each([true, false])('preserves policy list receipt availability %s when the list catalog cannot be read', async available => {
+  const policy = { ...samplePolicy, list_ids: [7], list_states: [{ id: 7, name: 'Finance', state: 'failed' as const, available }] }
+  const original = api.get.getMockImplementation()!
+  api.get.mockImplementation(async (url: string, config?: unknown) => {
+    if (url.endsWith('/policies')) return { data: destinationPolicies({ block: [policy] }) }
+    if (url.endsWith('/lists')) throw err(503, 'lists_unavailable')
+    return original(url, config)
+  })
+  mount()
+  fireEvent.click(await screen.findByRole('button', { name: `${P}policies.edit No mail` }))
+  const editor = await screen.findByRole('dialog', { name: `${P}editor.edit_title No mail` })
+  await within(editor).findByText(`${P}editor.lists_failed`)
+  expect(!!within(editor).queryByRole('button', { name: `${P}editor.list_pending_summary` })).toBe(!available)
+  expect(within(editor).getByRole('button', { name: 'Finance' })).toBeTruthy()
+  fireEvent.change(within(editor).getByRole('textbox', { name: `${P}editor.name` }), { target: { value: 'Changed name' } })
+  fireEvent.click(within(editor).getByRole('button', { name: 'common:actions.save' }))
+  await waitFor(() => expect(api.put).toHaveBeenCalledWith('/admin/dest/policies/12', expect.objectContaining({ list_ids: [7] }), expect.anything()))
+})
 it('keeps cached list entries active after a refresh failure in the overview', async () => {
   cachedListPolicyAPI(); mount()
   await screen.findByRole('button', { name: `${P}policies.edit No mail` })
@@ -371,6 +440,9 @@ it('starts blank additional conditions collapsed and preserves values through co
   mount(); fireEvent.click(await screen.findByRole('button', { name: `${P}policies.create` }))
   fireEvent.click(screen.getByRole('menuitem', { name: `${P}templates.blank` }))
   const dialog = await screen.findByRole('dialog', { name: `${P}editor.create_title` })
+  expect(within(dialog).getByText(`${P}quota.domains —`)).toBeTruthy()
+  expect(within(dialog).queryAllByRole('progressbar')).toHaveLength(0)
+  expect(api.post).not.toHaveBeenCalled()
   const toggle = within(dialog).getByRole('button', { name: `${P}editor.more_conditions` })
   expect(toggle.getAttribute('aria-expanded')).toBe('false')
   expect(within(dialog).queryByRole('textbox', { name: `${P}editor.ports` })).toBeNull()
@@ -884,15 +956,24 @@ it('toggles with every policy field and its version without treating the save as
   expect(confirmation).not.toHaveBeenCalled()
 })
 it('keeps a stale editor draft until the user explicitly loads the latest version', async () => {
+  const original = api.get.getMockImplementation()!
+  let changedElsewhere = false
+  api.get.mockImplementation(async (url: string, config?: unknown) => {
+    if (url.endsWith('/policies')) return { data: destinationPolicies({ block: [{ ...samplePolicy, list_ids: [7], list_states: [{ id: 7, name: changedElsewhere ? 'Current finance' : 'Finance', state: 'failed' as const, available: !changedElsewhere }] }] }) }
+    if (url.endsWith('/lists')) throw err(503, 'lists_unavailable')
+    return original(url, config)
+  })
   mount(); fireEvent.click(await screen.findByRole('button', { name: `${P}policies.edit No mail` }))
   const name = await screen.findByRole('textbox', { name: `${P}editor.name` })
   fireEvent.change(name, { target: { value: 'My draft' } })
-  api.put.mockRejectedValueOnce(err(409, 'dest_policy_stale'))
+  api.put.mockImplementationOnce(async () => { changedElsewhere = true; throw err(409, 'dest_policy_stale') })
   fireEvent.click(screen.getByRole('button', { name: 'common:actions.save' }))
   const reload = await screen.findByRole('button', { name: `${P}editor.reload` })
   expect((name as HTMLInputElement).value).toBe('My draft')
   fireEvent.click(reload)
   await waitFor(() => expect((name as HTMLInputElement).value).toBe('No mail'))
+  expect(screen.getByRole('button', { name: 'Current finance' })).toBeTruthy()
+  expect(screen.getByRole('button', { name: `${P}editor.list_pending_summary` })).toBeTruthy()
 })
 it('requires first-enable confirmation using published facts and sends no write on cancellation', async () => {
   const disabled = { ...samplePolicy, enabled: false }
@@ -954,6 +1035,8 @@ it('keeps save available after a preview read fails and still validates at the w
   const name = await screen.findByRole('textbox', { name: `${P}editor.name` })
   fireEvent.change(name, { target: { value: 'New name' } })
   await screen.findByText(`${P}editor.preview_failed`)
+  expect(screen.getByText(`${P}quota.domains —`)).toBeTruthy()
+  expect(within(screen.getByRole('dialog')).queryAllByRole('progressbar')).toHaveLength(0)
   expect((screen.getByRole('button', { name: 'common:actions.save' }) as HTMLButtonElement).disabled).toBe(false)
   fireEvent.click(screen.getByRole('button', { name: 'common:actions.save' }))
   await waitFor(() => expect(api.put).toHaveBeenCalled())

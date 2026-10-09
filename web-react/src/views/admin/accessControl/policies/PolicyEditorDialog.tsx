@@ -9,7 +9,7 @@ import { useQueryScope } from '@/query/useQueryScope'
 import { accessControlKeys } from '@/query/keys'
 import { useDestinationLists, useSaveDestinationPolicy } from '@/query/accessControl'
 import { useAllGroups } from '@/query/groups'
-import { destinationListAvailable } from '@/utils/destinationListAvailability'
+import { destinationListAvailable, policyListAvailable } from '@/utils/destinationListAvailability'
 import { useDirtyClose } from '@/hooks/useDirtyClose'
 import { useLeaveGuard } from '@/hooks/useLeaveGuard'
 import { confirm } from '@/components/ConfirmHost'
@@ -28,6 +28,10 @@ import FieldHint from '@/components/FieldHint'
 import { ToneBadge, stateTone } from '@/components/ToneBadge'
 const CodeEditor = lazy(() => import('@/components/CodeEditor'))
 const P = 'admin:access_control.editor.'
+const pickerSlots = {
+  chip: { sx: { minHeight: 44, '& .MuiChip-deleteIcon': { width: 44, height: 44, p: '13px', boxSizing: 'border-box', mx: 0 } } },
+  listbox: { sx: { '& .MuiAutocomplete-option': { minHeight: 44, overflowWrap: 'anywhere' } } },
+}
 interface Props { initial: DestinationPolicyInput; existing?: DestinationPolicyOverviewItem; templateName?: string; policies: DestinationPoliciesView; status?: DestinationStatus; seconds?: number; onClose: () => void }
 function hasAdditionalConditions(input: DestinationPolicyInput) {
   return !!(input.inline.ports?.trim() || input.inline.network || input.inline.cidrs?.some(line => line.trim()) || input.inline.protocols?.length || input.inline.private)
@@ -42,6 +46,7 @@ export default function PolicyEditorDialog({ initial, existing, templateName, po
   const [conditionsOpen, setConditionsOpen] = useState(() => hasAdditionalConditions(seed))
   const conditionsId = useId()
   const [version, setVersion] = useState(existing?.updated_at)
+  const [listReceipts, setListReceipts] = useState(existing?.list_states ?? [])
   const [error, setError] = useState<{ error: string; field?: string }>({ error: '' })
   const [busy, setBusy] = useState(false)
   const admission = useRef(false)
@@ -89,11 +94,19 @@ export default function PolicyEditorDialog({ initial, existing, templateName, po
       const latest = await getDestinationPolicies({ silent: true })
       const row = [...latest.allow, ...latest.block, ...latest.observe].find(row => row.id === existing?.id)
       if (!row) { setError({ error: 'dest_policy_missing' }); return }
-      const next = policyInput(row); setSeed(next); setDraft(next); setConditionsOpen(hasAdditionalConditions(next)); setVersion(row.updated_at); setError({ error: '' })
+      const next = policyInput(row); setSeed(next); setDraft(next); setConditionsOpen(hasAdditionalConditions(next)); setVersion(row.updated_at); setListReceipts(row.list_states); setError({ error: '' })
     } catch (err) { setError(destinationError(err)) } finally { admission.current = false; setBusy(false) }
   }
   const listChoices = (lists.data?.items ?? []).filter(list => !list.owner_group_id)
-  const names = new Map(listChoices.map(list => [list.id, list.name]))
+  const names = new Map([...listReceipts, ...listChoices].map(list => [list.id, list.name]))
+  const pendingList = draft.list_ids.some(id => {
+    const list = listChoices.find(list => list.id === id)
+    if (list) return !destinationListAvailable(list)
+    if (lists.data) return true
+    const receipt = listReceipts.find(list => list.id === id)
+    return !!receipt && !policyListAvailable(receipt)
+  })
+  const selectedAllowlist = draft.scope === 'groups' && policies.allowlist_groups.some(group => draft.group_ids.includes(group.group_id))
   const match = matchSummary(draft)
   const additionalSummary = summaryText(t, { ...draft, list_ids: [], new_list: undefined }, names)
   const nodeCount = status?.nodes.filter(node => node.kind === 'psp' && node.supports.policy && !['offline', 'unsupported_version'].includes(node.state)).length
@@ -101,7 +114,11 @@ export default function PolicyEditorDialog({ initial, existing, templateName, po
   const position = existing && existing.action === draft.action ? Math.max(1, rows.findIndex(row => row.id === existing.id) + 1) : rows.length + 1
   const saveButton = <AsyncButton variant="contained" pending={busy} disabled={!valid || quotaError || categoryError || (!!existing && !dirty) || error.error === 'dest_policy_stale'} onClick={submit}>{t('common:actions.save')}</AsyncButton>
   const closeButton = <IconButton aria-label={t('common:actions.close')} disabled={busy} onClick={close}><CloseIcon /></IconButton>
-  return <Dialog open fullWidth maxWidth={false} slotProps={{ paper: { sx: { maxWidth: mobile ? 'none' : 720 } } }} fullScreen={mobile} onClose={close} aria-labelledby="access-policy-title">
+  return <Dialog open fullWidth maxWidth={false} slotProps={{ paper: { sx: { maxWidth: mobile ? 'none' : 720,
+    '& button': { minWidth: 44, minHeight: 44 }, '& .MuiFormControlLabel-root': { minHeight: 44 },
+    '& .MuiAutocomplete-endAdornment': { top: '50%', transform: 'translateY(-50%)' },
+    '& .MuiAutocomplete-inputRoot': { minHeight: 56, pr: '90px !important' },
+  } } }} fullScreen={mobile} onClose={close} aria-labelledby="access-policy-title">
     <DialogTitle component="div" id="access-policy-heading" sx={{ display: 'flex', alignItems: 'center', gap: 1, px: { xs: 1, sm: 3 } }}>
       {mobile && closeButton}<Typography component="h2" variant="h6" id="access-policy-title" sx={{ flex: 1, minWidth: 0, overflowWrap: 'anywhere' }}>{t(existing ? `${P}edit_title` : templateName ? `${P}template_title` : `${P}create_title`, { ...(existing ? { name: seed.name } : {}), template: templateName })}</Typography>{mobile ? saveButton : closeButton}
     </DialogTitle>
@@ -119,8 +136,8 @@ export default function PolicyEditorDialog({ initial, existing, templateName, po
           <Button disabled={busy} onClick={() => change({ new_list: undefined })}>{t('admin:access_control.templates.remove_category')}</Button>
         </Stack>}
         {lists.error && <Alert severity="error" action={<Button onClick={() => void lists.refetch()}>{t('common:actions.retry')}</Button>}>{t(`${P}lists_failed`)}</Alert>}
-        <Autocomplete multiple options={listChoices.map(list => list.id)} value={draft.list_ids} loading={lists.isPending} disabled={busy}
-          getOptionLabel={id => { const list = listChoices.find(list => list.id === id); return list ? t(`${P}list_option`, { name: list.name, kind: t(`admin:access_control.lists.${list.kind}`), count: list.entry_count, regexps: list.regexp_count }) : `#${id}` }}
+        <Autocomplete multiple options={listChoices.map(list => list.id)} value={draft.list_ids} loading={lists.isPending} disabled={busy} slotProps={pickerSlots}
+          getOptionLabel={id => { const list = listChoices.find(list => list.id === id); return list ? t(`${P}list_option`, { name: list.name, kind: t(`admin:access_control.lists.${list.kind}`), count: list.entry_count, regexps: list.regexp_count }) : names.get(id) ?? `#${id}` }}
           getOptionDisabled={id => listChoices.some(list => list.id === id && list.kind === 'custom' && !list.entry_count)}
           renderOption={(props, id) => {
             const { key, ...optionProps } = props
@@ -131,13 +148,13 @@ export default function PolicyEditorDialog({ initial, existing, templateName, po
               style={{ ...optionProps.style, ...(empty ? { pointerEvents: 'auto' as const } : {}) }}>
               <Box sx={{ minWidth: 0, width: '100%' }}>
                 <Typography variant="body2" sx={{ overflowWrap: 'anywhere' }}>{t(`${P}list_option`, { name: list.name, kind: t(`admin:access_control.lists.${list.kind}`), count: list.entry_count, regexps: list.regexp_count })}</Typography>
-                {list.state !== 'ready' && <ToneBadge tone={stateTone(theme, 'attention')} label={t(`${P}list_attention`)} />}
+                {list.state !== 'ready' && <ToneBadge wrap tone={stateTone(theme, 'attention')} label={t(`${P}list_attention`)} />}
                 {empty && <Typography variant="caption">{t(`${P}list_empty`)}</Typography>}
               </Box>
             </li>
           }}
           onChange={(_, list_ids) => change({ list_ids })} renderInput={p => <TextField {...p} label={t(`${P}lists`)} />} />
-        {draft.list_ids.some(id => { const list = listChoices.find(list => list.id === id); return !list || !destinationListAvailable(list) }) && <Typography variant="caption"><FieldHint tone="amber" summary={t(`${P}list_pending_summary`)} detail={t(`${P}list_pending_detail`)} /></Typography>}
+        {pendingList && <Typography variant="caption"><FieldHint tone="amber" summary={t(`${P}list_pending_summary`)} detail={t(`${P}list_pending_detail`)} /></Typography>}
         <Accordion disableGutters elevation={0} expanded={conditionsOpen} onChange={(_, expanded) => setConditionsOpen(expanded)} disabled={busy} sx={{ border: 1, borderColor: 'divider', borderRadius: 2, '&:before': { display: 'none' } }}>
           <AccordionSummary expandIcon={<ExpandMoreIcon />} aria-label={t(`${P}more_conditions`)} aria-describedby={additionalSummary ? `${conditionsId}-summary` : undefined} aria-controls={`${conditionsId}-content`} id={`${conditionsId}-toggle`} sx={{ '& .MuiAccordionSummary-content': { flexWrap: 'wrap', gap: 1, alignItems: 'center', minWidth: 0 } }}>
             <Typography component="span" variant="subtitle2" sx={{ flex: '1 1 auto' }}>{t(`${P}more_conditions`)}</Typography>
@@ -153,17 +170,19 @@ export default function PolicyEditorDialog({ initial, existing, templateName, po
           </Stack></AccordionDetails>
         </Accordion>
         {validation.match && <Alert severity="error">{t(`${P}no_match`)}</Alert>}
-        <TextField select label={t(`${P}scope`)} value={draft.scope} onChange={e => change({ scope: e.target.value as 'all' | 'groups', group_ids: e.target.value === 'all' ? [] : draft.group_ids })}>{['all', 'groups'].map(scope => <MenuItem key={scope} value={scope}>{t(`${P}${scope}`)}</MenuItem>)}</TextField>
-        {draft.scope === 'groups' && <><Autocomplete multiple options={(groups.data ?? []).map(group => group.id)} value={draft.group_ids} disabled={busy} loading={groups.isPending} getOptionLabel={id => groups.data?.find(group => group.id === id)?.name ?? `#${id}`} onChange={(_, group_ids) => change({ group_ids })} renderInput={p => <TextField {...p} label={t(`${P}groups`)} error={!!fieldError('group_ids')} helperText={fieldMessage('group_ids')} />} />{groups.error && <Alert severity="error" action={<Button onClick={() => void groups.refetch()}>{t('common:actions.retry')}</Button>}>{t(`${P}groups_failed`)}</Alert>}</>}
+        <TextField select disabled={busy} label={t(`${P}scope`)} value={draft.scope} onChange={e => change({ scope: e.target.value as 'all' | 'groups', group_ids: e.target.value === 'all' ? [] : draft.group_ids })} slotProps={{ select: { MenuProps: { slotProps: { list: { sx: { '& .MuiMenuItem-root': { minHeight: 44 } } } } } } }}>{['all', 'groups'].map(scope => <MenuItem key={scope} value={scope}>{t(`${P}${scope}`)}</MenuItem>)}</TextField>
+        {draft.scope === 'groups' && <><Autocomplete multiple options={(groups.data ?? []).map(group => group.id)} value={draft.group_ids} disabled={busy} loading={groups.isPending} slotProps={pickerSlots} getOptionLabel={id => groups.data?.find(group => group.id === id)?.name ?? `#${id}`} onChange={(_, group_ids) => change({ group_ids })} renderInput={p => <TextField {...p} label={t(`${P}groups`)} error={!!fieldError('group_ids')} helperText={fieldMessage('group_ids')} />} />{groups.error && <Alert severity="error" action={<Button onClick={() => void groups.refetch()}>{t('common:actions.retry')}</Button>}>{t(`${P}groups_failed`)}</Alert>}</>}
+        {selectedAllowlist && <Typography variant="caption"><FieldHint tone="muted" summary={t(`${P}group_allowlist_summary`)} detail={t(`${P}group_allowlist_detail`)} /></Typography>}
         {draft.action === 'block' && <FormControlLabel control={<Switch checked={draft.counts_as_risk} onChange={(_, counts_as_risk) => change({ counts_as_risk })} />} label={t(`${P}counts_as_risk`)} />}
         <FormControlLabel control={<Switch checked={draft.enabled} onChange={(_, enabled) => change({ enabled })} />} label={t(`${P}enabled`)} />
       </Stack></Box>
       <Typography variant="subtitle2">{t(`${P}quota`)}</Typography>
-      {preview.error ? <Alert severity={quotaError || categoryError ? 'error' : 'warning'} action={<Button disabled={busy} onClick={() => void preview.refetch()}>{t('common:actions.retry')}</Button>}>{t(quotaError ? 'admin:access_control.quota.exceeded' : categoryError ? `admin:access_control.list_editor.${destinationError(preview.error).error}` : `${P}preview_failed`, { defaultValue: t(`${P}preview_failed`) })}</Alert> : <QuotaMeters budget={settled === serialized ? preview.data?.budget : undefined} />}
+      {preview.error && <QuotaMeters unavailable />}
+      {preview.error ? <Alert severity={quotaError || categoryError ? 'error' : 'warning'} action={<Button disabled={busy} onClick={() => void preview.refetch()}>{t('common:actions.retry')}</Button>}>{t(quotaError ? 'admin:access_control.quota.exceeded' : categoryError ? `admin:access_control.list_editor.${destinationError(preview.error).error}` : `${P}preview_failed`, { defaultValue: t(`${P}preview_failed`) })}</Alert> : <QuotaMeters unavailable={!valid} budget={settled === serialized ? preview.data?.budget : undefined} />}
       {categoryError && !preview.error && <Alert severity="error">{t('admin:access_control.list_editor.dest_list_empty_after_filter')}</Alert>}
     </Stack></DialogContent>
     <DialogActions sx={{ position: 'sticky', bottom: 0, bgcolor: 'background.paper', flexWrap: 'wrap', px: 3, py: 2, gap: 1 }}>
-      <Box sx={{ flex: '1 1 100%' }}><Typography variant="body2">{t(`${P}action_${draft.action}`)} · {t(`${P}${draft.scope}`)} · {summaryText(t, draft, names)} · {t(`${P}position`, { step: { allow: 1, block: 3, observe: 4 }[draft.action], position })}</Typography>
+      <Box sx={{ flex: '1 1 100%' }}><Typography variant="body2">{t(`${P}action_${draft.action}`)} · {t(`${P}${draft.scope}`)} · {summaryText(t, draft, names) || '—'} · {t(`${P}position`, { step: { allow: 1, block: 3, observe: 4 }[draft.action], position })}</Typography>
         {match.split && <Typography variant="caption">{t(`${P}split`)}</Typography>}
         <Typography variant="caption" sx={{ display: 'block' }} color="text.secondary">{t(!draft.enabled ? `${P}disabled_hint` : existing && !executionChanged(draft, seed) ? `${P}metadata_hint` : `${P}apply_hint`, { nodes: nodeCount === undefined ? t('admin:access_control.confirm.each_node') : t('admin:access_control.confirm.node_count', { count: nodeCount }), eta: status?.apply_eta_ms ? t('admin:access_control.confirm.eta_minutes', { minutes: Math.ceil(status.apply_eta_ms / 60000) }) : t('admin:access_control.confirm.eta_unknown') })}</Typography>
       </Box><Button disabled={busy} onClick={close}>{t('common:actions.cancel')}</Button>{!mobile && saveButton}

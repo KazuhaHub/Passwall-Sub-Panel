@@ -1,4 +1,5 @@
 // This page is served by Vite, outside the production index.html entry point.
+import { accessFixtureScenarios, type AccessFixtureScenario } from './accessControlMock'
 if (import.meta.env.DEV) {
   const form = document.querySelector<HTMLFormElement>('#fixtures')
   const status = document.querySelector<HTMLElement>('#status')
@@ -7,7 +8,7 @@ if (import.meta.env.DEV) {
   form?.addEventListener('submit', event => {
     event.preventDefault()
     const scenario = new FormData(form).get('scenario')
-    if (!['normal', 'empty', 'error', 'catalog-missing', 'catalog-failed'].includes(String(scenario))) return
+    if (!accessFixtureScenarios.includes(String(scenario) as AccessFixtureScenario)) return
     try {
       localStorage.setItem('psp_dev_access_state', String(scenario))
       localStorage.setItem('psp_dev_fixtures', 'access')

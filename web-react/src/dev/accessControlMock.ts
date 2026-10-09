@@ -5,12 +5,13 @@ import type { Server } from '@/api/servers'
 import { destinationListAvailable } from '@/utils/destinationListAvailability'
 import { accessControlFixtureSeed, destinationPolicies, destinationStatus } from '@/test/accessControlFixtures'
 
-export type AccessFixtureScenario = 'normal' | 'empty' | 'error' | 'catalog-missing' | 'catalog-failed'
+export const accessFixtureScenarios = ['normal', 'empty', 'error', 'catalog-missing', 'catalog-failed', 'policy-preview-error', 'policy-over-quota', 'policy-conflict', 'policy-save-pending', 'policy-lists-error', 'policy-groups-error'] as const
+export type AccessFixtureScenario = typeof accessFixtureScenarios[number]
 
 function savedScenario(): AccessFixtureScenario {
   try {
     const value = localStorage.getItem('psp_dev_access_state')
-    if (value === 'empty' || value === 'error' || value === 'catalog-missing' || value === 'catalog-failed') return value
+    if (accessFixtureScenarios.includes(value as AccessFixtureScenario)) return value as AccessFixtureScenario
   } catch { /* Storage may be unavailable; the normal seed remains usable. */ }
   return 'normal'
 }
@@ -63,6 +64,7 @@ export function createAccessControlMock(fallback: AxiosAdapter, options: { scena
   }))
   let generation = 12, publishedGeneration = 12, paused = false, lastWrite = Date.now() - 3_600_000
   let published = structuredClone(seed.policies)
+  let conflictInjected = false
   let catalogAvailable = scenario !== 'catalog-missing' && scenario !== 'catalog-failed'
   let catalogDue = 0, catalogError = ''
   const defaults: AccessControlSettings = { dest_hit_retention_days: 30, dest_trial_retention_days: 7, dest_usage_retention_days: 7, dest_list_refresh_hours: 17, dest_policy_apply_min_seconds: 93 }
@@ -102,6 +104,8 @@ export function createAccessControlMock(fallback: AxiosAdapter, options: { scena
         panel_version: node.agent_version ?? undefined })
     }
     if (scenario === 'error') return fail(500, 'fixture_unavailable')
+    if (scenario === 'policy-lists-error' && method === 'GET' && path === '/admin/dest/lists' || scenario === 'policy-groups-error' && method === 'GET' && path === '/admin/groups') return fail(503, 'fixture_unavailable')
+    if (scenario === 'policy-save-pending' && (method === 'POST' && path === '/admin/dest/policies' || method === 'PUT' && /^\/admin\/dest\/policies\/\d+$/.test(path))) await delay(config, 30_000)
     const summary = (list: DestinationListDetail): DestinationListSummary => {
       const { entries: _entries, source_text: _source, content_sha256: _digest, entry_types: _types, parse_report, ...rest } = list
       const used_by: DestinationListSummary['used_by'] = seed.policies.filter(p => p.list_ids.includes(list.id)).map(p => ({ kind: 'policy', id: p.id, name: p.name }))
@@ -111,7 +115,7 @@ export function createAccessControlMock(fallback: AxiosAdapter, options: { scena
     }
     const findList = (id: number) => seed.lists.find(l => l.id === id) ?? fail(404, 'not_found')
     const findPolicy = (id: number) => seed.policies.find(p => p.id === id) ?? fail(404, 'not_found')
-    const cas = (updatedAt: number) => { if (body.updated_at !== updatedAt) fail(409, 'dest_stale') }
+    const cas = (updatedAt: number, error: 'dest_policy_stale' | 'dest_list_stale') => { if (body.updated_at !== updatedAt) fail(409, error) }
     const preview = (input: DestinationListInput): DestinationListPreview => {
       let entries: string[], report: DestinationListDetail['parse_report']
       if (input.kind === 'geosite') {
@@ -149,7 +153,7 @@ export function createAccessControlMock(fallback: AxiosAdapter, options: { scena
     }
     const validatePolicy = (input: DestinationPolicyInput, id?: number) => {
       if (!input.name?.trim() || !['allow', 'block', 'observe'].includes(input.action)) fail(422, 'dest_policy_invalid')
-      if (seed.policies.some(p => p.id !== id && p.name === input.name)) fail(409, 'already_exists')
+      if (seed.policies.some(p => p.id !== id && p.name === input.name)) fail(409, 'dest_name_taken')
       if (!Array.isArray(input.list_ids) || input.list_ids.some(id => !seed.lists.some(l => l.id === id))) fail(422, 'dest_list_missing')
       if (input.scope === 'groups' && !input.group_ids?.length) fail(422, 'dest_scope_empty')
     }
@@ -195,7 +199,7 @@ export function createAccessControlMock(fallback: AxiosAdapter, options: { scena
         seed.lists = seed.lists.filter(l => l.id !== id); tick(); return response(null, 204)
       }
       if (!operation && method === 'PUT') {
-        cas(list.updated_at)
+        cas(list.updated_at, 'dest_list_stale')
         const input = body as unknown as DestinationListInput
         const result = preview(input)
         if (!input.name?.trim()) fail(422, 'dest_list_invalid')
@@ -215,11 +219,15 @@ export function createAccessControlMock(fallback: AxiosAdapter, options: { scena
         exemptions: { count: seed.exemptions.filter(e => !e.expired).length }, allowlist_groups: seed.allowlistGroups, budget: budget() }))
     }
     if (path === '/admin/dest/policies/preview' && method === 'POST') {
+      if (scenario === 'policy-preview-error') return fail(503, 'fixture_unavailable')
       const input = body as unknown as DestinationPolicyInput
       validatePolicy(input, body.id as number | undefined)
-      return response({ budget: budget(), ...(input.new_list ? { new_list_preview: preview(input.new_list) } : {}) })
+      const projected = budget()
+      if (scenario === 'policy-over-quota') projected.domains = { used: 50001, limit: 50000 }
+      return response({ budget: projected, ...(input.new_list ? { new_list_preview: preview(input.new_list) } : {}) })
     }
     if (path === '/admin/dest/policies' && method === 'POST') {
+      if (scenario === 'policy-over-quota') return fail(400, 'dest_policy_over_limit')
       const input = structuredClone(body) as unknown as DestinationPolicyInput
       validatePolicy(input)
       const list = input.new_list ? newList(input.new_list) : null
@@ -239,7 +247,13 @@ export function createAccessControlMock(fallback: AxiosAdapter, options: { scena
     if (policyMatch) {
       const id = Number(policyMatch[1]), policy = findPolicy(id)
       if (method === 'GET') return response(policy)
-      if (method === 'PUT') { cas(policy.updated_at); const input = body as unknown as DestinationPolicyInput; validatePolicy(input, id); tick(); Object.assign(policy, policyFrom(input, id, policy.created_at, policy.priority)); return response(policy) }
+      if (method === 'PUT') {
+        if (scenario === 'policy-conflict' && !conflictInjected) { conflictInjected = true; policy.name = `${policy.name} · concurrent edit`; policy.updated_at = tick() }
+        cas(policy.updated_at, 'dest_policy_stale')
+        if (scenario === 'policy-over-quota') return fail(400, 'dest_policy_over_limit')
+        const input = body as unknown as DestinationPolicyInput
+        validatePolicy(input, id); tick(); Object.assign(policy, policyFrom(input, id, policy.created_at, policy.priority)); return response(policy)
+      }
       if (method === 'DELETE') { seed.policies = seed.policies.filter(p => p.id !== id); tick(); return response(null, 204) }
     }
     if (path === '/admin/dest/exemptions' && method === 'GET') return response({ items: seed.exemptions })

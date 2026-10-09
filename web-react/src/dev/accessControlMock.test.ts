@@ -1,10 +1,10 @@
 import axios, { AxiosHeaders, type AxiosAdapter } from 'axios'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { accessControlFixtureSeed } from '@/test/accessControlFixtures'
-import { createAccessControlMock } from './accessControlMock'
+import { createAccessControlMock, type AccessFixtureScenario } from './accessControlMock'
 import { policyTemplates } from '@/views/admin/accessControl/policies/templates'
 
-function harness(scenario: 'normal' | 'empty' | 'error' | 'catalog-missing' | 'catalog-failed' = 'normal') {
+function harness(scenario: AccessFixtureScenario = 'normal') {
   const fallback = vi.fn<AxiosAdapter>(async config => ({ data: 'live', status: 200, statusText: 'OK', headers: new AxiosHeaders(), config }))
   const adapter = createAccessControlMock(fallback, { scenario, latency: 0 })
   const client = axios.create({ baseURL: '/panel/api', adapter })
@@ -14,6 +14,63 @@ function harness(scenario: 'normal' | 'empty' | 'error' | 'catalog-missing' | 'c
 afterEach(() => vi.useRealTimers())
 
 describe('reproducible access-control acceptance fixtures', () => {
+  it('fails only the editor preview without changing definitions or contacting the live transport', async () => {
+    const { client, fallback } = harness('policy-preview-error')
+    const before = (await client.get('/admin/dest/policies')).data
+    await expect(client.post('/admin/dest/policies/preview', before.block[0])).rejects.toMatchObject({ response: { status: 503 } })
+    expect((await client.get('/admin/dest/policies')).data).toEqual(before)
+    expect((await client.get('/admin/dest/lists')).data.items.length).toBeGreaterThan(0)
+    expect(fallback).not.toHaveBeenCalled()
+  })
+  it('shows a projected over-limit budget and refuses saves without mutating the current budget', async () => {
+    const { client, fallback } = harness('policy-over-quota')
+    const before = (await client.get('/admin/dest/policies')).data
+    const policy = before.block[0]
+    expect((await client.post('/admin/dest/policies/preview', policy)).data.budget.domains).toEqual({ used: 50001, limit: 50000 })
+    await expect(client.put(`/admin/dest/policies/${policy.id}`, { ...policy, name: 'Changed' })).rejects.toMatchObject({ response: { status: 400, data: { error: 'dest_policy_over_limit' } } })
+    expect((await client.get('/admin/dest/policies')).data).toEqual(before)
+    expect(fallback).not.toHaveBeenCalled()
+  })
+  it('requires reloading the concurrently changed policy before accepting a new revision', async () => {
+    const { client, fallback } = harness('policy-conflict')
+    const policy = (await client.get('/admin/dest/policies')).data.block[0]
+    await expect(client.put(`/admin/dest/policies/${policy.id}`, { ...policy, name: 'Local draft' })).rejects.toMatchObject({ response: { status: 409, data: { error: 'dest_policy_stale' } } })
+    const latest = (await client.get(`/admin/dest/policies/${policy.id}`)).data
+    expect(latest.name).not.toBe('Local draft')
+    expect(latest.updated_at).toBeGreaterThan(policy.updated_at)
+    await expect(client.put(`/admin/dest/policies/${policy.id}`, { ...policy, name: 'Local draft' })).rejects.toMatchObject({ response: { data: { error: 'dest_policy_stale' } } })
+    expect((await client.put(`/admin/dest/policies/${policy.id}`, { ...latest, name: 'Reviewed draft' })).data.name).toBe('Reviewed draft')
+    expect(fallback).not.toHaveBeenCalled()
+  })
+  it('keeps a slow editor save pending and cancels before mutation without leaving timers or using the live transport', async () => {
+    vi.useFakeTimers()
+    const { client, fallback } = harness('policy-save-pending')
+    const before = (await client.get('/admin/dest/policies')).data
+    const policy = before.block[0], controller = new AbortController()
+    const outcome = client.put(`/admin/dest/policies/${policy.id}`, { ...policy, name: 'Pending draft' }, { signal: controller.signal }).then(() => 'saved', error => error)
+    await vi.advanceTimersByTimeAsync(1000)
+    expect((await client.get('/admin/dest/policies')).data).toEqual(before)
+    controller.abort()
+    expect(await outcome).toMatchObject({ code: 'ERR_CANCELED' })
+    expect(vi.getTimerCount()).toBe(0)
+    expect((await client.get('/admin/dest/policies')).data).toEqual(before)
+    expect(fallback).not.toHaveBeenCalled()
+  })
+  it.each(['policy-lists-error', 'policy-groups-error'] as const)('keeps the editor readable when %s fails', async scenario => {
+    const { client, fallback } = harness(scenario)
+    const before = (await client.get('/admin/dest/policies')).data
+    await expect(client.get(scenario === 'policy-lists-error' ? '/admin/dest/lists' : '/admin/groups')).rejects.toMatchObject({ response: { status: 503 } })
+    expect((await client.get('/admin/dest/policies')).data).toEqual(before)
+    expect(fallback).not.toHaveBeenCalled()
+  })
+  it('returns the administrator API stale codes for policy and list revision conflicts', async () => {
+    const { client, fallback } = harness()
+    const policy = (await client.get('/admin/dest/policies')).data.block[0]
+    await expect(client.put(`/admin/dest/policies/${policy.id}`, { ...policy, updated_at: 1 })).rejects.toMatchObject({ response: { status: 409, data: { error: 'dest_policy_stale' } } })
+    const list = (await client.get('/admin/dest/lists')).data.items[0]
+    await expect(client.put(`/admin/dest/lists/${list.id}`, { ...list, updated_at: 1 })).rejects.toMatchObject({ response: { status: 409, data: { error: 'dest_list_stale' } } })
+    expect(fallback).not.toHaveBeenCalled()
+  })
   it('keeps simulation execution receipts independent and unknown counts null', async () => {
     const { client, fallback } = harness()
     const before = (await client.get('/admin/dest/status')).data

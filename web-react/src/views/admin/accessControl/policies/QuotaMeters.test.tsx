@@ -6,6 +6,12 @@ import QuotaMeters from './QuotaMeters'
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key }) }))
 afterEach(cleanup)
 const P = 'admin:access_control.quota.'
+it('shows unavailable budgets without a loading animation or borrowed counts', () => {
+  render(<QuotaMeters unavailable budget={destinationBudget} />)
+  expect(screen.getByText(`${P}domains —`)).toBeTruthy()
+  expect(screen.queryAllByRole('progressbar')).toHaveLength(0)
+  expect(screen.queryByText(`${P}domains 0 / 50,000`)).toBeNull()
+})
 it('names each quota and exposes actual counts without including low extra budgets', () => {
   render(<QuotaMeters budget={destinationBudget} />)
   expect(screen.getAllByRole('progressbar')).toHaveLength(4)
