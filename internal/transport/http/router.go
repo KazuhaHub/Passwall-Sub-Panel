@@ -397,7 +397,8 @@ func NewRouter(d Deps) stdhttp.Handler {
 	enroll2FA := authpolicy.New(authpolicy.Deps{Groups: d.Repos.Group, Passkeys: d.Repos.WebAuthn, Settings: d.Repos.ScopedSettings})
 	require2FAGate := middleware.Require2FAEnrollment(enroll2FA, d.User)
 
-	userMe := handler.NewUserMeHandler(d.User, d.Traffic, d.Repos.ScopedSettings, d.Group, twofaSvc, passkeySvc, enroll2FA)
+	userMe := handler.NewUserMeHandler(d.User, d.Traffic, d.Repos.ScopedSettings, d.Group, twofaSvc, passkeySvc, enroll2FA, d.Repos.Legal)
+	legalConsent := handler.NewLegalConsentHandler(d.Repos.Legal)
 	userGroup := g.Group("/api/user/me",
 		middleware.RequireAuth(d.Auth, d.User, authUserCache),
 		// Operators are included so that an operator forced to enroll 2FA (via the
@@ -410,6 +411,7 @@ func NewRouter(d Deps) stdhttp.Handler {
 	)
 	{
 		userGroup.GET("", userMe.Profile)
+		userGroup.POST("/legal/accept", legalConsent.Accept)
 		userGroup.GET("/traffic", userMe.Traffic)
 		userGroup.GET("/traffic/history", userMe.TrafficHistory)
 		userGroup.GET("/server-status", userMe.ServerStatus)

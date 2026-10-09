@@ -22,6 +22,16 @@ type LegalConsentStatus struct {
 	Pending        bool  `json:"pending"`
 }
 
+// LegalPublicDocument omits publisher identity and internal document IDs.
+type LegalPublicDocument struct {
+	Version        int64     `json:"version"`
+	ConsentVersion int64     `json:"consent_version"`
+	Locale         string    `json:"locale"`
+	FallbackFrom   string    `json:"fallback_from,omitempty"`
+	Content        string    `json:"content"`
+	PublishedAt    time.Time `json:"published_at"`
+}
+
 func ValidateLegalIdentity(kind, locale string) error {
 	if kind != "terms" && kind != "privacy" {
 		return fmt.Errorf("%w: legal kind", ErrValidation)

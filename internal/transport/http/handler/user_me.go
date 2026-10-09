@@ -33,10 +33,11 @@ type UserMeHandler struct {
 	twofa    *twofa.Service
 	passkey  *passkey.Service
 	enroll   *authpolicy.Service
+	legal    ports.LegalRepo
 }
 
-func NewUserMeHandler(userSvc *user.Service, trafficSvc *traffic.Service, settings ports.ScopedSettings, groupSvc *group.Service, twofaSvc *twofa.Service, passkeySvc *passkey.Service, enroll *authpolicy.Service) *UserMeHandler {
-	return &UserMeHandler{user: userSvc, traffic: trafficSvc, settings: settings, group: groupSvc, twofa: twofaSvc, passkey: passkeySvc, enroll: enroll}
+func NewUserMeHandler(userSvc *user.Service, trafficSvc *traffic.Service, settings ports.ScopedSettings, groupSvc *group.Service, twofaSvc *twofa.Service, passkeySvc *passkey.Service, enroll *authpolicy.Service, legal ports.LegalRepo) *UserMeHandler {
+	return &UserMeHandler{user: userSvc, traffic: trafficSvc, settings: settings, group: groupSvc, twofa: twofaSvc, passkey: passkeySvc, enroll: enroll, legal: legal}
 }
 
 func (h *UserMeHandler) Profile(c *gin.Context) {
@@ -63,6 +64,17 @@ func (h *UserMeHandler) Profile(c *gin.Context) {
 	// group-scoped categories: emergency-access caps, 2FA method availability,
 	// and login policy (password-change / personal-rules locks).
 	settings, _ := h.settings.Load(c.Request.Context(), ports.UISettings{})
+	var legalState domain.LegalConsentStatus
+	if h.legal != nil {
+		legalState, err = h.legal.Status(c.Request.Context(), u.ID)
+		if err != nil {
+			respondPublicError(c, err)
+			return
+		}
+	} else if settings.LegalEnabled {
+		respondPublicError(c, domain.ErrUnavailable)
+		return
+	}
 	suEff, suErr := h.settings.LoadForUser(c.Request.Context(), u, ports.UISettings{})
 	canChangePassword := u.HasLocalPassword()
 	if canChangePassword && u.Role != domain.RoleAdmin {
@@ -81,10 +93,12 @@ func (h *UserMeHandler) Profile(c *gin.Context) {
 	now := time.Now()
 	access := u.AccessSnapshot(now)
 	c.JSON(http.StatusOK, gin.H{
-		"id":           u.ID,
-		"display_name": u.DisplayName,
-		"upn":          u.UPN,
-		"sub_url":      h.subURL(c.Request, u.SubToken),
+		"id":                    u.ID,
+		"legal_pending":         legalState.Pending,
+		"legal_consent_version": legalState.ConsentVersion,
+		"display_name":          u.DisplayName,
+		"upn":                   u.UPN,
+		"sub_url":               h.subURL(c.Request, u.SubToken),
 		// profile_name is the server-resolved SubProfileNameTemplate.
 		// Exposing it pre-rendered means the frontend's buildImportURL
 		// can drop {{ profile_name_encoded }} into deep links exactly
