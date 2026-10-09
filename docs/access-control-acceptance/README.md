@@ -1242,3 +1242,76 @@ with an empty custom editor; the unsaved draft was then discarded and focus
 returned to New list. No list was saved or deleted, and Test fetch was never
 invoked. These checks fill this dialog's normal matrix only; other S20 dialogs,
 remaining per-view acceptance and real candidate Node gates remain open.
+
+### First-publication, retention and discard confirmation matrices
+
+Fifteen additional native captures fill the normal five-variant matrix for
+three existing S20 confirmations. The first-publication checks use the empty
+DEV seed and the enabled mail-template draft: zero eligible nodes is an actual
+empty-fleet count, not a failed-read substitute. Save opens the confirmation;
+Enable was never accepted. Canceling retained the template and closing it
+returned to the unchanged empty-policy page.
+
+The settings checks change hit retention from 30 to 20 only in a local draft.
+Shortening was always declined. Its copy names 20 days and irreversible cleanup
+within an hour; its action uses the theme's error color. Cancel preserves the
+draft and restores Save. Closing then opens ordinary discard confirmation;
+Continue editing/Escape preserves the draft and restores Close. Tab/Shift+Tab
+wrap between its actions. Accepting Discard closes with no second prompt and
+returns focus to More; reopening verifies the original 30-day value.
+
+| Confirmation | Chinese light desktop | Chinese dark desktop | Chinese light phone | Chinese dark phone | English light phone |
+| --- | --- | --- | --- | --- | --- |
+| First enabled publication | [1440](s20-first-publish-zh-light-1440.jpg) | [1440](s20-first-publish-zh-dark-1440.jpg) | [375](s20-first-publish-zh-light-375.jpg) | [375](s20-first-publish-zh-dark-375.jpg) | [375](s20-first-publish-en-light-375.jpg) |
+| Shorten retention | [1440](s20-shorten-retention-zh-light-1440.jpg) | [1440](s20-shorten-retention-zh-dark-1440.jpg) | [375](s20-shorten-retention-zh-light-375.jpg) | [375](s20-shorten-retention-zh-dark-375.jpg) | [375](s20-shorten-retention-en-light-375.jpg) |
+| Discard settings draft | [1440](s20-discard-settings-zh-light-1440.jpg) | [1440](s20-discard-settings-zh-dark-1440.jpg) | [375](s20-discard-settings-zh-light-375.jpg) | [375](s20-discard-settings-zh-dark-375.jpg) | [375](s20-discard-settings-en-light-375.jpg) |
+
+[First-publication bounds](s20-first-publish-metrics.json) and
+[settings-confirmation bounds](s20-settings-confirmation-metrics.json) show no
+horizontal overflow and actions at least 44px high. The English Continue editing
+label wraps and its target grows to 61px. Every image was visually inspected.
+Focus checks use a fixed viewport: resizing a confirmation between phone and
+desktop can replace the underlying Save element, so those resize observations
+are not used as evidence of focus restoration. Independent English and Chinese
+phone cancellation restored Save with the draft unchanged.
+
+These are native synthetic UI checks against existing components, not new
+application changes. No policy was created, no retention setting was saved and
+no historical record was deleted. They do not prove real cleanup or kernel
+deployment. Normal fixtures, English, automatic theme and default viewport were
+restored. Other per-view/S20 acceptance, owner approval and C2/C5/C6 remain open.
+
+### Global allow-exception targets and normal matrix
+
+Native measurement found a 24px explanation button and 40px footer actions in
+the global exception dialog. Its own scope now sets a 44px minimum for buttons,
+without changing the shared hint component or other product views. Three
+target regressions failed before repair; the explanation remains interactive
+without issuing a write. All nine global-exception checks pass.
+
+| Language/theme/viewport | Native capture |
+| --- | --- |
+| Chinese light desktop, 1440 × 900 | [Dialog](global-exception-zh-light-1440.jpg) |
+| Chinese dark desktop, 1440 × 900 | [Dialog](global-exception-zh-dark-1440.jpg) |
+| Chinese light phone, 375 × 812 | [Dialog](global-exception-zh-light-375.jpg) |
+| Chinese dark phone, 375 × 812 | [Dialog](global-exception-zh-dark-375.jpg) |
+| English light phone, 375 × 812 | [Dialog](global-exception-en-light-375.jpg) |
+
+[Measured bounds](global-exception-metrics.json) show all buttons at least
+44px in both dimensions, with no horizontal document overflow. Desktop paper
+is 600px; phone paper fills the viewport (fractional CSS rounding is recorded).
+The English scope labels wrap and their targets grow to 72px. The readonly
+target is `www.example.test`, obtained by an explicit DEV destination test.
+Without a selected account, account-only exemption remains disabled.
+
+[Explanation](global-exception-detail-en-light-375.jpg) opens above the dialog
+and names the global allow-before-block behavior; Escape returns focus to its
+44px trigger. Escape from the clean dialog returns to Add allow exception.
+[Host-only selection](global-exception-host-zh-dark-375.jpg) changes the scope
+explanation; declining discard preserves that choice. Returning to Entire site
+allows a clean close. No exception was saved. The final relevant suite passed
+490 tests in 35 files, with TypeScript, changed-source lint, production build,
+fixture exclusion and four production smoke checks passing. Normal fixtures,
+English, automatic theme and default viewport were restored. The normal matrix
+does not establish this dialog's failed-write/pending/account variants or real
+backend exception creation; these and the remaining C2/C5/C6 gates stay open.

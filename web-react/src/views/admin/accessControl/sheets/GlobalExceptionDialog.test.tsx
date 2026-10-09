@@ -27,6 +27,19 @@ it('keeps the global exception title separate from its close button', () => {
   mount()
   expect(within(screen.getByRole('heading', { name: `${P}title` })).queryByRole('button')).toBeNull()
 })
+it.each([`${P}global_summary`, 'common:actions.cancel', `${P}save`])('makes the global exception %s target touch-accessible without a write', name => {
+  mount()
+  const dialog = screen.getByRole('dialog', { name: `${P}title` })
+  const style = getComputedStyle(within(dialog).getByRole('button', { name }))
+  expect(parseFloat(style.minHeight) || 0).toBeGreaterThanOrEqual(44)
+  expect(parseFloat(style.minWidth) || 0).toBeGreaterThanOrEqual(44)
+  if (name === `${P}global_summary`) {
+    fireEvent.click(screen.getByRole('button', { name }))
+    expect(screen.getByRole('dialog', { name })).toBeTruthy()
+    expect(screen.getByText(`${P}global_detail`)).toBeTruthy()
+  }
+  expect(api.post).not.toHaveBeenCalled()
+})
 it('saves a global site exception once and reports the actual first-use result', async () => {
   const close = mount(); expect(screen.getByText(`${P}global_summary`)).toBeTruthy(); expect(screen.getByText(`${P}first_use`)).toBeTruthy()
   fireEvent.click(screen.getByRole('button', { name: `${P}save` })); await waitFor(() => expect(close).toHaveBeenCalledOnce())

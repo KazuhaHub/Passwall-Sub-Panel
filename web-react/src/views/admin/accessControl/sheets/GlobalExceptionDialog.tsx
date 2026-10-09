@@ -30,7 +30,7 @@ export default function GlobalExceptionDialog({ target, userId, etaMs, onClose }
     } catch (err) { setError(destinationError(err).error) } finally { admission.current = false; setBusy(false) }
   }
   if (accountOnly && userId) return <AddExemptionDialog userId={userId} etaMs={etaMs} accessWarning onClose={() => setAccountOnly(false)} onSaved={onClose} />
-  return <Dialog open fullWidth maxWidth="sm" fullScreen={mobile} onClose={close} aria-labelledby="global-exception-title">
+  return <Dialog open fullWidth maxWidth="sm" fullScreen={mobile} onClose={close} aria-labelledby="global-exception-title" sx={{ '& button': { minWidth: 44, minHeight: 44 } }}>
     <Box sx={{ display: 'flex', alignItems: 'center' }}><DialogTitle id="global-exception-title" sx={{ flex: 1, minWidth: 0 }}>{t(`${P}title`)}</DialogTitle><IconButton disabled={busy} aria-label={t('common:actions.close')} onClick={close} sx={{ mr: 2, width: 44, height: 44 }}><CloseIcon /></IconButton></Box>
     <DialogContent dividers><Stack spacing={2.5}>
       {error && <Alert severity="error">{t(`${P}failed`)}<Typography variant="caption">{error}</Typography></Alert>}

@@ -130,3 +130,14 @@ filled custom/remote decline-and-accept paths pass, without a list write.
 cover the Chinese theme/desktop/phone and English-phone matrix. Native checks
 also verify keyboard cancellation, focus restoration, action wrapping and
 accepted source clearing with the name retained. No list was saved or fetched.
+
+### First publication, retention and settings discard
+
+[Fifteen native captures and measured bounds](access-control-acceptance/README.md#first-publication-retention-and-discard-confirmation-matrices)
+fill the five normal language/theme/viewport variants for these three existing
+confirmations. First enable was declined with the template retained. Shortening
+was declined with the 20-day draft retained; discard cancellation restored Close,
+and accepted discard returned to More without saving or a second prompt.
+Reopening settings retained 30 days. Actions meet 44px, danger/ordinary colors
+match their intent, and the English two-line Continue editing target is 61px.
+No policy publication, retention update or record deletion was performed.

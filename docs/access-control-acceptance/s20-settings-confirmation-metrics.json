@@ -1,0 +1,302 @@
+[
+  {
+    "kind": "shorten-retention",
+    "label": "zh-dark-375",
+    "buttons": [
+      {
+        "color": "rgba(0, 0, 0, 0)",
+        "height": 44,
+        "text": "取消",
+        "width": 76.20833587646484
+      },
+      {
+        "color": "rgb(255, 180, 171)",
+        "height": 44,
+        "text": "缩短",
+        "width": 76.20833587646484
+      }
+    ],
+    "documentWidth": 375,
+    "rect": {
+      "height": 201.1666717529297,
+      "width": 320,
+      "x": 27.666667938232425,
+      "y": 305.41668701171875
+    },
+    "text": "缩短保留期？超过 20 天的记录会在一小时内删除，无法恢复。取消缩短",
+    "viewport": [
+      375,
+      812
+    ]
+  },
+  {
+    "kind": "shorten-retention",
+    "label": "zh-dark-1440",
+    "buttons": [
+      {
+        "color": "rgba(0, 0, 0, 0)",
+        "height": 44,
+        "text": "取消",
+        "width": 76.20833587646484
+      },
+      {
+        "color": "rgb(255, 180, 171)",
+        "height": 44,
+        "text": "缩短",
+        "width": 76.20833587646484
+      }
+    ],
+    "documentWidth": 1440,
+    "rect": {
+      "height": 182.58334350585935,
+      "width": 345.0625,
+      "x": 547.46875,
+      "y": 358.7083435058594
+    },
+    "text": "缩短保留期？超过 20 天的记录会在一小时内删除，无法恢复。取消缩短",
+    "viewport": [
+      1440,
+      900
+    ]
+  },
+  {
+    "kind": "discard-settings",
+    "label": "zh-dark-1440",
+    "buttons": [
+      {
+        "color": "rgba(0, 0, 0, 0)",
+        "height": 44,
+        "text": "继续编辑",
+        "width": 104.40625
+      },
+      {
+        "color": "rgb(159, 202, 255)",
+        "height": 44,
+        "text": "放弃",
+        "width": 76.20833587646484
+      }
+    ],
+    "documentWidth": 1440,
+    "rect": {
+      "height": 174.58334350585938,
+      "width": 320,
+      "x": 560,
+      "y": 362.7083435058594
+    },
+    "text": "放弃未保存的修改？关闭后，这次的修改不会保存。继续编辑放弃",
+    "viewport": [
+      1440,
+      900
+    ]
+  },
+  {
+    "kind": "discard-settings",
+    "label": "zh-dark-375",
+    "buttons": [
+      {
+        "color": "rgba(0, 0, 0, 0)",
+        "height": 44,
+        "text": "继续编辑",
+        "width": 104.40625
+      },
+      {
+        "color": "rgb(159, 202, 255)",
+        "height": 44,
+        "text": "放弃",
+        "width": 76.20833587646484
+      }
+    ],
+    "documentWidth": 375,
+    "rect": {
+      "height": 174.58334350585938,
+      "width": 320,
+      "x": 27.666667938232425,
+      "y": 318.7083435058594
+    },
+    "text": "放弃未保存的修改？关闭后，这次的修改不会保存。继续编辑放弃",
+    "viewport": [
+      375,
+      812
+    ]
+  },
+  {
+    "kind": "shorten-retention",
+    "label": "zh-light-375",
+    "buttons": [
+      {
+        "color": "rgba(0, 0, 0, 0)",
+        "height": 44,
+        "text": "取消",
+        "width": 76.20833587646484
+      },
+      {
+        "color": "rgb(186, 26, 26)",
+        "height": 44,
+        "text": "缩短",
+        "width": 76.20833587646484
+      }
+    ],
+    "documentWidth": 375,
+    "rect": {
+      "height": 201.1666717529297,
+      "width": 320,
+      "x": 27.666667938232425,
+      "y": 305.41668701171875
+    },
+    "text": "缩短保留期？超过 20 天的记录会在一小时内删除，无法恢复。取消缩短",
+    "viewport": [
+      375,
+      812
+    ]
+  },
+  {
+    "kind": "shorten-retention",
+    "label": "zh-light-1440",
+    "buttons": [
+      {
+        "color": "rgba(0, 0, 0, 0)",
+        "height": 44,
+        "text": "取消",
+        "width": 76.20833587646484
+      },
+      {
+        "color": "rgb(186, 26, 26)",
+        "height": 44,
+        "text": "缩短",
+        "width": 76.20833587646484
+      }
+    ],
+    "documentWidth": 1440,
+    "rect": {
+      "height": 182.58334350585935,
+      "width": 345.0625,
+      "x": 547.46875,
+      "y": 358.7083435058594
+    },
+    "text": "缩短保留期？超过 20 天的记录会在一小时内删除，无法恢复。取消缩短",
+    "viewport": [
+      1440,
+      900
+    ]
+  },
+  {
+    "kind": "discard-settings",
+    "label": "zh-light-1440",
+    "buttons": [
+      {
+        "color": "rgba(0, 0, 0, 0)",
+        "height": 44,
+        "text": "继续编辑",
+        "width": 104.40625
+      },
+      {
+        "color": "rgb(0, 97, 164)",
+        "height": 44,
+        "text": "放弃",
+        "width": 76.20833587646484
+      }
+    ],
+    "documentWidth": 1440,
+    "rect": {
+      "height": 174.58334350585938,
+      "width": 320,
+      "x": 560,
+      "y": 362.7083435058594
+    },
+    "text": "放弃未保存的修改？关闭后，这次的修改不会保存。继续编辑放弃",
+    "viewport": [
+      1440,
+      900
+    ]
+  },
+  {
+    "kind": "discard-settings",
+    "label": "zh-light-375",
+    "buttons": [
+      {
+        "color": "rgba(0, 0, 0, 0)",
+        "height": 44,
+        "text": "继续编辑",
+        "width": 104.40625
+      },
+      {
+        "color": "rgb(0, 97, 164)",
+        "height": 44,
+        "text": "放弃",
+        "width": 76.20833587646484
+      }
+    ],
+    "documentWidth": 375,
+    "rect": {
+      "height": 174.58334350585938,
+      "width": 320,
+      "x": 27.666667938232425,
+      "y": 318.7083435058594
+    },
+    "text": "放弃未保存的修改？关闭后，这次的修改不会保存。继续编辑放弃",
+    "viewport": [
+      375,
+      812
+    ]
+  },
+  {
+    "kind": "shorten-retention",
+    "label": "en-light-375",
+    "buttons": [
+      {
+        "color": "rgba(0, 0, 0, 0)",
+        "height": 44,
+        "text": "Cancel",
+        "width": 91.45833587646484
+      },
+      {
+        "color": "rgb(186, 26, 26)",
+        "height": 44,
+        "text": "Shorten",
+        "width": 98.14583587646484
+      }
+    ],
+    "documentWidth": 375,
+    "rect": {
+      "height": 201.1666717529297,
+      "width": 320,
+      "x": 27.666667938232425,
+      "y": 305.41668701171875
+    },
+    "text": "Shorten retention?Records older than 20 days will be deleted within an hour and cannot be recovered.CancelShorten",
+    "viewport": [
+      375,
+      812
+    ]
+  },
+  {
+    "kind": "discard-settings",
+    "label": "en-light-375",
+    "buttons": [
+      {
+        "color": "rgba(0, 0, 0, 0)",
+        "height": 61,
+        "text": "Continue editing",
+        "width": 151.9375
+      },
+      {
+        "color": "rgb(0, 97, 164)",
+        "height": 44,
+        "text": "Discard",
+        "width": 96.0625
+      }
+    ],
+    "documentWidth": 375,
+    "rect": {
+      "height": 191.58334350585935,
+      "width": 320,
+      "x": 27.666667938232425,
+      "y": 310.2083435058594
+    },
+    "text": "Discard unsaved changes?Closing will discard these changes.Continue editingDiscard",
+    "viewport": [
+      375,
+      812
+    ]
+  }
+]
