@@ -256,7 +256,9 @@ func TestRiskCenterPolicyDefaults_CoverEveryNumericKeyExactly(t *testing.T) {
 	}
 	_, runtimeDefaults := RuntimeEffective(UISettings{})
 	for k, v := range runtimeDefaults {
-		want[k] = float64(v)
+		if slices.Contains(RiskCenterPolicyKeys(), k) {
+			want[k] = float64(v)
+		}
 	}
 	for k, w := range want {
 		if g, ok := got[k]; !ok || g != w {

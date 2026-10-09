@@ -11,6 +11,8 @@ import (
 	"unicode/utf8"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/metrics"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/operationgate"
 	"golang.org/x/sync/singleflight"
 )
 
@@ -35,15 +37,39 @@ type Service struct {
 	attempts        map[int64]listAttempt
 	wake            chan struct{}
 	loopOnce        sync.Once
+	operationGate   *operationgate.Gate
+	validateSave    func(context.Context, domain.DestList) error
+	refreshing      map[int64]int
+	catalogQueued   bool
+	catalogActive   int
+	catalogError    string
 }
 
 func NewService(store DefinitionStore, cache *GeositeCache) *Service {
-	return &Service{store: store, cache: cache, fetcher: NewFetcher(), now: time.Now, attempts: map[int64]listAttempt{}, wake: make(chan struct{}, 1)}
+	return &Service{store: store, cache: cache, fetcher: NewFetcher(), now: time.Now, attempts: map[int64]listAttempt{}, refreshing: map[int64]int{}, wake: make(chan struct{}, 1)}
+}
+
+// Configure at assembly time. Admission spans downloads and their final writes,
+// so an online backend switch cannot cross an old backend's pending response.
+func (s *Service) SetOperationGate(gate *operationgate.Gate) { s.operationGate = gate }
+
+// Nil leaves parser/source validation enabled but omits fleet definition quota
+// checks. Production assembly supplies the same checker used by publication.
+func (s *Service) SetSaveValidator(validate func(context.Context, domain.DestList) error) {
+	s.validateSave = validate
 }
 
 // Preview is read-only, including a missing geosite cache. Downloading the
 // shared catalog is an explicit action, never a side effect of opening a form.
 func (s *Service) Preview(ctx context.Context, list domain.DestList) (FetchResult, error) {
+	ctx, release, err := s.operationGate.Read(ctx)
+	if err != nil {
+		return FetchResult{}, err
+	}
+	defer release()
+	if err := ctx.Err(); err != nil {
+		return FetchResult{}, err
+	}
 	switch list.Kind {
 	case domain.DestListCustom:
 		p, err := ParseCustom(list.SourceText)
@@ -69,6 +95,11 @@ func attributeFields(text string) []string {
 }
 
 func (s *Service) Save(ctx context.Context, list *domain.DestList, expected time.Time) error {
+	ctx, release, err := s.operationGate.Read(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
 	if s.store == nil {
 		return domain.ErrUnavailable
 	}
@@ -114,11 +145,41 @@ func (s *Service) Save(ctx context.Context, list *domain.DestList, expected time
 	if candidate.Kind != domain.DestListCustom {
 		candidate.SourceText = nil
 	}
+	if s.validateSave != nil {
+		if err := s.validateSave(ctx, candidate); err != nil {
+			return err
+		}
+	}
 	if err := s.store.SaveList(ctx, &candidate, expected, now); err != nil {
 		return err
 	}
 	*list = candidate
 	return nil
+}
+
+func (s *Service) Get(ctx context.Context, id int64) (domain.DestList, error) {
+	if s == nil || s.store == nil {
+		return domain.DestList{}, domain.ErrUnavailable
+	}
+	ctx, release, err := s.operationGate.Read(ctx)
+	if err != nil {
+		return domain.DestList{}, err
+	}
+	defer release()
+	return s.store.GetList(ctx, id)
+}
+
+func (s *Service) Delete(ctx context.Context, id int64) error {
+	if s == nil || s.store == nil {
+		return domain.ErrUnavailable
+	}
+	store, ok := s.store.(interface {
+		DeleteList(context.Context, int64, time.Time) error
+	})
+	if !ok {
+		return domain.ErrUnavailable
+	}
+	return s.operationGate.RunRead(ctx, func(ctx context.Context) error { return store.DeleteList(ctx, id, s.now()) })
 }
 
 func (s *Service) RefreshList(ctx context.Context, id int64) error {
@@ -131,30 +192,49 @@ func (s *Service) RefreshList(ctx context.Context, id int64) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	return s.withListFlight(ctx, id, func() (any, error) {
-		captured, err := s.store.GetList(ctx, id)
-		if err != nil {
-			return nil, err
-		}
-		if captured.Kind != domain.DestListRemote && captured.Kind != domain.DestListGeosite {
-			return nil, domain.ErrValidation
-		}
-		var cacheError error
-		if captured.Kind == domain.DestListGeosite {
-			if s.cache == nil {
-				cacheError = domain.ErrUnavailable
-			} else {
-				cacheError = s.cache.Refresh(ctx)
+	return s.operationGate.RunRead(ctx, func(ctx context.Context) error {
+		return s.withListFlight(ctx, id, func() (any, error) {
+			captured, err := s.store.GetList(ctx, id)
+			if err != nil {
+				return nil, err
 			}
-		}
-		return nil, s.refreshCaptured(ctx, captured, cacheError)
+			if captured.Kind != domain.DestListRemote && captured.Kind != domain.DestListGeosite {
+				return nil, domain.ErrValidation
+			}
+			var cacheError error
+			if captured.Kind == domain.DestListGeosite {
+				if s.cache == nil {
+					cacheError = domain.ErrUnavailable
+				} else {
+					cacheError = s.RefreshCategories(ctx)
+				}
+			}
+			return nil, s.refreshCaptured(ctx, captured, cacheError)
+		})
 	})
 }
 
 func (s *Service) withListFlight(ctx context.Context, id int64, work func() (any, error)) error {
-	result := s.flights.DoChan(strconv.FormatInt(id, 10), work)
+	result := s.flights.DoChan(strconv.FormatInt(id, 10), func() (any, error) {
+		s.mu.Lock()
+		s.refreshing[id]++
+		s.mu.Unlock()
+		defer func() {
+			s.mu.Lock()
+			s.refreshing[id]--
+			if s.refreshing[id] == 0 {
+				delete(s.refreshing, id)
+			}
+			s.mu.Unlock()
+		}()
+		return work()
+	})
 	select {
 	case <-ctx.Done():
+		// Join the flight before releasing lifecycle/admission ownership.
+		// Its context has been canceled, but database/download cleanup may
+		// still be running. A shared flight's leader must drain as well.
+		<-result
 		return ctx.Err()
 	case result := <-result:
 		return result.Err
@@ -162,6 +242,9 @@ func (s *Service) withListFlight(ctx context.Context, id int64, work func() (any
 }
 
 func (s *Service) refreshCaptured(ctx context.Context, captured domain.DestList, cacheError error) error {
+	outcome := metrics.DestListRefreshFailed
+	// Record once in the actual single-flight work, not for every waiter.
+	defer func() { metrics.DestListRefreshTotal.With(outcome).Inc() }()
 	result, err := FetchResult{}, cacheError
 	if err == nil {
 		result, err = s.Preview(ctx, captured)
@@ -179,6 +262,19 @@ func (s *Service) refreshCaptured(ctx context.Context, captured domain.DestList,
 	if commitErr := s.store.CommitListRefresh(ctx, captured, refresh, s.now().UTC()); commitErr != nil {
 		return commitErr
 	}
+	var parseError *Error
+	if errors.As(err, &parseError) && parseError.Code == "broad_entry" {
+		outcome = metrics.DestListRefreshBroad
+	} else if err == nil {
+		switch {
+		case result.Parsed.Report.IgnoredBroad > 0:
+			outcome = metrics.DestListRefreshBroad
+		case result.Parsed.ContentSHA256 == captured.ContentSHA256:
+			outcome = metrics.DestListRefreshUnchanged
+		default:
+			outcome = metrics.DestListRefreshUpdated
+		}
+	}
 	return err
 }
 
@@ -186,6 +282,10 @@ func (s *Service) refreshCaptured(ctx context.Context, captured domain.DestList,
 // and HTTP parsing occur outside definition transactions; commit rechecks the
 // captured row/source. Attempts bound repeated failures to the current interval.
 func (s *Service) RefreshDue(ctx context.Context, hours int) error {
+	return s.operationGate.RunRead(ctx, func(ctx context.Context) error { return s.refreshDue(ctx, hours) })
+}
+
+func (s *Service) refreshDue(ctx context.Context, hours int) error {
 	if s.store == nil {
 		return domain.ErrUnavailable
 	}
@@ -230,7 +330,7 @@ func (s *Service) RefreshDue(ctx context.Context, hours int) error {
 			if s.cache == nil {
 				cacheError = domain.ErrUnavailable
 			} else {
-				cacheError = s.cache.Refresh(ctx)
+				cacheError = s.RefreshCategories(ctx)
 			}
 		}
 		var failures []error
@@ -250,6 +350,7 @@ func (s *Service) RefreshDue(ctx context.Context, hours int) error {
 	})
 	select {
 	case <-ctx.Done():
+		<-result
 		return ctx.Err()
 	case result := <-result:
 		return result.Err

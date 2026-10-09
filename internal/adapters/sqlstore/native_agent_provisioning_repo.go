@@ -356,6 +356,12 @@ func (r *nativeAgentProvisioningRepo) DeleteConverged(ctx context.Context, panel
 		if err := tx.Where("agent_id = ?", agent.AgentID).Delete(&nodeAgentStreamRow{}).Error; err != nil {
 			return err
 		}
+		// Candidate minting/status writes use the agent owner lock held above.
+		// Remove runtime policy state before retiring that owner, in the same
+		// transaction, so no concurrent mint can leave an orphan candidate.
+		if err := tx.Where("agent_id = ?", agent.AgentID).Delete(&destAgentPolicyRow{}).Error; err != nil {
+			return err
+		}
 		// Host telemetry goes with the agent, IN THIS TRANSACTION. Nothing else
 		// would clean it up — the four tables are keyed by agent id with no
 		// foreign key to cascade from — and a panel deleted halfway would leave

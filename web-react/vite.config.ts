@@ -16,8 +16,8 @@ export default defineConfig({
     port: 5174,
     host: true,
     proxy: {
-      '/api': { target: 'http://localhost:8788', changeOrigin: true },
-      '/sub': { target: 'http://localhost:8788', changeOrigin: true },
+      '/api': { target: process.env.PSP_DEV_PROXY_TARGET || 'http://localhost:8788', changeOrigin: true },
+      '/sub': { target: process.env.PSP_DEV_PROXY_TARGET || 'http://localhost:8788', changeOrigin: true },
     },
     fs: {
       // Allow Vite to serve files from the parent repo (npm hoisting

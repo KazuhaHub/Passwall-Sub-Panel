@@ -1,0 +1,147 @@
+[
+  {
+    "label": "en-light-375",
+    "buttons": [
+      {
+        "color": "rgba(0, 0, 0, 0)",
+        "height": 44,
+        "text": "Cancel",
+        "width": 91.45833587646484
+      },
+      {
+        "color": "rgb(0, 97, 164)",
+        "height": 44,
+        "text": "Enable",
+        "width": 90.79167175292967
+      }
+    ],
+    "documentWidth": 375,
+    "rect": {
+      "height": 299.5,
+      "width": 320,
+      "x": 27.666667938232425,
+      "y": 256.25
+    },
+    "text": "Enable the first access policy?Policies will be published after 93 seconds, and should apply on 0 nodes within about 2 minutes. Each node restarts its proxy once, which may briefly interrupt connections. Offline nodes and failed applications need separate checks.CancelEnable",
+    "viewport": [
+      375,
+      812
+    ]
+  },
+  {
+    "label": "zh-light-375",
+    "buttons": [
+      {
+        "color": "rgba(0, 0, 0, 0)",
+        "height": 44,
+        "text": "取消",
+        "width": 76.20833587646484
+      },
+      {
+        "color": "rgb(0, 97, 164)",
+        "height": 44,
+        "text": "启用",
+        "width": 76.20833587646484
+      }
+    ],
+    "documentWidth": 375,
+    "rect": {
+      "height": 230.33334350585935,
+      "width": 320,
+      "x": 27.666667938232425,
+      "y": 290.8333435058594
+    },
+    "text": "启用第一条访问策略？策略将在93 秒后下发，预计约 2 分钟在0 台节点生效。节点会重启代理程序一次，现有连接可能短暂中断。离线或应用失败的节点需要另行检查。取消启用",
+    "viewport": [
+      375,
+      812
+    ]
+  },
+  {
+    "label": "zh-light-1440",
+    "buttons": [
+      {
+        "color": "rgba(0, 0, 0, 0)",
+        "height": 44,
+        "text": "取消",
+        "width": 76.20833587646484
+      },
+      {
+        "color": "rgb(0, 97, 164)",
+        "height": 44,
+        "text": "启用",
+        "width": 76.20833587646484
+      }
+    ],
+    "documentWidth": 1440,
+    "rect": {
+      "height": 211.75,
+      "width": 480,
+      "x": 480,
+      "y": 344.125
+    },
+    "text": "启用第一条访问策略？策略将在93 秒后下发，预计约 2 分钟在0 台节点生效。节点会重启代理程序一次，现有连接可能短暂中断。离线或应用失败的节点需要另行检查。取消启用",
+    "viewport": [
+      1440,
+      900
+    ]
+  },
+  {
+    "label": "zh-dark-1440",
+    "buttons": [
+      {
+        "color": "rgba(0, 0, 0, 0)",
+        "height": 44,
+        "text": "取消",
+        "width": 76.20833587646484
+      },
+      {
+        "color": "rgb(159, 202, 255)",
+        "height": 44,
+        "text": "启用",
+        "width": 76.20833587646484
+      }
+    ],
+    "documentWidth": 1440,
+    "rect": {
+      "height": 211.75,
+      "width": 480,
+      "x": 480,
+      "y": 344.125
+    },
+    "text": "启用第一条访问策略？策略将在93 秒后下发，预计约 2 分钟在0 台节点生效。节点会重启代理程序一次，现有连接可能短暂中断。离线或应用失败的节点需要另行检查。取消启用",
+    "viewport": [
+      1440,
+      900
+    ]
+  },
+  {
+    "label": "zh-dark-375",
+    "buttons": [
+      {
+        "color": "rgba(0, 0, 0, 0)",
+        "height": 44,
+        "text": "取消",
+        "width": 76.20833587646484
+      },
+      {
+        "color": "rgb(159, 202, 255)",
+        "height": 44,
+        "text": "启用",
+        "width": 76.20833587646484
+      }
+    ],
+    "documentWidth": 375,
+    "rect": {
+      "height": 230.33334350585935,
+      "width": 320,
+      "x": 27.666667938232425,
+      "y": 290.8333435058594
+    },
+    "text": "启用第一条访问策略？策略将在93 秒后下发，预计约 2 分钟在0 台节点生效。节点会重启代理程序一次，现有连接可能短暂中断。离线或应用失败的节点需要另行检查。取消启用",
+    "viewport": [
+      375,
+      812
+    ]
+  }
+]

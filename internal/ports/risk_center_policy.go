@@ -218,6 +218,18 @@ var riskCenterPolicyKeys = func() []string {
 // slice is the caller's own.
 func RiskCenterPolicyKeys() []string { return slices.Clone(riskCenterPolicyKeys) }
 
+// RiskCenterRuntimeEffective excludes fleet controls owned by other settings
+// views from the risk policy's diagnostics.
+func RiskCenterRuntimeEffective(s UISettings) map[string]int {
+	values, _ := RuntimeEffective(s)
+	for key := range values {
+		if !slices.Contains(riskCenterPolicyKeys, key) {
+			delete(values, key)
+		}
+	}
+	return values
+}
+
 // RiskCenterPolicyDefaults is the shipped value of every NUMERIC policy key
 // (38), keyed by json tag, in the unit the setting is typed in — the number
 // an unset (0) field falls back to. The policy page shows it as the empty
@@ -254,7 +266,9 @@ func RiskCenterPolicyDefaults() map[string]float64 {
 	}
 	_, runtime := RuntimeEffective(UISettings{})
 	for key, v := range runtime {
-		out[key] = float64(v)
+		if slices.Contains(riskCenterPolicyKeys, key) {
+			out[key] = float64(v)
+		}
 	}
 	return out
 }

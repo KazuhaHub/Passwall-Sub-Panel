@@ -58,7 +58,7 @@ type riskPolicyView struct {
 }
 
 func riskPolicyViewOf(s ports.UISettings) riskPolicyView {
-	effective, _ := ports.RuntimeEffective(s)
+	effective := ports.RiskCenterRuntimeEffective(s)
 	return riskPolicyView{
 		Settings:  s.RiskCenterPolicy(),
 		Defaults:  ports.RiskCenterPolicyDefaults(),

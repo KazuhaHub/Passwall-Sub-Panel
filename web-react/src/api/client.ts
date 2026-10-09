@@ -1,4 +1,4 @@
-import axios, { AxiosError, AxiosRequestConfig, InternalAxiosRequestConfig } from 'axios'
+import axios, { AxiosError, AxiosRequestConfig, InternalAxiosRequestConfig, type AxiosAdapter } from 'axios'
 import i18n from '@/i18n'
 import { pushSnack } from '@/components/SnackbarHost'
 import { panelAPIBase, panelURL } from '@/panelPath'
@@ -20,7 +20,20 @@ export const client = axios.create({
 // Every write on the wire drives the app-wide progress bar
 // (components/RequestProgressBar); see requestProgress.ts for why the adapter,
 // not an interceptor, is where it is counted.
-client.defaults.adapter = trackWrites(axios.getAdapter(client.defaults.adapter ?? axios.defaults.adapter))
+let transport = axios.getAdapter(client.defaults.adapter ?? axios.defaults.adapter)
+if (import.meta.env.DEV) {
+  const live = transport
+  let fixtures: Promise<AxiosAdapter> | undefined
+  transport = async config => {
+    let enabled = false
+    try { enabled = localStorage.getItem('psp_dev_fixtures') === 'access' } catch { /* Keep the normal transport when storage is unavailable. */ }
+    if (!enabled) return live(config)
+    fixtures ??= import('@/dev/accessControlMock').then(module => module.createAccessControlMock(live))
+    // A broken fixture must surface its error, never fall through to a real write.
+    return (await fixtures)(config)
+  }
+}
+client.defaults.adapter = trackWrites(transport)
 
 // Optional per-request flags. Set on a request config to bypass the
 // interceptors selectively.

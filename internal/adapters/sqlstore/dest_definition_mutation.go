@@ -10,6 +10,19 @@ import (
 	"gorm.io/gorm"
 )
 
+func (r *DestDefinitionRepo) SetPaused(ctx context.Context, paused bool, now time.Time) error {
+	return r.mutate(ctx, now, func(tx *gorm.DB) (bool, error) {
+		var state destPolicyStateRow
+		if err := tx.First(&state, "id = ?", 1).Error; err != nil {
+			return false, err
+		}
+		if state.Paused == paused {
+			return false, nil
+		}
+		return true, tx.Model(&destPolicyStateRow{}).Where("id = ?", 1).UpdateColumn("paused", paused).Error
+	})
+}
+
 func (r *DestDefinitionRepo) ReorderPolicies(ctx context.Context, action domain.DestAction, ids []int64, now time.Time) error {
 	if action != domain.DestAllow && action != domain.DestBlock && action != domain.DestObserve {
 		return domain.ErrValidation
@@ -62,6 +75,13 @@ func (r *DestDefinitionRepo) SaveExemption(ctx context.Context, ex *domain.DestE
 	}
 	row := destExemptionRow{UserID: ex.UserID, Reason: ex.Reason, CreatedBy: ex.CreatedBy, ExpiresAt: ex.ExpiresAt}
 	err = r.mutate(ctx, now, func(tx *gorm.DB) (bool, error) {
+		// User deletion takes the same generation lock before removing its
+		// exemption. This read must follow that lock so a concurrent create
+		// cannot recreate a definition for an already deleted owner.
+		var owner userRow
+		if err := tx.Select("id").First(&owner, "id = ?", row.UserID).Error; err != nil {
+			return false, destinationRowError(err)
+		}
 		if create {
 			row.CreatedAt = now
 			err := tx.Create(&row).Error

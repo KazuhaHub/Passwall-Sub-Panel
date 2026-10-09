@@ -122,6 +122,9 @@ func (r *DestDefinitionRepo) SavePolicy(ctx context.Context, p *domain.DestPolic
 	}
 	row := destPolicyFromDomain(*p)
 	err = r.mutate(ctx, now, func(tx *gorm.DB) (bool, error) {
+		if err := destinationListReferences(tx, row.ListIDs, 0, false); err != nil {
+			return false, err
+		}
 		if row.ID == 0 {
 			row.Priority, err = nextDestPriority(tx, p.Action)
 			if err != nil {
@@ -201,6 +204,19 @@ func (r *DestDefinitionRepo) ReadDefinitions(ctx context.Context) (domain.DestDe
 	var defs domain.DestDefinitions
 	err := r.readTransaction(ctx, func(tx *gorm.DB) error {
 		var err error
+		defs, err = readDestinationDefinitions(tx)
+		return err
+	})
+	if err != nil {
+		return domain.DestDefinitions{}, err
+	}
+	return defs, err
+}
+
+func readDestinationDefinitions(tx *gorm.DB) (domain.DestDefinitions, error) {
+	var defs domain.DestDefinitions
+	err := func() error {
+		var err error
 		// The generation read establishes the snapshot before definitions.
 		defs.State, err = readDestState(tx)
 		if err != nil {
@@ -235,7 +251,7 @@ func (r *DestDefinitionRepo) ReadDefinitions(ctx context.Context) (domain.DestDe
 			defs.Groups = append(defs.Groups, domain.DestGroupMode{GroupID: row.GroupID, Mode: row.Mode, Stage: row.Stage, ListIDs: append([]int64(nil), row.ListIDs...), BaseListID: row.BaseListID, ExtraListID: row.ExtraListID, StageChangedAt: row.StageChangedAt, UpdatedAt: row.UpdatedAt})
 		}
 		return nil
-	})
+	}()
 	if err != nil {
 		return domain.DestDefinitions{}, err
 	}
@@ -295,29 +311,41 @@ func (r *DestDefinitionRepo) RecordPublishError(ctx context.Context, generation,
 }
 
 func (r *DestDefinitionRepo) Published(ctx context.Context) (domain.DestPolicySnapshot, bool, error) {
+	_, snapshot, found, err := r.PublishedState(ctx)
+	return snapshot, found, err
+}
+
+// PublishedState returns the live pause flag and its selected published body
+// from one consistent read, so an older pause read cannot override a new one.
+func (r *DestDefinitionRepo) PublishedState(ctx context.Context) (domain.DestPolicyState, domain.DestPolicySnapshot, bool, error) {
+	var state domain.DestPolicyState
 	var snapshot domain.DestPolicySnapshot
 	found := false
 	err := r.readTransaction(ctx, func(tx *gorm.DB) error {
-		state, err := readDestState(tx)
+		var err error
+		state, err = readDestState(tx)
 		if err != nil {
 			return err
 		}
-		if state.PublishedGeneration == 0 {
-			return nil
-		}
-		var rows []destPolicySnapshotRow
-		if err := tx.Where("generation = ?", state.PublishedGeneration).Find(&rows).Error; err != nil {
-			return err
-		}
-		if len(rows) != 1 || !json.Valid(rows[0].Body) || len(rows[0].Body) == 0 || rows[0].Body[0] != '{' {
-			return fmt.Errorf("%w: missing or corrupt destination snapshot", domain.ErrUnavailable)
-		}
-		snapshot = domain.DestPolicySnapshot{Generation: rows[0].Generation, Body: append([]byte(nil), rows[0].Body...), CreatedAt: rows[0].CreatedAt}
-		found = true
-		return nil
+		snapshot, found, err = readDestPublishedSnapshot(tx, state)
+		return err
 	})
 	if err != nil {
+		return domain.DestPolicyState{}, domain.DestPolicySnapshot{}, false, err
+	}
+	return state, snapshot, found, nil
+}
+
+func readDestPublishedSnapshot(tx *gorm.DB, state domain.DestPolicyState) (domain.DestPolicySnapshot, bool, error) {
+	if state.PublishedGeneration == 0 {
+		return domain.DestPolicySnapshot{}, false, nil
+	}
+	var rows []destPolicySnapshotRow
+	if err := tx.Where("generation = ?", state.PublishedGeneration).Find(&rows).Error; err != nil {
 		return domain.DestPolicySnapshot{}, false, err
 	}
-	return snapshot, found, nil
+	if len(rows) != 1 || !json.Valid(rows[0].Body) || len(rows[0].Body) == 0 || rows[0].Body[0] != '{' {
+		return domain.DestPolicySnapshot{}, false, fmt.Errorf("%w: missing or corrupt destination snapshot", domain.ErrUnavailable)
+	}
+	return domain.DestPolicySnapshot{Generation: rows[0].Generation, Body: append([]byte(nil), rows[0].Body...), CreatedAt: rows[0].CreatedAt}, true, nil
 }

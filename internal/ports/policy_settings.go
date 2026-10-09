@@ -197,7 +197,25 @@ func RuntimeEffective(global UISettings) (effective, defaults map[string]int) {
 		domain.DefaultRiskPolicy().Bounded(domain.DefaultRiskRuntime()),
 		time.Duration(runtimeDefaultPollMinutes)*time.Minute,
 	)
+	destination := global.DestinationSettings()
+	for key, value := range destinationRuntimeValues(destination) {
+		effective[key] = value
+	}
+	for key, value := range destinationRuntimeValues(domain.DefaultDestinationSettings()) {
+		defaults[key] = value
+	}
 	return effective, defaults
+}
+
+func destinationRuntimeValues(s domain.DestinationSettings) map[string]int {
+	s = s.Effective()
+	return map[string]int{
+		"dest_hit_retention_days":       s.HitRetentionDays,
+		"dest_trial_retention_days":     s.EffectiveTrialRetentionDays(),
+		"dest_usage_retention_days":     s.UsageRetentionDays,
+		"dest_list_refresh_hours":       s.ListRefreshHours,
+		"dest_policy_apply_min_seconds": s.PolicyApplyMinSeconds,
+	}
 }
 
 // runtimeKnobValues lays the resolved runtimes out as the 23 knobs, each in

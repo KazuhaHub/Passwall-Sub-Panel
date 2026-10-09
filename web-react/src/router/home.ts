@@ -26,6 +26,7 @@ const ADMIN_ONLY_ROUTES = [
   '/admin/servers',
   '/admin/settings',
   '/admin/risk',
+  '/admin/access-control',
   '/admin/diagnostics',
 ]
 

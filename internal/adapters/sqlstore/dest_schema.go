@@ -158,6 +158,7 @@ type destAgentPolicyRow struct {
 	MintedAt                    *time.Time
 	FallbackReason              string `gorm:"size:32;not null;default:''"`
 	RejectedGeneration          int64
+	RejectedContext             string  `gorm:"size:64;not null;default:''"`
 	FallbackExhausted           bool    `gorm:"not null;default:false"`
 	OverLimit                   *string `gorm:"type:text"`
 	PrecheckListeners           jsonStrings

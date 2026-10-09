@@ -18,6 +18,14 @@ function issue(id: number, overrides: Partial<NodeAgentIssue> = {}): NodeAgentIs
 }
 
 describe('groupNodeIssues', () => {
+  it.each(['destination_policy_over_limit', 'destination_policy_rejected', 'destination_policy_lkg_rejected', 'destination_policy_sniffing_insufficient'])(
+    'groups %s with synchronization issues while retaining the original diagnostic', code => {
+      const original = issue(42, { code })
+      const groups = groupNodeIssues([original])
+      expect(groups[0].category).toBe('sync')
+      expect(groups[0].issues).toEqual([original])
+    },
+  )
   it('returns no groups for an empty API page', () => {
     expect(groupNodeIssues([])).toEqual([])
   })

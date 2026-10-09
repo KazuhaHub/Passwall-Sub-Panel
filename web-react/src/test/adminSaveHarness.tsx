@@ -71,11 +71,11 @@ afterEach(cleanup)
 
 const theme = createAppTheme({ mode: 'light', sourceColor: '#6750a4', language: 'en-US' })
 
-export function mountWithClient(page: ReactElement) {
+export function mountWithClient(page: ReactElement, initialEntries?: string[]) {
   const client = makeTestQueryClient()
   const result = render(
     <StrictMode>
-      <MemoryRouter>
+      <MemoryRouter initialEntries={initialEntries}>
         <ThemeProvider theme={theme}>
           {/* A client per mount: migrated views read through the query cache,
               and a shared client would leak cached rows between tests. */}
@@ -87,8 +87,8 @@ export function mountWithClient(page: ReactElement) {
   return { client, ...result }
 }
 
-export function mount(page: ReactElement) {
-  return mountWithClient(page)
+export function mount(page: ReactElement, initialEntries?: string[]) {
+  return mountWithClient(page, initialEntries)
 }
 
 export async function editRow(name = 'old-name', icon = 'EditOutlinedIcon') {

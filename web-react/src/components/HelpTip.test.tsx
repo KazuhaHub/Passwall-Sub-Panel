@@ -51,4 +51,11 @@ describe('HelpTip', () => {
     fireEvent.click(screen.getByRole('button', { name: 'admin:diagnostics.help_label' }))
     expect(screen.getByText('admin:diagnostics.help')).toBeTruthy()
   })
+
+  it('interpolates actual limits and intervals independently of the accessible label', () => {
+    mount(<HelpTip textKey="admin:access_control.help.policies" textValues={{ max_regexps: 128, seconds: 91 }}
+      labelKey="admin:access_control.help.label" labelValues={{ name: 'Policies' }} />)
+    fireEvent.click(screen.getByRole('button', { name: 'admin:access_control.help.label|Policies' }))
+    expect(screen.getByText('admin:access_control.help.policies|128|91')).toBeTruthy()
+  })
 })

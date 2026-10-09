@@ -12,13 +12,26 @@ import (
 )
 
 type Service struct {
-	groups ports.GroupRepo
-	nodes  ports.NodeRepo
-	scope  ports.ScopeSettingsRepo
+	groups                 ports.GroupRepo
+	nodes                  ports.NodeRepo
+	scope                  ports.ScopeSettingsRepo
+	membership             ports.UserMembershipRepo
+	membershipInvalidator  func()
+	destinationEligibility ports.DestinationEligibilityRepo
+	modeEligibilityCache   *eligibilityCache[string]
+	panelEligibilityCache  *eligibilityCache[ports.DestinationPanelEligibility]
 	// enabledCache memoizes nodes.ListEnabled for a short TTL (NodesFor → /sub
 	// render); now is its clock seam (defaults to time.Now).
 	enabledCache *nodeListCache
 	now          func() time.Time
+}
+
+func (s *Service) SetMembershipRepo(repo ports.UserMembershipRepo) { s.membership = repo }
+
+func (s *Service) SetDestinationEligibilityRepo(repo ports.DestinationEligibilityRepo) {
+	s.destinationEligibility = repo
+	s.modeEligibilityCache = newEligibilityCache[string]()
+	s.panelEligibilityCache = newEligibilityCache[ports.DestinationPanelEligibility]()
 }
 
 func New(groups ports.GroupRepo, nodes ports.NodeRepo, scope ports.ScopeSettingsRepo) *Service {
@@ -63,11 +76,19 @@ func (s *Service) Create(ctx context.Context, g *domain.Group) error {
 	if g.Slug == "" || g.Name == "" {
 		return fmt.Errorf("%w: slug and name required", domain.ErrValidation)
 	}
-	return s.groups.Create(ctx, g)
+	if err := s.groups.Create(ctx, g); err != nil {
+		return err
+	}
+	s.invalidateMembership()
+	return nil
 }
 
 func (s *Service) Update(ctx context.Context, g *domain.Group) error {
-	return s.groups.Update(ctx, g)
+	if err := s.groups.Update(ctx, g); err != nil {
+		return err
+	}
+	s.invalidateMembership()
+	return nil
 }
 
 // Delete refuses to remove a group that still has members; the admin must
@@ -83,6 +104,7 @@ func (s *Service) Delete(ctx context.Context, id int64) error {
 	if err := s.groups.Delete(ctx, id); err != nil {
 		return err
 	}
+	s.invalidateMembership()
 	// Clean up the group's per-scope setting overrides so they don't linger as
 	// orphan rows. (Group IDs never recycle, so they'd be inert anyway, but tidy.)
 	if s.scope != nil {
@@ -97,16 +119,26 @@ func (s *Service) Delete(ctx context.Context, id int64) error {
 // the global node sort_order (group.layout overrides happen later in the
 // render pipeline).
 func (s *Service) NodesFor(ctx context.Context, g *domain.Group) ([]*domain.Node, error) {
+	if g == nil {
+		return nil, domain.ErrValidation
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	all, err := s.listEnabledCached(ctx)
 	if err != nil {
 		return nil, err
 	}
-	if g.TagFilter.All {
+	if s.destinationEligibility == nil && g.TagFilter.All {
 		return all, nil
 	}
 	out := make([]*domain.Node, 0, len(all))
 	for _, n := range all {
-		if matchFilter(n, g.TagFilter) {
+		eligible, err := s.Eligible(ctx, n, g)
+		if err != nil {
+			return nil, err
+		}
+		if eligible {
 			out = append(out, n)
 		}
 	}

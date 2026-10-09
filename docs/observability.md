@@ -166,6 +166,51 @@ skip 命中率 = psp_lifecycle_sync_skipped_total / psp_lifecycle_sync_total
 
 `active_users` 与 `floor_push_enqueued` 之间有个缺口：用户动了流量，也可能到不了入队（inbound 拉取失败被跳过、或已因配额停用）。**这个缺口本身有诊断价值**——它大，说明模型里的 N 高估了负载。
 
+### 4.7 目的地访问控制清理
+
+`psp_dest_pruned_rows_total{table=exemptions}` 只在过期豁免删除事务完整提交
+后增加，数值为实际删除行数。失败回滚和空清理不计数。清理运行于现有每小时
+`audit-cleanup-loop`，启动时先执行一轮；更新后的 generation 进入正常发布去抖
+和节点同步流程，不代表节点已经确认应用。
+
+`table` 使用固定集合 `hits|trial|usage|batches|loss|budget|exemptions|orphans`。
+当前仅过期豁免清理接通，其余标签随对应保留期任务接通后才产生数据；指标子项
+不存在不能解释为该类数据已经全部清理。诊断目录与中英文标签同步维护。
+
+### 4.8 目的地策略发布指标
+
+`psp_dest_policy_publish_total{trigger=...}` 只统计成功提交的新快照；固定触发
+值为 `debounced|max_wait|manual|pause`。前两项分别表示尾随等待结束与连续修改
+达到最长等待，后两项表示立即发布与暂停/恢复。重复请求、CAS 失败和发布失败
+不计为成功发布；并发请求只由实际提交者计数。
+
+`psp_dest_policy_publish_rejected_total` 统计验证失败且错误记录已提交的尝试。
+重复尝试同一无效定义可以继续增加次数，但不刷新原有错误首次时间；存储失败和
+已被取代的候选不计数。这些指标不代表节点已经确认执行。诊断目录提供中英文
+名称与有界标签，不携带账号、节点、目的地或来源 URL。
+
+### 4.9 目的地编译与列表刷新指标
+
+`psp_dest_policy_compile_total{result=...}` 每次编译调用只记一个结果：
+`compiled` 表示生成了候选（包括正常空策略与暂停候选）；`cache_hit` 表示
+复用完整候选选择缓存且归属事务成功；仅准备阶段的缓存不算完整命中。
+`fallback_rejected|fallback_sniffing|fallback_over_limit` 表示因相应原因
+选择了可执行的回退；`fallback_nil` 表示回退不可用或已耗尽，只生成空策略。
+重复复用回退缓存时计 `cache_hit`。`invalid` 表示未返回可用结果，包含
+校验、读取、存储或取消失败，不能把所有 `invalid` 都解释为管理员输入错误。
+`psp_dest_policy_compile_ms` 同时记录每次调用总耗时，单位毫秒，包含缓存
+命中与失败。计数发生于编译调用，不证明配置流已提交或节点已确认执行。
+
+`psp_dest_list_refresh_total{result=...}` 在实际列表刷新工作内计数一次，
+共享等待者、预览与未执行的刷新排期不计数。成功保存后的规范内容摘要决定
+`updated|unchanged`；如果分类过滤了过宽条目，即使内容摘要不变，也优先计
+`broad`。远程列表整份拒绝过宽条目且错误记录成功提交时也计 `broad`，保留
+旧内容；其他下载、解析、取消、CAS 或存储失败计 `failed`。`broad` 是否成功
+需结合列表解析报告与最后错误，不把它统一解释为内容已更新。
+
+这三项 family 与有界标签登记在原生节点诊断卡及中英文文案中；不新增
+卡片或 finding，不把账号、agent、面板、目的地、来源 URL 当成指标标签。
+
 ## 5. 已知限制
 
 - **快照跨指标非原子。** 并发跑着的 poll 可能只被记了一半，两个相关计数最多差一个周期的量。要做成原子的就得在每次记录上加锁，用热路径的真实成本，去买一个以小时计的测量窗口根本不需要的一致性。

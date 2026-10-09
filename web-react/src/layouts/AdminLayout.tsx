@@ -41,6 +41,7 @@ import SyncIcon from '@mui/icons-material/Sync'
 import ReportProblemIcon from '@mui/icons-material/ReportProblemOutlined'
 import MonitorHeartIcon from '@mui/icons-material/MonitorHeart'
 import ShieldOutlinedIcon from '@mui/icons-material/ShieldOutlined'
+import PolicyOutlinedIcon from '@mui/icons-material/PolicyOutlined'
 import SettingsIcon from '@mui/icons-material/Settings'
 import TranslateIcon from '@mui/icons-material/Translate'
 import LogoutIcon from '@mui/icons-material/Logout'
@@ -126,6 +127,7 @@ const ADMIN_NAV: NavSection[] = [
   // location and risk alerts carry, so the alert and its page look alike.
   { items: [
     { to: '/admin/risk', labelKey: 'nav:admin.risk_center', Icon: ShieldOutlinedIcon, adminOnly: true },
+    { to: '/admin/access-control', labelKey: 'nav:admin.access_control', Icon: PolicyOutlinedIcon, adminOnly: true },
   ] },
   { items: [
     { to: '/admin/language-packs', labelKey: 'nav:admin.language_packs', Icon: TranslateIcon, adminOnly: true },

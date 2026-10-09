@@ -5,6 +5,11 @@ vi.mock('@/stores/auth', () => ({ useAuthStore: vi.fn() }))
 import { roleCan, type Capability } from './permissions'
 
 describe('roleCan', () => {
+  it('grants access-control reads only to administrators', () => {
+    expect(roleCan('admin', 'access.view' as Capability)).toBe(true)
+    expect(roleCan('operator', 'access.view' as Capability)).toBe(false)
+    expect(roleCan('user', 'access.view' as Capability)).toBe(false)
+  })
   const capabilities: Capability[] = [
     'config.write',
     'users.write',
@@ -13,6 +18,7 @@ describe('roleCan', () => {
     'sync.operate',
     'risk.view',
     'diagnostics.view',
+    'access.view',
   ]
 
   it('grants every built-in capability to admins', () => {

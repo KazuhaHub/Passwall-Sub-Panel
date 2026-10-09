@@ -60,6 +60,18 @@ func (r *DestDefinitionRepo) SaveList(ctx context.Context, list *domain.DestList
 			return false, fmt.Errorf("%w: dest_list_stale", domain.ErrConflict)
 		}
 		row.CreatedAt, row.OwnerGroupID = old.CreatedAt, old.OwnerGroupID
+		if row.Kind == string(domain.DestListCustom) && row.ParseReport != nil && row.ParseReport.IgnoredBroad > 0 {
+			allow, err := destListUsedForAllow(tx, row.ID)
+			if err != nil {
+				return false, err
+			}
+			if allow {
+				return false, fmt.Errorf("%w: dest_list_too_broad", domain.ErrValidation)
+			}
+		}
+		if row.OwnerGroupID != 0 && row.Kind != string(domain.DestListCustom) {
+			return false, fmt.Errorf("%w: dest_list_group_owned", domain.ErrValidation)
+		}
 		if equalDestList(row, old) {
 			row = old
 			return false, nil
@@ -117,6 +129,13 @@ func (r *DestDefinitionRepo) CommitListRefresh(ctx context.Context, captured dom
 }
 
 func (r *DestDefinitionRepo) DeleteList(ctx context.Context, id int64, now time.Time) error {
+	if id <= 0 {
+		return domain.ErrValidation
+	}
+	now, err := destWriteTime(now)
+	if err != nil {
+		return err
+	}
 	return r.mutate(ctx, now, func(tx *gorm.DB) (bool, error) {
 		var list destListRow
 		if err := tx.First(&list, "id = ?", id).Error; err != nil {
@@ -131,6 +150,7 @@ func (r *DestDefinitionRepo) DeleteList(ctx context.Context, id int64, now time.
 			return false, err
 		}
 		var refs []domain.DestReference
+		var closed []destGroupModeRow
 		for _, p := range policies {
 			if slices.Contains(p.ListIDs, id) {
 				refs = append(refs, domain.DestReference{Kind: "policy", ID: p.ID, Name: p.Name})
@@ -138,6 +158,13 @@ func (r *DestDefinitionRepo) DeleteList(ctx context.Context, id int64, now time.
 		}
 		for _, g := range groups {
 			if slices.Contains(g.ListIDs, id) || g.BaseListID == id || g.ExtraListID == id {
+				if !validDestinationMode(g.Mode, g.Stage) {
+					return false, fmt.Errorf("%w: corrupt destination group mode", domain.ErrUnavailable)
+				}
+				if g.Mode == "open" {
+					closed = append(closed, g)
+					continue
+				}
 				var group groupRow
 				if err := tx.First(&group, "id = ?", g.GroupID).Error; err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 					return false, err
@@ -147,6 +174,21 @@ func (r *DestDefinitionRepo) DeleteList(ctx context.Context, id int64, now time.
 		}
 		if len(refs) != 0 {
 			return false, &domain.DestListInUseError{UsedBy: refs}
+		}
+		for _, g := range closed {
+			g.ListIDs = slices.DeleteFunc(g.ListIDs, func(v int64) bool { return v == id })
+			if g.BaseListID == id {
+				g.BaseListID = 0
+			}
+			if g.ExtraListID == id {
+				g.ExtraListID = 0
+			}
+			if err := tx.Model(&destGroupModeRow{}).Where("group_id = ?", g.GroupID).Updates(map[string]any{
+				"list_ids": g.ListIDs, "base_list_id": g.BaseListID, "extra_list_id": g.ExtraListID,
+				"updated_at": nextDestRowTime(now, g.UpdatedAt),
+			}).Error; err != nil {
+				return false, err
+			}
 		}
 		return true, tx.Delete(&list).Error
 	})

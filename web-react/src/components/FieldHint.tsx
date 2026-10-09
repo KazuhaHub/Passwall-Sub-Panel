@@ -60,7 +60,7 @@ export default function FieldHint({
         anchorEl={anchor}
         onClose={() => setAnchor(null)}
         anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
-        slotProps={{ paper: { sx: { maxWidth: 380, p: 1.5 } } }}
+        slotProps={{ paper: { role: 'dialog', 'aria-label': summary, sx: { maxWidth: 'min(380px, calc(100vw - 32px))', boxSizing: 'border-box', maxHeight: 'calc(100vh - 32px)', overflowY: 'auto', p: 1.5 } } }}
       >
         <Typography variant="body2" sx={{ lineHeight: 1.6 }}>{detail}</Typography>
       </Popover>

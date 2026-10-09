@@ -95,6 +95,19 @@ async function fixture(request, response, url) {
     if (pathname === '/api/version') return reply(response, { version: 'fixture', commit: 'fixture', build_date: '' });
     if (pathname === '/api/admin/alerts') return reply(response, { alerts: [], counts: { error: 0, warning: 0, info: 0 } });
     if (pathname === '/api/admin/servers') return reply(response, { items: servers, total: servers.length, page: 1, page_size: 25 });
+    // Native server rows read fleet access state. This fixture has no destination
+    // definitions or published rules; destination writes still fail below.
+    if (pathname === '/api/admin/dest/policies') return reply(response, {
+      published_generation: 0, published_has_access_control: false,
+      allow: [], block: [], observe: [], exemptions: { count: 0 }, allowlist_groups: [], hit_window_days: 7,
+      budget: Object.fromEntries(Object.entries({ rules: 256, domains: 50_000, regexps: 128, cidrs: 20_000, subjects: 10_000, bytes: 4_194_304 })
+        .map(([key, limit]) => [key, { used: 0, limit }])),
+    });
+    if (pathname === '/api/admin/dest/status') return reply(response, {
+      generation: 0, published_generation: 0, paused: false, publish_error: null,
+      last_write_at: null, next_publish_at: null, apply_eta_ms: 0, nodes: [],
+      totals: Object.fromEntries(['total', 'collecting', 'none', 'paused', 'unsupported_kind', 'unsupported_version', 'pending', 'applied', 'rejected', 'over_limit', 'sniffing', 'offline'].map(key => [key, 0])),
+    });
     // Match GetSUIRelease's read-only metadata DTO; no upstream request is made.
     if (pathname === '/api/admin/servers/sui-release') return reply(response, { version: 'v1.6.2' });
     // THE SERVERS PAGE READS THE PANEL'S OWN COMPATIBILITY STATE, so the fixture has
@@ -413,6 +426,10 @@ try {
 
   assert.equal(count('POST', '/api/admin/servers'), 0, 'Reinstallation must not create a server record.');
   assert(count('GET', '/api/admin/servers/sui-release') > 0, 'The visible S-UI server must request read-only release metadata.');
+  assert(count('GET', '/api/admin/dest/status') > 0 && count('GET', '/api/admin/dest/policies') > 0,
+    'Native server rows must read the empty fleet access state.');
+  assert.equal(requests.some(request => request.pathname.startsWith('/api/admin/dest/') && request.method !== 'GET'), false,
+    'Server reinstallation must not mutate destination access policies.');
   assert.equal(requests.some(request => /rotate-node|node-credential$/.test(request.pathname)), false, 'Reinstallation must not rotate/import credentials.');
   assert.deepEqual(requests.filter(request => request.method === 'PUT').map(request => request.pathname),
     ['/api/admin/servers/17', '/api/admin/servers/27', '/api/admin/servers/7'], 'Only explicit original-ID configuration or preference saving may update a record.');

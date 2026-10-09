@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+  <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Access-control development fixtures</title></head>
+  <body>
+    <main>
+      <h1>Access-control development fixtures</h1>
+      <p>This Vite-only tool uses synthetic data for UI acceptance. Authentication still uses the local PSP.</p>
+      <form id="fixtures">
+        <label for="scenario">Scenario</label>
+        <select id="scenario" name="scenario">
+          <option value="normal">All policy, list, node and server states</option>
+          <option value="empty">Empty state</option>
+          <option value="error">Service error</option>
+          <option value="catalog-missing">Catalog missing, refresh succeeds</option>
+          <option value="catalog-failed">Catalog missing, refresh fails</option>
+          <option value="policy-preview-error">Policy editor: preview fails</option>
+          <option value="policy-over-quota">Policy editor: projected budget exceeds limit</option>
+          <option value="policy-conflict">Policy editor: concurrent edit requires reload</option>
+          <option value="policy-save-pending">Policy editor: save stays pending for 30 seconds</option>
+          <option value="policy-lists-error">Policy editor: lists read fails</option>
+          <option value="policy-groups-error">Policy editor: groups read fails</option>
+          <option value="template-over-quota">Templates: category regex count exceeds remaining quota</option>
+          <option value="templates-catalog-missing">Templates: empty policies with missing catalog</option>
+          <option value="list-original-read-error">List editor: first original-text read fails, explicit reload succeeds</option>
+          <option value="settings-save-pending">Settings: save stays pending for 30 seconds</option>
+          <option value="list-delete-conflict">List deletion: stale unused read, server reports current references</option>
+          <option value="account-read-error">Account access: first read fails, explicit retry succeeds</option>
+          <option value="account-cancel-pending">Account access: cancellation stays pending then fails without deleting</option>
+          <option value="node-retry-pending">Node coverage: retry stays pending then fails without changing node state</option>
+        </select>
+        <button type="submit">Activate and open access control</button>
+        <button id="disable" type="button">Disable fixtures</button>
+      </form>
+      <p id="status" role="status"></p>
+    </main>
+    <script type="module" src="/src/dev/accessControlFixtureTools.ts"></script>
+  </body>
+</html>

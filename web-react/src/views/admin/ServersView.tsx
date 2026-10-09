@@ -115,6 +115,10 @@ import { serverKeys } from '@/query/keys'
 import { type ServerListResponse, useServersList } from '@/query/servers'
 import type { ServerListParams } from '@/api/servers'
 import { useQueryScope } from '@/query/useQueryScope'
+import { scopeKey } from '@/query/session'
+import { useDestinationPolicies, useDestinationStatus } from '@/query/accessControl'
+import NodePolicyStatusRow from './accessControl/NodePolicyStatusRow'
+import ServerAccessDialog from './ServerAccessDialog'
 import { ipCapBadgeTone, type IPCapTone } from '@/utils/capabilities'
 import { copyToClipboard } from '@/utils/clipboard'
 import { useCan } from '@/utils/permissions'
@@ -189,8 +193,13 @@ export default function ServersView() {
   const { t, i18n } = useTranslation(['admin', 'common'])
   const metadataDetailsID = useId()
   const canConfigure = useCan('config.write')
+  const canViewAccess = useCan('access.view')
+  const [accessTarget, setAccessTarget] = useState<{ server: Server; owner: string } | null>(null)
 
-  const [search, setSearch] = useState('')
+  const ps = usePageState({ defaultSortBy: 'id', defaultSortDir: 'asc' })
+  const { page, pageSize, sortBy, sortDir, setPage, setPageSize, setKeyword, setSort } = ps
+  const [search, setSearch] = useState(ps.keyword)
+  useEffect(() => { setSearch(ps.keyword) }, [ps.keyword])
   const [probeStates, setProbeStates] = useState<Record<number, ProbeState>>({})
   const [selected, setSelected] = useState<Set<number>>(new Set())
   const [batchBusy, setBatchBusy] = useState<'test' | 'delete' | 'upgrade_xray' | 'upgrade_panel' | ''>('')
@@ -244,8 +253,6 @@ export default function ServersView() {
   // case-insensitive). Kept strictly read-only and unpolled: the connection
   // probe below is a separate concern, so refreshing this list must never
   // imply an upstream request.
-  const ps = usePageState({ defaultSortBy: 'id', defaultSortDir: 'asc' })
-  const { page, pageSize, sortBy, sortDir, setPage, setPageSize, setKeyword, setSort } = ps
   const scope = useQueryScope()
   const queryClient = useQueryClient()
 
@@ -259,6 +266,19 @@ export default function ServersView() {
   const items = serversQuery.data?.items ?? []
   const total = serversQuery.data?.total ?? 0
   const loading = serversQuery.isPending
+  const accessOwner = scopeKey(scope)
+  const accessEnabled = canViewAccess && (items.some(s => s.panel_type === 'psp') || accessTarget?.owner === accessOwner)
+  const accessStatus = useDestinationStatus(scope, accessEnabled)
+  const accessDefinitions = useDestinationPolicies(scope, accessEnabled)
+  const fleetHasPolicy = accessDefinitions.isSuccess && (accessDefinitions.data.published_has_access_control ||
+    [...accessDefinitions.data.allow, ...accessDefinitions.data.block, ...accessDefinitions.data.observe].some(p => p.enabled) ||
+    accessDefinitions.data.allowlist_groups.length > 0)
+  const openAccess = (server: Server) => setAccessTarget({ server, owner: accessOwner })
+  function accessLine(server: Server) {
+    if (!canViewAccess || server.panel_type !== 'psp' || !fleetHasPolicy || !accessStatus.isSuccess) return null
+    const node = accessStatus.data.nodes.find(n => n.panel_id === server.id && n.kind === 'psp')
+    return node ? <NodePolicyStatusRow variant="row" node={node} now={Date.now()} onOpen={() => openAccess(server)} /> : null
+  }
 
   function refresh() { void serversQuery.refetch() }
 
@@ -1555,6 +1575,7 @@ export default function ServersView() {
                   </TableCell>
                   <TableCell sx={{ whiteSpace: 'nowrap' }}>
                     <Box>{statusBadge(s)}</Box>
+                    {accessLine(s)}
                     {ipCapBadge(s)}
                   </TableCell>
                   <TableCell sx={{ whiteSpace: 'nowrap' }}>{versionCell(s)}</TableCell>
@@ -1656,6 +1677,9 @@ export default function ServersView() {
           onClick={() => { setNativeUpgradeTarget(menuTarget); closeMenu() }}>
           <UpgradeIcon fontSize="small" sx={{ mr: 1 }} />
           {t('admin:servers.agent_upgrade.action')}
+        </MenuItem>}
+        {menuTarget?.panel_type === 'psp' && canViewAccess && <MenuItem sx={{ minHeight: 44 }} onClick={() => { openAccess(menuTarget); closeMenu() }}>
+          {t('admin:access_control.server.menu')}
         </MenuItem>}
         {hasCapability(menuTarget, 'panel.upgrade') && <MenuItem onClick={() => menuTarget && runUpgradePanel(menuTarget)}>
           <UpgradeIcon fontSize="small" sx={{ mr: 1 }} />
@@ -1971,6 +1995,7 @@ export default function ServersView() {
         </DialogActions>
         </>}
       </Dialog>
+      {accessTarget && accessTarget.owner === accessOwner && canViewAccess && <ServerAccessDialog key={`${accessOwner}:${accessTarget.server.id}`} server={accessTarget.server} onClose={() => setAccessTarget(null)} />}
       <NodeMetricsDialog
         server={metricsTarget}
         open={metricsTarget !== null}

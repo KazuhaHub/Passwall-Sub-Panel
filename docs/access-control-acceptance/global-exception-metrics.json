@@ -1,0 +1,327 @@
+[
+  {
+    "label": "en-light-375",
+    "buttons": [
+      {
+        "height": 44,
+        "label": "Close",
+        "text": "",
+        "width": 44
+      },
+      {
+        "height": 72.33333587646484,
+        "label": null,
+        "text": "Global allow exception",
+        "width": 149
+      },
+      {
+        "height": 72.33333587646484,
+        "label": null,
+        "text": "Exempt only this account",
+        "width": 163.33334350585938
+      },
+      {
+        "height": 44,
+        "label": null,
+        "text": "Bypasses all blocking policies",
+        "width": 311.3333435058594
+      },
+      {
+        "height": 47.83333587646485,
+        "label": null,
+        "text": "Entire site",
+        "width": 87.10417175292969
+      },
+      {
+        "height": 47.83333587646485,
+        "label": null,
+        "text": "Only this host",
+        "width": 110.36458587646484
+      },
+      {
+        "height": 44,
+        "label": null,
+        "text": "Cancel",
+        "width": 91.45833587646484
+      },
+      {
+        "height": 44,
+        "label": null,
+        "text": "Add exception",
+        "width": 138.8854217529297
+      }
+    ],
+    "documentWidth": 375,
+    "rect": {
+      "height": 812,
+      "width": 375.3333435058594,
+      "x": 0,
+      "y": 0
+    },
+    "text": "Add allow exception…DestinationDestinationGlobal allow exceptionExempt only this accountBypasses all blocking policiesEntire siteOnly this hostThe server determines the registrable domain using the public suffix list, including all its subdomains.First use creates an “Allow exceptions” list and a policy first in the allow segment.CancelAdd exception",
+    "viewport": [
+      375,
+      812
+    ]
+  },
+  {
+    "label": "zh-light-375",
+    "buttons": [
+      {
+        "height": 44,
+        "label": "关闭",
+        "text": "",
+        "width": 44
+      },
+      {
+        "height": 47.83333587646485,
+        "label": null,
+        "text": "全局放行例外",
+        "width": 107.9375
+      },
+      {
+        "height": 47.83333587646485,
+        "label": null,
+        "text": "只豁免这个账号",
+        "width": 122.04167175292967
+      },
+      {
+        "height": 44,
+        "label": null,
+        "text": "会越过所有拦截策略",
+        "width": 311.3333435058594
+      },
+      {
+        "height": 47.83333587646485,
+        "label": null,
+        "text": "整站",
+        "width": 51.54166793823242
+      },
+      {
+        "height": 47.83333587646485,
+        "label": null,
+        "text": "仅此主机",
+        "width": 79.73958587646484
+      },
+      {
+        "height": 44,
+        "label": null,
+        "text": "取消",
+        "width": 76.20833587646484
+      },
+      {
+        "height": 44,
+        "label": null,
+        "text": "加入例外",
+        "width": 104.40625
+      }
+    ],
+    "documentWidth": 375,
+    "rect": {
+      "height": 812,
+      "width": 375.3333435058594,
+      "x": 0,
+      "y": 0
+    },
+    "text": "加入放行例外…目的地目的地全局放行例外只豁免这个账号会越过所有拦截策略整站仅此主机服务端按公共后缀表确定主域名，包括它的所有子域名。第一次使用会新建列表「放行例外」和一条排在放行第 1 位的策略。取消加入例外",
+    "viewport": [
+      375,
+      812
+    ]
+  },
+  {
+    "label": "zh-light-1440",
+    "buttons": [
+      {
+        "height": 44,
+        "label": "关闭",
+        "text": "",
+        "width": 44
+      },
+      {
+        "height": 47.83333587646485,
+        "label": null,
+        "text": "全局放行例外",
+        "width": 107.9375
+      },
+      {
+        "height": 47.83333587646485,
+        "label": null,
+        "text": "只豁免这个账号",
+        "width": 122.04167175292967
+      },
+      {
+        "height": 44,
+        "label": null,
+        "text": "会越过所有拦截策略",
+        "width": 536
+      },
+      {
+        "height": 47.83333587646485,
+        "label": null,
+        "text": "整站",
+        "width": 51.54166793823242
+      },
+      {
+        "height": 47.83333587646485,
+        "label": null,
+        "text": "仅此主机",
+        "width": 79.73958587646484
+      },
+      {
+        "height": 44,
+        "label": null,
+        "text": "取消",
+        "width": 76.20833587646484
+      },
+      {
+        "height": 44,
+        "label": null,
+        "text": "加入例外",
+        "width": 104.40625
+      }
+    ],
+    "documentWidth": 1440,
+    "rect": {
+      "height": 502.1666870117187,
+      "width": 600,
+      "x": 420,
+      "y": 198.9166717529297
+    },
+    "text": "加入放行例外…目的地目的地全局放行例外只豁免这个账号会越过所有拦截策略整站仅此主机服务端按公共后缀表确定主域名，包括它的所有子域名。第一次使用会新建列表「放行例外」和一条排在放行第 1 位的策略。取消加入例外",
+    "viewport": [
+      1440,
+      900
+    ]
+  },
+  {
+    "label": "zh-dark-1440",
+    "buttons": [
+      {
+        "height": 44,
+        "label": "关闭",
+        "text": "",
+        "width": 44
+      },
+      {
+        "height": 47.83333587646485,
+        "label": null,
+        "text": "全局放行例外",
+        "width": 107.9375
+      },
+      {
+        "height": 47.83333587646485,
+        "label": null,
+        "text": "只豁免这个账号",
+        "width": 122.04167175292967
+      },
+      {
+        "height": 44,
+        "label": null,
+        "text": "会越过所有拦截策略",
+        "width": 536
+      },
+      {
+        "height": 47.83333587646485,
+        "label": null,
+        "text": "整站",
+        "width": 51.54166793823242
+      },
+      {
+        "height": 47.83333587646485,
+        "label": null,
+        "text": "仅此主机",
+        "width": 79.73958587646484
+      },
+      {
+        "height": 44,
+        "label": null,
+        "text": "取消",
+        "width": 76.20833587646484
+      },
+      {
+        "height": 44,
+        "label": null,
+        "text": "加入例外",
+        "width": 104.40625
+      }
+    ],
+    "documentWidth": 1440,
+    "rect": {
+      "height": 502.1666870117187,
+      "width": 600,
+      "x": 420,
+      "y": 198.9166717529297
+    },
+    "text": "加入放行例外…目的地目的地全局放行例外只豁免这个账号会越过所有拦截策略整站仅此主机服务端按公共后缀表确定主域名，包括它的所有子域名。第一次使用会新建列表「放行例外」和一条排在放行第 1 位的策略。取消加入例外",
+    "viewport": [
+      1440,
+      900
+    ]
+  },
+  {
+    "label": "zh-dark-375",
+    "buttons": [
+      {
+        "height": 44,
+        "label": "关闭",
+        "text": "",
+        "width": 44
+      },
+      {
+        "height": 47.83333587646485,
+        "label": null,
+        "text": "全局放行例外",
+        "width": 107.9375
+      },
+      {
+        "height": 47.83333587646485,
+        "label": null,
+        "text": "只豁免这个账号",
+        "width": 122.04167175292967
+      },
+      {
+        "height": 44,
+        "label": null,
+        "text": "会越过所有拦截策略",
+        "width": 311.3333435058594
+      },
+      {
+        "height": 47.83333587646485,
+        "label": null,
+        "text": "整站",
+        "width": 51.54166793823242
+      },
+      {
+        "height": 47.83333587646485,
+        "label": null,
+        "text": "仅此主机",
+        "width": 79.73958587646484
+      },
+      {
+        "height": 44,
+        "label": null,
+        "text": "取消",
+        "width": 76.20833587646484
+      },
+      {
+        "height": 44,
+        "label": null,
+        "text": "加入例外",
+        "width": 104.40625
+      }
+    ],
+    "documentWidth": 375,
+    "rect": {
+      "height": 812,
+      "width": 375.3333435058594,
+      "x": 0,
+      "y": 0
+    },
+    "text": "加入放行例外…目的地目的地全局放行例外只豁免这个账号会越过所有拦截策略整站仅此主机服务端按公共后缀表确定主域名，包括它的所有子域名。第一次使用会新建列表「放行例外」和一条排在放行第 1 位的策略。取消加入例外",
+    "viewport": [
+      375,
+      812
+    ]
+  }
+]

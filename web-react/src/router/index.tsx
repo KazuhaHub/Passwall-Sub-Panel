@@ -32,6 +32,7 @@ const TemplatesView = lazy(viewLoaders['/admin/templates'])
 const SubClientsView = lazy(viewLoaders['/admin/sub-clients'])
 const LogsView = lazy(viewLoaders['/admin/logs'])
 const RiskCenterView = lazy(viewLoaders['/admin/risk'])
+const AccessControlView = lazy(viewLoaders['/admin/access-control'])
 const SyncTasksView = lazy(viewLoaders['/admin/sync-tasks'])
 const NodeIssuesView = lazy(viewLoaders['/admin/node-issues'])
 const DiagnosticsView = lazy(viewLoaders['/admin/diagnostics'])
@@ -102,6 +103,7 @@ export const router = createBrowserRouter([
           // center, where those two tabs now live.
           { path: 'logs', element: <LogsRoute><LogsView /></LogsRoute> },
           { path: 'risk', element: <RiskCenterView /> },
+          { path: 'access-control', element: <AccessControlView /> },
           { path: 'sync-tasks', element: <SyncTasksView /> },
           { path: 'node-issues', element: <NodeIssuesView /> },
           { path: 'diagnostics', element: <DiagnosticsView /> },

@@ -538,6 +538,21 @@ type PSPClientRepo interface {
 // desired/applied streams. MintStream accepts canonical JSON and performs the
 // compare-before-CAS rule: identical content returns minted=false and never
 // advances DesiredVersion.
+// NodePolicyCandidateRepo is the narrow atomic mint boundary for the optional
+// destination compiler. Unchanged calls return stream metadata without its
+// desired body; the caller already holds the canonical config bytes.
+type NodePolicyCandidateRepo interface {
+	MintConfigWithPolicyCandidate(ctx context.Context, agentID string, canonicalBody []byte, metadata domain.DestPolicyMint, now time.Time) (*domain.NodeAgentStream, bool, error)
+}
+
+// DestAgentPolicyRepo serializes runtime state changes with candidate minting.
+// Mutation starts with metadata; loadBodies lazily reads the exact minted/LKG
+// bytes in the same owner transaction. Callbacks must perform no external I/O.
+type DestAgentPolicyRepo interface {
+	Get(ctx context.Context, agentID string, includeBodies bool) (*domain.DestAgentPolicy, error)
+	Update(ctx context.Context, agentID string, now time.Time, mutate func(*domain.DestAgentPolicy, func() error) (bool, error)) (bool, error)
+}
+
 type NodeAgentRepo interface {
 	Create(ctx context.Context, agent *domain.NodeAgent) error
 	List(ctx context.Context) ([]*domain.NodeAgent, error)
@@ -1139,6 +1154,13 @@ type UISettings struct {
 	// AuditRetentionDays controls automatic audit cleanup. 0 means never
 	// delete audit entries automatically.
 	AuditRetentionDays int `yaml:"audit_retention_days" json:"audit_retention_days"`
+	// Destination controls are fleet-wide, bounded and never group overrides.
+	// Zero selects the product default, never permanent retention.
+	DestHitRetentionDays      int `json:"dest_hit_retention_days"`
+	DestTrialRetentionDays    int `json:"dest_trial_retention_days"`
+	DestUsageRetentionDays    int `json:"dest_usage_retention_days"`
+	DestListRefreshHours      int `json:"dest_list_refresh_hours"`
+	DestPolicyApplyMinSeconds int `json:"dest_policy_apply_min_seconds"`
 	// SubBaseURL is the panel's public base URL used to render absolute
 	// subscription URLs ("<base>/sub/<token>"). Empty falls back to relative
 	// paths.
@@ -2218,6 +2240,8 @@ type Repos struct {
 	Ownership               OwnershipRepo
 	PSPClient               PSPClientRepo
 	NodeAgent               NodeAgentRepo
+	DestAgentPolicy         DestAgentPolicyRepo
+	DestinationEligibility  DestinationEligibilityRepo
 	NativeAgentProvisioning NativeAgentProvisioningRepo
 	ServerMigration         ServerMigrationRepo
 	NodeAgentIssue          NodeAgentIssueRepo

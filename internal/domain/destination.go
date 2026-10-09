@@ -26,9 +26,10 @@ func NormalizeAuditCollect(c AuditCollect) AuditCollect {
 type DestListKind string
 
 type DestParseSample struct {
-	Line   int    `json:"line"`
-	Text   string `json:"text"`
-	Reason string `json:"reason"`
+	Line       int    `json:"line"`
+	Text       string `json:"text"`
+	Reason     string `json:"reason"`
+	Normalized string `json:"normalized,omitempty"`
 }
 
 type DestParseReport struct {
@@ -84,6 +85,15 @@ func (e *DestListInUseError) Unwrap() error { return ErrConflict }
 
 type DestAction string
 
+// This identity belongs to the global-exception writer. It survives display
+// renames and must not be assigned by ordinary policy forms.
+const DestGlobalExceptionTemplateKey = "global-exceptions"
+
+type DestGlobalExceptionCommit struct {
+	ListID, PolicyID int64
+	Created          bool
+}
+
 const (
 	DestAllow   DestAction = "allow"
 	DestBlock   DestAction = "block"
@@ -125,6 +135,19 @@ type DestExemption struct {
 	CreatedBy int64
 	CreatedAt time.Time
 	ExpiresAt *time.Time
+}
+
+// DestUserAccess contains only the stage-1c account access metadata.
+type DestUserAccess struct {
+	UPN          string
+	Group        *DestUserAccessGroup
+	Exemption    *DestExemption
+	CreatedByUPN *string
+}
+
+type DestUserAccessGroup struct {
+	ID                int64
+	Name, Mode, Stage string
 }
 
 type DestGroupMode struct {
@@ -171,6 +194,14 @@ type DestDefinitions struct {
 
 type DestCandidateKind string
 
+// DestPolicyMint describes the executable candidate's source. Exact candidate
+// bytes and digest are derived from the config body inside the mint boundary.
+type DestPolicyMint struct {
+	Kind                                     DestCandidateKind
+	Generation                               int64
+	Context, DesiredSHA256, CollectEffective string
+}
+
 const (
 	DestCandidateDesired  DestCandidateKind = "desired"
 	DestCandidateFallback DestCandidateKind = "fallback"
@@ -190,6 +221,7 @@ type DestAgentPolicy struct {
 	MintedAt                                     *time.Time
 	FallbackReason                               string
 	RejectedGeneration                           int64
+	RejectedContext                              string
 	FallbackExhausted                            bool
 	OverLimit                                    *DestPublishError
 	PrecheckListeners                            []string

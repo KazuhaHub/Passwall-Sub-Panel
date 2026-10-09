@@ -5,6 +5,7 @@ package app
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"net"
@@ -38,6 +39,8 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/auth"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/cert"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/clientprov"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/destlist"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/destpolicy"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/geo"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/group"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/health"
@@ -120,22 +123,32 @@ func (a *asyncDispatcher) Go(name string, fn func(ctx context.Context)) {
 // ListenAndServe and runs the background workers in goroutines; Shutdown
 // cancels both.
 type App struct {
-	operationGate *operationgate.Gate
-	cfg           *config.Config
-	server        *http.Server
-	traffic       *traffic.Service
-	reconcile     *reconcile.Service
-	user          *user.Service
-	node          *node.Service
-	cert          *cert.Service
-	audit         *audit.Service
-	mail          *mailer.Service
-	health        *health.Service
-	geo           *geo.Service
-	render        *render.Service
-	risk          *risk.Service
-	settings      ports.SettingsRepo
-	syncTasks     ports.SyncTaskRepo
+	database        *sql.DB
+	operationGate   *operationgate.Gate
+	cfg             *config.Config
+	server          *http.Server
+	traffic         *traffic.Service
+	reconcile       *reconcile.Service
+	user            *user.Service
+	node            *node.Service
+	cert            *cert.Service
+	audit           *audit.Service
+	mail            *mailer.Service
+	health          *health.Service
+	geo             *geo.Service
+	render          *render.Service
+	risk            *risk.Service
+	settings        ports.SettingsRepo
+	destLists       *destlist.Service
+	destDefinitions *sqlstore.DestDefinitionRepo
+	destCompiler    *destpolicy.Compiler
+	destFacts       destpolicy.CollectionFactsCache
+	destTagMembers  destpolicy.TagMatchedMemberReader
+	destAdmin       *destpolicy.Administrator
+	destExemptions  *destpolicy.ExemptionManager
+	destExceptions  *destpolicy.ExceptionManager
+	destControls    *destpolicy.Controls
+	syncTasks       ports.SyncTaskRepo
 	// trafficRepo / nodeTraffic kept for the retention cron — PruneBefore is
 	// outside traffic.Service's surface (it's a maintenance concern, not a
 	// poll-cycle concern), so app.go reaches into the repos directly.
@@ -234,6 +247,16 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	if err != nil {
 		return nil, fmt.Errorf("db open: %w", err)
 	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		return nil, fmt.Errorf("db connection: %w", err)
+	}
+	assembled := false
+	defer func() {
+		if !assembled {
+			_ = sqlDB.Close()
+		}
+	}()
 	if err := sqlstore.EnsureSchema(db); err != nil {
 		return nil, fmt.Errorf("db schema: %w", err)
 	}
@@ -325,6 +348,37 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	// it is configured here rather than passed through NewRepos because that
 	// constructor has a dozen callers that have no business naming a core catalog.
 	sqlstore.ConfigureCoreCatalog(coreCatalog)
+	groupSvc := group.New(repos.Group, repos.Node, repos.ScopeSettings)
+	membership, ok := repos.User.(ports.UserMembershipRepo)
+	if !ok || repos.DestinationEligibility == nil {
+		return nil, errors.New("destination policy: membership and eligibility repositories are required")
+	}
+	auditSettings, ok := repos.XUIPanel.(ports.PanelAuditSettingsRepo)
+	if !ok {
+		return nil, errors.New("destination policy: panel audit controls are required")
+	}
+	policyCandidates, ok := repos.NodeAgent.(ports.NodePolicyCandidateRepo)
+	if !ok {
+		return nil, errors.New("destination policy: atomic candidate mint repository is required")
+	}
+	groupSvc.SetMembershipRepo(membership)
+	groupSvc.SetDestinationEligibilityRepo(repos.DestinationEligibility)
+	destDefinitions := sqlstore.NewDestDefinitionRepo(db)
+	destInputs, err := destpolicy.NewInputs(auditSettings, membership, groupSvc)
+	if err != nil {
+		return nil, fmt.Errorf("destination policy inputs: %w", err)
+	}
+	var membershipGeneration atomic.Uint64
+	invalidateMembership := func() { membershipGeneration.Add(1) }
+	destInputs.SetMembershipGeneration(membershipGeneration.Load)
+	groupSvc.SetMembershipInvalidator(invalidateMembership)
+	destCompiler, err := destpolicy.NewCompiler(destpolicy.CompilerOptions{
+		Definitions: destDefinitions, Runtime: repos.DestAgentPolicy, Inputs: destInputs,
+		MinSeconds: func(ctx context.Context) (int, error) { return destinationPolicyMinSeconds(ctx, repos.Settings) },
+	})
+	if err != nil {
+		return nil, fmt.Errorf("destination policy compiler: %w", err)
+	}
 	nativeSync, err := nodesync.New(nodesync.Options{
 		Desired: repos.NativeDesired, Agents: repos.NodeAgent, Issues: repos.NodeAgentIssue, Tasks: repos.NodeAgentTask, Users: repos.User,
 		Clients: repos.PSPClient, Nodes: repos.Node, Settings: repos.ScopedSettings, Panels: repos.XUIPanel,
@@ -333,6 +387,7 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 		// being dispatched to the fleet.
 		CoreCatalog: coreCatalog,
 		Host:        nodeMetrics,
+		Policies:    destCompiler, PolicyCandidates: policyCandidates,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("native node sync: %w", err)
@@ -449,13 +504,14 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 		return nil, fmt.Errorf("init oidc: %w", err)
 	}
 	auditSvc := audit.New(repos.Audit)
-	groupSvc := group.New(repos.Group, repos.Node, repos.ScopeSettings)
 	syncSvc := syncsvc.New(pool, repos.Ownership)
 	// v3.9.0: let the inbound-deletable guard recognise shared clients as managed,
 	// so node deletion isn't blocked once users are migrated off the ownership table.
 	syncSvc.SetPSPClientRepo(repos.PSPClient)
 	userSvc := user.New(repos.User, repos.Group, repos.Ownership, repos.SyncTask, groupSvc, syncSvc, pool, repos.ScopedSettings)
+	userSvc.SetMembershipInvalidator(invalidateMembership)
 	nodeSvc := node.New(repos.Node, repos.Separator, pool, syncSvc, repos.SyncTask, repos.Group, repos.User)
+	nodeSvc.SetGroupEligibility(groupSvc)
 	nativeSync.SetRealityFingerprintNormalizer(nodeSvc.NormalizeRealityFingerprintsForPanel)
 	trafficSvc := traffic.New(repos.User, repos.Ownership, repos.Traffic, repos.Node, repos.NodeTraffic, pool, userSvc).WithSettings(repos.ScopedSettings)
 	// traffic needs user to push the per-client floor into 3X-UI after each
@@ -493,6 +549,7 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	// a service-only suspension.)
 	userSvc.SetMailNotifier(mailSvc)
 	reconcileSvc := reconcile.New(repos.User, repos.Ownership, repos.Node, repos.Group, repos.Settings, repos.Audit, pool, syncSvc)
+	reconcileSvc.SetGroupEligibility(groupSvc)
 	reconcileSvc.SetPSPClientRepo(repos.PSPClient)
 	healthSvc := health.New(repos.Node)
 	renderSvc := render.New(repos, pool, groupSvc)
@@ -500,11 +557,13 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	// enabled-node snapshots and final subscriptions. Clear both cache layers
 	// after the DB write commits so the next refresh sees the current nodes.
 	invalidateSubscriptions := func() {
+		invalidateMembership()
 		groupSvc.InvalidateNodeCache()
 		renderSvc.InvalidateAll()
 	}
 	nativeSync.SetRenderInvalidator(invalidateSubscriptions)
 	nodeSvc.SetSubscriptionInvalidator(invalidateSubscriptions)
+	destCompiler.SetInvalidator(func(string) { renderSvc.InvalidateAll() })
 	// Geo IP resolution for access-log region display — fully offline against a
 	// local .mmdb in <ConfigDir>/geoip/. No per-IP external calls. Reads
 	// enabled/active-file live from settings and hot-reloads the DB on change.
@@ -532,13 +591,34 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	// (e.g. an admin POST after Build but before Run), and Shutdown will
 	// fire bgCancel even if Run never started.
 	bgCtx, cancel := context.WithCancel(context.Background())
+	defer func() {
+		if !assembled {
+			cancel()
+		}
+	}()
 	a := &App{
-		operationGate: operationgate.New(),
-		cfg:           cfg,
-		bgCancel:      cancel,
-		bgRootCtx:     bgCtx,
-		render:        renderSvc,
+		database:        sqlDB,
+		operationGate:   operationgate.New(),
+		cfg:             cfg,
+		bgCancel:        cancel,
+		bgRootCtx:       bgCtx,
+		render:          renderSvc,
+		destDefinitions: destDefinitions,
+		destCompiler:    destCompiler,
+		destTagMembers:  groupSvc,
 	}
+	a.destLists = destlist.NewService(a.destDefinitions, destlist.NewGeositeCache(cfg.DataDir))
+	a.destLists.SetOperationGate(a.operationGate)
+	a.destLists.SetSaveValidator(a.validateDestinationListSave)
+	a.destAdmin = destpolicy.NewAdministrator(a.destDefinitions, a.destinationPolicyContext, a.destinationBudget)
+	a.destAdmin.SetPublishedContextReader(a.destinationPublishedAccessContext)
+	a.destAdmin.SetOperationGate(a.operationGate)
+	a.destExemptions = destpolicy.NewExemptionManager(a.destDefinitions)
+	a.destExemptions.SetOperationGate(a.operationGate)
+	a.destExceptions = destpolicy.NewExceptionManager(a.destDefinitions)
+	a.destExceptions.SetOperationGate(a.operationGate)
+	a.destControls = destpolicy.NewControls(a.destDefinitions)
+	a.destControls.SetOperationGate(a.operationGate)
 	dispatcher := &asyncDispatcher{ctx: bgCtx, wg: &a.bgWG, gate: a.operationGate}
 	// Wire traffic.Service into the panel-wide WaitGroup. Its async
 	// floor-push + quota-event email goroutines (`safego.GoTracked`)
@@ -548,6 +628,22 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	// Route the handler-triggered group-member resync through the tracked
 	// dispatcher so Shutdown drains it (it was an untracked safego.Go).
 	userSvc.SetBackgroundRunner(dispatcher.Go)
+	resyncAllowlist := destinationAllowlistResyncer(groupSvc, userSvc, repos.DestinationEligibility, renderSvc.InvalidateAll, dispatcher.Go)
+	nativeSync.SetAllowlistResyncer(resyncAllowlist)
+	destCompiler.SetAllowlistResyncer(func(_ context.Context, agentID string) {
+		// Clear synchronously before resolving the panel off the sync owner
+		// lock. Read failures leave healing to the periodic membership sweep.
+		groupSvc.InvalidateEligibility(0)
+		renderSvc.InvalidateAll()
+		dispatcher.Go("destination.resolve-agent-panel", func(ctx context.Context) {
+			agent, err := repos.NodeAgent.GetByAgentID(ctx, agentID)
+			if err != nil {
+				log.Warn("destination allowlist panel resolution failed")
+				return
+			}
+			resyncAllowlist(ctx, agent.PanelID)
+		})
+	})
 	// Same for node.Service's handler-spawned background work (post-recreate
 	// member provisioning + sync-existing-users) — previously untracked safego.Go.
 	nodeSvc.SetBackgroundRunner(dispatcher.Go)
@@ -672,11 +768,22 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 		return nil, err
 	}
 	httpHandler := httptransport.NewRouter(httptransport.Deps{
-		OperationGate: a.operationGate,
-		Async:         dispatcher,
-		Cfg:           cfg,
-		Repos:         repos,
-		GeoRecords:    geoStreaks,
+		OperationGate:             a.operationGate,
+		Async:                     dispatcher,
+		Cfg:                       cfg,
+		Repos:                     repos,
+		DestinationRefreshChanged: a.destLists.NotifySettingsChanged,
+		DestinationPolicyRetry:    nativeSync,
+		DestinationLists:          a.destLists,
+		DestinationListOverview:   a.destinationListOverview,
+		DestinationPolicies:       a.destAdmin,
+		DestinationExemptions:     a.destExemptions,
+		DestinationExceptions:     a.destExceptions,
+		DestinationUserAccess:     a.destinationUserAccess,
+		DestinationControls:       a.destControls,
+		DestinationTest:           a.destinationTest,
+		DestinationStatus:         a.destinationStatus,
+		GeoRecords:                geoStreaks,
 		// The risk view's rows. Optional, so leaving it out would compile —
 		// TestBuildWiresTheRiskSignals reads it through the assembled router.
 		RiskSignals: riskSignals,
@@ -817,6 +924,7 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 		IdleTimeout:       2 * time.Minute,
 		MaxHeaderBytes:    1 << 20, // 1 MiB
 	}
+	assembled = true
 	return a, nil
 }
 
@@ -842,6 +950,7 @@ func (a *App) Run() error {
 	}
 
 	bgCtx := a.bgRootCtx
+	a.startDestinationListRefresh()
 
 	// Every background worker runs under safego.GoTracked: the *recover*
 	// shield keeps a single nil-deref / map race in a 3X-UI response from
@@ -1340,6 +1449,7 @@ func (a *App) runAuditCleanupLoop(ctx context.Context) {
 		a.pruneConnectionHistory(ctx)
 		a.pruneFlagRecords(ctx)
 		a.pruneRiskReviews(ctx)
+		a.pruneDestExemptions(ctx)
 		a.pruneCertEvents(ctx)
 		select {
 		case <-ctx.Done():
@@ -1823,7 +1933,7 @@ func (a *App) runSyncTaskLoop(ctx context.Context) {
 //     (the old order) handed every drained request's write an already-
 //     cancelled context, so the last batch of audit/sub-log rows was dropped.
 //  2. cancel bgRootCtx — every loop sees ctx.Done() and exits its select.
-//  3. wait for bgWG up to the caller-supplied deadline — guarantees a
+//  3. wait for bgWG and admitted operations up to the caller-supplied deadline — guarantees a
 //     stuck SMTP / 3X-UI HTTP call doesn't leave a half-committed
 //     transaction or leaked connection behind, and lets the just-dispatched
 //     audit writes finish.
@@ -1838,16 +1948,28 @@ func (a *App) Shutdown(ctx context.Context) error {
 	}
 
 	done := make(chan struct{})
+	var databaseErr error
 	go func() {
 		a.bgWG.Wait()
+		// A timed-out HTTP drain or an exclusive backend operation may still
+		// own the pool after background workers finish. Admission must drain
+		// too. Eventual closure continues after the caller's deadline.
+		if a.database != nil {
+			if a.operationGate == nil {
+				databaseErr = a.database.Close()
+			} else {
+				databaseErr = a.operationGate.Exclusive(context.Background(), func(context.Context) error { return a.database.Close() })
+			}
+		}
 		close(done)
 	}()
 	select {
 	case <-done:
+		return errors.Join(httpErr, databaseErr)
 	case <-ctx.Done():
-		log.Warn("shutdown: background workers did not exit before deadline")
+		log.Warn("shutdown: background workers or admitted operations did not exit before deadline")
 	}
-	return httpErr
+	return errors.Join(httpErr, ctx.Err())
 }
 
 // nextTrafficInterval decides the cadence the traffic loop should run on next,

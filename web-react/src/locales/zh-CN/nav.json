@@ -16,7 +16,8 @@
     "node_issues": "节点问题",
     "language_packs": "语言包",
     "settings": "系统设置",
-    "diagnostics": "运行诊断"
+    "diagnostics": "运行诊断",
+    "access_control": "访问控制"
   },
   "section": {
     "directory": "目录",

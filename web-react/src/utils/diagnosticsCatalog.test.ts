@@ -42,7 +42,7 @@ function expectCopy(keys: string[]) {
 }
 
 function goSource(rel: string): string {
-  return fs.readFileSync(new URL(`../../../${rel}`, import.meta.url), 'utf8')
+  return fs.readFileSync(new URL(`../../../${rel}`, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
 }
 
 interface Declared { type: 'counter' | 'gauge' | 'histogram'; labelled: boolean }
@@ -217,6 +217,24 @@ describe('familyOf', () => {
   // forbids an "=" inside it, and the series must still split on the first.
   it('keeps everything after the first "=" as the value', () => {
     expect(familyOf('psp_x_total{op=a=b}')).toEqual({ family: 'psp_x_total', label: 'op', value: 'a=b' })
+  })
+})
+
+describe('destination compiler and list refresh diagnostics', () => {
+  it('keeps the planned metrics on the native node card', () => {
+    expect(FAMILY_CATALOG.psp_dest_policy_compile_total).toEqual({ card: 'node', type: 'counter', labelled: true })
+    expect(FAMILY_CATALOG.psp_dest_policy_compile_ms).toEqual({ card: 'node', type: 'histogram', labelled: false })
+    expect(FAMILY_CATALOG.psp_dest_list_refresh_total).toEqual({ card: 'node', type: 'counter', labelled: true })
+    expect(FAMILY_LABEL_GROUP).toMatchObject({ psp_dest_policy_compile_total: 'dest_compile', psp_dest_list_refresh_total: 'dest_list_refresh' })
+  })
+
+  it('translates every bounded compiler and refresh outcome in both languages', () => {
+    const src = goSource('internal/pkg/metrics/psp.go')
+    for (const [prefix, group, count] of [['DestCompile', 'dest_compile', 7], ['DestListRefresh', 'dest_list_refresh', 4]] as const) {
+      const values = [...src.matchAll(new RegExp(`${prefix}\\w+\\s*=\\s*"([a-z_]+)"`, 'g'))].map(m => m[1])
+      expect(values).toHaveLength(count)
+      expectCopy(values.map(v => `labels.${group}.${v}`))
+    }
   })
 })
 

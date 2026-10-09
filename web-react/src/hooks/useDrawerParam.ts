@@ -8,6 +8,8 @@ export interface DrawerHistoryState extends Record<string, unknown> {
 export interface DrawerOptions<T> {
   parse?: (raw: string | null) => T | null
   exclusive?: readonly string[]
+  /** Parameters owned by this sheet, removed when closing a cold deep link. */
+  clearOnClose?: readonly string[]
 }
 export interface DrawerParam<T = number> {
   id: T | null
@@ -48,9 +50,10 @@ export function useDrawerParam<T extends string | number = number>(param: string
     setParams(prev => {
       const out = new URLSearchParams(prev)
       out.delete(param)
+      for (const owned of options.clearOnClose ?? []) out.delete(owned)
       return out
     }, { replace: true, state: Object.keys(remaining).length ? remaining : null })
-  }, [pushedHere, navigate, param, setParams, state])
+  }, [pushedHere, navigate, param, setParams, state, options.clearOnClose])
 
   return { id, open, close }
 }

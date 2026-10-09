@@ -182,7 +182,7 @@ func (c *Catalog) Select(category string, attrs []string) (Parsed, error) {
 			}
 			if entry.entry != entry.base {
 				p.Report.Rewritten++
-				p.sample(line, "normalized")
+				p.normalizedSample(line, entry.entry)
 			}
 		}
 	}

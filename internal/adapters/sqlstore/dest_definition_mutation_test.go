@@ -194,6 +194,8 @@ func TestDestinationListDeleteChecksDisabledReferences(t *testing.T) {
 
 func TestDestinationExemptionDuplicatesAndExpiryAreAtomic(t *testing.T) {
 	r := newDestDefinitionRepo(t)
+	destinationTestUser(t, r, 12)
+	destinationTestUser(t, r, 13)
 	now := time.UnixMilli(1791000000000).UTC()
 	until := now.Add(time.Hour)
 	ex := domain.DestExemption{UserID: 12, Reason: "temporary", CreatedBy: 9, ExpiresAt: &until}

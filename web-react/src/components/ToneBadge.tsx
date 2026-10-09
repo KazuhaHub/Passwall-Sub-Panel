@@ -56,11 +56,12 @@ export function severityTone(theme: Theme, severity: Severity): Tone {
 
 // M3 tokens define both surfaces and text. The icon and label convey the
 // state together, so its meaning never depends on colour alone.
-export function ToneBadge({ tone, label, testId, data }: {
+export function ToneBadge({ tone, label, testId, data, wrap = false }: {
   tone: Tone
   label: string
   testId?: string
   data?: string
+  wrap?: boolean
 }) {
   const { Icon } = tone
   return (
@@ -68,9 +69,10 @@ export function ToneBadge({ tone, label, testId, data }: {
       sx={{
         display: 'inline-flex', alignItems: 'center', gap: 0.5, flex: '0 0 auto',
         px: 1, py: 0.25, borderRadius: 2, bgcolor: tone.bg, color: tone.fg,
-        fontSize: 12.5, fontWeight: 500, lineHeight: 1.6, whiteSpace: 'nowrap',
+        fontSize: 12.5, fontWeight: 500, lineHeight: 1.6, whiteSpace: wrap ? 'normal' : 'nowrap',
+        maxWidth: wrap ? '100%' : undefined, overflowWrap: wrap ? 'anywhere' : undefined,
       }}>
-      <Icon aria-hidden sx={{ fontSize: data === 'recorded' ? 10 : 16, color: tone.iconColor ?? tone.fg }} />
+      <Icon aria-hidden sx={{ fontSize: data === 'recorded' ? 10 : 16, color: tone.iconColor ?? tone.fg, flexShrink: 0 }} />
       {label}
     </Box>
   )

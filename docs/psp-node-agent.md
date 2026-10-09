@@ -852,3 +852,35 @@ PSP 拨入时「这次没到」的证据由 PSP 的传输层产生，节点拨�
 3. 关闭父目录 `go.work`，跑 PSP 后端、前端、跨平台构建和 live contract 全套闸门。
 4. 后续能力按 §9 独立立项；quota gate 已闭合，开放首个真实 task 前仍须完成 expiry / retention /
    restore 三道硬门，不得把未知或冲突结果当成功，也不得把未经目录核验的 core 版本暴露为可选项。
+
+## 11. 目的地访问控制扩展（开发中）
+
+访问控制沿用 config / roster / directives 三流，不新增第四条流。共享类型位于 `github.com/KazuhaHub/passwall-protocol/protocol` 的 `destination_policy.go`、`segments.go` 和 `report.go`。当前开发分支使用 Protocol 伪版本 `v0.2.1-0.20261004033110-01759871165c`；合并前换成正式模块标签，并遵守 Protocol → Node → PSP 的发布顺序。这些实现及其 CI 不等于真实节点执行验收已完成。
+
+### 11.1 配置与能力
+
+节点在 `capabilities` 声明 `policy.destination.v1` 后，PSP 才能在 `ConfigBody.policy` 下发有序规则。没有此能力、没有策略或暂停后不需要规则时，`policy` 可省略；不能用空的失败列表意外生成全局拒绝。配置摘要包含实际策略，策略内容改变后按现有 config 部署流程生效，代理程序可能重启。纯状态读取及未变化的摘要不应触发重复部署。
+
+| 字段 | 语义 |
+|---|---|
+| `policy.rules` | 有序的 allow / block / observe 规则。规则顺序不能按 ID 重排。域名、CIDR、私网条件相互取或，再与端口、网络、协议等条件取与。 |
+| `policy.rules[].subjects` | 限定的账号主体；空集合表示规则不限定账号。显式 `catch_all` 必须有主体且没有匹配条件，仅用于限定账号的兜底。 |
+| `policy.exempt` | 已豁免的主体。固定顺序为允许策略 → 豁免 → 拦截策略 → 分组白名单 → 观察策略 → 直连。 |
+| `policy.collect` | 省略为关闭；`hits` 请求命中汇总，`hits_and_usage` 还请求按网站用量。不存在原始连接日志档位。 |
+| `policy.collect_revision` | 关闭时为 0；开启时必须为正数，用于隔离关闭后重开、降档等变化之前的数据。 |
+
+记录档位还要求 Xray 及对应能力：`audit.hits.v1` 支持命中，`audit.usage.v1` 与 hits 能力共同支持用量。保存的 `hits_and_usage` 在只有 hits 能力时降为 `hits`；没有 hits 能力、非 Xray 或关闭时实际档位为空。能力字符串是部署声明，不能提前把未交付的后续审计阶段视为已可用。
+
+### 11.2 独立的策略部署回执
+
+`NodeReport.policy_status` 仅描述实际部署或因策略拒绝的候选：`digest` 是策略摘要，`state` 为 `applied` 或 `rejected`，拒绝详情为 `issue_code` 及有界、排序去重的 `listeners`。拒绝代码为 `destination_policy_rejected` 或 `destination_policy_sniffing_insufficient`。无策略成功应用时可回报空摘要；无关的监听配置或进程故障不能改写为策略拒绝。
+
+接收端在控制路径的基础校验前移出该子树，独立验证和观察。格式不合法的策略回执被丢弃，不得阻断 roster、config、directives 及原有同步；存储故障仍按正常失败处理。只承认节点实际收到并成功部署的候选，不把未发送的版本或 PSP 希望下发的摘要当成节点已应用。
+
+PSP 保存实际候选、回执及最后可用策略，并在拒绝、sniffing 不足或配额超限时按账号当前资格修剪可验证的最后可用策略。回退可能得到新的摘要，不能仅与希望下发的摘要比较来判断拒绝；回退耗尽时也不能继续标记为正在执行。记录可用性另外核对在线状态、实际档位、当前 revision、已确认候选和候选内的 block / observe 规则，保存了档位或看到一条成功回执均不足以单独证明正在记录。
+
+### 11.3 兼容与验收边界
+
+旧节点不声明策略能力时，PSP 保持原有配置字节和 ETag。旧 PSP 的非严格报告解码忽略新的策略及审计观察。降级 PSP 会撤去白名单保证，且离线或部署失败节点可能继续执行旧配置，详见 [升级与降级警告](UPGRADE-v4.md#访问控制版本的升级与降级)。
+
+当前代码覆盖能力门控、独立回执校验、摘要确认、回退及只读状态；实际 Xray / sing-box 策略包的执行、拒绝恢复、混合机队和降级逐节点时序仍须按最终审计计划验收。已发布 Node 基线的 systemd 验收只证明基线通路，不能证明尚未发布的目的地策略执行。后续 Audit 批次入库、losses、命中与用量查询及隐私同意，分别在对应阶段实现后再补充线上字段和验收结果。

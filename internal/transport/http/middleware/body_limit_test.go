@@ -90,3 +90,36 @@ func TestBodyLimitByPathUsesExactOverride(t *testing.T) {
 		}
 	}
 }
+
+func TestBodyLimitByPathUsesMatchedRouteWithoutBroadeningOtherRoutes(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.Use(BodyLimitByPath(4, map[string]int64{"/lists/:id": 8, "/lists/:id/entries": 8}))
+	read := func(c *gin.Context) {
+		if _, err := io.ReadAll(c.Request.Body); err != nil {
+			c.Status(http.StatusRequestEntityTooLarge)
+			return
+		}
+		c.Status(http.StatusNoContent)
+	}
+	r.PUT("/lists/:id", read)
+	r.POST("/lists/:id/entries", read)
+	r.PUT("/other/:id", read)
+	r.POST("/lists/:id/refresh", read)
+	for _, test := range []struct {
+		method, path, body string
+		status             int
+	}{
+		{http.MethodPut, "/lists/123", "12345678", http.StatusNoContent},
+		{http.MethodPost, "/lists/456/entries", "12345678", http.StatusNoContent},
+		{http.MethodPut, "/lists/123", "123456789", http.StatusRequestEntityTooLarge},
+		{http.MethodPut, "/other/123", "12345", http.StatusRequestEntityTooLarge},
+		{http.MethodPost, "/lists/123/refresh", "12345", http.StatusRequestEntityTooLarge},
+	} {
+		response := httptest.NewRecorder()
+		r.ServeHTTP(response, httptest.NewRequest(test.method, test.path, strings.NewReader(test.body)))
+		if response.Code != test.status {
+			t.Fatalf("%s %s status = %d, want %d", test.method, test.path, response.Code, test.status)
+		}
+	}
+}
