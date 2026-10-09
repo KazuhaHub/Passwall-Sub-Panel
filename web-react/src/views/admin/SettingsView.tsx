@@ -394,7 +394,8 @@ export default function SettingsView() {
         logoUrl: saved.logo_url || '',
         logoUrlDark: saved.logo_url_dark || '',
         iconUrl: saved.icon_url || '',
-        footerText: saved.footer_text || '© Kazuha Hub Passwall',
+        footerText: saved.footer_text ?? '© Kazuha Hub Passwall',
+        legalEnabled: saved.legal_enabled ?? false,
         themeColor: saved.theme_color || undefined,
       })
       setChangeGeoToken(false)

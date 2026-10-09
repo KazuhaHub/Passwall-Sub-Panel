@@ -48,6 +48,8 @@ export interface GlobalAnnouncement {
 }
 
 export interface MeProfile {
+  legal_pending?: boolean
+  legal_consent_version?: number
   id: number
   display_name?: string
   upn: string

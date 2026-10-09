@@ -77,6 +77,8 @@ export type RuntimeKnob =
 export type RuntimeKnobValues = Partial<Record<RuntimeKnob, number>>
 
 export interface UISettings {
+  legal_enabled?: boolean
+  readonly legal_consent_version?: number
   login_mode: LoginMode
   site_title: string
   app_title: string

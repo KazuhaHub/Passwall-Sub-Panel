@@ -31,6 +31,7 @@ import { pushSnack } from '@/components/SnackbarHost'
 import LanguageMenu from '@/components/LanguageMenu'
 import AppearanceMenu from '@/components/AppearanceMenu'
 import BrandLogo from '@/components/BrandLogo'
+import LegalFooter from '@/components/LegalFooter'
 import { setLanguage, currentLanguage } from '@/i18n'
 import { DEFAULT_PRESET_HEX, type AppLanguage } from '@/theme'
 
@@ -612,11 +613,7 @@ export default function LoginView({ forceLocal = false }: { forceLocal?: boolean
         </Card>
       </Box>
 
-      {site.footerText && (
-        <Box sx={{ p: 2, textAlign: 'center', fontSize: 12, color: md.onSurfaceVariant }}>
-          {site.footerText}
-        </Box>
-      )}
+      <LegalFooter text={site.footerText} enabled={methods?.legal?.enabled ?? site.legalEnabled} />
     </Box>
   )
 }

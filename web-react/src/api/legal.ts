@@ -30,3 +30,7 @@ export async function getLegalDocument(kind: LegalKind, lang: string, signal?: A
   })
   return data
 }
+
+export async function acceptLegalConsent(consentVersion: number): Promise<void> {
+  await client.post('/user/me/legal/accept', { consent_version: consentVersion }, { _skipErrorToast: true })
+}
