@@ -1032,7 +1032,7 @@ jobs:
       # ~18s on a cold analysis cache, measured locally, in a job off the critical path.
       - name: staticcheck
         run: |
-          go -C tools/staticcheck build -o "$RUNNER_TEMP/psp-staticcheck" honnef.co/go/tools/cmd/staticcheck
+          go -C tools/staticcheck build -mod=readonly -o "$RUNNER_TEMP/psp-staticcheck" honnef.co/go/tools/cmd/staticcheck
           "$RUNNER_TEMP/psp-staticcheck" -tags node_reinstall_acceptance ./...
       # EVERY OS THE RELEASE SHIPS, NOT ONLY THE RUNNER'S. govulncheck analyses the
       # packages as they build for the current GOOS, so an advisory whose vulnerable

@@ -381,6 +381,14 @@ test('go_static\'s build cache key names every tool the job compiles, at its pin
   assert.equal(keys.length, 2, 'go_static restores one build cache and saves it')
   assert.equal(keys[0], keys[1], 'go_static must save under the key it restores, or no run ever hits it')
   const tools = [...steps.matchAll(/\bgo (?:run|install) \S*\/([a-z0-9-]+)@(v\d+\.\d+\.\d+)/g)]
+  const staticModule = readFileSync(new URL('../tools/staticcheck/go.mod', import.meta.url), 'utf8')
+  const staticPin = /^\s*honnef\.co\/go\/tools (v\d+\.\d+\.\d+)(?:\s*\/\/ indirect)?$/m.exec(staticModule)
+  assert(staticPin, 'the isolated staticcheck module must pin the analyzer version')
+  assert(/go -C tools\/staticcheck build -mod=readonly .*honnef\.co\/go\/tools\/cmd\/staticcheck/.test(steps), 'staticcheck must build from its isolated module without modifying pins or checksums')
+  tools.push([null, 'staticcheck', staticPin[1]])
+  for (const file of ['tools/staticcheck/go.mod', 'tools/staticcheck/go.sum']) {
+    assert(keys[0].includes(`'${file}'`), `staticcheck build cache must hash ${file}`)
+  }
   assert(tools.length >= 3, `go_static compiles actionlint, staticcheck and govulncheck at pinned versions; found ${tools.length}`)
   for (const [, tool, version] of tools) {
     assert(
@@ -531,7 +539,7 @@ test('caches are restored on every event and saved only from the default branch'
 // key restored everywhere, and only go_static writes it, after govulncheck has loaded the
 // widest module set any job needs.
 test('setup-go caches nothing, and only go_static saves the module cache, after govulncheck', () => {
-  const modKey = "go-mod-${{ runner.os }}-${{ hashFiles('go.sum') }}"
+  const modKey = "go-mod-${{ runner.os }}-${{ hashFiles('go.sum', 'tools/staticcheck/go.mod', 'tools/staticcheck/go.sum') }}"
   const savers = []
   let setups = 0
   for (const [name, raw] of jobs()) {
