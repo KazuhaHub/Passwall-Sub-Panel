@@ -120,6 +120,55 @@ func TestUserPeriodUsedNilSafe(t *testing.T) {
 	}
 }
 
+// TestUserPeriodUsedSplit pins the Subscription-Userinfo split's one hard
+// invariant: up+down == PeriodUsed() EXACTLY, whatever the baselines hold, so
+// the header a client shows can never disagree with quota enforcement. Upload
+// is clamped into [0, total]; download absorbs every residual — including a
+// row whose lifetime total drifted from up+down (the pre-v3.9.0-beta.32
+// asymmetric-reset over-count) and the signed baselines a manual
+// SetPeriodUsage or the upgrade backfill leave behind. The down baseline is
+// deliberately not read: the "ignored down baseline" case would read 14 GiB
+// of download (more than the 10 GiB period) if it were.
+func TestUserPeriodUsedSplit(t *testing.T) {
+	const gb = int64(1) << 30
+	cases := []struct {
+		name                        string
+		lifeUp, lifeDown, lifeTotal int64
+		baseline, baseUp, baseDown  int64
+		wantUp, wantDown            int64
+	}{
+		{"zero values", 0, 0, 0, 0, 0, 0, 0, 0},
+		{"never rolled — whole lifetime, measured", 3 * gb, 7 * gb, 10 * gb, 0, 0, 0, 3 * gb, 7 * gb},
+		{"measured split after rollover", 13 * gb, 37 * gb, 50 * gb, 40 * gb, 11 * gb, 29 * gb, 2 * gb, 8 * gb},
+		{"just rolled over", 11 * gb, 29 * gb, 40 * gb, 40 * gb, 11 * gb, 29 * gb, 0, 0},
+		{"upgrade backfill (up baseline = lifetime up) reads as all download", 11 * gb, 34 * gb, 45 * gb, 40 * gb, 11 * gb, 29 * gb, 0, 5 * gb},
+		{"negative up baseline clamps upload to total", 2 * gb, 5 * gb, 7 * gb, 4 * gb, -3 * gb, 9 * gb, 3 * gb, 0},
+		{"negative down baseline is ignored", 2 * gb, 5 * gb, 7 * gb, 4 * gb, 2 * gb, -2 * gb, 0, 3 * gb},
+		{"ignored down baseline", 6 * gb, 14 * gb, 20 * gb, 10 * gb, 3 * gb, 0, 3 * gb, 7 * gb},
+		{"up baseline above lifetime up clamps upload to 0", 1 * gb, 9 * gb, 10 * gb, 4 * gb, 5 * gb, 0, 0, 6 * gb},
+		{"baseline above lifetime — 0/0", 5 * gb, 5 * gb, 10 * gb, 20 * gb, 0, 0, 0, 0},
+		{"drifted lifetime total — residual goes to download", 2 * gb, 3 * gb, 9 * gb, 4 * gb, 1 * gb, 1 * gb, 1 * gb, 4 * gb},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			u := &User{
+				LifetimeUpBytes: tc.lifeUp, LifetimeDownBytes: tc.lifeDown, LifetimeTotalBytes: tc.lifeTotal,
+				PeriodBaselineBytes: tc.baseline, PeriodBaselineUpBytes: tc.baseUp, PeriodBaselineDownBytes: tc.baseDown,
+			}
+			up, down := u.PeriodUsedSplit()
+			if up != tc.wantUp || down != tc.wantDown {
+				t.Fatalf("PeriodUsedSplit() = (%d, %d), want (%d, %d)", up, down, tc.wantUp, tc.wantDown)
+			}
+			if up+down != u.PeriodUsed() {
+				t.Fatalf("up+down = %d, want PeriodUsed() = %d", up+down, u.PeriodUsed())
+			}
+			if up < 0 || down < 0 {
+				t.Fatalf("negative direction: up %d down %d", up, down)
+			}
+		})
+	}
+}
+
 // TestSeparatorVisibleForNodes locks in the rc.4 separator visibility
 // rules:
 //   - global mode is unconditionally visible

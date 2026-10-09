@@ -653,6 +653,8 @@ func (r *memoryUserRepo) UpdateTrafficState(ctx context.Context, u *domain.User)
 	cur.LifetimeDownBytes = u.LifetimeDownBytes
 	cur.LifetimeTotalBytes = u.LifetimeTotalBytes
 	cur.PeriodBaselineBytes = u.PeriodBaselineBytes
+	cur.PeriodBaselineUpBytes = u.PeriodBaselineUpBytes
+	cur.PeriodBaselineDownBytes = u.PeriodBaselineDownBytes
 	cur.LifetimeBaselineAt = u.LifetimeBaselineAt
 	cur.TrafficPeriodStart = u.TrafficPeriodStart
 	return nil

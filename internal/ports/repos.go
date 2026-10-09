@@ -188,11 +188,15 @@ type UserRepo interface {
 	// a full-table scan + in-memory sort/slice.
 	ListExpiringBetween(ctx context.Context, from, to time.Time, limit int) ([]*domain.User, error)
 	// UpdateTrafficState persists ONLY the traffic-poll-owned columns
-	// (lifetime counters, period baseline/start). The traffic poll loads every
-	// user at cycle start and writes them back many seconds later; a full-row
-	// Update would clobber any concurrent admin / self-service edit (password,
-	// group, role, expiry, sub_token) made in that window. This narrow write
-	// touches only the columns the poll owns.
+	// (lifetime counters, period start, and the period baselines — total plus
+	// the per-direction PeriodBaselineUpBytes / PeriodBaselineDownBytes, always
+	// together in one statement so the subscription header's split can never
+	// pair a fresh total baseline with stale per-direction ones). The traffic
+	// poll loads every user at cycle start and writes them back many seconds
+	// later; a full-row Update would clobber any concurrent admin /
+	// self-service edit (password, group, role, expiry, sub_token) made in
+	// that window. This narrow write touches only the columns the poll owns,
+	// and Update in turn omits them.
 	//
 	// Deliberately does NOT write the emergency-access columns: those are owned
 	// by the emergency subsystem (UseEmergencyAccess grants, ClearEmergencyAccess
@@ -243,8 +247,9 @@ type UserRepo interface {
 	// each row write is its own ~5–10ms commit (WAL fsync) so collapsing
 	// N commits into one is what cuts manual "Poll Now" from ~10s to
 	// sub-second at modest scale. MySQL/Postgres get the smaller win of
-	// fewer round-trips. Same column scope and emergency-column skip as
-	// the single-row UpdateTrafficState — see that doc.
+	// fewer round-trips. Same column scope (including both per-direction
+	// period baselines) and emergency-column skip as the single-row
+	// UpdateTrafficState — see that doc.
 	BatchUpdateTrafficState(ctx context.Context, users []*domain.User) error
 	// BatchUpdateLastOnline writes per-user last_online_at via a single
 	// transaction (same batching rationale as BatchUpdateTrafficState).

@@ -64,7 +64,7 @@ func (r *userRepo) Create(ctx context.Context, u *domain.User) error {
 
 // pollOwnedColumns lists user columns owned by a non-Update writer that
 // runs concurrently with admin edits — traffic poll's
-// BatchUpdateTrafficState (lifetime counters + period baseline) and
+// BatchUpdateTrafficState (lifetime counters + period baselines) and
 // BatchUpdateLastOnline (last_online_at), plus sub.go's
 // UpdateBlockViolation. Update() loads the row, the admin mutates
 // fields in a dialog, then Save() writes the whole row back; if those
@@ -82,9 +82,10 @@ func (r *userRepo) Create(ctx context.Context, u *domain.User) error {
 // from the dialog's stale snapshot. Emergency columns are written ONLY through
 // the targeted GrantEmergencyAccess / ClearEmergencyAccess writers.
 var pollOwnedColumns = []string{
-	// BatchUpdateTrafficState / UpdateTrafficState
+	// BatchUpdateTrafficState / UpdateTrafficState (userTrafficStateMap)
 	"lifetime_up_bytes", "lifetime_down_bytes", "lifetime_total_bytes",
 	"period_baseline_bytes", "lifetime_baseline_at", "traffic_period_start",
+	"period_baseline_up_bytes", "period_baseline_down_bytes",
 	// BatchUpdateLastOnline
 	"last_online_at",
 	// AdvanceBlockViolation (sub.go blocked-client path)
@@ -399,11 +400,33 @@ func (r *userRepo) ClearServiceStateIfReason(ctx context.Context, userID int64, 
 	return res.RowsAffected == 1, nil
 }
 
-// UpdateTrafficState writes only the columns the traffic poll owns, via a
-// map so zero-values (e.g. resetting period_baseline_bytes to 0) are persisted.
-// Keeps a slow poll cycle from clobbering concurrent admin / self-service edits
-// to other columns. The emergency-access columns are intentionally NOT written
-// here — see ClearEmergencyAccess and the interface doc.
+// userTrafficStateMap is the ONE column set UpdateTrafficState and
+// BatchUpdateTrafficState write — the user-level twin of pspClientCounterMap.
+// A map (not a struct) so zero-values (e.g. resetting period_baseline_bytes to
+// 0) are persisted. Shared so the two writers can never diverge again: the
+// period baselines (total + per direction) must land in the SAME statement,
+// otherwise a poll write-back racing SetPeriodUsage could leave a fresh total
+// baseline beside stale per-direction ones (or vice versa) and the
+// subscription header's split would stop describing the period quota counts.
+// Every key here must also be in pollOwnedColumns.
+func userTrafficStateMap(u *domain.User) map[string]any {
+	return map[string]any{
+		"lifetime_up_bytes":          u.LifetimeUpBytes,
+		"lifetime_down_bytes":        u.LifetimeDownBytes,
+		"lifetime_total_bytes":       u.LifetimeTotalBytes,
+		"period_baseline_bytes":      u.PeriodBaselineBytes,
+		"period_baseline_up_bytes":   u.PeriodBaselineUpBytes,
+		"period_baseline_down_bytes": u.PeriodBaselineDownBytes,
+		"lifetime_baseline_at":       u.LifetimeBaselineAt,
+		"traffic_period_start":       u.TrafficPeriodStart,
+	}
+}
+
+// UpdateTrafficState writes only the columns the traffic poll owns
+// (userTrafficStateMap). Keeps a slow poll cycle from clobbering concurrent
+// admin / self-service edits to other columns. The emergency-access columns
+// are intentionally NOT written here — see ClearEmergencyAccess and the
+// interface doc.
 func (r *userRepo) UpdateTrafficState(ctx context.Context, u *domain.User) error {
 	if u == nil || u.ID == 0 {
 		return fmt.Errorf("UpdateTrafficState requires a non-zero user ID; got %+v", u)
@@ -411,14 +434,7 @@ func (r *userRepo) UpdateTrafficState(ctx context.Context, u *domain.User) error
 	return r.db.WithContext(ctx).
 		Model(&userRow{}).
 		Where("id = ?", u.ID).
-		Updates(map[string]any{
-			"lifetime_up_bytes":     u.LifetimeUpBytes,
-			"lifetime_down_bytes":   u.LifetimeDownBytes,
-			"lifetime_total_bytes":  u.LifetimeTotalBytes,
-			"period_baseline_bytes": u.PeriodBaselineBytes,
-			"lifetime_baseline_at":  u.LifetimeBaselineAt,
-			"traffic_period_start":  u.TrafficPeriodStart,
-		}).Error
+		Updates(userTrafficStateMap(u)).Error
 }
 
 // BatchUpdateTrafficState runs N UpdateTrafficState writes wrapped in one
@@ -443,14 +459,7 @@ func (r *userRepo) BatchUpdateTrafficState(ctx context.Context, users []*domain.
 			}
 			err := tx.Model(&userRow{}).
 				Where("id = ?", u.ID).
-				Updates(map[string]any{
-					"lifetime_up_bytes":     u.LifetimeUpBytes,
-					"lifetime_down_bytes":   u.LifetimeDownBytes,
-					"lifetime_total_bytes":  u.LifetimeTotalBytes,
-					"period_baseline_bytes": u.PeriodBaselineBytes,
-					"lifetime_baseline_at":  u.LifetimeBaselineAt,
-					"traffic_period_start":  u.TrafficPeriodStart,
-				}).Error
+				Updates(userTrafficStateMap(u)).Error
 			if err != nil {
 				return err
 			}

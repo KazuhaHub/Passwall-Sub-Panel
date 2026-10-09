@@ -414,6 +414,9 @@ CREATE TABLE users (
   lifetime_down_bytes      BIGINT DEFAULT 0,
   lifetime_total_bytes     BIGINT DEFAULT 0,
   period_baseline_bytes    BIGINT DEFAULT 0,
+  -- 周期起点时的 lifetime_up/down_bytes（有符号，只经 PeriodUsedSplit 读取，见 §11.2）
+  period_baseline_up_bytes   BIGINT DEFAULT 0,
+  period_baseline_down_bytes BIGINT DEFAULT 0,
   lifetime_baseline_at     DATETIME,
   display_name             VARCHAR(128),
   remark                   VARCHAR(255),
@@ -1073,6 +1076,7 @@ TrafficSvc cron 每 N 分钟（默认 5）:
        - AuditLog
   6. 重置周期触发（每月 1 号 / 每季首日）:
        - period_start = now
+       - period_baseline_bytes / _up_bytes / _down_bytes 同时 freeze 为本轮 delta 之前的 lifetime
        - 若 service_disabled_reason=traffic_exceeded → 调 user.ResumeServiceAndSync(userID)
            （清空 service_disabled_reason + SyncLifecycle(enable=true) + 异步"服务已恢复"邮件）
        - AuditLog
@@ -1106,7 +1110,8 @@ GET /{sub_path}/abc123 (UA: mihomo)
      g. `sub-rules:` 由模板定义，{{ sub_rules }} 只输出其下的 Mihomo 子规则映射内容；Rematch 出站追加到 proxies
      h. 按规则集 proxy_group_order 生成代理组顺序；{{ rules_personal }} 插入 user.personal_rules
   6. 写 sub_logs
-  7. 写 Subscription-Userinfo header（流量 + 到期 + 限额）
+  7. 写 Subscription-Userinfo header（流量 + 到期 + 限额）：
+       upload/download = User.PeriodUsedSplit()，两者之和恒等于 PeriodUsed()（与配额判定一致，见 §11.2）
   8. 返回 yaml
 ```
 
@@ -1508,6 +1513,12 @@ func (c *Client) UpgradeXray(ctx, tag string) error
 
 实现：`users.traffic_period_start` 记录当前周期起点；`users.period_baseline_bytes` 在 period rollover 时 freeze 为当时的 `lifetime_total_bytes`。**周期内已用 = lifetime_total_bytes - period_baseline_bytes**（O(1) 内存减法，零 DB 查询；通过 `domain.User.PeriodUsed()` 暴露）。
 
+分方向（订阅 header 的 upload/download）：`period_baseline_up_bytes` / `period_baseline_down_bytes` 与总 baseline 同步 freeze（rollover、`SetPeriodUsage`），并与之在同一条 UPDATE 中写入。`domain.User.PeriodUsedSplit()`：upload = `lifetime_up_bytes - period_baseline_up_bytes` 夹到 [0, 周期已用]，download = 周期已用 − upload（吸收一切残差），**upload + download 恒等于 `PeriodUsed()`**；down baseline 不参与计算。
+
+- 两列有符号、可为负，不做 clamp，也不能假设 up + down == `period_baseline_bytes`（仅当 lifetime_total == up + down 时成立）。
+- 管理员手动改用量（`SetPeriodUsage`）只给总量：按本周期**实测**上下行比例做精确整数拆分（本周期无实测流量 → 全部计入 download）。总量精确，方向是估算。
+- 升级回填（一次性 marker `user_period_baseline_split_v1`）：`period_baseline_bytes <= 0` 的行 → 0/0（周期即全部 lifetime，拆分精确）；`> 0` 的行 → up baseline = lifetime_up，周期内存量全部计为 download（与旧版 header 逐字节一致），之后的流量按方向累计，下一次自然 rollover 起完全实测。reset=never 用户不会 rollover，却可能 baseline > 0（曾手动改用量，或由按周期重置改为 never）：其存量部分一直计为 download，直到管理员手动设置用量重新拆分（设为 0 时精确，否则按实测比例）。
+
 ### 11.3 超限 → 暂停服务
 
 | 触发 | 动作 |
@@ -1527,6 +1538,7 @@ func (c *Client) UpgradeXray(ctx, tag string) error
 |---|---|
 | 永久用量 | 最新 total |
 | 当前周期已用 | `lifetime_total_bytes - period_baseline_bytes`（O(1)） |
+| 当前周期上行 / 下行 | 看板（`UserNodeUsage` / `UserServerUsage`）：按 client 级 `lifetime_up/down - period_baseline_up/down`（nonNeg）逐节点/服务器求和；订阅 header 另用 `User.PeriodUsedSplit()`（见 §11.2），两者不保证逐字节相等 |
 | 今日 | 最新 total - 今日 00:00 之前最后一条 |
 | 30 天曲线 | 优先读小时聚合表，按日取末次快照，相邻 diff |
 
@@ -1718,7 +1730,7 @@ volumes:
 ### 17.3 实现位置
 
 - 只读基线检查：[schema_baseline.go](../internal/adapters/sqlstore/schema_baseline.go)。识别 8 张核心表、额度列 nullable、V3 额度迁移标记，以及已完成/中断的 V4 endpoint 与 attachment 表示；不是按旧二进制版本号判定。
-- 当前模型和启动编排：[schema.go](../internal/adapters/sqlstore/schema.go) 的 `EnsureSchema`。先检查，再 `AutoMigrate`，然后执行必要桥接、持续修复和角色种子。
+- 当前模型和启动编排：[schema.go](../internal/adapters/sqlstore/schema.go) 的 `EnsureSchema`。先检查，再 `AutoMigrate`，然后执行必要桥接、持续修复、一次性当前模型数据回填（`schema_migrations` 标记门控，如 `user_period_baseline_split_v1`，见 §11.2）和角色种子。
 - 有界桥接：[schema_upgrade_v4.go](../internal/adapters/sqlstore/schema_upgrade_v4.go)。保留原 V4 子步骤标记，所有必要步骤成功后记录 `v3_to_v4_baseline_v1`；后续启动跳过旧桥接。
 - 新装初始化标记 `v4_schema_initializing_v1` 仅支持已确认没有 PSP 状态的新库 DDL 失败后重试，不是给旧库绕过检查的开关。
 - `cmd/panel/main.go` 保留退休命令保护：`psp migrate` 和未消费 positional 参数在配置加载/数据库初始化前退出，不能误启动 daemon。V2→V3 专用 `internal/migrate` 已从当前源码删除。
@@ -1736,6 +1748,7 @@ V3 最后版本对三个旧应用索引只做 best-effort 删除，因此它们�
 | V3 残留旧索引 | 一次性规范化 `idx_sub_logs_user_id`、`idx_sub_logs_accessed_at`、`idx_users_email` |
 | V4 client 身份、attachment、endpoint 状态 | 有界桥接，保留 ID、凭据、计数及原迁移标记 |
 | 流量计数 NULL | 当前数据的持续修复，不是历史版本迁移；继续保留 |
+| 当前模型新列的一次性回填（如 `user_period_baseline_split_v1`） | 标记与数据同事务写入，只执行一次；不属于 V3→V4 桥接，已完成 V4 的库也会执行一次 |
 | 内置角色 | 当前模型的不变量维护/种子，不属于旧迁移清理 |
 | Ownership / shared-client 上游应用与清理 | 仍是必要的运行时收敛，**本次未删除**；见 [清理登记](migration/v3-to-v4-cleanup.md) |
 

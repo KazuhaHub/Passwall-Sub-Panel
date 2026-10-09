@@ -64,22 +64,29 @@ type userRow struct {
 	// PeriodBaselineBytes: LifetimeTotalBytes at the start of the current
 	// period. periodUsage simplifies to lifetime - baseline (O(1)). Pre-v3
 	// derived from a LastBefore(period_start) snapshot query on every read.
-	PeriodBaselineBytes    int64 `gorm:"default:0"`
-	LifetimeBaselineAt     *time.Time
-	DisplayName            string `gorm:"size:128"`
-	Remark                 string `gorm:"size:255"`
-	Enabled                bool   `gorm:"not null"`
-	AutoDisabledReason     string `gorm:"size:32"`
-	DisableDetail          string `gorm:"type:text"`
-	ServiceDisabledReason  string `gorm:"size:32;not null;default:''"`
-	ServiceDisableDetail   string `gorm:"type:text"`
-	ServiceDisabledAt      *time.Time
-	SelfRegistered         bool `gorm:"not null;default:false"`
-	BlockViolationCount    int  `gorm:"default:0"`
-	LastBlockViolationAt   *time.Time
-	EmergencyUsedCount     int
-	EmergencyUntil         *time.Time
-	EmergencyBaselineBytes int64 `gorm:"default:0"`
+	PeriodBaselineBytes int64 `gorm:"default:0"`
+	// PeriodBaselineUpBytes / PeriodBaselineDownBytes: the per-direction
+	// companions of PeriodBaselineBytes (domain.User docs the semantics,
+	// including why they are SIGNED). Added in V4 with DEFAULT 0 and always
+	// written non-NULL, so repairTrafficCounterNulls does not cover them;
+	// pre-existing rows are seeded once by backfillUserPeriodBaselineSplit.
+	PeriodBaselineUpBytes   int64 `gorm:"default:0"`
+	PeriodBaselineDownBytes int64 `gorm:"default:0"`
+	LifetimeBaselineAt      *time.Time
+	DisplayName             string `gorm:"size:128"`
+	Remark                  string `gorm:"size:255"`
+	Enabled                 bool   `gorm:"not null"`
+	AutoDisabledReason      string `gorm:"size:32"`
+	DisableDetail           string `gorm:"type:text"`
+	ServiceDisabledReason   string `gorm:"size:32;not null;default:''"`
+	ServiceDisableDetail    string `gorm:"type:text"`
+	ServiceDisabledAt       *time.Time
+	SelfRegistered          bool `gorm:"not null;default:false"`
+	BlockViolationCount     int  `gorm:"default:0"`
+	LastBlockViolationAt    *time.Time
+	EmergencyUsedCount      int
+	EmergencyUntil          *time.Time
+	EmergencyBaselineBytes  int64 `gorm:"default:0"`
 	// TokenVersion bumps invalidate every JWT issued before the bump
 	// (admin disable / role demote / password change). Auth middleware
 	// rejects a token whose tv claim doesn't match the live row's
@@ -144,32 +151,34 @@ func (r *userRow) toDomain() *domain.User {
 			IPLimit:           r.IPLimit,
 			DeviceLimit:       r.DeviceLimit,
 		},
-		TrafficResetPeriod:     domain.ResetPeriod(r.TrafficResetPeriod),
-		TrafficPeriodStart:     r.TrafficPeriodStart,
-		LifetimeUpBytes:        r.LifetimeUpBytes,
-		LifetimeDownBytes:      r.LifetimeDownBytes,
-		LifetimeTotalBytes:     r.LifetimeTotalBytes,
-		LifetimeBaselineAt:     r.LifetimeBaselineAt,
-		PeriodBaselineBytes:    r.PeriodBaselineBytes,
-		DisplayName:            r.DisplayName,
-		Remark:                 r.Remark,
-		Enabled:                r.Enabled,
-		AutoDisabledReason:     domain.AutoDisabledReason(r.AutoDisabledReason),
-		DisableDetail:          r.DisableDetail,
-		ServiceDisabledReason:  domain.AutoDisabledReason(r.ServiceDisabledReason),
-		ServiceDisableDetail:   r.ServiceDisableDetail,
-		ServiceDisabledAt:      r.ServiceDisabledAt,
-		SelfRegistered:         r.SelfRegistered,
-		TOTPEnabled:            r.TOTPEnabled,
-		BlockViolationCount:    r.BlockViolationCount,
-		LastBlockViolationAt:   r.LastBlockViolationAt,
-		EmergencyUsedCount:     r.EmergencyUsedCount,
-		EmergencyUntil:         r.EmergencyUntil,
-		EmergencyBaselineBytes: r.EmergencyBaselineBytes,
-		TokenVersion:           r.TokenVersion,
-		LastOnlineAt:           r.LastOnlineAt,
-		CreatedAt:              r.CreatedAt,
-		UpdatedAt:              r.UpdatedAt,
+		TrafficResetPeriod:      domain.ResetPeriod(r.TrafficResetPeriod),
+		TrafficPeriodStart:      r.TrafficPeriodStart,
+		LifetimeUpBytes:         r.LifetimeUpBytes,
+		LifetimeDownBytes:       r.LifetimeDownBytes,
+		LifetimeTotalBytes:      r.LifetimeTotalBytes,
+		LifetimeBaselineAt:      r.LifetimeBaselineAt,
+		PeriodBaselineBytes:     r.PeriodBaselineBytes,
+		PeriodBaselineUpBytes:   r.PeriodBaselineUpBytes,
+		PeriodBaselineDownBytes: r.PeriodBaselineDownBytes,
+		DisplayName:             r.DisplayName,
+		Remark:                  r.Remark,
+		Enabled:                 r.Enabled,
+		AutoDisabledReason:      domain.AutoDisabledReason(r.AutoDisabledReason),
+		DisableDetail:           r.DisableDetail,
+		ServiceDisabledReason:   domain.AutoDisabledReason(r.ServiceDisabledReason),
+		ServiceDisableDetail:    r.ServiceDisableDetail,
+		ServiceDisabledAt:       r.ServiceDisabledAt,
+		SelfRegistered:          r.SelfRegistered,
+		TOTPEnabled:             r.TOTPEnabled,
+		BlockViolationCount:     r.BlockViolationCount,
+		LastBlockViolationAt:    r.LastBlockViolationAt,
+		EmergencyUsedCount:      r.EmergencyUsedCount,
+		EmergencyUntil:          r.EmergencyUntil,
+		EmergencyBaselineBytes:  r.EmergencyBaselineBytes,
+		TokenVersion:            r.TokenVersion,
+		LastOnlineAt:            r.LastOnlineAt,
+		CreatedAt:               r.CreatedAt,
+		UpdatedAt:               r.UpdatedAt,
 	}
 }
 
@@ -192,34 +201,36 @@ func userFromDomain(u *domain.User) *userRow {
 		// u.IPLimit / u.DeviceLimit: writing a resolved value back would turn
 		// an inheriting user into an explicitly-pinned one, silently detaching
 		// them from their group's policy.
-		TrafficLimitBytes:      u.Limits.TrafficLimitBytes,
-		IPLimit:                u.Limits.IPLimit,
-		DeviceLimit:            u.Limits.DeviceLimit,
-		TrafficResetPeriod:     string(u.TrafficResetPeriod),
-		TrafficPeriodStart:     u.TrafficPeriodStart,
-		LifetimeUpBytes:        u.LifetimeUpBytes,
-		LifetimeDownBytes:      u.LifetimeDownBytes,
-		LifetimeTotalBytes:     u.LifetimeTotalBytes,
-		LifetimeBaselineAt:     u.LifetimeBaselineAt,
-		PeriodBaselineBytes:    u.PeriodBaselineBytes,
-		DisplayName:            u.DisplayName,
-		Remark:                 u.Remark,
-		Enabled:                u.Enabled,
-		AutoDisabledReason:     string(u.AutoDisabledReason),
-		DisableDetail:          u.DisableDetail,
-		ServiceDisabledReason:  string(u.ServiceDisabledReason),
-		ServiceDisableDetail:   u.ServiceDisableDetail,
-		ServiceDisabledAt:      u.ServiceDisabledAt,
-		SelfRegistered:         u.SelfRegistered,
-		BlockViolationCount:    u.BlockViolationCount,
-		LastBlockViolationAt:   u.LastBlockViolationAt,
-		EmergencyUsedCount:     u.EmergencyUsedCount,
-		EmergencyUntil:         u.EmergencyUntil,
-		EmergencyBaselineBytes: u.EmergencyBaselineBytes,
-		TokenVersion:           u.TokenVersion,
-		LastOnlineAt:           u.LastOnlineAt,
-		CreatedAt:              u.CreatedAt,
-		UpdatedAt:              u.UpdatedAt,
+		TrafficLimitBytes:       u.Limits.TrafficLimitBytes,
+		IPLimit:                 u.Limits.IPLimit,
+		DeviceLimit:             u.Limits.DeviceLimit,
+		TrafficResetPeriod:      string(u.TrafficResetPeriod),
+		TrafficPeriodStart:      u.TrafficPeriodStart,
+		LifetimeUpBytes:         u.LifetimeUpBytes,
+		LifetimeDownBytes:       u.LifetimeDownBytes,
+		LifetimeTotalBytes:      u.LifetimeTotalBytes,
+		LifetimeBaselineAt:      u.LifetimeBaselineAt,
+		PeriodBaselineBytes:     u.PeriodBaselineBytes,
+		PeriodBaselineUpBytes:   u.PeriodBaselineUpBytes,
+		PeriodBaselineDownBytes: u.PeriodBaselineDownBytes,
+		DisplayName:             u.DisplayName,
+		Remark:                  u.Remark,
+		Enabled:                 u.Enabled,
+		AutoDisabledReason:      string(u.AutoDisabledReason),
+		DisableDetail:           u.DisableDetail,
+		ServiceDisabledReason:   string(u.ServiceDisabledReason),
+		ServiceDisableDetail:    u.ServiceDisableDetail,
+		ServiceDisabledAt:       u.ServiceDisabledAt,
+		SelfRegistered:          u.SelfRegistered,
+		BlockViolationCount:     u.BlockViolationCount,
+		LastBlockViolationAt:    u.LastBlockViolationAt,
+		EmergencyUsedCount:      u.EmergencyUsedCount,
+		EmergencyUntil:          u.EmergencyUntil,
+		EmergencyBaselineBytes:  u.EmergencyBaselineBytes,
+		TokenVersion:            u.TokenVersion,
+		LastOnlineAt:            u.LastOnlineAt,
+		CreatedAt:               u.CreatedAt,
+		UpdatedAt:               u.UpdatedAt,
 	}
 }
 
@@ -1607,6 +1618,11 @@ func EnsureSchema(db *gorm.DB) error {
 	if err := repairTrafficCounterNulls(db); err != nil {
 		return err
 	}
+	// After the NULL repair (its COALESCEs are then belt-and-braces) and
+	// outside migrateV3ToV4, which returns early on every completed V4 install.
+	if err := backfillUserPeriodBaselineSplit(db); err != nil {
+		return err
+	}
 	return seedBuiltinRoles(db)
 }
 
@@ -1776,5 +1792,72 @@ func applyOnce(db *gorm.DB, id string, fn func(tx *gorm.DB) error) error {
 			return fmt.Errorf("schema migration %s: %w", id, err)
 		}
 		return tx.Create(&schemaMigrationRow{ID: id, AppliedAt: time.Now().UTC()}).Error
+	})
+}
+
+// userPeriodBaselineSplitMigrationID marks the one-time seeding of
+// users.period_baseline_up_bytes / period_baseline_down_bytes.
+const userPeriodBaselineSplitMigrationID = "user_period_baseline_split_v1"
+
+// backfillUserPeriodBaselineSplit seeds the per-direction period baselines on
+// rows that predate them, exactly once. AutoMigrate adds both columns as 0,
+// which would read as "the whole lifetime upload is this period's upload" —
+// wrong for any user whose period has rolled over. The marker (not a column
+// probe) decides "not yet done": MySQL commits the ADD COLUMN DDL implicitly,
+// so a crash between DDL and backfill must still leave the backfill pending.
+//
+// The formula, per row (PB = period_baseline_bytes):
+//
+//   - PB <= 0: the period IS the user's whole lifetime (never rolled — e.g.
+//     reset=never with no admin usage edit — rolled from zero, or an admin
+//     set usage equal to lifetime), so 0/0 is the exact measured split — the
+//     same state a newly created user starts in.
+//   - PB > 0: nothing recorded the per-direction counters at period start,
+//     so the pre-upgrade period usage is attributed entirely to download:
+//     up baseline = lifetime_up (period upload 0), down baseline =
+//     lifetime_down - max(lifetime_total - PB, 0). User.PeriodUsedSplit then
+//     returns upload=0 / download=PeriodUsed() — byte-for-byte what the
+//     header emitted before this column existed. Post-upgrade traffic accrues
+//     per direction, and the next natural rollover makes the split fully
+//     measured. reset=never users never roll, yet can carry PB > 0 (an
+//     earlier admin usage edit, or a switch from a rolling period): their
+//     pre-upgrade part stays download until an admin usage set re-splits the
+//     period (exact when set to 0, otherwise by the measured ratio).
+//
+// The marker also means a downgrade to a binary that does not maintain these
+// columns, followed by a re-upgrade, leaves them stale until the next
+// rollover or admin usage set; PeriodUsedSplit's clamp keeps upload+download
+// == PeriodUsed() meanwhile, so only the direction split can be off, never
+// the total.
+//
+// SQL constraints, all load-bearing:
+//   - one raw Exec, not Model().Updates: GORM's map Updates bumps updated_at,
+//     and this is a data seed, not a user edit (schema_baseline_test DeepEquals
+//     the frozen row, updated_at included, across two boots);
+//   - the closure uses tx, never db: SQLite runs with MaxOpenConns(1), so a
+//     second connection inside applyOnce's transaction deadlocks;
+//   - CASE, not GREATEST/MAX, so one statement runs on all three dialects;
+//   - COALESCE on every input: period_baseline_bytes is outside
+//     repairTrafficCounterNulls' scope;
+//   - the down expression never reads period_baseline_up_bytes: MySQL
+//     evaluates SET assignments left to right against already-updated values;
+//   - no clamp: a negative down baseline is expected (PeriodUsedSplit reads
+//     only the up baseline, and clamps);
+//   - integer-only arithmetic, so 2^53+ counters survive exactly.
+func backfillUserPeriodBaselineSplit(db *gorm.DB) error {
+	return applyOnce(db, userPeriodBaselineSplitMigrationID, func(tx *gorm.DB) error {
+		return tx.Exec(`
+UPDATE users
+SET
+	period_baseline_up_bytes = CASE WHEN COALESCE(period_baseline_bytes, 0) > 0
+		THEN COALESCE(lifetime_up_bytes, 0)
+		ELSE 0 END,
+	period_baseline_down_bytes = CASE WHEN COALESCE(period_baseline_bytes, 0) > 0
+		THEN COALESCE(lifetime_down_bytes, 0) - (CASE
+			WHEN COALESCE(lifetime_total_bytes, 0) > COALESCE(period_baseline_bytes, 0)
+			THEN COALESCE(lifetime_total_bytes, 0) - COALESCE(period_baseline_bytes, 0)
+			ELSE 0 END)
+		ELSE 0 END
+`).Error
 	})
 }

@@ -860,10 +860,17 @@ func buildProfileName(u *domain.User, st ports.UISettings) string {
 }
 
 // buildSubInfo produces the Subscription-Userinfo header value. Usage follows
-// the user's period baseline, not cumulative traffic snapshots. The user only
-// stores a total baseline, so report aggregate period usage as download and
-// upload as zero; their sum matches quota enforcement. total reflects the user's
-// configured cap (0 = unlimited); expire is appended ONLY when the user
+// the user's period baselines, not cumulative traffic snapshots: upload and
+// download come from User.PeriodUsedSplit, whose up+down == PeriodUsed()
+// exactly — the same figure quota enforcement compares against the limit, so
+// a client's "used" can never disagree with when service is actually
+// suspended. Download absorbs any residual (a row whose lifetime total drifted
+// from up+down, or the pre-upgrade part of a period that predates the
+// per-direction baselines, reported as download until the next rollover or
+// an admin usage set).
+// After an admin's manual usage edit the split is an estimate (the total is
+// split by the period's measured ratio); the sum stays exact. total reflects
+// the user's configured cap (0 = unlimited); expire is appended ONLY when the user
 // has a real expiry — both ClashMi and ClashMetaForAndroid parse a literal
 // "expire=0" as the Unix epoch (1969/1970 in negative-offset timezones)
 // rather than as "no expiry", so the field must be absent entirely when
@@ -871,7 +878,8 @@ func buildProfileName(u *domain.User, st ports.UISettings) string {
 //
 // Format spec: https://github.com/Dreamacro/clash/wiki/managing-providers
 func (s *Service) buildSubInfo(_ context.Context, u *domain.User) string {
-	out := fmt.Sprintf("upload=0; download=%d; total=%d", u.PeriodUsed(), u.TrafficLimitBytes)
+	up, down := u.PeriodUsedSplit()
+	out := fmt.Sprintf("upload=%d; download=%d; total=%d", up, down, u.TrafficLimitBytes)
 	if u.ExpireAt != nil && !u.ExpireAt.IsZero() {
 		out += fmt.Sprintf("; expire=%d", u.ExpireAt.Unix())
 	}

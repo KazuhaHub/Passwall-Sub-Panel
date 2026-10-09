@@ -34,6 +34,8 @@ func (r *fakeUserRepo) Update(ctx context.Context, u *domain.User) error {
 		cp.LifetimeDownBytes = prev.LifetimeDownBytes
 		cp.LifetimeTotalBytes = prev.LifetimeTotalBytes
 		cp.PeriodBaselineBytes = prev.PeriodBaselineBytes
+		cp.PeriodBaselineUpBytes = prev.PeriodBaselineUpBytes
+		cp.PeriodBaselineDownBytes = prev.PeriodBaselineDownBytes
 		cp.LifetimeBaselineAt = prev.LifetimeBaselineAt
 		cp.TrafficPeriodStart = prev.TrafficPeriodStart
 		cp.LastOnlineAt = prev.LastOnlineAt
@@ -169,6 +171,8 @@ func (r *fakeUserRepo) UpdateTrafficState(ctx context.Context, u *domain.User) e
 	cur.LifetimeDownBytes = u.LifetimeDownBytes
 	cur.LifetimeTotalBytes = u.LifetimeTotalBytes
 	cur.PeriodBaselineBytes = u.PeriodBaselineBytes
+	cur.PeriodBaselineUpBytes = u.PeriodBaselineUpBytes
+	cur.PeriodBaselineDownBytes = u.PeriodBaselineDownBytes
 	cur.LifetimeBaselineAt = u.LifetimeBaselineAt
 	cur.TrafficPeriodStart = u.TrafficPeriodStart
 	return nil
@@ -682,6 +686,107 @@ func TestSetPeriodUsageSetsBaseline(t *testing.T) {
 	})
 }
 
+// TestSetPeriodUsagePerDirectionSplit pins how a manual usage edit moves the
+// per-direction period baselines that feed the Subscription-Userinfo header.
+// The admin supplies only a total, so SetPeriodUsage splits it by the period's
+// MEASURED up:down ratio — taken before the lifetime bump and before
+// PeriodBaselineBytes is overwritten — in exact integer math, and stores the
+// baselines signed. Whatever the split, upload+download must equal the
+// override exactly (it is what quota enforcement reads). The huge case is the
+// overflow guard: used × measuredUp is ~2^123, which wraps an int64 product
+// and drifts by 53 bytes through float64.
+func TestSetPeriodUsagePerDirectionSplit(t *testing.T) {
+	const gb = int64(1) << 30
+	const huge = int64(1) << 62
+	cases := []struct {
+		name             string
+		user             domain.User
+		latest           *domain.TrafficSnapshot
+		used             int64
+		wantUp, wantDown int64
+		wantBU, wantBD   int64
+	}{
+		{
+			name: "measured ratio preserved",
+			user: domain.User{LifetimeUpBytes: 30 * gb, LifetimeDownBytes: 70 * gb, LifetimeTotalBytes: 100 * gb,
+				PeriodBaselineBytes: 90 * gb, PeriodBaselineUpBytes: 28 * gb, PeriodBaselineDownBytes: 62 * gb}, // measured 2 up / 8 down
+			latest: &domain.TrafficSnapshot{UpBytes: 30 * gb, DownBytes: 70 * gb, TotalBytes: 100 * gb},
+			used:   5 * gb, wantUp: gb, wantDown: 4 * gb, wantBU: 29 * gb, wantBD: 66 * gb,
+		},
+		{
+			name: "used equal to measured keeps the split bit-for-bit",
+			user: domain.User{LifetimeUpBytes: 1_000_003, LifetimeDownBytes: 2_000_011, LifetimeTotalBytes: 3_000_014,
+				PeriodBaselineBytes: 1_000_000, PeriodBaselineUpBytes: 333_331, PeriodBaselineDownBytes: 666_669},
+			used: 2_000_014, wantUp: 666_672, wantDown: 1_333_342, wantBU: 333_331, wantBD: 666_669,
+		},
+		{
+			name: "zero usage resets both directions",
+			user: domain.User{LifetimeUpBytes: 30 * gb, LifetimeDownBytes: 70 * gb, LifetimeTotalBytes: 100 * gb,
+				PeriodBaselineBytes: 90 * gb, PeriodBaselineUpBytes: 28 * gb, PeriodBaselineDownBytes: 62 * gb},
+			used: 0, wantUp: 0, wantDown: 0, wantBU: 30 * gb, wantBD: 70 * gb,
+		},
+		{
+			// LT=0: the bump splits 50/50 (no snapshot) but nothing was
+			// measured, so upload stays 0 and the down baseline goes negative.
+			name: "from zero lifetime reads as all download",
+			user: domain.User{PeriodBaselineBytes: 999},
+			used: 3 * gb, wantUp: 0, wantDown: 3 * gb, wantBU: 3 * gb / 2, wantBD: -3 * gb / 2,
+		},
+		{
+			name: "nothing measured this period reads as all download",
+			user: domain.User{LifetimeUpBytes: 4 * gb, LifetimeDownBytes: 6 * gb, LifetimeTotalBytes: 10 * gb,
+				PeriodBaselineBytes: 10 * gb, PeriodBaselineUpBytes: 4 * gb, PeriodBaselineDownBytes: 6 * gb},
+			used: 2 * gb, wantUp: 0, wantDown: 2 * gb, wantBU: 4 * gb, wantBD: 4 * gb,
+		},
+		{
+			// The bump (latest snapshot's lifetime ratio) and the period ratio
+			// agree here, so the baselines land back at zero.
+			name:   "override above lifetime bumps it and keeps the period ratio",
+			user:   domain.User{LifetimeUpBytes: 3 * gb, LifetimeDownBytes: 7 * gb, LifetimeTotalBytes: 10 * gb},
+			latest: &domain.TrafficSnapshot{UpBytes: 3 * gb, DownBytes: 7 * gb, TotalBytes: 10 * gb},
+			used:   20 * gb, wantUp: 6 * gb, wantDown: 14 * gb, wantBU: 0, wantBD: 0,
+		},
+		{
+			name: "values near 1<<62 neither overflow nor drift",
+			user: domain.User{LifetimeUpBytes: huge/2 + 12345, LifetimeDownBytes: huge/2 - 12345, LifetimeTotalBytes: huge},
+			used: huge - 7, wantUp: huge/2 + 12341, wantDown: huge/2 - 12348, wantBU: 4, wantBD: 3,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			start := time.Now().AddDate(0, 0, -3)
+			u := tc.user
+			u.ID, u.Enabled, u.TrafficResetPeriod, u.TrafficPeriodStart = 1, true, domain.ResetMonthly, &start
+			users := &fakeUserRepo{users: map[int64]*domain.User{1: &u}}
+			repo := &fakeTrafficRepo{}
+			if tc.latest != nil {
+				snap := *tc.latest
+				snap.UserID, snap.CapturedAt = 1, time.Now().Add(-time.Minute)
+				repo.snapshots = append(repo.snapshots, &snap)
+			}
+			svc := New(users, nil, repo, nil, nil, nil, &fakeDisabler{})
+			if err := svc.SetPeriodUsage(context.Background(), 1, tc.used); err != nil {
+				t.Fatalf("SetPeriodUsage: %v", err)
+			}
+			got := users.users[1]
+			if got.PeriodUsed() != tc.used {
+				t.Fatalf("PeriodUsed() = %d, want %d (=usedBytes)", got.PeriodUsed(), tc.used)
+			}
+			up, down := got.PeriodUsedSplit()
+			if up != tc.wantUp || down != tc.wantDown {
+				t.Errorf("PeriodUsedSplit() = (%d, %d), want (%d, %d)", up, down, tc.wantUp, tc.wantDown)
+			}
+			if up+down != tc.used {
+				t.Errorf("upload+download = %d, want the override %d exactly", up+down, tc.used)
+			}
+			if got.PeriodBaselineUpBytes != tc.wantBU || got.PeriodBaselineDownBytes != tc.wantBD {
+				t.Errorf("per-direction baselines = (%d, %d), want (%d, %d) — stored signed, never clamped",
+					got.PeriodBaselineUpBytes, got.PeriodBaselineDownBytes, tc.wantBU, tc.wantBD)
+			}
+		})
+	}
+}
+
 // Regression (M1): SetPeriodUsage must NOT insert a snapshot whose total is
 // below the latest existing in-hour snapshot. The hourly rollup buckets traffic
 // as MAX(total)-MIN(total) and assumes intra-hour monotonicity; a below-baseline
@@ -1005,6 +1110,84 @@ func TestRecordAndEnforcePersistsRolloverBeforeDisablerCall(t *testing.T) {
 	}
 	if len(disabler.calls) != 1 || !disabler.calls[0] {
 		t.Fatalf("disabler should have been called with enabled=true, got %v", disabler.calls)
+	}
+}
+
+// TestRecordAndEnforceRolloverFreezesPerDirectionBaselines pins the natural
+// rollover's per-direction baselines on the non-sink path (recordAndEnforce,
+// persisted inline through UpdateTrafficState): each freezes at lifetime
+// minus this cycle's own delta, exactly like PeriodBaselineBytes, so the new
+// period's Subscription-Userinfo split is this cycle's measured up/down. That
+// also retires a backfilled row's "all download" attribution and any stale
+// split a manual edit left behind; a zero-hit rollover reads 0/0.
+func TestRecordAndEnforceRolloverFreezesPerDirectionBaselines(t *testing.T) {
+	const gb = int64(1) << 30
+	cases := []struct {
+		name             string
+		user             domain.User
+		totals           trafficTotals
+		wantBU, wantBD   int64
+		wantUp, wantDown int64
+	}{
+		{
+			name: "stale previous-period baselines",
+			user: domain.User{LifetimeUpBytes: 30 * gb, LifetimeDownBytes: 70 * gb, LifetimeTotalBytes: 100 * gb,
+				PeriodBaselineBytes: 20 * gb, PeriodBaselineUpBytes: 5 * gb, PeriodBaselineDownBytes: 15 * gb},
+			totals: trafficTotals{deltaUp: 3 * gb, deltaDown: 4 * gb, deltaTotal: 7 * gb, hits: 1},
+			wantBU: 30 * gb, wantBD: 70 * gb, wantUp: 3 * gb, wantDown: 4 * gb,
+		},
+		{
+			name: "upgrade-backfilled row becomes measured",
+			user: domain.User{LifetimeUpBytes: 11 * gb, LifetimeDownBytes: 34 * gb, LifetimeTotalBytes: 45 * gb,
+				PeriodBaselineBytes: 40 * gb, PeriodBaselineUpBytes: 11 * gb, PeriodBaselineDownBytes: 29 * gb},
+			totals: trafficTotals{deltaUp: 1 * gb, deltaDown: 2 * gb, deltaTotal: 3 * gb, hits: 1},
+			wantBU: 11 * gb, wantBD: 34 * gb, wantUp: 1 * gb, wantDown: 2 * gb,
+		},
+		{
+			name: "signed baselines from a manual edit are replaced",
+			user: domain.User{LifetimeUpBytes: 2 * gb, LifetimeDownBytes: 5 * gb, LifetimeTotalBytes: 7 * gb,
+				PeriodBaselineBytes: 4 * gb, PeriodBaselineUpBytes: -3 * gb, PeriodBaselineDownBytes: 9 * gb},
+			totals: trafficTotals{deltaUp: 5, deltaDown: 6, deltaTotal: 11, hits: 1},
+			wantBU: 2 * gb, wantBD: 5 * gb, wantUp: 5, wantDown: 6,
+		},
+		{
+			name: "drifted lifetime total keeps the measured split",
+			user: domain.User{LifetimeUpBytes: 10 * gb, LifetimeDownBytes: 20 * gb, LifetimeTotalBytes: 50 * gb,
+				PeriodBaselineBytes: 1 * gb},
+			totals: trafficTotals{deltaUp: 1 * gb, deltaDown: 2 * gb, deltaTotal: 3 * gb, hits: 1},
+			wantBU: 10 * gb, wantBD: 20 * gb, wantUp: 1 * gb, wantDown: 2 * gb,
+		},
+		{
+			name: "zero-hit rollover",
+			user: domain.User{LifetimeUpBytes: 6 * gb, LifetimeDownBytes: 9 * gb, LifetimeTotalBytes: 15 * gb,
+				PeriodBaselineBytes: 10 * gb, PeriodBaselineUpBytes: 4 * gb, PeriodBaselineDownBytes: 6 * gb},
+			wantBU: 6 * gb, wantBD: 9 * gb, wantUp: 0, wantDown: 0,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			oldStart := time.Now().AddDate(-1, 0, 0) // a year ago → monthly rollover fires
+			stored := tc.user
+			stored.ID, stored.Enabled, stored.TrafficResetPeriod, stored.TrafficPeriodStart = 1, true, domain.ResetMonthly, &oldStart
+			users := &fakeUserRepo{users: map[int64]*domain.User{1: &stored}}
+			svc := New(users, nil, &fakeTrafficRepo{}, nil, nil, nil, &fakeDisabler{})
+			cp := stored // in-memory copy, as the poll holds; only the inline write persists
+			if err := svc.recordAndEnforce(context.Background(), &cp, tc.totals); err != nil {
+				t.Fatal(err)
+			}
+			got := users.users[1]
+			if got.TrafficPeriodStart == nil || got.TrafficPeriodStart.Equal(oldStart) {
+				t.Fatalf("period did not roll: start = %v", got.TrafficPeriodStart)
+			}
+			if got.PeriodBaselineUpBytes != tc.wantBU || got.PeriodBaselineDownBytes != tc.wantBD {
+				t.Errorf("per-direction baselines = (%d, %d), want (%d, %d)",
+					got.PeriodBaselineUpBytes, got.PeriodBaselineDownBytes, tc.wantBU, tc.wantBD)
+			}
+			if up, down := got.PeriodUsedSplit(); up != tc.wantUp || down != tc.wantDown || up+down != got.PeriodUsed() {
+				t.Errorf("PeriodUsedSplit() = (%d, %d), want (%d, %d) summing to PeriodUsed() %d",
+					up, down, tc.wantUp, tc.wantDown, got.PeriodUsed())
+			}
+		})
 	}
 }
 

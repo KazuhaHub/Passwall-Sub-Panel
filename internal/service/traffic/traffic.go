@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/bits"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -1468,6 +1469,13 @@ func (s *Service) recordAndEnforceWith(ctx context.Context, u *domain.User, tota
 		if u.PeriodBaselineBytes < 0 {
 			u.PeriodBaselineBytes = 0
 		}
+		// Per-direction baselines get the same pre-delta freeze, so this
+		// cycle's upload/download also land in the new period. deltaTotal ==
+		// deltaUp + deltaDown on every path that feeds totals, so the split
+		// read through User.PeriodUsedSplit is exact from here on — this is
+		// what retires the upgrade backfill's "all download" attribution.
+		u.PeriodBaselineUpBytes = nonNeg(u.LifetimeUpBytes - totals.deltaUp)
+		u.PeriodBaselineDownBytes = nonNeg(u.LifetimeDownBytes - totals.deltaDown)
 		// Flag this user so the post-loop pass reseeds each owned client's
 		// per-client period baseline in lockstep with the user-level one above.
 		// Done out-of-band (not here) because recordAndEnforceWith only has the
@@ -2602,6 +2610,11 @@ func (s *Service) SetPeriodUsage(ctx context.Context, userID int64, usedBytes in
 	if err != nil {
 		return err
 	}
+	// Measure this period's upload share NOW — before the lifetime bump below
+	// and before PeriodBaselineBytes is overwritten; either would make the
+	// split describe the override instead of the traffic actually observed.
+	measuredUp, _ := u.PeriodUsedSplit()
+	measuredTotal := u.PeriodUsed()
 
 	var latestTotal, latestUp int64
 	if latest, err := s.traffic.LatestForUser(ctx, userID); err == nil && latest != nil {
@@ -2695,9 +2708,39 @@ func (s *Service) SetPeriodUsage(ctx context.Context, userID int64, usedBytes in
 	if u.PeriodBaselineBytes < 0 {
 		u.PeriodBaselineBytes = 0
 	}
+	// Per-direction baselines (the Subscription-Userinfo header's
+	// upload/download). The admin supplies only a total, so split usedBytes by
+	// the period's MEASURED up:down ratio — the best split available, and the
+	// one case where the per-direction figures are an estimate; the total
+	// stays exact either way. Nothing measured this period → up=0, down=used,
+	// the same "all download" attribution the upgrade backfill uses.
+	//
+	// Exact integer math: bits.Mul64/Div64 give floor(used·up/total) without
+	// the int64 overflow of a plain product (multi-GiB × multi-GiB) or the
+	// byte drift of float64, so used == measuredTotal reproduces the measured
+	// split bit-for-bit. measuredUp <= measuredTotal ⇒ q <= usedBytes, so
+	// Div64 cannot overflow (hi < divisor) and the result fits in int64.
+	//
+	// Deliberately NOT clamped: these are signed (see domain.User). Against the
+	// post-bump lifetimes, BU = LU' - newUp and BD = LD' - (used - newUp) go
+	// negative whenever the bump's ratio (splitUpDown, from the latest
+	// snapshot's lifetime ratio) differs from the period's — e.g. a
+	// from-zero lifetime gets a 50/50 bump but nothing measured, so BD < 0.
+	// Clamping BU would bias the split (it caps newUp at LU'); clamping BD
+	// changes nothing visible but breaks BU+BD == PeriodBaselineBytes.
+	// PeriodUsedSplit reads only BU, clamps, and returns exactly
+	// (newUp, used-newUp).
+	var newUp int64
+	if measuredTotal > 0 && usedBytes > 0 {
+		hi, lo := bits.Mul64(uint64(usedBytes), uint64(measuredUp))
+		q, _ := bits.Div64(hi, lo, uint64(measuredTotal))
+		newUp = int64(q)
+	}
+	u.PeriodBaselineUpBytes = u.LifetimeUpBytes - newUp
+	u.PeriodBaselineDownBytes = u.LifetimeDownBytes - (usedBytes - newUp)
 	// Must be UpdateTrafficState, NOT Update: userRepo.Update does
 	// Omit(pollOwnedColumns...) which skips exactly the columns we just set
-	// (lifetime_*, period_baseline_bytes, lifetime_baseline_at,
+	// (lifetime_*, period_baseline_*, lifetime_baseline_at,
 	// traffic_period_start) so the whole override would silently no-op in
 	// production. UpdateTrafficState is the column-scoped writer for these.
 	if err := s.users.UpdateTrafficState(ctx, u); err != nil {

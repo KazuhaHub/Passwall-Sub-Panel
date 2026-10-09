@@ -94,6 +94,28 @@ type User struct {
 	// duplicated in both traffic.Service and mailer.Service. Now lifetime
 	// counters + this baseline are the single source of truth.
 	PeriodBaselineBytes int64
+	// PeriodBaselineUpBytes / PeriodBaselineDownBytes are LifetimeUpBytes /
+	// LifetimeDownBytes as they stood when TrafficPeriodStart last advanced —
+	// the per-direction companions of PeriodBaselineBytes, mirroring
+	// XUIClientEntry's per-client baselines one level up. They exist so the
+	// Subscription-Userinfo header can report this period's upload/download
+	// instead of a bare total. The natural rollover and SetPeriodUsage
+	// maintain them in lockstep with PeriodBaselineBytes, and every write path
+	// persists the three together.
+	//
+	// SIGNED by design: either may be negative. SetPeriodUsage splits the
+	// admin's total by the period's measured ratio, which need not match the
+	// ratio its lifetime bump used; the one-time upgrade backfill attributes
+	// a whole pre-upgrade period to download, which can exceed the lifetime
+	// download counter.
+	// Read them ONLY through PeriodUsedSplit, which clamps and keeps the sum
+	// equal to PeriodUsed(); never subtract them directly elsewhere.
+	// BU+BD == PeriodBaselineBytes only holds while LifetimeTotalBytes ==
+	// LifetimeUpBytes+LifetimeDownBytes, which rows over-counted before
+	// v3.9.0-beta.32 (asymmetric Xray counter reset) break — so never assert
+	// or "repair" that relation globally.
+	PeriodBaselineUpBytes   int64
+	PeriodBaselineDownBytes int64
 	// LifetimeBaselineAt marks when the poll worker last updated the lifetime
 	// counters. It's the cutoff the bootstrap-delta logic uses: ownerships
 	// created AFTER this point are genuinely new traffic (count their first
@@ -182,6 +204,31 @@ func (u *User) PeriodUsed() int64 {
 		return 0
 	}
 	return used
+}
+
+// PeriodUsedSplit returns this period's usage split into upload and
+// download, with up+down == PeriodUsed() EXACTLY — so the
+// Subscription-Userinfo header can never disagree with quota enforcement,
+// which reads PeriodUsed(). Upload is the per-direction difference
+// LifetimeUpBytes - PeriodBaselineUpBytes clamped into [0, PeriodUsed()];
+// download absorbs everything else, including any residual left by a row
+// whose LifetimeTotalBytes drifted from LifetimeUpBytes+LifetimeDownBytes.
+//
+// PeriodBaselineDownBytes is intentionally NOT read here: deriving download
+// from its own baseline would let up+down diverge from the authoritative
+// total whenever the lifetime counters disagree (or a signed baseline is
+// off), and the total — not the split — is what quota enforcement trusts.
+// The down baseline is kept only for symmetry and diagnostics.
+func (u *User) PeriodUsedSplit() (up, down int64) {
+	total := u.PeriodUsed()
+	up = u.LifetimeUpBytes - u.PeriodBaselineUpBytes
+	if up < 0 {
+		up = 0
+	}
+	if up > total {
+		up = total
+	}
+	return up, total - up
 }
 
 func (u *User) IsExpired(t time.Time) bool {

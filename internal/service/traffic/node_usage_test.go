@@ -280,13 +280,12 @@ func TestPollOncePerClientPeriodBaselineRollover(t *testing.T) {
 	}}
 
 	// New cumulative raw counters → per-client deltas: A {50,50}=100, B {100,200}=300.
-	pool := &fakeXUIPool{clients: map[int64]ports.XUIClient{
-		10: &fakeXUIClient{inbounds: []ports.Inbound{{ID: 20, ClientStats: []ports.ClientTraffic{
-			{Email: "u1-n1@x", Up: 150, Down: 250},
-		}}, {ID: 21, ClientStats: []ports.ClientTraffic{
-			{Email: "u1-n2@x", Up: 1100, Down: 2200},
-		}}}},
-	}}
+	panel := &fakeXUIClient{inbounds: []ports.Inbound{{ID: 20, ClientStats: []ports.ClientTraffic{
+		{Email: "u1-n1@x", Up: 150, Down: 250},
+	}}, {ID: 21, ClientStats: []ports.ClientTraffic{
+		{Email: "u1-n2@x", Up: 1100, Down: 2200},
+	}}}}
+	pool := &fakeXUIPool{clients: map[int64]ports.XUIClient{10: panel}}
 
 	repo := &fakeTrafficRepo{}
 	svc := New(users, ownership, repo, nil, nil, pool, &fakeDisabler{})
@@ -320,6 +319,36 @@ func TestPollOncePerClientPeriodBaselineRollover(t *testing.T) {
 	}
 	if perEmail["u1-n2@x"] != 300 {
 		t.Errorf("client B period = %d, want 300", perEmail["u1-n2@x"])
+	}
+
+	// The per-direction user baselines freeze at the same pre-delta instant,
+	// so the Subscription-Userinfo split is this cycle's measured up/down
+	// (A {50,50} + B {100,200}), not the lifetime split or "all download".
+	if u.PeriodBaselineUpBytes != 1100 || u.PeriodBaselineDownBytes != 2200 {
+		t.Errorf("per-direction baselines = (%d, %d), want the pre-delta lifetimes (1100, 2200)",
+			u.PeriodBaselineUpBytes, u.PeriodBaselineDownBytes)
+	}
+	if u.PeriodBaselineUpBytes+u.PeriodBaselineDownBytes != u.PeriodBaselineBytes {
+		t.Errorf("BU+BD = %d, want PeriodBaselineBytes %d (lifetime up+down == total here)",
+			u.PeriodBaselineUpBytes+u.PeriodBaselineDownBytes, u.PeriodBaselineBytes)
+	}
+	if up, down := u.PeriodUsedSplit(); up != 150 || down != 250 {
+		t.Errorf("PeriodUsedSplit after rollover = (%d, %d), want (150, 250)", up, down)
+	}
+
+	// Further traffic in the new period accrues per direction on top:
+	// A {+30, +10}, B {+0, +100} → split (180, 360), no second rollover.
+	panel.inbounds[0].ClientStats[0].Up, panel.inbounds[0].ClientStats[0].Down = 180, 260
+	panel.inbounds[1].ClientStats[0].Down = 2300
+	if err := svc.PollOnce(context.Background()); err != nil {
+		t.Fatalf("second PollOnce: %v", err)
+	}
+	u, _ = users.GetByID(context.Background(), 1)
+	if u.PeriodBaselineUpBytes != 1100 || u.PeriodBaselineDownBytes != 2200 {
+		t.Errorf("a non-rollover cycle moved the per-direction baselines to (%d, %d)", u.PeriodBaselineUpBytes, u.PeriodBaselineDownBytes)
+	}
+	if up, down := u.PeriodUsedSplit(); up != 180 || down != 360 || up+down != u.PeriodUsed() {
+		t.Errorf("PeriodUsedSplit after further traffic = (%d, %d), want (180, 360) summing to PeriodUsed() %d", up, down, u.PeriodUsed())
 	}
 }
 
