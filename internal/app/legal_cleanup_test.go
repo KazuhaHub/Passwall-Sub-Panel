@@ -3,6 +3,8 @@ package app
 import (
 	"context"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -56,6 +58,18 @@ func TestBuildPrunesLegalConsentOrphans(t *testing.T) {
 	})
 	if a.legalConsents != a.repos.Legal {
 		t.Fatal("Build did not wire the legal consent store into cleanup")
+	}
+	for _, tc := range []struct{ method, path string }{
+		{http.MethodGet, "/api/admin/legal/affected-users"},
+		{http.MethodGet, "/api/admin/legal/terms"},
+		{http.MethodPost, "/api/admin/legal/terms"},
+		{http.MethodPost, "/api/user/me/legal/accept"},
+	} {
+		w := httptest.NewRecorder()
+		a.server.Handler.ServeHTTP(w, httptest.NewRequest(tc.method, tc.path, nil))
+		if w.Code != http.StatusUnauthorized {
+			t.Fatalf("legal route must be mounted behind authentication: %s %s => %d", tc.method, tc.path, w.Code)
+		}
 	}
 	if err := a.repos.Settings.Save(ctx, ports.UISettings{LegalEnabled: true}); err != nil {
 		t.Fatal(err)

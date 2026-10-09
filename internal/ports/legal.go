@@ -13,6 +13,7 @@ type LegalRepo interface {
 	Latest(context.Context, string, string) (domain.LegalDocument, error)
 	Public(context.Context, string, string) (domain.LegalPublicDocument, error)
 	History(context.Context, string, string, int64, int) ([]domain.LegalDocument, error)
+	HistoryByKind(context.Context, string, int64, int) ([]domain.LegalDocument, error)
 	Accept(context.Context, int64, int64) error
 	Status(context.Context, int64) (domain.LegalConsentStatus, error)
 	AffectedUsers(context.Context) (int64, error)

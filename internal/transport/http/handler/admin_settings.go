@@ -824,6 +824,15 @@ func (h *AdminSettingsHandler) Put(c *gin.Context) {
 		RefreshTTL: time.Duration(s.JWTRefreshTTLMinutes) * time.Minute,
 		Issuer:     s.JWTIssuer,
 	})
+	// Publication does not use this handler's settings mutex. It may have
+	// advanced consent since prev was loaded, even though Save correctly kept
+	// its durable row. Return stored metadata rather than that old snapshot.
+	current, err := h.repo.Load(c.Request.Context(), s)
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+	s.LegalConsentVersion = current.LegalConsentVersion
 	c.JSON(http.StatusOK, settingsToDTO(s))
 }
 

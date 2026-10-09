@@ -153,3 +153,25 @@ func (r *legalRepo) History(ctx context.Context, kind, locale string, before int
 func (r legalDocumentRow) document() domain.LegalDocument {
 	return domain.LegalDocument{ID: r.ID, Kind: r.Kind, Locale: r.Locale, Version: r.Version, Content: r.Content, ConsentBump: r.ConsentBump, PublishedBy: r.PublishedBy, PublishedAt: r.PublishedAt}
 }
+
+func (r *legalRepo) HistoryByKind(ctx context.Context, kind string, before int64, limit int) ([]domain.LegalDocument, error) {
+	if err := domain.ValidateLegalIdentity(kind, "en-US"); err != nil {
+		return nil, err
+	}
+	if before < 0 || limit < 1 || limit > 50 {
+		return nil, fmt.Errorf("%w: legal history bounds", domain.ErrValidation)
+	}
+	query := r.db.WithContext(ctx).Where("kind = ?", kind)
+	if before > 0 {
+		query = query.Where("id < ?", before)
+	}
+	var rows []legalDocumentRow
+	if err := query.Order("id DESC").Limit(limit).Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	out := make([]domain.LegalDocument, len(rows))
+	for i, row := range rows {
+		out[i] = row.document()
+	}
+	return out, nil
+}

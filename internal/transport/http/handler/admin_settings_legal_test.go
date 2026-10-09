@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"testing"
@@ -8,6 +9,42 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 )
+
+type legalPublicationDuringSettingsSave struct {
+	ports.SettingsRepo
+	legal ports.LegalRepo
+}
+
+func (r legalPublicationDuringSettingsSave) Save(ctx context.Context, settings ports.UISettings) error {
+	if err := r.SettingsRepo.Save(ctx, settings); err != nil {
+		return err
+	}
+	_, err := r.legal.Publish(ctx, domain.LegalDraft{Kind: "privacy", Locale: "zh-CN", Content: "intervening major publication", ConsentBump: true, PublishedBy: 1})
+	return err
+}
+
+func TestSettingsPut_ResponseUsesInterveningPublicationVersion(t *testing.T) {
+	repos := legalHTTPRepos(t)
+	ctx := t.Context()
+	if _, err := repos.Legal.Publish(ctx, domain.LegalDraft{Kind: "terms", Locale: "en-US", Content: "first", PublishedBy: 1}); err != nil {
+		t.Fatal(err)
+	}
+	wrapper := legalPublicationDuringSettingsSave{SettingsRepo: repos.Settings, legal: repos.Legal}
+	w := requestNodeTaskLifecycleSettings(t, nodeTaskLifecycleSettingsRouter(wrapper), http.MethodPut, `{"login_mode":"local_only","legal_enabled":true,"legal_consent_version":1}`)
+	var response struct {
+		Version int64 `json:"legal_consent_version"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if w.Code != http.StatusOK || response.Version != 2 {
+		t.Fatalf("response used pre-publication metadata: %d %+v", w.Code, response)
+	}
+	stored, err := repos.Settings.Load(ctx, ports.UISettings{})
+	if err != nil || stored.LegalConsentVersion != response.Version {
+		t.Fatalf("response/storage mismatch %+v: %v", stored, err)
+	}
+}
 
 func TestSettingsPut_PreservesLegalConsentVersion(t *testing.T) {
 	stored := storedEverywhere()

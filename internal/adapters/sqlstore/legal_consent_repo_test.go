@@ -323,6 +323,12 @@ func TestRegisteredUser_ConcurrentMajorPublication(t *testing.T) {
 	if p.ConsentVersion != 2 {
 		t.Fatalf("major version %d", p.ConsentVersion)
 	}
+	// Compare persisted timestamps at the database's own precision. MySQL and
+	// PostgreSQL may round the original in-memory nanoseconds when storing them.
+	published, err := repos.Legal.Latest(ctx, "privacy", "zh-CN")
+	if err != nil {
+		t.Fatal(err)
+	}
 	success := int64(0)
 	for err := range results {
 		if err == nil {
@@ -343,8 +349,8 @@ func TestRegisteredUser_ConcurrentMajorPublication(t *testing.T) {
 		t.Fatalf("consents %d successes %d", len(records), success)
 	}
 	for _, r := range records {
-		if r.ConsentVersion != 1 || r.AcceptedAt.After(p.Document.PublishedAt) {
-			t.Fatalf("obsolete consent committed after major publication: %+v vs %v", r, p.Document.PublishedAt)
+		if r.ConsentVersion != 1 || r.AcceptedAt.After(published.PublishedAt) {
+			t.Fatalf("obsolete consent committed after major publication: %+v vs %v", r, published.PublishedAt)
 		}
 	}
 }
