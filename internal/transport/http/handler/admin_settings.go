@@ -46,6 +46,8 @@ func NewAdminSettingsHandler(repo ports.SettingsRepo, jwtParams *jwtutil.ParamsC
 }
 
 type settingsDTO struct {
+	LegalEnabled               bool                     `json:"legal_enabled"`
+	LegalConsentVersion        int64                    `json:"legal_consent_version"`
 	LoginMode                  string                   `json:"login_mode"`
 	SiteTitle                  string                   `json:"site_title"`
 	AppTitle                   string                   `json:"app_title"`
@@ -268,9 +270,12 @@ type settingsDTO struct {
 // Explicit zero remains a nonnil pointer and fails the shared policy validator.
 type settingsRequest struct {
 	settingsDTO
-	NodeTaskOfflineReconcileDays *int `json:"node_task_offline_reconcile_days"`
-	NodeTaskBackupRestoreDays    *int `json:"node_task_backup_restore_days"`
-	NodeTaskResultRetentionDays  *int `json:"node_task_result_retention_days"`
+	LegalEnabled *bool `json:"legal_enabled"`
+	// This is publication-owned metadata, never a settings request value.
+	LegalConsentVersion          json.RawMessage `json:"legal_consent_version"`
+	NodeTaskOfflineReconcileDays *int            `json:"node_task_offline_reconcile_days"`
+	NodeTaskBackupRestoreDays    *int            `json:"node_task_backup_restore_days"`
+	NodeTaskResultRetentionDays  *int            `json:"node_task_result_retention_days"`
 	// The response-only runtime maps, shadowed as raw JSON so the embedded
 	// DTO's typed maps are never decoded. The SPA posts back the whole
 	// object it read, maps included; a tab loaded before a change to their
@@ -341,8 +346,10 @@ func settingsToDTO(s ports.UISettings) settingsDTO {
 	// just saved, so the page reads the new values in effect off the save.
 	effective, defaults := ports.RuntimeEffective(s)
 	return settingsDTO{
-		RuntimeEffective: effective,
-		RuntimeDefaults:  defaults,
+		LegalEnabled:        s.LegalEnabled,
+		LegalConsentVersion: s.LegalConsentVersion,
+		RuntimeEffective:    effective,
+		RuntimeDefaults:     defaults,
 
 		LoginMode:                   s.LoginMode,
 		SiteTitle:                   s.SiteTitle,
@@ -528,6 +535,8 @@ func (h *AdminSettingsHandler) Put(c *gin.Context) {
 		return
 	}
 	s := ports.UISettings{
+		LegalEnabled:                  prev.LegalEnabled,
+		LegalConsentVersion:           prev.LegalConsentVersion,
 		LoginMode:                     req.LoginMode,
 		SiteTitle:                     req.SiteTitle,
 		AppTitle:                      req.AppTitle,
@@ -630,6 +639,9 @@ func (h *AdminSettingsHandler) Put(c *gin.Context) {
 	// more — this save does not store it, so a list that does not parse must
 	// not make the rest of the page unsavable.
 	s.SetRiskCenterPolicy(prev.RiskCenterPolicy())
+	if req.LegalEnabled != nil {
+		s.LegalEnabled = *req.LegalEnabled
+	}
 	var pathErr error
 	if s.PanelPath, pathErr = panelpath.Normalize(s.PanelPath); pathErr != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": pathErr.Error()})
