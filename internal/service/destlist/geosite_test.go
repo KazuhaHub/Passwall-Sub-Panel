@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 const geoFixture = `lists:
@@ -183,5 +184,51 @@ func TestGeositeEmptyFilterReturnsReportAndNoUsableContent(t *testing.T) {
 	p, err = c.Select("finance", []string{"ads", "!cn"})
 	if err == nil || err.Error() != "dest_list_empty_after_filter" || p.EntryCount != 0 {
 		t.Fatalf("empty attribute intersection ready: %+v / %v", p, err)
+	}
+}
+
+func TestGeositeAllBroadClassesAndBoundedUTF8Reports(t *testing.T) {
+	rules := []string{
+		"domain:com:@other",
+		"domain:hsbc:@cn,@ads",
+		"full:co.uk:@cn:@ads",
+		"keyword:abc:@cn,@ads",
+		"regexp:(?:.*|" + strings.Repeat("界", 200) + "):@cn,@ads",
+		"0.0.0.0/7:@cn,@ads",
+		"::/15:@cn,@ads",
+	}
+	for range MaxSamples {
+		rules = append(rules, "domain:com:@cn,@ads")
+	}
+	rules = append(rules, "domain:Example.COM.:@cn,@ads", "domain:example.com:@cn:@ads")
+	var body strings.Builder
+	fmt.Fprintf(&body, "lists:\n  - name: mixed\n    length: %d\n    rules:\n", len(rules))
+	for _, rule := range rules {
+		fmt.Fprintf(&body, "      - %q\n", rule)
+	}
+	catalog, err := ParseGeosite([]byte(body.String()), geoChecksum(body.String()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := catalog.Select("mixed", []string{"cn", "ads"})
+	if err != nil || string(parsed.Entries) != "domain:example.com\n" {
+		t.Fatalf("filtering retained broad input or lost valid content: %+v / %v", parsed, err)
+	}
+	if parsed.Report.IgnoredBroad != 6+MaxSamples || parsed.Report.Ignored != 7+MaxSamples || parsed.Report.Accepted != 1 || parsed.Report.Rewritten != 1 || len(parsed.Report.Samples) != MaxSamples {
+		t.Fatalf("bounded samples changed complete accounting: %+v", parsed.Report)
+	}
+	for i, sample := range parsed.Report.Samples {
+		if sample.Line != i+2 || sample.Reason != "broad_entry" || len(sample.Text) > 512 || !utf8.ValidString(sample.Text) {
+			t.Fatalf("sample lost source order, broad reason or UTF-8 bounds: %+v", sample)
+		}
+	}
+	if len(parsed.Report.Samples[3].Text) <= 500 {
+		t.Fatal("long Unicode source did not exercise byte-boundary truncation")
+	}
+	for _, entry := range rules[1:7] {
+		base, _, _ := strings.Cut(entry, ":@")
+		if partial, err := ParseRemote([]byte("domain:example.com\n" + base)); err == nil || len(partial.Entries) != 0 {
+			t.Fatalf("remote input returned usable partial content for %q: %v", base, err)
+		}
 	}
 }

@@ -832,7 +832,11 @@ references, and keeps list content and policies unchanged without falling
 through to live transport. Parser cases cover malformed and duplicate targets.
 The final relevant frontend suite passed 406 tests in 29 files; TypeScript,
 changed-source lint, production build, fixture exclusion and four production
-browser smoke checks passed. This follow-up needs its own remote CI.
+browser smoke checks passed. Head `122683dfaec091be57ed6e257a8afcf3b2794652`
+passed its own [complete Test CI](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37895731882)
+and [Node systemd acceptance](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37895731853).
+Third-party live-panel checks were skipped; released-node systemd does not prove
+candidate Node enforcement.
 English, automatic theme, normal fixtures and the default 1280 × 720 viewport
 were restored with no open dialogs. The isolated backend was restarted with
 its existing executable, config and database after the temporary processes
