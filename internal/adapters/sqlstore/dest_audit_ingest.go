@@ -21,6 +21,7 @@ import (
 type DestAuditRepo struct {
 	db    *gorm.DB
 	gates *keyedmutex.Map[int64]
+	now   func() time.Time
 }
 
 const auditChunkRows = 1000
@@ -204,6 +205,9 @@ func auditStorageError(err error) error {
 	}
 	if errors.Is(err, domain.ErrValidation) {
 		return domain.ErrValidation
+	}
+	if errors.Is(err, domain.ErrDestAuditLossExpired) {
+		return domain.ErrDestAuditLossExpired
 	}
 	return errAuditStorage
 }

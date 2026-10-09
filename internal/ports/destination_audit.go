@@ -10,3 +10,7 @@ type DestAuditRepo interface {
 	BeginDestinationAudit(context.Context, domain.DestAuditBatch) (domain.DestAuditBegin, error)
 	WriteDestinationAuditChunk(context.Context, domain.DestAuditChunk) (string, error)
 }
+
+type DestAuditLossRepo interface {
+	FlushDestinationAuditLoss(context.Context, domain.DestAuditLossBatch) error
+}

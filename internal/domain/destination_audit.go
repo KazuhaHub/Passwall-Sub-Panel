@@ -1,6 +1,25 @@
 package domain
 
-import "time"
+import (
+	"errors"
+	"time"
+)
+
+var ErrDestAuditLossExpired = errors.New("destination audit loss retry expired")
+
+// DestAuditLoss contains receiver-estimated rows, never node events or account
+// and destination values. ReceivedAt and BatchID stay fixed across retries.
+type DestAuditLoss struct {
+	HourMS, PanelID int64
+	Kind, Reason    string
+	Rows            int64
+}
+
+type DestAuditLossBatch struct {
+	BatchID    string
+	ReceivedAt time.Time
+	Losses     []DestAuditLoss
+}
 
 // DestHit is one logical destination key after rule-fragment IDs have been
 // mapped to their stable source. Trial keys use UserID and Port zero.
