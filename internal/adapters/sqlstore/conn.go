@@ -201,8 +201,8 @@ func NewRepos(db *gorm.DB) ports.Repos {
 		DestAgentPolicy:         NewDestAgentPolicyRepo(db),
 		DestAudit:               destAudit,
 		DestinationEligibility:  NewDestinationEligibilityRepo(db),
-		NativeAgentProvisioning: &nativeAgentProvisioningRepo{db: db},
-		ServerMigration:         &serverMigrationRepo{db: db},
+		NativeAgentProvisioning: &nativeAgentProvisioningRepo{db: db, audit: destAudit},
+		ServerMigration:         &serverMigrationRepo{db: db, audit: destAudit},
 		NodeAgentIssue:          &nodeAgentIssueRepo{db: db},
 		NodeAgentTask:           newNodeAgentTaskRepo(db, defaultNodeAgentTaskQuota()),
 		NativeDesired:           &nativeDesiredRepo{db: db},
@@ -222,7 +222,7 @@ func NewRepos(db *gorm.DB) ports.Repos {
 		// config/rulesets/*.yaml, not the DB). A previous MySQL repo
 		// existed but was never actually injected, so it was dead code
 		// and got removed during the v3 schema cleanup.
-		XUIPanel: &xuiPanelRepo{db: db, auditGates: destAudit.gates},
+		XUIPanel: &xuiPanelRepo{db: db, auditGates: destAudit.gates, audit: destAudit},
 		// Settings is wrapped in the in-process cache decorator so the
 		// hot paths (render, traffic poll, reconcile, paneltz) don't
 		// fan into the DB for the same row dozens of times per request

@@ -21,6 +21,15 @@ type DestAuditLossBatch struct {
 	Losses     []DestAuditLoss
 }
 
+// DestAuditControl is the narrow current collection cache value. Unavailable
+// means deleted, non-native or unreadable; callers must fail closed.
+type DestAuditControl struct {
+	PanelID   int64
+	Collect   AuditCollect
+	Revision  uint64
+	Available bool
+}
+
 // DestHit is one logical destination key after rule-fragment IDs have been
 // mapped to their stable source. Trial keys use UserID and Port zero.
 type DestHit struct {

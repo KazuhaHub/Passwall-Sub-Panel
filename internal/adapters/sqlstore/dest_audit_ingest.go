@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	protocol "github.com/KazuhaHub/passwall-protocol/protocol"
@@ -19,9 +20,11 @@ import (
 )
 
 type DestAuditRepo struct {
-	db    *gorm.DB
-	gates *keyedmutex.Map[int64]
-	now   func() time.Time
+	db         *gorm.DB
+	gates      *keyedmutex.Map[int64]
+	now        func() time.Time
+	observerMu sync.Mutex
+	observer   func([]domain.DestAuditControl)
 }
 
 const auditChunkRows = 1000

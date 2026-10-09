@@ -14,3 +14,15 @@ type DestAuditRepo interface {
 type DestAuditLossRepo interface {
 	FlushDestinationAuditLoss(context.Context, domain.DestAuditLossBatch) error
 }
+
+type DestAuditControlRepo interface {
+	// Seed the current native controls and register subsequent committed
+	// changes atomically. The observer must only update bounded memory.
+	WatchDestinationAuditControls(context.Context, func([]domain.DestAuditControl)) error
+}
+
+type DestAuditStore interface {
+	DestAuditRepo
+	DestAuditLossRepo
+	DestAuditControlRepo
+}

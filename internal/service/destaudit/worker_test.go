@@ -371,3 +371,18 @@ func TestWorkerWakesForNewBatchAndStopsWhenQueueDrained(t *testing.T) {
 	}
 	requireEmptyWorker(t, w)
 }
+
+func TestWorkerCanceledBeforeMappingStillReportsLoss(t *testing.T) {
+	s := &workerStore{}
+	w, events, _ := workerFixture(t, s)
+	offerWorker(t, w, workerBody("block", 1, 3))
+	if w.q.next() == nil {
+		t.Fatal("missing reserved active batch")
+	}
+	w.q.discardPanel(9)
+	drainWorker(t, w)
+	if len(s.writes) != 0 || eventRows(*events, "stale_collect_revision") != 3 {
+		t.Fatal("canceled unstarted batch lost accounting")
+	}
+	requireEmptyWorker(t, w)
+}
