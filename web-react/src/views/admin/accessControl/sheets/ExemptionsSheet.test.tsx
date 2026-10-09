@@ -2,7 +2,7 @@
 import { ThemeProvider } from '@mui/material'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { createMemoryRouter } from 'react-router'
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import AppRouter from '@/router/AppRouter'
 import { createAppTheme } from '@/theme'
@@ -27,10 +27,21 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.restoreAllMocks() })
 function mount() {
   const onClose = vi.fn(), onOpenUser = vi.fn(), client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  const router = createMemoryRouter([{ path: '/admin/access-control', element: <ExemptionsSheet onClose={onClose} onOpenUser={onOpenUser} etaMs={120000} /> }], { initialEntries: ['/admin/access-control'] })
+  const router = createMemoryRouter([{ path: '/admin/access-control', element: <ExemptionsSheet onClose={onClose} onOpenUser={onOpenUser} etaMs={120000} /> }, { path: '/away', element: <p>Destination</p> }], { initialEntries: ['/admin/access-control'] })
   render(<ThemeProvider theme={createAppTheme({ mode: 'light', sourceColor: '#6750a4', language: 'en-US' })}><QueryClientProvider client={client}><AppRouter router={router} /></QueryClientProvider></ThemeProvider>)
-  return { onClose, onOpenUser }
+  return { onClose, onOpenUser, router }
 }
+it.each(['/admin/access-control?user=14', '/away'])('retains cancellation ownership and resumes queued navigation to %s after settlement', async target => {
+  let finish!: (value: unknown) => void
+  api.delete.mockImplementation(() => new Promise(resolve => { finish = resolve }))
+  const { router } = mount()
+  fireEvent.click(await screen.findByRole('button', { name: `${P}menu alice@test` })); fireEvent.click(screen.getByRole('menuitem', { name: `${P}cancel` }))
+  await waitFor(() => expect(api.delete).toHaveBeenCalledOnce())
+  await act(async () => { void router.navigate(target) })
+  expect(router.state.location.pathname + router.state.location.search).toBe('/admin/access-control')
+  finish({ data: {} })
+  await waitFor(() => expect(router.state.location.pathname + router.state.location.search).toBe(target))
+})
 it('places expired exemptions last and shows expiry states without negative countdowns', async () => {
   api.get.mockResolvedValue({ data: { items: [{ ...row, user_id: 1, upn: 'expired@test', expires_at: at - 1, expired: true }, row, { ...row, user_id: 2, upn: 'permanent@test', expires_at: null }] } })
   mount(); await screen.findByText('permanent@test')

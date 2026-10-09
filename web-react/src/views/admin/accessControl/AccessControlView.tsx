@@ -103,7 +103,7 @@ function AccessControlPage({ scope }: { scope: QueryScope }) {
     finally { admission.current = false; setBusy(false) }
   }
   return <Box sx={{ p: { xs: 2, sm: 3 }, minWidth: 0 }}>
-    {busy && <PendingActionGuard />}
+    <PendingActionGuard hold={busy} />
     <AccessPageHeader userId={user.id} paused={status.data?.paused} busy={busy} onTest={() => openTest()} onOpenUser={openUser} onSettings={() => openSettings()} onPause={perform} />
     {unavailable ? <Alert severity="info">{t(`${P}unwired`)}</Alert> : <>
       <StatusOverview data={status.data} verdict={verdict} failed={!!status.error} refreshing={status.isFetching} readAt={status.dataUpdatedAt} busy={busy} onRetry={() => status.refetch()} onOpenNodes={openNodes} onOpenLists={openLists} onPublish={() => perform()} onPause={perform} />

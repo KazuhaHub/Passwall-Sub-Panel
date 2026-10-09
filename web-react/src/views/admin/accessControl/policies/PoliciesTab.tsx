@@ -82,7 +82,7 @@ export default function PoliciesTab({ data, status, seconds, onCreateList, onExe
   const fromTemplate = (template: PolicyTemplate) => { const name = t(`${P}template_${template.key}`); setEditor({ initial: templatePolicy(template, name, t('admin:access_control.templates.list_name', { name })), templateName: name }) }
   const added = new Set([...data.allow, ...data.block, ...data.observe].map(row => row.template_key))
   return <Stack spacing={2.5}>
-    {busy !== null && <PendingActionGuard />}
+    <PendingActionGuard hold={busy !== null} />
     <QuotaMeters compact budget={data.budget} />
     <Stack direction="row" sx={{ alignItems: 'center', justifyContent: 'space-between', gap: 1 }}><Typography variant="body2" color="text.secondary">{any ? t(`${P}order_hint`) : ''}</Typography><TemplateMenu {...catalog} added={added} onOpen={setTemplateMenuOpen} onCreate={fromTemplate} onBlank={() => create('block')} onFinance={() => setFinance(true)} /></Stack>
     {!any && <TemplateGrid {...catalog} budget={data.budget} added={added} onCreate={fromTemplate} onBlank={() => create('block')} onCreateList={onCreateList} />}

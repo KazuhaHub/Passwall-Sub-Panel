@@ -36,7 +36,7 @@ export default function ExemptionsSheet({ onClose, onOpenUser, etaMs }: { onClos
   }
   const close = () => { if (!admission.current && !editor) onClose() }
   return <Drawer anchor="right" open onClose={close} slotProps={{ paper: { role: 'dialog', 'aria-labelledby': 'exemptions-sheet-title', sx: { width: { xs: '100vw', sm: 560 }, maxWidth: '100vw', bgcolor: theme.palette.md.surfaceContainerLow, borderTopLeftRadius: { xs: 0, sm: 16 }, display: 'flex', flexDirection: 'column' } } }}>
-    {busy && <PendingActionGuard />}
+    <PendingActionGuard hold={busy} />
     <Box sx={{ p: 2.5, display: 'flex', alignItems: 'center' }}><Typography id="exemptions-sheet-title" component="h2" variant="h6" sx={{ flex: 1 }}>{t(`${P}title`)}</Typography><IconButton disabled={busy || !!editor} aria-label={t('common:actions.close')} onClick={close} sx={{ minWidth: 44, minHeight: 44 }}><CloseIcon /></IconButton></Box>
     <Stack spacing={2} sx={{ px: 2.5, pb: 2.5, overflowY: 'auto', flex: 1 }}>
       <Typography variant="body2">{t(`${P}hint`)}</Typography><Button disabled={busy} sx={{ alignSelf: 'flex-end', minHeight: 44 }} onClick={() => setEditor({})}>{t(`${P}add`)}</Button>

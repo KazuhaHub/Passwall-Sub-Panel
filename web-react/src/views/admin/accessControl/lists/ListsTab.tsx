@@ -77,7 +77,7 @@ export default function ListsTab({ active, selectedId, onCloseSheet, onOpenList,
   const name = (list: DestinationListSummary) => <><Button sx={{ p: 0, minWidth: 44, minHeight: 44, justifyContent: 'flex-start', textAlign: 'left', overflowWrap: 'anywhere' }} onClick={() => onOpenList(list.id)}>{list.name}</Button><Typography variant="caption" color="text.secondary" sx={{ display: 'block', overflowWrap: 'anywhere' }}>{t(`${P}${list.kind}`)}{list.kind !== 'custom' && ` · ${listSourceLabel(list)}`}</Typography></>
   const actions = (list: DestinationListSummary) => <IconButton disabled={busy} aria-label={t(`${P}menu`, { name: list.name })} onClick={e => { actionTrigger.current = e.currentTarget; setMenu({ anchor: e.currentTarget, list }) }} sx={{ minWidth: 44, minHeight: 44 }}><MoreVertIcon /></IconButton>
   return <>
-    {busy && <PendingActionGuard />}
+    <PendingActionGuard hold={busy} />
     <Box hidden={!active} sx={{ '& .MuiTableSortLabel-root': { minWidth: 44, minHeight: 44 } }}>
       <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'center', gap: 1 }}><Typography component="h2" variant="h6">{t(`${P}title`)}</Typography><Button disabled={busy} onClick={() => setEditor({})} sx={{ minHeight: 44 }}>{t(`${P}create`)}</Button></Stack>
       {catalogMissing && <GeositeDownloadNotice pending={categoryRefresh.isPending || catalogState.refreshing} disabled={busy} failed={!catalogState.refreshing && (!!categoryRefresh.error || catalogState.failed)} onDownload={downloadCatalog} />}

@@ -1082,3 +1082,43 @@ The target/locale head `8e874bd6079e0c43a175070428f59a7e6d872a1e` passed its own
 and [released-node systemd acceptance](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37904667711).
 Third-party live-panel adapters were skipped; these results do not validate a
 subsequent pending-protection commit.
+
+### Shared pending-navigation ownership
+
+The shared guard now includes pathname and search boundaries by default. All
+six mutation owners keep its outer component mounted and pass their busy state:
+page publication/pause, policy actions, list actions, exemption-sheet
+cancellation, test-sheet publication and account cancellation. Its inner router
+blocker exists only during ownership and remains until queued navigation has
+settled. Idle actions register no blocker, so a dirty editor retains its own
+discard confirmation. A destination simulation remains cancelable and aborts
+on unmount; publication does not repeat the simulation.
+
+Seven caller regressions failed against the old implementation: query/page
+departure for exemption cancellation and test-sheet publication, plus pause,
+policy toggle and list deletion. An additional ownership regression showed
+that always registering idle blockers could bypass a sibling dirty editor.
+The corrected pause setup waits for the status read before using its enabled
+menu. The final relevant suite passed 468 tests in 34 files, including removal
+of settled blockers before later editing. TypeScript, changed-source lint,
+production build, fixture exclusion and four production smoke checks passed.
+
+| Synthetic exemption-sheet state | Native evidence |
+| --- | --- |
+| Browser Back requested during cancellation; sheet retained and actions disabled | [English phone](s20-exemption-sheet-back-pending-en-light-375.jpg) |
+| Failure settled; queued Back completed and focus returned to Manage exemptions | [English phone](s20-exemption-sheet-back-settled-en-light-375.jpg) |
+| Reopened sheet; both original exemptions and enabled actions retained | [English phone](s20-exemption-sheet-back-preserved-en-light-375.jpg) |
+
+This uses the existing no-deletion `account-cancel-pending` DEV adapter. No real
+backend exemption changed. The browser may temporarily show the POP target
+before the router restores the held location; the pending evidence establishes
+retained UI, not an unchanged address bar. Normal fixtures, English, automatic
+theme and default viewport were restored. These captures do not establish
+native acceptance for every mutation owner or the complete per-view matrix.
+
+The preceding account-pending head
+`d10ee7691c3ca9171ddb0d917c0b4e17028d1b8e` passed its own
+[complete Test CI](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37905575404)
+and [released-node systemd acceptance](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37905575422).
+Third-party live-panel adapters were skipped. A later commit needs its own CI;
+candidate Node enforcement and remaining C2/C5/C6 gates stay open.

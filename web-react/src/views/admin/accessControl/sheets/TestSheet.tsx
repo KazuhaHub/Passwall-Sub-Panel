@@ -52,7 +52,7 @@ export default function TestSheet({ onClose, onOpenPolicy, status, prefill }: { 
   const unpublished = result?.unpublished || !!status && status.generation !== status.published_generation
   const visibleNodes = result?.nodes.filter(node => panelId === null || node.panel_id === panelId) ?? []
   return <Drawer anchor="right" open onClose={close} slotProps={{ paper: { role: 'dialog', 'aria-labelledby': 'test-sheet-title', sx: { width: { xs: '100vw', sm: 560 }, maxWidth: '100vw', bgcolor: theme.palette.md.surfaceContainerLow, borderTopLeftRadius: { xs: 0, sm: 16 } } } }}>
-    {publication.isPending && <PendingActionGuard />}
+    <PendingActionGuard hold={publication.isPending} />
     <Box sx={{ p: 2.5, display: 'flex', alignItems: 'center' }}><Typography id="test-sheet-title" component="h2" variant="h6" sx={{ flex: 1, minWidth: 0, overflowWrap: 'anywhere' }}>{t(`${P}title`)}</Typography><IconButton disabled={publication.isPending} aria-label={t('common:actions.close')} onClick={close} sx={{ minWidth: 44, minHeight: 44 }}><CloseIcon /></IconButton></Box>
     <Stack spacing={2.5} sx={{ px: 2.5, pt: 1, pb: 2.5, overflowY: 'auto' }}>
       <Box component="form" aria-label={t(`${P}title`)} onSubmit={event => { event.preventDefault(); void run(input) }} noValidate>

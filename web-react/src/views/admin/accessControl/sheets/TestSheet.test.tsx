@@ -2,7 +2,7 @@
 import { ThemeProvider } from '@mui/material'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { createMemoryRouter } from 'react-router'
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import AppRouter from '@/router/AppRouter'
 import { createAppTheme } from '@/theme'
@@ -21,11 +21,23 @@ beforeEach(() => { vi.clearAllMocks(); useAuthStore.setState({ userId: 42, role:
 afterEach(() => cleanup())
 function mount(prefill?: { target?: string; port?: number; network?: string; userId?: number }) {
   const onClose = vi.fn(), onOpenPolicy = vi.fn(), client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  const router = createMemoryRouter([{ path: '/admin/access-control', element: <TestSheet onClose={onClose} onOpenPolicy={onOpenPolicy} status={destinationStatus()} prefill={prefill} /> }], { initialEntries: ['/admin/access-control?sheet=test'] })
+  const router = createMemoryRouter([{ path: '/admin/access-control', element: <TestSheet onClose={onClose} onOpenPolicy={onOpenPolicy} status={destinationStatus()} prefill={prefill} /> }, { path: '/away', element: <p>Destination</p> }], { initialEntries: ['/admin/access-control?sheet=test'] })
   const rendered = render(<ThemeProvider theme={createAppTheme({ mode: 'light', sourceColor: '#6750a4', language: 'en-US' })}><QueryClientProvider client={client}><AppRouter router={router} /></QueryClientProvider></ThemeProvider>)
   return { onClose, onOpenPolicy, client, router, ...rendered }
 }
 function submit(target = 'example.test') { fireEvent.change(screen.getByRole('textbox', { name: `${P}target` }), { target: { value: target } }); fireEvent.click(screen.getByRole('button', { name: `${P}submit` })) }
+it.each(['/admin/access-control?sheet=exemptions', '/away'])('holds publication and then resumes queued navigation to %s without repeating simulation', async target => {
+  let finish!: (value: unknown) => void
+  api.post.mockImplementation((url: string) => url === '/admin/dest/publish' ? new Promise(resolve => { finish = resolve }) : Promise.resolve({ data: { ...result, unpublished: true } }))
+  const { router } = mount(); submit(); await screen.findByText(`${P}unpublished`)
+  fireEvent.click(screen.getByRole('button', { name: 'admin:access_control.publish' }))
+  await waitFor(() => expect(api.post.mock.calls.filter(([url]) => url === '/admin/dest/publish')).toHaveLength(1))
+  await act(async () => { void router.navigate(target) })
+  expect(router.state.location.pathname + router.state.location.search).toBe('/admin/access-control?sheet=test')
+  finish({ data: {} })
+  await waitFor(() => expect(router.state.location.pathname + router.state.location.search).toBe(target))
+  expect(api.post.mock.calls.filter(([url]) => url === '/admin/dest/test')).toHaveLength(1)
+})
 it('keeps test input, result and navigation actions touch-accessible', async () => {
   mount(); submit(); await screen.findByText(`${P}result_shadowed`)
   for (const button of within(screen.getByRole('dialog')).getAllByRole('button')) expect(parseFloat(getComputedStyle(button).minHeight)).toBeGreaterThanOrEqual(44)

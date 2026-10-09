@@ -2,7 +2,7 @@
 import { ThemeProvider } from '@mui/material'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { createMemoryRouter } from 'react-router'
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createAppTheme } from '@/theme'
 import AppRouter from '@/router/AppRouter'
@@ -19,6 +19,31 @@ vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string, opti
 vi.mock('@/components/CodeEditor', () => ({ default: (p: { value: string; onChange: (s: string) => void; ariaLabel: string; readOnly: boolean }) => <textarea aria-label={p.ariaLabel} value={p.value} readOnly={p.readOnly} onChange={e => p.onChange(e.target.value)} /> }))
 import AccessControlView from './AccessControlView'
 const P = 'admin:access_control.'
+it.each(['pause', 'policy', 'list'] as const)('holds both query and page departure during %s mutation and resumes it after settlement', async kind => {
+  if (kind === 'list') listsAPI([listSummary])
+  let finish!: (value: unknown) => void
+  const mutation = kind === 'list' ? api.delete : api.put
+  mutation.mockImplementation(() => new Promise(resolve => { finish = resolve }))
+  const initial = kind === 'list' ? '/admin/access-control?tab=lists' : '/admin/access-control'
+  const router = mount(initial)
+  if (kind === 'pause') {
+    await screen.findByRole('status')
+    fireEvent.click(await screen.findByRole('button', { name: `${P}more` })); fireEvent.click(screen.getByRole('menuitem', { name: `${P}pause` }))
+  } else if (kind === 'policy') fireEvent.click(await screen.findByRole('switch', { name: `${P}policies.toggle No mail` }))
+  else {
+    fireEvent.click((await screen.findAllByRole('button', { name: `${P}lists.menu Finance` }))[0]); fireEvent.click(screen.getByRole('menuitem', { name: 'common:actions.delete' }))
+  }
+  await waitFor(() => expect(mutation).toHaveBeenCalledOnce())
+  const target = kind === 'list' ? '/admin/access-control?tab=policies' : '/admin/access-control?tab=lists'
+  await act(async () => { void router.navigate(target) })
+  expect(router.state.location.pathname + router.state.location.search).toBe(initial)
+  // The latest departure replaces the queued tab change while ownership holds.
+  await act(async () => { void router.navigate('/admin/dashboard') })
+  expect(router.state.location.pathname + router.state.location.search).toBe(initial)
+  finish({ data: kind === 'policy' ? samplePolicy : {} })
+  await screen.findByText('Dashboard')
+  expect(router.state.location.pathname).toBe('/admin/dashboard'); expect(mutation).toHaveBeenCalledOnce()
+})
 it('shows current references after a stale unused-list delete is rejected, and opens its policy without another delete', async () => {
   listsAPI([listSummary])
   api.delete.mockRejectedValueOnce({ isAxiosError: true, response: { status: 409, data: { error: 'dest_list_in_use', used_by: [
