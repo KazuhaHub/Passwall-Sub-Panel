@@ -971,7 +971,7 @@ CompiledPolicy 含 `Policy *protocol.DestinationPolicy` 与 `MintMetadata{kind,g
    - `user_id > 0` 且用户已不存在的命中，以及用户已不存在的用量、豁免、同意记录；**合法 trial 行的 user_id=0 不参与用户孤儿清理**；
    - 匿名 trial 行按精确 `source=g<gid>` 对应的分组是否仍存在清理（分组切回 open 不提前删除试运行历史，删除分组才算孤儿）。不要把所有 user_id=0 都豁免：source/action/port 不符合 trial 形状的行清为非法孤儿；
    - `panel_id` 已不存在的命中和用量；
-   - agent 已不存在的 `dest_agent_policy`、批次和预算行，面板已不存在的 loss 行。
+   - agent 已不存在的 `dest_agent_policy`、Node 批次和预算行，面板已不存在的 loss 行。`agent_id='' AND kind='receiver_loss'` 是 P4 接收端刷写标记，不是 Node 孤儿；仅按首次 received_at 的 72h 窗口清理，避免正常孤儿清理提前删除仍在重试的幂等标记。其他空 agent_id 的非法批次行照常删除，并为此增加清理回归。
 
 行为照 `pruneConnectionHistory`（`app.go:1552`）：读不到设置时跳过按时间删除并打 Warn；孤儿照样清。测试照 `app/cleanup_test.go` 里 flag records 的四个写，并照 `TestBuildPrunesFlagRecords`（`:351`）加 `TestBuildPrunesDestRows`。
 
