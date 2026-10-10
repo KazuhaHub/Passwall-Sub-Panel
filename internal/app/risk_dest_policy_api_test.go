@@ -57,3 +57,35 @@ func TestBuildDestinationRiskPolicyPersistsPartialWritesAndRejectsPartialDecode(
 		t.Fatal("stored destination policy not readable")
 	}
 }
+
+func TestBuildDestinationRiskPolicyIsReadableButPreservedBySystemSettings(t *testing.T) {
+	a := buildDestinationListsFixture(t)
+	token := destinationRefreshAdminToken(t, a)
+	stored, err := a.settings.Load(t.Context(), ports.UISettings{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored.RiskDestBlockOff, stored.RiskDestBlockThreshold = true, 37
+	if err := a.settings.Save(t.Context(), stored); err != nil {
+		t.Fatal(err)
+	}
+	for _, method := range []string{"GET", "PUT"} {
+		var body []byte
+		if method == "PUT" {
+			body = []byte(`{"login_mode":"local_only","site_title":"risk DTO check","risk_dest_block_off":false,"risk_dest_block_threshold":99}`)
+		}
+		req := httptest.NewRequest(method, "/api/admin/settings/ui", bytes.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		a.server.Handler.ServeHTTP(w, req)
+		var view map[string]json.RawMessage
+		if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &view) != nil || string(view["risk_dest_block_off"]) != "true" || string(view["risk_dest_block_threshold"]) != "37" {
+			t.Fatalf("system settings %s omitted/changed risk policy HTTP=%d", method, w.Code)
+		}
+	}
+	got, err := a.settings.Load(t.Context(), ports.UISettings{})
+	if err != nil || !got.RiskDestBlockOff || got.RiskDestBlockThreshold != 37 || got.SiteTitle != "risk DTO check" {
+		t.Fatal("system settings changed owned risk policy or skipped unrelated save")
+	}
+}
