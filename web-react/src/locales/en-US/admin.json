@@ -583,7 +583,14 @@
       "not_exempt": "Not exempt",
       "add": "Exempt this account",
       "load_failed": "Could not load this account’s destination access",
-      "expires_at": "Expires {{time}}"
+      "expires_at": "Expires {{time}}",
+      "hits_title_one": "Hits in the past {{days}} day",
+      "hits_title_other": "Hits in the past {{days}} days",
+      "hits_empty_one": "No hits in the past {{days}} day",
+      "hits_empty_other": "No hits in the past {{days}} days",
+      "hits_all": "View all records",
+      "hits_unavailable": "None of this account’s nodes currently record hits",
+      "hits_stale": "Showing the previous hit summary; refresh failed."
     },
     "test": {
       "title": "Test destination",

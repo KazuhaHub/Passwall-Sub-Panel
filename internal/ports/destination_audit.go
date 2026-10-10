@@ -40,6 +40,10 @@ type DestHitReadRepo interface {
 	ReadDestinationHits(context.Context, domain.DestHitQuery) (domain.DestHitPage, error)
 }
 
+type DestUserHitReadRepo interface {
+	ReadDestinationUserHits(context.Context, int64, time.Time, time.Time) (domain.DestRecentHits, error)
+}
+
 type DestAuditStore interface {
 	DestAuditRepo
 	DestAuditLossRepo

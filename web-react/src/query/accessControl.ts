@@ -108,7 +108,7 @@ export function useDestinationExemptions(scope: QueryScope, enabled = true) {
   return useQuery({ queryKey: accessControlKeys.exemptions(scope), queryFn: ({ signal }) => getDestinationExemptions({ signal, silent: true }), enabled, ...freshness(policies.destDefinitions) })
 }
 export function useDestinationUserAccess(scope: QueryScope, id: number, enabled = true) {
-  return useQuery({ queryKey: accessControlKeys.userAccess(scope, id), queryFn: ({ signal }) => getDestinationUserAccess(id, { signal, silent: true }), enabled: enabled && id > 0, ...freshness(policies.destDefinitions) })
+  return useQuery({ queryKey: accessControlKeys.userAccess(scope, id), queryFn: ({ signal }) => getDestinationUserAccess(id, { signal, silent: true }), enabled: enabled && id > 0, ...freshness(policies.destHits), refetchOnWindowFocus: false })
 }
 function useInvalidateExemptions(scope: QueryScope) {
   const client = useQueryClient()

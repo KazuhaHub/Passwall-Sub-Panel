@@ -1,6 +1,7 @@
 import { client } from './client'
 import type { ReadOptions } from './requestOptions'
 import type { UISettings } from './settings'
+import { isDestinationUserAccessView } from './destinationUserAccessGuard'
 
 export type DestinationTestStepName = 'allow' | 'exemption' | 'block' | 'group' | 'observe' | 'direct'
 export type DestinationNodeState =
@@ -301,16 +302,31 @@ export async function putDestinationPause(paused: boolean): Promise<DestinationP
   const { data } = await client.put<DestinationPublicationView>('/admin/dest/pause', { paused }, { _skipErrorToast: true })
   return data
 }
+export interface DestinationUserHit {
+  source: string
+  source_name: string | null
+  action: 'block' | 'observe'
+  count: number
+  top_dests: Array<{ dest: string; port: number; count: number }>
+  panels: Array<{ panel_id: number; name: string | null }>
+  last_at: number
+}
+export interface DestinationRecentHits {
+  days: number
+  items: DestinationUserHit[]
+  losses: DestinationAuditLosses
+}
 export interface DestinationUserAccessView {
   group: { id: number; name: string; mode: 'open' | 'allowlist'; stage: '' | 'trial' | 'enforce' } | null
   exemption: DestinationExemptionView | null
-  hits_available: null
-  recent_hits: null
+  hits_available: boolean | null
+  recent_hits: DestinationRecentHits | null
   usage_available: null
   usage_nodes: null
 }
 export async function getDestinationUserAccess(userId: number, opts: ReadOptions = {}): Promise<DestinationUserAccessView> {
-  const { data } = await client.get<DestinationUserAccessView>(`/admin/dest/users/${userId}`, { signal: opts.signal, _skipErrorToast: opts.silent })
+  const { data } = await client.get<unknown>(`/admin/dest/users/${userId}`, { signal: opts.signal, _skipErrorToast: opts.silent })
+  if (!isDestinationUserAccessView(data)) throw new Error('destination user access unavailable')
   return data
 }
 export interface DestinationExceptionResult {

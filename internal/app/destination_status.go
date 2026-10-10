@@ -19,21 +19,8 @@ func (a *App) destinationStatus(ctx context.Context) (destpolicy.DestinationStat
 	if err != nil {
 		return destpolicy.DestinationStatus{}, err
 	}
-	poll := settings.NodePollSeconds
-	if poll <= 0 {
-		poll = protocol.DefaultNextPollSeconds
-	}
 	now := time.Now().UTC()
-	current, err := a.destDefinitions.StatusContext(ctx, func(p domain.DestStatusPanel, load func() ([]byte, error)) (domain.DestCollectionFacts, error) {
-		if !destpolicy.NeedsCollectionProof(p, time.Duration(poll)*time.Second, now) {
-			return domain.DestCollectionFacts{}, nil
-		}
-		return a.destFacts.Read(p.Agent.AgentID, p.Runtime.MintedSHA256, load)
-	})
-	if err != nil {
-		return destpolicy.DestinationStatus{}, err
-	}
-	view, err := destpolicy.BuildDestinationStatus(current, settings.DestinationSettings().Effective().PolicyApplyMinSeconds, poll, now)
+	view, err := a.destinationStatusMetadata(ctx, settings, now, nil)
 	if err != nil {
 		return destpolicy.DestinationStatus{}, err
 	}
@@ -60,4 +47,23 @@ func (a *App) destinationStatus(ctx context.Context) (destpolicy.DestinationStat
 		}
 	}
 	return view, nil
+}
+
+// The caller owns backend admission. Account reads verify candidate bodies
+// only for current client panels and never read fleet-wide hit counters.
+func (a *App) destinationStatusMetadata(ctx context.Context, settings ports.UISettings, now time.Time, related map[int64]bool) (destpolicy.DestinationStatus, error) {
+	poll := settings.NodePollSeconds
+	if poll <= 0 {
+		poll = protocol.DefaultNextPollSeconds
+	}
+	current, err := a.destDefinitions.StatusContext(ctx, func(p domain.DestStatusPanel, load func() ([]byte, error)) (domain.DestCollectionFacts, error) {
+		if related != nil && !related[p.ID] || !destpolicy.NeedsCollectionProof(p, time.Duration(poll)*time.Second, now) {
+			return domain.DestCollectionFacts{}, nil
+		}
+		return a.destFacts.Read(p.Agent.AgentID, p.Runtime.MintedSHA256, load)
+	})
+	if err != nil {
+		return destpolicy.DestinationStatus{}, err
+	}
+	return destpolicy.BuildDestinationStatus(current, settings.DestinationSettings().Effective().PolicyApplyMinSeconds, poll, now)
 }

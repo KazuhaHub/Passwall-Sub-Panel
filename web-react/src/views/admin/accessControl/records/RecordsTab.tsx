@@ -14,6 +14,7 @@ import { hitTime } from './hitTime'
 import HitsMetricCards from './HitsMetricCards'
 import HitRow from './HitRow'
 import AddExceptionDialog from './AddExceptionDialog'
+import HitLossNotice from '../HitLossNotice'
 const P = 'admin:access_control.records.'
 const localInput = (ms: number) => { const d = new Date(ms); return new Date(ms - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16) }
 const selectProps = { select: { MenuProps: { slotProps: { paper: { sx: { '& .MuiMenuItem-root': { minHeight: 44 } } } } } } }
@@ -86,7 +87,7 @@ export default function RecordsTab({ definitions, status, retentionDays, onUser,
     {!hits.valid ? <Alert severity="error">{t(`${P}invalid_range`)}</Alert> : hits.error && !data ? <Alert aria-label={t(`${P}failed`)} severity="error" action={<Button onClick={() => void hits.refetch()}>{t('common:actions.retry')}</Button>}>{t(`${P}failed`)}</Alert> : <>
       {hits.error && data && <Alert severity="warning" action={<Button onClick={() => void hits.refetch()}>{t('common:actions.retry')}</Button>}>{t(`${P}stale`)}</Alert>}
       {hits.isFetching && <LinearProgress aria-label={t(`${P}loading`)} />}
-      {data && <Alert severity={data.losses.rows || data.losses.events || data.losses.unmatched ? 'warning' : 'info'}><Typography variant="body2">{t(`${P}${data.losses.rows || data.losses.events || data.losses.unmatched ? 'loss_notice' : 'incomplete'}`)}</Typography><Stack direction="row" sx={{ flexWrap: 'wrap', gap: 1 }}>{data.losses.rows > 0 && <Typography variant="caption">{t(`${P}loss_rows`, { count: data.losses.rows })}</Typography>}{data.losses.events > 0 && <Typography variant="caption">{t(`${P}loss_events`, { count: data.losses.events })}</Typography>}{data.losses.unmatched > 0 && <Typography variant="caption">{t(`${P}loss_unmatched`, { count: data.losses.unmatched })}</Typography>}</Stack></Alert>}
+      {data && <HitLossNotice losses={data.losses} />}
       {data?.total === 0 && <Paper variant="outlined" sx={{ p: 3 }}><Typography>{t(`${P}${filtered ? 'empty_filtered' : 'empty'}`)}</Typography><Typography variant="body2">{t(`${P}retention`, { days: retentionDays })}</Typography>{filtered && <Button onClick={clear}>{t(`${P}clear`)}</Button>}</Paper>}
       {data && data.total > 0 && <Paper variant="outlined" sx={{ minWidth: 0, overflow: 'clip' }}>
         <Box sx={{ p: 1.5, display: { xs: 'none', lg: 'grid' }, gap: 1, gridTemplateColumns: data.group_by === 'none' ? '130px minmax(100px,1fr) minmax(260px,2fr) minmax(90px,.7fr) 65px 44px' : 'minmax(0,1fr) 150px 120px 160px' }}>

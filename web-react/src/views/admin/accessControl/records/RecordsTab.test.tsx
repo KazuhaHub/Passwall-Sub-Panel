@@ -43,6 +43,7 @@ beforeEach(() => {
     if (url.endsWith('/policies')) return { data: destinationPolicies() }
     if (url.endsWith('/status')) return { data: destinationStatus() }
     if (url.endsWith('/settings')) return { data: { effective: { dest_hit_retention_days: 30 } } }
+    if (url === '/admin/dest/users/13') return { data: { group: null, exemption: null, hits_available: false, recent_hits: { days: 7, items: [], losses: { rows: 0, events: 0, unmatched: 0, scope: 'panel', complete: false } }, usage_available: null, usage_nodes: null } }
     if (url.endsWith('/users')) return { data: { items: [], total: 0 } }
     return { data: { items: [] } }
   })

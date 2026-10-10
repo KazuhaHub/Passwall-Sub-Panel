@@ -1,6 +1,6 @@
 # Destination access control
 
-Implementation follows the [final audit plan](https://github.com/KazuhaHub/Passwall-Sub-Panel/pull/271). Definition publication, native candidate compilation, list management, hit ingestion and the records tab are connected to the application. The feature remains under development: the remaining management interfaces, risk evaluation, privacy/consent integration, browser acceptance and real Node kernel acceptance are pending. Stage 4 usage collection and stage 5 group modes remain separate open work.
+Implementation follows the [final audit plan](https://github.com/KazuhaHub/Passwall-Sub-Panel/pull/271). Definition publication, native candidate compilation, list management, hit ingestion, the records tab and account hit summaries are connected to the application. The feature remains under development: the remaining management interfaces, risk evaluation, privacy/consent integration, browser acceptance and real Node kernel acceptance are pending. Stage 4 usage collection and stage 5 group modes remain separate open work.
 
 ## Current implementation
 
@@ -112,6 +112,9 @@ cards and trial controls remain hidden until group-mode integration. The mobile
 layout uses two-column KPI cards, wrapped account/time fields, an extra-filter
 dialog and compact rows. Actual browser visual/interaction acceptance and real
 deployment acceptance remain open; frontend tests do not prove them.
+Records UI commit `9fa819b9f95380f0c642fc429016207df83663cc` passed its
+[complete Test workflow](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/38016425199)
+and [published-node systemd acceptance](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/38016425211).
 
 ## Definition and publication repository
 
@@ -932,20 +935,35 @@ The account, group, mode, exemption and creator display identifier share one
 consistent SQL read transaction under backend operation admission. The read
 selects only account ID/UPN/group ID and group ID/name; it does not resolve user
 entitlements or load credentials or private list bodies. It changes neither
-definitions nor generation. Before later collection stages, `hits_available`,
-`recent_hits`, `usage_available` and `usage_nodes` are present and null. Usage
-query parameters are rejected until their separately audited stage-4 read is
-implemented.
+definitions nor generation. `usage_available` and `usage_nodes` remain null;
+query parameters are rejected until the separately audited stage-4 usage read
+is implemented.
+
+`recent_hits.days` is `min(7, effective hit retention)`. Its source/action groups
+preserve historical actions and nullable current names. Counts and the top three
+destination/port pairs aggregate across hours and nodes before sorting; counts
+saturate instead of overflowing. Trial observations stay at group level and are
+excluded. Client projections, hit aggregates, display names and separate
+related-panel loss units share one private SQL snapshot. `complete:false` never
+becomes a claim of complete account coverage.
+
+`hits_available` requires a current client projection on a node whose collection
+is proven by capability, engine, recent report and the exact applied candidate.
+The application reuses the status proof and does not fetch fleet hit counters.
+Retained history remains visible when current collection stops. The Access tab
+loads this summary only when selected; its links open all account records or
+node coverage. Per-session summary queries do not poll. Failed or malformed
+reads display an error; fallback SPA HTML cannot fabricate empty history.
 
 The missing-route regression first failed against SPA fallback. Actual
 Build/HTTP tests verify group defaults, persisted trial mode, expired exemption
 visibility, administrator boundaries, missing/invalid IDs and unchanged
 generation. SQL query guards verify display-only reads, missing historical
 identities and corruption errors without partial responses. Frontend DTO/client
-methods are included; account drawer integration and browser acceptance remain
-pending. Complete local app, SQL-store, HTTP router/handler/middleware and domain
+methods and account drawer integration are included; browser acceptance remains
+pending. The account-metadata foundation passed local app, SQL-store, HTTP router/handler/middleware and domain
 suites, relevant static checks and TypeScript compilation pass. Current
-account-access head `3f72eb2dea050babba05170c8f2233875b05b475` passed its
+account-access foundation `3f72eb2dea050babba05170c8f2233875b05b475` passed its
 [complete Test workflow](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37392283019)
 and [released-node systemd acceptance](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37392283122).
 Real third-party panel jobs were skipped; this does not establish unmerged
@@ -1999,7 +2017,7 @@ connected; consent enforcement remains part of the later integration stages.
 
 Stage 1c still requires the remaining access-control views and complete browser
 acceptance. C2's end-to-end browser
-acceptance remains outstanding. Risk evaluation, complete records UI,
+acceptance remains outstanding. Risk evaluation, records browser acceptance,
 privacy/consent integration and subsequent stages retain the full final-plan
 scope. Repository tests and green CI do not establish completion of these
 requirements or real deployment acceptance.

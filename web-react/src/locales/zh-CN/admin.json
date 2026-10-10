@@ -581,7 +581,14 @@
       "not_exempt": "未豁免",
       "add": "豁免此账号",
       "load_failed": "读取这个账号的访问状态失败",
-      "expires_at": "到期时间：{{time}}"
+      "expires_at": "到期时间：{{time}}",
+      "hits_title_one": "过去 {{days}} 天命中",
+      "hits_title_other": "过去 {{days}} 天命中",
+      "hits_empty_one": "过去 {{days}} 天没有命中",
+      "hits_empty_other": "过去 {{days}} 天没有命中",
+      "hits_all": "在记录中查看全部",
+      "hits_unavailable": "这个账号所在的节点当前都不记录命中",
+      "hits_stale": "刷新失败，当前显示的是上次读取的命中摘要。"
     },
     "test": {
       "title": "测试目的地",
