@@ -2126,6 +2126,44 @@ The drawer fetches website usage only on an explicit click. Ranges are 24 hours
 and `min(7, retention)` days, deduplicated at one day. Results stay in component
 state, outside URLs and shared query caches, and are discarded on account/session,
 coverage or retention changes, read errors, tab exit and drawer close. Connections
-to IP addresses are shown as `(ip)`. Local component tests and a production build
-cover this path; new HTTP/runtime cases still require this candidate's Linux CI.
+to IP addresses are shown as `(ip)`. Candidate `63a4e2dd` passed the complete
+[Test workflow](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/38054754326),
+including HTTP/audit cases, SQLite/race, MySQL, PostgreSQL and the full Linux web
+suite. The local full web run had a native worker crash; only its focused tests,
+production build and lint passed locally.
 Browser and VM/load acceptance remain open, as does the rest of the final plan.
+
+Stage 5 starts with the staff-readable group-list summary. `GET /api/admin/groups`
+adds the read-only `dest_mode` field (`open`, `allowlist_trial` or
+`allowlist_enforce`). Its narrow repository port selects only group ID, mode and
+stage for the requested page, without loading private list IDs or contents.
+Missing mode rows mean open; a read error or inconsistent stored mode returns
+unavailable instead of a partial or fabricated open summary. Operators see a
+noninteractive allowlist badge and make no destination-list request. Ordinary
+group saves do not change destination modes, owned lists or their generation.
+The administrator group workflow, preview, readiness, trial report and remaining
+allowlist UI are still pending; the badge alone does not enable allowlists.
+
+`POST /api/admin/dest/exceptions` also accepts `scope: "group"` with a positive
+`group_id`. It normalizes the target locally and appends only to that allowlist
+group's owned extra list, returning its group/list IDs and normalized entry.
+It creates no global allow policy. A closed group is rejected with
+`dest_mode_invalid_transition`; an unknown group returns `dest_group_not_found`.
+The transaction rechecks the current mode, extra-list identity, ownership and
+custom kind under the definition lock, then parses fresh source. Concurrent
+appends preserve existing content; duplicates keep versions and generation.
+Late failures roll back both contents and generation and return no commit ID.
+Ordinary users and operators cannot invoke this route. The remaining group
+workflow and UI, and this candidate's Linux runtime checks, remain open.
+
+The group-preview foundation reads current default mihomo/sing-box templates,
+using the same template repository as subscription rendering. Its DNS extraction
+selects mihomo HTTPS nameserver-policy entries with a proxy-group suffix and
+sing-box HTTPS servers referenced by DNS rules without `detour: direct`.
+Bootstrap, proxy-server DNS, unused/final-only sing-box servers and literal IPs
+are excluded. Hostnames are normalized, deduplicated and sorted without DNS I/O;
+malformed or unresolved selected DNS inputs yield no partial suggestions.
+Current shipped templates yield `dns.alidns.com` and
+`l9f26nnn5d.cloudflare-gateway.com` under these rules. This is internal preview
+preparation; the group preview endpoint and its manual-entry fallback UI remain
+pending, and no base list is automatically written by this reader.

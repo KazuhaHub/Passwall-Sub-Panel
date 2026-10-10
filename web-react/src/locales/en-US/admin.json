@@ -3230,6 +3230,7 @@
   },
   "groups": {
     "title": "Groups",
+    "destination_badge": "Allowlist",
     "load_failed": "Groups are temporarily unavailable",
     "retry": "Retry",
     "create": "New group",

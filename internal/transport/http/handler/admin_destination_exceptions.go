@@ -1,6 +1,9 @@
 package handler
 
 import (
+	"errors"
+
+	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/destpolicy"
 	"github.com/gin-gonic/gin"
 )
@@ -22,6 +25,23 @@ func (h *AdminDestinationExceptionsHandler) Create(c *gin.Context) {
 		GroupID *int64 `json:"group_id"`
 	}
 	if !destinationPolicyDecode(c, &req) {
+		return
+	}
+	if req.Scope == "group" {
+		if req.GroupID == nil || *req.GroupID <= 0 {
+			c.JSON(400, gin.H{"error": "dest_policy_invalid", "field": "group_id"})
+			return
+		}
+		result, err := h.manager.Group(c.Request.Context(), *req.GroupID, req.Target, req.Match)
+		if err != nil {
+			if errors.Is(err, domain.ErrNotFound) {
+				c.JSON(404, gin.H{"error": "dest_group_not_found"})
+				return
+			}
+			destinationPolicyError(c, err)
+			return
+		}
+		c.JSON(200, gin.H{"group_id": *req.GroupID, "list_id": result.Commit.ListID, "entry": result.Entry})
 		return
 	}
 	if req.Scope != "global" || req.GroupID != nil {

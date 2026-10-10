@@ -19,7 +19,9 @@ import (
 
 type ExceptionStore interface {
 	ReadDefinitions(context.Context) (domain.DestDefinitions, error)
+	GetGroupMode(context.Context, int64) (domain.DestGroupMode, error)
 	AddGlobalException(context.Context, time.Time, func(domain.DestList) (domain.DestList, error)) (domain.DestGlobalExceptionCommit, error)
+	AddGroupException(context.Context, int64, time.Time, func(domain.DestList) (domain.DestList, error)) (int64, error)
 }
 type ExceptionResult struct {
 	Commit domain.DestGlobalExceptionCommit

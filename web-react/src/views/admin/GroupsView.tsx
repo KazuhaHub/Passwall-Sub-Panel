@@ -636,7 +636,14 @@ export default function GroupsView() {
                         disabled={!canSelect}
                       />
                     </TableCell>
-                    <TableCell sx={{ fontWeight: 500 }}>{g.name}</TableCell>
+                    <TableCell sx={{ fontWeight: 500 }}>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+                        {g.name}
+                        {(g.dest_mode === 'allowlist_trial' || g.dest_mode === 'allowlist_enforce') && (
+                          <Chip size="small" variant="outlined" label={t('admin:groups.destination_badge')} />
+                        )}
+                      </Box>
+                    </TableCell>
                     <TableCell sx={{ fontSize: 13, color: md.onSurfaceVariant }}>{g.slug}</TableCell>
                     <TableCell>{tagFilterCell(g)}</TableCell>
                     <TableCell align="right" sx={{ fontVariantNumeric: 'tabular-nums' }}>{g.members}</TableCell>

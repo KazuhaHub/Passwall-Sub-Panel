@@ -299,6 +299,8 @@ export interface Group {
   id: number
   slug: string
   name: string
+  /** Read-only list summary; absent on older servers and write responses. */
+  dest_mode?: 'open' | 'allowlist_trial' | 'allowlist_enforce'
   tag_filter: TagFilter
   layout: Layout
   remark?: string

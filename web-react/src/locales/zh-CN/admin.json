@@ -3226,6 +3226,7 @@
   },
   "groups": {
     "title": "分组管理",
+    "destination_badge": "白名单",
     "load_failed": "暂时无法加载分组",
     "retry": "重试",
     "create": "新增分组",
