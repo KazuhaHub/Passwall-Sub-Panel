@@ -48,6 +48,12 @@ type DestUsageReadRepo interface {
 	ReadDestinationUsage(context.Context, domain.DestUsageQuery) (domain.DestUsagePage, error)
 }
 
+type DestGroupTrialReadRepo interface {
+	// Anonymous sites for one exact group, without account or full-host fields.
+	// Reads all sites and panel-scoped trial losses in one consistent snapshot.
+	ReadDestinationGroupTrial(context.Context, domain.DestGroupTrialQuery) (domain.DestGroupTrialData, error)
+}
+
 type DestAuditStore interface {
 	DestAuditRepo
 	DestAuditLossRepo

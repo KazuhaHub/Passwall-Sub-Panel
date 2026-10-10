@@ -149,6 +149,7 @@ type App struct {
 	destHitsRead         ports.DestHitReadRepo
 	destUserHitsRead     ports.DestUserHitReadRepo
 	destUsageRead        ports.DestUsageReadRepo
+	destGroupTrialRead   ports.DestGroupTrialReadRepo
 	destRiskRead         ports.DestRiskReadRepo
 	destAuditCtx         context.Context
 	destAuditCancel      context.CancelFunc
@@ -631,6 +632,7 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 		destHitsRead:         repos.DestHitsRead,
 		destUserHitsRead:     repos.DestUserHitsRead,
 		destUsageRead:        repos.DestUsageRead,
+		destGroupTrialRead:   repos.DestGroupTrialRead,
 		destRiskRead:         repos.DestRiskRead,
 		destAudit:            destAudit, destAuditCtx: auditCtx, destAuditCancel: auditCancel,
 		destTagMembers: groupSvc,

@@ -2181,3 +2181,16 @@ After a changed commit, production wiring first invalidates group eligibility
 and rendered subscriptions, then schedules member resynchronization. No-op and
 failed commits do not invalidate membership. Its group HTTP workflow and the
 full readiness/report views are still pending.
+
+The trial-report storage foundation reads one exact group's anonymous
+`observe` records with zero account and port fields. It streams only the supplied
+site, count and latest timestamp, merges hours and nodes, and returns every site
+with deterministic count/time/site ordering. It does not recompute public
+suffixes or load accounts, sample hosts or raw hit records. Counts saturate
+instead of overflowing. The same private, consistent read snapshot includes
+only trial loss counters from current member panels and panels with historical
+records for this group. Rows, events and unmatched events remain separate;
+`dropped_in_range` mirrors rows, and losses remain panel-scoped and incomplete.
+Any storage or cancellation failure withholds the entire result. This narrow
+repository is wired into the application; the retention-clamped HTTP report,
+current-list coverage marking and report UI are still pending.
