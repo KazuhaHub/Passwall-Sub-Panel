@@ -159,6 +159,7 @@ type App struct {
 	destExemptions       *destpolicy.ExemptionManager
 	destExceptions       *destpolicy.ExceptionManager
 	destControls         *destpolicy.Controls
+	destGroups           *destpolicy.GroupAdministrator
 	syncTasks            ports.SyncTaskRepo
 	// trafficRepo / nodeTraffic kept for the retention cron — PruneBefore is
 	// outside traffic.Service's surface (it's a maintenance concern, not a
@@ -646,6 +647,12 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	a.destExceptions.SetOperationGate(a.operationGate)
 	a.destControls = destpolicy.NewControls(a.destDefinitions)
 	a.destControls.SetOperationGate(a.operationGate)
+	a.destGroups = destpolicy.NewGroupAdministrator(a.destDefinitions, repos.Group.GetByID, a.destinationBudget, func(ctx context.Context, groupID int64) {
+		groupSvc.InvalidateEligibility(0)
+		renderSvc.InvalidateAll()
+		userSvc.ResyncGroupMembersInBackground(groupID)
+	})
+	a.destGroups.SetOperationGate(a.operationGate)
 	dispatcher := &asyncDispatcher{ctx: bgCtx, wg: &a.bgWG, gate: a.operationGate}
 	// Wire traffic.Service into the panel-wide WaitGroup. Its async
 	// floor-push + quota-event email goroutines (`safego.GoTracked`)

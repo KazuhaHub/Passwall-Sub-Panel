@@ -2167,3 +2167,17 @@ Current shipped templates yield `dns.alidns.com` and
 `l9f26nnn5d.cloudflare-gateway.com` under these rules. This is internal preview
 preparation; the group preview endpoint and its manual-entry fallback UI remain
 pending, and no base list is automatically written by this reader.
+
+The internal group administrator now prepares the prospective mode, selected
+lists and any new owned base/extra lists before checking structural and per-node
+definition budgets. Preview writes nothing. Save requires the current mode's UTC
+edit version (zero for a never-saved mode) and delegates the atomic commit to the
+existing group-mode repository. Direct open-to-enforce transitions are rejected;
+enforcement requires every referenced remote/geosite list to have a successful
+fetch. A later refresh error retains that readiness through last good content.
+New base hosts become exact `full:` entries; IPs, URLs and broad hosts are
+rejected. Existing owned source is retained and edited through the list API.
+After a changed commit, production wiring first invalidates group eligibility
+and rendered subscriptions, then schedules member resynchronization. No-op and
+failed commits do not invalidate membership. Its group HTTP workflow and the
+full readiness/report views are still pending.
