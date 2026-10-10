@@ -1,15 +1,25 @@
 package app
 
 import (
+	"errors"
 	"reflect"
 	"testing"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/seed"
 )
 
 func TestDestinationBaseHostsFollowCurrentDefaultTemplateEdits(t *testing.T) {
 	a := buildDestinationListsFixture(t)
 	destinationRefreshAdminToken(t, a)
+	if got, err := a.destinationGroupBaseHosts(t.Context()); !errors.Is(err, domain.ErrNotFound) || got != nil {
+		t.Fatal("missing current templates did not return an explicit unavailable read")
+	}
+	// The executable seeds before Build. This fixture calls Build directly,
+	// so initialize templates explicitly before exercising live repo edits.
+	if err := seed.Ensure(a.cfg.ConfigDir); err != nil {
+		t.Fatal(err)
+	}
 	got, err := a.destinationGroupBaseHosts(t.Context())
 	if err != nil || !reflect.DeepEqual(got, []string{"dns.alidns.com", "l9f26nnn5d.cloudflare-gateway.com"}) {
 		t.Fatalf("current template hosts=%v: %v", got, err)
