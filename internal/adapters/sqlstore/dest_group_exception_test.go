@@ -56,10 +56,7 @@ func TestDestinationGroupExceptionRechecksModeOwnershipAndRollsBackLateFailure(t
 			if err := r.SaveGroupMode(t.Context(), &m, m.UpdatedAt, initialModeLists(t), now); err != nil {
 				t.Fatal(err)
 			}
-			extra, err := r.GetList(t.Context(), m.ExtraListID)
-			if err != nil {
-				t.Fatal(err)
-			}
+			var err error
 			switch problem {
 			case "closed":
 				err = r.db.Model(&destGroupModeRow{}).Where("group_id = ?", g.ID).Updates(map[string]any{"mode": "open", "stage": ""}).Error
@@ -76,6 +73,12 @@ func TestDestinationGroupExceptionRechecksModeOwnershipAndRollsBackLateFailure(t
 				})
 				t.Cleanup(func() { r.db.Callback().Update().Remove(callback) })
 			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			// Fault injection can itself update GORM's UpdatedAt. Verify the
+			// operation preserves the state AFTER injection, on every dialect.
+			extra, err := r.GetList(t.Context(), m.ExtraListID)
 			if err != nil {
 				t.Fatal(err)
 			}
