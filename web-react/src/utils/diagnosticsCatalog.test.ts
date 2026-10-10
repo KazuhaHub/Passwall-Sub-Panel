@@ -43,7 +43,9 @@ function expectCopy(keys: string[]) {
 }
 
 function goSource(rel: string): string {
-  return fs.readFileSync(new URL(`../../../${rel}`, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
+  // Git's Windows checkout uses CRLF; source guards compare declarations,
+  // so line-ending style must not hide an otherwise unchanged function.
+  return fs.readFileSync(new URL(`../../../${rel}`, import.meta.url), 'utf8').replace(/\r\n?/g, '\n')
 }
 
 interface Declared { type: 'counter' | 'gauge' | 'histogram'; labelled: boolean }

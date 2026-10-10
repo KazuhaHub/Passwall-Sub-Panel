@@ -13,6 +13,7 @@ interface SiteState {
   logoUrlDark: string
   iconUrl: string
   footerText: string
+  legalEnabled: boolean
   themeColor: string | undefined
   themeDefaultMode: 'light' | 'dark' | undefined
   // panel timezone (IANA name). Empty = backend hasn't been configured, so
@@ -21,7 +22,7 @@ interface SiteState {
   loaded: boolean
   load: () => Promise<void>
   update: (patch: Partial<Pick<SiteState,
-    'siteTitle' | 'appTitle' | 'logoUrl' | 'logoUrlDark' | 'iconUrl' | 'footerText' | 'themeColor' | 'themeDefaultMode' | 'timezone'
+    'siteTitle' | 'appTitle' | 'logoUrl' | 'logoUrlDark' | 'iconUrl' | 'footerText' | 'legalEnabled' | 'themeColor' | 'themeDefaultMode' | 'timezone'
   >>) => void
 }
 
@@ -43,6 +44,7 @@ export const useSiteStore = create<SiteState>((set, get) => ({
   logoUrlDark: '',
   iconUrl: '',
   footerText: '© Kazuha Hub Passwall',
+  legalEnabled: false,
   themeColor: undefined,
   themeDefaultMode: undefined,
   timezone: '',
@@ -58,7 +60,8 @@ export const useSiteStore = create<SiteState>((set, get) => ({
         logoUrl: m.logo_url || '',
         logoUrlDark: m.logo_url_dark || '',
         iconUrl: m.icon_url || '',
-        footerText: m.footer_text || '© Kazuha Hub Passwall',
+        footerText: m.footer_text ?? '© Kazuha Hub Passwall',
+        legalEnabled: m.legal?.enabled ?? false,
         themeColor: m.theme_color,
         themeDefaultMode: m.theme_default_mode,
         timezone: m.timezone || '',

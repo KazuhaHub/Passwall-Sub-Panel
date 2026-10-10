@@ -19,6 +19,7 @@ const initial = {
   themeDefaultMode: undefined,
   timezone: '',
   loaded: false,
+  legalEnabled: false,
 } as const
 
 beforeEach(() => {
@@ -29,6 +30,11 @@ beforeEach(() => {
 })
 
 describe('site store', () => {
+  it('keeps an explicitly empty footer and public legal enablement', async () => {
+    mocks.getAuthMethods.mockResolvedValue({ footer_text: '', legal: { enabled: true, consent_version: 2 } })
+    await useSiteStore.getState().load()
+    expect(useSiteStore.getState()).toMatchObject({ footerText: '', legalEnabled: true })
+  })
   it('loads public branding once and applies it to the document', async () => {
     mocks.getAuthMethods.mockResolvedValue({
       site_title: 'My Panel',

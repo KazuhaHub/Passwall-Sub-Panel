@@ -51,9 +51,8 @@ type UserStore interface {
 	CreateLocalAndSync(ctx context.Context, in user.CreateLocalInput) (*user.CreateLocalSyncedResult, error)
 	ActivateAfterVerification(ctx context.Context, userID int64) error
 	GetByUPN(ctx context.Context, upn string) (*domain.User, error)
-	// SetPassword refreshes a local account's password — used to resume a
-	// pending (unverified) signup when the visitor re-registers.
-	SetPassword(ctx context.Context, userID int64, newPassword string) error
+	// ResumeRegistration guards credential replacement and consent together.
+	ResumeRegistration(ctx context.Context, userID int64, newPassword string, acceptedConsentVersion int64) error
 }
 
 // GroupLookup resolves the default registration group.
@@ -137,9 +136,10 @@ func resendCooldown(set ports.UISettings) time.Duration {
 // RegisterInput is the public signup payload. The email doubles as the login
 // username (UPN), so there's no separate username to pick.
 type RegisterInput struct {
-	Email       string
-	Password    string
-	DisplayName string
+	Email                  string
+	Password               string
+	DisplayName            string
+	AcceptedConsentVersion int64
 }
 
 // RegisterResult tells the caller whether the account still needs email
@@ -182,15 +182,16 @@ func (s *Service) Register(ctx context.Context, in RegisterInput) (*RegisterResu
 	}
 	requireVerify := !set.RegistrationAllowUnverified
 	cin := user.CreateLocalInput{
-		UPN:                email, // email IS the login username for self-signup
-		Email:              email,
-		DisplayName:        strings.TrimSpace(in.DisplayName),
-		InitialPassword:    in.Password,
-		GroupID:            groupID,
-		ExpireAt:           expireAt,
-		TrafficLimitBytes:  int64(set.RegistrationDefaultTrafficGB * gib),
-		PendingEmailVerify: requireVerify,
-		SelfRegistered:     true, // excludes it from silent first-time SSO linking
+		UPN:                    email, // email IS the login username for self-signup
+		Email:                  email,
+		DisplayName:            strings.TrimSpace(in.DisplayName),
+		InitialPassword:        in.Password,
+		GroupID:                groupID,
+		ExpireAt:               expireAt,
+		TrafficLimitBytes:      int64(set.RegistrationDefaultTrafficGB * gib),
+		PendingEmailVerify:     requireVerify,
+		SelfRegistered:         true, // excludes it from silent first-time SSO linking
+		AcceptedConsentVersion: in.AcceptedConsentVersion,
 	}
 
 	if !requireVerify {
@@ -213,7 +214,7 @@ func (s *Service) Register(ctx context.Context, in RegisterInput) (*RegisterResu
 	// holding the same address.
 	if existing, gerr := s.d.Users.GetByUPN(ctx, in.Email); gerr == nil && existing != nil {
 		if !existing.Enabled && existing.AutoDisabledReason == domain.DisabledPendingEmailVerify {
-			if perr := s.d.Users.SetPassword(ctx, existing.ID, in.Password); perr != nil {
+			if perr := s.d.Users.ResumeRegistration(ctx, existing.ID, in.Password, in.AcceptedConsentVersion); perr != nil {
 				return nil, perr
 			}
 			s.sendVerification(ctx, set, existing)

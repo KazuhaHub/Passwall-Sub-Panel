@@ -57,6 +57,12 @@ func respondErrorDetail(c *gin.Context, err error, leakDetail bool) {
 		return
 	}
 	switch {
+	case errors.Is(err, domain.ErrLegalContentTooLarge):
+		c.JSON(http.StatusBadRequest, gin.H{"error": "legal_content_too_large"})
+	case errors.Is(err, domain.ErrLegalVersionConflict):
+		c.JSON(http.StatusConflict, gin.H{"error": "legal_version_conflict"})
+	case errors.Is(err, domain.ErrLegalConsentOutdated):
+		c.JSON(http.StatusConflict, gin.H{"error": "legal_consent_outdated"})
 	case errors.Is(err, domain.ErrValidation):
 		// Validation messages are author-controlled (no GORM/SMTP leakage)
 		// and the caller wants the user to see them.

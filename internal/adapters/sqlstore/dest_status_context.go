@@ -11,15 +11,36 @@ import (
 // StatusContext keeps every fleet metadata read and lazy candidate proof in
 // one repeatable-read transaction. Bodies never escape this projection.
 func (r *DestDefinitionRepo) StatusContext(ctx context.Context, proof func(domain.DestStatusPanel, func() ([]byte, error)) (domain.DestCollectionFacts, error)) (domain.DestStatusContext, error) {
-	result := domain.DestStatusContext{Panels: []domain.DestStatusPanel{}, GroupNames: map[int64]string{}}
+	var result domain.DestStatusContext
 	err := r.readTransaction(ctx, func(tx *gorm.DB) error {
 		var err error
-		result.State, err = readDestState(tx)
-		if err != nil {
-			return err
+		result, err = readDestStatusContext(tx, proof, true)
+		return err
+	})
+	if err != nil {
+		return domain.DestStatusContext{}, err
+	}
+	return result, nil
+}
+
+// The caller owns the transaction. Disclosure reads reuse the current proof
+// projection without reading server/group names, listeners or historical data.
+func readDestStatusContext(tx *gorm.DB, proof func(domain.DestStatusPanel, func() ([]byte, error)) (domain.DestCollectionFacts, error), details bool) (domain.DestStatusContext, error) {
+	result := domain.DestStatusContext{Panels: []domain.DestStatusPanel{}, GroupNames: map[int64]string{}}
+	err := func() error {
+		var err error
+		if details {
+			result.State, err = readDestState(tx)
+			if err != nil {
+				return err
+			}
 		}
 		var panels []xuiPanelRow
-		if err := tx.Select("id", "name", "kind", "panel_version", "audit_collect", "audit_collect_revision").Order("id").Find(&panels).Error; err != nil {
+		panelColumns := []string{"id", "name", "kind", "panel_version", "audit_collect", "audit_collect_revision"}
+		if !details {
+			panelColumns = []string{"id", "kind", "audit_collect", "audit_collect_revision"}
+		}
+		if err := tx.Select(panelColumns).Order("id").Find(&panels).Error; err != nil {
 			return err
 		}
 		ids := []int64{}
@@ -56,7 +77,11 @@ func (r *DestDefinitionRepo) StatusContext(ctx context.Context, proof func(domai
 				continue
 			}
 			var runtimes []destAgentPolicyRow
-			if err := tx.Omit("MintedBody", "AppliedBody").Where("agent_id IN ?", agentIDs).Find(&runtimes).Error; err != nil {
+			runtimeRead := tx.Omit("MintedBody", "AppliedBody")
+			if !details {
+				runtimeRead = tx.Select("agent_id", "minted_sha256", "minted_at", "reported_sha256", "reported_state", "fallback_exhausted")
+			}
+			if err := runtimeRead.Where("agent_id IN ?", agentIDs).Find(&runtimes).Error; err != nil {
 				return err
 			}
 			for _, row := range runtimes {
@@ -74,8 +99,10 @@ func (r *DestDefinitionRepo) StatusContext(ctx context.Context, proof func(domai
 			if runtime == nil {
 				continue
 			}
-			groupIDs = append(groupIDs, runtime.AppliedGroups...)
-			if len(runtime.PrecheckListeners)+len(runtime.ReportedListeners) > 0 {
+			if details {
+				groupIDs = append(groupIDs, runtime.AppliedGroups...)
+			}
+			if details && len(runtime.PrecheckListeners)+len(runtime.ReportedListeners) > 0 {
 				var nodes []nodeRow
 				if err := tx.Select("id", "display_name").Where("panel_id = ?", p.ID).Order("id").Find(&nodes).Error; err != nil {
 					return err
@@ -112,7 +139,7 @@ func (r *DestDefinitionRepo) StatusContext(ctx context.Context, proof func(domai
 			}
 		}
 		return nil
-	})
+	}()
 	if err != nil {
 		return domain.DestStatusContext{}, err
 	}

@@ -166,6 +166,7 @@ export async function registerUser(input: {
   email: string
   password: string
   display_name?: string
+  accepted_consent_version?: number
   captcha_id?: string
   captcha_answer?: string
   captcha_token?: string

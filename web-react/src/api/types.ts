@@ -350,6 +350,7 @@ export function isTwoFAChallenge(r: AuthLoginResult): r is TwoFAChallenge {
 export type LoginMode = 'sso_redirect' | 'sso_first' | 'dual' | 'local_only'
 
 export interface AuthMethods {
+  legal?: { enabled: boolean; consent_version: number }
   local: boolean
   sso: boolean
   saml: boolean

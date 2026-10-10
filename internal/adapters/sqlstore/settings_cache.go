@@ -55,6 +55,10 @@ type cachingSettingsRepo struct {
 
 // NewCachingSettingsRepo wraps inner with the in-process cache.
 func NewCachingSettingsRepo(inner ports.SettingsRepo) ports.SettingsRepo {
+	return newCachingSettingsRepo(inner)
+}
+
+func newCachingSettingsRepo(inner ports.SettingsRepo) *cachingSettingsRepo {
 	return &cachingSettingsRepo{inner: inner}
 }
 
@@ -111,9 +115,13 @@ func (r *cachingSettingsRepo) Save(ctx context.Context, s ports.UISettings) erro
 	// Admin edits remain visible immediately (same TTL=0 semantic) —
 	// the cost is one extra Load per Save, which is fine because Save
 	// is rare and Load is the path we want fast.
+	r.invalidate()
+	return nil
+}
+
+func (r *cachingSettingsRepo) invalidate() {
 	r.mu.Lock()
 	r.cached = nil
 	r.gen++
 	r.mu.Unlock()
-	return nil
 }

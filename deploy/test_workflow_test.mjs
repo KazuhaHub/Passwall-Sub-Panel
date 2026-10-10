@@ -381,10 +381,14 @@ test('go_static\'s build cache key names every tool the job compiles, at its pin
   assert.equal(keys.length, 2, 'go_static restores one build cache and saves it')
   assert.equal(keys[0], keys[1], 'go_static must save under the key it restores, or no run ever hits it')
   const tools = [...steps.matchAll(/\bgo (?:run|install) \S*\/([a-z0-9-]+)@(v\d+\.\d+\.\d+)/g)]
-  const toolModule = readFileSync(new URL('../tools/staticcheck/go.mod', import.meta.url), 'utf8')
-  const analyzer = /honnef\.co\/go\/tools (v\d+\.\d+\.\d+)/.exec(toolModule)
-  assert(analyzer, 'the isolated staticcheck module must pin an analyzer release')
-  tools.push(['', 'staticcheck', analyzer[1]])
+  const staticModule = readFileSync(new URL('../tools/staticcheck/go.mod', import.meta.url), 'utf8')
+  const staticPin = /^\s*honnef\.co\/go\/tools (v\d+\.\d+\.\d+)(?:\s*\/\/ indirect)?$/m.exec(staticModule)
+  assert(staticPin, 'the isolated staticcheck module must pin the analyzer version')
+  assert(/go -C tools\/staticcheck build -mod=readonly .*honnef\.co\/go\/tools\/cmd\/staticcheck/.test(steps), 'staticcheck must build from its isolated module without modifying pins or checksums')
+  tools.push([null, 'staticcheck', staticPin[1]])
+  for (const file of ['tools/staticcheck/go.mod', 'tools/staticcheck/go.sum']) {
+    assert(keys[0].includes(`'${file}'`), `staticcheck build cache must hash ${file}`)
+  }
   assert(tools.length >= 3, `go_static compiles actionlint, staticcheck and govulncheck at pinned versions; found ${tools.length}`)
   for (const [, tool, version] of tools) {
     assert(
@@ -397,7 +401,7 @@ test('go_static\'s build cache key names every tool the job compiles, at its pin
 
 test('staticcheck uses its pinned tool module and analyzes the application with acceptance files', () => {
   const steps = job('go_static').replace(/^\s*#.*$/gm, '')
-  assert(steps.includes('go -C tools/staticcheck build -o "$RUNNER_TEMP/psp-staticcheck" honnef.co/go/tools/cmd/staticcheck'), 'build the analyzer from its isolated module so its export reader can follow the compiler')
+  assert(steps.includes('go -C tools/staticcheck build -mod=readonly -o "$RUNNER_TEMP/psp-staticcheck" honnef.co/go/tools/cmd/staticcheck'), 'build the analyzer from its isolated module without changing its pinned dependencies')
   assert(steps.includes('"$RUNNER_TEMP/psp-staticcheck" -tags node_reinstall_acceptance ./...'), 'run the resulting analyzer against the full application and acceptance files')
   assert(!/staticcheck@\S+/.test(steps), 'go run package@version ignores the tool-module export reader pin')
 })

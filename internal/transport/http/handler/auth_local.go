@@ -117,6 +117,7 @@ func (h *AuthLocalHandler) Methods(c *gin.Context) {
 		"registration_enabled":                    s.RegistrationEnabled,
 		"registration_require_email_verification": !s.RegistrationAllowUnverified,
 		"registration_delivery":                   s.RegistrationDelivery,
+		"legal":                                   gin.H{"enabled": s.LegalEnabled, "consent_version": s.LegalConsentVersion},
 		// Passkeys (v3.7.0): passkey_passwordless drives whether the login page
 		// shows a "Sign in with a passkey" button (usernameless discoverable
 		// login). passkey_enabled alone only allows enrollment as a 2nd factor.

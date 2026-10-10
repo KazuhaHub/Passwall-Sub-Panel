@@ -177,7 +177,7 @@ func openWithLogger(kind, dsn string, gormLogger logger.Interface) (*gorm.DB, er
 func NewRepos(db *gorm.DB) ports.Repos {
 	// Settings is wrapped in the in-process cache decorator (see below); the
 	// ScopedSettings resolver layers each group's sparse overrides on top of it.
-	cachedSettings := NewCachingSettingsRepo(newKVSettingsRepo(db))
+	cachedSettings := newCachingSettingsRepo(newKVSettingsRepo(db))
 	// One cached scope repo shared by BOTH the write side (ScopeSettings: admin
 	// override CRUD, group-delete cleanup) and the read side (the ScopedSettings
 	// resolver). Sharing the instance is what makes invalidate-on-write correct —
@@ -191,6 +191,7 @@ func NewRepos(db *gorm.DB) ports.Repos {
 	groupLimits := newGroupLimitsCache(db)
 	destAudit := NewDestAuditRepo(db)
 	return ports.Repos{
+		Legal:                   &legalRepo{db: db, invalidate: cachedSettings.invalidate},
 		User:                    &userRepo{db: db, groupLimits: groupLimits},
 		Group:                   &groupRepo{db: db, limitsCache: groupLimits},
 		Node:                    &nodeRepo{db: db},

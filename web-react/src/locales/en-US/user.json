@@ -210,6 +210,15 @@
     "cancel": "Cancel",
     "copied": "Copied"
   },
+  "legal": {
+    "title": "The terms of service and privacy policy have changed",
+    "description": "We updated the terms of service and privacy policy to explain what this service records and how long it keeps the data. Your subscription is unaffected.",
+    "later": "Later",
+    "accept": "Agree",
+    "failed": "Unable to submit. Please try again.",
+    "outdated": "The terms just changed again. Please read the updated documents.",
+    "recorded": "Your consent has been recorded"
+  },
   "announce": {
     "ack": "Got it",
     "mute": "Don't show again"

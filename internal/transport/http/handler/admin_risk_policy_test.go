@@ -448,7 +448,10 @@ func TestSettingsWritesAreSerialized(t *testing.T) {
 		t.Errorf("while the settings save was held the store saw %v, want %v: the policy PUT loaded a record about to be overwritten", during, want)
 	}
 	got, saves, events := repo.snapshot()
-	if want := []string{"load", "save", "saved", "load", "save", "saved"}; !slices.Equal(events, want) {
+	// The settings writer rereads publication metadata after its save while
+	// still holding the shared lock. Only then may the policy writer load the
+	// updated record and save its change.
+	if want := []string{"load", "save", "saved", "load", "load", "save", "saved"}; !slices.Equal(events, want) {
 		t.Errorf("events = %v, want %v", events, want)
 	}
 	if saves != 2 || got.SiteTitle != "after" || got.RiskMaxDevices != 5 {

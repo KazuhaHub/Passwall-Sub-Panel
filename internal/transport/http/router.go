@@ -264,6 +264,7 @@ func NewRouter(d Deps) stdhttp.Handler {
 	// Public endpoints
 	g.GET("/health", handler.Health)
 	g.GET("/api/version", handler.Version)
+	g.GET("/api/legal/:kind", handler.NewLegalPublicHandler(d.Repos.Legal).Get)
 	if d.NodeSync != nil && d.Repos.NodeAgent != nil {
 		nodeAuth, err := handler.NewNodeBearerAuthenticator(d.Repos.NodeAgent)
 		if err != nil {
@@ -415,7 +416,8 @@ func NewRouter(d Deps) stdhttp.Handler {
 	enroll2FA := authpolicy.New(authpolicy.Deps{Groups: d.Repos.Group, Passkeys: d.Repos.WebAuthn, Settings: d.Repos.ScopedSettings})
 	require2FAGate := middleware.Require2FAEnrollment(enroll2FA, d.User)
 
-	userMe := handler.NewUserMeHandler(d.User, d.Traffic, d.Repos.ScopedSettings, d.Group, twofaSvc, passkeySvc, enroll2FA)
+	userMe := handler.NewUserMeHandler(d.User, d.Traffic, d.Repos.ScopedSettings, d.Group, twofaSvc, passkeySvc, enroll2FA, d.Repos.Legal)
+	legalConsent := handler.NewLegalConsentHandler(d.Repos.Legal)
 	userGroup := g.Group("/api/user/me",
 		middleware.RequireAuth(d.Auth, d.User, authUserCache),
 		// Operators are included so that an operator forced to enroll 2FA (via the
@@ -428,6 +430,7 @@ func NewRouter(d Deps) stdhttp.Handler {
 	)
 	{
 		userGroup.GET("", userMe.Profile)
+		userGroup.POST("/legal/accept", legalConsent.Accept)
 		userGroup.GET("/traffic", userMe.Traffic)
 		userGroup.GET("/traffic/history", userMe.TrafficHistory)
 		userGroup.GET("/server-status", userMe.ServerStatus)
@@ -819,6 +822,12 @@ func NewRouter(d Deps) stdhttp.Handler {
 
 		panelPathSSO := handler.NewPanelPathSSOMigrator(d.Repos.SAMLConfig, d.Repos.OIDCConfig, d.SAML, d.OIDC)
 		settings := handler.NewAdminSettingsHandler(d.Repos.Settings, d.JWTParams, paths, panelPathSSO)
+		legalAdmin := handler.NewLegalAdminHandler(d.Repos.Legal)
+		adminGroup.GET("/legal/data-collection", legalAdmin.Collection)
+		adminGroup.GET("/legal/:kind/latest", legalAdmin.Latest)
+		adminGroup.GET("/legal/affected-users", legalAdmin.AffectedUsers)
+		adminGroup.GET("/legal/:kind", legalAdmin.History)
+		adminGroup.POST("/legal/:kind", legalAdmin.Publish)
 		adminGroup.GET("/settings/ui", settings.Get)
 		adminGroup.PUT("/settings/ui", settings.Put)
 		destinationSettings := handler.NewAdminDestinationSettingsHandler(d.Repos.Settings, d.DestinationRefreshChanged)

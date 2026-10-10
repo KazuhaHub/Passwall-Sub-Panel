@@ -1025,14 +1025,14 @@ jobs:
       # staticcheck reads the compiler's export data, and a release older than the
       # toolchain cannot. Go 1.27.2 uses export format 5; the latest released
       # staticcheck v0.8.1 pins an x/tools reader that only supports format 4.
-      # Build that analyzer from a separate pinned module with x/tools v0.50.0,
-      # which supports format 5, then run it against PSP from the repository root.
-      # No analyzer is disabled, and PSP's runtime dependency graph is unchanged.
+      # Build the unchanged analyzer in a separate checksum-pinned tool module
+      # using x/tools v0.50.0. Keep every analyzer enabled and the tool-only
+      # dependencies separate from PSP's runtime graph.
       #
       # ~18s on a cold analysis cache, measured locally, in a job off the critical path.
       - name: staticcheck
         run: |
-          go -C tools/staticcheck build -o "$RUNNER_TEMP/psp-staticcheck" honnef.co/go/tools/cmd/staticcheck
+          go -C tools/staticcheck build -mod=readonly -o "$RUNNER_TEMP/psp-staticcheck" honnef.co/go/tools/cmd/staticcheck
           "$RUNNER_TEMP/psp-staticcheck" -tags node_reinstall_acceptance ./...
       # EVERY OS THE RELEASE SHIPS, NOT ONLY THE RUNNER'S. govulncheck analyses the
       # packages as they build for the current GOOS, so an advisory whose vulnerable

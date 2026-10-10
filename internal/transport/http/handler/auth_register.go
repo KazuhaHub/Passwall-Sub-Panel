@@ -23,9 +23,10 @@ func NewAuthRegisterHandler(reg *registration.Service, settings ports.SettingsRe
 }
 
 type registerRequest struct {
-	Email       string `json:"email" binding:"required"`
-	Password    string `json:"password" binding:"required"`
-	DisplayName string `json:"display_name"`
+	Email                  string `json:"email" binding:"required"`
+	Password               string `json:"password" binding:"required"`
+	DisplayName            string `json:"display_name"`
+	AcceptedConsentVersion int64  `json:"accepted_consent_version"`
 	// Optional captcha proof (image: id+answer; token providers: token), checked
 	// when the admin enabled captcha for the registration context.
 	CaptchaID     string `json:"captcha_id"`
@@ -47,9 +48,10 @@ func (h *AuthRegisterHandler) Register(c *gin.Context) {
 		return
 	}
 	res, err := h.reg.Register(c.Request.Context(), registration.RegisterInput{
-		Email:       req.Email,
-		Password:    req.Password,
-		DisplayName: req.DisplayName,
+		Email:                  req.Email,
+		Password:               req.Password,
+		DisplayName:            req.DisplayName,
+		AcceptedConsentVersion: req.AcceptedConsentVersion,
 	})
 	if err != nil {
 		respondPublicError(c, err)

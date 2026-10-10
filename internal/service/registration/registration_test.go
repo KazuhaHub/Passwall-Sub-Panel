@@ -49,7 +49,7 @@ func (s *stubUserStore) GetByUPN(_ context.Context, upn string) (*domain.User, e
 	}
 	return nil, domain.ErrNotFound
 }
-func (s *stubUserStore) SetPassword(_ context.Context, userID int64, newPassword string) error {
+func (s *stubUserStore) ResumeRegistration(_ context.Context, userID int64, newPassword string, accepted int64) error {
 	s.setPwd = append(s.setPwd, userID)
 	return nil
 }

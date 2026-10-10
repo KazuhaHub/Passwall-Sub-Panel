@@ -1130,7 +1130,10 @@ type CertEventRepo interface {
 // UISettings holds runtime-editable UI preferences. They live in the DB so
 // admin edits don't touch infrastructure fields.
 type UISettings struct {
-	LoginMode string `yaml:"login_mode" json:"login_mode"`
+	LegalEnabled bool `yaml:"legal_enabled" json:"legal_enabled"`
+	// Only legal publication writes this global, monotonically increasing value.
+	LegalConsentVersion int64  `yaml:"legal_consent_version" json:"legal_consent_version"`
+	LoginMode           string `yaml:"login_mode" json:"login_mode"`
 	// SiteTitle is the brand name displayed in the sidebar, header, and
 	// login page. Defaults to "Kazuha Hub Passwall".
 	SiteTitle string `yaml:"site_title" json:"site_title"`
@@ -2239,6 +2242,7 @@ type OIDCConfigRepo interface {
 
 // Repos aggregates all repository ports for dependency injection.
 type Repos struct {
+	Legal                   LegalRepo
 	User                    UserRepo
 	Group                   GroupRepo
 	Node                    NodeRepo

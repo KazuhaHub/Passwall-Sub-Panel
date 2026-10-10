@@ -46,6 +46,8 @@ func NewAdminSettingsHandler(repo ports.SettingsRepo, jwtParams *jwtutil.ParamsC
 }
 
 type settingsDTO struct {
+	LegalEnabled               bool                     `json:"legal_enabled"`
+	LegalConsentVersion        int64                    `json:"legal_consent_version"`
 	LoginMode                  string                   `json:"login_mode"`
 	SiteTitle                  string                   `json:"site_title"`
 	AppTitle                   string                   `json:"app_title"`
@@ -275,6 +277,9 @@ type settingsDTO struct {
 // Explicit zero remains a nonnil pointer and fails the shared policy validator.
 type settingsRequest struct {
 	settingsDTO
+	LegalEnabled *bool `json:"legal_enabled"`
+	// This is publication-owned metadata, never a settings request value.
+	LegalConsentVersion json.RawMessage `json:"legal_consent_version"`
 	// Destination settings have one writer: PUT /dest/settings. Ignore echoed
 	// stale values, including shapes an older tab may send.
 	DestHitRetentionDays         json.RawMessage `json:"dest_hit_retention_days"`
@@ -356,8 +361,10 @@ func settingsToDTO(s ports.UISettings) settingsDTO {
 	// just saved, so the page reads the new values in effect off the save.
 	effective, defaults := ports.RuntimeEffective(s)
 	return settingsDTO{
-		RuntimeEffective: effective,
-		RuntimeDefaults:  defaults,
+		LegalEnabled:        s.LegalEnabled,
+		LegalConsentVersion: s.LegalConsentVersion,
+		RuntimeEffective:    effective,
+		RuntimeDefaults:     defaults,
 
 		LoginMode:                   s.LoginMode,
 		SiteTitle:                   s.SiteTitle,
@@ -551,6 +558,8 @@ func (h *AdminSettingsHandler) Put(c *gin.Context) {
 	}
 	destination := destinationSettingsFrom(prev)
 	s := ports.UISettings{
+		LegalEnabled:                  prev.LegalEnabled,
+		LegalConsentVersion:           prev.LegalConsentVersion,
 		DestHitRetentionDays:          destination.HitRetentionDays,
 		DestTrialRetentionDays:        destination.TrialRetentionDays,
 		DestUsageRetentionDays:        destination.UsageRetentionDays,
@@ -658,6 +667,9 @@ func (h *AdminSettingsHandler) Put(c *gin.Context) {
 	// more — this save does not store it, so a list that does not parse must
 	// not make the rest of the page unsavable.
 	s.SetRiskCenterPolicy(prev.RiskCenterPolicy())
+	if req.LegalEnabled != nil {
+		s.LegalEnabled = *req.LegalEnabled
+	}
 	var pathErr error
 	if s.PanelPath, pathErr = panelpath.Normalize(s.PanelPath); pathErr != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": pathErr.Error()})
@@ -840,6 +852,15 @@ func (h *AdminSettingsHandler) Put(c *gin.Context) {
 		RefreshTTL: time.Duration(s.JWTRefreshTTLMinutes) * time.Minute,
 		Issuer:     s.JWTIssuer,
 	})
+	// Publication does not use this handler's settings mutex. It may have
+	// advanced consent since prev was loaded, even though Save correctly kept
+	// its durable row. Return stored metadata rather than that old snapshot.
+	current, err := h.repo.Load(c.Request.Context(), s)
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+	s.LegalConsentVersion = current.LegalConsentVersion
 	c.JSON(http.StatusOK, settingsToDTO(s))
 }
 

@@ -9,7 +9,7 @@ import { yaml } from '@codemirror/lang-yaml'
 // keystroke. This module pulls in the heavy CM deps, so consumers should
 // React.lazy() it — that keeps it out of the initial SPA bundle (loaded only
 // when a rule-set editor opens). Default export for lazy().
-export interface CodeEditorHandle { revealLine(n: number): void }
+export interface CodeEditorHandle { revealLine(n: number): void; insertLine(text: string): void }
 
 const CodeEditor = forwardRef<CodeEditorHandle, {
   value: string
@@ -41,7 +41,15 @@ const CodeEditor = forwardRef<CodeEditorHandle, {
     const line = view.state.doc.line(Math.max(1, Math.min(view.state.doc.lines, Math.trunc(n))))
     view.dispatch({ selection: { anchor: line.from, head: line.to }, scrollIntoView: true })
     view.focus()
-  } }), [])
+  }, insertLine(text) {
+    const view = editor.current?.view
+    if (!view || readOnly) return
+    const { from, to } = view.state.selection.main
+    const prefix = from > 0 && view.state.doc.sliceString(from - 1, from) !== '\n' ? '\n' : ''
+    const insert = prefix + text + '\n'
+    view.dispatch({ changes: { from, to, insert }, selection: { anchor: from + insert.length }, scrollIntoView: true })
+    view.focus()
+  } }), [readOnly])
   return (
     <CodeMirror
       ref={editor}
