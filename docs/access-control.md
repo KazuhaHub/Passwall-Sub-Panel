@@ -2143,3 +2143,15 @@ noninteractive allowlist badge and make no destination-list request. Ordinary
 group saves do not change destination modes, owned lists or their generation.
 The administrator group workflow, preview, readiness, trial report and remaining
 allowlist UI are still pending; the badge alone does not enable allowlists.
+
+`POST /api/admin/dest/exceptions` also accepts `scope: "group"` with a positive
+`group_id`. It normalizes the target locally and appends only to that allowlist
+group's owned extra list, returning its group/list IDs and normalized entry.
+It creates no global allow policy. A closed group is rejected with
+`dest_mode_invalid_transition`; an unknown group returns `dest_group_not_found`.
+The transaction rechecks the current mode, extra-list identity, ownership and
+custom kind under the definition lock, then parses fresh source. Concurrent
+appends preserve existing content; duplicates keep versions and generation.
+Late failures roll back both contents and generation and return no commit ID.
+Ordinary users and operators cannot invoke this route. The remaining group
+workflow and UI, and this candidate's Linux runtime checks, remain open.
