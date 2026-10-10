@@ -688,7 +688,7 @@
       "hits": "Record rule hits only",
       "hits_and_usage": "Record hits and site usage",
       "off_detail": "Enforce policies only. Saving stops new records from being accepted; the node stops collecting at its next sync. Existing history expires under its retention policy.",
-      "hits_detail": "Record accounts, destinations and counts for block, observe and allowlist hits, aggregated hourly and retained for {{hitDays}} days.",
+      "hits_detail": "Record accounts, destinations and counts for block, observe and allowlist hits, aggregated by hour and retained for {{hitDays}} days.",
       "hits_and_usage_detail": "Also record visited primary domains and counts per account and hour, retained for {{usageDays}} days. Usage can only be viewed one account at a time, and viewing is audited. Trial connections also count toward account usage.",
       "disclosure_hits": "These are connection counts, not traffic volume or a complete browsing log. Allowlist trial hits record groups and primary domains without accounts.",
       "disclosure_usage": "These are connection counts, not traffic volume or a complete browsing log. With site usage enabled, trial connections also count toward each account.",
