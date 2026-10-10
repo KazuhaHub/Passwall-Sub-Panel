@@ -1,6 +1,6 @@
 # Destination access control
 
-Implementation follows the [final audit plan](https://github.com/KazuhaHub/Passwall-Sub-Panel/pull/271). Definition publication, native candidate compilation, list management and hit ingestion are connected to the application. The feature remains under development: the remaining management interfaces, records page, risk evaluation, privacy/consent integration, browser acceptance and real Node kernel acceptance are pending. Stage 4 usage collection and stage 5 group modes remain separate open work.
+Implementation follows the [final audit plan](https://github.com/KazuhaHub/Passwall-Sub-Panel/pull/271). Definition publication, native candidate compilation, list management, hit ingestion and the records tab are connected to the application. The feature remains under development: the remaining management interfaces, risk evaluation, privacy/consent integration, browser acceptance and real Node kernel acceptance are pending. Stage 4 usage collection and stage 5 group modes remain separate open work.
 
 ## Current implementation
 
@@ -91,13 +91,27 @@ Summary, records/groups, names, source options and losses use one private read
 transaction, with repeatable-read isolation on MySQL and PostgreSQL. Local SQLite
 and assembled HTTP tests cover filtering, deletion, stable pagination, overflow,
 privacy failures, role restrictions and backend-switch admission. Concurrent
-server snapshot regression is included for actual MySQL/PostgreSQL CI; SQLite
-skips that concurrency case. The new candidate still needs its own CI verdict.
+server snapshot regression ran on actual MySQL/PostgreSQL CI; SQLite skips that
+concurrency case. Backend commit `85d137dc9d33397d093bf3cd78cb5e5323819963`
+passed its [complete Test workflow](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/38014479132)
+and [published-node systemd acceptance](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/38014479151).
 
-The frontend URL parser and typed HTTP adapter are connected to each other.
+The records tab now mounts from the access-control page while active. It connects
+KPI filters, exact account selection, source/node/time/keyword filters, aggregation,
+pagination and separate incomplete-loss units. Node-zone hour labels retain
+fractional offsets, and sticky headings group the actual panel dates. Custom input
+uses browser time and keeps partial invalid edits local without querying a fallback.
 Keywords stay outside browser history, instants use Unix milliseconds, cancellation
 propagates and runtime component fields cannot enter the API parameter allowlist.
-The records page, browser acceptance and deployment acceptance remain open.
+The adapter validates the history envelope so fallback HTML or malformed data cannot
+become an empty or complete history. Per-session queries do not poll.
+
+Row actions open the existing test prefill, global exception/account exemption
+flow and account drawer. The footer focuses hit retention settings. Stage-5 deny
+cards and trial controls remain hidden until group-mode integration. The mobile
+layout uses two-column KPI cards, wrapped account/time fields, an extra-filter
+dialog and compact rows. Actual browser visual/interaction acceptance and real
+deployment acceptance remain open; frontend tests do not prove them.
 
 ## Definition and publication repository
 

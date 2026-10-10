@@ -34,6 +34,7 @@ export const accessControlKeys = {
   settings: (s: QueryScope) => [...accessControlKeys.all(s), 'settings'] as const,
   status: (s: QueryScope) => [...accessControlKeys.all(s), 'status'] as const,
   policies: (s: QueryScope) => [...accessControlKeys.all(s), 'policies'] as const,
+  hits: (s: QueryScope) => [...accessControlKeys.all(s), 'hits'] as const,
   lists: (s: QueryScope) => [...accessControlKeys.all(s), 'lists'] as const,
   listDetails: (s: QueryScope) => [...accessControlKeys.all(s), 'list-detail'] as const,
   listDetail: (s: QueryScope, id: number, text: boolean) => [...accessControlKeys.listDetails(s), id, text] as const,

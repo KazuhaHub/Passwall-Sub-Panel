@@ -6,6 +6,7 @@ const { get } = vi.hoisted(() => ({ get: vi.fn() }))
 vi.mock('./client', () => ({ client: { get } }))
 
 const now = Date.parse('2026-10-10T01:00:00Z')
+const emptyPage = { group_by: 'site', items: [], total: 0, page: 1, page_size: 50, summary: { block: 0, deny: 0, observe: 0, users: 0 }, sources: [], dropped_in_range: 0, losses: { rows: 0, events: 0, unmatched: 0, scope: 'panel', complete: false } }
 function request() {
   const input = recordsRequest(parseRecordsParams(new URLSearchParams('rec_action=deny&rec_panel=7&rec_group_by=site'), 30), ' private%_host.test ', now)
   if (!input) throw new Error('valid filter fixture rejected')
@@ -17,7 +18,7 @@ describe('destination hits transport', () => {
 
   it('uses the assembled records query with UTC milliseconds, deny semantics and cancellation', async () => {
     const controller = new AbortController()
-    get.mockResolvedValue({ data: { group_by: 'site', items: [], total: 0 } })
+    get.mockResolvedValue({ data: emptyPage })
     await getDestinationHits(request(), { signal: controller.signal, silent: true })
     expect(get).toHaveBeenCalledWith('/admin/dest/hits', {
       params: { panel_id: 7, action: 'block', source_kind: 'group', since: now - 86400000, until: now,
@@ -45,11 +46,31 @@ describe('destination hits transport', () => {
   })
 
   it('does not forward page-link or component fields accidentally attached at runtime', async () => {
-    get.mockResolvedValue({ data: { group_by: 'site', items: [], total: 0 } })
+    get.mockResolvedValue({ data: emptyPage })
     await getDestinationHits({ ...request(), rec_q: 'stale-search', drawer: 'private-drawer', sort: 'dest' } as ReturnType<typeof request>)
     const params = get.mock.calls[0][1].params
     expect(params).not.toHaveProperty('rec_q')
     expect(params).not.toHaveProperty('drawer')
     expect(params).not.toHaveProperty('sort')
+  })
+
+  it('rejects the SPA fallback and malformed histories instead of claiming a complete empty page', async () => {
+    for (const data of ['<!doctype html><html>SPA</html>', {}, { ...emptyPage, group_by: 'none' },
+      { ...emptyPage, losses: null }, { ...emptyPage, losses: { ...emptyPage.losses, complete: true } },
+      { ...emptyPage, items: [{ key: 'example.test', name: null, count: -1, user_count: 1, source_count: 1, last_at: now }] }]) {
+      get.mockResolvedValueOnce({ data })
+      await expect(getDestinationHits(request())).rejects.toThrow('destination records unavailable')
+    }
+  })
+
+  it('cannot open the wrong account by rounding an invalid grouped account identifier', async () => {
+    const input = { ...request(), group_by: 'user' as const }
+    const data = { ...emptyPage, group_by: 'user', items: [{ key: '13', name: null, count: 7, user_count: 1, source_count: 1, last_at: now }] }
+    get.mockResolvedValueOnce({ data })
+    expect(await getDestinationHits(input)).toBe(data)
+    for (const key of ['9007199254740993', '13.5', '-1', '1e3', '01']) {
+      get.mockResolvedValueOnce({ data: { ...data, items: [{ ...data.items[0], key }] } })
+      await expect(getDestinationHits(input)).rejects.toThrow('destination records unavailable')
+    }
   })
 })

@@ -1,5 +1,5 @@
-The records parameter layer implements the shared-link grammar for the planned
-records tab. It does not yet mount a records page.
+The records tab mounts from `AccessControlView` only while active. It reads the
+administrator hit API and keeps its private cache scoped to the current session.
 
 `parseRecordsParams` reads typed filters without changing the supplied URL.
 `recordsSearch` changes only those filters, preserves other tabs and drawer
@@ -22,4 +22,20 @@ parameter allowlist excludes page-link/drawer fields accidentally attached at
 runtime. The assembled app tests exercise the route and its authorization;
 storage tests cover SQLite locally and real server dialects in CI.
 
-The records page, browser acceptance and deployment validation remain open.
+`RecordsTab`, `HitsMetricCards` and `HitRow` connect filtering, stable grouped
+pages, nullable source/account labels, panel-zone hour/date display, independent
+summary cards and separate incomplete loss units. Search is debounced in local
+state. Partial custom-time edits remain local and invalid instead of issuing a
+fallback query. Relative windows resolve on an actual read, not each render.
+Inactive tabs do not read hits, and pending reads cancel on departure.
+
+Row actions reuse the existing destination test prefill, transactional global
+exception/account exemption dialogs and in-page account drawer. The retention
+footer opens settings with hit retention focused. Stage-5 deny cards and trial
+checkboxes stay hidden until group-mode integration. Mobile rows and filter
+dialogs have separate responsive layouts; browser visual acceptance remains open.
+The HTTP adapter validates its response envelope, including the requested
+group/page, separate loss units and incomplete flag. SPA fallback HTML or corrupt
+histories become an unavailable read, never an empty or complete result.
+
+Browser acceptance and real deployment validation remain open.

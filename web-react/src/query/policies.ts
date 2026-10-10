@@ -23,6 +23,8 @@ export interface ResourcePolicy {
 }
 
 export const policies = {
+  destHits: { staleTime: 30 * SECOND, gcTime: 5 * MINUTE, refetchInterval: false,
+    note: 'Hourly audit aggregates; refresh explicitly, never poll a potentially broad historical query.' },
   destStatus: { staleTime: 15 * SECOND, gcTime: 5 * MINUTE, refetchInterval: 10 * SECOND,
     note: 'Observe actual outstanding candidate/publication acknowledgement only; stop polling when settled and while hidden.' },
   destDefinitions: { staleTime: 5 * MINUTE, gcTime: 15 * MINUTE, refetchInterval: false,
