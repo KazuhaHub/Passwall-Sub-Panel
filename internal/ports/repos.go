@@ -2252,6 +2252,7 @@ type Repos struct {
 	DestAuditRead           DestAuditReadRepo
 	DestHitsRead            DestHitReadRepo
 	DestUserHitsRead        DestUserHitReadRepo
+	DestRiskRead            DestRiskReadRepo
 	DestinationEligibility  DestinationEligibilityRepo
 	NativeAgentProvisioning NativeAgentProvisioningRepo
 	ServerMigration         ServerMigrationRepo

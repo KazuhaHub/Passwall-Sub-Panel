@@ -2020,8 +2020,15 @@ endpoint, SQL settings, per-group overrides and the policy card. The signal's
 negative switch defaults to enabled; its fixed 24-hour threshold defaults to
 20 and is bounded to 1..10000. An explicit group zero uses the shipped default
 rather than the global threshold. The card has no preset, automatic action or
-runtime-window setting. This foundation does not yet implement destination
-risk evaluation, evidence, collector-availability states or queue integration.
+runtime-window setting. The pure six-state evaluator and an address-free bulk
+SQL window are implemented separately. Counts use frozen block actions and
+currently opted-in policies; allowlist fallback, observation and deleted
+policies are excluded. Counts and related panel block losses share one private
+read snapshot with current clients. Aggregates spanning a 24-hour cutoff are
+excluded because their inside-window counts are unknown. Evidence retains only
+policy IDs, counts, current collecting-node counts and separate loss units,
+with incomplete coverage explicitly stated. Production worker wiring, proof of
+current collection, queue integration and evidence UI remain outstanding.
 
 Stage 1c still requires the remaining access-control views and complete browser
 acceptance. C2's end-to-end browser
