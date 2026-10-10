@@ -2085,5 +2085,21 @@ zero rows are omitted. One read-only repeatable-read snapshot covers publication
 state, document, settings and node proof. Only kind, count and retention leave
 the repository; server names, accounts, credentials and historical data do not
 enter this projection. The existing whole-document ETag covers these changes.
-This slice still needs its own Linux/server-dialect CI and real deployment
-acceptance; prior integration CI does not validate the newly added code.
+Collection candidate `f58da307` passed its own complete
+[Test workflow](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/38051472949)
+and [systemd acceptance](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/38051473018),
+including assembled HTTP/ETag transitions and real MySQL/PostgreSQL snapshot
+tests. Browser and real deployment acceptance remain open.
+
+Stage 4 now adds a repository boundary for per-account website usage. A
+positive account ID is mandatory, windows are bounded to 31 days and the
+default top result has 20 sites (at most 200). Rows from overlapping UTC hours
+and selected nodes fold into connection counts with integer saturation. The
+stream retains only the bounded top sites, with deterministic count/site
+ordering. It reads only site/count columns; usage losses keep separate row,
+event and unmatched units and explicitly retain panel scope. Counts and losses
+share a private repeatable-read snapshot. Errors return no partial result or
+private SQL diagnostic. This foundation does not expose an HTTP usage route;
+audited reads, retention enforcement, account availability and explicit
+on-demand UI remain required before stage 4 is delivered. The new SQL cases
+still require this branch's Linux/server-dialect execution.
