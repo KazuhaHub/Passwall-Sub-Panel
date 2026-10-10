@@ -174,7 +174,12 @@ func TestRiskPolicyGet_ServesSettingsDefaultsAndEffective(t *testing.T) {
 	if !reflect.DeepEqual(view.Defaults, ports.RiskCenterPolicyDefaults()) {
 		t.Errorf("defaults = %v\nwant %v", view.Defaults, ports.RiskCenterPolicyDefaults())
 	}
-	effective, _ := ports.RuntimeEffective(stored)
+	effective := ports.RiskCenterRuntimeEffective(stored)
+	for key := range view.Effective {
+		if strings.HasPrefix(key, "dest_") {
+			t.Fatalf("risk view exposed unrelated fleet controls: %s", key)
+		}
+	}
 	if !reflect.DeepEqual(view.Effective, effective) {
 		t.Errorf("effective = %v\nwant RuntimeEffective of the stored settings %v", view.Effective, effective)
 	}

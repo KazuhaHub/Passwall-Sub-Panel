@@ -3,15 +3,22 @@ package sqlstore
 import (
 	"context"
 	"fmt"
+	"math"
 	"time"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/keyedmutex"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 )
 
-type xuiPanelRepo struct{ db *gorm.DB }
+type xuiPanelRepo struct {
+	db         *gorm.DB
+	auditGates *keyedmutex.Map[int64]
+	audit      *DestAuditRepo
+}
 
 func (r *xuiPanelRepo) List(ctx context.Context) ([]*domain.XUIPanel, error) {
 	var rows []xuiPanelRow
@@ -93,7 +100,14 @@ func (r *xuiPanelRepo) Save(ctx context.Context, p *domain.XUIPanel) error {
 		return err
 	}
 	db := r.db.WithContext(ctx)
-	if row.ID == 0 {
+	creating := row.ID == 0
+	if !creating && r.auditGates != nil {
+		unlock := r.auditGates.Lock(row.ID)
+		defer unlock()
+	}
+	if creating {
+		row.AuditCollect = string(domain.NormalizeAuditCollect(p.AuditCollect))
+		row.AuditCollectRevision = 1
 		err = db.Create(row).Error
 	} else {
 		// domain.XUIPanel carries no created_at, so a full Save would write the
@@ -101,12 +115,21 @@ func (r *xuiPanelRepo) Save(ctx context.Context, p *domain.XUIPanel) error {
 		// ("Incorrect datetime value: '0000-00-00'"). Omit it: created_at stays
 		// as first written, updated_at still refreshes. SQLite/Postgres tolerated
 		// the zero date; the cross-DB CI surfaced this MySQL-only bug.
-		err = db.Omit("CreatedAt").Save(row).Error
+		err = db.Omit("CreatedAt", "AuditCollect", "AuditCollectRevision").Save(row).Error
 	}
 	if err != nil {
 		return err
 	}
 	p.ID = row.ID
+	if creating {
+		// Creation initialized these fields; callers updating an existing row
+		// must read the separate control state rather than infer it from Save.
+		p.AuditCollect = domain.AuditCollect(row.AuditCollect)
+		p.AuditCollectRevision = row.AuditCollectRevision
+		unlock := r.audit.lockControlPanel(row.ID)
+		defer unlock()
+	}
+	r.audit.notifyCurrentControl(ctx, row.ID)
 	return nil
 }
 
@@ -115,9 +138,18 @@ func (r *xuiPanelRepo) Save(ctx context.Context, p *domain.XUIPanel) error {
 // when an administrator only changes a native server's display/preference.
 // Input channel validation belongs to the HTTP boundary: rollback must be able
 // to restore the exact empty/unknown preference read from an existing row.
-func (r *xuiPanelRepo) UpdateNativeMetadata(ctx context.Context, id int64, name, remark *string, channel *domain.PanelUpdateChannel) error {
+func (r *xuiPanelRepo) UpdateNativeMetadata(ctx context.Context, id int64, name, remark *string, channel *domain.PanelUpdateChannel, collect *domain.AuditCollect) error {
 	if id <= 0 || (name != nil && *name == "") {
 		return fmt.Errorf("%w: invalid native server metadata", domain.ErrValidation)
+	}
+	if collect != nil && !collect.Valid() {
+		return fmt.Errorf("%w: invalid audit collection mode", domain.ErrValidation)
+	}
+	// Share the short per-panel gate with every audit chunk. No transaction
+	// carrying an old revision can commit after this settings write succeeds.
+	if r.auditGates != nil {
+		unlock := r.auditGates.Lock(id)
+		defer unlock()
 	}
 	updates := map[string]any{}
 	if name != nil {
@@ -129,33 +161,35 @@ func (r *xuiPanelRepo) UpdateNativeMetadata(ctx context.Context, id int64, name,
 	if channel != nil {
 		updates["update_channel"] = string(*channel)
 	}
-	db := r.db.WithContext(ctx)
-	var row xuiPanelRow
-	if err := db.Select("id", "kind").First(&row, id).Error; err != nil {
-		return wrapNotFound(err)
-	}
-	if domain.NormalizePanelKind(domain.PanelKind(row.Kind)) != domain.PanelKindPSP {
-		return fmt.Errorf("%w: native metadata requires a Passwall Node server", domain.ErrValidation)
-	}
-	if len(updates) == 0 {
-		return nil
-	}
-	result := db.Model(&xuiPanelRow{}).Where("id = ? AND kind = ?", id, string(domain.PanelKindPSP)).Updates(updates)
-	if result.Error != nil {
-		return result.Error
-	}
-	if result.RowsAffected == 0 {
-		// MySQL may report zero changed rows for a no-op; distinguish that from
-		// deletion/backend change instead of claiming a missing row was saved.
-		var current xuiPanelRow
-		if err := db.Select("id", "kind").First(&current, id).Error; err != nil {
+	var state domain.DestAuditControl
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// Serialize the comparison with the revision increment. Two equal
+		// writes must not both invalidate the same collection generation.
+		var row xuiPanelRow
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select("id", "kind", "audit_collect", "audit_collect_revision").First(&row, id).Error; err != nil {
 			return wrapNotFound(err)
 		}
-		if domain.NormalizePanelKind(domain.PanelKind(current.Kind)) != domain.PanelKindPSP {
-			return fmt.Errorf("%w: native server backend changed", domain.ErrConflict)
+		if domain.NormalizePanelKind(domain.PanelKind(row.Kind)) != domain.PanelKindPSP {
+			return fmt.Errorf("%w: native metadata requires a Passwall Node server", domain.ErrValidation)
 		}
+		if collect != nil && string(*collect) != row.AuditCollect {
+			if row.AuditCollectRevision < 1 || row.AuditCollectRevision == math.MaxInt64 {
+				return fmt.Errorf("%w: invalid audit collection revision", domain.ErrValidation)
+			}
+			updates["audit_collect"] = string(*collect)
+			updates["audit_collect_revision"] = gorm.Expr("audit_collect_revision + 1")
+			row.AuditCollect, row.AuditCollectRevision = string(*collect), row.AuditCollectRevision+1
+		}
+		state = auditControlState(row)
+		if len(updates) == 0 {
+			return nil
+		}
+		return tx.Model(&xuiPanelRow{}).Where("id = ?", id).Updates(updates).Error
+	})
+	if err == nil {
+		r.audit.notifyControl(state)
 	}
-	return nil
+	return err
 }
 
 // Delete removes a panel row, but refuses the operation when any nodes
@@ -166,6 +200,10 @@ func (r *xuiPanelRepo) UpdateNativeMetadata(ctx context.Context, id int64, name,
 // dangling reference panics on nil. Caller is expected to clean the
 // referencing rows (or reassign them) first.
 func (r *xuiPanelRepo) Delete(ctx context.Context, id int64) error {
+	if r.auditGates != nil {
+		unlock := r.auditGates.Lock(id)
+		defer unlock()
+	}
 	var nodeRefs int64
 	if err := r.db.WithContext(ctx).Model(&nodeRow{}).Where("panel_id = ?", id).Count(&nodeRefs).Error; err != nil {
 		return err
@@ -186,7 +224,11 @@ func (r *xuiPanelRepo) Delete(ctx context.Context, id int64) error {
 	if clientRefs > 0 {
 		return fmt.Errorf("%w: panel still owns %d user client row(s); detach them first", domain.ErrValidation, clientRefs)
 	}
-	return r.db.WithContext(ctx).Delete(&xuiPanelRow{}, id).Error
+	err := r.db.WithContext(ctx).Delete(&xuiPanelRow{}, id).Error
+	if err == nil {
+		r.audit.notifyControl(domain.DestAuditControl{PanelID: id})
+	}
+	return err
 }
 
 // UpdateVersion writes only panel_version / xray_version / version_checked_at

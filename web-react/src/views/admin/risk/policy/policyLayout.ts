@@ -1,7 +1,8 @@
+import type { PolicyFieldSpec as SharedPolicyFieldSpec } from '@/components/PolicyField'
 import type { RiskPolicyKey, RiskPolicySettings } from './policyKeys'
 import type { PresetDetector } from './presets'
 
-// THE POLICY PAGE'S LAYOUT: which of the 48 keys goes on which card, in
+// THE POLICY PAGE'S LAYOUT: which of the 50 keys goes on which card, in
 // which part of it, with which label, hint and bounds. Data rather than
 // JSX, so the rules the page stands on — every key placed exactly once, the
 // runtime knobs captioned with their value in effect, a lit preset
@@ -35,7 +36,7 @@ export const RISK_WINDOW_DAYS = 7
 
 export type PolicyFieldKind = 'number' | 'float' | 'switch' | 'inverted' | 'select' | 'text'
 
-export interface PolicyFieldSpec {
+export interface PolicyFieldSpec extends SharedPolicyFieldSpec {
   key: RiskPolicyKey
   kind: PolicyFieldKind
   /** Full i18n keys, namespace included. */
@@ -54,7 +55,7 @@ export interface PolicyFieldSpec {
   options?: { value: string; label: string }[]
 }
 
-export type PolicyCardId = 'geo' | 'sub_spread' | 'devices' | 'usage_shift' | 'login_country' | 'data'
+export type PolicyCardId = 'geo' | 'sub_spread' | 'devices' | 'usage_shift' | 'login_country' | 'dest_block' | 'data'
 
 export interface PolicyCardSpec {
   id: PolicyCardId
@@ -62,7 +63,7 @@ export interface PolicyCardSpec {
   desc: string
   /**
    * The card's on/off switch. The geo card's is its scope ('off' is off);
-   * the four risk signals' are their negative *_off keys. The data card has
+   * the five risk signals' are their negative *_off keys. The data card has
    * none: nothing on it detects.
    */
   toggle?: { kind: 'geo_scope' } | { kind: 'inverted'; key: RiskPolicyKey }
@@ -96,7 +97,7 @@ function knob(key: RiskPolicyKey, ns: 'geo_anomaly' | 'risk' | 'risk_center', mi
   }
 }
 
-export const POLICY_CARDS: PolicyCardSpec[] = [
+export const POLICY_CARDS: PolicyCardSpec[] = withRiskCopy([
   {
     id: 'geo',
     title: 'admin:risk_center.policy.card.geo',
@@ -204,6 +205,13 @@ export const POLICY_CARDS: PolicyCardSpec[] = [
     ],
   },
   {
+    id: 'dest_block',
+    title: 'admin:risk_center.policy.card.dest_block',
+    desc: 'admin:risk_center.policy.card.dest_block_desc',
+    toggle: { kind: 'inverted', key: 'risk_dest_block_off' },
+    fields: [{ key: 'risk_dest_block_threshold', kind: 'number', label: `${RISK}dest_block_threshold`, hint: `${RISK}dest_block_threshold_hint`, min: 1, max: 10000, tail: true }],
+  },
+  {
     id: 'data',
     title: 'admin:risk_center.policy.card.data',
     desc: 'admin:risk_center.policy.card.data_desc',
@@ -225,7 +233,7 @@ export const POLICY_CARDS: PolicyCardSpec[] = [
       knob('geo_anomaly_infra_host_ttl_minutes', 'geo_anomaly', 1, 1440),
     ],
   },
-]
+])
 
 /** Every field of a card, in page order. */
 export function cardFields(card: PolicyCardSpec): PolicyFieldSpec[] {
@@ -261,4 +269,16 @@ export function advancedConfigured(card: PolicyCardSpec, draft: Partial<RiskPoli
     if (typeof v === 'string') return v.trim() !== ''
     return v === true
   })
+}
+
+// Preserve the existing policy page's words while sharing its field renderer.
+function withRiskCopy(cards: PolicyCardSpec[]): PolicyCardSpec[] {
+  const copy = {
+    range_default: 'admin:risk_center.policy.range_default', min_default: 'admin:risk_center.policy.min_default',
+    default_only: 'admin:risk_center.policy.default_only', out_of_range: 'admin:risk_center.policy.out_of_range',
+    reset_default: 'admin:risk_center.policy.reset_default', default_adornment: 'admin:risk_center.policy.default_adornment',
+    effective: 'admin:settings.risk_center.effective',
+  }
+  const field = (spec: PolicyFieldSpec): PolicyFieldSpec => ({ ...spec, copy })
+  return cards.map(card => ({ ...card, fields: card.fields.map(field), disposal: card.disposal?.map(field), advanced: card.advanced?.map(field) }))
 }

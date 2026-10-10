@@ -1,12 +1,14 @@
 package handler
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"sync"
 	"time"
 
@@ -68,7 +70,9 @@ type NodeSyncHandler struct {
 	// The METRIC is not rate-limited — it is the durable record — but a node with
 	// a permanently broken collector would otherwise emit one warning per poll
 	// forever, which is how a real signal gets filtered out of a log.
-	drops hostDropLog
+	drops       hostDropLog
+	policyDrops hostDropLog
+	auditDrops  hostDropLog
 }
 
 // hostDropLogInterval is how often one agent's telemetry failure may be logged.
@@ -191,6 +195,31 @@ func (h *NodeSyncHandler) recordHostDrop(agentID, reason string) {
 	log.Warn("node host telemetry dropped", "agent_id", agentID, "reason", reason)
 }
 
+// Decode this additive subtree after control validation. A peer's observation
+// must never prevent the panel from sending a changed roster or config.
+func (h *NodeSyncHandler) sanitizePolicyStatus(raw json.RawMessage, capabilities []string, agentID string) *nodeprotocol.PolicyStatus {
+	raw = bytes.TrimSpace(raw)
+	if len(raw) == 0 || bytes.Equal(raw, []byte("null")) {
+		return nil
+	}
+	reason := "invalid"
+	if slices.Contains(capabilities, nodeprotocol.CapabilityDestinationPolicy) {
+		var status nodeprotocol.PolicyStatus
+		if err := json.Unmarshal(raw, &status); err == nil {
+			if err := nodeprotocol.ValidatePolicyStatus(status); err == nil {
+				return &status
+			}
+		}
+	} else {
+		reason = "capability_missing"
+	}
+	metrics.NodePolicyStatusDroppedTotal.Inc()
+	if h.policyDrops.shouldLog(agentID, time.Now()) {
+		log.Warn("node policy status dropped", "agent_id", agentID, "reason", reason)
+	}
+	return nil
+}
+
 func (h *NodeSyncHandler) ServeHTTP(w http.ResponseWriter, request *http.Request) {
 	if request.Method != http.MethodPost || request.URL.Path != "/v1/node/sync" {
 		http.NotFound(w, request)
@@ -217,14 +246,21 @@ func (h *NodeSyncHandler) ServeHTTP(w http.ResponseWriter, request *http.Request
 		writeNodeError(w, status, fmt.Errorf("read node report: %w", err))
 		return
 	}
-	var report nodeprotocol.NodeReport
+	// The explicit RawMessage shadows the embedded typed field, including
+	// scalar/type errors that would otherwise reject the entire report.
+	var envelope struct {
+		nodeprotocol.NodeReport
+		PolicyStatus json.RawMessage `json:"policy_status"`
+		Audit        json.RawMessage `json:"audit"`
+	}
 	// Unmarshal rather than a streaming decoder: this makes a trailing second
 	// document a syntax error, instead of something a following Decode has to be
 	// remembered to notice.
-	if err := json.Unmarshal(body, &report); err != nil {
+	if err := json.Unmarshal(body, &envelope); err != nil {
 		writeNodeError(w, http.StatusBadRequest, fmt.Errorf("decode node report: %w", err))
 		return
 	}
+	report := envelope.NodeReport
 	if report.AgentID != agentID {
 		writeNodeError(w, http.StatusUnauthorized, ErrNodeAuthentication)
 		return
@@ -254,6 +290,8 @@ func (h *NodeSyncHandler) ServeHTTP(w http.ResponseWriter, request *http.Request
 		return
 	}
 	report.Host = h.sanitizeHost(body, report.Host, agentID)
+	report.PolicyStatus = h.sanitizePolicyStatus(envelope.PolicyStatus, report.Capabilities, agentID)
+	report.Audit = h.sanitizeAudit(envelope.Audit, report.Capabilities, agentID)
 	response, err := h.service.Sync(request.Context(), report)
 	if err != nil {
 		// The untrusted shape was already validated above. Everything after this

@@ -161,9 +161,9 @@ describe('geo catalog', () => {
 describe('risk catalog', () => {
   const riskRows = () => SCOPE_KEYS.filter(k => k.cat === 'risk')
 
-  it('has exactly the thirteen overridable risk keys, in order', () => {
-    // The mirror of ports.OverridableScopeKeys' risk block: the four
-    // switches, the four tolerances, then usage_shift's three thresholds and
+  it('has exactly the fifteen overridable risk keys, in order', () => {
+    // The mirror of ports.OverridableScopeKeys' risk block: the five
+    // switches, the destination threshold, the four tolerances, then usage_shift's three thresholds and
     // login_country's two, which became per-group settings with the risk
     // center.
     expect(SCOPE_CATEGORIES.find(c => c.id === 'risk')).toEqual({ id: 'risk', labelKey: 'cat_risk', def: '风险信号（只提示）' })
@@ -172,6 +172,8 @@ describe('risk catalog', () => {
       'risk.devices_off',
       'risk.usage_shift_off',
       'risk.login_country_off',
+      'risk.dest_block_off',
+      'risk.dest_block_threshold',
       'risk.min_days',
       'risk.max_devices',
       'risk.usage_ratio',
@@ -183,7 +185,7 @@ describe('risk catalog', () => {
       'risk.login_hold_days',
     ])
     expect(riskRows().map(k => k.kind)).toEqual(
-      ['bool', 'bool', 'bool', 'bool', 'int', 'int', 'float', 'int', 'int', 'int', 'int', 'int', 'int'])
+      ['bool', 'bool', 'bool', 'bool', 'bool', 'int', 'int', 'int', 'float', 'int', 'int', 'int', 'int', 'int', 'int'])
   })
 
   it('never offers hwid capture per group', () => {
@@ -198,6 +200,7 @@ describe('risk catalog', () => {
     // "no device allowed", "a zero-byte floor" or "flag on no days".
     const unset = Object.fromEntries(riskRows().filter(k => k.kind !== 'bool').map(k => [k.key, k.unsetValue]))
     expect(unset).toEqual({
+      'risk.dest_block_threshold': '20',
       'risk.min_days': '3',
       'risk.max_devices': '3',
       'risk.usage_ratio': '3',
@@ -223,12 +226,12 @@ describe('risk catalog', () => {
 // (「上面」「下方」) or restate "0 = default": the editor is not that page,
 // and its inherited value already says the default.
 describe('geo and risk hints', () => {
-  const HINTLESS = ['risk.devices_off', 'risk.usage_shift_off', 'risk.login_country_off']
+  const HINTLESS = ['risk.devices_off', 'risk.usage_shift_off', 'risk.login_country_off', 'risk.dest_block_off']
   const rows = () => SCOPE_KEYS.filter(k => ['geo', 'geo_ban', 'risk'].includes(k.cat))
   const zh = flatten(zhBundle as Nested)
   const en = flatten(enBundle as Nested)
 
-  it('gives every geo and risk row a hint both bundles have, the three plain switches excepted', () => {
+  it('gives every geo and risk row a hint both bundles have, the four plain switches excepted', () => {
     const missing: string[] = []
     for (const k of rows()) {
       if (HINTLESS.includes(k.key)) {

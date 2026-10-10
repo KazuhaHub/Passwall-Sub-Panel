@@ -68,8 +68,8 @@ func TestRiskCenterPolicy_IsExactlyTheGeoAndRiskFields(t *testing.T) {
 		f := pt.Field(i)
 		got[f.Name] = field{f.Name, jsonTag(f), f.Type}
 	}
-	if len(want) != 48 {
-		t.Errorf("UISettings has %d geo_anomaly_/risk_ fields, the policy was specified at 48: update this count only together with the policy page", len(want))
+	if len(want) != 50 {
+		t.Errorf("UISettings has %d geo_anomaly_/risk_ fields, the policy was specified at 50: update this count only together with the policy page", len(want))
 	}
 	for name, w := range want {
 		g, ok := got[name]
@@ -169,8 +169,8 @@ func TestRiskCenterPolicyKeys_AreTheTagsInOrder(t *testing.T) {
 	if !slices.Equal(got, want) {
 		t.Fatalf("RiskCenterPolicyKeys() = %v\nwant %v", got, want)
 	}
-	if len(got) != 48 {
-		t.Errorf("%d keys, want 48", len(got))
+	if len(got) != 50 {
+		t.Errorf("%d keys, want 50", len(got))
 	}
 	if len(slices.Compact(slices.Sorted(slices.Values(got)))) != len(got) {
 		t.Errorf("a key is listed twice: %v", got)
@@ -184,7 +184,7 @@ func TestRiskCenterPolicyKeys_AreTheTagsInOrder(t *testing.T) {
 
 // The policy page shows the shipped default in every empty numeric field
 // and holds no copy of any: it reads them from here. So the keys are
-// exactly the policy's 38 numbers (the three texts and seven switches have
+// exactly the policy's 39 numbers (the three texts and eight switches have
 // no "default" to show), and each value is the domain's own shipped value
 // in the setting's unit — the geo policy's, the risk policy's (the floor in
 // GiB, as it is typed) and the 23 runtime knobs' as RuntimeEffective states
@@ -200,8 +200,8 @@ func TestRiskCenterPolicyDefaults_CoverEveryNumericKeyExactly(t *testing.T) {
 			numeric = append(numeric, jsonTag(pt.Field(i)))
 		}
 	}
-	if len(numeric) != 38 {
-		t.Errorf("the policy has %d numeric keys, want 38", len(numeric))
+	if len(numeric) != 39 {
+		t.Errorf("the policy has %d numeric keys, want 39", len(numeric))
 	}
 	keys := make([]string, 0, len(got))
 	for k := range got {
@@ -228,6 +228,7 @@ func TestRiskCenterPolicyDefaults_CoverEveryNumericKeyExactly(t *testing.T) {
 		"risk_max_devices":                 3,
 		"risk_usage_ratio":                 3,
 		"risk_usage_floor_gb":              3,
+		"risk_dest_block_threshold":        20,
 	}
 	// The literals above are the shipped values the page was designed
 	// around; they must also BE the domain's, or the page would show a
@@ -248,6 +249,7 @@ func TestRiskCenterPolicyDefaults_CoverEveryNumericKeyExactly(t *testing.T) {
 		"risk_max_devices":                 float64(risk.MaxDevices),
 		"risk_usage_ratio":                 risk.UsageRatio,
 		"risk_usage_floor_gb":              float64(risk.UsageFloorBytes / domain.RiskGiB),
+		"risk_dest_block_threshold":        float64(risk.DestBlockThreshold),
 	}
 	for k, v := range fromDomain {
 		if want[k] != v {
@@ -256,7 +258,9 @@ func TestRiskCenterPolicyDefaults_CoverEveryNumericKeyExactly(t *testing.T) {
 	}
 	_, runtimeDefaults := RuntimeEffective(UISettings{})
 	for k, v := range runtimeDefaults {
-		want[k] = float64(v)
+		if slices.Contains(RiskCenterPolicyKeys(), k) {
+			want[k] = float64(v)
+		}
 	}
 	for k, w := range want {
 		if g, ok := got[k]; !ok || g != w {

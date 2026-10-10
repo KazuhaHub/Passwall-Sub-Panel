@@ -29,6 +29,23 @@ import type { QueryScope } from './session'
  */
 const privateRoot = (s: QueryScope) => ['private', s] as const
 
+export const accessControlKeys = {
+  all: (s: QueryScope) => [...privateRoot(s), 'access-control'] as const,
+  settings: (s: QueryScope) => [...accessControlKeys.all(s), 'settings'] as const,
+  status: (s: QueryScope) => [...accessControlKeys.all(s), 'status'] as const,
+  policies: (s: QueryScope) => [...accessControlKeys.all(s), 'policies'] as const,
+  hits: (s: QueryScope) => [...accessControlKeys.all(s), 'hits'] as const,
+  lists: (s: QueryScope) => [...accessControlKeys.all(s), 'lists'] as const,
+  listDetails: (s: QueryScope) => [...accessControlKeys.all(s), 'list-detail'] as const,
+  listDetail: (s: QueryScope, id: number, text: boolean) => [...accessControlKeys.listDetails(s), id, text] as const,
+  listPreviews: (s: QueryScope) => [...accessControlKeys.all(s), 'list-preview'] as const,
+  categories: (s: QueryScope) => [...accessControlKeys.all(s), 'categories'] as const,
+  policyPreviews: (s: QueryScope) => [...accessControlKeys.all(s), 'policy-preview'] as const,
+  exemptions: (s: QueryScope) => [...accessControlKeys.all(s), 'exemptions'] as const,
+  userAccessRoot: (s: QueryScope) => [...accessControlKeys.all(s), 'user-access'] as const,
+  userAccess: (s: QueryScope, id: number) => [...accessControlKeys.userAccessRoot(s), id] as const,
+}
+
 export const alertKeys = {
   all: (s: QueryScope) => [...privateRoot(s), 'alerts'] as const,
 }

@@ -1,0 +1,714 @@
+[
+  {
+    "name": "s16-account-en-light-375",
+    "actions": [
+      {
+        "height": 44,
+        "name": "Close",
+        "width": 44
+      },
+      {
+        "height": 44,
+        "name": "Open usage trend",
+        "width": 132.11459350585938
+      },
+      {
+        "height": 44,
+        "name": "Suspend proxy service",
+        "width": 162.28125
+      },
+      {
+        "height": 44,
+        "name": "More actions",
+        "width": 44
+      },
+      {
+        "height": 48,
+        "name": "Overview",
+        "width": 90.28125
+      },
+      {
+        "height": 48,
+        "name": "Connections",
+        "width": 111.75
+      },
+      {
+        "height": 48,
+        "name": "Devices",
+        "width": 90
+      },
+      {
+        "height": 48,
+        "name": "Timeline",
+        "width": 90
+      },
+      {
+        "height": 48,
+        "name": "Access",
+        "width": 90
+      },
+      {
+        "height": 44,
+        "name": "Cancel exemption",
+        "width": 161.875
+      }
+    ],
+    "overflow": false,
+    "rect": {
+      "height": 812,
+      "width": 375.3333435058594,
+      "x": 0,
+      "y": 0
+    },
+    "tabs": [
+      {
+        "label": "Overview",
+        "selected": "false"
+      },
+      {
+        "label": "Connections",
+        "selected": "false"
+      },
+      {
+        "label": "Devices",
+        "selected": "false"
+      },
+      {
+        "label": "Timeline",
+        "selected": "false"
+      },
+      {
+        "label": "Access",
+        "selected": "true"
+      }
+    ],
+    "text": "Risk detailsfixture-1@example.invalidFixture · 用户 1#1Fixture · 试运行分组Account activeProxy service activePeriod used0.00 GB / UnlimitedOpen usage trendSuspend proxy serviceOverviewConnectionsDevicesTimelineAccessGroupFixture · 试运行分组Allowlist · trialExemptionFixture · 临时排障例外Added by fixture-admin@example.invalid 1h agoExpires Oct 10, 2026, 1:16:34 AMThe allowlist and every destination policy stop applying to this account until the exemption expires or is canceled.Cancel exemption",
+    "viewport": {
+      "height": 812,
+      "width": 375
+    }
+  },
+  {
+    "name": "s16-account-zh-light-375",
+    "actions": [
+      {
+        "height": 44,
+        "name": "关闭",
+        "width": 44
+      },
+      {
+        "height": 44,
+        "name": "查看用量趋势",
+        "width": 106.60417175292967
+      },
+      {
+        "height": 44,
+        "name": "暂停代理服务",
+        "width": 107.9375
+      },
+      {
+        "height": 44,
+        "name": "更多操作",
+        "width": 44
+      },
+      {
+        "height": 48,
+        "name": "概览",
+        "width": 90
+      },
+      {
+        "height": 48,
+        "name": "连接",
+        "width": 90
+      },
+      {
+        "height": 48,
+        "name": "设备",
+        "width": 90
+      },
+      {
+        "height": 48,
+        "name": "时间线",
+        "width": 90
+      },
+      {
+        "height": 48,
+        "name": "访问",
+        "width": 90
+      },
+      {
+        "height": 44,
+        "name": "取消豁免",
+        "width": 104.40625
+      }
+    ],
+    "overflow": false,
+    "rect": {
+      "height": 812,
+      "width": 375.3333435058594,
+      "x": 0,
+      "y": 0
+    },
+    "tabs": [
+      {
+        "label": "概览",
+        "selected": "false"
+      },
+      {
+        "label": "连接",
+        "selected": "false"
+      },
+      {
+        "label": "设备",
+        "selected": "false"
+      },
+      {
+        "label": "时间线",
+        "selected": "false"
+      },
+      {
+        "label": "访问",
+        "selected": "true"
+      }
+    ],
+    "text": "风控详情fixture-1@example.invalidFixture · 用户 1#1Fixture · 试运行分组账户正常代理服务正常本周期已用0.00 GB / 不限查看用量趋势暂停代理服务概览连接设备时间线访问分组Fixture · 试运行分组白名单 · 试运行豁免Fixture · 临时排障例外由 fixture-admin@example.invalid 于1 小时前添加到期时间：2026年10月10日 01:16:34豁免后，白名单和所有访问策略都不再对它生效，直到豁免到期或被取消。取消豁免",
+    "viewport": {
+      "height": 812,
+      "width": 375
+    }
+  },
+  {
+    "name": "s16-account-zh-light-1440",
+    "actions": [
+      {
+        "height": 44,
+        "name": "关闭",
+        "width": 44
+      },
+      {
+        "height": 44,
+        "name": "查看用量趋势",
+        "width": 106.60417175292967
+      },
+      {
+        "height": 44,
+        "name": "暂停代理服务",
+        "width": 107.9375
+      },
+      {
+        "height": 44,
+        "name": "更多操作",
+        "width": 44
+      },
+      {
+        "height": 48,
+        "name": "概览",
+        "width": 108.79167175292967
+      },
+      {
+        "height": 48,
+        "name": "连接",
+        "width": 108.80208587646484
+      },
+      {
+        "height": 48,
+        "name": "设备",
+        "width": 108.80208587646484
+      },
+      {
+        "height": 48,
+        "name": "时间线",
+        "width": 108.80208587646484
+      },
+      {
+        "height": 48,
+        "name": "访问",
+        "width": 108.80208587646484
+      },
+      {
+        "height": 44,
+        "name": "取消豁免",
+        "width": 104.40625
+      }
+    ],
+    "overflow": false,
+    "rect": {
+      "height": 900,
+      "width": 560,
+      "x": 880,
+      "y": 0
+    },
+    "tabs": [
+      {
+        "label": "概览",
+        "selected": "false"
+      },
+      {
+        "label": "连接",
+        "selected": "false"
+      },
+      {
+        "label": "设备",
+        "selected": "false"
+      },
+      {
+        "label": "时间线",
+        "selected": "false"
+      },
+      {
+        "label": "访问",
+        "selected": "true"
+      }
+    ],
+    "text": "风控详情fixture-1@example.invalidFixture · 用户 1#1Fixture · 试运行分组账户正常代理服务正常本周期已用0.00 GB / 不限查看用量趋势暂停代理服务概览连接设备时间线访问分组Fixture · 试运行分组白名单 · 试运行豁免Fixture · 临时排障例外由 fixture-admin@example.invalid 于1 小时前添加到期时间：2026年10月10日 01:16:34豁免后，白名单和所有访问策略都不再对它生效，直到豁免到期或被取消。取消豁免",
+    "viewport": {
+      "height": 900,
+      "width": 1440
+    }
+  },
+  {
+    "name": "s16-account-zh-dark-1440",
+    "actions": [
+      {
+        "height": 44,
+        "name": "关闭",
+        "width": 44
+      },
+      {
+        "height": 44,
+        "name": "查看用量趋势",
+        "width": 106.60417175292967
+      },
+      {
+        "height": 44,
+        "name": "暂停代理服务",
+        "width": 107.9375
+      },
+      {
+        "height": 44,
+        "name": "更多操作",
+        "width": 44
+      },
+      {
+        "height": 48,
+        "name": "概览",
+        "width": 108.79167175292967
+      },
+      {
+        "height": 48,
+        "name": "连接",
+        "width": 108.80208587646484
+      },
+      {
+        "height": 48,
+        "name": "设备",
+        "width": 108.80208587646484
+      },
+      {
+        "height": 48,
+        "name": "时间线",
+        "width": 108.80208587646484
+      },
+      {
+        "height": 48,
+        "name": "访问",
+        "width": 108.80208587646484
+      },
+      {
+        "height": 44,
+        "name": "取消豁免",
+        "width": 104.40625
+      }
+    ],
+    "overflow": false,
+    "rect": {
+      "height": 900,
+      "width": 560,
+      "x": 880,
+      "y": 0
+    },
+    "tabs": [
+      {
+        "label": "概览",
+        "selected": "false"
+      },
+      {
+        "label": "连接",
+        "selected": "false"
+      },
+      {
+        "label": "设备",
+        "selected": "false"
+      },
+      {
+        "label": "时间线",
+        "selected": "false"
+      },
+      {
+        "label": "访问",
+        "selected": "true"
+      }
+    ],
+    "text": "风控详情fixture-1@example.invalidFixture · 用户 1#1Fixture · 试运行分组账户正常代理服务正常本周期已用0.00 GB / 不限查看用量趋势暂停代理服务概览连接设备时间线访问分组Fixture · 试运行分组白名单 · 试运行豁免Fixture · 临时排障例外由 fixture-admin@example.invalid 于1 小时前添加到期时间：2026年10月10日 01:16:34豁免后，白名单和所有访问策略都不再对它生效，直到豁免到期或被取消。取消豁免",
+    "viewport": {
+      "height": 900,
+      "width": 1440
+    }
+  },
+  {
+    "name": "s16-account-zh-dark-375",
+    "actions": [
+      {
+        "height": 44,
+        "name": "关闭",
+        "width": 44
+      },
+      {
+        "height": 44,
+        "name": "查看用量趋势",
+        "width": 106.60417175292967
+      },
+      {
+        "height": 44,
+        "name": "暂停代理服务",
+        "width": 107.9375
+      },
+      {
+        "height": 44,
+        "name": "更多操作",
+        "width": 44
+      },
+      {
+        "height": 48,
+        "name": "概览",
+        "width": 90
+      },
+      {
+        "height": 48,
+        "name": "连接",
+        "width": 90
+      },
+      {
+        "height": 48,
+        "name": "设备",
+        "width": 90
+      },
+      {
+        "height": 48,
+        "name": "时间线",
+        "width": 90
+      },
+      {
+        "height": 48,
+        "name": "访问",
+        "width": 90
+      },
+      {
+        "height": 44,
+        "name": "取消豁免",
+        "width": 104.40625
+      }
+    ],
+    "overflow": false,
+    "rect": {
+      "height": 812,
+      "width": 375.3333435058594,
+      "x": 0,
+      "y": 0
+    },
+    "tabs": [
+      {
+        "label": "概览",
+        "selected": "false"
+      },
+      {
+        "label": "连接",
+        "selected": "false"
+      },
+      {
+        "label": "设备",
+        "selected": "false"
+      },
+      {
+        "label": "时间线",
+        "selected": "false"
+      },
+      {
+        "label": "访问",
+        "selected": "true"
+      }
+    ],
+    "text": "风控详情fixture-1@example.invalidFixture · 用户 1#1Fixture · 试运行分组账户正常代理服务正常本周期已用0.00 GB / 不限查看用量趋势暂停代理服务概览连接设备时间线访问分组Fixture · 试运行分组白名单 · 试运行豁免Fixture · 临时排障例外由 fixture-admin@example.invalid 于1 小时前添加到期时间：2026年10月10日 01:16:34豁免后，白名单和所有访问策略都不再对它生效，直到豁免到期或被取消。取消豁免",
+    "viewport": {
+      "height": 812,
+      "width": 375
+    }
+  },
+  {
+    "name": "s16-account-read-error-zh-dark-375",
+    "actions": [
+      {
+        "height": 44,
+        "name": "关闭",
+        "width": 44
+      },
+      {
+        "height": 44,
+        "name": "查看用量趋势",
+        "width": 106.60417175292967
+      },
+      {
+        "height": 44,
+        "name": "暂停代理服务",
+        "width": 107.9375
+      },
+      {
+        "height": 44,
+        "name": "更多操作",
+        "width": 44
+      },
+      {
+        "height": 48,
+        "name": "概览",
+        "width": 90
+      },
+      {
+        "height": 48,
+        "name": "连接",
+        "width": 90
+      },
+      {
+        "height": 48,
+        "name": "设备",
+        "width": 90
+      },
+      {
+        "height": 48,
+        "name": "时间线",
+        "width": 90
+      },
+      {
+        "height": 48,
+        "name": "访问",
+        "width": 90
+      },
+      {
+        "height": 44,
+        "name": "重试",
+        "width": 76.20833587646484
+      }
+    ],
+    "overflow": false,
+    "rect": {
+      "height": 812,
+      "width": 375.3333435058594,
+      "x": 0,
+      "y": 0
+    },
+    "tabs": [
+      {
+        "label": "概览",
+        "selected": "false"
+      },
+      {
+        "label": "连接",
+        "selected": "false"
+      },
+      {
+        "label": "设备",
+        "selected": "false"
+      },
+      {
+        "label": "时间线",
+        "selected": "false"
+      },
+      {
+        "label": "访问",
+        "selected": "true"
+      }
+    ],
+    "text": "风控详情fixture-1@example.invalidFixture · 用户 1#1Fixture · 试运行分组账户正常代理服务正常本周期已用0.00 GB / 不限查看用量趋势暂停代理服务概览连接设备时间线访问读取这个账号的访问状态失败重试",
+    "viewport": {
+      "height": 812,
+      "width": 375
+    }
+  },
+  {
+    "name": "s16-account-read-recovered-zh-dark-375",
+    "actions": [
+      {
+        "height": 44,
+        "name": "关闭",
+        "width": 44
+      },
+      {
+        "height": 44,
+        "name": "查看用量趋势",
+        "width": 106.60417175292967
+      },
+      {
+        "height": 44,
+        "name": "暂停代理服务",
+        "width": 107.9375
+      },
+      {
+        "height": 44,
+        "name": "更多操作",
+        "width": 44
+      },
+      {
+        "height": 48,
+        "name": "概览",
+        "width": 90
+      },
+      {
+        "height": 48,
+        "name": "连接",
+        "width": 90
+      },
+      {
+        "height": 48,
+        "name": "设备",
+        "width": 90
+      },
+      {
+        "height": 48,
+        "name": "时间线",
+        "width": 90
+      },
+      {
+        "height": 48,
+        "name": "访问",
+        "width": 90
+      },
+      {
+        "height": 44,
+        "name": "取消豁免",
+        "width": 104.40625
+      }
+    ],
+    "overflow": false,
+    "rect": {
+      "height": 812,
+      "width": 375.3333435058594,
+      "x": 0,
+      "y": 0
+    },
+    "tabs": [
+      {
+        "label": "概览",
+        "selected": "false"
+      },
+      {
+        "label": "连接",
+        "selected": "false"
+      },
+      {
+        "label": "设备",
+        "selected": "false"
+      },
+      {
+        "label": "时间线",
+        "selected": "false"
+      },
+      {
+        "label": "访问",
+        "selected": "true"
+      }
+    ],
+    "text": "风控详情fixture-1@example.invalidFixture · 用户 1#1Fixture · 试运行分组账户正常代理服务正常本周期已用0.00 GB / 不限查看用量趋势暂停代理服务概览连接设备时间线访问分组Fixture · 试运行分组白名单 · 试运行豁免Fixture · 临时排障例外由 fixture-admin@example.invalid 于1 小时前添加到期时间：2026年10月10日 01:20:24豁免后，白名单和所有访问策略都不再对它生效，直到豁免到期或被取消。取消豁免",
+    "viewport": {
+      "height": 812,
+      "width": 375
+    }
+  },
+  {
+    "name": "s16-account-empty-zh-dark-375",
+    "actions": [
+      {
+        "height": 44,
+        "name": "关闭",
+        "width": 44
+      },
+      {
+        "height": 44,
+        "name": "查看用量趋势",
+        "width": 106.60417175292967
+      },
+      {
+        "height": 44,
+        "name": "暂停代理服务",
+        "width": 107.9375
+      },
+      {
+        "height": 44,
+        "name": "更多操作",
+        "width": 44
+      },
+      {
+        "height": 48,
+        "name": "概览",
+        "width": 90
+      },
+      {
+        "height": 48,
+        "name": "连接",
+        "width": 90
+      },
+      {
+        "height": 48,
+        "name": "设备",
+        "width": 90
+      },
+      {
+        "height": 48,
+        "name": "时间线",
+        "width": 90
+      },
+      {
+        "height": 48,
+        "name": "访问",
+        "width": 90
+      },
+      {
+        "height": 44,
+        "name": "豁免此账号",
+        "width": 118.5
+      }
+    ],
+    "overflow": false,
+    "rect": {
+      "height": 812,
+      "width": 375.3333435058594,
+      "x": 0,
+      "y": 0
+    },
+    "tabs": [
+      {
+        "label": "概览",
+        "selected": "false"
+      },
+      {
+        "label": "连接",
+        "selected": "false"
+      },
+      {
+        "label": "设备",
+        "selected": "false"
+      },
+      {
+        "label": "时间线",
+        "selected": "false"
+      },
+      {
+        "label": "访问",
+        "selected": "true"
+      }
+    ],
+    "text": "风控详情fixture-1@example.invalidFixture · 用户 1#1账户正常代理服务正常本周期已用0.00 GB / 不限查看用量趋势暂停代理服务概览连接设备时间线访问分组未分组不限豁免未豁免豁免此账号",
+    "viewport": {
+      "height": 812,
+      "width": 375
+    }
+  }
+]

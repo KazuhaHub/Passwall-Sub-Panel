@@ -1,0 +1,152 @@
+[
+  {
+    "name": "s20-exemption-cancel-en-light-375",
+    "buttons": [
+      {
+        "background": "rgba(0, 0, 0, 0)",
+        "height": 44,
+        "text": "Cancel",
+        "width": 89.98958587646484
+      },
+      {
+        "background": "rgb(0, 97, 164)",
+        "height": 61,
+        "text": "Cancel exemption",
+        "width": 158.0104217529297
+      }
+    ],
+    "overflow": false,
+    "rect": [
+      27.666667938232425,
+      275.625,
+      320,
+      260.75
+    ],
+    "text": "Cancel the exemption for fixture-1@example.invalid?Destination policies and allowlists will apply to this account again, expected within about 2 minutes.CancelCancel exemption",
+    "title": "Cancel the exemption for fixture-1@example.invalid?",
+    "viewport": [
+      375,
+      812
+    ]
+  },
+  {
+    "name": "s20-exemption-cancel-zh-light-375",
+    "buttons": [
+      {
+        "background": "rgba(0, 0, 0, 0)",
+        "height": 44,
+        "text": "取消",
+        "width": 76.20833587646484
+      },
+      {
+        "background": "rgb(0, 97, 164)",
+        "height": 44,
+        "text": "取消豁免",
+        "width": 104.40625
+      }
+    ],
+    "overflow": false,
+    "rect": [
+      27.666667938232425,
+      293.41668701171875,
+      320,
+      225.1666717529297
+    ],
+    "text": "取消 fixture-1@example.invalid 的豁免？之后访问策略和白名单会对这个账号生效，预计在约 2 分钟内生效。取消取消豁免",
+    "title": "取消 fixture-1@example.invalid 的豁免？",
+    "viewport": [
+      375,
+      812
+    ]
+  },
+  {
+    "name": "s20-exemption-cancel-zh-light-1440",
+    "buttons": [
+      {
+        "background": "rgba(0, 0, 0, 0)",
+        "height": 44,
+        "text": "取消",
+        "width": 76.20833587646484
+      },
+      {
+        "background": "rgb(0, 97, 164)",
+        "height": 44,
+        "text": "取消豁免",
+        "width": 104.40625
+      }
+    ],
+    "overflow": false,
+    "rect": [
+      492.6145935058594,
+      362.7083435058594,
+      454.7604370117187,
+      174.58334350585938
+    ],
+    "text": "取消 fixture-1@example.invalid 的豁免？之后访问策略和白名单会对这个账号生效，预计在约 2 分钟内生效。取消取消豁免",
+    "title": "取消 fixture-1@example.invalid 的豁免？",
+    "viewport": [
+      1440,
+      900
+    ]
+  },
+  {
+    "name": "s20-exemption-cancel-zh-dark-1440",
+    "buttons": [
+      {
+        "background": "rgba(0, 0, 0, 0)",
+        "height": 44,
+        "text": "取消",
+        "width": 76.20833587646484
+      },
+      {
+        "background": "rgb(159, 202, 255)",
+        "height": 44,
+        "text": "取消豁免",
+        "width": 104.40625
+      }
+    ],
+    "overflow": false,
+    "rect": [
+      492.6145935058594,
+      362.7083435058594,
+      454.7604370117187,
+      174.58334350585938
+    ],
+    "text": "取消 fixture-1@example.invalid 的豁免？之后访问策略和白名单会对这个账号生效，预计在约 2 分钟内生效。取消取消豁免",
+    "title": "取消 fixture-1@example.invalid 的豁免？",
+    "viewport": [
+      1440,
+      900
+    ]
+  },
+  {
+    "name": "s20-exemption-cancel-zh-dark-375",
+    "buttons": [
+      {
+        "background": "rgba(0, 0, 0, 0)",
+        "height": 44,
+        "text": "取消",
+        "width": 76.20833587646484
+      },
+      {
+        "background": "rgb(159, 202, 255)",
+        "height": 44,
+        "text": "取消豁免",
+        "width": 104.40625
+      }
+    ],
+    "overflow": false,
+    "rect": [
+      27.666667938232425,
+      293.41668701171875,
+      320,
+      225.1666717529297
+    ],
+    "text": "取消 fixture-1@example.invalid 的豁免？之后访问策略和白名单会对这个账号生效，预计在约 2 分钟内生效。取消取消豁免",
+    "title": "取消 fixture-1@example.invalid 的豁免？",
+    "viewport": [
+      375,
+      812
+    ]
+  }
+]

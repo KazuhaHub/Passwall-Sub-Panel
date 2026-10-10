@@ -55,14 +55,15 @@ type MemberResyncer interface {
 }
 
 type Service struct {
-	nodes      ports.NodeRepo
-	separators ports.SeparatorRepo
-	pool       ports.XUIPool
-	cleaner    InboundCleaner
-	tasks      ports.SyncTaskRepo
-	groups     ports.GroupRepo
-	users      ports.UserRepo
-	resyncer   MemberResyncer
+	nodes            ports.NodeRepo
+	separators       ports.SeparatorRepo
+	pool             ports.XUIPool
+	cleaner          InboundCleaner
+	tasks            ports.SyncTaskRepo
+	groups           ports.GroupRepo
+	users            ports.UserRepo
+	resyncer         MemberResyncer
+	groupEligibility ports.GroupNodeEligibility
 	// bg routes handler-spawned background work (member provisioning after a node
 	// recreate; sync-existing-users after a node add) through the app's tracked
 	// dispatcher so App.Shutdown drains it under a cancellable context. Late-bound
@@ -80,6 +81,18 @@ type Service struct {
 
 // SetMemberResyncer late-binds the shared-client member resyncer (user.Service).
 func (s *Service) SetMemberResyncer(r MemberResyncer) { s.resyncer = r }
+
+func (s *Service) SetGroupEligibility(selector ports.GroupNodeEligibility) {
+	s.groupEligibility = selector
+}
+
+func (s *Service) groupAllowsNode(ctx context.Context, n *domain.Node, g *domain.Group) (bool, error) {
+	if s.groupEligibility != nil {
+		return s.groupEligibility.Eligible(ctx, n, g)
+	}
+	var legacy *group.Service
+	return legacy.Eligible(ctx, n, g)
+}
 
 // SetBackgroundRunner late-binds the app's tracked async dispatcher so node
 // background work is drained by App.Shutdown instead of leaking on an untracked
@@ -594,7 +607,12 @@ func (s *Service) provisionNodeMembers(ctx context.Context, n *domain.Node) {
 	seen := make(map[int64]bool)
 	var memberIDs []int64
 	for _, g := range groups {
-		if !group.Matches(n, g.TagFilter) {
+		eligible, err := s.groupAllowsNode(ctx, n, g)
+		if err != nil {
+			log.Warn("recreate: group eligibility unavailable", "group_id", g.ID)
+			continue
+		}
+		if !eligible {
 			continue
 		}
 		members, err := s.users.ListByGroup(ctx, g.ID)
@@ -1359,7 +1377,12 @@ func (s *Service) syncExistingUsersToNode(ctx context.Context, n *domain.Node) e
 	seen := make(map[int64]bool)
 	considered, enqueued := 0, 0
 	for _, g := range groups {
-		if !group.Matches(n, g.TagFilter) {
+		eligible, err := s.groupAllowsNode(ctx, n, g)
+		if err != nil {
+			log.Warn("new-node: group eligibility unavailable", "group_id", g.ID)
+			continue
+		}
+		if !eligible {
 			continue
 		}
 		members, err := s.users.ListByGroup(ctx, g.ID)

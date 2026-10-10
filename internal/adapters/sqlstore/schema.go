@@ -940,7 +940,9 @@ type xuiPanelRow struct {
 	Remark   string `gorm:"size:255"`
 	// Additive preference; empty legacy values are effectively stable. Keep raw
 	// values so omitted edits cannot erase preferences written by newer builds.
-	UpdateChannel string `gorm:"size:16;not null;default:''"`
+	UpdateChannel        string `gorm:"size:16;not null;default:''"`
+	AuditCollect         string `gorm:"size:16;not null;default:hits"`
+	AuditCollectRevision int64  `gorm:"not null;default:1"`
 	// AuthMethod: "" (auto) / "token" / "password"; InsecureSkipVerify skips TLS
 	// cert checks for this panel. AutoMigrate adds both; empty/false on legacy rows.
 	AuthMethod         string `gorm:"size:16;default:''"`
@@ -1070,20 +1072,22 @@ func (r *xuiPanelRow) toDomain() (*domain.XUIPanel, error) {
 		return nil, err
 	}
 	return &domain.XUIPanel{
-		ID:                 r.ID,
-		Kind:               domain.NormalizePanelKind(domain.PanelKind(r.Kind)),
-		Name:               r.Name,
-		URL:                r.URL,
-		APIToken:           apiToken,
-		Username:           r.Username,
-		Password:           password,
-		Remark:             r.Remark,
-		UpdateChannel:      domain.PanelUpdateChannel(r.UpdateChannel),
-		AuthMethod:         domain.XUIAuthMethod(r.AuthMethod),
-		InsecureSkipVerify: r.InsecureSkipVerify,
-		PanelVersion:       r.PanelVersion,
-		XrayVersion:        r.XrayVersion,
-		VersionCheckedAt:   r.VersionCheckedAt,
+		ID:                   r.ID,
+		Kind:                 domain.NormalizePanelKind(domain.PanelKind(r.Kind)),
+		Name:                 r.Name,
+		URL:                  r.URL,
+		APIToken:             apiToken,
+		Username:             r.Username,
+		Password:             password,
+		Remark:               r.Remark,
+		UpdateChannel:        domain.PanelUpdateChannel(r.UpdateChannel),
+		AuditCollect:         domain.AuditCollect(r.AuditCollect),
+		AuditCollectRevision: r.AuditCollectRevision,
+		AuthMethod:           domain.XUIAuthMethod(r.AuthMethod),
+		InsecureSkipVerify:   r.InsecureSkipVerify,
+		PanelVersion:         r.PanelVersion,
+		XrayVersion:          r.XrayVersion,
+		VersionCheckedAt:     r.VersionCheckedAt,
 		// Anything unrecognised — a legacy empty string, a hand-edited row,
 		// a state a newer build wrote — reads as unknown. The alternative is
 		// surfacing junk as a verdict about somebody's node.
@@ -1102,22 +1106,24 @@ func xuiPanelFromDomain(p *domain.XUIPanel) (*xuiPanelRow, error) {
 		return nil, err
 	}
 	return &xuiPanelRow{
-		ID:                 p.ID,
-		Kind:               string(domain.NormalizePanelKind(p.Kind)),
-		Name:               p.Name,
-		URL:                p.URL,
-		APIToken:           apiToken,
-		Username:           p.Username,
-		Password:           password,
-		Remark:             p.Remark,
-		UpdateChannel:      string(p.UpdateChannel),
-		AuthMethod:         string(p.AuthMethod),
-		InsecureSkipVerify: p.InsecureSkipVerify,
-		PanelVersion:       p.PanelVersion,
-		XrayVersion:        p.XrayVersion,
-		VersionCheckedAt:   p.VersionCheckedAt,
-		IPLimitEnforcement: string(normalizeIPLimitEnforcement(string(p.IPLimitEnforcement))),
-		IPLimitProbedAt:    p.IPLimitProbedAt,
+		ID:                   p.ID,
+		Kind:                 string(domain.NormalizePanelKind(p.Kind)),
+		Name:                 p.Name,
+		URL:                  p.URL,
+		APIToken:             apiToken,
+		Username:             p.Username,
+		Password:             password,
+		Remark:               p.Remark,
+		UpdateChannel:        string(p.UpdateChannel),
+		AuditCollect:         string(p.AuditCollect),
+		AuditCollectRevision: p.AuditCollectRevision,
+		AuthMethod:           string(p.AuthMethod),
+		InsecureSkipVerify:   p.InsecureSkipVerify,
+		PanelVersion:         p.PanelVersion,
+		XrayVersion:          p.XrayVersion,
+		VersionCheckedAt:     p.VersionCheckedAt,
+		IPLimitEnforcement:   string(normalizeIPLimitEnforcement(string(p.IPLimitEnforcement))),
+		IPLimitProbedAt:      p.IPLimitProbedAt,
 	}, nil
 }
 
@@ -1586,6 +1592,18 @@ var schemaModels = []any{
 	&nodeHostMetricSampleRow{},
 	&nodeInterfaceMetricSampleRow{},
 	&nodeHostMetricHourlyRow{},
+	&destListRow{},
+	&destPolicyRow{},
+	&destExemptionRow{},
+	&destGroupModeRow{},
+	&destPolicyStateRow{},
+	&destPolicySnapshotRow{},
+	&destAgentPolicyRow{},
+	&destHitRow{},
+	&destUsageHourlyRow{},
+	&destAuditBatchRow{},
+	&destAuditLossHourlyRow{},
+	&destAuditIngestBudgetRow{},
 }
 
 // EnsureSchema validates the supported input before performing any DDL, then

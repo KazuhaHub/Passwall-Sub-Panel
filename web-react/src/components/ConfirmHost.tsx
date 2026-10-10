@@ -23,6 +23,7 @@ export interface ConfirmOpts {
 interface InternalState {
   open: boolean
   opts: ConfirmOpts | null
+  returnFocus?: HTMLElement | null
 }
 
 let resolver: ((v: boolean) => void) | null = null
@@ -30,15 +31,19 @@ let setStateExternal: ((s: InternalState) => void) | null = null
 
 // Promise-style confirmation. Resolves true when user confirms,
 // false when they cancel or close the dialog.
-export function confirm(opts: ConfirmOpts): Promise<boolean> {
+export function confirm(opts: ConfirmOpts, returnFocus?: HTMLElement | null): Promise<boolean> {
   return new Promise<boolean>((resolve) => {
     if (!setStateExternal) {
       console.warn('ConfirmHost not mounted')
       resolve(false)
       return
     }
+    // Capture before the caller's pending render can disable its action.
+    // Menu callers supply a stable trigger because the active item unmounts.
+    const active = document.activeElement
+    const origin = returnFocus ?? (active instanceof HTMLElement && active !== document.body ? active : null)
     resolver = resolve
-    setStateExternal({ open: true, opts })
+    setStateExternal({ open: true, opts, returnFocus: origin })
   })
 }
 
@@ -54,7 +59,7 @@ export default function ConfirmHost() {
   }, [])
 
   function close(answer: boolean) {
-    setState({ open: false, opts: state.opts })
+    setState({ ...state, open: false })
     resolver?.(answer)
     resolver = null
   }
@@ -69,10 +74,14 @@ export default function ConfirmHost() {
     // level opened beneath the drawer's backdrop, where no click could reach it.
     <Dialog
       open={state.open}
+      disableRestoreFocus={!!state.returnFocus}
       onClose={() => close(false)}
       sx={{ zIndex: t => t.zIndex.modal + 3 }}
       slotProps={{
-        paper: { sx: { borderRadius: 3, bgcolor: md.surfaceContainerHigh, minWidth: 320, maxWidth: 480 } }
+        paper: { sx: { borderRadius: 3, bgcolor: md.surfaceContainerHigh, minWidth: 320, maxWidth: 480 } },
+        // A menu item disappears while its confirmation opens. Restore its
+        // persistent trigger after the dialog releases its focus trap.
+        transition: { onExited: () => { if (!state.open && state.returnFocus?.isConnected) state.returnFocus.focus({ preventScroll: true }) } },
       }}
     >
       <DialogTitle sx={{ display: 'flex', gap: 1.5, alignItems: 'center', pt: 3 }}>
@@ -93,14 +102,15 @@ export default function ConfirmHost() {
         </Typography>
       </DialogContent>
       <DialogActions>
-        <Button onClick={() => close(false)} variant="text">
+        <Button onClick={() => close(false)} variant="text" sx={{ minHeight: 44 }}>
           {opts?.cancelText ?? t('actions.cancel')}
         </Button>
         <Button
           onClick={() => close(true)}
           variant="contained"
+          color={destructive ? 'error' : 'primary'}
           autoFocus
-          sx={destructive ? { bgcolor: md.error, color: md.onError, '&:hover': { bgcolor: md.error } } : undefined}
+          sx={{ minHeight: 44, ...(destructive ? { bgcolor: md.error, color: md.onError, '&:hover': { bgcolor: md.error } } : {}) }}
         >
           {opts?.confirmText ?? t('actions.ok')}
         </Button>

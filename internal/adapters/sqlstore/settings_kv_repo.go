@@ -401,6 +401,13 @@ func settingDescriptors(s *ports.UISettings) []settingDescriptor {
 		intField("security", "sub_per_ip_per_min", &s.SubPerIPPerMin),
 		intField("security", "login_per_ip_per_min", &s.LoginPerIPPerMin),
 		intField("security", "audit_retention_days", &s.AuditRetentionDays),
+		// Destination retention/runtime: 0 means default, never forever.
+		// domain.DestinationSettings owns defaulting and read-time bounds.
+		intField("dest", "hit_retention_days", &s.DestHitRetentionDays),
+		intField("dest", "trial_retention_days", &s.DestTrialRetentionDays),
+		intField("dest", "usage_retention_days", &s.DestUsageRetentionDays),
+		intField("dest", "list_refresh_hours", &s.DestListRefreshHours),
+		intField("dest", "policy_apply_min_seconds", &s.DestPolicyApplyMinSeconds),
 		intField("security", "auth_event_retention_days", &s.AuthEventRetentionDays),
 		intField("security", "sync_task_retention_days", &s.SyncTaskRetentionDays),
 		intField("security", "traffic_history_days", &s.TrafficHistoryDays),
@@ -515,6 +522,8 @@ func settingDescriptors(s *ports.UISettings) []settingDescriptor {
 		boolField("risk", "devices_off", &s.RiskDevicesOff),
 		boolField("risk", "usage_shift_off", &s.RiskUsageShiftOff),
 		boolField("risk", "login_country_off", &s.RiskLoginCountryOff),
+		boolField("risk", "dest_block_off", &s.RiskDestBlockOff),
+		intField("risk", "dest_block_threshold", &s.RiskDestBlockThreshold),
 		intField("risk", "min_days", &s.RiskMinDays),
 		intField("risk", "max_devices", &s.RiskMaxDevices),
 		floatField("risk", "usage_ratio", &s.RiskUsageRatio),

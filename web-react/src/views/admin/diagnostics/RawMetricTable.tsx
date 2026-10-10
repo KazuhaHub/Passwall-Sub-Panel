@@ -7,7 +7,7 @@ import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import type { HistogramSnapshot } from '@/api/diagnostics'
 import { copyToClipboard } from '@/utils/clipboard'
 import { bucketRows, quantileUsable, ratePerHour, type RawFamily, type RawSeries } from '@/utils/diagnostics'
-import { FAMILY_LABEL_GROUP } from '@/utils/diagnosticsCatalog'
+import { FAMILY_LABEL_GROUP, pairLabelFor } from '@/utils/diagnosticsCatalog'
 import type { DiagFormat } from './useDiagFormat'
 
 // EVERY SERIES THE SERVER RETURNED, EXACTLY. Values are the API's own,
@@ -31,6 +31,8 @@ export function familyDesc(fmt: DiagFormat, family: string): string | undefined 
 
 /** A child's name: its label group's translation, or the raw label=value. */
 export function childLabel(fmt: DiagFormat, f: RawFamily, s: RawSeries): string {
+  const pair = pairLabelFor(fmt.label, f.family, s.label, s.value)
+  if (pair !== undefined) return pair
   const group = FAMILY_LABEL_GROUP[f.family]
   if (group && s.value !== undefined) return fmt.label(group, s.value)
   return `${s.label}=${s.value}`

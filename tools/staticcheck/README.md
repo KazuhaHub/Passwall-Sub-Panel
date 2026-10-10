@@ -8,7 +8,7 @@ format 4. This module builds the same analyzer with the format-5 reader from
 From the repository root, use the compiler selected by the root `go.mod`:
 
 ```sh
-go -C tools/staticcheck build -o /tmp/psp-staticcheck honnef.co/go/tools/cmd/staticcheck
+go -C tools/staticcheck build -mod=readonly -o /tmp/psp-staticcheck honnef.co/go/tools/cmd/staticcheck
 /tmp/psp-staticcheck -tags node_reinstall_acceptance ./...
 ```
 

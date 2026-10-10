@@ -10,7 +10,7 @@
     "build": "tsc -b && vite build",
     "postbuild": "node scripts/restore-dist-gitkeep.mjs",
     "preview": "vite preview",
-    "smoke:dist": "node scripts/smoke-dist.mjs",
+    "smoke:dist": "node --test scripts/check-access-fixtures-dist.test.mjs && node scripts/smoke-dist.mjs",
     "lint": "oxlint src",
     "test": "vitest run --maxWorkers=2",
     "test:coverage": "vitest run --coverage",

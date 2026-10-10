@@ -23,6 +23,16 @@ export interface ResourcePolicy {
 }
 
 export const policies = {
+  destHits: { staleTime: 30 * SECOND, gcTime: 5 * MINUTE, refetchInterval: false,
+    note: 'Hourly audit aggregates; refresh explicitly, never poll a potentially broad historical query.' },
+  destStatus: { staleTime: 15 * SECOND, gcTime: 5 * MINUTE, refetchInterval: 10 * SECOND,
+    note: 'Observe actual outstanding candidate/publication acknowledgement only; stop polling when settled and while hidden.' },
+  destDefinitions: { staleTime: 5 * MINUTE, gcTime: 15 * MINUTE, refetchInterval: false,
+    note: 'Slow-changing definitions; successful writes invalidate all dependent views.' },
+  destListRefreshing: { staleTime: 0, gcTime: MINUTE, refetchInterval: 5 * SECOND,
+    note: 'Poll only while an explicitly started list refresh is pending; pause while hidden.' },
+  destSettings: { staleTime: 0, gcTime: 5 * MINUTE, refetchInterval: false,
+    note: 'Revalidate on dialog open because effective retention informs irreversible shortening; never replace an editing draft.' },
   /** Keeps the existing 60s cadence; pauses while the tab is hidden. */
   alerts: {
     staleTime: 30 * SECOND,

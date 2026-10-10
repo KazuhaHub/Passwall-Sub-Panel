@@ -100,7 +100,7 @@ func NewRiskSignalRepo(db *gorm.DB) *RiskSignalRepo { return &RiskSignalRepo{db:
 // only (TestRiskServiceCannotWriteServiceState) — so the previous state
 // exists only in this table, until the upsert overwrites it. Inside one
 // explicit transaction Save therefore reads every row's (user_id, kind,
-// state) — the whole table, at most four rows per account, three narrow
+// state) — the whole table, at most five rows per account, three narrow
 // columns — then upserts, then inserts a flag record for each saved signal
 // whose level moved (domain.RiskFlagTransition: suspect and flagged are the
 // levels, unknown included in "none", as the bell reads it) — and, for a
@@ -268,7 +268,7 @@ type riskSignalKey struct {
 
 // riskSignalStates reads the stored state of every row, on tx and only tx
 // (see Save). The whole table rather than the saved keys: it holds at most
-// four rows per account, and one three-column scan is cheaper and simpler
+// five rows per account, and one three-column scan is cheaper and simpler
 // than an IN list chunked under each dialect's parameter limit.
 func riskSignalStates(tx *gorm.DB) (map[riskSignalKey]domain.GeoState, error) {
 	var rows []struct {

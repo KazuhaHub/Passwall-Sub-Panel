@@ -25,6 +25,8 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/authpolicy"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/captcha"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/cert"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/destlist"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/destpolicy"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/geo"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/group"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/login2fa"
@@ -65,9 +67,21 @@ type AsyncDispatcher interface {
 // Deps bundles every dependency the HTTP layer needs. App-startup wiring
 // populates this and passes it to NewRouter.
 type Deps struct {
-	OperationGate *operationgate.Gate
-	Cfg           *config.Config
-	Repos         ports.Repos
+	OperationGate             *operationgate.Gate
+	Cfg                       *config.Config
+	Repos                     ports.Repos
+	DestinationRefreshChanged func()
+	DestinationPolicyRetry    handler.DestinationPolicyRetrier
+	DestinationLists          *destlist.Service
+	DestinationListOverview   func(context.Context) (handler.DestinationListOverview, error)
+	DestinationPolicies       *destpolicy.Administrator
+	DestinationExemptions     *destpolicy.ExemptionManager
+	DestinationExceptions     *destpolicy.ExceptionManager
+	DestinationUserAccess     func(context.Context, int64) (domain.DestUserAccess, error)
+	DestinationControls       *destpolicy.Controls
+	DestinationTest           func(context.Context, destpolicy.DestinationTestInput) (destpolicy.DestinationTestResult, error)
+	DestinationStatus         func(context.Context) (destpolicy.DestinationStatus, error)
+	DestinationHits           func(context.Context, domain.DestHitQuery) (domain.DestHitPage, error)
 	// GeoRecords is the read side of the concurrent-location detector, the
 	// same rows the traffic poll writes each cycle. Optional: a deployment
 	// without it gets a 503 from the endpoint rather than an empty list, so
@@ -228,7 +242,11 @@ func NewRouter(d Deps) stdhttp.Handler {
 	// 16 MiB limit for full fleet reports. Audit middleware later does
 	// io.ReadAll(body) — without these caps that's a memory-exhaustion vector.
 	g.Use(middleware.BodyLimitByPath(1<<20, map[string]int64{
-		"/v1/node/sync": nodeprotocol.MaxSyncBodyBytes,
+		"/v1/node/sync":                     nodeprotocol.MaxSyncBodyBytes,
+		"/api/admin/dest/lists":             handler.DestinationListJSONLimit,
+		"/api/admin/dest/lists/preview":     handler.DestinationListJSONLimit,
+		"/api/admin/dest/lists/:id":         handler.DestinationListJSONLimit,
+		"/api/admin/dest/lists/:id/entries": handler.DestinationListJSONLimit,
 	}))
 	// Audit middleware lives at the engine level so it covers admin
 	// endpoints AND the login attempt AND user self-service writes. The
@@ -812,6 +830,49 @@ func NewRouter(d Deps) stdhttp.Handler {
 		adminGroup.POST("/legal/:kind", legalAdmin.Publish)
 		adminGroup.GET("/settings/ui", settings.Get)
 		adminGroup.PUT("/settings/ui", settings.Put)
+		destinationSettings := handler.NewAdminDestinationSettingsHandler(d.Repos.Settings, d.DestinationRefreshChanged)
+		adminGroup.GET("/dest/settings", destinationSettings.Get)
+		adminGroup.PUT("/dest/settings", destinationSettings.Put)
+		destinationRetry := handler.NewAdminDestinationRetryHandler(d.DestinationPolicyRetry)
+		adminGroup.POST("/dest/agents/:agent_id/retry", destinationRetry.Retry)
+		destinationLists := handler.NewAdminDestinationListsHandler(d.DestinationLists)
+		destinationLists.SetOverview(d.DestinationListOverview)
+		if d.Async != nil {
+			destinationLists.SetDispatcher(d.Async.Go)
+		}
+		adminGroup.GET("/dest/lists", destinationLists.List)
+		adminGroup.POST("/dest/lists/preview", destinationLists.Preview)
+		adminGroup.POST("/dest/lists", destinationLists.Create)
+		adminGroup.GET("/dest/lists/:id", destinationLists.Get)
+		adminGroup.PUT("/dest/lists/:id", destinationLists.Put)
+		adminGroup.DELETE("/dest/lists/:id", destinationLists.Delete)
+		adminGroup.POST("/dest/lists/:id/refresh", destinationLists.Refresh)
+		adminGroup.POST("/dest/lists/:id/entries", destinationLists.Entries)
+		adminGroup.GET("/dest/geosite/categories", destinationLists.Categories)
+		adminGroup.POST("/dest/geosite/refresh", destinationLists.RefreshCategories)
+		destinationPolicies := handler.NewAdminDestinationPoliciesHandler(d.DestinationPolicies, d.DestinationLists)
+		adminGroup.GET("/dest/policies", destinationPolicies.List)
+		adminGroup.POST("/dest/policies/preview", destinationPolicies.Preview)
+		adminGroup.POST("/dest/policies", destinationPolicies.Create)
+		adminGroup.PUT("/dest/policies/order", destinationPolicies.Order)
+		adminGroup.PUT("/dest/policies/:id", destinationPolicies.Put)
+		adminGroup.DELETE("/dest/policies/:id", destinationPolicies.Delete)
+		destinationExemptions := handler.NewAdminDestinationExemptionsHandler(d.DestinationExemptions)
+		adminGroup.GET("/dest/exemptions", destinationExemptions.List)
+		adminGroup.GET("/dest/exemptions/:user_id", destinationExemptions.Get)
+		adminGroup.POST("/dest/exemptions", destinationExemptions.Create)
+		adminGroup.PUT("/dest/exemptions/:user_id", destinationExemptions.Put)
+		adminGroup.DELETE("/dest/exemptions/:user_id", destinationExemptions.Delete)
+		destinationExceptions := handler.NewAdminDestinationExceptionsHandler(d.DestinationExceptions)
+		adminGroup.POST("/dest/exceptions", destinationExceptions.Create)
+		destinationUsers := handler.NewAdminDestinationUsersHandler(d.DestinationUserAccess)
+		adminGroup.GET("/dest/users/:id", destinationUsers.Get)
+		destinationControls := handler.NewAdminDestinationControlsHandler(d.DestinationControls)
+		adminGroup.POST("/dest/publish", destinationControls.Publish)
+		adminGroup.PUT("/dest/pause", destinationControls.Pause)
+		adminGroup.POST("/dest/test", handler.NewAdminDestinationTestHandler(d.DestinationTest).Test)
+		adminGroup.GET("/dest/status", handler.NewAdminDestinationStatusHandler(d.DestinationStatus).Get)
+		adminGroup.GET("/dest/hits", handler.NewAdminDestinationHitsHandler(d.DestinationHits).Get)
 
 		// Offline geo database status + manual update (touches the update token
 		// + fetches an external DB — admin only).

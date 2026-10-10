@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type Dispatch, type SetStateAction } from 'react'
+import { useLocation, useSearchParams } from 'react-router'
 import {
   Autocomplete,
   Alert,
@@ -2111,11 +2112,18 @@ function reorderRows<T>(rows: readonly T[], fromIdx: number, toIdx: number): T[]
 // it has to split the result into node / separator payloads anyway —
 // no shared helper left to extract.
 
+const EMPTY_MANAGED_NODES: Node[] = []
+const EMPTY_SERVER_LIST: Server[] = []
+
 export default function NodesView() {
   const theme = useTheme()
   const md = theme.palette.md
   const { t } = useTranslation(['admin', 'common'])
   const canConfig = useCan('config.write')
+  const [linkParams, setLinkParams] = useSearchParams()
+  const linkLocation = useLocation()
+  const inboundLink = linkParams.get('inbound')
+  const consumedInboundLink = useRef<string | null>(null)
   // Admin view: render times in the panel timezone (with the viewer's browser
   // tz disclosed when they differ), consistent with the other admin pages.
   const panelTz = useSiteStore(s => s.timezone)
@@ -2126,7 +2134,7 @@ export default function NodesView() {
   // Drag-to-reorder spans the full set, so the query fetches everything; the
   // visible table still paginates client-side against that complete ordering.
   const nodesQuery = useNodesList(qScope, { page: 1, page_size: 500 })
-  const managed = nodesQuery.data?.items ?? []
+  const managed = nodesQuery.data?.items ?? EMPTY_MANAGED_NODES
   const nodesFailed = nodesQuery.isError
   // Separators live in nodes_separator (since v3.0.0-beta.7) and load
   // through a dedicated endpoint. They render interleaved with real nodes
@@ -2426,7 +2434,7 @@ export default function NodesView() {
   // The panel picker. Shared with ServersView's list read, so the servers list
   // has one owner instead of two independent fetchers.
   const serversQuery = useServersList(qScope, { page: 1, page_size: 200 })
-  const servers = serversQuery.data?.items ?? []
+  const servers = serversQuery.data?.items ?? EMPTY_SERVER_LIST
   const writableServers = useMemo(
     () => servers.filter(s => s.capabilities?.includes('inbound.create') && s.capabilities?.includes('inbound.delete')),
     [servers],
@@ -2987,6 +2995,36 @@ export default function NodesView() {
       await load()
     } finally { setCreateBusy(false) }
   }
+
+  const openInboundFromLink = useRef(openEditInbound)
+  openInboundFromLink.current = openEditInbound
+  useEffect(() => {
+    if (inboundLink === null) { consumedInboundLink.current = null; return }
+    const requestKey = `${linkLocation.key}:${inboundLink}`
+    // Retain an unconsumed link while reads fail or an existing editor is open.
+    // A list row alone does not authorize editing its upstream configuration.
+    if (consumedInboundLink.current === requestKey || editInboundOpen ||
+        !nodesQuery.isSuccess || !serversQuery.isSuccess) return
+    const id = /^[1-9]\d*$/.test(inboundLink) ? Number(inboundLink) : NaN
+    const target = Number.isSafeInteger(id) ? managed.find(n => n.id === id) : undefined
+    const allowed = canConfig && target && servers.find(s => s.id === target.panel_id)?.capabilities?.includes('inbound.update')
+    let cancelled = false
+    // StrictMode's first setup is discarded before starting a configuration read.
+    queueMicrotask(() => {
+      if (cancelled) return
+      consumedInboundLink.current = requestKey
+      setLinkParams(previous => {
+        const next = new URLSearchParams(previous)
+        next.delete('inbound')
+        if (allowed) next.delete('tab')
+        return next
+      }, { replace: true, state: linkLocation.state })
+      if (allowed) void openInboundFromLink.current(target)
+      else pushSnack(t('admin:nodes.edit_inbound_dialog.link_unavailable'), 'warning')
+    })
+    return () => { cancelled = true }
+  }, [inboundLink, linkLocation.key, linkLocation.state, managed, servers, canConfig,
+    nodesQuery.isSuccess, serversQuery.isSuccess, editInboundOpen, setLinkParams, t])
 
   async function openEditInbound(n: Node) {
     const intent = ++editInboundIntent.current

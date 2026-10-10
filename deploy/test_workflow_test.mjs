@@ -396,6 +396,14 @@ test('go_static\'s build cache key names every tool the job compiles, at its pin
       `go_static compiles ${tool}@${version} and its build cache key does not name it: the key is written once per go.sum, so no main save would ever hold that build`,
     )
   }
+  assert(keys[0].includes("hashFiles('go.sum', 'tools/staticcheck/go.mod', 'tools/staticcheck/go.sum')"), 'the build cache must change when the isolated analyzer dependency graph changes')
+})
+
+test('staticcheck uses its pinned tool module and analyzes the application with acceptance files', () => {
+  const steps = job('go_static').replace(/^\s*#.*$/gm, '')
+  assert(steps.includes('go -C tools/staticcheck build -mod=readonly -o "$RUNNER_TEMP/psp-staticcheck" honnef.co/go/tools/cmd/staticcheck'), 'build the analyzer from its isolated module without changing its pinned dependencies')
+  assert(steps.includes('"$RUNNER_TEMP/psp-staticcheck" -tags node_reinstall_acceptance ./...'), 'run the resulting analyzer against the full application and acceptance files')
+  assert(!/staticcheck@\S+/.test(steps), 'go run package@version ignores the tool-module export reader pin')
 })
 
 // ONE PACKAGE IS HALF THE RACE SUITE, AND PACKAGES CANNOT BALANCE IT.

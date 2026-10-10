@@ -2,7 +2,7 @@ import type { GeoAnomaly } from '@/api/geoAnomalies'
 
 /**
  * Every state a detector row can be in: the seven the server stores (the
- * concurrent-location verdict and the four risk kinds share them), and
+ * concurrent-location verdict and the five risk kinds share them), and
  * `not_computed` for a detector with no row at all, which is "not judged
  * yet", never blank and never clean.
  */

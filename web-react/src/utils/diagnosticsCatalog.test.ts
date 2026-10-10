@@ -17,6 +17,7 @@ import {
   familyOf,
   labelFor,
   labelKey,
+  pairLabelFor,
 } from './diagnosticsCatalog'
 
 // DRIFT GUARD AGAINST THE GO SOURCE, in the manner of api/riskCenter.test.ts.
@@ -52,8 +53,8 @@ interface Declared { type: 'counter' | 'gauge' | 'histogram'; labelled: boolean 
 function declaredFamilies(): Map<string, Declared> {
   const src = goSource('internal/pkg/metrics/psp.go')
   const out = new Map<string, Declared>()
-  for (const m of src.matchAll(/New(Counter|Gauge|Histogram)(Vec)?\(\s*"(psp_[a-z0-9_]+)"/g)) {
-    out.set(m[3], { type: m[1].toLowerCase() as Declared['type'], labelled: m[2] === 'Vec' })
+  for (const m of src.matchAll(/New(Counter|Gauge|Histogram)(Vec|PairVec)?\(\s*"(psp_[a-z0-9_]+)"/g)) {
+    out.set(m[3], { type: m[1].toLowerCase() as Declared['type'], labelled: Boolean(m[2]) })
   }
   if (out.size === 0) throw new Error('psp.go no longer declares metrics through New*(…); update this test')
   return out
@@ -219,6 +220,55 @@ describe('familyOf', () => {
   // forbids an "=" inside it, and the series must still split on the first.
   it('keeps everything after the first "=" as the value', () => {
     expect(familyOf('psp_x_total{op=a=b}')).toEqual({ family: 'psp_x_total', label: 'op', value: 'a=b' })
+  })
+})
+
+describe('audit metric label pairs', () => {
+
+  it('explains receiver rows separately from node event counters in both languages', () => {
+    for (const family of ['psp_dest_audit_rows_total', 'psp_dest_audit_node_dropped_total', 'psp_dest_audit_node_unmatched_total', 'psp_dest_audit_loss_buffer_dropped_total']) {
+      expect(FAMILY_CATALOG[family]).toEqual({ card: 'node', type: 'counter', labelled: family === 'psp_dest_audit_rows_total' })
+      for (const [, keys] of BUNDLES) {
+        expect(keys.has(`diagnostics.metric.${family}.label`)).toBe(true)
+        expect(keys.has(`diagnostics.metric.${family}.desc`)).toBe(true)
+      }
+    }
+    for (const [bundle, expected] of [[zh, '拦截 · 已入库'], [en, 'Blocked · Stored']] as const) {
+      const flat = flatten(bundle as Nested)
+      const label = (group: string, value: string) => flat[`diagnostics.labels.${group}.${value}`] ?? value
+      expect(pairLabelFor(label, 'psp_dest_audit_rows_total', 'kind', 'block,outcome=stored')).toBe(expected)
+    }
+  })
+  it('translates the kind and outcome separately in both languages', () => {
+    for (const [bundle, expected] of [[zh, '拦截 · 已接收'], [en, 'Blocked · Accepted']] as const) {
+      const flat = flatten(bundle as Nested)
+      const label = (group: string, value: string) => flat[`diagnostics.labels.${group}.${value}`] ?? value
+      expect(pairLabelFor(label, 'psp_node_audit_report_total', 'kind', 'block,outcome=accepted')).toBe(expected)
+    }
+  })
+
+  it('does not reinterpret commas or equals inside old single-label values', () => {
+    expect(familyOf('psp_x_total{reason=phase=compile,outcome=old}')).toEqual({ family: 'psp_x_total', label: 'reason', value: 'phase=compile,outcome=old' })
+    expect(pairLabelFor((_, v) => v, 'psp_x_total', 'reason', 'phase=compile,outcome=old')).toBeUndefined()
+    expect(pairLabelFor((_, v) => v, 'psp_node_audit_report_total', 'kind', 'block')).toBeUndefined()
+  })
+})
+
+describe('destination compiler and list refresh diagnostics', () => {
+  it('keeps the planned metrics on the native node card', () => {
+    expect(FAMILY_CATALOG.psp_dest_policy_compile_total).toEqual({ card: 'node', type: 'counter', labelled: true })
+    expect(FAMILY_CATALOG.psp_dest_policy_compile_ms).toEqual({ card: 'node', type: 'histogram', labelled: false })
+    expect(FAMILY_CATALOG.psp_dest_list_refresh_total).toEqual({ card: 'node', type: 'counter', labelled: true })
+    expect(FAMILY_LABEL_GROUP).toMatchObject({ psp_dest_policy_compile_total: 'dest_compile', psp_dest_list_refresh_total: 'dest_list_refresh' })
+  })
+
+  it('translates every bounded compiler and refresh outcome in both languages', () => {
+    const src = goSource('internal/pkg/metrics/psp.go')
+    for (const [prefix, group, count] of [['DestCompile', 'dest_compile', 7], ['DestListRefresh', 'dest_list_refresh', 4]] as const) {
+      const values = [...src.matchAll(new RegExp(`${prefix}\\w+\\s*=\\s*"([a-z_]+)"`, 'g'))].map(m => m[1])
+      expect(values).toHaveLength(count)
+      expectCopy(values.map(v => `labels.${group}.${v}`))
+    }
   })
 })
 

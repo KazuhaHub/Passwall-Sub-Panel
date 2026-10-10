@@ -4,8 +4,10 @@ import { mkdtemp, rm, stat } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import { tmpdir } from 'node:os'
 import { extname, join, normalize, resolve, sep } from 'node:path'
+import { assertNoAccessFixtures } from './check-access-fixtures-dist.mjs'
 
 const dist = resolve(import.meta.dirname, '../../internal/web/dist')
+await assertNoAccessFixtures(dist)
 const profile = await mkdtemp(join(tmpdir(), 'psp-web-smoke-'))
 
 const contentTypes = {

@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { Link, Popover, Typography } from '@mui/material'
+import { Link, Popover, Typography, useTheme } from '@mui/material'
+import { amber } from './ToneBadge'
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined'
 
 /**
@@ -24,10 +25,11 @@ export default function FieldHint({
   summary: string
   detail: string
   /** 'warning' for a broken or misleading cap; 'muted' for merely informational. */
-  tone?: 'warning' | 'muted'
+  tone?: 'warning' | 'muted' | 'amber'
 }) {
   const [anchor, setAnchor] = useState<HTMLElement | null>(null)
-  const color = tone === 'warning' ? 'warning.main' : 'text.secondary'
+  const theme = useTheme()
+  const color = tone === 'amber' ? theme.palette.md.onSurface : tone === 'warning' ? 'warning.main' : 'text.secondary'
   return (
     <>
       <Link
@@ -51,14 +53,14 @@ export default function FieldHint({
         }}
       >
         {summary}
-        <InfoOutlinedIcon sx={{ fontSize: 13 }} />
+        <InfoOutlinedIcon sx={{ fontSize: 13, color: tone === 'amber' ? amber(theme).fg : undefined }} />
       </Link>
       <Popover
         open={Boolean(anchor)}
         anchorEl={anchor}
         onClose={() => setAnchor(null)}
         anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
-        slotProps={{ paper: { sx: { maxWidth: 380, p: 1.5 } } }}
+        slotProps={{ paper: { role: 'dialog', 'aria-label': summary, sx: { maxWidth: 'min(380px, calc(100vw - 32px))', boxSizing: 'border-box', maxHeight: 'calc(100vh - 32px)', overflowY: 'auto', p: 1.5 } } }}
       >
         <Typography variant="body2" sx={{ lineHeight: 1.6 }}>{detail}</Typography>
       </Popover>

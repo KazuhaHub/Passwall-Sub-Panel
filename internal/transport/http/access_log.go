@@ -45,6 +45,9 @@ func newAccessLogger(output io.Writer) gin.HandlerFunc {
 }
 
 func xrayAccessLogFormatter(params gin.LogFormatterParams) string {
+	if strings.HasPrefix(params.Path, "/api/admin/dest/") {
+		params.Path, _, _ = strings.Cut(params.Path, "?")
+	}
 	line := fmt.Sprintf("%s [Info] passwall-sub-panel: http request status=%d method=%s path=%s latency=%s client_ip=%s",
 		params.TimeStamp.UTC().Format("2006/01/02 15:04:05.000000"),
 		params.StatusCode,

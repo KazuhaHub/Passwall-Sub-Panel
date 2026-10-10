@@ -6,7 +6,7 @@ import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import { useTranslation } from 'react-i18next'
 
 import type { RuntimeKnobValues } from '@/api/settings'
-import PolicyField from './PolicyField'
+import PolicyField from '@/components/PolicyField'
 import type { RiskPolicyKey, RiskPolicySettings } from './policyKeys'
 import type { PolicyCardSpec, PolicyFieldSpec } from './policyLayout'
 import { applyPreset, detectPreset } from './presets'

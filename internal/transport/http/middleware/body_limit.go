@@ -12,15 +12,13 @@ import (
 // moment the limit is exceeded, before the bytes ever accumulate in
 // memory.
 //
-// 1 MiB is plenty for every admin write the panel exposes (user CRUD,
-// settings JSON, SAML config). The only intentionally-large endpoint
-// is /api/auth/saml/acs which carries a SAMLResponse — its expected
-// upper bound is typically ~80 KiB, so 1 MiB covers it with margin.
+// Ordinary admin writes retain a one-MiB cap. Native sync and destination-list
+// writes have separate route overrides for their bounded larger payloads.
 func BodyLimit(maxBytes int64) gin.HandlerFunc {
 	return BodyLimitByPath(maxBytes, nil)
 }
 
-// BodyLimitByPath applies a default cap and exact-path overrides. The map is
+// BodyLimitByPath applies a default cap and exact-path or matched-route overrides. The map is
 // copied at construction so startup wiring cannot race request handling by
 // mutating it later.
 func BodyLimitByPath(defaultMaxBytes int64, pathLimits map[string]int64) gin.HandlerFunc {
@@ -38,6 +36,8 @@ func BodyLimitByPath(defaultMaxBytes int64, pathLimits map[string]int64) gin.Han
 		if c.Request.Body != nil {
 			maxBytes := defaultMaxBytes
 			if override, ok := limits[c.Request.URL.Path]; ok {
+				maxBytes = override
+			} else if override, ok := limits[c.FullPath()]; ok {
 				maxBytes = override
 			}
 			c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxBytes)

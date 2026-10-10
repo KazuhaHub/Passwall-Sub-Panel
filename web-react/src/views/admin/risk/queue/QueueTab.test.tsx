@@ -13,7 +13,7 @@ import type { GeoAnomaly } from '@/api/geoAnomalies'
 import type { QueueCounts, QueueRow, QueueView } from '@/api/riskCenter'
 import type { GeoIPStatus } from '@/api/settings'
 import RiskUserDrawer from '../drawer/RiskUserDrawer'
-import { useDrawerParam } from '../drawerParam'
+import { useDrawerParam } from '@/hooks/useDrawerParam'
 import QueueTab from './QueueTab'
 
 const api = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() }))
@@ -387,7 +387,7 @@ describe('QueueTab filters', () => {
     fireEvent.mouseDown(screen.getByRole('combobox', { name: '来源' }))
     const list = await screen.findByRole('listbox')
     expect(within(list).getAllByRole('option').map(o => o.textContent))
-      .toEqual(['异地并发', '订阅多地', '设备数', '用量变化', '登录国家'])
+      .toEqual(['异地并发', '订阅多地', '设备数', '用量变化', '登录国家', '访问拦截'])
     fireEvent.click(within(list).getByRole('option', { name: '设备数' }))
     await waitFor(() => expect(urlParams().get('source')).toBe('devices'))
     fireEvent.click(within(screen.getByRole('listbox')).getByRole('option', { name: '异地并发' }))

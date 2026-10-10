@@ -15,6 +15,7 @@ export type CompatStatus = 'supported' | 'too_old' | 'untested' | 'unknown'
 export type XUIAuthMethod = '' | 'token' | 'password'
 export type PanelType = '3xui' | 'sui' | 'psp'
 export type NodeUpdateChannel = 'stable' | 'beta'
+export type NativeAuditCollect = 'off' | 'hits' | 'hits_and_usage'
 export type NativeCoreEngine = 'xray' | 'sing-box'
 export type NativeCompatibilityStatus = 'unknown' | 'compatible' | 'limited' | 'incompatible'
 
@@ -47,6 +48,8 @@ export interface Server {
   panel_type: PanelType
   /** Saved Passwall Node release preference; legacy omission means stable. Docker installation files follow its floating image tag by default. */
   update_channel?: NodeUpdateChannel
+  /** Saved native-node collection preference; effective collection also depends on reported capabilities. */
+  audit_collect?: NativeAuditCollect
   capabilities: PanelCapability[]
   name: string
   url: string
@@ -197,6 +200,8 @@ export interface NativeInstallationFiles {
 export interface UpdateServerRequest {
   panel_type?: PanelType
   update_channel?: NodeUpdateChannel
+  /** Omit to preserve the saved native-node mode; revision is owned by the server. */
+  audit_collect?: NativeAuditCollect
   name?: string
   url?: string
   api_token?: string

@@ -151,14 +151,14 @@ function GeoDetector({ geo }: { geo: RiskUserSummary['geo'] }) {
   )
 }
 
-function KindDetector({ kind, sig }: { kind: RiskKind; sig: (RiskSignal & { stale: boolean }) | undefined }) {
+function KindDetector({ kind, sig, userID }: { kind: RiskKind; sig: (RiskSignal & { stale: boolean }) | undefined; userID: number }) {
   const { t } = useTranslation(['admin'])
   const title = t(`admin:risk_signals.kind.${kind}`)
   if (!sig) return <DetectorRow title={title} chip={<DetectorStateChip state="not_computed" />} />
   return (
-    <DetectorRow title={title} chip={<DetectorStateChip state={sig.state} code={sig.code} />}
+    <DetectorRow title={title} chip={<DetectorStateChip state={sig.state} code={sig.code} complete={kind === 'dest_block' ? false : undefined} />}
       reason={riskCodeText(sig, t)} judgedAt={sig.updated_at_ms} stale={sig.stale}
-      evidence={sig.evidence ? <RiskKindEvidence kind={kind} evidence={sig.evidence} /> : undefined} />
+      evidence={sig.evidence ? <RiskKindEvidence kind={kind} evidence={sig.evidence} userID={userID} /> : undefined} />
   )
 }
 
@@ -205,7 +205,7 @@ export default function OverviewTab({ summary }: { summary: RiskUserSummary }) {
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.25 }}>
       <GeoDetector geo={summary.geo} />
       {RISK_KINDS.map(k => (
-        <KindDetector key={k} kind={k} sig={summary.signals.find(s => s.kind === k)} />
+        <KindDetector key={k} kind={k} sig={summary.signals.find(s => s.kind === k)} userID={summary.user.id} />
       ))}
       <ReviewLines review={summary.review} />
     </Box>

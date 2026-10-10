@@ -23,7 +23,10 @@ import (
 // OR drain the single-instance live operation gate before Apply, and replace
 // the pool before releasing admission. Old responses and detached writers must
 // not commit after conversion or create new old-backend tasks after retirement.
-type serverMigrationRepo struct{ db *gorm.DB }
+type serverMigrationRepo struct {
+	db    *gorm.DB
+	audit *DestAuditRepo
+}
 
 // coreCatalogForMigration is the reviewed core catalog the offline conversion gate
 // reads. It is package-level for the same reason the secret key is: NewRepos is
@@ -101,6 +104,8 @@ func (r *serverMigrationRepo) Apply(ctx context.Context, panelID int64, expected
 		return safeNativeCredentialStorageError(err)
 	}
 	var created *nodeAgentRow
+	unlock := r.audit.lockControlPanel(panelID)
+	defer unlock()
 	err = r.db.WithContext(ctx).Session(&gorm.Session{Logger: logger.Discard}).Transaction(func(tx *gorm.DB) error {
 		snapshot, err := loadServerMigrationSnapshot(tx, panelID, true)
 		if err != nil {
@@ -185,6 +190,7 @@ func (r *serverMigrationRepo) Apply(ctx context.Context, panelID int64, expected
 		return safeNativeCredentialStorageError(err)
 	}
 	applyCreatedNodeAgent(agent, created)
+	r.audit.notifyCurrentControl(ctx, panelID)
 	return nil
 }
 

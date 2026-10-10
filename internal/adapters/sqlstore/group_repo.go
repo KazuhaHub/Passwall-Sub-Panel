@@ -2,6 +2,7 @@ package sqlstore
 
 import (
 	"context"
+	"time"
 
 	"gorm.io/gorm"
 
@@ -44,7 +45,24 @@ func (r *groupRepo) Update(ctx context.Context, g *domain.Group) error {
 }
 
 func (r *groupRepo) Delete(ctx context.Context, id int64) error {
-	if err := r.db.WithContext(ctx).Delete(&groupRow{}, id).Error; err != nil {
+	if id <= 0 {
+		return domain.ErrValidation
+	}
+	err := NewDestDefinitionRepo(r.db).mutate(ctx, time.Now(), func(tx *gorm.DB) (bool, error) {
+		mode := tx.Where("group_id = ?", id).Delete(&destGroupModeRow{})
+		if mode.Error != nil {
+			return false, mode.Error
+		}
+		lists := tx.Where("owner_group_id = ?", id).Delete(&destListRow{})
+		if lists.Error != nil {
+			return false, lists.Error
+		}
+		if err := tx.Delete(&groupRow{}, id).Error; err != nil {
+			return false, err
+		}
+		return mode.RowsAffected > 0 || lists.RowsAffected > 0, nil
+	})
+	if err != nil {
 		return err
 	}
 	r.invalidateLimits()

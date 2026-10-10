@@ -79,15 +79,16 @@ type ClientSyncer interface {
 }
 
 type Service struct {
-	users     ports.UserRepo
-	ownership ports.OwnershipRepo
-	nodes     ports.NodeRepo
-	groups    ports.GroupRepo
-	settings  ports.SettingsRepo
-	audit     ports.AuditRepo
-	pool      ports.XUIPool
-	syncer    ClientSyncer
-	clients   ports.PSPClientRepo
+	users            ports.UserRepo
+	ownership        ports.OwnershipRepo
+	nodes            ports.NodeRepo
+	groups           ports.GroupRepo
+	settings         ports.SettingsRepo
+	audit            ports.AuditRepo
+	pool             ports.XUIPool
+	syncer           ClientSyncer
+	clients          ports.PSPClientRepo
+	groupEligibility ports.GroupNodeEligibility
 
 	// axisAReversePush gates the v3.5 "PSP pushes its config back over 3X-UI
 	// drift" behavior in reconcileInboundConfig (the push uses
@@ -109,6 +110,18 @@ func New(users ports.UserRepo, ownership ports.OwnershipRepo, nodes ports.NodeRe
 		audit: audit, pool: pool, syncer: syncer,
 		axisAReversePush: true,
 	}
+}
+
+func (s *Service) SetGroupEligibility(selector ports.GroupNodeEligibility) {
+	s.groupEligibility = selector
+}
+
+func (s *Service) groupAllowsNode(ctx context.Context, n *domain.Node, g *domain.Group) (bool, error) {
+	if s.groupEligibility != nil {
+		return s.groupEligibility.Eligible(ctx, n, g)
+	}
+	var legacy *group.Service
+	return legacy.Eligible(ctx, n, g)
 }
 
 // SetPSPClientRepo supplies the authoritative desired client rows. Nil keeps
@@ -422,16 +435,26 @@ func (s *Service) checkMissingOwnershipsWithCtx(
 		owned[nodeKey{e.PanelID, e.InboundID}] = true
 	}
 
+	var eligibleNodes []*domain.Node
 	for _, n := range nodes {
 		if n == nil || n.IsSeparator() || !n.Enabled {
-			continue
-		}
-		if !group.Matches(n, g.TagFilter) {
 			continue
 		}
 		if owned[nodeKey{n.PanelID, n.InboundID}] {
 			continue
 		}
+		eligible, err := s.groupAllowsNode(ctx, n, g)
+		if err != nil {
+			log.Warn("reconcile: group eligibility unavailable", "group_id", g.ID)
+			return
+		}
+		if eligible {
+			eligibleNodes = append(eligibleNodes, n)
+		}
+	}
+	// Read the whole group's candidate eligibility before any additions. A
+	// failure on a later panel must not leave a partially provisioned group.
+	for _, n := range eligibleNodes {
 		// Missing!
 		report.Scanned++
 		ce, err := s.loadInbound(ctx, cache, n.PanelID, n.InboundID)

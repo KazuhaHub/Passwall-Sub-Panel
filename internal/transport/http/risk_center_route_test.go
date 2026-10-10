@@ -164,6 +164,8 @@ func TestRiskCenterRoutesAreAdminOnly(t *testing.T) {
 		{stdhttp.MethodDelete, "/api/admin/risk-center/users/7/trust", "", `"trusted":false`, services},
 		{stdhttp.MethodGet, "/api/admin/risk-center/policy", "", `"defaults":{`, nil},
 		{stdhttp.MethodPut, "/api/admin/risk-center/policy", `{"settings":{"risk_max_devices":5}}`, `"risk_max_devices":5`, saves},
+		{stdhttp.MethodGet, "/api/admin/dest/settings", "", `"dest_hit_retention_days":30`, nil},
+		{stdhttp.MethodPut, "/api/admin/dest/settings", `{"settings":{"dest_list_refresh_hours":6}}`, `"dest_list_refresh_hours":6`, saves},
 	} {
 		for _, test := range []struct {
 			name, token string
@@ -277,6 +279,7 @@ func TestRiskCenterAuditRowsAreAdminOnly(t *testing.T) {
 	for _, w := range []*httptest.ResponseRecorder{
 		do(stdhttp.MethodPost, "/api/admin/risk-center/users/7/dismiss", adminToken, `{"note":"`+note+`","expected":{"geo":"flagged"}}`),
 		do(stdhttp.MethodPost, "/api/admin/risk-center/users/8/trust", adminToken, ""),
+		do(stdhttp.MethodPut, "/api/admin/dest/settings", adminToken, `{"settings":{"dest_list_refresh_hours":6}}`),
 	} {
 		if w.Code != stdhttp.StatusOK {
 			t.Fatalf("the administrator's review action = %d: %s", w.Code, w.Body.String())
@@ -313,13 +316,14 @@ func TestRiskCenterAuditRowsAreAdminOnly(t *testing.T) {
 		"",
 		"?page_size=1",
 		"?search=risk-center",
+		"?search=dest",
 		"?search=203.0.113.9",
 		"?actor=" + url.QueryEscape(admin.UPN),
 		"?action=" + url.QueryEscape("create_or_run /api/admin/risk-center/users/:id/dismiss"),
 	} {
 		t.Run("operator reads audit"+query, func(t *testing.T) {
 			page, raw := read(operatorToken, query)
-			for _, leak := range []string{"risk-center", "203.0.113.9", "brother", "flagged"} {
+			for _, leak := range []string{"risk-center", "dest_list_refresh_hours", "/api/admin/dest/", "203.0.113.9", "brother", "flagged"} {
 				if strings.Contains(raw, leak) {
 					t.Fatalf("the operator's audit page carries %q: %s", leak, raw)
 				}
@@ -339,10 +343,10 @@ func TestRiskCenterAuditRowsAreAdminOnly(t *testing.T) {
 
 	t.Run("administrator reads audit", func(t *testing.T) {
 		page, raw := read(adminToken, "")
-		if page.Total != 3 || len(page.Items) != 3 {
-			t.Fatalf("the administrator's page = total %d, items %+v; want all 3 rows", page.Total, page.Items)
+		if page.Total != 4 || len(page.Items) != 4 {
+			t.Fatalf("the administrator's page = total %d, items %+v; want all 4 rows", page.Total, page.Items)
 		}
-		for _, want := range []string{"/api/admin/risk-center/users/:id/dismiss", "/api/admin/risk-center/users/:id/trust", note, "flagged"} {
+		for _, want := range []string{"/api/admin/risk-center/users/:id/dismiss", "/api/admin/risk-center/users/:id/trust", "/api/admin/dest/settings", "dest_list_refresh_hours", note, "flagged"} {
 			if !strings.Contains(raw, want) {
 				t.Fatalf("the administrator's audit page lacks %q: %s", want, raw)
 			}

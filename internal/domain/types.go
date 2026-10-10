@@ -1285,6 +1285,9 @@ type Panel struct {
 	// UpdateChannel is a Passwall Node-only release preference, not an automatic
 	// update policy. Empty legacy values resolve to stable via Effective().
 	UpdateChannel PanelUpdateChannel
+	// Collection is controlled separately from display/credential edits.
+	AuditCollect         AuditCollect
+	AuditCollectRevision int64
 	// AuthMethod chooses Bearer-token vs username/password explicitly. Empty
 	// (XUIAuthAuto) keeps the legacy infer-from-presence behavior for rows
 	// written before this field existed.

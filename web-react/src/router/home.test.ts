@@ -3,6 +3,11 @@ import { describe, expect, it } from 'vitest'
 import { homeForRole, isAdminOnlyPath, isAdminPath } from './home'
 
 describe('route access helpers', () => {
+  it('keeps access control and its subroutes admin-only', () => {
+    expect(isAdminOnlyPath('/admin/access-control')).toBe(true)
+    expect(isAdminOnlyPath('/admin/access-control/node')).toBe(true)
+    expect(isAdminOnlyPath('/admin/access-controls')).toBe(false)
+  })
   it('lands staff on the dashboard and users on their profile', () => {
     expect(homeForRole('admin')).toBe('/admin/dashboard')
     expect(homeForRole('operator')).toBe('/admin/dashboard')

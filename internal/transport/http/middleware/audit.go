@@ -104,6 +104,9 @@ func AuditWrites(auditSvc *audit.Service, dispatch AsyncDispatch) gin.HandlerFun
 // needing a matched route — whether this request should be audited. Kept as
 // a pure function so it can be unit-tested without standing up gin.
 func shouldAuditPath(path, method string) bool {
+	if method == http.MethodPost && (path == "/api/admin/dest/lists/preview" || path == "/api/admin/dest/policies/preview") {
+		return false
+	}
 	switch method {
 	case http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete:
 	default:

@@ -116,3 +116,29 @@ func TestSettingsPut_RealPublicationVersionSurvivesStaleTab(t *testing.T) {
 		t.Fatalf("publication state %+v: %v", got, err)
 	}
 }
+
+func TestSettingsWritersKeepLegalPublicationAndDestinationOwnersSeparate(t *testing.T) {
+	stored := storedEverywhere()
+	stored.LegalEnabled, stored.LegalConsentVersion = true, 9
+	stored.DestHitRetentionDays, stored.DestTrialRetentionDays, stored.DestUsageRetentionDays = 31, 12, 9
+	stored.DestListRefreshHours, stored.DestPolicyApplyMinSeconds = 7, 45
+	repo := &policySettingsRepo{settings: stored}
+	w := requestRiskPolicy(riskPolicyRouter(repo), http.MethodPut, "/api/admin/settings/ui",
+		`{"login_mode":"local_only","legal_enabled":false,"legal_consent_version":999,"dest_hit_retention_days":{"stale":true},"dest_trial_retention_days":0,"dest_usage_retention_days":1,"dest_list_refresh_hours":0,"dest_policy_apply_min_seconds":null}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("legal toggle: %d %s", w.Code, w.Body.String())
+	}
+	got, _, _ := repo.snapshot()
+	if got.LegalEnabled || got.LegalConsentVersion != 9 || got.AccessControlSettings() != stored.AccessControlSettings() {
+		t.Fatalf("legal toggle changed a different writer's state: legal=%t/%d destination=%+v", got.LegalEnabled, got.LegalConsentVersion, got.AccessControlSettings())
+	}
+	w = requestDestinationSettings(t, destinationRouter(repo), http.MethodPut, `{"dest_hit_retention_days":17}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("destination edit: %d %s", w.Code, w.Body.String())
+	}
+	got, _, _ = repo.snapshot()
+	stored.DestHitRetentionDays = 17
+	if got.LegalEnabled || got.LegalConsentVersion != 9 || got.AccessControlSettings() != stored.AccessControlSettings() {
+		t.Fatalf("destination edit changed legal publication or unedited controls: legal=%t/%d destination=%+v", got.LegalEnabled, got.LegalConsentVersion, got.AccessControlSettings())
+	}
+}

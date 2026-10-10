@@ -12,7 +12,7 @@ import (
 // risk_* field of UISettings — the concurrent-location detector's policy, its
 // automatic suspension and fleet-wide runtime, and the risk signals' policy
 // and runtime — with the same Go names, the same types and the same json tags
-// (48). Each field means exactly what its UISettings namesake documents; read
+// (50). Each field means exactly what its UISettings namesake documents; read
 // the comments there, not here, so there is one definition of each knob.
 //
 // The /risk-center/policy endpoint owns these keys. It is a separate type,
@@ -47,21 +47,23 @@ type RiskCenterPolicy struct {
 	GeoAnomalyLiftMaxPerPoll      int `json:"geo_anomaly_lift_max_per_poll"`
 	GeoAnomalyInfraRefreshMinutes int `json:"geo_anomaly_infra_refresh_minutes"`
 	GeoAnomalyInfraHostTTLMinutes int `json:"geo_anomaly_infra_host_ttl_minutes"`
-	// Risk signals: device capture, the four switches and the thresholds.
-	RiskHWIDCaptureOff    bool    `json:"risk_hwid_capture_off"`
-	RiskSubSpreadOff      bool    `json:"risk_sub_spread_off"`
-	RiskDevicesOff        bool    `json:"risk_devices_off"`
-	RiskUsageShiftOff     bool    `json:"risk_usage_shift_off"`
-	RiskLoginCountryOff   bool    `json:"risk_login_country_off"`
-	RiskMinDays           int     `json:"risk_min_days"`
-	RiskMaxDevices        int     `json:"risk_max_devices"`
-	RiskUsageRatio        float64 `json:"risk_usage_ratio"`
-	RiskUsageFloorGB      int     `json:"risk_usage_floor_gb"`
-	RiskLoginWarmupLogins int     `json:"risk_login_warmup_logins"`
-	RiskLoginHoldDays     int     `json:"risk_login_hold_days"`
-	RiskUsageWarmupDays   int     `json:"risk_usage_warmup_days"`
-	RiskUsageFlagDays     int     `json:"risk_usage_flag_days"`
-	RiskUsageSuspectDays  int     `json:"risk_usage_suspect_days"`
+	// Risk signals: device capture, the five switches and the thresholds.
+	RiskHWIDCaptureOff     bool    `json:"risk_hwid_capture_off"`
+	RiskSubSpreadOff       bool    `json:"risk_sub_spread_off"`
+	RiskDevicesOff         bool    `json:"risk_devices_off"`
+	RiskUsageShiftOff      bool    `json:"risk_usage_shift_off"`
+	RiskLoginCountryOff    bool    `json:"risk_login_country_off"`
+	RiskDestBlockOff       bool    `json:"risk_dest_block_off"`
+	RiskDestBlockThreshold int     `json:"risk_dest_block_threshold"`
+	RiskMinDays            int     `json:"risk_min_days"`
+	RiskMaxDevices         int     `json:"risk_max_devices"`
+	RiskUsageRatio         float64 `json:"risk_usage_ratio"`
+	RiskUsageFloorGB       int     `json:"risk_usage_floor_gb"`
+	RiskLoginWarmupLogins  int     `json:"risk_login_warmup_logins"`
+	RiskLoginHoldDays      int     `json:"risk_login_hold_days"`
+	RiskUsageWarmupDays    int     `json:"risk_usage_warmup_days"`
+	RiskUsageFlagDays      int     `json:"risk_usage_flag_days"`
+	RiskUsageSuspectDays   int     `json:"risk_usage_suspect_days"`
 	// Risk signals: the worker's fleet-wide runtime and the risk center's
 	// retention and live view.
 	RiskRefreshIntervalMinutes     int `json:"risk_refresh_interval_minutes"`
@@ -112,20 +114,22 @@ func (s UISettings) RiskCenterPolicy() RiskCenterPolicy {
 		GeoAnomalyInfraRefreshMinutes: s.GeoAnomalyInfraRefreshMinutes,
 		GeoAnomalyInfraHostTTLMinutes: s.GeoAnomalyInfraHostTTLMinutes,
 
-		RiskHWIDCaptureOff:    s.RiskHWIDCaptureOff,
-		RiskSubSpreadOff:      s.RiskSubSpreadOff,
-		RiskDevicesOff:        s.RiskDevicesOff,
-		RiskUsageShiftOff:     s.RiskUsageShiftOff,
-		RiskLoginCountryOff:   s.RiskLoginCountryOff,
-		RiskMinDays:           s.RiskMinDays,
-		RiskMaxDevices:        s.RiskMaxDevices,
-		RiskUsageRatio:        s.RiskUsageRatio,
-		RiskUsageFloorGB:      s.RiskUsageFloorGB,
-		RiskLoginWarmupLogins: s.RiskLoginWarmupLogins,
-		RiskLoginHoldDays:     s.RiskLoginHoldDays,
-		RiskUsageWarmupDays:   s.RiskUsageWarmupDays,
-		RiskUsageFlagDays:     s.RiskUsageFlagDays,
-		RiskUsageSuspectDays:  s.RiskUsageSuspectDays,
+		RiskHWIDCaptureOff:     s.RiskHWIDCaptureOff,
+		RiskSubSpreadOff:       s.RiskSubSpreadOff,
+		RiskDevicesOff:         s.RiskDevicesOff,
+		RiskUsageShiftOff:      s.RiskUsageShiftOff,
+		RiskLoginCountryOff:    s.RiskLoginCountryOff,
+		RiskDestBlockOff:       s.RiskDestBlockOff,
+		RiskDestBlockThreshold: s.RiskDestBlockThreshold,
+		RiskMinDays:            s.RiskMinDays,
+		RiskMaxDevices:         s.RiskMaxDevices,
+		RiskUsageRatio:         s.RiskUsageRatio,
+		RiskUsageFloorGB:       s.RiskUsageFloorGB,
+		RiskLoginWarmupLogins:  s.RiskLoginWarmupLogins,
+		RiskLoginHoldDays:      s.RiskLoginHoldDays,
+		RiskUsageWarmupDays:    s.RiskUsageWarmupDays,
+		RiskUsageFlagDays:      s.RiskUsageFlagDays,
+		RiskUsageSuspectDays:   s.RiskUsageSuspectDays,
 
 		RiskRefreshIntervalMinutes:     s.RiskRefreshIntervalMinutes,
 		RiskFirstDelayMinutes:          s.RiskFirstDelayMinutes,
@@ -177,6 +181,8 @@ func (s *UISettings) SetRiskCenterPolicy(p RiskCenterPolicy) {
 	s.RiskDevicesOff = p.RiskDevicesOff
 	s.RiskUsageShiftOff = p.RiskUsageShiftOff
 	s.RiskLoginCountryOff = p.RiskLoginCountryOff
+	s.RiskDestBlockOff = p.RiskDestBlockOff
+	s.RiskDestBlockThreshold = p.RiskDestBlockThreshold
 	s.RiskMinDays = p.RiskMinDays
 	s.RiskMaxDevices = p.RiskMaxDevices
 	s.RiskUsageRatio = p.RiskUsageRatio
@@ -218,15 +224,27 @@ var riskCenterPolicyKeys = func() []string {
 // slice is the caller's own.
 func RiskCenterPolicyKeys() []string { return slices.Clone(riskCenterPolicyKeys) }
 
+// RiskCenterRuntimeEffective excludes fleet controls owned by other settings
+// views from the risk policy's diagnostics.
+func RiskCenterRuntimeEffective(s UISettings) map[string]int {
+	values, _ := RuntimeEffective(s)
+	for key := range values {
+		if !slices.Contains(riskCenterPolicyKeys, key) {
+			delete(values, key)
+		}
+	}
+	return values
+}
+
 // RiskCenterPolicyDefaults is the shipped value of every NUMERIC policy key
-// (38), keyed by json tag, in the unit the setting is typed in — the number
+// (39), keyed by json tag, in the unit the setting is typed in — the number
 // an unset (0) field falls back to. The policy page shows it as the empty
 // field's placeholder and computes its presets and "in effect" lines from
 // it, so the SPA holds no copy of any default: a copy is a second definition
 // of each rule, and the first thing to drift.
 //
 // Every value comes from the domain value its reader falls back to: the geo
-// policy's (DefaultGeoPolicy), the risk policy's four thresholds
+// policy's (DefaultGeoPolicy), the risk policy's five thresholds
 // (DefaultRiskPolicy — the floor stated in GiB, as it is typed), and the 23
 // runtime knobs exactly as RuntimeEffective states their defaults. The texts
 // and switches have no default to show: an empty text means none, and a
@@ -247,14 +265,17 @@ func RiskCenterPolicyDefaults() map[string]float64 {
 		"geo_anomaly_ban_after_polls":      float64(geo.BanAfterPolls),
 		"geo_anomaly_ban_duration_minutes": float64(geo.BanDurationMinutes),
 
-		"risk_min_days":       float64(risk.MinDays),
-		"risk_max_devices":    float64(risk.MaxDevices),
-		"risk_usage_ratio":    risk.UsageRatio,
-		"risk_usage_floor_gb": float64(risk.UsageFloorBytes / domain.RiskGiB),
+		"risk_min_days":             float64(risk.MinDays),
+		"risk_max_devices":          float64(risk.MaxDevices),
+		"risk_usage_ratio":          risk.UsageRatio,
+		"risk_usage_floor_gb":       float64(risk.UsageFloorBytes / domain.RiskGiB),
+		"risk_dest_block_threshold": float64(risk.DestBlockThreshold),
 	}
 	_, runtime := RuntimeEffective(UISettings{})
 	for key, v := range runtime {
-		out[key] = float64(v)
+		if slices.Contains(riskCenterPolicyKeys, key) {
+			out[key] = float64(v)
+		}
 	}
 	return out
 }

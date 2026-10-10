@@ -19,6 +19,7 @@ import (
 	nodeprotocol "github.com/KazuhaHub/passwall-protocol/protocol"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/boundedcache"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/keyedmutex"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/log"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
@@ -62,7 +63,13 @@ type Service struct {
 	// host ingests the optional telemetry subtree. NIL MEANS THIS BUILD DOES NOT
 	// COLLECT IT, which is what keeps a panel with no metrics repository from
 	// advertising a cadence it cannot honour.
-	host *nodemetrics.Service
+	host               *nodemetrics.Service
+	audit              AuditCollector
+	policies           PolicyCoordinator
+	policyCandidates   ports.NodePolicyCandidateRepo
+	policyConfigCache  *boundedcache.Cache[[]byte]
+	policyConfigEncode func(nodeprotocol.ConfigBody) ([]byte, error)
+	allowlistResync    func(context.Context, int64)
 }
 
 // receivedFullReport keeps the control plane's receipt time beside the latest
@@ -91,10 +98,20 @@ type Options struct {
 	// Host is optional: a build without a metrics repository simply does not
 	// ingest telemetry, and the envelope carries no cadence for it.
 	Host *nodemetrics.Service
-	Now  func() time.Time
+	// Audit must only reserve bounded memory. It must not wait on storage or a
+	// collection writer; Sync invokes it after releasing the agent lock.
+	Audit AuditCollector
+	// Policies and PolicyCandidates must be configured together. Both nil keeps
+	// the existing config path; application activation follows C3 acceptance.
+	Policies         PolicyCoordinator
+	PolicyCandidates ports.NodePolicyCandidateRepo
+	Now              func() time.Time
 }
 
 func New(options Options) (*Service, error) {
+	if (options.Policies == nil) != (options.PolicyCandidates == nil) {
+		return nil, errors.New("nodesync: policies and atomic policy candidate mint repository are required together")
+	}
 	if options.Desired == nil || options.Agents == nil || options.Issues == nil || options.Tasks == nil || options.Users == nil ||
 		options.Clients == nil || options.Nodes == nil || options.Settings == nil {
 		return nil, errors.New("nodesync: desired, agents, issues, tasks, users, clients, nodes, settings are required")
@@ -109,12 +126,22 @@ func New(options Options) (*Service, error) {
 		panels: options.Panels, coreCatalog: options.CoreCatalog,
 		reports: make(map[string]receivedFullReport),
 		anchors: make(map[int64]nodeprotocol.ClientCounters), now: now,
-		grants: make(map[string]map[nodeprotocol.ClientKey]int64),
-		host:   options.Host,
+		grants:   make(map[string]map[nodeprotocol.ClientKey]int64),
+		host:     options.Host,
+		audit:    options.Audit,
+		policies: options.Policies, policyCandidates: options.PolicyCandidates,
+		policyConfigCache: boundedcache.New[[]byte](64, 32<<20),
 	}, nil
 }
 
 func (s *Service) SetRenderInvalidator(invalidate func()) { s.invalidateRender = invalidate }
+
+// SetAllowlistResyncer is wired before serving. The callback must invalidate
+// eligibility first, then enqueue asynchronous member resync without waiting
+// on the current agent sync lock. Nil leaves recovery to the periodic heal.
+func (s *Service) SetAllowlistResyncer(resync func(context.Context, int64)) {
+	s.allowlistResync = resync
+}
 
 func (s *Service) SetRealityFingerprintNormalizer(normalize func(context.Context, int64, string) (int, error)) {
 	s.normalizeRealityFingerprints = normalize
@@ -136,6 +163,16 @@ func (s *Service) Sync(ctx context.Context, report nodeprotocol.NodeReport) (nod
 	// latest-full cache.
 	host := report.Host
 	report.Host = nil
+	// Audit ingestion belongs to the separate bounded worker, never control
+	// validation, accounting, observed-state persistence or the latest-full cache.
+	audit := report.Audit
+	var auditReceivedAt time.Time
+	if audit != nil && s.audit != nil {
+		auditReceivedAt = s.now().UTC()
+	}
+	report.Audit = nil
+	policyStatus := report.PolicyStatus
+	report.PolicyStatus = nil
 	if err := nodeprotocol.ValidateNodeReportBase(report); err != nil {
 		return nodeprotocol.SyncResponse{}, fmt.Errorf("nodesync: invalid report: %w", err)
 	}
@@ -156,6 +193,11 @@ func (s *Service) Sync(ctx context.Context, report nodeprotocol.NodeReport) (nod
 	now := s.now().UTC()
 	if err := s.ingestReport(ctx, agent, snapshot, report, now); err != nil {
 		return nodeprotocol.SyncResponse{}, err
+	}
+	if s.policies != nil {
+		if err := s.policies.ObserveStatus(ctx, agent.AgentID, policyStatus, report.Capabilities); err != nil {
+			return nodeprotocol.SyncResponse{}, fmt.Errorf("nodesync: observe policy status: %w", err)
+		}
 	}
 	normalized, err := s.recordPanelObservation(ctx, agent, report, now)
 	if err != nil {
@@ -190,7 +232,7 @@ func (s *Service) Sync(ctx context.Context, report nodeprotocol.NodeReport) (nod
 	if err != nil {
 		return nodeprotocol.SyncResponse{}, err
 	}
-	configStream, err := s.mint(ctx, agent, domain.NodeAgentStreamConfig, configBody, now)
+	configBody, configStream, err := s.mintConfig(ctx, agent, snapshot, report.Capabilities, configBody, now)
 	if err != nil {
 		return nodeprotocol.SyncResponse{}, err
 	}
@@ -252,6 +294,12 @@ func (s *Service) Sync(ctx context.Context, report nodeprotocol.NodeReport) (nod
 	}
 	if int64(len(encoded)) > nodeprotocol.MaxSyncBodyBytes {
 		return nodeprotocol.SyncResponse{}, fmt.Errorf("nodesync: response exceeds %d bytes", nodeprotocol.MaxSyncBodyBytes)
+	}
+	// Every control error above releases through defer without offering audit.
+	// Unlock is idempotent; telemetry only takes its own bounded memory locks.
+	unlock()
+	if s.audit != nil && auditOfferEligible(report.Capabilities, audit) {
+		s.audit.Offer(agent.AgentID, agent.PanelID, auditReceivedAt, *audit)
 	}
 	return response, nil
 }
@@ -478,6 +526,9 @@ func (s *Service) ingestReport(ctx context.Context, agent *domain.NodeAgent, sna
 	// upgrade helper immediately revokes future task admission.
 	if err := s.agents.UpdateProtocolObservation(ctx, agent.AgentID, report.ProtocolVersion, report.Capabilities, now); err != nil {
 		return fmt.Errorf("nodesync: record protocol observation: %w", err)
+	}
+	if s.allowlistResync != nil && slices.Contains(agent.ObservedCapabilities, nodeprotocol.CapabilityDestinationPolicy) != slices.Contains(report.Capabilities, nodeprotocol.CapabilityDestinationPolicy) {
+		s.allowlistResync(ctx, agent.PanelID)
 	}
 	results := make([]domain.NodeAgentTaskResult, len(report.TaskResults))
 	for i := range report.TaskResults {
@@ -726,6 +777,9 @@ func cloneReport(in nodeprotocol.NodeReport) nodeprotocol.NodeReport {
 	// per agent into the latest-full cache is the kind of regression that only
 	// shows up as memory, months later.
 	out.Host = nil
+	// Audit is a transient best-effort batch, never a cached control observation.
+	out.Audit = nil
+	out.PolicyStatus = nil
 	return out
 }
 

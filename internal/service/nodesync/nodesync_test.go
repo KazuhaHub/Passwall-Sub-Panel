@@ -227,6 +227,11 @@ func TestSyncDispatchesDurableTasksOnlyWithBothCapabilitiesAndAcceptsReplay(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
+	connection, err := db.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = connection.Close() })
 	if err := sqlstore.EnsureSchema(db); err != nil {
 		t.Fatal(err)
 	}
@@ -351,6 +356,11 @@ func TestSyncMintsDocumentsThenIngestsAppliedObservation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	connection, err := db.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = connection.Close() })
 	if err := sqlstore.EnsureSchema(db); err != nil {
 		t.Fatal(err)
 	}

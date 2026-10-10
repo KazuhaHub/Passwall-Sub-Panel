@@ -2,7 +2,7 @@
 // decides what an admin reads (riskCodeText, the day strips), so all of them
 // are pinned by unit tests rather than by rendering.
 import type {
-  DevicesEvidence, LoginCountryEvidence, RiskSignal, SubSpreadEvidence, UsageShiftEvidence,
+  DestBlockEvidence, DevicesEvidence, LoginCountryEvidence, RiskSignal, SubSpreadEvidence, UsageShiftEvidence,
 } from '@/api/riskSignals'
 import type { Translate } from './geoAnomaly'
 import type { RegionNamer, RegionRef } from './regionName'
@@ -19,6 +19,10 @@ function evidenceOf<T>(sig: RiskSignal): Partial<T> {
  *  resolved per group, as the concurrent-location reasons are. */
 function codeParams(sig: RiskSignal): Record<string, unknown> {
   switch (sig.kind) {
+    case 'dest_block': {
+      const ev = evidenceOf<DestBlockEvidence>(sig)
+      return { total: ev.total, threshold: ev.threshold, hours: ev.window_hours }
+    }
     case 'sub_spread': {
       const ev = evidenceOf<SubSpreadEvidence>(sig)
       // No exclusions on record are no numbers, not four zeros: the

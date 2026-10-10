@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 import { ThemeProvider } from '@mui/material/styles'
-import { MemoryRouter } from 'react-router'
+import { createMemoryRouter, MemoryRouter } from 'react-router'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { AxiosError, type AxiosResponse } from 'axios'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -11,6 +11,7 @@ import { useSiteStore } from '@/stores/site'
 import { formatMsDualTz } from '@/utils/datetime'
 import type { RiskUserSummary } from '@/api/riskCenter'
 import ConfirmHost, { confirm } from '@/components/ConfirmHost'
+import AppRouter from '@/router/AppRouter'
 import RiskUserDrawer, { riskDrawerZIndex } from './RiskUserDrawer'
 
 const api = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() }))
@@ -152,7 +153,7 @@ function serve(user: () => RiskUserSummary | Error = () => summary()) {
   })
 }
 
-function tree(userId: number | null, onClose = vi.fn(), host: 'risk' | 'users' = 'risk') {
+function tree(userId: number | null, onClose = vi.fn(), host: 'risk' | 'users' | 'access' = 'risk') {
   return (
     <MemoryRouter>
       <ThemeProvider theme={theme}>
@@ -162,7 +163,7 @@ function tree(userId: number | null, onClose = vi.fn(), host: 'risk' | 'users' =
   )
 }
 
-function mount(userId: number | null, onClose = vi.fn(), host: 'risk' | 'users' = 'risk') {
+function mount(userId: number | null, onClose = vi.fn(), host: 'risk' | 'users' | 'access' = 'risk') {
   return render(tree(userId, onClose, host), { wrapper: queryWrapper(makeTestQueryClient()) })
 }
 
@@ -247,13 +248,13 @@ describe('RiskUserDrawer', () => {
     expect(await header()).toBeTruthy()
   })
 
-  it('概览: the five detectors in order, trust read as trust, stale verdicts marked, the geo reason always', async () => {
+  it('概览: the six detectors in order, trust read as trust, stale verdicts marked, the geo reason always', async () => {
     serve()
     mount(7)
     await header()
     const rows = screen.getAllByTestId('detector-row')
     expect(rows.map(r => within(r).getByTestId('detector-title').textContent))
-      .toEqual(['异地并发', '订阅多地', '设备数', '用量变化', '登录国家'])
+      .toEqual(['异地并发', '订阅多地', '设备数', '用量变化', '登录国家', '访问拦截'])
 
     // Geo: "no data" beside the reason that says why, never a bare chip.
     expect(within(rows[0]).getByText('无数据')).toBeTruthy()
@@ -468,5 +469,65 @@ describe('RiskUserDrawer', () => {
     serve()
     mount(null)
     expect(api.get).not.toHaveBeenCalled()
+  })
+  it('loads access only after tab selection, without later-stage usage reads', async () => {
+    serve(); const original = api.get.getMockImplementation()!
+    api.get.mockImplementation(async (url: string) => url === '/admin/dest/users/7' ? { data: { group: { id: 2, name: 'Students', mode: 'open', stage: '' }, exemption: null, hits_available: null, recent_hits: null, usage_available: null, usage_nodes: null } } : original(url))
+    mount(7); await header()
+    expect(api.get.mock.calls.some(([url]) => url.startsWith('/admin/dest/'))).toBe(false)
+    fireEvent.click(screen.getByRole('tab', { name: '访问' }))
+    await screen.findByText('Students')
+    expect(api.get.mock.calls.filter(([url]) => url === '/admin/dest/users/7')).toHaveLength(1)
+    expect(api.get.mock.calls.some(([url]) => url.includes('usage='))).toBe(false)
+  })
+  it('starts the access host on access', async () => {
+    serve(); api.get.mockImplementation(async (url: string) => ({ data: url.startsWith('/admin/dest/') ? { group: null, exemption: null, hits_available: null, recent_hits: null, usage_available: null, usage_nodes: null } : summary() }))
+    mount(7, vi.fn(), 'access'); await header()
+    expect(selectedTab()).toBe('访问')
+  })
+  it('provides 44px header, shared action and portaled menu targets', async () => {
+    serve(); mount(7); await header()
+    const targets = [screen.getByRole('button', { name: '关闭' }), screen.getByRole('button', { name: '暂停代理服务' }), screen.getByRole('button', { name: '更多操作' }), screen.getByRole('link', { name: '查看用量趋势' })]
+    for (const target of targets) {
+      expect(parseFloat(getComputedStyle(target).minHeight)).toBeGreaterThanOrEqual(44)
+      expect(parseFloat(getComputedStyle(target).minWidth)).toBeGreaterThanOrEqual(44)
+    }
+    fireEvent.click(screen.getByRole('button', { name: '更多操作' }))
+    for (const item of await screen.findAllByRole('menuitem')) expect(parseFloat(getComputedStyle(item).minHeight)).toBeGreaterThanOrEqual(44)
+  })
+  it('holds close, Escape, tab changes and competing actions until an access cancellation settles', async () => {
+    serve(); const original = api.get.getMockImplementation()!
+    api.get.mockImplementation(async (url: string) => url === '/admin/dest/users/7' ? { data: { group: null, exemption: { user_id: 7, upn: 'alice', reason: 'Diagnostics', created_by: 1, created_by_upn: null, created_at: Date.now(), expires_at: null, expired: false }, hits_available: null, recent_hits: null, usage_available: null, usage_nodes: null } } : original(url))
+    let finish!: (value: unknown) => void
+    api.delete.mockImplementation(() => new Promise(resolve => { finish = resolve }))
+    const onClose = vi.fn()
+    const router = createMemoryRouter([{ path: '/', element: <><RiskUserDrawer userId={7} onClose={onClose} host="access" /><ConfirmHost /></> }])
+    render(<ThemeProvider theme={theme}><AppRouter router={router} /></ThemeProvider>, { wrapper: queryWrapper(makeTestQueryClient()) })
+    fireEvent.click(await screen.findByRole('button', { name: '取消豁免' }))
+    const dialog = await screen.findByRole('dialog', { name: '取消 alice 的豁免？' })
+    fireEvent.click(within(dialog).getByRole('button', { name: '取消豁免' }))
+    await waitFor(() => expect(api.delete).toHaveBeenCalledOnce())
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '取消 alice 的豁免？' })).toBeNull())
+    for (const target of [screen.getByRole('button', { name: '关闭' }), screen.getByRole('button', { name: '暂停代理服务' }), screen.getByRole('button', { name: '更多操作' }), screen.getByRole('link', { name: '查看用量趋势' }), ...screen.getAllByRole('tab')]) {
+      expect(target.getAttribute('disabled') !== null || target.getAttribute('aria-disabled') === 'true').toBe(true)
+    }
+    fireEvent.click(screen.getByRole('button', { name: '关闭' })); fireEvent.keyDown(screen.getByRole('dialog', { name: 'alice' }), { key: 'Escape' })
+    fireEvent.click(screen.getByRole('tab', { name: '概览' }))
+    expect(onClose).not.toHaveBeenCalled(); expect(selectedTab()).toBe('访问')
+    finish({ data: {} }); await waitFor(() => expect(screen.getByRole('button', { name: '关闭' }).hasAttribute('disabled')).toBe(false))
+    fireEvent.click(screen.getByRole('button', { name: '关闭' })); expect(onClose).toHaveBeenCalledOnce()
+  })
+  it('does not show or read destination access for operators', async () => {
+    serve(); useAuthStore.setState({ role: 'operator' })
+    mount(7, vi.fn(), 'access'); await header()
+    expect(screen.queryByRole('tab', { name: '访问' })).toBeNull()
+    expect(selectedTab()).toBe('概览')
+    expect(api.get.mock.calls.some(([url]) => url.startsWith('/admin/dest/'))).toBe(false)
+  })
+  it('also offers access from the users host while keeping its overview default', async () => {
+    serve(); mount(7, vi.fn(), 'users'); await header()
+    expect(screen.getByRole('tab', { name: '访问' })).toBeTruthy()
+    expect(selectedTab()).toBe('概览')
+    expect(api.get.mock.calls.some(([url]) => url.startsWith('/admin/dest/'))).toBe(false)
   })
 })

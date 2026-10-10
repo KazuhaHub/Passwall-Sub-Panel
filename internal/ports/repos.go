@@ -538,6 +538,21 @@ type PSPClientRepo interface {
 // desired/applied streams. MintStream accepts canonical JSON and performs the
 // compare-before-CAS rule: identical content returns minted=false and never
 // advances DesiredVersion.
+// NodePolicyCandidateRepo is the narrow atomic mint boundary for the optional
+// destination compiler. Unchanged calls return stream metadata without its
+// desired body; the caller already holds the canonical config bytes.
+type NodePolicyCandidateRepo interface {
+	MintConfigWithPolicyCandidate(ctx context.Context, agentID string, canonicalBody []byte, metadata domain.DestPolicyMint, now time.Time) (*domain.NodeAgentStream, bool, error)
+}
+
+// DestAgentPolicyRepo serializes runtime state changes with candidate minting.
+// Mutation starts with metadata; loadBodies lazily reads the exact minted/LKG
+// bytes in the same owner transaction. Callbacks must perform no external I/O.
+type DestAgentPolicyRepo interface {
+	Get(ctx context.Context, agentID string, includeBodies bool) (*domain.DestAgentPolicy, error)
+	Update(ctx context.Context, agentID string, now time.Time, mutate func(*domain.DestAgentPolicy, func() error) (bool, error)) (bool, error)
+}
+
 type NodeAgentRepo interface {
 	Create(ctx context.Context, agent *domain.NodeAgent) error
 	List(ctx context.Context) ([]*domain.NodeAgent, error)
@@ -1142,6 +1157,13 @@ type UISettings struct {
 	// AuditRetentionDays controls automatic audit cleanup. 0 means never
 	// delete audit entries automatically.
 	AuditRetentionDays int `yaml:"audit_retention_days" json:"audit_retention_days"`
+	// Destination controls are fleet-wide, bounded and never group overrides.
+	// Zero selects the product default, never permanent retention.
+	DestHitRetentionDays      int `json:"dest_hit_retention_days"`
+	DestTrialRetentionDays    int `json:"dest_trial_retention_days"`
+	DestUsageRetentionDays    int `json:"dest_usage_retention_days"`
+	DestListRefreshHours      int `json:"dest_list_refresh_hours"`
+	DestPolicyApplyMinSeconds int `json:"dest_policy_apply_min_seconds"`
 	// SubBaseURL is the panel's public base URL used to render absolute
 	// subscription URLs ("<base>/sub/<token>"). Empty falls back to relative
 	// paths.
@@ -1555,18 +1577,22 @@ type UISettings struct {
 	// loaded, and whether the panel records a device identifier at all is a
 	// panel-wide privacy decision, not a group's policy.
 	RiskHWIDCaptureOff bool `json:"risk_hwid_capture_off"`
-	// The four signal switches. NEGATIVE on purpose: the zero value is what
+	// The five signal switches. NEGATIVE on purpose: the zero value is what
 	// an install that never saved the form stores, and it must mean "observe"
 	// — a positive "enabled" flag would leave every signal off until an admin
 	// found the form. Per-group, so a group whose members legitimately trip
 	// one signal (a team credential fetched from several provinces, staff who
 	// sign in from abroad) can have that signal alone switched off without
-	// losing the other three. A switched-off signal is stored as "disabled",
+	// losing the other signals. A switched-off signal is stored as "disabled",
 	// never as clean.
 	RiskSubSpreadOff    bool `json:"risk_sub_spread_off"`
 	RiskDevicesOff      bool `json:"risk_devices_off"`
 	RiskUsageShiftOff   bool `json:"risk_usage_shift_off"`
 	RiskLoginCountryOff bool `json:"risk_login_country_off"`
+	// The destination risk signal only reports risk and can be disabled per group.
+	RiskDestBlockOff bool `json:"risk_dest_block_off"`
+	// Zero takes the default 20; effective thresholds stay within 1..10000.
+	RiskDestBlockThreshold int `json:"risk_dest_block_threshold"`
 	// RiskMinDays is how many distinct panel-local days of the fetch window a
 	// place or a device must be seen on before it counts as established: a
 	// province or device seen on fewer days can make a signal suspect, never
@@ -2042,19 +2068,21 @@ var OverridableScopeKeys = map[string]bool{
 	// live_snapshot_stale_minutes, live_refresh_cooldown_seconds,
 	// device_infer_hours) is absent for the same kind of reason: see
 	// UISettings.
-	"risk.sub_spread_off":      true,
-	"risk.devices_off":         true,
-	"risk.usage_shift_off":     true,
-	"risk.login_country_off":   true,
-	"risk.min_days":            true,
-	"risk.max_devices":         true,
-	"risk.usage_ratio":         true,
-	"risk.usage_floor_gb":      true,
-	"risk.login_warmup_logins": true,
-	"risk.login_hold_days":     true,
-	"risk.usage_warmup_days":   true,
-	"risk.usage_flag_days":     true,
-	"risk.usage_suspect_days":  true,
+	"risk.sub_spread_off":       true,
+	"risk.devices_off":          true,
+	"risk.usage_shift_off":      true,
+	"risk.login_country_off":    true,
+	"risk.dest_block_off":       true,
+	"risk.dest_block_threshold": true,
+	"risk.min_days":             true,
+	"risk.max_devices":          true,
+	"risk.usage_ratio":          true,
+	"risk.usage_floor_gb":       true,
+	"risk.login_warmup_logins":  true,
+	"risk.login_hold_days":      true,
+	"risk.usage_warmup_days":    true,
+	"risk.usage_flag_days":      true,
+	"risk.usage_suspect_days":   true,
 	// 2FA methods (login / enroll) — auth_local / twofa / passkey / login2fa.
 	"security.totp_enabled":      true,
 	"security.passkey_enabled":   true,
@@ -2222,6 +2250,14 @@ type Repos struct {
 	Ownership               OwnershipRepo
 	PSPClient               PSPClientRepo
 	NodeAgent               NodeAgentRepo
+	DestAgentPolicy         DestAgentPolicyRepo
+	DestAudit               DestAuditStore
+	DestAuditMaintenance    DestAuditMaintenanceRepo
+	DestAuditRead           DestAuditReadRepo
+	DestHitsRead            DestHitReadRepo
+	DestUserHitsRead        DestUserHitReadRepo
+	DestRiskRead            DestRiskReadRepo
+	DestinationEligibility  DestinationEligibilityRepo
 	NativeAgentProvisioning NativeAgentProvisioningRepo
 	ServerMigration         ServerMigrationRepo
 	NodeAgentIssue          NodeAgentIssueRepo

@@ -23,6 +23,8 @@ export interface UserAutocompleteProps {
   onChange: (userId: number | null) => void
   label?: string
   width?: number
+  optionMinHeight?: number
+  disabled?: boolean
 }
 
 /**
@@ -35,7 +37,7 @@ export interface UserAutocompleteProps {
  * return it (a filter read back from the URL): it is read by id
  * (userKeys.detail).
  */
-export default function UserAutocomplete({ value, onChange, label, width = 280 }: UserAutocompleteProps) {
+export default function UserAutocomplete({ value, onChange, label, width = 280, optionMinHeight, disabled = false }: UserAutocompleteProps) {
   const { t } = useTranslation(['admin'])
   const scope = useQueryScope()
   const [input, setInput] = useState('')
@@ -64,6 +66,7 @@ export default function UserAutocomplete({ value, onChange, label, width = 280 }
   return (
     <Autocomplete
       size="small"
+      disabled={disabled}
       options={all}
       value={selected}
       loading={isFetching}
@@ -75,6 +78,7 @@ export default function UserAutocomplete({ value, onChange, label, width = 280 }
       isOptionEqualToValue={(a, b) => a.id === b.id}
       getOptionLabel={o => o.label}
       sx={{ width, maxWidth: '100%' }}
+      slotProps={{ listbox: { sx: { '& .MuiAutocomplete-option': { minHeight: optionMinHeight } } } }}
       renderInput={params => (
         <TextField {...params} label={label ?? t('admin:risk_center.pick_user')} />
       )}

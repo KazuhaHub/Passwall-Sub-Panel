@@ -42,8 +42,8 @@ func TestSettingsGET_ServesRuntimeEffective(t *testing.T) {
 	}
 	eff, def := runtimeMaps(t, res.Body.Bytes())
 	wantEff, wantDef := ports.RuntimeEffective(repo.settings)
-	if len(eff) != 23 || len(def) != 23 {
-		t.Fatalf("runtime_effective has %d keys and runtime_defaults %d; want the 23 runtime knobs in each", len(eff), len(def))
+	if len(eff) != 28 || len(def) != 28 {
+		t.Fatalf("runtime_effective has %d keys and runtime_defaults %d; want the 28 runtime knobs in each", len(eff), len(def))
 	}
 	for k, v := range wantEff {
 		if eff[k] != v {

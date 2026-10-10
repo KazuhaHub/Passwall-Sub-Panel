@@ -77,6 +77,8 @@ describe('AdminLayout view prefetching', () => {
     expect(paths).not.toContain('/admin/servers')
     expect(paths).not.toContain('/admin/settings')
     expect(paths).not.toContain('/admin/risk')
+    expect(paths).not.toContain('/admin/access-control')
+    expect(screen.queryByText('nav:admin.access_control')).toBeNull()
   })
 
   // The risk center is a nav item like any other for an admin, so its chunk is
@@ -87,6 +89,8 @@ describe('AdminLayout view prefetching', () => {
     await waitFor(() => expect(prefetch.prefetchViewsWhenIdle).toHaveBeenCalled())
     const paths = prefetch.prefetchViewsWhenIdle.mock.calls.at(-1)![0]
     expect(paths).toContain('/admin/risk')
+    expect(paths).toContain('/admin/access-control')
+    expect(screen.getByText('nav:admin.access_control')).toBeTruthy()
     expect(paths).toContain('/admin/settings')
   })
 })

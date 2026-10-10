@@ -19,15 +19,15 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/geo"
 )
 
-// uiSettingsWriteMu serializes the two writers of the settings record: this
-// page's PUT and the risk center's policy PUT (AdminRiskPolicyHandler.Put).
+// uiSettingsWriteMu serializes the settings page, risk policy and destination
+// settings writers of the shared settings record.
 // The store saves whole records only (the KV repo rewrites every key), so
 // each writer loads the whole record, changes its part and saves the whole
 // record back; two of them interleaving would each write the other's part
 // back as it was before they loaded, and the later save would silently
 // revert the earlier (D6). Held from the load to the last save (or
 // rollback) and nothing else is locked inside it. Package-level because
-// the two writers are separate handlers sharing one store.
+// the writers are separate handlers sharing one store.
 var uiSettingsWriteMu sync.Mutex
 
 // AdminSettingsHandler exposes /api/admin/settings/ui — every runtime-editable
@@ -56,6 +56,11 @@ type settingsDTO struct {
 	LogoURLDark                string                   `json:"logo_url_dark"`
 	EmailDomain                string                   `json:"email_domain"`
 	AuditRetentionDays         int                      `json:"audit_retention_days"`
+	DestHitRetentionDays       int                      `json:"dest_hit_retention_days"`
+	DestTrialRetentionDays     int                      `json:"dest_trial_retention_days"`
+	DestUsageRetentionDays     int                      `json:"dest_usage_retention_days"`
+	DestListRefreshHours       int                      `json:"dest_list_refresh_hours"`
+	DestPolicyApplyMinSeconds  int                      `json:"dest_policy_apply_min_seconds"`
 	SubBaseURL                 string                   `json:"sub_base_url"`
 	PanelPath                  string                   `json:"panel_path"`
 	Timezone                   string                   `json:"timezone"`
@@ -139,20 +144,22 @@ type settingsDTO struct {
 	// Risk signals (observe only). Capture of the device a subscription
 	// client declares; global only, false = capture on.
 	RiskHWIDCaptureOff bool `json:"risk_hwid_capture_off"`
-	// The four signal switches (negative: false = signal on) and the shared
+	// The five signal switches (negative: false = signal on) and the shared
 	// tolerances, all per-group overridable; see ports.UISettings for why
 	// each exists. 0 in a number means "never configured";
 	// domain.RiskPolicyFromSettings is the one place a stored value is
 	// interpreted, and it repairs nonsense toward NOT accusing (a ratio under
 	// 1.5 is raised, MinDays is clamped to the window, 0 is unset).
-	RiskSubSpreadOff    bool    `json:"risk_sub_spread_off"`
-	RiskDevicesOff      bool    `json:"risk_devices_off"`
-	RiskUsageShiftOff   bool    `json:"risk_usage_shift_off"`
-	RiskLoginCountryOff bool    `json:"risk_login_country_off"`
-	RiskMinDays         int     `json:"risk_min_days"`
-	RiskMaxDevices      int     `json:"risk_max_devices"`
-	RiskUsageRatio      float64 `json:"risk_usage_ratio"`
-	RiskUsageFloorGB    int     `json:"risk_usage_floor_gb"`
+	RiskSubSpreadOff       bool    `json:"risk_sub_spread_off"`
+	RiskDevicesOff         bool    `json:"risk_devices_off"`
+	RiskUsageShiftOff      bool    `json:"risk_usage_shift_off"`
+	RiskLoginCountryOff    bool    `json:"risk_login_country_off"`
+	RiskDestBlockOff       bool    `json:"risk_dest_block_off"`
+	RiskDestBlockThreshold int     `json:"risk_dest_block_threshold"`
+	RiskMinDays            int     `json:"risk_min_days"`
+	RiskMaxDevices         int     `json:"risk_max_devices"`
+	RiskUsageRatio         float64 `json:"risk_usage_ratio"`
+	RiskUsageFloorGB       int     `json:"risk_usage_floor_gb"`
 	// login_country's two thresholds and usage_shift's three, per-group like
 	// the tolerances above and read by the same domain.RiskPolicyFromSettings
 	// (which raises usage_shift's to their floors of 7 and 2 days).
@@ -272,7 +279,14 @@ type settingsRequest struct {
 	settingsDTO
 	LegalEnabled *bool `json:"legal_enabled"`
 	// This is publication-owned metadata, never a settings request value.
-	LegalConsentVersion          json.RawMessage `json:"legal_consent_version"`
+	LegalConsentVersion json.RawMessage `json:"legal_consent_version"`
+	// Destination settings have one writer: PUT /dest/settings. Ignore echoed
+	// stale values, including shapes an older tab may send.
+	DestHitRetentionDays         json.RawMessage `json:"dest_hit_retention_days"`
+	DestTrialRetentionDays       json.RawMessage `json:"dest_trial_retention_days"`
+	DestUsageRetentionDays       json.RawMessage `json:"dest_usage_retention_days"`
+	DestListRefreshHours         json.RawMessage `json:"dest_list_refresh_hours"`
+	DestPolicyApplyMinSeconds    json.RawMessage `json:"dest_policy_apply_min_seconds"`
 	NodeTaskOfflineReconcileDays *int            `json:"node_task_offline_reconcile_days"`
 	NodeTaskBackupRestoreDays    *int            `json:"node_task_backup_restore_days"`
 	NodeTaskResultRetentionDays  *int            `json:"node_task_result_retention_days"`
@@ -341,6 +355,7 @@ func (h *AdminSettingsHandler) Get(c *gin.Context) {
 // a newly-added field can't be echoed by one path and silently dropped by the
 // other (the drift that briefly broke the 2FA totp_enabled round-trip).
 func settingsToDTO(s ports.UISettings) settingsDTO {
+	destination := destinationSettingsFrom(s)
 	policy := nodeTaskLifecyclePolicyFromSettings(s)
 	// From the same settings the DTO echoes: after a PUT that is what was
 	// just saved, so the page reads the new values in effect off the save.
@@ -359,6 +374,11 @@ func settingsToDTO(s ports.UISettings) settingsDTO {
 		LogoURLDark:                 s.LogoURLDark,
 		EmailDomain:                 s.EmailDomain,
 		AuditRetentionDays:          s.AuditRetentionDays,
+		DestHitRetentionDays:        destination.HitRetentionDays,
+		DestTrialRetentionDays:      destination.TrialRetentionDays,
+		DestUsageRetentionDays:      destination.UsageRetentionDays,
+		DestListRefreshHours:        destination.ListRefreshHours,
+		DestPolicyApplyMinSeconds:   destination.PolicyApplyMinSeconds,
 		SubBaseURL:                  s.SubBaseURL,
 		PanelPath:                   s.PanelPath,
 		Timezone:                    s.Timezone,
@@ -464,6 +484,8 @@ func settingsToDTO(s ports.UISettings) settingsDTO {
 		RiskDevicesOff:               s.RiskDevicesOff,
 		RiskUsageShiftOff:            s.RiskUsageShiftOff,
 		RiskLoginCountryOff:          s.RiskLoginCountryOff,
+		RiskDestBlockOff:             s.RiskDestBlockOff,
+		RiskDestBlockThreshold:       s.RiskDestBlockThreshold,
 		RiskMinDays:                  s.RiskMinDays,
 		RiskMaxDevices:               s.RiskMaxDevices,
 		RiskUsageRatio:               s.RiskUsageRatio,
@@ -534,9 +556,15 @@ func (h *AdminSettingsHandler) Put(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": policyErr.Error()})
 		return
 	}
+	destination := destinationSettingsFrom(prev)
 	s := ports.UISettings{
 		LegalEnabled:                  prev.LegalEnabled,
 		LegalConsentVersion:           prev.LegalConsentVersion,
+		DestHitRetentionDays:          destination.HitRetentionDays,
+		DestTrialRetentionDays:        destination.TrialRetentionDays,
+		DestUsageRetentionDays:        destination.UsageRetentionDays,
+		DestListRefreshHours:          destination.ListRefreshHours,
+		DestPolicyApplyMinSeconds:     destination.PolicyApplyMinSeconds,
 		LoginMode:                     req.LoginMode,
 		SiteTitle:                     req.SiteTitle,
 		AppTitle:                      req.AppTitle,

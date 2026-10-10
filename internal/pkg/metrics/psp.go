@@ -563,7 +563,92 @@ const (
 	NodeHostPruneHourlyTable    = "hourly"
 )
 
+const (
+	DestPruneHits                = "hits"
+	DestPruneTrial               = "trial"
+	DestPruneUsage               = "usage"
+	DestPruneBatches             = "batches"
+	DestPruneLoss                = "loss"
+	DestPruneBudget              = "budget"
+	DestPruneExemptions          = "exemptions"
+	DestPruneOrphans             = "orphans"
+	DestPublishDebounced         = "debounced"
+	DestPublishMaxWait           = "max_wait"
+	DestPublishManual            = "manual"
+	DestPublishPause             = "pause"
+	DestCompileCacheHit          = "cache_hit"
+	DestCompileCompiled          = "compiled"
+	DestCompileFallbackRejected  = "fallback_rejected"
+	DestCompileFallbackSniffing  = "fallback_sniffing"
+	DestCompileFallbackOverLimit = "fallback_over_limit"
+	DestCompileFallbackNil       = "fallback_nil"
+	DestCompileInvalid           = "invalid"
+	DestListRefreshUnchanged     = "unchanged"
+	DestListRefreshUpdated       = "updated"
+	DestListRefreshFailed        = "failed"
+	DestListRefreshBroad         = "broad"
+)
+
 var (
+	DestPolicyCompileTotal = NewCounterVec(
+		"psp_dest_policy_compile_total",
+		"Destination compiler calls by bounded outcome. Cache hits require successful runtime persistence; invalid means no usable result, including storage/cancellation failures.",
+		"result",
+	)
+	DestPolicyCompileMS = NewHistogram(
+		"psp_dest_policy_compile_ms",
+		"Elapsed destination compiler call time, including cached calls and failures. A candidate result does not establish node acknowledgement.",
+		"ms", LatencyBucketsMS,
+	)
+	DestListRefreshTotal = NewCounterVec(
+		"psp_dest_list_refresh_total",
+		"Executed list refresh attempts by one bounded outcome. Broad means a durably recorded remote broad-entry rejection or successful category filtering; failed includes other download, parsing, cancellation and commit failures.",
+		"result",
+	)
+	DestPolicyPublishTotal = NewCounterVec(
+		"psp_dest_policy_publish_total",
+		"Committed destination snapshot publications, by bounded trigger. No-op requests and failed CAS writes do not count.",
+		"trigger",
+	)
+	DestPolicyPublishRejectedTotal = NewCounter(
+		"psp_dest_policy_publish_rejected_total",
+		"Destination publication attempts rejected by validation with their error durably recorded. Storage failures and stale attempts do not count.",
+	)
+	DestPrunedRowsTotal = NewCounterVec(
+		"psp_dest_pruned_rows_total",
+		"Durably deleted destination rows, by bounded table category. Only connected cleanup paths contribute.",
+		"table",
+	)
+	NodePolicyStatusDroppedTotal = NewCounter(
+		"psp_node_policy_status_dropped_total",
+		"Policy status subtrees dropped after decoding, validation or capability binding failed.",
+	)
+	NodeAuditReportTotal = NewCounterPairVec(
+		"psp_node_audit_report_total",
+		"Audit subtrees handled, by bounded kind and outcome. Acceptance does not imply durable storage.",
+		"kind", "outcome",
+	)
+	DestAuditRowsTotal = NewCounterPairVec(
+		"psp_dest_audit_rows_total",
+		"Destination rows stored or estimated lost, by bounded kind and outcome. Receiver losses are best effort and incomplete.",
+		"kind", "outcome",
+	)
+	DestAuditNodeDroppedTotal = NewCounter(
+		"psp_dest_audit_node_dropped_total",
+		"Node-reported dropped events in first committed audit batches; separate from receiver-estimated rows.",
+	)
+	DestAuditNodeUnmatchedTotal = NewCounter(
+		"psp_dest_audit_node_unmatched_total",
+		"Node-reported unmatched events in first committed audit batches; separate from receiver-estimated rows.",
+	)
+	DestAuditLossBufferDroppedTotal = NewCounter(
+		"psp_dest_audit_loss_buffer_dropped_total",
+		"Receiver loss keys not saved because of buffer capacity, retry expiry or forced shutdown. Diagnostic only, never a historical loss estimate.",
+	)
+	DestAuditLossFlushErrorsTotal = NewCounter(
+		"psp_dest_audit_loss_flush_errors_total",
+		"Failed receiver loss flush attempts with increments retained for retry; separate from unsaved loss keys.",
+	)
 	NodeHostReportTotal = NewCounterVec(
 		"psp_node_host_report_total",
 		"Host telemetry reports handled, by outcome.",
