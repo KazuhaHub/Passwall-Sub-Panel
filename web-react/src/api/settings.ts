@@ -233,6 +233,8 @@ export interface UISettings {
   risk_devices_off: boolean
   risk_usage_shift_off: boolean
   risk_login_country_off: boolean
+  risk_dest_block_off: boolean
+  risk_dest_block_threshold: number
   /** Days of the fetch window a province or device must recur on. 0 = default
    *  3; clamped to 1..7. */
   risk_min_days: number

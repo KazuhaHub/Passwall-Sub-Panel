@@ -2015,6 +2015,14 @@ search terms will remain component state rather than page URL state, but API
 queries can still reach those external logs. Hit ingestion and retention are now
 connected; consent enforcement remains part of the later integration stages.
 
+The destination-risk policy foundation is now wired through the global policy
+endpoint, SQL settings, per-group overrides and the policy card. The signal's
+negative switch defaults to enabled; its fixed 24-hour threshold defaults to
+20 and is bounded to 1..10000. An explicit group zero uses the shipped default
+rather than the global threshold. The card has no preset, automatic action or
+runtime-window setting. This foundation does not yet implement destination
+risk evaluation, evidence, collector-availability states or queue integration.
+
 Stage 1c still requires the remaining access-control views and complete browser
 acceptance. C2's end-to-end browser
 acceptance remains outstanding. Risk evaluation, records browser acceptance,

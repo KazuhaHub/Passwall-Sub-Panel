@@ -10,7 +10,7 @@ import (
 
 // TestRiskCenterPolicyKeysMatchTheSPA holds the policy page's key list
 // (web-react/src/views/admin/risk/policy/policyKeys.json) to the policy
-// itself: the same 48 tags, in struct order. The page lays out, diffs and
+// itself: the same 50 tags, in struct order. The page lays out, diffs and
 // saves exactly those keys, and it PUTs only the ones an admin changed, so a
 // key the server added but the page never learned would be editable nowhere,
 // and a key the page kept after the server dropped it would be sent and
