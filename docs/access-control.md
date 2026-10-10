@@ -2164,9 +2164,9 @@ Bootstrap, proxy-server DNS, unused/final-only sing-box servers and literal IPs
 are excluded. Hostnames are normalized, deduplicated and sorted without DNS I/O;
 malformed or unresolved selected DNS inputs yield no partial suggestions.
 Current shipped templates yield `dns.alidns.com` and
-`l9f26nnn5d.cloudflare-gateway.com` under these rules. This is internal preview
-preparation; the group preview endpoint and its manual-entry fallback UI remain
-pending, and no base list is automatically written by this reader.
+`l9f26nnn5d.cloudflare-gateway.com` under these rules. The group preview endpoint
+uses these suggestions; its manual-entry fallback UI remains pending, and this
+reader never writes a base list automatically.
 
 The internal group administrator now prepares the prospective mode, selected
 lists and any new owned base/extra lists before checking structural and per-node
@@ -2210,5 +2210,31 @@ arbitrary regular-expression matches cannot establish whole-site coverage from
 folded telemetry and remain unmarked. `(ip)` is never marked added: it cannot
 identify an address or CIDR to allow. Closing the group retains its report and
 owned-list history while normal retention still applies. The report UI and the
-remaining group overview, preview, readiness and transition HTTP workflow are
+remaining group overview, readiness and transition HTTP workflow are
 still pending.
+
+`GET /api/admin/dest/groups/:group_id/preview?list_ids=1,2` prepares an allowlist
+trial without changing the current mode, lists or definition generation. Only
+administrators can read it. Group and list IDs must be canonical positive
+integers; unknown and duplicate query fields are rejected. It returns member
+count, total and eligible panels, stable exclusion reasons, base DNS suggestions
+and definition budget. Counts use each tag-matched panel once, rather than
+counting its individual listeners as separate servers.
+
+Eligibility is assessed against prospective definitions and full tag-matched
+membership, including disabled members. It does not reuse the current open-mode
+selection or reduce quota membership to the current roster. Third-party panels,
+missing destination-policy capability and current fallback/exhaustion are
+excluded. A native panel's prospective quota and enabled-listener sniffing are
+checked with the same policy builder, limits and preflight used by publication.
+Only enabled and sniffing fields enter that preflight projection; listener
+credentials and transport settings are not serialized into it. Read failures
+withhold the whole preview, rather than inventing partial counts.
+
+When current templates cannot produce DNS suggestions, `base_hosts` is an
+empty array and `base_hosts_available` is false; the rest of the preview remains
+usable so the enable wizard can accept manual base hosts. Existing owned lists
+are retained and identified by their real `base_list_id` / `extra_list_id`;
+prospective synthetic list IDs never leave the preview. Responses use no-store.
+This is prospective eligibility evidence; applied-node receipts and enforcement
+readiness still belong to the pending group overview and transition workflow.
