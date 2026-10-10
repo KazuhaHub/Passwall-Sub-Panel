@@ -1,18 +1,20 @@
 import type { ReactNode } from 'react'
-import { Box, Chip, Tooltip, Typography, useTheme } from '@mui/material'
+import { Box, Chip, Link, Tooltip, Typography, useTheme } from '@mui/material'
 import { useTranslation } from 'react-i18next'
 
 import type {
-  DevicesEvidence, LoginCountryEvidence, RiskSignal, SubSpreadEvidence, UsageShiftEvidence,
+  DestBlockEvidence, DevicesEvidence, LoginCountryEvidence, RiskSignal, SubSpreadEvidence, UsageShiftEvidence,
 } from '@/api/riskSignals'
 import { useSiteStore } from '@/stores/site'
+import { useDestinationPolicies } from '@/query/accessControl'
+import { useQueryScope } from '@/query/useQueryScope'
 import { formatMsDualTz } from '@/utils/datetime'
 import { countryFlag } from '@/utils/geo'
 import { regionNamer } from '@/utils/regionName'
 import { dayBits, dayLabels, formatGB, placeLabel, riskCodeText } from '@/utils/riskSignals'
 import { DetectorStateChip } from './DetectorStateChip'
 
-// The renderers of the four risk kinds' evidence, shared by every surface that
+// The renderers of the five risk kinds' evidence, shared by every surface that
 // shows one (the drawer, and the records after it), so one verdict never reads
 // two ways. Field names are the server's wire
 // contract (domain.*Evidence); every list is present, empty rather than null,
@@ -255,9 +257,32 @@ export function LoginPanel({ ev }: { ev: LoginCountryEvidence }) {
  * build does not know or for a verdict with nothing to show (evidence null on
  * idle, disabled and exempt rows).
  */
-export function RiskKindEvidence({ kind, evidence }: { kind: string; evidence: unknown }) {
+export function DestBlockPanel({ ev, userID }: { ev: DestBlockEvidence; userID?: number }) {
+  const { t } = useTranslation(['admin'])
+  const policies = useDestinationPolicies(useQueryScope())
+  const names = new Map([...(policies.data?.allow ?? []), ...(policies.data?.block ?? []), ...(policies.data?.observe ?? [])]
+    .map(p => [`p${p.id}`, p.name]))
+  return <>
+    <Caption>{t('admin:risk_signals.dest_block_counts', { hours: ev.window_hours, total: ev.total, threshold: ev.threshold, nodes: ev.nodes })}</Caption>
+    {(ev.by_source ?? []).filter(s => /^p[1-9]\d*$/.test(s.source)).slice(0, 5).map(s => <Line key={s.source}>
+      <span>{names.get(s.source) || t(policies.isSuccess ? 'admin:risk_signals.dest_block_deleted' : 'admin:risk_signals.dest_block_policy', { source: s.source })}</span>
+      <span>{s.count}</span>
+    </Line>)}
+    {policies.isError && <Caption>{t('admin:risk_signals.dest_block_names_unavailable')}</Caption>}
+    <Caption>{t('admin:risk_signals.dest_block_incomplete')}</Caption>
+    <Caption>{t('admin:risk_signals.dest_block_losses', {
+      rows: ev.losses?.rows ?? 0, events: ev.losses?.events ?? 0, unmatched: ev.losses?.unmatched ?? 0,
+    })}</Caption>
+    {userID !== undefined && Number.isSafeInteger(userID) && userID > 0 && <Link href={`/admin/access-control?tab=records&rec_user=${userID}&rec_since=24h&rec_action=block`}>
+      {t('admin:risk_signals.dest_block_open_hits')}
+    </Link>}
+  </>
+}
+
+export function RiskKindEvidence({ kind, evidence, userID }: { kind: string; evidence: unknown; userID?: number }) {
   if (!evidence || typeof evidence !== 'object') return null
   switch (kind) {
+    case 'dest_block': return <DestBlockPanel ev={evidence as DestBlockEvidence} userID={userID} />
     case 'sub_spread': return <SubSpreadPanel ev={evidence as SubSpreadEvidence} />
     case 'devices': return <DevicesPanel ev={evidence as DevicesEvidence} />
     case 'usage_shift': return <UsagePanel ev={evidence as UsageShiftEvidence} />
@@ -281,7 +306,7 @@ export function RiskKindChip({ sig }: { sig: RiskSignal | undefined }) {
   }
   const updated = t('admin:risk_signals.col_updated')
   return (
-    <DetectorStateChip state={sig.state} code={sig.code}
+    <DetectorStateChip state={sig.state} code={sig.code} complete={sig.kind === 'dest_block' ? false : undefined}
       tooltip={`${riskCodeText(sig, t)} · ${updated} ${formatMsDualTz(sig.updated_at_ms, panelTz)}`} />
   )
 }

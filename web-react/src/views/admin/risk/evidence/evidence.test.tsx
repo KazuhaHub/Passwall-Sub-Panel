@@ -17,6 +17,9 @@ import {
 } from './RiskEvidence'
 
 vi.mock('@/api/client', () => ({ client: {} }))
+const destinationNames = vi.hoisted(() => ({ data: { allow: [] as { id: number; name: string }[], block: [] as { id: number; name: string }[], observe: [] as { id: number; name: string }[] }, isSuccess: true, isError: false }))
+vi.mock('@/query/accessControl', () => ({ useDestinationPolicies: () => destinationNames }))
+vi.mock('@/query/useQueryScope', () => ({ useQueryScope: () => 'evidence-session' }))
 // t over the REAL zh-CN admin bundle, flattened as the SPA registers it, so
 // the assertions read the Chinese an admin sees and a key a renderer asks for
 // but the bundle lacks shows up as its raw key.
@@ -47,7 +50,54 @@ function mount(node: ReactNode) {
 
 const chipOf = (label: string) => screen.getByText(label).closest('.MuiChip-root') as HTMLElement
 
-beforeEach(() => useSiteStore.setState({ timezone: PANEL_TZ }))
+describe('destination blocking lower bounds', () => {
+  it('resolves current policy names and explicitly marks deleted sources', () => {
+    destinationNames.data.block = [{ id: 12, name: 'Current renamed policy' }]
+    mount(<RiskKindEvidence kind="dest_block" evidence={{ v: 1, window_hours: 24, threshold: 20, total: 37, nodes: 1,
+      by_source: [{ source: 'p12', count: 30 }, { source: 'p99', count: 7 }], coverage_complete: false,
+      losses: { rows: 0, events: 0, unmatched: 0 } }} />)
+    expect(screen.getByText('Current renamed policy')).toBeTruthy()
+    expect(screen.getByText('已删除策略 p99')).toBeTruthy()
+  })
+
+  it('does not label a source deleted when current names cannot be read', () => {
+    destinationNames.isSuccess = false
+    destinationNames.isError = true
+    mount(<RiskKindEvidence kind="dest_block" evidence={{ window_hours: 24, threshold: 20, total: 1, nodes: 1,
+      by_source: [{ source: 'p12', count: 1 }] }} />)
+    expect(screen.getByText('策略 p12')).toBeTruthy()
+    expect(screen.getByText('当前策略名称读取失败')).toBeTruthy()
+    expect(document.body.textContent).not.toContain('已删除')
+  })
+  it('shows incomplete coverage and separate panel losses without destinations', () => {
+    mount(<RiskKindEvidence kind="dest_block" userID={7} evidence={{
+      v: 1, window_hours: 24, total: 37, threshold: 20, nodes: 2,
+      by_source: [{ source: 'p12', count: 37 }], coverage_complete: false,
+      losses: { rows: 3, events: 7, unmatched: 2, complete: false, scope: 'panel' },
+      target: 'private-host.test', port: 443,
+    }} />)
+    expect(screen.getByText(/最近 24 小时.*37.*20/)).toBeTruthy()
+    expect(screen.getByText(/覆盖不完整/)).toBeTruthy()
+    expect(screen.getByText(/节点范围.*3.*7.*2/)).toBeTruthy()
+    expect(document.body.textContent).not.toContain('private-host.test')
+    expect(document.body.textContent).not.toContain('443')
+    expect(screen.getByRole('link', { name: '查看阻断记录' }).getAttribute('href'))
+      .toBe('/admin/access-control?tab=records&rec_user=7&rec_since=24h&rec_action=block')
+  })
+
+  it('does not paint an incomplete clean signal green', () => {
+    mount(<RiskKindChip sig={{ kind: 'dest_block' as RiskSignal['kind'], state: 'clean', code: 'within', updated_at_ms: 1,
+      evidence: { total: 1, threshold: 20, window_hours: 24, coverage_complete: false } }} />)
+    expect(chipOf('正常').className).not.toContain('MuiChip-colorSuccess')
+  })
+})
+
+beforeEach(() => {
+  useSiteStore.setState({ timezone: PANEL_TZ })
+  destinationNames.data = { allow: [], block: [], observe: [] }
+  destinationNames.isSuccess = true
+  destinationNames.isError = false
+})
 afterEach(() => {
   cleanup()
   useSiteStore.setState({ timezone: '' })

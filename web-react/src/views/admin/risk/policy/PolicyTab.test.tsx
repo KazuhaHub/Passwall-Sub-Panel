@@ -133,6 +133,7 @@ function serve(over: Partial<RiskPolicySettings> = {}) {
   server.putError = null
   server.overrides = { 'geo_anomaly.max_regions': '2' }
   api.get.mockImplementation(async (url: string) => {
+    if (url === '/admin/dest/policies') return { data: { allow: [], block: [], observe: [], allowlist_groups: [], published_has_access_control: false } }
     if (url === '/admin/risk-center/policy') return { data: view() }
     if (url === '/admin/settings/geoip/status') {
       return {
@@ -197,6 +198,7 @@ function TabSwitch() {
 function mount(url = '/admin/risk?tab=policy', client: QueryClient = makeTestQueryClient()): { client: QueryClient } {
   const router = createMemoryRouter([
     { path: '/admin/risk', element: <><PolicyTab /><TabSwitch /><Where /></> },
+    { path: '/admin/access-control', element: <Where /> },
   ], { initialEntries: [url] })
   render(
     <ThemeProvider theme={theme}>
@@ -257,6 +259,37 @@ afterEach(() => {
 })
 
 describe('PolicyTab, the page', () => {
+  it('names selected destination policies, and guards navigation with an unsaved draft', async () => {
+    serve()
+    const base = api.get.getMockImplementation()!
+    api.get.mockImplementation(async (url: string, ...rest: unknown[]) => {
+      if (url === '/admin/dest/policies') return { data: { allow: [], observe: [], allowlist_groups: [], published_has_access_control: true,
+        block: [{ id: 12, name: 'Current financial policy', counts_as_risk: true }, { id: 13, name: 'Unselected policy', counts_as_risk: false }] } }
+      return base(url, ...rest)
+    })
+    mount()
+    await loaded()
+    const c = card('risk_center.policy.card.dest_block')
+    expect(await within(c).findByText(/Current financial policy/)).toBeTruthy()
+    expect(c.textContent).not.toContain('Unselected policy')
+    type(field('settings.risk.dest_block_threshold'), '37')
+    confirmMock.mockResolvedValueOnce(false)
+    fireEvent.click(within(c).getByRole('link', { name: L('risk_center.policy.dest_block_open') }))
+    await waitFor(() => expect(confirmMock).toHaveBeenCalledWith(expect.objectContaining({ title: L('risk_center.policy.leave_title') })))
+    expect(lastLocation).toContain('/admin/risk')
+    expect(field('settings.risk.dest_block_threshold').value).toBe('37')
+    confirmMock.mockResolvedValueOnce(true)
+    fireEvent.click(within(c).getByRole('link', { name: L('risk_center.policy.dest_block_open') }))
+    await waitFor(() => expect(lastLocation).toBe('/admin/access-control?tab=policies'))
+    expect(policyPuts()).toEqual([])
+  })
+
+  it('explains that no policies are selected for destination risk', async () => {
+    serve()
+    mount()
+    await loaded()
+    expect(await within(card('risk_center.policy.card.dest_block')).findByText(L('risk_center.policy.dest_block_none'))).toBeTruthy()
+  })
   it('lays out the seven detector cards and the group exceptions', async () => {
     serve()
     mount()

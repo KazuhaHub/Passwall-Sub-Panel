@@ -8,6 +8,12 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 )
 
+type destinationRiskReader struct{ app *App }
+
+func (r destinationRiskReader) ReadDestinationRisk(ctx context.Context, at time.Time) (map[int64]domain.DestBlockInput, error) {
+	return r.app.destinationRiskInputs(ctx, at)
+}
+
 // destinationRiskInputs proves collection once for the union of current
 // client panels. It never performs per-user SQL or reads fleet hit totals.
 // Admission covers both the counter snapshot and the current metadata read.

@@ -32,6 +32,16 @@ const tEn = translator(en)
 const ctx = { nameRegion: regionNamer(t, 'zh-CN'), panelTz: 'Asia/Shanghai', sep: listSeparator('zh-CN') }
 const ctxEn = { nameRegion: regionNamer(tEn, 'en-US'), panelTz: 'Asia/Shanghai', sep: listSeparator('en-US') }
 
+it('explains destination block attention from its stored lower bound', () => {
+  const r = row({ level: 'flagged', sources: [{ source: 'dest_block', level: 'flagged' }], signals: [{
+    kind: 'dest_block' as RiskSignal['kind'], state: 'flagged', code: 'over', updated_at_ms: 1,
+    evidence: { v: 1, total: 37, threshold: 20, window_hours: 24 },
+  }] })
+  expect(headlineText(r, t, ctx)).toBe('最近 24 小时至少 37 次目的地阻断（阈值 20 次）')
+  expect(headlineText(r, tEn, ctxEn)).toBe('At least 37 destination blocks in the last 24 hours (threshold 20)')
+  expect(sourceChipLabel('dest_block', r, t)).toBe('目的地阻断')
+})
+
 const NO_REVIEW = { dismissed: false, reopened: false, lapsed: false, trusted: false, escalated: [] }
 
 function evidence(spots: GeoSpot[], over: Partial<GeoEvidence> = {}): GeoEvidence {

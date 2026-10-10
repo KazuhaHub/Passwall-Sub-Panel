@@ -10,6 +10,7 @@ import (
 )
 
 func TestEvaluateDestBlockSixStatesAndThresholdBoundaries(t *testing.T) {
+	seen := map[RiskCode]bool{}
 	for _, tc := range []struct {
 		name             string
 		off              bool
@@ -35,6 +36,7 @@ func TestEvaluateDestBlockSixStatesAndThresholdBoundaries(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			v, ev := EvaluateDestBlock(DestBlockPolicy{Off: tc.off, Threshold: tc.threshold}, DestBlockInput{CollectingNodes: tc.nodes, Sources: []DestBlockSource{{Source: "p12", Count: tc.count}}})
+			seen[v.Code] = true
 			if v != (RiskVerdict{State: tc.state, Code: tc.code}) || v.State == GeoStateExempt {
 				t.Fatalf("verdict=%+v", v)
 			}
@@ -48,6 +50,15 @@ func TestEvaluateDestBlockSixStatesAndThresholdBoundaries(t *testing.T) {
 				t.Fatalf("fixed-window lower-bound evidence=%+v", ev)
 			}
 		})
+	}
+	codes := AllRiskCodes()[RiskKindDestBlock]
+	if len(seen) != len(codes) {
+		t.Fatalf("destination evaluator codes %v differ from registered %v", seen, codes)
+	}
+	for _, code := range codes {
+		if !seen[code] {
+			t.Errorf("registered destination code %s has no evaluator branch", code)
+		}
 	}
 }
 

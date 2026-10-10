@@ -248,13 +248,13 @@ describe('RiskUserDrawer', () => {
     expect(await header()).toBeTruthy()
   })
 
-  it('概览: the five detectors in order, trust read as trust, stale verdicts marked, the geo reason always', async () => {
+  it('概览: the six detectors in order, trust read as trust, stale verdicts marked, the geo reason always', async () => {
     serve()
     mount(7)
     await header()
     const rows = screen.getAllByTestId('detector-row')
     expect(rows.map(r => within(r).getByTestId('detector-title').textContent))
-      .toEqual(['异地并发', '订阅多地', '设备数', '用量变化', '登录国家'])
+      .toEqual(['异地并发', '订阅多地', '设备数', '用量变化', '登录国家', '目的地阻断'])
 
     // Geo: "no data" beside the reason that says why, never a bare chip.
     expect(within(rows[0]).getByText('无数据')).toBeTruthy()

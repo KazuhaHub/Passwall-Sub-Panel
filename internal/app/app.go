@@ -920,6 +920,7 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 		AuthEvents:   repos.AuthEvent,
 		LandingAddrs: trafficSvc.LandingAddresses,
 		Trust:        riskReviews,
+		Destination:  destinationRiskReader{app: a},
 	})
 	a.trafficInterval = time.Duration(sysSettings.CronTrafficPullMinutes) * time.Minute
 	// Rollup's gap heartbeat is derived from the poll cadence so a coarse poll

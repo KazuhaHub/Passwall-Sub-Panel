@@ -37,14 +37,15 @@ import (
 // exported methods by name, through reflect, on whatever it is handed.
 func TestRiskServiceCannotWriteServiceState(t *testing.T) {
 	allowed := map[string][]string{
-		"Users":      {"List"},
-		"Store":      {"PurgeOrphans", "Save"},
-		"Settings":   {"Load", "LoadForGroup", "LoadForUser"},
-		"Traffic":    {"ListHourlyByUser", "SumHourlyAllUsers"},
-		"SubLogs":    {"ScanSince"},
-		"Geo":        {"Available", "Lookup"},
-		"AuthEvents": {"List"},
-		"Trust":      {"ListTrusted"},
+		"Users":       {"List"},
+		"Store":       {"PurgeOrphans", "Save"},
+		"Settings":    {"Load", "LoadForGroup", "LoadForUser"},
+		"Traffic":     {"ListHourlyByUser", "SumHourlyAllUsers"},
+		"SubLogs":     {"ScanSince"},
+		"Geo":         {"Available", "Lookup"},
+		"AuthEvents":  {"List"},
+		"Trust":       {"ListTrusted"},
+		"Destination": {"ReadDestinationRisk"},
 	}
 	deps := reflect.TypeFor[Deps]()
 	seen := map[string]bool{}

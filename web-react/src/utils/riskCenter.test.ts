@@ -234,7 +234,7 @@ describe('the record labels', () => {
       ...FLAG_SOURCES.map(flagSourceKey),
       ...EXCLUSION_REASONS.map(r => exclusionLabelKey(r) as string),
     ]
-    expect(keys.length).toBe(12 + 4 + 7 + 4)
+    expect(keys.length).toBe(12 + 4 + 8 + 4)
     for (const k of keys) {
       const flat = k.replace(/^admin:/, '')
       expect(zhDict[flat], `zh-CN ${flat}`).toBeTruthy()
@@ -245,7 +245,7 @@ describe('the record labels', () => {
   // domain.FlagSources(): the admin's review actions are recorded too, and
   // come last — they are never attention.
   it('lists the sources the server records, geo first and review last', () => {
-    expect(FLAG_SOURCES).toEqual(['geo', 'geo_auto', 'sub_spread', 'devices', 'usage_shift', 'login_country', 'review'])
+    expect(FLAG_SOURCES).toEqual(['geo', 'geo_auto', 'sub_spread', 'devices', 'usage_shift', 'login_country', 'dest_block', 'review'])
   })
 
   it('lists the review events after the attention ones', () => {

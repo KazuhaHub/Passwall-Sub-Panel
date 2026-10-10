@@ -93,7 +93,7 @@ type QueueView struct {
 	Page, PageSize int
 	Counts         QueueCounts
 	// GlobalDetectorsOff says the GLOBAL settings turn every detector off
-	// (the geo scope and the four risk kinds). A group may still turn one
+	// (the geo scope and the five risk kinds). A group may still turn one
 	// on, which the page's copy says; it is the empty queue's explanation,
 	// not a verdict about every account.
 	GlobalDetectorsOff bool
@@ -317,7 +317,7 @@ func (s *Service) queueCounts(ctx context.Context, w readWindow, all map[int64]*
 // it) and so is every risk kind.
 func globalDetectorsOff(w readWindow) bool {
 	return domain.GeoPolicyFromSettings(w.set.GeoPolicySettings()).Scope == domain.GeoScopeOff &&
-		w.set.RiskSubSpreadOff && w.set.RiskDevicesOff && w.set.RiskUsageShiftOff && w.set.RiskLoginCountryOff
+		w.set.RiskSubSpreadOff && w.set.RiskDevicesOff && w.set.RiskUsageShiftOff && w.set.RiskLoginCountryOff && w.set.RiskDestBlockOff
 }
 
 // explain loads what the page's rows show beside their levels: each geo

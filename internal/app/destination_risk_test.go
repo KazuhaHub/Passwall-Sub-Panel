@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
@@ -61,6 +62,18 @@ func TestBuildDestinationRiskReaderUsesBulkWindowAndCurrentAppliedCollectionProo
 		t.Fatal(err)
 	}
 	check(now, 1) // Duplicate client rows never multiply one physical node.
+	if err := f.a.operationGate.RunRead(t.Context(), f.a.risk.RefreshOnce); err != nil {
+		t.Fatal(err)
+	}
+	var state, code string
+	var raw []byte
+	if err := f.a.database.QueryRowContext(t.Context(), "SELECT state, code, evidence FROM risk_signals WHERE user_id = ? AND kind = ?", f.user.ID, "dest_block").Scan(&state, &code, &raw); err != nil {
+		t.Fatal("assembled worker did not persist destination verdict", err)
+	}
+	var evidence domain.DestBlockEvidence
+	if err := json.Unmarshal(raw, &evidence); err != nil || state != "flagged" || code != "over" || evidence.Total != 37 || evidence.Threshold != 20 || evidence.Nodes != 1 || evidence.CoverageComplete {
+		t.Fatalf("assembled worker changed its lower-bound evidence: state=%s code=%s evidence=%+v err=%v", state, code, evidence, err)
+	}
 	check(now.Add(4*time.Hour), 0)
 	clients = nil
 	check(now, 0) // Retained historical counts are not membership.
@@ -93,15 +106,25 @@ func TestBuildDestinationRiskReaderUsesBulkWindowAndCurrentAppliedCollectionProo
 		t.Fatal(err)
 	}
 	check(time.Now().UTC(), 1)
-	// An acknowledged empty candidate can retain a historical LKG but has
-	// no executable hit rules. Neither the old LKG nor its old counters prove
-	// that this node still records hits for the account.
+	// Hits-only without rules omits the policy. The prior LKG and counters
+	// must not prove collection after the rule-free config has been minted.
 	policy.Enabled = false
 	if err := f.a.destDefinitions.SavePolicy(t.Context(), policy, policy.UpdatedAt, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	if w := destinationListRequest(t, f.a, token, "POST", "publish", nil); w.Code != 200 {
 		t.Fatal("empty policy publication failed")
+	}
+	noHits := syncNativeCacheFixture(t, f.a, f.credential, f.report)
+	if noHits.Config.Body == nil || noHits.Config.Body.Policy != nil {
+		t.Fatal("hits-only without rules did not omit the policy")
+	}
+	check(time.Now().UTC(), 0)
+	// Usage collection can retain an acknowledged, non-nil policy without
+	// executable hit rules. It likewise cannot prove destination-hit coverage.
+	f.report.Capabilities = append(f.report.Capabilities, "audit.usage.v1")
+	if w := serverAuditRequest(t, f.a, token, "PUT", fmt.Sprintf("/%d", f.agent.PanelID), map[string]any{"audit_collect": "hits_and_usage"}); w.Code != 200 {
+		t.Fatal("usage collection fixture failed")
 	}
 	empty := syncNativeCacheFixture(t, f.a, f.credential, f.report)
 	if empty.Config.Body == nil || empty.Config.Body.Policy == nil || len(empty.Config.Body.Policy.Rules) != 0 {

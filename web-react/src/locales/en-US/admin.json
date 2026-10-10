@@ -1767,7 +1767,8 @@
       "sub_spread": "Subscription spread",
       "devices": "Devices",
       "usage_shift": "Usage change",
-      "login_country": "Login country"
+      "login_country": "Login country",
+      "dest_block": "Destination blocks"
     },
     "expand": "Show evidence",
     "collapse": "Hide",
@@ -1837,6 +1838,14 @@
         "learning": "Fewer than {{warmup}} earlier logins; still learning",
         "new_country": "Login from a new country: {{countries}}",
         "known_countries": "Recent logins all came from known countries"
+      },
+      "dest_block": {
+        "signal_off": "Destination blocking risk is off for this account's scope",
+        "no_collector": "No current node has confirmed destination-hit collection for this account",
+        "no_hits": "No destination blocks observed in the last 24 hours; coverage is incomplete",
+        "within": "At least {{total}} destination blocks in the last {{hours}} hours (threshold {{threshold}}); coverage is incomplete",
+        "over_building": "At least {{total}} destination blocks in the last {{hours}} hours, approaching threshold {{threshold}}",
+        "over": "At least {{total}} destination blocks in the last {{hours}} hours (threshold {{threshold}})"
       }
     },
     "code_bare": {
@@ -1864,8 +1873,20 @@
       "login_country": {
         "learning": "Too few earlier logins; still learning",
         "new_country": "Login from a new country"
+      },
+      "dest_block": {
+        "within": "Observed destination blocks below threshold; coverage is incomplete",
+        "over_building": "Observed destination blocks approaching threshold",
+        "over": "Observed destination blocks reached threshold"
       }
-    }
+    },
+    "dest_block_counts": "Last {{hours}} hours: at least {{total}} blocks, threshold {{threshold}}, {{nodes}} current collecting node(s)",
+    "dest_block_policy": "Policy {{source}}",
+    "dest_block_incomplete": "Coverage is incomplete. Counts are observed lower bounds; a low count does not establish safety.",
+    "dest_block_losses": "Related panel block losses (not account totals): {{rows}} rows, {{events}} events, {{unmatched}} unmatched",
+    "dest_block_deleted": "Deleted policy {{source}}",
+    "dest_block_names_unavailable": "Current policy names could not be loaded",
+    "dest_block_open_hits": "View block records"
   },
   "risk_center": {
     "title": "Risk center",
@@ -1998,7 +2019,8 @@
         "devices": "Devices",
         "usage_shift": "Usage change",
         "login_country": "Login country",
-        "review": "Admin review"
+        "review": "Admin review",
+        "dest_block": "Destination blocks"
       },
       "level": {
         "flagged": "Flagged",
@@ -2086,7 +2108,7 @@
       "last_judged": "Last judged {{time}}",
       "stale_verdict": "Not re-judged within the freshness window; not counted for review",
       "suspended_since": "Suspended at {{time}}",
-      "trust_scope": "Trusted: locations, subscription spread and login country are not judged; devices and usage change still are.",
+      "trust_scope": "Trusted: locations, subscription spread and login country are not judged; devices, usage change and destination blocks still are.",
       "online": "Online",
       "last_seen": "Last seen {{time}}",
       "seen_detail": "First seen {{first}} · {{count}} samples",
@@ -2131,7 +2153,7 @@
       "undismiss_title": "Undo dismiss for {{upn}}?",
       "undismiss_message": "The account returns to the queue with its current signals.",
       "trust_title": "Trust {{upn}}?",
-      "trust_message": "Locations, subscription spread and login country are no longer judged for this account, and automatic suspension never applies to it; devices and usage change still are.",
+      "trust_message": "Locations, subscription spread and login country are no longer judged for this account, and automatic suspension never applies to it; devices, usage change and destination blocks still are.",
       "trust_resume": "Also resume proxy service (auto-suspended for locations now)",
       "untrust_title": "Stop trusting {{upn}}?",
       "untrust_message": "From the next check it is judged by its group's policy again.",
@@ -2222,7 +2244,13 @@
       "geoip_city": "city level",
       "geoip_country": "countries only",
       "geoip_off": "unavailable",
-      "geoip_open": "Open settings"
+      "geoip_open": "Open settings",
+      "dest_block_selected": "Selected risk policies: {{names}}",
+      "dest_block_none": "No destination policies selected for risk",
+      "dest_block_none_detail": "Select Counts as risk on the destination policies to include. Frozen block hits for those policies form the observed lower bound; low counts do not establish safety.",
+      "dest_block_read_failed": "The selected policy names are unavailable. Open access control to check them; this does not mean none are selected.",
+      "dest_block_loading": "Loading selected risk policies…",
+      "dest_block_open": "Open access control"
     }
   },
   "logs": {

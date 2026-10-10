@@ -2027,8 +2027,16 @@ policies are excluded. Counts and related panel block losses share one private
 read snapshot with current clients. Aggregates spanning a 24-hour cutoff are
 excluded because their inside-window counts are unknown. Evidence retains only
 policy IDs, counts, current collecting-node counts and separate loss units,
-with incomplete coverage explicitly stated. Production worker wiring, proof of
-current collection, queue integration and evidence UI remain outstanding.
+with incomplete coverage explicitly stated. Production assembly now supplies
+one bulk read to the observe-only worker, with the status page's exact current
+collection proof and the caller's backend admission. Location trust does not
+mask this signal; read failures preserve enabled rows, explicit off needs no
+telemetry, and cancellation saves no verdicts. The registered kind and six
+codes flow through the queue, records and freshness rules. Evidence renders
+current policy names, deleted/read-failed labels and separate panel losses;
+incomplete clean is never green. Drawer and records link to the account's
+fixed-24h block history. The current candidate still needs its own Linux CI,
+browser acceptance and real Node deployment checks.
 
 Stage 1c still requires the remaining access-control views and complete browser
 acceptance. C2's end-to-end browser

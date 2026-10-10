@@ -9,6 +9,8 @@ import { pushSnack } from '@/components/SnackbarHost'
 import { useAllGroups } from '@/query/groups'
 import { useRiskPolicy, useSaveRiskPolicy } from '@/query/riskCenter'
 import { useGeoIPStatus } from '@/query/settings'
+import { useDestinationPolicies } from '@/query/accessControl'
+import FieldHint from '@/components/FieldHint'
 import { useQueryScope } from '@/query/useQueryScope'
 import { activeDbIsCountryOnly } from '@/utils/geoAnomaly'
 import { listSeparator } from '@/utils/riskCenter'
@@ -87,6 +89,9 @@ function PolicyBody({ loaded }: { loaded: RiskPolicyView }) {
   const save = useSaveRiskPolicy(scope)
   const { data: geoip } = useGeoIPStatus(scope)
   const groupsQ = useAllGroups(scope)
+  const destinationQ = useDestinationPolicies(scope)
+  const riskDestinations = [...(destinationQ.data?.allow ?? []), ...(destinationQ.data?.block ?? []), ...(destinationQ.data?.observe ?? [])]
+    .filter(p => p.counts_as_risk)
   const [params, setParams] = useSearchParams()
   const groupId = parsePolicyGroup(params)
   const exceptions = useGroupExceptions(groupId)
@@ -235,6 +240,18 @@ function PolicyBody({ loaded }: { loaded: RiskPolicyView }) {
         return caption(t('admin:settings.risk.sub_spread_hint'))
       case 'devices':
         return caption(t(`${P}hwid_on_devices`))
+      case 'dest_block':
+        return <>
+          {destinationQ.isSuccess && (riskDestinations.length
+            ? caption(t(`${P}dest_block_selected`, { names: riskDestinations.map(p => p.name).join(listSeparator(i18n.language)) }))
+            : <FieldHint tone="amber" summary={t(`${P}dest_block_none`)} detail={t(`${P}dest_block_none_detail`)} />)}
+          {destinationQ.isError && <FieldHint tone="amber" summary={t('admin:risk_signals.dest_block_names_unavailable')}
+            detail={t(`${P}dest_block_read_failed`)} />}
+          {destinationQ.isPending && caption(t(`${P}dest_block_loading`))}
+          <Button size="small" component={RouterLink} to="/admin/access-control?tab=policies">
+            {t(`${P}dest_block_open`)}
+          </Button>
+        </>
       default:
         return null
     }

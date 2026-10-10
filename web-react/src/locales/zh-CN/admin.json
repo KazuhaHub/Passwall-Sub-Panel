@@ -1763,7 +1763,8 @@
       "sub_spread": "订阅多地",
       "devices": "设备数",
       "usage_shift": "用量变化",
-      "login_country": "登录国家"
+      "login_country": "登录国家",
+      "dest_block": "目的地阻断"
     },
     "expand": "查看证据",
     "collapse": "收起",
@@ -1833,6 +1834,14 @@
         "learning": "之前的登录不足 {{warmup}} 次，还在学习",
         "new_country": "从新国家登录：{{countries}}",
         "known_countries": "最近的登录都来自已知国家"
+      },
+      "dest_block": {
+        "signal_off": "此账户所属范围已关闭目的地阻断风险判断",
+        "no_collector": "当前没有节点确认正在为此账户采集目的地命中",
+        "no_hits": "最近 24 小时未观察到目的地阻断，覆盖不完整",
+        "within": "最近 {{hours}} 小时至少 {{total}} 次目的地阻断（阈值 {{threshold}} 次），覆盖不完整",
+        "over_building": "最近 {{hours}} 小时至少 {{total}} 次目的地阻断，正在接近 {{threshold}} 次阈值",
+        "over": "最近 {{hours}} 小时至少 {{total}} 次目的地阻断（阈值 {{threshold}} 次）"
       }
     },
     "code_bare": {
@@ -1860,8 +1869,20 @@
       "login_country": {
         "learning": "之前的登录次数还不够，还在学习",
         "new_country": "从新国家登录"
+      },
+      "dest_block": {
+        "within": "已观察到的目的地阻断低于阈值，覆盖不完整",
+        "over_building": "已观察到的目的地阻断正在接近阈值",
+        "over": "已观察到的目的地阻断达到阈值"
       }
-    }
+    },
+    "dest_block_counts": "最近 {{hours}} 小时至少 {{total}} 次阻断，阈值 {{threshold}} 次，当前 {{nodes}} 个节点正在采集",
+    "dest_block_policy": "策略 {{source}}",
+    "dest_block_incomplete": "覆盖不完整。计数仅为已观察到的下界；次数较少不能证明安全。",
+    "dest_block_losses": "相关节点范围的阻断丢失（不归属于此账户）：{{rows}} 行、{{events}} 次事件、{{unmatched}} 次未匹配",
+    "dest_block_deleted": "已删除策略 {{source}}",
+    "dest_block_names_unavailable": "当前策略名称读取失败",
+    "dest_block_open_hits": "查看阻断记录"
   },
   "risk_center": {
     "title": "风控中心",
@@ -1994,7 +2015,8 @@
         "devices": "设备数",
         "usage_shift": "用量变化",
         "login_country": "登录国家",
-        "review": "管理员处理"
+        "review": "管理员处理",
+        "dest_block": "目的地阻断"
       },
       "level": {
         "flagged": "已标记",
@@ -2082,7 +2104,7 @@
       "last_judged": "最后判定 {{time}}",
       "stale_verdict": "超过新鲜度未重新判定，不计入待处理",
       "suspended_since": "暂停于 {{time}}",
-      "trust_scope": "已信任：异地并发、订阅多地、登录国家不再判定；设备数与用量变化照常判定。",
+      "trust_scope": "已信任：异地并发、订阅多地、登录国家不再判定；设备数、用量变化和目的地阻断照常判定。",
       "online": "在线",
       "last_seen": "最近 {{time}}",
       "seen_detail": "首次 {{first}} · 共 {{count}} 次判定",
@@ -2127,7 +2149,7 @@
       "undismiss_title": "取消忽略 {{upn}}？",
       "undismiss_message": "账号会按当前信号重新列入待处理。",
       "trust_title": "信任 {{upn}}？",
-      "trust_message": "此账号不再做异地并发、订阅多地和登录国家判定，自动临时暂停也不会作用于它；设备数和用量变化照常。",
+      "trust_message": "此账号不再做异地并发、订阅多地和登录国家判定，自动临时暂停也不会作用于它；设备数、用量变化和目的地阻断照常。",
       "trust_resume": "同时恢复代理服务（当前为异地自动暂停）",
       "untrust_title": "取消信任 {{upn}}？",
       "untrust_message": "下一轮检测起按分组策略重新判定。",
@@ -2218,7 +2240,13 @@
       "geoip_city": "城市级",
       "geoip_country": "仅国家",
       "geoip_off": "不可用",
-      "geoip_open": "前往设置"
+      "geoip_open": "前往设置",
+      "dest_block_selected": "已选风险策略：{{names}}",
+      "dest_block_none": "尚未选择计入风险的目的地策略",
+      "dest_block_none_detail": "在访问控制策略中开启「计入风险」。所选策略的历史阻断命中构成已观察到的下界；次数较少不能证明安全。",
+      "dest_block_read_failed": "当前无法读取已选策略名称，可前往访问控制核对；这不表示没有选择策略。",
+      "dest_block_loading": "正在读取已选风险策略…",
+      "dest_block_open": "前往访问控制"
     }
   },
   "logs": {

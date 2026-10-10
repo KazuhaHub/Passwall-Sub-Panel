@@ -702,11 +702,11 @@ func TestQueue_EvidenceLoadedForThePageOnly(t *testing.T) {
 }
 
 // "Every detector is off" is said only when the GLOBAL settings turn every
-// one of them off — the geo scope and the four risk kinds. A group may
+// one of them off — the geo scope and the five risk kinds. A group may
 // still override that, which the page's copy says.
 func TestQueue_GlobalDetectorsOff(t *testing.T) {
 	h := newHarness()
-	off := ports.UISettings{GeoAnomalyScope: " OFF ", RiskSubSpreadOff: true, RiskDevicesOff: true, RiskUsageShiftOff: true, RiskLoginCountryOff: true}
+	off := ports.UISettings{GeoAnomalyScope: " OFF ", RiskSubSpreadOff: true, RiskDevicesOff: true, RiskUsageShiftOff: true, RiskLoginCountryOff: true, RiskDestBlockOff: true}
 	h.settings.set = off
 	if !h.queue(t, QueueQuery{}).GlobalDetectorsOff {
 		t.Fatal("every detector off globally, want GlobalDetectorsOff")
@@ -717,6 +717,7 @@ func TestQueue_GlobalDetectorsOff(t *testing.T) {
 		func(s *ports.UISettings) { s.RiskDevicesOff = false },
 		func(s *ports.UISettings) { s.RiskUsageShiftOff = false },
 		func(s *ports.UISettings) { s.RiskLoginCountryOff = false },
+		func(s *ports.UISettings) { s.RiskDestBlockOff = false },
 	} {
 		set := off
 		on(&set)
@@ -724,6 +725,34 @@ func TestQueue_GlobalDetectorsOff(t *testing.T) {
 		if h.queue(t, QueueQuery{}).GlobalDetectorsOff {
 			t.Fatalf("%+v has a detector on, want GlobalDetectorsOff false", set)
 		}
+	}
+}
+
+func TestQueue_DestinationBlocksStayVisibleUnderLocationTrust(t *testing.T) {
+	h := newHarness()
+	h.user(7, "destination-review")
+	h.user(8, "destination-suspect")
+	h.trust(7)
+	h.geo.rows = []domain.GeoRecord{geoAt(7, true, 0, domain.GeoStateFlagged, testNow)}
+	h.signals.rows = []domain.RiskSignal{
+		signalAt(7, domain.RiskKindLoginCountry, domain.GeoStateFlagged, testNow),
+		signalAt(7, domain.RiskKindDestBlock, domain.GeoStateFlagged, testNow),
+		signalAt(8, domain.RiskKindDestBlock, domain.GeoStateSuspect, testNow),
+	}
+	v := h.queue(t, QueueQuery{Sources: []string{"dest_block"}})
+	if v.Total != 2 || v.Counts.Urgent != 1 || v.Counts.Flagged != 1 || v.Counts.Suspect != 1 || v.Counts.AutoSuspended != 0 {
+		t.Fatalf("destination queue counts = %+v, total=%d", v.Counts, v.Total)
+	}
+	r := rowOf(t, v, 7)
+	if !reflect.DeepEqual(r.Attention.Levels, domain.AttentionLevels{"dest_block": domain.FlagLevelFlagged}) || len(r.Signals) != 1 || r.Signals[0].Kind != domain.RiskKindDestBlock || r.Geo != nil {
+		t.Fatalf("trust hid destination or exposed location attention: %+v", r)
+	}
+	if r.User.ServiceDisabledReason != "" {
+		t.Fatal("observe-only destination attention suspended an account")
+	}
+	h.signals.rows[1].UpdatedAtMS = testNow.Add(-48 * time.Hour).UnixMilli()
+	if got := h.queue(t, QueueQuery{Urgent: true}).Total; got != 0 {
+		t.Fatalf("stale destination signal remained urgent: %d", got)
 	}
 }
 

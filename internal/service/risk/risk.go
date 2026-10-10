@@ -83,6 +83,13 @@ type Deps struct {
 	// signals judge them exempt / trusted. Read once per run. Nil: nobody is
 	// trusted.
 	Trust TrustedLister
+	// Destination reads one fixed-window snapshot with current collection
+	// proof. Nil: dest_block is not computed. Location trust does not apply.
+	Destination DestinationReader
+}
+
+type DestinationReader interface {
+	ReadDestinationRisk(ctx context.Context, at time.Time) (map[int64]domain.DestBlockInput, error)
 }
 
 // UserLister pages through the accounts (ports.UserRepo's List, alone).
@@ -253,6 +260,11 @@ func (s *Service) RefreshOnce(ctx context.Context) (err error) {
 			return err
 		}
 	}
+	if s.d.Destination != nil {
+		if err := s.destinationBlocks(ctx, r); err != nil {
+			return err
+		}
+	}
 
 	// The place signals judge where the week's fetches came from, so they
 	// wait for the infrastructure set: before its first build it is empty
@@ -300,6 +312,9 @@ func (s *Service) RefreshOnce(ctx context.Context) (err error) {
 		}
 	}
 
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("risk refresh: %w", err)
+	}
 	if len(r.rows) > 0 {
 		if err := s.d.Store.Save(ctx, r.rows); err != nil {
 			return fmt.Errorf("risk refresh: save: %w", err)
