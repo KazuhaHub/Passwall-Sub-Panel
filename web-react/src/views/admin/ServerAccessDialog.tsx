@@ -46,7 +46,7 @@ export default function ServerAccessDialog({ server, onClose }: { server: Server
           : <>
             {status.isError && <Alert severity="warning" action={retryRead}>{t(`${P}coverage.read_stale`)}</Alert>}
             {status.data!.generation !== status.data!.published_generation && <Alert severity="info">{t(`${P}server.unpublished`)}</Alert>}
-            <NodePolicyStatusRow node={node} now={Date.now()} onRetry={retryNode} retryPending={retry.isPending} />
+            <NodePolicyStatusRow node={node} now={Date.now()} onRetry={retryNode} retryPending={retry.isPending} auditCards />
           </>}
     </Stack></DialogContent>
     <DialogActions sx={{ flexWrap: 'wrap' }}>

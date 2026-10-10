@@ -676,7 +676,36 @@
       "created": "Created the allow-exception list and policy and added {{entry}}; awaiting publication.",
       "saved": "Added {{entry}}; awaiting publication."
     },
-    "view_account": "View account…"
+    "view_account": "View account…",
+    "collect": {
+      "open": "Set collection mode…",
+      "title": "What should {{node}} record?",
+      "mode": "Collection mode",
+      "modify": "Change collection mode",
+      "hits_24h": "Hits in 24 hours",
+      "view_records": "View records",
+      "off": "Do not record",
+      "hits": "Record rule hits only",
+      "hits_and_usage": "Record hits and site usage",
+      "off_detail": "Enforce policies only. Saving stops new records from being accepted; the node stops collecting at its next sync. Existing history expires under its retention policy.",
+      "hits_detail": "Record accounts, destinations and counts for block, observe and allowlist hits, aggregated hourly and retained for {{hitDays}} days.",
+      "hits_and_usage_detail": "Also record visited primary domains and counts per account and hour, retained for {{usageDays}} days. Usage can only be viewed one account at a time, and viewing is audited. Trial connections also count toward account usage.",
+      "disclosure_hits": "These are connection counts, not traffic volume or a complete browsing log. Allowlist trial hits record groups and primary domains without accounts.",
+      "disclosure_usage": "These are connection counts, not traffic volume or a complete browsing log. With site usage enabled, trial connections also count toward each account.",
+      "sing_box": "sing-box nodes enforce policies without recording.",
+      "engine_unknown": "The node engine is not confirmed; collection mode cannot be changed yet.",
+      "upgrade_hits": "Upgrade this node before it can record rule hits.",
+      "upgrade_usage": "Upgrade this node before it can record site usage.",
+      "legal_disabled": "The privacy and terms page is disabled; users will not be informed",
+      "legal_unknown": "The privacy and terms page status is unconfirmed; check it first",
+      "legal_detail": "Site usage records visited primary domains per account and hour. Publish a privacy policy and enable it in System settings › Privacy and terms so users know what is collected.",
+      "open_legal": "Open privacy and terms settings",
+      "restart": "Saving restarts this node’s proxy once at its next sync.",
+      "usage_reminder": "Visited primary domains will also be recorded per account, retained for {{days}} days.",
+      "loading": "Reading collection settings",
+      "read_failed": "Could not read retention settings or the sync interval. Retry to continue.",
+      "saved": "Saved. {{node}} will restart its proxy once within about {{minutes}} minute(s)."
+    }
   },
   "languagePacks": {
     "title": "Language packs",

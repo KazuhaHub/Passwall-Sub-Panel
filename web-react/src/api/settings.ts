@@ -79,6 +79,8 @@ export type RuntimeKnob =
 export type RuntimeKnobValues = Partial<Record<RuntimeKnob, number>>
 
 export interface UISettings {
+  /** Absent on panels without the privacy and terms feature. */
+  legal_enabled?: boolean
   /** Read-only here; /admin/dest/settings owns writes. Optional for old snapshots. */
   dest_hit_retention_days?: number
   dest_trial_retention_days?: number

@@ -2035,8 +2035,38 @@ telemetry, and cancellation saves no verdicts. The registered kind and six
 codes flow through the queue, records and freshness rules. Evidence renders
 current policy names, deleted/read-failed labels and separate panel losses;
 incomplete clean is never green. Drawer and records link to the account's
-fixed-24h block history. The current candidate still needs its own Linux CI,
-browser acceptance and real Node deployment checks.
+fixed-24h block history. Production integration `852ae71b` passed its own
+[complete Test workflow](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/38035190167)
+and [systemd acceptance](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/38035190169).
+The real MySQL/PostgreSQL storage suites and assembled Linux App tests passed,
+including persisted destination-risk transitions and both rule-free collection
+contracts. Shared detector badges and blocking labels in `340e6168` passed
+[Test](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/38035830221)
+and [systemd acceptance](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/38035830618).
+Browser acceptance and real Node deployment checks remain open.
+
+Stage-2c recording controls now share one node dialog between fleet coverage
+and native-server details. It submits only `audit_collect`; the server owns the
+revision. Reported hit/usage capabilities restrict the three choices, and
+sing-box is read-only. Retention uses the effective destination settings,
+without substituting guessed defaults after failed or malformed reads. The
+restart estimate uses the configured node sync interval. No extra confirmation
+is added after the visible restart and account-usage notices. Off explains
+immediate ingestion cessation, next-sync collection cessation and ordinary
+historical retention. Trial hits explain their account-free group/domain
+aggregation; explicit usage also includes trial connections by account.
+
+The usage choice warns when privacy and terms are disabled or their status is
+unknown and links to the planned legal settings tab without preventing saving.
+`legal_enabled` is optional until the legal branch is integrated. A neutral
+data disclosure distinguishes connection counts from traffic and complete
+browsing history. The dialog prevents duplicate writes and closing during a
+save, retains failed drafts, invalidates only its session's server/status
+queries and drops drafts/callbacks on identity or permission changes. Server
+details show retained 24-hour hits separately from current collection proof,
+preserve unknown counts and link to exact `rec_panel` records. The shared block
+is ready for the later server-overview consumer; that consumer has not landed.
+These controls still require real browser and Node deployment acceptance.
 
 Stage 1c still requires the remaining access-control views and complete browser
 acceptance. C2's end-to-end browser
