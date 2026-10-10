@@ -1,19 +1,19 @@
 # Destination access control
 
-Implementation follows the [final audit plan](https://github.com/KazuhaHub/Passwall-Sub-Panel/pull/271). Definition publication, native candidate compilation and list management are connected to the application. The feature remains under development: the remaining management interfaces, audit ingestion, browser acceptance and real Node kernel acceptance are pending.
+Implementation follows the [final audit plan](https://github.com/KazuhaHub/Passwall-Sub-Panel/pull/271). Definition publication, native candidate compilation, list management and hit ingestion are connected to the application. The feature remains under development: the remaining management interfaces, records page, risk evaluation, privacy/consent integration, browser acceptance and real Node kernel acceptance are pending. Stage 4 usage collection and stage 5 group modes remain separate open work.
 
 ## Current implementation
 
 - Definition tables: `dest_lists`, `dest_policies`, `dest_exemptions`, `dest_group_modes`.
 - Publication and runtime state: `dest_policy_state`, `dest_policy_snapshots`, `dest_agent_policy`.
-- Durable audit storage: `dest_hits`, `dest_usage_hourly`, `dest_audit_batches`, `dest_audit_loss_hourly`, `dest_audit_ingest_budget`. Collection and ingestion are not connected yet.
-- The sync HTTP boundary decodes `audit` separately, bounds its raw size and validates its shape and capabilities. Invalid telemetry is dropped without changing a valid control response. Audit batches are stripped from control caches; the worker has not been connected to production sync, so decoded acceptance does not mean durable storage.
+- Durable audit storage: `dest_hits`, `dest_usage_hourly`, `dest_audit_batches`, `dest_audit_loss_hourly`, `dest_audit_ingest_budget`. Hit ingestion, loss persistence and retention are connected; production usage writes remain inactive.
+- The sync HTTP boundary decodes `audit` separately, bounds its raw size and validates its shape and capabilities. Invalid telemetry is dropped without changing a valid control response. Audit batches are stripped from control caches. A successful validated sync offers telemetry to the bounded worker without waiting for the database; HTTP acceptance does not itself mean durable storage.
 - `psp_node_audit_report_total` uses the fixed `kind` and `outcome` enum labels. Diagnostics translate both labels in English and Chinese; existing single-label metric values keep their original interpretation. Logs for discarded audit subtrees contain only the authenticated agent identifier and a count, with per-agent rate limiting.
-- The audit queue foundation reserves independent batch/byte/per-agent capacity for block, observe, trial and usage, including processing batches. In-flight deduplication is independent of bounded recent caches. Its seven-slot scheduler yields after each database chunk. Mapping merges final hit keys before persistence, preserves frozen actions and anonymous trial fields, and applies receiver-clock age bounds. Production sync and application lifecycle connection remain pending.
+- The audit queue reserves independent batch/byte/per-agent capacity for block, observe, trial and usage, including processing batches. In-flight deduplication is independent of bounded recent caches. Its seven-slot scheduler yields after each database chunk. Mapping merges final hit keys before persistence, preserves frozen actions and anonymous trial fields, and applies receiver-clock age bounds. Application startup and shutdown own the worker and its loss flushing; shutdown stops new offers before draining admitted work.
 - New tables participate in the normal boot migration. JSON columns use TEXT without defaults. Binary list content, original custom-list text, snapshots and policy bodies use SQLite BLOB, PostgreSQL BYTEA and MySQL LONGBLOB.
 - Candidate bytes are stored independently from confirmed policy bytes. The compiler and candidate observer use the latter for pruned last-known-good fallback and durable exhaustion, as described below.
 - Native panel collection settings are stored as `audit_collect` (`off`, `hits`, `hits_and_usage`) and `audit_collect_revision`. Creation and migration initialize `hits` and revision `1`. A normal panel `Save` omits these columns.
-- The native metadata writer validates collection mode and compares it under a transaction lock. A mode change increments revision atomically; repeated writes of the same mode do not. This write is not yet exposed by the HTTP request DTO. The future ingestion gate will use the same collection state to reject outdated batches.
+- The native metadata writer validates collection mode and compares it under a transaction lock. A mode change increments revision atomically; repeated writes of the same mode do not. The server request DTO exposes hit/off selection, and the ingestion gate rejects outdated collection revisions. B mode remains unavailable until stage 4.
 
 ## Audit transaction foundation
 
@@ -38,7 +38,9 @@ isolation, count/time upserts, anonymous trial rows, collection changes and SQL
 privacy. Storage foundation `7c55cd5a72f6515759b440934274b681349cbb2c`
 passed the [complete Test workflow](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37996403773),
 including actual PostgreSQL and MySQL repository suites and the MySQL
-`clientFoundRows=true` connection test. Worker/sync integration remains pending.
+`clientFoundRows=true` connection test. Worker/sync integration is now connected;
+the subsequent integration commit passed the
+[complete Test workflow](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/38010378151).
 Usage persistence is prepared internally; production usage collection
 remains inactive until its stage-4 acceptance.
 
@@ -52,12 +54,50 @@ the batch, and canceled progress cannot survive a collection-setting change.
 Graceful stopping refuses new offers before draining; forced cancellation
 returns the undrained batch/row counts.
 
-Worker regressions first failed against an empty engine. The current engine
-compiles and passes `go vet`; its Windows test executable was blocked by
-Application Control, so Linux execution is required before claiming these
-regressions pass. New ID-resolution tests and existing audit storage tests passed
-locally. Collection-state cache invalidation, bounded loss persistence, tracked
-worker startup/shutdown and the sync offer remain outstanding.
+Worker regressions first failed against an empty engine. Windows Application
+Control blocks this package's local test executable, so its runtime evidence is
+the actual Linux race run in the
+[collector Test workflow](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/38004841445).
+Collection-state invalidation, bounded idempotent loss persistence and tracked
+startup/shutdown are connected. The hourly maintenance job applies distinct hit,
+trial and usage retention, keeps deduplication markers for 72 hours and removes
+orphans. Node status reads durable hit totals and independent loss units; turning
+collection off does not erase existing history. Maintenance and status commits
+passed their complete Test workflows, including real MySQL and PostgreSQL.
+
+## Hit records API
+
+`GET /api/admin/dest/hits` is administrator-only. It accepts time, user, panel,
+source, source kind, action and literal destination-keyword filters, with at most
+31 days and 200 items per page. Duplicate parameters, unknown keys and invalid
+ranges return a fixed 400 error. Missing or failed storage returns 503; neither
+partial results nor private driver values reach the response or error logger.
+
+`group_by=none` returns stored hourly records in deterministic primary-key order;
+`site`, `user` and `policy` return count-descending aggregates with stable time/key
+tie-breakers. Site folding uses the public and private suffix list; IP addresses
+share the `(ip)` bucket. Frozen source/action fields do not change when the current
+definition is edited. Display names reflect current definitions and become null
+after deletion. Anonymous group trial observations are excluded by default.
+
+Summary cards use the selected time/user/panel scope independently of list
+action/source/keyword/trial filters. Source options cover the whole selected time
+range. Losses remain related-panel totals: current client membership and historical
+hits identify related panels for user/source filters. They never become precise
+user or policy loss counts. `rows`, `events` and `unmatched` retain separate units,
+`dropped_in_range` mirrors only rows, and `complete` remains false.
+
+Summary, records/groups, names, source options and losses use one private read
+transaction, with repeatable-read isolation on MySQL and PostgreSQL. Local SQLite
+and assembled HTTP tests cover filtering, deletion, stable pagination, overflow,
+privacy failures, role restrictions and backend-switch admission. Concurrent
+server snapshot regression is included for actual MySQL/PostgreSQL CI; SQLite
+skips that concurrency case. The new candidate still needs its own CI verdict.
+
+The frontend URL parser and typed HTTP adapter are connected to each other.
+Keywords stay outside browser history, instants use Unix milliseconds, cancellation
+propagates and runtime component fields cannot enter the API parameter allowlist.
+The records page, browser acceptance and deployment acceptance remain open.
 
 ## Definition and publication repository
 
@@ -1940,12 +1980,12 @@ audit behavior; destination audit rows remain restricted to administrators.
 PSP's access logger strips query strings from `/api/admin/dest/` paths. Reverse
 proxies may still record API query parameters in their own access logs. Record
 search terms will remain component state rather than page URL state, but API
-queries can still reach those external logs. Audit ingestion, retention and
-consent enforcement remain part of the later implementation stages.
+queries can still reach those external logs. Hit ingestion and retention are now
+connected; consent enforcement remains part of the later integration stages.
 
 Stage 1c still requires the remaining access-control views and complete browser
 acceptance. C2's end-to-end browser
-acceptance remains outstanding. Audit ingestion,
-retention, privacy/consent and subsequent stages retain the full final-plan
+acceptance remains outstanding. Risk evaluation, complete records UI,
+privacy/consent integration and subsequent stages retain the full final-plan
 scope. Repository tests and green CI do not establish completion of these
-requirements.
+requirements or real deployment acceptance.

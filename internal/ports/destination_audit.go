@@ -36,6 +36,10 @@ type DestAuditReadRepo interface {
 	ReadDestinationAuditPanelStats(context.Context, time.Time, time.Time, []int64) (map[int64]domain.DestAuditPanelStats, error)
 }
 
+type DestHitReadRepo interface {
+	ReadDestinationHits(context.Context, domain.DestHitQuery) (domain.DestHitPage, error)
+}
+
 type DestAuditStore interface {
 	DestAuditRepo
 	DestAuditLossRepo

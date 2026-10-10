@@ -1,3 +1,6 @@
+import type { DestinationHitGroupBy, DestinationHitQuery as HitRequest } from '@/api/destinationHits'
+export type { DestinationHitQuery as HitRequest } from '@/api/destinationHits'
+
 export interface RecordsFilters {
   user_id?: number
   panel_id?: number
@@ -5,25 +8,10 @@ export interface RecordsFilters {
   action?: 'block' | 'deny' | 'observe'
   since: string
   until?: string
-  group_by: 'none' | 'site' | 'user' | 'policy'
+  group_by: DestinationHitGroupBy
   include_trial: boolean
   page: number
   page_size: number
-}
-
-export interface HitRequest {
-  user_id?: number
-  panel_id?: number
-  source?: string
-  source_kind?: 'policy' | 'group'
-  action?: 'block' | 'observe'
-  since: number
-  until: number
-  group_by: RecordsFilters['group_by']
-  include_trial: boolean
-  page: number
-  page_size: number
-  q?: string
 }
 
 export const RECORDS_PAGE_SIZES = [25, 50, 100] as const
