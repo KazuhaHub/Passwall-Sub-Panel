@@ -47,7 +47,7 @@ type DestinationNodeStatus struct {
 	FallbackReason       string                      `json:"fallback_reason"`
 	FallbackExhausted    bool                        `json:"fallback_exhausted"`
 	MintedKind           domain.DestCandidateKind    `json:"minted_kind"`
-	Losses               *int64                      `json:"losses"`
+	Losses               *domain.DestAuditLosses     `json:"losses"`
 	OverLimit            *domain.DestPublishError    `json:"over_limit"`
 	SniffingInsufficient []domain.DestStatusListener `json:"sniffing_insufficient"`
 	MintedAt             *int64                      `json:"minted_at"`

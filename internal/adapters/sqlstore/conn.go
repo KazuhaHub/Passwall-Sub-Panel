@@ -201,6 +201,7 @@ func NewRepos(db *gorm.DB) ports.Repos {
 		DestAgentPolicy:         NewDestAgentPolicyRepo(db),
 		DestAudit:               destAudit,
 		DestAuditMaintenance:    destAudit,
+		DestAuditRead:           destAudit,
 		DestinationEligibility:  NewDestinationEligibilityRepo(db),
 		NativeAgentProvisioning: &nativeAgentProvisioningRepo{db: db, audit: destAudit},
 		ServerMigration:         &serverMigrationRepo{db: db, audit: destAudit},

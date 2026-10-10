@@ -51,6 +51,16 @@ node events, unsaved loss keys and failed loss flush attempts. Failed flushes
 retain increments; their attempt counter is separate from dropped keys. Unsaved
 key counts cannot reconstruct historical lost rows.
 
+The node coverage endpoint reads durable panel counters in one read-only
+snapshot across both audit tables and all bounded panel-ID queries. A count
+histogram and saturating integer arithmetic avoid SQL SUM overflow and rounding;
+no account, destination or source values are loaded. The requested time range
+selects overlapping UTC hour buckets. Hits include retained trial observations;
+loss rows, dropped events and unmatched events are separate panel totals with
+`complete:false`. Historical counts survive collection being switched off;
+unsupported nodes keep unknown telemetry. Current collection still requires the
+digest, revision, capability and freshness proof independently of these counts.
+
 Focused verification:
 
 ```sh

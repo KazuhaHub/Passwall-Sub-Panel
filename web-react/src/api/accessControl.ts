@@ -324,6 +324,14 @@ export async function createDestinationGlobalException(input: DestinationGlobalE
   return data
 }
 
+export interface DestinationAuditLosses {
+  rows: number
+  events: number
+  unmatched: number
+  scope: 'panel'
+  complete: false
+}
+
 export interface DestinationNodeStatus {
   panel_id: number
   agent_id: string | null
@@ -339,7 +347,7 @@ export interface DestinationNodeStatus {
   fallback_reason: string
   fallback_exhausted: boolean
   minted_kind: '' | 'desired' | 'fallback' | 'empty' | 'paused'
-  losses: number | null
+  losses: DestinationAuditLosses | null
   over_limit: DestinationPublicationView['publish_error']
   sniffing_insufficient: Array<{ listener: string; label: string; node_id: number | null }>
   minted_at: number | null

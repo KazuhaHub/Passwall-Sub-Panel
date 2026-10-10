@@ -68,3 +68,31 @@ it.each(['en-US', 'zh-CN'])('has localized state labels, explanations and destin
     expect((dictionary.node_issues.code_summaries as Record<string, string>)[code]).toBeTruthy()
   }
 })
+
+it.each(['en-US', 'zh-CN'])('shows stored hits and separate observed loss units in %s', async language => {
+  await mount(language, { supports: { policy: true, hits: true, usage: false }, collecting: true, collect_effective: 'hits',
+    hits_24h: 17, losses: { rows: 3, events: 5, unmatched: 7, scope: 'panel', complete: false } })
+  expect(screen.getByTestId('coverage-hits-1').textContent).toContain('17')
+  const loss = screen.getByTestId('coverage-losses-1').textContent!
+  for (const text of language === 'zh-CN' ? ['3 行', '5 个事件', '7 个事件', '统计可能不完整'] : ['3 rows', '5 events', '7 events', 'may be incomplete']) {
+    expect(loss).toContain(text)
+  }
+  expect(screen.getByTestId('coverage-collection-1').textContent).toContain(language === 'zh-CN' ? '正在记录规则命中' : 'Recording rule hits')
+})
+
+it.each(['en-US', 'zh-CN'])('does not turn unknown data or saved collection into proof in %s', async language => {
+  await mount(language, { supports: { policy: true, hits: true, usage: true }, collect: 'hits_and_usage', collect_effective: 'hits_and_usage', collecting: false })
+  expect(screen.queryByTestId('coverage-hits-1')).toBeNull()
+  expect(screen.queryByTestId('coverage-losses-1')).toBeNull()
+  expect(screen.getByTestId('coverage-collection-1').textContent).toContain(language === 'zh-CN' ? '尚未确认' : 'not confirmed')
+  cleanup()
+  await mount(language, { supports: { policy: true, hits: true, usage: false }, collect: 'off', hits_24h: 0,
+    losses: { rows: 0, events: 0, unmatched: 0, scope: 'panel', complete: false } })
+  expect(screen.getByTestId('coverage-hits-1').textContent).toContain('0')
+  expect(screen.getByTestId('coverage-collection-1').textContent).toContain(language === 'zh-CN' ? '不记录' : 'Collection is off')
+  expect(screen.queryByTestId('coverage-losses-1')).toBeNull()
+  cleanup()
+  await mount(language, { engine: 'sing-box', hits_24h: 0 })
+  expect(screen.queryByTestId('coverage-hits-1')).toBeNull()
+  expect(screen.queryByTestId('coverage-collection-1')).toBeNull()
+})

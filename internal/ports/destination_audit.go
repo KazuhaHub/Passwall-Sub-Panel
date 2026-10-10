@@ -28,6 +28,14 @@ type DestAuditMaintenanceRepo interface {
 	PruneDestinationAudit(context.Context, time.Time, *domain.DestinationSettings) (domain.DestAuditPruned, error)
 }
 
+type DestAuditReadRepo interface {
+	// Read stored counters for the UTC hour buckets overlapping [since, until).
+	// The window must be positive and no longer than 31 days. Only requested
+	// positive panel IDs are returned; absent data has known zero counters and
+	// complete=false. No destination or account values leave this projection.
+	ReadDestinationAuditPanelStats(context.Context, time.Time, time.Time, []int64) (map[int64]domain.DestAuditPanelStats, error)
+}
+
 type DestAuditStore interface {
 	DestAuditRepo
 	DestAuditLossRepo

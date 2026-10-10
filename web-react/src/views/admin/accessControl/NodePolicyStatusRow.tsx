@@ -32,6 +32,10 @@ export default function NodePolicyStatusRow({ node, now, variant = 'block', onLi
   const needsIssues = prolonged || node.state === 'rejected' || fallback === 'exhausted' || fallback === 'stopping'
   const confirmed = node.minted_at !== null && node.applied_at !== null && node.pending_since === null
   const rules = fallback === 'exhausted' ? 0 : confirmed && (node.minted_kind === 'desired' || node.minted_kind === 'fallback') ? node.applied_rules : null
+  const auditAvailable = node.kind === 'psp' && node.engine === 'xray' && node.supports.hits
+  const collection = node.collect === 'off' ? 'off' : !node.collecting ? 'unconfirmed'
+    : node.collect_effective === 'hits_and_usage' ? 'usage' : 'hits'
+  const loss = node.losses
   const linkStyle = { minHeight: 44 }
   if (variant === 'row') return <ButtonBase onClick={onOpen} sx={{ minHeight: 44, minWidth: 44, px: 0.5, gap: 0.5,
     justifyContent: 'flex-start', textAlign: 'left', whiteSpace: 'normal', color: tone.fg, borderRadius: 1,
@@ -47,6 +51,14 @@ export default function NodePolicyStatusRow({ node, now, variant = 'block', onLi
     </Stack>
     {variant === 'block' && <Typography variant="caption" color="text.secondary">{t(`${P}kind_${['psp', '3xui', 'sui'].includes(node.kind) ? node.kind : 'other'}`)} · {node.engine ?? '—'} · {node.agent_version ?? '—'}</Typography>}
     {node.state !== 'none' && <Typography variant="body2" color="text.secondary">{t(`${P}description_${prolonged ? 'pending_long' : node.state}`)}</Typography>}
+    {auditAvailable && <Typography variant="body2" color="text.secondary" data-testid={`coverage-collection-${node.panel_id}`}>{t(`${P}collection_${collection}`)}</Typography>}
+    {auditAvailable && node.hits_24h !== null && <Typography variant="body2" data-testid={`coverage-hits-${node.panel_id}`}>{t(`${P}hits_window`, { hours: 24, n: number(node.hits_24h) })}</Typography>}
+    {auditAvailable && loss && (loss.rows > 0 || loss.events > 0 || loss.unmatched > 0) && <Alert severity="warning" sx={{ mt: 1 }} data-testid={`coverage-losses-${node.panel_id}`}>
+      <Typography variant="body2">{t(`${P}loss_incomplete`)}</Typography>
+      {loss.rows > 0 && <Typography variant="body2">{t(`${P}loss_rows`, { n: number(loss.rows) })}</Typography>}
+      {loss.events > 0 && <Typography variant="body2">{t(`${P}loss_events`, { n: number(loss.events) })}</Typography>}
+      {loss.unmatched > 0 && <Typography variant="body2">{t(`${P}loss_unmatched`, { n: number(loss.unmatched) })}</Typography>}
+    </Alert>}
     {node.last_report_at !== null && <Typography variant="body2" color="text.secondary">{t(`${P}reported_at`, { time: dateTime(node.last_report_at) })}</Typography>}
     {variant === 'block' && node.applied_at !== null && <Typography variant="body2">{t(`${P}applied_at`, { time: dateTime(node.applied_at) })}</Typography>}
     {node.pending_since !== null && <Typography variant="body2">{t(`${P}pending_since`, { time: dateTime(node.pending_since) })}</Typography>}

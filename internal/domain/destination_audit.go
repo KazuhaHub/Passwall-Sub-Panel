@@ -34,6 +34,21 @@ type DestAuditPruned struct {
 	Hits, Trial, Usage, Loss, Batches, Budget, Orphans int64
 }
 
+// Loss units stay independent. These are observed panel totals, never a
+// complete account history or a sum of rows and connection events.
+type DestAuditLosses struct {
+	Rows      int64  `json:"rows"`
+	Events    int64  `json:"events"`
+	Unmatched int64  `json:"unmatched"`
+	Scope     string `json:"scope"`
+	Complete  bool   `json:"complete"`
+}
+
+type DestAuditPanelStats struct {
+	Hits   int64
+	Losses DestAuditLosses
+}
+
 // DestHit is one logical destination key after rule-fragment IDs have been
 // mapped to their stable source. Trial keys use UserID and Port zero.
 type DestHit struct {

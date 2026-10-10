@@ -145,6 +145,7 @@ type App struct {
 	destCompiler         *destpolicy.Compiler
 	destAudit            destinationAuditRunner
 	destAuditMaintenance ports.DestAuditMaintenanceRepo
+	destAuditRead        ports.DestAuditReadRepo
 	destAuditCtx         context.Context
 	destAuditCancel      context.CancelFunc
 	destAuditStart       sync.Once
@@ -620,6 +621,7 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 		destDefinitions:      destDefinitions,
 		destCompiler:         destCompiler,
 		destAuditMaintenance: repos.DestAuditMaintenance,
+		destAuditRead:        repos.DestAuditRead,
 		destAudit:            destAudit, destAuditCtx: auditCtx, destAuditCancel: auditCancel,
 		destTagMembers: groupSvc,
 	}
