@@ -2,6 +2,7 @@ package sqlstore
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -29,7 +30,7 @@ func legalCollectionNode(t *testing.T, db *gorm.DB, name, mode string, rules []p
 	}
 	now := time.Now().UTC()
 	agentID := fmt.Sprintf("agt_legal_collection_%d", p.ID)
-	a := nodeAgentRow{AgentID: agentID, PanelID: p.ID, Epoch: 1, CredentialSHA256: "private-agent-credential", ObservedCoreEngine: "xray",
+	a := nodeAgentRow{AgentID: agentID, PanelID: p.ID, Epoch: 1, CredentialSHA256: fmt.Sprintf("%x", sha256.Sum256([]byte("private-agent-credential-"+agentID))), ObservedCoreEngine: "xray",
 		ObservedCapabilities: jsonStrings{protocol.CapabilityDestinationPolicy, "audit.hits.v1", "audit.usage.v1"}, LastSeen: &now}
 	if err := db.Create(&a).Error; err != nil {
 		t.Fatal(err)
