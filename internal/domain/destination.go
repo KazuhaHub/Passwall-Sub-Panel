@@ -139,12 +139,20 @@ type DestExemption struct {
 
 // DestUserAccess contains account metadata and observed hit history.
 type DestUserAccess struct {
-	UPN           string
-	Group         *DestUserAccessGroup
-	Exemption     *DestExemption
-	CreatedByUPN  *string
-	HitsAvailable *bool
-	RecentHits    *DestRecentHits
+	UPN                string
+	Group              *DestUserAccessGroup
+	Exemption          *DestExemption
+	CreatedByUPN       *string
+	HitsAvailable      *bool
+	RecentHits         *DestRecentHits
+	UsageAvailable     *bool
+	UsageNodes         []DestUsageNode
+	UsageRetentionDays int
+}
+
+type DestUsageNode struct {
+	PanelID int64  `json:"panel_id"`
+	Name    string `json:"name"`
 }
 
 type DestUserAccessGroup struct {

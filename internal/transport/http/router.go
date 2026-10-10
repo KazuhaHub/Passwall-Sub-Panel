@@ -82,6 +82,7 @@ type Deps struct {
 	DestinationTest           func(context.Context, destpolicy.DestinationTestInput) (destpolicy.DestinationTestResult, error)
 	DestinationStatus         func(context.Context) (destpolicy.DestinationStatus, error)
 	DestinationHits           func(context.Context, domain.DestHitQuery) (domain.DestHitPage, error)
+	DestinationUsage          func(context.Context, domain.DestUsageQuery) (domain.DestUsagePage, error)
 	// GeoRecords is the read side of the concurrent-location detector, the
 	// same rows the traffic poll writes each cycle. Optional: a deployment
 	// without it gets a 503 from the endpoint rather than an empty list, so
@@ -865,7 +866,12 @@ func NewRouter(d Deps) stdhttp.Handler {
 		adminGroup.DELETE("/dest/exemptions/:user_id", destinationExemptions.Delete)
 		destinationExceptions := handler.NewAdminDestinationExceptionsHandler(d.DestinationExceptions)
 		adminGroup.POST("/dest/exceptions", destinationExceptions.Create)
-		destinationUsers := handler.NewAdminDestinationUsersHandler(d.DestinationUserAccess)
+		destinationUsage := handler.NewAdminDestinationUsageHandler(d.DestinationUsage, nil)
+		if d.Audit != nil {
+			destinationUsage = handler.NewAdminDestinationUsageHandler(d.DestinationUsage, d.Audit)
+		}
+		adminGroup.GET("/dest/usage", destinationUsage.Get)
+		destinationUsers := handler.NewAdminDestinationUsersHandler(d.DestinationUserAccess, destinationUsage)
 		adminGroup.GET("/dest/users/:id", destinationUsers.Get)
 		destinationControls := handler.NewAdminDestinationControlsHandler(d.DestinationControls)
 		adminGroup.POST("/dest/publish", destinationControls.Publish)

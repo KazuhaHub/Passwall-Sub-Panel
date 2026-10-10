@@ -590,7 +590,17 @@
       "hits_empty_other": "No hits in the past {{days}} days",
       "hits_all": "View all records",
       "hits_unavailable": "None of this account’s nodes currently record hits",
-      "hits_stale": "Showing the previous hit summary; refresh failed."
+      "hits_stale": "Showing the previous hit summary; refresh failed.",
+      "usage_title": "Website usage",
+      "usage_show": "Show website usage",
+      "usage_range": "Website usage time range",
+      "usage_audited": "Viewing is recorded in the audit log",
+      "usage_ip_help": "Connections made using an IP address are recorded only as (ip).",
+      "usage_loading": "Loading website usage",
+      "usage_failed": "Could not read website usage. Click to retry.",
+      "usage_empty": "No records in this time range",
+      "usage_unavailable": "None of this account’s nodes record website usage",
+      "usage_detail": "Connections, not bandwidth · retained for {{days}} days · only nodes recording usage: {{nodes}}"
     },
     "test": {
       "title": "Test destination",

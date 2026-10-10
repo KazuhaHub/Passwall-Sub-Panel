@@ -148,6 +148,7 @@ type App struct {
 	destAuditRead        ports.DestAuditReadRepo
 	destHitsRead         ports.DestHitReadRepo
 	destUserHitsRead     ports.DestUserHitReadRepo
+	destUsageRead        ports.DestUsageReadRepo
 	destRiskRead         ports.DestRiskReadRepo
 	destAuditCtx         context.Context
 	destAuditCancel      context.CancelFunc
@@ -628,6 +629,7 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 		destAuditRead:        repos.DestAuditRead,
 		destHitsRead:         repos.DestHitsRead,
 		destUserHitsRead:     repos.DestUserHitsRead,
+		destUsageRead:        repos.DestUsageRead,
 		destRiskRead:         repos.DestRiskRead,
 		destAudit:            destAudit, destAuditCtx: auditCtx, destAuditCancel: auditCancel,
 		destTagMembers: groupSvc,
@@ -809,6 +811,7 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 		DestinationTest:           a.destinationTest,
 		DestinationStatus:         a.destinationStatus,
 		DestinationHits:           a.destinationHits,
+		DestinationUsage:          a.destinationUsage,
 		GeoRecords:                geoStreaks,
 		// The risk view's rows. Optional, so leaving it out would compile —
 		// TestBuildWiresTheRiskSignals reads it through the assembled router.

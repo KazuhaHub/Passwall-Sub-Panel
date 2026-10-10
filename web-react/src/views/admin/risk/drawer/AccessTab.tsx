@@ -10,6 +10,8 @@ import { agoText } from '@/utils/riskCenter'
 import AddExemptionDialog from '../../accessControl/sheets/AddExemptionDialog'
 import PendingActionGuard from '../../accessControl/PendingActionGuard'
 import RecentHits from './RecentHits'
+import WebsiteUsage from './WebsiteUsage'
+import { scopeKey } from '@/query/session'
 import { destinationError } from '../../accessControl/errors'
 import { cancelExemptionCopy } from '../../accessControl/confirmCopy'
 const P = 'admin:access_control.account.'
@@ -46,6 +48,9 @@ export default function AccessTab({ userId, upn, onBusyChange }: { userId: numbe
         </Stack> : <Stack direction="row" sx={{ alignItems: 'center', gap: 1, flexWrap: 'wrap' }}><Typography variant="body2">{t(`${P}not_exempt`)}</Typography><Button disabled={busy} sx={{ minWidth: 44, minHeight: 44 }} onClick={() => setEditor(true)}>{t(`${P}add`)}</Button></Stack>}
       </Box>
       {data.recent_hits && data.hits_available !== null && <RecentHits userId={userId} hits={data.recent_hits} available={data.hits_available} disabled={busy} stale={!!query.error} />}
+      {!query.error && data.usage_available !== null && data.usage_nodes !== null && data.usage_retention_days !== undefined && <WebsiteUsage
+        key={`${scopeKey(scope)}:${userId}:${data.usage_available}:${data.usage_retention_days}:${JSON.stringify(data.usage_nodes)}`}
+        userId={userId} available={data.usage_available} nodes={data.usage_nodes} retention={data.usage_retention_days} disabled={busy} />}
     </>}
     {editor && <AddExemptionDialog userId={userId} upn={upn} onClose={() => setEditor(false)} />}
   </Stack>

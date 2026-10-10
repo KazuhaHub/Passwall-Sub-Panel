@@ -44,10 +44,8 @@ func TestBuildDestinationUserAccessReturnsGroupAndExemptionWithoutUsageData(t *t
 	if err := json.Unmarshal(w.Body.Bytes(), &fields); err != nil {
 		t.Fatal(err)
 	}
-	for _, key := range []string{"usage_available", "usage_nodes"} {
-		if string(fields[key]) != "null" {
-			t.Fatalf("stage-4 field %s must be present and null", key)
-		}
+	if string(fields["usage_available"]) != "false" || string(fields["usage_nodes"]) != "[]" || string(fields["usage_retention_days"]) != "7" {
+		t.Fatal("inactive usage must expose availability/retention without reading usage")
 	}
 	if string(fields["hits_available"]) != "false" || string(fields["recent_hits"]) == "null" {
 		t.Fatal("account hit telemetry must be present without pretending collection has started")
@@ -67,7 +65,7 @@ func TestBuildDestinationUserAccessReturnsGroupAndExemptionWithoutUsageData(t *t
 	for _, tc := range []struct {
 		path   string
 		status int
-	}{{"users/0", 400}, {"users/not-an-id", 400}, {"users/9223372036854775807", 404}, {path + "?usage=24h", 400}} {
+	}{{"users/0", 400}, {"users/not-an-id", 400}, {"users/9223372036854775807", 404}, {path + "?usage=24h", 200}, {path + "?usage=8d", 400}} {
 		if got := destinationListRequest(t, a, token, "GET", tc.path, nil); got.Code != tc.status {
 			t.Fatalf("%s HTTP=%d, want %d", tc.path, got.Code, tc.status)
 		}

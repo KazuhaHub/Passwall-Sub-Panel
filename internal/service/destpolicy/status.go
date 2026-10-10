@@ -43,6 +43,7 @@ type DestinationNodeStatus struct {
 	Collect              domain.AuditCollect         `json:"collect"`
 	CollectEffective     string                      `json:"collect_effective"`
 	Collecting           bool                        `json:"collecting"`
+	UsageCollecting      bool                        `json:"-"`
 	State                string                      `json:"state"`
 	FallbackReason       string                      `json:"fallback_reason"`
 	FallbackExhausted    bool                        `json:"fallback_exhausted"`
@@ -163,6 +164,7 @@ func BuildDestinationStatus(current domain.DestStatusContext, minSeconds, pollSe
 			}
 		}
 		n.Collecting = NeedsCollectionProof(p, poll, now) && p.Facts.Hits && p.Facts.Revision == p.CollectRevision && p.Facts.Collect == n.CollectEffective
+		n.UsageCollecting = NeedsCollectionProof(p, poll, now) && n.CollectEffective == "hits_and_usage" && p.Facts.Revision == p.CollectRevision && p.Facts.Collect == n.CollectEffective
 		result.Nodes = append(result.Nodes, n)
 		result.Totals[n.State]++
 		result.Totals["total"]++
