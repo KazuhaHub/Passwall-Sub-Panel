@@ -2191,6 +2191,24 @@ instead of overflowing. The same private, consistent read snapshot includes
 only trial loss counters from current member panels and panels with historical
 records for this group. Rows, events and unmatched events remain separate;
 `dropped_in_range` mirrors rows, and losses remain panel-scoped and incomplete.
-Any storage or cancellation failure withholds the entire result. This narrow
-repository is wired into the application; the retention-clamped HTTP report,
-current-list coverage marking and report UI are still pending.
+Any storage or cancellation failure withholds the entire result.
+
+Administrators can read this report at
+`GET /api/admin/dest/groups/:group_id/trial-report?days=7`. The group ID and days
+must be canonical positive integers; unknown or duplicate query fields are
+rejected. The default is seven days, clamped on every request to the current
+effective trial retention. The endpoint requires a real group and returns
+`effective_days`, all `items:{site,count,last_at,added}`, `dropped_in_range` and
+`losses`. Responses use `Cache-Control: no-store`; operators and ordinary users
+cannot invoke it. Missing dependencies and read failures return unavailable,
+without private driver details or partial sites.
+
+`added` is computed from the group's current selected and owned lists, including
+last-good fetched content after a refresh failure. Only a `domain:` suffix that
+covers the supplied site and all its subdomains proves this flag. Exact-host and
+arbitrary regular-expression matches cannot establish whole-site coverage from
+folded telemetry and remain unmarked. `(ip)` is never marked added: it cannot
+identify an address or CIDR to allow. Closing the group retains its report and
+owned-list history while normal retention still applies. The report UI and the
+remaining group overview, preview, readiness and transition HTTP workflow are
+still pending.

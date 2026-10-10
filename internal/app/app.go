@@ -161,6 +161,7 @@ type App struct {
 	destExceptions       *destpolicy.ExceptionManager
 	destControls         *destpolicy.Controls
 	destGroups           *destpolicy.GroupAdministrator
+	destGroupTrial       *destpolicy.GroupTrialReporter
 	syncTasks            ports.SyncTaskRepo
 	// trafficRepo / nodeTraffic kept for the retention cron — PruneBefore is
 	// outside traffic.Service's surface (it's a maintenance concern, not a
@@ -655,6 +656,19 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 		userSvc.ResyncGroupMembersInBackground(groupID)
 	})
 	a.destGroups.SetOperationGate(a.operationGate)
+	a.destGroupTrial = destpolicy.NewGroupTrialReporter(repos.Group.GetByID, a.destDefinitions.ReadDefinitions, func(ctx context.Context, q domain.DestGroupTrialQuery) (domain.DestGroupTrialData, error) {
+		if a.destGroupTrialRead == nil {
+			return domain.DestGroupTrialData{}, domain.ErrUnavailable
+		}
+		return a.destGroupTrialRead.ReadDestinationGroupTrial(ctx, q)
+	}, func(ctx context.Context) (int, error) {
+		settings, err := a.settings.Load(ctx, ports.UISettings{})
+		if err != nil {
+			return 0, err
+		}
+		return settings.DestinationSettings().EffectiveTrialRetentionDays(), nil
+	})
+	a.destGroupTrial.SetOperationGate(a.operationGate)
 	dispatcher := &asyncDispatcher{ctx: bgCtx, wg: &a.bgWG, gate: a.operationGate}
 	// Wire traffic.Service into the panel-wide WaitGroup. Its async
 	// floor-push + quota-event email goroutines (`safego.GoTracked`)
@@ -820,6 +834,7 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 		DestinationTest:           a.destinationTest,
 		DestinationStatus:         a.destinationStatus,
 		DestinationHits:           a.destinationHits,
+		DestinationGroupTrial:     a.destGroupTrial.Read,
 		DestinationUsage:          a.destinationUsage,
 		GeoRecords:                geoStreaks,
 		// The risk view's rows. Optional, so leaving it out would compile —
