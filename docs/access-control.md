@@ -2155,3 +2155,15 @@ appends preserve existing content; duplicates keep versions and generation.
 Late failures roll back both contents and generation and return no commit ID.
 Ordinary users and operators cannot invoke this route. The remaining group
 workflow and UI, and this candidate's Linux runtime checks, remain open.
+
+The group-preview foundation reads current default mihomo/sing-box templates,
+using the same template repository as subscription rendering. Its DNS extraction
+selects mihomo HTTPS nameserver-policy entries with a proxy-group suffix and
+sing-box HTTPS servers referenced by DNS rules without `detour: direct`.
+Bootstrap, proxy-server DNS, unused/final-only sing-box servers and literal IPs
+are excluded. Hostnames are normalized, deduplicated and sorted without DNS I/O;
+malformed or unresolved selected DNS inputs yield no partial suggestions.
+Current shipped templates yield `dns.alidns.com` and
+`l9f26nnn5d.cloudflare-gateway.com` under these rules. This is internal preview
+preparation; the group preview endpoint and its manual-entry fallback UI remain
+pending, and no base list is automatically written by this reader.
