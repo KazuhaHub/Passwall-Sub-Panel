@@ -78,8 +78,8 @@ func TestBuildLegalCollectionTracksAppliedPolicyAndInvalidatesPublicETag(t *test
 		t.Fatal(err)
 	}
 	etag = check(etag, []domain.LegalAccessCollection{{Kind: "hits", Nodes: 1, RetentionDays: 43}})
-	if w := destinationListRequest(t, f.a, token, "PUT", "settings", map[string]any{"dest_hit_retention_days": 44}); w.Code != http.StatusOK {
-		t.Fatalf("retention update HTTP=%d", w.Code)
+	if w := destinationListRequest(t, f.a, token, "PUT", "settings", map[string]any{"settings": map[string]any{"dest_hit_retention_days": 44}}); w.Code != http.StatusOK {
+		t.Fatalf("retention update HTTP=%d body=%s", w.Code, w.Body.String())
 	}
 	etag = check(etag, []domain.LegalAccessCollection{{Kind: "hits", Nodes: 1, RetentionDays: 44}})
 	path := fmt.Sprintf("/%d", f.agent.PanelID)
