@@ -576,7 +576,7 @@ func NewRouter(d Deps) stdhttp.Handler {
 		adminGroup.GET("/acme-key-types", certs.ListKeyTypes)
 		adminGroup.PUT("/nodes/:id/cert-source", certs.SetNodeCertSource)
 
-		groups := handler.NewAdminGroupHandler(d.Group, d.User, d.Repos.User)
+		groups := handler.NewAdminGroupHandler(d.Group, d.User, d.Repos.User, d.Repos.DestGroupModes)
 		// Group CRUD shapes who can see which nodes — admin-only structure.
 		// Operators need to read groups to pick one when creating a user.
 		staffGroup.GET("/groups", groups.List)

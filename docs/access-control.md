@@ -2126,6 +2126,20 @@ The drawer fetches website usage only on an explicit click. Ranges are 24 hours
 and `min(7, retention)` days, deduplicated at one day. Results stay in component
 state, outside URLs and shared query caches, and are discarded on account/session,
 coverage or retention changes, read errors, tab exit and drawer close. Connections
-to IP addresses are shown as `(ip)`. Local component tests and a production build
-cover this path; new HTTP/runtime cases still require this candidate's Linux CI.
+to IP addresses are shown as `(ip)`. Candidate `63a4e2dd` passed the complete
+[Test workflow](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/38054754326),
+including HTTP/audit cases, SQLite/race, MySQL, PostgreSQL and the full Linux web
+suite. The local full web run had a native worker crash; only its focused tests,
+production build and lint passed locally.
 Browser and VM/load acceptance remain open, as does the rest of the final plan.
+
+Stage 5 starts with the staff-readable group-list summary. `GET /api/admin/groups`
+adds the read-only `dest_mode` field (`open`, `allowlist_trial` or
+`allowlist_enforce`). Its narrow repository port selects only group ID, mode and
+stage for the requested page, without loading private list IDs or contents.
+Missing mode rows mean open; a read error or inconsistent stored mode returns
+unavailable instead of a partial or fabricated open summary. Operators see a
+noninteractive allowlist badge and make no destination-list request. Ordinary
+group saves do not change destination modes, owned lists or their generation.
+The administrator group workflow, preview, readiness, trial report and remaining
+allowlist UI are still pending; the badge alone does not enable allowlists.

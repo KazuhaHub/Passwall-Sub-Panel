@@ -21,22 +21,24 @@ type AdminGroupHandler struct {
 	group *group.Service
 	user  *user.Service
 	users ports.UserRepo
+	modes ports.DestGroupModeReadRepo
 }
 
-func NewAdminGroupHandler(groupSvc *group.Service, userSvc *user.Service, users ports.UserRepo) *AdminGroupHandler {
-	return &AdminGroupHandler{group: groupSvc, user: userSvc, users: users}
+func NewAdminGroupHandler(groupSvc *group.Service, userSvc *user.Service, users ports.UserRepo, modes ports.DestGroupModeReadRepo) *AdminGroupHandler {
+	return &AdminGroupHandler{group: groupSvc, user: userSvc, users: users, modes: modes}
 }
 
 // ---- DTOs ----
 
 type groupDTO struct {
-	ID         int64         `json:"id"`
-	Slug       string        `json:"slug"`
-	Name       string        `json:"name"`
-	TagFilter  tagFilterDTO  `json:"tag_filter"`
-	Layout     domain.Layout `json:"layout"`
-	Remark     string        `json:"remark,omitempty"`
-	Require2FA bool          `json:"require_2fa"`
+	DestMode   domain.DestGroupAccessMode `json:"dest_mode,omitempty"`
+	ID         int64                      `json:"id"`
+	Slug       string                     `json:"slug"`
+	Name       string                     `json:"name"`
+	TagFilter  tagFilterDTO               `json:"tag_filter"`
+	Layout     domain.Layout              `json:"layout"`
+	Remark     string                     `json:"remark,omitempty"`
+	Require2FA bool                       `json:"require_2fa"`
 	// The group's entitlement policy every member inherits unless they
 	// override it. null = the group states nothing, which resolves to
 	// unlimited — distinct from 0, which states "uncapped" explicitly. The
@@ -106,11 +108,26 @@ func (h *AdminGroupHandler) List(c *gin.Context) {
 	for i, g := range groups {
 		ids[i] = g.ID
 	}
+	if h.modes == nil {
+		respondPublicError(c, domain.ErrUnavailable)
+		return
+	}
+	modes, err := h.modes.ReadDestinationGroupModes(c.Request.Context(), ids)
+	if err != nil {
+		respondPublicError(c, domain.ErrUnavailable)
+		return
+	}
 	counts, _ := h.group.CountMembersByGroups(c.Request.Context(), ids)
 	out := make([]groupDTO, len(groups))
 	for i, g := range groups {
 		out[i] = toGroupDTO(g)
 		out[i].Members = counts[g.ID]
+		mode, ok := modes[g.ID]
+		if !ok || mode != domain.DestGroupAccessOpen && mode != domain.DestGroupAccessTrial && mode != domain.DestGroupAccessEnforce {
+			respondPublicError(c, domain.ErrUnavailable)
+			return
+		}
+		out[i].DestMode = mode
 	}
 	c.JSON(http.StatusOK, pagedEnvelope(out, total, p))
 }

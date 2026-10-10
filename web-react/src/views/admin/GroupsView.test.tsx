@@ -38,6 +38,28 @@ beforeEach(() => vi.clearAllMocks())
 afterEach(cleanup)
 
 describe('GroupsView', () => {
+  it.each(['allowlist_trial', 'allowlist_enforce'])('shows operators the %s badge without reading private lists', async (destMode) => {
+    useAuthStore.setState({ role: 'operator', userId: 2, hasToken: true })
+    const group = { id: 5, slug: 'team', name: 'Team', tag_filter: { all: true, tags: [] }, members: 0 }
+    api.get.mockImplementation(async (url: string) => {
+      if (url === '/admin/groups') return { data: { items: [
+        { ...group, dest_mode: destMode },
+        { ...group, id: 6, slug: 'open', name: 'Open', dest_mode: 'open' },
+        { ...group, id: 7, slug: 'legacy', name: 'Legacy' },
+      ], total: 3, page: 1, page_size: 25 } }
+      if (url === '/admin/nodes') return { data: { items: [], total: 0, page: 1, page_size: 500 } }
+      if (url === '/admin/settings/ui') return { data: {} }
+      throw new Error(`Unexpected GET ${url}`)
+    })
+    mount()
+    expect(await screen.findByText('admin:groups.destination_badge')).toBeTruthy()
+    expect(screen.getAllByText('admin:groups.destination_badge')).toHaveLength(1)
+    expect(screen.queryByRole('button', { name: 'admin:groups.action.edit' })).toBeNull()
+    expect(api.get.mock.calls.some(([url]) => String(url).includes('/dest/'))).toBe(false)
+    expect(api.post).not.toHaveBeenCalled()
+    expect(api.put).not.toHaveBeenCalled()
+  })
+
   it('reports a failed read instead of showing an empty group list', async () => {
     // The mount load had no catch, so a failure raised an unhandled rejection
     // and the table rendered empty — indistinguishable from "no groups exist".
