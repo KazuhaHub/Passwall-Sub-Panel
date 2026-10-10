@@ -2,6 +2,7 @@ package sqlstore
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"reflect"
 	"strings"
@@ -199,5 +200,167 @@ func TestDestAuditControlConversionNotifiesOnlyOnCommittedBackendChange(t *testi
 	}
 	if state := v.get(f.panelID); !state.Available || state.Collect != domain.AuditCollectHits || state.Revision != 1 {
 		t.Fatal("converted node did not become collectable without restart")
+	}
+}
+
+func TestDestAuditControlWarmAndCommittedWriterCannotDeadlockOrLoseNewState(t *testing.T) {
+	repos, r, id := auditControlFixture(t)
+	v := newAuditControlView()
+	seeded, release := make(chan struct{}), make(chan struct{})
+	var seedOnce, releaseOnce sync.Once
+	finish := func() { releaseOnce.Do(func() { close(release) }) }
+	defer finish()
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+	defer cancel()
+	warmDone := make(chan error, 1)
+	go func() {
+		warmDone <- r.WatchDestinationAuditControls(ctx, func(states []domain.DestAuditControl) {
+			v.update(states)
+			seedOnce.Do(func() {
+				close(seeded)
+				select {
+				case <-release:
+				case <-ctx.Done():
+				}
+			})
+		})
+	}()
+	select {
+	case <-seeded:
+	case <-ctx.Done():
+		t.Fatal("seed did not reach memory observer")
+	}
+	writer := repos.XUIPanel.(interface {
+		UpdateNativeMetadata(context.Context, int64, *string, *string, *domain.PanelUpdateChannel, *domain.AuditCollect) error
+	})
+	writeDone := make(chan error, 1)
+	off := domain.AuditCollectOff
+	go func() { writeDone <- writer.UpdateNativeMetadata(ctx, id, nil, nil, nil, &off) }()
+	for {
+		var row xuiPanelRow
+		if err := r.privateDB(ctx).Select("id", "audit_collect_revision").First(&row, id).Error; err != nil {
+			t.Fatal("writer retained DB connection while waiting for seed observer")
+		}
+		if row.AuditCollectRevision == 2 {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatal("setting transaction could not commit during cache seed")
+		case <-time.After(time.Millisecond):
+		}
+	}
+	select {
+	case <-writeDone:
+		t.Fatal("setting returned before updating the observer")
+	default:
+	}
+	finish()
+	if err := <-warmDone; err != nil {
+		t.Fatal(err)
+	}
+	if err := <-writeDone; err != nil {
+		t.Fatal(err)
+	}
+	if state := v.get(id); state.Collect != off || state.Revision != 2 {
+		t.Fatal("initial seed overwrote committed newer control")
+	}
+}
+
+type auditDelayedCommitPool struct {
+	gorm.ConnPool
+	committed, release chan struct{}
+}
+
+func (p *auditDelayedCommitPool) BeginTx(ctx context.Context, opts *sql.TxOptions) (gorm.ConnPool, error) {
+	tx, err := p.ConnPool.(gorm.TxBeginner).BeginTx(ctx, opts)
+	if err != nil {
+		return nil, err
+	}
+	return &auditDelayedCommitTx{ConnPool: tx, commit: tx, ctx: ctx, committed: p.committed, release: p.release}, nil
+}
+
+type auditDelayedCommitTx struct {
+	gorm.ConnPool
+	commit             gorm.TxCommitter
+	ctx                context.Context
+	committed, release chan struct{}
+}
+
+func (tx *auditDelayedCommitTx) Commit() error {
+	if err := tx.commit.Commit(); err != nil {
+		return err
+	}
+	close(tx.committed)
+	select {
+	case <-tx.release:
+		return nil
+	case <-tx.ctx.Done():
+		return tx.ctx.Err()
+	}
+}
+func (tx *auditDelayedCommitTx) Rollback() error { return tx.commit.Rollback() }
+
+func TestDestAuditControlLateCreationNoticeCannotResurrectDeletedNativePanel(t *testing.T) {
+	repos, r, _ := auditControlFixture(t)
+	v := newAuditControlView()
+	if err := r.WatchDestinationAuditControls(t.Context(), v.update); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+	defer cancel()
+	committed, release := make(chan struct{}), make(chan struct{})
+	var releaseOnce sync.Once
+	finish := func() { releaseOnce.Do(func() { close(release) }) }
+	defer finish()
+	creator := *repos.NativeAgentProvisioning.(*nativeAgentProvisioningRepo)
+	creator.db = r.db.Session(&gorm.Session{NewDB: true}).WithContext(ctx)
+	creator.db.Statement.ConnPool = &auditDelayedCommitPool{ConnPool: creator.db.Statement.ConnPool, committed: committed, release: release}
+	agent := &domain.NodeAgent{AgentID: "agt_late_created_control", CredentialSHA256: strings.Repeat("c", 64), DesiredCoreVersion: "26.6.27"}
+	panel := &domain.XUIPanel{Kind: domain.PanelKindPSP, Name: "late-created-control", URL: "psp://" + agent.AgentID}
+	created := make(chan error, 1)
+	go func() { created <- creator.Create(ctx, panel, agent) }()
+	select {
+	case <-committed:
+	case <-ctx.Done():
+		t.Fatal("creation did not commit")
+	}
+	var row xuiPanelRow
+	if err := r.privateDB(ctx).Select("id").Where("url = ?", panel.URL).First(&row).Error; err != nil {
+		t.Fatal("committed create did not release DB connection")
+	}
+	if err := repos.NativeAgentProvisioning.DeleteConverged(ctx, row.ID); err != nil {
+		t.Fatal(err)
+	}
+	finish()
+	if err := <-created; err != nil {
+		t.Fatal(err)
+	}
+	if v.get(row.ID).Available {
+		t.Fatal("delayed creation notification restored a deleted panel")
+	}
+}
+
+func TestDestAuditControlUnreadablePostCommitCreationInvalidatesWithoutRetryableCRUD(t *testing.T) {
+	repos, r, _ := auditControlFixture(t)
+	v := newAuditControlView()
+	if err := r.WatchDestinationAuditControls(t.Context(), v.update); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.db.Callback().Query().Before("gorm:query").Register("audit_control_postcommit_read_fault", func(tx *gorm.DB) {
+		if tx.Statement.Table == "xui_panels" {
+			tx.AddError(errors.New("private SQL and credentials"))
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = r.db.Callback().Query().Remove("audit_control_postcommit_read_fault") })
+	agent := &domain.NodeAgent{AgentID: "agt_unreadable_created_control", CredentialSHA256: strings.Repeat("d", 64), DesiredCoreVersion: "26.6.27"}
+	panel := &domain.XUIPanel{Kind: domain.PanelKindPSP, Name: "unreadable-created-control", URL: "psp://" + agent.AgentID}
+	if err := repos.NativeAgentProvisioning.Create(t.Context(), panel, agent); err != nil || panel.ID == 0 {
+		t.Fatal("postcommit read error encouraged retrying committed create")
+	}
+	if v.get(panel.ID).Available {
+		t.Fatal("unreadable committed control failed open")
 	}
 }
