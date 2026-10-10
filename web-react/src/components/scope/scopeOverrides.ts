@@ -129,6 +129,8 @@ export const SCOPE_KEYS: ScopeKeyMeta[] = [
   { cat: 'risk', key: 'risk.devices_off', type: 'risk', name: 'devices_off', kind: 'bool', field: 'risk_devices_off', labelKey: 'risk_devices_off', def: '关闭：设备数' },
   { cat: 'risk', key: 'risk.usage_shift_off', type: 'risk', name: 'usage_shift_off', kind: 'bool', field: 'risk_usage_shift_off', labelKey: 'risk_usage_shift_off', def: '关闭：用量变化' },
   { cat: 'risk', key: 'risk.login_country_off', type: 'risk', name: 'login_country_off', kind: 'bool', field: 'risk_login_country_off', labelKey: 'risk_login_country_off', def: '关闭：登录国家' },
+  { cat: 'risk', key: 'risk.dest_block_off', type: 'risk', name: 'dest_block_off', kind: 'bool', field: 'risk_dest_block_off', labelKey: 'risk_dest_block_off', def: '关闭：访问拦截' },
+  { cat: 'risk', key: 'risk.dest_block_threshold', type: 'risk', name: 'dest_block_threshold', kind: 'int', field: 'risk_dest_block_threshold', labelKey: 'risk_dest_block_threshold', def: '访问拦截标记阈值', unsetValue: '20', hintKey: 'admin:settings.risk.dest_block_threshold_hint' },
   { cat: 'risk', key: 'risk.min_days', type: 'risk', name: 'min_days', kind: 'int', field: 'risk_min_days', labelKey: 'risk_min_days', def: '常驻天数', unsetValue: '3', hintKey: 'admin:settings.risk.min_days_hint' },
   { cat: 'risk', key: 'risk.max_devices', type: 'risk', name: 'max_devices', kind: 'int', field: 'risk_max_devices', labelKey: 'risk_max_devices', def: '设备上限', unsetValue: '3', hintKey: 'admin:settings.risk.max_devices_hint' },
   { cat: 'risk', key: 'risk.usage_ratio', type: 'risk', name: 'usage_ratio', kind: 'float', field: 'risk_usage_ratio', labelKey: 'risk_usage_ratio', def: '用量倍数', unsetValue: '3', hintKey: 'admin:settings.risk.usage_ratio_hint' },

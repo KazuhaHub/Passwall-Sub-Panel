@@ -37,6 +37,8 @@ function sig(kind: string, state: RiskSignal['state'], over: Partial<RiskSignal>
 
 // One evidence body per kind, carrying every field a code's sentence reads.
 const evidence: Record<RiskKind, object> = {
+  dest_block: { v: 1, window_hours: 24, threshold: 20, total: 37, nodes: 2, by_source: [], coverage_complete: false,
+    losses: { rows: 3, events: 7, unmatched: 2, complete: false, scope: 'panel' } },
   sub_spread: {
     v: 1, window_days: 2, window_start: '2026-09-18', retention_days: 2, min_days: 3, min_placed_pct: 50,
     tolerance: 1, country: 'CN', groups: 2, groups_all: 3, provinces: [], identities: [], foreign: [],

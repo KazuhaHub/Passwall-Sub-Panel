@@ -296,7 +296,7 @@ export function RecordDetail({ rec, sentence = true }: { rec: FlagRecord; senten
       )}
       {risk && (
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5, fontSize: 13 }}>
-          <RiskKindEvidence kind={rec.source} evidence={rec.params} />
+          <RiskKindEvidence kind={rec.source} evidence={rec.params} userID={rec.user_id} />
         </Box>
       )}
       {rows.length > 0 && (

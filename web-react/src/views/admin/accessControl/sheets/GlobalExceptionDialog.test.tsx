@@ -16,7 +16,7 @@ vi.mock('@/components/ConfirmHost', () => ({ confirm: confirmation }))
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key }) }))
 import GlobalExceptionDialog from './GlobalExceptionDialog'
 const P = 'admin:access_control.exception.'
-beforeEach(() => { vi.clearAllMocks(); useAuthStore.setState({ userId: 42, role: 'admin', authEpoch: 5 }); api.post.mockResolvedValue({ data: { policy_id: 12, list_id: 7, entry: 'domain:example.test', created: { policy_id: 12, list_id: 7 } } }); api.get.mockResolvedValue({ data: { group: null, exemption: null } }); confirmation.mockResolvedValue(false) })
+beforeEach(() => { vi.clearAllMocks(); useAuthStore.setState({ userId: 42, role: 'admin', authEpoch: 5 }); api.post.mockResolvedValue({ data: { policy_id: 12, list_id: 7, entry: 'domain:example.test', created: { policy_id: 12, list_id: 7 } } }); api.get.mockResolvedValue({ data: { group: null, exemption: null, hits_available: null, recent_hits: null, usage_available: null, usage_nodes: null } }); confirmation.mockResolvedValue(false) })
 afterEach(cleanup)
 function mount(userId?: number, target = 'sub.example.test') {
   const onClose = vi.fn(), router = createMemoryRouter([{ path: '/', element: <GlobalExceptionDialog target={target} userId={userId} onClose={onClose} /> }])

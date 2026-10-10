@@ -623,6 +623,32 @@ var (
 		"psp_node_policy_status_dropped_total",
 		"Policy status subtrees dropped after decoding, validation or capability binding failed.",
 	)
+	NodeAuditReportTotal = NewCounterPairVec(
+		"psp_node_audit_report_total",
+		"Audit subtrees handled, by bounded kind and outcome. Acceptance does not imply durable storage.",
+		"kind", "outcome",
+	)
+	DestAuditRowsTotal = NewCounterPairVec(
+		"psp_dest_audit_rows_total",
+		"Destination rows stored or estimated lost, by bounded kind and outcome. Receiver losses are best effort and incomplete.",
+		"kind", "outcome",
+	)
+	DestAuditNodeDroppedTotal = NewCounter(
+		"psp_dest_audit_node_dropped_total",
+		"Node-reported dropped events in first committed audit batches; separate from receiver-estimated rows.",
+	)
+	DestAuditNodeUnmatchedTotal = NewCounter(
+		"psp_dest_audit_node_unmatched_total",
+		"Node-reported unmatched events in first committed audit batches; separate from receiver-estimated rows.",
+	)
+	DestAuditLossBufferDroppedTotal = NewCounter(
+		"psp_dest_audit_loss_buffer_dropped_total",
+		"Receiver loss keys not saved because of buffer capacity, retry expiry or forced shutdown. Diagnostic only, never a historical loss estimate.",
+	)
+	DestAuditLossFlushErrorsTotal = NewCounter(
+		"psp_dest_audit_loss_flush_errors_total",
+		"Failed receiver loss flush attempts with increments retained for retry; separate from unsaved loss keys.",
+	)
 	NodeHostReportTotal = NewCounterVec(
 		"psp_node_host_report_total",
 		"Host telemetry reports handled, by outcome.",

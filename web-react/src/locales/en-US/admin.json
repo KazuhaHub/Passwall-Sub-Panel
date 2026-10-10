@@ -1,5 +1,76 @@
 {
   "access_control": {
+    "records": {
+      "title": "Records",
+      "metrics": "Hit totals",
+      "block": "Blocked",
+      "deny": "Allowlist denied",
+      "observe": "Observed",
+      "users": "Accounts involved",
+      "account": "Account",
+      "source": "Policy or group",
+      "panel": "Node",
+      "search": "Search destination",
+      "all": "All",
+      "policies": "Policies",
+      "groups": "Allowlist groups",
+      "deleted": "Deleted",
+      "deleted_policy": "Deleted policy",
+      "deleted_group": "Deleted group",
+      "deleted_account": "Deleted account #{{id}}",
+      "group_level": "Group level",
+      "trial": "Would be denied",
+      "include_trial": "Include allowlist trials",
+      "time": "Time range",
+      "hour": "Past hour",
+      "day": "Past 24 hours",
+      "days": "Past {{days}} days",
+      "custom": "Custom…",
+      "since": "From",
+      "until": "Until",
+      "browser_time": "Browser time · maximum 31 days",
+      "filters": "Filters",
+      "view": "View records",
+      "group_none": "Details",
+      "group_site": "By site",
+      "group_user": "By account",
+      "group_policy": "By policy",
+      "total": "{{count}} items · 1-hour buckets",
+      "refresh": "Refresh",
+      "invalid_range": "Enter a valid start and end time, with the end after the start and no more than 31 days apart.",
+      "failed": "Could not read hit records. Counts are unavailable.",
+      "stale": "Refresh failed. These records may be out of date.",
+      "loading": "Loading hit records",
+      "loss_notice": "Records from related nodes may be incomplete. These node-level totals are not exact losses for the selected account or policy.",
+      "incomplete": "Records may be incomplete. Undelivered telemetry and lost in-memory backlog cannot be reconstructed.",
+      "loss_rows": "{{count}} rows not counted",
+      "loss_events": "{{count}} events dropped by nodes",
+      "loss_unmatched": "{{count}} events could not be matched",
+      "empty": "No hits in this time range. Nodes only record hits when a blocking or observation policy matches.",
+      "empty_filtered": "No hits match these filters in this time range.",
+      "clear": "Clear filters",
+      "retention": "Hit records are retained for {{days}} days",
+      "modify_retention": "Change retention",
+      "first_last": "First {{first}} · last {{last}}",
+      "row_menu": "Record actions",
+      "test": "Test this destination",
+      "add_exception": "Add an allow exception…",
+      "open_account": "Open account",
+      "source_count": "{{count}} policies or groups",
+      "source_count_label": "Policies or groups",
+      "user_count_label": "Accounts involved",
+      "user_count": "{{count}} accounts",
+      "first_page": "Go to first page",
+      "page_empty": "This page has no records. The retained result set may have changed.",
+      "previous": "Previous page",
+      "next": "Next page",
+      "page_size": "Items per page",
+      "period": "Period",
+      "destination": "Rule / destination",
+      "count": "Count",
+      "object": "Object",
+      "recent": "Most recent"
+    },
     "settings": {
       "title": "Data and deployment settings",
       "retention": "Record retention",
@@ -49,6 +120,7 @@
     "subtitle": "Decide which destinations users can access through native nodes.",
     "more": "More access control actions",
     "help": {
+      "records": "Each row summarizes one account's hits on the same destination within an hour. Nodes report recognized domains or IP addresses, not URL paths. Hours and date headings use the panel time zone; custom range inputs use your browser time.\n\nOnly native Xray nodes record hits. Sing-box nodes enforce policies without recording. Source actions are frozen when observed; names may change or become unavailable after deletion.\n\nTelemetry can be lost in memory, queues, transport or storage. Counts are observed lower bounds. Related-node loss totals have separate row/event units and cannot identify exact losses for an account or policy.\n\nSearch text stays outside page URLs and browser history. API requests still contain it; reverse proxies may record API query parameters. PSP's own destination access log omits them.",
       "label": "About {{name}}",
       "policies": "Access control is enforced by nodes; blocked connections are disconnected. The rule library only determines client routing, which users can change themselves. Only PSP native nodes enforce these policies; operators manage 3X-UI and S-UI routing themselves.\n\nRules are evaluated from top to bottom and stop at the first match. After an observation match, later rules do not apply to that connection. Ordering within one action only determines the policy name attributed to the match; place blocking policies that count toward risk above others.\n\nNodes can see the destination (domain or IP), but cannot see URL paths. Policies can be bypassed with ECH, resolving through DoH then connecting directly to an IP, or a client's own encrypted tunnel.\n\nIP ranges apply only to connections initiated with an IP; IPs resolved from domain names do not participate in matching. BT detection only recognizes plaintext handshakes and uTP; encrypted BT and DHT cannot be detected.\n\nRegular expressions are matched individually for every connection and consume resources; the limit is {{max_regexps}}.\n\nEach deployment restarts the node's proxy once and interrupts active connections once. Deployment waits {{seconds}} seconds after the last change; consecutive changes are combined into one deployment.",
       "lists": "Supported formats: plain domains; domain: / full: / keyword: / regexp:; *.x; hosts lines; AdGuard ||x^; Clash rules; IPs and IP ranges. Lines beginning with # are comments. Saving lowercases domains, removes trailing dots, converts international domain names to punycode and aligns IP ranges to their network address.\n\nRemote and category lists refresh every {{hours}} hours. Only changed content is deployed; failed refreshes keep the previous content.\n\nBroad entries (expressions matching almost all domains, keywords shorter than four characters, public suffixes themselves and excessively large IP ranges) are excluded from custom lists and community categories, with a parse report. A remote URL list containing them fails the entire refresh and keeps its previous content. Community categories also keep previous content when filtering leaves no entries; a first download remains unready. Excluded entries are never deployed."
@@ -177,8 +249,8 @@
       "list_pending_detail": "Nodes still execute this policy's other conditions. After the list first downloads successfully, its entries join the next publication.",
       "list_attention": "Not ready",
       "list_empty": "This custom list has no entries and cannot be used in a policy.",
-        "more_conditions": "Additional conditions",
-        "conditions_set": "Set:",
+      "more_conditions": "Additional conditions",
+      "conditions_set": "Set:",
       "cidrs": "CIDRs (one per line)",
       "cidrs_hint": "Only matches connections addressed by IP; resolved domain IPs are not matched and nodes perform no extra DNS lookup.",
       "cidrs_summary": "Only matches connections addressed by IP",
@@ -306,6 +378,15 @@
       "description_offline": "Deployment resumes automatically when the node reports again.",
       "description_paused": "Access control is paused; resuming restores the same policies.",
       "reported_at": "Last report: {{time}}",
+      "collection_off": "Collection is off; retained history follows the retention period.",
+      "collection_unconfirmed": "Current collection is not confirmed by the node.",
+      "collection_hits": "Recording rule hits",
+      "collection_usage": "Recording rule hits and per-site usage",
+      "hits_window": "Past {{hours}} hours: {{n}} hits (aggregated by hour)",
+      "loss_incomplete": "This node has uncounted records; statistics may be incomplete. Observed losses:",
+      "loss_rows": "{{n}} rows lost",
+      "loss_events": "{{n}} events dropped by the node",
+      "loss_unmatched": "{{n}} events could not be parsed",
       "executing_rules": "Executing rules:",
       "quota_unknown": "Rule budget",
       "fallback_members": "Members newly added to a policy's target group during fallback are not subject to that group's block policies on this node.",
@@ -502,7 +583,14 @@
       "not_exempt": "Not exempt",
       "add": "Exempt this account",
       "load_failed": "Could not load this account’s destination access",
-      "expires_at": "Expires {{time}}"
+      "expires_at": "Expires {{time}}",
+      "hits_title_one": "Hits in the past {{days}} day",
+      "hits_title_other": "Hits in the past {{days}} days",
+      "hits_empty_one": "No hits in the past {{days}} day",
+      "hits_empty_other": "No hits in the past {{days}} days",
+      "hits_all": "View all records",
+      "hits_unavailable": "None of this account’s nodes currently record hits",
+      "hits_stale": "Showing the previous hit summary; refresh failed."
     },
     "test": {
       "title": "Test destination",
@@ -588,7 +676,36 @@
       "created": "Created the allow-exception list and policy and added {{entry}}; awaiting publication.",
       "saved": "Added {{entry}}; awaiting publication."
     },
-    "view_account": "View account…"
+    "view_account": "View account…",
+    "collect": {
+      "open": "Set collection mode…",
+      "title": "What should {{node}} record?",
+      "mode": "Collection mode",
+      "modify": "Change collection mode",
+      "hits_24h": "Hits in 24 hours",
+      "view_records": "View records",
+      "off": "Do not record",
+      "hits": "Record rule hits only",
+      "hits_and_usage": "Record hits and site usage",
+      "off_detail": "Enforce policies only. Saving stops new records from being accepted; the node stops collecting at its next sync. Existing history expires under its retention policy.",
+      "hits_detail": "Record accounts, destinations and counts for block, observe and allowlist hits, aggregated by hour and retained for {{hitDays}} days.",
+      "hits_and_usage_detail": "Also record visited primary domains and counts per account and hour, retained for {{usageDays}} days. Usage can only be viewed one account at a time, and viewing is audited. Trial connections also count toward account usage.",
+      "disclosure_hits": "These are connection counts, not traffic volume or a complete browsing log. Allowlist trial hits record groups and primary domains without accounts.",
+      "disclosure_usage": "These are connection counts, not traffic volume or a complete browsing log. With site usage enabled, trial connections also count toward each account.",
+      "sing_box": "sing-box nodes enforce policies without recording.",
+      "engine_unknown": "The node engine is not confirmed; collection mode cannot be changed yet.",
+      "upgrade_hits": "Upgrade this node before it can record rule hits.",
+      "upgrade_usage": "Upgrade this node before it can record site usage.",
+      "legal_disabled": "The privacy and terms page is disabled; users will not be informed",
+      "legal_unknown": "The privacy and terms page status is unconfirmed; check it first",
+      "legal_detail": "Site usage records visited primary domains per account and hour. Publish a privacy policy and enable it in System settings › Privacy and terms so users know what is collected.",
+      "open_legal": "Open privacy and terms settings",
+      "restart": "Saving restarts this node’s proxy once at its next sync.",
+      "usage_reminder": "Visited primary domains will also be recorded per account, retained for {{days}} days.",
+      "loading": "Reading collection settings",
+      "read_failed": "Could not read retention settings or the sync interval. Retry to continue.",
+      "saved": "Saved. {{node}} will restart its proxy once within about {{minutes}} minute(s)."
+    }
   },
   "languagePacks": {
     "title": "Language packs",
@@ -884,6 +1001,8 @@
       "min_days": "Recurring days",
       "min_days_hint": "Days a province or device must appear on within the fetch window (bounded by sub-log retention), counted as calendar days in the panel timezone; at most the window's days.",
       "max_devices": "Device limit",
+      "dest_block_threshold": "Blocked hits required to flag",
+      "dest_block_threshold_hint": "Count matches of blocking policies selected for risk in 24 hours. Half the threshold is suspect. Allowlist denials and observation matches never count; this signal does not suspend accounts.",
       "max_devices_hint": "More recurring devices than this is flagged; only clients that send x-hwid are counted.",
       "usage_ratio": "Usage ratio",
       "usage_ratio_hint": "A day above the daily median of the baseline days (since first use) times this ratio is an over-day; within the judged days, reaching the over-days to flag is flagged and reaching the over-days for suspect is suspect.",
@@ -1677,7 +1796,8 @@
       "sub_spread": "Subscription spread",
       "devices": "Devices",
       "usage_shift": "Usage change",
-      "login_country": "Login country"
+      "login_country": "Login country",
+      "dest_block": "Destination blocking"
     },
     "expand": "Show evidence",
     "collapse": "Hide",
@@ -1747,6 +1867,14 @@
         "learning": "Fewer than {{warmup}} earlier logins; still learning",
         "new_country": "Login from a new country: {{countries}}",
         "known_countries": "Recent logins all came from known countries"
+      },
+      "dest_block": {
+        "signal_off": "Destination blocking risk is off for this account's scope",
+        "no_collector": "No current node has confirmed destination-hit collection for this account",
+        "no_hits": "No destination blocks observed in the last 24 hours; coverage is incomplete",
+        "within": "At least {{total}} destination blocks in the last {{hours}} hours (threshold {{threshold}}); coverage is incomplete",
+        "over_building": "At least {{total}} destination blocks in the last {{hours}} hours, approaching threshold {{threshold}}",
+        "over": "At least {{total}} destination blocks in the last {{hours}} hours (threshold {{threshold}})"
       }
     },
     "code_bare": {
@@ -1774,8 +1902,20 @@
       "login_country": {
         "learning": "Too few earlier logins; still learning",
         "new_country": "Login from a new country"
+      },
+      "dest_block": {
+        "within": "Observed destination blocks below threshold; coverage is incomplete",
+        "over_building": "Observed destination blocks approaching threshold",
+        "over": "Observed destination blocks reached threshold"
       }
-    }
+    },
+    "dest_block_counts": "Last {{hours}} hours: at least {{total}} blocks, threshold {{threshold}}, {{nodes}} current collecting node(s)",
+    "dest_block_policy": "Policy {{source}}",
+    "dest_block_incomplete": "Coverage is incomplete. Counts are observed lower bounds; a low count does not establish safety.",
+    "dest_block_losses": "Related panel block losses (not account totals): {{rows}} rows, {{events}} events, {{unmatched}} unmatched",
+    "dest_block_deleted": "Deleted policy {{source}}",
+    "dest_block_names_unavailable": "Current policy names could not be loaded",
+    "dest_block_open_hits": "View block records"
   },
   "risk_center": {
     "title": "Risk center",
@@ -1908,7 +2048,8 @@
         "devices": "Devices",
         "usage_shift": "Usage change",
         "login_country": "Login country",
-        "review": "Admin review"
+        "review": "Admin review",
+        "dest_block": "Destination blocking"
       },
       "level": {
         "flagged": "Flagged",
@@ -1996,7 +2137,7 @@
       "last_judged": "Last judged {{time}}",
       "stale_verdict": "Not re-judged within the freshness window; not counted for review",
       "suspended_since": "Suspended at {{time}}",
-      "trust_scope": "Trusted: locations, subscription spread and login country are not judged; devices and usage change still are.",
+      "trust_scope": "Trusted: locations, subscription spread and login country are not judged; devices, usage change and destination blocks still are.",
       "online": "Online",
       "last_seen": "Last seen {{time}}",
       "seen_detail": "First seen {{first}} · {{count}} samples",
@@ -2041,7 +2182,7 @@
       "undismiss_title": "Undo dismiss for {{upn}}?",
       "undismiss_message": "The account returns to the queue with its current signals.",
       "trust_title": "Trust {{upn}}?",
-      "trust_message": "Locations, subscription spread and login country are no longer judged for this account, and automatic suspension never applies to it; devices and usage change still are.",
+      "trust_message": "Locations, subscription spread and login country are no longer judged for this account, and automatic suspension never applies to it; devices, usage change and destination blocks still are.",
       "trust_resume": "Also resume proxy service (auto-suspended for locations now)",
       "untrust_title": "Stop trusting {{upn}}?",
       "untrust_message": "From the next check it is judged by its group's policy again.",
@@ -2085,6 +2226,8 @@
         "usage_shift_desc": "Daily usage staying above the account's own baseline.",
         "login_country": "Login country",
         "login_country_desc": "A panel login from a country the subscription fetches never established. No key threshold; warm-up and hold are under Advanced.",
+        "dest_block": "Destination blocking",
+        "dest_block_desc": "Matches in 24 hours against blocking policies selected for risk. Allowlist denials and observation matches never count. This signal only flags an account for review.",
         "data": "Data and refresh",
         "data_desc": "Retention, snapshots and cadence that belong to no single detector; global only.",
         "groups": "Group exceptions",
@@ -2130,7 +2273,13 @@
       "geoip_city": "city level",
       "geoip_country": "countries only",
       "geoip_off": "unavailable",
-      "geoip_open": "Open settings"
+      "geoip_open": "Open settings",
+      "dest_block_selected": "Selected risk policies: {{names}}",
+      "dest_block_none": "No policies count toward risk; this detector cannot trigger",
+      "dest_block_none_detail": "Select Counts as risk on destination policies. Only frozen block hits count; allowlist rejections and observation hits never count. Counts remain observed lower bounds.",
+      "dest_block_read_failed": "The selected policy names are unavailable. Open access control to check them; this does not mean none are selected.",
+      "dest_block_loading": "Loading selected risk policies…",
+      "dest_block_open": "Open access control"
     }
   },
   "logs": {
@@ -3146,6 +3295,8 @@
       "risk_devices_off": "Off: devices",
       "risk_usage_shift_off": "Off: usage change",
       "risk_login_country_off": "Off: login country",
+      "risk_dest_block_off": "Off: destination blocking",
+      "risk_dest_block_threshold": "Destination blocking flag threshold",
       "risk_min_days": "Recurring days",
       "risk_max_devices": "Device limit",
       "risk_usage_ratio": "Usage ratio",
@@ -4522,6 +4673,30 @@
       "psp_sso_claim_silent_total": {
         "label": "Single sign-ins without role or group",
         "desc": "Single sign-ins where role or group rules exist but the identity provider sent none of the attributes they read, counted per kind: one sign-in can count once for each. The existing role and group were kept."
+      },
+      "psp_node_audit_report_total": {
+        "label": "Audit batch receipt",
+        "desc": "Audit subtrees by kind and handling outcome. Acceptance does not imply durable storage, and these counts are incomplete."
+      },
+      "psp_dest_audit_rows_total": {
+        "label": "Destination record rows",
+        "desc": "Stored or estimated lost rows by record kind and outcome. Receiver losses are best effort and incomplete; do not add them to node event counts."
+      },
+      "psp_dest_audit_node_dropped_total": {
+        "label": "Node-reported dropped events",
+        "desc": "Dropped events reported in first committed audit batches. Events are separate from receiver-estimated rows; undelivered node counters are absent."
+      },
+      "psp_dest_audit_node_unmatched_total": {
+        "label": "Node-reported unmatched events",
+        "desc": "Unmatched events reported in first committed audit batches. The unit is events and the counts are incomplete."
+      },
+      "psp_dest_audit_loss_buffer_dropped_total": {
+        "label": "Unsaved loss-statistic keys",
+        "desc": "Panel, hour, kind and reason keys not saved because the loss buffer was full, frozen increments expired or shutdown was forced. Diagnostic only; cannot reconstruct historical lost rows."
+      },
+      "psp_dest_audit_loss_flush_errors_total": {
+        "label": "Loss-statistic flush failures",
+        "desc": "Failed receiver loss flush attempts. Increments remain queued for retry; separate from unsaved key counts."
       }
     },
     "labels": {
@@ -4688,6 +4863,32 @@
       "sso_kind": {
         "role": "Role",
         "group": "Group"
+      },
+      "node_audit_report": {
+        "kind_block": "Blocked",
+        "kind_observe": "Observed",
+        "kind_trial": "Anonymous trial",
+        "kind_usage": "Usage",
+        "kind_unknown": "Unknown",
+        "outcome_accepted": "Accepted",
+        "outcome_oversized": "Oversized",
+        "outcome_invalid": "Invalid",
+        "outcome_no_capability": "Capability missing",
+        "outcome_duplicate_batch": "Duplicate batch",
+        "outcome_queue_full": "Queue full",
+        "outcome_ingest_error": "Ingest failed"
+      },
+      "dest_rows": {
+        "kind_block": "Blocked",
+        "kind_observe": "Observed",
+        "kind_trial": "Anonymous trial",
+        "kind_usage": "Usage",
+        "outcome_stored": "Stored",
+        "outcome_unknown_subject": "Account missing",
+        "outcome_out_of_range": "Outside time window",
+        "outcome_over_budget": "Row budget exceeded",
+        "outcome_collect_off": "Current collection mode disallows",
+        "outcome_stale_collect_revision": "Stale collection revision"
       }
     }
   },

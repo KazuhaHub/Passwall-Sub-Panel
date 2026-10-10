@@ -142,20 +142,22 @@ type settingsDTO struct {
 	// Risk signals (observe only). Capture of the device a subscription
 	// client declares; global only, false = capture on.
 	RiskHWIDCaptureOff bool `json:"risk_hwid_capture_off"`
-	// The four signal switches (negative: false = signal on) and the shared
+	// The five signal switches (negative: false = signal on) and the shared
 	// tolerances, all per-group overridable; see ports.UISettings for why
 	// each exists. 0 in a number means "never configured";
 	// domain.RiskPolicyFromSettings is the one place a stored value is
 	// interpreted, and it repairs nonsense toward NOT accusing (a ratio under
 	// 1.5 is raised, MinDays is clamped to the window, 0 is unset).
-	RiskSubSpreadOff    bool    `json:"risk_sub_spread_off"`
-	RiskDevicesOff      bool    `json:"risk_devices_off"`
-	RiskUsageShiftOff   bool    `json:"risk_usage_shift_off"`
-	RiskLoginCountryOff bool    `json:"risk_login_country_off"`
-	RiskMinDays         int     `json:"risk_min_days"`
-	RiskMaxDevices      int     `json:"risk_max_devices"`
-	RiskUsageRatio      float64 `json:"risk_usage_ratio"`
-	RiskUsageFloorGB    int     `json:"risk_usage_floor_gb"`
+	RiskSubSpreadOff       bool    `json:"risk_sub_spread_off"`
+	RiskDevicesOff         bool    `json:"risk_devices_off"`
+	RiskUsageShiftOff      bool    `json:"risk_usage_shift_off"`
+	RiskLoginCountryOff    bool    `json:"risk_login_country_off"`
+	RiskDestBlockOff       bool    `json:"risk_dest_block_off"`
+	RiskDestBlockThreshold int     `json:"risk_dest_block_threshold"`
+	RiskMinDays            int     `json:"risk_min_days"`
+	RiskMaxDevices         int     `json:"risk_max_devices"`
+	RiskUsageRatio         float64 `json:"risk_usage_ratio"`
+	RiskUsageFloorGB       int     `json:"risk_usage_floor_gb"`
 	// login_country's two thresholds and usage_shift's three, per-group like
 	// the tolerances above and read by the same domain.RiskPolicyFromSettings
 	// (which raises usage_shift's to their floors of 7 and 2 days).
@@ -475,6 +477,8 @@ func settingsToDTO(s ports.UISettings) settingsDTO {
 		RiskDevicesOff:               s.RiskDevicesOff,
 		RiskUsageShiftOff:            s.RiskUsageShiftOff,
 		RiskLoginCountryOff:          s.RiskLoginCountryOff,
+		RiskDestBlockOff:             s.RiskDestBlockOff,
+		RiskDestBlockThreshold:       s.RiskDestBlockThreshold,
 		RiskMinDays:                  s.RiskMinDays,
 		RiskMaxDevices:               s.RiskMaxDevices,
 		RiskUsageRatio:               s.RiskUsageRatio,

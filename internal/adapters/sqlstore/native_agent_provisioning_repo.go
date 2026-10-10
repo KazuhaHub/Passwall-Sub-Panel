@@ -17,7 +17,10 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 )
 
-type nativeAgentProvisioningRepo struct{ db *gorm.DB }
+type nativeAgentProvisioningRepo struct {
+	db    *gorm.DB
+	audit *DestAuditRepo
+}
 
 func (r *nativeAgentProvisioningRepo) Create(ctx context.Context, panel *domain.XUIPanel, agent *domain.NodeAgent) error {
 	return r.create(ctx, panel, agent, nil)
@@ -85,6 +88,9 @@ func (r *nativeAgentProvisioningRepo) create(ctx context.Context, panel *domain.
 	panel.ID = panelRow.ID
 	agent.PanelID = panelRow.ID
 	applyCreatedNodeAgent(agent, agentRow)
+	unlock := r.audit.lockControlPanel(panelRow.ID)
+	defer unlock()
+	r.audit.notifyCurrentControl(ctx, panelRow.ID)
 	return nil
 }
 
@@ -276,7 +282,9 @@ func safeNativeCredentialStorageError(err error) error {
 // agent acknowledged those exact bytes; otherwise deleting its credential
 // could strand a still-serving core outside control-plane reach.
 func (r *nativeAgentProvisioningRepo) DeleteConverged(ctx context.Context, panelID int64) error {
-	return runTransactionWithRetry(ctx, r.db, func(tx *gorm.DB) error {
+	unlock := r.audit.lockControlPanel(panelID)
+	defer unlock()
+	err := runTransactionWithRetry(ctx, r.db, func(tx *gorm.DB) error {
 		var panel xuiPanelRow
 		if err := tx.First(&panel, panelID).Error; err != nil {
 			return wrapNotFound(err)
@@ -387,6 +395,10 @@ func (r *nativeAgentProvisioningRepo) DeleteConverged(ctx context.Context, panel
 		}
 		return nil
 	})
+	if err == nil {
+		r.audit.notifyControl(domain.DestAuditControl{PanelID: panelID})
+	}
+	return err
 }
 
 func requireEmptyConvergedNativeStreams(tx *gorm.DB, agentID string) error {

@@ -18,6 +18,7 @@ import PoliciesTab from './policies/PoliciesTab'
 import NodeCoverageDrawer from './NodeCoverageDrawer'
 import PendingActionGuard, { PendingActionScope } from './PendingActionGuard'
 import ListsTab from './lists/ListsTab'
+import RecordsTab from './records/RecordsTab'
 import ExemptionsSheet from './sheets/ExemptionsSheet'
 import RiskUserDrawer from '../risk/drawer/RiskUserDrawer'
 import TestSheet from './sheets/TestSheet'
@@ -42,7 +43,7 @@ function AccessControlPage({ scope }: { scope: QueryScope }) {
   const user = useDrawerParam('user', { exclusive: ['sheet'], clearOnClose: ['sheet', 'list', 'node_state'] })
   const activeSheet = user.id === null ? sheet.id : null
   const [params, setParams] = useSearchParams(), location = useLocation()
-  const tab = params.get('tab') === 'lists' ? 'lists' : 'policies'
+  const tab = params.get('tab') === 'lists' ? 'lists' : params.get('tab') === 'records' ? 'records' : 'policies'
   const [newListRequest, setNewListRequest] = useState(0)
   const [policyRequest, setPolicyRequest] = useState<{ id: number; token: number } | null>(null)
   const policySequence = useRef(0)
@@ -108,11 +109,12 @@ function AccessControlPage({ scope }: { scope: QueryScope }) {
     {unavailable ? <Alert severity="info">{t(`${P}unwired`)}</Alert> : <>
       <StatusOverview data={status.data} verdict={verdict} failed={!!status.error} refreshing={status.isFetching} readAt={status.dataUpdatedAt} busy={busy} onRetry={() => status.refetch()} onOpenNodes={openNodes} onOpenLists={openLists} onPublish={() => perform()} onPause={perform} />
       <Stack direction="row" sx={{ mb: 2, minWidth: 0, alignItems: 'center' }}>
-        <Tabs value={tab} variant="scrollable" scrollButtons={false} sx={{ flex: '1 1 auto', minWidth: 0 }} onChange={(_, value) => setParams(prev => { const next = new URLSearchParams(prev); next.set('tab', value); return next }, { replace: true, state: location.state })} aria-label={t(`${P}tabs`)}><Tab value="policies" label={t(`${P}policies.title`)} /><Tab value="lists" label={t(`${P}lists.title`)} /></Tabs>
-        <HelpTip key={tab} textKey={tab === 'lists' ? 'admin:access_control.help.lists' : 'admin:access_control.help.policies'} labelKey="admin:access_control.help.label" labelValues={{ name: t(`${P}${tab}.title`) }} textValues={{ max_regexps: definitions.data?.budget.regexps.limit ?? '—', seconds: settings.data?.effective.dest_policy_apply_min_seconds ?? '—', hours: settings.data?.effective.dest_list_refresh_hours ?? '—' }} />
+        <Tabs value={tab} variant="scrollable" scrollButtons={false} sx={{ flex: '1 1 auto', minWidth: 0 }} onChange={(_, value) => setParams(prev => { const next = new URLSearchParams(prev); next.set('tab', value); return next }, { replace: true, state: location.state })} aria-label={t(`${P}tabs`)}><Tab value="policies" label={t(`${P}policies.title`)} /><Tab value="lists" label={t(`${P}lists.title`)} /><Tab value="records" label={t(`${P}records.title`)} /></Tabs>
+        <HelpTip key={tab} textKey={tab === 'lists' ? 'admin:access_control.help.lists' : tab === 'records' ? 'admin:access_control.help.records' : 'admin:access_control.help.policies'} labelKey="admin:access_control.help.label" labelValues={{ name: t(`${P}${tab}.title`) }} textValues={{ max_regexps: definitions.data?.budget.regexps.limit ?? '—', seconds: settings.data?.effective.dest_policy_apply_min_seconds ?? '—', hours: settings.data?.effective.dest_list_refresh_hours ?? '—' }} />
       </Stack>
       {tab === 'policies' && (definitions.data ? <>{definitions.error && <Alert sx={{ mb: 2 }} severity="warning" action={<Button onClick={() => void definitions.refetch()}>{t('common:actions.retry')}</Button>}>{t(`${P}definitions_stale`)}</Alert>}<PoliciesTab data={definitions.data} status={status.data} seconds={settings.data?.effective.dest_policy_apply_min_seconds} onCreateList={createList} onExemptions={() => sheet.open('exemptions')} openRequest={policyRequest} onOpenRequestHandled={consumePolicyRequest} /></> : definitions.error ? <Alert severity="error" action={<Button onClick={() => void definitions.refetch()}>{t('common:actions.retry')}</Button>}>{t(`${P}definitions_failed`)}</Alert> : <Stack spacing={1} aria-busy="true">{[0,1,2,3,4].map(key => <Skeleton key={key} variant="rounded" height={56} />)}</Stack>)}
       <ListsTab active={tab === 'lists'} selectedId={activeSheet === 'list' ? listId : null} onCloseSheet={sheet.close} onOpenList={openList} onOpenPolicy={openPolicy} onSettings={() => openSettings('dest_list_refresh_hours')} onTest={openTest} newListRequest={newListRequest} policies={definitions.data} status={status.data} />
+      {tab === 'records' && <RecordsTab definitions={definitions.data} status={status.data} retentionDays={settings.data?.effective.dest_hit_retention_days || 30} onUser={openUser} onTest={openTest} onSettings={() => openSettings('dest_hit_retention_days')} />}
     </>}
     {activeSheet === 'nodes' && <NodeCoverageDrawer status={status.data} loading={status.isPending} failed={!!status.error} refreshing={status.isFetching} onRetryRead={() => status.refetch()} onClose={sheet.close} onLists={() => openLists(false)} onSettings={() => openSettings('dest_policy_apply_min_seconds')} applySeconds={settings.data?.effective.dest_policy_apply_min_seconds} />}
     {activeSheet === 'exemptions' && <ExemptionsSheet onClose={sheet.close} onOpenUser={openUser} etaMs={status.data?.apply_eta_ms} />}

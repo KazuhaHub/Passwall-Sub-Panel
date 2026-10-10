@@ -2,12 +2,14 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/metrics"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 )
 
 func TestBuildHourlyCleanupPrunesExpiredDestinationExemptions(t *testing.T) {
@@ -72,6 +74,118 @@ func TestBuildHourlyCleanupPrunesExpiredDestinationExemptions(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatal("production hourly cleanup left the expired destination exemption stored")
+}
+
+func seedDestinationCleanupRows(t *testing.T, f destinationPolicyFixture) {
+	t.Helper()
+	now := time.Now().UTC()
+	old := now.Add(-31 * 24 * time.Hour).Truncate(time.Hour).UnixMilli()
+	hour := now.Truncate(time.Hour).UnixMilli()
+	for _, row := range []struct {
+		user   int64
+		source string
+		hour   int64
+		dest   string
+		port   int
+	}{
+		{f.user.ID, "p12", old, "expired.test", 443},
+		{0, fmt.Sprintf("g%d", f.group.ID), hour, "valid-trial.test", 0},
+		{0, "p12", hour, "invalid-anonymous.test", 0},
+	} {
+		if _, err := f.a.database.ExecContext(t.Context(), "INSERT INTO dest_hits (hour_ms, panel_id, user_id, source, action, dest, port, count, first_at, last_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", row.hour, f.agent.PanelID, row.user, row.source, "observe", row.dest, row.port, 1, time.UnixMilli(row.hour), time.UnixMilli(row.hour+1)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := f.a.database.ExecContext(t.Context(), "INSERT INTO dest_audit_batches (agent_id, batch_id, kind, hour_ms, received_at) VALUES (?, ?, ?, ?, ?)", "", "00000000000000000000000000000001", "receiver_loss", hour, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.a.database.ExecContext(t.Context(), "INSERT INTO dest_audit_batches (agent_id, batch_id, kind, hour_ms, received_at) VALUES (?, ?, ?, ?, ?)", f.agent.AgentID, "00000000000000000000000000000002", "block", old, now.Add(-73*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestBuildPrunesDestRowsThroughHourlyLoopWithoutDeletingTrialOrReceiverMarker(t *testing.T) {
+	f := buildDestinationPolicyFixture(t)
+	if f.a.destAuditMaintenance == nil {
+		t.Fatal("Build did not wire destination audit maintenance")
+	}
+	seedDestinationCleanupRows(t, f)
+	if _, err := f.a.database.ExecContext(t.Context(), "INSERT INTO dest_exemptions (user_id, reason, created_by, created_at) VALUES (?, ?, ?, ?)", 999999, "orphan cleanup fixture", 0, time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	worker := &App{destAuditMaintenance: f.a.destAuditMaintenance, destDefinitions: f.a.destDefinitions, operationGate: f.a.operationGate, settings: f.a.settings}
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan struct{})
+	go func() { defer close(done); worker.runAuditCleanupLoop(ctx) }()
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(3 * time.Second):
+			t.Error("destination cleanup did not stop")
+		}
+	})
+	waitAuditRows(t, f.a, "dest_hits", 1)
+	waitAuditRows(t, f.a, "dest_exemptions", 0)
+	if auditTableCount(t, f.a, "dest_audit_batches") != 1 {
+		t.Fatal("hourly cleanup removed receiver dedup marker or kept expired batch")
+	}
+	if state, err := f.a.destDefinitions.State(t.Context()); err != nil || state.Generation != 1 {
+		t.Fatal("hourly orphan exemption cleanup did not publish its definition change")
+	}
+}
+
+func TestDestinationCleanupSettingsFailureSkipsTTLButStillRemovesOrphansAndExpiredMarkers(t *testing.T) {
+	f := buildDestinationPolicyFixture(t)
+	if f.a.destAuditMaintenance == nil {
+		t.Fatal("Build did not wire destination audit maintenance")
+	}
+	seedDestinationCleanupRows(t, f)
+	worker := &App{destAuditMaintenance: f.a.destAuditMaintenance, operationGate: f.a.operationGate, settings: retentionSettings{err: errors.New("private settings failure")}}
+	worker.pruneDestAudit(t.Context())
+	if auditTableCount(t, f.a, "dest_hits") != 2 || auditTableCount(t, f.a, "dest_audit_batches") != 1 {
+		t.Fatal("settings outage deleted configured history or skipped orphan/fixed retention cleanup")
+	}
+}
+
+type destinationCleanupProbe struct {
+	settings *domain.DestinationSettings
+	calls    int
+	err      error
+}
+
+func (p *destinationCleanupProbe) PruneDestinationAudit(_ context.Context, _ time.Time, s *domain.DestinationSettings) (domain.DestAuditPruned, error) {
+	p.calls++
+	p.settings = s
+	return domain.DestAuditPruned{Hits: 2, Trial: 3, Usage: 4, Loss: 5, Batches: 6, Budget: 7, Orphans: 8}, p.err
+}
+
+func TestDestinationCleanupCountsOnlyCommittedRowsAndHonorsBackendAdmission(t *testing.T) {
+	f := buildDestinationPolicyFixture(t)
+	p := &destinationCleanupProbe{err: errors.New("private storage failure")}
+	a := &App{destAuditMaintenance: p, operationGate: f.a.operationGate, settings: retentionSettings{stored: ports.UISettings{DestHitRetentionDays: 2, DestTrialRetentionDays: 7}}}
+	counter := metrics.DestPrunedRowsTotal.With(metrics.DestPruneHits)
+	before := counter.Value()
+	a.pruneDestAudit(t.Context())
+	if p.calls != 1 || counter.Value() != before {
+		t.Fatal("failed cleanup counted uncommitted rows or skipped storage")
+	}
+	p.err = nil
+	a.pruneDestAudit(t.Context())
+	if p.calls != 2 || p.settings == nil || p.settings.Effective().TrialRetentionDays != 2 || counter.Value() != before+2 {
+		t.Fatal("cleanup ignored effective settings or committed row counts")
+	}
+	if err := a.operationGate.Exclusive(t.Context(), func(context.Context) error {
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
+		a.pruneDestAudit(ctx)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if p.calls != 2 {
+		t.Fatal("cleanup entered storage without backend admission")
+	}
 }
 
 func TestHourlyDestinationCleanupCancellationWhileBackendSwitchOwnsGate(t *testing.T) {

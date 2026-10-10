@@ -754,7 +754,7 @@ it('opens the account Access drawer from the header and closes back to the page'
   api.get.mockImplementation(async (url: string, config?: unknown) => {
     if (url === '/admin/users') return { data: { items: [{ id: 13, upn: 'alice@example.test' }], total: 1 } }
     if (url === '/admin/users/13') return { data: { id: 13, upn: 'alice@example.test' } }
-    if (url === '/admin/dest/users/13') return { data: { group: null, exemption: null } }
+    if (url === '/admin/dest/users/13') return { data: { group: null, exemption: null, hits_available: null, recent_hits: null, usage_available: null, usage_nodes: null } }
     if (url === '/admin/risk-center/users/13') return { data: { user: { id: 13, upn: 'alice@example.test', display_name: '', role: 'user', enabled: true, group_id: 0, group_name: '', traffic_limit_bytes: 0 }, attention: [], review: { dismissed: false, trusted: false, escalated: [] }, geo: null, signals: [], live: {}, devices: [], device_window_hours: 24, devices_unavailable: false } }
     if (url.startsWith('/admin/risk-center/')) throw err(503, 'unavailable')
     return original(url, config)

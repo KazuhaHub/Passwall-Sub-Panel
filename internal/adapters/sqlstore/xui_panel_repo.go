@@ -10,10 +10,15 @@ import (
 	"gorm.io/gorm/clause"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/keyedmutex"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 )
 
-type xuiPanelRepo struct{ db *gorm.DB }
+type xuiPanelRepo struct {
+	db         *gorm.DB
+	auditGates *keyedmutex.Map[int64]
+	audit      *DestAuditRepo
+}
 
 func (r *xuiPanelRepo) List(ctx context.Context) ([]*domain.XUIPanel, error) {
 	var rows []xuiPanelRow
@@ -96,6 +101,10 @@ func (r *xuiPanelRepo) Save(ctx context.Context, p *domain.XUIPanel) error {
 	}
 	db := r.db.WithContext(ctx)
 	creating := row.ID == 0
+	if !creating && r.auditGates != nil {
+		unlock := r.auditGates.Lock(row.ID)
+		defer unlock()
+	}
 	if creating {
 		row.AuditCollect = string(domain.NormalizeAuditCollect(p.AuditCollect))
 		row.AuditCollectRevision = 1
@@ -117,7 +126,10 @@ func (r *xuiPanelRepo) Save(ctx context.Context, p *domain.XUIPanel) error {
 		// must read the separate control state rather than infer it from Save.
 		p.AuditCollect = domain.AuditCollect(row.AuditCollect)
 		p.AuditCollectRevision = row.AuditCollectRevision
+		unlock := r.audit.lockControlPanel(row.ID)
+		defer unlock()
 	}
+	r.audit.notifyCurrentControl(ctx, row.ID)
 	return nil
 }
 
@@ -133,6 +145,12 @@ func (r *xuiPanelRepo) UpdateNativeMetadata(ctx context.Context, id int64, name,
 	if collect != nil && !collect.Valid() {
 		return fmt.Errorf("%w: invalid audit collection mode", domain.ErrValidation)
 	}
+	// Share the short per-panel gate with every audit chunk. No transaction
+	// carrying an old revision can commit after this settings write succeeds.
+	if r.auditGates != nil {
+		unlock := r.auditGates.Lock(id)
+		defer unlock()
+	}
 	updates := map[string]any{}
 	if name != nil {
 		updates["name"] = *name
@@ -143,7 +161,8 @@ func (r *xuiPanelRepo) UpdateNativeMetadata(ctx context.Context, id int64, name,
 	if channel != nil {
 		updates["update_channel"] = string(*channel)
 	}
-	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	var state domain.DestAuditControl
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		// Serialize the comparison with the revision increment. Two equal
 		// writes must not both invalidate the same collection generation.
 		var row xuiPanelRow
@@ -159,12 +178,18 @@ func (r *xuiPanelRepo) UpdateNativeMetadata(ctx context.Context, id int64, name,
 			}
 			updates["audit_collect"] = string(*collect)
 			updates["audit_collect_revision"] = gorm.Expr("audit_collect_revision + 1")
+			row.AuditCollect, row.AuditCollectRevision = string(*collect), row.AuditCollectRevision+1
 		}
+		state = auditControlState(row)
 		if len(updates) == 0 {
 			return nil
 		}
 		return tx.Model(&xuiPanelRow{}).Where("id = ?", id).Updates(updates).Error
 	})
+	if err == nil {
+		r.audit.notifyControl(state)
+	}
+	return err
 }
 
 // Delete removes a panel row, but refuses the operation when any nodes
@@ -175,6 +200,10 @@ func (r *xuiPanelRepo) UpdateNativeMetadata(ctx context.Context, id int64, name,
 // dangling reference panics on nil. Caller is expected to clean the
 // referencing rows (or reassign them) first.
 func (r *xuiPanelRepo) Delete(ctx context.Context, id int64) error {
+	if r.auditGates != nil {
+		unlock := r.auditGates.Lock(id)
+		defer unlock()
+	}
 	var nodeRefs int64
 	if err := r.db.WithContext(ctx).Model(&nodeRow{}).Where("panel_id = ?", id).Count(&nodeRefs).Error; err != nil {
 		return err
@@ -195,7 +224,11 @@ func (r *xuiPanelRepo) Delete(ctx context.Context, id int64) error {
 	if clientRefs > 0 {
 		return fmt.Errorf("%w: panel still owns %d user client row(s); detach them first", domain.ErrValidation, clientRefs)
 	}
-	return r.db.WithContext(ctx).Delete(&xuiPanelRow{}, id).Error
+	err := r.db.WithContext(ctx).Delete(&xuiPanelRow{}, id).Error
+	if err == nil {
+		r.audit.notifyControl(domain.DestAuditControl{PanelID: id})
+	}
+	return err
 }
 
 // UpdateVersion writes only panel_version / xray_version / version_checked_at

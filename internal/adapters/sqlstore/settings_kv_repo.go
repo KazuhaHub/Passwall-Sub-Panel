@@ -495,6 +495,8 @@ func settingDescriptors(s *ports.UISettings) []settingDescriptor {
 		boolField("risk", "devices_off", &s.RiskDevicesOff),
 		boolField("risk", "usage_shift_off", &s.RiskUsageShiftOff),
 		boolField("risk", "login_country_off", &s.RiskLoginCountryOff),
+		boolField("risk", "dest_block_off", &s.RiskDestBlockOff),
+		intField("risk", "dest_block_threshold", &s.RiskDestBlockThreshold),
 		intField("risk", "min_days", &s.RiskMinDays),
 		intField("risk", "max_devices", &s.RiskMaxDevices),
 		floatField("risk", "usage_ratio", &s.RiskUsageRatio),

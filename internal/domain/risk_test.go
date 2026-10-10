@@ -6,11 +6,11 @@ import (
 )
 
 // The kinds are stored (risk_signals.kind), sent to the SPA and named by the
-// four risk.*_off switches, so they are a contract in their spelling. The
+// five risk.*_off switches, so they are a contract in their spelling. The
 // order is the admin table's column order: the store and the API return
 // signals in it, and a reorder would silently move every column.
-func TestRiskKinds_AreTheFourSignalsInDisplayOrder(t *testing.T) {
-	want := []RiskKind{"sub_spread", "devices", "usage_shift", "login_country"}
+func TestRiskKinds_AreTheFiveSignalsInDisplayOrder(t *testing.T) {
+	want := []RiskKind{"sub_spread", "devices", "usage_shift", "login_country", "dest_block"}
 	if got := RiskKinds(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("RiskKinds() = %q, want %q", got, want)
 	}

@@ -2,6 +2,8 @@ package handler
 
 import (
 	"context"
+	"errors"
+	"net/url"
 	"strconv"
 	"time"
 
@@ -29,13 +31,17 @@ func (h *AdminDestinationUsersHandler) Get(c *gin.Context) {
 		return
 	}
 	// Usage reads require stage-4 availability and their own audited boundary.
-	if _, exists := c.Request.URL.Query()["usage"]; exists {
+	if params, err := url.ParseQuery(c.Request.URL.RawQuery); err != nil || len(params) != 0 {
 		c.JSON(400, gin.H{"error": "dest_policy_invalid", "field": "usage"})
 		return
 	}
 	access, err := h.read(c.Request.Context(), id)
 	if err != nil {
-		destinationPolicyError(c, err)
+		if errors.Is(err, domain.ErrNotFound) || errors.Is(err, domain.ErrValidation) {
+			destinationPolicyError(c, err)
+		} else {
+			respondPublicError(c, domain.ErrUnavailable)
+		}
 		return
 	}
 	var group, exemption any
@@ -47,5 +53,5 @@ func (h *AdminDestinationUsersHandler) Get(c *gin.Context) {
 		ex := *access.Exemption
 		exemption = destinationExemptionView(destpolicy.ExemptionView{Exemption: ex, UPN: &access.UPN, CreatedByUPN: access.CreatedByUPN, Expired: ex.ExpiresAt != nil && !ex.ExpiresAt.After(time.Now().UTC())})
 	}
-	c.JSON(200, gin.H{"group": group, "exemption": exemption, "hits_available": nil, "recent_hits": nil, "usage_available": nil, "usage_nodes": nil})
+	c.JSON(200, gin.H{"group": group, "exemption": exemption, "hits_available": access.HitsAvailable, "recent_hits": access.RecentHits, "usage_available": nil, "usage_nodes": nil})
 }

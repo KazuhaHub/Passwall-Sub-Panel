@@ -88,7 +88,7 @@ const DEFAULTS: Record<string, number> = {
   geo_anomaly_flag_after_polls: 3, geo_anomaly_clear_after_polls: 6, geo_anomaly_min_placed_ratio: 0.5,
   geo_anomaly_ban_max_countries: 1, geo_anomaly_ban_max_regions: 2, geo_anomaly_ban_max_cities: 3,
   geo_anomaly_ban_after_polls: 6, geo_anomaly_ban_duration_minutes: 60,
-  risk_min_days: 3, risk_max_devices: 3, risk_usage_ratio: 3, risk_usage_floor_gb: 3,
+  risk_min_days: 3, risk_max_devices: 3, risk_usage_ratio: 3, risk_usage_floor_gb: 3, risk_dest_block_threshold: 20,
   ...Object.fromEntries(KNOBS.map(([k], i) => [k, 500 + i])),
 }
 const EFFECTIVE: Record<string, number> = Object.fromEntries(KNOBS.map(([k], i) => [k, 100 + i]))
@@ -100,6 +100,7 @@ function blank(): RiskPolicySettings {
     geo_anomaly_allow_anywhere: false, geo_anomaly_ban_enabled: false,
     risk_hwid_capture_off: false, risk_sub_spread_off: false, risk_devices_off: false,
     risk_usage_shift_off: false, risk_login_country_off: false,
+    risk_dest_block_off: false,
   } as RiskPolicySettings
 }
 
@@ -132,6 +133,7 @@ function serve(over: Partial<RiskPolicySettings> = {}) {
   server.putError = null
   server.overrides = { 'geo_anomaly.max_regions': '2' }
   api.get.mockImplementation(async (url: string) => {
+    if (url === '/admin/dest/policies') return { data: { allow: [], block: [], observe: [], allowlist_groups: [], published_has_access_control: false } }
     if (url === '/admin/risk-center/policy') return { data: view() }
     if (url === '/admin/settings/geoip/status') {
       return {
@@ -196,6 +198,7 @@ function TabSwitch() {
 function mount(url = '/admin/risk?tab=policy', client: QueryClient = makeTestQueryClient()): { client: QueryClient } {
   const router = createMemoryRouter([
     { path: '/admin/risk', element: <><PolicyTab /><TabSwitch /><Where /></> },
+    { path: '/admin/access-control', element: <Where /> },
   ], { initialEntries: [url] })
   render(
     <ThemeProvider theme={theme}>
@@ -256,11 +259,42 @@ afterEach(() => {
 })
 
 describe('PolicyTab, the page', () => {
-  it('lays out the six detector cards and the group exceptions', async () => {
+  it('names selected destination policies, and guards navigation with an unsaved draft', async () => {
+    serve()
+    const base = api.get.getMockImplementation()!
+    api.get.mockImplementation(async (url: string, ...rest: unknown[]) => {
+      if (url === '/admin/dest/policies') return { data: { allow: [], observe: [], allowlist_groups: [], published_has_access_control: true,
+        block: [{ id: 12, name: 'Current financial policy', counts_as_risk: true }, { id: 13, name: 'Unselected policy', counts_as_risk: false }] } }
+      return base(url, ...rest)
+    })
+    mount()
+    await loaded()
+    const c = card('risk_center.policy.card.dest_block')
+    expect(await within(c).findByText(/Current financial policy/)).toBeTruthy()
+    expect(c.textContent).not.toContain('Unselected policy')
+    type(field('settings.risk.dest_block_threshold'), '37')
+    confirmMock.mockResolvedValueOnce(false)
+    fireEvent.click(within(c).getByRole('link', { name: L('risk_center.policy.dest_block_open') }))
+    await waitFor(() => expect(confirmMock).toHaveBeenCalledWith(expect.objectContaining({ title: L('risk_center.policy.leave_title') })))
+    expect(lastLocation).toContain('/admin/risk')
+    expect(field('settings.risk.dest_block_threshold').value).toBe('37')
+    confirmMock.mockResolvedValueOnce(true)
+    fireEvent.click(within(c).getByRole('link', { name: L('risk_center.policy.dest_block_open') }))
+    await waitFor(() => expect(lastLocation).toBe('/admin/access-control?tab=policies'))
+    expect(policyPuts()).toEqual([])
+  })
+
+  it('explains that no policies are selected for destination risk', async () => {
     serve()
     mount()
     await loaded()
-    for (const k of ['geo', 'sub_spread', 'devices', 'usage_shift', 'login_country', 'data', 'groups']) {
+    expect(await within(card('risk_center.policy.card.dest_block')).findByText(L('risk_center.policy.dest_block_none'))).toBeTruthy()
+  })
+  it('lays out the seven detector cards and the group exceptions', async () => {
+    serve()
+    mount()
+    await loaded()
+    for (const k of ['geo', 'sub_spread', 'devices', 'usage_shift', 'login_country', 'dest_block', 'data', 'groups']) {
       expect(card(`risk_center.policy.card.${k}`), k).toBeTruthy()
     }
     // Nothing is unsaved on arrival.
@@ -294,6 +328,17 @@ describe('PolicyTab, the page', () => {
 })
 
 describe('PolicyTab, fields', () => {
+  it('saves only the destination switch and threshold through the existing draft save', async () => {
+    serve(); mount(); await loaded()
+    const destination = card('risk_center.policy.card.dest_block')
+    const threshold = field('settings.risk.dest_block_threshold', destination)
+    expect(threshold.placeholder).toBe('20')
+    type(threshold, '37')
+    fireEvent.click(within(destination).getByRole('switch', { name: L('risk_center.policy.enabled') }))
+    fireEvent.click(saveButton())
+    await waitFor(() => expect(policyPuts()).toEqual([{ risk_dest_block_off: true, risk_dest_block_threshold: 37 }]))
+    await waitFor(() => expect(saveButton().disabled).toBe(true))
+  })
   // Migrated from the settings page: every runtime knob shows the default
   // as its empty placeholder and, under the hint, the number the server
   // runs with — the server's, never a copy.

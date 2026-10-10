@@ -1,15 +1,15 @@
 import type { GeoAnomaly, GeoExcluded, GeoTier } from './geoAnomalies'
 
 /**
- * The four observe-only risk signals, mirroring domain.RiskKind. Each is
+ * The observe-only risk signals, mirroring domain.RiskKind. Each is
  * judged on its own and stored as its own (account, kind) row: there is no
  * score, and nothing on the server acts on any of them.
  */
-export type RiskKind = 'sub_spread' | 'devices' | 'usage_shift' | 'login_country'
+export type RiskKind = 'sub_spread' | 'devices' | 'usage_shift' | 'login_country' | 'dest_block'
 
 /** Display order — the table's column order, and domain.RiskKinds(). The one
  *  list to extend for a new kind; a kind outside it is ignored everywhere. */
-export const RISK_KINDS: readonly RiskKind[] = ['sub_spread', 'devices', 'usage_shift', 'login_country']
+export const RISK_KINDS: readonly RiskKind[] = ['sub_spread', 'devices', 'usage_shift', 'login_country', 'dest_block']
 
 /**
  * Every code each kind's evaluator can write: a copy of
@@ -38,6 +38,7 @@ export const RISK_CODES: Readonly<Record<RiskKind, readonly string[]>> = {
     'geo_unavailable', 'unplaced', 'learning',
     'new_country', 'known_countries',
   ],
+  dest_block: ['signal_off', 'no_collector', 'no_hits', 'within', 'over_building', 'over'],
 }
 
 /** v2's seven states, read the same way: only `flagged` reaches the bell, and
@@ -140,9 +141,22 @@ export interface LoginCountryEvidence {
   events: { cc: string; at_ms: number; method: string }[]
 }
 
-/** One stored (account, kind) row. `evidence` is null for a verdict with
- *  nothing to show (idle, disabled, exempt); otherwise the kind's body above.
- *  `kind` may be one this build does not know — readers skip those. */
+/** Destination block counts are lower bounds; even idle retains coverage. */
+export interface DestBlockEvidence {
+  v: number
+  window_hours: number
+  threshold: number
+  total: number
+  by_source: { source: string; count: number }[]
+  nodes: number
+  coverage_complete: false
+  /** Related panel block losses; never attributed to this account. */
+  losses: { rows: number; events: number; unmatched: number; complete: false; scope: 'panel' }
+}
+
+/** One stored (account, kind) row. Evidence is null when there is nothing
+ * to show; destination idle retains collection and coverage evidence.
+ * Unknown kinds written by a newer server are skipped by readers. */
 export interface RiskSignal {
   kind: RiskKind
   state: RiskState

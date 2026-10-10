@@ -4,7 +4,7 @@ import keys from './policyKeys.json'
 export type { RiskPolicyKey, RiskPolicySettings, RiskPolicyView }
 
 /**
- * The policy's 48 keys in the server's order (ports.RiskCenterPolicyKeys).
+ * The policy's 50 keys in the server's order (ports.RiskCenterPolicyKeys).
  *
  * A JSON file rather than a literal so that one list is checked from both
  * sides: TestRiskCenterPolicyKeysMatchTheSPA holds the file to the Go
@@ -25,7 +25,7 @@ export const ALL_POLICY_KEYS: Record<RiskPolicyKey, true> = {
   geo_anomaly_shared_exit_min_users: true, geo_anomaly_ban_max_per_poll: true, geo_anomaly_lift_max_per_poll: true,
   geo_anomaly_infra_refresh_minutes: true, geo_anomaly_infra_host_ttl_minutes: true,
   risk_hwid_capture_off: true, risk_sub_spread_off: true, risk_devices_off: true, risk_usage_shift_off: true,
-  risk_login_country_off: true, risk_min_days: true, risk_max_devices: true, risk_usage_ratio: true,
+  risk_login_country_off: true, risk_dest_block_off: true, risk_dest_block_threshold: true, risk_min_days: true, risk_max_devices: true, risk_usage_ratio: true,
   risk_usage_floor_gb: true, risk_login_warmup_logins: true, risk_login_hold_days: true,
   risk_usage_warmup_days: true, risk_usage_flag_days: true, risk_usage_suspect_days: true,
   risk_refresh_interval_minutes: true, risk_first_delay_minutes: true, risk_alert_freshness_hours: true,

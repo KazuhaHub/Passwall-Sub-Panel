@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-func TestBuildDestinationUserAccessReturnsGroupAndExemptionWithoutLaterStageData(t *testing.T) {
+func TestBuildDestinationUserAccessReturnsGroupAndExemptionWithoutUsageData(t *testing.T) {
 	f := buildDestinationPolicyFixture(t)
 	a := f.a
 	token := destinationRefreshAdminToken(t, a)
@@ -44,10 +44,13 @@ func TestBuildDestinationUserAccessReturnsGroupAndExemptionWithoutLaterStageData
 	if err := json.Unmarshal(w.Body.Bytes(), &fields); err != nil {
 		t.Fatal(err)
 	}
-	for _, key := range []string{"hits_available", "recent_hits", "usage_available", "usage_nodes"} {
+	for _, key := range []string{"usage_available", "usage_nodes"} {
 		if string(fields[key]) != "null" {
-			t.Fatalf("stage-1c field %s must be present and null", key)
+			t.Fatalf("stage-4 field %s must be present and null", key)
 		}
+	}
+	if string(fields["hits_available"]) != "false" || string(fields["recent_hits"]) == "null" {
+		t.Fatal("account hit telemetry must be present without pretending collection has started")
 	}
 	var exemption struct {
 		UserID  int64  `json:"user_id"`

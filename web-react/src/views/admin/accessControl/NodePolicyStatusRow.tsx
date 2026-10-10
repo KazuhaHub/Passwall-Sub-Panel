@@ -7,19 +7,28 @@ import { Link as RouterLink } from 'react-router'
 import type { DestinationNodeStatus } from '@/api/accessControl'
 import { ToneBadge, stateTone } from '@/components/ToneBadge'
 import { AsyncButton } from '@/components/AsyncButton'
+import KpiTile, { KpiGrid } from '@/components/KpiTile'
 import { fallbackState, nodeAccessTone, nodeFilter } from '@/utils/accessControl'
+import { useCan } from '@/utils/permissions'
+import { useQueryScope } from '@/query/useQueryScope'
+import { scopeKey } from '@/query/session'
+import AuditCollectDialog from './AuditCollectDialog'
 import { useAccessTranslation } from './useAccessTranslation'
 
 const P = 'admin:access_control.coverage.'
 const quotas = new Set(['rules', 'domains', 'regexps', 'cidrs', 'subjects', 'bytes'])
-export default function NodePolicyStatusRow({ node, now, variant = 'block', onLists, onRetry, retryPending = false, onOpen }: {
+export default function NodePolicyStatusRow({ node, now, variant = 'block', onLists, onRetry, retryPending = false, onOpen, auditCards = false }: {
   node: DestinationNodeStatus; now: number; variant?: 'row' | 'block'
   onLists?: () => void; onRetry?: (agentId: string) => Promise<void>; retryPending?: boolean
   onOpen?: () => void
+  auditCards?: boolean
 }) {
   const { t, dateTime, number } = useAccessTranslation(['admin', 'common'])
   const theme = useTheme()
   const [menu, setMenu] = useState<HTMLElement | null>(null)
+  const [collectOwner, setCollectOwner] = useState<string | null>(null)
+  const owner = scopeKey(useQueryScope())
+  const canWrite = useCan('config.write')
   const colors = stateTone(theme, nodeAccessTone(node, now))
   const tone = node.state === 'paused' ? { ...colors, Icon: PauseCircleOutlineIcon }
     : node.state === 'unsupported_kind' ? { ...colors, Icon: RemoveCircleOutlineIcon } : colors
@@ -32,6 +41,10 @@ export default function NodePolicyStatusRow({ node, now, variant = 'block', onLi
   const needsIssues = prolonged || node.state === 'rejected' || fallback === 'exhausted' || fallback === 'stopping'
   const confirmed = node.minted_at !== null && node.applied_at !== null && node.pending_since === null
   const rules = fallback === 'exhausted' ? 0 : confirmed && (node.minted_kind === 'desired' || node.minted_kind === 'fallback') ? node.applied_rules : null
+  const auditAvailable = node.kind === 'psp' && node.engine === 'xray' && node.supports.hits
+  const collection = node.collect === 'off' ? 'off' : !node.collecting ? 'unconfirmed'
+    : node.collect_effective === 'hits_and_usage' ? 'usage' : 'hits'
+  const loss = node.losses
   const linkStyle = { minHeight: 44 }
   if (variant === 'row') return <ButtonBase onClick={onOpen} sx={{ minHeight: 44, minWidth: 44, px: 0.5, gap: 0.5,
     justifyContent: 'flex-start', textAlign: 'left', whiteSpace: 'normal', color: tone.fg, borderRadius: 1,
@@ -47,6 +60,21 @@ export default function NodePolicyStatusRow({ node, now, variant = 'block', onLi
     </Stack>
     {variant === 'block' && <Typography variant="caption" color="text.secondary">{t(`${P}kind_${['psp', '3xui', 'sui'].includes(node.kind) ? node.kind : 'other'}`)} · {node.engine ?? '—'} · {node.agent_version ?? '—'}</Typography>}
     {node.state !== 'none' && <Typography variant="body2" color="text.secondary">{t(`${P}description_${prolonged ? 'pending_long' : node.state}`)}</Typography>}
+    {auditAvailable && (auditCards ? <KpiGrid>
+      <KpiTile label={t('admin:access_control.collect.mode')} value={t(`${P}collection_${collection}`)}
+        caption={canWrite ? <Button onClick={() => setCollectOwner(owner)} sx={linkStyle}>{t('admin:access_control.collect.modify')}</Button> : undefined} />
+      <KpiTile label={t('admin:access_control.collect.hits_24h')} value={node.hits_24h === null ? '—' : number(node.hits_24h)}
+        caption={<Button component={RouterLink} to={`/admin/access-control?tab=records&rec_panel=${node.panel_id}`} sx={linkStyle}>{t('admin:access_control.collect.view_records')}</Button>} />
+    </KpiGrid> : <>
+      <Typography variant="body2" color="text.secondary" data-testid={`coverage-collection-${node.panel_id}`}>{t(`${P}collection_${collection}`)}</Typography>
+      {node.hits_24h !== null && <Typography variant="body2" data-testid={`coverage-hits-${node.panel_id}`}>{t(`${P}hits_window`, { hours: 24, n: number(node.hits_24h) })}</Typography>}
+    </>)}
+    {auditAvailable && loss && (loss.rows > 0 || loss.events > 0 || loss.unmatched > 0) && <Alert severity="warning" sx={{ mt: 1 }} data-testid={`coverage-losses-${node.panel_id}`}>
+      <Typography variant="body2">{t(`${P}loss_incomplete`)}</Typography>
+      {loss.rows > 0 && <Typography variant="body2">{t(`${P}loss_rows`, { n: number(loss.rows) })}</Typography>}
+      {loss.events > 0 && <Typography variant="body2">{t(`${P}loss_events`, { n: number(loss.events) })}</Typography>}
+      {loss.unmatched > 0 && <Typography variant="body2">{t(`${P}loss_unmatched`, { n: number(loss.unmatched) })}</Typography>}
+    </Alert>}
     {node.last_report_at !== null && <Typography variant="body2" color="text.secondary">{t(`${P}reported_at`, { time: dateTime(node.last_report_at) })}</Typography>}
     {variant === 'block' && node.applied_at !== null && <Typography variant="body2">{t(`${P}applied_at`, { time: dateTime(node.applied_at) })}</Typography>}
     {node.pending_since !== null && <Typography variant="body2">{t(`${P}pending_since`, { time: dateTime(node.pending_since) })}</Typography>}
@@ -67,8 +95,10 @@ export default function NodePolicyStatusRow({ node, now, variant = 'block', onLi
       {onRetry && node.agent_id && node.kind === 'psp' && node.supports.policy && ['pending', 'rejected', 'over_limit', 'sniffing'].includes(node.state) && <AsyncButton pending={retryPending} onClick={() => onRetry(node.agent_id!)} sx={linkStyle}>{t(`${P}retry`)}</AsyncButton>}
     </Stack>
     <Menu anchorEl={menu} open={!!menu} onClose={() => setMenu(null)}>
+      {node.kind === 'psp' && canWrite && <MenuItem onClick={() => { setMenu(null); setCollectOwner(owner) }} sx={linkStyle}>{t('admin:access_control.collect.open')}</MenuItem>}
       <MenuItem component={RouterLink} to={serverLink} onClick={() => setMenu(null)} sx={linkStyle}>{t(`${P}open_server`)}</MenuItem>
       {issueLink && <MenuItem component={RouterLink} to={issueLink} onClick={() => setMenu(null)} sx={linkStyle}>{t(`${P}issues`)}</MenuItem>}
     </Menu>
+    {collectOwner === owner && canWrite && <AuditCollectDialog node={node} onClose={() => setCollectOwner(null)} />}
   </Box>
 }

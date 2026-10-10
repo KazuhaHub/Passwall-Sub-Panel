@@ -64,6 +64,7 @@ type Service struct {
 	// COLLECT IT, which is what keeps a panel with no metrics repository from
 	// advertising a cadence it cannot honour.
 	host               *nodemetrics.Service
+	audit              AuditCollector
 	policies           PolicyCoordinator
 	policyCandidates   ports.NodePolicyCandidateRepo
 	policyConfigCache  *boundedcache.Cache[[]byte]
@@ -97,6 +98,9 @@ type Options struct {
 	// Host is optional: a build without a metrics repository simply does not
 	// ingest telemetry, and the envelope carries no cadence for it.
 	Host *nodemetrics.Service
+	// Audit must only reserve bounded memory. It must not wait on storage or a
+	// collection writer; Sync invokes it after releasing the agent lock.
+	Audit AuditCollector
 	// Policies and PolicyCandidates must be configured together. Both nil keeps
 	// the existing config path; application activation follows C3 acceptance.
 	Policies         PolicyCoordinator
@@ -124,6 +128,7 @@ func New(options Options) (*Service, error) {
 		anchors: make(map[int64]nodeprotocol.ClientCounters), now: now,
 		grants:   make(map[string]map[nodeprotocol.ClientKey]int64),
 		host:     options.Host,
+		audit:    options.Audit,
 		policies: options.Policies, policyCandidates: options.PolicyCandidates,
 		policyConfigCache: boundedcache.New[[]byte](64, 32<<20),
 	}, nil
@@ -158,6 +163,14 @@ func (s *Service) Sync(ctx context.Context, report nodeprotocol.NodeReport) (nod
 	// latest-full cache.
 	host := report.Host
 	report.Host = nil
+	// Audit ingestion belongs to the separate bounded worker, never control
+	// validation, accounting, observed-state persistence or the latest-full cache.
+	audit := report.Audit
+	var auditReceivedAt time.Time
+	if audit != nil && s.audit != nil {
+		auditReceivedAt = s.now().UTC()
+	}
+	report.Audit = nil
 	policyStatus := report.PolicyStatus
 	report.PolicyStatus = nil
 	if err := nodeprotocol.ValidateNodeReportBase(report); err != nil {
@@ -281,6 +294,12 @@ func (s *Service) Sync(ctx context.Context, report nodeprotocol.NodeReport) (nod
 	}
 	if int64(len(encoded)) > nodeprotocol.MaxSyncBodyBytes {
 		return nodeprotocol.SyncResponse{}, fmt.Errorf("nodesync: response exceeds %d bytes", nodeprotocol.MaxSyncBodyBytes)
+	}
+	// Every control error above releases through defer without offering audit.
+	// Unlock is idempotent; telemetry only takes its own bounded memory locks.
+	unlock()
+	if s.audit != nil && auditOfferEligible(report.Capabilities, audit) {
+		s.audit.Offer(agent.AgentID, agent.PanelID, auditReceivedAt, *audit)
 	}
 	return response, nil
 }
@@ -758,6 +777,8 @@ func cloneReport(in nodeprotocol.NodeReport) nodeprotocol.NodeReport {
 	// per agent into the latest-full cache is the kind of regression that only
 	// shows up as memory, months later.
 	out.Host = nil
+	// Audit is a transient best-effort batch, never a cached control observation.
+	out.Audit = nil
 	out.PolicyStatus = nil
 	return out
 }

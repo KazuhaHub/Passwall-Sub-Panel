@@ -6,7 +6,7 @@ import "encoding/json"
 //
 // Each kind is judged on its own and stored as its own (user, kind) row with
 // one of the seven GeoState values and a code. There is no score and no
-// cross-signal escalation: four independent "suspect"s are four rows for an
+// cross-signal escalation: five independent "suspect"s are five rows for an
 // admin to read, not a verdict about the account. Nothing in PSP acts on
 // these rows — they are shown, never enforced.
 //
@@ -28,12 +28,14 @@ const (
 	// RiskKindLoginCountry — a panel login from a country the account's
 	// subscription fetches have not established.
 	RiskKindLoginCountry RiskKind = "login_country"
+	// RiskKindDestBlock counts selected destination-policy block hits.
+	RiskKindDestBlock RiskKind = "dest_block"
 )
 
 // RiskKinds is every kind in display order — the admin table's column order,
 // and the order the API returns each account's signals in.
 func RiskKinds() []RiskKind {
-	return []RiskKind{RiskKindSubSpread, RiskKindDevices, RiskKindUsageShift, RiskKindLoginCountry}
+	return []RiskKind{RiskKindSubSpread, RiskKindDevices, RiskKindUsageShift, RiskKindLoginCountry, RiskKindDestBlock}
 }
 
 // RiskCode names the branch behind one signal's verdict, the way
@@ -81,6 +83,9 @@ const (
 // branches. A fresh map per call, so no caller can edit the table.
 func AllRiskCodes() map[RiskKind][]RiskCode {
 	return map[RiskKind][]RiskCode{
+		RiskKindDestBlock: {
+			RiskCodeSignalOff, RiskCodeNoCollector, RiskCodeNoHits, RiskCodeWithin, RiskCodeOverBuilding, RiskCodeOver,
+		},
 		RiskKindSubSpread: {
 			RiskCodeSignalOff, RiskCodeScopeOff, RiskCodeScopeCountry, RiskCodeAllowAnywhere, RiskCodeTrusted,
 			RiskCodeNoFetches, RiskCodeRetentionShort, RiskCodeAllExcluded, RiskCodeGeoUnavailable,
@@ -127,8 +132,8 @@ const RiskEvidenceVersion = 1
 // Evidence NEVER contains an address or a coordinate: provinces and
 // countries with day masks, client labels with a short digest prefix, byte
 // totals, login countries. It is nil (NULL in the store) for a verdict with
-// nothing to show — idle, disabled, exempt — so nothing outlives the window
-// it described.
+// nothing to show — disabled or exempt. Destination idle rows retain the
+// collection and incomplete-coverage evidence behind their zero lower bound.
 type RiskSignal struct {
 	UserID int64
 	Kind   RiskKind

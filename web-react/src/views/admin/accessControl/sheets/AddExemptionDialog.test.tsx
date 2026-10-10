@@ -23,7 +23,7 @@ const existing: DestinationExemptionView = { user_id: 13, upn: 'alice@test', rea
 beforeEach(() => {
   vi.clearAllMocks(); vi.spyOn(Date, 'now').mockReturnValue(at)
   useAuthStore.setState({ userId: 42, role: 'admin', authEpoch: 5 })
-  api.get.mockResolvedValue({ data: { group: null, exemption: null } })
+  api.get.mockResolvedValue({ data: { group: null, exemption: null, hits_available: null, recent_hits: null, usage_available: null, usage_nodes: null } })
   api.post.mockResolvedValue({ data: existing }); api.put.mockResolvedValue({ data: existing })
   confirmation.mockResolvedValue(true)
 })
@@ -92,7 +92,7 @@ it('guards dirty cancellation and admits only one pending save while preventing 
   await waitFor(() => expect(onClose).toHaveBeenCalledOnce())
 })
 it('shows the allowlist exception warning from the selected account without creating an exemption', async () => {
-  api.get.mockResolvedValue({ data: { group: { id: 7, name: 'Visitors', mode: 'allowlist', stage: 'trial' }, exemption: null } })
+  api.get.mockResolvedValue({ data: { group: { id: 7, name: 'Visitors', mode: 'allowlist', stage: 'trial' }, exemption: null, hits_available: null, recent_hits: null, usage_available: null, usage_nodes: null } })
   mount({ userId: 13 })
   expect(await screen.findByRole('button', { name: `${P}allowlist_summary` })).toBeTruthy()
   expect(api.post).not.toHaveBeenCalled()

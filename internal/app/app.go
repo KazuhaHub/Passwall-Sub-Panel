@@ -39,6 +39,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/auth"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/cert"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/clientprov"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/destaudit"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/destlist"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/destpolicy"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/geo"
@@ -123,32 +124,41 @@ func (a *asyncDispatcher) Go(name string, fn func(ctx context.Context)) {
 // ListenAndServe and runs the background workers in goroutines; Shutdown
 // cancels both.
 type App struct {
-	database        *sql.DB
-	operationGate   *operationgate.Gate
-	cfg             *config.Config
-	server          *http.Server
-	traffic         *traffic.Service
-	reconcile       *reconcile.Service
-	user            *user.Service
-	node            *node.Service
-	cert            *cert.Service
-	audit           *audit.Service
-	mail            *mailer.Service
-	health          *health.Service
-	geo             *geo.Service
-	render          *render.Service
-	risk            *risk.Service
-	settings        ports.SettingsRepo
-	destLists       *destlist.Service
-	destDefinitions *sqlstore.DestDefinitionRepo
-	destCompiler    *destpolicy.Compiler
-	destFacts       destpolicy.CollectionFactsCache
-	destTagMembers  destpolicy.TagMatchedMemberReader
-	destAdmin       *destpolicy.Administrator
-	destExemptions  *destpolicy.ExemptionManager
-	destExceptions  *destpolicy.ExceptionManager
-	destControls    *destpolicy.Controls
-	syncTasks       ports.SyncTaskRepo
+	database             *sql.DB
+	operationGate        *operationgate.Gate
+	cfg                  *config.Config
+	server               *http.Server
+	traffic              *traffic.Service
+	reconcile            *reconcile.Service
+	user                 *user.Service
+	node                 *node.Service
+	cert                 *cert.Service
+	audit                *audit.Service
+	mail                 *mailer.Service
+	health               *health.Service
+	geo                  *geo.Service
+	render               *render.Service
+	risk                 *risk.Service
+	settings             ports.SettingsRepo
+	destLists            *destlist.Service
+	destDefinitions      *sqlstore.DestDefinitionRepo
+	destCompiler         *destpolicy.Compiler
+	destAudit            destinationAuditRunner
+	destAuditMaintenance ports.DestAuditMaintenanceRepo
+	destAuditRead        ports.DestAuditReadRepo
+	destHitsRead         ports.DestHitReadRepo
+	destUserHitsRead     ports.DestUserHitReadRepo
+	destRiskRead         ports.DestRiskReadRepo
+	destAuditCtx         context.Context
+	destAuditCancel      context.CancelFunc
+	destAuditStart       sync.Once
+	destFacts            destpolicy.CollectionFactsCache
+	destTagMembers       destpolicy.TagMatchedMemberReader
+	destAdmin            *destpolicy.Administrator
+	destExemptions       *destpolicy.ExemptionManager
+	destExceptions       *destpolicy.ExceptionManager
+	destControls         *destpolicy.Controls
+	syncTasks            ports.SyncTaskRepo
 	// trafficRepo / nodeTraffic kept for the retention cron — PruneBefore is
 	// outside traffic.Service's surface (it's a maintenance concern, not a
 	// poll-cycle concern), so app.go reaches into the repos directly.
@@ -379,6 +389,11 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	if err != nil {
 		return nil, fmt.Errorf("destination policy compiler: %w", err)
 	}
+	operationGate := operationgate.New()
+	destAudit, err := destaudit.New(ctx, admittedDestinationAuditStore{store: repos.DestAudit, gate: operationGate}, destaudit.Options{Emit: destinationAuditObserver()})
+	if err != nil {
+		return nil, fmt.Errorf("destination audit collector: %w", err)
+	}
 	nativeSync, err := nodesync.New(nodesync.Options{
 		Desired: repos.NativeDesired, Agents: repos.NodeAgent, Issues: repos.NodeAgentIssue, Tasks: repos.NodeAgentTask, Users: repos.User,
 		Clients: repos.PSPClient, Nodes: repos.Node, Settings: repos.ScopedSettings, Panels: repos.XUIPanel,
@@ -388,6 +403,7 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 		CoreCatalog: coreCatalog,
 		Host:        nodeMetrics,
 		Policies:    destCompiler, PolicyCandidates: policyCandidates,
+		Audit: destAudit,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("native node sync: %w", err)
@@ -591,21 +607,29 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	// (e.g. an admin POST after Build but before Run), and Shutdown will
 	// fire bgCancel even if Run never started.
 	bgCtx, cancel := context.WithCancel(context.Background())
+	auditCtx, auditCancel := context.WithCancel(context.Background())
 	defer func() {
 		if !assembled {
 			cancel()
+			auditCancel()
 		}
 	}()
 	a := &App{
-		database:        sqlDB,
-		operationGate:   operationgate.New(),
-		cfg:             cfg,
-		bgCancel:        cancel,
-		bgRootCtx:       bgCtx,
-		render:          renderSvc,
-		destDefinitions: destDefinitions,
-		destCompiler:    destCompiler,
-		destTagMembers:  groupSvc,
+		database:             sqlDB,
+		operationGate:        operationGate,
+		cfg:                  cfg,
+		bgCancel:             cancel,
+		bgRootCtx:            bgCtx,
+		render:               renderSvc,
+		destDefinitions:      destDefinitions,
+		destCompiler:         destCompiler,
+		destAuditMaintenance: repos.DestAuditMaintenance,
+		destAuditRead:        repos.DestAuditRead,
+		destHitsRead:         repos.DestHitsRead,
+		destUserHitsRead:     repos.DestUserHitsRead,
+		destRiskRead:         repos.DestRiskRead,
+		destAudit:            destAudit, destAuditCtx: auditCtx, destAuditCancel: auditCancel,
+		destTagMembers: groupSvc,
 	}
 	a.destLists = destlist.NewService(a.destDefinitions, destlist.NewGeositeCache(cfg.DataDir))
 	a.destLists.SetOperationGate(a.operationGate)
@@ -783,6 +807,7 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 		DestinationControls:       a.destControls,
 		DestinationTest:           a.destinationTest,
 		DestinationStatus:         a.destinationStatus,
+		DestinationHits:           a.destinationHits,
 		GeoRecords:                geoStreaks,
 		// The risk view's rows. Optional, so leaving it out would compile —
 		// TestBuildWiresTheRiskSignals reads it through the assembled router.
@@ -895,6 +920,7 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 		AuthEvents:   repos.AuthEvent,
 		LandingAddrs: trafficSvc.LandingAddresses,
 		Trust:        riskReviews,
+		Destination:  destinationRiskReader{app: a},
 	})
 	a.trafficInterval = time.Duration(sysSettings.CronTrafficPullMinutes) * time.Minute
 	// Rollup's gap heartbeat is derived from the poll cadence so a coarse poll
@@ -950,6 +976,7 @@ func (a *App) Run() error {
 	}
 
 	bgCtx := a.bgRootCtx
+	a.startDestinationAudit()
 	a.startDestinationListRefresh()
 
 	// Every background worker runs under safego.GoTracked: the *recover*
@@ -1449,7 +1476,9 @@ func (a *App) runAuditCleanupLoop(ctx context.Context) {
 		a.pruneConnectionHistory(ctx)
 		a.pruneFlagRecords(ctx)
 		a.pruneRiskReviews(ctx)
+		a.pruneDestAudit(ctx)
 		a.pruneDestExemptions(ctx)
+		a.pruneDestOrphanExemptions(ctx)
 		a.pruneCertEvents(ctx)
 		select {
 		case <-ctx.Done():
@@ -1942,6 +1971,15 @@ func (a *App) runSyncTaskLoop(ctx context.Context) {
 // don't return in time we log and continue rather than block forever.
 func (a *App) Shutdown(ctx context.Context) error {
 	httpErr := a.server.Shutdown(ctx)
+	if a.destAudit != nil {
+		a.destAudit.StopOffers()
+		if ctx.Err() != nil && a.destAuditCancel != nil {
+			a.destAuditCancel()
+		}
+		// Build is usable by in-process handlers before Run. Drain any such
+		// offers on shutdown too; startOnce prevents a second storage owner.
+		a.startDestinationAudit()
+	}
 
 	if a.bgCancel != nil {
 		a.bgCancel()
@@ -1965,8 +2003,14 @@ func (a *App) Shutdown(ctx context.Context) error {
 	}()
 	select {
 	case <-done:
+		if a.destAuditCancel != nil {
+			a.destAuditCancel()
+		}
 		return errors.Join(httpErr, databaseErr)
 	case <-ctx.Done():
+		if a.destAuditCancel != nil {
+			a.destAuditCancel()
+		}
 		log.Warn("shutdown: background workers or admitted operations did not exit before deadline")
 	}
 	return errors.Join(httpErr, ctx.Err())

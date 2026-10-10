@@ -35,9 +35,9 @@ beforeEach(() => {
   api.get.mockResolvedValue({ data: view() }); api.delete.mockResolvedValue({ data: {} }); confirmation.mockResolvedValue(false)
 })
 afterEach(() => { cleanup(); vi.restoreAllMocks() })
-function mount() {
+function mount(entry = '/admin/access-control') {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  const router = createMemoryRouter([{ path: '/admin/access-control', element: <AccessTab userId={13} upn={row.upn!} /> }], { initialEntries: ['/admin/access-control'] })
+  const router = createMemoryRouter([{ path: '/admin/*', element: <AccessTab userId={13} upn={row.upn!} /> }], { initialEntries: [entry] })
   const tree = () => <ThemeProvider theme={createAppTheme({ mode: 'light', sourceColor: '#6750a4', language: 'en-US' })}><QueryClientProvider client={client}><AppRouter router={router} /></QueryClientProvider></ThemeProvider>
   const result = render(tree())
   return { router, rerender: () => result.rerender(tree()) }
@@ -131,4 +131,57 @@ it('opens the add dialog with the current account locked and keeps later-stage t
   expect(account.value).toBe(row.upn); expect(account.readOnly).toBe(true)
   expect(api.get.mock.calls.every(([url]) => url === '/admin/dest/users/13')).toBe(true)
   expect(api.post).not.toHaveBeenCalled()
+})
+
+const recent = (): NonNullable<DestinationUserAccessView['recent_hits']> => ({ days: 7, items: [
+  { source: 'p12', source_name: 'No mail', action: 'block', count: 1200, top_dests: [{ dest: 'smtp.example.test', port: 587, count: 1200 }], panels: [{ panel_id: 4, name: 'Tokyo' }], last_at: at - 10000 },
+  { source: 'p99', source_name: null, action: 'observe', count: 3, top_dests: [{ dest: 'watch.example.test', port: 443, count: 3 }], panels: [{ panel_id: 7, name: null }], last_at: at - 5000 },
+], losses: { rows: 2, events: 4, unmatched: 6, scope: 'panel', complete: false } })
+
+it('shows retained hourly hits even when current nodes stopped collecting, with scoped loss units', async () => {
+  api.get.mockResolvedValue({ data: { ...view(null), hits_available: false, recent_hits: recent() } }); mount()
+  await screen.findByText('Hits in the past 7 days')
+  await screen.findByText('No mail'); await screen.findByText('smtp.example.test:587')
+  await screen.findByText('1,200'); await screen.findByText('Tokyo')
+  await screen.findByText('Deleted policy'); await screen.findByText('#7')
+  expect(screen.getByText('None of this account’s nodes currently record hits')).toBeTruthy()
+  expect(screen.getByText(en.access_control.records.loss_notice)).toBeTruthy()
+  expect(screen.getByText(translation.instance.t('admin:access_control.records.loss_rows', { count: 2 }))).toBeTruthy()
+  expect(screen.getByText(translation.instance.t('admin:access_control.records.loss_events', { count: 4 }))).toBeTruthy()
+  expect(screen.getByText(translation.instance.t('admin:access_control.records.loss_unmatched', { count: 6 }))).toBeTruthy()
+  expect(api.get.mock.calls.map(([url]) => url)).toEqual(['/admin/dest/users/13'])
+})
+
+it('uses the server retention window for a known empty account and keeps usage unopened', async () => {
+  api.get.mockResolvedValue({ data: { ...view(null), hits_available: true, recent_hits: { ...recent(), days: 1, items: [], losses: { rows: 0, events: 0, unmatched: 0, scope: 'panel', complete: false } } } }); mount()
+  await screen.findByText('No hits in the past 1 day')
+  expect(screen.getByText(en.access_control.records.incomplete)).toBeTruthy()
+  expect(screen.queryByText('None of this account’s nodes currently record hits')).toBeNull()
+  expect(api.get.mock.calls.map(([url]) => url)).toEqual(['/admin/dest/users/13'])
+})
+
+it('replaces the in-page drawer with all this account’s records and removes stale record filters', async () => {
+  api.get.mockResolvedValue({ data: { ...view(null), hits_available: true, recent_hits: recent() } })
+  const { router } = mount('/admin/access-control?tab=policies&user=13&rec_source=p99&rec_action=observe&rec_panel=4&rec_page=3&rec_q=private&lst_state=problem')
+  fireEvent.click(await screen.findByRole('link', { name: 'View all records' }))
+  const params = new URLSearchParams(router.state.location.search)
+  expect(params.get('tab')).toBe('records'); expect(params.get('rec_user')).toBe('13'); expect(params.get('rec_since')).toBe('7d')
+  for (const key of ['user', 'sheet', 'rec_source', 'rec_action', 'rec_panel', 'rec_page', 'rec_q']) expect(params.has(key)).toBe(false)
+  expect(params.get('lst_state')).toBe('problem')
+})
+
+it('links from other hosts to account records and from the access host to node coverage', async () => {
+  api.get.mockResolvedValue({ data: { ...view(null), hits_available: false, recent_hits: recent() } })
+  const { router } = mount('/admin/risk?user=13')
+  const records = await screen.findByRole('link', { name: 'View all records' })
+  expect(records.getAttribute('href')).toBe('/admin/access-control?tab=records&rec_user=13&rec_since=7d')
+  fireEvent.click(screen.getByRole('link', { name: 'Node coverage' }))
+  expect(router.state.location.pathname).toBe('/admin/access-control')
+  expect(router.state.location.search).toBe('?sheet=nodes')
+})
+
+it.each(['<html>old route</html>', { ...view(), hits_available: true, recent_hits: null }, { ...view(), hits_available: false, recent_hits: { ...recent(), items: [{ ...recent().items[0], top_dests: new Array(4).fill(recent().items[0].top_dests[0]) }] } }])('rejects a malformed account summary instead of showing empty or fabricated history', async data => {
+  api.get.mockResolvedValue({ data }); mount()
+  await screen.findByText('Could not load this account’s destination access')
+  expect(screen.queryByText('No group')).toBeNull(); expect(screen.queryByText('Not exempt')).toBeNull()
 })

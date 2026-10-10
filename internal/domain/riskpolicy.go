@@ -30,6 +30,9 @@ const (
 	RiskDefaultUsageFloorGB = 3
 	// RiskGiB is the unit an admin types the floor in.
 	RiskGiB int64 = 1 << 30
+	// Destination blocking uses one fixed 24-hour window.
+	RiskDefaultDestBlockThreshold = 20
+	RiskMaxDestBlockThreshold     = 10000
 )
 
 // RiskPolicySettings is the flat, storage-shaped form of the risk policy —
@@ -39,6 +42,8 @@ const (
 // that is safe to judge with, the same split GeoPolicySettings makes for the
 // concurrent-location policy.
 type RiskPolicySettings struct {
+	DestBlockOff                                             bool
+	DestBlockThreshold                                       int
 	SubSpreadOff, DevicesOff, UsageShiftOff, LoginCountryOff bool
 	MinDays, MaxDevices                                      int
 	UsageRatio                                               float64
@@ -59,6 +64,8 @@ type RiskPolicySettings struct {
 // RiskPolicyFromSettings guarantees, and Bounded tightens five of them
 // against the fleet's configured runtime.
 type RiskPolicy struct {
+	DestBlockOff                                             bool
+	DestBlockThreshold                                       int // 1..10000; fixed 24-hour window
 	SubSpreadOff, DevicesOff, UsageShiftOff, LoginCountryOff bool
 	MinDays                                                  int     // 1..RiskWindowDays; Bounded: <= the configured window
 	MaxDevices                                               int     // >= 1
@@ -75,10 +82,11 @@ type RiskPolicy struct {
 // its default.
 func DefaultRiskPolicy() RiskPolicy {
 	return RiskPolicy{
-		MinDays:         RiskDefaultMinDays,
-		MaxDevices:      RiskDefaultMaxDevices,
-		UsageRatio:      RiskDefaultUsageRatio,
-		UsageFloorBytes: RiskDefaultUsageFloorGB * RiskGiB,
+		DestBlockThreshold: RiskDefaultDestBlockThreshold,
+		MinDays:            RiskDefaultMinDays,
+		MaxDevices:         RiskDefaultMaxDevices,
+		UsageRatio:         RiskDefaultUsageRatio,
+		UsageFloorBytes:    RiskDefaultUsageFloorGB * RiskGiB,
 		// login_country's and usage_shift's thresholds, the constants
 		// they replaced.
 		LoginWarmupLogins: RiskLoginWarmupLogins,
@@ -120,13 +128,17 @@ func DefaultRiskPolicy() RiskPolicy {
 //     (RiskUsageBaselineMaxDays, RiskUsageRecentMaxDays); Bounded then holds
 //     each to the series actually configured, and suspect to flag.
 //
-// The four switches have no "unset" — false IS the default (signal on) — and
+// The five switches have no "unset" — false IS the default (signal on) — and
 // are copied through.
 //
 // This is the single place these rules live; the admin form does not
 // validate, so there is no second definition of "valid" to drift from it.
 func RiskPolicyFromSettings(s RiskPolicySettings) RiskPolicy {
 	p := DefaultRiskPolicy()
+	p.DestBlockOff = s.DestBlockOff
+	if s.DestBlockThreshold > 0 {
+		p.DestBlockThreshold = min(s.DestBlockThreshold, RiskMaxDestBlockThreshold)
+	}
 	p.SubSpreadOff = s.SubSpreadOff
 	p.DevicesOff = s.DevicesOff
 	p.UsageShiftOff = s.UsageShiftOff

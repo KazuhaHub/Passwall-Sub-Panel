@@ -9,6 +9,7 @@ import { pushSnack } from '@/components/SnackbarHost'
 import { agoText } from '@/utils/riskCenter'
 import AddExemptionDialog from '../../accessControl/sheets/AddExemptionDialog'
 import PendingActionGuard from '../../accessControl/PendingActionGuard'
+import RecentHits from './RecentHits'
 import { destinationError } from '../../accessControl/errors'
 import { cancelExemptionCopy } from '../../accessControl/confirmCopy'
 const P = 'admin:access_control.account.'
@@ -34,7 +35,7 @@ export default function AccessTab({ userId, upn, onBusyChange }: { userId: numbe
   return <Stack spacing={2}>
     <PendingActionGuard hold={busy} />
     {query.error && <Alert severity="error" action={<Button disabled={query.isFetching} sx={{ minWidth: 44, minHeight: 44 }} onClick={() => void query.refetch()}>{t('common:actions.retry')}</Button>}>{t(`${P}load_failed`)}</Alert>}
-    {!data && query.isPending && [0, 1].map(key => <Skeleton key={key} variant="rounded" height={64} />)}
+    {!data && query.isPending && [0, 1, 2, 3, 4].map(key => <Skeleton key={key} variant="rounded" height={64} />)}
     {error && <Alert severity="error">{t(`${E}cancel_failed`, { error })}</Alert>}
     {data && <>
       <Box><Typography variant="subtitle2">{t(`${P}group`)}</Typography><Stack direction="row" sx={{ gap: 1, flexWrap: 'wrap', alignItems: 'center' }}><Typography sx={{ overflowWrap: 'anywhere' }}>{data.group?.name ?? t(`${P}no_group`)}</Typography><ToneBadge tone={stateTone(theme, data.group?.mode === 'allowlist' ? 'measuring' : 'quiet')} label={t(`${P}${data.group?.mode === 'allowlist' ? data.group.stage === 'enforce' ? 'enforce' : 'trial' : 'unlimited'}`)} /></Stack></Box>
@@ -44,6 +45,7 @@ export default function AccessTab({ userId, upn, onBusyChange }: { userId: numbe
           <Tooltip title={t(`${E}expiry_delay`)}><Box sx={{ alignSelf: 'flex-start' }}><ToneBadge tone={stateTone(theme, expired ? 'measuring' : 'quiet')} label={expired ? t(`${E}expired`) : exemption.expires_at === null ? t(`${E}expiry_never`) : t(`${P}expires_at`, { time: dateTime(exemption.expires_at) })} /></Box></Tooltip><Typography variant="caption">{t(`${E}allowlist_detail`)}</Typography><Button disabled={busy} sx={{ alignSelf: 'flex-start', minWidth: 44, minHeight: 44 }} onClick={() => void cancel()}>{t(`${E}cancel`)}</Button>
         </Stack> : <Stack direction="row" sx={{ alignItems: 'center', gap: 1, flexWrap: 'wrap' }}><Typography variant="body2">{t(`${P}not_exempt`)}</Typography><Button disabled={busy} sx={{ minWidth: 44, minHeight: 44 }} onClick={() => setEditor(true)}>{t(`${P}add`)}</Button></Stack>}
       </Box>
+      {data.recent_hits && data.hits_available !== null && <RecentHits userId={userId} hits={data.recent_hits} available={data.hits_available} disabled={busy} stale={!!query.error} />}
     </>}
     {editor && <AddExemptionDialog userId={userId} upn={upn} onClose={() => setEditor(false)} />}
   </Stack>

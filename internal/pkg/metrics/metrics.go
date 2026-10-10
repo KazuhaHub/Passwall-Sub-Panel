@@ -72,6 +72,20 @@ func (c *Counter) Inc() { c.v.Add(1) }
 // Add adds n.
 func (c *Counter) Add(n int64) { c.v.Add(n) }
 
+// AddSaturating handles unsigned peer diagnostics without wrapping counters.
+func (c *Counter) AddSaturating(n uint64) {
+	for {
+		old := c.v.Load()
+		next := int64(math.MaxInt64)
+		if n < uint64(math.MaxInt64-old) {
+			next = old + int64(n)
+		}
+		if c.v.CompareAndSwap(old, next) {
+			return
+		}
+	}
+}
+
 // Value returns the current tally.
 func (c *Counter) Value() int64 { return c.v.Load() }
 

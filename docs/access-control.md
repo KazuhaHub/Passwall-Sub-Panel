@@ -1,16 +1,120 @@
 # Destination access control
 
-Implementation follows the [final audit plan](https://github.com/KazuhaHub/Passwall-Sub-Panel/pull/271). Definition publication, native candidate compilation and list management are connected to the application. The feature remains under development: the remaining management interfaces, audit ingestion, browser acceptance and real Node kernel acceptance are pending.
+Implementation follows the [final audit plan](https://github.com/KazuhaHub/Passwall-Sub-Panel/pull/271). Definition publication, native candidate compilation, list management, hit ingestion, the records tab and account hit summaries are connected to the application. The feature remains under development: the remaining management interfaces, risk evaluation, privacy/consent integration, browser acceptance and real Node kernel acceptance are pending. Stage 4 usage collection and stage 5 group modes remain separate open work.
 
 ## Current implementation
 
 - Definition tables: `dest_lists`, `dest_policies`, `dest_exemptions`, `dest_group_modes`.
 - Publication and runtime state: `dest_policy_state`, `dest_policy_snapshots`, `dest_agent_policy`.
-- Durable audit storage: `dest_hits`, `dest_usage_hourly`, `dest_audit_batches`, `dest_audit_loss_hourly`, `dest_audit_ingest_budget`. Collection and ingestion are not connected yet.
+- Durable audit storage: `dest_hits`, `dest_usage_hourly`, `dest_audit_batches`, `dest_audit_loss_hourly`, `dest_audit_ingest_budget`. Hit ingestion, loss persistence and retention are connected; production usage writes remain inactive.
+- The sync HTTP boundary decodes `audit` separately, bounds its raw size and validates its shape and capabilities. Invalid telemetry is dropped without changing a valid control response. Audit batches are stripped from control caches. A successful validated sync offers telemetry to the bounded worker without waiting for the database; HTTP acceptance does not itself mean durable storage.
+- `psp_node_audit_report_total` uses the fixed `kind` and `outcome` enum labels. Diagnostics translate both labels in English and Chinese; existing single-label metric values keep their original interpretation. Logs for discarded audit subtrees contain only the authenticated agent identifier and a count, with per-agent rate limiting.
+- The audit queue reserves independent batch/byte/per-agent capacity for block, observe, trial and usage, including processing batches. In-flight deduplication is independent of bounded recent caches. Its seven-slot scheduler yields after each database chunk. Mapping merges final hit keys before persistence, preserves frozen actions and anonymous trial fields, and applies receiver-clock age bounds. Application startup and shutdown own the worker and its loss flushing; shutdown stops new offers before draining admitted work.
 - New tables participate in the normal boot migration. JSON columns use TEXT without defaults. Binary list content, original custom-list text, snapshots and policy bodies use SQLite BLOB, PostgreSQL BYTEA and MySQL LONGBLOB.
 - Candidate bytes are stored independently from confirmed policy bytes. The compiler and candidate observer use the latter for pruned last-known-good fallback and durable exhaustion, as described below.
 - Native panel collection settings are stored as `audit_collect` (`off`, `hits`, `hits_and_usage`) and `audit_collect_revision`. Creation and migration initialize `hits` and revision `1`. A normal panel `Save` omits these columns.
-- The native metadata writer validates collection mode and compares it under a transaction lock. A mode change increments revision atomically; repeated writes of the same mode do not. This write is not yet exposed by the HTTP request DTO. The future ingestion gate will use the same collection state to reject outdated batches.
+- The native metadata writer validates collection mode and compares it under a transaction lock. A mode change increments revision atomically; repeated writes of the same mode do not. The server request DTO exposes hit/off selection, and the ingestion gate rejects outdated collection revisions. B mode remains unavailable until stage 4.
+
+## Audit transaction foundation
+
+The destination audit repository commits the batch marker, whole-batch row-budget
+reservation, node/mapping loss counts and first chunk in one transaction. Later
+chunks preserve earlier commits on failure. A replay cannot fill a partially
+committed batch or reserve its budget twice. Transactions contain at most 1,000
+data rows and statements contain at most 200; final logical keys must be unique
+before entering the repository. Event counts, unmatched counts and dropped rows
+remain separate, and counter additions saturate at the signed storage limit.
+
+Each chunk checks the current panel collection revision, mode, agent ownership,
+engine and capabilities. Production repositories share a per-panel gate with
+collection-setting writes. The durable agent owner lock also serializes the batch
+identity check across connections. This check precedes the conflict-safe marker
+insert so MySQL `clientFoundRows=true` cannot disguise a replay as an insertion.
+Audit database operations disable SQL tracing independently of global Debug mode;
+value-bearing database errors become a fixed storage error at this boundary.
+
+Local SQLite transaction tests verify rollback, replay, partial failure, budget
+isolation, count/time upserts, anonymous trial rows, collection changes and SQL
+privacy. Storage foundation `7c55cd5a72f6515759b440934274b681349cbb2c`
+passed the [complete Test workflow](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37996403773),
+including actual PostgreSQL and MySQL repository suites and the MySQL
+`clientFoundRows=true` connection test. Worker/sync integration is now connected;
+the subsequent integration commit passed the
+[complete Test workflow](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/38010378151).
+Usage persistence is prepared internally; production usage collection
+remains inactive until its stage-4 acceptance.
+
+The worker engine handles one transaction per scheduling opportunity and keeps
+at most four mapped batches. It preserves the exact first receipt timestamp and
+the original budget hour, resolves distinct subject IDs in bounded queries, and
+rechecks receiver-clock age between chunks. The ID resolver reads only user IDs
+and disables tracing at the same private storage boundary; it does not load
+account metadata. Failed chunks stop the remainder, permission rejection stops
+the batch, and canceled progress cannot survive a collection-setting change.
+Graceful stopping refuses new offers before draining; forced cancellation
+returns the undrained batch/row counts.
+
+Worker regressions first failed against an empty engine. Windows Application
+Control blocks this package's local test executable, so its runtime evidence is
+the actual Linux race run in the
+[collector Test workflow](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/38004841445).
+Collection-state invalidation, bounded idempotent loss persistence and tracked
+startup/shutdown are connected. The hourly maintenance job applies distinct hit,
+trial and usage retention, keeps deduplication markers for 72 hours and removes
+orphans. Node status reads durable hit totals and independent loss units; turning
+collection off does not erase existing history. Maintenance and status commits
+passed their complete Test workflows, including real MySQL and PostgreSQL.
+
+## Hit records API
+
+`GET /api/admin/dest/hits` is administrator-only. It accepts time, user, panel,
+source, source kind, action and literal destination-keyword filters, with at most
+31 days and 200 items per page. Duplicate parameters, unknown keys and invalid
+ranges return a fixed 400 error. Missing or failed storage returns 503; neither
+partial results nor private driver values reach the response or error logger.
+
+`group_by=none` returns stored hourly records in deterministic primary-key order;
+`site`, `user` and `policy` return count-descending aggregates with stable time/key
+tie-breakers. Site folding uses the public and private suffix list; IP addresses
+share the `(ip)` bucket. Frozen source/action fields do not change when the current
+definition is edited. Display names reflect current definitions and become null
+after deletion. Anonymous group trial observations are excluded by default.
+
+Summary cards use the selected time/user/panel scope independently of list
+action/source/keyword/trial filters. Source options cover the whole selected time
+range. Losses remain related-panel totals: current client membership and historical
+hits identify related panels for user/source filters. They never become precise
+user or policy loss counts. `rows`, `events` and `unmatched` retain separate units,
+`dropped_in_range` mirrors only rows, and `complete` remains false.
+
+Summary, records/groups, names, source options and losses use one private read
+transaction, with repeatable-read isolation on MySQL and PostgreSQL. Local SQLite
+and assembled HTTP tests cover filtering, deletion, stable pagination, overflow,
+privacy failures, role restrictions and backend-switch admission. Concurrent
+server snapshot regression ran on actual MySQL/PostgreSQL CI; SQLite skips that
+concurrency case. Backend commit `85d137dc9d33397d093bf3cd78cb5e5323819963`
+passed its [complete Test workflow](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/38014479132)
+and [published-node systemd acceptance](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/38014479151).
+
+The records tab now mounts from the access-control page while active. It connects
+KPI filters, exact account selection, source/node/time/keyword filters, aggregation,
+pagination and separate incomplete-loss units. Node-zone hour labels retain
+fractional offsets, and sticky headings group the actual panel dates. Custom input
+uses browser time and keeps partial invalid edits local without querying a fallback.
+Keywords stay outside browser history, instants use Unix milliseconds, cancellation
+propagates and runtime component fields cannot enter the API parameter allowlist.
+The adapter validates the history envelope so fallback HTML or malformed data cannot
+become an empty or complete history. Per-session queries do not poll.
+
+Row actions open the existing test prefill, global exception/account exemption
+flow and account drawer. The footer focuses hit retention settings. Stage-5 deny
+cards and trial controls remain hidden until group-mode integration. The mobile
+layout uses two-column KPI cards, wrapped account/time fields, an extra-filter
+dialog and compact rows. Actual browser visual/interaction acceptance and real
+deployment acceptance remain open; frontend tests do not prove them.
+Records UI commit `9fa819b9f95380f0c642fc429016207df83663cc` passed its
+[complete Test workflow](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/38016425199)
+and [published-node systemd acceptance](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/38016425211).
 
 ## Definition and publication repository
 
@@ -831,20 +935,35 @@ The account, group, mode, exemption and creator display identifier share one
 consistent SQL read transaction under backend operation admission. The read
 selects only account ID/UPN/group ID and group ID/name; it does not resolve user
 entitlements or load credentials or private list bodies. It changes neither
-definitions nor generation. Before later collection stages, `hits_available`,
-`recent_hits`, `usage_available` and `usage_nodes` are present and null. Usage
-query parameters are rejected until their separately audited stage-4 read is
-implemented.
+definitions nor generation. `usage_available` and `usage_nodes` remain null;
+query parameters are rejected until the separately audited stage-4 usage read
+is implemented.
+
+`recent_hits.days` is `min(7, effective hit retention)`. Its source/action groups
+preserve historical actions and nullable current names. Counts and the top three
+destination/port pairs aggregate across hours and nodes before sorting; counts
+saturate instead of overflowing. Trial observations stay at group level and are
+excluded. Client projections, hit aggregates, display names and separate
+related-panel loss units share one private SQL snapshot. `complete:false` never
+becomes a claim of complete account coverage.
+
+`hits_available` requires a current client projection on a node whose collection
+is proven by capability, engine, recent report and the exact applied candidate.
+The application reuses the status proof and does not fetch fleet hit counters.
+Retained history remains visible when current collection stops. The Access tab
+loads this summary only when selected; its links open all account records or
+node coverage. Per-session summary queries do not poll. Failed or malformed
+reads display an error; fallback SPA HTML cannot fabricate empty history.
 
 The missing-route regression first failed against SPA fallback. Actual
 Build/HTTP tests verify group defaults, persisted trial mode, expired exemption
 visibility, administrator boundaries, missing/invalid IDs and unchanged
 generation. SQL query guards verify display-only reads, missing historical
 identities and corruption errors without partial responses. Frontend DTO/client
-methods are included; account drawer integration and browser acceptance remain
-pending. Complete local app, SQL-store, HTTP router/handler/middleware and domain
+methods and account drawer integration are included; browser acceptance remains
+pending. The account-metadata foundation passed local app, SQL-store, HTTP router/handler/middleware and domain
 suites, relevant static checks and TypeScript compilation pass. Current
-account-access head `3f72eb2dea050babba05170c8f2233875b05b475` passed its
+account-access foundation `3f72eb2dea050babba05170c8f2233875b05b475` passed its
 [complete Test workflow](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37392283019)
 and [released-node systemd acceptance](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/37392283122).
 Real third-party panel jobs were skipped; this does not establish unmerged
@@ -1893,12 +2012,65 @@ audit behavior; destination audit rows remain restricted to administrators.
 PSP's access logger strips query strings from `/api/admin/dest/` paths. Reverse
 proxies may still record API query parameters in their own access logs. Record
 search terms will remain component state rather than page URL state, but API
-queries can still reach those external logs. Audit ingestion, retention and
-consent enforcement remain part of the later implementation stages.
+queries can still reach those external logs. Hit ingestion and retention are now
+connected; consent enforcement remains part of the later integration stages.
+
+The destination-risk policy foundation is now wired through the global policy
+endpoint, SQL settings, per-group overrides and the policy card. The signal's
+negative switch defaults to enabled; its fixed 24-hour threshold defaults to
+20 and is bounded to 1..10000. An explicit group zero uses the shipped default
+rather than the global threshold. The card has no preset, automatic action or
+runtime-window setting. The pure six-state evaluator and an address-free bulk
+SQL window are implemented separately. Counts use frozen block actions and
+currently opted-in policies; allowlist fallback, observation and deleted
+policies are excluded. Counts and related panel block losses share one private
+read snapshot with current clients. Aggregates spanning a 24-hour cutoff are
+excluded because their inside-window counts are unknown. Evidence retains only
+policy IDs, counts, current collecting-node counts and separate loss units,
+with incomplete coverage explicitly stated. Production assembly now supplies
+one bulk read to the observe-only worker, with the status page's exact current
+collection proof and the caller's backend admission. Location trust does not
+mask this signal; read failures preserve enabled rows, explicit off needs no
+telemetry, and cancellation saves no verdicts. The registered kind and six
+codes flow through the queue, records and freshness rules. Evidence renders
+current policy names, deleted/read-failed labels and separate panel losses;
+incomplete clean is never green. Drawer and records link to the account's
+fixed-24h block history. Production integration `852ae71b` passed its own
+[complete Test workflow](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/38035190167)
+and [systemd acceptance](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/38035190169).
+The real MySQL/PostgreSQL storage suites and assembled Linux App tests passed,
+including persisted destination-risk transitions and both rule-free collection
+contracts. Shared detector badges and blocking labels in `340e6168` passed
+[Test](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/38035830221)
+and [systemd acceptance](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/38035830618).
+Browser acceptance and real Node deployment checks remain open.
+
+Stage-2c recording controls now share one node dialog between fleet coverage
+and native-server details. It submits only `audit_collect`; the server owns the
+revision. Reported hit/usage capabilities restrict the three choices, and
+sing-box is read-only. Retention uses the effective destination settings,
+without substituting guessed defaults after failed or malformed reads. The
+restart estimate uses the configured node sync interval. No extra confirmation
+is added after the visible restart and account-usage notices. Off explains
+immediate ingestion cessation, next-sync collection cessation and ordinary
+historical retention. Trial hits explain their account-free group/domain
+aggregation; explicit usage also includes trial connections by account.
+
+The usage choice warns when privacy and terms are disabled or their status is
+unknown and links to the planned legal settings tab without preventing saving.
+`legal_enabled` is optional until the legal branch is integrated. A neutral
+data disclosure distinguishes connection counts from traffic and complete
+browsing history. The dialog prevents duplicate writes and closing during a
+save, retains failed drafts, invalidates only its session's server/status
+queries and drops drafts/callbacks on identity or permission changes. Server
+details show retained 24-hour hits separately from current collection proof,
+preserve unknown counts and link to exact `rec_panel` records. The shared block
+is ready for the later server-overview consumer; that consumer has not landed.
+These controls still require real browser and Node deployment acceptance.
 
 Stage 1c still requires the remaining access-control views and complete browser
 acceptance. C2's end-to-end browser
-acceptance remains outstanding. Audit ingestion,
-retention, privacy/consent and subsequent stages retain the full final-plan
+acceptance remains outstanding. Risk evaluation, records browser acceptance,
+privacy/consent integration and subsequent stages retain the full final-plan
 scope. Repository tests and green CI do not establish completion of these
-requirements.
+requirements or real deployment acceptance.
