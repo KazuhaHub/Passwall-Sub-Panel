@@ -36,8 +36,23 @@ func readLegalState(tx *gorm.DB, write bool) (domain.LegalConsentStatus, error) 
 		}
 		strength = "UPDATE"
 	}
+	return readLegalStateWithLock(tx, strength)
+}
+
+// Public disclosure already owns a repeatable-read snapshot. Taking SHARE
+// there would mix locking/current reads with snapshot reads on MySQL and can
+// cause serialization failures against publication on PostgreSQL.
+func readLegalSnapshotState(tx *gorm.DB) (domain.LegalConsentStatus, error) {
+	return readLegalStateWithLock(tx, "")
+}
+
+func readLegalStateWithLock(tx *gorm.DB, strength string) (domain.LegalConsentStatus, error) {
+	query := tx
+	if strength != "" {
+		query = query.Clauses(clause.Locking{Strength: strength})
+	}
 	var state settingRow
-	err := tx.Clauses(clause.Locking{Strength: strength}).Where("type = ? AND name = ?", "legal", "consent_version").First(&state).Error
+	err := query.Where("type = ? AND name = ?", "legal", "consent_version").First(&state).Error
 	status := domain.LegalConsentStatus{}
 	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		return status, err

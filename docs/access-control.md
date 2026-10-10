@@ -2071,6 +2071,19 @@ These controls still require real browser and Node deployment acceptance.
 Stage 1c still requires the remaining access-control views and complete browser
 acceptance. C2's end-to-end browser
 acceptance remains outstanding. Risk evaluation, records browser acceptance,
-privacy/consent integration and subsequent stages retain the full final-plan
+privacy/consent runtime acceptance and subsequent stages retain the full final-plan
 scope. Repository tests and green CI do not establish completion of these
 requirements or real deployment acceptance.
+
+The legal integration now supplies current collection counts and effective
+retention to both public documents and administrator previews. It reuses the
+status page's digest-verified current native-Xray proof, including collection
+revision, capability and liveness checks. Hits require executable block/observe
+rules; trial requires a group observe fallback. Usage is counted independently
+and can remain active without hit rules. Physical nodes are deduplicated and
+zero rows are omitted. One read-only repeatable-read snapshot covers publication
+state, document, settings and node proof. Only kind, count and retention leave
+the repository; server names, accounts, credentials and historical data do not
+enter this projection. The existing whole-document ETag covers these changes.
+This slice still needs its own Linux/server-dialect CI and real deployment
+acceptance; prior integration CI does not validate the newly added code.

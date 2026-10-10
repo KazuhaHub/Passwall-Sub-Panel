@@ -6,6 +6,7 @@ type DestCollectionFacts struct {
 	Collect  string
 	Revision uint64
 	Hits     bool
+	Trial    bool
 }
 
 type DestStatusPanel struct {

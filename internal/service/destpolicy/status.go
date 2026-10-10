@@ -210,7 +210,9 @@ func (c *CollectionFactsCache) Read(agentID, digest string, load func() ([]byte,
 	for _, rule := range policy.Rules {
 		if rule.Action == protocol.RuleBlock || rule.Action == protocol.RuleObserve {
 			fact.Hits = true
-			break
+		}
+		if trialFallback(rule) {
+			fact.Trial = true
 		}
 	}
 	c.mu.Lock()

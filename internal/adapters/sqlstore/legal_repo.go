@@ -13,6 +13,7 @@ import (
 	"gorm.io/gorm/clause"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/destpolicy"
 )
 
 type legalDocumentRow struct {
@@ -31,6 +32,7 @@ func (legalDocumentRow) TableName() string { return "legal_documents" }
 type legalRepo struct {
 	db         *gorm.DB
 	invalidate func()
+	facts      destpolicy.CollectionFactsCache
 }
 
 var errLegalStaleDraft = errors.New("legal draft based on a stale version")

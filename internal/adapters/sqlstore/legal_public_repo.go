@@ -6,7 +6,6 @@ import (
 	"fmt"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
-	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 	"golang.org/x/text/language"
 	"gorm.io/gorm"
 )
@@ -29,11 +28,10 @@ func (r *legalRepo) Public(ctx context.Context, kind, requested string) (domain.
 	}
 	locales = append(locales, "en-US", "zh-CN")
 	var public domain.LegalPublicDocument
-	err = r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		// Hold publication's global row while choosing the document, including
-		// fallback queries. A cached settings read followed by Latest could pair
-		// an old body with a new consent version at READ COMMITTED isolation.
-		state, err := readLegalState(tx, false)
+	err = r.collectionReadTransaction(ctx, func(tx *gorm.DB) error {
+		// One snapshot pairs publication state, fallback body, collection proof
+		// and retention without blocking publishers or mixing current reads.
+		state, err := readLegalSnapshotState(tx)
 		if err != nil {
 			return err
 		}
@@ -58,11 +56,11 @@ func (r *legalRepo) Public(ctx context.Context, kind, requested string) (domain.
 			// Read durable collection settings in this transaction rather than
 			// combining the public body with a stale cached disclosure. Only the
 			// explicit public policy fields leave the repository.
-			settings, err := newKVSettingsRepo(tx).Load(ctx, ports.UISettings{})
+			collection, err := r.collectionFromTransaction(ctx, tx)
 			if err != nil {
 				return err
 			}
-			public.DataCollection = ports.LegalDataCollectionFromSettings(settings)
+			public.DataCollection = collection
 			if locale != requested {
 				public.FallbackFrom = requested
 			}
@@ -71,7 +69,13 @@ func (r *legalRepo) Public(ctx context.Context, kind, requested string) (domain.
 		return domain.ErrNotFound
 	})
 	if err != nil {
-		return domain.LegalPublicDocument{}, err
+		if errors.Is(err, domain.ErrNotFound) {
+			return domain.LegalPublicDocument{}, domain.ErrNotFound
+		}
+		if errors.Is(err, domain.ErrValidation) {
+			return domain.LegalPublicDocument{}, domain.ErrValidation
+		}
+		return domain.LegalPublicDocument{}, legalCollectionReadError(ctx)
 	}
 	return public, nil
 }
