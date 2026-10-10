@@ -33,6 +33,22 @@ func TestBuildLegalCollectionTracksAppliedPolicyAndInvalidatesPublicETag(t *test
 		t.Fatal(err)
 	}
 	token := destinationRefreshAdminToken(t, f.a)
+	checkAccountUsage := func(want bool) {
+		t.Helper()
+		w := destinationListRequest(t, f.a, token, "GET", fmt.Sprintf("users/%d", f.user.ID), nil)
+		var view struct {
+			Available *bool                  `json:"usage_available"`
+			Nodes     []domain.DestUsageNode `json:"usage_nodes"`
+			Retention int                    `json:"usage_retention_days"`
+			Top       json.RawMessage        `json:"usage_top"`
+		}
+		if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &view) != nil || view.Available == nil || *view.Available != want || view.Nodes == nil || (len(view.Nodes) > 0) != want || view.Retention != 9 || view.Top != nil {
+			t.Fatal("account usage metadata lost current collection proof or fetched private history")
+		}
+		if want && (len(view.Nodes) != 1 || view.Nodes[0].PanelID != f.agent.PanelID) {
+			t.Fatal("account usage included unrelated nodes")
+		}
+	}
 	read := func(etag string) *httptest.ResponseRecorder {
 		t.Helper()
 		req := httptest.NewRequest(http.MethodGet, "/api/legal/privacy?lang=en-US", nil)
@@ -64,6 +80,7 @@ func TestBuildLegalCollectionTracksAppliedPolicyAndInvalidatesPublicETag(t *test
 		return etag
 	}
 	etag := check("", []domain.LegalAccessCollection{})
+	checkAccountUsage(false)
 	policy := saveWiringPolicy(t, f)
 	f.report.CoreEngine = "xray"
 	f.report.Capabilities = []string{protocol.CapabilityDestinationPolicy, protocol.CapabilityAuditHits, "audit.usage.v1"}
@@ -104,8 +121,14 @@ func TestBuildLegalCollectionTracksAppliedPolicyAndInvalidatesPublicETag(t *test
 	if w := read(etag); w.Code != http.StatusNotModified {
 		t.Fatal("old applied revision became public usage collection")
 	}
+	checkAccountUsage(false)
 	if err := f.a.destCompiler.ObserveStatus(t.Context(), f.agent.AgentID, &protocol.PolicyStatus{State: "applied", Digest: protocol.PolicyDigest(empty.Config.Body.Policy)}, f.report.Capabilities); err != nil {
 		t.Fatal(err)
 	}
 	check(etag, []domain.LegalAccessCollection{{Kind: "usage", Nodes: 1, RetentionDays: 9}})
+	checkAccountUsage(true)
+	if _, err := f.a.database.ExecContext(t.Context(), "DELETE FROM psp_clients WHERE user_id = ?", f.user.ID); err != nil {
+		t.Fatal(err)
+	}
+	checkAccountUsage(false)
 }

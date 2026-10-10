@@ -3,7 +3,6 @@ package handler
 import (
 	"context"
 	"errors"
-	"net/url"
 	"strconv"
 	"time"
 
@@ -13,14 +12,20 @@ import (
 )
 
 type AdminDestinationUsersHandler struct {
-	read func(context.Context, int64) (domain.DestUserAccess, error)
+	read  func(context.Context, int64) (domain.DestUserAccess, error)
+	usage *AdminDestinationUsageHandler
 }
 
-func NewAdminDestinationUsersHandler(read func(context.Context, int64) (domain.DestUserAccess, error)) *AdminDestinationUsersHandler {
-	return &AdminDestinationUsersHandler{read: read}
+func NewAdminDestinationUsersHandler(read func(context.Context, int64) (domain.DestUserAccess, error), usage ...*AdminDestinationUsageHandler) *AdminDestinationUsersHandler {
+	h := &AdminDestinationUsersHandler{read: read}
+	if len(usage) > 0 {
+		h.usage = usage[0]
+	}
+	return h
 }
 
 func (h *AdminDestinationUsersHandler) Get(c *gin.Context) {
+	c.Header("Cache-Control", "no-store")
 	if h.read == nil {
 		c.JSON(503, gin.H{"error": "destination user access unavailable"})
 		return
@@ -30,8 +35,8 @@ func (h *AdminDestinationUsersHandler) Get(c *gin.Context) {
 		c.JSON(400, gin.H{"error": "dest_policy_invalid", "field": "user_id"})
 		return
 	}
-	// Usage reads require stage-4 availability and their own audited boundary.
-	if params, err := url.ParseQuery(c.Request.URL.RawQuery); err != nil || len(params) != 0 {
+	usageQuery, err := destinationUserUsageQuery(c.Request.URL.RawQuery, id, time.Now().UTC())
+	if err != nil {
 		c.JSON(400, gin.H{"error": "dest_policy_invalid", "field": "usage"})
 		return
 	}
@@ -53,5 +58,17 @@ func (h *AdminDestinationUsersHandler) Get(c *gin.Context) {
 		ex := *access.Exemption
 		exemption = destinationExemptionView(destpolicy.ExemptionView{Exemption: ex, UPN: &access.UPN, CreatedByUPN: access.CreatedByUPN, Expired: ex.ExpiresAt != nil && !ex.ExpiresAt.After(time.Now().UTC())})
 	}
-	c.JSON(200, gin.H{"group": group, "exemption": exemption, "hits_available": access.HitsAvailable, "recent_hits": access.RecentHits, "usage_available": nil, "usage_nodes": nil})
+	view := gin.H{"group": group, "exemption": exemption, "hits_available": access.HitsAvailable, "recent_hits": access.RecentHits, "usage_available": access.UsageAvailable, "usage_nodes": access.UsageNodes, "usage_retention_days": access.UsageRetentionDays}
+	if usageQuery != nil {
+		if h.usage == nil {
+			respondPublicError(c, domain.ErrUnavailable)
+			return
+		}
+		page, ok := h.usage.readAudited(c, *usageQuery)
+		if !ok {
+			return
+		}
+		view["usage_top"] = page
+	}
+	c.JSON(200, view)
 }

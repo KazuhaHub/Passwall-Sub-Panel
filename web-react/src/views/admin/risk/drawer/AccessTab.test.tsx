@@ -35,12 +35,67 @@ beforeEach(() => {
   api.get.mockResolvedValue({ data: view() }); api.delete.mockResolvedValue({ data: {} }); confirmation.mockResolvedValue(false)
 })
 afterEach(() => { cleanup(); vi.restoreAllMocks() })
+
+it('reads website usage only after a click and keeps results out of URL and query cache', async () => {
+  const usage = { items: [{ site: 'private-usage.test', count: 9 }], total_sites: 1, total_count: 9,
+    losses: { rows: 1, events: 2, unmatched: 3, scope: 'panel', complete: false } }
+  api.get.mockImplementation((url: string) => Promise.resolve({ data: url.endsWith('/usage') ? usage :
+    { ...view(), usage_available: true, usage_nodes: [{ panel_id: 2, name: 'Tokyo' }], usage_retention_days: 7 } }))
+  const mounted = mount()
+  const show = await screen.findByRole('button', { name: 'Show website usage' })
+  expect(api.get).toHaveBeenCalledOnce()
+  fireEvent.click(show)
+  await screen.findByText('private-usage.test')
+  expect(api.get.mock.calls[1]).toEqual(['/admin/dest/usage', expect.objectContaining({ params: { user_id: 13, since: '24h' }, signal: expect.any(AbortSignal) })])
+  expect(screen.getByText(/Connections, not bandwidth/)).toBeTruthy()
+  expect(screen.getByText(/node-level totals/)).toBeTruthy()
+  expect(mounted.router.state.location.search).toBe('')
+  expect(JSON.stringify(mounted.client.getQueryCache().getAll().map(q => q.state.data))).not.toContain('private-usage.test')
+  window.dispatchEvent(new Event('focus'))
+  await act(async () => { await Promise.resolve() })
+  expect(api.get).toHaveBeenCalledTimes(2)
+  fireEvent.click(screen.getByRole('button', { name: 'Past 7 days' }))
+  expect(screen.queryByText('private-usage.test')).toBeNull()
+  expect(api.get).toHaveBeenCalledTimes(2)
+  fireEvent.click(screen.getByRole('button', { name: 'Show website usage' }))
+  await screen.findByText('private-usage.test')
+  expect(api.get.mock.calls[2][1].params.since).toBe('7d')
+})
+
+it('does not read usage without collecting nodes and deduplicates the one-day range', async () => {
+  api.get.mockResolvedValue({ data: { ...view(), usage_available: false, usage_nodes: [], usage_retention_days: 1 } })
+  const mounted = mount()
+  await screen.findByText('None of this account’s nodes record website usage')
+  expect(screen.queryByRole('button', { name: 'Show website usage' })).toBeNull()
+  expect(api.get).toHaveBeenCalledOnce()
+  api.get.mockResolvedValue({ data: { ...view(), usage_available: true, usage_nodes: [{ panel_id: 1, name: 'Only' }], usage_retention_days: 1 } })
+  await act(async () => { useAuthStore.setState({ authEpoch: 6 }); mounted.rerender() })
+  await screen.findByRole('button', { name: 'Show website usage' })
+  expect(screen.getAllByRole('button', { name: 'Past 24 hours' })).toHaveLength(1)
+  expect(screen.queryByRole('button', { name: 'Past 1 days' })).toBeNull()
+})
+
+it('aborts pending usage and discards private results after session change', async () => {
+  let finish!: (value: unknown) => void
+  let signal: AbortSignal | undefined
+  api.get.mockImplementation((url: string, options: { signal?: AbortSignal }) => url.endsWith('/usage')
+    ? new Promise(resolve => { finish = resolve; signal = options.signal })
+    : Promise.resolve({ data: { ...view(), usage_available: true, usage_nodes: [{ panel_id: 2, name: 'Tokyo' }], usage_retention_days: 7 } }))
+  const mounted = mount()
+  fireEvent.click(await screen.findByRole('button', { name: 'Show website usage' }))
+  await waitFor(() => expect(signal).toBeDefined())
+  await act(async () => { useAuthStore.setState({ authEpoch: 6 }); mounted.rerender() })
+  expect(signal?.aborted).toBe(true)
+  await act(async () => { finish({ data: { items: [{ site: 'discarded-private.test', count: 1 }], total_sites: 1, total_count: 1, losses: { rows: 0, events: 0, unmatched: 0, scope: 'panel', complete: false } } }); await Promise.resolve() })
+  expect(screen.queryByText('discarded-private.test')).toBeNull()
+  expect(await screen.findByRole('button', { name: 'Show website usage' })).toBeTruthy()
+})
 function mount(entry = '/admin/access-control') {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   const router = createMemoryRouter([{ path: '/admin/*', element: <AccessTab userId={13} upn={row.upn!} /> }], { initialEntries: [entry] })
   const tree = () => <ThemeProvider theme={createAppTheme({ mode: 'light', sourceColor: '#6750a4', language: 'en-US' })}><QueryClientProvider client={client}><AppRouter router={router} /></QueryClientProvider></ThemeProvider>
   const result = render(tree())
-  return { router, rerender: () => result.rerender(tree()) }
+  return { router, client, rerender: () => result.rerender(tree()) }
 }
 it('formats expiry with the interface locale and updates it without another read', async () => {
   await translation.instance.changeLanguage('zh-CN')

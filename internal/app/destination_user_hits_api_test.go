@@ -131,10 +131,10 @@ func TestBuildDestinationUserHitsAvailabilityNeedsCurrentClientAndAppliedProof(t
 		var view struct {
 			Available      *bool                  `json:"hits_available"`
 			Recent         *domain.DestRecentHits `json:"recent_hits"`
-			UsageAvailable any                    `json:"usage_available"`
-			UsageNodes     any                    `json:"usage_nodes"`
+			UsageAvailable *bool                  `json:"usage_available"`
+			UsageNodes     []domain.DestUsageNode `json:"usage_nodes"`
 		}
-		if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &view) != nil || view.Available == nil || *view.Available != available || view.Recent == nil || view.Recent.Days != days || len(view.Recent.Items) != 1 || view.Recent.Items[0].Count != 4 || view.Recent.Items[0].SourceName != nil || view.Recent.Items[0].TopDests[0].Dest != "example.test" || view.Recent.Losses.Events != 2 || view.Recent.Losses.Unmatched != 3 || view.Recent.Losses.Scope != "panel" || view.Recent.Losses.Complete || view.UsageAvailable != nil || view.UsageNodes != nil {
+		if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &view) != nil || view.Available == nil || *view.Available != available || view.Recent == nil || view.Recent.Days != days || len(view.Recent.Items) != 1 || view.Recent.Items[0].Count != 4 || view.Recent.Items[0].SourceName != nil || view.Recent.Items[0].TopDests[0].Dest != "example.test" || view.Recent.Losses.Events != 2 || view.Recent.Losses.Unmatched != 3 || view.Recent.Losses.Scope != "panel" || view.Recent.Losses.Complete || view.UsageAvailable == nil || *view.UsageAvailable || view.UsageNodes == nil || len(view.UsageNodes) != 0 {
 			t.Fatalf("account hits availability/history HTTP=%d available=%v", w.Code, view.Available)
 		}
 	}

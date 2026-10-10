@@ -588,7 +588,17 @@
       "hits_empty_other": "过去 {{days}} 天没有命中",
       "hits_all": "在记录中查看全部",
       "hits_unavailable": "这个账号所在的节点当前都不记录命中",
-      "hits_stale": "刷新失败，当前显示的是上次读取的命中摘要。"
+      "hits_stale": "刷新失败，当前显示的是上次读取的命中摘要。",
+      "usage_title": "按网站用量",
+      "usage_show": "显示按网站用量",
+      "usage_range": "按网站用量时间范围",
+      "usage_audited": "查看会记入审计日志",
+      "usage_ip_help": "客户端以 IP 连接时只记为 (ip)。",
+      "usage_loading": "正在读取按网站用量",
+      "usage_failed": "无法读取按网站用量，请点击重试。",
+      "usage_empty": "这段时间没有记录",
+      "usage_unavailable": "这个账号所在的节点没有开启按网站用量",
+      "usage_detail": "连接次数，不是流量 · 保留 {{days}} 天 · 只统计开启了用量记录的节点：{{nodes}}"
     },
     "test": {
       "title": "测试目的地",

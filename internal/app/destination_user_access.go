@@ -33,6 +33,8 @@ func (a *App) destinationUserAccess(ctx context.Context, userID int64) (domain.D
 	}
 	hits.Days = days
 	available := false
+	usageAvailable := false
+	usageNodes := []domain.DestUsageNode{}
 	if len(hits.ClientPanelIDs) > 0 {
 		related := make(map[int64]bool, len(hits.ClientPanelIDs))
 		for _, id := range hits.ClientPanelIDs {
@@ -45,10 +47,14 @@ func (a *App) destinationUserAccess(ctx context.Context, userID int64) (domain.D
 		for _, node := range status.Nodes {
 			if related[node.PanelID] && node.Collecting {
 				available = true
-				break
+			}
+			if related[node.PanelID] && node.UsageCollecting {
+				usageAvailable = true
+				usageNodes = append(usageNodes, domain.DestUsageNode{PanelID: node.PanelID, Name: node.PanelName})
 			}
 		}
 	}
 	access.HitsAvailable, access.RecentHits = &available, &hits
+	access.UsageAvailable, access.UsageNodes, access.UsageRetentionDays = &usageAvailable, usageNodes, settings.DestinationSettings().Effective().UsageRetentionDays
 	return access, nil
 }

@@ -166,7 +166,7 @@ export default function RiskUserDrawer({ userId, onClose, host, initialTab }: {
           {visibleTab === 'connections' && <ConnectionsTab summary={data} />}
           {visibleTab === 'devices' && <DevicesTab summary={data} />}
           {visibleTab === 'timeline' && <TimelineTab userId={data.user.id} upn={data.user.upn} />}
-          {visibleTab === 'access' && <AccessTab key={data.user.id} userId={data.user.id} upn={data.user.upn} onBusyChange={setAccessBusy} />}
+          {open && visibleTab === 'access' && <AccessTab key={data.user.id} userId={data.user.id} upn={data.user.upn} onBusyChange={setAccessBusy} />}
         </Box>
       </>
     )

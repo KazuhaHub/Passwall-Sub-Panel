@@ -2099,7 +2099,33 @@ stream retains only the bounded top sites, with deterministic count/site
 ordering. It reads only site/count columns; usage losses keep separate row,
 event and unmatched units and explicitly retain panel scope. Counts and losses
 share a private repeatable-read snapshot. Errors return no partial result or
-private SQL diagnostic. This foundation does not expose an HTTP usage route;
-audited reads, retention enforcement, account availability and explicit
-on-demand UI remain required before stage 4 is delivered. The new SQL cases
-still require this branch's Linux/server-dialect execution.
+private SQL diagnostic. Foundation candidate `749f8600` passed its own complete
+[Test workflow](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/38053423709),
+including SQLite/race and real MySQL/PostgreSQL reads. Its predecessor exposed
+a cancellation error that is now preserved without leaking driver details.
+
+The administrator-only `GET /api/admin/dest/usage` requires `user_id`; optional
+`panel_id`, `since` and `until` narrow the read. The account drawer also accepts
+`GET /api/admin/dest/users/:id?usage=24h|<N>d`. Both return Top 20 connection
+counts and node-level, incomplete loss totals. Application admission bounds
+the duration and oldest hourly bucket to the effective usage retention and
+rejects future end times. Turning collection off does not erase retained history.
+Ordinary account reads fetch no website usage and expose current `usage_available`,
+`usage_nodes` (panel ID/name) and `usage_retention_days`. Rule-free usage still
+requires exact applied digest/revision, current capability and node liveness.
+
+Both explicit reads write `dest.usage.read` using the normal audit repository.
+Only the account ID and UTC millisecond window enter its parameters; the target
+is the route template. Operators cannot read either usage data or these audit
+rows. A shared, bounded process cache coalesces concurrent reads for the same
+administrator/account for ten minutes. Audit failure or cache saturation returns
+unavailable without returning usage. Restarting or using another PSP process
+can add an audit row; the cache never stores usage data. Responses use `no-store`.
+
+The drawer fetches website usage only on an explicit click. Ranges are 24 hours
+and `min(7, retention)` days, deduplicated at one day. Results stay in component
+state, outside URLs and shared query caches, and are discarded on account/session,
+coverage or retention changes, read errors, tab exit and drawer close. Connections
+to IP addresses are shown as `(ip)`. Local component tests and a production build
+cover this path; new HTTP/runtime cases still require this candidate's Linux CI.
+Browser and VM/load acceptance remain open, as does the rest of the final plan.
