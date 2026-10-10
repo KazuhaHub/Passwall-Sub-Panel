@@ -1768,7 +1768,7 @@
       "devices": "Devices",
       "usage_shift": "Usage change",
       "login_country": "Login country",
-      "dest_block": "Destination blocks"
+      "dest_block": "Destination blocking"
     },
     "expand": "Show evidence",
     "collapse": "Hide",
@@ -2020,7 +2020,7 @@
         "usage_shift": "Usage change",
         "login_country": "Login country",
         "review": "Admin review",
-        "dest_block": "Destination blocks"
+        "dest_block": "Destination blocking"
       },
       "level": {
         "flagged": "Flagged",
@@ -2246,8 +2246,8 @@
       "geoip_off": "unavailable",
       "geoip_open": "Open settings",
       "dest_block_selected": "Selected risk policies: {{names}}",
-      "dest_block_none": "No destination policies selected for risk",
-      "dest_block_none_detail": "Select Counts as risk on the destination policies to include. Frozen block hits for those policies form the observed lower bound; low counts do not establish safety.",
+      "dest_block_none": "No policies count toward risk; this detector cannot trigger",
+      "dest_block_none_detail": "Select Counts as risk on destination policies. Only frozen block hits count; allowlist rejections and observation hits never count. Counts remain observed lower bounds.",
       "dest_block_read_failed": "The selected policy names are unavailable. Open access control to check them; this does not mean none are selected.",
       "dest_block_loading": "Loading selected risk policies…",
       "dest_block_open": "Open access control"

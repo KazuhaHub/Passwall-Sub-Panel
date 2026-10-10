@@ -39,7 +39,7 @@ it('explains destination block attention from its stored lower bound', () => {
   }] })
   expect(headlineText(r, t, ctx)).toBe('最近 24 小时至少 37 次目的地阻断（阈值 20 次）')
   expect(headlineText(r, tEn, ctxEn)).toBe('At least 37 destination blocks in the last 24 hours (threshold 20)')
-  expect(sourceChipLabel('dest_block', r, t)).toBe('目的地阻断')
+  expect(sourceChipLabel('dest_block', r, t)).toBe('访问拦截')
 })
 
 const NO_REVIEW = { dismissed: false, reopened: false, lapsed: false, trusted: false, escalated: [] }

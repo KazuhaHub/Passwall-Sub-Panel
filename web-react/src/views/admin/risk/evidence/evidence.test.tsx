@@ -48,7 +48,7 @@ function mount(node: ReactNode) {
   render(<ThemeProvider theme={theme}>{node}</ThemeProvider>)
 }
 
-const chipOf = (label: string) => screen.getByText(label).closest('.MuiChip-root') as HTMLElement
+const chipOf = (label: string) => screen.getByText(label).closest('[data-state], .MuiChip-root') as HTMLElement
 
 describe('destination blocking lower bounds', () => {
   it('resolves current policy names and explicitly marks deleted sources', () => {
@@ -88,7 +88,7 @@ describe('destination blocking lower bounds', () => {
   it('does not paint an incomplete clean signal green', () => {
     mount(<RiskKindChip sig={{ kind: 'dest_block' as RiskSignal['kind'], state: 'clean', code: 'within', updated_at_ms: 1,
       evidence: { total: 1, threshold: 20, window_hours: 24, coverage_complete: false } }} />)
-    expect(chipOf('正常').className).not.toContain('MuiChip-colorSuccess')
+    expect(chipOf('正常').getAttribute('data-state')).toBe('quiet')
   })
 })
 
@@ -125,7 +125,7 @@ describe('DetectorStateChip', () => {
 
   it('says 尚未计算 for a detector with no row', () => {
     mount(<DetectorStateChip state="not_computed" />)
-    expect(chipOf('尚未计算').className).not.toContain('MuiChip-colorSuccess')
+    expect(chipOf('尚未计算').getAttribute('data-state')).toBe('quiet')
   })
 
   // A clean verdict judged while a panel was unreadable stands on a FLOOR of
@@ -137,13 +137,13 @@ describe('DetectorStateChip', () => {
       <DetectorStateChip state="clean" complete={false} />
       <DetectorStateChip state="flagged" complete={false} />
     </>)
-    expect(chipOf('正常').className).not.toContain('MuiChip-colorSuccess')
-    expect(chipOf('正常').className).toContain('MuiChip-colorDefault')
-    expect(chipOf('已标记').className).toContain('MuiChip-colorError')
+    expect(chipOf('正常').getAttribute('data-state')).toBe('quiet')
+    expect(chipOf('正常').querySelector('svg')).toBeTruthy()
+    expect(chipOf('已标记').getAttribute('data-state')).toBe('failing')
     cleanup()
 
     mount(<DetectorStateChip state="clean" />)
-    expect(chipOf('正常').className).toContain('MuiChip-colorSuccess')
+    expect(chipOf('正常').getAttribute('data-state')).toBe('ok')
   })
 
   it('carries its tooltip', () => {

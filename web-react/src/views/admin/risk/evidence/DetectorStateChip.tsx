@@ -1,5 +1,6 @@
-import { Chip, Tooltip } from '@mui/material'
+import { Tooltip, useTheme } from '@mui/material'
 import { useTranslation } from 'react-i18next'
+import { severityTone, stateTone, ToneBadge } from '@/components/ToneBadge'
 
 import { stateColor, stateLabelKey, type DetectorState } from './state'
 
@@ -23,11 +24,10 @@ export interface DetectorStateChipProps {
  */
 export function DetectorStateChip({ state, code, complete, tooltip }: DetectorStateChipProps) {
   const { t } = useTranslation(['admin'])
-  const c = stateColor(state)
-  const chip = (
-    <Chip size="small" color={complete === false && c === 'success' ? 'default' : c}
-      variant={state === 'not_computed' ? 'outlined' : 'filled'}
-      label={t(`admin:${stateLabelKey(state, code)}`)} />
-  )
-  return tooltip ? <Tooltip title={tooltip}>{chip}</Tooltip> : chip
+  const theme = useTheme()
+  const c = complete === false && stateColor(state) === 'success' ? 'default' : stateColor(state)
+  const paint = c === 'error' ? 'failing' : c === 'warning' ? 'attention' : c === 'success' ? 'ok' : c === 'info' ? 'notice' : 'quiet'
+  const tone = paint === 'notice' ? severityTone(theme, 'notice') : stateTone(theme, paint)
+  const badge = <ToneBadge tone={tone} data={paint} label={t(`admin:${stateLabelKey(state, code)}`)} />
+  return tooltip ? <Tooltip title={tooltip}><span>{badge}</span></Tooltip> : badge
 }

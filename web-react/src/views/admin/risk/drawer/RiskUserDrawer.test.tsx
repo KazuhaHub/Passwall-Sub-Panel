@@ -254,7 +254,7 @@ describe('RiskUserDrawer', () => {
     await header()
     const rows = screen.getAllByTestId('detector-row')
     expect(rows.map(r => within(r).getByTestId('detector-title').textContent))
-      .toEqual(['异地并发', '订阅多地', '设备数', '用量变化', '登录国家', '目的地阻断'])
+      .toEqual(['异地并发', '订阅多地', '设备数', '用量变化', '登录国家', '访问拦截'])
 
     // Geo: "no data" beside the reason that says why, never a bare chip.
     expect(within(rows[0]).getByText('无数据')).toBeTruthy()

@@ -1764,7 +1764,7 @@
       "devices": "设备数",
       "usage_shift": "用量变化",
       "login_country": "登录国家",
-      "dest_block": "目的地阻断"
+      "dest_block": "访问拦截"
     },
     "expand": "查看证据",
     "collapse": "收起",
@@ -2016,7 +2016,7 @@
         "usage_shift": "用量变化",
         "login_country": "登录国家",
         "review": "管理员处理",
-        "dest_block": "目的地阻断"
+        "dest_block": "访问拦截"
       },
       "level": {
         "flagged": "已标记",
@@ -2242,8 +2242,8 @@
       "geoip_off": "不可用",
       "geoip_open": "前往设置",
       "dest_block_selected": "已选风险策略：{{names}}",
-      "dest_block_none": "尚未选择计入风险的目的地策略",
-      "dest_block_none_detail": "在访问控制策略中开启「计入风险」。所选策略的历史阻断命中构成已观察到的下界；次数较少不能证明安全。",
+      "dest_block_none": "没有策略计入风险，这个检测项不会触发",
+      "dest_block_none_detail": "在「访问控制 › 策略」里给拦截策略勾选「计入风险信号」。只有历史阻断命中计入；白名单拒绝和仅观察永不计入。计数仍是已观察到的下界。",
       "dest_block_read_failed": "当前无法读取已选策略名称，可前往访问控制核对；这不表示没有选择策略。",
       "dest_block_loading": "正在读取已选风险策略…",
       "dest_block_open": "前往访问控制"
