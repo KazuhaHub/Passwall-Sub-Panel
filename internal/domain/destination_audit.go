@@ -30,6 +30,10 @@ type DestAuditControl struct {
 	Available bool
 }
 
+type DestAuditPruned struct {
+	Hits, Trial, Usage, Loss, Batches, Budget, Orphans int64
+}
+
 // DestHit is one logical destination key after rule-fragment IDs have been
 // mapped to their stable source. Trial keys use UserID and Port zero.
 type DestHit struct {

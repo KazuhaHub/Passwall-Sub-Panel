@@ -2242,6 +2242,7 @@ type Repos struct {
 	NodeAgent               NodeAgentRepo
 	DestAgentPolicy         DestAgentPolicyRepo
 	DestAudit               DestAuditStore
+	DestAuditMaintenance    DestAuditMaintenanceRepo
 	DestinationEligibility  DestinationEligibilityRepo
 	NativeAgentProvisioning NativeAgentProvisioningRepo
 	ServerMigration         ServerMigrationRepo

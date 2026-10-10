@@ -124,36 +124,37 @@ func (a *asyncDispatcher) Go(name string, fn func(ctx context.Context)) {
 // ListenAndServe and runs the background workers in goroutines; Shutdown
 // cancels both.
 type App struct {
-	database        *sql.DB
-	operationGate   *operationgate.Gate
-	cfg             *config.Config
-	server          *http.Server
-	traffic         *traffic.Service
-	reconcile       *reconcile.Service
-	user            *user.Service
-	node            *node.Service
-	cert            *cert.Service
-	audit           *audit.Service
-	mail            *mailer.Service
-	health          *health.Service
-	geo             *geo.Service
-	render          *render.Service
-	risk            *risk.Service
-	settings        ports.SettingsRepo
-	destLists       *destlist.Service
-	destDefinitions *sqlstore.DestDefinitionRepo
-	destCompiler    *destpolicy.Compiler
-	destAudit       destinationAuditRunner
-	destAuditCtx    context.Context
-	destAuditCancel context.CancelFunc
-	destAuditStart  sync.Once
-	destFacts       destpolicy.CollectionFactsCache
-	destTagMembers  destpolicy.TagMatchedMemberReader
-	destAdmin       *destpolicy.Administrator
-	destExemptions  *destpolicy.ExemptionManager
-	destExceptions  *destpolicy.ExceptionManager
-	destControls    *destpolicy.Controls
-	syncTasks       ports.SyncTaskRepo
+	database             *sql.DB
+	operationGate        *operationgate.Gate
+	cfg                  *config.Config
+	server               *http.Server
+	traffic              *traffic.Service
+	reconcile            *reconcile.Service
+	user                 *user.Service
+	node                 *node.Service
+	cert                 *cert.Service
+	audit                *audit.Service
+	mail                 *mailer.Service
+	health               *health.Service
+	geo                  *geo.Service
+	render               *render.Service
+	risk                 *risk.Service
+	settings             ports.SettingsRepo
+	destLists            *destlist.Service
+	destDefinitions      *sqlstore.DestDefinitionRepo
+	destCompiler         *destpolicy.Compiler
+	destAudit            destinationAuditRunner
+	destAuditMaintenance ports.DestAuditMaintenanceRepo
+	destAuditCtx         context.Context
+	destAuditCancel      context.CancelFunc
+	destAuditStart       sync.Once
+	destFacts            destpolicy.CollectionFactsCache
+	destTagMembers       destpolicy.TagMatchedMemberReader
+	destAdmin            *destpolicy.Administrator
+	destExemptions       *destpolicy.ExemptionManager
+	destExceptions       *destpolicy.ExceptionManager
+	destControls         *destpolicy.Controls
+	syncTasks            ports.SyncTaskRepo
 	// trafficRepo / nodeTraffic kept for the retention cron — PruneBefore is
 	// outside traffic.Service's surface (it's a maintenance concern, not a
 	// poll-cycle concern), so app.go reaches into the repos directly.
@@ -610,15 +611,16 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 		}
 	}()
 	a := &App{
-		database:        sqlDB,
-		operationGate:   operationGate,
-		cfg:             cfg,
-		bgCancel:        cancel,
-		bgRootCtx:       bgCtx,
-		render:          renderSvc,
-		destDefinitions: destDefinitions,
-		destCompiler:    destCompiler,
-		destAudit:       destAudit, destAuditCtx: auditCtx, destAuditCancel: auditCancel,
+		database:             sqlDB,
+		operationGate:        operationGate,
+		cfg:                  cfg,
+		bgCancel:             cancel,
+		bgRootCtx:            bgCtx,
+		render:               renderSvc,
+		destDefinitions:      destDefinitions,
+		destCompiler:         destCompiler,
+		destAuditMaintenance: repos.DestAuditMaintenance,
+		destAudit:            destAudit, destAuditCtx: auditCtx, destAuditCancel: auditCancel,
 		destTagMembers: groupSvc,
 	}
 	a.destLists = destlist.NewService(a.destDefinitions, destlist.NewGeositeCache(cfg.DataDir))
@@ -1464,7 +1466,9 @@ func (a *App) runAuditCleanupLoop(ctx context.Context) {
 		a.pruneConnectionHistory(ctx)
 		a.pruneFlagRecords(ctx)
 		a.pruneRiskReviews(ctx)
+		a.pruneDestAudit(ctx)
 		a.pruneDestExemptions(ctx)
+		a.pruneDestOrphanExemptions(ctx)
 		a.pruneCertEvents(ctx)
 		select {
 		case <-ctx.Done():
