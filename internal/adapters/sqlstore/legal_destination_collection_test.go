@@ -18,9 +18,9 @@ import (
 	"gorm.io/gorm/logger"
 )
 
-func legalCollectionNode(t *testing.T, db *gorm.DB, mode string, rules []protocol.DestinationRule) (int64, string) {
+func legalCollectionNode(t *testing.T, db *gorm.DB, name, mode string, rules []protocol.DestinationRule) (int64, string) {
 	t.Helper()
-	p := &domain.Panel{Name: "private-disclosure-node", Kind: domain.PanelKindPSP, URL: "psp://private-disclosure", APIToken: "private-panel-credential"}
+	p := &domain.Panel{Name: "private-disclosure-" + name, Kind: domain.PanelKindPSP, URL: "psp://private-disclosure", APIToken: "private-panel-credential"}
 	if err := (&xuiPanelRepo{db: db}).Save(t.Context(), p); err != nil {
 		t.Fatal(err)
 	}
@@ -62,10 +62,10 @@ func TestLegalCollectionCurrentProofRetentionAndPrivateProjection(t *testing.T) 
 	}
 	rules := []protocol.DestinationRule{{ID: "p1", Action: protocol.RuleBlock, Domains: []string{"domain:private-destination.example"}},
 		{ID: "g9", Action: protocol.RuleObserve, CatchAll: true, Subjects: []protocol.SubjectKey{"usr_123"}}}
-	hitsID, _ := legalCollectionNode(t, db, "hits", rules)
-	usageID, _ := legalCollectionNode(t, db, "hits_and_usage", nil)
+	hitsID, _ := legalCollectionNode(t, db, "hits", "hits", rules)
+	usageID, _ := legalCollectionNode(t, db, "usage", "hits_and_usage", nil)
 	for _, scenario := range []string{"off", "sing-box", "no-capability", "offline", "pending", "old-revision"} {
-		id, agent := legalCollectionNode(t, db, "hits", rules)
+		id, agent := legalCollectionNode(t, db, scenario, "hits", rules)
 		var err error
 		switch scenario {
 		case "off":
@@ -205,7 +205,7 @@ func TestLegalCollectionSettingsAndNodesShareRepeatableRead(t *testing.T) {
 			if _, err := repos.Legal.Publish(t.Context(), legalDraft("privacy", "en-US", "[[data-collection]]", false)); err != nil {
 				t.Fatal(err)
 			}
-			id, _ := legalCollectionNode(t, db, "hits", []protocol.DestinationRule{{ID: "p1", Action: protocol.RuleBlock, Ports: "443"}})
+			id, _ := legalCollectionNode(t, db, "snapshot", "hits", []protocol.DestinationRule{{ID: "p1", Action: protocol.RuleBlock, Ports: "443"}})
 			fired := false
 			if err := db.Callback().Query().After("gorm:query").Register("legal_collection_concurrent_writer", func(tx *gorm.DB) {
 				if _, ok := tx.Statement.Dest.(*[]settingRow); !ok || fired {
