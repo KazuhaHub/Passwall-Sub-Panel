@@ -18,6 +18,9 @@ func (r *DestAuditRepo) ReadDestinationUsage(ctx context.Context, q domain.DestU
 	if err != nil {
 		return domain.DestUsagePage{}, err
 	}
+	if err := ctx.Err(); err != nil {
+		return domain.DestUsagePage{}, err
+	}
 	out := domain.DestUsagePage{Items: []domain.DestUsageSite{}, Losses: domain.DestAuditLosses{Scope: "panel"}}
 	var options *sql.TxOptions
 	if r.db.Dialector.Name() != "sqlite" {
@@ -29,6 +32,11 @@ func (r *DestAuditRepo) ReadDestinationUsage(ctx context.Context, q domain.DestU
 		}
 		return readUsageLosses(tx, q, &out.Losses)
 	}, options)
+	// Drivers may replace cancellation with a dialect-specific transaction error.
+	// Keep the context result without exposing a driver's private parameters.
+	if err := ctx.Err(); err != nil {
+		return domain.DestUsagePage{}, err
+	}
 	if err != nil {
 		return domain.DestUsagePage{}, auditStorageError(err)
 	}
