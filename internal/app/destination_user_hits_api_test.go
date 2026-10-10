@@ -160,7 +160,7 @@ func TestBuildDestinationUserHitsAvailabilityNeedsCurrentClientAndAppliedProof(t
 func TestBuildDestinationUserHitsRejectsUnknownOrMalformedReadParameters(t *testing.T) {
 	f := buildDestinationPolicyFixture(t)
 	token := destinationRefreshAdminToken(t, f.a)
-	for _, suffix := range []string{"?usage=24h", "?usage=%zz", "?q=private-host.test", "?usage=24h&usage=7d"} {
+	for _, suffix := range []string{"?usage=25h", "?usage=0d", "?usage=8d", "?usage=%zz", "?q=private-host.test", "?usage=24h&usage=7d", "?usage=24h&panel_id=1"} {
 		if w := destinationListRequest(t, f.a, token, "GET", fmt.Sprintf("users/%d%s", f.user.ID, suffix), nil); w.Code != 400 {
 			t.Fatalf("invalid user read parameters HTTP=%d", w.Code)
 		}
