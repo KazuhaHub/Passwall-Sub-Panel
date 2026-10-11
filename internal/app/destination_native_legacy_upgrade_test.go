@@ -197,13 +197,15 @@ func TestNativeLegacyPSPUpgrade(t *testing.T) {
 			nativeMust(test, err, "call legacy upgrade admin HTTP")
 			defer response.Body.Close()
 			if response.StatusCode != want {
-				test.Fatal("legacy upgrade admin request failed; detail withheld")
+				test.Fatalf("legacy upgrade admin %s returned HTTP %d; body withheld", path, response.StatusCode)
 			}
 			if result != nil {
 				nativeMust(test, json.NewDecoder(response.Body).Decode(result), "decode legacy upgrade admin response")
 			}
 		}
-		request("POST", "dest/policies", map[string]any{"name": "Legacy port deny", "enabled": true, "action": "block", "scope": "global", "inline": map[string]any{"ports": strconv.Itoa(targetPort)}}, 201, nil)
+		input := destinationPolicyInput("Legacy port deny", "block")
+		input["inline"] = map[string]any{"ports": strconv.Itoa(targetPort)}
+		request("POST", "dest/policies", input, 201, nil)
 		request("POST", "dest/publish", nil, 200, nil)
 		assertUnchanged(test, 3)
 		var status destpolicy.DestinationStatus

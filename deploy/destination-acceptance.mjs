@@ -13,6 +13,10 @@ const guardedSingBoxNames = ['TestNativeGuardedSingBoxDestinationTraffic', ...gu
 const legacyUpgradeNames = ['TestNativeLegacyPSPUpgrade', ...['old_panel', 'panel_upgrade', 'legacy_publication'].map(name => `TestNativeLegacyPSPUpgrade/${name}`)]
 const names = [...xrayNames, ...singBoxNames, ...guardedSingBoxNames, ...legacyUpgradeNames]
 const diagnostics = Object.freeze({
+  'legacy upgrade admin dest/policies returned HTTP 400': 'legacy_policy_input_rejected',
+  'legacy upgrade admin dest/policies returned HTTP 401': 'legacy_policy_auth_failed',
+  'legacy upgrade admin dest/policies returned HTTP 403': 'legacy_policy_access_failed',
+  'legacy upgrade admin dest/publish returned HTTP 409': 'legacy_publish_conflict',
   'timed out waiting for released panel ready': 'legacy_panel_start_timeout',
   'timed out waiting for released node applied released panel': 'legacy_node_apply_timeout',
   'timed out waiting for unchanged legacy upgrade sync': 'legacy_unchanged_sync_timeout',

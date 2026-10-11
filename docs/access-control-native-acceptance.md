@@ -279,30 +279,21 @@ Xray jobs and both separate sing-box jobs must pass on the exact current PR head
 an earlier or partial matrix does
 not satisfy this gate.
 
-The separate legacy-upgrade job uses released PSP v4.0.1.20 source at
-`0ae05e1e40170c030acd23cdf637310b740b50a6` and Node v4.0.1.8 source at
-`8e5e3db72219a8db9081a372722abb1529d22ecd`, each with its own preferred
-compiler. The old PSP checkout receives only the reviewed test bridge; its
-production Build, router, migrations and sync services remain the released
-code. The bridge creates a fresh original database, serves the old production
-handler behind the same fixture TLS endpoint, and provisions one real VLESS
-listener and principal. Before candidate Build runs, a read-only query must
-prove that the database has no destination tables.
+独立的 legacy-upgrade 作业使用已发布 PSP v4.0.1.20 的源提交
+`0ae05e1e40170c030acd23cdf637310b740b50a6` 与 Node v4.0.1.8 的源提交
+`8e5e3db72219a8db9081a372722abb1529d22ecd`，各自使用自身首选工具链。
+旧 PSP 只加入已审阅的测试桥接；生产 Build、路由、迁移和同步服务均保持发布版本。
+旧 Build 创建原始数据库，在同一夹具 TLS 入口后运行原生产处理器，并提供真实 VLESS
+入站和账号。候选 Build 运行前，必须只读查询确认数据库中没有目的地策略表。
 
-`old_panel`, `panel_upgrade` and `legacy_publication` have their own mandatory
-execution gate. After real old-node convergence, the driver holds the original
-Xray process with a pidfd, stops the old PSP process, and migrates its same
-database through candidate Build. The Node process continues throughout.
-At least three accepted sync cycles per stage must preserve config and roster
-ETags/versions, actual core-config bytes, the original live core, and nonce
-VLESS traffic. Publishing a port deny through normal administrator HTTP must
-still leave that old node unchanged, create no policy runtime row, and expose
-`unsupported_version` in coverage. A bounded passive probe forwards the
-original request and response and retains only validators and convergence
-facts; credentials, process output and private database contents are not
-uploaded. This verifies one exact legacy pair and Xray 26.6.27, and does not
-substitute for node-upgrade, mixed-fleet, downgrade or load acceptance.
+`old_panel`、`panel_upgrade` 和 `legacy_publication` 使用独立必需执行门禁。
+真实旧节点收敛后，驱动以 pidfd 持有原 Xray 进程，关闭旧 PSP 进程，随后使用候选
+Build 迁移同一数据库，Node 在全程持续运行。每阶段至少三个实际成功同步周期必须
+保持 config/roster 的 ETag 与版本、实际核心配置字节、原核心进程及 nonce VLESS
+连接。通过正常管理员 HTTP 发布端口拒绝策略后，旧节点仍保持原样，不创建策略运行
+记录，覆盖状态必须为 `unsupported_version`。有界被动探针原样转发请求及响应，仅
+保留验证器和收敛事实；凭据、进程输出和私有数据库内容不上传。本验收覆盖这一固定旧
+版本组合与 Xray 26.6.27，不能代替节点升级、混合机队、降级或负载验收。
 
-Implementation and compilation do not prove that these stages ran. Their
-execution evidence must be verified separately on the exact current PR head;
-the existing five core jobs cannot satisfy the legacy-upgrade gate.
+代码和编译不证明这些阶段已经运行。必须在当前 PR 的精确 HEAD 上分别核验执行
+证据；现有五个核心作业不能满足旧版本升级门禁。

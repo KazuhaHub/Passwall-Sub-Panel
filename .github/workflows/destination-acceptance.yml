@@ -129,9 +129,10 @@ jobs:
       - name: Verify exact candidate compiler
         run: |
           set -eu
-          compiler=$(awk '$1 == "toolchain" { print $2 }' go.mod)
-          test "$(go env GOVERSION)" = "$compiler"
-          test "$(go tool compile -V | awk '{ print $3 }')" = "$compiler"
+          build_toolchain=$(awk '$1 == "toolchain" { print $2 }' go.mod)
+          test -n "$build_toolchain"
+          test "$(go env GOVERSION)" = "$build_toolchain"
+          test "$(go tool compile -V | awk '{ print $3 }')" = "$build_toolchain"
       - uses: actions/checkout@v7
         with:
           repository: KazuhaHub/Passwall-Sub-Panel
