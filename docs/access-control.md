@@ -2296,4 +2296,10 @@ only for administrators, separate preview inputs and requested report windows,
 and poll only outstanding receipts while visible. Group writes and existing
 list/policy/exemption/publication/settings mutations invalidate related group
 facts and reports, including after conflicts, without automatically re-running
-previews. The S8-S11 allowlist interface and S17 summary tab remain pending.
+previews. S8 card/tab components now render actual retention, separate trial
+and unconfirmed receipt states, zero-node bands, touch-accessible exclusion
+reasons, selected/owned list links and unfetched-list warnings. Failed list
+metadata stays explicitly unknown; failed group reads withhold cached cards.
+These components are not yet mounted in the access-control page: the S9-S11
+dialogs/report and their URL/navigation integration, along with the S17 summary
+tab, remain pending.
