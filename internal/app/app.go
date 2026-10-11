@@ -151,6 +151,7 @@ type App struct {
 	destUsageRead        ports.DestUsageReadRepo
 	destGroupTrialRead   ports.DestGroupTrialReadRepo
 	destGroupStatsRead   ports.DestGroupStatsReadRepo
+	destGroupListeners   ports.DestGroupListenerReadRepo
 	destRiskRead         ports.DestRiskReadRepo
 	destAuditCtx         context.Context
 	destAuditCancel      context.CancelFunc
@@ -636,6 +637,7 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 		destUsageRead:        repos.DestUsageRead,
 		destGroupTrialRead:   repos.DestGroupTrialRead,
 		destGroupStatsRead:   repos.DestGroupStatsRead,
+		destGroupListeners:   repos.DestGroupListeners,
 		destRiskRead:         repos.DestRiskRead,
 		destAudit:            destAudit, destAuditCtx: auditCtx, destAuditCancel: auditCancel,
 		destTagMembers: groupSvc,
@@ -839,6 +841,8 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 		DestinationGroupTrial:     a.destGroupTrial.Read,
 		DestinationGroupPreview:   a.destinationGroupPreview,
 		DestinationGroupSave:      a.destGroups.Save,
+		DestinationGroupsOverview: a.destinationGroupsOverview,
+		DestinationGroupDetail:    a.destinationGroupDetail,
 		DestinationUsage:          a.destinationUsage,
 		GeoRecords:                geoStreaks,
 		// The risk view's rows. Optional, so leaving it out would compile —

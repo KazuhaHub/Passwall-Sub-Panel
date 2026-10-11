@@ -74,7 +74,14 @@ func (r *GroupTrialReporter) Read(ctx context.Context, groupID int64, days int) 
 	if ctx.Err() != nil {
 		return GroupTrialReport{}, ctx.Err()
 	}
-	if err != nil || data.Losses.Scope != "panel" || data.Losses.Complete || data.Losses.Rows < 0 || data.Losses.Events < 0 || data.Losses.Unmatched < 0 || data.DroppedInRange != data.Losses.Rows {
+	if err != nil {
+		return GroupTrialReport{}, domain.ErrUnavailable
+	}
+	return groupTrialReportData(coverage, days, data)
+}
+
+func groupTrialReportData(coverage map[string]bool, days int, data domain.DestGroupTrialData) (GroupTrialReport, error) {
+	if data.Losses.Scope != "panel" || data.Losses.Complete || data.Losses.Rows < 0 || data.Losses.Events < 0 || data.Losses.Unmatched < 0 || data.DroppedInRange != data.Losses.Rows {
 		return GroupTrialReport{}, domain.ErrUnavailable
 	}
 	out := GroupTrialReport{EffectiveDays: days, Items: []GroupTrialReportSite{}, DroppedInRange: data.DroppedInRange, Losses: data.Losses}

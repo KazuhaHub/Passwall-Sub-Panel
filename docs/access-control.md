@@ -2188,8 +2188,8 @@ Use zero only for a never-saved mode. Initial trial activation may also supply
 stage-change time and edit version; no-ops retain their version. Stale edits,
 invalid transitions and unfetched enforcement lists return distinct 409 codes.
 Canonical positive group IDs, strict JSON and no query fields are required.
-The route uses no-store and normal administrator write-audit capture. Group
-overview and full readiness views are still pending.
+The route uses no-store and normal administrator write-audit capture. The full
+allowlist interface and confirmation dialogs are still pending.
 
 The trial-report storage foundation reads one exact group's anonymous
 `observe` records with zero account and port fields. It streams only the supplied
@@ -2218,8 +2218,8 @@ covers the supplied site and all its subdomains proves this flag. Exact-host and
 arbitrary regular-expression matches cannot establish whole-site coverage from
 folded telemetry and remain unmarked. `(ip)` is never marked added: it cannot
 identify an address or CIDR to allow. Closing the group retains its report and
-owned-list history while normal retention still applies. The report UI and the
-remaining group overview and readiness views are still pending.
+owned-list history while normal retention still applies. The report UI is still
+pending.
 
 `GET /api/admin/dest/groups/:group_id/preview?list_ids=1,2` prepares an allowlist
 trial without changing the current mode, lists or definition generation. Only
@@ -2235,8 +2235,8 @@ selection or reduce quota membership to the current roster. Third-party panels,
 missing destination-policy capability and current fallback/exhaustion are
 excluded. A native panel's prospective quota and enabled-listener sniffing are
 checked with the same policy builder, limits and preflight used by publication.
-Only enabled and sniffing fields enter that preflight projection; listener
-credentials and transport settings are not serialized into it. Read failures
+The private listener query selects only ID, panel ID and sniffing for enabled
+listeners; credentials and transport settings are not loaded. Read failures
 withhold the whole preview, rather than inventing partial counts.
 
 When current templates cannot produce DNS suggestions, `base_hosts` is an
@@ -2244,8 +2244,8 @@ empty array and `base_hosts_available` is false; the rest of the preview remains
 usable so the enable wizard can accept manual base hosts. Existing owned lists
 are retained and identified by their real `base_list_id` / `extra_list_id`;
 prospective synthetic list IDs never leave the preview. Responses use no-store.
-This is prospective eligibility evidence; applied-node receipts and enforcement
-readiness still belong to the pending group overview workflow.
+This is prospective eligibility evidence; current applied-node receipts and
+readiness are returned by the separate group overview/detail endpoints.
 
 The group-overview storage foundation projects counters for requested group IDs
 in batches of 512 inside one private read snapshot. Anonymous trial sites retain
@@ -2253,8 +2253,7 @@ the producer's site boundaries and merge across hours and nodes; their time
 window is independent of the denial window. Denial counts select only source and
 count, without loading account or destination fields. Empty IDs return no groups,
 overflow saturates, and any failed batch withholds the entire result. These are
-observed counts, not a claim that collection is complete. The overview API and
-readiness workflow are still pending.
+observed counts, not a claim that collection is complete.
 
 The applied-group proof foundation validates the exact canonical candidate body
 against its minted, desired, reported and applied digests, current published
@@ -2263,5 +2262,30 @@ subject-scoped catch-all rule, distinguishing trial from enforcement by action.
 Historical `AppliedGroups` alone cannot prove the current stage. Unpublished,
 paused, stale, fallback or rejected candidates do not load the body or claim
 applied groups. This works with collection off and with either supported core.
-The future overview must additionally compare its definition/status snapshots
-and each group's current stage; this helper is not yet an overview endpoint.
+The overview compares its definition/status generations and pause flags before
+counting this proof, and compares each group's current stage. Snapshot drift
+clears applied counts. A changed fleet fails the read instead of omitting nodes.
+
+`GET /api/admin/dest/groups` returns every group, including open and empty
+groups, with member count, mode, selected/owned IDs, millisecond edit and stage
+timestamps, total/eligible/applied node counts, stable exclusion reasons,
+`would_deny_recent:{days,sites,count}` and `denied_24h`. The trial window is
+`min(7, current trial retention)` days; denials use a separate 24-hour window.
+Membership is read once per panel for the whole request, member counts are
+batched and each prospective node policy is assessed once. Open groups retain
+current tag-matching eligibility, while allowlist groups require policy support
+and preflight. The overview does not load per-group trial reports.
+
+`GET /api/admin/dest/groups/:group_id` adds `readiness`: selected-list readiness,
+not-ready list references, eligible but unapplied node references, base-list
+nonemptiness, the observed number of uncovered trial sites in 24 hours and their
+top three anonymous sites. It uses the report's current whole-site coverage
+rules. `trial_losses` remains panel-scoped and incomplete, so an empty observed
+site count is not proof that no events were lost. Last-good fetched lists remain
+ready after refresh errors. Empty base lists and remaining sites are warnings;
+the future confirmation interface must block on zero eligible nodes, unready
+lists or eligible nodes without current applied rules.
+
+Both read routes are administrator-only, accept no query fields, use no-store
+and return no partial groups/readiness on failure. Reads never publish or mint a
+candidate. The S8-S11 allowlist interface and S17 summary tab remain pending.

@@ -15,10 +15,60 @@ import (
 
 type AdminDestinationGroupsHandler struct {
 	save func(context.Context, int64, destpolicy.GroupModeInput, time.Time) (domain.DestGroupMode, error)
+	list func(context.Context) ([]destpolicy.GroupAccessSummary, error)
+	read func(context.Context, int64) (destpolicy.GroupAccessDetail, error)
 }
 
 func NewAdminDestinationGroupsHandler(save func(context.Context, int64, destpolicy.GroupModeInput, time.Time) (domain.DestGroupMode, error)) *AdminDestinationGroupsHandler {
 	return &AdminDestinationGroupsHandler{save: save}
+}
+
+func (h *AdminDestinationGroupsHandler) SetReaders(list func(context.Context) ([]destpolicy.GroupAccessSummary, error), read func(context.Context, int64) (destpolicy.GroupAccessDetail, error)) {
+	h.list, h.read = list, read
+}
+
+func (h *AdminDestinationGroupsHandler) List(c *gin.Context) {
+	c.Header("Cache-Control", "no-store")
+	if c.Request.URL.RawQuery != "" {
+		destinationHitQueryError(c)
+		return
+	}
+	if h.list == nil {
+		respondPublicError(c, domain.ErrUnavailable)
+		return
+	}
+	items, err := h.list(c.Request.Context())
+	if err != nil {
+		respondPublicError(c, domain.ErrUnavailable)
+		return
+	}
+	if items == nil {
+		items = []destpolicy.GroupAccessSummary{}
+	}
+	c.JSON(200, gin.H{"items": items})
+}
+
+func (h *AdminDestinationGroupsHandler) Get(c *gin.Context) {
+	c.Header("Cache-Control", "no-store")
+	id, err := strconv.ParseInt(c.Param("group_id"), 10, 64)
+	if err != nil || id <= 0 || strconv.FormatInt(id, 10) != c.Param("group_id") || c.Request.URL.RawQuery != "" {
+		destinationHitQueryError(c)
+		return
+	}
+	if h.read == nil {
+		respondPublicError(c, domain.ErrUnavailable)
+		return
+	}
+	item, err := h.read(c.Request.Context(), id)
+	if errors.Is(err, domain.ErrNotFound) {
+		c.JSON(404, gin.H{"error": "dest_group_not_found"})
+		return
+	}
+	if err != nil {
+		respondPublicError(c, domain.ErrUnavailable)
+		return
+	}
+	c.JSON(200, item)
 }
 
 func destinationGroupModeView(mode domain.DestGroupMode) gin.H {

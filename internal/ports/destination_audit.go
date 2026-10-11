@@ -60,6 +60,10 @@ type DestGroupStatsReadRepo interface {
 	ReadDestinationGroupStats(context.Context, domain.DestGroupStatsQuery) (map[int64]domain.DestGroupStats, error)
 }
 
+type DestGroupListenerReadRepo interface {
+	ReadDestinationGroupListeners(context.Context) ([]domain.DestGroupListener, error)
+}
+
 type DestAuditStore interface {
 	DestAuditRepo
 	DestAuditLossRepo

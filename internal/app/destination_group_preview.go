@@ -59,56 +59,82 @@ func (a *App) destinationGroupPreview(ctx context.Context, groupID int64, listID
 }
 
 func (a *App) destinationGroupNodeInputs(ctx context.Context, groupID int64) ([]destpolicy.GroupNodeInput, error) {
-	if a.destTagMembers == nil {
-		return nil, domain.ErrUnavailable
-	}
 	current, err := a.destDefinitions.StatusContext(ctx, nil)
 	if err != nil {
 		return nil, err
 	}
-	nodes, err := a.repos.Node.ListEnabled(ctx)
+	inputs, _, err := a.destinationGroupFleetInputs(ctx, current, []int64{groupID})
+	return inputs, err
+}
+
+func (a *App) destinationGroupFleetInputs(ctx context.Context, current domain.DestStatusContext, groupIDs []int64) ([]destpolicy.GroupNodeInput, map[int64][]int64, error) {
+	if a.destTagMembers == nil || a.destGroupListeners == nil {
+		return nil, nil, domain.ErrUnavailable
+	}
+	wanted := map[int64]bool{}
+	groupPanels := map[int64][]int64{}
+	for _, id := range groupIDs {
+		if id <= 0 {
+			return nil, nil, domain.ErrValidation
+		}
+		wanted[id], groupPanels[id] = true, []int64{}
+	}
+	nodes, err := a.destGroupListeners.ReadDestinationGroupListeners(ctx)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	listeners := map[int64][]protocol.Listener{}
+	nodeIDs := map[int64]bool{}
 	for _, node := range nodes {
-		if node == nil || node.ID <= 0 || node.PanelID <= 0 {
-			return nil, domain.ErrUnavailable
+		if node.NodeID <= 0 || node.PanelID <= 0 || nodeIDs[node.NodeID] {
+			return nil, nil, domain.ErrUnavailable
 		}
+		nodeIDs[node.NodeID] = true
 		// These are the same two ConfigIntent fields consumed by PreflightPolicy.
 		// No listener credentials or transport configuration enter the preview.
 		raw, err := json.Marshal(struct {
 			Enabled  bool   `json:"enabled"`
 			Sniffing string `json:"sniffing"`
-		}{node.Enabled, node.Sniffing})
+		}{true, node.Sniffing})
 		if err != nil {
-			return nil, domain.ErrUnavailable
+			return nil, nil, domain.ErrUnavailable
 		}
-		listeners[node.PanelID] = append(listeners[node.PanelID], protocol.Listener{Key: protocol.NewListenerKey(node.ID), Config: protocol.RawConfig(raw)})
+		listeners[node.PanelID] = append(listeners[node.PanelID], protocol.Listener{Key: protocol.NewListenerKey(node.NodeID), Config: protocol.RawConfig(raw)})
 	}
 	result := []destpolicy.GroupNodeInput{}
+	panelIDs := map[int64]bool{}
 	for _, panel := range current.Panels {
+		if panel.ID <= 0 || panelIDs[panel.ID] {
+			return nil, nil, domain.ErrUnavailable
+		}
+		panelIDs[panel.ID] = true
 		members, err := a.destTagMembers.TagMatchedMembers(ctx, panel.ID)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
-		if _, matched := members[groupID]; !matched {
+		matched := []int64{}
+		for id := range members {
+			if wanted[id] {
+				matched = append(matched, id)
+			}
+		}
+		if len(matched) == 0 {
 			continue
 		}
 		if len(listeners[panel.ID]) == 0 {
-			return nil, domain.ErrUnavailable
+			return nil, nil, domain.ErrUnavailable
 		}
 		quota := destpolicy.RosterInput{UserGroups: map[int64]int64{}, Collect: panel.Collect, CollectRevision: panel.CollectRevision}
 		for id, users := range members {
 			if id <= 0 {
-				return nil, domain.ErrUnavailable
+				return nil, nil, domain.ErrUnavailable
 			}
 			for _, user := range users {
 				if user <= 0 {
-					return nil, domain.ErrUnavailable
+					return nil, nil, domain.ErrUnavailable
 				}
 				if old, exists := quota.UserGroups[user]; exists && old != id {
-					return nil, domain.ErrUnavailable
+					return nil, nil, domain.ErrUnavailable
 				}
 				quota.UserGroups[user] = id
 				quota.UserIDs = append(quota.UserIDs, user)
@@ -121,6 +147,9 @@ func (a *App) destinationGroupNodeInputs(ctx context.Context, groupID int64) ([]
 			input.Engine = string(domain.NormalizeNodeCoreEngine(panel.Agent.DesiredCoreEngine))
 		}
 		result = append(result, input)
+		for _, id := range matched {
+			groupPanels[id] = append(groupPanels[id], panel.ID)
+		}
 	}
-	return result, nil
+	return result, groupPanels, nil
 }
