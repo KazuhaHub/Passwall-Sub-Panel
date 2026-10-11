@@ -72,8 +72,9 @@ func TestNativeDestinationTraffic(t *testing.T) {
 	inbound, api := nativePort(t), nativePort(t)
 	f.node.DesiredPort, f.node.ObservedPort = inbound, inbound
 	f.node.InboundListen = "127.0.0.1"
-	const fullSniffing = `{"enabled":true,"destOverride":["http","tls","quic"]}`
-	const metadataSniffing = `{"enabled":true,"destOverride":["http","tls","quic"],"metadataOnly":true}`
+	const fullSniffing = `{"enabled":true,"destOverride":["http","tls","quic"],"routeOnly":true}`
+	const metadataSniffing = `{"enabled":true,"destOverride":["http","tls","quic"],"routeOnly":true,"metadataOnly":true}`
+	const nativeDomain = "fallback.example.test"
 	f.node.Sniffing = fullSniffing
 	nativeMust(t, a.repos.Node.Update(t.Context(), f.node), "configure disposable listener")
 	a.startDestinationAudit()
@@ -199,10 +200,10 @@ func TestNativeDestinationTraffic(t *testing.T) {
 	waitFault := func(kind domain.DestCandidateKind, exhausted bool) {
 		waitCandidate(kind, exhausted, true, receiptAfter)
 	}
-	trafficUser := func(uuid string, allowed bool) {
+	trafficUserHost := func(uuid, host string, allowed bool) {
 		caseTest.Helper()
 		before := requests.Load()
-		err := nativeVLESS(caseTest.Context(), inbound, address, targetPort, uuid, nonce)
+		err := nativeVLESSHost(caseTest.Context(), inbound, address, targetPort, uuid, nonce, host)
 		if allowed && err != nil {
 			caseTest.Fatal("real VLESS traffic did not reach its nonce target; private diagnostics withheld")
 		}
@@ -217,7 +218,9 @@ func TestNativeDestinationTraffic(t *testing.T) {
 			caseTest.Fatal("deny/allow result disagreed with actual target request count")
 		}
 	}
+	trafficUser := func(uuid string, allowed bool) { trafficUserHost(uuid, "["+address+"]", allowed) }
 	traffic := func(allowed bool) { trafficUser(f.user.UUID, allowed) }
+	trafficDomain := func(allowed bool) { trafficUserHost(f.user.UUID, nativeDomain, allowed) }
 	count := func(query string, args ...any) int64 {
 		caseTest.Helper()
 		var n int64
@@ -392,7 +395,7 @@ func TestNativeDestinationTraffic(t *testing.T) {
 		})
 	})
 	var domainPolicy destinationPolicyAPIResult
-	var portLKG, protocolLKG string
+	var portLKG, domainLKG string
 	run("fallback_port", func() {
 		input["action"], input["updated_at"] = "block", policy.UpdatedAt
 		request("PUT", fmt.Sprintf("dest/policies/%d", policy.ID), input, 200, &policy)
@@ -405,7 +408,7 @@ func TestNativeDestinationTraffic(t *testing.T) {
 		var list struct {
 			ID int64 `json:"id"`
 		}
-		request("POST", "dest/lists", map[string]any{"name": "Sniffing prerequisite", "kind": "custom", "text": "full:fallback.example.test\n"}, 201, &list)
+		request("POST", "dest/lists", map[string]any{"name": "Sniffing prerequisite", "kind": "custom", "text": "full:" + nativeDomain + "\n"}, 201, &list)
 		domainInput := destinationPolicyInput("Domain prerequisite", "block")
 		domainInput["inline"], domainInput["list_ids"] = map[string]any{}, []int64{list.ID}
 		request("POST", "dest/policies", domainInput, 201, &domainPolicy)
@@ -436,24 +439,18 @@ func TestNativeDestinationTraffic(t *testing.T) {
 		setSniffing(fullSniffing)
 		waitApplied()
 		verifyCandidate(1, "", 0) // The domain rule is now executable.
-		traffic(true)
-		protocolInput := destinationPolicyInput("HTTP prerequisite", "block")
-		protocolInput["inline"] = map[string]any{"protocols": []string{"http"}}
-		var httpPolicy destinationPolicyAPIResult
-		request("POST", "dest/policies", protocolInput, 201, &httpPolicy)
-		publish()
-		waitApplied()
-		protocolLKG = verifyCandidate(2, "", 0).AppliedSHA256
-		traffic(false)
-		waitHit(fmt.Sprintf("p%d", httpPolicy.ID), "block", f.user.ID, targetPort)
+		traffic(true)             // Literal-IP Host does not match the domain.
+		domainLKG = verifyCandidate(1, "", 0).AppliedSHA256
+		trafficDomain(false)
+		waitHit(fmt.Sprintf("p%d", domainPolicy.ID), "block", f.user.ID, targetPort)
 		setSniffing(metadataSniffing)
 		waitFault(domain.DestCandidateEmpty, true)
-		verifyCandidate(0, protocolLKG, 0)
-		traffic(true)
+		verifyCandidate(0, domainLKG, 0)
+		trafficDomain(true)
 	})
 	run("exhausted_roster", func() {
 		mintedAfter := receiptAfter
-		before := verifyCandidate(0, protocolLKG, 0).MintedSHA256
+		before := verifyCandidate(0, domainLKG, 0).MintedSHA256
 		request("POST", fmt.Sprintf("users/%d/set-enabled", f.user.ID), map[string]any{"enabled": false}, 204, nil)
 		disabledAfter := receiptAfter
 		nativeWait(caseTest, 120*time.Second, "exhausted roster application", func() bool {
@@ -483,7 +480,7 @@ func TestNativeDestinationTraffic(t *testing.T) {
 			return revoked == 1 && active == 1
 		})
 		waitCandidate(domain.DestCandidateEmpty, true, true, mintedAfter)
-		if verifyCandidate(0, protocolLKG, 0).MintedSHA256 != before {
+		if verifyCandidate(0, domainLKG, 0).MintedSHA256 != before {
 			caseTest.Fatal("roster update rearmed an exhausted fallback")
 		}
 		traffic(false)
@@ -587,7 +584,7 @@ func nativeTarget(t *testing.T) (*httptest.Server, string, int, string, *atomic.
 	return server, ip, l.Addr().(*net.TCPAddr).Port, nonce, requests
 }
 
-func nativeVLESS(ctx context.Context, inbound int, address string, port int, uuid, nonce string) error {
+func nativeVLESSHost(ctx context.Context, inbound int, address string, port int, uuid, nonce, host string) error {
 	c, err := (&net.Dialer{Timeout: 3 * time.Second}).DialContext(ctx, "tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(inbound)))
 	if err != nil {
 		return err
@@ -601,7 +598,7 @@ func nativeVLESS(ctx context.Context, inbound int, address string, port int, uui
 	header := append([]byte{0}, id...)
 	header = append(header, 0, 1, byte(port>>8), byte(port), 3)
 	header = append(header, net.ParseIP(address).To16()...)
-	header = append(header, []byte("GET / HTTP/1.1\r\nHost: ["+address+"]\r\nConnection: close\r\n\r\n")...)
+	header = append(header, []byte("GET / HTTP/1.1\r\nHost: "+host+"\r\nConnection: close\r\n\r\n")...)
 	if _, err = c.Write(header); err != nil {
 		return err
 	}

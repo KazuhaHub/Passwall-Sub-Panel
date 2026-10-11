@@ -33,7 +33,9 @@ They check canonical candidate bytes, historical LKG retention, the acknowledged
 current digest, actual allow/deny traffic, and the status API's current rule count
 and fault state. A confirmed port-only fallback continues blocking when a new
 domain policy cannot be sniffed; pausing stops it and disabling its source prunes
-it. A confirmed protocol-dependent LKG exhausts under metadata-only sniffing.
+it. A confirmed domain-dependent LKG exhausts under metadata-only sniffing.
+The same HTTP Host is denied with full sniffing and allowed after exhaustion;
+route-only sniffing preserves the local IP destination and requires no DNS.
 Account revocation must then reach the acknowledged roster without rearming that
 fallback. The revoked user must fail while a separate enabled canary still reaches
 the same target, proving the core is serving traffic.
