@@ -2283,7 +2283,7 @@ top three anonymous sites. It uses the report's current whole-site coverage
 rules. `trial_losses` remains panel-scoped and incomplete, so an empty observed
 site count is not proof that no events were lost. Last-good fetched lists remain
 ready after refresh errors. Empty base lists and remaining sites are warnings;
-the future confirmation interface must block on zero eligible nodes, unready
+the enforcement confirmation interface blocks on zero eligible nodes, unready
 lists or eligible nodes without current applied rules.
 
 Both read routes are administrator-only, accept no query fields, use no-store
@@ -2300,6 +2300,26 @@ previews. S8 card/tab components now render actual retention, separate trial
 and unconfirmed receipt states, zero-node bands, touch-accessible exclusion
 reasons, selected/owned list links and unfetched-list warnings. Failed list
 metadata stays explicitly unknown; failed group reads withhold cached cards.
-These components are not yet mounted in the access-control page: the S9-S11
-dialogs/report and their URL/navigation integration, along with the S17 summary
-tab, remain pending.
+白名单分组页已挂载概览、启用向导、模式确认、试运行报告与分组节点覆盖抽屉。
+启用向导分三步选择分组、名单和基础放行，再预览受影响节点；首次启用只提交一次
+CAS 写入，重新启用保留已有自带列表。执行确认每次打开重新读取就绪状态；零可用
+节点、名单未就绪或缺少当前下发回执会阻止执行。基础列表为空和仍有未覆盖站点
+显示为警告。冲突要求明确重新读取，不自动重试写入。
+
+试运行报告展示所有匿名站点，支持时间范围、搜索、排序、分页和单个或批量加入
+自定义名单；已有内容去重追加。IP 聚合项引导编辑 IP 段，不能当作域名加入。
+成功提示明确区分保存名单与节点生效。写入时离页需确认，离页后失败仍有全局提示。
+URL 支持 `al_group`、`al_view`、`al_days` 和 `al_enable`；启用成功消费入口参数，
+返回不会再次打开向导。
+
+分组编辑页增加只读的目的地摘要，并支持 `edit` / `dtab=destination` 深链接。
+新分组先保存；已有分组显示实际模式、名单和节点覆盖，编辑中的未保存设置在跳转
+前需要确认。读取失败隐藏缓存摘要并提供重试，不将未知名单当作可用名单。
+
+开发专用 `allowlist` 场景提供开放、试运行和执行分组，覆盖启用、CAS 冲突、完整
+报告和追加名单。该夹具受开发环境门控，生产构建检查禁止打包夹具入口及内容。
+浏览器中的合成场景验证只能证明页面交互，不能代替原生节点内核验收。
+
+剩余验收：原生节点虚拟机上的真实下发、试运行和执行流量验证，以及后续审计阶段。
+当前 Windows 会话没有 Hyper-V 管理权限；`Get-VM` 返回权限错误，尚未启动验收虚拟机。
+这些验收完成前保留草稿 PR，不宣称发布就绪。

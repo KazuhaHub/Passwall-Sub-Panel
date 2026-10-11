@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { ThemeProvider } from '@mui/material/styles'
-import { MemoryRouter } from 'react-router'
+import { MemoryRouter, useLocation } from 'react-router'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createAppTheme } from '@/theme'
@@ -8,6 +8,7 @@ import { useAuthStore } from '@/stores/auth'
 import { SCOPE_KEYS } from '@/components/scope/scopeOverrides'
 import { makeTestQueryClient, queryWrapper } from '@/test/queryTestUtils'
 import GroupsView from './GroupsView'
+import { confirm } from '@/components/ConfirmHost'
 
 const api = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() }))
 vi.mock('@/api/client', () => ({ client: api }))
@@ -23,11 +24,13 @@ vi.mock('react-i18next', () => ({
 
 const theme = createAppTheme({ mode: 'light', sourceColor: '#6750a4', language: 'en-US' })
 
-function mount() {
+function LocationProbe() { const location = useLocation(); return <output data-testid="location">{location.pathname}{location.search}</output> }
+function mount(entry = '/admin/groups') {
   render(
-    <MemoryRouter>
+    <MemoryRouter initialEntries={[entry]}>
       <ThemeProvider theme={theme}>
         <GroupsView />
+        <LocationProbe />
       </ThemeProvider>
     </MemoryRouter>,
     { wrapper: queryWrapper(makeTestQueryClient()) },
@@ -38,6 +41,33 @@ beforeEach(() => vi.clearAllMocks())
 afterEach(cleanup)
 
 describe('GroupsView', () => {
+  it('consumes the destination deep link once and retains group edits when departure is declined', async () => {
+    useAuthStore.setState({ role: 'admin', userId: 1, hasToken: true })
+    const group = { id: 5, slug: 'team', name: 'Team', tag_filter: { all: true, tags: [], mode: 'all' }, members: 0, remark: '' }
+    api.get.mockImplementation(async (url: string) => {
+      if (url === '/admin/groups') return { data: { items: [group], total: 1, page: 1, page_size: 25 } }
+      if (url === '/admin/nodes') return { data: { items: [] } }
+      if (url === '/admin/groups/5/scope-settings') return { data: { overrides: {}, overridable: [] } }
+      if (url === '/admin/settings/ui') return { data: {} }
+      if (url === '/admin/dest/groups/5') return { data: { group_id: 5, group_name: 'Team', mode: 'open', stage: '', list_ids: [], base_list_id: 0, extra_list_id: 0, stage_changed_at: null, updated_at: 0, members: 0, total_nodes: 0, eligible_nodes: 0, applied_nodes: 0, ineligible: [], would_deny_recent: { days: 1, sites: 0, count: 0 }, denied_24h: 0, readiness: { lists_ready: true, not_ready_lists: [], unapplied_nodes: [], base_nonempty: false, remaining_sites_24h: 0, top_sites: [], trial_losses: { rows: 0, events: 0, unmatched: 0, scope: 'panel', complete: false } } } }
+      throw new Error(`Unexpected GET ${url}`)
+    })
+    mount('/admin/groups?edit=5&dtab=destination&keep=1')
+    const link = await screen.findByRole('button', { name: 'admin:groups.destination.enable' })
+    await waitFor(() => expect(screen.getByTestId('location').textContent).toBe('/admin/groups?keep=1'))
+    expect(screen.getByRole('tab', { name: 'admin:groups.destination.tab' }).getAttribute('aria-selected')).toBe('true')
+    fireEvent.change(screen.getByRole('textbox', { name: 'admin:groups.field.name' }), { target: { value: 'Edited team' } })
+    vi.mocked(confirm).mockResolvedValueOnce(false)
+    fireEvent.click(link)
+    await waitFor(() => expect(confirm).toHaveBeenCalledOnce())
+    expect(screen.getByTestId('location').textContent).toBe('/admin/groups?keep=1')
+    expect((screen.getByRole('textbox', { name: 'admin:groups.field.name' }) as HTMLInputElement).value).toBe('Edited team')
+    vi.mocked(confirm).mockResolvedValueOnce(true)
+    fireEvent.click(link)
+    await waitFor(() => expect(screen.getByTestId('location').textContent).toBe('/admin/access-control?tab=allowlist&al_enable=5'))
+    expect(api.put).not.toHaveBeenCalled()
+    expect(api.post).not.toHaveBeenCalled()
+  })
   it.each(['allowlist_trial', 'allowlist_enforce'])('shows operators the %s badge without reading private lists', async (destMode) => {
     useAuthStore.setState({ role: 'operator', userId: 2, hasToken: true })
     const group = { id: 5, slug: 'team', name: 'Team', tag_filter: { all: true, tags: [] }, members: 0 }

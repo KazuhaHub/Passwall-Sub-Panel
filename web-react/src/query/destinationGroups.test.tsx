@@ -5,11 +5,12 @@ import { act, cleanup, renderHook, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { accessControlKeys, groupKeys } from './keys'
 import { sessionScope } from './session'
-import { destinationGroupDetailQuery, destinationGroupPreviewQuery, destinationGroupsQuery, destinationGroupTrialQuery, invalidateDestinationGroups, useSaveDestinationGroup, useCreateDestinationGroupException } from './destinationGroups'
+import { destinationGroupDetailQuery, destinationGroupPreviewQuery, destinationGroupsQuery, destinationGroupTrialQuery, invalidateDestinationGroups, useSaveDestinationGroup, useCreateDestinationGroupException, useAddDestinationGroupSites } from './destinationGroups'
 import type { DestinationGroupSummary } from '@/api/destinationGroups'
 
-const api = vi.hoisted(() => ({ getDestinationGroups: vi.fn(), getDestinationGroup: vi.fn(), previewDestinationGroup: vi.fn(), getDestinationGroupTrialReport: vi.fn(), putDestinationGroup: vi.fn(), createDestinationGroupException: vi.fn() }))
+const api = vi.hoisted(() => ({ getDestinationGroups: vi.fn(), getDestinationGroup: vi.fn(), previewDestinationGroup: vi.fn(), getDestinationGroupTrialReport: vi.fn(), putDestinationGroup: vi.fn(), createDestinationGroupException: vi.fn(), entries: vi.fn() }))
 vi.mock('@/api/destinationGroups', () => api)
+vi.mock('@/api/accessControl', () => ({ patchDestinationListEntries: api.entries }))
 const scope = sessionScope({ userId: 1, role: 'admin', authEpoch: 3 })
 const sibling = sessionScope({ userId: 1, role: 'admin', authEpoch: 4 })
 const trial: DestinationGroupSummary = { group_id: 7, group_name: 'Trial', mode: 'allowlist', stage: 'trial', list_ids: [], base_list_id: 10, extra_list_id: 11, updated_at: 1000, stage_changed_at: 1000, total_nodes: 1, eligible_nodes: 1, applied_nodes: 0, ineligible: [], members: 2, would_deny_recent: { days: 7, sites: 0, count: 0 }, denied_24h: 0 }
@@ -108,5 +109,17 @@ it('refreshes whole-site coverage and list editors after adding a group exceptio
   await act(async () => { await result.current.mutateAsync({ groupID: 7, input: { target: 'example.test', match: 'site' } }) })
   expect(api.createDestinationGroupException).toHaveBeenCalledWith(7, { target: 'example.test', match: 'site' })
   for (const key of keys()) expect(client.getQueryState(key)?.isInvalidated).toBe(true)
+  client.clear()
+})
+it('adds selected whole sites in one atomic entries request, rejects IP labels and refreshes actual coverage', async () => {
+  const client = new QueryClient({ defaultOptions: { mutations: { retry: false } } })
+  for (const key of keys()) client.setQueryData(key, { fixture: true })
+  api.entries.mockResolvedValue({ id: 11 })
+  const { result } = renderHook(() => useAddDestinationGroupSites(scope), { wrapper: ({ children }: { children: ReactNode }) => <QueryClientProvider client={client}>{children}</QueryClientProvider> })
+  await act(async () => { await result.current.mutateAsync({ listID: 11, sites: ['a.test', 'b.test', 'a.test'] }) })
+  expect(api.entries).toHaveBeenCalledExactlyOnceWith(11, ['domain:a.test', 'domain:b.test'])
+  for (const key of keys()) expect(client.getQueryState(key)?.isInvalidated).toBe(true)
+  await act(async () => { await expect(result.current.mutateAsync({ listID: 11, sites: ['(ip)'] })).rejects.toThrow() })
+  expect(api.entries).toHaveBeenCalledOnce()
   client.clear()
 })

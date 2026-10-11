@@ -2,10 +2,11 @@ import { AxiosError, AxiosHeaders, CanceledError, type AxiosAdapter, type AxiosR
 import type { AccessControlSettings, DestinationListDetail, DestinationListInput, DestinationListPreview, DestinationListSummary, DestinationPolicyInput, DestinationPolicyOverviewItem, DestinationTestResult, DestinationUserAccessView } from '@/api/accessControl'
 import type { RiskUserSummary } from '@/api/riskCenter'
 import type { Server } from '@/api/servers'
+import type { DestinationGroupSummary } from '@/api/destinationGroups'
 import { destinationListAvailable } from '@/utils/destinationListAvailability'
 import { accessControlFixtureSeed, destinationPolicies, destinationStatus } from '@/test/accessControlFixtures'
 
-export const accessFixtureScenarios = ['normal', 'empty', 'error', 'catalog-missing', 'catalog-failed', 'policy-preview-error', 'policy-over-quota', 'policy-conflict', 'policy-save-pending', 'policy-lists-error', 'policy-groups-error', 'template-over-quota', 'templates-catalog-missing', 'list-original-read-error', 'settings-save-pending', 'list-delete-conflict', 'account-read-error', 'account-cancel-pending', 'node-retry-pending'] as const
+export const accessFixtureScenarios = ['normal', 'allowlist', 'empty', 'error', 'catalog-missing', 'catalog-failed', 'policy-preview-error', 'policy-over-quota', 'policy-conflict', 'policy-save-pending', 'policy-lists-error', 'policy-groups-error', 'template-over-quota', 'templates-catalog-missing', 'list-original-read-error', 'settings-save-pending', 'list-delete-conflict', 'account-read-error', 'account-cancel-pending', 'node-retry-pending'] as const
 export type AccessFixtureScenario = typeof accessFixtureScenarios[number]
 
 function savedScenario(): AccessFixtureScenario {
@@ -78,6 +79,25 @@ export function createAccessControlMock(fallback: AxiosAdapter, options: { scena
   let settings: AccessControlSettings = { ...defaults }
   let freshListReferences = false
   const tick = () => { lastWrite = Math.max(Date.now(), lastWrite + 1); generation++; return lastWrite }
+  const groupModes = new Map<number, DestinationGroupSummary>()
+  const ownedList = (groupID: number, name: string, entries: string[]) => {
+    const id = Math.max(0, ...seed.lists.map(list => list.id)) + 1
+    const list: DestinationListDetail = { ...structuredClone(seed.lists[0]), id, name, owner_group_id: groupID, kind: 'custom', entries, source_text: entries.join('\n'), entry_count: entries.length, last_fetched_at: null, updated_at: tick() }
+    seed.lists.push(list)
+    return id
+  }
+  if (scenario === 'allowlist') {
+    seed.groups.push({ ...structuredClone(seed.groups[0]), id: 12, slug: 'fixture-open', name: 'Fixture · Open group', members: 51 })
+    for (const group of seed.groups) {
+      const stage = group.id === 12 ? '' : group.id === 3 ? 'trial' : 'enforce'
+      groupModes.set(group.id, { group_id: group.id, group_name: group.name, members: group.members, mode: stage ? 'allowlist' : 'open', stage,
+        list_ids: stage ? [4] : [], base_list_id: stage ? ownedList(group.id, `${group.name} · Base`, ['domain:dns.example.test']) : 0,
+        extra_list_id: stage ? ownedList(group.id, `${group.name} · Extra`, []) : 0, updated_at: lastWrite, stage_changed_at: stage ? Date.now() - 2 * 86400000 : null,
+        total_nodes: 2, eligible_nodes: 1, applied_nodes: stage ? 1 : 0, ineligible: [{ panel_id: 3, name: 'Fixture · 3X-UI', reason: 'xui' }],
+        would_deny_recent: { days: 7, sites: 26, count: 86 }, denied_24h: stage === 'enforce' ? 24 : 0 })
+    }
+  }
+  const trialSites = (group: DestinationGroupSummary) => [{ site: 'new.example.test', count: 19, last_at: Date.now() - 60000 }, { site: '(ip)', count: 3, last_at: Date.now() - 300000 }, ...Array.from({ length: 24 }, (_, n) => ({ site: `site${n}.example.test`, count: n + 1, last_at: Date.now() - (n + 1) * 3600000 }))].map(site => ({ ...site, added: site.site !== '(ip)' && seed.lists.filter(list => [...group.list_ids, group.base_list_id, group.extra_list_id].includes(list.id)).some(list => list.entries.some(entry => entry.startsWith('domain:') && (site.site === entry.slice(7) || site.site.endsWith(`.${entry.slice(7)}`)))) }))
   const publication = () => ({ generation, published_generation: publishedGeneration, paused, publish_error: null })
   const budget = () => ({ ...structuredClone(seed.budget), rules: { used: seed.policies.filter(p => p.enabled).length, limit: seed.budget.rules.limit } })
   const userAccess = (id: number): DestinationUserAccessView => {
@@ -174,6 +194,28 @@ export function createAccessControlMock(fallback: AxiosAdapter, options: { scena
     }
     const detail = (list: DestinationListDetail) => ({ ...list, entries: list.entries.slice(0, 200),
       source_text: config.params?.text ? list.source_text : undefined })
+    if (scenario === 'allowlist') {
+      if (path === '/admin/dest/groups' && method === 'GET') return response({ items: [...groupModes.values()] })
+      const match = path.match(/^\/admin\/dest\/groups\/(\d+)(?:\/(preview|trial-report))?$/)
+      if (match) {
+        const group = groupModes.get(Number(match[1])) ?? fail(404, 'not_found'), operation = match[2]
+        if (method === 'GET' && operation === 'preview') return response({ members: group.members, total_nodes: group.total_nodes, eligible_nodes: group.eligible_nodes, ineligible: group.ineligible, base_hosts: ['dns.example.test'], base_hosts_available: true, base_list_id: group.base_list_id, extra_list_id: group.extra_list_id, budget: budget() })
+        if (method === 'GET' && operation === 'trial-report') return response({ effective_days: Math.min(Number(config.params?.days) || 7, settings.dest_trial_retention_days || defaults.dest_trial_retention_days), items: trialSites(group), dropped_in_range: 2, losses: { rows: 2, events: 4, unmatched: 0, scope: 'panel', complete: false } })
+        if (method === 'GET' && !operation) return response({ ...group, readiness: { lists_ready: true, not_ready_lists: [], unapplied_nodes: [], base_nonempty: seed.lists.find(list => list.id === group.base_list_id)?.entry_count !== 0, remaining_sites_24h: trialSites(group).filter(site => !site.added).length, top_sites: trialSites(group).filter(site => !site.added).slice(0, 3), trial_losses: { rows: 2, events: 4, unmatched: 0, scope: 'panel', complete: false } } })
+        if (method === 'PUT' && !operation) {
+          if (body.updated_at !== group.updated_at) fail(409, 'dest_mode_stale')
+          if (body.mode === 'allowlist' && !group.base_list_id) {
+            group.base_list_id = ownedList(group.group_id, `${group.group_name} · Base`, (body.base_hosts as string[] ?? []).map(host => `domain:${host}`))
+            group.extra_list_id = ownedList(group.group_id, `${group.group_name} · Extra`, [])
+          }
+          group.mode = body.mode === 'open' ? 'open' : 'allowlist'; group.stage = group.mode === 'open' ? '' : body.stage === 'enforce' ? 'enforce' : 'trial'
+          group.list_ids = [...(body.list_ids as number[] ?? [])]; group.updated_at = tick(); group.stage_changed_at = group.stage ? lastWrite : null; group.applied_nodes = group.stage ? group.eligible_nodes : 0
+          return response(group)
+        }
+      }
+      if (/^\/admin\/groups\/\d+\/scope-settings$/.test(path) && method === 'GET') return response({ overrides: {}, overridable: [] })
+      if (path === '/admin/groups' && method === 'GET') return response({ items: seed.groups.map(group => ({ ...group, dest_mode: groupModes.get(group.id)?.mode === 'allowlist' ? `allowlist_${groupModes.get(group.id)!.stage}` : 'open' })), total: seed.groups.length, page: 1, page_size: 200 })
+    }
     if (path === '/admin/groups' && method === 'GET') {
       const page = Math.max(1, Number(config.params?.page ?? 1)), pageSize = Math.min(200, Math.max(1, Number(config.params?.page_size ?? 200)))
       return response({ items: seed.groups.slice((page - 1) * pageSize, page * pageSize), total: seed.groups.length, page, page_size: pageSize })

@@ -370,6 +370,23 @@ describe('reproducible access-control acceptance fixtures', () => {
     await expect(error.client.get('/admin/dest/status')).rejects.toMatchObject({ response: { status: 500, data: { error: 'fixture_unavailable' } } })
     expect(error.fallback).not.toHaveBeenCalled()
   })
+  it('isolates allowlist browser writes, CAS and whole-site coverage in the development seed', async () => {
+    const { client, fallback } = harness('allowlist')
+    const overview = (await client.get('/admin/dest/groups')).data
+    const open = overview.items.find((group: { mode: string }) => group.mode === 'open')
+    expect(open).toBeTruthy()
+    const input = { mode: 'allowlist', stage: 'trial', list_ids: [4], updated_at: open.updated_at, base_hosts: ['dns.example.test'] }
+    const saved = (await client.put(`/admin/dest/groups/${open.group_id}`, input)).data
+    expect(saved.base_list_id).toBeGreaterThan(0); expect(saved.extra_list_id).toBeGreaterThan(0)
+    await expect(client.put(`/admin/dest/groups/${open.group_id}`, input)).rejects.toMatchObject({ response: { status: 409 } })
+    const report = (await client.get(`/admin/dest/groups/${open.group_id}/trial-report`, { params: { days: 7 } })).data
+    expect(report.items.length).toBeGreaterThan(20)
+    expect(report.items.find((site: { site: string }) => site.site === 'new.example.test').added).toBe(false)
+    await client.post(`/admin/dest/lists/${saved.extra_list_id}/entries`, { add: ['domain:new.example.test'] })
+    const refreshed = (await client.get(`/admin/dest/groups/${open.group_id}/trial-report`, { params: { days: 7 } })).data
+    expect(refreshed.items.find((site: { site: string }) => site.site === 'new.example.test').added).toBe(true)
+    expect(fallback).not.toHaveBeenCalled()
+  })
 
   it('saves global exceptions entirely within the seed and creates a first-use pair atomically', async () => {
     const { client, fallback } = harness('empty')

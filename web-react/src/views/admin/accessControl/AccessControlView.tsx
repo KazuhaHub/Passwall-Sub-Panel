@@ -26,6 +26,8 @@ import type { DrawerHistoryState } from '@/hooks/useDrawerParam'
 import type { AccessControlSettingKey } from '@/api/accessControl'
 import AccessPageHeader from './AccessPageHeader'
 import StatusOverview from './StatusOverview'
+import AllowlistWorkspace, { allowlistID } from './allowlist/AllowlistWorkspace'
+import GroupNodeCoverageDrawer from './allowlist/GroupNodeCoverageDrawer'
 const P = 'admin:access_control.'
 export default function AccessControlView() {
   const scope = useQueryScope()
@@ -39,11 +41,12 @@ function AccessControlPage({ scope }: { scope: QueryScope }) {
   const status = useDestinationStatus(scope)
   const settings = useAccessControlSettings(scope, true)
   const publication = useDestinationPublication(scope)
-  const sheet = useDrawerParam<'nodes' | 'settings' | 'list' | 'exemptions' | 'test'>('sheet', { parse: raw => raw === 'nodes' || raw === 'settings' || raw === 'list' || raw === 'exemptions' || raw === 'test' ? raw : null, exclusive: ['user'], clearOnClose: ['node_state', 'list'] })
+  const sheet = useDrawerParam<'nodes' | 'settings' | 'list' | 'exemptions' | 'test'>('sheet', { parse: raw => raw === 'nodes' || raw === 'settings' || raw === 'list' || raw === 'exemptions' || raw === 'test' ? raw : null, exclusive: ['user'], clearOnClose: ['node_state', 'list', 'node_group'] })
   const user = useDrawerParam('user', { exclusive: ['sheet'], clearOnClose: ['sheet', 'list', 'node_state'] })
   const activeSheet = user.id === null ? sheet.id : null
   const [params, setParams] = useSearchParams(), location = useLocation()
-  const tab = params.get('tab') === 'lists' ? 'lists' : params.get('tab') === 'records' ? 'records' : 'policies'
+  const tab = params.get('tab') === 'allowlist' ? 'allowlist' : params.get('tab') === 'lists' ? 'lists' : params.get('tab') === 'records' ? 'records' : 'policies'
+  const nodeGroup = allowlistID(params.get('node_group'))
   const [newListRequest, setNewListRequest] = useState(0)
   const [policyRequest, setPolicyRequest] = useState<{ id: number; token: number } | null>(null)
   const policySequence = useRef(0)
@@ -56,8 +59,8 @@ function AccessControlPage({ scope }: { scope: QueryScope }) {
     else delete state.drawer
     setParams(prev => { const next = new URLSearchParams(prev); next.set('sheet', 'settings'); next.delete('user'); next.delete('list'); next.delete('node_state'); return next }, { replace: replacing, state: Object.keys(state).length ? state : null })
   }
-  const openTest = (target?: string) => {
-    const replacing = sheet.id !== null || user.id !== null, state = { ...location.state, prefill: target ? { target } : undefined }
+  const openTest = (target?: string, groupId?: number) => {
+    const replacing = sheet.id !== null || user.id !== null, state = { ...location.state, prefill: target ? { target, ...(groupId ? { groupId } : {}) } : undefined }
     if (!replacing || state.drawer === 'sheet' || state.drawer === 'user') state.drawer = 'sheet'
     else delete state.drawer
     setParams(prev => { const next = new URLSearchParams(prev); next.set('sheet', 'test'); next.delete('user'); next.delete('list'); next.delete('node_state'); return next }, { replace: replacing, state })
@@ -68,12 +71,12 @@ function AccessControlPage({ scope }: { scope: QueryScope }) {
     setPolicyRequest({ id, token: ++policySequence.current })
   }
   const consumePolicyRequest = (token: number) => setPolicyRequest(current => current?.token === token ? null : current)
-  const openNodes = (filter?: NodeFilter) => {
+  const openNodes = (filter?: NodeFilter, groupID?: number) => {
     const replacing = sheet.id !== null || user.id !== null, state = { ...location.state }
     delete state.prefill
     if (!replacing || state.drawer === 'sheet' || state.drawer === 'user') state.drawer = 'sheet'
     else delete state.drawer
-    setParams(prev => { const next = new URLSearchParams(prev); next.set('sheet', 'nodes'); next.delete('user'); next.delete('list'); if (filter) next.set('node_state', filter); else next.delete('node_state'); return next }, { replace: replacing, state: Object.keys(state).length ? state : null })
+    setParams(prev => { const next = new URLSearchParams(prev); next.set('sheet', 'nodes'); next.delete('user'); next.delete('list'); if (groupID) next.set('node_group', String(groupID)); else next.delete('node_group'); if (filter) next.set('node_state', filter); else next.delete('node_state'); return next }, { replace: replacing, state: Object.keys(state).length ? state : null })
   }
   const openLists = (problem: boolean) => {
     const state = { ...location.state }; delete state.drawer; delete state.prefill
@@ -81,7 +84,7 @@ function AccessControlPage({ scope }: { scope: QueryScope }) {
   }
   const createList = () => { setNewListRequest(value => value + 1); setParams(prev => { const next = new URLSearchParams(prev); next.set('tab', 'lists'); return next }, { replace: true, state: location.state }) }
   const rawList = params.get('list'), listId = rawList && /^\d+$/.test(rawList) && Number.isSafeInteger(Number(rawList)) && Number(rawList) > 0 ? Number(rawList) : null
-  const openList = (id: number) => setParams(prev => { const next = new URLSearchParams(prev); next.set('sheet', 'list'); next.set('list', String(id)); next.delete('node_state'); next.delete('user'); return next }, { replace: sheet.id === 'list', state: { ...location.state, drawer: 'sheet' } })
+  const openList = (id: number) => setParams(prev => { const next = new URLSearchParams(prev); next.set('sheet', 'list'); next.set('list', String(id)); next.delete('node_state'); next.delete('node_group'); next.delete('al_enable'); next.delete('user'); return next }, { replace: sheet.id === 'list', state: { ...location.state, drawer: 'sheet' } })
   const openUser = (id: number) => {
     const replacing = sheet.id !== null || user.id !== null
     const state = { ...location.state }
@@ -109,14 +112,15 @@ function AccessControlPage({ scope }: { scope: QueryScope }) {
     {unavailable ? <Alert severity="info">{t(`${P}unwired`)}</Alert> : <>
       <StatusOverview data={status.data} verdict={verdict} failed={!!status.error} refreshing={status.isFetching} readAt={status.dataUpdatedAt} busy={busy} onRetry={() => status.refetch()} onOpenNodes={openNodes} onOpenLists={openLists} onPublish={() => perform()} onPause={perform} />
       <Stack direction="row" sx={{ mb: 2, minWidth: 0, alignItems: 'center' }}>
-        <Tabs value={tab} variant="scrollable" scrollButtons={false} sx={{ flex: '1 1 auto', minWidth: 0 }} onChange={(_, value) => setParams(prev => { const next = new URLSearchParams(prev); next.set('tab', value); return next }, { replace: true, state: location.state })} aria-label={t(`${P}tabs`)}><Tab value="policies" label={t(`${P}policies.title`)} /><Tab value="lists" label={t(`${P}lists.title`)} /><Tab value="records" label={t(`${P}records.title`)} /></Tabs>
-        <HelpTip key={tab} textKey={tab === 'lists' ? 'admin:access_control.help.lists' : tab === 'records' ? 'admin:access_control.help.records' : 'admin:access_control.help.policies'} labelKey="admin:access_control.help.label" labelValues={{ name: t(`${P}${tab}.title`) }} textValues={{ max_regexps: definitions.data?.budget.regexps.limit ?? '—', seconds: settings.data?.effective.dest_policy_apply_min_seconds ?? '—', hours: settings.data?.effective.dest_list_refresh_hours ?? '—' }} />
+        <Tabs value={tab} variant="scrollable" scrollButtons={false} sx={{ flex: '1 1 auto', minWidth: 0 }} onChange={(_, value) => setParams(prev => { const next = new URLSearchParams(prev); next.set('tab', value); if (value !== 'allowlist') for (const key of ['al_group', 'al_view', 'al_days', 'al_enable', 'node_group']) next.delete(key); return next }, { replace: true, state: location.state })} aria-label={t(`${P}tabs`)}><Tab value="policies" label={t(`${P}policies.title`)} /><Tab value="allowlist" label={t(`${P}allowlist.title`)} /><Tab value="lists" label={t(`${P}lists.title`)} /><Tab value="records" label={t(`${P}records.title`)} /></Tabs>
+        <HelpTip key={tab} textKey={tab === 'allowlist' ? 'admin:access_control.help.allowlist' : tab === 'lists' ? 'admin:access_control.help.lists' : tab === 'records' ? 'admin:access_control.help.records' : 'admin:access_control.help.policies'} labelKey="admin:access_control.help.label" labelValues={{ name: t(`${P}${tab}.title`) }} textValues={{ max_regexps: definitions.data?.budget.regexps.limit ?? '—', seconds: settings.data?.effective.dest_policy_apply_min_seconds ?? '—', hours: settings.data?.effective.dest_list_refresh_hours ?? '—' }} />
       </Stack>
       {tab === 'policies' && (definitions.data ? <>{definitions.error && <Alert sx={{ mb: 2 }} severity="warning" action={<Button onClick={() => void definitions.refetch()}>{t('common:actions.retry')}</Button>}>{t(`${P}definitions_stale`)}</Alert>}<PoliciesTab data={definitions.data} status={status.data} seconds={settings.data?.effective.dest_policy_apply_min_seconds} onCreateList={createList} onExemptions={() => sheet.open('exemptions')} openRequest={policyRequest} onOpenRequestHandled={consumePolicyRequest} /></> : definitions.error ? <Alert severity="error" action={<Button onClick={() => void definitions.refetch()}>{t('common:actions.retry')}</Button>}>{t(`${P}definitions_failed`)}</Alert> : <Stack spacing={1} aria-busy="true">{[0,1,2,3,4].map(key => <Skeleton key={key} variant="rounded" height={56} />)}</Stack>)}
       <ListsTab active={tab === 'lists'} selectedId={activeSheet === 'list' ? listId : null} onCloseSheet={sheet.close} onOpenList={openList} onOpenPolicy={openPolicy} onSettings={() => openSettings('dest_list_refresh_hours')} onTest={openTest} newListRequest={newListRequest} policies={definitions.data} status={status.data} />
+      {tab === 'allowlist' && <AllowlistWorkspace scope={scope} active retentionDays={settings.data?.effective.dest_trial_retention_days} etaMs={status.data?.apply_eta_ms} onList={openList} onNodes={id => openNodes(undefined, id)} onTest={openTest} />}
       {tab === 'records' && <RecordsTab definitions={definitions.data} status={status.data} retentionDays={settings.data?.effective.dest_hit_retention_days || 30} onUser={openUser} onTest={openTest} onSettings={() => openSettings('dest_hit_retention_days')} />}
     </>}
-    {activeSheet === 'nodes' && <NodeCoverageDrawer status={status.data} loading={status.isPending} failed={!!status.error} refreshing={status.isFetching} onRetryRead={() => status.refetch()} onClose={sheet.close} onLists={() => openLists(false)} onSettings={() => openSettings('dest_policy_apply_min_seconds')} applySeconds={settings.data?.effective.dest_policy_apply_min_seconds} />}
+    {activeSheet === 'nodes' && (nodeGroup !== null ? <GroupNodeCoverageDrawer scope={scope} groupID={nodeGroup} onClose={sheet.close} /> : <NodeCoverageDrawer status={status.data} loading={status.isPending} failed={!!status.error} refreshing={status.isFetching} onRetryRead={() => status.refetch()} onClose={sheet.close} onLists={() => openLists(false)} onSettings={() => openSettings('dest_policy_apply_min_seconds')} applySeconds={settings.data?.effective.dest_policy_apply_min_seconds} />)}
     {activeSheet === 'exemptions' && <ExemptionsSheet onClose={sheet.close} onOpenUser={openUser} etaMs={status.data?.apply_eta_ms} />}
     {activeSheet === 'test' && <TestSheet onClose={sheet.close} onOpenPolicy={openPolicy} status={status.data} prefill={(location.state as DrawerHistoryState | null)?.prefill} />}
     <RiskUserDrawer userId={user.id} onClose={user.close} host="access" />

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import {
   Autocomplete,
   Box,
@@ -34,7 +34,7 @@ import SearchIcon from '@mui/icons-material/Search'
 import DeleteIcon from '@mui/icons-material/DeleteOutlined'
 import EditIcon from '@mui/icons-material/EditOutlined'
 import { useTranslation } from 'react-i18next'
-import { Link as RouterLink } from 'react-router'
+import { Link as RouterLink, useNavigate, useSearchParams } from 'react-router'
 import { deviceCapIsInert } from '@/utils/capabilities'
 import { useCan } from '@/utils/permissions'
 import { allSettledLimited } from '@/utils/promises'
@@ -54,6 +54,10 @@ import { PagedTableFooter } from '@/components/PagedTableFooter'
 import PageHeader from '@/components/PageHeader'
 import ScopeOverridesEditor from '@/components/scope/ScopeOverridesEditor'
 import { loadScopeState, saveScopeState, type ScopeState } from '@/components/scope/scopeOverrides'
+import GroupDestinationSummary from './accessControl/allowlist/GroupDestinationSummary'
+import { useDirtyClose } from '@/hooks/useDirtyClose'
+import { discardSettingsCopy } from './accessControl/confirmCopy'
+import { allowlistID } from './accessControl/allowlist/AllowlistWorkspace'
 
 interface FormState {
   slug: string
@@ -197,6 +201,8 @@ export default function GroupsView() {
   const md = theme.palette.md
   const { t } = useTranslation(['admin', 'common'])
   const canConfig = useCan('config.write')
+  const canAccess = useCan('access.view')
+  const [params, setParams] = useSearchParams(), navigate = useNavigate()
 
   const [search, setSearch] = useState('')
   const qScope = useQueryScope()
@@ -219,12 +225,22 @@ export default function GroupsView() {
   const [editing, setEditing] = useState<Group | null>(null)
   // Group detail is tabbed: Node access (tag filter) / Policies (require_2fa +
   // per-group overrides) / Members. Reset to 'access' on every open.
-  const [dlgTab, setDlgTab] = useState<'access' | 'policies' | 'members'>('access')
+  const [dlgTab, setDlgTab] = useState<'access' | 'policies' | 'members' | 'destination'>('access')
   // Per-group setting overrides shown in the Policies tab (null while loading /
   // on create — overrides apply only to an existing group).
   const [scope, setScope] = useState<ScopeState | null>(null)
   const [form, setForm] = useState<FormState>(EMPTY_FORM)
+  const initialForm = useRef<FormState>(EMPTY_FORM)
   const [busy, setBusy] = useState(false)
+  const departing = useRef(false)
+  const scopeDirty = scope && scope.overridable.some(key => scope.edit[key] && (scope.edit[key].on ? scope.orig[key] !== scope.edit[key].value : scope.orig[key] !== undefined))
+  const mayLeaveDestination = useDirtyClose(JSON.stringify(form) !== JSON.stringify(initialForm.current) || !!scopeDirty, discardSettingsCopy(t))
+  const openDestination = async (url: string) => {
+    if (busy || departing.current) return
+    departing.current = true
+    try { if (await mayLeaveDestination()) { setDialogOpen(false); void navigate(url) } }
+    finally { departing.current = false }
+  }
 
   // Tag filter conditions accept "region:XX" / "tag:YY" / a bare tag. Build
   // the dropdown suggestions by scanning every managed node — regions get a
@@ -314,6 +330,7 @@ export default function GroupsView() {
     setEditing(null)
     setScope(null) // overrides apply only to an existing group
     setForm(EMPTY_FORM)
+    initialForm.current = EMPTY_FORM
     setDlgTab('access')
     setDialogOpen(true)
   }
@@ -321,7 +338,7 @@ export default function GroupsView() {
   function openEdit(g: Group) {
     setEditing(g)
     const parsed = parseTagConditions(g.tag_filter.tags || [])
-    setForm({
+    const draft: FormState = {
       slug: g.slug,
       name: g.name,
       all: g.tag_filter.all,
@@ -335,12 +352,26 @@ export default function GroupsView() {
       traffic_limit_gb: g.traffic_limit_gb == null ? '' : String(g.traffic_limit_gb),
       ip_limit: g.ip_limit == null ? '' : String(g.ip_limit),
       device_limit: g.device_limit == null ? '' : String(g.device_limit),
-    })
+    }
+    setForm(draft)
+    initialForm.current = draft
     setScope(null)
     setDlgTab('access')
     setDialogOpen(true)
     void loadScope(g.id)
   }
+
+  const deepLinkID = allowlistID(params.get('edit'))
+  const deepLinkDestination = params.get('dtab') === 'destination'
+  useEffect(() => {
+    if (!canConfig || loading || groupsFailed || deepLinkID === null) return
+    const group = items.find(item => item.id === deepLinkID)
+    if (group) { openEdit(group); if (deepLinkDestination && canAccess) setDlgTab('destination') }
+    setParams(prev => { const next = new URLSearchParams(prev); next.delete('edit'); next.delete('dtab'); return next }, { replace: true })
+    // Consume the link once after its group list is available; ordinary refetches
+    // must never reopen the editor or replace a draft.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canConfig, canAccess, loading, groupsFailed, deepLinkID, deepLinkDestination, items, setParams])
 
   async function loadScope(groupId: number) {
     try {
@@ -720,6 +751,7 @@ export default function GroupsView() {
                 <Tab value="members" sx={{ minHeight: 40 }}
                   label={t('admin:groups.tabs.members', { defaultValue: '成员' })} />
               )}
+              {canAccess && <Tab value="destination" sx={{ minHeight: 44 }} label={t('admin:groups.destination.tab')} />}
             </Tabs>
 
             {dlgTab === 'access' && (
@@ -862,6 +894,7 @@ export default function GroupsView() {
               </>
             )}
 
+            {dlgTab === 'destination' && canAccess && <GroupDestinationSummary scope={qScope} groupID={editing?.id ?? null} busy={busy} onOpen={url => { void openDestination(url) }} />}
             {dlgTab === 'members' && editing && (
               <Box sx={{ py: 1 }}>
                 <Typography variant="body2" sx={{ mb: 0.5 }}>

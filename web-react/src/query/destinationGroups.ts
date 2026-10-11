@@ -1,5 +1,6 @@
 import { queryOptions, useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
 import { createDestinationGroupException, getDestinationGroup, getDestinationGroups, getDestinationGroupTrialReport, previewDestinationGroup, putDestinationGroup, type DestinationGroupInput, type DestinationGroupSummary } from '@/api/destinationGroups'
+import { patchDestinationListEntries } from '@/api/accessControl'
 import { accessControlKeys, groupKeys } from './keys'
 import { freshness, policies } from './policies'
 import type { QueryScope } from './session'
@@ -17,7 +18,7 @@ export function useDestinationGroups(scope: QueryScope, enabled = true) { return
 
 export function destinationGroupDetailQuery(scope: QueryScope, id: number, enabled = true) {
   return queryOptions({ queryKey: accessControlKeys.destinationGroup(scope, id), queryFn: ({ signal }) => getDestinationGroup(id, { signal, silent: true }),
-    ...freshness(policies.destStatus), enabled: enabled && admin(scope) && positive(id), retry: false, refetchIntervalInBackground: false,
+    ...freshness(policies.destStatus), enabled: enabled && admin(scope) && positive(id), retry: false, refetchOnMount: 'always', refetchIntervalInBackground: false,
     refetchInterval: q => q.state.status !== 'error' && q.state.data && outstanding(q.state.data) ? policies.destStatus.refetchInterval : false })
 }
 export function useDestinationGroup(scope: QueryScope, id: number, enabled = true) { return useQuery(destinationGroupDetailQuery(scope, id, enabled)) }
@@ -56,4 +57,10 @@ export function useSaveDestinationGroup(scope: QueryScope) {
 }
 export function useCreateDestinationGroupException(scope: QueryScope) {
   return useMutation({ mutationFn: ({ groupID, input }: { groupID: number; input: { target: string; match: 'site' | 'host' } }) => createDestinationGroupException(groupID, input), onSettled: useInvalidateGroupWrite(scope) })
+}
+export function useAddDestinationGroupSites(scope: QueryScope) {
+  return useMutation({ mutationFn: ({ listID, sites }: { listID: number; sites: string[] }) => {
+    if (!positive(listID) || !Array.isArray(sites) || sites.length === 0 || !sites.every(site => typeof site === 'string' && /^[a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?$/.test(site))) throw new Error('Invalid whole-site entries')
+    return patchDestinationListEntries(listID, [...new Set(sites)].map(site => `domain:${site}`))
+  }, onSettled: useInvalidateGroupWrite(scope) })
 }
