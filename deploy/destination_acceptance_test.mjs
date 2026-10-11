@@ -41,6 +41,23 @@ test('published Docker rollback requires real policy, automatic recovery and bot
   for (const required of [acceptance.remoteNodeCandidate.commit, 'ubuntu-24.04', 'ubuntu-24.04-arm', 'Dockerfile.release', 'PSP_NATIVE_DOCKER_IMAGE', 'TestNativePublishedDockerRollback', 'check-docker-upgrade', 'native-published-docker-${{ matrix.arch }}']) assert(job.includes(required), required)
 })
 
+test('Docker recovery diagnostics retain fixed categories without task or credential output', () => {
+  const pkg = 'github.com/KazuhaHub/passwall-sub-panel/internal/app'
+  const Test = 'TestNativePublishedDockerRollback/health_failure_restore'
+  for (const [message, expected] of [
+    ['Docker automatic restoration changed original receipt identity', 'docker_restore_receipt_failed'],
+    ['Docker automatic restoration changed original execution identity', 'docker_restore_execution_failed'],
+    ['Docker automatic restoration changed original installation identity', 'docker_restore_installation_failed'],
+    ['timed out waiting for Docker failed result acknowledgement', 'docker_failed_ack_timeout'],
+    ['Docker replacement lost private material, original state inode or advancing counter epoch', 'docker_preservation_failed'],
+  ]) {
+    const output = sanitizeDestinationResults(encode([{ Action: 'output', Package: pkg, Test, Output: `${message}; task=private-id credential=secret host=private-host` }]))
+    assert.deepEqual(JSON.parse(output), { Action: 'output', Package: pkg, Test, Diagnostic: expected })
+    for (const text of ['private-id', 'secret', 'private-host', 'Output']) assert(!output.includes(text))
+  }
+  assert.equal(sanitizeDestinationResults(encode([{ Action: 'output', Package: pkg, Test, Output: 'private task receipt credential address' }])), '\n')
+})
+
 test('remote restoration diagnostics retain only fixed booleans', () => {
   for (const suffix of ['task_terminal', 'receipt_failed', 'receipt_activated', 'source_installed', 'seen', 'identity', 'capability', 'streams', 'policy', 'report', 'core', 'listener', 'journal_readable', 'journal_failed', 'journal_running', 'journal_delivered', 'quarantined', 'failed_result_posted', 'failed_result_accepted', 'failed_result_rejected', 'outbox_pending', 'outbox_valid', 'fresh_after_restore', 'sync_validation_error', 'sync_outbox_error', 'sync_observer_error', 'sync_duplicate_issue', 'sync_stream_error', 'sync_process_error']) {
     const category = `remote_restore_${suffix}`

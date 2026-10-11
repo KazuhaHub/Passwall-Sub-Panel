@@ -215,12 +215,23 @@ func TestNativePublishedDockerRollback(t *testing.T) {
 			}
 			return converged(nativeRemoteCandidateIdentity, restoredAt)
 		})
+		// The panel accepts the result before the agent consumes its response and
+		// commits the ordinary local acknowledgement. Do not sample between them.
+		nativeWait(caseTest, 30*time.Second, "Docker failed result acknowledgement", func() bool {
+			return m.execution(caseTest, task.TaskID).delivered == 1
+		})
 		receipt, completed := m.receipt(caseTest, task.TaskID), m.execution(caseTest, task.TaskID)
 		if _, err := os.Lstat(readyPath); !errors.Is(err, os.ErrNotExist) {
 			caseTest.Fatal("Docker restored failure retained authenticated readiness")
 		}
-		if receipt.ErrorCode != "agent_upgrade_failed" || receipt.Result != nil || receipt.ActivationNonce != activated.ActivationNonce || !reflect.DeepEqual(receipt.Request.Task, activated.Request.Task) || completed.state != "failed" || completed.delivered != 1 || completed.digest != running.digest || completed.claim != running.claim || completed.started != running.started || completed.deadline != running.deadline || m.inspect(caseTest, m.agentName).ID != source.ID || m.pid(caseTest) == source.State.Pid || m.digest(caseTest) != sourceDigest {
-			caseTest.Fatal("Docker automatic restoration changed original installation or execution identity")
+		if receipt.ErrorCode != "agent_upgrade_failed" || receipt.Result != nil || receipt.ActivationNonce != activated.ActivationNonce || !reflect.DeepEqual(receipt.Request.Task, activated.Request.Task) {
+			caseTest.Fatal("Docker automatic restoration changed original receipt identity")
+		}
+		if completed.state != "failed" || completed.delivered != 1 || completed.digest != running.digest || completed.claim != running.claim || completed.started != running.started || completed.deadline != running.deadline {
+			caseTest.Fatal("Docker automatic restoration changed original execution identity")
+		}
+		if m.inspect(caseTest, m.agentName).ID != source.ID || m.pid(caseTest) == source.State.Pid || m.digest(caseTest) != sourceDigest {
+			caseTest.Fatal("Docker automatic restoration changed original installation identity")
 		}
 		fold()
 		traffic(false)
@@ -275,6 +286,9 @@ func TestNativePublishedDockerRollback(t *testing.T) {
 			caseTest.Fatal("Docker readiness did not bind the current authorized activation")
 		}
 		m.assertPublishedImage(caseTest, task.TaskID)
+		nativeWait(caseTest, 30*time.Second, "Docker successful result acknowledgement", func() bool {
+			return m.execution(caseTest, task.TaskID).delivered == 1
+		})
 		successful = m.execution(caseTest, task.TaskID)
 		if successful.state != "succeeded" || successful.delivered != 1 || successful.digest != receipt.Request.Task.InputSHA256 || successful.deadline != task.NotAfterMS || successful.claim == "" || successful.started <= 0 {
 			caseTest.Fatal("Docker target did not recover and acknowledge its original claim")
@@ -730,6 +744,12 @@ func (m *nativeDockerInstallation) assertPrivacy(t *testing.T, private ...string
 
 func (m *nativeDockerInstallation) cleanup(t *testing.T) {
 	t.Helper()
+	rootInfo, rootErr := os.Lstat(m.root)
+	markerInfo, markerErr := os.Lstat(filepath.Join(m.root, ".owner"))
+	if rootErr != nil || markerErr != nil || !rootInfo.IsDir() || rootInfo.Mode()&os.ModeSymlink != 0 || rootInfo.Sys().(*syscall.Stat_t).Uid != 0 || !markerInfo.Mode().IsRegular() || markerInfo.Sys().(*syscall.Stat_t).Uid != 0 || markerInfo.Mode().Perm() != 0600 {
+		t.Error("Docker cleanup refused changed ownership provenance")
+		return
+	}
 	marker, err := os.ReadFile(filepath.Join(m.root, ".owner"))
 	if err != nil || string(marker) != m.nonce {
 		t.Error("Docker cleanup refused changed ownership provenance")
@@ -762,7 +782,14 @@ func (m *nativeDockerInstallation) cleanup(t *testing.T) {
 			return walkErr
 		}
 		info, err := os.Lstat(path)
-		if err != nil || info.Mode()&os.ModeSymlink != 0 || (!info.IsDir() && !info.Mode().IsRegular()) || len(paths) >= 2048 {
+		if err != nil {
+			return err
+		}
+		// A force-stopped owned agent may leave its production Unix audit socket.
+		// All owned containers are already removed. Accept only that exact path
+		// and non-root production UID, never a link or another special entry.
+		ownedSocket := path == filepath.Join(m.root, "data", "runtime", "audit.sock") && info.Mode()&os.ModeSocket != 0 && info.Sys().(*syscall.Stat_t).Uid == 10001
+		if info.Mode()&os.ModeSymlink != 0 || (!info.IsDir() && !info.Mode().IsRegular() && !ownedSocket) || len(paths) >= 2048 {
 			return errors.New("Docker cleanup refused linked, special or excessive entries")
 		}
 		uid := info.Sys().(*syscall.Stat_t).Uid
