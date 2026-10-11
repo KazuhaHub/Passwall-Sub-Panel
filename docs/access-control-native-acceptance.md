@@ -319,7 +319,10 @@ VLESS TCP 节点及 SQLite；不是全机队、跨方言或压力矩阵的完整
 state.db 必须保持原文件身份和 schema 9，Agent epoch、凭据摘要和用户 UUID 保持
 不变。降级后不得在当前候选中下发策略；原核心配置字节和 config ETag 恢复，
 roster 的 `min_config_version` 随当前 config 版本更新，必须确认当前 roster ETag，
-覆盖显示需升级且不表示正在执行历史策略。再次升级必须重新应用当前已发布策略。
+覆盖显示需升级且不表示正在执行历史策略。旧 Node 没有空策略 PolicyStatus，
+接口保留历史 applied_rules 及未确认的空候选；界面不得把它显示为执行规则数，
+也不得显示历史 fallback 为“仍在执行”。真实停止由当前完整流、配置字节和代理
+连接证明。再次升级必须重新应用当前已发布策略。
 历史 LKG 可以保留，不能把它当成当前执行事实。此演练只验证上述固定版本的原地
 二进制切换；PSP 远程升级 helper、systemd/Docker updater、白名单能力变更及
 离线升级窗口仍有各自验收门槛。

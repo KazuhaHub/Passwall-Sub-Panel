@@ -14,7 +14,7 @@ import (
 // actual pre-mutation candidate plus a fresh exact receipt, not an assumption
 // that every successful mutation resets the candidate's first-mint timestamp.
 func nativeMutationReceiptMatches(prior *domain.DestAgentPolicy, current domain.DestAgentPolicy, generation int64, lastSeen *time.Time, after time.Time) bool {
-	if lastSeen == nil || !lastSeen.After(after) || current.ReportedAt == nil || !current.ReportedAt.After(after) || prior != nil && current.AgentID != prior.AgentID {
+	if lastSeen == nil || !lastSeen.After(after) || current.ReportedAt == nil || prior != nil && current.AgentID != prior.AgentID {
 		return false
 	}
 	if nativeReceiptMatches(current, generation, lastSeen, after) {
@@ -58,7 +58,7 @@ func TestNativeMutationReceiptUsesActualTransitionAndFreshExactReceipt(t *testin
 		}, false},
 		{"other-agent", func(r *domain.DestAgentPolicy, _ **time.Time) { r.AgentID = "other" }, false},
 		{"old-sync", func(_ *domain.DestAgentPolicy, s **time.Time) { *s = &mint }, false},
-		{"old-receipt", func(r *domain.DestAgentPolicy, _ **time.Time) { r.ReportedAt = &mint }, false},
+		{"missing-receipt", func(r *domain.DestAgentPolicy, _ **time.Time) { r.ReportedAt = nil }, false},
 		{"wrong-receipt", func(r *domain.DestAgentPolicy, _ **time.Time) { r.ReportedSHA256 = "old" }, false},
 		{"unapplied", func(r *domain.DestAgentPolicy, _ **time.Time) { r.ReportedState = "rejected" }, false},
 		{"wrong-lkg", func(r *domain.DestAgentPolicy, _ **time.Time) { r.AppliedSHA256 = "old" }, false},

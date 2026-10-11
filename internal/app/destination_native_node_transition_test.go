@@ -61,6 +61,8 @@ func nativeLegacyNodeTransitions(t *testing.T, f nativeLegacyTransitionFixture) 
 		{"node_upgrade", binary, true}, {"node_downgrade", f.oldBinary, false}, {"node_reupgrade", binary, true},
 	} {
 		if !t.Run(step.name, func(test *testing.T) {
+			priorPolicy, err := f.app.repos.DestAgentPolicy.Get(test.Context(), f.agentID, true)
+			nativeMust(test, err, "read policy history before node transition")
 			after := time.Now().UTC()
 			sequence := f.probe.snapshot().Sequence
 			cmd := f.replace(step.executable)
@@ -170,6 +172,9 @@ func nativeLegacyNodeTransitions(t *testing.T, f nativeLegacyTransitionFixture) 
 				if len(policy.MintedBody) > 0 && (json.Unmarshal(policy.MintedBody, &body) != nil || body != nil) {
 					test.Fatal("node downgrade retained executable policy in the current candidate")
 				}
+				if priorPolicy == nil || policy.AppliedSHA256 != priorPolicy.AppliedSHA256 || !bytes.Equal(policy.AppliedBody, priorPolicy.AppliedBody) || policy.AppliedRuleCount != priorPolicy.AppliedRuleCount {
+					test.Fatal("node downgrade erased confirmed policy history")
+				}
 			}
 			r, err := http.NewRequestWithContext(test.Context(), "GET", f.adminURL+"/api/admin/dest/status", nil)
 			nativeMust(test, err, "create transition coverage request")
@@ -188,7 +193,10 @@ func nativeLegacyNodeTransitions(t *testing.T, f nativeLegacyTransitionFixture) 
 					continue
 				}
 				found = true
-				if row.Supports.Policy != step.capable || step.capable && (row.State != "applied" || row.AppliedRules != 1 || row.PendingSince != nil) || !step.capable && (row.State != "unsupported_version" || row.AppliedRules != 0 || row.Collecting) {
+				// Old Node cannot report an empty PolicyStatus. Its historical LKG
+				// count survives; unsupported capability plus the empty pending
+				// candidate must not be mistaken for current policy execution.
+				if row.Supports.Policy != step.capable || step.capable && (row.State != "applied" || row.AppliedRules != 1 || row.PendingSince != nil) || !step.capable && (row.State != "unsupported_version" || row.MintedKind != domain.DestCandidateEmpty || row.PendingSince == nil || row.AppliedRules != priorPolicy.AppliedRuleCount || row.Collecting) {
 					test.Fatal("node transition coverage did not match its own execution")
 				}
 			}

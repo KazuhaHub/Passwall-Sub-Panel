@@ -19,6 +19,7 @@ const diagnostics = Object.freeze({
   'node binary transition lost its original principal or identity': 'node_transition_identity_invalid',
   'node downgrade did not restore the original core artifact': 'node_downgrade_artifact_changed',
   'node downgrade retained executable policy in the current candidate': 'node_downgrade_policy_dispatched',
+  'node downgrade erased confirmed policy history': 'node_downgrade_history_erased',
   'node transition coverage did not match its own execution': 'node_transition_coverage_invalid',
   'timed out waiting for mixed current candidate application': 'mixed_apply_timeout',
   'timed out waiting for mixed single-node offline pause': 'mixed_offline_timeout',
