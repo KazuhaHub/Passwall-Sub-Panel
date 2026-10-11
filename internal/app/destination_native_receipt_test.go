@@ -2,16 +2,83 @@ package app
 
 import (
 	"bytes"
+	"encoding/json"
 	"testing"
 	"time"
 
+	"github.com/KazuhaHub/passwall-protocol/protocol"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 )
+
+func nativeOpenRosterReceiptMatches(stream domain.NodeAgentStream, epoch uint64, revoked protocol.SubjectKey, canary protocol.ClientKey, listener protocol.ListenerKey) bool {
+	var roster protocol.RosterBody
+	if epoch == 0 || stream.Stream != domain.NodeAgentStreamRoster || stream.AppliedEpoch != epoch || !stream.Converged() || json.Unmarshal(stream.DesiredBody, &roster) != nil {
+		return false
+	}
+	retained, active := 0, 0
+	for _, c := range roster.Clients {
+		if c.Subject == revoked {
+			if c.Enabled {
+				return false
+			}
+			retained++
+		}
+		if c.Key == canary {
+			if !c.Enabled || len(c.Listeners) != 1 || c.Listeners[0] != listener {
+				return false
+			}
+			active++
+		}
+	}
+	return retained == 1 && active == 1
+}
+
+func TestNativeOpenRosterReceiptRequiresCurrentAttachmentAndPreservedRevocation(t *testing.T) {
+	roster := protocol.RosterBody{Clients: []protocol.Client{
+		{Key: protocol.NewClientKey(1), Subject: protocol.NewSubjectKey(1), Enabled: false},
+		{Key: protocol.NewClientKey(2), Subject: protocol.NewSubjectKey(2), Enabled: true, Listeners: []protocol.ListenerKey{protocol.NewListenerKey(3)}},
+	}}
+	for _, tc := range []struct {
+		name   string
+		change func(*protocol.RosterBody, *domain.NodeAgentStream)
+		want   bool
+	}{
+		{"current-attached-canary", func(*protocol.RosterBody, *domain.NodeAgentStream) {}, true},
+		{"unacknowledged", func(_ *protocol.RosterBody, s *domain.NodeAgentStream) { s.AppliedETag = "old" }, false},
+		{"old-epoch", func(_ *protocol.RosterBody, s *domain.NodeAgentStream) { s.AppliedEpoch = 1 }, false},
+		{"unattached-canary", func(r *protocol.RosterBody, _ *domain.NodeAgentStream) { r.Clients[1].Listeners = nil }, false},
+		{"different-listener", func(r *protocol.RosterBody, _ *domain.NodeAgentStream) {
+			r.Clients[1].Listeners[0] = protocol.NewListenerKey(4)
+		}, false},
+		{"disabled-canary", func(r *protocol.RosterBody, _ *domain.NodeAgentStream) { r.Clients[1].Enabled = false }, false},
+		{"replaced-canary", func(r *protocol.RosterBody, _ *domain.NodeAgentStream) { r.Clients[1].Key = protocol.NewClientKey(4) }, false},
+		{"revoked-user-reenabled", func(r *protocol.RosterBody, _ *domain.NodeAgentStream) { r.Clients[0].Enabled = true }, false},
+		{"revoked-user-deleted", func(r *protocol.RosterBody, _ *domain.NodeAgentStream) { r.Clients = r.Clients[1:] }, false},
+		{"duplicate-canary", func(r *protocol.RosterBody, _ *domain.NodeAgentStream) { r.Clients = append(r.Clients, r.Clients[1]) }, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			current := roster
+			current.Clients = append([]protocol.Client(nil), roster.Clients...)
+			current.Clients[1].Listeners = append([]protocol.ListenerKey(nil), roster.Clients[1].Listeners...)
+			stream := domain.NodeAgentStream{Stream: domain.NodeAgentStreamRoster, DesiredETag: "current", AppliedETag: "current", AppliedEpoch: 2}
+			tc.change(&current, &stream)
+			body, err := json.Marshal(current)
+			if err != nil {
+				t.Fatal(err)
+			}
+			stream.DesiredBody = body
+			if got := nativeOpenRosterReceiptMatches(stream, 2, protocol.NewSubjectKey(1), protocol.NewClientKey(2), protocol.NewListenerKey(3)); got != tc.want {
+				t.Fatalf("open roster readiness=%t, want %t", got, tc.want)
+			}
+		})
+	}
+}
 
 func TestNativeListenerFaultReceiptRequiresUnchangedPolicyAndFailedCurrentConfig(t *testing.T) {
 	minted, mutation, seen := time.UnixMilli(1000), time.UnixMilli(2000), time.UnixMilli(3000)
 	prior := domain.DestAgentPolicy{AgentID: "native", MintedKind: domain.DestCandidateDesired, MintedGeneration: 7, MintedAt: &minted, MintedSHA256: "confirmed", DesiredSHA256: "confirmed", ReportedSHA256: "confirmed", ReportedState: "applied", ReportedAt: &minted, AppliedSHA256: "confirmed", AppliedAt: &minted, MintedBody: []byte("policy"), AppliedBody: []byte("policy")}
-	stream := domain.NodeAgentStream{AgentID: "native", Stream: domain.NodeAgentStreamConfig, DesiredETag: "invalid-listener", AppliedETag: "good-listener", AppliedEpoch: 1, LastSeen: &seen}
+	// Stream acknowledgement means received and durably stored, not deployed.
+	stream := domain.NodeAgentStream{AgentID: "native", Stream: domain.NodeAgentStreamConfig, DesiredETag: "invalid-listener", AppliedETag: "invalid-listener", AppliedEpoch: 1, LastSeen: &seen}
 	for _, tc := range []struct {
 		name   string
 		change func(*domain.DestAgentPolicy, *domain.NodeAgentStream)
@@ -19,8 +86,8 @@ func TestNativeListenerFaultReceiptRequiresUnchangedPolicyAndFailedCurrentConfig
 	}{
 		{"unchanged-policy-with-fresh-config-failure", func(*domain.DestAgentPolicy, *domain.NodeAgentStream) {}, true},
 		{"no-current-config-mutation", func(_ *domain.DestAgentPolicy, s *domain.NodeAgentStream) { s.DesiredETag = "good-listener" }, false},
-		{"config-unexpectedly-applied", func(_ *domain.DestAgentPolicy, s *domain.NodeAgentStream) { s.AppliedETag = s.DesiredETag }, false},
-		{"different-confirmed-config", func(_ *domain.DestAgentPolicy, s *domain.NodeAgentStream) { s.AppliedETag = "other" }, false},
+		{"old-config-acknowledgement", func(_ *domain.DestAgentPolicy, s *domain.NodeAgentStream) { s.AppliedETag = "good-listener" }, false},
+		{"different-received-config", func(_ *domain.DestAgentPolicy, s *domain.NodeAgentStream) { s.AppliedETag = "other" }, false},
 		{"old-epoch", func(_ *domain.DestAgentPolicy, s *domain.NodeAgentStream) { s.AppliedEpoch = 0 }, false},
 		{"stale-config-report", func(_ *domain.DestAgentPolicy, s *domain.NodeAgentStream) { s.LastSeen = &minted }, false},
 		{"policy-rejected", func(r *domain.DestAgentPolicy, _ *domain.NodeAgentStream) { r.ReportedState = "rejected" }, false},
@@ -45,8 +112,9 @@ func TestNativeListenerFaultReceiptRequiresUnchangedPolicyAndFailedCurrentConfig
 }
 
 // A failed listener deployment must not be mistaken for a policy rejection or
-// for successful application of the invalid config. The unchanged policy may
-// legitimately retain its old mint/report timestamps.
+// for deployment of the invalid config. Streams acknowledge received documents;
+// the driver separately requires the production listener intent to stay pending
+// and proves the previous core is still serving real traffic.
 func nativeListenerFaultReceiptMatches(prior, current domain.DestAgentPolicy, cfg domain.NodeAgentStream, confirmedConfig string, epoch uint64, lastSeen *time.Time, after time.Time) bool {
 	return prior.AgentID != "" && current.AgentID == prior.AgentID && prior.MintedAt != nil &&
 		lastSeen != nil && lastSeen.After(after) && nativeReceiptMatches(current, prior.MintedGeneration, lastSeen, *prior.MintedAt) &&
@@ -55,7 +123,7 @@ func nativeListenerFaultReceiptMatches(prior, current domain.DestAgentPolicy, cf
 		current.AppliedSHA256 == prior.AppliedSHA256 && current.ReportedSHA256 == prior.ReportedSHA256 &&
 		bytes.Equal(current.MintedBody, prior.MintedBody) && bytes.Equal(current.AppliedBody, prior.AppliedBody) &&
 		cfg.AgentID == prior.AgentID && cfg.Stream == domain.NodeAgentStreamConfig && epoch > 0 && cfg.AppliedEpoch == epoch &&
-		confirmedConfig != "" && cfg.DesiredETag != "" && cfg.DesiredETag != confirmedConfig && cfg.AppliedETag == confirmedConfig && !cfg.Converged() &&
+		confirmedConfig != "" && cfg.DesiredETag != "" && cfg.DesiredETag != confirmedConfig && cfg.Converged() &&
 		cfg.LastSeen != nil && cfg.LastSeen.After(after)
 }
 

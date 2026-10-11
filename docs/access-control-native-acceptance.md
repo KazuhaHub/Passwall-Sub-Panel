@@ -14,13 +14,14 @@ Xray version: `26.6.27`, `26.7.28`, and `26.9.9`.
 The isolated fixture explicitly acknowledges the reviewed restricted `26.9.9`
 selection; the production catalog gate remains enforced.
 
-Every matrix job must execute all seventeen ordered cases: empty policy, watch,
+Every matrix job must execute all nineteen ordered cases: empty policy, watch,
 block, pause/resume, anonymous allowlist trial, enforce, supplemental entry,
 unrelated listener rejection and repair,
 collection off, detailed usage, daemon restart, port-only fallback under
 insufficient sniffing, pause/resume during fallback, disabled-rule pruning,
 sniffing fallback exhaustion, account revocation while exhausted, and a PSP app
-restart with the exhausted state persisted.
+restart with the exhausted state persisted, returning an allowlist group to open
+during sniffing fallback, and pause/resume of that pruned fallback.
 The restarted daemon's very
 first real TLS report must already carry the confirmed applied policy, and a new
 traffic hit must map to its original user. A bounded in-memory probe copies only
@@ -48,13 +49,26 @@ the real Xray configuration check rejects that listener. A fresh real
 receipt and LKG remain unchanged, the invalid config stays unapplied, and both
 original client keys remain attached. Both users still reach the target through
 the running previous artifact. Restoring the original settings then requires a
-fresh accepted report and current config/roster convergence. This covers an
+fresh accepted report, current config/roster convergence and a synced production
+listener intent. Stream convergence alone acknowledges a received document;
+the listener's pending intent proves the invalid config was not deployed. This covers an
 unrelated completed core check, not a simulated policy rejection or timeout.
 PSP is then shut down and rebuilt with the same configuration and database.
 A drained fixture TLS gateway holds the endpoint stable while the actual SQL
 pool, router, services and caches are replaced. The continuing real daemon must
 sync with the reopened app; the exhausted candidate and historical LKG must
 survive, and the revoked user must remain denied while the canary succeeds.
+
+After the reopen, a group catch-all and a global port watch are genuinely applied:
+canary traffic is denied and a real group hit is ingested. A new BitTorrent rule
+then fails the metadata-only sniffing precheck. The confirmed fallback retains
+the group source. Returning the group to open must prune that source, retain only
+the exact port watch, and acknowledge the original canary's enabled attachment.
+The previously revoked user must remain disabled. Actual canary traffic must
+reach the target and create a watch hit. Pausing this fallback acknowledges zero
+rules and allows canary traffic without adding watch hits after prior batches
+have drained. Resuming restores the confirmed watch and ingests a newly counted
+hit. These checks cover both policy pruning and asynchronous membership resync.
 
 Current candidate readiness requires its published generation, a mint after
 the administrator mutation, a matching applied report, and an accepted sync

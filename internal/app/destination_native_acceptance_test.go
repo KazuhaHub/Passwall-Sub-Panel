@@ -350,6 +350,11 @@ func TestNativeDestinationTraffic(t *testing.T) {
 		if !confirmed.Converged() {
 			caseTest.Fatal("listener failure fixture has no confirmed config")
 		}
+		baseline, err := a.repos.Node.GetByID(caseTest.Context(), f.node.ID)
+		nativeMust(caseTest, err, "read listener before failure")
+		if baseline.ConfigSyncState != domain.ConfigSyncSynced {
+			caseTest.Fatal("listener failure fixture has no confirmed config")
+		}
 		members := func() map[int64]int64 {
 			caseTest.Helper()
 			keys := map[int64]int64{}
@@ -414,9 +419,10 @@ func TestNativeDestinationTraffic(t *testing.T) {
 			observed["listener_policy_unchanged"] = current.MintedSHA256 == prior.MintedSHA256 && current.DesiredSHA256 == prior.DesiredSHA256 && current.AppliedSHA256 == prior.AppliedSHA256 && current.ReportedSHA256 == prior.ReportedSHA256 && bytes.Equal(current.MintedBody, prior.MintedBody) && bytes.Equal(current.AppliedBody, prior.AppliedBody)
 			observed["listener_epoch"] = cfg.AppliedEpoch == agent.Epoch
 			observed["listener_config_changed"] = cfg.DesiredETag != "" && cfg.DesiredETag != confirmed.DesiredETag
-			observed["listener_config_preserved"] = cfg.AppliedETag == confirmed.DesiredETag && !cfg.Converged()
+			listener, err := a.repos.Node.GetByID(caseTest.Context(), f.node.ID)
+			observed["listener_config_preserved"] = err == nil && listener.ConfigSyncState == domain.ConfigSyncPending
 			observed["listener_config_fresh"] = cfg.LastSeen != nil && cfg.LastSeen.After(failedAfter)
-			return coreRejected && nativeListenerFaultReceiptMatches(*prior, *current, *cfg, confirmed.DesiredETag, agent.Epoch, agent.LastSeen, failedAfter)
+			return coreRejected && observed["listener_config_preserved"] && nativeListenerFaultReceiptMatches(*prior, *current, *cfg, confirmed.DesiredETag, agent.Epoch, agent.LastSeen, failedAfter)
 		})
 		for user, key := range members() {
 			if before[user] != key {
@@ -443,7 +449,11 @@ func TestNativeDestinationTraffic(t *testing.T) {
 		repairedAfter := receiptAfter
 		nativeWait(caseTest, 120*time.Second, "listener repair application", func() bool {
 			agent, err := a.repos.NodeAgent.GetByAgentID(caseTest.Context(), f.agent.AgentID)
-			return err == nil && agent.LastSeen != nil && agent.LastSeen.After(repairedAfter) && streamsReady(agent)
+			if err != nil || agent.LastSeen == nil || !agent.LastSeen.After(repairedAfter) || !streamsReady(agent) {
+				return false
+			}
+			listener, err := a.repos.Node.GetByID(caseTest.Context(), f.node.ID)
+			return err == nil && listener.ConfigSyncState == domain.ConfigSyncSynced
 		})
 		waitCandidate("", false, false, *prior.MintedAt)
 		traffic(true)
@@ -603,7 +613,7 @@ func TestNativeDestinationTraffic(t *testing.T) {
 		err := a.Shutdown(closeContext)
 		cancel()
 		nativeMust(caseTest, err, "stop exhausted PSP app")
-		a, err = Build(caseTest.Context(), &cfg) // Fresh SQL pool, services and caches.
+		a, err = Build(t.Context(), &cfg) // Fresh SQL pool, services and caches, retained for later cases.
 		nativeMust(caseTest, err, "reopen exhausted PSP app")
 		t.Cleanup(func() {
 			stopDaemon(t)
@@ -626,6 +636,113 @@ func TestNativeDestinationTraffic(t *testing.T) {
 		}
 		traffic(false)
 		trafficUser(canary.UUID, true)
+	})
+	var groupWatch destinationPolicyAPIResult
+	var groupWatchLKG string
+	verifyGroupWatch := func(r *domain.DestAgentPolicy, withGroup bool) {
+		caseTest.Helper()
+		var body protocol.DestinationPolicy
+		nativeMust(caseTest, json.Unmarshal(r.MintedBody, &body), "decode group fallback")
+		watch, group := 0, 0
+		for _, rule := range body.Rules {
+			source, _, _ := strings.Cut(rule.ID, "x")
+			switch source {
+			case fmt.Sprintf("g%d", f.group.ID):
+				if !withGroup || rule.Action != protocol.RuleBlock || !rule.CatchAll || len(rule.Domains) != 0 || len(rule.CIDRs) != 0 || len(rule.Protocols) != 0 || rule.Ports != "" {
+					caseTest.Fatal("group fallback retained an unexpected deny rule")
+				}
+				group++
+			case fmt.Sprintf("p%d", groupWatch.ID):
+				if rule.Action != protocol.RuleObserve || rule.Ports != strconv.Itoa(targetPort) || len(rule.Domains) != 0 || len(rule.CIDRs) != 0 || len(rule.Protocols) != 0 || rule.CatchAll {
+					caseTest.Fatal("group fallback did not retain the exact watch rule")
+				}
+				watch++
+			default:
+				caseTest.Fatal("group fallback contains an unexpected source")
+			}
+		}
+		wantGroup := 0
+		if withGroup {
+			wantGroup = 1
+		}
+		if watch != 1 || group != wantGroup {
+			caseTest.Fatal("group fallback has the wrong source counts")
+		}
+	}
+	run("fallback_group_open", func() {
+		setSniffing(fullSniffing)
+		waitApplied()
+		request("DELETE", fmt.Sprintf("dest/policies/%d", domainPolicy.ID), nil, 204, nil)
+		watchInput := destinationPolicyInput("Fallback group watch", "observe")
+		watchInput["inline"] = map[string]any{"ports": strconv.Itoa(targetPort)}
+		request("POST", "dest/policies", watchInput, 201, &groupWatch)
+		request("POST", fmt.Sprintf("dest/lists/%d/entries", mode.ExtraListID), map[string]any{"remove": []string{address + "/128"}}, 200, nil)
+		request("PUT", groupPath, map[string]any{"mode": "allowlist", "stage": "trial", "list_ids": []int64{}, "updated_at": mode.UpdatedAt}, 200, &mode)
+		publish()
+		waitApplied()
+		request("PUT", groupPath, map[string]any{"mode": "allowlist", "stage": "enforce", "list_ids": []int64{}, "updated_at": mode.UpdatedAt}, 200, &mode)
+		publish()
+		waitApplied()
+		confirmed := verifyCandidate(2, "", 0)
+		verifyGroupWatch(confirmed, true)
+		trafficUser(canary.UUID, false)
+		waitHit(fmt.Sprintf("g%d", f.group.ID), "block", canary.ID, targetPort)
+		setSniffing(metadataSniffing)
+		waitApplied() // Catch-all and port rules remain executable without sniffing.
+		prerequisite := destinationPolicyInput("Fallback group prerequisite", "block")
+		prerequisite["inline"] = map[string]any{"protocols": []string{"bittorrent"}}
+		request("POST", "dest/policies", prerequisite, 201, nil)
+		publish()
+		waitFault(domain.DestCandidateFallback, false)
+		verifyGroupWatch(verifyCandidate(2, confirmed.AppliedSHA256, 0), true)
+		trafficUser(canary.UUID, false)
+		// Sniffing fallback can detach allowlist members. Returning to open must
+		// prune the group source and acknowledge its original client attachment.
+		request("PUT", groupPath, map[string]any{"mode": "open", "stage": "", "list_ids": []int64{}, "updated_at": mode.UpdatedAt}, 200, &mode)
+		publish()
+		waitFault(domain.DestCandidateFallback, false)
+		current := verifyCandidate(1, "", 0)
+		verifyGroupWatch(current, false)
+		groupWatchLKG = current.AppliedSHA256
+		nativeWait(caseTest, 120*time.Second, "open fallback roster application", func() bool {
+			agent, err := a.repos.NodeAgent.GetByAgentID(caseTest.Context(), f.agent.AgentID)
+			if err != nil || !streamsReady(agent) {
+				return false
+			}
+			stream, err := a.repos.NodeAgent.GetStream(caseTest.Context(), f.agent.AgentID, domain.NodeAgentStreamRoster)
+			if err != nil || !nativeOpenRosterReceiptMatches(*stream, agent.Epoch, protocol.NewSubjectKey(f.user.ID), protocol.NewClientKey(canaryClient.ID), protocol.NewListenerKey(f.node.ID)) {
+				return false
+			}
+			attachments, err := a.repos.PSPClient.ListInbounds(caseTest.Context(), canaryClient.ID)
+			return err == nil && len(attachments) == 1 && attachments[0].NodeID == f.node.ID && attachments[0].State == domain.ClientApplyApplied && attachments[0].AppliedVersion == stream.AppliedVersion
+		})
+		traffic(false)
+		trafficUser(canary.UUID, true)
+		waitHit(fmt.Sprintf("p%d", groupWatch.ID), "observe", canary.ID, targetPort)
+	})
+	run("fallback_group_pause", func() {
+		request("PUT", "dest/pause", map[string]any{"paused": true}, 200, nil)
+		waitFault(domain.DestCandidatePaused, false)
+		verifyCandidate(0, groupWatchLKG, 0)
+		// Drain earlier observations before proving that paused traffic emits none.
+		time.Sleep(7 * time.Second)
+		source := fmt.Sprintf("p%d", groupWatch.ID)
+		query := "SELECT COALESCE(SUM(count),0) FROM dest_hits WHERE source=? AND user_id=? AND action='observe' AND port=?"
+		before := count(query, source, canary.ID, targetPort)
+		traffic(false)
+		trafficUser(canary.UUID, true)
+		time.Sleep(7 * time.Second)
+		if count(query, source, canary.ID, targetPort) != before {
+			caseTest.Fatal("paused group fallback collected a new watch hit")
+		}
+		request("PUT", "dest/pause", map[string]any{"paused": false}, 200, nil)
+		waitFault(domain.DestCandidateFallback, false)
+		verifyGroupWatch(verifyCandidate(1, groupWatchLKG, 0), false)
+		traffic(false)
+		trafficUser(canary.UUID, true)
+		nativeWait(caseTest, 30*time.Second, "resumed group fallback hit ingestion", func() bool {
+			return count(query, source, canary.ID, targetPort) > before
+		})
 	})
 }
 

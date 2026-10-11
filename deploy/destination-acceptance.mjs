@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
 
 export const nodeCandidate = Object.freeze({ repository: 'KazuhaHub/Passwall-Node', commit: '63c60f6d5e8cd093bbaa8385f5b514dbe2f40390' })
-export const destinationCases = Object.freeze(['empty', 'watch', 'block', 'paused', 'trial', 'enforce', 'extra', 'listener_rejected', 'collection_off', 'usage', 'restart', 'fallback_port', 'fallback_pause', 'fallback_prune', 'sniff_exhaustion', 'exhausted_roster', 'exhausted_panel_restart'])
+export const destinationCases = Object.freeze(['empty', 'watch', 'block', 'paused', 'trial', 'enforce', 'extra', 'listener_rejected', 'collection_off', 'usage', 'restart', 'fallback_port', 'fallback_pause', 'fallback_prune', 'sniff_exhaustion', 'exhausted_roster', 'exhausted_panel_restart', 'fallback_group_open', 'fallback_group_pause'])
 const pkg = 'github.com/KazuhaHub/passwall-sub-panel/internal/app'
 const names = ['TestNativeDestinationTraffic', ...destinationCases.map(name => `TestNativeDestinationTraffic/${name}`)]
 const diagnostics = Object.freeze({
@@ -40,6 +40,13 @@ const diagnostics = Object.freeze({
   'listener failure replaced an allowlist client': 'listener_member_replaced',
   'listener failure was presented as a policy fault': 'listener_policy_fault',
   'real listener rejection did not reach the administrator inbox': 'listener_inbox_failed',
+  'group fallback retained an unexpected deny rule': 'group_deny_failed',
+  'group fallback did not retain the exact watch rule': 'group_watch_failed',
+  'group fallback contains an unexpected source': 'group_source_failed',
+  'group fallback has the wrong source counts': 'group_source_count_failed',
+  'timed out waiting for open fallback roster application': 'group_open_roster_timeout',
+  'paused group fallback collected a new watch hit': 'group_pause_collected',
+  'timed out waiting for resumed group fallback hit ingestion': 'group_resume_hit_timeout',
 })
 function parseEvent(line) {
   try { return JSON.parse(line) } catch { throw new Error('Malformed test execution stream; content withheld') }
