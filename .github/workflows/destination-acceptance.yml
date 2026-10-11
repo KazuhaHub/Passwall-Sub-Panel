@@ -113,3 +113,84 @@ jobs:
           path: ${{ runner.temp }}/destination-acceptance-tests.json
           if-no-files-found: error
           retention-days: 7
+
+  legacy-upgrade:
+    name: real PSP upgrade + unchanged released Node
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        env:
+          GOTOOLCHAIN: auto
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Verify exact candidate compiler
+        run: |
+          set -eu
+          compiler=$(awk '$1 == "toolchain" { print $2 }' go.mod)
+          test "$(go env GOVERSION)" = "$compiler"
+          test "$(go tool compile -V | awk '{ print $3 }')" = "$compiler"
+      - uses: actions/checkout@v7
+        with:
+          repository: KazuhaHub/Passwall-Sub-Panel
+          ref: '0ae05e1e40170c030acd23cdf637310b740b50a6'
+          path: legacy-panel
+          persist-credentials: false
+      - uses: actions/checkout@v7
+        with:
+          repository: KazuhaHub/Passwall-Node
+          ref: '8e5e3db72219a8db9081a372722abb1529d22ecd'
+          path: legacy-node
+          persist-credentials: false
+      - name: Build released sources with their own preferred compilers
+        run: |
+          set -euo pipefail
+          test "$(git -C legacy-panel rev-parse HEAD)" = '0ae05e1e40170c030acd23cdf637310b740b50a6'
+          test "$(git -C legacy-node rev-parse HEAD)" = '8e5e3db72219a8db9081a372722abb1529d22ecd'
+          test -z "$(git -C legacy-panel status --porcelain)"
+          test -z "$(git -C legacy-node status --porcelain)"
+          # The only old-PSP addition is this reviewed test harness. Its Build,
+          # router, migrations and sync services all remain the released code.
+          cp deploy/native-legacy-panel-bridge.go.txt legacy-panel/internal/app/native_legacy_bridge_test.go
+          for source in legacy-panel legacy-node; do
+            (
+              cd "$source"
+              compiler=$(awk '$1 == "toolchain" { print $2 }' go.mod)
+              test -n "$compiler"
+              test "$(GOTOOLCHAIN="$compiler" go env GOVERSION)" = "$compiler"
+              test "$(GOTOOLCHAIN="$compiler" go tool compile -V | awk '{ print $3 }')" = "$compiler"
+              if [ "$source" = legacy-panel ]; then
+                GOTOOLCHAIN="$compiler" CGO_ENABLED=0 go test -c -o "$RUNNER_TEMP/destination-legacy-panel.test" ./internal/app
+              else
+                GOTOOLCHAIN="$compiler" CGO_ENABLED=0 go build \
+                  -ldflags '-X github.com/KazuhaHub/passwall-node/v4/internal/version.Version=v4.0.1.8' \
+                  -o "$RUNNER_TEMP/destination-legacy-node" ./cmd/node
+              fi
+            )
+          done
+      - name: Build candidate production upgrade driver
+        run: |
+          set -euo pipefail
+          node --test deploy/destination_acceptance_test.mjs
+          go test -c -tags destination_acceptance -o "$RUNNER_TEMP/destination-acceptance.test" ./internal/app
+      - name: Keep original legacy core through real PSP migration and publication
+        run: |
+          set -euo pipefail
+          sudo --preserve-env=GITHUB_ACTIONS,GITHUB_REPOSITORY,RUNNER_ENVIRONMENT \
+            env PSP_NATIVE_LEGACY_PANEL_BIN="$RUNNER_TEMP/destination-legacy-panel.test" \
+            PSP_NATIVE_LEGACY_NODE_BIN="$RUNNER_TEMP/destination-legacy-node" \
+            "$RUNNER_TEMP/destination-acceptance.test" -test.v=test2json -test.run '^TestNativeLegacyPSPUpgrade$' -test.timeout 12m 2>&1 \
+            | go tool test2json -t -p github.com/KazuhaHub/passwall-sub-panel/internal/app \
+            | node deploy/destination-acceptance.mjs sanitize \
+            > "$RUNNER_TEMP/destination-legacy-upgrade-tests.json"
+          node deploy/destination-acceptance.mjs check-legacy-upgrade "$RUNNER_TEMP/destination-legacy-upgrade-tests.json"
+      - name: Keep sanitized legacy upgrade execution evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: native-legacy-upgrade-${{ github.sha }}
+          path: ${{ runner.temp }}/destination-legacy-upgrade-tests.json
+          if-no-files-found: error
+          retention-days: 7

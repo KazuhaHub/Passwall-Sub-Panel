@@ -10,8 +10,17 @@ export const guardedSingBoxCases = Object.freeze([...singBoxCases.filter(name =>
 const xrayNames = ['TestNativeDestinationTraffic', ...destinationCases.map(name => `TestNativeDestinationTraffic/${name}`)]
 const singBoxNames = ['TestNativeSingBoxDestinationTraffic', ...singBoxCases.map(name => `TestNativeSingBoxDestinationTraffic/${name}`)]
 const guardedSingBoxNames = ['TestNativeGuardedSingBoxDestinationTraffic', ...guardedSingBoxCases.map(name => `TestNativeGuardedSingBoxDestinationTraffic/${name}`)]
-const names = [...xrayNames, ...singBoxNames, ...guardedSingBoxNames]
+const legacyUpgradeNames = ['TestNativeLegacyPSPUpgrade', ...['old_panel', 'panel_upgrade', 'legacy_publication'].map(name => `TestNativeLegacyPSPUpgrade/${name}`)]
+const names = [...xrayNames, ...singBoxNames, ...guardedSingBoxNames, ...legacyUpgradeNames]
 const diagnostics = Object.freeze({
+  'timed out waiting for released panel ready': 'legacy_panel_start_timeout',
+  'timed out waiting for released node applied released panel': 'legacy_node_apply_timeout',
+  'timed out waiting for unchanged legacy upgrade sync': 'legacy_unchanged_sync_timeout',
+  'legacy database already contained destination schema': 'legacy_schema_fixture_invalid',
+  'PSP upgrade changed legacy stream validators or dispatched policy': 'legacy_upgrade_stream_changed',
+  'PSP upgrade rewrote the legacy artifact': 'legacy_upgrade_artifact_changed',
+  'legacy node coverage did not require an upgrade': 'legacy_upgrade_status_invalid',
+  'legacy node received a policy runtime candidate': 'legacy_upgrade_candidate_invalid',
   'sniffing precheck did not persist its operator issue': 'sniffing_issue_missing',
   'timed out waiting for reviewed core switch': 'fallback_core_switch_timeout',
   'mapped-prefix LKG was not actually confirmed by sing-box': 'fallback_original_unconfirmed',
@@ -136,6 +145,7 @@ export function sanitizeDestinationResults(input) {
 export function checkDestinationResults(input) { checkCases(input, xrayNames) }
 export function checkSingBoxResults(input) { checkCases(input, singBoxNames) }
 export function checkGuardedSingBoxResults(input) { checkCases(input, guardedSingBoxNames) }
+export function checkLegacyUpgradeResults(input) { checkCases(input, legacyUpgradeNames) }
 function checkCases(input, names) {
   const runs = new Map(), passes = new Map()
   let packagePasses = 0
@@ -157,8 +167,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   if (process.argv[2] === 'sanitize' && process.argv.length === 3) {
     process.stdout.write(sanitizeDestinationResults(readFileSync(0, 'utf8')))
   } else {
-    const checks = { check: checkDestinationResults, 'check-singbox': checkSingBoxResults, 'check-guarded-singbox': checkGuardedSingBoxResults }
-    if (!Object.hasOwn(checks, process.argv[2]) || process.argv.length !== 4) throw new Error('Usage: destination-acceptance.mjs check|check-singbox|check-guarded-singbox RESULTS')
+    const checks = { check: checkDestinationResults, 'check-singbox': checkSingBoxResults, 'check-guarded-singbox': checkGuardedSingBoxResults, 'check-legacy-upgrade': checkLegacyUpgradeResults }
+    if (!Object.hasOwn(checks, process.argv[2]) || process.argv.length !== 4) throw new Error('Usage: destination-acceptance.mjs check|check-singbox|check-guarded-singbox|check-legacy-upgrade RESULTS')
     const check = checks[process.argv[2]]
     check(readFileSync(process.argv[3], 'utf8'))
     console.log('Every native destination acceptance case ran and passed')

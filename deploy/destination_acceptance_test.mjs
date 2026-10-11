@@ -2,6 +2,23 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
 import { checkDestinationResults, sanitizeDestinationResults, nodeCandidate, destinationCases } from './destination-acceptance.mjs'
+
+test('legacy upgrade has an independent complete real execution gate and immutable released sources', async () => {
+  const acceptance = await import('./destination-acceptance.mjs')
+  assert.equal(typeof acceptance.checkLegacyUpgradeResults, 'function')
+  const pkg = 'github.com/KazuhaHub/passwall-sub-panel/internal/app'
+  const tests = ['TestNativeLegacyPSPUpgrade', ...['old_panel', 'panel_upgrade', 'legacy_publication'].map(name => `TestNativeLegacyPSPUpgrade/${name}`)]
+  const values = [...tests.flatMap(Test => [{ Action: 'run', Package: pkg, Test }, { Action: 'pass', Package: pkg, Test }]), { Action: 'pass', Package: pkg }]
+  const evidence = sanitizeDestinationResults(encode(values))
+  assert.doesNotThrow(() => acceptance.checkLegacyUpgradeResults(evidence))
+  assert.throws(() => checkDestinationResults(evidence))
+  for (const name of tests) {
+    assert.throws(() => acceptance.checkLegacyUpgradeResults(encode(values.filter(event => event.Test !== name))))
+    assert.throws(() => acceptance.checkLegacyUpgradeResults(encode(values.map(event => event.Test === name && event.Action === 'pass' ? { ...event, Action: 'skip' } : event))))
+  }
+  const workflow = readFileSync(new URL('../.github/workflows/destination-acceptance.yml', import.meta.url), 'utf8')
+  for (const value of ['0ae05e1e40170c030acd23cdf637310b740b50a6', '8e5e3db72219a8db9081a372722abb1529d22ecd', 'native-legacy-panel-bridge.go.txt', 'check-legacy-upgrade', 'PSP_NATIVE_LEGACY_PANEL_BIN', 'PSP_NATIVE_LEGACY_NODE_BIN']) assert(workflow.includes(value), value)
+})
 import * as acceptance from './destination-acceptance.mjs'
 
 function events() {

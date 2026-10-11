@@ -278,3 +278,31 @@ Use the workflow run and PR validation record for execution evidence. All three
 Xray jobs and both separate sing-box jobs must pass on the exact current PR head;
 an earlier or partial matrix does
 not satisfy this gate.
+
+The separate legacy-upgrade job uses released PSP v4.0.1.20 source at
+`0ae05e1e40170c030acd23cdf637310b740b50a6` and Node v4.0.1.8 source at
+`8e5e3db72219a8db9081a372722abb1529d22ecd`, each with its own preferred
+compiler. The old PSP checkout receives only the reviewed test bridge; its
+production Build, router, migrations and sync services remain the released
+code. The bridge creates a fresh original database, serves the old production
+handler behind the same fixture TLS endpoint, and provisions one real VLESS
+listener and principal. Before candidate Build runs, a read-only query must
+prove that the database has no destination tables.
+
+`old_panel`, `panel_upgrade` and `legacy_publication` have their own mandatory
+execution gate. After real old-node convergence, the driver holds the original
+Xray process with a pidfd, stops the old PSP process, and migrates its same
+database through candidate Build. The Node process continues throughout.
+At least three accepted sync cycles per stage must preserve config and roster
+ETags/versions, actual core-config bytes, the original live core, and nonce
+VLESS traffic. Publishing a port deny through normal administrator HTTP must
+still leave that old node unchanged, create no policy runtime row, and expose
+`unsupported_version` in coverage. A bounded passive probe forwards the
+original request and response and retains only validators and convergence
+facts; credentials, process output and private database contents are not
+uploaded. This verifies one exact legacy pair and Xray 26.6.27, and does not
+substitute for node-upgrade, mixed-fleet, downgrade or load acceptance.
+
+Implementation and compilation do not prove that these stages ran. Their
+execution evidence must be verified separately on the exact current PR head;
+the existing five core jobs cannot satisfy the legacy-upgrade gate.
