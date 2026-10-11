@@ -50,7 +50,9 @@ func TestNativeSingBoxDestinationTraffic(t *testing.T) {
 	nativeMust(t, a.settings.Save(t.Context(), settings), "save live cadence")
 	inbound, api := nativePort(t), nativePort(t)
 	f.node.DesiredPort, f.node.ObservedPort, f.node.InboundListen = inbound, inbound, "127.0.0.1"
-	f.node.Sniffing = `{"enabled":true,"destOverride":["http","tls","quic"],"routeOnly":true}`
+	// sing-box sniffing is inserted as a route action by the policy compiler;
+	// its listener adapter correctly rejects legacy Xray inbound sniffing.
+	f.node.Sniffing = `{}`
 	nativeMust(t, a.repos.Node.Update(t.Context(), f.node), "configure disposable listener")
 	a.startDestinationAudit()
 	probe := &nativeRestartProbe{}
@@ -149,7 +151,7 @@ func TestNativeSingBoxDestinationTraffic(t *testing.T) {
 			caseTest.Fatal("sing-box persisted destination audit data")
 		}
 	}
-	waitApplied := func() {
+	waitAppliedCandidate := func(unchanged *domain.DestAgentPolicy) {
 		caseTest.Helper()
 		defer func() {
 			if caseTest.Failed() {
@@ -168,7 +170,14 @@ func TestNativeSingBoxDestinationTraffic(t *testing.T) {
 				return false
 			}
 			agent, err := a.repos.NodeAgent.GetByAgentID(caseTest.Context(), f.agent.AgentID)
-			if err != nil || agent.ObservedCoreEngine != domain.NodeCoreSingBox || !nativeReceiptMatches(*r, state.PublishedGeneration, agent.LastSeen, receiptAfter) {
+			if err != nil || agent.ObservedCoreEngine != domain.NodeCoreSingBox {
+				return false
+			}
+			ready := nativeReceiptMatches(*r, state.PublishedGeneration, agent.LastSeen, receiptAfter)
+			if unchanged != nil {
+				ready = nativeUnchangedReceiptMatches(*unchanged, *r, state.PublishedGeneration, agent.LastSeen, receiptAfter)
+			}
+			if !ready {
 				return false
 			}
 			for _, name := range []domain.NodeAgentStreamName{domain.NodeAgentStreamConfig, domain.NodeAgentStreamRoster} {
@@ -182,6 +191,7 @@ func TestNativeSingBoxDestinationTraffic(t *testing.T) {
 		})
 		noCollection()
 	}
+	waitApplied := func() { waitAppliedCandidate(nil) }
 	traffic := func(host string, allowed bool) {
 		caseTest.Helper()
 		before := requests.Load()
@@ -285,16 +295,20 @@ func TestNativeSingBoxDestinationTraffic(t *testing.T) {
 		traffic(literalHost, true)
 	})
 	run("collection_off", func() {
-		request("PUT", fmt.Sprintf("servers/%d", f.agent.PanelID), map[string]any{"audit_collect": "hits_and_usage"}, 200, nil)
-		waitApplied()
-		traffic(literalHost, true)
-		time.Sleep(7 * time.Second)
-		noCollection()
-		request("PUT", fmt.Sprintf("servers/%d", f.agent.PanelID), map[string]any{"audit_collect": "off"}, 200, nil)
-		waitApplied()
-		traffic(literalHost, true)
-		time.Sleep(7 * time.Second)
-		noCollection()
+		for _, level := range []string{"hits_and_usage", "off"} {
+			prior, err := a.repos.DestAgentPolicy.Get(caseTest.Context(), f.agent.AgentID, true)
+			nativeMust(caseTest, err, "read unchanged sing-box candidate")
+			request("PUT", fmt.Sprintf("servers/%d", f.agent.PanelID), map[string]any{"audit_collect": level}, 200, nil)
+			waitAppliedCandidate(prior)
+			var status destpolicy.DestinationStatus
+			request("GET", "dest/status", nil, 200, &status)
+			if len(status.Nodes) != 1 || string(status.Nodes[0].Collect) != level {
+				caseTest.Fatal("sing-box execution falsely claimed collection")
+			}
+			traffic(literalHost, true)
+			time.Sleep(7 * time.Second)
+			noCollection()
+		}
 		request("PUT", groupPath, map[string]any{"mode": "open", "stage": "", "list_ids": []int64{}, "updated_at": mode.UpdatedAt}, 200, &mode)
 		publish()
 		waitApplied()

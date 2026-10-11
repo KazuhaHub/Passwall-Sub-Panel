@@ -144,6 +144,16 @@ func nativeReceiptMatches(r domain.DestAgentPolicy, generation int64, lastSeen *
 	}
 }
 
+// A setting clamped by the engine cannot mint a different policy. Prove its
+// exact candidate still applies and that a real accepted sync followed the write.
+func nativeUnchangedReceiptMatches(prior, current domain.DestAgentPolicy, generation int64, lastSeen *time.Time, after time.Time) bool {
+	return prior.MintedAt != nil && current.MintedAt != nil && current.MintedAt.Equal(*prior.MintedAt) &&
+		prior.MintedGeneration == generation && current.MintedKind == prior.MintedKind && current.MintedContext == prior.MintedContext &&
+		current.MintedSHA256 == prior.MintedSHA256 && current.DesiredSHA256 == prior.DesiredSHA256 && bytes.Equal(current.MintedBody, prior.MintedBody) &&
+		current.AppliedSHA256 == prior.AppliedSHA256 && bytes.Equal(current.AppliedBody, prior.AppliedBody) &&
+		lastSeen != nil && lastSeen.After(after) && nativeReceiptMatches(current, generation, lastSeen, *prior.MintedAt)
+}
+
 // Fault scenarios declare the exact source and exhaustion state they expect.
 // A historical LKG is not enough: the current fallback must itself be applied.
 func nativeFaultReceiptMatches(r domain.DestAgentPolicy, generation int64, lastSeen *time.Time, after time.Time, kind domain.DestCandidateKind, exhausted bool) bool {
@@ -196,6 +206,35 @@ func TestNativeDestinationReceiptRequiresCurrentObservedCandidate(t *testing.T) 
 			tc.change(&r, &lastSeen)
 			if got := nativeReceiptMatches(r, 7, lastSeen, after); got != tc.want {
 				t.Fatalf("receipt readiness=%t, want %t", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestNativeUnchangedReceiptRequiresExactCandidateAndPostMutationSync(t *testing.T) {
+	minted, changed, seen := time.UnixMilli(1000), time.UnixMilli(2000), time.UnixMilli(3000)
+	prior := domain.DestAgentPolicy{MintedKind: domain.DestCandidateDesired, MintedGeneration: 7, MintedAt: &minted, MintedSHA256: "same", MintedBody: []byte("canonical"), MintedContext: "same-context", DesiredSHA256: "same", ReportedSHA256: "same", ReportedState: "applied", ReportedAt: &minted, AppliedAt: &minted, AppliedSHA256: "same", AppliedBody: []byte("canonical")}
+	for _, tc := range []struct {
+		name   string
+		change func(*domain.DestAgentPolicy, **time.Time)
+		want   bool
+	}{
+		{"exact-applied-policy-after-mutation", func(*domain.DestAgentPolicy, **time.Time) {}, true},
+		{"old-sync", func(_ *domain.DestAgentPolicy, at **time.Time) { *at = &changed }, false},
+		{"changed-generation", func(r *domain.DestAgentPolicy, _ **time.Time) { r.MintedGeneration++ }, false},
+		{"changed-context", func(r *domain.DestAgentPolicy, _ **time.Time) { r.MintedContext = "other" }, false},
+		{"changed-body", func(r *domain.DestAgentPolicy, _ **time.Time) { r.MintedBody = []byte("other") }, false},
+		{"changed-mint", func(r *domain.DestAgentPolicy, _ **time.Time) { r.MintedAt = &changed }, false},
+		{"missing-applied-proof", func(r *domain.DestAgentPolicy, _ **time.Time) { r.AppliedAt = nil }, false},
+		{"changed-lkg", func(r *domain.DestAgentPolicy, _ **time.Time) { r.AppliedBody = []byte("other") }, false},
+		{"stale-receipt", func(r *domain.DestAgentPolicy, _ **time.Time) { r.ReportedSHA256 = "other" }, false},
+		{"fallback", func(r *domain.DestAgentPolicy, _ **time.Time) { r.FallbackReason = "sniffing" }, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			current, at := prior, &seen
+			tc.change(&current, &at)
+			if nativeUnchangedReceiptMatches(prior, current, 7, at, changed) != tc.want {
+				t.Fatal("unchanged candidate readiness disagrees with exact receipt and sync evidence")
 			}
 		})
 	}

@@ -27,6 +27,13 @@ even when the panel requests B; the status API must disclose no hit/usage
 support or active collection. Traffic over multiple sync cycles must leave
 both audit tables empty.
 
+Changing an unsupported collection setting leaves sing-box's effective policy
+unchanged. That case compares the exact candidate/body/context and historical
+LKG, requires its applied receipt and an accepted sync after the saved setting,
+and verifies the saved panel level through status. It does not demand a new mint
+for identical effective state. Policy-changing mutations still require a mint
+after the administrator mutation.
+
 The N0-S baseline uses a disposable loopback HTTP target. It sends distinct
 VLESS address types for the private IPv4 literal and the `localhost` domain,
 checks the target nonce, and expects the pinned pre-hotfix Node to reach both.
