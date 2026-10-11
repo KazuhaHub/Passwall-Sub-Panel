@@ -62,14 +62,18 @@ func readDestStatusContext(tx *gorm.DB, proof func(domain.DestStatusPanel, func(
 		}
 		for start := 0; start < len(ids); start += 512 {
 			var agents []nodeAgentRow
-			if err := tx.Select("agent_id", "panel_id", "observed_capabilities", "observed_core_engine", "last_seen").Where("panel_id IN ?", ids[start:min(start+512, len(ids))]).Find(&agents).Error; err != nil {
+			agentColumns := []string{"agent_id", "panel_id", "observed_capabilities", "observed_core_engine", "last_seen"}
+			if details {
+				agentColumns = []string{"agent_id", "panel_id", "observed_capabilities", "desired_core_engine", "observed_core_engine", "last_seen"}
+			}
+			if err := tx.Select(agentColumns).Where("panel_id IN ?", ids[start:min(start+512, len(ids))]).Find(&agents).Error; err != nil {
 				return err
 			}
 			agentIDs := []string{}
 			byAgent := map[string]int{}
 			for _, a := range agents {
 				i := byPanel[a.PanelID]
-				result.Panels[i].Agent = &domain.NodeAgent{AgentID: a.AgentID, PanelID: a.PanelID, ObservedCapabilities: append([]string(nil), a.ObservedCapabilities...), ObservedCoreEngine: domain.NodeCoreEngine(a.ObservedCoreEngine), LastSeen: runtimeTimeCopy(a.LastSeen)}
+				result.Panels[i].Agent = &domain.NodeAgent{AgentID: a.AgentID, PanelID: a.PanelID, ObservedCapabilities: append([]string(nil), a.ObservedCapabilities...), DesiredCoreEngine: domain.NodeCoreEngine(a.DesiredCoreEngine), ObservedCoreEngine: domain.NodeCoreEngine(a.ObservedCoreEngine), LastSeen: runtimeTimeCopy(a.LastSeen)}
 				agentIDs = append(agentIDs, a.AgentID)
 				byAgent[a.AgentID] = i
 			}

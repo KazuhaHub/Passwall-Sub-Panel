@@ -86,6 +86,41 @@ func TestBuildGroupPreviewUsesProspectiveEligibilityAndAllowsManualDNSFallback(t
 
 type destinationGroupPreviewMembersFailure struct{}
 
+func TestBuildGroupPreviewUsesDesiredCoreFromNarrowStatusProjection(t *testing.T) {
+	f := buildDestinationPolicyFixture(t)
+	if _, err := f.a.database.ExecContext(t.Context(), "UPDATE node_agents SET desired_core_engine=? WHERE agent_id=?", "sing-box", f.agent.AgentID); err != nil {
+		t.Fatal(err)
+	}
+	inputs, err := f.a.destinationGroupNodeInputs(t.Context(), f.group.ID)
+	if err != nil || len(inputs) != 1 || inputs[0].Engine != "sing-box" || inputs[0].Panel.Agent.CredentialSHA256 != "" {
+		t.Fatal("prospective preview defaulted the desired engine or loaded credentials")
+	}
+	if err := seed.Ensure(f.a.cfg.ConfigDir); err != nil {
+		t.Fatal(err)
+	}
+	caps, _ := json.Marshal([]string{protocol.CapabilityDestinationPolicy})
+	if _, err := f.a.database.ExecContext(t.Context(), "UPDATE node_agents SET observed_capabilities=? WHERE agent_id=?", string(caps), f.agent.AgentID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.a.database.ExecContext(t.Context(), "UPDATE nodes SET sniffing=? WHERE id=?", `{"enabled":true,"metadataOnly":true}`, f.node.ID); err != nil {
+		t.Fatal(err)
+	}
+	token := destinationRefreshAdminToken(t, f.a)
+	path := fmt.Sprintf("groups/%d/preview", f.group.ID)
+	var preview destpolicy.GroupAccessPreview
+	w := destinationListRequest(t, f.a, token, "GET", path, nil)
+	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &preview) != nil || preview.EligibleNodes != 1 {
+		t.Fatal("Sing-box preview incorrectly applied Xray sniffing requirements")
+	}
+	if _, err := f.a.database.ExecContext(t.Context(), "UPDATE node_agents SET desired_core_engine=? WHERE agent_id=?", "xray", f.agent.AgentID); err != nil {
+		t.Fatal(err)
+	}
+	w = destinationListRequest(t, f.a, token, "GET", path, nil)
+	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &preview) != nil || preview.EligibleNodes != 0 || len(preview.Ineligible) != 1 || preview.Ineligible[0].Reason != "sniffing" {
+		t.Fatal("Xray preview ignored its actual desired-engine preflight")
+	}
+}
+
 func (destinationGroupPreviewMembersFailure) TagMatchedMembers(context.Context, int64) (map[int64][]int64, error) {
 	return nil, errors.New("private-preview-membership-detail")
 }
