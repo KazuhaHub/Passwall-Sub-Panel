@@ -62,7 +62,8 @@ func nativeScopedDestinationCases(t *testing.T, f destinationPolicyFixture, peer
 	var engine domain.NodeCoreEngine
 	count := func(user int64) int64 {
 		var n int64
-		nativeMust(cb.test(), f.a.database.QueryRowContext(cb.test().Context(), "SELECT COALESCE(SUM(count),0) FROM dest_hits WHERE panel_id=? AND user_id=? AND source=? AND action='block'", f.agent.PanelID, user, fmt.Sprintf("p%d", policy.ID)).Scan(&n), "read scoped hit count")
+		query := nativeDestinationCountSQL(f.a.cfg.DBKind(), "SELECT COALESCE(SUM(count),0) FROM dest_hits WHERE panel_id=? AND user_id=? AND source=? AND action='block'")
+		nativeMust(cb.test(), f.a.database.QueryRowContext(cb.test().Context(), query, f.agent.PanelID, user, fmt.Sprintf("p%d", policy.ID)).Scan(&n), "read scoped hit count")
 		return n
 	}
 	// Shape checks accompany an exact real applied receipt. A previous policy

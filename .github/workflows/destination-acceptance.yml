@@ -123,6 +123,114 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  traffic-sql:
+    name: real PSP ${{ matrix.database }} + full-module Node + ${{ matrix.engine }} ${{ matrix.core }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {engine: xray, core: '26.6.27', database: mysql}
+          - {engine: xray, core: '26.7.28', database: mysql}
+          - {engine: xray, core: '26.9.9', database: mysql}
+          - {engine: sing-box, core: '1.14.0', database: mysql}
+          - {engine: xray, core: '26.6.27', database: postgres}
+          - {engine: xray, core: '26.7.28', database: postgres}
+          - {engine: xray, core: '26.9.9', database: postgres}
+          - {engine: sing-box, core: '1.14.0', database: postgres}
+    services:
+      mysql:
+        image: ${{ matrix.database == 'mysql' && 'mysql:8' || '' }}
+        env:
+          MYSQL_ROOT_PASSWORD: fixture-native-root-password
+          MYSQL_DATABASE: psp_native_acceptance
+          MYSQL_USER: psp
+          MYSQL_PASSWORD: fixture-native-database-password
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -uroot -pfixture-native-root-password"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 30
+      postgres:
+        image: ${{ matrix.database == 'postgres' && 'postgres:16' || '' }}
+        env:
+          POSTGRES_USER: psp
+          POSTGRES_PASSWORD: fixture-native-database-password
+          POSTGRES_DB: psp_native_acceptance
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U psp -d psp_native_acceptance"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        env:
+          GOTOOLCHAIN: auto
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Verify exact preferred compiler
+        run: |
+          set -eu
+          build_toolchain=$(awk '$1 == "toolchain" { print $2 }' go.mod)
+          test -n "$build_toolchain"
+          test "$(go env GOVERSION)" = "$build_toolchain"
+          test "$(go tool compile -V | awk '{ print $3 }')" = "$build_toolchain"
+      - uses: actions/checkout@v7
+        with:
+          repository: KazuhaHub/Passwall-Node
+          ref: 'cef54ddba3ee96f9794aaacdc6ac1ed89cc318f9'
+          path: node-candidate
+          persist-credentials: false
+      - name: Build immutable full-module Node candidate with its own compiler
+        run: |
+          set -euo pipefail
+          test "$(git -C node-candidate rev-parse HEAD)" = 'cef54ddba3ee96f9794aaacdc6ac1ed89cc318f9'
+          test -z "$(git -C node-candidate status --porcelain)"
+          cd node-candidate
+          node_toolchain=$(awk '$1 == "toolchain" { print $2 }' go.mod)
+          test -n "$node_toolchain"
+          test "$(GOTOOLCHAIN="$node_toolchain" go env GOVERSION)" = "$node_toolchain"
+          test "$(GOTOOLCHAIN="$node_toolchain" go tool compile -V | awk '{ print $3 }')" = "$node_toolchain"
+          GOTOOLCHAIN="$node_toolchain" CGO_ENABLED=0 go build -o "$RUNNER_TEMP/destination-node" ./cmd/node
+      - name: Verify database selection and build the unchanged complete driver
+        run: |
+          set -euo pipefail
+          node --test deploy/destination_acceptance_test.mjs
+          go test -count=1 ./internal/app -run '^TestNative(DatabaseConfigurationIsClosedAndPreservesOwnedDirectories|DatabaseCountQueryKeepsParametersSeparate|FaultMutationRequiresNewPublicationAndExactReceipt|PrunedFallbackUsesGenerationAndBodyCausality)$'
+          go test -c -tags destination_acceptance -o "$RUNNER_TEMP/destination-acceptance.test" ./internal/app
+      - name: Real SQL-backed policy traffic and ingestion across all complete scenarios
+        run: |
+          set -euo pipefail
+          case '${{ matrix.engine }}' in
+            xray) test_name=TestNativeDestinationTraffic; verifier=check ;;
+            sing-box) test_name=TestNativeGuardedSingBoxDestinationTraffic; verifier=check-guarded-singbox ;;
+            *) exit 1 ;;
+          esac
+          sudo --preserve-env=GITHUB_ACTIONS,GITHUB_REPOSITORY,RUNNER_ENVIRONMENT \
+            env PSP_NATIVE_DB_KIND='${{ matrix.database }}' \
+            PSP_NATIVE_NODE_BIN="$RUNNER_TEMP/destination-node" PSP_NATIVE_CORE_VERSION='${{ matrix.core }}' \
+            PSP_NATIVE_SOURCE_COMMIT='${{ github.event.pull_request.head.sha || github.sha }}' \
+            "$RUNNER_TEMP/destination-acceptance.test" -test.v=test2json -test.run "^${test_name}$" -test.timeout 15m 2>&1 \
+            | go tool test2json -t -p github.com/KazuhaHub/passwall-sub-panel/internal/app \
+            | node deploy/destination-acceptance.mjs sanitize \
+            > "$RUNNER_TEMP/destination-acceptance-tests.json"
+          node deploy/destination-acceptance.mjs "$verifier" "$RUNNER_TEMP/destination-acceptance-tests.json"
+      - name: Keep count-only SQL execution evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: native-destination-sql-${{ matrix.database }}-${{ matrix.engine }}-${{ matrix.core }}-${{ github.sha }}
+          path: ${{ runner.temp }}/destination-acceptance-tests.json
+          if-no-files-found: error
+          retention-days: 7
+
   published-remote:
     name: production PSP policy + published Node rollback via systemd watcher
     runs-on: ubuntu-24.04

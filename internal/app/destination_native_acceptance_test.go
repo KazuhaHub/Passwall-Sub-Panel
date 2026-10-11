@@ -47,7 +47,7 @@ func TestNativeDestinationTraffic(t *testing.T) {
 	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0022 != 0 {
 		t.Fatal("candidate executable is absent or writable by other users")
 	}
-	f := buildDestinationPolicyFixture(t)
+	f := buildNativeDestinationPolicyFixture(t)
 	a := f.a
 	token := destinationRefreshAdminToken(t, a)
 	// A second real principal distinguishes successful account revocation from
@@ -277,7 +277,7 @@ func TestNativeDestinationTraffic(t *testing.T) {
 	count := func(query string, args ...any) int64 {
 		caseTest.Helper()
 		var n int64
-		nativeMust(caseTest, a.database.QueryRowContext(caseTest.Context(), query, args...).Scan(&n), "read private count")
+		nativeMust(caseTest, a.database.QueryRowContext(caseTest.Context(), nativeDestinationCountSQL(a.cfg.DBKind(), query), args...).Scan(&n), "read private count")
 		return n
 	}
 	waitHit := func(source, action string, user int64, port int) {
@@ -909,6 +909,7 @@ func TestNativeDestinationTraffic(t *testing.T) {
 		nativeMust(caseTest, err, "stop exhausted PSP app")
 		a, err = Build(t.Context(), &cfg) // Fresh SQL pool, services and caches, retained for later cases.
 		nativeMust(caseTest, err, "reopen exhausted PSP app")
+		nativeVerifyDestinationDatabase(caseTest, a)
 		t.Cleanup(func() {
 			stopDaemon(t)
 			gateway.replace(nil)

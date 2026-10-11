@@ -49,7 +49,7 @@ func nativeSingBoxDestinationTraffic(t *testing.T, guarded bool) {
 	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0022 != 0 {
 		t.Fatal("candidate executable is absent or writable by other users")
 	}
-	f := buildDestinationPolicyFixture(t)
+	f := buildNativeDestinationPolicyFixture(t)
 	a := f.a
 	token := destinationRefreshAdminToken(t, a)
 	nativeMust(t, a.repos.NodeAgent.UpdateCoreSelection(t.Context(), f.agent.AgentID, domain.NodeCoreSingBox, "1.14.0", false), "select reviewed sing-box")

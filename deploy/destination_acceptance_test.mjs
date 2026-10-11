@@ -217,6 +217,30 @@ test('integrated Node executes the complete core matrix without replacing fixed 
   assert(traffic.includes('*) exit 1 ;;'))
   assert(traffic.includes('native-destination-${{ matrix.engine }}-${{ matrix.core }}-${{ matrix.candidate }}-${{ github.sha }}'))
 })
+test('SQL runtime matrix executes every reviewed core using the full verifier and owned database', () => {
+  const workflow = readFileSync(new URL('../.github/workflows/destination-acceptance.yml', import.meta.url), 'utf8')
+  const start = workflow.indexOf('  traffic-sql:')
+  assert(start >= 0, 'real SQL traffic job is missing')
+  const job = workflow.slice(start, workflow.indexOf('  published-remote:', start))
+  const rows = [...job.matchAll(/\{engine: ([\w-]+), core: '([^']+)', database: (\w+)\}/g)]
+    .map(([, engine, core, database]) => [engine, core, database])
+  assert.deepEqual(rows, ['mysql', 'postgres'].flatMap(database => [
+    ...['26.6.27', '26.7.28', '26.9.9'].map(core => ['xray', core, database]),
+    ['sing-box', '1.14.0', database],
+  ]))
+  for (const required of [acceptance.moduleNodeCandidate.commit, 'mysql:8', 'postgres:16',
+    'PSP_NATIVE_DB_KIND', 'psp_native_acceptance', 'TestNativeDestinationTraffic',
+    'TestNativeGuardedSingBoxDestinationTraffic', 'verifier=check', 'verifier=check-guarded-singbox',
+    'destination-acceptance.mjs "$verifier"', 'native-destination-sql-${{ matrix.database }}-${{ matrix.engine }}-${{ matrix.core }}-${{ github.sha }}',
+    'if-no-files-found: error']) assert(job.includes(required), required)
+  assert(!job.includes('continue-on-error'))
+  assert(!job.includes('PSP_NATIVE_DB_DSN'), 'the fixture must not accept arbitrary database endpoints')
+  for (const source of ['destination_native_acceptance_test.go', 'destination_native_singbox_test.go']) {
+    const driver = readFileSync(new URL(`../internal/app/${source}`, import.meta.url), 'utf8')
+    assert(driver.includes('buildNativeDestinationPolicyFixture(t)'), source)
+  }
+})
+
 test('real execution gate rejects absent, skipped, failed, duplicate and incomplete cases', () => {
   assert.doesNotThrow(() => checkDestinationResults(encode(events())))
   for (const values of [[], events().slice(0, -1), events().filter(e => !e.Test?.endsWith('/trial')), [...events(), events()[0]], events().map(e => e.Test?.endsWith('/block') && e.Action === 'pass' ? { ...e, Action: 'skip' } : e), [...events(), { Action: 'fail', Package: 'other/package' }]]) {
