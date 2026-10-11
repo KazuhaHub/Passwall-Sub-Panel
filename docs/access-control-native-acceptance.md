@@ -14,7 +14,28 @@ Xray version: `26.6.27`, `26.7.28`, and `26.9.9`.
 The isolated fixture explicitly acknowledges the reviewed restricted `26.9.9`
 selection; the production catalog gate remains enforced.
 
-Every matrix job must execute all twenty-two ordered cases: empty policy, watch,
+A separate job selects the reviewed sing-box `1.14.0` through the same PSP
+catalog and launches the candidate Node with its normal sing-box API. Its
+eleven required cases are empty policy, watch, block, pause/resume, sniffed
+domain blocking, allowlist trial, enforce, supplemental CIDR, daemon restart,
+collection settings, and the pre-hotfix private-address baseline. Administrator
+mutations require a current applied policy receipt and actual listener/roster
+convergence before traffic is checked. Trial allows the connection; enforce
+denies it; adding the target CIDR allows it. The first report after restart must
+restore the confirmed policy. Collection is clamped to the empty wire level
+even when the panel requests B; the status API must disclose no hit/usage
+support or active collection. Traffic over multiple sync cycles must leave
+both audit tables empty.
+
+The N0-S baseline uses a disposable loopback HTTP target. It sends distinct
+VLESS address types for the private IPv4 literal and the `localhost` domain,
+checks the target nonce, and expects the pinned pre-hotfix Node to reach both.
+This is prerequisite evidence for a separate conditional Node hotfix, not a
+claim that a private-address guard already exists or that cloud metadata and
+DNS-resolved private destinations are protected. No cloud endpoint is queried.
+The private-address guard is unchanged by this PSP acceptance change.
+
+Every Xray job must execute all twenty-two ordered cases: empty policy, watch,
 block, pause/resume, anonymous allowlist trial, enforce, supplemental entry,
 unrelated listener rejection and repair,
 collection off, detailed usage, daemon restart, port-only fallback under
@@ -117,17 +138,20 @@ trust is scoped to a temporary CA file; host trust stores and core private
 address protections are unchanged. Credentials and process output stay in
 temporary private files or memory and are never uploaded. The retained artifact
 contains Go test execution results and count-only assertions. The result parser
-rejects missing, duplicate, failed, or skipped cases.
+rejects missing, duplicate, failed, or skipped cases. Xray and sing-box have
+separate required sets; evidence from one engine cannot satisfy the other.
 
 This gate covers one native node with one VLESS TCP listener and two users on
 SQLite. The fixture provisions those records directly, obtains a normal admin
 JWT, then uses production HTTP routes for every tested policy mutation. It
 starts `Build` and the audit worker, not all `App.Run` background services. It
 does not replace full service installation/reinstall acceptance, SQL matrix
-tests, sing-box acceptance, policy-rejection and timeout scenarios, multi-node
+tests, the complete sing-box matching/upgrade matrix, policy-rejection and timeout
+scenarios, multi-node
 offline and mixed-version cases, long-window response-loss deduplication, load testing, the
 complete UI approval matrix, or staged release verification.
 
 Use the workflow run and PR validation record for execution evidence. All three
-jobs must pass on the exact current PR head; an earlier or partial matrix does
+Xray jobs and the separate sing-box job must pass on the exact current PR head;
+an earlier or partial matrix does
 not satisfy this gate.

@@ -4,7 +4,10 @@ import { pathToFileURL } from 'node:url'
 export const nodeCandidate = Object.freeze({ repository: 'KazuhaHub/Passwall-Node', commit: '63c60f6d5e8cd093bbaa8385f5b514dbe2f40390' })
 export const destinationCases = Object.freeze(['empty', 'watch', 'block', 'paused', 'trial', 'enforce', 'extra', 'listener_rejected', 'collection_off', 'usage', 'restart', 'fallback_port', 'fallback_pause', 'fallback_prune', 'sniff_exhaustion', 'exhausted_roster', 'exhausted_panel_restart', 'fallback_group_open', 'fallback_group_pause', 'offline_pause', 'offline_restart', 'response_loss'])
 const pkg = 'github.com/KazuhaHub/passwall-sub-panel/internal/app'
-const names = ['TestNativeDestinationTraffic', ...destinationCases.map(name => `TestNativeDestinationTraffic/${name}`)]
+export const singBoxCases = Object.freeze(['empty', 'watch', 'block', 'paused', 'domain', 'trial', 'enforce', 'extra', 'restart', 'collection_off', 'private_baseline'])
+const xrayNames = ['TestNativeDestinationTraffic', ...destinationCases.map(name => `TestNativeDestinationTraffic/${name}`)]
+const singBoxNames = ['TestNativeSingBoxDestinationTraffic', ...singBoxCases.map(name => `TestNativeSingBoxDestinationTraffic/${name}`)]
+const names = [...xrayNames, ...singBoxNames]
 const diagnostics = Object.freeze({
   'real VLESS traffic did not reach its nonce target': 'traffic_allow_failed',
   'real VLESS traffic bypassed a deny rule': 'traffic_deny_failed',
@@ -67,6 +70,11 @@ const diagnostics = Object.freeze({
   'timed out waiting for response loss backlog ingestion': 'response_loss_backlog_timeout',
   'restored response replay duplicated committed hits': 'response_loss_recovery_duplicate',
   'timed out waiting for response loss fresh hit ingestion': 'response_loss_fresh_timeout',
+  'timed out waiting for current sing-box policy receipt': 'singbox_receipt_timeout',
+  'sing-box execution falsely claimed collection': 'singbox_collection_failed',
+  'sing-box persisted destination audit data': 'singbox_storage_failed',
+  'sing-box restart lost its applied policy receipt': 'singbox_restart_failed',
+  'timed out waiting for first sing-box restart report': 'singbox_restart_timeout',
 })
 function parseEvent(line) {
   try { return JSON.parse(line) } catch { throw new Error('Malformed test execution stream; content withheld') }
@@ -75,8 +83,10 @@ export function sanitizeDestinationResults(input) {
   return input.split(/\r?\n/).filter(line => line.trim()).map(line => {
     const event = parseEvent(line)
     if (event.Action === 'output') {
-      const category = typeof event.Output === 'string' && /native diagnostic: (download|checksum|timeout|rejected|unsupported|permission|bind|certificate|listener_issue|listener_core_rejected|listener_agent_fresh|listener_policy_ready|listener_policy_unchanged|listener_epoch|listener_config_changed|listener_config_preserved|listener_config_fresh)=(true|false)(?:\r?\n|$)/.exec(event.Output)
+      const category = typeof event.Output === 'string' && /native diagnostic: (download|checksum|timeout|rejected|unsupported|permission|bind|certificate|listener_issue|listener_core_rejected|listener_agent_fresh|listener_policy_ready|listener_policy_unchanged|listener_epoch|listener_config_changed|listener_config_preserved|listener_config_fresh|receipt_generation|receipt_mint_fresh|receipt_sync_fresh|receipt_state|receipt_sha|receipt_lkg|receipt_precheck|receipt_streams)=(true|false)(?:\r?\n|$)/.exec(event.Output)
       if (category) return JSON.stringify({ Action: 'output', Package: pkg, Diagnostic: category[1], Observed: category[2] === 'true' })
+      const sequence = typeof event.Output === 'string' && /native receipt wait: ([1-9][0-9]?)(?:\r?\n|$)/.exec(event.Output)
+      if (sequence) return JSON.stringify({ Action: 'output', Package: pkg, Diagnostic: 'receipt_wait', Observed: Number(sequence[1]) })
       const diagnostic = Object.entries(diagnostics).find(([message]) => typeof event.Output === 'string' && event.Output.includes(message))?.[1]
       return diagnostic ? JSON.stringify({ Action: 'output', Package: pkg, ...(names.includes(event.Test) ? { Test: event.Test } : {}), Diagnostic: diagnostic }) : ''
     }
@@ -87,7 +97,9 @@ export function sanitizeDestinationResults(input) {
     return JSON.stringify(result)
   }).filter(Boolean).join('\n') + '\n'
 }
-export function checkDestinationResults(input) {
+export function checkDestinationResults(input) { checkCases(input, xrayNames) }
+export function checkSingBoxResults(input) { checkCases(input, singBoxNames) }
+function checkCases(input, names) {
   const runs = new Map(), passes = new Map()
   let packagePasses = 0
   for (const line of input.split(/\r?\n/).filter(line => line.trim())) {
@@ -108,8 +120,9 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   if (process.argv[2] === 'sanitize' && process.argv.length === 3) {
     process.stdout.write(sanitizeDestinationResults(readFileSync(0, 'utf8')))
   } else {
-    if (process.argv[2] !== 'check' || process.argv.length !== 4) throw new Error('Usage: destination-acceptance.mjs check RESULTS')
-    checkDestinationResults(readFileSync(process.argv[3], 'utf8'))
+    if (!['check', 'check-singbox'].includes(process.argv[2]) || process.argv.length !== 4) throw new Error('Usage: destination-acceptance.mjs check|check-singbox RESULTS')
+    const check = process.argv[2] === 'check-singbox' ? checkSingBoxResults : checkDestinationResults
+    check(readFileSync(process.argv[3], 'utf8'))
     console.log('Every native destination acceptance case ran and passed')
   }
 }

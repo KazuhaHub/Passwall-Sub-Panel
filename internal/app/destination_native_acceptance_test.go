@@ -165,10 +165,17 @@ func TestNativeDestinationTraffic(t *testing.T) {
 		}
 		return true
 	}
+	receiptWait := 0
 	waitCandidate := func(kind domain.DestCandidateKind, exhausted, fault bool, after time.Time) {
 		caseTest.Helper()
+		receiptWait++
+		facts := map[string]bool{}
 		defer func() {
 			if caseTest.Failed() {
+				caseTest.Logf("native receipt wait: %d", receiptWait)
+				for _, category := range []string{"receipt_generation", "receipt_mint_fresh", "receipt_sync_fresh", "receipt_state", "receipt_sha", "receipt_lkg", "receipt_precheck", "receipt_streams"} {
+					caseTest.Logf("native diagnostic: %s=%t", category, facts[category])
+				}
 				for _, category := range []string{"download", "checksum", "timeout", "rejected", "unsupported", "permission", "bind", "certificate"} {
 					caseTest.Logf("native diagnostic: %s=%t", category, strings.Contains(strings.ToLower(output.text()), category))
 				}
@@ -187,6 +194,14 @@ func TestNativeDestinationTraffic(t *testing.T) {
 			if err != nil {
 				return false
 			}
+			facts["receipt_generation"] = r.MintedGeneration == state.PublishedGeneration
+			facts["receipt_mint_fresh"] = r.MintedAt != nil && !r.MintedAt.Before(after)
+			facts["receipt_sync_fresh"] = r.MintedAt != nil && agent.LastSeen != nil && agent.LastSeen.After(*r.MintedAt)
+			facts["receipt_state"] = r.ReportedAt != nil && r.ReportedState == "applied" && r.ReportedIssue == "" && len(r.ReportedListeners) == 0
+			facts["receipt_sha"] = r.ReportedSHA256 == r.MintedSHA256
+			facts["receipt_lkg"] = r.MintedKind == domain.DestCandidateEmpty || r.MintedKind == domain.DestCandidatePaused || r.AppliedAt != nil && r.AppliedSHA256 == r.MintedSHA256
+			facts["receipt_precheck"] = (len(r.PrecheckListeners) > 0) == fault
+			facts["receipt_streams"] = streamsReady(agent)
 			if fault {
 				if !nativeFaultReceiptMatches(*r, state.PublishedGeneration, agent.LastSeen, after, kind, exhausted) || len(r.PrecheckListeners) != 1 || r.PrecheckListeners[0] != string(protocol.NewListenerKey(f.node.ID)) {
 					return false
@@ -196,7 +211,7 @@ func TestNativeDestinationTraffic(t *testing.T) {
 			}
 			// An empty policy may be acknowledged before the core download and
 			// roster installation. Policy receipt alone cannot prove traffic ready.
-			return streamsReady(agent)
+			return facts["receipt_streams"]
 		})
 	}
 	waitApplied := func() { waitCandidate("", false, false, receiptAfter) }
@@ -1002,14 +1017,10 @@ func nativeVLESSHost(ctx context.Context, inbound int, address string, port int,
 	}
 	defer c.Close()
 	_ = c.SetDeadline(time.Now().Add(5 * time.Second))
-	id, err := hex.DecodeString(strings.ReplaceAll(uuid, "-", ""))
+	header, err := nativeVLESSRequest(uuid, address, port, host)
 	if err != nil {
 		return err
 	}
-	header := append([]byte{0}, id...)
-	header = append(header, 0, 1, byte(port>>8), byte(port), 3)
-	header = append(header, net.ParseIP(address).To16()...)
-	header = append(header, []byte("GET / HTTP/1.1\r\nHost: "+host+"\r\nConnection: close\r\n\r\n")...)
 	if _, err = c.Write(header); err != nil {
 		return err
 	}

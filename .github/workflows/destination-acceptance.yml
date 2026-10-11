@@ -37,13 +37,17 @@ concurrency:
 
 jobs:
   traffic:
-    name: real PSP + candidate Node + Xray ${{ matrix.core }}
+    name: real PSP + candidate Node + ${{ matrix.engine }} ${{ matrix.core }}
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
-        core: ['26.6.27', '26.7.28', '26.9.9']
+        include:
+          - {engine: xray, core: '26.6.27'}
+          - {engine: xray, core: '26.7.28'}
+          - {engine: xray, core: '26.9.9'}
+          - {engine: sing-box, core: '1.14.0'}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
@@ -86,18 +90,23 @@ jobs:
       - name: Real TLS sync, policy traffic, private ingestion and collection controls
         run: |
           set -euo pipefail
+          case '${{ matrix.engine }}' in
+            xray) test_name=TestNativeDestinationTraffic; verifier=check ;;
+            sing-box) test_name=TestNativeSingBoxDestinationTraffic; verifier=check-singbox ;;
+            *) exit 1 ;;
+          esac
           sudo --preserve-env=GITHUB_ACTIONS,GITHUB_REPOSITORY,RUNNER_ENVIRONMENT \
             env PSP_NATIVE_NODE_BIN="$RUNNER_TEMP/destination-node" PSP_NATIVE_CORE_VERSION='${{ matrix.core }}' \
-            "$RUNNER_TEMP/destination-acceptance.test" -test.v=test2json -test.run '^TestNativeDestinationTraffic$' -test.timeout 15m 2>&1 \
+            "$RUNNER_TEMP/destination-acceptance.test" -test.v=test2json -test.run "^${test_name}$" -test.timeout 15m 2>&1 \
             | go tool test2json -t -p github.com/KazuhaHub/passwall-sub-panel/internal/app \
             | node deploy/destination-acceptance.mjs sanitize \
             > "$RUNNER_TEMP/destination-acceptance-tests.json"
-          node deploy/destination-acceptance.mjs check "$RUNNER_TEMP/destination-acceptance-tests.json"
+          node deploy/destination-acceptance.mjs "$verifier" "$RUNNER_TEMP/destination-acceptance-tests.json"
       - name: Keep count-only execution evidence
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: native-destination-xray-${{ matrix.core }}-${{ github.sha }}
+          name: native-destination-${{ matrix.engine }}-${{ matrix.core }}-${{ github.sha }}
           path: ${{ runner.temp }}/destination-acceptance-tests.json
           if-no-files-found: error
           retention-days: 7
