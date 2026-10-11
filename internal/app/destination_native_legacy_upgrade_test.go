@@ -223,4 +223,21 @@ func TestNativeLegacyPSPUpgrade(t *testing.T) {
 		return
 	}
 	nativeMixedLegacyFleet(t, nativeMixedLegacyFixture{app: current, dir: dir, legacyPanelID: ready.PanelID, userID: ready.UserID, targetAddress: address, targetPort: targetPort, nonce: nonce, adminToken: adminToken, adminURL: server.URL, adminClient: server.Client(), legacyUnchanged: assertUnchanged})
+	if t.Failed() {
+		return
+	}
+	nativeLegacyNodeTransitions(t, nativeLegacyTransitionFixture{
+		app: current, probe: probe, agentID: ready.AgentID, panelID: ready.PanelID, userID: ready.UserID,
+		dataDir: nodeDir, inbound: inbound, targetAddress: address, targetPort: targetPort, nonce: nonce,
+		originalConfig: beforeConfig, originalConfigETag: before.Config.ETag, originalRosterETag: before.Roster.ETag,
+		adminToken: adminToken, adminURL: server.URL, adminClient: server.Client(), oldBinary: nodeBinary,
+		replace: func(binary string) *exec.Cmd {
+			stop(&node, nodeDone)
+			node = exec.Command(binary, "--endpoint", server.URL+"/v1/node/sync", "--agent-id", ready.AgentID, "--credential-file", credential, "--data-dir", nodeDir, "--xray-api-listen", net.JoinHostPort("127.0.0.1", strconv.Itoa(api)))
+			node.Env = append(os.Environ(), "SSL_CERT_FILE="+ca)
+			nodeDone = start(node)
+			return node
+		},
+		stop: func() { stop(&node, nodeDone) },
+	})
 }

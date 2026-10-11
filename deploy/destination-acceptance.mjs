@@ -10,9 +10,16 @@ export const guardedSingBoxCases = Object.freeze([...singBoxCases.filter(name =>
 const xrayNames = ['TestNativeDestinationTraffic', ...destinationCases.map(name => `TestNativeDestinationTraffic/${name}`)]
 const singBoxNames = ['TestNativeSingBoxDestinationTraffic', ...singBoxCases.map(name => `TestNativeSingBoxDestinationTraffic/${name}`)]
 const guardedSingBoxNames = ['TestNativeGuardedSingBoxDestinationTraffic', ...guardedSingBoxCases.map(name => `TestNativeGuardedSingBoxDestinationTraffic/${name}`)]
-const legacyUpgradeNames = ['TestNativeLegacyPSPUpgrade', ...['old_panel', 'panel_upgrade', 'legacy_publication', 'mixed_fleet', 'mixed_offline_pause'].map(name => `TestNativeLegacyPSPUpgrade/${name}`)]
+const legacyUpgradeNames = ['TestNativeLegacyPSPUpgrade', ...['old_panel', 'panel_upgrade', 'legacy_publication', 'mixed_fleet', 'mixed_offline_pause', 'node_upgrade', 'node_downgrade', 'node_reupgrade'].map(name => `TestNativeLegacyPSPUpgrade/${name}`)]
 const names = [...xrayNames, ...singBoxNames, ...guardedSingBoxNames, ...legacyUpgradeNames]
 const diagnostics = Object.freeze({
+  'timed out waiting for original node binary transition': 'node_transition_timeout',
+  'original node transition traffic did not match execution': 'node_transition_traffic_failed',
+  'node binary transition replaced its state database or changed schema': 'node_transition_state_invalid',
+  'node binary transition lost its original principal or identity': 'node_transition_identity_invalid',
+  'node downgrade did not restore the original core artifact': 'node_downgrade_artifact_changed',
+  'node downgrade retained executable policy in the current candidate': 'node_downgrade_policy_dispatched',
+  'node transition coverage did not match its own execution': 'node_transition_coverage_invalid',
   'timed out waiting for mixed current candidate application': 'mixed_apply_timeout',
   'timed out waiting for mixed single-node offline pause': 'mixed_offline_timeout',
   'mixed candidate real traffic did not match its execution state': 'mixed_traffic_failed',

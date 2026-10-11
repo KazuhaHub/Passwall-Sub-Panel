@@ -7,7 +7,7 @@ test('legacy upgrade has an independent complete real execution gate and immutab
   const acceptance = await import('./destination-acceptance.mjs')
   assert.equal(typeof acceptance.checkLegacyUpgradeResults, 'function')
   const pkg = 'github.com/KazuhaHub/passwall-sub-panel/internal/app'
-  const tests = ['TestNativeLegacyPSPUpgrade', ...['old_panel', 'panel_upgrade', 'legacy_publication', 'mixed_fleet', 'mixed_offline_pause'].map(name => `TestNativeLegacyPSPUpgrade/${name}`)]
+  const tests = ['TestNativeLegacyPSPUpgrade', ...['old_panel', 'panel_upgrade', 'legacy_publication', 'mixed_fleet', 'mixed_offline_pause', 'node_upgrade', 'node_downgrade', 'node_reupgrade'].map(name => `TestNativeLegacyPSPUpgrade/${name}`)]
   const values = [...tests.flatMap(Test => [{ Action: 'run', Package: pkg, Test }, { Action: 'pass', Package: pkg, Test }]), { Action: 'pass', Package: pkg }]
   const evidence = sanitizeDestinationResults(encode(values))
   assert.doesNotThrow(() => acceptance.checkLegacyUpgradeResults(evidence))
