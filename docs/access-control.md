@@ -2255,3 +2255,13 @@ count, without loading account or destination fields. Empty IDs return no groups
 overflow saturates, and any failed batch withholds the entire result. These are
 observed counts, not a claim that collection is complete. The overview API and
 readiness workflow are still pending.
+
+The applied-group proof foundation validates the exact canonical candidate body
+against its minted, desired, reported and applied digests, current published
+generation, live native agent and observed core. It recognizes only a group's
+subject-scoped catch-all rule, distinguishing trial from enforcement by action.
+Historical `AppliedGroups` alone cannot prove the current stage. Unpublished,
+paused, stale, fallback or rejected candidates do not load the body or claim
+applied groups. This works with collection off and with either supported core.
+The future overview must additionally compare its definition/status snapshots
+and each group's current stage; this helper is not yet an overview endpoint.
