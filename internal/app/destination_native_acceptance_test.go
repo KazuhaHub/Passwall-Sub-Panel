@@ -123,7 +123,14 @@ func TestNativeDestinationTraffic(t *testing.T) {
 	publish := func() { request("POST", "dest/publish", nil, 200, nil) }
 	waitApplied := func() {
 		caseTest.Helper()
-		nativeWait(caseTest, 90*time.Second, "current policy receipt", func() bool {
+		defer func() {
+			if caseTest.Failed() {
+				for _, category := range []string{"download", "checksum", "timeout", "rejected", "unsupported", "permission", "bind", "certificate"} {
+					caseTest.Logf("native diagnostic: %s=%t", category, strings.Contains(strings.ToLower(output.text()), category))
+				}
+			}
+		}()
+		nativeWait(caseTest, 120*time.Second, "current policy receipt", func() bool {
 			state, err := a.destDefinitions.State(caseTest.Context())
 			if err != nil {
 				return false
@@ -133,7 +140,18 @@ func TestNativeDestinationTraffic(t *testing.T) {
 				return false
 			}
 			agent, err := a.repos.NodeAgent.GetByAgentID(caseTest.Context(), f.agent.AgentID)
-			return err == nil && nativeReceiptMatches(*r, state.PublishedGeneration, agent.LastSeen, receiptAfter)
+			if err != nil || !nativeReceiptMatches(*r, state.PublishedGeneration, agent.LastSeen, receiptAfter) {
+				return false
+			}
+			// An empty policy may be acknowledged before the core download and
+			// roster installation. Policy receipt alone cannot prove traffic ready.
+			for _, name := range []domain.NodeAgentStreamName{domain.NodeAgentStreamConfig, domain.NodeAgentStreamRoster} {
+				stream, err := a.repos.NodeAgent.GetStream(caseTest.Context(), f.agent.AgentID, name)
+				if err != nil || stream.AppliedEpoch != agent.Epoch || !stream.Converged() {
+					return false
+				}
+			}
+			return true
 		})
 	}
 	traffic := func(allowed bool) {

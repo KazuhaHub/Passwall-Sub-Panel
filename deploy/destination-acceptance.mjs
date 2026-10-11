@@ -5,13 +5,33 @@ export const nodeCandidate = Object.freeze({ repository: 'KazuhaHub/Passwall-Nod
 export const destinationCases = Object.freeze(['empty', 'watch', 'block', 'paused', 'trial', 'enforce', 'extra', 'collection_off', 'usage'])
 const pkg = 'github.com/KazuhaHub/passwall-sub-panel/internal/app'
 const names = ['TestNativeDestinationTraffic', ...destinationCases.map(name => `TestNativeDestinationTraffic/${name}`)]
+const diagnostics = Object.freeze({
+  'real VLESS traffic did not reach its nonce target': 'traffic_allow_failed',
+  'real VLESS traffic bypassed a deny rule': 'traffic_deny_failed',
+  'deny/allow result disagreed with actual target request count': 'traffic_count_mismatch',
+  'timed out waiting for current policy receipt': 'policy_receipt_timeout',
+  'timed out waiting for real hit ingestion': 'hit_ingestion_timeout',
+  'timed out waiting for real usage ingestion': 'usage_ingestion_timeout',
+  'private access data escaped into Node output': 'output_privacy_failed',
+  'administrator route': 'admin_http_status_failed',
+  'empty policy collected private history': 'empty_collected_data',
+  'real trial report lost anonymity': 'trial_anonymity_failed',
+  'off admitted new audit data or erased history': 'collection_off_failed',
+  'usage HTTP did not expose the real bounded observation': 'usage_read_failed',
+  'real private usage read did not leave an audit record': 'usage_audit_failed',
+})
 function parseEvent(line) {
   try { return JSON.parse(line) } catch { throw new Error('Malformed test execution stream; content withheld') }
 }
 export function sanitizeDestinationResults(input) {
   return input.split(/\r?\n/).filter(line => line.trim()).map(line => {
     const event = parseEvent(line)
-    if (event.Action === 'output') return ''
+    if (event.Action === 'output') {
+      const category = typeof event.Output === 'string' && /native diagnostic: (download|checksum|timeout|rejected|unsupported|permission|bind|certificate)=(true|false)(?:\r?\n|$)/.exec(event.Output)
+      if (category) return JSON.stringify({ Action: 'output', Package: pkg, Diagnostic: category[1], Observed: category[2] === 'true' })
+      const diagnostic = Object.entries(diagnostics).find(([message]) => typeof event.Output === 'string' && event.Output.includes(message))?.[1]
+      return diagnostic ? JSON.stringify({ Action: 'output', Package: pkg, ...(names.includes(event.Test) ? { Test: event.Test } : {}), Diagnostic: diagnostic }) : ''
+    }
     if (!['start', 'run', 'pause', 'cont', 'pass', 'bench', 'fail', 'skip'].includes(event.Action)) throw new Error('Unrecognized test event; content withheld')
     const result = { Action: event.Action, Package: event.Package === pkg ? pkg : '[other package]' }
     if (names.includes(event.Test)) result.Test = event.Test

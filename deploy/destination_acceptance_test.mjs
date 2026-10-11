@@ -13,6 +13,10 @@ test('retained execution evidence excludes process output and arbitrary metadata
   const retained = sanitizeDestinationResults(encode([...events(), { Action: 'output', Package: 'private', Output: 'credential email address' }, { Action: 'pass', Package: 'ignored', Output: 'private', Private: 'secret' }]))
   for (const privateText of ['credential', 'email', 'address', 'private', 'secret', 'Output', 'Private']) assert(!retained.includes(privateText))
   assert.doesNotThrow(() => checkDestinationResults(retained))
+  const diagnostic = sanitizeDestinationResults(encode([{ Action: 'output', Package: 'private', Output: 'private address: real VLESS traffic did not reach its nonce target; credential secret' }]))
+  assert.equal(JSON.parse(diagnostic).Diagnostic, 'traffic_allow_failed')
+  assert(!diagnostic.includes('credential'))
+  assert(!diagnostic.includes('address'))
 })
 test('acceptance requires immutable reviewed Node source', () => {
   assert.equal(nodeCandidate.repository, 'KazuhaHub/Passwall-Node')
