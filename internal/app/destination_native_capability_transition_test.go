@@ -34,6 +34,20 @@ func nativeLegacyAllowlistCapabilityTransitions(t *testing.T, f nativeLegacyTran
 	nativeMust(t, err, "read allowlist capability agent identity")
 	user, err := f.app.repos.User.GetByID(t.Context(), f.userID)
 	nativeMust(t, err, "read allowlist capability original principal")
+	originalClients, err := f.app.repos.PSPClient.ListByUser(t.Context(), user.ID)
+	nativeMust(t, err, "bind allowlist capability stable client")
+	var originalClient *domain.PSPClient
+	for _, client := range originalClients {
+		if client.PanelID == f.panelID {
+			if originalClient != nil {
+				t.Fatal("allowlist capability fixture has multiple original panel clients")
+			}
+			originalClient = client
+		}
+	}
+	if originalClient == nil || originalClient.UUID != user.UUID {
+		t.Fatal("allowlist capability fixture has no original stable client")
+	}
 	_, controlAddress, controlPort, controlNonce, _ := nativeTarget(t)
 	t.Cleanup(f.stop)
 	request := func(test *testing.T, method, path string, body any, want int, result any) {
@@ -95,26 +109,22 @@ func nativeLegacyAllowlistCapabilityTransitions(t *testing.T, f nativeLegacyTran
 			if !facts["agent_fresh"] {
 				return false
 			}
-			clients, err := f.app.repos.PSPClient.ListByUser(test.Context(), user.ID)
-			if err != nil {
+			snapshot, err := f.app.repos.NativeDesired.Load(test.Context(), f.panelID)
+			if err != nil || snapshot == nil {
 				return false
 			}
-			matches := 0
-			for _, client := range clients {
-				if client.PanelID != f.panelID {
-					continue
-				}
-				attachments, err := f.app.repos.PSPClient.ListInbounds(test.Context(), client.ID)
-				if err != nil || !client.DesiredEnable || client.UUID != user.UUID || len(attachments) != 1 || attachments[0].State != domain.ClientApplyApplied {
-					return false
-				}
-				matches++
+			stream, err := f.app.repos.NodeAgent.GetStream(test.Context(), f.agentID, domain.NodeAgentStreamRoster)
+			if err != nil || stream == nil || !stream.Converged() || stream.AppliedEpoch != agent.Epoch || stream.DesiredETag == "" || stream.DesiredETag != string(s.HaveRoster.ETag) || stream.DesiredVersion != s.Roster.Version.Version {
+				return false
 			}
+			var roster protocol.RosterBody
+			if json.Unmarshal(stream.DesiredBody, &roster) != nil || roster.MinConfigVersion != s.Config.Version {
+				return false
+			}
+			facts["membership"] = nativeAllowlistMembershipMatches(originalClient, snapshot.Clients, roster, capable)
 			if !capable {
-				facts["membership"] = matches == 0
 				return facts["membership"]
 			}
-			facts["membership"] = matches == 1
 			facts["policy_body"] = s.ConfigBodyKnown && s.ConfigPolicy && s.PolicyReportPresent && s.PolicyReportState == "applied"
 			if !facts["membership"] || !facts["policy_body"] {
 				return false
