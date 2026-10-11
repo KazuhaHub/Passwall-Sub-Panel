@@ -84,6 +84,7 @@ type Deps struct {
 	DestinationHits           func(context.Context, domain.DestHitQuery) (domain.DestHitPage, error)
 	DestinationGroupTrial     func(context.Context, int64, int) (destpolicy.GroupTrialReport, error)
 	DestinationGroupPreview   func(context.Context, int64, []int64) (destpolicy.GroupAccessPreview, error)
+	DestinationGroupSave      func(context.Context, int64, destpolicy.GroupModeInput, time.Time) (domain.DestGroupMode, error)
 	DestinationUsage          func(context.Context, domain.DestUsageQuery) (domain.DestUsagePage, error)
 	// GeoRecords is the read side of the concurrent-location detector, the
 	// same rows the traffic poll writes each cycle. Optional: a deployment
@@ -883,6 +884,7 @@ func NewRouter(d Deps) stdhttp.Handler {
 		adminGroup.GET("/dest/hits", handler.NewAdminDestinationHitsHandler(d.DestinationHits).Get)
 		adminGroup.GET("/dest/groups/:group_id/trial-report", handler.NewAdminDestinationGroupTrialHandler(d.DestinationGroupTrial).Get)
 		adminGroup.GET("/dest/groups/:group_id/preview", handler.NewAdminDestinationGroupPreviewHandler(d.DestinationGroupPreview).Get)
+		adminGroup.PUT("/dest/groups/:group_id", handler.NewAdminDestinationGroupsHandler(d.DestinationGroupSave).Put)
 
 		// Offline geo database status + manual update (touches the update token
 		// + fetches an external DB — admin only).

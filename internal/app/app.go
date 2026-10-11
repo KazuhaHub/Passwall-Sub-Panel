@@ -838,6 +838,7 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 		DestinationHits:           a.destinationHits,
 		DestinationGroupTrial:     a.destGroupTrial.Read,
 		DestinationGroupPreview:   a.destinationGroupPreview,
+		DestinationGroupSave:      a.destGroups.Save,
 		DestinationUsage:          a.destinationUsage,
 		GeoRecords:                geoStreaks,
 		// The risk view's rows. Optional, so leaving it out would compile —

@@ -2179,8 +2179,17 @@ New base hosts become exact `full:` entries; IPs, URLs and broad hosts are
 rejected. Existing owned source is retained and edited through the list API.
 After a changed commit, production wiring first invalidates group eligibility
 and rendered subscriptions, then schedules member resynchronization. No-op and
-failed commits do not invalidate membership. Its group HTTP workflow and the
-full readiness/report views are still pending.
+failed commits do not invalidate membership.
+
+Administrators save through `PUT /api/admin/dest/groups/:group_id`, supplying
+the complete `mode`, `stage`, `list_ids` and millisecond `updated_at` fields.
+Use zero only for a never-saved mode. Initial trial activation may also supply
+`base_hosts`. The response contains the committed mode, real owned-list IDs,
+stage-change time and edit version; no-ops retain their version. Stale edits,
+invalid transitions and unfetched enforcement lists return distinct 409 codes.
+Canonical positive group IDs, strict JSON and no query fields are required.
+The route uses no-store and normal administrator write-audit capture. Group
+overview and full readiness views are still pending.
 
 The trial-report storage foundation reads one exact group's anonymous
 `observe` records with zero account and port fields. It streams only the supplied
@@ -2210,8 +2219,7 @@ arbitrary regular-expression matches cannot establish whole-site coverage from
 folded telemetry and remain unmarked. `(ip)` is never marked added: it cannot
 identify an address or CIDR to allow. Closing the group retains its report and
 owned-list history while normal retention still applies. The report UI and the
-remaining group overview, readiness and transition HTTP workflow are
-still pending.
+remaining group overview and readiness views are still pending.
 
 `GET /api/admin/dest/groups/:group_id/preview?list_ids=1,2` prepares an allowlist
 trial without changing the current mode, lists or definition generation. Only
@@ -2237,7 +2245,7 @@ usable so the enable wizard can accept manual base hosts. Existing owned lists
 are retained and identified by their real `base_list_id` / `extra_list_id`;
 prospective synthetic list IDs never leave the preview. Responses use no-store.
 This is prospective eligibility evidence; applied-node receipts and enforcement
-readiness still belong to the pending group overview and transition workflow.
+readiness still belong to the pending group overview workflow.
 
 The group-overview storage foundation projects counters for requested group IDs
 in batches of 512 inside one private read snapshot. Anonymous trial sites retain
