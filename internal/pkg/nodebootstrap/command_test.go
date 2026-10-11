@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -74,14 +75,21 @@ func TestInstallCommandBufferedRuntime(t *testing.T) {
 			mustWrite(t, filepath.Join(root, "response"), scenario.payload, 0600)
 			// The first option must disable curlrc. Require all bounds and an
 			// exact positional URL, and prove an inherited exported s is gone.
-			curl := "#!" + bash + "\n" + `[[ ${s-} == '' ]] || exit 91
+			shell := bash
+			if runtime.GOOS == "windows" {
+				// Git Bash resolves this shebang without Windows symlink privileges.
+				shell = "/bin/bash"
+			}
+			curl := "#!" + shell + "\n" + `[[ ${s-} == '' ]] || exit 91
 [[ $1 == -qf && $2 == --proto && $3 == =https && $4 == -m && $5 == 30 && $6 == --max-filesize && $7 == 1048576 && $8 == "$HARNESS_URL" && $# == 8 ]] || exit 92
 while IFS= read -r line || [[ -n $line ]]; do printf '%s\n' "$line"; done < "$HARNESS_ROOT/response"
 exit "$HARNESS_STATUS"
 `
 			mustWrite(t, filepath.Join(bin, "curl"), curl, 0700)
 			// Reuse the actual Bash, not a payload interpreter substitute.
-			if err := os.Symlink(bash, filepath.Join(bin, "bash")); err != nil {
+			if runtime.GOOS == "windows" {
+				mustWrite(t, filepath.Join(bin, "bash"), "#!/bin/bash\nexec '"+filepath.ToSlash(bash)+"' \"$@\"\n", 0700)
+			} else if err := os.Symlink(bash, filepath.Join(bin, "bash")); err != nil {
 				t.Fatal(err)
 			}
 			url := "https://panel.invalid/node-bootstrap/" + strings.Repeat("a", 43)
@@ -92,7 +100,7 @@ exit "$HARNESS_STATUS"
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 			cmd := exec.CommandContext(ctx, bash, "--noprofile", "--norc", "-c", command)
-			cmd.Env = []string{"PATH=" + bin, "LANG=C", "HARNESS_ROOT=" + root, "HARNESS_URL=" + url, "HARNESS_STATUS=" + strconv.Itoa(scenario.status), "s=INHERITED_EXPORTED_FIXTURE"}
+			cmd.Env = []string{"PATH=" + filepath.ToSlash(bin), "LANG=C", "HARNESS_ROOT=" + filepath.ToSlash(root), "HARNESS_URL=" + url, "HARNESS_STATUS=" + strconv.Itoa(scenario.status), "s=INHERITED_EXPORTED_FIXTURE"}
 			if scenario.name == "inherited allexport stays private" {
 				cmd.Env = append(cmd.Env, "SHELLOPTS=allexport")
 			}

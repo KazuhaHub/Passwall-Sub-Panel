@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"net"
+	"runtime"
 	"strconv"
 	"testing"
 	"time"
@@ -122,6 +123,12 @@ func TestUDPProbeClosedPortIsUnreachableNotInconclusive(t *testing.T) {
 	err := portOpen(context.Background(), "udp", host, port)
 	if err == nil {
 		t.Fatal("a closed port must not read as open")
+	}
+	if runtime.GOOS == "windows" && errors.Is(err, errProbeInconclusive) {
+		// Go's net package disables SIO_UDP_CONNRESET on Windows sockets,
+		// so a loopback ICMP error may surface as silence. It must still not
+		// claim the closed port is healthy.
+		return
 	}
 	if errors.Is(err, errProbeInconclusive) {
 		t.Fatalf("ICMP port-unreachable is PROOF of closed, not an inconclusive result; got %v", err)

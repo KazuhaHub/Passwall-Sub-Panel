@@ -27,7 +27,7 @@ func auditCleanupFixture(t *testing.T) (*DestAuditRepo, int64, int64, int64, tim
 }
 
 func cleanupHit(panel, user, hour int64, source, action, dest string, port int) destHitRow {
-	return destHitRow{PanelID: panel, UserID: user, HourMS: hour, Source: source, Action: action, Dest: dest, Port: port, Count: 1, FirstAt: time.UnixMilli(hour), LastAt: time.UnixMilli(hour + 1)}
+	return destHitRow{PanelID: panel, UserID: user, HourMS: hour, Source: source, Action: action, Dest: dest, Port: port, Count: 1, FirstAt: time.UnixMilli(hour).UTC(), LastAt: time.UnixMilli(hour + 1).UTC()}
 }
 
 func TestDestAuditCleanupDistinctRetentionsUTCAndExactTrialSource(t *testing.T) {

@@ -729,7 +729,8 @@ test('the contract job skips only a wire run the matrix already made, and always
   const plan = execFileSync('node', ['deploy/compat/plan.mjs', '--emit', 'cases'], { cwd: root, encoding: 'utf8' })
   const cases = JSON.parse(plan)
   assert(cases.length > 0, 'the plan emitted no case, so the match was not exercised')
-  const match = (sha) => execFileSync('python3', ['-c', matcher[1], sha], { input: plan, encoding: 'utf8' }).trim()
+  const python = process.platform === 'win32' ? 'python' : 'python3'
+  const match = (sha) => execFileSync(python, ['-c', matcher[1], sha], { input: plan, encoding: 'utf8' }).trim()
   for (const planned of cases) assert.equal(match(planned.sha), planned.id, `a planned commit must be recognised as ${planned.id}`)
   assert.equal(match('0'.repeat(40)), '', 'a commit outside the plan must not be treated as covered, or its wire run is silently dropped')
 })
