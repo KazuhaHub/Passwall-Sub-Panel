@@ -204,6 +204,45 @@ func nativeUnchangedReceiptMatches(prior, current domain.DestAgentPolicy, genera
 		lastSeen != nil && lastSeen.After(after) && nativeReceiptMatches(current, generation, lastSeen, *prior.MintedAt)
 }
 
+func nativeIdleStreamMatches(prior, current domain.NodeAgentStream, epoch uint64, after time.Time) bool {
+	return epoch > 0 && prior.AppliedEpoch == epoch && current.AppliedEpoch == epoch &&
+		prior.AgentID != "" && prior.AgentID == current.AgentID && prior.Stream == current.Stream &&
+		prior.DesiredVersion > 0 && prior.DesiredVersion == current.DesiredVersion && prior.AppliedVersion == current.AppliedVersion &&
+		prior.DesiredETag != "" && prior.DesiredETag == current.DesiredETag && prior.AppliedETag == current.AppliedETag &&
+		len(prior.DesiredBody) > 0 && bytes.Equal(prior.DesiredBody, current.DesiredBody) &&
+		prior.Converged() && current.Converged() && current.LastSeen != nil && current.LastSeen.After(after)
+}
+
+func TestNativeIdleStreamRequiresFreshAcknowledgementOfUnchangedContent(t *testing.T) {
+	before, after := time.Unix(100, 0), time.Unix(101, 0)
+	base := domain.NodeAgentStream{AgentID: "native", Stream: domain.NodeAgentStreamConfig, DesiredVersion: 2, AppliedVersion: 2, DesiredETag: "same", AppliedETag: "same", DesiredBody: []byte("config"), AppliedEpoch: 3, LastSeen: &before}
+	for _, tc := range []struct {
+		name   string
+		change func(*domain.NodeAgentStream)
+		want   bool
+	}{
+		{"fresh-same-content", func(*domain.NodeAgentStream) {}, true},
+		{"old-report", func(s *domain.NodeAgentStream) { s.LastSeen = &before }, false},
+		{"missing-report", func(s *domain.NodeAgentStream) { s.LastSeen = nil }, false},
+		{"other-agent", func(s *domain.NodeAgentStream) { s.AgentID = "other" }, false},
+		{"other-stream", func(s *domain.NodeAgentStream) { s.Stream = domain.NodeAgentStreamRoster }, false},
+		{"other-epoch", func(s *domain.NodeAgentStream) { s.AppliedEpoch++ }, false},
+		{"new-version", func(s *domain.NodeAgentStream) { s.DesiredVersion++; s.AppliedVersion++ }, false},
+		{"new-body", func(s *domain.NodeAgentStream) { s.DesiredBody = []byte("other") }, false},
+		{"new-hash", func(s *domain.NodeAgentStream) { s.DesiredETag = "other"; s.AppliedETag = "other" }, false},
+		{"not-applied", func(s *domain.NodeAgentStream) { s.AppliedETag = "old" }, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			current := base
+			current.LastSeen = &after
+			tc.change(&current)
+			if got := nativeIdleStreamMatches(base, current, 3, before); got != tc.want {
+				t.Fatalf("idle stream = %t, want %t", got, tc.want)
+			}
+		})
+	}
+}
+
 // Fault scenarios declare the exact source and exhaustion state they expect.
 // A historical LKG is not enough: the current fallback must itself be applied.
 func nativeFaultReceiptMatches(r domain.DestAgentPolicy, generation int64, lastSeen *time.Time, after time.Time, kind domain.DestCandidateKind, exhausted bool) bool {

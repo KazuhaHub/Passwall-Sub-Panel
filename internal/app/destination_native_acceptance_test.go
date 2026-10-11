@@ -362,6 +362,12 @@ func TestNativeDestinationTraffic(t *testing.T) {
 		waitApplied()
 		traffic(true)
 	})
+	run("idle_sync", func() {
+		nativeAssertIdleSync(caseTest, a, probe, f.agent.AgentID, f.node.ID, cmd.Process.Pid, filepath.Join(dir, "node"), "xray", func() {
+			traffic(true)
+			trafficUser(canary.UUID, true)
+		})
+	})
 	run("listener_rejected", func() {
 		prior, err := a.repos.DestAgentPolicy.Get(caseTest.Context(), f.agent.AgentID, true)
 		nativeMust(caseTest, err, "read policy before listener failure")

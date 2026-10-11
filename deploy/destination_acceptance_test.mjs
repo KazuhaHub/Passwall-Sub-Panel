@@ -10,6 +10,10 @@ function events() {
   return [...names.flatMap(Test => [{ Action: 'run', Package: pkg, Test }, { Action: 'pass', Package: pkg, Test }]), { Action: 'pass', Package: pkg }]
 }
 const encode = values => values.map(value => JSON.stringify(value)).join('\n')
+test('each engine requires the real unchanged-sync process identity case', () => {
+  for (const cases of [destinationCases, acceptance.singBoxCases, acceptance.guardedSingBoxCases]) assert(cases.includes('idle_sync'))
+  assert.throws(() => checkDestinationResults(encode(events().filter(event => !event.Test?.endsWith('/idle_sync')))))
+})
 test('native matrix requires the actual core-check timeout case', () => {
   assert(destinationCases.includes('core_check_timeout'))
   assert.throws(() => checkDestinationResults(encode(events().filter(event => !event.Test?.endsWith('/core_check_timeout')))))

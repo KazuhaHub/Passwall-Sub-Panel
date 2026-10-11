@@ -19,8 +19,8 @@ selection; the production catalog gate remains enforced.
 
 A separate job selects the reviewed sing-box `1.14.0` through the same PSP
 catalog and launches the candidate Node with its normal sing-box API. Its
-eleven required cases are empty policy, watch, block, pause/resume, sniffed
-domain blocking, allowlist trial, enforce, supplemental CIDR, daemon restart,
+twelve required cases are empty policy, watch, block, pause/resume, sniffed
+domain blocking, allowlist trial, enforce, supplemental CIDR, unchanged sync, daemon restart,
 collection settings, and the pre-hotfix private-address baseline. Administrator
 mutations require a current applied policy receipt and actual listener/roster
 convergence before traffic is checked. Trial allows the connection; enforce
@@ -45,7 +45,7 @@ claim that a private-address guard already exists or that cloud metadata and
 DNS-resolved private destinations are protected. No cloud endpoint is queried.
 The private-address guard is unchanged by this PSP acceptance change.
 
-The guarded job repeats the same ten policy, allowlist, restart and collection
+The guarded job repeats the same eleven policy, allowlist, sync, restart and collection
 cases against the new Node, then replaces `private_baseline` with `private_guard`.
 It must reject a real VLESS private IPv4 literal with no target request, while a
 `localhost` domain still reaches the same controlled server and returns its nonce.
@@ -59,9 +59,9 @@ it does not claim protection for all private-resolving domains or cloud metadata
 The guarded job has its own complete execution gate and cannot borrow passes
 from either the baseline sing-box job or Xray jobs. No production code changes.
 
-Every Xray job must execute all twenty-three ordered cases: empty policy, watch,
+Every Xray job must execute all twenty-four ordered cases: empty policy, watch,
 block, pause/resume, anonymous allowlist trial, enforce, supplemental entry,
-unrelated listener rejection and repair, actual core-check timeout and repair,
+unchanged sync, unrelated listener rejection and repair, actual core-check timeout and repair,
 collection off, detailed usage, daemon restart, port-only fallback under
 insufficient sniffing, pause/resume during fallback, disabled-rule pruning,
 sniffing fallback exhaustion, account revocation while exhausted, and a PSP app
@@ -77,6 +77,18 @@ unchanged bytes and validates it normally. Allow/deny is checked against an actu
 VLESS HTTP request and the destination's nonce and request count. Audit and
 usage counts come from the real ingestion worker. The usage HTTP read must
 also create its declared administrator audit action.
+
+After supplemental allowlist admission, each engine holds a pidfd for the unique
+live core belonging to the real Node. Parent, exact engine arguments, owned
+`current.json` path and installed executable inode are checked before and after
+three separate successful real TLS sync requests. Each cycle must retain the
+published generation, policy mint/context/body/digest and confirmed LKG; config
+and roster bodies, ETags, versions and epoch remain identical with fresh accepted
+acknowledgements. The listener stays synced. The actual current core config stays
+byte-identical with the same SHA-256, traffic still reaches the nonce target, and
+the original pidfd must remain alive. Xray verifies both real users. No signals
+are sent or artifacts rewritten. This proves no successful core replacement over
+these idle cycles, not all possible sources of restart or a load-duration test.
 
 Fault cases mutate sniffing and policies through production administrator HTTP.
 They check canonical candidate bytes, historical LKG retention, the acknowledged

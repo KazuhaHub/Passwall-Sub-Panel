@@ -3,15 +3,21 @@ import { pathToFileURL } from 'node:url'
 
 export const nodeCandidate = Object.freeze({ repository: 'KazuhaHub/Passwall-Node', commit: '63c60f6d5e8cd093bbaa8385f5b514dbe2f40390' })
 export const guardedNodeCandidate = Object.freeze({ repository: nodeCandidate.repository, commit: 'a6163c8b5c10a9c8129cf660020fe2c8fa2b85db' })
-export const destinationCases = Object.freeze(['empty', 'watch', 'block', 'paused', 'trial', 'enforce', 'extra', 'listener_rejected', 'core_check_timeout', 'collection_off', 'usage', 'restart', 'fallback_port', 'fallback_pause', 'fallback_prune', 'sniff_exhaustion', 'exhausted_roster', 'exhausted_panel_restart', 'fallback_group_open', 'fallback_group_pause', 'offline_pause', 'offline_restart', 'response_loss'])
+export const destinationCases = Object.freeze(['empty', 'watch', 'block', 'paused', 'trial', 'enforce', 'extra', 'idle_sync', 'listener_rejected', 'core_check_timeout', 'collection_off', 'usage', 'restart', 'fallback_port', 'fallback_pause', 'fallback_prune', 'sniff_exhaustion', 'exhausted_roster', 'exhausted_panel_restart', 'fallback_group_open', 'fallback_group_pause', 'offline_pause', 'offline_restart', 'response_loss'])
 const pkg = 'github.com/KazuhaHub/passwall-sub-panel/internal/app'
-export const singBoxCases = Object.freeze(['empty', 'watch', 'block', 'paused', 'domain', 'trial', 'enforce', 'extra', 'restart', 'collection_off', 'private_baseline'])
+export const singBoxCases = Object.freeze(['empty', 'watch', 'block', 'paused', 'domain', 'trial', 'enforce', 'extra', 'idle_sync', 'restart', 'collection_off', 'private_baseline'])
 export const guardedSingBoxCases = Object.freeze([...singBoxCases.filter(name => name !== 'private_baseline'), 'private_guard'])
 const xrayNames = ['TestNativeDestinationTraffic', ...destinationCases.map(name => `TestNativeDestinationTraffic/${name}`)]
 const singBoxNames = ['TestNativeSingBoxDestinationTraffic', ...singBoxCases.map(name => `TestNativeSingBoxDestinationTraffic/${name}`)]
 const guardedSingBoxNames = ['TestNativeGuardedSingBoxDestinationTraffic', ...guardedSingBoxCases.map(name => `TestNativeGuardedSingBoxDestinationTraffic/${name}`)]
 const names = [...xrayNames, ...singBoxNames, ...guardedSingBoxNames]
 const diagnostics = Object.freeze({
+  'idle sync cannot bind a unique owned live core': 'idle_core_binding_failed',
+  'idle sync replaced or lost the original core process': 'idle_core_restarted',
+  'idle sync has no confirmed core config': 'idle_config_missing',
+  'idle sync did not accept the unchanged applied policy': 'idle_policy_changed',
+  'idle sync changed the confirmed core config': 'idle_config_changed',
+  'timed out waiting for unchanged accepted idle sync': 'idle_sync_timeout',
   'cannot bind timeout fault to the owned running core': 'timeout_core_binding_failed',
   'did not pause the owned actual Xray config check': 'timeout_check_not_paused',
   'timed out waiting for real core check timeout': 'timeout_report_wait_failed',

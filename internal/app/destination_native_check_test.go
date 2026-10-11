@@ -6,6 +6,21 @@ import (
 	"testing"
 )
 
+func nativeOwnedLiveCoreCommand(args []string, engine, stateDir string) bool {
+	if len(args) != 4 || !filepath.IsAbs(args[0]) || !filepath.IsAbs(stateDir) || args[1] != "run" {
+		return false
+	}
+	switch engine {
+	case "xray":
+		return nativeOwnedXrayCommand(args, args[0], stateDir, false)
+	case "sing-box":
+		config := args[3]
+		return args[2] == "-c" && filepath.IsAbs(config) && filepath.Clean(config) == config && filepath.Dir(config) == stateDir && filepath.Base(config) == "current.json"
+	default:
+		return false
+	}
+}
+
 func nativeOwnedXrayCommand(args []string, binary, stateDir string, check bool) bool {
 	if !filepath.IsAbs(binary) || !filepath.IsAbs(stateDir) || len(args) < 4 || args[0] != binary || args[1] != "run" {
 		return false
@@ -51,6 +66,33 @@ func TestNativeCoreFaultSelectsOnlyTheOwnedCheck(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := nativeOwnedXrayCommand(tc.args, binary, stateDir, tc.check); got != tc.want {
 				t.Fatalf("owned core selection = %t, want %t", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestNativeLiveCoreIdentityRequiresExactOwnedEngineArguments(t *testing.T) {
+	root := t.TempDir()
+	state := filepath.Join(root, "runtime", "xray")
+	config := filepath.Join(state, "current.json")
+	for _, tc := range []struct {
+		name, engine string
+		args         []string
+		want         bool
+	}{
+		{"xray-live", "xray", []string{filepath.Join(root, "cores", "xray"), "run", "-config", config}, true},
+		{"singbox-live", "sing-box", []string{filepath.Join(root, "cores", "sing-box"), "run", "-c", config}, true},
+		{"check-is-not-live", "xray", []string{filepath.Join(root, "cores", "xray"), "run", "-test", "-config", config}, false},
+		{"wrong-engine-args", "sing-box", []string{filepath.Join(root, "cores", "sing-box"), "run", "-config", config}, false},
+		{"unknown-engine", "other", []string{filepath.Join(root, "cores", "other"), "run", "-c", config}, false},
+		{"relative-binary", "sing-box", []string{"sing-box", "run", "-c", config}, false},
+		{"different-state", "sing-box", []string{filepath.Join(root, "cores", "sing-box"), "run", "-c", filepath.Join(root, "current.json")}, false},
+		{"candidate-not-current", "sing-box", []string{filepath.Join(root, "cores", "sing-box"), "run", "-c", filepath.Join(state, ".candidate-1.json")}, false},
+		{"extra-argument", "sing-box", []string{filepath.Join(root, "cores", "sing-box"), "run", "-c", config, "other"}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := nativeOwnedLiveCoreCommand(tc.args, tc.engine, state); got != tc.want {
+				t.Fatalf("live identity = %t, want %t", got, tc.want)
 			}
 		})
 	}

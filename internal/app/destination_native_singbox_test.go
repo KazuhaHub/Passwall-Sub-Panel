@@ -289,6 +289,10 @@ func nativeSingBoxDestinationTraffic(t *testing.T, guarded bool) {
 		waitApplied()
 		traffic(literalHost, true)
 	})
+	run("idle_sync", func() {
+		nativeAssertIdleSync(caseTest, a, probe, f.agent.AgentID, f.node.ID, cmd.Process.Pid, filepath.Join(dir, "node"), "sing-box", func() { traffic(literalHost, true) })
+		noCollection()
+	})
 	run("restart", func() {
 		prior, err := a.repos.DestAgentPolicy.Get(caseTest.Context(), f.agent.AgentID, true)
 		nativeMust(caseTest, err, "read confirmed sing-box policy")
