@@ -19,6 +19,12 @@ guard, state URI compatibility and Windows checkout changes. It is also an
 unpublished development candidate. These jobs use the same complete traffic and
 ingestion gates, with separate candidate-labelled artifacts; the earlier fixed
 candidates remain independent checkpoints.
+Four additional jobs pin the full-module Node stack to
+`cef54ddba3ee96f9794aaacdc6ac1ed89cc318f9`, including native Windows ACL/state
+protection, document persistence and platform-boundary regressions. They exercise
+all three Xray versions and guarded sing-box `1.14.0` with the same complete
+runtime gates. The integrated `e2c9dfb` candidate remains a separate immutable
+checkpoint; success on it does not replace execution of the full-module stack.
 No local module replacement is used. The daemon installs and runs each exact
 Xray version: `26.6.27`, `26.7.28`, and `26.9.9`.
 The isolated fixture explicitly acknowledges the reviewed restricted `26.9.9`
@@ -288,8 +294,8 @@ offline and mixed-version cases, long-window response-loss deduplication, load t
 complete UI approval matrix, or staged release verification.
 
 Use the workflow run and PR validation record for execution evidence. All three
-baseline Xray jobs, both checkpoint sing-box jobs and all four integrated Node
-jobs must pass on the exact current PR head;
+baseline Xray jobs, both checkpoint sing-box jobs, all four integrated Node
+jobs and all four full-module Node jobs must pass on the exact current PR head;
 an earlier or partial matrix does
 not satisfy this gate.
 
@@ -488,6 +494,8 @@ issue，导致报告校验失败并连带阻止有效失败任务结果发送。
 版本的正向升级，也不代替 Node updater 的全部交接故障矩阵。
 
 集成 Node `e2c9dfbfe934d4a61fda84b0a80b4f1cb5dbc719` 另增加三份 Xray
-证据（每份 32 项）和一份 guarded sing-box 证据（17 项），因此当前完整矩阵
-要求十三份独立证据、272 项。原九份证据仍须通过，不能用旧候选绿灯代替集成
-候选的实际执行，也不能据此宣称已发布新版本的正向升级或全部阶段已经完成。
+证据（每份 32 项）和一份 guarded sing-box 证据（17 项），组成十三份独立证据、
+272 项的固定检查点。全模块 Node `cef54ddba3ee96f9794aaacdc6ac1ed89cc318f9`
+再增加同样四份证据、113 项，因此当前完整矩阵要求十七份独立证据、385 项。
+原十三份证据仍须通过，不能用旧候选绿灯代替最新组合的实际执行，也不能据此
+宣称已发布新版本的正向升级或全部阶段已经完成。

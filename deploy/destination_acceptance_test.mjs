@@ -196,6 +196,8 @@ test('acceptance requires immutable reviewed Node source', () => {
 test('integrated Node executes the complete core matrix without replacing fixed checkpoints', () => {
   assert.equal(acceptance.integratedNodeCandidate?.repository, nodeCandidate.repository)
   assert.equal(acceptance.integratedNodeCandidate?.commit, 'e2c9dfbfe934d4a61fda84b0a80b4f1cb5dbc719')
+  assert.equal(acceptance.moduleNodeCandidate?.repository, nodeCandidate.repository)
+  assert.equal(acceptance.moduleNodeCandidate?.commit, 'cef54ddba3ee96f9794aaacdc6ac1ed89cc318f9')
   const workflow = readFileSync(new URL('../.github/workflows/destination-acceptance.yml', import.meta.url), 'utf8')
   const traffic = workflow.slice(workflow.indexOf('  traffic:'), workflow.indexOf('  published-remote:'))
   const rows = [...traffic.matchAll(/\{engine: ([\w-]+), core: '([^']+)', candidate: (\w+), node: '([a-f0-9]{40})'\}/g)]
@@ -206,9 +208,11 @@ test('integrated Node executes the complete core matrix without replacing fixed 
     ['sing-box', '1.14.0', 'guarded', acceptance.guardedNodeCandidate.commit],
     ...['26.6.27', '26.7.28', '26.9.9'].map(core => ['xray', core, 'integrated', acceptance.integratedNodeCandidate.commit]),
     ['sing-box', '1.14.0', 'integrated', acceptance.integratedNodeCandidate.commit],
+    ...['26.6.27', '26.7.28', '26.9.9'].map(core => ['xray', core, 'module', acceptance.moduleNodeCandidate.commit]),
+    ['sing-box', '1.14.0', 'module', acceptance.moduleNodeCandidate.commit],
   ])
-  assert(traffic.includes('xray:baseline|xray:integrated) test_name=TestNativeDestinationTraffic; verifier=check ;;'))
-  assert(traffic.includes('sing-box:guarded|sing-box:integrated) test_name=TestNativeGuardedSingBoxDestinationTraffic; verifier=check-guarded-singbox ;;'))
+  assert(traffic.includes('xray:baseline|xray:integrated|xray:module) test_name=TestNativeDestinationTraffic; verifier=check ;;'))
+  assert(traffic.includes('sing-box:guarded|sing-box:integrated|sing-box:module) test_name=TestNativeGuardedSingBoxDestinationTraffic; verifier=check-guarded-singbox ;;'))
   assert(traffic.includes('sing-box:baseline) test_name=TestNativeSingBoxDestinationTraffic; verifier=check-singbox ;;'))
   assert(traffic.includes('*) exit 1 ;;'))
   assert(traffic.includes('native-destination-${{ matrix.engine }}-${{ matrix.core }}-${{ matrix.candidate }}-${{ github.sha }}'))
