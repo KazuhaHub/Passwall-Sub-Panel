@@ -207,6 +207,7 @@ func NewRepos(db *gorm.DB) ports.Repos {
 		DestUserHitsRead:        destAudit,
 		DestUsageRead:           destAudit,
 		DestGroupTrialRead:      destAudit,
+		DestGroupStatsRead:      destAudit,
 		DestGroupModes:          NewDestDefinitionRepo(db),
 		DestRiskRead:            destAudit,
 		DestinationEligibility:  NewDestinationEligibilityRepo(db),

@@ -2238,3 +2238,12 @@ are retained and identified by their real `base_list_id` / `extra_list_id`;
 prospective synthetic list IDs never leave the preview. Responses use no-store.
 This is prospective eligibility evidence; applied-node receipts and enforcement
 readiness still belong to the pending group overview and transition workflow.
+
+The group-overview storage foundation projects counters for requested group IDs
+in batches of 512 inside one private read snapshot. Anonymous trial sites retain
+the producer's site boundaries and merge across hours and nodes; their time
+window is independent of the denial window. Denial counts select only source and
+count, without loading account or destination fields. Empty IDs return no groups,
+overflow saturates, and any failed batch withholds the entire result. These are
+observed counts, not a claim that collection is complete. The overview API and
+readiness workflow are still pending.
