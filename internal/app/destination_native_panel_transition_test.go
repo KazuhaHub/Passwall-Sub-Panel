@@ -122,7 +122,7 @@ func nativeLegacyPanelTransitions(t *testing.T, f nativeLegacyPanelFixture) {
 		appliedAt := time.Now().UTC()
 		artifact, err := os.ReadFile(configPath)
 		nativeMust(test, err, "read online panel rollback artifact")
-		if !bytes.Equal(artifact, f.originalConfig) {
+		if !nativePanelPolicyFreeArtifactMatches(f.originalConfig, artifact) {
 			test.Fatal("online panel downgrade did not deploy the original policy-free artifact")
 		}
 		traffic(test, true)

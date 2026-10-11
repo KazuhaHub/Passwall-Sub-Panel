@@ -174,7 +174,12 @@ func TestNativeLegacyProbeTracksOnlyObservedConfigPolicyIdentity(t *testing.T) {
 		{`{"config":{"etag":"b","unchanged":true}}`, true, false},
 	} {
 		response := httptest.NewRecorder()
-		p.wrap(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, tc.output) })).ServeHTTP(response, httptest.NewRequest("POST", "/v1/node/sync", strings.NewReader(`{"policy_status":{"state":"applied","digest":""}}`)))
+		p.wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if _, err := io.ReadAll(r.Body); err != nil {
+				t.Fatal("read actual probe test request")
+			}
+			_, _ = io.WriteString(w, tc.output)
+		})).ServeHTTP(response, httptest.NewRequest("POST", "/v1/node/sync", strings.NewReader(`{"policy_status":{"state":"applied","digest":""}}`)))
 		s := p.snapshot()
 		if s.ConfigBodyKnown != tc.known || s.ConfigPolicy != tc.policy || s.Config.Body != nil || !s.PolicyReportPresent || s.PolicyReportState != "applied" || s.PolicyReportDigest != "" {
 			t.Fatal("probe inferred policy from an unobserved configuration or lost the actual report")
