@@ -7,7 +7,7 @@ test('legacy upgrade has an independent complete real execution gate and immutab
   const acceptance = await import('./destination-acceptance.mjs')
   assert.equal(typeof acceptance.checkLegacyUpgradeResults, 'function')
   const pkg = 'github.com/KazuhaHub/passwall-sub-panel/internal/app'
-  const tests = ['TestNativeLegacyPSPUpgrade', ...['old_panel', 'panel_upgrade', 'legacy_publication', 'mixed_fleet', 'mixed_offline_pause', 'node_upgrade', 'node_downgrade', 'node_reupgrade', 'panel_downgrade_offline', 'panel_downgrade', 'panel_reupgrade'].map(name => `TestNativeLegacyPSPUpgrade/${name}`)]
+  const tests = ['TestNativeLegacyPSPUpgrade', ...['old_panel', 'panel_upgrade', 'legacy_publication', 'mixed_fleet', 'mixed_offline_pause', 'node_upgrade', 'node_downgrade', 'node_reupgrade', 'panel_downgrade_offline', 'panel_downgrade', 'panel_reupgrade', 'allowlist_capability_setup', 'allowlist_capability_removed', 'allowlist_capability_restored'].map(name => `TestNativeLegacyPSPUpgrade/${name}`)]
   const values = [...tests.flatMap(Test => [{ Action: 'run', Package: pkg, Test }, { Action: 'pass', Package: pkg, Test }]), { Action: 'pass', Package: pkg }]
   const evidence = sanitizeDestinationResults(encode(values))
   assert.doesNotThrow(() => acceptance.checkLegacyUpgradeResults(evidence))
@@ -55,6 +55,17 @@ test('node transition diagnostics retain only fixed booleans without private sta
     }
   }
   for (const text of ['credential=secret', 'config=private', 'address=true']) assert.equal(sanitizeDestinationResults(encode([{ Action: 'output', Output: `native diagnostic: node_transition_${text}\n` }])), '\n')
+})
+
+test('allowlist capability diagnostics retain only fixed convergence booleans', () => {
+  for (const fact of ['streams', 'capability', 'agent_fresh', 'membership', 'policy_body', 'policy_receipt']) {
+    for (const value of ['true', 'false']) {
+      const result = JSON.parse(sanitizeDestinationResults(encode([{ Action: 'output', Output: `native diagnostic: capability_${fact}=${value}\n` }])))
+      assert.equal(result.Diagnostic, `capability_${fact}`)
+      assert.equal(result.Observed, value === 'true')
+    }
+  }
+  for (const text of ['credential=secret', 'address=true', 'membership=private']) assert.equal(sanitizeDestinationResults(encode([{ Action: 'output', Output: `native diagnostic: capability_${text}\n` }])), '\n')
 })
 test('Xray separately requires actual LKG and pruned-candidate rejection', () => {
   for (const name of ['lkg_rejected', 'pruned_rejected']) {

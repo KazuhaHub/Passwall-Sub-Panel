@@ -228,6 +228,28 @@ func TestNativeDestinationTraffic(t *testing.T) {
 		})
 	}
 	waitApplied := func() { waitCandidate("", false, false, receiptAfter) }
+	waitCollection := func(level protocol.CollectLevel) {
+		caseTest.Helper()
+		panel, err := a.repos.XUIPanel.GetByID(caseTest.Context(), f.agent.PanelID)
+		nativeMust(caseTest, err, "read requested collection revision")
+		revision := uint64(0)
+		if level != "" {
+			if panel.AuditCollectRevision <= 0 || string(panel.AuditCollect) != string(level) {
+				caseTest.Fatal("native collection input did not retain its requested revision")
+			}
+			revision = uint64(panel.AuditCollectRevision)
+		} else if panel.AuditCollect != domain.AuditCollectOff {
+			caseTest.Fatal("native collection input did not retain its requested revision")
+		}
+		nativeWait(caseTest, 120*time.Second, "requested current collection receipt", func() bool {
+			current, err := a.repos.DestAgentPolicy.Get(caseTest.Context(), f.agent.AgentID, true)
+			if err != nil || current == nil || !nativeCollectionReceiptMatches(*current, level, revision) {
+				return false
+			}
+			agent, err := a.repos.NodeAgent.GetByAgentID(caseTest.Context(), f.agent.AgentID)
+			return err == nil && agent.LastSeen != nil && agent.LastSeen.After(receiptAfter) && streamsReady(agent)
+		})
+	}
 	waitFault := func(kind domain.DestCandidateKind, exhausted bool) {
 		waitCandidate(kind, exhausted, true, receiptAfter)
 	}
@@ -604,6 +626,7 @@ func TestNativeDestinationTraffic(t *testing.T) {
 	run("collection_off", func() {
 		request("PUT", fmt.Sprintf("servers/%d", f.agent.PanelID), map[string]any{"audit_collect": "off"}, 200, nil)
 		waitApplied()
+		waitCollection("")
 		before := count("SELECT COALESCE(SUM(count),0) FROM dest_hits")
 		traffic(true)
 		// Three real poll cycles allow any unexpected batch to enter the queue.
@@ -615,6 +638,7 @@ func TestNativeDestinationTraffic(t *testing.T) {
 	run("usage", func() {
 		request("PUT", fmt.Sprintf("servers/%d", f.agent.PanelID), map[string]any{"audit_collect": "hits_and_usage"}, 200, nil)
 		waitApplied()
+		waitCollection(protocol.CollectHitsAndUsage)
 		traffic(true)
 		nativeWait(caseTest, 30*time.Second, "real usage ingestion", func() bool {
 			return count("SELECT COALESCE(SUM(count),0) FROM dest_usage_hourly WHERE panel_id=? AND user_id=? AND site='(ip)'", f.agent.PanelID, f.user.ID) > 0

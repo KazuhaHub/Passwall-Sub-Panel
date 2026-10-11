@@ -32,6 +32,54 @@ func nativeMutationReceiptMatches(prior *domain.DestAgentPolicy, current domain.
 	return nativeReceiptMatches(current, generation, lastSeen, *prior.MintedAt)
 }
 
+// An unchanged published generation does not confirm a collection edit. Wait
+// for the exact requested level/revision in the actually acknowledged policy,
+// so a debounced old candidate cannot admit traffic for the new usage test.
+func nativeCollectionReceiptMatches(current domain.DestAgentPolicy, level protocol.CollectLevel, revision uint64) bool {
+	var policy *protocol.DestinationPolicy
+	if json.Unmarshal(current.MintedBody, &policy) != nil || policy == nil || policy.Collect != level || policy.CollectRevision != revision || current.CollectEffective != string(level) {
+		return false
+	}
+	digest := protocol.PolicyDigest(policy)
+	return current.MintedKind == domain.DestCandidateDesired && digest != "" && current.MintedSHA256 == digest && current.DesiredSHA256 == digest && current.ReportedState == "applied" && current.ReportedSHA256 == digest && current.AppliedSHA256 == digest && current.ReportedIssue == "" && current.FallbackReason == "" && !current.FallbackExhausted
+}
+
+func TestNativeCollectionReceiptRejectsOldLevelRevisionOrDigest(t *testing.T) {
+	policy := &protocol.DestinationPolicy{Collect: protocol.CollectHitsAndUsage, CollectRevision: 3}
+	body, err := json.Marshal(policy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest := protocol.PolicyDigest(policy)
+	base := domain.DestAgentPolicy{MintedKind: domain.DestCandidateDesired, MintedBody: body, MintedSHA256: digest, DesiredSHA256: digest, ReportedState: "applied", ReportedSHA256: digest, AppliedSHA256: digest, CollectEffective: string(policy.Collect)}
+	if !nativeCollectionReceiptMatches(base, policy.Collect, 3) {
+		t.Fatal("current collection receipt rejected")
+	}
+	if nativeCollectionReceiptMatches(base, protocol.CollectHits, 3) || nativeCollectionReceiptMatches(base, policy.Collect, 4) {
+		t.Fatal("old collection receipt confirmed a new setting")
+	}
+	for _, change := range []func(*domain.DestAgentPolicy){
+		func(r *domain.DestAgentPolicy) { r.MintedBody = []byte("null") },
+		func(r *domain.DestAgentPolicy) { r.MintedBody = []byte("malformed private") },
+		func(r *domain.DestAgentPolicy) { r.MintedSHA256 = "old" },
+		func(r *domain.DestAgentPolicy) { r.DesiredSHA256 = "old" },
+		func(r *domain.DestAgentPolicy) { r.ReportedSHA256 = "old" },
+		func(r *domain.DestAgentPolicy) { r.AppliedSHA256 = "old" },
+		func(r *domain.DestAgentPolicy) { r.CollectEffective = "hits" },
+		func(r *domain.DestAgentPolicy) { r.MintedKind = domain.DestCandidateFallback },
+		func(r *domain.DestAgentPolicy) { r.ReportedState = "rejected" },
+		func(r *domain.DestAgentPolicy) { r.ReportedIssue = "rejected" },
+		func(r *domain.DestAgentPolicy) { r.FallbackReason = "sniffing" },
+		func(r *domain.DestAgentPolicy) { r.FallbackExhausted = true },
+	} {
+		current := base
+		change(&current)
+		if nativeCollectionReceiptMatches(current, policy.Collect, 3) {
+			t.Fatal("collection gate accepted an old or rejected candidate")
+		}
+	}
+}
+
 func TestNativeMutationReceiptUsesActualTransitionAndFreshExactReceipt(t *testing.T) {
 	oldMint := time.UnixMilli(1000)
 	mint := oldMint.Add(time.Second)

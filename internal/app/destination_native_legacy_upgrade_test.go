@@ -227,7 +227,7 @@ func TestNativeLegacyPSPUpgrade(t *testing.T) {
 	if t.Failed() {
 		return
 	}
-	nativeLegacyNodeTransitions(t, nativeLegacyTransitionFixture{
+	transitionFixture := nativeLegacyTransitionFixture{
 		app: current, probe: probe, agentID: ready.AgentID, panelID: ready.PanelID, userID: ready.UserID,
 		dataDir: nodeDir, inbound: inbound, targetAddress: address, targetPort: targetPort, nonce: nonce,
 		originalConfig: beforeConfig, originalConfigETag: before.Config.ETag,
@@ -240,7 +240,8 @@ func TestNativeLegacyPSPUpgrade(t *testing.T) {
 			return node
 		},
 		stop: func() { stop(&node, nodeDone) },
-	})
+	}
+	nativeLegacyNodeTransitions(t, transitionFixture)
 	if t.Failed() {
 		return
 	}
@@ -286,4 +287,9 @@ func TestNativeLegacyPSPUpgrade(t *testing.T) {
 			return current
 		},
 	})
+	if t.Failed() {
+		return
+	}
+	transitionFixture.app = current
+	nativeLegacyAllowlistCapabilityTransitions(t, transitionFixture, ready.GroupID)
 }
