@@ -90,6 +90,9 @@ func TestAppliedGroupStagesDoNotLoadStaleUnpublishedOrFallbackCandidates(t *test
 		{"different-engine", func(_ *domain.DestPolicyState, p *domain.DestTestPanel, _ time.Time) {
 			p.Agent.DesiredCoreEngine = domain.NodeCoreSingBox
 		}},
+		{"unknown-observed-engine", func(_ *domain.DestPolicyState, p *domain.DestTestPanel, _ time.Time) {
+			p.Agent.ObservedCoreEngine = ""
+		}},
 		{"different-agent", func(_ *domain.DestPolicyState, p *domain.DestTestPanel, _ time.Time) { p.Runtime.AgentID = "agt_other" }},
 		{"third-party", func(_ *domain.DestPolicyState, p *domain.DestTestPanel, _ time.Time) { p.Kind = domain.PanelKind3XUI }},
 		{"missing-mint-time", func(_ *domain.DestPolicyState, p *domain.DestTestPanel, _ time.Time) { p.Runtime.MintedAt = nil }},

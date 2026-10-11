@@ -41,6 +41,7 @@ func TestBuildGroupOverviewUsesBatchMembershipStatsAndExactAppliedStage(t *testi
 	f := buildDestinationPolicyFixture(t)
 	a, token := f.a, destinationRefreshAdminToken(t, f.a)
 	f.report.Capabilities = []string{protocol.CapabilityDestinationPolicy}
+	f.report.CoreEngine = "xray"
 	_ = syncNativeCacheFixture(t, a, f.credential, f.report)
 	open := &domain.Group{Slug: "overview-open", Name: "Open zero members", TagFilter: domain.TagFilter{All: true}}
 	if err := a.repos.Group.Create(t.Context(), open); err != nil {
