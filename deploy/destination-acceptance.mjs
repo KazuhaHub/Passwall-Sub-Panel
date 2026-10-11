@@ -13,9 +13,24 @@ const singBoxNames = ['TestNativeSingBoxDestinationTraffic', ...singBoxCases.map
 const guardedSingBoxNames = ['TestNativeGuardedSingBoxDestinationTraffic', ...guardedSingBoxCases.map(name => `TestNativeGuardedSingBoxDestinationTraffic/${name}`)]
 const legacyUpgradeNames = ['TestNativeLegacyPSPUpgrade', ...['old_panel', 'panel_upgrade', 'legacy_publication', 'mixed_fleet', 'mixed_offline_pause', 'node_upgrade', 'node_downgrade', 'node_reupgrade', 'panel_downgrade_offline', 'panel_downgrade', 'panel_reupgrade', 'allowlist_capability_setup', 'allowlist_capability_removed', 'allowlist_capability_restored'].map(name => `TestNativeLegacyPSPUpgrade/${name}`)]
 export const remoteUpgradeCases = Object.freeze(['candidate_policy', 'health_failure_restore', 'published_rollback', 'restart_recovery', 'idempotent_replay'])
+const dockerUpgradeNames = ['TestNativePublishedDockerRollback', ...remoteUpgradeCases.map(name => `TestNativePublishedDockerRollback/${name}`)]
 const remoteUpgradeNames = ['TestNativePublishedRemoteRollback', ...remoteUpgradeCases.map(name => `TestNativePublishedRemoteRollback/${name}`)]
-const names = [...xrayNames, ...singBoxNames, ...guardedSingBoxNames, ...legacyUpgradeNames, ...remoteUpgradeNames]
+const names = [...xrayNames, ...singBoxNames, ...guardedSingBoxNames, ...legacyUpgradeNames, ...remoteUpgradeNames, ...dockerUpgradeNames]
 const diagnostics = Object.freeze({
+  'Docker administrator returned HTTP': 'docker_admin_http_failed',
+  'Docker acceptance command failed': 'docker_command_failed',
+  'Docker deployment changed the production isolation profile': 'docker_profile_failed',
+  'Docker enrollment did not retain the fixture identity and TLS endpoint': 'docker_enrollment_failed',
+  'Docker agent did not drop to its production non-root identity': 'docker_uid_failed',
+  'Docker agent has no matching owned live core': 'docker_core_missing',
+  'timed out waiting for Docker current candidate policy': 'docker_candidate_timeout',
+  'timed out waiting for Docker rejected target activation': 'docker_activation_timeout',
+  'timed out waiting for Docker automatic health restoration': 'docker_auto_restore_timeout',
+  'timed out waiting for Docker published helper completion': 'docker_helper_timeout',
+  'timed out waiting for Docker restart production convergence': 'docker_restart_timeout',
+  'Docker installed image is not the actual official registry replacement': 'docker_image_failed',
+  'Docker logs exposed private traffic or credentials': 'docker_privacy_failed',
+  'Docker cleanup provenance check failed': 'docker_cleanup_failed',
   'timed out waiting for remote failed target activation': 'remote_failed_activation_timeout',
   'timed out waiting for remote automatic health failure restoration': 'remote_auto_restore_timeout',
   'remote failed target activation evidence invalid': 'remote_failed_activation_invalid',
@@ -227,6 +242,7 @@ export function checkSingBoxResults(input) { checkCases(input, singBoxNames) }
 export function checkGuardedSingBoxResults(input) { checkCases(input, guardedSingBoxNames) }
 export function checkLegacyUpgradeResults(input) { checkCases(input, legacyUpgradeNames) }
 export function checkRemoteUpgradeResults(input) { checkCases(input, remoteUpgradeNames) }
+export function checkDockerUpgradeResults(input) { checkCases(input, dockerUpgradeNames) }
 function checkCases(input, names) {
   const runs = new Map(), passes = new Map()
   let packagePasses = 0
@@ -248,8 +264,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   if (process.argv[2] === 'sanitize' && process.argv.length === 3) {
     process.stdout.write(sanitizeDestinationResults(readFileSync(0, 'utf8')))
   } else {
-    const checks = { check: checkDestinationResults, 'check-singbox': checkSingBoxResults, 'check-guarded-singbox': checkGuardedSingBoxResults, 'check-legacy-upgrade': checkLegacyUpgradeResults, 'check-remote-upgrade': checkRemoteUpgradeResults }
-    if (!Object.hasOwn(checks, process.argv[2]) || process.argv.length !== 4) throw new Error('Usage: destination-acceptance.mjs check|check-singbox|check-guarded-singbox|check-legacy-upgrade|check-remote-upgrade RESULTS')
+    const checks = { check: checkDestinationResults, 'check-singbox': checkSingBoxResults, 'check-guarded-singbox': checkGuardedSingBoxResults, 'check-legacy-upgrade': checkLegacyUpgradeResults, 'check-remote-upgrade': checkRemoteUpgradeResults, 'check-docker-upgrade': checkDockerUpgradeResults }
+    if (!Object.hasOwn(checks, process.argv[2]) || process.argv.length !== 4) throw new Error('Usage: destination-acceptance.mjs check|check-singbox|check-guarded-singbox|check-legacy-upgrade|check-remote-upgrade|check-docker-upgrade RESULTS')
     const check = checks[process.argv[2]]
     check(readFileSync(process.argv[3], 'utf8'))
     console.log('Every native destination acceptance case ran and passed')

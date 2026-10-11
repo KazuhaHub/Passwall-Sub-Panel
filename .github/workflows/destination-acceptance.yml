@@ -178,6 +178,83 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  published-docker:
+    name: production PSP policy + published Docker rollback (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: ubuntu-24.04, arch: amd64 }
+          - { runner: ubuntu-24.04-arm, arch: arm64 }
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        env:
+          GOTOOLCHAIN: auto
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Verify exact preferred compiler
+        run: |
+          set -eu
+          compiler=$(awk '$1 == "toolchain" { print $2 }' go.mod)
+          test "$(go env GOVERSION)" = "$compiler"
+          test "$(go tool compile -V | awk '{ print $3 }')" = "$compiler"
+          test "$(go env GOARCH)" = '${{ matrix.arch }}'
+          docker version
+          docker compose version
+      - uses: actions/checkout@v7
+        with:
+          repository: KazuhaHub/Passwall-Node
+          ref: 'c51d145ae0e2db47eb69a640fe8f751318370f59'
+          path: docker-node-candidate
+          persist-credentials: false
+      - name: Build immutable unpublished candidate using the production release recipe
+        working-directory: docker-node-candidate
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = 'c51d145ae0e2db47eb69a640fe8f751318370f59'
+          test -z "$(git status --porcelain)"
+          compiler=$(awk '$1 == "toolchain" { print $2 }' go.mod)
+          test "$(GOTOOLCHAIN="$compiler" go env GOVERSION)" = "$compiler"
+          test "$(GOTOOLCHAIN="$compiler" go tool compile -V | awk '{ print $3 }')" = "$compiler"
+          arch='${{ matrix.arch }}'
+          mkdir -p "bin/linux-$arch"
+          GOTOOLCHAIN="$compiler" CGO_ENABLED=0 go build -trimpath \
+            -ldflags '-X github.com/KazuhaHub/passwall-node/v4/internal/version.Version=4.0.1.9 -X github.com/KazuhaHub/passwall-node/v4/internal/version.Commit=c51d145' \
+            -o "bin/linux-$arch/passwall-node" ./cmd/node
+          metadata=$("bin/linux-$arch/passwall-node" --upgrade-info)
+          docker build --file Dockerfile.release --build-arg "TARGETARCH=$arch" \
+            --build-arg VERSION=4.0.1.9 \
+            --build-arg "STATE_SCHEMA=$(printf '%s' "$metadata" | jq -er .state_schema)" \
+            --build-arg "UPGRADE_CONTRACT=$(printf '%s' "$metadata" | jq -er .upgrade_contract)" \
+            --tag ghcr.io/kazuhahub/passwall-node:4.0.1.9 .
+      - name: Build production PSP Docker upgrade driver
+        run: |
+          set -euo pipefail
+          node --test deploy/destination_acceptance_test.mjs
+          go test -c -tags destination_acceptance -o "$RUNNER_TEMP/destination-acceptance.test" ./internal/app
+      - name: Generated production Compose, real policy and official image recovery
+        run: |
+          set -euo pipefail
+          sudo --preserve-env=GITHUB_ACTIONS,GITHUB_REPOSITORY,RUNNER_ENVIRONMENT \
+            env PSP_NATIVE_DOCKER_IMAGE=ghcr.io/kazuhahub/passwall-node:4.0.1.9 \
+            "$RUNNER_TEMP/destination-acceptance.test" -test.v=test2json -test.run '^TestNativePublishedDockerRollback$' -test.timeout 12m 2>&1 \
+            | go tool test2json -t -p github.com/KazuhaHub/passwall-sub-panel/internal/app \
+            | node deploy/destination-acceptance.mjs sanitize \
+            > "$RUNNER_TEMP/destination-docker-upgrade-tests.json"
+          node deploy/destination-acceptance.mjs check-docker-upgrade "$RUNNER_TEMP/destination-docker-upgrade-tests.json"
+      - name: Keep count-only Docker upgrade evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: native-published-docker-${{ matrix.arch }}-${{ github.sha }}
+          path: ${{ runner.temp }}/destination-docker-upgrade-tests.json
+          if-no-files-found: error
+          retention-days: 7
+
   legacy-upgrade:
     name: real PSP upgrade and rollback + mixed fleet + Node rollback
     runs-on: ubuntu-24.04

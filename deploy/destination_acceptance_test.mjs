@@ -24,6 +24,23 @@ test('published remote rollback requires the real watcher, helper and complete e
   for (const value of [acceptance.remoteNodeCandidate.commit, 'PSP_NATIVE_REMOTE_SOURCE', 'PSP_NATIVE_REMOTE_NODE_BIN', 'check-remote-upgrade', 'TestNativePublishedRemoteRollback', 'TestNativeRemoteHealthFaultPreservesOtherRequests']) assert(job.includes(value), value)
 })
 
+test('published Docker rollback requires real policy, automatic recovery and both production architectures', async () => {
+  const acceptance = await import('./destination-acceptance.mjs')
+  assert.equal(typeof acceptance.checkDockerUpgradeResults, 'function')
+  const pkg = 'github.com/KazuhaHub/passwall-sub-panel/internal/app'
+  const names = ['TestNativePublishedDockerRollback', ...['candidate_policy', 'health_failure_restore', 'published_rollback', 'restart_recovery', 'idempotent_replay'].map(name => `TestNativePublishedDockerRollback/${name}`)]
+  const events = [...names.flatMap(Test => [{ Action: 'run', Package: pkg, Test }, { Action: 'pass', Package: pkg, Test }]), { Action: 'pass', Package: pkg }]
+  assert.doesNotThrow(() => acceptance.checkDockerUpgradeResults(sanitizeDestinationResults(encode(events))))
+  assert.throws(() => acceptance.checkRemoteUpgradeResults(encode(events)))
+  for (const name of names) {
+    assert.throws(() => acceptance.checkDockerUpgradeResults(encode(events.filter(event => event.Test !== name))))
+    assert.throws(() => acceptance.checkDockerUpgradeResults(encode(events.map(event => event.Test === name && event.Action === 'pass' ? { ...event, Action: 'skip' } : event))))
+  }
+  const workflow = readFileSync(new URL('../.github/workflows/destination-acceptance.yml', import.meta.url), 'utf8')
+  const job = workflow.slice(workflow.indexOf('  published-docker:'), workflow.indexOf('  legacy-upgrade:'))
+  for (const required of [acceptance.remoteNodeCandidate.commit, 'ubuntu-24.04', 'ubuntu-24.04-arm', 'Dockerfile.release', 'PSP_NATIVE_DOCKER_IMAGE', 'TestNativePublishedDockerRollback', 'check-docker-upgrade', 'native-published-docker-${{ matrix.arch }}']) assert(job.includes(required), required)
+})
+
 test('remote restoration diagnostics retain only fixed booleans', () => {
   for (const suffix of ['task_terminal', 'receipt_failed', 'receipt_activated', 'source_installed', 'seen', 'identity', 'capability', 'streams', 'policy', 'report', 'core', 'listener', 'journal_readable', 'journal_failed', 'journal_running', 'journal_delivered', 'quarantined', 'failed_result_posted', 'failed_result_accepted', 'failed_result_rejected', 'outbox_pending', 'outbox_valid', 'fresh_after_restore', 'sync_validation_error', 'sync_outbox_error', 'sync_observer_error', 'sync_duplicate_issue', 'sync_stream_error', 'sync_process_error']) {
     const category = `remote_restore_${suffix}`
