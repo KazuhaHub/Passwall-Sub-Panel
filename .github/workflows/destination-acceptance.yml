@@ -203,7 +203,7 @@ jobs:
         run: |
           set -euo pipefail
           node --test deploy/destination_acceptance_test.mjs
-          go test -count=1 ./internal/app -run '^TestNative(DatabaseConfigurationIsClosedAndPreservesOwnedDirectories|DatabaseCountQueryKeepsParametersSeparate|FaultMutationRequiresNewPublicationAndExactReceipt|PrunedFallbackUsesGenerationAndBodyCausality)$'
+          go test -v -count=1 ./internal/app -run '^TestNative(DatabaseConfigurationIsClosedAndPreservesOwnedDirectories|DatabaseCountQueryKeepsParametersSeparate|StatusCandidateRequiresEveryOriginalComparison|FaultMutationRequiresNewPublicationAndExactReceipt|PrunedFallbackUsesGenerationAndBodyCausality)$'
           go test -c -tags destination_acceptance -o "$RUNNER_TEMP/destination-acceptance.test" ./internal/app
       - name: Real SQL-backed policy traffic and ingestion across all complete scenarios
         run: |

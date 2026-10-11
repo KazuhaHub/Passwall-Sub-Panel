@@ -58,6 +58,18 @@ test('Docker recovery diagnostics retain fixed categories without task or creden
   assert.equal(sanitizeDestinationResults(encode([{ Action: 'output', Package: pkg, Test, Output: 'private task receipt credential address' }])), '\n')
 })
 
+test('status candidate diagnostics retain only fixed comparison facts', () => {
+  const facts = ['rows', 'panel', 'kind', 'reason', 'exhausted', 'rules', 'pending', 'applied_at', 'state', 'paused', 'generation',
+    'is_applied', 'is_sniffing', 'is_paused', 'is_pending', 'is_offline', 'is_none', 'is_rejected', 'is_over_limit']
+  for (const fact of facts) for (const value of ['true', 'false']) {
+    const event = JSON.parse(sanitizeDestinationResults(encode([{ Action: 'output', Output: `native diagnostic: status_${fact}=${value}\n` }])))
+    assert.deepEqual(event, { Action: 'output', Package: 'github.com/KazuhaHub/passwall-sub-panel/internal/app', Diagnostic: `status_${fact}`, Observed: value === 'true' })
+  }
+  for (const output of ['native diagnostic: status_secret=true\n', 'native diagnostic: status_state=private-receipt\n', 'native diagnostic: status_rules=123\n']) {
+    assert.equal(sanitizeDestinationResults(encode([{ Action: 'output', Output: output }])), '\n')
+  }
+})
+
 test('remote restoration diagnostics retain only fixed booleans', () => {
   for (const suffix of ['task_terminal', 'receipt_failed', 'receipt_activated', 'source_installed', 'seen', 'identity', 'capability', 'streams', 'policy', 'report', 'core', 'listener', 'journal_readable', 'journal_failed', 'journal_running', 'journal_delivered', 'quarantined', 'failed_result_posted', 'failed_result_accepted', 'failed_result_rejected', 'outbox_pending', 'outbox_valid', 'fresh_after_restore', 'sync_validation_error', 'sync_outbox_error', 'sync_observer_error', 'sync_duplicate_issue', 'sync_stream_error', 'sync_process_error']) {
     const category = `remote_restore_${suffix}`

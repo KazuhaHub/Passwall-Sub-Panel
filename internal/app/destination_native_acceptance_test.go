@@ -304,18 +304,10 @@ func TestNativeDestinationTraffic(t *testing.T) {
 		}
 		var status destpolicy.DestinationStatus
 		request("GET", "dest/status", nil, 200, &status)
-		if len(status.Nodes) != 1 {
-			caseTest.Fatal("status API did not expose the exact native node")
-		}
-		n := status.Nodes[0]
-		wantState := "applied"
-		if r.FallbackReason == "sniffing" {
-			wantState = "sniffing"
-		}
-		if r.MintedKind == domain.DestCandidatePaused {
-			wantState = "paused"
-		}
-		if n.PanelID != f.agent.PanelID || n.MintedKind != r.MintedKind || n.FallbackReason != r.FallbackReason || n.FallbackExhausted != r.FallbackExhausted || n.AppliedRules != wantRules || n.PendingSince != nil || n.AppliedAt == nil || n.State != wantState || status.Paused != (r.MintedKind == domain.DestCandidatePaused) {
+		if matches, facts := nativeStatusCandidateMatches(*r, status, f.agent.PanelID, wantRules); !matches {
+			for _, fact := range facts {
+				caseTest.Logf("native diagnostic: status_%s=%t", fact.name, fact.pass)
+			}
 			caseTest.Fatal("status API disagreed with the currently acknowledged candidate")
 		}
 		if portSource > 0 {
