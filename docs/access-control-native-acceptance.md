@@ -11,6 +11,8 @@ This is a reviewed development candidate, not a published stable release. Its
 own preferred Go compiler is checked separately from PSP's preferred compiler.
 No local module replacement is used. The daemon installs and runs each exact
 Xray version: `26.6.27`, `26.7.28`, and `26.9.9`.
+The isolated fixture explicitly acknowledges the reviewed restricted `26.9.9`
+selection; the production catalog gate remains enforced.
 
 Every matrix job must execute all nine ordered cases: empty policy, watch,
 block, pause/resume, anonymous allowlist trial, enforce, supplemental entry,
@@ -42,4 +44,6 @@ does not replace full service installation/reinstall acceptance, SQL matrix
 tests, sing-box acceptance, fallback/rejection scenarios, load testing, the
 complete UI approval matrix, or staged release verification.
 
-Execution evidence is pending until all three jobs pass on the exact PR head.
+Use the workflow run and PR validation record for execution evidence. All three
+jobs must pass on the exact current PR head; an earlier or partial matrix does
+not satisfy this gate.

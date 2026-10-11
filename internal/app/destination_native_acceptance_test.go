@@ -54,7 +54,9 @@ func TestNativeDestinationTraffic(t *testing.T) {
 	nativeMust(t, a.settings.Save(t.Context(), settings), "save live cadence")
 	// Provisioning uses the same reviewed catalog check as ordinary native nodes.
 	if version != f.agent.DesiredCoreVersion {
-		nativeMust(t, a.repos.NodeAgent.UpdateCoreSelection(t.Context(), f.agent.AgentID, domain.NodeCoreXray, version, false), "select reviewed core")
+		// The reviewed 26.9.9 row requires explicit acknowledgement even for
+		// this plain VLESS listener. Never weaken the production catalog gate.
+		nativeMust(t, a.repos.NodeAgent.UpdateCoreSelection(t.Context(), f.agent.AgentID, domain.NodeCoreXray, version, version == "26.9.9"), "select reviewed core")
 	}
 	inbound, api := nativePort(t), nativePort(t)
 	f.node.DesiredPort, f.node.ObservedPort = inbound, inbound
