@@ -1,13 +1,99 @@
 package app
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 
 	"github.com/KazuhaHub/passwall-protocol/protocol"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/destpolicy"
 )
+
+// EligiblePanelIDs is internal (json:"-"). The public group detail exposes
+// counts and individual exclusions; require this panel's capability exclusion
+// to appear/disappear while the other panels' coverage stays unchanged.
+func nativeAllowlistCoverageMatches(original, current destpolicy.GroupAccessDetail, panelID int64, capable bool) bool {
+	if panelID <= 0 || original.Mode != "allowlist" || original.Stage != "enforce" || original.EligibleNodes < 1 || original.TotalNodes != original.EligibleNodes+len(original.Ineligible) || current.Mode != original.Mode || current.Stage != original.Stage || current.TotalNodes != original.TotalNodes {
+		return false
+	}
+	expected := make(map[int64]string, len(original.Ineligible)+1)
+	for _, node := range original.Ineligible {
+		if node.PanelID <= 0 || node.PanelID == panelID || expected[node.PanelID] != "" || node.Reason == "" {
+			return false
+		}
+		expected[node.PanelID] = node.Reason
+	}
+	eligible := original.EligibleNodes
+	if !capable {
+		expected[panelID] = "capability"
+		eligible--
+	}
+	if current.EligibleNodes != eligible || len(current.Ineligible) != len(expected) {
+		return false
+	}
+	for _, node := range current.Ineligible {
+		if node.Reason == "" || expected[node.PanelID] != node.Reason {
+			return false
+		}
+		delete(expected, node.PanelID)
+	}
+	return len(expected) == 0
+}
+
+func TestNativeAllowlistCoverageUsesPublicHTTPFields(t *testing.T) {
+	original := destpolicy.GroupAccessDetail{GroupAccessSummary: destpolicy.GroupAccessSummary{Mode: "allowlist", Stage: "enforce", GroupNodeCoverage: destpolicy.GroupNodeCoverage{TotalNodes: 3, EligibleNodes: 2, Ineligible: []destpolicy.GroupIneligibleNode{{PanelID: 15, Reason: "xui"}}, EligiblePanelIDs: []int64{11, 13}}}}
+	data, err := json.Marshal(original)
+	if err != nil {
+		t.Fatal("encode public group detail")
+	}
+	var baseline destpolicy.GroupAccessDetail
+	if json.Unmarshal(data, &baseline) != nil || len(baseline.EligiblePanelIDs) != 0 {
+		t.Fatal("group detail did not retain its public JSON contract")
+	}
+	for _, capable := range []bool{false, true} {
+		scenarios := []string{"valid", "wrong-count", "wrong-panel", "wrong-reason", "lost-peer", "wrong-stage", "changed-total", "duplicate-panel"}
+		if !capable {
+			scenarios = append(scenarios, "peer-excluded-instead")
+		}
+		for _, scenario := range scenarios {
+			name := "removed/"
+			if capable {
+				name = "restored/"
+			}
+			t.Run(name+scenario, func(t *testing.T) {
+				current := baseline
+				current.Ineligible = append([]destpolicy.GroupIneligibleNode{}, baseline.Ineligible...)
+				if !capable {
+					current.EligibleNodes--
+					current.Ineligible = append(current.Ineligible, destpolicy.GroupIneligibleNode{PanelID: 11, Reason: "capability"})
+				}
+				switch scenario {
+				case "wrong-count":
+					current.EligibleNodes++
+				case "wrong-panel":
+					current.Ineligible[0].PanelID = 14
+				case "wrong-reason":
+					current.Ineligible[0].Reason = "capability"
+				case "lost-peer":
+					current.Ineligible = current.Ineligible[1:]
+				case "wrong-stage":
+					current.Stage = "trial"
+				case "changed-total":
+					current.TotalNodes++
+				case "duplicate-panel":
+					current.Ineligible = append(current.Ineligible, current.Ineligible[0])
+				case "peer-excluded-instead":
+					current.Ineligible[1].PanelID = 13
+				}
+				if got := nativeAllowlistCoverageMatches(baseline, current, 11, capable); got != (scenario == "valid") {
+					t.Fatalf("public coverage readiness=%t", got)
+				}
+			})
+		}
+	}
+}
 
 // Empty attachment sets retire access while retaining the stable SQL and
 // native roster identity that owns cumulative counters. Require the same

@@ -48,7 +48,18 @@ func nativeLegacyAllowlistCapabilityTransitions(t *testing.T, f nativeLegacyTran
 	if originalClient == nil || originalClient.UUID != user.UUID {
 		t.Fatal("allowlist capability fixture has no original stable client")
 	}
-	_, controlAddress, controlPort, controlNonce, _ := nativeTarget(t)
+	unblockedTarget := func() (string, int, string) {
+		for range 8 {
+			_, address, port, nonce, _ := nativeTarget(t)
+			if port != f.targetPort {
+				return address, port, nonce
+			}
+		}
+		t.Fatal("independent capability target overlaps original port rule")
+		return "", 0, ""
+	}
+	controlAddress, controlPort, controlNonce := unblockedTarget()
+	unlistedAddress, unlistedPort, unlistedNonce := unblockedTarget()
 	t.Cleanup(f.stop)
 	request := func(test *testing.T, method, path string, body any, want int, result any) {
 		test.Helper()
@@ -68,7 +79,7 @@ func nativeLegacyAllowlistCapabilityTransitions(t *testing.T, f nativeLegacyTran
 			nativeMust(test, json.NewDecoder(response.Body).Decode(result), "decode capability admin response")
 		}
 	}
-	traffic := func(test *testing.T, controlAllowed bool) {
+	traffic := func(test *testing.T, controlAllowed, unlistedAllowed bool) {
 		test.Helper()
 		for _, target := range []struct {
 			address string
@@ -76,7 +87,8 @@ func nativeLegacyAllowlistCapabilityTransitions(t *testing.T, f nativeLegacyTran
 			nonce   string
 			allow   bool
 		}{
-			{controlAddress, controlPort, controlNonce, controlAllowed}, {f.targetAddress, f.targetPort, f.nonce, false}, {controlAddress, controlPort, controlNonce, controlAllowed},
+			{controlAddress, controlPort, controlNonce, controlAllowed}, {f.targetAddress, f.targetPort, f.nonce, false},
+			{unlistedAddress, unlistedPort, unlistedNonce, unlistedAllowed}, {controlAddress, controlPort, controlNonce, controlAllowed},
 		} {
 			ctx, cancel := context.WithTimeout(test.Context(), 5*time.Second)
 			err := nativeVLESSHost(ctx, f.inbound, target.address, target.port, user.UUID, target.nonce, "capability.example.test")
@@ -86,7 +98,7 @@ func nativeLegacyAllowlistCapabilityTransitions(t *testing.T, f nativeLegacyTran
 			}
 		}
 	}
-	wait := func(test *testing.T, sequence uint64, after time.Time, capable bool) {
+	wait := func(test *testing.T, sequence uint64, after time.Time, capable, enforced bool) {
 		test.Helper()
 		facts := map[string]bool{}
 		defer func() {
@@ -135,6 +147,29 @@ func nativeLegacyAllowlistCapabilityTransitions(t *testing.T, f nativeLegacyTran
 			}
 			policy, err := f.app.repos.DestAgentPolicy.Get(test.Context(), f.agentID, false)
 			facts["policy_receipt"] = err == nil && policy != nil && policy.MintedKind == domain.DestCandidateDesired && policy.MintedGeneration == state.PublishedGeneration && policy.MintedSHA256 != "" && policy.MintedSHA256 == s.PolicyReportDigest && policy.ReportedState == "applied" && policy.ReportedSHA256 == policy.MintedSHA256 && policy.AppliedSHA256 == policy.MintedSHA256 && !policy.FallbackExhausted
+			if !facts["policy_receipt"] {
+				return false
+			}
+			var body *protocol.DestinationPolicy
+			if json.Unmarshal(policy.MintedBody, &body) != nil || body == nil {
+				return false
+			}
+			action := protocol.RuleObserve
+			if enforced {
+				action = protocol.RuleBlock
+			}
+			// A surviving global port rule cannot stand in for the group's
+			// actual trial or deny-all rule scoped to this original account.
+			groupMatches := 0
+			for _, rule := range body.Rules {
+				if rule.ID == fmt.Sprintf("g%d", groupID) && rule.Action == action && rule.CatchAll && len(rule.Subjects) == 1 && rule.Subjects[0] == protocol.NewSubjectKey(user.ID) {
+					groupMatches++
+				}
+			}
+			facts["policy_body"] = facts["policy_body"] && groupMatches == 1
+			if !facts["policy_body"] {
+				return false
+			}
 			return facts["policy_receipt"]
 		})
 	}
@@ -145,16 +180,18 @@ func nativeLegacyAllowlistCapabilityTransitions(t *testing.T, f nativeLegacyTran
 		request(test, "PUT", path, map[string]any{"mode": "allowlist", "stage": "trial", "list_ids": []int64{}, "updated_at": int64(0), "base_hosts": []string{}}, 200, &mode)
 		request(test, "POST", fmt.Sprintf("dest/lists/%d/entries", mode.ExtraListID), map[string]any{"add": []string{controlAddress + "/128"}}, 200, nil)
 		request(test, "POST", "dest/publish", nil, 200, nil)
-		wait(test, sequence, after, true)
-		traffic(test, true)
+		wait(test, sequence, after, true, false)
+		traffic(test, true, true)
 		sequence, after = f.probe.snapshot().Sequence, time.Now().UTC()
 		request(test, "PUT", path, map[string]any{"mode": "allowlist", "stage": "enforce", "list_ids": []int64{}, "updated_at": mode.UpdatedAt}, 200, &mode)
 		request(test, "POST", "dest/publish", nil, 200, nil)
-		wait(test, sequence, after, true)
-		traffic(test, true)
+		wait(test, sequence, after, true, true)
+		traffic(test, true, false)
 	}) {
 		return
 	}
+	var originalCoverage destpolicy.GroupAccessDetail
+	request(t, "GET", fmt.Sprintf("dest/groups/%d", groupID), nil, 200, &originalCoverage)
 	for _, step := range []struct {
 		name, binary string
 		capable      bool
@@ -164,11 +201,11 @@ func nativeLegacyAllowlistCapabilityTransitions(t *testing.T, f nativeLegacyTran
 		if !t.Run(step.name, func(test *testing.T) {
 			sequence, after := f.probe.snapshot().Sequence, time.Now().UTC()
 			cmd := f.replace(step.binary)
-			wait(test, sequence, after, step.capable)
+			wait(test, sequence, after, step.capable, true)
 			// A live core plus complete streams distinguishes account removal
 			// from an unavailable daemon when the old binary loses capability.
 			live := nativeBindLiveCore(test, cmd.Process.Pid, f.dataDir, "xray")
-			traffic(test, step.capable)
+			traffic(test, step.capable, false)
 			live()
 			currentAgent, err := f.app.repos.NodeAgent.GetByAgentID(test.Context(), f.agentID)
 			nativeMust(test, err, "read capability transition identity")
@@ -181,11 +218,7 @@ func nativeLegacyAllowlistCapabilityTransitions(t *testing.T, f nativeLegacyTran
 			}
 			var detail destpolicy.GroupAccessDetail
 			request(test, "GET", fmt.Sprintf("dest/groups/%d", groupID), nil, 200, &detail)
-			eligible := false
-			for _, panelID := range detail.EligiblePanelIDs {
-				eligible = eligible || panelID == f.panelID
-			}
-			if detail.Mode != "allowlist" || detail.Stage != "enforce" || eligible != step.capable {
+			if !nativeAllowlistCoverageMatches(originalCoverage, detail, f.panelID, step.capable) {
 				test.Fatal("allowlist capability coverage borrowed a peer eligibility")
 			}
 		}) {
