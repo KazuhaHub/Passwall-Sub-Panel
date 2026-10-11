@@ -1,0 +1,103 @@
+name: Native destination traffic acceptance
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'internal/app/**'
+      - 'internal/service/dest*/**'
+      - 'internal/service/nodesync/**'
+      - 'internal/adapters/sqlstore/dest*'
+      - 'deploy/destination*'
+      - '.github/workflows/destination-acceptance.yml'
+      - 'go.mod'
+      - 'go.sum'
+  push:
+    branches: [main]
+    paths:
+      - 'internal/app/**'
+      - 'internal/service/dest*/**'
+      - 'internal/service/nodesync/**'
+      - 'internal/adapters/sqlstore/dest*'
+      - 'deploy/destination*'
+      - '.github/workflows/destination-acceptance.yml'
+      - 'go.mod'
+      - 'go.sum'
+
+permissions:
+  contents: read
+
+env:
+  GOWORK: 'off'
+  GOTOOLCHAIN: 'local'
+
+concurrency:
+  group: native-destination-${{ github.event_name }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  traffic:
+    name: real PSP + candidate Node + Xray ${{ matrix.core }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        core: ['26.6.27', '26.7.28', '26.9.9']
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        env:
+          GOTOOLCHAIN: auto
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Verify exact preferred compiler
+        run: |
+          set -eu
+          build_toolchain=$(awk '$1 == "toolchain" { print $2 }' go.mod)
+          test -n "$build_toolchain"
+          test "$(go env GOVERSION)" = "$build_toolchain"
+          test "$(go tool compile -V | awk '{ print $3 }')" = "$build_toolchain"
+      - uses: actions/checkout@v7
+        with:
+          repository: KazuhaHub/Passwall-Node
+          ref: 63c60f6d5e8cd093bbaa8385f5b514dbe2f40390
+          path: node-candidate
+          persist-credentials: false
+      - name: Build immutable Node candidate with its own preferred compiler
+        run: |
+          set -euo pipefail
+          test "$(git -C node-candidate rev-parse HEAD)" = 63c60f6d5e8cd093bbaa8385f5b514dbe2f40390
+          test -z "$(git -C node-candidate status --porcelain)"
+          cd node-candidate
+          node_toolchain=$(awk '$1 == "toolchain" { print $2 }' go.mod)
+          test -n "$node_toolchain"
+          test "$(GOTOOLCHAIN="$node_toolchain" go env GOVERSION)" = "$node_toolchain"
+          test "$(GOTOOLCHAIN="$node_toolchain" go tool compile -V | awk '{ print $3 }')" = "$node_toolchain"
+          GOTOOLCHAIN="$node_toolchain" CGO_ENABLED=0 go build -o "$RUNNER_TEMP/destination-node" ./cmd/node
+      - name: Build production PSP acceptance driver
+        run: |
+          set -euo pipefail
+          node --test deploy/destination_acceptance_test.mjs
+          go test -c -tags destination_acceptance -o "$RUNNER_TEMP/destination-acceptance.test" ./internal/app
+      # Only the hosted ephemeral VM receives one run-owned documentation /128.
+      # Neither host trust stores nor the production core's private guard change.
+      - name: Real TLS sync, policy traffic, private ingestion and collection controls
+        run: |
+          set -euo pipefail
+          sudo --preserve-env=GITHUB_ACTIONS,GITHUB_REPOSITORY,RUNNER_ENVIRONMENT \
+            env PSP_NATIVE_NODE_BIN="$RUNNER_TEMP/destination-node" PSP_NATIVE_CORE_VERSION='${{ matrix.core }}' \
+            "$RUNNER_TEMP/destination-acceptance.test" -test.v=test2json -test.run '^TestNativeDestinationTraffic$' -test.timeout 15m 2>&1 \
+            | go tool test2json -t -p github.com/KazuhaHub/passwall-sub-panel/internal/app \
+            | node deploy/destination-acceptance.mjs sanitize \
+            > "$RUNNER_TEMP/destination-acceptance-tests.json"
+          node deploy/destination-acceptance.mjs check "$RUNNER_TEMP/destination-acceptance-tests.json"
+      - name: Keep count-only execution evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: native-destination-xray-${{ matrix.core }}-${{ github.sha }}
+          path: ${{ runner.temp }}/destination-acceptance-tests.json
+          if-no-files-found: error
+          retention-days: 7
