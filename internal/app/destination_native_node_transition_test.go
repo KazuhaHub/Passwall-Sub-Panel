@@ -64,6 +64,38 @@ func nativeLegacyNodeTransitions(t *testing.T, f nativeLegacyTransitionFixture) 
 			after := time.Now().UTC()
 			sequence := f.probe.snapshot().Sequence
 			cmd := f.replace(step.executable)
+			defer func() {
+				if !test.Failed() {
+					return
+				}
+				s := f.probe.snapshot()
+				for _, fact := range []struct {
+					name  string
+					value bool
+				}{
+					{"sequence", s.Sequence >= sequence+3}, {"capability", s.PolicyCapable == step.capable}, {"policy", s.PolicyPresent == step.capable},
+					{"core", s.CoreState == "running" && s.CoreEngine == "xray" && s.CoreVersion == "26.6.27"}, {"listener", s.ListenerApplied},
+					{"config", s.HaveConfig.ETag == s.Config.ETag && s.HaveConfig.Applied == s.Config.Version},
+					{"roster", s.HaveRoster.ETag == s.Roster.ETag && s.HaveRoster.Applied == s.Roster.Version},
+					{"version", step.capable || s.AgentVersion == "v4.0.1.8"},
+					{"original_etags", step.capable || s.Config.ETag == f.originalConfigETag && s.Roster.ETag == f.originalRosterETag},
+				} {
+					test.Logf("native diagnostic: node_transition_%s=%t", fact.name, fact.value)
+				}
+				agent, err := f.app.repos.NodeAgent.GetByAgentID(t.Context(), f.agentID)
+				fresh := err == nil && agent.LastSeen != nil && agent.LastSeen.After(after) && slicesContainsNative(agent.ObservedCapabilities, protocol.CapabilityDestinationPolicy) == step.capable
+				test.Logf("native diagnostic: node_transition_agent_fresh=%t", fresh)
+				streams := err == nil
+				if streams {
+					for _, name := range []domain.NodeAgentStreamName{domain.NodeAgentStreamConfig, domain.NodeAgentStreamRoster} {
+						stream, err := f.app.repos.NodeAgent.GetStream(t.Context(), f.agentID, name)
+						streams = streams && err == nil && stream.Converged() && stream.AppliedEpoch == agent.Epoch
+					}
+				}
+				test.Logf("native diagnostic: node_transition_streams=%t", streams)
+				policy, err := f.app.repos.DestAgentPolicy.Get(t.Context(), f.agentID, false)
+				test.Logf("native diagnostic: node_transition_minted_empty=%t", err == nil && policy != nil && policy.MintedKind == domain.DestCandidateEmpty && policy.MintedSHA256 == "")
+			}()
 			nativeWait(test, 120*time.Second, "original node binary transition", func() bool {
 				s := f.probe.snapshot()
 				if s.Sequence < sequence+3 || s.PolicyCapable != step.capable || s.PolicyPresent != step.capable || s.CoreState != "running" || s.CoreEngine != "xray" || s.CoreVersion != "26.6.27" || !s.ListenerApplied || s.HaveConfig.ETag != s.Config.ETag || s.HaveConfig.Applied != s.Config.Version || s.HaveRoster.ETag != s.Roster.ETag || s.HaveRoster.Applied != s.Roster.Version {

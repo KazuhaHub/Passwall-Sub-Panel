@@ -28,6 +28,16 @@ function events() {
   return [...names.flatMap(Test => [{ Action: 'run', Package: pkg, Test }, { Action: 'pass', Package: pkg, Test }]), { Action: 'pass', Package: pkg }]
 }
 const encode = values => values.map(value => JSON.stringify(value)).join('\n')
+test('node transition diagnostics retain only fixed booleans without private state', () => {
+  for (const fact of ['sequence', 'capability', 'policy', 'core', 'listener', 'config', 'roster', 'version', 'original_etags', 'agent_fresh', 'streams', 'minted_empty']) {
+    for (const value of ['true', 'false']) {
+      const result = JSON.parse(sanitizeDestinationResults(encode([{ Action: 'output', Output: `native diagnostic: node_transition_${fact}=${value}\n` }])))
+      assert.equal(result.Diagnostic, `node_transition_${fact}`)
+      assert.equal(result.Observed, value === 'true')
+    }
+  }
+  for (const text of ['credential=secret', 'config=private', 'address=true']) assert.equal(sanitizeDestinationResults(encode([{ Action: 'output', Output: `native diagnostic: node_transition_${text}\n` }])), '\n')
+})
 test('Xray separately requires actual LKG and pruned-candidate rejection', () => {
   for (const name of ['lkg_rejected', 'pruned_rejected']) {
     assert(destinationCases.includes(name))
