@@ -771,6 +771,11 @@ func TestNativeDestinationTraffic(t *testing.T) {
 		publish()
 		waitFault(domain.DestCandidateFallback, false)
 		verifyCandidate(1, portLKG, policy.ID)
+		issues, total, err := a.repos.NodeAgentIssue.List(caseTest.Context(), ports.NodeAgentIssueFilter{AgentID: f.agent.AgentID, Code: "destination_policy_sniffing_insufficient"})
+		nativeMust(caseTest, err, "read actual sniffing prerequisite issue")
+		if total == 0 || len(issues) == 0 {
+			caseTest.Fatal("sniffing precheck did not persist its operator issue")
+		}
 		traffic(false)
 	})
 	run("fallback_pause", func() {

@@ -12,6 +12,7 @@ const singBoxNames = ['TestNativeSingBoxDestinationTraffic', ...singBoxCases.map
 const guardedSingBoxNames = ['TestNativeGuardedSingBoxDestinationTraffic', ...guardedSingBoxCases.map(name => `TestNativeGuardedSingBoxDestinationTraffic/${name}`)]
 const names = [...xrayNames, ...singBoxNames, ...guardedSingBoxNames]
 const diagnostics = Object.freeze({
+  'sniffing precheck did not persist its operator issue': 'sniffing_issue_missing',
   'timed out waiting for reviewed core switch': 'fallback_core_switch_timeout',
   'mapped-prefix LKG was not actually confirmed by sing-box': 'fallback_original_unconfirmed',
   'fallback rejection fixture did not distinguish pruning from desired': 'fallback_rejection_fixture_invalid',
