@@ -114,6 +114,69 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  published-remote:
+    name: production PSP policy + published Node rollback via systemd watcher
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        env:
+          GOTOOLCHAIN: auto
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Verify exact preferred compiler
+        run: |
+          set -eu
+          build_toolchain=$(awk '$1 == "toolchain" { print $2 }' go.mod)
+          test -n "$build_toolchain"
+          test "$(go env GOVERSION)" = "$build_toolchain"
+          test "$(go tool compile -V | awk '{ print $3 }')" = "$build_toolchain"
+      - uses: actions/checkout@v7
+        with:
+          repository: KazuhaHub/Passwall-Node
+          ref: '63c60f6d5e8cd093bbaa8385f5b514dbe2f40390'
+          path: remote-node-candidate
+          persist-credentials: false
+      - name: Build immutable candidate with explicit unpublished identity
+        working-directory: remote-node-candidate
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = '63c60f6d5e8cd093bbaa8385f5b514dbe2f40390'
+          test -z "$(git status --porcelain)"
+          compiler=$(awk '$1 == "toolchain" { print $2 }' go.mod)
+          test -n "$compiler"
+          test "$(GOTOOLCHAIN="$compiler" go env GOVERSION)" = "$compiler"
+          test "$(GOTOOLCHAIN="$compiler" go tool compile -V | awk '{ print $3 }')" = "$compiler"
+          GOTOOLCHAIN="$compiler" CGO_ENABLED=0 go build -trimpath \
+            -ldflags '-X github.com/KazuhaHub/passwall-node/v4/internal/version.Version=4.0.1.9 -X github.com/KazuhaHub/passwall-node/v4/internal/version.Commit=63c60f6' \
+            -o "$RUNNER_TEMP/destination-remote-node" ./cmd/node
+      - name: Build production PSP remote upgrade driver
+        run: |
+          set -euo pipefail
+          node --test deploy/destination_acceptance_test.mjs
+          go test -c -tags destination_acceptance -o "$RUNNER_TEMP/destination-acceptance.test" ./internal/app
+      - name: Normal admin task, real watcher, official signed archive and production recovery
+        run: |
+          set -euo pipefail
+          sudo --preserve-env=GITHUB_ACTIONS,GITHUB_REPOSITORY,RUNNER_ENVIRONMENT \
+            env PSP_NATIVE_REMOTE_NODE_BIN="$RUNNER_TEMP/destination-remote-node" \
+            PSP_NATIVE_REMOTE_SOURCE="$GITHUB_WORKSPACE/remote-node-candidate" \
+            "$RUNNER_TEMP/destination-acceptance.test" -test.v=test2json -test.run '^TestNativePublishedRemoteRollback$' -test.timeout 12m 2>&1 \
+            | go tool test2json -t -p github.com/KazuhaHub/passwall-sub-panel/internal/app \
+            | node deploy/destination-acceptance.mjs sanitize \
+            > "$RUNNER_TEMP/destination-remote-upgrade-tests.json"
+          node deploy/destination-acceptance.mjs check-remote-upgrade "$RUNNER_TEMP/destination-remote-upgrade-tests.json"
+      - name: Keep count-only remote upgrade evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: native-published-remote-${{ github.sha }}
+          path: ${{ runner.temp }}/destination-remote-upgrade-tests.json
+          if-no-files-found: error
+          retention-days: 7
+
   legacy-upgrade:
     name: real PSP upgrade and rollback + mixed fleet + Node rollback
     runs-on: ubuntu-24.04

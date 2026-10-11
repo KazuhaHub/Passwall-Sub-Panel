@@ -11,8 +11,24 @@ const xrayNames = ['TestNativeDestinationTraffic', ...destinationCases.map(name 
 const singBoxNames = ['TestNativeSingBoxDestinationTraffic', ...singBoxCases.map(name => `TestNativeSingBoxDestinationTraffic/${name}`)]
 const guardedSingBoxNames = ['TestNativeGuardedSingBoxDestinationTraffic', ...guardedSingBoxCases.map(name => `TestNativeGuardedSingBoxDestinationTraffic/${name}`)]
 const legacyUpgradeNames = ['TestNativeLegacyPSPUpgrade', ...['old_panel', 'panel_upgrade', 'legacy_publication', 'mixed_fleet', 'mixed_offline_pause', 'node_upgrade', 'node_downgrade', 'node_reupgrade', 'panel_downgrade_offline', 'panel_downgrade', 'panel_reupgrade', 'allowlist_capability_setup', 'allowlist_capability_removed', 'allowlist_capability_restored'].map(name => `TestNativeLegacyPSPUpgrade/${name}`)]
-const names = [...xrayNames, ...singBoxNames, ...guardedSingBoxNames, ...legacyUpgradeNames]
+export const remoteUpgradeCases = Object.freeze(['candidate_policy', 'published_rollback', 'restart_recovery', 'idempotent_replay'])
+const remoteUpgradeNames = ['TestNativePublishedRemoteRollback', ...remoteUpgradeCases.map(name => `TestNativePublishedRemoteRollback/${name}`)]
+const names = [...xrayNames, ...singBoxNames, ...guardedSingBoxNames, ...legacyUpgradeNames, ...remoteUpgradeNames]
 const diagnostics = Object.freeze({
+  'timed out waiting for remote candidate nonempty policy': 'remote_candidate_timeout',
+  'timed out waiting for published remote helper completion': 'remote_helper_timeout',
+  'timed out waiting for published remote rollback convergence': 'remote_convergence_timeout',
+  'published remote helper task failed': 'remote_task_failed',
+  'remote public status did not confirm the actual published target': 'remote_status_failed',
+  'remote rollback replaced private identity': 'remote_identity_failed',
+  'published helper receipt is not the completed authorized task': 'remote_receipt_failed',
+  'remote target readiness did not bind the current activation': 'remote_ready_failed',
+  'remote target did not durably recover and acknowledge the original execution': 'remote_recovery_failed',
+  'remote restart changed the immutable completed execution': 'remote_restart_failed',
+  'remote completed task replay executed the helper again': 'remote_replay_failed',
+  'remote withdrawal lost policy history': 'remote_history_failed',
+  'private remote traffic escaped into journal': 'remote_privacy_failed',
+  'remote cleanup provenance check failed': 'remote_cleanup_failed',
   'timed out waiting for native scoped policy application': 'scope_policy_timeout',
   'timed out waiting for native scoped hit ingestion': 'scope_hits_timeout',
   'timed out waiting for native exemption clock expiry': 'scope_expiry_timeout',
@@ -194,6 +210,7 @@ export function checkDestinationResults(input) { checkCases(input, xrayNames) }
 export function checkSingBoxResults(input) { checkCases(input, singBoxNames) }
 export function checkGuardedSingBoxResults(input) { checkCases(input, guardedSingBoxNames) }
 export function checkLegacyUpgradeResults(input) { checkCases(input, legacyUpgradeNames) }
+export function checkRemoteUpgradeResults(input) { checkCases(input, remoteUpgradeNames) }
 function checkCases(input, names) {
   const runs = new Map(), passes = new Map()
   let packagePasses = 0
@@ -215,8 +232,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   if (process.argv[2] === 'sanitize' && process.argv.length === 3) {
     process.stdout.write(sanitizeDestinationResults(readFileSync(0, 'utf8')))
   } else {
-    const checks = { check: checkDestinationResults, 'check-singbox': checkSingBoxResults, 'check-guarded-singbox': checkGuardedSingBoxResults, 'check-legacy-upgrade': checkLegacyUpgradeResults }
-    if (!Object.hasOwn(checks, process.argv[2]) || process.argv.length !== 4) throw new Error('Usage: destination-acceptance.mjs check|check-singbox|check-guarded-singbox|check-legacy-upgrade RESULTS')
+    const checks = { check: checkDestinationResults, 'check-singbox': checkSingBoxResults, 'check-guarded-singbox': checkGuardedSingBoxResults, 'check-legacy-upgrade': checkLegacyUpgradeResults, 'check-remote-upgrade': checkRemoteUpgradeResults }
+    if (!Object.hasOwn(checks, process.argv[2]) || process.argv.length !== 4) throw new Error('Usage: destination-acceptance.mjs check|check-singbox|check-guarded-singbox|check-legacy-upgrade|check-remote-upgrade RESULTS')
     const check = checks[process.argv[2]]
     check(readFileSync(process.argv[3], 'utf8'))
     console.log('Every native destination acceptance case ran and passed')

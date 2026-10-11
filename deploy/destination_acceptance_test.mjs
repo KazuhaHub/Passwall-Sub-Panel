@@ -3,6 +3,24 @@ import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
 import { checkDestinationResults, sanitizeDestinationResults, nodeCandidate, destinationCases } from './destination-acceptance.mjs'
 
+test('published remote rollback requires the real watcher, helper and complete execution evidence', async () => {
+  const acceptance = await import('./destination-acceptance.mjs')
+  assert.equal(typeof acceptance.checkRemoteUpgradeResults, 'function')
+  const pkg = 'github.com/KazuhaHub/passwall-sub-panel/internal/app'
+  const names = ['TestNativePublishedRemoteRollback', ...['candidate_policy', 'published_rollback', 'restart_recovery', 'idempotent_replay'].map(name => `TestNativePublishedRemoteRollback/${name}`)]
+  const values = [...names.flatMap(Test => [{ Action: 'run', Package: pkg, Test }, { Action: 'pass', Package: pkg, Test }]), { Action: 'pass', Package: pkg }]
+  const evidence = sanitizeDestinationResults(encode(values))
+  assert.doesNotThrow(() => acceptance.checkRemoteUpgradeResults(evidence))
+  assert.throws(() => acceptance.checkLegacyUpgradeResults(evidence))
+  for (const name of names) {
+    assert.throws(() => acceptance.checkRemoteUpgradeResults(encode(values.filter(event => event.Test !== name))))
+    assert.throws(() => acceptance.checkRemoteUpgradeResults(encode(values.map(event => event.Test === name && event.Action === 'pass' ? { ...event, Action: 'skip' } : event))))
+  }
+  const workflow = readFileSync(new URL('../.github/workflows/destination-acceptance.yml', import.meta.url), 'utf8')
+  const job = workflow.slice(workflow.indexOf('  published-remote:'))
+  for (const value of [nodeCandidate.commit, 'PSP_NATIVE_REMOTE_SOURCE', 'PSP_NATIVE_REMOTE_NODE_BIN', 'check-remote-upgrade', 'TestNativePublishedRemoteRollback']) assert(job.includes(value), value)
+})
+
 test('all real cores require scoped users, exemption expiry and allow priority', async () => {
   const acceptance = await import('./destination-acceptance.mjs')
   const required = ['group_scope', 'exemption', 'exemption_expired', 'allow_priority']
