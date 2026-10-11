@@ -5,7 +5,6 @@ package app
 import (
 	"bytes"
 	"context"
-	"database/sql"
 	"encoding/json"
 	"encoding/pem"
 	"net"
@@ -40,7 +39,7 @@ func TestNativeLegacyPSPUpgrade(t *testing.T) {
 		}
 	}
 	dir := t.TempDir()
-	cfg := config.Config{Listen: "127.0.0.1:0", JWTSecret: strings.Repeat("j", 48), EncryptionKey: strings.Repeat("e", 48), ConfigDir: filepath.Join(dir, "panel-config"), DataDir: filepath.Join(dir, "panel-data")}
+	cfg := nativeDestinationFixtureConfig(t, config.Config{Listen: "127.0.0.1:0", JWTSecret: strings.Repeat("j", 48), EncryptionKey: strings.Repeat("e", 48), ConfigDir: filepath.Join(dir, "panel-config"), DataDir: filepath.Join(dir, "panel-data")})
 	encoded, err := json.Marshal(cfg)
 	nativeMust(t, err, "encode owned legacy config")
 	configPath := filepath.Join(dir, "legacy-config.json")
@@ -103,16 +102,7 @@ func TestNativeLegacyPSPUpgrade(t *testing.T) {
 	}
 	// The old Build owns the fresh schema. Check before any candidate Build can
 	// migrate it, rather than seeding new tables and calling that an upgrade.
-	db, err := sql.Open("sqlite", "file:"+filepath.Join(cfg.DataDir, "panel.db")+"?mode=ro")
-	nativeMust(t, err, "open legacy schema read-only")
-	var destinationTables int
-	err = db.QueryRowContext(t.Context(), "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name GLOB 'dest_*'").Scan(&destinationTables)
-	closeErr := db.Close()
-	nativeMust(t, err, "read actual pre-upgrade schema")
-	nativeMust(t, closeErr, "close read-only legacy schema")
-	if destinationTables != 0 {
-		t.Fatal("legacy database already contained destination schema")
-	}
+	nativeVerifyLegacyDestinationSchema(t, cfg)
 	upstream, err := url.Parse("http://" + ready.Address)
 	nativeMust(t, err, "create loopback legacy handler")
 	gateway := &nativePanelGateway{}
@@ -175,6 +165,7 @@ func TestNativeLegacyPSPUpgrade(t *testing.T) {
 		upgradedAfter := time.Now().UTC()
 		current, err = Build(t.Context(), &cfg)
 		nativeMust(test, err, "migrate original released database")
+		nativeVerifyDestinationDatabase(test, current)
 		gateway.replace(current.server.Handler)
 		assertUnchanged(test, 3)
 		nativeWait(test, 30*time.Second, "fresh legacy report on upgraded panel", func() bool {
@@ -246,7 +237,7 @@ func TestNativeLegacyPSPUpgrade(t *testing.T) {
 		return
 	}
 	nativeLegacyPanelTransitions(t, nativeLegacyPanelFixture{
-		app: current, probe: probe, gateway: gateway, dataDir: nodeDir, panelDB: filepath.Join(cfg.DataDir, "panel.db"),
+		app: current, cfg: cfg, probe: probe, gateway: gateway, dataDir: nodeDir, panelDB: filepath.Join(cfg.DataDir, "panel.db"),
 		agentID: ready.AgentID, panelID: ready.PanelID, userID: ready.UserID, parent: node.Process.Pid,
 		inbound: inbound, targetAddress: address, targetPort: targetPort, nonce: nonce, originalConfig: beforeConfig,
 		adminURL: server.URL, adminToken: adminToken, adminClient: server.Client(),
@@ -284,6 +275,7 @@ func TestNativeLegacyPSPUpgrade(t *testing.T) {
 		startCandidate: func(test *testing.T) *App {
 			current, err = Build(t.Context(), &cfg)
 			nativeMust(test, err, "reopen original downgraded panel database")
+			nativeVerifyDestinationDatabase(test, current)
 			return current
 		},
 	})

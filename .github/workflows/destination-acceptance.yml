@@ -9,6 +9,7 @@ on:
       - 'internal/service/nodesync/**'
       - 'internal/adapters/sqlstore/dest*'
       - 'deploy/destination*'
+      - 'deploy/native-legacy-panel-bridge.go.txt'
       - '.github/workflows/destination-acceptance.yml'
       - 'go.mod'
       - 'go.sum'
@@ -20,6 +21,7 @@ on:
       - 'internal/service/nodesync/**'
       - 'internal/adapters/sqlstore/dest*'
       - 'deploy/destination*'
+      - 'deploy/native-legacy-panel-bridge.go.txt'
       - '.github/workflows/destination-acceptance.yml'
       - 'go.mod'
       - 'go.sum'
@@ -374,9 +376,42 @@ jobs:
           retention-days: 7
 
   legacy-upgrade:
-    name: real PSP upgrade and rollback + mixed fleet + Node rollback
+    name: real PSP upgrade and rollback + mixed fleet + Node rollback (${{ matrix.database }}, ${{ matrix.candidate }})
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        database: [sqlite, mysql, postgres]
+        candidate: [baseline, module]
+    services:
+      mysql:
+        image: ${{ matrix.database == 'mysql' && 'mysql:8' || '' }}
+        env:
+          MYSQL_ROOT_PASSWORD: fixture-native-root-password
+          MYSQL_DATABASE: psp_native_acceptance
+          MYSQL_USER: psp
+          MYSQL_PASSWORD: fixture-native-database-password
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -uroot -pfixture-native-root-password"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 30
+      postgres:
+        image: ${{ matrix.database == 'postgres' && 'postgres:16' || '' }}
+        env:
+          POSTGRES_USER: psp
+          POSTGRES_PASSWORD: fixture-native-database-password
+          POSTGRES_DB: psp_native_acceptance
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U psp -d psp_native_acceptance"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
@@ -407,7 +442,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           repository: KazuhaHub/Passwall-Node
-          ref: '63c60f6d5e8cd093bbaa8385f5b514dbe2f40390'
+          ref: ${{ matrix.candidate == 'module' && 'cef54ddba3ee96f9794aaacdc6ac1ed89cc318f9' || '63c60f6d5e8cd093bbaa8385f5b514dbe2f40390' }}
           path: mixed-node
           persist-credentials: false
       - name: Build released sources with their own preferred compilers
@@ -415,7 +450,7 @@ jobs:
           set -euo pipefail
           test "$(git -C legacy-panel rev-parse HEAD)" = '0ae05e1e40170c030acd23cdf637310b740b50a6'
           test "$(git -C legacy-node rev-parse HEAD)" = '8e5e3db72219a8db9081a372722abb1529d22ecd'
-          test "$(git -C mixed-node rev-parse HEAD)" = '63c60f6d5e8cd093bbaa8385f5b514dbe2f40390'
+          test "$(git -C mixed-node rev-parse HEAD)" = '${{ matrix.candidate == 'module' && 'cef54ddba3ee96f9794aaacdc6ac1ed89cc318f9' || '63c60f6d5e8cd093bbaa8385f5b514dbe2f40390' }}'
           test -z "$(git -C legacy-panel status --porcelain)"
           test -z "$(git -C legacy-node status --porcelain)"
           test -z "$(git -C mixed-node status --porcelain)"
@@ -444,12 +479,14 @@ jobs:
         run: |
           set -euo pipefail
           node --test deploy/destination_acceptance_test.mjs
+          go test -v -count=1 ./internal/app -run '^TestNativeSnapshotIdentifiersRejectForeignTablesAndSQLSyntax$'
           go test -c -tags destination_acceptance -o "$RUNNER_TEMP/destination-acceptance.test" ./internal/app
       - name: Verify PSP migration and rollback, isolated mixed fleet, and in-place Node rollback
         run: |
           set -euo pipefail
           sudo --preserve-env=GITHUB_ACTIONS,GITHUB_REPOSITORY,RUNNER_ENVIRONMENT \
-            env PSP_NATIVE_LEGACY_PANEL_BIN="$RUNNER_TEMP/destination-legacy-panel.test" \
+            env PSP_NATIVE_DB_KIND='${{ matrix.database }}' \
+            PSP_NATIVE_LEGACY_PANEL_BIN="$RUNNER_TEMP/destination-legacy-panel.test" \
             PSP_NATIVE_LEGACY_NODE_BIN="$RUNNER_TEMP/destination-legacy-node" \
             PSP_NATIVE_MIXED_NODE_BIN="$RUNNER_TEMP/destination-mixed-node" \
             "$RUNNER_TEMP/destination-acceptance.test" -test.v=test2json -test.run '^TestNativeLegacyPSPUpgrade$' -test.timeout 12m 2>&1 \
@@ -457,17 +494,25 @@ jobs:
             | node deploy/destination-acceptance.mjs sanitize \
             > "$RUNNER_TEMP/destination-legacy-upgrade-tests.json"
           node deploy/destination-acceptance.mjs check-legacy-upgrade "$RUNNER_TEMP/destination-legacy-upgrade-tests.json"
+      - name: Prove server snapshots detect changed rows and schema without retaining mutations
+        if: matrix.database != 'sqlite'
+        run: |
+          set -euo pipefail
+          sudo --preserve-env=GITHUB_ACTIONS,GITHUB_REPOSITORY,RUNNER_ENVIRONMENT \
+            env PSP_NATIVE_DB_KIND='${{ matrix.database }}' \
+            "$RUNNER_TEMP/destination-acceptance.test" -test.v \
+            -test.run '^TestNativeServerDestinationSnapshotDetectsChangedDataAndSchema$' -test.timeout 2m
       - name: Keep sanitized legacy upgrade execution evidence
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: native-legacy-upgrade-${{ github.sha }}
+          name: native-legacy-upgrade${{ matrix.candidate == 'module' && format('-module-{0}', matrix.database) || (matrix.database != 'sqlite' && format('-sql-{0}', matrix.database) || '') }}-${{ github.sha }}
           path: ${{ runner.temp }}/destination-legacy-upgrade-tests.json
           if-no-files-found: error
           retention-days: 7
 
   complete-matrix:
-    name: complete native matrix (25 reports / 611 cases)
+    name: complete native matrix (30 reports / 681 cases)
     needs: [traffic, traffic-sql, published-remote, published-docker, legacy-upgrade]
     if: always()
     runs-on: ubuntu-24.04

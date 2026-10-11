@@ -17,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/KazuhaHub/passwall-sub-panel/internal/config"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/destpolicy"
 	"golang.org/x/sys/unix"
@@ -24,6 +25,7 @@ import (
 
 type nativeLegacyPanelFixture struct {
 	app                         *App
+	cfg                         config.Config
 	probe                       *nativeLegacyProbe
 	gateway                     *nativePanelGateway
 	dataDir, panelDB, agentID   string
@@ -59,8 +61,7 @@ func nativeLegacyPanelTransitions(t *testing.T, f nativeLegacyPanelFixture) {
 	if policy == nil || policy.MintedKind != domain.DestCandidateDesired || policy.MintedSHA256 == "" || policy.AppliedSHA256 != policy.MintedSHA256 || policy.AppliedRuleCount != 1 {
 		t.Fatal("panel rollback requires a published executing policy")
 	}
-	panelFile, err := os.Stat(f.panelDB)
-	nativeMust(t, err, "bind original panel database")
+	verifyPanelDatabase := nativeBindLegacyPanelDatabase(t, f)
 	nodeFile, err := os.Stat(filepath.Join(f.dataDir, "state.db"))
 	nativeMust(t, err, "bind panel rollback node database")
 	configPath := filepath.Join(f.dataDir, "runtime", "xray", "current.json")
@@ -93,7 +94,7 @@ func nativeLegacyPanelTransitions(t *testing.T, f nativeLegacyPanelFixture) {
 	if !t.Run("panel_downgrade_offline", func(test *testing.T) {
 		f.gateway.partitionSync(partition)
 		f.stopCandidate(test)
-		preserved = nativePanelDestinationSnapshot(test, f.panelDB)
+		preserved = nativeLegacyPanelDestinationSnapshot(test, f)
 		if len(preserved) != 12 {
 			test.Fatal("panel rollback did not bind the complete destination schema")
 		}
@@ -102,7 +103,7 @@ func nativeLegacyPanelTransitions(t *testing.T, f nativeLegacyPanelFixture) {
 		live()
 		artifact, err := os.ReadFile(configPath)
 		nativeMust(test, err, "read offline panel rollback artifact")
-		if !bytes.Equal(artifact, confirmed) || !reflect.DeepEqual(preserved, nativePanelDestinationSnapshot(test, f.panelDB)) {
+		if !bytes.Equal(artifact, confirmed) || !reflect.DeepEqual(preserved, nativeLegacyPanelDestinationSnapshot(test, f)) {
 			test.Fatal("offline panel downgrade changed its live artifact or destination data")
 		}
 		traffic(test, false)
@@ -128,7 +129,7 @@ func nativeLegacyPanelTransitions(t *testing.T, f nativeLegacyPanelFixture) {
 		traffic(test, true)
 		newLive := nativeBindLiveCore(t, f.parent, f.dataDir, "xray")
 		newLive()
-		if !reflect.DeepEqual(preserved, nativePanelDestinationSnapshot(test, f.panelDB)) {
+		if !reflect.DeepEqual(preserved, nativeLegacyPanelDestinationSnapshot(test, f)) {
 			test.Fatal("released panel modified destination tables or data")
 		}
 		// Retain duration/count evidence only, not a private node identifier.
@@ -139,14 +140,14 @@ func nativeLegacyPanelTransitions(t *testing.T, f nativeLegacyPanelFixture) {
 	t.Run("panel_reupgrade", func(test *testing.T) {
 		oldExited := nativePanelHoldCoreExit(test, f.parent, f.dataDir)
 		f.stopLegacy(test)
-		if !reflect.DeepEqual(preserved, nativePanelDestinationSnapshot(test, f.panelDB)) {
+		if !reflect.DeepEqual(preserved, nativeLegacyPanelDestinationSnapshot(test, f)) {
 			test.Fatal("released panel modified destination tables or data")
 		}
 		after := time.Now().UTC()
 		sequence := f.probe.snapshot().Sequence
 		defer nativePanelTransitionDiagnostics(test, f.probe, sequence, policy.MintedSHA256, oldExited)
 		a := f.startCandidate(test)
-		restored := nativePanelDestinationSnapshot(test, f.panelDB)
+		restored := nativeLegacyPanelDestinationSnapshot(test, f)
 		for _, table := range []string{"dest_lists", "dest_policies", "dest_exemptions", "dest_group_modes", "dest_policy_snapshots"} {
 			if restored[table] != preserved[table] {
 				test.Fatal("PSP reupgrade lost the published policy state")
@@ -177,11 +178,10 @@ func nativeLegacyPanelTransitions(t *testing.T, f nativeLegacyPanelFixture) {
 		nativeMust(test, err, "read reupgraded agent identity")
 		user, err := a.repos.User.GetByID(test.Context(), f.userID)
 		nativeMust(test, err, "read reupgraded principal")
-		panelNow, err := os.Stat(f.panelDB)
-		nativeMust(test, err, "read reupgraded panel database")
+		verifyPanelDatabase(test)
 		nodeNow, err := os.Stat(filepath.Join(f.dataDir, "state.db"))
 		nativeMust(test, err, "read reupgraded node database")
-		if !os.SameFile(panelFile, panelNow) || !os.SameFile(nodeFile, nodeNow) || agent.Epoch != originalAgent.Epoch || agent.CredentialSHA256 != originalAgent.CredentialSHA256 || user.UUID != originalUser.UUID {
+		if !os.SameFile(nodeFile, nodeNow) || agent.Epoch != originalAgent.Epoch || agent.CredentialSHA256 != originalAgent.CredentialSHA256 || user.UUID != originalUser.UUID {
 			test.Fatal("panel transition replaced an original database or identity")
 		}
 		r, err := http.NewRequestWithContext(test.Context(), "GET", f.adminURL+"/api/admin/dest/status", nil)

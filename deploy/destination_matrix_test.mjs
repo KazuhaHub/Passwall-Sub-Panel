@@ -8,9 +8,9 @@ test('complete matrix gate rejects missing reports, mixed commits and unsafe eve
   const { destinationMatrixReports, checkDestinationMatrix } = await import('./destination-matrix.mjs')
   const source = await import('./destination-acceptance.mjs')
   const reports = destinationMatrixReports()
-  assert.equal(reports.length, 25)
-  assert.equal(new Set(reports.map(report => report.name)).size, 25)
-  assert.equal(reports.reduce((total, report) => total + report.cases.length, 0), 611)
+  assert.equal(reports.length, 30)
+  assert.equal(new Set(reports.map(report => report.name)).size, 30)
+  assert.equal(reports.reduce((total, report) => total + report.cases.length, 0), 681)
   const root = mkdtempSync(join(tmpdir(), 'psp-matrix-gate-'))
   const merge = 'a'.repeat(40)
   const packageName = 'github.com/KazuhaHub/passwall-sub-panel/internal/app'
@@ -23,7 +23,7 @@ test('complete matrix gate rejects missing reports, mixed commits and unsafe eve
       events.push({ Action: 'pass', Package: packageName })
       writeFileSync(join(folder, report.file), events.map(event => JSON.stringify(event)).join('\n') + '\n')
     }
-    assert.deepEqual(checkDestinationMatrix(root, merge), { reports: 25, cases: 611 })
+    assert.deepEqual(checkDestinationMatrix(root, merge), { reports: 30, cases: 681 })
     const first = reports[0]
     const path = join(root, `${first.name}-${merge}`, first.file)
     const original = readFileSync(path, 'utf8')
@@ -49,7 +49,7 @@ test('complete matrix gate rejects missing reports, mixed commits and unsafe eve
       { Diagnostic: 'panel_downgrade_application_ms', Observed: 150000 },
     ].map(event => JSON.stringify({ Action: 'output', Package: packageName, ...event })).join('\n') + '\n'
     writeFileSync(path, original + diagnostics)
-    assert.deepEqual(checkDestinationMatrix(root, merge), { reports: 25, cases: 611 })
+    assert.deepEqual(checkDestinationMatrix(root, merge), { reports: 30, cases: 681 })
     writeFileSync(path, original)
     assert.throws(() => checkDestinationMatrix(root, 'b'.repeat(40)))
     assert.throws(() => checkDestinationMatrix(root, '../foreign'))
@@ -73,5 +73,27 @@ test('workflow aggregate gate requires every producer and exact merge identity',
     'needs.published-docker.result', 'needs.legacy-upgrade.result', 'actions/download-artifact@v8',
     'pattern: native-*', 'destination-matrix.mjs', 'node --test deploy/destination_matrix_test.mjs', '${{ github.sha }}',
   ]) assert(job.includes(required), required)
+  assert(!job.includes('continue-on-error'))
+})
+
+test('legacy SQL cohorts retain the complete upgrade, mixed fleet and rollback stages', async () => {
+  const { destinationMatrixReports } = await import('./destination-matrix.mjs')
+  const { legacyUpgradeCases } = await import('./destination-acceptance.mjs')
+  const reports = destinationMatrixReports()
+  for (const name of ['native-legacy-upgrade', 'native-legacy-upgrade-sql-mysql', 'native-legacy-upgrade-sql-postgres']) {
+    const report = reports.find(report => report.name === name)
+    assert(report, name)
+    assert.deepEqual(report.cases, legacyUpgradeCases)
+    assert.equal(report.cases.length, 14)
+  }
+  for (const database of ['sqlite', 'mysql', 'postgres']) {
+    const report = reports.find(report => report.name === `native-legacy-upgrade-module-${database}`)
+    assert(report, `module/${database}`)
+    assert.deepEqual(report.cases, legacyUpgradeCases)
+  }
+  const workflow = readFileSync(new URL('../.github/workflows/destination-acceptance.yml', import.meta.url), 'utf8')
+  const job = workflow.slice(workflow.indexOf('  legacy-upgrade:'), workflow.indexOf('  complete-matrix:'))
+  assert.equal(workflow.split("      - 'deploy/native-legacy-panel-bridge.go.txt'").length - 1, 2)
+  for (const required of ['database: [sqlite, mysql, postgres]', 'candidate: [baseline, module]', 'cef54ddba3ee96f9794aaacdc6ac1ed89cc318f9', "matrix.database == 'mysql'", "matrix.database == 'postgres'", 'PSP_NATIVE_DB_KIND', 'TestNativeServerDestinationSnapshotDetectsChangedDataAndSchema', 'check-legacy-upgrade']) assert(job.includes(required), required)
   assert(!job.includes('continue-on-error'))
 })

@@ -23,6 +23,8 @@ export function destinationMatrixReports() {
     add(`native-destination-sql-${database}-sing-box-1.14.0`, 'TestNativeGuardedSingBoxDestinationTraffic', acceptance.guardedSingBoxCases, acceptance.checkGuardedSingBoxResults)
   }
   add('native-legacy-upgrade', 'TestNativeLegacyPSPUpgrade', acceptance.legacyUpgradeCases, acceptance.checkLegacyUpgradeResults, 'destination-legacy-upgrade-tests.json')
+  for (const database of ['mysql', 'postgres']) add(`native-legacy-upgrade-sql-${database}`, 'TestNativeLegacyPSPUpgrade', acceptance.legacyUpgradeCases, acceptance.checkLegacyUpgradeResults, 'destination-legacy-upgrade-tests.json')
+  for (const database of ['sqlite', 'mysql', 'postgres']) add(`native-legacy-upgrade-module-${database}`, 'TestNativeLegacyPSPUpgrade', acceptance.legacyUpgradeCases, acceptance.checkLegacyUpgradeResults, 'destination-legacy-upgrade-tests.json')
   add('native-published-remote', 'TestNativePublishedRemoteRollback', acceptance.remoteUpgradeCases, acceptance.checkRemoteUpgradeResults, 'destination-remote-upgrade-tests.json')
   for (const architecture of ['amd64', 'arm64']) add(`native-published-docker-${architecture}`, 'TestNativePublishedDockerRollback', acceptance.remoteUpgradeCases, acceptance.checkDockerUpgradeResults, 'destination-docker-upgrade-tests.json')
   return reports
@@ -60,7 +62,7 @@ export function checkDestinationMatrix(root, mergeSHA) {
     }
     cases += report.cases.length
   }
-  require(reports.length === 25 && cases === 611)
+  require(reports.length === 30 && cases === 681)
   return { reports: reports.length, cases }
 }
 
