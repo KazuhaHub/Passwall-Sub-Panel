@@ -48,30 +48,58 @@ func TestNativeLegacyPanelBridge(t *testing.T) {
 			t.Fatal("legacy fixture operation failed; detail withheld")
 		}
 	}
+	reuse := os.Getenv("PSP_NATIVE_LEGACY_REUSE")
+	if reuse != "" && reuse != "true" {
+		t.Fatal("invalid owned legacy restart mode")
+	}
 	digest := sha256.Sum256([]byte("fixture-native-legacy-credential-with-enough-entropy"))
 	agent := &domain.NodeAgent{AgentID: "agt_native_legacy_upgrade", Epoch: 1, CredentialSHA256: hex.EncodeToString(digest[:]), DesiredCoreEngine: domain.NodeCoreXray, DesiredCoreVersion: "26.6.27"}
 	panel := &domain.Panel{Name: "Native legacy upgrade", Kind: domain.PanelKindPSP, URL: "psp://" + agent.AgentID}
-	must(a.repos.NativeAgentProvisioning.Create(t.Context(), panel, agent))
-	must(a.xuiPool.Add(panel))
+	if reuse == "true" {
+		agent, err = a.repos.NodeAgent.GetByAgentID(t.Context(), agent.AgentID)
+		must(err)
+		panel, err = a.repos.XUIPanel.GetByID(t.Context(), agent.PanelID)
+		must(err)
+		if agent.Epoch != 1 || agent.CredentialSHA256 != hex.EncodeToString(digest[:]) || panel.Kind != domain.PanelKindPSP || panel.URL != "psp://"+agent.AgentID {
+			t.Fatal("legacy restart lost its owned agent identity")
+		}
+	} else {
+		must(a.repos.NativeAgentProvisioning.Create(t.Context(), panel, agent))
+		must(a.xuiPool.Add(panel))
+	}
 	port, err := net.LookupPort("tcp", os.Getenv("PSP_NATIVE_LEGACY_INBOUND"))
 	if err != nil || port < 1024 {
 		t.Fatal("invalid owned inbound")
 	}
 	node := &domain.Node{PanelID: panel.ID, InboundID: 1, DisplayName: "Native legacy", ServerAddress: "node.example.test", DesiredProtocol: "vless", DesiredPort: port, ObservedProtocol: "vless", ObservedPort: port, InboundListen: "127.0.0.1", InboundSettings: `{"decryption":"none"}`, StreamSettings: `{"network":"tcp","security":"none"}`, Sniffing: `{}`, Allocate: `{}`, Enabled: true, ConfigSyncState: domain.ConfigSyncPending}
-	must(a.repos.Node.Create(t.Context(), node))
-	group := &domain.Group{Slug: "native-legacy", Name: "Native legacy", TagFilter: domain.TagFilter{All: true}}
-	must(a.repos.Group.Create(t.Context(), group))
-	user := &domain.User{UPN: "legacy@example.test", Email: "legacy@example.test", SSOProvider: domain.SSOProviderLocal, SSOSubject: "legacy@example.test", Role: domain.RoleUser, Enabled: true, GroupID: group.ID, UUID: "11111111-1111-4111-8111-111111111111", SubToken: "fixture-native-legacy-sub-token"}
-	must(a.repos.User.Create(t.Context(), user))
-	client := &domain.PSPClient{UserID: user.ID, PanelID: panel.ID, Email: "legacy@psp.local", UUID: user.UUID, Password: "fixture-native-legacy-password"}
-	client.SetDesiredLifecycle(domain.UserLifecycle{Enable: true})
-	client.ID, err = a.repos.PSPClient.Create(t.Context(), client)
-	must(err)
-	must(a.repos.PSPClient.SetInbounds(t.Context(), client.ID, []domain.PSPClientInbound{{ClientID: client.ID, NodeID: node.ID, State: domain.ClientApplyPending}}))
-	settings, err := a.settings.Load(t.Context(), ports.UISettings{})
-	must(err)
-	settings.NodePollSeconds, settings.FullReportSeconds = 2, 0
-	must(a.settings.Save(t.Context(), settings))
+	var group *domain.Group
+	var user *domain.User
+	if reuse == "true" {
+		node, err = a.repos.Node.GetByPanelInbound(t.Context(), panel.ID, 1)
+		must(err)
+		group, err = a.repos.Group.GetBySlug(t.Context(), "native-legacy")
+		must(err)
+		user, err = a.repos.User.GetByUPN(t.Context(), "legacy@example.test")
+		must(err)
+		if node.DesiredPort != port || node.DesiredProtocol != "vless" || user.GroupID != group.ID || user.UUID != "11111111-1111-4111-8111-111111111111" {
+			t.Fatal("legacy restart lost its owned principal or listener")
+		}
+	} else {
+		must(a.repos.Node.Create(t.Context(), node))
+		group = &domain.Group{Slug: "native-legacy", Name: "Native legacy", TagFilter: domain.TagFilter{All: true}}
+		must(a.repos.Group.Create(t.Context(), group))
+		user = &domain.User{UPN: "legacy@example.test", Email: "legacy@example.test", SSOProvider: domain.SSOProviderLocal, SSOSubject: "legacy@example.test", Role: domain.RoleUser, Enabled: true, GroupID: group.ID, UUID: "11111111-1111-4111-8111-111111111111", SubToken: "fixture-native-legacy-sub-token"}
+		must(a.repos.User.Create(t.Context(), user))
+		client := &domain.PSPClient{UserID: user.ID, PanelID: panel.ID, Email: "legacy@psp.local", UUID: user.UUID, Password: "fixture-native-legacy-password"}
+		client.SetDesiredLifecycle(domain.UserLifecycle{Enable: true})
+		client.ID, err = a.repos.PSPClient.Create(t.Context(), client)
+		must(err)
+		must(a.repos.PSPClient.SetInbounds(t.Context(), client.ID, []domain.PSPClientInbound{{ClientID: client.ID, NodeID: node.ID, State: domain.ClientApplyPending}}))
+		settings, err := a.settings.Load(t.Context(), ports.UISettings{})
+		must(err)
+		settings.NodePollSeconds, settings.FullReportSeconds = 2, 0
+		must(a.settings.Save(t.Context(), settings))
+	}
 	listener, err := net.Listen("tcp", cfg.Listen)
 	must(err)
 	done := make(chan error, 1)
@@ -82,7 +110,11 @@ func TestNativeLegacyPanelBridge(t *testing.T) {
 		PanelID, NodeID, GroupID, UserID int64
 	}{listener.Addr().String(), agent.AgentID, panel.ID, node.ID, group.ID, user.ID})
 	must(err)
-	must(os.WriteFile(filepath.Join(filepath.Dir(path), "legacy-ready.json"), ready, 0600))
+	readyName := "legacy-ready.json"
+	if reuse == "true" {
+		readyName = "legacy-ready-reuse.json"
+	}
+	must(os.WriteFile(filepath.Join(filepath.Dir(path), readyName), ready, 0600))
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, syscall.SIGTERM, syscall.SIGINT)
 	defer signal.Stop(stop)

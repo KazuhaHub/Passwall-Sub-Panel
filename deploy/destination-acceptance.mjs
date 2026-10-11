@@ -10,9 +10,22 @@ export const guardedSingBoxCases = Object.freeze([...singBoxCases.filter(name =>
 const xrayNames = ['TestNativeDestinationTraffic', ...destinationCases.map(name => `TestNativeDestinationTraffic/${name}`)]
 const singBoxNames = ['TestNativeSingBoxDestinationTraffic', ...singBoxCases.map(name => `TestNativeSingBoxDestinationTraffic/${name}`)]
 const guardedSingBoxNames = ['TestNativeGuardedSingBoxDestinationTraffic', ...guardedSingBoxCases.map(name => `TestNativeGuardedSingBoxDestinationTraffic/${name}`)]
-const legacyUpgradeNames = ['TestNativeLegacyPSPUpgrade', ...['old_panel', 'panel_upgrade', 'legacy_publication', 'mixed_fleet', 'mixed_offline_pause', 'node_upgrade', 'node_downgrade', 'node_reupgrade'].map(name => `TestNativeLegacyPSPUpgrade/${name}`)]
+const legacyUpgradeNames = ['TestNativeLegacyPSPUpgrade', ...['old_panel', 'panel_upgrade', 'legacy_publication', 'mixed_fleet', 'mixed_offline_pause', 'node_upgrade', 'node_downgrade', 'node_reupgrade', 'panel_downgrade_offline', 'panel_downgrade', 'panel_reupgrade'].map(name => `TestNativeLegacyPSPUpgrade/${name}`)]
 const names = [...xrayNames, ...singBoxNames, ...guardedSingBoxNames, ...legacyUpgradeNames]
 const diagnostics = Object.freeze({
+  'timed out waiting for released panel restart ready': 'panel_restart_timeout',
+  'timed out waiting for panel downgrade offline attempts': 'panel_offline_timeout',
+  'timed out waiting for online PSP downgrade application': 'panel_downgrade_timeout',
+  'timed out waiting for PSP reupgrade current policy execution': 'panel_reupgrade_timeout',
+  'panel rollback requires a published executing policy': 'panel_original_unconfirmed',
+  'panel rollback did not bind the complete destination schema': 'panel_schema_incomplete',
+  'offline panel downgrade changed its live artifact or destination data': 'panel_offline_preservation_failed',
+  'online panel downgrade did not deploy the original policy-free artifact': 'panel_empty_artifact_failed',
+  'released panel modified destination tables or data': 'panel_destination_preservation_failed',
+  'PSP reupgrade lost the published policy state': 'panel_publication_lost',
+  'panel transition traffic did not match actual execution': 'panel_traffic_failed',
+  'panel transition replaced an original database or identity': 'panel_identity_changed',
+  'PSP reupgrade coverage did not confirm current execution': 'panel_coverage_failed',
   'timed out waiting for original node binary transition': 'node_transition_timeout',
   'original node transition traffic did not match execution': 'node_transition_traffic_failed',
   'node binary transition replaced its state database or changed schema': 'node_transition_state_invalid',
@@ -148,10 +161,12 @@ export function sanitizeDestinationResults(input) {
   return input.split(/\r?\n/).filter(line => line.trim()).map(line => {
     const event = parseEvent(line)
     if (event.Action === 'output') {
-      const category = typeof event.Output === 'string' && /native diagnostic: (download|checksum|timeout|rejected|unsupported|permission|bind|certificate|listener_issue|listener_core_rejected|listener_agent_fresh|listener_policy_ready|listener_policy_unchanged|listener_epoch|listener_config_changed|listener_config_preserved|listener_config_fresh|receipt_generation|receipt_mint_fresh|receipt_sync_fresh|receipt_state|receipt_sha|receipt_lkg|receipt_precheck|receipt_streams|receipt_transition|fallback_report|fallback_accepted|fallback_empty|fallback_exhausted|fallback_core|fallback_streams|fallback_issue|node_transition_sequence|node_transition_capability|node_transition_policy|node_transition_core|node_transition_listener|node_transition_config|node_transition_roster|node_transition_version|node_transition_original_etags|node_transition_agent_fresh|node_transition_streams|node_transition_minted_empty)=(true|false)(?:\r?\n|$)/.exec(event.Output)
+      const category = typeof event.Output === 'string' && /native diagnostic: (download|checksum|timeout|rejected|unsupported|permission|bind|certificate|listener_issue|listener_core_rejected|listener_agent_fresh|listener_policy_ready|listener_policy_unchanged|listener_epoch|listener_config_changed|listener_config_preserved|listener_config_fresh|receipt_generation|receipt_mint_fresh|receipt_sync_fresh|receipt_state|receipt_sha|receipt_lkg|receipt_precheck|receipt_streams|receipt_transition|fallback_report|fallback_accepted|fallback_empty|fallback_exhausted|fallback_core|fallback_streams|fallback_issue|node_transition_sequence|node_transition_capability|node_transition_policy|node_transition_core|node_transition_listener|node_transition_config|node_transition_roster|node_transition_version|node_transition_original_etags|node_transition_agent_fresh|node_transition_streams|node_transition_minted_empty|panel_streams|panel_capability|panel_config_known|panel_config_policy|panel_report_applied|panel_report_empty|panel_report_current|panel_original_core_exited)=(true|false)(?:\r?\n|$)/.exec(event.Output)
       if (category) return JSON.stringify({ Action: 'output', Package: pkg, Diagnostic: category[1], Observed: category[2] === 'true' })
       const sequence = typeof event.Output === 'string' && /native receipt wait: ([1-9][0-9]?)(?:\r?\n|$)/.exec(event.Output)
       if (sequence) return JSON.stringify({ Action: 'output', Package: pkg, Diagnostic: 'receipt_wait', Observed: Number(sequence[1]) })
+      const application = typeof event.Output === 'string' && /native panel application: (downgrade|reupgrade)=([0-9]{1,6})(?:\r?\n|$)/.exec(event.Output)
+      if (application && Number(application[2]) <= 150000) return JSON.stringify({ Action: 'output', Package: pkg, Diagnostic: `panel_${application[1]}_application_ms`, Observed: Number(application[2]) })
       const diagnostic = Object.entries(diagnostics).find(([message]) => typeof event.Output === 'string' && event.Output.includes(message))?.[1]
       return diagnostic ? JSON.stringify({ Action: 'output', Package: pkg, ...(names.includes(event.Test) ? { Test: event.Test } : {}), Diagnostic: diagnostic }) : ''
     }

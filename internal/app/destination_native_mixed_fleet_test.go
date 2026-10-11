@@ -35,6 +35,7 @@ type nativeMixedLegacyFixture struct {
 	nonce, adminToken, adminURL string
 	adminClient                 *http.Client
 	legacyUnchanged             func(*testing.T, uint64)
+	retainGateway               func(*nativePanelGateway)
 }
 
 func nativeMixedLegacyFleet(t *testing.T, f nativeMixedLegacyFixture) {
@@ -66,6 +67,9 @@ func nativeMixedLegacyFleet(t *testing.T, f nativeMixedLegacyFixture) {
 	// this gateway is partitioned; legacy-node sync continues on its own socket.
 	gateway := &nativePanelGateway{}
 	gateway.replace(a.server.Handler)
+	if f.retainGateway != nil {
+		f.retainGateway(gateway)
+	}
 	server := httptest.NewTLSServer(gateway)
 	t.Cleanup(server.Close)
 	ca, key := filepath.Join(f.dir, "mixed-ca.pem"), filepath.Join(f.dir, "mixed-credential")

@@ -17,6 +17,9 @@ type nativeLegacySnapshot struct {
 	Sequence                                         uint64
 	AgentVersion, CoreEngine, CoreVersion, CoreState string
 	PolicyCapable, PolicyPresent                     bool
+	PolicyReportPresent                              bool
+	PolicyReportState, PolicyReportDigest            string
+	ConfigBodyKnown, ConfigPolicy                    bool
 	HaveConfig, HaveRoster                           protocol.StreamState
 	Config                                           protocol.Segment[protocol.ConfigBody]
 	Roster                                           protocol.Segment[protocol.RosterBody]
@@ -89,6 +92,12 @@ func (p *nativeLegacyProbe) wrap(next http.Handler) http.Handler {
 			s.PolicyCapable = s.PolicyCapable || capability == protocol.CapabilityDestinationPolicy
 		}
 		s.PolicyPresent = report.PolicyStatus != nil || reply.Config.Body != nil && reply.Config.Body.Policy != nil
+		if report.PolicyStatus != nil {
+			s.PolicyReportPresent, s.PolicyReportState, s.PolicyReportDigest = true, report.PolicyStatus.State, report.PolicyStatus.Digest
+		}
+		if reply.Config.Body != nil {
+			s.ConfigBodyKnown, s.ConfigPolicy = true, reply.Config.Body.Policy != nil
+		}
 		for _, object := range report.Objects {
 			s.ListenerApplied = s.ListenerApplied || object.Stream == protocol.StreamConfig && object.Key == string(p.listener) && object.State == protocol.ObjectApplied
 		}
@@ -96,6 +105,9 @@ func (p *nativeLegacyProbe) wrap(next http.Handler) http.Handler {
 		s.Config = protocol.Segment[protocol.ConfigBody]{Version: reply.Config.Version, ETag: reply.Config.ETag, Unchanged: reply.Config.Unchanged}
 		s.Roster = protocol.Segment[protocol.RosterBody]{Version: reply.Roster.Version, ETag: reply.Roster.ETag, Unchanged: reply.Roster.Unchanged}
 		p.mu.Lock()
+		if reply.Config.Unchanged && reply.Config.Body == nil && reply.Config.ETag == p.latest.Config.ETag {
+			s.ConfigBodyKnown, s.ConfigPolicy = p.latest.ConfigBodyKnown, p.latest.ConfigPolicy
+		}
 		s.Sequence = p.latest.Sequence + 1
 		p.latest = s
 		p.mu.Unlock()
@@ -146,5 +158,26 @@ func TestNativeLegacyProbePreservesWireAndIgnoresRejectedOrOversizedSync(t *test
 				t.Fatal("legacy probe lost actual convergence or retained private bodies")
 			}
 		})
+	}
+}
+
+func TestNativeLegacyProbeTracksOnlyObservedConfigPolicyIdentity(t *testing.T) {
+	p := &nativeLegacyProbe{}
+	for _, tc := range []struct {
+		output        string
+		known, policy bool
+	}{
+		{`{"config":{"etag":"a","body":{"policy":{}}}}`, true, true},
+		{`{"config":{"etag":"a","unchanged":true}}`, true, true},
+		{`{"config":{"etag":"b","unchanged":true}}`, false, false},
+		{`{"config":{"etag":"b","body":{}}}`, true, false},
+		{`{"config":{"etag":"b","unchanged":true}}`, true, false},
+	} {
+		response := httptest.NewRecorder()
+		p.wrap(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, tc.output) })).ServeHTTP(response, httptest.NewRequest("POST", "/v1/node/sync", strings.NewReader(`{"policy_status":{"state":"applied","digest":""}}`)))
+		s := p.snapshot()
+		if s.ConfigBodyKnown != tc.known || s.ConfigPolicy != tc.policy || s.Config.Body != nil || !s.PolicyReportPresent || s.PolicyReportState != "applied" || s.PolicyReportDigest != "" {
+			t.Fatal("probe inferred policy from an unobserved configuration or lost the actual report")
+		}
 	}
 }

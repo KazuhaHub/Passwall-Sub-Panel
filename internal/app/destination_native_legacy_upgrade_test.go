@@ -222,7 +222,8 @@ func TestNativeLegacyPSPUpgrade(t *testing.T) {
 	}) {
 		return
 	}
-	nativeMixedLegacyFleet(t, nativeMixedLegacyFixture{app: current, dir: dir, legacyPanelID: ready.PanelID, userID: ready.UserID, targetAddress: address, targetPort: targetPort, nonce: nonce, adminToken: adminToken, adminURL: server.URL, adminClient: server.Client(), legacyUnchanged: assertUnchanged})
+	var mixedGateway *nativePanelGateway
+	nativeMixedLegacyFleet(t, nativeMixedLegacyFixture{app: current, dir: dir, legacyPanelID: ready.PanelID, userID: ready.UserID, targetAddress: address, targetPort: targetPort, nonce: nonce, adminToken: adminToken, adminURL: server.URL, adminClient: server.Client(), legacyUnchanged: assertUnchanged, retainGateway: func(g *nativePanelGateway) { mixedGateway = g }})
 	if t.Failed() {
 		return
 	}
@@ -239,5 +240,50 @@ func TestNativeLegacyPSPUpgrade(t *testing.T) {
 			return node
 		},
 		stop: func() { stop(&node, nodeDone) },
+	})
+	if t.Failed() {
+		return
+	}
+	nativeLegacyPanelTransitions(t, nativeLegacyPanelFixture{
+		app: current, probe: probe, gateway: gateway, dataDir: nodeDir, panelDB: filepath.Join(cfg.DataDir, "panel.db"),
+		agentID: ready.AgentID, panelID: ready.PanelID, userID: ready.UserID, parent: node.Process.Pid,
+		inbound: inbound, targetAddress: address, targetPort: targetPort, nonce: nonce, originalConfig: beforeConfig,
+		adminURL: server.URL, adminClient: server.Client(),
+		stopNode:   func() { stop(&node, nodeDone) },
+		resumePeer: mixedGateway.replace,
+		stopCandidate: func(test *testing.T) {
+			gateway.replace(nil)
+			mixedGateway.replace(nil)
+			ctx, cancel := context.WithTimeout(test.Context(), 10*time.Second)
+			defer cancel()
+			nativeMust(test, current.Shutdown(ctx), "drain candidate before PSP downgrade")
+			current = nil
+		},
+		startLegacy: func(test *testing.T) http.Handler {
+			legacy = exec.Command(bridge, "-test.run=^TestNativeLegacyPanelBridge$", "-test.timeout=15m")
+			legacy.Env = append(os.Environ(), "PSP_NATIVE_LEGACY_CONFIG="+configPath, "PSP_NATIVE_LEGACY_INBOUND="+strconv.Itoa(inbound), "PSP_NATIVE_LEGACY_REUSE=true")
+			legacyDone = start(legacy)
+			var restarted struct {
+				Address, AgentID                 string
+				PanelID, NodeID, GroupID, UserID int64
+			}
+			nativeWait(test, 60*time.Second, "released panel restart ready", func() bool {
+				data, err := os.ReadFile(filepath.Join(dir, "legacy-ready-reuse.json"))
+				return err == nil && json.Unmarshal(data, &restarted) == nil && restarted.AgentID == ready.AgentID && restarted.PanelID == ready.PanelID && restarted.NodeID == ready.NodeID && restarted.GroupID == ready.GroupID && restarted.UserID == ready.UserID
+			})
+			host, _, err := net.SplitHostPort(restarted.Address)
+			if err != nil || host != "127.0.0.1" {
+				test.Fatal("legacy restart escaped its owned listener")
+			}
+			upstream, err := url.Parse("http://" + restarted.Address)
+			nativeMust(test, err, "create restarted legacy handler")
+			return httputil.NewSingleHostReverseProxy(upstream)
+		},
+		stopLegacy: func(test *testing.T) { gateway.replace(nil); stop(&legacy, legacyDone) },
+		startCandidate: func(test *testing.T) *App {
+			current, err = Build(t.Context(), &cfg)
+			nativeMust(test, err, "reopen original downgraded panel database")
+			return current
+		},
 	})
 }

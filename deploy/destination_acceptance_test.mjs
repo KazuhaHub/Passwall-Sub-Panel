@@ -7,7 +7,7 @@ test('legacy upgrade has an independent complete real execution gate and immutab
   const acceptance = await import('./destination-acceptance.mjs')
   assert.equal(typeof acceptance.checkLegacyUpgradeResults, 'function')
   const pkg = 'github.com/KazuhaHub/passwall-sub-panel/internal/app'
-  const tests = ['TestNativeLegacyPSPUpgrade', ...['old_panel', 'panel_upgrade', 'legacy_publication', 'mixed_fleet', 'mixed_offline_pause', 'node_upgrade', 'node_downgrade', 'node_reupgrade'].map(name => `TestNativeLegacyPSPUpgrade/${name}`)]
+  const tests = ['TestNativeLegacyPSPUpgrade', ...['old_panel', 'panel_upgrade', 'legacy_publication', 'mixed_fleet', 'mixed_offline_pause', 'node_upgrade', 'node_downgrade', 'node_reupgrade', 'panel_downgrade_offline', 'panel_downgrade', 'panel_reupgrade'].map(name => `TestNativeLegacyPSPUpgrade/${name}`)]
   const values = [...tests.flatMap(Test => [{ Action: 'run', Package: pkg, Test }, { Action: 'pass', Package: pkg, Test }]), { Action: 'pass', Package: pkg }]
   const evidence = sanitizeDestinationResults(encode(values))
   assert.doesNotThrow(() => acceptance.checkLegacyUpgradeResults(evidence))
@@ -21,6 +21,24 @@ test('legacy upgrade has an independent complete real execution gate and immutab
   for (const value of ['0ae05e1e40170c030acd23cdf637310b740b50a6', '8e5e3db72219a8db9081a372722abb1529d22ecd', nodeCandidate.commit, 'native-legacy-panel-bridge.go.txt', 'check-legacy-upgrade', 'PSP_NATIVE_LEGACY_PANEL_BIN', 'PSP_NATIVE_LEGACY_NODE_BIN', 'PSP_NATIVE_MIXED_NODE_BIN']) assert(legacyJob.includes(value), value)
 })
 import * as acceptance from './destination-acceptance.mjs'
+
+test('panel transition evidence retains bounded application duration and fixed facts only', () => {
+  for (const phase of ['downgrade', 'reupgrade']) {
+    for (const duration of [0, 5720, 120000, 150000]) {
+      const event = JSON.parse(sanitizeDestinationResults(encode([{ Action: 'output', Output: `native panel application: ${phase}=${duration}\n` }])))
+      assert.equal(event.Diagnostic, `panel_${phase}_application_ms`)
+      assert.equal(event.Observed, duration)
+    }
+  }
+  for (const fact of ['streams', 'capability', 'config_known', 'config_policy', 'report_applied', 'report_empty', 'report_current', 'original_core_exited']) {
+    for (const value of ['true', 'false']) {
+      const event = JSON.parse(sanitizeDestinationResults(encode([{ Action: 'output', Output: `native diagnostic: panel_${fact}=${value}\n` }])))
+      assert.equal(event.Diagnostic, `panel_${fact}`)
+      assert.equal(event.Observed, value === 'true')
+    }
+  }
+  for (const value of ['downgrade=150001', 'secret=1', 'reupgrade=-1', 'downgrade=credential', 'reupgrade=1.25']) assert.equal(sanitizeDestinationResults(encode([{ Action: 'output', Output: `native panel application: ${value}\n` }])), '\n')
+})
 
 function events() {
   const pkg = 'github.com/KazuhaHub/passwall-sub-panel/internal/app'
