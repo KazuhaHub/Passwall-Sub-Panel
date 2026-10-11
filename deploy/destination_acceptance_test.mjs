@@ -9,6 +9,16 @@ function events() {
   return [...names.flatMap(Test => [{ Action: 'run', Package: pkg, Test }, { Action: 'pass', Package: pkg, Test }]), { Action: 'pass', Package: pkg }]
 }
 const encode = values => values.map(value => JSON.stringify(value)).join('\n')
+test('listener diagnostics retain only fixed booleans and withhold arbitrary labels and values', () => {
+  for (const category of ['listener_issue', 'listener_core_rejected', 'listener_agent_fresh', 'listener_policy_ready', 'listener_policy_unchanged', 'listener_epoch', 'listener_config_changed', 'listener_config_preserved', 'listener_config_fresh']) {
+    for (const value of ['true', 'false']) {
+      const retained = sanitizeDestinationResults(encode([{ Action: 'output', Package: 'private', Output: `native diagnostic: ${category}=${value}\n` }]))
+      assert.equal(JSON.parse(retained).Diagnostic, category)
+      assert.equal(JSON.parse(retained).Observed, value === 'true')
+    }
+  }
+  for (const output of ['native diagnostic: listener_secret=true\n', 'native diagnostic: listener_issue=credential\n']) assert.equal(sanitizeDestinationResults(encode([{ Action: 'output', Output: output }])), '\n')
+})
 test('retained execution evidence excludes process output and arbitrary metadata', () => {
   const retained = sanitizeDestinationResults(encode([...events(), { Action: 'output', Package: 'private', Output: 'credential email address' }, { Action: 'pass', Package: 'ignored', Output: 'private', Private: 'secret' }]))
   for (const privateText of ['credential', 'email', 'address', 'private', 'secret', 'Output', 'Private']) assert(!retained.includes(privateText))

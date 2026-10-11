@@ -48,7 +48,7 @@ export function sanitizeDestinationResults(input) {
   return input.split(/\r?\n/).filter(line => line.trim()).map(line => {
     const event = parseEvent(line)
     if (event.Action === 'output') {
-      const category = typeof event.Output === 'string' && /native diagnostic: (download|checksum|timeout|rejected|unsupported|permission|bind|certificate)=(true|false)(?:\r?\n|$)/.exec(event.Output)
+      const category = typeof event.Output === 'string' && /native diagnostic: (download|checksum|timeout|rejected|unsupported|permission|bind|certificate|listener_issue|listener_core_rejected|listener_agent_fresh|listener_policy_ready|listener_policy_unchanged|listener_epoch|listener_config_changed|listener_config_preserved|listener_config_fresh)=(true|false)(?:\r?\n|$)/.exec(event.Output)
       if (category) return JSON.stringify({ Action: 'output', Package: pkg, Diagnostic: category[1], Observed: category[2] === 'true' })
       const diagnostic = Object.entries(diagnostics).find(([message]) => typeof event.Output === 'string' && event.Output.includes(message))?.[1]
       return diagnostic ? JSON.stringify({ Action: 'output', Package: pkg, ...(names.includes(event.Test) ? { Test: event.Test } : {}), Diagnostic: diagnostic }) : ''

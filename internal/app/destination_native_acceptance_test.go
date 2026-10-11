@@ -378,6 +378,14 @@ func TestNativeDestinationTraffic(t *testing.T) {
 		// -test rejects ALPN's numeric type, both with and without the policy.
 		setInbound(fullSniffing, `{"network":"tcp","security":"tls","tlsSettings":{"alpn":5}}`)
 		failedAfter := receiptAfter
+		observed := map[string]bool{}
+		defer func() {
+			if caseTest.Failed() {
+				for _, category := range []string{"listener_issue", "listener_core_rejected", "listener_agent_fresh", "listener_policy_ready", "listener_policy_unchanged", "listener_epoch", "listener_config_changed", "listener_config_preserved", "listener_config_fresh"} {
+					caseTest.Logf("native diagnostic: %s=%t", category, observed[category])
+				}
+			}
+		}()
 		nativeWait(caseTest, 120*time.Second, "real listener rejection", func() bool {
 			issues, _, err := a.repos.NodeAgentIssue.List(caseTest.Context(), ports.NodeAgentIssueFilter{AgentID: f.agent.AgentID, Code: "core_convergence_failed", Pagination: ports.Pagination{Page: 1, PageSize: 50}})
 			if err != nil {
@@ -385,11 +393,10 @@ func TestNativeDestinationTraffic(t *testing.T) {
 			}
 			coreRejected := false
 			for _, issue := range issues {
+				observed["listener_issue"] = observed["listener_issue"] || issue.LastSeenAt.After(failedAfter)
 				coreRejected = coreRejected || issue.LastSeenAt.After(failedAfter) && strings.Contains(issue.Detail, "core candidate rejected")
 			}
-			if !coreRejected {
-				return false
-			}
+			observed["listener_core_rejected"] = coreRejected
 			current, err := a.repos.DestAgentPolicy.Get(caseTest.Context(), f.agent.AgentID, true)
 			if err != nil {
 				return false
@@ -399,7 +406,17 @@ func TestNativeDestinationTraffic(t *testing.T) {
 				return false
 			}
 			agent, err := a.repos.NodeAgent.GetByAgentID(caseTest.Context(), f.agent.AgentID)
-			return err == nil && nativeListenerFaultReceiptMatches(*prior, *current, *cfg, confirmed.DesiredETag, agent.Epoch, agent.LastSeen, failedAfter)
+			if err != nil {
+				return false
+			}
+			observed["listener_agent_fresh"] = agent.LastSeen != nil && agent.LastSeen.After(failedAfter)
+			observed["listener_policy_ready"] = nativeReceiptMatches(*current, prior.MintedGeneration, agent.LastSeen, *prior.MintedAt)
+			observed["listener_policy_unchanged"] = current.MintedSHA256 == prior.MintedSHA256 && current.DesiredSHA256 == prior.DesiredSHA256 && current.AppliedSHA256 == prior.AppliedSHA256 && current.ReportedSHA256 == prior.ReportedSHA256 && bytes.Equal(current.MintedBody, prior.MintedBody) && bytes.Equal(current.AppliedBody, prior.AppliedBody)
+			observed["listener_epoch"] = cfg.AppliedEpoch == agent.Epoch
+			observed["listener_config_changed"] = cfg.DesiredETag != "" && cfg.DesiredETag != confirmed.DesiredETag
+			observed["listener_config_preserved"] = cfg.AppliedETag == confirmed.DesiredETag && !cfg.Converged()
+			observed["listener_config_fresh"] = cfg.LastSeen != nil && cfg.LastSeen.After(failedAfter)
+			return coreRejected && nativeListenerFaultReceiptMatches(*prior, *current, *cfg, confirmed.DesiredETag, agent.Epoch, agent.LastSeen, failedAfter)
 		})
 		for user, key := range members() {
 			if before[user] != key {
