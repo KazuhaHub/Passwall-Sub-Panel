@@ -10,6 +10,8 @@ on:
       - 'internal/adapters/sqlstore/dest*'
       - 'deploy/destination*'
       - 'deploy/native-legacy-panel-bridge.go.txt'
+      - 'deploy/compat/backends/third-party*.sh'
+      - 'deploy/compat/backends/third-party*.mjs'
       - '.github/workflows/destination-acceptance.yml'
       - 'go.mod'
       - 'go.sum'
@@ -22,6 +24,8 @@ on:
       - 'internal/adapters/sqlstore/dest*'
       - 'deploy/destination*'
       - 'deploy/native-legacy-panel-bridge.go.txt'
+      - 'deploy/compat/backends/third-party*.sh'
+      - 'deploy/compat/backends/third-party*.mjs'
       - '.github/workflows/destination-acceptance.yml'
       - 'go.mod'
       - 'go.sum'
@@ -511,9 +515,125 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  fleet:
+    name: real production fleet (${{ matrix.database }}, ${{ matrix.cohort }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        database: [sqlite, mysql, postgres]
+        cohort: [old, new, mixed]
+    services:
+      mysql:
+        image: ${{ matrix.database == 'mysql' && 'mysql:8' || '' }}
+        env:
+          MYSQL_ROOT_PASSWORD: fixture-native-root-password
+          MYSQL_DATABASE: psp_native_acceptance
+          MYSQL_USER: psp
+          MYSQL_PASSWORD: fixture-native-database-password
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -uroot -pfixture-native-root-password"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 30
+      postgres:
+        image: ${{ matrix.database == 'postgres' && 'postgres:16' || '' }}
+        env:
+          POSTGRES_USER: psp
+          POSTGRES_PASSWORD: fixture-native-database-password
+          POSTGRES_DB: psp_native_acceptance
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U psp -d psp_native_acceptance"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        env:
+          GOTOOLCHAIN: auto
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Verify exact preferred compiler
+        run: |
+          set -eu
+          build_toolchain=$(awk '$1 == "toolchain" { print $2 }' go.mod)
+          test -n "$build_toolchain"
+          test "$(go env GOVERSION)" = "$build_toolchain"
+          test "$(go tool compile -V | awk '{ print $3 }')" = "$build_toolchain"
+      - uses: actions/checkout@v7
+        with:
+          repository: KazuhaHub/Passwall-Node
+          ref: '8e5e3db72219a8db9081a372722abb1529d22ecd'
+          path: fleet-old-source
+          persist-credentials: false
+      - uses: actions/checkout@v7
+        with:
+          repository: KazuhaHub/Passwall-Node
+          ref: 'cef54ddba3ee96f9794aaacdc6ac1ed89cc318f9'
+          path: fleet-new-source
+          persist-credentials: false
+      - name: Build immutable fleet candidates with their own preferred compilers
+        run: |
+          set -euo pipefail
+          test "$(git -C fleet-old-source rev-parse HEAD)" = '8e5e3db72219a8db9081a372722abb1529d22ecd'
+          test "$(git -C fleet-new-source rev-parse HEAD)" = 'cef54ddba3ee96f9794aaacdc6ac1ed89cc318f9'
+          for cohort in old new; do
+            source="fleet-${cohort}-source"
+            test -z "$(git -C "$source" status --porcelain)"
+            (
+              cd "$source"
+              compiler=$(awk '$1 == "toolchain" { print $2 }' go.mod)
+              test -n "$compiler"
+              test "$(GOTOOLCHAIN="$compiler" go env GOVERSION)" = "$compiler"
+              test "$(GOTOOLCHAIN="$compiler" go tool compile -V | awk '{ print $3 }')" = "$compiler"
+              if [ "$cohort" = old ]; then
+                GOTOOLCHAIN="$compiler" CGO_ENABLED=0 go build \
+                  -ldflags '-X github.com/KazuhaHub/passwall-node/v4/internal/version.Version=v4.0.1.8' \
+                  -o "$RUNNER_TEMP/destination-fleet-old" ./cmd/node
+              else
+                GOTOOLCHAIN="$compiler" CGO_ENABLED=0 go build -o "$RUNNER_TEMP/destination-fleet-new" ./cmd/node
+              fi
+            )
+          done
+      - name: Verify fleet gates and compile the full production driver
+        run: |
+          set -euo pipefail
+          node --test deploy/destination_fleet_test.mjs deploy/compat/backends/third-party_network.test.mjs
+          go test -v -count=1 ./internal/app -run '^TestNativeFleet(ProfilesAndContainerOwnershipAreClosed|PolicyRequiresOwnSubjectAllowanceAndCatchAll)$'
+          go test -c -tags destination_acceptance -o "$RUNNER_TEMP/destination-acceptance.test" ./internal/app
+      - name: Real App.Run, native cohort and both production third-party adapters
+        run: |
+          set -euo pipefail
+          sudo --preserve-env=GITHUB_ACTIONS,GITHUB_REPOSITORY,RUNNER_ENVIRONMENT \
+            env PSP_NATIVE_FLEET_PROFILE='${{ matrix.cohort }}' \
+            PSP_NATIVE_FLEET_OLD_BIN="$RUNNER_TEMP/destination-fleet-old" \
+            PSP_NATIVE_FLEET_NEW_BIN="$RUNNER_TEMP/destination-fleet-new" \
+            PSP_NATIVE_DB_KIND='${{ matrix.database }}' \
+            PSP_NATIVE_SOURCE_COMMIT='${{ github.event.pull_request.head.sha || github.sha }}' \
+            "$RUNNER_TEMP/destination-acceptance.test" -test.v=test2json -test.run '^TestNativeDestinationFleet$' -test.timeout 15m 2>&1 \
+            | go tool test2json -t -p github.com/KazuhaHub/passwall-sub-panel/internal/app \
+            | node deploy/destination-acceptance.mjs sanitize \
+            > "$RUNNER_TEMP/destination-fleet-tests.json"
+          node deploy/destination-acceptance.mjs check-fleet "$RUNNER_TEMP/destination-fleet-tests.json"
+      - name: Keep count-only fleet evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: native-fleet-${{ matrix.database }}-${{ matrix.cohort }}-${{ github.sha }}
+          path: ${{ runner.temp }}/destination-fleet-tests.json
+          if-no-files-found: error
+          retention-days: 7
+
   complete-matrix:
-    name: complete native matrix (30 reports / 681 cases)
-    needs: [traffic, traffic-sql, published-remote, published-docker, legacy-upgrade]
+    name: complete native matrix (39 reports / 771 cases)
+    needs: [traffic, traffic-sql, published-remote, published-docker, legacy-upgrade, fleet]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -525,6 +645,7 @@ jobs:
           REMOTE_RESULT: ${{ needs.published-remote.result }}
           DOCKER_RESULT: ${{ needs.published-docker.result }}
           LEGACY_RESULT: ${{ needs.legacy-upgrade.result }}
+          FLEET_RESULT: ${{ needs.fleet.result }}
         run: |
           set -eu
           test "$TRAFFIC_RESULT" = success
@@ -532,9 +653,10 @@ jobs:
           test "$REMOTE_RESULT" = success
           test "$DOCKER_RESULT" = success
           test "$LEGACY_RESULT" = success
+          test "$FLEET_RESULT" = success
       - uses: actions/checkout@v7
       - name: Verify complete-matrix rejection boundaries
-        run: node --test deploy/destination_matrix_test.mjs deploy/destination_acceptance_test.mjs
+        run: node --test deploy/destination_matrix_test.mjs deploy/destination_acceptance_test.mjs deploy/destination_fleet_test.mjs
       - uses: actions/download-artifact@v8
         with:
           pattern: native-*

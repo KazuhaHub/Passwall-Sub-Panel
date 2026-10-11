@@ -71,6 +71,18 @@ XUI_NAME=psp-compat-3xui
 NODE_PORT_RANGE="${PSP_LIVE_XUI_NODE_PORTS:-24443-24450}"
 SUI_NAME=psp-compat-sui
 
+# shellcheck source=deploy/compat/backends/third-party-network.sh
+source "$(dirname "${BASH_SOURCE[0]}")/third-party-network.sh"
+network_mode=$(third_party_network_mode)
+network_args=()
+xui_ports=(-p "$XUI_PORT:2053" -p "$NODE_PORT_RANGE:$NODE_PORT_RANGE")
+sui_ports=(-p "$SUI_PORT:2095")
+if [ "$network_mode" = host ]; then
+  network_args=(--network host)
+  xui_ports=()
+  sui_ports=()
+fi
+
 log() { printf '%s\n' "$*" >&2; }
 
 # wait_for polls the panel's own authenticated surface with a bounded deadline.
@@ -182,7 +194,7 @@ up() {
   # with connection refused against a node that is correctly configured.
   # 3X-UI restarts its core when an inbound is added, so the range has to be
   # published before the node exists.
-  $SUDO "$RUNTIME" run -d --name "$XUI_NAME" -p "$XUI_PORT:2053" -p "$NODE_PORT_RANGE:$NODE_PORT_RANGE" -v "$WORKDIR/3xui:/etc/x-ui" "$THIRD_PARTY_IMAGE_3XUI" >/dev/null
+  $SUDO "$RUNTIME" run -d --name "$XUI_NAME" "${network_args[@]}" "${xui_ports[@]}" -v "$WORKDIR/3xui:/etc/x-ui" "$THIRD_PARTY_IMAGE_3XUI" >/dev/null
   XUI_ORIGIN="http://$HOST:$XUI_PORT"
   wait_for "$XUI_ORIGIN/" 120
   log "3X-UI ready at $XUI_ORIGIN"
@@ -194,7 +206,7 @@ up() {
   log "pulling $THIRD_PARTY_IMAGE_SUI"
   $SUDO "$RUNTIME" pull "$THIRD_PARTY_IMAGE_SUI" >/dev/null
   $SUDO "$RUNTIME" rm -f "$SUI_NAME" >/dev/null 2>&1 || true
-  $SUDO "$RUNTIME" run -d --name "$SUI_NAME" -p "$SUI_PORT:2095" -v "$WORKDIR/sui:/app/db" "$THIRD_PARTY_IMAGE_SUI" >/dev/null
+  $SUDO "$RUNTIME" run -d --name "$SUI_NAME" "${network_args[@]}" "${sui_ports[@]}" -v "$WORKDIR/sui:/app/db" "$THIRD_PARTY_IMAGE_SUI" >/dev/null
   # The panel is NOT reachable at the bare origin: it serves under webPath, so
   # waiting there would 404 until the deadline however healthy the panel is. Wait
   # for the database to exist first — that is what says the process started —

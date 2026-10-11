@@ -8,9 +8,9 @@ test('complete matrix gate rejects missing reports, mixed commits and unsafe eve
   const { destinationMatrixReports, checkDestinationMatrix } = await import('./destination-matrix.mjs')
   const source = await import('./destination-acceptance.mjs')
   const reports = destinationMatrixReports()
-  assert.equal(reports.length, 30)
-  assert.equal(new Set(reports.map(report => report.name)).size, 30)
-  assert.equal(reports.reduce((total, report) => total + report.cases.length, 0), 681)
+  assert.equal(reports.length, 39)
+  assert.equal(new Set(reports.map(report => report.name)).size, 39)
+  assert.equal(reports.reduce((total, report) => total + report.cases.length, 0), 771)
   const root = mkdtempSync(join(tmpdir(), 'psp-matrix-gate-'))
   const merge = 'a'.repeat(40)
   const packageName = 'github.com/KazuhaHub/passwall-sub-panel/internal/app'
@@ -23,7 +23,7 @@ test('complete matrix gate rejects missing reports, mixed commits and unsafe eve
       events.push({ Action: 'pass', Package: packageName })
       writeFileSync(join(folder, report.file), events.map(event => JSON.stringify(event)).join('\n') + '\n')
     }
-    assert.deepEqual(checkDestinationMatrix(root, merge), { reports: 30, cases: 681 })
+    assert.deepEqual(checkDestinationMatrix(root, merge), { reports: 39, cases: 771 })
     const first = reports[0]
     const path = join(root, `${first.name}-${merge}`, first.file)
     const original = readFileSync(path, 'utf8')
@@ -49,7 +49,7 @@ test('complete matrix gate rejects missing reports, mixed commits and unsafe eve
       { Diagnostic: 'panel_downgrade_application_ms', Observed: 150000 },
     ].map(event => JSON.stringify({ Action: 'output', Package: packageName, ...event })).join('\n') + '\n'
     writeFileSync(path, original + diagnostics)
-    assert.deepEqual(checkDestinationMatrix(root, merge), { reports: 30, cases: 681 })
+    assert.deepEqual(checkDestinationMatrix(root, merge), { reports: 39, cases: 771 })
     writeFileSync(path, original)
     assert.throws(() => checkDestinationMatrix(root, 'b'.repeat(40)))
     assert.throws(() => checkDestinationMatrix(root, '../foreign'))
@@ -68,9 +68,9 @@ test('workflow aggregate gate requires every producer and exact merge identity',
   assert(start >= 0)
   const job = workflow.slice(start)
   for (const required of [
-    'needs: [traffic, traffic-sql, published-remote, published-docker, legacy-upgrade]',
+    'needs: [traffic, traffic-sql, published-remote, published-docker, legacy-upgrade, fleet]',
     'if: always()', "needs.traffic.result", 'needs.traffic-sql.result', 'needs.published-remote.result',
-    'needs.published-docker.result', 'needs.legacy-upgrade.result', 'actions/download-artifact@v8',
+    'needs.published-docker.result', 'needs.legacy-upgrade.result', 'needs.fleet.result', 'actions/download-artifact@v8',
     'pattern: native-*', 'destination-matrix.mjs', 'node --test deploy/destination_matrix_test.mjs', '${{ github.sha }}',
   ]) assert(job.includes(required), required)
   assert(!job.includes('continue-on-error'))

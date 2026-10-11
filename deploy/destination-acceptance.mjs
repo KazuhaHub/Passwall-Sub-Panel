@@ -15,11 +15,24 @@ const singBoxNames = ['TestNativeSingBoxDestinationTraffic', ...singBoxCases.map
 const guardedSingBoxNames = ['TestNativeGuardedSingBoxDestinationTraffic', ...guardedSingBoxCases.map(name => `TestNativeGuardedSingBoxDestinationTraffic/${name}`)]
 export const legacyUpgradeCases = Object.freeze(['old_panel', 'panel_upgrade', 'legacy_publication', 'mixed_fleet', 'mixed_offline_pause', 'node_upgrade', 'node_downgrade', 'node_reupgrade', 'panel_downgrade_offline', 'panel_downgrade', 'panel_reupgrade', 'allowlist_capability_setup', 'allowlist_capability_removed', 'allowlist_capability_restored'])
 const legacyUpgradeNames = ['TestNativeLegacyPSPUpgrade', ...legacyUpgradeCases.map(name => `TestNativeLegacyPSPUpgrade/${name}`)]
+export const fleetCases = Object.freeze(['native_ready', 'native_publication', 'native_pause', 'native_resume', 'third_party_ready', 'allowlist_trial', 'allowlist_enforce', 'one_peer_offline', 'allowlist_pause', 'allowlist_reopen'])
+const fleetNames = ['TestNativeDestinationFleet', ...fleetCases.map(name => `TestNativeDestinationFleet/${name}`)]
 export const remoteUpgradeCases = Object.freeze(['candidate_policy', 'health_failure_restore', 'published_rollback', 'restart_recovery', 'idempotent_replay'])
 const dockerUpgradeNames = ['TestNativePublishedDockerRollback', ...remoteUpgradeCases.map(name => `TestNativePublishedDockerRollback/${name}`)]
 const remoteUpgradeNames = ['TestNativePublishedRemoteRollback', ...remoteUpgradeCases.map(name => `TestNativePublishedRemoteRollback/${name}`)]
-const names = [...xrayNames, ...singBoxNames, ...guardedSingBoxNames, ...legacyUpgradeNames, ...remoteUpgradeNames, ...dockerUpgradeNames]
+const names = [...xrayNames, ...singBoxNames, ...guardedSingBoxNames, ...legacyUpgradeNames, ...remoteUpgradeNames, ...dockerUpgradeNames, ...fleetNames]
 const diagnostics = Object.freeze({
+  'timed out waiting for every individual fleet receipt': 'fleet_receipt_timeout',
+  'timed out waiting for actual fleet member removal and restoration': 'fleet_membership_timeout',
+  'fleet real traffic did not match individual membership and policy': 'fleet_traffic_failed',
+  'fleet public coverage borrowed capability from another panel': 'fleet_coverage_failed',
+  'start immutable real third-party fleet backends': 'fleet_backends_failed',
+  'fleet public status borrowed another node': 'fleet_public_status_failed',
+  'fleet public status omitted or borrowed an owned peer': 'fleet_public_status_failed',
+  'third-party fleet status falsely acquired native execution': 'fleet_public_status_failed',
+  'fleet reopen replaced a retired client identity or counters': 'fleet_identity_failed',
+  'fleet panel is not the exact reviewed version': 'fleet_version_failed',
+  'fleet backend changed its reviewed image': 'fleet_provenance_failed',
   'Docker automatic restoration changed original receipt identity': 'docker_restore_receipt_failed',
   'Docker automatic restoration changed original execution identity': 'docker_restore_execution_failed',
   'Docker automatic restoration changed original installation identity': 'docker_restore_installation_failed',
@@ -250,7 +263,7 @@ export function sanitizeDestinationResults(input) {
     if (event.Action === 'output') {
       const statusFact = typeof event.Output === 'string' && /native diagnostic: status_(rows|panel|kind|reason|exhausted|rules|pending|applied_at|state|paused|generation|is_applied|is_sniffing|is_paused|is_pending|is_offline|is_none|is_rejected|is_over_limit)=(true|false)(?:\r?\n|$)/.exec(event.Output)
       if (statusFact) return JSON.stringify({ Action: 'output', Package: pkg, Diagnostic: `status_${statusFact[1]}`, Observed: statusFact[2] === 'true' })
-      const category = typeof event.Output === 'string' && /native diagnostic: (download|checksum|timeout|rejected|unsupported|permission|bind|certificate|listener_issue|listener_core_rejected|listener_agent_fresh|listener_policy_ready|listener_policy_unchanged|listener_epoch|listener_config_changed|listener_config_preserved|listener_config_fresh|receipt_generation|receipt_mint_fresh|receipt_sync_fresh|receipt_state|receipt_sha|receipt_lkg|receipt_precheck|receipt_streams|receipt_transition|fallback_report|fallback_accepted|fallback_empty|fallback_exhausted|fallback_core|fallback_streams|fallback_issue|node_transition_sequence|node_transition_capability|node_transition_policy|node_transition_core|node_transition_listener|node_transition_config|node_transition_roster|node_transition_version|node_transition_original_etags|node_transition_agent_fresh|node_transition_streams|node_transition_minted_empty|panel_streams|panel_capability|panel_config_known|panel_config_policy|panel_report_applied|panel_report_empty|panel_report_current|panel_original_core_exited|capability_streams|capability_capability|capability_agent_fresh|capability_membership|capability_policy_body|capability_policy_receipt|remote_restore_task_terminal|remote_restore_receipt_failed|remote_restore_receipt_activated|remote_restore_source_installed|remote_restore_seen|remote_restore_identity|remote_restore_capability|remote_restore_streams|remote_restore_policy|remote_restore_report|remote_restore_core|remote_restore_listener|remote_restore_journal_readable|remote_restore_journal_failed|remote_restore_journal_running|remote_restore_journal_delivered|remote_restore_quarantined|remote_restore_failed_result_posted|remote_restore_failed_result_accepted|remote_restore_failed_result_rejected|remote_restore_outbox_pending|remote_restore_outbox_valid|remote_restore_fresh_after_restore|remote_restore_sync_validation_error|remote_restore_sync_outbox_error|remote_restore_sync_observer_error|remote_restore_sync_duplicate_issue|remote_restore_sync_stream_error|remote_restore_sync_process_error)=(true|false)(?:\r?\n|$)/.exec(event.Output)
+      const category = typeof event.Output === 'string' && /native diagnostic: (fleet_peer_0_observation|fleet_peer_1_observation|fleet_peer_0_streams|fleet_peer_1_streams|fleet_peer_0_policy|fleet_peer_1_policy|download|checksum|timeout|rejected|unsupported|permission|bind|certificate|listener_issue|listener_core_rejected|listener_agent_fresh|listener_policy_ready|listener_policy_unchanged|listener_epoch|listener_config_changed|listener_config_preserved|listener_config_fresh|receipt_generation|receipt_mint_fresh|receipt_sync_fresh|receipt_state|receipt_sha|receipt_lkg|receipt_precheck|receipt_streams|receipt_transition|fallback_report|fallback_accepted|fallback_empty|fallback_exhausted|fallback_core|fallback_streams|fallback_issue|node_transition_sequence|node_transition_capability|node_transition_policy|node_transition_core|node_transition_listener|node_transition_config|node_transition_roster|node_transition_version|node_transition_original_etags|node_transition_agent_fresh|node_transition_streams|node_transition_minted_empty|panel_streams|panel_capability|panel_config_known|panel_config_policy|panel_report_applied|panel_report_empty|panel_report_current|panel_original_core_exited|capability_streams|capability_capability|capability_agent_fresh|capability_membership|capability_policy_body|capability_policy_receipt|remote_restore_task_terminal|remote_restore_receipt_failed|remote_restore_receipt_activated|remote_restore_source_installed|remote_restore_seen|remote_restore_identity|remote_restore_capability|remote_restore_streams|remote_restore_policy|remote_restore_report|remote_restore_core|remote_restore_listener|remote_restore_journal_readable|remote_restore_journal_failed|remote_restore_journal_running|remote_restore_journal_delivered|remote_restore_quarantined|remote_restore_failed_result_posted|remote_restore_failed_result_accepted|remote_restore_failed_result_rejected|remote_restore_outbox_pending|remote_restore_outbox_valid|remote_restore_fresh_after_restore|remote_restore_sync_validation_error|remote_restore_sync_outbox_error|remote_restore_sync_observer_error|remote_restore_sync_duplicate_issue|remote_restore_sync_stream_error|remote_restore_sync_process_error)=(true|false)(?:\r?\n|$)/.exec(event.Output)
       if (category) return JSON.stringify({ Action: 'output', Package: pkg, Diagnostic: category[1], Observed: category[2] === 'true' })
       const sequence = typeof event.Output === 'string' && /native receipt wait: ([1-9][0-9]?)(?:\r?\n|$)/.exec(event.Output)
       if (sequence) return JSON.stringify({ Action: 'output', Package: pkg, Diagnostic: 'receipt_wait', Observed: Number(sequence[1]) })
@@ -270,6 +283,7 @@ export function checkDestinationResults(input) { checkCases(input, xrayNames) }
 export function checkSingBoxResults(input) { checkCases(input, singBoxNames) }
 export function checkGuardedSingBoxResults(input) { checkCases(input, guardedSingBoxNames) }
 export function checkLegacyUpgradeResults(input) { checkCases(input, legacyUpgradeNames) }
+export function checkFleetResults(input) { checkCases(input, fleetNames) }
 export function checkRemoteUpgradeResults(input) { checkCases(input, remoteUpgradeNames) }
 export function checkDockerUpgradeResults(input) { checkCases(input, dockerUpgradeNames) }
 export function isSafeDestinationDiagnostic(event) {
@@ -306,8 +320,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   if (process.argv[2] === 'sanitize' && process.argv.length === 3) {
     process.stdout.write(sanitizeDestinationResults(readFileSync(0, 'utf8')))
   } else {
-    const checks = { check: checkDestinationResults, 'check-singbox': checkSingBoxResults, 'check-guarded-singbox': checkGuardedSingBoxResults, 'check-legacy-upgrade': checkLegacyUpgradeResults, 'check-remote-upgrade': checkRemoteUpgradeResults, 'check-docker-upgrade': checkDockerUpgradeResults }
-    if (!Object.hasOwn(checks, process.argv[2]) || process.argv.length !== 4) throw new Error('Usage: destination-acceptance.mjs check|check-singbox|check-guarded-singbox|check-legacy-upgrade|check-remote-upgrade|check-docker-upgrade RESULTS')
+    const checks = { check: checkDestinationResults, 'check-singbox': checkSingBoxResults, 'check-guarded-singbox': checkGuardedSingBoxResults, 'check-legacy-upgrade': checkLegacyUpgradeResults, 'check-remote-upgrade': checkRemoteUpgradeResults, 'check-docker-upgrade': checkDockerUpgradeResults, 'check-fleet': checkFleetResults }
+    if (!Object.hasOwn(checks, process.argv[2]) || process.argv.length !== 4) throw new Error('Usage: destination-acceptance.mjs check|check-singbox|check-guarded-singbox|check-legacy-upgrade|check-remote-upgrade|check-docker-upgrade|check-fleet RESULTS')
     const check = checks[process.argv[2]]
     check(readFileSync(process.argv[3], 'utf8'))
     console.log('Every native destination acceptance case ran and passed')

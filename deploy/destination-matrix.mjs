@@ -27,6 +27,7 @@ export function destinationMatrixReports() {
   for (const database of ['sqlite', 'mysql', 'postgres']) add(`native-legacy-upgrade-module-${database}`, 'TestNativeLegacyPSPUpgrade', acceptance.legacyUpgradeCases, acceptance.checkLegacyUpgradeResults, 'destination-legacy-upgrade-tests.json')
   add('native-published-remote', 'TestNativePublishedRemoteRollback', acceptance.remoteUpgradeCases, acceptance.checkRemoteUpgradeResults, 'destination-remote-upgrade-tests.json')
   for (const architecture of ['amd64', 'arm64']) add(`native-published-docker-${architecture}`, 'TestNativePublishedDockerRollback', acceptance.remoteUpgradeCases, acceptance.checkDockerUpgradeResults, 'destination-docker-upgrade-tests.json')
+  for (const database of ['sqlite', 'mysql', 'postgres']) for (const cohort of ['old', 'new', 'mixed']) add(`native-fleet-${database}-${cohort}`, 'TestNativeDestinationFleet', acceptance.fleetCases, acceptance.checkFleetResults, 'destination-fleet-tests.json')
   return reports
 }
 
@@ -62,7 +63,7 @@ export function checkDestinationMatrix(root, mergeSHA) {
     }
     cases += report.cases.length
   }
-  require(reports.length === 30 && cases === 681)
+  require(reports.length === 39 && cases === 771)
   return { reports: reports.length, cases }
 }
 
