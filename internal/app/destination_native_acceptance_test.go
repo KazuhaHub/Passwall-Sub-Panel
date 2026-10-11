@@ -127,8 +127,15 @@ func TestNativeDestinationTraffic(t *testing.T) {
 	client := server.Client()
 	client.Timeout = 10 * time.Second
 	caseTest := t
+	var receiptBefore *domain.DestAgentPolicy
 	request := func(method, path string, body any, want int, result any) {
 		caseTest.Helper()
+		var prior *domain.DestAgentPolicy
+		if method != "GET" && path != "dest/publish" {
+			var err error
+			prior, err = a.repos.DestAgentPolicy.Get(caseTest.Context(), f.agent.AgentID, true)
+			nativeMust(caseTest, err, "read candidate before administrator mutation")
+		}
 		encoded, err := json.Marshal(body)
 		nativeMust(caseTest, err, "encode administrator input")
 		r, err := http.NewRequestWithContext(caseTest.Context(), method, server.URL+"/api/admin/"+path, bytes.NewReader(encoded))
@@ -144,6 +151,7 @@ func TestNativeDestinationTraffic(t *testing.T) {
 		}
 		if method != "GET" && path != "dest/publish" {
 			receiptAfter = started
+			receiptBefore = prior
 		}
 		if result != nil {
 			nativeMust(caseTest, json.NewDecoder(response.Body).Decode(result), "decode administrator response")
@@ -211,7 +219,7 @@ func TestNativeDestinationTraffic(t *testing.T) {
 				if !matches || len(r.PrecheckListeners) != 1 || r.PrecheckListeners[0] != string(protocol.NewListenerKey(f.node.ID)) {
 					return false
 				}
-			} else if !nativeReceiptMatches(*r, state.PublishedGeneration, agent.LastSeen, after) {
+			} else if !nativeMutationReceiptMatches(receiptBefore, *r, state.PublishedGeneration, agent.LastSeen, after) {
 				return false
 			}
 			// An empty policy may be acknowledged before the core download and

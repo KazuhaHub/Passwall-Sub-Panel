@@ -229,7 +229,7 @@ func TestNativeLegacyPSPUpgrade(t *testing.T) {
 	nativeLegacyNodeTransitions(t, nativeLegacyTransitionFixture{
 		app: current, probe: probe, agentID: ready.AgentID, panelID: ready.PanelID, userID: ready.UserID,
 		dataDir: nodeDir, inbound: inbound, targetAddress: address, targetPort: targetPort, nonce: nonce,
-		originalConfig: beforeConfig, originalConfigETag: before.Config.ETag, originalRosterETag: before.Roster.ETag,
+		originalConfig: beforeConfig, originalConfigETag: before.Config.ETag,
 		adminToken: adminToken, adminURL: server.URL, adminClient: server.Client(), oldBinary: nodeBinary,
 		replace: func(binary string) *exec.Cmd {
 			stop(&node, nodeDone)

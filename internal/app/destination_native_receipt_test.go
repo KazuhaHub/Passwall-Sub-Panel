@@ -10,6 +10,70 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 )
 
+// Sync captures its clock before an overlapping admin mutation. Use the
+// actual pre-mutation candidate plus a fresh exact receipt, not an assumption
+// that every successful mutation resets the candidate's first-mint timestamp.
+func nativeMutationReceiptMatches(prior *domain.DestAgentPolicy, current domain.DestAgentPolicy, generation int64, lastSeen *time.Time, after time.Time) bool {
+	if lastSeen == nil || !lastSeen.After(after) || current.ReportedAt == nil || !current.ReportedAt.After(after) || prior != nil && current.AgentID != prior.AgentID {
+		return false
+	}
+	if nativeReceiptMatches(current, generation, lastSeen, after) {
+		return true
+	}
+	if prior == nil || prior.MintedAt == nil {
+		return false
+	}
+	if nativeUnchangedReceiptMatches(*prior, current, generation, lastSeen, after) {
+		return true
+	}
+	if current.MintedAt == nil || !current.MintedAt.After(*prior.MintedAt) || current.MintedGeneration < prior.MintedGeneration || current.MintedGeneration == prior.MintedGeneration && current.MintedContext == prior.MintedContext && current.MintedSHA256 == prior.MintedSHA256 && current.MintedKind == prior.MintedKind {
+		return false
+	}
+	return nativeReceiptMatches(current, generation, lastSeen, *prior.MintedAt)
+}
+
+func TestNativeMutationReceiptUsesActualTransitionAndFreshExactReceipt(t *testing.T) {
+	oldMint := time.UnixMilli(1000)
+	mint := oldMint.Add(time.Second)
+	admin := mint.Add(time.Millisecond)
+	seen := admin.Add(time.Second)
+	prior := domain.DestAgentPolicy{AgentID: "agt_mutation", MintedGeneration: 7, MintedAt: &oldMint, MintedContext: "old", MintedSHA256: "old", MintedKind: domain.DestCandidateDesired}
+	base := domain.DestAgentPolicy{AgentID: prior.AgentID, MintedKind: domain.DestCandidateDesired, MintedGeneration: 7, MintedAt: &mint, MintedContext: "current", MintedSHA256: "current", DesiredSHA256: "current", ReportedSHA256: "current", ReportedState: "applied", ReportedAt: &seen, AppliedSHA256: "current", AppliedAt: &seen}
+	unchanged := base
+	unchanged.ReportedAt = &mint
+	if nativeMutationReceiptMatches(&unchanged, base, 7, &seen, admin) != true {
+		t.Fatal("exact unchanged candidate with fresh acknowledgement was rejected")
+	}
+	for _, tc := range []struct {
+		name   string
+		change func(*domain.DestAgentPolicy, **time.Time)
+		want   bool
+	}{
+		{"sync-clock-before-admin-with-new-context", func(*domain.DestAgentPolicy, **time.Time) {}, true},
+		{"old-generation", func(r *domain.DestAgentPolicy, _ **time.Time) { r.MintedGeneration = 6 }, false},
+		{"old-mint", func(r *domain.DestAgentPolicy, _ **time.Time) { r.MintedAt = &oldMint }, false},
+		{"no-transition", func(r *domain.DestAgentPolicy, _ **time.Time) {
+			r.MintedContext = prior.MintedContext
+			r.MintedSHA256 = prior.MintedSHA256
+		}, false},
+		{"other-agent", func(r *domain.DestAgentPolicy, _ **time.Time) { r.AgentID = "other" }, false},
+		{"old-sync", func(_ *domain.DestAgentPolicy, s **time.Time) { *s = &mint }, false},
+		{"old-receipt", func(r *domain.DestAgentPolicy, _ **time.Time) { r.ReportedAt = &mint }, false},
+		{"wrong-receipt", func(r *domain.DestAgentPolicy, _ **time.Time) { r.ReportedSHA256 = "old" }, false},
+		{"unapplied", func(r *domain.DestAgentPolicy, _ **time.Time) { r.ReportedState = "rejected" }, false},
+		{"wrong-lkg", func(r *domain.DestAgentPolicy, _ **time.Time) { r.AppliedSHA256 = "old" }, false},
+		{"fallback", func(r *domain.DestAgentPolicy, _ **time.Time) { r.FallbackReason = "sniffing" }, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			current, at := base, &seen
+			tc.change(&current, &at)
+			if nativeMutationReceiptMatches(&prior, current, 7, at, admin) != tc.want {
+				t.Fatal("mutation receipt lost causal transition or exact current proof")
+			}
+		})
+	}
+}
+
 func nativeOpenRosterReceiptMatches(stream domain.NodeAgentStream, epoch uint64, revoked protocol.SubjectKey, canary protocol.ClientKey, listener protocol.ListenerKey) bool {
 	var roster protocol.RosterBody
 	if epoch == 0 || stream.Stream != domain.NodeAgentStreamRoster || stream.AppliedEpoch != epoch || !stream.Converged() || json.Unmarshal(stream.DesiredBody, &roster) != nil {

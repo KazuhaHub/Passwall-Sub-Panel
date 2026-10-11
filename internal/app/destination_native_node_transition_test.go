@@ -20,18 +20,18 @@ import (
 )
 
 type nativeLegacyTransitionFixture struct {
-	app                                    *App
-	probe                                  *nativeLegacyProbe
-	agentID, dataDir                       string
-	panelID, userID                        int64
-	inbound, targetPort                    int
-	targetAddress, nonce                   string
-	originalConfig                         []byte
-	originalConfigETag, originalRosterETag protocol.ETag
-	adminToken, adminURL, oldBinary        string
-	adminClient                            *http.Client
-	replace                                func(string) *exec.Cmd
-	stop                                   func()
+	app                             *App
+	probe                           *nativeLegacyProbe
+	agentID, dataDir                string
+	panelID, userID                 int64
+	inbound, targetPort             int
+	targetAddress, nonce            string
+	originalConfig                  []byte
+	originalConfigETag              protocol.ETag
+	adminToken, adminURL, oldBinary string
+	adminClient                     *http.Client
+	replace                         func(string) *exec.Cmd
+	stop                            func()
 }
 
 // Replace only the agent executable. No state, report, receipt or core artifact
@@ -78,7 +78,7 @@ func nativeLegacyNodeTransitions(t *testing.T, f nativeLegacyTransitionFixture) 
 					{"config", s.HaveConfig.ETag == s.Config.ETag && s.HaveConfig.Applied == s.Config.Version},
 					{"roster", s.HaveRoster.ETag == s.Roster.ETag && s.HaveRoster.Applied == s.Roster.Version},
 					{"version", step.capable || s.AgentVersion == "v4.0.1.8"},
-					{"original_etags", step.capable || s.Config.ETag == f.originalConfigETag && s.Roster.ETag == f.originalRosterETag},
+					{"original_etags", step.capable || s.Config.ETag == f.originalConfigETag},
 				} {
 					test.Logf("native diagnostic: node_transition_%s=%t", fact.name, fact.value)
 				}
@@ -101,7 +101,9 @@ func nativeLegacyNodeTransitions(t *testing.T, f nativeLegacyTransitionFixture) 
 				if s.Sequence < sequence+3 || s.PolicyCapable != step.capable || s.PolicyPresent != step.capable || s.CoreState != "running" || s.CoreEngine != "xray" || s.CoreVersion != "26.6.27" || !s.ListenerApplied || s.HaveConfig.ETag != s.Config.ETag || s.HaveConfig.Applied != s.Config.Version || s.HaveRoster.ETag != s.Roster.ETag || s.HaveRoster.Applied != s.Roster.Version {
 					return false
 				}
-				if !step.capable && (s.AgentVersion != "v4.0.1.8" || s.Config.ETag != f.originalConfigETag || s.Roster.ETag != f.originalRosterETag) {
+				// Roster embeds the new config version, so A/B/A restores the
+				// config ETag but must acknowledge the current roster identity.
+				if !step.capable && (s.AgentVersion != "v4.0.1.8" || s.Config.ETag != f.originalConfigETag) {
 					return false
 				}
 				agent, err := f.app.repos.NodeAgent.GetByAgentID(test.Context(), f.agentID)
