@@ -18,8 +18,10 @@ test('published remote rollback requires the real watcher, helper and complete e
     assert.throws(() => acceptance.checkRemoteUpgradeResults(encode(values.map(event => event.Test === name && event.Action === 'pass' ? { ...event, Action: 'skip' } : event))))
   }
   const workflow = readFileSync(new URL('../.github/workflows/destination-acceptance.yml', import.meta.url), 'utf8')
-  const job = workflow.slice(workflow.indexOf('  published-remote:'))
-  for (const value of [nodeCandidate.commit, 'PSP_NATIVE_REMOTE_SOURCE', 'PSP_NATIVE_REMOTE_NODE_BIN', 'check-remote-upgrade', 'TestNativePublishedRemoteRollback', 'TestNativeRemoteHealthFaultPreservesOtherRequests']) assert(job.includes(value), value)
+  const job = workflow.slice(workflow.indexOf('  published-remote:'), workflow.indexOf('  legacy-upgrade:'))
+  assert.equal(acceptance.remoteNodeCandidate.repository, nodeCandidate.repository)
+  assert.match(acceptance.remoteNodeCandidate.commit, /^[a-f0-9]{40}$/)
+  for (const value of [acceptance.remoteNodeCandidate.commit, 'PSP_NATIVE_REMOTE_SOURCE', 'PSP_NATIVE_REMOTE_NODE_BIN', 'check-remote-upgrade', 'TestNativePublishedRemoteRollback', 'TestNativeRemoteHealthFaultPreservesOtherRequests']) assert(job.includes(value), value)
 })
 
 test('remote restoration diagnostics retain only fixed booleans', () => {

@@ -38,6 +38,7 @@ import (
 
 const nativeRemoteRoot = "/opt/passwall-node"
 const nativeRemoteCandidate = "4.0.1.9" // Unpublished source candidate, never presented as a released archive.
+const nativeRemoteCandidateIdentity = "4.0.1.9 (c51d145)"
 const nativeRemotePublished = "4.0.1.8"
 const nativeRemotePublishedIdentity = "4.0.1.8 (8e5e3db)"
 
@@ -181,7 +182,7 @@ func TestNativePublishedRemoteRollback(t *testing.T) {
 		request("POST", "dest/publish", "", nil, nil, 200)
 		nativeWait(caseTest, 3*time.Minute, "remote candidate nonempty policy", func() bool {
 			agent, err := a.repos.NodeAgent.GetByAgentID(caseTest.Context(), f.agent.AgentID)
-			if err != nil || agent.LastSeen == nil || probe.snapshot().AgentVersion != nativeRemoteCandidate+" (63c60f6)" || !slicesContainsNative(agent.ObservedCapabilities, protocol.TaskCapability(protocol.TaskKindAgentUpgradeV1)) || !slicesContainsNative(agent.ObservedCapabilities, protocol.CapabilityDestinationPolicy) || !streamsReady(agent) {
+			if err != nil || agent.LastSeen == nil || probe.snapshot().AgentVersion != nativeRemoteCandidateIdentity || !slicesContainsNative(agent.ObservedCapabilities, protocol.TaskCapability(protocol.TaskKindAgentUpgradeV1)) || !slicesContainsNative(agent.ObservedCapabilities, protocol.CapabilityDestinationPolicy) || !streamsReady(agent) {
 				return false
 			}
 			runtime, err := a.repos.DestAgentPolicy.Get(caseTest.Context(), f.agent.AgentID, true)
@@ -317,11 +318,11 @@ func TestNativePublishedRemoteRollback(t *testing.T) {
 				facts["streams"] = streamsReady(agent)
 			}
 			s := probe.snapshot()
-			facts["report"] = s.AgentVersion == nativeRemoteCandidate+" (63c60f6)"
+			facts["report"] = s.AgentVersion == nativeRemoteCandidateIdentity
 			facts["core"], facts["listener"] = s.CoreState == "running", s.ListenerApplied
 			current, err := a.repos.DestAgentPolicy.Get(caseTest.Context(), f.agent.AgentID, true)
 			facts["policy"] = err == nil && current != nil && current.MintedSHA256 == originalPolicy.MintedSHA256 && current.ReportedState == "applied" && current.ReportedSHA256 == current.MintedSHA256 && current.AppliedSHA256 == current.MintedSHA256 && bytes.Equal(current.AppliedBody, originalPolicy.AppliedBody) && s.ConfigBodyKnown && s.ConfigPolicy
-			return facts["task_terminal"] && facts["seen"] && facts["identity"] && facts["capability"] && facts["streams"] && facts["report"] && facts["core"] && facts["listener"] && facts["policy"]
+			return facts["task_terminal"] && facts["fresh_after_restore"] && facts["seen"] && facts["identity"] && facts["capability"] && facts["streams"] && facts["report"] && facts["core"] && facts["listener"] && facts["policy"]
 		})
 		var receipt nativeRemoteReceipt
 		if json.Unmarshal(managed.read(caseTest, "upgrades/"+failed.TaskID+".json"), &receipt) != nil || receipt.Phase != "failed" || receipt.ErrorCode != "agent_upgrade_failed" || receipt.Result != nil || receipt.ActivationNonce != activated.ActivationNonce || !reflect.DeepEqual(receipt.Request.Task, activated.Request.Task) {
@@ -479,7 +480,7 @@ func (f *nativeRemoteHealthFault) wrap(next http.Handler) http.Handler {
 			return
 		}
 		for _, result := range report.TaskResults {
-			if report.AgentVersion == nativeRemoteCandidate+" (63c60f6)" && result.Kind == protocol.TaskKindAgentUpgradeV1 && !result.OK {
+			if report.AgentVersion == nativeRemoteCandidateIdentity && result.Kind == protocol.TaskKindAgentUpgradeV1 && !result.OK {
 				f.failedResultPosted.Store(true)
 				response := &nativeProbeResponse{ResponseWriter: w}
 				next.ServeHTTP(response, r)
@@ -501,8 +502,8 @@ func TestNativeRemoteHealthFaultPreservesOtherRequests(t *testing.T) {
 		enabled, rejected        bool
 	}{
 		{"target", "POST", "/v1/node/sync", `{"agent_version":"4.0.1.8 (8e5e3db)"}`, true, true},
-		{"source", "POST", "/v1/node/sync", `{"agent_version":"4.0.1.9 (63c60f6)"}`, true, false},
-		{"failed_result", "POST", "/v1/node/sync", `{"agent_version":"4.0.1.9 (63c60f6)","task_results":[{"kind":"agent.upgrade.v1","ok":false}]}`, true, false},
+		{"source", "POST", "/v1/node/sync", `{"agent_version":"4.0.1.9 (c51d145)"}`, true, false},
+		{"failed_result", "POST", "/v1/node/sync", `{"agent_version":"4.0.1.9 (c51d145)","task_results":[{"kind":"agent.upgrade.v1","ok":false}]}`, true, false},
 		{"disabled", "POST", "/v1/node/sync", `{"agent_version":"4.0.1.8 (8e5e3db)"}`, false, false},
 		{"other_path", "POST", "/api/admin/servers/1/upgrade-node-agent", `{"agent_version":"4.0.1.8 (8e5e3db)"}`, true, false},
 		{"other_method", "GET", "/v1/node/sync", `{"agent_version":"4.0.1.8 (8e5e3db)"}`, true, false},
@@ -542,7 +543,7 @@ func TestNativeRemoteHealthFaultPreservesOtherRequests(t *testing.T) {
 	t.Run("rejected_result", func(t *testing.T) {
 		fault := &nativeRemoteHealthFault{}
 		fault.enabled.Store(true)
-		body := `{"agent_version":"4.0.1.9 (63c60f6)","task_results":[{"kind":"agent.upgrade.v1","ok":false}]}`
+		body := `{"agent_version":"4.0.1.9 (c51d145)","task_results":[{"kind":"agent.upgrade.v1","ok":false}]}`
 		response := httptest.NewRecorder()
 		fault.wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			data, err := io.ReadAll(r.Body)

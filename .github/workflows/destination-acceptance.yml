@@ -136,21 +136,21 @@ jobs:
       - uses: actions/checkout@v7
         with:
           repository: KazuhaHub/Passwall-Node
-          ref: '63c60f6d5e8cd093bbaa8385f5b514dbe2f40390'
+          ref: 'c51d145ae0e2db47eb69a640fe8f751318370f59'
           path: remote-node-candidate
           persist-credentials: false
       - name: Build immutable candidate with explicit unpublished identity
         working-directory: remote-node-candidate
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = '63c60f6d5e8cd093bbaa8385f5b514dbe2f40390'
+          test "$(git rev-parse HEAD)" = 'c51d145ae0e2db47eb69a640fe8f751318370f59'
           test -z "$(git status --porcelain)"
           compiler=$(awk '$1 == "toolchain" { print $2 }' go.mod)
           test -n "$compiler"
           test "$(GOTOOLCHAIN="$compiler" go env GOVERSION)" = "$compiler"
           test "$(GOTOOLCHAIN="$compiler" go tool compile -V | awk '{ print $3 }')" = "$compiler"
           GOTOOLCHAIN="$compiler" CGO_ENABLED=0 go build -trimpath \
-            -ldflags '-X github.com/KazuhaHub/passwall-node/v4/internal/version.Version=4.0.1.9 -X github.com/KazuhaHub/passwall-node/v4/internal/version.Commit=63c60f6' \
+            -ldflags '-X github.com/KazuhaHub/passwall-node/v4/internal/version.Version=4.0.1.9 -X github.com/KazuhaHub/passwall-node/v4/internal/version.Commit=c51d145' \
             -o "$RUNNER_TEMP/destination-remote-node" ./cmd/node
       - name: Build production PSP remote upgrade driver
         run: |

@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
 
 export const nodeCandidate = Object.freeze({ repository: 'KazuhaHub/Passwall-Node', commit: '63c60f6d5e8cd093bbaa8385f5b514dbe2f40390' })
+export const remoteNodeCandidate = Object.freeze({ repository: nodeCandidate.repository, commit: 'c51d145ae0e2db47eb69a640fe8f751318370f59' })
 export const guardedNodeCandidate = Object.freeze({ repository: nodeCandidate.repository, commit: 'a6163c8b5c10a9c8129cf660020fe2c8fa2b85db' })
 export const destinationCases = Object.freeze(['empty', 'watch', 'block', 'group_scope', 'exemption', 'exemption_expired', 'allow_priority', 'paused', 'trial', 'enforce', 'extra', 'idle_sync', 'report_refresh', 'listener_rejected', 'core_check_timeout', 'collection_off', 'usage', 'restart', 'policy_rejected', 'lkg_rejected', 'pruned_rejected', 'fallback_port', 'fallback_pause', 'fallback_prune', 'sniff_exhaustion', 'exhausted_roster', 'exhausted_panel_restart', 'fallback_group_open', 'fallback_group_pause', 'offline_pause', 'offline_restart', 'response_loss'])
 const pkg = 'github.com/KazuhaHub/passwall-sub-panel/internal/app'
