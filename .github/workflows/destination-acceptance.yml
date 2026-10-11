@@ -37,17 +37,18 @@ concurrency:
 
 jobs:
   traffic:
-    name: real PSP + candidate Node + ${{ matrix.engine }} ${{ matrix.core }}
+    name: real PSP + ${{ matrix.candidate }} Node + ${{ matrix.engine }} ${{ matrix.core }}
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
         include:
-          - {engine: xray, core: '26.6.27'}
-          - {engine: xray, core: '26.7.28'}
-          - {engine: xray, core: '26.9.9'}
-          - {engine: sing-box, core: '1.14.0'}
+          - {engine: xray, core: '26.6.27', candidate: baseline, node: '63c60f6d5e8cd093bbaa8385f5b514dbe2f40390'}
+          - {engine: xray, core: '26.7.28', candidate: baseline, node: '63c60f6d5e8cd093bbaa8385f5b514dbe2f40390'}
+          - {engine: xray, core: '26.9.9', candidate: baseline, node: '63c60f6d5e8cd093bbaa8385f5b514dbe2f40390'}
+          - {engine: sing-box, core: '1.14.0', candidate: baseline, node: '63c60f6d5e8cd093bbaa8385f5b514dbe2f40390'}
+          - {engine: sing-box, core: '1.14.0', candidate: guarded, node: 'a6163c8b5c10a9c8129cf660020fe2c8fa2b85db'}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
@@ -66,13 +67,13 @@ jobs:
       - uses: actions/checkout@v7
         with:
           repository: KazuhaHub/Passwall-Node
-          ref: 63c60f6d5e8cd093bbaa8385f5b514dbe2f40390
+          ref: ${{ matrix.node }}
           path: node-candidate
           persist-credentials: false
       - name: Build immutable Node candidate with its own preferred compiler
         run: |
           set -euo pipefail
-          test "$(git -C node-candidate rev-parse HEAD)" = 63c60f6d5e8cd093bbaa8385f5b514dbe2f40390
+          test "$(git -C node-candidate rev-parse HEAD)" = '${{ matrix.node }}'
           test -z "$(git -C node-candidate status --porcelain)"
           cd node-candidate
           node_toolchain=$(awk '$1 == "toolchain" { print $2 }' go.mod)
@@ -90,9 +91,10 @@ jobs:
       - name: Real TLS sync, policy traffic, private ingestion and collection controls
         run: |
           set -euo pipefail
-          case '${{ matrix.engine }}' in
-            xray) test_name=TestNativeDestinationTraffic; verifier=check ;;
-            sing-box) test_name=TestNativeSingBoxDestinationTraffic; verifier=check-singbox ;;
+          case '${{ matrix.engine }}:${{ matrix.candidate }}' in
+            xray:baseline) test_name=TestNativeDestinationTraffic; verifier=check ;;
+            sing-box:baseline) test_name=TestNativeSingBoxDestinationTraffic; verifier=check-singbox ;;
+            sing-box:guarded) test_name=TestNativeGuardedSingBoxDestinationTraffic; verifier=check-guarded-singbox ;;
             *) exit 1 ;;
           esac
           sudo --preserve-env=GITHUB_ACTIONS,GITHUB_REPOSITORY,RUNNER_ENVIRONMENT \
@@ -106,7 +108,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: native-destination-${{ matrix.engine }}-${{ matrix.core }}-${{ github.sha }}
+          name: native-destination-${{ matrix.engine }}-${{ matrix.core }}-${{ matrix.candidate }}-${{ github.sha }}
           path: ${{ runner.temp }}/destination-acceptance-tests.json
           if-no-files-found: error
           retention-days: 7

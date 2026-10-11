@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -29,6 +30,14 @@ import (
 // This separate gate exercises sing-box execution with actual Node reports.
 // It also records the pre-hotfix private-address behavior required by N0-S.
 func TestNativeSingBoxDestinationTraffic(t *testing.T) {
+	nativeSingBoxDestinationTraffic(t, false)
+}
+
+func TestNativeGuardedSingBoxDestinationTraffic(t *testing.T) {
+	nativeSingBoxDestinationTraffic(t, true)
+}
+
+func nativeSingBoxDestinationTraffic(t *testing.T, guarded bool) {
 	if os.Geteuid() != 0 || os.Getenv("GITHUB_ACTIONS") != "true" || os.Getenv("RUNNER_ENVIRONMENT") != "github-hosted" || os.Getenv("GITHUB_REPOSITORY") != "KazuhaHub/Passwall-Sub-Panel" {
 		t.Fatal("native destination acceptance requires the disposable hosted Linux workflow")
 	}
@@ -313,14 +322,57 @@ func TestNativeSingBoxDestinationTraffic(t *testing.T) {
 		publish()
 		waitApplied()
 	})
-	run("private_baseline", func() {
-		// This is a disposable local target, never a cloud metadata endpoint.
-		privateTarget := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, nonce) }))
-		defer privateTarget.Close()
-		port := privateTarget.Listener.Addr().(*net.TCPAddr).Port
+	// This is a disposable local target, never a cloud metadata endpoint.
+	var privateRequests atomic.Int64
+	privateTarget := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		privateRequests.Add(1)
+		_, _ = io.WriteString(w, nonce)
+	}))
+	defer privateTarget.Close()
+	privatePort := privateTarget.Listener.Addr().(*net.TCPAddr).Port
+	privateDestinations := func(literalAllowed bool) {
 		for _, destination := range []string{"127.0.0.1", "localhost"} {
-			nativeMust(caseTest, nativeVLESSHost(caseTest.Context(), inbound, destination, port, f.user.UUID, nonce, destination), "pre-hotfix sing-box private destination")
+			allowed := literalAllowed || destination == "localhost"
+			before := privateRequests.Load()
+			err := nativeVLESSHost(caseTest.Context(), inbound, destination, privatePort, f.user.UUID, nonce, destination)
+			if allowed && err != nil {
+				caseTest.Fatal("real VLESS traffic did not reach its nonce target; private diagnostics withheld")
+			}
+			if !allowed && err == nil {
+				caseTest.Fatal("real VLESS traffic bypassed a deny rule")
+			}
+			want := before
+			if allowed {
+				want++
+			}
+			if privateRequests.Load() != want {
+				caseTest.Fatal("deny/allow result disagreed with actual target request count")
+			}
 		}
+		// The documentation-address target must still be served by the live core.
+		traffic(literalHost, true)
 		noCollection()
-	})
+	}
+	if guarded {
+		run("private_guard", func() {
+			privateDestinations(false)
+			// A global allow must not override the first unconditional private guard.
+			input := destinationPolicyInput("Private guard allow fixture", "allow")
+			input["inline"] = map[string]any{"ports": strconv.Itoa(privatePort)}
+			request("POST", "dest/policies", input, 201, &policy)
+			publish()
+			waitApplied()
+			privateDestinations(false)
+			request("PUT", "dest/pause", map[string]any{"paused": true}, 200, nil)
+			waitApplied()
+			privateDestinations(false)
+			request("PUT", "dest/pause", map[string]any{"paused": false}, 200, nil)
+			waitApplied()
+			request("DELETE", fmt.Sprintf("dest/policies/%d", policy.ID), nil, 204, nil)
+			publish()
+			waitApplied()
+		})
+	} else {
+		run("private_baseline", func() { privateDestinations(true) })
+	}
 }

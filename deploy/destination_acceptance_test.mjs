@@ -92,3 +92,28 @@ test('sing-box driver and hosted workflow execute every declared scenario', () =
   const workflow = readFileSync(new URL('../.github/workflows/destination-acceptance.yml', import.meta.url), 'utf8')
   for (const value of ['sing-box', '1.14.0', 'TestNativeSingBoxDestinationTraffic', 'check-singbox']) assert(workflow.includes(value), value)
 })
+
+test('guarded sing-box keeps an independent immutable candidate and complete execution gate', () => {
+  assert.equal(acceptance.guardedNodeCandidate?.repository, nodeCandidate.repository)
+  assert.equal(acceptance.guardedNodeCandidate?.commit, 'a6163c8b5c10a9c8129cf660020fe2c8fa2b85db')
+  assert.notEqual(acceptance.guardedNodeCandidate.commit, nodeCandidate.commit)
+  assert.deepEqual(acceptance.guardedSingBoxCases, [...acceptance.singBoxCases.filter(name => name !== 'private_baseline'), 'private_guard'])
+  const pkg = 'github.com/KazuhaHub/passwall-sub-panel/internal/app'
+  const names = ['TestNativeGuardedSingBoxDestinationTraffic', ...acceptance.guardedSingBoxCases.map(name => `TestNativeGuardedSingBoxDestinationTraffic/${name}`)]
+  const values = [...names.flatMap(Test => [{ Action: 'run', Package: pkg, Test }, { Action: 'pass', Package: pkg, Test }]), { Action: 'pass', Package: pkg }]
+  const evidence = sanitizeDestinationResults(encode(values))
+  assert.doesNotThrow(() => acceptance.checkGuardedSingBoxResults(evidence))
+  assert.throws(() => acceptance.checkSingBoxResults(evidence))
+  for (const name of names) {
+    assert.throws(() => acceptance.checkGuardedSingBoxResults(encode(values.filter(event => event.Test !== name))))
+    assert.throws(() => acceptance.checkGuardedSingBoxResults(encode([...values, { Action: 'run', Package: pkg, Test: name }])))
+    assert.throws(() => acceptance.checkGuardedSingBoxResults(encode(values.map(event => event.Test === name && event.Action === 'pass' ? { ...event, Action: 'skip' } : event))))
+  }
+  assert.throws(() => acceptance.checkGuardedSingBoxResults(encode(events())))
+  const baseline = values.map(event => event.Test ? { ...event, Test: event.Test.replace('TestNativeGuardedSingBoxDestinationTraffic', 'TestNativeSingBoxDestinationTraffic').replace('/private_guard', '/private_baseline') } : event)
+  assert.throws(() => acceptance.checkGuardedSingBoxResults(encode(baseline)))
+  const workflow = readFileSync(new URL('../.github/workflows/destination-acceptance.yml', import.meta.url), 'utf8')
+  for (const required of [nodeCandidate.commit, acceptance.guardedNodeCandidate.commit, '${{ matrix.node }}', 'check-guarded-singbox', 'TestNativeGuardedSingBoxDestinationTraffic']) assert(workflow.includes(required), required)
+  const driver = readFileSync(new URL('../internal/app/destination_native_singbox_test.go', import.meta.url), 'utf8')
+  for (const required of ['func TestNativeGuardedSingBoxDestinationTraffic', 'run("private_guard"', 'privateRequests.Load()', 'privateDestinations(false)', 'strconv.Itoa(privatePort)']) assert(driver.includes(required), required)
+})

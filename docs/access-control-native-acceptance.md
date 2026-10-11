@@ -9,6 +9,9 @@ The Node candidate is pinned to
 `KazuhaHub/Passwall-Node@63c60f6d5e8cd093bbaa8385f5b514dbe2f40390`.
 This is a reviewed development candidate, not a published stable release. Its
 own preferred Go compiler is checked separately from PSP's preferred compiler.
+The additional guarded sing-box job pins Node to
+`a6163c8b5c10a9c8129cf660020fe2c8fa2b85db`; the four baseline jobs retain their
+original immutable candidate. Each checkout and compiler is checked independently.
 No local module replacement is used. The daemon installs and runs each exact
 Xray version: `26.6.27`, `26.7.28`, and `26.9.9`.
 The isolated fixture explicitly acknowledges the reviewed restricted `26.9.9`
@@ -41,6 +44,20 @@ This is prerequisite evidence for a separate conditional Node hotfix, not a
 claim that a private-address guard already exists or that cloud metadata and
 DNS-resolved private destinations are protected. No cloud endpoint is queried.
 The private-address guard is unchanged by this PSP acceptance change.
+
+The guarded job repeats the same ten policy, allowlist, restart and collection
+cases against the new Node, then replaces `private_baseline` with `private_guard`.
+It must reject a real VLESS private IPv4 literal with no target request, while a
+`localhost` domain still reaches the same controlled server and returns its nonce.
+It repeats these checks after PSP publishes a global allow matching that exact
+private target port and while destination policy is paused. An owned documentation
+IP target must remain reachable each time, ruling out a stopped proxy. The
+global allow is removed and policy is resumed through administrator HTTP, with
+actual applied receipts required at each transition. Audit tables must stay empty.
+This records the guard's visible-IP boundary and the remaining DNS-domain bypass;
+it does not claim protection for all private-resolving domains or cloud metadata.
+The guarded job has its own complete execution gate and cannot borrow passes
+from either the baseline sing-box job or Xray jobs. No production code changes.
 
 Every Xray job must execute all twenty-three ordered cases: empty policy, watch,
 block, pause/resume, anonymous allowlist trial, enforce, supplemental entry,
@@ -182,6 +199,6 @@ offline and mixed-version cases, long-window response-loss deduplication, load t
 complete UI approval matrix, or staged release verification.
 
 Use the workflow run and PR validation record for execution evidence. All three
-Xray jobs and the separate sing-box job must pass on the exact current PR head;
+Xray jobs and both separate sing-box jobs must pass on the exact current PR head;
 an earlier or partial matrix does
 not satisfy this gate.

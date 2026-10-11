@@ -2,12 +2,15 @@ import { readFileSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
 
 export const nodeCandidate = Object.freeze({ repository: 'KazuhaHub/Passwall-Node', commit: '63c60f6d5e8cd093bbaa8385f5b514dbe2f40390' })
+export const guardedNodeCandidate = Object.freeze({ repository: nodeCandidate.repository, commit: 'a6163c8b5c10a9c8129cf660020fe2c8fa2b85db' })
 export const destinationCases = Object.freeze(['empty', 'watch', 'block', 'paused', 'trial', 'enforce', 'extra', 'listener_rejected', 'core_check_timeout', 'collection_off', 'usage', 'restart', 'fallback_port', 'fallback_pause', 'fallback_prune', 'sniff_exhaustion', 'exhausted_roster', 'exhausted_panel_restart', 'fallback_group_open', 'fallback_group_pause', 'offline_pause', 'offline_restart', 'response_loss'])
 const pkg = 'github.com/KazuhaHub/passwall-sub-panel/internal/app'
 export const singBoxCases = Object.freeze(['empty', 'watch', 'block', 'paused', 'domain', 'trial', 'enforce', 'extra', 'restart', 'collection_off', 'private_baseline'])
+export const guardedSingBoxCases = Object.freeze([...singBoxCases.filter(name => name !== 'private_baseline'), 'private_guard'])
 const xrayNames = ['TestNativeDestinationTraffic', ...destinationCases.map(name => `TestNativeDestinationTraffic/${name}`)]
 const singBoxNames = ['TestNativeSingBoxDestinationTraffic', ...singBoxCases.map(name => `TestNativeSingBoxDestinationTraffic/${name}`)]
-const names = [...xrayNames, ...singBoxNames]
+const guardedSingBoxNames = ['TestNativeGuardedSingBoxDestinationTraffic', ...guardedSingBoxCases.map(name => `TestNativeGuardedSingBoxDestinationTraffic/${name}`)]
+const names = [...xrayNames, ...singBoxNames, ...guardedSingBoxNames]
 const diagnostics = Object.freeze({
   'cannot bind timeout fault to the owned running core': 'timeout_core_binding_failed',
   'did not pause the owned actual Xray config check': 'timeout_check_not_paused',
@@ -104,6 +107,7 @@ export function sanitizeDestinationResults(input) {
 }
 export function checkDestinationResults(input) { checkCases(input, xrayNames) }
 export function checkSingBoxResults(input) { checkCases(input, singBoxNames) }
+export function checkGuardedSingBoxResults(input) { checkCases(input, guardedSingBoxNames) }
 function checkCases(input, names) {
   const runs = new Map(), passes = new Map()
   let packagePasses = 0
@@ -125,8 +129,9 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   if (process.argv[2] === 'sanitize' && process.argv.length === 3) {
     process.stdout.write(sanitizeDestinationResults(readFileSync(0, 'utf8')))
   } else {
-    if (!['check', 'check-singbox'].includes(process.argv[2]) || process.argv.length !== 4) throw new Error('Usage: destination-acceptance.mjs check|check-singbox RESULTS')
-    const check = process.argv[2] === 'check-singbox' ? checkSingBoxResults : checkDestinationResults
+    const checks = { check: checkDestinationResults, 'check-singbox': checkSingBoxResults, 'check-guarded-singbox': checkGuardedSingBoxResults }
+    if (!Object.hasOwn(checks, process.argv[2]) || process.argv.length !== 4) throw new Error('Usage: destination-acceptance.mjs check|check-singbox|check-guarded-singbox RESULTS')
+    const check = checks[process.argv[2]]
     check(readFileSync(process.argv[3], 'utf8'))
     console.log('Every native destination acceptance case ran and passed')
   }
