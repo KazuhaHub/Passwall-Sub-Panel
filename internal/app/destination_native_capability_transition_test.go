@@ -145,7 +145,7 @@ func nativeLegacyAllowlistCapabilityTransitions(t *testing.T, f nativeLegacyTran
 			if err != nil || state.Paused {
 				return false
 			}
-			policy, err := f.app.repos.DestAgentPolicy.Get(test.Context(), f.agentID, false)
+			policy, err := f.app.repos.DestAgentPolicy.Get(test.Context(), f.agentID, true)
 			facts["policy_receipt"] = err == nil && policy != nil && policy.MintedKind == domain.DestCandidateDesired && policy.MintedGeneration == state.PublishedGeneration && policy.MintedSHA256 != "" && policy.MintedSHA256 == s.PolicyReportDigest && policy.ReportedState == "applied" && policy.ReportedSHA256 == policy.MintedSHA256 && policy.AppliedSHA256 == policy.MintedSHA256 && !policy.FallbackExhausted
 			if !facts["policy_receipt"] {
 				return false
