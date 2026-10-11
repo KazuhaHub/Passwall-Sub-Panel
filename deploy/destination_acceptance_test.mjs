@@ -22,6 +22,18 @@ test('published remote rollback requires the real watcher, helper and complete e
   for (const value of [nodeCandidate.commit, 'PSP_NATIVE_REMOTE_SOURCE', 'PSP_NATIVE_REMOTE_NODE_BIN', 'check-remote-upgrade', 'TestNativePublishedRemoteRollback', 'TestNativeRemoteHealthFaultPreservesOtherRequests']) assert(job.includes(value), value)
 })
 
+test('remote restoration diagnostics retain only fixed booleans', () => {
+  for (const suffix of ['task_terminal', 'receipt_failed', 'receipt_activated', 'source_installed', 'seen', 'identity', 'capability', 'streams', 'policy', 'report', 'core', 'listener']) {
+    const category = `remote_restore_${suffix}`
+    for (const value of ['true', 'false']) {
+      const retained = sanitizeDestinationResults(encode([{ Action: 'output', Output: `native diagnostic: ${category}=${value}\n` }]))
+      assert.equal(JSON.parse(retained).Diagnostic, category)
+      assert.equal(JSON.parse(retained).Observed, value === 'true')
+    }
+  }
+  for (const output of ['native diagnostic: remote_restore_secret=true\n', 'native diagnostic: remote_restore_policy=private\n']) assert.equal(sanitizeDestinationResults(encode([{ Action: 'output', Output: output }])), '\n')
+})
+
 test('all real cores require scoped users, exemption expiry and allow priority', async () => {
   const acceptance = await import('./destination-acceptance.mjs')
   const required = ['group_scope', 'exemption', 'exemption_expired', 'allow_priority']

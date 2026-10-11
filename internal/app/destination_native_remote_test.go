@@ -223,12 +223,24 @@ func TestNativePublishedRemoteRollback(t *testing.T) {
 		}
 	})
 	run("health_failure_restore", func() {
+		facts := map[string]bool{}
+		sourceDigest := managed.digest(caseTest, "bin/passwall-node")
+		defer func() {
+			if caseTest.Failed() {
+				if data, err := os.ReadFile(nativeRemoteRoot + "/bin/passwall-node"); err == nil {
+					sum := sha256.Sum256(data)
+					facts["source_installed"] = hex.EncodeToString(sum[:]) == sourceDigest
+				}
+				for _, name := range []string{"task_terminal", "receipt_failed", "receipt_activated", "source_installed", "seen", "identity", "capability", "streams", "policy", "report", "core", "listener"} {
+					caseTest.Logf("native diagnostic: remote_restore_%s=%t", name, facts[name])
+				}
+			}
+		}()
 		// Refuse only the actual published target's sync before the production
 		// handler accepts it. The source candidate remains able to authenticate.
 		// No helper timeout, trust, download or activation behavior is replaced.
 		healthFault.enabled.Store(true)
 		defer healthFault.enabled.Store(false)
-		sourceDigest := managed.digest(caseTest, "bin/passwall-node")
 		exited := nativePanelHoldCoreExit(caseTest, originalPID, nativeRemoteRoot+"/data")
 		after := time.Now().UTC()
 		var failed nodeagentupgrade.Status
@@ -260,20 +272,29 @@ func TestNativePublishedRemoteRollback(t *testing.T) {
 			caseTest.Fatal("remote failed activation lacks the original running execution")
 		}
 		nativeWait(caseTest, 4*time.Minute, "remote automatic health failure restoration", func() bool {
-			stored, err := a.repos.NodeAgentTask.GetByTaskID(caseTest.Context(), failed.TaskID)
-			if err != nil || stored == nil || !stored.Status.Terminal() {
-				return false
+			var observed nativeRemoteReceipt
+			if data, err := os.ReadFile(nativeRemoteRoot + "/upgrades/" + failed.TaskID + ".json"); err == nil && json.Unmarshal(data, &observed) == nil {
+				facts["receipt_failed"], facts["receipt_activated"] = observed.Phase == "failed", observed.Phase == "activated"
 			}
-			if stored.Status != domain.NodeAgentTaskFailed || stored.ResultOK == nil || *stored.ResultOK || stored.ResultIndeterminate {
+			stored, err := a.repos.NodeAgentTask.GetByTaskID(caseTest.Context(), failed.TaskID)
+			facts["task_terminal"] = err == nil && stored != nil && stored.Status.Terminal()
+			if facts["task_terminal"] && (stored.Status != domain.NodeAgentTaskFailed || stored.ResultOK == nil || *stored.ResultOK || stored.ResultIndeterminate) {
 				caseTest.Fatal("remote health failure did not return a determinate failed task")
 			}
 			agent, err := a.repos.NodeAgent.GetByAgentID(caseTest.Context(), f.agent.AgentID)
-			if err != nil || agent.LastSeen == nil || !agent.LastSeen.After(after) || agent.Epoch != originalAgent.Epoch || agent.CredentialSHA256 != originalAgent.CredentialSHA256 || !slicesContainsNative(agent.ObservedCapabilities, protocol.CapabilityDestinationPolicy) || !streamsReady(agent) {
-				return false
+			facts["seen"], facts["identity"], facts["capability"], facts["streams"] = false, false, false, false
+			if err == nil && agent != nil {
+				facts["seen"] = agent.LastSeen != nil && agent.LastSeen.After(after)
+				facts["identity"] = agent.Epoch == originalAgent.Epoch && agent.CredentialSHA256 == originalAgent.CredentialSHA256
+				facts["capability"] = slicesContainsNative(agent.ObservedCapabilities, protocol.CapabilityDestinationPolicy)
+				facts["streams"] = streamsReady(agent)
 			}
 			s := probe.snapshot()
+			facts["report"] = s.AgentVersion == nativeRemoteCandidate+" (63c60f6)"
+			facts["core"], facts["listener"] = s.CoreState == "running", s.ListenerApplied
 			current, err := a.repos.DestAgentPolicy.Get(caseTest.Context(), f.agent.AgentID, true)
-			return err == nil && current != nil && current.MintedSHA256 == originalPolicy.MintedSHA256 && current.ReportedState == "applied" && current.ReportedSHA256 == current.MintedSHA256 && current.AppliedSHA256 == current.MintedSHA256 && bytes.Equal(current.AppliedBody, originalPolicy.AppliedBody) && s.AgentVersion == nativeRemoteCandidate+" (63c60f6)" && s.CoreState == "running" && s.ListenerApplied && s.ConfigBodyKnown && s.ConfigPolicy
+			facts["policy"] = err == nil && current != nil && current.MintedSHA256 == originalPolicy.MintedSHA256 && current.ReportedState == "applied" && current.ReportedSHA256 == current.MintedSHA256 && current.AppliedSHA256 == current.MintedSHA256 && bytes.Equal(current.AppliedBody, originalPolicy.AppliedBody) && s.ConfigBodyKnown && s.ConfigPolicy
+			return facts["task_terminal"] && facts["seen"] && facts["identity"] && facts["capability"] && facts["streams"] && facts["report"] && facts["core"] && facts["listener"] && facts["policy"]
 		})
 		var receipt nativeRemoteReceipt
 		if json.Unmarshal(managed.read(caseTest, "upgrades/"+failed.TaskID+".json"), &receipt) != nil || receipt.Phase != "failed" || receipt.ErrorCode != "agent_upgrade_failed" || receipt.Result != nil || receipt.ActivationNonce != activated.ActivationNonce || !reflect.DeepEqual(receipt.Request.Task, activated.Request.Task) {
