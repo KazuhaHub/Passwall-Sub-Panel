@@ -10,6 +10,10 @@ function events() {
   return [...names.flatMap(Test => [{ Action: 'run', Package: pkg, Test }, { Action: 'pass', Package: pkg, Test }]), { Action: 'pass', Package: pkg }]
 }
 const encode = values => values.map(value => JSON.stringify(value)).join('\n')
+test('native matrix requires the actual core-check timeout case', () => {
+  assert(destinationCases.includes('core_check_timeout'))
+  assert.throws(() => checkDestinationResults(encode(events().filter(event => !event.Test?.endsWith('/core_check_timeout')))))
+})
 test('listener diagnostics retain only fixed booleans and withhold arbitrary labels and values', () => {
   for (const category of ['listener_issue', 'listener_core_rejected', 'listener_agent_fresh', 'listener_policy_ready', 'listener_policy_unchanged', 'listener_epoch', 'listener_config_changed', 'listener_config_preserved', 'listener_config_fresh', 'receipt_generation', 'receipt_mint_fresh', 'receipt_sync_fresh', 'receipt_state', 'receipt_sha', 'receipt_lkg', 'receipt_precheck', 'receipt_streams']) {
     for (const value of ['true', 'false']) {

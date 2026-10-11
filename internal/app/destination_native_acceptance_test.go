@@ -473,6 +473,99 @@ func TestNativeDestinationTraffic(t *testing.T) {
 		waitCandidate("", false, false, *prior.MintedAt)
 		traffic(true)
 	})
+	run("core_check_timeout", func() {
+		prior, err := a.repos.DestAgentPolicy.Get(caseTest.Context(), f.agent.AgentID, true)
+		nativeMust(caseTest, err, "read policy before real core timeout")
+		confirmed, err := a.repos.NodeAgent.GetStream(caseTest.Context(), f.agent.AgentID, domain.NodeAgentStreamConfig)
+		nativeMust(caseTest, err, "read config before real core timeout")
+		if !confirmed.Converged() {
+			caseTest.Fatal("core timeout fixture has no confirmed config")
+		}
+		members := func() map[int64]int64 {
+			keys := map[int64]int64{}
+			for _, user := range []*domain.User{f.user, canary} {
+				clients, err := a.repos.PSPClient.ListByUser(caseTest.Context(), user.ID)
+				nativeMust(caseTest, err, "read timeout member")
+				for _, c := range clients {
+					if c.PanelID != f.agent.PanelID {
+						continue
+					}
+					attachments, err := a.repos.PSPClient.ListInbounds(caseTest.Context(), c.ID)
+					nativeMust(caseTest, err, "read timeout attachments")
+					if !c.DesiredEnable || c.UUID != user.UUID || len(attachments) != 1 || attachments[0].NodeID != f.node.ID || keys[user.ID] != 0 {
+						caseTest.Fatal("core timeout changed allowlist membership")
+					}
+					keys[user.ID] = c.ID
+				}
+				if keys[user.ID] == 0 {
+					caseTest.Fatal("core timeout retired an allowlist member")
+				}
+			}
+			return keys
+		}
+		before := members()
+		freeze := nativePauseNextCoreCheck(caseTest, cmd.Process.Pid, filepath.Join(dir, "node"))
+		setInbound(fullSniffing, `{"network":"tcp","security":"none","sockopt":{"tcpNoDelay":true}}`)
+		failedAfter := receiptAfter
+		select {
+		case <-freeze.observed:
+		case <-time.After(30 * time.Second):
+			caseTest.Fatal("did not pause the owned actual Xray config check")
+		}
+		// The previous process must still serve both members while the actual
+		// check is stopped. Its normal 15-second timeout must reap that child.
+		traffic(true)
+		trafficUser(canary.UUID, true)
+		nativeWait(caseTest, 120*time.Second, "real core check timeout", func() bool {
+			issues, _, err := a.repos.NodeAgentIssue.List(caseTest.Context(), ports.NodeAgentIssueFilter{AgentID: f.agent.AgentID, Code: "core_convergence_failed", Pagination: ports.Pagination{Page: 1, PageSize: 50}})
+			if err != nil {
+				return false
+			}
+			timedOut := false
+			for _, issue := range issues {
+				timedOut = timedOut || issue.LastSeenAt.After(failedAfter) && strings.Contains(issue.Detail, "context deadline exceeded")
+			}
+			current, err := a.repos.DestAgentPolicy.Get(caseTest.Context(), f.agent.AgentID, true)
+			if err != nil {
+				return false
+			}
+			cfg, err := a.repos.NodeAgent.GetStream(caseTest.Context(), f.agent.AgentID, domain.NodeAgentStreamConfig)
+			if err != nil {
+				return false
+			}
+			agent, err := a.repos.NodeAgent.GetByAgentID(caseTest.Context(), f.agent.AgentID)
+			if err != nil {
+				return false
+			}
+			listener, err := a.repos.Node.GetByID(caseTest.Context(), f.node.ID)
+			return timedOut && freeze.exited() && err == nil && listener.ConfigSyncState == domain.ConfigSyncPending && nativeListenerFaultReceiptMatches(*prior, *current, *cfg, confirmed.DesiredETag, agent.Epoch, agent.LastSeen, failedAfter)
+		})
+		for user, key := range members() {
+			if before[user] != key {
+				caseTest.Fatal("core timeout replaced an allowlist client")
+			}
+		}
+		var status destpolicy.DestinationStatus
+		request("GET", "dest/status", nil, 200, &status)
+		if len(status.Nodes) != 1 || status.Nodes[0].State != "applied" || status.Nodes[0].FallbackReason != "" || status.Nodes[0].FallbackExhausted || status.Nodes[0].MintedKind != domain.DestCandidateDesired || status.Nodes[0].PendingSince != nil {
+			caseTest.Fatal("core timeout was presented as a policy rejection")
+		}
+		traffic(true)
+		trafficUser(canary.UUID, true)
+		setSniffing(fullSniffing)
+		freeze.release()
+		repairedAfter := receiptAfter
+		nativeWait(caseTest, 120*time.Second, "timeout repair application", func() bool {
+			agent, err := a.repos.NodeAgent.GetByAgentID(caseTest.Context(), f.agent.AgentID)
+			if err != nil || agent.LastSeen == nil || !agent.LastSeen.After(repairedAfter) || !streamsReady(agent) {
+				return false
+			}
+			listener, err := a.repos.Node.GetByID(caseTest.Context(), f.node.ID)
+			return err == nil && listener.ConfigSyncState == domain.ConfigSyncSynced
+		})
+		waitCandidate("", false, false, *prior.MintedAt)
+		traffic(true)
+	})
 	run("collection_off", func() {
 		request("PUT", fmt.Sprintf("servers/%d", f.agent.PanelID), map[string]any{"audit_collect": "off"}, 200, nil)
 		waitApplied()

@@ -2,13 +2,18 @@ import { readFileSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
 
 export const nodeCandidate = Object.freeze({ repository: 'KazuhaHub/Passwall-Node', commit: '63c60f6d5e8cd093bbaa8385f5b514dbe2f40390' })
-export const destinationCases = Object.freeze(['empty', 'watch', 'block', 'paused', 'trial', 'enforce', 'extra', 'listener_rejected', 'collection_off', 'usage', 'restart', 'fallback_port', 'fallback_pause', 'fallback_prune', 'sniff_exhaustion', 'exhausted_roster', 'exhausted_panel_restart', 'fallback_group_open', 'fallback_group_pause', 'offline_pause', 'offline_restart', 'response_loss'])
+export const destinationCases = Object.freeze(['empty', 'watch', 'block', 'paused', 'trial', 'enforce', 'extra', 'listener_rejected', 'core_check_timeout', 'collection_off', 'usage', 'restart', 'fallback_port', 'fallback_pause', 'fallback_prune', 'sniff_exhaustion', 'exhausted_roster', 'exhausted_panel_restart', 'fallback_group_open', 'fallback_group_pause', 'offline_pause', 'offline_restart', 'response_loss'])
 const pkg = 'github.com/KazuhaHub/passwall-sub-panel/internal/app'
 export const singBoxCases = Object.freeze(['empty', 'watch', 'block', 'paused', 'domain', 'trial', 'enforce', 'extra', 'restart', 'collection_off', 'private_baseline'])
 const xrayNames = ['TestNativeDestinationTraffic', ...destinationCases.map(name => `TestNativeDestinationTraffic/${name}`)]
 const singBoxNames = ['TestNativeSingBoxDestinationTraffic', ...singBoxCases.map(name => `TestNativeSingBoxDestinationTraffic/${name}`)]
 const names = [...xrayNames, ...singBoxNames]
 const diagnostics = Object.freeze({
+  'cannot bind timeout fault to the owned running core': 'timeout_core_binding_failed',
+  'did not pause the owned actual Xray config check': 'timeout_check_not_paused',
+  'timed out waiting for real core check timeout': 'timeout_report_wait_failed',
+  'timed out waiting for timeout repair application': 'timeout_repair_failed',
+  'core timeout was presented as a policy rejection': 'timeout_status_failed',
   'real VLESS traffic did not reach its nonce target': 'traffic_allow_failed',
   'real VLESS traffic bypassed a deny rule': 'traffic_deny_failed',
   'deny/allow result disagreed with actual target request count': 'traffic_count_mismatch',

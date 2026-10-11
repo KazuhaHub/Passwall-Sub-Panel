@@ -42,9 +42,9 @@ claim that a private-address guard already exists or that cloud metadata and
 DNS-resolved private destinations are protected. No cloud endpoint is queried.
 The private-address guard is unchanged by this PSP acceptance change.
 
-Every Xray job must execute all twenty-two ordered cases: empty policy, watch,
+Every Xray job must execute all twenty-three ordered cases: empty policy, watch,
 block, pause/resume, anonymous allowlist trial, enforce, supplemental entry,
-unrelated listener rejection and repair,
+unrelated listener rejection and repair, actual core-check timeout and repair,
 collection off, detailed usage, daemon restart, port-only fallback under
 insufficient sniffing, pause/resume during fallback, disabled-rule pruning,
 sniffing fallback exhaustion, account revocation while exhausted, and a PSP app
@@ -81,8 +81,23 @@ original client keys remain attached. Both users still reach the target through
 the running previous artifact. Restoring the original settings then requires a
 fresh accepted report, current config/roster convergence and a synced production
 listener intent. Stream convergence alone acknowledges a received document;
-the listener's pending intent proves the invalid config was not deployed. This covers an
-unrelated completed core check, not a simulated policy rejection or timeout.
+the listener's pending intent proves the invalid config was not deployed.
+
+The timeout case binds to the installed executable of the running Node's core.
+It pauses only that Node's exact `run -test -config .candidate-*.json` children,
+using pidfds and checking parent, executable inode, argument shape and owned
+state directory. It never pauses the live proxy process or rewrites any binary,
+artifact, report or receipt. The normal production timeout must terminate the
+first stopped check and yield a fresh `core_convergence_failed` deadline report.
+Checks remain paused until repair so a quick successful retry cannot hide the
+failure. While the check is stopped and after timeout, both existing users must
+still reach the actual target through the previous core. Policy body, digest,
+LKG, candidate kind and member keys remain unchanged; listener intent stays
+pending and the status page does not classify this as a policy rejection.
+Restoring the original listener requires a fresh applied/converged report and
+synced listener intent. Cleanup resumes only still-existing held children and
+closes all pidfds. These cases cover a completed unrelated rejection and a real
+deadline, not a policy-specific rejection.
 PSP is then shut down and rebuilt with the same configuration and database.
 A drained fixture TLS gateway holds the endpoint stable while the actual SQL
 pool, router, services and caches are replaced. The continuing real daemon must
