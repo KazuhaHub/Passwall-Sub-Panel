@@ -109,6 +109,14 @@ canary traffic is denied and a real group hit is ingested. A new BitTorrent rule
 then fails the metadata-only sniffing precheck. The confirmed fallback retains
 the group source. Returning the group to open must prune that source, retain only
 the exact port watch, and acknowledge the original canary's enabled attachment.
+Before that administrative mutation, the driver captures the prior fallback.
+The prune must advance the published generation, mint after that prior mint,
+change the canonical body and digest, confirm that exact pruned body, and receive
+a real sync after the mutation. Mint timestamps use a sync cycle's clock captured
+before policy compilation, so a concurrent write can be visible to compilation
+after that clock. This transition proof avoids assuming that the mint's clock
+must follow the administrator request's wall time. The exact rule/source, current
+generation, LKG, listener, roster and actual traffic assertions remain required.
 The previously revoked user must remain disabled. Actual canary traffic must
 reach the target and create a watch hit. Pausing this fallback acknowledges zero
 rules and allows canary traffic without adding watch hits after prior batches

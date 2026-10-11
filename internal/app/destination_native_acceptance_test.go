@@ -166,14 +166,14 @@ func TestNativeDestinationTraffic(t *testing.T) {
 		return true
 	}
 	receiptWait := 0
-	waitCandidate := func(kind domain.DestCandidateKind, exhausted, fault bool, after time.Time) {
+	waitCandidate := func(kind domain.DestCandidateKind, exhausted, fault bool, after time.Time, prunedFrom ...*domain.DestAgentPolicy) {
 		caseTest.Helper()
 		receiptWait++
 		facts := map[string]bool{}
 		defer func() {
 			if caseTest.Failed() {
 				caseTest.Logf("native receipt wait: %d", receiptWait)
-				for _, category := range []string{"receipt_generation", "receipt_mint_fresh", "receipt_sync_fresh", "receipt_state", "receipt_sha", "receipt_lkg", "receipt_precheck", "receipt_streams"} {
+				for _, category := range []string{"receipt_generation", "receipt_mint_fresh", "receipt_sync_fresh", "receipt_state", "receipt_sha", "receipt_lkg", "receipt_precheck", "receipt_streams", "receipt_transition"} {
 					caseTest.Logf("native diagnostic: %s=%t", category, facts[category])
 				}
 				for _, category := range []string{"download", "checksum", "timeout", "rejected", "unsupported", "permission", "bind", "certificate"} {
@@ -203,7 +203,12 @@ func TestNativeDestinationTraffic(t *testing.T) {
 			facts["receipt_precheck"] = (len(r.PrecheckListeners) > 0) == fault
 			facts["receipt_streams"] = streamsReady(agent)
 			if fault {
-				if !nativeFaultReceiptMatches(*r, state.PublishedGeneration, agent.LastSeen, after, kind, exhausted) || len(r.PrecheckListeners) != 1 || r.PrecheckListeners[0] != string(protocol.NewListenerKey(f.node.ID)) {
+				matches := nativeFaultReceiptMatches(*r, state.PublishedGeneration, agent.LastSeen, after, kind, exhausted)
+				if len(prunedFrom) > 0 {
+					facts["receipt_transition"] = len(prunedFrom) == 1 && prunedFrom[0] != nil && kind == domain.DestCandidateFallback && !exhausted && nativePrunedFallbackReceiptMatches(*prunedFrom[0], *r, state.PublishedGeneration, agent.LastSeen, after)
+					matches = facts["receipt_transition"]
+				}
+				if !matches || len(r.PrecheckListeners) != 1 || r.PrecheckListeners[0] != string(protocol.NewListenerKey(f.node.ID)) {
 					return false
 				}
 			} else if !nativeReceiptMatches(*r, state.PublishedGeneration, agent.LastSeen, after) {
@@ -806,9 +811,11 @@ func TestNativeDestinationTraffic(t *testing.T) {
 		trafficUser(canary.UUID, false)
 		// Sniffing fallback can detach allowlist members. Returning to open must
 		// prune the group source and acknowledge its original client attachment.
+		pruningPrior, err := a.repos.DestAgentPolicy.Get(caseTest.Context(), f.agent.AgentID, true)
+		nativeMust(caseTest, err, "read fallback before group opens")
 		request("PUT", groupPath, map[string]any{"mode": "open", "stage": "", "list_ids": []int64{}, "updated_at": mode.UpdatedAt}, 200, &mode)
 		publish()
-		waitFault(domain.DestCandidateFallback, false)
+		waitCandidate(domain.DestCandidateFallback, false, true, receiptAfter, pruningPrior)
 		current := verifyCandidate(1, "", 0)
 		verifyGroupWatch(current, false)
 		groupWatchLKG = current.AppliedSHA256

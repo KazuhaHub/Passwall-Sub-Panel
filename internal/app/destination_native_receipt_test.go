@@ -33,6 +33,56 @@ func nativeOpenRosterReceiptMatches(stream domain.NodeAgentStream, epoch uint64,
 	return retained == 1 && active == 1
 }
 
+func nativePrunedFallbackReceiptMatches(prior, current domain.DestAgentPolicy, generation int64, lastSeen *time.Time, after time.Time) bool {
+	// Mint uses the sync cycle's clock, captured before compiling the latest
+	// published definitions. A concurrent admin write can occur after that
+	// clock yet before compilation. Prove the exact post-write transition.
+	return prior.MintedAt != nil && current.MintedAt != nil && current.MintedAt.After(*prior.MintedAt) &&
+		prior.MintedGeneration > 0 && generation > prior.MintedGeneration &&
+		prior.MintedSHA256 != "" && current.MintedSHA256 != prior.MintedSHA256 &&
+		len(prior.MintedBody) > 0 && len(current.MintedBody) > 0 && !bytes.Equal(current.MintedBody, prior.MintedBody) &&
+		bytes.Equal(current.AppliedBody, current.MintedBody) && lastSeen != nil && lastSeen.After(after) &&
+		nativeFaultReceiptMatches(current, generation, lastSeen, *prior.MintedAt, domain.DestCandidateFallback, false)
+}
+
+func TestNativePrunedFallbackUsesGenerationAndBodyCausality(t *testing.T) {
+	oldMint := time.Unix(100, 0)
+	newMint := oldMint.Add(time.Second)
+	adminStarted := newMint.Add(time.Millisecond)
+	synced := adminStarted.Add(time.Second)
+	prior := domain.DestAgentPolicy{MintedGeneration: 6, MintedAt: &oldMint, MintedSHA256: "group-and-watch", MintedBody: []byte("group-and-watch")}
+	base := domain.DestAgentPolicy{MintedKind: domain.DestCandidateFallback, MintedGeneration: 7, MintedAt: &newMint, MintedSHA256: "watch-only", MintedBody: []byte("watch-only"), DesiredSHA256: "unsniffable", ReportedSHA256: "watch-only", ReportedState: "applied", AppliedSHA256: "watch-only", AppliedBody: []byte("watch-only"), AppliedAt: &synced, ReportedAt: &synced, FallbackReason: "sniffing", PrecheckListeners: []string{"l1"}}
+	for _, tc := range []struct {
+		name   string
+		change func(*domain.DestAgentPolicy, **time.Time)
+		want   bool
+	}{
+		{"sync-clock-precedes-admin-but-new-generation-and-pruned-body", func(*domain.DestAgentPolicy, **time.Time) {}, true},
+		{"old-generation", func(r *domain.DestAgentPolicy, _ **time.Time) { r.MintedGeneration = 6 }, false},
+		{"old-body", func(r *domain.DestAgentPolicy, _ **time.Time) { r.MintedBody = prior.MintedBody }, false},
+		{"old-digest", func(r *domain.DestAgentPolicy, _ **time.Time) { r.MintedSHA256 = prior.MintedSHA256 }, false},
+		{"old-mint", func(r *domain.DestAgentPolicy, _ **time.Time) { r.MintedAt = prior.MintedAt }, false},
+		{"old-sync", func(_ *domain.DestAgentPolicy, s **time.Time) { *s = &newMint }, false},
+		{"unapplied", func(r *domain.DestAgentPolicy, _ **time.Time) { r.ReportedSHA256 = "old" }, false},
+		{"lost-confirmed-body", func(r *domain.DestAgentPolicy, _ **time.Time) { r.AppliedBody = prior.MintedBody }, false},
+		{"exhausted", func(r *domain.DestAgentPolicy, _ **time.Time) { r.FallbackExhausted = true }, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			current, seen := base, &synced
+			// Negative vectors also fail with an ordinary post-write mint clock;
+			// chronology alone cannot replace generation/body/receipt checks.
+			if !tc.want {
+				later := adminStarted.Add(time.Millisecond)
+				current.MintedAt = &later
+			}
+			tc.change(&current, &seen)
+			if got := nativePrunedFallbackReceiptMatches(prior, current, 7, seen, adminStarted); got != tc.want {
+				t.Fatalf("pruned fallback receipt = %t, want %t", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestNativeOpenRosterReceiptRequiresCurrentAttachmentAndPreservedRevocation(t *testing.T) {
 	roster := protocol.RosterBody{Clients: []protocol.Client{
 		{Key: protocol.NewClientKey(1), Subject: protocol.NewSubjectKey(1), Enabled: false},
