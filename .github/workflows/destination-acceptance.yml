@@ -49,6 +49,10 @@ jobs:
           - {engine: xray, core: '26.9.9', candidate: baseline, node: '63c60f6d5e8cd093bbaa8385f5b514dbe2f40390'}
           - {engine: sing-box, core: '1.14.0', candidate: baseline, node: '63c60f6d5e8cd093bbaa8385f5b514dbe2f40390'}
           - {engine: sing-box, core: '1.14.0', candidate: guarded, node: 'a6163c8b5c10a9c8129cf660020fe2c8fa2b85db'}
+          - {engine: xray, core: '26.6.27', candidate: integrated, node: 'e2c9dfbfe934d4a61fda84b0a80b4f1cb5dbc719'}
+          - {engine: xray, core: '26.7.28', candidate: integrated, node: 'e2c9dfbfe934d4a61fda84b0a80b4f1cb5dbc719'}
+          - {engine: xray, core: '26.9.9', candidate: integrated, node: 'e2c9dfbfe934d4a61fda84b0a80b4f1cb5dbc719'}
+          - {engine: sing-box, core: '1.14.0', candidate: integrated, node: 'e2c9dfbfe934d4a61fda84b0a80b4f1cb5dbc719'}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
@@ -92,9 +96,9 @@ jobs:
         run: |
           set -euo pipefail
           case '${{ matrix.engine }}:${{ matrix.candidate }}' in
-            xray:baseline) test_name=TestNativeDestinationTraffic; verifier=check ;;
+            xray:baseline|xray:integrated) test_name=TestNativeDestinationTraffic; verifier=check ;;
             sing-box:baseline) test_name=TestNativeSingBoxDestinationTraffic; verifier=check-singbox ;;
-            sing-box:guarded) test_name=TestNativeGuardedSingBoxDestinationTraffic; verifier=check-guarded-singbox ;;
+            sing-box:guarded|sing-box:integrated) test_name=TestNativeGuardedSingBoxDestinationTraffic; verifier=check-guarded-singbox ;;
             *) exit 1 ;;
           esac
           sudo --preserve-env=GITHUB_ACTIONS,GITHUB_REPOSITORY,RUNNER_ENVIRONMENT \

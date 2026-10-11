@@ -12,6 +12,13 @@ own preferred Go compiler is checked separately from PSP's preferred compiler.
 The additional guarded sing-box job pins Node to
 `a6163c8b5c10a9c8129cf660020fe2c8fa2b85db`; the four baseline jobs retain their
 original immutable candidate. Each checkout and compiler is checked independently.
+Four further jobs pin the integrated Node stack to
+`e2c9dfbfe934d4a61fda84b0a80b4f1cb5dbc719`: all three Xray versions and
+guarded sing-box `1.14.0`. This candidate includes the report-outbox fix, private-IP
+guard, state URI compatibility and Windows checkout changes. It is also an
+unpublished development candidate. These jobs use the same complete traffic and
+ingestion gates, with separate candidate-labelled artifacts; the earlier fixed
+candidates remain independent checkpoints.
 No local module replacement is used. The daemon installs and runs each exact
 Xray version: `26.6.27`, `26.7.28`, and `26.9.9`.
 The isolated fixture explicitly acknowledges the reviewed restricted `26.9.9`
@@ -19,7 +26,8 @@ selection; the production catalog gate remains enforced.
 
 A separate job selects the reviewed sing-box `1.14.0` through the same PSP
 catalog and launches the candidate Node with its normal sing-box API. Its
-thirteen required cases are empty policy, watch, block, pause/resume, sniffed
+seventeen required cases are empty policy, watch, block, group scoping, exemption
+and expiry, allow priority, pause/resume, sniffed
 domain blocking, allowlist trial, enforce, supplemental CIDR, unchanged sync, report-only refresh, daemon restart,
 collection settings, and the pre-hotfix private-address baseline. Administrator
 mutations require a current applied policy receipt and actual listener/roster
@@ -45,7 +53,7 @@ claim that a private-address guard already exists or that cloud metadata and
 DNS-resolved private destinations are protected. No cloud endpoint is queried.
 The private-address guard is unchanged by this PSP acceptance change.
 
-The guarded job repeats the same twelve policy, allowlist, sync, refresh, restart and collection
+The guarded jobs repeat the same sixteen policy, allowlist, sync, refresh, restart and collection
 cases against the new Node, then replaces `private_baseline` with `private_guard`.
 It must reject a real VLESS private IPv4 literal with no target request, while a
 `localhost` domain still reaches the same controlled server and returns its nonce.
@@ -60,8 +68,8 @@ The guarded job has its own complete execution gate and cannot borrow passes
 from either the baseline sing-box job or Xray jobs. This guarded job does not
 change Node production code.
 
-Every Xray job must execute all twenty-eight ordered cases: empty policy, watch,
-block, pause/resume, anonymous allowlist trial, enforce, supplemental entry,
+Every Xray job must execute all thirty-two ordered cases: empty policy, watch,
+block, group scoping, exemption and expiry, allow priority, pause/resume, anonymous allowlist trial, enforce, supplemental entry,
 unchanged sync, report-only list refresh, unrelated listener rejection and repair, actual core-check timeout and repair,
 collection off, detailed usage, daemon restart, policy rejection and retry,
 original-LKG rejection, pruned-fallback rejection, port-only fallback under
@@ -275,7 +283,8 @@ offline and mixed-version cases, long-window response-loss deduplication, load t
 complete UI approval matrix, or staged release verification.
 
 Use the workflow run and PR validation record for execution evidence. All three
-Xray jobs and both separate sing-box jobs must pass on the exact current PR head;
+baseline Xray jobs, both checkpoint sing-box jobs and all four integrated Node
+jobs must pass on the exact current PR head;
 an earlier or partial matrix does
 not satisfy this gate.
 
@@ -451,7 +460,7 @@ issue，导致报告校验失败并连带阻止有效失败任务结果发送。
 检查，不能用之前的 148 项绿灯计为完成。
 
 独立 `published-docker` 作业新增 amd64/arm64 两个平台，各要求相同的五个阶段，
-使完整矩阵要求九份证据、159 项。它通过正常管理 HTTP 在一次性夹具中创建可恢复
+使原固定候选矩阵要求九份证据、159 项。它通过正常管理 HTTP 在一次性夹具中创建可恢复
 的注册凭据，再下载 PSP 正常生成的双服务 Compose。固定 Node `c51d145ae0e2db47eb69a640fe8f751318370f59`
 通过原发行 Dockerfile 构建明确未发布的本地候选；初始 Compose 不拉取该候选。
 只增加夹具 TLS CA 的独立只读挂载，原入口、权限、网络与生产挂载保持。
@@ -472,3 +481,8 @@ issue，导致报告校验失败并连带阻止有效失败任务结果发送。
 新增 Docker 驱动仍须通过实际作业和严格执行检查；代码、编译和合成 checker 测试
 不证明其运行成功。它覆盖已发布旧目标的回滚及健康失败恢复，不代替已发布新功能
 版本的正向升级，也不代替 Node updater 的全部交接故障矩阵。
+
+集成 Node `e2c9dfbfe934d4a61fda84b0a80b4f1cb5dbc719` 另增加三份 Xray
+证据（每份 32 项）和一份 guarded sing-box 证据（17 项），因此当前完整矩阵
+要求十三份独立证据、272 项。原九份证据仍须通过，不能用旧候选绿灯代替集成
+候选的实际执行，也不能据此宣称已发布新版本的正向升级或全部阶段已经完成。
