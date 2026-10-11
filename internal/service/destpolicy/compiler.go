@@ -32,6 +32,7 @@ type CompilerInputs interface {
 type CompilerOptions struct {
 	Definitions CompilerDefinitions
 	Runtime     ports.DestAgentPolicyRepo
+	Issues      ports.NodeAgentIssueRepo
 	Inputs      CompilerInputs
 	MinSeconds  func(context.Context) (int, error)
 	Now         func() time.Time
@@ -73,6 +74,7 @@ func NewCompiler(options CompilerOptions) (*Compiler, error) {
 	c.publisher = NewPublisher(options.Definitions, nil)
 	c.publisher.now = options.Now
 	c.observer = NewObserver(options.Runtime, options.Now)
+	c.observer.issues = options.Issues
 	c.observer.SetInvalidator(func(agentID string) {
 		if c.invalidate != nil {
 			c.invalidate(agentID)

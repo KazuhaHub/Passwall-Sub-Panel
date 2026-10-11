@@ -69,7 +69,7 @@ func TestNativeDestinationTraffic(t *testing.T) {
 		// this plain VLESS listener. Never weaken the production catalog gate.
 		nativeMust(t, a.repos.NodeAgent.UpdateCoreSelection(t.Context(), f.agent.AgentID, domain.NodeCoreXray, version, version == "26.9.9"), "select reviewed core")
 	}
-	inbound, api := nativePort(t), nativePort(t)
+	inbound, api, singBoxAPI := nativePort(t), nativePort(t), nativePort(t)
 	f.node.DesiredPort, f.node.ObservedPort = inbound, inbound
 	f.node.InboundListen = "127.0.0.1"
 	const fullSniffing = `{"enabled":true,"destOverride":["http","tls","quic"],"routeOnly":true}`
@@ -92,7 +92,7 @@ func TestNativeDestinationTraffic(t *testing.T) {
 	var cmd *exec.Cmd
 	var done chan error
 	startDaemon := func(test *testing.T) {
-		cmd = exec.Command(binary, "--endpoint", server.URL+"/v1/node/sync", "--agent-id", f.agent.AgentID, "--credential-file", credential, "--data-dir", filepath.Join(dir, "node"), "--xray-api-listen", net.JoinHostPort("127.0.0.1", strconv.Itoa(api)))
+		cmd = exec.Command(binary, "--endpoint", server.URL+"/v1/node/sync", "--agent-id", f.agent.AgentID, "--credential-file", credential, "--data-dir", filepath.Join(dir, "node"), "--xray-api-listen", net.JoinHostPort("127.0.0.1", strconv.Itoa(api)), "--sing-box-api-listen", net.JoinHostPort("127.0.0.1", strconv.Itoa(singBoxAPI)))
 		cmd.Env = append(os.Environ(), "SSL_CERT_FILE="+ca)
 		cmd.Stdout, cmd.Stderr = output, output
 		nativeMust(test, cmd.Start(), "start candidate Node")
@@ -743,6 +743,14 @@ func TestNativeDestinationTraffic(t *testing.T) {
 		waitApplied()
 		traffic(true)
 	})
+	rejectedFallback := nativeFallbackRejectionFixture{
+		root: t, app: &a, agentID: f.agent.AgentID, panelID: f.agent.PanelID, nodeID: f.node.ID,
+		userID: f.user.ID, canaryClientID: canaryClient.ID, userUUID: f.user.UUID, canaryUUID: canary.UUID,
+		xrayVersion: version, gateway: gateway, probe: probe, request: request, publish: publish,
+		waitApplied: waitApplied, stopDaemon: stopDaemon, streamsReady: streamsReady, traffic: trafficUser,
+	}
+	run("lkg_rejected", func() { rejectedFallback.run(caseTest, false) })
+	run("pruned_rejected", func() { rejectedFallback.run(caseTest, true) })
 	run("fallback_port", func() {
 		input["action"], input["updated_at"] = "block", policy.UpdatedAt
 		request("PUT", fmt.Sprintf("dest/policies/%d", policy.ID), input, 200, &policy)

@@ -15,6 +15,7 @@ import (
 
 type Observer struct {
 	store           ports.DestAgentPolicyRepo
+	issues          ports.NodeAgentIssueRepo
 	now             func() time.Time
 	invalidate      func(string)
 	allowlistResync func(context.Context, string)
@@ -40,8 +41,9 @@ func (o *Observer) ObserveStatus(ctx context.Context, agentID string, status *pr
 	now := o.now().UTC()
 	invalidate := false
 	resync := false
+	lkgRejected := false
 	_, err := o.store.Update(ctx, agentID, now, func(state *domain.DestAgentPolicy, loadBodies func() error) (bool, error) {
-		invalidate, resync = false, false
+		invalidate, resync, lkgRejected = false, false, false
 		blocked := fallbackBlocksAllowlist(*state)
 		oldDigest, oldReason, oldExhausted := state.AppliedSHA256, state.FallbackReason, state.FallbackExhausted
 		oldRejected, oldLimit, oldListeners := state.RejectedGeneration, state.OverLimit, state.PrecheckListeners
@@ -60,6 +62,9 @@ func (o *Observer) ObserveStatus(ctx context.Context, agentID string, status *pr
 			invalidate = oldDigest != state.AppliedSHA256 || oldReason != state.FallbackReason || oldExhausted != state.FallbackExhausted || oldRejected != state.RejectedGeneration || oldRejectedContext != state.RejectedContext || !reflect.DeepEqual(oldLimit, state.OverLimit) || !slices.Equal(oldListeners, state.PrecheckListeners)
 			resync = blocked != fallbackBlocksAllowlist(*state)
 		}
+		// Keep this true for a matching replay after an issue-store failure.
+		// Sync must record the issue before minting the replacement empty policy.
+		lkgRejected = err == nil && state.MintedAt != nil && state.MintedKind == domain.DestCandidateFallback && state.FallbackExhausted && status.State == "rejected" && status.Digest == state.MintedSHA256
 		return changed, err
 	})
 	if err != nil {
@@ -70,6 +75,12 @@ func (o *Observer) ObserveStatus(ctx context.Context, agentID string, status *pr
 	}
 	if resync && o.allowlistResync != nil {
 		o.allowlistResync(ctx, agentID)
+	}
+	if lkgRejected && o.issues != nil {
+		issue := domain.NodeAgentIssue{AgentID: agentID, Code: "destination_policy_lkg_rejected", Key: status.Digest, Detail: "The core rejected the previous access policy; an empty policy is being dispatched."}
+		if err := o.issues.RecordBatch(ctx, agentID, []domain.NodeAgentIssue{issue}, now); err != nil {
+			return fmt.Errorf("record rejected destination fallback issue: %w", err)
+		}
 	}
 	return nil
 }

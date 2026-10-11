@@ -351,6 +351,7 @@ type nativeRestartProbe struct {
 	armed, seen, accepted bool
 	status                *protocol.PolicyStatus
 	wantedState           string
+	wantedDigest          string
 	generation            uint64
 }
 
@@ -361,10 +362,17 @@ func (p *nativeRestartProbe) armRejected() {
 	p.armState("rejected")
 }
 func (p *nativeRestartProbe) armState(state string) {
+	p.armMatch(state, "")
+}
+func (p *nativeRestartProbe) armRejectedDigest(digest string) {
+	p.armMatch("rejected", digest)
+}
+func (p *nativeRestartProbe) armMatch(state, digest string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.armed, p.seen, p.accepted, p.status = true, false, false, nil
 	p.wantedState = state
+	p.wantedDigest = digest
 	p.generation++
 }
 func (p *nativeRestartProbe) first() (*protocol.PolicyStatus, bool, bool) {
@@ -381,7 +389,7 @@ func (p *nativeRestartProbe) wrap(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p.mu.Lock()
 		capture := p.armed && r.Method == "POST" && r.URL.Path == "/v1/node/sync"
-		wanted, generation := p.wantedState, p.generation
+		wanted, digest, generation := p.wantedState, p.wantedDigest, p.generation
 		if capture && wanted == "" {
 			p.armed = false
 		}
@@ -400,7 +408,7 @@ func (p *nativeRestartProbe) wrap(next http.Handler) http.Handler {
 		valid := !body.truncated && json.Unmarshal(body.buf.Bytes(), &report) == nil && report.PolicyStatus != nil
 		p.mu.Lock()
 		defer p.mu.Unlock()
-		if p.generation != generation || wanted != "" && (!p.armed || !valid || report.PolicyStatus.State != wanted || protocol.ValidatePolicyStatus(*report.PolicyStatus) != nil) {
+		if p.generation != generation || wanted != "" && (!p.armed || !valid || report.PolicyStatus.State != wanted || digest != "" && report.PolicyStatus.Digest != digest || protocol.ValidatePolicyStatus(*report.PolicyStatus) != nil) {
 			return
 		}
 		p.armed = false

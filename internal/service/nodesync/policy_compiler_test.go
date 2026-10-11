@@ -318,8 +318,12 @@ func TestProductionPolicyCompilerPrunedFallbackRejectionExhaustsDurably(t *testi
 	if err := definitions.SavePolicy(t.Context(), p, p.UpdatedAt, f.now); err != nil {
 		t.Fatal(err)
 	}
+	retired := &domain.DestPolicy{Name: "retired fallback source", Enabled: true, Action: domain.DestBlock, Scope: domain.DestScopeAll, Inline: domain.DestInline{Ports: "8080"}}
+	if err := definitions.SavePolicy(t.Context(), retired, retired.UpdatedAt, f.now); err != nil {
+		t.Fatal(err)
+	}
 	publishCompilerFixture(t, f, definitions)
-	compiler, err := destpolicy.NewCompiler(destpolicy.CompilerOptions{Definitions: definitions, Runtime: f.repos.DestAgentPolicy, Inputs: compilerFixtureInputs{}, Now: f.service.now})
+	compiler, err := destpolicy.NewCompiler(destpolicy.CompilerOptions{Definitions: definitions, Runtime: f.repos.DestAgentPolicy, Issues: f.repos.NodeAgentIssue, Inputs: compilerFixtureInputs{}, Now: f.service.now})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -337,6 +341,9 @@ func TestProductionPolicyCompilerPrunedFallbackRejectionExhaustsDurably(t *testi
 	if err := definitions.SavePolicy(t.Context(), p, p.UpdatedAt, f.now); err != nil {
 		t.Fatal(err)
 	}
+	if err := definitions.DeletePolicy(t.Context(), retired.ID, f.now); err != nil {
+		t.Fatal(err)
+	}
 	publishCompilerFixture(t, f, definitions)
 	desired, err := f.service.Sync(t.Context(), report)
 	if err != nil || desired.Config.Body == nil || desired.Config.Body.Policy == nil {
@@ -344,7 +351,7 @@ func TestProductionPolicyCompilerPrunedFallbackRejectionExhaustsDurably(t *testi
 	}
 	report.PolicyStatus = &protocol.PolicyStatus{State: "rejected", Digest: protocol.PolicyDigest(desired.Config.Body.Policy), IssueCode: protocol.IssueDestinationPolicyRejected}
 	fallback, err := f.service.Sync(t.Context(), report)
-	if err != nil || fallback.Config.Body == nil || fallback.Config.Body.Policy == nil || fallback.Config.Body.Policy.Rules[0].Ports != "80" {
+	if err != nil || fallback.Config.Body == nil || fallback.Config.Body.Policy == nil || len(fallback.Config.Body.Policy.Rules) != 1 || fallback.Config.Body.Policy.Rules[0].Ports != "80" || protocol.PolicyDigest(fallback.Config.Body.Policy) == protocol.PolicyDigest(first.Config.Body.Policy) {
 		t.Fatalf("exact LKG not selected: %+v / %v", fallback.Config, err)
 	}
 	report.PolicyStatus.Digest = protocol.PolicyDigest(fallback.Config.Body.Policy)
@@ -356,6 +363,10 @@ func TestProductionPolicyCompilerPrunedFallbackRejectionExhaustsDurably(t *testi
 	if err != nil || !state.FallbackExhausted || state.AppliedSHA256 != "" || len(state.AppliedBody) != 0 || state.MintedKind != domain.DestCandidateEmpty {
 		t.Fatalf("fallback exhaustion not durable: %+v / %v", state, err)
 	}
+	issues, total, err := f.repos.NodeAgentIssue.List(t.Context(), ports.NodeAgentIssueFilter{AgentID: f.agent.AgentID, Code: "destination_policy_lkg_rejected"})
+	if err != nil || total != 1 || len(issues) != 1 || issues[0].Key != report.PolicyStatus.Digest {
+		t.Fatalf("matching rejected fallback did not persist its issue: total=%d / %v", total, err)
+	}
 	// Reassembling the compiler uses persisted state, not a process-local lock.
 	restarted, err := destpolicy.NewCompiler(destpolicy.CompilerOptions{Definitions: definitions, Runtime: sqlstore.NewDestAgentPolicyRepo(f.db), Inputs: compilerFixtureInputs{}, Now: f.service.now})
 	if err != nil {
@@ -365,5 +376,9 @@ func TestProductionPolicyCompilerPrunedFallbackRejectionExhaustsDurably(t *testi
 	again, err := f.service.Sync(t.Context(), report)
 	if err != nil || again.Config.ETag != empty.Config.ETag || again.Config.Body == nil || again.Config.Body.Policy != nil {
 		t.Fatalf("restart retried exhausted fallback: %+v / %v", again.Config, err)
+	}
+	_, total, err = f.repos.NodeAgentIssue.List(t.Context(), ports.NodeAgentIssueFilter{AgentID: f.agent.AgentID, Code: "destination_policy_lkg_rejected"})
+	if err != nil || total != 1 {
+		t.Fatal("stale fallback report duplicated its durable issue")
 	}
 }

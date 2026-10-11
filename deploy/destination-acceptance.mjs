@@ -3,7 +3,7 @@ import { pathToFileURL } from 'node:url'
 
 export const nodeCandidate = Object.freeze({ repository: 'KazuhaHub/Passwall-Node', commit: '63c60f6d5e8cd093bbaa8385f5b514dbe2f40390' })
 export const guardedNodeCandidate = Object.freeze({ repository: nodeCandidate.repository, commit: 'a6163c8b5c10a9c8129cf660020fe2c8fa2b85db' })
-export const destinationCases = Object.freeze(['empty', 'watch', 'block', 'paused', 'trial', 'enforce', 'extra', 'idle_sync', 'report_refresh', 'listener_rejected', 'core_check_timeout', 'collection_off', 'usage', 'restart', 'policy_rejected', 'fallback_port', 'fallback_pause', 'fallback_prune', 'sniff_exhaustion', 'exhausted_roster', 'exhausted_panel_restart', 'fallback_group_open', 'fallback_group_pause', 'offline_pause', 'offline_restart', 'response_loss'])
+export const destinationCases = Object.freeze(['empty', 'watch', 'block', 'paused', 'trial', 'enforce', 'extra', 'idle_sync', 'report_refresh', 'listener_rejected', 'core_check_timeout', 'collection_off', 'usage', 'restart', 'policy_rejected', 'lkg_rejected', 'pruned_rejected', 'fallback_port', 'fallback_pause', 'fallback_prune', 'sniff_exhaustion', 'exhausted_roster', 'exhausted_panel_restart', 'fallback_group_open', 'fallback_group_pause', 'offline_pause', 'offline_restart', 'response_loss'])
 const pkg = 'github.com/KazuhaHub/passwall-sub-panel/internal/app'
 export const singBoxCases = Object.freeze(['empty', 'watch', 'block', 'paused', 'domain', 'trial', 'enforce', 'extra', 'idle_sync', 'report_refresh', 'restart', 'collection_off', 'private_baseline'])
 export const guardedSingBoxCases = Object.freeze([...singBoxCases.filter(name => name !== 'private_baseline'), 'private_guard'])
@@ -12,6 +12,17 @@ const singBoxNames = ['TestNativeSingBoxDestinationTraffic', ...singBoxCases.map
 const guardedSingBoxNames = ['TestNativeGuardedSingBoxDestinationTraffic', ...guardedSingBoxCases.map(name => `TestNativeGuardedSingBoxDestinationTraffic/${name}`)]
 const names = [...xrayNames, ...singBoxNames, ...guardedSingBoxNames]
 const diagnostics = Object.freeze({
+  'timed out waiting for reviewed core switch': 'fallback_core_switch_timeout',
+  'mapped-prefix LKG was not actually confirmed by sing-box': 'fallback_original_unconfirmed',
+  'fallback rejection fixture did not distinguish pruning from desired': 'fallback_rejection_fixture_invalid',
+  'real rejected fallback report did not match the exact minted policy': 'fallback_rejection_identity_failed',
+  'timed out waiting for rejected fallback empty deployment': 'fallback_empty_timeout',
+  'status API did not confirm exhausted rejected fallback': 'fallback_exhausted_status_failed',
+  'timed out waiting for rejected fallback roster revocation': 'fallback_rejected_roster_timeout',
+  'roster mutation rearmed rejected fallback': 'fallback_rejected_roster_rearmed',
+  'PSP restart rearmed rejected pruned fallback': 'fallback_rejected_restart_rearmed',
+  'exhausted fallback retry was not admitted': 'fallback_rejected_retry_failed',
+  'timed out waiting for exhausted fallback manual retry rejection': 'fallback_rejected_retry_timeout',
   'timed out waiting for real policy rejection and LKG receipt': 'policy_rejection_timeout',
   'real rejection did not identify the canonical desired policy': 'policy_rejection_identity_failed',
   'status API lost the confirmed rejected-policy fallback': 'policy_rejection_status_failed',
@@ -107,7 +118,7 @@ export function sanitizeDestinationResults(input) {
   return input.split(/\r?\n/).filter(line => line.trim()).map(line => {
     const event = parseEvent(line)
     if (event.Action === 'output') {
-      const category = typeof event.Output === 'string' && /native diagnostic: (download|checksum|timeout|rejected|unsupported|permission|bind|certificate|listener_issue|listener_core_rejected|listener_agent_fresh|listener_policy_ready|listener_policy_unchanged|listener_epoch|listener_config_changed|listener_config_preserved|listener_config_fresh|receipt_generation|receipt_mint_fresh|receipt_sync_fresh|receipt_state|receipt_sha|receipt_lkg|receipt_precheck|receipt_streams|receipt_transition)=(true|false)(?:\r?\n|$)/.exec(event.Output)
+      const category = typeof event.Output === 'string' && /native diagnostic: (download|checksum|timeout|rejected|unsupported|permission|bind|certificate|listener_issue|listener_core_rejected|listener_agent_fresh|listener_policy_ready|listener_policy_unchanged|listener_epoch|listener_config_changed|listener_config_preserved|listener_config_fresh|receipt_generation|receipt_mint_fresh|receipt_sync_fresh|receipt_state|receipt_sha|receipt_lkg|receipt_precheck|receipt_streams|receipt_transition|fallback_report|fallback_accepted|fallback_empty|fallback_exhausted|fallback_core|fallback_streams|fallback_issue)=(true|false)(?:\r?\n|$)/.exec(event.Output)
       if (category) return JSON.stringify({ Action: 'output', Package: pkg, Diagnostic: category[1], Observed: category[2] === 'true' })
       const sequence = typeof event.Output === 'string' && /native receipt wait: ([1-9][0-9]?)(?:\r?\n|$)/.exec(event.Output)
       if (sequence) return JSON.stringify({ Action: 'output', Package: pkg, Diagnostic: 'receipt_wait', Observed: Number(sequence[1]) })

@@ -60,13 +60,14 @@ func TestNativeRestartProbeFiltersRealPolicyRejectionsWithoutChangingHTTP(t *tes
 	valid := `{"policy_status":{"state":"rejected","digest":"` + digest + `","issue_code":"destination_policy_rejected"}}`
 	for _, code := range []int{http.StatusOK, http.StatusInternalServerError} {
 		probe := &nativeRestartProbe{}
-		probe.armRejected()
+		probe.armRejectedDigest(digest)
 		var consumed []byte
 		handler := probe.wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			consumed, _ = io.ReadAll(r.Body)
 			w.WriteHeader(code)
 		}))
 		for _, before := range []string{
+			`{"policy_status":{"state":"rejected","digest":"` + strings.Repeat("b", 64) + `","issue_code":"destination_policy_rejected"}}`,
 			`{"policy_status":{"state":"applied","digest":"` + digest + `"}}`,
 			`{"policy_status":{"state":"rejected","digest":"invalid","issue_code":"destination_policy_rejected"}}`,
 			`{"policy_status":{"state":"rejected","digest":"` + digest + `","issue_code":"destination_policy_rejected"},"padding":"` + strings.Repeat("x", 1<<20) + `"}`,

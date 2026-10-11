@@ -10,6 +10,12 @@ function events() {
   return [...names.flatMap(Test => [{ Action: 'run', Package: pkg, Test }, { Action: 'pass', Package: pkg, Test }]), { Action: 'pass', Package: pkg }]
 }
 const encode = values => values.map(value => JSON.stringify(value)).join('\n')
+test('Xray separately requires actual LKG and pruned-candidate rejection', () => {
+  for (const name of ['lkg_rejected', 'pruned_rejected']) {
+    assert(destinationCases.includes(name))
+    assert.throws(() => checkDestinationResults(encode(events().filter(event => !event.Test?.endsWith(`/${name}`)))))
+  }
+})
 test('Xray requires actual policy rejection and retry independently of listener failure', () => {
   assert(destinationCases.includes('policy_rejected'))
   assert.throws(() => checkDestinationResults(encode(events().filter(event => !event.Test?.endsWith('/policy_rejected')))))
@@ -29,7 +35,7 @@ test('native matrix requires the actual core-check timeout case', () => {
   assert.throws(() => checkDestinationResults(encode(events().filter(event => !event.Test?.endsWith('/core_check_timeout')))))
 })
 test('listener diagnostics retain only fixed booleans and withhold arbitrary labels and values', () => {
-  for (const category of ['listener_issue', 'listener_core_rejected', 'listener_agent_fresh', 'listener_policy_ready', 'listener_policy_unchanged', 'listener_epoch', 'listener_config_changed', 'listener_config_preserved', 'listener_config_fresh', 'receipt_generation', 'receipt_mint_fresh', 'receipt_sync_fresh', 'receipt_state', 'receipt_sha', 'receipt_lkg', 'receipt_precheck', 'receipt_streams', 'receipt_transition']) {
+  for (const category of ['listener_issue', 'listener_core_rejected', 'listener_agent_fresh', 'listener_policy_ready', 'listener_policy_unchanged', 'listener_epoch', 'listener_config_changed', 'listener_config_preserved', 'listener_config_fresh', 'receipt_generation', 'receipt_mint_fresh', 'receipt_sync_fresh', 'receipt_state', 'receipt_sha', 'receipt_lkg', 'receipt_precheck', 'receipt_streams', 'receipt_transition', 'fallback_report', 'fallback_accepted', 'fallback_empty', 'fallback_exhausted', 'fallback_core', 'fallback_streams', 'fallback_issue']) {
     for (const value of ['true', 'false']) {
       const retained = sanitizeDestinationResults(encode([{ Action: 'output', Package: 'private', Output: `native diagnostic: ${category}=${value}\n` }]))
       assert.equal(JSON.parse(retained).Diagnostic, category)

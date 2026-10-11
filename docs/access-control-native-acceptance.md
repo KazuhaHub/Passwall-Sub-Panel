@@ -57,12 +57,14 @@ actual applied receipts required at each transition. Audit tables must stay empt
 This records the guard's visible-IP boundary and the remaining DNS-domain bypass;
 it does not claim protection for all private-resolving domains or cloud metadata.
 The guarded job has its own complete execution gate and cannot borrow passes
-from either the baseline sing-box job or Xray jobs. No production code changes.
+from either the baseline sing-box job or Xray jobs. This guarded job does not
+change Node production code.
 
-Every Xray job must execute all twenty-six ordered cases: empty policy, watch,
+Every Xray job must execute all twenty-eight ordered cases: empty policy, watch,
 block, pause/resume, anonymous allowlist trial, enforce, supplemental entry,
 unchanged sync, report-only list refresh, unrelated listener rejection and repair, actual core-check timeout and repair,
-collection off, detailed usage, daemon restart, policy rejection and retry, port-only fallback under
+collection off, detailed usage, daemon restart, policy rejection and retry,
+original-LKG rejection, pruned-fallback rejection, port-only fallback under
 insufficient sniffing, pause/resume during fallback, disabled-rule pruning,
 sniffing fallback exhaustion, account revocation while exhausted, and a PSP app
 restart with the exhausted state persisted, returning an allowlist group to open
@@ -161,6 +163,31 @@ desired application. This tests a real engine compatibility boundary without
 rewriting a binary, candidate artifact or Node report; it does not cover an LKG
 or pruned fallback being rejected.
 
+The independent `lkg_rejected` and `pruned_rejected` cases apply a mapped-prefix
+policy with the reviewed sing-box `1.14.0`, then switch through administrator
+HTTP to that job's exact reviewed Xray version. Collection is explicitly off
+so changing engines alone cannot change the policy digest. Real sync traffic
+is partitioned while the new mapped-prefix desired rule and core selection are
+published, keeping the sing-box-confirmed LKG authoritative. The pruned case
+also deletes an independently confirmed source: its fallback digest must differ
+from the historical applied digest, while the original-LKG case must retain it.
+The observer waits for the exact fallback digest, excluding the first desired
+rejection. Both cases require the actual accepted fallback rejection, durable
+exhaustion, empty policy application, current core and roster convergence, and
+the persisted `destination_policy_lkg_rejected` issue. A revoked account must
+fail real VLESS traffic while a separate canary succeeds. The pruned case also
+reopens PSP's actual SQL pool, routes and caches; neither reopening nor roster
+changes may rearm the exhausted candidate. Manual retry must provoke a fresh
+desired rejection. Repaired definitions and the original collection setting are
+applied through administrator HTTP before subsequent cases run.
+
+PSP derives the LKG issue only from a matching, committed fallback rejection.
+Its key is the exact candidate digest and its detail is fixed, with no address
+or user data. Issue-write failures stop that sync before replacement minting;
+a matching replay retries persistence without rearming the exhausted policy.
+Stale, invalid, unsupported, desired-policy and rolled-back observations cannot
+produce the issue. Durable issue deduplication preserves operator review state.
+
 PSP is then shut down and rebuilt with the same configuration and database.
 A drained fixture TLS gateway holds the endpoint stable while the actual SQL
 pool, router, services and caches are replaced. The continuing real daemon must
@@ -239,7 +266,7 @@ SQLite. The fixture provisions those records directly, obtains a normal admin
 JWT, then uses production HTTP routes for every tested policy mutation. It
 starts `Build` and the audit worker, not all `App.Run` background services. It
 does not replace full service installation/reinstall acceptance, SQL matrix
-tests, the complete sing-box matching/upgrade matrix, LKG/pruned-candidate rejection,
+tests, the complete sing-box matching/upgrade matrix,
 other-engine timeout scenarios, multi-node
 offline and mixed-version cases, long-window response-loss deduplication, load testing, the
 complete UI approval matrix, or staged release verification.

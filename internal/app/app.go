@@ -390,7 +390,7 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	destInputs.SetMembershipGeneration(membershipGeneration.Load)
 	groupSvc.SetMembershipInvalidator(invalidateMembership)
 	destCompiler, err := destpolicy.NewCompiler(destpolicy.CompilerOptions{
-		Definitions: destDefinitions, Runtime: repos.DestAgentPolicy, Inputs: destInputs,
+		Definitions: destDefinitions, Runtime: repos.DestAgentPolicy, Issues: repos.NodeAgentIssue, Inputs: destInputs,
 		MinSeconds: func(ctx context.Context) (int, error) { return destinationPolicyMinSeconds(ctx, repos.Settings) },
 	})
 	if err != nil {
