@@ -31,7 +31,7 @@ type nativeLegacyPanelFixture struct {
 	parent, inbound, targetPort int
 	targetAddress, nonce        string
 	originalConfig              []byte
-	adminURL                    string
+	adminURL, adminToken        string
 	adminClient                 *http.Client
 	stopCandidate, stopLegacy   func(*testing.T)
 	startLegacy                 func(*testing.T) http.Handler
@@ -184,10 +184,9 @@ func nativeLegacyPanelTransitions(t *testing.T, f nativeLegacyPanelFixture) {
 		if !os.SameFile(panelFile, panelNow) || !os.SameFile(nodeFile, nodeNow) || agent.Epoch != originalAgent.Epoch || agent.CredentialSHA256 != originalAgent.CredentialSHA256 || user.UUID != originalUser.UUID {
 			test.Fatal("panel transition replaced an original database or identity")
 		}
-		token := destinationRefreshAdminToken(test, a)
 		r, err := http.NewRequestWithContext(test.Context(), "GET", f.adminURL+"/api/admin/dest/status", nil)
 		nativeMust(test, err, "create PSP reupgrade coverage request")
-		r.Header.Set("Authorization", "Bearer "+token)
+		r.Header.Set("Authorization", "Bearer "+f.adminToken)
 		response, err := f.adminClient.Do(r)
 		nativeMust(test, err, "read PSP reupgrade coverage HTTP")
 		defer response.Body.Close()

@@ -248,7 +248,7 @@ func TestNativeLegacyPSPUpgrade(t *testing.T) {
 		app: current, probe: probe, gateway: gateway, dataDir: nodeDir, panelDB: filepath.Join(cfg.DataDir, "panel.db"),
 		agentID: ready.AgentID, panelID: ready.PanelID, userID: ready.UserID, parent: node.Process.Pid,
 		inbound: inbound, targetAddress: address, targetPort: targetPort, nonce: nonce, originalConfig: beforeConfig,
-		adminURL: server.URL, adminClient: server.Client(),
+		adminURL: server.URL, adminToken: adminToken, adminClient: server.Client(),
 		stopNode:   func() { stop(&node, nodeDone) },
 		resumePeer: mixedGateway.replace,
 		stopCandidate: func(test *testing.T) {
