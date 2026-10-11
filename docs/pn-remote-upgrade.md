@@ -23,6 +23,12 @@ Docker socket，隔离 updater 无网络但独占 socket；升级以精确 diges
 通过重启、重新同步与收敛检查后提交，失败自动恢复保留的旧容器。手动 Docker 配置、单容器旧安装以及其他
 系统仍需宿主机/人工升级，不能为了方便把 socket 或特权交给 Agent。
 
+生成的 updater 使用只读根目录、独立有界 `/tmp`、`cap_drop: ALL` 和
+`no-new-privileges`；仅保留 `CHOWN`、`DAC_READ_SEARCH`、`FOWNER`，用于控制目录
+的所有者、请求读取和权限保护，与 Node 官方 Compose 一致。它仅挂载 Docker
+socket 和升级控制目录，不挂载账号凭据或 Agent 状态库。既有部署需选当前使用的
+精确版本重新生成 Compose，并在没有升级任务执行时重建 updater 才能应用新配置。
+
 Passwall Node 非 root daemon 接收请求；固定路径的独立 root systemd helper 自行下载并核验官方发行档。
 只自动升级同数据库 schema/升级 contract 的版本。下载失败不停止旧进程；目标启动/重新同步/严格配置收敛
 失败则恢复旧程序和版本元数据，不清空 config/data。升级会有连接中断；已持久化历史计数保持，
