@@ -201,10 +201,10 @@ func nativeSingBoxDestinationTraffic(t *testing.T, guarded bool) {
 		noCollection()
 	}
 	waitApplied := func() { waitAppliedCandidate(nil) }
-	traffic := func(host string, allowed bool) {
+	trafficUserHost := func(uuid, host string, allowed bool) {
 		caseTest.Helper()
 		before := requests.Load()
-		err := nativeVLESSHost(caseTest.Context(), inbound, address, targetPort, f.user.UUID, nonce, host)
+		err := nativeVLESSHost(caseTest.Context(), inbound, address, targetPort, uuid, nonce, host)
 		if allowed && err != nil {
 			caseTest.Fatal("real VLESS traffic did not reach its nonce target; private diagnostics withheld")
 		}
@@ -219,6 +219,7 @@ func nativeSingBoxDestinationTraffic(t *testing.T, guarded bool) {
 			caseTest.Fatal("deny/allow result disagreed with actual target request count")
 		}
 	}
+	traffic := func(host string, allowed bool) { trafficUserHost(f.user.UUID, host, allowed) }
 	literalHost := "[" + address + "]"
 	run := func(name string, work func()) {
 		if !t.Run(name, func(child *testing.T) { caseTest = child; defer func() { caseTest = t }(); work() }) {
@@ -242,6 +243,26 @@ func nativeSingBoxDestinationTraffic(t *testing.T, guarded bool) {
 		waitApplied()
 		traffic(literalHost, false)
 	})
+	scoped := nativeScopedDestinationCases(t, f, nil, &policy, input, targetPort, nativeScopeControl{
+		test: func() *testing.T { return caseTest }, request: request, publish: publish, waitApplied: waitApplied,
+		traffic: func(uuid, host string, allow bool) {
+			if host == "" {
+				host = literalHost
+			}
+			trafficUserHost(uuid, host, allow)
+		},
+		control: func(target string, port int, nonce string) {
+			nativeMust(caseTest, nativeVLESSHost(caseTest.Context(), inbound, target, port, f.user.UUID, nonce, "["+target+"]"), "scoped independent control connection")
+		},
+		live: func() func() {
+			return nativeBindLiveCore(caseTest, cmd.Process.Pid, filepath.Join(dir, "node"), "sing-box")
+		},
+		stop: func() { stopDaemon(t) }, output: output.text,
+	})
+	run("group_scope", scoped.groupScope)
+	run("exemption", scoped.exemption)
+	run("exemption_expired", scoped.exemptionExpired)
+	run("allow_priority", scoped.allowPriority)
 	run("paused", func() {
 		request("PUT", "dest/pause", map[string]any{"paused": true}, 200, nil)
 		waitApplied()

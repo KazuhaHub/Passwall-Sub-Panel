@@ -3,6 +3,18 @@ import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
 import { checkDestinationResults, sanitizeDestinationResults, nodeCandidate, destinationCases } from './destination-acceptance.mjs'
 
+test('all real cores require scoped users, exemption expiry and allow priority', async () => {
+  const acceptance = await import('./destination-acceptance.mjs')
+  const required = ['group_scope', 'exemption', 'exemption_expired', 'allow_priority']
+  for (const cases of [destinationCases, acceptance.singBoxCases, acceptance.guardedSingBoxCases]) {
+    for (const name of required) assert(cases.includes(name), name)
+  }
+  for (const source of ['destination_native_acceptance_test.go', 'destination_native_singbox_test.go']) {
+    const driver = readFileSync(new URL(`../internal/app/${source}`, import.meta.url), 'utf8')
+    for (const name of required) assert(driver.includes(`run("${name}"`), name)
+  }
+})
+
 test('legacy upgrade has an independent complete real execution gate and immutable released sources', async () => {
   const acceptance = await import('./destination-acceptance.mjs')
   assert.equal(typeof acceptance.checkLegacyUpgradeResults, 'function')

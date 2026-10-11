@@ -359,6 +359,26 @@ func TestNativeDestinationTraffic(t *testing.T) {
 		traffic(false)
 		waitHit(fmt.Sprintf("p%d", policy.ID), "block", f.user.ID, targetPort)
 	})
+	scoped := nativeScopedDestinationCases(t, f, canary, &policy, input, targetPort, nativeScopeControl{
+		test: func() *testing.T { return caseTest }, request: request, publish: publish, waitApplied: waitApplied,
+		traffic: func(uuid, host string, allow bool) {
+			if host == "" {
+				host = "[" + address + "]"
+			}
+			trafficUserHost(uuid, host, allow)
+		},
+		control: func(target string, port int, nonce string) {
+			nativeMust(caseTest, nativeVLESSHost(caseTest.Context(), inbound, target, port, f.user.UUID, nonce, "["+target+"]"), "scoped independent control connection")
+		},
+		live: func() func() {
+			return nativeBindLiveCore(caseTest, cmd.Process.Pid, filepath.Join(dir, "node"), "xray")
+		},
+		stop: func() { stopDaemon(t) }, output: output.text,
+	})
+	run("group_scope", scoped.groupScope)
+	run("exemption", scoped.exemption)
+	run("exemption_expired", scoped.exemptionExpired)
+	run("allow_priority", scoped.allowPriority)
 	run("paused", func() {
 		request("PUT", "dest/pause", map[string]any{"paused": true}, 200, nil)
 		waitApplied()
