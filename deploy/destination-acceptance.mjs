@@ -11,10 +11,21 @@ const xrayNames = ['TestNativeDestinationTraffic', ...destinationCases.map(name 
 const singBoxNames = ['TestNativeSingBoxDestinationTraffic', ...singBoxCases.map(name => `TestNativeSingBoxDestinationTraffic/${name}`)]
 const guardedSingBoxNames = ['TestNativeGuardedSingBoxDestinationTraffic', ...guardedSingBoxCases.map(name => `TestNativeGuardedSingBoxDestinationTraffic/${name}`)]
 const legacyUpgradeNames = ['TestNativeLegacyPSPUpgrade', ...['old_panel', 'panel_upgrade', 'legacy_publication', 'mixed_fleet', 'mixed_offline_pause', 'node_upgrade', 'node_downgrade', 'node_reupgrade', 'panel_downgrade_offline', 'panel_downgrade', 'panel_reupgrade', 'allowlist_capability_setup', 'allowlist_capability_removed', 'allowlist_capability_restored'].map(name => `TestNativeLegacyPSPUpgrade/${name}`)]
-export const remoteUpgradeCases = Object.freeze(['candidate_policy', 'published_rollback', 'restart_recovery', 'idempotent_replay'])
+export const remoteUpgradeCases = Object.freeze(['candidate_policy', 'health_failure_restore', 'published_rollback', 'restart_recovery', 'idempotent_replay'])
 const remoteUpgradeNames = ['TestNativePublishedRemoteRollback', ...remoteUpgradeCases.map(name => `TestNativePublishedRemoteRollback/${name}`)]
 const names = [...xrayNames, ...singBoxNames, ...guardedSingBoxNames, ...legacyUpgradeNames, ...remoteUpgradeNames]
 const diagnostics = Object.freeze({
+  'timed out waiting for remote failed target activation': 'remote_failed_activation_timeout',
+  'timed out waiting for remote automatic health failure restoration': 'remote_auto_restore_timeout',
+  'remote failed target activation evidence invalid': 'remote_failed_activation_invalid',
+  'remote rejected target produced authenticated readiness': 'remote_false_readiness',
+  'remote failed activation lacks the original running execution': 'remote_failed_execution_invalid',
+  'remote health failure did not return a determinate failed task': 'remote_failed_outcome_invalid',
+  'remote automatic restoration receipt invalid': 'remote_restore_receipt_invalid',
+  'remote automatic restoration changed durable execution identity': 'remote_restore_execution_invalid',
+  'remote automatic restoration did not confirm the source release': 'remote_restore_source_invalid',
+  'remote automatic restoration lost stable client counters or identity': 'remote_restore_client_invalid',
+  'remote failed activation left authenticated readiness': 'remote_failed_ready_retained',
   'timed out waiting for remote candidate nonempty policy': 'remote_candidate_timeout',
   'timed out waiting for remote candidate raw counters': 'remote_raw_counters_timeout',
   'timed out waiting for remote candidate cumulative counters': 'remote_counters_timeout',

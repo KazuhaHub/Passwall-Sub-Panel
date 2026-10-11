@@ -25,6 +25,7 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -62,7 +63,8 @@ func TestNativePublishedRemoteRollback(t *testing.T) {
 	nativeMust(t, a.repos.Node.Update(t.Context(), f.node), "configure remote fixture listener")
 	a.startDestinationAudit()
 	probe := &nativeLegacyProbe{listener: protocol.NewListenerKey(f.node.ID)}
-	server := httptest.NewTLSServer(probe.wrap(a.server.Handler))
+	healthFault := &nativeRemoteHealthFault{}
+	server := httptest.NewTLSServer(healthFault.wrap(probe.wrap(a.server.Handler)))
 	t.Cleanup(server.Close)
 	_, address, port, nonce, requests := nativeTarget(t)
 	_, controlAddress, controlPort, controlNonce, _ := nativeTarget(t)
@@ -220,6 +222,85 @@ func TestNativePublishedRemoteRollback(t *testing.T) {
 			caseTest.Fatal("remote helper ran before any administrator authorization")
 		}
 	})
+	run("health_failure_restore", func() {
+		// Refuse only the actual published target's sync before the production
+		// handler accepts it. The source candidate remains able to authenticate.
+		// No helper timeout, trust, download or activation behavior is replaced.
+		healthFault.enabled.Store(true)
+		defer healthFault.enabled.Store(false)
+		sourceDigest := managed.digest(caseTest, "bin/passwall-node")
+		exited := nativePanelHoldCoreExit(caseTest, originalPID, nativeRemoteRoot+"/data")
+		after := time.Now().UTC()
+		var failed nodeagentupgrade.Status
+		request("POST", upgradePath, key+"-health", upgradeInput, &failed, 202)
+		if failed.TaskID == "" || failed.Version != nativeRemotePublished || failed.ExpectedVersion != nativeRemoteCandidate || failed.NotAfterMS <= after.UnixMilli() {
+			caseTest.Fatal("remote health failure did not authorize the exact target")
+		}
+		var activated nativeRemoteReceipt
+		var targetPID int
+		nativeWait(caseTest, 3*time.Minute, "remote failed target activation", func() bool {
+			if healthFault.rejected.Load() == 0 {
+				return false
+			}
+			data, err := os.ReadFile(nativeRemoteRoot + "/upgrades/" + failed.TaskID + ".json")
+			if err != nil || json.Unmarshal(data, &activated) != nil || activated.Phase != "activated" || activated.Result == nil {
+				return false
+			}
+			if activated.Request.Task.ID != failed.TaskID || activated.Request.Task.NotAfterMS != failed.NotAfterMS || len(activated.ActivationNonce) != 32 || activated.Result.Version != nativeRemotePublished || activated.Result.PreviousVersion != nativeRemoteCandidate || activated.Result.Restarted || len(activated.Result.BinarySHA256) != 64 || managed.digest(caseTest, "bin/passwall-node") != activated.Result.BinarySHA256 || activated.Result.BinarySHA256 == sourceDigest {
+				caseTest.Fatal("remote failed target activation evidence invalid")
+			}
+			targetPID = managed.pid(caseTest)
+			return targetPID != originalPID && exited()
+		})
+		if _, err := os.Lstat(nativeRemoteRoot + "/data/upgrades/" + failed.TaskID + ".ready.json"); !errors.Is(err, os.ErrNotExist) {
+			caseTest.Fatal("remote rejected target produced authenticated readiness")
+		}
+		running := managed.execution(caseTest, failed.TaskID)
+		if running.state != "running" || running.digest != activated.Request.Task.InputSHA256 || running.deadline != failed.NotAfterMS || running.started <= 0 || running.claim == "" || running.delivered != 0 {
+			caseTest.Fatal("remote failed activation lacks the original running execution")
+		}
+		nativeWait(caseTest, 4*time.Minute, "remote automatic health failure restoration", func() bool {
+			stored, err := a.repos.NodeAgentTask.GetByTaskID(caseTest.Context(), failed.TaskID)
+			if err != nil || stored == nil || !stored.Status.Terminal() {
+				return false
+			}
+			if stored.Status != domain.NodeAgentTaskFailed || stored.ResultOK == nil || *stored.ResultOK || stored.ResultIndeterminate {
+				caseTest.Fatal("remote health failure did not return a determinate failed task")
+			}
+			agent, err := a.repos.NodeAgent.GetByAgentID(caseTest.Context(), f.agent.AgentID)
+			if err != nil || agent.LastSeen == nil || !agent.LastSeen.After(after) || agent.Epoch != originalAgent.Epoch || agent.CredentialSHA256 != originalAgent.CredentialSHA256 || !slicesContainsNative(agent.ObservedCapabilities, protocol.CapabilityDestinationPolicy) || !streamsReady(agent) {
+				return false
+			}
+			s := probe.snapshot()
+			current, err := a.repos.DestAgentPolicy.Get(caseTest.Context(), f.agent.AgentID, true)
+			return err == nil && current != nil && current.MintedSHA256 == originalPolicy.MintedSHA256 && current.ReportedState == "applied" && current.ReportedSHA256 == current.MintedSHA256 && current.AppliedSHA256 == current.MintedSHA256 && bytes.Equal(current.AppliedBody, originalPolicy.AppliedBody) && s.AgentVersion == nativeRemoteCandidate+" (63c60f6)" && s.CoreState == "running" && s.ListenerApplied && s.ConfigBodyKnown && s.ConfigPolicy
+		})
+		var receipt nativeRemoteReceipt
+		if json.Unmarshal(managed.read(caseTest, "upgrades/"+failed.TaskID+".json"), &receipt) != nil || receipt.Phase != "failed" || receipt.ErrorCode != "agent_upgrade_failed" || receipt.Result != nil || receipt.ActivationNonce != activated.ActivationNonce || !reflect.DeepEqual(receipt.Request.Task, activated.Request.Task) {
+			caseTest.Fatal("remote automatic restoration receipt invalid")
+		}
+		completed := managed.execution(caseTest, failed.TaskID)
+		if completed.state != "failed" || completed.digest != running.digest || completed.claim != running.claim || completed.started != running.started || completed.deadline != running.deadline || completed.delivered != 1 {
+			caseTest.Fatal("remote automatic restoration changed durable execution identity")
+		}
+		request("GET", fmt.Sprintf("servers/%d/node-agent-upgrades/%s", f.agent.PanelID, failed.TaskID), "", nil, &failed, 200)
+		if failed.UpgradeState != "failed" || failed.Status != domain.NodeAgentTaskFailed || failed.ObservedVersion != nativeRemoteCandidate || failed.ResultErrorCode != "agent_upgrade_failed" || managed.digest(caseTest, "bin/passwall-node") != sourceDigest || managed.pid(caseTest) == targetPID {
+			caseTest.Fatal("remote automatic restoration did not confirm the source release")
+		}
+		foldTraffic()
+		traffic(false)
+		managed.assertPreserved(caseTest, before)
+		clients, err := a.repos.PSPClient.ListByUser(caseTest.Context(), f.user.ID)
+		nativeMust(caseTest, err, "read automatic restoration client")
+		if len(clients) != 1 || clients[0].ID != originalClient.ID || clients[0].UUID != originalClient.UUID || !clients[0].CreatedAt.Equal(originalClient.CreatedAt) || clients[0].LifetimeUpBytes < originalClient.LifetimeUpBytes || clients[0].LifetimeDownBytes < originalClient.LifetimeDownBytes || clients[0].LifetimeTotalBytes < originalClient.LifetimeTotalBytes {
+			caseTest.Fatal("remote automatic restoration lost stable client counters or identity")
+		}
+		if _, err := os.Lstat(nativeRemoteRoot + "/data/upgrades/" + failed.TaskID + ".ready.json"); !errors.Is(err, os.ErrNotExist) {
+			caseTest.Fatal("remote failed activation left authenticated readiness")
+		}
+		// The next independent authorization starts from the restored process.
+		originalPID, before = managed.pid(caseTest), managed.preserved(caseTest)
+	})
 	run("published_rollback", func() {
 		exited := nativePanelHoldCoreExit(caseTest, originalPID, nativeRemoteRoot+"/data")
 		after := time.Now().UTC()
@@ -315,6 +396,83 @@ func TestNativePublishedRemoteRollback(t *testing.T) {
 		}
 		managed.assertPrivacy(caseTest, nil)
 	})
+}
+
+type nativeRemoteReceipt struct {
+	Phase           string `json:"phase"`
+	ErrorCode       string `json:"error_code"`
+	ActivationNonce string `json:"activation_nonce"`
+	Request         struct {
+		Task protocol.Task `json:"task"`
+	} `json:"request"`
+	Result *protocol.AgentUpgradeResult `json:"result"`
+}
+
+type nativeRemoteHealthFault struct {
+	enabled  atomic.Bool
+	rejected atomic.Uint64
+}
+
+func (f *nativeRemoteHealthFault) wrap(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !f.enabled.Load() || r.Method != "POST" || r.URL.Path != "/v1/node/sync" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		// Bounded inspection does not retain private reports. Reassemble the exact
+		// bytes for every request passed to the normal production handler.
+		body, err := io.ReadAll(io.LimitReader(r.Body, (1<<20)+1))
+		r.Body = &nativeTeeBody{Reader: io.MultiReader(bytes.NewReader(body), r.Body), Closer: r.Body}
+		var report protocol.NodeReport
+		if err == nil && len(body) <= 1<<20 && json.Unmarshal(body, &report) == nil && report.AgentVersion == nativeRemotePublishedIdentity {
+			f.rejected.Add(1)
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func TestNativeRemoteHealthFaultPreservesOtherRequests(t *testing.T) {
+	for _, tc := range []struct {
+		name, method, path, body string
+		enabled, rejected        bool
+	}{
+		{"target", "POST", "/v1/node/sync", `{"agent_version":"4.0.1.8 (8e5e3db)"}`, true, true},
+		{"source", "POST", "/v1/node/sync", `{"agent_version":"4.0.1.9 (63c60f6)"}`, true, false},
+		{"disabled", "POST", "/v1/node/sync", `{"agent_version":"4.0.1.8 (8e5e3db)"}`, false, false},
+		{"other_path", "POST", "/api/admin/servers/1/upgrade-node-agent", `{"agent_version":"4.0.1.8 (8e5e3db)"}`, true, false},
+		{"other_method", "GET", "/v1/node/sync", `{"agent_version":"4.0.1.8 (8e5e3db)"}`, true, false},
+		{"malformed", "POST", "/v1/node/sync", "invalid input", true, false},
+		{"oversized", "POST", "/v1/node/sync", `{"agent_version":"4.0.1.8 (8e5e3db)","padding":"` + strings.Repeat("x", 1<<20) + `"}`, true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fault := &nativeRemoteHealthFault{}
+			fault.enabled.Store(tc.enabled)
+			called := false
+			next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				called = true
+				data, err := io.ReadAll(r.Body)
+				if err != nil || string(data) != tc.body || r.Header.Get("Authorization") != "fixture" {
+					t.Fatal("health fault modified a forwarded request")
+				}
+				w.Header().Set("X-Fixture", "retained")
+				w.WriteHeader(http.StatusAccepted)
+				_, _ = io.WriteString(w, "original reply")
+			})
+			request := httptest.NewRequest(tc.method, tc.path, strings.NewReader(tc.body))
+			request.Header.Set("Authorization", "fixture")
+			response := httptest.NewRecorder()
+			fault.wrap(next).ServeHTTP(response, request)
+			if tc.rejected {
+				if called || response.Code != http.StatusServiceUnavailable || response.Body.Len() != 0 || fault.rejected.Load() != 1 {
+					t.Fatal("health fault did not reject only the exact target before acceptance")
+				}
+			} else if !called || response.Code != http.StatusAccepted || response.Header().Get("X-Fixture") != "retained" || response.Body.String() != "original reply" || fault.rejected.Load() != 0 {
+				t.Fatal("health fault changed a forwarded response")
+			}
+		})
+	}
 }
 
 type nativeRemoteExecution struct {

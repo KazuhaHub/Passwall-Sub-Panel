@@ -6,8 +6,9 @@ import { checkDestinationResults, sanitizeDestinationResults, nodeCandidate, des
 test('published remote rollback requires the real watcher, helper and complete execution evidence', async () => {
   const acceptance = await import('./destination-acceptance.mjs')
   assert.equal(typeof acceptance.checkRemoteUpgradeResults, 'function')
+  assert(acceptance.remoteUpgradeCases.includes('health_failure_restore'))
   const pkg = 'github.com/KazuhaHub/passwall-sub-panel/internal/app'
-  const names = ['TestNativePublishedRemoteRollback', ...['candidate_policy', 'published_rollback', 'restart_recovery', 'idempotent_replay'].map(name => `TestNativePublishedRemoteRollback/${name}`)]
+  const names = ['TestNativePublishedRemoteRollback', ...['candidate_policy', 'health_failure_restore', 'published_rollback', 'restart_recovery', 'idempotent_replay'].map(name => `TestNativePublishedRemoteRollback/${name}`)]
   const values = [...names.flatMap(Test => [{ Action: 'run', Package: pkg, Test }, { Action: 'pass', Package: pkg, Test }]), { Action: 'pass', Package: pkg }]
   const evidence = sanitizeDestinationResults(encode(values))
   assert.doesNotThrow(() => acceptance.checkRemoteUpgradeResults(evidence))
@@ -18,7 +19,7 @@ test('published remote rollback requires the real watcher, helper and complete e
   }
   const workflow = readFileSync(new URL('../.github/workflows/destination-acceptance.yml', import.meta.url), 'utf8')
   const job = workflow.slice(workflow.indexOf('  published-remote:'))
-  for (const value of [nodeCandidate.commit, 'PSP_NATIVE_REMOTE_SOURCE', 'PSP_NATIVE_REMOTE_NODE_BIN', 'check-remote-upgrade', 'TestNativePublishedRemoteRollback']) assert(job.includes(value), value)
+  for (const value of [nodeCandidate.commit, 'PSP_NATIVE_REMOTE_SOURCE', 'PSP_NATIVE_REMOTE_NODE_BIN', 'check-remote-upgrade', 'TestNativePublishedRemoteRollback', 'TestNativeRemoteHealthFaultPreservesOtherRequests']) assert(job.includes(value), value)
 })
 
 test('all real cores require scoped users, exemption expiry and allow priority', async () => {

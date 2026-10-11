@@ -157,6 +157,7 @@ jobs:
           set -euo pipefail
           node --test deploy/destination_acceptance_test.mjs
           go test -c -tags destination_acceptance -o "$RUNNER_TEMP/destination-acceptance.test" ./internal/app
+          "$RUNNER_TEMP/destination-acceptance.test" -test.run '^TestNativeRemoteHealthFaultPreservesOtherRequests$' -test.timeout 1m
       - name: Normal admin task, real watcher, official signed archive and production recovery
         run: |
           set -euo pipefail
