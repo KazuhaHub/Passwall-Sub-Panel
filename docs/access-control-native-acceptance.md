@@ -14,8 +14,9 @@ Xray version: `26.6.27`, `26.7.28`, and `26.9.9`.
 The isolated fixture explicitly acknowledges the reviewed restricted `26.9.9`
 selection; the production catalog gate remains enforced.
 
-Every matrix job must execute all sixteen ordered cases: empty policy, watch,
+Every matrix job must execute all seventeen ordered cases: empty policy, watch,
 block, pause/resume, anonymous allowlist trial, enforce, supplemental entry,
+unrelated listener rejection and repair,
 collection off, detailed usage, daemon restart, port-only fallback under
 insufficient sniffing, pause/resume during fallback, disabled-rule pruning,
 sniffing fallback exhaustion, account revocation while exhausted, and a PSP app
@@ -40,6 +41,15 @@ route-only sniffing preserves the local IP destination and requires no DNS.
 Account revocation must then reach the acknowledged roster without rearming that
 fallback. The revoked user must fail while a separate enabled canary still reaches
 the same target, proving the core is serving traffic.
+The listener rejection case runs while the group enforces its allowlist.
+Administrator HTTP stores syntactically valid TLS settings with a numeric ALPN;
+the real Xray configuration check rejects that listener. A fresh real
+`core_convergence_failed` report must reach the operator inbox, while the policy
+receipt and LKG remain unchanged, the invalid config stays unapplied, and both
+original client keys remain attached. Both users still reach the target through
+the running previous artifact. Restoring the original settings then requires a
+fresh accepted report and current config/roster convergence. This covers an
+unrelated completed core check, not a simulated policy rejection or timeout.
 PSP is then shut down and rebuilt with the same configuration and database.
 A drained fixture TLS gateway holds the endpoint stable while the actual SQL
 pool, router, services and caches are replaced. The continuing real daemon must
@@ -66,7 +76,7 @@ SQLite. The fixture provisions those records directly, obtains a normal admin
 JWT, then uses production HTTP routes for every tested policy mutation. It
 starts `Build` and the audit worker, not all `App.Run` background services. It
 does not replace full service installation/reinstall acceptance, SQL matrix
-tests, sing-box acceptance, core-rejection and listener-fault scenarios, load testing, the
+tests, sing-box acceptance, policy-rejection and timeout scenarios, load testing, the
 complete UI approval matrix, or staged release verification.
 
 Use the workflow run and PR validation record for execution evidence. All three

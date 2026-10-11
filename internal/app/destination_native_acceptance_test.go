@@ -152,9 +152,10 @@ func TestNativeDestinationTraffic(t *testing.T) {
 		}
 	}
 	publish := func() { request("POST", "dest/publish", nil, 200, nil) }
-	setSniffing := func(sniffing string) {
-		request("PUT", fmt.Sprintf("nodes/%d/inbound", f.node.ID), map[string]any{"remark": "Native acceptance", "enable": true, "listen": "127.0.0.1", "port": inbound, "protocol": "vless", "settings": f.node.InboundSettings, "stream_settings": f.node.StreamSettings, "sniffing": sniffing, "allocate": f.node.Allocate}, 204, nil)
+	setInbound := func(sniffing, stream string) {
+		request("PUT", fmt.Sprintf("nodes/%d/inbound", f.node.ID), map[string]any{"remark": "Native acceptance", "enable": true, "listen": "127.0.0.1", "port": inbound, "protocol": "vless", "settings": f.node.InboundSettings, "stream_settings": stream, "sniffing": sniffing, "allocate": f.node.Allocate}, 204, nil)
 	}
+	setSniffing := func(sniffing string) { setInbound(sniffing, f.node.StreamSettings) }
 	streamsReady := func(agent *domain.NodeAgent) bool {
 		for _, name := range []domain.NodeAgentStreamName{domain.NodeAgentStreamConfig, domain.NodeAgentStreamRoster} {
 			stream, err := a.repos.NodeAgent.GetStream(caseTest.Context(), f.agent.AgentID, name)
@@ -339,6 +340,95 @@ func TestNativeDestinationTraffic(t *testing.T) {
 		request("POST", fmt.Sprintf("dest/lists/%d/entries", mode.ExtraListID), map[string]any{"add": []string{address + "/128"}}, 200, nil)
 		publish()
 		waitApplied()
+		traffic(true)
+	})
+	run("listener_rejected", func() {
+		prior, err := a.repos.DestAgentPolicy.Get(caseTest.Context(), f.agent.AgentID, true)
+		nativeMust(caseTest, err, "read policy before listener failure")
+		confirmed, err := a.repos.NodeAgent.GetStream(caseTest.Context(), f.agent.AgentID, domain.NodeAgentStreamConfig)
+		nativeMust(caseTest, err, "read config before listener failure")
+		if !confirmed.Converged() {
+			caseTest.Fatal("listener failure fixture has no confirmed config")
+		}
+		members := func() map[int64]int64 {
+			caseTest.Helper()
+			keys := map[int64]int64{}
+			for _, user := range []*domain.User{f.user, canary} {
+				clients, err := a.repos.PSPClient.ListByUser(caseTest.Context(), user.ID)
+				nativeMust(caseTest, err, "read real allowlist member")
+				for _, c := range clients {
+					if c.PanelID != f.agent.PanelID {
+						continue
+					}
+					attachments, err := a.repos.PSPClient.ListInbounds(caseTest.Context(), c.ID)
+					nativeMust(caseTest, err, "read real member attachments")
+					if !c.DesiredEnable || c.UUID != user.UUID || len(attachments) != 1 || attachments[0].NodeID != f.node.ID || keys[user.ID] != 0 {
+						caseTest.Fatal("listener failure changed allowlist client membership")
+					}
+					keys[user.ID] = c.ID
+				}
+				if keys[user.ID] == 0 {
+					caseTest.Fatal("listener failure retired an allowlist member")
+				}
+			}
+			return keys
+		}
+		before := members()
+		// Valid JSON passes the production listener compiler. Real Xray's
+		// -test rejects ALPN's numeric type, both with and without the policy.
+		setInbound(fullSniffing, `{"network":"tcp","security":"tls","tlsSettings":{"alpn":5}}`)
+		failedAfter := receiptAfter
+		nativeWait(caseTest, 120*time.Second, "real listener rejection", func() bool {
+			issues, _, err := a.repos.NodeAgentIssue.List(caseTest.Context(), ports.NodeAgentIssueFilter{AgentID: f.agent.AgentID, Code: "core_convergence_failed", Pagination: ports.Pagination{Page: 1, PageSize: 50}})
+			if err != nil {
+				return false
+			}
+			coreRejected := false
+			for _, issue := range issues {
+				coreRejected = coreRejected || issue.LastSeenAt.After(failedAfter) && strings.Contains(issue.Detail, "core candidate rejected")
+			}
+			if !coreRejected {
+				return false
+			}
+			current, err := a.repos.DestAgentPolicy.Get(caseTest.Context(), f.agent.AgentID, true)
+			if err != nil {
+				return false
+			}
+			cfg, err := a.repos.NodeAgent.GetStream(caseTest.Context(), f.agent.AgentID, domain.NodeAgentStreamConfig)
+			if err != nil {
+				return false
+			}
+			agent, err := a.repos.NodeAgent.GetByAgentID(caseTest.Context(), f.agent.AgentID)
+			return err == nil && nativeListenerFaultReceiptMatches(*prior, *current, *cfg, confirmed.DesiredETag, agent.Epoch, agent.LastSeen, failedAfter)
+		})
+		for user, key := range members() {
+			if before[user] != key {
+				caseTest.Fatal("listener failure replaced an allowlist client")
+			}
+		}
+		var status destpolicy.DestinationStatus
+		request("GET", "dest/status", nil, 200, &status)
+		if len(status.Nodes) != 1 || status.Nodes[0].State != "applied" || status.Nodes[0].FallbackReason != "" || status.Nodes[0].FallbackExhausted || status.Nodes[0].MintedKind != domain.DestCandidateDesired || status.Nodes[0].PendingSince != nil {
+			caseTest.Fatal("listener failure was presented as a policy fault")
+		}
+		var inbox struct {
+			Items []domain.NodeAgentIssue `json:"items"`
+		}
+		request("GET", "node-issues?agent_id="+f.agent.AgentID+"&code=core_convergence_failed", nil, 200, &inbox)
+		if len(inbox.Items) == 0 {
+			caseTest.Fatal("real listener rejection did not reach the administrator inbox")
+		}
+		traffic(true)
+		trafficUser(canary.UUID, true)
+		setSniffing(fullSniffing)
+		// A/B/A restores the original bytes. The policy timestamp need not
+		// change; require a fresh accepted report and current stream convergence.
+		repairedAfter := receiptAfter
+		nativeWait(caseTest, 120*time.Second, "listener repair application", func() bool {
+			agent, err := a.repos.NodeAgent.GetByAgentID(caseTest.Context(), f.agent.AgentID)
+			return err == nil && agent.LastSeen != nil && agent.LastSeen.After(repairedAfter) && streamsReady(agent)
+		})
+		waitCandidate("", false, false, *prior.MintedAt)
 		traffic(true)
 	})
 	run("collection_off", func() {

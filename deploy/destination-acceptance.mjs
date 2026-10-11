@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
 
 export const nodeCandidate = Object.freeze({ repository: 'KazuhaHub/Passwall-Node', commit: '63c60f6d5e8cd093bbaa8385f5b514dbe2f40390' })
-export const destinationCases = Object.freeze(['empty', 'watch', 'block', 'paused', 'trial', 'enforce', 'extra', 'collection_off', 'usage', 'restart', 'fallback_port', 'fallback_pause', 'fallback_prune', 'sniff_exhaustion', 'exhausted_roster', 'exhausted_panel_restart'])
+export const destinationCases = Object.freeze(['empty', 'watch', 'block', 'paused', 'trial', 'enforce', 'extra', 'listener_rejected', 'collection_off', 'usage', 'restart', 'fallback_port', 'fallback_pause', 'fallback_prune', 'sniff_exhaustion', 'exhausted_roster', 'exhausted_panel_restart'])
 const pkg = 'github.com/KazuhaHub/passwall-sub-panel/internal/app'
 const names = ['TestNativeDestinationTraffic', ...destinationCases.map(name => `TestNativeDestinationTraffic/${name}`)]
 const diagnostics = Object.freeze({
@@ -32,6 +32,14 @@ const diagnostics = Object.freeze({
   'roster update rearmed an exhausted fallback': 'roster_rearmed_fallback',
   'timed out waiting for restored PSP sync': 'panel_restart_sync_timeout',
   'PSP reopen rearmed an exhausted fallback or lost its history': 'panel_restart_rearmed_fallback',
+  'timed out waiting for real listener rejection': 'listener_rejection_timeout',
+  'timed out waiting for listener repair application': 'listener_repair_timeout',
+  'listener failure fixture has no confirmed config': 'listener_baseline_failed',
+  'listener failure changed allowlist client membership': 'listener_membership_changed',
+  'listener failure retired an allowlist member': 'listener_member_retired',
+  'listener failure replaced an allowlist client': 'listener_member_replaced',
+  'listener failure was presented as a policy fault': 'listener_policy_fault',
+  'real listener rejection did not reach the administrator inbox': 'listener_inbox_failed',
 })
 function parseEvent(line) {
   try { return JSON.parse(line) } catch { throw new Error('Malformed test execution stream; content withheld') }

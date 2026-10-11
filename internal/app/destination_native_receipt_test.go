@@ -1,11 +1,63 @@
 package app
 
 import (
+	"bytes"
 	"testing"
 	"time"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 )
+
+func TestNativeListenerFaultReceiptRequiresUnchangedPolicyAndFailedCurrentConfig(t *testing.T) {
+	minted, mutation, seen := time.UnixMilli(1000), time.UnixMilli(2000), time.UnixMilli(3000)
+	prior := domain.DestAgentPolicy{AgentID: "native", MintedKind: domain.DestCandidateDesired, MintedGeneration: 7, MintedAt: &minted, MintedSHA256: "confirmed", DesiredSHA256: "confirmed", ReportedSHA256: "confirmed", ReportedState: "applied", ReportedAt: &minted, AppliedSHA256: "confirmed", AppliedAt: &minted, MintedBody: []byte("policy"), AppliedBody: []byte("policy")}
+	stream := domain.NodeAgentStream{AgentID: "native", Stream: domain.NodeAgentStreamConfig, DesiredETag: "invalid-listener", AppliedETag: "good-listener", AppliedEpoch: 1, LastSeen: &seen}
+	for _, tc := range []struct {
+		name   string
+		change func(*domain.DestAgentPolicy, *domain.NodeAgentStream)
+		want   bool
+	}{
+		{"unchanged-policy-with-fresh-config-failure", func(*domain.DestAgentPolicy, *domain.NodeAgentStream) {}, true},
+		{"no-current-config-mutation", func(_ *domain.DestAgentPolicy, s *domain.NodeAgentStream) { s.DesiredETag = "good-listener" }, false},
+		{"config-unexpectedly-applied", func(_ *domain.DestAgentPolicy, s *domain.NodeAgentStream) { s.AppliedETag = s.DesiredETag }, false},
+		{"different-confirmed-config", func(_ *domain.DestAgentPolicy, s *domain.NodeAgentStream) { s.AppliedETag = "other" }, false},
+		{"old-epoch", func(_ *domain.DestAgentPolicy, s *domain.NodeAgentStream) { s.AppliedEpoch = 0 }, false},
+		{"stale-config-report", func(_ *domain.DestAgentPolicy, s *domain.NodeAgentStream) { s.LastSeen = &minted }, false},
+		{"policy-rejected", func(r *domain.DestAgentPolicy, _ *domain.NodeAgentStream) { r.ReportedState = "rejected" }, false},
+		{"policy-fallback", func(r *domain.DestAgentPolicy, _ *domain.NodeAgentStream) { r.FallbackReason = "rejected" }, false},
+		{"policy-generation-changed", func(r *domain.DestAgentPolicy, _ *domain.NodeAgentStream) { r.MintedGeneration++ }, false},
+		{"policy-body-changed", func(r *domain.DestAgentPolicy, _ *domain.NodeAgentStream) { r.MintedBody = []byte("different") }, false},
+		{"lkg-body-changed", func(r *domain.DestAgentPolicy, _ *domain.NodeAgentStream) { r.AppliedBody = []byte("different") }, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			current, cfg := prior, stream
+			tc.change(&current, &cfg)
+			if got := nativeListenerFaultReceiptMatches(prior, current, cfg, "good-listener", 1, &seen, mutation); got != tc.want {
+				t.Fatalf("listener fault receipt=%t, want %t", got, tc.want)
+			}
+		})
+	}
+	// The test must observe an accepted sync after the mutation, not a cached
+	// policy receipt and an old core error.
+	if nativeListenerFaultReceiptMatches(prior, prior, stream, "good-listener", 1, &minted, mutation) {
+		t.Fatal("stale agent report proved a new listener failure")
+	}
+}
+
+// A failed listener deployment must not be mistaken for a policy rejection or
+// for successful application of the invalid config. The unchanged policy may
+// legitimately retain its old mint/report timestamps.
+func nativeListenerFaultReceiptMatches(prior, current domain.DestAgentPolicy, cfg domain.NodeAgentStream, confirmedConfig string, epoch uint64, lastSeen *time.Time, after time.Time) bool {
+	return prior.AgentID != "" && current.AgentID == prior.AgentID && prior.MintedAt != nil &&
+		lastSeen != nil && lastSeen.After(after) && nativeReceiptMatches(current, prior.MintedGeneration, lastSeen, *prior.MintedAt) &&
+		prior.MintedKind == domain.DestCandidateDesired && current.MintedKind == prior.MintedKind &&
+		current.MintedSHA256 == prior.MintedSHA256 && current.DesiredSHA256 == prior.DesiredSHA256 &&
+		current.AppliedSHA256 == prior.AppliedSHA256 && current.ReportedSHA256 == prior.ReportedSHA256 &&
+		bytes.Equal(current.MintedBody, prior.MintedBody) && bytes.Equal(current.AppliedBody, prior.AppliedBody) &&
+		cfg.AgentID == prior.AgentID && cfg.Stream == domain.NodeAgentStreamConfig && epoch > 0 && cfg.AppliedEpoch == epoch &&
+		confirmedConfig != "" && cfg.DesiredETag != "" && cfg.DesiredETag != confirmedConfig && cfg.AppliedETag == confirmedConfig && !cfg.Converged() &&
+		cfg.LastSeen != nil && cfg.LastSeen.After(after)
+}
 
 // ReportedAt records status transitions, not every sync. A following accepted
 // sync proves liveness even when an unchanged receipt retains its old timestamp.
