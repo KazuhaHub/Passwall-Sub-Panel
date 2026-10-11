@@ -23,7 +23,7 @@ test('published remote rollback requires the real watcher, helper and complete e
 })
 
 test('remote restoration diagnostics retain only fixed booleans', () => {
-  for (const suffix of ['task_terminal', 'receipt_failed', 'receipt_activated', 'source_installed', 'seen', 'identity', 'capability', 'streams', 'policy', 'report', 'core', 'listener', 'journal_readable', 'journal_failed', 'journal_running', 'journal_delivered', 'quarantined', 'failed_result_posted', 'failed_result_accepted', 'failed_result_rejected']) {
+  for (const suffix of ['task_terminal', 'receipt_failed', 'receipt_activated', 'source_installed', 'seen', 'identity', 'capability', 'streams', 'policy', 'report', 'core', 'listener', 'journal_readable', 'journal_failed', 'journal_running', 'journal_delivered', 'quarantined', 'failed_result_posted', 'failed_result_accepted', 'failed_result_rejected', 'outbox_pending', 'outbox_valid', 'fresh_after_restore', 'sync_validation_error', 'sync_outbox_error', 'sync_observer_error', 'sync_duplicate_issue', 'sync_stream_error', 'sync_process_error']) {
     const category = `remote_restore_${suffix}`
     for (const value of ['true', 'false']) {
       const retained = sanitizeDestinationResults(encode([{ Action: 'output', Output: `native diagnostic: ${category}=${value}\n` }]))

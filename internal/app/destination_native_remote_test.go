@@ -225,14 +225,27 @@ func TestNativePublishedRemoteRollback(t *testing.T) {
 	run("health_failure_restore", func() {
 		facts := map[string]bool{}
 		var failed nodeagentupgrade.Status
+		var restoredAt time.Time
 		sourceDigest := managed.digest(caseTest, "bin/passwall-node")
 		defer func() {
 			if caseTest.Failed() {
+				if !restoredAt.IsZero() {
+					journal := managed.command(caseTest, "/usr/bin/journalctl", "--unit", "passwall-node.service", "--since", "@"+strconv.FormatInt(restoredAt.Unix(), 10), "--no-pager", "--output=cat")
+					for _, entry := range []struct{ name, text string }{{"sync_validation_error", "validate local node report"}, {"sync_outbox_error", "build report outbox"}, {"sync_observer_error", "observe core before full report"}, {"sync_duplicate_issue", "duplicate issue"}, {"sync_stream_error", "build report have."}, {"sync_process_error", "task worker:"}} {
+						caseTest.Logf("native diagnostic: remote_restore_%s=%t", entry.name, strings.Contains(journal, entry.text))
+					}
+				}
 				if db, err := sql.Open("sqlite", "file:"+nativeRemoteRoot+"/data/state.db?mode=ro&_pragma=query_only(1)&_pragma=busy_timeout(5000)"); err == nil {
 					var state string
 					var delivered int
 					facts["journal_readable"] = db.QueryRowContext(caseTest.Context(), "SELECT state,result_delivered FROM task_executions WHERE task_id=?", failed.TaskID).Scan(&state, &delivered) == nil
 					facts["journal_failed"], facts["journal_running"], facts["journal_delivered"] = state == "failed", state == "running", delivered == 1
+					var payload []byte
+					if db.QueryRowContext(caseTest.Context(), "SELECT payload FROM report_outbox WHERE kind='task_result' AND dedupe_key=? AND delivered=0", failed.TaskID).Scan(&payload) == nil {
+						facts["outbox_pending"] = true
+						var result protocol.TaskResult
+						facts["outbox_valid"] = json.Unmarshal(payload, &result) == nil && protocol.ValidateTaskResults([]protocol.TaskResult{result}) == nil
+					}
 					_ = db.Close()
 				}
 				quarantined, err := a.repos.NodeAgentTask.GetQuarantinedResult(caseTest.Context(), f.agent.AgentID, failed.TaskID)
@@ -242,7 +255,7 @@ func TestNativePublishedRemoteRollback(t *testing.T) {
 					sum := sha256.Sum256(data)
 					facts["source_installed"] = hex.EncodeToString(sum[:]) == sourceDigest
 				}
-				for _, name := range []string{"task_terminal", "receipt_failed", "receipt_activated", "source_installed", "seen", "identity", "capability", "streams", "policy", "report", "core", "listener", "journal_readable", "journal_failed", "journal_running", "journal_delivered", "quarantined", "failed_result_posted", "failed_result_accepted", "failed_result_rejected"} {
+				for _, name := range []string{"task_terminal", "receipt_failed", "receipt_activated", "source_installed", "seen", "identity", "capability", "streams", "policy", "report", "core", "listener", "journal_readable", "journal_failed", "journal_running", "journal_delivered", "quarantined", "failed_result_posted", "failed_result_accepted", "failed_result_rejected", "outbox_pending", "outbox_valid", "fresh_after_restore"} {
 					caseTest.Logf("native diagnostic: remote_restore_%s=%t", name, facts[name])
 				}
 			}
@@ -285,6 +298,9 @@ func TestNativePublishedRemoteRollback(t *testing.T) {
 			var observed nativeRemoteReceipt
 			if data, err := os.ReadFile(nativeRemoteRoot + "/upgrades/" + failed.TaskID + ".json"); err == nil && json.Unmarshal(data, &observed) == nil {
 				facts["receipt_failed"], facts["receipt_activated"] = observed.Phase == "failed", observed.Phase == "activated"
+				if observed.Phase == "failed" && restoredAt.IsZero() {
+					restoredAt = time.Now().UTC()
+				}
 			}
 			stored, err := a.repos.NodeAgentTask.GetByTaskID(caseTest.Context(), failed.TaskID)
 			facts["task_terminal"] = err == nil && stored != nil && stored.Status.Terminal()
@@ -294,6 +310,7 @@ func TestNativePublishedRemoteRollback(t *testing.T) {
 			agent, err := a.repos.NodeAgent.GetByAgentID(caseTest.Context(), f.agent.AgentID)
 			facts["seen"], facts["identity"], facts["capability"], facts["streams"] = false, false, false, false
 			if err == nil && agent != nil {
+				facts["fresh_after_restore"] = !restoredAt.IsZero() && agent.LastSeen != nil && agent.LastSeen.After(restoredAt)
 				facts["seen"] = agent.LastSeen != nil && agent.LastSeen.After(after)
 				facts["identity"] = agent.Epoch == originalAgent.Epoch && agent.CredentialSHA256 == originalAgent.CredentialSHA256
 				facts["capability"] = slicesContainsNative(agent.ObservedCapabilities, protocol.CapabilityDestinationPolicy)
