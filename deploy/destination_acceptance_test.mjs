@@ -7,7 +7,7 @@ test('legacy upgrade has an independent complete real execution gate and immutab
   const acceptance = await import('./destination-acceptance.mjs')
   assert.equal(typeof acceptance.checkLegacyUpgradeResults, 'function')
   const pkg = 'github.com/KazuhaHub/passwall-sub-panel/internal/app'
-  const tests = ['TestNativeLegacyPSPUpgrade', ...['old_panel', 'panel_upgrade', 'legacy_publication'].map(name => `TestNativeLegacyPSPUpgrade/${name}`)]
+  const tests = ['TestNativeLegacyPSPUpgrade', ...['old_panel', 'panel_upgrade', 'legacy_publication', 'mixed_fleet', 'mixed_offline_pause'].map(name => `TestNativeLegacyPSPUpgrade/${name}`)]
   const values = [...tests.flatMap(Test => [{ Action: 'run', Package: pkg, Test }, { Action: 'pass', Package: pkg, Test }]), { Action: 'pass', Package: pkg }]
   const evidence = sanitizeDestinationResults(encode(values))
   assert.doesNotThrow(() => acceptance.checkLegacyUpgradeResults(evidence))
@@ -17,7 +17,8 @@ test('legacy upgrade has an independent complete real execution gate and immutab
     assert.throws(() => acceptance.checkLegacyUpgradeResults(encode(values.map(event => event.Test === name && event.Action === 'pass' ? { ...event, Action: 'skip' } : event))))
   }
   const workflow = readFileSync(new URL('../.github/workflows/destination-acceptance.yml', import.meta.url), 'utf8')
-  for (const value of ['0ae05e1e40170c030acd23cdf637310b740b50a6', '8e5e3db72219a8db9081a372722abb1529d22ecd', 'native-legacy-panel-bridge.go.txt', 'check-legacy-upgrade', 'PSP_NATIVE_LEGACY_PANEL_BIN', 'PSP_NATIVE_LEGACY_NODE_BIN']) assert(workflow.includes(value), value)
+  const legacyJob = workflow.slice(workflow.indexOf('  legacy-upgrade:'))
+  for (const value of ['0ae05e1e40170c030acd23cdf637310b740b50a6', '8e5e3db72219a8db9081a372722abb1529d22ecd', nodeCandidate.commit, 'native-legacy-panel-bridge.go.txt', 'check-legacy-upgrade', 'PSP_NATIVE_LEGACY_PANEL_BIN', 'PSP_NATIVE_LEGACY_NODE_BIN', 'PSP_NATIVE_MIXED_NODE_BIN']) assert(legacyJob.includes(value), value)
 })
 import * as acceptance from './destination-acceptance.mjs'
 

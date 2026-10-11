@@ -10,9 +10,17 @@ export const guardedSingBoxCases = Object.freeze([...singBoxCases.filter(name =>
 const xrayNames = ['TestNativeDestinationTraffic', ...destinationCases.map(name => `TestNativeDestinationTraffic/${name}`)]
 const singBoxNames = ['TestNativeSingBoxDestinationTraffic', ...singBoxCases.map(name => `TestNativeSingBoxDestinationTraffic/${name}`)]
 const guardedSingBoxNames = ['TestNativeGuardedSingBoxDestinationTraffic', ...guardedSingBoxCases.map(name => `TestNativeGuardedSingBoxDestinationTraffic/${name}`)]
-const legacyUpgradeNames = ['TestNativeLegacyPSPUpgrade', ...['old_panel', 'panel_upgrade', 'legacy_publication'].map(name => `TestNativeLegacyPSPUpgrade/${name}`)]
+const legacyUpgradeNames = ['TestNativeLegacyPSPUpgrade', ...['old_panel', 'panel_upgrade', 'legacy_publication', 'mixed_fleet', 'mixed_offline_pause'].map(name => `TestNativeLegacyPSPUpgrade/${name}`)]
 const names = [...xrayNames, ...singBoxNames, ...guardedSingBoxNames, ...legacyUpgradeNames]
 const diagnostics = Object.freeze({
+  'timed out waiting for mixed current candidate application': 'mixed_apply_timeout',
+  'timed out waiting for mixed single-node offline pause': 'mixed_offline_timeout',
+  'mixed candidate real traffic did not match its execution state': 'mixed_traffic_failed',
+  "mixed coverage borrowed a peer's policy capability or execution": 'mixed_coverage_invalid',
+  'mixed candidate did not confirm its own applied rule': 'mixed_candidate_unconfirmed',
+  'mixed offline node falsely stopped execution': 'mixed_offline_state_invalid',
+  'mixed reconnected node did not apply the pause': 'mixed_pause_unconfirmed',
+  'mixed legacy node acquired policy execution material': 'mixed_legacy_policy_invalid',
   'legacy upgrade admin dest/policies returned HTTP 400': 'legacy_policy_input_rejected',
   'legacy upgrade admin dest/policies returned HTTP 401': 'legacy_policy_auth_failed',
   'legacy upgrade admin dest/policies returned HTTP 403': 'legacy_policy_access_failed',

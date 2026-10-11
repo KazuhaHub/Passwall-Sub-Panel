@@ -145,17 +145,25 @@ jobs:
           ref: '8e5e3db72219a8db9081a372722abb1529d22ecd'
           path: legacy-node
           persist-credentials: false
+      - uses: actions/checkout@v7
+        with:
+          repository: KazuhaHub/Passwall-Node
+          ref: '63c60f6d5e8cd093bbaa8385f5b514dbe2f40390'
+          path: mixed-node
+          persist-credentials: false
       - name: Build released sources with their own preferred compilers
         run: |
           set -euo pipefail
           test "$(git -C legacy-panel rev-parse HEAD)" = '0ae05e1e40170c030acd23cdf637310b740b50a6'
           test "$(git -C legacy-node rev-parse HEAD)" = '8e5e3db72219a8db9081a372722abb1529d22ecd'
+          test "$(git -C mixed-node rev-parse HEAD)" = '63c60f6d5e8cd093bbaa8385f5b514dbe2f40390'
           test -z "$(git -C legacy-panel status --porcelain)"
           test -z "$(git -C legacy-node status --porcelain)"
+          test -z "$(git -C mixed-node status --porcelain)"
           # The only old-PSP addition is this reviewed test harness. Its Build,
           # router, migrations and sync services all remain the released code.
           cp deploy/native-legacy-panel-bridge.go.txt legacy-panel/internal/app/native_legacy_bridge_test.go
-          for source in legacy-panel legacy-node; do
+          for source in legacy-panel legacy-node mixed-node; do
             (
               cd "$source"
               compiler=$(awk '$1 == "toolchain" { print $2 }' go.mod)
@@ -164,10 +172,12 @@ jobs:
               test "$(GOTOOLCHAIN="$compiler" go tool compile -V | awk '{ print $3 }')" = "$compiler"
               if [ "$source" = legacy-panel ]; then
                 GOTOOLCHAIN="$compiler" CGO_ENABLED=0 go test -c -o "$RUNNER_TEMP/destination-legacy-panel.test" ./internal/app
-              else
+              elif [ "$source" = legacy-node ]; then
                 GOTOOLCHAIN="$compiler" CGO_ENABLED=0 go build \
                   -ldflags '-X github.com/KazuhaHub/passwall-node/v4/internal/version.Version=v4.0.1.8' \
                   -o "$RUNNER_TEMP/destination-legacy-node" ./cmd/node
+              else
+                GOTOOLCHAIN="$compiler" CGO_ENABLED=0 go build -o "$RUNNER_TEMP/destination-mixed-node" ./cmd/node
               fi
             )
           done
@@ -182,6 +192,7 @@ jobs:
           sudo --preserve-env=GITHUB_ACTIONS,GITHUB_REPOSITORY,RUNNER_ENVIRONMENT \
             env PSP_NATIVE_LEGACY_PANEL_BIN="$RUNNER_TEMP/destination-legacy-panel.test" \
             PSP_NATIVE_LEGACY_NODE_BIN="$RUNNER_TEMP/destination-legacy-node" \
+            PSP_NATIVE_MIXED_NODE_BIN="$RUNNER_TEMP/destination-mixed-node" \
             "$RUNNER_TEMP/destination-acceptance.test" -test.v=test2json -test.run '^TestNativeLegacyPSPUpgrade$' -test.timeout 12m 2>&1 \
             | go tool test2json -t -p github.com/KazuhaHub/passwall-sub-panel/internal/app \
             | node deploy/destination-acceptance.mjs sanitize \

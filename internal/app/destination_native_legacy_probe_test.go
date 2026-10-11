@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/KazuhaHub/passwall-protocol/protocol"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 )
 
 type nativeLegacySnapshot struct {
@@ -26,6 +27,40 @@ type nativeLegacyProbe struct {
 	mu       sync.Mutex
 	latest   nativeLegacySnapshot
 	listener protocol.ListenerKey
+}
+
+func nativeLegacyPolicyAbsent(state *domain.DestAgentPolicy) bool {
+	if state == nil {
+		return true
+	}
+	if state.DesiredSHA256 != "" || state.MintedSHA256 != "" || state.AppliedSHA256 != "" || state.ReportedSHA256 != "" || state.AppliedRuleCount != 0 || state.CollectEffective != "" {
+		return false
+	}
+	for _, body := range [][]byte{state.MintedBody, state.AppliedBody} {
+		var policy *protocol.DestinationPolicy
+		if len(body) > 0 && (json.Unmarshal(body, &policy) != nil || policy != nil) {
+			return false
+		}
+	}
+	return state.MintedKind == "" || state.MintedKind == domain.DestCandidateEmpty || state.MintedKind == domain.DestCandidatePaused
+}
+
+func TestNativeLegacyAllowsEmptyMetadataButRejectsAnyPolicyMaterial(t *testing.T) {
+	for _, body := range [][]byte{nil, []byte("null")} {
+		state := &domain.DestAgentPolicy{MintedKind: domain.DestCandidateEmpty, MintedBody: body}
+		if !nativeLegacyPolicyAbsent(state) {
+			t.Fatal("empty legacy metadata mistaken for policy execution")
+		}
+	}
+	for _, state := range []*domain.DestAgentPolicy{
+		{MintedSHA256: "digest"}, {DesiredSHA256: "digest"}, {AppliedSHA256: "digest"}, {ReportedSHA256: "digest"},
+		{MintedBody: []byte(`{}`)}, {AppliedBody: []byte(`{}`)}, {MintedBody: []byte(`private malformed`)},
+		{AppliedRuleCount: 1}, {CollectEffective: "hits"}, {MintedKind: domain.DestCandidateDesired},
+	} {
+		if nativeLegacyPolicyAbsent(state) {
+			t.Fatal("legacy gate accepted policy material or execution")
+		}
+	}
 }
 
 func (p *nativeLegacyProbe) snapshot() nativeLegacySnapshot {

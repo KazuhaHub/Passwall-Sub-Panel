@@ -75,6 +75,7 @@ func TestNativeLegacyPSPUpgrade(t *testing.T) {
 	var node *exec.Cmd
 	var nodeDone chan error
 	var current *App
+	var adminToken string
 	var server *httptest.Server
 	t.Cleanup(func() {
 		stop(&node, nodeDone)
@@ -184,14 +185,14 @@ func TestNativeLegacyPSPUpgrade(t *testing.T) {
 		return
 	}
 	if !t.Run("legacy_publication", func(test *testing.T) {
-		token := destinationRefreshAdminToken(test, current)
+		adminToken = destinationRefreshAdminToken(test, current)
 		client := server.Client()
 		request := func(method, path string, body any, want int, result any) {
 			data, err := json.Marshal(body)
 			nativeMust(test, err, "encode legacy upgrade admin input")
 			r, err := http.NewRequestWithContext(test.Context(), method, server.URL+"/api/admin/"+path, bytes.NewReader(data))
 			nativeMust(test, err, "create legacy upgrade admin request")
-			r.Header.Set("Authorization", "Bearer "+token)
+			r.Header.Set("Authorization", "Bearer "+adminToken)
 			r.Header.Set("Content-Type", "application/json")
 			response, err := client.Do(r)
 			nativeMust(test, err, "call legacy upgrade admin HTTP")
@@ -213,12 +214,13 @@ func TestNativeLegacyPSPUpgrade(t *testing.T) {
 		if len(status.Nodes) != 1 || status.Nodes[0].PanelID != ready.PanelID || status.Nodes[0].State != "unsupported_version" || status.Nodes[0].Supports.Policy || status.Nodes[0].AppliedRules != 0 || status.PublishedGeneration == 0 {
 			test.Fatal("legacy node coverage did not require an upgrade")
 		}
-		var count int
-		nativeMust(test, current.database.QueryRowContext(test.Context(), "SELECT COUNT(*) FROM dest_agent_policy WHERE agent_id = ?", ready.AgentID).Scan(&count), "read legacy policy runtime")
-		if count != 0 {
+		metadata, err := current.repos.DestAgentPolicy.Get(test.Context(), ready.AgentID, true)
+		nativeMust(test, err, "read legacy empty policy metadata")
+		if !nativeLegacyPolicyAbsent(metadata) {
 			test.Fatal("legacy node received a policy runtime candidate")
 		}
 	}) {
 		return
 	}
+	nativeMixedLegacyFleet(t, nativeMixedLegacyFixture{app: current, dir: dir, legacyPanelID: ready.PanelID, userID: ready.UserID, targetAddress: address, targetPort: targetPort, nonce: nonce, adminToken: adminToken, adminURL: server.URL, adminClient: server.Client(), legacyUnchanged: assertUnchanged})
 }
