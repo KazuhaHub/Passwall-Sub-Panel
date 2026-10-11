@@ -9,6 +9,7 @@ import { getDestinationList, getDestinationCategories, createDestinationList, pu
 import { groupKeys } from './keys'
 import { getDestinationExemptions, getDestinationUserAccess, createDestinationExemption, putDestinationExemption, deleteDestinationExemption, type DestinationExemptionInput } from '@/api/accessControl'
 import { createDestinationGlobalException } from '@/api/accessControl'
+import { invalidateDestinationGroups } from './destinationGroups'
 
 export function useAccessControlSettings(scope: QueryScope, enabled: boolean) {
   return useQuery({
@@ -22,12 +23,10 @@ export function useSaveAccessControlSettings(scope: QueryScope) {
   const client = useQueryClient()
   return useMutation({
     mutationFn: putAccessControlSettings,
-    onSuccess: () => {
-      void client.invalidateQueries({ queryKey: accessControlKeys.settings(scope) })
-      void client.invalidateQueries({ queryKey: accessControlKeys.status(scope) })
-      void client.invalidateQueries({ queryKey: settingsKeys.ui(scope) })
-      void client.invalidateQueries({ queryKey: accessControlKeys.lists(scope) })
-    },
+    onSuccess: () => Promise.all([
+      ...[accessControlKeys.settings(scope), accessControlKeys.status(scope), settingsKeys.ui(scope), accessControlKeys.lists(scope)].map(queryKey => client.invalidateQueries({ queryKey })),
+      invalidateDestinationGroups(client, scope),
+    ]),
   })
 }
 
@@ -58,8 +57,8 @@ export function destinationCategoriesQuery(scope: QueryScope, enabled = true) {
 export function useDestinationCategories(scope: QueryScope, enabled: boolean) { return useQuery(destinationCategoriesQuery(scope, enabled)) }
 function useInvalidateLists(scope: QueryScope) {
   const client = useQueryClient()
-  return () => Promise.all([accessControlKeys.lists(scope), accessControlKeys.listDetails(scope), accessControlKeys.listPreviews(scope), accessControlKeys.policyPreviews(scope), accessControlKeys.policies(scope), accessControlKeys.status(scope), groupKeys.all(scope)]
-    .map(queryKey => client.invalidateQueries({ queryKey, refetchType: queryKey.some(key => key === 'list-preview' || key === 'policy-preview') ? 'none' : 'active' })))
+  return () => Promise.all([invalidateDestinationGroups(client, scope), ...[accessControlKeys.lists(scope), accessControlKeys.listDetails(scope), accessControlKeys.listPreviews(scope), accessControlKeys.policyPreviews(scope), accessControlKeys.policies(scope), accessControlKeys.status(scope), groupKeys.all(scope)]
+    .map(queryKey => client.invalidateQueries({ queryKey, refetchType: queryKey.some(key => key === 'list-preview' || key === 'policy-preview') ? 'none' : 'active' }))])
 }
 export function useSaveDestinationList(scope: QueryScope) {
   const invalidate = useInvalidateLists(scope)
@@ -78,8 +77,8 @@ export function useRefreshDestinationCategories(scope: QueryScope) {
 }
 function useInvalidatePolicies(scope: QueryScope) {
   const client = useQueryClient()
-  return () => Promise.all([accessControlKeys.policies(scope), accessControlKeys.status(scope), accessControlKeys.lists(scope), accessControlKeys.policyPreviews(scope)]
-    .map(queryKey => client.invalidateQueries({ queryKey, refetchType: queryKey.some(key => key === 'policy-preview') ? 'none' : 'active' })))
+  return () => Promise.all([invalidateDestinationGroups(client, scope), ...[accessControlKeys.policies(scope), accessControlKeys.status(scope), accessControlKeys.lists(scope), accessControlKeys.policyPreviews(scope)]
+    .map(queryKey => client.invalidateQueries({ queryKey, refetchType: queryKey.some(key => key === 'policy-preview') ? 'none' : 'active' }))])
 }
 export function useSaveDestinationPolicy(scope: QueryScope) {
   const invalidate = useInvalidatePolicies(scope)
@@ -97,11 +96,11 @@ export function useOrderDestinationPolicies(scope: QueryScope) {
 export function useDestinationPublication(scope: QueryScope) {
   const client = useQueryClient()
   return useMutation({ mutationFn: ({ paused }: { paused?: boolean }) => paused === undefined ? publishDestinationPolicies() : putDestinationPause(paused),
-    onSettled: () => Promise.all([accessControlKeys.status(scope), accessControlKeys.policies(scope)].map(queryKey => client.invalidateQueries({ queryKey }))) })
+    onSettled: () => Promise.all([invalidateDestinationGroups(client, scope), ...[accessControlKeys.status(scope), accessControlKeys.policies(scope)].map(queryKey => client.invalidateQueries({ queryKey }))]) })
 }
 export function useRetryDestinationPolicy(scope: QueryScope) {
   const client = useQueryClient()
-  return useMutation({ mutationFn: retryDestinationPolicy, onSettled: () => client.invalidateQueries({ queryKey: accessControlKeys.status(scope) }) })
+  return useMutation({ mutationFn: retryDestinationPolicy, onSettled: () => Promise.all([client.invalidateQueries({ queryKey: accessControlKeys.status(scope) }), invalidateDestinationGroups(client, scope)]) })
 }
 
 export function useDestinationExemptions(scope: QueryScope, enabled = true) {
@@ -112,8 +111,8 @@ export function useDestinationUserAccess(scope: QueryScope, id: number, enabled 
 }
 function useInvalidateExemptions(scope: QueryScope) {
   const client = useQueryClient()
-  return () => Promise.all([accessControlKeys.exemptions(scope), accessControlKeys.userAccessRoot(scope), accessControlKeys.policies(scope), accessControlKeys.status(scope), accessControlKeys.policyPreviews(scope)]
-    .map(queryKey => client.invalidateQueries({ queryKey, refetchType: queryKey.some(key => key === 'policy-preview') ? 'none' : 'active' })))
+  return () => Promise.all([invalidateDestinationGroups(client, scope), ...[accessControlKeys.exemptions(scope), accessControlKeys.userAccessRoot(scope), accessControlKeys.policies(scope), accessControlKeys.status(scope), accessControlKeys.policyPreviews(scope)]
+    .map(queryKey => client.invalidateQueries({ queryKey, refetchType: queryKey.some(key => key === 'policy-preview') ? 'none' : 'active' }))])
 }
 export function useSaveDestinationExemption(scope: QueryScope) {
   return useMutation({ mutationFn: ({ userId, input, existing }: { userId: number; input: DestinationExemptionInput; existing?: boolean }) => existing

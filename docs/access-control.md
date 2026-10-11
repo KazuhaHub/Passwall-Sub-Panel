@@ -2288,4 +2288,12 @@ lists or eligible nodes without current applied rules.
 
 Both read routes are administrator-only, accept no query fields, use no-store
 and return no partial groups/readiness on failure. Reads never publish or mint a
-candidate. The S8-S11 allowlist interface and S17 summary tab remain pending.
+candidate. The frontend transport validates complete group responses and
+forwards request cancellation. Trial reports retain every anonymous site and
+the server's effective retention window; malformed or partial responses are
+errors rather than empty summaries. Session-scoped group queries are enabled
+only for administrators, separate preview inputs and requested report windows,
+and poll only outstanding receipts while visible. Group writes and existing
+list/policy/exemption/publication/settings mutations invalidate related group
+facts and reports, including after conflicts, without automatically re-running
+previews. The S8-S11 allowlist interface and S17 summary tab remain pending.
