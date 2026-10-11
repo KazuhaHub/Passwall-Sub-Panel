@@ -26,8 +26,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/KazuhaHub/passwall-protocol/protocol"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/destpolicy"
 )
 
 // This driver launches the real candidate daemon against Build's production
@@ -48,6 +50,15 @@ func TestNativeDestinationTraffic(t *testing.T) {
 	f := buildDestinationPolicyFixture(t)
 	a := f.a
 	token := destinationRefreshAdminToken(t, a)
+	// A second real principal distinguishes successful account revocation from
+	// an unavailable core. Both attachments are provisioned before the daemon.
+	canary := &domain.User{UPN: "canary@example.test", Email: "canary@example.test", SSOProvider: domain.SSOProviderLocal, SSOSubject: "canary@example.test", Role: domain.RoleUser, Enabled: true, GroupID: f.group.ID, UUID: "33333333-3333-4333-8333-333333333333", SubToken: "fixture-native-canary-token"}
+	nativeMust(t, a.repos.User.Create(t.Context(), canary), "create canary principal")
+	canaryClient := &domain.PSPClient{UserID: canary.ID, PanelID: f.agent.PanelID, Email: "canary@psp.local", UUID: canary.UUID, Password: "fixture-native-canary-password"}
+	canaryClient.SetDesiredLifecycle(domain.UserLifecycle{Enable: true})
+	canaryClient.ID, err = a.repos.PSPClient.Create(t.Context(), canaryClient)
+	nativeMust(t, err, "create canary client")
+	nativeMust(t, a.repos.PSPClient.SetInbounds(t.Context(), canaryClient.ID, []domain.PSPClientInbound{{ClientID: canaryClient.ID, NodeID: f.node.ID, State: domain.ClientApplyPending}}), "attach canary client")
 	settings, err := a.settings.Load(t.Context(), ports.UISettings{})
 	nativeMust(t, err, "read cadence")
 	settings.NodePollSeconds, settings.FullReportSeconds = 2, 0
@@ -61,7 +72,9 @@ func TestNativeDestinationTraffic(t *testing.T) {
 	inbound, api := nativePort(t), nativePort(t)
 	f.node.DesiredPort, f.node.ObservedPort = inbound, inbound
 	f.node.InboundListen = "127.0.0.1"
-	f.node.Sniffing = `{"enabled":true,"destOverride":["http","tls"]}`
+	const fullSniffing = `{"enabled":true,"destOverride":["http","tls","quic"]}`
+	const metadataSniffing = `{"enabled":true,"destOverride":["http","tls","quic"],"metadataOnly":true}`
+	f.node.Sniffing = fullSniffing
 	nativeMust(t, a.repos.Node.Update(t.Context(), f.node), "configure disposable listener")
 	a.startDestinationAudit()
 	probe := &nativeRestartProbe{}
@@ -102,7 +115,7 @@ func TestNativeDestinationTraffic(t *testing.T) {
 	t.Cleanup(func() {
 		stopDaemon(t)
 		text := output.text()
-		for _, private := range []string{f.credential, f.user.Email, "destination@psp.local", " accepted ", " rejected "} {
+		for _, private := range []string{f.credential, f.user.Email, canary.Email, canaryClient.Email, "destination@psp.local", " accepted ", " rejected "} {
 			if strings.Contains(text, private) {
 				t.Error("private access data escaped into Node output; content withheld")
 			}
@@ -136,7 +149,19 @@ func TestNativeDestinationTraffic(t *testing.T) {
 		}
 	}
 	publish := func() { request("POST", "dest/publish", nil, 200, nil) }
-	waitApplied := func() {
+	setSniffing := func(sniffing string) {
+		request("PUT", fmt.Sprintf("nodes/%d/inbound", f.node.ID), map[string]any{"remark": "Native acceptance", "enable": true, "listen": "127.0.0.1", "port": inbound, "protocol": "vless", "settings": f.node.InboundSettings, "stream_settings": f.node.StreamSettings, "sniffing": sniffing, "allocate": f.node.Allocate}, 204, nil)
+	}
+	streamsReady := func(agent *domain.NodeAgent) bool {
+		for _, name := range []domain.NodeAgentStreamName{domain.NodeAgentStreamConfig, domain.NodeAgentStreamRoster} {
+			stream, err := a.repos.NodeAgent.GetStream(caseTest.Context(), f.agent.AgentID, name)
+			if err != nil || stream.AppliedEpoch != agent.Epoch || !stream.Converged() {
+				return false
+			}
+		}
+		return true
+	}
+	waitCandidate := func(kind domain.DestCandidateKind, exhausted, fault bool, after time.Time) {
 		caseTest.Helper()
 		defer func() {
 			if caseTest.Failed() {
@@ -155,24 +180,29 @@ func TestNativeDestinationTraffic(t *testing.T) {
 				return false
 			}
 			agent, err := a.repos.NodeAgent.GetByAgentID(caseTest.Context(), f.agent.AgentID)
-			if err != nil || !nativeReceiptMatches(*r, state.PublishedGeneration, agent.LastSeen, receiptAfter) {
+			if err != nil {
+				return false
+			}
+			if fault {
+				if !nativeFaultReceiptMatches(*r, state.PublishedGeneration, agent.LastSeen, after, kind, exhausted) || len(r.PrecheckListeners) != 1 || r.PrecheckListeners[0] != string(protocol.NewListenerKey(f.node.ID)) {
+					return false
+				}
+			} else if !nativeReceiptMatches(*r, state.PublishedGeneration, agent.LastSeen, after) {
 				return false
 			}
 			// An empty policy may be acknowledged before the core download and
 			// roster installation. Policy receipt alone cannot prove traffic ready.
-			for _, name := range []domain.NodeAgentStreamName{domain.NodeAgentStreamConfig, domain.NodeAgentStreamRoster} {
-				stream, err := a.repos.NodeAgent.GetStream(caseTest.Context(), f.agent.AgentID, name)
-				if err != nil || stream.AppliedEpoch != agent.Epoch || !stream.Converged() {
-					return false
-				}
-			}
-			return true
+			return streamsReady(agent)
 		})
 	}
-	traffic := func(allowed bool) {
+	waitApplied := func() { waitCandidate("", false, false, receiptAfter) }
+	waitFault := func(kind domain.DestCandidateKind, exhausted bool) {
+		waitCandidate(kind, exhausted, true, receiptAfter)
+	}
+	trafficUser := func(uuid string, allowed bool) {
 		caseTest.Helper()
 		before := requests.Load()
-		err := nativeVLESS(caseTest.Context(), inbound, address, targetPort, f.user.UUID, nonce)
+		err := nativeVLESS(caseTest.Context(), inbound, address, targetPort, uuid, nonce)
 		if allowed && err != nil {
 			caseTest.Fatal("real VLESS traffic did not reach its nonce target; private diagnostics withheld")
 		}
@@ -187,6 +217,7 @@ func TestNativeDestinationTraffic(t *testing.T) {
 			caseTest.Fatal("deny/allow result disagreed with actual target request count")
 		}
 	}
+	traffic := func(allowed bool) { trafficUser(f.user.UUID, allowed) }
 	count := func(query string, args ...any) int64 {
 		caseTest.Helper()
 		var n int64
@@ -201,6 +232,48 @@ func TestNativeDestinationTraffic(t *testing.T) {
 	}
 	var policy destinationPolicyAPIResult
 	var mode destinationGroupModeAPIResult
+	verifyCandidate := func(wantRules int, keepLKG string, portSource int64) *domain.DestAgentPolicy {
+		caseTest.Helper()
+		r, err := a.repos.DestAgentPolicy.Get(caseTest.Context(), f.agent.AgentID, true)
+		nativeMust(caseTest, err, "read exact fault candidate")
+		var compiled *protocol.DestinationPolicy
+		nativeMust(caseTest, json.Unmarshal(r.MintedBody, &compiled), "decode exact fault candidate")
+		if compiled == nil || protocol.ValidateDestinationPolicy(compiled) != nil || protocol.PolicyDigest(compiled) != r.MintedSHA256 || len(compiled.Rules) != wantRules || compiled.Collect != protocol.CollectHitsAndUsage {
+			caseTest.Fatal("fault candidate did not retain its exact rules and collection mode")
+		}
+		canonical, err := json.Marshal(compiled)
+		nativeMust(caseTest, err, "encode canonical fault candidate")
+		if !bytes.Equal(canonical, r.MintedBody) || keepLKG != "" && r.AppliedSHA256 != keepLKG {
+			caseTest.Fatal("fault candidate changed its canonical body or historical LKG")
+		}
+		var status destpolicy.DestinationStatus
+		request("GET", "dest/status", nil, 200, &status)
+		if len(status.Nodes) != 1 {
+			caseTest.Fatal("status API did not expose the exact native node")
+		}
+		n := status.Nodes[0]
+		wantState := "applied"
+		if r.FallbackReason == "sniffing" {
+			wantState = "sniffing"
+		}
+		if r.MintedKind == domain.DestCandidatePaused {
+			wantState = "paused"
+		}
+		if n.PanelID != f.agent.PanelID || n.MintedKind != r.MintedKind || n.FallbackReason != r.FallbackReason || n.FallbackExhausted != r.FallbackExhausted || n.AppliedRules != wantRules || n.PendingSince != nil || n.AppliedAt == nil || n.State != wantState || status.Paused != (r.MintedKind == domain.DestCandidatePaused) {
+			caseTest.Fatal("status API disagreed with the currently acknowledged candidate")
+		}
+		if portSource > 0 {
+			if len(compiled.Rules) != 1 {
+				caseTest.Fatal("port fallback contains unexpected rules")
+			}
+			rule := compiled.Rules[0]
+			source, _, _ := strings.Cut(rule.ID, "x")
+			if source != fmt.Sprintf("p%d", portSource) || rule.Action != protocol.RuleBlock || rule.Ports != strconv.Itoa(targetPort) || len(rule.Domains) != 0 || len(rule.Protocols) != 0 || len(rule.CIDRs) != 0 || rule.CatchAll {
+				caseTest.Fatal("fallback did not execute the confirmed port-only rule")
+			}
+		}
+		return r
+	}
 	run := func(name string, work func()) {
 		if !t.Run(name, func(child *testing.T) { caseTest = child; defer func() { caseTest = t }(); work() }) {
 			t.FailNow()
@@ -317,6 +390,104 @@ func TestNativeDestinationTraffic(t *testing.T) {
 		nativeWait(caseTest, 30*time.Second, "restarted user hit ingestion", func() bool {
 			return count("SELECT COALESCE(SUM(count),0) FROM dest_hits WHERE user_id=? AND source=? AND action='observe' AND port=?", f.user.ID, source, targetPort) > before
 		})
+	})
+	var domainPolicy destinationPolicyAPIResult
+	var portLKG, protocolLKG string
+	run("fallback_port", func() {
+		input["action"], input["updated_at"] = "block", policy.UpdatedAt
+		request("PUT", fmt.Sprintf("dest/policies/%d", policy.ID), input, 200, &policy)
+		publish()
+		waitApplied()
+		traffic(false)
+		portLKG = verifyCandidate(1, "", policy.ID).AppliedSHA256
+		setSniffing(metadataSniffing)
+		waitApplied() // Port-only policy remains valid with metadataOnly.
+		var list struct {
+			ID int64 `json:"id"`
+		}
+		request("POST", "dest/lists", map[string]any{"name": "Sniffing prerequisite", "kind": "custom", "text": "full:fallback.example.test\n"}, 201, &list)
+		domainInput := destinationPolicyInput("Domain prerequisite", "block")
+		domainInput["inline"], domainInput["list_ids"] = map[string]any{}, []int64{list.ID}
+		request("POST", "dest/policies", domainInput, 201, &domainPolicy)
+		publish()
+		waitFault(domain.DestCandidateFallback, false)
+		verifyCandidate(1, portLKG, policy.ID)
+		traffic(false)
+	})
+	run("fallback_pause", func() {
+		request("PUT", "dest/pause", map[string]any{"paused": true}, 200, nil)
+		waitFault(domain.DestCandidatePaused, false)
+		verifyCandidate(0, portLKG, 0)
+		traffic(true)
+		request("PUT", "dest/pause", map[string]any{"paused": false}, 200, nil)
+		waitFault(domain.DestCandidateFallback, false)
+		verifyCandidate(1, portLKG, policy.ID)
+		traffic(false)
+	})
+	run("fallback_prune", func() {
+		input["enabled"], input["updated_at"] = false, policy.UpdatedAt
+		request("PUT", fmt.Sprintf("dest/policies/%d", policy.ID), input, 200, &policy)
+		publish()
+		waitFault(domain.DestCandidateEmpty, false)
+		verifyCandidate(0, portLKG, 0)
+		traffic(true)
+	})
+	run("sniff_exhaustion", func() {
+		setSniffing(fullSniffing)
+		waitApplied()
+		verifyCandidate(1, "", 0) // The domain rule is now executable.
+		traffic(true)
+		protocolInput := destinationPolicyInput("HTTP prerequisite", "block")
+		protocolInput["inline"] = map[string]any{"protocols": []string{"http"}}
+		var httpPolicy destinationPolicyAPIResult
+		request("POST", "dest/policies", protocolInput, 201, &httpPolicy)
+		publish()
+		waitApplied()
+		protocolLKG = verifyCandidate(2, "", 0).AppliedSHA256
+		traffic(false)
+		waitHit(fmt.Sprintf("p%d", httpPolicy.ID), "block", f.user.ID, targetPort)
+		setSniffing(metadataSniffing)
+		waitFault(domain.DestCandidateEmpty, true)
+		verifyCandidate(0, protocolLKG, 0)
+		traffic(true)
+	})
+	run("exhausted_roster", func() {
+		mintedAfter := receiptAfter
+		before := verifyCandidate(0, protocolLKG, 0).MintedSHA256
+		request("POST", fmt.Sprintf("users/%d/set-enabled", f.user.ID), map[string]any{"enabled": false}, 204, nil)
+		disabledAfter := receiptAfter
+		nativeWait(caseTest, 120*time.Second, "exhausted roster application", func() bool {
+			agent, err := a.repos.NodeAgent.GetByAgentID(caseTest.Context(), f.agent.AgentID)
+			if err != nil || agent.LastSeen == nil || !agent.LastSeen.After(disabledAfter) || !streamsReady(agent) {
+				return false
+			}
+			// Convergence of the old roster is insufficient. Require the current
+			// acknowledged body to revoke this subject while retaining the canary.
+			stream, err := a.repos.NodeAgent.GetStream(caseTest.Context(), f.agent.AgentID, domain.NodeAgentStreamRoster)
+			var roster protocol.RosterBody
+			if err != nil || stream.AppliedEpoch != agent.Epoch || !stream.Converged() || json.Unmarshal(stream.DesiredBody, &roster) != nil {
+				return false
+			}
+			revoked, active := 0, 0
+			for _, c := range roster.Clients {
+				if c.Subject == protocol.NewSubjectKey(f.user.ID) {
+					if c.Enabled {
+						return false
+					}
+					revoked++
+				}
+				if c.Key == protocol.NewClientKey(canaryClient.ID) && c.Enabled {
+					active++
+				}
+			}
+			return revoked == 1 && active == 1
+		})
+		waitCandidate(domain.DestCandidateEmpty, true, true, mintedAfter)
+		if verifyCandidate(0, protocolLKG, 0).MintedSHA256 != before {
+			caseTest.Fatal("roster update rearmed an exhausted fallback")
+		}
+		traffic(false)
+		trafficUser(canary.UUID, true)
 	})
 }
 

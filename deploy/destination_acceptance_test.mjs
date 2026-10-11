@@ -41,3 +41,7 @@ test('the real driver exercises the first report and traffic after a daemon rest
   assert(destinationCases.includes('restart'))
   for (const required of ['run("restart"', 'probe.arm()', 'probe.first()', 'stopDaemon(caseTest)', 'startDaemon(caseTest)']) assert(driver.includes(required), required)
 })
+test('the driver must execute every declared real traffic and fault scenario', () => {
+  const driver = readFileSync(new URL('../internal/app/destination_native_acceptance_test.go', import.meta.url), 'utf8')
+  for (const name of destinationCases) assert(driver.includes(`run("${name}"`), name)
+})
