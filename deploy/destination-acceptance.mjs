@@ -16,6 +16,10 @@ const remoteUpgradeNames = ['TestNativePublishedRemoteRollback', ...remoteUpgrad
 const names = [...xrayNames, ...singBoxNames, ...guardedSingBoxNames, ...legacyUpgradeNames, ...remoteUpgradeNames]
 const diagnostics = Object.freeze({
   'timed out waiting for remote candidate nonempty policy': 'remote_candidate_timeout',
+  'timed out waiting for remote candidate raw counters': 'remote_raw_counters_timeout',
+  'timed out waiting for remote candidate cumulative counters': 'remote_counters_timeout',
+  'fold real remote traffic through production collector': 'remote_collector_failed',
+  'remote acceptance command failed': 'remote_command_failed',
   'timed out waiting for published remote helper completion': 'remote_helper_timeout',
   'timed out waiting for published remote rollback convergence': 'remote_convergence_timeout',
   'published remote helper task failed': 'remote_task_failed',

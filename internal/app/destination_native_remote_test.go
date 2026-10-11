@@ -141,6 +141,9 @@ func TestNativePublishedRemoteRollback(t *testing.T) {
 		}
 		return true
 	}
+	foldTraffic := func() {
+		nativeMust(caseTest, a.operationGate.RunRead(caseTest.Context(), a.traffic.PollOnce), "fold real remote traffic through production collector")
+	}
 	waitPublished := func(after time.Time) {
 		nativeWait(caseTest, 4*time.Minute, "published remote rollback convergence", func() bool {
 			agent, err := a.repos.NodeAgent.GetByAgentID(caseTest.Context(), f.agent.AgentID)
@@ -150,6 +153,7 @@ func TestNativePublishedRemoteRollback(t *testing.T) {
 			s := probe.snapshot()
 			return s.AgentVersion == nativeRemotePublishedIdentity && s.CoreState == "running" && !s.PolicyPresent && !s.PolicyCapable && s.ConfigBodyKnown && !s.ConfigPolicy && s.ListenerApplied
 		})
+		foldTraffic()
 		traffic(true)
 		managed.assertPreserved(caseTest, before)
 		clients, err := a.repos.PSPClient.ListByUser(caseTest.Context(), f.user.ID)
@@ -189,8 +193,19 @@ func TestNativePublishedRemoteRollback(t *testing.T) {
 			originalAgent, originalPolicy = agent, runtime
 			return true
 		})
+		// Build does not launch the application's cron loop. Run its production
+		// traffic callback explicitly: the first nonzero raw sample establishes
+		// a reset-safe baseline; only a second traffic wave contributes lifetime.
+		foldTraffic()
+		traffic(false)
+		nativeWait(caseTest, 30*time.Second, "remote candidate raw counters", func() bool {
+			foldTraffic()
+			clients, err := a.repos.PSPClient.ListByUser(caseTest.Context(), f.user.ID)
+			return err == nil && len(clients) == 1 && clients[0].LastCounterEpoch != 0 && clients[0].LastRawUpBytes+clients[0].LastRawDownBytes > 0
+		})
 		traffic(false)
 		nativeWait(caseTest, 30*time.Second, "remote candidate cumulative counters", func() bool {
+			foldTraffic()
 			clients, err := a.repos.PSPClient.ListByUser(caseTest.Context(), f.user.ID)
 			if err != nil || len(clients) != 1 || clients[0].LifetimeUpBytes+clients[0].LifetimeDownBytes == 0 {
 				return false
