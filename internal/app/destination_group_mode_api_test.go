@@ -102,6 +102,8 @@ func TestBuildGroupModeHTTPUsesAtomicOwnedListsCASAndPreservesRetainedSource(t *
 	if err != nil || retained.ContentSHA256 != base.ContentSHA256 || string(retained.SourceText) != string(base.SourceText) {
 		t.Fatal("mode transitions replaced retained owned list source")
 	}
+	// Observe committed rows after all Build-owned write audits finish.
+	a.bgWG.Wait()
 	rows, _, err := a.repos.Audit.List(t.Context(), ports.AuditFilter{})
 	if err != nil {
 		t.Fatal(err)
