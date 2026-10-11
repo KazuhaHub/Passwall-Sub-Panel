@@ -256,9 +256,14 @@ new events and one fresh connection must be ingested with exact counts and no
 duplicate committed hit. This covers short live retries, not the 26-hour
 cleanup/reopen and 48-hour/72-hour boundary matrix.
 
-Current candidate readiness requires its published generation, a mint after
-the administrator mutation, a matching applied report, and an accepted sync
-after that mint. Desired candidates additionally require the matching confirmed
+Current candidate readiness requires its published generation, a matching
+applied report, and an accepted sync after the mint. A fault mint must follow
+the administrator mutation, or prove a newer publication and mint than the
+actual pre-mutation candidate, with an accepted sync after the mutation. This
+handles a sync clock sampled before the write but compilation after the new
+publication. The exact fault kind, applied digest, LKG and precheck still must
+match; the exception cannot confirm a same-generation pause edit.
+Desired candidates additionally require the matching confirmed
 LKG. Empty and paused candidates may retain a different historical LKG;
 unchanged report timestamps are not treated as a new status transition.
 

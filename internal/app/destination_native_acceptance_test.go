@@ -211,7 +211,7 @@ func TestNativeDestinationTraffic(t *testing.T) {
 			facts["receipt_precheck"] = (len(r.PrecheckListeners) > 0) == fault
 			facts["receipt_streams"] = streamsReady(agent)
 			if fault {
-				matches := nativeFaultReceiptMatches(*r, state.PublishedGeneration, agent.LastSeen, after, kind, exhausted)
+				matches := nativeFaultMutationReceiptMatches(receiptBefore, *r, state.PublishedGeneration, agent.LastSeen, after, kind, exhausted)
 				if len(prunedFrom) > 0 {
 					facts["receipt_transition"] = len(prunedFrom) == 1 && prunedFrom[0] != nil && kind == domain.DestCandidateFallback && !exhausted && nativePrunedFallbackReceiptMatches(*prunedFrom[0], *r, state.PublishedGeneration, agent.LastSeen, after)
 					matches = facts["receipt_transition"]

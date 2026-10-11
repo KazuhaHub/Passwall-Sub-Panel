@@ -157,6 +157,57 @@ func nativePrunedFallbackReceiptMatches(prior, current domain.DestAgentPolicy, g
 		nativeFaultReceiptMatches(current, generation, lastSeen, *prior.MintedAt, domain.DestCandidateFallback, false)
 }
 
+// A sync cycle can sample its clock before the admin write and compile the new
+// published definitions afterward. Require a newer publication and mint than
+// the actual pre-write candidate, plus the exact fault receipt and a post-write
+// accepted sync. This exception cannot confirm a same-generation pause edit.
+func nativeFaultMutationReceiptMatches(prior *domain.DestAgentPolicy, current domain.DestAgentPolicy, generation int64, lastSeen *time.Time, after time.Time, kind domain.DestCandidateKind, exhausted bool) bool {
+	if nativeFaultReceiptMatches(current, generation, lastSeen, after, kind, exhausted) {
+		return true
+	}
+	if prior == nil || prior.AgentID != current.AgentID || prior.MintedAt == nil || current.MintedAt == nil || !current.MintedAt.After(*prior.MintedAt) || generation <= prior.MintedGeneration || lastSeen == nil || !lastSeen.After(after) {
+		return false
+	}
+	return nativeFaultReceiptMatches(current, generation, lastSeen, *prior.MintedAt, kind, exhausted)
+}
+
+func TestNativeFaultMutationRequiresNewPublicationAndExactReceipt(t *testing.T) {
+	oldMint := time.Unix(100, 0)
+	mint := oldMint.Add(time.Second)
+	admin := mint.Add(time.Millisecond)
+	seen := admin.Add(time.Second)
+	prior := domain.DestAgentPolicy{AgentID: "agt_fault_overlap", MintedGeneration: 6, MintedAt: &oldMint}
+	base := domain.DestAgentPolicy{AgentID: prior.AgentID, MintedKind: domain.DestCandidateFallback, MintedGeneration: 7, MintedAt: &mint, MintedSHA256: "confirmed", ReportedSHA256: "confirmed", ReportedState: "applied", AppliedSHA256: "confirmed", AppliedAt: &seen, ReportedAt: &seen, FallbackReason: "sniffing", PrecheckListeners: []string{"l1"}}
+	for _, tc := range []struct {
+		name   string
+		change func(*domain.DestAgentPolicy, **time.Time)
+		want   bool
+	}{
+		{"overlapping-clock-with-new-publication", func(*domain.DestAgentPolicy, **time.Time) {}, true},
+		{"same-generation", func(r *domain.DestAgentPolicy, _ **time.Time) { r.MintedGeneration = 6 }, false},
+		{"old-mint", func(r *domain.DestAgentPolicy, _ **time.Time) { r.MintedAt = &oldMint }, false},
+		{"old-sync", func(_ *domain.DestAgentPolicy, s **time.Time) { *s = &mint }, false},
+		{"foreign-agent", func(r *domain.DestAgentPolicy, _ **time.Time) { r.AgentID = "agt_other" }, false},
+		{"wrong-kind", func(r *domain.DestAgentPolicy, _ **time.Time) { r.MintedKind = domain.DestCandidateDesired }, false},
+		{"old-receipt", func(r *domain.DestAgentPolicy, _ **time.Time) { r.ReportedSHA256 = "old" }, false},
+		{"old-lkg", func(r *domain.DestAgentPolicy, _ **time.Time) { r.AppliedSHA256 = "old" }, false},
+		{"rejected", func(r *domain.DestAgentPolicy, _ **time.Time) { r.ReportedState = "rejected" }, false},
+		{"fault-missing", func(r *domain.DestAgentPolicy, _ **time.Time) { r.PrecheckListeners = nil }, false},
+		{"exhausted", func(r *domain.DestAgentPolicy, _ **time.Time) { r.FallbackExhausted = true }, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			current, synced := base, &seen
+			tc.change(&current, &synced)
+			if got := nativeFaultMutationReceiptMatches(&prior, current, current.MintedGeneration, synced, admin, domain.DestCandidateFallback, false); got != tc.want {
+				t.Fatalf("fault mutation receipt = %t, want %t", got, tc.want)
+			}
+		})
+	}
+	if nativeFaultMutationReceiptMatches(nil, base, 7, &seen, admin, domain.DestCandidateFallback, false) {
+		t.Fatal("overlap without the actual pre-write candidate accepted")
+	}
+}
+
 func TestNativePrunedFallbackUsesGenerationAndBodyCausality(t *testing.T) {
 	oldMint := time.Unix(100, 0)
 	newMint := oldMint.Add(time.Second)

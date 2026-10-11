@@ -89,6 +89,7 @@ jobs:
         run: |
           set -euo pipefail
           node --test deploy/destination_acceptance_test.mjs
+          go test -count=1 ./internal/app -run '^TestNative(FaultMutationRequiresNewPublicationAndExactReceipt|PrunedFallbackUsesGenerationAndBodyCausality)$'
           go test -c -tags destination_acceptance -o "$RUNNER_TEMP/destination-acceptance.test" ./internal/app
       # Only the hosted ephemeral VM receives one run-owned documentation /128.
       # Neither host trust stores nor the production core's private guard change.
