@@ -10,6 +10,12 @@ function events() {
   return [...names.flatMap(Test => [{ Action: 'run', Package: pkg, Test }, { Action: 'pass', Package: pkg, Test }]), { Action: 'pass', Package: pkg }]
 }
 const encode = values => values.map(value => JSON.stringify(value)).join('\n')
+test('each engine requires a real report-only refresh without replacing its core', () => {
+  for (const cases of [destinationCases, acceptance.singBoxCases, acceptance.guardedSingBoxCases]) assert(cases.includes('report_refresh'))
+  assert.throws(() => checkDestinationResults(encode(events().filter(event => !event.Test?.endsWith('/report_refresh')))))
+  const workflow = readFileSync(new URL('../.github/workflows/destination-acceptance.yml', import.meta.url), 'utf8')
+  assert(workflow.includes("PSP_NATIVE_SOURCE_COMMIT='${{ github.event.pull_request.head.sha || github.sha }}'"))
+})
 test('each engine requires the real unchanged-sync process identity case', () => {
   for (const cases of [destinationCases, acceptance.singBoxCases, acceptance.guardedSingBoxCases]) assert(cases.includes('idle_sync'))
   assert.throws(() => checkDestinationResults(encode(events().filter(event => !event.Test?.endsWith('/idle_sync')))))

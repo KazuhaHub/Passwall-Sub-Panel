@@ -19,8 +19,8 @@ selection; the production catalog gate remains enforced.
 
 A separate job selects the reviewed sing-box `1.14.0` through the same PSP
 catalog and launches the candidate Node with its normal sing-box API. Its
-twelve required cases are empty policy, watch, block, pause/resume, sniffed
-domain blocking, allowlist trial, enforce, supplemental CIDR, unchanged sync, daemon restart,
+thirteen required cases are empty policy, watch, block, pause/resume, sniffed
+domain blocking, allowlist trial, enforce, supplemental CIDR, unchanged sync, report-only refresh, daemon restart,
 collection settings, and the pre-hotfix private-address baseline. Administrator
 mutations require a current applied policy receipt and actual listener/roster
 convergence before traffic is checked. Trial allows the connection; enforce
@@ -45,7 +45,7 @@ claim that a private-address guard already exists or that cloud metadata and
 DNS-resolved private destinations are protected. No cloud endpoint is queried.
 The private-address guard is unchanged by this PSP acceptance change.
 
-The guarded job repeats the same eleven policy, allowlist, sync, restart and collection
+The guarded job repeats the same twelve policy, allowlist, sync, refresh, restart and collection
 cases against the new Node, then replaces `private_baseline` with `private_guard`.
 It must reject a real VLESS private IPv4 literal with no target request, while a
 `localhost` domain still reaches the same controlled server and returns its nonce.
@@ -59,9 +59,9 @@ it does not claim protection for all private-resolving domains or cloud metadata
 The guarded job has its own complete execution gate and cannot borrow passes
 from either the baseline sing-box job or Xray jobs. No production code changes.
 
-Every Xray job must execute all twenty-four ordered cases: empty policy, watch,
+Every Xray job must execute all twenty-five ordered cases: empty policy, watch,
 block, pause/resume, anonymous allowlist trial, enforce, supplemental entry,
-unchanged sync, unrelated listener rejection and repair, actual core-check timeout and repair,
+unchanged sync, report-only list refresh, unrelated listener rejection and repair, actual core-check timeout and repair,
 collection off, detailed usage, daemon restart, port-only fallback under
 insufficient sniffing, pause/resume during fallback, disabled-rule pruning,
 sniffing fallback exhaustion, account revocation while exhausted, and a PSP app
@@ -89,6 +89,23 @@ byte-identical with the same SHA-256, traffic still reaches the nonce target, an
 the original pidfd must remain alive. Xray verifies both real users. No signals
 are sent or artifacts rewritten. This proves no successful core replacement over
 these idle cycles, not all possible sources of restart or a load-duration test.
+
+The report-only refresh case seeds a migrated remote list with usable canonical
+content and a missing parse report, then publishes a real global watch policy
+that uses that list. The source is this repository's non-sensitive two-line
+fixture on raw.githubusercontent.com at the exact PR head commit (or the exact
+push/manual commit); only a lowercase forty-character commit is admitted. The
+driver never grants private network access or replaces the production fetcher.
+Administrator HTTP queues a normal asynchronous HTTPS download, duplicate
+parsing and production refresh commit. The duplicate report must appear both
+in storage and the administrator detail read, with a new fetched time and row
+edit version. Source, normalized entries, counts, digest, definition generation
+and published generation must stay unchanged. The pidfd/config/roster/policy
+checks span that actual refresh and three later accepted syncs, with successful
+traffic throughout. The temporary watch is then removed through HTTP. No Node
+report, receipt, core artifact or refresh result is fabricated. This covers
+the legacy-missing-report refresh path; the full category-download, SQL-dialect,
+cache/CAS and old-node upgrade requirements still use their separate evidence.
 
 Fault cases mutate sniffing and policies through production administrator HTTP.
 They check canonical candidate bytes, historical LKG retention, the acknowledged

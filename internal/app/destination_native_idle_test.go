@@ -18,7 +18,7 @@ import (
 
 // Hold the original process identity across actual accepted sync cycles. A PID
 // number or an unchanged config alone cannot prove that the core never restarted.
-func nativeAssertIdleSync(t *testing.T, a *App, probe *nativeRestartProbe, agentID string, nodeID int64, parent int, dataDir, engine string, traffic func()) {
+func nativeAssertIdleSync(t *testing.T, a *App, probe *nativeRestartProbe, agentID string, nodeID int64, parent int, dataDir, engine string, traffic func(), mutations ...func()) {
 	t.Helper()
 	stateDir := filepath.Join(dataDir, "runtime", "xray")
 	pid, fd := 0, -1
@@ -76,6 +76,9 @@ func nativeAssertIdleSync(t *testing.T, a *App, probe *nativeRestartProbe, agent
 		stream, err := a.repos.NodeAgent.GetStream(t.Context(), agentID, name)
 		nativeMust(t, err, "read idle confirmed stream")
 		streams = append(streams, stream)
+	}
+	for _, mutate := range mutations {
+		mutate()
 	}
 	for range 3 {
 		after := time.Now().UTC()

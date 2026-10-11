@@ -99,6 +99,7 @@ jobs:
           esac
           sudo --preserve-env=GITHUB_ACTIONS,GITHUB_REPOSITORY,RUNNER_ENVIRONMENT \
             env PSP_NATIVE_NODE_BIN="$RUNNER_TEMP/destination-node" PSP_NATIVE_CORE_VERSION='${{ matrix.core }}' \
+            PSP_NATIVE_SOURCE_COMMIT='${{ github.event.pull_request.head.sha || github.sha }}' \
             "$RUNNER_TEMP/destination-acceptance.test" -test.v=test2json -test.run "^${test_name}$" -test.timeout 15m 2>&1 \
             | go tool test2json -t -p github.com/KazuhaHub/passwall-sub-panel/internal/app \
             | node deploy/destination-acceptance.mjs sanitize \

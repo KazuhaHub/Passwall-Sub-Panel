@@ -293,6 +293,20 @@ func nativeSingBoxDestinationTraffic(t *testing.T, guarded bool) {
 		nativeAssertIdleSync(caseTest, a, probe, f.agent.AgentID, f.node.ID, cmd.Process.Pid, filepath.Join(dir, "node"), "sing-box", func() { traffic(literalHost, true) })
 		noCollection()
 	})
+	run("report_refresh", func() {
+		list := nativeSeedReportRefreshList(caseTest, a)
+		input := destinationPolicyInput("Native report refresh", "observe")
+		input["inline"], input["list_ids"] = map[string]any{}, []int64{list.ID}
+		var refreshPolicy destinationPolicyAPIResult
+		request("POST", "dest/policies", input, 201, &refreshPolicy)
+		publish()
+		waitApplied()
+		nativeAssertIdleSync(caseTest, a, probe, f.agent.AgentID, f.node.ID, cmd.Process.Pid, filepath.Join(dir, "node"), "sing-box", func() { traffic(literalHost, true) }, func() { nativeRefreshReportOnly(caseTest, a, list, request) })
+		noCollection()
+		request("DELETE", fmt.Sprintf("dest/policies/%d", refreshPolicy.ID), nil, 204, nil)
+		publish()
+		waitApplied()
+	})
 	run("restart", func() {
 		prior, err := a.repos.DestAgentPolicy.Get(caseTest.Context(), f.agent.AgentID, true)
 		nativeMust(caseTest, err, "read confirmed sing-box policy")
