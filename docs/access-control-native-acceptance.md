@@ -14,14 +14,15 @@ Xray version: `26.6.27`, `26.7.28`, and `26.9.9`.
 The isolated fixture explicitly acknowledges the reviewed restricted `26.9.9`
 selection; the production catalog gate remains enforced.
 
-Every matrix job must execute all nineteen ordered cases: empty policy, watch,
+Every matrix job must execute all twenty-one ordered cases: empty policy, watch,
 block, pause/resume, anonymous allowlist trial, enforce, supplemental entry,
 unrelated listener rejection and repair,
 collection off, detailed usage, daemon restart, port-only fallback under
 insufficient sniffing, pause/resume during fallback, disabled-rule pruning,
 sniffing fallback exhaustion, account revocation while exhausted, and a PSP app
 restart with the exhausted state persisted, returning an allowlist group to open
-during sniffing fallback, and pause/resume of that pruned fallback.
+during sniffing fallback, pause/resume of that pruned fallback, pausing an offline
+node, and restarting that node with unacknowledged audit backlog.
 The restarted daemon's very
 first real TLS report must already carry the confirmed applied policy, and a new
 traffic hit must map to its original user. A bounded in-memory probe copies only
@@ -70,6 +71,26 @@ rules and allows canary traffic without adding watch hits after prior batches
 have drained. Resuming restores the confirmed watch and ingests a newly counted
 hit. These checks cover both policy pruning and asynchronous membership resync.
 
+Offline cases partition only real Node TLS sync requests with HTTP 503; the
+production administrator routes remain available. With a confirmed port deny,
+the administrator pauses execution while multiple actual polls fail. The status
+API must still show the node as offline with its historical active rules, and
+real canary traffic remains denied. Reconnection must then acknowledge the pause
+before canary traffic succeeds; resuming restores the deny without re-enabling
+the previously revoked user.
+
+The next partition observes real frozen block batches over several failed polls.
+A bounded fixture probe retains only counts and the first audit subtree's hash;
+new blocked connections must not change that batch's ID, hour, rows or counters.
+No partitioned hit reaches PSP storage. Node is then stopped and restarted while
+sync remains unavailable. Its first real report must already restore the applied
+policy, but multiple new failed reports must contain none of the old in-memory
+backlog. The private sink token remains identical with mode 0600. New denied
+traffic must produce a new batch through the restored sink. Reconnection admits
+that new event and another fresh event, with exact counts excluding pre-restart
+backlog. This records actual volatile-data loss across multiple cycles; it does
+not bound restart loss to one poll interval or establish durable audit delivery.
+
 Current candidate readiness requires its published generation, a mint after
 the administrator mutation, a matching applied report, and an accepted sync
 after that mint. Desired candidates additionally require the matching confirmed
@@ -90,7 +111,8 @@ SQLite. The fixture provisions those records directly, obtains a normal admin
 JWT, then uses production HTTP routes for every tested policy mutation. It
 starts `Build` and the audit worker, not all `App.Run` background services. It
 does not replace full service installation/reinstall acceptance, SQL matrix
-tests, sing-box acceptance, policy-rejection and timeout scenarios, load testing, the
+tests, sing-box acceptance, policy-rejection and timeout scenarios, multi-node
+offline and mixed-version cases, committed-batch response-loss deduplication, load testing, the
 complete UI approval matrix, or staged release verification.
 
 Use the workflow run and PR validation record for execution evidence. All three

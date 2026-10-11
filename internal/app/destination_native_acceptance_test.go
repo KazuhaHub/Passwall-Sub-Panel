@@ -744,6 +744,119 @@ func TestNativeDestinationTraffic(t *testing.T) {
 			return count(query, source, canary.ID, targetPort) > before
 		})
 	})
+	run("offline_pause", func() {
+		setSniffing(fullSniffing)
+		waitApplied()
+		blockInput := destinationPolicyInput("Offline control fixture", "block")
+		blockInput["inline"], blockInput["updated_at"] = map[string]any{"ports": strconv.Itoa(targetPort)}, groupWatch.UpdatedAt
+		request("PUT", fmt.Sprintf("dest/policies/%d", groupWatch.ID), blockInput, 200, &groupWatch)
+		publish()
+		waitApplied()
+		prior := verifyCandidate(2, "", 0)
+		trafficUser(canary.UUID, false)
+		waitHit(fmt.Sprintf("p%d", groupWatch.ID), "block", canary.ID, targetPort)
+		partition := &nativeSyncPartition{}
+		gateway.partitionSync(partition)
+		t.Cleanup(func() { gateway.partitionSync(nil) })
+		request("PUT", "dest/pause", map[string]any{"paused": true}, 200, nil)
+		// Admin HTTP remains live; only the real Node sync requests receive 503.
+		nativeWait(caseTest, 45*time.Second, "offline pause status", func() bool {
+			var status destpolicy.DestinationStatus
+			request("GET", "dest/status", nil, 200, &status)
+			attempts, _ := partition.snapshot()
+			return attempts >= 3 && status.Paused && len(status.Nodes) == 1 && status.Nodes[0].State == "offline" && status.Nodes[0].AppliedRules == 2 && !status.Nodes[0].Collecting
+		})
+		current, err := a.repos.DestAgentPolicy.Get(caseTest.Context(), f.agent.AgentID, true)
+		nativeMust(caseTest, err, "read offline pause candidate")
+		if current.MintedSHA256 != prior.MintedSHA256 || current.MintedKind != domain.DestCandidateDesired || current.ReportedSHA256 != prior.ReportedSHA256 || current.AppliedSHA256 != prior.AppliedSHA256 {
+			caseTest.Fatal("offline node was recorded as having stopped execution")
+		}
+		trafficUser(canary.UUID, false) // The old deny remains active offline.
+		gateway.partitionSync(nil)
+		waitApplied()
+		verifyCandidate(0, prior.AppliedSHA256, 0)
+		trafficUser(canary.UUID, true) // Only a real applied pause withdraws it.
+		request("PUT", "dest/pause", map[string]any{"paused": false}, 200, nil)
+		waitApplied()
+		verifyCandidate(2, prior.AppliedSHA256, 0)
+		traffic(false)
+		trafficUser(canary.UUID, false)
+	})
+	run("offline_restart", func() {
+		prior := verifyCandidate(2, "", 0)
+		source := fmt.Sprintf("p%d", groupWatch.ID)
+		query := "SELECT COALESCE(SUM(count),0) FROM dest_hits WHERE source=? AND user_id=? AND action='block' AND port=?"
+		before := count(query, source, canary.ID, targetPort)
+		trafficUser(canary.UUID, false)
+		nativeWait(caseTest, 30*time.Second, "offline baseline hit ingestion", func() bool { return count(query, source, canary.ID, targetPort) > before })
+		time.Sleep(7 * time.Second) // Drain acknowledgements of pre-partition hits.
+		baseline := count(query, source, canary.ID, targetPort)
+		tokenPath := filepath.Join(dir, "node", "runtime", "audit.token")
+		privateToken, err := os.ReadFile(tokenPath)
+		nativeMust(caseTest, err, "read private offline sink credential")
+		partition := &nativeSyncPartition{}
+		gateway.partitionSync(partition)
+		trafficUser(canary.UUID, false)
+		nativeWait(caseTest, 60*time.Second, "offline frozen block batch", func() bool {
+			_, batches := partition.snapshot()
+			b := batches["block"]
+			return b.Seen > 0 && b.Rows == 1 && b.Events > 0 && !b.Changed
+		})
+		_, initial := partition.snapshot()
+		first := initial["block"]
+		for range 3 {
+			time.Sleep(2200 * time.Millisecond)
+			trafficUser(canary.UUID, false)
+		}
+		nativeWait(caseTest, 90*time.Second, "offline immutable batch replay", func() bool {
+			_, batches := partition.snapshot()
+			return batches["block"].Seen >= 3
+		})
+		_, repeated := partition.snapshot()
+		frozen := repeated["block"]
+		if frozen.Changed || frozen.Digest != first.Digest || frozen.Events != first.Events || count(query, source, canary.ID, targetPort) != baseline {
+			caseTest.Fatal("offline retry changed a frozen batch or reached storage")
+		}
+		stopDaemon(caseTest)
+		restartedPartition := &nativeSyncPartition{}
+		gateway.partitionSync(restartedPartition)
+		probe.arm()
+		startDaemon(caseTest)
+		nativeWait(caseTest, 60*time.Second, "offline restarted reports", func() bool {
+			attempts, _ := restartedPartition.snapshot()
+			return attempts >= 3
+		})
+		firstReport, seen, accepted := probe.first()
+		if !seen || accepted || firstReport == nil || firstReport.State != "applied" || firstReport.Digest != prior.MintedSHA256 || firstReport.IssueCode != "" {
+			caseTest.Fatal("offline restart did not restore its applied policy before sync")
+		}
+		_, restoredBatches := restartedPartition.snapshot()
+		if len(restoredBatches) != 0 || count(query, source, canary.ID, targetPort) != baseline {
+			caseTest.Fatal("offline restart retained unacknowledged memory backlog")
+		}
+		restoredToken, err := os.ReadFile(tokenPath)
+		nativeMust(caseTest, err, "read restored private sink credential")
+		info, err := os.Stat(tokenPath)
+		if err != nil || info.Mode().Perm() != 0600 || !bytes.Equal(privateToken, restoredToken) {
+			caseTest.Fatal("offline restart replaced or exposed its sink credential")
+		}
+		traffic(false)
+		trafficUser(canary.UUID, false) // Restored policy and sink both operate offline.
+		nativeWait(caseTest, 60*time.Second, "new offline restart hit", func() bool {
+			_, batches := restartedPartition.snapshot()
+			b := batches["block"]
+			return b.Seen > 0 && b.Rows == 1 && b.Events == 1 && !b.Changed && b.Digest != frozen.Digest
+		})
+		gateway.partitionSync(nil)
+		waitCandidate("", false, false, *prior.MintedAt)
+		nativeWait(caseTest, 30*time.Second, "reconnected new hit ingestion", func() bool { return count(query, source, canary.ID, targetPort) == baseline+1 })
+		time.Sleep(7 * time.Second)
+		if count(query, source, canary.ID, targetPort) != baseline+1 {
+			caseTest.Fatal("reconnection replayed pre-restart memory backlog")
+		}
+		trafficUser(canary.UUID, false)
+		nativeWait(caseTest, 30*time.Second, "fresh recovered hit ingestion", func() bool { return count(query, source, canary.ID, targetPort) == baseline+2 })
+	})
 }
 
 func slicesContainsNative(values []string, value string) bool {

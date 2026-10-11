@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
 
 export const nodeCandidate = Object.freeze({ repository: 'KazuhaHub/Passwall-Node', commit: '63c60f6d5e8cd093bbaa8385f5b514dbe2f40390' })
-export const destinationCases = Object.freeze(['empty', 'watch', 'block', 'paused', 'trial', 'enforce', 'extra', 'listener_rejected', 'collection_off', 'usage', 'restart', 'fallback_port', 'fallback_pause', 'fallback_prune', 'sniff_exhaustion', 'exhausted_roster', 'exhausted_panel_restart', 'fallback_group_open', 'fallback_group_pause'])
+export const destinationCases = Object.freeze(['empty', 'watch', 'block', 'paused', 'trial', 'enforce', 'extra', 'listener_rejected', 'collection_off', 'usage', 'restart', 'fallback_port', 'fallback_pause', 'fallback_prune', 'sniff_exhaustion', 'exhausted_roster', 'exhausted_panel_restart', 'fallback_group_open', 'fallback_group_pause', 'offline_pause', 'offline_restart'])
 const pkg = 'github.com/KazuhaHub/passwall-sub-panel/internal/app'
 const names = ['TestNativeDestinationTraffic', ...destinationCases.map(name => `TestNativeDestinationTraffic/${name}`)]
 const diagnostics = Object.freeze({
@@ -47,6 +47,20 @@ const diagnostics = Object.freeze({
   'timed out waiting for open fallback roster application': 'group_open_roster_timeout',
   'paused group fallback collected a new watch hit': 'group_pause_collected',
   'timed out waiting for resumed group fallback hit ingestion': 'group_resume_hit_timeout',
+  'timed out waiting for offline pause status': 'offline_pause_timeout',
+  'offline node was recorded as having stopped execution': 'offline_pause_receipt_failed',
+  'timed out waiting for offline baseline hit ingestion': 'offline_baseline_timeout',
+  'timed out waiting for offline frozen block batch': 'offline_batch_timeout',
+  'timed out waiting for offline immutable batch replay': 'offline_replay_timeout',
+  'offline retry changed a frozen batch or reached storage': 'offline_frozen_batch_failed',
+  'timed out waiting for offline restarted reports': 'offline_restart_report_timeout',
+  'offline restart did not restore its applied policy before sync': 'offline_restart_policy_failed',
+  'offline restart retained unacknowledged memory backlog': 'offline_restart_backlog_failed',
+  'offline restart replaced or exposed its sink credential': 'offline_restart_token_failed',
+  'timed out waiting for new offline restart hit': 'offline_new_hit_timeout',
+  'timed out waiting for reconnected new hit ingestion': 'offline_reconnect_hit_timeout',
+  'reconnection replayed pre-restart memory backlog': 'offline_replayed_old_backlog',
+  'timed out waiting for fresh recovered hit ingestion': 'offline_recovered_hit_timeout',
 })
 function parseEvent(line) {
   try { return JSON.parse(line) } catch { throw new Error('Malformed test execution stream; content withheld') }
