@@ -194,6 +194,12 @@ func TestNativeDestinationFleet(t *testing.T) {
 	thirdNodes := []*domain.Node{}
 	memberClients, canaryClients := map[int64]*domain.PSPClient{}, map[int64]*domain.PSPClient{}
 	waitPeers := func(after time.Time) {
+		priorReceipts := make(map[string]*domain.DestAgentPolicy)
+		for _, peer := range peers {
+			prior, err := a.repos.DestAgentPolicy.Get(caseTest.Context(), peer.agent.AgentID, true)
+			nativeMust(caseTest, err, "bind exact prior fleet candidate")
+			priorReceipts[peer.agent.AgentID] = prior
+		}
 		facts := map[string]bool{}
 		defer func() {
 			if caseTest.Failed() {
@@ -243,7 +249,7 @@ func TestNativeDestinationFleet(t *testing.T) {
 				if paused {
 					kind = domain.DestCandidatePaused
 				}
-				if runtime == nil || runtime.MintedKind != kind || runtime.MintedGeneration != state.PublishedGeneration || runtime.ReportedAt == nil || runtime.ReportedAt.Before(after) || runtime.ReportedState != "applied" || runtime.ReportedIssue != "" || runtime.ReportedSHA256 != runtime.MintedSHA256 || runtime.FallbackExhausted || runtime.FallbackReason != "" {
+				if runtime == nil || runtime.MintedKind != kind || !nativeMutationReceiptMatches(priorReceipts[peer.agent.AgentID], *runtime, state.PublishedGeneration, observed.LastSeen, after) {
 					facts[prefix+"policy"] = false
 					return false
 				}

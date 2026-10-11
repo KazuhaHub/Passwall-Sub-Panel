@@ -18,7 +18,7 @@ test('fleet evidence requires all real cohort stages and rejects missing, duplic
   const safe = source.sanitizeDestinationResults(privateInput)
   assert(!safe.includes('private'))
   source.checkFleetResults(safe)
-  for (const Diagnostic of ['fleet_peer_0_observation', 'fleet_peer_1_observation', 'fleet_peer_0_streams', 'fleet_peer_1_streams', 'fleet_peer_0_policy', 'fleet_peer_1_policy']) {
+  for (const Diagnostic of ['fleet_peer_0_observation', 'fleet_peer_1_observation', 'fleet_peer_0_streams', 'fleet_peer_1_streams', 'fleet_peer_0_policy', 'fleet_peer_1_policy', 'fleet_backend_xui_ready', 'fleet_backend_sui_ready', 'fleet_backend_xui_pull', 'fleet_backend_sui_pull', 'fleet_backend_auth_error', 'fleet_backend_timeout', 'fleet_backend_registry_error', 'fleet_backend_sql_error']) {
     for (const Observed of [true, false]) assert(source.isSafeDestinationDiagnostic({ Diagnostic, Observed }))
     assert(!source.isSafeDestinationDiagnostic({ Diagnostic, Observed: 'private credential' }))
   }

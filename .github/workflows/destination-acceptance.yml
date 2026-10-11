@@ -606,7 +606,7 @@ jobs:
         run: |
           set -euo pipefail
           node --test deploy/destination_fleet_test.mjs deploy/compat/backends/third-party_network.test.mjs
-          go test -v -count=1 ./internal/app -run '^TestNativeFleet(ProfilesAndContainerOwnershipAreClosed|PolicyRequiresOwnSubjectAllowanceAndCatchAll)$'
+          go test -v -count=1 ./internal/app -run '^TestNativeFleet(ProfilesAndContainerOwnershipAreClosed|PolicyRequiresOwnSubjectAllowanceAndCatchAll|StableReceiptRequiresFreshHeartbeatAndExactCandidate)$'
           go test -c -tags destination_acceptance -o "$RUNNER_TEMP/destination-acceptance.test" ./internal/app
       - name: Real App.Run, native cohort and both production third-party adapters
         run: |

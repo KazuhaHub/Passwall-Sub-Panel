@@ -100,7 +100,23 @@ func nativeStartFleetBackends(t, owner *testing.T) nativeFleetBackends {
 	command := exec.Command("bash", "deploy/compat/backends/third-party.sh", "up")
 	command.Env = append(os.Environ(), "PSP_CONTAINER_RUNTIME=docker", "PSP_BACKEND_WORKDIR="+workdir, "PSP_BACKEND_HOST="+address, "PSP_BACKEND_NETWORK=host", "PSP_LIVE_XUI_PORT=2053", "PSP_LIVE_SUI_PORT=2095", "PSP_LIVE_3XUI_IMAGE="+nativeFleetXUIImage, "PSP_LIVE_SUI_IMAGE="+nativeFleetSUIImage)
 	command.Stdout, command.Stderr = output, output
-	nativeMust(t, command.Run(), "start immutable real third-party fleet backends")
+	startErr := command.Run()
+	if startErr != nil {
+		private := output.text()
+		for category, present := range map[string]bool{
+			"fleet_backend_xui_ready":      strings.Contains(private, "3X-UI ready"),
+			"fleet_backend_sui_ready":      strings.Contains(private, "S-UI ready"),
+			"fleet_backend_xui_pull":       strings.Contains(private, "pulling "+nativeFleetXUIImage),
+			"fleet_backend_sui_pull":       strings.Contains(private, "pulling "+nativeFleetSUIImage),
+			"fleet_backend_auth_error":     strings.Contains(private, "curl: (22)") || strings.Contains(private, "KeyError:"),
+			"fleet_backend_timeout":        strings.Contains(private, "timed out") || strings.Contains(private, "never created") || strings.Contains(private, "never published"),
+			"fleet_backend_registry_error": strings.Contains(private, "manifest unknown") || strings.Contains(private, "unauthorized") || strings.Contains(private, "denied"),
+			"fleet_backend_sql_error":      strings.Contains(private, "sqlite3.OperationalError") || strings.Contains(private, "sqlite3.IntegrityError"),
+		} {
+			t.Logf("native diagnostic: %s=%t", category, present)
+		}
+	}
+	nativeMust(t, startErr, "start immutable real third-party fleet backends")
 	for _, profile := range profiles {
 		data, err := exec.Command("docker", "container", "inspect", profile.name).Output()
 		nativeMust(t, err, "read actual fleet container provenance")

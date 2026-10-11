@@ -6,12 +6,40 @@ import (
 	"regexp"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/KazuhaHub/passwall-protocol/protocol"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 )
 
 const nativeFleetXUIImage = "ghcr.io/mhsanaei/3x-ui:v3.9.0@sha256:93a7a68e3d0a65be1b02d2bfc1f3ca02d0e800516a403e103cea2d7c7090855d"
 const nativeFleetSUIImage = "ghcr.io/alireza0/s-ui:v1.6.3@sha256:51cdb0036118dbcac12cba28fed13e36c53f8cdcb72bff88a062b5d6f243bd64"
+
+func TestNativeFleetStableReceiptRequiresFreshHeartbeatAndExactCandidate(t *testing.T) {
+	minted, requested, heartbeat := time.Unix(100, 0), time.Unix(101, 0), time.Unix(102, 0)
+	base := domain.DestAgentPolicy{AgentID: "fleet", MintedKind: domain.DestCandidateEmpty, MintedGeneration: 7, MintedAt: &minted, MintedContext: "owned", MintedBody: []byte("null"), ReportedState: "applied", ReportedAt: &minted}
+	// The observer preserves ReportedAt for identical reports. A newer real
+	// heartbeat plus the exact unchanged candidate must still prove readiness.
+	if !nativeMutationReceiptMatches(&base, base, 7, &heartbeat, requested) {
+		t.Fatal("stable fleet receipt was mistaken for a missing current heartbeat")
+	}
+	if nativeMutationReceiptMatches(&base, base, 7, &minted, requested) {
+		t.Fatal("old fleet heartbeat confirmed current readiness")
+	}
+	for _, change := range []func(*domain.DestAgentPolicy){
+		func(r *domain.DestAgentPolicy) { r.AgentID = "borrowed" },
+		func(r *domain.DestAgentPolicy) { r.MintedBody = []byte("different") },
+		func(r *domain.DestAgentPolicy) { r.MintedGeneration = 6 },
+		func(r *domain.DestAgentPolicy) { r.ReportedSHA256 = "borrowed" },
+		func(r *domain.DestAgentPolicy) { r.ReportedState = "rejected" },
+	} {
+		current := base
+		change(&current)
+		if nativeMutationReceiptMatches(&base, current, 7, &heartbeat, requested) {
+			t.Fatal("changed or borrowed fleet receipt was accepted")
+		}
+	}
+}
 
 func nativeFleetProfile(profile string) ([2]bool, bool) {
 	switch profile {
