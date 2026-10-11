@@ -650,6 +650,99 @@ func TestNativeDestinationTraffic(t *testing.T) {
 	})
 	var domainPolicy destinationPolicyAPIResult
 	var portLKG, domainLKG string
+	run("policy_rejected", func() {
+		live := nativeBindLiveCore(caseTest, cmd.Process.Pid, filepath.Join(dir, "node"), "xray")
+		live()
+		configPath := filepath.Join(dir, "node", "runtime", "xray", "current.json")
+		originalConfig, err := os.ReadFile(configPath)
+		nativeMust(caseTest, err, "read original rejection fixture core config")
+		prior, err := a.repos.DestAgentPolicy.Get(caseTest.Context(), f.agent.AgentID, true)
+		nativeMust(caseTest, err, "read LKG before policy rejection")
+		var expected protocol.DestinationPolicy
+		nativeMust(caseTest, json.Unmarshal(prior.MintedBody, &expected), "decode prior rejection fixture")
+		if prior.MintedKind != domain.DestCandidateDesired || prior.AppliedSHA256 != prior.MintedSHA256 || len(expected.Rules) != 1 || expected.Rules[0].Action != protocol.RuleObserve {
+			caseTest.Fatal("policy rejection requires the confirmed port watch")
+		}
+		badInput := destinationPolicyInput("Native mapped-prefix rejection", "block")
+		badInput["inline"] = map[string]any{"cidrs": []string{nativeRejectedMappedCIDR}}
+		var badPolicy destinationPolicyAPIResult
+		probe.armRejected()
+		request("POST", "dest/policies", badInput, 201, &badPolicy)
+		// Canonical mapped IPv6 passes both original validators. Xray converts
+		// this address to IPv4, then rejects /120 as exceeding its 32-bit width.
+		// The real Node must attribute failure using its policy-free core check.
+		expected.Rules = append([]protocol.DestinationRule{{ID: fmt.Sprintf("p%d", badPolicy.ID), Action: protocol.RuleBlock, CIDRs: []string{nativeRejectedMappedCIDR}}}, expected.Rules...)
+		nativeMust(caseTest, protocol.ValidateDestinationPolicy(&expected), "validate rejection fixture contract")
+		rejectedDigest := protocol.PolicyDigest(&expected)
+		publish()
+		state, err := a.destDefinitions.State(caseTest.Context())
+		nativeMust(caseTest, err, "read rejected publication")
+		generation := state.PublishedGeneration
+		waitRejectedFallback := func(after time.Time) {
+			caseTest.Helper()
+			nativeWait(caseTest, 120*time.Second, "real policy rejection and LKG receipt", func() bool {
+				first, seen, accepted := probe.first()
+				if !seen {
+					return false
+				}
+				if !accepted || first == nil || first.State != "rejected" || first.IssueCode != protocol.IssueDestinationPolicyRejected || first.Digest != rejectedDigest || len(first.Listeners) != 0 {
+					caseTest.Fatal("real rejection did not identify the canonical desired policy")
+				}
+				r, err := a.repos.DestAgentPolicy.Get(caseTest.Context(), f.agent.AgentID, true)
+				if err != nil {
+					return false
+				}
+				agent, err := a.repos.NodeAgent.GetByAgentID(caseTest.Context(), f.agent.AgentID)
+				if err != nil || agent.LastSeen == nil || !agent.LastSeen.After(after) || !streamsReady(agent) {
+					return false
+				}
+				if r.MintedGeneration != generation || r.RejectedGeneration != generation || r.RejectedContext == "" || r.FallbackReason != "rejected" || r.FallbackExhausted || len(r.PrecheckListeners) != 0 || r.MintedKind != domain.DestCandidateFallback || r.DesiredSHA256 != rejectedDigest || r.MintedSHA256 != prior.AppliedSHA256 || r.AppliedSHA256 != prior.AppliedSHA256 || !bytes.Equal(r.MintedBody, prior.AppliedBody) || !bytes.Equal(r.AppliedBody, prior.AppliedBody) || r.ReportedState != "applied" || r.ReportedSHA256 != r.MintedSHA256 || r.ReportedIssue != "" || r.ReportedAt == nil || !r.ReportedAt.After(after) {
+					return false
+				}
+				issues, _, err := a.repos.NodeAgentIssue.List(caseTest.Context(), ports.NodeAgentIssueFilter{AgentID: f.agent.AgentID, Code: "core_convergence_failed", Pagination: ports.Pagination{Page: 1, PageSize: 50}})
+				if err != nil {
+					return false
+				}
+				for _, issue := range issues {
+					if issue.LastSeenAt.After(after) && strings.Contains(issue.Detail, "core candidate rejected") && strings.Contains(issue.Detail, "exceeds max") {
+						return true
+					}
+				}
+				return false
+			})
+			var status destpolicy.DestinationStatus
+			request("GET", "dest/status", nil, 200, &status)
+			if len(status.Nodes) != 1 || status.Nodes[0].State != "rejected" || status.Nodes[0].FallbackReason != "rejected" || status.Nodes[0].FallbackExhausted || status.Nodes[0].MintedKind != domain.DestCandidateFallback || status.Nodes[0].AppliedRules != 1 || status.Nodes[0].PendingSince != nil {
+				caseTest.Fatal("status API lost the confirmed rejected-policy fallback")
+			}
+			live()
+			currentConfig, err := os.ReadFile(configPath)
+			nativeMust(caseTest, err, "read rejection fallback core config")
+			if !bytes.Equal(originalConfig, currentConfig) {
+				caseTest.Fatal("policy rejection changed the original live core artifact")
+			}
+			before := count("SELECT COALESCE(SUM(count),0) FROM dest_hits WHERE user_id=? AND source=? AND action='observe' AND port=?", f.user.ID, fmt.Sprintf("p%d", policy.ID), targetPort)
+			traffic(true)
+			trafficUser(canary.UUID, true)
+			nativeWait(caseTest, 30*time.Second, "rejected policy LKG watch ingestion", func() bool {
+				return count("SELECT COALESCE(SUM(count),0) FROM dest_hits WHERE user_id=? AND source=? AND action='observe' AND port=?", f.user.ID, fmt.Sprintf("p%d", policy.ID), targetPort) > before
+			})
+		}
+		waitRejectedFallback(receiptAfter)
+		probe.armRejected()
+		var retry struct {
+			Requested bool `json:"retry_requested"`
+		}
+		request("POST", "dest/agents/"+f.agent.AgentID+"/retry", nil, 200, &retry)
+		if !retry.Requested {
+			caseTest.Fatal("policy retry did not reset the real rejection")
+		}
+		waitRejectedFallback(receiptAfter)
+		request("DELETE", fmt.Sprintf("dest/policies/%d", badPolicy.ID), nil, 204, nil)
+		publish()
+		waitApplied()
+		traffic(true)
+	})
 	run("fallback_port", func() {
 		input["action"], input["updated_at"] = "block", policy.UpdatedAt
 		request("PUT", fmt.Sprintf("dest/policies/%d", policy.ID), input, 200, &policy)

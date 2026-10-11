@@ -10,6 +10,10 @@ function events() {
   return [...names.flatMap(Test => [{ Action: 'run', Package: pkg, Test }, { Action: 'pass', Package: pkg, Test }]), { Action: 'pass', Package: pkg }]
 }
 const encode = values => values.map(value => JSON.stringify(value)).join('\n')
+test('Xray requires actual policy rejection and retry independently of listener failure', () => {
+  assert(destinationCases.includes('policy_rejected'))
+  assert.throws(() => checkDestinationResults(encode(events().filter(event => !event.Test?.endsWith('/policy_rejected')))))
+})
 test('each engine requires a real report-only refresh without replacing its core', () => {
   for (const cases of [destinationCases, acceptance.singBoxCases, acceptance.guardedSingBoxCases]) assert(cases.includes('report_refresh'))
   assert.throws(() => checkDestinationResults(encode(events().filter(event => !event.Test?.endsWith('/report_refresh')))))

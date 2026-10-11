@@ -343,18 +343,29 @@ func TestNativePanelGatewayDrainsBeforeReplacingHandler(t *testing.T) {
 	}
 }
 
-// Observe only the first real request after arm. The production handler still
-// owns validation and its original bytes; private report payloads are discarded.
+// Observe the first real request after arm, or the first valid rejected status
+// when explicitly requested. The production handler receives the original bytes;
+// private report payloads are discarded and prior armed requests cannot be reused.
 type nativeRestartProbe struct {
 	mu                    sync.Mutex
 	armed, seen, accepted bool
 	status                *protocol.PolicyStatus
+	wantedState           string
+	generation            uint64
 }
 
 func (p *nativeRestartProbe) arm() {
+	p.armState("")
+}
+func (p *nativeRestartProbe) armRejected() {
+	p.armState("rejected")
+}
+func (p *nativeRestartProbe) armState(state string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.armed, p.seen, p.accepted, p.status = true, false, false, nil
+	p.wantedState = state
+	p.generation++
 }
 func (p *nativeRestartProbe) first() (*protocol.PolicyStatus, bool, bool) {
 	p.mu.Lock()
@@ -363,13 +374,15 @@ func (p *nativeRestartProbe) first() (*protocol.PolicyStatus, bool, bool) {
 		return nil, p.seen, p.accepted
 	}
 	status := *p.status
+	status.Listeners = append([]protocol.ListenerKey(nil), status.Listeners...)
 	return &status, p.seen, p.accepted
 }
 func (p *nativeRestartProbe) wrap(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p.mu.Lock()
 		capture := p.armed && r.Method == "POST" && r.URL.Path == "/v1/node/sync"
-		if capture {
+		wanted, generation := p.wantedState, p.generation
+		if capture && wanted == "" {
 			p.armed = false
 		}
 		p.mu.Unlock()
@@ -387,6 +400,10 @@ func (p *nativeRestartProbe) wrap(next http.Handler) http.Handler {
 		valid := !body.truncated && json.Unmarshal(body.buf.Bytes(), &report) == nil && report.PolicyStatus != nil
 		p.mu.Lock()
 		defer p.mu.Unlock()
+		if p.generation != generation || wanted != "" && (!p.armed || !valid || report.PolicyStatus.State != wanted || protocol.ValidatePolicyStatus(*report.PolicyStatus) != nil) {
+			return
+		}
+		p.armed = false
 		p.seen, p.accepted = true, valid && (response.code == 0 || response.code == 200)
 		if valid {
 			p.status = report.PolicyStatus

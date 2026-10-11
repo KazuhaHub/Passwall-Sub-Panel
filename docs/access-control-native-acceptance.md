@@ -59,10 +59,10 @@ it does not claim protection for all private-resolving domains or cloud metadata
 The guarded job has its own complete execution gate and cannot borrow passes
 from either the baseline sing-box job or Xray jobs. No production code changes.
 
-Every Xray job must execute all twenty-five ordered cases: empty policy, watch,
+Every Xray job must execute all twenty-six ordered cases: empty policy, watch,
 block, pause/resume, anonymous allowlist trial, enforce, supplemental entry,
 unchanged sync, report-only list refresh, unrelated listener rejection and repair, actual core-check timeout and repair,
-collection off, detailed usage, daemon restart, port-only fallback under
+collection off, detailed usage, daemon restart, policy rejection and retry, port-only fallback under
 insufficient sniffing, pause/resume during fallback, disabled-rule pruning,
 sniffing fallback exhaustion, account revocation while exhausted, and a PSP app
 restart with the exhausted state persisted, returning an allowlist group to open
@@ -143,7 +143,24 @@ pending and the status page does not classify this as a policy rejection.
 Restoring the original listener requires a fresh applied/converged report and
 synced listener intent. Cleanup resumes only still-existing held children and
 closes all pidfds. These cases cover a completed unrelated rejection and a real
-deadline, not a policy-specific rejection.
+deadline, independently of a policy-specific rejection.
+
+The separate `policy_rejected` case publishes a canonical documentation prefix,
+`::ffff:192.0.2.0/120`, through administrator HTTP. PSP and Protocol validators
+remain unchanged: Xray maps the address to IPv4 and rejects the 120-bit prefix.
+The real Node must complete its policy-free check before attributing the failure.
+A bounded observer retains only the first valid rejected PolicyStatus and the
+original HTTP acceptance; earlier applied reports cannot satisfy this proof.
+The rejection must identify the exact expected desired digest, and a fresh core
+issue must establish the prefix-width error. PSP must acknowledge the unchanged
+port-watch LKG, preserve the original live core pidfd and configuration bytes,
+display rejected-with-fallback, and continue traffic and real watch ingestion.
+Administrator retry must produce another actual accepted rejection followed by
+the same LKG confirmation. Deleting the incompatible rule must recover normal
+desired application. This tests a real engine compatibility boundary without
+rewriting a binary, candidate artifact or Node report; it does not cover an LKG
+or pruned fallback being rejected.
+
 PSP is then shut down and rebuilt with the same configuration and database.
 A drained fixture TLS gateway holds the endpoint stable while the actual SQL
 pool, router, services and caches are replaced. The continuing real daemon must
@@ -222,8 +239,8 @@ SQLite. The fixture provisions those records directly, obtains a normal admin
 JWT, then uses production HTTP routes for every tested policy mutation. It
 starts `Build` and the audit worker, not all `App.Run` background services. It
 does not replace full service installation/reinstall acceptance, SQL matrix
-tests, the complete sing-box matching/upgrade matrix, policy-rejection and timeout
-scenarios, multi-node
+tests, the complete sing-box matching/upgrade matrix, LKG/pruned-candidate rejection,
+other-engine timeout scenarios, multi-node
 offline and mixed-version cases, long-window response-loss deduplication, load testing, the
 complete UI approval matrix, or staged release verification.
 

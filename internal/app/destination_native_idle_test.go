@@ -16,9 +16,8 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// Hold the original process identity across actual accepted sync cycles. A PID
-// number or an unchanged config alone cannot prove that the core never restarted.
-func nativeAssertIdleSync(t *testing.T, a *App, probe *nativeRestartProbe, agentID string, nodeID int64, parent int, dataDir, engine string, traffic func(), mutations ...func()) {
+// Bind to the original owned process without sending it a signal or changing it.
+func nativeBindLiveCore(t *testing.T, parent int, dataDir, engine string) func() {
 	t.Helper()
 	stateDir := filepath.Join(dataDir, "runtime", "xray")
 	pid, fd := 0, -1
@@ -51,7 +50,7 @@ func nativeAssertIdleSync(t *testing.T, a *App, probe *nativeRestartProbe, agent
 	if fd < 0 {
 		t.Fatal("idle sync cannot bind a unique owned live core")
 	}
-	defer unix.Close(fd)
+	t.Cleanup(func() { _ = unix.Close(fd) })
 	live := func() {
 		t.Helper()
 		file, err := os.Stat(filepath.Join("/proc", strconv.Itoa(pid), "exe"))
@@ -59,6 +58,15 @@ func nativeAssertIdleSync(t *testing.T, a *App, probe *nativeRestartProbe, agent
 			t.Fatal("idle sync replaced or lost the original core process")
 		}
 	}
+	return live
+}
+
+// Hold the original process identity across actual accepted sync cycles. A PID
+// number or an unchanged config alone cannot prove that the core never restarted.
+func nativeAssertIdleSync(t *testing.T, a *App, probe *nativeRestartProbe, agentID string, nodeID int64, parent int, dataDir, engine string, traffic func(), mutations ...func()) {
+	t.Helper()
+	live := nativeBindLiveCore(t, parent, dataDir, engine)
+	stateDir := filepath.Join(dataDir, "runtime", "xray")
 	live()
 	configPath := filepath.Join(stateDir, "current.json")
 	config, err := os.ReadFile(configPath)
