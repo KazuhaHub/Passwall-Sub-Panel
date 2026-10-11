@@ -13,7 +13,8 @@ export const guardedSingBoxCases = Object.freeze([...singBoxCases.filter(name =>
 const xrayNames = ['TestNativeDestinationTraffic', ...destinationCases.map(name => `TestNativeDestinationTraffic/${name}`)]
 const singBoxNames = ['TestNativeSingBoxDestinationTraffic', ...singBoxCases.map(name => `TestNativeSingBoxDestinationTraffic/${name}`)]
 const guardedSingBoxNames = ['TestNativeGuardedSingBoxDestinationTraffic', ...guardedSingBoxCases.map(name => `TestNativeGuardedSingBoxDestinationTraffic/${name}`)]
-const legacyUpgradeNames = ['TestNativeLegacyPSPUpgrade', ...['old_panel', 'panel_upgrade', 'legacy_publication', 'mixed_fleet', 'mixed_offline_pause', 'node_upgrade', 'node_downgrade', 'node_reupgrade', 'panel_downgrade_offline', 'panel_downgrade', 'panel_reupgrade', 'allowlist_capability_setup', 'allowlist_capability_removed', 'allowlist_capability_restored'].map(name => `TestNativeLegacyPSPUpgrade/${name}`)]
+export const legacyUpgradeCases = Object.freeze(['old_panel', 'panel_upgrade', 'legacy_publication', 'mixed_fleet', 'mixed_offline_pause', 'node_upgrade', 'node_downgrade', 'node_reupgrade', 'panel_downgrade_offline', 'panel_downgrade', 'panel_reupgrade', 'allowlist_capability_setup', 'allowlist_capability_removed', 'allowlist_capability_restored'])
+const legacyUpgradeNames = ['TestNativeLegacyPSPUpgrade', ...legacyUpgradeCases.map(name => `TestNativeLegacyPSPUpgrade/${name}`)]
 export const remoteUpgradeCases = Object.freeze(['candidate_policy', 'health_failure_restore', 'published_rollback', 'restart_recovery', 'idempotent_replay'])
 const dockerUpgradeNames = ['TestNativePublishedDockerRollback', ...remoteUpgradeCases.map(name => `TestNativePublishedDockerRollback/${name}`)]
 const remoteUpgradeNames = ['TestNativePublishedRemoteRollback', ...remoteUpgradeCases.map(name => `TestNativePublishedRemoteRollback/${name}`)]
@@ -271,6 +272,19 @@ export function checkGuardedSingBoxResults(input) { checkCases(input, guardedSin
 export function checkLegacyUpgradeResults(input) { checkCases(input, legacyUpgradeNames) }
 export function checkRemoteUpgradeResults(input) { checkCases(input, remoteUpgradeNames) }
 export function checkDockerUpgradeResults(input) { checkCases(input, dockerUpgradeNames) }
+export function isSafeDestinationDiagnostic(event) {
+  if (typeof event.Diagnostic !== 'string') return false
+  if (event.Observed === undefined) return Object.values(diagnostics).includes(event.Diagnostic)
+  if (typeof event.Observed === 'boolean') {
+    const roundTrip = sanitizeDestinationResults(JSON.stringify({ Action: 'output', Output: `native diagnostic: ${event.Diagnostic}=${event.Observed}\n` }))
+    if (!roundTrip.trim()) return false
+    const sanitized = JSON.parse(roundTrip)
+    return sanitized.Diagnostic === event.Diagnostic && sanitized.Observed === event.Observed
+  }
+  if (!Number.isInteger(event.Observed) || event.Observed < 0) return false
+  if (event.Diagnostic === 'receipt_wait') return event.Observed >= 1 && event.Observed <= 99
+  return ['panel_downgrade_application_ms', 'panel_reupgrade_application_ms'].includes(event.Diagnostic) && event.Observed <= 150000
+}
 function checkCases(input, names) {
   const runs = new Map(), passes = new Map()
   let packagePasses = 0

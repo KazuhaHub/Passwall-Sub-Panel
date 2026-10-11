@@ -465,3 +465,34 @@ jobs:
           path: ${{ runner.temp }}/destination-legacy-upgrade-tests.json
           if-no-files-found: error
           retention-days: 7
+
+  complete-matrix:
+    name: complete native matrix (25 reports / 611 cases)
+    needs: [traffic, traffic-sql, published-remote, published-docker, legacy-upgrade]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Require every runtime producer
+        env:
+          TRAFFIC_RESULT: ${{ needs.traffic.result }}
+          SQL_RESULT: ${{ needs.traffic-sql.result }}
+          REMOTE_RESULT: ${{ needs.published-remote.result }}
+          DOCKER_RESULT: ${{ needs.published-docker.result }}
+          LEGACY_RESULT: ${{ needs.legacy-upgrade.result }}
+        run: |
+          set -eu
+          test "$TRAFFIC_RESULT" = success
+          test "$SQL_RESULT" = success
+          test "$REMOTE_RESULT" = success
+          test "$DOCKER_RESULT" = success
+          test "$LEGACY_RESULT" = success
+      - uses: actions/checkout@v7
+      - name: Verify complete-matrix rejection boundaries
+        run: node --test deploy/destination_matrix_test.mjs deploy/destination_acceptance_test.mjs
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: native-*
+          path: ${{ runner.temp }}/native-destination-matrix
+      - name: Verify every required case and current merge identity
+        run: node deploy/destination-matrix.mjs "$RUNNER_TEMP/native-destination-matrix" '${{ github.sha }}'

@@ -508,6 +508,13 @@ PostgreSQL 16 上执行全部三个 Xray 版本和 guarded sing-box 1.14.0，新
 独立报告、226 个必需阶段。原十七份/385 项固定检查点保留；当前总要求为
 二十五份/611 项，每份均须由原完整 verifier 验证。
 
+`complete-matrix` 还要求五类运行作业全部成功，然后下载本次工作流的原始
+脱敏报告，交给 `deploy/destination-matrix.mjs` 统一核验。目录必须恰好包含
+当前 merge SHA 的二十五份报告，不能混用旧提交或缺少任一数据库/核心组合；
+每份报告仍使用原完整 verifier 要求唯一 RUN/PASS 和包通过事件。额外字段、
+原始 Output、未知诊断、失败、跳过、重复执行或链接文件都不能通过。合成
+checker 单元测试只验证拒绝边界，不作为真实流量或矩阵完成的证据。
+
 夹具只接受封闭的 `PSP_NATIVE_DB_KIND` 选择，不接收外部 DSN。服务数据库由
 本次工作流创建，固定为回环地址的 `psp_native_acceptance`；MySQL 业务连接
 使用仅获本数据库权限的专用用户。Build 后通过实际 SQL 读取引擎版本及当前
