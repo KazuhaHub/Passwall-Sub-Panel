@@ -25,6 +25,8 @@ type nativeFallbackRejectionFixture struct {
 	probe                                   *nativeRestartProbe
 	request                                 func(string, string, any, int, any)
 	publish, waitApplied                    func()
+	setSniffing                             func(string)
+	fullSniffing                            string
 	stopDaemon                              func(*testing.T)
 	streamsReady                            func(*domain.NodeAgent) bool
 	traffic                                 func(string, bool)
@@ -49,6 +51,10 @@ func (f nativeFallbackRejectionFixture) run(t *testing.T, pruned bool) {
 		})
 	}
 	request("PUT", fmt.Sprintf("servers/%d", f.panelID), map[string]any{"audit_collect": "off"}, 200, nil)
+	f.waitApplied()
+	// sing-box rejects legacy per-inbound Xray sniffing even without domains.
+	// Prepare compatible listener intent through the same production HTTP route.
+	f.setSniffing(`{}`)
 	f.waitApplied()
 	selectCore("sing-box", "1.14.0")
 	f.waitApplied()
@@ -242,6 +248,8 @@ func (f nativeFallbackRejectionFixture) run(t *testing.T, pruned bool) {
 	request("DELETE", fmt.Sprintf("dest/policies/%d", previous.ID), nil, 204, nil)
 	request("POST", fmt.Sprintf("users/%d/set-enabled", f.userID), map[string]any{"enabled": true}, 204, nil)
 	f.publish()
+	f.waitApplied()
+	f.setSniffing(f.fullSniffing)
 	f.waitApplied()
 	request("PUT", fmt.Sprintf("servers/%d", f.panelID), map[string]any{"audit_collect": "hits_and_usage"}, 200, nil)
 	f.waitApplied()

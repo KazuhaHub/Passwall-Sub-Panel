@@ -748,6 +748,7 @@ func TestNativeDestinationTraffic(t *testing.T) {
 		userID: f.user.ID, canaryClientID: canaryClient.ID, userUUID: f.user.UUID, canaryUUID: canary.UUID,
 		xrayVersion: version, gateway: gateway, probe: probe, request: request, publish: publish,
 		waitApplied: waitApplied, stopDaemon: stopDaemon, streamsReady: streamsReady, traffic: trafficUser,
+		setSniffing: setSniffing, fullSniffing: fullSniffing,
 	}
 	run("lkg_rejected", func() { rejectedFallback.run(caseTest, false) })
 	run("pruned_rejected", func() { rejectedFallback.run(caseTest, true) })

@@ -166,7 +166,10 @@ or pruned fallback being rejected.
 The independent `lkg_rejected` and `pruned_rejected` cases apply a mapped-prefix
 policy with the reviewed sing-box `1.14.0`, then switch through administrator
 HTTP to that job's exact reviewed Xray version. Collection is explicitly off
-so changing engines alone cannot change the policy digest. Real sync traffic
+and legacy per-inbound Xray sniffing is cleared through administrator HTTP
+before selecting sing-box; both settings are restored for subsequent cases.
+This preserves sing-box's normal listener compatibility checks. With collection
+off, changing engines alone cannot change the policy digest. Real sync traffic
 is partitioned while the new mapped-prefix desired rule and core selection are
 published, keeping the sing-box-confirmed LKG authoritative. The pruned case
 also deletes an independently confirmed source: its fallback digest must differ
