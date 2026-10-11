@@ -79,7 +79,9 @@ func TestNativeDestinationTraffic(t *testing.T) {
 	nativeMust(t, a.repos.Node.Update(t.Context(), f.node), "configure disposable listener")
 	a.startDestinationAudit()
 	probe := &nativeRestartProbe{}
-	server := httptest.NewTLSServer(probe.wrap(a.server.Handler))
+	gateway := &nativePanelGateway{}
+	gateway.replace(a.server.Handler)
+	server := httptest.NewTLSServer(probe.wrap(gateway))
 	t.Cleanup(server.Close)
 	dir := t.TempDir()
 	ca, credential := filepath.Join(dir, "ca.pem"), filepath.Join(dir, "credential")
@@ -482,6 +484,38 @@ func TestNativeDestinationTraffic(t *testing.T) {
 		waitCandidate(domain.DestCandidateEmpty, true, true, mintedAfter)
 		if verifyCandidate(0, domainLKG, 0).MintedSHA256 != before {
 			caseTest.Fatal("roster update rearmed an exhausted fallback")
+		}
+		traffic(false)
+		trafficUser(canary.UUID, true)
+	})
+	run("exhausted_panel_restart", func() {
+		prior := verifyCandidate(0, domainLKG, 0)
+		cfg := *a.cfg
+		gateway.replace(nil) // Drain actual HTTP requests before closing the pool.
+		closeContext, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		err := a.Shutdown(closeContext)
+		cancel()
+		nativeMust(caseTest, err, "stop exhausted PSP app")
+		a, err = Build(caseTest.Context(), &cfg) // Fresh SQL pool, services and caches.
+		nativeMust(caseTest, err, "reopen exhausted PSP app")
+		t.Cleanup(func() {
+			stopDaemon(t)
+			gateway.replace(nil)
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			nativeMust(t, a.Shutdown(ctx), "close restored PSP app")
+		})
+		a.startDestinationAudit()
+		reopenedAt := time.UnixMilli(time.Now().UnixMilli())
+		gateway.replace(a.server.Handler)
+		nativeWait(caseTest, 120*time.Second, "restored PSP sync", func() bool {
+			agent, err := a.repos.NodeAgent.GetByAgentID(caseTest.Context(), f.agent.AgentID)
+			return err == nil && agent.LastSeen != nil && agent.LastSeen.After(reopenedAt) && streamsReady(agent)
+		})
+		waitCandidate(domain.DestCandidateEmpty, true, true, *prior.MintedAt)
+		current := verifyCandidate(0, domainLKG, 0)
+		if current.MintedSHA256 != prior.MintedSHA256 || current.MintedGeneration != prior.MintedGeneration || current.DesiredSHA256 != prior.DesiredSHA256 || current.AppliedSHA256 != prior.AppliedSHA256 {
+			caseTest.Fatal("PSP reopen rearmed an exhausted fallback or lost its history")
 		}
 		traffic(false)
 		trafficUser(canary.UUID, true)

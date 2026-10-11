@@ -9,9 +9,72 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/KazuhaHub/passwall-protocol/protocol"
 )
+
+// The TLS listener belongs to the fixture, while each handler belongs to one
+// production App. Replacing it drains old requests before their SQL pool closes.
+type nativePanelGateway struct {
+	mu   sync.RWMutex
+	next http.Handler
+}
+
+func (g *nativePanelGateway) replace(next http.Handler) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.next = next
+}
+
+func (g *nativePanelGateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	if g.next == nil {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		return
+	}
+	g.next.ServeHTTP(w, r)
+}
+
+func TestNativePanelGatewayDrainsBeforeReplacingHandler(t *testing.T) {
+	entered, release, done, swapped := make(chan struct{}), make(chan struct{}), make(chan struct{}), make(chan struct{})
+	gateway := &nativePanelGateway{}
+	gateway.replace(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		close(entered)
+		<-release
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	oldResponse := httptest.NewRecorder()
+	go func() {
+		gateway.ServeHTTP(oldResponse, httptest.NewRequest("GET", "/", nil))
+		close(done)
+	}()
+	<-entered
+	go func() { gateway.replace(nil); close(swapped) }()
+	select {
+	case <-swapped:
+		t.Error("gateway retired an app while it still owned a request")
+	case <-time.After(25 * time.Millisecond):
+	}
+	close(release)
+	<-done
+	<-swapped
+	if oldResponse.Code != http.StatusNoContent {
+		t.Fatal("in-flight request lost its original handler")
+	}
+	paused := httptest.NewRecorder()
+	gateway.ServeHTTP(paused, httptest.NewRequest("GET", "/", nil))
+	if paused.Code != http.StatusServiceUnavailable {
+		t.Fatal("restart window reached a closed app")
+	}
+	gateway.replace(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusAccepted) }))
+	restored := httptest.NewRecorder()
+	gateway.ServeHTTP(restored, httptest.NewRequest("GET", "/", nil))
+	if restored.Code != http.StatusAccepted {
+		t.Fatal("restored request reached a retired handler")
+	}
+}
 
 // Observe only the first real request after arm. The production handler still
 // owns validation and its original bytes; private report payloads are discarded.

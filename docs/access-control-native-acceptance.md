@@ -14,11 +14,12 @@ Xray version: `26.6.27`, `26.7.28`, and `26.9.9`.
 The isolated fixture explicitly acknowledges the reviewed restricted `26.9.9`
 selection; the production catalog gate remains enforced.
 
-Every matrix job must execute all fifteen ordered cases: empty policy, watch,
+Every matrix job must execute all sixteen ordered cases: empty policy, watch,
 block, pause/resume, anonymous allowlist trial, enforce, supplemental entry,
 collection off, detailed usage, daemon restart, port-only fallback under
 insufficient sniffing, pause/resume during fallback, disabled-rule pruning,
-sniffing fallback exhaustion, and account revocation while exhausted.
+sniffing fallback exhaustion, account revocation while exhausted, and a PSP app
+restart with the exhausted state persisted.
 The restarted daemon's very
 first real TLS report must already carry the confirmed applied policy, and a new
 traffic hit must map to its original user. A bounded in-memory probe copies only
@@ -39,6 +40,11 @@ route-only sniffing preserves the local IP destination and requires no DNS.
 Account revocation must then reach the acknowledged roster without rearming that
 fallback. The revoked user must fail while a separate enabled canary still reaches
 the same target, proving the core is serving traffic.
+PSP is then shut down and rebuilt with the same configuration and database.
+A drained fixture TLS gateway holds the endpoint stable while the actual SQL
+pool, router, services and caches are replaced. The continuing real daemon must
+sync with the reopened app; the exhausted candidate and historical LKG must
+survive, and the revoked user must remain denied while the canary succeeds.
 
 Current candidate readiness requires its published generation, a mint after
 the administrator mutation, a matching applied report, and an accepted sync
