@@ -64,7 +64,8 @@ func TestNativeDestinationTraffic(t *testing.T) {
 	f.node.Sniffing = `{"enabled":true,"destOverride":["http","tls"]}`
 	nativeMust(t, a.repos.Node.Update(t.Context(), f.node), "configure disposable listener")
 	a.startDestinationAudit()
-	server := httptest.NewTLSServer(a.server.Handler)
+	probe := &nativeRestartProbe{}
+	server := httptest.NewTLSServer(probe.wrap(a.server.Handler))
 	t.Cleanup(server.Close)
 	dir := t.TempDir()
 	ca, credential := filepath.Join(dir, "ca.pem"), filepath.Join(dir, "credential")
@@ -72,22 +73,34 @@ func TestNativeDestinationTraffic(t *testing.T) {
 	nativeMust(t, os.WriteFile(credential, []byte(f.credential), 0600), "write private fixture credential")
 	_, address, targetPort, nonce, requests := nativeTarget(t)
 	output := &nativePrivateOutput{}
-	cmd := exec.Command(binary, "--endpoint", server.URL+"/v1/node/sync", "--agent-id", f.agent.AgentID, "--credential-file", credential, "--data-dir", filepath.Join(dir, "node"), "--xray-api-listen", net.JoinHostPort("127.0.0.1", strconv.Itoa(api)))
-	cmd.Env = append(os.Environ(), "SSL_CERT_FILE="+ca)
-	cmd.Stdout, cmd.Stderr = output, output
-	receiptAfter := time.UnixMilli(time.Now().UnixMilli())
-	nativeMust(t, cmd.Start(), "start candidate Node")
-	done := make(chan error, 1)
-	go func() { done <- cmd.Wait() }()
-	t.Cleanup(func() {
+	var cmd *exec.Cmd
+	var done chan error
+	startDaemon := func(test *testing.T) {
+		cmd = exec.Command(binary, "--endpoint", server.URL+"/v1/node/sync", "--agent-id", f.agent.AgentID, "--credential-file", credential, "--data-dir", filepath.Join(dir, "node"), "--xray-api-listen", net.JoinHostPort("127.0.0.1", strconv.Itoa(api)))
+		cmd.Env = append(os.Environ(), "SSL_CERT_FILE="+ca)
+		cmd.Stdout, cmd.Stderr = output, output
+		nativeMust(test, cmd.Start(), "start candidate Node")
+		done = make(chan error, 1)
+		go func(process *exec.Cmd, completion chan error) { completion <- process.Wait() }(cmd, done)
+	}
+	stopDaemon := func(test *testing.T) {
+		if cmd == nil {
+			return
+		}
 		_ = cmd.Process.Signal(syscall.SIGTERM)
 		select {
 		case <-done:
 		case <-time.After(15 * time.Second):
 			_ = cmd.Process.Kill()
 			<-done
-			t.Error("candidate Node did not drain its core and collectors")
+			test.Error("candidate Node did not drain its core and collectors")
 		}
+		cmd = nil
+	}
+	receiptAfter := time.UnixMilli(time.Now().UnixMilli())
+	startDaemon(t)
+	t.Cleanup(func() {
+		stopDaemon(t)
 		text := output.text()
 		for _, private := range []string{f.credential, f.user.Email, "destination@psp.local", " accepted ", " rejected "} {
 			if strings.Contains(text, private) {
@@ -276,6 +289,34 @@ func TestNativeDestinationTraffic(t *testing.T) {
 		if count("SELECT COUNT(*) FROM audit_log WHERE action='dest.usage.read'") == 0 {
 			caseTest.Fatal("real private usage read did not leave an audit record")
 		}
+	})
+	run("restart", func() {
+		request("PUT", groupPath, map[string]any{"mode": "open", "stage": "", "list_ids": []int64{}, "updated_at": mode.UpdatedAt}, 200, &mode)
+		request("POST", "dest/policies", destinationPolicyInput("Restart user mapping", "observe"), 201, &policy)
+		input = destinationPolicyInput("Restart user mapping", "observe")
+		input["inline"], input["updated_at"] = map[string]any{"ports": strconv.Itoa(targetPort)}, policy.UpdatedAt
+		request("PUT", fmt.Sprintf("dest/policies/%d", policy.ID), input, 200, &policy)
+		publish()
+		waitApplied()
+		traffic(true)
+		source := fmt.Sprintf("p%d", policy.ID)
+		waitHit(source, "observe", f.user.ID, targetPort)
+		before := count("SELECT COALESCE(SUM(count),0) FROM dest_hits WHERE user_id=? AND source=? AND action='observe' AND port=?", f.user.ID, source, targetPort)
+		runtime, err := a.repos.DestAgentPolicy.Get(caseTest.Context(), f.agent.AgentID, false)
+		nativeMust(caseTest, err, "read confirmed restart candidate")
+		stopDaemon(caseTest)
+		probe.arm()
+		startDaemon(caseTest)
+		nativeWait(caseTest, 30*time.Second, "first restarted report", func() bool { _, seen, _ := probe.first(); return seen })
+		first, _, accepted := probe.first()
+		if !accepted || first == nil || first.State != "applied" || first.Digest != runtime.MintedSHA256 || first.IssueCode != "" || len(first.Listeners) != 0 {
+			caseTest.Fatal("first restarted report did not restore the confirmed policy")
+		}
+		waitApplied()
+		traffic(true)
+		nativeWait(caseTest, 30*time.Second, "restarted user hit ingestion", func() bool {
+			return count("SELECT COALESCE(SUM(count),0) FROM dest_hits WHERE user_id=? AND source=? AND action='observe' AND port=?", f.user.ID, source, targetPort) > before
+		})
 	})
 }
 

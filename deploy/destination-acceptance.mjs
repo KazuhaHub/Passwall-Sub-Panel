@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
 
 export const nodeCandidate = Object.freeze({ repository: 'KazuhaHub/Passwall-Node', commit: '63c60f6d5e8cd093bbaa8385f5b514dbe2f40390' })
-export const destinationCases = Object.freeze(['empty', 'watch', 'block', 'paused', 'trial', 'enforce', 'extra', 'collection_off', 'usage'])
+export const destinationCases = Object.freeze(['empty', 'watch', 'block', 'paused', 'trial', 'enforce', 'extra', 'collection_off', 'usage', 'restart'])
 const pkg = 'github.com/KazuhaHub/passwall-sub-panel/internal/app'
 const names = ['TestNativeDestinationTraffic', ...destinationCases.map(name => `TestNativeDestinationTraffic/${name}`)]
 const diagnostics = Object.freeze({
@@ -19,6 +19,9 @@ const diagnostics = Object.freeze({
   'off admitted new audit data or erased history': 'collection_off_failed',
   'usage HTTP did not expose the real bounded observation': 'usage_read_failed',
   'real private usage read did not leave an audit record': 'usage_audit_failed',
+  'first restarted report did not restore the confirmed policy': 'restart_receipt_failed',
+  'timed out waiting for first restarted report': 'restart_report_timeout',
+  'timed out waiting for restarted user hit ingestion': 'restart_hit_timeout',
 })
 function parseEvent(line) {
   try { return JSON.parse(line) } catch { throw new Error('Malformed test execution stream; content withheld') }

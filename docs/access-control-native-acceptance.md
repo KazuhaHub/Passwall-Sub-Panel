@@ -14,9 +14,13 @@ Xray version: `26.6.27`, `26.7.28`, and `26.9.9`.
 The isolated fixture explicitly acknowledges the reviewed restricted `26.9.9`
 selection; the production catalog gate remains enforced.
 
-Every matrix job must execute all nine ordered cases: empty policy, watch,
+Every matrix job must execute all ten ordered cases: empty policy, watch,
 block, pause/resume, anonymous allowlist trial, enforce, supplemental entry,
-collection off, and detailed usage. Allow/deny is checked against an actual
+collection off, detailed usage, and daemon restart. The restarted daemon's very
+first real TLS report must already carry the confirmed applied policy, and a new
+traffic hit must map to its original user. A bounded in-memory probe copies only
+policy status from that first request; the production handler receives its
+unchanged bytes and validates it normally. Allow/deny is checked against an actual
 VLESS HTTP request and the destination's nonce and request count. Audit and
 usage counts come from the real ingestion worker. The usage HTTP read must
 also create its declared administrator audit action.

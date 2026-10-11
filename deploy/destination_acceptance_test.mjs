@@ -36,3 +36,8 @@ test('workflow exercises the actual Node/PSP boundary and uploads only reviewed 
   assert(!workflow.includes('secrets.'))
   assert(!workflow.includes('actions/upload-artifact') || workflow.includes('destination-acceptance-tests.json'))
 })
+test('the real driver exercises the first report and traffic after a daemon restart', () => {
+  const driver = readFileSync(new URL('../internal/app/destination_native_acceptance_test.go', import.meta.url), 'utf8')
+  assert(destinationCases.includes('restart'))
+  for (const required of ['run("restart"', 'probe.arm()', 'probe.first()', 'stopDaemon(caseTest)', 'startDaemon(caseTest)']) assert(driver.includes(required), required)
+})
