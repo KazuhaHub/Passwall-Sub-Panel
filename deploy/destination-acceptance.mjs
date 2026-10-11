@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
 
 export const nodeCandidate = Object.freeze({ repository: 'KazuhaHub/Passwall-Node', commit: '63c60f6d5e8cd093bbaa8385f5b514dbe2f40390' })
-export const destinationCases = Object.freeze(['empty', 'watch', 'block', 'paused', 'trial', 'enforce', 'extra', 'listener_rejected', 'collection_off', 'usage', 'restart', 'fallback_port', 'fallback_pause', 'fallback_prune', 'sniff_exhaustion', 'exhausted_roster', 'exhausted_panel_restart', 'fallback_group_open', 'fallback_group_pause', 'offline_pause', 'offline_restart'])
+export const destinationCases = Object.freeze(['empty', 'watch', 'block', 'paused', 'trial', 'enforce', 'extra', 'listener_rejected', 'collection_off', 'usage', 'restart', 'fallback_port', 'fallback_pause', 'fallback_prune', 'sniff_exhaustion', 'exhausted_roster', 'exhausted_panel_restart', 'fallback_group_open', 'fallback_group_pause', 'offline_pause', 'offline_restart', 'response_loss'])
 const pkg = 'github.com/KazuhaHub/passwall-sub-panel/internal/app'
 const names = ['TestNativeDestinationTraffic', ...destinationCases.map(name => `TestNativeDestinationTraffic/${name}`)]
 const diagnostics = Object.freeze({
@@ -61,6 +61,12 @@ const diagnostics = Object.freeze({
   'timed out waiting for reconnected new hit ingestion': 'offline_reconnect_hit_timeout',
   'reconnection replayed pre-restart memory backlog': 'offline_replayed_old_backlog',
   'timed out waiting for fresh recovered hit ingestion': 'offline_recovered_hit_timeout',
+  'timed out waiting for committed response loss batch': 'response_loss_commit_timeout',
+  'timed out waiting for committed response loss replay': 'response_loss_replay_timeout',
+  'committed response loss changed the frozen batch or duplicated storage': 'response_loss_duplicate_failed',
+  'timed out waiting for response loss backlog ingestion': 'response_loss_backlog_timeout',
+  'restored response replay duplicated committed hits': 'response_loss_recovery_duplicate',
+  'timed out waiting for response loss fresh hit ingestion': 'response_loss_fresh_timeout',
 })
 function parseEvent(line) {
   try { return JSON.parse(line) } catch { throw new Error('Malformed test execution stream; content withheld') }

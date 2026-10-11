@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -62,9 +63,9 @@ func TestNativeSyncPartitionRetainsOnlyImmutableAuditEvidence(t *testing.T) {
 func TestNativeSyncPartitionBlocksOnlySyncAndKeepsOriginalAdminHandler(t *testing.T) {
 	partition := &nativeSyncPartition{}
 	gateway := &nativePanelGateway{}
-	seen := 0
+	var seen atomic.Int64
 	gateway.replace(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		seen++
+		seen.Add(1)
 		_, _ = io.Copy(io.Discard, r.Body)
 		w.WriteHeader(http.StatusNoContent)
 	}))
@@ -83,14 +84,65 @@ func TestNativeSyncPartitionBlocksOnlySyncAndKeepsOriginalAdminHandler(t *testin
 			t.Fatal("partition changed unrelated HTTP behavior")
 		}
 	}
-	if attempts, _ := partition.snapshot(); attempts != 1 || seen != 2 {
+	if attempts, _ := partition.snapshot(); attempts != 1 || seen.Load() != 2 {
 		t.Fatal("partition did not isolate node synchronization")
 	}
 	gateway.partitionSync(nil)
 	response := httptest.NewRecorder()
 	gateway.ServeHTTP(response, httptest.NewRequest("POST", "/v1/node/sync", strings.NewReader(`{"audit":null}`)))
-	if response.Code != http.StatusNoContent || seen != 3 {
+	if response.Code != http.StatusNoContent || seen.Load() != 3 {
 		t.Fatal("restored sync did not reach the original handler")
+	}
+}
+
+func TestNativeSyncResponseLossProcessesOriginalRequestsAndDropsRealResponses(t *testing.T) {
+	loss := &nativeSyncResponseLoss{}
+	gateway := &nativePanelGateway{}
+	const body = `{"audit":null,"private":"fixture-only"}`
+	var seen atomic.Int64
+	gateway.replace(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		data, err := io.ReadAll(r.Body)
+		if err != nil || (r.Method == "POST" && string(data) != body) {
+			t.Error("response loss changed the original request")
+		}
+		seen.Add(1)
+		w.Header().Set("X-Original", "preserved")
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, "real private response")
+	}))
+	server := httptest.NewTLSServer(gateway)
+	defer server.Close()
+	gateway.loseSyncResponses(loss)
+	for range 2 {
+		response, err := server.Client().Post(server.URL+"/v1/node/sync", "application/json", strings.NewReader(body))
+		if response != nil {
+			response.Body.Close()
+		}
+		if err == nil {
+			t.Fatal("node received an acknowledgement during response loss")
+		}
+	}
+	if attempts, batches, successes := loss.snapshot(); attempts != 2 || len(batches) != 0 || successes != 2 {
+		t.Fatal("response loss did not count actual production handler responses")
+	}
+	response, err := server.Client().Get(server.URL + "/api/admin/dest/status")
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := io.ReadAll(response.Body)
+	response.Body.Close()
+	if err != nil || response.Header.Get("X-Original") != "preserved" || string(data) != "real private response" {
+		t.Fatal("response loss changed unrelated administrator responses")
+	}
+	gateway.loseSyncResponses(nil)
+	response, err = server.Client().Post(server.URL+"/v1/node/sync", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err = io.ReadAll(response.Body)
+	response.Body.Close()
+	if err != nil || response.StatusCode != 200 || string(data) != "real private response" || seen.Load() != 4 {
+		t.Fatal("restored sync did not preserve the actual handler response")
 	}
 }
 
@@ -100,6 +152,65 @@ type nativePanelGateway struct {
 	mu        sync.RWMutex
 	next      http.Handler
 	partition *nativeSyncPartition
+	loss      *nativeSyncResponseLoss
+}
+
+// The production handler consumes its original request and owns ingestion. Only
+// its network response is discarded; neither payload nor acknowledgement is kept.
+type nativeSyncResponseLoss struct {
+	evidence nativeSyncPartition
+	mu       sync.Mutex
+	accepted uint64
+}
+
+func (l *nativeSyncResponseLoss) snapshot() (uint64, map[string]nativeAuditEvidence, uint64) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	attempts, batches := l.evidence.snapshot()
+	return attempts, batches, l.accepted
+}
+
+func (l *nativeSyncResponseLoss) serve(next http.Handler, r *http.Request) {
+	body := &nativeBoundedReport{}
+	r.Body = &nativeTeeBody{Reader: io.TeeReader(r.Body, body), Closer: r.Body}
+	response := &nativeDiscardResponse{header: make(http.Header)}
+	next.ServeHTTP(response, r)
+	l.mu.Lock()
+	if body.truncated {
+		l.evidence.observe(strings.NewReader(""))
+	} else {
+		l.evidence.observe(&body.buf)
+	}
+	if response.code == 0 || response.code >= 200 && response.code < 300 {
+		l.accepted++
+	}
+	l.mu.Unlock()
+	// net/http closes the real connection without a synthesized HTTP response.
+	panic(http.ErrAbortHandler)
+}
+
+type nativeDiscardResponse struct {
+	header http.Header
+	code   int
+}
+
+func (w *nativeDiscardResponse) Header() http.Header { return w.header }
+func (w *nativeDiscardResponse) WriteHeader(code int) {
+	if w.code == 0 {
+		w.code = code
+	}
+}
+func (w *nativeDiscardResponse) Write(data []byte) (int, error) {
+	if w.code == 0 {
+		w.code = http.StatusOK
+	}
+	return len(data), nil
+}
+
+func (g *nativePanelGateway) loseSyncResponses(loss *nativeSyncResponseLoss) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.loss = loss
 }
 
 type nativeAuditEvidence struct {
@@ -184,6 +295,10 @@ func (g *nativePanelGateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if g.next == nil {
 		w.WriteHeader(http.StatusServiceUnavailable)
+		return
+	}
+	if g.loss != nil && r.Method == "POST" && r.URL.Path == "/v1/node/sync" {
+		g.loss.serve(g.next, r)
 		return
 	}
 	g.next.ServeHTTP(w, r)

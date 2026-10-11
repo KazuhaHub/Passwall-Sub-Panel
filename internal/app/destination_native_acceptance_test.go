@@ -857,6 +857,46 @@ func TestNativeDestinationTraffic(t *testing.T) {
 		trafficUser(canary.UUID, false)
 		nativeWait(caseTest, 30*time.Second, "fresh recovered hit ingestion", func() bool { return count(query, source, canary.ID, targetPort) == baseline+2 })
 	})
+	run("response_loss", func() {
+		prior := verifyCandidate(2, "", 0)
+		source := fmt.Sprintf("p%d", groupWatch.ID)
+		query := "SELECT COALESCE(SUM(count),0) FROM dest_hits WHERE source=? AND user_id=? AND action='block' AND port=?"
+		time.Sleep(7 * time.Second) // Drain the previous case's successful acknowledgement.
+		baseline := count(query, source, canary.ID, targetPort)
+		loss := &nativeSyncResponseLoss{}
+		gateway.loseSyncResponses(loss)
+		t.Cleanup(func() { gateway.loseSyncResponses(nil) })
+		trafficUser(canary.UUID, false)
+		nativeWait(caseTest, 60*time.Second, "committed response loss batch", func() bool {
+			_, batches, _ := loss.snapshot()
+			b := batches["block"]
+			return b.Seen > 0 && b.Rows == 1 && b.Events == 1 && !b.Changed && count(query, source, canary.ID, targetPort) == baseline+1
+		})
+		_, initial, _ := loss.snapshot()
+		first := initial["block"]
+		for range 3 {
+			time.Sleep(2200 * time.Millisecond)
+			trafficUser(canary.UUID, false)
+		}
+		nativeWait(caseTest, 90*time.Second, "committed response loss replay", func() bool {
+			_, batches, _ := loss.snapshot()
+			return batches["block"].Seen >= 3
+		})
+		attempts, batches, successes := loss.snapshot()
+		frozen := batches["block"]
+		if attempts != successes || frozen.Changed || frozen.Digest != first.Digest || frozen.Rows != 1 || frozen.Events != 1 || count(query, source, canary.ID, targetPort) != baseline+1 {
+			caseTest.Fatal("committed response loss changed the frozen batch or duplicated storage")
+		}
+		gateway.loseSyncResponses(nil)
+		waitCandidate("", false, false, *prior.MintedAt)
+		nativeWait(caseTest, 60*time.Second, "response loss backlog ingestion", func() bool { return count(query, source, canary.ID, targetPort) == baseline+4 })
+		time.Sleep(7 * time.Second)
+		if count(query, source, canary.ID, targetPort) != baseline+4 {
+			caseTest.Fatal("restored response replay duplicated committed hits")
+		}
+		trafficUser(canary.UUID, false)
+		nativeWait(caseTest, 30*time.Second, "response loss fresh hit ingestion", func() bool { return count(query, source, canary.ID, targetPort) == baseline+5 })
+	})
 }
 
 func slicesContainsNative(values []string, value string) bool {

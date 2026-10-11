@@ -14,7 +14,7 @@ Xray version: `26.6.27`, `26.7.28`, and `26.9.9`.
 The isolated fixture explicitly acknowledges the reviewed restricted `26.9.9`
 selection; the production catalog gate remains enforced.
 
-Every matrix job must execute all twenty-one ordered cases: empty policy, watch,
+Every matrix job must execute all twenty-two ordered cases: empty policy, watch,
 block, pause/resume, anonymous allowlist trial, enforce, supplemental entry,
 unrelated listener rejection and repair,
 collection off, detailed usage, daemon restart, port-only fallback under
@@ -22,7 +22,8 @@ insufficient sniffing, pause/resume during fallback, disabled-rule pruning,
 sniffing fallback exhaustion, account revocation while exhausted, and a PSP app
 restart with the exhausted state persisted, returning an allowlist group to open
 during sniffing fallback, pause/resume of that pruned fallback, pausing an offline
-node, and restarting that node with unacknowledged audit backlog.
+node, restarting that node with unacknowledged audit backlog, and committed-batch
+replay after response loss.
 The restarted daemon's very
 first real TLS report must already carry the confirmed applied policy, and a new
 traffic hit must map to its original user. A bounded in-memory probe copies only
@@ -91,6 +92,18 @@ that new event and another fresh event, with exact counts excluding pre-restart
 backlog. This records actual volatile-data loss across multiple cycles; it does
 not bound restart loss to one poll interval or establish durable audit delivery.
 
+The response-loss case lets the same production sync handler consume every
+original report and enqueue its audit batch, then closes the real TLS connection
+without delivering the handler's response. PSP must commit the first block hit.
+At least three reports replay its unchanged audit-subtree hash, row count and
+event count while three new denied connections accumulate for the next batch.
+Every processed sync must actually have produced a successful handler response;
+the fixture synthesizes no acknowledgement. Storage remains at exactly one new
+event throughout the lost responses. After normal responses resume, the three
+new events and one fresh connection must be ingested with exact counts and no
+duplicate committed hit. This covers short live retries, not the 26-hour
+cleanup/reopen and 48-hour/72-hour boundary matrix.
+
 Current candidate readiness requires its published generation, a mint after
 the administrator mutation, a matching applied report, and an accepted sync
 after that mint. Desired candidates additionally require the matching confirmed
@@ -112,7 +125,7 @@ JWT, then uses production HTTP routes for every tested policy mutation. It
 starts `Build` and the audit worker, not all `App.Run` background services. It
 does not replace full service installation/reinstall acceptance, SQL matrix
 tests, sing-box acceptance, policy-rejection and timeout scenarios, multi-node
-offline and mixed-version cases, committed-batch response-loss deduplication, load testing, the
+offline and mixed-version cases, long-window response-loss deduplication, load testing, the
 complete UI approval matrix, or staged release verification.
 
 Use the workflow run and PR validation record for execution evidence. All three
