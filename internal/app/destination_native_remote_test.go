@@ -224,14 +224,25 @@ func TestNativePublishedRemoteRollback(t *testing.T) {
 	})
 	run("health_failure_restore", func() {
 		facts := map[string]bool{}
+		var failed nodeagentupgrade.Status
 		sourceDigest := managed.digest(caseTest, "bin/passwall-node")
 		defer func() {
 			if caseTest.Failed() {
+				if db, err := sql.Open("sqlite", "file:"+nativeRemoteRoot+"/data/state.db?mode=ro&_pragma=query_only(1)&_pragma=busy_timeout(5000)"); err == nil {
+					var state string
+					var delivered int
+					facts["journal_readable"] = db.QueryRowContext(caseTest.Context(), "SELECT state,result_delivered FROM task_executions WHERE task_id=?", failed.TaskID).Scan(&state, &delivered) == nil
+					facts["journal_failed"], facts["journal_running"], facts["journal_delivered"] = state == "failed", state == "running", delivered == 1
+					_ = db.Close()
+				}
+				quarantined, err := a.repos.NodeAgentTask.GetQuarantinedResult(caseTest.Context(), f.agent.AgentID, failed.TaskID)
+				facts["quarantined"] = err == nil && quarantined != nil
+				facts["failed_result_posted"], facts["failed_result_accepted"], facts["failed_result_rejected"] = healthFault.failedResultPosted.Load(), healthFault.failedResultAccepted.Load(), healthFault.failedResultRejected.Load()
 				if data, err := os.ReadFile(nativeRemoteRoot + "/bin/passwall-node"); err == nil {
 					sum := sha256.Sum256(data)
 					facts["source_installed"] = hex.EncodeToString(sum[:]) == sourceDigest
 				}
-				for _, name := range []string{"task_terminal", "receipt_failed", "receipt_activated", "source_installed", "seen", "identity", "capability", "streams", "policy", "report", "core", "listener"} {
+				for _, name := range []string{"task_terminal", "receipt_failed", "receipt_activated", "source_installed", "seen", "identity", "capability", "streams", "policy", "report", "core", "listener", "journal_readable", "journal_failed", "journal_running", "journal_delivered", "quarantined", "failed_result_posted", "failed_result_accepted", "failed_result_rejected"} {
 					caseTest.Logf("native diagnostic: remote_restore_%s=%t", name, facts[name])
 				}
 			}
@@ -243,7 +254,6 @@ func TestNativePublishedRemoteRollback(t *testing.T) {
 		defer healthFault.enabled.Store(false)
 		exited := nativePanelHoldCoreExit(caseTest, originalPID, nativeRemoteRoot+"/data")
 		after := time.Now().UTC()
-		var failed nodeagentupgrade.Status
 		request("POST", upgradePath, key+"-health", upgradeInput, &failed, 202)
 		if failed.TaskID == "" || failed.Version != nativeRemotePublished || failed.ExpectedVersion != nativeRemoteCandidate || failed.NotAfterMS <= after.UnixMilli() {
 			caseTest.Fatal("remote health failure did not authorize the exact target")
@@ -430,8 +440,9 @@ type nativeRemoteReceipt struct {
 }
 
 type nativeRemoteHealthFault struct {
-	enabled  atomic.Bool
-	rejected atomic.Uint64
+	enabled                                                        atomic.Bool
+	rejected                                                       atomic.Uint64
+	failedResultPosted, failedResultAccepted, failedResultRejected atomic.Bool
 }
 
 func (f *nativeRemoteHealthFault) wrap(next http.Handler) http.Handler {
@@ -450,6 +461,19 @@ func (f *nativeRemoteHealthFault) wrap(next http.Handler) http.Handler {
 			w.WriteHeader(http.StatusServiceUnavailable)
 			return
 		}
+		for _, result := range report.TaskResults {
+			if report.AgentVersion == nativeRemoteCandidate+" (63c60f6)" && result.Kind == protocol.TaskKindAgentUpgradeV1 && !result.OK {
+				f.failedResultPosted.Store(true)
+				response := &nativeProbeResponse{ResponseWriter: w}
+				next.ServeHTTP(response, r)
+				if response.code == 0 || response.code >= 200 && response.code < 300 {
+					f.failedResultAccepted.Store(true)
+				} else {
+					f.failedResultRejected.Store(true)
+				}
+				return
+			}
+		}
 		next.ServeHTTP(w, r)
 	})
 }
@@ -461,6 +485,7 @@ func TestNativeRemoteHealthFaultPreservesOtherRequests(t *testing.T) {
 	}{
 		{"target", "POST", "/v1/node/sync", `{"agent_version":"4.0.1.8 (8e5e3db)"}`, true, true},
 		{"source", "POST", "/v1/node/sync", `{"agent_version":"4.0.1.9 (63c60f6)"}`, true, false},
+		{"failed_result", "POST", "/v1/node/sync", `{"agent_version":"4.0.1.9 (63c60f6)","task_results":[{"kind":"agent.upgrade.v1","ok":false}]}`, true, false},
 		{"disabled", "POST", "/v1/node/sync", `{"agent_version":"4.0.1.8 (8e5e3db)"}`, false, false},
 		{"other_path", "POST", "/api/admin/servers/1/upgrade-node-agent", `{"agent_version":"4.0.1.8 (8e5e3db)"}`, true, false},
 		{"other_method", "GET", "/v1/node/sync", `{"agent_version":"4.0.1.8 (8e5e3db)"}`, true, false},
@@ -492,8 +517,28 @@ func TestNativeRemoteHealthFaultPreservesOtherRequests(t *testing.T) {
 			} else if !called || response.Code != http.StatusAccepted || response.Header().Get("X-Fixture") != "retained" || response.Body.String() != "original reply" || fault.rejected.Load() != 0 {
 				t.Fatal("health fault changed a forwarded response")
 			}
+			if want := tc.name == "failed_result"; fault.failedResultPosted.Load() != want || fault.failedResultAccepted.Load() != want || fault.failedResultRejected.Load() {
+				t.Fatal("health fault incorrectly classified result delivery")
+			}
 		})
 	}
+	t.Run("rejected_result", func(t *testing.T) {
+		fault := &nativeRemoteHealthFault{}
+		fault.enabled.Store(true)
+		body := `{"agent_version":"4.0.1.9 (63c60f6)","task_results":[{"kind":"agent.upgrade.v1","ok":false}]}`
+		response := httptest.NewRecorder()
+		fault.wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			data, err := io.ReadAll(r.Body)
+			if err != nil || string(data) != body {
+				t.Fatal("result diagnostics changed original report")
+			}
+			w.WriteHeader(http.StatusConflict)
+			_, _ = io.WriteString(w, "original refusal")
+		})).ServeHTTP(response, httptest.NewRequest("POST", "/v1/node/sync", strings.NewReader(body)))
+		if !fault.failedResultPosted.Load() || fault.failedResultAccepted.Load() || !fault.failedResultRejected.Load() || response.Code != http.StatusConflict || response.Body.String() != "original refusal" {
+			t.Fatal("result diagnostics changed or misclassified production refusal")
+		}
+	})
 }
 
 type nativeRemoteExecution struct {
