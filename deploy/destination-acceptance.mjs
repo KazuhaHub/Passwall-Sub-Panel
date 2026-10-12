@@ -18,11 +18,18 @@ const legacyUpgradeNames = ['TestNativeLegacyPSPUpgrade', ...legacyUpgradeCases.
 export const fleetCases = Object.freeze(['native_ready', 'native_publication', 'native_pause', 'native_resume', 'third_party_ready', 'allowlist_trial', 'allowlist_enforce', 'one_peer_offline', 'allowlist_pause', 'allowlist_reopen'])
 const fleetNames = ['TestNativeDestinationFleet', ...fleetCases.map(name => `TestNativeDestinationFleet/${name}`)]
 export const loadNames = Object.freeze(['TestNativeDestinationWebhookLoad', 'TestNativeDestinationWebhookLoad/single_rule', 'TestNativeDestinationWebhookLoad/fifty_rules'])
+export const trialLoadNames = Object.freeze(['TestNativeDestinationTrialLoad'])
 export const remoteUpgradeCases = Object.freeze(['candidate_policy', 'health_failure_restore', 'published_rollback', 'restart_recovery', 'idempotent_replay'])
 const dockerUpgradeNames = ['TestNativePublishedDockerRollback', ...remoteUpgradeCases.map(name => `TestNativePublishedDockerRollback/${name}`)]
 const remoteUpgradeNames = ['TestNativePublishedRemoteRollback', ...remoteUpgradeCases.map(name => `TestNativePublishedRemoteRollback/${name}`)]
-const names = [...xrayNames, ...singBoxNames, ...guardedSingBoxNames, ...legacyUpgradeNames, ...remoteUpgradeNames, ...dockerUpgradeNames, ...fleetNames, ...loadNames]
+const names = [...xrayNames, ...singBoxNames, ...guardedSingBoxNames, ...legacyUpgradeNames, ...remoteUpgradeNames, ...dockerUpgradeNames, ...fleetNames, ...loadNames, ...trialLoadNames]
 const diagnostics = Object.freeze({
+  'timed out waiting for actual native trial provisioning capability': 'trial_load_capability_timeout',
+  'timed out waiting for current trial policy and complete real roster': 'trial_load_roster_timeout',
+  'timed out waiting for actual trial saturation with intact block ingestion': 'trial_load_ingestion_timeout',
+  'trial flood lost sustained delivery, anonymity, control or independent block reservation': 'trial_load_counts_failed',
+  'trial or independent block flow fell below its actual rate': 'trial_load_rate_failed',
+  'trial principal escaped into private candidate output': 'trial_load_privacy_failed',
   'timed out waiting for every individual fleet receipt': 'fleet_receipt_timeout',
   'timed out waiting for actual fleet member removal and restoration': 'fleet_membership_timeout',
   'fleet real traffic did not match individual membership and policy': 'fleet_traffic_failed',
@@ -286,6 +293,7 @@ export function checkGuardedSingBoxResults(input) { checkCases(input, guardedSin
 export function checkLegacyUpgradeResults(input) { checkCases(input, legacyUpgradeNames) }
 export function checkFleetResults(input) { checkCases(input, fleetNames) }
 export function checkDestinationLoadResults(input) { checkCases(input, loadNames) }
+export function checkDestinationTrialLoadResults(input) { checkCases(input, trialLoadNames) }
 export function checkRemoteUpgradeResults(input) { checkCases(input, remoteUpgradeNames) }
 export function checkDockerUpgradeResults(input) { checkCases(input, dockerUpgradeNames) }
 export function isSafeDestinationDiagnostic(event) {

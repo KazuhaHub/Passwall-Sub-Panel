@@ -32,10 +32,22 @@ import (
 // The separate load gate keeps every functional matrix case. Two independent
 // five-minute phases exercise one webhook rule and fifty concurrently hit rules.
 func TestNativeDestinationWebhookLoad(t *testing.T) {
+	nativeDestinationLoad(t, false)
+}
+
+func TestNativeDestinationTrialLoad(t *testing.T) {
+	nativeDestinationLoad(t, true)
+}
+
+func nativeDestinationLoad(t *testing.T, trial bool) {
 	binary, evidence := os.Getenv("PSP_NATIVE_NODE_BIN"), os.Getenv("PSP_NATIVE_LOAD_METRICS")
+	metricsName := "destination-load-metrics.json"
+	if trial {
+		metricsName = "destination-trial-load-metrics.json"
+	}
 	runnerTemp, tempErr := filepath.EvalSymlinks(os.Getenv("RUNNER_TEMP"))
 	evidenceDir, dirErr := filepath.EvalSymlinks(filepath.Dir(evidence))
-	if tempErr != nil || dirErr != nil || runnerTemp != evidenceDir || filepath.Base(evidence) != "destination-load-metrics.json" || !filepath.IsAbs(binary) || filepath.Base(binary) != "destination-node" || os.Getenv("PSP_NATIVE_DB_KIND") != "sqlite" || os.Getenv("PSP_NATIVE_CORE_VERSION") != "26.6.27" {
+	if tempErr != nil || dirErr != nil || runnerTemp != evidenceDir || filepath.Base(evidence) != metricsName || !filepath.IsAbs(binary) || filepath.Base(binary) != "destination-node" || os.Getenv("PSP_NATIVE_DB_KIND") != "sqlite" || os.Getenv("PSP_NATIVE_CORE_VERSION") != "26.6.27" {
 		t.Fatal("load fixture requires exact hosted candidate, owned evidence and SQLite")
 	}
 	info, err := os.Stat(binary)
@@ -61,6 +73,9 @@ func TestNativeDestinationWebhookLoad(t *testing.T) {
 	}
 	inbound, api := port(), port()
 	f.node.DesiredPort, f.node.ObservedPort, f.node.InboundListen = inbound, inbound, "127.0.0.1"
+	if trial {
+		f.node.Sniffing = `{"enabled":true,"destOverride":["http","tls","quic"],"routeOnly":true}`
+	}
 	nativeMust(t, a.repos.Node.Update(t.Context(), f.node), "configure owned load inbound")
 	a.server.Addr = net.JoinHostPort("127.0.0.1", strconv.Itoa(port()))
 	runDone := make(chan error, 1)
@@ -139,6 +154,10 @@ func TestNativeDestinationWebhookLoad(t *testing.T) {
 	nativeMust(t, err, "read actual process CPU clock")
 	ticks, err := strconv.ParseUint(strings.TrimSpace(string(clock)), 10, 64)
 	nativeMust(t, err, "decode actual process CPU clock")
+	if trial {
+		nativeTrialLoad(t, f, client, server.URL, token, cmd.Process.Pid, filepath.Join(dir, "node"), inbound, api, ticks, address, firstPort, nonce, reached, controlAddress, controlPort, controlNonce, evidence, output.text)
+		return
+	}
 	report := struct {
 		Schema      int               `json:"schema_version"`
 		Candidate   string            `json:"candidate"`

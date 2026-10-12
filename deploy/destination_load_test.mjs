@@ -56,6 +56,7 @@ test('load metrics cannot replace unique successful execution or expose raw priv
   const unknown = sanitizeDestinationResults(input([{ Action: 'run', Package, Test: 'TestNativeDestinationWebhookLoad/private-credential' }]))
   assert(!unknown.includes('private-credential'))
   assert.throws(() => checkDestinationLoadEvidence(sanitizeDestinationResults(input([...events, { Action: 'run', Package, Test: 'TestNativeDestinationTraffic' }])), JSON.stringify(good())))
+  assert.throws(() => checkDestinationLoadEvidence(sanitizeDestinationResults(input([...events, { Action: 'run', Package, Test: 'TestNativeDestinationTrialLoad' }])), JSON.stringify(good())))
   assert.throws(() => checkDestinationLoadEvidence(input(events) + unknown, JSON.stringify(good())))
 })
 

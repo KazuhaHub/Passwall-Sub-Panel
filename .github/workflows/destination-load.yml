@@ -98,3 +98,63 @@ jobs:
             ${{ runner.temp }}/destination-load-metrics.json
           if-no-files-found: error
           retention-days: 7
+  trial-load:
+    name: 200-user five-minute trial and independent block load (SQLite / Xray 26.6.27)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        env:
+          GOTOOLCHAIN: auto
+        with:
+          go-version-file: go.mod
+      - name: Verify exact preferred PSP compiler
+        run: |
+          set -euo pipefail
+          build_toolchain=$(awk '$1 == "toolchain" { print $2 }' go.mod)
+          test -n "$build_toolchain"
+          test "$(go env GOVERSION)" = "$build_toolchain"
+          test "$(go tool compile -V | awk '{ print $3 }')" = "$build_toolchain"
+      - uses: actions/checkout@v7
+        with:
+          repository: KazuhaHub/Passwall-Node
+          ref: cef54ddba3ee96f9794aaacdc6ac1ed89cc318f9
+          path: node-source
+      - name: Build immutable full-module Node with its own preferred compiler
+        working-directory: node-source
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = cef54ddba3ee96f9794aaacdc6ac1ed89cc318f9
+          toolchain=$(awk '$1 == "toolchain" { print $2; exit }' go.mod)
+          test -n "$toolchain"
+          test "$(GOTOOLCHAIN="$toolchain" go tool compile -V | awk '{ print $3 }')" = "$toolchain"
+          GOTOOLCHAIN="$toolchain" CGO_ENABLED=0 go build -o "$RUNNER_TEMP/destination-node" ./cmd/node
+      - name: Test evidence rejection and owned process counter boundaries
+        run: |
+          set -euo pipefail
+          node --test deploy/destination_trial_load_test.mjs
+          go test -v -count=1 ./internal/app -run '^TestNativeLoadProcCountersRequireBirthAndExactCPUFields$'
+          go test -c -tags destination_acceptance -o "$RUNNER_TEMP/destination-trial-load.test" ./internal/app
+      - name: Actual production App.Run, 200 users with trial saturation and independent blocking
+        run: |
+          set -euo pipefail
+          sudo --preserve-env=GITHUB_ACTIONS,GITHUB_REPOSITORY,RUNNER_ENVIRONMENT,RUNNER_TEMP \
+            env PSP_NATIVE_NODE_BIN="$RUNNER_TEMP/destination-node" \
+            PSP_NATIVE_CORE_VERSION=26.6.27 PSP_NATIVE_DB_KIND=sqlite \
+            PSP_NATIVE_LOAD_METRICS="$RUNNER_TEMP/destination-trial-load-metrics.json" \
+            "$RUNNER_TEMP/destination-trial-load.test" \
+              -test.v=test2json -test.run '^TestNativeDestinationTrialLoad$' -test.timeout=20m 2>&1 \
+            | go tool test2json -t -p github.com/KazuhaHub/passwall-sub-panel/internal/app \
+            | node deploy/destination-acceptance.mjs sanitize > "$RUNNER_TEMP/destination-trial-load-tests.json"
+          node deploy/destination-trial-load.mjs "$RUNNER_TEMP/destination-trial-load-tests.json" "$RUNNER_TEMP/destination-trial-load-metrics.json"
+      - name: Keep bounded count and resource evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: native-destination-trial-load-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/destination-trial-load-tests.json
+            ${{ runner.temp }}/destination-trial-load-metrics.json
+          if-no-files-found: error
+          retention-days: 7
