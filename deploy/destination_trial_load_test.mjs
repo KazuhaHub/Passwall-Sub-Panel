@@ -50,7 +50,7 @@ test('trial metrics need unique execution through the production sanitizer and c
   const encode = rows => rows.map(row => JSON.stringify(row)).join('\n') + '\n'
   checkDestinationTrialLoadEvidence(sanitizeDestinationResults(encode(events)), JSON.stringify(report()))
   for (const Action of ['run', 'pass', 'skip', 'fail']) assert.throws(() => checkDestinationTrialLoadEvidence(encode([...events, { Action, Package, Test }]), JSON.stringify(report())))
-  for (const Test of ['TestNativeDestinationWebhookLoad', 'TestNativeDestinationTrialLoad/private', undefined]) assert.throws(() => checkDestinationTrialLoadEvidence(sanitizeDestinationResults(encode([...events, { Action: 'run', Package, Test }])), JSON.stringify(report())))
+  for (const Test of ['TestNativeDestinationWebhookLoad', 'TestNativeDestinationBlockOverflow', 'TestNativeDestinationTrialLoad/private', undefined]) assert.throws(() => checkDestinationTrialLoadEvidence(sanitizeDestinationResults(encode([...events, { Action: 'run', Package, Test }])), JSON.stringify(report())))
   assert.throws(() => checkDestinationTrialLoadEvidence(encode([...events, { Action: 'output', Package, Output: 'private row' }]), JSON.stringify(report())))
   assert.throws(() => checkDestinationTrialLoadEvidence(encode(events.slice(1)), JSON.stringify(report())))
   const loss = report()

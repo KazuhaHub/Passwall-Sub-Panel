@@ -1,11 +1,51 @@
 package app
 
 import (
+	"encoding/json"
 	"errors"
 	"math"
 	"strconv"
 	"strings"
 	"testing"
+)
+
+func TestNativeLoadMetricSchemaSeparatesOverflowBudget(t *testing.T) {
+	phase := nativeLoadPhase{}
+	decode := func() map[string]json.RawMessage {
+		t.Helper()
+		data, err := json.Marshal(phase)
+		if err != nil {
+			t.Fatal("cannot encode load phase")
+		}
+		var fields map[string]json.RawMessage
+		if json.Unmarshal(data, &fields) != nil {
+			t.Fatal("cannot decode load phase")
+		}
+		return fields
+	}
+	ordinary := decode()
+	original := []string{"name", "rules", "duration_ms", "attempted", "delivered", "blocked", "transport_failures", "target_requests", "control_successes", "heartbeat_advances", "window_delivered", "late_delivered", "hit_rules", "hit_events", "losses", "samples"}
+	if len(ordinary) != len(original) {
+		t.Fatal("ordinary workload changed its closed evidence schema")
+	}
+	for _, field := range original {
+		if _, ok := ordinary[field]; !ok {
+			t.Fatal("ordinary load evidence field missing")
+		}
+	}
+	phase.BudgetMaxRows = 20000
+	overflow := decode()
+	if len(overflow) != len(original)+1 || string(overflow["budget_max_rows"]) != "20000" {
+		t.Fatal("overflow evidence omitted its actual budget")
+	}
+}
+
+type nativeLoadWorkload uint8
+
+const (
+	nativeWebhookWorkload nativeLoadWorkload = iota
+	nativeTrialWorkload
+	nativeBlockOverflowWorkload
 )
 
 type nativeLoadSample struct {
@@ -38,6 +78,7 @@ type nativeLoadPhase struct {
 	LateDelivered     uint64             `json:"late_delivered"`
 	HitRules          int                `json:"hit_rules"`
 	HitEvents         int64              `json:"hit_events"`
+	BudgetMaxRows     int64              `json:"budget_max_rows,omitempty"`
 	Losses            []nativeLoadLoss   `json:"losses"`
 	Samples           []nativeLoadSample `json:"samples"`
 }

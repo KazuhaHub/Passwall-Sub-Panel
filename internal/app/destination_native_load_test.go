@@ -32,18 +32,28 @@ import (
 // The separate load gate keeps every functional matrix case. Two independent
 // five-minute phases exercise one webhook rule and fifty concurrently hit rules.
 func TestNativeDestinationWebhookLoad(t *testing.T) {
-	nativeDestinationLoad(t, false)
+	nativeDestinationLoad(t, nativeWebhookWorkload)
 }
 
 func TestNativeDestinationTrialLoad(t *testing.T) {
-	nativeDestinationLoad(t, true)
+	nativeDestinationLoad(t, nativeTrialWorkload)
 }
 
-func nativeDestinationLoad(t *testing.T, trial bool) {
+func TestNativeDestinationBlockOverflow(t *testing.T) {
+	nativeDestinationLoad(t, nativeBlockOverflowWorkload)
+}
+
+func nativeDestinationLoad(t *testing.T, workload nativeLoadWorkload) {
+	trial, overflow := workload == nativeTrialWorkload, workload == nativeBlockOverflowWorkload
+	if workload > nativeBlockOverflowWorkload {
+		t.Fatal("unknown native load workload")
+	}
 	binary, evidence := os.Getenv("PSP_NATIVE_NODE_BIN"), os.Getenv("PSP_NATIVE_LOAD_METRICS")
 	metricsName := "destination-load-metrics.json"
 	if trial {
 		metricsName = "destination-trial-load-metrics.json"
+	} else if overflow {
+		metricsName = "destination-block-overflow-metrics.json"
 	}
 	runnerTemp, tempErr := filepath.EvalSymlinks(os.Getenv("RUNNER_TEMP"))
 	evidenceDir, dirErr := filepath.EvalSymlinks(filepath.Dir(evidence))
@@ -73,7 +83,7 @@ func nativeDestinationLoad(t *testing.T, trial bool) {
 	}
 	inbound, api := port(), port()
 	f.node.DesiredPort, f.node.ObservedPort, f.node.InboundListen = inbound, inbound, "127.0.0.1"
-	if trial {
+	if trial || overflow {
 		f.node.Sniffing = `{"enabled":true,"destOverride":["http","tls","quic"],"routeOnly":true}`
 	}
 	nativeMust(t, a.repos.Node.Update(t.Context(), f.node), "configure owned load inbound")
@@ -214,7 +224,11 @@ func nativeDestinationLoad(t *testing.T, trial bool) {
 		nativeMust(test, rows.Err(), "finish bounded load loss counters")
 		return result
 	}
-	for index, name := range []string{"single_rule", "fifty_rules"} {
+	phaseNames := []string{"single_rule", "fifty_rules"}
+	if overflow {
+		phaseNames = []string{"block_overflow"}
+	}
+	for index, name := range phaseNames {
 		if !t.Run(name, func(test *testing.T) {
 			caseTest = test
 			phase := nativeLoadPhase{Name: name, Rules: []int{1, 50}[index], Losses: []nativeLoadLoss{}, Samples: []nativeLoadSample{}}
@@ -298,7 +312,18 @@ func nativeDestinationLoad(t *testing.T, trial bool) {
 					defer workers.Done()
 					for job := range jobs {
 						attempted.Add(1)
-						ok := nativeLoadBlockedRequest(ctx, inbound, headers[job], func() {
+						var header []byte
+						if overflow {
+							var err error
+							header, err = nativeVLESSRequest(f.user.UUID, address, ports[0], fmt.Sprintf("overflow%07d.test", job))
+							if err != nil {
+								failed.Add(1)
+								continue
+							}
+						} else {
+							header = headers[job]
+						}
+						ok := nativeLoadBlockedRequest(ctx, inbound, header, func() {
 							delivered.Add(1)
 							bucket := int(time.Since(start) / time.Second)
 							if bucket < 300 {
@@ -324,8 +349,12 @@ func nativeDestinationLoad(t *testing.T, trial bool) {
 					time.Sleep(delay)
 				}
 				for n := 0; n < 110; n++ {
+					job := tick*110 + n
+					if !overflow {
+						job %= phase.Rules
+					}
 					select {
-					case jobs <- (tick*110 + n) % phase.Rules:
+					case jobs <- job:
 					default:
 						failed.Add(1)
 					}
@@ -398,9 +427,26 @@ func nativeDestinationLoad(t *testing.T, trial bool) {
 						phase.Losses = append(phase.Losses, loss)
 					}
 					accounted += loss.Events + loss.Unmatched
+					// Only the overflow fixture uses one unique host/event per
+					// connection, making a discarded row one known event.
+					if overflow {
+						accounted += loss.Rows
+					}
 				}
 				return phase.HitRules == phase.Rules && accounted >= 0 && uint64(accounted) == phase.Blocked
 			})
+			if overflow {
+				nativeMust(test, a.database.QueryRowContext(test.Context(), "SELECT COALESCE(MAX(rows_reserved),0) FROM dest_audit_ingest_budget WHERE agent_id=? AND kind='block'", f.agent.AgentID).Scan(&phase.BudgetMaxRows), "read actual exhausted block reservation")
+				var discarded int64
+				for _, loss := range phase.Losses {
+					if loss.Reason == "over_budget" {
+						discarded += loss.Rows
+					}
+				}
+				if phase.BudgetMaxRows != 20000 || discarded <= 0 {
+					test.Fatal("block overflow never exhausted its independent actual budget")
+				}
+			}
 			if phase.TransportFailures != 0 || phase.TargetRequests != 0 || phase.Attempted != phase.Delivered || phase.Blocked != phase.Delivered || phase.LateDelivered != 0 || phase.ControlSuccesses < 300 || phase.HeartbeatAdvances < 30 || phase.HitRules != phase.Rules {
 				test.Fatal("sustained load, own receipt, target or control proof failed")
 			}

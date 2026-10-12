@@ -19,11 +19,14 @@ export const fleetCases = Object.freeze(['native_ready', 'native_publication', '
 const fleetNames = ['TestNativeDestinationFleet', ...fleetCases.map(name => `TestNativeDestinationFleet/${name}`)]
 export const loadNames = Object.freeze(['TestNativeDestinationWebhookLoad', 'TestNativeDestinationWebhookLoad/single_rule', 'TestNativeDestinationWebhookLoad/fifty_rules'])
 export const trialLoadNames = Object.freeze(['TestNativeDestinationTrialLoad'])
+export const blockOverflowNames = Object.freeze(['TestNativeDestinationBlockOverflow', 'TestNativeDestinationBlockOverflow/block_overflow'])
 export const remoteUpgradeCases = Object.freeze(['candidate_policy', 'health_failure_restore', 'published_rollback', 'restart_recovery', 'idempotent_replay'])
 const dockerUpgradeNames = ['TestNativePublishedDockerRollback', ...remoteUpgradeCases.map(name => `TestNativePublishedDockerRollback/${name}`)]
 const remoteUpgradeNames = ['TestNativePublishedRemoteRollback', ...remoteUpgradeCases.map(name => `TestNativePublishedRemoteRollback/${name}`)]
-const names = [...xrayNames, ...singBoxNames, ...guardedSingBoxNames, ...legacyUpgradeNames, ...remoteUpgradeNames, ...dockerUpgradeNames, ...fleetNames, ...loadNames, ...trialLoadNames]
+const names = [...xrayNames, ...singBoxNames, ...guardedSingBoxNames, ...legacyUpgradeNames, ...remoteUpgradeNames, ...dockerUpgradeNames, ...fleetNames, ...loadNames, ...trialLoadNames, ...blockOverflowNames]
 const diagnostics = Object.freeze({
+  'block overflow never exhausted its independent actual budget': 'block_overflow_budget_failed',
+  'read actual exhausted block reservation': 'block_overflow_budget_read_failed',
   'timed out waiting for actual native trial provisioning capability': 'trial_load_capability_timeout',
   'timed out waiting for current trial policy and complete real roster': 'trial_load_roster_timeout',
   'timed out waiting for actual trial saturation with intact block ingestion': 'trial_load_ingestion_timeout',
@@ -296,6 +299,7 @@ export function checkLegacyUpgradeResults(input) { checkCases(input, legacyUpgra
 export function checkFleetResults(input) { checkCases(input, fleetNames) }
 export function checkDestinationLoadResults(input) { checkCases(input, loadNames) }
 export function checkDestinationTrialLoadResults(input) { checkCases(input, trialLoadNames) }
+export function checkDestinationBlockOverflowResults(input) { checkCases(input, blockOverflowNames) }
 export function checkRemoteUpgradeResults(input) { checkCases(input, remoteUpgradeNames) }
 export function checkDockerUpgradeResults(input) { checkCases(input, dockerUpgradeNames) }
 export function isSafeDestinationDiagnostic(event) {
