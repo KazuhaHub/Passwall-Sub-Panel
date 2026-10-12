@@ -585,8 +585,23 @@ func isPermanentPanelMsg(msg string) bool {
 		// "XMC finalmask requires at least one complete Minecraft profile ..."
 		// reject that arrived with xray-core 26.7.28's XMC.Profiles change.
 		// The REALITY one is a PRE-EXISTING gap being closed here, not new to
-		// 3.6.0. Only an admin editing the inbound can clear either.
-		strings.Contains(m, "finalmask")
+		// 3.6.0. Only an admin editing the inbound can clear either. 3.10.0
+		// added a third: "salamander finalmask password must be at least 4
+		// bytes ..." (web/service/inbound.go validateFinalMaskSalamander), also
+		// caught by this substring.
+		strings.Contains(m, "finalmask") ||
+		// >= 3.10.0 refuses a Shadowsocks-2022 inbound whose method is
+		// chacha20-poly1305, unconditionally on add AND update —
+		// xray-core's multi-user identity header is AES-only, so the core
+		// cannot build the inbound (web/service/client_crud.go
+		// validateShadowsocks2022Inbound → xray.Shadowsocks2022NoMultiUser).
+		// The write is deterministic, so a retry can only fail again; the
+		// wording names no marker above, so without this it was classified
+		// transient and burned the sync task's attempt budget. PSP's SPA
+		// offers chacha20 as an SS-2022 method for a 3X-UI node, so an admin
+		// can still select a cipher a 3.10.0 panel will not accept — this
+		// makes that a fast, labelled failure rather than a retry storm.
+		strings.Contains(m, "does not support multiple users")
 }
 
 // isUnsafeMethod reports whether m is a state-changing HTTP method that 3X-UI's
