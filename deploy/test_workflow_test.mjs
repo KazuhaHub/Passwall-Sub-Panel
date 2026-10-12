@@ -402,7 +402,7 @@ test('go_static\'s build cache key names every tool the job compiles, at its pin
 test('staticcheck uses its pinned tool module and analyzes the application with acceptance files', () => {
   const steps = job('go_static').replace(/^\s*#.*$/gm, '')
   assert(steps.includes('go -C tools/staticcheck build -mod=readonly -o "$RUNNER_TEMP/psp-staticcheck" honnef.co/go/tools/cmd/staticcheck'), 'build the analyzer from its isolated module without changing its pinned dependencies')
-  assert(steps.includes('"$RUNNER_TEMP/psp-staticcheck" -tags node_reinstall_acceptance,destination_acceptance ./...'), 'run the resulting analyzer against the full application and both acceptance tags')
+  assert(steps.includes('"$RUNNER_TEMP/psp-staticcheck" -tags node_reinstall_acceptance,destination_acceptance,destination_pressure ./...'), 'run the resulting analyzer against the full application and all acceptance/pressure tags')
   assert(!/staticcheck@\S+/.test(steps), 'go run package@version ignores the tool-module export reader pin')
 })
 

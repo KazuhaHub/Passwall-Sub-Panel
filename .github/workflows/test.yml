@@ -1016,6 +1016,8 @@ jobs:
         run: go vet -tags node_reinstall_acceptance ./tests/acceptance/...
       - name: The native destination traffic acceptance still compiles
         run: go vet -tags destination_acceptance ./internal/app
+      - name: The decoded destination queue pressure still compiles
+        run: go vet -tags destination_pressure ./internal/service/destaudit
       # STATICCHECK, BECAUSE VET DOES NOT LOOK FOR WHAT IT FINDS. Its first run here
       # reported thirteen findings every gate above had passed, among them six pieces
       # of dead code, a dead store in nodesync, a crypto/ecdsa field deprecated since
@@ -1035,7 +1037,7 @@ jobs:
       - name: staticcheck
         run: |
           go -C tools/staticcheck build -mod=readonly -o "$RUNNER_TEMP/psp-staticcheck" honnef.co/go/tools/cmd/staticcheck
-          "$RUNNER_TEMP/psp-staticcheck" -tags node_reinstall_acceptance,destination_acceptance ./...
+          "$RUNNER_TEMP/psp-staticcheck" -tags node_reinstall_acceptance,destination_acceptance,destination_pressure ./...
       # EVERY OS THE RELEASE SHIPS, NOT ONLY THE RUNNER'S. govulncheck analyses the
       # packages as they build for the current GOOS, so an advisory whose vulnerable
       # code lives only in a _windows.go or _darwin.go file is never evaluated on a
