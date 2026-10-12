@@ -25,6 +25,8 @@ const dockerUpgradeNames = ['TestNativePublishedDockerRollback', ...remoteUpgrad
 const remoteUpgradeNames = ['TestNativePublishedRemoteRollback', ...remoteUpgradeCases.map(name => `TestNativePublishedRemoteRollback/${name}`)]
 const names = [...xrayNames, ...singBoxNames, ...guardedSingBoxNames, ...legacyUpgradeNames, ...remoteUpgradeNames, ...dockerUpgradeNames, ...fleetNames, ...loadNames, ...trialLoadNames, ...blockOverflowNames]
 const diagnostics = Object.freeze({
+  'timed out waiting for sing-box restarted runtime and inbound': 'singbox_restart_runtime_timeout',
+  'timed out waiting for exact load policy and collection receipt': 'load_receipt_timeout',
   'block overflow never exhausted its independent actual budget': 'block_overflow_budget_failed',
   'read actual exhausted block reservation': 'block_overflow_budget_read_failed',
   'timed out waiting for actual native trial provisioning capability': 'trial_load_capability_timeout',
@@ -272,6 +274,8 @@ export function sanitizeDestinationResults(input) {
   return input.split(/\r?\n/).filter(line => line.trim()).map(line => {
     const event = parseEvent(line)
     if (event.Action === 'output') {
+      const loadReceipt = typeof event.Output === 'string' && /native diagnostic: (load_(?:state|runtime|agent|panel|selection|observed_core|transition|collection|rule_count|rule_shape|config|roster))=(true|false)(?:\r?\n|$)/.exec(event.Output)
+      if (loadReceipt) return JSON.stringify({ Action: 'output', Package: pkg, Diagnostic: loadReceipt[1], Observed: loadReceipt[2] === 'true' })
       const trialSetup = typeof event.Output === 'string' && /native diagnostic: (trial_setup_(?:capability|group|principal|membership|policy|mode|collection|publication|receipt|resources|warmup|traffic|ingestion))=(true|false)(?:\r?\n|$)/.exec(event.Output)
       if (trialSetup) return JSON.stringify({ Action: 'output', Package: pkg, Diagnostic: trialSetup[1], Observed: trialSetup[2] === 'true' })
       const statusFact = typeof event.Output === 'string' && /native diagnostic: status_(rows|panel|kind|reason|exhausted|rules|pending|applied_at|state|paused|generation|is_applied|is_sniffing|is_paused|is_pending|is_offline|is_none|is_rejected|is_over_limit)=(true|false)(?:\r?\n|$)/.exec(event.Output)

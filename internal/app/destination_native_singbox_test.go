@@ -353,14 +353,42 @@ func nativeSingBoxDestinationTraffic(t *testing.T, guarded bool) {
 		nativeMust(caseTest, err, "read confirmed sing-box policy")
 		stopDaemon(caseTest)
 		probe.arm()
+		receiptAfter = time.UnixMilli(time.Now().UnixMilli())
 		startDaemon(caseTest)
 		nativeWait(caseTest, 60*time.Second, "first sing-box restart report", func() bool { _, seen, _ := probe.first(); return seen })
 		first, seen, accepted := probe.first()
 		if !seen || !accepted || first == nil || first.State != "applied" || first.Digest != prior.MintedSHA256 || first.IssueCode != "" {
 			caseTest.Fatal("sing-box restart lost its applied policy receipt")
 		}
-		waitApplied()
+		// A persisted applied receipt is deliberately sent on the first sync.
+		// It does not by itself establish that this new process has opened its
+		// listener. Require a fresh unchanged receipt, observed runtime and the
+		// actual owned child before the single traffic assertion.
+		waitAppliedCandidate(prior)
+		nativeWait(caseTest, 60*time.Second, "sing-box restarted runtime and inbound", func() bool {
+			cli, err := a.xuiPool.Get(f.agent.PanelID)
+			if err != nil {
+				return false
+			}
+			status, err := cli.GetServerStatus(caseTest.Context())
+			if err != nil {
+				return false
+			}
+			inboundState, err := cli.GetInbound(caseTest.Context(), f.node.InboundID)
+			if err != nil || !nativeObservedRuntimeReady(status, inboundState, f.node.InboundID, inbound, "sing-box", "1.14.0") {
+				return false
+			}
+			listener, err := net.DialTimeout("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(inbound)), time.Second)
+			if err != nil {
+				return false
+			}
+			_ = listener.Close()
+			return true
+		})
+		live := nativeBindLiveCore(caseTest, cmd.Process.Pid, filepath.Join(dir, "node"), "sing-box")
+		live()
 		traffic(literalHost, true)
+		live()
 	})
 	run("collection_off", func() {
 		for _, level := range []string{"hits_and_usage", "off"} {

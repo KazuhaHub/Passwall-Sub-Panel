@@ -248,26 +248,49 @@ func nativeDestinationLoad(t *testing.T, workload nativeLoadWorkload) {
 			request("POST", "dest/publish", nil, 200, nil)
 			panel, err := a.repos.XUIPanel.GetByID(test.Context(), f.agent.PanelID)
 			nativeMust(test, err, "read load collection revision")
+			factNames := []string{"load_state", "load_runtime", "load_agent", "load_panel", "load_selection", "load_observed_core", "load_transition", "load_collection", "load_rule_count", "load_rule_shape", "load_config", "load_roster"}
+			facts := make(map[string]bool)
+			defer func() {
+				if test.Failed() {
+					for _, name := range factNames {
+						test.Logf("native diagnostic: %s=%t", name, facts[name])
+					}
+				}
+			}()
 			nativeWait(test, 120*time.Second, "exact load policy and collection receipt", func() bool {
+				for _, name := range factNames {
+					facts[name] = false
+				}
 				state, e1 := a.destDefinitions.State(test.Context())
 				runtime, e2 := a.repos.DestAgentPolicy.Get(test.Context(), f.agent.AgentID, true)
 				agent, e3 := a.repos.NodeAgent.GetByAgentID(test.Context(), f.agent.AgentID)
 				observedPanel, e4 := a.repos.XUIPanel.GetByID(test.Context(), f.agent.PanelID)
-				if e1 != nil || e2 != nil || e3 != nil || e4 != nil || runtime == nil || agent == nil || observedPanel == nil || agent.ObservedCoreEngine != domain.NodeCoreXray || agent.DesiredCoreEngine != domain.NodeCoreXray || agent.DesiredCoreVersion != "26.6.27" || observedPanel.XrayVersion != "26.6.27" || agent.AllowRestrictedReality || agent.Epoch != f.agent.Epoch || state.Paused || !nativeMutationReceiptMatches(prior, *runtime, state.PublishedGeneration, agent.LastSeen, after) || !nativeCollectionReceiptMatches(*runtime, protocol.CollectHits, uint64(panel.AuditCollectRevision)) {
-					return false
+				facts["load_state"] = e1 == nil && !state.Paused
+				facts["load_runtime"], facts["load_agent"], facts["load_panel"] = e2 == nil && runtime != nil, e3 == nil && agent != nil, e4 == nil && observedPanel != nil
+				if agent != nil {
+					facts["load_selection"] = agent.DesiredCoreEngine == domain.NodeCoreXray && agent.DesiredCoreVersion == "26.6.27" && !agent.AllowRestrictedReality && agent.Epoch == f.agent.Epoch
+				}
+				facts["load_observed_core"] = agent != nil && observedPanel != nil && agent.ObservedCoreEngine == domain.NodeCoreXray && observedPanel.XrayVersion == "26.6.27"
+				if runtime != nil && agent != nil && e1 == nil {
+					facts["load_transition"] = nativeMutationReceiptMatches(prior, *runtime, state.PublishedGeneration, agent.LastSeen, after)
+					facts["load_collection"] = nativeCollectionReceiptMatches(*runtime, protocol.CollectHits, uint64(panel.AuditCollectRevision))
 				}
 				var body protocol.DestinationPolicy
-				if json.Unmarshal(runtime.MintedBody, &body) != nil || len(body.Rules) != phase.Rules {
-					return false
-				}
-				for i, rule := range body.Rules {
-					if rule.ID != fmt.Sprintf("p%d", oldIDs[i]) || rule.Action != protocol.RuleBlock || rule.Ports != strconv.Itoa(ports[i]) || len(rule.Domains) != 0 || len(rule.Subjects) != 0 {
-						return false
+				facts["load_rule_count"] = runtime != nil && json.Unmarshal(runtime.MintedBody, &body) == nil && len(body.Rules) == phase.Rules
+				if facts["load_rule_count"] {
+					facts["load_rule_shape"] = true
+					for i, rule := range body.Rules {
+						if rule.ID != fmt.Sprintf("p%d", oldIDs[i]) || rule.Action != protocol.RuleBlock || rule.Ports != strconv.Itoa(ports[i]) || len(rule.Domains) != 0 || len(rule.Subjects) != 0 {
+							facts["load_rule_shape"] = false
+						}
 					}
 				}
 				for _, streamName := range []domain.NodeAgentStreamName{domain.NodeAgentStreamConfig, domain.NodeAgentStreamRoster} {
 					stream, err := a.repos.NodeAgent.GetStream(test.Context(), f.agent.AgentID, streamName)
-					if err != nil || stream == nil || !stream.Converged() || stream.AppliedEpoch != agent.Epoch {
+					facts["load_"+string(streamName)] = err == nil && stream != nil && agent != nil && stream.Converged() && stream.AppliedEpoch == agent.Epoch
+				}
+				for _, name := range factNames {
+					if !facts[name] {
 						return false
 					}
 				}

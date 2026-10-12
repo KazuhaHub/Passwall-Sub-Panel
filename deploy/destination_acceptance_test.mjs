@@ -70,6 +70,23 @@ test('status candidate diagnostics retain only fixed comparison facts', () => {
   }
 })
 
+test('load readiness diagnostics retain each exact comparison as a boolean without private output', async () => {
+  const { isSafeDestinationDiagnostic } = await import('./destination-acceptance.mjs')
+  for (const name of ['state', 'runtime', 'agent', 'panel', 'selection', 'observed_core', 'transition', 'collection', 'rule_count', 'rule_shape', 'config', 'roster']) {
+    for (const value of ['true', 'false']) {
+      const event = JSON.parse(sanitizeDestinationResults(encode([{ Action: 'output', Package: 'private', Output: `private credential: native diagnostic: load_${name}=${value}\n` }])))
+      assert.deepEqual(event, { Action: 'output', Package: 'github.com/KazuhaHub/passwall-sub-panel/internal/app', Diagnostic: `load_${name}`, Observed: value === 'true' })
+      assert(isSafeDestinationDiagnostic(event))
+    }
+  }
+  for (const value of ['credential=true', 'state=private', 'selection=123', 'roster=true private']) {
+    assert.equal(sanitizeDestinationResults(encode([{ Action: 'output', Output: `native diagnostic: load_${value}\n` }])), '\n')
+  }
+  const timeout = JSON.parse(sanitizeDestinationResults(encode([{ Action: 'output', Output: 'timed out waiting for exact load policy and collection receipt; credential withheld' }])))
+  assert.equal(timeout.Diagnostic, 'load_receipt_timeout')
+  assert(isSafeDestinationDiagnostic(timeout))
+})
+
 test('remote restoration diagnostics retain only fixed booleans', () => {
   for (const suffix of ['task_terminal', 'receipt_failed', 'receipt_activated', 'source_installed', 'seen', 'identity', 'capability', 'streams', 'policy', 'report', 'core', 'listener', 'journal_readable', 'journal_failed', 'journal_running', 'journal_delivered', 'quarantined', 'failed_result_posted', 'failed_result_accepted', 'failed_result_rejected', 'outbox_pending', 'outbox_valid', 'fresh_after_restore', 'sync_validation_error', 'sync_outbox_error', 'sync_observer_error', 'sync_duplicate_issue', 'sync_stream_error', 'sync_process_error']) {
     const category = `remote_restore_${suffix}`
@@ -307,6 +324,9 @@ test('sing-box driver and hosted workflow execute every declared scenario', () =
   for (const name of acceptance.singBoxCases) assert(driver.includes(`run("${name}"`), name)
   const workflow = readFileSync(new URL('../.github/workflows/destination-acceptance.yml', import.meta.url), 'utf8')
   for (const value of ['sing-box', '1.14.0', 'TestNativeSingBoxDestinationTraffic', 'check-singbox']) assert(workflow.includes(value), value)
+  const restart = driver.slice(driver.indexOf('run("restart"'), driver.indexOf('run("collection_off"'))
+  for (const required of ['receiptAfter = time.UnixMilli(time.Now().UnixMilli())', 'waitAppliedCandidate(prior)', 'nativeObservedRuntimeReady', 'GetServerStatus', 'GetInbound', 'net.DialTimeout', 'nativeBindLiveCore', 'traffic(literalHost, true)']) assert(restart.includes(required), required)
+  assert(workflow.includes('RestartRequiresObservedCoreAndInbound'))
 })
 
 test('guarded sing-box keeps an independent immutable candidate and complete execution gate', () => {
