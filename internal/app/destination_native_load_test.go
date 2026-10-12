@@ -26,6 +26,7 @@ import (
 
 	"github.com/KazuhaHub/passwall-protocol/protocol"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/metrics"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 )
 
@@ -70,6 +71,9 @@ func nativeDestinationLoad(t *testing.T, workload nativeLoadWorkload) {
 	settings, err := a.settings.Load(t.Context(), ports.UISettings{})
 	nativeMust(t, err, "read load cadence")
 	settings.NodePollSeconds, settings.FullReportSeconds = 2, 0
+	if trial {
+		settings.CronTrafficPullMinutes = 1
+	}
 	nativeMust(t, a.settings.Save(t.Context(), settings), "save load cadence")
 	ownedPorts := map[int]bool{}
 	port := func() int {
@@ -111,7 +115,24 @@ func nativeDestinationLoad(t *testing.T, workload nativeLoadWorkload) {
 		defer response.Body.Close()
 		return response.StatusCode == 200
 	})
-	server := httptest.NewTLSServer(a.server.Handler)
+	handler := a.server.Handler
+	if trial {
+		elapsed := metrics.NewHistogram("fixture_destination_sync_handler_ms", "Owned load control handler completion time; excludes network transit.", "ms", metrics.LatencyBucketsMS)
+		original := handler
+		handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/v1/node/sync" {
+				started := time.Now()
+				defer elapsed.ObserveSince(started)
+			}
+			original.ServeHTTP(w, r)
+		})
+		metrics.PollStageDuration.With("sink_flush")
+		for _, kind := range []string{"block", "trial"} {
+			metrics.DestAuditBeginMS.With(kind)
+			metrics.DestAuditChunkMS.With(kind)
+		}
+	}
+	server := httptest.NewTLSServer(handler)
 	t.Cleanup(server.Close)
 	client := server.Client()
 	client.Timeout = 15 * time.Second

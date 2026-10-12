@@ -263,6 +263,7 @@ func nativeTrialLoad(t *testing.T, f destinationPolicyFixture, client *http.Clie
 	blockHeader, err := nativeVLESSRequest(f.user.UUID, blockAddress, blockPort, "trial-block.example.test")
 	nativeMust(t, err, "encode independent block request")
 	baseline := sample()
+	latencyBefore := nativeTrialLatencySnapshot(t)
 	start := time.Now()
 	baseline.ElapsedMS = 0
 	m.Samples = append(m.Samples, baseline)
@@ -346,6 +347,7 @@ func nativeTrialLoad(t *testing.T, f destinationPolicyFixture, client *http.Clie
 		time.Sleep(delay)
 	}
 	m.Duration = time.Since(start).Milliseconds()
+	nativeWriteTrialLatency(t, evidence, m.Duration, latencyBefore)
 	closeJobs.Do(func() { close(jobs) })
 	wg.Wait()
 	live()
