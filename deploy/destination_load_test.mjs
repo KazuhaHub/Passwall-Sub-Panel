@@ -40,15 +40,23 @@ test('load evidence requires two actual five-minute runs, sustained deliveries a
 
 test('load metrics cannot replace unique successful execution or expose raw private output', async () => {
   const { checkDestinationLoadEvidence } = await import('./destination-load.mjs')
+  const { sanitizeDestinationResults } = await import('./destination-acceptance.mjs')
   const Package = 'github.com/KazuhaHub/passwall-sub-panel/internal/app'
   const tests = ['TestNativeDestinationWebhookLoad', 'TestNativeDestinationWebhookLoad/single_rule', 'TestNativeDestinationWebhookLoad/fifty_rules']
   const events = tests.flatMap(Test => [{ Action: 'run', Package, Test }, { Action: 'pass', Package, Test }])
   events.push({ Action: 'pass', Package })
   const input = rows => rows.map(row => JSON.stringify(row)).join('\n') + '\n'
-  checkDestinationLoadEvidence(input(events), JSON.stringify(good()))
+  checkDestinationLoadEvidence(sanitizeDestinationResults(input(events)), JSON.stringify(good()))
   for (const Action of ['run', 'pass', 'fail', 'skip']) assert.throws(() => checkDestinationLoadEvidence(input([...events, { Action, Package, Test: tests[1] }]), JSON.stringify(good())))
   assert.throws(() => checkDestinationLoadEvidence(input(events.filter(event => event.Test !== tests[2])), JSON.stringify(good())))
   assert.throws(() => checkDestinationLoadEvidence(input([...events, { Action: 'output', Package, Output: 'private row' }]), JSON.stringify(good())))
+  const safe = sanitizeDestinationResults(input([...events, { Action: 'output', Package, Test: tests[1], Output: 'private credential or destination row' }]))
+  assert(!safe.includes('private'))
+  checkDestinationLoadEvidence(safe, JSON.stringify(good()))
+  const unknown = sanitizeDestinationResults(input([{ Action: 'run', Package, Test: 'TestNativeDestinationWebhookLoad/private-credential' }]))
+  assert(!unknown.includes('private-credential'))
+  assert.throws(() => checkDestinationLoadEvidence(sanitizeDestinationResults(input([...events, { Action: 'run', Package, Test: 'TestNativeDestinationTraffic' }])), JSON.stringify(good())))
+  assert.throws(() => checkDestinationLoadEvidence(input(events) + unknown, JSON.stringify(good())))
 })
 
 test('load evidence retains categorized losses without claiming best-effort telemetry is lossless', async () => {

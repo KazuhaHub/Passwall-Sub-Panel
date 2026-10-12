@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
-import { checkDestinationLoadResults, isSafeDestinationDiagnostic } from './destination-acceptance.mjs'
+import { checkDestinationLoadResults, isSafeDestinationDiagnostic, loadNames } from './destination-acceptance.mjs'
 
 const candidate = 'cef54ddba3ee96f9794aaacdc6ac1ed89cc318f9'
 const require = condition => { if (!condition) throw new Error('Native load evidence failed; private content withheld') }
@@ -59,6 +59,8 @@ export function checkDestinationLoadEvidence(results, metrics) {
     require(Object.keys(event).every(key => ['Action', 'Package', 'Test', 'Elapsed', 'Diagnostic', 'Observed'].includes(key)))
     require(event.Package === 'github.com/KazuhaHub/passwall-sub-panel/internal/app')
     require(['start', 'run', 'pass', 'output'].includes(event.Action))
+    require(event.Test === undefined || loadNames.includes(event.Test))
+    require(event.Action !== 'run' || loadNames.includes(event.Test))
     require(event.Elapsed === undefined || Number.isFinite(event.Elapsed) && event.Elapsed >= 0)
     if (event.Action === 'output') require(isSafeDestinationDiagnostic(event))
     else require(event.Diagnostic === undefined && event.Observed === undefined)

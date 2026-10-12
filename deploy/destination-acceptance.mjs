@@ -17,10 +17,11 @@ export const legacyUpgradeCases = Object.freeze(['old_panel', 'panel_upgrade', '
 const legacyUpgradeNames = ['TestNativeLegacyPSPUpgrade', ...legacyUpgradeCases.map(name => `TestNativeLegacyPSPUpgrade/${name}`)]
 export const fleetCases = Object.freeze(['native_ready', 'native_publication', 'native_pause', 'native_resume', 'third_party_ready', 'allowlist_trial', 'allowlist_enforce', 'one_peer_offline', 'allowlist_pause', 'allowlist_reopen'])
 const fleetNames = ['TestNativeDestinationFleet', ...fleetCases.map(name => `TestNativeDestinationFleet/${name}`)]
+export const loadNames = Object.freeze(['TestNativeDestinationWebhookLoad', 'TestNativeDestinationWebhookLoad/single_rule', 'TestNativeDestinationWebhookLoad/fifty_rules'])
 export const remoteUpgradeCases = Object.freeze(['candidate_policy', 'health_failure_restore', 'published_rollback', 'restart_recovery', 'idempotent_replay'])
 const dockerUpgradeNames = ['TestNativePublishedDockerRollback', ...remoteUpgradeCases.map(name => `TestNativePublishedDockerRollback/${name}`)]
 const remoteUpgradeNames = ['TestNativePublishedRemoteRollback', ...remoteUpgradeCases.map(name => `TestNativePublishedRemoteRollback/${name}`)]
-const names = [...xrayNames, ...singBoxNames, ...guardedSingBoxNames, ...legacyUpgradeNames, ...remoteUpgradeNames, ...dockerUpgradeNames, ...fleetNames]
+const names = [...xrayNames, ...singBoxNames, ...guardedSingBoxNames, ...legacyUpgradeNames, ...remoteUpgradeNames, ...dockerUpgradeNames, ...fleetNames, ...loadNames]
 const diagnostics = Object.freeze({
   'timed out waiting for every individual fleet receipt': 'fleet_receipt_timeout',
   'timed out waiting for actual fleet member removal and restoration': 'fleet_membership_timeout',
@@ -284,7 +285,7 @@ export function checkSingBoxResults(input) { checkCases(input, singBoxNames) }
 export function checkGuardedSingBoxResults(input) { checkCases(input, guardedSingBoxNames) }
 export function checkLegacyUpgradeResults(input) { checkCases(input, legacyUpgradeNames) }
 export function checkFleetResults(input) { checkCases(input, fleetNames) }
-export function checkDestinationLoadResults(input) { checkCases(input, ['TestNativeDestinationWebhookLoad', 'TestNativeDestinationWebhookLoad/single_rule', 'TestNativeDestinationWebhookLoad/fifty_rules']) }
+export function checkDestinationLoadResults(input) { checkCases(input, loadNames) }
 export function checkRemoteUpgradeResults(input) { checkCases(input, remoteUpgradeNames) }
 export function checkDockerUpgradeResults(input) { checkCases(input, dockerUpgradeNames) }
 export function isSafeDestinationDiagnostic(event) {
