@@ -67,6 +67,8 @@ func TestNativeCollectionReceiptRejectsOldLevelRevisionOrDigest(t *testing.T) {
 		func(r *domain.DestAgentPolicy) { r.AppliedSHA256 = "old" },
 		func(r *domain.DestAgentPolicy) { r.CollectEffective = "hits" },
 		func(r *domain.DestAgentPolicy) { r.MintedKind = domain.DestCandidateFallback },
+		func(r *domain.DestAgentPolicy) { r.MintedKind = domain.DestCandidateEmpty },
+		func(r *domain.DestAgentPolicy) { r.MintedKind = domain.DestCandidatePaused },
 		func(r *domain.DestAgentPolicy) { r.ReportedState = "rejected" },
 		func(r *domain.DestAgentPolicy) { r.ReportedIssue = "rejected" },
 		func(r *domain.DestAgentPolicy) { r.FallbackReason = "sniffing" },

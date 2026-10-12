@@ -850,6 +850,9 @@ func TestNativeDestinationTraffic(t *testing.T) {
 	run("sniff_exhaustion", func() {
 		setSniffing(fullSniffing)
 		waitApplied()
+		// A fresh acknowledgement of the previous empty candidate does not
+		// prove restoration of the domain rule after the sniffing edit.
+		waitCollection(protocol.CollectHitsAndUsage)
 		verifyCandidate(1, "", 0) // The domain rule is now executable.
 		traffic(true)             // Literal-IP Host does not match the domain.
 		domainLKG = verifyCandidate(1, "", 0).AppliedSHA256
