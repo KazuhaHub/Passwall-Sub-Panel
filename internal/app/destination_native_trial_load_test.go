@@ -137,7 +137,10 @@ func nativeTrialLoad(t *testing.T, f destinationPolicyFixture, client *http.Clie
 		users[i] = &domain.User{UPN: email, Email: email, SSOProvider: domain.SSOProviderLocal, SSOSubject: email, Role: domain.RoleUser, Enabled: true, GroupID: group.ID, UUID: fmt.Sprintf("00000000-0000-4000-8000-%012d", i+1), SubToken: fmt.Sprintf("fixture-trial-load-sub-%03d", i)}
 		nativeMust(t, a.repos.User.Create(t.Context(), users[i]), "create real trial principal")
 		stage = "membership"
-		nativeMust(t, a.user.ResyncMembership(t.Context(), users[i].ID), "provision trial principal through production membership service")
+		// Native writes record intent; immediate read-back can still show the
+		// previous roster. Use the production durable retry path, then require
+		// the exact applied 200-user roster and real traffic below.
+		nativeMust(t, a.user.ResyncMembershipOrEnqueue(t.Context(), users[i].ID, "trial load membership"), "admit trial principal through production membership retry service")
 	}
 	// Block traffic uses the original separate open-group principal and a
 	// different real target port. It keeps one key within its own budget.

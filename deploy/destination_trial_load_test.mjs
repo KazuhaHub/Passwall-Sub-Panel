@@ -77,6 +77,7 @@ test('trial setup exposes only closed boolean phases and waits for the actual na
   }
   for (const phase of ['private-email@example', 'principal_200', 'unknown']) assert.equal(sanitizeDestinationResults(JSON.stringify({ Action: 'output', Output: `native diagnostic: trial_setup_${phase}=false\n` })).trim(), '')
   const driver = readFileSync(new URL('../internal/app/destination_native_trial_load_test.go', import.meta.url), 'utf8')
-  for (const required of ['GetServerStatus', 'GetInbound', 'nativeTrialProvisioningReady', 'ResyncMembership']) assert(driver.includes(required), required)
-  assert(driver.indexOf('nativeTrialProvisioningReady') < driver.indexOf('ResyncMembership'))
+  for (const required of ['GetServerStatus', 'GetInbound', 'nativeTrialProvisioningReady', 'ResyncMembershipOrEnqueue']) assert(driver.includes(required), required)
+  assert(driver.indexOf('nativeTrialProvisioningReady') < driver.indexOf('ResyncMembershipOrEnqueue'))
+  assert(!driver.includes('a.user.ResyncMembership('))
 })
