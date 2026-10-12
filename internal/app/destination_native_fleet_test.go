@@ -260,7 +260,7 @@ func TestNativeDestinationFleet(t *testing.T) {
 				facts[prefix+"selection"] = observed != nil && observed.DesiredCoreEngine == peer.engine && observed.DesiredCoreVersion == peer.version && observed.AllowRestrictedReality == peer.restricted
 				facts[prefix+"engine"], facts[prefix+"version"] = s.CoreEngine == string(peer.engine), s.CoreVersion == peer.version
 				facts[prefix+"running"] = s.CoreState == "running"
-				facts[prefix+"listener"] = s.ListenerApplied && nativePanelStreamsApplied(s, 1)
+				facts[prefix+"listener"] = nativeFleetStreamsApplied(s, peer.nativeFleetNodePlan)
 				facts[prefix+"legacy"] = peer.capable || s.AgentVersion == "v4.0.1.8"
 				if !facts[prefix+"agent"] || !facts[prefix+"heartbeat"] || !facts[prefix+"epoch"] || !facts[prefix+"capability"] || !facts[prefix+"selection"] || !facts[prefix+"engine"] || !facts[prefix+"version"] || !facts[prefix+"running"] || !facts[prefix+"listener"] || !facts[prefix+"legacy"] {
 					facts[prefix+"observation"] = false

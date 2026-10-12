@@ -67,6 +67,9 @@ test('fleet workflow pins both daemons, requires production Run and both real ad
   assert(workflow.slice(end).includes('needs.fleet.result'))
   const driver = readFileSync(new URL('../internal/app/destination_native_fleet_test.go', import.meta.url), 'utf8')
   for (const value of ['a.Run()', 'nativeStartFleetBackends', 'adapter.GetServerStatus', 'adapter.ListClientInbounds', 'nativeVLESSHost', 'nativeAllowlistMembershipMatches', 'partitionSync', 'nativeBindLiveCore']) assert(driver.includes(value), value)
+  assert(driver.includes('nativeFleetStreamsApplied(s, peer.nativeFleetNodePlan)'))
+  assert(!driver.includes('nativePanelStreamsApplied(s, 1)'))
+  assert(job.includes('StreamsRequireOwnCoreAndEveryCurrentValidator'))
 })
 
 test('all eight peer diagnostics remain bounded booleans without private output', async () => {

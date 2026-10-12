@@ -116,6 +116,41 @@ func TestNativeFleetMixedEnginePlanCoversEveryCandidateAndCore(t *testing.T) {
 	}
 }
 
+func nativeFleetStreamsApplied(s nativeLegacySnapshot, peer nativeFleetNodePlan) bool {
+	return s.Sequence >= 4 && s.CoreState == "running" && s.CoreEngine == string(peer.engine) && s.CoreVersion == peer.version && s.ListenerApplied && s.Config.ETag != "" && s.HaveConfig.ETag == s.Config.ETag && s.HaveConfig.Applied == s.Config.Version && s.Roster.ETag != "" && s.HaveRoster.ETag == s.Roster.ETag && s.HaveRoster.Applied == s.Roster.Version
+}
+
+func TestNativeFleetStreamsRequireOwnCoreAndEveryCurrentValidator(t *testing.T) {
+	peers, _ := nativeFleetNodes("mixed", "mixed-engines")
+	for _, peer := range peers {
+		base := nativeLegacySnapshot{Sequence: 4, CoreEngine: string(peer.engine), CoreVersion: peer.version, CoreState: "running", ListenerApplied: true,
+			Config: protocol.Segment[protocol.ConfigBody]{Version: protocol.Version{Epoch: 1, Version: 7}, ETag: "owned-config"}, HaveConfig: protocol.StreamState{Applied: protocol.Version{Epoch: 1, Version: 7}, ETag: "owned-config"},
+			Roster: protocol.Segment[protocol.RosterBody]{Version: protocol.Version{Epoch: 1, Version: 9}, ETag: "owned-roster"}, HaveRoster: protocol.StreamState{Applied: protocol.Version{Epoch: 1, Version: 9}, ETag: "owned-roster"}}
+		if !nativeFleetStreamsApplied(base, peer) {
+			t.Fatal("fleet stream proof was pinned to another peer's core")
+		}
+		for _, change := range []func(*nativeLegacySnapshot){
+			func(s *nativeLegacySnapshot) { s.Sequence = 3 },
+			func(s *nativeLegacySnapshot) { s.CoreEngine = "different" },
+			func(s *nativeLegacySnapshot) { s.CoreVersion = "different" },
+			func(s *nativeLegacySnapshot) { s.CoreState = "stopped" },
+			func(s *nativeLegacySnapshot) { s.ListenerApplied = false },
+			func(s *nativeLegacySnapshot) { s.Config.ETag = "" },
+			func(s *nativeLegacySnapshot) { s.HaveConfig.ETag = "borrowed" },
+			func(s *nativeLegacySnapshot) { s.HaveConfig.Applied.Version-- },
+			func(s *nativeLegacySnapshot) { s.Roster.ETag = "" },
+			func(s *nativeLegacySnapshot) { s.HaveRoster.ETag = "borrowed" },
+			func(s *nativeLegacySnapshot) { s.HaveRoster.Applied.Version-- },
+		} {
+			current := base
+			change(&current)
+			if nativeFleetStreamsApplied(current, peer) {
+				t.Fatal("fleet stream proof omitted a current owned validator")
+			}
+		}
+	}
+}
+
 func nativeFleetPolicyRules(body *protocol.DestinationPolicy, groupID, userID int64, port int, controlAddress, stage string) bool {
 	if body == nil || len(body.Exempt) != 0 {
 		return false
