@@ -11,7 +11,11 @@ export function sanitizeSQLPressureResults(input) {
   require(typeof input === 'string' && Buffer.byteLength(input) <= 128 * 1024)
   return input.split(/\r?\n/).filter(line => line.trim()).map(line => {
     const event = JSON.parse(line)
-    if (event.Action === 'output') return ''
+    if (event.Action === 'output') {
+      if (event.Package !== pkg || event.Test !== root || typeof event.Output !== 'string') return ''
+      const stage = event.Output.match(/^\s*dest_pressure_native_test\.go:\d+: sql_pressure_failed_stage=(owned|database|principals|controls|wires|queues|drain|schedule|ledger|evidence)\r?\n?$/)?.[1]
+      return stage ? JSON.stringify({ Action: 'output', Package: pkg, Test: root, Diagnostic: 'sql_pressure_failed_stage', Stage: stage }) : ''
+    }
     require(['start', 'run', 'pass', 'fail', 'skip', 'pause', 'cont'].includes(event.Action))
     return JSON.stringify({ Action: event.Action, Package: event.Package === pkg ? pkg : '[other package]',
       ...(Object.hasOwn(event, 'Test') ? { Test: event.Test === root ? root : '[unknown test]' } : {}),

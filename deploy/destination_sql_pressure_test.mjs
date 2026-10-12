@@ -51,6 +51,11 @@ test('SQL pressure execution keeps only its unique actual identity and rejects s
     assert.throws(() => checkSQLPressureEvidence(sanitizeSQLPressureResults(encode(rejected)), metrics))
   }
   assert.throws(() => checkSQLPressureEvidence(encode([...rows, { Action: 'output', Package, Output: 'private' }]), metrics))
+  const diagnostic = Output => sanitizeSQLPressureResults(encode([{ Action: 'output', Package, Test, Output }]))
+  const failed = diagnostic('    dest_pressure_native_test.go:77: sql_pressure_failed_stage=wires\n')
+  assert.equal(JSON.parse(failed).Stage, 'wires')
+  assert.throws(() => checkSQLPressureEvidence(failed, metrics))
+  for (const output of ['    dest_pressure_native_test.go:77: sql_pressure_failed_stage=private\n', '    dest_pressure_native_test.go:77: sql_pressure_failed_stage=wires private\n', '    other.go:77: sql_pressure_failed_stage=wires\n']) assert.equal(diagnostic(output), '\n')
 })
 
 test('hosted SQL pressure exercises real file storage, unchanged worker and always tagged vet', () => {
@@ -60,6 +65,7 @@ test('hosted SQL pressure exercises real file storage, unchanged worker and alwa
   for (const required of ['  sql-pressure:', '^TestNativeDestinationSQLPressure$', 'PSP_NATIVE_SQL_PRESSURE_METRICS', 'destination-sql-pressure.mjs sanitize', 'native-destination-sql-pressure-${{ github.sha }}', 'destination-sql-pressure-tests.json', 'destination-sql-pressure-metrics.json']) assert(workflow.includes(required), required)
   assert(checks.includes('go vet -tags destination_pressure ./internal/service/destaudit'))
   assert(checks.includes('go vet -tags destination_pressure ./internal/adapters/sqlstore'))
+  assert.match(checks, /^      - name: The real destination SQL pressure still compiles\r?\n        run: go vet -tags destination_pressure \.\/internal\/adapters\/sqlstore$/m)
   for (const required of ['Open("sqlite", filepath.Join(t.TempDir(), "pressure.db"))', 'EnsureSchema(db)', 'destaudit.New', 's.Offer', 's.Run(ctx)', 'r.DestAuditRepo.BeginDestinationAudit', 'r.DestAuditRepo.WriteDestinationAuditChunk', 'time.Since(started).Nanoseconds()', 'filepath.EvalSymlinks']) {
     assert(source.includes(required), required)
   }

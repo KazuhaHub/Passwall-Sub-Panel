@@ -65,12 +65,19 @@ func (r *pressureSQLStore) WriteDestinationAuditChunk(ctx context.Context, b dom
 }
 
 func TestNativeDestinationSQLPressure(t *testing.T) {
+	stage := "owned"
+	defer func() {
+		if t.Failed() {
+			t.Log("sql_pressure_failed_stage=" + stage)
+		}
+	}()
 	path := os.Getenv("PSP_NATIVE_SQL_PRESSURE_METRICS")
 	root, err := filepath.EvalSymlinks(os.Getenv("RUNNER_TEMP"))
 	dir, dirErr := filepath.EvalSymlinks(filepath.Dir(path))
 	if err != nil || dirErr != nil || root != dir || filepath.Base(path) != "destination-sql-pressure-metrics.json" || os.Getenv("GITHUB_ACTIONS") != "true" || os.Getenv("RUNNER_ENVIRONMENT") != "github-hosted" || os.Getenv("GITHUB_REPOSITORY") != "KazuhaHub/Passwall-Sub-Panel" {
 		t.Fatal("SQL pressure requires owned evidence on the hosted Linux runner")
 	}
+	stage = "database"
 	db, err := Open("sqlite", filepath.Join(t.TempDir(), "pressure.db"))
 	if err != nil {
 		t.Fatal("SQL pressure database open failed")
@@ -79,6 +86,7 @@ func TestNativeDestinationSQLPressure(t *testing.T) {
 	if EnsureSchema(db) != nil {
 		t.Fatal("SQL pressure schema failed")
 	}
+	stage = "principals"
 	panel := xuiPanelRow{Kind: string(domain.PanelKindPSP), AuditCollect: "hits_and_usage", AuditCollectRevision: 1}
 	if db.Create(&panel).Error != nil || db.Create(&nodeAgentRow{AgentID: "agt_pressure", PanelID: panel.ID, CredentialSHA256: strings.Repeat("a", 64), ObservedCoreEngine: string(domain.NodeCoreXray), ObservedCapabilities: jsonStrings{protocol.CapabilityAuditHits, protocol.CapabilityAuditUsage}}).Error != nil || db.Create(&userRow{ID: 7, UPN: "pressure@example.test", SubToken: "pressure-token", UUID: "00000000-0000-0000-0000-000000000007", Enabled: true}).Error != nil {
 		t.Fatal("SQL pressure principals failed")
@@ -91,6 +99,7 @@ func TestNativeDestinationSQLPressure(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 8*time.Minute)
 	defer cancel()
 	unexpected := false
+	stage = "controls"
 	s, err := destaudit.New(ctx, r, destaudit.Options{Emit: func(e destaudit.Event) {
 		lane := r.lanes[e.Kind]
 		if lane == nil {
@@ -115,6 +124,7 @@ func TestNativeDestinationSQLPressure(t *testing.T) {
 	}
 	now := time.Now().UTC()
 	hour := now.Truncate(time.Hour).UnixMilli()
+	stage = "wires"
 	wires := map[string][]byte{}
 	for _, kind := range kinds {
 		body := protocol.AuditObservation{BatchID: fmt.Sprintf("%032x", 1), Kind: kind, Hour: hour, CollectRevision: 1}
@@ -142,6 +152,7 @@ func TestNativeDestinationSQLPressure(t *testing.T) {
 	}
 	// Fill all four real lanes together before starting the worker. Each request
 	// owns an independently decoded body; the actual clock and limits stay intact.
+	stage = "queues"
 	for batch := 1; batch <= 256; batch++ {
 		full := 0
 		for index, kind := range kinds {
@@ -171,14 +182,17 @@ func TestNativeDestinationSQLPressure(t *testing.T) {
 			t.Fatal("SQL pressure did not saturate each lane")
 		}
 	}
+	stage = "drain"
 	s.StopOffers()
 	started := time.Now()
 	if summary := s.Run(ctx); summary != (destaudit.Summary{}) || ctx.Err() != nil || unexpected {
 		t.Fatal("SQL pressure did not completely drain")
 	}
+	stage = "schedule"
 	if strings.Join(r.schedule, ",") != "block,block,block,block,observe,trial,usage" {
 		t.Fatal("SQL pressure lost original chunk scheduling")
 	}
+	stage = "ledger"
 	var budgets []destAuditIngestBudgetRow
 	var losses []destAuditLossHourlyRow
 	if db.Find(&budgets).Error != nil || db.Find(&losses).Error != nil || len(budgets) != 4 || len(losses) != 8 {
@@ -232,6 +246,7 @@ func TestNativeDestinationSQLPressure(t *testing.T) {
 	for _, kind := range kinds {
 		report.Lanes = append(report.Lanes, r.lanes[kind])
 	}
+	stage = "evidence"
 	data, err := json.Marshal(report)
 	if err != nil || len(data) > 32*1024 || os.WriteFile(path, append(data, '\n'), 0644) != nil {
 		t.Fatal("SQL pressure bounded evidence write failed")
