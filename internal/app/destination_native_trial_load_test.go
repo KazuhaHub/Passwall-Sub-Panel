@@ -70,158 +70,7 @@ func nativeTrialLoad(t *testing.T, f destinationPolicyFixture, client *http.Clie
 		nativeMust(t, err, "encode bounded trial load evidence")
 		nativeMust(t, os.WriteFile(evidence, append(data, '\n'), 0644), "write owned trial load evidence")
 	})
-	var prior *domain.DestAgentPolicy
-	var after time.Time
-	request := func(method, path string, body any, want int, result any) {
-		if method != "GET" {
-			var err error
-			prior, err = a.repos.DestAgentPolicy.Get(t.Context(), f.agent.AgentID, true)
-			nativeMust(t, err, "bind trial load candidate before mutation")
-		}
-		data, err := json.Marshal(body)
-		nativeMust(t, err, "encode trial administrator input")
-		r, err := http.NewRequestWithContext(t.Context(), method, endpoint+"/api/admin/"+path, bytes.NewReader(data))
-		nativeMust(t, err, "create trial administrator request")
-		r.Header.Set("Authorization", "Bearer "+token)
-		r.Header.Set("Content-Type", "application/json")
-		if method != "GET" {
-			after = time.Now()
-		}
-		response, err := client.Do(r)
-		nativeMust(t, err, "call trial production administrator route")
-		defer response.Body.Close()
-		if response.StatusCode != want {
-			t.Fatal("trial load administrator failed; private body withheld")
-		}
-		if result != nil {
-			nativeMust(t, json.NewDecoder(response.Body).Decode(result), "decode trial administrator reply")
-		} else {
-			_, _ = io.Copy(io.Discard, response.Body)
-		}
-	}
-	// Do not borrow a fabricated capability or roster to provision the users.
-	nativeWait(t, 120*time.Second, "actual native trial provisioning capability", func() bool {
-		agent, err := a.repos.NodeAgent.GetByAgentID(t.Context(), f.agent.AgentID)
-		if err != nil || agent == nil || agent.LastSeen == nil || !slicesContainsNative(agent.ObservedCapabilities, protocol.CapabilityDestinationPolicy) {
-			return false
-		}
-		// The first control report may advertise capability before installation
-		// or any full runtime enumeration. Membership reconciliation reads the
-		// real native adapter, so wait for its observed inbound rather than
-		// treating advertised support as a completed startup.
-		cli, err := a.xuiPool.Get(f.agent.PanelID)
-		if err != nil {
-			return false
-		}
-		status, err := cli.GetServerStatus(t.Context())
-		if err != nil {
-			return false
-		}
-		observedInbound, err := cli.GetInbound(t.Context(), f.node.InboundID)
-		return err == nil && nativeTrialProvisioningReady(status, observedInbound, f.node.InboundID, inbound)
-	})
-	stage = "group"
-	group := &domain.Group{Slug: "trial-load", Name: "Trial load", TagFilter: domain.TagFilter{All: true}}
-	nativeMust(t, a.repos.Group.Create(t.Context(), group), "create owned trial load group")
-	users := make([]*domain.User, 200)
-	t.Cleanup(func() {
-		for _, user := range users {
-			if user != nil && (strings.Contains(output(), user.Email) || strings.Contains(output(), user.UUID) || strings.Contains(output(), user.SubToken)) {
-				t.Error("trial principal escaped into private candidate output")
-			}
-		}
-	})
-	for i := range users {
-		stage = "principal"
-		email := fmt.Sprintf("trial-load-%03d@example.test", i)
-		users[i] = &domain.User{UPN: email, Email: email, SSOProvider: domain.SSOProviderLocal, SSOSubject: email, Role: domain.RoleUser, Enabled: true, GroupID: group.ID, UUID: fmt.Sprintf("00000000-0000-4000-8000-%012d", i+1), SubToken: fmt.Sprintf("fixture-trial-load-sub-%03d", i)}
-		nativeMust(t, a.repos.User.Create(t.Context(), users[i]), "create real trial principal")
-		stage = "membership"
-		// Native writes record intent; immediate read-back can still show the
-		// previous roster. Use the production durable retry path, then require
-		// the exact applied 200-user roster and real traffic below.
-		nativeMust(t, a.user.ResyncMembershipOrEnqueue(t.Context(), users[i].ID, "trial load membership"), "admit trial principal through production membership retry service")
-	}
-	// Block traffic uses the original separate open-group principal and a
-	// different real target port. It keeps one key within its own budget.
-	_, blockAddress, blockPort, _, blockReached := nativeTarget(t)
-	stage = "policy"
-	input := destinationPolicyInput("Concurrent trial block", "block")
-	input["inline"] = map[string]any{"ports": strconv.Itoa(blockPort)}
-	var policy destinationPolicyAPIResult
-	request("POST", "dest/policies", input, 201, &policy)
-	var mode destinationGroupModeAPIResult
-	stage = "mode"
-	request("PUT", fmt.Sprintf("dest/groups/%d", group.ID), map[string]any{"mode": "allowlist", "stage": "trial", "list_ids": []int64{}, "updated_at": int64(0), "base_hosts": []string{}}, 200, &mode)
-	stage = "collection"
-	request("PUT", fmt.Sprintf("servers/%d", f.agent.PanelID), map[string]any{"audit_collect": "hits"}, 200, nil)
-	stage = "publication"
-	request("POST", "dest/publish", nil, 200, nil)
-	panel, err := a.repos.XUIPanel.GetByID(t.Context(), f.agent.PanelID)
-	stage = "receipt"
-	nativeMust(t, err, "bind trial collection revision")
-	nativeWait(t, 120*time.Second, "current trial policy and complete real roster", func() bool {
-		state, e1 := a.destDefinitions.State(t.Context())
-		runtime, e2 := a.repos.DestAgentPolicy.Get(t.Context(), f.agent.AgentID, true)
-		agent, e3 := a.repos.NodeAgent.GetByAgentID(t.Context(), f.agent.AgentID)
-		observedPanel, e4 := a.repos.XUIPanel.GetByID(t.Context(), f.agent.PanelID)
-		if e1 != nil || e2 != nil || e3 != nil || e4 != nil || runtime == nil || agent == nil || observedPanel == nil || agent.ObservedCoreEngine != domain.NodeCoreXray || agent.DesiredCoreEngine != domain.NodeCoreXray || agent.DesiredCoreVersion != "26.6.27" || observedPanel.XrayVersion != "26.6.27" || agent.AllowRestrictedReality || agent.Epoch != f.agent.Epoch || state.Paused || !nativeMutationReceiptMatches(prior, *runtime, state.PublishedGeneration, agent.LastSeen, after) || !nativeCollectionReceiptMatches(*runtime, protocol.CollectHits, uint64(panel.AuditCollectRevision)) {
-			return false
-		}
-		var body protocol.DestinationPolicy
-		if json.Unmarshal(runtime.MintedBody, &body) != nil || len(body.Rules) != 2 {
-			return false
-		}
-		trialRules, blockRules := 0, 0
-		for _, rule := range body.Rules {
-			if rule.ID == fmt.Sprintf("g%d", group.ID) && rule.Action == protocol.RuleObserve && rule.CatchAll && len(rule.Subjects) == 200 {
-				members := make(map[protocol.SubjectKey]bool)
-				for _, subject := range rule.Subjects {
-					members[subject] = true
-				}
-				for _, user := range users {
-					if !members[protocol.NewSubjectKey(user.ID)] {
-						return false
-					}
-				}
-				trialRules++
-			}
-			if rule.ID == fmt.Sprintf("p%d", policy.ID) && rule.Action == protocol.RuleBlock && rule.Ports == strconv.Itoa(blockPort) && len(rule.Subjects) == 0 && len(rule.Domains) == 0 {
-				blockRules++
-			}
-		}
-		if trialRules != 1 || blockRules != 1 {
-			return false
-		}
-		configStream, err := a.repos.NodeAgent.GetStream(t.Context(), f.agent.AgentID, domain.NodeAgentStreamConfig)
-		if err != nil || configStream == nil || !configStream.Converged() || configStream.AppliedEpoch != agent.Epoch {
-			return false
-		}
-		stream, err := a.repos.NodeAgent.GetStream(t.Context(), f.agent.AgentID, domain.NodeAgentStreamRoster)
-		if err != nil || stream == nil || !stream.Converged() || stream.AppliedEpoch != agent.Epoch {
-			return false
-		}
-		var roster protocol.RosterBody
-		if json.Unmarshal(stream.DesiredBody, &roster) != nil {
-			return false
-		}
-		seen := map[protocol.SubjectKey]bool{}
-		for _, c := range roster.Clients {
-			if c.Enabled {
-				for _, l := range c.Listeners {
-					if l == protocol.NewListenerKey(f.node.ID) {
-						seen[c.Subject] = true
-					}
-				}
-			}
-		}
-		for _, user := range users {
-			if !seen[protocol.NewSubjectKey(user.ID)] {
-				return false
-			}
-		}
-		return seen[protocol.NewSubjectKey(f.user.ID)]
-	})
+	users, group, policy, blockAddress, blockPort, blockReached := nativePrepareTrialLoad(t, f, client, endpoint, token, inbound, output, &stage, nil)
 	m.Users = len(users)
 	stage = "resources"
 	live := nativeBindLiveCore(t, parent, dataDir, "xray")
@@ -419,4 +268,182 @@ func nativeTrialLoad(t *testing.T, f destinationPolicyFixture, client *http.Clie
 	if pageFailure != "" {
 		t.Fatalf("first-screen API probe failed: %s; private body withheld", pageFailure)
 	}
+}
+
+// nativePrepareTrialLoad uses the production membership retry service and
+// exact applied policy/config/roster receipts for both independent workloads.
+func nativePrepareTrialLoad(t *testing.T, f destinationPolicyFixture, client *http.Client, endpoint, token string, inbound int, output func() string, stage *string, mixed *nativeMixedSetup) ([]*domain.User, *domain.Group, destinationPolicyAPIResult, string, int, *atomic.Int64) {
+	a := f.a
+	collect, ruleCount := "hits", 2
+	if mixed != nil {
+		collect, ruleCount = "hits_and_usage", 3
+	}
+	var prior *domain.DestAgentPolicy
+	var after time.Time
+	request := func(method, path string, body any, want int, result any) {
+		if method != "GET" {
+			var err error
+			prior, err = a.repos.DestAgentPolicy.Get(t.Context(), f.agent.AgentID, true)
+			nativeMust(t, err, "bind trial load candidate before mutation")
+		}
+		data, err := json.Marshal(body)
+		nativeMust(t, err, "encode trial administrator input")
+		r, err := http.NewRequestWithContext(t.Context(), method, endpoint+"/api/admin/"+path, bytes.NewReader(data))
+		nativeMust(t, err, "create trial administrator request")
+		r.Header.Set("Authorization", "Bearer "+token)
+		r.Header.Set("Content-Type", "application/json")
+		if method != "GET" {
+			after = time.Now()
+		}
+		response, err := client.Do(r)
+		nativeMust(t, err, "call trial production administrator route")
+		defer response.Body.Close()
+		if response.StatusCode != want {
+			t.Fatal("trial load administrator failed; private body withheld")
+		}
+		if result != nil {
+			nativeMust(t, json.NewDecoder(response.Body).Decode(result), "decode trial administrator reply")
+		} else {
+			_, _ = io.Copy(io.Discard, response.Body)
+		}
+	}
+	// Do not borrow a fabricated capability or roster to provision the users.
+	nativeWait(t, 120*time.Second, "actual native trial provisioning capability", func() bool {
+		agent, err := a.repos.NodeAgent.GetByAgentID(t.Context(), f.agent.AgentID)
+		if err != nil || agent == nil || agent.LastSeen == nil || !slicesContainsNative(agent.ObservedCapabilities, protocol.CapabilityDestinationPolicy) {
+			return false
+		}
+		// The first control report may advertise capability before installation
+		// or any full runtime enumeration. Membership reconciliation reads the
+		// real native adapter, so wait for its observed inbound rather than
+		// treating advertised support as a completed startup.
+		cli, err := a.xuiPool.Get(f.agent.PanelID)
+		if err != nil {
+			return false
+		}
+		status, err := cli.GetServerStatus(t.Context())
+		if err != nil {
+			return false
+		}
+		observedInbound, err := cli.GetInbound(t.Context(), f.node.InboundID)
+		return err == nil && nativeTrialProvisioningReady(status, observedInbound, f.node.InboundID, inbound)
+	})
+	*stage = "group"
+	group := &domain.Group{Slug: "trial-load", Name: "Trial load", TagFilter: domain.TagFilter{All: true}}
+	nativeMust(t, a.repos.Group.Create(t.Context(), group), "create owned trial load group")
+	users := make([]*domain.User, 200)
+	t.Cleanup(func() {
+		for _, user := range users {
+			if user != nil && (strings.Contains(output(), user.Email) || strings.Contains(output(), user.UUID) || strings.Contains(output(), user.SubToken)) {
+				t.Error("trial principal escaped into private candidate output")
+			}
+		}
+	})
+	for i := range users {
+		*stage = "principal"
+		email := fmt.Sprintf("trial-load-%03d@example.test", i)
+		users[i] = &domain.User{UPN: email, Email: email, SSOProvider: domain.SSOProviderLocal, SSOSubject: email, Role: domain.RoleUser, Enabled: true, GroupID: group.ID, UUID: fmt.Sprintf("00000000-0000-4000-8000-%012d", i+1), SubToken: fmt.Sprintf("fixture-trial-load-sub-%03d", i)}
+		nativeMust(t, a.repos.User.Create(t.Context(), users[i]), "create real trial principal")
+		*stage = "membership"
+		// Native writes record intent; immediate read-back can still show the
+		// previous roster. Use the production durable retry path, then require
+		// the exact applied 200-user roster and real traffic below.
+		nativeMust(t, a.user.ResyncMembershipOrEnqueue(t.Context(), users[i].ID, "trial load membership"), "admit trial principal through production membership retry service")
+	}
+	// Block traffic uses the original separate open-group principal and its own target port.
+	blockBindPort := 0
+	if mixed != nil {
+		blockBindPort = nativePort(t)
+	}
+	_, blockAddress, blockPort, _, blockReached := nativeTargetAtPort(t, blockBindPort)
+	*stage = "policy"
+	input := destinationPolicyInput("Concurrent trial block", "block")
+	input["inline"] = map[string]any{"ports": strconv.Itoa(blockPort)}
+	var policy destinationPolicyAPIResult
+	request("POST", "dest/policies", input, 201, &policy)
+	var observePolicy destinationPolicyAPIResult
+	if mixed != nil {
+		observeInput := destinationPolicyInput("Concurrent mixed observe", "observe")
+		observeInput["inline"] = map[string]any{"ports": strconv.Itoa(mixed.observePort)}
+		request("POST", "dest/policies", observeInput, 201, &observePolicy)
+	}
+	var mode destinationGroupModeAPIResult
+	*stage = "mode"
+	request("PUT", fmt.Sprintf("dest/groups/%d", group.ID), map[string]any{"mode": "allowlist", "stage": "trial", "list_ids": []int64{}, "updated_at": int64(0), "base_hosts": []string{}}, 200, &mode)
+	*stage = "collection"
+	request("PUT", fmt.Sprintf("servers/%d", f.agent.PanelID), map[string]any{"audit_collect": collect}, 200, nil)
+	*stage = "publication"
+	request("POST", "dest/publish", nil, 200, nil)
+	panel, err := a.repos.XUIPanel.GetByID(t.Context(), f.agent.PanelID)
+	*stage = "receipt"
+	nativeMust(t, err, "bind trial collection revision")
+	nativeWait(t, 120*time.Second, "current trial policy and complete real roster", func() bool {
+		state, e1 := a.destDefinitions.State(t.Context())
+		runtime, e2 := a.repos.DestAgentPolicy.Get(t.Context(), f.agent.AgentID, true)
+		agent, e3 := a.repos.NodeAgent.GetByAgentID(t.Context(), f.agent.AgentID)
+		observedPanel, e4 := a.repos.XUIPanel.GetByID(t.Context(), f.agent.PanelID)
+		if e1 != nil || e2 != nil || e3 != nil || e4 != nil || runtime == nil || agent == nil || observedPanel == nil || agent.ObservedCoreEngine != domain.NodeCoreXray || agent.DesiredCoreEngine != domain.NodeCoreXray || agent.DesiredCoreVersion != "26.6.27" || observedPanel.XrayVersion != "26.6.27" || agent.AllowRestrictedReality || agent.Epoch != f.agent.Epoch || state.Paused || !nativeMutationReceiptMatches(prior, *runtime, state.PublishedGeneration, agent.LastSeen, after) || !nativeCollectionReceiptMatches(*runtime, protocol.CollectLevel(collect), uint64(panel.AuditCollectRevision)) {
+			return false
+		}
+		var body protocol.DestinationPolicy
+		if json.Unmarshal(runtime.MintedBody, &body) != nil || len(body.Rules) != ruleCount {
+			return false
+		}
+		trialRules, blockRules, observeRules := 0, 0, 0
+		for _, rule := range body.Rules {
+			if rule.ID == fmt.Sprintf("g%d", group.ID) && rule.Action == protocol.RuleObserve && rule.CatchAll && len(rule.Subjects) == 200 {
+				members := make(map[protocol.SubjectKey]bool)
+				for _, subject := range rule.Subjects {
+					members[subject] = true
+				}
+				for _, user := range users {
+					if !members[protocol.NewSubjectKey(user.ID)] {
+						return false
+					}
+				}
+				trialRules++
+			}
+			if rule.ID == fmt.Sprintf("p%d", policy.ID) && rule.Action == protocol.RuleBlock && rule.Ports == strconv.Itoa(blockPort) && len(rule.Subjects) == 0 && len(rule.Domains) == 0 {
+				blockRules++
+			}
+			if mixed != nil && rule.ID == fmt.Sprintf("p%d", observePolicy.ID) && rule.Action == protocol.RuleObserve && rule.Ports == strconv.Itoa(mixed.observePort) && len(rule.Subjects) == 0 && len(rule.Domains) == 0 {
+				observeRules++
+			}
+		}
+		if mixed != nil && (observeRules != 1 || !slicesContainsNative(agent.ObservedCapabilities, protocol.CapabilityAuditUsage)) {
+			return false
+		}
+		if trialRules != 1 || blockRules != 1 {
+			return false
+		}
+		configStream, err := a.repos.NodeAgent.GetStream(t.Context(), f.agent.AgentID, domain.NodeAgentStreamConfig)
+		if err != nil || configStream == nil || !configStream.Converged() || configStream.AppliedEpoch != agent.Epoch {
+			return false
+		}
+		stream, err := a.repos.NodeAgent.GetStream(t.Context(), f.agent.AgentID, domain.NodeAgentStreamRoster)
+		if err != nil || stream == nil || !stream.Converged() || stream.AppliedEpoch != agent.Epoch {
+			return false
+		}
+		var roster protocol.RosterBody
+		if json.Unmarshal(stream.DesiredBody, &roster) != nil {
+			return false
+		}
+		seen := map[protocol.SubjectKey]bool{}
+		for _, c := range roster.Clients {
+			if c.Enabled {
+				for _, l := range c.Listeners {
+					if l == protocol.NewListenerKey(f.node.ID) {
+						seen[c.Subject] = true
+					}
+				}
+			}
+		}
+		for _, user := range users {
+			if !seen[protocol.NewSubjectKey(user.ID)] {
+				return false
+			}
+		}
+		return seen[protocol.NewSubjectKey(f.user.ID)]
+	})
+	return users, group, policy, blockAddress, blockPort, blockReached
 }

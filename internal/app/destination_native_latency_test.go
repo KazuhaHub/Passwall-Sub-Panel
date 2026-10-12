@@ -25,14 +25,18 @@ type nativeTrialLatencyReading struct {
 }
 
 func nativeTrialLatencySnapshot(t *testing.T) nativeTrialLatencyReading {
+	return nativeLatencySnapshot(t, nativeTrialLatencyNames)
+}
+
+func nativeLatencySnapshot(t *testing.T, names []string) nativeTrialLatencyReading {
 	t.Helper()
 	// Take is intentionally non-atomic. Retry a bounded read when bucket and
 	// count loads straddle an observation; never reset or pause production work.
 	for range 100 {
 		snapshot := metrics.Take()
 		all := snapshot.Histograms
-		out := make([]metrics.HistogramSnapshot, 0, len(nativeTrialLatencyNames))
-		for _, name := range nativeTrialLatencyNames {
+		out := make([]metrics.HistogramSnapshot, 0, len(names))
+		for _, name := range names {
 			for _, h := range all {
 				if h.Name == name {
 					if _, ok := nativeLatencyDifference(h, h); ok {
@@ -42,7 +46,7 @@ func nativeTrialLatencySnapshot(t *testing.T) nativeTrialLatencyReading {
 				}
 			}
 		}
-		if len(out) == len(nativeTrialLatencyNames) {
+		if len(out) == len(names) {
 			return nativeTrialLatencyReading{snapshot.SinceUnixMS, out}
 		}
 		time.Sleep(time.Millisecond)

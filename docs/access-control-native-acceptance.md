@@ -1084,5 +1084,47 @@ owner 占用。不导出面板、Agent、batch、账户或目的地，也不读�
 释放或重新解释占用。每类 waiting+active 与实际 reservations 一致，原合计
 256 批/64 MiB 和 4/1/1/1 单 owner 限额保持。
 
-该视图用于后续同次 Node/queue/SQL/heap 压力采样，本身不等于压力已执行。
-新 full-module 候选的完整跨仓库回归与该视图回归仍待本轮托管结果。
+该视图用于同次 Node/queue/SQL/heap 压力采样，本身不等于压力已执行。
+`d178a30663e3d5450836973ee29efc65a027f26d` 的完整 Test/systemd、
+[原生 48 项产物 / 861 场景](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/38315349673)
+及[七项负载](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/38315349554)
+均实际成功。全部 48/16 原件及完整 metadata 已保存，固定源矩阵、独立
+负载/延迟/首屏组合、三种 SQL 和队列门禁通过；它们仍各自保留证明边界。
+
+### 四类同次真实连接、冻结重试与恢复
+
+新增独立 `mixed-pressure` 作业，固定同一 Node `77912a65`、Xray 26.6.27、
+SQLite 和实际 `App.Run`。复用原试运行的生产会员服务及完整已应用 roster/
+config/policy 回执，保留原五分钟双类试运行、独立 block overflow、Webhook、
+队列和三种 SQL 作业。新的数值报告及测试执行身份独立保存，不能借旧报告通过。
+
+90 秒内并发发送每秒 800 个唯一 block、400 个 observe、1100 个匿名 trial、
+1000 个无命中 usage 目标及一个独立控制连接。域名形式 VLESS 连接使用本次
+nonce 的 `.test` 名称，映射到作业自己拥有的 documentation IPv6 /128 服务；
+不查询公共名称。只在已限定的一次性 root GitHub runner 上追加 hosts，退出
+恢复原文件。原因是 Xray accepted 日志记录原始请求目标，单独伪装 HTTP Host
+不能证明 usage 的唯一键压力。Block 的唯一嗅探域名仍只路由到其自有数值目标。
+
+开始 75 秒仅在本次 TLS 夹具返回真实 503，阻止 PSP 接收原报告；Node 按生产
+退避形成并保留四类 pending。之后把同一原请求交给生产认证 handler，私下
+比较每类第一次恢复成功的 canonical subtree SHA-256；报告只导出比较次数，
+不导出 digest、batch、账户、目的地或私有 HTTP 内容。窗口长度覆盖生产退避
+的一轮七个调度槽，不修改时钟、ACK、调度、额度或核心配置。
+
+显式启用 `--audit-metrics`，严格解析固定数值 journal。门禁要求某一实际采样
+时刻同时具有四类键上限、四个 pending 和各自非零 retained dropped；不能
+拼接不同时间的峰值。采集实际整进程 Go heap、每 10 ms 的真实队列保留批数/
+规范字节及每秒 PSP heap。完整校验原每类/单 owner/合计上限，并保存同窗口
+control Sync、真实 PollOnce/sink flush、四类 Begin/Chunk 完整调用耗时的 CDF。
+这些耗时包括等待和执行，不能称作单独的 SQL 锁等待时间。
+
+每次目标唯一，四类逐一核对真实投递与 `dest_hits`/`dest_usage_hourly` 已存事件
+加各原因持久化丢失，试运行仍须匿名。Usage 按实际被允许的 observe/trial/
+usage/控制连接合计，独立排除已完整排空的 warmup；被拦截连接不算 usage。
+结束必须实际排空 Node retained/pending 和 PSP queue，任何无法解释的丢失、
+错误 kind、缺失重试或未投递连接都失败。部分失败仍保存已有数值报告。
+
+该作业只有一个真实 native owner，最大保留批数为 4/1/1/1 合计七个；它不能
+证明 256 批/64 MiB 的多 owner 同次全局饱和。现有多 owner SQL/队列组件证据
+继续独立保留，完整 §40a 的多 owner 集成压力及 §40 的 24 小时规模仍未完成。
+新增混合场景的实际托管执行结果也仍待验证。

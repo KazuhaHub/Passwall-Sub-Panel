@@ -84,7 +84,7 @@ test('real load job pins production candidate, complete duration and both indepe
 
 test('port-only load policies cannot also select the independent control target', () => {
   const workflow = readFileSync(new URL('../.github/workflows/destination-load.yml', import.meta.url), 'utf8')
-  for (const name of ['TestNativeLoadPoliciesRequireNumericControlPortIsolation', 'TestNativeTargetAddressesCanShareTheSameNumericPort']) assert.equal(workflow.split(name).length - 1, 3)
+  for (const name of ['TestNativeLoadPoliciesRequireNumericControlPortIsolation', 'TestNativeTargetAddressesCanShareTheSameNumericPort']) assert.equal(workflow.split(name).length - 1, 4)
   const driver = readFileSync(new URL('../internal/app/destination_native_load_test.go', import.meta.url), 'utf8')
   assert(driver.includes('controlAddress, controlPort, controlNonce, _ := nativeTargetAtPort(t, port())'))
   assert(driver.includes('nativeLoadControlPortIsolated(ports, controlPort)'))

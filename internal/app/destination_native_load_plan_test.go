@@ -108,6 +108,7 @@ const (
 	nativeWebhookWorkload nativeLoadWorkload = iota
 	nativeTrialWorkload
 	nativeBlockOverflowWorkload
+	nativeMixedWorkload
 )
 
 type nativeLoadSample struct {
