@@ -226,7 +226,7 @@ test('integrated Node executes the complete core matrix without replacing fixed 
   assert.equal(acceptance.integratedNodeCandidate?.repository, nodeCandidate.repository)
   assert.equal(acceptance.integratedNodeCandidate?.commit, 'e2c9dfbfe934d4a61fda84b0a80b4f1cb5dbc719')
   assert.equal(acceptance.moduleNodeCandidate?.repository, nodeCandidate.repository)
-  assert.equal(acceptance.moduleNodeCandidate?.commit, 'cef54ddba3ee96f9794aaacdc6ac1ed89cc318f9')
+  assert.equal(acceptance.moduleNodeCandidate?.commit, '77912a6541eede8db9493d8be0cd6151cfded6e4')
   const workflow = readFileSync(new URL('../.github/workflows/destination-acceptance.yml', import.meta.url), 'utf8')
   const traffic = workflow.slice(workflow.indexOf('  traffic:'), workflow.indexOf('  published-remote:'))
   const rows = [...traffic.matchAll(/\{engine: ([\w-]+), core: '([^']+)', candidate: (\w+), node: '([a-f0-9]{40})'\}/g)]

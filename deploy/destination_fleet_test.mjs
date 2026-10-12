@@ -72,7 +72,7 @@ test('fleet workflow pins both daemons, requires production Run and both real ad
   const end = workflow.indexOf('  complete-matrix:')
   assert(start > 0 && end > start)
   const job = workflow.slice(start, end)
-  for (const value of ['database: [sqlite, mysql, postgres]', 'cohort: [old, new, mixed]', '8e5e3db72219a8db9081a372722abb1529d22ecd', 'cef54ddba3ee96f9794aaacdc6ac1ed89cc318f9', 'PSP_NATIVE_FLEET_PROFILE', 'PSP_NATIVE_FLEET_OLD_BIN', 'PSP_NATIVE_FLEET_NEW_BIN', 'TestNativeDestinationFleet', 'check-fleet', 'PSP_NATIVE_DB_KIND']) assert(job.includes(value), value)
+  for (const value of ['database: [sqlite, mysql, postgres]', 'cohort: [old, new, mixed]', '8e5e3db72219a8db9081a372722abb1529d22ecd', '77912a6541eede8db9493d8be0cd6151cfded6e4', 'PSP_NATIVE_FLEET_PROFILE', 'PSP_NATIVE_FLEET_OLD_BIN', 'PSP_NATIVE_FLEET_NEW_BIN', 'TestNativeDestinationFleet', 'check-fleet', 'PSP_NATIVE_DB_KIND']) assert(job.includes(value), value)
   assert(!job.includes('continue-on-error'))
   assert(job.includes('layout: [xray-pair, mixed-engines]'))
   assert(job.includes('PSP_NATIVE_FLEET_LAYOUT'))

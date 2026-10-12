@@ -200,7 +200,7 @@ func nativeDestinationLoad(t *testing.T, workload nativeLoadWorkload) {
 		CoreVersion string            `json:"core_version"`
 		Ticks       uint64            `json:"cpu_ticks_per_second"`
 		Phases      []nativeLoadPhase `json:"phases"`
-	}{1, "cef54ddba3ee96f9794aaacdc6ac1ed89cc318f9", "26.6.27", ticks, []nativeLoadPhase{}}
+	}{1, "77912a6541eede8db9493d8be0cd6151cfded6e4", "26.6.27", ticks, []nativeLoadPhase{}}
 	t.Cleanup(func() {
 		data, err := json.Marshal(report)
 		nativeMust(t, err, "encode count-only load evidence")

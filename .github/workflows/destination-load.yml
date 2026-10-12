@@ -59,13 +59,13 @@ jobs:
       - uses: actions/checkout@v7
         with:
           repository: KazuhaHub/Passwall-Node
-          ref: cef54ddba3ee96f9794aaacdc6ac1ed89cc318f9
+          ref: 77912a6541eede8db9493d8be0cd6151cfded6e4
           path: node-source
       - name: Build immutable full-module Node with its own preferred compiler
         working-directory: node-source
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = cef54ddba3ee96f9794aaacdc6ac1ed89cc318f9
+          test "$(git rev-parse HEAD)" = 77912a6541eede8db9493d8be0cd6151cfded6e4
           toolchain=$(awk '$1 == "toolchain" { print $2; exit }' go.mod)
           test -n "$toolchain"
           test "$(GOTOOLCHAIN="$toolchain" go tool compile -V | awk '{ print $3 }')" = "$toolchain"
@@ -244,13 +244,13 @@ jobs:
       - uses: actions/checkout@v7
         with:
           repository: KazuhaHub/Passwall-Node
-          ref: cef54ddba3ee96f9794aaacdc6ac1ed89cc318f9
+          ref: 77912a6541eede8db9493d8be0cd6151cfded6e4
           path: node-source
       - name: Build immutable full-module Node with its own preferred compiler
         working-directory: node-source
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = cef54ddba3ee96f9794aaacdc6ac1ed89cc318f9
+          test "$(git rev-parse HEAD)" = 77912a6541eede8db9493d8be0cd6151cfded6e4
           toolchain=$(awk '$1 == "toolchain" { print $2; exit }' go.mod)
           test -n "$toolchain"
           test "$(GOTOOLCHAIN="$toolchain" go tool compile -V | awk '{ print $3 }')" = "$toolchain"
@@ -308,13 +308,13 @@ jobs:
       - uses: actions/checkout@v7
         with:
           repository: KazuhaHub/Passwall-Node
-          ref: cef54ddba3ee96f9794aaacdc6ac1ed89cc318f9
+          ref: 77912a6541eede8db9493d8be0cd6151cfded6e4
           path: node-source
       - name: Build immutable full-module Node with its own preferred compiler
         working-directory: node-source
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = cef54ddba3ee96f9794aaacdc6ac1ed89cc318f9
+          test "$(git rev-parse HEAD)" = 77912a6541eede8db9493d8be0cd6151cfded6e4
           toolchain=$(awk '$1 == "toolchain" { print $2; exit }' go.mod)
           test -n "$toolchain"
           test "$(GOTOOLCHAIN="$toolchain" go tool compile -V | awk '{ print $3 }')" = "$toolchain"

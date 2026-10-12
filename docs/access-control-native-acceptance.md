@@ -20,8 +20,13 @@ unpublished development candidate. These jobs use the same complete traffic and
 ingestion gates, with separate candidate-labelled artifacts; the earlier fixed
 candidates remain independent checkpoints.
 Four additional jobs pin the full-module Node stack to
-`cef54ddba3ee96f9794aaacdc6ac1ed89cc318f9`, including native Windows ACL/state
-protection, document persistence and platform-boundary regressions. They exercise
+`77912a6541eede8db9493d8be0cd6151cfded6e4`, including native Windows ACL/state
+protection, document persistence, platform-boundary regressions and opt-in
+numeric collector/agent-memory observation. Its five complete Node workflows
+passed before this repin; collector/634 Windows roots/30 startup and both real-core
+architecture reports were retained and independently checked. The older
+`cef54ddba3ee96f9794aaacdc6ac1ed89cc318f9` execution remains a preserved historical
+checkpoint. They exercise
 all three Xray versions and guarded sing-box `1.14.0` with the same complete
 runtime gates. The integrated `e2c9dfb` candidate remains a separate immutable
 checkpoint; success on it does not replace execution of the full-module stack.
@@ -1055,8 +1060,29 @@ single_rule 与 fifty_rules 各 330000 次实际拦截、300 次成功控制、�
 末次记录页总量须达到 20000 行，策略页仍为本次的一个 block 与一个 trial
 分组。p95 使用实际请求时长样本的 nearest-rank 值，不借用旧窗口统计。
 失败时保存已有数值样本，原投递/损失/延迟证据也继续形成，最终 Go 场景
-明确失败；不以部分页面成功替代完整通过。新增实际查询结果仍待托管验证。
+明确失败；不以部分页面成功替代完整通过。
+
+首次实际查询来自 `a787e88dcc28148634de6a31cebaffc8c69ddf02` 的
+[trial 作业](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/38306623646)：
+两个 API 各 149 个成功样本，记录第一页 p95 138.293 ms、末次总量 20001，
+策略 overview p95 11.253 ms、末次两项对象。全部 16 份负载原件及准确源/
+merge/run metadata 保存，独立双负载/延迟/页面完整组合门禁通过。该源
+完整 Test/systemd/七负载成功；原生首次尝试编译器下载失败、无该报告，
+保留 47 原件后仅定向重跑已终止失败作业，同源补齐第 48 份并通过 861 场景。
+这些历史查询数值不冒充新 Node 观测候选的运行结果。
 
 此处测量 API 首屏请求，不代表浏览器渲染耗时；五分钟、20000 行规模仍
 不能替代 §40 的 24 小时数据规模，四类同次过载和 50k 域名空闲成本也仍需
 各自的实际证明。
+
+### 运行中队列的只读占用视图
+
+`destaudit.Service.Pressure()` 在同一队列锁下返回四个固定 kind 的 waiting、
+active、保留批数/规范字节、原批数/字节/单 owner 上限、owner 数和最大单
+owner 占用。不导出面板、Agent、batch、账户或目的地，也不读取私有行或
+存储。已取消但 worker 尚未退出的 active 仍保留原额度；读取不推进调度、
+释放或重新解释占用。每类 waiting+active 与实际 reservations 一致，原合计
+256 批/64 MiB 和 4/1/1/1 单 owner 限额保持。
+
+该视图用于后续同次 Node/queue/SQL/heap 压力采样，本身不等于压力已执行。
+新 full-module 候选的完整跨仓库回归与该视图回归仍待本轮托管结果。
