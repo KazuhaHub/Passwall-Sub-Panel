@@ -284,6 +284,7 @@ export function checkSingBoxResults(input) { checkCases(input, singBoxNames) }
 export function checkGuardedSingBoxResults(input) { checkCases(input, guardedSingBoxNames) }
 export function checkLegacyUpgradeResults(input) { checkCases(input, legacyUpgradeNames) }
 export function checkFleetResults(input) { checkCases(input, fleetNames) }
+export function checkDestinationLoadResults(input) { checkCases(input, ['TestNativeDestinationWebhookLoad', 'TestNativeDestinationWebhookLoad/single_rule', 'TestNativeDestinationWebhookLoad/fifty_rules']) }
 export function checkRemoteUpgradeResults(input) { checkCases(input, remoteUpgradeNames) }
 export function checkDockerUpgradeResults(input) { checkCases(input, dockerUpgradeNames) }
 export function isSafeDestinationDiagnostic(event) {
