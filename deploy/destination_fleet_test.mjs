@@ -1,5 +1,18 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
+
+test('fleet setup failure retains only closed completion booleans before the first scenario', async () => {
+  const source = await import('./destination-acceptance.mjs')
+  for (const name of ['cohort', 'candidates', 'database', 'session', 'cadence', 'principals', 'peers', 'server', 'daemons', 'membership']) {
+    for (const Observed of [true, false]) {
+      const Diagnostic = `fleet_setup_${name}`
+      const retained = source.sanitizeDestinationResults(JSON.stringify({ Action: 'output', Output: `private credential: native diagnostic: ${Diagnostic}=${Observed}\n` }))
+      assert.deepEqual(JSON.parse(retained), { Action: 'output', Package: 'github.com/KazuhaHub/passwall-sub-panel/internal/app', Diagnostic, Observed })
+      assert(source.isSafeDestinationDiagnostic({ Diagnostic, Observed }))
+    }
+  }
+  for (const text of ['secret=true', 'database=private', 'session=123', 'membership=true private']) assert.equal(source.sanitizeDestinationResults(JSON.stringify({ Action: 'output', Output: `native diagnostic: fleet_setup_${text}\n` })), '\n')
+})
 import { test } from 'node:test'
 
 const stages = ['native_ready', 'native_publication', 'native_pause', 'native_resume', 'third_party_ready', 'allowlist_trial', 'allowlist_enforce', 'one_peer_offline', 'allowlist_pause', 'allowlist_reopen']

@@ -47,6 +47,15 @@ type nativeFleetPeer struct {
 // real third-party adapters to the same production App.Run and database. All
 // administrator mutations use production HTTP and all traffic is raw VLESS.
 func TestNativeDestinationFleet(t *testing.T) {
+	setupNames := []string{"fleet_setup_cohort", "fleet_setup_candidates", "fleet_setup_database", "fleet_setup_session", "fleet_setup_cadence", "fleet_setup_principals", "fleet_setup_peers", "fleet_setup_server", "fleet_setup_daemons", "fleet_setup_membership"}
+	setup := make(map[string]bool)
+	defer func() {
+		if t.Failed() {
+			for _, name := range setupNames {
+				t.Logf("native diagnostic: %s=%t", name, setup[name])
+			}
+		}
+	}()
 	layout := os.Getenv("PSP_NATIVE_FLEET_LAYOUT")
 	if layout == "" {
 		layout = "xray-pair"
@@ -55,6 +64,7 @@ func TestNativeDestinationFleet(t *testing.T) {
 	if !valid {
 		t.Fatal("native fleet requires an exact reviewed cohort")
 	}
+	setup["fleet_setup_cohort"] = true
 	binaries := map[bool]string{false: os.Getenv("PSP_NATIVE_FLEET_OLD_BIN"), true: os.Getenv("PSP_NATIVE_FLEET_NEW_BIN")}
 	for capable, binary := range binaries {
 		want := "destination-fleet-old"
@@ -66,13 +76,17 @@ func TestNativeDestinationFleet(t *testing.T) {
 			t.Fatal("native fleet candidate is absent or mutable")
 		}
 	}
+	setup["fleet_setup_candidates"] = true
 	f := buildNativeDestinationPolicyFixture(t) // also enforces disposable/root/closed SQL guards
+	setup["fleet_setup_database"] = true
 	a := f.a
 	adminToken := destinationRefreshAdminToken(t, a)
+	setup["fleet_setup_session"] = true
 	settings, err := a.settings.Load(t.Context(), ports.UISettings{})
 	nativeMust(t, err, "read native fleet cadence")
 	settings.NodePollSeconds, settings.FullReportSeconds = 2, 0
 	nativeMust(t, a.settings.Save(t.Context(), settings), "save native fleet cadence")
+	setup["fleet_setup_cadence"] = true
 	openGroup := &domain.Group{Slug: "fleet-canary", Name: "Fleet canary", TagFilter: domain.TagFilter{All: true}}
 	scratchGroup := &domain.Group{Slug: "fleet-provision", Name: "Fleet provision", TagFilter: domain.TagFilter{All: true}}
 	for _, group := range []*domain.Group{openGroup, scratchGroup} {
@@ -80,6 +94,7 @@ func TestNativeDestinationFleet(t *testing.T) {
 	}
 	canary := &domain.User{UPN: "fleet-canary@example.test", Email: "fleet-canary@example.test", SSOProvider: domain.SSOProviderLocal, SSOSubject: "fleet-canary@example.test", Role: domain.RoleUser, Enabled: true, GroupID: openGroup.ID, UUID: "33333333-3333-4333-8333-333333333333", SubToken: "fixture-fleet-canary-token"}
 	nativeMust(t, a.repos.User.Create(t.Context(), canary), "create independent fleet control principal")
+	setup["fleet_setup_principals"] = true
 	ownedPorts := map[int]bool{}
 	port := func() int {
 		for {
@@ -113,6 +128,7 @@ func TestNativeDestinationFleet(t *testing.T) {
 		peer.panelID, peer.inbound = peer.agent.PanelID, peer.node.DesiredPort
 		peers = append(peers, peer)
 	}
+	setup["fleet_setup_peers"] = true
 	// Run all ordinary production loops, not only the audit worker or explicit callbacks.
 	a.server.Addr = net.JoinHostPort("127.0.0.1", strconv.Itoa(port()))
 	runDone := make(chan error, 1)
@@ -139,6 +155,7 @@ func TestNativeDestinationFleet(t *testing.T) {
 		defer response.Body.Close()
 		return response.StatusCode == 200
 	})
+	setup["fleet_setup_server"] = true
 	admin := httptest.NewTLSServer(a.server.Handler)
 	t.Cleanup(admin.Close)
 	adminClient := admin.Client()
@@ -216,8 +233,10 @@ func TestNativeDestinationFleet(t *testing.T) {
 			}
 		})
 	}
+	setup["fleet_setup_daemons"] = true
 	resync(f.user, f.group.ID)
 	resync(canary, openGroup.ID)
+	setup["fleet_setup_membership"] = true
 	_, targetAddress, targetPort, targetNonce, _ := nativeTarget(t)
 	_, controlAddress, controlPort, controlNonce, _ := nativeTarget(t)
 	_, unlistedAddress, unlistedPort, unlistedNonce, _ := nativeTarget(t)

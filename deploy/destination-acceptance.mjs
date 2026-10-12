@@ -25,6 +25,7 @@ const dockerUpgradeNames = ['TestNativePublishedDockerRollback', ...remoteUpgrad
 const remoteUpgradeNames = ['TestNativePublishedRemoteRollback', ...remoteUpgradeCases.map(name => `TestNativePublishedRemoteRollback/${name}`)]
 const names = [...xrayNames, ...singBoxNames, ...guardedSingBoxNames, ...legacyUpgradeNames, ...remoteUpgradeNames, ...dockerUpgradeNames, ...fleetNames, ...loadNames, ...trialLoadNames, ...blockOverflowNames]
 const diagnostics = Object.freeze({
+  'fleet administrator returned HTTP': 'fleet_admin_http_failed',
   'timed out waiting for sing-box restarted runtime and inbound': 'singbox_restart_runtime_timeout',
   'timed out waiting for exact load policy and collection receipt': 'load_receipt_timeout',
   'block overflow never exhausted its independent actual budget': 'block_overflow_budget_failed',
@@ -274,6 +275,8 @@ export function sanitizeDestinationResults(input) {
   return input.split(/\r?\n/).filter(line => line.trim()).map(line => {
     const event = parseEvent(line)
     if (event.Action === 'output') {
+      const fleetSetup = typeof event.Output === 'string' && /native diagnostic: (fleet_setup_(?:cohort|candidates|database|session|cadence|principals|peers|server|daemons|membership))=(true|false)(?:\r?\n|$)/.exec(event.Output)
+      if (fleetSetup) return JSON.stringify({ Action: 'output', Package: pkg, Diagnostic: fleetSetup[1], Observed: fleetSetup[2] === 'true' })
       const loadReceipt = typeof event.Output === 'string' && /native diagnostic: (load_(?:state|runtime|agent|panel|selection|observed_core|transition|collection|rule_count|rule_shape|config|roster))=(true|false)(?:\r?\n|$)/.exec(event.Output)
       if (loadReceipt) return JSON.stringify({ Action: 'output', Package: pkg, Diagnostic: loadReceipt[1], Observed: loadReceipt[2] === 'true' })
       const trialSetup = typeof event.Output === 'string' && /native diagnostic: (trial_setup_(?:capability|group|principal|membership|policy|mode|collection|publication|receipt|resources|warmup|traffic|ingestion))=(true|false)(?:\r?\n|$)/.exec(event.Output)
