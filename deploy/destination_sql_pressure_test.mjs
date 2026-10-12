@@ -80,13 +80,26 @@ test('hosted SQL pressure exercises real file storage, unchanged worker and alwa
   const workflow = readFileSync(new URL('../.github/workflows/destination-load.yml', import.meta.url), 'utf8')
   const source = readFileSync(new URL('../internal/adapters/sqlstore/dest_pressure_native_test.go', import.meta.url), 'utf8')
   const checks = readFileSync(new URL('../.github/workflows/test.yml', import.meta.url), 'utf8')
-  for (const required of ['  sql-pressure:', '^TestNativeDestinationSQLPressure$', 'PSP_NATIVE_SQL_PRESSURE_METRICS', 'destination-sql-pressure.mjs sanitize', 'native-destination-sql-pressure-${{ github.sha }}', 'destination-sql-pressure-tests.json', 'destination-sql-pressure-metrics.json']) assert(workflow.includes(required), required)
+  for (const required of ['  sql-pressure:', '^TestNativeDestinationSQLPressure$', 'PSP_NATIVE_SQL_PRESSURE_METRICS', 'destination-sql-pressure.mjs sanitize', 'evidence_prefix: native-destination-sql-pressure\n', '${{ matrix.evidence_prefix }}-${{ github.sha }}', 'destination-sql-pressure-tests.json', 'destination-sql-pressure-metrics.json']) assert(workflow.replaceAll('\r\n', '\n').includes(required), required)
   assert(checks.includes('go vet -tags destination_pressure ./internal/service/destaudit'))
   assert(checks.includes('go vet -tags destination_pressure ./internal/adapters/sqlstore'))
   assert.match(checks, /^      - name: The real destination SQL pressure still compiles\r?\n        run: go vet -tags destination_pressure \.\/internal\/adapters\/sqlstore$/m)
-  for (const required of ['Open("sqlite", filepath.Join(t.TempDir(), "pressure.db"))', 'EnsureSchema(db)', 'destaudit.New', 's.Offer', 's.Run(ctx)', 'r.DestAuditRepo.BeginDestinationAudit', 'r.DestAuditRepo.WriteDestinationAuditChunk', 'time.Since(started).Nanoseconds()', 'filepath.EvalSymlinks']) {
+  for (const required of ['nativeSQLPressureDatabase(', 'OpenQuiet(kind, dsn)', 'EnsureSchema(db)', 'destaudit.New', 's.Offer', 's.Run(ctx)', 'r.DestAuditRepo.BeginDestinationAudit', 'r.DestAuditRepo.WriteDestinationAuditChunk', 'time.Since(started).Nanoseconds()', 'filepath.EvalSymlinks']) {
     assert(source.includes(required), required)
   }
   for (const required of ['make([]peer, 129)', 'peers[batch-1].agent', 'peers[batch-1].panel', 'time.Now().UTC()', 'round < 64', 'fullOwners[row.Kind][row.AgentID] = true', 'lane.FullAgents == lane.PeakBatches']) assert(source.includes(required), required)
   assert(!source.includes('RowsReserved:'))
+})
+
+test('pressure evidence binds every server dialect and cannot borrow a successful SQLite report', () => {
+  for (const database of ['sqlite', 'mysql', 'postgres']) {
+    const metrics = good(); metrics.database = database
+    checkSQLPressureEvidence(encode(events()), JSON.stringify(metrics), database)
+    for (const other of ['sqlite', 'mysql', 'postgres'].filter(value => value !== database)) assert.throws(() => checkSQLPressureEvidence(encode(events()), JSON.stringify(metrics), other))
+  }
+  for (const database of ['', 'MYSQL', 'unknown', 'postgres ']) assert.throws(() => checkSQLPressureMetrics(JSON.stringify(good()), database))
+  const workflow = readFileSync(new URL('../.github/workflows/destination-load.yml', import.meta.url), 'utf8')
+  for (const required of ['evidence_prefix: native-destination-sql-pressure-mysql', 'evidence_prefix: native-destination-sql-pressure-postgres', 'PSP_NATIVE_SQL_PRESSURE_DB_KIND: ${{ matrix.database }}', 'psp_native_pressure', '33307:3306', '35432:5432', '"${{ matrix.database }}"']) assert(workflow.includes(required), required)
+  const driver = readFileSync(new URL('../internal/adapters/sqlstore/dest_pressure_native_test.go', import.meta.url), 'utf8')
+  for (const required of ['SELECT VERSION(), DATABASE()', 'SELECT version(), current_database()', 'db.Migrator().GetTables()', 'len(tables) != 0', 'PSP_NATIVE_SQL_PRESSURE_DB_DSN', 'PSP_TEST_DB_DSN', 'PSP_NATIVE_DB_DSN']) assert(driver.includes(required), required)
 })

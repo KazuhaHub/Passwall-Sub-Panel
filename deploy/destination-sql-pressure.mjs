@@ -24,11 +24,11 @@ export function sanitizeSQLPressureResults(input) {
   }).filter(Boolean).join('\n') + '\n'
 }
 
-export function checkSQLPressureMetrics(input) {
+export function checkSQLPressureMetrics(input, database = 'sqlite') {
   require(typeof input === 'string' && Buffer.byteLength(input) <= 1024 * 1024)
   const value = JSON.parse(input)
   fields(value, ['schema_version', 'database', 'rounds', 'registered_agents', 'drain_ns', 'first_cycle', 'lanes'])
-  require(value.schema_version === 1 && value.database === 'sqlite')
+  require(['sqlite', 'mysql', 'postgres'].includes(database) && value.schema_version === 1 && value.database === database)
   require(count(value.rounds) && value.rounds >= 20 && value.rounds <= 64 && value.registered_agents === 129)
   require(count(value.drain_ns) && value.drain_ns > 0 && value.drain_ns <= 8 * 60 * 1e9)
   require(JSON.stringify(value.first_cycle) === JSON.stringify(['block', 'block', 'block', 'block', 'observe', 'trial', 'usage']))
@@ -63,7 +63,7 @@ export function checkSQLPressureMetrics(input) {
   return { peak_batches: batches, peak_canonical_bytes: bytes, stored_events: stored, measured_transaction_ns: measured }
 }
 
-export function checkSQLPressureEvidence(results, metrics) {
+export function checkSQLPressureEvidence(results, metrics, database = 'sqlite') {
   require(typeof results === 'string' && Buffer.byteLength(results) <= 128 * 1024)
   let runs = 0, passes = 0, packages = 0, starts = 0
   for (const line of results.split(/\r?\n/).filter(line => line.trim())) {
@@ -78,15 +78,15 @@ export function checkSQLPressureEvidence(results, metrics) {
     if (event.Action === 'start') { require(event.Test === undefined && runs === 0 && starts === 0); starts++ }
   }
   require(runs === 1 && passes === 1 && packages === 1)
-  return checkSQLPressureMetrics(metrics)
+  return checkSQLPressureMetrics(metrics, database)
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   try {
     if (process.argv[2] === 'sanitize') process.stdout.write(sanitizeSQLPressureResults(readFileSync(0, 'utf8')))
     else {
-      checkSQLPressureEvidence(readFileSync(process.argv[2], 'utf8'), readFileSync(process.argv[3], 'utf8'))
-      console.log('Four global queue reservations and original per-agent hourly budgets exhausted through real SQLite; all stored events, losses and bounded SQL chunks reconciled')
+      checkSQLPressureEvidence(readFileSync(process.argv[2], 'utf8'), readFileSync(process.argv[3], 'utf8'), process.argv[4] ?? 'sqlite')
+      console.log('Four global queue reservations and original per-agent hourly budgets exhausted through the exact requested SQL driver; all stored events, losses and bounded SQL chunks reconciled')
     }
   } catch {
     console.error('SQL pressure evidence failed; private content withheld')

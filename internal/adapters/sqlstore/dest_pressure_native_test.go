@@ -86,11 +86,38 @@ func TestNativeDestinationSQLPressure(t *testing.T) {
 		t.Fatal("SQL pressure requires owned evidence on the hosted Linux runner")
 	}
 	stage = "database"
-	db, err := Open("sqlite", filepath.Join(t.TempDir(), "pressure.db"))
+	kind, dsn, valid := nativeSQLPressureDatabase(os.Getenv("PSP_NATIVE_SQL_PRESSURE_DB_KIND"), filepath.Join(t.TempDir(), "pressure.db"), os.Getenv("PSP_NATIVE_SQL_PRESSURE_DB_DSN"), os.Getenv("PSP_TEST_DB_DSN"), os.Getenv("PSP_NATIVE_DB_DSN"))
+	if !valid {
+		t.Fatal("SQL pressure database selection is not isolated")
+	}
+	db, err := OpenQuiet(kind, dsn)
 	if err != nil {
 		t.Fatal("SQL pressure database open failed")
 	}
 	t.Cleanup(func() { closeGormDB(db) })
+	var version, database string
+	switch kind {
+	case "sqlite":
+		if db.Raw("SELECT sqlite_version()").Scan(&version).Error != nil || !strings.HasPrefix(version, "3.") {
+			t.Fatal("SQL pressure database identity failed")
+		}
+	case "mysql":
+		row := db.Raw("SELECT VERSION(), DATABASE()").Row()
+		if row.Scan(&version, &database) != nil || !strings.HasPrefix(version, "8.") || database != "psp_native_pressure" {
+			t.Fatal("SQL pressure database identity failed")
+		}
+	case "postgres":
+		row := db.Raw("SELECT version(), current_database()").Row()
+		if row.Scan(&version, &database) != nil || !strings.HasPrefix(version, "PostgreSQL 16.") || database != "psp_native_pressure" {
+			t.Fatal("SQL pressure database identity failed")
+		}
+	}
+	if kind != "sqlite" {
+		tables, err := db.Migrator().GetTables()
+		if err != nil || len(tables) != 0 {
+			t.Fatal("SQL pressure server database is not empty")
+		}
+	}
 	if EnsureSchema(db) != nil {
 		t.Fatal("SQL pressure schema failed")
 	}
@@ -322,7 +349,7 @@ func TestNativeDestinationSQLPressure(t *testing.T) {
 		Drain    int64              `json:"drain_ns"`
 		Schedule []string           `json:"first_cycle"`
 		Lanes    []*pressureSQLLane `json:"lanes"`
-	}{Schema: 1, Database: "sqlite", Rounds: rounds, Owners: len(peers), Drain: drainNS, Schedule: r.schedule}
+	}{Schema: 1, Database: kind, Rounds: rounds, Owners: len(peers), Drain: drainNS, Schedule: r.schedule}
 	for _, kind := range kinds {
 		report.Lanes = append(report.Lanes, r.lanes[kind])
 	}
