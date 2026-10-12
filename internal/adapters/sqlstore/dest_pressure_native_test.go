@@ -18,18 +18,22 @@ import (
 )
 
 type pressureSQLLane struct {
-	Kind         string  `json:"kind"`
-	Batches      int64   `json:"batches"`
-	Bytes        int64   `json:"canonical_bytes"`
-	Wire         int64   `json:"batch_wire_bytes"`
-	Offered      int64   `json:"offered_rows"`
-	Stored       int64   `json:"stored_events"`
-	Budget       int64   `json:"budget_rows"`
-	QueueFull    int64   `json:"queue_full_rows"`
-	OverBudget   int64   `json:"over_budget_rows"`
-	Transactions int64   `json:"transactions"`
-	MaxRows      int64   `json:"max_chunk_rows"`
-	Durations    []int64 `json:"transaction_ns"`
+	Kind          string  `json:"kind"`
+	Batches       int64   `json:"batches"`
+	Bytes         int64   `json:"canonical_bytes"`
+	PeakBatches   int64   `json:"peak_batches"`
+	PeakBytes     int64   `json:"peak_canonical_bytes"`
+	Wire          int64   `json:"batch_wire_bytes"`
+	Offered       int64   `json:"offered_rows"`
+	Stored        int64   `json:"stored_events"`
+	Budget        int64   `json:"budget_rows"`
+	BudgetBuckets []int64 `json:"budget_bucket_rows"`
+	FullAgents    int64   `json:"full_budget_agents"`
+	QueueFull     int64   `json:"queue_full_rows"`
+	OverBudget    int64   `json:"over_budget_rows"`
+	Transactions  int64   `json:"transactions"`
+	MaxRows       int64   `json:"max_chunk_rows"`
+	Durations     []int64 `json:"transaction_ns"`
 }
 
 // The wrapper measures complete calls to the real repository, including its
@@ -38,6 +42,7 @@ type pressureSQLStore struct {
 	*DestAuditRepo
 	lanes    map[string]*pressureSQLLane
 	schedule []string
+	cycle    []string
 }
 
 func (r *pressureSQLStore) record(kind string, rows int, started time.Time) {
@@ -47,6 +52,9 @@ func (r *pressureSQLStore) record(kind string, rows int, started time.Time) {
 	lane.Durations = append(lane.Durations, max(1, time.Since(started).Nanoseconds()))
 	if len(r.schedule) < 7 {
 		r.schedule = append(r.schedule, kind)
+	}
+	if len(r.cycle) < 7 {
+		r.cycle = append(r.cycle, kind)
 	}
 }
 
@@ -87,8 +95,20 @@ func TestNativeDestinationSQLPressure(t *testing.T) {
 		t.Fatal("SQL pressure schema failed")
 	}
 	stage = "principals"
-	panel := xuiPanelRow{Kind: string(domain.PanelKindPSP), AuditCollect: "hits_and_usage", AuditCollectRevision: 1}
-	if db.Create(&panel).Error != nil || db.Create(&nodeAgentRow{AgentID: "agt_pressure", PanelID: panel.ID, CredentialSHA256: strings.Repeat("a", 64), ObservedCoreEngine: string(domain.NodeCoreXray), ObservedCapabilities: jsonStrings{protocol.CapabilityAuditHits, protocol.CapabilityAuditUsage}}).Error != nil || db.Create(&userRow{ID: 7, UPN: "pressure@example.test", SubToken: "pressure-token", UUID: "00000000-0000-0000-0000-000000000007", Enabled: true}).Error != nil {
+	type peer struct {
+		agent string
+		panel int64
+	}
+	peers := make([]peer, 129)
+	for index := range peers {
+		panel := xuiPanelRow{Name: fmt.Sprintf("SQL pressure %03d", index), Kind: string(domain.PanelKindPSP), AuditCollect: "hits_and_usage", AuditCollectRevision: 1}
+		agent := fmt.Sprintf("agt_pressure_%03d", index)
+		if db.Create(&panel).Error != nil || db.Create(&nodeAgentRow{AgentID: agent, PanelID: panel.ID, CredentialSHA256: fmt.Sprintf("%064x", index+1), ObservedCoreEngine: string(domain.NodeCoreXray), ObservedCapabilities: jsonStrings{protocol.CapabilityAuditHits, protocol.CapabilityAuditUsage}}).Error != nil {
+			t.Fatal("SQL pressure principals failed")
+		}
+		peers[index] = peer{agent, panel.ID}
+	}
+	if db.Create(&userRow{ID: 7, UPN: "pressure@example.test", SubToken: "pressure-token", UUID: "00000000-0000-0000-0000-000000000007", Enabled: true}).Error != nil {
 		t.Fatal("SQL pressure principals failed")
 	}
 	r := &pressureSQLStore{DestAuditRepo: NewDestAuditRepo(db), lanes: map[string]*pressureSQLLane{}}
@@ -99,8 +119,7 @@ func TestNativeDestinationSQLPressure(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 8*time.Minute)
 	defer cancel()
 	unexpected := false
-	stage = "controls"
-	s, err := destaudit.New(ctx, r, destaudit.Options{Emit: func(e destaudit.Event) {
+	emit := func(e destaudit.Event) {
 		lane := r.lanes[e.Kind]
 		if lane == nil {
 			unexpected = true
@@ -118,9 +137,6 @@ func TestNativeDestinationSQLPressure(t *testing.T) {
 		default:
 			unexpected = true
 		}
-	}})
-	if err != nil {
-		t.Fatal("SQL pressure control seed failed")
 	}
 	now := time.Now().UTC()
 	hour := now.Truncate(time.Hour).UnixMilli()
@@ -150,67 +166,133 @@ func TestNativeDestinationSQLPressure(t *testing.T) {
 		wires[kind] = wire
 		r.lanes[kind].Wire = int64(len(wire))
 	}
-	// Fill all four real lanes together before starting the worker. Each request
-	// owns an independently decoded body; the actual clock and limits stay intact.
-	stage = "queues"
-	for batch := 1; batch <= 256; batch++ {
-		full := 0
-		for index, kind := range kinds {
+	// Every lane receives at most one batch from each real registered owner in
+	// each cycle. A fresh owner's rejection proves the global reservation is full
+	// rather than merely hitting the original 4/1/1/1 per-agent caps.
+	var rounds, drainNS int64
+	var budgets []destAuditIngestBudgetRow
+	for round := 0; round < 64; round++ {
+		stage = "controls"
+		r.DestAuditRepo = NewDestAuditRepo(db)
+		s, err := destaudit.New(ctx, r, destaudit.Options{Emit: emit})
+		if err != nil {
+			t.Fatal("SQL pressure control seed failed")
+		}
+		beforeBatches, beforeBytes, beforeFull := map[string]int64{}, map[string]int64{}, map[string]int64{}
+		for _, kind := range kinds {
 			lane := r.lanes[kind]
-			if lane.QueueFull > 0 {
-				full++
-				continue
+			beforeBatches[kind], beforeBytes[kind], beforeFull[kind] = lane.Batches, lane.Bytes, lane.QueueFull
+		}
+		stage = "queues"
+		for batch := 1; batch <= len(peers); batch++ {
+			full := 0
+			for index, kind := range kinds {
+				lane := r.lanes[kind]
+				if lane.QueueFull > beforeFull[kind] {
+					full++
+					continue
+				}
+				var body protocol.AuditObservation
+				if json.Unmarshal(wires[kind], &body) != nil {
+					t.Fatal("SQL pressure decoding failed")
+				}
+				body.BatchID = fmt.Sprintf("%032x", round*1024+batch*4+index)
+				accepted := lane.Batches
+				lane.Offered += 2001
+				s.Offer(peers[batch-1].agent, peers[batch-1].panel, time.Now().UTC(), body)
+				if lane.Batches > accepted {
+					lane.Bytes += lane.Wire
+				}
 			}
-			var body protocol.AuditObservation
-			if json.Unmarshal(wires[kind], &body) != nil {
-				t.Fatal("SQL pressure decoding failed")
-			}
-			body.BatchID = fmt.Sprintf("%032x", batch*4+index)
-			accepted := lane.Batches
-			lane.Offered += 2001
-			s.Offer("agt_pressure", panel.ID, now, body)
-			if lane.Batches > accepted {
-				lane.Bytes += lane.Wire
+			if full == 4 {
+				break
 			}
 		}
-		if full == 4 {
+		for _, kind := range kinds {
+			lane := r.lanes[kind]
+			if lane.QueueFull-beforeFull[kind] != 2001 {
+				t.Fatal("SQL pressure did not saturate each lane")
+			}
+			batches, bytes := lane.Batches-beforeBatches[kind], lane.Bytes-beforeBytes[kind]
+			if round > 0 && (batches != lane.PeakBatches || bytes != lane.PeakBytes) {
+				t.Fatal("SQL pressure changed a cycle reservation")
+			}
+			lane.PeakBatches, lane.PeakBytes = max(lane.PeakBatches, batches), max(lane.PeakBytes, bytes)
+		}
+		stage = "drain"
+		s.StopOffers()
+		started := time.Now()
+		r.cycle = nil
+		if summary := s.Run(ctx); summary != (destaudit.Summary{}) || ctx.Err() != nil || unexpected {
+			t.Fatal("SQL pressure did not completely drain")
+		}
+		stage = "schedule"
+		drainNS += time.Since(started).Nanoseconds()
+		if strings.Join(r.cycle, ",") != "block,block,block,block,observe,trial,usage" {
+			t.Fatal("SQL pressure lost original chunk scheduling")
+		}
+		stage = "ledger"
+		budgets = nil
+		if db.Find(&budgets).Error != nil {
+			t.Fatal("SQL pressure accounting incomplete")
+		}
+		for _, kind := range kinds {
+			lane := r.lanes[kind]
+			lane.Budget, lane.FullAgents, lane.BudgetBuckets = 0, 0, nil
+		}
+		fullOwners := map[string]map[string]bool{}
+		for _, kind := range kinds {
+			fullOwners[kind] = map[string]bool{}
+		}
+		for _, row := range budgets {
+			lane := r.lanes[row.Kind]
+			limit := int64(20000)
+			if row.Kind == "usage" {
+				limit = 40000
+			}
+			if lane == nil || row.RowsReserved <= 0 || row.RowsReserved > limit {
+				t.Fatal("SQL pressure row budget or chunk ledger failed")
+			}
+			lane.Budget += row.RowsReserved
+			lane.BudgetBuckets = append(lane.BudgetBuckets, row.RowsReserved)
+			if row.RowsReserved == limit {
+				fullOwners[row.Kind][row.AgentID] = true
+			}
+		}
+		complete := true
+		for _, kind := range kinds {
+			lane := r.lanes[kind]
+			lane.FullAgents = int64(len(fullOwners[kind]))
+			complete = complete && lane.FullAgents == lane.PeakBatches && lane.OverBudget > 0
+		}
+		rounds++
+		if complete {
 			break
 		}
 	}
 	for _, kind := range kinds {
-		if r.lanes[kind].QueueFull != 2001 {
-			t.Fatal("SQL pressure did not saturate each lane")
+		if r.lanes[kind].FullAgents != r.lanes[kind].PeakBatches || r.lanes[kind].OverBudget <= 0 {
+			t.Fatal("SQL pressure did not exhaust each original agent-hour budget")
 		}
 	}
-	stage = "drain"
-	s.StopOffers()
-	started := time.Now()
-	if summary := s.Run(ctx); summary != (destaudit.Summary{}) || ctx.Err() != nil || unexpected {
-		t.Fatal("SQL pressure did not completely drain")
-	}
-	stage = "schedule"
-	if strings.Join(r.schedule, ",") != "block,block,block,block,observe,trial,usage" {
-		t.Fatal("SQL pressure lost original chunk scheduling")
-	}
-	stage = "ledger"
-	var budgets []destAuditIngestBudgetRow
 	var losses []destAuditLossHourlyRow
-	if db.Find(&budgets).Error != nil || db.Find(&losses).Error != nil || len(budgets) != 4 || len(losses) != 8 {
+	if db.Find(&losses).Error != nil {
 		t.Fatal("SQL pressure accounting incomplete")
 	}
-	for _, row := range budgets {
-		r.lanes[row.Kind].Budget = row.RowsReserved
+	lossTotals := map[string]map[string]int64{}
+	for _, kind := range kinds {
+		lossTotals[kind] = map[string]int64{}
 	}
 	for _, row := range losses {
 		lane := r.lanes[row.Kind]
-		if lane == nil || row.Events != 0 || row.Unmatched != 0 || (row.Reason != "over_budget" && row.Reason != "queue_full") {
+		if lane == nil || row.Rows <= 0 || row.Events != 0 || row.Unmatched != 0 || (row.Reason != "over_budget" && row.Reason != "queue_full") {
 			t.Fatal("SQL pressure loss category invalid")
 		}
-		want := lane.OverBudget
-		if row.Reason == "queue_full" {
-			want = lane.QueueFull
-		}
-		if row.Rows != want {
+		lossTotals[row.Kind][row.Reason] += row.Rows
+	}
+	for _, kind := range kinds {
+		lane := r.lanes[kind]
+		if lossTotals[kind]["over_budget"] != lane.OverBudget || lossTotals[kind]["queue_full"] != lane.QueueFull {
 			t.Fatal("SQL pressure durable loss differs from worker")
 		}
 	}
@@ -220,10 +302,6 @@ func TestNativeDestinationSQLPressure(t *testing.T) {
 	}
 	for _, kind := range kinds {
 		lane := r.lanes[kind]
-		limit := int64(20000)
-		if kind == "usage" {
-			limit = 40000
-		}
 		var events int64
 		query := db.Model(&destHitRow{}).Select("COALESCE(SUM(count), 0)").Where("source = ? AND action = ?", "p1", kind)
 		if kind == "trial" {
@@ -232,23 +310,25 @@ func TestNativeDestinationSQLPressure(t *testing.T) {
 		if kind == "usage" {
 			query = db.Model(&destUsageHourlyRow{}).Select("COALESCE(SUM(count), 0)")
 		}
-		if query.Scan(&events).Error != nil || events != lane.Stored || lane.Stored != limit || lane.Budget != limit || lane.OverBudget <= 0 || lane.Stored+lane.OverBudget+lane.QueueFull != lane.Offered || lane.MaxRows != 1000 || lane.Transactions != int64(len(lane.Durations)) {
+		if query.Scan(&events).Error != nil || events != lane.Stored || lane.Stored != lane.Budget || lane.OverBudget <= 0 || lane.Stored+lane.OverBudget+lane.QueueFull != lane.Offered || lane.MaxRows != 1000 || lane.Transactions != int64(len(lane.Durations)) {
 			t.Fatal("SQL pressure row budget or chunk ledger failed")
 		}
 	}
 	report := struct {
 		Schema   int                `json:"schema_version"`
 		Database string             `json:"database"`
+		Rounds   int64              `json:"rounds"`
+		Owners   int                `json:"registered_agents"`
 		Drain    int64              `json:"drain_ns"`
 		Schedule []string           `json:"first_cycle"`
 		Lanes    []*pressureSQLLane `json:"lanes"`
-	}{Schema: 1, Database: "sqlite", Drain: time.Since(started).Nanoseconds(), Schedule: r.schedule}
+	}{Schema: 1, Database: "sqlite", Rounds: rounds, Owners: len(peers), Drain: drainNS, Schedule: r.schedule}
 	for _, kind := range kinds {
 		report.Lanes = append(report.Lanes, r.lanes[kind])
 	}
 	stage = "evidence"
 	data, err := json.Marshal(report)
-	if err != nil || len(data) > 32*1024 || os.WriteFile(path, append(data, '\n'), 0644) != nil {
+	if err != nil || len(data) > 1024*1024 || os.WriteFile(path, append(data, '\n'), 0644) != nil {
 		t.Fatal("SQL pressure bounded evidence write failed")
 	}
 }
