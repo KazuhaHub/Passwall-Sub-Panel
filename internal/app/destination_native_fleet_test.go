@@ -39,6 +39,7 @@ type nativeFleetPeer struct {
 	probe   *nativeLegacyProbe
 	gateway *nativePanelGateway
 	process *exec.Cmd
+	output  *nativePrivateOutput
 	dir     string
 }
 
@@ -198,8 +199,8 @@ func TestNativeDestinationFleet(t *testing.T) {
 		nativeMust(t, os.WriteFile(key, []byte(peer.secret), 0600), "write private individual fleet credential")
 		peer.process = exec.Command(binaries[peer.capable], "--endpoint", server.URL+"/v1/node/sync", "--agent-id", peer.agent.AgentID, "--credential-file", key, "--data-dir", filepath.Join(peer.dir, "node"), "--xray-api-listen", net.JoinHostPort("127.0.0.1", strconv.Itoa(port())), "--sing-box-api-listen", net.JoinHostPort("127.0.0.1", strconv.Itoa(port())))
 		peer.process.Env = append(os.Environ(), "SSL_CERT_FILE="+ca)
-		output := &nativePrivateOutput{}
-		peer.process.Stdout, peer.process.Stderr = output, output
+		peer.output = &nativePrivateOutput{}
+		peer.process.Stdout, peer.process.Stderr = peer.output, peer.output
 		nativeMust(t, peer.process.Start(), "start immutable individual fleet daemon")
 		done := make(chan error, 1)
 		go func(process *exec.Cmd) { done <- process.Wait() }(peer.process)
@@ -230,9 +231,12 @@ func TestNativeDestinationFleet(t *testing.T) {
 		defer func() {
 			if caseTest.Failed() {
 				for index := range peers {
-					for _, fact := range []string{"observation", "streams", "policy"} {
+					for _, fact := range []string{"observation", "agent", "heartbeat", "epoch", "capability", "selection", "engine", "version", "running", "listener", "legacy", "streams", "policy"} {
 						category := fmt.Sprintf("fleet_peer_%d_%s", index, fact)
 						caseTest.Logf("native diagnostic: %s=%t", category, facts[category])
+					}
+					for _, category := range []string{"download", "checksum", "timeout", "rejected", "unsupported", "permission", "bind", "certificate"} {
+						caseTest.Logf("native diagnostic: fleet_peer_%d_%s=%t", index, category, strings.Contains(strings.ToLower(peers[index].output.text()), category))
 					}
 				}
 				for _, category := range []string{"fleet_runtime_present", "fleet_prior_present", "fleet_kind_matches", "fleet_generation_matches", "fleet_minted_present", "fleet_reported_present", "fleet_report_state", "fleet_report_sha", "fleet_heartbeat_fresh", "fleet_mint_fresh", "fleet_exact_receipt"} {
@@ -249,7 +253,16 @@ func TestNativeDestinationFleet(t *testing.T) {
 				prefix := fmt.Sprintf("fleet_peer_%d_", index)
 				s := peer.probe.snapshot()
 				observed, err := a.repos.NodeAgent.GetByAgentID(caseTest.Context(), peer.agent.AgentID)
-				if err != nil || observed.LastSeen == nil || !observed.LastSeen.After(after) || observed.Epoch != peer.agent.Epoch || slicesContainsNative(observed.ObservedCapabilities, protocol.CapabilityDestinationPolicy) != peer.capable || s.PolicyCapable != peer.capable || s.CoreEngine != string(peer.engine) || s.CoreVersion != peer.version || s.CoreState != "running" || !s.ListenerApplied || !nativePanelStreamsApplied(s, 1) || !peer.capable && s.AgentVersion != "v4.0.1.8" {
+				facts[prefix+"agent"] = err == nil && observed != nil
+				facts[prefix+"heartbeat"] = observed != nil && observed.LastSeen != nil && observed.LastSeen.After(after)
+				facts[prefix+"epoch"] = observed != nil && observed.Epoch == peer.agent.Epoch
+				facts[prefix+"capability"] = observed != nil && slicesContainsNative(observed.ObservedCapabilities, protocol.CapabilityDestinationPolicy) == peer.capable && s.PolicyCapable == peer.capable
+				facts[prefix+"selection"] = observed != nil && observed.DesiredCoreEngine == peer.engine && observed.DesiredCoreVersion == peer.version && observed.AllowRestrictedReality == peer.restricted
+				facts[prefix+"engine"], facts[prefix+"version"] = s.CoreEngine == string(peer.engine), s.CoreVersion == peer.version
+				facts[prefix+"running"] = s.CoreState == "running"
+				facts[prefix+"listener"] = s.ListenerApplied && nativePanelStreamsApplied(s, 1)
+				facts[prefix+"legacy"] = peer.capable || s.AgentVersion == "v4.0.1.8"
+				if !facts[prefix+"agent"] || !facts[prefix+"heartbeat"] || !facts[prefix+"epoch"] || !facts[prefix+"capability"] || !facts[prefix+"selection"] || !facts[prefix+"engine"] || !facts[prefix+"version"] || !facts[prefix+"running"] || !facts[prefix+"listener"] || !facts[prefix+"legacy"] {
 					facts[prefix+"observation"] = false
 					return false
 				}

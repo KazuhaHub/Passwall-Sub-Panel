@@ -71,8 +71,9 @@ test('fleet workflow pins both daemons, requires production Run and both real ad
 
 test('all eight peer diagnostics remain bounded booleans without private output', async () => {
   const source = await import('./destination-acceptance.mjs')
-  for (let peer = 0; peer < 8; peer++) for (const fact of ['observation', 'streams', 'policy']) {
+  for (let peer = 0; peer < 8; peer++) for (const fact of ['observation', 'agent', 'heartbeat', 'epoch', 'capability', 'selection', 'engine', 'version', 'running', 'listener', 'legacy', 'streams', 'policy', 'download', 'checksum', 'timeout', 'rejected', 'unsupported', 'permission', 'bind', 'certificate']) {
     for (const Observed of [true, false]) assert(source.isSafeDestinationDiagnostic({ Diagnostic: `fleet_peer_${peer}_${fact}`, Observed }))
+    assert(!source.isSafeDestinationDiagnostic({ Diagnostic: `fleet_peer_${peer}_${fact}`, Observed: 'private row or process output' }))
   }
   for (const Diagnostic of ['fleet_peer_8_policy', 'fleet_peer_01_policy', 'fleet_peer_-1_policy', 'fleet_peer_2_credential']) assert(!source.isSafeDestinationDiagnostic({ Diagnostic, Observed: true }))
 })
