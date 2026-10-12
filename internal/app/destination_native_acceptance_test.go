@@ -1239,13 +1239,33 @@ func (w *nativePrivateOutput) Write(p []byte) (int, error) {
 	return w.buf.Write(p)
 }
 func (w *nativePrivateOutput) text() string { w.mu.Lock(); defer w.mu.Unlock(); return w.buf.String() }
+
+var nativeFixturePortSequence atomic.Uint64
+
 func nativePort(t *testing.T) int {
 	t.Helper()
-	l, err := net.Listen("tcp", "127.0.0.1:0")
-	nativeMust(t, err, "reserve loopback port")
-	port := l.Addr().(*net.TCPAddr).Port
-	_ = l.Close()
-	return port
+	raw, err := os.ReadFile("/proc/sys/net/ipv4/ip_local_port_range")
+	nativeMust(t, err, "read native fixture automatic port boundary")
+	first, last, valid := nativeFixturePortRange(string(raw))
+	if !valid {
+		t.Fatal("native fixture has no explicit nonprivileged server range")
+	}
+	width := uint64(last - first + 1)
+	for attempt := uint64(0); attempt < width; attempt++ {
+		sequence := nativeFixturePortSequence.Add(1) - 1
+		if sequence >= width {
+			t.Fatal("native fixture explicit server range is exhausted")
+		}
+		port := first + int(sequence)
+		listener, err := net.Listen("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)))
+		if err != nil {
+			continue
+		}
+		nativeMust(t, listener.Close(), "release owned native fixture port probe")
+		return port
+	}
+	t.Fatal("native fixture explicit server range is occupied")
+	return 0
 }
 
 func nativeTarget(t *testing.T) (*httptest.Server, string, int, string, *atomic.Int64) {
