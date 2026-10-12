@@ -645,7 +645,9 @@ func TestNativeDestinationFleet(t *testing.T) {
 					return false
 				}
 			}
-			return true
+			var status destpolicy.DestinationStatus
+			request("GET", "dest/status", nil, []int{200}, &status)
+			return nativeFleetOfflineStatusReady(status.Nodes, offline.panelID, offline.agent.AgentID, offline.capable, *before.LastSeen, time.Duration(settings.NodePollSeconds)*time.Second, time.Now().UTC())
 		})
 		assertTraffic()
 		assertCoverage()
