@@ -4,10 +4,72 @@ import (
 	"encoding/json"
 	"errors"
 	"math"
+	"net"
 	"strconv"
 	"strings"
 	"testing"
 )
+
+func nativeLoadControlPortIsolated(blockPorts []int, controlPort int) bool {
+	if controlPort < 1 || controlPort > 65535 || len(blockPorts) != 50 {
+		return false
+	}
+	seen := map[int]bool{}
+	for _, port := range blockPorts {
+		if port < 1 || port > 65535 || port == controlPort || seen[port] {
+			return false
+		}
+		seen[port] = true
+	}
+	return true
+}
+
+func TestNativeLoadPoliciesRequireNumericControlPortIsolation(t *testing.T) {
+	ports := make([]int, 50)
+	for i := range ports {
+		ports[i] = 40000 + i
+	}
+	if !nativeLoadControlPortIsolated(ports, 41000) {
+		t.Fatal("independent control port rejected")
+	}
+	for _, control := range []int{0, 65536, ports[0], ports[49]} {
+		if nativeLoadControlPortIsolated(ports, control) {
+			t.Fatal("invalid or policy-selected control port accepted")
+		}
+	}
+	for _, invalid := range []int{0, 65536, ports[1]} {
+		bad := append([]int(nil), ports...)
+		bad[0] = invalid
+		if nativeLoadControlPortIsolated(bad, 41000) {
+			t.Fatal("invalid or duplicate block port accepted")
+		}
+	}
+	if nativeLoadControlPortIsolated(ports[:49], 41000) {
+		t.Fatal("fifty-rule fixture lost a target")
+	}
+}
+
+func TestNativeTargetAddressesCanShareTheSameNumericPort(t *testing.T) {
+	first, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal("cannot bind owned first loopback target")
+	}
+	t.Cleanup(func() { _ = first.Close() })
+	port := first.Addr().(*net.TCPAddr).Port
+	second, err := net.Listen("tcp4", net.JoinHostPort("127.0.0.2", strconv.Itoa(port)))
+	if err != nil {
+		t.Fatal("cannot bind the same numeric port on the second owned address")
+	}
+	t.Cleanup(func() { _ = second.Close() })
+	ports := make([]int, 50)
+	for i := range ports {
+		ports[i] = 1024 + i
+	}
+	ports[0] = port
+	if nativeLoadControlPortIsolated(ports, second.Addr().(*net.TCPAddr).Port) {
+		t.Fatal("distinct listening addresses hid a port-only policy collision")
+	}
+}
 
 func TestNativeLoadMetricSchemaSeparatesOverflowBudget(t *testing.T) {
 	phase := nativeLoadPhase{}

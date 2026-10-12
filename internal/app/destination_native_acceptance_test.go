@@ -1270,6 +1270,14 @@ func nativePort(t *testing.T) int {
 
 func nativeTarget(t *testing.T) (*httptest.Server, string, int, string, *atomic.Int64) {
 	t.Helper()
+	return nativeTargetAtPort(t, 0)
+}
+
+func nativeTargetAtPort(t *testing.T, bindPort int) (*httptest.Server, string, int, string, *atomic.Int64) {
+	t.Helper()
+	if bindPort < 0 || bindPort > 65535 {
+		t.Fatal("invalid owned target port")
+	}
 	var random [8]byte
 	_, err := rand.Read(random[:])
 	nativeMust(t, err, "create target nonce")
@@ -1305,7 +1313,7 @@ func nativeTarget(t *testing.T) (*httptest.Server, string, int, string, *atomic.
 	if len(routes) != 1 || routes[0].Type != "local" || routes[0].Dev != "lo" || !net.ParseIP(routes[0].Dst).Equal(net.ParseIP(ip)) {
 		t.Fatal("target does not have its exact local loopback route")
 	}
-	l, err := net.Listen("tcp6", net.JoinHostPort(ip, "0"))
+	l, err := net.Listen("tcp6", net.JoinHostPort(ip, strconv.Itoa(bindPort)))
 	nativeMust(t, err, "bind exact owned target")
 	requests := &atomic.Int64{}
 	server := &httptest.Server{Listener: l, Config: &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { requests.Add(1); _, _ = io.WriteString(w, nonce) })}}

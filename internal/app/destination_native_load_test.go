@@ -164,7 +164,7 @@ func nativeDestinationLoad(t *testing.T, workload nativeLoadWorkload) {
 		}
 	})
 	_, address, firstPort, nonce, reached := nativeTarget(t)
-	_, controlAddress, controlPort, controlNonce, _ := nativeTarget(t)
+	_, controlAddress, controlPort, controlNonce, _ := nativeTargetAtPort(t, port())
 	t.Cleanup(func() {
 		for _, private := range []string{nonce, controlNonce, f.user.SubToken} {
 			if strings.Contains(output.text(), private) {
@@ -180,6 +180,11 @@ func nativeDestinationLoad(t *testing.T, workload nativeLoadWorkload) {
 		target.Start()
 		t.Cleanup(target.Close)
 		ports = append(ports, listener.Addr().(*net.TCPAddr).Port)
+	}
+	// These policies match ports across every address. A different target IP
+	// alone cannot isolate the control request from the fifty block rules.
+	if !nativeLoadControlPortIsolated(ports, controlPort) {
+		t.Fatal("load policy ports overlap or include the independent control port")
 	}
 	clock, err := exec.Command("getconf", "CLK_TCK").Output()
 	nativeMust(t, err, "read actual process CPU clock")

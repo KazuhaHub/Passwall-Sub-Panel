@@ -74,7 +74,7 @@ jobs:
         run: |
           set -euo pipefail
           node --test deploy/destination_load_test.mjs
-          go test -v -count=1 ./internal/app -run '^TestNativeLoadProcCountersRequireBirthAndExactCPUFields$'
+          go test -v -count=1 ./internal/app -run '^(TestNativeLoadProcCountersRequireBirthAndExactCPUFields|TestNativeLoadPoliciesRequireNumericControlPortIsolation|TestNativeTargetAddressesCanShareTheSameNumericPort)$'
           go test -c -tags destination_acceptance -o "$RUNNER_TEMP/destination-load.test" ./internal/app
       - name: Actual production App.Run, one rule and fifty rules at sustained delivery rate
         run: |
@@ -259,7 +259,7 @@ jobs:
         run: |
           set -euo pipefail
           node --test deploy/destination_trial_load_test.mjs deploy/destination_trial_latency_test.mjs
-          go test -v -count=1 ./internal/app -run '^(TestNativeLoadProcCountersRequireBirthAndExactCPUFields|TestNativeTrialProvisioningRequiresObservedRuntimeAndInbound)$'
+          go test -v -count=1 ./internal/app -run '^(TestNativeLoadProcCountersRequireBirthAndExactCPUFields|TestNativeTrialProvisioningRequiresObservedRuntimeAndInbound|TestNativeLoadPoliciesRequireNumericControlPortIsolation|TestNativeTargetAddressesCanShareTheSameNumericPort)$'
           go test -c -tags destination_acceptance -o "$RUNNER_TEMP/destination-trial-load.test" ./internal/app
       - name: Actual production App.Run, 200 users with trial saturation and independent blocking
         run: |
@@ -321,7 +321,7 @@ jobs:
         run: |
           set -euo pipefail
           node --test deploy/destination_block_overflow_test.mjs
-          go test -v -count=1 ./internal/app -run '^(TestNativeLoadProcCountersRequireBirthAndExactCPUFields|TestNativeLoadMetricSchemaSeparatesOverflowBudget)$'
+          go test -v -count=1 ./internal/app -run '^(TestNativeLoadProcCountersRequireBirthAndExactCPUFields|TestNativeLoadMetricSchemaSeparatesOverflowBudget|TestNativeLoadPoliciesRequireNumericControlPortIsolation|TestNativeTargetAddressesCanShareTheSameNumericPort)$'
           go test -c -tags destination_acceptance -o "$RUNNER_TEMP/destination-block-overflow.test" ./internal/app
       - name: Actual production App.Run, sustained unique block destinations beyond quota
         run: |
