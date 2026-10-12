@@ -35,7 +35,7 @@ func nativeStartFleetBackends(t, owner *testing.T) nativeFleetBackends {
 			t.Fatal("fleet fixture container name is already owned by another process")
 		}
 	}
-	for _, port := range []int{2053, 2095, 24445, 24446} {
+	for _, port := range []int{2053, 2095, 2096, 2097, 24443, 24444, 24445, 24446} {
 		listener, err := net.Listen("tcp4", net.JoinHostPort("0.0.0.0", strconv.Itoa(port)))
 		nativeMust(t, err, "reserve unused fleet backend port")
 		nativeMust(t, listener.Close(), "release owned fleet port probe")

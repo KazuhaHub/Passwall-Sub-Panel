@@ -295,6 +295,13 @@ func TestNativeDestinationTraffic(t *testing.T) {
 		var compiled *protocol.DestinationPolicy
 		nativeMust(caseTest, json.Unmarshal(r.MintedBody, &compiled), "decode exact fault candidate")
 		if compiled == nil || protocol.ValidateDestinationPolicy(compiled) != nil || protocol.PolicyDigest(compiled) != r.MintedSHA256 || len(compiled.Rules) != wantRules || compiled.Collect != protocol.CollectHitsAndUsage {
+			caseTest.Logf("native diagnostic: fault_body_present=%t", compiled != nil)
+			if compiled != nil {
+				caseTest.Logf("native diagnostic: fault_body_valid=%t", protocol.ValidateDestinationPolicy(compiled) == nil)
+				caseTest.Logf("native diagnostic: fault_body_digest=%t", protocol.PolicyDigest(compiled) == r.MintedSHA256)
+				caseTest.Logf("native diagnostic: fault_body_rules=%t", len(compiled.Rules) == wantRules)
+				caseTest.Logf("native diagnostic: fault_body_collect=%t", compiled.Collect == protocol.CollectHitsAndUsage)
+			}
 			caseTest.Fatal("fault candidate did not retain its exact rules and collection mode")
 		}
 		canonical, err := json.Marshal(compiled)

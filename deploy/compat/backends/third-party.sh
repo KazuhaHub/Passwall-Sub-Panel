@@ -235,17 +235,25 @@ up() {
     # environment, so an exported SUI_DB never reaches the interpreter and the
     # read dies with a KeyError that the redirect above hides — which is how this
     # presented as a panel that never published a webPath.
-    web_path=$($DB_SUDO python3 - "$WORKDIR/sui/s-ui.db" <<'PY' 2>/dev/null || true
+    web_path=$($DB_SUDO python3 - "$WORKDIR/sui/s-ui.db" "$network_mode" <<'PY' 2>/dev/null || true
 import sqlite3, sys
 db = sqlite3.connect(sys.argv[1])
 row = db.execute("select value from settings where key='webPath'").fetchone()
-print(row[0] if row else "")
+sub = db.execute("select value from settings where key='subPort'").fetchone() if sys.argv[2] == 'host' else True
+print(row[0] if row and sub else "")
 PY
 )
     if [ -n "$web_path" ]; then break; fi
     sleep 2; waited=$((waited + 2))
   done
   local sui_base="http://$HOST:$SUI_PORT${web_path%/}"
+  if [ "$network_mode" = host ]; then
+    # S-UI may already have exited on 3X-UI's subscription listener. Stop it
+    # before the single-setting transaction, then start the same container.
+    $SUDO "$RUNTIME" stop "$SUI_NAME" >/dev/null
+    third_party_configure_sui_host_db "$WORKDIR/sui/s-ui.db"
+    $SUDO "$RUNTIME" start "$SUI_NAME" >/dev/null
+  fi
   wait_for "$sui_base/" 60
   log "S-UI ready at $sui_base"
   local sui_tok; sui_tok=$(sui_token)

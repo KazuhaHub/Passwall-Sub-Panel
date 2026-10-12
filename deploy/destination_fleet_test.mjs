@@ -23,7 +23,7 @@ test('fleet evidence requires all real cohort stages and rejects missing, duplic
     assert(!source.isSafeDestinationDiagnostic({ Diagnostic, Observed: 'private credential' }))
   }
   assert(!source.isSafeDestinationDiagnostic({ Diagnostic: 'fleet_peer_2_policy', Observed: true }))
-  for (const Diagnostic of ['fleet_runtime_present', 'fleet_prior_present', 'fleet_kind_matches', 'fleet_generation_matches', 'fleet_minted_present', 'fleet_reported_present', 'fleet_report_state', 'fleet_report_sha', 'fleet_heartbeat_fresh', 'fleet_mint_fresh', 'fleet_exact_receipt', 'fleet_backend_sui_running', 'fleet_backend_sui_bind_error', 'fleet_backend_sui_storage_error', 'fleet_backend_sui_start_error']) {
+  for (const Diagnostic of ['fault_body_present', 'fault_body_valid', 'fault_body_digest', 'fault_body_rules', 'fault_body_collect', 'fleet_runtime_present', 'fleet_prior_present', 'fleet_kind_matches', 'fleet_generation_matches', 'fleet_minted_present', 'fleet_reported_present', 'fleet_report_state', 'fleet_report_sha', 'fleet_heartbeat_fresh', 'fleet_mint_fresh', 'fleet_exact_receipt', 'fleet_backend_sui_running', 'fleet_backend_sui_bind_error', 'fleet_backend_sui_storage_error', 'fleet_backend_sui_start_error']) {
     for (const Observed of [true, false]) {
       const safeFact = source.sanitizeDestinationResults(input([{ Action: 'output', Package: pkg, Output: `native diagnostic: ${Diagnostic}=${Observed}\n` }]))
       assert.deepEqual(JSON.parse(safeFact), { Action: 'output', Package: pkg, Diagnostic, Observed })

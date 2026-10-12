@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
+import { existsSync, mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { test } from 'node:test'
 
@@ -21,4 +24,29 @@ test('third-party network keeps bridge defaults and admits only the dedicated ho
     { PSP_BACKEND_HOST: '10.254.1.2; private' }, { PSP_BACKEND_HOST: 'panel.example' },
     { GITHUB_ACTIONS: 'false' }, { GITHUB_REPOSITORY: 'foreign/repository' }, { RUNNER_ENVIRONMENT: 'self-hosted' },
   ]) assert.throws(() => mode({ ...owned, ...change }))
+})
+
+test('host S-UI subscription moves off 3X-UI port while retaining all other database rows', () => {
+  const root = mkdtempSync(join(tmpdir(), 'psp-sui-host-network-'))
+  const python = process.platform === 'win32' ? 'python' : 'python3'
+  const db = join(root, 's-ui.db').replaceAll('\\', '/')
+  const run = code => execFileSync(python, ['-c', code, db], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
+  const configure = path => execFileSync('bash', ['-c', 'python3() { "${PSP_TEST_PYTHON}" "$@"; }; source "$1" && third_party_configure_sui_host_db "$2"', '_', source, path], {
+    encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, PSP_TEST_PYTHON: python },
+  })
+  try {
+    run("import sqlite3,sys; d=sqlite3.connect(sys.argv[1]); d.executescript(\"CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT); INSERT INTO settings VALUES ('subPort','2096'),('webPort','2095'),('webPath','/app/'),('secret','private-preserved'); CREATE TABLE tokens (token TEXT); INSERT INTO tokens VALUES ('private-preserved');\"); d.commit()")
+    configure(db)
+    configure(db) // restart preparation is idempotent
+    const rows = JSON.parse(run("import sqlite3,sys,json; d=sqlite3.connect(sys.argv[1]); print(json.dumps([d.execute('SELECT * FROM settings ORDER BY key').fetchall(), d.execute('SELECT * FROM tokens').fetchall()]))"))
+    assert.deepEqual(rows, [[['secret', 'private-preserved'], ['subPort', '2097'], ['webPath', '/app/'], ['webPort', '2095']], [['private-preserved']]])
+    run("import sqlite3,sys; d=sqlite3.connect(sys.argv[1]); d.execute(\"UPDATE settings SET value='foreign' WHERE key='subPort'\"); d.commit()")
+    assert.throws(() => configure(db))
+    assert.equal(run("import sqlite3,sys; d=sqlite3.connect(sys.argv[1]); print(d.execute(\"SELECT value FROM settings WHERE key='subPort'\").fetchone()[0])").trim(), 'foreign')
+    const missing = join(root, 'absent.db').replaceAll('\\', '/')
+    assert.throws(() => configure(missing))
+    assert(!existsSync(missing))
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
 })

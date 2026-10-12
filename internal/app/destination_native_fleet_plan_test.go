@@ -26,6 +26,13 @@ func TestNativeFleetStableReceiptRequiresFreshHeartbeatAndExactCandidate(t *test
 	if nativeMutationReceiptMatches(&base, base, 7, &minted, requested) {
 		t.Fatal("old fleet heartbeat confirmed current readiness")
 	}
+	// A first candidate can be minted before the first wait while the prior
+	// transaction still exposes an unminted row. Startup's clock is authority.
+	unminted := domain.DestAgentPolicy{AgentID: base.AgentID}
+	startup := minted.Add(-time.Second)
+	if !nativeMutationReceiptMatches(&unminted, base, 7, &heartbeat, startup) || nativeMutationReceiptMatches(&unminted, base, 7, &heartbeat, requested) {
+		t.Fatal("initial fleet receipt lost the actual daemon startup boundary")
+	}
 	for _, change := range []func(*domain.DestAgentPolicy){
 		func(r *domain.DestAgentPolicy) { r.AgentID = "borrowed" },
 		func(r *domain.DestAgentPolicy) { r.MintedBody = []byte("different") },

@@ -22,3 +22,24 @@ third_party_network_mode() {
     *) echo 'unsupported backend network profile' >&2; return 2 ;;
   esac
 }
+
+# Both reviewed panels default to subscription port 2096. They share a network
+# namespace only in the fleet fixture; configure the stopped S-UI before its
+# readiness check without changing its web endpoint or any credential rows.
+third_party_configure_sui_host_db() {
+  local privilege=()
+  if [ -n "${DB_SUDO:-}" ]; then privilege=("$DB_SUDO"); fi
+  "${privilege[@]}" python3 - "$1" <<'PY'
+import pathlib, sqlite3, sys
+
+uri = pathlib.Path(sys.argv[1]).resolve().as_uri() + '?mode=rw'
+with sqlite3.connect(uri, uri=True) as db:
+    db.execute('BEGIN IMMEDIATE')
+    row = db.execute("SELECT value FROM settings WHERE key='subPort'").fetchone()
+    if row not in [('2096',), ('2097',)]:
+        raise RuntimeError('unexpected fixture subscription port')
+    changed = db.execute("UPDATE settings SET value='2097' WHERE key='subPort'")
+    if changed.rowcount != 1:
+        raise RuntimeError('fixture subscription setting is not unique')
+PY
+}

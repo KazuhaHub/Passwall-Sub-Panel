@@ -122,7 +122,18 @@ func TestNativeDestinationFleet(t *testing.T) {
 	adminClient := admin.Client()
 	adminClient.Timeout = 30 * time.Second
 	caseTest := t
+	priorReceipts := make(map[string]*domain.DestAgentPolicy)
+	bindPriorReceipts := func() {
+		for _, peer := range peers {
+			prior, err := a.repos.DestAgentPolicy.Get(caseTest.Context(), peer.agent.AgentID, true)
+			nativeMust(caseTest, err, "bind fleet candidate before administrator mutation")
+			priorReceipts[peer.agent.AgentID] = prior
+		}
+	}
 	request := func(method, path string, body any, codes []int, result any) {
+		if method != http.MethodGet {
+			bindPriorReceipts()
+		}
 		data, err := json.Marshal(body)
 		nativeMust(caseTest, err, "encode fleet administrator input")
 		r, err := http.NewRequestWithContext(caseTest.Context(), method, admin.URL+"/api/admin/"+path, bytes.NewReader(data))
@@ -150,6 +161,10 @@ func TestNativeDestinationFleet(t *testing.T) {
 		request("PUT", fmt.Sprintf("users/%d", user.ID), map[string]any{"group_id": scratchGroup.ID}, []int{200}, nil)
 		request("PUT", fmt.Sprintf("users/%d", user.ID), map[string]any{"group_id": groupID}, []int{200}, nil)
 	}
+	// A first sync samples its mint clock before its transaction commits. Bind
+	// startup before starting either daemon, never after observing its first sync.
+	startupAfter := time.UnixMilli(time.Now().UnixMilli())
+	bindPriorReceipts()
 	for i, peer := range peers {
 		peer.probe = &nativeLegacyProbe{listener: protocol.NewListenerKey(peer.node.ID)}
 		peer.gateway = &nativePanelGateway{}
@@ -194,12 +209,6 @@ func TestNativeDestinationFleet(t *testing.T) {
 	thirdNodes := []*domain.Node{}
 	memberClients, canaryClients := map[int64]*domain.PSPClient{}, map[int64]*domain.PSPClient{}
 	waitPeers := func(after time.Time) {
-		priorReceipts := make(map[string]*domain.DestAgentPolicy)
-		for _, peer := range peers {
-			prior, err := a.repos.DestAgentPolicy.Get(caseTest.Context(), peer.agent.AgentID, true)
-			nativeMust(caseTest, err, "bind exact prior fleet candidate")
-			priorReceipts[peer.agent.AgentID] = prior
-		}
 		facts := map[string]bool{}
 		defer func() {
 			if caseTest.Failed() {
@@ -430,7 +439,7 @@ func TestNativeDestinationFleet(t *testing.T) {
 	step := func(name string, fn func()) bool { return t.Run(name, func(test *testing.T) { caseTest = test; fn() }) }
 	publish := func() { request("POST", "dest/publish", nil, []int{200}, nil) }
 	if !step("native_ready", func() {
-		waitPeers(time.Now())
+		waitPeers(startupAfter)
 		assertTraffic()
 		for _, peer := range peers {
 			wrong := *f.user
