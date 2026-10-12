@@ -184,7 +184,11 @@ func nativeDestinationLoad(t *testing.T, workload nativeLoadWorkload) {
 	var prior *domain.DestAgentPolicy
 	var after time.Time
 	request := func(method, path string, body any, want int, result any) {
-		if method != http.MethodGet {
+		// Publication may leave the already minted candidate unchanged. Keep
+		// the actual administrator edit as the causal before/after boundary,
+		// as the functional native driver does, even if its receipt is pending.
+		mutation := method != http.MethodGet && path != "dest/publish"
+		if mutation {
 			var err error
 			prior, err = a.repos.DestAgentPolicy.Get(caseTest.Context(), f.agent.AgentID, true)
 			nativeMust(caseTest, err, "bind load candidate before mutation")
@@ -195,8 +199,8 @@ func nativeDestinationLoad(t *testing.T, workload nativeLoadWorkload) {
 		nativeMust(caseTest, err, "create load administrator request")
 		r.Header.Set("Authorization", "Bearer "+token)
 		r.Header.Set("Content-Type", "application/json")
-		if method != http.MethodGet {
-			after = time.Now()
+		if mutation {
+			after = time.UnixMilli(time.Now().UnixMilli())
 		}
 		response, err := client.Do(r)
 		nativeMust(caseTest, err, "call load production administrator route")

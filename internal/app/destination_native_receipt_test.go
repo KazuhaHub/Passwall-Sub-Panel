@@ -94,6 +94,16 @@ func TestNativeMutationReceiptUsesActualTransitionAndFreshExactReceipt(t *testin
 	if nativeMutationReceiptMatches(&unchanged, base, 7, &seen, admin) != true {
 		t.Fatal("exact unchanged candidate with fresh acknowledgement was rejected")
 	}
+	// A following no-op publication can observe this same minted candidate
+	// before acknowledgement. It is not the original collection edit and
+	// cannot replace that edit's causal baseline. Later acknowledgement alone
+	// must not invent a new transition relative to the pending snapshot.
+	pending := base
+	pending.ReportedState, pending.ReportedSHA256, pending.AppliedSHA256 = "", "", ""
+	pending.ReportedAt, pending.AppliedAt = nil, nil
+	if nativeMutationReceiptMatches(&pending, base, 7, &seen, admin) || !nativeMutationReceiptMatches(&prior, base, 7, &seen, admin) {
+		t.Fatal("publication snapshot replaced the actual mutation boundary")
+	}
 	// Pause can compile after the write using a sync clock sampled just before
 	// it. Its kind transition and fresh exact receipt prove the same generation.
 	paused := base

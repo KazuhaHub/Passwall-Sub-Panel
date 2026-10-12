@@ -53,4 +53,6 @@ test('separate block overflow job preserves webhook and trial jobs with immutabl
   const workflow = readFileSync(new URL('../.github/workflows/destination-load.yml', import.meta.url), 'utf8')
   for (const required of ['webhook-load:', 'trial-load:', 'block-overflow:', 'TestNativeDestinationBlockOverflow', 'destination-block-overflow-tests.json', 'destination-block-overflow-metrics.json', 'deploy/destination-block-overflow.mjs', 'cef54ddba3ee96f9794aaacdc6ac1ed89cc318f9']) assert(workflow.includes(required), required)
   assert(!workflow.includes('continue-on-error'))
+  const driver = readFileSync(new URL('../internal/app/destination_native_load_test.go', import.meta.url), 'utf8')
+  for (const required of ['mutation := method != http.MethodGet && path != "dest/publish"', 'after = time.UnixMilli(time.Now().UnixMilli())', 'nativeMutationReceiptMatches(prior, *runtime', 'nativeCollectionReceiptMatches(*runtime, protocol.CollectHits', 'load_transition']) assert(driver.includes(required), required)
 })
