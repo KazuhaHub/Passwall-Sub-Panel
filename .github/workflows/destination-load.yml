@@ -141,6 +141,48 @@ jobs:
             ${{ runner.temp }}/destination-queue-pressure-metrics.json
           if-no-files-found: error
           retention-days: 7
+  sql-pressure:
+    name: Four full lanes and hourly budgets through real SQLite chunks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        env:
+          GOTOOLCHAIN: auto
+        with:
+          go-version-file: go.mod
+      - name: Verify exact preferred PSP compiler
+        run: |
+          set -euo pipefail
+          build_toolchain=$(awk '$1 == "toolchain" { print $2 }' go.mod)
+          test -n "$build_toolchain"
+          test "$(go env GOVERSION)" = "$build_toolchain"
+          test "$(go tool compile -V | awk '{ print $3 }')" = "$build_toolchain"
+      - name: Check closed SQL evidence and compile the real worker pressure driver
+        run: |
+          set -euo pipefail
+          node --test deploy/destination_sql_pressure_test.mjs
+          go test -c -tags destination_pressure -o "$RUNNER_TEMP/destination-sql-pressure.test" ./internal/adapters/sqlstore
+      - name: Drain four saturated production lanes through real file SQLite
+        run: |
+          set -euo pipefail
+          PSP_NATIVE_SQL_PRESSURE_METRICS="$RUNNER_TEMP/destination-sql-pressure-metrics.json" \
+            "$RUNNER_TEMP/destination-sql-pressure.test" \
+              -test.v=test2json -test.run '^TestNativeDestinationSQLPressure$' -test.timeout=10m 2>&1 \
+            | go tool test2json -t -p github.com/KazuhaHub/passwall-sub-panel/internal/adapters/sqlstore \
+            | node deploy/destination-sql-pressure.mjs sanitize > "$RUNNER_TEMP/destination-sql-pressure-tests.json"
+          node deploy/destination-sql-pressure.mjs "$RUNNER_TEMP/destination-sql-pressure-tests.json" "$RUNNER_TEMP/destination-sql-pressure-metrics.json"
+      - name: Keep fixed execution identities and bounded SQL pressure counts
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: native-destination-sql-pressure-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/destination-sql-pressure-tests.json
+            ${{ runner.temp }}/destination-sql-pressure-metrics.json
+          if-no-files-found: error
+          retention-days: 7
   trial-load:
     name: 200-user five-minute trial and independent block load (SQLite / Xray 26.6.27)
     runs-on: ubuntu-24.04

@@ -1016,8 +1016,10 @@ jobs:
         run: go vet -tags node_reinstall_acceptance ./tests/acceptance/...
       - name: The native destination traffic acceptance still compiles
         run: go vet -tags destination_acceptance ./internal/app
-      - name: The decoded destination queue pressure still compiles
-        run: go vet -tags destination_pressure ./internal/service/destaudit
+        - name: The decoded destination queue pressure still compiles
+          run: go vet -tags destination_pressure ./internal/service/destaudit
+        - name: The real destination SQL pressure still compiles
+          run: go vet -tags destination_pressure ./internal/adapters/sqlstore
       # STATICCHECK, BECAUSE VET DOES NOT LOOK FOR WHAT IT FINDS. Its first run here
       # reported thirteen findings every gate above had passed, among them six pieces
       # of dead code, a dead store in nodesync, a crypto/ecdsa field deprecated since
