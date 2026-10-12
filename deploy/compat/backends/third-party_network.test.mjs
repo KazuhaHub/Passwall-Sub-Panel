@@ -31,7 +31,7 @@ test('host S-UI subscription moves off 3X-UI port while retaining all other data
   const python = process.platform === 'win32' ? 'python' : 'python3'
   const db = join(root, 's-ui.db').replaceAll('\\', '/')
   const run = code => execFileSync(python, ['-c', code, db], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
-  const configure = path => execFileSync('bash', ['-c', 'python3() { "${PSP_TEST_PYTHON}" "$@"; }; source "$1" && third_party_configure_sui_host_db "$2"', '_', source, path], {
+  const configure = path => execFileSync('bash', ['-c', 'python3() { command "${PSP_TEST_PYTHON}" "$@"; }; source "$1" && third_party_configure_sui_host_db "$2"', '_', source, path], {
     encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, PSP_TEST_PYTHON: python },
   })
   try {
