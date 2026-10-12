@@ -3,6 +3,7 @@ package destaudit
 import (
 	"context"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/metrics"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 	"slices"
 	"time"
@@ -122,7 +123,9 @@ func (w *ingestWorker) step(ctx context.Context) bool {
 	}
 	// Current mode/revision are checked again under the repository gate inside
 	// every transaction, including a setting change during this step.
+	started := time.Now()
 	rejected, err := w.repo.WriteDestinationAuditChunk(ctx, chunk)
+	metrics.DestAuditChunkMS.With(boundedKind(b.body.Kind)).ObserveSince(started)
 	if err != nil {
 		w.failed(ctx, b, w.remaining(b))
 		return true
@@ -174,7 +177,9 @@ func (w *ingestWorker) begin(ctx context.Context, b *queuedBatch) {
 	}
 	mapped := mapBatch(b.panelID, b.body, known, w.now())
 	batch := domain.DestAuditBatch{AgentID: b.agentID, BatchID: b.body.BatchID, Kind: b.body.Kind, PanelID: b.panelID, HourMS: b.body.Hour, ReceivedHourMS: b.receivedHour, ReceivedAt: b.receivedAt, CollectRevision: b.body.CollectRevision, Hits: mapped.hits, Usage: mapped.usage, Dropped: b.body.Dropped, Unmatched: b.body.Unmatched, Losses: mapped.losses}
+	started := time.Now()
 	result, err := w.repo.BeginDestinationAudit(ctx, batch)
+	metrics.DestAuditBeginMS.With(boundedKind(b.body.Kind)).ObserveSince(started)
 	if err != nil {
 		rows := len(mapped.hits) + len(mapped.usage)
 		for _, n := range mapped.losses {
