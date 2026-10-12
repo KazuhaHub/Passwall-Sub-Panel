@@ -58,6 +58,12 @@ type nativeTrialMetrics struct {
 // nonce server. No benchmark request resolves or connects to those hostnames.
 func nativeTrialLoad(t *testing.T, f destinationPolicyFixture, client *http.Client, endpoint, token string, parent int, dataDir string, inbound, api int, ticks uint64, address string, targetPort int, nonce string, reached *atomic.Int64, controlAddress string, controlPort int, controlNonce, evidence string, output func() string) {
 	a := f.a
+	stage := "capability"
+	defer func() {
+		if t.Failed() {
+			t.Logf("native diagnostic: trial_setup_%s=false", stage)
+		}
+	}()
 	m := nativeTrialMetrics{Schema: 1, Candidate: "cef54ddba3ee96f9794aaacdc6ac1ed89cc318f9", CoreVersion: "26.6.27", TrialWindows: make([]uint64, 300), BlockWindows: make([]uint64, 300), UserDeliveries: make([]uint64, 200)}
 	t.Cleanup(func() {
 		data, err := json.Marshal(m)
@@ -96,8 +102,25 @@ func nativeTrialLoad(t *testing.T, f destinationPolicyFixture, client *http.Clie
 	// Do not borrow a fabricated capability or roster to provision the users.
 	nativeWait(t, 120*time.Second, "actual native trial provisioning capability", func() bool {
 		agent, err := a.repos.NodeAgent.GetByAgentID(t.Context(), f.agent.AgentID)
-		return err == nil && agent != nil && agent.LastSeen != nil && slicesContainsNative(agent.ObservedCapabilities, protocol.CapabilityDestinationPolicy)
+		if err != nil || agent == nil || agent.LastSeen == nil || !slicesContainsNative(agent.ObservedCapabilities, protocol.CapabilityDestinationPolicy) {
+			return false
+		}
+		// The first control report may advertise capability before installation
+		// or any full runtime enumeration. Membership reconciliation reads the
+		// real native adapter, so wait for its observed inbound rather than
+		// treating advertised support as a completed startup.
+		cli, err := a.xuiPool.Get(f.agent.PanelID)
+		if err != nil {
+			return false
+		}
+		status, err := cli.GetServerStatus(t.Context())
+		if err != nil {
+			return false
+		}
+		observedInbound, err := cli.GetInbound(t.Context(), f.node.InboundID)
+		return err == nil && nativeTrialProvisioningReady(status, observedInbound, f.node.InboundID, inbound)
 	})
+	stage = "group"
 	group := &domain.Group{Slug: "trial-load", Name: "Trial load", TagFilter: domain.TagFilter{All: true}}
 	nativeMust(t, a.repos.Group.Create(t.Context(), group), "create owned trial load group")
 	users := make([]*domain.User, 200)
@@ -109,23 +132,30 @@ func nativeTrialLoad(t *testing.T, f destinationPolicyFixture, client *http.Clie
 		}
 	})
 	for i := range users {
+		stage = "principal"
 		email := fmt.Sprintf("trial-load-%03d@example.test", i)
 		users[i] = &domain.User{UPN: email, Email: email, SSOProvider: domain.SSOProviderLocal, SSOSubject: email, Role: domain.RoleUser, Enabled: true, GroupID: group.ID, UUID: fmt.Sprintf("00000000-0000-4000-8000-%012d", i+1), SubToken: fmt.Sprintf("fixture-trial-load-sub-%03d", i)}
 		nativeMust(t, a.repos.User.Create(t.Context(), users[i]), "create real trial principal")
+		stage = "membership"
 		nativeMust(t, a.user.ResyncMembership(t.Context(), users[i].ID), "provision trial principal through production membership service")
 	}
 	// Block traffic uses the original separate open-group principal and a
 	// different real target port. It keeps one key within its own budget.
 	_, blockAddress, blockPort, _, blockReached := nativeTarget(t)
+	stage = "policy"
 	input := destinationPolicyInput("Concurrent trial block", "block")
 	input["inline"] = map[string]any{"ports": strconv.Itoa(blockPort)}
 	var policy destinationPolicyAPIResult
 	request("POST", "dest/policies", input, 201, &policy)
 	var mode destinationGroupModeAPIResult
+	stage = "mode"
 	request("PUT", fmt.Sprintf("dest/groups/%d", group.ID), map[string]any{"mode": "allowlist", "stage": "trial", "list_ids": []int64{}, "updated_at": int64(0), "base_hosts": []string{}}, 200, &mode)
+	stage = "collection"
 	request("PUT", fmt.Sprintf("servers/%d", f.agent.PanelID), map[string]any{"audit_collect": "hits"}, 200, nil)
+	stage = "publication"
 	request("POST", "dest/publish", nil, 200, nil)
 	panel, err := a.repos.XUIPanel.GetByID(t.Context(), f.agent.PanelID)
+	stage = "receipt"
 	nativeMust(t, err, "bind trial collection revision")
 	nativeWait(t, 120*time.Second, "current trial policy and complete real roster", func() bool {
 		state, e1 := a.destDefinitions.State(t.Context())
@@ -190,6 +220,7 @@ func nativeTrialLoad(t *testing.T, f destinationPolicyFixture, client *http.Clie
 		return seen[protocol.NewSubjectKey(f.user.ID)]
 	})
 	m.Users = len(users)
+	stage = "resources"
 	live := nativeBindLiveCore(t, parent, dataDir, "xray")
 	corePID, coreBinary := 0, ""
 	for _, pid := range nativeCoreChildren(parent) {
@@ -209,7 +240,9 @@ func nativeTrialLoad(t *testing.T, f destinationPolicyFixture, client *http.Clie
 	// Prove routeOnly before launching the flood. A virtual name must reach
 	// the owned nonce through the same user/listener and never public DNS.
 	// The open principal keeps warmup out of measured trial audit rows.
+	stage = "warmup"
 	nativeMust(t, nativeVLESSHost(t.Context(), inbound, address, targetPort, f.user.UUID, nonce, "trial-warmup.test"), "verify owned route-only trial target")
+	stage = "traffic"
 	baselineRequests := reached.Load()
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
@@ -336,6 +369,7 @@ func nativeTrialLoad(t *testing.T, f destinationPolicyFixture, client *http.Clie
 	}
 	// No account identifier or virtual host is exported. This query checks the
 	// persisted anonymous group source and actual per-kind budget/loss totals.
+	stage = "ingestion"
 	nativeWait(t, 90*time.Second, "actual trial saturation with intact block ingestion", func() bool {
 		nativeMust(t, a.database.QueryRowContext(t.Context(), "SELECT COUNT(*), COALESCE(SUM(count),0), COALESCE(SUM(CASE WHEN user_id<>0 OR port<>0 THEN 1 ELSE 0 END),0) FROM dest_hits WHERE panel_id=? AND source=? AND action='observe'", f.agent.PanelID, fmt.Sprintf("g%d", group.ID)).Scan(&m.TrialRows, &m.TrialEvents, &m.TrialIdentified), "read anonymous real trial ingestion")
 		nativeMust(t, a.database.QueryRowContext(t.Context(), "SELECT COALESCE(SUM(rows),0) FROM dest_audit_loss_hourly WHERE panel_id=? AND kind='trial' AND reason='over_budget'", f.agent.PanelID).Scan(&m.TrialOverBudget), "read actual exhausted trial quota")

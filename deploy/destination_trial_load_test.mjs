@@ -63,5 +63,20 @@ test('trial metrics need unique execution through the production sanitizer and c
 test('trial job retains the existing webhook job and requires separate real production evidence', () => {
   const workflow = readFileSync(new URL('../.github/workflows/destination-load.yml', import.meta.url), 'utf8')
   for (const required of ['webhook-load:', 'trial-load:', 'TestNativeDestinationWebhookLoad', 'TestNativeDestinationTrialLoad', 'cef54ddba3ee96f9794aaacdc6ac1ed89cc318f9', 'destination-trial-load-tests.json', 'destination-trial-load-metrics.json', 'deploy/destination-trial-load.mjs', 'deploy/destination_trial_load_test.mjs', 'set -euo pipefail']) assert(workflow.includes(required), required)
+  assert(workflow.includes('TestNativeTrialProvisioningRequiresObservedRuntimeAndInbound'))
   assert(!workflow.includes('continue-on-error'))
+})
+
+test('trial setup exposes only closed boolean phases and waits for the actual native inbound before membership', async () => {
+  const { sanitizeDestinationResults, isSafeDestinationDiagnostic } = await import('./destination-acceptance.mjs')
+  for (const phase of ['capability', 'group', 'principal', 'membership', 'policy', 'mode', 'collection', 'publication', 'receipt', 'resources', 'warmup', 'traffic', 'ingestion']) {
+    const input = JSON.stringify({ Action: 'output', Output: `native diagnostic: trial_setup_${phase}=false\n` })
+    const event = JSON.parse(sanitizeDestinationResults(input))
+    assert.deepEqual(event, { Action: 'output', Package: 'github.com/KazuhaHub/passwall-sub-panel/internal/app', Diagnostic: `trial_setup_${phase}`, Observed: false })
+    assert(isSafeDestinationDiagnostic(event))
+  }
+  for (const phase of ['private-email@example', 'principal_200', 'unknown']) assert.equal(sanitizeDestinationResults(JSON.stringify({ Action: 'output', Output: `native diagnostic: trial_setup_${phase}=false\n` })).trim(), '')
+  const driver = readFileSync(new URL('../internal/app/destination_native_trial_load_test.go', import.meta.url), 'utf8')
+  for (const required of ['GetServerStatus', 'GetInbound', 'nativeTrialProvisioningReady', 'ResyncMembership']) assert(driver.includes(required), required)
+  assert(driver.indexOf('nativeTrialProvisioningReady') < driver.indexOf('ResyncMembership'))
 })
