@@ -99,7 +99,7 @@ jobs:
         run: |
           set -euo pipefail
           node --test deploy/destination_acceptance_test.mjs
-          go test -count=1 ./internal/app -run '^TestNative(FaultMutationRequiresNewPublicationAndExactReceipt|PrunedFallbackUsesGenerationAndBodyCausality)$'
+          go test -v -count=1 ./internal/app -run '^TestNative(MutationReceiptUsesActualTransitionAndFreshExactReceipt|FaultMutationRequiresNewPublicationAndExactReceipt|PrunedFallbackUsesGenerationAndBodyCausality)$'
           go test -c -tags destination_acceptance -o "$RUNNER_TEMP/destination-acceptance.test" ./internal/app
       # Only the hosted ephemeral VM receives one run-owned documentation /128.
       # Neither host trust stores nor the production core's private guard change.
@@ -209,7 +209,7 @@ jobs:
         run: |
           set -euo pipefail
           node --test deploy/destination_acceptance_test.mjs
-          go test -v -count=1 ./internal/app -run '^TestNative(DatabaseConfigurationIsClosedAndPreservesOwnedDirectories|DatabaseCountQueryKeepsParametersSeparate|StatusCandidateRequiresEveryOriginalComparison|FaultMutationRequiresNewPublicationAndExactReceipt|PrunedFallbackUsesGenerationAndBodyCausality)$'
+          go test -v -count=1 ./internal/app -run '^TestNative(DatabaseConfigurationIsClosedAndPreservesOwnedDirectories|DatabaseCountQueryKeepsParametersSeparate|StatusCandidateRequiresEveryOriginalComparison|MutationReceiptUsesActualTransitionAndFreshExactReceipt|FaultMutationRequiresNewPublicationAndExactReceipt|PrunedFallbackUsesGenerationAndBodyCausality)$'
           go test -c -tags destination_acceptance -o "$RUNNER_TEMP/destination-acceptance.test" ./internal/app
       - name: Real SQL-backed policy traffic and ingestion across all complete scenarios
         run: |
@@ -516,7 +516,7 @@ jobs:
           retention-days: 7
 
   fleet:
-    name: real production fleet (${{ matrix.database }}, ${{ matrix.cohort }})
+    name: real production fleet (${{ matrix.database }}, ${{ matrix.cohort }}, ${{ matrix.layout }})
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     strategy:
@@ -524,6 +524,7 @@ jobs:
       matrix:
         database: [sqlite, mysql, postgres]
         cohort: [old, new, mixed]
+        layout: [xray-pair, mixed-engines]
     services:
       mysql:
         image: ${{ matrix.database == 'mysql' && 'mysql:8' || '' }}
@@ -606,13 +607,14 @@ jobs:
         run: |
           set -euo pipefail
           node --test deploy/destination_fleet_test.mjs deploy/compat/backends/third-party_network.test.mjs
-          go test -v -count=1 ./internal/app -run '^TestNativeFleet(ProfilesAndContainerOwnershipAreClosed|PolicyRequiresOwnSubjectAllowanceAndCatchAll|StableReceiptRequiresFreshHeartbeatAndExactCandidate)$'
+          go test -v -count=1 ./internal/app -run '^TestNativeFleet(ProfilesAndContainerOwnershipAreClosed|PolicyRequiresOwnSubjectAllowanceAndCatchAll|StableReceiptRequiresFreshHeartbeatAndExactCandidate|MixedEnginePlanCoversEveryCandidateAndCore)$'
           go test -c -tags destination_acceptance -o "$RUNNER_TEMP/destination-acceptance.test" ./internal/app
       - name: Real App.Run, native cohort and both production third-party adapters
         run: |
           set -euo pipefail
           sudo --preserve-env=GITHUB_ACTIONS,GITHUB_REPOSITORY,RUNNER_ENVIRONMENT \
             env PSP_NATIVE_FLEET_PROFILE='${{ matrix.cohort }}' \
+            PSP_NATIVE_FLEET_LAYOUT='${{ matrix.layout }}' \
             PSP_NATIVE_FLEET_OLD_BIN="$RUNNER_TEMP/destination-fleet-old" \
             PSP_NATIVE_FLEET_NEW_BIN="$RUNNER_TEMP/destination-fleet-new" \
             PSP_NATIVE_DB_KIND='${{ matrix.database }}' \
@@ -626,13 +628,13 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: native-fleet-${{ matrix.database }}-${{ matrix.cohort }}-${{ github.sha }}
+          name: ${{ matrix.layout == 'mixed-engines' && 'native-engine-fleet' || 'native-fleet' }}-${{ matrix.database }}-${{ matrix.cohort }}-${{ github.sha }}
           path: ${{ runner.temp }}/destination-fleet-tests.json
           if-no-files-found: error
           retention-days: 7
 
   complete-matrix:
-    name: complete native matrix (39 reports / 771 cases)
+    name: complete native matrix (48 reports / 861 cases)
     needs: [traffic, traffic-sql, published-remote, published-docker, legacy-upgrade, fleet]
     if: always()
     runs-on: ubuntu-24.04

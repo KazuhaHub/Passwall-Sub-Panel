@@ -8,9 +8,9 @@ test('complete matrix gate rejects missing reports, mixed commits and unsafe eve
   const { destinationMatrixReports, checkDestinationMatrix } = await import('./destination-matrix.mjs')
   const source = await import('./destination-acceptance.mjs')
   const reports = destinationMatrixReports()
-  assert.equal(reports.length, 39)
-  assert.equal(new Set(reports.map(report => report.name)).size, 39)
-  assert.equal(reports.reduce((total, report) => total + report.cases.length, 0), 771)
+  assert.equal(reports.length, 48)
+  assert.equal(new Set(reports.map(report => report.name)).size, 48)
+  assert.equal(reports.reduce((total, report) => total + report.cases.length, 0), 861)
   const root = mkdtempSync(join(tmpdir(), 'psp-matrix-gate-'))
   const merge = 'a'.repeat(40)
   const packageName = 'github.com/KazuhaHub/passwall-sub-panel/internal/app'
@@ -23,7 +23,7 @@ test('complete matrix gate rejects missing reports, mixed commits and unsafe eve
       events.push({ Action: 'pass', Package: packageName })
       writeFileSync(join(folder, report.file), events.map(event => JSON.stringify(event)).join('\n') + '\n')
     }
-    assert.deepEqual(checkDestinationMatrix(root, merge), { reports: 39, cases: 771 })
+    assert.deepEqual(checkDestinationMatrix(root, merge), { reports: 48, cases: 861 })
     const first = reports[0]
     const path = join(root, `${first.name}-${merge}`, first.file)
     const original = readFileSync(path, 'utf8')
@@ -49,7 +49,7 @@ test('complete matrix gate rejects missing reports, mixed commits and unsafe eve
       { Diagnostic: 'panel_downgrade_application_ms', Observed: 150000 },
     ].map(event => JSON.stringify({ Action: 'output', Package: packageName, ...event })).join('\n') + '\n'
     writeFileSync(path, original + diagnostics)
-    assert.deepEqual(checkDestinationMatrix(root, merge), { reports: 39, cases: 771 })
+    assert.deepEqual(checkDestinationMatrix(root, merge), { reports: 48, cases: 861 })
     writeFileSync(path, original)
     assert.throws(() => checkDestinationMatrix(root, 'b'.repeat(40)))
     assert.throws(() => checkDestinationMatrix(root, '../foreign'))

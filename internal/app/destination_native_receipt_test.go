@@ -94,6 +94,16 @@ func TestNativeMutationReceiptUsesActualTransitionAndFreshExactReceipt(t *testin
 	if nativeMutationReceiptMatches(&unchanged, base, 7, &seen, admin) != true {
 		t.Fatal("exact unchanged candidate with fresh acknowledgement was rejected")
 	}
+	// Pause can compile after the write using a sync clock sampled just before
+	// it. Its kind transition and fresh exact receipt prove the same generation.
+	paused := base
+	paused.MintedKind, paused.MintedSHA256, paused.ReportedSHA256 = domain.DestCandidatePaused, "", ""
+	if !nativeMutationReceiptMatches(&prior, paused, 7, &seen, admin) || nativeReceiptMatches(paused, 7, &seen, admin) {
+		t.Fatal("pause receipt lost the causal pre-write candidate boundary")
+	}
+	if nativeMutationReceiptMatches(&prior, paused, 7, &mint, admin) {
+		t.Fatal("pause receipt borrowed a heartbeat preceding the write")
+	}
 	for _, tc := range []struct {
 		name   string
 		change func(*domain.DestAgentPolicy, **time.Time)

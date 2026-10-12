@@ -61,6 +61,61 @@ func nativeFleetProfile(profile string) ([2]bool, bool) {
 	}
 }
 
+type nativeFleetNodePlan struct {
+	capable    bool
+	engine     domain.NodeCoreEngine
+	version    string
+	restricted bool
+}
+
+func nativeFleetNodes(profile, layout string) ([]nativeFleetNodePlan, bool) {
+	capabilities, valid := nativeFleetProfile(profile)
+	if !valid || layout != "xray-pair" && layout != "mixed-engines" {
+		return nil, false
+	}
+	cores := []nativeFleetNodePlan{{engine: domain.NodeCoreXray, version: "26.6.27"}}
+	if layout == "mixed-engines" {
+		cores = append(cores,
+			nativeFleetNodePlan{engine: domain.NodeCoreXray, version: "26.7.28"},
+			nativeFleetNodePlan{engine: domain.NodeCoreXray, version: "26.9.9", restricted: true},
+			nativeFleetNodePlan{engine: domain.NodeCoreSingBox, version: "1.14.0"},
+		)
+	}
+	var peers []nativeFleetNodePlan
+	for _, core := range cores {
+		for _, capable := range capabilities {
+			peer := core
+			peer.capable = capable
+			peers = append(peers, peer)
+		}
+	}
+	return peers, true
+}
+
+func TestNativeFleetMixedEnginePlanCoversEveryCandidateAndCore(t *testing.T) {
+	for _, profile := range []string{"old", "new", "mixed"} {
+		capabilities, _ := nativeFleetProfile(profile)
+		for layout, count := range map[string]int{"xray-pair": 2, "mixed-engines": 8} {
+			peers, ok := nativeFleetNodes(profile, layout)
+			if !ok || len(peers) != count {
+				t.Fatal("fleet layout omitted an independent daemon")
+			}
+			cores := []struct{ engine, version string }{{"xray", "26.6.27"}, {"xray", "26.7.28"}, {"xray", "26.9.9"}, {"sing-box", "1.14.0"}}
+			for i, peer := range peers {
+				core := cores[i/2]
+				if string(peer.engine) != core.engine || peer.version != core.version || peer.capable != capabilities[i%2] || peer.restricted != (core.engine == "xray" && core.version == "26.9.9") {
+					t.Fatal("fleet layout changed the candidate, reviewed core or explicit restriction acknowledgement")
+				}
+			}
+		}
+	}
+	for _, input := range [][2]string{{"", "mixed-engines"}, {"old", ""}, {"mixed", "other"}, {"new", "mixed-engines; private"}} {
+		if peers, ok := nativeFleetNodes(input[0], input[1]); ok || len(peers) != 0 {
+			t.Fatal("unknown fleet shape silently selected an easier layout")
+		}
+	}
+}
+
 func nativeFleetPolicyRules(body *protocol.DestinationPolicy, groupID, userID int64, port int, controlAddress, stage string) bool {
 	if body == nil || len(body.Exempt) != 0 {
 		return false

@@ -110,8 +110,14 @@ func nativeSingBoxDestinationTraffic(t *testing.T, guarded bool) {
 	client := server.Client()
 	client.Timeout = 10 * time.Second
 	caseTest := t
+	var priorReceipt *domain.DestAgentPolicy
 	request := func(method, path string, body any, want int, result any) {
 		caseTest.Helper()
+		if method != "GET" && path != "dest/publish" {
+			var err error
+			priorReceipt, err = a.repos.DestAgentPolicy.Get(caseTest.Context(), f.agent.AgentID, true)
+			nativeMust(caseTest, err, "bind sing-box candidate before administrator mutation")
+		}
 		encoded, err := json.Marshal(body)
 		nativeMust(caseTest, err, "encode administrator input")
 		r, err := http.NewRequestWithContext(caseTest.Context(), method, server.URL+"/api/admin/"+path, bytes.NewReader(encoded))
@@ -162,8 +168,12 @@ func nativeSingBoxDestinationTraffic(t *testing.T, guarded bool) {
 	}
 	waitAppliedCandidate := func(unchanged *domain.DestAgentPolicy) {
 		caseTest.Helper()
+		facts := map[string]bool{}
 		defer func() {
 			if caseTest.Failed() {
+				for _, category := range []string{"receipt_generation", "receipt_mint_fresh", "receipt_sync_fresh", "receipt_state", "receipt_sha", "receipt_lkg", "receipt_precheck", "receipt_streams", "receipt_transition"} {
+					caseTest.Logf("native diagnostic: %s=%t", category, facts[category])
+				}
 				for _, category := range []string{"download", "checksum", "timeout", "rejected", "unsupported", "permission", "bind", "certificate"} {
 					caseTest.Logf("native diagnostic: %s=%t", category, strings.Contains(strings.ToLower(output.text()), category))
 				}
@@ -175,26 +185,36 @@ func nativeSingBoxDestinationTraffic(t *testing.T, guarded bool) {
 				return false
 			}
 			r, err := a.repos.DestAgentPolicy.Get(caseTest.Context(), f.agent.AgentID, true)
-			if err != nil {
+			if err != nil || r == nil {
 				return false
 			}
 			agent, err := a.repos.NodeAgent.GetByAgentID(caseTest.Context(), f.agent.AgentID)
-			if err != nil || agent.ObservedCoreEngine != domain.NodeCoreSingBox {
+			if err != nil || agent == nil || agent.ObservedCoreEngine != domain.NodeCoreSingBox {
 				return false
 			}
-			ready := nativeReceiptMatches(*r, state.PublishedGeneration, agent.LastSeen, receiptAfter)
+			facts["receipt_generation"] = r.MintedGeneration == state.PublishedGeneration
+			facts["receipt_mint_fresh"] = r.MintedAt != nil && !r.MintedAt.Before(receiptAfter)
+			facts["receipt_sync_fresh"] = agent.LastSeen != nil && agent.LastSeen.After(receiptAfter)
+			facts["receipt_state"] = r.ReportedState == "applied"
+			facts["receipt_sha"] = r.MintedSHA256 == r.ReportedSHA256
+			facts["receipt_lkg"] = r.MintedKind != domain.DestCandidateDesired || r.AppliedSHA256 == r.MintedSHA256
+			facts["receipt_precheck"] = r.FallbackReason == "" && !r.FallbackExhausted && r.ReportedIssue == "" && len(r.PrecheckListeners) == 0 && len(r.ReportedListeners) == 0
+			ready := nativeMutationReceiptMatches(priorReceipt, *r, state.PublishedGeneration, agent.LastSeen, receiptAfter)
 			if unchanged != nil {
 				ready = nativeUnchangedReceiptMatches(*unchanged, *r, state.PublishedGeneration, agent.LastSeen, receiptAfter)
 			}
-			if !ready {
+			facts["receipt_transition"] = ready
+			if !ready || state.Paused != (r.MintedKind == domain.DestCandidatePaused) {
 				return false
 			}
+			facts["receipt_streams"] = false
 			for _, name := range []domain.NodeAgentStreamName{domain.NodeAgentStreamConfig, domain.NodeAgentStreamRoster} {
 				stream, err := a.repos.NodeAgent.GetStream(caseTest.Context(), f.agent.AgentID, name)
 				if err != nil || stream.AppliedEpoch != agent.Epoch || !stream.Converged() {
 					return false
 				}
 			}
+			facts["receipt_streams"] = true
 			listener, err := a.repos.Node.GetByID(caseTest.Context(), f.node.ID)
 			return err == nil && listener.ConfigSyncState == domain.ConfigSyncSynced
 		})

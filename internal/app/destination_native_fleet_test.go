@@ -30,10 +30,11 @@ import (
 )
 
 type nativeFleetPeer struct {
+	nativeFleetNodePlan
 	panelID int64
 	node    *domain.Node
 	agent   *domain.NodeAgent
-	capable bool
+	secret  string
 	inbound int
 	probe   *nativeLegacyProbe
 	gateway *nativePanelGateway
@@ -41,11 +42,15 @@ type nativeFleetPeer struct {
 	dir     string
 }
 
-// Every profile runs two independent immutable native daemons, then adds both
+// Every layout runs independent immutable native daemons, then adds both
 // real third-party adapters to the same production App.Run and database. All
 // administrator mutations use production HTTP and all traffic is raw VLESS.
 func TestNativeDestinationFleet(t *testing.T) {
-	capabilities, valid := nativeFleetProfile(os.Getenv("PSP_NATIVE_FLEET_PROFILE"))
+	layout := os.Getenv("PSP_NATIVE_FLEET_LAYOUT")
+	if layout == "" {
+		layout = "xray-pair"
+	}
+	plans, valid := nativeFleetNodes(os.Getenv("PSP_NATIVE_FLEET_PROFILE"), layout)
 	if !valid {
 		t.Fatal("native fleet requires an exact reviewed cohort")
 	}
@@ -74,25 +79,41 @@ func TestNativeDestinationFleet(t *testing.T) {
 	}
 	canary := &domain.User{UPN: "fleet-canary@example.test", Email: "fleet-canary@example.test", SSOProvider: domain.SSOProviderLocal, SSOSubject: "fleet-canary@example.test", Role: domain.RoleUser, Enabled: true, GroupID: openGroup.ID, UUID: "33333333-3333-4333-8333-333333333333", SubToken: "fixture-fleet-canary-token"}
 	nativeMust(t, a.repos.User.Create(t.Context(), canary), "create independent fleet control principal")
-	credential := "fixture-fleet-second-credential-with-enough-entropy"
-	digest := sha256.Sum256([]byte(credential))
-	agent := &domain.NodeAgent{AgentID: "agt_native_fleet_second", Epoch: 1, CredentialSHA256: hex.EncodeToString(digest[:]), DesiredCoreEngine: domain.NodeCoreXray, DesiredCoreVersion: "26.6.27"}
-	panel := &domain.Panel{Name: "Fleet second", Kind: domain.PanelKindPSP, URL: "psp://" + agent.AgentID}
-	nativeMust(t, a.repos.NativeAgentProvisioning.Create(t.Context(), panel, agent), "create independent second fleet panel")
-	nativeMust(t, a.xuiPool.Add(panel), "register independent second fleet adapter")
-	second := &domain.Node{PanelID: panel.ID, InboundID: 1, DisplayName: "Fleet second", ServerAddress: "fleet.example.test", DesiredProtocol: "vless", ObservedProtocol: "vless", InboundListen: "127.0.0.1", InboundSettings: `{"decryption":"none"}`, StreamSettings: `{"network":"tcp","security":"none"}`, Sniffing: `{}`, Allocate: `{}`, Enabled: true, ConfigSyncState: domain.ConfigSyncPending}
-	second.DesiredPort, second.ObservedPort = nativePort(t), 0
-	second.ObservedPort = second.DesiredPort
-	nativeMust(t, a.repos.Node.Create(t.Context(), second), "create independent second fleet inbound")
-	f.node.DesiredPort, f.node.ObservedPort = nativePort(t), 0
-	f.node.ObservedPort, f.node.InboundListen = f.node.DesiredPort, "127.0.0.1"
-	nativeMust(t, a.repos.Node.Update(t.Context(), f.node), "configure owned primary fleet inbound")
-	peers := []*nativeFleetPeer{{panelID: f.agent.PanelID, node: f.node, agent: f.agent, capable: capabilities[0], inbound: f.node.DesiredPort}, {panelID: panel.ID, node: second, agent: agent, capable: capabilities[1], inbound: second.DesiredPort}}
-	if peers[0].inbound == peers[1].inbound {
-		t.Fatal("fleet peers borrowed the same listener")
+	ownedPorts := map[int]bool{}
+	port := func() int {
+		for {
+			value := nativePort(t)
+			if !ownedPorts[value] {
+				ownedPorts[value] = true
+				return value
+			}
+		}
+	}
+	var peers []*nativeFleetPeer
+	for i, plan := range plans {
+		peer := &nativeFleetPeer{nativeFleetNodePlan: plan, node: f.node, agent: f.agent, secret: f.credential}
+		if i != 0 {
+			peer.secret = fmt.Sprintf("fixture-fleet-%d-credential-with-enough-entropy", i)
+			digest := sha256.Sum256([]byte(peer.secret))
+			peer.agent = &domain.NodeAgent{AgentID: fmt.Sprintf("agt_native_fleet_%d", i), Epoch: 1, CredentialSHA256: hex.EncodeToString(digest[:]), DesiredCoreEngine: plan.engine, DesiredCoreVersion: plan.version}
+			panel := &domain.Panel{Name: fmt.Sprintf("Fleet peer %d", i), Kind: domain.PanelKindPSP, URL: "psp://" + peer.agent.AgentID}
+			nativeMust(t, a.repos.NativeAgentProvisioning.Create(t.Context(), panel, peer.agent), "create independent fleet panel")
+			nativeMust(t, a.xuiPool.Add(panel), "register independent fleet adapter")
+			peer.node = &domain.Node{PanelID: panel.ID, InboundID: 1, DisplayName: panel.Name, ServerAddress: "fleet.example.test", DesiredProtocol: "vless", ObservedProtocol: "vless", InboundListen: "127.0.0.1", InboundSettings: `{"decryption":"none"}`, StreamSettings: `{"network":"tcp","security":"none"}`, Sniffing: `{}`, Allocate: `{}`, Enabled: true, ConfigSyncState: domain.ConfigSyncPending}
+			peer.node.DesiredPort = port()
+			peer.node.ObservedPort = peer.node.DesiredPort
+			nativeMust(t, a.repos.Node.Create(t.Context(), peer.node), "create independent fleet inbound")
+		} else {
+			peer.node.DesiredPort, peer.node.InboundListen = port(), "127.0.0.1"
+			peer.node.ObservedPort = peer.node.DesiredPort
+			nativeMust(t, a.repos.Node.Update(t.Context(), peer.node), "configure owned primary fleet inbound")
+		}
+		nativeMust(t, a.repos.NodeAgent.UpdateCoreSelection(t.Context(), peer.agent.AgentID, plan.engine, plan.version, plan.restricted), "select exact reviewed individual fleet core")
+		peer.panelID, peer.inbound = peer.agent.PanelID, peer.node.DesiredPort
+		peers = append(peers, peer)
 	}
 	// Run all ordinary production loops, not only the audit worker or explicit callbacks.
-	a.server.Addr = net.JoinHostPort("127.0.0.1", strconv.Itoa(nativePort(t)))
+	a.server.Addr = net.JoinHostPort("127.0.0.1", strconv.Itoa(port()))
 	runDone := make(chan error, 1)
 	go func() { runDone <- a.Run() }()
 	t.Cleanup(func() {
@@ -165,7 +186,7 @@ func TestNativeDestinationFleet(t *testing.T) {
 	// startup before starting either daemon, never after observing its first sync.
 	startupAfter := time.UnixMilli(time.Now().UnixMilli())
 	bindPriorReceipts()
-	for i, peer := range peers {
+	for _, peer := range peers {
 		peer.probe = &nativeLegacyProbe{listener: protocol.NewListenerKey(peer.node.ID)}
 		peer.gateway = &nativePanelGateway{}
 		peer.gateway.replace(a.server.Handler)
@@ -174,12 +195,8 @@ func TestNativeDestinationFleet(t *testing.T) {
 		peer.dir = t.TempDir()
 		ca, key := filepath.Join(peer.dir, "ca.pem"), filepath.Join(peer.dir, "credential")
 		nativeMust(t, os.WriteFile(ca, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: server.Certificate().Raw}), 0600), "write fleet peer scoped CA")
-		secret := f.credential
-		if i == 1 {
-			secret = credential
-		}
-		nativeMust(t, os.WriteFile(key, []byte(secret), 0600), "write private individual fleet credential")
-		peer.process = exec.Command(binaries[peer.capable], "--endpoint", server.URL+"/v1/node/sync", "--agent-id", peer.agent.AgentID, "--credential-file", key, "--data-dir", filepath.Join(peer.dir, "node"), "--xray-api-listen", net.JoinHostPort("127.0.0.1", strconv.Itoa(nativePort(t))))
+		nativeMust(t, os.WriteFile(key, []byte(peer.secret), 0600), "write private individual fleet credential")
+		peer.process = exec.Command(binaries[peer.capable], "--endpoint", server.URL+"/v1/node/sync", "--agent-id", peer.agent.AgentID, "--credential-file", key, "--data-dir", filepath.Join(peer.dir, "node"), "--xray-api-listen", net.JoinHostPort("127.0.0.1", strconv.Itoa(port())), "--sing-box-api-listen", net.JoinHostPort("127.0.0.1", strconv.Itoa(port())))
 		peer.process.Env = append(os.Environ(), "SSL_CERT_FILE="+ca)
 		output := &nativePrivateOutput{}
 		peer.process.Stdout, peer.process.Stderr = output, output
@@ -212,7 +229,13 @@ func TestNativeDestinationFleet(t *testing.T) {
 		facts := map[string]bool{}
 		defer func() {
 			if caseTest.Failed() {
-				for _, category := range []string{"fleet_peer_0_observation", "fleet_peer_1_observation", "fleet_peer_0_streams", "fleet_peer_1_streams", "fleet_peer_0_policy", "fleet_peer_1_policy", "fleet_runtime_present", "fleet_prior_present", "fleet_kind_matches", "fleet_generation_matches", "fleet_minted_present", "fleet_reported_present", "fleet_report_state", "fleet_report_sha", "fleet_heartbeat_fresh", "fleet_mint_fresh", "fleet_exact_receipt"} {
+				for index := range peers {
+					for _, fact := range []string{"observation", "streams", "policy"} {
+						category := fmt.Sprintf("fleet_peer_%d_%s", index, fact)
+						caseTest.Logf("native diagnostic: %s=%t", category, facts[category])
+					}
+				}
+				for _, category := range []string{"fleet_runtime_present", "fleet_prior_present", "fleet_kind_matches", "fleet_generation_matches", "fleet_minted_present", "fleet_reported_present", "fleet_report_state", "fleet_report_sha", "fleet_heartbeat_fresh", "fleet_mint_fresh", "fleet_exact_receipt"} {
 					caseTest.Logf("native diagnostic: %s=%t", category, facts[category])
 				}
 			}
@@ -226,7 +249,7 @@ func TestNativeDestinationFleet(t *testing.T) {
 				prefix := fmt.Sprintf("fleet_peer_%d_", index)
 				s := peer.probe.snapshot()
 				observed, err := a.repos.NodeAgent.GetByAgentID(caseTest.Context(), peer.agent.AgentID)
-				if err != nil || observed.LastSeen == nil || !observed.LastSeen.After(after) || observed.Epoch != peer.agent.Epoch || slicesContainsNative(observed.ObservedCapabilities, protocol.CapabilityDestinationPolicy) != peer.capable || s.PolicyCapable != peer.capable || s.CoreEngine != "xray" || s.CoreVersion != "26.6.27" || s.CoreState != "running" || !s.ListenerApplied || !nativePanelStreamsApplied(s, 1) || !peer.capable && s.AgentVersion != "v4.0.1.8" {
+				if err != nil || observed.LastSeen == nil || !observed.LastSeen.After(after) || observed.Epoch != peer.agent.Epoch || slicesContainsNative(observed.ObservedCapabilities, protocol.CapabilityDestinationPolicy) != peer.capable || s.PolicyCapable != peer.capable || s.CoreEngine != string(peer.engine) || s.CoreVersion != peer.version || s.CoreState != "running" || !s.ListenerApplied || !nativePanelStreamsApplied(s, 1) || !peer.capable && s.AgentVersion != "v4.0.1.8" {
 					facts[prefix+"observation"] = false
 					return false
 				}
@@ -303,7 +326,7 @@ func TestNativeDestinationFleet(t *testing.T) {
 		var status destpolicy.DestinationStatus
 		request("GET", "dest/status", nil, []int{200}, &status)
 		rows := make(map[int64]destpolicy.DestinationNodeStatus)
-		if len(status.Nodes) != 2+len(thirdPanels) || status.Paused != paused {
+		if len(status.Nodes) != len(peers)+len(thirdPanels) || status.Paused != paused {
 			caseTest.Fatal("fleet public status omitted or borrowed an owned peer")
 		}
 		for _, row := range status.Nodes {
@@ -330,7 +353,7 @@ func TestNativeDestinationFleet(t *testing.T) {
 					wantState = "offline"
 				}
 			}
-			if row.Kind != domain.PanelKindPSP || row.Supports.Policy != peer.capable || row.State != wantState || row.AppliedRules != rules {
+			if row.Kind != domain.PanelKindPSP || row.AgentID == nil || *row.AgentID != peer.agent.AgentID || row.Engine == nil || *row.Engine != string(peer.engine) || row.Supports.Policy != peer.capable || row.State != wantState || row.AppliedRules != rules || peer.engine == domain.NodeCoreSingBox && (row.Supports.Hits || row.Supports.Usage || row.Collecting || row.CollectEffective != "") {
 				caseTest.Fatal("fleet public status borrowed another node's execution")
 			}
 			delete(rows, peer.panelID)
@@ -363,8 +386,8 @@ func TestNativeDestinationFleet(t *testing.T) {
 	captureClients := func(user *domain.User, out map[int64]*domain.PSPClient) {
 		clients, err := a.repos.PSPClient.ListByUser(caseTest.Context(), user.ID)
 		nativeMust(caseTest, err, "bind stable fleet client identities")
-		if len(clients) != 4 {
-			caseTest.Fatal("fleet did not provision exactly four independent panel clients")
+		if len(clients) != len(peers)+len(thirdPanels) {
+			caseTest.Fatal("fleet did not provision every independent panel client")
 		}
 		for _, client := range clients {
 			if client.UUID != user.UUID || out[client.PanelID] != nil {
@@ -423,7 +446,7 @@ func TestNativeDestinationFleet(t *testing.T) {
 				expected[peer.panelID] = "capability"
 			}
 		}
-		if detail.Mode != modeName || detail.Stage != stage || detail.TotalNodes != 4 || detail.EligibleNodes != eligible || len(detail.Ineligible) != len(expected) {
+		if detail.Mode != modeName || detail.Stage != stage || detail.TotalNodes != len(peers)+len(thirdPanels) || detail.EligibleNodes != eligible || len(detail.Ineligible) != len(expected) {
 			caseTest.Fatal("fleet public coverage borrowed capability from another panel")
 		}
 		for _, row := range detail.Ineligible {
@@ -556,8 +579,11 @@ func TestNativeDestinationFleet(t *testing.T) {
 		if !peers[index].capable && peers[1].capable {
 			index = 1
 		}
-		offline, online := peers[index], peers[1-index]
-		live := nativeBindLiveCore(caseTest, offline.process.Process.Pid, filepath.Join(offline.dir, "node"), "xray")
+		if layout == "mixed-engines" {
+			index = len(peers) - 1 // the independently scoped sing-box daemon
+		}
+		offline := peers[index]
+		live := nativeBindLiveCore(caseTest, offline.process.Process.Pid, filepath.Join(offline.dir, "node"), string(offline.engine))
 		partition := &nativeSyncPartition{}
 		offline.gateway.partitionSync(partition)
 		offlinePanelID = offline.panelID
@@ -574,9 +600,20 @@ func TestNativeDestinationFleet(t *testing.T) {
 			if err != nil {
 				return false
 			}
-			fresh, err := a.repos.NodeAgent.GetByAgentID(caseTest.Context(), online.agent.AgentID)
 			live()
-			return err == nil && attempts >= firstBlocked+3 && old.LastSeen != nil && before.LastSeen != nil && !old.LastSeen.After(*before.LastSeen) && fresh.LastSeen != nil && fresh.LastSeen.After(after)
+			if attempts < firstBlocked+3 || old.LastSeen == nil || before.LastSeen == nil || old.LastSeen.After(*before.LastSeen) {
+				return false
+			}
+			for _, online := range peers {
+				if online == offline {
+					continue
+				}
+				fresh, err := a.repos.NodeAgent.GetByAgentID(caseTest.Context(), online.agent.AgentID)
+				if err != nil || fresh.LastSeen == nil || !fresh.LastSeen.After(after) {
+					return false
+				}
+			}
+			return true
 		})
 		assertTraffic()
 		assertCoverage()
