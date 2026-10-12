@@ -203,7 +203,7 @@ func TestNativeDestinationFleet(t *testing.T) {
 		facts := map[string]bool{}
 		defer func() {
 			if caseTest.Failed() {
-				for _, category := range []string{"fleet_peer_0_observation", "fleet_peer_1_observation", "fleet_peer_0_streams", "fleet_peer_1_streams", "fleet_peer_0_policy", "fleet_peer_1_policy"} {
+				for _, category := range []string{"fleet_peer_0_observation", "fleet_peer_1_observation", "fleet_peer_0_streams", "fleet_peer_1_streams", "fleet_peer_0_policy", "fleet_peer_1_policy", "fleet_runtime_present", "fleet_prior_present", "fleet_kind_matches", "fleet_generation_matches", "fleet_minted_present", "fleet_reported_present", "fleet_report_state", "fleet_report_sha", "fleet_heartbeat_fresh", "fleet_mint_fresh", "fleet_exact_receipt"} {
 					caseTest.Logf("native diagnostic: %s=%t", category, facts[category])
 				}
 			}
@@ -249,7 +249,24 @@ func TestNativeDestinationFleet(t *testing.T) {
 				if paused {
 					kind = domain.DestCandidatePaused
 				}
-				if runtime == nil || runtime.MintedKind != kind || !nativeMutationReceiptMatches(priorReceipts[peer.agent.AgentID], *runtime, state.PublishedGeneration, observed.LastSeen, after) {
+				for category, present := range map[string]bool{
+					"fleet_runtime_present": runtime != nil,
+					"fleet_prior_present":   priorReceipts[peer.agent.AgentID] != nil,
+				} {
+					facts[category] = present
+				}
+				if runtime != nil {
+					facts["fleet_kind_matches"] = runtime.MintedKind == kind
+					facts["fleet_generation_matches"] = runtime.MintedGeneration == state.PublishedGeneration
+					facts["fleet_minted_present"] = runtime.MintedAt != nil
+					facts["fleet_reported_present"] = runtime.ReportedAt != nil
+					facts["fleet_report_state"] = runtime.ReportedState == "applied"
+					facts["fleet_report_sha"] = runtime.ReportedSHA256 == runtime.MintedSHA256
+					facts["fleet_heartbeat_fresh"] = observed.LastSeen.After(after)
+					facts["fleet_mint_fresh"] = runtime.MintedAt != nil && !runtime.MintedAt.Before(after)
+					facts["fleet_exact_receipt"] = nativeMutationReceiptMatches(priorReceipts[peer.agent.AgentID], *runtime, state.PublishedGeneration, observed.LastSeen, after)
+				}
+				if runtime == nil || runtime.MintedKind != kind || !facts["fleet_exact_receipt"] {
 					facts[prefix+"policy"] = false
 					return false
 				}

@@ -3,6 +3,7 @@
 package app
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/json"
 	"net"
@@ -103,15 +104,32 @@ func nativeStartFleetBackends(t, owner *testing.T) nativeFleetBackends {
 	startErr := command.Run()
 	if startErr != nil {
 		private := output.text()
+		// Inspect only this fixture's named container; retain booleans, never
+		// its logs (which may include the minted administrator password).
+		suiInfo, _ := exec.Command("docker", "container", "inspect", "psp-compat-sui").Output()
+		var suiContainers []nativeFleetContainer
+		suiOwned := json.Unmarshal(suiInfo, &suiContainers) == nil && len(suiContainers) == 1 && nativeFleetContainerOwned(suiContainers[0], "psp-compat-sui", nativeFleetSUIImage, filepath.Join(workdir, "sui"), "/app/db")
+		suiRunning, suiPrivate := false, ""
+		if suiOwned {
+			suiRunning = suiContainers[0].State.Running
+			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			suiLogs, _ := exec.CommandContext(ctx, "docker", "logs", "--tail", "500", suiContainers[0].ID).CombinedOutput()
+			cancel()
+			suiPrivate = strings.ToLower(string(suiLogs))
+		}
 		for category, present := range map[string]bool{
-			"fleet_backend_xui_ready":      strings.Contains(private, "3X-UI ready"),
-			"fleet_backend_sui_ready":      strings.Contains(private, "S-UI ready"),
-			"fleet_backend_xui_pull":       strings.Contains(private, "pulling "+nativeFleetXUIImage),
-			"fleet_backend_sui_pull":       strings.Contains(private, "pulling "+nativeFleetSUIImage),
-			"fleet_backend_auth_error":     strings.Contains(private, "curl: (22)") || strings.Contains(private, "KeyError:"),
-			"fleet_backend_timeout":        strings.Contains(private, "timed out") || strings.Contains(private, "never created") || strings.Contains(private, "never published"),
-			"fleet_backend_registry_error": strings.Contains(private, "manifest unknown") || strings.Contains(private, "unauthorized") || strings.Contains(private, "denied"),
-			"fleet_backend_sql_error":      strings.Contains(private, "sqlite3.OperationalError") || strings.Contains(private, "sqlite3.IntegrityError"),
+			"fleet_backend_xui_ready":         strings.Contains(private, "3X-UI ready"),
+			"fleet_backend_sui_ready":         strings.Contains(private, "S-UI ready"),
+			"fleet_backend_xui_pull":          strings.Contains(private, "pulling "+nativeFleetXUIImage),
+			"fleet_backend_sui_pull":          strings.Contains(private, "pulling "+nativeFleetSUIImage),
+			"fleet_backend_auth_error":        strings.Contains(private, "curl: (22)") || strings.Contains(private, "KeyError:"),
+			"fleet_backend_timeout":           strings.Contains(private, "timed out") || strings.Contains(private, "never created") || strings.Contains(private, "never published"),
+			"fleet_backend_registry_error":    strings.Contains(private, "manifest unknown") || strings.Contains(private, "unauthorized") || strings.Contains(private, "denied"),
+			"fleet_backend_sql_error":         strings.Contains(private, "sqlite3.OperationalError") || strings.Contains(private, "sqlite3.IntegrityError"),
+			"fleet_backend_sui_running":       suiRunning,
+			"fleet_backend_sui_bind_error":    strings.Contains(suiPrivate, "address already in use") || strings.Contains(suiPrivate, "bind: permission denied"),
+			"fleet_backend_sui_storage_error": strings.Contains(suiPrivate, "database is locked") || strings.Contains(suiPrivate, "readonly database") || strings.Contains(suiPrivate, "permission denied"),
+			"fleet_backend_sui_start_error":   strings.Contains(suiPrivate, "failed to start") || strings.Contains(suiPrivate, "start failed") || strings.Contains(suiPrivate, "panic:"),
 		} {
 			t.Logf("native diagnostic: %s=%t", category, present)
 		}
