@@ -4874,6 +4874,18 @@
         "label": "Audit batch receipt",
         "desc": "Audit subtrees by kind and handling outcome. Acceptance does not imply durable storage, and these counts are incomplete."
       },
+      "psp_node_control_sync_ms": {
+        "label": "Node control processing time",
+        "desc": "Time spent in the control coordinator, including failed calls. Excludes HTTP authentication, decoding and network transit."
+      },
+      "psp_dest_audit_begin_ms": {
+        "label": "Audit first transaction time",
+        "desc": "Complete repository calls by record kind, including admission, budget checks and the first chunk. Includes failures; does not isolate database lock wait."
+      },
+      "psp_dest_audit_chunk_ms": {
+        "label": "Audit remaining chunk time",
+        "desc": "Complete repository calls for remaining chunks by record kind, including admission and the transaction. Includes failures; does not isolate database lock wait."
+      },
       "psp_dest_audit_rows_total": {
         "label": "Destination record rows",
         "desc": "Stored or estimated lost rows by record kind and outcome. Receiver losses are best effort and incomplete; do not add them to node event counts."
@@ -5073,6 +5085,13 @@
         "outcome_duplicate_batch": "Duplicate batch",
         "outcome_queue_full": "Queue full",
         "outcome_ingest_error": "Ingest failed"
+      },
+      "dest_kind": {
+        "block": "Block",
+        "observe": "Observe",
+        "trial": "Anonymous trial",
+        "usage": "Usage",
+        "unknown": "Unknown"
       },
       "dest_rows": {
         "kind_block": "Blocked",

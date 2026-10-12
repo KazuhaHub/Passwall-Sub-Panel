@@ -1,13 +1,31 @@
 package destaudit
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/metrics"
 )
+
+// Keep the fake repository calls above the histogram's microsecond resolution.
+// This exercises elapsed instrumentation without assuming a minimum cost for
+// an in-memory slice append on a particular runner.
+type timingWorkerStore struct{ *workerStore }
+
+func (s timingWorkerStore) BeginDestinationAudit(ctx context.Context, batch domain.DestAuditBatch) (domain.DestAuditBegin, error) {
+	time.Sleep(time.Millisecond)
+	return s.workerStore.BeginDestinationAudit(ctx, batch)
+}
+
+func (s timingWorkerStore) WriteDestinationAuditChunk(ctx context.Context, chunk domain.DestAuditChunk) (string, error) {
+	time.Sleep(time.Millisecond)
+	return s.workerStore.WriteDestinationAuditChunk(ctx, chunk)
+}
 
 func auditTiming(t *testing.T, name string) metrics.HistogramSnapshot {
 	t.Helper()
@@ -29,6 +47,7 @@ func TestWorkerTimingSeparatesRealBeginAndChunkAttemptsIncludingFailures(t *test
 			beforeBegin, beforeChunk := auditTiming(t, beginName), auditTiming(t, chunkName)
 			repo := &workerStore{failAt: failed, writeErr: errors.New("private SQL and destination marker")}
 			worker, _, _ := workerFixture(t, repo)
+			worker.repo = timingWorkerStore{repo}
 			offerWorker(t, worker, workerBody(kind, 1, 1001))
 			drainWorker(t, worker)
 			afterBegin, afterChunk := auditTiming(t, beginName), auditTiming(t, chunkName)
@@ -36,8 +55,8 @@ func TestWorkerTimingSeparatesRealBeginAndChunkAttemptsIncludingFailures(t *test
 			if failed == 1 {
 				chunks = 0
 			}
-			if afterBegin.Count != beforeBegin.Count+1 || afterChunk.Count != beforeChunk.Count+chunks || afterBegin.Sum <= beforeBegin.Sum || chunks > 0 && afterChunk.Sum <= beforeChunk.Sum {
-				t.Fatal("actual write attempts were missing, merged or counted twice")
+			if afterBegin.Count != beforeBegin.Count+1 || afterChunk.Count != beforeChunk.Count+chunks || afterBegin.Sum-beforeBegin.Sum < 1 || chunks > 0 && afterChunk.Sum-beforeChunk.Sum < 1 {
+				t.Fatalf("kind=%s failure_step=%d begin_attempts=%d chunk_attempts=%d; missing elapsed repository measurement", kind, failed, afterBegin.Count-beforeBegin.Count, afterChunk.Count-beforeChunk.Count)
 			}
 			for _, value := range []metrics.HistogramSnapshot{afterBegin, afterChunk} {
 				data, err := json.Marshal(value)

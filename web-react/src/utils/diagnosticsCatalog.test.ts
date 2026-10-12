@@ -273,6 +273,19 @@ describe('destination compiler and list refresh diagnostics', () => {
 })
 
 describe('labelKey and labelFor', () => {
+  it('translates each audit timing kind without interpreting it as a receipt outcome', () => {
+    const groups = ['psp_dest_audit_begin_ms', 'psp_dest_audit_chunk_ms'].map(f => FAMILY_LABEL_GROUP[f])
+    expect(groups).toEqual(['dest_kind', 'dest_kind'])
+    for (const bundle of [zh, en]) {
+      const flat = flatten(bundle as Nested)
+      for (const kind of ['block', 'observe', 'trial', 'usage', 'unknown']) {
+        const key = `diagnostics.labels.dest_kind.${kind}`
+        expect(flat[key]).toBeDefined()
+        expect(labelFor(k => flat[k.replace('admin:', '')], k => k.replace('admin:', '') in flat, 'dest_kind', kind)).toBe(flat[key])
+      }
+    }
+  })
+
   // i18next reads "." as nothing special here (keySeparator is false) but a
   // flattened bundle key with a dot in it is still a trap for every tool that
   // walks the JSON, so label values are folded to identifier characters.

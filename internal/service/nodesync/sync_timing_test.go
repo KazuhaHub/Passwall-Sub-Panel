@@ -29,7 +29,9 @@ func TestControlSyncTimingCountsFailedAttemptsWithoutPrivateLabels(t *testing.T)
 		}
 	}
 	after := syncTiming(t)
-	if after.Count != before.Count+2 || after.Sum <= before.Sum || after.Unit != "ms" {
+	// Validation-only calls may be shorter than the histogram's microsecond
+	// resolution. They must still contribute samples, including a zero duration.
+	if after.Count != before.Count+2 || after.Sum < before.Sum || after.Unit != "ms" {
 		t.Fatal("failed control attempts disappeared from actual elapsed timing")
 	}
 	data, err := json.Marshal(after)

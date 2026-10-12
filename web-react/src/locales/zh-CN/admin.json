@@ -4870,6 +4870,18 @@
         "label": "审计批次接收",
         "desc": "按记录种类与处理结果统计审计子树。已接收不代表已经入库，统计不保证完整。"
       },
+      "psp_node_control_sync_ms": {
+        "label": "节点控制处理耗时",
+        "desc": "控制协调器的调用耗时，包含失败调用；不包含 HTTP 身份验证、解码与网络传输。"
+      },
+      "psp_dest_audit_begin_ms": {
+        "label": "审计首笔事务耗时",
+        "desc": "按记录种类统计完整仓库调用，包含准入、预算检查与首个分块，失败调用也计入；不能单独表示数据库锁等待。"
+      },
+      "psp_dest_audit_chunk_ms": {
+        "label": "审计后续分块耗时",
+        "desc": "按记录种类统计后续分块的完整仓库调用，包含准入与事务，失败调用也计入；不能单独表示数据库锁等待。"
+      },
       "psp_dest_audit_rows_total": {
         "label": "目的地记录行数",
         "desc": "按记录种类与结果统计已入库或估计丢失的行数。接收端损失尽力记录，不保证完整，也不与节点事件数相加。"
@@ -5069,6 +5081,13 @@
         "outcome_duplicate_batch": "重复批次",
         "outcome_queue_full": "队列已满",
         "outcome_ingest_error": "入库失败"
+      },
+      "dest_kind": {
+        "block": "拦截",
+        "observe": "观察",
+        "trial": "匿名试运行",
+        "usage": "用量",
+        "unknown": "未知"
       },
       "dest_rows": {
         "kind_block": "拦截",
