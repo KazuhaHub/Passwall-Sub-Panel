@@ -264,7 +264,10 @@ func nativeTrialLoad(t *testing.T, f destinationPolicyFixture, client *http.Clie
 	nativeMust(t, err, "encode independent block request")
 	baseline := sample()
 	latencyBefore := nativeTrialLatencySnapshot(t)
+	pageState, err := a.destDefinitions.State(t.Context())
+	nativeMust(t, err, "bind published generation for first-screen reads")
 	start := time.Now()
+	pageDone := nativeStartPageProbe(ctx, client, endpoint, token, nativePageIdentity{panel: f.agent.PanelID, user: f.user.ID, policy: policy.ID, group: group.ID, generation: pageState.PublishedGeneration}, start)
 	baseline.ElapsedMS = 0
 	m.Samples = append(m.Samples, baseline)
 	for range 512 {
@@ -347,6 +350,7 @@ func nativeTrialLoad(t *testing.T, f destinationPolicyFixture, client *http.Clie
 		time.Sleep(delay)
 	}
 	m.Duration = time.Since(start).Milliseconds()
+	pageFailure := nativeWritePageProbe(t, evidence, m.Duration, pageDone)
 	nativeWriteTrialLatency(t, evidence, m.Duration, latencyBefore)
 	closeJobs.Do(func() { close(jobs) })
 	wg.Wait()
@@ -412,4 +416,7 @@ func nativeTrialLoad(t *testing.T, f destinationPolicyFixture, client *http.Clie
 	}
 	// The accepted workload has a separate future block-overflow and four-lane
 	// pressure gate. This phase proves trial budget exhaustion and block isolation.
+	if pageFailure != "" {
+		t.Fatalf("first-screen API probe failed: %s; private body withheld", pageFailure)
+	}
 }
