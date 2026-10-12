@@ -65,8 +65,10 @@ func nativeDestinationLoad(t *testing.T, workload nativeLoadWorkload) {
 	}
 	runnerTemp, tempErr := filepath.EvalSymlinks(os.Getenv("RUNNER_TEMP"))
 	evidenceDir, dirErr := filepath.EvalSymlinks(filepath.Dir(evidence))
-	if tempErr != nil || dirErr != nil || runnerTemp != evidenceDir || filepath.Base(evidence) != metricsName || !filepath.IsAbs(binary) || filepath.Base(binary) != "destination-node" || os.Getenv("PSP_NATIVE_DB_KIND") != "sqlite" || os.Getenv("PSP_NATIVE_CORE_VERSION") != "26.6.27" {
-		t.Fatal("load fixture requires exact hosted candidate, owned evidence and SQLite")
+	database := os.Getenv("PSP_NATIVE_DB_KIND")
+	validDatabase := database == "sqlite" || mixed && (database == "mysql" || database == "postgres")
+	if tempErr != nil || dirErr != nil || runnerTemp != evidenceDir || filepath.Base(evidence) != metricsName || !filepath.IsAbs(binary) || filepath.Base(binary) != "destination-node" || !validDatabase || os.Getenv("PSP_NATIVE_CORE_VERSION") != "26.6.27" {
+		t.Fatal("load fixture requires exact hosted candidate, owned evidence and supported owned database")
 	}
 	info, err := os.Stat(binary)
 	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0022 != 0 {
@@ -224,7 +226,7 @@ func nativeDestinationLoad(t *testing.T, workload nativeLoadWorkload) {
 		CoreVersion string            `json:"core_version"`
 		Ticks       uint64            `json:"cpu_ticks_per_second"`
 		Phases      []nativeLoadPhase `json:"phases"`
-	}{1, "77912a6541eede8db9493d8be0cd6151cfded6e4", "26.6.27", ticks, []nativeLoadPhase{}}
+	}{1, "184f4e23f0f3d72f8492432184685fea4ec4967c", "26.6.27", ticks, []nativeLoadPhase{}}
 	t.Cleanup(func() {
 		data, err := json.Marshal(report)
 		nativeMust(t, err, "encode count-only load evidence")

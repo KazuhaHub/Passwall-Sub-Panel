@@ -31,6 +31,65 @@ type nativeMixedNodeReading struct {
 	HeapObjects uint64                `json:"go_heap_objects"`
 	Goroutines  int                   `json:"go_goroutines"`
 	Lanes       []nativeMixedNodeLane `json:"lanes"`
+	Access      nativeMixedAccess     `json:"access_log"`
+}
+
+type nativeMixedAccess struct {
+	Available        int    `json:"available"`
+	Private          uint64 `json:"private_lines"`
+	Usage            uint64 `json:"usage_events"`
+	Denied           uint64 `json:"denied_events"`
+	Unmatched        uint64 `json:"unmatched_events"`
+	Dropped          uint64 `json:"dropped_events"`
+	Stale            uint64 `json:"stale_events"`
+	Queued           int    `json:"parse_queued"`
+	Limit            int    `json:"parse_limit"`
+	PendingDropped   uint64 `json:"pending_dropped"`
+	PendingUnmatched uint64 `json:"pending_unmatched"`
+}
+
+func (v nativeMixedAccess) valid() bool {
+	if v.Available != 1 || v.Limit != 4096 || v.Queued < 0 || v.Queued > v.Limit {
+		return false
+	}
+	for _, n := range []uint64{v.Private, v.Usage, v.Denied, v.Unmatched, v.Dropped, v.Stale, v.PendingDropped, v.PendingUnmatched} {
+		if n > 1<<53-1 {
+			return false
+		}
+	}
+	return true
+}
+
+func (v nativeMixedAccess) quiescent() bool {
+	return v.valid() && v.Queued == 0 && v.PendingDropped == 0 && v.PendingUnmatched == 0 && v.Private == v.Usage+v.Denied+v.Unmatched+v.Dropped+v.Stale
+}
+
+// The fixture owns connection counts. A difference before this filter is not
+// a fabricated Node loss, nor a measurement inside the upstream core's queue.
+type nativeMixedIngress struct {
+	Before             nativeMixedAccess `json:"before"`
+	After              nativeMixedAccess `json:"after"`
+	AllowedExpected    uint64            `json:"allowed_expected"`
+	AllowedReceived    uint64            `json:"allowed_received"`
+	AllowedNotReceived uint64            `json:"allowed_not_received"`
+	DeniedExpected     uint64            `json:"denied_expected"`
+	DeniedReceived     uint64            `json:"denied_received"`
+	DeniedNotReceived  uint64            `json:"denied_not_received"`
+}
+
+func nativeMixedIngressBetween(before, after nativeMixedAccess, allowed, denied uint64) (nativeMixedIngress, bool) {
+	out := nativeMixedIngress{Before: before, After: after, AllowedExpected: allowed, DeniedExpected: denied}
+	if !before.quiescent() || !after.quiescent() || after.Private < before.Private || after.Usage < before.Usage || after.Denied < before.Denied || after.Unmatched < before.Unmatched || after.Dropped < before.Dropped || after.Stale != before.Stale {
+		return out, false
+	}
+	out.AllowedReceived = after.Usage - before.Usage + after.Unmatched - before.Unmatched + after.Dropped - before.Dropped
+	out.DeniedReceived = after.Denied - before.Denied
+	if out.AllowedReceived > allowed || out.DeniedReceived > denied {
+		return out, false
+	}
+	out.AllowedNotReceived = allowed - out.AllowedReceived
+	out.DeniedNotReceived = denied - out.DeniedReceived
+	return out, true
 }
 
 // Closed opt-in numeric journal only. Other private output stays private.
@@ -46,8 +105,19 @@ func nativeReadMixedNodeLine(line []byte) (nativeMixedNodeReading, bool, bool) {
 	}
 	decoder := json.NewDecoder(bytes.NewReader(line[prefix[1]:]))
 	decoder.DisallowUnknownFields()
-	if decoder.Decode(&out) != nil || decoder.Decode(new(any)) != io.EOF || out.Schema != 1 || out.HeapAlloc == 0 || out.HeapInuse < out.HeapAlloc || out.HeapObjects == 0 || out.Goroutines < 1 || len(out.Lanes) != 4 {
+	if decoder.Decode(&out) != nil || decoder.Decode(new(any)) != io.EOF || out.Schema != 2 || out.HeapAlloc == 0 || out.HeapInuse < out.HeapAlloc || out.HeapObjects == 0 || out.Goroutines < 1 || len(out.Lanes) != 4 || !out.Access.valid() {
 		return out, true, false
+	}
+	var shape struct {
+		Access map[string]json.RawMessage `json:"access_log"`
+	}
+	if json.Unmarshal(line[prefix[1]:], &shape) != nil || len(shape.Access) != 11 {
+		return out, true, false
+	}
+	for _, raw := range shape.Access {
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			return out, true, false
+		}
 	}
 	for i, lane := range out.Lanes {
 		maxRows := 4096
@@ -62,7 +132,7 @@ func nativeReadMixedNodeLine(line []byte) (nativeMixedNodeReading, bool, bool) {
 }
 
 func TestNativeMixedObservationRejectsPrivateFieldsAndForeignQuotas(t *testing.T) {
-	reading := nativeMixedNodeReading{Schema: 1, HeapAlloc: 100, HeapInuse: 200, HeapObjects: 10, Goroutines: 5}
+	reading := nativeMixedNodeReading{Schema: 2, HeapAlloc: 100, HeapInuse: 200, HeapObjects: 10, Goroutines: 5, Access: nativeMixedAccess{Available: 1, Limit: 4096}}
 	for i, kind := range nativeMixedKinds {
 		reading.Lanes = append(reading.Lanes, nativeMixedNodeLane{Kind: kind, KeyLimit: nativeMixedKeyLimits[i]})
 	}
@@ -85,6 +155,11 @@ func TestNativeMixedObservationRejectsPrivateFieldsAndForeignQuotas(t *testing.T
 		func(v *nativeMixedNodeReading) { v.Lanes[3].PendingBytes = 1 },
 		func(v *nativeMixedNodeReading) { v.Lanes[0].PendingRows = 4097 },
 		func(v *nativeMixedNodeReading) { v.Lanes[0].Hours = 51 },
+		func(v *nativeMixedNodeReading) { v.Schema = 1 },
+		func(v *nativeMixedNodeReading) { v.Access.Available = 0 },
+		func(v *nativeMixedNodeReading) { v.Access.Limit = 8192 },
+		func(v *nativeMixedNodeReading) { v.Access.Queued = 4097 },
+		func(v *nativeMixedNodeReading) { v.Access.Private = 1 << 53 },
 	} {
 		copy := reading
 		copy.Lanes = append([]nativeMixedNodeLane(nil), reading.Lanes...)
@@ -94,11 +169,43 @@ func TestNativeMixedObservationRejectsPrivateFieldsAndForeignQuotas(t *testing.T
 		}
 	}
 	data := encode(reading)
+	for _, invalid := range [][]byte{
+		bytes.Replace(data, []byte(`"private_lines":0,`), nil, 1),
+		bytes.Replace(data, []byte(`"private_lines":0`), []byte(`"private_lines":null`), 1),
+	} {
+		if _, _, ok := nativeReadMixedNodeLine(invalid); ok {
+			t.Fatal("missing or null ingress counter accepted")
+		}
+	}
 	data = append(data[:len(data)-1], []byte(`,"private_destination":"secret"}`)...)
 	if _, _, ok := nativeReadMixedNodeLine(data); ok {
 		t.Fatal("private journal extension accepted")
 	}
 	if _, found, ok := nativeReadMixedNodeLine([]byte("a private unrelated line")); found || !ok {
 		t.Fatal("foreign journal was parsed")
+	}
+}
+
+func TestNativeMixedIngressSeparatesCoreOmissionsFromPersistedUsage(t *testing.T) {
+	before := nativeMixedAccess{Available: 1, Limit: 4096, Private: 1, Usage: 1}
+	after := nativeMixedAccess{Available: 1, Limit: 4096, Private: 196045 + 70000, Usage: 39999 + 18193 + 1, Dropped: 137852, Denied: 70000}
+	ingress, ok := nativeMixedIngressBetween(before, after, 225090, 72000)
+	if !ok || ingress.AllowedReceived != 196044 || ingress.AllowedNotReceived != 29046 || ingress.DeniedNotReceived != 2000 {
+		t.Fatal("before-filter omissions were confused with the persisted usage ledger")
+	}
+	for _, mutate := range []func(*nativeMixedAccess){
+		func(v *nativeMixedAccess) { v.Private++ },
+		func(v *nativeMixedAccess) { v.Queued = 1 },
+		func(v *nativeMixedAccess) { v.PendingDropped = 1 },
+		func(v *nativeMixedAccess) { v.PendingUnmatched = 1 },
+		func(v *nativeMixedAccess) { v.Stale++; v.Private++ },
+		func(v *nativeMixedAccess) { v.Denied += 2001; v.Private += 2001 },
+		func(v *nativeMixedAccess) { v.Usage += 29047; v.Private += 29047 },
+	} {
+		invalid := after
+		mutate(&invalid)
+		if _, ok := nativeMixedIngressBetween(before, invalid, 225090, 72000); ok {
+			t.Fatal("unreconciled or nonquiescent ingress accepted")
+		}
 	}
 }

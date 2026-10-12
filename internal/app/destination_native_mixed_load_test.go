@@ -183,6 +183,7 @@ type nativeMixedLedger struct {
 
 type nativeMixedMetrics struct {
 	Schema          int                       `json:"schema_version"`
+	Database        string                    `json:"database"`
 	Candidate       string                    `json:"candidate"`
 	CoreVersion     string                    `json:"core_version"`
 	Duration        int64                     `json:"traffic_ms"`
@@ -207,6 +208,7 @@ type nativeMixedMetrics struct {
 	Node            []nativeMixedNodeSample   `json:"node_samples"`
 	PSP             []nativeMixedPSPSample    `json:"psp_samples"`
 	Ledgers         []nativeMixedLedger       `json:"ledgers"`
+	Ingress         nativeMixedIngress        `json:"access_ingress"`
 	Window          int64                     `json:"observation_ms"`
 	Histograms      []nativeLatencyHistogram  `json:"histograms"`
 }
@@ -249,7 +251,9 @@ func nativeMixedHosts(t *testing.T, nonce, address, observeAddress, controlAddre
 
 func nativeMixedLoad(t *testing.T, f destinationPolicyFixture, client *http.Client, endpoint, token string, parent int, dataDir string, inbound int, address string, targetPort int, nonce string, reached *atomic.Int64, controlAddress string, controlPort int, controlNonce, evidence string, output func() string, probe *nativeMixedProbe) {
 	a := f.a
-	m := nativeMixedMetrics{Schema: 1, Candidate: "77912a6541eede8db9493d8be0cd6151cfded6e4", CoreVersion: "26.6.27", Partition: 75000, Owners: 1, Users: make([]uint64, 200), Node: []nativeMixedNodeSample{}, PSP: []nativeMixedPSPSample{}, Ledgers: []nativeMixedLedger{}, Histograms: []nativeLatencyHistogram{}}
+	m := nativeMixedMetrics{Schema: 2, Candidate: "184f4e23f0f3d72f8492432184685fea4ec4967c", CoreVersion: "26.6.27", Partition: 75000, Owners: 1, Users: make([]uint64, 200), Node: []nativeMixedNodeSample{}, PSP: []nativeMixedPSPSample{}, Ledgers: []nativeMixedLedger{}, Histograms: []nativeLatencyHistogram{}}
+	m.Database = a.cfg.DBKind() // buildNativeDestinationPolicyFixture verified the actual owned server.
+	sql := func(query string) string { return nativeDestinationCountSQL(m.Database, query) }
 	t.Cleanup(func() {
 		probe.mu.Lock()
 		m.Node = append([]nativeMixedNodeSample{}, probe.samples...)
@@ -286,13 +290,13 @@ func nativeMixedLoad(t *testing.T, f destinationPolicyFixture, client *http.Clie
 	}
 	nativeWait(t, 90*time.Second, "mixed warmup audit drain", func() bool {
 		var stored int64
-		if a.database.QueryRowContext(t.Context(), "SELECT COALESCE(SUM(count),0) FROM dest_usage_hourly WHERE panel_id=?", f.agent.PanelID).Scan(&stored) != nil || stored != 1 {
+		if a.database.QueryRowContext(t.Context(), sql("SELECT COALESCE(SUM(count),0) FROM dest_usage_hourly WHERE panel_id=?"), f.agent.PanelID).Scan(&stored) != nil || stored != 1 {
 			return false
 		}
 		probe.mu.Lock()
 		node, invalid := probe.node, probe.invalid
 		probe.mu.Unlock()
-		if invalid || len(node.Lanes) != 4 {
+		if invalid || len(node.Lanes) != 4 || !node.Access.quiescent() || node.Access.Private != 1 || node.Access.Usage != 1 {
 			return false
 		}
 		for _, lane := range node.Lanes {
@@ -308,7 +312,7 @@ func nativeMixedLoad(t *testing.T, f destinationPolicyFixture, client *http.Clie
 		return true
 	})
 	var usageBaseline int64
-	nativeMust(t, a.database.QueryRowContext(t.Context(), "SELECT COALESCE(SUM(count),0) FROM dest_usage_hourly WHERE panel_id=?", f.agent.PanelID).Scan(&usageBaseline), "bind actual warmup usage baseline")
+	nativeMust(t, a.database.QueryRowContext(t.Context(), sql("SELECT COALESCE(SUM(count),0) FROM dest_usage_hourly WHERE panel_id=?"), f.agent.PanelID).Scan(&usageBaseline), "bind actual warmup usage baseline")
 	names := append([]string(nil), nativeTrialLatencyNames[:4]...)
 	for _, kind := range nativeMixedKinds {
 		names = append(names, "psp_dest_audit_begin_ms{kind="+kind+"}", "psp_dest_audit_chunk_ms{kind="+kind+"}")
@@ -317,6 +321,7 @@ func nativeMixedLoad(t *testing.T, f destinationPolicyFixture, client *http.Clie
 	baseline := reached.Load()
 	start := time.Now()
 	probe.mu.Lock()
+	ingressBefore := probe.node.Access
 	probe.start = start
 	probe.mu.Unlock()
 	ctx, cancel := context.WithCancel(t.Context())
@@ -455,12 +460,33 @@ func nativeMixedLoad(t *testing.T, f destinationPolicyFixture, client *http.Clie
 		t.Fatal("mixed load bypassed the actual block policy")
 	}
 	readLedger := func() bool {
+		probe.mu.Lock()
+		node, invalid := probe.node, probe.invalid
+		// Require three unchanged, complete ingress observations after traffic,
+		// spanning two real seconds. No counter reset or artificial flush.
+		stable := len(probe.samples) >= 3
+		if stable {
+			last := probe.samples[len(probe.samples)-3:]
+			stable = last[0].ElapsedMS >= m.Duration && last[2].ElapsedMS-last[0].ElapsedMS >= 1800
+			for _, sample := range last {
+				stable = stable && sample.Reading.Access == node.Access
+			}
+		}
+		probe.mu.Unlock()
+		if invalid || !stable || len(node.Lanes) != 4 {
+			return false
+		}
+		var valid bool
+		m.Ingress, valid = nativeMixedIngressBetween(ingressBefore, node.Access, m.Delivered[1]+m.Delivered[2]+m.Delivered[3]+m.Controls, m.Delivered[0])
+		if !valid {
+			return false
+		}
 		m.Ledgers = nil
 		for i, kind := range nativeMixedKinds {
 			ledger := nativeMixedLedger{Kind: kind, Expected: m.Delivered[i], Losses: []nativeLoadLoss{}}
 			if i == 3 {
-				ledger.Expected = m.Delivered[1] + m.Delivered[2] + m.Delivered[3] + m.Controls
-				nativeMust(t, a.database.QueryRowContext(t.Context(), "SELECT COUNT(*),COALESCE(SUM(count),0) FROM dest_usage_hourly WHERE panel_id=?", f.agent.PanelID).Scan(&ledger.StoredRows, &ledger.StoredEvents), "read actual mixed usage")
+				ledger.Expected = m.Ingress.AllowedReceived
+				nativeMust(t, a.database.QueryRowContext(t.Context(), sql("SELECT COUNT(*),COALESCE(SUM(count),0) FROM dest_usage_hourly WHERE panel_id=?"), f.agent.PanelID).Scan(&ledger.StoredRows, &ledger.StoredEvents), "read actual mixed usage")
 				ledger.StoredEvents -= usageBaseline
 				ledger.StoredRows -= usageBaseline // warmup is one unique row
 			} else {
@@ -474,10 +500,10 @@ func nativeMixedLoad(t *testing.T, f destinationPolicyFixture, client *http.Clie
 					where = "panel_id=? AND action='observe' AND user_id>0"
 					args = []any{f.agent.PanelID}
 				}
-				nativeMust(t, a.database.QueryRowContext(t.Context(), "SELECT COUNT(*),COALESCE(SUM(count),0),COALESCE(SUM(CASE WHEN source LIKE 'g%' AND (user_id<>0 OR port<>0) THEN 1 ELSE 0 END),0) FROM dest_hits WHERE "+where, args...).Scan(&ledger.StoredRows, &ledger.StoredEvents, &ledger.Identified), "read actual mixed hit ledger")
+				nativeMust(t, a.database.QueryRowContext(t.Context(), sql("SELECT COUNT(*),COALESCE(SUM(count),0),COALESCE(SUM(CASE WHEN source LIKE 'g%' AND (user_id<>0 OR port<>0) THEN 1 ELSE 0 END),0) FROM dest_hits WHERE "+where), args...).Scan(&ledger.StoredRows, &ledger.StoredEvents, &ledger.Identified), "read actual mixed hit ledger")
 			}
-			nativeMust(t, a.database.QueryRowContext(t.Context(), "SELECT COALESCE(MAX(rows_reserved),0) FROM dest_audit_ingest_budget WHERE agent_id=? AND kind=?", f.agent.AgentID, kind).Scan(&ledger.Budget), "read mixed hourly reservation")
-			rows, err := a.database.QueryContext(t.Context(), "SELECT reason,SUM(rows),SUM(events),SUM(unmatched) FROM dest_audit_loss_hourly WHERE panel_id=? AND kind=? GROUP BY reason ORDER BY reason", f.agent.PanelID, kind)
+			nativeMust(t, a.database.QueryRowContext(t.Context(), sql("SELECT COALESCE(MAX(rows_reserved),0) FROM dest_audit_ingest_budget WHERE agent_id=? AND kind=?"), f.agent.AgentID, kind).Scan(&ledger.Budget), "read mixed hourly reservation")
+			rows, err := a.database.QueryContext(t.Context(), sql("SELECT reason,SUM(rows),SUM(events),SUM(unmatched) FROM dest_audit_loss_hourly WHERE panel_id=? AND kind=? GROUP BY reason ORDER BY reason"), f.agent.PanelID, kind)
 			nativeMust(t, err, "read mixed categorized losses")
 			accounted := ledger.StoredEvents
 			for rows.Next() {
@@ -494,12 +520,6 @@ func nativeMixedLoad(t *testing.T, f destinationPolicyFixture, client *http.Clie
 				return false
 			}
 		}
-		probe.mu.Lock()
-		node, invalid := probe.node, probe.invalid
-		probe.mu.Unlock()
-		if invalid || len(node.Lanes) != 4 {
-			return false
-		}
 		for _, lane := range node.Lanes {
 			if lane.Keys != 0 || lane.Pending != 0 || lane.Dropped != 0 || lane.Unmatched != 0 {
 				return false
@@ -514,7 +534,14 @@ func nativeMixedLoad(t *testing.T, f destinationPolicyFixture, client *http.Clie
 	}
 	nativeWait(t, 150*time.Second, "mixed canonical retry and persisted four-lane ledger", readLedger)
 	live()
+	cancel()
+	<-queueDone
 	m.Window = time.Since(start).Milliseconds()
+	var finalMemory runtime.MemStats
+	runtime.ReadMemStats(&finalMemory)
+	if len(m.PSP) == 0 || m.Window > m.PSP[len(m.PSP)-1].ElapsedMS {
+		m.PSP = append(m.PSP, nativeMixedPSPSample{m.Window, finalMemory.HeapAlloc, finalMemory.HeapInuse, queue.Pressure()})
+	}
 	after := nativeLatencySnapshot(t, names)
 	if before.sinceUnixMS != after.sinceUnixMS {
 		t.Fatal("mixed latency metrics reset")

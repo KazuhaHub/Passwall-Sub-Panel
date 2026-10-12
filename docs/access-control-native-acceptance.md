@@ -20,7 +20,7 @@ unpublished development candidate. These jobs use the same complete traffic and
 ingestion gates, with separate candidate-labelled artifacts; the earlier fixed
 candidates remain independent checkpoints.
 Four additional jobs pin the full-module Node stack to
-`77912a6541eede8db9493d8be0cd6151cfded6e4`, including native Windows ACL/state
+`184f4e23f0f3d72f8492432184685fea4ec4967c`, including native Windows ACL/state
 protection, document persistence, platform-boundary regressions and opt-in
 numeric collector/agent-memory observation. Its five complete Node workflows
 passed before this repin; collector/634 Windows roots/30 startup and both real-core
@@ -1093,7 +1093,7 @@ owner 占用。不导出面板、Agent、batch、账户或目的地，也不读�
 
 ### 四类同次真实连接、冻结重试与恢复
 
-新增独立 `mixed-pressure` 作业，固定同一 Node `77912a65`、Xray 26.6.27、
+新增独立 `mixed-pressure` 作业，固定同一 Node 候选、Xray 26.6.27、
 SQLite 和实际 `App.Run`。复用原试运行的生产会员服务及完整已应用 roster/
 config/policy 回执，保留原五分钟双类试运行、独立 block overflow、Webhook、
 队列和三种 SQL 作业。新的数值报告及测试执行身份独立保存，不能借旧报告通过。
@@ -1118,13 +1118,41 @@ nonce 的 `.test` 名称，映射到作业自己拥有的 documentation IPv6 /12
 control Sync、真实 PollOnce/sink flush、四类 Begin/Chunk 完整调用耗时的 CDF。
 这些耗时包括等待和执行，不能称作单独的 SQL 锁等待时间。
 
-每次目标唯一，四类逐一核对真实投递与 `dest_hits`/`dest_usage_hourly` 已存事件
-加各原因持久化丢失，试运行仍须匿名。Usage 按实际被允许的 observe/trial/
-usage/控制连接合计，独立排除已完整排空的 warmup；被拦截连接不算 usage。
-结束必须实际排空 Node retained/pending 和 PSP queue，任何无法解释的丢失、
-错误 kind、缺失重试或未投递连接都失败。部分失败仍保存已有数值报告。
+每次目标唯一，hit 三类逐一核对真实投递与 `dest_hits` 已存事件加各原因
+持久化丢失，试运行仍须匿名。三类 hit 每小时原预算均为 20000，usage 为
+40000；旧 SQL 组件的 4000 条 observe 输入不是预算。
+
+`2616824e` 首次实际混合运行完成四类投递、四类 canonical 重试和最终排空，
+但 usage 225090 个实际允许连接仅有 39999 个存储事件、137852 个 Node dropped
+及 18193 个 over_budget，共 196044，差 29046；因此作业失败，18 份 Load
+原件全部保留。该源另外完整 Test/systemd/Native 成功，48 份 Native 原件
+独立核对 861 必需场景通过；这些结果不能替代失败的混合门禁。
+
+固定 Xray 26.6.27 的 `common/log/logger.go` 有一个 128 条、满时无计数丢弃
+的上游队列。Node schema 2 增加只读数值过滤器入口及 usage/denied/unmatched/
+dropped/stale 分类、解析队列和未刷损失数。修正 overflow 不把已识别 denied
+记成 usage 丢失，畸形/截断输入以原接收小时计入独立 bounded unmatched。
+这些计数测量 Node 实际收到的行，不能测量核心内部队列丢弃数。
+
+新混合门禁保存已完整排空的 warmup 前值与至少三个真实、相隔两秒且稳定的
+结束快照。先核对 private 输入等于各分类之和及无新增 stale，再将收到的
+usage、有效允许 overflow、unmatched 与 usage 已存事件加持久化丢失精确
+核对。实际允许连接减入口允许数的差额单独报告为核心日志未收到；实际
+denied 与入口 denied 的差额也独立报告。禁止把这两项伪造为 Node dropped
+或用它们填补入口之后无法解释的存储差额。原 29046 差额仍是失败旧源结果，
+不能当作新源运行数字。结束须实际排空解析队列、未刷损失、Node 四类
+retained/pending 和 PSP queue。错误 kind、缺失重试或未投递连接继续失败。
+部分失败仍保存已有数值报告。PSP heap 包括同一测试进程的负载夹具，不能
+解释为隔离 PSP 服务的独立内存成本。
 
 该作业只有一个真实 native owner，最大保留批数为 4/1/1/1 合计七个；它不能
 证明 256 批/64 MiB 的多 owner 同次全局饱和。现有多 owner SQL/队列组件证据
 继续独立保留，完整 §40a 的多 owner 集成压力及 §40 的 24 小时规模仍未完成。
-新增混合场景的实际托管执行结果也仍待验证。
+修正后的混合场景仍需其准确源的实际托管验证。
+
+混合矩阵扩展至 SQLite、MySQL 8、PostgreSQL 16。每个作业有独立真实 Node、
+生产 App.Run、原队列及同一作业内的真实 SQL 连接池；复用已有专用托管
+数据库配置与实际版本/库名校验，禁止外部 DSN。只读断言使用对应驱动的
+占位符，报告绑定实际后端，并由门禁校验与矩阵选择一致。SQLite 保留原
+artifact 名，另两个后端各保存独立测试和数值原件；原七个 Load 作业保留。
+这三组运行仍各只有一个 native owner，不能宣称多 owner 全局饱和。
