@@ -13,10 +13,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -60,6 +62,82 @@ type nativeIdleCycle struct {
 type nativeIdleWindow struct {
 	From  int64 `json:"from_unix_us"`
 	Until int64 `json:"until_unix_us"`
+}
+
+// strace 6.8 detaches, flushes its log, then re-raises the interrupt it received.
+// Only a successfully requested SIGINT may explain its signal/130 exit; an
+// arbitrary nonzero status or a failed stop request remains an error.
+func nativeIdleObserverStopError(signalErr, waitErr error) error {
+	if signalErr != nil {
+		return signalErr
+	}
+	if waitErr == nil {
+		return nil
+	}
+	var exited *exec.ExitError
+	if errors.As(waitErr, &exited) && exited.ProcessState != nil {
+		if status, ok := exited.Sys().(syscall.WaitStatus); ok && (status.Signaled() && status.Signal() == syscall.SIGINT || status.Exited() && status.ExitStatus() == 128+int(syscall.SIGINT)) {
+			return nil
+		}
+	}
+	return waitErr
+}
+
+var nativeIdleObserverMessage = regexp.MustCompile(`^strace: Process [1-9][0-9]* (?:attached(?: with [1-9][0-9]* threads)?|detached)$`)
+
+func nativeIdleObserverMessagesValid(output string) bool {
+	if len(output) > 65536 {
+		return false
+	}
+	lines := strings.Split(strings.TrimSpace(output), "\n")
+	if len(lines) > 512 {
+		return false
+	}
+	for _, line := range lines {
+		if line != "" && !nativeIdleObserverMessage.MatchString(line) {
+			return false
+		}
+	}
+	return true
+}
+
+func TestNativeIdleObserverStopRequiresRequestedInterrupt(t *testing.T) {
+	for _, tc := range []struct {
+		name, command string
+		want          bool
+	}{
+		{"zero", "exit 0", true},
+		{"interrupt", "kill -INT $$", true},
+		{"interrupt-fallback", "exit 130", true},
+		{"ordinary-failure", "exit 1", false},
+		{"termination", "kill -TERM $$", false},
+		{"killed", "kill -KILL $$", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := exec.Command("sh", "-c", tc.command).Run()
+			if (nativeIdleObserverStopError(nil, err) == nil) != tc.want {
+				t.Fatal("observer stop accepted an unexpected process exit")
+			}
+			if nativeIdleObserverStopError(errors.New("stop request failed"), err) == nil {
+				t.Fatal("observer stop ignored a failed interrupt request")
+			}
+		})
+	}
+	for _, err := range []error{errors.New("unknown wait failure"), &exec.ExitError{}} {
+		if nativeIdleObserverStopError(nil, err) == nil {
+			t.Fatal("observer stop ignored an unknown wait failure")
+		}
+	}
+	for _, output := range []string{"", "strace: Process 123 attached with 8 threads\nstrace: Process 124 detached\n", "strace: Process 123 attached\n"} {
+		if !nativeIdleObserverMessagesValid(output) {
+			t.Fatal("observer rejected its bounded attach/detach messages")
+		}
+	}
+	for _, output := range []string{"strace: write: I/O error", "strace: Process 123 detached\nprivate payload", "strace: Process 0 detached", "strace: Process /private/state.db detached", strings.Repeat("strace: Process 123 detached\n", 513)} {
+		if nativeIdleObserverMessagesValid(output) {
+			t.Fatal("observer discarded an error or private output")
+		}
+	}
 }
 
 // This is a real idle runtime gate, not a generated-config size benchmark.
@@ -312,20 +390,26 @@ func nativeIdleCost(t *testing.T, f destinationPolicyFixture, client *http.Clien
 	tracePath, windowPath := filepath.Join(t.TempDir(), "state-writes.private.trace"), filepath.Join(t.TempDir(), "state-writes.windows.json")
 	nativeMust(t, os.WriteFile(tracePath, nil, 0600), "create owned private state trace")
 	tracer := exec.Command("strace", "-f", "-ttt", "-yy", "-s", "0", "-e", "trace=write,pwrite64,writev,pwritev,pwritev2,fsync,fdatasync,mmap,msync", "-e", "signal=none", "-o", tracePath, "-p", strconv.Itoa(parent))
-	tracer.Stdout, tracer.Stderr = &nativePrivateOutput{}, &nativePrivateOutput{}
+	var observerOutput, observerErrors nativePrivateOutput
+	tracer.Stdout, tracer.Stderr = &observerOutput, &observerErrors
 	nativeMust(t, tracer.Start(), "attach owned idle state observer")
 	done := make(chan error, 1)
 	go func() { done <- tracer.Wait() }()
 	var once sync.Once
 	stop := func() {
 		once.Do(func() {
-			_ = tracer.Process.Signal(os.Interrupt)
+			signalErr := tracer.Process.Signal(os.Interrupt)
 			select {
 			case err := <-done:
+				err = nativeIdleObserverStopError(signalErr, err)
 				if err != nil {
 					m.TraceError = 19
 				}
 				nativeMust(t, err, "detach owned idle state observer")
+				if observerOutput.text() != "" || !nativeIdleObserverMessagesValid(observerErrors.text()) {
+					m.TraceError = 21
+					t.Fatal("owned idle state observer reported unexpected private output")
+				}
 			case <-time.After(15 * time.Second):
 				_ = tracer.Process.Kill()
 				<-done

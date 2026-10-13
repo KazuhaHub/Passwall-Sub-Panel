@@ -1260,3 +1260,19 @@ App 现在独立按真实 go test -race -list 的 Test/Fuzz/Example 根名称轮
 模块及 App 两组结果。每个 App 作业保存完整名单、选中名单及逐项结果；
 回归实际执行排除规划和测试轮转，验证没有遗漏/重复，错误排除名会失败。
 新 CI 分片的实际完整运行与原件核对仍待托管验证。
+
+`503119b0` 实际 idle 报告 stage=1/error=19，十三项回执及 plain/traced
+各五轮仍通过；失败明确发生在停止 observer，读取器尚未运行。运行器
+使用 strace 6.8，其 [terminate 实现](https://github.com/strace/strace/blob/v6.8/src/strace.c#L3982-L4023)
+先 detach/flush/close，再重发收到的信号；主动 SIGINT 会成为非零等待结果。
+夹具现在只在确已成功请求 SIGINT 时接受准确 SIGINT/130 状态；失败请求、
+其他信号、普通非零退出或未知 wait 错误仍失败。Linux 预检用六种真实
+子进程退出及失败请求验证该边界；完整验收还要求 TracerPid=0、原核心
+存活、完整私有轨迹解码及末次控制请求。observer stdout 必须为空，stderr
+只准许 bounded 数字 attach/detach 消息，异常输出记 error=21 且不导出
+原文，避免中断状态掩盖跟踪器的真实错误。修正后的实际成本仍待验证。
+
+`503119b0` 的三个 App race 分片已全部成功，三份完整编译名单一致，
+选中名单准确轮转、无遗漏/重复。九份原件独立核对的 211 个测试根均为
+RUN1/PASS1，没有失败、跳过或缓存结果，原四分钟预算保留。该组件证据
+不替代同源其余完整 Test、Native、压力及空闲成本结果。
