@@ -236,6 +236,13 @@ type App struct {
 // Build assembles the App from the loaded Config. It does NOT start any
 // goroutines or listeners; call Run() for that.
 func Build(ctx context.Context, cfg *config.Config) (*App, error) {
+	return buildWithDestinationAuditStore(ctx, cfg, nil)
+}
+
+// The package-private assembly seam decorates only the already admitted audit
+// store. Production always uses nil; no runtime flag or alternate collector is
+// exposed. Integration fixtures can delay a real transaction before delegation.
+func buildWithDestinationAuditStore(ctx context.Context, cfg *config.Config, decorate func(ports.DestAuditStore) ports.DestAuditStore) (*App, error) {
 	// Wire the version-compat on-disk cache to PSP's DataDir BEFORE any
 	// RefreshRemoteCompat could fire, so the first refresh persists to the right
 	// place and a same-process load picks up the cached snapshot.
@@ -397,7 +404,11 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 		return nil, fmt.Errorf("destination policy compiler: %w", err)
 	}
 	operationGate := operationgate.New()
-	destAudit, err := destaudit.New(ctx, admittedDestinationAuditStore{store: repos.DestAudit, gate: operationGate}, destaudit.Options{Emit: destinationAuditObserver()})
+	var auditStore ports.DestAuditStore = admittedDestinationAuditStore{store: repos.DestAudit, gate: operationGate}
+	if decorate != nil {
+		auditStore = decorate(auditStore)
+	}
+	destAudit, err := destaudit.New(ctx, auditStore, destaudit.Options{Emit: destinationAuditObserver()})
 	if err != nil {
 		return nil, fmt.Errorf("destination audit collector: %w", err)
 	}
