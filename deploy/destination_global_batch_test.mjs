@@ -35,6 +35,7 @@ test('global batch driver uses real 65-owner traffic and original storage, with 
   assert.doesNotMatch(source,/SetSnapshot\(|\.collector\.Ack\(|runtime\.GC\(|time\.Now\(\)\.Add\(-/)
   assert(source.includes('t.Cleanup(writeMetrics)') && source.includes('m.Stage = 2\n\twriteMetrics()') && source.includes('m.Stage = 3\n\twriteMetrics()'))
   assert(source.includes('memberConcurrency: 8'))
+  assert(source.indexOf('var prior []*domain.DestAgentPolicy') < source.indexOf('for _, peer := range cohort.peers[1:]'))
   const setup=readFileSync(new URL('../internal/app/destination_native_trial_load_test.go',import.meta.url),'utf8')
   assert(setup.includes('memberConcurrency := 1') && setup.includes('memberConcurrency < 1 || memberConcurrency > 8'))
   assert(setup.includes('for range memberConcurrency') && setup.includes('members.Wait(); close(results)'))

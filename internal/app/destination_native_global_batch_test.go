@@ -128,17 +128,20 @@ func TestNativeDestinationGlobalBatchPressure(t *testing.T) {
 	if m.Users != 200 || targetPort == blockPort || targetPort == observePort || controlPort == blockPort || controlPort == observePort || controlPort == targetPort {
 		t.Fatal("global batch principals or lane targets are not independent")
 	}
+	// Bind the causal candidate before collection changes. A later no-op
+	// publication can already see the new candidate while its ACK is pending;
+	// using that snapshot would reject its eventual valid exact receipt.
+	var prior []*domain.DestAgentPolicy
+	for _, peer := range cohort.peers {
+		p, err := a.repos.DestAgentPolicy.Get(t.Context(), peer.agent.AgentID, true)
+		nativeMust(t, err, "bind global policies before actual collection edits")
+		prior = append(prior, p)
+	}
 	for _, peer := range cohort.peers[1:] {
 		response := serverAuditRequest(t, a, token, "PUT", "/"+strconv.FormatInt(peer.agent.PanelID, 10), map[string]any{"audit_collect": "hits_and_usage"})
 		if response.Code != http.StatusOK {
 			t.Fatal("global owner collection could not be enabled through production administration")
 		}
-	}
-	var prior []*domain.DestAgentPolicy
-	for _, peer := range cohort.peers {
-		p, err := a.repos.DestAgentPolicy.Get(t.Context(), peer.agent.AgentID, true)
-		nativeMust(t, err, "bind global policies before actual publication")
-		prior = append(prior, p)
 	}
 	afterMutation := time.UnixMilli(time.Now().UnixMilli())
 	request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, cohort.server.URL+"/api/admin/dest/publish", nil)
