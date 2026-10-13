@@ -1453,6 +1453,23 @@ func (s *Service) NativePanelSnapshot(ctx context.Context, panelID int64) (*port
 			Sniffing: node.Sniffing, Allocate: node.Allocate,
 		})
 	}
+	// A definition may change between reports and before Sync mints the next
+	// roster. The old stream receipt must not turn that new intent into an
+	// observed identity through the legacy facade.
+	appliedClients := make(map[nodeprotocol.ClientKey]nodeprotocol.Client)
+	currentClients := make(map[nodeprotocol.ClientKey]nodeprotocol.Client)
+	if rosterCurrent {
+		var appliedRoster nodeprotocol.RosterBody
+		if err := json.Unmarshal(rosterStream.DesiredBody, &appliedRoster); err != nil {
+			return nil, fmt.Errorf("nodesync: decode observed roster: %w", err)
+		}
+		for _, client := range appliedRoster.Clients {
+			appliedClients[client.Key] = client
+		}
+		for _, client := range buildRoster(desired, appliedRoster.MinConfigVersion).Clients {
+			currentClients[client.Key] = client
+		}
+	}
 	for _, desiredClient := range desired.Clients {
 		client := desiredClient.Client
 		if client == nil {
@@ -1461,6 +1478,12 @@ func (s *Service) NativePanelSnapshot(ctx context.Context, panelID int64) (*port
 		counter, reported := clientCounters[client.ID]
 		object := statusByStream[nodeprotocol.StreamRoster][string(nodeprotocol.NewClientKey(client.ID))]
 		if !rosterCurrent || !reported || object.State != nodeprotocol.ObjectApplied {
+			continue
+		}
+		key := nodeprotocol.NewClientKey(client.ID)
+		applied, exists := appliedClients[key]
+		current, desiredExists := currentClients[key]
+		if !exists || !desiredExists || !sameProtocolClient(applied, current) {
 			continue
 		}
 		// Present describes membership in the running core, not whether the

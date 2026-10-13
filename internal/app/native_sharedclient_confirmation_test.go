@@ -59,4 +59,47 @@ func TestNativeSharedClientReadbackPreservesAuthenticatedRosterConfirmation(t *t
 			t.Fatal("legacy provisioning or lifecycle read-back overwrote authenticated native confirmation")
 		}
 	}
+	rotated := *client
+	rotated.UUID = "22222222-2222-4222-8222-222222222222"
+	if err := f.a.repos.PSPClient.UpdateDefinition(ctx, &rotated); err != nil {
+		t.Fatal(err)
+	}
+	adapter, err := f.a.xuiPool.Get(client.PanelID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if detail, err := adapter.GetClient(ctx, client.Email); err != nil || detail != nil {
+		t.Fatal("old authenticated receipt exposed a newly edited desired identity")
+	}
+	if err := service.SyncLifecycle(ctx, &rotated); err == nil {
+		t.Fatal("native lifecycle confirmed an identity absent from the accepted roster")
+	}
+	if result, err := service.ProvisionClient(ctx, &rotated); err == nil || result.Provisioned != 0 {
+		t.Fatal("native provisioning confirmed an identity absent from the accepted roster")
+	}
+	stillConfirmed, err := f.a.repos.PSPClient.ListInbounds(ctx, client.ID)
+	if err != nil || !reflect.DeepEqual(stillConfirmed, confirmed) {
+		t.Fatal("unconfirmed credential rotation overwrote the previous report proof")
+	}
+	next := syncNativeCacheFixture(t, f.a, f.credential, f.report)
+	if next.Roster.Body == nil || next.Roster.Version.Version <= initial.Roster.Version.Version {
+		t.Fatal("credential rotation did not mint a new actual roster")
+	}
+	f.report.Have[protocol.StreamRoster] = protocol.StreamState{Applied: next.Roster.Version, ETag: next.Roster.ETag}
+	f.report.Have[protocol.StreamDirectives] = protocol.StreamState{Applied: next.Directives.Version, ETag: next.Directives.ETag}
+	f.report.Objects[1].SinceVersion = next.Roster.Version
+	syncNativeCacheFixture(t, f.a, f.credential, f.report)
+	if detail, err := adapter.GetClient(ctx, rotated.Email); err != nil || detail == nil || detail.ID != rotated.UUID {
+		t.Fatal("new authenticated roster receipt did not expose the rotated identity")
+	}
+	if result, err := service.ProvisionClient(ctx, &rotated); err != nil || result.Provisioned != 1 {
+		t.Fatal("rotated confirmed identity did not recover native provisioning")
+	}
+	if err := service.SyncLifecycle(ctx, &rotated); err != nil {
+		t.Fatal(err)
+	}
+	latest, err := f.a.repos.PSPClient.ListInbounds(ctx, client.ID)
+	if err != nil || len(latest) != 1 || !latest[0].Applied() || latest[0].AppliedVersion != next.Roster.Version.Version || latest[0].AppliedUUID != rotated.UUID {
+		t.Fatal("native read-back lost the newly confirmed rotated roster proof")
+	}
 }
