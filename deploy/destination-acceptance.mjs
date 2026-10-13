@@ -305,6 +305,8 @@ export function sanitizeDestinationResults(input) {
   return input.split(/\r?\n/).filter(line => line.trim()).map(line => {
     const event = parseEvent(line)
     if (event.Action === 'output') {
+      const dockerPreserved = typeof event.Output === 'string' && /native diagnostic: (docker_preserved_material|docker_preserved_state|docker_advanced_epoch)=(true|false)(?:\r?\n|$)/.exec(event.Output)
+      if (dockerPreserved) return JSON.stringify({ Action: 'output', Package: pkg, Diagnostic: dockerPreserved[1], Observed: dockerPreserved[2] === 'true' })
       const globalStage = typeof event.Output === 'string' && /native global stage: ((?:desired|ingest|policy|panel|config|roster|directives|tasks|finish)_(?:count|mean_ms|p95_ms|max_ms))=([0-9]{1,7})(?:\r?\n|$)/.exec(event.Output)
       if (globalStage && isSafeGlobalStageFact(globalStage[1], Number(globalStage[2]))) return JSON.stringify({ Action: 'output', Package: pkg, Diagnostic: `global_stage_${globalStage[1]}`, Observed: Number(globalStage[2]) })
       const globalSync = typeof event.Output === 'string' && /native global sync: (attempt_age_ms|completion_age_ms|last_duration_ms|last_status|inflight|parent_alive)=([0-9]{1,7})(?:\r?\n|$)/.exec(event.Output)

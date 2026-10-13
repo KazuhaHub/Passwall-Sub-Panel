@@ -110,6 +110,26 @@ test('Docker recovery diagnostics retain fixed categories without task or creden
   assert.equal(sanitizeDestinationResults(encode([{ Action: 'output', Package: pkg, Test, Output: 'private task receipt credential address' }])), '\n')
 })
 
+test('Docker preservation keeps each original guard while withholding private installation details', async () => {
+  const { isSafeDestinationDiagnostic } = await import('./destination-acceptance.mjs')
+  for (const name of ['docker_preserved_material', 'docker_preserved_state', 'docker_advanced_epoch']) {
+    for (const value of [true, false]) {
+      const result = sanitizeDestinationResults(encode([{ Action: 'output', Output: `private-path:1: native diagnostic: ${name}=${value}\n` }]))
+      const event = JSON.parse(result)
+      assert.equal(event.Diagnostic, name)
+      assert.equal(event.Observed, value)
+      assert(isSafeDestinationDiagnostic(event))
+      assert(!result.includes('private-path'))
+    }
+  }
+  for (const line of ['docker_state_inode=12345', 'docker_epoch_value=42', 'docker_material_hash=private', 'docker_advanced_epoch=true; credential=secret']) {
+    assert.equal(sanitizeDestinationResults(encode([{ Action: 'output', Output: `native diagnostic: ${line}\n` }])).trim(), '')
+  }
+  const source = readFileSync(new URL('../internal/app/destination_native_docker_test.go', import.meta.url), 'utf8')
+  assert.match(source, /binary\.BigEndian\.Uint64\(current\.epoch\) > binary\.BigEndian\.Uint64\(before\.epoch\)/)
+  assert.match(source, /if !material \|\| !state \|\| !epoch/)
+})
+
 test('status candidate diagnostics retain only fixed comparison facts', () => {
   const facts = ['rows', 'panel', 'kind', 'reason', 'exhausted', 'rules', 'pending', 'applied_at', 'state', 'paused', 'generation',
     'is_applied', 'is_sniffing', 'is_paused', 'is_pending', 'is_offline', 'is_none', 'is_rejected', 'is_over_limit']

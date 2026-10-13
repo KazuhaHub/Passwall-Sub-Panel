@@ -716,7 +716,13 @@ func (m *nativeDockerInstallation) preserved(t *testing.T) nativeRemotePreserved
 func (m *nativeDockerInstallation) assertPreserved(t *testing.T, before nativeRemotePreserved) {
 	t.Helper()
 	current := m.preserved(t)
-	if !reflect.DeepEqual(before.hashes, current.hashes) || !reflect.DeepEqual(before.inodes, current.inodes) || binary.BigEndian.Uint64(current.epoch) <= binary.BigEndian.Uint64(before.epoch) {
+	material := reflect.DeepEqual(before.hashes, current.hashes)
+	state := reflect.DeepEqual(before.inodes, current.inodes)
+	epoch := binary.BigEndian.Uint64(current.epoch) > binary.BigEndian.Uint64(before.epoch)
+	if !material || !state || !epoch {
+		t.Logf("native diagnostic: docker_preserved_material=%t", material)
+		t.Logf("native diagnostic: docker_preserved_state=%t", state)
+		t.Logf("native diagnostic: docker_advanced_epoch=%t", epoch)
 		t.Fatal("Docker replacement lost private material, original state inode or advancing counter epoch")
 	}
 }
