@@ -150,6 +150,8 @@ func (s *Service) ProvisionClient(ctx context.Context, c *domain.PSPClient) (Pro
 	if err != nil {
 		return res, fmt.Errorf("xui pool get %d: %w", c.PanelID, err)
 	}
+	async, isAsync := cli.(ports.AsynchronousApplier)
+	deferredConfirmation := isAsync && async.ApplyIsAsynchronous()
 	desiredSet := make(map[int]bool, len(inboundIDs))
 	for _, id := range inboundIDs {
 		desiredSet[id] = true
@@ -167,12 +169,14 @@ func (s *Service) ProvisionClient(ctx context.Context, c *domain.PSPClient) (Pro
 	cur, _ := cli.GetClient(ctx, c.Email)
 	if cur != nil && sameInboundSet(cur.InboundIDs, desiredSet) {
 		for _, nodeID := range nodeByInbound {
-			if err := s.clients.UpdateInboundState(ctx, domain.PSPClientInbound{
-				ClientID: c.ID, NodeID: nodeID, State: domain.ClientApplyApplied,
-				AppliedEmail: cur.Email, AppliedUUID: appliedUUID(cur), AppliedPassword: cur.Password,
-			}); err != nil {
-				log.Warn("sharedclient: mark provisioned", "client_id", c.ID, "node_id", nodeID, "err", err)
-				continue
+			if !deferredConfirmation {
+				if err := s.clients.UpdateInboundState(ctx, domain.PSPClientInbound{
+					ClientID: c.ID, NodeID: nodeID, State: domain.ClientApplyApplied,
+					AppliedEmail: cur.Email, AppliedUUID: appliedUUID(cur), AppliedPassword: cur.Password,
+				}); err != nil {
+					log.Warn("sharedclient: mark provisioned", "client_id", c.ID, "node_id", nodeID, "err", err)
+					continue
+				}
 			}
 			res.Provisioned++
 		}
@@ -234,12 +238,14 @@ func (s *Service) ProvisionClient(ctx context.Context, c *domain.PSPClient) (Pro
 		if !confirmed[inb] {
 			continue
 		}
-		if err := s.clients.UpdateInboundState(ctx, domain.PSPClientInbound{
-			ClientID: c.ID, NodeID: nodeID, State: domain.ClientApplyApplied,
-			AppliedEmail: detail.Email, AppliedUUID: appliedUUID(detail), AppliedPassword: detail.Password,
-		}); err != nil {
-			log.Warn("sharedclient: mark provisioned", "client_id", c.ID, "node_id", nodeID, "err", err)
-			continue
+		if !deferredConfirmation {
+			if err := s.clients.UpdateInboundState(ctx, domain.PSPClientInbound{
+				ClientID: c.ID, NodeID: nodeID, State: domain.ClientApplyApplied,
+				AppliedEmail: detail.Email, AppliedUUID: appliedUUID(detail), AppliedPassword: detail.Password,
+			}); err != nil {
+				log.Warn("sharedclient: mark provisioned", "client_id", c.ID, "node_id", nodeID, "err", err)
+				continue
+			}
 		}
 		res.Provisioned++
 	}
@@ -256,9 +262,15 @@ func appliedUUID(detail *ports.ClientDetail) string {
 	return detail.Auth
 }
 
-func (s *Service) refreshAppliedCredentials(ctx context.Context, c *domain.PSPClient, attachments []domain.PSPClientInbound, detail *ports.ClientDetail) error {
+func (s *Service) refreshAppliedCredentials(ctx context.Context, c *domain.PSPClient, attachments []domain.PSPClientInbound, detail *ports.ClientDetail, cli ports.XUIClient) error {
 	if detail == nil {
 		return fmt.Errorf("shared client %s absent during credential confirmation", c.Email)
+	}
+	// Native convergence is written only by its epoch/version-bound report.
+	// A legacy read-back has no roster version and must not overwrite that
+	// proof or restore credentials from an earlier observed snapshot.
+	if async, ok := cli.(ports.AsynchronousApplier); ok && async.ApplyIsAsynchronous() {
+		return nil
 	}
 	uuid := appliedUUID(detail)
 	if uuid == "" && detail.Password == "" {
@@ -409,7 +421,7 @@ func (s *Service) pushLifecycle(ctx context.Context, c *domain.PSPClient) (stage
 		if reason == "" {
 			metrics.LifecycleSkippedTotal.Inc()
 			// Not counted as a failure: it never was (see pushLifecycle).
-			if err := s.refreshAppliedCredentials(ctx, c, atts, cur); err != nil {
+			if err := s.refreshAppliedCredentials(ctx, c, atts, cur, cli); err != nil {
 				return metrics.LifecycleErrorStageRecordCredentials, err
 			}
 			return "", nil
@@ -436,7 +448,7 @@ func (s *Service) pushLifecycle(ctx context.Context, c *domain.PSPClient) (stage
 		return fail(metrics.LifecycleErrorStageConfirmMismatch,
 			fmt.Errorf("confirm shared client %s credentials: read-back does not match desired identity", c.Email))
 	}
-	if err := s.refreshAppliedCredentials(ctx, c, atts, confirmed); err != nil {
+	if err := s.refreshAppliedCredentials(ctx, c, atts, confirmed, cli); err != nil {
 		return fail(metrics.LifecycleErrorStageRecordCredentials, err)
 	}
 	return "", nil
