@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -42,7 +43,7 @@ func inboundBatchFixture(t *testing.T, count int) (*pspClientRepo, []domain.PSPC
 
 func TestPSPClientInboundBatchBoundsReadsAndReplaysEveryStateWithoutWrites(t *testing.T) {
 	r, updates := inboundBatchFixture(t, 601)
-	queries, writes, maxArgs := 0, 0, 0
+	queries, writes, maxArgs, affected := 0, 0, 0, int64(0)
 	queryHook, updateHook := "batch-query-cardinality", "batch-write-cardinality"
 	if err := r.db.Callback().Query().After("gorm:query").Register(queryHook, func(tx *gorm.DB) {
 		if tx.Statement.Table == "psp_client_inbounds" {
@@ -52,9 +53,11 @@ func TestPSPClientInboundBatchBoundsReadsAndReplaysEveryStateWithoutWrites(t *te
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.db.Callback().Update().Before("gorm:update").Register(updateHook, func(tx *gorm.DB) {
+	if err := r.db.Callback().Update().After("gorm:update").Register(updateHook, func(tx *gorm.DB) {
 		if tx.Statement.Table == "psp_client_inbounds" {
 			writes++
+			affected += tx.RowsAffected
+			maxArgs = max(maxArgs, len(tx.Statement.Vars))
 		}
 	}); err != nil {
 		t.Fatal(err)
@@ -63,18 +66,18 @@ func TestPSPClientInboundBatchBoundsReadsAndReplaysEveryStateWithoutWrites(t *te
 	if err := r.UpdateInboundStates(t.Context(), updates); err != nil {
 		t.Fatal(err)
 	}
-	if queries != 3 || writes != 601 || maxArgs > 500 {
-		t.Fatalf("queries=%d writes=%d args=%d", queries, writes, maxArgs)
+	if queries != 3 || writes != 19 || affected != 601 || maxArgs > 500 {
+		t.Fatalf("queries=%d writes=%d affected=%d args=%d", queries, writes, affected, maxArgs)
 	}
 	var before []pspClientInboundRow
 	if err := r.db.Order("id").Find(&before).Error; err != nil {
 		t.Fatal(err)
 	}
-	queries, writes, maxArgs = 0, 0, 0
+	queries, writes, maxArgs, affected = 0, 0, 0, 0
 	if err := r.UpdateInboundStates(t.Context(), updates); err != nil {
 		t.Fatal(err)
 	}
-	if queries != 3 || writes != 0 || maxArgs > 500 {
+	if queries != 3 || writes != 0 || affected != 0 || maxArgs > 500 {
 		t.Fatalf("replay queries=%d writes=%d args=%d", queries, writes, maxArgs)
 	}
 	var after []pspClientInboundRow
@@ -103,7 +106,7 @@ func TestPSPClientInboundBatchBoundsReadsAndReplaysEveryStateWithoutWrites(t *te
 }
 
 func TestPSPClientInboundBatchRollsBackLateWritesAndRejectsInvalidInput(t *testing.T) {
-	r, updates := inboundBatchFixture(t, 3)
+	r, updates := inboundBatchFixture(t, 65)
 	wantErr := errors.New("owned late attachment write failure")
 	writes := 0
 	hook := "batch-late-write-error"
@@ -215,6 +218,82 @@ func TestPSPClientInboundBatchBindsExactPairsAndKeepsUnrequestedAttachments(t *t
 			}
 		} else if row.ClientID == 2 && (row.State != string(domain.ClientApplyApplied) || row.AppliedVersion != 4) {
 			t.Fatal("missing pair changed a different attachment for the same client")
+		}
+	}
+}
+
+func TestPSPClientInboundBatchCoalescesReplayAndReseedsClearedFailureClock(t *testing.T) {
+	r, _ := inboundBatchFixture(t, 2)
+	stamp := time.Date(2020, time.January, 1, 0, 0, 0, 0, time.UTC)
+	if err := r.db.Model(&pspClientInboundRow{}).Where("client_id = ?", 2).Updates(map[string]any{"state": string(domain.ClientApplyPending), "first_failed_at": stamp}).Error; err != nil {
+		t.Fatal(err)
+	}
+	writes := 0
+	hook := "batch-coalesced-write-cardinality"
+	if err := r.db.Callback().Update().Before("gorm:update").Register(hook, func(tx *gorm.DB) {
+		if tx.Statement.Table == "psp_client_inbounds" {
+			writes++
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = r.db.Callback().Update().Remove(hook) })
+	if err := r.UpdateInboundStates(t.Context(), []domain.PSPClientInbound{
+		{ClientID: 1, NodeID: 7, State: domain.ClientApplyPending},
+		{ClientID: 1, NodeID: 7, State: domain.ClientApplyApplied, AppliedVersion: 4, AppliedUUID: "confirmed-fixture"},
+		{ClientID: 2, NodeID: 7, State: domain.ClientApplyPending},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if writes != 0 {
+		t.Fatal("final unchanged observations performed database writes")
+	}
+	if err := r.UpdateInboundStates(t.Context(), []domain.PSPClientInbound{
+		{ClientID: 2, NodeID: 7, State: domain.ClientApplyApplied, AppliedVersion: 4},
+		{ClientID: 2, NodeID: 7, State: domain.ClientApplyPending},
+		{ClientID: 2, NodeID: 7, State: domain.ClientApplyRejected},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var row pspClientInboundRow
+	if err := r.db.Where("client_id = ?", 2).First(&row).Error; err != nil {
+		t.Fatal(err)
+	}
+	if writes != 1 || row.State != string(domain.ClientApplyRejected) || row.FirstFailedAt == nil || !row.FirstFailedAt.After(stamp) || row.AppliedUUID != "confirmed-fixture" || row.AppliedVersion != 4 {
+		t.Fatal("coalescing lost input-order clock reset or preserved confirmation")
+	}
+}
+
+func TestPSPClientInboundBatchStateOnlyWritesDoNotBindConfirmedCredentials(t *testing.T) {
+	r, _ := inboundBatchFixture(t, 2)
+	credentialColumns := false
+	hook := "batch-state-only-columns"
+	if err := r.db.Callback().Update().After("gorm:update").Register(hook, func(tx *gorm.DB) {
+		if tx.Statement.Table == "psp_client_inbounds" {
+			for _, column := range []string{"applied_email", "applied_uuid", "applied_password", "applied_version"} {
+				credentialColumns = credentialColumns || strings.Contains(tx.Statement.SQL.String(), column)
+			}
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = r.db.Callback().Update().Remove(hook) })
+	if err := r.UpdateInboundStates(t.Context(), []domain.PSPClientInbound{
+		{ClientID: 1, NodeID: 7, State: domain.ClientApplyPending, AppliedUUID: "unconfirmed-fixture", AppliedPassword: "unconfirmed-password"},
+		{ClientID: 2, NodeID: 7, State: domain.ClientApplyBlocked},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var rows []pspClientInboundRow
+	if err := r.db.Find(&rows).Error; err != nil {
+		t.Fatal(err)
+	}
+	if credentialColumns || len(rows) != 2 {
+		t.Fatal("state-only batch bound confirmed identity columns or changed membership")
+	}
+	for _, row := range rows {
+		if row.AppliedVersion != 4 || row.AppliedUUID != "confirmed-fixture" {
+			t.Fatal("state-only batch replaced confirmed identity")
 		}
 	}
 }

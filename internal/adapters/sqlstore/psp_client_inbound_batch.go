@@ -42,6 +42,7 @@ func (r *pspClientRepo) UpdateInboundStates(ctx context.Context, inbounds []doma
 	})
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		current := make(map[inboundStateKey]*pspClientInboundRow, len(pairs))
+		original := make(map[inboundStateKey]pspClientInboundRow, len(pairs))
 		// Two bound parameters per identity; every read remains within 500.
 		for start := 0; start < len(pairs); start += 250 {
 			end := min(start+250, len(pairs))
@@ -55,7 +56,8 @@ func (r *pspClientRepo) UpdateInboundStates(ctx context.Context, inbounds []doma
 				return err
 			}
 			for i := range rows {
-				current[inboundStateKey{rows[i].ClientID, rows[i].NodeID}] = &rows[i]
+				key := inboundStateKey{rows[i].ClientID, rows[i].NodeID}
+				current[key], original[key] = &rows[i], rows[i]
 			}
 		}
 		// Preserve input order when the same attachment occurs more than once.
@@ -77,27 +79,77 @@ func (r *pspClientRepo) UpdateInboundStates(ctx context.Context, inbounds []doma
 				failedAt = nil
 			}
 			version, email, uuid, password := row.AppliedVersion, row.AppliedEmail, row.AppliedUUID, row.AppliedPassword
-			updates := map[string]any{"state": string(inbound.State), "first_failed_at": failedAt}
 			if inbound.State == domain.ClientApplyApplied {
 				version = inbound.AppliedVersion
-				updates["applied_version"] = version
 				if inbound.AppliedEmail != "" || inbound.AppliedUUID != "" || inbound.AppliedPassword != "" {
 					email, uuid, password = inbound.AppliedEmail, inbound.AppliedUUID, inbound.AppliedPassword
-					updates["applied_email"], updates["applied_uuid"], updates["applied_password"] = email, uuid, password
 				}
-			}
-			sameClock := row.FirstFailedAt == nil && failedAt == nil || row.FirstFailedAt != nil && failedAt != nil && row.FirstFailedAt.Equal(*failedAt)
-			if row.State == string(inbound.State) && sameClock && row.AppliedVersion == version && row.AppliedEmail == email && row.AppliedUUID == uuid && row.AppliedPassword == password {
-				continue
-			}
-			if err := tx.Model(&pspClientInboundRow{}).Where("id = ?", row.ID).Updates(updates).Error; err != nil {
-				return err
 			}
 			row.State, row.FirstFailedAt, row.AppliedVersion = string(inbound.State), failedAt, version
 			row.AppliedEmail, row.AppliedUUID, row.AppliedPassword = email, uuid, password
 		}
+		var changed []*pspClientInboundRow
+		for _, key := range pairs {
+			row := current[key]
+			if row != nil && !sameInboundObservedState(*row, original[key]) {
+				changed = append(changed, row)
+			}
+		}
+		// Six CASE columns bind (id, value), plus one WHERE id per row:
+		// 32 rows use 416 parameters. Keep all chunks in this same transaction.
+		for start := 0; start < len(changed); start += 32 {
+			if err := updateInboundObservedRows(tx, changed[start:min(start+32, len(changed))], original); err != nil {
+				return err
+			}
+		}
 		return nil
 	})
+}
+
+func sameInboundObservedState(a, b pspClientInboundRow) bool {
+	return a.State == b.State && sameInboundFailureClock(a, b) && a.AppliedVersion == b.AppliedVersion && a.AppliedEmail == b.AppliedEmail && a.AppliedUUID == b.AppliedUUID && a.AppliedPassword == b.AppliedPassword
+}
+
+func sameInboundFailureClock(a, b pspClientInboundRow) bool {
+	return a.FirstFailedAt == nil && b.FirstFailedAt == nil || a.FirstFailedAt != nil && b.FirstFailedAt != nil && a.FirstFailedAt.Equal(*b.FirstFailedAt)
+}
+
+func updateInboundObservedRows(tx *gorm.DB, rows []*pspClientInboundRow, original map[inboundStateKey]pspClientInboundRow) error {
+	columns := []struct {
+		name    string
+		value   func(*pspClientInboundRow) any
+		changed func(pspClientInboundRow, pspClientInboundRow) bool
+	}{
+		{"state", func(r *pspClientInboundRow) any { return r.State }, func(a, b pspClientInboundRow) bool { return a.State != b.State }},
+		{"first_failed_at", func(r *pspClientInboundRow) any { return r.FirstFailedAt }, func(a, b pspClientInboundRow) bool { return !sameInboundFailureClock(a, b) }},
+		{"applied_version", func(r *pspClientInboundRow) any { return r.AppliedVersion }, func(a, b pspClientInboundRow) bool { return a.AppliedVersion != b.AppliedVersion }},
+		{"applied_email", func(r *pspClientInboundRow) any { return r.AppliedEmail }, func(a, b pspClientInboundRow) bool { return a.AppliedEmail != b.AppliedEmail }},
+		{"applied_uuid", func(r *pspClientInboundRow) any { return r.AppliedUUID }, func(a, b pspClientInboundRow) bool { return a.AppliedUUID != b.AppliedUUID }},
+		{"applied_password", func(r *pspClientInboundRow) any { return r.AppliedPassword }, func(a, b pspClientInboundRow) bool { return a.AppliedPassword != b.AppliedPassword }},
+	}
+	updates := make(map[string]any, len(columns))
+	for _, column := range columns {
+		var expression strings.Builder
+		expression.WriteString("CASE id")
+		args := make([]any, 0, 2*len(rows))
+		for _, row := range rows {
+			if !column.changed(*row, original[inboundStateKey{row.ClientID, row.NodeID}]) {
+				continue
+			}
+			expression.WriteString(" WHEN ? THEN ?")
+			args = append(args, row.ID, column.value(row))
+		}
+		if len(args) == 0 {
+			continue
+		}
+		expression.WriteString(" ELSE " + column.name + " END")
+		updates[column.name] = gorm.Expr(expression.String(), args...)
+	}
+	ids := make([]int64, len(rows))
+	for i, row := range rows {
+		ids[i] = row.ID
+	}
+	return tx.Model(&pspClientInboundRow{}).Where("id IN ?", ids).Updates(updates).Error
 }
 
 var _ ports.PSPClientInboundBatchRepo = (*pspClientRepo)(nil)
