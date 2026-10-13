@@ -2,6 +2,16 @@ name: Native destination load acceptance
 
 on:
   workflow_dispatch:
+    inputs:
+      suite:
+        description: Focused manual acceptance or the complete load matrix
+        type: choice
+        default: all
+        options:
+          - all
+          - mixed-pressure
+          - idle-cost
+          - global-batch
   pull_request:
     paths:
       - 'internal/app/**'
@@ -38,7 +48,23 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  validate-selection:
+    name: validate manual acceptance selection
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - name: Require a known scope; ordinary and empty-input runs use all
+        env:
+          PSP_ACCEPTANCE_SUITE: ${{ inputs.suite || 'all' }}
+        run: |
+          set -euo pipefail
+          case "$PSP_ACCEPTANCE_SUITE" in
+            all|mixed-pressure|idle-cost|global-batch) ;;
+            *) printf '%s\n' 'Unknown acceptance selection'; exit 1 ;;
+          esac
+          printf 'Acceptance selection: %s\n' "$PSP_ACCEPTANCE_SUITE"
   webhook-load:
+    if: github.event_name != 'workflow_dispatch' || (inputs.suite || 'all') == 'all'
     name: two five-minute real webhook loads (SQLite / Xray 26.6.27)
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -100,6 +126,7 @@ jobs:
           retention-days: 7
 
   idle-cost:
+    if: github.event_name != 'workflow_dispatch' || (inputs.suite || 'all') == 'all' || inputs.suite == 'idle-cost'
     name: actual fifty-thousand-domain idle CPU and SQLite syscall writes
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -169,6 +196,7 @@ jobs:
           if-no-files-found: error
           retention-days: 7
   queue-pressure:
+    if: github.event_name != 'workflow_dispatch' || (inputs.suite || 'all') == 'all'
     name: Four saturated queue lanes and actual decoded heap (Linux)
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -212,6 +240,7 @@ jobs:
           if-no-files-found: error
           retention-days: 7
   sql-pressure:
+    if: github.event_name != 'workflow_dispatch' || (inputs.suite || 'all') == 'all'
     name: Four full lanes and hourly budgets through real ${{ matrix.database }} chunks
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -294,6 +323,7 @@ jobs:
           if-no-files-found: error
           retention-days: 7
   trial-load:
+    if: github.event_name != 'workflow_dispatch' || (inputs.suite || 'all') == 'all'
     name: 200-user five-minute trial and independent block load (SQLite / Xray 26.6.27)
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -358,6 +388,7 @@ jobs:
           if-no-files-found: error
           retention-days: 7
   block-overflow:
+    if: github.event_name != 'workflow_dispatch' || (inputs.suite || 'all') == 'all'
     name: five-minute independent block quota overflow (SQLite / Xray 26.6.27)
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -419,6 +450,7 @@ jobs:
           retention-days: 7
 
   mixed-pressure:
+    if: github.event_name != 'workflow_dispatch' || (inputs.suite || 'all') == 'all' || inputs.suite == 'mixed-pressure'
     name: four-class native overflow, frozen retries and recovery (${{ matrix.database }} / Xray 26.6.27)
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -516,6 +548,7 @@ jobs:
 
 
   global-bootstrap:
+    if: github.event_name != 'workflow_dispatch' || (inputs.suite || 'all') == 'all'
     name: 65 real immutable Node/Xray cohort bootstrap (${{ matrix.database }} / Xray 26.6.27)
     runs-on: ubuntu-24.04
     timeout-minutes: 45
@@ -612,6 +645,7 @@ jobs:
           retention-days: 7
 
   global-batch:
+    if: github.event_name != 'workflow_dispatch' || (inputs.suite || 'all') == 'all' || inputs.suite == 'global-batch'
     name: 65 real Node/Xray four-lane global batch saturation (${{ matrix.database }} / Xray 26.6.27)
     runs-on: ubuntu-24.04
     timeout-minutes: 45
