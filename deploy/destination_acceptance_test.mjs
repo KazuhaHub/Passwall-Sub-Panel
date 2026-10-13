@@ -110,6 +110,32 @@ test('Docker recovery diagnostics retain fixed categories without task or creden
   assert.equal(sanitizeDestinationResults(encode([{ Action: 'output', Package: pkg, Test, Output: 'private task receipt credential address' }])), '\n')
 })
 
+test('global timeout stack facts retain only closed operation categories', async () => {
+  const { isSafeDestinationDiagnostic } = await import('./destination-acceptance.mjs')
+  const frames = {
+    'internal/service/sharedclient.(*Service).ProvisionClient(': 'provision',
+    'internal/service/nodesync.(*Service).NativePanelSnapshot(': 'snapshot',
+    'internal/adapters/sqlstore.(*nativeDesiredRepo).Load(': 'desired_sql',
+    'internal/adapters/sqlstore.(*pspClientRepo).ListInbounds(': 'attachment_read',
+    'internal/adapters/sqlstore.(*pspClientRepo).UpdateInboundStates(': 'attachment_write',
+    'internal/adapters/sqlstore.(*nodeAgentRepo).RecordApplied(': 'stream_ack',
+    'internal/adapters/sqlstore.(*nodeAgentRepo).UpdateProtocolObservation(': 'protocol_write',
+    'internal/adapters/sqlstore.(*nodeAgentRepo).MintConfigWithPolicyCandidate(': 'config_mint',
+    'internal/adapters/sqlstore.(*nodeAgentIssueRepo).RecordBatch(': 'issues_write',
+    'database/sql.(*DB).conn(': 'sql_connection',
+  }
+  for (const [frame, category] of Object.entries(frames)) {
+    const result = sanitizeDestinationResults(encode([{ Action: 'output', Output: `github.com/KazuhaHub/passwall-sub-panel/${frame}0xprivate, credential-secret)\n` }]))
+    const event = JSON.parse(result)
+    assert.equal(event.Diagnostic, `global_batch_${category}_stack`)
+    assert.deepEqual(Object.keys(event).sort(), ['Action', 'Diagnostic', 'Package'])
+    assert(isSafeDestinationDiagnostic(event))
+    assert(!result.includes('0xprivate') && !result.includes('credential-secret') && !result.includes(frame))
+  }
+  assert.equal(sanitizeDestinationResults(encode([{ Action: 'output', Output: 'private unknown.(*Repo).Read(credential-secret)\n' }])), '\n')
+  assert(!isSafeDestinationDiagnostic({ Diagnostic: 'global_batch_unknown_stack' }))
+})
+
 test('Docker preservation keeps each original guard while withholding private installation details', async () => {
   const { isSafeDestinationDiagnostic } = await import('./destination-acceptance.mjs')
   for (const name of ['docker_preserved_material', 'docker_preserved_state', 'docker_advanced_epoch']) {
