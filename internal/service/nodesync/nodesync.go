@@ -959,7 +959,10 @@ func (s *Service) buildDirectives(ctx context.Context, agent *domain.NodeAgent, 
 		ForRosterVersion: rosterVersion,
 		Quota:            make([]nodeprotocol.QuotaEntry, 0, len(snapshot.Clients)),
 	}
-	users := make(map[int64]*domain.User)
+	users, err := s.loadQuotaUsers(ctx, snapshot)
+	if err != nil {
+		return nodeprotocol.DirectivesBody{}, nodeprotocol.Envelope{}, err
+	}
 	emergencyQuotaGBByUser := make(map[int64]float64)
 	for _, desired := range snapshot.Clients {
 		client := desired.Client
@@ -967,13 +970,6 @@ func (s *Service) buildDirectives(ctx context.Context, agent *domain.NodeAgent, 
 			continue
 		}
 		user := users[client.UserID]
-		if user == nil {
-			user, err = s.users.GetByID(ctx, client.UserID)
-			if err != nil {
-				return nodeprotocol.DirectivesBody{}, nodeprotocol.Envelope{}, fmt.Errorf("nodesync: load user %d: %w", client.UserID, err)
-			}
-			users[client.UserID] = user
-		}
 		counter, counterKnown := counters[client.ID]
 		baseline := int64(0)
 		if counterKnown {
@@ -1063,6 +1059,48 @@ func (s *Service) buildDirectives(ctx context.Context, agent *domain.NodeAgent, 
 	envelope.NumeratorAsOfMS, envelope.NumeratorOldestReportAgeMS,
 		envelope.OverburnHeadroomBytes = s.recordGrantsAndFleetEnvelope(agent.AgentID, body.Quota, now, oldestReportMS)
 	return body, envelope, nil
+}
+
+// Read this roster's distinct account closure afresh in bounded repository
+// batches. ListByIDs resolves the same current plan/group facts as GetByID;
+// absence must still fail the control round instead of becoming an empty grant.
+func (s *Service) loadQuotaUsers(ctx context.Context, snapshot *ports.NativeDesiredSnapshot) (map[int64]*domain.User, error) {
+	users := make(map[int64]*domain.User)
+	var ids []int64
+	for _, desired := range snapshot.Clients {
+		if desired.Client == nil {
+			continue
+		}
+		id := desired.Client.UserID
+		if _, exists := users[id]; !exists {
+			users[id] = nil
+			ids = append(ids, id)
+		}
+	}
+	if len(ids) == 0 {
+		return users, nil
+	}
+	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+	loaded, err := s.users.ListByIDs(ctx, ids)
+	if err != nil {
+		return nil, fmt.Errorf("nodesync: load quota users: %w", err)
+	}
+	for _, user := range loaded {
+		if user == nil {
+			return nil, fmt.Errorf("nodesync: incomplete quota account closure: %w", domain.ErrConflict)
+		}
+		prior, requested := users[user.ID]
+		if !requested || prior != nil {
+			return nil, fmt.Errorf("nodesync: inconsistent quota account closure: %w", domain.ErrConflict)
+		}
+		users[user.ID] = user
+	}
+	for _, id := range ids {
+		if users[id] == nil {
+			return nil, fmt.Errorf("nodesync: load user %d: %w", id, domain.ErrNotFound)
+		}
+	}
+	return users, nil
 }
 
 // aggregateCoverage derives the denominator from PSP's own native-panel client

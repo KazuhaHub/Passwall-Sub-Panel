@@ -48,6 +48,18 @@ func (r emergencyDirectiveUsers) GetByID(context.Context, int64) (*domain.User, 
 	return r.user, nil
 }
 
+func (r emergencyDirectiveUsers) ListByIDs(_ context.Context, ids []int64) ([]*domain.User, error) {
+	if r.err != nil {
+		return nil, r.err
+	}
+	for _, id := range ids {
+		if r.user != nil && r.user.ID == id {
+			return []*domain.User{r.user}, nil
+		}
+	}
+	return nil, nil
+}
+
 type emergencyDirectiveClients struct {
 	ports.PSPClientRepo
 	client *domain.PSPClient
