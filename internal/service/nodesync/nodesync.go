@@ -603,6 +603,12 @@ func (s *Service) reconcileObjects(ctx context.Context, agent *domain.NodeAgent,
 			appliedClients[client.Key] = client
 		}
 		currentRoster := buildRoster(snapshot, appliedRoster.MinConfigVersion)
+		desiredClients := make(map[int64]*ports.NativeDesiredClient, len(snapshot.Clients))
+		for i := range snapshot.Clients {
+			if snapshot.Clients[i].Client != nil {
+				desiredClients[snapshot.Clients[i].Client.ID] = &snapshot.Clients[i]
+			}
+		}
 		statuses := objectStatuses(report.Objects, nodeprotocol.StreamRoster)
 		for _, currentClient := range currentRoster.Clients {
 			appliedClient, existed := appliedClients[currentClient.Key]
@@ -629,13 +635,7 @@ func (s *Service) reconcileObjects(ctx context.Context, agent *domain.NodeAgent,
 					Detail: "roster object missing from full report",
 				})
 			}
-			var desired *ports.NativeDesiredClient
-			for i := range snapshot.Clients {
-				if snapshot.Clients[i].Client != nil && snapshot.Clients[i].Client.ID == clientID {
-					desired = &snapshot.Clients[i]
-					break
-				}
-			}
+			desired := desiredClients[clientID]
 			if desired == nil {
 				continue
 			}
@@ -653,6 +653,18 @@ func (s *Service) reconcileObjects(ctx context.Context, agent *domain.NodeAgent,
 						attachment.AppliedPassword != update.AppliedPassword {
 						renderCredentialsChanged = true
 					}
+				}
+				// The full report and stream/heartbeat were recorded above. An
+				// identical applied attachment has no convergence transition to
+				// persist. Avoid one transaction per client on every periodic full
+				// replay; changed versions, credentials and failure clocks still
+				// reach the repository. A newer concurrent desired edit stays
+				// pending instead of being overwritten from this earlier snapshot.
+				if state == domain.ClientApplyApplied && attachment.State == state &&
+					attachment.AppliedVersion == update.AppliedVersion && attachment.FirstFailedAt == nil &&
+					attachment.AppliedEmail == update.AppliedEmail && attachment.AppliedUUID == update.AppliedUUID &&
+					attachment.AppliedPassword == update.AppliedPassword {
+					continue
 				}
 				if err := s.clients.UpdateInboundState(ctx, update); err != nil {
 					return fmt.Errorf("nodesync: update client %d attachment %d: %w", clientID, attachment.NodeID, err)
