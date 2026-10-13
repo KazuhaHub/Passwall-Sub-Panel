@@ -1179,8 +1179,9 @@ jobs:
           # THE PACKAGE IS TAKEN OUT OF THE PARTITION AND RUN HERE, and both places
           # that name it read one variable, so the two halves cannot overlap.
           heavy=github.com/KazuhaHub/passwall-sub-panel/internal/adapters/sqlstore
+          app=github.com/KazuhaHub/passwall-sub-panel/internal/app
           packages=$(.github/scripts/plan-race-shards.sh \
-            --shards 3 --shard "${{ matrix.part }}" --exclude "$heavy" \
+            --shards 3 --shard "${{ matrix.part }}" --exclude "$heavy" --exclude "$app" \
             --default 1 --weights .github/race-shard-weights.txt)
           test -n "$packages"
           # A `-run` THAT MATCHES NOTHING IS A PASS — that is the failure this
@@ -1239,9 +1240,76 @@ jobs:
           path: ~/.cache/go-build
           key: go-build-race-${{ matrix.part }}-${{ runner.os }}-${{ hashFiles('go.sum') }}
 
+  # App's full migration-backed suite now reaches the four-minute package
+  # budget on some runners. Partition its actual roots instead of extending
+  # the timeout; the original module slices exclude it and the gate covers both.
+  app-race-shard:
+    name: go race app (${{ matrix.part }}/3)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        part: [1, 2, 3]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/cache/restore@v6
+        with:
+          path: ~/.cache/go-build
+          key: go-build-app-race-${{ matrix.part }}-${{ runner.os }}-${{ hashFiles('go.sum') }}
+          restore-keys: go-build-app-race-${{ matrix.part }}-${{ runner.os }}-
+      - uses: actions/cache/restore@v6
+        with:
+          path: ~/go/pkg/mod
+          key: go-mod-${{ runner.os }}-${{ hashFiles('go.sum', 'tools/staticcheck/go.mod', 'tools/staticcheck/go.sum') }}
+          restore-keys: go-mod-${{ runner.os }}-
+      - uses: actions/setup-go@v7
+        env:
+          GOTOOLCHAIN: auto
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Verify exact preferred compiler
+        run: |
+          set -eu
+          build_toolchain=$(awk '$1 == "toolchain" { print $2 }' go.mod)
+          test -n "$build_toolchain"
+          test "$(go env GOVERSION)" = "$build_toolchain"
+          test "$(go tool compile -V | awk '{ print $3 }')" = "$build_toolchain"
+      - name: Every App test in exactly one race slice
+        env:
+          GORACE: atexit_sleep_ms=100
+        run: |
+          set -euo pipefail
+          heavy=github.com/KazuhaHub/passwall-sub-panel/internal/app
+          tests=$(go test -race -list '^(Test|Fuzz|Example)' "$heavy" | grep -E '^(Test|Fuzz|Example)' | grep -v '^TestMain$')
+          test -n "$tests"
+          printf '%s\n' "$tests" > app-roots.txt
+          printf '%s\n' "$tests" \
+            | awk -v s="${{ matrix.part }}" -v m=3 'NR % m == s % m' > app-selected.txt
+          test -s app-selected.txt
+          regex=$(paste -sd'|' app-selected.txt)
+          test -n "$regex"
+          go test -race -v -count=1 -timeout=4m -run "^(${regex})$" "$heavy" 2>&1 | tee test-output.txt
+      - name: upload test output
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: app-race-shard-${{ matrix.part }}-test-output
+          path: |
+            test-output.txt
+            app-roots.txt
+            app-selected.txt
+          if-no-files-found: error
+      - uses: actions/cache/save@v6
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        with:
+          path: ~/.cache/go-build
+          key: go-build-app-race-${{ matrix.part }}-${{ runner.os }}-${{ hashFiles('go.sum') }}
+
   sqlite:
     name: sqlite (full suite, race)
-    needs: race-shard
+    needs: [race-shard, app-race-shard]
     # always() so a failed, cancelled or never-planned shard still produces a
     # verdict here. A skipped gate would report as a missing required check,
     # which reads as "not run" rather than "failed".
@@ -1250,7 +1318,7 @@ jobs:
     timeout-minutes: 5
     steps:
       - name: every shard passed
-        run: test "${{ needs.race-shard.result }}" = success
+        run: test "${{ needs.race-shard.result }}" = success && test "${{ needs.app-race-shard.result }}" = success
 
   postgres:
     name: postgres (sqlstore dialect)

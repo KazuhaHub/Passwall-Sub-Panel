@@ -1249,3 +1249,14 @@ detach 且窗口文件就绪、读取器成功、五轮数值已解码、最后�
 返回值、未知 syscall、计数溢出、线程调用重叠。16–20 为读取器不存在、
 读取器执行失败、数值形状不完整、observer 停止失败、未 detach。
 任意运行时错误的原始文本仍私有，只有严格解码的固定数字类别可导出。
+
+同源 `0abf2af2` 完整 Test 的 race 3/3 也在 App 整包四分钟预算到期时
+失败，当前 TestBuildBaseDestinationAccessNeverCallsUsageRepository 仅运行
+1 秒；原件及堆栈保留，未出现 race 报告。与前次同类整包超时一起说明
+需要拆分迁移密集的 App 套件，不能通过延长超时或忽略失败来判定通过。
+App 现在独立按真实 go test -race -list 的 Test/Fuzz/Example 根名称轮转到
+三分片，原模块规划同时排除 SQLStore 和 App，并逐一校验排除名称存在。
+原四分钟测试预算保留，SQLStore 原分片保留，SQLite 必需门禁同时检查
+模块及 App 两组结果。每个 App 作业保存完整名单、选中名单及逐项结果；
+回归实际执行排除规划和测试轮转，验证没有遗漏/重复，错误排除名会失败。
+新 CI 分片的实际完整运行与原件核对仍待托管验证。
