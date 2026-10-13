@@ -41,6 +41,8 @@ function node(reading) {
   }
 }
 
+export function checkNativeMixedNodeReading(reading) { node(reading) }
+
 const accessCounters = ['private_lines', 'usage_events', 'denied_events', 'unmatched_events', 'dropped_events', 'stale_events']
 function access(value, quiescent = false) {
   fields(value, ['available', ...accessCounters, 'parse_queued', 'parse_limit', 'pending_dropped', 'pending_unmatched'])

@@ -1350,3 +1350,24 @@ worker 的真实 active reservation 保持、控制流仍返回、重传只入�
 以两套实际注册凭据和协议向量检查正确认证、错误凭据、foreign input、
 重复/未绑定 observer 及原 bytes，未启动定时分区，不产生重试通过记录。
 该预检不证明 65 个实际进程的四类 canonical retry，后者仍须实际运行。
+
+新增 global-batch 三后端作业复用实际 65 Node/Xray 夹具与 200 人试运行
+部署路径，逐 owner 等待当前 collection revision、实际 policy digest 和
+完整成员/listener roster，再绑定部署后的核心。小规模域名映射共用同一
+nonce namespace，仍使用 domain-form VLESS；不复制状态或修改节点时钟。
+原件只有启动数值报告、闭合测试事件和批数压力数值报告。
+
+每个 owner 四类各投递 1200 次连接、120 次独立控制；每名试运行用户
+实际服务 390 次。所有节点都经过原 75 秒 HTTP 分区与四类首个 canonical
+retry 验证。SQL 只在实际预热入库排空后暂停原 Begin，120 秒流量期间
+不得提前委托；10ms 实际队列采样须同次到达 128/32/32/64 共 256 批，
+每 lane 都有真实入库 queue_full 行损失。释放后要求所有 owner 三轮稳定
+入口读数、队列/四类 pending 排空、各自存储/损失账本精确对账和原进程
+存活；PSP 全堆采样及十二个真实控制/poll/Begin/Chunk CDF 一并保存。
+低行数批次可以没有后续 Chunk 事务，零样本原样保留，不能伪造延迟。
+
+此组件要求 global_batch_complete=1，但 byte_saturation_complete、
+key_saturation_complete 与 pressure_complete 必须仍为 0。它不能替代
+真实字节拒绝、键上限/Node retained dropped 过载或 §40 的 24 小时运行。
+代码及数值拒绝回归已接入；真实三个后端的运行结论仍待托管验收，合成
+数值测试和编译成功均不计作该项通过。
