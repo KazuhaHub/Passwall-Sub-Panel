@@ -21,11 +21,12 @@ export const loadNames = Object.freeze(['TestNativeDestinationWebhookLoad', 'Tes
 export const trialLoadNames = Object.freeze(['TestNativeDestinationTrialLoad'])
 export const mixedPressureNames = Object.freeze(['TestNativeDestinationMixedPressure'])
 export const idleCostNames = Object.freeze(['TestNativeDestinationIdleCost'])
+export const globalBootstrapNames = Object.freeze(['TestNativeDestinationGlobalCohortBootstrap'])
 export const blockOverflowNames = Object.freeze(['TestNativeDestinationBlockOverflow', 'TestNativeDestinationBlockOverflow/block_overflow'])
 export const remoteUpgradeCases = Object.freeze(['candidate_policy', 'health_failure_restore', 'published_rollback', 'restart_recovery', 'idempotent_replay'])
 const dockerUpgradeNames = ['TestNativePublishedDockerRollback', ...remoteUpgradeCases.map(name => `TestNativePublishedDockerRollback/${name}`)]
 const remoteUpgradeNames = ['TestNativePublishedRemoteRollback', ...remoteUpgradeCases.map(name => `TestNativePublishedRemoteRollback/${name}`)]
-const names = [...xrayNames, ...singBoxNames, ...guardedSingBoxNames, ...legacyUpgradeNames, ...remoteUpgradeNames, ...dockerUpgradeNames, ...fleetNames, ...loadNames, ...trialLoadNames, ...blockOverflowNames, ...mixedPressureNames, ...idleCostNames]
+const names = [...xrayNames, ...singBoxNames, ...guardedSingBoxNames, ...legacyUpgradeNames, ...remoteUpgradeNames, ...dockerUpgradeNames, ...fleetNames, ...loadNames, ...trialLoadNames, ...blockOverflowNames, ...mixedPressureNames, ...idleCostNames, ...globalBootstrapNames]
 const diagnostics = Object.freeze({
   'fleet administrator returned HTTP': 'fleet_admin_http_failed',
   'timed out waiting for sing-box restarted runtime and inbound': 'singbox_restart_runtime_timeout',
@@ -310,6 +311,7 @@ export function checkDestinationLoadResults(input) { checkCases(input, loadNames
 export function checkDestinationTrialLoadResults(input) { checkCases(input, trialLoadNames) }
 export function checkDestinationMixedPressureResults(input) { checkCases(input, mixedPressureNames) }
 export function checkDestinationIdleCostResults(input) { checkCases(input, idleCostNames) }
+export function checkDestinationGlobalBootstrapResults(input) { checkCases(input, globalBootstrapNames) }
 export function checkDestinationBlockOverflowResults(input) { checkCases(input, blockOverflowNames) }
 export function checkRemoteUpgradeResults(input) { checkCases(input, remoteUpgradeNames) }
 export function checkDockerUpgradeResults(input) { checkCases(input, dockerUpgradeNames) }

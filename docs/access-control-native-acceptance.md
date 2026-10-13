@@ -1306,3 +1306,21 @@ owner 数量从实际 Pressure 的 batch_limit/owner_limit 推导；四个原上
 状态、runtime、凭据与日志不复制；文件回归使用明确的合成摘要向量，
 不执行合成核心。独立 Linux fixture 预检接入必需 SQLite 总门禁；它只是
 夹具隔离与生命周期测试，实际 65 Node/Xray 压力及三 SQL 运行仍待完成。
+
+`7a69afc6` 的四项完整工作流及两项 Linux fixture 预检已实际成功；完整
+48 Native/24 Load/9 App 原件另独立验证，原压力与空闲成本门禁保留。
+
+后续 `global-bootstrap` 三后端作业只验证全局压力的真实进程前提：完整
+不可变 Node `184f4e23` 启动 65 个独立认证 daemon，每个具有独立新建的
+SQLite state 和实际 Xray 26.6.27 子进程。首个实际安装、验证并运行的
+公共核心缓存复制到其余 64 个新目录；不复制状态、runtime、凭据或日志。
+生产 App.Run 和成员同步部署同一个实际用户，等待每个 owner 的新 config/
+roster 回执，再通过每个真实 VLESS inbound 验证控制 nonce。成员部署可以
+合法替换空 roster 核心，因此最终 pidfd/进程/配置绑定在真实控制成功后
+建立，最后检查 65 个原父进程和核心仍存活、state 文件身份各不相同。
+
+产物只有闭合的测试事件及十五字段数值报告；完整前提要求 stage=9，
+65 parent/core/state/stream/control、64 次公共复制、shared_users=1 且
+pressure_complete=0。缺失项、缓存/跳过、额外私有字段或错误来源均失败。
+该前提不证明 200 用户、多 lane 同次过载、全局 64MiB 队列及重试损失对账；
+这些压力项及长期验收仍须分别完成。新增作业的真实运行结果待托管确认。
