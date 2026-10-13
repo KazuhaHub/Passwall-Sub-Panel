@@ -104,6 +104,25 @@ func nativeIdleCost(t *testing.T, f destinationPolicyFixture, client *http.Clien
 			_, _ = io.Copy(io.Discard, response.Body)
 		}
 	}
+	// Bootstrap sync samples its clock before compiling. Wait for its real
+	// acknowledged candidate before editing so an overlapping first sync cannot
+	// leave the mutation without a minted causal baseline. This warmup is outside
+	// both measurement phases and does not alter the receipt predicate.
+	nativeWait(t, 180*time.Second, "actual initial idle candidate and complete streams", func() bool {
+		state, e1 := a.destDefinitions.State(t.Context())
+		current, e2 := a.repos.DestAgentPolicy.Get(t.Context(), f.agent.AgentID, true)
+		agent, e3 := a.repos.NodeAgent.GetByAgentID(t.Context(), f.agent.AgentID)
+		if e1 != nil || e2 != nil || e3 != nil || state.Paused || current == nil || current.MintedAt == nil || agent == nil || agent.Epoch != f.agent.Epoch || agent.ObservedCoreEngine != domain.NodeCoreXray || probe.accepted.Load() == 0 || !nativeReceiptMatches(*current, state.PublishedGeneration, agent.LastSeen, *current.MintedAt) {
+			return false
+		}
+		for _, name := range []domain.NodeAgentStreamName{domain.NodeAgentStreamConfig, domain.NodeAgentStreamRoster} {
+			stream, err := a.repos.NodeAgent.GetStream(t.Context(), f.agent.AgentID, name)
+			if err != nil || stream == nil || !stream.Converged() || stream.AppliedEpoch != agent.Epoch {
+				return false
+			}
+		}
+		return true
+	})
 	var text strings.Builder
 	for i := 0; i < 50000; i++ {
 		fmt.Fprintf(&text, "domain:idle-%05d.test\n", i)
@@ -122,7 +141,7 @@ func nativeIdleCost(t *testing.T, f destinationPolicyFixture, client *http.Clien
 	// may be a no-op over an already minted, not-yet-acknowledged candidate.
 	prior, err := a.repos.DestAgentPolicy.Get(t.Context(), f.agent.AgentID, true)
 	nativeMust(t, err, "bind actual idle policy before policy mutation")
-	after := time.Now().UTC()
+	after := time.UnixMilli(time.Now().UnixMilli())
 	var policy destinationPolicyAPIResult
 	request("POST", "dest/policies", input, 201, &policy)
 	request("PUT", fmt.Sprintf("servers/%d", f.agent.PanelID), map[string]any{"audit_collect": "off"}, 200, nil)
