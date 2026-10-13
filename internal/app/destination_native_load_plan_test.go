@@ -109,6 +109,7 @@ const (
 	nativeTrialWorkload
 	nativeBlockOverflowWorkload
 	nativeMixedWorkload
+	nativeIdleCostWorkload
 )
 
 type nativeLoadSample struct {

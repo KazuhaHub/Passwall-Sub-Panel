@@ -1169,3 +1169,31 @@ MySQL 8 的保留字 ROWS 冲突；修正为表名限定列，参数仍独立绑
 MySQL 混合作业须先在其实际专用数据库复现旧查询的 1064，再验证限定列
 查询成功，报告仅保存数值回执，随后执行完整压力与对账。新源仍待验证，
 不能用另外两后端的通过替代。
+
+### Fifty-thousand-domain idle cost gate
+
+新增独立 `idle-cost` 作业复用真实托管 App.Run、固定完整 Node 与 Xray
+26.6.27。管理员通过实际 HTTP 创建 50000 条独立域名的 custom list、引用
+它的 block 策略、关闭采集并发布；必须核对实际 list 数、已确认 applied
+policy 数与正在运行的核心配置 domain 数均为 50000，并核对 config/roster
+完整回执。控制流量在测量窗口外验证，窗口内没有负载请求。
+
+先取五个不带跟踪的真实空闲同步周期，再取五个单独标明带跟踪的周期。
+每轮只允许一次实际成功控制 Sync，读取原 Node 与核心的 `/proc` CPU ticks
+及实际 CLK_TCK；验证进程 birth、原核心 pidfd、SQLite 文件身份、候选与
+配置/roster 不变。该夹具保持已有 2 秒 Sync cadence，报告每轮耗时与 CPU，
+不能解释为默认 cadence 的持续 CPU 比率或更长空闲窗口。
+
+文件写入阶段仅在一次性自有 Linux job 中把 strace 附加到准确 Node PID，
+实际验证 TracerPid 与 observer PID 一致；不修改安全设置、策略、数据或定时器。
+`-s 0` 抑制 buffer 内容，原始 trace 保存在私有临时目录且不上传。严格
+读取器按成功 syscall 返回字节、调用入口时间和线程身份，对准确 state.db、
+其 WAL、journal 分别计数，排除其他文件和 SQLite SHM；短写按实际返回值，
+错误、遗失/未完成调用、内容转储、共享可写映射或模糊 state 路径都失败。
+只导出固定数值每轮报告。跟踪 CPU 单独呈现，不能替代前五轮未跟踪 CPU。
+这些是逻辑 syscall 写入字节，不是文件增长、物理磁盘写入或全进程 I/O。
+
+原 idle_sync 的三轮身份与回执验证保留，仅提取可供新五轮观测复用的内部
+helper；原十项 Load 和 Native 矩阵保留。新增作业另存两份数值原件，Load
+合计十一项、二十四份原件。当前只完成编译与解析器/门禁回归，实际五万
+域名 idle 数字仍待准确新源托管执行，不计为已完成的成本证据。

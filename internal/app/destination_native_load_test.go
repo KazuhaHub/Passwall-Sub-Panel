@@ -48,10 +48,15 @@ func TestNativeDestinationMixedPressure(t *testing.T) {
 	nativeDestinationLoad(t, nativeMixedWorkload)
 }
 
+func TestNativeDestinationIdleCost(t *testing.T) {
+	nativeDestinationLoad(t, nativeIdleCostWorkload)
+}
+
 func nativeDestinationLoad(t *testing.T, workload nativeLoadWorkload) {
 	trial, overflow := workload == nativeTrialWorkload, workload == nativeBlockOverflowWorkload
 	mixed := workload == nativeMixedWorkload
-	if workload > nativeMixedWorkload {
+	idle := workload == nativeIdleCostWorkload
+	if workload > nativeIdleCostWorkload {
 		t.Fatal("unknown native load workload")
 	}
 	binary, evidence := os.Getenv("PSP_NATIVE_NODE_BIN"), os.Getenv("PSP_NATIVE_LOAD_METRICS")
@@ -62,6 +67,8 @@ func nativeDestinationLoad(t *testing.T, workload nativeLoadWorkload) {
 		metricsName = "destination-block-overflow-metrics.json"
 	} else if mixed {
 		metricsName = "destination-mixed-pressure-metrics.json"
+	} else if idle {
+		metricsName = "destination-idle-cost-metrics.json"
 	}
 	runnerTemp, tempErr := filepath.EvalSymlinks(os.Getenv("RUNNER_TEMP"))
 	evidenceDir, dirErr := filepath.EvalSymlinks(filepath.Dir(evidence))
@@ -96,7 +103,7 @@ func nativeDestinationLoad(t *testing.T, workload nativeLoadWorkload) {
 	}
 	inbound, api := port(), port()
 	f.node.DesiredPort, f.node.ObservedPort, f.node.InboundListen = inbound, inbound, "127.0.0.1"
-	if trial || overflow || mixed {
+	if trial || overflow || mixed || idle {
 		f.node.Sniffing = `{"enabled":true,"destOverride":["http","tls","quic"],"routeOnly":true}`
 	}
 	nativeMust(t, a.repos.Node.Update(t.Context(), f.node), "configure owned load inbound")
@@ -126,6 +133,7 @@ func nativeDestinationLoad(t *testing.T, workload nativeLoadWorkload) {
 	})
 	handler := a.server.Handler
 	probe := newNativeMixedProbe(f.agent.AgentID)
+	idleProbe := &nativeIdleCostProbe{}
 	if trial || mixed {
 		elapsed := metrics.NewHistogram("fixture_destination_sync_handler_ms", "Owned load control handler completion time; excludes network transit.", "ms", metrics.LatencyBucketsMS)
 		original := handler
@@ -148,6 +156,8 @@ func nativeDestinationLoad(t *testing.T, workload nativeLoadWorkload) {
 	}
 	if mixed {
 		handler = probe.handler(handler)
+	} else if idle {
+		handler = idleProbe.wrap(handler)
 	}
 	server := httptest.NewTLSServer(handler)
 	t.Cleanup(server.Close)
@@ -195,7 +205,7 @@ func nativeDestinationLoad(t *testing.T, workload nativeLoadWorkload) {
 		}
 	})
 	ports := []int{firstPort}
-	for !mixed && len(ports) < 50 {
+	for !mixed && !idle && len(ports) < 50 {
 		listener, err := net.Listen("tcp6", net.JoinHostPort(address, "0"))
 		nativeMust(t, err, "bind owned fifty-rule load target")
 		target := &httptest.Server{Listener: listener, Config: &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { reached.Add(1); _, _ = io.WriteString(w, nonce) })}}
@@ -205,13 +215,17 @@ func nativeDestinationLoad(t *testing.T, workload nativeLoadWorkload) {
 	}
 	// These policies match ports across every address. A different target IP
 	// alone cannot isolate the control request from the fifty block rules.
-	if !mixed && !nativeLoadControlPortIsolated(ports, controlPort) {
+	if !mixed && !idle && !nativeLoadControlPortIsolated(ports, controlPort) {
 		t.Fatal("load policy ports overlap or include the independent control port")
 	}
 	clock, err := exec.Command("getconf", "CLK_TCK").Output()
 	nativeMust(t, err, "read actual process CPU clock")
 	ticks, err := strconv.ParseUint(strings.TrimSpace(string(clock)), 10, 64)
 	nativeMust(t, err, "decode actual process CPU clock")
+	if idle {
+		nativeIdleCost(t, f, client, server.URL, token, cmd.Process.Pid, filepath.Join(dir, "node"), inbound, address, firstPort, nonce, evidence, ticks, idleProbe)
+		return
+	}
 	if mixed {
 		nativeMixedLoad(t, f, client, server.URL, token, cmd.Process.Pid, filepath.Join(dir, "node"), inbound, address, firstPort, nonce, reached, controlAddress, controlPort, controlNonce, evidence, output.text, probe)
 		return

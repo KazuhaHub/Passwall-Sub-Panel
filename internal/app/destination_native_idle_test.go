@@ -64,6 +64,10 @@ func nativeBindLiveCore(t *testing.T, parent int, dataDir, engine string) func()
 // Hold the original process identity across actual accepted sync cycles. A PID
 // number or an unchanged config alone cannot prove that the core never restarted.
 func nativeAssertIdleSync(t *testing.T, a *App, probe *nativeRestartProbe, agentID string, nodeID int64, parent int, dataDir, engine string, traffic func(), mutations ...func()) {
+	nativeAssertIdleSyncCycles(t, a, probe, agentID, nodeID, parent, dataDir, engine, traffic, 3, nil, mutations...)
+}
+
+func nativeAssertIdleSyncCycles(t *testing.T, a *App, probe *nativeRestartProbe, agentID string, nodeID int64, parent int, dataDir, engine string, traffic func(), cycles int, observe func(bool), mutations ...func()) {
 	t.Helper()
 	live := nativeBindLiveCore(t, parent, dataDir, engine)
 	stateDir := filepath.Join(dataDir, "runtime", "xray")
@@ -88,8 +92,11 @@ func nativeAssertIdleSync(t *testing.T, a *App, probe *nativeRestartProbe, agent
 	for _, mutate := range mutations {
 		mutate()
 	}
-	for range 3 {
+	for range cycles {
 		after := time.Now().UTC()
+		if observe != nil {
+			observe(true)
+		}
 		probe.arm()
 		nativeWait(t, 30*time.Second, "unchanged accepted idle sync", func() bool {
 			live()
@@ -128,5 +135,8 @@ func nativeAssertIdleSync(t *testing.T, a *App, probe *nativeRestartProbe, agent
 		}
 		traffic()
 		live()
+		if observe != nil {
+			observe(false)
+		}
 	}
 }
