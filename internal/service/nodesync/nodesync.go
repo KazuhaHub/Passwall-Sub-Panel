@@ -1483,6 +1483,9 @@ func (s *Service) NativePanelSnapshot(ctx context.Context, panelID int64) (*port
 		key := nodeprotocol.NewClientKey(client.ID)
 		applied, exists := appliedClients[key]
 		current, desiredExists := currentClients[key]
+		if !exists {
+			continue
+		}
 		identityConfirmed := exists && desiredExists && sameProtocolClient(applied, current)
 		// Present describes membership in the running core, not whether the
 		// applied roster identity exists. A locally closed quota gate removes a
@@ -1494,12 +1497,14 @@ func (s *Service) NativePanelSnapshot(ctx context.Context, panelID int64) (*port
 			Password: client.Password, Auth: client.UUID, ExpiryTime: client.DesiredExpiryTime,
 			LimitIP: client.PanelIPLimit, LimitHwid: client.PanelDeviceLimit,
 		}
-		for _, attachment := range desiredClient.Inbounds {
-			if node := nodesByID[attachment.NodeID]; node != nil {
+		detail.Flow = applied.Credentials.Flow
+		for _, listener := range applied.Listeners {
+			nodeID, err := listener.RowID()
+			if err != nil {
+				continue
+			}
+			if node := nodesByID[nodeID]; node != nil {
 				detail.InboundIDs = append(detail.InboundIDs, node.InboundID)
-				if attachment.FlowOverride != "" {
-					detail.Flow = attachment.FlowOverride
-				}
 			}
 		}
 		sort.Ints(detail.InboundIDs)
@@ -1519,7 +1524,7 @@ func (s *Service) NativePanelSnapshot(ctx context.Context, panelID int64) (*port
 					InboundID: result.Inbounds[i].ID, Email: client.Email,
 					Up: counter.UpBytes, Down: counter.DownBytes,
 					Total:  nonNegativeSum(counter.UpBytes, counter.DownBytes),
-					Enable: client.DesiredEnable, ExpiryTime: client.DesiredExpiryTime,
+					Enable: applied.Enabled, ExpiryTime: applied.ExpiresAtMS,
 					CounterEpoch: counter.CounterEpoch,
 				})
 			}

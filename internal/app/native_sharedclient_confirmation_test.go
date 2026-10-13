@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/KazuhaHub/passwall-protocol/protocol"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/sharedclient"
 )
 
@@ -64,6 +65,10 @@ func TestNativeSharedClientReadbackPreservesAuthenticatedRosterConfirmation(t *t
 	if err := f.a.repos.PSPClient.UpdateDefinition(ctx, &rotated); err != nil {
 		t.Fatal(err)
 	}
+	rotated.SetDesiredLifecycle(domain.UserLifecycle{Enable: false})
+	if err := f.a.repos.PSPClient.UpdateDesiredLifecycleByUser(ctx, client.UserID, domain.UserLifecycle{Enable: false}); err != nil {
+		t.Fatal(err)
+	}
 	adapter, err := f.a.xuiPool.Get(client.PanelID)
 	if err != nil {
 		t.Fatal(err)
@@ -72,7 +77,7 @@ func TestNativeSharedClientReadbackPreservesAuthenticatedRosterConfirmation(t *t
 		t.Fatal("old authenticated receipt exposed a newly edited desired identity")
 	}
 	inbounds, err := adapter.ListInbounds(ctx)
-	if err != nil || len(inbounds) != 1 || len(inbounds[0].ClientStats) != 1 || inbounds[0].ClientStats[0].Up != 100 || inbounds[0].ClientStats[0].Down != 200 || inbounds[0].ClientStats[0].CounterEpoch != 1 {
+	if err != nil || len(inbounds) != 1 || len(inbounds[0].ClientStats) != 1 || inbounds[0].ClientStats[0].Up != 100 || inbounds[0].ClientStats[0].Down != 200 || inbounds[0].ClientStats[0].CounterEpoch != 1 || !inbounds[0].ClientStats[0].Enable {
 		t.Fatal("pending identity suppressed actual counters from the stable client key")
 	}
 	if err := service.SyncLifecycle(ctx, &rotated); err == nil {
@@ -92,8 +97,9 @@ func TestNativeSharedClientReadbackPreservesAuthenticatedRosterConfirmation(t *t
 	f.report.Have[protocol.StreamRoster] = protocol.StreamState{Applied: next.Roster.Version, ETag: next.Roster.ETag}
 	f.report.Have[protocol.StreamDirectives] = protocol.StreamState{Applied: next.Directives.Version, ETag: next.Directives.ETag}
 	f.report.Objects[1].SinceVersion = next.Roster.Version
+	f.report.Clients[0].Present = false
 	syncNativeCacheFixture(t, f.a, f.credential, f.report)
-	if detail, err := adapter.GetClient(ctx, rotated.Email); err != nil || detail == nil || detail.ID != rotated.UUID {
+	if detail, err := adapter.GetClient(ctx, rotated.Email); err != nil || detail == nil || detail.ID != rotated.UUID || detail.Enable {
 		t.Fatal("new authenticated roster receipt did not expose the rotated identity")
 	}
 	if result, err := service.ProvisionClient(ctx, &rotated); err != nil || result.Provisioned != 1 {
