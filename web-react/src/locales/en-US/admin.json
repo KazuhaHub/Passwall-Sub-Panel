@@ -4878,6 +4878,10 @@
         "label": "Node control processing time",
         "desc": "Time spent in the control coordinator, including failed calls. Excludes HTTP authentication, decoding and network transit."
       },
+      "psp_node_control_sync_stage_ms": {
+        "label": "Node control stage time",
+        "desc": "Processing time by control stage, including failed calls. Use the distribution to locate slow work; stages also include database and lock waits."
+      },
       "psp_dest_audit_begin_ms": {
         "label": "Audit first transaction time",
         "desc": "Complete repository calls by record kind, including admission, budget checks and the first chunk. Includes failures; does not isolate database lock wait."
@@ -4908,6 +4912,17 @@
       }
     },
     "labels": {
+      "node_control_stage": {
+        "desired": "Read desired state",
+        "ingest": "Persist node report",
+        "policy": "Observe policy receipt",
+        "panel": "Record panel state",
+        "config": "Prepare core configuration",
+        "roster": "Prepare client roster",
+        "directives": "Prepare quotas and directives",
+        "tasks": "Offer tasks",
+        "finish": "Finish control response"
+      },
       "dest_compile": {
         "cache_hit": "Complete cache reused",
         "compiled": "Candidate produced",

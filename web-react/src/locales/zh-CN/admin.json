@@ -4874,6 +4874,10 @@
         "label": "节点控制处理耗时",
         "desc": "控制协调器的调用耗时，包含失败调用；不包含 HTTP 身份验证、解码与网络传输。"
       },
+      "psp_node_control_sync_stage_ms": {
+        "label": "节点控制阶段耗时",
+        "desc": "按控制阶段统计处理耗时，包含失败调用。可结合分布定位较慢的环节；阶段耗时也包含数据库与锁等待。"
+      },
       "psp_dest_audit_begin_ms": {
         "label": "审计首笔事务耗时",
         "desc": "按记录种类统计完整仓库调用，包含准入、预算检查与首个分块，失败调用也计入；不能单独表示数据库锁等待。"
@@ -4904,6 +4908,17 @@
       }
     },
     "labels": {
+      "node_control_stage": {
+        "desired": "读取期望状态",
+        "ingest": "保存节点报告",
+        "policy": "读取策略回执",
+        "panel": "记录面板状态",
+        "config": "准备内核配置",
+        "roster": "准备客户端名单",
+        "directives": "准备配额与指令",
+        "tasks": "分发任务",
+        "finish": "完成控制响应"
+      },
       "dest_compile": {
         "cache_hit": "复用完整缓存",
         "compiled": "生成候选",

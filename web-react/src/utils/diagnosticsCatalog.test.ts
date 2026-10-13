@@ -105,6 +105,16 @@ describe('FAMILY_CATALOG', () => {
 })
 
 describe('STAGE_GROUP', () => {
+  it('names every measured native control stage in both bundles', () => {
+    const src = goSource('internal/service/nodesync/nodesync.go')
+    const initial = /stage, stageStarted := "([a-z_]+)", started/.exec(src)?.[1]
+    expect(initial).toBeDefined()
+    const stages = new Set([initial!, ...[...src.matchAll(/advanceStage\("([a-z_]+)"\)/g)].map(match => match[1])])
+    expect(FAMILY_CATALOG.psp_node_control_sync_stage_ms).toEqual({ card: 'node', type: 'histogram', labelled: true })
+    expect(FAMILY_LABEL_GROUP.psp_node_control_sync_stage_ms).toBe('node_control_stage')
+    expectCopy([...stages].map(stage => `labels.node_control_stage.${stage}`))
+  })
+
   it('covers exactly the stages the traffic poll marks', () => {
     expect(Object.keys(STAGE_GROUP).sort()).toEqual([...new Set(pollStages())].sort())
   })
