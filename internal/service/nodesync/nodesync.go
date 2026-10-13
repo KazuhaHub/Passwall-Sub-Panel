@@ -155,6 +155,12 @@ func (s *Service) SetRealityFingerprintNormalizer(normalize func(context.Context
 func (s *Service) Sync(ctx context.Context, report nodeprotocol.NodeReport) (nodeprotocol.SyncResponse, error) {
 	started := time.Now()
 	defer metrics.NodeControlSyncMS.ObserveSince(started)
+	stage, stageStarted := "desired", started
+	advanceStage := func(next string) {
+		metrics.NodeControlSyncStageMS.With(stage).ObserveSince(stageStarted)
+		stage, stageStarted = next, time.Now()
+	}
+	defer func() { metrics.NodeControlSyncStageMS.With(stage).ObserveSince(stageStarted) }()
 	// THE TELEMETRY SUBTREE LEAVES THE CONTROL PATH HERE, before anything reads
 	// the report. Everything below this line decides config, roster, directives,
 	// tasks and accounting, and none of it may be influenced by a telemetry
@@ -194,14 +200,17 @@ func (s *Service) Sync(ctx context.Context, report nodeprotocol.NodeReport) (nod
 		return nodeprotocol.SyncResponse{}, fmt.Errorf("nodesync: desired snapshot: %w", err)
 	}
 	now := s.now().UTC()
+	advanceStage("ingest")
 	if err := s.ingestReport(ctx, agent, snapshot, report, now); err != nil {
 		return nodeprotocol.SyncResponse{}, err
 	}
+	advanceStage("policy")
 	if s.policies != nil {
 		if err := s.policies.ObserveStatus(ctx, agent.AgentID, policyStatus, report.Capabilities); err != nil {
 			return nodeprotocol.SyncResponse{}, fmt.Errorf("nodesync: observe policy status: %w", err)
 		}
 	}
+	advanceStage("panel")
 	normalized, err := s.recordPanelObservation(ctx, agent, report, now)
 	if err != nil {
 		return nodeprotocol.SyncResponse{}, err
@@ -227,6 +236,7 @@ func (s *Service) Sync(ctx context.Context, report nodeprotocol.NodeReport) (nod
 	// THE READ IS CACHED. The reader refreshes on its own TTL and de-duplicates
 	// concurrent refreshes, so the hot path takes a lock and compares a time; it
 	// does not reach the origin.
+	advanceStage("config")
 	coreDocument, err := s.coreCatalog.Document(ctx)
 	if err != nil {
 		return nodeprotocol.SyncResponse{}, fmt.Errorf("nodesync: %w", err)
@@ -239,11 +249,13 @@ func (s *Service) Sync(ctx context.Context, report nodeprotocol.NodeReport) (nod
 	if err != nil {
 		return nodeprotocol.SyncResponse{}, err
 	}
+	advanceStage("roster")
 	rosterBody := buildRoster(snapshot, nodeprotocol.Version{Epoch: agent.Epoch, Version: configStream.DesiredVersion})
 	rosterStream, err := s.mint(ctx, agent, domain.NodeAgentStreamRoster, rosterBody, now)
 	if err != nil {
 		return nodeprotocol.SyncResponse{}, err
 	}
+	advanceStage("directives")
 	directivesBody, envelope, err := s.buildDirectives(ctx, agent, snapshot, report,
 		nodeprotocol.Version{Epoch: agent.Epoch, Version: rosterStream.DesiredVersion}, now)
 	if err != nil {
@@ -259,6 +271,7 @@ func (s *Service) Sync(ctx context.Context, report nodeprotocol.NodeReport) (nod
 		Roster:     segmentFor(report.Have[nodeprotocol.StreamRoster], agent.Epoch, rosterStream, rosterBody),
 		Directives: segmentFor(report.Have[nodeprotocol.StreamDirectives], agent.Epoch, directivesStream, directivesBody),
 	}
+	advanceStage("tasks")
 	taskJSONBudget, err := availableTaskJSONBytes(response)
 	if err != nil {
 		return nodeprotocol.SyncResponse{}, err
@@ -277,6 +290,7 @@ func (s *Service) Sync(ctx context.Context, report nodeprotocol.NodeReport) (nod
 	// returns no error by construction: the only way this feature could break the
 	// data plane is by returning one, and that is the outcome it exists to be
 	// incapable of.
+	advanceStage("finish")
 	if s.host != nil {
 		if host != nil {
 			s.host.Ingest(ctx, agent.AgentID, host, now)

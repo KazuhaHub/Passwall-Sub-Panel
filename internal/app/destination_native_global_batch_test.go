@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net"
 	"net/http"
 	"os"
@@ -83,6 +84,21 @@ func TestNativeDestinationGlobalBatchPressure(t *testing.T) {
 		nativeMust(t, err, "encode closed numeric global batch evidence")
 		nativeMust(t, os.WriteFile(evidence, append(body, '\n'), 0644), "save closed numeric global batch evidence")
 	}
+	writeStageDiagnostics := func() {
+		for _, h := range metrics.Take().Histograms {
+			for _, name := range []string{"desired", "ingest", "policy", "panel", "config", "roster", "directives", "tasks", "finish"} {
+				if h.Name != "psp_node_control_sync_stage_ms{stage="+name+"}" || h.Count <= 0 {
+					continue
+				}
+				t.Logf("native global stage: %s_count=%d", name, h.Count)
+				for field, value := range map[string]float64{"mean_ms": h.Mean, "p95_ms": h.P95, "max_ms": h.Max} {
+					if !math.IsNaN(value) && !math.IsInf(value, 0) && value >= 0 && value <= 1200000 {
+						t.Logf("native global stage: %s_%s=%d", name, field, int64(math.Ceil(value)))
+					}
+				}
+			}
+		}
+	}
 	t.Cleanup(writeMetrics)
 	var storage *nativeGlobalAuditStorage
 	cohort := nativeBootstrapGlobalCohort(t, nativeGlobalCohortOptions{
@@ -124,7 +140,13 @@ func TestNativeDestinationGlobalBatchPressure(t *testing.T) {
 	_, observeAddress, observePort, observeNonce, _ := nativeTargetAtPort(t, nativePort(t))
 	_, controlAddress, controlPort, controlNonce, _ := nativeTargetAtPort(t, nativePort(t))
 	stage := "capability"
-	users, group, policy, blockAddress, blockPort, blockReached := nativePrepareTrialLoad(t, f, cohort.server.Client(), cohort.server.URL, token, f.node.DesiredPort, nativeGlobalBatchOutput(cohort.peers), &stage, &nativeMixedSetup{observePort: observePort, memberConcurrency: 8, memberReady: func(completed int) { m.Users = completed; writeMetrics() }})
+	users, group, policy, blockAddress, blockPort, blockReached := nativePrepareTrialLoad(t, f, cohort.server.Client(), cohort.server.URL, token, f.node.DesiredPort, nativeGlobalBatchOutput(cohort.peers), &stage, &nativeMixedSetup{observePort: observePort, memberConcurrency: 8, memberReady: func(completed int) {
+		m.Users = completed
+		writeMetrics()
+		if completed%50 == 0 {
+			writeStageDiagnostics()
+		}
+	}})
 	m.Users = len(users)
 	if m.Users != 200 || targetPort == blockPort || targetPort == observePort || controlPort == blockPort || controlPort == observePort || controlPort == targetPort {
 		t.Fatal("global batch principals or lane targets are not independent")
@@ -161,6 +183,7 @@ func TestNativeDestinationGlobalBatchPressure(t *testing.T) {
 	var waitingPeer *nativeGlobalPeer
 	t.Cleanup(func() {
 		if m.Stage == 2 {
+			writeStageDiagnostics()
 			t.Log("global batch readiness: " + readiness)
 			if waitingPeer != nil {
 				for name, value := range waitingPeer.sync.facts() {

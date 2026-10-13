@@ -713,6 +713,11 @@ var (
 		"Complete control coordinator Sync calls, including failed calls; excludes HTTP authentication, decoding and network transit.",
 		"ms", LatencyBucketsMS,
 	)
+	NodeControlSyncStageMS = NewHistogramVec(
+		"psp_node_control_sync_stage_ms",
+		"Control coordinator phases, including failed calls; fixed phase labels only, no agent identity or request content.",
+		"ms", "stage", LatencyBucketsMS,
+	)
 )
 
 // ---------------------------------------------------------------------

@@ -72,6 +72,27 @@ test('global sync diagnostics retain only bounded actual transport facts', async
   assert(!isSafeDestinationDiagnostic({ Diagnostic: 'global_sync_agent_id', Observed: 1 }))
 })
 
+test('global control stage diagnostics expose only bounded aggregate timing and never completion proof', async () => {
+  const { isSafeDestinationDiagnostic, checkDestinationGlobalBatchResults } = await import('./destination-acceptance.mjs')
+  const facts = []
+  for (const stage of ['desired', 'ingest', 'policy', 'panel', 'config', 'roster', 'directives', 'tasks', 'finish']) {
+    for (const [field, value] of [['count', 1000000], ['mean_ms', 0], ['p95_ms', 12345], ['max_ms', 1200000]]) {
+      const result = sanitizeDestinationResults(encode([{ Action: 'output', Output: `private identity: native global stage: ${stage}_${field}=${value}\n` }]))
+      const event = JSON.parse(result)
+      assert.equal(event.Diagnostic, `global_stage_${stage}_${field}`)
+      assert.equal(event.Observed, value)
+      assert(isSafeDestinationDiagnostic(event))
+      assert(!result.includes('private identity'))
+      facts.push(event)
+    }
+  }
+  assert.throws(() => checkDestinationGlobalBatchResults(encode(facts)))
+  for (const line of ['agent_count=1', 'directives_count=0', 'directives_count=1000001', 'desired_mean_ms=-1', 'ingest_p95_ms=1200001', 'policy_mean_ms=1.5', 'tasks_max_ms=1; credential=secret']) {
+    assert.equal(sanitizeDestinationResults(encode([{ Action: 'output', Output: `native global stage: ${line}\n` }])).trim(), '')
+  }
+  assert(!isSafeDestinationDiagnostic({ Diagnostic: 'global_stage_agent_count', Observed: 1 }))
+})
+
 test('Docker recovery diagnostics retain fixed categories without task or credential output', () => {
   const pkg = 'github.com/KazuhaHub/passwall-sub-panel/internal/app'
   const Test = 'TestNativePublishedDockerRollback/health_failure_restore'

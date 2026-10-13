@@ -305,6 +305,8 @@ export function sanitizeDestinationResults(input) {
   return input.split(/\r?\n/).filter(line => line.trim()).map(line => {
     const event = parseEvent(line)
     if (event.Action === 'output') {
+      const globalStage = typeof event.Output === 'string' && /native global stage: ((?:desired|ingest|policy|panel|config|roster|directives|tasks|finish)_(?:count|mean_ms|p95_ms|max_ms))=([0-9]{1,7})(?:\r?\n|$)/.exec(event.Output)
+      if (globalStage && isSafeGlobalStageFact(globalStage[1], Number(globalStage[2]))) return JSON.stringify({ Action: 'output', Package: pkg, Diagnostic: `global_stage_${globalStage[1]}`, Observed: Number(globalStage[2]) })
       const globalSync = typeof event.Output === 'string' && /native global sync: (attempt_age_ms|completion_age_ms|last_duration_ms|last_status|inflight|parent_alive)=([0-9]{1,7})(?:\r?\n|$)/.exec(event.Output)
       if (globalSync && isSafeGlobalSyncFact(globalSync[1], Number(globalSync[2]))) return JSON.stringify({ Action: 'output', Package: pkg, Diagnostic: `global_sync_${globalSync[1]}`, Observed: Number(globalSync[2]) })
       const fleetSetup = typeof event.Output === 'string' && /native diagnostic: (fleet_setup_(?:cohort|candidates|database|session|cadence|principals|peers|server|daemons|membership))=(true|false)(?:\r?\n|$)/.exec(event.Output)
@@ -355,6 +357,7 @@ export function isSafeDestinationDiagnostic(event) {
     return sanitized.Diagnostic === event.Diagnostic && sanitized.Observed === event.Observed
   }
   if (!Number.isInteger(event.Observed) || event.Observed < 0) return false
+  if (event.Diagnostic.startsWith('global_stage_')) return isSafeGlobalStageFact(event.Diagnostic.slice('global_stage_'.length), event.Observed)
   if (event.Diagnostic.startsWith('global_sync_')) return isSafeGlobalSyncFact(event.Diagnostic.slice('global_sync_'.length), event.Observed)
   if (event.Diagnostic === 'receipt_wait') return event.Observed >= 1 && event.Observed <= 99
   return ['panel_downgrade_application_ms', 'panel_reupgrade_application_ms'].includes(event.Diagnostic) && event.Observed <= 150000
@@ -366,6 +369,11 @@ function isSafeGlobalSyncFact(name, value) {
   if (name === 'last_status') return value >= 100 && value <= 599
   if (name === 'inflight') return value <= 65
   return name === 'parent_alive' && value <= 1
+}
+
+function isSafeGlobalStageFact(name, value) {
+  if (!/^(desired|ingest|policy|panel|config|roster|directives|tasks|finish)_(count|mean_ms|p95_ms|max_ms)$/.test(name) || !Number.isInteger(value) || value < 0) return false
+  return name.endsWith('_count') ? value >= 1 && value <= 1000000 : value <= 1200000
 }
 function checkCases(input, names) {
   const runs = new Map(), passes = new Map()
