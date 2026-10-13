@@ -6,7 +6,7 @@ const require = (value, code = 1) => {
 }
 export const idleTraceFailureDiagnostic = error => ({ schema_version: 1, error_code: Number.isInteger(error?.code) && error.code >= 1 && error.code <= 15 ? error.code : 1 })
 const count = value => Number.isSafeInteger(value) && value >= 0
-const calls = ['write', 'pwrite64', 'writev', 'pwritev', 'pwritev2', 'fsync', 'fdatasync', 'mmap', 'msync']
+const calls = ['write', 'pwrite64', 'writev', 'pwritev', 'pwritev2', 'fsync', 'fdatasync', 'mmap', 'msync', 'restart_syscall']
 
 // Input is private strace -f -ttt -yy -s 0 output from the owned actual Node.
 // Successful write return values are logical syscall bytes, not physical disk
@@ -25,8 +25,15 @@ export function summarizeIdleStateWrites(input, statePath, windows) {
   const result = windows.map(() => ({ db_bytes: 0, wal_bytes: 0, journal_bytes: 0, write_calls: 0, sync_calls: 0 }))
   const pending = new Map()
   const consume = (stamp, call) => {
-    const name = call.match(/^([a-z0-9]+)\(/)?.[1]
+    const name = call.match(/^([a-z0-9_]+)\(/)?.[1]
     require(calls.includes(name), 13)
+    // Attaching a tracer can stop/resume kernel waits. Only closed, known
+    // non-writing wait restarts contribute no SQLite bytes. Ambiguous or
+    // writing restarts remain failures, including incomplete thread pairs.
+    if (name === 'restart_syscall') {
+      require(!call.includes(statePath) && /^restart_syscall\(<\.\.\. resuming interrupted (?:futex|poll|nanosleep|clock_nanosleep) \.\.\.>\)\s+=\s+-?\d+(?:\s+[A-Z][A-Z0-9_]*(?: \([^"\r\n]*\))?)?$/.test(call), 13)
+      return
+    }
     const fd = call.match(/^\w+\(\d+<([^>]+)>/)
     const path = fd?.[1]
     if (path?.startsWith(statePath) && path.includes(' (deleted)')) require(false, 9)

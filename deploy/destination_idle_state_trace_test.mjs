@@ -36,6 +36,20 @@ test('idle trace retains entry timestamps and thread identity for unfinished wri
   assert.equal(summarizeIdleStateWrites(input, state, windows)[1].wal_bytes, 0)
 })
 
+test('idle trace keeps closed restarted kernel waits separate from state writes', () => {
+  const input = line('0.100000', 'restart_syscall(<... resuming interrupted futex ...>) = 0')
+    + line('0.200000', 'restart_syscall(<... resuming interrupted poll ...> <unfinished ...>')
+    + '123 1791851000.210000 <... restart_syscall resumed>) = 1\n'
+    + line('0.300000', `write(8<${state}-wal>, ""..., 32) = 32`)
+  assert.deepEqual(summarizeIdleStateWrites(input, state, windows)[0], { db_bytes: 0, wal_bytes: 32, journal_bytes: 0, write_calls: 1, sync_calls: 0 })
+  for (const call of [
+    'restart_syscall(<... resuming interrupted write ...>) = 32',
+    'restart_syscall(<... resuming interrupted unknown ...>) = 0',
+    `restart_syscall(<... resuming interrupted futex ...>, 8<${state}>) = 0`,
+    'restart_syscall(<... resuming interrupted futex ...> <unfinished ...>',
+  ]) assert.throws(() => summarizeIdleStateWrites(line('0.100000', call), state, windows))
+})
+
 test('idle trace refuses ambiguous state writes, lost calls, private payload and invalid windows', () => {
   for (const input of [
     line('0.100000', `write(8<${state}>, "private", 7) = 7`),

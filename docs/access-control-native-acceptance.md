@@ -1412,3 +1412,11 @@ owner，仍在 stage1，流量与 SQL 暂停入口尚未开始。固定诊断同
 generation、准确collection revision/digest、收敛名单及全部200人。
 既有因果回执回归明确拒绝错误的pending基线，未放宽回执判断；新的
 全局运行结果仍待验收，旧stage2失败保留。
+
+源59的50k idle实际观测在trace_stage3/error13失败，CPU的五轮plain/
+traced观测已完成，写入字节未解析成功，不能填零或宣称该项通过。受控
+回归复现解析器拒绝restart_syscall的同一类别；Linux内核可能在停止/
+恢复后重启futex、poll或sleep等待。解析现在只接受完整、已知的非写入
+等待重启，并保留线程配对检查；写入重启、未知调用、状态路径混入和
+未闭合调用仍拒绝，不产生SQLite写入计数。该回归证明一个解析缺口，
+尚不能证明旧失败的具体调用就是它，真实trace验收与旧失败原件保留。
