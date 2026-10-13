@@ -1483,9 +1483,7 @@ func (s *Service) NativePanelSnapshot(ctx context.Context, panelID int64) (*port
 		key := nodeprotocol.NewClientKey(client.ID)
 		applied, exists := appliedClients[key]
 		current, desiredExists := currentClients[key]
-		if !exists || !desiredExists || !sameProtocolClient(applied, current) {
-			continue
-		}
+		identityConfirmed := exists && desiredExists && sameProtocolClient(applied, current)
 		// Present describes membership in the running core, not whether the
 		// applied roster identity exists. A locally closed quota gate removes a
 		// client from Xray while retaining its durable identity and counters. The
@@ -1505,7 +1503,11 @@ func (s *Service) NativePanelSnapshot(ctx context.Context, panelID int64) (*port
 			}
 		}
 		sort.Ints(detail.InboundIDs)
-		result.Clients[client.Email] = detail
+		if identityConfirmed {
+			result.Clients[client.Email] = detail
+		}
+		// Counters and live IPs use the stable client key. A pending definition
+		// must not suppress actual traffic while its new identity awaits ACK.
 		if len(counter.LiveIPs) > 0 {
 			ips := append([]string(nil), counter.LiveIPs...)
 			sort.Strings(ips)

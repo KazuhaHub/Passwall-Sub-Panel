@@ -41,7 +41,7 @@ func TestNativeSharedClientReadbackPreservesAuthenticatedRosterConfirmation(t *t
 		{Stream: protocol.StreamRoster, Key: string(protocol.NewClientKey(client.ID)), State: protocol.ObjectApplied, SinceVersion: initial.Roster.Version},
 	}
 	f.report.ListenerCounters = []protocol.ListenerCounters{{Key: protocol.NewListenerKey(f.node.ID), Present: true, CounterEpoch: 1}}
-	f.report.Clients = []protocol.ClientCounters{{Key: protocol.NewClientKey(client.ID), Present: true, CounterEpoch: 1, Gate: protocol.GateUnconfigured}}
+	f.report.Clients = []protocol.ClientCounters{{Key: protocol.NewClientKey(client.ID), Present: true, UpBytes: 100, DownBytes: 200, CounterEpoch: 1, Gate: protocol.GateUnconfigured}}
 	syncNativeCacheFixture(t, f.a, f.credential, f.report)
 	confirmed, err := f.a.repos.PSPClient.ListInbounds(ctx, client.ID)
 	if err != nil || len(confirmed) != 1 || !confirmed[0].Applied() || confirmed[0].AppliedVersion != initial.Roster.Version.Version || confirmed[0].AppliedUUID != client.UUID {
@@ -70,6 +70,10 @@ func TestNativeSharedClientReadbackPreservesAuthenticatedRosterConfirmation(t *t
 	}
 	if detail, err := adapter.GetClient(ctx, client.Email); err != nil || detail != nil {
 		t.Fatal("old authenticated receipt exposed a newly edited desired identity")
+	}
+	inbounds, err := adapter.ListInbounds(ctx)
+	if err != nil || len(inbounds) != 1 || len(inbounds[0].ClientStats) != 1 || inbounds[0].ClientStats[0].Up != 100 || inbounds[0].ClientStats[0].Down != 200 || inbounds[0].ClientStats[0].CounterEpoch != 1 {
+		t.Fatal("pending identity suppressed actual counters from the stable client key")
 	}
 	if err := service.SyncLifecycle(ctx, &rotated); err == nil {
 		t.Fatal("native lifecycle confirmed an identity absent from the accepted roster")
