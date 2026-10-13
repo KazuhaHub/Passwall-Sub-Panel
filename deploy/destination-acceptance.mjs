@@ -29,6 +29,15 @@ const dockerUpgradeNames = ['TestNativePublishedDockerRollback', ...remoteUpgrad
 const remoteUpgradeNames = ['TestNativePublishedRemoteRollback', ...remoteUpgradeCases.map(name => `TestNativePublishedRemoteRollback/${name}`)]
 const names = [...xrayNames, ...singBoxNames, ...guardedSingBoxNames, ...legacyUpgradeNames, ...remoteUpgradeNames, ...dockerUpgradeNames, ...fleetNames, ...loadNames, ...trialLoadNames, ...blockOverflowNames, ...mixedPressureNames, ...idleCostNames, ...globalBootstrapNames, ...globalBatchNames]
 const diagnostics = Object.freeze({
+  'native setup stage: capability\n': 'global_setup_stage_capability',
+  'native setup stage: group\n': 'global_setup_stage_group',
+  'native setup stage: principal\n': 'global_setup_stage_principal',
+  'native setup stage: membership\n': 'global_setup_stage_membership',
+  'native setup stage: policy\n': 'global_setup_stage_policy',
+  'native setup stage: mode\n': 'global_setup_stage_mode',
+  'native setup stage: collection\n': 'global_setup_stage_collection',
+  'native setup stage: publication\n': 'global_setup_stage_publication',
+  'native setup stage: receipt\n': 'global_setup_stage_receipt',
   'test timed out after 20m': 'global_batch_suite_timeout',
   'nativePrepareTrialLoad(': 'global_batch_setup_stack',
   '(*Service).ResyncMembership(': 'global_batch_membership_stack',

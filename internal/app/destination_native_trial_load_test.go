@@ -274,6 +274,15 @@ func nativeTrialLoad(t *testing.T, f destinationPolicyFixture, client *http.Clie
 // exact applied policy/config/roster receipts for both independent workloads.
 func nativePrepareTrialLoad(t *testing.T, f destinationPolicyFixture, client *http.Client, endpoint, token string, inbound int, output func() string, stage *string, mixed *nativeMixedSetup) ([]*domain.User, *domain.Group, destinationPolicyAPIResult, string, int, *atomic.Int64) {
 	a := f.a
+	lastStage := ""
+	setStage := func(next string) {
+		*stage = next
+		if next != lastStage {
+			t.Log("native setup stage: " + next)
+			lastStage = next
+		}
+	}
+	setStage("capability")
 	collect, ruleCount := "hits", 2
 	if mixed != nil {
 		collect, ruleCount = "hits_and_usage", 3
@@ -328,7 +337,7 @@ func nativePrepareTrialLoad(t *testing.T, f destinationPolicyFixture, client *ht
 		observedInbound, err := cli.GetInbound(t.Context(), f.node.InboundID)
 		return err == nil && nativeTrialProvisioningReady(status, observedInbound, f.node.InboundID, inbound)
 	})
-	*stage = "group"
+	setStage("group")
 	group := &domain.Group{Slug: "trial-load", Name: "Trial load", TagFilter: domain.TagFilter{All: true}}
 	nativeMust(t, a.repos.Group.Create(t.Context(), group), "create owned trial load group")
 	users := make([]*domain.User, 200)
@@ -347,19 +356,19 @@ func nativePrepareTrialLoad(t *testing.T, f destinationPolicyFixture, client *ht
 		t.Fatal("trial fixture membership concurrency outside the bounded owner workload")
 	}
 	for i := range users {
-		*stage = "principal"
+		setStage("principal")
 		email := fmt.Sprintf("trial-load-%03d@example.test", i)
 		users[i] = &domain.User{UPN: email, Email: email, SSOProvider: domain.SSOProviderLocal, SSOSubject: email, Role: domain.RoleUser, Enabled: true, GroupID: group.ID, UUID: fmt.Sprintf("00000000-0000-4000-8000-%012d", i+1), SubToken: fmt.Sprintf("fixture-trial-load-sub-%03d", i)}
 		nativeMust(t, a.repos.User.Create(t.Context(), users[i]), "create real trial principal")
 		if memberConcurrency == 1 {
-			*stage = "membership"
+			setStage("membership")
 			nativeMust(t, a.user.ResyncMembershipOrEnqueue(t.Context(), users[i].ID, "trial load membership"), "admit trial principal through production membership retry service")
 			if mixed != nil && mixed.memberReady != nil {
 				mixed.memberReady(i + 1)
 			}
 		}
 	}
-	*stage = "membership"
+	setStage("membership")
 	// Different users have independent production resync locks. Bound the
 	// fixture's concurrency without bypassing intent, lifecycle, provisioning,
 	// durable retries, or the exact applied roster/traffic checks below.
@@ -406,7 +415,7 @@ func nativePrepareTrialLoad(t *testing.T, f destinationPolicyFixture, client *ht
 		blockBindPort = nativePort(t)
 	}
 	_, blockAddress, blockPort, _, blockReached := nativeTargetAtPort(t, blockBindPort)
-	*stage = "policy"
+	setStage("policy")
 	input := destinationPolicyInput("Concurrent trial block", "block")
 	input["inline"] = map[string]any{"ports": strconv.Itoa(blockPort)}
 	var policy destinationPolicyAPIResult
@@ -418,14 +427,14 @@ func nativePrepareTrialLoad(t *testing.T, f destinationPolicyFixture, client *ht
 		request("POST", "dest/policies", observeInput, 201, &observePolicy)
 	}
 	var mode destinationGroupModeAPIResult
-	*stage = "mode"
+	setStage("mode")
 	request("PUT", fmt.Sprintf("dest/groups/%d", group.ID), map[string]any{"mode": "allowlist", "stage": "trial", "list_ids": []int64{}, "updated_at": int64(0), "base_hosts": []string{}}, 200, &mode)
-	*stage = "collection"
+	setStage("collection")
 	request("PUT", fmt.Sprintf("servers/%d", f.agent.PanelID), map[string]any{"audit_collect": collect}, 200, nil)
-	*stage = "publication"
+	setStage("publication")
 	request("POST", "dest/publish", nil, 200, nil)
 	panel, err := a.repos.XUIPanel.GetByID(t.Context(), f.agent.PanelID)
-	*stage = "receipt"
+	setStage("receipt")
 	nativeMust(t, err, "bind trial collection revision")
 	nativeWait(t, 120*time.Second, "current trial policy and complete real roster", func() bool {
 		state, e1 := a.destDefinitions.State(t.Context())

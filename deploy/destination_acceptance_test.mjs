@@ -110,6 +110,20 @@ test('Docker recovery diagnostics retain fixed categories without task or creden
   assert.equal(sanitizeDestinationResults(encode([{ Action: 'output', Package: pkg, Test, Output: 'private task receipt credential address' }])), '\n')
 })
 
+test('setup stages remain closed and expose no request or account parameters', async () => {
+  const { isSafeDestinationDiagnostic } = await import('./destination-acceptance.mjs')
+  for (const stage of ['capability', 'group', 'principal', 'membership', 'policy', 'mode', 'collection', 'publication', 'receipt']) {
+    const event = JSON.parse(sanitizeDestinationResults(encode([{ Action: 'output', Output: `private-file:1: native setup stage: ${stage}\n` }])))
+    assert.equal(event.Diagnostic, `global_setup_stage_${stage}`)
+    assert(isSafeDestinationDiagnostic(event))
+    assert.deepEqual(Object.keys(event).sort(), ['Action', 'Diagnostic', 'Package'])
+  }
+  for (const value of ['mode credential=secret', 'private-email', 'membership=123']) {
+    assert.equal(sanitizeDestinationResults(encode([{ Action: 'output', Output: `native setup stage: ${value}\n` }])), '\n')
+  }
+  assert(!isSafeDestinationDiagnostic({ Diagnostic: 'global_setup_stage_private' }))
+})
+
 test('global timeout stack facts retain only closed operation categories', async () => {
   const { isSafeDestinationDiagnostic } = await import('./destination-acceptance.mjs')
   const frames = {
