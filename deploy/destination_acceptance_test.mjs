@@ -45,7 +45,7 @@ test('global readiness failures disclose only closed guard categories', async ()
   const { isSafeDestinationDiagnostic } = await import('./destination-acceptance.mjs')
   const Package = 'github.com/KazuhaHub/passwall-sub-panel/internal/app'
   const Test = 'TestNativeDestinationGlobalBatchPressure'
-  for (const reason of ['state', 'store', 'capability', 'streams', 'receipt', 'collection', 'shape', 'subjects', 'roster', 'complete']) {
+  for (const reason of ['state', 'store', 'capability', 'streams', 'streams_store', 'streams_metadata', 'streams_config', 'streams_roster', 'streams_adapter', 'streams_inbound', 'receipt', 'collection', 'shape', 'subjects', 'roster', 'complete']) {
     const result = sanitizeDestinationResults(encode([{ Action: 'output', Package, Test, Output: 'private-path:4: global batch readiness: ' + reason + '; credential=secret host=private-host' }]))
     const event = JSON.parse(result)
     assert.deepEqual(event, { Action: 'output', Package, Test, Diagnostic: 'global_batch_readiness_' + reason })

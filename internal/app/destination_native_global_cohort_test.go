@@ -43,10 +43,11 @@ type nativeGlobalCohortOptions struct {
 }
 
 type nativeGlobalCohort struct {
-	fixture destinationPolicyFixture
-	peers   []*nativeGlobalPeer
-	ready   func(*nativeGlobalPeer) bool
-	server  *httptest.Server
+	fixture     destinationPolicyFixture
+	peers       []*nativeGlobalPeer
+	ready       func(*nativeGlobalPeer) bool
+	readyReason func(*nativeGlobalPeer) string
+	server      *httptest.Server
 }
 
 // Bootstrap prerequisite only. It proves 65 independently authenticated real
@@ -172,22 +173,35 @@ func nativeBootstrapGlobalCohort(t *testing.T, options nativeGlobalCohortOptions
 	t.Cleanup(server.Close)
 	ca := filepath.Join(t.TempDir(), "ca.pem")
 	nativeMust(t, os.WriteFile(ca, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: server.Certificate().Raw}), 0600), "write private scoped global CA")
-	ready := func(peer *nativeGlobalPeer) bool {
+	readyReason := func(peer *nativeGlobalPeer) string {
 		agent, e1 := a.repos.NodeAgent.GetByAgentID(t.Context(), peer.agent.AgentID)
 		cfg, e2 := a.repos.NodeAgent.GetStream(t.Context(), peer.agent.AgentID, domain.NodeAgentStreamConfig)
 		roster, e3 := a.repos.NodeAgent.GetStream(t.Context(), peer.agent.AgentID, domain.NodeAgentStreamRoster)
 		panel, panelErr := a.repos.XUIPanel.GetByID(t.Context(), peer.agent.PanelID)
-		if e1 != nil || e2 != nil || e3 != nil || panelErr != nil || panel == nil || panel.XrayVersion != "26.6.27" || agent == nil || cfg == nil || roster == nil || agent.Epoch != peer.agent.Epoch || agent.AllowRestrictedReality || agent.ObservedCoreEngine != domain.NodeCoreXray || agent.DesiredCoreEngine != domain.NodeCoreXray || agent.DesiredCoreVersion != "26.6.27" || agent.LastSeen == nil || !slicesContainsNative(agent.ObservedCapabilities, protocol.CapabilityDestinationPolicy) || !cfg.Converged() || !roster.Converged() || cfg.AppliedEpoch != agent.Epoch || roster.AppliedEpoch != agent.Epoch {
-			return false
+		if e1 != nil || e2 != nil || e3 != nil || panelErr != nil || panel == nil || agent == nil || cfg == nil || roster == nil {
+			return "store"
+		}
+		if panel.XrayVersion != "26.6.27" || agent.Epoch != peer.agent.Epoch || agent.AllowRestrictedReality || agent.ObservedCoreEngine != domain.NodeCoreXray || agent.DesiredCoreEngine != domain.NodeCoreXray || agent.DesiredCoreVersion != "26.6.27" || agent.LastSeen == nil || !slicesContainsNative(agent.ObservedCapabilities, protocol.CapabilityDestinationPolicy) {
+			return "metadata"
+		}
+		if !cfg.Converged() || cfg.AppliedEpoch != agent.Epoch {
+			return "config"
+		}
+		if !roster.Converged() || roster.AppliedEpoch != agent.Epoch {
+			return "roster"
 		}
 		adapter, err := a.xuiPool.Get(peer.agent.PanelID)
 		if err != nil {
-			return false
+			return "adapter"
 		}
 		status, e4 := adapter.GetServerStatus(t.Context())
 		inbound, e5 := adapter.GetInbound(t.Context(), peer.node.InboundID)
-		return e4 == nil && e5 == nil && nativeTrialProvisioningReady(status, inbound, peer.node.InboundID, peer.node.DesiredPort)
+		if e4 != nil || e5 != nil || !nativeTrialProvisioningReady(status, inbound, peer.node.InboundID, peer.node.DesiredPort) {
+			return "inbound"
+		}
+		return ""
 	}
+	ready := func(peer *nativeGlobalPeer) bool { return readyReason(peer) == "" }
 	for i, peer := range peers {
 		dataDir := filepath.Join(peer.dir, "node")
 		if i != 0 {
@@ -313,7 +327,7 @@ func nativeBootstrapGlobalCohort(t *testing.T, options nativeGlobalCohortOptions
 		peer.live()
 	}
 	m.Stage = 9
-	return &nativeGlobalCohort{fixture: f, peers: peers, ready: ready, server: server}
+	return &nativeGlobalCohort{fixture: f, peers: peers, ready: ready, readyReason: readyReason, server: server}
 }
 
 func nativeGlobalCurrentPublicCore(parent int, dataDir string) bool {

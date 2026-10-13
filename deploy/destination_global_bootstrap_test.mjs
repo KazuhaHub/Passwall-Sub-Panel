@@ -44,7 +44,9 @@ test('global pressure reuses the checked real cohort and opts into actual Node m
   assert(source.includes('peer.process.Args = append(peer.process.Args, "--audit-metrics")'))
   assert(source.includes('nativeMixedOutput{private: peer.output, probe: peer.probe}'))
   assert(source.indexOf('handler = options.transport(handler, peers)') < source.indexOf('httptest.NewTLSServer(handler)'))
-  assert(source.indexOf('return &nativeGlobalCohort{fixture: f, peers: peers, ready: ready, server: server}') > source.indexOf('m.Stage = 9'))
+  assert(source.indexOf('return &nativeGlobalCohort{fixture: f, peers: peers, ready: ready, readyReason: readyReason, server: server}') > source.indexOf('m.Stage = 9'))
+  assert(source.includes('ready := func(peer *nativeGlobalPeer) bool { return readyReason(peer) == "" }'))
+  for (const guard of ['!cfg.Converged() || cfg.AppliedEpoch != agent.Epoch', '!roster.Converged() || roster.AppliedEpoch != agent.Epoch', 'nativeTrialProvisioningReady(status, inbound, peer.node.InboundID, peer.node.DesiredPort)']) assert(source.includes(guard))
   assert.doesNotMatch(source, /\.server\.Config\.Handler\s*=|SetSnapshot\(|\.collector\.Ack\(/)
 })
 

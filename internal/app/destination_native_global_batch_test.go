@@ -182,7 +182,8 @@ func TestNativeDestinationGlobalBatchPressure(t *testing.T) {
 				return false
 			}
 			readiness = "streams"
-			if !cohort.ready(peer) {
+			if reason := cohort.readyReason(peer); reason != "" {
+				readiness = "streams_" + reason
 				return false
 			}
 			readiness = "receipt"
