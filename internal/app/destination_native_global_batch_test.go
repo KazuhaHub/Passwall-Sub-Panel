@@ -123,7 +123,7 @@ func TestNativeDestinationGlobalBatchPressure(t *testing.T) {
 	_, observeAddress, observePort, observeNonce, _ := nativeTargetAtPort(t, nativePort(t))
 	_, controlAddress, controlPort, controlNonce, _ := nativeTargetAtPort(t, nativePort(t))
 	stage := "capability"
-	users, group, policy, blockAddress, blockPort, blockReached := nativePrepareTrialLoad(t, f, cohort.server.Client(), cohort.server.URL, token, f.node.DesiredPort, nativeGlobalBatchOutput(cohort.peers), &stage, &nativeMixedSetup{observePort: observePort, memberReady: func(completed int) { m.Users = completed; writeMetrics() }})
+	users, group, policy, blockAddress, blockPort, blockReached := nativePrepareTrialLoad(t, f, cohort.server.Client(), cohort.server.URL, token, f.node.DesiredPort, nativeGlobalBatchOutput(cohort.peers), &stage, &nativeMixedSetup{observePort: observePort, memberConcurrency: 8, memberReady: func(completed int) { m.Users = completed; writeMetrics() }})
 	m.Users = len(users)
 	if m.Users != 200 || targetPort == blockPort || targetPort == observePort || controlPort == blockPort || controlPort == observePort || controlPort == targetPort {
 		t.Fatal("global batch principals or lane targets are not independent")

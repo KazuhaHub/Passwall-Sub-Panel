@@ -26,8 +26,9 @@ import (
 )
 
 type nativeMixedSetup struct {
-	observePort int
-	memberReady func(int)
+	observePort       int
+	memberReady       func(int)
+	memberConcurrency int
 }
 
 type nativeMixedNodeSample struct {

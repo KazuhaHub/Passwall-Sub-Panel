@@ -339,18 +339,65 @@ func nativePrepareTrialLoad(t *testing.T, f destinationPolicyFixture, client *ht
 			}
 		}
 	})
+	memberConcurrency := 1
+	if mixed != nil && mixed.memberConcurrency != 0 {
+		memberConcurrency = mixed.memberConcurrency
+	}
+	if memberConcurrency < 1 || memberConcurrency > 8 {
+		t.Fatal("trial fixture membership concurrency outside the bounded owner workload")
+	}
 	for i := range users {
 		*stage = "principal"
 		email := fmt.Sprintf("trial-load-%03d@example.test", i)
 		users[i] = &domain.User{UPN: email, Email: email, SSOProvider: domain.SSOProviderLocal, SSOSubject: email, Role: domain.RoleUser, Enabled: true, GroupID: group.ID, UUID: fmt.Sprintf("00000000-0000-4000-8000-%012d", i+1), SubToken: fmt.Sprintf("fixture-trial-load-sub-%03d", i)}
 		nativeMust(t, a.repos.User.Create(t.Context(), users[i]), "create real trial principal")
-		*stage = "membership"
-		// Native writes record intent; immediate read-back can still show the
-		// previous roster. Use the production durable retry path, then require
-		// the exact applied 200-user roster and real traffic below.
-		nativeMust(t, a.user.ResyncMembershipOrEnqueue(t.Context(), users[i].ID, "trial load membership"), "admit trial principal through production membership retry service")
-		if mixed != nil && mixed.memberReady != nil {
-			mixed.memberReady(i + 1)
+		if memberConcurrency == 1 {
+			*stage = "membership"
+			nativeMust(t, a.user.ResyncMembershipOrEnqueue(t.Context(), users[i].ID, "trial load membership"), "admit trial principal through production membership retry service")
+			if mixed != nil && mixed.memberReady != nil {
+				mixed.memberReady(i + 1)
+			}
+		}
+	}
+	*stage = "membership"
+	// Different users have independent production resync locks. Bound the
+	// fixture's concurrency without bypassing intent, lifecycle, provisioning,
+	// durable retries, or the exact applied roster/traffic checks below.
+	if memberConcurrency > 1 {
+		jobs := make(chan *domain.User, len(users))
+		results := make(chan error, len(users))
+		for _, user := range users {
+			jobs <- user
+		}
+		close(jobs)
+		var members sync.WaitGroup
+		for range memberConcurrency {
+			members.Add(1)
+			go func() {
+				defer members.Done()
+				for user := range jobs {
+					results <- a.user.ResyncMembershipOrEnqueue(t.Context(), user.ID, "trial load membership")
+				}
+			}()
+		}
+		go func() { members.Wait(); close(results) }()
+		completed := 0
+		var firstErr error
+		for err := range results {
+			if err != nil {
+				if firstErr == nil {
+					firstErr = err
+				}
+				continue
+			}
+			completed++
+			if mixed.memberReady != nil {
+				mixed.memberReady(completed)
+			}
+		}
+		nativeMust(t, firstErr, "admit every real trial principal through bounded production membership sync")
+		if completed != len(users) {
+			t.Fatal("bounded trial membership omitted a real principal")
 		}
 	}
 	// Block traffic uses the original separate open-group principal and its own target port.
