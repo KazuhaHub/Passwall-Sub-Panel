@@ -47,7 +47,7 @@ test('separate App race slices preserve every test and the required full-suite g
   assert(sliced.includes('> app-roots.txt') && sliced.includes('> app-selected.txt') && sliced.includes("paste -sd'|' app-selected.txt"))
   assert.match(sliced, /if: always\(\)/)
   assert.match(sliced, /name: app-race-shard-\$\{\{ matrix\.part \}\}-test-output/)
-  assert.match(gate, /needs: \[race-shard, app-race-shard\]/)
+  assert.match(gate, /needs: \[race-shard, app-race-shard(?:, [a-z-]+)*\]/)
   assert(gate.includes('if: always()') && gate.includes('needs.race-shard.result') && gate.includes('needs.app-race-shard.result'))
   const minutes = Number(/timeout-minutes: (\d+)/.exec(sliced)?.[1])
   assert(minutes >= 6)

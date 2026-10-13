@@ -1307,9 +1307,34 @@ jobs:
           path: ~/.cache/go-build
           key: go-build-app-race-${{ matrix.part }}-${{ runner.os }}-${{ hashFiles('go.sum') }}
 
+  global-fixture:
+    name: global pressure fixture isolation and lifecycle
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        env:
+          GOTOOLCHAIN: auto
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Verify exact preferred compiler
+        run: |
+          set -eu
+          build_toolchain=$(awk '$1 == "toolchain" { print $2 }' go.mod)
+          test -n "$build_toolchain"
+          test "$(go env GOVERSION)" = "$build_toolchain"
+          test "$(go tool compile -V | awk '{ print $3 }')" = "$build_toolchain"
+      - name: Public cache privacy and actual service permission integration
+        run: |
+          set -euo pipefail
+          go test -v -count=1 -timeout=4m -tags destination_acceptance ./internal/app \
+            -run '^TestNativeGlobal(AuditStartPreservesRealQueueAndPermissionChanges|PublicCoreCopyExcludesStateAndRejectsUntrustedFiles)$'
+
   sqlite:
     name: sqlite (full suite, race)
-    needs: [race-shard, app-race-shard]
+    needs: [race-shard, app-race-shard, global-fixture]
     # always() so a failed, cancelled or never-planned shard still produces a
     # verdict here. A skipped gate would report as a missing required check,
     # which reads as "not run" rather than "failed".
@@ -1318,7 +1343,7 @@ jobs:
     timeout-minutes: 5
     steps:
       - name: every shard passed
-        run: test "${{ needs.race-shard.result }}" = success && test "${{ needs.app-race-shard.result }}" = success
+        run: test "${{ needs.race-shard.result }}" = success && test "${{ needs.app-race-shard.result }}" = success && test "${{ needs.global-fixture.result }}" = success
 
   postgres:
     name: postgres (sqlstore dialect)

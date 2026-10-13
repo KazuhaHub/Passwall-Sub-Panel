@@ -1276,3 +1276,33 @@ App 现在独立按真实 go test -race -list 的 Test/Fuzz/Example 根名称轮
 选中名单准确轮转、无遗漏/重复。九份原件独立核对的 211 个测试根均为
 RUN1/PASS1，没有失败、跳过或缓存结果，原四分钟预算保留。该组件证据
 不替代同源其余完整 Test、Native、压力及空闲成本结果。
+
+`2583ac11` 完整 Test、systemd、49 项 Native 作业及十一项 Load 均成功。
+完整 48 Native/24 Load 原件及 source/merge/run metadata 保存；861 个
+Native 必需场景、三后端 mixed/SQL、queue、原 webhook/trial/首屏查询及
+新 idle 成本已独立核验。三份 App 编译名单及九份原件另独立核对 211 个
+测试根，每个仅在一个分片 RUN1/PASS1，没有失败、跳过或缓存结果。
+
+首份完整五万域名成本原件为 schema 2、receipt_checks=8191、stage=6/
+error=0、control_successes=2；published/applied/core 均为 50000，plain/
+traced 各五轮均仅包含一次真实接受同步，原进程及 SQLite 身份保留。
+2 秒夹具、CLK_TCK=100 下 plain Node/Core CPU 均值为 88/2ms，traced
+Node CPU 均值 172ms。每轮 DB/journal 写入为 0，WAL 五轮分别为
+8240、16480、16456、16480、24720 字节，均值 16475.2 字节；对应写调用
+为 4/8/7/8/12、sync 调用 1/3/3/3/5。这是确切 state.db/WAL/journal 的
+成功逻辑 syscall 字节，测量周期及跟踪扰动均保留，原始轨迹不上传。
+它完成五万域名成本组件；同次多 owner 全局压力、真实 24 小时数据规模、
+物理表体积及实际保留期/重启仍按原范围待验收。
+
+多 owner 全局压力的下一阶段先补齐 fixture 边界，尚未计作全局压力通过。
+owner 数量从实际 Pressure 的 batch_limit/owner_limit 推导；四个原上限
+128/32/32/64 与 per-owner 4/1/1/1 需要 65 owner 才能覆盖批数上限及拒绝。
+启动持有只包装原 destinationAuditRunner.Run，原生产 Offer、权限通知、
+队列、最终 SQL worker 保留；回归通过实际 App/SQLite/认证请求核对持有期
+控制响应与入队、关闭/重开撤销旧 revision、释放后只持久化一次。
+公共 Xray 缓存复制仅允许 xray/install.json 两个正规不可 group/other 写的
+文件，验证 metadata、SHA-256 与路径；拒绝 symlink、未知字段、摘要变化、
+私有文件及已有目标。每个后续 Node 仍正常执行 catalog/摘要/version 校验，
+状态、runtime、凭据与日志不复制；文件回归使用明确的合成摘要向量，
+不执行合成核心。独立 Linux fixture 预检接入必需 SQLite 总门禁；它只是
+夹具隔离与生命周期测试，实际 65 Node/Xray 压力及三 SQL 运行仍待完成。
