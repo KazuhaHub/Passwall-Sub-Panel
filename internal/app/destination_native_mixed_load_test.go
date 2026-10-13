@@ -25,7 +25,10 @@ import (
 	mysqldriver "github.com/go-sql-driver/mysql"
 )
 
-type nativeMixedSetup struct{ observePort int }
+type nativeMixedSetup struct {
+	observePort int
+	memberReady func(int)
+}
 
 type nativeMixedNodeSample struct {
 	ElapsedMS int64                  `json:"elapsed_ms"`

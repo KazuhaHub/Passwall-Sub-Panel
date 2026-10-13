@@ -29,6 +29,9 @@ const dockerUpgradeNames = ['TestNativePublishedDockerRollback', ...remoteUpgrad
 const remoteUpgradeNames = ['TestNativePublishedRemoteRollback', ...remoteUpgradeCases.map(name => `TestNativePublishedRemoteRollback/${name}`)]
 const names = [...xrayNames, ...singBoxNames, ...guardedSingBoxNames, ...legacyUpgradeNames, ...remoteUpgradeNames, ...dockerUpgradeNames, ...fleetNames, ...loadNames, ...trialLoadNames, ...blockOverflowNames, ...mixedPressureNames, ...idleCostNames, ...globalBootstrapNames, ...globalBatchNames]
 const diagnostics = Object.freeze({
+  'test timed out after 20m': 'global_batch_suite_timeout',
+  'nativePrepareTrialLoad(': 'global_batch_setup_stack',
+  '(*Service).ResyncMembership(': 'global_batch_membership_stack',
   'fleet administrator returned HTTP': 'fleet_admin_http_failed',
   'timed out waiting for sing-box restarted runtime and inbound': 'singbox_restart_runtime_timeout',
   'timed out waiting for exact load policy and collection receipt': 'load_receipt_timeout',

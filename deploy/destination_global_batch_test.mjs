@@ -33,6 +33,7 @@ test('global batch driver uses real 65-owner traffic and original storage, with 
   for(const required of ['nativeBootstrapGlobalCohort','auditMetrics: true','nativeGlobalMixedTransport(timed, peers)','nativePrepareTrialLoad','nativeMutationReceiptMatches','nativeCollectionReceiptMatches','storage.pause()','storage.resume(pause)','nativeVLESSHost','nativeLoadBlockedRequest','lane.BatchLimit','lane.ByteLimit','m.Saturation++','nativeMixedIngressBetween','sql(nativeMixedLossSQL)','queueFull[i] += loss.Rows']) assert(source.includes(required))
   assert(source.indexOf('peer.live = nativeBindLiveCore')>source.indexOf('all real global trial policies and 200-user paired rosters'))
   assert.doesNotMatch(source,/SetSnapshot\(|\.collector\.Ack\(|runtime\.GC\(|time\.Now\(\)\.Add\(-/)
+  assert(source.includes('t.Cleanup(writeMetrics)') && source.includes('m.Stage = 2\n\twriteMetrics()') && source.includes('m.Stage = 3\n\twriteMetrics()'))
   const workflow=readFileSync(new URL('../.github/workflows/destination-load.yml',import.meta.url),'utf8')
   const job=workflow.slice(workflow.indexOf('\n  global-batch:'))
   assert(job.startsWith('\n  global-batch:'))

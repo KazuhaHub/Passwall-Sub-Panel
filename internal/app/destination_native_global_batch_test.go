@@ -77,11 +77,12 @@ func TestNativeDestinationGlobalBatchPressure(t *testing.T) {
 		t.Fatal("global batch evidence must belong to the dedicated hosted job")
 	}
 	m := nativeGlobalBatchMetrics{Schema: 1, Candidate: "184f4e23f0f3d72f8492432184685fea4ec4967c", Core: "26.6.27", Details: []nativeGlobalBatchOwner{}, PSP: []nativeMixedPSPSample{}, Histograms: []nativeLatencyHistogram{}}
-	t.Cleanup(func() {
+	writeMetrics := func() {
 		body, err := json.Marshal(m)
 		nativeMust(t, err, "encode closed numeric global batch evidence")
 		nativeMust(t, os.WriteFile(evidence, append(body, '\n'), 0644), "save closed numeric global batch evidence")
-	})
+	}
+	t.Cleanup(writeMetrics)
 	var storage *nativeGlobalAuditStorage
 	cohort := nativeBootstrapGlobalCohort(t, nativeGlobalCohortOptions{
 		decorate: func(original ports.DestAuditStore) ports.DestAuditStore {
@@ -113,12 +114,16 @@ func TestNativeDestinationGlobalBatchPressure(t *testing.T) {
 	if m.Owners != 65 || storage == nil {
 		t.Fatal("global batch traffic lacks its actual checked owner cohort")
 	}
+	// Persist only closed numeric setup milestones before sampling starts. A
+	// whole-test timeout may skip cleanup; it must not erase which real phase
+	// was reached. Missing completion/root PASS still fails the normal verifier.
+	writeMetrics()
 	token := destinationRefreshAdminToken(t, a)
 	_, address, targetPort, nonce, _ := nativeTarget(t)
 	_, observeAddress, observePort, observeNonce, _ := nativeTargetAtPort(t, nativePort(t))
 	_, controlAddress, controlPort, controlNonce, _ := nativeTargetAtPort(t, nativePort(t))
 	stage := "capability"
-	users, group, policy, blockAddress, blockPort, blockReached := nativePrepareTrialLoad(t, f, cohort.server.Client(), cohort.server.URL, token, f.node.DesiredPort, nativeGlobalBatchOutput(cohort.peers), &stage, &nativeMixedSetup{observePort: observePort})
+	users, group, policy, blockAddress, blockPort, blockReached := nativePrepareTrialLoad(t, f, cohort.server.Client(), cohort.server.URL, token, f.node.DesiredPort, nativeGlobalBatchOutput(cohort.peers), &stage, &nativeMixedSetup{observePort: observePort, memberReady: func(completed int) { m.Users = completed; writeMetrics() }})
 	m.Users = len(users)
 	if m.Users != 200 || targetPort == blockPort || targetPort == observePort || controlPort == blockPort || controlPort == observePort || controlPort == targetPort {
 		t.Fatal("global batch principals or lane targets are not independent")
@@ -147,6 +152,7 @@ func TestNativeDestinationGlobalBatchPressure(t *testing.T) {
 		t.Fatal("global policy publication failed")
 	}
 	m.Stage = 2
+	writeMetrics()
 	nativeWait(t, 240*time.Second, "all real global trial policies and 200-user paired rosters", func() bool {
 		state, err := a.destDefinitions.State(t.Context())
 		if err != nil || state.Paused {
@@ -240,6 +246,7 @@ func TestNativeDestinationGlobalBatchPressure(t *testing.T) {
 		return true
 	})
 	m.Stage = 3
+	writeMetrics()
 	names := append([]string(nil), nativeTrialLatencyNames[:4]...)
 	for _, kind := range nativeMixedKinds {
 		names = append(names, "psp_dest_audit_begin_ms{kind="+kind+"}", "psp_dest_audit_chunk_ms{kind="+kind+"}")

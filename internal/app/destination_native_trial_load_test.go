@@ -349,6 +349,9 @@ func nativePrepareTrialLoad(t *testing.T, f destinationPolicyFixture, client *ht
 		// previous roster. Use the production durable retry path, then require
 		// the exact applied 200-user roster and real traffic below.
 		nativeMust(t, a.user.ResyncMembershipOrEnqueue(t.Context(), users[i].ID, "trial load membership"), "admit trial principal through production membership retry service")
+		if mixed != nil && mixed.memberReady != nil {
+			mixed.memberReady(i + 1)
+		}
 	}
 	// Block traffic uses the original separate open-group principal and its own target port.
 	blockBindPort := 0
