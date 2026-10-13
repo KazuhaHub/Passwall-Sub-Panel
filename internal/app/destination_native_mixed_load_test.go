@@ -437,11 +437,14 @@ func nativeMixedLoad(t *testing.T, f destinationPolicyFixture, client *http.Clie
 	}()
 	defer func() { cancel(); <-queueDone }()
 	// Keep the same per-lane rates and total identities, but spread the owned
-	// producer over 10ms slices. A 330-request FIFO burst every 100ms favours
+	// producer over approximately 10ms slices. A 330-request FIFO burst every 100ms favours
 	// the first lanes and can push the later lanes across a second boundary.
-	// Actual completion-window gates remain unchanged.
-	for tick := 0; tick < 9000; tick++ {
-		if delay := time.Until(start.Add(time.Duration(tick) * 10 * time.Millisecond)); delay > 0 {
+	// Preserve the original final send at 89.9s, leaving the same 100ms for
+	// actual responses before the strict 90s deadline. No late gate changes.
+	const ticks = 9000
+	const lastSend = 90*time.Second - 100*time.Millisecond
+	for tick := 0; tick < ticks; tick++ {
+		if delay := time.Until(start.Add(time.Duration(tick) * lastSend / (ticks - 1))); delay > 0 {
 			time.Sleep(delay)
 		}
 		for kind, count := range []int{8, 4, 11, 10} {
