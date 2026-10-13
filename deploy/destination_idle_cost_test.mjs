@@ -31,8 +31,12 @@ test('idle runtime uses actual published receipts and tracee identity without ch
   assert.doesNotMatch(source, /\.Process\.(?:Kill|Signal)\(.*parent|runtime\.GC\(|sysctl|SetSnapshot\(|\.collector\.Ack\(/)
   // The UI setting is "off"; the wire CollectLevel is empty. Reuse the
   // exact revision/digest receipt check instead of waiting for that UI literal.
-  assert.match(source, /nativeCollectionReceiptMatches\(\*current, "", uint64\(panel\.AuditCollectRevision\)\)/)
+  assert.match(source, /nativeCollectionReceiptMatches\(\*current, "", 0\)/)
   assert.doesNotMatch(source, /CollectEffective\s*!=\s*"off"/)
+  const baseline = source.indexOf('prior, err := a.repos.DestAgentPolicy.Get')
+  const edit = source.indexOf('request("POST", "dest/policies"')
+  assert(baseline >= 0 && edit > baseline)
+  assert.match(source, /panel\.AuditCollect != domain\.AuditCollectOff/)
   const workflow = readFileSync(new URL('../.github/workflows/destination-load.yml', import.meta.url), 'utf8')
   assert.match(workflow, /idle-cost:/)
   assert.match(workflow, /\^TestNativeDestinationIdleCost\$/)

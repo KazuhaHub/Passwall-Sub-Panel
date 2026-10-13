@@ -118,14 +118,19 @@ func nativeIdleCost(t *testing.T, f destinationPolicyFixture, client *http.Clien
 	}
 	input := destinationPolicyInput("Owned idle policy", "block")
 	input["inline"], input["list_ids"] = map[string]any{}, []int64{list.ID}
+	// Keep the actual policy edit's causal baseline. A following publication
+	// may be a no-op over an already minted, not-yet-acknowledged candidate.
+	prior, err := a.repos.DestAgentPolicy.Get(t.Context(), f.agent.AgentID, true)
+	nativeMust(t, err, "bind actual idle policy before policy mutation")
+	after := time.Now().UTC()
 	var policy destinationPolicyAPIResult
 	request("POST", "dest/policies", input, 201, &policy)
 	request("PUT", fmt.Sprintf("servers/%d", f.agent.PanelID), map[string]any{"audit_collect": "off"}, 200, nil)
 	panel, err := a.repos.XUIPanel.GetByID(t.Context(), f.agent.PanelID)
 	nativeMust(t, err, "bind actual disabled idle collection revision")
-	prior, err := a.repos.DestAgentPolicy.Get(t.Context(), f.agent.AgentID, true)
-	nativeMust(t, err, "bind actual idle policy before publication")
-	after := time.Now().UTC()
+	if panel == nil || panel.AuditCollect != domain.AuditCollectOff {
+		t.Fatal("idle panel did not retain the requested disabled collection setting")
+	}
 	request("POST", "dest/publish", nil, 200, nil)
 	m.Domains = list.Count
 	nativeWait(t, 180*time.Second, "actual fifty-thousand-domain applied policy and complete streams", func() bool {
@@ -155,7 +160,8 @@ func nativeIdleCost(t *testing.T, f destinationPolicyFixture, client *http.Clien
 		if e1 == nil && current != nil && agent != nil && nativeMutationReceiptMatches(prior, *current, state.PublishedGeneration, agent.LastSeen, after) {
 			m.ReceiptChecks |= 64
 		}
-		if current != nil && nativeCollectionReceiptMatches(*current, "", uint64(panel.AuditCollectRevision)) {
+		// The policy compiler omits collection revision when Collect is empty.
+		if current != nil && nativeCollectionReceiptMatches(*current, "", 0) {
 			m.ReceiptChecks |= 128
 		}
 		var applied protocol.DestinationPolicy
