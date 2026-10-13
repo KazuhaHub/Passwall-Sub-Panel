@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -196,8 +197,29 @@ func nativeBootstrapGlobalCohort(t *testing.T, options nativeGlobalCohortOptions
 		}
 		status, e4 := adapter.GetServerStatus(t.Context())
 		inbound, e5 := adapter.GetInbound(t.Context(), peer.node.InboundID)
-		if e4 != nil || e5 != nil || !nativeTrialProvisioningReady(status, inbound, peer.node.InboundID, peer.node.DesiredPort) {
-			return "inbound"
+		if errors.Is(e4, ports.ErrNativePanelSnapshotMissing) || errors.Is(e5, ports.ErrNativePanelSnapshotMissing) {
+			return "inbound_missing"
+		}
+		if errors.Is(e4, ports.ErrNativePanelAgentOffline) || errors.Is(e5, ports.ErrNativePanelAgentOffline) {
+			return "inbound_offline"
+		}
+		if errors.Is(e4, ports.ErrNativePanelSnapshotStale) || errors.Is(e5, ports.ErrNativePanelSnapshotStale) {
+			return "inbound_stale"
+		}
+		if errors.Is(e5, domain.ErrNotFound) {
+			return "inbound_absent"
+		}
+		if e4 != nil || e5 != nil {
+			return "inbound_read"
+		}
+		if status == nil || inbound == nil {
+			return "inbound_absent"
+		}
+		if status.CoreEngine != "xray" || status.XrayVersion != "26.6.27" || status.XrayState != "running" {
+			return "inbound_runtime"
+		}
+		if !nativeTrialProvisioningReady(status, inbound, peer.node.InboundID, peer.node.DesiredPort) {
+			return "inbound_shape"
 		}
 		return ""
 	}

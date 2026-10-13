@@ -1438,3 +1438,10 @@ traced观测已完成，写入字节未解析成功，不能填零或宣称该�
 输出固定就绪类别：state/store/capability/streams/receipt/collection/
 shape/subjects/roster/complete，定位实际失败门禁；不输出节点身份、
 名单、候选内容或凭据。诊断不改变原通过条件，也不能让失败根测试通过。
+
+源e9三后端均在stage2失败，固定类别streams_inbound；配置/名单流收敛
+检查已通过，但真实状态或inbound读取/检查未通过。继续细分时保留所有
+原检查，按typed error区分快照missing/offline/stale、其他read错误，
+以及对象absent、核心runtime字段不符或inbound shape不符。只输出这些
+固定类别，不输出错误详情、状态原件、目的地或身份；未增加超时或改变
+实际快照新鲜度要求。真实根因仍须下一次同源原件确认。
