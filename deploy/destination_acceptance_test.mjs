@@ -55,6 +55,23 @@ test('global readiness failures disclose only closed guard categories', async ()
   assert.equal(sanitizeDestinationResults(encode([{ Action: 'output', Package, Test, Output: 'global batch readiness: private-unknown' }])).trim(), '')
 })
 
+test('global sync diagnostics retain only bounded actual transport facts', async () => {
+  const { isSafeDestinationDiagnostic } = await import('./destination-acceptance.mjs')
+  const values = { attempt_age_ms: 1200000, completion_age_ms: 10, last_duration_ms: 12345, last_status: 503, inflight: 1, parent_alive: 0 }
+  for (const [name, value] of Object.entries(values)) {
+    const result = sanitizeDestinationResults(encode([{ Action: 'output', Output: `private-path:4: native global sync: ${name}=${value}\n` }]))
+    const event = JSON.parse(result)
+    assert.equal(event.Diagnostic, `global_sync_${name}`)
+    assert.equal(event.Observed, value)
+    assert(isSafeDestinationDiagnostic(event))
+    assert(!result.includes('private-path'))
+  }
+  for (const line of ['agent_id=42', 'attempt_age_ms=1200001', 'completion_age_ms=-1', 'last_status=0', 'last_status=600', 'inflight=66', 'parent_alive=2', 'last_duration_ms=1; credential=private']) {
+    assert.equal(sanitizeDestinationResults(encode([{ Action: 'output', Output: `native global sync: ${line}\n` }])).trim(), '')
+  }
+  assert(!isSafeDestinationDiagnostic({ Diagnostic: 'global_sync_agent_id', Observed: 1 }))
+})
+
 test('Docker recovery diagnostics retain fixed categories without task or credential output', () => {
   const pkg = 'github.com/KazuhaHub/passwall-sub-panel/internal/app'
   const Test = 'TestNativePublishedDockerRollback/health_failure_restore'

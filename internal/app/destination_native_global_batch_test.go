@@ -17,6 +17,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -157,9 +158,21 @@ func TestNativeDestinationGlobalBatchPressure(t *testing.T) {
 	m.Stage = 2
 	writeMetrics()
 	readiness := "state"
+	var waitingPeer *nativeGlobalPeer
 	t.Cleanup(func() {
 		if m.Stage == 2 {
 			t.Log("global batch readiness: " + readiness)
+			if waitingPeer != nil {
+				for name, value := range waitingPeer.sync.facts() {
+					t.Logf("native global sync: %s=%d", name, value)
+				}
+				alive := waitingPeer.process != nil && waitingPeer.process.Process != nil && waitingPeer.process.Process.Signal(syscall.Signal(0)) == nil
+				value := 0
+				if alive {
+					value = 1
+				}
+				t.Logf("native global sync: parent_alive=%d", value)
+			}
 		}
 	})
 	nativeWait(t, 240*time.Second, "all real global trial policies and 200-user paired rosters", func() bool {
@@ -169,6 +182,7 @@ func TestNativeDestinationGlobalBatchPressure(t *testing.T) {
 			return false
 		}
 		for i, peer := range cohort.peers {
+			waitingPeer = peer
 			p, e1 := a.repos.DestAgentPolicy.Get(t.Context(), peer.agent.AgentID, true)
 			agent, e2 := a.repos.NodeAgent.GetByAgentID(t.Context(), peer.agent.AgentID)
 			panel, e3 := a.repos.XUIPanel.GetByID(t.Context(), peer.agent.PanelID)

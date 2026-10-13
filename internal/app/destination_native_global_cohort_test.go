@@ -35,6 +35,7 @@ type nativeGlobalPeer struct {
 	output  *nativePrivateOutput
 	live    func()
 	probe   *nativeMixedProbe
+	sync    nativeGlobalSyncObservation
 }
 
 type nativeGlobalCohortOptions struct {
