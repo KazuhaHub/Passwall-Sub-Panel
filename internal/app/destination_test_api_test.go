@@ -140,6 +140,8 @@ func TestBuildDestinationTestNeverResolvesDomainsAndRetainsWriteAudit(t *testing
 	if queries.Load() != 0 {
 		t.Fatal("destination test attempted DNS")
 	}
+	// Build dispatches write audits asynchronously after the HTTP handler.
+	f.a.bgWG.Wait()
 	rows, _, err := f.a.repos.Audit.List(t.Context(), ports.AuditFilter{})
 	if err != nil {
 		t.Fatal(err)

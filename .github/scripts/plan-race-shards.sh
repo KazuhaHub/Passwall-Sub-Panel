@@ -37,12 +37,14 @@ while [ $# -gt 0 ]; do
     --shard) only="$2"; shift 2 ;;
     --weights) weights="$2"; shift 2 ;;
     --default) default_weight="$2"; shift 2 ;;
-    # ONE PACKAGE MAY BE TAKEN OUT OF THE PARTITION ENTIRELY. A package longer
+    # Packages may be taken out of the partition entirely. A package longer
     # than a shard's share cannot be balanced by packing — it gets a shard to
     # itself and the run waits on it — so the caller splits its TESTS instead and
     # this flag is how the two halves of that decision are kept from overlapping.
     # The excluded package is the caller's to run, in every shard.
-    --exclude) excluded="$2"; shift 2 ;;
+    --exclude)
+      if [ -z "$2" ]; then echo "excluded package must not be empty" >&2; exit 2; fi
+      excluded="${excluded}${excluded:+ }$2"; shift 2 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
 done
@@ -79,6 +81,8 @@ fi
 
 go list ./... | awk -v n="$shards" -v only="$only" -v weights="$weights" -v fallback="$default_weight" -v exclude="$excluded" '
   BEGIN {
+    exclusions = split(exclude, excluded_names, /[[:space:]]+/)
+    for (i = 1; i <= exclusions; i++) if (excluded_names[i] != "") omitted[excluded_names[i]] = 0
     if (weights != "") {
       while ((getline line < weights) > 0) {
         sub(/[[:space:]]*#.*/, "", line)
@@ -93,7 +97,7 @@ go list ./... | awk -v n="$shards" -v only="$only" -v weights="$weights" -v fall
   NF {
     # THE EXCLUDED PACKAGE IS THE CALLER TO RUN, in every shard, so leaving it
     # here would run it twice — once whole and once in slices.
-    if (exclude != "" && $0 == exclude) { dropped++; next }
+    if ($0 in omitted) { omitted[$0]++; next }
     total++
     weight[total] = ($0 in measured) ? measured[$0] : fallback + 0
     name[total] = $0
@@ -101,8 +105,8 @@ go list ./... | awk -v n="$shards" -v only="$only" -v weights="$weights" -v fall
   END {
     # A NAME THAT MATCHED NOTHING IS A TYPO, and the cost of it is silent: the
     # package stays in the partition AND the caller runs it again in slices.
-    if (exclude != "" && dropped == 0) {
-      printf "excluded package %s is not in `go list ./...`\n", exclude > "/dev/stderr"
+    for (package in omitted) if (omitted[package] == 0) {
+      printf "excluded package %s is not in `go list ./...`\n", package > "/dev/stderr"
       exit 1
     }
     # Longest-processing-time first. Selection sort: n is a few dozen, so the

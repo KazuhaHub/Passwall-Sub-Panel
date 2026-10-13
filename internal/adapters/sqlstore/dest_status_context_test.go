@@ -20,7 +20,7 @@ func TestDestinationStatusContextUsesNarrowConsistentLazyBodyProof(t *testing.T)
 	if err := (&xuiPanelRepo{db: r.db}).Save(t.Context(), p); err != nil {
 		t.Fatal(err)
 	}
-	a := nodeAgentRow{AgentID: "agt_status", PanelID: p.ID, Epoch: 1, CredentialSHA256: "private-agent-secret", ObservedCoreEngine: "xray", ObservedCapabilities: jsonStrings{protocol.CapabilityDestinationPolicy, "audit.hits.v1"}, LastSeen: &now}
+	a := nodeAgentRow{AgentID: "agt_status", PanelID: p.ID, Epoch: 1, CredentialSHA256: "private-agent-secret", DesiredCoreEngine: "sing-box", ObservedCoreEngine: "xray", ObservedCapabilities: jsonStrings{protocol.CapabilityDestinationPolicy, "audit.hits.v1"}, LastSeen: &now}
 	if err := r.db.Create(&a).Error; err != nil {
 		t.Fatal(err)
 	}
@@ -46,7 +46,7 @@ func TestDestinationStatusContextUsesNarrowConsistentLazyBodyProof(t *testing.T)
 				tx.AddError(problem)
 			}
 		case "node_agents":
-			if !slices.Equal(tx.Statement.Selects, []string{"agent_id", "panel_id", "observed_capabilities", "observed_core_engine", "last_seen"}) {
+			if !slices.Equal(tx.Statement.Selects, []string{"agent_id", "panel_id", "observed_capabilities", "desired_core_engine", "observed_core_engine", "last_seen"}) {
 				tx.AddError(problem)
 			}
 		case "dest_agent_policy":
@@ -81,6 +81,9 @@ func TestDestinationStatusContextUsesNarrowConsistentLazyBodyProof(t *testing.T)
 		got, err := r.StatusContext(t.Context(), proof)
 		if err != nil || len(got.Panels) != 1 || !got.Panels[0].Facts.Hits || got.Panels[0].Listeners["lst_1"].Label != "native-443" || len(got.Panels[0].Runtime.MintedBody) != 0 || len(got.Panels[0].Runtime.AppliedBody) != 0 || got.Panels[0].Agent.CredentialSHA256 != "" {
 			t.Fatalf("status projection failed narrow consistent guard: %v", err)
+		}
+		if got.Panels[0].Agent.DesiredCoreEngine != domain.NodeCoreSingBox || got.Panels[0].Agent.ObservedCoreEngine != domain.NodeCoreXray {
+			t.Fatal("status projection lost the prospective engine or replaced the observed engine")
 		}
 	}
 	if bodyReads != 1 {

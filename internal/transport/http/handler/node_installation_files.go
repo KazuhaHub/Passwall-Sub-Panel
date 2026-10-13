@@ -181,6 +181,18 @@ func renderNodeInstallationFiles(panelID int64, p nativeServerCreateResponse, r 
       # isolated updater; never mount it into the network-facing Agent.
       - /var/run/docker.sock:/var/run/docker.sock
       - ./upgrades:/run/passwall-node-upgrades
+    read_only: true
+    tmpfs:
+      - /tmp:size=4m,mode=1777
+    cap_drop:
+      - ALL
+    # The helper needs ownership changes, request-directory reads and chmod.
+    cap_add:
+      - CHOWN
+      - DAC_READ_SEARCH
+      - FOWNER
+    security_opt:
+      - no-new-privileges:true
     stop_grace_period: 15s
 `, composeYAMLString(p.AgentID), updaterContainer, r.Version, platformLine, agentContainer, composeYAMLString(p.AgentID))
 		}

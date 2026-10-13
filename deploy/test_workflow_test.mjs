@@ -402,7 +402,7 @@ test('go_static\'s build cache key names every tool the job compiles, at its pin
 test('staticcheck uses its pinned tool module and analyzes the application with acceptance files', () => {
   const steps = job('go_static').replace(/^\s*#.*$/gm, '')
   assert(steps.includes('go -C tools/staticcheck build -mod=readonly -o "$RUNNER_TEMP/psp-staticcheck" honnef.co/go/tools/cmd/staticcheck'), 'build the analyzer from its isolated module without changing its pinned dependencies')
-  assert(steps.includes('"$RUNNER_TEMP/psp-staticcheck" -tags node_reinstall_acceptance ./...'), 'run the resulting analyzer against the full application and acceptance files')
+  assert(steps.includes('"$RUNNER_TEMP/psp-staticcheck" -tags node_reinstall_acceptance,destination_acceptance,destination_pressure ./...'), 'run the resulting analyzer against the full application and all acceptance/pressure tags')
   assert(!/staticcheck@\S+/.test(steps), 'go run package@version ignores the tool-module export reader pin')
 })
 
@@ -729,7 +729,8 @@ test('the contract job skips only a wire run the matrix already made, and always
   const plan = execFileSync('node', ['deploy/compat/plan.mjs', '--emit', 'cases'], { cwd: root, encoding: 'utf8' })
   const cases = JSON.parse(plan)
   assert(cases.length > 0, 'the plan emitted no case, so the match was not exercised')
-  const match = (sha) => execFileSync('python3', ['-c', matcher[1], sha], { input: plan, encoding: 'utf8' }).trim()
+  const python = process.platform === 'win32' ? 'python' : 'python3'
+  const match = (sha) => execFileSync(python, ['-c', matcher[1], sha], { input: plan, encoding: 'utf8' }).trim()
   for (const planned of cases) assert.equal(match(planned.sha), planned.id, `a planned commit must be recognised as ${planned.id}`)
   assert.equal(match('0'.repeat(40)), '', 'a commit outside the plan must not be treated as covered, or its wire run is silently dropped')
 })

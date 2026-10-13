@@ -2126,6 +2126,200 @@ The drawer fetches website usage only on an explicit click. Ranges are 24 hours
 and `min(7, retention)` days, deduplicated at one day. Results stay in component
 state, outside URLs and shared query caches, and are discarded on account/session,
 coverage or retention changes, read errors, tab exit and drawer close. Connections
-to IP addresses are shown as `(ip)`. Local component tests and a production build
-cover this path; new HTTP/runtime cases still require this candidate's Linux CI.
+to IP addresses are shown as `(ip)`. Candidate `63a4e2dd` passed the complete
+[Test workflow](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/38054754326),
+including HTTP/audit cases, SQLite/race, MySQL, PostgreSQL and the full Linux web
+suite. The local full web run had a native worker crash; only its focused tests,
+production build and lint passed locally.
 Browser and VM/load acceptance remain open, as does the rest of the final plan.
+
+Stage 5 starts with the staff-readable group-list summary. `GET /api/admin/groups`
+adds the read-only `dest_mode` field (`open`, `allowlist_trial` or
+`allowlist_enforce`). Its narrow repository port selects only group ID, mode and
+stage for the requested page, without loading private list IDs or contents.
+Missing mode rows mean open; a read error or inconsistent stored mode returns
+unavailable instead of a partial or fabricated open summary. Operators see a
+noninteractive allowlist badge and make no destination-list request. Ordinary
+group saves do not change destination modes, owned lists or their generation.
+The administrator group workflow, preview, readiness, trial report and remaining
+allowlist UI are still pending; the badge alone does not enable allowlists.
+
+`POST /api/admin/dest/exceptions` also accepts `scope: "group"` with a positive
+`group_id`. It normalizes the target locally and appends only to that allowlist
+group's owned extra list, returning its group/list IDs and normalized entry.
+It creates no global allow policy. A closed group is rejected with
+`dest_mode_invalid_transition`; an unknown group returns `dest_group_not_found`.
+The transaction rechecks the current mode, extra-list identity, ownership and
+custom kind under the definition lock, then parses fresh source. Concurrent
+appends preserve existing content; duplicates keep versions and generation.
+Late failures roll back both contents and generation and return no commit ID.
+Ordinary users and operators cannot invoke this route. The remaining group
+workflow and UI, and this candidate's Linux runtime checks, remain open.
+
+The group-preview foundation reads current default mihomo/sing-box templates,
+using the same template repository as subscription rendering. Its DNS extraction
+selects mihomo HTTPS nameserver-policy entries with a proxy-group suffix and
+sing-box HTTPS servers referenced by DNS rules without `detour: direct`.
+Bootstrap, proxy-server DNS, unused/final-only sing-box servers and literal IPs
+are excluded. Hostnames are normalized, deduplicated and sorted without DNS I/O;
+malformed or unresolved selected DNS inputs yield no partial suggestions.
+Current shipped templates yield `dns.alidns.com` and
+`l9f26nnn5d.cloudflare-gateway.com` under these rules. The group preview endpoint
+uses these suggestions; its manual-entry fallback UI remains pending, and this
+reader never writes a base list automatically.
+
+The internal group administrator now prepares the prospective mode, selected
+lists and any new owned base/extra lists before checking structural and per-node
+definition budgets. Preview writes nothing. Save requires the current mode's UTC
+edit version (zero for a never-saved mode) and delegates the atomic commit to the
+existing group-mode repository. Direct open-to-enforce transitions are rejected;
+enforcement requires every referenced remote/geosite list to have a successful
+fetch. A later refresh error retains that readiness through last good content.
+New base hosts become exact `full:` entries; IPs, URLs and broad hosts are
+rejected. Existing owned source is retained and edited through the list API.
+After a changed commit, production wiring first invalidates group eligibility
+and rendered subscriptions, then schedules member resynchronization. No-op and
+failed commits do not invalidate membership.
+
+Administrators save through `PUT /api/admin/dest/groups/:group_id`, supplying
+the complete `mode`, `stage`, `list_ids` and millisecond `updated_at` fields.
+Use zero only for a never-saved mode. Initial trial activation may also supply
+`base_hosts`. The response contains the committed mode, real owned-list IDs,
+stage-change time and edit version; no-ops retain their version. Stale edits,
+invalid transitions and unfetched enforcement lists return distinct 409 codes.
+Canonical positive group IDs, strict JSON and no query fields are required.
+The route uses no-store and normal administrator write-audit capture. The full
+allowlist interface and confirmation dialogs are still pending.
+
+The trial-report storage foundation reads one exact group's anonymous
+`observe` records with zero account and port fields. It streams only the supplied
+site, count and latest timestamp, merges hours and nodes, and returns every site
+with deterministic count/time/site ordering. It does not recompute public
+suffixes or load accounts, sample hosts or raw hit records. Counts saturate
+instead of overflowing. The same private, consistent read snapshot includes
+only trial loss counters from current member panels and panels with historical
+records for this group. Rows, events and unmatched events remain separate;
+`dropped_in_range` mirrors rows, and losses remain panel-scoped and incomplete.
+Any storage or cancellation failure withholds the entire result.
+
+Administrators can read this report at
+`GET /api/admin/dest/groups/:group_id/trial-report?days=7`. The group ID and days
+must be canonical positive integers; unknown or duplicate query fields are
+rejected. The default is seven days, clamped on every request to the current
+effective trial retention. The endpoint requires a real group and returns
+`effective_days`, all `items:{site,count,last_at,added}`, `dropped_in_range` and
+`losses`. Responses use `Cache-Control: no-store`; operators and ordinary users
+cannot invoke it. Missing dependencies and read failures return unavailable,
+without private driver details or partial sites.
+
+`added` is computed from the group's current selected and owned lists, including
+last-good fetched content after a refresh failure. Only a `domain:` suffix that
+covers the supplied site and all its subdomains proves this flag. Exact-host and
+arbitrary regular-expression matches cannot establish whole-site coverage from
+folded telemetry and remain unmarked. `(ip)` is never marked added: it cannot
+identify an address or CIDR to allow. Closing the group retains its report and
+owned-list history while normal retention still applies. The report UI is still
+pending.
+
+`GET /api/admin/dest/groups/:group_id/preview?list_ids=1,2` prepares an allowlist
+trial without changing the current mode, lists or definition generation. Only
+administrators can read it. Group and list IDs must be canonical positive
+integers; unknown and duplicate query fields are rejected. It returns member
+count, total and eligible panels, stable exclusion reasons, base DNS suggestions
+and definition budget. Counts use each tag-matched panel once, rather than
+counting its individual listeners as separate servers.
+
+Eligibility is assessed against prospective definitions and full tag-matched
+membership, including disabled members. It does not reuse the current open-mode
+selection or reduce quota membership to the current roster. Third-party panels,
+missing destination-policy capability and current fallback/exhaustion are
+excluded. A native panel's prospective quota and enabled-listener sniffing are
+checked with the same policy builder, limits and preflight used by publication.
+The private listener query selects only ID, panel ID and sniffing for enabled
+listeners; credentials and transport settings are not loaded. Read failures
+withhold the whole preview, rather than inventing partial counts.
+
+When current templates cannot produce DNS suggestions, `base_hosts` is an
+empty array and `base_hosts_available` is false; the rest of the preview remains
+usable so the enable wizard can accept manual base hosts. Existing owned lists
+are retained and identified by their real `base_list_id` / `extra_list_id`;
+prospective synthetic list IDs never leave the preview. Responses use no-store.
+This is prospective eligibility evidence; current applied-node receipts and
+readiness are returned by the separate group overview/detail endpoints.
+
+The group-overview storage foundation projects counters for requested group IDs
+in batches of 512 inside one private read snapshot. Anonymous trial sites retain
+the producer's site boundaries and merge across hours and nodes; their time
+window is independent of the denial window. Denial counts select only source and
+count, without loading account or destination fields. Empty IDs return no groups,
+overflow saturates, and any failed batch withholds the entire result. These are
+observed counts, not a claim that collection is complete.
+
+The applied-group proof foundation validates the exact canonical candidate body
+against its minted, desired, reported and applied digests, current published
+generation, live native agent and observed core. It recognizes only a group's
+subject-scoped catch-all rule, distinguishing trial from enforcement by action.
+Historical `AppliedGroups` alone cannot prove the current stage. Unpublished,
+paused, stale, fallback or rejected candidates do not load the body or claim
+applied groups. This works with collection off and with either supported core.
+The overview compares its definition/status generations and pause flags before
+counting this proof, and compares each group's current stage. Snapshot drift
+clears applied counts. A changed fleet fails the read instead of omitting nodes.
+
+`GET /api/admin/dest/groups` returns every group, including open and empty
+groups, with member count, mode, selected/owned IDs, millisecond edit and stage
+timestamps, total/eligible/applied node counts, stable exclusion reasons,
+`would_deny_recent:{days,sites,count}` and `denied_24h`. The trial window is
+`min(7, current trial retention)` days; denials use a separate 24-hour window.
+Membership is read once per panel for the whole request, member counts are
+batched and each prospective node policy is assessed once. Open groups retain
+current tag-matching eligibility, while allowlist groups require policy support
+and preflight. The overview does not load per-group trial reports.
+
+`GET /api/admin/dest/groups/:group_id` adds `readiness`: selected-list readiness,
+not-ready list references, eligible but unapplied node references, base-list
+nonemptiness, the observed number of uncovered trial sites in 24 hours and their
+top three anonymous sites. It uses the report's current whole-site coverage
+rules. `trial_losses` remains panel-scoped and incomplete, so an empty observed
+site count is not proof that no events were lost. Last-good fetched lists remain
+ready after refresh errors. Empty base lists and remaining sites are warnings;
+the enforcement confirmation interface blocks on zero eligible nodes, unready
+lists or eligible nodes without current applied rules.
+
+Both read routes are administrator-only, accept no query fields, use no-store
+and return no partial groups/readiness on failure. Reads never publish or mint a
+candidate. The frontend transport validates complete group responses and
+forwards request cancellation. Trial reports retain every anonymous site and
+the server's effective retention window; malformed or partial responses are
+errors rather than empty summaries. Session-scoped group queries are enabled
+only for administrators, separate preview inputs and requested report windows,
+and poll only outstanding receipts while visible. Group writes and existing
+list/policy/exemption/publication/settings mutations invalidate related group
+facts and reports, including after conflicts, without automatically re-running
+previews. S8 card/tab components now render actual retention, separate trial
+and unconfirmed receipt states, zero-node bands, touch-accessible exclusion
+reasons, selected/owned list links and unfetched-list warnings. Failed list
+metadata stays explicitly unknown; failed group reads withhold cached cards.
+白名单分组页已挂载概览、启用向导、模式确认、试运行报告与分组节点覆盖抽屉。
+启用向导分三步选择分组、名单和基础放行，再预览受影响节点；首次启用只提交一次
+CAS 写入，重新启用保留已有自带列表。执行确认每次打开重新读取就绪状态；零可用
+节点、名单未就绪或缺少当前下发回执会阻止执行。基础列表为空和仍有未覆盖站点
+显示为警告。冲突要求明确重新读取，不自动重试写入。
+
+试运行报告展示所有匿名站点，支持时间范围、搜索、排序、分页和单个或批量加入
+自定义名单；已有内容去重追加。IP 聚合项引导编辑 IP 段，不能当作域名加入。
+成功提示明确区分保存名单与节点生效。写入时离页需确认，离页后失败仍有全局提示。
+URL 支持 `al_group`、`al_view`、`al_days` 和 `al_enable`；启用成功消费入口参数，
+返回不会再次打开向导。
+
+分组编辑页增加只读的目的地摘要，并支持 `edit` / `dtab=destination` 深链接。
+新分组先保存；已有分组显示实际模式、名单和节点覆盖，编辑中的未保存设置在跳转
+前需要确认。读取失败隐藏缓存摘要并提供重试，不将未知名单当作可用名单。
+
+开发专用 `allowlist` 场景提供开放、试运行和执行分组，覆盖启用、CAS 冲突、完整
+报告和追加名单。该夹具受开发环境门控，生产构建检查禁止打包夹具入口及内容。
+浏览器中的合成场景验证只能证明页面交互，不能代替原生节点内核验收。
+
+剩余验收：原生节点虚拟机上的真实下发、试运行和执行流量验证，以及后续审计阶段。
+当前 Windows 会话没有 Hyper-V 管理权限；`Get-VM` 返回权限错误，尚未启动验收虚拟机。
+这些验收完成前保留草稿 PR，不宣称发布就绪。

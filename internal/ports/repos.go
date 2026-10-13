@@ -2257,6 +2257,10 @@ type Repos struct {
 	DestHitsRead            DestHitReadRepo
 	DestUserHitsRead        DestUserHitReadRepo
 	DestUsageRead           DestUsageReadRepo
+	DestGroupTrialRead      DestGroupTrialReadRepo
+	DestGroupStatsRead      DestGroupStatsReadRepo
+	DestGroupListeners      DestGroupListenerReadRepo
+	DestGroupModes          DestGroupModeReadRepo
 	DestRiskRead            DestRiskReadRepo
 	DestinationEligibility  DestinationEligibilityRepo
 	NativeAgentProvisioning NativeAgentProvisioningRepo

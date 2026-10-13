@@ -32,7 +32,8 @@ export default function NodePolicyStatusRow({ node, now, variant = 'block', onLi
   const colors = stateTone(theme, nodeAccessTone(node, now))
   const tone = node.state === 'paused' ? { ...colors, Icon: PauseCircleOutlineIcon }
     : node.state === 'unsupported_kind' ? { ...colors, Icon: RemoveCircleOutlineIcon } : colors
-  const fallback = fallbackState(node)
+  const executable = node.kind === 'psp' && node.supports.policy && !['unsupported_version', 'unsupported_kind'].includes(node.state)
+  const fallback = executable ? fallbackState(node) : 'none'
   const prolonged = node.state === 'pending' && nodeFilter(node, now) === 'problem'
   const label = prolonged ? t(`${P}state_pending_long`, { minutes: Math.floor((now - node.pending_since!) / 60000) })
     : node.state === 'applied' && node.engine === 'sing-box' ? t(`${P}state_applied_execute_only`) : t(`${P}state_${node.state}`)
@@ -40,7 +41,7 @@ export default function NodePolicyStatusRow({ node, now, variant = 'block', onLi
   const issueLink = node.agent_id ? `/admin/node-issues?${new URLSearchParams({ agent: node.agent_id })}` : null
   const needsIssues = prolonged || node.state === 'rejected' || fallback === 'exhausted' || fallback === 'stopping'
   const confirmed = node.minted_at !== null && node.applied_at !== null && node.pending_since === null
-  const rules = fallback === 'exhausted' ? 0 : confirmed && (node.minted_kind === 'desired' || node.minted_kind === 'fallback') ? node.applied_rules : null
+  const rules = !executable ? null : fallback === 'exhausted' ? 0 : confirmed && (node.minted_kind === 'desired' || node.minted_kind === 'fallback') ? node.applied_rules : null
   const auditAvailable = node.kind === 'psp' && node.engine === 'xray' && node.supports.hits
   const collection = node.collect === 'off' ? 'off' : !node.collecting ? 'unconfirmed'
     : node.collect_effective === 'hits_and_usage' ? 'usage' : 'hits'

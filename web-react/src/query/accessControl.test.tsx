@@ -13,9 +13,10 @@ vi.mock('@/api/client', () => ({ client: api }))
 const scope = sessionScope({ userId: 1, role: 'admin', authEpoch: 1 })
 const sibling = sessionScope({ userId: 2, role: 'admin', authEpoch: 1 })
 const list = { name: 'List', kind: 'custom' as const, text: 'example.com' }
-const listKeys = ['lists', 'detail', 'listPreview', 'policyPreview', 'policies', 'status', 'groups']
-const policyKeys = ['policies', 'status', 'lists', 'policyPreview']
-const exemptionKeys = ['exemptions', 'userAccess', 'policies', 'status', 'policyPreview']
+const destinationGroupKeys = ['destinationGroups', 'groupDetail', 'groupPreview', 'trialReport']
+const listKeys = ['lists', 'detail', 'listPreview', 'policyPreview', 'policies', 'status', 'groups', ...destinationGroupKeys]
+const policyKeys = ['policies', 'status', 'lists', 'policyPreview', ...destinationGroupKeys]
+const exemptionKeys = ['exemptions', 'userAccess', 'policies', 'status', 'policyPreview', ...destinationGroupKeys]
 const cases: Array<{ name: string; keys: string[]; successOnly?: boolean; useRun: () => () => Promise<unknown> }> = [
   { name: 'global exception', keys: listKeys, useRun: () => { const m = useCreateDestinationException(scope); return () => m.mutateAsync({ target: 'example.test', match: 'site', scope: 'global' }) } },
   { name: 'create exemption', keys: exemptionKeys, useRun: () => { const m = useSaveDestinationExemption(scope); return () => m.mutateAsync({ userId: 7, input: { reason: 'Diagnostics', expires_at: null } }) } },
@@ -30,14 +31,14 @@ const cases: Array<{ name: string; keys: string[]; successOnly?: boolean; useRun
   { name: 'edit policy', keys: policyKeys, useRun: () => { const m = useSaveDestinationPolicy(scope); return () => m.mutateAsync({ input: samplePolicy, existing: samplePolicy }) } },
   { name: 'delete policy', keys: policyKeys, useRun: () => { const m = useDeleteDestinationPolicy(scope); return () => m.mutateAsync(12) } },
   { name: 'order policies', keys: policyKeys, useRun: () => { const m = useOrderDestinationPolicies(scope); return () => m.mutateAsync({ action: 'block', ids: [12] }) } },
-  { name: 'publish', keys: ['status', 'policies'], useRun: () => { const m = useDestinationPublication(scope); return () => m.mutateAsync({}) } },
-  { name: 'pause', keys: ['status', 'policies'], useRun: () => { const m = useDestinationPublication(scope); return () => m.mutateAsync({ paused: true }) } },
-  { name: 'resume', keys: ['status', 'policies'], useRun: () => { const m = useDestinationPublication(scope); return () => m.mutateAsync({ paused: false }) } },
-  { name: 'retry agent', keys: ['status'], useRun: () => { const m = useRetryDestinationPolicy(scope); return () => m.mutateAsync('node-one') } },
-  { name: 'settings', keys: ['settings', 'status', 'ui', 'lists'], successOnly: true, useRun: () => { const m = useSaveAccessControlSettings(scope); return () => m.mutateAsync({ dest_list_refresh_hours: 12 }) } },
+  { name: 'publish', keys: ['status', 'policies', ...destinationGroupKeys], useRun: () => { const m = useDestinationPublication(scope); return () => m.mutateAsync({}) } },
+  { name: 'pause', keys: ['status', 'policies', ...destinationGroupKeys], useRun: () => { const m = useDestinationPublication(scope); return () => m.mutateAsync({ paused: true }) } },
+  { name: 'resume', keys: ['status', 'policies', ...destinationGroupKeys], useRun: () => { const m = useDestinationPublication(scope); return () => m.mutateAsync({ paused: false }) } },
+  { name: 'retry agent', keys: ['status', ...destinationGroupKeys], useRun: () => { const m = useRetryDestinationPolicy(scope); return () => m.mutateAsync('node-one') } },
+  { name: 'settings', keys: ['settings', 'status', 'ui', 'lists', ...destinationGroupKeys], successOnly: true, useRun: () => { const m = useSaveAccessControlSettings(scope); return () => m.mutateAsync({ dest_trial_retention_days: 1 }) } },
 ]
 function keys(s = scope) {
-  return { exemptions: accessControlKeys.exemptions(s), userAccess: accessControlKeys.userAccess(s, 7), lists: accessControlKeys.lists(s), detail: accessControlKeys.listDetail(s, 7, true), listPreview: [...accessControlKeys.listPreviews(s), 'input'], policyPreview: [...accessControlKeys.policyPreviews(s), 'input'], policies: accessControlKeys.policies(s), status: accessControlKeys.status(s), groups: groupKeys.catalogue(s), categories: accessControlKeys.categories(s), settings: accessControlKeys.settings(s), ui: settingsKeys.ui(s) }
+  return { exemptions: accessControlKeys.exemptions(s), userAccess: accessControlKeys.userAccess(s, 7), lists: accessControlKeys.lists(s), detail: accessControlKeys.listDetail(s, 7, true), listPreview: [...accessControlKeys.listPreviews(s), 'input'], policyPreview: [...accessControlKeys.policyPreviews(s), 'input'], policies: accessControlKeys.policies(s), status: accessControlKeys.status(s), groups: groupKeys.catalogue(s), categories: accessControlKeys.categories(s), settings: accessControlKeys.settings(s), ui: settingsKeys.ui(s), destinationGroups: accessControlKeys.destinationGroups(s), groupDetail: accessControlKeys.destinationGroup(s, 7), groupPreview: accessControlKeys.destinationGroupPreview(s, 7, [1]), trialReport: accessControlKeys.destinationGroupTrial(s, 7, 7) }
 }
 beforeEach(() => { vi.clearAllMocks(); for (const method of [api.post, api.put, api.delete]) method.mockResolvedValue({ data: {} }) })
 afterEach(cleanup)

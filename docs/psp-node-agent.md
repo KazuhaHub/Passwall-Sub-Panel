@@ -875,6 +875,10 @@ PSP 拨入时「这次没到」的证据由 PSP 的传输层产生，节点拨�
 
 `NodeReport.policy_status` 仅描述实际部署或因策略拒绝的候选：`digest` 是策略摘要，`state` 为 `applied` 或 `rejected`，拒绝详情为 `issue_code` 及有界、排序去重的 `listeners`。拒绝代码为 `destination_policy_rejected` 或 `destination_policy_sniffing_insufficient`。无策略成功应用时可回报空摘要；无关的监听配置或进程故障不能改写为策略拒绝。
 
+若真实拒绝报告匹配当前实际回退候选，PSP 持久化 exhausted 并生成 `destination_policy_lkg_rejected` issue；修剪后摘要不同于历史 applied 摘要也按实际 minted 摘要匹配。issue 的 key 仅为该摘要，详情为固定文本，不记录用户或目的地。issue 写入失败会在 mint 空候选之前返回错误，下一次匹配报告可重试写入，不能重新启用已耗尽策略；重复 issue 使用现有持久去重并保留管理员确认状态。
+
+PSP 的嗅探预检及节点独立额度判断会分别写入 `destination_policy_sniffing_insufficient` 和 `destination_policy_over_limit`。只在候选决定事务成功后记录，key 为策略上下文摘要、详情为固定说明；失败同步可重试写入。相同故障持续期间使用有界缓存避免每轮重复写库，恢复后再次出现故障会更新其持久记录，保留已有管理员确认状态。
+
 接收端在控制路径的基础校验前移出该子树，独立验证和观察。格式不合法的策略回执被丢弃，不得阻断 roster、config、directives 及原有同步；存储故障仍按正常失败处理。只承认节点实际收到并成功部署的候选，不把未发送的版本或 PSP 希望下发的摘要当成节点已应用。
 
 PSP 保存实际候选、回执及最后可用策略，并在拒绝、sniffing 不足或配额超限时按账号当前资格修剪可验证的最后可用策略。回退可能得到新的摘要，不能仅与希望下发的摘要比较来判断拒绝；回退耗尽时也不能继续标记为正在执行。记录可用性另外核对在线状态、实际档位、当前 revision、已确认候选和候选内的 block / observe 规则，保存了档位或看到一条成功回执均不足以单独证明正在记录。

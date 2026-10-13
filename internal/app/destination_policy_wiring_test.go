@@ -27,7 +27,11 @@ type destinationPolicyFixture struct {
 
 func buildDestinationPolicyFixture(t *testing.T) destinationPolicyFixture {
 	t.Helper()
-	a := buildDestinationListsFixture(t)
+	return seedDestinationPolicyFixture(t, buildDestinationListsFixture(t))
+}
+
+func seedDestinationPolicyFixture(t *testing.T, a *App) destinationPolicyFixture {
+	t.Helper()
 	credential := "fixture-destination-policy-credential-with-enough-entropy"
 	digest := sha256.Sum256([]byte(credential))
 	agent := &domain.NodeAgent{AgentID: "agt_destination_wiring", Epoch: 1, CredentialSHA256: hex.EncodeToString(digest[:]), DesiredCoreEngine: domain.NodeCoreXray, DesiredCoreVersion: "26.6.27"}

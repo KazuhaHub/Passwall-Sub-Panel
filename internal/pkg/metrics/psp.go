@@ -649,6 +649,16 @@ var (
 		"psp_dest_audit_loss_flush_errors_total",
 		"Failed receiver loss flush attempts with increments retained for retry; separate from unsaved loss keys.",
 	)
+	DestAuditBeginMS = NewHistogramVec(
+		"psp_dest_audit_begin_ms",
+		"Complete audit repository Begin calls, including admission, budget and first chunk; not isolated database lock wait.",
+		"ms", "kind", LatencyBucketsMS,
+	)
+	DestAuditChunkMS = NewHistogramVec(
+		"psp_dest_audit_chunk_ms",
+		"Complete remaining audit repository chunk calls, including admission and transaction; not isolated database lock wait.",
+		"ms", "kind", LatencyBucketsMS,
+	)
 	NodeHostReportTotal = NewCounterVec(
 		"psp_node_host_report_total",
 		"Host telemetry reports handled, by outcome.",
@@ -697,6 +707,11 @@ var (
 		"psp_node_sync_refused_total",
 		"Authenticated node reports refused at the wire boundary, by reason.",
 		"reason",
+	)
+	NodeControlSyncMS = NewHistogram(
+		"psp_node_control_sync_ms",
+		"Complete control coordinator Sync calls, including failed calls; excludes HTTP authentication, decoding and network transit.",
+		"ms", LatencyBucketsMS,
 	)
 )
 

@@ -42,6 +42,19 @@ it.each(['en-US', 'zh-CN'])('distinguishes fallback confirmation and never prese
   expect(screen.getByText(copy.fallback_exhausted)).toBeTruthy()
   expect(screen.getByTestId('coverage-rules-1').textContent).toBe(`${copy.executing_rules} 0`)
 })
+it.each(['en-US', 'zh-CN'])('does not present retained policy history as execution after capability withdrawal in %s', async language => {
+  const copy = language === 'zh-CN' ? zh.access_control.coverage : en.access_control.coverage
+  for (const kind of ['desired', 'fallback', 'empty'] as const) {
+    await mount(language, { state: 'unsupported_version', supports: { policy: false, hits: false, usage: false },
+      minted_kind: kind, pending_since: kind === 'empty' ? 3000 : null, applied_rules: 99 })
+    expect(screen.getByText(copy.state_unsupported_version)).toBeTruthy()
+    expect(screen.queryByTestId('coverage-rules-1')).toBeNull()
+    expect(screen.queryByText(copy.fallback_applied)).toBeNull()
+    expect(screen.queryByText(copy.fallback_waiting)).toBeNull()
+    expect(screen.getByRole('link', { name: copy.upgrade })).toBeTruthy()
+    cleanup()
+  }
+})
 it.each(['en-US', 'zh-CN'])('explains a prolonged deployment, localizes quota names, and marks sing-box execution-only in %s', async language => {
   const copy = language === 'zh-CN' ? zh.access_control.coverage : en.access_control.coverage
   await mount(language, { state: 'pending', pending_since: 0 })

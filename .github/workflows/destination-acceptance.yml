@@ -1,0 +1,667 @@
+name: Native destination traffic acceptance
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'internal/app/**'
+      - 'internal/service/dest*/**'
+      - 'internal/service/nodesync/**'
+      - 'internal/adapters/sqlstore/dest*'
+      - 'deploy/destination*'
+      - 'deploy/native-legacy-panel-bridge.go.txt'
+      - 'deploy/compat/backends/third-party*.sh'
+      - 'deploy/compat/backends/third-party*.mjs'
+      - '.github/workflows/destination-acceptance.yml'
+      - 'go.mod'
+      - 'go.sum'
+  push:
+    branches: [main]
+    paths:
+      - 'internal/app/**'
+      - 'internal/service/dest*/**'
+      - 'internal/service/nodesync/**'
+      - 'internal/adapters/sqlstore/dest*'
+      - 'deploy/destination*'
+      - 'deploy/native-legacy-panel-bridge.go.txt'
+      - 'deploy/compat/backends/third-party*.sh'
+      - 'deploy/compat/backends/third-party*.mjs'
+      - '.github/workflows/destination-acceptance.yml'
+      - 'go.mod'
+      - 'go.sum'
+
+permissions:
+  contents: read
+
+env:
+  GOWORK: 'off'
+  GOTOOLCHAIN: 'local'
+
+concurrency:
+  group: native-destination-${{ github.event_name }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  traffic:
+    name: real PSP + ${{ matrix.candidate }} Node + ${{ matrix.engine }} ${{ matrix.core }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {engine: xray, core: '26.6.27', candidate: baseline, node: '63c60f6d5e8cd093bbaa8385f5b514dbe2f40390'}
+          - {engine: xray, core: '26.7.28', candidate: baseline, node: '63c60f6d5e8cd093bbaa8385f5b514dbe2f40390'}
+          - {engine: xray, core: '26.9.9', candidate: baseline, node: '63c60f6d5e8cd093bbaa8385f5b514dbe2f40390'}
+          - {engine: sing-box, core: '1.14.0', candidate: baseline, node: '63c60f6d5e8cd093bbaa8385f5b514dbe2f40390'}
+          - {engine: sing-box, core: '1.14.0', candidate: guarded, node: 'a6163c8b5c10a9c8129cf660020fe2c8fa2b85db'}
+          - {engine: xray, core: '26.6.27', candidate: integrated, node: 'e2c9dfbfe934d4a61fda84b0a80b4f1cb5dbc719'}
+          - {engine: xray, core: '26.7.28', candidate: integrated, node: 'e2c9dfbfe934d4a61fda84b0a80b4f1cb5dbc719'}
+          - {engine: xray, core: '26.9.9', candidate: integrated, node: 'e2c9dfbfe934d4a61fda84b0a80b4f1cb5dbc719'}
+          - {engine: sing-box, core: '1.14.0', candidate: integrated, node: 'e2c9dfbfe934d4a61fda84b0a80b4f1cb5dbc719'}
+          - {engine: xray, core: '26.6.27', candidate: module, node: '184f4e23f0f3d72f8492432184685fea4ec4967c'}
+          - {engine: xray, core: '26.7.28', candidate: module, node: '184f4e23f0f3d72f8492432184685fea4ec4967c'}
+          - {engine: xray, core: '26.9.9', candidate: module, node: '184f4e23f0f3d72f8492432184685fea4ec4967c'}
+          - {engine: sing-box, core: '1.14.0', candidate: module, node: '184f4e23f0f3d72f8492432184685fea4ec4967c'}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        env:
+          GOTOOLCHAIN: auto
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Verify exact preferred compiler
+        run: |
+          set -eu
+          build_toolchain=$(awk '$1 == "toolchain" { print $2 }' go.mod)
+          test -n "$build_toolchain"
+          test "$(go env GOVERSION)" = "$build_toolchain"
+          test "$(go tool compile -V | awk '{ print $3 }')" = "$build_toolchain"
+      - uses: actions/checkout@v7
+        with:
+          repository: KazuhaHub/Passwall-Node
+          ref: ${{ matrix.node }}
+          path: node-candidate
+          persist-credentials: false
+      - name: Build immutable Node candidate with its own preferred compiler
+        run: |
+          set -euo pipefail
+          test "$(git -C node-candidate rev-parse HEAD)" = '${{ matrix.node }}'
+          test -z "$(git -C node-candidate status --porcelain)"
+          cd node-candidate
+          node_toolchain=$(awk '$1 == "toolchain" { print $2 }' go.mod)
+          test -n "$node_toolchain"
+          test "$(GOTOOLCHAIN="$node_toolchain" go env GOVERSION)" = "$node_toolchain"
+          test "$(GOTOOLCHAIN="$node_toolchain" go tool compile -V | awk '{ print $3 }')" = "$node_toolchain"
+          GOTOOLCHAIN="$node_toolchain" CGO_ENABLED=0 go build -o "$RUNNER_TEMP/destination-node" ./cmd/node
+      - name: Build production PSP acceptance driver
+        run: |
+          set -euo pipefail
+          node --test deploy/destination_acceptance_test.mjs
+          go test -v -count=1 ./internal/app -run '^TestNative(MutationReceiptUsesActualTransitionAndFreshExactReceipt|FaultMutationRequiresNewPublicationAndExactReceipt|PrunedFallbackUsesGenerationAndBodyCausality)$'
+          go test -c -tags destination_acceptance -o "$RUNNER_TEMP/destination-acceptance.test" ./internal/app
+      # Only the hosted ephemeral VM receives one run-owned documentation /128.
+      # Neither host trust stores nor the production core's private guard change.
+      - name: Real TLS sync, policy traffic, private ingestion and collection controls
+        run: |
+          set -euo pipefail
+          case '${{ matrix.engine }}:${{ matrix.candidate }}' in
+            xray:baseline|xray:integrated|xray:module) test_name=TestNativeDestinationTraffic; verifier=check ;;
+            sing-box:baseline) test_name=TestNativeSingBoxDestinationTraffic; verifier=check-singbox ;;
+            sing-box:guarded|sing-box:integrated|sing-box:module) test_name=TestNativeGuardedSingBoxDestinationTraffic; verifier=check-guarded-singbox ;;
+            *) exit 1 ;;
+          esac
+          sudo --preserve-env=GITHUB_ACTIONS,GITHUB_REPOSITORY,RUNNER_ENVIRONMENT \
+            env PSP_NATIVE_NODE_BIN="$RUNNER_TEMP/destination-node" PSP_NATIVE_CORE_VERSION='${{ matrix.core }}' \
+            PSP_NATIVE_SOURCE_COMMIT='${{ github.event.pull_request.head.sha || github.sha }}' \
+            "$RUNNER_TEMP/destination-acceptance.test" -test.v=test2json -test.run "^${test_name}$" -test.timeout 15m 2>&1 \
+            | go tool test2json -t -p github.com/KazuhaHub/passwall-sub-panel/internal/app \
+            | node deploy/destination-acceptance.mjs sanitize \
+            > "$RUNNER_TEMP/destination-acceptance-tests.json"
+          node deploy/destination-acceptance.mjs "$verifier" "$RUNNER_TEMP/destination-acceptance-tests.json"
+      - name: Keep count-only execution evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: native-destination-${{ matrix.engine }}-${{ matrix.core }}-${{ matrix.candidate }}-${{ github.sha }}
+          path: ${{ runner.temp }}/destination-acceptance-tests.json
+          if-no-files-found: error
+          retention-days: 7
+
+  traffic-sql:
+    name: real PSP ${{ matrix.database }} + full-module Node + ${{ matrix.engine }} ${{ matrix.core }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {engine: xray, core: '26.6.27', database: mysql}
+          - {engine: xray, core: '26.7.28', database: mysql}
+          - {engine: xray, core: '26.9.9', database: mysql}
+          - {engine: sing-box, core: '1.14.0', database: mysql}
+          - {engine: xray, core: '26.6.27', database: postgres}
+          - {engine: xray, core: '26.7.28', database: postgres}
+          - {engine: xray, core: '26.9.9', database: postgres}
+          - {engine: sing-box, core: '1.14.0', database: postgres}
+    services:
+      mysql:
+        image: ${{ matrix.database == 'mysql' && 'mysql:8' || '' }}
+        env:
+          MYSQL_ROOT_PASSWORD: fixture-native-root-password
+          MYSQL_DATABASE: psp_native_acceptance
+          MYSQL_USER: psp
+          MYSQL_PASSWORD: fixture-native-database-password
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -uroot -pfixture-native-root-password"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 30
+      postgres:
+        image: ${{ matrix.database == 'postgres' && 'postgres:16' || '' }}
+        env:
+          POSTGRES_USER: psp
+          POSTGRES_PASSWORD: fixture-native-database-password
+          POSTGRES_DB: psp_native_acceptance
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U psp -d psp_native_acceptance"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        env:
+          GOTOOLCHAIN: auto
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Verify exact preferred compiler
+        run: |
+          set -eu
+          build_toolchain=$(awk '$1 == "toolchain" { print $2 }' go.mod)
+          test -n "$build_toolchain"
+          test "$(go env GOVERSION)" = "$build_toolchain"
+          test "$(go tool compile -V | awk '{ print $3 }')" = "$build_toolchain"
+      - uses: actions/checkout@v7
+        with:
+          repository: KazuhaHub/Passwall-Node
+          ref: '184f4e23f0f3d72f8492432184685fea4ec4967c'
+          path: node-candidate
+          persist-credentials: false
+      - name: Build immutable full-module Node candidate with its own compiler
+        run: |
+          set -euo pipefail
+          test "$(git -C node-candidate rev-parse HEAD)" = '184f4e23f0f3d72f8492432184685fea4ec4967c'
+          test -z "$(git -C node-candidate status --porcelain)"
+          cd node-candidate
+          node_toolchain=$(awk '$1 == "toolchain" { print $2 }' go.mod)
+          test -n "$node_toolchain"
+          test "$(GOTOOLCHAIN="$node_toolchain" go env GOVERSION)" = "$node_toolchain"
+          test "$(GOTOOLCHAIN="$node_toolchain" go tool compile -V | awk '{ print $3 }')" = "$node_toolchain"
+          GOTOOLCHAIN="$node_toolchain" CGO_ENABLED=0 go build -o "$RUNNER_TEMP/destination-node" ./cmd/node
+      - name: Verify database selection and build the unchanged complete driver
+        run: |
+          set -euo pipefail
+          node --test deploy/destination_acceptance_test.mjs
+          go test -v -count=1 ./internal/app -run '^TestNative(DatabaseConfigurationIsClosedAndPreservesOwnedDirectories|DatabaseCountQueryKeepsParametersSeparate|StatusCandidateRequiresEveryOriginalComparison|MutationReceiptUsesActualTransitionAndFreshExactReceipt|FaultMutationRequiresNewPublicationAndExactReceipt|PrunedFallbackUsesGenerationAndBodyCausality|RestartRequiresObservedCoreAndInbound)$'
+          go test -c -tags destination_acceptance -o "$RUNNER_TEMP/destination-acceptance.test" ./internal/app
+      - name: Real SQL-backed policy traffic and ingestion across all complete scenarios
+        run: |
+          set -euo pipefail
+          case '${{ matrix.engine }}' in
+            xray) test_name=TestNativeDestinationTraffic; verifier=check ;;
+            sing-box) test_name=TestNativeGuardedSingBoxDestinationTraffic; verifier=check-guarded-singbox ;;
+            *) exit 1 ;;
+          esac
+          sudo --preserve-env=GITHUB_ACTIONS,GITHUB_REPOSITORY,RUNNER_ENVIRONMENT \
+            env PSP_NATIVE_DB_KIND='${{ matrix.database }}' \
+            PSP_NATIVE_NODE_BIN="$RUNNER_TEMP/destination-node" PSP_NATIVE_CORE_VERSION='${{ matrix.core }}' \
+            PSP_NATIVE_SOURCE_COMMIT='${{ github.event.pull_request.head.sha || github.sha }}' \
+            "$RUNNER_TEMP/destination-acceptance.test" -test.v=test2json -test.run "^${test_name}$" -test.timeout 15m 2>&1 \
+            | go tool test2json -t -p github.com/KazuhaHub/passwall-sub-panel/internal/app \
+            | node deploy/destination-acceptance.mjs sanitize \
+            > "$RUNNER_TEMP/destination-acceptance-tests.json"
+          node deploy/destination-acceptance.mjs "$verifier" "$RUNNER_TEMP/destination-acceptance-tests.json"
+      - name: Keep count-only SQL execution evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: native-destination-sql-${{ matrix.database }}-${{ matrix.engine }}-${{ matrix.core }}-${{ github.sha }}
+          path: ${{ runner.temp }}/destination-acceptance-tests.json
+          if-no-files-found: error
+          retention-days: 7
+
+  published-remote:
+    name: production PSP policy + published Node rollback via systemd watcher
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        env:
+          GOTOOLCHAIN: auto
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Verify exact preferred compiler
+        run: |
+          set -eu
+          build_toolchain=$(awk '$1 == "toolchain" { print $2 }' go.mod)
+          test -n "$build_toolchain"
+          test "$(go env GOVERSION)" = "$build_toolchain"
+          test "$(go tool compile -V | awk '{ print $3 }')" = "$build_toolchain"
+      - uses: actions/checkout@v7
+        with:
+          repository: KazuhaHub/Passwall-Node
+          ref: 'c51d145ae0e2db47eb69a640fe8f751318370f59'
+          path: remote-node-candidate
+          persist-credentials: false
+      - name: Build immutable candidate with explicit unpublished identity
+        working-directory: remote-node-candidate
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = 'c51d145ae0e2db47eb69a640fe8f751318370f59'
+          test -z "$(git status --porcelain)"
+          compiler=$(awk '$1 == "toolchain" { print $2 }' go.mod)
+          test -n "$compiler"
+          test "$(GOTOOLCHAIN="$compiler" go env GOVERSION)" = "$compiler"
+          test "$(GOTOOLCHAIN="$compiler" go tool compile -V | awk '{ print $3 }')" = "$compiler"
+          GOTOOLCHAIN="$compiler" CGO_ENABLED=0 go build -trimpath \
+            -ldflags '-X github.com/KazuhaHub/passwall-node/v4/internal/version.Version=4.0.1.9 -X github.com/KazuhaHub/passwall-node/v4/internal/version.Commit=c51d145' \
+            -o "$RUNNER_TEMP/destination-remote-node" ./cmd/node
+      - name: Build production PSP remote upgrade driver
+        run: |
+          set -euo pipefail
+          node --test deploy/destination_acceptance_test.mjs
+          go test -c -tags destination_acceptance -o "$RUNNER_TEMP/destination-acceptance.test" ./internal/app
+          "$RUNNER_TEMP/destination-acceptance.test" -test.run '^TestNativeRemoteHealthFaultPreservesOtherRequests$' -test.timeout 1m
+      - name: Normal admin task, real watcher, official signed archive and production recovery
+        run: |
+          set -euo pipefail
+          sudo --preserve-env=GITHUB_ACTIONS,GITHUB_REPOSITORY,RUNNER_ENVIRONMENT \
+            env PSP_NATIVE_REMOTE_NODE_BIN="$RUNNER_TEMP/destination-remote-node" \
+            PSP_NATIVE_REMOTE_SOURCE="$GITHUB_WORKSPACE/remote-node-candidate" \
+            "$RUNNER_TEMP/destination-acceptance.test" -test.v=test2json -test.run '^TestNativePublishedRemoteRollback$' -test.timeout 12m 2>&1 \
+            | go tool test2json -t -p github.com/KazuhaHub/passwall-sub-panel/internal/app \
+            | node deploy/destination-acceptance.mjs sanitize \
+            > "$RUNNER_TEMP/destination-remote-upgrade-tests.json"
+          node deploy/destination-acceptance.mjs check-remote-upgrade "$RUNNER_TEMP/destination-remote-upgrade-tests.json"
+      - name: Keep count-only remote upgrade evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: native-published-remote-${{ github.sha }}
+          path: ${{ runner.temp }}/destination-remote-upgrade-tests.json
+          if-no-files-found: error
+          retention-days: 7
+
+  published-docker:
+    name: production PSP policy + published Docker rollback (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: ubuntu-24.04, arch: amd64 }
+          - { runner: ubuntu-24.04-arm, arch: arm64 }
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        env:
+          GOTOOLCHAIN: auto
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Verify exact preferred compiler
+        run: |
+          set -eu
+          build_toolchain=$(awk '$1 == "toolchain" { print $2 }' go.mod)
+          test -n "$build_toolchain"
+          test "$(go env GOVERSION)" = "$build_toolchain"
+          test "$(go tool compile -V | awk '{ print $3 }')" = "$build_toolchain"
+          test "$(go env GOARCH)" = '${{ matrix.arch }}'
+          docker version
+          docker compose version
+      - uses: actions/checkout@v7
+        with:
+          repository: KazuhaHub/Passwall-Node
+          ref: 'c51d145ae0e2db47eb69a640fe8f751318370f59'
+          path: docker-node-candidate
+          persist-credentials: false
+      - name: Build immutable unpublished candidate using the production release recipe
+        working-directory: docker-node-candidate
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = 'c51d145ae0e2db47eb69a640fe8f751318370f59'
+          test -z "$(git status --porcelain)"
+          compiler=$(awk '$1 == "toolchain" { print $2 }' go.mod)
+          test "$(GOTOOLCHAIN="$compiler" go env GOVERSION)" = "$compiler"
+          test "$(GOTOOLCHAIN="$compiler" go tool compile -V | awk '{ print $3 }')" = "$compiler"
+          arch='${{ matrix.arch }}'
+          mkdir -p "bin/linux-$arch"
+          GOTOOLCHAIN="$compiler" CGO_ENABLED=0 go build -trimpath \
+            -ldflags '-X github.com/KazuhaHub/passwall-node/v4/internal/version.Version=4.0.1.9 -X github.com/KazuhaHub/passwall-node/v4/internal/version.Commit=c51d145' \
+            -o "bin/linux-$arch/passwall-node" ./cmd/node
+          metadata=$("bin/linux-$arch/passwall-node" --upgrade-info)
+          docker build --file Dockerfile.release --build-arg "TARGETARCH=$arch" \
+            --build-arg VERSION=4.0.1.9 \
+            --build-arg "STATE_SCHEMA=$(printf '%s' "$metadata" | jq -er .state_schema)" \
+            --build-arg "UPGRADE_CONTRACT=$(printf '%s' "$metadata" | jq -er .upgrade_contract)" \
+            --tag ghcr.io/kazuhahub/passwall-node:4.0.1.9 .
+      - name: Build production PSP Docker upgrade driver
+        run: |
+          set -euo pipefail
+          node --test deploy/destination_acceptance_test.mjs
+          go test -c -tags destination_acceptance -o "$RUNNER_TEMP/destination-acceptance.test" ./internal/app
+      - name: Generated production Compose, real policy and official image recovery
+        run: |
+          set -euo pipefail
+          sudo --preserve-env=GITHUB_ACTIONS,GITHUB_REPOSITORY,RUNNER_ENVIRONMENT \
+            env PSP_NATIVE_DOCKER_IMAGE=ghcr.io/kazuhahub/passwall-node:4.0.1.9 \
+            "$RUNNER_TEMP/destination-acceptance.test" -test.v=test2json -test.run '^TestNativePublishedDockerRollback$' -test.timeout 12m 2>&1 \
+            | go tool test2json -t -p github.com/KazuhaHub/passwall-sub-panel/internal/app \
+            | node deploy/destination-acceptance.mjs sanitize \
+            > "$RUNNER_TEMP/destination-docker-upgrade-tests.json"
+          node deploy/destination-acceptance.mjs check-docker-upgrade "$RUNNER_TEMP/destination-docker-upgrade-tests.json"
+      - name: Keep count-only Docker upgrade evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: native-published-docker-${{ matrix.arch }}-${{ github.sha }}
+          path: ${{ runner.temp }}/destination-docker-upgrade-tests.json
+          if-no-files-found: error
+          retention-days: 7
+
+  legacy-upgrade:
+    name: real PSP upgrade and rollback + mixed fleet + Node rollback (${{ matrix.database }}, ${{ matrix.candidate }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        database: [sqlite, mysql, postgres]
+        candidate: [baseline, module]
+    services:
+      mysql:
+        image: ${{ matrix.database == 'mysql' && 'mysql:8' || '' }}
+        env:
+          MYSQL_ROOT_PASSWORD: fixture-native-root-password
+          MYSQL_DATABASE: psp_native_acceptance
+          MYSQL_USER: psp
+          MYSQL_PASSWORD: fixture-native-database-password
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -uroot -pfixture-native-root-password"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 30
+      postgres:
+        image: ${{ matrix.database == 'postgres' && 'postgres:16' || '' }}
+        env:
+          POSTGRES_USER: psp
+          POSTGRES_PASSWORD: fixture-native-database-password
+          POSTGRES_DB: psp_native_acceptance
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U psp -d psp_native_acceptance"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        env:
+          GOTOOLCHAIN: auto
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Verify exact candidate compiler
+        run: |
+          set -eu
+          build_toolchain=$(awk '$1 == "toolchain" { print $2 }' go.mod)
+          test -n "$build_toolchain"
+          test "$(go env GOVERSION)" = "$build_toolchain"
+          test "$(go tool compile -V | awk '{ print $3 }')" = "$build_toolchain"
+      - uses: actions/checkout@v7
+        with:
+          repository: KazuhaHub/Passwall-Sub-Panel
+          ref: '0ae05e1e40170c030acd23cdf637310b740b50a6'
+          path: legacy-panel
+          persist-credentials: false
+      - uses: actions/checkout@v7
+        with:
+          repository: KazuhaHub/Passwall-Node
+          ref: '8e5e3db72219a8db9081a372722abb1529d22ecd'
+          path: legacy-node
+          persist-credentials: false
+      - uses: actions/checkout@v7
+        with:
+          repository: KazuhaHub/Passwall-Node
+          ref: ${{ matrix.candidate == 'module' && '184f4e23f0f3d72f8492432184685fea4ec4967c' || '63c60f6d5e8cd093bbaa8385f5b514dbe2f40390' }}
+          path: mixed-node
+          persist-credentials: false
+      - name: Build released sources with their own preferred compilers
+        run: |
+          set -euo pipefail
+          test "$(git -C legacy-panel rev-parse HEAD)" = '0ae05e1e40170c030acd23cdf637310b740b50a6'
+          test "$(git -C legacy-node rev-parse HEAD)" = '8e5e3db72219a8db9081a372722abb1529d22ecd'
+          test "$(git -C mixed-node rev-parse HEAD)" = '${{ matrix.candidate == 'module' && '184f4e23f0f3d72f8492432184685fea4ec4967c' || '63c60f6d5e8cd093bbaa8385f5b514dbe2f40390' }}'
+          test -z "$(git -C legacy-panel status --porcelain)"
+          test -z "$(git -C legacy-node status --porcelain)"
+          test -z "$(git -C mixed-node status --porcelain)"
+          # The only old-PSP addition is this reviewed test harness. Its Build,
+          # router, migrations and sync services all remain the released code.
+          cp deploy/native-legacy-panel-bridge.go.txt legacy-panel/internal/app/native_legacy_bridge_test.go
+          for source in legacy-panel legacy-node mixed-node; do
+            (
+              cd "$source"
+              compiler=$(awk '$1 == "toolchain" { print $2 }' go.mod)
+              test -n "$compiler"
+              test "$(GOTOOLCHAIN="$compiler" go env GOVERSION)" = "$compiler"
+              test "$(GOTOOLCHAIN="$compiler" go tool compile -V | awk '{ print $3 }')" = "$compiler"
+              if [ "$source" = legacy-panel ]; then
+                GOTOOLCHAIN="$compiler" CGO_ENABLED=0 go test -c -o "$RUNNER_TEMP/destination-legacy-panel.test" ./internal/app
+              elif [ "$source" = legacy-node ]; then
+                GOTOOLCHAIN="$compiler" CGO_ENABLED=0 go build \
+                  -ldflags '-X github.com/KazuhaHub/passwall-node/v4/internal/version.Version=v4.0.1.8' \
+                  -o "$RUNNER_TEMP/destination-legacy-node" ./cmd/node
+              else
+                GOTOOLCHAIN="$compiler" CGO_ENABLED=0 go build -o "$RUNNER_TEMP/destination-mixed-node" ./cmd/node
+              fi
+            )
+          done
+      - name: Build candidate production upgrade driver
+        run: |
+          set -euo pipefail
+          node --test deploy/destination_acceptance_test.mjs
+          go test -v -count=1 ./internal/app -run '^TestNativeSnapshotIdentifiersRejectForeignTablesAndSQLSyntax$'
+          go test -c -tags destination_acceptance -o "$RUNNER_TEMP/destination-acceptance.test" ./internal/app
+      - name: Verify PSP migration and rollback, isolated mixed fleet, and in-place Node rollback
+        run: |
+          set -euo pipefail
+          sudo --preserve-env=GITHUB_ACTIONS,GITHUB_REPOSITORY,RUNNER_ENVIRONMENT \
+            env PSP_NATIVE_DB_KIND='${{ matrix.database }}' \
+            PSP_NATIVE_LEGACY_PANEL_BIN="$RUNNER_TEMP/destination-legacy-panel.test" \
+            PSP_NATIVE_LEGACY_NODE_BIN="$RUNNER_TEMP/destination-legacy-node" \
+            PSP_NATIVE_MIXED_NODE_BIN="$RUNNER_TEMP/destination-mixed-node" \
+            "$RUNNER_TEMP/destination-acceptance.test" -test.v=test2json -test.run '^TestNativeLegacyPSPUpgrade$' -test.timeout 12m 2>&1 \
+            | go tool test2json -t -p github.com/KazuhaHub/passwall-sub-panel/internal/app \
+            | node deploy/destination-acceptance.mjs sanitize \
+            > "$RUNNER_TEMP/destination-legacy-upgrade-tests.json"
+          node deploy/destination-acceptance.mjs check-legacy-upgrade "$RUNNER_TEMP/destination-legacy-upgrade-tests.json"
+      - name: Prove server snapshots detect changed rows and schema without retaining mutations
+        if: matrix.database != 'sqlite'
+        run: |
+          set -euo pipefail
+          sudo --preserve-env=GITHUB_ACTIONS,GITHUB_REPOSITORY,RUNNER_ENVIRONMENT \
+            env PSP_NATIVE_DB_KIND='${{ matrix.database }}' \
+            "$RUNNER_TEMP/destination-acceptance.test" -test.v \
+            -test.run '^TestNativeServerDestinationSnapshotDetectsChangedDataAndSchema$' -test.timeout 2m
+      - name: Keep sanitized legacy upgrade execution evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: native-legacy-upgrade${{ matrix.candidate == 'module' && format('-module-{0}', matrix.database) || (matrix.database != 'sqlite' && format('-sql-{0}', matrix.database) || '') }}-${{ github.sha }}
+          path: ${{ runner.temp }}/destination-legacy-upgrade-tests.json
+          if-no-files-found: error
+          retention-days: 7
+
+  fleet:
+    name: real production fleet (${{ matrix.database }}, ${{ matrix.cohort }}, ${{ matrix.layout }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        database: [sqlite, mysql, postgres]
+        cohort: [old, new, mixed]
+        layout: [xray-pair, mixed-engines]
+    services:
+      mysql:
+        image: ${{ matrix.database == 'mysql' && 'mysql:8' || '' }}
+        env:
+          MYSQL_ROOT_PASSWORD: fixture-native-root-password
+          MYSQL_DATABASE: psp_native_acceptance
+          MYSQL_USER: psp
+          MYSQL_PASSWORD: fixture-native-database-password
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -uroot -pfixture-native-root-password"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 30
+      postgres:
+        image: ${{ matrix.database == 'postgres' && 'postgres:16' || '' }}
+        env:
+          POSTGRES_USER: psp
+          POSTGRES_PASSWORD: fixture-native-database-password
+          POSTGRES_DB: psp_native_acceptance
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U psp -d psp_native_acceptance"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        env:
+          GOTOOLCHAIN: auto
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Verify exact preferred compiler
+        run: |
+          set -eu
+          build_toolchain=$(awk '$1 == "toolchain" { print $2 }' go.mod)
+          test -n "$build_toolchain"
+          test "$(go env GOVERSION)" = "$build_toolchain"
+          test "$(go tool compile -V | awk '{ print $3 }')" = "$build_toolchain"
+      - uses: actions/checkout@v7
+        with:
+          repository: KazuhaHub/Passwall-Node
+          ref: '8e5e3db72219a8db9081a372722abb1529d22ecd'
+          path: fleet-old-source
+          persist-credentials: false
+      - uses: actions/checkout@v7
+        with:
+          repository: KazuhaHub/Passwall-Node
+          ref: '184f4e23f0f3d72f8492432184685fea4ec4967c'
+          path: fleet-new-source
+          persist-credentials: false
+      - name: Build immutable fleet candidates with their own preferred compilers
+        run: |
+          set -euo pipefail
+          test "$(git -C fleet-old-source rev-parse HEAD)" = '8e5e3db72219a8db9081a372722abb1529d22ecd'
+          test "$(git -C fleet-new-source rev-parse HEAD)" = '184f4e23f0f3d72f8492432184685fea4ec4967c'
+          for cohort in old new; do
+            source="fleet-${cohort}-source"
+            test -z "$(git -C "$source" status --porcelain)"
+            (
+              cd "$source"
+              compiler=$(awk '$1 == "toolchain" { print $2 }' go.mod)
+              test -n "$compiler"
+              test "$(GOTOOLCHAIN="$compiler" go env GOVERSION)" = "$compiler"
+              test "$(GOTOOLCHAIN="$compiler" go tool compile -V | awk '{ print $3 }')" = "$compiler"
+              if [ "$cohort" = old ]; then
+                GOTOOLCHAIN="$compiler" CGO_ENABLED=0 go build \
+                  -ldflags '-X github.com/KazuhaHub/passwall-node/v4/internal/version.Version=v4.0.1.8' \
+                  -o "$RUNNER_TEMP/destination-fleet-old" ./cmd/node
+              else
+                GOTOOLCHAIN="$compiler" CGO_ENABLED=0 go build -o "$RUNNER_TEMP/destination-fleet-new" ./cmd/node
+              fi
+            )
+          done
+      - name: Verify fleet gates and compile the full production driver
+        run: |
+          set -euo pipefail
+          node --test deploy/destination_fleet_test.mjs deploy/compat/backends/third-party_network.test.mjs
+          go test -v -count=1 ./internal/app -run '^TestNativeFleet(ProfilesAndContainerOwnershipAreClosed|PolicyRequiresOwnSubjectAllowanceAndCatchAll|StableReceiptRequiresFreshHeartbeatAndExactCandidate|MixedEnginePlanCoversEveryCandidateAndCore|StreamsRequireOwnCoreAndEveryCurrentValidator)$'
+          go test -c -tags destination_acceptance -o "$RUNNER_TEMP/destination-acceptance.test" ./internal/app
+      - name: Real App.Run, native cohort and both production third-party adapters
+        run: |
+          set -euo pipefail
+          sudo --preserve-env=GITHUB_ACTIONS,GITHUB_REPOSITORY,RUNNER_ENVIRONMENT \
+            env PSP_NATIVE_FLEET_PROFILE='${{ matrix.cohort }}' \
+            PSP_NATIVE_FLEET_LAYOUT='${{ matrix.layout }}' \
+            PSP_NATIVE_FLEET_OLD_BIN="$RUNNER_TEMP/destination-fleet-old" \
+            PSP_NATIVE_FLEET_NEW_BIN="$RUNNER_TEMP/destination-fleet-new" \
+            PSP_NATIVE_DB_KIND='${{ matrix.database }}' \
+            PSP_NATIVE_SOURCE_COMMIT='${{ github.event.pull_request.head.sha || github.sha }}' \
+            "$RUNNER_TEMP/destination-acceptance.test" -test.v=test2json -test.run '^TestNativeDestinationFleet$' -test.timeout 15m 2>&1 \
+            | go tool test2json -t -p github.com/KazuhaHub/passwall-sub-panel/internal/app \
+            | node deploy/destination-acceptance.mjs sanitize \
+            > "$RUNNER_TEMP/destination-fleet-tests.json"
+          node deploy/destination-acceptance.mjs check-fleet "$RUNNER_TEMP/destination-fleet-tests.json"
+      - name: Keep count-only fleet evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.layout == 'mixed-engines' && 'native-engine-fleet' || 'native-fleet' }}-${{ matrix.database }}-${{ matrix.cohort }}-${{ github.sha }}
+          path: ${{ runner.temp }}/destination-fleet-tests.json
+          if-no-files-found: error
+          retention-days: 7
+
+  complete-matrix:
+    name: complete native matrix (48 reports / 861 cases)
+    needs: [traffic, traffic-sql, published-remote, published-docker, legacy-upgrade, fleet]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Require every runtime producer
+        env:
+          TRAFFIC_RESULT: ${{ needs.traffic.result }}
+          SQL_RESULT: ${{ needs.traffic-sql.result }}
+          REMOTE_RESULT: ${{ needs.published-remote.result }}
+          DOCKER_RESULT: ${{ needs.published-docker.result }}
+          LEGACY_RESULT: ${{ needs.legacy-upgrade.result }}
+          FLEET_RESULT: ${{ needs.fleet.result }}
+        run: |
+          set -eu
+          test "$TRAFFIC_RESULT" = success
+          test "$SQL_RESULT" = success
+          test "$REMOTE_RESULT" = success
+          test "$DOCKER_RESULT" = success
+          test "$LEGACY_RESULT" = success
+          test "$FLEET_RESULT" = success
+      - uses: actions/checkout@v7
+      - name: Verify complete-matrix rejection boundaries
+        run: node --test deploy/destination_matrix_test.mjs deploy/destination_acceptance_test.mjs deploy/destination_fleet_test.mjs
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: native-*
+          path: ${{ runner.temp }}/native-destination-matrix
+      - name: Verify every required case and current merge identity
+        run: node deploy/destination-matrix.mjs "$RUNNER_TEMP/native-destination-matrix" '${{ github.sha }}'

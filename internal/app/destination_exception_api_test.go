@@ -82,7 +82,8 @@ func TestBuildDestinationGlobalExceptionInvalidInputsDoNotCreateBundle(t *testin
 		{"target": "com", "match": "site", "scope": "global"},
 		{"target": "regexp:.*", "match": "host", "scope": "global"},
 		{"target": "example.test", "match": "wildcard", "scope": "global"},
-		{"target": "example.test", "match": "host", "scope": "group", "group_id": 1},
+		{"target": "example.test", "match": "host", "scope": "group"},
+		{"target": "example.test", "match": "host", "scope": "group", "group_id": 0},
 		{"target": "example.test", "match": "host", "scope": "global", "group_id": 1},
 		{"target": "example.test", "match": "host", "scope": "global", "policy_id": 1},
 	} {

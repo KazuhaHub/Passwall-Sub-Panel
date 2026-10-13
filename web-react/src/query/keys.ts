@@ -44,6 +44,13 @@ export const accessControlKeys = {
   exemptions: (s: QueryScope) => [...accessControlKeys.all(s), 'exemptions'] as const,
   userAccessRoot: (s: QueryScope) => [...accessControlKeys.all(s), 'user-access'] as const,
   userAccess: (s: QueryScope, id: number) => [...accessControlKeys.userAccessRoot(s), id] as const,
+  destinationGroups: (s: QueryScope) => [...accessControlKeys.all(s), 'destination-groups'] as const,
+  destinationGroupDetails: (s: QueryScope) => [...accessControlKeys.all(s), 'destination-group-detail'] as const,
+  destinationGroup: (s: QueryScope, id: number) => [...accessControlKeys.destinationGroupDetails(s), id] as const,
+  destinationGroupPreviews: (s: QueryScope) => [...accessControlKeys.all(s), 'destination-group-preview'] as const,
+  destinationGroupPreview: (s: QueryScope, id: number, listIDs: number[]) => [...accessControlKeys.destinationGroupPreviews(s), id, [...new Set(listIDs)].sort((a, b) => a - b)] as const,
+  destinationGroupTrials: (s: QueryScope) => [...accessControlKeys.all(s), 'destination-group-trial'] as const,
+  destinationGroupTrial: (s: QueryScope, id: number, days: number) => [...accessControlKeys.destinationGroupTrials(s), id, days] as const,
 }
 
 export const alertKeys = {

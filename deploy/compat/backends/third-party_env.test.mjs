@@ -56,7 +56,7 @@ function printedEnv() {
     writeFileSync(join(workdir, 'sui.base'), 'http://127.0.0.1:2095/app\n')
     return execFileSync('bash', [SCRIPT, 'env'], {
       encoding: 'utf8',
-      env: { ...process.env, PSP_CONTAINER_RUNTIME: 'echo', PSP_BACKEND_WORKDIR: workdir },
+      env: { ...process.env, PSP_CONTAINER_RUNTIME: 'echo', PSP_BACKEND_WORKDIR: workdir.replaceAll('\\', '/') },
     })
   } finally {
     rmSync(workdir, { recursive: true, force: true })
@@ -106,14 +106,14 @@ test('a value carrying shell metacharacters reaches the child unchanged', () => 
     writeFileSync(join(workdir, 'sui.base'), `http://127.0.0.1:2095/app?x=${nasty}\n`)
     const output = execFileSync('bash', [SCRIPT, 'env'], {
       encoding: 'utf8',
-      env: { ...process.env, PSP_CONTAINER_RUNTIME: 'echo', PSP_BACKEND_WORKDIR: workdir },
+      env: { ...process.env, PSP_CONTAINER_RUNTIME: 'echo', PSP_BACKEND_WORKDIR: workdir.replaceAll('\\', '/') },
       cwd: workdir,
     })
     const seen = childEnvironment(output, workdir)
     assert.match(seen, new RegExp(`^PSP_LIVE_XUI_TOKEN=${escapeRe(nasty)}$`, 'm'))
     assert.match(seen, new RegExp(`^PSP_LIVE_SUI_URL=http://127\\.0\\.0\\.1:2095/app\\?x=${escapeRe(nasty)}$`, 'm'))
     // The workdir has a space in it; the DB path is derived from it.
-    assert.match(seen, new RegExp(`^PSP_LIVE_XUI_DB=${escapeRe(join(workdir, '3xui/x-ui.db'))}$`, 'm'))
+    assert.match(seen, new RegExp(`^PSP_LIVE_XUI_DB=${escapeRe(join(workdir, '3xui/x-ui.db').replaceAll('\\', '/'))}$`, 'm'))
     assert(!existsSync(join(workdir, 'pwned')), 'a value was executed rather than passed through')
   } finally {
     rmSync(workdir, { recursive: true, force: true })

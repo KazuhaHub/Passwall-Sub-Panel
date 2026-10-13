@@ -1,0 +1,142 @@
+// This test-only bridge is compiled in the immutable released PSP checkout.
+// It serves that checkout's production Build handler and provisions only the
+// legacy fixture. No destination implementation is copied into the old panel.
+package app
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"net"
+	"net/http"
+	"os"
+	"os/signal"
+	"path/filepath"
+	"syscall"
+	"testing"
+	"time"
+
+	"github.com/KazuhaHub/passwall-sub-panel/internal/config"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
+)
+
+func TestNativeLegacyPanelBridge(t *testing.T) {
+	if os.Geteuid() != 0 || os.Getenv("GITHUB_ACTIONS") != "true" || os.Getenv("RUNNER_ENVIRONMENT") != "github-hosted" || os.Getenv("GITHUB_REPOSITORY") != "KazuhaHub/Passwall-Sub-Panel" {
+		t.Fatal("legacy bridge requires the disposable hosted acceptance job")
+	}
+	path := os.Getenv("PSP_NATIVE_LEGACY_CONFIG")
+	if !filepath.IsAbs(path) || filepath.Base(path) != "legacy-config.json" {
+		t.Fatal("missing owned legacy config")
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal("read legacy config")
+	}
+	var cfg config.Config
+	if json.Unmarshal(data, &cfg) != nil || cfg.Listen != "127.0.0.1:0" || cfg.DataDir != filepath.Join(filepath.Dir(path), "panel-data") {
+		t.Fatal("invalid owned legacy config")
+	}
+	kind := os.Getenv("PSP_NATIVE_DB_KIND")
+	if kind == "" {
+		kind = "sqlite"
+	}
+	allowedDSN := map[string]string{
+		"mysql":    "psp:fixture-native-database-password@tcp(127.0.0.1:3306)/psp_native_acceptance?parseTime=true&charset=utf8mb4&loc=UTC",
+		"postgres": "postgres://psp:fixture-native-database-password@127.0.0.1:5432/psp_native_acceptance?sslmode=disable",
+	}
+	if os.Getenv("PSP_NATIVE_DB_DSN") != "" || cfg.DBKind() != kind || kind == "sqlite" && (cfg.MySQL.DSN != "" || cfg.Postgres.DSN != "") || kind != "sqlite" && (allowedDSN[kind] == "" || cfg.DBDSN() != allowedDSN[kind]) {
+		t.Fatal("legacy fixture escaped its dedicated database")
+	}
+	a, err := Build(t.Context(), &cfg)
+	if err != nil {
+		t.Fatal("build released panel")
+	}
+	must := func(err error) {
+		t.Helper()
+		if err != nil {
+			t.Fatal("legacy fixture operation failed; detail withheld")
+		}
+	}
+	reuse := os.Getenv("PSP_NATIVE_LEGACY_REUSE")
+	if reuse != "" && reuse != "true" {
+		t.Fatal("invalid owned legacy restart mode")
+	}
+	digest := sha256.Sum256([]byte("fixture-native-legacy-credential-with-enough-entropy"))
+	agent := &domain.NodeAgent{AgentID: "agt_native_legacy_upgrade", Epoch: 1, CredentialSHA256: hex.EncodeToString(digest[:]), DesiredCoreEngine: domain.NodeCoreXray, DesiredCoreVersion: "26.6.27"}
+	panel := &domain.Panel{Name: "Native legacy upgrade", Kind: domain.PanelKindPSP, URL: "psp://" + agent.AgentID}
+	if reuse == "true" {
+		agent, err = a.repos.NodeAgent.GetByAgentID(t.Context(), agent.AgentID)
+		must(err)
+		panel, err = a.repos.XUIPanel.GetByID(t.Context(), agent.PanelID)
+		must(err)
+		if agent.Epoch != 1 || agent.CredentialSHA256 != hex.EncodeToString(digest[:]) || panel.Kind != domain.PanelKindPSP || panel.URL != "psp://"+agent.AgentID {
+			t.Fatal("legacy restart lost its owned agent identity")
+		}
+	} else {
+		must(a.repos.NativeAgentProvisioning.Create(t.Context(), panel, agent))
+		must(a.xuiPool.Add(panel))
+	}
+	port, err := net.LookupPort("tcp", os.Getenv("PSP_NATIVE_LEGACY_INBOUND"))
+	if err != nil || port < 1024 {
+		t.Fatal("invalid owned inbound")
+	}
+	node := &domain.Node{PanelID: panel.ID, InboundID: 1, DisplayName: "Native legacy", ServerAddress: "node.example.test", DesiredProtocol: "vless", DesiredPort: port, ObservedProtocol: "vless", ObservedPort: port, InboundListen: "127.0.0.1", InboundSettings: `{"decryption":"none"}`, StreamSettings: `{"network":"tcp","security":"none"}`, Sniffing: `{}`, Allocate: `{}`, Enabled: true, ConfigSyncState: domain.ConfigSyncPending}
+	var group *domain.Group
+	var user *domain.User
+	if reuse == "true" {
+		node, err = a.repos.Node.GetByPanelInbound(t.Context(), panel.ID, 1)
+		must(err)
+		group, err = a.repos.Group.GetBySlug(t.Context(), "native-legacy")
+		must(err)
+		user, err = a.repos.User.GetByUPN(t.Context(), "legacy@example.test")
+		must(err)
+		if node.DesiredPort != port || node.DesiredProtocol != "vless" || user.GroupID != group.ID || user.UUID != "11111111-1111-4111-8111-111111111111" {
+			t.Fatal("legacy restart lost its owned principal or listener")
+		}
+	} else {
+		must(a.repos.Node.Create(t.Context(), node))
+		group = &domain.Group{Slug: "native-legacy", Name: "Native legacy", TagFilter: domain.TagFilter{All: true}}
+		must(a.repos.Group.Create(t.Context(), group))
+		user = &domain.User{UPN: "legacy@example.test", Email: "legacy@example.test", SSOProvider: domain.SSOProviderLocal, SSOSubject: "legacy@example.test", Role: domain.RoleUser, Enabled: true, GroupID: group.ID, UUID: "11111111-1111-4111-8111-111111111111", SubToken: "fixture-native-legacy-sub-token"}
+		must(a.repos.User.Create(t.Context(), user))
+		client := &domain.PSPClient{UserID: user.ID, PanelID: panel.ID, Email: "legacy@psp.local", UUID: user.UUID, Password: "fixture-native-legacy-password"}
+		client.SetDesiredLifecycle(domain.UserLifecycle{Enable: true})
+		client.ID, err = a.repos.PSPClient.Create(t.Context(), client)
+		must(err)
+		must(a.repos.PSPClient.SetInbounds(t.Context(), client.ID, []domain.PSPClientInbound{{ClientID: client.ID, NodeID: node.ID, State: domain.ClientApplyPending}}))
+		settings, err := a.settings.Load(t.Context(), ports.UISettings{})
+		must(err)
+		settings.NodePollSeconds, settings.FullReportSeconds = 2, 0
+		must(a.settings.Save(t.Context(), settings))
+	}
+	listener, err := net.Listen("tcp", cfg.Listen)
+	must(err)
+	done := make(chan error, 1)
+	go func() { done <- a.server.Serve(listener) }()
+	ready, err := json.Marshal(struct {
+		Address                          string
+		AgentID                          string
+		PanelID, NodeID, GroupID, UserID int64
+	}{listener.Addr().String(), agent.AgentID, panel.ID, node.ID, group.ID, user.ID})
+	must(err)
+	readyName := "legacy-ready.json"
+	if reuse == "true" {
+		readyName = "legacy-ready-reuse.json"
+	}
+	must(os.WriteFile(filepath.Join(filepath.Dir(path), readyName), ready, 0600))
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, syscall.SIGTERM, syscall.SIGINT)
+	defer signal.Stop(stop)
+	select {
+	case <-stop:
+	case err := <-done:
+		if err != nil && err != http.ErrServerClosed {
+			t.Fatal("legacy handler exited")
+		}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	must(a.Shutdown(ctx))
+}

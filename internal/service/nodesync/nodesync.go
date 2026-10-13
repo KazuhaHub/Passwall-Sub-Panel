@@ -22,6 +22,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/boundedcache"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/keyedmutex"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/log"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/metrics"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/nodemetrics"
 )
@@ -152,6 +153,8 @@ func (s *Service) SetRealityFingerprintNormalizer(normalize func(context.Context
 // this service: the production HTTP boundary resolves a strict Bearer digest
 // to the same agent ID before calling this coordinator.
 func (s *Service) Sync(ctx context.Context, report nodeprotocol.NodeReport) (nodeprotocol.SyncResponse, error) {
+	started := time.Now()
+	defer metrics.NodeControlSyncMS.ObserveSince(started)
 	// THE TELEMETRY SUBTREE LEAVES THE CONTROL PATH HERE, before anything reads
 	// the report. Everything below this line decides config, roster, directives,
 	// tasks and accounting, and none of it may be influenced by a telemetry

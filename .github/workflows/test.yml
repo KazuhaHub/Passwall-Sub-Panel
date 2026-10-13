@@ -724,7 +724,7 @@ jobs:
           docker stop -t 15 "$cid" >/dev/null
           test "$(docker inspect -f '{{.State.ExitCode}}' "$cid")" = 0
       - name: Publisher identity, compat result validators and fail-closed guard tests
-        run: node --test deploy/check_image_test.mjs deploy/check_build_test.mjs deploy/release_workflow_test.mjs deploy/compat/check-go-results.test.mjs deploy/compat/check-case-set.test.mjs deploy/compat/plan.test.mjs deploy/compat/profiles.test.mjs deploy/compat/backends/third-party_env.test.mjs deploy/compat/evidence-index.test.mjs deploy/compat/contract-source.test.mjs deploy/tracked_text_test.mjs deploy/test_workflow_test.mjs
+        run: node --test deploy/check_image_test.mjs deploy/check_build_test.mjs deploy/release_workflow_test.mjs deploy/compat/check-go-results.test.mjs deploy/compat/check-case-set.test.mjs deploy/compat/plan.test.mjs deploy/compat/profiles.test.mjs deploy/compat/backends/third-party_env.test.mjs deploy/compat/backends/third-party_network.test.mjs deploy/compat/evidence-index.test.mjs deploy/compat/contract-source.test.mjs deploy/tracked_text_test.mjs deploy/test_workflow_test.mjs
 
   web:
     name: web (typecheck + build + test)
@@ -1014,6 +1014,12 @@ jobs:
       # main saves a cache that has seen it, and under a second after.
       - name: The tagged reinstall acceptance still compiles
         run: go vet -tags node_reinstall_acceptance ./tests/acceptance/...
+      - name: The native destination traffic acceptance still compiles
+        run: go vet -tags destination_acceptance ./internal/app
+      - name: The decoded destination queue pressure still compiles
+        run: go vet -tags destination_pressure ./internal/service/destaudit
+      - name: The real destination SQL pressure still compiles
+        run: go vet -tags destination_pressure ./internal/adapters/sqlstore
       # STATICCHECK, BECAUSE VET DOES NOT LOOK FOR WHAT IT FINDS. Its first run here
       # reported thirteen findings every gate above had passed, among them six pieces
       # of dead code, a dead store in nodesync, a crypto/ecdsa field deprecated since
@@ -1033,7 +1039,7 @@ jobs:
       - name: staticcheck
         run: |
           go -C tools/staticcheck build -mod=readonly -o "$RUNNER_TEMP/psp-staticcheck" honnef.co/go/tools/cmd/staticcheck
-          "$RUNNER_TEMP/psp-staticcheck" -tags node_reinstall_acceptance ./...
+          "$RUNNER_TEMP/psp-staticcheck" -tags node_reinstall_acceptance,destination_acceptance,destination_pressure ./...
       # EVERY OS THE RELEASE SHIPS, NOT ONLY THE RUNNER'S. govulncheck analyses the
       # packages as they build for the current GOOS, so an advisory whose vulnerable
       # code lives only in a _windows.go or _darwin.go file is never evaluated on a
@@ -1173,8 +1179,9 @@ jobs:
           # THE PACKAGE IS TAKEN OUT OF THE PARTITION AND RUN HERE, and both places
           # that name it read one variable, so the two halves cannot overlap.
           heavy=github.com/KazuhaHub/passwall-sub-panel/internal/adapters/sqlstore
+          app=github.com/KazuhaHub/passwall-sub-panel/internal/app
           packages=$(.github/scripts/plan-race-shards.sh \
-            --shards 3 --shard "${{ matrix.part }}" --exclude "$heavy" \
+            --shards 3 --shard "${{ matrix.part }}" --exclude "$heavy" --exclude "$app" \
             --default 1 --weights .github/race-shard-weights.txt)
           test -n "$packages"
           # A `-run` THAT MATCHES NOTHING IS A PASS — that is the failure this
@@ -1233,9 +1240,101 @@ jobs:
           path: ~/.cache/go-build
           key: go-build-race-${{ matrix.part }}-${{ runner.os }}-${{ hashFiles('go.sum') }}
 
+  # App's full migration-backed suite now reaches the four-minute package
+  # budget on some runners. Partition its actual roots instead of extending
+  # the timeout; the original module slices exclude it and the gate covers both.
+  app-race-shard:
+    name: go race app (${{ matrix.part }}/3)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        part: [1, 2, 3]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/cache/restore@v6
+        with:
+          path: ~/.cache/go-build
+          key: go-build-app-race-${{ matrix.part }}-${{ runner.os }}-${{ hashFiles('go.sum') }}
+          restore-keys: go-build-app-race-${{ matrix.part }}-${{ runner.os }}-
+      - uses: actions/cache/restore@v6
+        with:
+          path: ~/go/pkg/mod
+          key: go-mod-${{ runner.os }}-${{ hashFiles('go.sum', 'tools/staticcheck/go.mod', 'tools/staticcheck/go.sum') }}
+          restore-keys: go-mod-${{ runner.os }}-
+      - uses: actions/setup-go@v7
+        env:
+          GOTOOLCHAIN: auto
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Verify exact preferred compiler
+        run: |
+          set -eu
+          build_toolchain=$(awk '$1 == "toolchain" { print $2 }' go.mod)
+          test -n "$build_toolchain"
+          test "$(go env GOVERSION)" = "$build_toolchain"
+          test "$(go tool compile -V | awk '{ print $3 }')" = "$build_toolchain"
+      - name: Every App test in exactly one race slice
+        env:
+          GORACE: atexit_sleep_ms=100
+        run: |
+          set -euo pipefail
+          heavy=github.com/KazuhaHub/passwall-sub-panel/internal/app
+          tests=$(go test -race -list '^(Test|Fuzz|Example)' "$heavy" | grep -E '^(Test|Fuzz|Example)' | grep -v '^TestMain$')
+          test -n "$tests"
+          printf '%s\n' "$tests" > app-roots.txt
+          printf '%s\n' "$tests" \
+            | awk -v s="${{ matrix.part }}" -v m=3 'NR % m == s % m' > app-selected.txt
+          test -s app-selected.txt
+          regex=$(paste -sd'|' app-selected.txt)
+          test -n "$regex"
+          go test -race -v -count=1 -timeout=4m -run "^(${regex})$" "$heavy" 2>&1 | tee test-output.txt
+      - name: upload test output
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: app-race-shard-${{ matrix.part }}-test-output
+          path: |
+            test-output.txt
+            app-roots.txt
+            app-selected.txt
+          if-no-files-found: error
+      - uses: actions/cache/save@v6
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        with:
+          path: ~/.cache/go-build
+          key: go-build-app-race-${{ matrix.part }}-${{ runner.os }}-${{ hashFiles('go.sum') }}
+
+  global-fixture:
+    name: global pressure fixture isolation and lifecycle
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        env:
+          GOTOOLCHAIN: auto
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Verify exact preferred compiler
+        run: |
+          set -eu
+          build_toolchain=$(awk '$1 == "toolchain" { print $2 }' go.mod)
+          test -n "$build_toolchain"
+          test "$(go env GOVERSION)" = "$build_toolchain"
+          test "$(go tool compile -V | awk '{ print $3 }')" = "$build_toolchain"
+      - name: Public cache privacy and actual service permission integration
+        run: |
+          set -euo pipefail
+          go test -v -count=1 -timeout=4m -tags destination_acceptance ./internal/app \
+            -run '^TestNativeGlobal(AuditStartPreservesRealQueueAndPermissionChanges|PublicCoreCopyExcludesStateAndRejectsUntrustedFiles|StoragePauseKeepsControlAndOriginalSQLTransactions|TransportKeepsProductionAuthenticationAndExactBodies)$'
+
   sqlite:
     name: sqlite (full suite, race)
-    needs: race-shard
+    needs: [race-shard, app-race-shard, global-fixture]
     # always() so a failed, cancelled or never-planned shard still produces a
     # verdict here. A skipped gate would report as a missing required check,
     # which reads as "not run" rather than "failed".
@@ -1244,7 +1343,7 @@ jobs:
     timeout-minutes: 5
     steps:
       - name: every shard passed
-        run: test "${{ needs.race-shard.result }}" = success
+        run: test "${{ needs.race-shard.result }}" = success && test "${{ needs.app-race-shard.result }}" = success && test "${{ needs.global-fixture.result }}" = success
 
   postgres:
     name: postgres (sqlstore dialect)

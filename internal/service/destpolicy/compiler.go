@@ -32,6 +32,7 @@ type CompilerInputs interface {
 type CompilerOptions struct {
 	Definitions CompilerDefinitions
 	Runtime     ports.DestAgentPolicyRepo
+	Issues      ports.NodeAgentIssueRepo
 	Inputs      CompilerInputs
 	MinSeconds  func(context.Context) (int, error)
 	Now         func() time.Time
@@ -54,6 +55,7 @@ type Compiler struct {
 	selectCandidate        func(*PreparedCandidate, *domain.DestAgentPolicy) (ports.DestPolicyCandidate, bool, error)
 	preparedCache          *boundedcache.Cache[*PreparedCandidate]
 	selectionCache         *boundedcache.Cache[cachedSelection]
+	issuesWritten          *boundedcache.Cache[string]
 }
 
 func NewCompiler(options CompilerOptions) (*Compiler, error) {
@@ -70,9 +72,11 @@ func NewCompiler(options CompilerOptions) (*Compiler, error) {
 	c.prepare, c.selectCandidate = PrepareCandidate, SelectCandidate
 	c.preparedCache = boundedcache.New[*PreparedCandidate](64, 32<<20)
 	c.selectionCache = boundedcache.New[cachedSelection](64, 32<<20)
+	c.issuesWritten = boundedcache.New[string](64, 64<<10)
 	c.publisher = NewPublisher(options.Definitions, nil)
 	c.publisher.now = options.Now
 	c.observer = NewObserver(options.Runtime, options.Now)
+	c.observer.issues = options.Issues
 	c.observer.SetInvalidator(func(agentID string) {
 		if c.invalidate != nil {
 			c.invalidate(agentID)
@@ -230,6 +234,10 @@ func (c *Compiler) Compile(ctx context.Context, agent *domain.NodeAgent, snapsho
 	}
 	if resync && c.allowlistResync != nil {
 		c.allowlistResync(ctx, agent.AgentID)
+	}
+	if err := c.recordCompilationIssue(ctx, agent.AgentID, prepared); err != nil {
+		outcome = metrics.DestCompileInvalid
+		return ports.DestPolicyCandidate{}, err
 	}
 	return cloneCandidate(result), nil
 }

@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
 
-const workflow = readFileSync(new URL('../.github/workflows/release.yml', import.meta.url), 'utf8')
+const workflow = readFileSync(new URL('../.github/workflows/release.yml', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
 
 // THE NAMESPACE IS THE ONE THE PRODUCT ALREADY WEARS, AND THE OLD ONE IS CLOSED.
 //

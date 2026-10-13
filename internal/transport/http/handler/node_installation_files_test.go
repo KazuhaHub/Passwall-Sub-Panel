@@ -272,6 +272,51 @@ func TestNodeInstallationFilesDockerRemoteUpgradeIsExplicitAdvancedOption(t *tes
 	}
 }
 
+func TestNodeInstallationFilesDockerUpdaterRetainsProductionIsolation(t *testing.T) {
+	_, repo := installationFixture(t)
+	result := renderNodeInstallationFiles(41, nativeServerCreateResponse{
+		AgentID: repo.agent.AgentID, Credential: repo.credential,
+		Endpoint: "https://panel.example/v1/node/sync",
+	}, nodeInstallationFilesRequest{Method: "docker", Version: "4.0.1.8", OS: "linux", DockerRemoteUpgrade: true})
+	var document struct {
+		Services map[string]map[string]any `yaml:"services"`
+	}
+	for _, file := range result.Files {
+		if file.Name == "compose.yaml" {
+			if err := yaml.Unmarshal([]byte(file.Content), &document); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	updater, agent := document.Services["passwall-node-updater"], document.Services["passwall-node"]
+	if updater == nil || agent == nil {
+		t.Fatal("generated deployment must contain both production roles")
+	}
+	for field, want := range map[string]any{
+		"network_mode": "none", "read_only": true,
+		"cap_drop":     []any{"ALL"},
+		"cap_add":      []any{"CHOWN", "DAC_READ_SEARCH", "FOWNER"},
+		"security_opt": []any{"no-new-privileges:true"},
+		"tmpfs":        []any{"/tmp:size=4m,mode=1777"},
+		"volumes":      []any{"/var/run/docker.sock:/var/run/docker.sock", "./upgrades:/run/passwall-node-upgrades"},
+	} {
+		if !reflect.DeepEqual(updater[field], want) {
+			t.Errorf("updater field %s does not retain the production isolation profile", field)
+		}
+	}
+	if updater["privileged"] != nil || updater["pid"] != nil || updater["userns_mode"] != nil {
+		t.Error("updater acquired additional host privileges")
+	}
+	if agent["network_mode"] != "host" || agent["read_only"] != true || !reflect.DeepEqual(agent["cap_drop"], []any{"ALL"}) || !reflect.DeepEqual(agent["security_opt"], []any{"no-new-privileges:true"}) {
+		t.Error("agent lost its existing production isolation profile")
+	}
+	for _, volume := range agent["volumes"].([]any) {
+		if strings.Contains(volume.(string), "docker.sock") {
+			t.Error("network-facing agent must not have the engine socket")
+		}
+	}
+}
+
 func TestNodeInstallationFilesDockerAllowsStableChannelAndExactPin(t *testing.T) {
 	h, _ := installationFixture(t)
 	for _, version := range []string{"latest", "beta", "4.0.0"} {

@@ -82,6 +82,11 @@ type Deps struct {
 	DestinationTest           func(context.Context, destpolicy.DestinationTestInput) (destpolicy.DestinationTestResult, error)
 	DestinationStatus         func(context.Context) (destpolicy.DestinationStatus, error)
 	DestinationHits           func(context.Context, domain.DestHitQuery) (domain.DestHitPage, error)
+	DestinationGroupTrial     func(context.Context, int64, int) (destpolicy.GroupTrialReport, error)
+	DestinationGroupPreview   func(context.Context, int64, []int64) (destpolicy.GroupAccessPreview, error)
+	DestinationGroupSave      func(context.Context, int64, destpolicy.GroupModeInput, time.Time) (domain.DestGroupMode, error)
+	DestinationGroupsOverview func(context.Context) ([]destpolicy.GroupAccessSummary, error)
+	DestinationGroupDetail    func(context.Context, int64) (destpolicy.GroupAccessDetail, error)
 	DestinationUsage          func(context.Context, domain.DestUsageQuery) (domain.DestUsagePage, error)
 	// GeoRecords is the read side of the concurrent-location detector, the
 	// same rows the traffic poll writes each cycle. Optional: a deployment
@@ -576,7 +581,7 @@ func NewRouter(d Deps) stdhttp.Handler {
 		adminGroup.GET("/acme-key-types", certs.ListKeyTypes)
 		adminGroup.PUT("/nodes/:id/cert-source", certs.SetNodeCertSource)
 
-		groups := handler.NewAdminGroupHandler(d.Group, d.User, d.Repos.User)
+		groups := handler.NewAdminGroupHandler(d.Group, d.User, d.Repos.User, d.Repos.DestGroupModes)
 		// Group CRUD shapes who can see which nodes — admin-only structure.
 		// Operators need to read groups to pick one when creating a user.
 		staffGroup.GET("/groups", groups.List)
@@ -879,6 +884,13 @@ func NewRouter(d Deps) stdhttp.Handler {
 		adminGroup.POST("/dest/test", handler.NewAdminDestinationTestHandler(d.DestinationTest).Test)
 		adminGroup.GET("/dest/status", handler.NewAdminDestinationStatusHandler(d.DestinationStatus).Get)
 		adminGroup.GET("/dest/hits", handler.NewAdminDestinationHitsHandler(d.DestinationHits).Get)
+		adminGroup.GET("/dest/groups/:group_id/trial-report", handler.NewAdminDestinationGroupTrialHandler(d.DestinationGroupTrial).Get)
+		adminGroup.GET("/dest/groups/:group_id/preview", handler.NewAdminDestinationGroupPreviewHandler(d.DestinationGroupPreview).Get)
+		destinationGroups := handler.NewAdminDestinationGroupsHandler(d.DestinationGroupSave)
+		destinationGroups.SetReaders(d.DestinationGroupsOverview, d.DestinationGroupDetail)
+		adminGroup.GET("/dest/groups", destinationGroups.List)
+		adminGroup.GET("/dest/groups/:group_id", destinationGroups.Get)
+		adminGroup.PUT("/dest/groups/:group_id", destinationGroups.Put)
 
 		// Offline geo database status + manual update (touches the update token
 		// + fetches an external DB — admin only).

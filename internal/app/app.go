@@ -149,6 +149,9 @@ type App struct {
 	destHitsRead         ports.DestHitReadRepo
 	destUserHitsRead     ports.DestUserHitReadRepo
 	destUsageRead        ports.DestUsageReadRepo
+	destGroupTrialRead   ports.DestGroupTrialReadRepo
+	destGroupStatsRead   ports.DestGroupStatsReadRepo
+	destGroupListeners   ports.DestGroupListenerReadRepo
 	destRiskRead         ports.DestRiskReadRepo
 	destAuditCtx         context.Context
 	destAuditCancel      context.CancelFunc
@@ -159,6 +162,8 @@ type App struct {
 	destExemptions       *destpolicy.ExemptionManager
 	destExceptions       *destpolicy.ExceptionManager
 	destControls         *destpolicy.Controls
+	destGroups           *destpolicy.GroupAdministrator
+	destGroupTrial       *destpolicy.GroupTrialReporter
 	syncTasks            ports.SyncTaskRepo
 	// trafficRepo / nodeTraffic kept for the retention cron — PruneBefore is
 	// outside traffic.Service's surface (it's a maintenance concern, not a
@@ -231,6 +236,13 @@ type App struct {
 // Build assembles the App from the loaded Config. It does NOT start any
 // goroutines or listeners; call Run() for that.
 func Build(ctx context.Context, cfg *config.Config) (*App, error) {
+	return buildWithDestinationAuditStore(ctx, cfg, nil)
+}
+
+// The package-private assembly seam decorates only the already admitted audit
+// store. Production always uses nil; no runtime flag or alternate collector is
+// exposed. Integration fixtures can delay a real transaction before delegation.
+func buildWithDestinationAuditStore(ctx context.Context, cfg *config.Config, decorate func(ports.DestAuditStore) ports.DestAuditStore) (*App, error) {
 	// Wire the version-compat on-disk cache to PSP's DataDir BEFORE any
 	// RefreshRemoteCompat could fire, so the first refresh persists to the right
 	// place and a same-process load picks up the cached snapshot.
@@ -385,14 +397,18 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	destInputs.SetMembershipGeneration(membershipGeneration.Load)
 	groupSvc.SetMembershipInvalidator(invalidateMembership)
 	destCompiler, err := destpolicy.NewCompiler(destpolicy.CompilerOptions{
-		Definitions: destDefinitions, Runtime: repos.DestAgentPolicy, Inputs: destInputs,
+		Definitions: destDefinitions, Runtime: repos.DestAgentPolicy, Issues: repos.NodeAgentIssue, Inputs: destInputs,
 		MinSeconds: func(ctx context.Context) (int, error) { return destinationPolicyMinSeconds(ctx, repos.Settings) },
 	})
 	if err != nil {
 		return nil, fmt.Errorf("destination policy compiler: %w", err)
 	}
 	operationGate := operationgate.New()
-	destAudit, err := destaudit.New(ctx, admittedDestinationAuditStore{store: repos.DestAudit, gate: operationGate}, destaudit.Options{Emit: destinationAuditObserver()})
+	var auditStore ports.DestAuditStore = admittedDestinationAuditStore{store: repos.DestAudit, gate: operationGate}
+	if decorate != nil {
+		auditStore = decorate(auditStore)
+	}
+	destAudit, err := destaudit.New(ctx, auditStore, destaudit.Options{Emit: destinationAuditObserver()})
 	if err != nil {
 		return nil, fmt.Errorf("destination audit collector: %w", err)
 	}
@@ -630,6 +646,9 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 		destHitsRead:         repos.DestHitsRead,
 		destUserHitsRead:     repos.DestUserHitsRead,
 		destUsageRead:        repos.DestUsageRead,
+		destGroupTrialRead:   repos.DestGroupTrialRead,
+		destGroupStatsRead:   repos.DestGroupStatsRead,
+		destGroupListeners:   repos.DestGroupListeners,
 		destRiskRead:         repos.DestRiskRead,
 		destAudit:            destAudit, destAuditCtx: auditCtx, destAuditCancel: auditCancel,
 		destTagMembers: groupSvc,
@@ -646,6 +665,25 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	a.destExceptions.SetOperationGate(a.operationGate)
 	a.destControls = destpolicy.NewControls(a.destDefinitions)
 	a.destControls.SetOperationGate(a.operationGate)
+	a.destGroups = destpolicy.NewGroupAdministrator(a.destDefinitions, repos.Group.GetByID, a.destinationBudget, func(ctx context.Context, groupID int64) {
+		groupSvc.InvalidateEligibility(0)
+		renderSvc.InvalidateAll()
+		userSvc.ResyncGroupMembersInBackground(groupID)
+	})
+	a.destGroups.SetOperationGate(a.operationGate)
+	a.destGroupTrial = destpolicy.NewGroupTrialReporter(repos.Group.GetByID, a.destDefinitions.ReadDefinitions, func(ctx context.Context, q domain.DestGroupTrialQuery) (domain.DestGroupTrialData, error) {
+		if a.destGroupTrialRead == nil {
+			return domain.DestGroupTrialData{}, domain.ErrUnavailable
+		}
+		return a.destGroupTrialRead.ReadDestinationGroupTrial(ctx, q)
+	}, func(ctx context.Context) (int, error) {
+		settings, err := a.settings.Load(ctx, ports.UISettings{})
+		if err != nil {
+			return 0, err
+		}
+		return settings.DestinationSettings().EffectiveTrialRetentionDays(), nil
+	})
+	a.destGroupTrial.SetOperationGate(a.operationGate)
 	dispatcher := &asyncDispatcher{ctx: bgCtx, wg: &a.bgWG, gate: a.operationGate}
 	// Wire traffic.Service into the panel-wide WaitGroup. Its async
 	// floor-push + quota-event email goroutines (`safego.GoTracked`)
@@ -811,6 +849,11 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 		DestinationTest:           a.destinationTest,
 		DestinationStatus:         a.destinationStatus,
 		DestinationHits:           a.destinationHits,
+		DestinationGroupTrial:     a.destGroupTrial.Read,
+		DestinationGroupPreview:   a.destinationGroupPreview,
+		DestinationGroupSave:      a.destGroups.Save,
+		DestinationGroupsOverview: a.destinationGroupsOverview,
+		DestinationGroupDetail:    a.destinationGroupDetail,
 		DestinationUsage:          a.destinationUsage,
 		GeoRecords:                geoStreaks,
 		// The risk view's rows. Optional, so leaving it out would compile —

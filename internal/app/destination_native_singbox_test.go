@@ -1,0 +1,465 @@
+//go:build destination_acceptance && linux
+
+package app
+
+import (
+	"bytes"
+	"encoding/json"
+	"encoding/pem"
+	"fmt"
+	"io"
+	"net"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"sync/atomic"
+	"syscall"
+	"testing"
+	"time"
+
+	"github.com/KazuhaHub/passwall-protocol/protocol"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/destpolicy"
+)
+
+// This separate gate exercises sing-box execution with actual Node reports.
+// It also records the pre-hotfix private-address behavior required by N0-S.
+func TestNativeSingBoxDestinationTraffic(t *testing.T) {
+	nativeSingBoxDestinationTraffic(t, false)
+}
+
+func TestNativeGuardedSingBoxDestinationTraffic(t *testing.T) {
+	nativeSingBoxDestinationTraffic(t, true)
+}
+
+func nativeSingBoxDestinationTraffic(t *testing.T, guarded bool) {
+	if os.Geteuid() != 0 || os.Getenv("GITHUB_ACTIONS") != "true" || os.Getenv("RUNNER_ENVIRONMENT") != "github-hosted" || os.Getenv("GITHUB_REPOSITORY") != "KazuhaHub/Passwall-Sub-Panel" {
+		t.Fatal("native destination acceptance requires the disposable hosted Linux workflow")
+	}
+	binary := os.Getenv("PSP_NATIVE_NODE_BIN")
+	if !filepath.IsAbs(binary) || !strings.HasPrefix(filepath.Base(binary), "destination-node") || os.Getenv("PSP_NATIVE_CORE_VERSION") != "1.14.0" {
+		t.Fatal("missing reviewed candidate or exact core selection")
+	}
+	info, err := os.Stat(binary)
+	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0022 != 0 {
+		t.Fatal("candidate executable is absent or writable by other users")
+	}
+	f := buildNativeDestinationPolicyFixture(t)
+	a := f.a
+	token := destinationRefreshAdminToken(t, a)
+	nativeMust(t, a.repos.NodeAgent.UpdateCoreSelection(t.Context(), f.agent.AgentID, domain.NodeCoreSingBox, "1.14.0", false), "select reviewed sing-box")
+	settings, err := a.settings.Load(t.Context(), ports.UISettings{})
+	nativeMust(t, err, "read cadence")
+	settings.NodePollSeconds, settings.FullReportSeconds = 2, 0
+	nativeMust(t, a.settings.Save(t.Context(), settings), "save live cadence")
+	inbound, api := nativePort(t), nativePort(t)
+	f.node.DesiredPort, f.node.ObservedPort, f.node.InboundListen = inbound, inbound, "127.0.0.1"
+	// sing-box sniffing is inserted as a route action by the policy compiler;
+	// its listener adapter correctly rejects legacy Xray inbound sniffing.
+	f.node.Sniffing = `{}`
+	nativeMust(t, a.repos.Node.Update(t.Context(), f.node), "configure disposable listener")
+	a.startDestinationAudit()
+	probe := &nativeRestartProbe{}
+	server := httptest.NewTLSServer(probe.wrap(a.server.Handler))
+	t.Cleanup(server.Close)
+	dir := t.TempDir()
+	ca, credential := filepath.Join(dir, "ca.pem"), filepath.Join(dir, "credential")
+	nativeMust(t, os.WriteFile(ca, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: server.Certificate().Raw}), 0600), "write scoped fixture CA")
+	nativeMust(t, os.WriteFile(credential, []byte(f.credential), 0600), "write private fixture credential")
+	_, address, targetPort, nonce, requests := nativeTarget(t)
+	output := &nativePrivateOutput{}
+	var cmd *exec.Cmd
+	var done chan error
+	startDaemon := func(test *testing.T) {
+		cmd = exec.Command(binary, "--endpoint", server.URL+"/v1/node/sync", "--agent-id", f.agent.AgentID, "--credential-file", credential, "--data-dir", filepath.Join(dir, "node"), "--sing-box-api-listen", net.JoinHostPort("127.0.0.1", strconv.Itoa(api)))
+		cmd.Env = append(os.Environ(), "SSL_CERT_FILE="+ca)
+		cmd.Stdout, cmd.Stderr = output, output
+		nativeMust(test, cmd.Start(), "start candidate Node")
+		done = make(chan error, 1)
+		go func(process *exec.Cmd, completion chan error) { completion <- process.Wait() }(cmd, done)
+	}
+	stopDaemon := func(test *testing.T) {
+		if cmd == nil {
+			return
+		}
+		_ = cmd.Process.Signal(syscall.SIGTERM)
+		select {
+		case <-done:
+		case <-time.After(15 * time.Second):
+			_ = cmd.Process.Kill()
+			<-done
+			test.Error("candidate Node did not drain its core and collectors")
+		}
+		cmd = nil
+	}
+	receiptAfter := time.UnixMilli(time.Now().UnixMilli())
+	startDaemon(t)
+	t.Cleanup(func() {
+		stopDaemon(t)
+		for _, private := range []string{f.credential, f.user.Email, "destination@psp.local", nonce, " accepted ", " rejected "} {
+			if strings.Contains(output.text(), private) {
+				t.Error("private access data escaped into Node output; content withheld")
+			}
+		}
+	})
+	client := server.Client()
+	client.Timeout = 10 * time.Second
+	caseTest := t
+	var priorReceipt *domain.DestAgentPolicy
+	request := func(method, path string, body any, want int, result any) {
+		caseTest.Helper()
+		if method != "GET" && path != "dest/publish" {
+			var err error
+			priorReceipt, err = a.repos.DestAgentPolicy.Get(caseTest.Context(), f.agent.AgentID, true)
+			nativeMust(caseTest, err, "bind sing-box candidate before administrator mutation")
+		}
+		encoded, err := json.Marshal(body)
+		nativeMust(caseTest, err, "encode administrator input")
+		r, err := http.NewRequestWithContext(caseTest.Context(), method, server.URL+"/api/admin/"+path, bytes.NewReader(encoded))
+		nativeMust(caseTest, err, "create administrator request")
+		r.Header.Set("Authorization", "Bearer "+token)
+		r.Header.Set("Content-Type", "application/json")
+		started := time.UnixMilli(time.Now().UnixMilli())
+		response, err := client.Do(r)
+		nativeMust(caseTest, err, "perform administrator request")
+		defer response.Body.Close()
+		if response.StatusCode != want {
+			caseTest.Fatalf("administrator route %s returned HTTP %d, expected %d; body withheld", path, response.StatusCode, want)
+		}
+		if method != "GET" && path != "dest/publish" {
+			receiptAfter = started
+		}
+		if result != nil {
+			nativeMust(caseTest, json.NewDecoder(response.Body).Decode(result), "decode administrator response")
+		} else {
+			_, _ = io.Copy(io.Discard, response.Body)
+		}
+	}
+	publish := func() { request("POST", "dest/publish", nil, 200, nil) }
+	count := func(table string) int64 {
+		caseTest.Helper()
+		var n int64
+		// The table argument is a fixed fixture literal, never an HTTP input.
+		nativeMust(caseTest, a.database.QueryRowContext(caseTest.Context(), "SELECT COUNT(*) FROM "+table).Scan(&n), "read private count")
+		return n
+	}
+	noCollection := func() {
+		caseTest.Helper()
+		candidate, err := a.repos.DestAgentPolicy.Get(caseTest.Context(), f.agent.AgentID, true)
+		nativeMust(caseTest, err, "read sing-box collection candidate")
+		var compiled *protocol.DestinationPolicy
+		nativeMust(caseTest, json.Unmarshal(candidate.MintedBody, &compiled), "decode sing-box collection candidate")
+		if compiled != nil && (protocol.ValidateDestinationPolicy(compiled) != nil || compiled.Collect != "" || protocol.PolicyDigest(compiled) != candidate.MintedSHA256) {
+			caseTest.Fatal("sing-box execution falsely claimed collection")
+		}
+		var status destpolicy.DestinationStatus
+		request("GET", "dest/status", nil, 200, &status)
+		if len(status.Nodes) != 1 || status.Nodes[0].Engine == nil || *status.Nodes[0].Engine != "sing-box" || !status.Nodes[0].Supports.Policy || status.Nodes[0].Supports.Hits || status.Nodes[0].Supports.Usage || status.Nodes[0].Collecting || status.Nodes[0].CollectEffective != "" {
+			caseTest.Fatal("sing-box execution falsely claimed collection")
+		}
+		if count("dest_hits") != 0 || count("dest_usage_hourly") != 0 {
+			caseTest.Fatal("sing-box persisted destination audit data")
+		}
+	}
+	waitAppliedCandidate := func(unchanged *domain.DestAgentPolicy) {
+		caseTest.Helper()
+		facts := map[string]bool{}
+		defer func() {
+			if caseTest.Failed() {
+				for _, category := range []string{"receipt_generation", "receipt_mint_fresh", "receipt_sync_fresh", "receipt_state", "receipt_sha", "receipt_lkg", "receipt_precheck", "receipt_streams", "receipt_transition"} {
+					caseTest.Logf("native diagnostic: %s=%t", category, facts[category])
+				}
+				for _, category := range []string{"download", "checksum", "timeout", "rejected", "unsupported", "permission", "bind", "certificate"} {
+					caseTest.Logf("native diagnostic: %s=%t", category, strings.Contains(strings.ToLower(output.text()), category))
+				}
+			}
+		}()
+		nativeWait(caseTest, 120*time.Second, "current sing-box policy receipt", func() bool {
+			state, err := a.destDefinitions.State(caseTest.Context())
+			if err != nil {
+				return false
+			}
+			r, err := a.repos.DestAgentPolicy.Get(caseTest.Context(), f.agent.AgentID, true)
+			if err != nil || r == nil {
+				return false
+			}
+			agent, err := a.repos.NodeAgent.GetByAgentID(caseTest.Context(), f.agent.AgentID)
+			if err != nil || agent == nil || agent.ObservedCoreEngine != domain.NodeCoreSingBox {
+				return false
+			}
+			facts["receipt_generation"] = r.MintedGeneration == state.PublishedGeneration
+			facts["receipt_mint_fresh"] = r.MintedAt != nil && !r.MintedAt.Before(receiptAfter)
+			facts["receipt_sync_fresh"] = agent.LastSeen != nil && agent.LastSeen.After(receiptAfter)
+			facts["receipt_state"] = r.ReportedState == "applied"
+			facts["receipt_sha"] = r.MintedSHA256 == r.ReportedSHA256
+			facts["receipt_lkg"] = r.MintedKind != domain.DestCandidateDesired || r.AppliedSHA256 == r.MintedSHA256
+			facts["receipt_precheck"] = r.FallbackReason == "" && !r.FallbackExhausted && r.ReportedIssue == "" && len(r.PrecheckListeners) == 0 && len(r.ReportedListeners) == 0
+			ready := nativeMutationReceiptMatches(priorReceipt, *r, state.PublishedGeneration, agent.LastSeen, receiptAfter)
+			if unchanged != nil {
+				ready = nativeUnchangedReceiptMatches(*unchanged, *r, state.PublishedGeneration, agent.LastSeen, receiptAfter)
+			}
+			facts["receipt_transition"] = ready
+			if !ready || state.Paused != (r.MintedKind == domain.DestCandidatePaused) {
+				return false
+			}
+			facts["receipt_streams"] = false
+			for _, name := range []domain.NodeAgentStreamName{domain.NodeAgentStreamConfig, domain.NodeAgentStreamRoster} {
+				stream, err := a.repos.NodeAgent.GetStream(caseTest.Context(), f.agent.AgentID, name)
+				if err != nil || stream.AppliedEpoch != agent.Epoch || !stream.Converged() {
+					return false
+				}
+			}
+			facts["receipt_streams"] = true
+			listener, err := a.repos.Node.GetByID(caseTest.Context(), f.node.ID)
+			return err == nil && listener.ConfigSyncState == domain.ConfigSyncSynced
+		})
+		noCollection()
+	}
+	waitApplied := func() { waitAppliedCandidate(nil) }
+	trafficUserHost := func(uuid, host string, allowed bool) {
+		caseTest.Helper()
+		before := requests.Load()
+		err := nativeVLESSHost(caseTest.Context(), inbound, address, targetPort, uuid, nonce, host)
+		if allowed && err != nil {
+			caseTest.Fatal("real VLESS traffic did not reach its nonce target; private diagnostics withheld")
+		}
+		if !allowed && err == nil {
+			caseTest.Fatal("real VLESS traffic bypassed a deny rule")
+		}
+		want := before
+		if allowed {
+			want++
+		}
+		if requests.Load() != want {
+			caseTest.Fatal("deny/allow result disagreed with actual target request count")
+		}
+	}
+	traffic := func(host string, allowed bool) { trafficUserHost(f.user.UUID, host, allowed) }
+	literalHost := "[" + address + "]"
+	run := func(name string, work func()) {
+		if !t.Run(name, func(child *testing.T) { caseTest = child; defer func() { caseTest = t }(); work() }) {
+			t.FailNow()
+		}
+	}
+	var policy destinationPolicyAPIResult
+	input := destinationPolicyInput("Sing-box traffic fixture", "observe")
+	input["inline"] = map[string]any{"ports": strconv.Itoa(targetPort)}
+	run("empty", func() { waitApplied(); traffic(literalHost, true) })
+	run("watch", func() {
+		request("POST", "dest/policies", input, 201, &policy)
+		publish()
+		waitApplied()
+		traffic(literalHost, true)
+	})
+	run("block", func() {
+		input["action"], input["updated_at"] = "block", policy.UpdatedAt
+		request("PUT", fmt.Sprintf("dest/policies/%d", policy.ID), input, 200, &policy)
+		publish()
+		waitApplied()
+		traffic(literalHost, false)
+	})
+	scoped := nativeScopedDestinationCases(t, f, nil, &policy, input, targetPort, nativeScopeControl{
+		test: func() *testing.T { return caseTest }, request: request, publish: publish, waitApplied: waitApplied,
+		traffic: func(uuid, host string, allow bool) {
+			if host == "" {
+				host = literalHost
+			}
+			trafficUserHost(uuid, host, allow)
+		},
+		control: func(target string, port int, nonce string) {
+			nativeMust(caseTest, nativeVLESSHost(caseTest.Context(), inbound, target, port, f.user.UUID, nonce, "["+target+"]"), "scoped independent control connection")
+		},
+		live: func() func() {
+			return nativeBindLiveCore(caseTest, cmd.Process.Pid, filepath.Join(dir, "node"), "sing-box")
+		},
+		stop: func() { stopDaemon(t) }, output: output.text,
+	})
+	run("group_scope", scoped.groupScope)
+	run("exemption", scoped.exemption)
+	run("exemption_expired", scoped.exemptionExpired)
+	run("allow_priority", scoped.allowPriority)
+	run("paused", func() {
+		request("PUT", "dest/pause", map[string]any{"paused": true}, 200, nil)
+		waitApplied()
+		traffic(literalHost, true)
+		request("PUT", "dest/pause", map[string]any{"paused": false}, 200, nil)
+		waitApplied()
+		traffic(literalHost, false)
+		request("DELETE", fmt.Sprintf("dest/policies/%d", policy.ID), nil, 204, nil)
+		publish()
+		waitApplied()
+	})
+	run("domain", func() {
+		var list struct {
+			ID int64 `json:"id"`
+		}
+		request("POST", "dest/lists", map[string]any{"name": "Sing-box domain fixture", "kind": "custom", "text": "full:fallback.example.test\n"}, 201, &list)
+		input = destinationPolicyInput("Sing-box domain fixture", "block")
+		input["inline"], input["list_ids"] = map[string]any{}, []int64{list.ID}
+		request("POST", "dest/policies", input, 201, &policy)
+		publish()
+		waitApplied()
+		traffic(literalHost, true)
+		traffic("fallback.example.test", false)
+		request("DELETE", fmt.Sprintf("dest/policies/%d", policy.ID), nil, 204, nil)
+		publish()
+		waitApplied()
+	})
+	groupPath := fmt.Sprintf("dest/groups/%d", f.group.ID)
+	var mode destinationGroupModeAPIResult
+	run("trial", func() {
+		request("PUT", groupPath, map[string]any{"mode": "allowlist", "stage": "trial", "list_ids": []int64{}, "updated_at": int64(0), "base_hosts": []string{}}, 200, &mode)
+		publish()
+		waitApplied()
+		traffic(literalHost, true)
+	})
+	run("enforce", func() {
+		request("PUT", groupPath, map[string]any{"mode": "allowlist", "stage": "enforce", "list_ids": []int64{}, "updated_at": mode.UpdatedAt}, 200, &mode)
+		publish()
+		waitApplied()
+		traffic(literalHost, false)
+	})
+	run("extra", func() {
+		request("POST", fmt.Sprintf("dest/lists/%d/entries", mode.ExtraListID), map[string]any{"add": []string{address + "/128"}}, 200, nil)
+		publish()
+		waitApplied()
+		traffic(literalHost, true)
+	})
+	run("idle_sync", func() {
+		nativeAssertIdleSync(caseTest, a, probe, f.agent.AgentID, f.node.ID, cmd.Process.Pid, filepath.Join(dir, "node"), "sing-box", func() { traffic(literalHost, true) })
+		noCollection()
+	})
+	run("report_refresh", func() {
+		list := nativeSeedReportRefreshList(caseTest, a)
+		input := destinationPolicyInput("Native report refresh", "observe")
+		input["inline"], input["list_ids"] = map[string]any{}, []int64{list.ID}
+		var refreshPolicy destinationPolicyAPIResult
+		request("POST", "dest/policies", input, 201, &refreshPolicy)
+		publish()
+		waitApplied()
+		nativeAssertIdleSync(caseTest, a, probe, f.agent.AgentID, f.node.ID, cmd.Process.Pid, filepath.Join(dir, "node"), "sing-box", func() { traffic(literalHost, true) }, func() { nativeRefreshReportOnly(caseTest, a, list, request) })
+		noCollection()
+		request("DELETE", fmt.Sprintf("dest/policies/%d", refreshPolicy.ID), nil, 204, nil)
+		publish()
+		waitApplied()
+	})
+	run("restart", func() {
+		prior, err := a.repos.DestAgentPolicy.Get(caseTest.Context(), f.agent.AgentID, true)
+		nativeMust(caseTest, err, "read confirmed sing-box policy")
+		stopDaemon(caseTest)
+		probe.arm()
+		receiptAfter = time.UnixMilli(time.Now().UnixMilli())
+		startDaemon(caseTest)
+		nativeWait(caseTest, 60*time.Second, "first sing-box restart report", func() bool { _, seen, _ := probe.first(); return seen })
+		first, seen, accepted := probe.first()
+		if !seen || !accepted || first == nil || first.State != "applied" || first.Digest != prior.MintedSHA256 || first.IssueCode != "" {
+			caseTest.Fatal("sing-box restart lost its applied policy receipt")
+		}
+		// A persisted applied receipt is deliberately sent on the first sync.
+		// It does not by itself establish that this new process has opened its
+		// listener. Require a fresh unchanged receipt, observed runtime and the
+		// actual owned child before the single traffic assertion.
+		waitAppliedCandidate(prior)
+		nativeWait(caseTest, 60*time.Second, "sing-box restarted runtime and inbound", func() bool {
+			cli, err := a.xuiPool.Get(f.agent.PanelID)
+			if err != nil {
+				return false
+			}
+			status, err := cli.GetServerStatus(caseTest.Context())
+			if err != nil {
+				return false
+			}
+			inboundState, err := cli.GetInbound(caseTest.Context(), f.node.InboundID)
+			if err != nil || !nativeObservedRuntimeReady(status, inboundState, f.node.InboundID, inbound, "sing-box", "1.14.0") {
+				return false
+			}
+			listener, err := net.DialTimeout("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(inbound)), time.Second)
+			if err != nil {
+				return false
+			}
+			_ = listener.Close()
+			return true
+		})
+		live := nativeBindLiveCore(caseTest, cmd.Process.Pid, filepath.Join(dir, "node"), "sing-box")
+		live()
+		traffic(literalHost, true)
+		live()
+	})
+	run("collection_off", func() {
+		for _, level := range []string{"hits_and_usage", "off"} {
+			prior, err := a.repos.DestAgentPolicy.Get(caseTest.Context(), f.agent.AgentID, true)
+			nativeMust(caseTest, err, "read unchanged sing-box candidate")
+			request("PUT", fmt.Sprintf("servers/%d", f.agent.PanelID), map[string]any{"audit_collect": level}, 200, nil)
+			waitAppliedCandidate(prior)
+			var status destpolicy.DestinationStatus
+			request("GET", "dest/status", nil, 200, &status)
+			if len(status.Nodes) != 1 || string(status.Nodes[0].Collect) != level {
+				caseTest.Fatal("sing-box execution falsely claimed collection")
+			}
+			traffic(literalHost, true)
+			time.Sleep(7 * time.Second)
+			noCollection()
+		}
+		request("PUT", groupPath, map[string]any{"mode": "open", "stage": "", "list_ids": []int64{}, "updated_at": mode.UpdatedAt}, 200, &mode)
+		publish()
+		waitApplied()
+	})
+	// This is a disposable local target, never a cloud metadata endpoint.
+	var privateRequests atomic.Int64
+	privateTarget := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		privateRequests.Add(1)
+		_, _ = io.WriteString(w, nonce)
+	}))
+	defer privateTarget.Close()
+	privatePort := privateTarget.Listener.Addr().(*net.TCPAddr).Port
+	privateDestinations := func(literalAllowed bool) {
+		for _, destination := range []string{"127.0.0.1", "localhost"} {
+			allowed := literalAllowed || destination == "localhost"
+			before := privateRequests.Load()
+			err := nativeVLESSHost(caseTest.Context(), inbound, destination, privatePort, f.user.UUID, nonce, destination)
+			if allowed && err != nil {
+				caseTest.Fatal("real VLESS traffic did not reach its nonce target; private diagnostics withheld")
+			}
+			if !allowed && err == nil {
+				caseTest.Fatal("real VLESS traffic bypassed a deny rule")
+			}
+			want := before
+			if allowed {
+				want++
+			}
+			if privateRequests.Load() != want {
+				caseTest.Fatal("deny/allow result disagreed with actual target request count")
+			}
+		}
+		// The documentation-address target must still be served by the live core.
+		traffic(literalHost, true)
+		noCollection()
+	}
+	if guarded {
+		run("private_guard", func() {
+			privateDestinations(false)
+			// A global allow must not override the first unconditional private guard.
+			input := destinationPolicyInput("Private guard allow fixture", "allow")
+			input["inline"] = map[string]any{"ports": strconv.Itoa(privatePort)}
+			request("POST", "dest/policies", input, 201, &policy)
+			publish()
+			waitApplied()
+			privateDestinations(false)
+			request("PUT", "dest/pause", map[string]any{"paused": true}, 200, nil)
+			waitApplied()
+			privateDestinations(false)
+			request("PUT", "dest/pause", map[string]any{"paused": false}, 200, nil)
+			waitApplied()
+			request("DELETE", fmt.Sprintf("dest/policies/%d", policy.ID), nil, 204, nil)
+			publish()
+			waitApplied()
+		})
+	} else {
+		run("private_baseline", func() { privateDestinations(true) })
+	}
+}

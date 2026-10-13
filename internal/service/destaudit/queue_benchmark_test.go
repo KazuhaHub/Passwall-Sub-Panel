@@ -51,6 +51,7 @@ func BenchmarkQueueDecodedHeap(b *testing.B) {
 		runtime.GC()
 		var before, after runtime.MemStats
 		runtime.ReadMemStats(&before)
+		peak := before.HeapAlloc
 		q := newBatchQueue()
 		for _, kind := range []string{"block", "observe", "trial", "usage"} {
 			for i := 0; i < 256; i++ {
@@ -60,20 +61,30 @@ func BenchmarkQueueDecodedHeap(b *testing.B) {
 					b.Fatal(err)
 				}
 				result := q.offer(fmt.Sprintf("%s-%d", kind, i), 1, decoded.Hour, decoded)
+				var current runtime.MemStats
+				runtime.ReadMemStats(&current)
+				peak = max(peak, current.HeapAlloc)
 				if result == "queue_full" {
+					b.ReportMetric(1, kind+"-queue-full")
 					break
 				}
 				if result != "accepted" {
 					b.Fatalf("benchmark offer %s", result)
 				}
 			}
+			lane := q.lanes[kind]
+			b.ReportMetric(float64(lane.batches), kind+"-batches")
+			b.ReportMetric(float64(lane.bytes), kind+"-canonical-bytes")
+			b.ReportMetric(float64(len(wires[kind])), kind+"-batch-wire-bytes")
 		}
 		runtime.GC()
 		runtime.ReadMemStats(&after)
+		peak = max(peak, after.HeapAlloc)
 		count, bytes := q.pending()
 		b.ReportMetric(float64(count), "batches")
 		b.ReportMetric(float64(bytes), "canonical-bytes")
 		b.ReportMetric(float64(after.HeapAlloc-before.HeapAlloc), "retained-heap-bytes")
+		b.ReportMetric(float64(peak-before.HeapAlloc), "sampled-peak-heap-bytes")
 		runtime.KeepAlive(q)
 		runtime.KeepAlive(wires)
 	}
