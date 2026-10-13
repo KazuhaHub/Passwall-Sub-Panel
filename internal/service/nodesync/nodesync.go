@@ -604,6 +604,7 @@ func (s *Service) ingestReport(ctx context.Context, agent *domain.NodeAgent, sna
 
 func (s *Service) reconcileObjects(ctx context.Context, agent *domain.NodeAgent, snapshot *ports.NativeDesiredSnapshot, report nodeprotocol.NodeReport, streams map[string]*domain.NodeAgentStream, now time.Time) error {
 	missing := make([]domain.NodeAgentIssue, 0)
+	var inboundUpdates []domain.PSPClientInbound
 	renderCredentialsChanged := false
 	rosterHave := report.Have[nodeprotocol.StreamRoster]
 	rosterCurrent := streams[nodeprotocol.StreamRoster]
@@ -680,8 +681,19 @@ func (s *Service) reconcileObjects(ctx context.Context, agent *domain.NodeAgent,
 					attachment.AppliedPassword == update.AppliedPassword {
 					continue
 				}
+				inboundUpdates = append(inboundUpdates, update)
+			}
+		}
+	}
+	if len(inboundUpdates) > 0 {
+		if batch, ok := s.clients.(ports.PSPClientInboundBatchRepo); ok {
+			if err := batch.UpdateInboundStates(ctx, inboundUpdates); err != nil {
+				return fmt.Errorf("nodesync: update client attachments: %w", err)
+			}
+		} else {
+			for _, update := range inboundUpdates {
 				if err := s.clients.UpdateInboundState(ctx, update); err != nil {
-					return fmt.Errorf("nodesync: update client %d attachment %d: %w", clientID, attachment.NodeID, err)
+					return fmt.Errorf("nodesync: update client %d attachment %d: %w", update.ClientID, update.NodeID, err)
 				}
 			}
 		}

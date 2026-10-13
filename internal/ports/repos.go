@@ -534,6 +534,13 @@ type PSPClientRepo interface {
 	BatchUpdateCounters(ctx context.Context, items []*domain.PSPClient) error
 }
 
+// PSPClientInboundBatchRepo optionally persists one report's attachment
+// observations atomically. Missing attachments remain no-ops; observations
+// retain UpdateInboundState's failure-clock and confirmed-credential semantics.
+type PSPClientInboundBatchRepo interface {
+	UpdateInboundStates(ctx context.Context, inbounds []domain.PSPClientInbound) error
+}
+
 // NodeAgentRepo persists native-agent identity and the three independent
 // desired/applied streams. MintStream accepts canonical JSON and performs the
 // compare-before-CAS rule: identical content returns minted=false and never
