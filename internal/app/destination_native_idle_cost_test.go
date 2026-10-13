@@ -120,6 +120,8 @@ func nativeIdleCost(t *testing.T, f destinationPolicyFixture, client *http.Clien
 	var policy destinationPolicyAPIResult
 	request("POST", "dest/policies", input, 201, &policy)
 	request("PUT", fmt.Sprintf("servers/%d", f.agent.PanelID), map[string]any{"audit_collect": "off"}, 200, nil)
+	panel, err := a.repos.XUIPanel.GetByID(t.Context(), f.agent.PanelID)
+	nativeMust(t, err, "bind actual disabled idle collection revision")
 	prior, err := a.repos.DestAgentPolicy.Get(t.Context(), f.agent.AgentID, true)
 	nativeMust(t, err, "bind actual idle policy before publication")
 	after := time.Now().UTC()
@@ -129,7 +131,7 @@ func nativeIdleCost(t *testing.T, f destinationPolicyFixture, client *http.Clien
 		state, e1 := a.destDefinitions.State(t.Context())
 		current, e2 := a.repos.DestAgentPolicy.Get(t.Context(), f.agent.AgentID, true)
 		agent, e3 := a.repos.NodeAgent.GetByAgentID(t.Context(), f.agent.AgentID)
-		if e1 != nil || e2 != nil || e3 != nil || current == nil || agent == nil || state.Paused || agent.ObservedCoreEngine != domain.NodeCoreXray || !nativeMutationReceiptMatches(prior, *current, state.PublishedGeneration, agent.LastSeen, after) || current.CollectEffective != "off" {
+		if e1 != nil || e2 != nil || e3 != nil || current == nil || agent == nil || state.Paused || agent.ObservedCoreEngine != domain.NodeCoreXray || !nativeMutationReceiptMatches(prior, *current, state.PublishedGeneration, agent.LastSeen, after) || !nativeCollectionReceiptMatches(*current, "", uint64(panel.AuditCollectRevision)) {
 			return false
 		}
 		var applied protocol.DestinationPolicy

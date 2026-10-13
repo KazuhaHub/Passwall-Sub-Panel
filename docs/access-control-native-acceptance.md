@@ -1197,3 +1197,11 @@ policy 数与正在运行的核心配置 domain 数均为 50000，并核对 conf
 helper；原十项 Load 和 Native 矩阵保留。新增作业另存两份数值原件，Load
 合计十一项、二十四份原件。当前只完成编译与解析器/门禁回归，实际五万
 域名 idle 数字仍待准确新源托管执行，不计为已完成的成本证据。
+
+首次 `6f576c33` idle 实际运行的 list/publish 已达到 50000，但夹具把管理
+设置的 `off` 与协议的空 CollectLevel 混为一谈，等待条件不可能成立；180
+秒后失败，尚未开始 CPU 或写入测量，报告 cycles 为空。失败的两份原件
+保留，不能作为零成本证明。修正改为复用 nativeCollectionReceiptMatches
+检查协议空值及实际关闭 revision、mint/applied/reported 摘要一致，不改变
+关闭设置、策略规模或 Node 生产行为。新增回归已先验证旧条件失败；新源
+仍须重新取得完整五万域名运行回执和测量。

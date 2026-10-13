@@ -29,6 +29,10 @@ test('idle runtime uses actual published receipts and tracee identity without ch
   const source = readFileSync(new URL('../internal/app/destination_native_idle_cost_test.go', import.meta.url), 'utf8')
   for (const required of ['nativeMutationReceiptMatches', 'current.AppliedBody', 'nativeBindLiveCore', 'nativeAssertIdleSyncCycles', 'os.SameFile', 'nativeLoadProcCounters', 'TracerPid:', 'trace=write,pwrite64,writev,pwritev,pwritev2,fsync,fdatasync,mmap,msync', 'measure("plain", 0)', 'measure("traced", tracer.Process.Pid)']) assert(source.includes(required))
   assert.doesNotMatch(source, /\.Process\.(?:Kill|Signal)\(.*parent|runtime\.GC\(|sysctl|SetSnapshot\(|\.collector\.Ack\(/)
+  // The UI setting is "off"; the wire CollectLevel is empty. Reuse the
+  // exact revision/digest receipt check instead of waiting for that UI literal.
+  assert.match(source, /nativeCollectionReceiptMatches\(\*current, "", uint64\(panel\.AuditCollectRevision\)\)/)
+  assert.doesNotMatch(source, /CollectEffective\s*!=\s*"off"/)
   const workflow = readFileSync(new URL('../.github/workflows/destination-load.yml', import.meta.url), 'utf8')
   assert.match(workflow, /idle-cost:/)
   assert.match(workflow, /\^TestNativeDestinationIdleCost\$/)
