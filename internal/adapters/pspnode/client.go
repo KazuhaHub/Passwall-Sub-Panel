@@ -193,6 +193,14 @@ func (c *Client) GetClient(ctx context.Context, email string) (*ports.ClientDeta
 	if email == "" {
 		return nil, errors.New("GetClient: email is required")
 	}
+	if reader, ok := c.reader.(ports.NativePanelClientSnapshotReader); ok {
+		detail, err := reader.NativePanelClientSnapshot(ctx, c.panelID, email)
+		if err != nil || detail == nil {
+			return nil, err
+		}
+		copy := cloneClientDetail(*detail)
+		return &copy, nil
+	}
 	snapshot, err := c.snapshot(ctx)
 	if err != nil {
 		return nil, err

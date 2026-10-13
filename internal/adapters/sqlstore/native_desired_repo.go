@@ -18,11 +18,27 @@ import (
 type nativeDesiredRepo struct{ db *gorm.DB }
 
 func (r *nativeDesiredRepo) Load(ctx context.Context, panelID int64) (*ports.NativeDesiredSnapshot, error) {
+	return r.load(ctx, panelID, nil)
+}
+
+func (r *nativeDesiredRepo) LoadClient(ctx context.Context, panelID int64, email string) (*ports.NativeDesiredSnapshot, error) {
+	if email == "" {
+		return nil, errors.New("load native desired client snapshot: email required")
+	}
+	return r.load(ctx, panelID, &email)
+}
+
+func (r *nativeDesiredRepo) load(ctx context.Context, panelID int64, email *string) (*ports.NativeDesiredSnapshot, error) {
 	if panelID == 0 {
 		return nil, errors.New("load native desired snapshot: panel ID required")
 	}
 	result := &ports.NativeDesiredSnapshot{}
-	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	db := r.db.WithContext(ctx)
+	if email != nil {
+		// A lookup must not put its email in slow/error/debug SQL logs.
+		db = db.Session(&gorm.Session{Logger: redactParams{db.Logger}})
+	}
+	err := db.Transaction(func(tx *gorm.DB) error {
 		var nodeRows []nodeRow
 		if err := tx.Where("panel_id = ?", panelID).Order("id").Find(&nodeRows).Error; err != nil {
 			return err
@@ -37,8 +53,23 @@ func (r *nativeDesiredRepo) Load(ctx context.Context, panelID int64) (*ports.Nat
 		}
 
 		var clientRows []pspClientRow
-		if err := tx.Where("panel_id = ?", panelID).Order("id").Find(&clientRows).Error; err != nil {
+		query := tx.Where("panel_id = ?", panelID)
+		if email != nil {
+			query = query.Where("email = ?", *email)
+		}
+		if err := query.Order("id").Find(&clientRows).Error; err != nil {
 			return err
+		}
+		if email != nil {
+			// Preserve the facade's byte identity under case/accent-insensitive
+			// MySQL collations; never normalize a credential lookup.
+			exact := clientRows[:0]
+			for _, row := range clientRows {
+				if row.Email == *email {
+					exact = append(exact, row)
+				}
+			}
+			clientRows = exact
 		}
 		result.Clients = make([]ports.NativeDesiredClient, len(clientRows))
 		if len(clientRows) == 0 {
@@ -75,3 +106,4 @@ func (r *nativeDesiredRepo) Load(ctx context.Context, panelID int64) (*ports.Nat
 }
 
 var _ ports.NativeDesiredSnapshotRepo = (*nativeDesiredRepo)(nil)
+var _ ports.NativeDesiredClientSnapshotRepo = (*nativeDesiredRepo)(nil)

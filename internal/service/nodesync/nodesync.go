@@ -1362,6 +1362,26 @@ func saturatingSub(limit, used int64) int64 {
 // live agent. A partial report never turns absent enumerations into deletion
 // or zero traffic, and stale bytes never remain readable indefinitely.
 func (s *Service) NativePanelSnapshot(ctx context.Context, panelID int64) (*ports.NativePanelSnapshot, error) {
+	return s.nativePanelSnapshot(ctx, panelID, "")
+}
+
+func (s *Service) NativePanelClientSnapshot(ctx context.Context, panelID int64, email string) (*ports.ClientDetail, error) {
+	if email == "" {
+		return nil, errors.New("native panel client snapshot: email required")
+	}
+	snapshot, err := s.nativePanelSnapshot(ctx, panelID, email)
+	if err != nil {
+		return nil, err
+	}
+	detail, ok := snapshot.Clients[email]
+	if !ok {
+		return nil, nil
+	}
+	detail.InboundIDs = append([]int(nil), detail.InboundIDs...)
+	return &detail, nil
+}
+
+func (s *Service) nativePanelSnapshot(ctx context.Context, panelID int64, email string) (*ports.NativePanelSnapshot, error) {
 	agent, err := s.agents.GetByPanelID(ctx, panelID)
 	if err != nil {
 		return nil, err
@@ -1394,7 +1414,12 @@ func (s *Service) NativePanelSnapshot(ctx context.Context, panelID int64) (*port
 	if fullReportStale(receivedAtMS, now, fullFreshnessSeconds) {
 		return nil, ports.ErrNativePanelSnapshotStale
 	}
-	desired, err := s.desired.Load(ctx, panelID)
+	var desired *ports.NativeDesiredSnapshot
+	if reader, ok := s.desired.(ports.NativeDesiredClientSnapshotRepo); ok && email != "" {
+		desired, err = reader.LoadClient(ctx, panelID, email)
+	} else {
+		desired, err = s.desired.Load(ctx, panelID)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -1550,3 +1575,4 @@ func containsInt(items []int, want int) bool {
 }
 
 var _ ports.NativePanelSnapshotReader = (*Service)(nil)
+var _ ports.NativePanelClientSnapshotReader = (*Service)(nil)

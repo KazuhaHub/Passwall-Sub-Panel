@@ -708,6 +708,13 @@ type NativeDesiredSnapshotRepo interface {
 	Load(ctx context.Context, panelID int64) (*NativeDesiredSnapshot, error)
 }
 
+// NativeDesiredClientSnapshotRepo optionally narrows a compatibility read to
+// one exact email, retaining the nodes and attachments in the same transaction.
+// All matching stable rows are retained because email is not a unique key.
+type NativeDesiredClientSnapshotRepo interface {
+	LoadClient(ctx context.Context, panelID int64, email string) (*NativeDesiredSnapshot, error)
+}
+
 // NodeHostMetricRepo persists and reads node host telemetry.
 //
 // ONE PORT FOR ALL FOUR TABLES, deliberately. The latest snapshot, the minute

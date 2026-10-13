@@ -354,6 +354,12 @@ type NativePanelSnapshotReader interface {
 	NativePanelSnapshot(ctx context.Context, panelID int64) (*NativePanelSnapshot, error)
 }
 
+// NativePanelClientSnapshotReader optionally avoids projecting every client
+// for a single GetClient call. The same observation and freshness gates apply.
+type NativePanelClientSnapshotReader interface {
+	NativePanelClientSnapshot(ctx context.Context, panelID int64, email string) (*ClientDetail, error)
+}
+
 // AsynchronousApplier marks an adapter whose successful imperative write means
 // "intent is recorded" rather than "runtime already applied it". Native node
 // documents converge on a later agent round trip, so node services keep their

@@ -426,6 +426,9 @@ func TestSyncMintsDocumentsThenIngestsAppliedObservation(t *testing.T) {
 	if _, err := service.NativePanelSnapshot(ctx, agent.PanelID); !errors.Is(err, ports.ErrNativePanelSnapshotMissing) || !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("missing full report error = %v", err)
 	}
+	if _, err := service.NativePanelClientSnapshot(ctx, agent.PanelID, "fixture@psp"); !errors.Is(err, ports.ErrNativePanelSnapshotMissing) {
+		t.Fatal("scoped lookup bypassed the missing-full-report gate")
+	}
 
 	first, err := service.Sync(ctx, nodeprotocol.NodeReport{
 		AgentID: agent.AgentID, ProtocolVersion: nodeprotocol.ProtocolVersion1,
@@ -508,6 +511,10 @@ func TestSyncMintsDocumentsThenIngestsAppliedObservation(t *testing.T) {
 	if detail := panelView.Clients[client.Email]; detail.ID != client.UUID || len(detail.InboundIDs) != 1 {
 		t.Fatalf("quota-closed applied identity missing from native panel view: %+v", detail)
 	}
+	clientView, err := service.NativePanelClientSnapshot(ctx, 9, client.Email)
+	if err != nil || clientView == nil || clientView.ID != panelView.Clients[client.Email].ID || len(clientView.InboundIDs) != 1 || clientView.InboundIDs[0] != panelView.Clients[client.Email].InboundIDs[0] {
+		t.Fatal("scoped quota-closed observation differs from full facade")
+	}
 
 	haveAfterClosed := make(map[string]nodeprotocol.StreamState, len(have))
 	for stream, state := range have {
@@ -539,6 +546,9 @@ func TestSyncMintsDocumentsThenIngestsAppliedObservation(t *testing.T) {
 	currentNow = now.Add(46 * time.Second)
 	if _, err := service.NativePanelSnapshot(ctx, agent.PanelID); !errors.Is(err, ports.ErrNativePanelAgentOffline) || !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("offline agent snapshot error = %v", err)
+	}
+	if _, err := service.NativePanelClientSnapshot(ctx, agent.PanelID, "fixture@psp"); !errors.Is(err, ports.ErrNativePanelAgentOffline) {
+		t.Fatal("scoped lookup bypassed durable liveness")
 	}
 	staleHave := make(map[string]nodeprotocol.StreamState, len(have))
 	for stream, state := range have {
@@ -584,6 +594,9 @@ func TestSyncMintsDocumentsThenIngestsAppliedObservation(t *testing.T) {
 	currentNow = now.Add(61 * time.Second)
 	if _, err := service.NativePanelSnapshot(ctx, 9); !errors.Is(err, ports.ErrNativePanelSnapshotStale) || !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("stale full report remained readable: %v", err)
+	}
+	if _, err := service.NativePanelClientSnapshot(ctx, 9, "fixture@psp"); !errors.Is(err, ports.ErrNativePanelSnapshotStale) {
+		t.Fatal("scoped lookup bypassed full-enumeration freshness")
 	}
 	currentNow = now
 	issues, total, err := repos.NodeAgentIssue.List(ctx, ports.NodeAgentIssueFilter{})
