@@ -581,6 +581,19 @@ type NodeAgentRepo interface {
 	RecordApplied(ctx context.Context, agentID string, stream domain.NodeAgentStreamName, epoch, version uint64, etag string, seenAt time.Time) error
 }
 
+type NodeAgentStreamApplied struct {
+	Stream         domain.NodeAgentStreamName
+	Epoch, Version uint64
+	ETag           string
+}
+
+// NodeAgentAppliedBatchRepo optionally records one report's stream receipts
+// under one owner lock and returns the issuer documents read by that transaction.
+// Failure commits neither the heartbeat nor any receipt. The scalar port remains.
+type NodeAgentAppliedBatchRepo interface {
+	RecordAppliedBatch(context.Context, string, []NodeAgentStreamApplied, time.Time) ([]*domain.NodeAgentStream, error)
+}
+
 // NativeAgentProvisioningRepo atomically creates and retires the local panel
 // identity plus its one native agent. Authentication uses only the digest;
 // recoverable credentials cross this narrow admin-only boundary, never the

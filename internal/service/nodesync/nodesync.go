@@ -572,23 +572,47 @@ func (s *Service) ingestReport(ctx context.Context, agent *domain.NodeAgent, sna
 		return fmt.Errorf("nodesync: record agent issues: %w", err)
 	}
 	streams := make(map[string]*domain.NodeAgentStream, 3)
-	for _, item := range []struct {
+	streamNames := []struct {
 		wire string
 		db   domain.NodeAgentStreamName
 	}{
 		{nodeprotocol.StreamConfig, domain.NodeAgentStreamConfig},
 		{nodeprotocol.StreamRoster, domain.NodeAgentStreamRoster},
 		{nodeprotocol.StreamDirectives, domain.NodeAgentStreamDirectives},
-	} {
-		stream, err := s.agents.GetStream(ctx, agent.AgentID, item.db)
-		if err != nil {
-			return fmt.Errorf("nodesync: load %s state: %w", item.wire, err)
+	}
+	if batch, ok := s.agents.(ports.NodeAgentAppliedBatchRepo); ok {
+		receipts := make([]ports.NodeAgentStreamApplied, 0, len(streamNames))
+		for _, item := range streamNames {
+			have := report.Have[item.wire]
+			receipts = append(receipts, ports.NodeAgentStreamApplied{Stream: item.db, Epoch: have.Applied.Epoch, Version: have.Applied.Version, ETag: string(have.ETag)})
 		}
-		streams[item.wire] = stream
-		have := report.Have[item.wire]
-		if err := s.agents.RecordApplied(ctx, agent.AgentID, item.db,
-			have.Applied.Epoch, have.Applied.Version, string(have.ETag), now); err != nil {
-			return fmt.Errorf("nodesync: record %s applied: %w", item.wire, err)
+		documents, err := batch.RecordAppliedBatch(ctx, agent.AgentID, receipts, now)
+		if err != nil {
+			return fmt.Errorf("nodesync: record stream receipts: %w", err)
+		}
+		for _, document := range documents {
+			if document == nil || document.AgentID != agent.AgentID || !document.Stream.Valid() || streams[string(document.Stream)] != nil {
+				return errors.New("nodesync: invalid stream receipt issuer documents")
+			}
+			streams[string(document.Stream)] = document
+		}
+		for _, item := range streamNames {
+			if streams[item.wire] == nil {
+				return fmt.Errorf("nodesync: missing %s issuer document", item.wire)
+			}
+		}
+	} else {
+		for _, item := range streamNames {
+			stream, err := s.agents.GetStream(ctx, agent.AgentID, item.db)
+			if err != nil {
+				return fmt.Errorf("nodesync: load %s state: %w", item.wire, err)
+			}
+			streams[item.wire] = stream
+			have := report.Have[item.wire]
+			if err := s.agents.RecordApplied(ctx, agent.AgentID, item.db,
+				have.Applied.Epoch, have.Applied.Version, string(have.ETag), now); err != nil {
+				return fmt.Errorf("nodesync: record %s applied: %w", item.wire, err)
+			}
 		}
 	}
 	if report.Partial {
