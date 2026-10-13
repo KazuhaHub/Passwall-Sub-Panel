@@ -435,11 +435,15 @@ func nativeMixedLoad(t *testing.T, f destinationPolicyFixture, client *http.Clie
 		}
 	}()
 	defer func() { cancel(); <-queueDone }()
-	for tick := 0; tick < 900; tick++ {
-		if delay := time.Until(start.Add(time.Duration(tick) * 100 * time.Millisecond)); delay > 0 {
+	// Keep the same per-lane rates and total identities, but spread the owned
+	// producer over 10ms slices. A 330-request FIFO burst every 100ms favours
+	// the first lanes and can push the later lanes across a second boundary.
+	// Actual completion-window gates remain unchanged.
+	for tick := 0; tick < 9000; tick++ {
+		if delay := time.Until(start.Add(time.Duration(tick) * 10 * time.Millisecond)); delay > 0 {
 			time.Sleep(delay)
 		}
-		for kind, count := range []int{80, 40, 110, 100} {
+		for kind, count := range []int{8, 4, 11, 10} {
 			for n := 0; n < count; n++ {
 				select {
 				case jobs <- job{kind, tick*count + n}:
@@ -448,9 +452,9 @@ func nativeMixedLoad(t *testing.T, f destinationPolicyFixture, client *http.Clie
 				}
 			}
 		}
-		if tick%10 == 0 {
+		if tick%100 == 0 {
 			live()
-			host := name(4, tick/10)
+			host := name(4, tick/100)
 			if nativeVLESSHost(t.Context(), inbound, host, controlPort, f.user.UUID, controlNonce, host) != nil {
 				failures.Add(1)
 			} else {
