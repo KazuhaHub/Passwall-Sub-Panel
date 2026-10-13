@@ -68,16 +68,17 @@ type nativeIdleWindow struct {
 func nativeIdleCost(t *testing.T, f destinationPolicyFixture, client *http.Client, endpoint, token string, parent int, dataDir string, inbound int, address string, port int, nonce, evidence string, ticks uint64, probe *nativeIdleCostProbe) {
 	a := f.a
 	m := struct {
-		Schema      int               `json:"schema_version"`
-		Candidate   string            `json:"candidate"`
-		Core        string            `json:"core_version"`
-		Domains     int               `json:"published_domains"`
-		Applied     int               `json:"applied_domains"`
-		CoreDomains int               `json:"core_domains"`
-		Ticks       uint64            `json:"cpu_ticks_per_second"`
-		Controls    int               `json:"control_successes"`
-		TracerBound int               `json:"tracer_bound"`
-		Cycles      []nativeIdleCycle `json:"cycles"`
+		Schema        int               `json:"schema_version"`
+		Candidate     string            `json:"candidate"`
+		Core          string            `json:"core_version"`
+		Domains       int               `json:"published_domains"`
+		Applied       int               `json:"applied_domains"`
+		CoreDomains   int               `json:"core_domains"`
+		Ticks         uint64            `json:"cpu_ticks_per_second"`
+		Controls      int               `json:"control_successes"`
+		TracerBound   int               `json:"tracer_bound"`
+		ReceiptChecks uint64            `json:"receipt_checks"`
+		Cycles        []nativeIdleCycle `json:"cycles"`
 	}{Schema: 1, Candidate: "184f4e23f0f3d72f8492432184685fea4ec4967c", Core: "26.6.27", Ticks: ticks, Cycles: []nativeIdleCycle{}}
 	t.Cleanup(func() {
 		data, err := json.Marshal(m)
@@ -128,24 +129,57 @@ func nativeIdleCost(t *testing.T, f destinationPolicyFixture, client *http.Clien
 	request("POST", "dest/publish", nil, 200, nil)
 	m.Domains = list.Count
 	nativeWait(t, 180*time.Second, "actual fifty-thousand-domain applied policy and complete streams", func() bool {
+		m.ReceiptChecks = 0
+		m.Applied = 0
 		state, e1 := a.destDefinitions.State(t.Context())
 		current, e2 := a.repos.DestAgentPolicy.Get(t.Context(), f.agent.AgentID, true)
 		agent, e3 := a.repos.NodeAgent.GetByAgentID(t.Context(), f.agent.AgentID)
-		if e1 != nil || e2 != nil || e3 != nil || current == nil || agent == nil || state.Paused || agent.ObservedCoreEngine != domain.NodeCoreXray || !nativeMutationReceiptMatches(prior, *current, state.PublishedGeneration, agent.LastSeen, after) || !nativeCollectionReceiptMatches(*current, "", uint64(panel.AuditCollectRevision)) {
-			return false
+		if e1 == nil && !state.Paused {
+			m.ReceiptChecks |= 1
+		}
+		if e2 == nil && current != nil {
+			m.ReceiptChecks |= 2
+		}
+		if e3 == nil && agent != nil {
+			m.ReceiptChecks |= 4
+		}
+		if agent != nil && agent.ObservedCoreEngine == domain.NodeCoreXray {
+			m.ReceiptChecks |= 8
+		}
+		if agent != nil && agent.Epoch == f.agent.Epoch {
+			m.ReceiptChecks |= 16
+		}
+		if agent != nil && agent.DesiredCoreEngine == domain.NodeCoreXray && agent.DesiredCoreVersion == "26.6.27" {
+			m.ReceiptChecks |= 32
+		}
+		if e1 == nil && current != nil && agent != nil && nativeMutationReceiptMatches(prior, *current, state.PublishedGeneration, agent.LastSeen, after) {
+			m.ReceiptChecks |= 64
+		}
+		if current != nil && nativeCollectionReceiptMatches(*current, "", uint64(panel.AuditCollectRevision)) {
+			m.ReceiptChecks |= 128
 		}
 		var applied protocol.DestinationPolicy
-		if json.Unmarshal(current.AppliedBody, &applied) != nil || len(applied.Rules) != 1 || applied.Rules[0].ID != fmt.Sprintf("p%d", policy.ID) || len(applied.Rules[0].Domains) != 50000 || applied.Rules[0].Action != protocol.RuleBlock {
-			return false
-		}
-		for _, name := range []domain.NodeAgentStreamName{domain.NodeAgentStreamConfig, domain.NodeAgentStreamRoster} {
-			stream, err := a.repos.NodeAgent.GetStream(t.Context(), f.agent.AgentID, name)
-			if err != nil || stream == nil || !stream.Converged() || stream.AppliedEpoch != agent.Epoch {
-				return false
+		if current != nil && json.Unmarshal(current.AppliedBody, &applied) == nil {
+			m.ReceiptChecks |= 256
+			if len(applied.Rules) == 1 && applied.Rules[0].ID == fmt.Sprintf("p%d", policy.ID) && applied.Rules[0].Action == protocol.RuleBlock {
+				m.ReceiptChecks |= 512
+			}
+			for _, rule := range applied.Rules {
+				if rule.ID == fmt.Sprintf("p%d", policy.ID) {
+					m.Applied = len(rule.Domains)
+				}
+			}
+			if m.Applied == 50000 {
+				m.ReceiptChecks |= 1024
 			}
 		}
-		m.Applied = len(applied.Rules[0].Domains)
-		return true
+		for i, name := range []domain.NodeAgentStreamName{domain.NodeAgentStreamConfig, domain.NodeAgentStreamRoster} {
+			stream, err := a.repos.NodeAgent.GetStream(t.Context(), f.agent.AgentID, name)
+			if err == nil && stream != nil && agent != nil && stream.Converged() && stream.AppliedEpoch == agent.Epoch {
+				m.ReceiptChecks |= 2048 << i
+			}
+		}
+		return m.ReceiptChecks == 8191
 	})
 	live := nativeBindLiveCore(t, parent, dataDir, "xray")
 	core := 0

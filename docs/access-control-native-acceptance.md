@@ -1205,3 +1205,12 @@ helper；原十项 Load 和 Native 矩阵保留。新增作业另存两份数值
 检查协议空值及实际关闭 revision、mint/applied/reported 摘要一致，不改变
 关闭设置、策略规模或 Node 生产行为。新增回归已先验证旧条件失败；新源
 仍须重新取得完整五万域名运行回执和测量。
+
+`e2482a0f` 修正协议关闭值后的实际 idle 原件仍在 180 秒等待阶段失败，
+尚未进入测量；旧报告无法区分余下哪个条件失败。后续数值报告增加
+`receipt_checks`，逐轮重置，位 0–12 依次代表 definitions 可读且未暂停、
+runtime 存在、agent 存在、观察引擎 Xray、epoch 一致、固定 desired core、
+因果回执、关闭采集 revision/digest 回执、applied JSON、单条准确 block 规则、
+50000 域名、config 收敛、roster 收敛。完整值必须为 8191 才进入测量，
+applied 域名数按实际读取填写；不导出原始回执、摘要、身份或私有字段。
+新增观察没有降低任何原条件，实际未满足项仍需该源运行结果定位。
