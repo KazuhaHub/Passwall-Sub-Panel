@@ -191,7 +191,13 @@ func nativeBootstrapGlobalCohort(t *testing.T, options nativeGlobalCohortOptions
 	for i, peer := range peers {
 		dataDir := filepath.Join(peer.dir, "node")
 		if i != 0 {
-			peers[0].live()
+			// Provisioning can legitimately replace the initial empty-roster
+			// core. Public cache reuse needs a current verified donor, not an
+			// idle-stability claim across deployment. Final PID binding remains
+			// below, after real member traffic and fresh paired receipts.
+			nativeWait(t, 180*time.Second, "current actual donor core for public cache reuse", func() bool {
+				return ready(peers[0]) && nativeGlobalCurrentPublicCore(peers[0].process.Process.Pid, filepath.Join(peers[0].dir, "node"))
+			})
 			nativeMust(t, nativeCopyPublicCoreCache(filepath.Join(peers[0].dir, "node"), dataDir), "reuse only the first real verified public core cache")
 			m.Copies++
 		}
@@ -230,7 +236,6 @@ func nativeBootstrapGlobalCohort(t *testing.T, options nativeGlobalCohortOptions
 		})
 		if i == 0 {
 			nativeWait(t, 180*time.Second, "first real core for audited public cache reuse", func() bool { return ready(peer) })
-			peer.live = nativeBindLiveCore(t, peer.process.Process.Pid, dataDir, "xray")
 			m.Stage = 4
 		}
 	}
@@ -309,4 +314,26 @@ func nativeBootstrapGlobalCohort(t *testing.T, options nativeGlobalCohortOptions
 	}
 	m.Stage = 9
 	return &nativeGlobalCohort{fixture: f, peers: peers, ready: ready, server: server}
+}
+
+func nativeGlobalCurrentPublicCore(parent int, dataDir string) bool {
+	// Read-only point-in-time donor proof. No signals, process replacement,
+	// synthetic version/metadata or relaxed final-cohort identity checks.
+	expected := filepath.Join(dataDir, "cores", "xray", "versions", "26.6.27", "xray")
+	file, err := os.Stat(expected)
+	if err != nil || !file.Mode().IsRegular() {
+		return false
+	}
+	count := 0
+	for _, pid := range nativeCoreChildren(parent) {
+		args := nativeCoreArgs(pid)
+		if len(args) == 0 || args[0] != expected || !nativeCoreHasParent(pid, parent) || !nativeOwnedLiveCoreCommand(args, "xray", filepath.Join(dataDir, "runtime", "xray")) {
+			continue
+		}
+		live, err := os.Stat(filepath.Join("/proc", strconv.Itoa(pid), "exe"))
+		if err == nil && os.SameFile(file, live) {
+			count++
+		}
+	}
+	return count == 1
 }

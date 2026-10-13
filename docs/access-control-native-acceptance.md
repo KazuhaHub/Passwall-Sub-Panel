@@ -1371,3 +1371,11 @@ key_saturation_complete 与 pressure_complete 必须仍为 0。它不能替代
 真实字节拒绝、键上限/Node retained dropped 过载或 §40 的 24 小时运行。
 代码及数值拒绝回归已接入；真实三个后端的运行结论仍待托管验收，合成
 数值测试和编译成功均不计作该项通过。
+
+独立验证源 `2f3b4b65` 的 SQLite bootstrap 原件在 stage4/started3 失败，
+固定诊断为 idle_core_restarted；它没有执行流量，不能记为压力失败或通过。
+此前缓存复制把首个空 roster 核心的 PID 绑定跨越了后续 provisioning，
+而生产成员同步此时可合法替换核心。复制现在逐次读取当前核心的父进程、
+准确运行命令、版本缓存路径及实际 executable inode，结合真实版本/流
+状态后再复制验证过的公共文件；最终部署后的 pidfd 稳定性检查保持不变。
+修正的真实运行仍需新源验证，失败原件保留。

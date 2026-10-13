@@ -47,3 +47,18 @@ test('global pressure reuses the checked real cohort and opts into actual Node m
   assert(source.indexOf('return &nativeGlobalCohort{fixture: f, peers: peers, ready: ready, server: server}') > source.indexOf('m.Stage = 9'))
   assert.doesNotMatch(source, /\.server\.Config\.Handler\s*=|SetSnapshot\(|\.collector\.Ack\(/)
 })
+
+test('global cache donor proves the current real executable without imposing idle PID stability during provisioning', () => {
+  const source = readFileSync(new URL('../internal/app/destination_native_global_cohort_test.go', import.meta.url), 'utf8')
+  const start = source.indexOf('dataDir := filepath.Join(peer.dir')
+  const copyStart = source.indexOf('if i != 0 {', start)
+  const copyEnd = source.indexOf('if _, err := os.Lstat(filepath.Join(dataDir, "state.db"))', copyStart)
+  const copy = source.slice(copyStart, copyEnd)
+  assert(copy.includes('ready(peers[0]) && nativeGlobalCurrentPublicCore'))
+  assert(copy.includes('nativeCopyPublicCoreCache'))
+  assert.doesNotMatch(copy, /peers\[0\]\.live\(\)/)
+  const donor = source.slice(source.indexOf('func nativeGlobalCurrentPublicCore'))
+  for (const required of ['"versions", "26.6.27", "xray"', 'args[0] != expected', 'nativeCoreHasParent(pid, parent)', 'nativeOwnedLiveCoreCommand', 'os.SameFile(file, live)', 'return count == 1']) assert(donor.includes(required))
+  const final = source.indexOf('peer.live = nativeBindLiveCore', source.indexOf('"actual global member traffic and fresh paired receipts"'))
+  assert(final > 0 && source.slice(final).includes('peer.live()'))
+})
