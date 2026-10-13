@@ -154,6 +154,7 @@ test('Docker preservation keeps each original guard while withholding private in
   const source = readFileSync(new URL('../internal/app/destination_native_docker_test.go', import.meta.url), 'utf8')
   assert.match(source, /binary\.BigEndian\.Uint64\(current\.epoch\) > binary\.BigEndian\.Uint64\(before\.epoch\)/)
   assert.match(source, /if !material \|\| !state \|\| !epoch/)
+  assert.match(source, /nativeWait\(caseTest, 3\*time\.Minute, "Docker restart production convergence and counter epoch", func\(\) bool \{\s*return converged\(nativeRemotePublishedIdentity, after\) && binary\.BigEndian\.Uint64\(m\.preserved\(caseTest\)\.epoch\) > binary\.BigEndian\.Uint64\(before\.epoch\)/)
 })
 
 test('status candidate diagnostics retain only fixed comparison facts', () => {

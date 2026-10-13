@@ -306,7 +306,12 @@ func TestNativePublishedDockerRollback(t *testing.T) {
 	run("restart_recovery", func() {
 		after := time.Now().UTC()
 		nativeDockerCommand(caseTest, "restart", m.inspect(caseTest, m.agentName).ID)
-		nativeWait(caseTest, 3*time.Minute, "Docker restart production convergence", func() bool { return converged(nativeRemotePublishedIdentity, after) })
+		// A fresh partial heartbeat can precede the restarted core's first full
+		// counter read. Keep the same deadline and require the durable epoch that
+		// assertPreserved already demands, rather than sampling it immediately.
+		nativeWait(caseTest, 3*time.Minute, "Docker restart production convergence and counter epoch", func() bool {
+			return converged(nativeRemotePublishedIdentity, after) && binary.BigEndian.Uint64(m.preserved(caseTest).epoch) > binary.BigEndian.Uint64(before.epoch)
+		})
 		if m.execution(caseTest, task.TaskID) != successful {
 			caseTest.Fatal("Docker restart changed the completed immutable execution")
 		}
