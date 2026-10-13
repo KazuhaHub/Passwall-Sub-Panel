@@ -15,7 +15,7 @@ const accessAt = i => {
 const reading = (saturated, elapsed = 0) => ({ schema_version: 2, go_heap_alloc_bytes: 10000000, go_heap_inuse_bytes: 12000000, go_heap_objects: 50000, go_goroutines: 30, access_log: accessAt(elapsed), lanes: kinds.map((kind, i) => ({ kind, keys: saturated ? [20000, 10000, 10000, 50000][i] : 0, key_limit: [20000, 10000, 10000, 50000][i], hours: 1, pending: saturated ? 1 : 0, pending_rows: saturated ? 10 : 0, pending_bytes: saturated ? 1000 : 0, retained_dropped_events: saturated ? 1000 : 0, retained_unmatched_events: 0 })) })
 const bounds = [0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 0]
 const fixture = () => ({
-  schema_version: 2, database: 'sqlite', candidate: moduleNodeCandidate.commit, core_version: '26.6.27', traffic_ms: 90000, partition_ms: 75000, native_owners: 1,
+  schema_version: 2, database: 'sqlite', reserved_loss_column_reproduced: 0, candidate: moduleNodeCandidate.commit, core_version: '26.6.27', traffic_ms: 90000, partition_ms: 75000, native_owners: 1,
   delivered: [72000, 36000, 99000, 90000], transport_failures: 0, late_delivered: 0, delivery_windows: [800,400,1100,1000].map(n => Array(90).fill(n)), control_successes: 90, user_deliveries: Array(200).fill(495), target_requests: [36000, 189000, 0],
   partition_sync_failures: 8, recovered_sync_successes: 20, frozen_transmissions: [4, 1, 1, 1], verified_canonical_retries: [1, 1, 1, 1],
   queue_reads: 12000, queue_bound_violations: 0, max_total_batches: 4, max_total_canonical_bytes: 4000, queue_peaks: queue(true),
@@ -62,6 +62,7 @@ test('mixed gate needs same-window simultaneous caps, four canonical retries and
     r => { r.node_samples[0].reading.email = 'private' }, r => { r.ledgers[0].destinations = ['private'] },
     r => { r.observation_ms = 89999 }, r => { r.traffic_ms = 89000 },
     r => { r.schema_version = 1 }, r => { r.node_samples[0].reading.schema_version = 1 },
+    r => { r.reserved_loss_column_reproduced = 1 },
     r => { r.access_ingress.allowed_received++ }, r => { r.access_ingress.allowed_not_received-- },
     r => { r.access_ingress.after.private_lines++ }, r => { r.access_ingress.after.stale_events++ },
     r => { r.access_ingress.after.parse_queued = 1 }, r => { r.access_ingress.after.pending_dropped = 1 },
@@ -90,7 +91,9 @@ test('mixed evidence sanitization preserves the independent root and rejects ski
 test('mixed integration binds each original to the selected owned SQL backend', () => {
   for (const database of ['sqlite', 'mysql', 'postgres']) {
     const report = fixture(); report.database = database
+    report.reserved_loss_column_reproduced = database === 'mysql' ? 1 : 0
     assert.equal(checkDestinationMixedPressureEvidence(evidence(), JSON.stringify(report), database).database, database)
+    if (database === 'mysql') { const missing = structuredClone(report); missing.reserved_loss_column_reproduced = 0; assert.throws(() => checkDestinationMixedPressureMetrics(JSON.stringify(missing), database)) }
     for (const wrong of ['sqlite', 'mysql', 'postgres', 'foreign'].filter(kind => kind !== database)) assert.throws(() => checkDestinationMixedPressureMetrics(JSON.stringify(report), wrong))
   }
 })

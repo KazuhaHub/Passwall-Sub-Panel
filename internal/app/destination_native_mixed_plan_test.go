@@ -12,6 +12,26 @@ var nativeMixedKinds = [4]string{"block", "observe", "trial", "usage"}
 var nativeMixedKeyLimits = [4]int{20000, 10000, 10000, 50000}
 var nativeMixedJournalPrefix = regexp.MustCompile(`^\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2}\.\d{6} \[Info\] passwall-node: audit_pressure=`)
 
+// ROWS is reserved by MySQL 8. Qualified columns work on all three backends;
+// parameters are still bound independently by nativeDestinationCountSQL.
+const nativeMixedLossSQL = "SELECT reason,SUM(dest_audit_loss_hourly.rows),SUM(events),SUM(unmatched) FROM dest_audit_loss_hourly WHERE panel_id=? AND kind=? GROUP BY reason ORDER BY reason"
+
+func TestNativeMixedLossQueryPreservesReservedColumnsAndBoundParameters(t *testing.T) {
+	for _, database := range []string{"sqlite", "mysql", "postgres"} {
+		query := nativeDestinationCountSQL(database, nativeMixedLossSQL)
+		if !bytes.Contains([]byte(query), []byte("SUM(dest_audit_loss_hourly.rows)")) || bytes.Contains([]byte(query), []byte("SUM(rows)")) {
+			t.Fatal("reserved loss column escaped its qualified identifier")
+		}
+		if database == "postgres" {
+			if !bytes.Contains([]byte(query), []byte("panel_id=$1 AND kind=$2")) {
+				t.Fatal("loss assertion lost PostgreSQL bound parameters")
+			}
+		} else if !bytes.Contains([]byte(query), []byte("panel_id=? AND kind=?")) {
+			t.Fatal("loss assertion lost bound parameters")
+		}
+	}
+}
+
 type nativeMixedNodeLane struct {
 	Kind         string `json:"kind"`
 	Keys         int    `json:"keys"`

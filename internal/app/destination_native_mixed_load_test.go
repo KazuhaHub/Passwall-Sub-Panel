@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -21,6 +22,7 @@ import (
 
 	"github.com/KazuhaHub/passwall-protocol/protocol"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/destaudit"
+	mysqldriver "github.com/go-sql-driver/mysql"
 )
 
 type nativeMixedSetup struct{ observePort int }
@@ -184,6 +186,7 @@ type nativeMixedLedger struct {
 type nativeMixedMetrics struct {
 	Schema          int                       `json:"schema_version"`
 	Database        string                    `json:"database"`
+	ReservedProbe   int                       `json:"reserved_loss_column_reproduced"`
 	Candidate       string                    `json:"candidate"`
 	CoreVersion     string                    `json:"core_version"`
 	Duration        int64                     `json:"traffic_ms"`
@@ -263,6 +266,21 @@ func nativeMixedLoad(t *testing.T, f destinationPolicyFixture, client *http.Clie
 		nativeMust(t, err, "encode numeric mixed load evidence")
 		nativeMust(t, os.WriteFile(evidence, append(data, '\n'), 0644), "save owned numeric mixed load evidence")
 	})
+	if m.Database == "mysql" {
+		// Reproduce the old assertion's exact syntax failure against this
+		// disposable actual MySQL before traffic. Export only a numeric receipt.
+		var total int64
+		err := a.database.QueryRowContext(t.Context(), "SELECT COALESCE(SUM(rows),0) FROM dest_audit_loss_hourly").Scan(&total)
+		var syntax *mysqldriver.MySQLError
+		if !errors.As(err, &syntax) || syntax.Number != 1064 {
+			t.Fatal("owned MySQL did not reproduce the old reserved-column assertion")
+		}
+		nativeMust(t, a.database.QueryRowContext(t.Context(), "SELECT COALESCE(SUM(dest_audit_loss_hourly.rows),0) FROM dest_audit_loss_hourly").Scan(&total), "verify owned MySQL qualified loss assertion")
+		if total != 0 {
+			t.Fatal("reserved-column reproduction lacks an empty owned baseline")
+		}
+		m.ReservedProbe = 1
+	}
 	_, observeAddress, observePort, observeNonce, observeReached := nativeTargetAtPort(t, nativePort(t))
 	if targetPort == observePort || controlPort == observePort {
 		t.Fatal("mixed observe policy selected another lane's numeric port")
@@ -503,7 +521,7 @@ func nativeMixedLoad(t *testing.T, f destinationPolicyFixture, client *http.Clie
 				nativeMust(t, a.database.QueryRowContext(t.Context(), sql("SELECT COUNT(*),COALESCE(SUM(count),0),COALESCE(SUM(CASE WHEN source LIKE 'g%' AND (user_id<>0 OR port<>0) THEN 1 ELSE 0 END),0) FROM dest_hits WHERE "+where), args...).Scan(&ledger.StoredRows, &ledger.StoredEvents, &ledger.Identified), "read actual mixed hit ledger")
 			}
 			nativeMust(t, a.database.QueryRowContext(t.Context(), sql("SELECT COALESCE(MAX(rows_reserved),0) FROM dest_audit_ingest_budget WHERE agent_id=? AND kind=?"), f.agent.AgentID, kind).Scan(&ledger.Budget), "read mixed hourly reservation")
-			rows, err := a.database.QueryContext(t.Context(), sql("SELECT reason,SUM(rows),SUM(events),SUM(unmatched) FROM dest_audit_loss_hourly WHERE panel_id=? AND kind=? GROUP BY reason ORDER BY reason"), f.agent.PanelID, kind)
+			rows, err := a.database.QueryContext(t.Context(), sql(nativeMixedLossSQL), f.agent.PanelID, kind)
 			nativeMust(t, err, "read mixed categorized losses")
 			accounted := ledger.StoredEvents
 			for rows.Next() {
