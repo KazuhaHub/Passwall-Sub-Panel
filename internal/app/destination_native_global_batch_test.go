@@ -156,7 +156,14 @@ func TestNativeDestinationGlobalBatchPressure(t *testing.T) {
 	}
 	m.Stage = 2
 	writeMetrics()
+	readiness := "state"
+	t.Cleanup(func() {
+		if m.Stage == 2 {
+			t.Log("global batch readiness: " + readiness)
+		}
+	})
 	nativeWait(t, 240*time.Second, "all real global trial policies and 200-user paired rosters", func() bool {
+		readiness = "state"
 		state, err := a.destDefinitions.State(t.Context())
 		if err != nil || state.Paused {
 			return false
@@ -166,11 +173,29 @@ func TestNativeDestinationGlobalBatchPressure(t *testing.T) {
 			agent, e2 := a.repos.NodeAgent.GetByAgentID(t.Context(), peer.agent.AgentID)
 			panel, e3 := a.repos.XUIPanel.GetByID(t.Context(), peer.agent.PanelID)
 			roster, e4 := a.repos.NodeAgent.GetStream(t.Context(), peer.agent.AgentID, domain.NodeAgentStreamRoster)
-			if e1 != nil || e2 != nil || e3 != nil || e4 != nil || p == nil || agent == nil || panel == nil || roster == nil || !slicesContainsNative(agent.ObservedCapabilities, protocol.CapabilityAuditUsage) || !cohort.ready(peer) || !nativeMutationReceiptMatches(prior[i], *p, state.PublishedGeneration, agent.LastSeen, afterMutation) || !nativeCollectionReceiptMatches(*p, protocol.CollectLevel("hits_and_usage"), uint64(panel.AuditCollectRevision)) {
+			readiness = "store"
+			if e1 != nil || e2 != nil || e3 != nil || e4 != nil || p == nil || agent == nil || panel == nil || roster == nil {
+				return false
+			}
+			readiness = "capability"
+			if !slicesContainsNative(agent.ObservedCapabilities, protocol.CapabilityAuditUsage) {
+				return false
+			}
+			readiness = "streams"
+			if !cohort.ready(peer) {
+				return false
+			}
+			readiness = "receipt"
+			if !nativeMutationReceiptMatches(prior[i], *p, state.PublishedGeneration, agent.LastSeen, afterMutation) {
+				return false
+			}
+			readiness = "collection"
+			if !nativeCollectionReceiptMatches(*p, protocol.CollectLevel("hits_and_usage"), uint64(panel.AuditCollectRevision)) {
 				return false
 			}
 			var body protocol.DestinationPolicy
 			var members protocol.RosterBody
+			readiness = "shape"
 			if json.Unmarshal(p.MintedBody, &body) != nil || json.Unmarshal(roster.DesiredBody, &members) != nil || len(body.Rules) != 3 {
 				return false
 			}
@@ -197,7 +222,12 @@ func TestNativeDestinationGlobalBatchPressure(t *testing.T) {
 					}
 				}
 			}
-			if !trial || !seen[protocol.NewSubjectKey(f.user.ID)] {
+			readiness = "subjects"
+			if !trial {
+				return false
+			}
+			readiness = "roster"
+			if !seen[protocol.NewSubjectKey(f.user.ID)] {
 				return false
 			}
 			for _, user := range users {
@@ -206,6 +236,7 @@ func TestNativeDestinationGlobalBatchPressure(t *testing.T) {
 				}
 			}
 		}
+		readiness = "complete"
 		return true
 	})
 	const seconds, rate = 120, 10

@@ -41,6 +41,20 @@ test('published Docker rollback requires real policy, automatic recovery and bot
   for (const required of [acceptance.remoteNodeCandidate.commit, 'ubuntu-24.04', 'ubuntu-24.04-arm', 'Dockerfile.release', 'PSP_NATIVE_DOCKER_IMAGE', 'TestNativePublishedDockerRollback', 'check-docker-upgrade', 'native-published-docker-${{ matrix.arch }}']) assert(job.includes(required), required)
 })
 
+test('global readiness failures disclose only closed guard categories', async () => {
+  const { isSafeDestinationDiagnostic } = await import('./destination-acceptance.mjs')
+  const Package = 'github.com/KazuhaHub/passwall-sub-panel/internal/app'
+  const Test = 'TestNativeDestinationGlobalBatchPressure'
+  for (const reason of ['state', 'store', 'capability', 'streams', 'receipt', 'collection', 'shape', 'subjects', 'roster', 'complete']) {
+    const result = sanitizeDestinationResults(encode([{ Action: 'output', Package, Test, Output: 'private-path:4: global batch readiness: ' + reason + '; credential=secret host=private-host' }]))
+    const event = JSON.parse(result)
+    assert.deepEqual(event, { Action: 'output', Package, Test, Diagnostic: 'global_batch_readiness_' + reason })
+    assert(isSafeDestinationDiagnostic(event))
+    for (const privateValue of ['private-path', 'secret', 'private-host', 'Output']) assert(!result.includes(privateValue))
+  }
+  assert.equal(sanitizeDestinationResults(encode([{ Action: 'output', Package, Test, Output: 'global batch readiness: private-unknown' }])).trim(), '')
+})
+
 test('Docker recovery diagnostics retain fixed categories without task or credential output', () => {
   const pkg = 'github.com/KazuhaHub/passwall-sub-panel/internal/app'
   const Test = 'TestNativePublishedDockerRollback/health_failure_restore'
