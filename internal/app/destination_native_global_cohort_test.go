@@ -33,11 +33,33 @@ type nativeGlobalPeer struct {
 	process *exec.Cmd
 	output  *nativePrivateOutput
 	live    func()
+	probe   *nativeMixedProbe
+}
+
+type nativeGlobalCohortOptions struct {
+	decorate     func(ports.DestAuditStore) ports.DestAuditStore
+	auditMetrics bool
+	transport    func(http.Handler, []*nativeGlobalPeer) http.Handler
+}
+
+type nativeGlobalCohort struct {
+	fixture destinationPolicyFixture
+	peers   []*nativeGlobalPeer
+	ready   func(*nativeGlobalPeer) bool
+	server  *httptest.Server
 }
 
 // Bootstrap prerequisite only. It proves 65 independently authenticated real
 // daemons/cores and their membership/streams; it does not claim queue overload.
 func TestNativeDestinationGlobalCohortBootstrap(t *testing.T) {
+	_ = nativeBootstrapGlobalCohort(t, nativeGlobalCohortOptions{})
+}
+
+// Keep one actual provisioning/cache/membership path for the subsequent global
+// pressure driver. Every returned process, stream and private state has already
+// passed the original bootstrap checks, and all cleanup remains owned by t.
+func nativeBootstrapGlobalCohort(t *testing.T, options nativeGlobalCohortOptions) *nativeGlobalCohort {
+	t.Helper()
 	binary, evidence := os.Getenv("PSP_NATIVE_NODE_BIN"), os.Getenv("PSP_NATIVE_LOAD_METRICS")
 	root, e1 := filepath.EvalSymlinks(os.Getenv("RUNNER_TEMP"))
 	dir, e2 := filepath.EvalSymlinks(filepath.Dir(evidence))
@@ -45,7 +67,7 @@ func TestNativeDestinationGlobalCohortBootstrap(t *testing.T) {
 	if e1 != nil || e2 != nil || root != dir || filepath.Base(evidence) != "destination-global-bootstrap-metrics.json" || !filepath.IsAbs(binary) || filepath.Base(binary) != "destination-node" || err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0022 != 0 || os.Getenv("PSP_NATIVE_CORE_VERSION") != "26.6.27" {
 		t.Fatal("global bootstrap requires the immutable hosted candidate and owned evidence")
 	}
-	f := buildNativeDestinationPolicyFixture(t)
+	f := buildNativeDestinationPolicyFixtureWithAuditStore(t, options.decorate)
 	a := f.a
 	gate, err := newNativeGlobalAuditStart(a.destAudit)
 	nativeMust(t, err, "bind actual global audit runner")
@@ -109,6 +131,9 @@ func TestNativeDestinationGlobalCohortBootstrap(t *testing.T) {
 			peer.node.ObservedPort = peer.node.DesiredPort
 			nativeMust(t, a.repos.Node.Update(t.Context(), peer.node), "configure first actual global inbound")
 		}
+		if options.auditMetrics {
+			peer.probe = newNativeMixedProbe(peer.agent.AgentID)
+		}
 		peers[i] = peer
 	}
 	m.Stage = 2
@@ -139,7 +164,11 @@ func TestNativeDestinationGlobalCohortBootstrap(t *testing.T) {
 		return response.StatusCode == 200
 	})
 	m.Stage = 3
-	server := httptest.NewTLSServer(a.server.Handler)
+	handler := a.server.Handler
+	if options.transport != nil {
+		handler = options.transport(handler, peers)
+	}
+	server := httptest.NewTLSServer(handler)
 	t.Cleanup(server.Close)
 	ca := filepath.Join(t.TempDir(), "ca.pem")
 	nativeMust(t, os.WriteFile(ca, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: server.Certificate().Raw}), 0600), "write private scoped global CA")
@@ -174,6 +203,11 @@ func TestNativeDestinationGlobalCohortBootstrap(t *testing.T) {
 		peer.process = exec.Command(binary, "--endpoint", server.URL+"/v1/node/sync", "--agent-id", peer.agent.AgentID, "--credential-file", key, "--data-dir", dataDir, "--xray-api-listen", net.JoinHostPort("127.0.0.1", strconv.Itoa(port())))
 		peer.process.Env = append(os.Environ(), "SSL_CERT_FILE="+ca)
 		peer.process.Stdout, peer.process.Stderr = peer.output, peer.output
+		if options.auditMetrics {
+			peer.process.Args = append(peer.process.Args, "--audit-metrics")
+			reading := &nativeMixedOutput{private: peer.output, probe: peer.probe}
+			peer.process.Stdout, peer.process.Stderr = reading, reading
+		}
 		nativeMust(t, peer.process.Start(), "start independent real global daemon")
 		m.Started++
 		done := make(chan error, 1)
@@ -274,4 +308,5 @@ func TestNativeDestinationGlobalCohortBootstrap(t *testing.T) {
 		peer.live()
 	}
 	m.Stage = 9
+	return &nativeGlobalCohort{fixture: f, peers: peers, ready: ready, server: server}
 }

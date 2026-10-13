@@ -35,3 +35,15 @@ test('global cohort bootstrap uses independent actual processes and binds after 
   assert.match(job, /PSP_NATIVE_CORE_VERSION=26\.6\.27/)
   assert.match(job, /name: \$\{\{ matrix\.evidence_prefix \}\}-\$\{\{ github\.sha \}\}/)
 })
+
+test('global pressure reuses the checked real cohort and opts into actual Node metrics', () => {
+  const source = readFileSync(new URL('../internal/app/destination_native_global_cohort_test.go', import.meta.url), 'utf8')
+  assert(source.includes('nativeBootstrapGlobalCohort(t, nativeGlobalCohortOptions{})'))
+  assert(source.includes('buildNativeDestinationPolicyFixtureWithAuditStore(t, options.decorate)'))
+  assert(source.includes('if options.auditMetrics {') && source.includes('newNativeMixedProbe(peer.agent.AgentID)'))
+  assert(source.includes('peer.process.Args = append(peer.process.Args, "--audit-metrics")'))
+  assert(source.includes('nativeMixedOutput{private: peer.output, probe: peer.probe}'))
+  assert(source.indexOf('handler = options.transport(handler, peers)') < source.indexOf('httptest.NewTLSServer(handler)'))
+  assert(source.indexOf('return &nativeGlobalCohort{fixture: f, peers: peers, ready: ready, server: server}') > source.indexOf('m.Stage = 9'))
+  assert.doesNotMatch(source, /\.server\.Config\.Handler\s*=|SetSnapshot\(|\.collector\.Ack\(/)
+})
