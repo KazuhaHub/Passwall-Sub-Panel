@@ -348,13 +348,15 @@ func nativeMixedLoad(t *testing.T, f destinationPolicyFixture, client *http.Clie
 	probe.mu.Unlock()
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
+	controlCtx, cancelControls := context.WithDeadline(ctx, start.Add(90*time.Second))
+	defer cancelControls()
 	type job struct{ kind, seq int }
 	jobs := make(chan job, 2048)
 	var wg sync.WaitGroup
 	var delivered [4]atomic.Uint64
 	var windows [4][90]atomic.Uint64
 	var perUser [200]atomic.Uint64
-	var failures, late atomic.Uint64
+	var failures, late, controls atomic.Uint64
 	var closeJobs sync.Once
 	defer func() { cancel(); closeJobs.Do(func() { close(jobs) }); wg.Wait() }()
 	for range 768 {
@@ -362,6 +364,15 @@ func nativeMixedLoad(t *testing.T, f destinationPolicyFixture, client *http.Clie
 		go func() {
 			defer wg.Done()
 			for j := range jobs {
+				if j.kind == 4 {
+					host := name(4, j.seq)
+					if nativeVLESSHost(controlCtx, inbound, host, controlPort, f.user.UUID, controlNonce, host) != nil || time.Since(start) >= 90*time.Second {
+						failures.Add(1)
+					} else {
+						controls.Add(1)
+					}
+					continue
+				}
 				if j.kind == 0 {
 					header, err := nativeVLESSRequest(f.user.UUID, blockAddress, blockPort, fmt.Sprintf("mixed-block-%s-%07d.test", nonce, j.seq))
 					if err != nil || !nativeLoadBlockedRequest(ctx, inbound, header, func() {}) {
@@ -458,11 +469,12 @@ func nativeMixedLoad(t *testing.T, f destinationPolicyFixture, client *http.Clie
 		}
 		if tick%100 == 0 {
 			live()
-			host := name(4, tick/100)
-			if nativeVLESSHost(t.Context(), inbound, host, controlPort, f.user.UUID, controlNonce, host) != nil {
+			// A real control reply must not stop all four traffic producers.
+			// It uses the same bounded worker pool and original 90s deadline.
+			select {
+			case jobs <- job{4, tick / 100}:
+			default:
 				failures.Add(1)
-			} else {
-				m.Controls++
 			}
 		}
 	}
@@ -472,6 +484,7 @@ func nativeMixedLoad(t *testing.T, f destinationPolicyFixture, client *http.Clie
 	m.Duration = time.Since(start).Milliseconds()
 	closeJobs.Do(func() { close(jobs) })
 	wg.Wait()
+	m.Controls = controls.Load()
 	for i := range delivered {
 		m.Delivered[i] = delivered[i].Load()
 		m.Windows[i] = make([]uint64, 90)
