@@ -8,7 +8,7 @@ test('global fixture preflight executes lifecycle, cache and SQL boundaries with
   assert(body.startsWith('  global-fixture:'))
   assert.match(body, /runs-on: ubuntu-24\.04/)
   assert.match(body, /-count=1 -timeout=4m -tags destination_acceptance/)
-  for (const root of ['AuditStartPreservesRealQueueAndPermissionChanges', 'PublicCoreCopyExcludesStateAndRejectsUntrustedFiles', 'StoragePauseKeepsControlAndOriginalSQLTransactions']) assert(body.includes(root))
+  for (const root of ['AuditStartPreservesRealQueueAndPermissionChanges', 'PublicCoreCopyExcludesStateAndRejectsUntrustedFiles', 'StoragePauseKeepsControlAndOriginalSQLTransactions', 'TransportKeepsProductionAuthenticationAndExactBodies']) assert(body.includes(root))
   const gate = workflow.slice(workflow.indexOf('  sqlite:')).split(/\r?\n(?=  postgres:)/)[0]
   assert.match(gate, /needs: \[race-shard, app-race-shard, global-fixture\]/)
   assert(gate.includes('needs.global-fixture.result') && gate.includes('if: always()'))
@@ -20,6 +20,12 @@ test('global fixture preflight executes lifecycle, cache and SQL boundaries with
   assert(source.includes('entries[0].Name() != "install.json"') && source.includes('entries[1].Name() != "xray"'))
   assert(source.includes('decoder.DisallowUnknownFields()') && source.includes('os.O_EXCL'))
   assert.doesNotMatch(source, /SetSnapshot\(|\.collector\.Ack\(|runtime\.GC\(|sysctl/)
+})
+
+test('global transport preserves raw authenticated bodies and delegates unknown input', () => {
+  const source = readFileSync(new URL('../internal/app/destination_native_global_transport_test.go', import.meta.url), 'utf8')
+  for (const required of ['peer.probe.agent != peer.agent.AgentID', 'handlers[peer.agent.AgentID] != nil', 'peer.probe.handler(original)', 'protocol.MaxSyncBodyBytes+1', 'io.NopCloser(bytes.NewReader(body))', 'nativeGlobalTransportReadError{err}', 'original.ServeHTTP(w, r)', 'f.a.server.Handler.ServeHTTP(w, r)', 'wrong-owned-fixture-credential', 'untimed transport preflight fabricated a canonical retry']) assert(source.includes(required))
+  assert.doesNotMatch(source, /\.start\s*=|\.Ack\(|SetSnapshot\(|http\.StatusOK\)/)
 })
 
 test('global storage hold decorates admitted real SQL without replacing production collection', () => {

@@ -1343,3 +1343,10 @@ worker 的真实 active reservation 保持、控制流仍返回、重传只入�
 检查；默认 bootstrap 不启用额外观测。压力夹具可以在实际进程启动前
 选择只读 audit-metrics 和作用于原认证 handler 的测试传输包装，复用原
 私有输出解析器，不在运行中更换 handler、不复制私有状态或合成指标。
+
+多 owner 传输按已验证的实际 agent/probe 配对选择各自的观察包装，进入
+原认证路由前恢复原始 bytes 与 headers；不重新序列化报告。未知身份、
+畸形或超限报告仍转交生产拒绝路径，原读取错误也保留。App/SQLite 预检
+以两套实际注册凭据和协议向量检查正确认证、错误凭据、foreign input、
+重复/未绑定 observer 及原 bytes，未启动定时分区，不产生重试通过记录。
+该预检不证明 65 个实际进程的四类 canonical retry，后者仍须实际运行。
