@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -78,8 +79,10 @@ func nativeIdleCost(t *testing.T, f destinationPolicyFixture, client *http.Clien
 		Controls      int               `json:"control_successes"`
 		TracerBound   int               `json:"tracer_bound"`
 		ReceiptChecks uint64            `json:"receipt_checks"`
+		TraceStage    uint64            `json:"trace_stage"`
+		TraceError    uint64            `json:"trace_error"`
 		Cycles        []nativeIdleCycle `json:"cycles"`
-	}{Schema: 1, Candidate: "184f4e23f0f3d72f8492432184685fea4ec4967c", Core: "26.6.27", Ticks: ticks, Cycles: []nativeIdleCycle{}}
+	}{Schema: 2, Candidate: "184f4e23f0f3d72f8492432184685fea4ec4967c", Core: "26.6.27", Ticks: ticks, Cycles: []nativeIdleCycle{}}
 	t.Cleanup(func() {
 		data, err := json.Marshal(m)
 		nativeMust(t, err, "encode numeric idle cost evidence")
@@ -319,6 +322,9 @@ func nativeIdleCost(t *testing.T, f destinationPolicyFixture, client *http.Clien
 			_ = tracer.Process.Signal(os.Interrupt)
 			select {
 			case err := <-done:
+				if err != nil {
+					m.TraceError = 19
+				}
 				nativeMust(t, err, "detach owned idle state observer")
 			case <-time.After(15 * time.Second):
 				_ = tracer.Process.Kill()
@@ -331,29 +337,55 @@ func nativeIdleCost(t *testing.T, f destinationPolicyFixture, client *http.Clien
 	nativeWait(t, 15*time.Second, "exact owned Node tracer attachment", func() bool { return tracerPID() == tracer.Process.Pid })
 	m.TracerBound = 1
 	measure("traced", tracer.Process.Pid)
+	m.TraceStage = 1
 	stop()
+	m.TraceStage = 2
 	if tracerPID() != 0 {
+		m.TraceError = 20
 		t.Fatal("owned idle state observer did not detach")
 	}
 	live()
 	data, err := json.Marshal(windows)
 	nativeMust(t, err, "encode private idle trace intervals")
 	nativeMust(t, os.WriteFile(windowPath, data, 0600), "save private idle trace intervals")
+	m.TraceStage = 3
 	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
 	defer cancel()
 	reader := exec.CommandContext(ctx, "node", "deploy/destination-idle-state-trace.mjs", tracePath, statePath, windowPath)
 	var privateErrors nativePrivateOutput
 	reader.Stderr = &privateErrors
 	result, err := reader.Output()
+	if err != nil {
+		m.TraceError = 17
+		if errors.Is(err, exec.ErrNotFound) {
+			m.TraceError = 16
+		} else {
+			// Only the reader's closed numeric diagnostic may leave stderr.
+			// Arbitrary runtime errors, paths and private trace lines stay private.
+			var diagnostic struct {
+				Schema int    `json:"schema_version"`
+				Code   uint64 `json:"error_code"`
+			}
+			d := json.NewDecoder(strings.NewReader(privateErrors.text()))
+			d.DisallowUnknownFields()
+			if d.Decode(&diagnostic) == nil && d.Decode(new(any)) == io.EOF && diagnostic.Schema == 1 && diagnostic.Code >= 1 && diagnostic.Code <= 15 {
+				m.TraceError = diagnostic.Code
+			}
+		}
+	}
 	nativeMust(t, err, "decode owned actual idle state write trace")
+	m.TraceStage = 4
 	var writes []nativeIdleWrites
 	decoder := json.NewDecoder(bytes.NewReader(result))
 	decoder.DisallowUnknownFields()
 	if decoder.Decode(&writes) != nil || decoder.Decode(new(any)) != io.EOF || len(writes) != 5 || len(m.Cycles) != 10 {
+		m.TraceError = 18
 		t.Fatal("idle state byte measurements have an incomplete numeric shape")
 	}
 	for i := range writes {
 		m.Cycles[i+5].Writes = &writes[i]
 	}
+	m.TraceStage = 5
 	control()
+	m.TraceStage = 6
 }

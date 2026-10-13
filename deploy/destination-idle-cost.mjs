@@ -19,10 +19,11 @@ export function checkIdleCostEvidence(results, metrics) {
   }
   let report
   try { report = JSON.parse(metrics) } catch { require(false) }
-  fields(report, ['schema_version', 'candidate', 'core_version', 'published_domains', 'applied_domains', 'core_domains', 'cpu_ticks_per_second', 'control_successes', 'tracer_bound', 'receipt_checks', 'cycles'])
-  require(report.schema_version === 1 && report.candidate === moduleNodeCandidate.commit && report.core_version === '26.6.27')
+  fields(report, ['schema_version', 'candidate', 'core_version', 'published_domains', 'applied_domains', 'core_domains', 'cpu_ticks_per_second', 'control_successes', 'tracer_bound', 'receipt_checks', 'trace_stage', 'trace_error', 'cycles'])
+  require(report.schema_version === 2 && report.candidate === moduleNodeCandidate.commit && report.core_version === '26.6.27')
   require(report.published_domains === 50000 && report.applied_domains === 50000 && report.core_domains === 50000 && report.control_successes === 2 && report.tracer_bound === 1)
   require(report.receipt_checks === 8191)
+  require(report.trace_stage === 6 && report.trace_error === 0)
   require(count(report.cpu_ticks_per_second) && report.cpu_ticks_per_second > 0 && report.cpu_ticks_per_second <= 1000000)
   require(Array.isArray(report.cycles) && report.cycles.length === 10)
   for (const [i, cycle] of report.cycles.entries()) {

@@ -7,13 +7,14 @@ import { moduleNodeCandidate, sanitizeDestinationResults } from './destination-a
 // Synthetic closed verifier fixtures only; not native CPU or disk evidence.
 const root = 'TestNativeDestinationIdleCost'
 const evidence = () => [{ Action: 'start' }, { Action: 'run', Test: root }, { Action: 'pass', Test: root, Elapsed: 45 }, { Action: 'pass', Elapsed: 45 }].map(e => JSON.stringify({ Package: 'github.com/KazuhaHub/passwall-sub-panel/internal/app', ...e })).join('\n')
-const report = () => ({ schema_version: 1, candidate: moduleNodeCandidate.commit, core_version: '26.6.27', published_domains: 50000, applied_domains: 50000, core_domains: 50000, cpu_ticks_per_second: 100, control_successes: 2, tracer_bound: 1, receipt_checks: 8191, cycles: Array.from({ length: 10 }, (_, i) => ({ phase: i < 5 ? 'plain' : 'traced', index: i % 5 + 1, elapsed_ms: 2200, agent_cpu_ticks: i < 5 ? 2 : 3, core_cpu_ticks: 0, accepted_syncs: 1, state_writes: i < 5 ? null : { db_bytes: 0, wal_bytes: 4096, journal_bytes: 0, write_calls: 1, sync_calls: 1 } })) })
+const report = () => ({ schema_version: 2, candidate: moduleNodeCandidate.commit, core_version: '26.6.27', published_domains: 50000, applied_domains: 50000, core_domains: 50000, cpu_ticks_per_second: 100, control_successes: 2, tracer_bound: 1, receipt_checks: 8191, trace_stage: 6, trace_error: 0, cycles: Array.from({ length: 10 }, (_, i) => ({ phase: i < 5 ? 'plain' : 'traced', index: i % 5 + 1, elapsed_ms: 2200, agent_cpu_ticks: i < 5 ? 2 : 3, core_cpu_ticks: 0, accepted_syncs: 1, state_writes: i < 5 ? null : { db_bytes: 0, wal_bytes: 4096, journal_bytes: 0, write_calls: 1, sync_calls: 1 } })) })
 
 test('idle gate binds actual fifty-thousand policy and original processes to separate plain/traced accepted cycles', () => {
   const value = checkIdleCostEvidence(sanitizeDestinationResults(evidence()), JSON.stringify(report()))
   assert.equal(value.plain_agent_cpu_ms_mean, 20)
   assert.equal(value.traced_state_bytes_mean, 4096)
   for (const mutate of [
+    r => { r.schema_version = 1 }, r => { r.trace_stage = 5 }, r => { r.trace_error = 8 },
     r => { r.published_domains-- }, r => { r.applied_domains-- }, r => { r.core_domains = 0 },
     r => { r.candidate = 'foreign' }, r => { r.tracer_bound = 0 }, r => { r.receipt_checks = 8190 }, r => { r.control_successes = 1 },
     r => { r.cycles.pop() }, r => { r.cycles[0].state_writes = { db_bytes: 0 } },

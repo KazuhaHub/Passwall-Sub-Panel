@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { summarizeIdleStateWrites } from './destination-idle-state-trace.mjs'
+import { spawnSync } from 'node:child_process'
+import { fileURLToPath } from 'node:url'
+import { summarizeIdleStateWrites, idleTraceFailureDiagnostic } from './destination-idle-state-trace.mjs'
 
 // Synthetic parser fixtures only; not measurements of a running Node.
 const state = '/owned/private-node/state.db'
@@ -47,4 +49,28 @@ test('idle trace refuses ambiguous state writes, lost calls, private payload and
     `private unparsed state write ${state}\n`,
   ]) assert.throws(() => summarizeIdleStateWrites(input, state, windows), /private content withheld/)
   for (const bad of [[], [windows[1], windows[0]], [{ ...windows[0], until_unix_us: windows[0].from_unix_us }], [{ ...windows[0], private_path: state }]]) assert.throws(() => summarizeIdleStateWrites('', state, bad))
+})
+
+test('idle trace failure exposes only a bounded category and never the private line or path', () => {
+  for (const [call, code] of [
+    ['pwrite64(8, ""..., 4096, 0) = 4096', 8],
+    [`write(8<${state}>, "private", 7) = 7`, 5],
+    [`mmap(NULL, 4096, PROT_READ|PROT_WRITE, MAP_SHARED, 8<${state}>, 0) = 0x7000`, 10],
+    ['<... pwrite64 resumed>) = 4096', 7],
+  ]) {
+    let error
+    try { summarizeIdleStateWrites(line('0.100000', call), state, windows) } catch (e) { error = e }
+    assert(error)
+    assert.deepEqual(idleTraceFailureDiagnostic(error), { schema_version: 1, error_code: code })
+  }
+  for (const error of [new Error(`private ${state}`), Object.assign(new Error('private'), { code: state }), Object.assign(new Error('private'), { code: 1000 })]) {
+    assert.deepEqual(idleTraceFailureDiagnostic(error), { schema_version: 1, error_code: 1 })
+  }
+})
+
+test('idle trace CLI with missing private inputs emits only the closed numeric error', () => {
+  const result = spawnSync(process.execPath, [fileURLToPath(new URL('./destination-idle-state-trace.mjs', import.meta.url)), '/missing-owned-private-trace.trace', state, '/missing-owned-private-windows.json'], { encoding: 'utf8' })
+  assert.equal(result.status, 1)
+  assert.equal(result.stdout, '')
+  assert.deepEqual(JSON.parse(result.stderr), { schema_version: 1, error_code: 1 })
 })
