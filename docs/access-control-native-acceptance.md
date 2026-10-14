@@ -1691,3 +1691,30 @@ SQL 游标复用扫描变量并按值追加到连续切片；不再为每行分�
 调用。后续仅修正为两次，并单独检查两次当前读实际发生；生产代码、
 错误返回与禁止 fallback 断言保留。首轮失败日志继续保留，新提交须以
 完整托管 CI 重新验证；原 b2c4bdf1 三数据库压力运行继续执行，不重复启动。
+
+修正后的 `996a1a89` [完整 CI](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/38552501617)
+已 18 项通过：212 个 App 入口原件在三个原四分钟 race 分片各 RUN1/PASS1、
+无失败/跳过/缓存，nodesync 完整 race 包 68.516s。PostgreSQL/MySQL 完整
+SQL-store 包通过 116.900s/79.996s，SQLite 完整 race 分片门禁通过；前端
+类型/构建、4 项浏览器烟测及 2507 项单元通过，既有 1 项条件跳过。
+
+生产代码来源 `b2c4bdf1` 的[三数据库压力原件](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/38552004559)
+全部失败：SQLite stage1/136 人、membership 套件超时，实际
+compile_unavailable 为 1；MySQL/PostgreSQL stage2/200 人、根 FAIL1，
+分别 streams_inbound_offline/stale。三者均无流量、根 PASS、四类完成
+标志或压力阶段 profile。MySQL 最近同步 HTTP200/1215ms、完成年龄
+9522ms、inflight1；PostgreSQL HTTP200/1793ms、完成年龄2922ms、inflight0，
+两父进程均存活。缺失配置错误类别不能填零，父进程存活不能证明核心就绪。
+
+独立 CPU 采样成功。SQLite/PostgreSQL 的 ListFleetAccounting 累计占
+23.76%/10.62%，MySQL 的应用前30项视图没有该条目，不能填为零。
+MySQL 的 NativePanelSnapshot 累计25.04%，PostgreSQL 18.64%；这些只是
+准备窗口 CPU 样本，不是延迟/吞吐改善的证明。
+
+下一步为同一可选60秒采样窗口增加前后累计 allocs 样本，以 pprof -base
+输出应用函数的 alloc_space/alloc_objects 差值，各最多30项。使用原运行时
+采样率、不强制 GC；这是统计采样，可能滞后最近GC，不能当作精确对象数或
+存活堆。文件仍固定名、独占创建、0600、仅留在 owned runner 临时目录，
+不上传 profile 二进制。普通运行保持关闭；完成门禁、65节点/200用户、
+超时与流量阶段都保持。新增三种固定文件的保护/可读取回归；实际运行
+结果与分配来源仍待同源托管验证。

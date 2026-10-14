@@ -743,6 +743,9 @@ jobs:
           test -s "$RUNNER_TEMP/destination-global-setup.cpu.pprof"
           sudo --preserve-env=GOWORK,GOTOOLCHAIN "$(command -v go)" tool pprof -top -nodecount=30 "$RUNNER_TEMP/destination-global-batch.test" "$RUNNER_TEMP/destination-global-setup.cpu.pprof"
           sudo --preserve-env=GOWORK,GOTOOLCHAIN "$(command -v go)" tool pprof -top -cum -nodecount=30 -show='^github.com/KazuhaHub/passwall-sub-panel/internal/' "$RUNNER_TEMP/destination-global-batch.test" "$RUNNER_TEMP/destination-global-setup.cpu.pprof"
+          for sample in alloc_space alloc_objects; do
+            sudo --preserve-env=GOWORK,GOTOOLCHAIN "$(command -v go)" tool pprof -top -cum -nodecount=30 -sample_index="$sample" -show='^github.com/KazuhaHub/passwall-sub-panel/internal/' -base="$RUNNER_TEMP/destination-global-setup.alloc-before.pprof" "$RUNNER_TEMP/destination-global-batch.test" "$RUNNER_TEMP/destination-global-setup.alloc-after.pprof"
+          done
       - name: Keep numeric batch, bootstrap and root evidence; byte/key pressure remains pending
         if: always()
         uses: actions/upload-artifact@v7
