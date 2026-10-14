@@ -56,6 +56,7 @@ test('setup profiling is opt-in and keeps the complete pressure gate and evidenc
   assert(batch.includes('node deploy/destination-global-batch.mjs'))
   assert(batch.includes("if: always() && inputs.suite == 'global-batch-profile'"))
   assert(batch.includes('"$(command -v go)" tool pprof -top -nodecount=30'))
+  assert(batch.includes("tool pprof -top -cum -nodecount=30 -show='^github.com/KazuhaHub/passwall-sub-panel/internal/'"))
   const upload = batch.slice(batch.indexOf('uses: actions/upload-artifact'))
   assert(!upload.includes('.pprof') && !upload.includes('profile'))
 })

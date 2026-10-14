@@ -1607,3 +1607,26 @@ workflow 选择测试；实际采样和 Go 回归须在自有托管 runner 执�
 本次完整 deploy 脚本测试 262 项通过；App acceptance 标签仅编译与 vet
 通过，完整 Go 构建通过。本地没有运行 Go 测试或测试二进制；新增回归
 实际结果与准备阶段采样仍待同源托管运行。
+
+`27fe7ae1` 的[完整 CI](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/38539808725)
+18 项通过；212 个实际 App 入口原件各 RUN1/PASS1，完整三个 race 分片无
+失败/跳过/缓存，原四分钟上限保持。nodesync 完整 race 包 66.732s；前端
+类型与生产构建、4 项生产浏览器烟测通过，2507 项单元通过、既有 1 项跳过。
+[三数据库准备采样](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/38539813836)
+均已封存失败原件：SQLite stage1/134 人、PostgreSQL stage1/192 人为
+membership 套件超时；MySQL stage2/200 人为 receipt 套件超时。均无流量、
+四类完成标志、压力阶段 profile 或根 PASS；SQLite/MySQL 的实际
+compile_unavailable 分别为 2/1，PostgreSQL 缺失此字段不能填零。
+
+三个托管作业中的新增 profile 文件边界与自动/重复停止回归均实际通过。
+独立采样步骤成功，三个 PSP CPU 窗口分别约 60s，总 CPU 样本分别
+39.56s/26.83s/41.43s。累计 GORM scanIntoStruct 占比分别为
+21.71%/32.13%/59.28%；这是包含子调用的 CPU 样本比例，不是延迟占比，
+不能跨后端直接比较吞吐或归因于单一仓库。同期累计分配分别为
+3813453328/3662341776/4039164328 字节，GC 次数 77/73/76，暂停累计
+113772105/525918374/512280303ns，结束堆字节
+90759112/115154576/78726896。原件与作业日志均保留。
+
+现有平坦热点提示大量 SQL 扫描/反射，但缺少应用调用方。后续在同一
+60 秒原 profile 上增加仅显示本仓库 internal 函数的累计视图，仍最多
+30 项静态函数，不改变采样时段、压力流量、超时、证据边界或验收条件。
