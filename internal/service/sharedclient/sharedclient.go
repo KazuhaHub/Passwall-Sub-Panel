@@ -774,6 +774,16 @@ func (s *Service) DeleteLegacyForUser(ctx context.Context, userID int64) (Cleanu
 	if s.ownership == nil {
 		return res, fmt.Errorf("ownership repo not wired")
 	}
+	entries, err := s.ownership.ListByUser(ctx, userID)
+	if err != nil {
+		return res, fmt.Errorf("list ownership: %w", err)
+	}
+	// Native-only users and completed migrations have no legacy projections.
+	// There is no deletion to authorise, so avoid re-reading every shared
+	// client, attachment and node merely to build an unused coverage map.
+	if len(entries) == 0 {
+		return res, nil
+	}
 
 	// Which (panel, inbound) pairs are now served by a PROVISIONED shared client?
 	provisioned := map[panelInbound]bool{}
@@ -798,10 +808,6 @@ func (s *Service) DeleteLegacyForUser(ctx context.Context, userID int64) (Cleanu
 		}
 	}
 
-	entries, err := s.ownership.ListByUser(ctx, userID)
-	if err != nil {
-		return res, fmt.Errorf("list ownership: %w", err)
-	}
 	// Group the deletable legacy clients by panel and remove them with ONE
 	// BulkDelByEmail per panel — one Xray restart per panel instead of one per
 	// client. Legacy emails are u{uid}-n{nodeID}@domain: panel-wide unique and
