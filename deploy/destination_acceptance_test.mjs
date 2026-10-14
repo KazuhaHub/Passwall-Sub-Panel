@@ -3,6 +3,50 @@ import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
 import { checkDestinationResults, sanitizeDestinationResults, nodeCandidate, destinationCases } from './destination-acceptance.mjs'
 
+test('pre-load fixture failures retain closed categories and the original failed root', async () => {
+  const { isSafeDestinationDiagnostic } = await import('./destination-acceptance.mjs')
+  const Package = 'github.com/KazuhaHub/passwall-sub-panel/internal/app'
+  const Test = 'TestNativeDestinationGlobalBatchPressure'
+  const failures = {
+    'create destination fixture administrator failed; private diagnostics withheld': 'admin_create_failed',
+    'load destination fixture issuer settings failed; private diagnostics withheld': 'admin_settings_failed',
+    'issue destination fixture access token failed; private diagnostics withheld': 'admin_token_failed',
+    'read native fixture automatic port boundary failed; private diagnostics withheld': 'port_boundary_failed',
+    'native fixture has no explicit nonprivileged server range': 'port_range_invalid',
+    'native fixture explicit server range is exhausted': 'port_range_exhausted',
+    'native fixture explicit server range is occupied': 'port_range_occupied',
+    'release owned native fixture port probe failed; private diagnostics withheld': 'port_probe_release_failed',
+    'invalid owned target port': 'target_port_invalid',
+    'create target nonce failed; private diagnostics withheld': 'target_nonce_failed',
+    'read owned target addresses failed; private diagnostics withheld': 'target_addresses_failed',
+    'decode owned addresses failed; private diagnostics withheld': 'target_addresses_invalid',
+    'target address already exists': 'target_address_conflict',
+    'add exact owned target /128 failed; private diagnostics withheld': 'target_address_add_failed',
+    'remove exact owned target /128 failed; private diagnostics withheld': 'target_address_remove_failed',
+    'verify local target route failed; private diagnostics withheld': 'target_route_read_failed',
+    'decode local target route failed; private diagnostics withheld': 'target_route_decode_failed',
+    'target does not have its exact local loopback route': 'target_route_invalid',
+    'bind exact owned target failed; private diagnostics withheld': 'target_bind_failed',
+  }
+  for (const [message, category] of Object.entries(failures)) {
+    const events = sanitizeDestinationResults(encode([
+      { Action: 'output', Package, Test, Output: `private-path:4: ${message}; credential=private-secret host=private-host\n` },
+      { Action: 'fail', Package, Test }, { Action: 'fail', Package },
+    ])).trim().split('\n').map(line => JSON.parse(line))
+    assert.equal(events[0].Diagnostic, 'fixture_' + category)
+    assert(isSafeDestinationDiagnostic(events[0]))
+    assert.deepEqual(events.slice(1), [{ Action: 'fail', Package, Test }, { Action: 'fail', Package }])
+    for (const privateValue of ['private-path', 'private-secret', 'private-host', 'Output']) assert(!JSON.stringify(events).includes(privateValue))
+  }
+  for (const stage of ['administrator', 'allowed_target', 'observe_target', 'control_target']) {
+    const event = JSON.parse(sanitizeDestinationResults(encode([{ Action: 'output', Package, Test, Output: `private-path:4: native setup stage: ${stage}\n` }])))
+    assert.equal(event.Diagnostic, 'global_setup_stage_' + stage)
+    assert(isSafeDestinationDiagnostic(event))
+  }
+  assert.equal(sanitizeDestinationResults(encode([{ Action: 'output', Output: 'create destination fixture private-secret failed\n' }])).trim(), '')
+  assert(!isSafeDestinationDiagnostic({ Diagnostic: 'fixture_target_private-secret' }))
+})
+
 test('published remote rollback requires the real watcher, helper and complete execution evidence', async () => {
   const acceptance = await import('./destination-acceptance.mjs')
   assert.equal(typeof acceptance.checkRemoteUpgradeResults, 'function')

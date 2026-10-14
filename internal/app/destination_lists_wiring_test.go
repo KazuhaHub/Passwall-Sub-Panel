@@ -62,17 +62,17 @@ func destinationRefreshAdminToken(t *testing.T, a *App) string {
 	t.Helper()
 	admin := &domain.User{UPN: "destination-admin@example.test", Email: "destination-admin@example.test", SSOProvider: domain.SSOProviderLocal, SSOSubject: "destination-admin@example.test", Role: domain.RoleAdmin, Enabled: true, UUID: "88888888-8888-4888-8888-888888888888", SubToken: "fixture-destination-admin-token", TrafficResetPeriod: domain.ResetMonthly}
 	if err := a.repos.User.Create(t.Context(), admin); err != nil {
-		t.Fatal(err)
+		t.Fatal("create destination fixture administrator failed; private diagnostics withheld")
 	}
 	settings, err := a.settings.Load(t.Context(), ports.UISettings{})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatal("load destination fixture issuer settings failed; private diagnostics withheld")
 	}
 	token, err := jwtutil.NewIssuer(a.cfg.JWTSecret, func() jwtutil.Params {
 		return jwtutil.Params{AccessTTL: time.Hour, RefreshTTL: time.Hour, Issuer: settings.JWTIssuer}
 	}).IssueAccess(admin.ID, admin.UPN, admin.Role, admin.TokenVersion)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatal("issue destination fixture access token failed; private diagnostics withheld")
 	}
 	return token
 }

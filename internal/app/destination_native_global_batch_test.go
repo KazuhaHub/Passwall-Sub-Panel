@@ -150,9 +150,13 @@ func TestNativeDestinationGlobalBatchPressure(t *testing.T) {
 	// whole-test timeout may skip cleanup; it must not erase which real phase
 	// was reached. Missing completion/root PASS still fails the normal verifier.
 	writeMetrics()
+	t.Log("native setup stage: administrator")
 	token := destinationRefreshAdminToken(t, a)
+	t.Log("native setup stage: allowed_target")
 	_, address, targetPort, nonce, _ := nativeTarget(t)
+	t.Log("native setup stage: observe_target")
 	_, observeAddress, observePort, observeNonce, _ := nativeTargetAtPort(t, nativePort(t))
+	t.Log("native setup stage: control_target")
 	_, controlAddress, controlPort, controlNonce, _ := nativeTargetAtPort(t, nativePort(t))
 	stage := "capability"
 	users, group, policy, blockAddress, blockPort, blockReached := nativePrepareTrialLoad(t, f, cohort.server.Client(), cohort.server.URL, token, f.node.DesiredPort, nativeGlobalBatchOutput(cohort.peers), &stage, &nativeMixedSetup{observePort: observePort, memberConcurrency: 8, memberReady: func(completed int) {
