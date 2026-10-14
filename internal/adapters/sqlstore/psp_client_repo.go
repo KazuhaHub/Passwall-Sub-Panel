@@ -218,7 +218,7 @@ func (r *pspClientRepo) ListAll(ctx context.Context) ([]*domain.PSPClient, error
 	return out, nil
 }
 
-func (r *pspClientRepo) ListFleetAccounting(ctx context.Context) ([]*domain.PSPClient, error) {
+func (r *pspClientRepo) ListFleetAccounting(ctx context.Context) ([]domain.PSPClientAccounting, error) {
 	rows, err := r.db.WithContext(ctx).
 		Model(&pspClientRow{}).
 		Select("id", "user_id", "panel_id", "last_raw_up_bytes", "last_raw_down_bytes", "last_counter_epoch").
@@ -227,15 +227,15 @@ func (r *pspClientRepo) ListFleetAccounting(ctx context.Context) ([]*domain.PSPC
 		return nil, err
 	}
 	defer rows.Close()
-	out := make([]*domain.PSPClient, 0)
+	out := make([]domain.PSPClientAccounting, 0)
 	// Read the fixed numeric projection directly. GORM's per-field setters and
 	// scan destinations are unnecessary here, and the intermediate row slice
 	// duplicates the complete fleet on every sync. Historic NULL baselines still
 	// mean zero, just as when scanning them into the model's scalar fields.
+	var client domain.PSPClientAccounting
+	var up, down sql.NullInt64
+	var epoch sql.Null[uint64]
 	for rows.Next() {
-		client := &domain.PSPClient{}
-		var up, down sql.NullInt64
-		var epoch sql.Null[uint64]
 		if err := rows.Scan(&client.ID, &client.UserID, &client.PanelID, &up, &down, &epoch); err != nil {
 			return nil, err
 		}

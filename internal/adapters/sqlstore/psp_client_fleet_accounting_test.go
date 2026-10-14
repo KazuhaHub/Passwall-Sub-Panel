@@ -55,7 +55,7 @@ func TestFleetAccountingReadsOnlyCurrentBaselinesWithoutFilteringClients(t *test
 	}
 	for i, client := range projected {
 		original := full[i]
-		want := &domain.PSPClient{ID: original.ID, UserID: original.UserID, PanelID: original.PanelID,
+		want := domain.PSPClientAccounting{ID: original.ID, UserID: original.UserID, PanelID: original.PanelID,
 			LastRawUpBytes: original.LastRawUpBytes, LastRawDownBytes: original.LastRawDownBytes, LastCounterEpoch: original.LastCounterEpoch}
 		if !reflect.DeepEqual(client, want) {
 			t.Fatal("projection changed ordering, ownership or counter baseline")
@@ -105,7 +105,7 @@ func TestFleetAccountingPreservesNullAndWideCounterBaselines(t *testing.T) {
 	}
 	for i, got := range projected {
 		original := full[i]
-		want := &domain.PSPClient{ID: original.ID, UserID: original.UserID, PanelID: original.PanelID, LastRawUpBytes: original.LastRawUpBytes, LastRawDownBytes: original.LastRawDownBytes, LastCounterEpoch: original.LastCounterEpoch}
+		want := domain.PSPClientAccounting{ID: original.ID, UserID: original.UserID, PanelID: original.PanelID, LastRawUpBytes: original.LastRawUpBytes, LastRawDownBytes: original.LastRawDownBytes, LastCounterEpoch: original.LastCounterEpoch}
 		if !reflect.DeepEqual(got, want) {
 			t.Fatal("fleet projection changed nullable, signed or wide integer baselines")
 		}

@@ -29,14 +29,17 @@ type projectedFleetClients struct {
 	err   error
 }
 
-func (r *projectedFleetClients) ListFleetAccounting(context.Context) ([]*domain.PSPClient, error) {
+func (r *projectedFleetClients) ListFleetAccounting(context.Context) ([]domain.PSPClientAccounting, error) {
 	r.calls++
 	if r.err != nil {
 		return nil, r.err
 	}
-	var rows []*domain.PSPClient
+	var rows []domain.PSPClientAccounting
 	for _, c := range r.rows {
-		rows = append(rows, &domain.PSPClient{ID: c.ID, UserID: c.UserID, PanelID: c.PanelID,
+		if c == nil {
+			continue
+		}
+		rows = append(rows, domain.PSPClientAccounting{ID: c.ID, UserID: c.UserID, PanelID: c.PanelID,
 			LastRawUpBytes: c.LastRawUpBytes, LastRawDownBytes: c.LastRawDownBytes, LastCounterEpoch: c.LastCounterEpoch})
 	}
 	return rows, nil
@@ -48,6 +51,7 @@ func TestFleetAccountingProjectionPreservesPendingUsageAndCoverage(t *testing.T)
 		{ID: 2, UserID: 7, PanelID: 20, DesiredEnable: true, LastCounterEpoch: 1},
 		{ID: 3, UserID: 8, PanelID: 20, LastCounterEpoch: 1},
 		{ID: 4, UserID: 9, PanelID: 30, LastCounterEpoch: 1},
+		nil, // Old repositories may include nil entries; they never count.
 	}
 	legacy := &legacyFleetClients{rows: full}
 	projected := &projectedFleetClients{legacyFleetClients: legacy}
@@ -64,32 +68,49 @@ func TestFleetAccountingProjectionPreservesPendingUsageAndCoverage(t *testing.T)
 		t.Fatal("optional projection fell back to full definitions")
 	}
 	agents := []*domain.NodeAgent{{AgentID: "a", PanelID: 10}, {AgentID: "b", PanelID: 20}}
-	index := func(rows []*domain.PSPClient) map[int64]*domain.PSPClient {
-		out := make(map[int64]*domain.PSPClient)
-		for _, row := range rows {
-			out[row.ID] = row
+	service.clients = legacy
+	fallback, err := service.loadFleetAccounting(t.Context())
+	if err != nil || legacy.calls != 1 || !reflect.DeepEqual(fallback, rows) {
+		t.Fatal("legacy repository fallback changed accounting")
+	}
+	index := func(rows []domain.PSPClientAccounting) map[int64]*domain.PSPClientAccounting {
+		out := make(map[int64]*domain.PSPClientAccounting)
+		for i := range rows {
+			out[rows[i].ID] = &rows[i]
 		}
 		return out
 	}
-	wantUsage := service.pendingUsage(index(full), agents)
+	wantUsage := service.pendingUsage(index(fallback), agents)
 	gotUsage := service.pendingUsage(index(rows), agents)
 	if !reflect.DeepEqual(gotUsage, wantUsage) || gotUsage[7] != 80 {
 		t.Fatal("projection changed closed-client usage or accepted cross-panel/retired counters")
 	}
-	wantCoverage, wantOldest := service.aggregateCoverage(full, agents, 60, time.UnixMilli(100000))
+	wantCoverage, wantOldest := service.aggregateCoverage(fallback, agents, 60, time.UnixMilli(100000))
 	coverage, oldest := service.aggregateCoverage(rows, agents, 60, time.UnixMilli(100000))
 	if coverage != wantCoverage || oldest != wantOldest || coverage.Entries != 3 || coverage.Subjects != 2 || coverage.EntriesStale != 3 || oldest != 30000 {
 		t.Fatal("projection changed disabled, missing, stale or legacy coverage")
 	}
-	service.clients = legacy
-	fallback, err := service.loadFleetAccounting(t.Context())
-	if err != nil || legacy.calls != 1 || !reflect.DeepEqual(fallback, full) {
-		t.Fatal("legacy repository fallback changed")
+	full[0].LastRawUpBytes = 14
+	latest, err := service.loadFleetAccounting(t.Context())
+	if err != nil || latest[0].LastRawUpBytes != 14 || rows[0].LastRawUpBytes != 4 {
+		t.Fatal("accounting values reused stale or aliased baselines")
 	}
 	service.clients = projected
 	failure := errors.New("owned accounting read failure")
 	projected.err = failure
 	if rows, err := service.loadFleetAccounting(t.Context()); rows != nil || !errors.Is(err, failure) || legacy.calls != 1 {
 		t.Fatal("failed projection returned fallback or partial accounting")
+	}
+}
+
+func TestFleetAccountingValuesRetainOnlySixNumericFields(t *testing.T) {
+	shape := reflect.TypeFor[domain.PSPClientAccounting]()
+	if shape.NumField() != 6 || shape.Size() != 48 {
+		t.Fatal("fleet accounting retained full client payload allocations")
+	}
+	for i := range shape.NumField() {
+		if kind := shape.Field(i).Type.Kind(); kind != reflect.Int64 && kind != reflect.Uint64 {
+			t.Fatal("fleet accounting contains a credential or lifecycle payload")
+		}
 	}
 }

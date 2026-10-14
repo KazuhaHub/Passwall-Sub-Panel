@@ -1003,11 +1003,9 @@ func (s *Service) buildDirectives(ctx context.Context, agent *domain.NodeAgent, 
 	if err != nil {
 		return nodeprotocol.DirectivesBody{}, nodeprotocol.Envelope{}, fmt.Errorf("nodesync: list native agents: %w", err)
 	}
-	clientByID := make(map[int64]*domain.PSPClient, len(allClients))
-	for _, client := range allClients {
-		if client != nil {
-			clientByID[client.ID] = client
-		}
+	clientByID := make(map[int64]*domain.PSPClientAccounting, len(allClients))
+	for i := range allClients {
+		clientByID[allClients[i].ID] = &allClients[i]
 	}
 	pendingByUser := s.pendingUsage(clientByID, agents)
 	counters := make(map[int64]nodeprotocol.ClientCounters)
@@ -1124,11 +1122,22 @@ func (s *Service) buildDirectives(ctx context.Context, agent *domain.NodeAgent, 
 	return body, envelope, nil
 }
 
-func (s *Service) loadFleetAccounting(ctx context.Context) ([]*domain.PSPClient, error) {
+func (s *Service) loadFleetAccounting(ctx context.Context) ([]domain.PSPClientAccounting, error) {
 	if reader, ok := s.clients.(ports.PSPClientFleetAccountingRepo); ok {
 		return reader.ListFleetAccounting(ctx)
 	}
-	return s.clients.ListAll(ctx)
+	clients, err := s.clients.ListAll(ctx)
+	if err != nil {
+		return nil, err
+	}
+	rows := make([]domain.PSPClientAccounting, 0, len(clients))
+	for _, c := range clients {
+		if c != nil {
+			rows = append(rows, domain.PSPClientAccounting{ID: c.ID, UserID: c.UserID, PanelID: c.PanelID,
+				LastRawUpBytes: c.LastRawUpBytes, LastRawDownBytes: c.LastRawDownBytes, LastCounterEpoch: c.LastCounterEpoch})
+		}
+	}
+	return rows, nil
 }
 
 // Read this roster's distinct account closure afresh in bounded repository
@@ -1176,7 +1185,7 @@ func (s *Service) loadQuotaUsers(ctx context.Context, snapshot *ports.NativeDesi
 // aggregateCoverage derives the denominator from PSP's own native-panel client
 // rows, never from however many counters happened to arrive. EntriesStale is a
 // tag only: it must not reduce Entries or any quota/error bound.
-func (s *Service) aggregateCoverage(clients []*domain.PSPClient, agents []*domain.NodeAgent, fullFreshnessSeconds int, now time.Time) (nodeprotocol.SegmentCounts, int64) {
+func (s *Service) aggregateCoverage(clients []domain.PSPClientAccounting, agents []*domain.NodeAgent, fullFreshnessSeconds int, now time.Time) (nodeprotocol.SegmentCounts, int64) {
 	agentByPanel := make(map[int64]string, len(agents))
 	activeAgents := make(map[string]struct{}, len(agents))
 	for _, agent := range agents {
@@ -1214,9 +1223,6 @@ func (s *Service) aggregateCoverage(clients []*domain.PSPClient, agents []*domai
 	subjects := make(map[int64]struct{})
 	usedAgents := make(map[string]struct{})
 	for _, client := range clients {
-		if client == nil {
-			continue
-		}
 		agentID, native := agentByPanel[client.PanelID]
 		if !native {
 			continue
@@ -1325,7 +1331,7 @@ func (s *Service) fleetCounterReports(active map[string]struct{}) map[string]fle
 	return reports
 }
 
-func (s *Service) pendingUsage(clients map[int64]*domain.PSPClient, agents []*domain.NodeAgent) map[int64]int64 {
+func (s *Service) pendingUsage(clients map[int64]*domain.PSPClientAccounting, agents []*domain.NodeAgent) map[int64]int64 {
 	panelByAgent := make(map[string]int64, len(agents))
 	activeAgents := make(map[string]struct{}, len(agents))
 	for _, agent := range agents {
@@ -1354,7 +1360,7 @@ func (s *Service) pendingUsage(clients map[int64]*domain.PSPClient, agents []*do
 			if client == nil || client.PanelID != panelID {
 				continue
 			}
-			result[client.UserID] = saturatingAdd(result[client.UserID], s.pendingCounterDelta(client, nodeprotocol.ClientCounters{
+			result[client.UserID] = saturatingAdd(result[client.UserID], s.pendingCounterDelta(*client, nodeprotocol.ClientCounters{
 				Key: counter.key, Present: counter.present,
 				UpBytes: counter.upBytes, DownBytes: counter.downBytes,
 				CounterEpoch: counter.counterEpoch,
@@ -1364,7 +1370,7 @@ func (s *Service) pendingUsage(clients map[int64]*domain.PSPClient, agents []*do
 	return result
 }
 
-func (s *Service) pendingCounterDelta(client *domain.PSPClient, counter nodeprotocol.ClientCounters) int64 {
+func (s *Service) pendingCounterDelta(client domain.PSPClientAccounting, counter nodeprotocol.ClientCounters) int64 {
 	if counter.CounterEpoch == 0 {
 		return 0
 	}

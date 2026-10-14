@@ -805,7 +805,7 @@ func (c *fixedCatalog) set(document ports.CoreCatalogDocument) { c.document = do
 
 func TestPendingUsageKeepsOriginalEpochAnchorUntilTrafficPollPersists(t *testing.T) {
 	service := &Service{anchors: make(map[int64]nodeprotocol.ClientCounters)}
-	client := &domain.PSPClient{ID: 7, UserID: 3}
+	client := domain.PSPClientAccounting{ID: 7, UserID: 3}
 	first := nodeprotocol.ClientCounters{CounterEpoch: 4, UpBytes: 100, DownBytes: 50}
 	if got := service.pendingCounterDelta(client, first); got != 0 {
 		t.Fatalf("first observation delta = %d, want 0", got)
@@ -842,7 +842,7 @@ func TestPendingUsageRejectsCrossPanelCounterSpoofing(t *testing.T) {
 		},
 		anchors: make(map[int64]nodeprotocol.ClientCounters),
 	}
-	clients := map[int64]*domain.PSPClient{
+	clients := map[int64]*domain.PSPClientAccounting{
 		1: {ID: 1, UserID: 101, PanelID: 10, LastCounterEpoch: 1},
 		2: {ID: 2, UserID: 202, PanelID: 20, LastCounterEpoch: 1},
 	}
@@ -890,7 +890,7 @@ func TestAggregateCoverageUsesPSPOwnNativeRowsAndTagsStaleEntries(t *testing.T) 
 		},
 	}}
 	agents := []*domain.NodeAgent{{AgentID: "a", PanelID: 10}, {AgentID: "b", PanelID: 20}}
-	clients := []*domain.PSPClient{
+	clients := []domain.PSPClientAccounting{
 		{ID: 1, UserID: 7, PanelID: 10},
 		{ID: 2, UserID: 7, PanelID: 20},
 		{ID: 3, UserID: 8, PanelID: 20},
@@ -920,7 +920,7 @@ func TestFullReportFreshnessFailsClosedAcrossControlPlaneClockRollback(t *testin
 		},
 	}}
 	coverage, oldest := service.aggregateCoverage(
-		[]*domain.PSPClient{{ID: 1, UserID: 7, PanelID: 10}},
+		[]domain.PSPClientAccounting{{ID: 1, UserID: 7, PanelID: 10}},
 		[]*domain.NodeAgent{{AgentID: "a", PanelID: 10}},
 		60,
 		now,

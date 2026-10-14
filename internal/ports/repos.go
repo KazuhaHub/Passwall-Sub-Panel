@@ -542,11 +542,10 @@ type PSPClientInboundBatchRepo interface {
 }
 
 // PSPClientFleetAccountingRepo optionally reads every client's current stable
-// ownership and raw counter baseline. Only ID, UserID, PanelID, LastRawUpBytes,
-// LastRawDownBytes and LastCounterEpoch are populated. No lifecycle or native
+// ownership and raw counter baseline as compact values. No lifecycle or native
 // filter may reduce the fleet denominator; definitions still use ListAll.
 type PSPClientFleetAccountingRepo interface {
-	ListFleetAccounting(ctx context.Context) ([]*domain.PSPClient, error)
+	ListFleetAccounting(ctx context.Context) ([]domain.PSPClientAccounting, error)
 }
 
 // NodeAgentRepo persists native-agent identity and the three independent

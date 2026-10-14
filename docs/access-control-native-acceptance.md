@@ -1654,3 +1654,34 @@ PostgreSQL 分别累计 11.83s/7.67s/9.23s，占各 PSP CPU 样本
 601 行完整读/当前更新/取消回归保留；新增历史 NULL、宽整数、真实各方言
 中途扫描失败和游标释放回归。实际运行、性能改善和原压力门禁仍待新的
 同源托管验证；旧失败及采样日志继续保留。
+
+`68b01ce6` 的[完整 CI](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/38547418412)
+18 项通过；212 个 App 入口原件在原三个四分钟 race 分片各 RUN1/PASS1、
+无失败/跳过/缓存。PostgreSQL/MySQL 完整 SQL-store 包通过
+73.311s/79.638s，SQLite 的完整 race 分片门禁通过；601 行、NULL/宽整数、
+中途失败与游标释放回归没有跳过路径。nodesync 完整 race 包 71.965s；
+前端类型/构建、4 项浏览器烟测及 2507 项单元通过，既有 1 项条件跳过。
+[同源三数据库压力](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/38547423587)
+仍全部失败：SQLite stage1/136 人、membership；MySQL stage2/200 人、
+receipt；PostgreSQL stage1/200 人、mode。三份原件均无根 PASS、流量、
+四类完成标志或压力阶段 profile。配置错误类别缺失不能填零。
+
+准备阶段采样成功。ListFleetAccounting 在 SQLite/MySQL/PostgreSQL
+累计分别为 9.43s/3.54s/5.06s，各占 PSP CPU 样本
+25.98%/15.86%/15.93%。不同运行的同期准备负载并非严格一致，比例下降
+不能单独证明吞吐改善；实际压力门禁尚未通过。MySQL 最后同步 HTTP200、
+2910ms、完成年龄 2267ms、父进程存活，也不能替代全部就绪条件。
+
+后续将可选机队计数端口的返回记录收紧为六字段、48 字节的数值类型，
+SQL 游标复用扫描变量并按值追加到连续切片；不再为每行分配完整客户端
+定义。配额索引指向该切片元素，覆盖率与 anchor 计算读取同样六字段，
+保留所有当前数据库行与归属、分母、新鲜度、epoch/关闭客户端规则。
+旧仓库仍通过 ListAll 当前读取后投影，nil 条目仍不计入，无跨调用缓存。
+新增数值记录边界和当前读/快照独立性检查；原 SQL 游标方言/错误与服务
+回归继续执行。该改动的实际改善仍待同源托管 CI 和原压力门禁验证。
+
+`68b01ce6` 的[原生矩阵](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/38548501014)
+48 个实际作业通过，48 份精确提交/run、未过期原件独立核验通过，861 个
+必需场景通过；此时 GitHub 汇总作业仍在下载报告，不能提前称其已经成功。
+后续数值记录改动的 SQL-store/nodesync 测试编译、相关 vet、完整 Go 构建
+及 App acceptance 标签编译通过；本地未运行 Go 测试或测试二进制。

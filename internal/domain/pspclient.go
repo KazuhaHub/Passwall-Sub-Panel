@@ -83,6 +83,14 @@ type PSPClient struct {
 	PeriodBaselineTotalBytes int64
 }
 
+// PSPClientAccounting carries only current durable ownership and counter
+// baselines. Fleet-wide quota reads do not need client credentials or lifecycle.
+type PSPClientAccounting struct {
+	ID, UserID, PanelID              int64
+	LastRawUpBytes, LastRawDownBytes int64
+	LastCounterEpoch                 uint64
+}
+
 // SetDesiredLifecycle updates only the desired intent carried by this client.
 func (c *PSPClient) SetDesiredLifecycle(lifecycle UserLifecycle) {
 	if c == nil {
