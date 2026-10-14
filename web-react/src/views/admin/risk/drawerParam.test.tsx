@@ -2,7 +2,7 @@
 import { MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it } from 'vitest'
-import { useDrawerParam } from './drawerParam'
+import { useDrawerParam } from '@/hooks/useDrawerParam'
 
 // The drawer's URL rule (§3.4): opening PUSHES `param=<id>` with a state mark,
 // so Back closes it; closing an entry that open pushed goes Back, so the
@@ -51,7 +51,7 @@ describe('useDrawerParam', () => {
 
     expect(where()).toBe('/admin/risk?tab=queue&source=geo&user=7')
     expect(screen.getByTestId('id').textContent).toBe('7')
-    expect(JSON.parse(screen.getByTestId('state').textContent ?? 'null')).toEqual({ riskDrawer: 'user' })
+    expect(JSON.parse(screen.getByTestId('state').textContent ?? 'null')).toEqual({ drawer: 'user' })
     // Pushed, not replaced: Back returns to the list without the drawer.
     act(() => { fireEvent.click(screen.getByText('back')) })
     expect(where()).toBe('/admin/risk?tab=queue&source=geo')

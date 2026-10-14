@@ -23,7 +23,7 @@ import {
   type WindowMode,
 } from '@/utils/diagnostics'
 import type { CardId } from '@/utils/diagnosticsCatalog'
-import KpiTile, { KpiGrid } from './KpiTile'
+import KpiTile, { KpiGrid } from '@/components/KpiTile'
 import PanelOpTable from './PanelOpTable'
 import StageBar from './StageBar'
 import SubsystemCard from './SubsystemCard'

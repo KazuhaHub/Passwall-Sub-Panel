@@ -20,7 +20,7 @@ import {
   changedKeys, pick, POLICY_KEYS, type RiskPolicyKey, type RiskPolicySettings, type RiskPolicyView,
 } from './policyKeys'
 import { advancedConfigured, cardFields, outOfRange, POLICY_CARDS, type PolicyCardId } from './policyLayout'
-import { useLeaveGuard } from './useLeaveGuard'
+import { useLeaveGuard } from '@/hooks/useLeaveGuard'
 
 const P = 'admin:risk_center.policy.'
 
@@ -115,7 +115,7 @@ function PolicyBody({ loaded }: { loaded: RiskPolicyView }) {
   useLeaveGuard(dirty || exceptions.dirty, {
     title: t(`${P}leave_title`), message: t(`${P}leave_message`), confirmText: t(`${P}leave_confirm`),
     destructive: true,
-  })
+  }, (next, current) => next.pathname !== current.pathname || new URLSearchParams(next.search).get('tab') !== 'policy')
 
   const patch = (p: Partial<RiskPolicySettings>) => {
     setDraft(d => ({ ...d, ...p }))

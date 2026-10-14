@@ -60,5 +60,14 @@
     "details": "View details",
     "copy": "Copy",
     "copied": "Copied"
+  },
+  "policy_field": {
+    "range_default": "Range {{min}}–{{max}}, default {{d}}",
+    "min_default": "At least {{min}}, default {{d}}",
+    "default_only": "Default {{d}}",
+    "out_of_range": "Out of range",
+    "reset_default": "Reset to default",
+    "default_adornment": "Default",
+    "effective": "In effect: {{value}}"
   }
 }
