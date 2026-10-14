@@ -105,6 +105,16 @@ describe('FAMILY_CATALOG', () => {
 })
 
 describe('STAGE_GROUP', () => {
+  it('names every closed native configuration failure phase and cause', () => {
+    const phases = ['catalog', 'build', 'compile', 'repository', 'capability', 'encode', 'mint']
+    const causes = ['canceled', 'deadline', 'conflict', 'validation', 'unavailable', 'other']
+    const src = goSource('internal/service/nodesync/nodesync.go') + goSource('internal/service/nodesync/policy.go')
+    expect([...new Set([...src.matchAll(/recordConfigFailure\("([a-z_]+)"/g)].map(match => match[1]))].sort()).toEqual([...phases].sort())
+    expect(FAMILY_CATALOG.psp_node_control_config_error_total).toEqual({ card: 'node', type: 'counter', labelled: true })
+    expect(FAMILY_LABEL_GROUP.psp_node_control_config_error_total).toBe('node_config_failure')
+    expectCopy(phases.flatMap(phase => causes.map(cause => `labels.node_config_failure.${phase}_${cause}`)))
+  })
+
   it('names every measured native control stage in both bundles', () => {
     const src = goSource('internal/service/nodesync/nodesync.go')
     const initial = /stage, stageStarted := "([a-z_]+)", started/.exec(src)?.[1]

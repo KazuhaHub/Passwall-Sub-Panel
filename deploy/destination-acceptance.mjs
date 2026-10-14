@@ -328,6 +328,8 @@ export function sanitizeDestinationResults(input) {
   return input.split(/\r?\n/).filter(line => line.trim()).map(line => {
     const event = parseEvent(line)
     if (event.Action === 'output') {
+      const configError = typeof event.Output === 'string' && /native global config error: ((?:catalog|build|compile|repository|capability|encode|mint)_(?:canceled|deadline|conflict|validation|unavailable|other))=([0-9]{1,7})(?:\r?\n|$)/.exec(event.Output)
+      if (configError && isSafeGlobalConfigError(configError[1], Number(configError[2]))) return JSON.stringify({ Action: 'output', Package: pkg, Diagnostic: `global_config_error_${configError[1]}`, Observed: Number(configError[2]) })
       const dockerPreserved = typeof event.Output === 'string' && /native diagnostic: (docker_preserved_material|docker_preserved_state|docker_advanced_epoch)=(true|false)(?:\r?\n|$)/.exec(event.Output)
       if (dockerPreserved) return JSON.stringify({ Action: 'output', Package: pkg, Diagnostic: dockerPreserved[1], Observed: dockerPreserved[2] === 'true' })
       const globalStage = typeof event.Output === 'string' && /native global stage: ((?:desired|ingest|policy|panel|config|roster|directives|tasks|finish)_(?:count|mean_ms|p95_ms|max_ms))=([0-9]{1,7})(?:\r?\n|$)/.exec(event.Output)
@@ -383,6 +385,7 @@ export function isSafeDestinationDiagnostic(event) {
   }
   if (!Number.isInteger(event.Observed) || event.Observed < 0) return false
   if (event.Diagnostic.startsWith('global_stage_')) return isSafeGlobalStageFact(event.Diagnostic.slice('global_stage_'.length), event.Observed)
+  if (event.Diagnostic.startsWith('global_config_error_')) return isSafeGlobalConfigError(event.Diagnostic.slice('global_config_error_'.length), event.Observed)
   if (event.Diagnostic.startsWith('global_sync_')) return isSafeGlobalSyncFact(event.Diagnostic.slice('global_sync_'.length), event.Observed)
   if (event.Diagnostic === 'receipt_wait') return event.Observed >= 1 && event.Observed <= 99
   return ['panel_downgrade_application_ms', 'panel_reupgrade_application_ms'].includes(event.Diagnostic) && event.Observed <= 150000
@@ -399,6 +402,9 @@ function isSafeGlobalSyncFact(name, value) {
 function isSafeGlobalStageFact(name, value) {
   if (!/^(desired|ingest|policy|panel|config|roster|directives|tasks|finish)_(count|mean_ms|p95_ms|max_ms)$/.test(name) || !Number.isInteger(value) || value < 0) return false
   return name.endsWith('_count') ? value >= 1 && value <= 1000000 : value <= 1200000
+}
+function isSafeGlobalConfigError(name, value) {
+  return /^(catalog|build|compile|repository|capability|encode|mint)_(canceled|deadline|conflict|validation|unavailable|other)$/.test(name) && Number.isInteger(value) && value >= 1 && value <= 1000000
 }
 function checkCases(input, names) {
   const runs = new Map(), passes = new Map()

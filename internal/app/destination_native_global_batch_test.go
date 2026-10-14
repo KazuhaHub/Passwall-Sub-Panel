@@ -85,7 +85,18 @@ func TestNativeDestinationGlobalBatchPressure(t *testing.T) {
 		nativeMust(t, os.WriteFile(evidence, append(body, '\n'), 0644), "save closed numeric global batch evidence")
 	}
 	writeStageDiagnostics := func() {
-		for _, h := range metrics.Take().Histograms {
+		observed := metrics.Take()
+		for _, counter := range observed.Counters {
+			for _, phase := range []string{"catalog", "build", "compile", "repository", "capability", "encode", "mint"} {
+				for _, cause := range []string{"canceled", "deadline", "conflict", "validation", "unavailable", "other"} {
+					name := phase + "_" + cause
+					if counter.Name == "psp_node_control_config_error_total{reason="+name+"}" && counter.Value > 0 && counter.Value <= 1000000 {
+						t.Logf("native global config error: %s=%d", name, counter.Value)
+					}
+				}
+			}
+		}
+		for _, h := range observed.Histograms {
 			for _, name := range []string{"desired", "ingest", "policy", "panel", "config", "roster", "directives", "tasks", "finish"} {
 				if h.Name != "psp_node_control_sync_stage_ms{stage="+name+"}" || h.Count <= 0 {
 					continue

@@ -10,6 +10,7 @@ import (
 
 	"github.com/KazuhaHub/passwall-protocol/protocol"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/metrics"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/destpolicy"
 )
@@ -83,6 +84,8 @@ func TestPolicySyncFailuresDoNotMintConfig(t *testing.T) {
 	for _, stage := range []string{"observe", "compile", "mint"} {
 		t.Run(stage, func(t *testing.T) {
 			f := newConfigAppliedFixture(t)
+			metrics.Reset()
+			defer metrics.Reset()
 			failure := errors.New("policy failure")
 			candidate := policySyncCandidate()
 			f.service.policyCandidates = f.repos.NodeAgent.(ports.NodePolicyCandidateRepo)
@@ -106,6 +109,19 @@ func TestPolicySyncFailuresDoNotMintConfig(t *testing.T) {
 			_, err := f.service.Sync(t.Context(), policySyncReport(f))
 			if err == nil || stage != "mint" && !errors.Is(err, failure) {
 				t.Fatalf("failure ignored: %v", err)
+			}
+			want := map[string]string{"observe": "", "compile": "compile_other", "mint": "mint_validation"}[stage]
+			found := false
+			for _, counter := range metrics.Take().Counters {
+				if strings.HasPrefix(counter.Name, "psp_node_control_config_error_total{") && counter.Value > 0 {
+					if counter.Name != "psp_node_control_config_error_total{reason="+want+"}" || counter.Value != 1 {
+						t.Fatal("configuration failure counter changed its boundary or cause")
+					}
+					found = true
+				}
+			}
+			if found != (want != "") {
+				t.Fatal("failed configuration boundary was not recorded exactly once")
 			}
 			stream, err := f.repos.NodeAgent.GetStream(t.Context(), f.agent.AgentID, domain.NodeAgentStreamConfig)
 			if err != nil || stream.DesiredVersion != 0 {

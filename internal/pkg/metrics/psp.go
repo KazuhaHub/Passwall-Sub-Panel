@@ -718,6 +718,11 @@ var (
 		"Control coordinator phases, including failed calls; fixed phase labels only, no agent identity or request content.",
 		"ms", "stage", LatencyBucketsMS,
 	)
+	NodeControlConfigErrorTotal = NewCounterVec(
+		"psp_node_control_config_error_total",
+		"Failed configuration preparation calls, by fixed phase and typed cause; excludes identity, configuration content and raw errors.",
+		"reason",
+	)
 )
 
 // ---------------------------------------------------------------------

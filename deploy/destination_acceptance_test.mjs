@@ -24,6 +24,26 @@ test('published remote rollback requires the real watcher, helper and complete e
   for (const value of [acceptance.remoteNodeCandidate.commit, 'PSP_NATIVE_REMOTE_SOURCE', 'PSP_NATIVE_REMOTE_NODE_BIN', 'check-remote-upgrade', 'TestNativePublishedRemoteRollback', 'TestNativeRemoteHealthFaultPreservesOtherRequests']) assert(job.includes(value), value)
 })
 
+test('global configuration failure facts have closed phases, causes and numeric bounds', async () => {
+  const { sanitizeDestinationResults, isSafeDestinationDiagnostic } = await import('./destination-acceptance.mjs')
+  for (const phase of ['catalog', 'build', 'compile', 'repository', 'capability', 'encode', 'mint']) {
+    for (const cause of ['canceled', 'deadline', 'conflict', 'validation', 'unavailable', 'other']) {
+      const result = sanitizeDestinationResults(encode([{ Action: 'output', Output: `private identity: native global config error: ${phase}_${cause}=17\n` }]))
+      const event = JSON.parse(result)
+      assert.deepEqual(Object.keys(event).sort(), ['Action', 'Diagnostic', 'Observed', 'Package'])
+      assert.equal(event.Diagnostic, `global_config_error_${phase}_${cause}`)
+      assert.equal(event.Observed, 17)
+      assert(isSafeDestinationDiagnostic(event))
+      assert(!result.includes('private identity'))
+    }
+  }
+  for (const fact of ['agent_other=1', 'compile_private=1', 'compile_other=0', 'compile_other=1000001', 'compile_other=-1', 'compile_other=1.5', 'compile_other=1 private']) {
+    assert.equal(sanitizeDestinationResults(encode([{ Action: 'output', Output: `native global config error: ${fact}\n` }])).trim(), '')
+  }
+  for (const Observed of [0, 1000001, -1, 1.5, '1', true]) assert(!isSafeDestinationDiagnostic({ Diagnostic: 'global_config_error_compile_other', Observed }))
+  assert(!isSafeDestinationDiagnostic({ Diagnostic: 'global_config_error_agent_other', Observed: 1 }))
+})
+
 test('published Docker rollback requires real policy, automatic recovery and both production architectures', async () => {
   const acceptance = await import('./destination-acceptance.mjs')
   assert.equal(typeof acceptance.checkDockerUpgradeResults, 'function')

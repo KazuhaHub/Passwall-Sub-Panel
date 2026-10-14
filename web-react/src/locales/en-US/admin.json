@@ -4878,6 +4878,10 @@
         "label": "Node control processing time",
         "desc": "Time spent in the control coordinator, including failed calls. Excludes HTTP authentication, decoding and network transit."
       },
+      "psp_node_control_config_error_total": {
+        "label": "Node configuration failures",
+        "desc": "Failed configuration preparation by phase and cause. Helps distinguish cancellation, timeouts, conflicts and invalid configuration; counts do not prove node readiness."
+      },
       "psp_node_control_sync_stage_ms": {
         "label": "Node control stage time",
         "desc": "Processing time by control stage, including failed calls. Use the distribution to locate slow work; stages also include database and lock waits."
@@ -4912,6 +4916,50 @@
       }
     },
     "labels": {
+      "node_config_failure": {
+        "catalog_canceled": "Core catalog: canceled",
+        "catalog_deadline": "Core catalog: deadline exceeded",
+        "catalog_conflict": "Core catalog: conflict",
+        "catalog_validation": "Core catalog: invalid input",
+        "catalog_unavailable": "Core catalog: unavailable",
+        "catalog_other": "Core catalog: other error",
+        "build_canceled": "Configuration build: canceled",
+        "build_deadline": "Configuration build: deadline exceeded",
+        "build_conflict": "Configuration build: conflict",
+        "build_validation": "Configuration build: invalid input",
+        "build_unavailable": "Configuration build: unavailable",
+        "build_other": "Configuration build: other error",
+        "compile_canceled": "Policy compilation: canceled",
+        "compile_deadline": "Policy compilation: deadline exceeded",
+        "compile_conflict": "Policy compilation: conflict",
+        "compile_validation": "Policy compilation: invalid input",
+        "compile_unavailable": "Policy compilation: unavailable",
+        "compile_other": "Policy compilation: other error",
+        "repository_canceled": "Candidate repository: canceled",
+        "repository_deadline": "Candidate repository: deadline exceeded",
+        "repository_conflict": "Candidate repository: conflict",
+        "repository_validation": "Candidate repository: invalid input",
+        "repository_unavailable": "Candidate repository: unavailable",
+        "repository_other": "Candidate repository: other error",
+        "capability_canceled": "Capability check: canceled",
+        "capability_deadline": "Capability check: deadline exceeded",
+        "capability_conflict": "Capability check: conflict",
+        "capability_validation": "Capability check: invalid input",
+        "capability_unavailable": "Capability check: unavailable",
+        "capability_other": "Capability check: other error",
+        "encode_canceled": "Configuration encoding: canceled",
+        "encode_deadline": "Configuration encoding: deadline exceeded",
+        "encode_conflict": "Configuration encoding: conflict",
+        "encode_validation": "Configuration encoding: invalid input",
+        "encode_unavailable": "Configuration encoding: unavailable",
+        "encode_other": "Configuration encoding: other error",
+        "mint_canceled": "Atomic candidate commit: canceled",
+        "mint_deadline": "Atomic candidate commit: deadline exceeded",
+        "mint_conflict": "Atomic candidate commit: conflict",
+        "mint_validation": "Atomic candidate commit: invalid input",
+        "mint_unavailable": "Atomic candidate commit: unavailable",
+        "mint_other": "Atomic candidate commit: other error"
+      },
       "node_control_stage": {
         "desired": "Read desired state",
         "ingest": "Persist node report",

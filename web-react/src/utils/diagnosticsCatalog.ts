@@ -127,6 +127,7 @@ export const FAMILY_CATALOG: Record<string, FamilyInfo> = {
   psp_node_sync_refused_total: c('node', true),
   psp_node_control_sync_ms: h('node'),
   psp_node_control_sync_stage_ms: h('node', true),
+  psp_node_control_config_error_total: c('node', true),
   psp_node_policy_status_dropped_total: c('node'),
   psp_node_audit_report_total: c('node', true),
   psp_dest_audit_rows_total: c('node', true),
@@ -157,6 +158,7 @@ export const FAMILY_CATALOG: Record<string, FamilyInfo> = {
 export const FAMILY_LABEL_GROUP: Record<string, string> = {
   psp_poll_stage_ms: 'stage',
   psp_node_control_sync_stage_ms: 'node_control_stage',
+  psp_node_control_config_error_total: 'node_config_failure',
   psp_lifecycle_sync_write_reason_total: 'write_reason',
   psp_lifecycle_sync_error_stage_total: 'lifecycle_stage',
   psp_lifecycle_sync_error_panel_kind_total: 'panel_kind',

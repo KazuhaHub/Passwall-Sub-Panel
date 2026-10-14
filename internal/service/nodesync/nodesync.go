@@ -239,10 +239,12 @@ func (s *Service) Sync(ctx context.Context, report nodeprotocol.NodeReport) (nod
 	advanceStage("config")
 	coreDocument, err := s.coreCatalog.Document(ctx)
 	if err != nil {
+		recordConfigFailure("catalog", err)
 		return nodeprotocol.SyncResponse{}, fmt.Errorf("nodesync: %w", err)
 	}
 	configBody, err := buildConfig(snapshot, agent, coreDocument)
 	if err != nil {
+		recordConfigFailure("build", err)
 		return nodeprotocol.SyncResponse{}, err
 	}
 	configBody, configStream, err := s.mintConfig(ctx, agent, snapshot, report.Capabilities, configBody, now)

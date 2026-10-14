@@ -17,25 +17,33 @@ type PolicyCandidate = ports.DestPolicyCandidate
 func (s *Service) mintConfig(ctx context.Context, agent *domain.NodeAgent, snapshot *ports.NativeDesiredSnapshot, capabilities []string, body protocol.ConfigBody, now time.Time) (protocol.ConfigBody, *domain.NodeAgentStream, error) {
 	if s.policies == nil {
 		stream, err := s.mint(ctx, agent, domain.NodeAgentStreamConfig, body, now)
+		if err != nil {
+			recordConfigFailure("mint", err)
+		}
 		return body, stream, err
 	}
 	if s.policyCandidates == nil {
+		recordConfigFailure("repository", domain.ErrUnavailable)
 		return body, nil, fmt.Errorf("%w: missing atomic policy candidate repository", domain.ErrUnavailable)
 	}
 	candidate, err := s.policies.Compile(ctx, agent, snapshot, capabilities, body)
 	if err != nil {
+		recordConfigFailure("compile", err)
 		return body, nil, fmt.Errorf("nodesync: compile destination policy: %w", err)
 	}
 	if candidate.Policy != nil && !slices.Contains(capabilities, protocol.CapabilityDestinationPolicy) {
+		recordConfigFailure("capability", domain.ErrValidation)
 		return body, nil, fmt.Errorf("%w: destination policy requires node capability", domain.ErrValidation)
 	}
 	body.Policy = candidate.Policy
 	canonical, err := s.encodePolicyConfig(body, candidate.CacheKey)
 	if err != nil {
+		recordConfigFailure("encode", err)
 		return body, nil, fmt.Errorf("nodesync: encode policy config: %w", err)
 	}
 	stream, _, err := s.policyCandidates.MintConfigWithPolicyCandidate(ctx, agent.AgentID, canonical, candidate.Mint, now)
 	if err != nil {
+		recordConfigFailure("mint", err)
 		return body, nil, fmt.Errorf("nodesync: mint config and destination candidate: %w", err)
 	}
 	return body, stream, nil

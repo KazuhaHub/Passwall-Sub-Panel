@@ -1499,3 +1499,18 @@ client/node对读取一次、500个参数以内，同一事务按原输入顺序
 只有applied可更新确认版本/凭据，blocked清除时钟并保留确认凭据。
 缺失附件不创建，晚期写入失败整批回滚，旧单条端口保留为兼容路径。
 该修复仍须实际三后端运行和原压力门禁确认。
+
+配置准备的失败观测补充：`psp_node_control_config_error_total` 按固定阶段
+catalog/build/compile/repository/capability/encode/mint 和类型
+canceled/deadline/conflict/validation/unavailable/other 计数。类型按错误链
+判定，不读取原始错误字符串，身份、候选正文和数据库参数不进入标签。
+现有返回错误、重试、回执、时钟和完成门禁保持；这个计数不覆盖认证或
+其他控制阶段，也不证明节点就绪。诊断页面同步提供中英文指标及 42 个
+固定组合的文案。全局准备进度和失败清理仅输出该已有计数的固定名称
+及 1–1000000 数值；缺失字段不能填成零或解释为没有失败。
+
+源 `bdff6006` 的全局三后端仍全部套件超时：SQLite 200 人、stage2；
+MySQL 200 人、总体 stage1 但已进入 receipt；PostgreSQL 198 人、membership。
+三者流量与四类完成标志均为零，没有压力 profile 或根测试 PASS。
+配置阶段与名单阶段次数不同只提示存在早期返回，不能据此指定根因；
+新的分类计数仍须同源真实运行确认。旧失败原件继续保留。
