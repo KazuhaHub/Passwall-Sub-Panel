@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	membershipCacheEntries = 64
+	membershipCacheEntries = policyCacheEntries
 	membershipCacheBudget  = 8 << 20
 )
 

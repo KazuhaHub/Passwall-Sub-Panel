@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -13,6 +14,23 @@ import (
 )
 
 type failingCachedPolicyMint struct{ ports.NodePolicyCandidateRepo }
+
+func TestPolicyConfigCacheKeeps65IndependentCompileKeysWarm(t *testing.T) {
+	f, candidate, encoded := cachePolicySyncFixture(t)
+	body := protocol.ConfigBody{Policy: candidate.Policy}
+	for round := range 3 {
+		for panel := 1; panel <= 65; panel++ {
+			canonical, err := f.service.encodePolicyConfig(body, fmt.Sprint("node-", panel))
+			if err != nil || !json.Valid(canonical) {
+				t.Fatalf("fleet config round=%d panel=%d: %v", round, panel, err)
+			}
+			canonical[0] = 0
+		}
+	}
+	if *encoded != 65 {
+		t.Fatalf("stable fleet repeatedly encoded policy config: %d", *encoded)
+	}
+}
 
 func (f failingCachedPolicyMint) MintConfigWithPolicyCandidate(_ context.Context, _ string, canonical []byte, _ domain.DestPolicyMint, _ time.Time) (*domain.NodeAgentStream, bool, error) {
 	if len(canonical) > 0 {

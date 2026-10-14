@@ -3,6 +3,7 @@ package destpolicy
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -177,5 +178,27 @@ func TestMembershipInputCacheCancellationAndUnsettledChangesReturnNoInputs(t *te
 	roster, quota, err := inputs.ForNode(t.Context(), 81, snapshot, true)
 	if !errors.Is(err, domain.ErrUnavailable) || len(roster.UserIDs) != 0 || len(quota.UserIDs) != 0 || members.calls.Load() != 3 || len(inputs.membershipCache.items) != 0 {
 		t.Fatalf("unsettled inputs escaped or retried indefinitely: roster=%+v quota=%+v queries=%d / %v", roster, quota, members.calls.Load(), err)
+	}
+}
+
+func TestMembershipInputCacheByteBudgetStillEvictsBelowEntryCeiling(t *testing.T) {
+	cache := newMembershipInputCache()
+	large := membershipInputs{quota: RosterInput{UserGroups: map[int64]int64{}}}
+	for id := int64(1); id <= 18000; id++ {
+		large.quota.UserGroups[id] = 8
+		large.quota.UserIDs = append(large.quota.UserIDs, id)
+	}
+	for panel := range 10 {
+		cache.put(fmt.Sprint(panel), large)
+	}
+	if len(cache.items) >= 10 || cache.weight > 8<<20 || cache.order.Len() != len(cache.items) {
+		t.Fatalf("byte budget bypassed: entries=%d weight=%d", len(cache.items), cache.weight)
+	}
+	if _, found := cache.get("0"); found {
+		t.Fatal("oldest membership retained beyond byte budget")
+	}
+	latest, found := cache.get("9")
+	if !found || len(latest.quota.UserIDs) != 18000 || len(latest.quota.UserGroups) != 18000 {
+		t.Fatal("byte eviction truncated or discarded the newest membership")
 	}
 }

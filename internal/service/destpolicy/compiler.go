@@ -38,6 +38,12 @@ type CompilerOptions struct {
 	Now         func() time.Time
 }
 
+// Keep a medium fleet warm without a round-robin scan evicting the next node.
+// Each cache still enforces its independent byte budget, including oversized
+// entries; this entry ceiling does not enlarge those budgets. Selection may
+// retain both keys around a decision transition, so allow room for both.
+const policyCacheEntries = 256
+
 type Compiler struct {
 	definitions            CompilerDefinitions
 	runtime                ports.DestAgentPolicyRepo
@@ -70,9 +76,9 @@ func NewCompiler(options CompilerOptions) (*Compiler, error) {
 	}
 	c := &Compiler{definitions: options.Definitions, runtime: options.Runtime, inputs: options.Inputs, minSeconds: options.MinSeconds, now: options.Now}
 	c.prepare, c.selectCandidate = PrepareCandidate, SelectCandidate
-	c.preparedCache = boundedcache.New[*PreparedCandidate](64, 32<<20)
-	c.selectionCache = boundedcache.New[cachedSelection](64, 32<<20)
-	c.issuesWritten = boundedcache.New[string](64, 64<<10)
+	c.preparedCache = boundedcache.New[*PreparedCandidate](policyCacheEntries, 32<<20)
+	c.selectionCache = boundedcache.New[cachedSelection](policyCacheEntries, 32<<20)
+	c.issuesWritten = boundedcache.New[string](policyCacheEntries, 64<<10)
 	c.publisher = NewPublisher(options.Definitions, nil)
 	c.publisher.now = options.Now
 	c.observer = NewObserver(options.Runtime, options.Now)

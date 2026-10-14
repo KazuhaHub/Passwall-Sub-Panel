@@ -9,6 +9,10 @@ import (
 	"github.com/KazuhaHub/passwall-protocol/protocol"
 )
 
+// The byte budget remains 32 MiB. Avoid cyclic eviction when more than 64
+// independent nodes repeatedly request their own immutable configuration.
+const policyConfigCacheEntries = 256
+
 func (s *Service) encodePolicyConfig(body protocol.ConfigBody, compileKey string) ([]byte, error) {
 	encode := s.policyConfigEncode
 	if encode == nil {

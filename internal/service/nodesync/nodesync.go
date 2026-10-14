@@ -134,7 +134,7 @@ func New(options Options) (*Service, error) {
 		host:     options.Host,
 		audit:    options.Audit,
 		policies: options.Policies, policyCandidates: options.PolicyCandidates,
-		policyConfigCache: boundedcache.New[[]byte](64, 32<<20),
+		policyConfigCache: boundedcache.New[[]byte](policyConfigCacheEntries, 32<<20),
 	}, nil
 }
 
