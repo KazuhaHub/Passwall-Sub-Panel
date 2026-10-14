@@ -24,6 +24,30 @@ test('published remote rollback requires the real watcher, helper and complete e
   for (const value of [acceptance.remoteNodeCandidate.commit, 'PSP_NATIVE_REMOTE_SOURCE', 'PSP_NATIVE_REMOTE_NODE_BIN', 'check-remote-upgrade', 'TestNativePublishedRemoteRollback', 'TestNativeRemoteHealthFaultPreservesOtherRequests']) assert(job.includes(value), value)
 })
 
+test('setup profiling retains only bounded numeric observations and cannot prove completion', async () => {
+  const { isSafeDestinationDiagnostic, checkDestinationGlobalBatchResults } = await import('./destination-acceptance.mjs')
+  const limits = { elapsed_ms: 1200000, allocated_bytes: 1000000000000000, gc_cycles: 1000000, gc_pause_ns: 1200000000000, heap_bytes: 1000000000000000 }
+  const facts = []
+  for (const [name, limit] of Object.entries(limits)) {
+    for (const value of [0, limit]) {
+      const result = sanitizeDestinationResults(encode([{ Action: 'output', Output: `private-file: native global setup profile: ${name}=${value}\n` }]))
+      const event = JSON.parse(result)
+      assert.deepEqual(Object.keys(event).sort(), ['Action', 'Diagnostic', 'Observed', 'Package'])
+      assert.equal(event.Diagnostic, `global_setup_profile_${name}`)
+      assert.equal(event.Observed, value)
+      assert(isSafeDestinationDiagnostic(event))
+      assert(!result.includes('private-file'))
+      facts.push(event)
+    }
+    for (const value of [limit + 1, -1, 1.5, 'private', '1; secret']) {
+      assert.equal(sanitizeDestinationResults(encode([{ Action: 'output', Output: `native global setup profile: ${name}=${value}\n` }])).trim(), '')
+    }
+    for (const Observed of [limit + 1, -1, 1.5, '1', true]) assert(!isSafeDestinationDiagnostic({ Diagnostic: `global_setup_profile_${name}`, Observed }))
+  }
+  assert(!isSafeDestinationDiagnostic({ Diagnostic: 'global_setup_profile_agent', Observed: 1 }))
+  assert.throws(() => checkDestinationGlobalBatchResults(encode(facts)))
+})
+
 test('global configuration failure facts have closed phases, causes and numeric bounds', async () => {
   const { sanitizeDestinationResults, isSafeDestinationDiagnostic } = await import('./destination-acceptance.mjs')
   for (const phase of ['catalog', 'build', 'compile', 'repository', 'capability', 'encode', 'mint']) {

@@ -1571,10 +1571,39 @@ MySQL 指令准备累计平均 792ms，最近同步 3160ms、完成年龄 2202ms
 父进程存活，仍不满足就绪。[原生矩阵](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/38530041392)
 首轮 47 项作业通过；集成 Node + Xray 26.9.9 根测试在 2.36s 失败，未进入
 场景子测试，也没有固定诊断类别，汇总门禁随之失败。首轮 48 份原件已保留，
-同一提交的该作业 attempt2 已启动，尚不能确定原因或宣称矩阵完整通过。
+同一提交的该作业 attempt2 已通过，49 项作业最终成功。按精确新 artifact
+ID/job 上传时间核验复验原件，及首轮其余 47 个未变 artifact ID，组成的
+48 份报告验证 861 个必需场景通过；首轮失败原件继续保留，原因尚未确定。
 
 后续将六字段机队计数查询的扫描目标从完整客户端行改为六个数值字段的
 小行类型，并显式保留 `psp_clients` 模型。查询列、全部行、排序、端口与
 返回数据保持；扫描阶段不再为每行分配完整凭据/生命周期记录。601 行
 回归同时检查单次完整查询、数值扫描的尺寸边界、当前更新和取消失败，
 实际三方言及压力结果仍须新的同源运行。
+
+`c23a0803` 的[完整 CI](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/38534794832)
+已 18 项通过；212 个 App 入口原件各 RUN1/PASS1，三个原四分钟 race 分片
+无失败/跳过/缓存。nodesync 完整 race 包通过 66.500s；PostgreSQL/MySQL
+完整 SQL-store 包通过 114.209s/62.452s，SQLite 的完整 race 分片门禁通过。
+前端类型与构建通过，2507 项单元通过，保留原有 1 项条件跳过。
+[同源三数据库压力](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/38534801185)
+全部失败：SQLite stage1/136 人，MySQL stage2/200 人，PostgreSQL 总体
+stage1/200 人、已进入 receipt，均为套件超时。三份来源原件仍没有压力
+profile、流量或四类完成标志，没有根 PASS；配置错误类别缺失不能填零。
+[完整原生矩阵](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/38536216454)
+已 49 项作业通过，48 份精确提交/run、未过期原件核验通过，861 个必需
+场景通过。现有紧凑扫描不能据此宣称解决压力瓶颈。
+
+增加手动选择 `global-batch-profile`，仅在完成 50 个真实成员后，对 PSP
+进程采样 60 秒 CPU，并记录该窗口的分配字节、GC 次数/暂停和结束时堆字节。
+采样使用独占创建、0600 的 runner 临时文件，计时器停止与清理停止只执行
+一次；普通 all/global-batch 和 PR/main 不开启采样。二进制 profile 不上传，
+独立 always 步骤只打印固定数量的静态函数统计。仍执行相同 65 owners、
+200 users、四条流量 lane、20 分钟上限及完整失败门禁；采样不能使失败转为
+通过。这是准备阶段的诊断，不能测量子 Node/SQL 进程 CPU，也不能替代
+压力阶段 profile 或真实长时验收。新增文件边界、自动/显式停止回归和
+workflow 选择测试；实际采样和 Go 回归须在自有托管 runner 执行。
+
+本次完整 deploy 脚本测试 262 项通过；App acceptance 标签仅编译与 vet
+通过，完整 Go 构建通过。本地没有运行 Go 测试或测试二进制；新增回归
+实际结果与准备阶段采样仍待同源托管运行。

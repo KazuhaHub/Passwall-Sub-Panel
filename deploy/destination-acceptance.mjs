@@ -336,6 +336,8 @@ export function sanitizeDestinationResults(input) {
       if (globalStage && isSafeGlobalStageFact(globalStage[1], Number(globalStage[2]))) return JSON.stringify({ Action: 'output', Package: pkg, Diagnostic: `global_stage_${globalStage[1]}`, Observed: Number(globalStage[2]) })
       const globalSync = typeof event.Output === 'string' && /native global sync: (attempt_age_ms|completion_age_ms|last_duration_ms|last_status|inflight|parent_alive)=([0-9]{1,7})(?:\r?\n|$)/.exec(event.Output)
       if (globalSync && isSafeGlobalSyncFact(globalSync[1], Number(globalSync[2]))) return JSON.stringify({ Action: 'output', Package: pkg, Diagnostic: `global_sync_${globalSync[1]}`, Observed: Number(globalSync[2]) })
+      const setupProfile = typeof event.Output === 'string' && /native global setup profile: (elapsed_ms|allocated_bytes|gc_cycles|gc_pause_ns|heap_bytes)=([0-9]{1,16})(?:\r?\n|$)/.exec(event.Output)
+      if (setupProfile && isSafeSetupProfileFact(setupProfile[1], Number(setupProfile[2]))) return JSON.stringify({ Action: 'output', Package: pkg, Diagnostic: `global_setup_profile_${setupProfile[1]}`, Observed: Number(setupProfile[2]) })
       const fleetSetup = typeof event.Output === 'string' && /native diagnostic: (fleet_setup_(?:cohort|candidates|database|session|cadence|principals|peers|server|daemons|membership))=(true|false)(?:\r?\n|$)/.exec(event.Output)
       if (fleetSetup) return JSON.stringify({ Action: 'output', Package: pkg, Diagnostic: fleetSetup[1], Observed: fleetSetup[2] === 'true' })
       const loadReceipt = typeof event.Output === 'string' && /native diagnostic: (load_(?:state|runtime|agent|panel|selection|observed_core|transition|collection|rule_count|rule_shape|config|roster))=(true|false)(?:\r?\n|$)/.exec(event.Output)
@@ -384,11 +386,17 @@ export function isSafeDestinationDiagnostic(event) {
     return sanitized.Diagnostic === event.Diagnostic && sanitized.Observed === event.Observed
   }
   if (!Number.isInteger(event.Observed) || event.Observed < 0) return false
+  if (event.Diagnostic.startsWith('global_setup_profile_')) return isSafeSetupProfileFact(event.Diagnostic.slice('global_setup_profile_'.length), event.Observed)
   if (event.Diagnostic.startsWith('global_stage_')) return isSafeGlobalStageFact(event.Diagnostic.slice('global_stage_'.length), event.Observed)
   if (event.Diagnostic.startsWith('global_config_error_')) return isSafeGlobalConfigError(event.Diagnostic.slice('global_config_error_'.length), event.Observed)
   if (event.Diagnostic.startsWith('global_sync_')) return isSafeGlobalSyncFact(event.Diagnostic.slice('global_sync_'.length), event.Observed)
   if (event.Diagnostic === 'receipt_wait') return event.Observed >= 1 && event.Observed <= 99
   return ['panel_downgrade_application_ms', 'panel_reupgrade_application_ms'].includes(event.Diagnostic) && event.Observed <= 150000
+}
+
+function isSafeSetupProfileFact(name, value) {
+  const limits = { elapsed_ms: 1200000, allocated_bytes: 1000000000000000, gc_cycles: 1000000, gc_pause_ns: 1200000000000, heap_bytes: 1000000000000000 }
+  return Object.hasOwn(limits, name) && Number.isSafeInteger(value) && value >= 0 && value <= limits[name]
 }
 
 function isSafeGlobalSyncFact(name, value) {

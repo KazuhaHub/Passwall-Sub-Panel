@@ -72,6 +72,10 @@ type nativeGlobalBatchMetrics struct {
 // Actual global batch saturation and retry/ledger component. Byte/key
 // saturation and the complete mixed-pressure acceptance remain separate gates.
 func TestNativeDestinationGlobalBatchPressure(t *testing.T) {
+	profile := os.Getenv("PSP_NATIVE_SETUP_PROFILE")
+	if profile != "" && profile != "0" && profile != "1" {
+		t.Fatal("unknown setup profile selection")
+	}
 	evidence := os.Getenv("PSP_NATIVE_GLOBAL_BATCH_METRICS")
 	root, e1 := filepath.EvalSymlinks(os.Getenv("RUNNER_TEMP"))
 	dir, e2 := filepath.EvalSymlinks(filepath.Dir(evidence))
@@ -156,6 +160,9 @@ func TestNativeDestinationGlobalBatchPressure(t *testing.T) {
 		writeMetrics()
 		if completed%50 == 0 {
 			writeStageDiagnostics()
+		}
+		if completed == 50 && profile == "1" {
+			t.Cleanup(nativeStartSetupProfile(t, root, 60*time.Second).stop)
 		}
 	}})
 	m.Users = len(users)
