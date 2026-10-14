@@ -12,6 +12,9 @@ import (
 func TestNativeSharedClientReadbackPreservesAuthenticatedRosterConfirmation(t *testing.T) {
 	f := buildDestinationPolicyFixture(t)
 	ctx := t.Context()
+	// Exercise actual member-input caching, which collection-only agents skip.
+	saveWiringPolicy(t, f)
+	f.report.Capabilities = []string{protocol.CapabilityDestinationPolicy}
 	clients, err := f.a.repos.PSPClient.ListByUser(ctx, f.user.ID)
 	if err != nil || len(clients) != 1 {
 		t.Fatal("fixture must have one persisted shared client")
@@ -107,7 +110,10 @@ func TestNativeSharedClientReadbackPreservesAuthenticatedRosterConfirmation(t *t
 		base := *initial.Config.Body
 		base.Policy = nil
 		candidate, err := f.a.destCompiler.Compile(ctx, agent, snapshot, f.report.Capabilities, base)
-		if err != nil || candidate.CacheKey == "" {
+		if err != nil {
+			t.Fatal(err)
+		}
+		if candidate.CacheKey == "" {
 			t.Fatal("production compiler did not bind its actual tracked membership inputs")
 		}
 		return candidate.CacheKey
