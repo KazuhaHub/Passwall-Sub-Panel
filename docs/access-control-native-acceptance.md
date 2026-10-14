@@ -1514,3 +1514,26 @@ MySQL 200 人、总体 stage1 但已进入 receipt；PostgreSQL 198 人、member
 三者流量与四类完成标志均为零，没有压力 profile 或根测试 PASS。
 配置阶段与名单阶段次数不同只提示存在早期返回，不能据此指定根因；
 新的分类计数仍须同源真实运行确认。旧失败原件继续保留。
+
+源 `f5c26b1c` 的[三数据库原件](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/38495517479)
+现已终止且均未通过：SQLite 在 stage1 完成 164 人后套件超时；MySQL 在
+stage2 完成 200 人，记录 `streams_inbound_stale` 并套件超时；PostgreSQL
+在 stage2 完成 200 人，根测试 FAIL1、同一就绪类别。实际配置失败类别
+`compile_unavailable` 分别为 4280、1079、1389。三份原件流量和四类完成
+标志均为零，没有压力 profile 或根测试 PASS。PostgreSQL 的独立 bootstrap
+数值报告证明 65 个父进程、核心和完整 stream 对，仍不证明共享用户压力完成。
+`compile_unavailable` 有多个来源，固定类别不能单独确定根因。
+
+源 `35343c93` 修复了客户端凭据确认递增无关成员 generation 的耦合：
+认证 roster 的凭据变化仅清空订阅渲染缓存，实际 listener 配置确认仍走
+完整失效；未安装独立回调的旧装配保留组合回调。所有 epoch、版本、ETag、
+当前期望身份与新鲜度门禁保持。首次实际 CI 发现新增夹具未声明策略能力，
+走 collection-only 路径，缓存键断言失败；该失败及汇总门禁失败继续保留。
+后续 `1cda2a12` 只为该夹具增加真实策略与能力，保留稳定缓存键断言。
+
+`1cda2a12` 的[实际 App race 原件](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/38526998450)
+经精确提交/run、未过期元数据和三个完整分片核验：212 个实际编译入口各
+RUN1/PASS1，恰在一个分片，无失败、跳过或缓存，原四分钟上限保持。
+凭据轮换与认证确认回归实际通过；原节点配置确认的双层订阅缓存回归也
+通过。这是失效边界的运行证据，不能替代尚在执行的全局压力与完整原生矩阵，
+也不证明真实 24 小时或保留窗口验收完成。
