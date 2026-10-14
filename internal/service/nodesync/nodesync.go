@@ -1003,11 +1003,7 @@ func (s *Service) buildDirectives(ctx context.Context, agent *domain.NodeAgent, 
 	if err != nil {
 		return nodeprotocol.DirectivesBody{}, nodeprotocol.Envelope{}, fmt.Errorf("nodesync: list native agents: %w", err)
 	}
-	clientByID := make(map[int64]*domain.PSPClientAccounting, len(allClients))
-	for i := range allClients {
-		clientByID[allClients[i].ID] = &allClients[i]
-	}
-	pendingByUser := s.pendingUsage(clientByID, agents)
+	pendingByUser, coverage, oldestReportMS := s.accountFleet(allClients, agents, fullFreshnessSeconds, now)
 	counters := make(map[int64]nodeprotocol.ClientCounters)
 	if hasFull {
 		for _, counter := range report.Clients {
@@ -1105,7 +1101,6 @@ func (s *Service) buildDirectives(ctx context.Context, agent *domain.NodeAgent, 
 			Subject: nodeprotocol.NewSubjectKey(id), IPLimit: users[id].IPLimit,
 		})
 	}
-	coverage, oldestReportMS := s.aggregateCoverage(allClients, agents, fullFreshnessSeconds, now)
 	body.Coverage = coverage
 	envelope := nodeprotocol.Envelope{
 		ComputedAtMS: now.UnixMilli(), NextPollSeconds: nextPollSeconds,
@@ -1186,15 +1181,16 @@ func (s *Service) loadQuotaUsers(ctx context.Context, snapshot *ports.NativeDesi
 // rows, never from however many counters happened to arrive. EntriesStale is a
 // tag only: it must not reduce Entries or any quota/error bound.
 func (s *Service) aggregateCoverage(clients []domain.PSPClientAccounting, agents []*domain.NodeAgent, fullFreshnessSeconds int, now time.Time) (nodeprotocol.SegmentCounts, int64) {
+	return aggregateCoverageFromReports(clients, agents, s.fleetCounterReportsForAgents(agents), fullFreshnessSeconds, now)
+}
+
+func aggregateCoverageFromReports(clients []domain.PSPClientAccounting, agents []*domain.NodeAgent, reports map[string]fleetCounterReport, fullFreshnessSeconds int, now time.Time) (nodeprotocol.SegmentCounts, int64) {
 	agentByPanel := make(map[int64]string, len(agents))
-	activeAgents := make(map[string]struct{}, len(agents))
 	for _, agent := range agents {
 		if agent != nil {
 			agentByPanel[agent.PanelID] = agent.AgentID
-			activeAgents[agent.AgentID] = struct{}{}
 		}
 	}
-	reports := s.fleetCounterReports(activeAgents)
 
 	type reportIndex struct {
 		stale    bool
@@ -1332,15 +1328,40 @@ func (s *Service) fleetCounterReports(active map[string]struct{}) map[string]fle
 }
 
 func (s *Service) pendingUsage(clients map[int64]*domain.PSPClientAccounting, agents []*domain.NodeAgent) map[int64]int64 {
+	return s.pendingUsageFromReports(clients, agents, s.fleetCounterReportsForAgents(agents))
+}
+
+// One response uses one current copy of cumulative counters and receipt times
+// for both quota accounting and coverage. The copy belongs only to this call;
+// no report snapshot is cached across syncs or shared with stored mutable data.
+func (s *Service) accountFleet(clients []domain.PSPClientAccounting, agents []*domain.NodeAgent, fullFreshnessSeconds int, now time.Time) (map[int64]int64, nodeprotocol.SegmentCounts, int64) {
+	clientByID := make(map[int64]*domain.PSPClientAccounting, len(clients))
+	for i := range clients {
+		clientByID[clients[i].ID] = &clients[i]
+	}
+	reports := s.fleetCounterReportsForAgents(agents)
+	pending := s.pendingUsageFromReports(clientByID, agents, reports)
+	coverage, oldest := aggregateCoverageFromReports(clients, agents, reports, fullFreshnessSeconds, now)
+	return pending, coverage, oldest
+}
+
+func (s *Service) fleetCounterReportsForAgents(agents []*domain.NodeAgent) map[string]fleetCounterReport {
+	active := make(map[string]struct{}, len(agents))
+	for _, agent := range agents {
+		if agent != nil {
+			active[agent.AgentID] = struct{}{}
+		}
+	}
+	return s.fleetCounterReports(active)
+}
+
+func (s *Service) pendingUsageFromReports(clients map[int64]*domain.PSPClientAccounting, agents []*domain.NodeAgent, reports map[string]fleetCounterReport) map[int64]int64 {
 	panelByAgent := make(map[string]int64, len(agents))
-	activeAgents := make(map[string]struct{}, len(agents))
 	for _, agent := range agents {
 		if agent != nil {
 			panelByAgent[agent.AgentID] = agent.PanelID
-			activeAgents[agent.AgentID] = struct{}{}
 		}
 	}
-	reports := s.fleetCounterReports(activeAgents)
 	result := make(map[int64]int64)
 	for agentID, report := range reports {
 		panelID, active := panelByAgent[agentID]
