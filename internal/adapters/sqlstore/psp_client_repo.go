@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"sync/atomic"
 	"time"
 
 	"gorm.io/gorm"
@@ -140,7 +141,17 @@ func (r *pspClientRepo) UpdateDesiredLifecycleByUser(ctx context.Context, userID
 	}).Error
 }
 
-type pspClientRepo struct{ db *gorm.DB }
+type pspClientRepo struct {
+	db *gorm.DB
+	// Allocation hint only: no client data or accounting result is retained.
+	fleetCapacity atomic.Int64
+}
+
+const maxFleetAccountingCapacity = 65536 // at most 3 MiB of numeric rows up front
+
+func fleetAccountingCapacity(rows int64) int {
+	return int(max(0, min(rows, maxFleetAccountingCapacity)))
+}
 
 // Create mints a new durable client identity. The caller must not supply an ID:
 // an existing row is updated only through UpdateDefinition, whose required ID
@@ -227,7 +238,7 @@ func (r *pspClientRepo) ListFleetAccounting(ctx context.Context) ([]domain.PSPCl
 		return nil, err
 	}
 	defer rows.Close()
-	out := make([]domain.PSPClientAccounting, 0)
+	out := make([]domain.PSPClientAccounting, 0, fleetAccountingCapacity(r.fleetCapacity.Load()))
 	// Read the fixed numeric projection directly. GORM's per-field setters and
 	// scan destinations are unnecessary here, and the intermediate row slice
 	// duplicates the complete fleet on every sync. Historic NULL baselines still
@@ -246,6 +257,9 @@ func (r *pspClientRepo) ListFleetAccounting(ctx context.Context) ([]domain.PSPCl
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
+	// A stale count affects capacity alone. Appending still reads every current
+	// row, including fleet growth beyond the bounded preallocation hint.
+	r.fleetCapacity.Store(int64(fleetAccountingCapacity(int64(len(out)))))
 	return out, nil
 }
 

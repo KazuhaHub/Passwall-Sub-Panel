@@ -68,6 +68,9 @@ func TestFleetAccountingReadsOnlyCurrentBaselinesWithoutFilteringClients(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
+	if cap(latest) != 601 || r.fleetCapacity.Load() != 601 || queries != 2 {
+		t.Fatal("fleet capacity hint added a count query or failed to reuse the successful row count")
+	}
 	found := false
 	for _, c := range latest {
 		if c.ID == 1 {
@@ -81,6 +84,9 @@ func TestFleetAccountingReadsOnlyCurrentBaselinesWithoutFilteringClients(t *test
 	cancel()
 	if result, err := r.ListFleetAccounting(ctx); result != nil || !errors.Is(err, context.Canceled) {
 		t.Fatal("cancelled fleet read returned partial accounting")
+	}
+	if r.fleetCapacity.Load() != 601 {
+		t.Fatal("cancelled read changed the last successful allocation hint")
 	}
 }
 
@@ -114,6 +120,7 @@ func TestFleetAccountingPreservesNullAndWideCounterBaselines(t *testing.T) {
 
 func TestFleetAccountingClosesCursorAndRejectsPartialScan(t *testing.T) {
 	r, _ := inboundBatchFixture(t, 0)
+	r.fleetCapacity.Store(601)
 	db, err := r.db.DB()
 	if err != nil {
 		t.Fatal(err)
@@ -140,5 +147,39 @@ func TestFleetAccountingClosesCursorAndRejectsPartialScan(t *testing.T) {
 	}
 	if db.Stats().InUse != before {
 		t.Fatal("failed fleet scan retained its SQL cursor")
+	}
+	if r.fleetCapacity.Load() != 601 {
+		t.Fatal("partial scan changed the last successful allocation hint")
+	}
+}
+
+func TestFleetAccountingCapacityNeverLimitsCurrentRows(t *testing.T) {
+	r, _ := inboundBatchFixture(t, 0)
+	r.fleetCapacity.Store(1)
+	for i := int64(1); i <= 3; i++ {
+		if err := r.db.Create(&pspClientRow{ID: i, UserID: i, PanelID: 1, LastRawUpBytes: i}).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	first, err := r.ListFleetAccounting(t.Context())
+	if err != nil || len(first) != 3 || r.fleetCapacity.Load() != 3 {
+		t.Fatal("small allocation hint truncated current fleet growth")
+	}
+	if err := r.db.Where("id > ?", 0).Delete(&pspClientRow{}).Error; err != nil {
+		t.Fatal(err)
+	}
+	empty, err := r.ListFleetAccounting(t.Context())
+	if err != nil || len(empty) != 0 || r.fleetCapacity.Load() != 0 || len(first) != 3 || first[0].LastRawUpBytes != 1 {
+		t.Fatal("empty current read reused prior rows or shared result storage")
+	}
+	for _, sample := range []struct {
+		rows int64
+		want int
+	}{
+		{-1, 0}, {0, 0}, {3, 3}, {65536, 65536}, {65537, 65536}, {1 << 62, 65536},
+	} {
+		if fleetAccountingCapacity(sample.rows) != sample.want {
+			t.Fatal("capacity hint exceeded its fixed allocation bound")
+		}
 	}
 }
