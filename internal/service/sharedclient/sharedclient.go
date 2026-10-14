@@ -851,16 +851,71 @@ func (s *Service) DeleteLegacyForUser(ctx context.Context, userID int64) (Cleanu
 }
 
 // ProvisionUser provisions every shared client a user holds (across panels).
-// Returns the first error but attempts all clients.
+// Different panels use the configured bounded fan-out; clients on one panel
+// retain their input order. Returns the first error in client order and attempts
+// every client before the caller may proceed to cleanup.
 func (s *Service) ProvisionUser(ctx context.Context, userID int64) (ProvisionResult, error) {
 	clients, err := s.clients.ListByUser(ctx, userID)
 	if err != nil {
 		return ProvisionResult{}, fmt.Errorf("list clients: %w", err)
 	}
+	results := make([]ProvisionResult, len(clients))
+	errs := make([]error, len(clients))
+	if len(clients) <= 1 {
+		for i, c := range clients {
+			results[i], errs[i] = s.ProvisionClient(ctx, c)
+		}
+	} else {
+		// One worker owns a panel's complete ordered client list. A restart or
+		// attachment mutation cannot race the next partition on that panel.
+		var groups [][]int
+		byPanel := make(map[int64]int)
+		for i, c := range clients {
+			panelID := int64(0)
+			if c != nil {
+				panelID = c.PanelID
+			}
+			group, exists := byPanel[panelID]
+			if !exists {
+				group = len(groups)
+				byPanel[panelID] = group
+				groups = append(groups, nil)
+			}
+			groups[group] = append(groups[group], i)
+		}
+		width := min(s.panelConcurrency(ctx), len(groups))
+		jobs := make(chan []int, len(groups))
+		for _, group := range groups {
+			jobs <- group
+		}
+		close(jobs)
+		var wg sync.WaitGroup
+		for range width {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				for group := range jobs {
+					for _, i := range group {
+						func() {
+							// A recovered operation must remain a failure: the caller
+							// removes fallback clients only after successful provision.
+							defer func() {
+								if recover() != nil {
+									errs[i] = fmt.Errorf("sharedclient.ProvisionUser: panel operation panicked")
+								}
+							}()
+							results[i], errs[i] = s.ProvisionClient(ctx, clients[i])
+						}()
+					}
+				}
+			}()
+		}
+		wg.Wait()
+	}
 	var total ProvisionResult
 	var firstErr error
-	for _, c := range clients {
-		r, err := s.ProvisionClient(ctx, c)
+	for i, r := range results {
+		err := errs[i]
 		if err != nil && firstErr == nil {
 			firstErr = err
 		}
