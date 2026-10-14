@@ -351,6 +351,8 @@ export function sanitizeDestinationResults(input) {
   return input.split(/\r?\n/).filter(line => line.trim()).map(line => {
     const event = parseEvent(line)
     if (event.Action === 'output') {
+      const fixtureRoute = typeof event.Output === 'string' && /native diagnostic: (fixture_route_(?:one|local|loopback|exact_address|exact_host_prefix))=(true|false)(?:\r?\n|$)/.exec(event.Output)
+      if (fixtureRoute) return JSON.stringify({ Action: 'output', Package: pkg, Diagnostic: fixtureRoute[1], Observed: fixtureRoute[2] === 'true' })
       const configError = typeof event.Output === 'string' && /native global config error: ((?:catalog|build|compile|repository|capability|encode|mint)_(?:canceled|deadline|conflict|validation|unavailable|other))=([0-9]{1,7})(?:\r?\n|$)/.exec(event.Output)
       if (configError && isSafeGlobalConfigError(configError[1], Number(configError[2]))) return JSON.stringify({ Action: 'output', Package: pkg, Diagnostic: `global_config_error_${configError[1]}`, Observed: Number(configError[2]) })
       const dockerPreserved = typeof event.Output === 'string' && /native diagnostic: (docker_preserved_material|docker_preserved_state|docker_advanced_epoch)=(true|false)(?:\r?\n|$)/.exec(event.Output)

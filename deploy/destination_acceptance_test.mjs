@@ -3,6 +3,25 @@ import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
 import { checkDestinationResults, sanitizeDestinationResults, nodeCandidate, destinationCases } from './destination-acceptance.mjs'
 
+test('target route diagnostics disclose only exact guard comparisons and never prove acceptance', async () => {
+  const { isSafeDestinationDiagnostic } = await import('./destination-acceptance.mjs')
+  for (const name of ['one', 'local', 'loopback', 'exact_address', 'exact_host_prefix']) {
+    for (const observed of [true, false]) {
+      const output = `private-path:4: native diagnostic: fixture_route_${name}=${observed}\n`
+      const sanitized = sanitizeDestinationResults(encode([{ Action: 'output', Output: output }]))
+      const event = JSON.parse(sanitized)
+      assert.deepEqual(event, { Action: 'output', Package: 'github.com/KazuhaHub/passwall-sub-panel/internal/app', Diagnostic: 'fixture_route_' + name, Observed: observed })
+      assert(isSafeDestinationDiagnostic(event))
+      assert(!sanitized.includes('private-path') && !sanitized.includes('Output'))
+      assert.throws(() => checkDestinationResults(sanitized))
+    }
+  }
+  for (const value of ['private_address=true', 'one=1', 'local=true private-secret', 'exact_host_prefix=2001:db8::1']) {
+    assert.equal(sanitizeDestinationResults(encode([{ Action: 'output', Output: `native diagnostic: fixture_route_${value}\n` }])).trim(), '')
+  }
+  assert(!isSafeDestinationDiagnostic({ Diagnostic: 'fixture_route_private', Observed: true }))
+})
+
 test('pre-load fixture failures retain closed categories and the original failed root', async () => {
   const { isSafeDestinationDiagnostic } = await import('./destination-acceptance.mjs')
   const Package = 'github.com/KazuhaHub/passwall-sub-panel/internal/app'

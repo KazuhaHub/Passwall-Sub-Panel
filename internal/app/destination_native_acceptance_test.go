@@ -1311,6 +1311,21 @@ func nativeTargetAtPort(t *testing.T, bindPort int) (*httptest.Server, string, i
 	}
 	nativeMust(t, json.Unmarshal(data, &routes), "decode local target route")
 	if len(routes) != 1 || routes[0].Type != "local" || routes[0].Dev != "lo" || !net.ParseIP(routes[0].Dst).Equal(net.ParseIP(ip)) {
+		// Keep the exact original route guard. Export only fixed comparisons,
+		// never the route JSON, target address or runner network metadata.
+		t.Logf("native diagnostic: fixture_route_one=%t", len(routes) == 1)
+		if len(routes) == 1 {
+			t.Logf("native diagnostic: fixture_route_local=%t", routes[0].Type == "local")
+			t.Logf("native diagnostic: fixture_route_loopback=%t", routes[0].Dev == "lo")
+			t.Logf("native diagnostic: fixture_route_exact_address=%t", net.ParseIP(routes[0].Dst).Equal(net.ParseIP(ip)))
+			address, prefix, prefixErr := net.ParseCIDR(routes[0].Dst)
+			exactPrefix := false
+			if prefixErr == nil {
+				ones, bits := prefix.Mask.Size()
+				exactPrefix = ones == 128 && bits == 128 && address.Equal(net.ParseIP(ip))
+			}
+			t.Logf("native diagnostic: fixture_route_exact_host_prefix=%t", exactPrefix)
+		}
 		t.Fatal("target does not have its exact local loopback route")
 	}
 	l, err := net.Listen("tcp6", net.JoinHostPort(ip, strconv.Itoa(bindPort)))
