@@ -541,6 +541,14 @@ type PSPClientInboundBatchRepo interface {
 	UpdateInboundStates(ctx context.Context, inbounds []domain.PSPClientInbound) error
 }
 
+// PSPClientFleetAccountingRepo optionally reads every client's current stable
+// ownership and raw counter baseline. Only ID, UserID, PanelID, LastRawUpBytes,
+// LastRawDownBytes and LastCounterEpoch are populated. No lifecycle or native
+// filter may reduce the fleet denominator; definitions still use ListAll.
+type PSPClientFleetAccountingRepo interface {
+	ListFleetAccounting(ctx context.Context) ([]*domain.PSPClient, error)
+}
+
 // NodeAgentRepo persists native-agent identity and the three independent
 // desired/applied streams. MintStream accepts canonical JSON and performs the
 // compare-before-CAS rule: identical content returns minted=false and never

@@ -982,7 +982,7 @@ func (s *Service) buildDirectives(ctx context.Context, agent *domain.NodeAgent, 
 	} else if hasFull && fullReportStale(receivedAtMS, now, fullFreshnessSeconds) {
 		hasFull = false
 	}
-	allClients, err := s.clients.ListAll(ctx)
+	allClients, err := s.loadFleetAccounting(ctx)
 	if err != nil {
 		return nodeprotocol.DirectivesBody{}, nodeprotocol.Envelope{}, fmt.Errorf("nodesync: list quota clients: %w", err)
 	}
@@ -1109,6 +1109,13 @@ func (s *Service) buildDirectives(ctx context.Context, agent *domain.NodeAgent, 
 	envelope.NumeratorAsOfMS, envelope.NumeratorOldestReportAgeMS,
 		envelope.OverburnHeadroomBytes = s.recordGrantsAndFleetEnvelope(agent.AgentID, body.Quota, now, oldestReportMS)
 	return body, envelope, nil
+}
+
+func (s *Service) loadFleetAccounting(ctx context.Context) ([]*domain.PSPClient, error) {
+	if reader, ok := s.clients.(ports.PSPClientFleetAccountingRepo); ok {
+		return reader.ListFleetAccounting(ctx)
+	}
+	return s.clients.ListAll(ctx)
 }
 
 // Read this roster's distinct account closure afresh in bounded repository

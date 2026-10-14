@@ -217,6 +217,26 @@ func (r *pspClientRepo) ListAll(ctx context.Context) ([]*domain.PSPClient, error
 	return out, nil
 }
 
+func (r *pspClientRepo) ListFleetAccounting(ctx context.Context) ([]*domain.PSPClient, error) {
+	var rows []pspClientRow
+	if err := r.db.WithContext(ctx).
+		Select("id", "user_id", "panel_id", "last_raw_up_bytes", "last_raw_down_bytes", "last_counter_epoch").
+		Order("panel_id, user_id, id").Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	out := make([]*domain.PSPClient, len(rows))
+	for i := range rows {
+		out[i] = &domain.PSPClient{
+			ID: rows[i].ID, UserID: rows[i].UserID, PanelID: rows[i].PanelID,
+			LastRawUpBytes: rows[i].LastRawUpBytes, LastRawDownBytes: rows[i].LastRawDownBytes,
+			LastCounterEpoch: rows[i].LastCounterEpoch,
+		}
+	}
+	return out, nil
+}
+
+var _ ports.PSPClientFleetAccountingRepo = (*pspClientRepo)(nil)
+
 func (r *pspClientRepo) ListByUser(ctx context.Context, userID int64) ([]*domain.PSPClient, error) {
 	var rows []pspClientRow
 	if err := r.db.WithContext(ctx).
