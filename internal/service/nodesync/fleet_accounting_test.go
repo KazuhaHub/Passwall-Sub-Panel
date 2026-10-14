@@ -95,10 +95,13 @@ func TestFleetAccountingProjectionPreservesPendingUsageAndCoverage(t *testing.T)
 	if err != nil || latest[0].LastRawUpBytes != 14 || rows[0].LastRawUpBytes != 4 {
 		t.Fatal("accounting values reused stale or aliased baselines")
 	}
+	if legacy.calls != 2 {
+		t.Fatal("legacy accounting did not perform both current reads")
+	}
 	service.clients = projected
 	failure := errors.New("owned accounting read failure")
 	projected.err = failure
-	if rows, err := service.loadFleetAccounting(t.Context()); rows != nil || !errors.Is(err, failure) || legacy.calls != 1 {
+	if rows, err := service.loadFleetAccounting(t.Context()); rows != nil || !errors.Is(err, failure) || legacy.calls != 2 {
 		t.Fatal("failed projection returned fallback or partial accounting")
 	}
 }
