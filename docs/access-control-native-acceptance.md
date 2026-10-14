@@ -1630,3 +1630,27 @@ compile_unavailable 分别为 2/1，PostgreSQL 缺失此字段不能填零。
 现有平坦热点提示大量 SQL 扫描/反射，但缺少应用调用方。后续在同一
 60 秒原 profile 上增加仅显示本仓库 internal 函数的累计视图，仍最多
 30 项静态函数，不改变采样时段、压力流量、超时、证据边界或验收条件。
+
+`2e327972` 的[完整 CI](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/38543461840)
+18 项通过，212 个 App 入口原件在原三个四分钟 race 分片各 RUN1/PASS1、
+无失败/跳过/缓存；nodesync 完整 race 包 53.431s。前端类型/构建、4 项
+生产浏览器烟测、2507 项单元通过，保留既有 1 项条件跳过。
+[同源三数据库压力](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/38543468149)
+仍全部套件超时：SQLite stage1/142 人、membership；MySQL stage2/200 人、
+receipt；PostgreSQL stage1/200 人、policy。三份精确来源原件没有根 PASS、
+流量、四类完成标志或压力阶段 profile。PostgreSQL 实际
+compile_unavailable 为 3；其余缺失不能填零。
+
+应用累计视图实际成功，定位 `ListFleetAccounting` 在 SQLite/MySQL/
+PostgreSQL 分别累计 11.83s/7.67s/9.23s，占各 PSP CPU 样本
+31.39%/29.63%/24.65%；经由 buildDirectives 当前全机队读取。该视图隐藏
+库函数，因此它的 flat 列不能解释成该函数自身的 CPU 时间，累计比例
+也不是延迟占比。现有完整读仍需保留全部客户端以维持归属、分母及配额。
+
+后续改用固定六字段 SQL 游标，直接扫描数值而不保留 GORM 中间行集合或
+使用其逐字段反射 setter。查询表、列、排序、全部行及旧端口保持，每次
+仍读当前数据库；历史 NULL 计数继续作为零，保留有符号计数与 uint64 epoch。
+扫描或游标迭代失败返回 nil 与错误，关闭游标，不暴露部分配额基线。
+601 行完整读/当前更新/取消回归保留；新增历史 NULL、宽整数、真实各方言
+中途扫描失败和游标释放回归。实际运行、性能改善和原压力门禁仍待新的
+同源托管验证；旧失败及采样日志继续保留。

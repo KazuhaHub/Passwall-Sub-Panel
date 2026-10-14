@@ -2,6 +2,7 @@ package sqlstore
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"time"
@@ -217,33 +218,33 @@ func (r *pspClientRepo) ListAll(ctx context.Context) ([]*domain.PSPClient, error
 	return out, nil
 }
 
-// Scan accounting into its six numeric fields. A restricted SELECT alone still
-// allocates the complete credential/lifecycle row for every fleet client when
-// the destination is []pspClientRow, even though those columns were not read.
-type pspClientFleetAccountingRow struct {
-	ID               int64  `gorm:"column:id"`
-	UserID           int64  `gorm:"column:user_id"`
-	PanelID          int64  `gorm:"column:panel_id"`
-	LastRawUpBytes   int64  `gorm:"column:last_raw_up_bytes"`
-	LastRawDownBytes int64  `gorm:"column:last_raw_down_bytes"`
-	LastCounterEpoch uint64 `gorm:"column:last_counter_epoch"`
-}
-
 func (r *pspClientRepo) ListFleetAccounting(ctx context.Context) ([]*domain.PSPClient, error) {
-	var rows []pspClientFleetAccountingRow
-	if err := r.db.WithContext(ctx).
+	rows, err := r.db.WithContext(ctx).
 		Model(&pspClientRow{}).
 		Select("id", "user_id", "panel_id", "last_raw_up_bytes", "last_raw_down_bytes", "last_counter_epoch").
-		Order("panel_id, user_id, id").Find(&rows).Error; err != nil {
+		Order("panel_id, user_id, id").Rows()
+	if err != nil {
 		return nil, err
 	}
-	out := make([]*domain.PSPClient, len(rows))
-	for i := range rows {
-		out[i] = &domain.PSPClient{
-			ID: rows[i].ID, UserID: rows[i].UserID, PanelID: rows[i].PanelID,
-			LastRawUpBytes: rows[i].LastRawUpBytes, LastRawDownBytes: rows[i].LastRawDownBytes,
-			LastCounterEpoch: rows[i].LastCounterEpoch,
+	defer rows.Close()
+	out := make([]*domain.PSPClient, 0)
+	// Read the fixed numeric projection directly. GORM's per-field setters and
+	// scan destinations are unnecessary here, and the intermediate row slice
+	// duplicates the complete fleet on every sync. Historic NULL baselines still
+	// mean zero, just as when scanning them into the model's scalar fields.
+	for rows.Next() {
+		client := &domain.PSPClient{}
+		var up, down sql.NullInt64
+		var epoch sql.Null[uint64]
+		if err := rows.Scan(&client.ID, &client.UserID, &client.PanelID, &up, &down, &epoch); err != nil {
+			return nil, err
 		}
+		client.LastRawUpBytes, client.LastRawDownBytes = up.Int64, down.Int64
+		client.LastCounterEpoch = epoch.V
+		out = append(out, client)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
 	}
 	return out, nil
 }
