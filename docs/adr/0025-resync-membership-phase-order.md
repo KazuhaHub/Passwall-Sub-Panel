@@ -4,6 +4,8 @@
 - **日期**：2026-08-14
 - **相关代码**：`internal/service/user/user.go`（`ResyncMembership`、`syncSharedLifecycle`、`deletePrunedSharedClients`）、`internal/service/sharedclient/sharedclient.go`（`ProvisionClient`、`buildSharedClientSpec`、`DeleteLegacyForUser`、`ReconcileOrphans`）
 
+下文原始背景与决策保留 2026-08 的实现记录。现行生命周期来源、相位顺序与并发约束见末尾的“2026-10-14 UTC 实现补充”；不能再把历史 provision 默认值当作当前创建行为。
+
 ## 背景
 
 `user.ResyncMembership` 是"把一个用户在 3X-UI 上的客户端调成它该有的样子"的唯一入口——分组变更、节点增删、配额重置、启用/禁用、后台自愈扫描，最终都落到它。v3.9.0 之后它同时还是**共享客户端迁移的执行者**：把用户从"每节点一个客户端"迁到"每面板每凭据类一个客户端"，并在迁移完成后删掉旧的每节点客户端。
@@ -68,3 +70,17 @@
 - **先删 legacy 再 provision**（"先清场再重建"）：更符合直觉，但删除与 provision 之间的窗口里用户**一个可用节点都没有**；provision 失败则彻底断服。当前顺序里失败只意味着"多留旧的"，方向相反。
 - **把 lifecycle 推送失败当作尽力而为，不挡住清理**：这正是 audit #1 的形态。理由是"下一轮 `sync_task` 会补推"——但补推之前的这段时间里，用户处于完全无拦截状态，而这段时间的长度取决于面板什么时候恢复，不可控。
 - **只在迁移完成后做一次全局清理，而不在每次 resync 里删**：会让 `DeleteLegacyForUser` 失去它的按节点粒度——它现在**保留**尚未被共享客户端覆盖的节点，正是这一点让部分迁移永远不会让用户断服。
+
+## 2026-10-14 UTC 实现补充
+
+当前 `ResyncMembership` 仍在按用户锁内执行，按以下顺序推进：
+
+1. `SyncUserRetirements` 持久化期望客户端/附件计划，并区分整个面板移除与保留面板上的分区替换。整个面板的已提交移除只收紧权限，`deleteRetiredSharedClients` 尝试立即删除，不等待其他面板恢复；错误仍向上传播。
+2. `syncSharedLifecycle` 先通过 `UpdateDesiredLifecycleByUser` 持久化真实期望生命周期，再尝试已有客户端的投影。`buildSharedClientSpec` 从该持久行经 `clientdoc.Mint` 构建 enable、expiry、配额和连接限制，新建客户端不再使用历史“全开、无期限”的默认值。
+3. `ProvisionUser` 完成客户端创建/附件协调及实际读回。不同面板按已有 `MaxPanelConcurrency` 上限并行，同一面板的分区保留输入顺序；等待全部 worker 完成后，按原客户端顺序汇总 `Created`、`Provisioned`、`Skipped` 与首个错误。并行 worker 的 panic 返回固定失败，取消也不能成为成功，不改变用户级相位顺序。
+4. `ReconcileOrphans` 保留独立执行与每面板的实际覆盖门禁，不移入最终清理条件。
+5. 保留面板的退休分区及 legacy 回退只在 `provisioned && lifeErr == nil && planErr == nil && migrator != nil` 时清理。生命周期、计划或 provision 失败不能授权这一步。
+
+原生异步适配器的读回仍保留实际确认和失败语义，但不通过 legacy writer 重写 applied 版本/凭据；原生观察由其认证报告的 epoch、版本、ETag 与当前期望身份匹配门禁确认。跨面板并发不能把“已请求”当作“已应用”，也不能缩短整个 resync 的用户锁范围。
+
+实现候选 `bdff6006` 的相关 `sharedclient`/`user` 完整 race 包及[完整 CI](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/38490960314)通过。阻塞屏障回归检查并发上限、同面板顺序、独立面板进展、首错顺序、结果等待、panic/取消和原生确认权限；真实 65 节点全局压力仍待该候选原件，不能从普通 CI 推断其通过。

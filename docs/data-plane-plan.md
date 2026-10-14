@@ -212,7 +212,7 @@ band_skip_total / sync_skipped_total = 28201 / 35252 = 80.0%
 
 ### 1b. 并行化 `SyncUserLifecycle` 的串行循环 ✅ 已实现
 
-`SyncUserLifecycle` 改为并发扇出。P > 1 时把单用户延迟从 `P × 2` 个往返压到 `2` 个。
+`SyncUserLifecycle` 改为并发扇出，使用管理员 `MaxPanelConcurrency` 上限。P 大于上限时仍需分批推进；减少串行等待不代表全部面板总耗时恒为两个往返。
 
 **并行安全的依据（已核源码，非假设）**：一个用户的 client 列表里，不可能有两条指向同一个面板侧 client。PSPClient 以 `(user, panel, credClass)` 为键，而 `domain.PSPClientEmail` 把邮箱后缀构造成分区键的**无碰撞函数**——所以同一面板上的两个 client 必然邮箱不同。真正危险的形态（两个 goroutine 写同一个面板侧 client，在整替换语义下抢适配器的 per-email 写锁，退化成 last-writer-wins）**从这里不可达**。
 
@@ -220,6 +220,12 @@ band_skip_total / sync_skipped_total = 28201 / 35252 = 80.0%
 
 - **P = 1 走直连**，不开 goroutine。多数用户 P 就是 1，为一次调用起协程加 channel 是纯开销。
 - **错误按下标收集，不按到达顺序。** 「第一个错误」必须是 client 列表顺序里的第一个，否则返回给管理员的报错取决于面板延迟——同一个故障每次报得都不一样。
+
+### 1b 补充：跨面板 provision 的有界调度
+
+`bdff6006` 将 `ProvisionUser` 的跨面板串行等待改为同一管理员上限控制的 worker。每个 worker 顺序处理一个面板的全部分区，不并发重启或修改该面板的相邻分区；不同面板独立推进。空/单客户端保留直接调用，全部 worker 完成后按输入顺序返回首个错误并汇总结果。
+
+每项继续执行原 `ProvisionClient` 的创建、attach/detach 与真实读回；失败、取消或并行 worker panic 不能授权删除回退，原生异步确认仍由认证报告写入。用户级“持久化期望生命周期 → provision → 孤儿回收 → 门控清理”顺序保持，见 [ADR 0025 的实现补充](adr/0025-resync-membership-phase-order.md)。相关 race 与完整 CI 已通过，65 节点全局压力仍待实测；不把生命周期旧生产窗口或普通 CI 当作这条新路径的性能结果。
 
 ### 1c. 给 `pushSem` 加跨周期守卫 ✅ 已实现
 
