@@ -354,6 +354,12 @@ type NativePanelSnapshotReader interface {
 	NativePanelSnapshot(ctx context.Context, panelID int64) (*NativePanelSnapshot, error)
 }
 
+// NativePanelStatusReader optionally reads the observed runtime identity without
+// constructing client/inbound projections. Full-report and freshness gates apply.
+type NativePanelStatusReader interface {
+	NativePanelStatus(ctx context.Context, panelID int64) (ServerStatus, error)
+}
+
 // NativePanelClientSnapshotReader optionally avoids projecting every client
 // for a single GetClient call. The same observation and freshness gates apply.
 type NativePanelClientSnapshotReader interface {

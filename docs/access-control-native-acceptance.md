@@ -1718,3 +1718,28 @@ MySQL 的 NativePanelSnapshot 累计25.04%，PostgreSQL 18.64%；这些只是
 不上传 profile 二进制。普通运行保持关闭；完成门禁、65节点/200用户、
 超时与流量阶段都保持。新增三种固定文件的保护/可读取回归；实际运行
 结果与分配来源仍待同源托管验证。
+
+`996a1a89` [完整原生矩阵](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/38553854105)
+49 项作业通过，48 份精确提交/run、未过期原件独立核验 861 个必需场景
+通过。`77c1ffad` [完整 CI](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/38555221406)
+18 项通过；212 个 App 入口原件各 RUN1/PASS1，无失败/跳过/缓存、原四分钟
+分片保持，nodesync 完整 race 包58.796s，前端类型/构建、4项浏览器烟测、
+2507项单元通过，保留既有1项条件跳过。
+
+`77c1ffad` 的[三数据库原件](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/38555227195)
+仍全部套件超时：SQLite147人、PostgreSQL199人停在membership；MySQL200人
+stage2、receipt，记录streams_inbound_offline。均无根PASS、流量、四类
+完成标志或压力阶段profile；SQLite compile_unavailable2，其余缺失不能填零。
+独立CPU/分配差值采样及文件/停止回归实际成功。约60秒窗口alloc_space
+样本总量 SQLite/MySQL/PostgreSQL 为3025.10/3333.11/2638.13MB；
+ListFleetAccounting累计占16.62%/14.91%/15.78%，NativePanelSnapshot占
+12.29%/20.79%/12.13%，两者包含子调用，不能相加或当作精确分配/延迟。
+
+根据快照热点拆出可选 NativePanelStatusReader：只返回当前已认证完整
+报告的AgentVersion/CoreEngine/CoreVersion/CoreState，不构建客户端、入站
+或实时IP集合，也不读取期望成员闭包。窄状态和完整快照共享原cadence、
+LastSeen离线、完整报告陈旧/未来时间判定；每次仍读当前agent/settings及
+报告，没有跨调用缓存。入站和客户端原读取路径继续验证期望定义及流
+回执，状态本身不宣称配置/名单已收敛。无窄端口的适配器保留旧路径；
+窄读取失败直接返回错误。新增当前读、值独立性、边界时间、取消/错误、
+跨面板、旧端口及实际Sync后状态等价回归；改善仍须同源实际运行确认。

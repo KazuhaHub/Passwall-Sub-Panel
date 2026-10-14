@@ -1465,20 +1465,34 @@ func (s *Service) NativePanelClientSnapshot(ctx context.Context, panelID int64, 
 	return &detail, nil
 }
 
-func (s *Service) nativePanelSnapshot(ctx context.Context, panelID int64, email string) (*ports.NativePanelSnapshot, error) {
+func (s *Service) NativePanelStatus(ctx context.Context, panelID int64) (ports.ServerStatus, error) {
 	agent, err := s.agents.GetByPanelID(ctx, panelID)
 	if err != nil {
-		return nil, err
+		return ports.ServerStatus{}, err
 	}
-	report, receivedAtMS, ok := s.fullReport(agent.AgentID)
+	// Copy just immutable runtime identity fields under the report lock. A
+	// status request neither reads desired membership nor clones private report
+	// collections; liveness still comes from the current durable agent row.
+	s.mu.RLock()
+	received, ok := s.reports[agent.AgentID]
+	status := ports.ServerStatus{PanelVersion: received.report.AgentVersion,
+		CoreEngine: received.report.CoreEngine, XrayVersion: received.report.CoreVersion, XrayState: received.report.CoreState}
+	s.mu.RUnlock()
 	if !ok {
-		return nil, ports.ErrNativePanelSnapshotMissing
+		return ports.ServerStatus{}, ports.ErrNativePanelSnapshotMissing
 	}
+	if err := s.nativePanelFreshness(ctx, agent, received.receivedAtMS); err != nil {
+		return ports.ServerStatus{}, err
+	}
+	return status, nil
+}
+
+func (s *Service) nativePanelFreshness(ctx context.Context, agent *domain.NodeAgent, receivedAtMS int64) error {
 	settings, err := s.settings.Load(ctx, ports.UISettings{
 		NodePollSeconds: nodeprotocol.DefaultNextPollSeconds, FullReportSeconds: nodeprotocol.DefaultFullReportSeconds,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("native panel snapshot: load cadence: %w", err)
+		return fmt.Errorf("native panel snapshot: load cadence: %w", err)
 	}
 	pollSeconds := settings.NodePollSeconds
 	if pollSeconds <= 0 {
@@ -1489,14 +1503,29 @@ func (s *Service) nativePanelSnapshot(ctx context.Context, panelID int64, email 
 	// Three missed polls absorb ordinary jitter without letting a dead agent's
 	// last snapshot look live forever.
 	if agent.OfflineAt(now, 3*time.Duration(pollSeconds)*time.Second) {
-		return nil, ports.ErrNativePanelAgentOffline
+		return ports.ErrNativePanelAgentOffline
 	}
 	// Full enumerations are independently paced. Allow one additional poll of
 	// scheduling/network jitter beyond the effective discrete full cadence;
 	// after that, absent objects and counters are unknowable, not healthy zeroes.
 	fullFreshnessSeconds := nodeprotocol.EffectiveFullReportPeriod(settings.FullReportSeconds, pollSeconds) + pollSeconds
 	if fullReportStale(receivedAtMS, now, fullFreshnessSeconds) {
-		return nil, ports.ErrNativePanelSnapshotStale
+		return ports.ErrNativePanelSnapshotStale
+	}
+	return nil
+}
+
+func (s *Service) nativePanelSnapshot(ctx context.Context, panelID int64, email string) (*ports.NativePanelSnapshot, error) {
+	agent, err := s.agents.GetByPanelID(ctx, panelID)
+	if err != nil {
+		return nil, err
+	}
+	report, receivedAtMS, ok := s.fullReport(agent.AgentID)
+	if !ok {
+		return nil, ports.ErrNativePanelSnapshotMissing
+	}
+	if err := s.nativePanelFreshness(ctx, agent, receivedAtMS); err != nil {
+		return nil, err
 	}
 	var desired *ports.NativeDesiredSnapshot
 	if reader, ok := s.desired.(ports.NativeDesiredClientSnapshotRepo); ok && email != "" {
@@ -1659,4 +1688,5 @@ func containsInt(items []int, want int) bool {
 }
 
 var _ ports.NativePanelSnapshotReader = (*Service)(nil)
+var _ ports.NativePanelStatusReader = (*Service)(nil)
 var _ ports.NativePanelClientSnapshotReader = (*Service)(nil)

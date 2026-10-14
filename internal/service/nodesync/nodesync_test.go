@@ -508,6 +508,10 @@ func TestSyncMintsDocumentsThenIngestsAppliedObservation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	statusView, err := service.NativePanelStatus(ctx, 9)
+	if err != nil || statusView != panelView.Status {
+		t.Fatal("observed status differs from the actual sync-backed full facade")
+	}
 	if detail := panelView.Clients[client.Email]; detail.ID != client.UUID || len(detail.InboundIDs) != 1 {
 		t.Fatalf("quota-closed applied identity missing from native panel view: %+v", detail)
 	}

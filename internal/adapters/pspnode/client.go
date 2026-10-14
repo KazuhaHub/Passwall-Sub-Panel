@@ -238,6 +238,13 @@ func (c *Client) BulkCreateClients(_ context.Context, items []ports.BulkCreateCl
 }
 
 func (c *Client) GetServerStatus(ctx context.Context) (*ports.ServerStatus, error) {
+	if reader, ok := c.reader.(ports.NativePanelStatusReader); ok {
+		status, err := reader.NativePanelStatus(ctx, c.panelID)
+		if err != nil {
+			return nil, err
+		}
+		return &status, nil
+	}
 	snapshot, err := c.snapshot(ctx)
 	if err != nil {
 		return nil, err
