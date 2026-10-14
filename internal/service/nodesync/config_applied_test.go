@@ -152,6 +152,8 @@ func assertConfigAckOnly(t *testing.T, before, after *domain.Node, confirmed boo
 
 func TestNativeConfigAppliedConfirmsPendingWithoutChangingSnapshot(t *testing.T) {
 	f := newConfigAppliedFixture(t)
+	credentialInvalidations := 0
+	f.service.SetCredentialInvalidator(func() { credentialInvalidations++ })
 	response := f.mint(t)
 	before, encrypted := f.storedNode(t), f.encryptedConfig(t)
 	if before.ConfigSyncState != domain.ConfigSyncPending || before.ConfigPendingSince == nil {
@@ -168,6 +170,9 @@ func TestNativeConfigAppliedConfirmsPendingWithoutChangingSnapshot(t *testing.T)
 	}
 	if f.invalidations != 1 {
 		t.Fatalf("first confirmed receipt invalidations = %d, want 1", f.invalidations)
+	}
+	if credentialInvalidations != 0 {
+		t.Fatal("listener confirmation used the credential-only invalidation path")
 	}
 	// A replay is expected after a lost HTTP response. It must not restamp the
 	// snapshot, rewrite secrets, or continuously discard subscription caches.

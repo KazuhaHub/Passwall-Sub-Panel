@@ -56,6 +56,9 @@ type Service struct {
 	// invalidateRender is late-bound because the native adapter needs this
 	// service before the panel pool (and therefore render service) can exist.
 	invalidateRender func()
+	// Credential receipts change subscriptions, not tag-matched membership.
+	// Nil retains the legacy combined callback for existing assembly callers.
+	invalidateCredentials func()
 	// normalizeRealityFingerprints is late-bound for the same assembly-order
 	// reason. Every trusted native Xray observation invokes it idempotently so
 	// upgrades, first boot on an already-new core, and prior partial failures all
@@ -136,6 +139,8 @@ func New(options Options) (*Service, error) {
 }
 
 func (s *Service) SetRenderInvalidator(invalidate func()) { s.invalidateRender = invalidate }
+
+func (s *Service) SetCredentialInvalidator(invalidate func()) { s.invalidateCredentials = invalidate }
 
 // SetAllowlistResyncer is wired before serving. The callback must invalidate
 // eligibility first, then enqueue asynchronous member resync without waiting
@@ -632,6 +637,7 @@ func (s *Service) reconcileObjects(ctx context.Context, agent *domain.NodeAgent,
 	missing := make([]domain.NodeAgentIssue, 0)
 	var inboundUpdates []domain.PSPClientInbound
 	renderCredentialsChanged := false
+	listenerConfigurationChanged := false
 	rosterHave := report.Have[nodeprotocol.StreamRoster]
 	rosterCurrent := streams[nodeprotocol.StreamRoster]
 	if rosterCurrent != nil && rosterHave.Applied.Epoch == agent.Epoch && string(rosterHave.ETag) == rosterCurrent.DesiredETag {
@@ -767,12 +773,17 @@ func (s *Service) reconcileObjects(ctx context.Context, agent *domain.NodeAgent,
 			// Render gates local snapshots on convergence. Refresh it on the
 			// transition, not on every periodic replay of an applied receipt.
 			if changed {
-				renderCredentialsChanged = true
+				listenerConfigurationChanged = true
 			}
 		}
 	}
-	if renderCredentialsChanged && s.invalidateRender != nil {
-		s.invalidateRender()
+	if listenerConfigurationChanged || renderCredentialsChanged && s.invalidateCredentials == nil {
+		if s.invalidateRender != nil {
+			s.invalidateRender()
+		}
+	}
+	if renderCredentialsChanged && s.invalidateCredentials != nil {
+		s.invalidateCredentials()
 	}
 	if err := s.issues.RecordBatch(ctx, agent.AgentID, missing, now); err != nil {
 		return fmt.Errorf("nodesync: record missing report objects: %w", err)

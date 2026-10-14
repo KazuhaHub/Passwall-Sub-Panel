@@ -94,11 +94,33 @@ func TestNativeSharedClientReadbackPreservesAuthenticatedRosterConfirmation(t *t
 	if next.Roster.Body == nil || next.Roster.Version.Version <= initial.Roster.Version.Version {
 		t.Fatal("credential rotation did not mint a new actual roster")
 	}
+	policyCacheKey := func() string {
+		t.Helper()
+		agent, err := f.a.repos.NodeAgent.GetByAgentID(ctx, f.agent.AgentID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		snapshot, err := f.a.repos.NativeDesired.Load(ctx, f.agent.PanelID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		base := *initial.Config.Body
+		base.Policy = nil
+		candidate, err := f.a.destCompiler.Compile(ctx, agent, snapshot, f.report.Capabilities, base)
+		if err != nil || candidate.CacheKey == "" {
+			t.Fatal("production compiler did not bind its actual tracked membership inputs")
+		}
+		return candidate.CacheKey
+	}
+	beforeCredentialReceipt := policyCacheKey()
 	f.report.Have[protocol.StreamRoster] = protocol.StreamState{Applied: next.Roster.Version, ETag: next.Roster.ETag}
 	f.report.Have[protocol.StreamDirectives] = protocol.StreamState{Applied: next.Directives.Version, ETag: next.Directives.ETag}
 	f.report.Objects[1].SinceVersion = next.Roster.Version
 	f.report.Clients[0].Present = false
 	syncNativeCacheFixture(t, f.a, f.credential, f.report)
+	if policyCacheKey() != beforeCredentialReceipt {
+		t.Fatal("credential confirmation discarded unrelated policy membership inputs")
+	}
 	if detail, err := adapter.GetClient(ctx, rotated.Email); err != nil || detail == nil || detail.ID != rotated.UUID || detail.Enable {
 		t.Fatal("new authenticated roster receipt did not expose the rotated identity")
 	}

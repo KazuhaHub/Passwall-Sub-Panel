@@ -596,6 +596,10 @@ func buildWithDestinationAuditStore(ctx context.Context, cfg *config.Config, dec
 		renderSvc.InvalidateAll()
 	}
 	nativeSync.SetRenderInvalidator(invalidateSubscriptions)
+	// A confirmed client credential changes rendered subscriptions but not
+	// user/group/tag membership. Keep member-input generations stable so other
+	// agents can finish their independent policy reads during roster admission.
+	nativeSync.SetCredentialInvalidator(renderSvc.InvalidateAll)
 	nodeSvc.SetSubscriptionInvalidator(invalidateSubscriptions)
 	destCompiler.SetInvalidator(func(string) { renderSvc.InvalidateAll() })
 	// Geo IP resolution for access-log region display — fully offline against a
