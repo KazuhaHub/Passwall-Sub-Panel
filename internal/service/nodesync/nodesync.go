@@ -1178,18 +1178,14 @@ func (s *Service) loadQuotaUsers(ctx context.Context, snapshot *ports.NativeDesi
 // tag only: it must not reduce Entries or any quota/error bound.
 func (s *Service) aggregateCoverage(clients []*domain.PSPClient, agents []*domain.NodeAgent, fullFreshnessSeconds int, now time.Time) (nodeprotocol.SegmentCounts, int64) {
 	agentByPanel := make(map[int64]string, len(agents))
+	activeAgents := make(map[string]struct{}, len(agents))
 	for _, agent := range agents {
 		if agent != nil {
 			agentByPanel[agent.PanelID] = agent.AgentID
+			activeAgents[agent.AgentID] = struct{}{}
 		}
 	}
-	s.mu.RLock()
-	reports := make(map[string]receivedFullReport, len(s.reports))
-	for agentID, received := range s.reports {
-		received.report = cloneReport(received.report)
-		reports[agentID] = received
-	}
-	s.mu.RUnlock()
+	reports := s.fleetCounterReports(activeAgents)
 
 	type reportIndex struct {
 		stale    bool
@@ -1207,9 +1203,9 @@ func (s *Service) aggregateCoverage(clients []*domain.PSPClient, agents []*domai
 			// future numerator time with a deceptively zero age.
 			idx.atMS = 0
 		}
-		idx.counters = make(map[nodeprotocol.ClientKey]bool, len(received.report.Clients))
-		for _, counter := range received.report.Clients {
-			idx.counters[counter.Key] = counter.Present
+		idx.counters = make(map[nodeprotocol.ClientKey]bool, len(received.clients))
+		for _, counter := range received.clients {
+			idx.counters[counter.key] = counter.present
 		}
 		indexed[agentID] = idx
 	}
@@ -1292,27 +1288,61 @@ func fullReportStale(receivedAtMS int64, now time.Time, freshnessSeconds int) bo
 	return nowMS < receivedAtMS || nowMS-receivedAtMS > int64(freshnessSeconds)*1000
 }
 
+type fleetClientCounter struct {
+	key                nodeprotocol.ClientKey
+	present            bool
+	upBytes, downBytes int64
+	counterEpoch       uint64
+}
+
+type fleetCounterReport struct {
+	clients      []fleetClientCounter
+	receivedAtMS int64
+}
+
+// Quota and coverage need current cumulative counters and receipt times, not
+// object receipts, live IPs, issues or task results. Copy only those values under
+// the report lock; never cache them or share the stored report's mutable slices.
+func (s *Service) fleetCounterReports(active map[string]struct{}) map[string]fleetCounterReport {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	reports := make(map[string]fleetCounterReport, len(active))
+	for agentID := range active {
+		received, found := s.reports[agentID]
+		if !found {
+			continue
+		}
+		clients := make([]fleetClientCounter, len(received.report.Clients))
+		for index, counter := range received.report.Clients {
+			clients[index] = fleetClientCounter{
+				key: counter.Key, present: counter.Present,
+				upBytes: counter.UpBytes, downBytes: counter.DownBytes,
+				counterEpoch: counter.CounterEpoch,
+			}
+		}
+		reports[agentID] = fleetCounterReport{clients: clients, receivedAtMS: received.receivedAtMS}
+	}
+	return reports
+}
+
 func (s *Service) pendingUsage(clients map[int64]*domain.PSPClient, agents []*domain.NodeAgent) map[int64]int64 {
 	panelByAgent := make(map[string]int64, len(agents))
+	activeAgents := make(map[string]struct{}, len(agents))
 	for _, agent := range agents {
 		if agent != nil {
 			panelByAgent[agent.AgentID] = agent.PanelID
+			activeAgents[agent.AgentID] = struct{}{}
 		}
 	}
-	s.mu.RLock()
-	reports := make(map[string]nodeprotocol.NodeReport, len(s.reports))
-	for agentID, received := range s.reports {
-		reports[agentID] = cloneReport(received.report)
-	}
-	s.mu.RUnlock()
+	reports := s.fleetCounterReports(activeAgents)
 	result := make(map[int64]int64)
 	for agentID, report := range reports {
 		panelID, active := panelByAgent[agentID]
 		if !active {
 			continue
 		}
-		for _, counter := range report.Clients {
-			id, err := counter.Key.RowID()
+		for _, counter := range report.clients {
+			id, err := counter.key.RowID()
 			if err != nil {
 				continue
 			}
@@ -1324,7 +1354,11 @@ func (s *Service) pendingUsage(clients map[int64]*domain.PSPClient, agents []*do
 			if client == nil || client.PanelID != panelID {
 				continue
 			}
-			result[client.UserID] = saturatingAdd(result[client.UserID], s.pendingCounterDelta(client, counter))
+			result[client.UserID] = saturatingAdd(result[client.UserID], s.pendingCounterDelta(client, nodeprotocol.ClientCounters{
+				Key: counter.key, Present: counter.present,
+				UpBytes: counter.upBytes, DownBytes: counter.downBytes,
+				CounterEpoch: counter.counterEpoch,
+			}))
 		}
 	}
 	return result

@@ -1540,3 +1540,19 @@ RUN1/PASS1，恰在一个分片，无失败、跳过或缓存，原四分钟上�
 原 Passkey 浏览器用例的 1 项条件跳过，无未处理错误。这是失效边界及普通
 CI 的运行证据，不能替代尚在执行的全局压力与完整原生矩阵，也不证明真实
 24 小时或保留窗口验收完成。
+
+源 `35343c93` 的[完整原生矩阵](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/38526412752)
+已 49 项作业通过；48 份精确提交/run、未过期原件逐份核验通过，861 个必需
+场景通过。[同源三数据库压力](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/38526418477)
+仍全部失败：SQLite stage1/131 人、MySQL stage1/192 人为套件超时；
+PostgreSQL stage2/200 人为 `streams_inbound_offline`、根测试 FAIL1。三份
+原件均无压力 profile，流量及四类完成标志为零；未输出配置错误类别不能
+填成零。PostgreSQL 配置与名单阶段 count 均为 7342，最近同步耗时 3035ms，
+完成年龄 3868ms、HTTP200、父进程存活；这些观察不能满足就绪门禁。
+
+后续减少配额/覆盖率计算中的报告复制：每次仍在报告锁下读取当前原生
+机队的 client key、present、累计上下行、counter epoch 和接收时间，
+不复制对象、实时 IP、问题和任务正文，不跨调用缓存。原归属检查、关闭
+客户端的待入账流量、anchor、陈旧/未来时钟与分母规则保持。新增回归检查
+快照独立性和当前读取，既有跨面板伪造、退休节点、计数器重置与新鲜度
+回归继续必跑；是否改善真实压力仍须新同源运行，旧失败原件保留。
