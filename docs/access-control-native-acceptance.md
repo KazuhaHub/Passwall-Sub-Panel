@@ -1556,3 +1556,25 @@ PostgreSQL stage2/200 人为 `streams_inbound_offline`、根测试 FAIL1。三�
 客户端的待入账流量、anchor、陈旧/未来时钟与分母规则保持。新增回归检查
 快照独立性和当前读取，既有跨面板伪造、退休节点、计数器重置与新鲜度
 回归继续必跑；是否改善真实压力仍须新同源运行，旧失败原件保留。
+
+源 `a9c223eb` 的[完整 CI](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/38530036073)
+18 项通过，`nodesync` 完整 race 包通过 63.886s，212 个 App 入口原件经
+精确提交/run 核验，各 RUN1/PASS1、恰在三个分片之一，无失败/跳过/缓存，
+原四分钟上限保持。前端类型与生产构建通过，2507 项单元测试通过，保留
+原 Passkey 浏览器用例的 1 项条件跳过，无未处理错误。
+
+[同源三数据库压力](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/38530047038)
+仍全部失败：SQLite stage1/144 人、PostgreSQL stage1/197 人为套件超时；
+MySQL stage2/200 人为 `streams_inbound_stale`、根测试 FAIL1。三份原件
+均无压力 profile，流量及四类完成标志为零，未输出配置错误类别不能填零。
+MySQL 指令准备累计平均 792ms，最近同步 3160ms、完成年龄 2202ms、HTTP200、
+父进程存活，仍不满足就绪。[原生矩阵](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/38530041392)
+首轮 47 项作业通过；集成 Node + Xray 26.9.9 根测试在 2.36s 失败，未进入
+场景子测试，也没有固定诊断类别，汇总门禁随之失败。首轮 48 份原件已保留，
+同一提交的该作业 attempt2 已启动，尚不能确定原因或宣称矩阵完整通过。
+
+后续将六字段机队计数查询的扫描目标从完整客户端行改为六个数值字段的
+小行类型，并显式保留 `psp_clients` 模型。查询列、全部行、排序、端口与
+返回数据保持；扫描阶段不再为每行分配完整凭据/生命周期记录。601 行
+回归同时检查单次完整查询、数值扫描的尺寸边界、当前更新和取消失败，
+实际三方言及压力结果仍须新的同源运行。

@@ -35,6 +35,19 @@ func TestFleetAccountingReadsOnlyCurrentBaselinesWithoutFilteringClients(t *test
 		if tx.Statement.Table != "psp_clients" || !reflect.DeepEqual(tx.Statement.Selects, want) {
 			t.Error("fleet accounting read fetched definitions or changed its table")
 		}
+		// Selecting six columns must also scan a compact numeric row, rather
+		// than allocating full credential/lifecycle records for the whole fleet.
+		rowType := reflect.TypeOf(tx.Statement.Dest).Elem().Elem()
+		if rowType.Kind() != reflect.Struct || rowType.NumField() != 6 || rowType.Size() > 48 {
+			t.Error("fleet accounting scan retained full client row allocations")
+		} else {
+			for index := range rowType.NumField() {
+				kind := rowType.Field(index).Type.Kind()
+				if kind != reflect.Int64 && kind != reflect.Uint64 {
+					t.Error("fleet accounting scan retained a nonnumeric payload field")
+				}
+			}
+		}
 		if _, filtered := tx.Statement.Clauses["WHERE"]; filtered {
 			t.Error("fleet accounting excluded clients from the denominator")
 		}

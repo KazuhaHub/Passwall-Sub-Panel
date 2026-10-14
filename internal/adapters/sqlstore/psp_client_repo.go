@@ -217,9 +217,22 @@ func (r *pspClientRepo) ListAll(ctx context.Context) ([]*domain.PSPClient, error
 	return out, nil
 }
 
+// Scan accounting into its six numeric fields. A restricted SELECT alone still
+// allocates the complete credential/lifecycle row for every fleet client when
+// the destination is []pspClientRow, even though those columns were not read.
+type pspClientFleetAccountingRow struct {
+	ID               int64  `gorm:"column:id"`
+	UserID           int64  `gorm:"column:user_id"`
+	PanelID          int64  `gorm:"column:panel_id"`
+	LastRawUpBytes   int64  `gorm:"column:last_raw_up_bytes"`
+	LastRawDownBytes int64  `gorm:"column:last_raw_down_bytes"`
+	LastCounterEpoch uint64 `gorm:"column:last_counter_epoch"`
+}
+
 func (r *pspClientRepo) ListFleetAccounting(ctx context.Context) ([]*domain.PSPClient, error) {
-	var rows []pspClientRow
+	var rows []pspClientFleetAccountingRow
 	if err := r.db.WithContext(ctx).
+		Model(&pspClientRow{}).
 		Select("id", "user_id", "panel_id", "last_raw_up_bytes", "last_raw_down_bytes", "last_counter_epoch").
 		Order("panel_id, user_id, id").Find(&rows).Error; err != nil {
 		return nil, err
