@@ -945,7 +945,7 @@ jobs:
       - uses: actions/cache/restore@v6
         with:
           path: ~/.cache/go-build
-          key: go-build-static-${{ runner.os }}-${{ hashFiles('go.sum') }}-actionlint-v1.7.12-staticcheck-v0.8.1-govulncheck-v1.8.0
+          key: go-build-static-${{ runner.os }}-${{ hashFiles('go.sum') }}-actionlint-v1.7.12-staticcheck-v0.8.2-govulncheck-v1.8.0
           restore-keys: go-build-static-${{ runner.os }}-
       - uses: actions/cache/restore@v6
         with:
@@ -1023,13 +1023,13 @@ jobs:
       #
       # THE PIN HAS TO UNDERSTAND go.mod'S TOOLCHAIN, SO THE TWO MOVE TOGETHER.
       # staticcheck reads the compiler's export data, and a release older than the
-      # toolchain cannot: v0.7.0 fails on go1.27.1 with "export data version 4 is
-      # greater than maximum supported version 2", and v0.8.1 works. A toolchain bump
+      # toolchain cannot: v0.8.1 fails on go1.27.2 with "export data version 5 is
+      # greater than maximum supported version 4", and v0.8.2 works. A toolchain bump
       # that turns this step red is asking for the staticcheck bump in the same PR.
       #
       # ~18s on a cold analysis cache, measured locally, in a job off the critical path.
       - name: staticcheck
-        run: go run honnef.co/go/tools/cmd/staticcheck@v0.8.1 -tags node_reinstall_acceptance ./...
+        run: go run honnef.co/go/tools/cmd/staticcheck@v0.8.2 -tags node_reinstall_acceptance ./...
       # EVERY OS THE RELEASE SHIPS, NOT ONLY THE RUNNER'S. govulncheck analyses the
       # packages as they build for the current GOOS, so an advisory whose vulnerable
       # code lives only in a _windows.go or _darwin.go file is never evaluated on a
@@ -1060,7 +1060,7 @@ jobs:
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         with:
           path: ~/.cache/go-build
-          key: go-build-static-${{ runner.os }}-${{ hashFiles('go.sum') }}-actionlint-v1.7.12-staticcheck-v0.8.1-govulncheck-v1.8.0
+          key: go-build-static-${{ runner.os }}-${{ hashFiles('go.sum') }}-actionlint-v1.7.12-staticcheck-v0.8.2-govulncheck-v1.8.0
 
   # The race suite is sharded because it is the critical path: at 4m22s it was
   # still running while the other twenty-two checks had finished.
