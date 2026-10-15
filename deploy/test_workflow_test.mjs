@@ -15,6 +15,8 @@ import { test } from 'node:test'
 // guard, so these assertions keep working on a machine that has no YAML library.
 
 const workflow = readFileSync(new URL('../.github/workflows/test.yml', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
+const preferredGoMinor = Number(/^toolchain go1\.(\d+)\.\d+$/m.exec(readFileSync(new URL('../go.mod', import.meta.url), 'utf8'))?.[1])
+assert(Number.isSafeInteger(preferredGoMinor) && preferredGoMinor > 0, 'the preferred compiler must have an exact Go minor')
 
 function job(name) {
   const marker = `  ${name}:\n`
@@ -185,7 +187,7 @@ test('the isolated third-party panels are pinned to the recorded ceilings', () =
 // constraint on the job's runner (linux/amd64, gc, cgo), or its compile depends on a
 // filter happening to fire. The plain `go vet ./...` counts, with no tags, so a file
 // that is merely linux-only is covered by it.
-function buildConstraintHolds(expression, tags) {
+function buildConstraintHolds(expression, tags, goMinor = preferredGoMinor) {
   const satisfied = new Set(['linux', 'unix', 'amd64', 'gc', 'cgo', ...tags])
   let rest = expression.trim()
   let program = ''
@@ -193,7 +195,8 @@ function buildConstraintHolds(expression, tags) {
     const token = /^(\(|\)|!|&&|\|\||[A-Za-z0-9_.]+)\s*/.exec(rest)
     assert(token, `cannot read the build constraint "${expression}"`)
     const word = token[1]
-    program += /^[A-Za-z0-9_.]+$/.test(word) ? ` ${satisfied.has(word) || /^go1\.\d+$/.test(word)} ` : word
+    const release = /^go1\.(\d+)$/.exec(word)
+    program += /^[A-Za-z0-9_.]+$/.test(word) ? ` ${satisfied.has(word) || release !== null && Number(release[1]) <= goMinor} ` : word
     rest = rest.slice(token[0].length)
   }
   // Only true, false and the operators Go shares with JavaScript reach this.
@@ -208,6 +211,14 @@ function packagePatternCovers(pattern, dir) {
     return dir === prefix || dir.startsWith(`${prefix}/`)
   }
   return path === dir
+}
+
+function vetInvocations(block) {
+  return [...block.matchAll(/^\s*(?:(?:-\s+)?run:\s*)?(?:GOTOOLCHAIN=go1\.(\d+)\.\d+ )?go vet (?:-tags (\S+) )?(\.\/\S*)\s*$/gm)].map(([, minor, tags, pattern]) => ({
+    goMinor: minor ? Number(minor) : preferredGoMinor,
+    tags: tags ? tags.split(',') : [],
+    pattern,
+  }))
 }
 
 test('every build-tagged Go file is type-checked by go_static', () => {
@@ -228,13 +239,10 @@ test('every build-tagged Go file is type-checked by go_static', () => {
     tagged.length > 0,
     'no tracked Go file has a build constraint, so this checked nothing: if the reinstall acceptance is gone, its vet step in go_static and this guard go with it',
   )
-  const vets = [...job('go_static').matchAll(/go vet (?:-tags (\S+) )?(\.\/\S*)/g)].map(([, tags, pattern]) => ({
-    tags: tags ? tags.split(',') : [],
-    pattern,
-  }))
+  const vets = vetInvocations(job('go_static'))
   for (const { dir, file, constraint } of tagged) {
     assert(
-      vets.some(({ tags, pattern }) => packagePatternCovers(pattern, dir) && buildConstraintHolds(constraint, tags)),
+      vets.some(({ tags, pattern, goMinor }) => packagePatternCovers(pattern, dir) && buildConstraintHolds(constraint, tags, goMinor)),
       `${file} is built only under "${constraint}", and no \`go vet\` line in go_static opens it. Its compile then depends on a path-filtered workflow happening to run, which is how a broken acceptance merges green.`,
     )
   }
@@ -244,6 +252,29 @@ test('every build-tagged Go file is type-checked by go_static', () => {
   assert.equal(buildConstraintHolds('linux && node_reinstall_acceptance', []), false)
   assert.equal(buildConstraintHolds('darwin && node_reinstall_acceptance', ['node_reinstall_acceptance']), false)
   assert.equal(buildConstraintHolds('!windows && (foo || bar)', ['bar']), true)
+})
+
+test('release build constraints require an actual matching compiler and scoped vet command', () => {
+  assert.equal(buildConstraintHolds('go1.26 && !go1.27', [], 26), true)
+  assert.equal(buildConstraintHolds('go1.26 && !go1.27', [], 27), false)
+  assert.equal(buildConstraintHolds('go1.27', [], 26), false)
+  assert.equal(buildConstraintHolds('go1.28', [], 27), false)
+  assert.equal(buildConstraintHolds('linux && go1.27 && destination_acceptance', ['destination_acceptance'], 27), true)
+  const fallback = step(job('go_static'), 'The Go 1.26 SQL scan fallback still compiles')
+  assert(fallback.includes('GOTOOLCHAIN=go1.26.9 go env GOVERSION'))
+  assert(fallback.includes('GOTOOLCHAIN=go1.26.9 go tool compile -V'))
+  assert(fallback.includes('GOTOOLCHAIN=go1.26.9 go vet ./internal/adapters/sqlstore'))
+  assert(fallback.includes('GOTOOLCHAIN=go1.26.9 go test -count=1 -timeout=4m ./internal/adapters/sqlstore'))
+  for (const name of ['TestCurrentSQLDestinationsPreserveDriverConversionsAndFailures', 'TestCurrentSQLDestinationsDelegateScannersOnceAndLeaveOtherDialectsUnchanged', 'TestCurrentUserCursorMatchesCompleteModelsAndResolvedLimits', 'TestCurrentUserCursorErrorsNeverReturnPartialAccountsOrRetainConnections']) assert(fallback.includes(name))
+  assert.deepEqual(vetInvocations(`
+    # GOTOOLCHAIN=go1.26.9 go vet ./commented
+    printf '%s' 'GOTOOLCHAIN=go1.26.9 go vet ./quoted'
+    GOTOOLCHAIN=go1.26.9 go vet ./legacy
+    run: go vet -tags destination_acceptance ./internal/app
+  `), [
+    { goMinor: 26, tags: [], pattern: './legacy' },
+    { goMinor: preferredGoMinor, tags: ['destination_acceptance'], pattern: './internal/app' },
+  ])
 })
 
 // A PACKAGE THAT BRANCHES ON THE DIALECT HAS TO BE RUN ON THE DIALECTS.

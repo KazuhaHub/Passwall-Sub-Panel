@@ -108,6 +108,10 @@ selected fields, ordering, ID chunks, resolution, freshness or caching. The
 adapter is build-tagged: Go 1.26 and other SQL dialects retain their original
 destinations. Both preferred and Go 1.26 SQLstore test binaries compile locally;
 actual tests and any performance improvement still require hosted evidence.
+CI also selects the fixed Go 1.26.9 compiler for the fallback's vet and four
+current-user/conversion regressions. The tracked-file coverage guard evaluates
+release tags against each vet command's actual compiler; it no longer assumes
+every `go1.*` tag is true or counts commented/quoted commands as coverage.
 
 For fallback-rejection diagnosis, the native workflow accepts
 `suite=mysql-module-xray-26.9.9`. It runs the unchanged complete MySQL/Xray

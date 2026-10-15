@@ -1020,6 +1020,13 @@ jobs:
         run: go vet -tags destination_pressure ./internal/service/destaudit
       - name: The real destination SQL pressure still compiles
         run: go vet -tags destination_pressure ./internal/adapters/sqlstore
+      - name: The Go 1.26 SQL scan fallback still compiles
+        run: |
+          set -euo pipefail
+          test "$(GOTOOLCHAIN=go1.26.9 go env GOVERSION)" = go1.26.9
+          test "$(GOTOOLCHAIN=go1.26.9 go tool compile -V | awk '{ print $3 }')" = go1.26.9
+          GOTOOLCHAIN=go1.26.9 go vet ./internal/adapters/sqlstore
+          GOTOOLCHAIN=go1.26.9 go test -count=1 -timeout=4m ./internal/adapters/sqlstore -run '^(TestCurrentSQLDestinationsPreserveDriverConversionsAndFailures|TestCurrentSQLDestinationsDelegateScannersOnceAndLeaveOtherDialectsUnchanged|TestCurrentUserCursorMatchesCompleteModelsAndResolvedLimits|TestCurrentUserCursorErrorsNeverReturnPartialAccountsOrRetainConnections)$'
       # STATICCHECK, BECAUSE VET DOES NOT LOOK FOR WHAT IT FINDS. Its first run here
       # reported thirteen findings every gate above had passed, among them six pieces
       # of dead code, a dead store in nodesync, a crypto/ecdsa field deprecated since
