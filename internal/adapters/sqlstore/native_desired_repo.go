@@ -68,24 +68,7 @@ func (r *nativeDesiredRepo) load(ctx context.Context, panelID int64, email *stri
 		for i := range clients {
 			ids[i] = clients[i].Client.ID
 		}
-		var attachmentRows []pspClientInboundRow
-		if err := tx.Where("client_id IN ?", ids).Order("client_id, node_id").Find(&attachmentRows).Error; err != nil {
-			return err
-		}
-		byClient := make(map[int64][]domain.PSPClientInbound, len(clients))
-		for _, row := range attachmentRows {
-			byClient[row.ClientID] = append(byClient[row.ClientID], domain.PSPClientInbound{
-				ClientID: row.ClientID, NodeID: row.NodeID,
-				FlowOverride: row.FlowOverride, State: domain.ClientApplyState(row.State),
-				AppliedVersion: row.AppliedVersion, AppliedEmail: row.AppliedEmail,
-				AppliedUUID: row.AppliedUUID, AppliedPassword: row.AppliedPassword,
-				FirstFailedAt: row.FirstFailedAt,
-			})
-		}
-		for i := range result.Clients {
-			result.Clients[i].Inbounds = byClient[result.Clients[i].Client.ID]
-		}
-		return nil
+		return loadNativeDesiredAttachments(tx, result.Clients, ids)
 	})
 	if err != nil {
 		return nil, err

@@ -37,15 +37,12 @@ func TestNativeDesiredClientSnapshotBoundsReadsAndPreservesExactIdentity(t *test
 	if err != nil || len(full.Clients) != 603 {
 		t.Fatal("fixture does not have its full native client set")
 	}
-	queries, clientQueries, attachmentRows, outsideTransaction := 0, 0, int64(0), false
+	queries, clientQueries, attachmentQueries, outsideTransaction := 0, 0, 0, false
 	hook := "native-client-scoped-query-shape"
 	if err := r.db.Callback().Query().After("gorm:query").Register(hook, func(tx *gorm.DB) {
 		queries++
 		_, transaction := tx.Statement.ConnPool.(gorm.TxCommitter)
 		outsideTransaction = outsideTransaction || !transaction
-		if tx.Statement.Table == "psp_client_inbounds" {
-			attachmentRows += tx.RowsAffected
-		}
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -53,10 +50,20 @@ func TestNativeDesiredClientSnapshotBoundsReadsAndPreservesExactIdentity(t *test
 		queries++
 		_, transaction := tx.Statement.ConnPool.(gorm.TxCommitter)
 		outsideTransaction = outsideTransaction || !transaction
-		if tx.Statement.Table != "psp_clients" || !strings.Contains(tx.Statement.SQL.String(), "panel_id = ") || !strings.Contains(tx.Statement.SQL.String(), "email = ") || len(tx.Statement.Vars) != 2 || tx.Statement.Vars[0] != int64(7) || tx.Statement.Vars[1] != email {
-			t.Error("client cursor lost its bound owner and email filters")
+		switch tx.Statement.Table {
+		case "psp_clients":
+			if !strings.Contains(tx.Statement.SQL.String(), "panel_id = ") || !strings.Contains(tx.Statement.SQL.String(), "email = ") || len(tx.Statement.Vars) != 2 || tx.Statement.Vars[0] != int64(7) || tx.Statement.Vars[1] != email {
+				t.Error("client cursor lost its bound owner and email filters")
+			}
+			clientQueries++
+		case "psp_client_inbounds":
+			if !strings.Contains(tx.Statement.SQL.String(), "client_id IN ") || !reflect.DeepEqual(tx.Statement.Vars, []any{int64(1), int64(603)}) {
+				t.Error("attachment cursor lost its exact current client closure")
+			}
+			attachmentQueries++
+		default:
+			t.Error("scoped snapshot opened an unexpected cursor")
 		}
-		clientQueries++
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -65,7 +72,7 @@ func TestNativeDesiredClientSnapshotBoundsReadsAndPreservesExactIdentity(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	if queries != 3 || clientQueries != 1 || attachmentRows != 2 || outsideTransaction {
+	if queries != 3 || clientQueries != 1 || attachmentQueries != 1 || outsideTransaction {
 		t.Fatal("single client read scanned the fleet, crossed its owner or escaped the snapshot transaction")
 	}
 	_ = r.db.Callback().Query().Remove(hook)
