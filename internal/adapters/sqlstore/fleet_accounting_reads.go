@@ -2,7 +2,6 @@ package sqlstore
 
 import (
 	"context"
-	"slices"
 	"sync"
 	"sync/atomic"
 
@@ -50,7 +49,14 @@ func (r *fleetAccountingReads) read(ctx context.Context, load func(context.Conte
 		}
 		// The stored result belongs only to this completed batch. Each caller
 		// receives its own numeric values, so mutations cannot cross responses.
-		return slices.Clone(batch.rows), batch.err
+		// Bound the exposed capacity to the complete result, rather than the
+		// allocator-rounded capacity used by append-based slice cloning.
+		if batch.rows == nil {
+			return nil, batch.err
+		}
+		rows := make([]domain.PSPClientAccounting, len(batch.rows))
+		copy(rows, batch.rows)
+		return rows, batch.err
 	}
 }
 
