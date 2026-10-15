@@ -145,6 +145,7 @@ type pspClientRepo struct {
 	db *gorm.DB
 	// Allocation hint only: no client data or accounting result is retained.
 	fleetCapacity atomic.Int64
+	fleetReads    fleetAccountingReads
 }
 
 const maxFleetAccountingCapacity = 65536 // at most 3 MiB of numeric rows up front
@@ -230,6 +231,10 @@ func (r *pspClientRepo) ListAll(ctx context.Context) ([]*domain.PSPClient, error
 }
 
 func (r *pspClientRepo) ListFleetAccounting(ctx context.Context) ([]domain.PSPClientAccounting, error) {
+	return r.fleetReads.read(ctx, r.readFleetAccounting)
+}
+
+func (r *pspClientRepo) readFleetAccounting(ctx context.Context) ([]domain.PSPClientAccounting, error) {
 	// The covering index follows this ordering and numeric projection, allowing
 	// the planner to avoid table lookups and temporary sorting. The query still
 	// reads the current complete fleet; no rows or freshness checks are omitted.
