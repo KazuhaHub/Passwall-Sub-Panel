@@ -9,8 +9,8 @@ PSP 通过 `/panel/api/*` 对接 3X-UI 面板。本文档维护两件事：
 
 | PSP 版本 | 最低 3X-UI | 已实测通过 | 备注 |
 |---|---|---|---|
-| **v4 stable（4.0.0–4.99.99）** | **3.4.2** | **3.9.0** | 当前 v4 适配器已在官方 3.9.0 / Xray 26.9.30 发布包上实测；详见下方验证记录 |
-| **v4.0.0-beta.9+** | **3.4.2** | **3.8.5** | 历史 beta 验证记录；不将当前 v4 源码的 3.9.0 结果套用于旧二进制 |
+| **v4 stable（4.0.0–4.99.99）** | **3.4.2** | **3.10.2** | 当前 v4 适配器已在官方 3.10.2 / Xray 26.10.10 隔离面板上实测；包含 SS-2022 永久校验错误分类修复，见下方验证记录 |
+| **v4.0.0-beta.9+** | **3.4.2** | **3.9.0** | 历史 beta 验证记录；不将当前 v4 源码的结果套用于旧二进制 |
 | **v4.0.0-beta.1–beta.8** | **3.4.2** | 3.7.0 | 历史二进制缺少 3X-UI 3.8.x 所需修复，不随远程清单误抬上限 |
 | **v3.9.3+** | **3.4.2** | **3.8.5** | V3 稳定维护线；补齐 Xray 26.9.8+ REALITY ML-KEM 订阅处理，并保留 3X-UI 3.8.x 的负数 `subSortIndex` |
 | **v3.9.1–v3.9.2** | **3.4.2** | 3.7.0 | 新增由所选节点执行的 REALITY 目标扫描；旧发行版没有 3.8.x 所需的两项兼容修复 |
@@ -41,6 +41,85 @@ PSP 通过 `/panel/api/*` 对接 3X-UI 面板。本文档维护两件事：
 - 抬高 `max_tested_xui` / `max_tested_sui` 时，**同一个改动**里把 `.github/workflows/test.yml` 中 `third-party-isolated` 的 `PSP_LIVE_3XUI_IMAGE` / `PSP_LIVE_SUI_IMAGE` 默认镜像改成新上限的 `tag@sha256:digest`；CI 跑的就是评审过的上限，`deploy/test_workflow_test.mjs` 会拒绝两者不一致
 
 ## 历史兼容性事件
+
+### 2026-10-14（洛杉矶）/ 3X-UI 3.10.2 适配器复核 → v4 已测上限更新到 3.10.2
+
+3X-UI [v3.10.2](https://github.com/MHSanaei/3x-ui/releases/tag/v3.10.2) 发布于
+2026-10-14，内置 Xray-core 仍为 **26.10.10**。在源码层面对比
+`v3.10.0..v3.10.2`，PSP 使用的 API 路由、客户端字段结构以及 client/server
+controller 未变化；本次涉及共享客户端字段合并、节点流量合并和 Shadowsocks 热更新。
+
+本地使用官方 Windows/amd64 发布包，SHA-256 与 GitHub release asset 的摘要一致：
+`67cf5f3a1d354f62bf5d0ff27e5a96663ba64761b7d26919b307ac6cca37419e`。
+隔离 SQLite 面板仅监听回环地址，独立订阅服务关闭，使用 admin-scoped token。
+面板实际回报 `panelVersion=3.10.2`、`xrayVersion=26.10.10`、`xrayState=running`。
+9 项必需 live 适配器测试全部通过，两项 fail2ban 按既有 profile 记为 N/A。
+
+另外通过真实适配器补测了两项测试及两个 AES 子场景：
+
+- SS-2022 AES-128 / AES-256 入站和客户端增删改、禁用再启用正常，配额、到期及连接限制保留，Xray 保持 running。
+- 不支持的 SS-2022 chacha20 方法和无效 server key 被面板拒绝。PSP 现在也将无效 server key 的错误识别为 `domain.ErrValidation`，避免把确定性配置错误当成临时错误重试；回归测试包含两个 AES 方法的实际返回消息。
+- 配置更新保留负数 `subSortIndex=-3`、独立的入站启停及客户端 UUID、启用、配额、到期和设备上限。
+- 通过面板 API 配置每周续期后，PSP `UpdateClient` 将 `clients` 和 `client_traffics` 两张表中的 `reset_weekday` 清零。
+
+机器可读记录见 [3x-ui-3.10.2.json](compat/evidence/3x-ui-3.10.2.json)。
+CI 固定到 `ghcr.io/mhsanaei/3x-ui:v3.10.2@sha256:6c7e73c5bc4b6d7d70866616f78d6c9866b4904defad3077c1e2b5c1c89c2ec1`，对应 linux/amd64 镜像会由手动完整 Test workflow 验证。
+
+**升级提醒**：Windows 可执行文件由 `x-ui.exe` 改为 `3x-ui.exe`，相关服务、任务
+和启动脚本需更新路径；跨过 3.10.0 时仍需阅读下面的内核升级及配置迁移提醒。
+最低版本仍为 3.4.2，历史 v3 / v4 beta 的支持声明不变。本次验证覆盖当前源码适配器
+与全新隔离面板；不代表旧数据库升级、历史 PSP 二进制、完整代理流量或现存连接连续性认证。
+
+
+### 2026-10-13 / 3X-UI 3.10.0 适配器复核 → v4 已测上限 3.9.0 抬到 3.10.0
+
+3X-UI [v3.10.0](https://github.com/MHSanaei/3x-ui/releases/tag/v3.10.0) 发布于
+2026-10-12，内置 Xray-core 升级到 **26.10.10**，新增 MASQUE、XDRIVE 等协议。
+源码核对了提交 `74c3cc38821cabd66ad316ea562851422d0b0063` 相对 3.9.0 的
+路由、认证、入站/客户端写路径与启动迁移，并用 CI 固定的同一个容器镜像
+`ghcr.io/mhsanaei/3x-ui:v3.10.0@sha256:ef90d07e…`（多架构 index 摘要，
+因此 CI 的 amd64 与本次 arm64 跑的是同一份评审过的发布）在隔离 SQLite 面板上
+端到端跑了适配器。面板回报 `panelVersion=3.10.0`、`xrayVersion=26.10.10`、
+`xrayState=running`。
+
+**接口面**：`/panel/api` 上 PSP 调用的路由**没有增删**；`api.go` 只把
+`/inbounds/:id/subSortIndex`、`/clients/bulkResetTraffic`、`/clients/activeInbounds`
+加进了 node-sync scope 白名单。`model.Client` 与 `model.ClientTraffic`
+逐字节相同，client controller 与 service 逐字节相同，
+`traffic_writer.go`、`server.go` 也逐字节相同。`normalizeSubSortIndex` 未变
+（0 → 1，显式负数保留），所以 3.9.0 验证过的负数排序行为仍然成立。
+
+9 项 required `TestLive_*`（接口生命周期、REALITY 扫描、连接限制、五组流量底线，
+以及共享客户端、迁移、批量删除和两种并发写入）**全部通过**，
+`check-go-results.mjs` 判定 `pass`；两项 fail2ban 仍按 profile 记为 **N/A**。
+机器可读结果见 [3x-ui-3.10.0.json](compat/evidence/3x-ui-3.10.0.json)。
+
+**3.10.0 新增了入站写路径的保存校验，其中一条需要 PSP 适配。** 这是本次唯一
+的代码改动：
+
+1. **SS-2022 的 chacha20-poly1305 被拒绝。** 3.10.0 起
+   `validateShadowsocks2022Inbound` 无条件拒绝使用该方法创建/更新的入站
+   （xray-core 的多用户身份头只支持 AES）。**这不是能力回退**：实测在 3.9.0 上
+   同一个入站会**保存成功、随后让整个内核启动失败**（`only blake3-aes-*-gcm
+   methods are supported`，core exit status 23，`xrayState=error`，端口不监听，
+   连同这台面板上**其它所有入站**一起停摆）。3.10.0 只是把这个「静默炸内核」
+   提前成保存时报错。但 PSP 的节点编辑器仍提供该 cipher，管理员选到它就会撞上；
+   `isPermanentPanelMsg` 现已匹配这条文案，让写入**快速失败为 `ErrValidation`**，
+   而不是把 sync task 的 ~100 次重试预算烧光、每次尝试写一条审计记录。
+   **操作建议**：3X-UI 节点的 SS-2022 请选 `2022-blake3-aes-128-gcm` 或
+   `2022-blake3-aes-256-gcm`。
+2. **混淆（salamander）密码少于 4 字节被拒绝。** 新增 `validateFinalMaskSalamander`。
+   现有 `finalmask` 子串匹配已经把它归为永久失败，无需改代码；补了测试用例钉住它。
+   PSP 自己不生成 salamander 密码，只有管理员手工填过短密码才会碰到。
+
+只更新 `docs/compat/3x-ui-v4.json` 的上限、revision、签发/到期时间与 3.10.0 advisory；
+最低版本仍为 3.4.2，V3 与历史 beta 的既有认证范围不变。
+CI `third-party-isolated` 同步固定为
+`ghcr.io/mhsanaei/3x-ui:v3.10.0@sha256:ef90d07ea00cf3b76bcd37e7c5025d73788dc188894c6a741c22776a83c2c556`。
+本次在本地 Lima VM 用仓库自己的隔离启动脚本实跑了该 Linux 容器（含 24443-24450
+节点端口段），验证只覆盖当前源码适配器与全新面板；未运行 PSP 历史发布二进制、
+已有面板数据库升级、完整代理流量、完整 PSP traffic/reconcile 链路，或面板/内核自升级操作。
+SS-2022/salamander 两处补充探测直接经适配器打 add/update，未走完整的建节点与 reconcile 推送链路。
 
 ### 2026-10-03（洛杉矶）/ 3X-UI 3.9.0 适配器复核 → v4 已测上限 3.8.5 抬到 3.9.0
 

@@ -132,9 +132,9 @@ func TestPolicySnapshotOnlyInstallsWhereTheDocumentApplies(t *testing.T) {
 		wantErr    bool
 		wantUnread bool
 	}{
-		{name: "the released line", current: "4.0.0", wantMax: "3.9.0"},
-		{name: "a later release on the same line", current: "4.0.1", wantMax: "3.9.0"},
-		{name: "the top of the reviewed window", current: "4.99.99", wantMax: "3.9.0"},
+		{name: "the released line", current: "4.0.0", wantMax: "3.10.2"},
+		{name: "a later release on the same line", current: "4.0.1", wantMax: "3.10.2"},
+		{name: "the top of the reviewed window", current: "4.99.99", wantMax: "3.10.2"},
 		// A LEGACY STAMP IS NOT AN IDENTITY ANY MORE, so it cannot be matched
 		// against a window either: the document does not apply, and no range is
 		// established for it.
@@ -191,8 +191,8 @@ func TestAnUnwritableSnapshotDirectoryDoesNotFailTheApply(t *testing.T) {
 	if err := applyXUICompatDocument(raw, time.Now().UTC()); err != nil {
 		t.Fatalf("an unwritable snapshot directory failed the apply: %v", err)
 	}
-	if got := ActiveMaxTestedXUI(); got != "3.9.0" {
-		t.Fatalf("active range=%q, want 3.9.0 — the document was validated and must have taken effect", got)
+	if got := ActiveMaxTestedXUI(); got != "3.10.2" {
+		t.Fatalf("active range=%q, want 3.10.2 — the document was validated and must have taken effect", got)
 	}
 }
 
@@ -343,7 +343,7 @@ func TestPolicySnapshotRoundTripsAndKeepsItsProvenance(t *testing.T) {
 
 	// Replay installs, then a different major does not — without the file
 	// having changed between the two.
-	if err := LoadPolicySnapshot(); err != nil || ActiveMaxTestedXUI() != "3.9.0" {
+	if err := LoadPolicySnapshot(); err != nil || ActiveMaxTestedXUI() != "3.10.2" {
 		t.Fatalf("same-major replay: active=%q error=%v", ActiveMaxTestedXUI(), err)
 	}
 	SetActiveMaxTestedXUI("")

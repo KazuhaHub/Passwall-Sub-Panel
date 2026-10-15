@@ -32,10 +32,11 @@ workflow re-checks them with `printenv`, which is a child too.
 CI pins the current tested ceilings recorded separately in
 `docs/compat/3x-ui-v4.json` and `docs/compat/sui-v4.json`. The historical container
 measurement above used 3X-UI 3.8.5; the 3.9.0 review used the official Windows
-release and passed the same nine required adapter tests, with the two fail2ban
+release, and the **3.10.0** review ran the pinned Linux container end to end —
+all three passed the same nine required adapter tests, with the two fail2ban
 probes N/A. See [the review](../../../docs/3xui-compat.md) and
-[structured evidence](../../../docs/compat/evidence/3x-ui-3.9.0.json).
-The 3.9.0 Linux container pin is updated with the ceiling and is exercised by CI.
+[structured evidence](../../../docs/compat/evidence/3x-ui-3.10.0.json).
+The current 3.10.2 review used the official Windows release and the same nine required adapter tests, plus supplementary SS-2022 and lifecycle probes. See [3.10.2 evidence](../../../docs/compat/evidence/3x-ui-3.10.2.json). The 3.10.2 Linux container pin moves with the ceiling and is exercised by CI.
 
 ## The two probes that skip, and why a waiver has to be REQUIRED to count
 

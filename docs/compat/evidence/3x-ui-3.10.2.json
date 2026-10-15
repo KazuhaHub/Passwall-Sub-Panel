@@ -1,0 +1,133 @@
+{
+  "schema_version": 1,
+  "verified_at": "2026-10-15T00:06:35.412Z",
+  "scope": "current PSP source adapter against a fresh isolated upstream release",
+  "psp_commit": "0401b69851defd3b54339930dbb5ec3d3ab10325",
+  "psp_commit_note": "Source includes the 3.10.0 permanent-error classification change and the invalid SS-2022 server-key classification fix; policy/docs-only changes follow this tested source commit.",
+  "upstream": {
+    "version": "3.10.2",
+    "commit": "608ef4e4010bf83e2e78328e08f77efc051ad4d7",
+    "release_url": "https://github.com/MHSanaei/3x-ui/releases/tag/v3.10.2",
+    "release_published_at": "2026-10-14T15:19:26Z",
+    "asset": "x-ui-windows-amd64.zip",
+    "asset_sha256": "67cf5f3a1d354f62bf5d0ff27e5a96663ba64761b7d26919b307ac6cca37419e",
+    "xray_version": "26.10.10",
+    "xray_state": "running"
+  },
+  "environment": {
+    "platform": "windows/amd64",
+    "go_version": "1.27.2",
+    "database": "fresh isolated SQLite",
+    "authentication": "admin-scoped Bearer token issued through the panel CLI",
+    "panel_bind": "127.0.0.1",
+    "panel_subscription_server": "disabled"
+  },
+  "ci_image": "ghcr.io/mhsanaei/3x-ui:v3.10.2@sha256:6c7e73c5bc4b6d7d70866616f78d6c9866b4904defad3077c1e2b5c1c89c2ec1",
+  "ci_image_locally_executed": false,
+  "ci_image_amd64_manifest": "sha256:8c0766062c8aac5f668a2daffc72938d6ddb926cdaa0e58a93ff9ffce4095a12",
+  "ci_image_execution_method": "The manual Test workflow runs the pinned linux/amd64 image before merge; no local container runtime was used.",
+  "command": "go test -json -count=1 -timeout=10m -overlay <temporary-overlay.json> ./internal/adapters/xui -run '^Test(Live_|Review3102)'",
+  "log_sha256": "3341ca555ebcf0b38fe077f77569a326cf2815ca990624992abdb6b8893d1604",
+  "checker": "deploy/compat/check-go-results.mjs --profile third-party-3xui-live with the canonical profile extended to require the two supplementary tests and both AES subtests",
+  "checker_profile_sha256": "5469f0e6260c3790b664c645e754e206cb6e6b55957ee06ce084e8dd80b5104e",
+  "result": {
+    "profile": "third-party-3xui-live",
+    "package": "github.com/KazuhaHub/passwall-sub-panel/internal/adapters/xui",
+    "verdict": "pass",
+    "goExitCode": 0,
+    "requiredTests": [
+      "TestLive_BulkDelPreservesSharedClient",
+      "TestLive_ConcurrentSameClientNoCorruption",
+      "TestLive_MultiInboundClientSurface",
+      "TestLive_SharedClientMigrationFlow",
+      "TestLive_TwoClientsSameBackendNoCorruption",
+      "TestLive_XUIConnectionLimits",
+      "TestLive_XUIRealityScan",
+      "TestLive_XUISurface",
+      "TestLive_XUITrafficFloorMatrix",
+      "TestReview3102InboundLifecycle",
+      "TestReview3102Shadowsocks"
+    ],
+    "passed": [
+      "TestLive_BulkDelPreservesSharedClient",
+      "TestLive_ConcurrentSameClientNoCorruption",
+      "TestLive_MultiInboundClientSurface",
+      "TestLive_SharedClientMigrationFlow",
+      "TestLive_TwoClientsSameBackendNoCorruption",
+      "TestLive_XUIConnectionLimits",
+      "TestLive_XUIRealityScan",
+      "TestLive_XUISurface",
+      "TestLive_XUITrafficFloorMatrix",
+      "TestReview3102InboundLifecycle",
+      "TestReview3102Shadowsocks",
+      "TestReview3102Shadowsocks/2022-blake3-aes-128-gcm",
+      "TestReview3102Shadowsocks/2022-blake3-aes-256-gcm"
+    ],
+    "missing": [],
+    "failed": [],
+    "skipped": [],
+    "unexpected": [
+      "TestLive_XUIConnectionLimits/an_unrelated_update_does_not_wipe_the_device_cap",
+      "TestLive_XUIConnectionLimits/create_carries_both_caps",
+      "TestLive_XUIConnectionLimits/update_carries_both_caps",
+      "TestLive_XUIConnectionLimits/zero_clears_both_caps",
+      "TestLive_XUITrafficFloorMatrix/an_exhausted_user_is_cut_the_moment_they_move_traffic",
+      "TestLive_XUITrafficFloorMatrix/first_period,_deep_into_quota",
+      "TestLive_XUITrafficFloorMatrix/first_period,_past_half_quota",
+      "TestLive_XUITrafficFloorMatrix/fresh_period,_zero_used,_aged_client",
+      "TestLive_XUITrafficFloorMatrix/the_pushed_cap_does_not_move_as_traffic_accrues"
+    ],
+    "notApplicable": [
+      {
+        "test": "TestLive_Fail2banStatus",
+        "reason": "needs a fail2ban endpoint the 3X-UI image does not run; not part of the panel-backed surface"
+      },
+      {
+        "test": "TestLive_Fail2banStatusUnknownRouteIsUnsupported",
+        "reason": "same fail2ban endpoint as TestLive_Fail2banStatus"
+      }
+    ]
+  },
+  "panel_reported_at_verification": {
+    "panelVersion": "3.10.2",
+    "xrayVersion": "26.10.10",
+    "xrayState": "running",
+    "getPanelUpdateInfo": "current=3.10.2 latest=v3.10.2 available=false"
+  },
+  "supplementary": {
+    "method": "temporary in-package Go overlay using the production adapter; the weekly-renewal fixture is set through the panel API, not an inconsistent database-only edit",
+    "overlay_sha256": "dbe7f34a43024bd2f231227afb34ca51fd394d5fd186b116e1aab22d54378dfd",
+    "tests": [
+      "TestReview3102Shadowsocks",
+      "TestReview3102InboundLifecycle"
+    ],
+    "verdict": "pass",
+    "checks": [
+      "SS-2022 aes-128-gcm and aes-256-gcm inbound add/update and client add/disable/enable/delete; quota, expiry and connection limits preserved; Xray remains running",
+      "SS-2022 chacha20-poly1305 inbound add/update refused as domain.ErrValidation",
+      "Malformed SS-2022 server keys refused on both AES methods as domain.ErrValidation after the adapter classification fix",
+      "negative subSortIndex=-3 preserved and config-only inbound update preserves independent inbound enable and client UUID/enable/quota/expiry/device cap",
+      "PSP UpdateClient clears panel-side resetWeekday=3 in both clients and client_traffics after the fixture is applied through the panel API"
+    ]
+  },
+  "source_review": {
+    "method": "git diff v3.9.0..v3.10.0 and v3.10.0..v3.10.2 with the official tagged source",
+    "changed_files_since_3_10_0": 56,
+    "findings": [
+      "PSP API routes, client and server controllers, Client model fields, xray.ClientTraffic, the client service and traffic writer are unchanged from 3.10.0",
+      "3.10.2 changes shared-client flow/tunnel field merging, skips unchanged node traffic writes and adds the Shadowsocks user hot-update path; the live shared-client/traffic and SS probes passed",
+      "normalizeSubSortIndex still maps zero to 1 and preserves explicit negative values",
+      "3.10.0 introduced save-time SS-2022 and salamander validators; the existing review classifies chacha20 rejection and the new fix also classifies invalid server keys as permanent",
+      "The Windows panel executable is now 3x-ui.exe; the archive name remains x-ui-windows-amd64.zip",
+      "Bundled Xray remains 26.10.10 relative to 3.10.0"
+    ]
+  },
+  "limits": [
+    "Two fail2ban probes are N/A; not counted as coverage. Nine canonical required adapter tests plus two supplementary tests passed.",
+    "Windows release locally executed; pinned Linux container is validated by CI rather than a local container runtime.",
+    "No historical PSP binary verification or existing-database upgrade verification.",
+    "No full proxy dataplane, live-connection continuity, multi-node production topology or full PSP traffic/reconcile-chain verification.",
+    "No destructive panel/core update execution.",
+    "3X-UI native MASQUE, XDRIVE, TUIC, MTProto and AmneziaWG features are outside this PSP adapter certification."
+  ]
+}

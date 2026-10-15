@@ -63,6 +63,16 @@ func TestIsPermanentPanelMsg(t *testing.T) {
 		// >= 3.6.0: the XMC profile reject, added when xray-core 26.7.28
 		// replaced XMC.Usernames with XMC.Profiles.
 		{"XMC finalmask requires at least one complete Minecraft profile — each needs a username (3-16 of A-Z a-z 0-9 _), a UUID, and both texture fields from Mojang's session server (XTLS/Xray-core#6487). Complete the profiles or remove the XMC mask.", true},
+		// >= 3.10.0: SS-2022's chacha20 method is refused on an inbound with
+		// users (the multi-user identity header is AES-only). Verbatim from
+		// 3X-UI source (internal/web/service/client_crud.go). Without this the
+		// message matched no marker and was classified transient.
+		{"Something went wrong (shadowsocks inbound method 2022-blake3-chacha20-poly1305 does not support multiple users, use a 2022-blake3-aes method)", true},
+		{"Something went wrong (shadowsocks inbound password: 2022-blake3-aes-128-gcm needs a 16-byte key, base64 encoded)", true},
+		{"Something went wrong (shadowsocks inbound password: 2022-blake3-aes-256-gcm needs a 32-byte key, base64 encoded)", true},
+		// >= 3.10.0 salamander reject — caught by the pre-existing "finalmask"
+		// marker above; pinned here so a future edit to that marker cannot drop it.
+		{"Something went wrong (salamander finalmask password must be at least 4 bytes; xray-core refuses a shorter one)", true},
 	}
 	for _, tc := range cases {
 		if got := isPermanentPanelMsg(tc.msg); got != tc.want {
