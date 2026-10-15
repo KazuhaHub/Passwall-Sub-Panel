@@ -991,12 +991,7 @@ func (s *Service) buildDirectives(ctx context.Context, agent *domain.NodeAgent, 
 		nextPollSeconds = nodeprotocol.DefaultNextPollSeconds
 	}
 	fullFreshnessSeconds := nodeprotocol.EffectiveFullReportPeriod(settings.FullReportSeconds, nextPollSeconds)
-	report, receivedAtMS, hasFull := s.fullReport(agent.AgentID)
-	if !current.Partial {
-		report, hasFull = current, true
-	} else if hasFull && fullReportStale(receivedAtMS, now, fullFreshnessSeconds) {
-		hasFull = false
-	}
+	baselines, hasFull := s.quotaBaselines(agent.AgentID, current, now, fullFreshnessSeconds)
 	allClients, err := s.loadFleetAccounting(ctx)
 	if err != nil {
 		return nodeprotocol.DirectivesBody{}, nodeprotocol.Envelope{}, fmt.Errorf("nodesync: list quota clients: %w", err)
@@ -1006,14 +1001,6 @@ func (s *Service) buildDirectives(ctx context.Context, agent *domain.NodeAgent, 
 		return nodeprotocol.DirectivesBody{}, nodeprotocol.Envelope{}, fmt.Errorf("nodesync: list native agents: %w", err)
 	}
 	pendingByUser, coverage, oldestReportMS := s.accountFleet(allClients, agents, fullFreshnessSeconds, now)
-	counters := make(map[int64]nodeprotocol.ClientCounters)
-	if hasFull {
-		for _, counter := range report.Clients {
-			if id, parseErr := counter.Key.RowID(); parseErr == nil {
-				counters[id] = counter
-			}
-		}
-	}
 	body := nodeprotocol.DirectivesBody{
 		ForRosterVersion: rosterVersion,
 		Quota:            make([]nodeprotocol.QuotaEntry, 0, len(snapshot.Clients)),
@@ -1029,11 +1016,7 @@ func (s *Service) buildDirectives(ctx context.Context, agent *domain.NodeAgent, 
 			continue
 		}
 		user := users[client.UserID]
-		counter, counterKnown := counters[client.ID]
-		baseline := int64(0)
-		if counterKnown {
-			baseline = nonNegativeSum(counter.UpBytes, counter.DownBytes)
-		}
+		baseline, counterKnown := baselines[client.ID]
 		entry := nodeprotocol.QuotaEntry{Client: nodeprotocol.NewClientKey(client.ID), BaselineBytes: baseline}
 		if user.EmergencyActive(now) {
 			// Emergency access deliberately overrides an already-exhausted normal
