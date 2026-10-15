@@ -37,29 +37,39 @@ func TestNativeDesiredClientSnapshotBoundsReadsAndPreservesExactIdentity(t *test
 	if err != nil || len(full.Clients) != 603 {
 		t.Fatal("fixture does not have its full native client set")
 	}
-	queries, clientRows, attachmentRows, outsideTransaction := 0, int64(0), int64(0), false
+	queries, clientQueries, attachmentRows, outsideTransaction := 0, 0, int64(0), false
 	hook := "native-client-scoped-query-shape"
 	if err := r.db.Callback().Query().After("gorm:query").Register(hook, func(tx *gorm.DB) {
 		queries++
 		_, transaction := tx.Statement.ConnPool.(gorm.TxCommitter)
 		outsideTransaction = outsideTransaction || !transaction
-		if tx.Statement.Table == "psp_clients" {
-			clientRows += tx.RowsAffected
-		}
 		if tx.Statement.Table == "psp_client_inbounds" {
 			attachmentRows += tx.RowsAffected
 		}
 	}); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = r.db.Callback().Query().Remove(hook) })
+	if err := r.db.Callback().Row().After("gorm:row").Register(hook, func(tx *gorm.DB) {
+		queries++
+		_, transaction := tx.Statement.ConnPool.(gorm.TxCommitter)
+		outsideTransaction = outsideTransaction || !transaction
+		if tx.Statement.Table != "psp_clients" || !strings.Contains(tx.Statement.SQL.String(), "panel_id = ") || !strings.Contains(tx.Statement.SQL.String(), "email = ") || len(tx.Statement.Vars) != 2 || tx.Statement.Vars[0] != int64(7) || tx.Statement.Vars[1] != email {
+			t.Error("client cursor lost its bound owner and email filters")
+		}
+		clientQueries++
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = r.db.Callback().Query().Remove(hook); _ = r.db.Callback().Row().Remove(hook) })
 	scoped, err := r.LoadClient(t.Context(), 7, email)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if queries != 3 || clientRows < 2 || clientRows > 3 || attachmentRows != 2 || outsideTransaction {
+	if queries != 3 || clientQueries != 1 || attachmentRows != 2 || outsideTransaction {
 		t.Fatal("single client read scanned the fleet, crossed its owner or escaped the snapshot transaction")
 	}
+	_ = r.db.Callback().Query().Remove(hook)
+	_ = r.db.Callback().Row().Remove(hook)
 	var expected []ports.NativeDesiredClient
 	for _, c := range full.Clients {
 		if c.Client.Email == email {

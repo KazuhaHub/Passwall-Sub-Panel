@@ -52,39 +52,27 @@ func (r *nativeDesiredRepo) load(ctx context.Context, panelID int64, email *stri
 			result.Nodes[i] = node
 		}
 
-		var clientRows []pspClientRow
 		query := tx.Where("panel_id = ?", panelID)
 		if email != nil {
 			query = query.Where("email = ?", *email)
 		}
-		if err := query.Order("id").Find(&clientRows).Error; err != nil {
+		clients, err := loadNativeDesiredClients(query, email)
+		if err != nil {
 			return err
 		}
-		if email != nil {
-			// Preserve the facade's byte identity under case/accent-insensitive
-			// MySQL collations; never normalize a credential lookup.
-			exact := clientRows[:0]
-			for _, row := range clientRows {
-				if row.Email == *email {
-					exact = append(exact, row)
-				}
-			}
-			clientRows = exact
-		}
-		result.Clients = make([]ports.NativeDesiredClient, len(clientRows))
-		if len(clientRows) == 0 {
+		result.Clients = clients
+		if len(clients) == 0 {
 			return nil
 		}
-		ids := make([]int64, len(clientRows))
-		for i := range clientRows {
-			ids[i] = clientRows[i].ID
-			result.Clients[i].Client = rowToPSPClient(&clientRows[i])
+		ids := make([]int64, len(clients))
+		for i := range clients {
+			ids[i] = clients[i].Client.ID
 		}
 		var attachmentRows []pspClientInboundRow
 		if err := tx.Where("client_id IN ?", ids).Order("client_id, node_id").Find(&attachmentRows).Error; err != nil {
 			return err
 		}
-		byClient := make(map[int64][]domain.PSPClientInbound, len(clientRows))
+		byClient := make(map[int64][]domain.PSPClientInbound, len(clients))
 		for _, row := range attachmentRows {
 			byClient[row.ClientID] = append(byClient[row.ClientID], domain.PSPClientInbound{
 				ClientID: row.ClientID, NodeID: row.NodeID,
