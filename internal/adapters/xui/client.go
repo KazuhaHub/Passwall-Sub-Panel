@@ -601,7 +601,10 @@ func isPermanentPanelMsg(msg string) bool {
 		// offers chacha20 as an SS-2022 method for a 3X-UI node, so an admin
 		// can still select a cipher a 3.10.0 panel will not accept — this
 		// makes that a fast, labelled failure rather than a retry storm.
-		strings.Contains(m, "does not support multiple users")
+		strings.Contains(m, "does not support multiple users") ||
+		// The same validator rejects malformed or wrong-length server keys.
+		// A retry cannot repair the configured key.
+		strings.Contains(m, "shadowsocks inbound password:")
 }
 
 // isUnsafeMethod reports whether m is a state-changing HTTP method that 3X-UI's

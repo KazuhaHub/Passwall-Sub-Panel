@@ -68,6 +68,8 @@ func TestIsPermanentPanelMsg(t *testing.T) {
 		// 3X-UI source (internal/web/service/client_crud.go). Without this the
 		// message matched no marker and was classified transient.
 		{"Something went wrong (shadowsocks inbound method 2022-blake3-chacha20-poly1305 does not support multiple users, use a 2022-blake3-aes method)", true},
+		{"Something went wrong (shadowsocks inbound password: 2022-blake3-aes-128-gcm needs a 16-byte key, base64 encoded)", true},
+		{"Something went wrong (shadowsocks inbound password: 2022-blake3-aes-256-gcm needs a 32-byte key, base64 encoded)", true},
 		// >= 3.10.0 salamander reject — caught by the pre-existing "finalmask"
 		// marker above; pinned here so a future edit to that marker cannot drop it.
 		{"Something went wrong (salamander finalmask password must be at least 4 bytes; xray-core refuses a shorter one)", true},
