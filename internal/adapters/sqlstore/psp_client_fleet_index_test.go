@@ -19,7 +19,25 @@ func TestFleetAccountingCoveringIndexIncludesExactlyTheCurrentNumericProjection(
 			continue
 		}
 		found = true
-		if !reflect.DeepEqual(index.Columns(), []string{"panel_id", "user_id", "id", "last_raw_up_bytes", "last_raw_down_bytes", "last_counter_epoch"}) {
+		columns := index.Columns()
+		if r.db.Dialector.Name() == "postgres" {
+			// GORM's PostgreSQL GetIndexes joins attnum = ANY(indkey)
+			// without ordering, so its Columns does not preserve index key
+			// order. Read the actual catalog key positions explicitly.
+			columns = nil
+			if err := r.db.Raw(`SELECT a.attname
+FROM pg_index i
+JOIN pg_class idx ON idx.oid = i.indexrelid
+JOIN pg_class tbl ON tbl.oid = i.indrelid
+JOIN pg_namespace ns ON ns.oid = tbl.relnamespace
+CROSS JOIN LATERAL unnest(i.indkey) WITH ORDINALITY AS k(attnum, ordinal)
+JOIN pg_attribute a ON a.attrelid = tbl.oid AND a.attnum = k.attnum
+WHERE ns.nspname = current_schema() AND tbl.relname = ? AND idx.relname = ?
+ORDER BY k.ordinal`, "psp_clients", name).Scan(&columns).Error; err != nil {
+				t.Fatal(err)
+			}
+		}
+		if !reflect.DeepEqual(columns, []string{"panel_id", "user_id", "id", "last_raw_up_bytes", "last_raw_down_bytes", "last_counter_epoch"}) {
 			t.Fatal("fleet index changed ordering or included definitions")
 		}
 		if unique, known := index.Unique(); !known || unique {

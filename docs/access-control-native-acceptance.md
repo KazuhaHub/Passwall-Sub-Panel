@@ -1937,3 +1937,10 @@ panel/email索引不覆盖该排序与投影。增加非唯一的六列覆盖索
 SQLite实际EXPLAIN要求覆盖扫描且无临时排序；真实旧表无新索引→EnsureSchema
 升级覆盖既有定义/NULL/宽epoch及后续计数更新。该索引增加基线更新维护成本，
 实际三方言写入、升级回滚及压力效果仍待同源验证，不能以索引存在代替验收。
+
+首次索引CI38708428302中MySQL完整SQLstore包78.761s通过；PostgreSQL在
+新增索引列序检查失败。当前GORM PG驱动GetIndexes使用attnum=ANY(indkey)
+且无ORDER BY，不提供索引键序保证。回归改为PG系统目录indkey展开并按
+WITH ORDINALITY排序，仍严格检查六列精确顺序和非唯一性，不修改生产索引、
+放宽断言或对返回字段排序来掩盖列序。该轮失败原日志已保存，修正版需重新
+执行完整CI；其余同源作业终态亦需保留。
