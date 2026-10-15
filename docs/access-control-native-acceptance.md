@@ -69,6 +69,16 @@ now fails the fixture's unit contract while the valid control request is still
 forwarded unchanged. Product loss units, aggregation, traffic rates, owner/user
 counts, queue limits and exact reconciliation gates are not changed.
 
+The shared trial preparation helper emits closed progress diagnostics, including
+the 200 membership stages. Mixed-pressure evidence accepts only those reviewed
+`global_setup_stage_*` values on its own root, without observed values or extra
+fields. Failure diagnostics, foreign tests, private output, skips and missing
+root execution remain rejected. This repairs an evidence-format mismatch:
+run `38792376872` completed each real Go driver and reconciled its four ledgers,
+but the old mixed parser rejected the preparation diagnostics. Rechecking its
+unchanged originals with the corrected parser passes all three databases;
+the historical workflow remains failed and a new source-bound run is required.
+
 `global-receipt-profile` starts the bounded CPU/allocation profile at the
 200-user receipt wait and stops it before pressure traffic when readiness
 succeeds. Optional block/mutex profiles cover the whole test process; their

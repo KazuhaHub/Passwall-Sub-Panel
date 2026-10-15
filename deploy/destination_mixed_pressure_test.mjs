@@ -88,6 +88,34 @@ test('mixed evidence sanitization preserves the independent root and rejects ski
   ]) assert.throws(() => checkDestinationMixedPressureEvidence(input, JSON.stringify(fixture())))
 })
 
+test('mixed evidence accepts only closed preparation progress without changing execution or metric gates', () => {
+  const pkg = 'github.com/KazuhaHub/passwall-sub-panel/internal/app'
+  const parent = 'TestNativeDestinationMixedPressure'
+  const progress = { Action: 'output', Package: pkg, Test: parent, Output: 'native setup stage: membership\n' }
+  const raw = evidence().split('\n')
+  raw.splice(2, 0, ...Array.from({ length: 200 }, () => JSON.stringify(progress)))
+  const sanitized = sanitizeDestinationResults(raw.join('\n'))
+  assert.equal(checkDestinationMixedPressureEvidence(sanitized, JSON.stringify(fixture())).native_owners, 1)
+  const diagnostic = { Action: 'output', Package: pkg, Test: parent, Diagnostic: 'global_setup_stage_membership' }
+  for (const change of [
+    { Diagnostic: 'global_setup_stage_private.example' },
+    { Diagnostic: 'global_batch_drain_timeout' },
+    { Diagnostic: 'admin_http_status_failed' },
+    { Test: 'TestNativeDestinationTrialLoad' }, { Package: 'foreign' },
+    { Observed: 1 }, { Output: 'private' }, { email: 'private' },
+    { Action: 'pass' },
+  ]) {
+    const lines = evidence().split('\n')
+    lines.splice(2, 0, JSON.stringify({ ...diagnostic, ...change }))
+    assert.throws(() => checkDestinationMixedPressureEvidence(lines.join('\n'), JSON.stringify(fixture())))
+  }
+  for (const action of ['fail', 'skip']) {
+    assert.throws(() => checkDestinationMixedPressureEvidence(sanitized.replace('"Action":"run"', `"Action":"${action}"`), JSON.stringify(fixture())))
+  }
+  const incomplete = fixture(); incomplete.ledgers[0].stored_events--
+  assert.throws(() => checkDestinationMixedPressureEvidence(sanitized, JSON.stringify(incomplete)))
+})
+
 test('mixed integration binds each original to the selected owned SQL backend', () => {
   for (const database of ['sqlite', 'mysql', 'postgres']) {
     const report = fixture(); report.database = database

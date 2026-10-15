@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
-import { checkDestinationMixedPressureResults, moduleNodeCandidate } from './destination-acceptance.mjs'
+import { checkDestinationMixedPressureResults, isSafeDestinationDiagnostic, moduleNodeCandidate } from './destination-acceptance.mjs'
 
 const require = value => { if (!value) throw new Error('Mixed pressure evidence invalid; private content withheld') }
 const fields = (value, names) => require(value && typeof value === 'object' && !Array.isArray(value) && Object.keys(value).sort().join() === [...names].sort().join())
@@ -154,11 +154,14 @@ export function checkDestinationMixedPressureEvidence(results, metrics, database
   for (const line of results.split(/\r?\n/).filter(l => l.trim())) {
     let event
     try { event = JSON.parse(line) } catch { require(false) }
-    require(event && Object.keys(event).every(k => ['Action', 'Package', 'Test', 'Elapsed'].includes(k)))
-    require(event.Package === 'github.com/KazuhaHub/passwall-sub-panel/internal/app' && ['start', 'run', 'pass'].includes(event.Action))
+    require(event && Object.keys(event).every(k => ['Action', 'Package', 'Test', 'Elapsed', 'Diagnostic'].includes(k)))
+    require(event.Package === 'github.com/KazuhaHub/passwall-sub-panel/internal/app' && ['start', 'run', 'pass', 'output'].includes(event.Action))
     require(event.Test === undefined || event.Test === 'TestNativeDestinationMixedPressure')
     require(event.Action !== 'run' || event.Test === 'TestNativeDestinationMixedPressure')
     require(event.Elapsed === undefined || Number.isFinite(event.Elapsed) && event.Elapsed >= 0)
+    if (event.Action === 'output') {
+      require(event.Test === 'TestNativeDestinationMixedPressure' && isSafeDestinationDiagnostic(event) && event.Diagnostic.startsWith('global_setup_stage_'))
+    } else require(event.Diagnostic === undefined)
   }
   return checkDestinationMixedPressureMetrics(metrics, database)
 }
