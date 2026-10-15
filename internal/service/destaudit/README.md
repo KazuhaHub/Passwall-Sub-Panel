@@ -20,6 +20,17 @@ storage errors become fixed categories. Diagnostic events contain counts, fixed
 categories and authenticated agent/panel identifiers; they contain no accounts,
 destinations, source addresses, SQL or driver error values.
 
+For a `queue_full` event, `Admission` captures that same attempt's canonical
+candidate byte size, retained batch/byte reservations, this owner's reservation
+count and all three limits under the original queue mutex. Active reservations
+remain counted. No subsequent read is used to infer the admission state; all
+other outcomes carry a zero value. The callback runs after releasing the queue
+mutex, and the witness changes neither the rejection nor its persisted loss
+rows. It adds only numeric values to the existing private event. A native byte
+pressure driver must still bind this event to its authenticated real batch,
+prove a fresh owner and spare batch capacity, and reconcile retries and losses.
+The component regressions do not establish real-daemon byte saturation.
+
 Receiver-estimated lost rows use a separate 10,000-key buffer. Frozen flushes
 contain at most 200 keys with an immutable ID, receipt time and increments. New
 increments stay separate until the frozen flush is acknowledged. Ambiguous

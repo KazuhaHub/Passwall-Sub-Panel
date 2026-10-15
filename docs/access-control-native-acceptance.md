@@ -25,6 +25,18 @@ complete 65-owner/200-user accounting with scalar epoch resets and report
 publication. Hosted race tests and fresh global pressure/profile evidence are
 required before attributing any runtime improvement to this change.
 
+## Admission evidence prerequisite
+
+The admission-evidence prerequisite adds an immutable numeric `Admission` value
+to the same `queue_full` collector event. It captures canonical candidate bytes,
+current retained bytes/batches, this owner's batch count and original limits
+inside the actual capacity decision. Validation, permissions, deduplication,
+reservation bounds, loss units and retry eligibility remain unchanged. Other
+outcomes have no capacity witness. Focused hosted race regressions must check
+all four lanes, later queue changes, rejection precedence, concurrent offers
+and durable loss drain. This remains a prerequisite: the real authenticated
+daemon byte-pressure driver and its independent ledger evidence are unfinished.
+
 ## Prepared-SQL checkpoint
 
 The next full-module candidate is Node

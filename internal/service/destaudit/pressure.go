@@ -1,5 +1,19 @@
 package destaudit
 
+// AdmissionPressure is the reservation state at one queue_full decision. The
+// immutable numeric value belongs to that Offer's existing authenticated event;
+// it carries no additional identities or payload and is zero on other outcomes.
+// Batches and Bytes include the active batch until its worker releases it.
+type AdmissionPressure struct {
+	CandidateBytes int
+	Batches        int
+	Bytes          int
+	OwnerBatches   int
+	BatchLimit     int
+	ByteLimit      int
+	OwnerLimit     int
+}
+
 // LanePressure reports retained reservations, including a processing batch.
 // It contains no panel, agent, batch, subject or destination identifiers.
 type LanePressure struct {

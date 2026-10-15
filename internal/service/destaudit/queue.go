@@ -68,38 +68,49 @@ func (q *batchQueue) offer(agentID string, panelID, receivedHour int64, body pro
 }
 
 func (q *batchQueue) offerAt(agentID string, panelID, receivedHour int64, receivedAt time.Time, body protocol.AuditObservation) string {
+	outcome, _ := q.offerAtWithPressure(agentID, panelID, receivedHour, receivedAt, body)
+	return outcome
+}
+
+func (q *batchQueue) offerAtWithPressure(agentID string, panelID, receivedHour int64, receivedAt time.Time, body protocol.AuditObservation) (string, AdmissionPressure) {
 	if agentID == "" || panelID <= 0 || receivedHour <= 0 || receivedHour%protocol.AuditHourMS != 0 || protocol.ValidateAuditObservation(body) != nil {
-		return "invalid"
+		return "invalid", AdmissionPressure{}
 	}
 	wire, err := json.Marshal(body)
 	if err != nil || len(wire) > protocol.MaxAuditObservationBytes {
-		return "invalid"
+		return "invalid", AdmissionPressure{}
 	}
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	if q.closed {
-		return "closed"
+		return "closed", AdmissionPressure{}
 	}
 	if q.admit != nil {
 		if reason := q.admit(panelID, body); reason != "" {
-			return reason
+			return reason, AdmissionPressure{}
 		}
 	}
 	key := batchKey{agentID, body.BatchID}
 	if _, found := q.inflight[key]; found {
-		return "duplicate_batch"
+		return "duplicate_batch", AdmissionPressure{}
 	}
 	// Batch identity excludes Kind, so a mutated retransmission cannot escape
 	// either the in-flight set or the four bounded recent caches.
 	for _, lane := range q.lanes {
 		if item, found := lane.recent[key]; found {
 			lane.order.MoveToFront(item)
-			return "duplicate_batch"
+			return "duplicate_batch", AdmissionPressure{}
 		}
 	}
 	lane := q.lanes[body.Kind]
 	if lane.batches >= lane.limits.batches || lane.agents[agentID] >= lane.limits.perAgent || len(wire) > lane.limits.bytes-lane.bytes {
-		return "queue_full"
+		// Capture the exact rejected admission under the reservation mutex. A
+		// later Pressure call can observe unrelated accepts, releases or edits.
+		return "queue_full", AdmissionPressure{
+			CandidateBytes: len(wire), Batches: lane.batches, Bytes: lane.bytes,
+			OwnerBatches: lane.agents[agentID], BatchLimit: lane.limits.batches,
+			ByteLimit: lane.limits.bytes, OwnerLimit: lane.limits.perAgent,
+		}
 	}
 	body.Hits = slices.Clone(body.Hits)
 	body.Usage = slices.Clone(body.Usage)
@@ -110,14 +121,19 @@ func (q *batchQueue) offerAt(agentID string, panelID, receivedHour int64, receiv
 	lane.bytes += b.bytes
 	lane.agents[agentID]++
 	q.signal()
-	return "accepted"
+	return "accepted", AdmissionPressure{}
 }
 
 func (q *batchQueue) offerReceived(agentID string, panelID int64, receivedAt time.Time, body protocol.AuditObservation) string {
+	outcome, _ := q.offerReceivedWithPressure(agentID, panelID, receivedAt, body)
+	return outcome
+}
+
+func (q *batchQueue) offerReceivedWithPressure(agentID string, panelID int64, receivedAt time.Time, body protocol.AuditObservation) (string, AdmissionPressure) {
 	if receivedAt.IsZero() {
-		return "invalid"
+		return "invalid", AdmissionPressure{}
 	}
-	return q.offerAt(agentID, panelID, receivedAt.UTC().Truncate(time.Hour).UnixMilli(), receivedAt.UTC(), body)
+	return q.offerAtWithPressure(agentID, panelID, receivedAt.UTC().Truncate(time.Hour).UnixMilli(), receivedAt.UTC(), body)
 }
 
 func (q *batchQueue) isCanceled(b *queuedBatch) bool {

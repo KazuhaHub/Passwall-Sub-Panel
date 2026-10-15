@@ -18,6 +18,7 @@ type Event struct {
 	PanelID, ReceivedHour      int64
 	Rows, DiagnosticKeys       int64
 	NodeDropped, NodeUnmatched uint64
+	Admission                  AdmissionPressure // populated only for queue_full
 }
 
 type Options struct {
@@ -80,12 +81,12 @@ func (s *Service) admissionLocked(panelID int64, body protocol.AuditObservation)
 func (s *Service) Offer(agentID string, panelID int64, receivedAt time.Time, body protocol.AuditObservation) {
 	s.producers.RLock()
 	defer s.producers.RUnlock()
-	outcome := s.q.offerReceived(agentID, panelID, receivedAt, body)
+	outcome, admission := s.q.offerReceivedWithPressure(agentID, panelID, receivedAt, body)
 	if outcome == "closed" {
 		s.publish(Event{AgentID: agentID, Kind: boundedKind(body.Kind), Outcome: "ingest_error"})
 		return
 	}
-	e := Event{AgentID: agentID, PanelID: panelID, Kind: boundedKind(body.Kind), Outcome: outcome, ReceivedHour: receivedAt.UTC().Truncate(time.Hour).UnixMilli()}
+	e := Event{AgentID: agentID, PanelID: panelID, Kind: boundedKind(body.Kind), Outcome: outcome, ReceivedHour: receivedAt.UTC().Truncate(time.Hour).UnixMilli(), Admission: admission}
 	if outcome != "accepted" && outcome != "duplicate_batch" && outcome != "invalid" {
 		e.Rows = int64(len(body.Hits) + len(body.Usage))
 	}
