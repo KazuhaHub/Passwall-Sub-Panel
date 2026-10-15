@@ -201,6 +201,40 @@ test('setup process CPU diagnostics retain only bounded aggregate counters and n
   assert(!isSafeDestinationDiagnostic({ Diagnostic: 'global_setup_cpu_pid', Observed: 42 }))
 })
 
+test('global drain diagnostics preserve bounded failure facts without private output or completion proof', () => {
+  const facts = []
+  const values = { owner: 65, lane: 4, owners_finished: 0, node_lanes: 4, node_invalid: 1, node_invalid_causes: 127,
+    samples: 360, traffic_ms: 130542, sample_first_ms: 140000, sample_last_ms: 142000, frozen: 2, retried: 1,
+    delivered_allowed: 5000, delivered_block: 400, expected: 5000, accounted: 4999, accounted_negative: 0,
+    node_keys: 0, node_pending: 2, node_dropped: 3, node_unmatched: 4, queue_batches: 1 }
+  for (const prefix of ['before', 'after']) for (const name of ['private', 'usage', 'denied', 'unmatched', 'dropped', 'stale', 'pending_dropped', 'pending_unmatched', 'queued']) values[`${prefix}_${name}`] = 0
+  for (const [name, value] of Object.entries(values)) {
+    const result = sanitizeDestinationResults(encode([{ Action: 'output', Output: `private-path:4: native global drain: ${name}=${value}\n` }]))
+    const event = JSON.parse(result)
+    assert.equal(event.Diagnostic, `global_drain_${name}`)
+    assert.equal(event.Observed, value)
+    assert(acceptance.isSafeDestinationDiagnostic(event))
+    assert(!result.includes('private-path'))
+    facts.push(event)
+  }
+  for (const reason of ['state', 'node_samples', 'sample_window', 'access_quiescence', 'frozen_retry', 'ingress_accounting', 'usage_read', 'hit_read', 'budget_read', 'loss_query', 'loss_scan', 'loss_cursor', 'ledger_accounting', 'node_pending', 'psp_pending']) {
+    const result = sanitizeDestinationResults(encode([{ Action: 'output', Output: `private-path:4: global batch drain: ${reason}\n` }]))
+    const event = JSON.parse(result)
+    assert.equal(event.Diagnostic, `global_batch_drain_${reason}`)
+    assert(acceptance.isSafeDestinationDiagnostic(event))
+    assert(!result.includes('private-path'))
+    facts.push(event)
+  }
+  for (const line of ['owner=0', 'owner=66', 'lane=0', 'lane=5', 'owners_finished=66', 'node_lanes=5', 'node_invalid=2', 'node_invalid_causes=128', 'accounted_negative=2', 'expected=-1', 'expected=1000000000001', 'traffic_ms=1200001', 'agent_id=1', 'pid=1', 'before_secret=1', 'accounted=2; private']) {
+    assert.equal(sanitizeDestinationResults(encode([{ Action: 'output', Output: `native global drain: ${line}\n` }])).trim(), '')
+  }
+  assert.equal(sanitizeDestinationResults(encode([{ Action: 'output', Output: 'global batch drain: private\n' }])).trim(), '')
+  assert(!acceptance.isSafeDestinationDiagnostic({ Diagnostic: 'global_drain_pid', Observed: 1 }))
+  assert.throws(() => acceptance.checkDestinationGlobalBatchResults(encode(facts)))
+  const timeout = JSON.parse(sanitizeDestinationResults(encode([{ Action: 'output', Output: 'timed out waiting for global real canonical retry, SQL drain and all owner loss ledgers\n' }])))
+  assert.equal(timeout.Diagnostic, 'global_batch_drain_timeout')
+})
+
 test('global control stage diagnostics expose only bounded aggregate timing and never completion proof', async () => {
   const { isSafeDestinationDiagnostic, checkDestinationGlobalBatchResults } = await import('./destination-acceptance.mjs')
   const facts = []

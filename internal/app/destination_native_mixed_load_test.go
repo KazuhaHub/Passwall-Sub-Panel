@@ -37,17 +37,19 @@ type nativeMixedNodeSample struct {
 }
 
 type nativeMixedProbe struct {
-	mu        sync.Mutex
-	agent     string
-	start     time.Time
-	invalid   bool
-	failed    uint64
-	succeeded uint64
-	frozen    [4]uint64
-	recovered [4]uint64
-	digests   [4][32]byte
-	node      nativeMixedNodeReading
-	samples   []nativeMixedNodeSample
+	mu      sync.Mutex
+	agent   string
+	start   time.Time
+	invalid bool
+	// Bits retain only fixed failure categories; private reports and output stay private.
+	invalidCauses uint64
+	failed        uint64
+	succeeded     uint64
+	frozen        [4]uint64
+	recovered     [4]uint64
+	digests       [4][32]byte
+	node          nativeMixedNodeReading
+	samples       []nativeMixedNodeSample
 }
 
 func newNativeMixedProbe(agent string) *nativeMixedProbe { return &nativeMixedProbe{agent: agent} }
@@ -103,10 +105,14 @@ func (p *nativeMixedProbe) handler(original http.Handler) http.Handler {
 		if !valid || partition {
 			p.mu.Lock()
 			p.invalid = p.invalid || !valid
+			if !valid {
+				p.invalidCauses |= 1
+			}
 			p.failed++
 			if valid && index >= 0 {
 				if p.frozen[index] > 0 && p.digests[index] != digest {
 					p.invalid = true
+					p.invalidCauses |= 2
 				}
 				p.digests[index] = digest
 				p.frozen[index]++
@@ -124,10 +130,17 @@ func (p *nativeMixedProbe) handler(original http.Handler) http.Handler {
 			p.succeeded++
 			if index >= 0 && p.recovered[index] == 0 {
 				p.invalid = p.invalid || p.frozen[index] == 0 || p.digests[index] != digest
+				if p.frozen[index] == 0 {
+					p.invalidCauses |= 4
+				}
+				if p.digests[index] != digest {
+					p.invalidCauses |= 8
+				}
 				p.recovered[index]++
 			}
 		} else {
 			p.invalid = true
+			p.invalidCauses |= 16
 		}
 	})
 }
@@ -153,6 +166,9 @@ func (w *nativeMixedOutput) Write(data []byte) (int, error) {
 		w.partial = w.partial[end+1:]
 		w.probe.mu.Lock()
 		w.probe.invalid = w.probe.invalid || !valid
+		if !valid {
+			w.probe.invalidCauses |= 32
+		}
 		if found && valid {
 			w.probe.node = reading
 			if !w.probe.start.IsZero() {
@@ -164,6 +180,7 @@ func (w *nativeMixedOutput) Write(data []byte) (int, error) {
 	if len(w.partial) > 64*1024 {
 		w.probe.mu.Lock()
 		w.probe.invalid = true
+		w.probe.invalidCauses |= 64
 		w.probe.mu.Unlock()
 		w.partial = nil
 	}

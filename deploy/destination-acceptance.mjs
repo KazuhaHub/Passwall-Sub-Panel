@@ -29,6 +29,8 @@ const dockerUpgradeNames = ['TestNativePublishedDockerRollback', ...remoteUpgrad
 const remoteUpgradeNames = ['TestNativePublishedRemoteRollback', ...remoteUpgradeCases.map(name => `TestNativePublishedRemoteRollback/${name}`)]
 const names = [...xrayNames, ...singBoxNames, ...guardedSingBoxNames, ...legacyUpgradeNames, ...remoteUpgradeNames, ...dockerUpgradeNames, ...fleetNames, ...loadNames, ...trialLoadNames, ...blockOverflowNames, ...mixedPressureNames, ...idleCostNames, ...globalBootstrapNames, ...globalBatchNames]
 const diagnostics = Object.freeze({
+  ...Object.fromEntries(['state', 'node_samples', 'sample_window', 'access_quiescence', 'frozen_retry', 'ingress_accounting', 'usage_read', 'hit_read', 'budget_read', 'loss_query', 'loss_scan', 'loss_cursor', 'ledger_accounting', 'node_pending', 'psp_pending'].map(reason => [`global batch drain: ${reason}\n`, `global_batch_drain_${reason}`])),
+  'timed out waiting for global real canonical retry, SQL drain and all owner loss ledgers': 'global_batch_drain_timeout',
   'native setup stage: administrator\n': 'global_setup_stage_administrator',
   'native setup stage: allowed_target\n': 'global_setup_stage_allowed_target',
   'native setup stage: observe_target\n': 'global_setup_stage_observe_target',
@@ -363,6 +365,8 @@ export function sanitizeDestinationResults(input) {
       if (globalSync && isSafeGlobalSyncFact(globalSync[1], Number(globalSync[2]))) return JSON.stringify({ Action: 'output', Package: pkg, Diagnostic: `global_sync_${globalSync[1]}`, Observed: Number(globalSync[2]) })
       const setupCPU = typeof event.Output === 'string' && /native global setup cpu: (sample|elapsed_ms|sample_ms|parent_ticks|waited_child_ticks|live_core_ticks|changed_core_identities|parents|cores|ticks_per_second|logical_cpus|unavailable)=([0-9]{1,13})(?:\r?\n|$)/.exec(event.Output)
       if (setupCPU && isSafeSetupCPUFact(setupCPU[1], Number(setupCPU[2]))) return JSON.stringify({ Action: 'output', Package: pkg, Diagnostic: `global_setup_cpu_${setupCPU[1]}`, Observed: Number(setupCPU[2]) })
+      const drain = typeof event.Output === 'string' && /native global drain: ([a-z_]+)=([0-9]{1,13})(?:\r?\n|$)/.exec(event.Output)
+      if (drain && isSafeGlobalDrainFact(drain[1], Number(drain[2]))) return JSON.stringify({ Action: 'output', Package: pkg, Diagnostic: `global_drain_${drain[1]}`, Observed: Number(drain[2]) })
       const setupProfile = typeof event.Output === 'string' && /native global setup profile: (elapsed_ms|allocated_bytes|gc_cycles|gc_pause_ns|heap_bytes)=([0-9]{1,16})(?:\r?\n|$)/.exec(event.Output)
       if (setupProfile && isSafeSetupProfileFact(setupProfile[1], Number(setupProfile[2]))) return JSON.stringify({ Action: 'output', Package: pkg, Diagnostic: `global_setup_profile_${setupProfile[1]}`, Observed: Number(setupProfile[2]) })
       const fleetSetup = typeof event.Output === 'string' && /native diagnostic: (fleet_setup_(?:cohort|candidates|database|session|cadence|principals|peers|server|daemons|membership))=(true|false)(?:\r?\n|$)/.exec(event.Output)
@@ -418,8 +422,22 @@ export function isSafeDestinationDiagnostic(event) {
   if (event.Diagnostic.startsWith('global_config_error_')) return isSafeGlobalConfigError(event.Diagnostic.slice('global_config_error_'.length), event.Observed)
   if (event.Diagnostic.startsWith('global_sync_')) return isSafeGlobalSyncFact(event.Diagnostic.slice('global_sync_'.length), event.Observed)
   if (event.Diagnostic.startsWith('global_setup_cpu_')) return isSafeSetupCPUFact(event.Diagnostic.slice('global_setup_cpu_'.length), event.Observed)
+  if (event.Diagnostic.startsWith('global_drain_')) return isSafeGlobalDrainFact(event.Diagnostic.slice('global_drain_'.length), event.Observed)
   if (event.Diagnostic === 'receipt_wait') return event.Observed >= 1 && event.Observed <= 99
   return ['panel_downgrade_application_ms', 'panel_reupgrade_application_ms'].includes(event.Diagnostic) && event.Observed <= 150000
+}
+
+function isSafeGlobalDrainFact(name, value) {
+  if (!Number.isSafeInteger(value) || value < 0) return false
+  if (name === 'owner') return value >= 1 && value <= 65
+  if (name === 'lane') return value >= 1 && value <= 4
+  if (name === 'owners_finished') return value <= 65
+  if (name === 'node_lanes') return value <= 4
+  if (name === 'node_invalid_causes') return value <= 127
+  if (['node_invalid', 'accounted_negative'].includes(name)) return value <= 1
+  if (['traffic_ms', 'sample_first_ms', 'sample_last_ms'].includes(name)) return value <= 1200000
+  const accessField = /^(before|after)_(private|usage|denied|unmatched|dropped|stale|pending_dropped|pending_unmatched|queued)$/.test(name)
+  return (accessField || ['samples', 'frozen', 'retried', 'delivered_allowed', 'delivered_block', 'expected', 'accounted', 'node_keys', 'node_pending', 'node_dropped', 'node_unmatched', 'queue_batches'].includes(name)) && value <= 1000000000000
 }
 
 function isSafeSetupCPUFact(name, value) {

@@ -494,22 +494,44 @@ func TestNativeDestinationGlobalBatchPressure(t *testing.T) {
 	storage.resume(pause)
 	m.Stage = 4
 	var detail []nativeGlobalBatchOwner
+	drainReason, drainComplete := "state", false
+	drainFacts := map[string]uint64{}
+	t.Cleanup(func() {
+		if t.Failed() && !drainComplete {
+			t.Log("global batch drain: " + drainReason)
+			for name, value := range drainFacts {
+				t.Logf("native global drain: %s=%d", name, value)
+			}
+		}
+	})
 	nativeWait(t, 180*time.Second, "global real canonical retry, SQL drain and all owner loss ledgers", func() bool {
 		detail = nil
 		for owner, peer := range cohort.peers {
 			peer.probe.mu.Lock()
 			reading, invalid := peer.probe.node, peer.probe.invalid
 			frozen, retried := peer.probe.frozen, peer.probe.recovered
+			invalidCauses := peer.probe.invalidCauses
 			samples := peer.probe.samples
 			peer.probe.mu.Unlock()
+			drainFacts = map[string]uint64{"owner": uint64(owner + 1), "samples": uint64(len(samples)), "traffic_ms": uint64(m.TrafficMS), "owners_finished": uint64(len(detail))}
+			drainReason = "node_samples"
+			drainFacts["node_lanes"], drainFacts["node_invalid_causes"] = uint64(len(reading.Lanes)), invalidCauses
+			if invalid {
+				drainFacts["node_invalid"] = 1
+			} else {
+				drainFacts["node_invalid"] = 0
+			}
 			if invalid || len(reading.Lanes) != 4 || len(samples) < 3 {
 				return false
 			}
 			last := samples[len(samples)-3:]
+			drainReason = "sample_window"
+			drainFacts["sample_first_ms"], drainFacts["sample_last_ms"] = uint64(last[0].ElapsedMS), uint64(last[2].ElapsedMS)
 			if last[0].ElapsedMS < m.TrafficMS || last[2].ElapsedMS-last[0].ElapsedMS < 1800 {
 				return false
 			}
 			for _, sample := range last {
+				drainReason = "access_quiescence"
 				if sample.Reading.Access != reading.Access {
 					return false
 				}
@@ -517,11 +539,29 @@ func TestNativeDestinationGlobalBatchPressure(t *testing.T) {
 			row := nativeGlobalBatchOwner{Ordinal: owner, Controls: controls[owner].Load(), Frozen: frozen, Retried: retried, Node: reading, Ledgers: []nativeMixedLedger{}}
 			for i := range 4 {
 				row.Delivered[i] = delivered[owner][i].Load()
+				drainReason = "frozen_retry"
+				drainFacts["lane"], drainFacts["frozen"], drainFacts["retried"] = uint64(i+1), frozen[i], retried[i]
 				if frozen[i] == 0 || retried[i] != 1 {
 					return false
 				}
 			}
 			allowed := row.Delivered[1] + row.Delivered[2] + row.Delivered[3] + row.Controls
+			delete(drainFacts, "lane")
+			delete(drainFacts, "frozen")
+			delete(drainFacts, "retried")
+			drainReason = "ingress_accounting"
+			drainFacts["delivered_allowed"], drainFacts["delivered_block"] = allowed, row.Delivered[0]
+			for _, sample := range []struct {
+				prefix string
+				access nativeMixedAccess
+			}{{"before", baseline[owner]}, {"after", reading.Access}} {
+				for name, value := range map[string]uint64{"private": sample.access.Private, "usage": sample.access.Usage, "denied": sample.access.Denied, "unmatched": sample.access.Unmatched, "dropped": sample.access.Dropped, "stale": sample.access.Stale, "pending_dropped": sample.access.PendingDropped, "pending_unmatched": sample.access.PendingUnmatched} {
+					drainFacts[sample.prefix+"_"+name] = value
+				}
+				if sample.access.Queued >= 0 {
+					drainFacts[sample.prefix+"_queued"] = uint64(sample.access.Queued)
+				}
+			}
 			var valid bool
 			row.Ingress, valid = nativeMixedIngressBetween(baseline[owner], reading.Access, allowed, row.Delivered[0])
 			if !valid {
@@ -529,8 +569,10 @@ func TestNativeDestinationGlobalBatchPressure(t *testing.T) {
 			}
 			for i, kind := range nativeMixedKinds {
 				ledger := nativeMixedLedger{Kind: kind, Expected: row.Delivered[i], Losses: []nativeLoadLoss{}}
+				drainFacts["lane"] = uint64(i + 1)
 				if i == 3 {
 					ledger.Expected = row.Ingress.AllowedReceived
+					drainReason = "usage_read"
 					if a.database.QueryRowContext(t.Context(), sql("SELECT COUNT(*),COALESCE(SUM(count),0) FROM dest_usage_hourly WHERE panel_id=?"), peer.agent.PanelID).Scan(&ledger.StoredRows, &ledger.StoredEvents) != nil {
 						return false
 					}
@@ -544,13 +586,16 @@ func TestNativeDestinationGlobalBatchPressure(t *testing.T) {
 					if i == 2 {
 						args = []any{peer.agent.PanelID, fmt.Sprintf("g%d", group.ID)}
 					}
+					drainReason = "hit_read"
 					if a.database.QueryRowContext(t.Context(), sql("SELECT COUNT(*),COALESCE(SUM(count),0),COALESCE(SUM(CASE WHEN source LIKE 'g%' AND (user_id<>0 OR port<>0) THEN 1 ELSE 0 END),0) FROM dest_hits WHERE "+where), args...).Scan(&ledger.StoredRows, &ledger.StoredEvents, &ledger.Identified) != nil {
 						return false
 					}
 				}
+				drainReason = "budget_read"
 				if a.database.QueryRowContext(t.Context(), sql("SELECT COALESCE(MAX(rows_reserved),0) FROM dest_audit_ingest_budget WHERE agent_id=? AND kind=?"), peer.agent.AgentID, kind).Scan(&ledger.Budget) != nil {
 					return false
 				}
+				drainReason = "loss_query"
 				rows, err := a.database.QueryContext(t.Context(), sql(nativeMixedLossSQL), peer.agent.PanelID, kind)
 				if err != nil {
 					return false
@@ -558,6 +603,7 @@ func TestNativeDestinationGlobalBatchPressure(t *testing.T) {
 				accounted := ledger.StoredEvents
 				for rows.Next() {
 					var loss nativeLoadLoss
+					drainReason = "loss_scan"
 					if rows.Scan(&loss.Reason, &loss.Rows, &loss.Events, &loss.Unmatched) != nil {
 						_ = rows.Close()
 						return false
@@ -567,25 +613,52 @@ func TestNativeDestinationGlobalBatchPressure(t *testing.T) {
 				}
 				err = rows.Err()
 				_ = rows.Close()
+				drainReason = "ledger_accounting"
+				if err != nil {
+					drainReason = "loss_cursor"
+				}
+				drainFacts["expected"] = ledger.Expected
+				if accounted >= 0 {
+					drainFacts["accounted"] = uint64(accounted)
+				} else {
+					delete(drainFacts, "accounted")
+					drainFacts["accounted_negative"] = 1
+				}
 				if err != nil || accounted < 0 || uint64(accounted) != ledger.Expected {
 					return false
 				}
 				row.Ledgers = append(row.Ledgers, ledger)
 			}
-			for _, lane := range reading.Lanes {
+			for i, lane := range reading.Lanes {
+				drainReason = "node_pending"
+				drainFacts["lane"] = uint64(i + 1)
+				if lane.Keys >= 0 {
+					drainFacts["node_keys"] = uint64(lane.Keys)
+				}
+				if lane.Pending >= 0 {
+					drainFacts["node_pending"] = uint64(lane.Pending)
+				}
+				drainFacts["node_dropped"], drainFacts["node_unmatched"] = lane.Dropped, lane.Unmatched
 				if lane.Keys != 0 || lane.Pending != 0 || lane.Dropped != 0 || lane.Unmatched != 0 {
 					return false
 				}
 			}
 			detail = append(detail, row)
 		}
-		for _, lane := range queue.Pressure() {
+		drainFacts = map[string]uint64{"owners_finished": uint64(len(detail))}
+		for i, lane := range queue.Pressure() {
+			drainReason = "psp_pending"
+			drainFacts["lane"] = uint64(i + 1)
+			if lane.Batches >= 0 {
+				drainFacts["queue_batches"] = uint64(lane.Batches)
+			}
 			if lane.Batches != 0 {
 				return false
 			}
 		}
 		return true
 	})
+	drainComplete = true
 	cancel()
 	<-observationsDone
 	m.Details, m.ObservationMS = detail, time.Since(start).Milliseconds()
