@@ -10,6 +10,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -1302,15 +1303,22 @@ func nativeTargetAtPort(t *testing.T, bindPort int) (*httptest.Server, string, i
 	t.Cleanup(func() {
 		nativeMust(t, exec.Command("ip", "-6", "addr", "del", ip+"/128", "dev", "lo").Run(), "remove exact owned target /128")
 	})
-	data, err = exec.Command("ip", "-j", "-6", "route", "get", ip).Output()
-	nativeMust(t, err, "verify local target route")
-	var routes []struct {
-		Type string `json:"type"`
-		Dev  string `json:"dev"`
-		Dst  string `json:"dst"`
+	routeCtx, cancelRoute := context.WithTimeout(t.Context(), 2*time.Second)
+	defer cancelRoute()
+	routes, routeErr := awaitNativeTargetRoute(routeCtx, ip, func(ctx context.Context) ([]nativeTargetRoute, error) {
+		data, err := exec.CommandContext(ctx, "ip", "-j", "-6", "route", "get", ip).Output()
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		nativeMust(t, err, "verify local target route")
+		var routes []nativeTargetRoute
+		nativeMust(t, json.Unmarshal(data, &routes), "decode local target route")
+		return routes, nil
+	})
+	if routeErr != nil && !errors.Is(routeErr, context.DeadlineExceeded) {
+		nativeMust(t, routeErr, "verify local target route")
 	}
-	nativeMust(t, json.Unmarshal(data, &routes), "decode local target route")
-	if len(routes) != 1 || routes[0].Type != "local" || routes[0].Dev != "lo" || !net.ParseIP(routes[0].Dst).Equal(net.ParseIP(ip)) {
+	if routeErr != nil || !exactNativeTargetRoute(routes, ip) {
 		// Keep the exact original route guard. Export only fixed comparisons,
 		// never the route JSON, target address or runner network metadata.
 		t.Logf("native diagnostic: fixture_route_one=%t", len(routes) == 1)

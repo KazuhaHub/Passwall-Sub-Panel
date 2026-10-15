@@ -1788,3 +1788,27 @@ Sync后窄/完整身份等价、关闭配额客户端、未回执凭据、拒绝
 epoch、未知email、旧端口、报告在读取中被完整替换、后续读取当前
 存在性及期望仓储失败回归。本地测试编译、相关vet和全项目构建通过；
 实际测试与准备/压力效果仍待同源托管验证。
+
+`0637a7f7` 完整CI38659981532的18项通过，nodesync完整race53.693s、
+pspnode0.112s；212个编译App入口原件各RUN1/PASS1，原四分钟分片、
+前端类型/构建、4项烟测、2507单元及既有1条件跳过均核验。原生矩阵
+38661253406出现MySQL/sing-box 1.14.0失败，job116182787144，精确
+artifact11939087189及日志/元数据保留：根测试4.03秒FAIL，
+fixture_target_route_invalid，one/loopback/exact_address为true，local/
+exact_host_prefix为false。该项后续流量验收未完成，其他行不能替代。
+
+夹具原先在ip addr add成功后仅立即检查一次route get。Linux IPv6地址
+配置通过addrconf_dad_start排队工作，即使loopback/nodad也在
+addrconf_dad_begin完成分支通知并安装local路由；源码见
+https://github.com/torvalds/linux/blob/v6.8/net/ipv6/addrconf.c 。这一异步
+就绪机制与本次精确地址/lo匹配但local不匹配的现象一致，尚不能证明
+是该runner失败的唯一原因。
+
+改为仅在本次已独占添加地址后有界等待2秒，每25ms读取一次，命令亦受
+同一context约束；每次仍使用原one/local/lo/精确裸地址比较。读取/解码
+错误、取消或持久错误仍失败；不接受/128字符串替代，不增删路由，
+不延长任何流量或压力套件门槛。超时保留原固定布尔诊断和FAIL类别。
+新增中间态转为精确local、缺失/错误类型、其他设备/地址、重复路由、
+前缀形式、持续错误超时、取消及读取失败回归，显式纳入完整CI、原生
+矩阵前置与全局压力前置。测试编译、acceptance vet和完整构建本地通过；
+实际执行与路由稳定性须同源托管验证。

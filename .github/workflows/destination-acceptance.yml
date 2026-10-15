@@ -101,6 +101,7 @@ jobs:
           node --test deploy/destination_acceptance_test.mjs
           go test -v -count=1 ./internal/app -run '^TestNative(MutationReceiptUsesActualTransitionAndFreshExactReceipt|FaultMutationRequiresNewPublicationAndExactReceipt|PrunedFallbackUsesGenerationAndBodyCausality)$'
           go test -c -tags destination_acceptance -o "$RUNNER_TEMP/destination-acceptance.test" ./internal/app
+          "$RUNNER_TEMP/destination-acceptance.test" -test.v -test.run '^TestNativeTargetRouteWait(RequiresExactLocalReadiness|StopsOnDeadlineCancellationAndReadFailure)$' -test.timeout=1m
       # Only the hosted ephemeral VM receives one run-owned documentation /128.
       # Neither host trust stores nor the production core's private guard change.
       - name: Real TLS sync, policy traffic, private ingestion and collection controls

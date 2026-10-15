@@ -1330,7 +1330,7 @@ jobs:
         run: |
           set -euo pipefail
           go test -v -count=1 -timeout=4m -tags destination_acceptance ./internal/app \
-            -run '^TestNativeGlobal(AuditStartPreservesRealQueueAndPermissionChanges|PublicCoreCopyExcludesStateAndRejectsUntrustedFiles|StoragePauseKeepsControlAndOriginalSQLTransactions|TransportKeepsProductionAuthenticationAndExactBodies)$'
+            -run '^TestNative(Global(AuditStartPreservesRealQueueAndPermissionChanges|PublicCoreCopyExcludesStateAndRejectsUntrustedFiles|StoragePauseKeepsControlAndOriginalSQLTransactions|TransportKeepsProductionAuthenticationAndExactBodies)|TargetRouteWait(RequiresExactLocalReadiness|StopsOnDeadlineCancellationAndReadFailure))$'
 
   sqlite:
     name: sqlite (full suite, race)
