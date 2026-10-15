@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
 import { checkGlobalBatchEvidence } from './destination-global-batch.mjs'
-import { moduleNodeCandidate } from './destination-acceptance.mjs'
+import { moduleNodeCandidate, sanitizeDestinationResults } from './destination-acceptance.mjs'
 
 const kinds = ['block', 'observe', 'trial', 'usage']
 const limits = [128,32,32,64], bytes = [32,8,8,16], owners = [4,1,1,1]
@@ -48,4 +48,12 @@ test('global batch driver uses real 65-owner traffic and original storage, with 
   assert(job.includes(`-test.run '^${root}$'`)&&job.includes('PSP_NATIVE_GLOBAL_BATCH_METRICS=')&&job.includes('destination-global-batch.mjs'))
   assert(job.includes(`ref: ${moduleNodeCandidate.commit}`)&&job.includes('PSP_NATIVE_CORE_VERSION=26.6.27'))
   assert(job.includes('destination-global-bootstrap-metrics.json')&&job.includes('destination-global-batch-metrics.json'))
+})
+
+test('failure diagnostics cannot turn contradictory global batch evidence into a pass', () => {
+  for (const output of ['native global traffic: total_failures=1\n', 'native global traffic: observe_queue_failures=1\n', 'native global drain: http_failure_count=1\n', 'native global drain: last_http_failure_status=500\n']) {
+    const diagnostic = sanitizeDestinationResults(JSON.stringify({Action:'output', Output:output}))
+    assert(diagnostic.trim())
+    assert.throws(() => checkGlobalBatchEvidence(events()+'\n'+diagnostic, JSON.stringify(report()), JSON.stringify(boot())))
+  }
 })

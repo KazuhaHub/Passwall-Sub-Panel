@@ -42,14 +42,16 @@ type nativeMixedProbe struct {
 	start   time.Time
 	invalid bool
 	// Bits retain only fixed failure categories; private reports and output stay private.
-	invalidCauses uint64
-	failed        uint64
-	succeeded     uint64
-	frozen        [4]uint64
-	recovered     [4]uint64
-	digests       [4][32]byte
-	node          nativeMixedNodeReading
-	samples       []nativeMixedNodeSample
+	invalidCauses         uint64
+	httpFailures          uint64
+	lastHTTPFailureStatus int
+	failed                uint64
+	succeeded             uint64
+	frozen                [4]uint64
+	recovered             [4]uint64
+	digests               [4][32]byte
+	node                  nativeMixedNodeReading
+	samples               []nativeMixedNodeSample
 }
 
 func newNativeMixedProbe(agent string) *nativeMixedProbe { return &nativeMixedProbe{agent: agent} }
@@ -148,6 +150,8 @@ func (p *nativeMixedProbe) handler(original http.Handler) http.Handler {
 		} else {
 			p.invalid = true
 			p.invalidCauses |= 16
+			p.httpFailures++
+			p.lastHTTPFailureStatus = response.status
 		}
 	})
 }

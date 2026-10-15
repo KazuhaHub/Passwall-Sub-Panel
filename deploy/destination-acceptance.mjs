@@ -377,6 +377,8 @@ export function sanitizeDestinationResults(input) {
       if (setupCPU && isSafeSetupCPUFact(setupCPU[1], Number(setupCPU[2]))) return JSON.stringify({ Action: 'output', Package: pkg, Diagnostic: `global_setup_cpu_${setupCPU[1]}`, Observed: Number(setupCPU[2]) })
       const drain = typeof event.Output === 'string' && /native global drain: ([a-z_]+)=([0-9]{1,13})(?:\r?\n|$)/.exec(event.Output)
       if (drain && isSafeGlobalDrainFact(drain[1], Number(drain[2]))) return JSON.stringify({ Action: 'output', Package: pkg, Diagnostic: `global_drain_${drain[1]}`, Observed: Number(drain[2]) })
+      const traffic = typeof event.Output === 'string' && /native global traffic: ([a-z_]+)=([0-9]{1,7})(?:\r?\n|$)/.exec(event.Output)
+      if (traffic && isSafeGlobalTrafficFact(traffic[1], Number(traffic[2]))) return JSON.stringify({ Action: 'output', Package: pkg, Diagnostic: `global_traffic_${traffic[1]}`, Observed: Number(traffic[2]) })
       const setupProfile = typeof event.Output === 'string' && /native global setup profile: (elapsed_ms|allocated_bytes|gc_cycles|gc_pause_ns|heap_bytes)=([0-9]{1,16})(?:\r?\n|$)/.exec(event.Output)
       if (setupProfile && isSafeSetupProfileFact(setupProfile[1], Number(setupProfile[2]))) return JSON.stringify({ Action: 'output', Package: pkg, Diagnostic: `global_setup_profile_${setupProfile[1]}`, Observed: Number(setupProfile[2]) })
       const fleetSetup = typeof event.Output === 'string' && /native diagnostic: (fleet_setup_(?:cohort|candidates|database|session|cadence|principals|peers|server|daemons|membership))=(true|false)(?:\r?\n|$)/.exec(event.Output)
@@ -435,12 +437,20 @@ export function isSafeDestinationDiagnostic(event) {
   if (event.Diagnostic.startsWith('global_sync_')) return isSafeGlobalSyncFact(event.Diagnostic.slice('global_sync_'.length), event.Observed)
   if (event.Diagnostic.startsWith('global_setup_cpu_')) return isSafeSetupCPUFact(event.Diagnostic.slice('global_setup_cpu_'.length), event.Observed)
   if (event.Diagnostic.startsWith('global_drain_')) return isSafeGlobalDrainFact(event.Diagnostic.slice('global_drain_'.length), event.Observed)
+  if (event.Diagnostic.startsWith('global_traffic_')) return isSafeGlobalTrafficFact(event.Diagnostic.slice('global_traffic_'.length), event.Observed)
   if (event.Diagnostic === 'receipt_wait') return event.Observed >= 1 && event.Observed <= 99
   return ['panel_downgrade_application_ms', 'panel_reupgrade_application_ms'].includes(event.Diagnostic) && event.Observed <= 150000
 }
 
+function isSafeGlobalTrafficFact(name, value) {
+  return (name === 'total_failures' || /^(block|observe|trial|usage|control)_(queue|request)_failures$/.test(name)) && Number.isSafeInteger(value) && value >= 0 && value <= 1000000
+}
+
 function isSafeGlobalDrainFact(name, value) {
   if (!Number.isSafeInteger(value) || value < 0) return false
+  if (name === 'http_failure_count') return value >= 1 && value <= 1000000
+  // Zero records a handler that never explicitly wrote a status or body.
+  if (name === 'last_http_failure_status') return value <= 999
   if (name === 'owner') return value >= 1 && value <= 65
   if (name === 'lane') return value >= 1 && value <= 4
   if (name === 'owners_finished') return value <= 65

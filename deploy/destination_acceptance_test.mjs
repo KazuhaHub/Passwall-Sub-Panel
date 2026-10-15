@@ -272,6 +272,53 @@ test('global drain diagnostics preserve bounded failure facts without private ou
   assert.equal(timeout.Diagnostic, 'global_batch_drain_timeout')
 })
 
+test('global traffic failures retain closed queue/request counts and actual recovery HTTP status without passing acceptance', async () => {
+  const { isSafeDestinationDiagnostic, checkDestinationGlobalBatchResults } = await import('./destination-acceptance.mjs')
+  const Package = 'github.com/KazuhaHub/passwall-sub-panel/internal/app'
+  const Test = 'TestNativeDestinationGlobalBatchPressure'
+  const facts = []
+  for (const kind of ['block', 'observe', 'trial', 'usage', 'control']) {
+    for (const cause of ['queue', 'request']) {
+      for (const value of [0, 1000000]) {
+        const name = `${kind}_${cause}_failures`
+        const result = sanitizeDestinationResults(encode([{ Action: 'output', Output: `private-path:4: native global traffic: ${name}=${value}\n` }]))
+        assert.deepEqual(JSON.parse(result), { Action: 'output', Package, Diagnostic: `global_traffic_${name}`, Observed: value })
+        assert(isSafeDestinationDiagnostic(JSON.parse(result)))
+        assert(!result.includes('private-path'))
+        facts.push(JSON.parse(result))
+      }
+    }
+  }
+  for (const [prefix, name, values] of [
+    ['traffic', 'total_failures', [0, 1000000]],
+    ['drain', 'http_failure_count', [1, 1000000]],
+    ['drain', 'last_http_failure_status', [0, 500, 999]],
+  ]) {
+    for (const value of values) {
+      const event = JSON.parse(sanitizeDestinationResults(encode([{ Action: 'output', Output: `native global ${prefix}: ${name}=${value}\n` }])))
+      assert.equal(event.Observed, value)
+      assert(isSafeDestinationDiagnostic(event))
+      facts.push(event)
+    }
+  }
+  for (const [prefix, name, value] of [
+    ['traffic', 'total_failures', 1000001], ['traffic', 'block_request_failures', -1],
+    ['traffic', 'control_queue_failures', NaN], ['traffic', 'agent_id', 1],
+    ['traffic', 'block_secret_failures', 1], ['drain', 'http_failure_count', 0],
+    ['drain', 'http_failure_count', 1000001], ['drain', 'last_http_failure_status', 1000],
+  ]) {
+    assert.equal(sanitizeDestinationResults(encode([{ Action: 'output', Output: `native global ${prefix}: ${name}=${value}\n` }])).trim(), '')
+    assert(!isSafeDestinationDiagnostic({ Diagnostic: `global_${prefix}_${name}`, Observed: value }))
+  }
+  const result = sanitizeDestinationResults(encode([
+    { Action: 'run', Package, Test },
+    ...facts,
+    { Action: 'fail', Package, Test },
+  ]))
+  assert.equal(JSON.parse(result.trim().split('\n').at(-1)).Action, 'fail')
+  assert.throws(() => checkDestinationGlobalBatchResults(result))
+})
+
 test('global control stage diagnostics expose only bounded aggregate timing and never completion proof', async () => {
   const { isSafeDestinationDiagnostic, checkDestinationGlobalBatchResults } = await import('./destination-acceptance.mjs')
   const facts = []

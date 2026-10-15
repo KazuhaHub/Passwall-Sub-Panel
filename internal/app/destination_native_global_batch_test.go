@@ -389,6 +389,19 @@ func TestNativeDestinationGlobalBatchPressure(t *testing.T) {
 	var controls [65]atomic.Uint64
 	var userDeliveries [200]atomic.Uint64
 	var failures atomic.Uint64
+	var queueFailures, requestFailures [5]atomic.Uint64
+	// Registered before worker/observer cleanup so these facts are read only
+	// after those goroutines have stopped, including on an early test failure.
+	t.Cleanup(func() {
+		if !t.Failed() {
+			return
+		}
+		for i, kind := range [5]string{"block", "observe", "trial", "usage", "control"} {
+			t.Logf("native global traffic: %s_queue_failures=%d", kind, queueFailures[i].Load())
+			t.Logf("native global traffic: %s_request_failures=%d", kind, requestFailures[i].Load())
+		}
+		t.Logf("native global traffic: total_failures=%d", failures.Load())
+	})
 	type job struct{ owner, kind, seq int }
 	jobs := make(chan job, 4096)
 	var workers sync.WaitGroup
@@ -402,6 +415,7 @@ func TestNativeDestinationGlobalBatchPressure(t *testing.T) {
 				if j.kind == 0 {
 					header, err := nativePressureBlockRequest(f.user.UUID, name(0, j.seq), blockPort)
 					if err != nil || !nativeLoadBlockedRequest(ctx, peer.node.DesiredPort, header, func() {}) {
+						requestFailures[j.kind].Add(1)
 						failures.Add(1)
 						continue
 					}
@@ -418,6 +432,7 @@ func TestNativeDestinationGlobalBatchPressure(t *testing.T) {
 					}
 					host := name(j.kind, j.seq)
 					if nativeVLESSHost(ctx, peer.node.DesiredPort, host, port, uuid, want, host) != nil {
+						requestFailures[j.kind].Add(1)
 						failures.Add(1)
 						continue
 					}
@@ -494,6 +509,7 @@ func TestNativeDestinationGlobalBatchPressure(t *testing.T) {
 				select {
 				case jobs <- job{owner, kind, tick}:
 				default:
+					queueFailures[kind].Add(1)
 					failures.Add(1)
 				}
 			}
@@ -501,6 +517,7 @@ func TestNativeDestinationGlobalBatchPressure(t *testing.T) {
 				select {
 				case jobs <- job{owner, 4, tick / rate}:
 				default:
+					queueFailures[4].Add(1)
 					failures.Add(1)
 				}
 			}
@@ -533,9 +550,14 @@ func TestNativeDestinationGlobalBatchPressure(t *testing.T) {
 			reading, invalid := peer.probe.node, peer.probe.invalid
 			frozen, retried := peer.probe.frozen, peer.probe.recovered
 			invalidCauses := peer.probe.invalidCauses
+			httpFailures, lastHTTPFailureStatus := peer.probe.httpFailures, peer.probe.lastHTTPFailureStatus
 			samples := peer.probe.samples
 			peer.probe.mu.Unlock()
 			drainFacts = map[string]uint64{"owner": uint64(owner + 1), "samples": uint64(len(samples)), "traffic_ms": uint64(m.TrafficMS), "owners_finished": uint64(len(detail))}
+			if httpFailures > 0 {
+				drainFacts["http_failure_count"] = httpFailures
+				drainFacts["last_http_failure_status"] = uint64(lastHTTPFailureStatus)
+			}
 			drainReason = "node_samples"
 			drainFacts["node_lanes"], drainFacts["node_invalid_causes"] = uint64(len(reading.Lanes)), invalidCauses
 			if invalid {
