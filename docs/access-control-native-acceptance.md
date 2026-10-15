@@ -25,6 +25,26 @@ complete 65-owner/200-user accounting with scalar epoch resets and report
 publication. Hosted race tests and fresh global pressure/profile evidence are
 required before attributing any runtime improvement to this change.
 
+PSP `0b342643` completed [all 18 CI jobs](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/38819848999).
+Independent originals confirm 216 App roots and 11 fixture roots, including
+three actual collector race roots; each ran and passed once without failures,
+skips or cache. These establish the admission evidence prerequisite below.
+The preceding `8ffa92be` ordinary and receipt-profile runs still failed all six
+database jobs before traffic. Its PostgreSQL receipt profile retained a fleet
+accounting mutex hotspot (68.27% of cumulative sampled waiting delay); this is
+not CPU, per-request latency or a causal comparison across hosted runners.
+
+The next quota follow-up checks up to 64 current entries under a shared anchor
+lock. A chunk entirely in the persisted epoch without anchors needs no map
+mutation, so its original delta arithmetic runs outside that lock. Zero epochs
+remain zero and retain any anchor. Any reset or existing anchor takes the
+writer path and re-reads all anchors after acquisition. The same-call bounded
+scratch array retains order and ownership checks; there is no cross-call cache,
+omitted counter, shortened current read or altered freshness gate. Regressions
+cover overlapping readers, both complete-fleet epoch modes, mixed chunk
+boundaries, duplicate presence, zero epochs and anchor deletion. New hosted race
+and pressure/profile evidence remain required.
+
 ## Admission evidence prerequisite
 
 The admission-evidence prerequisite adds an immutable numeric `Admission` value

@@ -139,6 +139,49 @@ func TestFleetAccountingIndexReadsCurrentReportsAndDoesNotAliasResults(t *testin
 	}
 }
 
+func TestFleetAccountingChunksPreserveMixedEpochTransitionsAcrossReadAndWriteBoundaries(t *testing.T) {
+	now := time.UnixMilli(100000)
+	var clients []domain.PSPClientAccounting
+	report := fleetCounterReport{receivedAtMS: now.UnixMilli()}
+	anchors := make(map[int64]protocol.ClientCounters)
+	for id := int64(1); id <= 193; id++ {
+		client := domain.PSPClientAccounting{ID: id, UserID: id%7 + 1, PanelID: 1, LastCounterEpoch: 2, LastRawUpBytes: 5, LastRawDownBytes: 7}
+		counter := fleetClientCounter{key: protocol.NewClientKey(id), present: true, upBytes: 15, downBytes: 17, counterEpoch: 2}
+		switch {
+		case id >= 65 && id <= 128:
+			counter.counterEpoch = 3
+			if id%2 == 0 {
+				anchors[id] = protocol.ClientCounters{CounterEpoch: 3, UpBytes: 11, DownBytes: 13}
+			}
+		case id >= 129:
+			anchors[id] = protocol.ClientCounters{CounterEpoch: 9, UpBytes: 99, DownBytes: 101}
+			if id <= 192 {
+				counter.counterEpoch = 0
+			}
+		}
+		clients = append(clients, client)
+		report.clients = append(report.clients, counter)
+	}
+	// Keep the duplicate's additional delta and last-counter presence across
+	// the final partial chunk; a noncanonical key cannot change either one.
+	report.clients = append(report.clients,
+		fleetClientCounter{key: protocol.NewClientKey(1), present: false, upBytes: 19, downBytes: 17, counterEpoch: 2},
+		fleetClientCounter{key: protocol.ClientKey("cli_0001"), present: true, upBytes: 999, counterEpoch: 2})
+	agents := []*domain.NodeAgent{{AgentID: "owned", PanelID: 1}}
+	reports := map[string]fleetCounterReport{"owned": report}
+	assertFleetIndexMatchesIndependentPaths(t, clients, agents, reports, anchors, 60, now)
+	s := &Service{anchors: cloneFleetTestAnchors(anchors)}
+	pending, coverage, oldest := s.accountFleetFromReports(clients, agents, reports, 60, now)
+	var sum int64
+	for _, amount := range pending {
+		sum += amount
+	}
+	_, retainedCurrent := s.anchors[193]
+	if sum != 1580 || len(pending) != 7 || coverage.Entries != 193 || coverage.Subjects != 7 || coverage.EntriesStale != 1 || oldest != now.UnixMilli() || retainedCurrent || !reflect.DeepEqual(s.anchors[129], anchors[129]) || s.anchors[65].CounterEpoch != 3 || s.anchors[65].UpBytes != 15 {
+		t.Fatal("read/write quota chunks changed deltas, coverage, zero epochs or anchor transitions")
+	}
+}
+
 func TestFleetAccountingSharedIndexReducesPerResponseAllocationsForComplete65OwnerFleet(t *testing.T) {
 	var clients []domain.PSPClientAccounting
 	var agents []*domain.NodeAgent

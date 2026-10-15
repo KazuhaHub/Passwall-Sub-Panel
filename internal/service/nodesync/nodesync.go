@@ -54,7 +54,7 @@ type Service struct {
 	now     func() time.Time
 	// Reset anchors have no atomic relationship with report publication. Keep
 	// quota arithmetic from contending with current report/coverage readers.
-	anchorsMu sync.Mutex
+	anchorsMu sync.RWMutex
 	anchors   map[int64]nodeprotocol.ClientCounters
 	// invalidateRender is late-bound because the native adapter needs this
 	// service before the panel pool (and therefore render service) can exist.
@@ -1377,12 +1377,29 @@ func (s *Service) pendingCounterDelta(client domain.PSPClientAccounting, counter
 	if counter.CounterEpoch == 0 {
 		return 0
 	}
+	s.anchorsMu.RLock()
+	baseline := s.pendingCounterUsesBaselineLocked(client, counter.CounterEpoch)
+	s.anchorsMu.RUnlock()
+	if baseline {
+		return pendingDeltaFromBaseline(counter.UpBytes, counter.DownBytes, client.LastRawUpBytes, client.LastRawDownBytes)
+	}
 	s.anchorsMu.Lock()
 	defer s.anchorsMu.Unlock()
 	return s.pendingCounterDeltaLocked(client, counter)
 }
 
-// The caller holds anchorsMu. Both the scalar and bounded fleet path retain
+// The caller holds anchorsMu for reading or writing. An absent anchor in the
+// persisted epoch needs no mutation: the original delete would be a no-op.
+// The check is the observation point; arithmetic uses only this call's inputs.
+func (s *Service) pendingCounterUsesBaselineLocked(client domain.PSPClientAccounting, epoch uint64) bool {
+	if epoch == 0 {
+		return true
+	}
+	_, anchored := s.anchors[client.ID]
+	return client.LastCounterEpoch == epoch && !anchored
+}
+
+// The caller holds anchorsMu for writing. Both scalar and bounded fleet paths retain
 // the same epoch reset, first-observation and persisted-baseline semantics.
 func (s *Service) pendingCounterDeltaLocked(client domain.PSPClientAccounting, counter nodeprotocol.ClientCounters) int64 {
 	if counter.CounterEpoch == 0 {
@@ -1399,8 +1416,12 @@ func (s *Service) pendingCounterDeltaLocked(client domain.PSPClientAccounting, c
 		}
 		baseUp, baseDown = anchor.UpBytes, anchor.DownBytes
 	}
-	up := counter.UpBytes - baseUp
-	down := counter.DownBytes - baseDown
+	return pendingDeltaFromBaseline(counter.UpBytes, counter.DownBytes, baseUp, baseDown)
+}
+
+func pendingDeltaFromBaseline(counterUp, counterDown, baseUp, baseDown int64) int64 {
+	up := counterUp - baseUp
+	down := counterDown - baseDown
 	if up < 0 {
 		up = 0
 	}

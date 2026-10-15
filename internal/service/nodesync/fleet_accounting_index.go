@@ -16,6 +16,11 @@ type fleetAccountingOwner struct {
 
 const fleetAccountingAnchorChunk = 64
 
+type fleetAccountingCounter struct {
+	client  domain.PSPClientAccounting
+	counter fleetClientCounter
+}
+
 // Reuse one numeric client index for pending usage and coverage. RowID rejects
 // noncanonical spellings, so a counter that resolves to an ID is exactly the
 // key NewClientKey would mint. Presence remains last-counter-wins; pending
@@ -52,6 +57,7 @@ func (s *Service) accountFleetFromReports(clients []domain.PSPClientAccounting, 
 	}
 	present := make([]bool, len(clients))
 	pending := make(map[int64]int64)
+	var current [fleetAccountingAnchorChunk]fleetAccountingCounter
 	for agentID, report := range reports {
 		owner := owners[agentID]
 		if owner == nil {
@@ -62,7 +68,7 @@ func (s *Service) accountFleetFromReports(clients []domain.PSPClientAccounting, 
 		// skipping counters, changing their order or holding a lock across I/O.
 		for offset := 0; offset < len(report.clients); offset += fleetAccountingAnchorChunk {
 			end := min(offset+fleetAccountingAnchorChunk, len(report.clients))
-			s.anchorsMu.Lock()
+			eligible := current[:0]
 			for _, counter := range report.clients[offset:end] {
 				id, err := counter.key.RowID()
 				if err != nil {
@@ -73,13 +79,9 @@ func (s *Service) accountFleetFromReports(clients []domain.PSPClientAccounting, 
 					continue
 				}
 				present[i] = counter.present
-				client := clients[i]
-				pending[client.UserID] = saturatingAdd(pending[client.UserID], s.pendingCounterDeltaLocked(client, protocol.ClientCounters{
-					Key: counter.key, Present: counter.present, UpBytes: counter.upBytes,
-					DownBytes: counter.downBytes, CounterEpoch: counter.counterEpoch,
-				}))
+				eligible = append(eligible, fleetAccountingCounter{client: clients[i], counter: counter})
 			}
-			s.anchorsMu.Unlock()
+			s.addFleetPendingChunk(pending, eligible)
 		}
 	}
 	coverage := protocol.SegmentCounts{}
@@ -111,6 +113,44 @@ func (s *Service) accountFleetFromReports(clients []domain.PSPClientAccounting, 
 		}
 	}
 	return pending, coverage, oldest
+}
+
+func (s *Service) addFleetPendingChunk(pending map[int64]int64, counters []fleetAccountingCounter) {
+	if len(counters) == 0 {
+		return
+	}
+	s.anchorsMu.RLock()
+	baseline := true
+	for _, entry := range counters {
+		if !s.pendingCounterUsesBaselineLocked(entry.client, entry.counter.counterEpoch) {
+			baseline = false
+			break
+		}
+	}
+	s.anchorsMu.RUnlock()
+	if baseline {
+		// No anchor mutation was needed at the read observation. All arithmetic
+		// and response-map updates can proceed without holding the shared lock.
+		for _, entry := range counters {
+			var delta int64
+			if entry.counter.counterEpoch != 0 {
+				delta = pendingDeltaFromBaseline(entry.counter.upBytes, entry.counter.downBytes, entry.client.LastRawUpBytes, entry.client.LastRawDownBytes)
+			}
+			pending[entry.client.UserID] = saturatingAdd(pending[entry.client.UserID], delta)
+		}
+		return
+	}
+	// Re-read every anchor after acquiring the writer lock. A reset or durable
+	// epoch transition may have occurred since the optimistic read was released.
+	s.anchorsMu.Lock()
+	defer s.anchorsMu.Unlock()
+	for _, entry := range counters {
+		counter := entry.counter
+		pending[entry.client.UserID] = saturatingAdd(pending[entry.client.UserID], s.pendingCounterDeltaLocked(entry.client, protocol.ClientCounters{
+			Key: counter.key, Present: counter.present, UpBytes: counter.upBytes,
+			DownBytes: counter.downBytes, CounterEpoch: counter.counterEpoch,
+		}))
+	}
 }
 
 func (s *Service) accountFleetSeparateIndexes(clients []domain.PSPClientAccounting, agents []*domain.NodeAgent, reports map[string]fleetCounterReport, freshness int, now time.Time) (map[int64]int64, protocol.SegmentCounts, int64) {
