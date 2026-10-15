@@ -2044,3 +2044,25 @@ panel/agent所有权在任何锚点修改前回到旧独立路径，保留异常
 200用户分配比较也必须保持13000 entries、200 subjects且无stale。旧独立计算
 路径保留作语义对照。当前改动本地测试只编译、相关vet和完整构建通过；实际
 托管运行及压力效果仍待验证，完整剩余验收范围保持。
+
+### 共享 fleet 索引终态与 PostgreSQL 扫描分类
+
+`3ddeb7d3` CI38726338679终态18项通过，nodesync完整race71.533s、SQLite
+SQLstore race51.314s、MySQL61.202s、PG118.908s；App原件212个实际入口
+各RUN1/PASS1，前端2507通过、既有1项条件跳过，类型/构建/浏览器烟测通过。
+原生矩阵38726778049终态49项通过，48份精确提交/run原件严格核验48 PASS、
+861个必需场景通过。压力38726782569三库全部失败：SQLite112用户stage1
+membership，MySQL/PG200用户stage2 receipt，均原20分钟超时；MySQL另有
+streams_inbound_offline。全部未进入流量阶段，无根PASS、四类完成标志或
+压力阶段profile。共享索引语义和分配回归通过，不代表实际压力吞吐改善。
+
+同轮PG准备阶段60秒采样显示pgx ScanColumn累计CPU51.73%，其中
+isSQLScanDestination34.59%、reflect.(*rtype).Implements32.14%；这些为嵌套
+累计比例，不能相加。当前pgx Go1.27实现对普通标量指针逐层检查多个接口。
+全量fleet读取的三个必需ID改用显式sql.Scanner，首先命中其SQL扫描分类；
+int64直接赋值，其余使用标准sql.NullInt64转换并明确拒绝NULL，保持原必需
+标量的错误行为。仅PG选择该路径，SQLite/MySQL保留直接指针快路径；每次
+查询只构造一次目的列表，完整六列、排序、行数、当前读取和可空计数语义不变。
+新增真实驱动下与原*int64转换结果/错误对照，以及三个必需ID的NULL失败、
+游标释放、无部分结果/失败不更新容量检查。本地只编译测试、SQLstore vet和
+完整构建通过，实际三库执行及压力效果仍待验证；全部剩余门槛保持。

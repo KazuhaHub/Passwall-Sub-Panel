@@ -249,8 +249,18 @@ func (r *pspClientRepo) ListFleetAccounting(ctx context.Context) ([]domain.PSPCl
 	var client domain.PSPClientAccounting
 	var up, down sql.NullInt64
 	var epoch sql.Null[uint64]
+	destinations := []any{&client.ID, &client.UserID, &client.PanelID, &up, &down, &epoch}
+	if r.db.Dialector.Name() == "postgres" {
+		// pgx's Go 1.27 column scanner otherwise checks several interfaces at
+		// every pointer level for every scalar cell. Explicit SQL scanners take
+		// its first classification branch, retaining database/sql conversions.
+		// Other drivers retain their direct *int64 fast path.
+		destinations[0] = requiredInt64{&client.ID}
+		destinations[1] = requiredInt64{&client.UserID}
+		destinations[2] = requiredInt64{&client.PanelID}
+	}
 	for rows.Next() {
-		if err := rows.Scan(&client.ID, &client.UserID, &client.PanelID, &up, &down, &epoch); err != nil {
+		if err := rows.Scan(destinations...); err != nil {
 			return nil, err
 		}
 		client.LastRawUpBytes, client.LastRawDownBytes = up.Int64, down.Int64
