@@ -179,6 +179,28 @@ test('global sync diagnostics retain only bounded actual transport facts', async
   assert(!isSafeDestinationDiagnostic({ Diagnostic: 'global_sync_agent_id', Observed: 1 }))
 })
 
+test('setup process CPU diagnostics retain only bounded aggregate counters and never completion proof', async () => {
+  const { isSafeDestinationDiagnostic, checkDestinationGlobalBatchResults } = await import('./destination-acceptance.mjs')
+  const values = { sample: 1, elapsed_ms: 1200000, sample_ms: 29, parent_ticks: 30000, waited_child_ticks: 40000, live_core_ticks: 500,
+    changed_core_identities: 65, parents: 65, cores: 65, ticks_per_second: 100, logical_cpus: 4, unavailable: 1 }
+  const facts = []
+  for (const [name, value] of Object.entries(values)) {
+    const result = sanitizeDestinationResults(encode([{ Action: 'output', Output: `private PID/path: native global setup cpu: ${name}=${value}\n` }]))
+    const event = JSON.parse(result)
+    assert.equal(event.Diagnostic, `global_setup_cpu_${name}`)
+    assert.equal(event.Observed, value)
+    assert(isSafeDestinationDiagnostic(event))
+    assert(!result.includes('private PID/path'))
+    facts.push(event)
+  }
+  assert.throws(() => checkDestinationGlobalBatchResults(encode(facts)))
+  for (const line of ['agent_id=1', 'pid=42', 'parents=66', 'cores=66', 'changed_core_identities=66', 'logical_cpus=0',
+    'ticks_per_second=0', 'sample=0', 'sample=11', 'elapsed_ms=1200001', 'parent_ticks=-1', 'waited_child_ticks=1000000000001', 'unavailable=0', 'sample_ms=2; private']) {
+    assert.equal(sanitizeDestinationResults(encode([{ Action: 'output', Output: `native global setup cpu: ${line}\n` }])).trim(), '')
+  }
+  assert(!isSafeDestinationDiagnostic({ Diagnostic: 'global_setup_cpu_pid', Observed: 42 }))
+})
+
 test('global control stage diagnostics expose only bounded aggregate timing and never completion proof', async () => {
   const { isSafeDestinationDiagnostic, checkDestinationGlobalBatchResults } = await import('./destination-acceptance.mjs')
   const facts = []

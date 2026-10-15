@@ -159,11 +159,23 @@ func TestNativeDestinationGlobalBatchPressure(t *testing.T) {
 	t.Log("native setup stage: control_target")
 	_, controlAddress, controlPort, controlNonce, _ := nativeTargetAtPort(t, nativePort(t))
 	stage := "capability"
+	var setupCPU func()
+	if profile == "1" {
+		setupCPU = nativeSetupCPUSampler(t, cohort.peers)
+		t.Cleanup(func() {
+			if m.Stage <= 2 {
+				setupCPU()
+			}
+		})
+	}
 	users, group, policy, blockAddress, blockPort, blockReached := nativePrepareTrialLoad(t, f, cohort.server.Client(), cohort.server.URL, token, f.node.DesiredPort, nativeGlobalBatchOutput(cohort.peers), &stage, &nativeMixedSetup{observePort: observePort, memberConcurrency: 8, memberReady: func(completed int) {
 		m.Users = completed
 		writeMetrics()
 		if completed%50 == 0 {
 			writeStageDiagnostics()
+			if setupCPU != nil {
+				setupCPU()
+			}
 		}
 		if completed == 50 && profile == "1" {
 			t.Cleanup(nativeStartSetupProfile(t, root, 60*time.Second).stop)

@@ -361,6 +361,8 @@ export function sanitizeDestinationResults(input) {
       if (globalStage && isSafeGlobalStageFact(globalStage[1], Number(globalStage[2]))) return JSON.stringify({ Action: 'output', Package: pkg, Diagnostic: `global_stage_${globalStage[1]}`, Observed: Number(globalStage[2]) })
       const globalSync = typeof event.Output === 'string' && /native global sync: (attempt_age_ms|completion_age_ms|last_duration_ms|last_status|inflight|parent_alive)=([0-9]{1,7})(?:\r?\n|$)/.exec(event.Output)
       if (globalSync && isSafeGlobalSyncFact(globalSync[1], Number(globalSync[2]))) return JSON.stringify({ Action: 'output', Package: pkg, Diagnostic: `global_sync_${globalSync[1]}`, Observed: Number(globalSync[2]) })
+      const setupCPU = typeof event.Output === 'string' && /native global setup cpu: (sample|elapsed_ms|sample_ms|parent_ticks|waited_child_ticks|live_core_ticks|changed_core_identities|parents|cores|ticks_per_second|logical_cpus|unavailable)=([0-9]{1,13})(?:\r?\n|$)/.exec(event.Output)
+      if (setupCPU && isSafeSetupCPUFact(setupCPU[1], Number(setupCPU[2]))) return JSON.stringify({ Action: 'output', Package: pkg, Diagnostic: `global_setup_cpu_${setupCPU[1]}`, Observed: Number(setupCPU[2]) })
       const setupProfile = typeof event.Output === 'string' && /native global setup profile: (elapsed_ms|allocated_bytes|gc_cycles|gc_pause_ns|heap_bytes)=([0-9]{1,16})(?:\r?\n|$)/.exec(event.Output)
       if (setupProfile && isSafeSetupProfileFact(setupProfile[1], Number(setupProfile[2]))) return JSON.stringify({ Action: 'output', Package: pkg, Diagnostic: `global_setup_profile_${setupProfile[1]}`, Observed: Number(setupProfile[2]) })
       const fleetSetup = typeof event.Output === 'string' && /native diagnostic: (fleet_setup_(?:cohort|candidates|database|session|cadence|principals|peers|server|daemons|membership))=(true|false)(?:\r?\n|$)/.exec(event.Output)
@@ -415,8 +417,20 @@ export function isSafeDestinationDiagnostic(event) {
   if (event.Diagnostic.startsWith('global_stage_')) return isSafeGlobalStageFact(event.Diagnostic.slice('global_stage_'.length), event.Observed)
   if (event.Diagnostic.startsWith('global_config_error_')) return isSafeGlobalConfigError(event.Diagnostic.slice('global_config_error_'.length), event.Observed)
   if (event.Diagnostic.startsWith('global_sync_')) return isSafeGlobalSyncFact(event.Diagnostic.slice('global_sync_'.length), event.Observed)
+  if (event.Diagnostic.startsWith('global_setup_cpu_')) return isSafeSetupCPUFact(event.Diagnostic.slice('global_setup_cpu_'.length), event.Observed)
   if (event.Diagnostic === 'receipt_wait') return event.Observed >= 1 && event.Observed <= 99
   return ['panel_downgrade_application_ms', 'panel_reupgrade_application_ms'].includes(event.Diagnostic) && event.Observed <= 150000
+}
+
+function isSafeSetupCPUFact(name, value) {
+  if (!Number.isSafeInteger(value) || value < 0) return false
+  if (name === 'sample') return value >= 1 && value <= 10
+  if (['elapsed_ms', 'sample_ms'].includes(name)) return value <= 1200000
+  if (['parent_ticks', 'waited_child_ticks', 'live_core_ticks'].includes(name)) return value <= 1000000000000
+  if (['parents', 'cores', 'changed_core_identities'].includes(name)) return value <= 65
+  if (name === 'ticks_per_second') return value >= 1 && value <= 1000000
+  if (name === 'logical_cpus') return value >= 1 && value <= 4096
+  return name === 'unavailable' && value === 1
 }
 
 function isSafeSetupProfileFact(name, value) {
