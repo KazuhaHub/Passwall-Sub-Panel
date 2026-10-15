@@ -31,7 +31,7 @@ test('global cohort bootstrap uses independent actual processes and binds after 
   assert(job.startsWith('  global-bootstrap:'))
   for (const db of ['sqlite', 'mysql', 'postgres']) assert(job.includes(`database: ${db}`))
   assert(job.includes(`-test.run '^${root}$'`) && job.includes('destination-global-bootstrap.mjs'))
-  assert.match(job, /ref: b35b29780406e4e7272c7b87f80ed2fe2d69bc42/)
+  assert.match(job, /ref: 1ce8f26cfbce8d3decf8855dda4349be10778a23/)
   assert.match(job, /PSP_NATIVE_CORE_VERSION=26\.6\.27/)
   assert.match(job, /name: \$\{\{ matrix\.evidence_prefix \}\}-\$\{\{ github\.sha \}\}/)
 })

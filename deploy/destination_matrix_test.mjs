@@ -94,6 +94,6 @@ test('legacy SQL cohorts retain the complete upgrade, mixed fleet and rollback s
   const workflow = readFileSync(new URL('../.github/workflows/destination-acceptance.yml', import.meta.url), 'utf8')
   const job = workflow.slice(workflow.indexOf('  legacy-upgrade:'), workflow.indexOf('  complete-matrix:'))
   assert.equal(workflow.split("      - 'deploy/native-legacy-panel-bridge.go.txt'").length - 1, 2)
-  for (const required of ['database: [sqlite, mysql, postgres]', 'candidate: [baseline, module]', 'b35b29780406e4e7272c7b87f80ed2fe2d69bc42', "matrix.database == 'mysql'", "matrix.database == 'postgres'", 'PSP_NATIVE_DB_KIND', 'TestNativeServerDestinationSnapshotDetectsChangedDataAndSchema', 'check-legacy-upgrade']) assert(job.includes(required), required)
+  for (const required of ['database: [sqlite, mysql, postgres]', 'candidate: [baseline, module]', '1ce8f26cfbce8d3decf8855dda4349be10778a23', "matrix.database == 'mysql'", "matrix.database == 'postgres'", 'PSP_NATIVE_DB_KIND', 'TestNativeServerDestinationSnapshotDetectsChangedDataAndSchema', 'check-legacy-upgrade']) assert(job.includes(required), required)
   assert(!job.includes('continue-on-error'))
 })

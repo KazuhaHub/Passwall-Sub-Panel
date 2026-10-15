@@ -12,7 +12,7 @@ export function checkDestinationTrialLoadMetrics(input) {
   const report = JSON.parse(input)
   const fields = ['schema_version', 'candidate', 'core_version', 'users', 'duration_ms', 'trial_windows', 'user_deliveries', 'trial_delivered', 'trial_allowed', 'trial_target_requests', 'trial_stored_rows', 'trial_stored_events', 'trial_over_budget_rows', 'trial_identified_rows', 'trial_budget_max_rows', 'block_windows', 'block_delivered', 'block_denied', 'block_stored_events', 'block_loss_rows', 'block_loss_events', 'transport_failures', 'late_delivered', 'control_successes', 'heartbeat_advances', 'trial_losses', 'samples', 'cpu_ticks_per_second']
   require(report && typeof report === 'object' && !Array.isArray(report) && Object.keys(report).sort().join() === fields.sort().join())
-  require(report.schema_version === 1 && report.candidate === 'b35b29780406e4e7272c7b87f80ed2fe2d69bc42' && report.core_version === '26.6.27')
+  require(report.schema_version === 1 && report.candidate === '1ce8f26cfbce8d3decf8855dda4349be10778a23' && report.core_version === '26.6.27')
   for (const name of fields.filter(name => !['candidate', 'core_version', 'trial_windows', 'user_deliveries', 'block_windows', 'trial_losses', 'samples'].includes(name))) require(Number.isSafeInteger(report[name]) && report[name] >= 0)
   require(report.users === 200 && report.duration_ms >= 300000 && report.duration_ms <= 305000)
   require(Array.isArray(report.user_deliveries) && report.user_deliveries.length === 200 && report.user_deliveries.every(n => Number.isSafeInteger(n) && n > 0))

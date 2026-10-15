@@ -11,7 +11,7 @@ export function checkDestinationBlockOverflowMetrics(input) {
   require(typeof input === 'string' && Buffer.byteLength(input) <= 128 * 1024)
   const report = JSON.parse(input)
   fields(report, ['schema_version', 'candidate', 'core_version', 'cpu_ticks_per_second', 'phases'])
-  require(report.schema_version === 1 && report.candidate === 'b35b29780406e4e7272c7b87f80ed2fe2d69bc42' && report.core_version === '26.6.27')
+  require(report.schema_version === 1 && report.candidate === '1ce8f26cfbce8d3decf8855dda4349be10778a23' && report.core_version === '26.6.27')
   require(count(report.cpu_ticks_per_second) && report.cpu_ticks_per_second > 0 && report.cpu_ticks_per_second <= 10000)
   require(Array.isArray(report.phases) && report.phases.length === 1)
   const phase = report.phases[0]
