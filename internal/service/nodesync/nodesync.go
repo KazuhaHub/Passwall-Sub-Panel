@@ -50,9 +50,12 @@ type Service struct {
 
 	mu      sync.RWMutex
 	reports map[string]receivedFullReport
-	anchors map[int64]nodeprotocol.ClientCounters
 	grants  map[string]map[nodeprotocol.ClientKey]int64
 	now     func() time.Time
+	// Reset anchors have no atomic relationship with report publication. Keep
+	// quota arithmetic from contending with current report/coverage readers.
+	anchorsMu sync.Mutex
+	anchors   map[int64]nodeprotocol.ClientCounters
 	// invalidateRender is late-bound because the native adapter needs this
 	// service before the panel pool (and therefore render service) can exist.
 	invalidateRender func()
@@ -1374,20 +1377,28 @@ func (s *Service) pendingCounterDelta(client domain.PSPClientAccounting, counter
 	if counter.CounterEpoch == 0 {
 		return 0
 	}
+	s.anchorsMu.Lock()
+	defer s.anchorsMu.Unlock()
+	return s.pendingCounterDeltaLocked(client, counter)
+}
+
+// The caller holds anchorsMu. Both the scalar and bounded fleet path retain
+// the same epoch reset, first-observation and persisted-baseline semantics.
+func (s *Service) pendingCounterDeltaLocked(client domain.PSPClientAccounting, counter nodeprotocol.ClientCounters) int64 {
+	if counter.CounterEpoch == 0 {
+		return 0
+	}
 	baseUp, baseDown := client.LastRawUpBytes, client.LastRawDownBytes
-	s.mu.Lock()
 	if client.LastCounterEpoch == counter.CounterEpoch {
 		delete(s.anchors, client.ID)
 	} else {
 		anchor, exists := s.anchors[client.ID]
 		if !exists || anchor.CounterEpoch != counter.CounterEpoch {
 			s.anchors[client.ID] = counter
-			s.mu.Unlock()
 			return 0
 		}
 		baseUp, baseDown = anchor.UpBytes, anchor.DownBytes
 	}
-	s.mu.Unlock()
 	up := counter.UpBytes - baseUp
 	down := counter.DownBytes - baseDown
 	if up < 0 {

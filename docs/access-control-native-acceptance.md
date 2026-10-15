@@ -2,6 +2,31 @@
 
 ## Current full-module candidate
 
+The current full-module jobs pin Node
+`1ce8f26cfbce8d3decf8855dda4349be10778a23`. Event wakes retain the normal
+full-report cadence, including due/requested/unset intervals. Its bounded
+regressions also reject invalid negative intervals. Earlier candidate evidence
+below remains tied to its original source.
+
+PSP `892f1391` completed [all 18 CI jobs](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/38815850779).
+Independent originals confirm all 216 compiled App roots, each run and passed
+once across three race slices, without skips, failures or cached results. All
+eight global-fixture roots also ran and passed once, including real TCP reply
+and wrapped request-error classification. This establishes the diagnostic
+contract; it does not establish global pressure completion.
+
+The quota contention follow-up separates reset anchors from current report and
+grant synchronization, then processes counters in lock sections bounded to 64
+entries. Every current counter, ownership check, epoch reset, persisted
+baseline and coverage calculation remains. There is no new cache or I/O under
+the anchor lock. Regressions cover independent report access while anchors are
+locked, independent quota arithmetic while reports are locked, and concurrent
+complete 65-owner/200-user accounting with scalar epoch resets and report
+publication. Hosted race tests and fresh global pressure/profile evidence are
+required before attributing any runtime improvement to this change.
+
+## Prepared-SQL checkpoint
+
 The next full-module candidate is Node
 `b35b29780406e4e7272c7b87f80ed2fe2d69bc42`. It retains the direct Stats wire
 contract below and reuses SQL programs for current counter reads and writes.

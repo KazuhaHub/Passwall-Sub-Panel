@@ -14,6 +14,8 @@ type fleetAccountingOwner struct {
 	used    bool
 }
 
+const fleetAccountingAnchorChunk = 64
+
 // Reuse one numeric client index for pending usage and coverage. RowID rejects
 // noncanonical spellings, so a counter that resolves to an ID is exactly the
 // key NewClientKey would mint. Presence remains last-counter-wins; pending
@@ -55,21 +57,29 @@ func (s *Service) accountFleetFromReports(clients []domain.PSPClientAccounting, 
 		if owner == nil {
 			continue
 		}
-		for _, counter := range report.clients {
-			id, err := counter.key.RowID()
-			if err != nil {
-				continue
+		// Bound each critical section independently of the fleet or report size.
+		// This removes per-counter handoffs without caching any current inputs,
+		// skipping counters, changing their order or holding a lock across I/O.
+		for offset := 0; offset < len(report.clients); offset += fleetAccountingAnchorChunk {
+			end := min(offset+fleetAccountingAnchorChunk, len(report.clients))
+			s.anchorsMu.Lock()
+			for _, counter := range report.clients[offset:end] {
+				id, err := counter.key.RowID()
+				if err != nil {
+					continue
+				}
+				i, found := index[id]
+				if !found || clients[i].PanelID != owner.panelID {
+					continue
+				}
+				present[i] = counter.present
+				client := clients[i]
+				pending[client.UserID] = saturatingAdd(pending[client.UserID], s.pendingCounterDeltaLocked(client, protocol.ClientCounters{
+					Key: counter.key, Present: counter.present, UpBytes: counter.upBytes,
+					DownBytes: counter.downBytes, CounterEpoch: counter.counterEpoch,
+				}))
 			}
-			i, found := index[id]
-			if !found || clients[i].PanelID != owner.panelID {
-				continue
-			}
-			present[i] = counter.present
-			client := clients[i]
-			pending[client.UserID] = saturatingAdd(pending[client.UserID], s.pendingCounterDelta(client, protocol.ClientCounters{
-				Key: counter.key, Present: counter.present, UpBytes: counter.upBytes,
-				DownBytes: counter.downBytes, CounterEpoch: counter.counterEpoch,
-			}))
+			s.anchorsMu.Unlock()
 		}
 	}
 	coverage := protocol.SegmentCounts{}
