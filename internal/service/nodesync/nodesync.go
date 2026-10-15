@@ -72,6 +72,7 @@ type Service struct {
 	policies           PolicyCoordinator
 	policyCandidates   ports.NodePolicyCandidateRepo
 	policyConfigCache  *boundedcache.Cache[[]byte]
+	issuedRosterCache  *boundedcache.Cache[*issuedRoster]
 	policyConfigEncode func(nodeprotocol.ConfigBody) ([]byte, error)
 	allowlistResync    func(context.Context, int64)
 }
@@ -138,6 +139,7 @@ func New(options Options) (*Service, error) {
 		audit:    options.Audit,
 		policies: options.Policies, policyCandidates: options.PolicyCandidates,
 		policyConfigCache: boundedcache.New[[]byte](policyConfigCacheEntries, 32<<20),
+		issuedRosterCache: boundedcache.New[*issuedRoster](issuedRosterCacheEntries, issuedRosterCacheBytes),
 	}, nil
 }
 
@@ -644,15 +646,12 @@ func (s *Service) reconcileObjects(ctx context.Context, agent *domain.NodeAgent,
 	rosterHave := report.Have[nodeprotocol.StreamRoster]
 	rosterCurrent := streams[nodeprotocol.StreamRoster]
 	if rosterCurrent != nil && rosterHave.Applied.Epoch == agent.Epoch && string(rosterHave.ETag) == rosterCurrent.DesiredETag {
-		var appliedRoster nodeprotocol.RosterBody
-		if err := json.Unmarshal(rosterCurrent.DesiredBody, &appliedRoster); err != nil {
+		appliedRoster, err := s.decodeIssuedRoster(rosterCurrent.DesiredBody)
+		if err != nil {
 			return fmt.Errorf("nodesync: decode applied roster: %w", err)
 		}
-		appliedClients := make(map[nodeprotocol.ClientKey]nodeprotocol.Client, len(appliedRoster.Clients))
-		for _, client := range appliedRoster.Clients {
-			appliedClients[client.Key] = client
-		}
-		currentRoster := buildRoster(snapshot, appliedRoster.MinConfigVersion)
+		appliedClients := appliedRoster.clients
+		currentRoster := buildRoster(snapshot, appliedRoster.minConfigVersion)
 		desiredClients := make(map[int64]*ports.NativeDesiredClient, len(snapshot.Clients))
 		for i := range snapshot.Clients {
 			if snapshot.Clients[i].Client != nil {
@@ -1635,14 +1634,12 @@ func (s *Service) nativePanelSnapshot(ctx context.Context, panelID int64, email 
 	appliedClients := make(map[nodeprotocol.ClientKey]nodeprotocol.Client)
 	currentClients := make(map[nodeprotocol.ClientKey]nodeprotocol.Client)
 	if rosterCurrent {
-		var appliedRoster nodeprotocol.RosterBody
-		if err := json.Unmarshal(rosterStream.DesiredBody, &appliedRoster); err != nil {
+		appliedRoster, err := s.decodeIssuedRoster(rosterStream.DesiredBody)
+		if err != nil {
 			return nil, fmt.Errorf("nodesync: decode observed roster: %w", err)
 		}
-		for _, client := range appliedRoster.Clients {
-			appliedClients[client.Key] = client
-		}
-		for _, client := range buildRoster(desired, appliedRoster.MinConfigVersion).Clients {
+		appliedClients = appliedRoster.clients
+		for _, client := range buildRoster(desired, appliedRoster.minConfigVersion).Clients {
 			currentClients[client.Key] = client
 		}
 	}

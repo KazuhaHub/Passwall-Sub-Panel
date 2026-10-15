@@ -2,10 +2,12 @@ package nodesync
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
 	"testing"
+	"time"
 
 	protocol "github.com/KazuhaHub/passwall-protocol/protocol"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
@@ -83,6 +85,21 @@ type fullDesiredOnly struct {
 	ports.NativeDesiredSnapshotRepo
 }
 
+type replacementRosterReader struct {
+	ports.NodeAgentRepo
+	change func([]byte) []byte
+}
+
+func (r replacementRosterReader) GetStream(ctx context.Context, agentID string, stream domain.NodeAgentStreamName) (*domain.NodeAgentStream, error) {
+	current, err := r.NodeAgentRepo.GetStream(ctx, agentID, stream)
+	if err != nil || current == nil || stream != domain.NodeAgentStreamRoster {
+		return current, err
+	}
+	copy := *current
+	copy.DesiredBody = r.change(current.DesiredBody)
+	return &copy, nil
+}
+
 func TestScopedClientObservationMatchesFullFacadeAndRetainsItsOwnReport(t *testing.T) {
 	f := newConfigAppliedFixture(t)
 	var clients []*domain.PSPClient
@@ -124,6 +141,39 @@ func TestScopedClientObservationMatchesFullFacadeAndRetainsItsOwnReport(t *testi
 			t.Fatalf("scoped closed-client identity differs from full facade: %v", err)
 		}
 	}
+	// Warm parsing cannot authorize bytes replaced under the same persisted
+	// ETag/version, hide corruption, or let a facade caller mutate its cache.
+	originalAgents := f.service.agents
+	f.service.agents = replacementRosterReader{NodeAgentRepo: originalAgents, change: func(body []byte) []byte {
+		var roster protocol.RosterBody
+		if err := json.Unmarshal(body, &roster); err != nil {
+			t.Fatal(err)
+		}
+		for i := range roster.Clients {
+			roster.Clients[i].Credentials.UUID = "replaced"
+		}
+		changed, err := json.Marshal(roster)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return changed
+	}}
+	if got, err := f.service.NativePanelClientSnapshot(t.Context(), f.agent.PanelID, clients[0].Email); err != nil || got != nil {
+		t.Fatalf("same-ETag replacement reused cached identity: %v", err)
+	}
+	f.service.agents = replacementRosterReader{NodeAgentRepo: originalAgents, change: func([]byte) []byte { return []byte("{") }}
+	if _, err := f.service.NativePanelClientSnapshot(t.Context(), f.agent.PanelID, clients[0].Email); err == nil {
+		t.Fatal("cached roster hid current corruption")
+	}
+	f.service.agents = originalAgents
+	owned, err := f.service.NativePanelClientSnapshot(t.Context(), f.agent.PanelID, clients[0].Email)
+	if err != nil || owned == nil || len(owned.InboundIDs) == 0 {
+		t.Fatalf("restored current roster failed: %v", err)
+	}
+	owned.InboundIDs[0] = 999999
+	if next, err := f.service.NativePanelClientSnapshot(t.Context(), f.agent.PanelID, clients[0].Email); err != nil || next == nil || !reflect.DeepEqual(*next, full.Clients[clients[0].Email]) {
+		t.Fatalf("facade output mutated cached syntax: %v", err)
+	}
 	if absent, err := f.service.NativePanelClientSnapshot(t.Context(), f.agent.PanelID, "absent@psp.local"); err != nil || absent != nil {
 		t.Fatalf("missing desired email imported another identity: %v", err)
 	}
@@ -141,6 +191,17 @@ func TestScopedClientObservationMatchesFullFacadeAndRetainsItsOwnReport(t *testi
 	f.service.mu.RLock()
 	saved := f.service.reports[f.agent.AgentID]
 	f.service.mu.RUnlock()
+	stale := saved
+	stale.receivedAtMS -= int64((24 * time.Hour) / time.Millisecond)
+	f.service.mu.Lock()
+	f.service.reports[f.agent.AgentID] = stale
+	f.service.mu.Unlock()
+	if _, err := f.service.NativePanelClientSnapshot(t.Context(), f.agent.PanelID, clients[0].Email); !errors.Is(err, ports.ErrNativePanelSnapshotStale) {
+		t.Fatalf("warm roster bypassed stale full observation: %v", err)
+	}
+	f.service.mu.Lock()
+	f.service.reports[f.agent.AgentID] = saved
+	f.service.mu.Unlock()
 	for _, change := range []struct {
 		name  string
 		apply func(*protocol.NodeReport)
