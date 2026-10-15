@@ -9,7 +9,7 @@ PSP 通过 `/panel/api/*` 对接 3X-UI 面板。本文档维护两件事：
 
 | PSP 版本 | 最低 3X-UI | 已实测通过 | 备注 |
 |---|---|---|---|
-| **v4 stable（4.0.0–4.99.99）** | **3.4.2** | **3.10.0** | 当前 v4 适配器已在官方 3.10.0 / Xray 26.10.10 隔离面板上实测；3.10.0 新增 SS-2022 chacha20 与短 salamander 密码保存校验，见下方验证记录 |
+| **v4 stable（4.0.0–4.99.99）** | **3.4.2** | **3.10.2** | 当前 v4 适配器已在官方 3.10.2 / Xray 26.10.10 隔离面板上实测；包含 SS-2022 永久校验错误分类修复，见下方验证记录 |
 | **v4.0.0-beta.9+** | **3.4.2** | **3.9.0** | 历史 beta 验证记录；不将当前 v4 源码的结果套用于旧二进制 |
 | **v4.0.0-beta.1–beta.8** | **3.4.2** | 3.7.0 | 历史二进制缺少 3X-UI 3.8.x 所需修复，不随远程清单误抬上限 |
 | **v3.9.3+** | **3.4.2** | **3.8.5** | V3 稳定维护线；补齐 Xray 26.9.8+ REALITY ML-KEM 订阅处理，并保留 3X-UI 3.8.x 的负数 `subSortIndex` |
@@ -41,6 +41,35 @@ PSP 通过 `/panel/api/*` 对接 3X-UI 面板。本文档维护两件事：
 - 抬高 `max_tested_xui` / `max_tested_sui` 时，**同一个改动**里把 `.github/workflows/test.yml` 中 `third-party-isolated` 的 `PSP_LIVE_3XUI_IMAGE` / `PSP_LIVE_SUI_IMAGE` 默认镜像改成新上限的 `tag@sha256:digest`；CI 跑的就是评审过的上限，`deploy/test_workflow_test.mjs` 会拒绝两者不一致
 
 ## 历史兼容性事件
+
+### 2026-10-14（洛杉矶）/ 3X-UI 3.10.2 适配器复核 → v4 已测上限更新到 3.10.2
+
+3X-UI [v3.10.2](https://github.com/MHSanaei/3x-ui/releases/tag/v3.10.2) 发布于
+2026-10-14，内置 Xray-core 仍为 **26.10.10**。在源码层面对比
+`v3.10.0..v3.10.2`，PSP 使用的 API 路由、客户端字段结构以及 client/server
+controller 未变化；本次涉及共享客户端字段合并、节点流量合并和 Shadowsocks 热更新。
+
+本地使用官方 Windows/amd64 发布包，SHA-256 与 GitHub release asset 的摘要一致：
+`67cf5f3a1d354f62bf5d0ff27e5a96663ba64761b7d26919b307ac6cca37419e`。
+隔离 SQLite 面板仅监听回环地址，独立订阅服务关闭，使用 admin-scoped token。
+面板实际回报 `panelVersion=3.10.2`、`xrayVersion=26.10.10`、`xrayState=running`。
+9 项必需 live 适配器测试全部通过，两项 fail2ban 按既有 profile 记为 N/A。
+
+另外通过真实适配器补测了两项测试及两个 AES 子场景：
+
+- SS-2022 AES-128 / AES-256 入站和客户端增删改、禁用再启用正常，配额、到期及连接限制保留，Xray 保持 running。
+- 不支持的 SS-2022 chacha20 方法和无效 server key 被面板拒绝。PSP 现在也将无效 server key 的错误识别为 `domain.ErrValidation`，避免把确定性配置错误当成临时错误重试；回归测试包含两个 AES 方法的实际返回消息。
+- 配置更新保留负数 `subSortIndex=-3`、独立的入站启停及客户端 UUID、启用、配额、到期和设备上限。
+- 通过面板 API 配置每周续期后，PSP `UpdateClient` 将 `clients` 和 `client_traffics` 两张表中的 `reset_weekday` 清零。
+
+机器可读记录见 [3x-ui-3.10.2.json](compat/evidence/3x-ui-3.10.2.json)。
+CI 固定到 `ghcr.io/mhsanaei/3x-ui:v3.10.2@sha256:6c7e73c5bc4b6d7d70866616f78d6c9866b4904defad3077c1e2b5c1c89c2ec1`，对应 linux/amd64 镜像会由手动完整 Test workflow 验证。
+
+**升级提醒**：Windows 可执行文件由 `x-ui.exe` 改为 `3x-ui.exe`，相关服务、任务
+和启动脚本需更新路径；跨过 3.10.0 时仍需阅读下面的内核升级及配置迁移提醒。
+最低版本仍为 3.4.2，历史 v3 / v4 beta 的支持声明不变。本次验证覆盖当前源码适配器
+与全新隔离面板；不代表旧数据库升级、历史 PSP 二进制、完整代理流量或现存连接连续性认证。
+
 
 ### 2026-10-13 / 3X-UI 3.10.0 适配器复核 → v4 已测上限 3.9.0 抬到 3.10.0
 

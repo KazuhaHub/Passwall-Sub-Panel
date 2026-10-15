@@ -187,7 +187,7 @@ func TestTheShippedDocumentsYieldTheReviewedCeilings(t *testing.T) {
 		apply   func([]byte, time.Time) error
 		wantMax string
 	}{
-		{name: "3x-ui", apply: applyXUICompatDocument, wantMax: "3.10.0"},
+		{name: "3x-ui", apply: applyXUICompatDocument, wantMax: "3.10.2"},
 		{name: "sui", apply: applySUICompatDocument, wantMax: "1.6.3"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

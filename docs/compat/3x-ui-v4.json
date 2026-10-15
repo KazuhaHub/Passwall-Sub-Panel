@@ -1,9 +1,9 @@
 {
   "schema_version": 1,
   "product": "3x-ui",
-  "revision": 4,
-  "issued_at": "2026-10-12T21:30:00Z",
-  "expires_at": "2027-10-12T21:30:00Z",
+  "revision": 5,
+  "issued_at": "2026-10-15T00:06:35.412Z",
+  "expires_at": "2027-10-15T00:06:35.412Z",
   "applies_to_psp": {
     "min": "4.0.0",
     "max": "4.99.99"
@@ -14,8 +14,8 @@
       "psp_min": "4.0.0",
       "psp_max": "4.99.99",
       "min_xui": "3.4.2",
-      "max_tested_xui": "3.10.0",
-      "notes": "3X-UI 3.10.0 live adapter verification (2026-10-12 UTC) ran the current PSP source adapter against the pinned ghcr.io/mhsanaei/3x-ui:v3.10.0 image (multi-arch manifest sha256:ef90d07e…, upstream commit 74c3cc38821cabd66ad316ea562851422d0b0063) and bundled Xray 26.10.10 on a fresh isolated SQLite panel. All nine required third-party-3xui-live tests passed; the two fail2ban probes remain N/A. A source diff v3.9.0..v3.10.0 found no route added or removed on the surface PSP calls, and model.Client / model.ClientTraffic and the client controller and service byte-identical. 3.10.0 DOES add save-time validators on the inbound write path: an SS-2022 inbound using chacha20-poly1305 is now refused (it was previously accepted and then killed the whole xray core before serving), and a salamander obfs password shorter than 4 bytes is refused. Only the first needed an adapter change — isPermanentPanelMsg now matches it so the write fails fast instead of retrying. Evidence: docs/compat/evidence/3x-ui-3.10.0.json and docs/3xui-compat.md. This is adapter-surface evidence, not historical PSP binary, existing-database upgrade or full proxy dataplane verification. Legacy v3 and v4 beta support claims are unchanged."
+      "max_tested_xui": "3.10.2",
+      "notes": "3X-UI 3.10.2 verification used PSP source 0401b698 (current main plus the permanent validation-error fixes) against the SHA-256-verified official Windows/amd64 archive on a fresh isolated SQLite panel, with bundled Xray 26.10.10 running. All nine required adapter tests and two supplementary tests passed; the two fail2ban probes remain N/A. Supplementary checks covered SS-2022 AES client lifecycle, permanent rejection of chacha20 and malformed server keys, negative sort-index preservation, independent inbound/client lifecycle and clearing weekly renewal through PSP UpdateClient. The tagged source review found no new PSP API route or client-field changes after 3.10.0. The CI image is pinned to the reviewed 3.10.2 multi-arch digest. Evidence: docs/compat/evidence/3x-ui-3.10.2.json and docs/3xui-compat.md. This is adapter-surface evidence, not historical PSP binary, existing-database upgrade or full proxy dataplane verification. Legacy v3 and v4 beta support claims are unchanged."
     }
   ],
   "xui_advisories": {
@@ -52,7 +52,12 @@
     "3.10.0": {
       "severity": "warning",
       "affects_xray": true,
-      "text": "3X-UI 3.10.0 升级内置 Xray-core 到 26.10.10 并重启内核；启动时会迁移旧的 XDNS finalmask、quicParams.udpHop 与 Shadowsocks-2022 配置，Xray 校验 outbound TLS 时改用内置 Mozilla 根证书（自签名/私有 CA 的 outbound 需在 3X-UI 中打开「Use system CA」），systemd 部署的单元会被沙箱化（/usr、/etc、/home、/root 变为只读，必要时用 ReadWritePaths= 放行）。对 PSP 有两点要注意：其一，3.10.0 起拒绝「使用 chacha20-poly1305 的 Shadowsocks-2022 入站」——这在旧版本上会保存成功、随后让整个 xray 内核启动失败（所有入站一起停），现在改为保存即报错；PSP 的节点编辑器仍提供该 cipher，请改选 2022-blake3-aes-128-gcm 或 aes-256-gcm。其二，混淆（salamander）密码少于 4 字节会被拒绝。新增的 MASQUE、XDRIVE 以及原生 TUIC/AmneziaWG 不在 PSP 支持范围内。PSP 适配器无需改动即可对接，已测上限仅覆盖当前 v4 适配器与全新隔离面板，不代表历史发布二进制、已有数据库升级或完整代理链路验证。"
+      "text": "3X-UI 3.10.0 升级内置 Xray-core 到 26.10.10 并重启内核；启动时会迁移旧的 XDNS finalmask、quicParams.udpHop 与 Shadowsocks-2022 配置，Xray 校验 outbound TLS 时改用内置 Mozilla 根证书（自签名/私有 CA 的 outbound 需在 3X-UI 中打开「Use system CA」），systemd 部署的单元会被沙箱化（/usr、/etc、/home、/root 变为只读，必要时用 ReadWritePaths= 放行）。对 PSP 有两点要注意：其一，3.10.0 起拒绝「使用 chacha20-poly1305 的 Shadowsocks-2022 入站」——这在旧版本上会保存成功、随后让整个 xray 内核启动失败（所有入站一起停），现在改为保存即报错；PSP 的节点编辑器仍提供该 cipher，请改选 2022-blake3-aes-128-gcm 或 aes-256-gcm。其二，混淆（salamander）密码少于 4 字节会被拒绝。新增的 MASQUE、XDRIVE 以及原生 TUIC/AmneziaWG 不在 PSP 支持范围内。PSP 已将这些入站配置校验错误识别为永久失败，避免无效重试，已测上限仅覆盖当前 v4 适配器与全新隔离面板，不代表历史发布二进制、已有数据库升级或完整代理链路验证。"
+    },
+    "3.10.2": {
+      "severity": "info",
+      "affects_xray": false,
+      "text": "3X-UI 3.10.2 内置 Xray-core 仍为 26.10.10，修复 Shadowsocks 多用户客户端热更新、共享客户端字段合并和节点流量同步，并完善 vmess 链接导入。当前 PSP v4 适配器已通过真实隔离面板验证；非法 SS-2022 chacha20 方法及无效 server key 会返回永久校验错误，请选择 AES 方法并提供正确长度的 base64 密钥。Windows 面板程序改名为 3x-ui.exe，使用服务、任务或脚本启动旧 x-ui.exe 的部署需要更新路径。跨过 3.10.0 时仍需注意其内核、配置迁移和系统 CA 提示。已测上限仅覆盖适配器接口，不代表已有数据库升级、历史 PSP 二进制或完整代理流量链路验证。"
     }
   }
 }
