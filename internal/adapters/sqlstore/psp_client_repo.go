@@ -20,9 +20,9 @@ import (
 // The non-unique (panel_id,email) index keeps upstream observation lookups fast
 // without letting a rendered email decide whether a local row survives.
 type pspClientRow struct {
-	ID        int64  `gorm:"primaryKey;autoIncrement"`
-	UserID    int64  `gorm:"index;not null"`
-	PanelID   int64  `gorm:"not null;index:idx_psp_client_panel_email,priority:1"`
+	ID        int64  `gorm:"primaryKey;autoIncrement;index:idx_psp_client_fleet_accounting,priority:3"`
+	UserID    int64  `gorm:"index;not null;index:idx_psp_client_fleet_accounting,priority:2"`
+	PanelID   int64  `gorm:"not null;index:idx_psp_client_panel_email,priority:1;index:idx_psp_client_fleet_accounting,priority:1"`
 	Email     string `gorm:"size:255;not null;index:idx_psp_client_panel_email,priority:2"`
 	CredClass int    `gorm:"not null;default:0"`
 	UUID      string `gorm:"size:36;not null;default:''"`
@@ -40,10 +40,10 @@ type pspClientRow struct {
 	LifetimeDownBytes  int64 `gorm:"default:0"`
 	LifetimeTotalBytes int64 `gorm:"default:0"`
 
-	LastRawUpBytes    int64  `gorm:"default:0"`
-	LastRawDownBytes  int64  `gorm:"default:0"`
+	LastRawUpBytes    int64  `gorm:"default:0;index:idx_psp_client_fleet_accounting,priority:4"`
+	LastRawDownBytes  int64  `gorm:"default:0;index:idx_psp_client_fleet_accounting,priority:5"`
 	LastRawTotalBytes int64  `gorm:"default:0"`
-	LastCounterEpoch  uint64 `gorm:"default:0"`
+	LastCounterEpoch  uint64 `gorm:"default:0;index:idx_psp_client_fleet_accounting,priority:6"`
 
 	PeriodBaselineUpBytes    int64 `gorm:"default:0"`
 	PeriodBaselineDownBytes  int64 `gorm:"default:0"`
@@ -230,6 +230,9 @@ func (r *pspClientRepo) ListAll(ctx context.Context) ([]*domain.PSPClient, error
 }
 
 func (r *pspClientRepo) ListFleetAccounting(ctx context.Context) ([]domain.PSPClientAccounting, error) {
+	// The covering index follows this ordering and numeric projection, allowing
+	// the planner to avoid table lookups and temporary sorting. The query still
+	// reads the current complete fleet; no rows or freshness checks are omitted.
 	rows, err := r.db.WithContext(ctx).
 		Model(&pspClientRow{}).
 		Select("id", "user_id", "panel_id", "last_raw_up_bytes", "last_raw_down_bytes", "last_counter_epoch").

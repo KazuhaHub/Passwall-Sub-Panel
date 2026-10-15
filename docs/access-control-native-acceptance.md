@@ -1911,3 +1911,29 @@ ETag、身份比较及新鲜度校验仍每次执行。原重复键最后胜出�
 条目/字节/超大值限制及热解析分配回归；已有当前凭据变更、拒绝对象、错误
 epoch、交错报告替换和读取错误回归继续执行。实际运行与压力改善待同源托管
 验证；全局压力、真实24小时及26/48/72小时等完整剩余验收范围保持。
+
+### roster 解析复用验证结果与 fleet 读取索引
+
+`440faac9` 完整CI38699833965的18项作业通过；nodesync完整race65.794s，
+MySQL/PostgreSQL完整SQLstore包62.367s/91.056s；前端类型/构建、浏览器烟测、
+2507单元通过，保留既有1项条件跳过。终态artifact清单和三份App race原件
+独立核验212个实际编译入口各RUN1/PASS1，无失败/跳过/缓存、原四分钟上限保持。
+原生矩阵38700253056的49项作业通过；48份未过期精确提交/run原件核验
+48 PASS/0 FAIL，861个必需场景通过。
+
+压力38700256892三库失败，三份原件/完整artifact清单/各job私有日志保存并
+核验：SQLite138用户stage1 membership，20分钟套件超时，compile_unavailable8；
+MySQL200用户stage2 receipt，streams_inbound_offline根FAIL，独立同步观测
+HTTP200/2335ms、完成距观测4631ms、无在途且父进程存活；PostgreSQL200用户
+stage2 receipt，20分钟套件超时，compile_unavailable4。均无流量、根PASS、
+四类完成标志或压力阶段profile。不能据此证明解析缓存改善了可比吞吐。
+SQLite独立60秒准备采样ListFleetAccounting累计CPU24.45%，PG为14.95%；
+PG未过滤采样亦显示ScanColumn/反射转换开销，不能归为唯一瓶颈。
+
+完整计费投影仍按panel_id/user_id/id排序，每次读取六个当前数值字段；原
+panel/email索引不覆盖该排序与投影。增加非唯一的六列覆盖索引，排序列在前，
+计数基线/epoch在后，排除凭据和其他定义。保持完整当前读取、NULL零语义、
+宽epoch和错误释放；不缓存或过滤成员。增加三方言索引列顺序/非唯一性检查，
+SQLite实际EXPLAIN要求覆盖扫描且无临时排序；真实旧表无新索引→EnsureSchema
+升级覆盖既有定义/NULL/宽epoch及后续计数更新。该索引增加基线更新维护成本，
+实际三方言写入、升级回滚及压力效果仍待同源验证，不能以索引存在代替验收。
