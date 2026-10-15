@@ -59,6 +59,24 @@ integrated and guarded candidates remain independent.
 
 ## Validated direct-telemetry checkpoint
 
+The pressure fixtures require one event per actual serialized row before
+reconciling receiver row losses with connection deliveries. Block probes now
+encode their unique domain as the VLESS destination as well as HTTP Host, with
+owned mappings for that domain. Previously they retained a constant IP target;
+routeOnly sniffing does not replace the access-log destination, so those hits
+could aggregate and make row/event arithmetic invalid. Any observed merged row
+now fails the fixture's unit contract while the valid control request is still
+forwarded unchanged. Product loss units, aggregation, traffic rates, owner/user
+counts, queue limits and exact reconciliation gates are not changed.
+
+`global-receipt-profile` starts the bounded CPU/allocation profile at the
+200-user receipt wait and stops it before pressure traffic when readiness
+succeeds. Optional block/mutex profiles cover the whole test process; their
+sampled waiting delay is not CPU or an additive wall-clock total. They remain
+private mode-0600 files; only static function summaries are printed. The old
+membership profile still starts after 50 members. Ordinary acceptance enables
+neither profiler and retains the same original deadlines.
+
 For fallback-rejection diagnosis, the native workflow accepts
 `suite=mysql-module-xray-26.9.9`. It runs the unchanged complete MySQL/Xray
 26.9.9 full-module traffic driver, including its entire original scenario

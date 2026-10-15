@@ -76,6 +76,13 @@ func TestNativeDestinationGlobalBatchPressure(t *testing.T) {
 	if profile != "" && profile != "0" && profile != "1" {
 		t.Fatal("unknown setup profile selection")
 	}
+	profileStage := os.Getenv("PSP_NATIVE_SETUP_PROFILE_STAGE")
+	if profileStage == "" {
+		profileStage = "membership"
+	}
+	if profileStage != "membership" && profileStage != "receipt" {
+		t.Fatal("unknown setup profile stage")
+	}
 	evidence := os.Getenv("PSP_NATIVE_GLOBAL_BATCH_METRICS")
 	root, e1 := filepath.EvalSymlinks(os.Getenv("RUNNER_TEMP"))
 	dir, e2 := filepath.EvalSymlinks(filepath.Dir(evidence))
@@ -177,7 +184,7 @@ func TestNativeDestinationGlobalBatchPressure(t *testing.T) {
 				setupCPU()
 			}
 		}
-		if completed == 50 && profile == "1" {
+		if completed == 50 && profile == "1" && profileStage == "membership" {
 			t.Cleanup(nativeStartSetupProfile(t, root, 60*time.Second).stop)
 		}
 	}})
@@ -232,6 +239,11 @@ func TestNativeDestinationGlobalBatchPressure(t *testing.T) {
 			}
 		}
 	})
+	var stopReceiptProfile func()
+	if profile == "1" && profileStage == "receipt" {
+		stopReceiptProfile = nativeStartSetupProfile(t, root, 60*time.Second).stop
+		t.Cleanup(stopReceiptProfile)
+	}
 	nativeWait(t, 240*time.Second, "all real global trial policies and 200-user paired rosters", func() bool {
 		readiness = "state"
 		state, err := a.destDefinitions.State(t.Context())
@@ -311,8 +323,11 @@ func TestNativeDestinationGlobalBatchPressure(t *testing.T) {
 		readiness = "complete"
 		return true
 	})
+	if stopReceiptProfile != nil {
+		stopReceiptProfile()
+	}
 	const seconds, rate = 120, 10
-	name := nativeGlobalBatchHosts(t, nonce, address, observeAddress, controlAddress, seconds, rate)
+	name := nativeGlobalBatchHosts(t, nonce, address, blockAddress, observeAddress, controlAddress, seconds, rate)
 	for _, peer := range cohort.peers {
 		nativeMust(t, nativeVLESSHost(t.Context(), peer.node.DesiredPort, name(5, 0), targetPort, f.user.UUID, nonce, name(5, 0)), "verify actual global allowed domain traffic")
 		peer.live = nativeBindLiveCore(t, peer.process.Process.Pid, filepath.Join(peer.dir, "node"), "xray")
@@ -385,7 +400,7 @@ func TestNativeDestinationGlobalBatchPressure(t *testing.T) {
 			for j := range jobs {
 				peer := cohort.peers[j.owner]
 				if j.kind == 0 {
-					header, err := nativeVLESSRequest(f.user.UUID, blockAddress, blockPort, name(0, j.seq))
+					header, err := nativePressureBlockRequest(f.user.UUID, name(0, j.seq), blockPort)
 					if err != nil || !nativeLoadBlockedRequest(ctx, peer.node.DesiredPort, header, func() {}) {
 						failures.Add(1)
 						continue
@@ -744,19 +759,22 @@ func nativeGlobalBatchOutput(peers []*nativeGlobalPeer) func() string {
 	}
 }
 
-func nativeGlobalBatchHosts(t *testing.T, nonce, address, observeAddress, controlAddress string, seconds, rate int) func(int, int) string {
+func nativeGlobalBatchHosts(t *testing.T, nonce, address, blockAddress, observeAddress, controlAddress string, seconds, rate int) func(int, int) string {
 	t.Helper()
 	original, err := os.ReadFile("/etc/hosts")
 	nativeMust(t, err, "read owned global mappings")
 	info, err := os.Stat("/etc/hosts")
 	nativeMust(t, err, "read owned global mapping permissions")
 	name := func(kind, seq int) string { return fmt.Sprintf("global-batch-%s-%d-%05d.test", nonce, kind, seq) }
-	if bytes.Contains(original, []byte("global-batch-"+nonce+"-")) || net.ParseIP(address) == nil || net.ParseIP(observeAddress) == nil || net.ParseIP(controlAddress) == nil {
+	if bytes.Contains(original, []byte("global-batch-"+nonce+"-")) || net.ParseIP(address) == nil || net.ParseIP(blockAddress) == nil || net.ParseIP(observeAddress) == nil || net.ParseIP(controlAddress) == nil {
 		t.Fatal("global mappings lack exclusive ownership")
 	}
 	var additions strings.Builder
-	for kind := 1; kind <= 4; kind++ {
+	for kind := 0; kind <= 4; kind++ {
 		ip, count := address, seconds*rate
+		if kind == 0 {
+			ip = blockAddress
+		}
 		if kind == 1 {
 			ip = observeAddress
 		}

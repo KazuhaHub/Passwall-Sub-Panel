@@ -6,7 +6,7 @@ import { test } from 'node:test'
 const workflow = readFileSync(new URL('../.github/workflows/destination-load.yml', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
 const jobs = ['webhook-load', 'idle-cost', 'queue-pressure', 'sql-pressure', 'trial-load', 'block-overflow', 'mixed-pressure', 'global-bootstrap', 'global-batch']
 const scopes = ['mixed-pressure', 'idle-cost', 'global-batch']
-const choices = ['all', ...scopes, 'global-batch-profile']
+const choices = ['all', ...scopes, 'global-batch-profile', 'global-receipt-profile']
 const condition = "github.event_name != 'workflow_dispatch' || (inputs.suite || 'all') == 'all'"
 const job = name => {
   const marker = '\n  ' + name + ':\n'
@@ -22,7 +22,7 @@ test('manual load selection defaults to all and cannot narrow PR or main checks'
   for (const scope of choices) assert(workflow.includes('          - ' + scope + '\n'))
   assert(workflow.includes('branches: [main]') && workflow.includes('  pull_request:\n'))
   for (const name of jobs) {
-    const expected = condition + (scopes.includes(name) ? " || inputs.suite == '" + name + "'" : '') + (name === 'global-batch' ? " || inputs.suite == 'global-batch-profile'" : '')
+    const expected = condition + (scopes.includes(name) ? " || inputs.suite == '" + name + "'" : '') + (name === 'global-batch' ? " || inputs.suite == 'global-batch-profile' || inputs.suite == 'global-receipt-profile'" : '')
     assert.equal(job(name).match(/^\s+if: (.+)$/m)?.[1], expected)
   }
 })
@@ -31,7 +31,7 @@ test('manual selection rejects unknown values without inserting input into shell
   const selection = job('validate-selection')
   assert(selection.includes("PSP_ACCEPTANCE_SUITE: ${{ inputs.suite || 'all' }}"))
   assert(selection.includes('case "$PSP_ACCEPTANCE_SUITE" in'))
-  assert(selection.includes('all|mixed-pressure|idle-cost|global-batch|global-batch-profile) ;;'))
+  assert(selection.includes('all|mixed-pressure|idle-cost|global-batch|global-batch-profile|global-receipt-profile) ;;'))
   assert(selection.includes("*) printf '%s\\n' 'Unknown acceptance selection'; exit 1 ;;"))
   const shell = selection.slice(selection.indexOf('run: |'))
   assert(!shell.includes('inputs.suite') && !workflow.includes('continue-on-error'))
@@ -50,11 +50,14 @@ test('manual selection rejects unknown values without inserting input into shell
 
 test('setup profiling is opt-in and keeps the complete pressure gate and evidence boundary', () => {
   const batch = job('global-batch')
-  assert(batch.includes("PSP_NATIVE_SETUP_PROFILE: ${{ inputs.suite == 'global-batch-profile' && '1' || '0' }}"))
+  assert(batch.includes("PSP_NATIVE_SETUP_PROFILE: ${{ (inputs.suite == 'global-batch-profile' || inputs.suite == 'global-receipt-profile') && '1' || '0' }}"))
+  assert(batch.includes("PSP_NATIVE_SETUP_PROFILE_STAGE: ${{ inputs.suite == 'global-receipt-profile' && 'receipt' || 'membership' }}"))
   assert(batch.includes('PSP_NATIVE_SETUP_PROFILE="$PSP_NATIVE_SETUP_PROFILE"'))
   assert(batch.includes('-test.timeout=20m'))
   assert(batch.includes('node deploy/destination-global-batch.mjs'))
-  assert(batch.includes("if: always() && inputs.suite == 'global-batch-profile'"))
+  assert(batch.includes("if: always() && (inputs.suite == 'global-batch-profile' || inputs.suite == 'global-receipt-profile')"))
+  assert(batch.includes('profile_args=()') && batch.includes('sudo install -m 0600 /dev/null'))
+  assert(batch.includes('-test.blockprofilerate=10000000') && batch.includes('-test.mutexprofilefraction=10'))
   assert(batch.includes('"$(command -v go)" tool pprof -top -nodecount=30'))
   assert(batch.includes("tool pprof -top -cum -nodecount=30 -show='^github.com/KazuhaHub/passwall-sub-panel/internal/'"))
   assert(batch.includes('for sample in alloc_space alloc_objects; do'))

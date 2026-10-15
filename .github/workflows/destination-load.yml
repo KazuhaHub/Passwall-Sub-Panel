@@ -13,6 +13,7 @@ on:
           - idle-cost
           - global-batch
           - global-batch-profile
+          - global-receipt-profile
   pull_request:
     paths:
       - 'internal/app/**'
@@ -60,7 +61,7 @@ jobs:
         run: |
           set -euo pipefail
           case "$PSP_ACCEPTANCE_SUITE" in
-            all|mixed-pressure|idle-cost|global-batch|global-batch-profile) ;;
+            all|mixed-pressure|idle-cost|global-batch|global-batch-profile|global-receipt-profile) ;;
             *) printf '%s\n' 'Unknown acceptance selection'; exit 1 ;;
           esac
           printf 'Acceptance selection: %s\n' "$PSP_ACCEPTANCE_SUITE"
@@ -646,7 +647,7 @@ jobs:
           retention-days: 7
 
   global-batch:
-    if: github.event_name != 'workflow_dispatch' || (inputs.suite || 'all') == 'all' || inputs.suite == 'global-batch' || inputs.suite == 'global-batch-profile'
+    if: github.event_name != 'workflow_dispatch' || (inputs.suite || 'all') == 'all' || inputs.suite == 'global-batch' || inputs.suite == 'global-batch-profile' || inputs.suite == 'global-receipt-profile'
     name: 65 real Node/Xray four-lane global batch saturation (${{ matrix.database }} / Xray 26.6.27)
     runs-on: ubuntu-24.04
     timeout-minutes: 45
@@ -722,22 +723,33 @@ jobs:
           "$RUNNER_TEMP/destination-global-batch.test" -test.v -test.run '^(TestNativeGlobalTransportKeepsProductionAuthenticationAndExactBodies|TestNativeSetupProfileRejectsExistingFilesAndLinks|TestNativeSetupProfileStopsAndClosesOnce|TestNativeTargetRouteWaitRequiresExactLocalReadiness|TestNativeTargetRouteWaitStopsOnDeadlineCancellationAndReadFailure)$' -test.timeout=2m
       - name: Actual 200 users, 65 owners, four lanes, original SQL hold and retry ledgers
         env:
-          PSP_NATIVE_SETUP_PROFILE: ${{ inputs.suite == 'global-batch-profile' && '1' || '0' }}
+          PSP_NATIVE_SETUP_PROFILE: ${{ (inputs.suite == 'global-batch-profile' || inputs.suite == 'global-receipt-profile') && '1' || '0' }}
+          PSP_NATIVE_SETUP_PROFILE_STAGE: ${{ inputs.suite == 'global-receipt-profile' && 'receipt' || 'membership' }}
         run: |
           set -euo pipefail
+          profile_args=()
+          if test "$PSP_NATIVE_SETUP_PROFILE" = 1; then
+            for kind in block mutex; do
+              profile_path="$RUNNER_TEMP/destination-global-wait.$kind.pprof"
+              test ! -e "$profile_path" && test ! -L "$profile_path"
+              sudo install -m 0600 /dev/null "$profile_path"
+            done
+            profile_args=(-test.blockprofile="$RUNNER_TEMP/destination-global-wait.block.pprof" -test.blockprofilerate=10000000 -test.mutexprofile="$RUNNER_TEMP/destination-global-wait.mutex.pprof" -test.mutexprofilefraction=10)
+          fi
           sudo --preserve-env=GITHUB_ACTIONS,GITHUB_REPOSITORY,RUNNER_ENVIRONMENT,RUNNER_TEMP \
             env PSP_NATIVE_NODE_BIN="$RUNNER_TEMP/destination-node" \
             PSP_NATIVE_CORE_VERSION=26.6.27 PSP_NATIVE_DB_KIND=${{ matrix.database }} \
             PSP_NATIVE_LOAD_METRICS="$RUNNER_TEMP/destination-global-bootstrap-metrics.json" \
             PSP_NATIVE_GLOBAL_BATCH_METRICS="$RUNNER_TEMP/destination-global-batch-metrics.json" \
             PSP_NATIVE_SETUP_PROFILE="$PSP_NATIVE_SETUP_PROFILE" \
+            PSP_NATIVE_SETUP_PROFILE_STAGE="$PSP_NATIVE_SETUP_PROFILE_STAGE" \
             "$RUNNER_TEMP/destination-global-batch.test" \
-              -test.v=test2json -test.run '^TestNativeDestinationGlobalBatchPressure$' -test.timeout=20m 2>&1 \
+              -test.v=test2json -test.run '^TestNativeDestinationGlobalBatchPressure$' -test.timeout=20m "${profile_args[@]}" 2>&1 \
             | go tool test2json -t -p github.com/KazuhaHub/passwall-sub-panel/internal/app \
             | node deploy/destination-acceptance.mjs sanitize > "$RUNNER_TEMP/destination-global-batch-tests.json"
           node deploy/destination-global-batch.mjs "$RUNNER_TEMP/destination-global-batch-tests.json" "$RUNNER_TEMP/destination-global-batch-metrics.json" "$RUNNER_TEMP/destination-global-bootstrap-metrics.json" "${{ matrix.database }}"
       - name: Inspect bounded setup CPU samples separately from acceptance
-        if: always() && inputs.suite == 'global-batch-profile'
+        if: always() && (inputs.suite == 'global-batch-profile' || inputs.suite == 'global-receipt-profile')
         run: |
           set -euo pipefail
           test -s "$RUNNER_TEMP/destination-global-setup.cpu.pprof"
@@ -746,6 +758,11 @@ jobs:
           for sample in alloc_space alloc_objects; do
             sudo --preserve-env=GOWORK,GOTOOLCHAIN "$(command -v go)" tool pprof -top -cum -nodecount=30 -sample_index="$sample" -show='^github.com/KazuhaHub/passwall-sub-panel/internal/' -base="$RUNNER_TEMP/destination-global-setup.alloc-before.pprof" "$RUNNER_TEMP/destination-global-batch.test" "$RUNNER_TEMP/destination-global-setup.alloc-after.pprof"
           done
+          for kind in block mutex; do
+            test -s "$RUNNER_TEMP/destination-global-wait.$kind.pprof"
+            sudo --preserve-env=GOWORK,GOTOOLCHAIN "$(command -v go)" tool pprof -top -cum -nodecount=30 -sample_index=delay -show='^github.com/KazuhaHub/passwall-sub-panel/internal/' "$RUNNER_TEMP/destination-global-batch.test" "$RUNNER_TEMP/destination-global-wait.$kind.pprof"
+          done
+          printf '%s\n' 'CPU scope follows the selected setup phase; block/mutex delay covers the whole test process and is neither CPU nor an additive wall-clock total. Raw profiles remain private.'
       - name: Keep numeric batch, bootstrap and root evidence; byte/key pressure remains pending
         if: always()
         uses: actions/upload-artifact@v7

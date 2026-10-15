@@ -7,7 +7,69 @@ import (
 	"net"
 	"strings"
 	"testing"
+
+	"github.com/KazuhaHub/passwall-protocol/protocol"
 )
+
+// Pressure fixtures reconcile rejected row counts with connection events only
+// because every actual destination key is unique. HTTP Host alone is insufficient:
+// routeOnly sniffing retains the VLESS destination in the core's access log.
+func nativePressureBlockRequest(uuid, destination string, port int) ([]byte, error) {
+	if destination == "" || net.ParseIP(destination) != nil {
+		return nil, fmt.Errorf("pressure block destination must be a unique domain")
+	}
+	return nativeVLESSRequest(uuid, destination, port, destination)
+}
+
+func nativeUnitAuditRows(observation *protocol.AuditObservation) bool {
+	if observation == nil {
+		return true
+	}
+	for _, row := range observation.Hits {
+		if row.Count != 1 {
+			return false
+		}
+	}
+	for _, row := range observation.Usage {
+		if row.Count != 1 {
+			return false
+		}
+	}
+	return true
+}
+
+func TestNativePressureBlockUsesDistinctVLESSDestinationKeys(t *testing.T) {
+	const uuid = "33333333-3333-4333-8333-333333333333"
+	var prior []byte
+	for _, destination := range []string{"pressure-000001.test", "pressure-000002.test"} {
+		packet, err := nativePressureBlockRequest(uuid, destination, 12345)
+		if err != nil || len(packet) < 23+len(destination) || packet[21] != 2 || int(packet[22]) != len(destination) || string(packet[23:23+len(destination)]) != destination {
+			t.Fatal("pressure key exists only in HTTP Host instead of the actual VLESS target")
+		}
+		if !bytes.Contains(packet[23+len(destination):], []byte("Host: "+destination+"\r\n")) || bytes.Equal(packet, prior) {
+			t.Fatal("pressure packet lost its independent target and HTTP host")
+		}
+		prior = packet
+	}
+	for _, destination := range []string{"", "192.0.2.1", "2001:db8::1"} {
+		if _, err := nativePressureBlockRequest(uuid, destination, 12345); err == nil {
+			t.Fatal("pressure accepted an aggregate IP key in place of a unique domain")
+		}
+	}
+}
+
+func TestNativePressureAccountingRejectsAggregatedSerializedRows(t *testing.T) {
+	for _, observation := range []*protocol.AuditObservation{nil, {Dropped: 7}, {Hits: []protocol.AuditHit{{Count: 1}, {Count: 1}}}, {Usage: []protocol.AuditUsage{{Count: 1}}}} {
+		if !nativeUnitAuditRows(observation) {
+			t.Fatal("unit-row pressure observation was rejected")
+		}
+	}
+	for _, observation := range []*protocol.AuditObservation{{Hits: []protocol.AuditHit{{Count: 0}}}, {Hits: []protocol.AuditHit{{Count: 1}, {Count: 2}}}, {Usage: []protocol.AuditUsage{{Count: 1200}}}} {
+		if nativeUnitAuditRows(observation) {
+			t.Fatal("pressure would add rejected rows and connection events with different units")
+		}
+	}
+}
 
 func nativeVLESSRequest(uuid, address string, port int, host string) ([]byte, error) {
 	id, err := hex.DecodeString(strings.ReplaceAll(uuid, "-", ""))

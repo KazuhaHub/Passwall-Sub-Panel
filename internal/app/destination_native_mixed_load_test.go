@@ -92,6 +92,13 @@ func (p *nativeMixedProbe) handler(original http.Handler) http.Handler {
 		index, digest := -1, [32]byte{}
 		if valid && report.Audit != nil {
 			valid = protocol.ValidateAuditObservation(*report.Audit) == nil
+			if valid && !nativeUnitAuditRows(report.Audit) {
+				// Fail acceptance without changing an otherwise valid control
+				// request or inventing an additional transport outage.
+				p.mu.Lock()
+				p.invalid, p.invalidCauses = true, p.invalidCauses|1
+				p.mu.Unlock()
+			}
 			for i, kind := range nativeMixedKinds {
 				if report.Audit.Kind == kind {
 					index = i
@@ -241,15 +248,18 @@ type nativeMixedMetrics struct {
 // /128s. Domain-form VLESS is required: routeOnly HTTP sniffing does not change
 // the original destination recorded by Xray's accepted-connection log. Restore
 // the original hosts file on every exit; never alter DNS or query public names.
-func nativeMixedHosts(t *testing.T, nonce, address, observeAddress, controlAddress string) func(int, int) string {
+func nativeMixedHosts(t *testing.T, nonce, address, blockAddress, observeAddress, controlAddress string) func(int, int) string {
 	original, err := os.ReadFile("/etc/hosts")
 	nativeMust(t, err, "read disposable hosted name mappings")
 	info, err := os.Stat("/etc/hosts")
 	nativeMust(t, err, "read disposable hosted mapping permissions")
 	name := func(kind, seq int) string { return fmt.Sprintf("mixed-%s-%d-%06d.test", nonce, kind, seq) }
 	var additions strings.Builder
-	for kind, perSecond := range []int{0, 400, 1100, 1000, 1} {
+	for kind, perSecond := range []int{800, 400, 1100, 1000, 1} {
 		ip := address
+		if kind == 0 {
+			ip = blockAddress
+		}
 		if kind == 1 {
 			ip = observeAddress
 		}
@@ -262,7 +272,7 @@ func nativeMixedHosts(t *testing.T, nonce, address, observeAddress, controlAddre
 	}
 	fmt.Fprintf(&additions, "%s %s\n", address, name(5, 0))
 	// A collision would borrow an existing mapping rather than our nonce target.
-	if bytes.Contains(original, []byte("mixed-"+nonce+"-")) || net.ParseIP(address) == nil || net.ParseIP(observeAddress) == nil || net.ParseIP(controlAddress) == nil {
+	if bytes.Contains(original, []byte("mixed-"+nonce+"-")) || net.ParseIP(address) == nil || net.ParseIP(blockAddress) == nil || net.ParseIP(observeAddress) == nil || net.ParseIP(controlAddress) == nil {
 		t.Fatal("mixed name fixture has foreign ownership")
 	}
 	t.Cleanup(func() {
@@ -313,7 +323,7 @@ func nativeMixedLoad(t *testing.T, f destinationPolicyFixture, client *http.Clie
 	}
 	// Each accepted destination must be unique, including trial and control,
 	// so persisted row losses can be reconciled as events for this fixture only.
-	name := nativeMixedHosts(t, nonce, address, observeAddress, controlAddress)
+	name := nativeMixedHosts(t, nonce, address, blockAddress, observeAddress, controlAddress)
 	t.Cleanup(func() {
 		if strings.Contains(output(), observeNonce) {
 			t.Error("mixed target nonce escaped into candidate output")
@@ -391,7 +401,7 @@ func nativeMixedLoad(t *testing.T, f destinationPolicyFixture, client *http.Clie
 					continue
 				}
 				if j.kind == 0 {
-					header, err := nativeVLESSRequest(f.user.UUID, blockAddress, blockPort, fmt.Sprintf("mixed-block-%s-%07d.test", nonce, j.seq))
+					header, err := nativePressureBlockRequest(f.user.UUID, name(0, j.seq), blockPort)
 					if err != nil || !nativeLoadBlockedRequest(ctx, inbound, header, func() {}) {
 						failures.Add(1)
 						continue
