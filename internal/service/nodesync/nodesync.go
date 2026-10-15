@@ -80,6 +80,9 @@ type Service struct {
 // full enumeration. ReportedAtMS is useful for clock-skew diagnostics, but it
 // is agent-controlled and therefore must never decide freshness, coverage, or
 // an authorization bound.
+// Stored reports are immutable: ingestion deep-copies each replacement. A
+// private reader may retain that value across repository reads, but must copy
+// any mutable collection it returns or changes.
 type receivedFullReport struct {
 	report       nodeprotocol.NodeReport
 	receivedAtMS int64
@@ -1541,7 +1544,18 @@ func (s *Service) nativePanelSnapshot(ctx context.Context, panelID int64, email 
 	if err != nil {
 		return nil, err
 	}
-	report, receivedAtMS, ok := s.fullReport(agent.AgentID)
+	reader, scoped := s.desired.(ports.NativeDesiredClientSnapshotRepo)
+	scoped = scoped && email != ""
+	// Retain this exact immutable observation and its receipt time. The scoped
+	// path needs the current desired client IDs before copying only their
+	// identity observations; it must not clone every other client's live IPs.
+	s.mu.RLock()
+	received, ok := s.reports[agent.AgentID]
+	s.mu.RUnlock()
+	report, receivedAtMS := received.report, received.receivedAtMS
+	if !scoped {
+		report = cloneReport(report)
+	}
 	if !ok {
 		return nil, ports.ErrNativePanelSnapshotMissing
 	}
@@ -1549,13 +1563,16 @@ func (s *Service) nativePanelSnapshot(ctx context.Context, panelID int64, email 
 		return nil, err
 	}
 	var desired *ports.NativeDesiredSnapshot
-	if reader, ok := s.desired.(ports.NativeDesiredClientSnapshotRepo); ok && email != "" {
+	if scoped {
 		desired, err = reader.LoadClient(ctx, panelID, email)
 	} else {
 		desired, err = s.desired.Load(ctx, panelID)
 	}
 	if err != nil {
 		return nil, err
+	}
+	if scoped {
+		report = cloneClientIdentityReport(report, desired)
 	}
 	configStream, err := s.agents.GetStream(ctx, agent.AgentID, domain.NodeAgentStreamConfig)
 	if err != nil {
