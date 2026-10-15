@@ -80,7 +80,7 @@ func TestNativeDestinationGlobalBatchPressure(t *testing.T) {
 	if profileStage == "" {
 		profileStage = "membership"
 	}
-	if profileStage != "membership" && profileStage != "receipt" {
+	if profileStage != "membership" && profileStage != "receipt" && profileStage != "traffic" {
 		t.Fatal("unknown setup profile stage")
 	}
 	evidence := os.Getenv("PSP_NATIVE_GLOBAL_BATCH_METRICS")
@@ -377,6 +377,13 @@ func TestNativeDestinationGlobalBatchPressure(t *testing.T) {
 	nativeMust(t, err, "hold original SQL after real warmup")
 	t.Cleanup(func() { storage.resume(pause) })
 	beforeBegins, beforeHeld := storage.begins.Load(), storage.blocked.Load()
+	var stopTrafficProfile func()
+	if profile == "1" && profileStage == "traffic" {
+		// Cover the actual partition and recovery while preserving the ordinary
+		// acceptance timing and gates. This opt-in run is diagnostic evidence.
+		stopTrafficProfile = nativeStartSetupProfile(t, root, seconds*time.Second).stop
+		t.Cleanup(stopTrafficProfile)
+	}
 	start := time.Now()
 	for _, peer := range cohort.peers {
 		peer.probe.mu.Lock()
@@ -532,6 +539,9 @@ func TestNativeDestinationGlobalBatchPressure(t *testing.T) {
 	m.SQLHeld, m.SQLEarly = storage.blocked.Load()-beforeHeld, storage.begins.Load()-beforeBegins
 	storage.resume(pause)
 	m.Stage = 4
+	if stopTrafficProfile != nil {
+		stopTrafficProfile()
+	}
 	var detail []nativeGlobalBatchOwner
 	drainReason, drainComplete := "state", false
 	drainFacts := map[string]uint64{}
