@@ -202,30 +202,14 @@ func rowToNodeAgent(row *nodeAgentRow) *domain.NodeAgent {
 }
 
 func (r *nodeAgentRepo) List(ctx context.Context) ([]*domain.NodeAgent, error) {
-	var rows []nodeAgentRow
-	if err := r.db.WithContext(ctx).Omit("CredentialCiphertext").Order("id").Find(&rows).Error; err != nil {
-		return nil, err
-	}
-	out := make([]*domain.NodeAgent, len(rows))
-	for i := range rows {
-		out[i] = rowToNodeAgent(&rows[i])
-	}
-	return out, nil
+	return loadCurrentNodeAgentRows(r.db.WithContext(ctx).Order("id"))
 }
 
 func (r *nodeAgentRepo) ListByPanelIDs(ctx context.Context, panelIDs []int64) ([]*domain.NodeAgent, error) {
 	if len(panelIDs) == 0 {
 		return []*domain.NodeAgent{}, nil
 	}
-	var rows []nodeAgentRow
-	if err := r.db.WithContext(ctx).Omit("CredentialCiphertext").Where("panel_id IN ?", panelIDs).Order("panel_id").Find(&rows).Error; err != nil {
-		return nil, err
-	}
-	out := make([]*domain.NodeAgent, len(rows))
-	for i := range rows {
-		out[i] = rowToNodeAgent(&rows[i])
-	}
-	return out, nil
+	return loadCurrentNodeAgentRows(r.db.WithContext(ctx).Where("panel_id IN ?", panelIDs).Order("panel_id"))
 }
 
 func streamRowToDomain(row *nodeAgentStreamRow) *domain.NodeAgentStream {

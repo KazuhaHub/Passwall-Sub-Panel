@@ -1,0 +1,44 @@
+package sqlstore
+
+import (
+	"database/sql"
+
+	"gorm.io/gorm"
+
+	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
+)
+
+// Read every public model column on each call. CredentialCiphertext is private
+// and was already omitted by both list methods. JSON scanner failures still
+// fail the entire read, including when earlier rows were decoded successfully.
+const currentNodeAgentColumns = `id,agent_id,panel_id,epoch,credential_sha256,
+observed_protocol_version,observed_capabilities,protocol_observed_at,
+desired_core_engine,desired_core_version,allow_restricted_reality,observed_core_engine,last_seen,
+refused_protocol_version,refused_reason,refused_first_at,refused_at,created_at,updated_at`
+
+func loadCurrentNodeAgentRows(query *gorm.DB) ([]*domain.NodeAgent, error) {
+	rows, err := query.Model(&nodeAgentRow{}).Select(currentNodeAgentColumns).Rows()
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]*domain.NodeAgent, 0)
+	for rows.Next() {
+		var row nodeAgentRow
+		var created, updated sql.NullTime
+		if err := rows.Scan(
+			&row.ID, &row.AgentID, &row.PanelID, &row.Epoch, &row.CredentialSHA256,
+			&row.ObservedProtocolVersion, &row.ObservedCapabilities, &row.ProtocolObservedAt,
+			&row.DesiredCoreEngine, &row.DesiredCoreVersion, &row.AllowRestrictedReality, &row.ObservedCoreEngine, &row.LastSeen,
+			&row.RefusedProtocolVersion, &row.RefusedReason, &row.RefusedFirstAt, &row.RefusedAt, &created, &updated,
+		); err != nil {
+			return nil, err
+		}
+		row.CreatedAt, row.UpdatedAt = created.Time, updated.Time
+		out = append(out, rowToNodeAgent(&row))
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
