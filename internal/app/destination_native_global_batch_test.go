@@ -477,25 +477,32 @@ func TestNativeDestinationGlobalBatchPressure(t *testing.T) {
 		}
 	}()
 	t.Cleanup(func() { cancel(); <-observationsDone })
-	for second := 0; second < seconds; second++ {
-		if delay := time.Until(start.Add(time.Duration(second) * time.Second)); delay > 0 {
+	// Spread the same deliveries across the original enqueue window instead of
+	// a 2665-job FIFO burst once a second. Keep all 512 workers, the queue bound,
+	// per-owner totals, first/final enqueue and strict 120s/130s traffic gates.
+	const ticks = seconds * rate
+	const lastSend = (seconds - 1) * time.Second
+	for tick := 0; tick < ticks; tick++ {
+		if delay := time.Until(start.Add(time.Duration(tick) * lastSend / (ticks - 1))); delay > 0 {
 			time.Sleep(delay)
 		}
 		for owner, peer := range cohort.peers {
-			peer.live()
+			if tick%rate == 0 {
+				peer.live()
+			}
 			for kind := range 4 {
-				for n := range rate {
-					select {
-					case jobs <- job{owner, kind, second*rate + n}:
-					default:
-						failures.Add(1)
-					}
+				select {
+				case jobs <- job{owner, kind, tick}:
+				default:
+					failures.Add(1)
 				}
 			}
-			select {
-			case jobs <- job{owner, 4, second}:
-			default:
-				failures.Add(1)
+			if tick%rate == 0 {
+				select {
+				case jobs <- job{owner, 4, tick / rate}:
+				default:
+					failures.Add(1)
+				}
 			}
 		}
 	}

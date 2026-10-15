@@ -79,6 +79,14 @@ but the old mixed parser rejected the preparation diagnostics. Rechecking its
 unchanged originals with the corrected parser passes all three databases;
 the historical workflow remains failed and a new source-bound run is required.
 
+Global batch production is paced across the original first/final enqueue window
+instead of enqueuing all 2665 jobs at once every second. It keeps 65 owners,
+200 users, 512 workers, the 4096-job bound, 1200 deliveries per owner/lane,
+120 controls per owner and the original 120s minimum/130s maximum. The 75s
+fault, SQL hold, 180s drain, queue budgets and zero transport-failure gate remain.
+This is a producer scheduling change requiring fresh native pressure evidence;
+it does not by itself establish throughput or receipt freshness.
+
 `global-receipt-profile` starts the bounded CPU/allocation profile at the
 200-user receipt wait and stops it before pressure traffic when readiness
 succeeds. Optional block/mutex profiles cover the whole test process; their
