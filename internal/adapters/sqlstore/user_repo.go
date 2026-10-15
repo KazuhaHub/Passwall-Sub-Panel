@@ -725,13 +725,11 @@ var userSortAllowlist = map[string]string{
 func (r *userRepo) ListByIDs(ctx context.Context, ids []int64) ([]*domain.User, error) {
 	var out []*domain.User
 	for _, chunk := range idChunks(ids) {
-		var rows []userRow
-		if err := r.db.WithContext(ctx).Where("id IN ?", chunk).Order("id").Find(&rows).Error; err != nil {
+		users, err := loadCurrentUserRows(r.db.WithContext(ctx).Where("id IN ?", chunk))
+		if err != nil {
 			return nil, fmt.Errorf("list users by id: %w", err)
 		}
-		for i := range rows {
-			out = append(out, rows[i].toDomain())
-		}
+		out = append(out, users...)
 	}
 	if len(out) == 0 {
 		return nil, nil
