@@ -319,6 +319,30 @@ test('global traffic failures retain closed queue/request counts and actual reco
   assert.throws(() => checkDestinationGlobalBatchResults(result))
 })
 
+test('global request error facts preserve only fixed bounded numeric causes and never raw errors', async () => {
+  const { isSafeDestinationDiagnostic } = await import('./destination-acceptance.mjs')
+  const causes = ['dial_timeout', 'write_timeout', 'read_timeout', 'timeout', 'refused', 'reset', 'address_unavailable', 'resource_limit', 'eof', 'short_write', 'other']
+  for (const kind of ['block', 'observe', 'trial', 'usage', 'control']) {
+    for (const cause of causes) for (const value of [0, 1000000]) {
+      const input = encode([{ Action: 'output', Output: `private-path:4: native global request: ${kind}_${cause}=${value}\n` }])
+      const output = sanitizeDestinationResults(input)
+      const event = JSON.parse(output)
+      assert.equal(event.Diagnostic, `global_request_${kind}_${cause}`)
+      assert.equal(event.Observed, value)
+      assert(isSafeDestinationDiagnostic(event))
+      assert(!output.includes('private-path') && !output.includes('Output'))
+      assert.deepEqual(Object.keys(event).sort(), ['Action', 'Diagnostic', 'Observed', 'Package'])
+    }
+  }
+  for (const [name, value] of [['block_dial_timeout', -1], ['block_read_timeout', 1000001], ['trial_write_timeout', NaN], ['usage_private_error', 1], ['agent_other', 1], ['control_endpoint', 1]]) {
+    assert.equal(sanitizeDestinationResults(encode([{ Action: 'output', Output: `native global request: ${name}=${value}\n` }])).trim(), '')
+    assert(!isSafeDestinationDiagnostic({ Diagnostic: `global_request_${name}`, Observed: value }))
+  }
+  for (const suffix of ['; private credential', ' https://private.invalid', '.5', 'e3']) {
+    assert.equal(sanitizeDestinationResults(encode([{ Action: 'output', Output: `native global request: usage_other=1${suffix}\n` }])).trim(), '')
+  }
+})
+
 test('global control stage diagnostics expose only bounded aggregate timing and never completion proof', async () => {
   const { isSafeDestinationDiagnostic, checkDestinationGlobalBatchResults } = await import('./destination-acceptance.mjs')
   const facts = []

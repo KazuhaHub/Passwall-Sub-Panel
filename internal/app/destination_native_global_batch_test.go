@@ -397,6 +397,16 @@ func TestNativeDestinationGlobalBatchPressure(t *testing.T) {
 	var userDeliveries [200]atomic.Uint64
 	var failures atomic.Uint64
 	var queueFailures, requestFailures [5]atomic.Uint64
+	var requestCauses [5][len(nativeRequestFailureKinds)]atomic.Uint64
+	recordRequestFailure := func(kind int, err error) {
+		cause := nativeRequestFailureIndex(err)
+		if cause < 0 {
+			panic("request failure requires an actual error")
+		}
+		requestCauses[kind][cause].Add(1)
+		requestFailures[kind].Add(1)
+		failures.Add(1)
+	}
 	// Registered before worker/observer cleanup so these facts are read only
 	// after those goroutines have stopped, including on an early test failure.
 	t.Cleanup(func() {
@@ -406,6 +416,9 @@ func TestNativeDestinationGlobalBatchPressure(t *testing.T) {
 		for i, kind := range [5]string{"block", "observe", "trial", "usage", "control"} {
 			t.Logf("native global traffic: %s_queue_failures=%d", kind, queueFailures[i].Load())
 			t.Logf("native global traffic: %s_request_failures=%d", kind, requestFailures[i].Load())
+			for cause, name := range nativeRequestFailureKinds {
+				t.Logf("native global request: %s_%s=%d", kind, name, requestCauses[i][cause].Load())
+			}
 		}
 		t.Logf("native global traffic: total_failures=%d", failures.Load())
 	})
@@ -421,9 +434,11 @@ func TestNativeDestinationGlobalBatchPressure(t *testing.T) {
 				peer := cohort.peers[j.owner]
 				if j.kind == 0 {
 					header, err := nativePressureBlockRequest(f.user.UUID, name(0, j.seq), blockPort)
-					if err != nil || !nativeLoadBlockedRequest(ctx, peer.node.DesiredPort, header, func() {}) {
-						requestFailures[j.kind].Add(1)
-						failures.Add(1)
+					if err == nil {
+						err = nativeLoadBlockedRequestFailure(ctx, peer.node.DesiredPort, header, func() {})
+					}
+					if err != nil {
+						recordRequestFailure(j.kind, err)
 						continue
 					}
 				} else {
@@ -438,9 +453,8 @@ func TestNativeDestinationGlobalBatchPressure(t *testing.T) {
 						port, want = controlPort, controlNonce
 					}
 					host := name(j.kind, j.seq)
-					if nativeVLESSHost(ctx, peer.node.DesiredPort, host, port, uuid, want, host) != nil {
-						requestFailures[j.kind].Add(1)
-						failures.Add(1)
+					if err := nativeVLESSHost(ctx, peer.node.DesiredPort, host, port, uuid, want, host); err != nil {
+						recordRequestFailure(j.kind, err)
 						continue
 					}
 				}

@@ -51,7 +51,7 @@ test('global batch driver uses real 65-owner traffic and original storage, with 
 })
 
 test('failure diagnostics cannot turn contradictory global batch evidence into a pass', () => {
-  for (const output of ['native global traffic: total_failures=1\n', 'native global traffic: observe_queue_failures=1\n', 'native global drain: http_failure_count=1\n', 'native global drain: last_http_failure_status=500\n']) {
+  for (const output of ['native global traffic: total_failures=1\n', 'native global traffic: observe_queue_failures=1\n', 'native global request: trial_read_timeout=1\n', 'native global request: usage_address_unavailable=0\n', 'native global drain: http_failure_count=1\n', 'native global drain: last_http_failure_status=500\n']) {
     const diagnostic = sanitizeDestinationResults(JSON.stringify({Action:'output', Output:output}))
     assert(diagnostic.trim())
     assert.throws(() => checkGlobalBatchEvidence(events()+'\n'+diagnostic, JSON.stringify(report()), JSON.stringify(boot())))

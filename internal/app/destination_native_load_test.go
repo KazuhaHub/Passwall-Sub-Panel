@@ -555,22 +555,32 @@ func nativeDestinationLoad(t *testing.T, workload nativeLoadWorkload) {
 }
 
 func nativeLoadBlockedRequest(ctx context.Context, inbound int, header []byte, sent func()) bool {
+	return nativeLoadBlockedRequestFailure(ctx, inbound, header, sent) == nil
+}
+
+func nativeLoadBlockedRequestFailure(ctx context.Context, inbound int, header []byte, sent func()) error {
 	connection, err := (&net.Dialer{Timeout: 3 * time.Second}).DialContext(ctx, "tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(inbound)))
 	if err != nil {
-		return false
+		return err
 	}
 	defer connection.Close()
 	_ = connection.SetDeadline(time.Now().Add(5 * time.Second))
 	n, err := connection.Write(header)
-	if err != nil || n != len(header) {
-		return false
+	if err != nil {
+		return err
+	}
+	if n != len(header) {
+		return io.ErrShortWrite
 	}
 	sent()
 	data, err := io.ReadAll(io.LimitReader(connection, 4))
 	if err != nil && !errors.Is(err, syscall.ECONNRESET) {
-		return false
+		return err
 	}
-	return len(data) == 0 || len(data) == 2 && data[0] == 0 && data[1] == 0
+	if len(data) == 0 || len(data) == 2 && data[0] == 0 && data[1] == 0 {
+		return nil
+	}
+	return errors.New("unexpected blocked response")
 }
 
 func nativeLoadSampler(t *testing.T, agent, core int, binary string, api int, live func()) func() nativeLoadSample {

@@ -10,6 +10,7 @@ test('global fixture preflight executes lifecycle, cache and SQL boundaries with
   assert.match(body, /-count=1 -timeout=4m -tags destination_acceptance/)
   for (const root of ['AuditStartPreservesRealQueueAndPermissionChanges', 'PublicCoreCopyExcludesStateAndRejectsUntrustedFiles', 'StoragePauseKeepsControlAndOriginalSQLTransactions', 'TransportKeepsProductionAuthenticationAndExactBodies']) assert(body.includes(root))
   assert(body.includes('MixedProbePreservesRecoveryFailures'))
+  assert(body.includes('RequestFailureFactsPreserveErrorsAndBlockedReplies'))
   const gate = workflow.slice(workflow.indexOf('  sqlite:')).split(/\r?\n(?=  postgres:)/)[0]
   assert.match(gate, /needs: \[race-shard, app-race-shard, global-fixture\]/)
   assert(gate.includes('needs.global-fixture.result') && gate.includes('if: always()'))
