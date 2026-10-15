@@ -3,7 +3,7 @@ import { test } from 'node:test'
 import { readFileSync } from 'node:fs'
 
 const good = () => ({
-  schema_version: 1, candidate: '96693d3c128d82f0d154774f593c497a276a1105', core_version: '26.6.27', cpu_ticks_per_second: 100,
+  schema_version: 1, candidate: '0614879497263defbda2bbcad6cdc81b3cdfd483', core_version: '26.6.27', cpu_ticks_per_second: 100,
   phases: ['single_rule', 'fifty_rules'].map((name, i) => ({
     name, rules: i ? 50 : 1, duration_ms: 300000, attempted: 330000, delivered: 330000, blocked: 330000,
     transport_failures: 0, target_requests: 0, control_successes: 300, heartbeat_advances: 100,
@@ -73,7 +73,7 @@ test('load evidence retains categorized losses without claiming best-effort tele
 
 test('real load job pins production candidate, complete duration and both independent evidence files', () => {
   const workflow = readFileSync(new URL('../.github/workflows/destination-load.yml', import.meta.url), 'utf8')
-  for (const required of ['96693d3c128d82f0d154774f593c497a276a1105', 'ubuntu-24.04', 'branches: [main]', 'go-version-file: go.mod', 'GOTOOLCHAIN="$toolchain"', 'PSP_NATIVE_DB_KIND=sqlite', 'PSP_NATIVE_CORE_VERSION=26.6.27', 'PSP_NATIVE_LOAD_METRICS', 'destination-load-tests.json', 'destination-load-metrics.json', 'deploy/destination-load.mjs', 'TestNativeDestinationWebhookLoad', 'TestNativeLoadProcCountersRequireBirthAndExactCPUFields', 'set -euo pipefail']) assert(workflow.includes(required), required)
+  for (const required of ['0614879497263defbda2bbcad6cdc81b3cdfd483', 'ubuntu-24.04', 'branches: [main]', 'go-version-file: go.mod', 'GOTOOLCHAIN="$toolchain"', 'PSP_NATIVE_DB_KIND=sqlite', 'PSP_NATIVE_CORE_VERSION=26.6.27', 'PSP_NATIVE_LOAD_METRICS', 'destination-load-tests.json', 'destination-load-metrics.json', 'deploy/destination-load.mjs', 'TestNativeDestinationWebhookLoad', 'TestNativeLoadProcCountersRequireBirthAndExactCPUFields', 'set -euo pipefail']) assert(workflow.includes(required), required)
   assert(!workflow.includes('continue-on-error'))
   assert(/uses: actions\/setup-go@v7\r?\n\s+env:\r?\n\s+GOTOOLCHAIN: auto/.test(workflow))
   assert(workflow.includes('test "$(go env GOVERSION)" = "$build_toolchain"'))

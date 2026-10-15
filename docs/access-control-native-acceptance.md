@@ -1,5 +1,56 @@
 # Native destination traffic acceptance
 
+## Current full-module candidate
+
+Node is now pinned to `0614879497263defbda2bbcad6cdc81b3cdfd483` for the
+full-module jobs. Earlier references below describe preserved checkpoints;
+baseline, integrated and guarded candidates remain independent.
+
+The candidate directly calls the read-only Xray QueryStats/GetUsersStats APIs
+for the three audited versions, using the existing gRPC dependency and minimal
+protobuf messages without linking the core implementation. Unverified versions
+and explicit command runners retain the CLI path. Current complete roster,
+counter/IP parsing, epoch, loopback restriction, per-request timeouts and the
+4MiB wire/16MiB JSON limits remain. Every connection closes; the core identity
+is checked again after reading. There is no counter or result cache. A Windows
+clock-resolution regression now models a bounded 25ms first request while still
+requiring cancellation, independent second-request deadlines and close cleanup.
+
+[Node CI](https://github.com/KazuhaHub/Passwall-Node/actions/runs/38774497166)
+completed with all 16 jobs successful. Independent source/run-bound original
+evidence confirms 36 Windows packages and 647 roots: 599 passed, 48 conditional
+skips. All seven new wire roots and three prior Processor/prepared-SQL roots
+each ran and passed once; three process rollback cases each passed 10 replays.
+Conditional skips do not replace dedicated UI/VM or N0-S acceptance.
+[Real-core acceptance](https://github.com/KazuhaHub/Passwall-Node/actions/runs/38774502218)
+passed on amd64 and arm64; each original report confirms 32 required cases and
+four packages, with no failures, skips or cache hits.
+
+[Paired real-core verification](https://github.com/KazuhaHub/Passwall-Node/actions/runs/38774496419)
+completed both jobs. Three source/run-bound originals independently confirm all
+11 required test entries ran and passed once, without failures/skips/cache.
+Three official versions each exercise plain/TLS transport: six scenarios, each
+with 200 clients, two listeners, live non-excluded IPv4/IPv6 sources and positive
+bidirectional user traffic. Complete counters and epoch match the CLI. TLS
+listeners count both directions; plain listener downlink remains zero exactly
+as reported by the upstream CLI. No count is invented to satisfy a predicate.
+Each scenario compares 20 CLI and 20 API rounds on the same core. Idle wall time
+per round is 30.41–31.70ms for CLI versus 3.42–3.70ms for API; parent plus CLI
+CPU is 40.06–42.64ms versus API parent CPU 4.22–4.74ms, with zero API child CPU.
+Parent CPU includes probes/assertions. Core CPU, full control handling and the
+complete fleet are outside this measurement; it does not prove global pressure.
+
+All 44 execution/verification source pins are updated together. Historical
+candidates and evidence remain. The 266 deploy/compatibility JS tests pass;
+local Go acceptance tests compile, tagged whole-module vet and the full build
+pass. PSP CI, the 48-report/861-case matrix and the original 65-owner/200-user
+three-database pressure suite must still execute for this candidate. Queue,
+freshness, timeout and completion predicates are unchanged. Real 24-hour and
+26/48/72-hour acceptance, dedicated environments, formal review and approved
+publication remain incomplete.
+
+## Preserved checkpoints and acceptance contract
+
 The `Native destination traffic acceptance` workflow runs a real Node daemon
 against PSP's production `Build` router, TLS sync endpoint, administrator HTTP
 routes, SQLite stores, and destination audit worker. It never fabricates a Node

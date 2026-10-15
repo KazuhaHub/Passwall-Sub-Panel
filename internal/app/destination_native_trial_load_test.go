@@ -64,7 +64,7 @@ func nativeTrialLoad(t *testing.T, f destinationPolicyFixture, client *http.Clie
 			t.Logf("native diagnostic: trial_setup_%s=false", stage)
 		}
 	}()
-	m := nativeTrialMetrics{Schema: 1, Candidate: "96693d3c128d82f0d154774f593c497a276a1105", CoreVersion: "26.6.27", TrialWindows: make([]uint64, 300), BlockWindows: make([]uint64, 300), UserDeliveries: make([]uint64, 200)}
+	m := nativeTrialMetrics{Schema: 1, Candidate: "0614879497263defbda2bbcad6cdc81b3cdfd483", CoreVersion: "26.6.27", TrialWindows: make([]uint64, 300), BlockWindows: make([]uint64, 300), UserDeliveries: make([]uint64, 200)}
 	t.Cleanup(func() {
 		data, err := json.Marshal(m)
 		nativeMust(t, err, "encode bounded trial load evidence")
