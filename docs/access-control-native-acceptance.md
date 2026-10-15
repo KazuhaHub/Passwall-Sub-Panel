@@ -2,9 +2,66 @@
 
 ## Current full-module candidate
 
-Node is now pinned to `0614879497263defbda2bbcad6cdc81b3cdfd483` for the
-full-module jobs. Earlier references below describe preserved checkpoints;
-baseline, integrated and guarded candidates remain independent.
+The next full-module candidate is Node
+`b35b29780406e4e7272c7b87f80ed2fe2d69bc42`. It retains the direct Stats wire
+contract below and reuses SQL programs for current counter reads and writes.
+The fixed catalog grows from seven to ten programs, bound once per transaction.
+The UPDATE SQL, parameters, complete sample, current quota/epoch checks, original
+single connection and all-or-nothing client/listener transaction remain.
+Nothing caches rows or skips unchanged observations or their timestamps.
+
+New regressions cover intervening quota/counter writes, widest epoch resets,
+independent client/listener bindings, owned scan results, late malformed-JSON
+scan rollback, cancellation and recovery of the next complete sample. The
+earlier `ce9565d` CI failed because the fault fixture attempted a TEXT write to
+a strict BLOB column; the final fixture corrupts the second client's JSON so
+the real late-scan rollback is exercised without bypassing the schema.
+
+[Real observation profiling](https://github.com/KazuhaHub/Passwall-Node/actions/runs/38782590591)
+completed all three jobs. Two source/run-bound artifacts independently confirm
+12 required test entries, six paired official-core plain/TLS scenarios and
+200 real Observe/SQLite rounds with 200 clients. Against the earlier diagnostic
+`494a164`, observed per-round total parent CPU is 27.64ms versus 6.04ms;
+ApplyCounterBatch CPU is 23.20ms versus 3.34ms. Wall time is 21.93ms versus
+5.32ms overall and 18.36ms versus 3.17ms for persistence. Allocations are about
+1.35MB versus 1.40MB per round. These are independent hosted runs, not a strict
+paired before/after experiment. Probes are included; core CPU, PSP and the
+complete fleet are excluded. Current-core identity and coherent durable
+client/listener counters are checked after every measured sequence.
+[Dual-architecture core acceptance](https://github.com/KazuhaHub/Passwall-Node/actions/runs/38782597952)
+passed; each original confirms 32 required cases and four packages, without
+failures, skips or cache.
+[Full Node CI](https://github.com/KazuhaHub/Passwall-Node/actions/runs/38782592553)
+completed all 16 jobs. Independent originals confirm 36 Windows packages and
+649 roots: 601 passes, 48 conditional skips. Both new counter roots and ten
+prior required roots each ran and passed once; three process rollback cases
+each passed ten replays. Conditional skips do not replace dedicated acceptance.
+
+PSP `2b89659a`, using Node `0614879`, completed
+[all 18 CI jobs](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/38775803376)
+and [all 49 native jobs](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/38776596932).
+Independent originals confirm 214 App roots and 48 reports/861 required cases.
+Its ordinary three-database global pressure run `38776601903` failed in setup:
+SQLite reached 184 users before the 20-minute limit; MySQL and PostgreSQL
+reached 200 but failed stale full-snapshot readiness. No pressure traffic ran.
+Diagnostic run `38779417367` also failed all three databases. PostgreSQL ran
+121379ms of traffic but failed drain accounting (owner 2 block: 1091 accounted
+of 1200). SQLite's timed-out top-level metrics remain incomplete at stage 3;
+closed drain diagnostics prove 123079ms of traffic and 1054/1192 accounted for
+owner 1 block. Do not interpret its top-level zero duration as no traffic.
+MySQL failed stale readiness. No root PASS or completion flag was obtained.
+
+The next PSP run additionally retains the current lane's keys/pending/drop
+counts before ledger equality fails, so outstanding backlog can be distinguished
+from unexplained loss. Original equality, drain time, 65-owner/200-user scale,
+freshness and all completion gates remain unchanged. Historical baseline,
+integrated and guarded candidates remain independent.
+
+## Validated direct-telemetry checkpoint
+
+PSP `2b89659a` pins Node
+`0614879497263defbda2bbcad6cdc81b3cdfd483` for the full-module jobs. Earlier
+references below describe preserved checkpoints.
 
 The candidate directly calls the read-only Xray QueryStats/GetUsersStats APIs
 for the three audited versions, using the existing gRPC dependency and minimal
@@ -43,9 +100,10 @@ complete fleet are outside this measurement; it does not prove global pressure.
 All 44 execution/verification source pins are updated together. Historical
 candidates and evidence remain. The 266 deploy/compatibility JS tests pass;
 local Go acceptance tests compile, tagged whole-module vet and the full build
-pass. PSP CI, the 48-report/861-case matrix and the original 65-owner/200-user
-three-database pressure suite must still execute for this candidate. Queue,
-freshness, timeout and completion predicates are unchanged. Real 24-hour and
+pass. PSP CI and the 48-report/861-case matrix subsequently passed at
+`2b89659a`; its original 65-owner/200-user three-database pressure suite failed
+as recorded above. Queue, freshness, timeout and completion predicates remain.
+The newly pinned full-module stack still needs its own PSP runs. Real 24-hour and
 26/48/72-hour acceptance, dedicated environments, formal review and approved
 publication remain incomplete.
 

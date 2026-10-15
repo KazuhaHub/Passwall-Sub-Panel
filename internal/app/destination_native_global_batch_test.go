@@ -82,7 +82,7 @@ func TestNativeDestinationGlobalBatchPressure(t *testing.T) {
 	if e1 != nil || e2 != nil || root != dir || filepath.Base(evidence) != "destination-global-batch-metrics.json" {
 		t.Fatal("global batch evidence must belong to the dedicated hosted job")
 	}
-	m := nativeGlobalBatchMetrics{Schema: 1, Candidate: "0614879497263defbda2bbcad6cdc81b3cdfd483", Core: "26.6.27", Details: []nativeGlobalBatchOwner{}, PSP: []nativeMixedPSPSample{}, Histograms: []nativeLatencyHistogram{}}
+	m := nativeGlobalBatchMetrics{Schema: 1, Candidate: "b35b29780406e4e7272c7b87f80ed2fe2d69bc42", Core: "26.6.27", Details: []nativeGlobalBatchOwner{}, PSP: []nativeMixedPSPSample{}, Histograms: []nativeLatencyHistogram{}}
 	writeMetrics := func() {
 		body, err := json.Marshal(m)
 		nativeMust(t, err, "encode closed numeric global batch evidence")
@@ -570,6 +570,19 @@ func TestNativeDestinationGlobalBatchPressure(t *testing.T) {
 			for i, kind := range nativeMixedKinds {
 				ledger := nativeMixedLedger{Kind: kind, Expected: row.Delivered[i], Losses: []nativeLoadLoss{}}
 				drainFacts["lane"] = uint64(i + 1)
+				// Preserve the same lane's pending state even when ledger equality
+				// fails first. Otherwise a backlog and an unexplained loss have
+				// indistinguishable diagnostics; neither is accepted as drained.
+				lane := reading.Lanes[i]
+				delete(drainFacts, "node_keys")
+				delete(drainFacts, "node_pending")
+				if lane.Keys >= 0 {
+					drainFacts["node_keys"] = uint64(lane.Keys)
+				}
+				if lane.Pending >= 0 {
+					drainFacts["node_pending"] = uint64(lane.Pending)
+				}
+				drainFacts["node_dropped"], drainFacts["node_unmatched"] = lane.Dropped, lane.Unmatched
 				if i == 3 {
 					ledger.Expected = row.Ingress.AllowedReceived
 					drainReason = "usage_read"

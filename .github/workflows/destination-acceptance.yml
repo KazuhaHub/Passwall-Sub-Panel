@@ -59,10 +59,10 @@ jobs:
           - {engine: xray, core: '26.7.28', candidate: integrated, node: 'e2c9dfbfe934d4a61fda84b0a80b4f1cb5dbc719'}
           - {engine: xray, core: '26.9.9', candidate: integrated, node: 'e2c9dfbfe934d4a61fda84b0a80b4f1cb5dbc719'}
           - {engine: sing-box, core: '1.14.0', candidate: integrated, node: 'e2c9dfbfe934d4a61fda84b0a80b4f1cb5dbc719'}
-          - {engine: xray, core: '26.6.27', candidate: module, node: '0614879497263defbda2bbcad6cdc81b3cdfd483'}
-          - {engine: xray, core: '26.7.28', candidate: module, node: '0614879497263defbda2bbcad6cdc81b3cdfd483'}
-          - {engine: xray, core: '26.9.9', candidate: module, node: '0614879497263defbda2bbcad6cdc81b3cdfd483'}
-          - {engine: sing-box, core: '1.14.0', candidate: module, node: '0614879497263defbda2bbcad6cdc81b3cdfd483'}
+          - {engine: xray, core: '26.6.27', candidate: module, node: 'b35b29780406e4e7272c7b87f80ed2fe2d69bc42'}
+          - {engine: xray, core: '26.7.28', candidate: module, node: 'b35b29780406e4e7272c7b87f80ed2fe2d69bc42'}
+          - {engine: xray, core: '26.9.9', candidate: module, node: 'b35b29780406e4e7272c7b87f80ed2fe2d69bc42'}
+          - {engine: sing-box, core: '1.14.0', candidate: module, node: 'b35b29780406e4e7272c7b87f80ed2fe2d69bc42'}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
@@ -192,13 +192,13 @@ jobs:
       - uses: actions/checkout@v7
         with:
           repository: KazuhaHub/Passwall-Node
-          ref: '0614879497263defbda2bbcad6cdc81b3cdfd483'
+          ref: 'b35b29780406e4e7272c7b87f80ed2fe2d69bc42'
           path: node-candidate
           persist-credentials: false
       - name: Build immutable full-module Node candidate with its own compiler
         run: |
           set -euo pipefail
-          test "$(git -C node-candidate rev-parse HEAD)" = '0614879497263defbda2bbcad6cdc81b3cdfd483'
+          test "$(git -C node-candidate rev-parse HEAD)" = 'b35b29780406e4e7272c7b87f80ed2fe2d69bc42'
           test -z "$(git -C node-candidate status --porcelain)"
           cd node-candidate
           node_toolchain=$(awk '$1 == "toolchain" { print $2 }' go.mod)
@@ -447,7 +447,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           repository: KazuhaHub/Passwall-Node
-          ref: ${{ matrix.candidate == 'module' && '0614879497263defbda2bbcad6cdc81b3cdfd483' || '63c60f6d5e8cd093bbaa8385f5b514dbe2f40390' }}
+          ref: ${{ matrix.candidate == 'module' && 'b35b29780406e4e7272c7b87f80ed2fe2d69bc42' || '63c60f6d5e8cd093bbaa8385f5b514dbe2f40390' }}
           path: mixed-node
           persist-credentials: false
       - name: Build released sources with their own preferred compilers
@@ -455,7 +455,7 @@ jobs:
           set -euo pipefail
           test "$(git -C legacy-panel rev-parse HEAD)" = '0ae05e1e40170c030acd23cdf637310b740b50a6'
           test "$(git -C legacy-node rev-parse HEAD)" = '8e5e3db72219a8db9081a372722abb1529d22ecd'
-          test "$(git -C mixed-node rev-parse HEAD)" = '${{ matrix.candidate == 'module' && '0614879497263defbda2bbcad6cdc81b3cdfd483' || '63c60f6d5e8cd093bbaa8385f5b514dbe2f40390' }}'
+          test "$(git -C mixed-node rev-parse HEAD)" = '${{ matrix.candidate == 'module' && 'b35b29780406e4e7272c7b87f80ed2fe2d69bc42' || '63c60f6d5e8cd093bbaa8385f5b514dbe2f40390' }}'
           test -z "$(git -C legacy-panel status --porcelain)"
           test -z "$(git -C legacy-node status --porcelain)"
           test -z "$(git -C mixed-node status --porcelain)"
@@ -578,14 +578,14 @@ jobs:
       - uses: actions/checkout@v7
         with:
           repository: KazuhaHub/Passwall-Node
-          ref: '0614879497263defbda2bbcad6cdc81b3cdfd483'
+          ref: 'b35b29780406e4e7272c7b87f80ed2fe2d69bc42'
           path: fleet-new-source
           persist-credentials: false
       - name: Build immutable fleet candidates with their own preferred compilers
         run: |
           set -euo pipefail
           test "$(git -C fleet-old-source rev-parse HEAD)" = '8e5e3db72219a8db9081a372722abb1529d22ecd'
-          test "$(git -C fleet-new-source rev-parse HEAD)" = '0614879497263defbda2bbcad6cdc81b3cdfd483'
+          test "$(git -C fleet-new-source rev-parse HEAD)" = 'b35b29780406e4e7272c7b87f80ed2fe2d69bc42'
           for cohort in old new; do
             source="fleet-${cohort}-source"
             test -z "$(git -C "$source" status --porcelain)"

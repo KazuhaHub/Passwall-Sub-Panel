@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
 import { checkDestinationLoadResults, isSafeDestinationDiagnostic, loadNames } from './destination-acceptance.mjs'
 
-const candidate = '0614879497263defbda2bbcad6cdc81b3cdfd483'
+const candidate = 'b35b29780406e4e7272c7b87f80ed2fe2d69bc42'
 const require = condition => { if (!condition) throw new Error('Native load evidence failed; private content withheld') }
 const fields = (object, names) => require(object && typeof object === 'object' && !Array.isArray(object) && Object.keys(object).sort().join() === [...names].sort().join())
 const count = value => Number.isSafeInteger(value) && value >= 0
