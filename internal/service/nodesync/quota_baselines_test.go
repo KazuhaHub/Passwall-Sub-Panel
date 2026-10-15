@@ -3,6 +3,7 @@ package nodesync
 import (
 	"math"
 	"reflect"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -21,10 +22,17 @@ func TestQuotaBaselinesKeepCurrentFullReportsAndKnownClosedCounters(t *testing.T
 		{Key: protocol.ClientKey("invalid"), UpBytes: 999},
 		{Key: protocol.NewClientKey(2), UpBytes: 0, DownBytes: 0},
 	}}
-	before := cloneReport(current)
+	before := current
+	before.Clients = slices.Clone(current.Clients)
+	for i := range before.Clients {
+		before.Clients[i].LiveIPs = slices.Clone(current.Clients[i].LiveIPs)
+	}
 	got, full := s.quotaBaselines("owned", current, now, 1)
-	if !full || !reflect.DeepEqual(got, map[int64]int64{1: 30, 2: 0, 3: math.MaxInt64, 4: 30}) || !reflect.DeepEqual(before, current) {
+	if !full || !reflect.DeepEqual(got, map[int64]int64{1: 30, 2: 0, 3: math.MaxInt64, 4: 30}) {
 		t.Fatal("quota baseline changed known closed, duplicate, invalid or saturated counters")
+	}
+	if !reflect.DeepEqual(before, current) {
+		t.Fatal("quota baseline mutated its current full report")
 	}
 	got[1] = 999
 	if next, _ := s.quotaBaselines("owned", current, now, 1); next[1] != 30 {
