@@ -1812,3 +1812,28 @@ https://github.com/torvalds/linux/blob/v6.8/net/ipv6/addrconf.c 。这一异步
 前缀形式、持续错误超时、取消及读取失败回归，显式纳入完整CI、原生
 矩阵前置与全局压力前置。测试编译、acceptance vet和完整构建本地通过；
 实际执行与路由稳定性须同源托管验证。
+
+`a80b32ce` 完整CI38662626817的18项通过；两项路由等待回归实际
+RUN/PASS（0.18s/0.03s），212个App编译入口三份原件各RUN1/PASS1，
+原四分钟race分片无失败/跳过/缓存；前端类型/构建、4项烟测、2507单元
+及既有1条件跳过均通过。完整原生矩阵38663624122另已启动，结果待核验。
+
+`0637a7f7` 三数据库压力38661257070原件全部核验：SQLite139用户停在
+stage1 membership；MySQL/PostgreSQL200用户停在stage2 receipt并记录
+streams_inbound_offline。三库均20分钟套件超时、无流量、根PASS或四类
+完成标志。SQLite compile_unavailable1，MySQL2；PostgreSQL缺失不能
+填零。MySQL最后HTTP200/4150ms、完成距观测3724ms、无在途、父进程存活；
+PostgreSQL最后HTTP200/4279ms、完成距观测3604ms、1请求在途、父进程存活。
+窄身份复制没有解决整体准备/同步门槛。原件、元数据和三份日志已保存。
+
+进一步减少回执事务中的固定往返：原RecordAppliedBatch持有owner及
+stream锁、验证整个1–3项向量后，仍逐stream写3条UPDATE。将stream写
+合为一条有界CASE UPDATE，agent心跳仍在同一事务中单独更新；按owner
+及已锁行ID限制范围。各stream的epoch/version/ETag/pending分别绑定，
+共用真实接收时间。CASE的ELSE保留列类型，兼容PostgreSQL数字/NULL
+时钟；不合并owner事务、不跳过当前读或校验、不改期望文档。返回值
+继续是输入顺序的写前issuer文档，任何写失败仍整体回滚且不返回部分结果。
+新增两项/单项向量、倒序输入、另一owner和省略stream不变、NULL pending
+生成与清除、含引号历史ETag保持绑定参数等回归，原标量等价与失败回滚
+回归保留并检查单次stream写。本地测试编译、相关vet和全项目构建通过；
+实际三方言执行与准备/压力效果仍待同源托管验证。
