@@ -95,6 +95,20 @@ private mode-0600 files; only static function summaries are printed. The old
 membership profile still starts after 50 members. Ordinary acceptance enables
 neither profiler and retains the same original deadlines.
 
+Receipt profile `38791956513` failed acceptance in all three databases. Its
+PostgreSQL receipt window sampled 33.09s of parent CPU across 59.99s wall time;
+the complete current-user cursor accounted for about 30% of sampled CPU. The
+current cursor experiment binds scalar destinations once per query and clears
+the row before every scan, so nullable pointers and decoded JSON remain owned
+by each returned account. PostgreSQL on Go 1.27 uses a value sql.Scanner adapter
+which delegates to the original database/sql ConvertAssign conversion; existing
+SQL scanners are left intact and called once, including their failure paths.
+This avoids pgx's repeated pointer-level classification without changing SQL,
+selected fields, ordering, ID chunks, resolution, freshness or caching. The
+adapter is build-tagged: Go 1.26 and other SQL dialects retain their original
+destinations. Both preferred and Go 1.26 SQLstore test binaries compile locally;
+actual tests and any performance improvement still require hosted evidence.
+
 For fallback-rejection diagnosis, the native workflow accepts
 `suite=mysql-module-xray-26.9.9`. It runs the unchanged complete MySQL/Xray
 26.9.9 full-module traffic driver, including its entire original scenario

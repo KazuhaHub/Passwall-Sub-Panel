@@ -34,22 +34,25 @@ func loadCurrentUserRows(query *gorm.DB) ([]*domain.User, error) {
 	}
 	defer rows.Close()
 	var users []*domain.User
+	var row userRow
+	var created, updated sql.NullTime
+	destinations := currentSQLDestinations(query.Dialector.Name(), []any{
+		&row.ID, &row.UPN, &row.SSOProvider, &row.SSOSubject, &row.Email, &row.PasswordHash,
+		&row.Role, &row.SubToken, &row.UUID, &row.GroupID, &row.EnabledRuleSets, &row.PersonalRules,
+		&row.ExpireAt, &row.TrafficLimitBytes, &row.IPLimit, &row.DeviceLimit, &row.TrafficResetPeriod,
+		&row.TrafficPeriodStart, &row.LifetimeUpBytes, &row.LifetimeDownBytes, &row.LifetimeTotalBytes,
+		&row.PeriodBaselineBytes, &row.LifetimeBaselineAt, &row.DisplayName, &row.Remark, &row.Enabled,
+		&row.AutoDisabledReason, &row.DisableDetail, &row.ServiceDisabledReason, &row.ServiceDisableDetail, &row.ServiceDisabledAt,
+		&row.SelfRegistered, &row.BlockViolationCount, &row.LastBlockViolationAt, &row.EmergencyUsedCount,
+		&row.EmergencyUntil, &row.EmergencyBaselineBytes, &row.TokenVersion, &row.TOTPSecret, &row.TOTPEnabled,
+		&row.RecoveryCodes, &row.PermissionOverrides, &row.LastOnlineAt, &created, &updated,
+	})
 	for rows.Next() {
-		// Fresh ownership matters: returned override/time pointers and decoded
-		// JSON collections must never alias the next row's scan destinations.
-		var row userRow
-		var created, updated sql.NullTime
-		if err := rows.Scan(
-			&row.ID, &row.UPN, &row.SSOProvider, &row.SSOSubject, &row.Email, &row.PasswordHash,
-			&row.Role, &row.SubToken, &row.UUID, &row.GroupID, &row.EnabledRuleSets, &row.PersonalRules,
-			&row.ExpireAt, &row.TrafficLimitBytes, &row.IPLimit, &row.DeviceLimit, &row.TrafficResetPeriod,
-			&row.TrafficPeriodStart, &row.LifetimeUpBytes, &row.LifetimeDownBytes, &row.LifetimeTotalBytes,
-			&row.PeriodBaselineBytes, &row.LifetimeBaselineAt, &row.DisplayName, &row.Remark, &row.Enabled,
-			&row.AutoDisabledReason, &row.DisableDetail, &row.ServiceDisabledReason, &row.ServiceDisableDetail, &row.ServiceDisabledAt,
-			&row.SelfRegistered, &row.BlockViolationCount, &row.LastBlockViolationAt, &row.EmergencyUsedCount,
-			&row.EmergencyUntil, &row.EmergencyBaselineBytes, &row.TokenVersion, &row.TOTPSecret, &row.TOTPEnabled,
-			&row.RecoveryCodes, &row.PermissionOverrides, &row.LastOnlineAt, &created, &updated,
-		); err != nil {
+		// Reuse the destination slots, not their values. Clearing before every
+		// scan makes nullable pointers and JSON allocate independently; otherwise
+		// a following row could mutate an account already returned by toDomain.
+		row, created, updated = userRow{}, sql.NullTime{}, sql.NullTime{}
+		if err := rows.Scan(destinations...); err != nil {
 			return nil, err
 		}
 		row.CreatedAt, row.UpdatedAt = created.Time, updated.Time
