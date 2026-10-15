@@ -53,7 +53,7 @@ func TestCurrentUserCursorMatchesCompleteModelsAndResolvedLimits(t *testing.T) {
 	}
 	// Historic scalar NULLs, pointer NULLs and empty JSON must retain the old
 	// model mapping; NULL overrides still inherit instead of becoming zero.
-	if err := db.Model(&userRow{}).Where("id = ?", ids[1]).Updates(map[string]any{
+	if err := db.Model(&userRow{}).Where("id = ?", ids[1]).UpdateColumns(map[string]any{
 		"email": nil, "password_hash": nil, "personal_rules": nil, "traffic_reset_period": nil,
 		"display_name": nil, "remark": nil, "auto_disabled_reason": nil, "disable_detail": nil, "service_disable_detail": nil,
 		"lifetime_up_bytes": nil, "lifetime_down_bytes": nil, "lifetime_total_bytes": nil, "period_baseline_bytes": nil,
