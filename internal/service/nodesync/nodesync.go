@@ -1320,14 +1320,8 @@ func (s *Service) pendingUsage(clients map[int64]*domain.PSPClientAccounting, ag
 // for both quota accounting and coverage. The copy belongs only to this call;
 // no report snapshot is cached across syncs or shared with stored mutable data.
 func (s *Service) accountFleet(clients []domain.PSPClientAccounting, agents []*domain.NodeAgent, fullFreshnessSeconds int, now time.Time) (map[int64]int64, nodeprotocol.SegmentCounts, int64) {
-	clientByID := make(map[int64]*domain.PSPClientAccounting, len(clients))
-	for i := range clients {
-		clientByID[clients[i].ID] = &clients[i]
-	}
 	reports := s.fleetCounterReportsForAgents(agents)
-	pending := s.pendingUsageFromReports(clientByID, agents, reports)
-	coverage, oldest := aggregateCoverageFromReports(clients, agents, reports, fullFreshnessSeconds, now)
-	return pending, coverage, oldest
+	return s.accountFleetFromReports(clients, agents, reports, fullFreshnessSeconds, now)
 }
 
 func (s *Service) fleetCounterReportsForAgents(agents []*domain.NodeAgent) map[string]fleetCounterReport {
