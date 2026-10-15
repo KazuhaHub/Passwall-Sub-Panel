@@ -160,7 +160,7 @@ func nativeIdleCost(t *testing.T, f destinationPolicyFixture, client *http.Clien
 		TraceStage    uint64            `json:"trace_stage"`
 		TraceError    uint64            `json:"trace_error"`
 		Cycles        []nativeIdleCycle `json:"cycles"`
-	}{Schema: 2, Candidate: "184f4e23f0f3d72f8492432184685fea4ec4967c", Core: "26.6.27", Ticks: ticks, Cycles: []nativeIdleCycle{}}
+	}{Schema: 2, Candidate: "96693d3c128d82f0d154774f593c497a276a1105", Core: "26.6.27", Ticks: ticks, Cycles: []nativeIdleCycle{}}
 	t.Cleanup(func() {
 		data, err := json.Marshal(m)
 		nativeMust(t, err, "encode numeric idle cost evidence")

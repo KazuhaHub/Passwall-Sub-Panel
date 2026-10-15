@@ -258,7 +258,7 @@ func nativeMixedHosts(t *testing.T, nonce, address, observeAddress, controlAddre
 
 func nativeMixedLoad(t *testing.T, f destinationPolicyFixture, client *http.Client, endpoint, token string, parent int, dataDir string, inbound int, address string, targetPort int, nonce string, reached *atomic.Int64, controlAddress string, controlPort int, controlNonce, evidence string, output func() string, probe *nativeMixedProbe) {
 	a := f.a
-	m := nativeMixedMetrics{Schema: 2, Candidate: "184f4e23f0f3d72f8492432184685fea4ec4967c", CoreVersion: "26.6.27", Partition: 75000, Owners: 1, Users: make([]uint64, 200), Node: []nativeMixedNodeSample{}, PSP: []nativeMixedPSPSample{}, Ledgers: []nativeMixedLedger{}, Histograms: []nativeLatencyHistogram{}}
+	m := nativeMixedMetrics{Schema: 2, Candidate: "96693d3c128d82f0d154774f593c497a276a1105", CoreVersion: "26.6.27", Partition: 75000, Owners: 1, Users: make([]uint64, 200), Node: []nativeMixedNodeSample{}, PSP: []nativeMixedPSPSample{}, Ledgers: []nativeMixedLedger{}, Histograms: []nativeLatencyHistogram{}}
 	m.Database = a.cfg.DBKind() // buildNativeDestinationPolicyFixture verified the actual owned server.
 	sql := func(query string) string { return nativeDestinationCountSQL(m.Database, query) }
 	t.Cleanup(func() {

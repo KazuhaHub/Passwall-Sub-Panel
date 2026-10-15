@@ -82,7 +82,7 @@ func TestNativeDestinationGlobalBatchPressure(t *testing.T) {
 	if e1 != nil || e2 != nil || root != dir || filepath.Base(evidence) != "destination-global-batch-metrics.json" {
 		t.Fatal("global batch evidence must belong to the dedicated hosted job")
 	}
-	m := nativeGlobalBatchMetrics{Schema: 1, Candidate: "184f4e23f0f3d72f8492432184685fea4ec4967c", Core: "26.6.27", Details: []nativeGlobalBatchOwner{}, PSP: []nativeMixedPSPSample{}, Histograms: []nativeLatencyHistogram{}}
+	m := nativeGlobalBatchMetrics{Schema: 1, Candidate: "96693d3c128d82f0d154774f593c497a276a1105", Core: "26.6.27", Details: []nativeGlobalBatchOwner{}, PSP: []nativeMixedPSPSample{}, Histograms: []nativeLatencyHistogram{}}
 	writeMetrics := func() {
 		body, err := json.Marshal(m)
 		nativeMust(t, err, "encode closed numeric global batch evidence")
