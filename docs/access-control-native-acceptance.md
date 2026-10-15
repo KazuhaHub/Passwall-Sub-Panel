@@ -59,6 +59,16 @@ integrated and guarded candidates remain independent.
 
 ## Validated direct-telemetry checkpoint
 
+For fallback-rejection diagnosis, the native workflow accepts
+`suite=mysql-module-xray-26.9.9`. It runs the unchanged complete MySQL/Xray
+26.9.9 full-module traffic driver, including its entire original scenario
+sequence. Other producers and the complete-matrix aggregate are skipped;
+this single report cannot prove the full 48-report matrix. Default, empty and
+ordinary push/PR selections still run all original producers. An unknown
+manual selection fails the full-matrix selection guard. Failure evidence adds
+only closed fallback phases, bounded HTTP/error codes and MySQL error numbers;
+no error strings, SQL, paths, routes, credentials or account values are exported.
+
 PSP `2b89659a` pins Node
 `0614879497263defbda2bbcad6cdc81b3cdfd483` for the full-module jobs. Earlier
 references below describe preserved checkpoints.

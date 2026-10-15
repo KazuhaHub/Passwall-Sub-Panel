@@ -349,10 +349,20 @@ const diagnostics = Object.freeze({
 function parseEvent(line) {
   try { return JSON.parse(line) } catch { throw new Error('Malformed test execution stream; content withheld') }
 }
+const fallbackStages = new Set(['collection_off', 'compatible_listener', 'singbox_selection', 'policy_create', 'original_publication', 'original_policy', 'original_traffic', 'partitioned_mutation', 'mutation_publication', 'xray_selection', 'empty_recovery', 'recovered_traffic', 'roster_revocation', 'revoked_traffic', 'psp_shutdown', 'psp_reopen', 'psp_restart_receipt', 'psp_restart_traffic', 'manual_retry', 'restore_fixture'])
+function isSafeFallbackFact(name, value) {
+  return Number.isInteger(value) && (name === 'error_kind' ? value >= 1 && value <= 4 : name === 'mysql_code' && value >= 0 && value <= 65535)
+}
 export function sanitizeDestinationResults(input) {
   return input.split(/\r?\n/).filter(line => line.trim()).map(line => {
     const event = parseEvent(line)
     if (event.Action === 'output') {
+      const fallbackStage = typeof event.Output === 'string' && /native fallback stage: ([a-z_]+)(?:\r?\n|$)/.exec(event.Output)
+      if (fallbackStage && fallbackStages.has(fallbackStage[1])) return JSON.stringify({ Action: 'output', Package: pkg, Diagnostic: `fallback_stage_${fallbackStage[1]}` })
+      const fallbackFact = typeof event.Output === 'string' && /native fallback failure: (error_kind|mysql_code)=([0-9]{1,5})(?:\r?\n|$)/.exec(event.Output)
+      if (fallbackFact && isSafeFallbackFact(fallbackFact[1], Number(fallbackFact[2]))) return JSON.stringify({ Action: 'output', Package: pkg, Diagnostic: `fallback_${fallbackFact[1]}`, Observed: Number(fallbackFact[2]) })
+      const adminHTTP = typeof event.Output === 'string' && /native admin HTTP: (actual|expected)=([1-5][0-9]{2})(?:\r?\n|$)/.exec(event.Output)
+      if (adminHTTP) return JSON.stringify({ Action: 'output', Package: pkg, Diagnostic: `admin_http_${adminHTTP[1]}`, Observed: Number(adminHTTP[2]) })
       const fixtureRoute = typeof event.Output === 'string' && /native diagnostic: (fixture_route_(?:one|local|loopback|exact_address|exact_host_prefix))=(true|false)(?:\r?\n|$)/.exec(event.Output)
       if (fixtureRoute) return JSON.stringify({ Action: 'output', Package: pkg, Diagnostic: fixtureRoute[1], Observed: fixtureRoute[2] === 'true' })
       const configError = typeof event.Output === 'string' && /native global config error: ((?:catalog|build|compile|repository|capability|encode|mint)_(?:canceled|deadline|conflict|validation|unavailable|other))=([0-9]{1,7})(?:\r?\n|$)/.exec(event.Output)
@@ -409,7 +419,7 @@ export function checkRemoteUpgradeResults(input) { checkCases(input, remoteUpgra
 export function checkDockerUpgradeResults(input) { checkCases(input, dockerUpgradeNames) }
 export function isSafeDestinationDiagnostic(event) {
   if (typeof event.Diagnostic !== 'string') return false
-  if (event.Observed === undefined) return Object.values(diagnostics).includes(event.Diagnostic)
+  if (event.Observed === undefined) return Object.values(diagnostics).includes(event.Diagnostic) || event.Diagnostic.startsWith('fallback_stage_') && fallbackStages.has(event.Diagnostic.slice('fallback_stage_'.length))
   if (typeof event.Observed === 'boolean') {
     const roundTrip = sanitizeDestinationResults(JSON.stringify({ Action: 'output', Output: `native diagnostic: ${event.Diagnostic}=${event.Observed}\n` }))
     if (!roundTrip.trim()) return false
@@ -417,6 +427,8 @@ export function isSafeDestinationDiagnostic(event) {
     return sanitized.Diagnostic === event.Diagnostic && sanitized.Observed === event.Observed
   }
   if (!Number.isInteger(event.Observed) || event.Observed < 0) return false
+  if (['fallback_error_kind', 'fallback_mysql_code'].includes(event.Diagnostic)) return isSafeFallbackFact(event.Diagnostic.slice('fallback_'.length), event.Observed)
+  if (['admin_http_actual', 'admin_http_expected'].includes(event.Diagnostic)) return event.Observed >= 100 && event.Observed <= 599
   if (event.Diagnostic.startsWith('global_setup_profile_')) return isSafeSetupProfileFact(event.Diagnostic.slice('global_setup_profile_'.length), event.Observed)
   if (event.Diagnostic.startsWith('global_stage_')) return isSafeGlobalStageFact(event.Diagnostic.slice('global_stage_'.length), event.Observed)
   if (event.Diagnostic.startsWith('global_config_error_')) return isSafeGlobalConfigError(event.Diagnostic.slice('global_config_error_'.length), event.Observed)

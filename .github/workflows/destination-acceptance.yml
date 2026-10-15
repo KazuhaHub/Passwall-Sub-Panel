@@ -2,6 +2,14 @@ name: Native destination traffic acceptance
 
 on:
   workflow_dispatch:
+    inputs:
+      suite:
+        description: Complete acceptance or one unchanged full SQL driver for diagnosis
+        type: choice
+        default: all
+        options:
+          - all
+          - mysql-module-xray-26.9.9
   pull_request:
     paths:
       - 'internal/app/**'
@@ -43,6 +51,7 @@ concurrency:
 
 jobs:
   traffic:
+    if: github.event_name != 'workflow_dispatch' || (inputs.suite || 'all') == 'all'
     name: real PSP + ${{ matrix.candidate }} Node + ${{ matrix.engine }} ${{ matrix.core }}
     runs-on: ubuntu-24.04
     timeout-minutes: 25
@@ -131,21 +140,14 @@ jobs:
           retention-days: 7
 
   traffic-sql:
+    if: github.event_name != 'workflow_dispatch' || (inputs.suite || 'all') == 'all' || inputs.suite == 'mysql-module-xray-26.9.9'
     name: real PSP ${{ matrix.database }} + full-module Node + ${{ matrix.engine }} ${{ matrix.core }}
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - {engine: xray, core: '26.6.27', database: mysql}
-          - {engine: xray, core: '26.7.28', database: mysql}
-          - {engine: xray, core: '26.9.9', database: mysql}
-          - {engine: sing-box, core: '1.14.0', database: mysql}
-          - {engine: xray, core: '26.6.27', database: postgres}
-          - {engine: xray, core: '26.7.28', database: postgres}
-          - {engine: xray, core: '26.9.9', database: postgres}
-          - {engine: sing-box, core: '1.14.0', database: postgres}
+        include: ${{ fromJSON(inputs.suite == 'mysql-module-xray-26.9.9' && '[{"engine":"xray","core":"26.9.9","database":"mysql"}]' || '[{"engine":"xray","core":"26.6.27","database":"mysql"},{"engine":"xray","core":"26.7.28","database":"mysql"},{"engine":"xray","core":"26.9.9","database":"mysql"},{"engine":"sing-box","core":"1.14.0","database":"mysql"},{"engine":"xray","core":"26.6.27","database":"postgres"},{"engine":"xray","core":"26.7.28","database":"postgres"},{"engine":"xray","core":"26.9.9","database":"postgres"},{"engine":"sing-box","core":"1.14.0","database":"postgres"}]') }}
     services:
       mysql:
         image: ${{ matrix.database == 'mysql' && 'mysql:8' || '' }}
@@ -239,6 +241,7 @@ jobs:
           retention-days: 7
 
   published-remote:
+    if: github.event_name != 'workflow_dispatch' || (inputs.suite || 'all') == 'all'
     name: production PSP policy + published Node rollback via systemd watcher
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -303,6 +306,7 @@ jobs:
           retention-days: 7
 
   published-docker:
+    if: github.event_name != 'workflow_dispatch' || (inputs.suite || 'all') == 'all'
     name: production PSP policy + published Docker rollback (${{ matrix.arch }})
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 25
@@ -381,6 +385,7 @@ jobs:
           retention-days: 7
 
   legacy-upgrade:
+    if: github.event_name != 'workflow_dispatch' || (inputs.suite || 'all') == 'all'
     name: real PSP upgrade and rollback + mixed fleet + Node rollback (${{ matrix.database }}, ${{ matrix.candidate }})
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -517,6 +522,7 @@ jobs:
           retention-days: 7
 
   fleet:
+    if: github.event_name != 'workflow_dispatch' || (inputs.suite || 'all') == 'all'
     name: real production fleet (${{ matrix.database }}, ${{ matrix.cohort }}, ${{ matrix.layout }})
     runs-on: ubuntu-24.04
     timeout-minutes: 25
@@ -637,12 +643,13 @@ jobs:
   complete-matrix:
     name: complete native matrix (48 reports / 861 cases)
     needs: [traffic, traffic-sql, published-remote, published-docker, legacy-upgrade, fleet]
-    if: always()
+    if: always() && (github.event_name != 'workflow_dispatch' || inputs.suite != 'mysql-module-xray-26.9.9')
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - name: Require every runtime producer
         env:
+          PSP_NATIVE_SUITE: ${{ inputs.suite || 'all' }}
           TRAFFIC_RESULT: ${{ needs.traffic.result }}
           SQL_RESULT: ${{ needs.traffic-sql.result }}
           REMOTE_RESULT: ${{ needs.published-remote.result }}
@@ -651,6 +658,7 @@ jobs:
           FLEET_RESULT: ${{ needs.fleet.result }}
         run: |
           set -eu
+          test "$PSP_NATIVE_SUITE" = all
           test "$TRAFFIC_RESULT" = success
           test "$SQL_RESULT" = success
           test "$REMOTE_RESULT" = success

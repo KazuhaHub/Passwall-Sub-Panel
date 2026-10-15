@@ -3,6 +3,43 @@ import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
 import { checkDestinationResults, sanitizeDestinationResults, nodeCandidate, destinationCases } from './destination-acceptance.mjs'
 
+test('fallback failure diagnostics disclose only closed phases and bounded error or HTTP codes', async () => {
+  const { isSafeDestinationDiagnostic } = await import('./destination-acceptance.mjs')
+  for (const stage of ['collection_off', 'roster_revocation', 'psp_shutdown', 'psp_reopen', 'restore_fixture']) {
+    const safe = sanitizeDestinationResults(encode([{ Action: 'output', Output: `private-path:4: native fallback stage: ${stage}\n` }]))
+    const event = JSON.parse(safe)
+    assert.equal(event.Diagnostic, 'fallback_stage_' + stage)
+    assert(isSafeDestinationDiagnostic(event))
+    assert(!safe.includes('private-path') && !safe.includes('Output'))
+    assert.throws(() => checkDestinationResults(safe))
+  }
+  for (const [prefix, name, values] of [['fallback failure', 'error_kind', [1, 4]], ['fallback failure', 'mysql_code', [0, 1050, 65535]], ['admin HTTP', 'actual', [100, 409, 599]], ['admin HTTP', 'expected', [200, 204]]]) {
+    for (const value of values) {
+      const safe = sanitizeDestinationResults(encode([{ Action: 'output', Output: `private-token: native ${prefix}: ${name}=${value}\n` }]))
+      const event = JSON.parse(safe)
+      assert.equal(event.Observed, value)
+      assert(isSafeDestinationDiagnostic(event))
+      assert(!safe.includes('private-token'))
+      assert.throws(() => checkDestinationResults(safe))
+    }
+  }
+  for (const output of ['native fallback stage: private_path\n', 'native fallback stage: psp_reopen /private/key\n', 'native fallback failure: error_kind=0\n', 'native fallback failure: error_kind=5\n', 'native fallback failure: mysql_code=65536\n', 'native fallback failure: mysql_code=-1\n', 'native admin HTTP: actual=600\n', 'native admin HTTP: actual=99\n']) {
+    assert.equal(sanitizeDestinationResults(encode([{ Action: 'output', Output: output }])).trim(), '')
+  }
+  assert(!isSafeDestinationDiagnostic({ Diagnostic: 'fallback_stage_private_path' }))
+  assert(!isSafeDestinationDiagnostic({ Diagnostic: 'fallback_error_kind', Observed: 5 }))
+  assert(!isSafeDestinationDiagnostic({ Diagnostic: 'fallback_mysql_code', Observed: 65536 }))
+  assert(!isSafeDestinationDiagnostic({ Diagnostic: 'admin_http_actual', Observed: 600 }))
+})
+
+test('fallback phase diagnostics retain the original failed verdict', () => {
+  const values = events().map(e => e.Test?.endsWith('/pruned_rejected') && e.Action === 'pass' ? { ...e, Action: 'fail' } : e)
+  values.push({ Action: 'output', Output: 'private-path: native fallback stage: psp_reopen\n' })
+  const safe = sanitizeDestinationResults(encode(values))
+  assert(safe.includes('fallback_stage_psp_reopen') && !safe.includes('private-path'))
+  assert.throws(() => checkDestinationResults(safe))
+})
+
 test('target route diagnostics disclose only exact guard comparisons and never prove acceptance', async () => {
   const { isSafeDestinationDiagnostic } = await import('./destination-acceptance.mjs')
   for (const name of ['one', 'local', 'loopback', 'exact_address', 'exact_host_prefix']) {
@@ -531,8 +568,10 @@ test('SQL runtime matrix executes every reviewed core using the full verifier an
   const start = workflow.indexOf('  traffic-sql:')
   assert(start >= 0, 'real SQL traffic job is missing')
   const job = workflow.slice(start, workflow.indexOf('  published-remote:', start))
-  const rows = [...job.matchAll(/\{engine: ([\w-]+), core: '([^']+)', database: (\w+)\}/g)]
-    .map(([, engine, core, database]) => [engine, core, database])
+  const choices = [...job.matchAll(/'(\[\{[^\r\n]*?\}\])'/g)].map(([, value]) => JSON.parse(value))
+  assert.equal(choices.length, 2)
+  assert.deepEqual(choices[0], [{ engine: 'xray', core: '26.9.9', database: 'mysql' }])
+  const rows = choices[1].map(({ engine, core, database }) => [engine, core, database])
   assert.deepEqual(rows, ['mysql', 'postgres'].flatMap(database => [
     ...['26.6.27', '26.7.28', '26.9.9'].map(core => ['xray', core, database]),
     ['sing-box', '1.14.0', database],

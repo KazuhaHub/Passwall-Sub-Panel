@@ -148,6 +148,8 @@ func TestNativeDestinationTraffic(t *testing.T) {
 		nativeMust(caseTest, err, "call real administrator HTTP")
 		defer response.Body.Close()
 		if response.StatusCode != want {
+			caseTest.Logf("native admin HTTP: actual=%d", response.StatusCode)
+			caseTest.Logf("native admin HTTP: expected=%d", want)
 			caseTest.Fatalf("administrator route %s returned HTTP %d, expected %d; body withheld", path, response.StatusCode, want)
 		}
 		if method != "GET" && path != "dest/publish" {

@@ -5,9 +5,12 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
+
+	mysqlDriver "github.com/go-sql-driver/mysql"
 
 	"github.com/KazuhaHub/passwall-protocol/protocol"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
@@ -36,6 +39,29 @@ type nativeFallbackRejectionFixture struct {
 // change intent through production admin HTTP to a reviewed Xray core. No
 // binary, report, on-disk artifact or contract validator is modified.
 func (f nativeFallbackRejectionFixture) run(t *testing.T, pruned bool) {
+	stage := "collection_off"
+	t.Cleanup(func() {
+		if t.Failed() {
+			t.Logf("native fallback stage: %s", stage)
+		}
+	})
+	errorFacts := func(err error) {
+		if err == nil {
+			return
+		}
+		kind := 4 // Other; never export error strings, paths, SQL or credentials.
+		if errors.Is(err, context.Canceled) {
+			kind = 1
+		} else if errors.Is(err, context.DeadlineExceeded) {
+			kind = 2
+		}
+		var mysqlError *mysqlDriver.MySQLError
+		if errors.As(err, &mysqlError) {
+			kind = 3
+			t.Logf("native fallback failure: mysql_code=%d", mysqlError.Number)
+		}
+		t.Logf("native fallback failure: error_kind=%d", kind)
+	}
 	request := f.request
 	selectCore := func(engine, version string) {
 		request("POST", fmt.Sprintf("servers/%d/select-core", f.panelID), map[string]any{"engine": engine, "version": version, "confirm_restricted": version == "26.9.9"}, 202, nil)
@@ -52,13 +78,16 @@ func (f nativeFallbackRejectionFixture) run(t *testing.T, pruned bool) {
 	}
 	request("PUT", fmt.Sprintf("servers/%d", f.panelID), map[string]any{"audit_collect": "off"}, 200, nil)
 	f.waitApplied()
+	stage = "compatible_listener"
 	// sing-box rejects legacy per-inbound Xray sniffing even without domains.
 	// Prepare compatible listener intent through the same production HTTP route.
 	f.setSniffing(`{}`)
 	f.waitApplied()
+	stage = "singbox_selection"
 	selectCore("sing-box", "1.14.0")
 	f.waitApplied()
 	waitEngine("sing-box", "1.14.0")
+	stage = "policy_create"
 	input := destinationPolicyInput("Previous mapped prefix", "block")
 	input["inline"] = map[string]any{"cidrs": []string{nativeRejectedMappedCIDR}}
 	var previous destinationPolicyAPIResult
@@ -69,8 +98,10 @@ func (f nativeFallbackRejectionFixture) run(t *testing.T, pruned bool) {
 		removedInput["inline"] = map[string]any{"ports": "1"}
 		request("POST", "dest/policies", removedInput, 201, &removed)
 	}
+	stage = "original_publication"
 	f.publish()
 	f.waitApplied()
+	stage = "original_policy"
 	prior, err := (*f.app).repos.DestAgentPolicy.Get(t.Context(), f.agentID, true)
 	nativeMust(t, err, "read sing-box confirmed mapped-prefix policy")
 	var fallback, desired protocol.DestinationPolicy
@@ -83,11 +114,13 @@ func (f nativeFallbackRejectionFixture) run(t *testing.T, pruned bool) {
 	if prior.MintedKind != domain.DestCandidateDesired || prior.MintedSHA256 != prior.AppliedSHA256 || protocol.PolicyDigest(&fallback) != prior.AppliedSHA256 || len(fallback.Rules) != wantRules || fallback.Collect != "" {
 		t.Fatal("mapped-prefix LKG was not actually confirmed by sing-box")
 	}
+	stage = "original_traffic"
 	f.traffic(f.userUUID, true)
 	f.traffic(f.canaryUUID, true)
 	// Freeze only real sync traffic while the two admin mutations are published.
 	// This prevents sing-box from confirming the new desired policy before the
 	// core switch. The previous confirmed policy remains the only LKG.
+	stage = "partitioned_mutation"
 	f.gateway.partitionSync(&nativeSyncPartition{})
 	t.Cleanup(func() { f.gateway.partitionSync(nil) })
 	input["inline"], input["updated_at"] = map[string]any{"cidrs": []string{"::ffff:198.51.100.0/120"}}, previous.UpdatedAt
@@ -115,11 +148,13 @@ func (f nativeFallbackRejectionFixture) run(t *testing.T, pruned bool) {
 	if (fallbackSHA != prior.AppliedSHA256) != pruned || desiredSHA == fallbackSHA {
 		t.Fatal("fallback rejection fixture did not distinguish pruning from desired")
 	}
+	stage = "mutation_publication"
 	f.publish()
 	state, err := (*f.app).destDefinitions.State(t.Context())
 	nativeMust(t, err, "read fallback rejection publication")
 	f.probe.armRejectedDigest(fallbackSHA)
 	selectedAfter := time.UnixMilli(time.Now().UnixMilli())
+	stage = "xray_selection"
 	selectCore("xray", f.xrayVersion)
 	f.gateway.partitionSync(nil)
 	var exhausted *domain.DestAgentPolicy
@@ -178,10 +213,13 @@ func (f nativeFallbackRejectionFixture) run(t *testing.T, pruned bool) {
 			t.Fatal("status API did not confirm exhausted rejected fallback")
 		}
 	}
+	stage = "empty_recovery"
 	waitEmpty(selectedAfter)
+	stage = "recovered_traffic"
 	f.traffic(f.userUUID, true)
 	f.traffic(f.canaryUUID, true)
 	policyContext, generation := exhausted.MintedContext, exhausted.MintedGeneration
+	stage = "roster_revocation"
 	request("POST", fmt.Sprintf("users/%d/set-enabled", f.userID), map[string]any{"enabled": false}, 204, nil)
 	revokedAfter := time.UnixMilli(time.Now().UnixMilli())
 	nativeWait(t, 120*time.Second, "rejected fallback roster revocation", func() bool {
@@ -197,19 +235,24 @@ func (f nativeFallbackRejectionFixture) run(t *testing.T, pruned bool) {
 	if exhausted.MintedContext != policyContext || exhausted.MintedGeneration != generation {
 		t.Fatal("roster mutation rearmed rejected fallback")
 	}
+	stage = "revoked_traffic"
 	f.traffic(f.userUUID, false)
 	f.traffic(f.canaryUUID, true)
 	if pruned {
 		// Reopen the actual production App, SQL pool and caches on the original
 		// database while the same Node continues serving the empty deployment.
+		stage = "psp_shutdown"
 		old := *f.app
 		cfg := *old.cfg
 		f.gateway.replace(nil)
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		err := old.Shutdown(ctx)
 		cancel()
+		errorFacts(err)
 		nativeMust(t, err, "stop PSP after rejected pruned fallback")
+		stage = "psp_reopen"
 		restored, err := Build(f.root.Context(), &cfg)
+		errorFacts(err)
 		nativeMust(t, err, "reopen PSP after rejected pruned fallback")
 		*f.app = restored
 		f.root.Cleanup(func() {
@@ -222,15 +265,18 @@ func (f nativeFallbackRejectionFixture) run(t *testing.T, pruned bool) {
 		restored.startDestinationAudit()
 		reopenedAfter := time.UnixMilli(time.Now().UnixMilli())
 		f.gateway.replace(restored.server.Handler)
+		stage = "psp_restart_receipt"
 		waitEmpty(reopenedAfter)
 		if exhausted.MintedContext != policyContext || exhausted.MintedGeneration != generation {
 			t.Fatal("PSP restart rearmed rejected pruned fallback")
 		}
+		stage = "psp_restart_traffic"
 		f.traffic(f.userUUID, false)
 		f.traffic(f.canaryUUID, true)
 	}
 	// Manual retry must offer the desired version again, then reach a fresh
 	// rejection without restoring the discarded LKG or the revoked account.
+	stage = "manual_retry"
 	f.probe.armRejectedDigest(desiredSHA)
 	var retry struct {
 		Requested bool `json:"retry_requested"`
@@ -245,6 +291,7 @@ func (f nativeFallbackRejectionFixture) run(t *testing.T, pruned bool) {
 	})
 	// Restore the shared watch fixture through normal admin intent for later
 	// scenarios. Publishing a repaired definition is an allowed retry trigger.
+	stage = "restore_fixture"
 	request("DELETE", fmt.Sprintf("dest/policies/%d", previous.ID), nil, 204, nil)
 	request("POST", fmt.Sprintf("users/%d/set-enabled", f.userID), map[string]any{"enabled": true}, 204, nil)
 	f.publish()
