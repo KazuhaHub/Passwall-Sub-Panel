@@ -189,7 +189,10 @@ func (b *nativeAdmissionBinding) snapshot(agent string) (nativeAdmissionFacts, b
 	if owner == nil {
 		return nativeAdmissionFacts{}, false
 	}
-	return owner.facts, !b.invalid && owner.inflight == 0
+	// Facts include only requests whose original handler has returned. A normal
+	// active request has not contributed yet; it does not invalidate completed
+	// evidence or require every polling daemon to be simultaneously idle.
+	return owner.facts, !b.invalid
 }
 
 // Synthetic callback vectors reject ambiguous evidence. Actual authentication,
@@ -282,6 +285,37 @@ func TestNativeGlobalAdmissionBindingRejectsAmbiguousEvidence(t *testing.T) {
 			}
 		})
 	}
+	t.Run("active_request_preserves_completed_facts", func(t *testing.T) {
+		binding := &nativeAdmissionBinding{}
+		entered, release := make(chan struct{}), make(chan struct{})
+		done := make(chan struct{})
+		original := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			binding.observe(base)
+			close(entered)
+			<-release
+			w.WriteHeader(http.StatusOK)
+		})
+		handler, err := binding.handler(original, []*nativeGlobalPeer{{agent: agent}})
+		nativeMust(t, err, "bind active observation vector")
+		go func() {
+			defer close(done)
+			handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/v1/node/sync", bytes.NewReader(body)))
+		}()
+		t.Cleanup(func() { close(release); <-done })
+		select {
+		case <-entered:
+		case <-time.After(5 * time.Second):
+			t.Fatal("original request did not reach its actual admission event")
+		}
+		if facts, valid := binding.snapshot(agent.AgentID); !valid || facts != (nativeAdmissionFacts{}) {
+			t.Fatal("active request invalidated history or published unfinished evidence")
+		}
+		release <- struct{}{}
+		<-done
+		if facts, valid := binding.snapshot(agent.AgentID); !valid || facts.Rejected[0] != 1 {
+			t.Fatal("completed original request lost its bound evidence")
+		}
+	})
 	t.Run("overlap_preserves_both_requests", func(t *testing.T) {
 		binding := &nativeAdmissionBinding{}
 		entered, release := make(chan struct{}, 2), make(chan struct{})
