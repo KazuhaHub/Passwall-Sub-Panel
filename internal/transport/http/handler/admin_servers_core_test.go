@@ -14,6 +14,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/compatadmission"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/corefixtures"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/nodecompat"
@@ -229,7 +230,9 @@ func TestNativeCoreSelectionRequiresExactRestrictionAcknowledgement(t *testing.T
 
 func TestServerListSeparatesDesiredAndObservedNativeCoreWithoutPerRowQueries(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	protocolObservedAt := time.Date(2026, 9, 16, 12, 0, 0, 0, time.UTC)
+	// The handler uses the wall clock. Keep this identity fixture fresh rather
+	// than letting an unrelated calendar date expire the compatibility verdict.
+	protocolObservedAt := time.Now().UTC().Add(-time.Minute)
 	panel := &domain.XUIPanel{
 		ID: 9, Kind: domain.PanelKindPSP, Name: "native", PanelVersion: "v0.2.0", XrayVersion: "26.6.27",
 	}
@@ -291,12 +294,14 @@ func TestNativeCompatibilityDTOStatesAreFailClosed(t *testing.T) {
 		pool:        fakeWebCertPool{client: &nativeCoreClientStub{}},
 		coreCatalog: corefixtures.Static{},
 	}
-	observedAt := time.Date(2026, 9, 16, 13, 0, 0, 0, time.UTC)
+	observedAt := time.Now().UTC().Add(-time.Minute)
+	staleAt := observedAt.Add(-nodecompat.DefaultObservationAge() - time.Hour)
 	for _, test := range []struct {
 		name         string
 		agent        *domain.NodeAgent
 		want         string
 		upgradeReady bool
+		reason       string
 	}{
 		{name: "unknown", agent: &domain.NodeAgent{}, want: "unknown"},
 		{name: "base sync remains compatible but upgrade is limited", agent: &domain.NodeAgent{
@@ -305,13 +310,16 @@ func TestNativeCompatibilityDTOStatesAreFailClosed(t *testing.T) {
 		{name: "reviewed upgrade capability set", agent: &domain.NodeAgent{
 			ObservedProtocolVersion: 1, ObservedCapabilities: nodeprotocol.AgentUpgradeCapabilities(), ProtocolObservedAt: &observedAt,
 		}, want: "compatible", upgradeReady: true},
+		{name: "stale observation remains unavailable", agent: &domain.NodeAgent{
+			ObservedProtocolVersion: 1, ObservedCapabilities: nodeprotocol.AgentUpgradeCapabilities(), ProtocolObservedAt: &staleAt,
+		}, want: "unknown", reason: string(compatadmission.ReasonObservationStale)},
 		{name: "unreviewed generation", agent: &domain.NodeAgent{
 			ObservedProtocolVersion: 2, ObservedCapabilities: nodeprotocol.AgentUpgradeCapabilities(), ProtocolObservedAt: &observedAt,
 		}, want: "incompatible"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			got := handler.toServerDTOWithAgent(panel, test.agent, nodecompat.Policy(nodecompat.DefaultObservationAge()))
-			if got.NodeCompatibility != test.want || got.NodeUpgradeReady != test.upgradeReady {
+			if got.NodeCompatibility != test.want || got.NodeUpgradeReady != test.upgradeReady || test.reason != "" && got.NodeCompatibilityReason != test.reason {
 				t.Fatalf("compatibility = %+v", got)
 			}
 		})
@@ -327,7 +335,7 @@ func TestNativeCompatibilityDTOStatesAreFailClosed(t *testing.T) {
 // peer its own judgement accepts is ready. The DECISION is untouched by this: a
 // peer that is not eligible is still not ready, which the second half measures.
 func TestNativeUpgradeReadinessFollowsTheDecision(t *testing.T) {
-	observedAt := time.Date(2026, 9, 16, 14, 0, 0, 0, time.UTC)
+	observedAt := time.Now().UTC().Add(-time.Minute)
 	panel := &domain.XUIPanel{ID: 9, Kind: domain.PanelKindPSP, Name: "native", PanelVersion: "v0.2.0"}
 	agent := &domain.NodeAgent{
 		ObservedProtocolVersion: nodeprotocol.ProtocolVersion1,
@@ -378,9 +386,9 @@ func TestRefusedNodeIsDistinguishableFromUnknownAndCompatible(t *testing.T) {
 		coreCatalog: corefixtures.Static{},
 	}
 	policy := nodecompat.Policy(nodecompat.DefaultObservationAge())
-	accepted := time.Date(2026, 9, 20, 10, 0, 0, 0, time.UTC)
-	refusedFirst := time.Date(2026, 9, 21, 9, 0, 0, 0, time.UTC)
-	refusedLast := time.Date(2026, 9, 21, 12, 0, 0, 0, time.UTC)
+	refusedLast := time.Now().UTC().Add(-time.Minute)
+	refusedFirst := refusedLast.Add(-3 * time.Hour)
+	accepted := refusedFirst.Add(-23 * time.Hour)
 	ahead := nodeprotocol.ProtocolVersion1 + 1
 
 	// The case that used to read "compatible, upgrade ready": a good observation
