@@ -23,15 +23,22 @@ func loadCurrentNodeAgentRows(query *gorm.DB) ([]*domain.NodeAgent, error) {
 	}
 	defer rows.Close()
 	out := make([]*domain.NodeAgent, 0)
+	var row nodeAgentRow
+	var created, updated sql.NullTime
+	// Use the existing current-row scalar adapter for pgx's Go 1.27 column
+	// scanner too. It preserves database/sql conversions without classifying
+	// every scalar pointer again for each cell; other drivers keep their path.
+	destinations := currentSQLDestinations(query.Dialector.Name(), []any{
+		&row.ID, &row.AgentID, &row.PanelID, &row.Epoch, &row.CredentialSHA256,
+		&row.ObservedProtocolVersion, &row.ObservedCapabilities, &row.ProtocolObservedAt,
+		&row.DesiredCoreEngine, &row.DesiredCoreVersion, &row.AllowRestrictedReality, &row.ObservedCoreEngine, &row.LastSeen,
+		&row.RefusedProtocolVersion, &row.RefusedReason, &row.RefusedFirstAt, &row.RefusedAt, &created, &updated,
+	})
 	for rows.Next() {
-		var row nodeAgentRow
-		var created, updated sql.NullTime
-		if err := rows.Scan(
-			&row.ID, &row.AgentID, &row.PanelID, &row.Epoch, &row.CredentialSHA256,
-			&row.ObservedProtocolVersion, &row.ObservedCapabilities, &row.ProtocolObservedAt,
-			&row.DesiredCoreEngine, &row.DesiredCoreVersion, &row.AllowRestrictedReality, &row.ObservedCoreEngine, &row.LastSeen,
-			&row.RefusedProtocolVersion, &row.RefusedReason, &row.RefusedFirstAt, &row.RefusedAt, &created, &updated,
-		); err != nil {
+		// Reset values, not the stable destination slots. Nullable pointers and
+		// JSON must allocate independently rather than mutate a previous result.
+		row, created, updated = nodeAgentRow{}, sql.NullTime{}, sql.NullTime{}
+		if err := rows.Scan(destinations...); err != nil {
 			return nil, err
 		}
 		row.CreatedAt, row.UpdatedAt = created.Time, updated.Time

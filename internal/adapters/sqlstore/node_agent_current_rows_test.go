@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"reflect"
 	"slices"
 	"strings"
@@ -14,6 +15,80 @@ import (
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 )
+
+func TestCurrentNodeAgentCursorReusesDestinationsWithoutSharingNullableRows(t *testing.T) {
+	db, err := openTestDB(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ensureTestSchema(db); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if connection, err := db.DB(); err == nil {
+			_ = connection.Close()
+		}
+	})
+	clock := time.Date(2026, 10, 16, 1, 2, 3, 123000000, time.UTC)
+	for i := range 4 {
+		at, version := clock.Add(time.Duration(i)*time.Minute), i
+		private := "private-ciphertext-excluded"
+		model := nodeAgentRow{
+			ID: int64(9501 + i), AgentID: fmt.Sprintf("scalar-cursor-%d", i), PanelID: int64(9604 - i),
+			Epoch: uint64(1<<53 + 17 + i), CredentialSHA256: strings.Repeat(fmt.Sprintf("%02x", i+1), 32), CredentialCiphertext: &private,
+			ObservedProtocolVersion: 3, ObservedCapabilities: jsonStrings{fmt.Sprintf("capability-%d", i)}, ProtocolObservedAt: &at,
+			DesiredCoreEngine: "xray", DesiredCoreVersion: fmt.Sprintf("version-%d", i), AllowRestrictedReality: i%2 == 0, ObservedCoreEngine: "xray",
+			LastSeen: &at, RefusedProtocolVersion: &version, RefusedReason: fmt.Sprintf("reason-%d", i), RefusedFirstAt: &at, RefusedAt: &at,
+			CreatedAt: at, UpdatedAt: at,
+		}
+		if err := db.Create(&model).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Exercise non-NULL -> different non-NULL -> NULL -> non-NULL in one
+	// cursor. Reusing a pointer from either earlier row would change its value.
+	if err := db.Model(&nodeAgentRow{}).Where("id = ?", 9503).UpdateColumns(map[string]any{
+		"observed_capabilities": nil, "protocol_observed_at": nil, "last_seen": nil,
+		"refused_protocol_version": nil, "refused_first_at": nil, "refused_at": nil, "created_at": nil, "updated_at": nil,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	var original []nodeAgentRow
+	if err := db.Omit("CredentialCiphertext").Order("id").Find(&original).Error; err != nil {
+		t.Fatal(err)
+	}
+	want := make([]*domain.NodeAgent, len(original))
+	for i := range original {
+		want[i] = rowToNodeAgent(&original[i])
+	}
+	repo := NewRepos(db).NodeAgent
+	got, err := repo.List(t.Context())
+	if err != nil || len(got) != 4 || !reflect.DeepEqual(got, want) {
+		t.Fatal("reused node-agent destinations changed complete rows, nullable state or wide epochs")
+	}
+	if got[0].LastSeen == got[1].LastSeen || got[0].ProtocolObservedAt == got[1].ProtocolObservedAt || got[0].RefusedProtocolVersion == got[1].RefusedProtocolVersion || got[0].RefusedAt == got[1].RefusedAt || got[0].RefusedFirstAt == got[1].RefusedFirstAt {
+		t.Fatal("node-agent cursor shared nullable storage between returned rows")
+	}
+	*got[0].LastSeen = clock.Add(time.Hour)
+	*got[0].ProtocolObservedAt = clock.Add(time.Hour)
+	*got[0].RefusedProtocolVersion = 99
+	*got[0].RefusedFirstAt = clock.Add(time.Hour)
+	*got[0].RefusedAt = clock.Add(time.Hour)
+	got[0].ObservedCapabilities[0] = "caller-only"
+	if !reflect.DeepEqual(got[1:], want[1:]) {
+		t.Fatal("mutating an earlier node-agent result changed a later row")
+	}
+	byPanel, err := repo.ListByPanelIDs(t.Context(), []int64{9601, 9602, 9603, 9604})
+	if err != nil || !reflect.DeepEqual(byPanel, []*domain.NodeAgent{want[3], want[2], want[1], want[0]}) {
+		t.Fatal("panel-scoped cursor retained mutations or changed ordering and nullable states")
+	}
+	for i := range want {
+		one, err := repo.GetByPanelID(t.Context(), want[i].PanelID)
+		if err != nil || !reflect.DeepEqual(one, want[i]) {
+			t.Fatal("single-panel cursor changed complete current scalar, JSON or nullable values")
+		}
+	}
+}
 
 func TestCurrentNodeAgentCursorMatchesCompleteModelsAndOwnedCurrentRows(t *testing.T) {
 	db, err := openTestDB(t)
