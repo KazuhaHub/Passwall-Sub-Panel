@@ -112,7 +112,7 @@ func TestNativeDestinationGlobalBytePressure(t *testing.T) {
 	if e1 != nil || e2 != nil || root != dir || filepath.Base(evidence) != "destination-global-byte-metrics.json" {
 		t.Fatal("global byte pressure requires owned hosted evidence")
 	}
-	m := nativeGlobalByteMetrics{Schema: 2, Candidate: "1ce8f26cfbce8d3decf8855dda4349be10778a23", Core: "26.6.27", Fresh: 64,
+	m := nativeGlobalByteMetrics{Schema: 2, Candidate: "61f30239e09d62b05bd59df7d9d28a5071790556", Core: "26.6.27", Fresh: 64,
 		Counts: [4]int{1400, 700, 1300, 200}, Details: []nativeGlobalByteOwner{}, PSP: []nativeMixedPSPSample{}, Histograms: []nativeLatencyHistogram{}}
 	var failures atomic.Uint64
 	var attempted, delivered [65][4]atomic.Uint64

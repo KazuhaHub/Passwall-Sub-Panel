@@ -53,7 +53,7 @@ func nativeByteFormation(t *testing.T, f destinationPolicyFixture, client *http.
 		Complete     int                       `json:"formation_complete"`
 		BytesDone    int                       `json:"byte_saturation_complete"`
 		Pressure     int                       `json:"pressure_complete"`
-	}{Schema: 2, Candidate: "1ce8f26cfbce8d3decf8855dda4349be10778a23", Core: "26.6.27", Database: f.a.cfg.DBKind(), Owners: 1}
+	}{Schema: 2, Candidate: "61f30239e09d62b05bd59df7d9d28a5071790556", Core: "26.6.27", Database: f.a.cfg.DBKind(), Owners: 1}
 	var attempted, delivered [4]atomic.Uint64
 	var failures atomic.Uint64
 	write := func() {

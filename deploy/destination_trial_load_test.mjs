@@ -3,7 +3,7 @@ import { test } from 'node:test'
 import { readFileSync } from 'node:fs'
 
 const report = () => ({
-  schema_version: 1, candidate: '1ce8f26cfbce8d3decf8855dda4349be10778a23', core_version: '26.6.27',
+  schema_version: 1, candidate: '61f30239e09d62b05bd59df7d9d28a5071790556', core_version: '26.6.27',
   users: 200, duration_ms: 300000,
   trial_windows: Array(300).fill(1100), user_deliveries: Array(200).fill(1650),
   trial_delivered: 330000, trial_allowed: 330000, trial_target_requests: 330000,
@@ -62,7 +62,7 @@ test('trial metrics need unique execution through the production sanitizer and c
 
 test('trial job retains the existing webhook job and requires separate real production evidence', () => {
   const workflow = readFileSync(new URL('../.github/workflows/destination-load.yml', import.meta.url), 'utf8')
-  for (const required of ['webhook-load:', 'trial-load:', 'TestNativeDestinationWebhookLoad', 'TestNativeDestinationTrialLoad', '1ce8f26cfbce8d3decf8855dda4349be10778a23', 'destination-trial-load-tests.json', 'destination-trial-load-metrics.json', 'deploy/destination-trial-load.mjs', 'deploy/destination_trial_load_test.mjs', 'set -euo pipefail']) assert(workflow.includes(required), required)
+  for (const required of ['webhook-load:', 'trial-load:', 'TestNativeDestinationWebhookLoad', 'TestNativeDestinationTrialLoad', '61f30239e09d62b05bd59df7d9d28a5071790556', 'destination-trial-load-tests.json', 'destination-trial-load-metrics.json', 'deploy/destination-trial-load.mjs', 'deploy/destination_trial_load_test.mjs', 'set -euo pipefail']) assert(workflow.includes(required), required)
   assert(workflow.includes('TestNativeTrialProvisioningRequiresObservedRuntimeAndInbound'))
   assert(!workflow.includes('continue-on-error'))
 })

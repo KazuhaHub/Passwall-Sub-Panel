@@ -3,7 +3,7 @@
 ## Current full-module candidate
 
 The current full-module jobs pin Node
-`1ce8f26cfbce8d3decf8855dda4349be10778a23`. Event wakes retain the normal
+`61f30239e09d62b05bd59df7d9d28a5071790556`. Event wakes retain the normal
 full-report cadence, including due/requested/unset intervals. Its bounded
 regressions also reject invalid negative intervals. Earlier candidate evidence
 below remains tied to its original source.

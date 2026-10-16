@@ -3,7 +3,7 @@ import { test } from 'node:test'
 import { readFileSync } from 'node:fs'
 
 const good = () => ({
-  schema_version: 1, candidate: '1ce8f26cfbce8d3decf8855dda4349be10778a23', core_version: '26.6.27', cpu_ticks_per_second: 100,
+  schema_version: 1, candidate: '61f30239e09d62b05bd59df7d9d28a5071790556', core_version: '26.6.27', cpu_ticks_per_second: 100,
   phases: [{ name: 'block_overflow', rules: 1, duration_ms: 300000, attempted: 330000, delivered: 330000, blocked: 330000,
     transport_failures: 0, target_requests: 0, control_successes: 300, heartbeat_advances: 100,
     window_delivered: Array(300).fill(1100), late_delivered: 0, hit_rules: 1, hit_events: 20000, budget_max_rows: 20000,
@@ -51,7 +51,7 @@ test('block quota evidence requires its own root and phase through the productio
 
 test('separate block overflow job preserves webhook and trial jobs with immutable real evidence', () => {
   const workflow = readFileSync(new URL('../.github/workflows/destination-load.yml', import.meta.url), 'utf8')
-  for (const required of ['webhook-load:', 'trial-load:', 'block-overflow:', 'TestNativeDestinationBlockOverflow', 'destination-block-overflow-tests.json', 'destination-block-overflow-metrics.json', 'deploy/destination-block-overflow.mjs', '1ce8f26cfbce8d3decf8855dda4349be10778a23']) assert(workflow.includes(required), required)
+  for (const required of ['webhook-load:', 'trial-load:', 'block-overflow:', 'TestNativeDestinationBlockOverflow', 'destination-block-overflow-tests.json', 'destination-block-overflow-metrics.json', 'deploy/destination-block-overflow.mjs', '61f30239e09d62b05bd59df7d9d28a5071790556']) assert(workflow.includes(required), required)
   assert(!workflow.includes('continue-on-error'))
   const driver = readFileSync(new URL('../internal/app/destination_native_load_test.go', import.meta.url), 'utf8')
   for (const required of ['mutation := method != http.MethodGet && path != "dest/publish"', 'after = time.UnixMilli(time.Now().UnixMilli())', 'nativeMutationReceiptMatches(prior, *runtime', 'nativeCollectionReceiptMatches(*runtime, protocol.CollectHits', 'load_transition']) assert(driver.includes(required), required)

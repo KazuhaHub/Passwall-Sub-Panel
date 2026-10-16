@@ -101,7 +101,7 @@ func nativeBootstrapGlobalCohort(t *testing.T, options nativeGlobalCohortOptions
 		Controls     int    `json:"nonce_controls"`
 		SharedUsers  int    `json:"shared_users"`
 		PressureDone int    `json:"pressure_complete"`
-	}{Schema: 1, Candidate: "1ce8f26cfbce8d3decf8855dda4349be10778a23", Core: "26.6.27", Database: a.cfg.DBKind(), Owners: owners, SharedUsers: 1}
+	}{Schema: 1, Candidate: "61f30239e09d62b05bd59df7d9d28a5071790556", Core: "26.6.27", Database: a.cfg.DBKind(), Owners: owners, SharedUsers: 1}
 	m.Stage = 1
 	t.Cleanup(func() {
 		body, err := json.Marshal(m)
