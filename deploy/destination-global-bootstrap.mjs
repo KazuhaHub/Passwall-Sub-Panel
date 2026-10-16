@@ -14,6 +14,14 @@ export function checkGlobalBootstrapEvidence(tests, metrics, database = 'sqlite'
     need(event.Test === undefined || event.Test === 'TestNativeDestinationGlobalCohortBootstrap')
     need(event.Elapsed === undefined || Number.isFinite(event.Elapsed) && event.Elapsed >= 0)
   }
+  return checkGlobalBootstrapMetrics(metrics, database)
+}
+
+// A component calling the actual shared bootstrap has its own root result.
+// Check its original bootstrap metrics directly, without inventing a second
+// test execution or relabelling the component's root as a bootstrap test.
+export function checkGlobalBootstrapMetrics(metrics, database = 'sqlite') {
+  const need = value => { if (!value) throw new Error('Global bootstrap evidence invalid; private content withheld') }
   need(typeof metrics === 'string' && Buffer.byteLength(metrics) <= 4096)
   let report
   try { report = JSON.parse(metrics) } catch { need(false) }

@@ -7,14 +7,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"math"
 	"net"
 	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -22,8 +20,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/KazuhaHub/passwall-protocol/protocol"
-	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/metrics"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/destaudit"
@@ -194,32 +190,7 @@ func TestNativeDestinationGlobalBatchPressure(t *testing.T) {
 	if m.Users != 200 || targetPort == blockPort || targetPort == observePort || controlPort == blockPort || controlPort == observePort || controlPort == targetPort {
 		t.Fatal("global batch principals or lane targets are not independent")
 	}
-	// Bind the causal candidate before collection changes. A later no-op
-	// publication can already see the new candidate while its ACK is pending;
-	// using that snapshot would reject its eventual valid exact receipt.
-	var prior []*domain.DestAgentPolicy
-	for _, peer := range cohort.peers {
-		p, err := a.repos.DestAgentPolicy.Get(t.Context(), peer.agent.AgentID, true)
-		nativeMust(t, err, "bind global policies before actual collection edits")
-		prior = append(prior, p)
-	}
-	for _, peer := range cohort.peers[1:] {
-		response := serverAuditRequest(t, a, token, "PUT", "/"+strconv.FormatInt(peer.agent.PanelID, 10), map[string]any{"audit_collect": "hits_and_usage"})
-		if response.Code != http.StatusOK {
-			t.Fatal("global owner collection could not be enabled through production administration")
-		}
-	}
-	afterMutation := time.UnixMilli(time.Now().UnixMilli())
-	request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, cohort.server.URL+"/api/admin/dest/publish", nil)
-	nativeMust(t, err, "create actual global publication request")
-	request.Header.Set("Authorization", "Bearer "+token)
-	response, err := cohort.server.Client().Do(request)
-	nativeMust(t, err, "publish through the actual TLS administration route")
-	_, _ = io.Copy(io.Discard, response.Body)
-	_ = response.Body.Close()
-	if response.StatusCode != http.StatusOK {
-		t.Fatal("global policy publication failed")
-	}
+	collectionReady := nativeGlobalCollectionPublication(t, cohort, token)
 	m.Stage = 2
 	writeMetrics()
 	readiness := "state"
@@ -247,83 +218,8 @@ func TestNativeDestinationGlobalBatchPressure(t *testing.T) {
 		t.Cleanup(stopReceiptProfile)
 	}
 	nativeWait(t, 240*time.Second, "all real global trial policies and 200-user paired rosters", func() bool {
-		readiness = "state"
-		state, err := a.destDefinitions.State(t.Context())
-		if err != nil || state.Paused {
-			return false
-		}
-		for i, peer := range cohort.peers {
-			waitingPeer = peer
-			p, e1 := a.repos.DestAgentPolicy.Get(t.Context(), peer.agent.AgentID, true)
-			agent, e2 := a.repos.NodeAgent.GetByAgentID(t.Context(), peer.agent.AgentID)
-			panel, e3 := a.repos.XUIPanel.GetByID(t.Context(), peer.agent.PanelID)
-			roster, e4 := a.repos.NodeAgent.GetStream(t.Context(), peer.agent.AgentID, domain.NodeAgentStreamRoster)
-			readiness = "store"
-			if e1 != nil || e2 != nil || e3 != nil || e4 != nil || p == nil || agent == nil || panel == nil || roster == nil {
-				return false
-			}
-			readiness = "capability"
-			if !slicesContainsNative(agent.ObservedCapabilities, protocol.CapabilityAuditUsage) {
-				return false
-			}
-			readiness = "streams"
-			if reason := cohort.readyReason(peer); reason != "" {
-				readiness = "streams_" + reason
-				return false
-			}
-			readiness = "receipt"
-			if !nativeMutationReceiptMatches(prior[i], *p, state.PublishedGeneration, agent.LastSeen, afterMutation) {
-				return false
-			}
-			readiness = "collection"
-			if !nativeCollectionReceiptMatches(*p, protocol.CollectLevel("hits_and_usage"), uint64(panel.AuditCollectRevision)) {
-				return false
-			}
-			var body protocol.DestinationPolicy
-			var members protocol.RosterBody
-			readiness = "shape"
-			if json.Unmarshal(p.MintedBody, &body) != nil || json.Unmarshal(roster.DesiredBody, &members) != nil || len(body.Rules) != 3 {
-				return false
-			}
-			trial := false
-			for _, rule := range body.Rules {
-				if rule.ID == fmt.Sprintf("g%d", group.ID) && rule.CatchAll && rule.Action == protocol.RuleObserve && len(rule.Subjects) == 200 {
-					seen := make(map[protocol.SubjectKey]bool)
-					for _, subject := range rule.Subjects {
-						seen[subject] = true
-					}
-					trial = true
-					for _, user := range users {
-						trial = trial && seen[protocol.NewSubjectKey(user.ID)]
-					}
-				}
-			}
-			seen := make(map[protocol.SubjectKey]bool)
-			for _, member := range members.Clients {
-				if member.Enabled {
-					for _, listener := range member.Listeners {
-						if listener == protocol.NewListenerKey(peer.node.ID) {
-							seen[member.Subject] = true
-						}
-					}
-				}
-			}
-			readiness = "subjects"
-			if !trial {
-				return false
-			}
-			readiness = "roster"
-			if !seen[protocol.NewSubjectKey(f.user.ID)] {
-				return false
-			}
-			for _, user := range users {
-				if !seen[protocol.NewSubjectKey(user.ID)] {
-					return false
-				}
-			}
-		}
-		readiness = "complete"
-		return true
+		readiness, waitingPeer = collectionReady(users, group.ID)
+		return readiness == "complete"
 	})
 	if stopReceiptProfile != nil {
 		stopReceiptProfile()

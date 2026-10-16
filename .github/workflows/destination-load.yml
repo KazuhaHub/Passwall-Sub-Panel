@@ -16,6 +16,7 @@ on:
           - global-receipt-profile
           - global-traffic-profile
           - byte-formation
+          - global-byte
   pull_request:
     paths:
       - 'internal/app/**'
@@ -63,7 +64,7 @@ jobs:
         run: |
           set -euo pipefail
           case "$PSP_ACCEPTANCE_SUITE" in
-            all|mixed-pressure|idle-cost|global-batch|global-batch-profile|global-receipt-profile|global-traffic-profile|byte-formation) ;;
+            all|mixed-pressure|idle-cost|global-batch|global-batch-profile|global-receipt-profile|global-traffic-profile|byte-formation|global-byte) ;;
             *) printf '%s\n' 'Unknown acceptance selection'; exit 1 ;;
           esac
           printf 'Acceptance selection: %s\n' "$PSP_ACCEPTANCE_SUITE"
@@ -841,5 +842,106 @@ jobs:
           path: |
             ${{ runner.temp }}/destination-byte-formation-tests.json
             ${{ runner.temp }}/destination-byte-formation-metrics.json
+          if-no-files-found: error
+          retention-days: 7
+
+  global-byte:
+    if: github.event_name == 'workflow_dispatch' && inputs.suite == 'global-byte'
+    name: 65 real Node four-lane byte-only saturation (${{ matrix.database }} / Xray 26.6.27)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {database: sqlite, evidence_prefix: native-destination-global-byte}
+          - {database: mysql, evidence_prefix: native-destination-global-byte-mysql}
+          - {database: postgres, evidence_prefix: native-destination-global-byte-postgres}
+    services:
+      mysql:
+        image: ${{ matrix.database == 'mysql' && 'mysql:8' || '' }}
+        env:
+          MYSQL_ROOT_PASSWORD: fixture-native-root-password
+          MYSQL_DATABASE: psp_native_acceptance
+          MYSQL_USER: psp
+          MYSQL_PASSWORD: fixture-native-database-password
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -uroot -pfixture-native-root-password"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 30
+      postgres:
+        image: ${{ matrix.database == 'postgres' && 'postgres:16' || '' }}
+        env:
+          POSTGRES_USER: psp
+          POSTGRES_PASSWORD: fixture-native-database-password
+          POSTGRES_DB: psp_native_acceptance
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U psp -d psp_native_acceptance"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        env:
+          GOTOOLCHAIN: auto
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Verify exact preferred PSP compiler
+        run: |
+          set -euo pipefail
+          build_toolchain=$(awk '$1 == "toolchain" { print $2 }' go.mod)
+          test -n "$build_toolchain"
+          test "$(go env GOVERSION)" = "$build_toolchain"
+          test "$(go tool compile -V | awk '{ print $3 }')" = "$build_toolchain"
+      - uses: actions/checkout@v7
+        with:
+          repository: KazuhaHub/Passwall-Node
+          ref: 1ce8f26cfbce8d3decf8855dda4349be10778a23
+          path: node-source
+      - name: Build immutable full-module Node with its own preferred compiler
+        working-directory: node-source
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = 1ce8f26cfbce8d3decf8855dda4349be10778a23
+          toolchain=$(awk '$1 == "toolchain" { print $2; exit }' go.mod)
+          test -n "$toolchain"
+          test "$(GOTOOLCHAIN="$toolchain" go tool compile -V | awk '{ print $3 }')" = "$toolchain"
+          GOTOOLCHAIN="$toolchain" CGO_ENABLED=0 go build -o "$RUNNER_TEMP/destination-node" ./cmd/node
+      - name: Reject false byte pressure evidence and exercise independent original response boundaries
+        run: |
+          set -euo pipefail
+          node --test deploy/destination_global_byte_test.mjs deploy/destination_byte_formation_test.mjs
+          go test -race -v -count=1 -timeout=4m -tags destination_acceptance ./internal/app \
+            -run '^(TestNativeByteResponseFaultPreservesOriginalHandlerAndCanonicalRetries|TestNativeByteFormationStoredQueriesUseOriginalSQLiteSchema|TestNativeByteFormationNamesAndOriginalReservationGeometry|TestNativeGlobalByteTransportKeepsIndependentResponseFaultsAndAuthentication|TestNativeGlobalByteWitnessRequiresOriginalExclusiveGeometry)$'
+          go test -c -tags destination_acceptance -o "$RUNNER_TEMP/destination-global-byte.test" ./internal/app
+      - name: Actual 65-owner frozen reports, carrier/fresh byte witnesses and original SQL
+        run: |
+          set -euo pipefail
+          sudo --preserve-env=GITHUB_ACTIONS,GITHUB_REPOSITORY,RUNNER_ENVIRONMENT,RUNNER_TEMP \
+            env PSP_NATIVE_NODE_BIN="$RUNNER_TEMP/destination-node" \
+            PSP_NATIVE_CORE_VERSION=26.6.27 PSP_NATIVE_DB_KIND=${{ matrix.database }} \
+            PSP_NATIVE_LOAD_METRICS="$RUNNER_TEMP/destination-global-bootstrap-metrics.json" \
+            PSP_NATIVE_GLOBAL_BYTE_METRICS="$RUNNER_TEMP/destination-global-byte-metrics.json" \
+            "$RUNNER_TEMP/destination-global-byte.test" \
+              -test.v=test2json -test.run '^TestNativeDestinationGlobalBytePressure$' -test.timeout=20m 2>&1 \
+            | go tool test2json -t -p github.com/KazuhaHub/passwall-sub-panel/internal/app \
+            | node deploy/destination-acceptance.mjs sanitize > "$RUNNER_TEMP/destination-global-byte-tests.json"
+          node deploy/destination-global-byte.mjs "$RUNNER_TEMP/destination-global-byte-tests.json" "$RUNNER_TEMP/destination-global-byte-metrics.json" "$RUNNER_TEMP/destination-global-bootstrap-metrics.json" "${{ matrix.database }}"
+      - name: Keep numeric original byte pressure evidence, with batch/key/full completion still zero
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.evidence_prefix }}-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/destination-global-byte-tests.json
+            ${{ runner.temp }}/destination-global-byte-metrics.json
+            ${{ runner.temp }}/destination-global-bootstrap-metrics.json
           if-no-files-found: error
           retention-days: 7

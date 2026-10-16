@@ -24,12 +24,26 @@ export const idleCostNames = Object.freeze(['TestNativeDestinationIdleCost'])
 export const globalBootstrapNames = Object.freeze(['TestNativeDestinationGlobalCohortBootstrap'])
 export const globalBatchNames = Object.freeze(['TestNativeDestinationGlobalBatchPressure'])
 export const byteFormationNames = Object.freeze(['TestNativeDestinationByteFormation'])
+export const globalByteNames = Object.freeze(['TestNativeDestinationGlobalBytePressure'])
 export const blockOverflowNames = Object.freeze(['TestNativeDestinationBlockOverflow', 'TestNativeDestinationBlockOverflow/block_overflow'])
 export const remoteUpgradeCases = Object.freeze(['candidate_policy', 'health_failure_restore', 'published_rollback', 'restart_recovery', 'idempotent_replay'])
 const dockerUpgradeNames = ['TestNativePublishedDockerRollback', ...remoteUpgradeCases.map(name => `TestNativePublishedDockerRollback/${name}`)]
 const remoteUpgradeNames = ['TestNativePublishedRemoteRollback', ...remoteUpgradeCases.map(name => `TestNativePublishedRemoteRollback/${name}`)]
-const names = [...xrayNames, ...singBoxNames, ...guardedSingBoxNames, ...legacyUpgradeNames, ...remoteUpgradeNames, ...dockerUpgradeNames, ...fleetNames, ...loadNames, ...trialLoadNames, ...blockOverflowNames, ...mixedPressureNames, ...idleCostNames, ...globalBootstrapNames, ...globalBatchNames, ...byteFormationNames]
+const names = [...xrayNames, ...singBoxNames, ...guardedSingBoxNames, ...legacyUpgradeNames, ...remoteUpgradeNames, ...dockerUpgradeNames, ...fleetNames, ...loadNames, ...trialLoadNames, ...blockOverflowNames, ...mixedPressureNames, ...idleCostNames, ...globalBootstrapNames, ...globalBatchNames, ...byteFormationNames, ...globalByteNames]
 const diagnostics = Object.freeze({
+  'global byte priming traffic failed': 'global_byte_prime_traffic_failed',
+  'global byte traffic exceeded original 75-second formation budget': 'global_byte_formation_budget_failed',
+  'global byte real formation traffic failed': 'global_byte_formation_traffic_failed',
+  'timed out waiting for global byte current policies and paired 200-user rosters': 'global_byte_receipt_timeout',
+  'timed out waiting for global byte warmup fully drained': 'global_byte_warmup_timeout',
+  'timed out waiting for global byte first class frozen in every actual owner': 'global_byte_prime_timeout',
+  'timed out waiting for global byte first packets durable in original SQL': 'global_byte_first_durable_timeout',
+  'timed out waiting for global byte original live keys retained behind frozen packets': 'global_byte_live_keys_timeout',
+  'global byte carrier fault exceeded original window': 'global_byte_carrier_fault_window_failed',
+  'timed out waiting for global byte carrier admission-time exclusive refusals': 'global_byte_carrier_witness_timeout',
+  'timed out waiting for global byte fresh owner four original exclusive witnesses': 'global_byte_fresh_witness_timeout',
+  'global byte original SQL hold or control path failed': 'global_byte_sql_or_control_failed',
+  'timed out waiting for global byte canonical recovery and all independent ledgers drain': 'global_byte_drain_timeout',
   'read original stored formation events': 'byte_formation_stored_query_failed',
   'warm original byte formation route': 'byte_formation_warm_route_failed',
   'verify independent actual control target': 'byte_formation_control_failed',
@@ -435,6 +449,7 @@ export function checkDestinationMixedPressureResults(input) { checkCases(input, 
 export function checkDestinationIdleCostResults(input) { checkCases(input, idleCostNames) }
 export function checkDestinationGlobalBootstrapResults(input) { checkCases(input, globalBootstrapNames) }
 export function checkDestinationGlobalBatchResults(input) { checkCases(input, globalBatchNames) }
+export function checkDestinationGlobalByteResults(input) { checkCases(input, globalByteNames) }
 export function checkDestinationBlockOverflowResults(input) { checkCases(input, blockOverflowNames) }
 export function checkRemoteUpgradeResults(input) { checkCases(input, remoteUpgradeNames) }
 export function checkDockerUpgradeResults(input) { checkCases(input, dockerUpgradeNames) }

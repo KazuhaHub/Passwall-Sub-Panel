@@ -72,10 +72,35 @@ func (o *nativeGlobalSyncObservation) facts() map[string]int64 {
 // the original wire bytes and headers before the unchanged authenticated route;
 // unknown, malformed or oversized reports retain production rejection behavior.
 func nativeGlobalMixedTransport(original http.Handler, peers []*nativeGlobalPeer) (http.Handler, error) {
+	return nativeGlobalRoutedTransport(original, peers, func(peer *nativeGlobalPeer, handler http.Handler) http.Handler {
+		return peer.sync.handler(peer.probe.handler(handler))
+	})
+}
+
+// Keep the checked wire router shared, but let byte formation use its response
+// fault instead of the batch driver's before-forwarding partition. The latter
+// cannot prove that a first packet was already durable before its ACK was lost.
+func nativeGlobalByteTransport(original http.Handler, peers []*nativeGlobalPeer, faults []*nativeByteResponseFault) (http.Handler, error) {
+	if len(faults) != len(peers) {
+		return nil, errors.New("global byte transport fault binding invalid; private content withheld")
+	}
+	byAgent := make(map[string]*nativeByteResponseFault, len(faults))
+	for i, fault := range faults {
+		if fault == nil || peers[i] == nil || peers[i].agent == nil || fault.agent == "" || fault.agent != peers[i].agent.AgentID || byAgent[fault.agent] != nil {
+			return nil, errors.New("global byte transport fault binding invalid; private content withheld")
+		}
+		byAgent[fault.agent] = fault
+	}
+	return nativeGlobalRoutedTransport(original, peers, func(peer *nativeGlobalPeer, handler http.Handler) http.Handler {
+		return peer.sync.handler(byAgent[peer.agent.AgentID].handler(handler))
+	})
+}
+
+func nativeGlobalRoutedTransport(original http.Handler, peers []*nativeGlobalPeer, wrap func(*nativeGlobalPeer, http.Handler) http.Handler) (http.Handler, error) {
 	fail := func() (http.Handler, error) {
 		return nil, errors.New("global transport peer binding invalid; private content withheld")
 	}
-	if original == nil || len(peers) == 0 {
+	if original == nil || len(peers) == 0 || len(peers) > 65 || wrap == nil {
 		return fail()
 	}
 	handlers := make(map[string]http.Handler, len(peers))
@@ -83,7 +108,10 @@ func nativeGlobalMixedTransport(original http.Handler, peers []*nativeGlobalPeer
 		if peer == nil || peer.agent == nil || peer.agent.AgentID == "" || peer.probe == nil || peer.probe.agent != peer.agent.AgentID || handlers[peer.agent.AgentID] != nil {
 			return fail()
 		}
-		handlers[peer.agent.AgentID] = peer.sync.handler(peer.probe.handler(original))
+		handlers[peer.agent.AgentID] = wrap(peer, original)
+		if handlers[peer.agent.AgentID] == nil {
+			return fail()
+		}
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/node/sync" || r.Method != http.MethodPost {
@@ -112,6 +140,93 @@ func nativeGlobalMixedTransport(original http.Handler, peers []*nativeGlobalPeer
 type nativeGlobalTransportReadError struct{ err error }
 
 func (r nativeGlobalTransportReadError) Read([]byte) (int, error) { return 0, r.err }
+
+func TestNativeGlobalByteTransportKeepsIndependentResponseFaultsAndAuthentication(t *testing.T) {
+	f := buildDestinationPolicyFixture(t)
+	secret := "fixture-global-byte-independent-credential"
+	digest := sha256.Sum256([]byte(secret))
+	other := &domain.NodeAgent{AgentID: "agt_global_byte_transport", Epoch: 1, CredentialSHA256: hex.EncodeToString(digest[:]), DesiredCoreEngine: domain.NodeCoreXray, DesiredCoreVersion: "26.6.27"}
+	panel := &domain.Panel{Name: "Owned byte transport peer", Kind: domain.PanelKindPSP, URL: "psp://" + other.AgentID}
+	nativeMust(t, f.a.repos.NativeAgentProvisioning.Create(t.Context(), panel, other), "provision independent byte transport identity")
+	nativeMust(t, f.a.xuiPool.Add(panel), "register actual byte transport adapter")
+	peers := []*nativeGlobalPeer{{agent: f.agent, probe: newNativeMixedProbe(f.agent.AgentID)}, {agent: other, probe: newNativeMixedProbe(other.AgentID)}}
+	faults := []*nativeByteResponseFault{{agent: f.agent.AgentID}, {agent: other.AgentID}}
+	var observed, expected []byte
+	calls := 0
+	original := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		var err error
+		observed, err = io.ReadAll(r.Body)
+		nativeMust(t, err, "read private original byte transport body")
+		if !bytes.Equal(observed, expected) {
+			t.Fatal("global byte response fault changed the original request")
+		}
+		r.Body = io.NopCloser(bytes.NewReader(observed))
+		f.a.server.Handler.ServeHTTP(w, r)
+	})
+	handler, err := nativeGlobalByteTransport(original, peers, faults)
+	nativeMust(t, err, "bind independent original byte response faults")
+	send := func(owner int, credential string, change bool) *httptest.ResponseRecorder {
+		t.Helper()
+		report := f.report
+		report.AgentID = peers[owner].agent.AgentID
+		report.Audit = fixtureAudit(t, f, 1)
+		if change {
+			report.Audit.BatchID = strings.Repeat("f", 32)
+		}
+		wire, err := json.Marshal(report)
+		nativeMust(t, err, "encode original byte transport report")
+		expected = append(append([]byte(" \n"), wire...), '\n')
+		r := httptest.NewRequest(http.MethodPost, "/v1/node/sync", bytes.NewReader(expected))
+		r.Header.Set("Authorization", "Bearer "+credential)
+		r.Header.Set("Content-Type", "application/json")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, r)
+		return response
+	}
+	credentials := []string{f.credential, secret}
+	for i, fault := range faults {
+		// The old batch partition is armed deliberately: byte routing must never
+		// enter it, or the real authenticated original handler would not run.
+		peers[i].probe.start = time.Now()
+		if _, valid := fault.arm(); !valid || send(i, credentials[i], false).Code != http.StatusServiceUnavailable {
+			t.Fatal("global byte transport failed to suppress the actual success response")
+		}
+	}
+	if calls != 2 {
+		t.Fatal("byte transport reused the before-forwarding batch partition")
+	}
+	faults[0].release()
+	if send(0, credentials[0], false).Code != http.StatusOK || send(1, credentials[1], false).Code != http.StatusServiceUnavailable {
+		t.Fatal("releasing a carrier also released the independently reserved owner")
+	}
+	first, _, valid := faults[0].snapshot()
+	fresh, _, freshValid := faults[1].snapshot()
+	if !valid || !freshValid || first.Recovered[0] != 1 || fresh.Recovered[0] != 0 || fresh.FrozenRetries[0] != 1 {
+		t.Fatal("global response routing attributed canonical recovery to the wrong owner")
+	}
+	faults[1].release()
+	if send(1, credentials[1], false).Code != http.StatusOK || send(1, credentials[1], true).Code != http.StatusOK {
+		t.Fatal("reserved owner could not recover its original canonical report")
+	}
+	fresh, _, freshValid = faults[1].snapshot()
+	if !freshValid || fresh.Recovered[0] != 1 || fresh.NewPackets[0] != 1 || fresh.OriginalError != 0 {
+		t.Fatal("reserved owner's original recovery/new-packet facts are incomplete")
+	}
+	// Original authentication failures remain failures even while a different
+	// response fault is still active; they cannot be recorded as suppressed 200s.
+	if response := send(0, "invalid-owned-credential", false); response.Code == http.StatusOK || response.Code == http.StatusServiceUnavailable {
+		t.Fatal("global byte transport hid original credential rejection")
+	}
+	if calls != 7 {
+		t.Fatal("global byte transport did not forward each exact original invocation")
+	}
+	for _, invalid := range [][]*nativeByteResponseFault{nil, {nil, faults[1]}, {faults[1], faults[0]}, {faults[0], faults[0]}} {
+		if _, err := nativeGlobalByteTransport(original, peers, invalid); err == nil {
+			t.Fatal("global byte transport accepted an absent, duplicate or mismatched fault")
+		}
+	}
+}
 
 func TestNativeGlobalTransportKeepsProductionAuthenticationAndExactBodies(t *testing.T) {
 	var observation nativeGlobalSyncObservation

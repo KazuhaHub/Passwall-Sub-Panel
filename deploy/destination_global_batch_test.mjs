@@ -30,12 +30,14 @@ test('global batch proof requires all actual owners, capacity and ledger facts a
 
 test('global batch driver uses real 65-owner traffic and original storage, with three owned databases',()=>{
   const source=readFileSync(new URL('../internal/app/destination_native_global_batch_test.go',import.meta.url),'utf8')
-  for(const required of ['nativeBootstrapGlobalCohort','auditMetrics: true','nativeGlobalMixedTransport(timed, peers)','nativePrepareTrialLoad','nativeMutationReceiptMatches','nativeCollectionReceiptMatches','storage.pause()','storage.resume(pause)','nativeVLESSHost','nativeLoadBlockedRequest','lane.BatchLimit','lane.ByteLimit','m.Saturation++','nativeMixedIngressBetween','sql(nativeMixedLossSQL)','queueFull[i] += loss.Rows']) assert(source.includes(required))
+  const collection=readFileSync(new URL('../internal/app/destination_native_global_collection_test.go',import.meta.url),'utf8')
+  for(const required of ['nativeBootstrapGlobalCohort','auditMetrics: true','nativeGlobalMixedTransport(timed, peers)','nativePrepareTrialLoad','nativeGlobalCollectionPublication(t, cohort, token)','collectionReady(users, group.ID)','storage.pause()','storage.resume(pause)','nativeVLESSHost','nativeLoadBlockedRequest','lane.BatchLimit','lane.ByteLimit','m.Saturation++','nativeMixedIngressBetween','sql(nativeMixedLossSQL)','queueFull[i] += loss.Rows']) assert(source.includes(required))
+  for(const required of ['nativeMutationReceiptMatches','nativeCollectionReceiptMatches','cohort.readyReason(peer)','len(rule.Subjects) == 200','members.Clients','/api/admin/dest/publish']) assert(collection.includes(required))
   assert(source.indexOf('peer.live = nativeBindLiveCore')>source.indexOf('all real global trial policies and 200-user paired rosters'))
   assert.doesNotMatch(source,/SetSnapshot\(|\.collector\.Ack\(|runtime\.GC\(|time\.Now\(\)\.Add\(-/)
   assert(source.includes('t.Cleanup(writeMetrics)') && source.includes('m.Stage = 2\n\twriteMetrics()') && source.includes('m.Stage = 3\n\twriteMetrics()'))
   assert(source.includes('memberConcurrency: 8'))
-  assert(source.indexOf('var prior []*domain.DestAgentPolicy') < source.indexOf('for _, peer := range cohort.peers[1:]'))
+  assert(collection.indexOf('var prior []*domain.DestAgentPolicy') < collection.indexOf('for _, peer := range cohort.peers[1:]'))
   const setup=readFileSync(new URL('../internal/app/destination_native_trial_load_test.go',import.meta.url),'utf8')
   assert(setup.includes('memberConcurrency := 1') && setup.includes('memberConcurrency < 1 || memberConcurrency > 8'))
   assert(setup.includes('for range memberConcurrency') && setup.includes('members.Wait(); close(results)'))

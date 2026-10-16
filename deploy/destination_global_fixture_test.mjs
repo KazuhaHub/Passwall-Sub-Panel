@@ -38,8 +38,9 @@ test('global worker scratch reuse keeps fresh requests and the original pressure
 
 test('global transport preserves raw authenticated bodies and delegates unknown input', () => {
   const source = readFileSync(new URL('../internal/app/destination_native_global_transport_test.go', import.meta.url), 'utf8')
-  for (const required of ['peer.probe.agent != peer.agent.AgentID', 'handlers[peer.agent.AgentID] != nil', 'peer.probe.handler(original)', 'protocol.MaxSyncBodyBytes+1', 'io.NopCloser(bytes.NewReader(body))', 'nativeGlobalTransportReadError{err}', 'original.ServeHTTP(w, r)', 'f.a.server.Handler.ServeHTTP(w, r)', 'wrong-owned-fixture-credential', 'untimed transport preflight fabricated a canonical retry']) assert(source.includes(required))
-  assert.doesNotMatch(source, /\.start\s*=|\.Ack\(|SetSnapshot\(|http\.StatusOK\)/)
+  for (const required of ['peer.probe.agent != peer.agent.AgentID', 'handlers[peer.agent.AgentID] != nil', 'peer.probe.handler(handler)', 'protocol.MaxSyncBodyBytes+1', 'io.NopCloser(bytes.NewReader(body))', 'nativeGlobalTransportReadError{err}', 'original.ServeHTTP(w, r)', 'f.a.server.Handler.ServeHTTP(w, r)', 'wrong-owned-fixture-credential', 'untimed transport preflight fabricated a canonical retry']) assert(source.includes(required))
+  const implementation=source.slice(0,source.indexOf('func TestNativeGlobalByteTransport'))
+  assert.doesNotMatch(implementation, /\.start\s*=|\.Ack\(|SetSnapshot\(|http\.StatusOK\)/)
 })
 
 test('global storage hold decorates admitted real SQL without replacing production collection', () => {
