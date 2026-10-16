@@ -19,6 +19,56 @@ func nativePrimeGlobalByteOwners(ctx context.Context, owners int, send func(cont
 	return nativePrimeGlobalByteOwnersWithReady(ctx, owners, send, frozen, nil)
 }
 
+// A frozen-lane notification is bounded metadata, not an extra request queue.
+// Its single feeder may wait for bulk queue space without holding up any
+// owner's next original prime. Return only after both priming and feeding join.
+func nativePrimeGlobalByteOwnersWithQueuedReady(ctx context.Context, owners int, send func(context.Context, int, int) error, frozen func(int, int) bool, feed func(context.Context, int, int) error) error {
+	if ctx == nil || owners < 1 || owners > 65 || send == nil || frozen == nil || feed == nil {
+		return errors.New("global byte queued priming scope invalid")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	phase, cancel := context.WithCancel(ctx)
+	defer cancel()
+	type lane struct{ owner, kind int }
+	ready := make(chan lane, owners*4)
+	exited := make(chan struct{})
+	var failed sync.Once
+	var firstErr error
+	fail := func(err error) { failed.Do(func() { firstErr = err; cancel() }) }
+	go func() {
+		defer close(exited)
+		for next := range ready {
+			if err := phase.Err(); err != nil {
+				fail(err)
+				return
+			}
+			if err := feed(phase, next.owner, next.kind); err != nil {
+				fail(err)
+				return
+			}
+		}
+	}()
+	err := nativePrimeGlobalByteOwnersWithReady(phase, owners, send, frozen, func(ctx context.Context, owner, kind int) error {
+		select {
+		case ready <- lane{owner, kind}:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	})
+	if err != nil {
+		fail(err)
+	}
+	close(ready) // every serial owner has joined, so no notification can race close
+	<-exited
+	if err := phase.Err(); err != nil {
+		fail(err)
+	}
+	return firstErr
+}
+
 // Ready can feed actual traffic behind a lane's frozen original packet while
 // other lanes/owners still wait for their first packet. It runs once per lane,
 // in the same serial owner worker, under the original shared fault deadline.
@@ -79,6 +129,158 @@ func nativePrimeGlobalByteOwnersWithReady(ctx context.Context, owners int, send 
 }
 
 func TestNativeGlobalBytePrimingKeepsIndependentOwnerOrderAndDeadline(t *testing.T) {
+	t.Run("queued_ready_does_not_hold_serial_primes", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+		defer cancel()
+		entered, release, allSent, exited := make(chan struct{}), make(chan struct{}), make(chan struct{}), make(chan struct{})
+		done := make(chan error, 1)
+		var once sync.Once
+		var sent atomic.Int64
+		var calls [65]int
+		var frozen [65][4]atomic.Bool
+		var fed [65][4]int
+		go func() {
+			defer close(exited)
+			done <- nativePrimeGlobalByteOwnersWithQueuedReady(ctx, 65, func(_ context.Context, owner, kind int) error {
+				if kind != 3-calls[owner] {
+					return errors.New("queued notification reordered original primes")
+				}
+				calls[owner]++
+				if sent.Add(1) == 260 {
+					close(allSent)
+				}
+				return nil
+			}, func(owner, kind int) bool {
+				frozen[owner][kind].Store(true)
+				return true
+			}, func(ctx context.Context, owner, kind int) error {
+				once.Do(func() { close(entered) })
+				select {
+				case <-release:
+				case <-ctx.Done():
+					return ctx.Err()
+				}
+				if !frozen[owner][kind].Load() {
+					return errors.New("bulk feeder used an unfrozen lane")
+				}
+				fed[owner][kind]++
+				return nil
+			})
+		}()
+		t.Cleanup(func() { cancel(); <-exited })
+		for _, stage := range []<-chan struct{}{entered, allSent} {
+			select {
+			case <-stage:
+			case <-ctx.Done():
+				t.Fatal("blocked bulk feeder held up the original 260 serial owner primes")
+			}
+		}
+		select {
+		case <-done:
+			t.Fatal("priming returned before its owned bulk feeder joined")
+		default:
+		}
+		close(release)
+		if err := <-done; err != nil {
+			t.Fatal(err)
+		}
+		for owner := range 65 {
+			if calls[owner] != 4 || fed[owner] != [4]int{1, 1, 1, 1} {
+				t.Fatal("queued readiness omitted or duplicated an original lane")
+			}
+		}
+	})
+
+	t.Run("queued_ready_failure_cancels_and_joins", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+		defer cancel()
+		entered := make(chan struct{})
+		var active, feeds atomic.Int64
+		boom := errors.New("owned queued feeder failure")
+		err := nativePrimeGlobalByteOwnersWithQueuedReady(ctx, 2, func(ctx context.Context, owner, kind int) error {
+			active.Add(1)
+			defer active.Add(-1)
+			if owner == 0 {
+				close(entered)
+				<-ctx.Done()
+				return ctx.Err()
+			}
+			select {
+			case <-entered:
+				return nil
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}, func(int, int) bool { return true }, func(context.Context, int, int) error {
+			feeds.Add(1)
+			return boom
+		})
+		if !errors.Is(err, boom) || active.Load() != 0 || feeds.Load() != 1 || ctx.Err() != nil {
+			t.Fatal("feeder failure lost its cause, leaked a prime or cancelled the parent")
+		}
+	})
+
+	t.Run("queued_ready_cancel_joins_blocked_feeder", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		limit, stop := context.WithTimeout(t.Context(), 2*time.Second)
+		defer stop()
+		entered, feederExited, exited := make(chan struct{}), make(chan struct{}), make(chan struct{})
+		done := make(chan error, 1)
+		go func() {
+			defer close(exited)
+			done <- nativePrimeGlobalByteOwnersWithQueuedReady(ctx, 65, func(context.Context, int, int) error { return nil }, func(int, int) bool { return true }, func(ctx context.Context, _, _ int) error {
+				defer close(feederExited)
+				close(entered)
+				<-ctx.Done()
+				return ctx.Err()
+			})
+		}()
+		t.Cleanup(func() { cancel(); <-exited })
+		select {
+		case <-entered:
+		case <-limit.Done():
+			t.Fatal("queued feeder never started")
+		}
+		cancel()
+		select {
+		case err := <-done:
+			if !errors.Is(err, context.Canceled) {
+				t.Fatal("queued feeder lost cancellation")
+			}
+		case <-limit.Done():
+			t.Fatal("cancellation did not join queued priming and its blocked feeder")
+		}
+		select {
+		case <-feederExited:
+		default:
+			t.Fatal("queued priming returned with its feeder still running")
+		}
+	})
+
+	t.Run("queued_ready_invalid_scope_does_not_start", func(t *testing.T) {
+		var calls atomic.Int64
+		send := func(context.Context, int, int) error { calls.Add(1); return nil }
+		frozen := func(int, int) bool { calls.Add(1); return true }
+		for _, owners := range []int{0, 66} {
+			if err := nativePrimeGlobalByteOwnersWithQueuedReady(t.Context(), owners, send, frozen, send); err == nil {
+				t.Fatal("invalid queued owner count started work")
+			}
+		}
+		//lint:ignore SA1012 Verify that a missing parent never starts a feeder.
+		if err := nativePrimeGlobalByteOwnersWithQueuedReady(nil, 1, send, frozen, send); err == nil {
+			t.Fatal("missing queued parent started work")
+		}
+		if nativePrimeGlobalByteOwnersWithQueuedReady(t.Context(), 1, nil, frozen, send) == nil || nativePrimeGlobalByteOwnersWithQueuedReady(t.Context(), 1, send, nil, send) == nil || nativePrimeGlobalByteOwnersWithQueuedReady(t.Context(), 1, send, frozen, nil) == nil {
+			t.Fatal("missing queued callback started work")
+		}
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
+		if err := nativePrimeGlobalByteOwnersWithQueuedReady(ctx, 1, send, frozen, send); !errors.Is(err, context.Canceled) || calls.Load() != 0 {
+			t.Fatal("invalid or cancelled queued scope invoked callbacks")
+		}
+	})
+
 	t.Run("independent_owner_order", func(t *testing.T) {
 		ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 		defer cancel()

@@ -382,12 +382,14 @@ func TestNativeDestinationGlobalBytePressure(t *testing.T) {
 	// deadline. Feed each lane only after its original packet froze, so live
 	// keys can form while other owners/lanes still wait. First SQL durability
 	// and every live-key witness still precede the original SQL hold.
+	// Readiness announces at most 260 frozen lanes to one joined feeder;
+	// waiting for bulk queue space cannot hold an owner's next prime.
 	var primeProbes [65]nativeVLESSWorkerProbe
 	primed := make(chan error, 1)
 	primingExited := make(chan struct{})
 	go func() {
 		defer close(primingExited)
-		primed <- nativePrimeGlobalByteOwnersWithReady(ctx, 65, func(ctx context.Context, owner, kind int) error {
+		primed <- nativePrimeGlobalByteOwnersWithQueuedReady(ctx, 65, func(ctx context.Context, owner, kind int) error {
 			attempted[owner][kind].Add(1)
 			err := send(ctx, owner, kind, 1, &primeProbes[owner])
 			if err != nil {

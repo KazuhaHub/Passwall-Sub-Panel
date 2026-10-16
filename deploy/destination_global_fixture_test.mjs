@@ -45,11 +45,15 @@ test('global and mixed worker scratch reuse keeps fresh requests and the origina
   for (const required of ['for range 768', 'make(chan job, 2048)', '[]int{8, 4, 11, 10}', 'time.Since(start) / time.Second', 'windows[j.kind][second].Add(1)', 'start.Add(90 * time.Second)']) assert(mixed.includes(required))
   for (const required of ['const seconds, rate = 120, 10', 'make(chan job, 4096)', 'for range 512', 'm.TrafficMS > (seconds+10)*1000', 'nativePressureBlockRequest(f.user.UUID, name(0, j.seq), blockPort)', 'users[j.seq%200].UUID']) assert(driver.includes(required))
   const byte = readFileSync(new URL('../internal/app/destination_native_global_byte_test.go', import.meta.url), 'utf8')
-  for (const required of ['requests := make(chan struct{}, 512)', 'case requests <- struct{}{}:', 'defer func() { <-requests }()', 'make(chan job, 4096)', 'for range 512', 'nativePrimeGlobalByteOwnersWithReady(ctx, 65', 'seq <= m.Counts[kind]+1', 'start.Add(75 * time.Second)', 'm.FaultMS > 76000', '<-primingExited', 'progress := time.NewTicker(time.Second)']) assert(byte.includes(required))
-  assert(byte.indexOf('make(chan job, 4096)') < byte.indexOf('primed <- nativePrimeGlobalByteOwnersWithReady'))
+  for (const required of ['requests := make(chan struct{}, 512)', 'case requests <- struct{}{}:', 'defer func() { <-requests }()', 'make(chan job, 4096)', 'for range 512', 'nativePrimeGlobalByteOwnersWithQueuedReady(ctx, 65', 'seq <= m.Counts[kind]+1', 'start.Add(75 * time.Second)', 'm.FaultMS > 76000', '<-primingExited', 'progress := time.NewTicker(time.Second)']) assert(byte.includes(required))
+  assert(byte.indexOf('make(chan job, 4096)') < byte.indexOf('primed <- nativePrimeGlobalByteOwnersWithQueuedReady'))
   const priming = readFileSync(new URL('../internal/app/destination_native_global_prime_test.go', import.meta.url), 'utf8')
   assert(priming.indexOf('if frozen(owner, kind)') < priming.indexOf('ready(phase, owner, kind)'))
   for (const required of ['ready_pipelines_only_frozen_owner_lanes', 'ready_failure_cancels_and_joins']) assert(priming.includes(required))
+  const queued = priming.split('func nativePrimeGlobalByteOwnersWithQueuedReady(')[1].split('// Ready can feed')[0]
+  for (const required of ['owners > 65', 'make(chan lane, owners*4)', 'defer close(exited)', 'feed(phase, next.owner, next.kind)', 'nativePrimeGlobalByteOwnersWithReady(phase, owners, send, frozen', 'case ready <- lane{owner, kind}', 'case <-ctx.Done():', 'close(ready)', '<-exited', 'firstErr = err; cancel()']) assert(queued.includes(required))
+  assert(!queued.includes('context.WithTimeout') && !queued.includes('context.WithDeadline') && !queued.includes('make(chan job'))
+  for (const required of ['queued_ready_does_not_hold_serial_primes', 'queued_ready_failure_cancels_and_joins', 'queued_ready_cancel_joins_blocked_feeder', 'queued_ready_invalid_scope_does_not_start']) assert(priming.includes(required))
   assert(workflow.includes('TestNativeGlobalWorkerProbeKeepsFreshConnectionsAndResponseSemantics'))
   const blocked = readFileSync(new URL('../internal/app/destination_native_load_test.go', import.meta.url), 'utf8').split('func nativeLoadBlockedRequestFailure(')[1].split('func nativeLoadSampler(')[0]
   for (const source of [probe, blocked]) {
