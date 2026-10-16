@@ -400,42 +400,27 @@ func TestNativeDestinationGlobalBatchPressure(t *testing.T) {
 		}
 	}()
 	t.Cleanup(func() { cancel(); <-observationsDone })
-	// Spread the same deliveries across the original enqueue window instead of
-	// a 2665-job FIFO burst once a second. Keep all 512 workers, the queue bound,
-	// per-owner totals, first/final enqueue and strict 120s/130s traffic gates.
+	// Keep the original owner/lane/control event order and every enqueue
+	// deadline, but do not let serial process inspection stall that clock.
 	const ticks = seconds * rate
 	const lastSend = (seconds - 1) * time.Second
-	for tick := 0; tick < ticks; tick++ {
-		if delay := time.Until(start.Add(time.Duration(tick) * lastSend / (ticks - 1))); delay > 0 {
-			time.Sleep(delay)
+	traffic, err := nativeStartGlobalTraffic(ctx, start, func(_ context.Context, owner, kind, seq int) {
+		select {
+		case jobs <- job{owner, kind, seq}:
+		default:
+			queueFailures[kind].Add(1)
+			failures.Add(1)
 		}
-		for owner, peer := range cohort.peers {
-			if tick%rate == 0 {
-				peer.live()
-			}
-			for kind := range 4 {
-				select {
-				case jobs <- job{owner, kind, tick}:
-				default:
-					queueFailures[kind].Add(1)
-					failures.Add(1)
-				}
-			}
-			if tick%rate == 0 {
-				select {
-				case jobs <- job{owner, 4, tick / rate}:
-				default:
-					queueFailures[4].Add(1)
-					failures.Add(1)
-				}
-			}
+	}, func() { closeJobs.Do(func() { close(jobs) }); workers.Wait() })
+	nativeMust(t, err, "start fixed independent global traffic clock")
+	t.Cleanup(func() { cancel(); traffic.stop() })
+	for second := 0; second < seconds; second++ {
+		nativeMust(t, nativeDayWait(ctx, start.Add(time.Duration(second*rate)*lastSend/(ticks-1))), "observe original global process-check deadline")
+		for _, peer := range cohort.peers {
+			peer.live()
 		}
 	}
-	if delay := time.Until(start.Add(seconds * time.Second)); delay > 0 {
-		time.Sleep(delay)
-	}
-	closeJobs.Do(func() { close(jobs) })
-	workers.Wait()
+	nativeMust(t, traffic.wait(), "join original global traffic queue and workers")
 	m.TrafficMS, m.Failures = time.Since(start).Milliseconds(), failures.Load()
 	m.SQLHeld, m.SQLEarly = storage.blocked.Load()-beforeHeld, storage.begins.Load()-beforeBegins
 	storage.resume(pause)
