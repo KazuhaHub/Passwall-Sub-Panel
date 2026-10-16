@@ -166,11 +166,15 @@ func TestNativeGlobalByteTransportKeepsIndependentResponseFaultsAndAuthenticatio
 	})
 	handler, err := nativeGlobalByteTransport(original, peers, faults)
 	nativeMust(t, err, "bind independent original byte response faults")
+	frozenAudit := fixtureAudit(t, f, 1)
 	send := func(owner int, credential string, change bool) *httptest.ResponseRecorder {
 		t.Helper()
 		report := f.report
 		report.AgentID = peers[owner].agent.AgentID
-		report.Audit = fixtureAudit(t, f, 1)
+		// Repeated original wire reports must preserve event timestamps too.
+		// Only the explicit next-packet vector changes the immutable batch ID.
+		audit := *frozenAudit
+		report.Audit = &audit
 		if change {
 			report.Audit.BatchID = strings.Repeat("f", 32)
 		}
