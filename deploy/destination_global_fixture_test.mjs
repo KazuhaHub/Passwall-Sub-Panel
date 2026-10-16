@@ -71,3 +71,16 @@ test('authenticated admission evidence keeps original App assembly and executes 
   assert(body.includes('go test -race -v -count=1 -timeout=4m -tags destination_acceptance ./internal/app'))
   assert(body.includes('AdmissionObserverKeepsAuthenticationRetryAndSQL'))
 })
+
+test('real cohort canonical attribution rejects overlap and retains original routing and pressure gates', () => {
+  const binding = readFileSync(new URL('../internal/app/destination_native_admission_binding_test.go', import.meta.url), 'utf8')
+  for (const required of ['protocol.ValidateAuditObservation(*report.Audit)', 'sha256.Sum256(canonical)', 'owner.inflight != 1', 'c.events != 1', 'p.CandidateBytes != c.size', 'owner.panel != e.PanelID', 'p.OwnerBatches == 0 && p.Batches < p.BatchLimit', 'p.CandidateBytes > p.ByteLimit-p.Bytes', 'owner.digests[i] == c.digest', 'original.ServeHTTP(response, r)', 'nativeGlobalTransportReadError{err}', 'overlap_preserves_both_requests']) assert(binding.includes(required))
+  assert.doesNotMatch(binding, /SetSnapshot\(|\.collector\.Ack\(|\.Offer\(|time\.Sleep\(/)
+  const cohort = readFileSync(new URL('../internal/app/destination_native_global_cohort_test.go', import.meta.url), 'utf8')
+  assert(cohort.includes('options.admission.observe') && cohort.includes('options.admission.handler(handler, peers)'))
+  assert(cohort.indexOf('options.admission.handler(handler, peers)') < cohort.indexOf('options.transport(handler, peers)'))
+  const driver = readFileSync(new URL('../internal/app/destination_native_global_batch_test.go', import.meta.url), 'utf8')
+  assert(driver.includes('admission: admission') && driver.includes('admission.snapshot(peer.agent.AgentID)'))
+  const workflow = readFileSync(new URL('../.github/workflows/test.yml', import.meta.url), 'utf8')
+  assert(workflow.includes('AdmissionBindingRejectsAmbiguousEvidence'))
+})

@@ -13,6 +13,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/adapters/sqlstore"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/config"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/destaudit"
 )
 
 func buildNativeDestinationPolicyFixture(t *testing.T) destinationPolicyFixture {
@@ -20,6 +21,10 @@ func buildNativeDestinationPolicyFixture(t *testing.T) destinationPolicyFixture 
 }
 
 func buildNativeDestinationPolicyFixtureWithAuditStore(t *testing.T, decorate func(ports.DestAuditStore) ports.DestAuditStore) destinationPolicyFixture {
+	return buildNativeDestinationPolicyFixtureWithAuditObserver(t, decorate, nil)
+}
+
+func buildNativeDestinationPolicyFixtureWithAuditObserver(t *testing.T, decorate func(ports.DestAuditStore) ports.DestAuditStore, observe func(destaudit.Event)) destinationPolicyFixture {
 	t.Helper()
 	if os.Geteuid() != 0 || os.Getenv("GITHUB_ACTIONS") != "true" || os.Getenv("RUNNER_ENVIRONMENT") != "github-hosted" || os.Getenv("GITHUB_REPOSITORY") != "KazuhaHub/Passwall-Sub-Panel" || os.Getenv("PSP_NATIVE_DB_DSN") != "" {
 		t.Fatal("native database fixture requires the dedicated disposable hosted job")
@@ -30,7 +35,12 @@ func buildNativeDestinationPolicyFixtureWithAuditStore(t *testing.T, decorate fu
 		ConfigDir: filepath.Join(directory, "config"), DataDir: filepath.Join(directory, "data"),
 	})
 	nativeMust(t, err, "select owned native database")
-	a, err := buildWithDestinationAuditStore(t.Context(), &cfg, decorate)
+	var a *App
+	if observe == nil {
+		a, err = buildWithDestinationAuditStore(t.Context(), &cfg, decorate)
+	} else {
+		a, err = buildWithDestinationAuditObserver(t.Context(), &cfg, decorate, observe)
+	}
 	nativeMust(t, err, "build native database fixture")
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

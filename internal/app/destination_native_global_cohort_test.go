@@ -40,6 +40,7 @@ type nativeGlobalPeer struct {
 
 type nativeGlobalCohortOptions struct {
 	decorate     func(ports.DestAuditStore) ports.DestAuditStore
+	admission    *nativeAdmissionBinding
 	auditMetrics bool
 	transport    func(http.Handler, []*nativeGlobalPeer) http.Handler
 }
@@ -70,7 +71,12 @@ func nativeBootstrapGlobalCohort(t *testing.T, options nativeGlobalCohortOptions
 	if e1 != nil || e2 != nil || root != dir || filepath.Base(evidence) != "destination-global-bootstrap-metrics.json" || !filepath.IsAbs(binary) || filepath.Base(binary) != "destination-node" || err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0022 != 0 || os.Getenv("PSP_NATIVE_CORE_VERSION") != "26.6.27" {
 		t.Fatal("global bootstrap requires the immutable hosted candidate and owned evidence")
 	}
-	f := buildNativeDestinationPolicyFixtureWithAuditStore(t, options.decorate)
+	var f destinationPolicyFixture
+	if options.admission == nil {
+		f = buildNativeDestinationPolicyFixtureWithAuditStore(t, options.decorate)
+	} else {
+		f = buildNativeDestinationPolicyFixtureWithAuditObserver(t, options.decorate, options.admission.observe)
+	}
 	a := f.a
 	gate, err := newNativeGlobalAuditStart(a.destAudit)
 	nativeMust(t, err, "bind actual global audit runner")
@@ -168,6 +174,10 @@ func nativeBootstrapGlobalCohort(t *testing.T, options nativeGlobalCohortOptions
 	})
 	m.Stage = 3
 	handler := a.server.Handler
+	if options.admission != nil {
+		handler, err = options.admission.handler(handler, peers)
+		nativeMust(t, err, "bind canonical admission events to checked actual owners")
+	}
 	if options.transport != nil {
 		handler = options.transport(handler, peers)
 	}

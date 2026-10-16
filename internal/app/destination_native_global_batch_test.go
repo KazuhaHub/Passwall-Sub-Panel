@@ -123,7 +123,9 @@ func TestNativeDestinationGlobalBatchPressure(t *testing.T) {
 	}
 	t.Cleanup(writeMetrics)
 	var storage *nativeGlobalAuditStorage
+	admission := &nativeAdmissionBinding{}
 	cohort := nativeBootstrapGlobalCohort(t, nativeGlobalCohortOptions{
+		admission: admission,
 		decorate: func(original ports.DestAuditStore) ports.DestAuditStore {
 			storage = &nativeGlobalAuditStorage{DestAuditStore: original}
 			return storage
@@ -606,6 +608,10 @@ func TestNativeDestinationGlobalBatchPressure(t *testing.T) {
 				}
 			}
 			row := nativeGlobalBatchOwner{Ordinal: owner, Controls: controls[owner].Load(), Frozen: frozen, Retried: retried, Node: reading, Ledgers: []nativeMixedLedger{}}
+			if _, valid := admission.snapshot(peer.agent.AgentID); !valid {
+				drainReason = "admission_binding"
+				return false
+			}
 			for i := range 4 {
 				row.Delivered[i] = delivered[owner][i].Load()
 				drainReason = "frozen_retry"

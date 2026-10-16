@@ -26,11 +26,13 @@ import (
 func TestNativeGlobalAdmissionObserverKeepsAuthenticationRetryAndSQL(t *testing.T) {
 	events := make(chan destaudit.Event, 128)
 	var overflow atomic.Bool
+	binding := &nativeAdmissionBinding{}
 	directory := t.TempDir()
 	a, err := buildWithDestinationAuditObserver(t.Context(), &config.Config{
 		Listen: "127.0.0.1:0", JWTSecret: strings.Repeat("j", 48), EncryptionKey: strings.Repeat("e", 48),
 		ConfigDir: filepath.Join(directory, "config"), DataDir: filepath.Join(directory, "data"),
 	}, nil, func(e destaudit.Event) {
+		binding.observe(e)
 		select {
 		case events <- e:
 		default:
@@ -45,6 +47,9 @@ func TestNativeGlobalAdmissionObserverKeepsAuthenticationRetryAndSQL(t *testing.
 		sqlstore.ConfigureSecretKey("")
 	})
 	f := seedDestinationPolicyFixture(t, a)
+	bound, err := binding.handler(a.server.Handler, []*nativeGlobalPeer{{agent: f.agent}})
+	nativeMust(t, err, "bind original authenticated route to canonical observations")
+	a.server.Handler = bound
 	gate, err := newNativeGlobalAuditStart(a.destAudit)
 	nativeMust(t, err, "hold original collector lifecycle")
 	a.destAudit = gate
@@ -168,5 +173,9 @@ func TestNativeGlobalAdmissionObserverKeepsAuthenticationRetryAndSQL(t *testing.
 	nativeMust(t, a.database.QueryRowContext(t.Context(), "SELECT SUM(rows) FROM dest_audit_loss_hourly WHERE reason = 'queue_full'").Scan(&loss), "read original queue rejection loss rows")
 	if count != 5 || loss != 2 || gate.Pressure()[0].Batches != 0 || overflow.Load() {
 		t.Fatal("observed admissions did not reconcile with original SQL and loss rows")
+	}
+	facts, valid := binding.snapshot(f.agent.AgentID)
+	if !valid || facts.Accepted != [4]uint64{5} || facts.Rejected != [4]uint64{2} || facts.Retried != [4]uint64{1} || facts.ByteExclusive != [4]uint64{} || facts.Last[0].Bytes != canonicalBytes {
+		t.Fatal("canonical request binding changed authentication, retry or rejection attribution")
 	}
 }

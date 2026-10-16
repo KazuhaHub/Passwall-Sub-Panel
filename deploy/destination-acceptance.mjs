@@ -29,7 +29,7 @@ const dockerUpgradeNames = ['TestNativePublishedDockerRollback', ...remoteUpgrad
 const remoteUpgradeNames = ['TestNativePublishedRemoteRollback', ...remoteUpgradeCases.map(name => `TestNativePublishedRemoteRollback/${name}`)]
 const names = [...xrayNames, ...singBoxNames, ...guardedSingBoxNames, ...legacyUpgradeNames, ...remoteUpgradeNames, ...dockerUpgradeNames, ...fleetNames, ...loadNames, ...trialLoadNames, ...blockOverflowNames, ...mixedPressureNames, ...idleCostNames, ...globalBootstrapNames, ...globalBatchNames]
 const diagnostics = Object.freeze({
-  ...Object.fromEntries(['state', 'node_samples', 'sample_window', 'access_quiescence', 'frozen_retry', 'ingress_accounting', 'usage_read', 'hit_read', 'budget_read', 'loss_query', 'loss_scan', 'loss_cursor', 'ledger_accounting', 'node_pending', 'psp_pending'].map(reason => [`global batch drain: ${reason}\n`, `global_batch_drain_${reason}`])),
+  ...Object.fromEntries(['state', 'node_samples', 'sample_window', 'access_quiescence', 'frozen_retry', 'ingress_accounting', 'usage_read', 'hit_read', 'budget_read', 'loss_query', 'loss_scan', 'loss_cursor', 'ledger_accounting', 'node_pending', 'psp_pending', 'admission_binding'].map(reason => [`global batch drain: ${reason}\n`, `global_batch_drain_${reason}`])),
   'timed out waiting for global real canonical retry, SQL drain and all owner loss ledgers': 'global_batch_drain_timeout',
   'native setup stage: administrator\n': 'global_setup_stage_administrator',
   'native setup stage: allowed_target\n': 'global_setup_stage_allowed_target',

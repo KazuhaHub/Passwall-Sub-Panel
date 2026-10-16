@@ -254,7 +254,7 @@ test('global drain diagnostics preserve bounded failure facts without private ou
     assert(!result.includes('private-path'))
     facts.push(event)
   }
-  for (const reason of ['state', 'node_samples', 'sample_window', 'access_quiescence', 'frozen_retry', 'ingress_accounting', 'usage_read', 'hit_read', 'budget_read', 'loss_query', 'loss_scan', 'loss_cursor', 'ledger_accounting', 'node_pending', 'psp_pending']) {
+  for (const reason of ['state', 'node_samples', 'sample_window', 'access_quiescence', 'frozen_retry', 'ingress_accounting', 'usage_read', 'hit_read', 'budget_read', 'loss_query', 'loss_scan', 'loss_cursor', 'ledger_accounting', 'node_pending', 'psp_pending', 'admission_binding']) {
     const result = sanitizeDestinationResults(encode([{ Action: 'output', Output: `private-path:4: global batch drain: ${reason}\n` }]))
     const event = JSON.parse(result)
     assert.equal(event.Diagnostic, `global_batch_drain_${reason}`)
