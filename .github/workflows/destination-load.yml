@@ -743,6 +743,9 @@ jobs:
             for name in destination-global-process-resources.json destination-global-process-resources.stop; do
               test ! -e "$RUNNER_TEMP/$name" && test ! -L "$RUNNER_TEMP/$name"
             done
+            install -m 0600 /dev/null "$RUNNER_TEMP/destination-global-process-resources.private.log"
+            # The runner owns this private log; only /proc reads need sudo.
+            # shellcheck disable=SC2024
             sudo --preserve-env=GITHUB_ACTIONS,RUNNER_TEMP python3 deploy/native_process_resources.py --root "$RUNNER_TEMP" > "$RUNNER_TEMP/destination-global-process-resources.private.log" 2>&1 &
             resource_pid=$!
           fi
