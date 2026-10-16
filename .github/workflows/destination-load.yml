@@ -949,7 +949,7 @@ jobs:
           set -euo pipefail
           node --test deploy/destination_global_byte_test.mjs deploy/destination_byte_formation_test.mjs
           go test -race -v -count=1 -timeout=4m -tags destination_acceptance ./internal/app \
-            -run '^(TestNativeByteResponseFaultPreservesOriginalHandlerAndCanonicalRetries|TestNativeByteFormationStoredQueriesUseOriginalSQLiteSchema|TestNativeByteFormationNamesAndOriginalReservationGeometry|TestNativeGlobalByteTransportKeepsIndependentResponseFaultsAndAuthentication|TestNativeGlobalByteWitnessRequiresOriginalExclusiveGeometry|TestNativeGlobalByteLossLedgerRejectsUnboundAndUnexpectedLosses)$'
+            -run '^(TestNativeByteResponseFaultPreservesOriginalHandlerAndCanonicalRetries|TestNativeByteFormationStoredQueriesUseOriginalSQLiteSchema|TestNativeByteFormationNamesAndOriginalReservationGeometry|TestNativeGlobalByteTransportKeepsIndependentResponseFaultsAndAuthentication|TestNativeGlobalBytePrimingKeepsIndependentOwnerOrderAndDeadline|TestNativeGlobalByteWitnessRequiresOriginalExclusiveGeometry|TestNativeGlobalByteLossLedgerRejectsUnboundAndUnexpectedLosses)$'
           go test -c -tags destination_acceptance -o "$RUNNER_TEMP/destination-global-byte.test" ./internal/app
       - name: Actual 65-owner frozen reports, carrier/fresh byte witnesses and original SQL
         run: |

@@ -307,35 +307,30 @@ func TestNativeDestinationGlobalBytePressure(t *testing.T) {
 		}
 		return nativeVLESSHost(ctx, peer.node.DesiredPort, host, port, uuid, want, host)
 	}
-	// Prime each class concurrently across the real cohort, in reverse priority.
-	// Every first packet must actually be durable before SQL is held.
-	for _, kind := range []int{3, 2, 1, 0} {
-		var priming sync.WaitGroup
-		for owner := range 65 {
-			priming.Add(1)
-			go func() {
-				defer priming.Done()
-				attempted[owner][kind].Add(1)
-				if send(ctx, owner, kind, 1) != nil {
-					failures.Add(1)
-				} else {
-					delivered[owner][kind].Add(1)
-				}
-			}()
+	// Keep each owner's reverse priority, 260 original requests and the same
+	// 75s deadline. A slow owner's packet must not impose a fleet-wide barrier
+	// on the next class. All owners still finish before original SQL durability.
+	primeErr := nativePrimeGlobalByteOwners(ctx, 65, func(ctx context.Context, owner, kind int) error {
+		attempted[owner][kind].Add(1)
+		err := send(ctx, owner, kind, 1)
+		if err != nil {
+			failures.Add(1)
+		} else {
+			delivered[owner][kind].Add(1)
 		}
-		priming.Wait()
+		return err
+	}, func(owner, kind int) bool {
+		facts, packets, valid := faults[owner].snapshot()
+		return valid && packets[kind].id != "" && facts.Suppressed[kind] > 0
+	})
+	if primeErr != nil {
 		if failures.Load() != 0 {
 			t.Fatal("global byte priming traffic failed")
 		}
-		nativeWait(t, max(time.Millisecond, time.Until(faultEnd)), "global byte first class frozen in every actual owner", func() bool {
-			for _, fault := range faults {
-				facts, packets, valid := fault.snapshot()
-				if !valid || packets[kind].id == "" || facts.Suppressed[kind] == 0 {
-					return false
-				}
-			}
-			return true
-		})
+		if t.Context().Err() != nil {
+			t.Fatal("acceptance cancelled")
+		}
+		t.Fatal("timed out waiting for global byte first class frozen in every actual owner; private diagnostics withheld")
 	}
 	nativeWait(t, max(time.Millisecond, time.Until(faultEnd)), "global byte first packets durable in original SQL", func() bool {
 		for owner, fault := range faults {
