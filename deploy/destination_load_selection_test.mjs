@@ -6,7 +6,7 @@ import { test } from 'node:test'
 const workflow = readFileSync(new URL('../.github/workflows/destination-load.yml', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
 const jobs = ['webhook-load', 'idle-cost', 'queue-pressure', 'sql-pressure', 'trial-load', 'block-overflow', 'mixed-pressure', 'global-bootstrap', 'global-batch']
 const scopes = ['mixed-pressure', 'idle-cost', 'global-batch']
-const choices = ['all', ...scopes, 'global-batch-profile', 'global-receipt-profile', 'global-traffic-profile']
+const choices = ['all', ...scopes, 'global-batch-profile', 'global-receipt-profile', 'global-traffic-profile', 'byte-formation']
 const condition = "github.event_name != 'workflow_dispatch' || (inputs.suite || 'all') == 'all'"
 const job = name => {
   const marker = '\n  ' + name + ':\n'
@@ -31,7 +31,7 @@ test('manual selection rejects unknown values without inserting input into shell
   const selection = job('validate-selection')
   assert(selection.includes("PSP_ACCEPTANCE_SUITE: ${{ inputs.suite || 'all' }}"))
   assert(selection.includes('case "$PSP_ACCEPTANCE_SUITE" in'))
-  assert(selection.includes('all|mixed-pressure|idle-cost|global-batch|global-batch-profile|global-receipt-profile|global-traffic-profile) ;;'))
+  assert(selection.includes('all|mixed-pressure|idle-cost|global-batch|global-batch-profile|global-receipt-profile|global-traffic-profile|byte-formation) ;;'))
   assert(selection.includes("*) printf '%s\\n' 'Unknown acceptance selection'; exit 1 ;;"))
   const shell = selection.slice(selection.indexOf('run: |'))
   assert(!shell.includes('inputs.suite') && !workflow.includes('continue-on-error'))

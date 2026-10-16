@@ -23,12 +23,24 @@ export const mixedPressureNames = Object.freeze(['TestNativeDestinationMixedPres
 export const idleCostNames = Object.freeze(['TestNativeDestinationIdleCost'])
 export const globalBootstrapNames = Object.freeze(['TestNativeDestinationGlobalCohortBootstrap'])
 export const globalBatchNames = Object.freeze(['TestNativeDestinationGlobalBatchPressure'])
+export const byteFormationNames = Object.freeze(['TestNativeDestinationByteFormation'])
 export const blockOverflowNames = Object.freeze(['TestNativeDestinationBlockOverflow', 'TestNativeDestinationBlockOverflow/block_overflow'])
 export const remoteUpgradeCases = Object.freeze(['candidate_policy', 'health_failure_restore', 'published_rollback', 'restart_recovery', 'idempotent_replay'])
 const dockerUpgradeNames = ['TestNativePublishedDockerRollback', ...remoteUpgradeCases.map(name => `TestNativePublishedDockerRollback/${name}`)]
 const remoteUpgradeNames = ['TestNativePublishedRemoteRollback', ...remoteUpgradeCases.map(name => `TestNativePublishedRemoteRollback/${name}`)]
-const names = [...xrayNames, ...singBoxNames, ...guardedSingBoxNames, ...legacyUpgradeNames, ...remoteUpgradeNames, ...dockerUpgradeNames, ...fleetNames, ...loadNames, ...trialLoadNames, ...blockOverflowNames, ...mixedPressureNames, ...idleCostNames, ...globalBootstrapNames, ...globalBatchNames]
+const names = [...xrayNames, ...singBoxNames, ...guardedSingBoxNames, ...legacyUpgradeNames, ...remoteUpgradeNames, ...dockerUpgradeNames, ...fleetNames, ...loadNames, ...trialLoadNames, ...blockOverflowNames, ...mixedPressureNames, ...idleCostNames, ...globalBootstrapNames, ...globalBatchNames, ...byteFormationNames]
 const diagnostics = Object.freeze({
+  'timed out waiting for actual warmup parsed and completely drained': 'byte_formation_warmup_timeout',
+  'timed out waiting for real first packets durable while their responses remain suppressed': 'byte_formation_first_durable_timeout',
+  'original 75-second fault budget cannot form all four live batches': 'byte_formation_fault_budget_failed',
+  'real formation traffic failed before response recovery': 'byte_formation_traffic_failed',
+  'timed out waiting for real collector retains live keys separately from unacknowledged first packets': 'byte_formation_live_keys_timeout',
+  'real response fault exceeded its recorded 75-second window': 'byte_formation_fault_window_failed',
+  'timed out waiting for actual canonical retry releases large next packets into original held reservations': 'byte_formation_large_packet_timeout',
+  'real byte formation bypassed the original SQL hold': 'byte_formation_sql_hold_failed',
+  'timed out waiting for original SQL and real producer fully drain after formation': 'byte_formation_drain_timeout',
+  'actual formation traffic does not reconcile with original SQL and losses': 'byte_formation_ledger_failed',
+  'formation lost authenticated admission binding or blocked traffic escaped': 'byte_formation_binding_failed',
   ...Object.fromEntries(['state', 'node_samples', 'sample_window', 'access_quiescence', 'frozen_retry', 'ingress_accounting', 'usage_read', 'hit_read', 'budget_read', 'loss_query', 'loss_scan', 'loss_cursor', 'ledger_accounting', 'node_pending', 'psp_pending', 'admission_binding'].map(reason => [`global batch drain: ${reason}\n`, `global_batch_drain_${reason}`])),
   'timed out waiting for global real canonical retry, SQL drain and all owner loss ledgers': 'global_batch_drain_timeout',
   'native setup stage: administrator\n': 'global_setup_stage_administrator',

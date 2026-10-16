@@ -52,11 +52,16 @@ func TestNativeDestinationIdleCost(t *testing.T) {
 	nativeDestinationLoad(t, nativeIdleCostWorkload)
 }
 
+func TestNativeDestinationByteFormation(t *testing.T) {
+	nativeDestinationLoad(t, nativeByteFormationWorkload)
+}
+
 func nativeDestinationLoad(t *testing.T, workload nativeLoadWorkload) {
 	trial, overflow := workload == nativeTrialWorkload, workload == nativeBlockOverflowWorkload
-	mixed := workload == nativeMixedWorkload
+	formation := workload == nativeByteFormationWorkload
+	mixed := workload == nativeMixedWorkload || formation
 	idle := workload == nativeIdleCostWorkload
-	if workload > nativeIdleCostWorkload {
+	if workload > nativeByteFormationWorkload {
 		t.Fatal("unknown native load workload")
 	}
 	binary, evidence := os.Getenv("PSP_NATIVE_NODE_BIN"), os.Getenv("PSP_NATIVE_LOAD_METRICS")
@@ -65,6 +70,8 @@ func nativeDestinationLoad(t *testing.T, workload nativeLoadWorkload) {
 		metricsName = "destination-trial-load-metrics.json"
 	} else if overflow {
 		metricsName = "destination-block-overflow-metrics.json"
+	} else if formation {
+		metricsName = "destination-byte-formation-metrics.json"
 	} else if mixed {
 		metricsName = "destination-mixed-pressure-metrics.json"
 	} else if idle {
@@ -73,7 +80,7 @@ func nativeDestinationLoad(t *testing.T, workload nativeLoadWorkload) {
 	runnerTemp, tempErr := filepath.EvalSymlinks(os.Getenv("RUNNER_TEMP"))
 	evidenceDir, dirErr := filepath.EvalSymlinks(filepath.Dir(evidence))
 	database := os.Getenv("PSP_NATIVE_DB_KIND")
-	validDatabase := database == "sqlite" || mixed && (database == "mysql" || database == "postgres")
+	validDatabase := database == "sqlite" || mixed && !formation && (database == "mysql" || database == "postgres")
 	if tempErr != nil || dirErr != nil || runnerTemp != evidenceDir || filepath.Base(evidence) != metricsName || !filepath.IsAbs(binary) || filepath.Base(binary) != "destination-node" || !validDatabase || os.Getenv("PSP_NATIVE_CORE_VERSION") != "26.6.27" {
 		t.Fatal("load fixture requires exact hosted candidate, owned evidence and supported owned database")
 	}
@@ -81,7 +88,17 @@ func nativeDestinationLoad(t *testing.T, workload nativeLoadWorkload) {
 	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0022 != 0 {
 		t.Fatal("load candidate is absent or mutable")
 	}
-	f := buildNativeDestinationPolicyFixture(t) // the existing disposable/root guards
+	var f destinationPolicyFixture
+	binding := &nativeAdmissionBinding{}
+	var formationStorage *nativeGlobalAuditStorage
+	if formation {
+		f = buildNativeDestinationPolicyFixtureWithAuditObserver(t, func(original ports.DestAuditStore) ports.DestAuditStore {
+			formationStorage = &nativeGlobalAuditStorage{DestAuditStore: original}
+			return formationStorage
+		}, binding.observe)
+	} else {
+		f = buildNativeDestinationPolicyFixture(t) // the existing disposable/root guards
+	}
 	a := f.a
 	token := destinationRefreshAdminToken(t, a)
 	settings, err := a.settings.Load(t.Context(), ports.UISettings{})
@@ -133,6 +150,7 @@ func nativeDestinationLoad(t *testing.T, workload nativeLoadWorkload) {
 	})
 	handler := a.server.Handler
 	probe := newNativeMixedProbe(f.agent.AgentID)
+	responseFault := &nativeByteResponseFault{agent: f.agent.AgentID}
 	idleProbe := &nativeIdleCostProbe{}
 	if trial || mixed {
 		elapsed := metrics.NewHistogram("fixture_destination_sync_handler_ms", "Owned load control handler completion time; excludes network transit.", "ms", metrics.LatencyBucketsMS)
@@ -154,7 +172,12 @@ func nativeDestinationLoad(t *testing.T, workload nativeLoadWorkload) {
 			metrics.DestAuditChunkMS.With(kind)
 		}
 	}
-	if mixed {
+	if formation {
+		handler, err = binding.handler(handler, []*nativeGlobalPeer{{agent: f.agent}})
+		nativeMust(t, err, "bind formation's original authenticated collector")
+		handler = responseFault.handler(handler)
+		t.Cleanup(responseFault.release)
+	} else if mixed {
 		handler = probe.handler(handler)
 	} else if idle {
 		handler = idleProbe.wrap(handler)
@@ -224,6 +247,10 @@ func nativeDestinationLoad(t *testing.T, workload nativeLoadWorkload) {
 	nativeMust(t, err, "decode actual process CPU clock")
 	if idle {
 		nativeIdleCost(t, f, client, server.URL, token, cmd.Process.Pid, filepath.Join(dir, "node"), inbound, address, firstPort, nonce, evidence, ticks, idleProbe)
+		return
+	}
+	if formation {
+		nativeByteFormation(t, f, client, server.URL, token, cmd.Process.Pid, filepath.Join(dir, "node"), inbound, address, firstPort, nonce, controlAddress, controlPort, controlNonce, evidence, output.text, probe, responseFault, binding, formationStorage)
 		return
 	}
 	if mixed {

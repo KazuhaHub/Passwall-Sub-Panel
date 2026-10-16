@@ -110,6 +110,7 @@ const (
 	nativeBlockOverflowWorkload
 	nativeMixedWorkload
 	nativeIdleCostWorkload
+	nativeByteFormationWorkload
 )
 
 type nativeLoadSample struct {
