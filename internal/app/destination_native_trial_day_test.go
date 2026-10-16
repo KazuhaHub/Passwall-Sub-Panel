@@ -335,7 +335,11 @@ func TestNativeDestinationTrialRealDay(t *testing.T) {
 		t.Fatal("real-day evidence must belong to its isolated host directory")
 	}
 	var recorder nativeDayNodeRecorder
+	var privateFields []string
 	c := nativeBootstrapOwnedCohort(t, nativeGlobalCohortOptions{auditMetrics: true, observeNode: recorder.observe, transport: func(original http.Handler, peers []*nativeGlobalPeer) http.Handler {
+		for i, peer := range peers {
+			nativeSpoolPrivateOutput(t, peer.output, fmt.Sprintf("trial-day-node-%02d-output.private.log", i), func() []string { return append([]string{peer.secret}, privateFields...) })
+		}
 		hist := metrics.NewHistogram("fixture_destination_sync_handler_ms", "Owned real-day handler completion.", "ms", metrics.LatencyBucketsMS)
 		timed := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			began := time.Now()
@@ -354,10 +358,12 @@ func TestNativeDestinationTrialRealDay(t *testing.T) {
 		return handler
 	}}, 10, "destination-trial-day-bootstrap-metrics.json", nativeBuildTrialDayFixture)
 	f, a := c.fixture, c.fixture.a
+	privateFields = []string{f.user.UUID, f.user.Email, f.user.SubToken, c.privateNonce}
 	if len(c.peers) != 10 || a.cfg.DBKind() != "sqlite" {
 		t.Fatal("real-day fixture lacks ten actual owners and SQLite")
 	}
 	admin := &domain.User{UPN: "trial-day-admin@example.test", Email: "trial-day-admin@example.test", Role: domain.RoleAdmin, Enabled: true, SSOProvider: domain.SSOProviderLocal, SSOSubject: "trial-day-admin@example.test", UUID: "99999999-9999-4999-8999-999999999999", SubToken: "owned-real-day-admin-token"}
+	privateFields = append(privateFields, admin.UUID, admin.Email, admin.SubToken)
 	nativeMust(t, a.repos.User.Create(t.Context(), admin), "create real-day administrator")
 	token := nativeDayToken(t, a, admin)
 	for _, peer := range c.peers {
@@ -366,15 +372,20 @@ func TestNativeDestinationTrialRealDay(t *testing.T) {
 	}
 	stage := "capability"
 	users, group, policy, blockAddress, blockPort, blockReached := nativePrepareTrialLoad(t, f, c.server.Client(), c.server.URL, token, f.node.DesiredPort, nativeGlobalBatchOutput(c.peers), &stage, nil)
+	for _, u := range users {
+		privateFields = append(privateFields, u.UUID, u.Email, u.SubToken)
+	}
 	nativeDayPublish(t, c, token, users, group.ID, policy.ID, blockPort)
 	domains, valid := nativeTrialDayDomains()
 	if !valid {
 		t.Fatal("real-day PSL domain set invalid")
 	}
 	domainWire := strings.Join(domains[:], "\n")
+	privateFields = append(privateFields, domains[:]...)
 	digest := sha256.Sum256([]byte(domainWire))
 	_, address, targetPort, nonce, reached := nativeTarget(t)
 	_, controlAddress, controlPort, controlNonce, _ := nativeTargetAtPort(t, nativePort(t))
+	privateFields = append(privateFields, nonce, controlNonce)
 	panels := map[int64]bool{}
 	for _, peer := range c.peers {
 		panels[peer.agent.PanelID] = true

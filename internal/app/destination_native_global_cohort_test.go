@@ -48,11 +48,12 @@ type nativeGlobalCohortOptions struct {
 }
 
 type nativeGlobalCohort struct {
-	fixture     destinationPolicyFixture
-	peers       []*nativeGlobalPeer
-	ready       func(*nativeGlobalPeer) bool
-	readyReason func(*nativeGlobalPeer) string
-	server      *httptest.Server
+	fixture      destinationPolicyFixture
+	peers        []*nativeGlobalPeer
+	ready        func(*nativeGlobalPeer) bool
+	readyReason  func(*nativeGlobalPeer) string
+	server       *httptest.Server
+	privateNonce string
 }
 
 // Bootstrap prerequisite only. It proves 65 independently authenticated real
@@ -396,7 +397,7 @@ func nativeBootstrapOwnedCohort(t *testing.T, options nativeGlobalCohortOptions,
 		peer.live()
 	}
 	m.Stage = 9
-	return &nativeGlobalCohort{fixture: f, peers: peers, ready: ready, readyReason: readyReason, server: server}
+	return &nativeGlobalCohort{fixture: f, peers: peers, ready: ready, readyReason: readyReason, server: server, privateNonce: nonce}
 }
 
 func nativeOwnedCohortScope(owners int, evidence string, dayBuilder, injected bool) bool {

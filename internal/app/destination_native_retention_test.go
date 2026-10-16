@@ -3,7 +3,6 @@
 package app
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"crypto/rand"
@@ -15,7 +14,6 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -90,34 +88,17 @@ func TestNativeDestinationRetentionReal72Hours(t *testing.T) {
 		latest, latestAt = r, time.Now()
 		sampleMu.Unlock()
 	}, transport: func(original http.Handler, peers []*nativeGlobalPeer) http.Handler {
-		file, err := os.OpenFile(filepath.Join(root, "retention-node-output.private.log"), os.O_CREATE|os.O_EXCL|os.O_RDWR, 0600)
-		nativeMust(t, err, "create fresh private retention output spool")
-		peers[0].output.spill, peers[0].output.retain = file, 64*1024
-		t.Cleanup(func() {
-			defer file.Close()
-			nativeMust(t, file.Sync(), "flush complete private retention daemon output")
-			_, err := file.Seek(0, io.SeekStart)
-			nativeMust(t, err, "read complete private retention output")
-			scanner := bufio.NewScanner(file)
-			scanner.Buffer(make([]byte, 4096), 64*1024)
-			for scanner.Scan() {
-				for _, private := range append(privateFields, peers[0].secret, " accepted ", " rejected ") {
-					if private != "" && strings.Contains(scanner.Text(), private) {
-						t.Error("retention daemon exposed private data")
-					}
-				}
-			}
-			nativeMust(t, scanner.Err(), "finish complete private retention output privacy scan")
-		})
+		nativeSpoolPrivateOutput(t, peers[0].output, "retention-node-output.private.log", func() []string { return append([]string{peers[0].secret}, privateFields...) })
 		fault = &nativeRetentionResponseFault{agent: peers[0].agent.AgentID, original: original}
 		return fault
 	}}, 1, "destination-retention-bootstrap-metrics.json", nativeBuildRetentionFixture)
 	f, a, peer := c.fixture, c.fixture.a, c.peers[0]
-	privateFields = []string{f.user.UUID, f.user.Email, f.user.SubToken}
+	privateFields = []string{f.user.UUID, f.user.Email, f.user.SubToken, c.privateNonce}
 	token := destinationRefreshAdminToken(t, a)
 	_, observeAddress, observePort, observeNonce, _ := nativeTarget(t)
 	_, controlAddress, controlPort, controlNonce, _ := nativeTargetAtPort(t, nativePort(t))
-	_, _, blockPort, _, blockReached := nativeTargetAtPort(t, nativePort(t))
+	_, _, blockPort, blockNonce, blockReached := nativeTargetAtPort(t, nativePort(t))
+	privateFields = append(privateFields, observeNonce, controlNonce, blockNonce)
 	for i, kind := range []string{"block", "observe"} {
 		port := blockPort
 		if i == 1 {
