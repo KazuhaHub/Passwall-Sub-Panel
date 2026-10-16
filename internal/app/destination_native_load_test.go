@@ -586,7 +586,9 @@ func nativeLoadBlockedRequest(ctx context.Context, inbound int, header []byte, s
 }
 
 func nativeLoadBlockedRequestFailure(ctx context.Context, inbound int, header []byte, sent func()) error {
-	connection, err := (&net.Dialer{Timeout: 3 * time.Second}).DialContext(ctx, "tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(inbound)))
+	// Like the successful worker probe, this socket has a 5s deadline and is
+	// closed after one request, before the default 15s keepalive can run.
+	connection, err := (&net.Dialer{Timeout: 3 * time.Second, KeepAlive: -1}).DialContext(ctx, "tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(inbound)))
 	if err != nil {
 		return err
 	}

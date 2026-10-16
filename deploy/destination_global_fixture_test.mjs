@@ -33,6 +33,12 @@ test('global worker scratch reuse keeps fresh requests and the original pressure
   assert(driver.includes('var probe nativeVLESSWorkerProbe') && driver.includes('probe.request(ctx, peer.node.DesiredPort, host, port, uuid, want, host)'))
   for (const required of ['const seconds, rate = 120, 10', 'make(chan job, 4096)', 'for range 512', 'm.TrafficMS > (seconds+10)*1000', 'nativePressureBlockRequest(f.user.UUID, name(0, j.seq), blockPort)', 'users[j.seq%200].UUID']) assert(driver.includes(required))
   assert(workflow.includes('TestNativeGlobalWorkerProbeKeepsFreshConnectionsAndResponseSemantics'))
+  const blocked = readFileSync(new URL('../internal/app/destination_native_load_test.go', import.meta.url), 'utf8').split('func nativeLoadBlockedRequestFailure(')[1].split('func nativeLoadSampler(')[0]
+  for (const source of [probe, blocked]) {
+    assert(source.includes('Timeout: 3 * time.Second, KeepAlive: -1'))
+    assert(source.includes('Add(5 * time.Second)'))
+  }
+  assert(blocked.includes('defer connection.Close()') && blocked.includes('io.LimitReader(connection, 4)'))
   assert.doesNotMatch(probe, /sync\.Pool|http\.Transport|\.Ack\(|SetSnapshot\(/)
 })
 

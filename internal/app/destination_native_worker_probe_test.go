@@ -26,7 +26,9 @@ type nativeVLESSWorkerProbe struct {
 }
 
 func (p *nativeVLESSWorkerProbe) request(ctx context.Context, inbound int, address string, port int, uuid, nonce, host string) error {
-	c, err := (&net.Dialer{Timeout: 3 * time.Second}).DialContext(ctx, "tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(inbound)))
+	// The 5s I/O deadline closes this fresh connection before Go's default
+	// 15s keepalive can run. Avoid its per-connection socket configuration.
+	c, err := (&net.Dialer{Timeout: 3 * time.Second, KeepAlive: -1}).DialContext(ctx, "tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(inbound)))
 	if err != nil {
 		return err
 	}
