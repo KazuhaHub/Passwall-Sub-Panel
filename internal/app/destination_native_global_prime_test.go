@@ -227,8 +227,12 @@ func TestNativeGlobalBytePrimingKeepsIndependentOwnerOrderAndDeadline(t *testing
 				t.Fatal("out-of-range owner count accepted")
 			}
 		}
-		if nativePrimeGlobalByteOwners(nil, 65, send, frozen) == nil || nativePrimeGlobalByteOwners(t.Context(), 65, nil, frozen) == nil || nativePrimeGlobalByteOwners(t.Context(), 65, send, nil) == nil {
-			t.Fatal("missing scope or callbacks accepted")
+		//lint:ignore SA1012 Deliberately verify that the private helper rejects a missing priming context.
+		if nativePrimeGlobalByteOwners(nil, 65, send, frozen) == nil {
+			t.Fatal("missing priming context accepted")
+		}
+		if nativePrimeGlobalByteOwners(t.Context(), 65, nil, frozen) == nil || nativePrimeGlobalByteOwners(t.Context(), 65, send, nil) == nil {
+			t.Fatal("missing priming callbacks accepted")
 		}
 	})
 }
