@@ -35,6 +35,7 @@ type nativeGlobalByteOwner struct {
 	Ingress   nativeMixedIngress       `json:"access_ingress"`
 	Stored    [4]int64                 `json:"stored_events"`
 	Loss      [4]int64                 `json:"loss_rows"`
+	Receiver  [4][]nativeLoadLoss      `json:"receiver_losses"`
 	Node      nativeMixedNodeReading   `json:"node"`
 }
 
@@ -56,6 +57,7 @@ type nativeGlobalByteMetrics struct {
 	SQLEarly     uint64                         `json:"delegated_begins_while_held"`
 	Carrier      [4]int                         `json:"carrier_byte_witness_owner"`
 	Witness      [4]destaudit.AdmissionPressure `json:"fresh_owner_byte_witness"`
+	WitnessRows  [4]int                         `json:"fresh_owner_candidate_rows"`
 	Held         [4]destaudit.LanePressure      `json:"held_queue"`
 	Details      []nativeGlobalByteOwner        `json:"owners"`
 	PSP          []nativeMixedPSPSample         `json:"psp_samples"`
@@ -69,8 +71,38 @@ type nativeGlobalByteMetrics struct {
 func nativeGlobalByteOnly(p destaudit.AdmissionPressure, kind int) bool {
 	return kind >= 0 && kind < 4 && p.BatchLimit == [4]int{128, 32, 32, 64}[kind] &&
 		p.ByteLimit == [4]int{32 << 20, 8 << 20, 8 << 20, 16 << 20}[kind] && p.OwnerLimit == [4]int{4, 1, 1, 1}[kind] &&
-		p.OwnerBatches == 0 && p.Batches > 0 && p.Batches < p.BatchLimit && p.Bytes >= 0 && p.Bytes <= p.ByteLimit &&
+		p.OwnerBatches == 0 && p.Batches > 0 && p.Batches < p.BatchLimit && p.Bytes >= 0 && p.Bytes <= p.ByteLimit && p.Bytes <= p.Batches*(1<<20) &&
 		p.CandidateBytes > 0 && p.CandidateBytes <= 1<<20 && p.CandidateBytes > p.ByteLimit-p.Bytes
+}
+
+// Queue-full row accounting comes from two independent boundaries: the rows of
+// each canonical request whose original authenticated handler completed, and
+// the original receiver's persisted reason ledger. Unrelated losses cannot
+// satisfy the equality, even if the total delivered/stored/lost sum matches.
+func nativeGlobalByteLossLedger(losses []nativeLoadLoss, facts nativeAdmissionFacts, kind int) (int64, bool) {
+	const maxSafeRows = 1<<53 - 1
+	if kind < 0 || kind >= 4 || facts.RejectedRows[kind] > maxSafeRows || len(losses) > 3 {
+		return 0, false
+	}
+	seen := map[string]bool{}
+	var queueRows int64
+	for _, loss := range losses {
+		if seen[loss.Reason] || loss.Rows < 0 || loss.Rows > maxSafeRows || loss.Events != 0 || loss.Unmatched != 0 {
+			return 0, false
+		}
+		seen[loss.Reason] = true
+		switch loss.Reason {
+		case "queue_full":
+			queueRows = loss.Rows
+		case "node_dropped", "node_unmatched":
+			if loss.Rows != 0 {
+				return 0, false
+			}
+		default:
+			return 0, false
+		}
+	}
+	return queueRows, uint64(queueRows) == facts.RejectedRows[kind]
 }
 
 func TestNativeDestinationGlobalBytePressure(t *testing.T) {
@@ -80,7 +112,7 @@ func TestNativeDestinationGlobalBytePressure(t *testing.T) {
 	if e1 != nil || e2 != nil || root != dir || filepath.Base(evidence) != "destination-global-byte-metrics.json" {
 		t.Fatal("global byte pressure requires owned hosted evidence")
 	}
-	m := nativeGlobalByteMetrics{Schema: 1, Candidate: "1ce8f26cfbce8d3decf8855dda4349be10778a23", Core: "26.6.27", Fresh: 64,
+	m := nativeGlobalByteMetrics{Schema: 2, Candidate: "1ce8f26cfbce8d3decf8855dda4349be10778a23", Core: "26.6.27", Fresh: 64,
 		Counts: [4]int{1400, 700, 1300, 200}, Details: []nativeGlobalByteOwner{}, PSP: []nativeMixedPSPSample{}, Histograms: []nativeLatencyHistogram{}}
 	var failures atomic.Uint64
 	var attempted, delivered [65][4]atomic.Uint64
@@ -205,7 +237,11 @@ func TestNativeDestinationGlobalBytePressure(t *testing.T) {
 		return true
 	})
 	for owner := range 65 {
-		m.Details = append(m.Details, nativeGlobalByteOwner{Ordinal: owner})
+		row := nativeGlobalByteOwner{Ordinal: owner}
+		for kind := range 4 {
+			row.Receiver[kind] = []nativeLoadLoss{}
+		}
+		m.Details = append(m.Details, row)
 	}
 	names := append([]string(nil), nativeTrialLatencyNames[:4]...)
 	for _, kind := range nativeMixedKinds {
@@ -441,10 +477,11 @@ func TestNativeDestinationGlobalBytePressure(t *testing.T) {
 			return false
 		}
 		for kind := range 4 {
-			if facts.ByteExclusive[kind] == 0 || !nativeGlobalByteOnly(facts.Last[kind], kind) {
+			if facts.ByteExclusive[kind] == 0 || facts.LastRows[kind] <= 8 || !nativeGlobalByteOnly(facts.Last[kind], kind) {
 				return false
 			}
 			m.Witness[kind] = facts.Last[kind]
+			m.WitnessRows[kind] = facts.LastRows[kind]
 		}
 		m.Held = queue.Pressure()
 		return true
@@ -506,7 +543,26 @@ func TestNativeDestinationGlobalBytePressure(t *testing.T) {
 					return false
 				}
 				row.Stored[kind] = count - storedBefore[owner][kind]
-				if a.database.QueryRowContext(t.Context(), nativeDestinationCountSQL(m.Database, "SELECT COALESCE(SUM(dest_audit_loss_hourly.rows),0) FROM dest_audit_loss_hourly WHERE panel_id=? AND kind=?"), peer.agent.PanelID, nativeMixedKinds[kind]).Scan(&row.Loss[kind]) != nil {
+				rows, err := a.database.QueryContext(t.Context(), nativeDestinationCountSQL(m.Database, nativeMixedLossSQL), peer.agent.PanelID, nativeMixedKinds[kind])
+				if err != nil {
+					return false
+				}
+				row.Receiver[kind] = []nativeLoadLoss{}
+				for rows.Next() {
+					var loss nativeLoadLoss
+					if rows.Scan(&loss.Reason, &loss.Rows, &loss.Events, &loss.Unmatched) != nil {
+						_ = rows.Close()
+						return false
+					}
+					row.Receiver[kind] = append(row.Receiver[kind], loss)
+				}
+				err = rows.Err()
+				_ = rows.Close()
+				if err != nil {
+					return false
+				}
+				row.Loss[kind], valid = nativeGlobalByteLossLedger(row.Receiver[kind], row.Admission, kind)
+				if !valid {
 					return false
 				}
 				expected := row.Delivered[kind]
@@ -572,11 +628,11 @@ func nativeGlobalByteControlHosts(t *testing.T, nonce, address string) func(int)
 
 func TestNativeGlobalByteWitnessRequiresOriginalExclusiveGeometry(t *testing.T) {
 	for kind := range 4 {
-		p := destaudit.AdmissionPressure{CandidateBytes: 600000, Batches: 1, Bytes: [4]int{32 << 20, 8 << 20, 8 << 20, 16 << 20}[kind] - 500000, BatchLimit: [4]int{128, 32, 32, 64}[kind], ByteLimit: [4]int{32 << 20, 8 << 20, 8 << 20, 16 << 20}[kind], OwnerLimit: [4]int{4, 1, 1, 1}[kind]}
+		p := destaudit.AdmissionPressure{CandidateBytes: 600000, Batches: [4]int{32, 8, 8, 16}[kind], Bytes: [4]int{32 << 20, 8 << 20, 8 << 20, 16 << 20}[kind] - 500000, BatchLimit: [4]int{128, 32, 32, 64}[kind], ByteLimit: [4]int{32 << 20, 8 << 20, 8 << 20, 16 << 20}[kind], OwnerLimit: [4]int{4, 1, 1, 1}[kind]}
 		if !nativeGlobalByteOnly(p, kind) {
 			t.Fatal("original byte-only witness rejected")
 		}
-		for scenario := range 7 {
+		for scenario := range 8 {
 			changed := p
 			switch scenario {
 			case 0:
@@ -593,10 +649,48 @@ func TestNativeGlobalByteWitnessRequiresOriginalExclusiveGeometry(t *testing.T) 
 				changed.CandidateBytes = (1 << 20) + 1
 			case 6:
 				changed.Batches = 0
+			case 7:
+				changed.Batches = 1
 			}
 			if nativeGlobalByteOnly(changed, kind) {
 				t.Fatal("nonexclusive or altered-cap witness accepted")
 			}
 		}
+	}
+}
+
+func TestNativeGlobalByteLossLedgerRejectsUnboundAndUnexpectedLosses(t *testing.T) {
+	facts := nativeAdmissionFacts{RejectedRows: [4]uint64{3}}
+	valid := []nativeLoadLoss{{Reason: "node_dropped"}, {Reason: "node_unmatched"}, {Reason: "queue_full", Rows: 3}}
+	if rows, ok := nativeGlobalByteLossLedger(valid, facts, 0); !ok || rows != 3 {
+		t.Fatal("independent bound queue-full rows did not reconcile")
+	}
+	if rows, ok := nativeGlobalByteLossLedger(nil, nativeAdmissionFacts{}, 1); !ok || rows != 0 {
+		t.Fatal("empty admitted lane acquired a receiver loss")
+	}
+	for name, losses := range map[string][]nativeLoadLoss{
+		"missing":                   {},
+		"different_owner_rows":      {{Reason: "queue_full", Rows: 4}},
+		"collect_off_substitution":  {{Reason: "collect_off", Rows: 3}},
+		"ingest_error_substitution": {{Reason: "ingest_error", Rows: 3}},
+		"over_budget_substitution":  {{Reason: "over_budget", Rows: 3}},
+		"duplicate_reason":          {{Reason: "queue_full", Rows: 1}, {Reason: "queue_full", Rows: 2}},
+		"dropped_events":            {{Reason: "queue_full", Rows: 3}, {Reason: "node_dropped", Events: 1}},
+		"unmatched_events":          {{Reason: "queue_full", Rows: 3}, {Reason: "node_unmatched", Unmatched: 1}},
+		"negative_rows":             {{Reason: "queue_full", Rows: -1}},
+		"unsafe_rows":               {{Reason: "queue_full", Rows: 1 << 53}},
+		"unexpected_even_if_zero":   {{Reason: "queue_full", Rows: 3}, {Reason: "out_of_range"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, ok := nativeGlobalByteLossLedger(losses, facts, 0); ok {
+				t.Fatal("unbound or unexpected receiver loss satisfied canonical rejection accounting")
+			}
+		})
+	}
+	if _, ok := nativeGlobalByteLossLedger(valid, facts, 4); ok {
+		t.Fatal("unknown lane acquired a bound loss ledger")
+	}
+	if _, ok := nativeGlobalByteLossLedger(valid, nativeAdmissionFacts{RejectedRows: [4]uint64{1 << 53}}, 0); ok {
+		t.Fatal("unsafe canonical row count acquired a bound loss ledger")
 	}
 }

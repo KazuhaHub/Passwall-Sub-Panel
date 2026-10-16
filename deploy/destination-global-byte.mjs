@@ -15,6 +15,7 @@ function witness(p, i) {
   numeric(p)
   need(p.BatchLimit === batches[i] && p.ByteLimit === bytes[i] && p.OwnerLimit === owners[i])
   need(p.OwnerBatches === 0 && p.Batches > 0 && p.Batches < batches[i] && p.Bytes <= bytes[i])
+  need(p.Bytes <= p.Batches*1024*1024)
   need(p.CandidateBytes > bytes[i]-p.Bytes && p.CandidateBytes <= 1024*1024)
 }
 function queue(q, i) {
@@ -23,6 +24,7 @@ function queue(q, i) {
   need(q.batch_limit === batches[i] && q.byte_limit === bytes[i] && q.owner_limit === owners[i])
   need(q.batches === q.active+q.waiting && q.active <= 1 && q.batches <= batches[i] && q.canonical_bytes <= bytes[i])
   need(q.owners <= 65 && q.owners <= q.batches && q.max_owner_batches <= owners[i] && q.max_owner_batches <= q.batches)
+  need(q.canonical_bytes <= q.batches*1024*1024 && q.batches <= q.owners*q.max_owner_batches)
   need((q.batches === 0) === (q.canonical_bytes === 0) && (q.batches === 0) === (q.owners === 0))
 }
 function access(a) {
@@ -43,6 +45,22 @@ function node(n) {
   access(n.access_log)
 }
 
+function receiverLosses(losses, boundRows) {
+  need(Array.isArray(losses) && losses.length <= 3)
+  const seen = new Set()
+  let queueRows = 0
+  for (const loss of losses) {
+    fields(loss,['reason','rows','events','unmatched'])
+    need(['queue_full','node_dropped','node_unmatched'].includes(loss.reason) && !seen.has(loss.reason))
+    seen.add(loss.reason)
+    need(count(loss.rows) && loss.events === 0 && loss.unmatched === 0)
+    if (loss.reason === 'queue_full') queueRows = loss.rows
+    else need(loss.rows === 0)
+  }
+  need(queueRows === boundRows)
+  return queueRows
+}
+
 export function checkGlobalByteEvidence(results, metrics, bootstrap, database = 'sqlite') {
   checkGlobalBootstrapMetrics(bootstrap, database)
   need(typeof results === 'string' && Buffer.byteLength(results) <= 128*1024)
@@ -53,8 +71,8 @@ export function checkGlobalByteEvidence(results, metrics, bootstrap, database = 
   checkDestinationGlobalByteResults(results)
   need(typeof metrics === 'string' && Buffer.byteLength(metrics) <= 4*1024*1024)
   const r = JSON.parse(metrics)
-  fields(r,['schema_version','candidate','core_version','database','stage','native_owners','trial_users','fresh_owner','new_connections_per_owner','required_canonical_bytes_exclusive','carrier_response_fault_ms','fresh_owner_extra_hold_ms','transport_failures','held_sql_entries','delegated_begins_while_held','carrier_byte_witness_owner','fresh_owner_byte_witness','held_queue','owners','psp_samples','latency_histograms','byte_saturation_complete','batch_saturation_complete','key_saturation_complete','pressure_complete'])
-  need(r.schema_version === 1 && r.candidate === moduleNodeCandidate.commit && r.core_version === '26.6.27' && ['sqlite','mysql','postgres'].includes(database) && r.database === database)
+  fields(r,['schema_version','candidate','core_version','database','stage','native_owners','trial_users','fresh_owner','new_connections_per_owner','required_canonical_bytes_exclusive','carrier_response_fault_ms','fresh_owner_extra_hold_ms','transport_failures','held_sql_entries','delegated_begins_while_held','carrier_byte_witness_owner','fresh_owner_byte_witness','fresh_owner_candidate_rows','held_queue','owners','psp_samples','latency_histograms','byte_saturation_complete','batch_saturation_complete','key_saturation_complete','pressure_complete'])
+  need(r.schema_version === 2 && r.candidate === moduleNodeCandidate.commit && r.core_version === '26.6.27' && ['sqlite','mysql','postgres'].includes(database) && r.database === database)
   need(r.stage === 6 && r.native_owners === 65 && r.trial_users === 200 && r.fresh_owner === 64)
   vector(r.new_connections_per_owner); need(r.new_connections_per_owner.join() === '1400,700,1300,200')
   vector(r.required_canonical_bytes_exclusive); need(r.required_canonical_bytes_exclusive.join() === minimum.join())
@@ -64,11 +82,13 @@ export function checkGlobalByteEvidence(results, metrics, bootstrap, database = 
   need(count(r.fresh_owner_extra_hold_ms) && r.fresh_owner_extra_hold_ms <= 120000)
   vector(r.carrier_byte_witness_owner, n => count(n) && n < 64)
   vector(r.fresh_owner_byte_witness, () => true); vector(r.held_queue, () => true)
+  vector(r.fresh_owner_candidate_rows, n => count(n) && n > 8)
+  need(r.fresh_owner_candidate_rows.every((n,i) => n <= (i === 3 ? 8192 : 4096)))
   r.fresh_owner_byte_witness.forEach((p,i) => { witness(p,i); need(p.CandidateBytes > minimum[i]); need(r.held_queue[i].canonical_bytes >= p.Bytes && r.held_queue[i].batches >= p.Batches) })
   r.held_queue.forEach(queue)
   need(Array.isArray(r.owners) && r.owners.length === 65)
   r.owners.forEach((row, ordinal) => {
-    fields(row,['owner','attempted','delivered','control_successes','durable_first_packets','packets','admission','access_ingress','stored_events','loss_rows','node'])
+    fields(row,['owner','attempted','delivered','control_successes','durable_first_packets','packets','admission','access_ingress','stored_events','loss_rows','receiver_losses','node'])
     need(row.owner === ordinal && row.control_successes === 1)
     vector(row.attempted); vector(row.delivered); vector(row.durable_first_packets, n => n === 1)
     need(row.delivered.every((n,i) => n === r.new_connections_per_owner[i]+1 && n === row.attempted[i]))
@@ -85,11 +105,17 @@ export function checkGlobalByteEvidence(results, metrics, bootstrap, database = 
     need(p.max_new_canonical_bytes.every((n,i) => n > minimum[i] && n <= 1024*1024))
     vector(p.rows_in_largest_new_packet, n => count(n) && n > 8 && n <= 8192)
     const a = row.admission
-    fields(a,['accepted','rejected','same_rejected_candidate_retries','byte_exclusive_rejections','last_rejection'])
-    for (const k of ['accepted','rejected','same_rejected_candidate_retries','byte_exclusive_rejections']) vector(a[k])
+    fields(a,['accepted','rejected','rejected_rows','last_rejected_rows','same_rejected_candidate_retries','byte_exclusive_rejections','last_rejection'])
+    for (const k of ['accepted','rejected','rejected_rows','last_rejected_rows','same_rejected_candidate_retries','byte_exclusive_rejections']) vector(a[k])
+    vector(row.receiver_losses, () => true)
+    row.receiver_losses.forEach((losses,i) => {
+      need(receiverLosses(losses,a.rejected_rows[i]) === row.loss_rows[i])
+      need(a.rejected_rows[i] >= a.rejected[i] && a.last_rejected_rows[i] <= a.rejected_rows[i] && a.last_rejected_rows[i] <= (i === 3 ? 8192 : 4096))
+      need(a.rejected[i] > 0 ? a.last_rejected_rows[i] > 0 : a.rejected_rows[i] === 0 && a.last_rejected_rows[i] === 0)
+    })
     vector(a.last_rejection, () => true)
     a.last_rejection.forEach((p,i) => { fields(p,['CandidateBytes','Batches','Bytes','OwnerBatches','BatchLimit','ByteLimit','OwnerLimit']); numeric(p); need(a.byte_exclusive_rejections[i] <= a.rejected[i] && a.same_rejected_candidate_retries[i] <= a.rejected[i] && a.accepted[i] > 0) })
-    if (ordinal === r.fresh_owner) a.byte_exclusive_rejections.forEach((n,i) => need(n > 0 && row.loss_rows[i] > 0))
+    if (ordinal === r.fresh_owner) a.byte_exclusive_rejections.forEach((n,i) => need(n > 0 && row.loss_rows[i] >= r.fresh_owner_candidate_rows[i] && r.fresh_owner_candidate_rows[i] <= p.rows_in_largest_new_packet[i]))
     const ingress = row.access_ingress
     fields(ingress,['before','after','allowed_expected','allowed_received','allowed_not_received','denied_expected','denied_received','denied_not_received'])
     access(ingress.before); access(ingress.after)

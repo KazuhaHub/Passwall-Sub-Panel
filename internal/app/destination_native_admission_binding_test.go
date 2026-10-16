@@ -47,6 +47,8 @@ type nativeAdmissionCandidate struct {
 type nativeAdmissionFacts struct {
 	Accepted      [4]uint64                      `json:"accepted"`
 	Rejected      [4]uint64                      `json:"rejected"`
+	RejectedRows  [4]uint64                      `json:"rejected_rows"`
+	LastRows      [4]int                         `json:"last_rejected_rows"`
 	Retried       [4]uint64                      `json:"same_rejected_candidate_retries"`
 	ByteExclusive [4]uint64                      `json:"byte_exclusive_rejections"`
 	Last          [4]destaudit.AdmissionPressure `json:"last_rejection"`
@@ -172,6 +174,8 @@ func (b *nativeAdmissionBinding) handler(original http.Handler, peers []*nativeG
 					owner.facts.Retried[i]++
 				}
 				owner.facts.Rejected[i]++
+				owner.facts.RejectedRows[i] += uint64(c.rows)
+				owner.facts.LastRows[i] = c.rows
 				owner.digests[i], owner.facts.Last[i] = c.digest, p
 				if p.OwnerBatches == 0 && p.Batches < p.BatchLimit && p.CandidateBytes > p.ByteLimit-p.Bytes {
 					owner.facts.ByteExclusive[i]++
@@ -209,7 +213,7 @@ func TestNativeGlobalAdmissionBindingRejectsAmbiguousEvidence(t *testing.T) {
 	nativeMust(t, err, "encode private binding vector")
 	base := destaudit.Event{AgentID: agent.AgentID, PanelID: agent.PanelID, Kind: "block", Outcome: "queue_full", ReceivedHour: audit.Hour, Rows: 1,
 		Admission: destaudit.AdmissionPressure{CandidateBytes: len(canonical), Batches: 4, Bytes: 4 * len(canonical), OwnerBatches: 4, BatchLimit: 128, ByteLimit: 32 << 20, OwnerLimit: 4}}
-	for _, scenario := range []string{"owner_cap", "byte_cap", "async_notifications", "wrong_bytes", "wrong_panel", "wrong_owner", "wrong_lane", "wrong_limits", "no_capacity_condition", "duplicate_event", "late_event", "failed_response"} {
+	for _, scenario := range []string{"owner_cap", "byte_cap", "async_notifications", "wrong_bytes", "wrong_rows", "wrong_panel", "wrong_owner", "wrong_lane", "wrong_limits", "no_capacity_condition", "duplicate_event", "late_event", "failed_response"} {
 		t.Run(scenario, func(t *testing.T) {
 			binding := &nativeAdmissionBinding{}
 			e := base
@@ -219,6 +223,8 @@ func TestNativeGlobalAdmissionBindingRejectsAmbiguousEvidence(t *testing.T) {
 				e.Admission.Bytes = e.Admission.ByteLimit - e.Admission.CandidateBytes + 1
 			case "wrong_bytes":
 				e.Admission.CandidateBytes++
+			case "wrong_rows":
+				e.Rows++
 			case "wrong_panel":
 				e.PanelID++
 			case "wrong_owner":
@@ -277,7 +283,7 @@ func TestNativeGlobalAdmissionBindingRejectsAmbiguousEvidence(t *testing.T) {
 			if scenario == "async_notifications" && facts != (nativeAdmissionFacts{}) {
 				t.Fatal("asynchronous SQL or permission notifications acquired HTTP attribution")
 			}
-			if wantValid && scenario != "async_notifications" && (facts.Rejected[0] != 2 || facts.Retried[0] != 1 || facts.ByteExclusive[0] != map[bool]uint64{true: 2, false: 0}[scenario == "byte_cap"]) {
+			if wantValid && scenario != "async_notifications" && (facts.Rejected[0] != 2 || facts.RejectedRows[0] != 2 || facts.LastRows[0] != 1 || facts.Retried[0] != 1 || facts.ByteExclusive[0] != map[bool]uint64{true: 2, false: 0}[scenario == "byte_cap"]) {
 				t.Fatal("canonical retry, owner cap and byte-exclusive facts were conflated")
 			}
 			if !wantValid && facts != (nativeAdmissionFacts{}) {

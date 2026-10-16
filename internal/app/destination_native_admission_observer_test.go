@@ -175,7 +175,7 @@ func TestNativeGlobalAdmissionObserverKeepsAuthenticationRetryAndSQL(t *testing.
 		t.Fatal("observed admissions did not reconcile with original SQL and loss rows")
 	}
 	facts, valid := binding.snapshot(f.agent.AgentID)
-	if !valid || facts.Accepted != [4]uint64{5} || facts.Rejected != [4]uint64{2} || facts.Retried != [4]uint64{1} || facts.ByteExclusive != [4]uint64{} || facts.Last[0].Bytes != canonicalBytes {
+	if !valid || facts.Accepted != [4]uint64{5} || facts.Rejected != [4]uint64{2} || facts.RejectedRows != [4]uint64{uint64(loss)} || facts.LastRows != [4]int{1} || facts.Retried != [4]uint64{1} || facts.ByteExclusive != [4]uint64{} || facts.Last[0].Bytes != canonicalBytes {
 		t.Fatal("canonical request binding changed authentication, retry or rejection attribution")
 	}
 }
