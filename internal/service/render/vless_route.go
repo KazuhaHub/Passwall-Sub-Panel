@@ -69,7 +69,7 @@ func (s *Service) filterRouteItems(ctx context.Context, u *domain.User, items []
 			panel, _ = s.repos.XUIPanel.GetByID(ctx, item.node.PanelID)
 			panels[item.node.PanelID] = panel
 		}
-		if panel == nil || !domain.VlessRouteSupported(panel.Kind, panel.PanelVersion, panel.XrayVersion) || item.node.RouteState.Binding != domain.RouteBinding(panel.URL, item.node) {
+		if panel == nil || domain.NormalizePanelKind(panel.Kind) != domain.PanelKind3XUI || item.node.RouteState.Binding != domain.RouteBinding(panel.URL, item.node) {
 			continue
 		}
 		credential, ok := applied[item.node.ID]

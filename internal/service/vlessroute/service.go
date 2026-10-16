@@ -52,9 +52,9 @@ func (s *Service) Get(ctx context.Context, id int64) (*View, error) {
 		return nil, err
 	}
 	view := viewFor(n)
-	view.Supported = s.repos.NodeRoute != nil && strings.EqualFold(n.DesiredProtocol, "vless") && domain.VlessRouteSupported(p.Kind, p.PanelVersion, p.XrayVersion)
+	view.Supported = s.repos.NodeRoute != nil && strings.EqualFold(n.DesiredProtocol, "vless") && domain.NormalizePanelKind(p.Kind) == domain.PanelKind3XUI
 	if !view.Supported {
-		view.Reason = "requires_3xui_3_7_0_xray_26_7_28_vless"
+		view.Reason = "requires_3xui_vless"
 	}
 	if view.State.Status == "applied" && (!view.Supported || view.State.Binding != domain.RouteBinding(p.URL, n)) {
 		view.State.Status = "drift"
@@ -90,17 +90,10 @@ func (s *Service) resources(ctx context.Context, id int64, cleanupOnly ...bool) 
 	}
 	status, err := c.GetServerStatus(ctx)
 	if err != nil {
-		return nil, nil, nil, nil, fmt.Errorf("%w: cannot verify backend version", domain.ErrUnavailable)
+		return nil, nil, nil, nil, fmt.Errorf("%w: cannot verify core status", domain.ErrUnavailable)
 	}
-	now := time.Now().UTC()
-	if err := s.repos.XUIPanel.UpdateVersion(ctx, p.ID, status.PanelVersion, status.XrayVersion, &now); err != nil {
-		return nil, nil, nil, nil, err
-	}
-	if s.invalidate != nil && (p.PanelVersion != status.PanelVersion || p.XrayVersion != status.XrayVersion) {
-		s.invalidate()
-	}
-	if !domain.VlessRouteSupported(p.Kind, status.PanelVersion, status.XrayVersion) || status.XrayState != "running" {
-		return nil, nil, nil, nil, fmt.Errorf("%w: requires running 3X-UI 3.7.0 with Xray 26.7.28", domain.ErrValidation)
+	if status == nil || status.XrayState != "running" {
+		return nil, nil, nil, nil, fmt.Errorf("%w: requires a running Xray core", domain.ErrValidation)
 	}
 	return n, p, c, a, nil
 }
@@ -233,7 +226,7 @@ func (s *Service) Save(ctx context.Context, id int64, req SaveRequest) (*View, e
 		return s.unknown(n, "remote_readback_mismatch")
 	}
 	status, err := c.GetServerStatus(ctx)
-	if err != nil || !domain.VlessRouteSupported(p.Kind, status.PanelVersion, status.XrayVersion) || status.XrayState != "running" {
+	if err != nil || status == nil || status.XrayState != "running" {
 		return s.unknown(n, "core_running_not_confirmed")
 	}
 	target.Status = "applied"

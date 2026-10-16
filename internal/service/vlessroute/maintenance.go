@@ -103,7 +103,7 @@ func (s *Service) checkGroup(parent context.Context, p *domain.XUIPanel, nodes [
 		if readErr != nil {
 			next.Status = "unknown"
 			next.Error = "remote_check_unavailable"
-		} else if status == nil || !domain.VlessRouteSupported(p.Kind, status.PanelVersion, status.XrayVersion) || status.XrayState != "running" {
+		} else if status == nil || domain.NormalizePanelKind(p.Kind) != domain.PanelKind3XUI || status.XrayState != "running" {
 			next.Status = "drift"
 			next.Error = "unsupported_or_stopped_core"
 		} else if inbound := actual[n.InboundID]; inbound == nil || inbound.Protocol != "vless" || inbound.Port != n.DesiredPort || n.RouteState.Binding != domain.RouteBinding(p.URL, n) {

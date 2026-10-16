@@ -24,7 +24,7 @@ func routeRenderFixture(t *testing.T) (*Service, *domain.Node, *domain.User, *ro
 	t.Helper()
 	n := vlessRealityNode(true)
 	n.DisplayName = "A"
-	p := &routeRenderPanelRepo{panel: domain.XUIPanel{ID: n.PanelID, Kind: domain.PanelKind3XUI, URL: "https://panel.example", PanelVersion: "3.7.0", XrayVersion: "26.7.28"}}
+	p := &routeRenderPanelRepo{panel: domain.XUIPanel{ID: n.PanelID, Kind: domain.PanelKind3XUI, URL: "https://panel.example"}}
 	n.RouteState = domain.NodeRouteState{Status: "applied", Binding: domain.RouteBinding(p.panel.URL, n), Lines: []domain.VlessRouteLine{{ID: "route-B", Name: "B", Route: 1001, OutboundTag: "warp", Enabled: true}}}
 	u := &domain.User{ID: 5, UUID: "87654321-4321-4def-8abc-cba987654321"}
 	repo := renderCredentialRepo{client: &domain.PSPClient{ID: 11, UserID: 5, UUID: u.UUID}, attachments: []domain.PSPClientInbound{{ClientID: 11, NodeID: n.ID, AppliedUUID: "12345678-1234-4abc-8def-123456789abc", AppliedEmail: "u5@example.test"}}}
@@ -69,7 +69,7 @@ func TestRouteAllSubscriptionFormatsUseAppliedUUIDAndZeroRemoteReads(t *testing.
 }
 
 func TestRoutePublicationRequiresExactBackendAndAppliedCredential(t *testing.T) {
-	for _, kind := range []string{"unknown", "changed_backend", "unsupported_version", "missing_applied", "hidden_direct", "original_route_collision"} {
+	for _, kind := range []string{"unknown", "changed_backend", "unsupported_backend", "missing_applied", "hidden_direct", "original_route_collision"} {
 		t.Run(kind, func(t *testing.T) {
 			s, n, u, p := routeRenderFixture(t)
 			switch kind {
@@ -77,8 +77,8 @@ func TestRoutePublicationRequiresExactBackendAndAppliedCredential(t *testing.T) 
 				n.RouteState.Status = "unknown"
 			case "changed_backend":
 				p.panel.URL = "https://different.example"
-			case "unsupported_version":
-				p.panel.XrayVersion = "26.9.8"
+			case "unsupported_backend":
+				p.panel.Kind = domain.PanelKindSUI
 			case "missing_applied":
 				s.repos.PSPClient = nil
 			case "hidden_direct":

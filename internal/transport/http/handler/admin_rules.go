@@ -32,7 +32,7 @@ func (h *AdminRuleSetsHandler) WithRoutePanels(panels ports.XUIPanelRepo) *Admin
 }
 
 // Route candidates are local metadata, but their availability must reflect the
-// same backend/version binding gate used by subscription rendering.
+// same backend and endpoint binding checks used by subscription rendering.
 func (h *AdminRuleSetsHandler) routePreviewNodes(ctx context.Context, nodes []*domain.Node) []*domain.Node {
 	out := make([]*domain.Node, 0, len(nodes))
 	panels := map[int64]*domain.XUIPanel{}
@@ -46,7 +46,7 @@ func (h *AdminRuleSetsHandler) routePreviewNodes(ctx context.Context, nodes []*d
 			panel, _ = h.routePanels.GetByID(ctx, node.PanelID)
 			panels[node.PanelID] = panel
 		}
-		if panel == nil || !domain.VlessRouteSupported(panel.Kind, panel.PanelVersion, panel.XrayVersion) || node.RouteState.Binding != domain.RouteBinding(panel.URL, node) {
+		if panel == nil || domain.NormalizePanelKind(panel.Kind) != domain.PanelKind3XUI || node.RouteState.Binding != domain.RouteBinding(panel.URL, node) {
 			copy := *node
 			copy.RouteState.Status = "drift"
 			copy.RouteState.Error = "unsupported_or_changed_binding"

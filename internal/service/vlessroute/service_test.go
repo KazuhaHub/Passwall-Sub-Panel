@@ -56,9 +56,6 @@ func (r *testPanelRepo) List(context.Context) ([]*domain.XUIPanel, error) {
 	p := r.panel
 	return []*domain.XUIPanel{&p}, nil
 }
-func (r *testPanelRepo) UpdateVersion(context.Context, int64, string, string, *time.Time) error {
-	return nil
-}
 
 type testPool struct {
 	ports.XUIPool
@@ -73,10 +70,15 @@ type testClient struct {
 	writes, reads     int
 	writeError        bool
 	driftOnSecondRead bool
+	coreState         string
 }
 
 func (c *testClient) GetServerStatus(context.Context) (*ports.ServerStatus, error) {
-	return &ports.ServerStatus{PanelVersion: "3.7.0", XrayVersion: "26.7.28", XrayState: "running"}, nil
+	state := c.coreState
+	if state == "" {
+		state = "running"
+	}
+	return &ports.ServerStatus{XrayState: state}, nil
 }
 func (c *testClient) GetInbound(context.Context, int) (*ports.Inbound, error) {
 	return &ports.Inbound{ID: 1, Tag: "inbound-443", Protocol: "vless", Port: 443, Settings: `{"clients":[{"id":"12345678-1234-4abc-8def-123456789abc"}]}`}, nil
@@ -108,7 +110,7 @@ func (c *testClient) WriteRouteTemplate(_ context.Context, template ports.RouteT
 func serviceFixture(t *testing.T) (*Service, *testNodeRepo, *testClient) {
 	t.Helper()
 	n := &testNodeRepo{node: domain.Node{ID: 1, PanelID: 1, InboundID: 1, DesiredProtocol: "vless", DesiredPort: 443, Enabled: true}}
-	p := &testPanelRepo{panel: domain.XUIPanel{ID: 1, Kind: domain.PanelKind3XUI, URL: "https://panel.example", PanelVersion: "3.7.0", XrayVersion: "26.7.28"}}
+	p := &testPanelRepo{panel: domain.XUIPanel{ID: 1, Kind: domain.PanelKind3XUI, URL: "https://panel.example"}}
 	c := &testClient{template: ports.RouteTemplate{Config: json.RawMessage(`{"outbounds":[{"tag":"direct","protocol":"freedom"}],"routing":{"rules":[{"domain":["example.test"],"outboundTag":"direct"}]}}`), TestURL: "keep", Outbounds: []ports.RouteOutbound{{Tag: "direct", Protocol: "freedom"}}}}
 	s := New(ports.Repos{Node: n, NodeRoute: n, XUIPanel: p}, testPool{client: c}, nil)
 	return s, n, c
@@ -138,6 +140,31 @@ func TestSaveConfirmsAndKeepsOriginalCredentialRangeReserved(t *testing.T) {
 	}
 	if last["ruleTag"] != RuleTag(1, line.ID) {
 		t.Fatal(last)
+	}
+}
+
+func TestRoutingLinesKeepBackendProtocolAndCoreStateChecks(t *testing.T) {
+	for _, condition := range []string{"non_3xui", "non_vless", "stopped_core"} {
+		t.Run(condition, func(t *testing.T) {
+			s, n, c := serviceFixture(t)
+			switch condition {
+			case "non_3xui":
+				s.repos.XUIPanel.(*testPanelRepo).panel.Kind = domain.PanelKindSUI
+			case "non_vless":
+				n.node.DesiredProtocol = "vmess"
+			case "stopped_core":
+				c.coreState = "stopped"
+			}
+			if condition != "stopped_core" {
+				view, err := s.Get(context.Background(), 1)
+				if err != nil || view.Supported || view.Reason != "requires_3xui_vless" {
+					t.Fatalf("unsupported node was offered routing lines: %+v %v", view, err)
+				}
+			}
+			if _, err := s.Save(context.Background(), 1, SaveRequest{Lines: []LineInput{{Name: "B", OutboundTag: "direct", Enabled: true}}}); !errors.Is(err, domain.ErrValidation) || c.writes != 0 {
+				t.Fatalf("invalid node reached a remote write: writes=%d err=%v", c.writes, err)
+			}
+		})
 	}
 }
 

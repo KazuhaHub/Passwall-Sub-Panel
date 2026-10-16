@@ -1854,7 +1854,7 @@
       "title": "VLESS routing lines",
       "tabs": "Additional line type",
       "hint": "Create separate proxy entries from this inbound using existing 3X-UI outbounds. Lines use the original endpoint, not relays. Rules are appended last; existing custom rules take priority.",
-      "unsupported": "Initially supports VLESS on 3X-UI 3.7.0 with Xray 26.7.28 only. Refresh outbounds to probe again.",
+      "unsupported": "Only VLESS nodes on 3X-UI are supported.",
       "read_error": "Cannot read lines. A failed read must not be treated as an empty list.",
       "catalog_error": "Cannot read existing outbounds. Refresh before selecting a destination.",
       "hidden_direct": "The direct line is hidden, so VLESS routing lines are also withheld to avoid exposing the direct endpoint.",

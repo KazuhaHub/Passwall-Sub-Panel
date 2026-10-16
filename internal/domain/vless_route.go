@@ -47,10 +47,6 @@ func RouteBinding(panelURL string, n *Node) string {
 	return fmt.Sprintf("%x", sha256.Sum256([]byte(value)))
 }
 
-func VlessRouteSupported(kind PanelKind, panelVersion, coreVersion string) bool {
-	return NormalizePanelKind(kind) == PanelKind3XUI && strings.TrimPrefix(panelVersion, "v") == "3.7.0" && strings.TrimPrefix(coreVersion, "v") == "26.7.28"
-}
-
 func UUIDRoute(id string) (uint16, error) {
 	u, err := uuid.Parse(id)
 	if err != nil {

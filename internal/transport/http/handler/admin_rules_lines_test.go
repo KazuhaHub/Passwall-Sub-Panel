@@ -20,7 +20,7 @@ func (p linePreviewPanels) GetByID(context.Context, int64) (*domain.XUIPanel, er
 
 func TestLineInspectionBindingGateDoesNotMutateCachedNodes(t *testing.T) {
 	n := &domain.Node{ID: 1, PanelID: 1, InboundID: 1, DesiredPort: 443, DesiredProtocol: "vless", Enabled: true, RouteState: domain.NodeRouteState{Status: "applied", Lines: []domain.VlessRouteLine{{ID: "route", Route: 1001, Name: "B", OutboundTag: "warp", Enabled: true}}}}
-	p := domain.XUIPanel{ID: 1, Kind: domain.PanelKind3XUI, URL: "https://panel.example", PanelVersion: "3.7.0", XrayVersion: "26.7.28"}
+	p := domain.XUIPanel{ID: 1, Kind: domain.PanelKind3XUI, URL: "https://panel.example"}
 	n.RouteState.Binding = domain.RouteBinding(p.URL, n)
 	h := &AdminRuleSetsHandler{routePanels: linePreviewPanels{panel: p}}
 	if got := h.routePreviewNodes(context.Background(), []*domain.Node{n}); got[0].RouteState.Status != "applied" {

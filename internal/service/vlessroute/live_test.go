@@ -403,17 +403,15 @@ func (f *liveV2Fixture) waitCore(serverID int64) {
 	for time.Now().Before(deadline) {
 		var probe struct {
 			OK    bool   `json:"ok"`
-			Panel string `json:"panel_version"`
-			Core  string `json:"xray_version"`
 			State string `json:"xray_state"`
 		}
 		f.api("POST", "/admin/servers/probe", map[string]any{"id": serverID}, &probe)
-		if probe.OK && probe.Panel == "3.7.0" && probe.Core == "26.7.28" && probe.State == "running" {
+		if probe.OK && probe.State == "running" {
 			return
 		}
 		time.Sleep(150 * time.Millisecond)
 	}
-	f.t.Fatal("fixture core did not become ready at the required profile")
+	f.t.Fatal("fixture core did not become ready")
 }
 
 func (f *liveV2Fixture) proxies(t *testing.T, format string) map[string]map[string]any {
