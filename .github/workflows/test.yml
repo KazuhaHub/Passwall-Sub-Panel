@@ -1347,7 +1347,7 @@ jobs:
         run: |
           set -euo pipefail
           go test -race -v -count=1 -timeout=2m ./internal/service/nodesync \
-            -run '^(TestPendingQuotaAndCurrentReportReadsDoNotShareContention|TestFleetQuotaChunksPreserveAllCurrentCountersDuringParallelReportsAndResets|TestFleetAccountingIndexMatchesIndependentPathsAcrossCurrentCounterAndOwnershipStates|TestFleetAccountingIndexPreservesUnusualAdapterInputsAndSaturation|TestFleetAccountingIndexReadsCurrentReportsAndDoesNotAliasResults|TestFleetAccountingChunksPreserveMixedEpochTransitionsAcrossReadAndWriteBoundaries|TestFleetAccountingSharedIndexReducesPerResponseAllocationsForComplete65OwnerFleet)$'
+            -run '^(TestPendingQuotaAndCurrentReportReadsDoNotShareContention|TestPendingQuotaStableAnchorReadsPreserveTransitionsAndSaturation|TestFleetQuotaChunksPreserveAllCurrentCountersDuringParallelReportsAndResets|TestFleetAccountingIndexMatchesIndependentPathsAcrossCurrentCounterAndOwnershipStates|TestFleetAccountingIndexPreservesUnusualAdapterInputsAndSaturation|TestFleetAccountingIndexReadsCurrentReportsAndDoesNotAliasResults|TestFleetAccountingChunksPreserveMixedEpochTransitionsAcrossReadAndWriteBoundaries|TestFleetAccountingSharedIndexReducesPerResponseAllocationsForComplete65OwnerFleet)$'
 
   sqlite:
     name: sqlite (full suite, race)

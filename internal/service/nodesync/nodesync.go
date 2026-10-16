@@ -1378,25 +1378,31 @@ func (s *Service) pendingCounterDelta(client domain.PSPClientAccounting, counter
 		return 0
 	}
 	s.anchorsMu.RLock()
-	baseline := s.pendingCounterUsesBaselineLocked(client, counter.CounterEpoch)
+	baseUp, baseDown, readonly := s.pendingCounterReadBaselineLocked(client, counter.CounterEpoch)
 	s.anchorsMu.RUnlock()
-	if baseline {
-		return pendingDeltaFromBaseline(counter.UpBytes, counter.DownBytes, client.LastRawUpBytes, client.LastRawDownBytes)
+	if readonly {
+		return pendingDeltaFromBaseline(counter.UpBytes, counter.DownBytes, baseUp, baseDown)
 	}
 	s.anchorsMu.Lock()
 	defer s.anchorsMu.Unlock()
 	return s.pendingCounterDeltaLocked(client, counter)
 }
 
-// The caller holds anchorsMu for reading or writing. An absent anchor in the
-// persisted epoch needs no mutation: the original delete would be a no-op.
-// The check is the observation point; arithmetic uses only this call's inputs.
-func (s *Service) pendingCounterUsesBaselineLocked(client domain.PSPClientAccounting, epoch uint64) bool {
+// The caller holds anchorsMu for reading or writing. Return the original scalar
+// baselines only when no anchor mutation is needed at this observation point.
+// Copies belong to this call; concurrent resets cannot change its arithmetic.
+func (s *Service) pendingCounterReadBaselineLocked(client domain.PSPClientAccounting, epoch uint64) (int64, int64, bool) {
 	if epoch == 0 {
-		return true
+		return 0, 0, true
 	}
-	_, anchored := s.anchors[client.ID]
-	return client.LastCounterEpoch == epoch && !anchored
+	anchor, exists := s.anchors[client.ID]
+	if client.LastCounterEpoch == epoch {
+		return client.LastRawUpBytes, client.LastRawDownBytes, !exists
+	}
+	if exists && anchor.CounterEpoch == epoch {
+		return anchor.UpBytes, anchor.DownBytes, true
+	}
+	return 0, 0, false
 }
 
 // The caller holds anchorsMu for writing. Both scalar and bounded fleet paths retain

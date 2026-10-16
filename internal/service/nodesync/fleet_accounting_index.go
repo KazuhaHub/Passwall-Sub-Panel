@@ -119,22 +119,25 @@ func (s *Service) addFleetPendingChunk(pending map[int64]int64, counters []fleet
 	if len(counters) == 0 {
 		return
 	}
+	var baselines [fleetAccountingAnchorChunk]struct{ up, down int64 }
 	s.anchorsMu.RLock()
-	baseline := true
-	for _, entry := range counters {
-		if !s.pendingCounterUsesBaselineLocked(entry.client, entry.counter.counterEpoch) {
-			baseline = false
+	readonly := true
+	for i, entry := range counters {
+		up, down, ok := s.pendingCounterReadBaselineLocked(entry.client, entry.counter.counterEpoch)
+		if !ok {
+			readonly = false
 			break
 		}
+		baselines[i].up, baselines[i].down = up, down
 	}
 	s.anchorsMu.RUnlock()
-	if baseline {
+	if readonly {
 		// No anchor mutation was needed at the read observation. All arithmetic
 		// and response-map updates can proceed without holding the shared lock.
-		for _, entry := range counters {
+		for i, entry := range counters {
 			var delta int64
 			if entry.counter.counterEpoch != 0 {
-				delta = pendingDeltaFromBaseline(entry.counter.upBytes, entry.counter.downBytes, entry.client.LastRawUpBytes, entry.client.LastRawDownBytes)
+				delta = pendingDeltaFromBaseline(entry.counter.upBytes, entry.counter.downBytes, baselines[i].up, baselines[i].down)
 			}
 			pending[entry.client.UserID] = saturatingAdd(pending[entry.client.UserID], delta)
 		}

@@ -2,6 +2,8 @@ package nodesync
 
 import (
 	"fmt"
+	"math"
+	"reflect"
 	"sync"
 	"testing"
 	"time"
@@ -66,6 +68,55 @@ func TestPendingQuotaAndCurrentReportReadsDoNotShareContention(t *testing.T) {
 			60, time.UnixMilli(1000))
 		return len(pending) == 1 && pending[1] == 10 && coverage.Entries == 1 && coverage.EntriesStale == 0 && at == 1000
 	})
+	s.anchorsMu.Lock()
+	s.anchors[1] = protocol.ClientCounters{CounterEpoch: 2, UpBytes: 7, DownBytes: 3}
+	s.anchorsMu.Unlock()
+	checkIndependent(s.anchorsMu.RLocker(), func() bool {
+		return s.pendingCounterDelta(domain.PSPClientAccounting{ID: 1, LastCounterEpoch: 1, LastRawUpBytes: 999}, protocol.ClientCounters{Key: protocol.NewClientKey(1), UpBytes: 17, DownBytes: 8, CounterEpoch: 2}) == 15
+	})
+	checkIndependent(s.anchorsMu.RLocker(), func() bool {
+		pending, coverage, at := s.accountFleetFromReports(
+			[]domain.PSPClientAccounting{{ID: 1, UserID: 1, PanelID: 1, LastRawUpBytes: 999, LastCounterEpoch: 1}},
+			[]*domain.NodeAgent{{AgentID: "owned", PanelID: 1}},
+			map[string]fleetCounterReport{"owned": {receivedAtMS: 1000, clients: []fleetClientCounter{{key: protocol.NewClientKey(1), present: true, upBytes: 17, downBytes: 8, counterEpoch: 2}}}},
+			60, time.UnixMilli(1000))
+		return len(pending) == 1 && pending[1] == 15 && coverage.Entries == 1 && coverage.EntriesStale == 0 && at == 1000
+	})
+}
+
+func TestPendingQuotaStableAnchorReadsPreserveTransitionsAndSaturation(t *testing.T) {
+	anchor := protocol.ClientCounters{Key: protocol.NewClientKey(1), CounterEpoch: 2, UpBytes: 7, DownBytes: 3, LiveIPs: []string{"owned"}}
+	s := &Service{anchors: map[int64]protocol.ClientCounters{1: anchor}}
+	client := domain.PSPClientAccounting{ID: 1, LastCounterEpoch: 1, LastRawUpBytes: 999, LastRawDownBytes: 999}
+	for _, counter := range []protocol.ClientCounters{
+		{CounterEpoch: 2, UpBytes: 17, DownBytes: 8},
+		{CounterEpoch: 2, UpBytes: 6, DownBytes: 2},
+		{CounterEpoch: 2, UpBytes: math.MaxInt64, DownBytes: math.MaxInt64},
+		{CounterEpoch: 0, UpBytes: math.MaxInt64, DownBytes: math.MaxInt64},
+	} {
+		want := int64(15)
+		if counter.UpBytes == 6 || counter.CounterEpoch == 0 {
+			want = 0
+		} else if counter.UpBytes == math.MaxInt64 {
+			want = math.MaxInt64
+		}
+		for range 2 {
+			if got := s.pendingCounterDelta(client, counter); got != want || !reflect.DeepEqual(s.anchors[1], anchor) {
+				t.Fatal("stable or zero epoch changed its original delta or retained anchor")
+			}
+		}
+	}
+	client.LastCounterEpoch, client.LastRawUpBytes, client.LastRawDownBytes = 2, 12, 4
+	if got := s.pendingCounterDelta(client, protocol.ClientCounters{CounterEpoch: 2, UpBytes: 17, DownBytes: 8}); got != 9 || len(s.anchors) != 0 {
+		t.Fatal("persisted epoch transition failed to delete its anchor")
+	}
+	first := protocol.ClientCounters{CounterEpoch: 3, UpBytes: 30, DownBytes: 40}
+	if got := s.pendingCounterDelta(client, first); got != 0 || !reflect.DeepEqual(s.anchors[1], first) {
+		t.Fatal("new epoch lost its actual first-observation anchor")
+	}
+	if got := s.pendingCounterDelta(client, protocol.ClientCounters{CounterEpoch: 3, UpBytes: 35, DownBytes: 47}); got != 12 || !reflect.DeepEqual(s.anchors[1], first) {
+		t.Fatal("new stable epoch did not retain and use its own anchor")
+	}
 }
 
 func TestFleetQuotaChunksPreserveAllCurrentCountersDuringParallelReportsAndResets(t *testing.T) {

@@ -59,6 +59,20 @@ daemon byte-pressure driver and its independent ledger evidence are unfinished.
 
 ## Global sender profiling
 
+The stable-anchor follow-up also treats an existing reset anchor with the same
+observed epoch as read-only, even while the durable epoch has not caught up.
+Under the shared lock it copies only scalar up/down baselines into a bounded
+64-entry same-call scratch array, then performs the original arithmetic outside
+the lock. Missing/mismatched anchors and persisted-epoch anchor deletion still
+use the original writer path with a fresh re-read. Zero epochs leave anchors
+untouched. There is no new cross-call cache, retained report, skipped counter or
+changed freshness rule. Shared-reader regressions cover both scalar and fleet
+stable-anchor reads; explicit arithmetic cases check clamping, saturation,
+zero-epoch retention, durable transition deletion and new-epoch anchoring.
+Existing complete 65-owner/200-user parallel and mixed-chunk oracle cases remain.
+The prior whole-process mutex profiles motivate the change but are not a
+traffic CPU attribution or evidence of a runtime improvement.
+
 The actual traffic profile on PSP `9a0b0784`, MySQL
 [run 38824258724](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/38824258724),
 covered 120.04s and sampled 72.58s of parent test-process CPU. The allowed VLESS
