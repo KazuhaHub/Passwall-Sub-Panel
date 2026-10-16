@@ -721,6 +721,7 @@ jobs:
         run: |
           set -euo pipefail
           node --test deploy/destination_global_batch_test.mjs
+          go test -count=1 -run '^TestNullableNumericPreservesStandardSQLConversionsAndReuse$' -bench '^BenchmarkFleetNullableNumericConversion$' -benchtime=500ms ./internal/adapters/sqlstore
           go test -v -count=1 ./internal/app -run '^(TestNativeLoadProcCountersRequireBirthAndExactCPUFields|TestNativeDatabaseConfigurationIsClosedAndPreservesOwnedDirectories|TestNativeDatabaseCountQueryKeepsParametersSeparate)$'
           go test -c -tags destination_acceptance -o "$RUNNER_TEMP/destination-global-batch.test" ./internal/app
           "$RUNNER_TEMP/destination-global-batch.test" -test.v -test.run '^(TestNativeGlobalTransportKeepsProductionAuthenticationAndExactBodies|TestNativeGlobalRequestFailureFactsPreserveErrorsAndBlockedReplies|TestNativeGlobalWorkerProbeKeepsFreshConnectionsAndResponseSemantics|TestNativeGlobalAdmissionBindingRejectsAmbiguousEvidence|TestNativeSetupProfileRejectsExistingFilesAndLinks|TestNativeSetupProfileStopsAndClosesOnce|TestNativeTargetRouteWaitRequiresExactLocalReadiness|TestNativeTargetRouteWaitStopsOnDeadlineCancellationAndReadFailure)$' -test.timeout=2m

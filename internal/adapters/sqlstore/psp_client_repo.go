@@ -2,7 +2,6 @@ package sqlstore
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"sync/atomic"
@@ -252,8 +251,8 @@ func (r *pspClientRepo) readFleetAccounting(ctx context.Context) ([]domain.PSPCl
 	// duplicates the complete fleet on every sync. Historic NULL baselines still
 	// mean zero, just as when scanning them into the model's scalar fields.
 	var client domain.PSPClientAccounting
-	var up, down sql.NullInt64
-	var epoch sql.Null[uint64]
+	var up, down nullableInt64
+	var epoch nullableUint64
 	destinations := []any{&client.ID, &client.UserID, &client.PanelID, &up, &down, &epoch}
 	if r.db.Dialector.Name() == "postgres" {
 		// pgx's Go 1.27 column scanner otherwise checks several interfaces at
