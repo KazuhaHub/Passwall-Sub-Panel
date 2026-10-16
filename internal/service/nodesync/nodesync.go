@@ -995,7 +995,7 @@ func (s *Service) buildDirectives(ctx context.Context, agent *domain.NodeAgent, 
 	}
 	fullFreshnessSeconds := nodeprotocol.EffectiveFullReportPeriod(settings.FullReportSeconds, nextPollSeconds)
 	baselines, hasFull := s.quotaBaselines(agent.AgentID, current, now, fullFreshnessSeconds)
-	allClients, err := s.loadFleetAccounting(ctx)
+	allClients, err := s.loadFleetAccountingSnapshot(ctx)
 	if err != nil {
 		return nodeprotocol.DirectivesBody{}, nodeprotocol.Envelope{}, fmt.Errorf("nodesync: list quota clients: %w", err)
 	}
@@ -1003,7 +1003,7 @@ func (s *Service) buildDirectives(ctx context.Context, agent *domain.NodeAgent, 
 	if err != nil {
 		return nodeprotocol.DirectivesBody{}, nodeprotocol.Envelope{}, fmt.Errorf("nodesync: list native agents: %w", err)
 	}
-	pendingByUser, coverage, oldestReportMS := s.accountFleet(allClients, agents, fullFreshnessSeconds, now)
+	pendingByUser, coverage, oldestReportMS := s.accountFleetSnapshot(allClients, agents, fullFreshnessSeconds, now)
 	body := nodeprotocol.DirectivesBody{
 		ForRosterVersion: rosterVersion,
 		Quota:            make([]nodeprotocol.QuotaEntry, 0, len(snapshot.Clients)),
@@ -1103,6 +1103,17 @@ func (s *Service) buildDirectives(ctx context.Context, agent *domain.NodeAgent, 
 	envelope.NumeratorAsOfMS, envelope.NumeratorOldestReportAgeMS,
 		envelope.OverburnHeadroomBytes = s.recordGrantsAndFleetEnvelope(agent.AgentID, body.Quota, now, oldestReportMS)
 	return body, envelope, nil
+}
+
+func (s *Service) loadFleetAccountingSnapshot(ctx context.Context) (domain.FleetAccountingSnapshot, error) {
+	if reader, ok := s.clients.(ports.PSPClientFleetAccountingSnapshotRepo); ok {
+		return reader.ReadFleetAccountingSnapshot(ctx)
+	}
+	rows, err := s.loadFleetAccounting(ctx)
+	if err != nil {
+		return domain.FleetAccountingSnapshot{}, err
+	}
+	return domain.NewFleetAccountingSnapshot(rows), nil
 }
 
 func (s *Service) loadFleetAccounting(ctx context.Context) ([]domain.PSPClientAccounting, error) {
@@ -1323,8 +1334,12 @@ func (s *Service) pendingUsage(clients map[int64]*domain.PSPClientAccounting, ag
 // for both quota accounting and coverage. The copy belongs only to this call;
 // no report snapshot is cached across syncs or shared with stored mutable data.
 func (s *Service) accountFleet(clients []domain.PSPClientAccounting, agents []*domain.NodeAgent, fullFreshnessSeconds int, now time.Time) (map[int64]int64, nodeprotocol.SegmentCounts, int64) {
+	return s.accountFleetSnapshot(domain.NewFleetAccountingSnapshot(clients), agents, fullFreshnessSeconds, now)
+}
+
+func (s *Service) accountFleetSnapshot(clients domain.FleetAccountingSnapshot, agents []*domain.NodeAgent, fullFreshnessSeconds int, now time.Time) (map[int64]int64, nodeprotocol.SegmentCounts, int64) {
 	reports := s.fleetCounterReportsForAgents(agents)
-	return s.accountFleetFromReports(clients, agents, reports, fullFreshnessSeconds, now)
+	return s.accountFleetSnapshotFromReports(clients, agents, reports, fullFreshnessSeconds, now)
 }
 
 func (s *Service) fleetCounterReportsForAgents(agents []*domain.NodeAgent) map[string]fleetCounterReport {

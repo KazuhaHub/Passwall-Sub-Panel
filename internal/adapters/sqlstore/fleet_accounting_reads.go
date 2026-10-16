@@ -21,13 +21,18 @@ type fleetAccountingReads struct {
 type fleetAccountingRead struct {
 	contexts []context.Context
 	done     chan struct{}
-	rows     []domain.PSPClientAccounting
+	snapshot domain.FleetAccountingSnapshot
 	err      error
 }
 
 func (r *fleetAccountingReads) read(ctx context.Context, load func(context.Context) ([]domain.PSPClientAccounting, error)) ([]domain.PSPClientAccounting, error) {
+	snapshot, err := r.readSnapshot(ctx, load)
+	return snapshot.CloneRows(), err
+}
+
+func (r *fleetAccountingReads) readSnapshot(ctx context.Context, load func(context.Context) ([]domain.PSPClientAccounting, error)) (domain.FleetAccountingSnapshot, error) {
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		return domain.FleetAccountingSnapshot{}, err
 	}
 	r.mu.Lock()
 	if r.pending == nil {
@@ -42,21 +47,12 @@ func (r *fleetAccountingReads) read(ctx context.Context, load func(context.Conte
 	r.mu.Unlock()
 	select {
 	case <-ctx.Done():
-		return nil, ctx.Err()
+		return domain.FleetAccountingSnapshot{}, ctx.Err()
 	case <-batch.done:
 		if err := ctx.Err(); err != nil {
-			return nil, err
+			return domain.FleetAccountingSnapshot{}, err
 		}
-		// The stored result belongs only to this completed batch. Each caller
-		// receives its own numeric values, so mutations cannot cross responses.
-		// Bound the exposed capacity to the complete result, rather than the
-		// allocator-rounded capacity used by append-based slice cloning.
-		if batch.rows == nil {
-			return nil, batch.err
-		}
-		rows := make([]domain.PSPClientAccounting, len(batch.rows))
-		copy(rows, batch.rows)
-		return rows, batch.err
+		return batch.snapshot, batch.err
 	}
 }
 
@@ -79,9 +75,10 @@ func (r *fleetAccountingReads) drain(load func(context.Context) ([]domain.PSPCli
 			}
 		}
 		if len(active) != 0 {
-			batch.rows, batch.err = readFleetAccountingBatch(active, load)
-			if batch.err != nil {
-				batch.rows = nil
+			var rows []domain.PSPClientAccounting
+			rows, batch.err = readFleetAccountingBatch(active, load)
+			if batch.err == nil {
+				batch.snapshot = domain.NewFleetAccountingSnapshot(rows)
 			}
 		}
 		batch.contexts = nil

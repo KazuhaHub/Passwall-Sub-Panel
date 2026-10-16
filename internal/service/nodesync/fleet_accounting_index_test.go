@@ -45,6 +45,12 @@ func assertFleetIndexMatchesIndependentPaths(t *testing.T, clients []domain.PSPC
 	if !reflect.DeepEqual(gotPending, wantPending) || gotCoverage != wantCoverage || gotOldest != wantOldest || !reflect.DeepEqual(next.anchors, old.anchors) {
 		t.Fatal("shared fleet index changed pending usage, coverage, oldest receipt or reset anchors")
 	}
+	shared := &Service{anchors: cloneFleetTestAnchors(anchors)}
+	snapshot := domain.NewFleetAccountingSnapshot(clients)
+	gotPending, gotCoverage, gotOldest = shared.accountFleetSnapshotFromReports(snapshot, agents, reports, freshness, now)
+	if !reflect.DeepEqual(gotPending, wantPending) || gotCoverage != wantCoverage || gotOldest != wantOldest || !reflect.DeepEqual(shared.anchors, old.anchors) {
+		t.Fatal("immutable fleet snapshot changed independent accounting semantics")
+	}
 	if !reflect.DeepEqual(before, reports) || !reflect.DeepEqual(rowsBefore, clients) {
 		t.Fatal("shared fleet index mutated its current inputs")
 	}
@@ -200,12 +206,16 @@ func TestFleetAccountingSharedIndexReducesPerResponseAllocationsForComplete65Own
 	}
 	assertFleetIndexMatchesIndependentPaths(t, clients, agents, reports, nil, 60, now)
 	s := &Service{anchors: map[int64]protocol.ClientCounters{}}
-	measure := func(shared bool) float64 {
+	snapshot := domain.NewFleetAccountingSnapshot(clients)
+	measure := func(mode int) float64 {
 		return testing.AllocsPerRun(3, func() {
 			var coverage protocol.SegmentCounts
-			if shared {
+			switch mode {
+			case 2:
+				_, coverage, _ = s.accountFleetSnapshotFromReports(snapshot, agents, reports, 60, now)
+			case 1:
 				_, coverage, _ = s.accountFleetFromReports(clients, agents, reports, 60, now)
-			} else {
+			default:
 				_, coverage, _ = s.accountFleetSeparateIndexes(clients, agents, reports, 60, now)
 			}
 			if coverage.Entries != 13000 || coverage.Subjects != 200 || coverage.EntriesStale != 0 {
@@ -213,8 +223,11 @@ func TestFleetAccountingSharedIndexReducesPerResponseAllocationsForComplete65Own
 			}
 		})
 	}
-	old, next := measure(false), measure(true)
+	old, next, reused := measure(0), measure(1), measure(2)
 	if next >= old {
 		t.Fatalf("shared fleet index did not reduce allocations: old=%.0f new=%.0f", old, next)
+	}
+	if reused >= next {
+		t.Fatalf("immutable batch did not avoid per-response fleet allocations: slice=%.0f snapshot=%.0f", next, reused)
 	}
 }

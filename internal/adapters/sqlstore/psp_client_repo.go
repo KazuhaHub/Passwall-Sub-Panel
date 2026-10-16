@@ -233,6 +233,10 @@ func (r *pspClientRepo) ListFleetAccounting(ctx context.Context) ([]domain.PSPCl
 	return r.fleetReads.read(ctx, r.readFleetAccounting)
 }
 
+func (r *pspClientRepo) ReadFleetAccountingSnapshot(ctx context.Context) (domain.FleetAccountingSnapshot, error) {
+	return r.fleetReads.readSnapshot(ctx, r.readFleetAccounting)
+}
+
 func (r *pspClientRepo) readFleetAccounting(ctx context.Context) ([]domain.PSPClientAccounting, error) {
 	// The covering index follows this ordering and numeric projection, allowing
 	// the planner to avoid table lookups and temporary sorting. The query still
@@ -281,6 +285,7 @@ func (r *pspClientRepo) readFleetAccounting(ctx context.Context) ([]domain.PSPCl
 }
 
 var _ ports.PSPClientFleetAccountingRepo = (*pspClientRepo)(nil)
+var _ ports.PSPClientFleetAccountingSnapshotRepo = (*pspClientRepo)(nil)
 
 func (r *pspClientRepo) ListByUser(ctx context.Context, userID int64) ([]*domain.PSPClient, error) {
 	return r.listClientsByUser(r.db.WithContext(ctx).Where("user_id = ?", userID))

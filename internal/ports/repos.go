@@ -556,6 +556,13 @@ type PSPClientFleetAccountingRepo interface {
 	ListFleetAccounting(ctx context.Context) ([]domain.PSPClientAccounting, error)
 }
 
+// PSPClientFleetAccountingSnapshotRepo optionally shares an immutable complete
+// current read among callers admitted before that SQL batch starts. Calls made
+// after a query starts require a later read; completed results must not be cached.
+type PSPClientFleetAccountingSnapshotRepo interface {
+	ReadFleetAccountingSnapshot(ctx context.Context) (domain.FleetAccountingSnapshot, error)
+}
+
 // NodeAgentRepo persists native-agent identity and the three independent
 // desired/applied streams. MintStream accepts canonical JSON and performs the
 // compare-before-CAS rule: identical content returns minted=false and never

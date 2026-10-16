@@ -26,12 +26,12 @@ type fleetAccountingCounter struct {
 // key NewClientKey would mint. Presence remains last-counter-wins; pending
 // deltas still visit every counter in report order, including duplicates.
 func (s *Service) accountFleetFromReports(clients []domain.PSPClientAccounting, agents []*domain.NodeAgent, reports map[string]fleetCounterReport, freshness int, now time.Time) (map[int64]int64, protocol.SegmentCounts, int64) {
-	index := make(map[int64]int, len(clients))
-	for i := range clients {
-		if _, duplicate := index[clients[i].ID]; duplicate || clients[i].ID <= 0 {
-			return s.accountFleetSeparateIndexes(clients, agents, reports, freshness, now)
-		}
-		index[clients[i].ID] = i
+	return s.accountFleetSnapshotFromReports(domain.NewFleetAccountingSnapshot(clients), agents, reports, freshness, now)
+}
+
+func (s *Service) accountFleetSnapshotFromReports(clients domain.FleetAccountingSnapshot, agents []*domain.NodeAgent, reports map[string]fleetCounterReport, freshness int, now time.Time) (map[int64]int64, protocol.SegmentCounts, int64) {
+	if !clients.HasUniqueIDs() {
+		return s.accountFleetSeparateIndexes(clients.CloneRows(), agents, reports, freshness, now)
 	}
 	byPanel := make(map[int64]string, len(agents))
 	owners := make(map[string]*fleetAccountingOwner, len(agents))
@@ -45,7 +45,7 @@ func (s *Service) accountFleetFromReports(clients []domain.PSPClientAccounting, 
 		_, repeatedPanel := byPanel[agent.PanelID]
 		_, repeatedAgent := owners[agent.AgentID]
 		if repeatedPanel || repeatedAgent {
-			return s.accountFleetSeparateIndexes(clients, agents, reports, freshness, now)
+			return s.accountFleetSeparateIndexes(clients.CloneRows(), agents, reports, freshness, now)
 		}
 		received, found := reports[agent.AgentID]
 		owner := &fleetAccountingOwner{panelID: agent.PanelID, atMS: received.receivedAtMS,
@@ -55,7 +55,7 @@ func (s *Service) accountFleetFromReports(clients []domain.PSPClientAccounting, 
 		}
 		owners[agent.AgentID], byPanel[agent.PanelID] = owner, agent.AgentID
 	}
-	present := make([]bool, len(clients))
+	present := make([]bool, clients.Len())
 	pending := make(map[int64]int64)
 	var current [fleetAccountingAnchorChunk]fleetAccountingCounter
 	for agentID, report := range reports {
@@ -74,19 +74,24 @@ func (s *Service) accountFleetFromReports(clients []domain.PSPClientAccounting, 
 				if err != nil {
 					continue
 				}
-				i, found := index[id]
-				if !found || clients[i].PanelID != owner.panelID {
+				i, found := clients.IndexForID(id)
+				if !found {
+					continue
+				}
+				client := clients.Row(i)
+				if client.PanelID != owner.panelID {
 					continue
 				}
 				present[i] = counter.present
-				eligible = append(eligible, fleetAccountingCounter{client: clients[i], counter: counter})
+				eligible = append(eligible, fleetAccountingCounter{client: client, counter: counter})
 			}
 			s.addFleetPendingChunk(pending, eligible)
 		}
 	}
 	coverage := protocol.SegmentCounts{}
 	subjects := make(map[int64]struct{})
-	for i, client := range clients {
+	for i := range clients.Len() {
+		client := clients.Row(i)
 		agentID, native := byPanel[client.PanelID]
 		if !native {
 			continue
