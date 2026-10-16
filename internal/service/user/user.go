@@ -68,7 +68,8 @@ type Service struct {
 	// App.Shutdown drains it and it runs under a cancellable background context.
 	// nil in tests / before wiring, where ResyncGroupMembersInBackground falls
 	// back to an untracked safego.Go with context.Background.
-	bg func(name string, fn func(ctx context.Context))
+	bg                 func(name string, fn func(ctx context.Context))
+	groupMemberResyncs groupMemberResyncs
 
 	// psp shadow-writes the v3.9.0 psp_client model alongside each membership
 	// resync. Late-bound via SetPSPProvisioner; nil before wiring / in tests
@@ -2164,7 +2165,9 @@ func (s *Service) ResyncMembershipOrEnqueue(ctx context.Context, userID int64, s
 // returns at once instead of blocking on N sequential per-member 3X-UI
 // round-trips. Uses a fresh context because the caller's request context is
 // cancelled once the save response is written; anything left unsynced if the
-// process stops mid-run is healed by the next reconcile pass.
+// process stops mid-run is healed by the next reconcile pass. Repeated requests
+// for one group share a queued pass; changes during a pass require another
+// current-member read after it finishes.
 func (s *Service) ResyncGroupMembersInBackground(groupID int64) {
 	work := func(ctx context.Context) {
 		members, err := s.users.ListByGroup(ctx, groupID)
@@ -2182,11 +2185,13 @@ func (s *Service) ResyncGroupMembersInBackground(groupID int64) {
 	// WaitGroup + cancellable background context so Shutdown drains it. Before
 	// wiring (tests / early-start) fall back to an untracked goroutine with its
 	// own context — anything left unsynced is healed by the next reconcile pass.
-	if s.bg != nil {
-		s.bg("user.resync-group-members", work)
-		return
-	}
-	safego.Go("user.resync-group-members", func() { work(context.Background()) })
+	s.groupMemberResyncs.schedule(groupID, func(run func(context.Context)) {
+		if s.bg != nil {
+			s.bg("user.resync-group-members", run)
+			return
+		}
+		safego.Go("user.resync-group-members", func() { run(context.Background()) })
+	}, work)
 }
 
 // ResyncMembership recomputes a user's 3X-UI client memberships against the
