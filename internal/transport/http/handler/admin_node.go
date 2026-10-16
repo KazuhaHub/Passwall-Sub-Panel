@@ -108,8 +108,8 @@ type nodeDTO struct {
 	// cert). "" = unmanaged. Never carries any PEM/secret — just the binding.
 	CertSource string `json:"cert_source,omitempty"`
 	CertID     int64  `json:"cert_id,omitempty"`
-	// Relays are the node's transit / 中转 lines; HideDirect drops the direct
-	// entry when at least one line is enabled. Surfaced so the edit form can
+	// Relays are the node's transit / 中转 lines; HideDirect drops only the
+	// standalone direct entry. Surfaced so the edit form can
 	// round-trip them. Always present (possibly empty) for real nodes.
 	Relays          []relayLineDTO         `json:"relays"`
 	RouteState      *domain.NodeRouteState `json:"route_state,omitempty"`
@@ -120,13 +120,14 @@ type nodeDTO struct {
 // relayLineDTO is one transit front. Only the dialed endpoint differs from the
 // landing; SNI/Host are optional CDN-fronting overrides. See domain.RelayLine.
 type relayLineDTO struct {
-	ID      string `json:"id,omitempty"`
-	Name    string `json:"name"`
-	Address string `json:"address"`
-	Port    int    `json:"port"`
-	SNI     string `json:"sni,omitempty"`
-	Host    string `json:"host,omitempty"`
-	Enabled bool   `json:"enabled"`
+	ID           string `json:"id,omitempty"`
+	Name         string `json:"name"`
+	OnlyLineName bool   `json:"only_line_name"`
+	Address      string `json:"address"`
+	Port         int    `json:"port"`
+	SNI          string `json:"sni,omitempty"`
+	Host         string `json:"host,omitempty"`
+	Enabled      bool   `json:"enabled"`
 }
 
 type inboundDTO struct {
@@ -151,13 +152,12 @@ type importNodeRequest struct {
 	Flow          string `json:"flow"`
 	// Protocol of the source inbound (lowercased), cached on the node so the
 	// UI can gate protocol-specific fields. Optional for backward compat.
-	Protocol        string         `json:"protocol"`
-	Region          string         `json:"region" binding:"required"`
-	Tags            []string       `json:"tags"`
-	SortOrder       int            `json:"sort_order"`
-	Relays          []relayLineDTO `json:"relays"`
-	HideDirect      bool           `json:"hide_direct"`
-	ShowRelayStatus bool           `json:"show_relay_status"`
+	Protocol   string         `json:"protocol"`
+	Region     string         `json:"region" binding:"required"`
+	Tags       []string       `json:"tags"`
+	SortOrder  int            `json:"sort_order"`
+	Relays     []relayLineDTO `json:"relays"`
+	HideDirect bool           `json:"hide_direct"`
 }
 
 type realityScanRequest struct {
@@ -166,19 +166,18 @@ type realityScanRequest struct {
 }
 
 type createNodeRequest struct {
-	PanelID         int64          `json:"panel_id" binding:"required"`
-	DisplayName     string         `json:"display_name" binding:"required"`
-	ServerAddress   string         `json:"server_address" binding:"required"`
-	Flow            string         `json:"flow"`
-	Region          string         `json:"region" binding:"required"`
-	Tags            []string       `json:"tags"`
-	SortOrder       int            `json:"sort_order"`
-	Relays          []relayLineDTO `json:"relays"`
-	HideDirect      bool           `json:"hide_direct"`
-	ShowRelayStatus bool           `json:"show_relay_status"`
-	CertSource      string         `json:"cert_source"`
-	CertID          int64          `json:"cert_id"`
-	Inbound         inboundSpecDTO `json:"inbound" binding:"required"`
+	PanelID       int64          `json:"panel_id" binding:"required"`
+	DisplayName   string         `json:"display_name" binding:"required"`
+	ServerAddress string         `json:"server_address" binding:"required"`
+	Flow          string         `json:"flow"`
+	Region        string         `json:"region" binding:"required"`
+	Tags          []string       `json:"tags"`
+	SortOrder     int            `json:"sort_order"`
+	Relays        []relayLineDTO `json:"relays"`
+	HideDirect    bool           `json:"hide_direct"`
+	CertSource    string         `json:"cert_source"`
+	CertID        int64          `json:"cert_id"`
+	Inbound       inboundSpecDTO `json:"inbound" binding:"required"`
 }
 
 type inboundSpecDTO struct {
@@ -205,9 +204,8 @@ type updateMetadataRequest struct {
 	SortOrder     int      `json:"sort_order"`
 	// Relays full-replaces the node's transit lines; nil (field absent) leaves
 	// them untouched, an explicit [] clears them — same patch semantics as Tags.
-	Relays          []relayLineDTO `json:"relays"`
-	HideDirect      bool           `json:"hide_direct"`
-	ShowRelayStatus bool           `json:"show_relay_status"`
+	Relays     []relayLineDTO `json:"relays"`
+	HideDirect bool           `json:"hide_direct"`
 }
 
 type setNodeEnabledRequest struct {
@@ -490,9 +488,7 @@ func (h *AdminNodeHandler) ImportExisting(c *gin.Context) {
 		SortOrder:       req.SortOrder,
 		Relays:          relays,
 		HideDirect:      req.HideDirect,
-		ShowRelayStatus: req.ShowRelayStatus,
 	}
-	forceRelayStatusForHiddenDirect(n)
 	if err := h.node.ImportExisting(c.Request.Context(), n); err != nil {
 		mapNodeServiceError(c, err)
 		return
@@ -523,9 +519,7 @@ func (h *AdminNodeHandler) CreateInbound(c *gin.Context) {
 		SortOrder:       req.SortOrder,
 		Relays:          relays,
 		HideDirect:      req.HideDirect,
-		ShowRelayStatus: req.ShowRelayStatus,
 	}
-	forceRelayStatusForHiddenDirect(n)
 	spec := ports.InboundSpec{
 		Remark:         req.Inbound.Remark,
 		Enable:         req.Inbound.Enable,
@@ -613,8 +607,6 @@ func (h *AdminNodeHandler) UpdateMetadata(c *gin.Context) {
 	if req.Relays != nil {
 		n.Relays = relays
 		n.HideDirect = req.HideDirect
-		n.ShowRelayStatus = req.ShowRelayStatus
-		forceRelayStatusForHiddenDirect(n)
 	}
 	if err := h.node.UpdateMetadata(c.Request.Context(), n); err != nil {
 		mapNodeServiceError(c, err)
@@ -975,13 +967,14 @@ func parseRelays(dtos []relayLineDTO) ([]domain.RelayLine, error) {
 			return nil, fmt.Errorf("relay line %d: port %d out of range (0-65535; 0 reuses the inbound port)", i+1, d.Port)
 		}
 		out = append(out, domain.RelayLine{
-			ID:      d.ID,
-			Name:    strings.TrimSpace(d.Name),
-			Address: addr,
-			Port:    d.Port,
-			SNI:     strings.TrimSpace(d.SNI),
-			Host:    strings.TrimSpace(d.Host),
-			Enabled: d.Enabled,
+			ID:           d.ID,
+			Name:         strings.TrimSpace(d.Name),
+			OnlyLineName: d.OnlyLineName,
+			Address:      addr,
+			Port:         d.Port,
+			SNI:          strings.TrimSpace(d.SNI),
+			Host:         strings.TrimSpace(d.Host),
+			Enabled:      d.Enabled,
 		})
 	}
 	return out, nil
@@ -992,13 +985,14 @@ func relayDTOs(relays []domain.RelayLine) []relayLineDTO {
 	out := make([]relayLineDTO, 0, len(relays))
 	for _, r := range relays {
 		out = append(out, relayLineDTO{
-			ID:      r.ID,
-			Name:    r.Name,
-			Address: r.Address,
-			Port:    r.Port,
-			SNI:     r.SNI,
-			Host:    r.Host,
-			Enabled: r.Enabled,
+			ID:           r.ID,
+			Name:         r.Name,
+			OnlyLineName: r.OnlyLineName,
+			Address:      r.Address,
+			Port:         r.Port,
+			SNI:          r.SNI,
+			Host:         r.Host,
+			Enabled:      r.Enabled,
 		})
 	}
 	return out
@@ -1050,16 +1044,6 @@ func routeStateDTO(state domain.NodeRouteState) *domain.NodeRouteState {
 	}
 	visible := state.Visible()
 	return &visible
-}
-
-// forceRelayStatusForHiddenDirect is the server-side half of the node-editor
-// invariant. A custom/older API client cannot save a relay-only node with both
-// the landing status hidden and relay status hidden. EffectiveShowRelayStatus
-// also covers legacy database rows until their next edit persists the flag.
-func forceRelayStatusForHiddenDirect(n *domain.Node) {
-	if n != nil && n.EffectiveHideDirect() {
-		n.ShowRelayStatus = true
-	}
 }
 
 func toInboundDTO(inb *ports.Inbound) inboundDTO {

@@ -6,7 +6,7 @@ import { nodeKeys } from './keys'
 import type { QueryScope } from './session'
 import { freshness, policies } from './policies'
 
-const inputs = (lines: VlessRouteLine[]) => lines.map(({ id, name, outbound_tag, enabled }) => ({ id, name: name.trim(), outbound_tag, enabled }))
+const inputs = (lines: VlessRouteLine[]) => lines.map(({ id, name, only_line_name, entry_relay_id, outbound_tag, enabled }) => ({ id, name: name.trim(), only_line_name: !!only_line_name, entry_relay_id: entry_relay_id || '', outbound_tag, enabled }))
 
 /** One draft per editor opening. Focus/poll reads never overwrite unsaved edits. */
 export function useVlessRouteDraft(scope: QueryScope, nodeId: number, session: number, active: boolean) {

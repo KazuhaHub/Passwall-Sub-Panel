@@ -11,12 +11,38 @@ import (
 
 // VlessRouteLine is a subscription entry, not a remote inbound/client.
 type VlessRouteLine struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	OutboundTag string `json:"outbound_tag"`
-	Route       uint16 `json:"route"`
-	Enabled     bool   `json:"enabled"`
-	Deleted     bool   `json:"deleted,omitempty"`
+	ID           string `json:"id"`
+	Name         string `json:"name"`
+	OnlyLineName bool   `json:"only_line_name"`
+	EntryRelayID string `json:"entry_relay_id,omitempty"`
+	OutboundTag  string `json:"outbound_tag"`
+	Route        uint16 `json:"route"`
+	Enabled      bool   `json:"enabled"`
+	Deleted      bool   `json:"deleted,omitempty"`
+}
+
+// Label follows the selected outbound tag when no custom name is configured.
+func (line VlessRouteLine) Label() string {
+	if line.Name != "" {
+		return line.Name
+	}
+	return line.OutboundTag
+}
+
+// ResolveEntry returns nil,true for the direct endpoint, or the one enabled
+// relay selected by stable ID. Missing/disabled references never fall back.
+func (line VlessRouteLine) ResolveEntry(n *Node) (*RelayLine, bool) {
+	if line.EntryRelayID == "" {
+		return nil, true
+	}
+	if n != nil {
+		for i := range n.Relays {
+			if n.Relays[i].ID == line.EntryRelayID && n.Relays[i].Enabled {
+				return &n.Relays[i], true
+			}
+		}
+	}
+	return nil, false
 }
 
 // NodeRouteState records an idempotent target before touching the remote API.

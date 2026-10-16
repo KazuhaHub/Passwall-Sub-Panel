@@ -15,6 +15,21 @@ beforeEach(() => {
   vi.mocked(getRouteOutbounds).mockResolvedValue([{ tag: 'direct', protocol: 'freedom', source: 'template' }])
 })
 
+it('treats an omitted legacy option as false and detects display-only edits', async () => {
+  const client = makeTestQueryClient()
+  const { result } = renderHook(() => useVlessRouteDraft(scope, 1, 1, true), { wrapper: queryWrapper(client) })
+  await waitFor(() => expect(result.current.baseline).not.toBeNull())
+  expect(result.current.needsSave).toBe(false)
+  act(() => result.current.setLines(previous => previous.map(line => ({ ...line, only_line_name: true }))))
+  expect(result.current.needsSave).toBe(true)
+  act(() => result.current.setLines(previous => previous.map(line => ({ ...line, only_line_name: false }))))
+  expect(result.current.needsSave).toBe(false)
+  act(() => result.current.setLines(previous => previous.map(line => ({ ...line, entry_relay_id: 'relay' }))))
+  expect(result.current.needsSave).toBe(true)
+  act(() => result.current.setLines(previous => previous.map(line => ({ ...line, entry_relay_id: '' }))))
+  expect(result.current.needsSave).toBe(false)
+})
+
 it('does not overwrite an unsaved line when background data is invalidated', async () => {
   const client = makeTestQueryClient()
   const { result } = renderHook(() => useVlessRouteDraft(scope, 1, 1, true), { wrapper: queryWrapper(client) })

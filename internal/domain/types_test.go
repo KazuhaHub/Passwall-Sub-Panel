@@ -15,9 +15,11 @@ func TestNodeRelayStatusVisibility(t *testing.T) {
 		showRelay  bool
 	}{
 		{name: "no relays", node: &Node{}, hideDirect: false, showRelay: false},
-		{name: "disabled relay", node: &Node{Relays: disabled, HideDirect: true}, hideDirect: false, showRelay: false},
+		{name: "disabled relay", node: &Node{Relays: disabled, HideDirect: true}, hideDirect: true, showRelay: false},
+		{name: "automatic", node: &Node{Relays: enabled}, hideDirect: false, showRelay: true},
+		{name: "obsolete flag without enabled relays", node: &Node{Relays: disabled, ShowRelayStatus: true}, hideDirect: false, showRelay: false},
 		{name: "opt in", node: &Node{Relays: enabled, ShowRelayStatus: true}, hideDirect: false, showRelay: true},
-		{name: "hidden direct forces relay", node: &Node{Relays: enabled, HideDirect: true}, hideDirect: true, showRelay: true},
+		{name: "hidden direct is independent", node: &Node{Relays: enabled, HideDirect: true}, hideDirect: true, showRelay: true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

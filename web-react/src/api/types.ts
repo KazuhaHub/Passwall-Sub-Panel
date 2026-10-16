@@ -179,11 +179,9 @@ export interface Node {
    *  server/port (+ optional CDN-fronting SNI/Host). */
   relays?: RelayLine[]
   route_state?: import('./vlessRoute').RouteState
-  /** Drop the direct entry when at least one relay is enabled (landing only
-   *  reachable via its relays). Ignored when no relay is enabled. */
+  /** Hide only the standalone direct entry, not derived routing entries. */
   hide_direct?: boolean
-  /** Show enabled relay endpoints' coarse health in the user server-status
-   *  tab. Always true when hide_direct is effective. */
+  /** Read-only derived value: true whenever an enabled relay exists. */
   show_relay_status?: boolean
 }
 
@@ -191,8 +189,10 @@ export interface Node {
 export interface RelayLine {
 	/** Stable identity assigned by the server; omitted for a new line. */
 	id?: string
-  /** Label appended after the node name in the rendered entry (e.g. 广州移动中转). */
+  /** Line label, appended to the node name unless only_line_name is enabled. */
   name: string
+  /** Missing legacy values default to false. */
+  only_line_name?: boolean
   /** Host the client dials instead of the landing's server_address. */
   address: string
   /** Relay listen port. 0 reuses the landing's inbound port. */

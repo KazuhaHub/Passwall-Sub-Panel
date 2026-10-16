@@ -70,9 +70,7 @@ func TestExpandRelays_DirectPlusLines(t *testing.T) {
 	}
 }
 
-// TestExpandRelays_HideDirect: HideDirect drops the direct entry only when at
-// least one relay is enabled. With no enabled relay the direct entry survives
-// so the node can never silently disappear.
+// TestExpandRelays_HideDirect: hiding the direct entry is independent of relays.
 func TestExpandRelays_HideDirect(t *testing.T) {
 	hidden := &domain.Node{ID: 1, DisplayName: "HK", HideDirect: true, Relays: []domain.RelayLine{
 		{Name: "GZ", Address: "gz.relay.cn", Enabled: true},
@@ -82,13 +80,13 @@ func TestExpandRelays_HideDirect(t *testing.T) {
 		t.Fatalf("HideDirect with an enabled relay should yield only the relay entry, got %+v", got)
 	}
 
-	// HideDirect but every relay disabled → keep the direct entry.
+	// HideDirect still applies when every relay is disabled.
 	stranded := &domain.Node{ID: 2, DisplayName: "TW", HideDirect: true, Relays: []domain.RelayLine{
 		{Name: "X", Address: "x", Enabled: false},
 	}}
 	got = expandRelays([]renderItem{{name: "TW", node: stranded}})
-	if len(got) != 1 || got[0].relay != nil {
-		t.Fatalf("HideDirect with no enabled relay should keep the direct entry, got %+v", got)
+	if len(got) != 0 {
+		t.Fatalf("HideDirect with no enabled relay must not restore direct access, got %+v", got)
 	}
 }
 

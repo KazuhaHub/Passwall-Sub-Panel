@@ -168,6 +168,53 @@ func TestRoutingLinesKeepBackendProtocolAndCoreStateChecks(t *testing.T) {
 	}
 }
 
+func TestLineNameOnlyRoundTripDoesNotChangeRemoteRulesOrIdentity(t *testing.T) {
+	s, _, c := serviceFixture(t)
+	view, err := s.Save(context.Background(), 1, SaveRequest{Lines: []LineInput{{Name: "B", OutboundTag: "direct", Enabled: true, OnlyLineName: true}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	line := view.State.Lines[0]
+	read, err := s.Get(context.Background(), 1)
+	if err != nil || !read.State.Lines[0].OnlyLineName {
+		t.Fatalf("line-only setting lost on read: %+v %v", read, err)
+	}
+	before := append(json.RawMessage(nil), c.template.Config...)
+	view, err = s.Save(context.Background(), 1, SaveRequest{Revision: view.State.Revision, Lines: []LineInput{{ID: line.ID, Name: line.Name, OutboundTag: line.OutboundTag, Enabled: true}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := view.State.Lines[0]
+	if got.OnlyLineName || got.ID != line.ID || got.Route != line.Route || !sameConfig(before, c.template.Config) {
+		t.Fatal("resetting the display option changed routing or lost its default")
+	}
+}
+
+func TestOptionalRouteNamesAndStableEntryReferences(t *testing.T) {
+	s, n, _ := serviceFixture(t)
+	n.node.HideDirect = true
+	n.node.Relays = []domain.RelayLine{{ID: "front", Address: "relay.example", Enabled: true}}
+	view, err := s.Save(context.Background(), 1, SaveRequest{Lines: []LineInput{{OutboundTag: "direct", Enabled: true}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	line := view.State.Lines[0]
+	if line.Name != "" || line.Label() != "direct" || line.EntryRelayID != "" {
+		t.Fatal("blank name/default entry did not round-trip")
+	}
+	view, err = s.Save(context.Background(), 1, SaveRequest{Revision: view.State.Revision, Lines: []LineInput{{ID: line.ID, OutboundTag: "direct", EntryRelayID: "front", Enabled: true}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	read, err := s.Get(context.Background(), 1)
+	if err != nil || read.State.Lines[0].EntryRelayID != "front" || read.State.Lines[0].Route != line.Route || read.State.Status != "applied" {
+		t.Fatalf("entry selection lost identity or was blocked by hidden direct: %+v %v", read, err)
+	}
+	if _, err := s.Save(context.Background(), 1, SaveRequest{Revision: view.State.Revision, Lines: []LineInput{{ID: line.ID, OutboundTag: "direct", EntryRelayID: "missing", Enabled: true}}}); !errors.Is(err, domain.ErrValidation) {
+		t.Fatal("unknown entry was accepted")
+	}
+}
+
 func TestAmbiguousRemoteWriteWithdrawsAndRetryDoesNotDuplicate(t *testing.T) {
 	s, _, c := serviceFixture(t)
 	c.writeError = true

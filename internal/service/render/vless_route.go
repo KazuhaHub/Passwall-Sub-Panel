@@ -9,7 +9,7 @@ import (
 )
 
 // expandNodeLines is shared by subscription generation and rule-set previews.
-// Route lines use only the original endpoint, never a relay cross product.
+// Each route selects one endpoint; relays are never expanded as a cross product.
 func expandNodeLines(items []renderItem) []renderItem {
 	out := []renderItem{}
 	for _, item := range items {
@@ -19,8 +19,12 @@ func expandNodeLines(items []renderItem) []renderItem {
 		}
 		for _, line := range item.node.RouteState.Lines {
 			if line.Enabled && !line.Deleted {
+				relay, available := line.ResolveEntry(item.node)
+				if !available {
+					continue
+				}
 				copy := line
-				out = append(out, renderItem{node: item.node, name: item.name + " " + line.Name, route: &copy})
+				out = append(out, renderItem{node: item.node, name: routeEntryName(item.name, line), route: &copy, relay: relay})
 			}
 		}
 	}
@@ -38,8 +42,15 @@ func expandNodeLines(items []renderItem) []renderItem {
 	return out
 }
 
+func routeEntryName(base string, line domain.VlessRouteLine) string {
+	if line.OnlyLineName {
+		return line.Label()
+	}
+	return base + " " + line.Label()
+}
+
 func routeLocallyAvailable(n *domain.Node) bool {
-	return n.Enabled && !n.EffectiveHideDirect() && strings.EqualFold(n.DesiredProtocol, "vless") && n.RouteState.Status == "applied"
+	return n.Enabled && strings.EqualFold(n.DesiredProtocol, "vless") && n.RouteState.Status == "applied"
 }
 
 func (s *Service) filterRouteItems(ctx context.Context, u *domain.User, items []renderItem) []renderItem {
@@ -59,6 +70,9 @@ func (s *Service) filterRouteItems(ctx context.Context, u *domain.User, items []
 			continue
 		}
 		if !routeLocallyAvailable(item.node) {
+			continue
+		}
+		if _, available := item.route.ResolveEntry(item.node); !available {
 			continue
 		}
 		if s.repos.XUIPanel == nil {

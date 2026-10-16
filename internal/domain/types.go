@@ -603,16 +603,11 @@ type Node struct {
 	Relays []RelayLine
 	// RouteState is written only by the vlessRoute synchronization service.
 	RouteState NodeRouteState
-	// HideDirect suppresses the direct entry when at least one relay line is
-	// enabled — for landings that only accept connections from their relays
-	// (firewalled to the transit IP). Ignored when no relay is enabled, so a
-	// node never silently vanishes from the subscription.
+	// HideDirect suppresses only the standalone direct subscription entry.
+	// Derived routing entries may still use the direct endpoint.
 	HideDirect bool
-	// ShowRelayStatus exposes the enabled relay endpoints' coarse reachability
-	// in the user portal. HideDirect implies this setting whenever at least one
-	// relay is enabled, so relay-only nodes can never end up with no visible
-	// status. RelayHealth is health-worker-owned and persisted separately from
-	// Relays so an async probe cannot overwrite a concurrent admin edit.
+	// ShowRelayStatus is retained for storage compatibility only. Relay status
+	// is automatic for enabled lines. RelayHealth remains health-worker-owned.
 	ShowRelayStatus bool
 	RelayHealth     []RelayHealth
 }
@@ -651,16 +646,14 @@ func (n *Node) HasEnabledRelays() bool {
 	return false
 }
 
-// EffectiveHideDirect mirrors subscription rendering: HideDirect only takes
-// effect when an enabled relay exists, preventing a node from disappearing.
+// EffectiveHideDirect controls only the standalone direct entry's visibility.
 func (n *Node) EffectiveHideDirect() bool {
-	return n != nil && n.HideDirect && n.HasEnabledRelays()
+	return n != nil && n.HideDirect
 }
 
-// EffectiveShowRelayStatus applies the UI/backend invariant requested for
-// relay-only nodes, including legacy rows created before ShowRelayStatus existed.
+// EffectiveShowRelayStatus automatically exposes enabled relay endpoints.
 func (n *Node) EffectiveShowRelayStatus() bool {
-	return n != nil && n.HasEnabledRelays() && (n.ShowRelayStatus || n.EffectiveHideDirect())
+	return n.HasEnabledRelays()
 }
 
 // RelayLine is one transit front for a Node (see Node.Relays). It changes only
@@ -669,9 +662,12 @@ func (n *Node) EffectiveShowRelayStatus() bool {
 type RelayLine struct {
 	// ID is a stable subscription-line identity, independent of label/order.
 	ID string
-	// Name labels the rendered entry, appended after the node's display name
-	// (e.g. "广州移动中转"). Falls back to Address when empty.
+	// Name labels the rendered entry (e.g. "广州移动中转"). Falls back to
+	// Address when empty, and is appended to the node name by default.
 	Name string
+	// OnlyLineName omits the parent node name from this entry's label.
+	// Missing legacy values keep the default combined label.
+	OnlyLineName bool
 	// Address is the transit front's host the client dials instead of the
 	// landing's ServerAddress.
 	Address string

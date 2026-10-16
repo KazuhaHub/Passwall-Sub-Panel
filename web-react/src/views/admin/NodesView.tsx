@@ -200,7 +200,6 @@ interface MetaForm {
   sort_order: number
   relays: RelayLine[]
   hide_direct: boolean
-  show_relay_status: boolean
 }
 
 interface ImportForm extends MetaForm {
@@ -366,7 +365,7 @@ interface InboundFormState {
 
 const EMPTY_META: MetaForm = {
   display_name: '', server_address: '', flow: '', region: '', tags_text: '', sort_order: 0,
-  relays: [], hide_direct: false, show_relay_status: false,
+  relays: [], hide_direct: false,
 }
 
 const EMPTY_IMPORT: ImportForm = {
@@ -2523,9 +2522,8 @@ export default function NodesView() {
       region: n.region,
       tags_text: (n.tags ?? []).join(', '),
       sort_order: n.sort_order,
-      relays: (n.relays ?? []).map(r => ({ ...r })),
+      relays: (n.relays ?? []).map(r => ({ ...r, only_line_name: !!r.only_line_name })),
       hide_direct: !!n.hide_direct,
-      show_relay_status: !!n.show_relay_status || !!n.hide_direct,
     })
     setEditMetaErr({})
     setEditOpen(true)
@@ -2561,10 +2559,9 @@ export default function NodesView() {
         // Drop blank-address lines, trim, and coerce port to a number so a
         // half-filled row never reaches the backend (which would 400).
         relays: editForm.relays
-          .map(r => ({ ...r, name: r.name.trim(), address: r.address.trim(), port: Number(r.port) || 0, sni: r.sni?.trim() || undefined, host: r.host?.trim() || undefined }))
+          .map(r => ({ ...r, name: r.name.trim(), only_line_name: !!r.only_line_name, address: r.address.trim(), port: Number(r.port) || 0, sni: r.sni?.trim() || undefined, host: r.host?.trim() || undefined }))
           .filter(r => r.address),
         hide_direct: editForm.hide_direct,
-        show_relay_status: editForm.hide_direct || editForm.show_relay_status,
       })
       mutateManaged(prev => prev.map(node => node.id === saved.id ? saved : node))
       metadataSaved = true
@@ -3897,7 +3894,7 @@ export default function NodesView() {
               <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                 <Typography sx={{ fontSize: 14, fontWeight: 600 }}>{t('admin:nodes.relay.title')}</Typography>
                 <Button size="small" startIcon={<AddIcon />}
-                  onClick={() => setEditForm(f => ({ ...f, relays: [...f.relays, { name: '', address: '', port: 0, sni: '', host: '', enabled: true }] }))}>
+                  onClick={() => setEditForm(f => ({ ...f, relays: [...f.relays, { name: '', only_line_name: false, address: '', port: 0, sni: '', host: '', enabled: true }] }))}>
                   {t('admin:nodes.relay.add')}
                 </Button>
               </Box>
@@ -3936,22 +3933,15 @@ export default function NodesView() {
                         onChange={e => update({ host: e.target.value })} sx={{ flex: 1 }}
                         placeholder={t('admin:nodes.relay.cdn_optional')} />
                     </Box>
+                    <FormControlLabel sx={{ m: 0, '& .MuiFormControlLabel-label': { ml: 0.75 } }} label={t('admin:nodes.relay.only_line_name')}
+                      control={<Switch size="small" checked={!!r.only_line_name} onChange={(_, checked) => update({ only_line_name: checked })} />} />
                   </Box>
                 )
               })}
-              {editForm.relays.some(r => r.enabled) && (
-                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
-                  <FormControlLabel sx={{ m: 0, '& .MuiFormControlLabel-label': { ml: 0.75 } }} label={t('admin:nodes.relay.hide_direct')}
-                    control={<Switch size="small" checked={editForm.hide_direct}
-                      onChange={(_, c) => setEditForm(f => ({ ...f, hide_direct: c, show_relay_status: c || f.show_relay_status }))} />} />
-                  <FormControlLabel sx={{ m: 0, '& .MuiFormControlLabel-label': { ml: 0.75 } }} label={t('admin:nodes.relay.show_relay_status')}
-                    control={<Switch size="small" checked={editForm.hide_direct || editForm.show_relay_status}
-                      disabled={editForm.hide_direct}
-                      onChange={(_, c) => setEditForm(f => ({ ...f, show_relay_status: c }))} />} />
-                </Box>
-              )}
+              <FormControlLabel sx={{ m: 0, '& .MuiFormControlLabel-label': { ml: 0.75 } }} label={t('admin:nodes.relay.hide_direct')}
+                control={<Switch size="small" checked={editForm.hide_direct} onChange={(_, checked) => setEditForm(f => ({ ...f, hide_direct: checked }))} />} />
             </Box>
-            {lineTab === 'route' && <VlessRouteLinesEditor draft={routeDraft} busy={editBusy} hiddenDirect={editForm.hide_direct && editForm.relays.some(line => line.enabled)} />}
+            {lineTab === 'route' && <VlessRouteLinesEditor draft={routeDraft} busy={editBusy} relays={editForm.relays} />}
             <Box sx={{ display: 'none' }}>{alpha(md.error, 0.5)}</Box>
           </Box>
         </DialogContent>

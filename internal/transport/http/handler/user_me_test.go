@@ -58,4 +58,13 @@ func TestUserStatusForNode_RelayVisibilityAndSanitization(t *testing.T) {
 	if strings.Contains(got.RelayStatuses[0].Name, "secret-relay.example") {
 		t.Fatal("relay address leaked through user status")
 	}
+	n.HideDirect = false
+	got = userStatusForNode(n)
+	if !got.ShowDirect || len(got.RelayStatuses) != 1 {
+		t.Fatal("relay status still depended on hiding the direct line")
+	}
+	n.Relays[0].Enabled = false
+	if got := userStatusForNode(n); len(got.RelayStatuses) != 0 {
+		t.Fatal("disabled relay exposed cached health")
+	}
 }

@@ -15,7 +15,7 @@ func TestRouteStateCASAndStaleNodeWrites(t *testing.T) {
 	if err := r.Create(ctx, n); err != nil {
 		t.Fatal(err)
 	}
-	state := domain.NodeRouteState{Status: "applying", Lines: []domain.VlessRouteLine{{ID: "one", Route: 1001, Enabled: true, OutboundTag: "warp"}}}
+	state := domain.NodeRouteState{Status: "applying", Lines: []domain.VlessRouteLine{{ID: "one", Route: 1001, Enabled: true, OutboundTag: "warp", OnlyLineName: true, EntryRelayID: "front"}}}
 	if err := r.SaveRouteState(ctx, n.ID, 0, &state); err != nil {
 		t.Fatal(err)
 	}
@@ -36,7 +36,7 @@ func TestRouteStateCASAndStaleNodeWrites(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.RouteState.Revision != 1 || got.RouteState.Status != "applying" || len(got.RouteState.Lines) != 1 || got.DisplayName != "renamed" {
+	if got.RouteState.Revision != 1 || got.RouteState.Status != "applying" || len(got.RouteState.Lines) != 1 || !got.RouteState.Lines[0].OnlyLineName || got.RouteState.Lines[0].EntryRelayID != "front" || got.DisplayName != "renamed" {
 		t.Fatalf("stale node write clobbered routes: %+v", got.RouteState)
 	}
 }

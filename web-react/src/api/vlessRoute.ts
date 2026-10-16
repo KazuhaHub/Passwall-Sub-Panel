@@ -3,6 +3,8 @@ import { client } from './client'
 export interface VlessRouteLine {
   id?: string
   name: string
+  only_line_name?: boolean
+  entry_relay_id?: string
   outbound_tag: string
   enabled: boolean
   route?: number
@@ -32,6 +34,6 @@ export async function getRouteOutbounds(nodeId: number, signal?: AbortSignal): P
 export async function saveRouteLines(nodeId: number, revision: number, lines: VlessRouteLine[]): Promise<RouteLinesView> {
   return (await client.put<RouteLinesView>(`/admin/nodes/${nodeId}/vless-route-lines`, {
     revision,
-    lines: lines.map(({ id, name, outbound_tag, enabled }) => ({ id, name, outbound_tag, enabled })),
+    lines: lines.map(({ id, name, only_line_name, entry_relay_id, outbound_tag, enabled }) => ({ id, name, only_line_name: !!only_line_name, entry_relay_id: entry_relay_id || '', outbound_tag, enabled })),
   })).data
 }

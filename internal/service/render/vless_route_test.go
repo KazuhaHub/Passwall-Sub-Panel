@@ -69,7 +69,7 @@ func TestRouteAllSubscriptionFormatsUseAppliedUUIDAndZeroRemoteReads(t *testing.
 }
 
 func TestRoutePublicationRequiresExactBackendAndAppliedCredential(t *testing.T) {
-	for _, kind := range []string{"unknown", "changed_backend", "unsupported_backend", "missing_applied", "hidden_direct", "original_route_collision"} {
+	for _, kind := range []string{"unknown", "changed_backend", "unsupported_backend", "missing_applied", "original_route_collision"} {
 		t.Run(kind, func(t *testing.T) {
 			s, n, u, p := routeRenderFixture(t)
 			switch kind {
@@ -81,9 +81,6 @@ func TestRoutePublicationRequiresExactBackendAndAppliedCredential(t *testing.T) 
 				p.panel.Kind = domain.PanelKindSUI
 			case "missing_applied":
 				s.repos.PSPClient = nil
-			case "hidden_direct":
-				n.HideDirect = true
-				n.Relays = []domain.RelayLine{{ID: "relay", Name: "R", Address: "relay.example", Enabled: true}}
 			case "original_route_collision":
 				n.RouteState.Lines[0].Route = 0x4abc
 			}

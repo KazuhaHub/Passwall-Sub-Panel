@@ -25,10 +25,12 @@ func New(repos ports.Repos, pool ports.XUIPool, invalidate func()) *Service {
 }
 
 type LineInput struct {
-	ID          string `json:"id,omitempty"`
-	Name        string `json:"name"`
-	OutboundTag string `json:"outbound_tag"`
-	Enabled     bool   `json:"enabled"`
+	ID           string `json:"id,omitempty"`
+	Name         string `json:"name"`
+	OnlyLineName bool   `json:"only_line_name"`
+	EntryRelayID string `json:"entry_relay_id,omitempty"`
+	OutboundTag  string `json:"outbound_tag"`
+	Enabled      bool   `json:"enabled"`
 }
 type SaveRequest struct {
 	Revision int64       `json:"revision"`
@@ -195,6 +197,18 @@ func (s *Service) Save(ctx context.Context, id int64, req SaveRequest) (*View, e
 	if err != nil {
 		return nil, err
 	}
+	for _, line := range target.Lines {
+		if line.Deleted || !line.Enabled || line.EntryRelayID == "" {
+			continue
+		}
+		found := false
+		for _, relay := range n.Relays {
+			found = found || relay.ID == line.EntryRelayID
+		}
+		if !found {
+			return nil, fmt.Errorf("%w: selected relay entry no longer exists; reload node lines", domain.ErrValidation)
+		}
+	}
 	peers, err := s.peerRuleTags(ctx, n.ID, p.URL)
 	if err != nil {
 		return nil, err
@@ -275,9 +289,9 @@ func makeTarget(previous domain.NodeRouteState, input []LineInput, used map[uint
 	seen := map[string]bool{}
 	state := domain.NodeRouteState{Revision: previous.Revision, Lines: []domain.VlessRouteLine{}}
 	for _, request := range input {
-		line := domain.VlessRouteLine{ID: request.ID, Name: strings.TrimSpace(request.Name), OutboundTag: strings.TrimSpace(request.OutboundTag), Enabled: request.Enabled}
-		if line.Name == "" || len(line.Name) > 128 || line.OutboundTag == "" || len(line.OutboundTag) > 255 {
-			return invalid("line name and outbound tag are required and bounded")
+		line := domain.VlessRouteLine{ID: request.ID, Name: strings.TrimSpace(request.Name), OnlyLineName: request.OnlyLineName, EntryRelayID: strings.TrimSpace(request.EntryRelayID), OutboundTag: strings.TrimSpace(request.OutboundTag), Enabled: request.Enabled}
+		if len(line.Name) > 128 || line.OutboundTag == "" || len(line.OutboundTag) > 255 || len(line.EntryRelayID) > 128 {
+			return invalid("outbound tag is required and line fields must be bounded")
 		}
 		if line.ID == "" {
 			line.ID = uuid.NewString()

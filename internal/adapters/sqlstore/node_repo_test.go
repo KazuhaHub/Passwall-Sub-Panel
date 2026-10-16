@@ -189,7 +189,7 @@ func TestNodeRepo_RelaysRoundTrip(t *testing.T) {
 		HideDirect:      true,
 		ShowRelayStatus: true,
 		Relays: []domain.RelayLine{
-			{Name: "广州移动中转", Address: "gz.relay.cn", Port: 20001, Enabled: true},
+			{Name: "广州移动中转", Address: "gz.relay.cn", Port: 20001, Enabled: true, OnlyLineName: true},
 			{Name: "CDN优选", Address: "104.16.0.1", Port: 8443, SNI: "cdn.example.com", Host: "cdn.example.com", Enabled: false},
 		},
 	}

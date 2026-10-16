@@ -4,8 +4,8 @@ import "github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 
 // expandRelays turns each real node that carries relay lines into multiple
 // render items: the direct entry (unless the node hides it) followed by one
-// entry per ENABLED relay line. Separators and relay-less nodes pass through
-// unchanged with a nil relay (= direct).
+// entry per ENABLED relay line. Separators pass through unchanged; direct
+// entries obey HideDirect independently of how many relays are enabled.
 //
 // Runs after applyLayout (so relay variants inherit their node's sort
 // position, clustering right after their landing) and before the region-flag
@@ -20,16 +20,7 @@ func expandRelays(items []renderItem) []renderItem {
 			continue
 		}
 		relays := enabledRelays(it.node.Relays)
-		if len(relays) == 0 {
-			// No relay lines → the node renders exactly as before.
-			out = append(out, it)
-			continue
-		}
-		// HideDirect only takes effect when at least one relay is enabled, so
-		// a node can never silently vanish from the subscription. We're already
-		// inside the len(relays) > 0 branch, so EffectiveHideDirect() matches
-		// the bare HideDirect here — using the helper keeps the invariant in
-		// one place (shared with the status/DTO layer).
+		// Hiding the direct entry is independent of enabled relay/route lines.
 		if !it.node.EffectiveHideDirect() {
 			out = append(out, it)
 		}
@@ -59,12 +50,15 @@ func enabledRelays(relays []domain.RelayLine) []domain.RelayLine {
 	return out
 }
 
-// relayEntryName labels a relay variant by appending the line's name (or its
-// address when unnamed) after the node's display name, space-separated.
+// relayEntryName uses the line's name (or its address when unnamed), either
+// on its own or appended to the node's display name, space-separated.
 func relayEntryName(base string, r domain.RelayLine) string {
 	label := r.Name
 	if label == "" {
 		label = r.Address
+	}
+	if r.OnlyLineName {
+		return label
 	}
 	return base + " " + label
 }

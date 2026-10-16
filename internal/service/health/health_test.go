@@ -166,7 +166,6 @@ func TestCheckOnce_UDPProtocolProbedWithUDP(t *testing.T) {
 func TestCheckOnce_RelayHealthIncludesEnabledLines(t *testing.T) {
 	repo := &fakeNodeRepo{nodes: []*domain.Node{{
 		ID: 1, Enabled: true, ServerAddress: "landing.example", DesiredPort: 443, DesiredProtocol: "vless",
-		HideDirect: true, // force relay probing even when ShowRelayStatus is false
 		Relays: []domain.RelayLine{
 			{Name: "good", Address: "good.relay", Port: 8443, Enabled: true},
 			{Name: "bad", Address: "bad.relay", Port: 0, Enabled: true},
