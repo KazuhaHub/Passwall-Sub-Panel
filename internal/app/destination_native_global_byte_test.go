@@ -179,7 +179,17 @@ func TestNativeDestinationGlobalBytePressure(t *testing.T) {
 	ready := nativeGlobalCollectionPublication(t, cohort, token)
 	m.Stage = 2
 	write()
-	nativeWait(t, 240*time.Second, "global byte current policies and paired 200-user rosters", func() bool { reason, _ := ready(users, group.ID); return reason == "complete" })
+	readiness := "state"
+	var waitingPeer *nativeGlobalPeer
+	t.Cleanup(func() {
+		if m.Stage == 2 {
+			nativeLogGlobalReadiness(t, readiness, waitingPeer)
+		}
+	})
+	nativeWait(t, 240*time.Second, "global byte current policies and paired 200-user rosters", func() bool {
+		readiness, waitingPeer = ready(users, group.ID)
+		return readiness == "complete"
+	})
 	name := nativeByteFormationHosts(t, nonce, address, blockAddress, observeAddress, 1400)
 	controlName := nativeGlobalByteControlHosts(t, nonce, controlAddress)
 	queue, ok := a.destAudit.(interface {
@@ -276,7 +286,17 @@ func TestNativeDestinationGlobalBytePressure(t *testing.T) {
 			}
 		}
 	}()
-	t.Cleanup(func() { stopSamples(); <-samplesDone })
+	var saveOnce sync.Once
+	saveSamples := func() {
+		saveOnce.Do(func() {
+			stopSamples()
+			<-samplesDone
+			samplesMu.Lock()
+			m.PSP = append([]nativeMixedPSPSample(nil), samples...)
+			samplesMu.Unlock()
+		})
+	}
+	t.Cleanup(saveSamples)
 	for i, fault := range faults {
 		if _, ok := fault.arm(); !ok {
 			t.Fatal("global byte response fault already armed")
@@ -289,6 +309,28 @@ func TestNativeDestinationGlobalBytePressure(t *testing.T) {
 	faultEnd := start.Add(75 * time.Second)
 	ctx, cancel := context.WithDeadline(t.Context(), faultEnd)
 	defer cancel()
+	// Failure diagnostics observe the original clock; no phase gets a new budget.
+	phase, phaseSince := 0, start
+	var phaseMS [4]int64
+	advancePhase := func() {
+		now := time.Now()
+		phaseMS[phase] = now.Sub(phaseSince).Milliseconds()
+		phase++
+		phaseSince = now
+	}
+	defer func() {
+		if !t.Failed() {
+			return
+		}
+		if phase < len(phaseMS) {
+			phaseMS[phase] = time.Since(phaseSince).Milliseconds()
+		}
+		for i, name := range []string{"priming_ms", "first_sql_ms", "formation_ms", "live_keys_ms"} {
+			if i <= phase {
+				t.Logf("native global byte phase: %s=%d", name, phaseMS[i])
+			}
+		}
+	}()
 	send := func(ctx context.Context, owner, kind, seq int, probe *nativeVLESSWorkerProbe) error {
 		peer := cohort.peers[owner]
 		host := name(kind, seq)
@@ -333,6 +375,7 @@ func TestNativeDestinationGlobalBytePressure(t *testing.T) {
 		}
 		t.Fatal("timed out waiting for global byte first class frozen in every actual owner; private diagnostics withheld")
 	}
+	advancePhase()
 	nativeWait(t, max(time.Millisecond, time.Until(faultEnd)), "global byte first packets durable in original SQL", func() bool {
 		for owner, fault := range faults {
 			facts, packets, valid := fault.snapshot()
@@ -355,6 +398,7 @@ func TestNativeDestinationGlobalBytePressure(t *testing.T) {
 		}
 		return true
 	})
+	advancePhase()
 	m.Stage = 3
 	write()
 	type job struct{ owner, kind, seq int }
@@ -401,6 +445,7 @@ func TestNativeDestinationGlobalBytePressure(t *testing.T) {
 	if failures.Load() != 0 {
 		t.Fatal("global byte real formation traffic failed")
 	}
+	advancePhase()
 	nativeWait(t, max(time.Millisecond, time.Until(faultEnd)), "global byte original live keys retained behind frozen packets", func() bool {
 		for _, peer := range cohort.peers {
 			peer.probe.mu.Lock()
@@ -421,6 +466,7 @@ func TestNativeDestinationGlobalBytePressure(t *testing.T) {
 		}
 		return true
 	})
+	advancePhase()
 	pause, err := storage.pause()
 	nativeMust(t, err, "hold original global byte SQL")
 	t.Cleanup(func() { storage.resume(pause) })
@@ -590,11 +636,7 @@ func TestNativeDestinationGlobalBytePressure(t *testing.T) {
 		}
 		m.Histograms = append(m.Histograms, delta)
 	}
-	stopSamples()
-	<-samplesDone
-	samplesMu.Lock()
-	m.PSP = append([]nativeMixedPSPSample(nil), samples...)
-	samplesMu.Unlock()
+	saveSamples()
 	if blockReached.Load() != 0 {
 		t.Fatal("global byte blocked traffic escaped")
 	}

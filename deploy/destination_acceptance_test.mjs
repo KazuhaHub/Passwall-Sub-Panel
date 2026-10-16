@@ -216,6 +216,39 @@ test('global sync diagnostics retain only bounded actual transport facts', async
   assert(!isSafeDestinationDiagnostic({ Diagnostic: 'global_sync_agent_id', Observed: 1 }))
 })
 
+test('global byte phase diagnostics keep closed monotonic durations and reject private or malformed values', async () => {
+  const { isSafeDestinationDiagnostic } = await import('./destination-acceptance.mjs')
+  for (const name of ['priming_ms', 'first_sql_ms', 'formation_ms', 'live_keys_ms']) {
+    for (const value of [0, 75000, 1200000]) {
+      const result = sanitizeDestinationResults(encode([{ Action: 'output', Output: `private-path:4: native global byte phase: ${name}=${value}\n` }]))
+      const event = JSON.parse(result)
+      assert.equal(event.Diagnostic, `global_byte_phase_${name}`)
+      assert.equal(event.Observed, value)
+      assert(isSafeDestinationDiagnostic(event))
+      assert(!result.includes('private-path'))
+    }
+  }
+  for (const line of ['owner=42', 'agent_id=1', 'priming_ms=-1', 'priming_ms=1.5', 'first_sql_ms=1200001', 'formation_ms=10000000', 'live_keys_ms=NaN', 'priming_ms=1; credential=private']) {
+    assert.equal(sanitizeDestinationResults(encode([{ Action: 'output', Output: `native global byte phase: ${line}\n` }])).trim(), '')
+  }
+  for (const value of [-1, 1.5, 1200001, NaN, Infinity, '1', true, null]) {
+    assert(!isSafeDestinationDiagnostic({ Diagnostic: 'global_byte_phase_priming_ms', Observed: value }))
+  }
+  assert(!isSafeDestinationDiagnostic({ Diagnostic: 'global_byte_phase_agent_id', Observed: 42 }))
+})
+
+test('global byte phase diagnostics retain the actual failed root verdict', async () => {
+  const { checkDestinationGlobalByteResults } = await import('./destination-acceptance.mjs')
+  const Package = 'github.com/KazuhaHub/passwall-sub-panel/internal/app', Test = 'TestNativeDestinationGlobalBytePressure'
+  const result = sanitizeDestinationResults(encode([
+    { Action: 'start', Package }, { Action: 'run', Package, Test },
+    { Action: 'output', Package, Test, Output: 'native global byte phase: formation_ms=75000\n' },
+    { Action: 'fail', Package, Test }, { Action: 'fail', Package },
+  ]))
+  assert(result.includes('global_byte_phase_formation_ms'))
+  assert.throws(() => checkDestinationGlobalByteResults(result))
+})
+
 test('setup process CPU diagnostics retain only bounded aggregate counters and never completion proof', async () => {
   const { isSafeDestinationDiagnostic, checkDestinationGlobalBatchResults } = await import('./destination-acceptance.mjs')
   const values = { sample: 1, elapsed_ms: 1200000, sample_ms: 29, parent_ticks: 30000, waited_child_ticks: 40000, live_core_ticks: 500,

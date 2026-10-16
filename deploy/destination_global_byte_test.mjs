@@ -92,6 +92,13 @@ test('global byte requires original bootstrap process and state evidence', () =>
   }
   assert.throws(() => checkGlobalByteEvidence(events(),JSON.stringify(report()),bootstrap(),'mysql'))
 })
+
+test('global byte phase diagnostics cannot replace successful pressure evidence', () => {
+  for (const name of ['priming_ms', 'first_sql_ms', 'formation_ms', 'live_keys_ms']) {
+    const diagnostic = sanitizeDestinationResults(JSON.stringify({Action:'output',Package,Test:root,Output:`native global byte phase: ${name}=0\n`}))
+    assert.throws(() => checkGlobalByteEvidence(events()+'\n'+diagnostic,JSON.stringify(report()),bootstrap()))
+  }
+})
 test('global byte keeps the original 65-owner bootstrap and same publication gate', () => {
   const source=readFileSync(new URL('../internal/app/destination_native_global_byte_test.go',import.meta.url),'utf8')
   assert(source.includes('nativeBootstrapGlobalCohort(t,') && source.includes('nativeGlobalCollectionPublication(t, cohort, token)'))

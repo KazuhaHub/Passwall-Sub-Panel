@@ -404,6 +404,8 @@ export function sanitizeDestinationResults(input) {
       if (globalStage && isSafeGlobalStageFact(globalStage[1], Number(globalStage[2]))) return JSON.stringify({ Action: 'output', Package: pkg, Diagnostic: `global_stage_${globalStage[1]}`, Observed: Number(globalStage[2]) })
       const globalSync = typeof event.Output === 'string' && /native global sync: (attempt_age_ms|completion_age_ms|last_duration_ms|last_status|inflight|parent_alive)=([0-9]{1,7})(?:\r?\n|$)/.exec(event.Output)
       if (globalSync && isSafeGlobalSyncFact(globalSync[1], Number(globalSync[2]))) return JSON.stringify({ Action: 'output', Package: pkg, Diagnostic: `global_sync_${globalSync[1]}`, Observed: Number(globalSync[2]) })
+      const bytePhase = typeof event.Output === 'string' && /native global byte phase: (priming_ms|first_sql_ms|formation_ms|live_keys_ms)=([0-9]{1,7})(?:\r?\n|$)/.exec(event.Output)
+      if (bytePhase && isSafeGlobalBytePhaseFact(bytePhase[1], Number(bytePhase[2]))) return JSON.stringify({ Action: 'output', Package: pkg, Diagnostic: `global_byte_phase_${bytePhase[1]}`, Observed: Number(bytePhase[2]) })
       const setupCPU = typeof event.Output === 'string' && /native global setup cpu: (sample|elapsed_ms|sample_ms|parent_ticks|waited_child_ticks|live_core_ticks|changed_core_identities|parents|cores|ticks_per_second|logical_cpus|unavailable)=([0-9]{1,13})(?:\r?\n|$)/.exec(event.Output)
       if (setupCPU && isSafeSetupCPUFact(setupCPU[1], Number(setupCPU[2]))) return JSON.stringify({ Action: 'output', Package: pkg, Diagnostic: `global_setup_cpu_${setupCPU[1]}`, Observed: Number(setupCPU[2]) })
       const drain = typeof event.Output === 'string' && /native global drain: ([a-z_]+)=([0-9]{1,13})(?:\r?\n|$)/.exec(event.Output)
@@ -469,12 +471,17 @@ export function isSafeDestinationDiagnostic(event) {
   if (event.Diagnostic.startsWith('global_stage_')) return isSafeGlobalStageFact(event.Diagnostic.slice('global_stage_'.length), event.Observed)
   if (event.Diagnostic.startsWith('global_config_error_')) return isSafeGlobalConfigError(event.Diagnostic.slice('global_config_error_'.length), event.Observed)
   if (event.Diagnostic.startsWith('global_sync_')) return isSafeGlobalSyncFact(event.Diagnostic.slice('global_sync_'.length), event.Observed)
+  if (event.Diagnostic.startsWith('global_byte_phase_')) return isSafeGlobalBytePhaseFact(event.Diagnostic.slice('global_byte_phase_'.length), event.Observed)
   if (event.Diagnostic.startsWith('global_setup_cpu_')) return isSafeSetupCPUFact(event.Diagnostic.slice('global_setup_cpu_'.length), event.Observed)
   if (event.Diagnostic.startsWith('global_drain_')) return isSafeGlobalDrainFact(event.Diagnostic.slice('global_drain_'.length), event.Observed)
   if (event.Diagnostic.startsWith('global_traffic_')) return isSafeGlobalTrafficFact(event.Diagnostic.slice('global_traffic_'.length), event.Observed)
   if (event.Diagnostic.startsWith('global_request_')) return isSafeGlobalRequestFact(event.Diagnostic.slice('global_request_'.length), event.Observed)
   if (event.Diagnostic === 'receipt_wait') return event.Observed >= 1 && event.Observed <= 99
   return ['panel_downgrade_application_ms', 'panel_reupgrade_application_ms'].includes(event.Diagnostic) && event.Observed <= 150000
+}
+
+function isSafeGlobalBytePhaseFact(name, value) {
+  return ['priming_ms', 'first_sql_ms', 'formation_ms', 'live_keys_ms'].includes(name) && Number.isSafeInteger(value) && value >= 0 && value <= 1200000
 }
 
 function isSafeGlobalTrafficFact(name, value) {

@@ -8,12 +8,29 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"syscall"
 	"testing"
 	"time"
 
 	"github.com/KazuhaHub/passwall-protocol/protocol"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 )
+
+func nativeLogGlobalReadiness(t *testing.T, readiness string, peer *nativeGlobalPeer) {
+	t.Helper()
+	t.Log("global batch readiness: " + readiness)
+	if peer == nil {
+		return
+	}
+	for name, value := range peer.sync.facts() {
+		t.Logf("native global sync: %s=%d", name, value)
+	}
+	alive := 0
+	if peer.process != nil && peer.process.Process != nil && peer.process.Process.Signal(syscall.Signal(0)) == nil {
+		alive = 1
+	}
+	t.Logf("native global sync: parent_alive=%d", alive)
+}
 
 // Both real global pressure components use the same causal publication,
 // capability, full membership and exact receipt gates. The returned predicate

@@ -16,7 +16,6 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
-	"syscall"
 	"testing"
 	"time"
 
@@ -198,18 +197,7 @@ func TestNativeDestinationGlobalBatchPressure(t *testing.T) {
 	t.Cleanup(func() {
 		if m.Stage == 2 {
 			writeStageDiagnostics()
-			t.Log("global batch readiness: " + readiness)
-			if waitingPeer != nil {
-				for name, value := range waitingPeer.sync.facts() {
-					t.Logf("native global sync: %s=%d", name, value)
-				}
-				alive := waitingPeer.process != nil && waitingPeer.process.Process != nil && waitingPeer.process.Process.Signal(syscall.Signal(0)) == nil
-				value := 0
-				if alive {
-					value = 1
-				}
-				t.Logf("native global sync: parent_alive=%d", value)
-			}
+			nativeLogGlobalReadiness(t, readiness, waitingPeer)
 		}
 	})
 	var stopReceiptProfile func()
