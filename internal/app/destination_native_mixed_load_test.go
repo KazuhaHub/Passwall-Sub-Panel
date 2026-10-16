@@ -394,10 +394,13 @@ func nativeMixedLoad(t *testing.T, f destinationPolicyFixture, client *http.Clie
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
+			// One serial worker owns the scratch buffers; each request still
+			// establishes a fresh connection and verifies its current nonce.
+			var probe nativeVLESSWorkerProbe
 			for j := range jobs {
 				if j.kind == 4 {
 					host := name(4, j.seq)
-					if nativeVLESSHost(controlCtx, inbound, host, controlPort, f.user.UUID, controlNonce, host) != nil || time.Since(start) >= 90*time.Second {
+					if probe.request(controlCtx, inbound, host, controlPort, f.user.UUID, controlNonce, host) != nil || time.Since(start) >= 90*time.Second {
 						failures.Add(1)
 					} else {
 						controls.Add(1)
@@ -419,7 +422,7 @@ func nativeMixedLoad(t *testing.T, f destinationPolicyFixture, client *http.Clie
 						uuid = users[j.seq%200].UUID
 					}
 					host := name(j.kind, j.seq)
-					if nativeVLESSHost(ctx, inbound, host, port, uuid, wantNonce, host) != nil {
+					if probe.request(ctx, inbound, host, port, uuid, wantNonce, host) != nil {
 						failures.Add(1)
 						continue
 					}
