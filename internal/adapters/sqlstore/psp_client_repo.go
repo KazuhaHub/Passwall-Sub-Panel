@@ -283,9 +283,18 @@ func (r *pspClientRepo) readFleetAccounting(ctx context.Context) ([]domain.PSPCl
 var _ ports.PSPClientFleetAccountingRepo = (*pspClientRepo)(nil)
 
 func (r *pspClientRepo) ListByUser(ctx context.Context, userID int64) ([]*domain.PSPClient, error) {
+	return r.listClientsByUser(r.db.WithContext(ctx).Where("user_id = ?", userID))
+}
+
+func (r *pspClientRepo) ListByUserAndPanel(ctx context.Context, userID, panelID int64) ([]*domain.PSPClient, error) {
+	return r.listClientsByUser(r.db.WithContext(ctx).Where("user_id = ? AND panel_id = ?", userID, panelID))
+}
+
+var _ ports.PSPClientUserPanelRepo = (*pspClientRepo)(nil)
+
+func (r *pspClientRepo) listClientsByUser(query *gorm.DB) ([]*domain.PSPClient, error) {
 	var rows []pspClientRow
-	if err := r.db.WithContext(ctx).
-		Where("user_id = ?", userID).
+	if err := query.
 		Order("panel_id, id").
 		Find(&rows).Error; err != nil {
 		return nil, err

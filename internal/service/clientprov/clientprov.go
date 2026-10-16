@@ -47,7 +47,13 @@ func (s *Service) Sync(ctx context.Context, userID int64, userUUID string, panel
 }
 
 func (s *Service) syncRetirements(ctx context.Context, userID int64, userUUID string, panelID int64, rules domain.EmailRules, nodes []clientplan.NodeCred) (domain.RetiredPanelClients, error) {
-	allExisting, err := s.clients.ListByUser(ctx, userID)
+	var allExisting []*domain.PSPClient
+	var err error
+	if scoped, ok := s.clients.(ports.PSPClientUserPanelRepo); ok {
+		allExisting, err = scoped.ListByUserAndPanel(ctx, userID, panelID)
+	} else {
+		allExisting, err = s.clients.ListByUser(ctx, userID)
+	}
 	if err != nil {
 		return domain.RetiredPanelClients{}, fmt.Errorf("list existing clients: %w", err)
 	}

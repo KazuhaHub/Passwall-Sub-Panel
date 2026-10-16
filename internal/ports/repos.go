@@ -534,6 +534,14 @@ type PSPClientRepo interface {
 	BatchUpdateCounters(ctx context.Context, items []*domain.PSPClient) error
 }
 
+// PSPClientUserPanelRepo optionally reads the same complete current client
+// records as ListByUser, restricted to one panel and ordered by panel then ID.
+// Membership planning still performs a fresh read for each panel; this avoids
+// decoding unrelated panels without retaining a cross-panel snapshot.
+type PSPClientUserPanelRepo interface {
+	ListByUserAndPanel(ctx context.Context, userID, panelID int64) ([]*domain.PSPClient, error)
+}
+
 // PSPClientInboundBatchRepo optionally persists one report's attachment
 // observations atomically. Missing attachments remain no-ops; observations
 // retain UpdateInboundState's failure-clock and confirmed-credential semantics.
