@@ -36,6 +36,7 @@ const diagnostics = Object.freeze({
   'formation padding would fold into an existing trial site': 'byte_formation_domains_invalid',
   'timed out waiting for actual warmup parsed and completely drained': 'byte_formation_warmup_timeout',
   'timed out waiting for real first packets durable while their responses remain suppressed': 'byte_formation_first_durable_timeout',
+  'timed out waiting for actual reverse-priority first packet is frozen before priming the next class': 'byte_formation_prime_timeout',
   'original 75-second fault budget cannot form all four live batches': 'byte_formation_fault_budget_failed',
   'real formation traffic failed before response recovery': 'byte_formation_traffic_failed',
   'timed out waiting for real collector retains live keys separately from unacknowledged first packets': 'byte_formation_live_keys_timeout',

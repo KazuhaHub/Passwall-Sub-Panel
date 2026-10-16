@@ -18,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/KazuhaHub/passwall-protocol/protocol"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/destaudit"
 	"golang.org/x/net/publicsuffix"
 )
@@ -28,29 +29,31 @@ import (
 func nativeByteFormation(t *testing.T, f destinationPolicyFixture, client *http.Client, endpoint, token string, parent int, dataDir string, inbound int, address string, targetPort int, nonce, controlAddress string, controlPort int, controlNonce, evidence string, output func() string, probe *nativeMixedProbe, fault *nativeByteResponseFault, binding *nativeAdmissionBinding, storage *nativeGlobalAuditStorage) {
 	const perLane, faultSeconds = 2048, 75
 	m := struct {
-		Schema      int                       `json:"schema_version"`
-		Candidate   string                    `json:"candidate"`
-		Core        string                    `json:"core_version"`
-		Database    string                    `json:"database"`
-		Stage       int                       `json:"stage"`
-		Owners      int                       `json:"native_owners"`
-		Users       int                       `json:"trial_users"`
-		Attempts    [4]uint64                 `json:"attempted"`
-		Delivered   [4]uint64                 `json:"delivered"`
-		Failures    uint64                    `json:"transport_failures"`
-		FaultMS     int64                     `json:"response_fault_ms"`
-		FirstStored [4]int                    `json:"durable_first_packets"`
-		Packets     nativeByteFormationFacts  `json:"packets"`
-		HeldQueue   [4]destaudit.LanePressure `json:"held_queue"`
-		SQLHeld     uint64                    `json:"held_sql_entries"`
-		SQLEarly    uint64                    `json:"delegated_begins_while_held"`
-		Ingress     nativeMixedIngress        `json:"access_ingress"`
-		Stored      [4]int64                  `json:"stored_events"`
-		LossRows    [4]int64                  `json:"loss_rows"`
-		Complete    int                       `json:"formation_complete"`
-		BytesDone   int                       `json:"byte_saturation_complete"`
-		Pressure    int                       `json:"pressure_complete"`
-	}{Schema: 1, Candidate: "1ce8f26cfbce8d3decf8855dda4349be10778a23", Core: "26.6.27", Database: f.a.cfg.DBKind(), Owners: 1}
+		Schema       int                       `json:"schema_version"`
+		Candidate    string                    `json:"candidate"`
+		Core         string                    `json:"core_version"`
+		Database     string                    `json:"database"`
+		Stage        int                       `json:"stage"`
+		Owners       int                       `json:"native_owners"`
+		TargetOwners int                       `json:"target_native_owners"`
+		MinimumBytes [4]int                    `json:"required_canonical_bytes_exclusive"`
+		Users        int                       `json:"trial_users"`
+		Attempts     [4]uint64                 `json:"attempted"`
+		Delivered    [4]uint64                 `json:"delivered"`
+		Failures     uint64                    `json:"transport_failures"`
+		FaultMS      int64                     `json:"response_fault_ms"`
+		FirstStored  [4]int                    `json:"durable_first_packets"`
+		Packets      nativeByteFormationFacts  `json:"packets"`
+		HeldQueue    [4]destaudit.LanePressure `json:"held_queue"`
+		SQLHeld      uint64                    `json:"held_sql_entries"`
+		SQLEarly     uint64                    `json:"delegated_begins_while_held"`
+		Ingress      nativeMixedIngress        `json:"access_ingress"`
+		Stored       [4]int64                  `json:"stored_events"`
+		LossRows     [4]int64                  `json:"loss_rows"`
+		Complete     int                       `json:"formation_complete"`
+		BytesDone    int                       `json:"byte_saturation_complete"`
+		Pressure     int                       `json:"pressure_complete"`
+	}{Schema: 2, Candidate: "1ce8f26cfbce8d3decf8855dda4349be10778a23", Core: "26.6.27", Database: f.a.cfg.DBKind(), Owners: 1}
 	var attempted, delivered [4]atomic.Uint64
 	var failures atomic.Uint64
 	write := func() {
@@ -81,6 +84,17 @@ func nativeByteFormation(t *testing.T, f destinationPolicyFixture, client *http.
 	})
 	if !ok {
 		t.Fatal("byte formation replaced the original queue observer")
+	}
+	lanes := queue.Pressure()
+	m.TargetOwners, ok = nativeGlobalOwners(lanes)
+	if !ok || m.TargetOwners != 65 {
+		t.Fatal("formation target lost the original global owner geometry")
+	}
+	for i, lane := range lanes {
+		m.MinimumBytes[i], ok = nativeByteFormationMinimum(lane, m.TargetOwners)
+		if !ok {
+			t.Fatal("original lane cannot form a byte-only refusal with one fresh packet per owner")
+		}
 	}
 	readStored := func(kind int) int64 {
 		t.Helper()
@@ -132,7 +146,10 @@ func nativeByteFormation(t *testing.T, f destinationPolicyFixture, client *http.
 		}
 		return nativeVLESSHost(ctx, inbound, host, port, uuid, want, host)
 	}
-	for kind := range 4 {
+	// Prime low-priority classes first. A frozen block packet is deliberately
+	// preferred in fallback slots; freezing it before other classes would spend
+	// the original failure-backoff window repeatedly sending only that packet.
+	for _, kind := range []int{3, 2, 1, 0} {
 		attempted[kind].Add(1)
 		err := send(t.Context(), kind, 1)
 		if err != nil {
@@ -140,6 +157,10 @@ func nativeByteFormation(t *testing.T, f destinationPolicyFixture, client *http.
 		}
 		nativeMust(t, err, "prime one actual small packet in each lane")
 		delivered[kind].Add(1)
+		nativeWait(t, max(time.Millisecond, time.Until(faultEnd)), "actual reverse-priority first packet is frozen before priming the next class", func() bool {
+			facts, packets, valid := fault.snapshot()
+			return valid && packets[kind].id != "" && facts.Suppressed[kind] > 0
+		})
 	}
 	nativeWait(t, min(65*time.Second, time.Until(faultEnd)), "real first packets durable while their responses remain suppressed", func() bool {
 		facts, packets, valid := fault.snapshot()
@@ -234,7 +255,8 @@ func nativeByteFormation(t *testing.T, f destinationPolicyFixture, client *http.
 		}
 		view := queue.Pressure()
 		for i, lane := range view {
-			if facts.Recovered[i] != 1 || facts.NewPackets[i] < 1 || facts.MaxNewBytes[i] <= (256<<10) || lane.Bytes <= (256<<10) || lane.Batches < 1 || lane.Bytes > lane.ByteLimit || lane.Batches > lane.BatchLimit {
+			minimum := m.MinimumBytes[i]
+			if facts.Recovered[i] != 1 || facts.NewPackets[i] < 1 || facts.MaxNewBytes[i] <= minimum || lane.Bytes <= minimum || lane.Batches < 1 || lane.Bytes > lane.ByteLimit || lane.Batches > lane.BatchLimit {
 				return false
 			}
 		}
@@ -328,8 +350,8 @@ func nativeByteFormationHosts(t *testing.T, nonce, address, blocked, observed st
 		t.Fatal("formation host mappings overlap foreign state")
 	}
 	name := func(kind, seq int) string {
-		label := fmt.Sprintf("%s%d-%05d-", prefix, kind, seq)
-		return label + strings.Repeat("x", 63-len(label)) + ".test"
+		host, _ := nativeByteFormationName(prefix, kind, seq)
+		return host
 	}
 	var additions strings.Builder
 	for kind := range 4 {
@@ -340,9 +362,9 @@ func nativeByteFormationHosts(t *testing.T, nonce, address, blocked, observed st
 			ip = observed
 		}
 		for seq := 0; seq <= count+1; seq++ {
-			host := name(kind, seq)
+			host, expectedRoot := nativeByteFormationName(prefix, kind, seq)
 			root, err := publicsuffix.EffectiveTLDPlusOne(host)
-			if err != nil || root != host {
+			if err != nil || root != expectedRoot || (kind >= 2 && root != host) {
 				t.Fatal("formation padding would fold into an existing trial site")
 			}
 			fmt.Fprintf(&additions, "%s %s\n", ip, host)
@@ -353,4 +375,68 @@ func nativeByteFormationHosts(t *testing.T, nonce, address, blocked, observed st
 	})
 	nativeMust(t, os.WriteFile("/etc/hosts", append(append([]byte(nil), original...), []byte("\n"+additions.String())...), info.Mode().Perm()), "install actual distinct registrable formation sites")
 	return name
+}
+
+func nativeByteFormationName(prefix string, kind, seq int) (host, root string) {
+	label := fmt.Sprintf("%s%d-%05d-", prefix, kind, seq)
+	root = label + strings.Repeat("x", 63-len(label)) + ".test"
+	host = root
+	if kind < 2 {
+		// Identified hits retain the full real destination, up to the original
+		// 253-byte domain limit. Anonymous trial/usage keep distinct bare roots.
+		host = strings.Repeat("b", 63) + "." + strings.Repeat("b", 63) + "." + strings.Repeat("b", 56) + "." + root
+	}
+	return
+}
+
+func nativeByteFormationMinimum(lane destaudit.LanePressure, owners int) (int, bool) {
+	if owners < 2 || owners > 65 || lane.BatchLimit < 2 || lane.ByteLimit < 1 || lane.OwnerLimit < 1 {
+		return 0, false
+	}
+	// One owner stays fresh. Also stay below the original global batch cap so
+	// it cannot explain the eventual refusal. Equality does not fill the bytes.
+	eligible := min(owners-1, lane.BatchLimit-1)
+	minimum := lane.ByteLimit / eligible
+	return minimum, minimum < protocol.MaxAuditObservationBytes
+}
+
+func TestNativeByteFormationNamesAndOriginalReservationGeometry(t *testing.T) {
+	f := buildDestinationPolicyFixture(t)
+	queue := f.a.destAudit.(interface {
+		Pressure() [4]destaudit.LanePressure
+	})
+	for kind, lane := range queue.Pressure() {
+		minimum, valid := nativeByteFormationMinimum(lane, 65)
+		if !valid || minimum != [4]int{524288, 270600, 270600, 266305}[kind] {
+			t.Fatal("formation minimum lost the original owner/batch/byte capacity geometry")
+		}
+		eligible := min(64, lane.BatchLimit-1)
+		if minimum*eligible > lane.ByteLimit || (minimum+1)*eligible <= lane.ByteLimit {
+			t.Fatal("formation boundary confused equality with a byte-exclusive refusal")
+		}
+		var priorRoot string
+		for seq := range 3 {
+			host, root := nativeByteFormationName("bf-000000000000-", kind, seq)
+			folded, err := publicsuffix.EffectiveTLDPlusOne(host)
+			if err != nil || folded != root || root == priorRoot || len(root) != 68 || len(host) != [4]int{253, 253, 68, 68}[kind] || (kind >= 2 && host != root) {
+				t.Fatal("real destination padding changed anonymous registrable-root geometry")
+			}
+			priorRoot = root
+			body := fixtureAudit(t, f, seq+1)
+			body.Hits[0].Dest = host
+			nativeMust(t, protocol.ValidateAuditObservation(*body), "validate actual domain names at original protocol limits")
+		}
+	}
+	for _, bad := range []struct {
+		lane   destaudit.LanePressure
+		owners int
+	}{
+		{destaudit.LanePressure{BatchLimit: 128, ByteLimit: 32 << 20, OwnerLimit: 4}, 1},
+		{destaudit.LanePressure{BatchLimit: 128, ByteLimit: 32 << 20, OwnerLimit: 4}, 33},
+		{destaudit.LanePressure{BatchLimit: 1, ByteLimit: 32 << 20, OwnerLimit: 4}, 65},
+	} {
+		if _, valid := nativeByteFormationMinimum(bad.lane, bad.owners); valid {
+			t.Fatal("impossible fresh-owner byte geometry was silently accepted")
+		}
+	}
 }

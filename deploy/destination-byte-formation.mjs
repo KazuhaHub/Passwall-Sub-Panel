@@ -31,9 +31,14 @@ export function checkByteFormationEvidence(results, metrics) {
   need(typeof metrics === 'string' && Buffer.byteLength(metrics) <= 64 * 1024)
   let r
   try { r = JSON.parse(metrics) } catch { need(false) }
-  fields(r, ['schema_version', 'candidate', 'core_version', 'database', 'stage', 'native_owners', 'trial_users', 'attempted', 'delivered', 'transport_failures', 'response_fault_ms', 'durable_first_packets', 'packets', 'held_queue', 'held_sql_entries', 'delegated_begins_while_held', 'access_ingress', 'stored_events', 'loss_rows', 'formation_complete', 'byte_saturation_complete', 'pressure_complete'])
-  need(r.schema_version === 1 && r.candidate === moduleNodeCandidate.commit && r.core_version === '26.6.27' && r.database === 'sqlite')
+  fields(r, ['schema_version', 'candidate', 'core_version', 'database', 'stage', 'native_owners', 'target_native_owners', 'required_canonical_bytes_exclusive', 'trial_users', 'attempted', 'delivered', 'transport_failures', 'response_fault_ms', 'durable_first_packets', 'packets', 'held_queue', 'held_sql_entries', 'delegated_begins_while_held', 'access_ingress', 'stored_events', 'loss_rows', 'formation_complete', 'byte_saturation_complete', 'pressure_complete'])
+  need(r.schema_version === 2 && r.candidate === moduleNodeCandidate.commit && r.core_version === '26.6.27' && r.database === 'sqlite')
   need(r.stage === 3 && r.native_owners === 1 && r.trial_users === 200 && r.formation_complete === 1)
+  need(r.target_native_owners === 65)
+  const byteLimits = [32, 8, 8, 16].map(n => n * 1024 * 1024), batchLimits = [128, 32, 32, 64]
+  const minimum = byteLimits.map((bytes, i) => Math.floor(bytes / Math.min(r.target_native_owners - 1, batchLimits[i] - 1)))
+  vector(r.required_canonical_bytes_exclusive)
+  need(r.required_canonical_bytes_exclusive.every((n, i) => n === minimum[i]))
   need(r.byte_saturation_complete === 0 && r.pressure_complete === 0 && r.transport_failures === 0)
   need(count(r.response_fault_ms) && r.response_fault_ms >= 75000 && r.response_fault_ms <= 76000)
   vector(r.attempted, n => n === 2049); vector(r.delivered, n => n === 2049); vector(r.durable_first_packets, n => n === 1)
@@ -46,7 +51,8 @@ export function checkByteFormationEvidence(results, metrics) {
   vector(r.packets.recovered_first_packets, n => n === 1)
   vector(r.packets.first_rows, n => count(n) && n >= 1 && n <= 8)
   vector(r.packets.first_canonical_bytes, n => count(n) && n > 0 && n < 4096)
-  vector(r.packets.max_new_canonical_bytes, n => count(n) && n > 256 * 1024 && n <= 1024 * 1024)
+  vector(r.packets.max_new_canonical_bytes, n => count(n) && n <= 1024 * 1024)
+  need(r.packets.max_new_canonical_bytes.every((n, i) => n > minimum[i]))
   vector(r.packets.rows_in_largest_new_packet, n => count(n) && n > 8 && n <= 8192)
   need(r.held_sql_entries === 1 && r.delegated_begins_while_held === 0 && Array.isArray(r.held_queue) && r.held_queue.length === 4)
   for (const [i, lane] of r.held_queue.entries()) {
@@ -54,7 +60,7 @@ export function checkByteFormationEvidence(results, metrics) {
     need(lane.kind === ['block', 'observe', 'trial', 'usage'][i] && Object.entries(lane).filter(([k]) => k !== 'kind').every(([, n]) => count(n)))
     need(lane.batch_limit === [128, 32, 32, 64][i] && lane.byte_limit === [32, 8, 8, 16][i] * 1024 * 1024 && lane.owner_limit === [4, 1, 1, 1][i])
     need(lane.active <= 1 && lane.waiting + lane.active === lane.batches && lane.batches > 0 && lane.batches <= lane.owner_limit)
-    need(lane.canonical_bytes > 256 * 1024 && lane.canonical_bytes <= lane.byte_limit && lane.owners === 1 && lane.max_owner_batches === lane.batches)
+    need(lane.canonical_bytes > minimum[i] && lane.canonical_bytes <= lane.byte_limit && lane.owners === 1 && lane.max_owner_batches === lane.batches)
   }
   const ingress = r.access_ingress
   fields(ingress, ['before', 'after', 'allowed_expected', 'allowed_received', 'allowed_not_received', 'denied_expected', 'denied_received', 'denied_not_received'])
