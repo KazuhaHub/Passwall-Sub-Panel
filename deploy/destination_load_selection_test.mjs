@@ -6,7 +6,7 @@ import { test } from 'node:test'
 const workflow = readFileSync(new URL('../.github/workflows/destination-load.yml', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
 const jobs = ['webhook-load', 'idle-cost', 'queue-pressure', 'sql-pressure', 'trial-load', 'block-overflow', 'mixed-pressure', 'global-bootstrap', 'global-batch']
 const scopes = ['mixed-pressure', 'idle-cost', 'global-batch']
-const choices = ['all', ...scopes, 'global-batch-profile', 'global-receipt-profile', 'global-traffic-profile', 'byte-formation', 'global-byte']
+const choices = ['all', 'webhook-load', ...scopes, 'global-batch-profile', 'global-receipt-profile', 'global-traffic-profile', 'byte-formation', 'global-byte']
 const condition = "github.event_name != 'workflow_dispatch' || (inputs.suite || 'all') == 'all'"
 const job = name => {
   const marker = '\n  ' + name + ':\n'
@@ -22,7 +22,7 @@ test('manual load selection defaults to all and cannot narrow PR or main checks'
   for (const scope of choices) assert(workflow.includes('          - ' + scope + '\n'))
   assert(workflow.includes('branches: [main]') && workflow.includes('  pull_request:\n'))
   for (const name of jobs) {
-    const expected = condition + (scopes.includes(name) ? " || inputs.suite == '" + name + "'" : '') + (name === 'global-batch' ? " || inputs.suite == 'global-batch-profile' || inputs.suite == 'global-receipt-profile' || inputs.suite == 'global-traffic-profile'" : '')
+    const expected = condition + (scopes.includes(name) ? " || inputs.suite == '" + name + "'" : '') + (['webhook-load', 'block-overflow'].includes(name) ? " || inputs.suite == 'webhook-load'" : '') + (name === 'global-batch' ? " || inputs.suite == 'global-batch-profile' || inputs.suite == 'global-receipt-profile' || inputs.suite == 'global-traffic-profile'" : '')
     assert.equal(job(name).match(/^\s+if: (.+)$/m)?.[1], expected)
   }
 })
@@ -31,7 +31,7 @@ test('manual selection rejects unknown values without inserting input into shell
   const selection = job('validate-selection')
   assert(selection.includes("PSP_ACCEPTANCE_SUITE: ${{ inputs.suite || 'all' }}"))
   assert(selection.includes('case "$PSP_ACCEPTANCE_SUITE" in'))
-  assert(selection.includes('all|mixed-pressure|idle-cost|global-batch|global-batch-profile|global-receipt-profile|global-traffic-profile|byte-formation|global-byte) ;;'))
+  assert(selection.includes('all|webhook-load|mixed-pressure|idle-cost|global-batch|global-batch-profile|global-receipt-profile|global-traffic-profile|byte-formation|global-byte) ;;'))
   assert(selection.includes("*) printf '%s\\n' 'Unknown acceptance selection'; exit 1 ;;"))
   const shell = selection.slice(selection.indexOf('run: |'))
   assert(!shell.includes('inputs.suite') && !workflow.includes('continue-on-error'))
@@ -46,6 +46,29 @@ test('manual selection rejects unknown values without inserting input into shell
     assert.equal(result.status, 1, result.stderr)
     assert.equal(result.stdout.trim(), 'Unknown acceptance selection')
   }
+})
+
+test('focused webhook validation covers both callers of the independent traffic clock', () => {
+  for (const [name, root, validator] of [
+    ['webhook-load', 'TestNativeDestinationWebhookLoad', 'destination-load.mjs'],
+    ['block-overflow', 'TestNativeDestinationBlockOverflow', 'destination-block-overflow.mjs'],
+  ]) {
+    const body = job(name)
+    assert(body.includes(" || inputs.suite == 'webhook-load'"))
+    assert(body.includes("go test -race -v -count=1 -timeout=4m -tags destination_acceptance ./internal/app -run '^TestNativeLoadTrafficScheduleKeepsClockAndOwnedCleanup$'"))
+    assert(body.includes("-test.run '^" + root + "$' -test.timeout=20m"))
+    assert(body.includes('node deploy/' + validator))
+  }
+  const source = readFileSync(new URL('../internal/app/destination_native_load_test.go', import.meta.url), 'utf8')
+  const start = source.indexOf('traffic, err = nativeStartLoadTraffic(ctx, start, 3000, 110, 100*time.Millisecond')
+  const observations = source.indexOf('var seen time.Time', start)
+  assert(start > 0 && observations > start)
+  const offer = source.slice(start, observations)
+  assert(offer.includes('case jobs <- job:') && offer.includes('failed.Add(1)'))
+  assert(!offer.includes('sample()') && !offer.includes('live()') && !offer.includes('nativeVLESSHost('))
+  for (const required of ['make(chan int, 512)', 'for range 512', 'make([]atomic.Uint64, 300)', 'time.Since(start) / time.Second', 'windows[bucket].Add(1)', 'traffic.stop()', 'elapsed, trafficErr := traffic.wait()', 'phase.DurationMS = elapsed.Milliseconds()']) assert(source.includes(required))
+  const ci = readFileSync(new URL('../.github/workflows/test.yml', import.meta.url), 'utf8')
+  assert(ci.includes('LoadTrafficScheduleKeepsClockAndOwnedCleanup'))
 })
 
 test('setup profiling is opt-in and keeps the complete pressure gate and evidence boundary', () => {

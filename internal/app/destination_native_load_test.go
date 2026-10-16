@@ -425,7 +425,16 @@ func nativeDestinationLoad(t *testing.T, workload nativeLoadWorkload) {
 			ctx, cancel := context.WithCancel(test.Context())
 			defer cancel()
 			var closeWorkers sync.Once
-			defer func() { cancel(); closeWorkers.Do(func() { close(jobs) }); workers.Wait() }()
+			var traffic *nativeLoadTraffic
+			defer func() {
+				cancel()
+				if traffic != nil {
+					traffic.stop()
+				} else {
+					closeWorkers.Do(func() { close(jobs) })
+					workers.Wait()
+				}
+			}()
 			for range 512 {
 				workers.Add(1)
 				go func() {
@@ -460,24 +469,25 @@ func nativeDestinationLoad(t *testing.T, workload nativeLoadWorkload) {
 					}
 				}()
 			}
-			// The load generator uses a bounded open-loop schedule. Evidence is
-			// actual successful writes per second, never the scheduled target.
+			traffic, err = nativeStartLoadTraffic(ctx, start, 3000, 110, 100*time.Millisecond, func(_ context.Context, job int) {
+				if !overflow {
+					job %= phase.Rules
+				}
+				select {
+				case jobs <- job:
+				default:
+					failed.Add(1)
+				}
+			}, func() { closeWorkers.Do(func() { close(jobs) }); workers.Wait() })
+			nativeMust(test, err, "start original bounded load schedule")
+			// Observation stays on this test goroutine while the independent
+			// producer keeps the original clock. Evidence still counts actual
+			// successful writes in the original 300 completion-time buckets.
 			var seen time.Time
 			for tick := 0; tick < 3000; tick++ {
 				due := start.Add(time.Duration(tick) * 100 * time.Millisecond)
 				if delay := time.Until(due); delay > 0 {
 					time.Sleep(delay)
-				}
-				for n := 0; n < 110; n++ {
-					job := tick*110 + n
-					if !overflow {
-						job %= phase.Rules
-					}
-					select {
-					case jobs <- job:
-					default:
-						failed.Add(1)
-					}
 				}
 				if tick%10 == 0 {
 					live()
@@ -502,12 +512,9 @@ func nativeDestinationLoad(t *testing.T, workload nativeLoadWorkload) {
 					phase.Samples = append(phase.Samples, point)
 				}
 			}
-			if delay := time.Until(start.Add(300 * time.Second)); delay > 0 {
-				time.Sleep(delay)
-			}
-			phase.DurationMS = time.Since(start).Milliseconds()
-			closeWorkers.Do(func() { close(jobs) })
-			workers.Wait()
+			elapsed, trafficErr := traffic.wait()
+			nativeMust(test, trafficErr, "complete original bounded load schedule")
+			phase.DurationMS = elapsed.Milliseconds()
 			phase.Attempted, phase.Delivered, phase.Blocked, phase.TransportFailures, phase.LateDelivered = attempted.Load(), delivered.Load(), blocked.Load(), failed.Load(), late.Load()
 			phase.TargetRequests = reached.Load()
 			phase.WindowDelivered = make([]uint64, len(windows))

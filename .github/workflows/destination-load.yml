@@ -9,6 +9,7 @@ on:
         default: all
         options:
           - all
+          - webhook-load
           - mixed-pressure
           - idle-cost
           - global-batch
@@ -64,12 +65,12 @@ jobs:
         run: |
           set -euo pipefail
           case "$PSP_ACCEPTANCE_SUITE" in
-            all|mixed-pressure|idle-cost|global-batch|global-batch-profile|global-receipt-profile|global-traffic-profile|byte-formation|global-byte) ;;
+            all|webhook-load|mixed-pressure|idle-cost|global-batch|global-batch-profile|global-receipt-profile|global-traffic-profile|byte-formation|global-byte) ;;
             *) printf '%s\n' 'Unknown acceptance selection'; exit 1 ;;
           esac
           printf 'Acceptance selection: %s\n' "$PSP_ACCEPTANCE_SUITE"
   webhook-load:
-    if: github.event_name != 'workflow_dispatch' || (inputs.suite || 'all') == 'all'
+    if: github.event_name != 'workflow_dispatch' || (inputs.suite || 'all') == 'all' || inputs.suite == 'webhook-load'
     name: two five-minute real webhook loads (SQLite / Xray 26.6.27)
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -106,6 +107,7 @@ jobs:
           set -euo pipefail
           node --test deploy/destination_load_test.mjs
           go test -v -count=1 ./internal/app -run '^(TestNativeLoadProcCountersRequireBirthAndExactCPUFields|TestNativeLoadPoliciesRequireNumericControlPortIsolation|TestNativeTargetAddressesCanShareTheSameNumericPort)$'
+          go test -race -v -count=1 -timeout=4m -tags destination_acceptance ./internal/app -run '^TestNativeLoadTrafficScheduleKeepsClockAndOwnedCleanup$'
           go test -c -tags destination_acceptance -o "$RUNNER_TEMP/destination-load.test" ./internal/app
       - name: Actual production App.Run, one rule and fifty rules at sustained delivery rate
         run: |
@@ -393,7 +395,7 @@ jobs:
           if-no-files-found: error
           retention-days: 7
   block-overflow:
-    if: github.event_name != 'workflow_dispatch' || (inputs.suite || 'all') == 'all'
+    if: github.event_name != 'workflow_dispatch' || (inputs.suite || 'all') == 'all' || inputs.suite == 'webhook-load'
     name: five-minute independent block quota overflow (SQLite / Xray 26.6.27)
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -430,6 +432,7 @@ jobs:
           set -euo pipefail
           node --test deploy/destination_block_overflow_test.mjs
           go test -v -count=1 ./internal/app -run '^(TestNativeLoadProcCountersRequireBirthAndExactCPUFields|TestNativeLoadMetricSchemaSeparatesOverflowBudget|TestNativeLoadPoliciesRequireNumericControlPortIsolation|TestNativeTargetAddressesCanShareTheSameNumericPort)$'
+          go test -race -v -count=1 -timeout=4m -tags destination_acceptance ./internal/app -run '^TestNativeLoadTrafficScheduleKeepsClockAndOwnedCleanup$'
           go test -c -tags destination_acceptance -o "$RUNNER_TEMP/destination-block-overflow.test" ./internal/app
       - name: Actual production App.Run, sustained unique block destinations beyond quota
         run: |
