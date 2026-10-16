@@ -11,6 +11,7 @@ test('global fixture preflight executes lifecycle, cache and SQL boundaries with
   for (const root of ['AuditStartPreservesRealQueueAndPermissionChanges', 'PublicCoreCopyExcludesStateAndRejectsUntrustedFiles', 'StoragePauseKeepsControlAndOriginalSQLTransactions', 'TransportKeepsProductionAuthenticationAndExactBodies']) assert(body.includes(root))
   assert(body.includes('MixedProbePreservesRecoveryFailures'))
   assert(body.includes('RequestFailureFactsPreserveErrorsAndBlockedReplies'))
+  assert(body.includes('WorkerProbeKeepsFreshConnectionsAndResponseSemantics'))
   const gate = workflow.slice(workflow.indexOf('  sqlite:')).split(/\r?\n(?=  postgres:)/)[0]
   assert.match(gate, /needs: \[race-shard, app-race-shard, global-fixture\]/)
   assert(gate.includes('needs.global-fixture.result') && gate.includes('if: always()'))
@@ -22,6 +23,17 @@ test('global fixture preflight executes lifecycle, cache and SQL boundaries with
   assert(source.includes('entries[0].Name() != "install.json"') && source.includes('entries[1].Name() != "xray"'))
   assert(source.includes('decoder.DisallowUnknownFields()') && source.includes('os.O_EXCL'))
   assert.doesNotMatch(source, /SetSnapshot\(|\.collector\.Ack\(|runtime\.GC\(|sysctl/)
+})
+
+test('global worker scratch reuse keeps fresh requests and the original pressure contract', () => {
+  const probe = readFileSync(new URL('../internal/app/destination_native_worker_probe_test.go', import.meta.url), 'utf8')
+  const driver = readFileSync(new URL('../internal/app/destination_native_global_batch_test.go', import.meta.url), 'utf8')
+  const workflow = readFileSync(new URL('../.github/workflows/destination-load.yml', import.meta.url), 'utf8')
+  for (const required of ['Timeout: 3 * time.Second', 'defer c.Close()', 'Add(5 * time.Second)', 'nativeVLESSRequest(uuid, address, port, host)', 'p.reader.Reset(c)', 'defer p.reader.Reset(nil)', 'io.ReadFull(p.reader, response[:])', 'http.ReadResponse(p.reader, nil)', 'body   [1024]byte', 'responseHTTP.Body.Close()', 'nativeVLESSHost(ctx, port, currentAddress', 'accepted.Load() != 2', 'nativeRequestFailureIndex(before) != nativeRequestFailureIndex(after)']) assert(probe.includes(required))
+  assert(driver.includes('var probe nativeVLESSWorkerProbe') && driver.includes('probe.request(ctx, peer.node.DesiredPort, host, port, uuid, want, host)'))
+  for (const required of ['const seconds, rate = 120, 10', 'make(chan job, 4096)', 'for range 512', 'm.TrafficMS > (seconds+10)*1000', 'nativePressureBlockRequest(f.user.UUID, name(0, j.seq), blockPort)', 'users[j.seq%200].UUID']) assert(driver.includes(required))
+  assert(workflow.includes('TestNativeGlobalWorkerProbeKeepsFreshConnectionsAndResponseSemantics'))
+  assert.doesNotMatch(probe, /sync\.Pool|http\.Transport|\.Ack\(|SetSnapshot\(/)
 })
 
 test('global transport preserves raw authenticated bodies and delegates unknown input', () => {

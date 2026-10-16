@@ -721,7 +721,7 @@ jobs:
           node --test deploy/destination_global_batch_test.mjs
           go test -v -count=1 ./internal/app -run '^(TestNativeLoadProcCountersRequireBirthAndExactCPUFields|TestNativeDatabaseConfigurationIsClosedAndPreservesOwnedDirectories|TestNativeDatabaseCountQueryKeepsParametersSeparate)$'
           go test -c -tags destination_acceptance -o "$RUNNER_TEMP/destination-global-batch.test" ./internal/app
-          "$RUNNER_TEMP/destination-global-batch.test" -test.v -test.run '^(TestNativeGlobalTransportKeepsProductionAuthenticationAndExactBodies|TestNativeGlobalRequestFailureFactsPreserveErrorsAndBlockedReplies|TestNativeSetupProfileRejectsExistingFilesAndLinks|TestNativeSetupProfileStopsAndClosesOnce|TestNativeTargetRouteWaitRequiresExactLocalReadiness|TestNativeTargetRouteWaitStopsOnDeadlineCancellationAndReadFailure)$' -test.timeout=2m
+          "$RUNNER_TEMP/destination-global-batch.test" -test.v -test.run '^(TestNativeGlobalTransportKeepsProductionAuthenticationAndExactBodies|TestNativeGlobalRequestFailureFactsPreserveErrorsAndBlockedReplies|TestNativeGlobalWorkerProbeKeepsFreshConnectionsAndResponseSemantics|TestNativeSetupProfileRejectsExistingFilesAndLinks|TestNativeSetupProfileStopsAndClosesOnce|TestNativeTargetRouteWaitRequiresExactLocalReadiness|TestNativeTargetRouteWaitStopsOnDeadlineCancellationAndReadFailure)$' -test.timeout=2m
       - name: Actual 200 users, 65 owners, four lanes, original SQL hold and retry ledgers
         env:
           PSP_NATIVE_SETUP_PROFILE: ${{ (inputs.suite == 'global-batch-profile' || inputs.suite == 'global-receipt-profile' || inputs.suite == 'global-traffic-profile') && '1' || '0' }}

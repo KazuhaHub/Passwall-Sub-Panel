@@ -57,6 +57,30 @@ all four lanes, later queue changes, rejection precedence, concurrent offers
 and durable loss drain. This remains a prerequisite: the real authenticated
 daemon byte-pressure driver and its independent ledger evidence are unfinished.
 
+## Global sender profiling
+
+The actual traffic profile on PSP `9a0b0784`, MySQL
+[run 38824258724](https://github.com/KazuhaHub/Passwall-Sub-Panel/actions/runs/38824258724),
+covered 120.04s and sampled 72.58s of parent test-process CPU. The allowed VLESS
+probe accounted for 29.44% cumulative CPU and about 1.61GB of cumulative
+allocations; the blocked probe accounted for 10.24% CPU. These two paths are
+disjoint; syscall and caller percentages overlap them and must not be added.
+Node/core CPU is excluded. The driver still failed: 126551ms traffic, 11563
+generator queue failures and 566 actual dial timeouts, not a pressure pass.
+
+The sender follow-up gives each existing serial worker a reusable HTTP reader
+and 1024-byte body scratch. Every request still opens/closes its own TCP socket,
+encodes the current UUID/destination/Host, uses the original 3s dial/5s I/O
+deadlines and verifies the same version, addons, HTTP status and nonce. Reading
+the prefix through the reader permits already-read bytes to serve the HTTP
+parser. It introduces neither connection reuse nor response/credential caching.
+All original owners/users, requests, workers, queue, pacing and pressure gates
+remain. The previous probe is retained as the TCP regression oracle for plain,
+addon, chunked, malformed, truncated, over-limit and exact-limit replies; every
+reply is followed by a valid request with a different UUID/destination/Host.
+Hosted regression execution and new ordinary/traffic-profile originals are
+required before claiming runtime or acceptance improvement.
+
 ## Prepared-SQL checkpoint
 
 The next full-module candidate is Node

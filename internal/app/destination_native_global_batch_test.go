@@ -430,6 +430,7 @@ func TestNativeDestinationGlobalBatchPressure(t *testing.T) {
 		workers.Add(1)
 		go func() {
 			defer workers.Done()
+			var probe nativeVLESSWorkerProbe
 			for j := range jobs {
 				peer := cohort.peers[j.owner]
 				if j.kind == 0 {
@@ -453,7 +454,7 @@ func TestNativeDestinationGlobalBatchPressure(t *testing.T) {
 						port, want = controlPort, controlNonce
 					}
 					host := name(j.kind, j.seq)
-					if err := nativeVLESSHost(ctx, peer.node.DesiredPort, host, port, uuid, want, host); err != nil {
+					if err := probe.request(ctx, peer.node.DesiredPort, host, port, uuid, want, host); err != nil {
 						recordRequestFailure(j.kind, err)
 						continue
 					}
