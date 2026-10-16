@@ -147,32 +147,33 @@ function ServerStatusPanel({ md }: { md: M3Tokens }) {
   if (loading) {
     return <Box sx={{ display: 'flex', justifyContent: 'center', py: 6 }}><CircularProgress /></Box>
   }
-  if (!nodes || nodes.length === 0) {
+  // Status lines reuse their selected entry's probe; they are not additional
+  // health checks or a claim that the selected outbound works end to end.
+  const rows = (nodes ?? []).flatMap(n => {
+    const direct = n.show_direct !== false
+      ? [{ name: n.name, region: n.region, status: n.status, checked_at: n.checked_at }]
+      : []
+    const relays = (n.relay_statuses ?? []).map((relay, relayIndex) => {
+      const label = relay.name || t('status.relay_fallback', { index: relayIndex + 1, defaultValue: '中转 {{index}}' })
+      return { name: relay.only_line_name ? label : `${n.name} ${label}`, region: n.region, status: relay.status, checked_at: relay.checked_at }
+    })
+    const routes = (n.route_statuses ?? []).map(route => ({
+      name: route.only_line_name ? route.name : `${n.name} ${route.name}`,
+      region: n.region, status: route.status, checked_at: route.checked_at,
+    }))
+    return [...direct, ...relays, ...routes]
+  })
+  if (rows.length === 0) {
     return (
       <Card sx={{ p: 3, bgcolor: md.surfaceContainerLow, border: `1px solid ${md.outlineVariant}`, textAlign: 'center', color: md.onSurfaceVariant }}>
         <Typography variant="body2">{t('status.empty', { defaultValue: '暂无可显示的节点' })}</Typography>
       </Card>
     )
   }
-  // Every dialable endpoint is rendered as a full node row. A landing comes
-  // first, followed immediately by its enabled relay lines. This mirrors the
-  // subscription's expanded-node model instead of squeezing landing + relays
-  // into columns on one row.
-  const rows = nodes.flatMap(n => {
-    const direct = n.show_direct !== false
-      ? [{ name: n.name, region: n.region, status: n.status, checked_at: n.checked_at }]
-      : []
-    const relays = (n.relay_statuses ?? []).map((relay, relayIndex) => ({
-      name: `${n.name} ${relay.name || t('status.relay_fallback', { index: relayIndex + 1, defaultValue: '中转 {{index}}' })}`,
-      region: n.region,
-      status: relay.status,
-      checked_at: relay.checked_at,
-    }))
-    return [...direct, ...relays]
-  })
   const okCount = rows.filter(row => row.status === 'ok').length
   const downCount = rows.filter(row => row.status === 'down').length
-  const hasRelays = nodes.some(n => (n.relay_statuses ?? []).length > 0)
+  const hasRelays = (nodes ?? []).some(n => (n.relay_statuses ?? []).length > 0)
+  const hasRoutes = (nodes ?? []).some(n => (n.route_statuses ?? []).length > 0)
   const checkedAt = rows.find(row => row.checked_at)?.checked_at
   return (
     <Card sx={{ p: { xs: 2.5, sm: 3 }, bgcolor: md.surfaceContainerLow, border: `1px solid ${md.outlineVariant}` }}>
@@ -202,8 +203,13 @@ function ServerStatusPanel({ md }: { md: M3Tokens }) {
           {t('status.relay_hint', { defaultValue: '中转状态仅表示中转入口可达，不代表中转链路完全可用。' })}
         </Typography>
       )}
-      {checkedAt && (
+      {hasRoutes && (
         <Typography variant="caption" sx={{ display: 'block', mt: hasRelays ? 0.5 : 2, color: md.onSurfaceVariant }}>
+          {t('status.route_hint', { defaultValue: 'VLESS 路由线路复用所选入口的检测结果，仅表示入口可达，不代表线路出站可用。' })}
+        </Typography>
+      )}
+      {checkedAt && (
+        <Typography variant="caption" sx={{ display: 'block', mt: hasRelays || hasRoutes ? 0.5 : 2, color: md.onSurfaceVariant }}>
           {t('status.checked_at', { time: new Date(checkedAt).toLocaleString(), defaultValue: '最后检查：{{time}}' })}
         </Typography>
       )}

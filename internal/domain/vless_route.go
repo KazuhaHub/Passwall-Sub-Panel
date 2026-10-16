@@ -29,11 +29,11 @@ func (line VlessRouteLine) Label() string {
 	return line.OutboundTag
 }
 
-// ResolveEntry returns nil,true for the direct endpoint, or the one enabled
-// relay selected by stable ID. Missing/disabled references never fall back.
+// ResolveEntry returns nil,true for a visible direct endpoint, or the one
+// enabled relay selected by stable ID. Unavailable entries never fall back.
 func (line VlessRouteLine) ResolveEntry(n *Node) (*RelayLine, bool) {
 	if line.EntryRelayID == "" {
-		return nil, true
+		return nil, n != nil && !n.EffectiveHideDirect()
 	}
 	if n != nil {
 		for i := range n.Relays {
@@ -43,6 +43,14 @@ func (line VlessRouteLine) ResolveEntry(n *Node) (*RelayLine, bool) {
 		}
 	}
 	return nil, false
+}
+
+// LocallyAvailable is the shared effective publication gate. Enabled records
+// retain the administrator's intent while an unavailable entry suspends use.
+func (line VlessRouteLine) LocallyAvailable(n *Node) bool {
+	_, entryAvailable := line.ResolveEntry(n)
+	return n != nil && n.Enabled && strings.EqualFold(n.DesiredProtocol, "vless") &&
+		n.RouteState.Status == "applied" && line.Enabled && !line.Deleted && entryAvailable
 }
 
 // NodeRouteState records an idempotent target before touching the remote API.

@@ -99,7 +99,7 @@ func inspectNodeLines(nodes []*domain.Node) []ProxyGroupInspectLine {
 			} else if n.RouteState.Status != "applied" {
 				reason = n.RouteState.Status
 			}
-			lines = append(lines, ProxyGroupInspectLine{NodeID: n.ID, LineID: line.ID, Kind: "vless_route", Name: line.Label(), DisplayName: routeEntryName(n.DisplayName, line), Enabled: line.Enabled, Available: line.Enabled && entryAvailable && routeLocallyAvailable(n), Reason: reason})
+			lines = append(lines, ProxyGroupInspectLine{NodeID: n.ID, LineID: line.ID, Kind: "vless_route", Name: line.Label(), DisplayName: routeEntryName(n.DisplayName, line), Enabled: line.Enabled && entryAvailable, Available: line.LocallyAvailable(n), Reason: reason})
 		}
 	}
 	return lines

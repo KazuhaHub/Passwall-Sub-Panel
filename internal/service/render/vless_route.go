@@ -3,7 +3,6 @@ package render
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 )
@@ -14,11 +13,11 @@ func expandNodeLines(items []renderItem) []renderItem {
 	out := []renderItem{}
 	for _, item := range items {
 		out = append(out, expandRelays([]renderItem{item})...)
-		if item.node == nil || item.isSeparator || !routeLocallyAvailable(item.node) {
+		if item.node == nil || item.isSeparator {
 			continue
 		}
 		for _, line := range item.node.RouteState.Lines {
-			if line.Enabled && !line.Deleted {
+			if line.LocallyAvailable(item.node) {
 				relay, available := line.ResolveEntry(item.node)
 				if !available {
 					continue
@@ -49,10 +48,6 @@ func routeEntryName(base string, line domain.VlessRouteLine) string {
 	return base + " " + line.Label()
 }
 
-func routeLocallyAvailable(n *domain.Node) bool {
-	return n.Enabled && strings.EqualFold(n.DesiredProtocol, "vless") && n.RouteState.Status == "applied"
-}
-
 func (s *Service) filterRouteItems(ctx context.Context, u *domain.User, items []renderItem) []renderItem {
 	hasRoutes := false
 	for _, item := range items {
@@ -69,10 +64,7 @@ func (s *Service) filterRouteItems(ctx context.Context, u *domain.User, items []
 			out = append(out, item)
 			continue
 		}
-		if !routeLocallyAvailable(item.node) {
-			continue
-		}
-		if _, available := item.route.ResolveEntry(item.node); !available {
+		if !item.route.LocallyAvailable(item.node) {
 			continue
 		}
 		if s.repos.XUIPanel == nil {
@@ -97,6 +89,25 @@ func (s *Service) filterRouteItems(ctx context.Context, u *domain.User, items []
 		out = append(out, item)
 	}
 	return out
+}
+
+// PublishedRouteLines uses the subscription's local-only publication gates for
+// the user status page too, including backend binding and applied credentials.
+// No remote probes or credential values cross this metadata-only boundary.
+func (s *Service) PublishedRouteLines(ctx context.Context, u *domain.User, nodes []*domain.Node) map[int64][]domain.VlessRouteLine {
+	items := []renderItem{}
+	for _, n := range nodes {
+		if n != nil && !n.IsSeparator() {
+			items = append(items, renderItem{node: n, name: n.DisplayName})
+		}
+	}
+	result := map[int64][]domain.VlessRouteLine{}
+	for _, item := range s.filterRouteItems(ctx, u, expandNodeLines(items)) {
+		if item.route != nil {
+			result[item.node.ID] = append(result[item.node.ID], *item.route)
+		}
+	}
+	return result
 }
 
 func (it renderItem) userForLine(u *domain.User) (*domain.User, error) {

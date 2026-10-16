@@ -11,10 +11,10 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 )
 
-func TestRoutesChooseOneEntryAndIgnoreHiddenDirectAcrossFormats(t *testing.T) {
+func TestRoutesChooseOneVisibleEntryAcrossFormats(t *testing.T) {
 	for _, relayEntry := range []bool{false, true} {
 		s, n, user, _ := routeRenderFixture(t)
-		n.HideDirect = true
+		n.HideDirect = relayEntry
 		n.Relays = []domain.RelayLine{{ID: "front", Name: "R", Address: "relay.example", Port: 8443, SNI: "relay-sni.example", Enabled: true}}
 		line := &n.RouteState.Lines[0]
 		line.Name, line.OutboundTag, line.OnlyLineName = "", "warp", true
@@ -28,7 +28,7 @@ func TestRoutesChooseOneEntryAndIgnoreHiddenDirectAcrossFormats(t *testing.T) {
 		for _, item := range items {
 			if item.route != nil {
 				routes = append(routes, item)
-			} else if item.relay == nil {
+			} else if n.HideDirect && item.relay == nil {
 				t.Fatal("hidden standalone direct entry was published")
 			}
 		}
@@ -67,10 +67,11 @@ func TestRoutesChooseOneEntryAndIgnoreHiddenDirectAcrossFormats(t *testing.T) {
 	}
 }
 
-func TestRoutesWithUnavailableRelayEntriesStayWithdrawn(t *testing.T) {
-	for _, entryID := range []string{"disabled", "deleted"} {
+func TestRoutesWithUnavailableEntriesStayWithdrawn(t *testing.T) {
+	for _, entryID := range []string{"", "disabled", "deleted"} {
 		s, n, user, _ := routeRenderFixture(t)
 		n.Relays = []domain.RelayLine{{ID: "disabled", Address: "relay.example"}}
+		n.HideDirect = true
 		n.RouteState.Lines[0].EntryRelayID = entryID
 		items := s.filterRouteItems(context.Background(), user, expandNodeLines([]renderItem{{node: n, name: n.DisplayName}}))
 		for _, item := range items {
@@ -78,9 +79,53 @@ func TestRoutesWithUnavailableRelayEntriesStayWithdrawn(t *testing.T) {
 				t.Fatal("unavailable relay route fell back to direct")
 			}
 		}
+		if len(s.PublishedRouteLines(context.Background(), user, []*domain.Node{n})[n.ID]) != 0 {
+			t.Fatal("status page published an unavailable route")
+		}
 		catalog := inspectNodeLines([]*domain.Node{n})
-		if line := catalog[len(catalog)-1]; line.Available || line.Reason != "entry_unavailable" {
+		if line := catalog[len(catalog)-1]; line.Available || line.Enabled || line.Reason != "entry_unavailable" {
 			t.Fatalf("unavailable route was selectable: %+v", line)
+		}
+		for _, kind := range []string{"node", "line"} {
+			member := domain.ProxyGroupMember{Kind: kind, NodeID: n.ID}
+			if kind == "line" {
+				member.LineID = n.RouteState.Lines[0].ID
+			}
+			inspection := InspectProxyGroups("- MATCH,Pick", map[string][]domain.ProxyGroupMember{"Pick": {member}}, nil, []*domain.Node{n})
+			for _, issue := range inspection.Issues {
+				if issue.Level == "error" {
+					t.Fatal(issue)
+				}
+			}
+			for _, group := range inspection.Groups {
+				for _, name := range group.Preview {
+					if name == "A B" {
+						t.Fatal("node/line selection preview published inactive route")
+					}
+				}
+			}
+		}
+		proxies := s.buildProxies(context.Background(), user, items, ports.UISettings{})
+		for _, proxy := range proxies {
+			if proxy["type"] == "vless" {
+				t.Fatal("Mihomo published inactive entry")
+			}
+		}
+		for _, outbound := range s.buildSingBoxOutbounds(context.Background(), user, items, nil, nil, nil, ports.UISettings{}) {
+			if outbound["tag"] == "A B" {
+				t.Fatal("sing-box published inactive entry")
+			}
+		}
+		body, err := s.renderURIList(context.Background(), user, items, ports.UISettings{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		decoded, _ := base64.StdEncoding.DecodeString(string(body.Body))
+		if strings.Contains(string(decoded), "vless://") {
+			t.Fatal("URI list published inactive entry")
+		}
+		if !n.RouteState.Lines[0].Enabled {
+			t.Fatal("dependency changed configured intent")
 		}
 	}
 }

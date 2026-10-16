@@ -69,12 +69,14 @@ func TestRouteAllSubscriptionFormatsUseAppliedUUIDAndZeroRemoteReads(t *testing.
 }
 
 func TestRoutePublicationRequiresExactBackendAndAppliedCredential(t *testing.T) {
-	for _, kind := range []string{"unknown", "changed_backend", "unsupported_backend", "missing_applied", "original_route_collision"} {
+	for _, kind := range []string{"unknown", "changed_backend", "unsupported_backend", "missing_applied", "original_route_collision", "hidden_direct"} {
 		t.Run(kind, func(t *testing.T) {
 			s, n, u, p := routeRenderFixture(t)
 			switch kind {
 			case "unknown":
 				n.RouteState.Status = "unknown"
+			case "hidden_direct":
+				n.HideDirect = true
 			case "changed_backend":
 				p.panel.URL = "https://different.example"
 			case "unsupported_backend":
@@ -90,7 +92,10 @@ func TestRoutePublicationRequiresExactBackendAndAppliedCredential(t *testing.T) 
 					t.Fatalf("published unconfirmed route for %s", kind)
 				}
 			}
-			if len(items) != 1 {
+			if len(s.PublishedRouteLines(context.Background(), u, []*domain.Node{n})[n.ID]) != 0 {
+				t.Fatal("status metadata bypassed the subscription publication gates")
+			}
+			if kind != "hidden_direct" && len(items) != 1 {
 				t.Fatal("withdrawing a route also removed original/relay node")
 			}
 		})

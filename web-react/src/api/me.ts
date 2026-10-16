@@ -171,11 +171,15 @@ export interface MyNodeStatus {
   show_direct: boolean
   /** Enabled relay endpoints selected for user-visible health display. */
   relay_statuses?: MyRelayStatus[]
+  /** Published VLESS routing lines, reusing their entry's reachability. */
+  route_statuses?: MyRelayStatus[]
 }
 
 export interface MyRelayStatus {
   /** Admin-defined line name; may be empty and is then localized client-side. */
   name: string
+  /** Missing legacy values preserve the parent-node prefix. */
+  only_line_name?: boolean
   status: 'ok' | 'down' | 'unknown'
   checked_at?: string
 }

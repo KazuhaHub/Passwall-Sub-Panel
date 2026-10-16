@@ -30,13 +30,14 @@ type UserMeHandler struct {
 	traffic  *traffic.Service
 	settings ports.ScopedSettings
 	group    *group.Service
+	render   *render.Service
 	twofa    *twofa.Service
 	passkey  *passkey.Service
 	enroll   *authpolicy.Service
 }
 
-func NewUserMeHandler(userSvc *user.Service, trafficSvc *traffic.Service, settings ports.ScopedSettings, groupSvc *group.Service, twofaSvc *twofa.Service, passkeySvc *passkey.Service, enroll *authpolicy.Service) *UserMeHandler {
-	return &UserMeHandler{user: userSvc, traffic: trafficSvc, settings: settings, group: groupSvc, twofa: twofaSvc, passkey: passkeySvc, enroll: enroll}
+func NewUserMeHandler(userSvc *user.Service, trafficSvc *traffic.Service, settings ports.ScopedSettings, groupSvc *group.Service, twofaSvc *twofa.Service, passkeySvc *passkey.Service, enroll *authpolicy.Service, renderSvc *render.Service) *UserMeHandler {
+	return &UserMeHandler{user: userSvc, traffic: trafficSvc, settings: settings, group: groupSvc, twofa: twofaSvc, passkey: passkeySvc, enroll: enroll, render: renderSvc}
 }
 
 func (h *UserMeHandler) Profile(c *gin.Context) {
@@ -173,9 +174,10 @@ func (h *UserMeHandler) mustEnroll2FA(ctx context.Context, u *domain.User) bool 
 }
 
 type userRelayStatus struct {
-	Name      string     `json:"name"`
-	Status    string     `json:"status"` // "ok" | "down" | "unknown"
-	CheckedAt *time.Time `json:"checked_at,omitempty"`
+	Name         string     `json:"name"`
+	OnlyLineName bool       `json:"only_line_name"`
+	Status       string     `json:"status"` // "ok" | "down" | "unknown"
+	CheckedAt    *time.Time `json:"checked_at,omitempty"`
 }
 
 type userNodeStatus struct {
@@ -185,6 +187,7 @@ type userNodeStatus struct {
 	CheckedAt     *time.Time        `json:"checked_at,omitempty"`
 	ShowDirect    bool              `json:"show_direct"`
 	RelayStatuses []userRelayStatus `json:"relay_statuses,omitempty"`
+	RouteStatuses []userRelayStatus `json:"route_statuses,omitempty"`
 }
 
 // userStatusForNode produces the sanitized presentation model. Relay endpoint
@@ -195,33 +198,51 @@ func userStatusForNode(n *domain.Node) userNodeStatus {
 		Status: coarseNodeStatus(n.HealthState), CheckedAt: n.HealthCheckedAt,
 		ShowDirect: !n.EffectiveHideDirect(),
 	}
-	if !n.EffectiveShowRelayStatus() {
-		return out
-	}
 	for relayIndex, relay := range n.Relays {
 		if !relay.Enabled {
 			continue
 		}
-		port := relay.Port
-		if port <= 0 {
-			port = n.DesiredPort
+		status := relayStatusForNode(n, relayIndex)
+		out.RelayStatuses = append(out.RelayStatuses, status)
+	}
+	for _, line := range n.RouteState.Lines {
+		if !line.LocallyAvailable(n) {
+			continue
 		}
-		status := userRelayStatus{Name: strings.TrimSpace(relay.Name), Status: "unknown"}
-		for _, health := range n.RelayHealth {
-			if health.Index == relayIndex && health.Address == relay.Address && health.Port == port {
-				status.Status = coarseNodeStatus(health.State)
-				status.CheckedAt = health.CheckedAt
-				break
+		status := userRelayStatus{Status: out.Status, CheckedAt: out.CheckedAt}
+		if relay, _ := line.ResolveEntry(n); relay != nil {
+			for i := range n.Relays {
+				if n.Relays[i].ID == relay.ID {
+					status = relayStatusForNode(n, i)
+					break
+				}
 			}
 		}
-		out.RelayStatuses = append(out.RelayStatuses, status)
+		status.Name, status.OnlyLineName = line.Label(), line.OnlyLineName
+		out.RouteStatuses = append(out.RouteStatuses, status)
 	}
 	return out
 }
 
+func relayStatusForNode(n *domain.Node, index int) userRelayStatus {
+	relay := n.Relays[index]
+	port := relay.Port
+	if port <= 0 {
+		port = n.DesiredPort
+	}
+	status := userRelayStatus{Name: strings.TrimSpace(relay.Name), OnlyLineName: relay.OnlyLineName, Status: "unknown"}
+	for _, health := range n.RelayHealth {
+		if health.Index == index && health.Address == relay.Address && health.Port == port {
+			status.Status, status.CheckedAt = coarseNodeStatus(health.State), health.CheckedAt
+			break
+		}
+	}
+	return status
+}
+
 // ServerStatus returns a sanitized, per-node availability list for the nodes
-// the caller actually has in their subscription (resolved from their ownership
-// rows). Deliberately user-safe: only display name + region + a coarse status
+// the caller can access through their group selector. Deliberately user-safe:
+// only display name + region + a coarse status
 // + last-checked time. It never leaks HealthDetail (internal panel/inbound
 // error strings), the panel host's CPU/mem (that's the admin /server/status),
 // panel URLs, inbound IDs, or any other group's nodes.
@@ -253,11 +274,20 @@ func (h *UserMeHandler) ServerStatus(c *gin.Context) {
 		return
 	}
 	out := make([]userNodeStatus, 0, len(nodes))
+	var routes map[int64][]domain.VlessRouteLine
+	if h.render != nil {
+		routes = h.render.PublishedRouteLines(c.Request.Context(), u, nodes)
+	}
 	for _, n := range nodes {
 		if n == nil || n.Kind == domain.NodeKindSeparator || !n.Enabled {
 			continue
 		}
-		out = append(out, userStatusForNode(n))
+		visible := *n
+		visible.RouteState.Lines = routes[n.ID]
+		status := userStatusForNode(&visible)
+		if status.ShowDirect || len(status.RelayStatuses) > 0 || len(status.RouteStatuses) > 0 {
+			out = append(out, status)
+		}
 	}
 	// Stable order: region, then name — matches how the subscription groups them.
 	sort.Slice(out, func(i, j int) bool {
