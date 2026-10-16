@@ -601,6 +601,8 @@ type Node struct {
 	// server/port (and optionally the TLS SNI / WS Host for CDN fronting). The
 	// relay machine's actual forwarding is configured outside the panel.
 	Relays []RelayLine
+	// RouteState is written only by the vlessRoute synchronization service.
+	RouteState NodeRouteState
 	// HideDirect suppresses the direct entry when at least one relay line is
 	// enabled — for landings that only accept connections from their relays
 	// (firewalled to the transit IP). Ignored when no relay is enabled, so a
@@ -665,6 +667,8 @@ func (n *Node) EffectiveShowRelayStatus() bool {
 // the dialed endpoint; the protocol, UUID-derived credentials and transport
 // come from the landing inbound unchanged.
 type RelayLine struct {
+	// ID is a stable subscription-line identity, independent of label/order.
+	ID string
 	// Name labels the rendered entry, appended after the node's display name
 	// (e.g. "广州移动中转"). Falls back to Address when empty.
 	Name string
@@ -1194,13 +1198,14 @@ type MihomoRematchOutbound struct {
 }
 
 // ProxyGroupMember is one ordered choice in a generated Mihomo/sing-box
-// selector. Kind is one of: builtin, proxy_group, node, node_set, rematch.
+// selector. Kind is one of: builtin, proxy_group, node, line, node_set, rematch.
 // NodeID is used only by node; Value carries the builtin/group/rematch name
 // or a node-set selector (remaining, region:XX, tag:name).
 type ProxyGroupMember struct {
 	Kind   string `json:"kind" yaml:"kind"`
 	Value  string `json:"value,omitempty" yaml:"value,omitempty"`
 	NodeID int64  `json:"node_id,omitempty" yaml:"node_id,omitempty"`
+	LineID string `json:"line_id,omitempty" yaml:"line_id,omitempty"`
 }
 
 // ProxyGroupOptions configures one generated proxy group. Pointer

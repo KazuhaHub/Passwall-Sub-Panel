@@ -129,7 +129,8 @@ func (s *Service) RenderForUser(ctx context.Context, u *domain.User, ct domain.C
 	// Expand each relay-bearing node into its direct entry + one entry per
 	// enabled transit line BEFORE the flag prefix, so every variant inherits
 	// its node's region flag. relay-less nodes pass through unchanged.
-	items = expandRelays(items)
+	items = expandNodeLines(items)
+	items = s.filterRouteItems(ctx, u, items)
 	if st.SubRegionFlagPrefix {
 		applyRegionFlagPrefix(items)
 	}
@@ -317,6 +318,10 @@ func (s *Service) buildProxies(ctx context.Context, u *domain.User, items []rend
 			}
 		}
 		renderUser, userEmail, appliedPassword := renderIdentityForNode(u, it.node.ID, emailRules, appliedCredentials)
+		renderUser, lineErr := it.userForLine(renderUser)
+		if lineErr != nil {
+			continue
+		}
 		block, err := emitProxy(it.name, it.node, renderUser, inb, userEmail, appliedPassword, it.relay,
 			mlkemFirstRealityByPanel[it.node.PanelID])
 		if err != nil {

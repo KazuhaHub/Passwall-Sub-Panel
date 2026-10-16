@@ -72,6 +72,8 @@ import { nodeKeys } from '@/query/keys'
 import { useNodesList, useSeparators, useUnmanagedInbounds } from '@/query/nodes'
 import { useServersList } from '@/query/servers'
 import { useQueryScope } from '@/query/useQueryScope'
+import { useVlessRouteDraft } from '@/query/vlessRoute'
+import VlessRouteLinesEditor from './VlessRouteLinesEditor'
 import { useQueryClient } from '@tanstack/react-query'
 import { xrayRequiresMLKEMFirst } from '@/utils/xrayReality'
 
@@ -2329,6 +2331,9 @@ export default function NodesView() {
   const [editBusy, setEditBusy] = useState(false)
   const [editing, setEditing] = useState<Node | null>(null)
   const [editForm, setEditForm] = useState<MetaForm>(EMPTY_META)
+  const [lineTab, setLineTab] = useState<'relay' | 'route'>('relay')
+  const [lineSession, setLineSession] = useState(0)
+  const routeDraft = useVlessRouteDraft(qScope, editing?.id || 0, lineSession, editOpen && lineTab === 'route')
   type MetaField = 'display_name' | 'server_address' | 'region'
   const [editMetaErr, setEditMetaErr] = useState<FieldErrors<MetaField>>({})
 
@@ -2508,6 +2513,8 @@ export default function NodesView() {
   }
 
   function openEdit(n: Node) {
+    setLineTab('relay')
+    setLineSession(previous => previous + 1)
     setEditing(n)
     setEditForm({
       display_name: n.display_name,
@@ -2540,6 +2547,7 @@ export default function NodesView() {
     const firstKey = firstError(errs)
     if (firstKey) { pushSnack(t(`admin:${firstKey}`), 'warning'); return }
     setEditBusy(true)
+    let metadataSaved = false
     try {
       const saved = await updateNodeMetadata(editing.id, {
         display_name: editForm.display_name,
@@ -2559,8 +2567,20 @@ export default function NodesView() {
         show_relay_status: editForm.hide_direct || editForm.show_relay_status,
       })
       mutateManaged(prev => prev.map(node => node.id === saved.id ? saved : node))
+      metadataSaved = true
+      setEditing(saved)
+      const routed = await routeDraft.save()
+      if (routed) {
+        mutateManaged(prev => prev.map(node => node.id === saved.id ? { ...saved, route_state: routed.state } : node))
+        if (routed.state.status !== 'applied') {
+          pushSnack(t('admin:nodes.vless_route.partial_failure'), 'warning')
+          return
+        }
+      }
       pushSnack(t('admin:nodes.toast.saved'), 'success')
       setEditOpen(false)
+    } catch {
+      if (metadataSaved) pushSnack(t('admin:nodes.vless_route.partial_failure'), 'warning')
     } finally { setEditBusy(false) }
   }
 
@@ -3869,7 +3889,11 @@ export default function NodesView() {
                 relay fronts. Server-side forwarding (realm/gost/iptables) is
                 set up outside the panel; here we only record each front's
                 address/port (+ optional CDN SNI/Host). */}
-            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+            <Tabs value={lineTab} onChange={(_, value: 'relay' | 'route') => setLineTab(value)} aria-label={t('admin:nodes.vless_route.tabs')}>
+              <Tab value="relay" label={t('admin:nodes.relay.title')} />
+              <Tab value="route" label={t('admin:nodes.vless_route.title')} />
+            </Tabs>
+            <Box hidden={lineTab !== 'relay'} sx={{ display: lineTab === 'relay' ? 'flex' : 'none', flexDirection: 'column', gap: 1 }}>
               <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                 <Typography sx={{ fontSize: 14, fontWeight: 600 }}>{t('admin:nodes.relay.title')}</Typography>
                 <Button size="small" startIcon={<AddIcon />}
@@ -3927,12 +3951,13 @@ export default function NodesView() {
                 </Box>
               )}
             </Box>
+            {lineTab === 'route' && <VlessRouteLinesEditor draft={routeDraft} busy={editBusy} hiddenDirect={editForm.hide_direct && editForm.relays.some(line => line.enabled)} />}
             <Box sx={{ display: 'none' }}>{alpha(md.error, 0.5)}</Box>
           </Box>
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setEditOpen(false)} disabled={editBusy} variant="text">{t('common:actions.cancel')}</Button>
-          <Button type="submit" form="node-form" variant="contained" disabled={editBusy}
+          <Button type="submit" form="node-form" variant="contained" disabled={editBusy || routeDraft.loading}
             startIcon={editBusy ? <CircularProgress size={16} color="inherit" /> : null}>
             {t('common:actions.ok')}
           </Button>

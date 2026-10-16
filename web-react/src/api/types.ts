@@ -178,6 +178,7 @@ export interface Node {
    *  that reuses the landing's protocol/credentials and only swaps the dialed
    *  server/port (+ optional CDN-fronting SNI/Host). */
   relays?: RelayLine[]
+  route_state?: import('./vlessRoute').RouteState
   /** Drop the direct entry when at least one relay is enabled (landing only
    *  reachable via its relays). Ignored when no relay is enabled. */
   hide_direct?: boolean
@@ -188,6 +189,8 @@ export interface Node {
 
 /** One transit front for a Node. See domain.RelayLine. */
 export interface RelayLine {
+	/** Stable identity assigned by the server; omitted for a new line. */
+	id?: string
   /** Label appended after the node name in the rendered entry (e.g. 广州移动中转). */
   name: string
   /** Host the client dials instead of the landing's server_address. */

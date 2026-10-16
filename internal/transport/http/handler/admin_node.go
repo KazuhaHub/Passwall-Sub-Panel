@@ -111,14 +111,16 @@ type nodeDTO struct {
 	// Relays are the node's transit / 中转 lines; HideDirect drops the direct
 	// entry when at least one line is enabled. Surfaced so the edit form can
 	// round-trip them. Always present (possibly empty) for real nodes.
-	Relays          []relayLineDTO `json:"relays"`
-	HideDirect      bool           `json:"hide_direct"`
-	ShowRelayStatus bool           `json:"show_relay_status"`
+	Relays          []relayLineDTO         `json:"relays"`
+	RouteState      *domain.NodeRouteState `json:"route_state,omitempty"`
+	HideDirect      bool                   `json:"hide_direct"`
+	ShowRelayStatus bool                   `json:"show_relay_status"`
 }
 
 // relayLineDTO is one transit front. Only the dialed endpoint differs from the
 // landing; SNI/Host are optional CDN-fronting overrides. See domain.RelayLine.
 type relayLineDTO struct {
+	ID      string `json:"id,omitempty"`
 	Name    string `json:"name"`
 	Address string `json:"address"`
 	Port    int    `json:"port"`
@@ -973,6 +975,7 @@ func parseRelays(dtos []relayLineDTO) ([]domain.RelayLine, error) {
 			return nil, fmt.Errorf("relay line %d: port %d out of range (0-65535; 0 reuses the inbound port)", i+1, d.Port)
 		}
 		out = append(out, domain.RelayLine{
+			ID:      d.ID,
 			Name:    strings.TrimSpace(d.Name),
 			Address: addr,
 			Port:    d.Port,
@@ -989,6 +992,7 @@ func relayDTOs(relays []domain.RelayLine) []relayLineDTO {
 	out := make([]relayLineDTO, 0, len(relays))
 	for _, r := range relays {
 		out = append(out, relayLineDTO{
+			ID:      r.ID,
 			Name:    r.Name,
 			Address: r.Address,
 			Port:    r.Port,
@@ -1034,9 +1038,18 @@ func (h *AdminNodeHandler) toNodeDTO(n *domain.Node, panelNames map[int64]string
 		CertSource:         string(n.CertSource),
 		CertID:             n.CertID,
 		Relays:             relayDTOs(n.Relays),
+		RouteState:         routeStateDTO(n.RouteState),
 		HideDirect:         n.HideDirect,
 		ShowRelayStatus:    n.EffectiveShowRelayStatus(),
 	}
+}
+
+func routeStateDTO(state domain.NodeRouteState) *domain.NodeRouteState {
+	if state.Revision == 0 && len(state.Lines) == 0 {
+		return nil
+	}
+	visible := state.Visible()
+	return &visible
 }
 
 // forceRelayStatusForHiddenDirect is the server-side half of the node-editor

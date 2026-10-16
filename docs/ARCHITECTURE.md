@@ -1010,6 +1010,10 @@ user.ResyncMembership(ctx, userID)：
 
 ### 7.6 节点编辑
 
+VLESS 路由线路（V2）在原中转区域提供两个标签页，只读取已有出站并管理 PSP 自有的末尾规则。“按节点选择”仍是动态线路集合，新增“按线路选择”稳定引用用于精确选择。历史中转补充 ID，不转换旧代理组引用；详细边界与验收进度见 [ADR 0039](adr/0039-vless-route-lines-v2.md) 和 [专题说明](vlessroute-v2.md)。
+
+线路目标及确认状态存于 `nodes.route_state`，`route_revision` 负责 CAS；普通节点写入不能覆盖该状态。`vless_route_leases` 按后端协调模板写入，`ports.VlessRouteAdapter` 为可选适配接口，不扩大其他后端的必选契约。`service/vlessroute` 负责规则编译、同步与只读漂移检查；render 只读本地确认状态及已应用凭据。删除、解绑、重建和端口/协议变更的破坏性步骤前先清理登记规则，失败时保留可重试状态。
+
 ```
 UI: 节点详情 → 改 region 或协议参数
 
@@ -1267,17 +1271,17 @@ HTTP/3 常见的 `UDP/443` 与其他 UDP 分开控制：`🎮 UDP控制` 默认 
 
 默认规则在私网直连和全局 QUIC 控制之后、普通 UDP 控制之前，将 `clau.de`、`claude.ai`、`claude.com`、`anthropic.com`、`claudeusercontent.com` 及其子域名，以及官方服务地址段 `160.79.104.0/23`、`2607:6bc0::/48` 分配给 `💬 Ai平台`。Claude 的 `UDP/443` 与其他互联网流量一样先遵守全局 QUIC 控制，默认禁用；回退后的 TCP 进入 AI 分组。这里使用的是 [Anthropic 官方入站地址段](https://platform.claude.com/docs/en/api/ip-addresses)，不包含其向外发起请求的 `/21` 地址段。个人规则仍排在共用规则之前。启动迁移只更新与旧官方默认内容完全一致的规则集（支持 LF/CRLF），保留自定义规则和模板。
 
-`proxy_group_members` 可选地覆盖单个代理组内部的成员顺序，Mihomo 与 sing-box 共用。支持具体节点（稳定 `node_id`）、内置出口、其他代理组以及 `remaining` / `region:XX` / `tag:name` 动态节点集合；Mihomo 还支持 `kind: rematch` 引用同一规则集声明的 Rematch 出站。展开后按首次出现去重。字段缺失时继续使用内置的名称匹配默认顺序。后台入口为「规则库 → 编辑规则集 → 代理组成员」。
+`proxy_group_members` 可选地覆盖单个代理组内部的成员顺序，Mihomo 与 sing-box 共用。支持按节点选择（稳定 `node_id`）、内置出站、其他代理组以及 `remaining` / `region:XX` / `tag:name` 动态节点集合；Mihomo 还支持 `kind: rematch` 引用同一规则集声明的 Rematch 出站。展开后按首次出现去重。字段缺失时继续使用内置的名称匹配默认顺序。后台入口为「规则库 → 编辑规则集 → 代理组成员」。
 
 主规则（加上渲染器自动补充的必要依赖组）是代理组存在性的真相源。删除主规则中某个代理组后，后台保存前会列出并确认级联删除该组的 `proxy_group_order`、`proxy_group_members` 与 `proxy_group_options` 项；保存接口也会执行相同规范化并返回实际落盘实体，确保直接 API 调用不会留下不可见的孤立配置。仅删除以该组为键的顶层配置；其它存活组若仍把它作为成员引用，继续按 `missing_group` 拦截，不能静默改变存活组的路由语义。已有孤立配置不做启动时批量迁移，在下一次保存该规则集时清理。
 
 > **跨规则集引用限制**：`proxy_group` 成员的校验以单个规则集为单位——被引用的组必须出现在**当前规则集自身**的主规则中，否则保存时按 `missing_group` 拦截（编辑器预览同样如此，反馈一致）。渲染时多个规则集会拼接，因此已保存的跨规则集引用能正常解析；但保存阶段暂不支持引用只在其它规则集里定义的组。若需要跨规则集引用，请把相关组定义在同一规则集内。
 
-`proxy_group_options` 可选地覆盖单个代理组的类型，支持 `select`、`url-test`、`fallback`、`load-balance`。三个自动类型共用 `url`、`interval`、`lazy`、`timeout`；`url-test` 额外支持 `tolerance`，`load-balance` 额外支持 `round-robin` / `consistent-hashing` / `sticky-sessions`。Mihomo 使用全部配置；sing-box 将 `url-test` 生成原生 `urltest`，映射 `url`、`interval` 和 `tolerance`，并静默丢弃其不支持的字段。`interval: 0` 会输出为 `0s`，sing-box 将其规范化为默认间隔 3 分钟。`fallback` 和 `load-balance` 在 sing-box 中仍生成手动 `selector`。自动类型（`url-test` / `fallback` / `load-balance`）的成员必须是真实出口（具体节点或其它代理组），不能包含 `DIRECT` / `REJECT` 等内置出口或 Rematch 出站——保存校验会直接拦截，Mihomo 自动组和 sing-box `urltest` 在渲染时也会剥离这类成员；若某用户可授权节点与配置成员没有交集导致成员为空，该组会安全降级为 `select`（避免生成把全部流量导向 `DIRECT` 的伪自动组）。模板绑定多个规则集且同名组重复配置时，members 与 options 分别按规则集顺序取第一个配置。
+`proxy_group_options` 可选地覆盖单个代理组的类型，支持 `select`、`url-test`、`fallback`、`load-balance`。三个自动类型共用 `url`、`interval`、`lazy`、`timeout`；`url-test` 额外支持 `tolerance`，`load-balance` 额外支持 `round-robin` / `consistent-hashing` / `sticky-sessions`。Mihomo 使用全部配置；sing-box 将 `url-test` 生成原生 `urltest`，映射 `url`、`interval` 和 `tolerance`，并静默丢弃其不支持的字段。`interval: 0` 会输出为 `0s`，sing-box 将其规范化为默认间隔 3 分钟。`fallback` 和 `load-balance` 在 sing-box 中仍生成手动 `selector`。自动类型（`url-test` / `fallback` / `load-balance`）的成员必须是真实出口（按节点选择或其它代理组），不能包含 `DIRECT` / `REJECT` 等内置出站或 Rematch 出站——保存校验会直接拦截，Mihomo 自动组和 sing-box `urltest` 在渲染时也会剥离这类成员；若某用户可授权节点与配置成员没有交集导致成员为空，该组会安全降级为 `select`（避免生成把全部流量导向 `DIRECT` 的伪自动组）。模板绑定多个规则集且同名组重复配置时，members 与 options 分别按规则集顺序取第一个配置。
 
 PSP 主规则遵守以下编译约定：模板中的规则集顺序决定合并顺序，每个规则集只有一份主规则；Mihomo 保持原始行序，sing-box 跳过无法转换的 Mihomo 专属类型。`SUB-RULE` 只能引用当前规则集声明的子规则，子规则禁止继续嵌套 `SUB-RULE`，并建议以 `MATCH` 兜底。只设置 `target-rematch-name` 的 Rematch 出站，其对应 `REMATCH-NAME` 处理规则必须位于触发该出站的规则之前，以避免重复匹配循环；也可以设置 `target-sub-rule` 直接进入子规则。
 
-同一 Mihomo 模板绑定的所有启用规则集中，子规则名和 Rematch 出站名必须分别保持唯一；出站名也不能与内置出口、代理组、节点重名。规则集保存和模板保存都会执行这组交叉校验。Mihomo 模板通过 `{{ sub_rules }}` 输出子规则映射内容，占位符本身不包含顶层 `sub-rules:` 键；缺少该占位符时不报错，子规则会被静默丢弃。默认模板在末尾显式定义 `sub-rules:` 并在其下内置该占位符。
+同一 Mihomo 模板绑定的所有启用规则集中，子规则名和 Rematch 出站名必须分别保持唯一；出站名也不能与内置出站、代理组、节点重名。规则集保存和模板保存都会执行这组交叉校验。Mihomo 模板通过 `{{ sub_rules }}` 输出子规则映射内容，占位符本身不包含顶层 `sub-rules:` 键；缺少该占位符时不报错，子规则会被静默丢弃。默认模板在末尾显式定义 `sub-rules:` 并在其下内置该占位符。
 
 ### 9.2 分组级 layout
 

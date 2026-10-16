@@ -66,6 +66,10 @@ func (s *Service) renderURIList(ctx context.Context, u *domain.User, items []ren
 			}
 		}
 		renderUser, userEmail, appliedPassword := renderIdentityForNode(u, it.node.ID, emailRules, appliedCredentials)
+		renderUser, lineErr := it.userForLine(renderUser)
+		if lineErr != nil {
+			continue
+		}
 		// it.name (not DisplayName) carries the layout-applied name — the
 		// region-flag prefix and, for relay variants, the per-line suffix —
 		// so each transit entry gets a distinct fragment.

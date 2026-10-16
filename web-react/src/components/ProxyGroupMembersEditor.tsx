@@ -60,8 +60,8 @@ interface Props {
   onValidationChange?: (hasErrors: boolean) => void
 }
 
-type AddKind = 'node' | 'builtin' | 'proxy_group' | 'rematch' | 'region' | 'tag' | 'remaining'
-type AddOption = { value: string | number; label: string }
+type AddKind = 'node' | 'line' | 'builtin' | 'proxy_group' | 'rematch' | 'region' | 'tag' | 'remaining'
+type AddOption = { value: string | number; label: string; unavailable?: boolean }
 
 export default function ProxyGroupMembersEditor({ content, groupOrder, initialGroupOrder, onGroupOrderChange, members, initialMembers, onChange, options, initialOptions, onOptionsChange, previewGroups, mihomoSubRules = [], mihomoRematchOutbounds = [], onValidationChange }: Props) {
   const theme = useTheme()
@@ -73,6 +73,7 @@ export default function ProxyGroupMembersEditor({ content, groupOrder, initialGr
   const [loading, setLoading] = useState(false)
   const [addKind, setAddKind] = useState<AddKind>('node')
   const [addValue, setAddValue] = useState<string | number | null>(null)
+  const [lineNodeID, setLineNodeID] = useState<number | null>(null)
   const [dragIndex, setDragIndex] = useState<number | null>(null)
   const [groupDragIndex, setGroupDragIndex] = useState<number | null>(null)
 
@@ -171,6 +172,10 @@ export default function ProxyGroupMembersEditor({ content, groupOrder, initialGr
   }
 
   function memberLabel(member: ProxyGroupMember) {
+    if (member.kind === 'line') {
+      const line = inspection?.lines?.find(line => line.node_id === member.node_id && line.line_id === member.line_id)
+      return line ? line.display_name : t('admin:rules.members.missing_line', { id: member.line_id })
+    }
     if (member.kind === 'node') {
       const node = inspection?.nodes.find(n => n.id === member.node_id)
       return node ? node.display_name : t('admin:rules.members.missing_node', { id: member.node_id })
@@ -188,8 +193,11 @@ export default function ProxyGroupMembersEditor({ content, groupOrder, initialGr
     return t(`admin:rules.members.issues.${issue.code}`, { ...issue.params, defaultValue: issue.message })
   }
 
+  const lineNode = inspection?.nodes.find(node => node.id === lineNodeID)
+  const lineNodeOptions = useMemo<AddOption[]>(() => (inspection?.nodes || []).map(node => ({ value: node.id, label: node.display_name })), [inspection])
   const addOptions = useMemo<AddOption[]>(() => {
     switch (addKind) {
+      case 'line': return (inspection?.lines || []).filter(line => line.node_id === lineNode?.id).map(line => ({ value: JSON.stringify([line.node_id, line.line_id]), label: `${line.kind === 'direct' ? '' : `${line.name ?? line.display_name} `}[${t(`admin:rules.members.line_type_${line.kind}`)}]`, unavailable: !line.available }))
       case 'node': return (inspection?.nodes || []).map(node => ({ value: node.id, label: node.display_name }))
       case 'builtin': return (inspection?.builtins || []).map(value => ({ value, label: value }))
       case 'proxy_group': return (inspection?.groups || []).filter(group => group.name !== selected).map(group => ({ value: group.name, label: group.name }))
@@ -198,13 +206,20 @@ export default function ProxyGroupMembersEditor({ content, groupOrder, initialGr
       case 'tag': return (inspection?.tags || []).map(value => ({ value, label: value }))
       case 'remaining': return [{ value: 'remaining', label: t('admin:rules.members.remaining') }]
     }
-  }, [addKind, inspection, mihomoRematchOutbounds, selected, t])
+  }, [addKind, inspection, lineNode?.id, mihomoRematchOutbounds, selected, t])
+
+  const selectedAddOption = addOptions.find(option => option.value === addValue) || null
 
   function addMember() {
+    if (addKind === 'line' && (!lineNode || !selectedAddOption)) return
     let member: ProxyGroupMember | null = null
     if (addKind === 'remaining') member = { kind: 'node_set', value: 'remaining' }
     else if (addValue !== null) {
       if (addKind === 'node') member = { kind: 'node', node_id: Number(addValue) }
+      else if (addKind === 'line') {
+        const [node_id, line_id] = JSON.parse(String(addValue)) as [number, string]
+        member = { kind: 'line', node_id, line_id }
+      }
       else if (addKind === 'region') member = { kind: 'node_set', value: `region:${addValue}` }
       else if (addKind === 'tag') member = { kind: 'node_set', value: `tag:${addValue}` }
       else member = { kind: addKind, value: String(addValue) }
@@ -235,7 +250,6 @@ export default function ProxyGroupMembersEditor({ content, groupOrder, initialGr
               </IconButton>
             </Tooltip>
           </Stack>
-          <Typography variant="caption" color="text.secondary">{t('admin:rules.members.groups_hint')}</Typography>
         </Box>
         {loading && !inspection ? <Box sx={{ p: 4, textAlign: 'center' }}><CircularProgress size={22} /></Box> : (
           <List dense disablePadding sx={{ overflowY: 'auto', minHeight: 0 }}>
@@ -334,27 +348,32 @@ export default function ProxyGroupMembersEditor({ content, groupOrder, initialGr
               <Box key={`${memberKey(member)}:${index}`} draggable
                 onDragStart={() => setDragIndex(index)} onDragEnd={() => setDragIndex(null)}
                 onDragOver={e => e.preventDefault()} onDrop={() => { if (dragIndex !== null) move(dragIndex, index); setDragIndex(null) }}
-                sx={{ display: 'flex', alignItems: 'center', gap: 1, p: 1, border: `1px solid ${md.outlineVariant}`, borderRadius: 1.5, bgcolor: index === 0 && emphasizeFirst ? md.primaryContainer : md.surfaceContainer, opacity: dragIndex === index ? 0.5 : 1 }}>
+                sx={{ display: 'grid', gridTemplateColumns: { xs: '20px 24px minmax(0, 1fr)', sm: '20px 24px minmax(0, 1fr) auto' }, alignItems: 'center', gap: 1, p: 1, border: `1px solid ${md.outlineVariant}`, borderRadius: 1.5, bgcolor: index === 0 && emphasizeFirst ? md.primaryContainer : md.surfaceContainer, opacity: dragIndex === index ? 0.5 : 1 }}>
                 <DragIndicatorIcon fontSize="small" sx={{ cursor: 'grab', color: md.onSurfaceVariant }} />
                 <Chip size="small" label={index + 1} color={index === 0 && emphasizeFirst ? 'primary' : 'default'} />
-                <Box sx={{ flex: 1, minWidth: 0 }}>
-                  <Typography noWrap sx={{ fontSize: 14, fontWeight: 500 }}>{memberLabel(member)}</Typography>
-                  <Typography noWrap variant="caption" color="text.secondary">{memberKey(member)}</Typography>
+                <Box sx={{ minWidth: 0 }}>
+                  <Tooltip title={memberKey(member)} placement="top" describeChild>
+                    <Typography component="span" noWrap tabIndex={0} sx={{ display: 'inline-block', maxWidth: '100%', verticalAlign: 'middle', fontSize: 14, fontWeight: 500, color: md.onSurface }}>{memberLabel(member)}</Typography>
+                  </Tooltip>
                 </Box>
+                <Stack direction="row" sx={{ gridColumn: { xs: '3', sm: 'auto' }, justifySelf: 'end' }}>
                 <Tooltip title={t('admin:rules.members.move_up')}><span><IconButton size="small" disabled={index === 0} onClick={() => move(index, index - 1)}><ArrowUpwardIcon fontSize="small" /></IconButton></span></Tooltip>
                 <Tooltip title={t('admin:rules.members.move_down')}><span><IconButton size="small" disabled={index === currentMembers.length - 1} onClick={() => move(index, index + 1)}><ArrowDownwardIcon fontSize="small" /></IconButton></span></Tooltip>
-                <IconButton size="small" color="error" disabled={currentMembers.length <= 1} onClick={() => remove(index)}>
+                <IconButton size="small" color="error" aria-label={`${t('common:actions.delete')} ${memberLabel(member)}`} disabled={currentMembers.length <= 1} onClick={() => remove(index)}>
                   <DeleteIcon fontSize="small" />
                 </IconButton>
+                </Stack>
               </Box>
             ))}
           </Stack>
 
           <Box sx={{ mt: 2, p: 1.5, borderRadius: 2, bgcolor: md.surfaceContainerLow }}>
             <Typography sx={{ fontSize: 13, fontWeight: 600, mb: 1 }}>{t('admin:rules.members.add_title')}</Typography>
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>{t(`admin:rules.members.kind_${addKind}_hint`)}</Typography>
             <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
-              <TextField select size="small" value={addKind} onChange={e => { setAddKind(e.target.value as AddKind); setAddValue(null) }} sx={{ minWidth: 150 }}>
+              <TextField select size="small" value={addKind} onChange={e => { setAddKind(e.target.value as AddKind); setAddValue(null); setLineNodeID(null) }} sx={{ minWidth: 150 }}>
                 <MenuItem value="node">{t('admin:rules.members.kind_node')}</MenuItem>
+                <MenuItem value="line">{t('admin:rules.members.kind_line')}</MenuItem>
                 <MenuItem value="remaining">{t('admin:rules.members.kind_remaining')}</MenuItem>
                 <MenuItem value="region">{t('admin:rules.members.kind_region')}</MenuItem>
                 <MenuItem value="tag">{t('admin:rules.members.kind_tag')}</MenuItem>
@@ -362,10 +381,19 @@ export default function ProxyGroupMembersEditor({ content, groupOrder, initialGr
                 <MenuItem value="proxy_group">{t('admin:rules.members.kind_group')}</MenuItem>
                 <MenuItem value="rematch">{t('admin:rules.members.kind_rematch')}</MenuItem>
               </TextField>
-              <Autocomplete<AddOption> size="small" options={addOptions} value={addOptions.find(option => option.value === addValue) || null}
+              {addKind === 'line' ? <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 1, flex: 1, minWidth: { xs: 0, sm: 180 } }}>
+                <Autocomplete<AddOption> size="small" options={lineNodeOptions} value={lineNodeOptions.find(option => option.value === lineNodeID) || null}
+                  onChange={(_, option) => { setLineNodeID(option ? Number(option.value) : null); setAddValue(null) }}
+                  getOptionLabel={option => option.label} getOptionKey={option => option.value}
+                  sx={{ minWidth: 0 }} renderInput={params => <TextField {...params} label={t('admin:rules.members.select_line_node')} />} />
+                <Autocomplete<AddOption> key={lineNode?.id ?? 'no-node'} size="small" options={addOptions} value={selectedAddOption} disabled={!lineNode}
+                  onChange={(_, option) => setAddValue(option?.value ?? null)} getOptionLabel={option => option.label} getOptionKey={option => option.value}
+                  renderOption={({ key, ...props }, option) => <li key={key} {...props}><Box sx={{ minWidth: 0, overflowWrap: 'anywhere' }}>{option.label}{option.unavailable && <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>{t('admin:rules.members.line_unavailable')}</Typography>}</Box></li>}
+                  sx={{ minWidth: 0 }} renderInput={params => <TextField {...params} label={t('admin:rules.members.select_line')} />} />
+              </Box> : <Autocomplete<AddOption> size="small" options={addOptions} value={selectedAddOption}
                 onChange={(_, option) => setAddValue(option?.value ?? null)} getOptionLabel={option => option.label}
-                sx={{ flex: 1, minWidth: 180 }} renderInput={params => <TextField {...params} placeholder={t('admin:rules.members.search_placeholder')} />} />
-              <Button variant="outlined" startIcon={<AddIcon />} onClick={addMember} disabled={addKind !== 'remaining' && addValue === null}>{t('admin:rules.members.add')}</Button>
+                sx={{ flex: 1, minWidth: 180 }} renderInput={params => <TextField {...params} placeholder={t('admin:rules.members.search_placeholder')} />} />}
+              <Button variant="outlined" startIcon={<AddIcon />} onClick={addMember} disabled={addKind === 'line' ? !lineNode || !selectedAddOption : addKind !== 'remaining' && addValue === null}>{t('admin:rules.members.add')}</Button>
             </Stack>
           </Box>
 
@@ -373,9 +401,9 @@ export default function ProxyGroupMembersEditor({ content, groupOrder, initialGr
           <Divider sx={{ my: 2 }} />
           <Stack direction={{ xs: 'column', sm: 'row' }} sx={{ justifyContent: 'space-between', gap: 1, alignItems: { sm: 'center' } }}>
             <Typography sx={{ fontWeight: 600 }}>{t('admin:rules.members.preview_title')}</Typography>
-            <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ alignItems: { xs: 'stretch', sm: 'center' } }}>
               <Typography variant="body2" sx={{ flexShrink: 0 }}>{t('admin:rules.members.preview_group_label')}</Typography>
-              <TextField select size="small" value={previewGroupID} onChange={e => setPreviewGroupID(Number(e.target.value))} sx={{ minWidth: 220 }}>
+              <TextField select size="small" value={previewGroupID} onChange={e => setPreviewGroupID(Number(e.target.value))} sx={{ minWidth: { xs: 0, sm: 220 } }}>
                 <MenuItem value={0}>{t('admin:rules.members.preview_all')}</MenuItem>
                 {previewGroups.map(group => <MenuItem key={group.id} value={group.id}>{group.name}</MenuItem>)}
               </TextField>

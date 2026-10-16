@@ -210,6 +210,14 @@ func TestV392Beta20SchemaUpgradePreservesNodeAndClientData(t *testing.T) {
 	expectedNodes := append([]v392Beta20NodeRow(nil), oldNodes...)
 	for i := range expectedNodes {
 		expectedNodes[i].Port, expectedNodes[i].Protocol = 0, ""
+		// The additive line-identity migration may only add IDs, not change
+		// historical relay configuration. Compare the original fields below.
+		for j := range afterNodes[i].Relays {
+			if afterNodes[i].Relays[j].ID == "" {
+				t.Fatal("historical relay did not receive a stable ID")
+			}
+			afterNodes[i].Relays[j].ID = expectedNodes[i].Relays[j].ID
+		}
 	}
 	if !reflect.DeepEqual(afterNodes, expectedNodes) {
 		t.Fatal("migration changed historical node identity, counters, flags, TLS/relay/config data or timestamps")

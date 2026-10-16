@@ -9,6 +9,30 @@ vi.mock('@/components/ConfirmHost', () => ({ confirm: confirmMock }))
 
 const row = { slug: 'custom', name: 'old-name', sort: 1, enabled: true, direct_subscription_domain: false, proxy_group_order: [], content: 'rules: []' }
 
+it('preserves precise line identities when editing and reopening a rule with a stale list', async () => {
+  const line = { kind: 'line' as const, node_id: 17, line_id: 'stable-route-id' }
+  const configured = { ...row, content: '- MATCH,Pick', proxy_group_members: { Pick: [line] } }
+  installReads({ '/admin/rules': list([configured]) })
+  api.post.mockResolvedValue({ data: {
+    groups: [{ name: 'Pick', configured: true, options: { type: 'select' }, default_members: [], members: [line], preview: ['Node B'] }],
+    builtins: ['DIRECT'], nodes: [], lines: [{ node_id: 17, line_id: line.line_id, display_name: 'Node B', kind: 'vless_route', available: true }], regions: [], tags: [], issues: [],
+  } })
+  api.put.mockImplementation(async (_url, body) => ({ data: { ...body, name: 'saved-name' } }))
+  mount(<RuleSetsView />)
+  const dialog = await editRow()
+  fireEvent.change(within(dialog).getByDisplayValue('old-name'), { target: { value: 'new-name' } })
+  fireEvent.click(within(dialog).getByRole('button', { name: 'common:actions.ok' }))
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+  expect(api.put.mock.calls[0][1].proxy_group_members).toEqual({ Pick: [line] })
+  const reopened = await editRow('saved-name')
+  fireEvent.click(within(reopened).getByRole('tab', { name: 'admin:rules.tabs.members' }))
+  const memberName = await within(reopened).findByTitle('line:17:stable-route-id')
+  expect(memberName.textContent).toBe('Node B')
+  expect(within(reopened).queryByText('line:17:stable-route-id')).toBeNull()
+  fireEvent.mouseOver(memberName)
+  expect((await screen.findByRole('tooltip')).textContent).toBe('line:17:stable-route-id')
+})
+
 it('reopens with the saved rule without reloading the stale list', async () => {
   installReads({ '/admin/rules': list([row]) })
   api.post.mockResolvedValue({ data: { groups: [], builtins: [], nodes: [], regions: [], tags: [], issues: [] } })

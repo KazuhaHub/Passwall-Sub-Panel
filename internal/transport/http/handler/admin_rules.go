@@ -17,12 +17,45 @@ import (
 
 // AdminRuleSetsHandler exposes CRUD for rule sets under /api/admin/rules.
 type AdminRuleSetsHandler struct {
-	repo       ports.RuleSetRepo
-	templates  ports.TemplateRepo
-	nodes      ruleNodeLister
-	groups     *groupsvc.Service
-	invalidate func()
-	configDir  string
+	repo        ports.RuleSetRepo
+	templates   ports.TemplateRepo
+	nodes       ruleNodeLister
+	groups      *groupsvc.Service
+	invalidate  func()
+	configDir   string
+	routePanels ports.XUIPanelRepo
+}
+
+func (h *AdminRuleSetsHandler) WithRoutePanels(panels ports.XUIPanelRepo) *AdminRuleSetsHandler {
+	h.routePanels = panels
+	return h
+}
+
+// Route candidates are local metadata, but their availability must reflect the
+// same backend/version binding gate used by subscription rendering.
+func (h *AdminRuleSetsHandler) routePreviewNodes(ctx context.Context, nodes []*domain.Node) []*domain.Node {
+	out := make([]*domain.Node, 0, len(nodes))
+	panels := map[int64]*domain.XUIPanel{}
+	for _, node := range nodes {
+		if node == nil || node.RouteState.Status != "applied" || len(node.RouteState.Lines) == 0 {
+			out = append(out, node)
+			continue
+		}
+		panel, seen := panels[node.PanelID]
+		if !seen && h.routePanels != nil {
+			panel, _ = h.routePanels.GetByID(ctx, node.PanelID)
+			panels[node.PanelID] = panel
+		}
+		if panel == nil || !domain.VlessRouteSupported(panel.Kind, panel.PanelVersion, panel.XrayVersion) || node.RouteState.Binding != domain.RouteBinding(panel.URL, node) {
+			copy := *node
+			copy.RouteState.Status = "drift"
+			copy.RouteState.Error = "unsupported_or_changed_binding"
+			out = append(out, &copy)
+		} else {
+			out = append(out, node)
+		}
+	}
+	return out
 }
 
 type ruleNodeLister interface {
@@ -244,6 +277,8 @@ func (h *AdminRuleSetsHandler) InspectProxyGroups(c *gin.Context) {
 	}
 	content := mergeLegacyRuleContent(req.MihomoRules, req.Content)
 	advanced := render.MihomoRuleFeatures{SubRules: req.MihomoSubRules, RematchOutbounds: req.MihomoRematchOutbounds}
+	nodes = h.routePreviewNodes(c.Request.Context(), nodes)
+	preview = h.routePreviewNodes(c.Request.Context(), preview)
 	c.JSON(http.StatusOK, render.InspectProxyGroupsWithMihomo(content, req.ProxyGroupMembers, req.ProxyGroupOptions, nodes, advanced, preview))
 }
 

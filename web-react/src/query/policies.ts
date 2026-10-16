@@ -23,6 +23,12 @@ export interface ResourcePolicy {
 }
 
 export const policies = {
+  nodeRouteLines: {
+    staleTime: 0,
+    gcTime: MINUTE,
+    refetchInterval: false,
+    note: 'Read on opening the node line editor; scoped per editing session. Focus/reconnect never replaces an unsaved draft.',
+  },
   /** Keeps the existing 60s cadence; pauses while the tab is hidden. */
   alerts: {
     staleTime: 30 * SECOND,

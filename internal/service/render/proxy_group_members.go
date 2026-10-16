@@ -49,9 +49,59 @@ type ProxyGroupInspection struct {
 	Groups   []ProxyGroupInspectGroup `json:"groups"`
 	Builtins []string                 `json:"builtins"`
 	Nodes    []ProxyGroupInspectNode  `json:"nodes"`
+	Lines    []ProxyGroupInspectLine  `json:"lines"`
 	Regions  []string                 `json:"regions"`
 	Tags     []string                 `json:"tags"`
 	Issues   []ProxyGroupIssue        `json:"issues"`
+}
+
+// ProxyGroupInspectLine is a credential-free catalog entry, not a proxy config.
+type ProxyGroupInspectLine struct {
+	NodeID      int64  `json:"node_id"`
+	LineID      string `json:"line_id"`
+	Kind        string `json:"kind"`
+	Name        string `json:"name"`
+	DisplayName string `json:"display_name"`
+	Enabled     bool   `json:"enabled"`
+	Available   bool   `json:"available"`
+	Reason      string `json:"reason,omitempty"`
+}
+
+func inspectNodeLines(nodes []*domain.Node) []ProxyGroupInspectLine {
+	lines := []ProxyGroupInspectLine{}
+	for _, n := range nodes {
+		if n == nil || n.IsSeparator() {
+			continue
+		}
+		reason := ""
+		if n.EffectiveHideDirect() {
+			reason = "hidden_direct"
+		}
+		lines = append(lines, ProxyGroupInspectLine{NodeID: n.ID, LineID: domain.DirectLineID, Kind: "direct", Name: n.DisplayName, DisplayName: n.DisplayName, Enabled: n.Enabled, Available: n.Enabled && reason == "", Reason: reason})
+		for _, r := range n.Relays {
+			if r.ID == "" {
+				continue
+			}
+			name := r.Name
+			if name == "" {
+				name = r.Address
+			}
+			lines = append(lines, ProxyGroupInspectLine{NodeID: n.ID, LineID: r.ID, Kind: "relay", Name: name, DisplayName: relayEntryName(n.DisplayName, r), Enabled: r.Enabled, Available: n.Enabled && r.Enabled})
+		}
+		for _, line := range n.RouteState.Lines {
+			if line.Deleted {
+				continue
+			}
+			reason := ""
+			if n.EffectiveHideDirect() {
+				reason = "hidden_direct"
+			} else if n.RouteState.Status != "applied" {
+				reason = n.RouteState.Status
+			}
+			lines = append(lines, ProxyGroupInspectLine{NodeID: n.ID, LineID: line.ID, Kind: "vless_route", Name: line.Name, DisplayName: n.DisplayName + " " + line.Name, Enabled: line.Enabled, Available: line.Enabled && routeLocallyAvailable(n), Reason: reason})
+		}
+	}
+	return lines
 }
 
 // ProxyGroupMetadata is the rule-set metadata whose keys must refer to groups
@@ -191,7 +241,7 @@ func InspectProxyGroupsWithMihomo(content string, members map[string][]domain.Pr
 		if optionsConfigured {
 			effectiveOptions = EffectiveProxyGroupOptions(rawOptions)
 		}
-		preview := resolveConfiguredMembersWithOutbounds(effective, previewItems)
+		preview := resolveConfiguredMembersWithOutbounds(effective, expandNodeLines(previewItems))
 		isAutoType := effectiveOptions.Type == ProxyGroupTypeURLTest ||
 			effectiveOptions.Type == ProxyGroupTypeFallback ||
 			effectiveOptions.Type == ProxyGroupTypeLoadBalance
@@ -200,7 +250,7 @@ func InspectProxyGroupsWithMihomo(content string, members map[string][]domain.Pr
 			// the health check in ~0ms (everything routes direct) and REJECT makes
 			// the check fail. Block it at save time so the misconfiguration surfaces
 			// in the editor instead of silently misrouting at render time.
-			issues = append(issues, ProxyGroupIssue{Level: "error", Group: target, Code: "auto_group_builtin_member", Message: "自动测速 / 回退 / 负载均衡类型的成员不能包含内置出口或 Rematch 出站，请改用具体节点或其它代理组"})
+			issues = append(issues, ProxyGroupIssue{Level: "error", Group: target, Code: "auto_group_builtin_member", Message: "自动测速 / 回退 / 负载均衡类型的成员不能包含内置出站或 Rematch 出站，请按节点或线路选择成员，或引用代理组"})
 		}
 		if (effectiveOptions.Type == ProxyGroupTypeURLTest || effectiveOptions.Type == ProxyGroupTypeLoadBalance) && len(preview) < 2 {
 			issues = append(issues, ProxyGroupIssue{Level: "warning", Group: target, Code: "insufficient_auto_members", Message: "自动选择或负载均衡通常至少需要两个可用成员"})
@@ -216,6 +266,7 @@ func InspectProxyGroupsWithMihomo(content string, members map[string][]domain.Pr
 
 	return ProxyGroupInspection{
 		Groups: groups, Builtins: append([]string(nil), proxyGroupBuiltins...),
+		Lines: inspectNodeLines(nodes),
 		Nodes: inspectNodes, Regions: sortedKeys(regionsSet), Tags: sortedKeys(tagsSet), Issues: issues,
 	}
 }
@@ -314,7 +365,7 @@ func validateProxyGroupMembers(targets []string, configs map[string][]domain.Pro
 		seen := map[string]bool{}
 		hasRemaining := false
 		for _, member := range list {
-			key := member.Kind + ":" + member.Value + ":" + strconv.FormatInt(member.NodeID, 10)
+			key := member.Kind + ":" + member.Value + ":" + strconv.FormatInt(member.NodeID, 10) + ":" + member.LineID
 			if seen[key] {
 				label := memberLabel(member, nodeSet)
 				issues = append(issues, ProxyGroupIssue{Level: "error", Group: group, Code: "duplicate", Params: map[string]any{"member": label}, Message: "存在重复成员：" + label})
@@ -324,7 +375,7 @@ func validateProxyGroupMembers(targets []string, configs map[string][]domain.Pro
 			switch member.Kind {
 			case "builtin":
 				if !builtInRuleTargets[member.Value] {
-					issues = append(issues, ProxyGroupIssue{Level: "error", Group: group, Code: "unknown_builtin", Params: map[string]any{"value": member.Value}, Message: "未知内置出口：" + member.Value})
+					issues = append(issues, ProxyGroupIssue{Level: "error", Group: group, Code: "unknown_builtin", Params: map[string]any{"value": member.Value}, Message: "未知内置出站：" + member.Value})
 				}
 			case "proxy_group":
 				if member.Value == group {
@@ -333,6 +384,12 @@ func validateProxyGroupMembers(targets []string, configs map[string][]domain.Pro
 					issues = append(issues, ProxyGroupIssue{Level: "error", Group: group, Code: "missing_group", Params: map[string]any{"value": member.Value}, Message: "引用的代理组不存在：" + member.Value})
 				} else {
 					graph[group] = append(graph[group], member.Value)
+				}
+			case "line":
+				if member.NodeID <= 0 || member.LineID == "" {
+					issues = append(issues, ProxyGroupIssue{Level: "error", Group: group, Code: "invalid_line", Message: "线路引用必须包含节点和稳定线路 ID"})
+				} else if n := nodeSet[member.NodeID]; n == nil || !n.HasLine(member.LineID) {
+					issues = append(issues, ProxyGroupIssue{Level: "warning", Group: group, Code: "missing_line", Message: "引用的线路已不存在，渲染时会跳过"})
 				}
 			case "node":
 				if member.NodeID <= 0 {
@@ -363,7 +420,7 @@ func validateProxyGroupMembers(targets []string, configs map[string][]domain.Pro
 			}
 		}
 		if len(list) > 0 && !hasRemaining {
-			issues = append(issues, ProxyGroupIssue{Level: "warning", Group: group, Code: "missing_remaining", Message: "未包含“其余节点”，未来新增节点不会自动进入此代理组"})
+			issues = append(issues, ProxyGroupIssue{Level: "warning", Group: group, Code: "missing_remaining", Message: "未包含“其余线路”，未来新增节点不会自动进入此代理组"})
 		}
 	}
 
@@ -444,6 +501,9 @@ func membersContainNonTestableExit(members []domain.ProxyGroupMember) bool {
 }
 
 func memberLabel(member domain.ProxyGroupMember, nodes map[int64]*domain.Node) string {
+	if member.Kind == "line" {
+		return fmt.Sprintf("node #%d / line %s", member.NodeID, member.LineID)
+	}
 	if member.Kind == "node" {
 		if n := nodes[member.NodeID]; n != nil {
 			return n.DisplayName
@@ -494,6 +554,10 @@ func resolveConfiguredMembersForClient(members []domain.ProxyGroupMember, items 
 			}
 		case "node":
 			addMatching(func(item renderItem) bool { return item.node != nil && item.node.ID == member.NodeID })
+		case "line":
+			addMatching(func(item renderItem) bool {
+				return item.node != nil && item.node.ID == member.NodeID && item.lineID() == member.LineID
+			})
 		case "node_set":
 			switch {
 			case member.Value == "remaining":

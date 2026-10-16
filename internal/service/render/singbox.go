@@ -137,6 +137,10 @@ func (s *Service) buildSingBoxOutbounds(ctx context.Context, u *domain.User, ite
 			continue
 		}
 		renderUser, userEmail, appliedPassword := renderIdentityForNode(u, it.node.ID, emailRules, appliedCredentials)
+		renderUser, lineErr := it.userForLine(renderUser)
+		if lineErr != nil {
+			continue
+		}
 		block, err := emitSingBoxOutbound(it.name, it.node, renderUser, inb, userEmail, appliedPassword, it.relay)
 		if err != nil {
 			log.Warn("render: skip node, emit sing-box failed", "node_id", it.node.ID, "err", err)

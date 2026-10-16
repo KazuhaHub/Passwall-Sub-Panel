@@ -27,9 +27,10 @@ export interface MihomoRematchOutbound {
 }
 
 export interface ProxyGroupMember {
-  kind: 'builtin' | 'proxy_group' | 'node' | 'node_set' | 'rematch'
+  kind: 'builtin' | 'proxy_group' | 'node' | 'line' | 'node_set' | 'rematch'
   value?: string
   node_id?: number
+  line_id?: string
 }
 
 export type ProxyGroupType = 'select' | 'url-test' | 'fallback' | 'load-balance'
@@ -78,9 +79,21 @@ export interface ProxyGroupInspection {
   groups: ProxyGroupInspectGroup[]
   builtins: string[]
   nodes: ProxyGroupInspectNode[]
+  lines?: ProxyGroupInspectLine[]
   regions: string[]
   tags: string[]
   issues: ProxyGroupIssue[]
+}
+
+export interface ProxyGroupInspectLine {
+  node_id: number
+  line_id: string
+  kind: 'direct' | 'relay' | 'vless_route'
+  name?: string
+  display_name: string
+  enabled: boolean
+  available: boolean
+  reason?: string
 }
 
 export interface RuleSetListParams {

@@ -229,7 +229,8 @@ func TestNativeCoreSelectionRequiresExactRestrictionAcknowledgement(t *testing.T
 
 func TestServerListSeparatesDesiredAndObservedNativeCoreWithoutPerRowQueries(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	protocolObservedAt := time.Date(2026, 9, 16, 12, 0, 0, 0, time.UTC)
+	// This scenario requires a fresh report, not a calendar-dependent expiry.
+	protocolObservedAt := time.Now().UTC()
 	panel := &domain.XUIPanel{
 		ID: 9, Kind: domain.PanelKindPSP, Name: "native", PanelVersion: "v0.2.0", XrayVersion: "26.6.27",
 	}
@@ -291,7 +292,7 @@ func TestNativeCompatibilityDTOStatesAreFailClosed(t *testing.T) {
 		pool:        fakeWebCertPool{client: &nativeCoreClientStub{}},
 		coreCatalog: corefixtures.Static{},
 	}
-	observedAt := time.Date(2026, 9, 16, 13, 0, 0, 0, time.UTC)
+	observedAt := time.Now().UTC()
 	for _, test := range []struct {
 		name         string
 		agent        *domain.NodeAgent
@@ -327,7 +328,7 @@ func TestNativeCompatibilityDTOStatesAreFailClosed(t *testing.T) {
 // peer its own judgement accepts is ready. The DECISION is untouched by this: a
 // peer that is not eligible is still not ready, which the second half measures.
 func TestNativeUpgradeReadinessFollowsTheDecision(t *testing.T) {
-	observedAt := time.Date(2026, 9, 16, 14, 0, 0, 0, time.UTC)
+	observedAt := time.Now().UTC()
 	panel := &domain.XUIPanel{ID: 9, Kind: domain.PanelKindPSP, Name: "native", PanelVersion: "v0.2.0"}
 	agent := &domain.NodeAgent{
 		ObservedProtocolVersion: nodeprotocol.ProtocolVersion1,

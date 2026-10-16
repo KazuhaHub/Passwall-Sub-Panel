@@ -58,6 +58,7 @@ import (
 	syncsvc "github.com/KazuhaHub/passwall-sub-panel/internal/service/sync"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/traffic"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/user"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/vlessroute"
 	httptransport "github.com/KazuhaHub/passwall-sub-panel/internal/transport/http"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/version"
 	"golang.org/x/crypto/bcrypt"
@@ -133,6 +134,7 @@ type App struct {
 	health        *health.Service
 	geo           *geo.Service
 	render        *render.Service
+	vlessRoute    *vlessroute.Service
 	risk          *risk.Service
 	settings      ports.SettingsRepo
 	syncTasks     ports.SyncTaskRepo
@@ -505,6 +507,9 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	}
 	nativeSync.SetRenderInvalidator(invalidateSubscriptions)
 	nodeSvc.SetSubscriptionInvalidator(invalidateSubscriptions)
+	sharedClientSvc.SetSubscriptionInvalidator(invalidateSubscriptions)
+	vlessRouteSvc := vlessroute.New(repos, pool, invalidateSubscriptions)
+	nodeSvc.SetRouteCleaner(vlessRouteSvc.RemoveForNode)
 	// Geo IP resolution for access-log region display — fully offline against a
 	// local .mmdb in <ConfigDir>/geoip/. No per-IP external calls. Reads
 	// enabled/active-file live from settings and hot-reloads the DB on change.
@@ -538,6 +543,7 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 		bgCancel:      cancel,
 		bgRootCtx:     bgCtx,
 		render:        renderSvc,
+		vlessRoute:    vlessRouteSvc,
 	}
 	dispatcher := &asyncDispatcher{ctx: bgCtx, wg: &a.bgWG, gate: a.operationGate}
 	// Wire traffic.Service into the panel-wide WaitGroup. Its async
@@ -704,21 +710,22 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 			}
 			return cli.GetServerStatus(ctx)
 		},
-		Auth:      authSvc,
-		SAML:      samlSvc,
-		OIDC:      oidcSvc,
-		User:      userSvc,
-		Group:     groupSvc,
-		Node:      nodeSvc,
-		Cert:      certSvc,
-		Render:    renderSvc,
-		Audit:     auditSvc,
-		Sync:      syncSvc,
-		Traffic:   trafficSvc,
-		Mail:      mailSvc,
-		Reconcile: reconcileSvc,
-		Geo:       geoSvc,
-		NodeSync:  nativeSync,
+		Auth:       authSvc,
+		SAML:       samlSvc,
+		OIDC:       oidcSvc,
+		User:       userSvc,
+		Group:      groupSvc,
+		Node:       nodeSvc,
+		VlessRoute: vlessRouteSvc,
+		Cert:       certSvc,
+		Render:     renderSvc,
+		Audit:      auditSvc,
+		Sync:       syncSvc,
+		Traffic:    trafficSvc,
+		Mail:       mailSvc,
+		Reconcile:  reconcileSvc,
+		Geo:        geoSvc,
+		NodeSync:   nativeSync,
 		// THE SAME INSTANCE THAT INGESTS AND ROLLS UP. Its routes are the read
 		// side of the telemetry the server list already shows, and the field is
 		// optional so an omission here is silent: the writes and the list keep
@@ -1088,6 +1095,11 @@ func (a *App) probePanelVersionsOnce(ctx context.Context) {
 		// against a panel we are already talking to, once per traffic poll
 		// (cron_traffic_pull_minutes, default 5).
 		a.probeIPLimitEnforcement(ctx, p, c, now)
+	}
+	if a.vlessRoute != nil {
+		if err := a.vlessRoute.CheckAll(ctx); err != nil {
+			log.Warn("vlessRoute read-only verification", "err", err)
+		}
 	}
 }
 
