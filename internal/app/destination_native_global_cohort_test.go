@@ -32,6 +32,7 @@ type nativeGlobalPeer struct {
 	secret  string
 	dir     string
 	process *exec.Cmd
+	done    <-chan error
 	output  *nativePrivateOutput
 	live    func()
 	probe   *nativeMixedProbe
@@ -235,6 +236,39 @@ func nativeBootstrapGlobalCohort(t *testing.T, options nativeGlobalCohortOptions
 		return ""
 	}
 	ready := func(peer *nativeGlobalPeer) bool { return readyReason(peer) == "" }
+	t.Cleanup(func() {
+		var started []*nativeGlobalPeer
+		var targets []nativeGlobalStopTarget
+		for _, peer := range peers {
+			if peer.done == nil {
+				continue
+			}
+			started = append(started, peer)
+			targets = append(targets, nativeGlobalStopTarget{
+				signal: func() { _ = peer.process.Process.Signal(syscall.SIGTERM) },
+				kill:   func() { _ = peer.process.Process.Kill() },
+				done:   peer.done,
+			})
+		}
+		results, err := nativeStopGlobalDaemons(targets, 15*time.Second, 3*time.Second)
+		if err != nil {
+			t.Error("global cleanup target binding failed")
+		}
+		for _, result := range results {
+			if result.forced || !result.reaped {
+				t.Error("global daemon did not drain")
+			} else if result.err != nil {
+				t.Error("stop global native daemon failed")
+			}
+		}
+		for _, peer := range started {
+			for _, private := range []string{peer.secret, f.user.UUID, f.user.Email, f.user.SubToken, " accepted ", " rejected "} {
+				if strings.Contains(peer.output.text(), private) {
+					t.Error("global daemon exposed private data")
+				}
+			}
+		}
+	})
 	for i, peer := range peers {
 		dataDir := filepath.Join(peer.dir, "node")
 		if i != 0 {
@@ -255,6 +289,7 @@ func nativeBootstrapGlobalCohort(t *testing.T, options nativeGlobalCohortOptions
 		nativeMust(t, os.WriteFile(key, []byte(peer.secret), 0600), "write independent private global credential")
 		peer.process = exec.Command(binary, "--endpoint", server.URL+"/v1/node/sync", "--agent-id", peer.agent.AgentID, "--credential-file", key, "--data-dir", dataDir, "--xray-api-listen", net.JoinHostPort("127.0.0.1", strconv.Itoa(port())))
 		peer.process.Env = append(os.Environ(), "SSL_CERT_FILE="+ca)
+		peer.process.WaitDelay = 2 * time.Second
 		peer.process.Stdout, peer.process.Stderr = peer.output, peer.output
 		if options.auditMetrics {
 			peer.process.Args = append(peer.process.Args, "--audit-metrics")
@@ -264,23 +299,8 @@ func nativeBootstrapGlobalCohort(t *testing.T, options nativeGlobalCohortOptions
 		nativeMust(t, peer.process.Start(), "start independent real global daemon")
 		m.Started++
 		done := make(chan error, 1)
+		peer.done = done
 		go func(command *exec.Cmd) { done <- command.Wait() }(peer.process)
-		t.Cleanup(func() {
-			_ = peer.process.Process.Signal(syscall.SIGTERM)
-			select {
-			case err := <-done:
-				nativeMust(t, err, "stop global native daemon")
-			case <-time.After(15 * time.Second):
-				_ = peer.process.Process.Kill()
-				<-done
-				t.Error("global daemon did not drain")
-			}
-			for _, private := range []string{peer.secret, f.user.UUID, f.user.Email, f.user.SubToken, " accepted ", " rejected "} {
-				if strings.Contains(peer.output.text(), private) {
-					t.Error("global daemon exposed private data")
-				}
-			}
-		})
 		if i == 0 {
 			nativeWait(t, 180*time.Second, "first real core for audited public cache reuse", func() bool { return ready(peer) })
 			m.Stage = 4

@@ -8,7 +8,14 @@ test('global fixture preflight executes lifecycle, cache and SQL boundaries with
   assert(body.startsWith('  global-fixture:'))
   assert.match(body, /runs-on: ubuntu-24\.04/)
   assert.match(body, /-count=1 -timeout=4m -tags destination_acceptance/)
-  for (const root of ['AuditStartPreservesRealQueueAndPermissionChanges', 'PublicCoreCopyExcludesStateAndRejectsUntrustedFiles', 'StoragePauseKeepsControlAndOriginalSQLTransactions', 'TransportKeepsProductionAuthenticationAndExactBodies']) assert(body.includes(root))
+  for (const root of ['DaemonCleanupBroadcastsAndBoundsWaits', 'AuditStartPreservesRealQueueAndPermissionChanges', 'PublicCoreCopyExcludesStateAndRejectsUntrustedFiles', 'StoragePauseKeepsControlAndOriginalSQLTransactions', 'TransportKeepsProductionAuthenticationAndExactBodies']) assert(body.includes(root))
+  const manual = readFileSync(new URL('../.github/workflows/destination-load.yml', import.meta.url), 'utf8')
+  for (const name of ['global-batch', 'global-byte']) {
+    const marker = '\n  ' + name + ':', start = manual.indexOf(marker)
+    assert(start >= 0)
+    const section = manual.slice(start + marker.length).split(/\r?\n  [a-z][a-z-]+:/)[0]
+    assert(section.includes('TestNativeGlobalDaemonCleanupBroadcastsAndBoundsWaits'))
+  }
   assert(body.includes('MixedProbePreservesRecoveryFailures'))
   assert(body.includes('RequestFailureFactsPreserveErrorsAndBlockedReplies'))
   assert(body.includes('WorkerProbeKeepsFreshConnectionsAndResponseSemantics'))
