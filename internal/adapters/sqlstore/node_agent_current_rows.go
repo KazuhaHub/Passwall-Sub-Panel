@@ -9,7 +9,7 @@ import (
 )
 
 // Read every public model column on each call. CredentialCiphertext is private
-// and was already omitted by both list methods. JSON scanner failures still
+// and was already omitted by the list and panel lookup methods. JSON failures still
 // fail the entire read, including when earlier rows were decoded successfully.
 const currentNodeAgentColumns = `id,agent_id,panel_id,epoch,credential_sha256,
 observed_protocol_version,observed_capabilities,protocol_observed_at,

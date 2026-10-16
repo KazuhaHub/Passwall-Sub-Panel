@@ -243,11 +243,14 @@ func (r *nodeAgentRepo) GetByCredentialSHA256(ctx context.Context, digest string
 }
 
 func (r *nodeAgentRepo) GetByPanelID(ctx context.Context, panelID int64) (*domain.NodeAgent, error) {
-	var row nodeAgentRow
-	if err := r.db.WithContext(ctx).Omit("CredentialCiphertext").Where("panel_id = ?", panelID).First(&row).Error; err != nil {
+	rows, err := loadCurrentNodeAgentRows(r.db.WithContext(ctx).Where("panel_id = ?", panelID).Order("id").Limit(1))
+	if err != nil {
 		return nil, wrapNotFound(err)
 	}
-	return rowToNodeAgent(&row), nil
+	if len(rows) == 0 {
+		return nil, domain.ErrNotFound
+	}
+	return rows[0], nil
 }
 
 func (r *nodeAgentRepo) UpdateCoreSelection(ctx context.Context, agentID string, engine domain.NodeCoreEngine, version string, allowRestrictedReality bool) error {
