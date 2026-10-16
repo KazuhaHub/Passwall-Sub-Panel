@@ -14,6 +14,8 @@ class OwnedProc:
         self.executables = {41: (1, 1)}
         self.commands = {41: ["/owned/test", "-test.run", resource.ROOT_TEST]}
         self.paths = {}
+        self.exe_reads = []
+        self.candidate_ids = {41}
         for i in range(65):
             node, core = 1000 + i, 2000 + i
             data = f"/owned/private-state/{i}/node"
@@ -32,10 +34,14 @@ class OwnedProc:
         return self.records[pid]
 
     def exe(self, pid):
+        self.exe_reads.append(pid)
         return self.executables[pid]
 
     def args(self, pid):
         return self.commands[pid]
+
+    def test_candidate(self, pid):
+        return pid in self.candidate_ids
 
 
 class NativeResources(unittest.TestCase):
@@ -60,6 +66,8 @@ class NativeResources(unittest.TestCase):
         proc = OwnedProc()
         bindings = self.bind(proc)
         self.assertEqual(len(bindings), 131)
+        self.assertEqual(len(proc.exe_reads), 131)
+        self.assertEqual(len(set(proc.exe_reads)), 131)
         initial = resource.counters(proc, bindings)
         for pid, (parent, cpu, birth) in list(proc.records.items()):
             proc.records[pid] = parent, cpu + 7, birth
@@ -71,6 +79,31 @@ class NativeResources(unittest.TestCase):
         encoded = json.dumps(data)
         self.assertNotIn("private", encoded)
         self.assertEqual(set(data), {"elapsed_ms", "panel_cpu_ticks", "node_cpu_ticks", "core_cpu_ticks"})
+
+    def test_proc_discovery_uses_comm_only_as_a_filter(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            fields = "S 7 1 1 0 -1 0 0 0 0 0 17 13 0 0 0 0 2 0 456"
+            for pid, name in [(41, "destination-glo"), (42, "unrelated"), (43, "fake (core)")]:
+                (root / str(pid)).mkdir()
+                (root / str(pid) / "stat").write_text(f"{pid} ({name}) {fields}")
+            proc = resource.Proc(root)
+            rows = proc.rows()
+            self.assertEqual(set(rows), {41, 42, 43})
+            self.assertTrue(proc.test_candidate(41))
+            self.assertFalse(proc.test_candidate(42))
+            self.assertFalse(proc.test_candidate(43))
+        proc = OwnedProc()
+        proc.executables[41] = (9, 9)
+        with self.assertRaises(resource.ScopeError) as error:
+            self.bind(proc)
+        self.assertEqual(error.exception.code, 10)
+        proc = OwnedProc()
+        proc.records[42], proc.executables[42], proc.commands[42] = proc.records[41], proc.executables[41], proc.commands[41][:]
+        proc.candidate_ids.add(42)
+        with self.assertRaises(resource.ScopeError) as error:
+            self.bind(proc)
+        self.assertEqual(error.exception.code, 10)
 
     def test_bind_rejects_foreign_cores_and_shared_state(self):
         changes = [

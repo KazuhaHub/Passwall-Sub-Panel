@@ -59,6 +59,7 @@ def file_identity(path):
 class Proc:
     def __init__(self, root=Path("/proc")):
         self.root = root
+        self.names = {}
 
     def stat(self, pid):
         return process_stat((self.root / str(pid) / "stat").read_text()[:8192])
@@ -74,20 +75,30 @@ class Proc:
 
     def rows(self):
         rows = {}
+        self.names = {}
         for entry in self.root.iterdir():
             if not entry.name.isdecimal():
                 continue
             try:
-                rows[int(entry.name)] = self.stat(int(entry.name))
+                raw = (entry / "stat").read_text()[:8192]
+                rows[int(entry.name)] = process_stat(raw)
+                self.names[int(entry.name)] = raw[raw.index("(") + 1:raw.rfind(")")]
             except (OSError, ValueError, UnicodeError):
                 continue
         return rows
+
+    def test_candidate(self, pid):
+        # Linux comm is limited to 15 bytes. This only narrows discovery;
+        # executable identity and the exact test root remain authoritative.
+        return self.names.get(pid) == "destination-global-batch.test"[:15]
 
 
 def bind_processes(proc, test_identity, node_identity):
     rows = proc.rows()
     mains = []
     for pid in rows:
+        if not proc.test_candidate(pid):
+            continue
         try:
             if proc.exe(pid) == test_identity and option(proc.args(pid), "-test.run") == ROOT_TEST:
                 mains.append(pid)
@@ -96,12 +107,14 @@ def bind_processes(proc, test_identity, node_identity):
     if len(mains) != 1:
         raise ScopeError(10)
     main = mains[0]
+    identities = {main: test_identity}
     nodes, cores, directories = [], [], set()
     for pid, (parent, _, _) in sorted(rows.items()):
         if parent != main:
             continue
         if proc.exe(pid) != node_identity:
             continue
+        identities[pid] = node_identity
         data = option(proc.args(pid), "--data-dir")
         directory = PurePosixPath(data)
         if not directory.is_absolute() or str(directory) != data or ".." in directory.parts or data in directories:
@@ -113,6 +126,7 @@ def bind_processes(proc, test_identity, node_identity):
                 expected = file_identity(Path(data) / "cores/xray/versions/26.6.27/xray")
                 if proc.exe(child) != expected:
                     raise ScopeError(12)
+                identities[child] = expected
                 children.append(child)
         if len(children) != 1:
             raise ScopeError(13)
@@ -120,7 +134,10 @@ def bind_processes(proc, test_identity, node_identity):
         cores.append(children[0])
     if len(nodes) != 65 or len(set(cores)) != 65:
         raise ScopeError(14)
-    bindings = [(pid, rows[pid][0], rows[pid][2], proc.exe(pid)) for pid in [main] + nodes + cores]
+    # Reuse only the executable coordinates just checked in this discovery
+    # call. counters() immediately revalidates every identity at the baseline
+    # and each subsequent sample; no process observation survives a run.
+    bindings = [(pid, rows[pid][0], rows[pid][2], identities[pid]) for pid in [main] + nodes + cores]
     if len({row[0] for row in bindings}) != 131:
         raise ScopeError(15)
     return bindings
