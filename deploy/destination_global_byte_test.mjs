@@ -101,6 +101,7 @@ test('global byte keeps the original 65-owner bootstrap and same publication gat
   const load=readFileSync(new URL('../.github/workflows/destination-load.yml',import.meta.url),'utf8')
   assert(ci.includes('GlobalBytePrimingKeepsIndependentOwnerOrderAndDeadline'))
   assert(load.includes('TestNativeGlobalBytePrimingKeepsIndependentOwnerOrderAndDeadline'))
+  assert(load.slice(load.indexOf('\n  global-byte:')).includes('TestNativeGlobalWorkerProbeKeepsFreshConnectionsAndResponseSemantics'))
   assert(source.includes('faultEnd := start.Add(75 * time.Second)') && source.includes('context.WithDeadline(t.Context(), faultEnd)'))
   assert(source.indexOf('nativePrimeGlobalByteOwners(ctx, 65,') < source.indexOf('global byte first packets durable in original SQL'))
   assert(source.indexOf('global byte first packets durable in original SQL') < source.indexOf('storage.pause()'))

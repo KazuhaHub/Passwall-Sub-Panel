@@ -289,7 +289,7 @@ func TestNativeDestinationGlobalBytePressure(t *testing.T) {
 	faultEnd := start.Add(75 * time.Second)
 	ctx, cancel := context.WithDeadline(t.Context(), faultEnd)
 	defer cancel()
-	send := func(ctx context.Context, owner, kind, seq int) error {
+	send := func(ctx context.Context, owner, kind, seq int, probe *nativeVLESSWorkerProbe) error {
 		peer := cohort.peers[owner]
 		host := name(kind, seq)
 		if kind == 0 {
@@ -305,14 +305,15 @@ func TestNativeDestinationGlobalBytePressure(t *testing.T) {
 		} else if kind == 2 {
 			uuid = users[seq%len(users)].UUID
 		}
-		return nativeVLESSHost(ctx, peer.node.DesiredPort, host, port, uuid, want, host)
+		return probe.request(ctx, peer.node.DesiredPort, host, port, uuid, want, host)
 	}
 	// Keep each owner's reverse priority, 260 original requests and the same
 	// 75s deadline. A slow owner's packet must not impose a fleet-wide barrier
 	// on the next class. All owners still finish before original SQL durability.
+	var primeProbes [65]nativeVLESSWorkerProbe
 	primeErr := nativePrimeGlobalByteOwners(ctx, 65, func(ctx context.Context, owner, kind int) error {
 		attempted[owner][kind].Add(1)
-		err := send(ctx, owner, kind, 1)
+		err := send(ctx, owner, kind, 1, &primeProbes[owner])
 		if err != nil {
 			failures.Add(1)
 		} else {
@@ -364,8 +365,9 @@ func TestNativeDestinationGlobalBytePressure(t *testing.T) {
 		workers.Add(1)
 		go func() {
 			defer workers.Done()
+			var probe nativeVLESSWorkerProbe
 			for j := range jobs {
-				if send(ctx, j.owner, j.kind, j.seq) != nil {
+				if send(ctx, j.owner, j.kind, j.seq, &probe) != nil {
 					failures.Add(1)
 				} else {
 					delivered[j.owner][j.kind].Add(1)
