@@ -68,8 +68,8 @@ func nativeBootstrapGlobalCohort(t *testing.T, options nativeGlobalCohortOptions
 	return nativeBootstrapOwnedCohort(t, options, 65, "destination-global-bootstrap-metrics.json", nil)
 }
 
-// The existing global entrypoint always requests 65 owners. Only the separate
-// real-day fixture can request ten, with its own database and evidence namespace.
+// The global entrypoint always requests 65 owners. The separate day and
+// retention entrypoints request exactly ten and one, with isolated evidence.
 func nativeBootstrapOwnedCohort(t *testing.T, options nativeGlobalCohortOptions, requestedOwners int, evidenceName string, buildDay func(*testing.T) destinationPolicyFixture) *nativeGlobalCohort {
 	t.Helper()
 	if !nativeOwnedCohortScope(requestedOwners, evidenceName, buildDay != nil, options.decorate != nil || options.admission != nil) {
@@ -401,7 +401,8 @@ func nativeBootstrapOwnedCohort(t *testing.T, options nativeGlobalCohortOptions,
 
 func nativeOwnedCohortScope(owners int, evidence string, dayBuilder, injected bool) bool {
 	return (owners == 65 && evidence == "destination-global-bootstrap-metrics.json" && !dayBuilder) ||
-		(owners == 10 && evidence == "destination-trial-day-bootstrap-metrics.json" && dayBuilder && !injected)
+		(owners == 10 && evidence == "destination-trial-day-bootstrap-metrics.json" && dayBuilder && !injected) ||
+		(owners == 1 && evidence == "destination-retention-bootstrap-metrics.json" && dayBuilder && !injected)
 }
 
 func nativeGlobalCurrentPublicCore(parent int, dataDir string) bool {

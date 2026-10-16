@@ -1232,13 +1232,36 @@ func nativeWait(t *testing.T, duration time.Duration, phase string, ready func()
 }
 
 type nativePrivateOutput struct {
-	mu  sync.Mutex
-	buf bytes.Buffer
+	mu     sync.Mutex
+	buf    bytes.Buffer
+	spill  io.Writer
+	retain int
 }
 
 func (w *nativePrivateOutput) Write(p []byte) (int, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
+	if w.spill != nil {
+		n, err := w.spill.Write(p)
+		if err != nil {
+			return n, err
+		}
+		if n != len(p) {
+			return n, io.ErrShortWrite
+		}
+		if w.retain > 0 {
+			if len(p) >= w.retain {
+				w.buf.Reset()
+				_, _ = w.buf.Write(p[len(p)-w.retain:])
+			} else {
+				if w.buf.Len()+len(p) > w.retain {
+					w.buf.Next(w.buf.Len() + len(p) - w.retain)
+				}
+				_, _ = w.buf.Write(p)
+			}
+			return n, nil
+		}
+	}
 	return w.buf.Write(p)
 }
 func (w *nativePrivateOutput) text() string { w.mu.Lock(); defer w.mu.Unlock(); return w.buf.String() }

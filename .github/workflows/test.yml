@@ -1328,7 +1328,7 @@ jobs:
         with:
           node-version: "26"
       - name: Real-day evidence rejection and runner syntax without long execution
-        run: node --test deploy/destination_trial_day_test.mjs
+        run: node --test deploy/destination_trial_day_test.mjs deploy/destination_retention_test.mjs
       - uses: actions/setup-go@v7
         env:
           GOTOOLCHAIN: auto
@@ -1346,7 +1346,7 @@ jobs:
         run: |
           set -euo pipefail
           go test -race -v -count=1 -timeout=4m -tags destination_acceptance ./internal/app \
-            -run '^TestNative(Global(DaemonCleanupBroadcastsAndBoundsWaits|AuditStartPreservesRealQueueAndPermissionChanges|PublicCoreCopyExcludesStateAndRejectsUntrustedFiles|StoragePauseKeepsControlAndOriginalSQLTransactions|TransportKeepsProductionAuthenticationAndExactBodies|RequestFailureFactsPreserveErrorsAndBlockedReplies|WorkerProbeKeepsFreshConnectionsAndResponseSemantics|AdmissionObserverKeepsAuthenticationRetryAndSQL|AdmissionBindingRejectsAmbiguousEvidence)|MixedProbePreservesRecoveryFailures|LoadTrafficScheduleKeepsClockAndOwnedCleanup|TrialDayPlanKeepsFullWallClockAndDistinctDomains|RetentionFaultKeepsOriginalPacketsAndRestartBoundary|ByteResponseFaultPreservesOriginalHandlerAndCanonicalRetries|ByteFormationStoredQueriesUseOriginalSQLiteSchema|ByteFormationNamesAndOriginalReservationGeometry|GlobalByteTransportKeepsIndependentResponseFaultsAndAuthentication|GlobalBytePrimingKeepsIndependentOwnerOrderAndDeadline|GlobalByteWitnessRequiresOriginalExclusiveGeometry|GlobalByteLossLedgerRejectsUnboundAndUnexpectedLosses|TargetRouteWait(RequiresExactLocalReadiness|StopsOnDeadlineCancellationAndReadFailure))$'
+            -run '^TestNative(Global(DaemonCleanupBroadcastsAndBoundsWaits|AuditStartPreservesRealQueueAndPermissionChanges|PublicCoreCopyExcludesStateAndRejectsUntrustedFiles|StoragePauseKeepsControlAndOriginalSQLTransactions|TransportKeepsProductionAuthenticationAndExactBodies|RequestFailureFactsPreserveErrorsAndBlockedReplies|WorkerProbeKeepsFreshConnectionsAndResponseSemantics|AdmissionObserverKeepsAuthenticationRetryAndSQL|AdmissionBindingRejectsAmbiguousEvidence)|MixedProbePreservesRecoveryFailures|LoadTrafficScheduleKeepsClockAndOwnedCleanup|TrialDayPlanKeepsFullWallClockAndDistinctDomains|RetentionFaultKeepsOriginalPacketsAndRestartBoundary|RetentionRestartPreservesActualSQLiteAndQuota|ByteResponseFaultPreservesOriginalHandlerAndCanonicalRetries|ByteFormationStoredQueriesUseOriginalSQLiteSchema|ByteFormationNamesAndOriginalReservationGeometry|GlobalByteTransportKeepsIndependentResponseFaultsAndAuthentication|GlobalBytePrimingKeepsIndependentOwnerOrderAndDeadline|GlobalByteWitnessRequiresOriginalExclusiveGeometry|GlobalByteLossLedgerRejectsUnboundAndUnexpectedLosses|TargetRouteWait(RequiresExactLocalReadiness|StopsOnDeadlineCancellationAndReadFailure))$'
       - name: Admission-time capacity evidence, concurrent offers and loss drain
         run: |
           set -euo pipefail
