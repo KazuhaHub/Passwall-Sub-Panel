@@ -49,6 +49,22 @@ test('global transport preserves raw authenticated bodies and delegates unknown 
   assert.doesNotMatch(implementation, /\.start\s*=|\.Ack\(|SetSnapshot\(|http\.StatusOK\)/)
 })
 
+test('process CPU diagnostics remain opt-in and separate from original pressure evidence', () => {
+  const workflow = readFileSync(new URL('../.github/workflows/destination-load.yml', import.meta.url), 'utf8')
+  const actual = workflow.slice(workflow.indexOf('      - name: Actual 200 users, 65 owners, four lanes, original SQL hold and retry ledgers')).split('      - name: Inspect bounded phase CPU')[0]
+  const enabled = actual.indexOf('if test "$PSP_NATIVE_SETUP_PROFILE" = 1 && test "$PSP_NATIVE_SETUP_PROFILE_STAGE" = traffic; then')
+  const helper = actual.indexOf('sudo --preserve-env=GITHUB_ACTIONS,RUNNER_TEMP python3 deploy/native_process_resources.py')
+  assert(enabled >= 0 && helper > enabled && helper < actual.indexOf('profile_args=()'))
+  assert(actual.includes('trap stop_resource_profile EXIT') && actual.includes('wait "$resource_pid" || true'))
+  assert(actual.includes('-test.timeout=20m') && actual.includes('node deploy/destination-global-batch.mjs'))
+  const artifact = workflow.slice(workflow.indexOf('      - name: Keep closed numeric process resource diagnostics separately')).split('      - name: Keep numeric batch')[0]
+  assert(artifact.includes("if: always() && inputs.suite == 'global-traffic-profile'"))
+  assert(artifact.includes('native-global-process-resources-${{ matrix.database }}-${{ github.sha }}'))
+  assert(!artifact.includes('destination-global-batch-metrics.json'))
+  const ci = readFileSync(new URL('../.github/workflows/test.yml', import.meta.url), 'utf8')
+  assert(ci.includes('python3 -m unittest discover -s deploy -p test_native_process_resources.py -v'))
+})
+
 test('global storage hold decorates admitted real SQL without replacing production collection', () => {
   const app = readFileSync(new URL('../internal/app/app.go', import.meta.url), 'utf8')
   assert(app.includes('return buildWithDestinationAuditStore(ctx, cfg, nil)'))

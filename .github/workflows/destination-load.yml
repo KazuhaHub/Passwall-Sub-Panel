@@ -731,6 +731,21 @@ jobs:
           PSP_NATIVE_SETUP_PROFILE_STAGE: ${{ inputs.suite == 'global-traffic-profile' && 'traffic' || inputs.suite == 'global-receipt-profile' && 'receipt' || 'membership' }}
         run: |
           set -euo pipefail
+          resource_pid=""
+          stop_resource_profile() {
+            if test -n "$resource_pid"; then
+              touch "$RUNNER_TEMP/destination-global-process-resources.stop"
+              wait "$resource_pid" || true
+            fi
+          }
+          trap stop_resource_profile EXIT
+          if test "$PSP_NATIVE_SETUP_PROFILE" = 1 && test "$PSP_NATIVE_SETUP_PROFILE_STAGE" = traffic; then
+            for name in destination-global-process-resources.json destination-global-process-resources.stop; do
+              test ! -e "$RUNNER_TEMP/$name" && test ! -L "$RUNNER_TEMP/$name"
+            done
+            sudo --preserve-env=GITHUB_ACTIONS,RUNNER_TEMP python3 deploy/native_process_resources.py --root "$RUNNER_TEMP" > "$RUNNER_TEMP/destination-global-process-resources.private.log" 2>&1 &
+            resource_pid=$!
+          fi
           profile_args=()
           if test "$PSP_NATIVE_SETUP_PROFILE" = 1; then
             for kind in block mutex; do
@@ -770,6 +785,17 @@ jobs:
           printf '%s\n' 'CPU scope follows the selected phase (membership/receipt at most 60s, traffic at most 120s); block/mutex delay covers the whole test process and is neither CPU nor an additive wall-clock total. Raw profiles remain private.'
         env:
           PSP_PROFILE_PHASE: ${{ inputs.suite == 'global-traffic-profile' && 'traffic' || inputs.suite == 'global-receipt-profile' && 'receipt' || 'membership' }}
+      - name: Inspect owned panel, Node and Core CPU separately from acceptance
+        if: always() && inputs.suite == 'global-traffic-profile'
+        run: python3 deploy/native_process_resources.py --root "$RUNNER_TEMP" --summary
+      - name: Keep closed numeric process resource diagnostics separately
+        if: always() && inputs.suite == 'global-traffic-profile'
+        uses: actions/upload-artifact@v7
+        with:
+          name: native-global-process-resources-${{ matrix.database }}-${{ github.sha }}
+          path: ${{ runner.temp }}/destination-global-process-resources.json
+          if-no-files-found: error
+          retention-days: 7
       - name: Keep numeric batch, bootstrap and root evidence; byte/key pressure remains pending
         if: always()
         uses: actions/upload-artifact@v7

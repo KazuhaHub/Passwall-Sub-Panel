@@ -999,6 +999,10 @@ jobs:
           command -v shellcheck
           go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
           git ls-files -z '*.sh' | xargs -0 shellcheck
+      - name: Owned native resource sampler boundaries
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python3 -m unittest discover -s deploy -p test_native_process_resources.py -v
       - run: go vet ./...
       # THE REINSTALL ACCEPTANCE IS BEHIND A BUILD TAG, SO THE LINE ABOVE NEVER OPENS
       # IT. Its only compile was node-reinstall-acceptance.yml, which runs on a path

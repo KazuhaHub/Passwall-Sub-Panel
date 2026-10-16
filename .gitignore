@@ -16,6 +16,7 @@ profile.cov
 # on failure; a local run of those step scripts leaves it there too.
 /test-output.txt
 local-build/
+__pycache__/
 
 # Go workspace files
 go.work
