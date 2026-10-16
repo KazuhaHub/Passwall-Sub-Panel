@@ -44,6 +44,7 @@ type nativeGlobalCohortOptions struct {
 	admission    *nativeAdmissionBinding
 	auditMetrics bool
 	transport    func(http.Handler, []*nativeGlobalPeer) http.Handler
+	observeNode  func(int, nativeMixedNodeReading)
 }
 
 type nativeGlobalCohort struct {
@@ -64,16 +65,27 @@ func TestNativeDestinationGlobalCohortBootstrap(t *testing.T) {
 // pressure driver. Every returned process, stream and private state has already
 // passed the original bootstrap checks, and all cleanup remains owned by t.
 func nativeBootstrapGlobalCohort(t *testing.T, options nativeGlobalCohortOptions) *nativeGlobalCohort {
+	return nativeBootstrapOwnedCohort(t, options, 65, "destination-global-bootstrap-metrics.json", nil)
+}
+
+// The existing global entrypoint always requests 65 owners. Only the separate
+// real-day fixture can request ten, with its own database and evidence namespace.
+func nativeBootstrapOwnedCohort(t *testing.T, options nativeGlobalCohortOptions, requestedOwners int, evidenceName string, buildDay func(*testing.T) destinationPolicyFixture) *nativeGlobalCohort {
 	t.Helper()
+	if !nativeOwnedCohortScope(requestedOwners, evidenceName, buildDay != nil, options.decorate != nil || options.admission != nil) {
+		t.Fatal("owned cohort scope does not match its dedicated entrypoint")
+	}
 	binary, evidence := os.Getenv("PSP_NATIVE_NODE_BIN"), os.Getenv("PSP_NATIVE_LOAD_METRICS")
 	root, e1 := filepath.EvalSymlinks(os.Getenv("RUNNER_TEMP"))
 	dir, e2 := filepath.EvalSymlinks(filepath.Dir(evidence))
 	info, err := os.Stat(binary)
-	if e1 != nil || e2 != nil || root != dir || filepath.Base(evidence) != "destination-global-bootstrap-metrics.json" || !filepath.IsAbs(binary) || filepath.Base(binary) != "destination-node" || err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0022 != 0 || os.Getenv("PSP_NATIVE_CORE_VERSION") != "26.6.27" {
+	if e1 != nil || e2 != nil || root != dir || filepath.Base(evidence) != evidenceName || !filepath.IsAbs(binary) || filepath.Base(binary) != "destination-node" || err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0022 != 0 || os.Getenv("PSP_NATIVE_CORE_VERSION") != "26.6.27" {
 		t.Fatal("global bootstrap requires the immutable hosted candidate and owned evidence")
 	}
 	var f destinationPolicyFixture
-	if options.admission == nil {
+	if buildDay != nil {
+		f = buildDay(t)
+	} else if options.admission == nil {
 		f = buildNativeDestinationPolicyFixtureWithAuditStore(t, options.decorate)
 	} else {
 		f = buildNativeDestinationPolicyFixtureWithAuditObserver(t, options.decorate, options.admission.observe)
@@ -85,6 +97,7 @@ func nativeBootstrapGlobalCohort(t *testing.T, options nativeGlobalCohortOptions
 	if !valid || owners != 65 {
 		t.Fatal("global bootstrap cannot cover the reserved owner limits")
 	}
+	owners = requestedOwners
 	m := struct {
 		Schema       int    `json:"schema_version"`
 		Candidate    string `json:"candidate"`
@@ -294,6 +307,9 @@ func nativeBootstrapGlobalCohort(t *testing.T, options nativeGlobalCohortOptions
 		if options.auditMetrics {
 			peer.process.Args = append(peer.process.Args, "--audit-metrics")
 			reading := &nativeMixedOutput{private: peer.output, probe: peer.probe}
+			if options.observeNode != nil {
+				reading.observe = func(value nativeMixedNodeReading) { options.observeNode(i, value) }
+			}
 			peer.process.Stdout, peer.process.Stderr = reading, reading
 		}
 		nativeMust(t, peer.process.Start(), "start independent real global daemon")
@@ -381,6 +397,11 @@ func nativeBootstrapGlobalCohort(t *testing.T, options nativeGlobalCohortOptions
 	}
 	m.Stage = 9
 	return &nativeGlobalCohort{fixture: f, peers: peers, ready: ready, readyReason: readyReason, server: server}
+}
+
+func nativeOwnedCohortScope(owners int, evidence string, dayBuilder, injected bool) bool {
+	return (owners == 65 && evidence == "destination-global-bootstrap-metrics.json" && !dayBuilder) ||
+		(owners == 10 && evidence == "destination-trial-day-bootstrap-metrics.json" && dayBuilder && !injected)
 }
 
 func nativeGlobalCurrentPublicCore(parent int, dataDir string) bool {

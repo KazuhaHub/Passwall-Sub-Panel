@@ -161,6 +161,7 @@ type nativeMixedOutput struct {
 	private *nativePrivateOutput
 	probe   *nativeMixedProbe
 	partial []byte
+	observe func(nativeMixedNodeReading)
 }
 
 func (w *nativeMixedOutput) Write(data []byte) (int, error) {
@@ -187,6 +188,9 @@ func (w *nativeMixedOutput) Write(data []byte) (int, error) {
 			}
 		}
 		w.probe.mu.Unlock()
+		if found && valid && w.observe != nil {
+			w.observe(reading)
+		}
 	}
 	if len(w.partial) > 64*1024 {
 		w.probe.mu.Lock()
