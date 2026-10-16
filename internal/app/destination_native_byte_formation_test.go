@@ -67,7 +67,7 @@ func nativeByteFormation(t *testing.T, f destinationPolicyFixture, client *http.
 	write()
 	_, observeAddress, observePort, observeNonce, _ := nativeTargetAtPort(t, nativePort(t))
 	stage := "capability"
-	users, _, _, blockAddress, blockPort, blockReached := nativePrepareTrialLoad(t, f, client, endpoint, token, inbound, output, &stage, &nativeMixedSetup{observePort: observePort, memberConcurrency: 8})
+	users, group, policy, blockAddress, blockPort, blockReached := nativePrepareTrialLoad(t, f, client, endpoint, token, inbound, output, &stage, &nativeMixedSetup{observePort: observePort, memberConcurrency: 8})
 	m.Users = len(users)
 	if m.Users != 200 || storage == nil || blockPort == targetPort || blockPort == observePort || blockPort == controlPort || observePort == targetPort || observePort == controlPort || targetPort == controlPort {
 		t.Fatal("byte formation lacks original principals, storage or independent lane targets")
@@ -84,10 +84,7 @@ func nativeByteFormation(t *testing.T, f destinationPolicyFixture, client *http.
 	}
 	readStored := func(kind int) int64 {
 		t.Helper()
-		query, args := "SELECT COALESCE(SUM(count),0) FROM dest_hits WHERE panel_id=? AND kind=?", []any{f.agent.PanelID, nativeMixedKinds[kind]}
-		if kind == 3 {
-			query, args = "SELECT COALESCE(SUM(count),0) FROM dest_usage_hourly WHERE panel_id=?", []any{f.agent.PanelID}
-		}
+		query, args := nativeByteFormationStoredQuery(f.agent.PanelID, policy.ID, group.ID, kind)
 		var count int64
 		nativeMust(t, f.a.database.QueryRowContext(t.Context(), query, args...).Scan(&count), "read original stored formation events")
 		return count
@@ -137,7 +134,11 @@ func nativeByteFormation(t *testing.T, f destinationPolicyFixture, client *http.
 	}
 	for kind := range 4 {
 		attempted[kind].Add(1)
-		nativeMust(t, send(t.Context(), kind, 1), "prime one actual small packet in each lane")
+		err := send(t.Context(), kind, 1)
+		if err != nil {
+			failures.Add(1)
+		}
+		nativeMust(t, err, "prime one actual small packet in each lane")
 		delivered[kind].Add(1)
 	}
 	nativeWait(t, min(65*time.Second, time.Until(faultEnd)), "real first packets durable while their responses remain suppressed", func() bool {
@@ -259,25 +260,60 @@ func nativeByteFormation(t *testing.T, f destinationPolicyFixture, client *http.
 		}
 		var complete bool
 		m.Ingress, complete = nativeMixedIngressBetween(baseline, reading.Access, 3*(perLane+1), perLane+1)
-		return complete && m.Ingress.AllowedNotReceived == 0 && m.Ingress.DeniedNotReceived == 0
+		if !complete || m.Ingress.AllowedNotReceived != 0 || m.Ingress.DeniedNotReceived != 0 {
+			return false
+		}
+		// Empty queue reservations do not by themselves prove that the separate
+		// receiver-loss buffer has reached SQL. Reconcile within the same drain.
+		for i := range 4 {
+			m.Stored[i] = readStored(i) - beforeStored[i]
+			nativeMust(t, f.a.database.QueryRowContext(t.Context(), "SELECT COALESCE(SUM(dest_audit_loss_hourly.rows),0) FROM dest_audit_loss_hourly WHERE panel_id=? AND kind=?", f.agent.PanelID, nativeMixedKinds[i]).Scan(&m.LossRows[i]), "read independent original formation loss rows")
+			expected := int64(perLane + 1)
+			if i == 3 {
+				expected *= 3
+			}
+			if m.Stored[i]+m.LossRows[i] != expected {
+				return false
+			}
+		}
+		return true
 	})
-	for i := range 4 {
-		m.Stored[i] = readStored(i) - beforeStored[i]
-		nativeMust(t, f.a.database.QueryRowContext(t.Context(), "SELECT COALESCE(SUM(dest_audit_loss_hourly.rows),0) FROM dest_audit_loss_hourly WHERE panel_id=? AND kind=?", f.agent.PanelID, nativeMixedKinds[i]).Scan(&m.LossRows[i]), "read independent original formation loss rows")
-		expected := int64(perLane + 1)
-		if i == 3 {
-			expected *= 3
-		}
-		if m.Stored[i]+m.LossRows[i] != expected {
-			t.Fatal("actual formation traffic does not reconcile with original SQL and losses")
-		}
-	}
 	if _, valid := binding.snapshot(f.agent.AgentID); !valid || blockReached.Load() != 0 {
 		t.Fatal("formation lost authenticated admission binding or blocked traffic escaped")
 	}
 	live()
 	m.Stage, m.Complete = 3, 1
 	write()
+}
+
+// Hit lanes use their original frozen source/action columns. Kind exists on
+// loss and batch records; dest_hits deliberately has no kind column.
+func nativeByteFormationStoredQuery(panel, blockPolicy, group int64, kind int) (string, []any) {
+	const hits = "SELECT COALESCE(SUM(count),0) FROM dest_hits WHERE "
+	switch kind {
+	case 0:
+		return hits + "panel_id=? AND source=?", []any{panel, fmt.Sprintf("p%d", blockPolicy)}
+	case 1:
+		return hits + "panel_id=? AND action='observe' AND user_id>0", []any{panel}
+	case 2:
+		return hits + "panel_id=? AND source=?", []any{panel, fmt.Sprintf("g%d", group)}
+	case 3:
+		return "SELECT COALESCE(SUM(count),0) FROM dest_usage_hourly WHERE panel_id=?", []any{panel}
+	default:
+		return "", nil
+	}
+}
+
+func TestNativeByteFormationStoredQueriesUseOriginalSQLiteSchema(t *testing.T) {
+	f := buildDestinationPolicyFixture(t)
+	for kind := range 4 {
+		query, args := nativeByteFormationStoredQuery(f.agent.PanelID, 12, 17, kind)
+		var count int64
+		nativeMust(t, f.a.database.QueryRowContext(t.Context(), query, args...).Scan(&count), "execute each real formation ledger query against original App migrations")
+		if count != 0 {
+			t.Fatal("new ledger fixture contains unrelated stored events")
+		}
+	}
 }
 
 func nativeByteFormationHosts(t *testing.T, nonce, address, blocked, observed string, count int) func(int, int) string {

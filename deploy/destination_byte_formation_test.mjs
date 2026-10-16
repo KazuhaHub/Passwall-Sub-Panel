@@ -36,4 +36,8 @@ test('formation uses actual original Node reports and records only bounded numer
   assert(!workflow.includes('continue-on-error'))
   const ci=readFileSync(new URL('../.github/workflows/test.yml',import.meta.url),'utf8')
   assert(ci.includes('ByteResponseFaultPreservesOriginalHandlerAndCanonicalRetries'))
+  assert(ci.includes('ByteFormationStoredQueriesUseOriginalSQLiteSchema'))
+  assert(driver.includes("panel_id=? AND action='observe' AND user_id>0"))
+  assert(driver.includes('nativeByteFormationStoredQuery(f.agent.PanelID, policy.ID, group.ID, kind)'))
+  assert(!driver.includes('FROM dest_hits WHERE panel_id=? AND kind=?'))
 })

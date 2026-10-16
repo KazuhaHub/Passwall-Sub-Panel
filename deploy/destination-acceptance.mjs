@@ -30,6 +30,10 @@ const dockerUpgradeNames = ['TestNativePublishedDockerRollback', ...remoteUpgrad
 const remoteUpgradeNames = ['TestNativePublishedRemoteRollback', ...remoteUpgradeCases.map(name => `TestNativePublishedRemoteRollback/${name}`)]
 const names = [...xrayNames, ...singBoxNames, ...guardedSingBoxNames, ...legacyUpgradeNames, ...remoteUpgradeNames, ...dockerUpgradeNames, ...fleetNames, ...loadNames, ...trialLoadNames, ...blockOverflowNames, ...mixedPressureNames, ...idleCostNames, ...globalBootstrapNames, ...globalBatchNames, ...byteFormationNames]
 const diagnostics = Object.freeze({
+  'read original stored formation events': 'byte_formation_stored_query_failed',
+  'warm original byte formation route': 'byte_formation_warm_route_failed',
+  'verify independent actual control target': 'byte_formation_control_failed',
+  'formation padding would fold into an existing trial site': 'byte_formation_domains_invalid',
   'timed out waiting for actual warmup parsed and completely drained': 'byte_formation_warmup_timeout',
   'timed out waiting for real first packets durable while their responses remain suppressed': 'byte_formation_first_durable_timeout',
   'original 75-second fault budget cannot form all four live batches': 'byte_formation_fault_budget_failed',
