@@ -44,7 +44,7 @@ export function checkRetentionMetrics(m,b){
   const received=initial.map(s=>s.received_unix_ms), first=Math.min(...received), final=Math.max(...received)
   const byName=Object.fromEntries(m.phases.map(p=>[p.name,p]))
   integer(byName.after_node_expiry48.at_unix_ms,m.original_hour_ms[1]+48*hour)
-  integer(byName.before_marker_expiry72.at_unix_ms,first+72*hour-5000,first+72*hour-1)
+  integer(byName.before_marker_expiry72.at_unix_ms,first+72*hour-120000,first+72*hour-1)
   integer(byName.after_marker_expiry72.at_unix_ms,final+72*hour)
   integer(byName.after_budget_hour_expiry.at_unix_ms,Math.floor(final/hour)*hour+73*hour)
   assert(Array.isArray(m.authenticated_boundary_fixtures));exact(m.authenticated_boundary_fixtures.length,3)

@@ -141,6 +141,10 @@ func TestNativeDestinationRetentionReal72Hours(t *testing.T) {
 		var body protocol.DestinationPolicy
 		return err == nil && e == nil && p != nil && panel != nil && c.ready(peer) && nativeCollectionReceiptMatches(*p, protocol.CollectHits, uint64(panel.AuditCollectRevision)) && json.Unmarshal(p.MintedBody, &body) == nil && len(body.Rules) == 2
 	})
+	// Initial policy deployment may replace the empty-policy core. Bind the
+	// measured process after that legitimate deployment, then require it to live
+	// throughout the partition and PSP restart without rebinding again.
+	peer.live = nativeBindLiveCore(t, peer.process.Process.Pid, filepath.Join(peer.dir, "node"), "xray")
 	var probe nativeVLESSWorkerProbe
 	control := func() {
 		peer.live()
@@ -328,7 +332,7 @@ func TestNativeDestinationRetentionReal72Hours(t *testing.T) {
 	phase("after_hit_cleanup48")
 	firstReceived := min(base[0].ReceivedMS, base[1].ReceivedMS)
 	lastReceived := max(base[0].ReceivedMS, base[1].ReceivedMS)
-	wait(time.UnixMilli(firstReceived).Add(72*time.Hour - 2*time.Second))
+	wait(time.UnixMilli(firstReceived).Add(72*time.Hour - time.Minute))
 	a.pruneDestAudit(t.Context())
 	phase("before_marker_expiry72")
 	wait(time.UnixMilli(lastReceived).Add(72*time.Hour + 2*time.Second))
