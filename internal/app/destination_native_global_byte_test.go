@@ -310,6 +310,8 @@ func TestNativeDestinationGlobalBytePressure(t *testing.T) {
 	ctx, cancel := context.WithDeadline(t.Context(), faultEnd)
 	defer cancel()
 	// Failure diagnostics observe the original clock; no phase gets a new budget.
+	// Ready-lane formation overlaps preparation, so its work is included in the
+	// first phase rather than attributed to a separate, non-overlapping window.
 	phase, phaseSince := 0, start
 	var phaseMS [4]int64
 	advancePhase := func() {
@@ -331,7 +333,15 @@ func TestNativeDestinationGlobalBytePressure(t *testing.T) {
 			}
 		}
 	}()
+	// Priming and bulk traffic overlap, sharing the original 512-request bound.
+	requests := make(chan struct{}, 512)
 	send := func(ctx context.Context, owner, kind, seq int, probe *nativeVLESSWorkerProbe) error {
+		select {
+		case requests <- struct{}{}:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+		defer func() { <-requests }()
 		peer := cohort.peers[owner]
 		host := name(kind, seq)
 		if kind == 0 {
@@ -349,23 +359,71 @@ func TestNativeDestinationGlobalBytePressure(t *testing.T) {
 		}
 		return probe.request(ctx, peer.node.DesiredPort, host, port, uuid, want, host)
 	}
-	// Keep each owner's reverse priority, 260 original requests and the same
-	// 75s deadline. A slow owner's packet must not impose a fleet-wide barrier
-	// on the next class. All owners still finish before original SQL durability.
+	type job struct{ owner, kind, seq int }
+	jobs := make(chan job, 4096)
+	var workers sync.WaitGroup
+	var closeJobs sync.Once
+	for range 512 {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			var probe nativeVLESSWorkerProbe
+			for j := range jobs {
+				if send(ctx, j.owner, j.kind, j.seq, &probe) != nil {
+					failures.Add(1)
+				} else {
+					delivered[j.owner][j.kind].Add(1)
+				}
+			}
+		}()
+	}
+	t.Cleanup(func() { cancel(); closeJobs.Do(func() { close(jobs) }); workers.Wait() })
+	// Keep reverse priming order, 260 original requests and the same 75s
+	// deadline. Feed each lane only after its original packet froze, so live
+	// keys can form while other owners/lanes still wait. First SQL durability
+	// and every live-key witness still precede the original SQL hold.
 	var primeProbes [65]nativeVLESSWorkerProbe
-	primeErr := nativePrimeGlobalByteOwners(ctx, 65, func(ctx context.Context, owner, kind int) error {
-		attempted[owner][kind].Add(1)
-		err := send(ctx, owner, kind, 1, &primeProbes[owner])
-		if err != nil {
-			failures.Add(1)
-		} else {
-			delivered[owner][kind].Add(1)
+	primed := make(chan error, 1)
+	primingExited := make(chan struct{})
+	go func() {
+		defer close(primingExited)
+		primed <- nativePrimeGlobalByteOwnersWithReady(ctx, 65, func(ctx context.Context, owner, kind int) error {
+			attempted[owner][kind].Add(1)
+			err := send(ctx, owner, kind, 1, &primeProbes[owner])
+			if err != nil {
+				failures.Add(1)
+			} else {
+				delivered[owner][kind].Add(1)
+			}
+			return err
+		}, func(owner, kind int) bool {
+			facts, packets, valid := faults[owner].snapshot()
+			return valid && packets[kind].id != "" && facts.Suppressed[kind] > 0
+		}, func(ctx context.Context, owner, kind int) error {
+			for seq := 2; seq <= m.Counts[kind]+1; seq++ {
+				select {
+				case jobs <- job{owner, kind, seq}:
+					attempted[owner][kind].Add(1)
+				case <-ctx.Done():
+					return ctx.Err()
+				}
+			}
+			return nil
+		})
+	}()
+	t.Cleanup(func() { cancel(); <-primingExited })
+	progress := time.NewTicker(time.Second)
+	defer progress.Stop()
+	var primeErr error
+	for waiting := true; waiting; {
+		select {
+		case primeErr = <-primed:
+			waiting = false
+		case <-progress.C:
+			write()
 		}
-		return err
-	}, func(owner, kind int) bool {
-		facts, packets, valid := faults[owner].snapshot()
-		return valid && packets[kind].id != "" && facts.Suppressed[kind] > 0
-	})
+	}
+	progress.Stop()
 	if primeErr != nil {
 		if failures.Load() != 0 {
 			t.Fatal("global byte priming traffic failed")
@@ -401,45 +459,6 @@ func TestNativeDestinationGlobalBytePressure(t *testing.T) {
 	advancePhase()
 	m.Stage = 3
 	write()
-	type job struct{ owner, kind, seq int }
-	jobs := make(chan job, 4096)
-	var workers sync.WaitGroup
-	var closeJobs sync.Once
-	for range 512 {
-		workers.Add(1)
-		go func() {
-			defer workers.Done()
-			var probe nativeVLESSWorkerProbe
-			for j := range jobs {
-				if send(ctx, j.owner, j.kind, j.seq, &probe) != nil {
-					failures.Add(1)
-				} else {
-					delivered[j.owner][j.kind].Add(1)
-				}
-			}
-		}()
-	}
-	t.Cleanup(func() { cancel(); closeJobs.Do(func() { close(jobs) }); workers.Wait() })
-	// Interleave actual owners and classes; the larger block cardinality must
-	// never starve the anonymous/trial classes within the real 75-second fault.
-	for seq := 2; seq <= 1401; seq++ {
-		for kind, count := range m.Counts {
-			if seq > count+1 {
-				continue
-			}
-			for owner := range 65 {
-				select {
-				case jobs <- job{owner, kind, seq}:
-					attempted[owner][kind].Add(1)
-				case <-ctx.Done():
-					t.Fatal("global byte traffic exceeded original 75-second formation budget")
-				}
-			}
-		}
-		if seq%50 == 0 {
-			write()
-		}
-	}
 	closeJobs.Do(func() { close(jobs) })
 	workers.Wait()
 	if failures.Load() != 0 {

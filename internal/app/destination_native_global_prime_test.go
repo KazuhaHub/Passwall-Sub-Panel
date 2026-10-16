@@ -16,6 +16,13 @@ import (
 // Waiting for a different owner's packet must not stop this owner advancing.
 // The caller supplies the original shared fault deadline, not a per-lane budget.
 func nativePrimeGlobalByteOwners(ctx context.Context, owners int, send func(context.Context, int, int) error, frozen func(int, int) bool) error {
+	return nativePrimeGlobalByteOwnersWithReady(ctx, owners, send, frozen, nil)
+}
+
+// Ready can feed actual traffic behind a lane's frozen original packet while
+// other lanes/owners still wait for their first packet. It runs once per lane,
+// in the same serial owner worker, under the original shared fault deadline.
+func nativePrimeGlobalByteOwnersWithReady(ctx context.Context, owners int, send func(context.Context, int, int) error, frozen func(int, int) bool, ready func(context.Context, int, int) error) error {
 	if ctx == nil || owners < 1 || owners > 65 || send == nil || frozen == nil {
 		return errors.New("global byte priming scope invalid")
 	}
@@ -49,6 +56,12 @@ func nativePrimeGlobalByteOwners(ctx context.Context, owners int, send func(cont
 						return
 					}
 					if frozen(owner, kind) {
+						if ready != nil {
+							if err := ready(phase, owner, kind); err != nil {
+								fail(err)
+								return
+							}
+						}
 						break
 					}
 					select {
@@ -165,6 +178,102 @@ func TestNativeGlobalBytePrimingKeepsIndependentOwnerOrderAndDeadline(t *testing
 			if !slices.Equal(owner, []int{3, 2, 1, 0}) {
 				t.Fatal("priming omitted, duplicated or reordered an original request")
 			}
+		}
+	})
+
+	t.Run("ready_pipelines_only_frozen_owner_lanes", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+		defer cancel()
+		entered, release, exited := make(chan struct{}), make(chan struct{}), make(chan struct{})
+		type lane struct{ owner, kind int }
+		ready := make(chan lane, 8)
+		done := make(chan error, 1)
+		var sent [2][4]atomic.Bool
+		go func() {
+			defer close(exited)
+			done <- nativePrimeGlobalByteOwnersWithReady(ctx, 2, func(ctx context.Context, owner, kind int) error {
+				if owner == 1 && kind == 3 {
+					select {
+					case <-entered:
+					case <-ctx.Done():
+						return ctx.Err()
+					}
+				}
+				sent[owner][kind].Store(true)
+				if owner == 0 && kind == 3 {
+					close(entered)
+				}
+				return nil
+			}, func(owner, kind int) bool {
+				if owner == 0 && kind == 3 {
+					select {
+					case <-release:
+					default:
+						return false
+					}
+				}
+				return sent[owner][kind].Load()
+			}, func(ctx context.Context, owner, kind int) error {
+				if !sent[owner][kind].Load() {
+					return errors.New("ready preceded the original request")
+				}
+				select {
+				case ready <- lane{owner, kind}:
+					return nil
+				case <-ctx.Done():
+					return ctx.Err()
+				}
+			})
+		}()
+		t.Cleanup(func() { cancel(); <-exited })
+		read := func(owner int) {
+			t.Helper()
+			for _, kind := range []int{3, 2, 1, 0} {
+				select {
+				case got := <-ready:
+					if got != (lane{owner, kind}) {
+						t.Fatal("ready traffic bypassed a frozen packet, repeated a lane or changed its owner order")
+					}
+				case <-ctx.Done():
+					t.Fatal("ready lanes waited for another owner's first packet")
+				}
+			}
+		}
+		read(1)
+		select {
+		case <-done:
+			t.Fatal("ready traffic bypassed an unprepared owner")
+		default:
+		}
+		close(release)
+		read(0)
+		if err := <-done; err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	t.Run("ready_failure_cancels_and_joins", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+		defer cancel()
+		want := errors.New("owned ready traffic failure")
+		entered := make(chan struct{})
+		var joined atomic.Bool
+		err := nativePrimeGlobalByteOwnersWithReady(ctx, 2, func(context.Context, int, int) error { return nil }, func(int, int) bool { return true }, func(ctx context.Context, owner, kind int) error {
+			if owner == 0 {
+				select {
+				case <-entered:
+					return want
+				case <-ctx.Done():
+					return ctx.Err()
+				}
+			}
+			close(entered)
+			<-ctx.Done()
+			joined.Store(true)
+			return ctx.Err()
+		})
+		if !errors.Is(err, want) || !joined.Load() || ctx.Err() != nil {
+			t.Fatal("ready failure was hidden, left a worker running or reset the shared deadline")
 		}
 	})
 
