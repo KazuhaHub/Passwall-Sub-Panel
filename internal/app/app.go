@@ -243,6 +243,13 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 // store. Production always uses nil; no runtime flag or alternate collector is
 // exposed. Integration fixtures can delay a real transaction before delegation.
 func buildWithDestinationAuditStore(ctx context.Context, cfg *config.Config, decorate func(ports.DestAuditStore) ports.DestAuditStore) (*App, error) {
+	return buildWithDestinationAuditObserver(ctx, cfg, decorate, nil)
+}
+
+// Acceptance observers receive the original collector's immutable events after
+// admission. Production supplies nil; observers must obey destaudit.Options.Emit's
+// memory-only contract and never change collection or authentication decisions.
+func buildWithDestinationAuditObserver(ctx context.Context, cfg *config.Config, decorate func(ports.DestAuditStore) ports.DestAuditStore, observe func(destaudit.Event)) (*App, error) {
 	// Wire the version-compat on-disk cache to PSP's DataDir BEFORE any
 	// RefreshRemoteCompat could fire, so the first refresh persists to the right
 	// place and a same-process load picks up the cached snapshot.
@@ -408,7 +415,15 @@ func buildWithDestinationAuditStore(ctx context.Context, cfg *config.Config, dec
 	if decorate != nil {
 		auditStore = decorate(auditStore)
 	}
-	destAudit, err := destaudit.New(ctx, auditStore, destaudit.Options{Emit: destinationAuditObserver()})
+	emitAudit := destinationAuditObserver()
+	if observe != nil {
+		original := emitAudit
+		emitAudit = func(e destaudit.Event) {
+			original(e)
+			observe(e)
+		}
+	}
+	destAudit, err := destaudit.New(ctx, auditStore, destaudit.Options{Emit: emitAudit})
 	if err != nil {
 		return nil, fmt.Errorf("destination audit collector: %w", err)
 	}

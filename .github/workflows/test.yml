@@ -1336,8 +1336,8 @@ jobs:
       - name: Public cache privacy and actual service permission integration
         run: |
           set -euo pipefail
-          go test -v -count=1 -timeout=4m -tags destination_acceptance ./internal/app \
-            -run '^TestNative(Global(AuditStartPreservesRealQueueAndPermissionChanges|PublicCoreCopyExcludesStateAndRejectsUntrustedFiles|StoragePauseKeepsControlAndOriginalSQLTransactions|TransportKeepsProductionAuthenticationAndExactBodies|RequestFailureFactsPreserveErrorsAndBlockedReplies|WorkerProbeKeepsFreshConnectionsAndResponseSemantics)|MixedProbePreservesRecoveryFailures|TargetRouteWait(RequiresExactLocalReadiness|StopsOnDeadlineCancellationAndReadFailure))$'
+          go test -race -v -count=1 -timeout=4m -tags destination_acceptance ./internal/app \
+            -run '^TestNative(Global(AuditStartPreservesRealQueueAndPermissionChanges|PublicCoreCopyExcludesStateAndRejectsUntrustedFiles|StoragePauseKeepsControlAndOriginalSQLTransactions|TransportKeepsProductionAuthenticationAndExactBodies|RequestFailureFactsPreserveErrorsAndBlockedReplies|WorkerProbeKeepsFreshConnectionsAndResponseSemantics|AdmissionObserverKeepsAuthenticationRetryAndSQL)|MixedProbePreservesRecoveryFailures|TargetRouteWait(RequiresExactLocalReadiness|StopsOnDeadlineCancellationAndReadFailure))$'
       - name: Admission-time capacity evidence, concurrent offers and loss drain
         run: |
           set -euo pipefail

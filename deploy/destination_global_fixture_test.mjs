@@ -56,3 +56,18 @@ test('global storage hold decorates admitted real SQL without replacing producti
   assert(database.includes('buildWithDestinationAuditStore(t.Context(), &cfg, decorate)'))
   assert(database.includes('nativeVerifyDestinationDatabase(t, a)') && database.includes('PSP_NATIVE_DB_DSN'))
 })
+
+test('authenticated admission evidence keeps original App assembly and executes under race detection', () => {
+  const app = readFileSync(new URL('../internal/app/app.go', import.meta.url), 'utf8')
+  assert(app.includes('return buildWithDestinationAuditStore(ctx, cfg, nil)'))
+  assert(app.includes('return buildWithDestinationAuditObserver(ctx, cfg, decorate, nil)'))
+  assert(app.includes('emitAudit := destinationAuditObserver()'))
+  assert.match(app, /original\(e\)\s+observe\(e\)/)
+  const fixture = readFileSync(new URL('../internal/app/destination_native_admission_observer_test.go', import.meta.url), 'utf8')
+  for (const required of ['a.server.Handler.ServeHTTP(response, request)', 'wrong-owned-fixture-credential', 'gate.Pressure()[0].Batches != 0', 'CandidateBytes: len(wire)', 'Bytes: canonicalBytes', 'BatchLimit: 128', 'ByteLimit: 32 << 20', 'OwnerLimit: 4', 'next("queue_full")', 'next("duplicate_batch")', 'next("collect_off")', "WHERE reason = 'queue_full'", 'loss != 2']) assert(fixture.includes(required))
+  assert.doesNotMatch(fixture, /SetSnapshot\(|\.collector\.Ack\(|unsafe\.|reflect\.|limits\s*=/)
+  const workflow = readFileSync(new URL('../.github/workflows/test.yml', import.meta.url), 'utf8')
+  const body = workflow.slice(workflow.indexOf('  global-fixture:')).split(/\r?\n(?=  sqlite:)/)[0]
+  assert(body.includes('go test -race -v -count=1 -timeout=4m -tags destination_acceptance ./internal/app'))
+  assert(body.includes('AdmissionObserverKeepsAuthenticationRetryAndSQL'))
+})
