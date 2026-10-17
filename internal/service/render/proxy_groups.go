@@ -64,7 +64,7 @@ func buildProxyGroupsYAMLWithMembers(rules string, preferredOrder []string, memb
 }
 
 func buildProxyGroupsYAMLWithFeatures(rules string, preferredOrder []string, members map[string][]domain.ProxyGroupMember, options map[string]domain.ProxyGroupOptions, items []renderItem, advanced MihomoRuleFeatures) (string, error) {
-	return buildProxyGroupsYAMLInternal(rules, preferredOrder, members, options, items, true, advanced.outboundNames())
+	return buildProxyGroupsYAMLInternal(strings.Join(advanced.allRuleFragments(rules), "\n"), preferredOrder, members, options, items, true, advanced.outboundNames())
 }
 
 func buildProxyGroupsYAMLInternal(rules string, preferredOrder []string, members map[string][]domain.ProxyGroupMember, options map[string]domain.ProxyGroupOptions, items []renderItem, resolve bool, excluded ...map[string]bool) (string, error) {
@@ -72,9 +72,12 @@ func buildProxyGroupsYAMLInternal(rules string, preferredOrder []string, members
 	if len(excluded) > 0 {
 		excludedTargets = excluded[0]
 	}
-	targets := ruleTargetsInOrderExcluding(rules, excludedTargets)
-	targets = withRequiredProxyGroupDependencies(targets)
-	targets = withConfiguredProxyGroupDependencies(targets, members)
+	targetExclusions := excludedTargets
+	if resolve {
+		targetExclusions = proxyTargetExclusions(items, excludedTargets)
+	}
+	targets := ruleTargetsInOrderExcluding(rules, targetExclusions)
+	targets = withEffectiveProxyGroupDependencies(targets, members)
 	targets = applyProxyGroupOrder(targets, preferredOrder)
 	if len(targets) == 0 {
 		return "[]", nil
@@ -137,6 +140,19 @@ func buildProxyGroupsYAMLInternal(rules string, preferredOrder []string, members
 	return strings.Join(lines, "\n"), nil
 }
 
+// Explicit rule targets can name a line directly. Such names are not groups;
+// materializing default groups with the same names would create collisions.
+func proxyTargetExclusions(items []renderItem, additional map[string]bool) map[string]bool {
+	excluded := make(map[string]bool, len(items)+len(additional))
+	for name, value := range additional {
+		excluded[name] = value
+	}
+	for _, item := range items {
+		excluded[item.name] = true
+	}
+	return excluded
+}
+
 // applyProxyGroupOrder emits the explicitly ordered groups first, in the
 // configured order, then appends any group the order does not mention at the
 // END, preserving its first-occurrence order from the main rules. Keeping the
@@ -186,47 +202,40 @@ func withoutBuiltinExits(choices []string, nonTestable ...map[string]bool) []str
 	return out
 }
 
-func withRequiredProxyGroupDependencies(targets []string) []string {
-	hasNodeSelector, hasUDPSelector := false, false
-	needsNodeSelector, needsUDPSelector := false, false
+// withEffectiveProxyGroupDependencies closes the two implicit built-in group
+// dependencies using effective members, never defaults that a user overrode.
+// Other group references must still be declared by rules: synthesizing them
+// here would hide missing_group errors and resurrect orphaned configuration.
+func withEffectiveProxyGroupDependencies(targets []string, configs map[string][]domain.ProxyGroupMember) []string {
+	seen := make(map[string]bool, len(targets))
+	queue := append([]string(nil), targets...)
 	for _, target := range targets {
-		// Exact match, not substring: a custom group merely CONTAINING the phrase
-		// (e.g. "美国节点选择") must not suppress the canonical "🚀 节点选择"
-		// selector other emitted groups still reference, which would leave a
-		// dangling reference Clash-family clients reject.
-		if target == "🚀 节点选择" {
-			hasNodeSelector = true
+		seen[target] = true
+	}
+	for index := 0; index < len(queue); index++ {
+		target := queue[index]
+		members, configured := configs[target]
+		if !configured {
+			members = defaultMembersForTarget(target)
 		}
-		if target == "🎮 UDP控制" {
-			hasUDPSelector = true
-		}
-		for _, choice := range proxyGroupChoices(target) {
-			if choice == "🚀 节点选择" {
-				needsNodeSelector = true
+		for _, member := range members {
+			if member.Kind != "proxy_group" || (member.Value != "🚀 节点选择" && member.Value != "🎮 UDP控制") || seen[member.Value] {
+				continue
 			}
-			if choice == "🎮 UDP控制" {
-				needsUDPSelector = true
+			seen[member.Value] = true
+			queue = append(queue, member.Value)
+		}
+	}
+	// Preserve legacy dependency order when no explicit order is configured.
+	out := make([]string, 0, len(queue))
+	for _, dependency := range []string{"🚀 节点选择", "🎮 UDP控制"} {
+		for _, added := range queue[len(targets):] {
+			if added == dependency {
+				out = append(out, added)
 			}
 		}
 	}
-	// The QUIC selector offers delegation to the UDP selector, and UDP's own
-	// alternatives reference the canonical node selector. Close that transitive
-	// dependency even when an administrator defines only a QUIC rule.
-	if needsUDPSelector && !hasUDPSelector {
-		needsNodeSelector = true
-	}
-	if (!needsNodeSelector || hasNodeSelector) && (!needsUDPSelector || hasUDPSelector) {
-		return targets
-	}
-	out := make([]string, 0, len(targets)+2)
-	if needsNodeSelector && !hasNodeSelector {
-		out = append(out, "🚀 节点选择")
-	}
-	if needsUDPSelector && !hasUDPSelector {
-		out = append(out, "🎮 UDP控制")
-	}
-	out = append(out, targets...)
-	return out
+	return append(out, targets...)
 }
 
 func ruleTargetsInOrder(rules string) []string {

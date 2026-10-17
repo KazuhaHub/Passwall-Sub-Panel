@@ -20,6 +20,11 @@ import (
 
 func (s *Service) renderSingBox(ctx context.Context, u *domain.User, tpl *domain.Template, items []renderItem, rulesCommon string, proxyGroupOrder []string, proxyGroupMembers map[string][]domain.ProxyGroupMember, proxyGroupOptions map[string]domain.ProxyGroupOptions, st ports.UISettings) (*Output, error) {
 	outbounds := s.buildSingBoxOutbounds(ctx, u, items, proxyGroupOrder, proxyGroupMembers, proxyGroupOptions, st, u.PersonalRules, rulesCommon)
+	generatedLines := make(map[string]bool, len(items))
+	for _, item := range items {
+		generatedLines[item.name] = true
+	}
+	lineOrigin := markGeneratedLines(outbounds, "tag", generatedLines)
 	outboundsJSON, err := marshalJSONBlock(outbounds)
 	if err != nil {
 		return nil, fmt.Errorf("marshal sing-box outbounds: %w", err)
@@ -46,9 +51,15 @@ func (s *Service) renderSingBox(ctx context.Context, u *domain.User, tpl *domain
 	// Emit the route.rule_set definitions required by the route rules
 	// (GEOSITE/GEOIP) and the template's dns.rules split. Downloads route
 	// through the primary proxy group so the .srs files reach GitHub.
-	body, err = assembleSingBoxRuleSets(body, singBoxRuleSetDetour(proxyGroupOrder))
+	body, err = assembleSingBoxRuleSets(body, singBoxAvailableRuleSetDetour(proxyGroupOrder, outbounds))
 	if err != nil {
 		return nil, fmt.Errorf("assemble sing-box rule_set: %w", err)
+	}
+	// Items already have stable, final names. Keep the complete candidate set
+	// until all selectors and template dependencies have been resolved.
+	body, err = pruneSingBoxLines(body, generatedLines, lineOrigin)
+	if err != nil {
+		return nil, fmt.Errorf("resolve subscription lines: %w", err)
 	}
 
 	// Build profile name for Content-Disposition header.
@@ -384,8 +395,8 @@ func buildSingBoxSelectorOutboundsWithMembers(rules string, items []renderItem, 
 }
 
 func buildSingBoxGroupOutboundsWithMembers(rules string, items []renderItem, preferredOrder []string, memberConfigs map[string][]domain.ProxyGroupMember, optionConfigs map[string]domain.ProxyGroupOptions) []map[string]any {
-	targets := withRequiredProxyGroupDependencies(ruleTargetsInOrder(rules))
-	targets = withConfiguredProxyGroupDependencies(targets, memberConfigs)
+	declared := ruleTargetsInOrderExcluding(rules, proxyTargetExclusions(items, nil))
+	targets := withEffectiveProxyGroupDependencies(declared, memberConfigs)
 	targets = applyProxyGroupOrder(targets, preferredOrder)
 	passThroughGroups := singBoxPassThroughProxyGroups(items, memberConfigs, rules)
 	out := make([]map[string]any, 0, len(targets))
@@ -440,6 +451,41 @@ func buildSingBoxGroupOutboundsWithMembers(rules string, items []renderItem, pre
 		}
 		out = append(out, selector)
 	}
+	return retainSingBoxGroupDependencies(out, declared)
+}
+
+// A PASS-default group is omitted for this client. Its implicit dependencies
+// must not survive as orphan selectors that pull in otherwise unused lines.
+// Explicitly declared, emitted groups remain selectable roots.
+func retainSingBoxGroupDependencies(groups []map[string]any, declared []string) []map[string]any {
+	byName := make(map[string]map[string]any, len(groups))
+	for _, group := range groups {
+		name, _ := group["tag"].(string)
+		byName[name] = group
+	}
+	used := map[string]bool{}
+	var visit func(string)
+	visit = func(name string) {
+		group := byName[name]
+		if group == nil || used[name] {
+			return
+		}
+		used[name] = true
+		members, _ := group["outbounds"].([]string)
+		for _, member := range members {
+			visit(member)
+		}
+	}
+	for _, name := range declared {
+		visit(name)
+	}
+	out := make([]map[string]any, 0, len(groups))
+	for _, group := range groups {
+		name, _ := group["tag"].(string)
+		if used[name] {
+			out = append(out, group)
+		}
+	}
 	return out
 }
 
@@ -466,8 +512,7 @@ func buildSingBoxRouteRules(ruleParts ...string) ([]map[string]any, string) {
 // preserve the semantics by omitting matching route rules for these targets.
 func singBoxPassThroughProxyGroups(items []renderItem, memberConfigs map[string][]domain.ProxyGroupMember, ruleParts ...string) map[string]bool {
 	rules := strings.Join(ruleParts, "\n")
-	targets := withRequiredProxyGroupDependencies(ruleTargetsInOrder(rules))
-	targets = withConfiguredProxyGroupDependencies(targets, memberConfigs)
+	targets := withEffectiveProxyGroupDependencies(ruleTargetsInOrderExcluding(rules, proxyTargetExclusions(items, nil)), memberConfigs)
 	resolvedByTarget := make(map[string][]string, len(targets))
 	for _, target := range targets {
 		members := defaultMembersForTarget(target)
@@ -859,6 +904,25 @@ func singBoxRuleSetDetour(proxyGroupOrder []string) string {
 		}
 	}
 	return "🚀 节点选择"
+}
+
+// A configured group may no longer depend on the canonical node selector.
+// Downloads must use an emitted outbound rather than resurrecting that selector
+// (and all its lines) solely to satisfy a stale preferred order or default name.
+func singBoxAvailableRuleSetDetour(order []string, outbounds []map[string]any) string {
+	preferred := singBoxRuleSetDetour(order)
+	for _, outbound := range outbounds {
+		if outbound["tag"] == preferred {
+			return preferred
+		}
+	}
+	for _, outbound := range outbounds {
+		if outbound["type"] == "selector" || outbound["type"] == "urltest" {
+			name, _ := outbound["tag"].(string)
+			return name
+		}
+	}
+	return "direct"
 }
 
 func marshalJSONBlock(v any) (string, error) {

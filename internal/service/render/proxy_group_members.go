@@ -277,37 +277,8 @@ func proxyGroupTargets(content string, members map[string][]domain.ProxyGroupMem
 	if len(advanced) > 0 {
 		features = advanced[0]
 	}
-	targets := withRequiredProxyGroupDependencies(ruleTargetsInOrderExcluding(strings.Join(features.allRuleFragments(content), "\n"), features.outboundNames()))
-	return withConfiguredProxyGroupDependencies(targets, members)
-}
-
-func withConfiguredProxyGroupDependencies(targets []string, configs map[string][]domain.ProxyGroupMember) []string {
-	hasNodeSelector := false
-	needsNodeSelector := false
-	targetSet := make(map[string]bool, len(targets))
-	for _, target := range targets {
-		targetSet[target] = true
-		if target == "🚀 节点选择" {
-			hasNodeSelector = true
-		}
-	}
-	for group, members := range configs {
-		// An orphaned owner cannot make another otherwise-unused group valid.
-		// This keeps cleanup stable when the removed group happened to reference
-		// the canonical node selector.
-		if !targetSet[group] {
-			continue
-		}
-		for _, member := range members {
-			if member.Kind == "proxy_group" && member.Value == "🚀 节点选择" {
-				needsNodeSelector = true
-			}
-		}
-	}
-	if !needsNodeSelector || hasNodeSelector {
-		return targets
-	}
-	return append([]string{"🚀 节点选择"}, targets...)
+	targets := ruleTargetsInOrderExcluding(strings.Join(features.allRuleFragments(content), "\n"), features.outboundNames())
+	return withEffectiveProxyGroupDependencies(targets, members)
 }
 
 func sortedKeys(set map[string]bool) []string {

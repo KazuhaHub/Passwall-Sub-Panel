@@ -169,7 +169,7 @@ export default function MihomoAdvancedRulesEditor({ value, onChange, onValidatio
 
       <RuleEditorDialog open={subRulesOpen} onClose={() => setSubRulesOpen(false)} paperWidth={900} paperHeight={680}>
         <DialogTitle>{t('admin:rules.mihomo.sub_rules')}</DialogTitle>
-        <DialogContent dividers sx={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        <DialogContent dividers sx={{ display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
           <Alert severity="info" sx={{ mb: 1.5 }}>{t('admin:rules.mihomo.sub_rules_compatibility')}</Alert>
           <Stack direction="row" sx={{ alignItems: 'center', justifyContent: 'space-between', mb: 1 }}>
             <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
@@ -180,8 +180,8 @@ export default function MihomoAdvancedRulesEditor({ value, onChange, onValidatio
             </Stack>
             <Typography variant="body2" color="text.secondary">{t('admin:rules.mihomo.sub_rules_count', { count: subRules.length })}</Typography>
           </Stack>
-          <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '240px minmax(0, 1fr)' }, border: `1px solid ${md.outlineVariant}`, borderRadius: 2, overflow: 'hidden', flex: 1, minHeight: 0 }}>
-            <List dense disablePadding sx={{ bgcolor: md.surfaceContainerLow, borderRight: { md: `1px solid ${md.outlineVariant}` }, overflowY: 'auto', minHeight: 0 }}>
+          <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '240px minmax(0, 1fr)' }, gridTemplateRows: { xs: 'auto minmax(0, 1fr)', md: 'minmax(0, 1fr)' }, border: `1px solid ${md.outlineVariant}`, borderRadius: 2, overflow: 'hidden', flex: 1, minHeight: 0 }}>
+            <List dense disablePadding sx={{ bgcolor: md.surfaceContainerLow, borderRight: { md: `1px solid ${md.outlineVariant}` }, overflowY: 'auto', minHeight: 0, maxHeight: { xs: 120, md: 'none' } }}>
               {subRules.map((rule, index) => (
                 <ListItemButton key={`${rule.name}:${index}`} selected={index === selectedIndex} onClick={() => setSelectedSubRuleIndex(index)}>
                   <ListItemText primary={rule.name || t('admin:rules.mihomo.unnamed_sub_rule')} />
@@ -189,13 +189,13 @@ export default function MihomoAdvancedRulesEditor({ value, onChange, onValidatio
                 </ListItemButton>
               ))}
             </List>
-            <Box sx={{ p: 1.5, minWidth: 0, overflowY: 'auto' }}>
+            <Box sx={{ p: 1.5, display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0, overflow: 'hidden' }}>
               {selected ? <>
                 <TextField fullWidth size="small" label={t('admin:rules.mihomo.sub_rule_name')} value={selected.name}
                   onChange={event => updateSubRule(selectedIndex, { ...selected, name: event.target.value })} sx={{ mb: 1 }} />
-                <Box sx={{ border: `1px solid ${md.outlineVariant}`, borderRadius: 2, overflow: 'hidden' }}>
-                  <Suspense fallback={<Box sx={{ height: 220, display: 'grid', placeItems: 'center' }}><CircularProgress size={22} /></Box>}>
-                    <CodeEditor value={selected.content} onChange={content => updateSubRule(selectedIndex, { ...selected, content })} height="220px" dark={theme.palette.mode === 'dark'} />
+                <Box sx={{ border: `1px solid ${md.outlineVariant}`, borderRadius: 2, overflow: 'hidden', flex: 1, minHeight: 0 }}>
+                  <Suspense fallback={<Box sx={{ height: '100%', display: 'grid', placeItems: 'center' }}><CircularProgress size={22} /></Box>}>
+                    <CodeEditor value={selected.content} onChange={content => updateSubRule(selectedIndex, { ...selected, content })} height="100%" dark={theme.palette.mode === 'dark'} />
                   </Suspense>
                 </Box>
               </> : <Box sx={{ py: 10, textAlign: 'center', color: md.onSurfaceVariant }}>{t('admin:rules.mihomo.no_sub_rules')}</Box>}

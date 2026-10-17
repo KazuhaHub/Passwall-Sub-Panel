@@ -160,6 +160,8 @@ func (s *Service) RenderForUser(ctx context.Context, u *domain.User, ct domain.C
 		return s.renderSingBox(ctx, u, tpl, items, bundle.SharedRules, bundle.ProxyGroupOrder, bundle.ProxyGroupMembers, bundle.ProxyGroupOptions, st)
 	}
 	proxies := s.buildProxies(ctx, u, items, st)
+	generatedLines := emittedProxyNames(proxies, "name")
+	lineOrigin := markGeneratedLines(proxies, "name", generatedLines)
 	proxies, err = appendMihomoRematchOutbounds(proxies, bundle.RematchOutbounds)
 	if err != nil {
 		return nil, err
@@ -177,15 +179,38 @@ func (s *Service) RenderForUser(ctx context.Context, u *domain.User, ct domain.C
 	if err != nil {
 		return nil, fmt.Errorf("marshal Mihomo sub-rules: %w", err)
 	}
-	body := substituteBlockPlaceholders(tpl.Content, map[string]string{
-		"proxies":        strings.TrimRight(string(proxiesYAML), "\n"),
-		"proxy_groups":   proxyGroupsYAML,
-		"rules_common":   strings.TrimRight(bundle.SharedRules, "\n"),
-		"rules_personal": strings.TrimRight(u.PersonalRules, "\n"),
-		"sub_rules":      subRulesYAML,
-	})
-	body = substituteInlinePlaceholders(body, s.profilePlaceholders(u, st))
-	body = expandNodeRefs(body, items)
+	compose := func(groups string) string {
+		body := substituteBlockPlaceholders(tpl.Content, map[string]string{
+			"proxies":        strings.TrimRight(string(proxiesYAML), "\n"),
+			"proxy_groups":   groups,
+			"rules_common":   strings.TrimRight(bundle.SharedRules, "\n"),
+			"rules_personal": strings.TrimRight(u.PersonalRules, "\n"),
+			"sub_rules":      subRulesYAML,
+		})
+		body = substituteInlinePlaceholders(body, s.profilePlaceholders(u, st))
+		return expandNodeRefs(body, items)
+	}
+	body := compose(proxyGroupsYAML)
+	missingGroups, err := mihomoMissingTemplateGroups(body)
+	if err != nil {
+		return nil, fmt.Errorf("resolve template dependencies: %w", err)
+	}
+	if len(missingGroups) > 0 {
+		groupRules := strings.Join([]string{u.PersonalRules, bundle.SharedRules}, "\n")
+		for _, group := range missingGroups {
+			// These synthetic targets drive group generation only, never rules.
+			groupRules += "\n- MATCH," + group
+		}
+		proxyGroupsYAML, err = buildProxyGroupsYAMLWithFeatures(groupRules, bundle.ProxyGroupOrder, bundle.ProxyGroupMembers, bundle.ProxyGroupOptions, items, advanced)
+		if err != nil {
+			return nil, fmt.Errorf("build template dependency groups: %w", err)
+		}
+		body = compose(proxyGroupsYAML)
+	}
+	body, err = pruneMihomoLines(body, generatedLines, lineOrigin)
+	if err != nil {
+		return nil, fmt.Errorf("resolve subscription lines: %w", err)
+	}
 
 	// Build profile name for Content-Disposition header.
 	profileName := buildProfileName(u, st)

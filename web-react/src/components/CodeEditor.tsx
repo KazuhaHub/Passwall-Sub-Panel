@@ -35,7 +35,7 @@ export default function CodeEditor({
         highlightActiveLine: !readOnly,
         autocompletion: false,
       }}
-      style={{ fontSize: 13, borderRadius: 8, overflow: 'hidden' }}
+      style={{ height, fontSize: 13, borderRadius: 8, overflow: 'hidden' }}
     />
   )
 }
