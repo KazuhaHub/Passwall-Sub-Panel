@@ -1,5 +1,9 @@
 {
   "title": "外观",
+  "density": {
+    "switch_to_comfortable": "切换为舒适布局",
+    "switch_to_compact": "切换为紧凑布局"
+  },
   "preset_section": "预设主题色",
   "custom_section": "自定义",
   "custom_hint": "输入 HEX 色值（如 #6750A4）",

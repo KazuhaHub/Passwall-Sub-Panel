@@ -1642,6 +1642,8 @@ IdP 响应验签/校验通过 →
 | 图表 | ECharts（按需 import）| 流量趋势 |
 | 前端打包 | `go:embed` 嵌到二进制 | 单二进制部署 |
 
+顶部密度切换按钮的提示与可访问名称使用 `appearance` 命名空间下的 `density.switch_to_comfortable` / `density.switch_to_compact`，跟随当前语言并沿用既有缺键回退；繁体中文由既有生成流程产生。文案国际化不改变布局密度的切换或本地存储方式。
+
 ---
 
 ## 15. 部署方案
