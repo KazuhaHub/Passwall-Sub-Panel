@@ -47,7 +47,7 @@ func TestFinalLineNamesOnlyCountEmittedReferencedLines(t *testing.T) {
 				switch scenario {
 				case "both":
 					rule.ProxyGroupMembers["国外媒体"] = append(rule.ProxyGroupMembers["国外媒体"], domain.ProxyGroupMember{Kind: "line", NodeID: node.ID, LineID: "relay"})
-					want = []string{"same [7:relay]", "same [7:route-B]"}
+					want = []string{"same [中转]", "same [VLESS 路由]"}
 				case "repeat":
 					rule.Content = "- DOMAIN,example.com,Second\n- MATCH,国外媒体"
 					rule.ProxyGroupMembers["Second"] = rule.ProxyGroupMembers["国外媒体"]
@@ -64,7 +64,7 @@ func TestFinalLineNamesOnlyCountEmittedReferencedLines(t *testing.T) {
 					}
 				case "node":
 					rule.ProxyGroupMembers["国外媒体"] = []domain.ProxyGroupMember{{Kind: "node", NodeID: node.ID}}
-					want = []string{"A", "same [7:relay]", "same [7:route-B]"}
+					want = []string{"A", "same [中转]", "same [VLESS 路由]"}
 				case "literal_brackets":
 					node.RouteState.Lines[0].Name = "user name [7:route-B]"
 					want = []string{"user name [7:route-B]"}
@@ -95,14 +95,14 @@ func TestFinalLineNamesOnlyCountEmittedReferencedLines(t *testing.T) {
 
 func TestFinalNameAllocationStableAndAvoidsSecondaryCollisions(t *testing.T) {
 	c := &lineNameCatalog{lines: map[string]subscriptionLineName{
-		"one":   {nodeID: 1, lineID: "direct", base: "same", token: "one"},
-		"two":   {nodeID: 2, lineID: "route", base: "same", token: "two"},
-		"three": {nodeID: 3, lineID: "direct", base: "same [1:direct]", token: "three"},
-		"four":  {nodeID: 4, lineID: "direct", base: "DIRECT", token: "four"},
+		"one":   {nodeID: 1, lineID: "direct", kind: "直连", base: "same", token: "one"},
+		"two":   {nodeID: 2, lineID: "route", kind: "VLESS 路由", base: "same", token: "two"},
+		"three": {nodeID: 3, lineID: "direct", kind: "直连", base: "same [直连]", token: "three"},
+		"four":  {nodeID: 4, lineID: "direct", kind: "直连", base: "DIRECT", token: "four"},
 	}}
 	kept := map[string]bool{"one": true, "two": true, "three": true, "four": true}
-	fixed := map[string]bool{"DIRECT": true, "same [1:direct] [2]": true}
-	want := map[string]string{"one": "same [1:direct] [3]", "two": "same [2:route]", "three": "same [1:direct]", "four": "DIRECT [4:direct]"}
+	fixed := map[string]bool{"DIRECT": true, "same [直连:1]": true, "same [直连:1] [2]": true}
+	want := map[string]string{"one": "same [直连:1] [3]", "two": "same [VLESS 路由]", "three": "same [直连]", "four": "DIRECT [直连]"}
 	for i := 0; i < 20; i++ {
 		if got := c.allocate(kept, fixed); !reflect.DeepEqual(got, want) {
 			t.Fatalf("unstable collision allocation: %v want %v", got, want)
@@ -144,9 +144,9 @@ func TestFinalLineNamesCompareCompleteFlagsAndIgnoreUnrenderableNodes(t *testing
 				got := namedVLESSProxies(t, output, ct)
 				want := []string{"🇺🇸 same", "🇯🇵 same"}
 				if scenario == "same_flags" {
-					want = []string{"🇺🇸 same [7:direct]", "🇺🇸 same [8:direct]"}
+					want = []string{"🇺🇸 same [直连:7]", "🇺🇸 same [直连:8]"}
 				} else if scenario == "flags_off" {
-					want = []string{"same [7:direct]", "same [8:direct]"}
+					want = []string{"same [直连:7]", "same [直连:8]"}
 				} else if scenario == "unsupported" || scenario == "outside_scope" {
 					want = []string{"🇺🇸 same"}
 				}
@@ -165,7 +165,7 @@ func TestFinalLineNamesCompareCompleteFlagsAndIgnoreUnrenderableNodes(t *testing
 
 func TestFinalNamesBindLegacyAndUniqueHandwrittenReferences(t *testing.T) {
 	for _, ct := range []domain.ClientType{domain.ClientMihomo, domain.ClientSingBox} {
-		for _, scenario := range []string{"legacy_personal", "legacy_rule", "unique_rule", "ambiguous_rule", "ambiguous_template", "unavailable_legacy"} {
+		for _, scenario := range []string{"legacy_personal", "legacy_rule", "typed_rule", "unique_rule", "ambiguous_rule", "ambiguous_template", "unavailable_legacy"} {
 			t.Run(string(ct)+"/"+scenario, func(t *testing.T) {
 				s, node, user, rule := collidingNameFixture(t)
 				switch scenario {
@@ -173,6 +173,8 @@ func TestFinalNamesBindLegacyAndUniqueHandwrittenReferences(t *testing.T) {
 					user.PersonalRules = "- DOMAIN,example.com,same [7:route-B],no-resolve"
 				case "legacy_rule":
 					rule.Content = "- MATCH,same [7:route-B]"
+				case "typed_rule":
+					rule.Content = "- MATCH,same [VLESS 路由]"
 				case "unique_rule":
 					node.RouteState.Lines[0].Name = "unique"
 					rule.Content = "- MATCH,unique"
@@ -224,17 +226,17 @@ func TestFixedObjectsKeepNamesWhileGeneratedLinesAvoidThem(t *testing.T) {
 				if ct == domain.ClientSingBox {
 					template = referenceSingBoxTemplate
 				}
-				want := "same [7:route-B]"
+				want := "same [VLESS 路由]"
 				switch scenario {
 				case "group":
 					name = "国外媒体"
-					want = name + " [7:route-B]"
+					want = name + " [VLESS 路由]"
 				case "builtin":
 					name = "DIRECT"
 					if ct == domain.ClientSingBox {
 						name = "direct"
 					}
-					want = name + " [7:route-B]"
+					want = name + " [VLESS 路由]"
 				case "custom":
 					if ct == domain.ClientMihomo {
 						template = strings.Replace(template, "  {{ proxies }}", "  {{ proxies }}\n  - {name: same, type: direct}", 1)
@@ -366,7 +368,7 @@ func TestFinalNameSeparatorCollisionsAndImmutableDuplicates(t *testing.T) {
 				key = "tag"
 			}
 			names := emittedProxyNames(subscriptionProxyMaps(t, output, ct), key)
-			if !names["same"] || !names["same [7:route-B]"] || !names["same [7:relay]"] {
+			if !names["same"] || !names["same [VLESS 路由]"] || !names["same [中转]"] {
 				t.Fatalf("separator renamed or real lines not disambiguated: %v", names)
 			}
 			s.repos.Separator = lineNameSeparatorRepo{entries: []*domain.SeparatorEntry{
@@ -493,7 +495,7 @@ func TestFinalSpecialNamesAndRenderScopeAreStable(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if got := namedVLESSProxies(t, both, ct); len(got) != 2 || got[name+" [7:relay]"] == nil || got[name+" [7:route-B]"] == nil {
+				if got := namedVLESSProxies(t, both, ct); len(got) != 2 || got[name+" [中转]"] == nil || got[name+" [VLESS 路由]"] == nil {
 					t.Fatalf("special collision names changed: %v", got)
 				}
 				rule.ProxyGroupMembers["国外媒体"] = rule.ProxyGroupMembers["国外媒体"][:1]

@@ -56,7 +56,7 @@ func TestGroupPreviewUsesSharedNamesWithinRuleSetScope(t *testing.T) {
 				t.Fatal(err)
 			}
 			if scenario == "template_collision" {
-				if !reflect.DeepEqual(preview.Groups[0].Members, []string{"same"}) || !reflect.DeepEqual(config.Groups[0].Members, []string{"same [7:route-B]"}) {
+				if !reflect.DeepEqual(preview.Groups[0].Members, []string{"same"}) || !reflect.DeepEqual(config.Groups[0].Members, []string{"same [VLESS 路由]"}) {
 					t.Fatalf("preview must ignore external names; subscription must avoid them: %+v vs %+v", preview.Groups, config.Groups)
 				}
 			} else if len(preview.Groups) != len(config.Groups) {
@@ -294,7 +294,7 @@ func TestGroupPreviewIgnoresLinesReferencedOnlyByOtherRuleSets(t *testing.T) {
 		t.Fatal(err)
 	}
 	names := namedVLESSProxies(t, output, domain.ClientMihomo)
-	if len(names) != 2 || names["same [7:relay]"] == nil || names["same [7:route-B]"] == nil {
+	if len(names) != 2 || names["same [中转]"] == nil || names["same [VLESS 路由]"] == nil {
 		t.Fatalf("subscription lost other rule-set dependencies: %+v", names)
 	}
 }

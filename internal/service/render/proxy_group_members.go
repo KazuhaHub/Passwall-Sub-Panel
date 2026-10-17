@@ -312,7 +312,6 @@ func validateProxyGroupMembers(targets []string, configs map[string][]domain.Pro
 			issues = append(issues, ProxyGroupIssue{Level: "error", Group: group, Code: "too_many_members", Params: map[string]any{"max": maxProxyGroupMembers}, Message: fmt.Sprintf("成员数量不能超过 %d", maxProxyGroupMembers)})
 		}
 		seen := map[string]bool{}
-		hasRemaining := false
 		for _, member := range list {
 			key := member.Kind + ":" + member.Value + ":" + strconv.FormatInt(member.NodeID, 10) + ":" + member.LineID
 			if seen[key] {
@@ -357,9 +356,6 @@ func validateProxyGroupMembers(targets []string, configs map[string][]domain.Pro
 				} else if member.Value != "remaining" && !nodeSetHasMatch(member.Value, nodes) {
 					issues = append(issues, ProxyGroupIssue{Level: "warning", Group: group, Code: "empty_node_set", Params: map[string]any{"value": member.Value}, Message: "节点集合当前没有匹配项：" + member.Value})
 				}
-				if member.Value == "remaining" {
-					hasRemaining = true
-				}
 			case "rematch":
 				if !knownOutbounds[member.Value] {
 					issues = append(issues, ProxyGroupIssue{Level: "error", Group: group, Code: "missing_rematch", Params: map[string]any{"value": member.Value}, Message: "引用的 Rematch 出站不存在：" + member.Value})
@@ -367,9 +363,6 @@ func validateProxyGroupMembers(targets []string, configs map[string][]domain.Pro
 			default:
 				issues = append(issues, ProxyGroupIssue{Level: "error", Group: group, Code: "unknown_kind", Params: map[string]any{"value": member.Kind}, Message: "未知成员类型：" + member.Kind})
 			}
-		}
-		if len(list) > 0 && !hasRemaining {
-			issues = append(issues, ProxyGroupIssue{Level: "warning", Group: group, Code: "missing_remaining", Message: "未包含“其余线路”，未来新增节点不会自动进入此代理组"})
 		}
 	}
 

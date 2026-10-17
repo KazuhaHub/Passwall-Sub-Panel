@@ -218,6 +218,21 @@ export default function ProxyGroupMembersEditor({ content, groupOrder, initialGr
     return member.value || member.kind
   }
 
+  // Type prefixes belong only to the sortable editor cards, never to saved
+  // identities, candidate labels or server-compiled subscription previews.
+  function memberOrderLabel(member: ProxyGroupMember) {
+    const value = memberLabel(member)
+    if (member.kind === 'line') {
+      const line = inspection?.lines?.find(line => line.node_id === member.node_id && line.line_id === member.line_id)
+      const kind = line?.kind || (member.line_id === 'direct' ? 'direct' : 'line')
+      return t(`admin:rules.members.member_label_${kind}`, { value })
+    }
+    if (['node', 'builtin', 'proxy_group', 'rematch'].includes(member.kind)) {
+      return t(`admin:rules.members.member_label_${member.kind}`, { value })
+    }
+    return value
+  }
+
   function issueLabel(issue: NonNullable<ProxyGroupInspection['issues']>[number]) {
     if (!issue.code) return issue.message
     return t(`admin:rules.members.issues.${issue.code}`, { ...issue.params, defaultValue: issue.message })
@@ -383,13 +398,13 @@ export default function ProxyGroupMembersEditor({ content, groupOrder, initialGr
                 <Chip size="small" label={index + 1} color={index === 0 && emphasizeFirst ? 'primary' : 'default'} />
                 <Box sx={{ minWidth: 0 }}>
                   <Tooltip title={memberKey(member)} placement="top" describeChild>
-                    <Typography component="span" noWrap tabIndex={0} sx={{ display: 'inline-block', maxWidth: '100%', verticalAlign: 'middle', fontSize: 14, fontWeight: 500, color: md.onSurface }}>{memberLabel(member)}</Typography>
+                    <Typography component="span" noWrap tabIndex={0} sx={{ display: 'inline-block', maxWidth: '100%', verticalAlign: 'middle', fontSize: 14, fontWeight: 500, color: md.onSurface }}>{memberOrderLabel(member)}</Typography>
                   </Tooltip>
                 </Box>
                 <Stack direction="row" sx={{ gridColumn: { xs: '3', sm: 'auto' }, justifySelf: 'end' }}>
                 <Tooltip title={t('admin:rules.members.move_up')}><span><IconButton size="small" disabled={index === 0} onClick={() => move(index, index - 1)}><ArrowUpwardIcon fontSize="small" /></IconButton></span></Tooltip>
                 <Tooltip title={t('admin:rules.members.move_down')}><span><IconButton size="small" disabled={index === currentMembers.length - 1} onClick={() => move(index, index + 1)}><ArrowDownwardIcon fontSize="small" /></IconButton></span></Tooltip>
-                <IconButton size="small" color="error" aria-label={`${t('common:actions.delete')} ${memberLabel(member)}`} disabled={currentMembers.length <= 1} onClick={() => remove(index)}>
+                <IconButton size="small" color="error" aria-label={`${t('common:actions.delete')} ${memberOrderLabel(member)}`} disabled={currentMembers.length <= 1} onClick={() => remove(index)}>
                   <DeleteIcon fontSize="small" />
                 </IconButton>
                 </Stack>

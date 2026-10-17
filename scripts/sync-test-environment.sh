@@ -67,7 +67,7 @@ ln -sfn "$artifact" "$current_link"
 docker compose -p "$project" -f "$test_compose" up -d --no-deps --force-recreate panel
 
 ready=false
-for attempt in {1..40}; do
+for ((attempt = 1; attempt <= 40; attempt++)); do
   if curl --fail --silent --max-time 2 "$base_url/api/version" | node -e '
     let raw=""; process.stdin.on("data", b => raw += b); process.stdin.on("end", () => {
       try { process.exit(JSON.parse(raw).version === process.argv[1] ? 0 : 1) } catch { process.exit(1) }

@@ -18,11 +18,12 @@ type subscriptionLineName struct {
 	lineID string
 	base   string
 	legacy string
+	kind   string
 	token  string
 }
 
 // A catalog is request-local. Public names are aliases, never identities.
-// URI and admin previews keep using the original renderItem.name values.
+// URI and admin candidate catalogs keep the original renderItem.name values.
 type lineNameCatalog struct {
 	lines   map[string]subscriptionLineName
 	aliases map[string][]string
@@ -49,7 +50,7 @@ func newLineNameCatalog(items []renderItem, flags bool, nodes ...[]*domain.Node)
 			continue
 		}
 		token := fmt.Sprintf("%s%d:%s", prefix, item.node.ID, item.lineID())
-		line := subscriptionLineName{nodeID: item.node.ID, lineID: item.lineID(), base: bases[i].name, legacy: item.name, token: token}
+		line := subscriptionLineName{nodeID: item.node.ID, lineID: item.lineID(), base: bases[i].name, legacy: item.name, kind: subscriptionLineKind(item), token: token}
 		catalog.add(line)
 		internal[i].name = token
 	}
@@ -73,7 +74,7 @@ func newLineNameCatalog(items []renderItem, flags bool, nodes ...[]*domain.Node)
 			for _, definition := range definitions {
 				token := fmt.Sprintf("%s%d:%s", prefix, node.ID, definition.lineID())
 				if _, exists := catalog.lines[token]; !exists {
-					catalog.add(subscriptionLineName{nodeID: node.ID, lineID: definition.lineID(), base: definition.name, legacy: definition.name, token: token})
+					catalog.add(subscriptionLineName{nodeID: node.ID, lineID: definition.lineID(), base: definition.name, legacy: definition.name, kind: subscriptionLineKind(definition), token: token})
 				}
 			}
 		}
@@ -81,9 +82,45 @@ func newLineNameCatalog(items []renderItem, flags bool, nodes ...[]*domain.Node)
 	return catalog, internal
 }
 
+// Labels are independent of the administrator's UI language, like the base
+// proxy names. Never infer a line's kind from its display name or UUID.
+func subscriptionLineKind(item renderItem) string {
+	if item.route != nil {
+		return "VLESS 路由"
+	}
+	if item.relay != nil {
+		return "中转"
+	}
+	return "直连"
+}
+
+func (line subscriptionLineName) typedName() string {
+	return fmt.Sprintf("%s [%s]", line.base, line.kind)
+}
+
+func (line subscriptionLineName) shortIdentity() string {
+	if line.lineID == "direct" {
+		return fmt.Sprint(line.nodeID)
+	}
+	return line.lineID
+}
+
+func (line subscriptionLineName) shortName(length int) string {
+	id := line.shortIdentity()
+	return fmt.Sprintf("%s [%s:%s]", line.base, line.kind, id[:min(length, len(id))])
+}
+
 func (c *lineNameCatalog) add(line subscriptionLineName) {
 	c.lines[line.token] = line
-	for _, alias := range []string{line.base, line.legacy, fmt.Sprintf("%s [%d:%s]", line.base, line.nodeID, line.lineID)} {
+	aliases := []string{line.base, line.legacy, fmt.Sprintf("%s [%d:%s]", line.base, line.nodeID, line.lineID), line.typedName()}
+	// Reconstruct new public names as aliases too, even when the current final
+	// set no longer needs a suffix. Ambiguous aliases still fail closed.
+	id := line.shortIdentity()
+	for length := min(8, len(id)); length <= len(id); length++ {
+		aliases = append(aliases, line.shortName(length))
+	}
+	aliases = append(aliases, fmt.Sprintf("%s [%s:%s:%d]", line.base, line.kind, id, line.nodeID))
+	for _, alias := range aliases {
 		found := false
 		for _, existing := range c.aliases[alias] {
 			found = found || existing == line.token
@@ -150,11 +187,55 @@ func (c *lineNameCatalog) allocate(kept, fixed map[string]bool) map[string]strin
 			reserved[line.base] = true
 		}
 	}
+	typedCounts := map[string]int{}
+	for _, line := range lines {
+		if _, assigned := result[line.token]; !assigned {
+			typedCounts[line.typedName()]++
+		}
+	}
+	// Reserve unique type labels before allocating any short identities, so a
+	// generated suffix cannot displace another line's simpler valid name.
+	pending := []subscriptionLineName{}
+	lengths := map[string]int{}
 	for _, line := range lines {
 		if _, assigned := result[line.token]; assigned {
 			continue
 		}
-		base := fmt.Sprintf("%s [%d:%s]", line.base, line.nodeID, line.lineID)
+		name := line.typedName()
+		if typedCounts[name] == 1 && !reserved[name] {
+			result[line.token], reserved[name] = name, true
+		} else {
+			pending = append(pending, line)
+			lengths[line.token] = min(8, len(line.shortIdentity()))
+		}
+	}
+	exhausted := []subscriptionLineName{}
+	for len(pending) > 0 {
+		counts := map[string]int{}
+		for _, line := range pending {
+			counts[line.shortName(lengths[line.token])]++
+		}
+		next := []subscriptionLineName{}
+		for _, line := range pending {
+			name := line.shortName(lengths[line.token])
+			if counts[name] == 1 && !reserved[name] {
+				result[line.token], reserved[name] = name, true
+			} else if lengths[line.token] < len(line.shortIdentity()) {
+				lengths[line.token]++
+				next = append(next, line)
+			} else {
+				exhausted = append(exhausted, line)
+			}
+		}
+		pending = next
+	}
+	// Identical full line IDs across nodes (or literal user-entered suffixes)
+	// still cannot collide. Node identity and a final counter are rare fallbacks.
+	for _, line := range exhausted {
+		base := line.shortName(len(line.shortIdentity()))
+		if line.lineID != "direct" {
+			base = fmt.Sprintf("%s [%s:%s:%d]", line.base, line.kind, line.lineID, line.nodeID)
+		}
 		name := base
 		for index := 2; reserved[name]; index++ {
 			name = fmt.Sprintf("%s [%d]", base, index)

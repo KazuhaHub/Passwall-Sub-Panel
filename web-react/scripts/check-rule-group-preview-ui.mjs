@@ -32,7 +32,7 @@ await context.route('**/api/**', async route => {
     const req = request.postDataJSON(); previews.push(req)
     if (fail) return route.fulfill({ status: 400, json: { error: 'fixture ambiguous line' } })
     const id = req.preview_group_id || 2
-    data = { group_id: id, rule_set: 'test', status: 'ready', groups: [{ name: 'Pick', members: [id === 2 ? '🇯🇵专线' : '🇯🇵专线 [3:route]'] }] }
+    data = { group_id: id, rule_set: 'test', status: 'ready', groups: [{ name: 'Pick', members: id === 2 ? ['🇯🇵专线'] : ['🇯🇵专线 [中转:52787c21]', '🇯🇵专线 [中转:6b752549]', '🇯🇵专线 [VLESS 路由]'] }] }
   } else if (path.endsWith('/inspect-proxy-groups')) data = inspection
   else if (path.endsWith('/admin/rules')) data = envelope([draft])
   else if (path.endsWith('/admin/groups')) data = envelope(groups)
@@ -68,7 +68,9 @@ try {
   await scope.click()
   assert.equal(await page.getByRole('option', { name: '全部启用节点', exact: true }).count(), 0)
   await page.getByRole('option', { name: '其他分组', exact: true }).click()
-  await dialog.getByText('1. 🇯🇵专线 [3:route]', { exact: true }).waitFor()
+  await dialog.getByText('1. 🇯🇵专线 [中转:52787c21]', { exact: true }).waitFor()
+  await dialog.getByText('2. 🇯🇵专线 [中转:6b752549]', { exact: true }).waitFor()
+  await dialog.getByText('3. 🇯🇵专线 [VLESS 路由]', { exact: true }).waitFor()
   for (const width of [390, 1440]) {
     await page.setViewportSize({ width, height: 1100 })
     await dialog.getByText('成员顺序预览', { exact: true }).scrollIntoViewIfNeeded()
@@ -79,7 +81,9 @@ try {
   fail = true
   await scope.click(); await page.getByRole('option', { name: '管理员所属分组', exact: true }).click()
   await dialog.getByText('fixture ambiguous line', { exact: true }).waitFor()
-  assert.equal(await dialog.getByText('1. 🇯🇵专线 [3:route]', { exact: true }).count(), 0)
+  assert.equal(await dialog.getByText('1. 🇯🇵专线 [中转:52787c21]', { exact: true }).count(), 0)
+  assert.equal(await dialog.getByText('2. 🇯🇵专线 [中转:6b752549]', { exact: true }).count(), 0)
+  assert.equal(await dialog.getByText('3. 🇯🇵专线 [VLESS 路由]', { exact: true }).count(), 0)
   assert.equal(await dialog.getByText('1. 🇯🇵专线', { exact: true }).count(), 0)
   assert.deepEqual(errors, [])
   assert.ok(writes.every(path => path.endsWith('/inspect-proxy-groups') || path.endsWith('/preview-proxy-groups')), JSON.stringify(writes))

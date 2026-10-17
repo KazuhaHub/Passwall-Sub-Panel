@@ -27,7 +27,7 @@ it('preserves precise line identities when editing and reopening a rule with a s
   const reopened = await editRow('saved-name')
   fireEvent.click(within(reopened).getByRole('tab', { name: 'admin:rules.tabs.members' }))
   const memberName = await within(reopened).findByTitle('line:17:stable-route-id')
-  expect(memberName.textContent).toBe('Node B')
+  await waitFor(() => expect(memberName.textContent).toBe('admin:rules.members.member_label_vless_route'))
   expect(within(reopened).queryByText('line:17:stable-route-id')).toBeNull()
   fireEvent.mouseOver(memberName)
   expect((await screen.findByRole('tooltip')).textContent).toBe('line:17:stable-route-id')

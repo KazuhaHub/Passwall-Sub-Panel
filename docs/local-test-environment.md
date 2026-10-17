@@ -19,6 +19,8 @@ bash scripts/sync-test-environment.sh
 
 脚本校验现有容器身份、挂载及配置路径，构建前端和内嵌前端的 Linux Go 程序。优先使用 `PSP_TEST_GO` 指定的编译器，其次使用 PATH 中的 Go，最后使用本机已有的 `/private/tmp/psp-network-tools.GMPtn3/go/bin/go`。编译器须满足 `go.mod`，不会自动下载替代工具链。可通过 `PSP_TEST_GOCACHE` 指定编译缓存。
 
+启动后的就绪检查最多执行 40 轮，使用显式计数循环，避免未使用循环变量触发 ShellCheck 的 SC2034；不通过禁用检查绕过告警。修改此脚本时，除 `bash -n` 外应按 CI 范围检查全部已跟踪的 Shell 脚本。
+
 构建成功后，仅停止 PSP，对静止的 `main-runtime/` 创建权限受限的备份，再切换 `psp-test-current` 软链接并只重建 PSP 容器。检查 `/api/version` 与本次构建标识一致、`/health` 成功以及 3X-UI 启动时间未变化。每次的二进制和备份使用独立时间戳，保留上一个版本以便回退；不执行 `down`、删除卷、重置数据库或覆盖 3X-UI 规则。
 
 新版本未就绪时，脚本尝试恢复旧软链接并重启旧 PSP；不会自动回灌数据库备份。涉及数据库迁移的回退须先核对数据兼容性，再由管理员决定是否恢复备份。备份含测试配置和数据，不应提交仓库或公开。

@@ -62,13 +62,46 @@ it('first chooses a node, then lists only its own named lines and saves stable r
   await waitFor(() => expect(changed).toHaveBeenCalledWith({ Pick: [...initialMembers.Pick, { kind: 'line', node_id: 1, line_id: 'route-a' }] }))
   expect((screen.getByRole('combobox', { name: 'admin:rules.members.select_line_node' }) as HTMLInputElement).value).toBe('Alpha')
   expect(screen.queryByText('line:1:route-a')).toBeNull()
-  const memberName = screen.getByText('Alpha my-vlessroute-line')
+  const memberName = screen.getByText('admin:rules.members.member_label_vless_route')
   expect(memberName.tagName).toBe('SPAN')
   expect(memberName.classList.contains('MuiTypography-noWrap')).toBe(true)
   expect(memberName.getAttribute('title')).toBe('line:1:route-a')
   fireEvent.mouseOver(memberName)
   expect((await screen.findByRole('tooltip')).textContent).toBe('line:1:route-a')
   fireEvent.mouseLeave(memberName)
+})
+
+it('prefixes sortable cards by member type without changing identities or inspection payloads', async () => {
+  const members: Record<string, ProxyGroupMember[]> = { Pick: [
+    { kind: 'node', node_id: 1 },
+    { kind: 'line', node_id: 1, line_id: 'direct' },
+    { kind: 'line', node_id: 1, line_id: 'relay-a' },
+    { kind: 'line', node_id: 1, line_id: 'route-a' },
+    { kind: 'node_set', value: 'remaining' },
+    { kind: 'node_set', value: 'region:HK' },
+    { kind: 'node_set', value: 'tag:fast' },
+    { kind: 'builtin', value: 'DIRECT' },
+    { kind: 'proxy_group', value: 'Other' },
+    { kind: 'rematch', value: 'Mark' },
+    { kind: 'line', node_id: 1, line_id: 'deleted' },
+  ] }
+  api.post.mockResolvedValue({ data: inspection })
+  const changed = vi.fn()
+  mount(<ProxyGroupMembersEditor content="- MATCH,Pick" groupOrder={[]} initialGroupOrder={[]} onGroupOrderChange={() => {}}
+    members={members} initialMembers={members} onChange={changed} options={{}} initialOptions={{}} onOptionsChange={() => {}} previewGroups={[]} />)
+  await screen.findByText('admin:rules.members.member_label_vless_route')
+  for (const key of ['node', 'direct', 'relay', 'vless_route', 'builtin', 'proxy_group', 'rematch', 'line']) {
+    const name = screen.getByText(`admin:rules.members.member_label_${key}`)
+    expect(name.tagName).toBe('SPAN')
+    expect(name.getAttribute('title')).toBeTruthy()
+  }
+  for (const key of ['remaining', 'region_set', 'tag_set']) expect(screen.getByText(`admin:rules.members.${key}`)).toBeTruthy()
+  expect(screen.getByText('admin:rules.members.member_label_direct').getAttribute('title')).toBe('line:1:direct')
+  expect(screen.getByText('admin:rules.members.member_label_rematch').getAttribute('title')).toBe('rematch:Mark:0')
+  expect(api.post).toHaveBeenCalledWith('/admin/rules/inspect-proxy-groups', expect.objectContaining({ proxy_group_members: members }), expect.anything())
+  expect(changed).not.toHaveBeenCalled()
+  fireEvent.click(screen.getByRole('button', { name: 'common:actions.delete admin:rules.members.member_label_relay' }))
+  expect(changed).toHaveBeenCalledWith({ Pick: members.Pick.filter(member => member.line_id !== 'relay-a') })
 })
 
 it('shows a category-specific explanation for every member category', async () => {

@@ -15,6 +15,33 @@ func TestProxyGroupBuiltinsMatchMihomoSupportedTargets(t *testing.T) {
 	}
 }
 
+func TestExplicitMembersNeedNotIncludeRemainingAndKeepOtherValidation(t *testing.T) {
+	nodes := []*domain.Node{{ID: 1, DisplayName: "A", Enabled: true, Region: "HK", Tags: []string{"fast"}}}
+	for _, tc := range []struct {
+		member domain.ProxyGroupMember
+		issue  string
+	}{
+		{domain.ProxyGroupMember{Kind: "builtin", Value: "DIRECT"}, ""},
+		{domain.ProxyGroupMember{Kind: "node", NodeID: 1}, ""},
+		{domain.ProxyGroupMember{Kind: "line", NodeID: 1, LineID: "direct"}, ""},
+		{domain.ProxyGroupMember{Kind: "node_set", Value: "region:HK"}, ""},
+		{domain.ProxyGroupMember{Kind: "node_set", Value: "tag:fast"}, ""},
+		{domain.ProxyGroupMember{Kind: "node_set", Value: "remaining"}, ""},
+		{domain.ProxyGroupMember{Kind: "node", NodeID: 999}, "missing_node"},
+		{domain.ProxyGroupMember{Kind: "builtin", Value: "INVALID"}, "unknown_builtin"},
+		{domain.ProxyGroupMember{Kind: "node_set", Value: "region:XX"}, "empty_node_set"},
+	} {
+		got := InspectProxyGroups("- MATCH,Pick", map[string][]domain.ProxyGroupMember{"Pick": {tc.member}}, nil, nodes)
+		if tc.issue == "" {
+			if len(got.Issues) != 0 {
+				t.Fatalf("explicit member %+v produced unnecessary issues: %+v", tc.member, got.Issues)
+			}
+		} else if len(got.Issues) != 1 || got.Issues[0].Code != tc.issue {
+			t.Fatalf("other validation changed for %+v: %+v", tc.member, got.Issues)
+		}
+	}
+}
+
 func TestResolveConfiguredMembersSpecificNodeBeforeDirectAndRemainingDeduplicates(t *testing.T) {
 	china := &domain.Node{ID: 42, DisplayName: "🇨🇳 China SH - Aliyun", Region: "CN", Tags: []string{"premium"}}
 	taiwan := &domain.Node{ID: 7, DisplayName: "🇹🇼 Taiwan", Region: "TW"}
@@ -142,7 +169,7 @@ func TestSingBoxCustomMembersUseSameOrder(t *testing.T) {
 	}
 }
 
-func TestInspectProxyGroupsRejectsCycleAndWarnsWithoutRemaining(t *testing.T) {
+func TestInspectProxyGroupsRejectsCycleWithoutAdditionalMembershipWarning(t *testing.T) {
 	configs := map[string][]domain.ProxyGroupMember{
 		"A": {{Kind: "proxy_group", Value: "B"}},
 		"B": {{Kind: "proxy_group", Value: "A"}},
@@ -160,8 +187,8 @@ func TestInspectProxyGroupsRejectsCycleAndWarnsWithoutRemaining(t *testing.T) {
 	if !hasCycle {
 		t.Fatalf("expected cycle error: %#v", inspection.Issues)
 	}
-	if !hasWarning {
-		t.Fatalf("expected remaining warning: %#v", inspection.Issues)
+	if hasWarning {
+		t.Fatalf("unexpected membership warning: %#v", inspection.Issues)
 	}
 }
 

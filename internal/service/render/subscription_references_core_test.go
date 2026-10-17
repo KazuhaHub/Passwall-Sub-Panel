@@ -32,7 +32,7 @@ func TestReferencedSubscriptionRealCores(t *testing.T) {
 	if xray == "" || mihomo == "" || singbox == "" {
 		t.Skip("set PSP_REFERENCE_XRAY, PSP_REFERENCE_MIHOMO and PSP_REFERENCE_SINGBOX for offline core acceptance")
 	}
-	for _, scenario := range []string{"vless_route", "hidden_direct_route", "collision_both", "collision_single", "direct_special", "direct_quoted", "direct_outer_quoted", "legacy_direct", "legacy_relay"} {
+	for _, scenario := range []string{"vless_route", "hidden_direct_route", "collision_both", "collision_single", "same_type_routes", "direct_special", "direct_quoted", "direct_outer_quoted", "legacy_direct", "legacy_relay"} {
 		t.Run(scenario, func(t *testing.T) {
 			testReferencedCoreScenario(t, xray, mihomo, singbox, scenario)
 		})
@@ -85,13 +85,22 @@ func testReferencedCoreScenario(t *testing.T, xray, mihomo, singbox, scenario st
 			rule.ProxyGroupMembers["OnlyRoute"] = rule.ProxyGroupMembers["国外媒体"]
 			delete(rule.ProxyGroupMembers, "国外媒体")
 			expectedName, expectedUUID := "A B", "12345678-1234-03e9-8def-123456789abc"
+			if scenario == "same_type_routes" {
+				line := &node.RouteState.Lines[0]
+				line.Name, line.OnlyLineName, line.ID = "same", true, "52787c21-62ab-4496-94fb-6f4b4fb51312"
+				other := *line
+				other.ID, other.Route = "6b752549-4a51-4d6a-bd6c-81930ee5e715", 1002
+				node.RouteState.Lines = append(node.RouteState.Lines, other)
+				rule.ProxyGroupMembers["OnlyRoute"] = []domain.ProxyGroupMember{{Kind: "line", NodeID: node.ID, LineID: line.ID}, {Kind: "line", NodeID: node.ID, LineID: other.ID}}
+				expectedName = "same [VLESS 路由:52787c21]"
+			}
 			if strings.HasPrefix(scenario, "collision_") {
 				node.Relays = []domain.RelayLine{{ID: "relay", Name: "same", OnlyLineName: true, Address: "127.0.0.1", Port: serverPort, Enabled: true}}
 				node.RouteState.Lines[0].Name, node.RouteState.Lines[0].OnlyLineName = "same", true
 				expectedName = "same"
 				if scenario == "collision_both" {
 					rule.ProxyGroupMembers["OnlyRoute"] = append(rule.ProxyGroupMembers["OnlyRoute"], domain.ProxyGroupMember{Kind: "line", NodeID: node.ID, LineID: "relay"})
-					expectedName = "same [7:route-B]"
+					expectedName = "same [VLESS 路由]"
 				}
 			}
 			if scenario == "direct_special" {
@@ -193,7 +202,7 @@ func testReferencedCoreScenario(t *testing.T, xray, mihomo, singbox, scenario st
 			if !foundRoute {
 				t.Fatalf("required %s was not emitted; refusing a DIRECT fallback false positive", expectedName)
 			}
-			if scenario == "collision_both" && vlessCount != 2 || scenario == "collision_single" && vlessCount != 1 {
+			if (scenario == "collision_both" || scenario == "same_type_routes") && vlessCount != 2 || scenario == "collision_single" && vlessCount != 1 {
 				t.Fatalf("collision transition emitted %d VLESS proxies", vlessCount)
 			}
 			file := referenceCoreFile(t, "subscription.json", output.Body)
