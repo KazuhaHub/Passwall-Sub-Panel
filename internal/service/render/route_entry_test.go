@@ -3,6 +3,7 @@ package render
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"net/url"
 	"strings"
 	"testing"
@@ -11,10 +12,66 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 )
 
-func TestRoutesChooseOneVisibleEntryAcrossFormats(t *testing.T) {
-	for _, relayEntry := range []bool{false, true} {
+func TestHiddenDirectInboundRouteRemainsPublishedForAllMemberSelections(t *testing.T) {
+	for _, member := range []domain.ProxyGroupMember{
+		{Kind: "node", NodeID: 7},
+		{Kind: "line", NodeID: 7, LineID: "route-B"},
+		{Kind: "node_set", Value: "remaining"},
+		{Kind: "node_set", Value: "region:US"},
+		{Kind: "node_set", Value: "tag:edge"},
+	} {
+		for _, ct := range []domain.ClientType{domain.ClientMihomo, domain.ClientSingBox, domain.ClientURIList} {
+			t.Run(member.Kind+member.Value+"/"+string(ct), func(t *testing.T) {
+				s, n, user, rule := referenceRenderFixture(t)
+				user.GroupID = 1
+				n.HideDirect, n.Region, n.Tags = true, "US", []string{"edge"}
+				rule.ProxyGroupMembers["国外媒体"] = []domain.ProxyGroupMember{member}
+				before, _ := json.Marshal(n)
+				output, err := s.RenderForUser(context.Background(), user, ct)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if ct == domain.ClientURIList {
+					body, err := base64.StdEncoding.DecodeString(string(output.Body))
+					if err != nil {
+						t.Fatal(err)
+					}
+					lines := strings.Fields(string(body))
+					if len(lines) != 1 {
+						t.Fatalf("unexpected URI set: %s", body)
+					}
+					uri, err := url.Parse(lines[0])
+					if err != nil || uri.Fragment != "A B" || uri.Hostname() != n.ServerAddress || uri.User.Username() != "12345678-1234-03e9-8def-123456789abc" {
+						t.Fatalf("wrong derived URI: %s (%v)", body, err)
+					}
+				} else {
+					key := "name"
+					if ct == domain.ClientSingBox {
+						key = "tag"
+					}
+					names := emittedProxyNames(subscriptionProxyMaps(t, output, ct), key)
+					if names["A"] || !names["A B"] {
+						t.Fatalf("wrong published set: %v", names)
+					}
+				}
+				preview, err := s.PreviewMihomoGroup(context.Background(), user.GroupID, rule)
+				if err != nil || len(preview.Groups) != 1 || len(preview.Groups[0].Members) != 1 || preview.Groups[0].Members[0] != "A B" {
+					t.Fatalf("wrong preview: %+v (%v)", preview, err)
+				}
+				after, _ := json.Marshal(n)
+				if string(before) != string(after) {
+					t.Fatal("render changed stored route intent")
+				}
+			})
+		}
+	}
+}
+
+func TestRoutesChooseOneInboundIndependentOfDirectLineVisibilityAcrossFormats(t *testing.T) {
+	for _, mode := range []struct{ relay, hidden bool }{{false, false}, {false, true}, {true, false}, {true, true}} {
+		relayEntry := mode.relay
 		s, n, user, _ := routeRenderFixture(t)
-		n.HideDirect = relayEntry
+		n.HideDirect = mode.hidden
 		n.Relays = []domain.RelayLine{{ID: "front", Name: "R", Address: "relay.example", Port: 8443, SNI: "relay-sni.example", Enabled: true}}
 		line := &n.RouteState.Lines[0]
 		line.Name, line.OutboundTag, line.OnlyLineName = "", "warp", true
@@ -68,7 +125,7 @@ func TestRoutesChooseOneVisibleEntryAcrossFormats(t *testing.T) {
 }
 
 func TestRoutesWithUnavailableEntriesStayWithdrawn(t *testing.T) {
-	for _, entryID := range []string{"", "disabled", "deleted"} {
+	for _, entryID := range []string{"disabled", "deleted"} {
 		s, n, user, _ := routeRenderFixture(t)
 		n.Relays = []domain.RelayLine{{ID: "disabled", Address: "relay.example"}}
 		n.HideDirect = true

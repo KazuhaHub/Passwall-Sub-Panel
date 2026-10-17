@@ -13,8 +13,8 @@ func TestRouteEntryAndDefaultLabel(t *testing.T) {
 		t.Fatal("custom name was replaced")
 	}
 	n.HideDirect = true
-	if _, ok := line.ResolveEntry(n); ok {
-		t.Fatal("hidden direct entry remained available")
+	if relay, ok := line.ResolveEntry(n); !ok || relay != nil {
+		t.Fatal("hiding the standalone direct line disabled the original inbound")
 	}
 	line.EntryRelayID = "on"
 	if relay, ok := line.ResolveEntry(n); !ok || relay.ID != "on" {
@@ -35,8 +35,8 @@ func TestRouteEffectiveAvailabilityPreservesConfiguredIntent(t *testing.T) {
 		t.Fatal("visible direct entry unavailable")
 	}
 	n.HideDirect = true
-	if line.LocallyAvailable(n) || !line.Enabled {
-		t.Fatal("hidden direct route was enabled or configuration was lost")
+	if !line.LocallyAvailable(n) || !line.Enabled {
+		t.Fatal("hiding the standalone direct line disabled the route or changed its intent")
 	}
 	line.EntryRelayID = "front"
 	if !line.LocallyAvailable(n) {

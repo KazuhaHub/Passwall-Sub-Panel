@@ -10,7 +10,7 @@ import type { VlessRouteLine } from '@/api/vlessRoute'
 import type { RelayLine } from '@/api/types'
 import VlessRouteMatchFields from './VlessRouteMatchFields'
 
-export default function VlessRouteLinesEditor({ draft, busy, relays, hiddenDirect }: { draft: VlessRouteDraft; busy: boolean; relays: RelayLine[]; hiddenDirect: boolean }) {
+export default function VlessRouteLinesEditor({ draft, busy, relays }: { draft: VlessRouteDraft; busy: boolean; relays: RelayLine[] }) {
   const { t } = useTranslation(['admin', 'common'])
   const md = useTheme().palette.md
   const { baseline, lines, setLines, outbounds } = draft
@@ -51,7 +51,7 @@ export default function VlessRouteLinesEditor({ draft, busy, relays, hiddenDirec
       const missing = !!line.outbound_tag && !outbounds.some(outbound => outbound.tag === line.outbound_tag)
       const entryID = line.entry_relay_id || ''
       const entry = relays.find(relay => relay.id === entryID)
-      const unavailableEntry = entryID ? !entry || !entry.enabled : hiddenDirect
+      const unavailableEntry = !!entryID && (!entry || !entry.enabled)
       return <Box key={line.id || `new-${index}`} sx={{ border: `1px solid ${md.outlineVariant}`, borderRadius: 2, p: 1.5, display: 'flex', flexDirection: 'column', gap: 1 }}>
         <Box sx={{ display: 'flex', gap: { xs: 0.25, sm: 1 }, alignItems: 'center' }}>
           <TextField size="small" label={t('admin:nodes.vless_route.name')} value={line.name} placeholder={line.outbound_tag} disabled={disabled} onChange={event => update({ name: event.target.value })} sx={{ flex: 1, minWidth: 0 }} />
@@ -68,7 +68,7 @@ export default function VlessRouteLinesEditor({ draft, busy, relays, hiddenDirec
         </Box>
         <Box sx={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 1, alignItems: 'start' }}>
           <TextField select fullWidth size="small" label={t('admin:nodes.vless_route.entry')} value={entryID || 'direct'} disabled={disabled} onChange={event => update({ entry_relay_id: event.target.value === 'direct' ? '' : event.target.value })} error={unavailableEntry} helperText={unavailableEntry ? t('admin:nodes.vless_route.entry_unavailable') : relays.some(relay => !relay.id) ? t('admin:nodes.vless_route.entry_unsaved_hint') : undefined}>
-            <MenuItem value="direct" disabled={hiddenDirect}>{t('admin:nodes.vless_route.entry_direct')}</MenuItem>
+            <MenuItem value="direct">{t('admin:nodes.vless_route.entry_direct')}</MenuItem>
             {entryID && !entry && <MenuItem value={entryID} disabled>{t('admin:nodes.vless_route.entry_missing')}</MenuItem>}
             {relays.map((relay, index) => <MenuItem key={relay.id || `pending-${index}`} value={relay.id || `pending-${index}`} disabled={!relay.id || !relay.enabled}>
               {relay.name || relay.address}

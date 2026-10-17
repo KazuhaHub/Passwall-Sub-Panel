@@ -32,7 +32,7 @@ func TestReferencedSubscriptionRealCores(t *testing.T) {
 	if xray == "" || mihomo == "" || singbox == "" {
 		t.Skip("set PSP_REFERENCE_XRAY, PSP_REFERENCE_MIHOMO and PSP_REFERENCE_SINGBOX for offline core acceptance")
 	}
-	for _, scenario := range []string{"vless_route", "collision_both", "collision_single", "direct_special", "direct_quoted", "direct_outer_quoted", "legacy_direct", "legacy_relay"} {
+	for _, scenario := range []string{"vless_route", "hidden_direct_route", "collision_both", "collision_single", "direct_special", "direct_quoted", "direct_outer_quoted", "legacy_direct", "legacy_relay"} {
 		t.Run(scenario, func(t *testing.T) {
 			testReferencedCoreScenario(t, xray, mihomo, singbox, scenario)
 		})
@@ -77,6 +77,7 @@ func testReferencedCoreScenario(t *testing.T, xray, mihomo, singbox, scenario st
 	for _, ct := range []domain.ClientType{domain.ClientMihomo, domain.ClientSingBox} {
 		t.Run(string(ct), func(t *testing.T) {
 			s, node, user, rule := referenceRenderFixture(t)
+			node.HideDirect = scenario == "hidden_direct_route"
 			node.ServerAddress, node.DesiredPort, node.Flow = "127.0.0.1", serverPort, ""
 			node.StreamSettings = `{"network":"tcp","security":"none"}`
 			node.RouteState.Binding = domain.RouteBinding("https://panel.example", node)

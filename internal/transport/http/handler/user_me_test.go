@@ -96,11 +96,11 @@ func TestUserStatusForNode_RoutesReuseEntryHealthAndNamingOptions(t *testing.T) 
 		t.Fatal(relay)
 	}
 	n.HideDirect = true
-	if lines := userStatusForNode(n).RouteStatuses; len(lines) != 1 || lines[0].Name != "warp" {
-		t.Fatal("hidden direct affected wrong routes")
+	if status := userStatusForNode(n); status.ShowDirect || len(status.RouteStatuses) != 2 || status.RouteStatuses[0].CheckedAt != &directTime {
+		t.Fatal("hidden direct affected route inbound health or visibility")
 	}
 	n.Relays[0].Enabled = false
-	if got := userStatusForNode(n); len(got.RouteStatuses) != 0 || len(got.RelayStatuses) != 0 {
+	if got := userStatusForNode(n); len(got.RouteStatuses) != 1 || got.RouteStatuses[0].Name != "Direct route" || len(got.RelayStatuses) != 0 {
 		t.Fatal("inactive dependency exposed cached status")
 	}
 	n.HideDirect = false

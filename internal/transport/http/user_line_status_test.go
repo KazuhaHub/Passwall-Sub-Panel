@@ -48,8 +48,9 @@ type statusRouteResponse struct {
 	Only   bool   `json:"only_line_name"`
 }
 type statusNodeResponse struct {
-	Name   string                `json:"name"`
-	Routes []statusRouteResponse `json:"route_statuses"`
+	Name       string                `json:"name"`
+	ShowDirect bool                  `json:"show_direct"`
+	Routes     []statusRouteResponse `json:"route_statuses"`
 }
 
 func (statusClients) ListByUser(_ context.Context, id int64) ([]*domain.PSPClient, error) {
@@ -116,13 +117,24 @@ func TestUserServerStatusSharesRoutePublicationGatesAndGroupScope(t *testing.T) 
 	}
 	n.HideDirect = true
 	got = read()
-	if len(got[0].Routes) != 1 || got[0].Routes[0].Name != "warp" {
-		t.Fatalf("hidden direct dependency still published: %+v", got)
+	if len(got) != 1 || got[0].ShowDirect || len(got[0].Routes) != 2 || got[0].Routes[0].Name != "D" {
+		t.Fatalf("hiding the standalone direct line affected its derived route: %+v", got)
 	}
 	n.Relays[0].Enabled = false
+	if got = read(); len(got) != 1 || got[0].ShowDirect || len(got[0].Routes) != 1 || got[0].Routes[0].Name != "D" {
+		t.Fatalf("direct-inbound route disappeared without an enabled relay: %+v", got)
+	}
+	relays := n.Relays
+	n.Relays = nil
+	if got = read(); len(got) != 1 || got[0].ShowDirect || len(got[0].Routes) != 1 || got[0].Routes[0].Name != "D" {
+		t.Fatalf("direct-inbound-only status card disappeared: %+v", got)
+	}
+	n.Relays = relays
+	n.RouteState.Lines[0].Enabled = false
 	if len(read()) != 0 {
 		t.Fatal("entirely hidden node still displayed")
 	}
+	n.RouteState.Lines[0].Enabled = true
 	n.HideDirect, n.Relays[0].Enabled = false, true
 	clients.applied = false
 	if got = read(); len(got[0].Routes) != 0 {

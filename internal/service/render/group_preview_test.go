@@ -14,7 +14,7 @@ import (
 )
 
 func TestGroupPreviewUsesSharedNamesWithinRuleSetScope(t *testing.T) {
-	for _, scenario := range []string{"single", "both", "repeat", "node", "disabled_relay", "drift", "literal", "template_collision"} {
+	for _, scenario := range []string{"single", "both", "repeat", "node", "hidden_direct", "disabled_relay", "drift", "literal", "template_collision"} {
 		t.Run(scenario, func(t *testing.T) {
 			s, node, user, rule := collidingNameFixture(t)
 			user.GroupID = 1
@@ -26,6 +26,8 @@ func TestGroupPreviewUsesSharedNamesWithinRuleSetScope(t *testing.T) {
 				rule.ProxyGroupMembers["Second"] = rule.ProxyGroupMembers["国外媒体"]
 			case "node":
 				rule.ProxyGroupMembers["国外媒体"] = []domain.ProxyGroupMember{{Kind: "node", NodeID: node.ID}}
+			case "hidden_direct":
+				node.HideDirect = true
 			case "disabled_relay":
 				node.Relays[0].Enabled = false
 			case "drift":
@@ -66,7 +68,7 @@ func TestGroupPreviewUsesSharedNamesWithinRuleSetScope(t *testing.T) {
 					}
 				}
 			}
-			if scenario == "single" && !reflect.DeepEqual(preview.Groups[0].Members, []string{"same"}) {
+			if (scenario == "single" || scenario == "hidden_direct") && !reflect.DeepEqual(preview.Groups[0].Members, []string{"same"}) {
 				t.Fatalf("unexpected suffix: %+v", preview)
 			}
 			after, _ := json.Marshal([]any{node, rule, user})

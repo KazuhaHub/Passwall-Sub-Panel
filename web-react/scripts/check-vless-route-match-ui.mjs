@@ -78,7 +78,7 @@ try {
   await fields.getByRole('textbox', { name: '端口', exact: true }).fill('443,1000-2000')
   for (const width of [390, 1440]) {
     await page.setViewportSize({ width, height: 1000 })
-    const entry = await dialog.getByRole('combobox', { name: '线路入口', exact: true }).boundingBox()
+    const entry = await dialog.getByRole('combobox', { name: '线路入站', exact: true }).boundingBox()
     const outbound = await dialog.getByRole('combobox', { name: /^线路出站/ }).boundingBox()
     assert.ok(entry && outbound && Math.abs(entry.y - outbound.y) < 1 && Math.abs(entry.width - outbound.width) < 1 && entry.x < outbound.x, `entry/outbound row at ${width}`)
     await fields.getByRole('textbox', { name: '域名', exact: true }).scrollIntoViewIfNeeded()

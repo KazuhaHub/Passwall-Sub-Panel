@@ -80,35 +80,36 @@ func testRouteFormatsWithOptionalMatch(t *testing.T, matched bool) {
 }
 
 func TestRoutePublicationRequiresExactBackendAndAppliedCredential(t *testing.T) {
-	for _, kind := range []string{"unknown", "changed_backend", "unsupported_backend", "missing_applied", "original_route_collision", "hidden_direct"} {
-		t.Run(kind, func(t *testing.T) {
-			s, n, u, p := routeRenderFixture(t)
-			switch kind {
-			case "unknown":
-				n.RouteState.Status = "unknown"
-			case "hidden_direct":
-				n.HideDirect = true
-			case "changed_backend":
-				p.panel.URL = "https://different.example"
-			case "unsupported_backend":
-				p.panel.Kind = domain.PanelKindSUI
-			case "missing_applied":
-				s.repos.PSPClient = nil
-			case "original_route_collision":
-				n.RouteState.Lines[0].Route = 0x4abc
-			}
-			items := s.filterRouteItems(context.Background(), u, expandNodeLines([]renderItem{{node: n, name: "A"}}))
-			for _, item := range items {
-				if item.route != nil {
-					t.Fatalf("published unconfirmed route for %s", kind)
+	for _, hidden := range []bool{false, true} {
+		for _, kind := range []string{"unknown", "changed_backend", "unsupported_backend", "missing_applied", "original_route_collision"} {
+			t.Run(kind, func(t *testing.T) {
+				s, n, u, p := routeRenderFixture(t)
+				n.HideDirect = hidden
+				switch kind {
+				case "unknown":
+					n.RouteState.Status = "unknown"
+				case "changed_backend":
+					p.panel.URL = "https://different.example"
+				case "unsupported_backend":
+					p.panel.Kind = domain.PanelKindSUI
+				case "missing_applied":
+					s.repos.PSPClient = nil
+				case "original_route_collision":
+					n.RouteState.Lines[0].Route = 0x4abc
 				}
-			}
-			if len(s.PublishedRouteLines(context.Background(), u, []*domain.Node{n})[n.ID]) != 0 {
-				t.Fatal("status metadata bypassed the subscription publication gates")
-			}
-			if kind != "hidden_direct" && len(items) != 1 {
-				t.Fatal("withdrawing a route also removed original/relay node")
-			}
-		})
+				items := s.filterRouteItems(context.Background(), u, expandNodeLines([]renderItem{{node: n, name: "A"}}))
+				for _, item := range items {
+					if item.route != nil {
+						t.Fatalf("published unconfirmed route for %s", kind)
+					}
+				}
+				if len(s.PublishedRouteLines(context.Background(), u, []*domain.Node{n})[n.ID]) != 0 {
+					t.Fatal("status metadata bypassed the subscription publication gates")
+				}
+				if (!hidden && len(items) != 1) || (hidden && len(items) != 0) {
+					t.Fatal("withdrawing a route also removed original/relay node")
+				}
+			})
+		}
 	}
 }

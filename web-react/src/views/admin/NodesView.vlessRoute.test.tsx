@@ -85,10 +85,11 @@ it('clears all five saved optional conditions without changing the route identit
   for (const key of ['network', 'protocols', 'ip', 'domain', 'port']) expect(last[key]).toBeUndefined()
 })
 
-it('keeps relay and route tabs separate and saves routes with the existing node Save button', async () => {
+it('creates and reopens a direct-inbound route while the standalone direct line is hidden', async () => {
   const view = initial()
+  const configured = { ...node, hide_direct: true }
   installReads({
-    '/admin/nodes': list([node]),
+    '/admin/nodes': list([configured]),
     '/admin/nodes/1/vless-route-lines': view,
     '/admin/nodes/1/vless-route-outbounds': { items: [{ tag: 'direct', protocol: 'freedom', source: 'template' }, { tag: 'remote', protocol: '', source: 'subscription' }] },
   })
@@ -98,7 +99,7 @@ it('keeps relay and route tabs separate and saves routes with the existing node 
       Object.assign(view, { state: { revision: 2, status: 'applied', lines: [{ ...body.lines[0], id: 'stable-route', route: 1001 }] } })
       return { data: view }
     }
-    return { data: { ...node, display_name: body.display_name } }
+    return { data: { ...configured, display_name: body.display_name } }
   })
   mount(<NodesView />)
   const dialog = await editRow()
@@ -158,6 +159,7 @@ it('allows blank route names and a saved relay entry while the direct line is hi
   const configured = { ...node, hide_direct: true, show_relay_status: false, relays: [
     { id: 'front', name: 'R1', address: 'relay.example', port: 8443, enabled: true },
     { id: 'off', name: 'Off', address: 'off.example', port: 0, enabled: false },
+    { id: '', name: 'Pending', address: 'pending.example', port: 443, enabled: true },
   ] }
   installReads({ '/admin/nodes': list([configured]), '/admin/nodes/1/vless-route-lines': view, '/admin/nodes/1/vless-route-outbounds': { items: [{ tag: 'direct', protocol: 'freedom', source: 'template' }] } })
   api.put.mockImplementation(async (url, body) => {
@@ -181,7 +183,8 @@ it('allows blank route names and a saved relay entry while the direct line is hi
   expect(entry.textContent).toBe('admin:nodes.vless_route.entry_direct')
   fireEvent.mouseDown(entry)
   expect((await screen.findByRole('option', { name: 'Off' })).getAttribute('aria-disabled')).toBe('true')
-  expect(screen.getByRole('option', { name: 'admin:nodes.vless_route.entry_direct' }).getAttribute('aria-disabled')).toBe('true')
+  expect(screen.getByRole('option', { name: 'Pending' }).getAttribute('aria-disabled')).toBe('true')
+  expect(screen.getByRole('option', { name: 'admin:nodes.vless_route.entry_direct' }).getAttribute('aria-disabled')).not.toBe('true')
   fireEvent.click(screen.getByRole('option', { name: 'R1' }))
   fireEvent.mouseDown(within(dialog).getByRole('combobox', { name: /admin:nodes.vless_route.outbound/ }))
   fireEvent.click(await screen.findByRole('option', { name: 'direct [freedom]' }))
@@ -201,24 +204,77 @@ it('allows blank route names and a saved relay entry while the direct line is hi
   expect((within(reopened).getByLabelText('admin:nodes.vless_route.name') as HTMLInputElement).value).toBe('')
 })
 
-it('shows hidden-direct dependent routes as inactive without losing their saved configuration', async () => {
+it('keeps a saved direct-inbound route enabled and editable when the standalone direct line is hidden', async () => {
   const view = initial()
   view.state = { revision: 2, status: 'applied', lines: [{ id: 'route', route: 1001, name: 'B', outbound_tag: 'direct', enabled: true }] }
   const configured = { ...node, hide_direct: true }
   installReads({ '/admin/nodes': list([configured]), '/admin/nodes/1/vless-route-lines': view, '/admin/nodes/1/vless-route-outbounds': { items: [{ tag: 'direct', protocol: 'freedom', source: 'template' }] } })
+  api.put.mockImplementation(async (url, body) => {
+    if (String(url).endsWith('/vless-route-lines')) {
+      view.state = { ...view.state, revision: 4, lines: body.lines.map((line: object) => ({ ...line, route: 1001 })) }
+      return { data: view }
+    }
+    return { data: configured }
+  })
+  mount(<NodesView />)
+  const dialog = await editRow()
+  fireEvent.click(within(dialog).getByRole('tab', { name: 'admin:nodes.vless_route.title' }))
+  await within(dialog).findByDisplayValue('B')
+  const enabled = within(dialog).getByRole('switch', { name: 'admin:nodes.relay.enabled' }) as HTMLInputElement
+  expect(enabled.checked).toBe(true)
+  await waitFor(() => expect(enabled.disabled).toBe(false))
+  expect(within(dialog).queryByText('admin:nodes.vless_route.entry_unavailable')).toBeNull()
+  fireEvent.click(enabled)
+  expect(enabled.checked).toBe(false)
+  fireEvent.click(enabled)
+  fireEvent.mouseDown(within(dialog).getByRole('combobox', { name: 'admin:nodes.vless_route.entry' }))
+  const direct = await screen.findByRole('option', { name: 'admin:nodes.vless_route.entry_direct' })
+  expect(direct.getAttribute('aria-disabled')).not.toBe('true')
+  fireEvent.click(direct)
+  fireEvent.change(within(dialog).getByLabelText('admin:nodes.vless_route.name'), { target: { value: 'Saved B' } })
+  fireEvent.click(within(dialog).getByRole('button', { name: 'common:actions.ok' }))
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+  expect(api.put.mock.calls.find(([url]) => String(url).endsWith('/metadata'))![1].hide_direct).toBe(true)
+  expect(view.state.lines[0]).toMatchObject({ id: 'route', enabled: true, entry_relay_id: '' })
+  const reopened = await editRow()
+  fireEvent.click(within(reopened).getByRole('tab', { name: 'admin:nodes.vless_route.title' }))
+  await within(reopened).findByDisplayValue('Saved B')
+  expect((within(reopened).getByRole('switch', { name: 'admin:nodes.relay.enabled' }) as HTMLInputElement).checked).toBe(true)
+})
+
+it.each(['disabled', 'deleted'])('keeps an unavailable %s relay selected without falling back to direct', async state => {
+  const view = initial()
+  view.state = { revision: 2, status: 'applied', lines: [{ id: 'route', route: 1001, name: 'B', outbound_tag: 'direct', entry_relay_id: 'front', enabled: true }] }
+  const configured = { ...node, hide_direct: true, relays: state === 'deleted' ? [] : [{ id: 'front', name: 'R', address: 'relay.example', enabled: false, port: 443 }] }
+  installReads({ '/admin/nodes': list([configured]), '/admin/nodes/1/vless-route-lines': view, '/admin/nodes/1/vless-route-outbounds': { items: [{ tag: 'direct', protocol: 'freedom', source: 'template' }] } })
+  mount(<NodesView />)
+  const dialog = await editRow()
+  fireEvent.click(within(dialog).getByRole('tab', { name: 'admin:nodes.vless_route.title' }))
+  await within(dialog).findByDisplayValue('B')
+  const toggle = within(dialog).getByRole('switch', { name: 'admin:nodes.relay.enabled' }) as HTMLInputElement
+  expect(toggle.checked).toBe(false)
+  expect(toggle.disabled).toBe(true)
+  expect(within(dialog).getByText('admin:nodes.vless_route.entry_unavailable')).toBeTruthy()
+  expect(within(dialog).getByRole('combobox', { name: 'admin:nodes.vless_route.entry' }).textContent).not.toContain('admin:nodes.vless_route.entry_direct')
+  expect(view.state.lines[0]).toMatchObject({ enabled: true, entry_relay_id: 'front' })
+})
+
+it('does not enable a previously disabled direct-inbound route when direct is hidden', async () => {
+  const view = initial()
+  view.state = { revision: 2, status: 'applied', lines: [{ id: 'route', route: 1001, name: 'B', outbound_tag: 'direct', enabled: false }] }
+  installReads({ '/admin/nodes': list([{ ...node, hide_direct: true }]), '/admin/nodes/1/vless-route-lines': view, '/admin/nodes/1/vless-route-outbounds': { items: [{ tag: 'direct', protocol: 'freedom', source: 'template' }] } })
   mount(<NodesView />)
   const dialog = await editRow()
   fireEvent.click(within(dialog).getByRole('tab', { name: 'admin:nodes.vless_route.title' }))
   await within(dialog).findByDisplayValue('B')
   const enabled = within(dialog).getByRole('switch', { name: 'admin:nodes.relay.enabled' }) as HTMLInputElement
   expect(enabled.checked).toBe(false)
-  expect(enabled.disabled).toBe(true)
-  expect(within(dialog).getByText('admin:nodes.vless_route.entry_unavailable')).toBeTruthy()
+  await waitFor(() => expect(enabled.disabled).toBe(false))
   fireEvent.click(within(dialog).getByRole('tab', { name: 'admin:nodes.relay.title' }))
   fireEvent.click(within(dialog).getByRole('switch', { name: 'admin:nodes.relay.hide_direct' }))
   fireEvent.click(within(dialog).getByRole('tab', { name: 'admin:nodes.vless_route.title' }))
   const restored = within(dialog).getByRole('switch', { name: 'admin:nodes.relay.enabled' }) as HTMLInputElement
-  expect(restored.checked).toBe(true)
+  expect(restored.checked).toBe(false)
   await waitFor(() => expect(restored.disabled).toBe(false))
 })
 

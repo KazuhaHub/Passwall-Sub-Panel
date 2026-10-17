@@ -34,11 +34,12 @@ func (line VlessRouteLine) Label() string {
 	return line.OutboundTag
 }
 
-// ResolveEntry returns nil,true for a visible direct endpoint, or the one
-// enabled relay selected by stable ID. Unavailable entries never fall back.
+// ResolveEntry returns nil,true for the original inbound regardless of the
+// standalone direct line's visibility, or the enabled relay selected by ID.
+// Unavailable relay entries never fall back to the original inbound.
 func (line VlessRouteLine) ResolveEntry(n *Node) (*RelayLine, bool) {
 	if line.EntryRelayID == "" {
-		return nil, n != nil && !n.EffectiveHideDirect()
+		return nil, n != nil
 	}
 	if n != nil {
 		for i := range n.Relays {
