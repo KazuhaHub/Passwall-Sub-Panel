@@ -1,6 +1,7 @@
 package render
 
 import (
+	"encoding/csv"
 	"strconv"
 	"strings"
 
@@ -63,8 +64,12 @@ func buildProxyGroupsYAMLWithMembers(rules string, preferredOrder []string, memb
 	return buildProxyGroupsYAMLWithFeatures(rules, preferredOrder, members, options, items, MihomoRuleFeatures{})
 }
 
-func buildProxyGroupsYAMLWithFeatures(rules string, preferredOrder []string, members map[string][]domain.ProxyGroupMember, options map[string]domain.ProxyGroupOptions, items []renderItem, advanced MihomoRuleFeatures) (string, error) {
-	return buildProxyGroupsYAMLInternal(strings.Join(advanced.allRuleFragments(rules), "\n"), preferredOrder, members, options, items, true, advanced.outboundNames())
+func buildProxyGroupsYAMLWithFeatures(rules string, preferredOrder []string, members map[string][]domain.ProxyGroupMember, options map[string]domain.ProxyGroupOptions, items []renderItem, advanced MihomoRuleFeatures, templateTargets ...map[string]bool) (string, error) {
+	templateNames := map[string]bool{}
+	if len(templateTargets) > 0 {
+		templateNames = templateTargets[0]
+	}
+	return buildProxyGroupsYAMLInternal(strings.Join(advanced.allRuleFragments(rules), "\n"), preferredOrder, members, options, items, true, advanced.outboundNames(), templateNames)
 }
 
 func buildProxyGroupsYAMLInternal(rules string, preferredOrder []string, members map[string][]domain.ProxyGroupMember, options map[string]domain.ProxyGroupOptions, items []renderItem, resolve bool, excluded ...map[string]bool) (string, error) {
@@ -76,8 +81,22 @@ func buildProxyGroupsYAMLInternal(rules string, preferredOrder []string, members
 	if resolve {
 		targetExclusions = proxyTargetExclusions(items, excludedTargets)
 	}
-	targets := ruleTargetsInOrderExcluding(rules, targetExclusions)
+	if len(excluded) > 1 {
+		for name := range excluded[1] {
+			targetExclusions[name] = true
+		}
+	}
+	targets := ruleTargetsInOrderExcluding(rules, targetExclusions, true)
 	targets = withEffectiveProxyGroupDependencies(targets, members)
+	if len(excluded) > 1 {
+		kept := []string{}
+		for _, name := range targets {
+			if !excluded[1][name] {
+				kept = append(kept, name)
+			}
+		}
+		targets = kept
+	}
 	targets = applyProxyGroupOrder(targets, preferredOrder)
 	if len(targets) == 0 {
 		return "[]", nil
@@ -242,15 +261,18 @@ func ruleTargetsInOrder(rules string) []string {
 	return ruleTargetsInOrderExcluding(rules, nil)
 }
 
-func ruleTargetsInOrderExcluding(rules string, excluded map[string]bool) []string {
+func ruleTargetsInOrderExcluding(rules string, excluded map[string]bool, rawPolicy ...bool) []string {
 	seen := map[string]bool{}
 	out := []string{}
-	for _, rawLine := range strings.Split(rules, "\n") {
+	for _, rawLine := range subscriptionRuleLines(rules) {
 		parts := splitRuleFields(rawLine)
 		if len(parts) < 2 || strings.EqualFold(parts[0], "SUB-RULE") {
 			continue
 		}
 		target := ruleOutboundTarget(parts)
+		if len(rawPolicy) > 0 && rawPolicy[0] {
+			target = mihomoRuleTarget(rawLine)
+		}
 		if target == "" || builtInRuleTargets[target] || excluded[target] || seen[target] {
 			continue
 		}
@@ -260,8 +282,29 @@ func ruleTargetsInOrderExcluding(rules string, excluded map[string]bool) []strin
 	return out
 }
 
+// Saved rule fragments may quote an entire YAML rule scalar, independently of
+// CSV quoting inside that scalar. Group discovery and route compilation must
+// inspect decoded values, not confuse those two layers of quoting.
+func subscriptionRuleLines(content string) []string {
+	if lines, err := parseRuleSequence(content); err == nil {
+		return lines
+	}
+	return strings.Split(content, "\n")
+}
+
 func normalizeRulePart(raw string) string {
-	return strings.Trim(strings.TrimSpace(raw), `"'`)
+	raw = strings.TrimSpace(raw)
+	if len(raw) >= 2 && raw[0] == raw[len(raw)-1] {
+		if raw[0] == '"' {
+			reader := csv.NewReader(strings.NewReader(raw))
+			if fields, err := reader.Read(); err == nil && len(fields) == 1 {
+				return fields[0]
+			}
+		} else if raw[0] == '\'' {
+			return strings.ReplaceAll(raw[1:len(raw)-1], "''", "'")
+		}
+	}
+	return raw
 }
 
 func proxyGroupChoices(name string) []string {

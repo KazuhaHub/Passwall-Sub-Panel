@@ -38,6 +38,20 @@ type subscriptionReferences struct {
 	builtins    map[string]bool
 }
 
+func (r *subscriptionReferences) collectSlot(owner, name string, optional bool) (string, error) {
+	if optional {
+		if _, exists := r.definitions[name]; !exists && !r.builtins[name] {
+			return name, nil // DNS interface or option, not a proxy dependency.
+		}
+	}
+	if _, exists := r.definitions[owner]; owner != "" && exists {
+		r.definitions[owner] = append(r.definitions[owner], name)
+	} else {
+		r.roots = append(r.roots, name)
+	}
+	return name, nil
+}
+
 func (r *subscriptionReferences) add(name string, dependencies []string, root bool) error {
 	if name == "" {
 		return fmt.Errorf("subscription reference: definition without name")
@@ -235,7 +249,7 @@ func mihomoMissingTemplateGroups(body string) ([]string, error) {
 		return nil, err
 	}
 	for _, rule := range rules {
-		dependencies = append(dependencies, ruleOutboundTarget(splitRuleFields(referenceString(rule))))
+		dependencies = append(dependencies, mihomoRuleTarget(referenceString(rule)))
 	}
 	missing := []string{}
 	for _, name := range dependencies {
@@ -335,7 +349,6 @@ func pruneMihomoLines(body string, generated map[string]bool, origin ...string) 
 			if err := checkSubRule(subRuleReference(fields)); err != nil {
 				return err
 			}
-			refs.roots = append(refs.roots, ruleOutboundTarget(fields))
 		}
 		return nil
 	}
@@ -368,6 +381,9 @@ func pruneMihomoLines(body string, generated map[string]bool, origin ...string) 
 		known[name] = true
 	}
 	refs.roots = append(refs.roots, mihomoDNSProxyReferences(root, known)...)
+	if err := transformMihomoReferences(root, refs.collectSlot); err != nil {
+		return "", err
+	}
 	used, err := refs.used()
 	if err != nil {
 		return "", err
@@ -509,6 +525,9 @@ func pruneSingBoxLines(body string, generated map[string]bool, origin ...string)
 		final, _ = first["tag"].(string)
 	}
 	refs.roots = append(refs.roots, final)
+	if err := transformSingBoxReferences(config, refs.collectSlot); err != nil {
+		return "", err
+	}
 	used, err := refs.used()
 	if err != nil {
 		return "", err

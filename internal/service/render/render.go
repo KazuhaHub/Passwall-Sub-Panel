@@ -156,12 +156,16 @@ func (s *Service) RenderForUser(ctx context.Context, u *domain.User, ct domain.C
 	if len(bundle.ProxyGroupOrder) == 0 {
 		bundle.ProxyGroupOrder = tpl.ProxyGroupOrder
 	}
+	lineNames, internalItems := newLineNameCatalog(items, st.SubRegionFlagPrefix, nodes)
+	items = internalItems
 	if ct == domain.ClientSingBox {
-		return s.renderSingBox(ctx, u, tpl, items, bundle.SharedRules, bundle.ProxyGroupOrder, bundle.ProxyGroupMembers, bundle.ProxyGroupOptions, st)
+		return s.renderSingBox(ctx, u, tpl, items, bundle.SharedRules, bundle.ProxyGroupOrder, bundle.ProxyGroupMembers, bundle.ProxyGroupOptions, st, lineNames)
 	}
 	proxies := s.buildProxies(ctx, u, items, st)
 	generatedLines := emittedProxyNames(proxies, "name")
+	items = emittedRenderItems(items, generatedLines)
 	lineOrigin := markGeneratedLines(proxies, "name", generatedLines)
+	lineNames.origin = lineOrigin
 	proxies, err = appendMihomoRematchOutbounds(proxies, bundle.RematchOutbounds)
 	if err != nil {
 		return nil, err
@@ -170,25 +174,69 @@ func (s *Service) RenderForUser(ctx context.Context, u *domain.User, ct domain.C
 	if err != nil {
 		return nil, fmt.Errorf("marshal proxies: %w", err)
 	}
-	advanced := MihomoRuleFeatures{SubRules: bundle.SubRules, RematchOutbounds: bundle.RematchOutbounds}
-	proxyGroupsYAML, err := buildProxyGroupsYAMLWithFeatures(strings.Join([]string{u.PersonalRules, bundle.SharedRules}, "\n"), bundle.ProxyGroupOrder, bundle.ProxyGroupMembers, bundle.ProxyGroupOptions, items, advanced)
-	if err != nil {
-		return nil, fmt.Errorf("build proxy groups: %w", err)
-	}
 	subRulesYAML, err := marshalMihomoSubRules(bundle.SubRules)
 	if err != nil {
 		return nil, fmt.Errorf("marshal Mihomo sub-rules: %w", err)
 	}
 	compose := func(groups string) string {
+		if groups == "[]" {
+			groups = "" // A template may append its own group list entries.
+		}
+		subRules := subRulesYAML
+		if subRules == "{}" {
+			subRules = "" // Likewise, allow template-owned sub-rule mappings.
+		}
 		body := substituteBlockPlaceholders(tpl.Content, map[string]string{
 			"proxies":        strings.TrimRight(string(proxiesYAML), "\n"),
 			"proxy_groups":   groups,
 			"rules_common":   strings.TrimRight(bundle.SharedRules, "\n"),
 			"rules_personal": strings.TrimRight(u.PersonalRules, "\n"),
-			"sub_rules":      subRulesYAML,
+			"sub_rules":      subRules,
 		})
 		body = substituteInlinePlaceholders(body, s.profilePlaceholders(u, st))
 		return expandNodeRefs(body, items)
+	}
+	// Use a harmless list entry instead of [] so templates may append custom
+	// groups after the generated block. Only template-owned names are fixed.
+	probe, err := parseMihomoSubscription(compose("- name: " + yamlScalar(lineNames.probe) + "\n  type: select\n  proxies: [DIRECT]"))
+	if err != nil {
+		return nil, fmt.Errorf("resolve template names: %w", err)
+	}
+	fixedNames, _, err := lineNames.mihomoNames(probe)
+	if err != nil {
+		return nil, err
+	}
+	templateTargets := make(map[string]bool, len(fixedNames))
+	for name := range fixedNames {
+		templateTargets[name] = true
+	}
+	for name := range configuredGroupNames(bundle.ProxyGroupMembers, bundle.ProxyGroupOptions) {
+		fixedNames[name] = true
+	}
+	userCopy := *u
+	userCopy.PersonalRules, err = lineNames.prepareRules(u.PersonalRules, fixedNames, generatedLines, true)
+	if err != nil {
+		return nil, err
+	}
+	u = &userCopy
+	bundle.SharedRules, err = lineNames.prepareRules(bundle.SharedRules, fixedNames, generatedLines, true)
+	if err != nil {
+		return nil, err
+	}
+	for index := range bundle.SubRules {
+		bundle.SubRules[index].Content, err = lineNames.prepareRules(bundle.SubRules[index].Content, fixedNames, generatedLines, true)
+		if err != nil {
+			return nil, err
+		}
+	}
+	subRulesYAML, err = marshalMihomoSubRules(bundle.SubRules)
+	if err != nil {
+		return nil, err
+	}
+	advanced := MihomoRuleFeatures{SubRules: bundle.SubRules, RematchOutbounds: bundle.RematchOutbounds}
+	proxyGroupsYAML, err := buildProxyGroupsYAMLWithFeatures(strings.Join([]string{u.PersonalRules, bundle.SharedRules}, "\n"), bundle.ProxyGroupOrder, bundle.ProxyGroupMembers, bundle.ProxyGroupOptions, items, advanced, templateTargets)
+	if err != nil {
+		return nil, fmt.Errorf("build proxy groups: %w", err)
 	}
 	body := compose(proxyGroupsYAML)
 	missingGroups, err := mihomoMissingTemplateGroups(body)
@@ -201,15 +249,23 @@ func (s *Service) RenderForUser(ctx context.Context, u *domain.User, ct domain.C
 			// These synthetic targets drive group generation only, never rules.
 			groupRules += "\n- MATCH," + group
 		}
-		proxyGroupsYAML, err = buildProxyGroupsYAMLWithFeatures(groupRules, bundle.ProxyGroupOrder, bundle.ProxyGroupMembers, bundle.ProxyGroupOptions, items, advanced)
+		proxyGroupsYAML, err = buildProxyGroupsYAMLWithFeatures(groupRules, bundle.ProxyGroupOrder, bundle.ProxyGroupMembers, bundle.ProxyGroupOptions, items, advanced, templateTargets)
 		if err != nil {
 			return nil, fmt.Errorf("build template dependency groups: %w", err)
 		}
 		body = compose(proxyGroupsYAML)
 	}
+	body, err = lineNames.bindMihomo(body)
+	if err != nil {
+		return nil, fmt.Errorf("bind subscription line references: %w", err)
+	}
 	body, err = pruneMihomoLines(body, generatedLines, lineOrigin)
 	if err != nil {
 		return nil, fmt.Errorf("resolve subscription lines: %w", err)
+	}
+	body, err = lineNames.finalizeMihomo(body)
+	if err != nil {
+		return nil, fmt.Errorf("finalize subscription line names: %w", err)
 	}
 
 	// Build profile name for Content-Disposition header.

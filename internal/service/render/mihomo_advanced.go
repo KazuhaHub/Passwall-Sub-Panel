@@ -251,41 +251,35 @@ func splitRuleFields(line string) []string {
 		return nil
 	}
 	fields := []string{}
-	start, depth := 0, 0
-	quote := rune(0)
-	for index, r := range line {
-		switch {
-		case quote != 0:
-			if r == quote {
-				quote = 0
-			}
-		case r == '\'' || r == '"':
-			quote = r
-		case r == '(':
-			depth++
-		case r == ')' && depth > 0:
-			depth--
-		case r == ',' && depth == 0:
-			fields = append(fields, normalizeRulePart(line[start:index]))
-			start = index + 1
-		}
+	for _, span := range ruleFieldSpans(line) {
+		fields = append(fields, normalizeRulePart(line[span[0]:span[1]]))
 	}
-	fields = append(fields, normalizeRulePart(line[start:]))
 	return fields
 }
 
 func ruleOutboundTarget(fields []string) string {
-	if len(fields) < 2 || strings.EqualFold(fields[0], "SUB-RULE") {
-		return ""
-	}
-	for index := len(fields) - 1; index > 0; index-- {
-		candidate := normalizeRulePart(fields[index])
-		if candidate == "" || strings.EqualFold(candidate, "no-resolve") || strings.EqualFold(candidate, "src") {
-			continue
-		}
-		return candidate
+	if index := ruleOutboundTargetIndex(fields); index >= 0 {
+		return normalizeRulePart(fields[index])
 	}
 	return ""
+}
+
+func ruleOutboundTargetIndex(fields []string) int {
+	if len(fields) < 2 || strings.EqualFold(fields[0], "SUB-RULE") {
+		return -1
+	}
+	minimum := 2
+	if strings.EqualFold(fields[0], "MATCH") {
+		minimum = 1
+	}
+	for index := len(fields) - 1; index >= minimum; index-- {
+		candidate := normalizeRulePart(fields[index])
+		if candidate == "" || index > minimum && (strings.EqualFold(candidate, "no-resolve") || strings.EqualFold(candidate, "src")) {
+			continue
+		}
+		return index
+	}
+	return -1
 }
 
 func subRuleReference(fields []string) string {

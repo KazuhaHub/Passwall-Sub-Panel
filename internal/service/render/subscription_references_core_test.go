@@ -17,6 +17,8 @@ import (
 	"testing"
 	"time"
 
+	"gopkg.in/yaml.v3"
+
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 )
 
@@ -29,7 +31,7 @@ func TestReferencedSubscriptionRealCores(t *testing.T) {
 	if xray == "" || mihomo == "" || singbox == "" {
 		t.Skip("set PSP_REFERENCE_XRAY, PSP_REFERENCE_MIHOMO and PSP_REFERENCE_SINGBOX for offline core acceptance")
 	}
-	for _, scenario := range []string{"vless_route", "legacy_direct", "legacy_relay"} {
+	for _, scenario := range []string{"vless_route", "collision_both", "collision_single", "direct_special", "direct_quoted", "direct_outer_quoted", "legacy_direct", "legacy_relay"} {
 		t.Run(scenario, func(t *testing.T) {
 			testReferencedCoreScenario(t, xray, mihomo, singbox, scenario)
 		})
@@ -44,7 +46,7 @@ func testReferencedCoreScenario(t *testing.T, xray, mihomo, singbox, scenario st
 	defer target.Close()
 	serverPort := referenceFreePort(t)
 	allowedRoute := "1001"
-	if scenario != "vless_route" {
+	if strings.HasPrefix(scenario, "legacy_") {
 		allowedRoute = "19132" // 0x4abc, the unchanged original UUID's route.
 	}
 	serverConfig := map[string]any{
@@ -81,7 +83,43 @@ func testReferencedCoreScenario(t *testing.T, xray, mihomo, singbox, scenario st
 			rule.ProxyGroupMembers["OnlyRoute"] = rule.ProxyGroupMembers["国外媒体"]
 			delete(rule.ProxyGroupMembers, "国外媒体")
 			expectedName, expectedUUID := "A B", "12345678-1234-03e9-8def-123456789abc"
-			if scenario != "vless_route" {
+			if strings.HasPrefix(scenario, "collision_") {
+				node.Relays = []domain.RelayLine{{ID: "relay", Name: "same", OnlyLineName: true, Address: "127.0.0.1", Port: serverPort, Enabled: true}}
+				node.RouteState.Lines[0].Name, node.RouteState.Lines[0].OnlyLineName = "same", true
+				expectedName = "same"
+				if scenario == "collision_both" {
+					rule.ProxyGroupMembers["OnlyRoute"] = append(rule.ProxyGroupMembers["OnlyRoute"], domain.ProxyGroupMember{Kind: "line", NodeID: node.ID, LineID: "relay"})
+					expectedName = "same [7:route-B]"
+				}
+			}
+			if scenario == "direct_special" {
+				node.RouteState.Lines[0].Name, node.RouteState.Lines[0].OnlyLineName = `same, "quoted"`, true
+				expectedName = `same, "quoted"`
+				rawRules, err := yaml.Marshal([]string{`MATCH,"same, ""quoted"" [7:route-B]"`})
+				if err != nil {
+					t.Fatal(err)
+				}
+				rule.Content = string(rawRules)
+			}
+			if scenario == "direct_quoted" {
+				node.RouteState.Lines[0].Name, node.RouteState.Lines[0].OnlyLineName = `line "quoted"`, true
+				expectedName = `line "quoted"`
+				rawRules, err := yaml.Marshal([]string{`MATCH,line "quoted" [7:route-B]`})
+				if err != nil {
+					t.Fatal(err)
+				}
+				rule.Content = string(rawRules)
+			}
+			if scenario == "direct_outer_quoted" {
+				node.RouteState.Lines[0].Name, node.RouteState.Lines[0].OnlyLineName = `"quoted"`, true
+				expectedName = `"quoted"`
+				rawRules, err := yaml.Marshal([]string{`MATCH,"quoted" [7:route-B]`})
+				if err != nil {
+					t.Fatal(err)
+				}
+				rule.Content = string(rawRules)
+			}
+			if strings.HasPrefix(scenario, "legacy_") {
 				// No VLESS route state or precise-line members in main fixtures.
 				node.RouteState = domain.NodeRouteState{}
 				rule.ProxyGroupMembers["OnlyRoute"] = []domain.ProxyGroupMember{{Kind: "node", NodeID: node.ID}}
@@ -103,13 +141,23 @@ func testReferencedCoreScenario(t *testing.T, xray, mihomo, singbox, scenario st
 			}
 			s.repos.Template = referenceTemplateRepo{content: map[domain.ClientType]string{ct: template}}
 			output, err := s.RenderForUser(context.Background(), user, ct)
+			if scenario == "direct_special" && ct == domain.ClientMihomo {
+				if err == nil || !strings.Contains(err.Error(), "through a proxy group") {
+					t.Fatalf("Mihomo unrepresentable inline policy must fail explicitly: %v", err)
+				}
+				return
+			}
 			if err != nil {
 				t.Fatal(err)
 			}
 			// Require the actual expected proxy, not merely an HTTP success via
 			// a DIRECT fallback after an unavailable member was filtered out.
 			foundRoute := false
+			vlessCount := 0
 			for _, proxy := range subscriptionProxyMaps(t, output, ct) {
+				if proxy["type"] == "vless" {
+					vlessCount++
+				}
 				if scenario != "legacy_direct" && (proxy["name"] == "A" || proxy["tag"] == "A") {
 					t.Fatal("original A was emitted")
 				}
@@ -119,6 +167,9 @@ func testReferencedCoreScenario(t *testing.T, xray, mihomo, singbox, scenario st
 			}
 			if !foundRoute {
 				t.Fatalf("required %s was not emitted; refusing a DIRECT fallback false positive", expectedName)
+			}
+			if scenario == "collision_both" && vlessCount != 2 || scenario == "collision_single" && vlessCount != 1 {
+				t.Fatalf("collision transition emitted %d VLESS proxies", vlessCount)
 			}
 			file := referenceCoreFile(t, "subscription.json", output.Body)
 			args = append(args, file)

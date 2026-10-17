@@ -30,8 +30,9 @@ func expandNodeLines(items []renderItem) []renderItem {
 	// Labels are client-side references, not identity. Disambiguate only when
 	// necessary; unchanged historical names keep their exact spelling.
 	counts := map[string]int{}
-	for _, item := range out {
-		counts[item.name]++
+	for i := range out {
+		out[i].baseName = out[i].name
+		counts[out[i].name]++
 	}
 	for i := range out {
 		if counts[out[i].name] > 1 && out[i].node != nil && !out[i].isSeparator {

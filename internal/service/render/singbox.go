@@ -18,19 +18,70 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 )
 
-func (s *Service) renderSingBox(ctx context.Context, u *domain.User, tpl *domain.Template, items []renderItem, rulesCommon string, proxyGroupOrder []string, proxyGroupMembers map[string][]domain.ProxyGroupMember, proxyGroupOptions map[string]domain.ProxyGroupOptions, st ports.UISettings) (*Output, error) {
+func (s *Service) renderSingBox(ctx context.Context, u *domain.User, tpl *domain.Template, items []renderItem, rulesCommon string, proxyGroupOrder []string, proxyGroupMembers map[string][]domain.ProxyGroupMember, proxyGroupOptions map[string]domain.ProxyGroupOptions, st ports.UISettings, catalogs ...*lineNameCatalog) (*Output, error) {
+	var lineNames *lineNameCatalog
+	if len(catalogs) > 0 {
+		lineNames = catalogs[0]
+	} else {
+		lineNames, items = newLineNameCatalog(items, st.SubRegionFlagPrefix)
+	}
 	outbounds := s.buildSingBoxOutbounds(ctx, u, items, proxyGroupOrder, proxyGroupMembers, proxyGroupOptions, st, u.PersonalRules, rulesCommon)
+	items = emittedRenderItems(items, emittedProxyNames(outbounds, "tag"))
+	// Recompile groups after binding handwritten rule targets. The first pass
+	// is used solely for actual protocol/credential availability, with no second
+	// backend or inbound fetch.
+	lineOutbounds := make([]map[string]any, 0, len(outbounds))
+	for _, outbound := range outbounds {
+		if outbound["type"] != "selector" && outbound["type"] != "urltest" {
+			lineOutbounds = append(lineOutbounds, outbound)
+		}
+	}
+	outbounds = lineOutbounds
 	generatedLines := make(map[string]bool, len(items))
 	for _, item := range items {
 		generatedLines[item.name] = true
 	}
 	lineOrigin := markGeneratedLines(outbounds, "tag", generatedLines)
+	lineNames.origin = lineOrigin
+	probeOutbounds, err := marshalJSONBlock(outbounds)
+	if err != nil {
+		return nil, err
+	}
+	probeBody := substituteBlockPlaceholders(tpl.Content, map[string]string{"outbounds": probeOutbounds, "route_rules": "[]", "rule_sets": "[]"})
+	probeBody = substituteInlinePlaceholders(probeBody, mergePlaceholders(s.profilePlaceholders(u, st), map[string]string{"final_outbound": `"direct"`}))
+	probe, err := parseSingBoxSubscription(probeBody)
+	if err != nil {
+		return nil, fmt.Errorf("resolve sing-box template names: %w", err)
+	}
+	fixedNames, _ := lineNames.singBoxNames(probe)
+	templateTargets := make(map[string]bool, len(fixedNames))
+	for name := range fixedNames {
+		templateTargets[name] = true
+	}
+	for name := range configuredGroupNames(proxyGroupMembers, proxyGroupOptions) {
+		fixedNames[name] = true
+	}
+	// Built-in exits have reserved target semantics even in custom templates.
+	for name := range mihomoBuiltinNames() {
+		fixedNames[name] = true
+	}
+	userCopy := *u
+	userCopy.PersonalRules, err = lineNames.prepareRules(u.PersonalRules, fixedNames, generatedLines)
+	if err != nil {
+		return nil, err
+	}
+	u = &userCopy
+	rulesCommon, err = lineNames.prepareRules(rulesCommon, fixedNames, generatedLines)
+	if err != nil {
+		return nil, err
+	}
+	outbounds = append(outbounds, buildSingBoxGroupOutboundsWithMembers(strings.Join([]string{u.PersonalRules, rulesCommon}, "\n"), items, proxyGroupOrder, proxyGroupMembers, proxyGroupOptions, templateTargets)...)
 	outboundsJSON, err := marshalJSONBlock(outbounds)
 	if err != nil {
 		return nil, fmt.Errorf("marshal sing-box outbounds: %w", err)
 	}
 
-	passThroughGroups := singBoxPassThroughProxyGroups(items, proxyGroupMembers, u.PersonalRules, rulesCommon)
+	passThroughGroups := singBoxPassThroughProxyGroupsExcluding(items, proxyGroupMembers, templateTargets, u.PersonalRules, rulesCommon)
 	rules, finalOutbound := buildSingBoxRouteRulesWithPassThrough(passThroughGroups, u.PersonalRules, rulesCommon)
 	rulesJSON, err := marshalJSONBlock(rules)
 	if err != nil {
@@ -55,11 +106,17 @@ func (s *Service) renderSingBox(ctx context.Context, u *domain.User, tpl *domain
 	if err != nil {
 		return nil, fmt.Errorf("assemble sing-box rule_set: %w", err)
 	}
-	// Items already have stable, final names. Keep the complete candidate set
-	// until all selectors and template dependencies have been resolved.
+	body, err = lineNames.bindSingBox(body)
+	if err != nil {
+		return nil, fmt.Errorf("bind sing-box line references: %w", err)
+	}
 	body, err = pruneSingBoxLines(body, generatedLines, lineOrigin)
 	if err != nil {
 		return nil, fmt.Errorf("resolve subscription lines: %w", err)
+	}
+	body, err = lineNames.finalizeSingBox(body)
+	if err != nil {
+		return nil, fmt.Errorf("finalize sing-box line names: %w", err)
 	}
 
 	// Build profile name for Content-Disposition header.
@@ -394,13 +451,20 @@ func buildSingBoxSelectorOutboundsWithMembers(rules string, items []renderItem, 
 	return buildSingBoxGroupOutboundsWithMembers(rules, items, preferredOrder, memberConfigs, nil)
 }
 
-func buildSingBoxGroupOutboundsWithMembers(rules string, items []renderItem, preferredOrder []string, memberConfigs map[string][]domain.ProxyGroupMember, optionConfigs map[string]domain.ProxyGroupOptions) []map[string]any {
-	declared := ruleTargetsInOrderExcluding(rules, proxyTargetExclusions(items, nil))
+func buildSingBoxGroupOutboundsWithMembers(rules string, items []renderItem, preferredOrder []string, memberConfigs map[string][]domain.ProxyGroupMember, optionConfigs map[string]domain.ProxyGroupOptions, templates ...map[string]bool) []map[string]any {
+	templateTargets := map[string]bool{}
+	if len(templates) > 0 {
+		templateTargets = templates[0]
+	}
+	declared := ruleTargetsInOrderExcluding(rules, proxyTargetExclusions(items, templateTargets))
 	targets := withEffectiveProxyGroupDependencies(declared, memberConfigs)
 	targets = applyProxyGroupOrder(targets, preferredOrder)
-	passThroughGroups := singBoxPassThroughProxyGroups(items, memberConfigs, rules)
+	passThroughGroups := singBoxPassThroughProxyGroupsExcluding(items, memberConfigs, templateTargets, rules)
 	out := make([]map[string]any, 0, len(targets))
 	for _, target := range targets {
+		if templateTargets[target] {
+			continue
+		}
 		members := defaultMembersForTarget(target)
 		if configured, ok := memberConfigs[target]; ok {
 			members = configured
@@ -511,10 +575,17 @@ func buildSingBoxRouteRules(ruleParts ...string) ([]map[string]any, string) {
 // first member is Mihomo's PASS. sing-box has no equivalent outbound; callers
 // preserve the semantics by omitting matching route rules for these targets.
 func singBoxPassThroughProxyGroups(items []renderItem, memberConfigs map[string][]domain.ProxyGroupMember, ruleParts ...string) map[string]bool {
+	return singBoxPassThroughProxyGroupsExcluding(items, memberConfigs, nil, ruleParts...)
+}
+
+func singBoxPassThroughProxyGroupsExcluding(items []renderItem, memberConfigs map[string][]domain.ProxyGroupMember, excluded map[string]bool, ruleParts ...string) map[string]bool {
 	rules := strings.Join(ruleParts, "\n")
-	targets := withEffectiveProxyGroupDependencies(ruleTargetsInOrderExcluding(rules, proxyTargetExclusions(items, nil)), memberConfigs)
+	targets := withEffectiveProxyGroupDependencies(ruleTargetsInOrderExcluding(rules, proxyTargetExclusions(items, excluded)), memberConfigs)
 	resolvedByTarget := make(map[string][]string, len(targets))
 	for _, target := range targets {
+		if excluded[target] {
+			continue
+		}
 		members := defaultMembersForTarget(target)
 		if configured, ok := memberConfigs[target]; ok {
 			members = configured
@@ -565,7 +636,7 @@ func buildSingBoxRouteRulesWithPassThrough(passThroughGroups map[string]bool, ru
 	rules := []map[string]any{{"action": "sniff"}}
 	finalOutbound := "direct"
 	for _, part := range ruleParts {
-		for _, rawLine := range strings.Split(part, "\n") {
+		for _, rawLine := range subscriptionRuleLines(part) {
 			kind, value, target, ok := parseClashRuleLine(rawLine)
 			if !ok {
 				continue
@@ -617,7 +688,7 @@ func parseClashRuleLine(rawLine string) (kind, value, target string, ok bool) {
 	value = normalizeRulePart(parts[1])
 	for i := len(parts) - 1; i >= 2; i-- {
 		candidate := normalizeRulePart(parts[i])
-		if candidate == "" || candidate == "no-resolve" {
+		if candidate == "" || i > 2 && candidate == "no-resolve" {
 			continue
 		}
 		target = candidate
@@ -646,38 +717,11 @@ func splitCSVLine(line string) []string {
 }
 
 func splitTopLevelRuleFields(line string) []string {
-	parts := make([]string, 0, 4)
-	start, depth := 0, 0
-	var quote byte
-	for i := 0; i < len(line); i++ {
-		c := line[i]
-		if quote != 0 {
-			if c == '\\' && i+1 < len(line) {
-				i++
-				continue
-			}
-			if c == quote {
-				quote = 0
-			}
-			continue
-		}
-		switch c {
-		case '\'', '"':
-			quote = c
-		case '(':
-			depth++
-		case ')':
-			if depth > 0 {
-				depth--
-			}
-		case ',':
-			if depth == 0 {
-				parts = append(parts, line[start:i])
-				start = i + 1
-			}
-		}
+	parts := []string{}
+	for _, span := range ruleFieldSpans(line) {
+		parts = append(parts, line[span[0]:span[1]])
 	}
-	return append(parts, line[start:])
+	return parts
 }
 
 func singBoxRouteRule(kind, value string) map[string]any {
