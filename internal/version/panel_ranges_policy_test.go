@@ -259,7 +259,7 @@ func TestTheShippedPanelRangesDocumentsParse(t *testing.T) {
 		wantCeiling string
 	}{
 		{product: "3x-ui", wantCeiling: "3.10.2"},
-		{product: "sui", wantCeiling: "1.6.3"},
+		{product: "sui", wantCeiling: "1.6.5"},
 	} {
 		t.Run(tc.product, func(t *testing.T) {
 			name := fmt.Sprintf(map[string]string{"3x-ui": "3x-ui-v%d.json", "sui": "sui-v%d.json"}[tc.product], 4)

@@ -1,0 +1,72 @@
+{
+  "schema_version": 1,
+  "verified_at": "2026-10-17T20:05:00Z",
+  "scope": "V3 maintenance source and current V4 source adapters against an isolated upstream source build",
+  "upstream": {
+    "version": "1.6.5",
+    "commit": "21866906a0ba260a829366ad56881b6b58d199af",
+    "release_url": "https://github.com/alireza0/s-ui/releases/tag/v1.6.5",
+    "sing_box_version": "1.14.3",
+    "core_state": "running"
+  },
+  "environment": {
+    "platform": "darwin/arm64",
+    "go_version": "1.27.2",
+    "database": "fresh isolated SQLite, sequential tests clean up their objects",
+    "authentication": "Token header",
+    "build_profile": "upstream test tags and ldflags, no Naive outbound",
+    "web_content": "placeholder HTML/assets only; production API and core unchanged"
+  },
+  "ci_image": "ghcr.io/alireza0/s-ui:v1.6.5@sha256:8c6461946ed833b8b7b65b52f2ed03ef40c23ce13aa82a09e20cb161270895c9",
+  "ci_image_locally_executed": false,
+  "v4": {
+    "psp_commit": "c94259e3866cf775abbc648e43d35d4d878df412",
+    "command": "go test ./internal/adapters/sui -run '^TestLive_SUISurface$' -count=1 -json",
+    "log_sha256": "6a38c273864156855c85e2a184600264f3d4a5527f14215356368de458f822b5",
+    "result": {
+      "profile": "third-party-sui-live",
+      "package": "github.com/KazuhaHub/passwall-sub-panel/internal/adapters/sui",
+      "verdict": "pass",
+      "goExitCode": 0,
+      "requiredTests": [
+        "TestLive_SUISurface"
+      ],
+      "passed": [
+        "TestLive_SUISurface"
+      ],
+      "missing": [],
+      "failed": [],
+      "skipped": [],
+      "unexpected": [],
+      "notApplicable": []
+    }
+  },
+  "v3": {
+    "psp_branch": "release/v3",
+    "psp_commit": "43cd70ebcf6955ad8debfa1dcae29d42d2b2971e",
+    "adapter_identical_to_tag": "v3.9.3",
+    "command": "go test ./internal/adapters/sui -run '^TestLive_SUI' -count=1 -json",
+    "log_sha256": "097f06c9e82a38f8ca5db36b27d62a55195cfc3af1d62f0b88893877dfbfcb87",
+    "result": {
+      "verdict": "pass",
+      "passed": [
+        "TestLive_SUISurface",
+        "TestLive_SUIBulkSetEnabled"
+      ],
+      "failed": [],
+      "skipped": []
+    }
+  },
+  "upstream_regression": {
+    "command": "go test -tags \"$(tags_for test)\" ./api ./service ./sub ./util ./cmd/migration",
+    "verdict": "pass",
+    "log_sha256": "e02028177a6942398006b6438a432d0871fae9758fb2bd86ca8bbd925467814e"
+  },
+  "limits": [
+    "no historical PSP binary verification; earlier V3 supported range inherits unchanged contract",
+    "no existing database upgrade verification",
+    "no full proxy dataplane or quota enforcement verification",
+    "no Naive outbound verification",
+    "no Linux container or official release binary execution"
+  ]
+}

@@ -26,7 +26,7 @@ PSP 通过 `/panel/api/*` 对接 3X-UI 面板。本文档维护两件事：
 
 | PSP 版本 | 最低 S-UI | 已实测通过 | 备注 |
 |---|---|---|---|
-| **v3.9.2–v3.x / v4.x** | 未发布 | **1.6.3** | 当前适配器接口实机验证（2026-09-16 UTC），v3 沿用未变的接口契约；未运行历史发布二进制或完整代理流量链路。没有编译期 floor，理由见 `internal/version/compat_sui.go` |
+| **v3.9.2–v3.x / v4.x** | 未发布 | **1.6.5** | V3 维护线与 V4 当前源码分别实机验证（2026-10-17 UTC）；未验证历史发布二进制、已有数据库升级或完整代理流量与配额执法。没有编译期 floor。 |
 
 > S-UI 侧没有 `min_sui`：上限验过了，但「支持到多旧」从来没有人确立过，而 `CheckSUI` 只对**显式发布过的** floor 报 too_old。
 
@@ -41,6 +41,28 @@ PSP 通过 `/panel/api/*` 对接 3X-UI 面板。本文档维护两件事：
 - 抬高 `max_tested_xui` / `max_tested_sui` 时，**同一个改动**里把 `.github/workflows/test.yml` 中 `third-party-isolated` 的 `PSP_LIVE_3XUI_IMAGE` / `PSP_LIVE_SUI_IMAGE` 默认镜像改成新上限的 `tag@sha256:digest`；CI 跑的就是评审过的上限，`deploy/test_workflow_test.mjs` 会拒绝两者不一致
 
 ## 历史兼容性事件
+
+### 2026-10-17 UTC / S-UI 1.6.5 → V3/V4 已测上限 1.6.5
+
+[S-UI v1.6.5](https://github.com/alireza0/s-ui/releases/tag/v1.6.5) 升级 sing-box 到
+1.14.3，新增 S-UI 订阅自定义响应头与 gzip，修复周期重置后的客户端状态通知、
+Clash UDP 默认值及外部链接解析。相对 1.6.4，PSP 使用的 API 路由、Token 认证、
+Client/Inbound 模型未发生破坏性变化；PSP 自行渲染订阅，未使用新增的 S-UI 订阅设置。
+
+V4 源码 `c94259e3` 和 V3 `release/v3` 源码 `43cd70eb` 分别通过真实面板上的
+`TestLive_SUISurface`；V3 另通过 `TestLive_SUIBulkSetEnabled`，验证批量禁用/启用、
+UUID 保留、幂等和不存在客户端处理。两次读回版本均为 1.6.5、内核运行。
+V3 适配器与 `v3.9.3` tag 一致，较早范围成员沿用未变的接口契约。
+上游 API、service、sub、util 与迁移测试通过，无需修改生产适配器。
+
+环境为 Go 1.27.2、darwin/arm64、全新隔离 SQLite、上游 test 构建配置；仅网页使用
+占位内容，生产 API 与内核未替换，构建不含 Naive outbound。未验证已有数据库升级、
+历史 PSP 二进制、完整代理流量或配额执法。证据见
+[s-ui-1.6.5.json](compat/evidence/s-ui-1.6.5.json)。CI 默认镜像同步固定到官方
+`v1.6.5` 的多架构摘要，本地未执行 Linux 容器。
+
+同时补入此前已完成但未进入 main 的 [1.6.4 实测记录](compat/evidence/s-ui-1.6.4.json)
+及升级提示，保留旧 ECH 字段清理说明；V3/V4 当前上限均更新到 1.6.5。
 
 ### 2026-10-14（洛杉矶）/ 3X-UI 3.10.2 适配器复核 → v4 已测上限更新到 3.10.2
 
