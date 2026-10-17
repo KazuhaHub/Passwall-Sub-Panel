@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -149,6 +150,29 @@ func testReferencedCoreScenario(t *testing.T, xray, mihomo, singbox, scenario st
 			}
 			if err != nil {
 				t.Fatal(err)
+			}
+			if ct == domain.ClientMihomo {
+				preview, err := s.PreviewMihomoGroup(context.Background(), 1, rule)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var config struct {
+					Groups []struct {
+						Name    string   `yaml:"name"`
+						Members []string `yaml:"proxies"`
+					} `yaml:"proxy-groups"`
+				}
+				if err := yaml.Unmarshal(output.Body, &config); err != nil {
+					t.Fatal(err)
+				}
+				if len(config.Groups) != len(preview.Groups) {
+					t.Fatal("core fixture preview group count differs")
+				}
+				for i, group := range config.Groups {
+					if preview.Groups[i].Name != group.Name || !reflect.DeepEqual(preview.Groups[i].Members, group.Members) {
+						t.Fatalf("preview does not match core configuration: %+v vs %+v", preview.Groups, config.Groups)
+					}
+				}
 			}
 			// Require the actual expected proxy, not merely an HTTP success via
 			// a DIRECT fallback after an unavailable member was filtered out.

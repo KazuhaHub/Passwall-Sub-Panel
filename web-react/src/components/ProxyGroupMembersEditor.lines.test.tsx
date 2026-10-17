@@ -9,7 +9,7 @@ import ProxyGroupMembersEditor from './ProxyGroupMembersEditor'
 const initialMembers: Record<string, ProxyGroupMember[]> = { Pick: [{ kind: 'builtin', value: 'DIRECT' }] }
 const node = (id: number, name: string) => ({ id, display_name: name, server_address: 'example.test', region: 'HK', tags: [], enabled: true })
 const inspection: ProxyGroupInspection = {
-  groups: [{ name: 'Pick', configured: true, options_configured: false, options: { type: 'select' }, default_members: [], members: initialMembers.Pick, preview: [] }],
+  groups: [{ name: 'Pick', configured: true, options_configured: false, options: { type: 'select' }, default_members: [], members: initialMembers.Pick }],
   builtins: ['DIRECT'], nodes: [node(1, 'Alpha'), node(2, 'Beta')], regions: [], tags: [], issues: [],
   lines: [
     { node_id: 1, line_id: 'direct', kind: 'direct', name: 'Alpha', display_name: 'Alpha', enabled: true, available: true },

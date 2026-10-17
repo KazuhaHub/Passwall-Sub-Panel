@@ -50,6 +50,10 @@ func routeEntryName(base string, line domain.VlessRouteLine) string {
 }
 
 func (s *Service) filterRouteItems(ctx context.Context, u *domain.User, items []renderItem) []renderItem {
+	return s.filterRouteItemsForContext(ctx, u, items, false)
+}
+
+func (s *Service) filterRouteItemsForContext(ctx context.Context, u *domain.User, items []renderItem, preview bool) []renderItem {
 	hasRoutes := false
 	for _, item := range items {
 		hasRoutes = hasRoutes || item.route != nil
@@ -57,7 +61,10 @@ func (s *Service) filterRouteItems(ctx context.Context, u *domain.User, items []
 	if !hasRoutes {
 		return items
 	}
-	applied := s.appliedClientCredentialsByNode(ctx, u)
+	var applied map[int64]appliedClientCredential
+	if !preview {
+		applied = s.appliedClientCredentialsByNode(ctx, u)
+	}
 	panels := map[int64]*domain.XUIPanel{}
 	out := make([]renderItem, 0, len(items))
 	for _, item := range items {
@@ -77,6 +84,10 @@ func (s *Service) filterRouteItems(ctx context.Context, u *domain.User, items []
 			panels[item.node.PanelID] = panel
 		}
 		if panel == nil || domain.NormalizePanelKind(panel.Kind) != domain.PanelKind3XUI || item.node.RouteState.Binding != domain.RouteBinding(panel.URL, item.node) {
+			continue
+		}
+		if preview {
+			out = append(out, item)
 			continue
 		}
 		credential, ok := applied[item.node.ID]

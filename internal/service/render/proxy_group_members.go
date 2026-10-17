@@ -42,7 +42,6 @@ type ProxyGroupInspectGroup struct {
 	Options           domain.ProxyGroupOptions  `json:"options"`
 	DefaultMembers    []domain.ProxyGroupMember `json:"default_members"`
 	Members           []domain.ProxyGroupMember `json:"members"`
-	Preview           []string                  `json:"preview"`
 }
 
 type ProxyGroupInspection struct {
@@ -169,14 +168,14 @@ func NormalizeProxyGroupMetadata(content string, order []string, members map[str
 }
 
 // InspectProxyGroups parses the same target set used by subscription rendering,
-// validates a draft member map, and resolves a metadata-only preview. It is
+// validates a draft member map, and returns a credential-free candidate catalog. It is
 // intentionally free of repositories so the admin handler and unit tests can
 // use the exact compiler semantics without constructing a render Service.
-func InspectProxyGroups(content string, members map[string][]domain.ProxyGroupMember, options map[string]domain.ProxyGroupOptions, nodes []*domain.Node, previewScope ...[]*domain.Node) ProxyGroupInspection {
-	return InspectProxyGroupsWithMihomo(content, members, options, nodes, MihomoRuleFeatures{}, previewScope...)
+func InspectProxyGroups(content string, members map[string][]domain.ProxyGroupMember, options map[string]domain.ProxyGroupOptions, nodes []*domain.Node) ProxyGroupInspection {
+	return InspectProxyGroupsWithMihomo(content, members, options, nodes, MihomoRuleFeatures{})
 }
 
-func InspectProxyGroupsWithMihomo(content string, members map[string][]domain.ProxyGroupMember, options map[string]domain.ProxyGroupOptions, nodes []*domain.Node, advanced MihomoRuleFeatures, previewScope ...[]*domain.Node) ProxyGroupInspection {
+func InspectProxyGroupsWithMihomo(content string, members map[string][]domain.ProxyGroupMember, options map[string]domain.ProxyGroupOptions, nodes []*domain.Node, advanced MihomoRuleFeatures) ProxyGroupInspection {
 	advanced = NormalizeMihomoRuleFeatures(advanced)
 	targets := proxyGroupTargets(content, members, advanced)
 	issues := validateProxyGroupMembers(targets, members, nodes, advanced.outboundNames())
@@ -212,23 +211,6 @@ func InspectProxyGroupsWithMihomo(content string, members map[string][]domain.Pr
 		return inspectNodes[i].ID < inspectNodes[j].ID
 	})
 
-	previewNodes := nodes
-	if len(previewScope) > 0 && previewScope[0] != nil {
-		previewNodes = previewScope[0]
-	}
-	previewItems := make([]renderItem, 0, len(previewNodes))
-	for _, n := range previewNodes {
-		if n != nil && n.Enabled && !n.IsSeparator() {
-			previewItems = append(previewItems, renderItem{name: n.DisplayName, node: n})
-		}
-	}
-	sort.SliceStable(previewItems, func(i, j int) bool {
-		if previewItems[i].node.SortOrder != previewItems[j].node.SortOrder {
-			return previewItems[i].node.SortOrder < previewItems[j].node.SortOrder
-		}
-		return previewItems[i].node.ID < previewItems[j].node.ID
-	})
-
 	groups := make([]ProxyGroupInspectGroup, 0, len(targets))
 	for _, target := range targets {
 		defaults := defaultMembersForTarget(target)
@@ -242,7 +224,6 @@ func InspectProxyGroupsWithMihomo(content string, members map[string][]domain.Pr
 		if optionsConfigured {
 			effectiveOptions = EffectiveProxyGroupOptions(rawOptions)
 		}
-		preview := resolveConfiguredMembersWithOutbounds(effective, expandNodeLines(previewItems))
 		isAutoType := effectiveOptions.Type == ProxyGroupTypeURLTest ||
 			effectiveOptions.Type == ProxyGroupTypeFallback ||
 			effectiveOptions.Type == ProxyGroupTypeLoadBalance
@@ -253,15 +234,11 @@ func InspectProxyGroupsWithMihomo(content string, members map[string][]domain.Pr
 			// in the editor instead of silently misrouting at render time.
 			issues = append(issues, ProxyGroupIssue{Level: "error", Group: target, Code: "auto_group_builtin_member", Message: "自动测速 / 回退 / 负载均衡类型的成员不能包含内置出站或 Rematch 出站，请按节点或线路选择成员，或引用代理组"})
 		}
-		if (effectiveOptions.Type == ProxyGroupTypeURLTest || effectiveOptions.Type == ProxyGroupTypeLoadBalance) && len(preview) < 2 {
-			issues = append(issues, ProxyGroupIssue{Level: "warning", Group: target, Code: "insufficient_auto_members", Message: "自动选择或负载均衡通常至少需要两个可用成员"})
-		}
 		groups = append(groups, ProxyGroupInspectGroup{
 			Name: target, Configured: configured, OptionsConfigured: optionsConfigured,
 			Options:        effectiveOptions,
 			DefaultMembers: defaults,
 			Members:        append([]domain.ProxyGroupMember(nil), effective...),
-			Preview:        preview,
 		})
 	}
 

@@ -26,7 +26,7 @@ func TestAdminRuleSetsSavePersistsMembersAndOptionsAndInvalidatesRenderCache(t *
 		t.Fatal(err)
 	}
 	invalidations := 0
-	h := NewAdminRuleSetsHandler(repo, staticRuleNodes{nodes: []*domain.Node{{ID: 42, DisplayName: "China", Enabled: true}}}, nil, func() { invalidations++ }, t.TempDir())
+	h := NewAdminRuleSetsHandler(repo, staticRuleNodes{nodes: []*domain.Node{{ID: 42, DisplayName: "China", Enabled: true}}}, func() { invalidations++ }, t.TempDir())
 
 	body := ruleSetDTO{
 		Slug: "custom", Name: "Custom", Enabled: true, DirectSubscriptionDomain: true, Content: "- MATCH,🇨🇳 中国大陆",
@@ -71,7 +71,7 @@ func TestAdminRuleSetsSaveMigratesLegacyMihomoRulesIntoContent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	h := NewAdminRuleSetsHandler(repo, staticRuleNodes{}, nil, nil, t.TempDir())
+	h := NewAdminRuleSetsHandler(repo, staticRuleNodes{}, nil, t.TempDir())
 	body := ruleSetDTO{
 		Slug: "advanced", Name: "Advanced", Enabled: true, Content: "- MATCH,DIRECT",
 		MihomoRules:            "- DOMAIN-SUFFIX,openai.com,use-ai-rules",
@@ -99,7 +99,7 @@ func TestAdminRuleSetsInspectMergesLegacyMihomoRulesIntoContent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	h := NewAdminRuleSetsHandler(repo, staticRuleNodes{}, nil, nil, t.TempDir())
+	h := NewAdminRuleSetsHandler(repo, staticRuleNodes{}, nil, t.TempDir())
 	raw, err := json.Marshal(inspectProxyGroupsRequest{
 		Content:     "- MATCH,Current",
 		MihomoRules: "- MATCH,Legacy",
@@ -133,7 +133,7 @@ func TestAdminRuleSetsSaveAllowsBoundSubRulesWithoutTemplatePlaceholder(t *testi
 	}); err != nil {
 		t.Fatal(err)
 	}
-	h := NewAdminRuleSetsHandler(rules, staticRuleNodes{}, nil, nil, root, templates)
+	h := NewAdminRuleSetsHandler(rules, staticRuleNodes{}, nil, root, templates)
 	w := performRuleSave(t, h, ruleSetDTO{
 		Slug: "advanced", Name: "Advanced", Enabled: true, Content: "- MATCH,DIRECT",
 		MihomoSubRules: []domain.MihomoSubRule{{Name: "ai-rules", Content: "- MATCH,DIRECT"}},
@@ -153,7 +153,7 @@ func TestAdminRuleSetsSavePrunesRemovedGroupMetadataAndReturnsPersistedRuleSet(t
 		t.Fatal(err)
 	}
 	invalidations := 0
-	h := NewAdminRuleSetsHandler(repo, staticRuleNodes{}, nil, func() { invalidations++ }, t.TempDir())
+	h := NewAdminRuleSetsHandler(repo, staticRuleNodes{}, func() { invalidations++ }, t.TempDir())
 	body := ruleSetDTO{
 		Slug: "custom", Name: "Custom", Enabled: true,
 		Content:         "- MATCH,🐟 漏网之鱼",
@@ -197,7 +197,7 @@ func TestAdminRuleSetsSaveRejectsInvalidProxyGroupOptions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	h := NewAdminRuleSetsHandler(repo, staticRuleNodes{}, nil, nil, t.TempDir())
+	h := NewAdminRuleSetsHandler(repo, staticRuleNodes{}, nil, t.TempDir())
 	negative, zero := -1, 0
 	tests := []domain.ProxyGroupOptions{
 		{Type: "random"},
@@ -220,7 +220,7 @@ func TestAdminRuleSetsSaveRejectsInvalidProxyGroupOptions(t *testing.T) {
 func TestAdminRuleSetsInspectReturnsEffectiveOptionsForAllTypes(t *testing.T) {
 	h := NewAdminRuleSetsHandler(nil, staticRuleNodes{nodes: []*domain.Node{
 		{ID: 1, DisplayName: "A", Enabled: true}, {ID: 2, DisplayName: "B", Enabled: true},
-	}}, nil, nil, t.TempDir())
+	}}, nil, t.TempDir())
 	req := inspectProxyGroupsRequest{
 		Content: "- DOMAIN,a,Manual\n- DOMAIN,b,Auto\n- DOMAIN,c,Failover\n- MATCH,Balanced",
 		ProxyGroupOptions: map[string]domain.ProxyGroupOptions{
@@ -270,7 +270,7 @@ func TestAdminRuleSetsSaveRejectsMemberCycleWithoutInvalidating(t *testing.T) {
 		t.Fatal(err)
 	}
 	invalidations := 0
-	h := NewAdminRuleSetsHandler(repo, staticRuleNodes{}, nil, func() { invalidations++ }, t.TempDir())
+	h := NewAdminRuleSetsHandler(repo, staticRuleNodes{}, func() { invalidations++ }, t.TempDir())
 	body := ruleSetDTO{
 		Slug: "bad", Name: "Bad", Enabled: true, Content: "- DOMAIN,a,A\n- MATCH,B",
 		ProxyGroupMembers: map[string][]domain.ProxyGroupMember{
@@ -293,7 +293,7 @@ func TestAdminRuleSetsSaveStillRejectsSurvivingReferenceToRemovedGroup(t *testin
 		t.Fatal(err)
 	}
 	invalidations := 0
-	h := NewAdminRuleSetsHandler(repo, staticRuleNodes{}, nil, func() { invalidations++ }, t.TempDir())
+	h := NewAdminRuleSetsHandler(repo, staticRuleNodes{}, func() { invalidations++ }, t.TempDir())
 	body := ruleSetDTO{
 		Slug: "bad", Name: "Bad", Enabled: true, Content: "- MATCH,Keep",
 		ProxyGroupMembers: map[string][]domain.ProxyGroupMember{

@@ -11,19 +11,26 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/seed"
-	groupsvc "github.com/KazuhaHub/passwall-sub-panel/internal/service/group"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/render"
 )
 
 // AdminRuleSetsHandler exposes CRUD for rule sets under /api/admin/rules.
 type AdminRuleSetsHandler struct {
-	repo        ports.RuleSetRepo
-	templates   ports.TemplateRepo
-	nodes       ruleNodeLister
-	groups      *groupsvc.Service
-	invalidate  func()
-	configDir   string
-	routePanels ports.XUIPanelRepo
+	repo            ports.RuleSetRepo
+	templates       ports.TemplateRepo
+	nodes           ruleNodeLister
+	invalidate      func()
+	configDir       string
+	routePanels     ports.XUIPanelRepo
+	previewRenderer interface {
+		PreviewMihomoGroup(context.Context, int64, *domain.RuleSet) (*render.GroupSubscriptionPreview, error)
+	}
+	previewUsers ports.UserRepo
+}
+
+func (h *AdminRuleSetsHandler) WithGroupPreview(renderer *render.Service, users ports.UserRepo) *AdminRuleSetsHandler {
+	h.previewRenderer, h.previewUsers = renderer, users
+	return h
 }
 
 func (h *AdminRuleSetsHandler) WithRoutePanels(panels ports.XUIPanelRepo) *AdminRuleSetsHandler {
@@ -62,8 +69,8 @@ type ruleNodeLister interface {
 	List(ctx context.Context) ([]*domain.Node, error)
 }
 
-func NewAdminRuleSetsHandler(repo ports.RuleSetRepo, nodes ruleNodeLister, groups *groupsvc.Service, invalidate func(), configDir string, templates ...ports.TemplateRepo) *AdminRuleSetsHandler {
-	h := &AdminRuleSetsHandler{repo: repo, nodes: nodes, groups: groups, invalidate: invalidate, configDir: configDir}
+func NewAdminRuleSetsHandler(repo ports.RuleSetRepo, nodes ruleNodeLister, invalidate func(), configDir string, templates ...ports.TemplateRepo) *AdminRuleSetsHandler {
+	h := &AdminRuleSetsHandler{repo: repo, nodes: nodes, invalidate: invalidate, configDir: configDir}
 	if len(templates) > 0 {
 		h.templates = templates[0]
 	}
@@ -245,7 +252,6 @@ type inspectProxyGroupsRequest struct {
 	MihomoRules            string                               `json:"mihomo_rules,omitempty"`
 	MihomoSubRules         []domain.MihomoSubRule               `json:"mihomo_sub_rules,omitempty"`
 	MihomoRematchOutbounds []domain.MihomoRematchOutbound       `json:"mihomo_rematch_outbounds,omitempty"`
-	PreviewGroupID         int64                                `json:"preview_group_id,omitempty"`
 }
 
 // InspectProxyGroups is the draft-time compiler used by the rule-set editor.
@@ -262,24 +268,10 @@ func (h *AdminRuleSetsHandler) InspectProxyGroups(c *gin.Context) {
 		respondError(c, err)
 		return
 	}
-	preview := nodes
-	if req.PreviewGroupID > 0 {
-		g, err := h.groups.Get(c.Request.Context(), req.PreviewGroupID)
-		if err != nil {
-			respondError(c, err)
-			return
-		}
-		preview, err = h.groups.NodesFor(c.Request.Context(), g)
-		if err != nil {
-			respondError(c, err)
-			return
-		}
-	}
 	content := mergeLegacyRuleContent(req.MihomoRules, req.Content)
 	advanced := render.MihomoRuleFeatures{SubRules: req.MihomoSubRules, RematchOutbounds: req.MihomoRematchOutbounds}
 	nodes = h.routePreviewNodes(c.Request.Context(), nodes)
-	preview = h.routePreviewNodes(c.Request.Context(), preview)
-	c.JSON(http.StatusOK, render.InspectProxyGroupsWithMihomo(content, req.ProxyGroupMembers, req.ProxyGroupOptions, nodes, advanced, preview))
+	c.JSON(http.StatusOK, render.InspectProxyGroupsWithMihomo(content, req.ProxyGroupMembers, req.ProxyGroupOptions, nodes, advanced))
 }
 
 func mergeLegacyRuleContent(legacy, content string) string {

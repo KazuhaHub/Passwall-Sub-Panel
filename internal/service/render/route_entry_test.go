@@ -97,11 +97,9 @@ func TestRoutesWithUnavailableEntriesStayWithdrawn(t *testing.T) {
 					t.Fatal(issue)
 				}
 			}
-			for _, group := range inspection.Groups {
-				for _, name := range group.Preview {
-					if name == "A B" {
-						t.Fatal("node/line selection preview published inactive route")
-					}
+			for _, line := range inspection.Lines {
+				if line.Kind == "vless_route" && line.Available {
+					t.Fatal("candidate catalog published inactive route")
 				}
 			}
 		}

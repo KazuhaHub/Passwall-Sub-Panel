@@ -40,10 +40,8 @@ func TestLineCatalogAndPreviewUseExpandedRelays(t *testing.T) {
 	if len(inspection.Lines) != 3 || inspection.Lines[0].Available || inspection.Lines[2].Available {
 		t.Fatalf("bad availability: %+v", inspection.Lines)
 	}
-	for _, g := range inspection.Groups {
-		if g.Name == "Group" && !reflect.DeepEqual(g.Preview, []string{"A R1"}) {
-			t.Fatalf("preview: %+v", g)
-		}
+	if got := resolveConfiguredMembers([]domain.ProxyGroupMember{{Kind: "line", NodeID: 7, LineID: "r1"}}, expandNodeLines([]renderItem{{node: n, name: "A"}})); !reflect.DeepEqual(got, []string{"A R1"}) {
+		t.Fatalf("expanded members: %+v", got)
 	}
 }
 

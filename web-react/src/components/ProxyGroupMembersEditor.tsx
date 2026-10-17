@@ -30,6 +30,9 @@ import { useTranslation } from 'react-i18next'
 
 import {
   inspectProxyGroups,
+  previewProxyGroups,
+  type GroupSubscriptionPreview,
+  type RuleSet,
   type ProxyGroupInspection,
   type ProxyGroupMember,
   type ProxyGroupOptions,
@@ -55,6 +58,8 @@ interface Props {
   initialOptions: OptionMap
   onOptionsChange: (options: OptionMap) => void
   previewGroups: Group[]
+  draft?: RuleSet
+  originalSlug?: string
   mihomoSubRules?: MihomoSubRule[]
   mihomoRematchOutbounds?: MihomoRematchOutbound[]
   onValidationChange?: (hasErrors: boolean) => void
@@ -63,13 +68,17 @@ interface Props {
 type AddKind = 'node' | 'line' | 'builtin' | 'proxy_group' | 'rematch' | 'region' | 'tag' | 'remaining'
 type AddOption = { value: string | number; label: string; unavailable?: boolean }
 
-export default function ProxyGroupMembersEditor({ content, groupOrder, initialGroupOrder, onGroupOrderChange, members, initialMembers, onChange, options, initialOptions, onOptionsChange, previewGroups, mihomoSubRules = [], mihomoRematchOutbounds = [], onValidationChange }: Props) {
+export default function ProxyGroupMembersEditor({ content, groupOrder, initialGroupOrder, onGroupOrderChange, members, initialMembers, onChange, options, initialOptions, onOptionsChange, previewGroups, draft, originalSlug, mihomoSubRules = [], mihomoRematchOutbounds = [], onValidationChange }: Props) {
   const theme = useTheme()
   const md = theme.palette.md
   const { t } = useTranslation(['admin', 'common'])
   const [inspection, setInspection] = useState<ProxyGroupInspection | null>(null)
   const [selected, setSelected] = useState('')
-  const [previewGroupID, setPreviewGroupID] = useState(0)
+  const [previewGroupID, setPreviewGroupID] = useState<number | undefined>()
+  const [resolvedPreviewGroupID, setResolvedPreviewGroupID] = useState<number | undefined>()
+  const [preview, setPreview] = useState<GroupSubscriptionPreview | null>(null)
+  const [previewLoading, setPreviewLoading] = useState(false)
+  const [previewError, setPreviewError] = useState('')
   const [loading, setLoading] = useState(false)
   const [addKind, setAddKind] = useState<AddKind>('node')
   const [addValue, setAddValue] = useState<string | number | null>(null)
@@ -90,8 +99,8 @@ export default function ProxyGroupMembersEditor({ content, groupOrder, initialGr
         proxy_group_options: options,
         mihomo_sub_rules: mihomoSubRules,
         mihomo_rematch_outbounds: mihomoRematchOutbounds,
-        preview_group_id: previewGroupID || undefined,
       }, controller.signal).then(result => {
+        if (controller.signal.aborted) return
         setInspection(result)
         const hasErrors = result.issues.some(issue => issue.level === 'error')
         onValidationChange?.(hasErrors)
@@ -99,15 +108,36 @@ export default function ProxyGroupMembersEditor({ content, groupOrder, initialGr
           setSelected(result.groups[0]?.name || '')
         }
       }).catch(error => {
-        if (error?.code !== 'ERR_CANCELED') onValidationChange?.(true)
+        if (!controller.signal.aborted && error?.code !== 'ERR_CANCELED') onValidationChange?.(true)
       }).finally(() => {
         if (!controller.signal.aborted) setLoading(false)
       })
     }, 300)
     return () => { window.clearTimeout(timer); controller.abort() }
-  }, [content, serializedMembers, serializedOptions, serializedMihomo, previewGroupID]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [content, serializedMembers, serializedOptions, serializedMihomo]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const serializedDraft = JSON.stringify(draft)
+  useEffect(() => {
+    const controller = new AbortController()
+    setPreview(null)
+    setPreviewError('')
+    if (!draft) return () => controller.abort()
+    setPreviewLoading(true)
+    const timer = window.setTimeout(() => {
+      void previewProxyGroups({ draft, original_slug: originalSlug, preview_group_id: previewGroupID }, controller.signal).then(result => {
+        if (!controller.signal.aborted) { setPreview(result); setResolvedPreviewGroupID(result.group_id) }
+      }).catch(error => {
+        if (!controller.signal.aborted) {
+          setPreviewError(error?.response?.data?.error || t('admin:rules.members.preview_failed'))
+          if (error?.response?.data?.group_id > 0) setResolvedPreviewGroupID(error.response.data.group_id)
+        }
+      }).finally(() => { if (!controller.signal.aborted) setPreviewLoading(false) })
+    }, 300)
+    return () => { controller.abort(); window.clearTimeout(timer) }
+  }, [serializedDraft, originalSlug, previewGroupID]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const current = inspection?.groups.find(group => group.name === selected)
+  const currentPreview = preview?.groups.find(group => group.name === selected)
   const currentConfigured = Object.prototype.hasOwnProperty.call(members, selected)
   const currentOptionsConfigured = Object.prototype.hasOwnProperty.call(options, selected)
   const currentMembers = members[selected] || current?.default_members || []
@@ -403,15 +433,19 @@ export default function ProxyGroupMembersEditor({ content, groupOrder, initialGr
             <Typography sx={{ fontWeight: 600 }}>{t('admin:rules.members.preview_title')}</Typography>
             <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ alignItems: { xs: 'stretch', sm: 'center' } }}>
               <Typography variant="body2" sx={{ flexShrink: 0 }}>{t('admin:rules.members.preview_group_label')}</Typography>
-              <TextField select size="small" value={previewGroupID} onChange={e => setPreviewGroupID(Number(e.target.value))} sx={{ minWidth: { xs: 0, sm: 220 } }}>
-                <MenuItem value={0}>{t('admin:rules.members.preview_all')}</MenuItem>
+              <TextField select size="small" value={previewGroupID ?? resolvedPreviewGroupID ?? ''} onChange={e => setPreviewGroupID(Number(e.target.value))} sx={{ minWidth: { xs: 0, sm: 220 } }}>
                 {previewGroups.map(group => <MenuItem key={group.id} value={group.id}>{group.name}</MenuItem>)}
               </TextField>
             </Stack>
           </Stack>
           <Box sx={{ mt: 1, display: 'flex', flexWrap: 'wrap', gap: 0.75 }}>
-            {current.preview.map((name, index) => <Chip key={`${name}:${index}`} size="small" color={index === 0 ? 'primary' : 'default'} label={`${index + 1}. ${name}`} />)}
-            {!current.preview.length && <Typography variant="caption" color="error">{t('admin:rules.members.preview_empty')}</Typography>}
+            {previewLoading ? <CircularProgress size={18} /> : previewError ? <Alert severity="error">{previewError}</Alert>
+              : preview?.status !== 'ready' ? preview && <Alert severity="info">{t(`admin:rules.members.preview_${preview.status}`)}</Alert>
+              : currentPreview ? <>
+                {['url-test', 'load-balance'].includes(currentPreview.type || '') && currentPreview.members.length < 2 && <Alert severity="warning">{t('admin:rules.members.issues.insufficient_auto_members')}</Alert>}
+                {currentPreview.members.map((name, index) => <Chip key={`${name}:${index}`} size="small" color={index === 0 ? 'primary' : 'default'} label={`${index + 1}. ${name}`} />)}
+                {!currentPreview.members.length && <Typography variant="caption">{t('admin:rules.members.preview_empty')}</Typography>}
+              </> : preview && <Typography variant="caption">{t('admin:rules.members.preview_absent')}</Typography>}
           </Box>
         </>}
       </Box>

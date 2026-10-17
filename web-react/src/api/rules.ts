@@ -72,7 +72,6 @@ export interface ProxyGroupInspectGroup {
   options: ProxyGroupOptions
   default_members: ProxyGroupMember[]
   members: ProxyGroupMember[]
-  preview: string[]
 }
 
 export interface ProxyGroupInspection {
@@ -126,9 +125,20 @@ export async function inspectProxyGroups(req: {
   proxy_group_options: Record<string, ProxyGroupOptions>
   mihomo_sub_rules?: MihomoSubRule[]
   mihomo_rematch_outbounds?: MihomoRematchOutbound[]
-  preview_group_id?: number
 }, signal?: AbortSignal) {
   const { data } = await client.post<ProxyGroupInspection>('/admin/rules/inspect-proxy-groups', req, { signal })
+  return data
+}
+
+export interface GroupSubscriptionPreview {
+  group_id: number
+  rule_set: string
+  status: 'ready' | 'disabled'
+  groups: { name: string; type?: string; members: string[] }[]
+}
+
+export async function previewProxyGroups(req: { preview_group_id?: number; original_slug?: string; draft: RuleSet }, signal?: AbortSignal) {
+  const { data } = await client.post<GroupSubscriptionPreview>('/admin/rules/preview-proxy-groups', req, { signal, _skipErrorToast: true })
   return data
 }
 

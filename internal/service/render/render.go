@@ -58,21 +58,18 @@ type Output struct {
 	Headers     map[string]string
 }
 
-// loadRenderSettings loads UISettings once for the whole /sub request,
-// with the union of every caller's fallback defaults applied. Pre-perf
-// audit each render did 6-10 separate Settings.Load calls (region flag,
-// update interval, profile placeholders, email domain, max-concurrency,
-// profile-name template — singbox + urilist add their own); the cache
-// decorator removed the DB cost but each call still acquired the
-// RWMutex + copied the UISettings struct + ran applyUISettingsDefaults.
-// One Load + threading the value through helpers eliminates that work
-// for the polling-fleet case, which is the only case that matters here.
-func (s *Service) loadRenderSettings(ctx context.Context, u *domain.User) ports.UISettings {
-	defaults := ports.UISettings{
+// renderSettingsDefaults keeps preview and subscription fallback values equal.
+func renderSettingsDefaults() ports.UISettings {
+	return ports.UISettings{
 		SiteTitle:   "Kazuha Hub Passwall",
 		LogoURL:     "/images/logo-title-circle.png",
 		LogoURLDark: "/images/logo-title-circle-darkmode.png",
 	}
+}
+
+// loadRenderSettings resolves settings once for each subscription request.
+func (s *Service) loadRenderSettings(ctx context.Context, u *domain.User) ports.UISettings {
+	defaults := renderSettingsDefaults()
 	// Per-user effective (global ⊕ this user's group overrides): the
 	// subscription-policy fields rendered into the document — update-interval
 	// header, profile-name template, region-flag prefix — are group-scoped.
@@ -97,10 +94,34 @@ func (s *Service) loadRenderSettings(ctx context.Context, u *domain.User) ports.
 //	├── 6. expand @all / @region / @tag inside proxy-groups
 //	└── 7. set Subscription-Userinfo header from traffic + expire
 func (s *Service) RenderForUser(ctx context.Context, u *domain.User, ct domain.ClientType) (*Output, error) {
+	return s.renderForContext(ctx, u, ct, nil)
+}
+
+// previewContext is internal only: subscription callers cannot opt out of
+// personal credential publication gates.
+type previewContext struct {
+	ruleSets []*domain.RuleSet
+	template *domain.Template
+}
+
+func (s *Service) renderForContext(ctx context.Context, u *domain.User, ct domain.ClientType, preview *previewContext) (*Output, error) {
 	if ct == "" {
 		ct = domain.ClientMihomo
 	}
-	st := s.loadRenderSettings(ctx, u)
+	var st ports.UISettings
+	if preview == nil {
+		st = s.loadRenderSettings(ctx, u)
+	} else {
+		var err error
+		if s.repos.ScopedSettings != nil {
+			st, err = s.repos.ScopedSettings.LoadForGroup(ctx, u.GroupID, renderSettingsDefaults())
+		} else {
+			st, err = s.repos.Settings.Load(ctx, renderSettingsDefaults())
+		}
+		if err != nil {
+			return nil, err
+		}
+	}
 	g, err := s.repos.Group.GetByID(ctx, u.GroupID)
 	if err != nil {
 		return nil, fmt.Errorf("load group: %w", err)
@@ -130,7 +151,7 @@ func (s *Service) RenderForUser(ctx context.Context, u *domain.User, ct domain.C
 	// enabled transit line BEFORE the flag prefix, so every variant inherits
 	// its node's region flag. relay-less nodes pass through unchanged.
 	items = expandNodeLines(items)
-	items = s.filterRouteItems(ctx, u, items)
+	items = s.filterRouteItemsForContext(ctx, u, items, preview != nil)
 	if st.SubRegionFlagPrefix {
 		applyRegionFlagPrefix(items)
 	}
@@ -145,11 +166,20 @@ func (s *Service) RenderForUser(ctx context.Context, u *domain.User, ct domain.C
 		return s.renderURIList(ctx, u, items, st)
 	}
 
-	tpl, err := s.repos.Template.GetDefault(ctx, ct)
+	var tpl *domain.Template
+	if preview == nil {
+		tpl, err = s.repos.Template.GetDefault(ctx, ct)
+	} else {
+		tpl = preview.template
+	}
 	if err != nil {
 		return nil, fmt.Errorf("load template: %w", err)
 	}
-	bundle, err := s.resolveRuleBundle(ctx, tpl, st, ct)
+	var overrides []*domain.RuleSet
+	if preview != nil {
+		overrides = preview.ruleSets
+	}
+	bundle, err := s.resolveRuleBundle(ctx, tpl, st, ct, overrides...)
 	if err != nil {
 		return nil, fmt.Errorf("resolve rules: %w", err)
 	}
@@ -161,7 +191,7 @@ func (s *Service) RenderForUser(ctx context.Context, u *domain.User, ct domain.C
 	if ct == domain.ClientSingBox {
 		return s.renderSingBox(ctx, u, tpl, items, bundle.SharedRules, bundle.ProxyGroupOrder, bundle.ProxyGroupMembers, bundle.ProxyGroupOptions, st, lineNames)
 	}
-	proxies := s.buildProxies(ctx, u, items, st)
+	proxies := s.buildProxiesForContext(ctx, u, items, st, preview != nil)
 	generatedLines := emittedProxyNames(proxies, "name")
 	items = emittedRenderItems(items, generatedLines)
 	lineOrigin := markGeneratedLines(proxies, "name", generatedLines)
@@ -283,8 +313,10 @@ func (s *Service) RenderForUser(ctx context.Context, u *domain.User, ct domain.C
 		"Content-Disposition":     `attachment; filename*=UTF-8''` + encodedName,
 		"Profile-Title":           profileName,
 	}
-	if info := s.buildSubInfo(ctx, u); info != "" {
-		headers["Subscription-Userinfo"] = info
+	if preview == nil {
+		if info := s.buildSubInfo(ctx, u); info != "" {
+			headers["Subscription-Userinfo"] = info
+		}
 	}
 
 	return &Output{
@@ -366,10 +398,17 @@ func absoluteURL(base, raw string) string {
 }
 
 func (s *Service) buildProxies(ctx context.Context, u *domain.User, items []renderItem, st ports.UISettings) []map[string]any {
+	return s.buildProxiesForContext(ctx, u, items, st, false)
+}
+
+func (s *Service) buildProxiesForContext(ctx context.Context, u *domain.User, items []renderItem, st ports.UISettings, preview bool) []map[string]any {
 	// Pre-resolve EmailRules once per render. ClientEmail is per-(user,
 	// node), so the rules can be reused across the loop.
 	emailRules := domain.EmailRules{Domain: st.EmailDomain}
-	appliedCredentials := s.appliedClientCredentialsByNode(ctx, u)
+	var appliedCredentials map[int64]appliedClientCredential
+	if !preview {
+		appliedCredentials = s.appliedClientCredentialsByNode(ctx, u)
+	}
 	nativePanels := s.nativePanelIDs(ctx, items)
 
 	// Captured nodes render from the local snapshot (zero 3X-UI calls), so a
@@ -391,7 +430,7 @@ func (s *Service) buildProxies(ctx context.Context, u *domain.User, items []rend
 				"node_id", it.node.ID, "panel_id", it.node.PanelID, "inbound_id", it.node.InboundID)
 			continue
 		}
-		if _, native := nativePanels[it.node.PanelID]; native {
+		if _, native := nativePanels[it.node.PanelID]; native && !preview {
 			if _, applied := appliedCredentials[it.node.ID]; !applied {
 				log.Warn("render: skip native node until client credentials are confirmed applied",
 					"node_id", it.node.ID, "panel_id", it.node.PanelID, "user_id", u.ID)
@@ -695,7 +734,7 @@ type resolvedRuleBundle struct {
 	RematchOutbounds  []domain.MihomoRematchOutbound
 }
 
-func (s *Service) resolveRuleBundle(ctx context.Context, tpl *domain.Template, st ports.UISettings, clientType domain.ClientType) (resolvedRuleBundle, error) {
+func (s *Service) resolveRuleBundle(ctx context.Context, tpl *domain.Template, st ports.UISettings, clientType domain.ClientType, overrides ...*domain.RuleSet) (resolvedRuleBundle, error) {
 	slugs := tpl.RuleSets
 	if len(slugs) == 0 {
 		log.Debug("render: no rule_sets configured for template", "template", tpl.Slug)
@@ -713,7 +752,17 @@ func (s *Service) resolveRuleBundle(ctx context.Context, tpl *domain.Template, s
 	seenSubRules := map[string]string{}
 	seenRematchOutbounds := map[string]string{}
 	for _, slug := range slugs {
-		rs, err := s.repos.RuleSet.GetBySlug(ctx, slug)
+		var rs *domain.RuleSet
+		var err error
+		for _, draft := range overrides {
+			if draft != nil && draft.Slug == slug {
+				rs = draft
+				break
+			}
+		}
+		if rs == nil {
+			rs, err = s.repos.RuleSet.GetBySlug(ctx, slug)
+		}
 		if err != nil {
 			log.Warn("render: skip rule_set, lookup failed", "slug", slug, "err", err)
 			continue

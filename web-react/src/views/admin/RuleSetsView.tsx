@@ -37,7 +37,7 @@ import { allSettledLimited } from '@/utils/promises'
 import { AsyncIconButton } from '@/components/AsyncButton'
 
 import { deleteRuleSet, inspectProxyGroups, resetRuleSet, saveRuleSet, SEEDED_RULESET_SLUGS, type RuleSet } from '@/api/rules'
-import { useGroupsList } from '@/query/groups'
+import { useAllGroups } from '@/query/groups'
 import { ruleKeys } from '@/query/keys'
 import { useRuleSets, useTemplates } from '@/query/rules'
 import { useQueryScope } from '@/query/useQueryScope'
@@ -89,10 +89,10 @@ export default function RuleSetsView() {
   const queryClient = useQueryClient()
   const rulesQuery = useRuleSets(qScope)
   const templatesQuery = useTemplates(qScope)
-  const groupsQuery = useGroupsList(qScope)
+  const groupsQuery = useAllGroups(qScope)
   const items = rulesQuery.data?.items ?? []
   const templates = templatesQuery.data?.items ?? []
-  const groups = groupsQuery.data?.items ?? []
+  const groups = groupsQuery.data ?? []
   const loading = rulesQuery.isPending
   const rulesFailed = rulesQuery.isError || templatesQuery.isError || groupsQuery.isError
   const [selected, setSelected] = useState<Set<string>>(new Set())
@@ -543,6 +543,8 @@ export default function RuleSetsView() {
                 initialOptions={initialProxyGroupOptions}
                 onOptionsChange={proxy_group_options => setForm(current => ({ ...current, proxy_group_options }))}
                 previewGroups={groups}
+                draft={form}
+                originalSlug={editing ? form.slug : undefined}
                 mihomoSubRules={form.mihomo_sub_rules}
                 mihomoRematchOutbounds={form.mihomo_rematch_outbounds}
               />
