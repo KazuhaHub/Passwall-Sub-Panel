@@ -53,8 +53,8 @@ await context.addInitScript(() => {
   if (!localStorage.getItem('psp-lang')) localStorage.setItem('psp-lang', 'zh-CN')
 })
 const labels = {
-  'zh-CN': ['节点：日本节点', '直连线路：日本节点', '中转线路：日本节点 中转专线', 'VLESS 路由线路：路由专线', '其余线路（自动去重）', '内置：DIRECT', '区域：HK', '标签：fast', '代理组：Other', 'Rematch：Mark'],
-  'en-US': ['Node: 日本节点', 'Direct line: 日本节点', 'Relay line: 日本节点 中转专线', 'VLESS routing line: 路由专线', 'Remaining lines (deduplicated)', 'Built-in: DIRECT', 'Region: HK', 'Tag: fast', 'Proxy group: Other', 'Rematch: Mark'],
+  'zh-CN': ['节点：日本节点', '直连：日本节点', '中转：日本节点 中转专线', 'VLESS 路由：路由专线', '其余线路（自动去重）', '内置：DIRECT', '区域：HK', '标签：fast', '代理组：Other', 'Rematch：Mark'],
+  'en-US': ['Node: 日本节点', 'Direct: 日本节点', 'Relay: 日本节点 中转专线', 'VLESS routing: 路由专线', 'Remaining lines (deduplicated)', 'Built-in: DIRECT', 'Region: HK', 'Tag: fast', 'Proxy group: Other', 'Rematch: Mark'],
 }
 try {
   for (const language of ['zh-CN', 'en-US']) {
