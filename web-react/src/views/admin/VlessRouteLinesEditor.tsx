@@ -8,6 +8,7 @@ import { useTranslation } from 'react-i18next'
 import type { VlessRouteDraft } from '@/query/vlessRoute'
 import type { VlessRouteLine } from '@/api/vlessRoute'
 import type { RelayLine } from '@/api/types'
+import VlessRouteMatchFields from './VlessRouteMatchFields'
 
 export default function VlessRouteLinesEditor({ draft, busy, relays, hiddenDirect }: { draft: VlessRouteDraft; busy: boolean; relays: RelayLine[]; hiddenDirect: boolean }) {
   const { t } = useTranslation(['admin', 'common'])
@@ -22,7 +23,7 @@ export default function VlessRouteLinesEditor({ draft, busy, relays, hiddenDirec
       <Typography sx={{ fontSize: 14, fontWeight: 600 }}>{t('admin:nodes.vless_route.title')}</Typography>
       <Box sx={{ display: 'flex', alignItems: 'center', ml: 'auto' }}>
         <Tooltip title={t('admin:nodes.vless_route.refresh')}>
-          <span><IconButton size="small" aria-label={t('admin:nodes.vless_route.refresh')} disabled={busy || draft.refreshing || draft.loading} onClick={() => void draft.refreshOutbounds()}><RefreshIcon fontSize="small" /></IconButton></span>
+          <span><IconButton size="small" aria-label={t('admin:nodes.vless_route.refresh')} disabled={busy || draft.refreshing || draft.loading} onClick={() => void draft.refresh()}><RefreshIcon fontSize="small" /></IconButton></span>
         </Tooltip>
         <Button size="small" disabled={disabled || lines.length >= 64} startIcon={<AddIcon />} onClick={() => setLines(previous => [...previous, { name: '', only_line_name: false, entry_relay_id: '', outbound_tag: '', enabled: true }])}>{t('admin:nodes.vless_route.add')}</Button>
       </Box>
@@ -30,11 +31,18 @@ export default function VlessRouteLinesEditor({ draft, busy, relays, hiddenDirec
     <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant }}>{t('admin:nodes.vless_route.hint')}</Typography>
     {draft.loading && <Alert severity="info">{t('common:status.loading')}</Alert>}
     {draft.readError && <Alert severity="error" action={<Button onClick={() => void draft.reload()}>{t('admin:nodes.vless_route.refresh')}</Button>}>{t('admin:nodes.vless_route.read_error')}</Alert>}
+    {draft.conflict && <Alert severity="error">{t('admin:nodes.vless_route.draft_conflict')}</Alert>}
     {baseline && !baseline.supported && <Alert severity="info">{t('admin:nodes.vless_route.unsupported')}</Alert>}
     {draft.catalogError && <Alert severity="warning">{t('admin:nodes.vless_route.catalog_error')}</Alert>}
+    {baseline?.supported && baseline.state.status === 'applied' && !draft.loading && !draft.readError && !draft.conflict && <Alert severity="success">
+      {t('admin:nodes.vless_route.state_applied')}
+    </Alert>}
     {baseline?.state.status && baseline.state.status !== 'applied' && <Alert severity="warning">
       {t(`admin:nodes.vless_route.state_${baseline.state.status}`, { defaultValue: baseline.state.status })}
-      {baseline.state.error && ` (${baseline.state.error})`}
+      {baseline.state.error && <Typography component="div" sx={{ mt: 0.5, fontSize: 12 }}>
+        {t('admin:nodes.vless_route.error_code')}{' '}
+        <Box component="code" sx={{ fontFamily: 'monospace', userSelect: 'text', overflowWrap: 'anywhere' }}>{baseline.state.error}</Box>
+      </Typography>}
     </Alert>}
     {baseline?.warnings.map((warning, index) => <Alert severity="warning" key={index}>{warning}</Alert>)}
     {!lines.length && !draft.loading && <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant, fontStyle: 'italic' }}>{t('admin:nodes.vless_route.empty')}</Typography>}
@@ -58,19 +66,22 @@ export default function VlessRouteLinesEditor({ draft, busy, relays, hiddenDirec
             <IconButton size="small" aria-label={t('admin:nodes.relay.remove')} disabled={disabled} onClick={() => setLines(previous => previous.filter((_, i) => i !== index))}><DeleteIcon fontSize="small" /></IconButton>
           </Tooltip>
         </Box>
-        <TextField select fullWidth size="small" label={t('admin:nodes.vless_route.entry')} value={entryID || 'direct'} disabled={disabled} onChange={event => update({ entry_relay_id: event.target.value === 'direct' ? '' : event.target.value })} error={unavailableEntry} helperText={unavailableEntry ? t('admin:nodes.vless_route.entry_unavailable') : relays.some(relay => !relay.id) ? t('admin:nodes.vless_route.entry_unsaved_hint') : undefined}>
-          <MenuItem value="direct" disabled={hiddenDirect}>{t('admin:nodes.vless_route.entry_direct')}</MenuItem>
-          {entryID && !entry && <MenuItem value={entryID} disabled>{t('admin:nodes.vless_route.entry_missing')}</MenuItem>}
-          {relays.map((relay, index) => <MenuItem key={relay.id || `pending-${index}`} value={relay.id || `pending-${index}`} disabled={!relay.id || !relay.enabled}>
-            {relay.name || relay.address}
-          </MenuItem>)}
-        </TextField>
-        <TextField select fullWidth size="small" required label={t('admin:nodes.vless_route.outbound')} value={line.outbound_tag} disabled={disabled} onChange={event => update({ outbound_tag: event.target.value })} error={missing} helperText={missing ? t('admin:nodes.vless_route.missing_outbound') : undefined}>
-          {missing && <MenuItem value={line.outbound_tag}>{`${line.outbound_tag} [${t('admin:nodes.vless_route.unknown_protocol')}]`}</MenuItem>}
-          {outbounds.map(outbound => <MenuItem key={outbound.tag} value={outbound.tag}>{`${outbound.tag} [${outbound.protocol || t('admin:nodes.vless_route.unknown_protocol')}]`}</MenuItem>)}
-        </TextField>
+        <Box sx={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 1, alignItems: 'start' }}>
+          <TextField select fullWidth size="small" label={t('admin:nodes.vless_route.entry')} value={entryID || 'direct'} disabled={disabled} onChange={event => update({ entry_relay_id: event.target.value === 'direct' ? '' : event.target.value })} error={unavailableEntry} helperText={unavailableEntry ? t('admin:nodes.vless_route.entry_unavailable') : relays.some(relay => !relay.id) ? t('admin:nodes.vless_route.entry_unsaved_hint') : undefined}>
+            <MenuItem value="direct" disabled={hiddenDirect}>{t('admin:nodes.vless_route.entry_direct')}</MenuItem>
+            {entryID && !entry && <MenuItem value={entryID} disabled>{t('admin:nodes.vless_route.entry_missing')}</MenuItem>}
+            {relays.map((relay, index) => <MenuItem key={relay.id || `pending-${index}`} value={relay.id || `pending-${index}`} disabled={!relay.id || !relay.enabled}>
+              {relay.name || relay.address}
+            </MenuItem>)}
+          </TextField>
+          <TextField select fullWidth size="small" required label={t('admin:nodes.vless_route.outbound')} value={line.outbound_tag} disabled={disabled} onChange={event => update({ outbound_tag: event.target.value })} error={missing} helperText={missing ? t('admin:nodes.vless_route.missing_outbound') : undefined}>
+            {missing && <MenuItem value={line.outbound_tag}>{`${line.outbound_tag} [${t('admin:nodes.vless_route.unknown_protocol')}]`}</MenuItem>}
+            {outbounds.map(outbound => <MenuItem key={outbound.tag} value={outbound.tag}>{`${outbound.tag} [${outbound.protocol || t('admin:nodes.vless_route.unknown_protocol')}]`}</MenuItem>)}
+          </TextField>
+        </Box>
         <FormControlLabel sx={{ m: 0, '& .MuiFormControlLabel-label': { ml: 0.75 } }} label={t('admin:nodes.relay.only_line_name')}
           control={<Switch size="small" checked={!!line.only_line_name} disabled={disabled} onChange={(_, checked) => update({ only_line_name: checked })} />} />
+        <VlessRouteMatchFields line={line} update={update} disabled={disabled} />
       </Box>
     })}
   </Box>

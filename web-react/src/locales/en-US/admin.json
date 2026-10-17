@@ -1859,7 +1859,8 @@
       "catalog_error": "Cannot read existing outbounds. Refresh before selecting a destination.",
       "add": "Add VLESS route",
       "empty": "No VLESS routing lines added yet",
-      "refresh": "Refresh existing outbounds",
+      "refresh": "Refresh routing status and outbounds",
+      "draft_conflict": "The line configuration was changed by another operation. Your unsaved edits are preserved. Close and reopen the editor to review it.",
       "name": "Line name",
       "outbound": "Line outbound",
       "entry": "Line entry",
@@ -1872,9 +1873,19 @@
       "missing_outbound": "Not currently found",
       "partial_failure": "Node metadata was saved, but routing is not confirmed. The editor remains open; check its status before retrying.",
       "state_applied": "Routing readback confirmed; actual traffic still needs testing.",
+      "error_code": "Error code:",
+      "match": {
+        "title": "Advanced routing rules",
+        "network": "Network",
+        "any": "Any (TCP / UDP)",
+        "protocols": "Protocol",
+        "ip": "IP",
+        "domain": "Domain",
+        "port": "Port"
+      },
       "state_applying": "Remote application is not confirmed; lines are withheld. Saving again first reads the current state.",
       "state_unknown": "Remote result unknown; lines are withheld. Save again to retry synchronization.",
-      "state_drift": "Remote routing changed; lines are withheld. Review it before saving again."
+      "state_drift": "Remote routing changed; lines are withheld. Continuing to save will overwrite the remote routing changes."
     },
     "load_failed": "Nodes are temporarily unavailable",
     "retry": "Retry",

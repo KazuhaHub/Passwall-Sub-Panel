@@ -30,7 +30,7 @@ func (h *AdminVlessRouteHandler) Get(c *gin.Context) {
 	if !ok {
 		return
 	}
-	view, err := h.service.Get(c.Request.Context(), id)
+	view, err := h.service.Refresh(c.Request.Context(), id)
 	if err != nil {
 		respondError(c, err)
 		return

@@ -8,6 +8,26 @@ export interface VlessRouteLine {
   outbound_tag: string
   enabled: boolean
   route?: number
+  network?: '' | 'tcp' | 'udp'
+  protocols?: string[]
+  ip?: string[]
+  domain?: string[]
+  port?: string
+}
+
+const cleanList = (values?: string[]) => [...new Set((values ?? []).map(value => value.trim()).filter(Boolean))]
+
+/** Empty optional match fields preserve the legacy one-rule-per-line payload. */
+export function routeLineInput(line: VlessRouteLine): VlessRouteLine {
+  const input: VlessRouteLine = { id: line.id, name: line.name.trim(), only_line_name: !!line.only_line_name, entry_relay_id: line.entry_relay_id || '', outbound_tag: line.outbound_tag, enabled: line.enabled }
+  if (line.network) input.network = line.network
+  const protocols = cleanList(line.protocols).sort()
+  const ip = cleanList(line.ip), domain = cleanList(line.domain), port = (line.port || '').trim()
+  if (protocols.length) input.protocols = protocols
+  if (ip.length) input.ip = ip
+  if (domain.length) input.domain = domain
+  if (port) input.port = port
+  return input
 }
 export interface RouteState {
   revision: number
@@ -34,6 +54,6 @@ export async function getRouteOutbounds(nodeId: number, signal?: AbortSignal): P
 export async function saveRouteLines(nodeId: number, revision: number, lines: VlessRouteLine[]): Promise<RouteLinesView> {
   return (await client.put<RouteLinesView>(`/admin/nodes/${nodeId}/vless-route-lines`, {
     revision,
-    lines: lines.map(({ id, name, only_line_name, entry_relay_id, outbound_tag, enabled }) => ({ id, name, only_line_name: !!only_line_name, entry_relay_id: entry_relay_id || '', outbound_tag, enabled })),
+    lines: lines.map(routeLineInput),
   })).data
 }

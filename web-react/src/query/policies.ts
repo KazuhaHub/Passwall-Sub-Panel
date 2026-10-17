@@ -27,7 +27,7 @@ export const policies = {
     staleTime: 0,
     gcTime: MINUTE,
     refetchInterval: false,
-    note: 'Read on opening the node line editor; scoped per editing session. Focus/reconnect never replaces an unsaved draft.',
+    note: 'Verify remote route status on tab activation or explicit refresh; scoped per editing session. Preserve unsaved edits and never poll the editor.',
   },
   /** Keeps the existing 60s cadence; pauses while the tab is hidden. */
   alerts: {

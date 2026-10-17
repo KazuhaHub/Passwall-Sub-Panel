@@ -1857,7 +1857,8 @@
       "catalog_error": "无法读取已有出站，列表不代表当前服务端状态。请刷新后再选择。",
       "add": "添加 VLESS 路由",
       "empty": "尚未添加 VLESS 路由线路",
-      "refresh": "刷新已有出站",
+      "refresh": "刷新路由状态和出站",
+      "draft_conflict": "线路配置已被其他操作修改，未保存的编辑已保留。请关闭编辑器并重新打开后核对。",
       "name": "线路名称",
       "outbound": "线路出站",
       "entry": "线路入口",
@@ -1870,9 +1871,19 @@
       "missing_outbound": "当前未找到",
       "partial_failure": "节点资料已保存，但路由同步尚未确认；编辑器保持打开，请检查状态后重试。",
       "state_applied": "路由已回读确认；实际流量仍需测试。",
+      "error_code": "错误标识：",
+      "match": {
+        "title": "高级路由规则",
+        "network": "网络",
+        "any": "不限（TCP / UDP）",
+        "protocols": "协议",
+        "ip": "IP",
+        "domain": "域名",
+        "port": "端口"
+      },
       "state_applying": "远端应用结果尚未确认，线路暂不发布。再次保存会先读取当前状态。",
       "state_unknown": "远端结果未知，线路暂不发布。再次保存可重试同步。",
-      "state_drift": "检测到远端路由变化，线路暂不发布。请核对后重新保存。"
+      "state_drift": "检测到远端路由变化，线路暂不发布。继续保存将覆盖远端路由变化。"
     },
     "load_failed": "暂时无法加载节点",
     "retry": "重试",

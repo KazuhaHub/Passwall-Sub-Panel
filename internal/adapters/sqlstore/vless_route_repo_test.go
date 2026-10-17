@@ -16,6 +16,7 @@ func TestRouteStateCASAndStaleNodeWrites(t *testing.T) {
 		t.Fatal(err)
 	}
 	state := domain.NodeRouteState{Status: "applying", Lines: []domain.VlessRouteLine{{ID: "one", Route: 1001, Enabled: true, OutboundTag: "warp", OnlyLineName: true, EntryRelayID: "front"}}}
+	state.Lines[0].Network, state.Lines[0].Protocols, state.Lines[0].IP, state.Lines[0].Domain, state.Lines[0].Port = "tcp", []string{"tls"}, []string{"192.0.2.0/24"}, []string{"domain:example.com"}, "443"
 	if err := r.SaveRouteState(ctx, n.ID, 0, &state); err != nil {
 		t.Fatal(err)
 	}
@@ -38,6 +39,10 @@ func TestRouteStateCASAndStaleNodeWrites(t *testing.T) {
 	}
 	if got.RouteState.Revision != 1 || got.RouteState.Status != "applying" || len(got.RouteState.Lines) != 1 || !got.RouteState.Lines[0].OnlyLineName || got.RouteState.Lines[0].EntryRelayID != "front" || got.DisplayName != "renamed" {
 		t.Fatalf("stale node write clobbered routes: %+v", got.RouteState)
+	}
+	line := got.RouteState.Lines[0]
+	if line.Network != "tcp" || len(line.Protocols) != 1 || line.Protocols[0] != "tls" || len(line.IP) != 1 || line.IP[0] != "192.0.2.0/24" || len(line.Domain) != 1 || line.Domain[0] != "domain:example.com" || line.Port != "443" {
+		t.Fatal("route match fields lost in SQL round trip", line)
 	}
 }
 

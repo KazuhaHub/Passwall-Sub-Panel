@@ -11,14 +11,19 @@ import (
 
 // VlessRouteLine is a subscription entry, not a remote inbound/client.
 type VlessRouteLine struct {
-	ID           string `json:"id"`
-	Name         string `json:"name"`
-	OnlyLineName bool   `json:"only_line_name"`
-	EntryRelayID string `json:"entry_relay_id,omitempty"`
-	OutboundTag  string `json:"outbound_tag"`
-	Route        uint16 `json:"route"`
-	Enabled      bool   `json:"enabled"`
-	Deleted      bool   `json:"deleted,omitempty"`
+	ID           string   `json:"id"`
+	Name         string   `json:"name"`
+	OnlyLineName bool     `json:"only_line_name"`
+	EntryRelayID string   `json:"entry_relay_id,omitempty"`
+	OutboundTag  string   `json:"outbound_tag"`
+	Network      string   `json:"network,omitempty"`
+	Protocols    []string `json:"protocols,omitempty"`
+	IP           []string `json:"ip,omitempty"`
+	Domain       []string `json:"domain,omitempty"`
+	Port         string   `json:"port,omitempty"`
+	Route        uint16   `json:"route"`
+	Enabled      bool     `json:"enabled"`
+	Deleted      bool     `json:"deleted,omitempty"`
 }
 
 // Label follows the selected outbound tag when no custom name is configured.

@@ -101,7 +101,27 @@ func Compile(template ports.RouteTemplate, nodeID int64, inboundTag string, regi
 		if !outbounds[line.OutboundTag] {
 			return invalid("selected outbound tag no longer exists")
 		}
-		raw, _ := json.Marshal(map[string]any{"type": "field", "ruleTag": RuleTag(nodeID, line.ID), "inboundTag": []string{inboundTag}, "vlessRoute": strconv.Itoa(int(line.Route)), "outboundTag": line.OutboundTag})
+		line, err := normalizeRouteMatch(line)
+		if err != nil {
+			return ports.RouteTemplate{}, nil, err
+		}
+		match := map[string]any{"type": "field", "ruleTag": RuleTag(nodeID, line.ID), "inboundTag": []string{inboundTag}, "vlessRoute": strconv.Itoa(int(line.Route)), "outboundTag": line.OutboundTag}
+		if line.Network != "" {
+			match["network"] = line.Network
+		}
+		if len(line.Protocols) > 0 {
+			match["protocol"] = line.Protocols
+		}
+		if len(line.IP) > 0 {
+			match["ip"] = line.IP
+		}
+		if len(line.Domain) > 0 {
+			match["domain"] = line.Domain
+		}
+		if line.Port != "" {
+			match["port"] = line.Port
+		}
+		raw, _ := json.Marshal(match)
 		keep = append(keep, raw)
 	}
 	routing["rules"], _ = json.Marshal(keep)

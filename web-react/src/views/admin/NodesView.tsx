@@ -2539,7 +2539,7 @@ export default function NodesView() {
 
   async function submitEdit(e: FormEvent) {
     e.preventDefault()
-    if (!editing) return
+    if (!editing || routeDraft.loading || routeDraft.refreshing || routeDraft.conflict || routeDraft.readError) return
     const errs = validateMeta(editForm)
     setEditMetaErr(errs)
     const firstKey = firstError(errs)
@@ -3947,7 +3947,7 @@ export default function NodesView() {
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setEditOpen(false)} disabled={editBusy} variant="text">{t('common:actions.cancel')}</Button>
-          <Button type="submit" form="node-form" variant="contained" disabled={editBusy || routeDraft.loading}
+          <Button type="submit" form="node-form" variant="contained" disabled={editBusy || routeDraft.loading || routeDraft.refreshing || routeDraft.conflict || routeDraft.readError}
             startIcon={editBusy ? <CircularProgress size={16} color="inherit" /> : null}>
             {t('common:actions.ok')}
           </Button>

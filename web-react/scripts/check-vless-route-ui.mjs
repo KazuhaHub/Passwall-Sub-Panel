@@ -79,11 +79,11 @@ try {
     assert.ok(Math.abs(name.y + name.height / 2 - down.y - down.height / 2) < 3, `down must share name row at ${width}`)
     assert.ok(toggle.x < up.x && up.x < down.x && down.x < remove.x, `enable, up, down, delete order at ${width}`)
     assert.equal(await dialog.getByText(/^route \d+$/).count(), 0)
-    assert.equal(await dialog.getByText(/路由已回读确认|Routing readback confirmed/).count(), 0)
+    assert.equal(await dialog.getByText(/路由已回读确认|Routing readback confirmed/).count(), 1)
     assert.ok(Math.abs(name.y + name.height / 2 - toggle.y - toggle.height / 2) < 3, `enable must share name row at ${width}`)
     assert.ok(Math.abs(name.y + name.height / 2 - remove.y - remove.height / 2) < 3, `delete must share name row at ${width}`)
     assert.ok(outbound.y >= name.y + name.height, `outbound must follow name row at ${width}`)
-    assert.ok(entry && entry.y < outbound.y, `entry must precede outbound at ${width}`)
+    assert.ok(entry && Math.abs(entry.y - outbound.y) < 1 && Math.abs(entry.width - outbound.width) < 1 && entry.x < outbound.x, `entry and outbound must share an equal-width row at ${width}`)
     await page.screenshot({ path: join(output, `node-lines-${width}.png`), animations: 'disabled' })
   }
   await page.setViewportSize({ width: 1440, height: 1000 })

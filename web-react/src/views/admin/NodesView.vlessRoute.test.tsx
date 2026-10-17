@@ -10,6 +10,64 @@ vi.mock('@/components/ConfirmHost', () => ({ confirm: confirmation }))
 
 const initial = (): RouteLinesView => ({ node_id: 1, supported: true, state: { revision: 0, lines: [], status: '' }, warnings: [] })
 
+it('edits exactly five optional fields on each existing route without adding a rule or outbound', async () => {
+  const view = initial()
+  view.state = { revision: 2, status: 'applied', lines: [{ id: 'line', route: 1, name: 'B', outbound_tag: 'direct', enabled: true }] }
+  installReads({ '/admin/nodes': list([node]), '/admin/nodes/1/vless-route-lines': view, '/admin/nodes/1/vless-route-outbounds': { items: [{ tag: 'direct', protocol: 'freedom', source: 'template' }] } })
+  api.put.mockImplementation(async (url, body) => {
+    if (String(url).endsWith('/vless-route-lines')) {
+      view.state = { revision: view.state.revision + 2, status: 'applied', lines: body.lines.map((line: object) => ({ ...line, route: 1 })) }
+      return { data: view }
+    }
+    return { data: node }
+  })
+  mount(<NodesView />)
+  let dialog = await editRow()
+  fireEvent.click(within(dialog).getByRole('tab', { name: 'admin:nodes.vless_route.title' }))
+  const accordion = await within(dialog).findByRole('button', { name: 'admin:nodes.vless_route.match.title' })
+  expect(accordion.getAttribute('aria-expanded')).toBe('false')
+  fireEvent.click(accordion)
+  let fields = within(dialog).getByRole('group', { name: 'admin:nodes.vless_route.match.title' })
+  expect(within(fields).getAllByRole('combobox')).toHaveLength(2)
+  expect(within(fields).getAllByRole('textbox')).toHaveLength(3)
+  expect(within(fields).queryByRole('button')).toBeNull()
+  expect(fields.querySelector('.MuiFormHelperText-root')).toBeNull()
+  expect(within(dialog).queryByText('admin:nodes.vless_route.match.hint')).toBeNull()
+  const entryControl = within(dialog).getByRole('combobox', { name: 'admin:nodes.vless_route.entry' }).closest('.MuiFormControl-root')
+  const outboundControl = within(dialog).getByRole('combobox', { name: /admin:nodes.vless_route.outbound/ }).closest('.MuiFormControl-root')
+  expect(entryControl?.parentElement).toBe(outboundControl?.parentElement)
+  fireEvent.mouseDown(within(fields).getByRole('combobox', { name: 'admin:nodes.vless_route.match.network' }))
+  fireEvent.click(await screen.findByRole('option', { name: 'TCP' }))
+  fireEvent.mouseDown(within(fields).getByRole('combobox', { name: 'admin:nodes.vless_route.match.protocols' }))
+  fireEvent.click(await screen.findByRole('option', { name: 'tls' }))
+  fireEvent.keyDown(screen.getByRole('listbox'), { key: 'Escape' })
+  fireEvent.change(within(fields).getByLabelText('admin:nodes.vless_route.match.ip'), { target: { value: '192.0.2.0/24\ngeoip:private' } })
+  fireEvent.change(within(fields).getByLabelText('admin:nodes.vless_route.match.domain'), { target: { value: 'domain:example.com\nregexp:^a{1,3}\\.example$' } })
+  fireEvent.change(within(fields).getByLabelText('admin:nodes.vless_route.match.port'), { target: { value: '443,1000-2000' } })
+  fireEvent.click(within(dialog).getByRole('button', { name: 'common:actions.ok' }))
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+  const first = api.put.mock.calls.find(([url]) => String(url).endsWith('/vless-route-lines'))![1].lines
+  expect(first).toHaveLength(1)
+  expect(first[0]).toEqual({ id: 'line', name: 'B', enabled: true, only_line_name: false, entry_relay_id: '', outbound_tag: 'direct', network: 'tcp', protocols: ['tls'], ip: ['192.0.2.0/24', 'geoip:private'], domain: ['domain:example.com', 'regexp:^a{1,3}\\.example$'], port: '443,1000-2000' })
+  dialog = await editRow()
+  fireEvent.click(within(dialog).getByRole('tab', { name: 'admin:nodes.vless_route.title' }))
+  const reopened = await within(dialog).findByRole('button', { name: 'admin:nodes.vless_route.match.title' })
+  expect(reopened.getAttribute('aria-expanded')).toBe('false')
+  fireEvent.click(reopened)
+  fields = within(dialog).getByRole('group', { name: 'admin:nodes.vless_route.match.title' })
+  expect(within(fields).getByDisplayValue('443,1000-2000')).toBeTruthy()
+  fireEvent.mouseDown(within(fields).getByRole('combobox', { name: 'admin:nodes.vless_route.match.network' }))
+  fireEvent.click(await screen.findByRole('option', { name: 'admin:nodes.vless_route.match.any' }))
+  fireEvent.mouseDown(within(fields).getByRole('combobox', { name: 'admin:nodes.vless_route.match.protocols' }))
+  fireEvent.click(await screen.findByRole('option', { name: 'tls' }))
+  fireEvent.keyDown(screen.getByRole('listbox'), { key: 'Escape' })
+  for (const field of ['ip', 'domain', 'port']) fireEvent.change(within(fields).getByLabelText(`admin:nodes.vless_route.match.${field}`), { target: { value: '' } })
+  fireEvent.click(within(dialog).getByRole('button', { name: 'common:actions.ok' }))
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+  const last = api.put.mock.calls.filter(([url]) => String(url).endsWith('/vless-route-lines')).at(-1)![1].lines[0]
+  for (const key of ['network', 'protocols', 'ip', 'domain', 'port']) expect(last[key]).toBeUndefined()
+})
+
 it('keeps relay and route tabs separate and saves routes with the existing node Save button', async () => {
   const view = initial()
   installReads({
@@ -53,7 +111,7 @@ it('keeps relay and route tabs separate and saves routes with the existing node 
   expect(await within(reopened).findByDisplayValue('B')).toBeTruthy()
   expect((within(reopened).getByRole('switch', { name: 'admin:nodes.relay.only_line_name' }) as HTMLInputElement).checked).toBe(true)
   expect(within(reopened).queryByText('route 1001')).toBeNull()
-  expect(within(reopened).queryByText('admin:nodes.vless_route.state_applied')).toBeNull()
+  expect(within(reopened).getByText('admin:nodes.vless_route.state_applied').closest('[role="alert"]')?.className).toMatch(/Success/)
 })
 
 it('defaults each legacy relay to false and keeps independent display options after saving and reopening', async () => {
@@ -162,9 +220,57 @@ it('keeps the editor open after metadata succeeds but route application is unkno
   fireEvent.click(within(dialog).getByRole('tab', { name: 'admin:nodes.vless_route.title' }))
   await within(dialog).findByDisplayValue('B')
   expect(within(dialog).getByRole('alert').textContent).toContain('admin:nodes.vless_route.state_unknown')
+  expect(within(dialog).getByText('remote_update_unconfirmed').tagName).toBe('CODE')
+  expect(within(dialog).queryByText('admin:nodes.vless_route.state_applied')).toBeNull()
   fireEvent.click(within(dialog).getByRole('button', { name: 'common:actions.ok' }))
   await waitFor(() => expect(api.put.mock.calls.some(([url]) => String(url).endsWith('/vless-route-lines'))).toBe(true))
   expect(screen.getByRole('dialog')).toBeTruthy()
+})
+
+it.each(['unsupported_or_stopped_core', 'inbound_binding_changed', 'routing_or_outbound_changed', 'unsupported_or_changed_binding', 'routes_withdrawn'])('shows the exact drift identifier %s separately from the status explanation', async error => {
+  const view = initial()
+  view.state = { revision: 2, status: 'drift', error, lines: [] }
+  installReads({ '/admin/nodes': list([node]), '/admin/nodes/1/vless-route-lines': view, '/admin/nodes/1/vless-route-outbounds': { items: [] } })
+  mount(<NodesView />)
+  const dialog = await editRow()
+  fireEvent.click(within(dialog).getByRole('tab', { name: 'admin:nodes.vless_route.title' }))
+  const code = await within(dialog).findByText(error)
+  expect(code.tagName).toBe('CODE')
+  expect(code.parentElement?.textContent).toBe(`admin:nodes.vless_route.error_code ${error}`)
+  expect(within(dialog).getByRole('alert').textContent).toContain('admin:nodes.vless_route.state_drift')
+})
+
+it('does not invent an error identifier for an applying state without one', async () => {
+  const view = initial()
+  view.state = { revision: 1, status: 'applying', lines: [] }
+  installReads({ '/admin/nodes': list([node]), '/admin/nodes/1/vless-route-lines': view, '/admin/nodes/1/vless-route-outbounds': { items: [] } })
+  mount(<NodesView />)
+  const dialog = await editRow()
+  fireEvent.click(within(dialog).getByRole('tab', { name: 'admin:nodes.vless_route.title' }))
+  await within(dialog).findByText('admin:nodes.vless_route.state_applying')
+  expect(within(dialog).queryByText('admin:nodes.vless_route.error_code')).toBeNull()
+})
+
+it('refreshes state on the refresh button and on tab reentry without discarding an edited name', async () => {
+  const view = initial()
+  view.state = { revision: 2, status: 'applied', lines: [{ id: 'one', route: 1, name: 'B', outbound_tag: 'direct', enabled: true }] }
+  const reads = (latest: RouteLinesView) => installReads({ '/admin/nodes': list([node]), '/admin/nodes/1/vless-route-lines': latest, '/admin/nodes/1/vless-route-outbounds': { items: [{ tag: 'direct', protocol: 'freedom', source: 'template' }] } })
+  reads(view)
+  mount(<NodesView />)
+  const dialog = await editRow()
+  fireEvent.click(within(dialog).getByRole('tab', { name: 'admin:nodes.vless_route.title' }))
+  const name = await within(dialog).findByDisplayValue('B')
+  fireEvent.change(name, { target: { value: 'edited' } })
+  reads({ ...view, state: { ...view.state, revision: 3, status: 'drift', error: 'routing_or_outbound_changed' } })
+  fireEvent.click(within(dialog).getByRole('button', { name: 'admin:nodes.vless_route.refresh' }))
+  await within(dialog).findByText('routing_or_outbound_changed')
+  expect(within(dialog).getByDisplayValue('edited')).toBeTruthy()
+  fireEvent.click(within(dialog).getByRole('tab', { name: 'admin:nodes.relay.title' }))
+  reads({ ...view, state: { ...view.state, revision: 4, status: 'unknown', error: 'remote_check_unavailable' } })
+  fireEvent.click(within(dialog).getByRole('tab', { name: 'admin:nodes.vless_route.title' }))
+  await within(dialog).findByText('remote_check_unavailable')
+  expect(within(dialog).getByDisplayValue('edited')).toBeTruthy()
+  expect(api.put).not.toHaveBeenCalled()
 })
 
 it('keeps enable, delete and reorder controls working in the relay-style route layout', async () => {

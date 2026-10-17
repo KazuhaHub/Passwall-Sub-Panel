@@ -16,6 +16,7 @@ type testNodeRepo struct {
 	ports.NodeRepo
 	node             domain.Node
 	failConfirmation bool
+	leaseBusy        bool
 }
 
 func (r *testNodeRepo) GetByID(context.Context, int64) (*domain.Node, error) {
@@ -39,7 +40,7 @@ func (r *testNodeRepo) SaveRouteState(_ context.Context, _ int64, revision int64
 	return nil
 }
 func (r *testNodeRepo) AcquireRouteLease(context.Context, string, string, time.Time) (bool, error) {
-	return true, nil
+	return !r.leaseBusy, nil
 }
 func (r *testNodeRepo) ReleaseRouteLease(context.Context, string, string) error { return nil }
 
@@ -71,6 +72,7 @@ type testClient struct {
 	writeError        bool
 	driftOnSecondRead bool
 	coreState         string
+	readError         bool
 }
 
 func (c *testClient) GetServerStatus(context.Context) (*ports.ServerStatus, error) {
@@ -93,6 +95,9 @@ func (c *testClient) ListInbounds(ctx context.Context) ([]ports.Inbound, error) 
 }
 func (c *testClient) ReadRouteTemplate(context.Context) (ports.RouteTemplate, error) {
 	c.reads++
+	if c.readError {
+		return ports.RouteTemplate{}, errors.New("route read unavailable")
+	}
 	if c.driftOnSecondRead && c.reads == 2 {
 		c.template.Config = json.RawMessage(`{"outbounds":[{"tag":"direct","protocol":"freedom"}],"routing":{"rules":[{"domain":["changed.example"],"outboundTag":"direct"}]}}`)
 	}

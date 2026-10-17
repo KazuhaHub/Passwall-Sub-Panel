@@ -25,12 +25,17 @@ func New(repos ports.Repos, pool ports.XUIPool, invalidate func()) *Service {
 }
 
 type LineInput struct {
-	ID           string `json:"id,omitempty"`
-	Name         string `json:"name"`
-	OnlyLineName bool   `json:"only_line_name"`
-	EntryRelayID string `json:"entry_relay_id,omitempty"`
-	OutboundTag  string `json:"outbound_tag"`
-	Enabled      bool   `json:"enabled"`
+	ID           string   `json:"id,omitempty"`
+	Name         string   `json:"name"`
+	OnlyLineName bool     `json:"only_line_name"`
+	EntryRelayID string   `json:"entry_relay_id,omitempty"`
+	OutboundTag  string   `json:"outbound_tag"`
+	Network      string   `json:"network,omitempty"`
+	Protocols    []string `json:"protocols,omitempty"`
+	IP           []string `json:"ip,omitempty"`
+	Domain       []string `json:"domain,omitempty"`
+	Port         string   `json:"port,omitempty"`
+	Enabled      bool     `json:"enabled"`
 }
 type SaveRequest struct {
 	Revision int64       `json:"revision"`
@@ -292,6 +297,11 @@ func makeTarget(previous domain.NodeRouteState, input []LineInput, used map[uint
 		line := domain.VlessRouteLine{ID: request.ID, Name: strings.TrimSpace(request.Name), OnlyLineName: request.OnlyLineName, EntryRelayID: strings.TrimSpace(request.EntryRelayID), OutboundTag: strings.TrimSpace(request.OutboundTag), Enabled: request.Enabled}
 		if len(line.Name) > 128 || line.OutboundTag == "" || len(line.OutboundTag) > 255 || len(line.EntryRelayID) > 128 {
 			return invalid("outbound tag is required and line fields must be bounded")
+		}
+		line.Network, line.Protocols, line.IP, line.Domain, line.Port = request.Network, request.Protocols, request.IP, request.Domain, request.Port
+		line, err := normalizeRouteMatch(line)
+		if err != nil {
+			return domain.NodeRouteState{}, err
 		}
 		if line.ID == "" {
 			line.ID = uuid.NewString()

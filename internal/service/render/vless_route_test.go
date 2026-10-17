@@ -33,7 +33,18 @@ func routeRenderFixture(t *testing.T) (*Service, *domain.Node, *domain.User, *ro
 }
 
 func TestRouteAllSubscriptionFormatsUseAppliedUUIDAndZeroRemoteReads(t *testing.T) {
+	for _, matched := range []bool{false, true} {
+		t.Run(map[bool]string{false: "legacy", true: "optional_match"}[matched], func(t *testing.T) { testRouteFormatsWithOptionalMatch(t, matched) })
+	}
+}
+
+func testRouteFormatsWithOptionalMatch(t *testing.T, matched bool) {
+	t.Helper()
 	s, n, u, _ := routeRenderFixture(t)
+	if matched {
+		line := &n.RouteState.Lines[0]
+		line.Network, line.Protocols, line.IP, line.Domain, line.Port = "tcp", []string{"tls"}, []string{"192.0.2.0/24"}, []string{"domain:example.com"}, "443"
+	}
 	items := s.filterRouteItems(context.Background(), u, expandNodeLines([]renderItem{{node: n, name: "A"}}))
 	if len(items) != 2 {
 		t.Fatalf("route not expanded: %+v", items)

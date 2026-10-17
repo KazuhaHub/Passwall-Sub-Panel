@@ -37,14 +37,38 @@ func (s *Service) CheckAll(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		if err := s.checkGroup(ctx, p, group); err != nil {
+		if err := s.checkGroup(ctx, p, group, false); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (s *Service) checkGroup(parent context.Context, p *domain.XUIPanel, nodes []*domain.Node) error {
+// Refresh verifies one node against the remote template before returning its
+// latest local view. It never applies or repairs remote routing rules.
+func (s *Service) Refresh(ctx context.Context, id int64) (*View, error) {
+	view, err := s.Get(ctx, id)
+	if err != nil || !view.Supported {
+		return view, err
+	}
+	n, err := s.repos.Node.GetByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if len(n.RouteState.Lines) == 0 {
+		return view, nil
+	}
+	p, err := s.repos.XUIPanel.GetByID(ctx, n.PanelID)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.checkGroup(ctx, p, []*domain.Node{n}, true); err != nil {
+		return nil, err
+	}
+	return s.Get(ctx, id)
+}
+
+func (s *Service) checkGroup(parent context.Context, p *domain.XUIPanel, nodes []*domain.Node, failIfBusy bool) error {
 	ctx, cancel := context.WithTimeout(parent, 45*time.Second)
 	defer cancel()
 	backend := fmt.Sprintf("%x", sha256.Sum256([]byte(strings.TrimRight(p.URL, "/"))))
@@ -54,6 +78,9 @@ func (s *Service) checkGroup(parent context.Context, p *domain.XUIPanel, nodes [
 		return err
 	}
 	if !acquired {
+		if failIfBusy {
+			return fmt.Errorf("%w: another routing operation is running; retry refresh", domain.ErrConflict)
+		}
 		return nil
 	}
 	defer func() {
@@ -106,7 +133,7 @@ func (s *Service) checkGroup(parent context.Context, p *domain.XUIPanel, nodes [
 		} else if status == nil || domain.NormalizePanelKind(p.Kind) != domain.PanelKind3XUI || status.XrayState != "running" {
 			next.Status = "drift"
 			next.Error = "unsupported_or_stopped_core"
-		} else if inbound := actual[n.InboundID]; inbound == nil || inbound.Protocol != "vless" || inbound.Port != n.DesiredPort || n.RouteState.Binding != domain.RouteBinding(p.URL, n) {
+		} else if inbound := actual[n.InboundID]; n.PanelID != p.ID || inbound == nil || inbound.Protocol != "vless" || inbound.Port != n.DesiredPort || n.RouteState.Binding != domain.RouteBinding(p.URL, n) {
 			next.Status = "drift"
 			next.Error = "inbound_binding_changed"
 		} else if !matchesNodeRules(template, n, inbound, owned) {
