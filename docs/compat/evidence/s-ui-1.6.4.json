@@ -1,0 +1,85 @@
+{
+  "schema_version": 1,
+  "verified_at": "2026-10-07T23:29:51Z",
+  "scope": "current PSP source adapter against a fresh isolated upstream source build",
+  "psp_commit": "0ae05e1e40170c030acd23cdf637310b740b50a6",
+  "upstream": {
+    "version": "1.6.4",
+    "commit": "db7f9545e7e2907a5d46a2b6bfc4a0b64c2de348",
+    "release_url": "https://github.com/alireza0/s-ui/releases/tag/v1.6.4",
+    "frontend_commit": "e4525297b002c1c3be234cc1c9695ef84be741a0",
+    "sing_box_version": "1.14.2",
+    "core_state": "running"
+  },
+  "environment": {
+    "platform": "darwin/arm64",
+    "go_version": "1.27.1",
+    "database": "fresh SQLite",
+    "authentication": "Token header",
+    "build_profile": "upstream test tags, no Naive outbound",
+    "web_content": "placeholder html/index.html and assets; production API and core unchanged"
+  },
+  "command": "go test ./internal/adapters/sui -run TestLive_SUISurface -count=1 -v",
+  "result": {
+    "test": "TestLive_SUISurface",
+    "verdict": "pass",
+    "checks": [
+      "Token authentication and version/core-state read-back",
+      "inbound list, slim list, get, create, update and delete",
+      "client create, get, update, attach, detach and delete"
+    ]
+  },
+  "supplementary": {
+    "method": "temporary extension of TestLive_SUISurface using the production adapter",
+    "verdict": "pass",
+    "checks": [
+      "UUID and updated password preserved after editbulk detach/attach",
+      "disabled state, expiry 1924992000000 ms and quota 2147483648 bytes preserved after editbulk detach/attach",
+      "BulkCreateClients creates one client",
+      "BulkDelByEmail deletes one client"
+    ]
+  },
+  "regression_tests": {
+    "psp": [
+      "go test ./internal/adapters/sui ./internal/version"
+    ],
+    "upstream": [
+      "go test -tags \"$(tags_for test)\" ./cmd/migration ./service ./core/quicgrace ./core/usersession"
+    ],
+    "verdict": "pass"
+  },
+  "limits": [
+    "no historical PSP release binary verification",
+    "no existing database upgrade verification",
+    "no full proxy dataplane or quota enforcement verification",
+    "no Naive outbound verification",
+    "no Linux container or official release binary execution"
+  ],
+  "v3_verification": {
+    "verified_at": "2026-10-07T23:32:47Z",
+    "psp_branch": "release/v3",
+    "psp_commit": "43cd70ebcf6955ad8debfa1dcae29d42d2b2971e",
+    "adapter_identical_to_tag": "v3.9.3",
+    "environment": "same isolated S-UI 1.6.4 source build and fresh SQLite used for V4; previous tests cleaned up their objects",
+    "command": "go test ./internal/adapters/sui -run '^TestLive_SUI' -count=1 -json",
+    "log_sha256": "3ef0c661db20e1ead5bc3b39bbd3682c4940b190b39265d56bc4553f7c1d541b",
+    "result": {
+      "verdict": "pass",
+      "passed": [
+        "TestLive_SUISurface",
+        "TestLive_SUIBulkSetEnabled"
+      ],
+      "failed": [],
+      "skipped": []
+    },
+    "checks": [
+      "Token, version and running core state",
+      "inbound and client create/read/update/attach/detach/delete",
+      "bulk disable and re-enable with UUID preservation",
+      "idempotent enable and unknown-client handling"
+    ],
+    "regression_command": "go test ./internal/adapters/sui ./internal/version",
+    "regression_verdict": "pass",
+    "range_note": "v3.9.2 range start retained; older supported V3 builds inherit the unchanged contract, not independent release binary tests"
+  }
+}

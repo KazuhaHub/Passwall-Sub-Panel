@@ -188,7 +188,7 @@ func TestTheShippedDocumentsYieldTheReviewedCeilings(t *testing.T) {
 		wantMax string
 	}{
 		{name: "3x-ui", apply: applyXUICompatDocument, wantMax: "3.10.2"},
-		{name: "sui", apply: applySUICompatDocument, wantMax: "1.6.3"},
+		{name: "sui", apply: applySUICompatDocument, wantMax: "1.6.5"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			name := fmt.Sprintf(map[string]string{"3x-ui": xuiDocumentPattern, "sui": suiDocumentPattern}[tc.name], 4)
