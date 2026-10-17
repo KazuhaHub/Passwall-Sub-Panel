@@ -10,7 +10,7 @@ vi.mock('@/components/ConfirmHost', () => ({ confirm: confirmation }))
 
 const initial = (): RouteLinesView => ({ node_id: 1, supported: true, state: { revision: 0, lines: [], status: '' }, warnings: [] })
 
-it('edits exactly five optional fields on each existing route without adding a rule or outbound', async () => {
+it('saves and reopens the five optional fields on the existing route without adding a rule or outbound', async () => {
   const view = initial()
   view.state = { revision: 2, status: 'applied', lines: [{ id: 'line', route: 1, name: 'B', outbound_tag: 'direct', enabled: true }] }
   installReads({ '/admin/nodes': list([node]), '/admin/nodes/1/vless-route-lines': view, '/admin/nodes/1/vless-route-outbounds': { items: [{ tag: 'direct', protocol: 'freedom', source: 'template' }] } })
@@ -27,7 +27,7 @@ it('edits exactly five optional fields on each existing route without adding a r
   const accordion = await within(dialog).findByRole('button', { name: 'admin:nodes.vless_route.match.title' })
   expect(accordion.getAttribute('aria-expanded')).toBe('false')
   fireEvent.click(accordion)
-  let fields = within(dialog).getByRole('group', { name: 'admin:nodes.vless_route.match.title' })
+  const fields = within(dialog).getByRole('group', { name: 'admin:nodes.vless_route.match.title' })
   expect(within(fields).getAllByRole('combobox')).toHaveLength(2)
   expect(within(fields).getAllByRole('textbox')).toHaveLength(3)
   expect(within(fields).queryByRole('button')).toBeNull()
@@ -54,8 +54,24 @@ it('edits exactly five optional fields on each existing route without adding a r
   const reopened = await within(dialog).findByRole('button', { name: 'admin:nodes.vless_route.match.title' })
   expect(reopened.getAttribute('aria-expanded')).toBe('false')
   fireEvent.click(reopened)
-  fields = within(dialog).getByRole('group', { name: 'admin:nodes.vless_route.match.title' })
-  expect(within(fields).getByDisplayValue('443,1000-2000')).toBeTruthy()
+  const savedFields = within(dialog).getByRole('group', { name: 'admin:nodes.vless_route.match.title' })
+  expect(within(savedFields).getByRole('combobox', { name: 'admin:nodes.vless_route.match.network' }).textContent).toBe('TCP')
+  expect(within(savedFields).getByRole('combobox', { name: 'admin:nodes.vless_route.match.protocols' }).textContent).toBe('tls')
+  expect(within(savedFields).getByLabelText('admin:nodes.vless_route.match.ip')).toHaveProperty('value', '192.0.2.0/24\ngeoip:private')
+  expect(within(savedFields).getByLabelText('admin:nodes.vless_route.match.domain')).toHaveProperty('value', 'domain:example.com\nregexp:^a{1,3}\\.example$')
+  expect(within(savedFields).getByDisplayValue('443,1000-2000')).toBeTruthy()
+})
+
+it('clears all five saved optional conditions without changing the route identity or outbound', async () => {
+  const view = initial()
+  view.state = { revision: 2, status: 'applied', lines: [{ id: 'line', route: 1, name: 'B', outbound_tag: 'direct', enabled: true, network: 'tcp', protocols: ['tls'], ip: ['192.0.2.0/24', 'geoip:private'], domain: ['domain:example.com', 'regexp:^a{1,3}\\.example$'], port: '443,1000-2000' }] }
+  installReads({ '/admin/nodes': list([node]), '/admin/nodes/1/vless-route-lines': view, '/admin/nodes/1/vless-route-outbounds': { items: [{ tag: 'direct', protocol: 'freedom', source: 'template' }] } })
+  api.put.mockImplementation(async (url, body) => ({ data: String(url).endsWith('/vless-route-lines') ? { ...view, state: { ...view.state, revision: 4, lines: body.lines.map((line: object) => ({ ...line, route: 1 })) } } : node }))
+  mount(<NodesView />)
+  const dialog = await editRow()
+  fireEvent.click(within(dialog).getByRole('tab', { name: 'admin:nodes.vless_route.title' }))
+  fireEvent.click(await within(dialog).findByRole('button', { name: 'admin:nodes.vless_route.match.title' }))
+  const fields = within(dialog).getByRole('group', { name: 'admin:nodes.vless_route.match.title' })
   fireEvent.mouseDown(within(fields).getByRole('combobox', { name: 'admin:nodes.vless_route.match.network' }))
   fireEvent.click(await screen.findByRole('option', { name: 'admin:nodes.vless_route.match.any' }))
   fireEvent.mouseDown(within(fields).getByRole('combobox', { name: 'admin:nodes.vless_route.match.protocols' }))
@@ -65,6 +81,7 @@ it('edits exactly five optional fields on each existing route without adding a r
   fireEvent.click(within(dialog).getByRole('button', { name: 'common:actions.ok' }))
   await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
   const last = api.put.mock.calls.filter(([url]) => String(url).endsWith('/vless-route-lines')).at(-1)![1].lines[0]
+  expect(last).toEqual({ id: 'line', name: 'B', enabled: true, only_line_name: false, entry_relay_id: '', outbound_tag: 'direct' })
   for (const key of ['network', 'protocols', 'ip', 'domain', 'port']) expect(last[key]).toBeUndefined()
 })
 

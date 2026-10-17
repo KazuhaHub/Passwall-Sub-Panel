@@ -131,7 +131,7 @@ func (s *Service) store(ctx context.Context, n *domain.Node, state *domain.NodeR
 func (s *Service) Save(ctx context.Context, id int64, req SaveRequest) (*View, error) {
 	ctx, cancel := context.WithTimeout(ctx, 45*time.Second)
 	defer cancel()
-	n, p, c, a, err := s.resources(ctx, id)
+	_, p, c, a, err := s.resources(ctx, id)
 	if err != nil {
 		return nil, err
 	}
@@ -150,7 +150,7 @@ func (s *Service) Save(ctx context.Context, id int64, req SaveRequest) (*View, e
 		_ = s.repos.NodeRoute.ReleaseRouteLease(releaseCtx, backend, owner)
 	}()
 	// Re-read after acquiring the backend lease, not the pre-lease snapshot.
-	n, err = s.repos.Node.GetByID(ctx, id)
+	n, err := s.repos.Node.GetByID(ctx, id)
 	if err != nil {
 		return nil, err
 	}
