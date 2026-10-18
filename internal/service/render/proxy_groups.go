@@ -142,9 +142,11 @@ func buildProxyGroupsYAMLInternal(rules string, preferredOrder []string, members
 		for _, proxy := range choices {
 			lines = append(lines, "  - "+yamlScalar(proxy))
 		}
+		if groupOptions.URL != "" {
+			lines = append(lines, "  url: "+yamlScalar(groupOptions.URL))
+		}
 		if groupOptions.Type != ProxyGroupTypeSelect {
 			lines = append(lines,
-				"  url: "+yamlScalar(groupOptions.URL),
 				"  interval: "+strconv.Itoa(*groupOptions.Interval),
 				"  lazy: "+strconv.FormatBool(*groupOptions.Lazy),
 				"  timeout: "+strconv.Itoa(*groupOptions.Timeout),

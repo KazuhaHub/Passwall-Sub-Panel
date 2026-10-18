@@ -38,6 +38,7 @@ func TestAdminRuleSetsSavePersistsMembersAndOptionsAndInvalidatesRenderCache(t *
 		},
 		ProxyGroupOptions: map[string]domain.ProxyGroupOptions{
 			"🇨🇳 中国大陆": {Type: "load-balance", Strategy: "consistent-hashing"},
+			"🚀 节点选择":  {Type: "select", URL: "https://example.com/check"},
 		},
 	}
 	w := performRuleSave(t, h, body)
@@ -63,6 +64,9 @@ func TestAdminRuleSetsSavePersistsMembersAndOptionsAndInvalidatesRenderCache(t *
 	options := got.ProxyGroupOptions["🇨🇳 中国大陆"]
 	if options.Type != "load-balance" || options.Strategy != "consistent-hashing" || options.URL == "" || options.Interval == nil || options.Lazy == nil || options.Timeout == nil {
 		t.Fatalf("options were not normalized and persisted: %#v", options)
+	}
+	if manual := got.ProxyGroupOptions["🚀 节点选择"]; manual.Type != "select" || manual.URL != "https://example.com/check" || manual.Interval != nil {
+		t.Fatalf("manual test URL was not persisted: %#v", manual)
 	}
 }
 
@@ -201,6 +205,7 @@ func TestAdminRuleSetsSaveRejectsInvalidProxyGroupOptions(t *testing.T) {
 	negative, zero := -1, 0
 	tests := []domain.ProxyGroupOptions{
 		{Type: "random"},
+		{Type: "select", URL: "ftp://example.com"},
 		{Type: "url-test", URL: "ftp://example.com", Interval: &negative},
 		{Type: "fallback", Timeout: &zero},
 		{Type: "load-balance", Strategy: "random"},

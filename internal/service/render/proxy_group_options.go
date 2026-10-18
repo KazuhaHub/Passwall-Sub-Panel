@@ -40,11 +40,14 @@ func EffectiveProxyGroupOptions(raw domain.ProxyGroupOptions) domain.ProxyGroupO
 	if !validProxyGroupTypes[typeName] {
 		typeName = ProxyGroupTypeSelect
 	}
+	testURL := strings.TrimSpace(raw.URL)
 	if typeName == ProxyGroupTypeSelect {
-		return domain.ProxyGroupOptions{Type: ProxyGroupTypeSelect}
+		if !validProxyGroupTestURL(testURL) {
+			testURL = ""
+		}
+		return domain.ProxyGroupOptions{Type: ProxyGroupTypeSelect, URL: testURL}
 	}
 
-	testURL := strings.TrimSpace(raw.URL)
 	if !validProxyGroupTestURL(testURL) {
 		testURL = DefaultProxyGroupTestURL
 	}
@@ -82,8 +85,8 @@ func EffectiveProxyGroupOptions(raw domain.ProxyGroupOptions) domain.ProxyGroupO
 	return out
 }
 
-// NormalizeProxyGroupOptionsMap canonicalizes persisted options. select is the
-// implicit default and is deliberately omitted to keep legacy YAML compact.
+// NormalizeProxyGroupOptionsMap canonicalizes persisted options. A select group
+// without a test URL is the implicit default and is omitted to keep YAML compact.
 func NormalizeProxyGroupOptionsMap(raw map[string]domain.ProxyGroupOptions) map[string]domain.ProxyGroupOptions {
 	if len(raw) == 0 {
 		return nil
@@ -91,7 +94,7 @@ func NormalizeProxyGroupOptionsMap(raw map[string]domain.ProxyGroupOptions) map[
 	out := make(map[string]domain.ProxyGroupOptions, len(raw))
 	for group, options := range raw {
 		effective := EffectiveProxyGroupOptions(options)
-		if effective.Type != ProxyGroupTypeSelect {
+		if effective.Type != ProxyGroupTypeSelect || effective.URL != "" {
 			out[group] = effective
 		}
 	}
@@ -116,11 +119,11 @@ func validateProxyGroupOptions(targets []string, configs map[string]domain.Proxy
 			issues = append(issues, ProxyGroupIssue{Level: "error", Group: group, Code: "invalid_group_type", Params: map[string]any{"value": options.Type}, Message: "未知代理组类型：" + options.Type})
 			continue
 		}
-		if typeName == ProxyGroupTypeSelect {
-			continue
-		}
 		if options.URL != "" && !validProxyGroupTestURL(strings.TrimSpace(options.URL)) {
 			issues = append(issues, ProxyGroupIssue{Level: "error", Group: group, Code: "invalid_test_url", Message: "测试地址必须是有效的 HTTP/HTTPS URL"})
+		}
+		if typeName == ProxyGroupTypeSelect {
+			continue
 		}
 		if options.Interval != nil && *options.Interval < 0 {
 			issues = append(issues, ProxyGroupIssue{Level: "error", Group: group, Code: "invalid_interval", Message: "测试间隔不能小于 0"})

@@ -50,6 +50,61 @@ func TestBuildProxyGroupsYAMLEmitsMihomoTypesAndDefaults(t *testing.T) {
 	}
 }
 
+func TestSelectProxyGroupTestURLIsPreservedForMihomoOnly(t *testing.T) {
+	options := NormalizeProxyGroupOptionsMap(map[string]domain.ProxyGroupOptions{
+		"Manual":  {Type: ProxyGroupTypeSelect, URL: " https://example.com/check ", Interval: intPointer(30)},
+		"Default": {Type: ProxyGroupTypeSelect},
+	})
+	manual := options["Manual"]
+	if len(options) != 1 || manual.Type != ProxyGroupTypeSelect || manual.URL != "https://example.com/check" || manual.Interval != nil {
+		t.Fatalf("normalized select options = %#v", options)
+	}
+	if issues := validateProxyGroupOptions([]string{"Manual"}, options); len(issues) != 0 {
+		t.Fatalf("valid select URL rejected: %#v", issues)
+	}
+
+	members := map[string][]domain.ProxyGroupMember{"Manual": {{Kind: "builtin", Value: "DIRECT"}}}
+	raw, err := buildProxyGroupsYAMLWithMembers("- MATCH,Manual", nil, members, options, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var groups []map[string]any
+	if err := yaml.Unmarshal([]byte(raw), &groups); err != nil {
+		t.Fatal(err)
+	}
+	if len(groups) != 1 || groups[0]["type"] != ProxyGroupTypeSelect || groups[0]["url"] != manual.URL {
+		t.Fatalf("Mihomo select = %#v", groups)
+	}
+	for _, field := range []string{"interval", "lazy", "timeout", "tolerance", "strategy"} {
+		if _, ok := groups[0][field]; ok {
+			t.Fatalf("Mihomo select unexpectedly includes %q: %#v", field, groups[0])
+		}
+	}
+	outbounds := buildSingBoxGroupOutboundsWithMembers("- MATCH,Manual", nil, nil, members, options)
+	if len(outbounds) != 1 || outbounds[0]["type"] != "selector" || outbounds[0]["url"] != nil {
+		t.Fatalf("sing-box selector = %#v", outbounds)
+	}
+	manual.URL = ""
+	if normalized := NormalizeProxyGroupOptionsMap(map[string]domain.ProxyGroupOptions{"Manual": manual}); normalized != nil {
+		t.Fatalf("cleared select URL should restore implicit default: %#v", normalized)
+	}
+}
+
+func TestSelectProxyGroupRejectsInvalidTestURL(t *testing.T) {
+	for _, testURL := range []string{"ftp://example.com/check", "not-a-url", "https:///check"} {
+		t.Run(testURL, func(t *testing.T) {
+			options := domain.ProxyGroupOptions{Type: ProxyGroupTypeSelect, URL: testURL}
+			issues := validateProxyGroupOptions([]string{"Manual"}, map[string]domain.ProxyGroupOptions{"Manual": options})
+			if len(issues) != 1 || issues[0].Code != "invalid_test_url" {
+				t.Fatalf("invalid select URL not rejected: %#v", issues)
+			}
+			if effective := EffectiveProxyGroupOptions(options); effective.URL != "" {
+				t.Fatalf("invalid select URL not discarded: %#v", effective)
+			}
+		})
+	}
+}
+
 func TestInspectProxyGroupOptionsReportsInvalidValuesAndWarnsForOneMember(t *testing.T) {
 	negative, zero := -1, 0
 	options := map[string]domain.ProxyGroupOptions{

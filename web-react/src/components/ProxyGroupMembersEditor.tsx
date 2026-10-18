@@ -169,13 +169,13 @@ export default function ProxyGroupMembersEditor({ content, groupOrder, initialGr
   function changeType(type: ProxyGroupType) {
     if (!selected) return
     const next = { ...options }
-    if (type === 'select') delete next[selected]
-    else next[selected] = defaultProxyGroupOptions(type)
+    const defaults = defaultProxyGroupOptions(type)
+    next[selected] = { ...defaults, ...currentOptions, type }
     onOptionsChange(next)
   }
 
   function updateOptions(patch: Partial<ProxyGroupOptions>) {
-    if (!selected || currentType === 'select') return
+    if (!selected) return
     onOptionsChange({ ...options, [selected]: { ...currentOptions, ...patch } })
   }
 
@@ -355,10 +355,10 @@ export default function ProxyGroupMembersEditor({ content, groupOrder, initialGr
               <MenuItem value="load-balance">{t('admin:rules.members.type.load-balance')}</MenuItem>
             </TextField>
 
-            {currentType !== 'select' && (
-              <Box sx={{ mt: 1.5, display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' }, gap: 1.5 }}>
-                <TextField size="small" label={t('admin:rules.members.test_url')} value={currentOptions.url || ''}
-                  onChange={e => updateOptions({ url: e.target.value })} sx={{ gridColumn: '1 / -1' }} />
+            <Box sx={{ mt: 1.5, display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' }, gap: 1.5 }}>
+              <TextField size="small" label={t('admin:rules.members.test_url')} value={currentOptions.url || ''}
+                onChange={e => updateOptions({ url: e.target.value })} sx={{ gridColumn: '1 / -1' }} />
+              {currentType !== 'select' && <>
                 <TextField size="small" type="number" label={t('admin:rules.members.interval')}
                   value={currentOptions.interval ?? ''} onChange={e => updateOptions({ interval: Number(e.target.value) })}
                   slotProps={{ htmlInput: { min: 0, step: 1 } }} />
@@ -382,8 +382,8 @@ export default function ProxyGroupMembersEditor({ content, groupOrder, initialGr
                 <FormControlLabel sx={{ m: 0, minHeight: 40, columnGap: 1 }}
                   control={<Switch size="small" checked={currentOptions.lazy ?? true} onChange={(_, checked) => updateOptions({ lazy: checked })} />}
                   label={t('admin:rules.members.lazy')} />
-              </Box>
-            )}
+              </>}
+            </Box>
             <Alert severity="info" sx={{ mt: 1.5 }}>{t('admin:rules.members.client_compatibility')}</Alert>
           </Box>
 

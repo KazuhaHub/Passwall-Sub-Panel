@@ -3,7 +3,7 @@ import { useState } from 'react'
 import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { expect, it, vi } from 'vitest'
 import { api, mount } from '@/test/adminSaveHarness'
-import type { ProxyGroupInspection, ProxyGroupMember } from '@/api/rules'
+import type { ProxyGroupInspection, ProxyGroupMember, ProxyGroupOptions, ProxyGroupType } from '@/api/rules'
 import ProxyGroupMembersEditor from './ProxyGroupMembersEditor'
 
 const initialMembers: Record<string, ProxyGroupMember[]> = { Pick: [{ kind: 'builtin', value: 'DIRECT' }] }
@@ -26,6 +26,18 @@ function Controlled({ changed }: { changed: (members: Record<string, ProxyGroupM
     options={{}} initialOptions={{}} onOptionsChange={() => {}} previewGroups={[]} />
 }
 
+function OptionsEditor({ initialOptions, changed }: { initialOptions: Record<string, ProxyGroupOptions>; changed: (options: Record<string, ProxyGroupOptions>) => void }) {
+  const [options, setOptions] = useState(initialOptions)
+  return <ProxyGroupMembersEditor content="- MATCH,Pick" groupOrder={[]} initialGroupOrder={[]} onGroupOrderChange={() => {}}
+    members={initialMembers} initialMembers={initialMembers} onChange={() => {}}
+    options={options} initialOptions={initialOptions} onOptionsChange={next => { changed(next); setOptions(next) }} previewGroups={[]} />
+}
+
+async function chooseType(type: ProxyGroupType) {
+  fireEvent.mouseDown(screen.getByRole('combobox', { name: 'admin:rules.members.group_type' }))
+  fireEvent.click(await screen.findByRole('option', { name: `admin:rules.members.type.${type}` }))
+}
+
 async function setup() {
   api.post.mockResolvedValue({ data: inspection })
   const changed = vi.fn()
@@ -42,6 +54,74 @@ async function chooseNode(name: string) {
   fireEvent.click(within(input.closest('.MuiAutocomplete-root') as HTMLElement).getByRole('button', { name: 'Open' }))
   fireEvent.click(await screen.findByRole('option', { name }))
 }
+
+it('loads and edits the optional test URL for manual select groups without automatic test parameters', async () => {
+  api.post.mockResolvedValue({ data: inspection })
+  const initialOptions: Record<string, ProxyGroupOptions> = { Pick: { type: 'select', url: 'https://example.com/saved' } }
+  const changed = vi.fn()
+  mount(<OptionsEditor initialOptions={initialOptions} changed={changed} />)
+  const input = await screen.findByRole('textbox', { name: 'admin:rules.members.test_url' }) as HTMLInputElement
+  expect(input.value).toBe('https://example.com/saved')
+  for (const field of ['interval', 'timeout', 'lazy', 'tolerance', 'strategy']) {
+    expect(screen.queryByLabelText(`admin:rules.members.${field}`)).toBeNull()
+  }
+  fireEvent.change(input, { target: { value: '' } })
+  expect(changed).toHaveBeenLastCalledWith({ Pick: { type: 'select', url: '' } })
+  fireEvent.change(input, { target: { value: 'https://example.com/check' } })
+  expect(changed).toHaveBeenLastCalledWith({ Pick: { type: 'select', url: 'https://example.com/check' } })
+  expect(input.value).toBe('https://example.com/check')
+  await waitFor(() => expect(api.post).toHaveBeenLastCalledWith('/admin/rules/inspect-proxy-groups', expect.objectContaining({
+    proxy_group_options: { Pick: { type: 'select', url: 'https://example.com/check' } },
+  }), expect.anything()))
+})
+
+it.each(['https://example.com/saved', ''])('preserves the test URL %j when switching between manual and automatic types', async url => {
+  api.post.mockResolvedValue({ data: inspection })
+  const initialOptions: Record<string, ProxyGroupOptions> = { Pick: { type: 'select', url } }
+  const changed = vi.fn()
+  mount(<OptionsEditor initialOptions={initialOptions} changed={changed} />)
+  const input = await screen.findByRole('textbox', { name: 'admin:rules.members.test_url' }) as HTMLInputElement
+  for (const type of ['url-test', 'fallback', 'load-balance'] as const) {
+    await chooseType(type)
+    expect(input.value).toBe(url)
+    expect(changed).toHaveBeenLastCalledWith({ Pick: expect.objectContaining({ type, url, interval: 300, timeout: 5000, lazy: true }) })
+    await chooseType('select')
+    expect(input.value).toBe(url)
+    expect(changed).toHaveBeenLastCalledWith({ Pick: expect.objectContaining({ type: 'select', url }) })
+    expect(screen.queryByLabelText('admin:rules.members.interval')).toBeNull()
+  }
+  fireEvent.click(screen.getByRole('button', { name: 'admin:rules.members.restore_default' }))
+  expect(changed).toHaveBeenLastCalledWith({})
+  expect(input.value).toBe('')
+})
+
+it('preserves all edited parameters across types and inspection refreshes, including zero and false', async () => {
+  api.post.mockResolvedValue({ data: inspection })
+  const saved: ProxyGroupOptions = { type: 'load-balance', url: 'https://example.com/check', interval: 0, timeout: 1234, lazy: false, strategy: 'round-robin' }
+  const changed = vi.fn()
+  mount(<OptionsEditor initialOptions={{ Pick: saved }} changed={changed} />)
+  await screen.findByRole('combobox', { name: 'admin:rules.members.strategy' })
+  await chooseType('url-test')
+  fireEvent.change(screen.getByLabelText('admin:rules.members.tolerance'), { target: { value: '73' } })
+  const expected = { ...saved, tolerance: 73 }
+  for (const type of ['select', 'fallback', 'load-balance', 'url-test'] as const) {
+    await chooseType(type)
+    expect(changed).toHaveBeenLastCalledWith({ Pick: { ...expected, type } })
+    await waitFor(() => expect(api.post).toHaveBeenLastCalledWith('/admin/rules/inspect-proxy-groups', expect.objectContaining({
+      proxy_group_options: { Pick: { ...expected, type } },
+    }), expect.anything()))
+    if (type === 'select') {
+      expect(screen.queryByLabelText('admin:rules.members.interval')).toBeNull()
+    } else {
+      expect((screen.getByLabelText('admin:rules.members.interval') as HTMLInputElement).value).toBe('0')
+      expect((screen.getByLabelText('admin:rules.members.timeout') as HTMLInputElement).value).toBe('1234')
+      expect((screen.getByLabelText('admin:rules.members.lazy') as HTMLInputElement).checked).toBe(false)
+    }
+    if (type === 'load-balance') expect(screen.getByRole('combobox', { name: 'admin:rules.members.strategy' }).textContent).toBe('admin:rules.members.strategy_value.round-robin')
+    if (type === 'url-test') expect((screen.getByLabelText('admin:rules.members.tolerance') as HTMLInputElement).value).toBe('73')
+  }
+  expect(saved).not.toHaveProperty('tolerance')
+})
 
 it('shows dangling-reference warnings without blocking save or rewriting members', async () => {
   const members: Record<string, ProxyGroupMember[]> = { Pick: [
