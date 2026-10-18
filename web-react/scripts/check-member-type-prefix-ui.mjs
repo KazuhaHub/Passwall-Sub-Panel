@@ -1,17 +1,10 @@
 // Browser-only acceptance: all API calls are mocked; no live data is changed.
 import assert from 'node:assert/strict'
-import { mkdtemp } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { pathToFileURL } from 'node:url'
+import { mockBrowserFixture } from './browser-fixture.mjs'
 
-assert.ok(process.env.PLAYWRIGHT_MODULE)
-const { chromium } = await import(pathToFileURL(process.env.PLAYWRIGHT_MODULE).href)
-const browser = await chromium.launch({ headless: true })
-const context = await browser.newContext({ locale: 'zh-CN', viewport: { width: 1440, height: 1100 } })
-const base = 'http://127.0.0.1:19881', output = await mkdtemp(join(tmpdir(), 'psp-member-prefix-browser-'))
-const page = await context.newPage(), errors = [], requests = []
-page.on('pageerror', error => errors.push(error.message))
+const { base, browser, context, page, errors, output } = await mockBrowserFixture('psp-member-prefix-browser-', '/admin/rules')
+const requests = []
 const members = [
   { kind: 'node', node_id: 3 },
   ...['direct', 'relay', 'route'].map(line_id => ({ kind: 'line', node_id: 3, line_id })),
@@ -23,16 +16,16 @@ const draft = { slug: 'test', name: '前缀验收', sort: 1, enabled: true, cont
 const group = { name: 'Pick', configured: true, options_configured: false, options: { type: 'select' }, default_members: [], members }
 const inspection = { groups: [group], builtins: ['DIRECT'], nodes: [{ id: 3, display_name: '日本节点', region: 'JP', tags: [], enabled: true }],
   lines: [
-    { node_id: 3, line_id: 'direct', kind: 'direct', name: '日本节点', display_name: '日本节点', enabled: true, available: true },
-    { node_id: 3, line_id: 'relay', kind: 'relay', name: '中转专线', display_name: '日本节点 中转专线', enabled: true, available: true },
-    { node_id: 3, line_id: 'route', kind: 'vless_route', name: '路由专线', display_name: '路由专线', enabled: true, available: true },
+    { node_id: 3, line_id: 'direct', kind: 'direct', name: '日本节点', display_name: '日本节点', available: true },
+    { node_id: 3, line_id: 'relay', kind: 'relay', name: '中转专线', display_name: '日本节点 中转专线', available: true },
+    { node_id: 3, line_id: 'route', kind: 'vless_route', name: '路由专线', display_name: '路由专线', available: true },
   ], regions: ['HK'], tags: ['fast'], issues: [] }
 const envelope = items => ({ items, total: items.length, page: 1, page_size: 200 })
 await context.route('**/api/**', async route => {
   const request = route.request(), path = new URL(request.url()).pathname
   let data = {}
   if (request.method() !== 'GET') requests.push({ path, body: request.postDataJSON() })
-  if (path.endsWith('/preview-proxy-groups')) data = { group_id: 2, rule_set: 'test', status: 'ready', groups: [{ name: 'Pick', members: ['日本节点', '路由专线', 'DIRECT'] }] }
+  if (path.endsWith('/preview-proxy-groups')) data = { group_id: 2, status: 'ready', groups: [{ name: 'Pick', members: ['日本节点', '路由专线', 'DIRECT'] }] }
   else if (path.endsWith('/inspect-proxy-groups')) data = inspection
   else if (path.endsWith('/admin/rules')) data = envelope([draft])
   else if (path.endsWith('/admin/groups')) data = envelope([{ id: 2, slug: 'default', name: 'Default', tag_filter: { all: true, tags: [] } }])
@@ -41,16 +34,6 @@ await context.route('**/api/**', async route => {
   else if (path.endsWith('/i18n/langs')) data = []
   else if (path.includes('/notifications')) data = { items: [], total: 0, unread: 0 }
   return route.fulfill({ json: data })
-})
-await context.route(`${base}/admin/rules`, async route => {
-  if (route.request().resourceType() !== 'document') return route.fallback()
-  const response = await route.fetch()
-  return route.fulfill({ response, body: (await response.text()).replace('<!-- PSP_PANEL_BASE -->', '<base href="/">') })
-})
-await context.addInitScript(() => {
-  localStorage.setItem('psp_access', 'browser-fixture-only')
-  localStorage.setItem('psp_user', JSON.stringify({ userId: 1, upn: 'fixture', displayName: 'Fixture', role: 'admin', authEpoch: 1 }))
-  if (!localStorage.getItem('psp-lang')) localStorage.setItem('psp-lang', 'zh-CN')
 })
 const labels = {
   'zh-CN': ['节点：日本节点', '直连：日本节点', '中转：日本节点 中转专线', 'VLESS 路由：路由专线', '其余线路（自动去重）', '内置：DIRECT', '区域：HK', '标签：fast', '代理组：Other', 'Rematch：Mark'],

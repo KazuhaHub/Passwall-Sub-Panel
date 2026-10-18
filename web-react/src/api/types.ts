@@ -178,6 +178,7 @@ export interface Node {
    *  that reuses the landing's protocol/credentials and only swaps the dialed
    *  server/port (+ optional CDN-fronting SNI/Host). */
   relays?: RelayLine[]
+  /** Included in detail/write responses, omitted from node lists. */
   route_state?: import('./vlessRoute').RouteState
   /** Hide only the standalone direct entry, not derived routing entries. */
   hide_direct?: boolean

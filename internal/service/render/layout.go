@@ -11,10 +11,7 @@ import (
 type renderItem struct {
 	isSeparator bool
 	name        string
-	// Captured before legacy collision suffixes. Configuration subscriptions
-	// allocate display names only after their final referenced set is known.
-	baseName string
-	node     *domain.Node
+	node        *domain.Node
 	// relay, when non-nil, marks this item as a transit variant of node: the
 	// emit dispatchers dial the relay's endpoint (and apply its optional SNI /
 	// Host override) instead of the node's own ServerAddress. nil = direct.

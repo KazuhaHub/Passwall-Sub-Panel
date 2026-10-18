@@ -242,7 +242,7 @@ func (h *AdminNodeHandler) List(c *gin.Context) {
 	panelNames := h.loadPanelNames(c.Request.Context())
 	out := make([]nodeDTO, len(nodes))
 	for i, n := range nodes {
-		out[i] = h.toNodeDTO(n, panelNames)
+		out[i] = h.toNodeDTO(n, panelNames, false)
 	}
 	c.JSON(http.StatusOK, pagedEnvelope(out, total, p))
 }
@@ -277,7 +277,7 @@ func (h *AdminNodeHandler) Get(c *gin.Context) {
 	if err != nil {
 		// Detail without clients is still useful; surface the error but don't 500.
 		out := gin.H{
-			"node":          h.toNodeDTO(n, panelNames),
+			"node":          h.toNodeDTO(n, panelNames, true),
 			"clients":       []any{},
 			"clients_error": err.Error(),
 		}
@@ -291,7 +291,7 @@ func (h *AdminNodeHandler) Get(c *gin.Context) {
 		return
 	}
 	out := gin.H{
-		"node":    h.toNodeDTO(n, panelNames),
+		"node":    h.toNodeDTO(n, panelNames, true),
 		"clients": clients,
 	}
 	if inbound != nil {
@@ -494,7 +494,7 @@ func (h *AdminNodeHandler) ImportExisting(c *gin.Context) {
 		return
 	}
 	panelNames := h.loadPanelNames(c.Request.Context())
-	c.JSON(http.StatusCreated, h.toNodeDTO(n, panelNames))
+	c.JSON(http.StatusCreated, h.toNodeDTO(n, panelNames, true))
 }
 
 func (h *AdminNodeHandler) CreateInbound(c *gin.Context) {
@@ -564,7 +564,7 @@ func (h *AdminNodeHandler) CreateInbound(c *gin.Context) {
 		return
 	}
 	panelNames := h.loadPanelNames(c.Request.Context())
-	c.JSON(http.StatusCreated, h.toNodeDTO(n, panelNames))
+	c.JSON(http.StatusCreated, h.toNodeDTO(n, panelNames, true))
 }
 
 func (h *AdminNodeHandler) UpdateMetadata(c *gin.Context) {
@@ -613,7 +613,7 @@ func (h *AdminNodeHandler) UpdateMetadata(c *gin.Context) {
 		return
 	}
 	panelNames := h.loadPanelNames(c.Request.Context())
-	c.JSON(http.StatusOK, h.toNodeDTO(n, panelNames))
+	c.JSON(http.StatusOK, h.toNodeDTO(n, panelNames, true))
 }
 
 func (h *AdminNodeHandler) UpdateInboundConfig(c *gin.Context) {
@@ -998,12 +998,16 @@ func relayDTOs(relays []domain.RelayLine) []relayLineDTO {
 	return out
 }
 
-func (h *AdminNodeHandler) toNodeDTO(n *domain.Node, panelNames map[int64]string) nodeDTO {
+func (h *AdminNodeHandler) toNodeDTO(n *domain.Node, panelNames map[int64]string, includeRouteState bool) nodeDTO {
 	// Panel name is resolved from the in-memory pool snapshot (panelNames map)
 	// rather than from the DB row — the v3 schema dropped the redundant
 	// panel_name column on nodes since renaming a panel would otherwise leave
 	// every historical row stale.
 	panelName := panelNames[n.PanelID]
+	var routeState *domain.NodeRouteState
+	if includeRouteState {
+		routeState = routeStateDTO(n.RouteState)
+	}
 	return nodeDTO{
 		ID:                 n.ID,
 		PanelID:            n.PanelID,
@@ -1032,7 +1036,7 @@ func (h *AdminNodeHandler) toNodeDTO(n *domain.Node, panelNames map[int64]string
 		CertSource:         string(n.CertSource),
 		CertID:             n.CertID,
 		Relays:             relayDTOs(n.Relays),
-		RouteState:         routeStateDTO(n.RouteState),
+		RouteState:         routeState,
 		HideDirect:         n.HideDirect,
 		ShowRelayStatus:    n.EffectiveShowRelayStatus(),
 	}

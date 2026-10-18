@@ -44,7 +44,7 @@ export default function VlessRouteLinesEditor({ draft, busy, relays }: { draft: 
         <Box component="code" sx={{ fontFamily: 'monospace', userSelect: 'text', overflowWrap: 'anywhere' }}>{baseline.state.error}</Box>
       </Typography>}
     </Alert>}
-    {baseline?.warnings.map((warning, index) => <Alert severity="warning" key={index}>{warning}</Alert>)}
+    {baseline?.warnings.map((code, index) => <Alert severity="warning" key={index}>{t(`admin:nodes.vless_route.warnings.${code}`, { defaultValue: code })}</Alert>)}
     {!lines.length && !draft.loading && <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant, fontStyle: 'italic' }}>{t('admin:nodes.vless_route.empty')}</Typography>}
     {lines.map((line, index) => {
       const update = (patch: Partial<VlessRouteLine>) => setLines(previous => previous.map((value, i) => i === index ? { ...value, ...patch } : value))

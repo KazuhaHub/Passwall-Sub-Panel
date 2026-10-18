@@ -206,11 +206,12 @@ func userStatusForNode(n *domain.Node) userNodeStatus {
 		out.RelayStatuses = append(out.RelayStatuses, status)
 	}
 	for _, line := range n.RouteState.Lines {
-		if !line.LocallyAvailable(n) {
+		relay, available := line.AvailableEntry(n)
+		if !available {
 			continue
 		}
 		status := userRelayStatus{Status: out.Status, CheckedAt: out.CheckedAt}
-		if relay, _ := line.ResolveEntry(n); relay != nil {
+		if relay != nil {
 			for i := range n.Relays {
 				if n.Relays[i].ID == relay.ID {
 					status = relayStatusForNode(n, i)

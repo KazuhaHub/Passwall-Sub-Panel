@@ -9,13 +9,13 @@ import ProxyGroupMembersEditor from './ProxyGroupMembersEditor'
 
 const draft: RuleSet = { slug: 'test', name: 'Test', sort: 0, enabled: true, direct_subscription_domain:false, content: '- MATCH,Pick', proxy_group_order: ['Pick'], proxy_group_members: { Pick: [{kind: 'node_set', value: 'remaining'}] }, proxy_group_options: {} }
 const inspection = { groups: [{name: 'Pick', configured: true, options_configured: false, options: {type:'select'}, default_members: [], members: draft.proxy_group_members!.Pick}], builtins: [], nodes: [], lines: [], regions: [], tags: [], issues: [] }
-const result: GroupSubscriptionPreview = {group_id: 1, rule_set:'test',status:'ready', groups:[{name:'Pick',members:['🇯🇵专线']}]}
+const result: GroupSubscriptionPreview = {group_id: 1,status:'ready', groups:[{name:'Pick',members:['🇯🇵专线']}]}
 const previewGroup: Group = {...group,tag_filter:{all:true,tags:[]},layout:{separators:[],sort:[],default_sort_strategy:''}}
 
 function Editor({ value = draft }: { value?: RuleSet }) {
   return <ProxyGroupMembersEditor content={value.content} groupOrder={value.proxy_group_order || []} initialGroupOrder={[]} onGroupOrderChange={() => {}}
     members={value.proxy_group_members || {}} initialMembers={{}} onChange={() => {}} options={value.proxy_group_options || {}} initialOptions={{}} onOptionsChange={() => {}}
-    previewGroups={[previewGroup, {...previewGroup,id:2,name:'Second'}]} draft={value} originalSlug="test" />
+    previewGroups={[previewGroup, {...previewGroup,id:2,name:'Second'}]} draft={value} />
 }
 
 it('uses final compiled labels, defaults on the server, and sends the entire draft', async () => {
@@ -25,7 +25,7 @@ it('uses final compiled labels, defaults on the server, and sends the entire dra
   expect(screen.queryByText(/\[3:/)).toBeNull()
   expect(screen.queryByText('admin:rules.members.preview_all')).toBeNull()
   expect(screen.getByText('group')).toBeTruthy()
-  expect(api.post).toHaveBeenCalledWith('/admin/rules/preview-proxy-groups', {draft, original_slug:'test',preview_group_id:undefined}, expect.objectContaining({signal:expect.any(AbortSignal),_skipErrorToast:true}))
+  expect(api.post).toHaveBeenCalledWith('/admin/rules/preview-proxy-groups', {draft,preview_group_id:undefined}, expect.objectContaining({signal:expect.any(AbortSignal),_skipErrorToast:true}))
   expect(screen.queryByText('admin:rules.members.preview_scope_hint')).toBeNull()
 })
 

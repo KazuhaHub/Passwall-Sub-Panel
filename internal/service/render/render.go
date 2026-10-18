@@ -151,7 +151,14 @@ func (s *Service) renderForContext(ctx context.Context, u *domain.User, ct domai
 	// enabled transit line BEFORE the flag prefix, so every variant inherits
 	// its node's region flag. relay-less nodes pass through unchanged.
 	items = expandNodeLines(items)
-	items = s.filterRouteItemsForContext(ctx, u, items, preview != nil)
+	if ct == domain.ClientURIList {
+		applyLegacyLineNames(items)
+	}
+	var applied map[int64]appliedClientCredential
+	if preview == nil {
+		applied = s.appliedClientCredentialsByNode(ctx, u)
+	}
+	items = s.filterRouteItemsForContext(ctx, items, preview != nil, applied)
 	if st.SubRegionFlagPrefix {
 		applyRegionFlagPrefix(items)
 	}
@@ -163,7 +170,7 @@ func (s *Service) renderForContext(ctx context.Context, u *domain.User, ct domai
 	// doesn't propagate ErrNotFound up to the sub handler and produce
 	// a misleading 404 to UAs that match a uri-list rule.
 	if ct == domain.ClientURIList {
-		return s.renderURIList(ctx, u, items, st)
+		return s.renderURIListWithCredentials(ctx, u, items, st, applied)
 	}
 
 	var tpl *domain.Template
@@ -189,9 +196,9 @@ func (s *Service) renderForContext(ctx context.Context, u *domain.User, ct domai
 	lineNames, internalItems := newLineNameCatalog(items, st.SubRegionFlagPrefix, nodes)
 	items = internalItems
 	if ct == domain.ClientSingBox {
-		return s.renderSingBox(ctx, u, tpl, items, bundle.SharedRules, bundle.ProxyGroupOrder, bundle.ProxyGroupMembers, bundle.ProxyGroupOptions, st, lineNames)
+		return s.renderSingBox(ctx, u, tpl, items, bundle.SharedRules, bundle.ProxyGroupOrder, bundle.ProxyGroupMembers, bundle.ProxyGroupOptions, st, lineNames, applied)
 	}
-	proxies := s.buildProxiesForContext(ctx, u, items, st, preview != nil)
+	proxies := s.buildProxiesForContext(ctx, u, items, st, preview != nil, applied)
 	generatedLines := emittedProxyNames(proxies, "name")
 	items = emittedRenderItems(items, generatedLines)
 	lineOrigin := markGeneratedLines(proxies, "name", generatedLines)
@@ -285,15 +292,7 @@ func (s *Service) renderForContext(ctx context.Context, u *domain.User, ct domai
 		}
 		body = compose(proxyGroupsYAML)
 	}
-	body, err = lineNames.bindMihomo(body)
-	if err != nil {
-		return nil, fmt.Errorf("bind subscription line references: %w", err)
-	}
-	body, err = pruneMihomoLines(body, generatedLines, lineOrigin)
-	if err != nil {
-		return nil, fmt.Errorf("resolve subscription lines: %w", err)
-	}
-	body, err = lineNames.finalizeMihomo(body)
+	body, err = lineNames.finishMihomo(body, generatedLines, lineOrigin)
 	if err != nil {
 		return nil, fmt.Errorf("finalize subscription line names: %w", err)
 	}
@@ -398,17 +397,13 @@ func absoluteURL(base, raw string) string {
 }
 
 func (s *Service) buildProxies(ctx context.Context, u *domain.User, items []renderItem, st ports.UISettings) []map[string]any {
-	return s.buildProxiesForContext(ctx, u, items, st, false)
+	return s.buildProxiesForContext(ctx, u, items, st, false, s.appliedClientCredentialsByNode(ctx, u))
 }
 
-func (s *Service) buildProxiesForContext(ctx context.Context, u *domain.User, items []renderItem, st ports.UISettings, preview bool) []map[string]any {
+func (s *Service) buildProxiesForContext(ctx context.Context, u *domain.User, items []renderItem, st ports.UISettings, preview bool, appliedCredentials map[int64]appliedClientCredential) []map[string]any {
 	// Pre-resolve EmailRules once per render. ClientEmail is per-(user,
 	// node), so the rules can be reused across the loop.
 	emailRules := domain.EmailRules{Domain: st.EmailDomain}
-	var appliedCredentials map[int64]appliedClientCredential
-	if !preview {
-		appliedCredentials = s.appliedClientCredentialsByNode(ctx, u)
-	}
 	nativePanels := s.nativePanelIDs(ctx, items)
 
 	// Captured nodes render from the local snapshot (zero 3X-UI calls), so a

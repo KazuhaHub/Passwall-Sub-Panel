@@ -1,29 +1,13 @@
 // Mutating acceptance is restricted to the dedicated local fixture.
 import assert from 'node:assert/strict'
-import { mkdtemp } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { pathToFileURL } from 'node:url'
+import { liveBrowserFixture, loginLiveFixture } from './browser-fixture.mjs'
 
-assert.equal(process.env.PSP_V2_UI_TEST, 'isolated-acceptance-fixture')
-const base = process.env.PSP_V2_PANEL_URL
-assert.equal(base, 'http://127.0.0.1:19788')
-assert.equal((await (await fetch(`${base}/api/version`)).json()).version, 'vlessroute-v2-acceptance')
-const { chromium } = await import(pathToFileURL(process.env.PLAYWRIGHT_MODULE).href)
-const browser = await chromium.launch({ headless: true })
-const context = await browser.newContext({ locale: 'zh-CN', viewport: { width: 1440, height: 1000 } })
-const page = await context.newPage(), errors = []
-page.on('pageerror', error => errors.push(error.message))
-const output = await mkdtemp(join(tmpdir(), 'psp-v2-five-match-'))
+const { base, password, browser, context, page, errors, output } = await liveBrowserFixture('psp-vless-route-match-ui-')
 let original, api
 const input = line => ({ id: line.id, name: line.name, enabled: line.enabled, outbound_tag: line.outbound_tag, only_line_name: !!line.only_line_name, entry_relay_id: line.entry_relay_id || '' })
 try {
-  await page.goto(`${base}/login`)
-  await page.getByRole('textbox').first().fill('admin')
-  await page.locator('input[type="password"]').fill(process.env.PSP_V2_ADMIN_PASSWORD)
-  await page.locator('button[type="submit"]').first().click()
-  await page.waitForURL(url => !url.pathname.includes('login'))
-  const token = await page.evaluate(() => localStorage.getItem('psp_access'))
+  const token = await loginLiveFixture({ page, base, password })
   api = async (method, path, data) => {
     const response = await context.request.fetch(`${base}/api${path}`, { method, headers: { Authorization: `Bearer ${token}` }, ...(data ? { data } : {}) })
     assert.ok(response.ok(), `${method} ${path}: ${response.status()} ${await response.text()}`)

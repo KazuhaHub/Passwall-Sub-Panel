@@ -22,9 +22,8 @@ func (h *AdminRuleSetsHandler) PreviewProxyGroups(c *gin.Context) {
 		return
 	}
 	var req struct {
-		GroupID      int64      `json:"preview_group_id"`
-		OriginalSlug string     `json:"original_slug"`
-		Draft        ruleSetDTO `json:"draft"`
+		GroupID int64      `json:"preview_group_id"`
+		Draft   ruleSetDTO `json:"draft"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -51,11 +50,7 @@ func (h *AdminRuleSetsHandler) PreviewProxyGroups(c *gin.Context) {
 	content := mergeLegacyRuleContent(req.Draft.MihomoRules, req.Draft.Content)
 	advanced := render.NormalizeMihomoRuleFeatures(render.MihomoRuleFeatures{SubRules: req.Draft.MihomoSubRules, RematchOutbounds: req.Draft.MihomoRematchOutbounds})
 	metadata := render.NormalizeProxyGroupMetadata(content, req.Draft.ProxyGroupOrder, req.Draft.ProxyGroupMembers, req.Draft.ProxyGroupOptions, advanced)
-	slug := req.OriginalSlug
-	if slug == "" {
-		slug = req.Draft.Slug
-	}
-	draft := &domain.RuleSet{Slug: slug, Name: req.Draft.Name, Sort: req.Draft.Sort, Enabled: req.Draft.Enabled,
+	draft := &domain.RuleSet{Slug: req.Draft.Slug, Name: req.Draft.Name, Sort: req.Draft.Sort, Enabled: req.Draft.Enabled,
 		Content: content, DirectSubscriptionDomain: req.Draft.DirectSubscriptionDomain,
 		ProxyGroupOrder: metadata.Order, ProxyGroupMembers: metadata.Members,
 		ProxyGroupOptions: render.NormalizeProxyGroupOptionsMap(metadata.Options),

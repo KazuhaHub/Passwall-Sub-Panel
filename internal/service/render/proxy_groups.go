@@ -103,6 +103,7 @@ func buildProxyGroupsYAMLInternal(rules string, preferredOrder []string, members
 	}
 
 	lines := make([]string, 0, len(targets)*6)
+	groupNames := proxyGroupNameSet(targets)
 	for _, target := range targets {
 		groupOptions := domain.ProxyGroupOptions{Type: ProxyGroupTypeSelect}
 		if configured, ok := options[target]; ok {
@@ -114,7 +115,7 @@ func buildProxyGroupsYAMLInternal(rules string, preferredOrder []string, members
 			if configured, ok := members[target]; ok {
 				effectiveMembers = configured
 			}
-			choices = resolveConfiguredMembersWithOutbounds(availableProxyGroupMembers(effectiveMembers, targets, excludedTargets), items)
+			choices = resolveConfiguredMembersWithOutbounds(availableProxyGroupMembers(effectiveMembers, groupNames, excludedTargets), items)
 		}
 		// Auto types (url-test/fallback/load-balance) health-check their members
 		// and pick a winner, so a DIRECT/REJECT or control-flow-only Rematch

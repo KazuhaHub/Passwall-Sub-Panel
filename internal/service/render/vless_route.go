@@ -17,21 +17,20 @@ func expandNodeLines(items []renderItem) []renderItem {
 			continue
 		}
 		for _, line := range item.node.RouteState.Lines {
-			if line.LocallyAvailable(item.node) {
-				relay, available := line.ResolveEntry(item.node)
-				if !available {
-					continue
-				}
+			if relay, available := line.AvailableEntry(item.node); available {
 				copy := line
 				out = append(out, renderItem{node: item.node, name: routeEntryName(item.name, line), route: &copy, relay: relay})
 			}
 		}
 	}
-	// Labels are client-side references, not identity. Disambiguate only when
-	// necessary; unchanged historical names keep their exact spelling.
+	return out
+}
+
+// URI lists retain legacy naming before publication filtering and flagging.
+// Configuration subscriptions instead allocate names after reference pruning.
+func applyLegacyLineNames(out []renderItem) {
 	counts := map[string]int{}
 	for i := range out {
-		out[i].baseName = out[i].name
 		counts[out[i].name]++
 	}
 	for i := range out {
@@ -39,7 +38,6 @@ func expandNodeLines(items []renderItem) []renderItem {
 			out[i].name = fmt.Sprintf("%s [%d:%s]", out[i].name, out[i].node.ID, out[i].lineID())
 		}
 	}
-	return out
 }
 
 func routeEntryName(base string, line domain.VlessRouteLine) string {
@@ -50,10 +48,6 @@ func routeEntryName(base string, line domain.VlessRouteLine) string {
 }
 
 func (s *Service) filterRouteItems(ctx context.Context, u *domain.User, items []renderItem) []renderItem {
-	return s.filterRouteItemsForContext(ctx, u, items, false)
-}
-
-func (s *Service) filterRouteItemsForContext(ctx context.Context, u *domain.User, items []renderItem, preview bool) []renderItem {
 	hasRoutes := false
 	for _, item := range items {
 		hasRoutes = hasRoutes || item.route != nil
@@ -61,10 +55,10 @@ func (s *Service) filterRouteItemsForContext(ctx context.Context, u *domain.User
 	if !hasRoutes {
 		return items
 	}
-	var applied map[int64]appliedClientCredential
-	if !preview {
-		applied = s.appliedClientCredentialsByNode(ctx, u)
-	}
+	return s.filterRouteItemsForContext(ctx, items, false, s.appliedClientCredentialsByNode(ctx, u))
+}
+
+func (s *Service) filterRouteItemsForContext(ctx context.Context, items []renderItem, preview bool, applied map[int64]appliedClientCredential) []renderItem {
 	panels := map[int64]*domain.XUIPanel{}
 	out := make([]renderItem, 0, len(items))
 	for _, item := range items {
@@ -83,7 +77,7 @@ func (s *Service) filterRouteItemsForContext(ctx context.Context, u *domain.User
 			panel, _ = s.repos.XUIPanel.GetByID(ctx, item.node.PanelID)
 			panels[item.node.PanelID] = panel
 		}
-		if panel == nil || domain.NormalizePanelKind(panel.Kind) != domain.PanelKind3XUI || item.node.RouteState.Binding != domain.RouteBinding(panel.URL, item.node) {
+		if !domain.RouteBackendMatches(item.node, panel) {
 			continue
 		}
 		if preview {

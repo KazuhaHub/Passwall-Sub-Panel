@@ -1,22 +1,26 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { isAxiosError } from 'axios'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { getRouteLines, getRouteOutbounds, routeLineInput, saveRouteLines, type RouteLinesView, type RouteOutbound, type VlessRouteLine } from '@/api/vlessRoute'
+import { getRouteLines, getRouteEditor, routeLineInput, saveRouteLines, type RouteLinesView, type RouteOutbound, type VlessRouteLine } from '@/api/vlessRoute'
 import { nodeKeys } from './keys'
 import type { QueryScope } from './session'
 import { freshness, policies } from './policies'
 
-const inputs = (lines: VlessRouteLine[]) => lines.map(routeLineInput)
+function normalizeSnapshot(lines: VlessRouteLine[]) {
+  const inputs = lines.map(routeLineInput)
+  return { inputs, key: JSON.stringify(inputs) }
+}
 
-function reconcileSnapshot(baseline: RouteLinesView | null, lines: VlessRouteLine[], latest: RouteLinesView) {
-  const edited = baseline !== null && JSON.stringify(inputs(lines)) !== JSON.stringify(inputs(baseline.state.lines))
-  const targetChanged = baseline !== null && JSON.stringify(inputs(latest.state.lines)) !== JSON.stringify(inputs(baseline.state.lines))
+function reconcileSnapshot(baseline: RouteLinesView | null, lines: VlessRouteLine[], latest: RouteLinesView, draft: ReturnType<typeof normalizeSnapshot>, prior: ReturnType<typeof normalizeSnapshot>) {
+  const current = normalizeSnapshot(latest.state.lines)
+  const edited = baseline !== null && draft.key !== prior.key
+  const targetChanged = baseline !== null && current.key !== prior.key
   // Newly saved lines receive server IDs. A readback matching the submitted
   // target confirms them without treating those assigned IDs as a conflict.
-  const requested = inputs(lines)
-  const matchesDraft = JSON.stringify(inputs(latest.state.lines).map((line, index) => ({
+  const requested = draft.inputs
+  const matchesDraft = JSON.stringify(current.inputs.map((line, index) => ({
     ...line, id: requested[index]?.id ? line.id : undefined,
-  }))) === JSON.stringify(requested)
+  }))) === draft.key
   const conflict = edited && targetChanged && !matchesDraft
   return {
     conflict,
@@ -36,6 +40,8 @@ export function useVlessRouteDraft(scope: QueryScope, nodeId: number, session: n
   const [refreshing, setRefreshing] = useState(false)
   const [conflict, setConflict] = useState(false)
   const appliedRead = useRef<unknown>(null)
+  const draftSnapshot = useMemo(() => normalizeSnapshot(lines), [lines])
+  const baselineSnapshot = useMemo(() => normalizeSnapshot(baseline?.state.lines ?? []), [baseline])
   useEffect(() => { setBaseline(null); setLines([]); setOutbounds([]); setCatalogError(false); setConflict(false); setRefreshing(false); appliedRead.current = null }, [nodeId, session, scope.apiBase, scope.userId, scope.role, scope.authEpoch])
   const query = useQuery({
     queryKey: key,
@@ -43,15 +49,8 @@ export function useVlessRouteDraft(scope: QueryScope, nodeId: number, session: n
     ...freshness(policies.nodeRouteLines),
     refetchOnWindowFocus: false, refetchOnReconnect: false,
     queryFn: async ({ signal }) => {
-      const view = await getRouteLines(nodeId, signal)
-      if (!view.supported) return { view, catalog: [] as RouteOutbound[], catalogError: false }
-      try {
-        const catalog = await getRouteOutbounds(nodeId, signal)
-        return { view: { ...view, supported: true }, catalog, catalogError: false }
-      } catch (error) {
-        if (signal.aborted) throw error
-        return { view, catalog: [] as RouteOutbound[], catalogError: true }
-      }
+      const { outbounds, outbounds_error, ...view } = await getRouteEditor(nodeId, signal)
+      return { view, catalog: outbounds, catalogError: !!outbounds_error }
     },
   })
   useEffect(() => {
@@ -60,14 +59,14 @@ export function useVlessRouteDraft(scope: QueryScope, nodeId: number, session: n
     const latest = query.data.view
     // A check may advance only the status revision. Adopt it without touching
     // edits. A changed target must not silently upgrade an old draft's CAS.
-    const next = reconcileSnapshot(baseline, lines, latest)
+    const next = reconcileSnapshot(baseline, lines, latest, draftSnapshot, baselineSnapshot)
     setConflict(next.conflict)
     setBaseline(next.baseline)
     setLines(next.lines)
     setOutbounds(query.data.catalog)
     setCatalogError(query.data.catalogError)
-  }, [baseline, lines, query.data, query.isFetching])
-  const dirty = baseline !== null && JSON.stringify(inputs(lines)) !== JSON.stringify(inputs(baseline.state.lines))
+  }, [baseline, lines, draftSnapshot, baselineSnapshot, query.data, query.isFetching])
+  const dirty = baseline !== null && draftSnapshot.key !== baselineSnapshot.key
   const needsSave = !!baseline?.supported && (dirty || ['unknown', 'applying', 'drift'].includes(baseline.state.status))
   async function refresh() {
     setRefreshing(true)
@@ -88,7 +87,7 @@ export function useVlessRouteDraft(scope: QueryScope, nodeId: number, session: n
       if (!isAxiosError(error) || error.response && error.response.status < 500) throw error
       const latest = await getRouteLines(nodeId).catch(() => null)
       if (latest && latest.state.revision !== baseline.state.revision) {
-        const next = reconcileSnapshot(baseline, lines, latest)
+        const next = reconcileSnapshot(baseline, lines, latest, draftSnapshot, baselineSnapshot)
         setBaseline(next.baseline); setLines(next.lines); setConflict(next.conflict)
       }
       throw error

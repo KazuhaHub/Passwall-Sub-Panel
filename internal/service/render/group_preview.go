@@ -12,7 +12,6 @@ import (
 // GroupSubscriptionPreview exposes only labels, never connection credentials.
 type GroupSubscriptionPreview struct {
 	GroupID int64                           `json:"group_id"`
-	RuleSet string                          `json:"rule_set"`
 	Status  string                          `json:"status"`
 	Groups  []GroupSubscriptionPreviewGroup `json:"groups"`
 }
@@ -42,7 +41,7 @@ func (s *Service) PreviewMihomoGroup(ctx context.Context, groupID int64, draft *
 		return nil, fmt.Errorf("%w: group and draft slug required", domain.ErrValidation)
 	}
 	tpl := &domain.Template{Slug: "rule-set-preview", Content: ruleSetPreviewTemplate, RuleSets: []string{draft.Slug}}
-	result := &GroupSubscriptionPreview{GroupID: groupID, RuleSet: draft.Slug, Status: "ready", Groups: []GroupSubscriptionPreviewGroup{}}
+	result := &GroupSubscriptionPreview{GroupID: groupID, Status: "ready", Groups: []GroupSubscriptionPreviewGroup{}}
 	if !draft.Enabled {
 		result.Status = "disabled"
 	}

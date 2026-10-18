@@ -2568,7 +2568,6 @@ export default function NodesView() {
       setEditing(saved)
       const routed = await routeDraft.save()
       if (routed) {
-        mutateManaged(prev => prev.map(node => node.id === saved.id ? { ...saved, route_state: routed.state } : node))
         if (routed.state.status !== 'applied') {
           pushSnack(t('admin:nodes.vless_route.partial_failure'), 'warning')
           return

@@ -3,17 +3,17 @@ import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { expect, it, vi } from 'vitest'
 import { api, editRow, installReads, list, mount, node } from '@/test/adminSaveHarness'
 import NodesView from './NodesView'
-import type { RouteLinesView } from '@/api/vlessRoute'
+import type { RouteEditorView } from '@/api/vlessRoute'
 
 const confirmation = vi.hoisted(() => vi.fn())
 vi.mock('@/components/ConfirmHost', () => ({ confirm: confirmation }))
 
-const initial = (): RouteLinesView => ({ node_id: 1, supported: true, state: { revision: 0, lines: [], status: '' }, warnings: [] })
+const initial = (): RouteEditorView => ({ node_id: 1, supported: true, outbounds: [], state: { revision: 0, lines: [], status: '' }, warnings: [] })
 
 it('saves and reopens the five optional fields on the existing route without adding a rule or outbound', async () => {
   const view = initial()
   view.state = { revision: 2, status: 'applied', lines: [{ id: 'line', route: 1, name: 'B', outbound_tag: 'direct', enabled: true }] }
-  installReads({ '/admin/nodes': list([node]), '/admin/nodes/1/vless-route-lines': view, '/admin/nodes/1/vless-route-outbounds': { items: [{ tag: 'direct', protocol: 'freedom', source: 'template' }] } })
+  installReads({ '/admin/nodes': list([node]), '/admin/nodes/1/vless-route-editor': Object.assign(view, { outbounds: [{ tag: 'direct', protocol: 'freedom' }] }) })
   api.put.mockImplementation(async (url, body) => {
     if (String(url).endsWith('/vless-route-lines')) {
       view.state = { revision: view.state.revision + 2, status: 'applied', lines: body.lines.map((line: object) => ({ ...line, route: 1 })) }
@@ -65,7 +65,7 @@ it('saves and reopens the five optional fields on the existing route without add
 it('clears all five saved optional conditions without changing the route identity or outbound', async () => {
   const view = initial()
   view.state = { revision: 2, status: 'applied', lines: [{ id: 'line', route: 1, name: 'B', outbound_tag: 'direct', enabled: true, network: 'tcp', protocols: ['tls'], ip: ['192.0.2.0/24', 'geoip:private'], domain: ['domain:example.com', 'regexp:^a{1,3}\\.example$'], port: '443,1000-2000' }] }
-  installReads({ '/admin/nodes': list([node]), '/admin/nodes/1/vless-route-lines': view, '/admin/nodes/1/vless-route-outbounds': { items: [{ tag: 'direct', protocol: 'freedom', source: 'template' }] } })
+  installReads({ '/admin/nodes': list([node]), '/admin/nodes/1/vless-route-editor': Object.assign(view, { outbounds: [{ tag: 'direct', protocol: 'freedom' }] }) })
   api.put.mockImplementation(async (url, body) => ({ data: String(url).endsWith('/vless-route-lines') ? { ...view, state: { ...view.state, revision: 4, lines: body.lines.map((line: object) => ({ ...line, route: 1 })) } } : node }))
   mount(<NodesView />)
   const dialog = await editRow()
@@ -90,8 +90,7 @@ it('creates and reopens a direct-inbound route while the standalone direct line 
   const configured = { ...node, hide_direct: true }
   installReads({
     '/admin/nodes': list([configured]),
-    '/admin/nodes/1/vless-route-lines': view,
-    '/admin/nodes/1/vless-route-outbounds': { items: [{ tag: 'direct', protocol: 'freedom', source: 'template' }, { tag: 'remote', protocol: '', source: 'subscription' }] },
+    '/admin/nodes/1/vless-route-editor': Object.assign(view, { outbounds: [{ tag: 'direct', protocol: 'freedom' }, { tag: 'remote', protocol: '' }] }),
   })
   confirmation.mockResolvedValue(true)
   api.put.mockImplementation(async (url, body) => {
@@ -137,7 +136,7 @@ it('defaults each legacy relay to false and keeps independent display options af
     { id: 'first', name: 'R1', address: 'first.example', port: 0, enabled: true },
     { id: 'second', name: 'R2', address: 'second.example', port: 0, enabled: true },
   ] }
-  installReads({ '/admin/nodes': list([legacy]), '/admin/nodes/1/vless-route-lines': initial(), '/admin/nodes/1/vless-route-outbounds': { items: [] } })
+  installReads({ '/admin/nodes': list([legacy]), '/admin/nodes/1/vless-route-editor': Object.assign(initial(), { outbounds: [] }) })
   api.put.mockImplementation(async (_url, body) => ({ data: { ...legacy, ...body } }))
   mount(<NodesView />)
   const dialog = await editRow()
@@ -161,7 +160,7 @@ it('allows blank route names and a saved relay entry while the direct line is hi
     { id: 'off', name: 'Off', address: 'off.example', port: 0, enabled: false },
     { id: '', name: 'Pending', address: 'pending.example', port: 443, enabled: true },
   ] }
-  installReads({ '/admin/nodes': list([configured]), '/admin/nodes/1/vless-route-lines': view, '/admin/nodes/1/vless-route-outbounds': { items: [{ tag: 'direct', protocol: 'freedom', source: 'template' }] } })
+  installReads({ '/admin/nodes': list([configured]), '/admin/nodes/1/vless-route-editor': Object.assign(view, { outbounds: [{ tag: 'direct', protocol: 'freedom' }] }) })
   api.put.mockImplementation(async (url, body) => {
     if (String(url).endsWith('/vless-route-lines')) {
       view.state = { revision: 2, status: 'applied', lines: body.lines.map((line: object) => ({ ...line, id: 'stable', route: 1001 })) }
@@ -208,7 +207,7 @@ it('keeps a saved direct-inbound route enabled and editable when the standalone 
   const view = initial()
   view.state = { revision: 2, status: 'applied', lines: [{ id: 'route', route: 1001, name: 'B', outbound_tag: 'direct', enabled: true }] }
   const configured = { ...node, hide_direct: true }
-  installReads({ '/admin/nodes': list([configured]), '/admin/nodes/1/vless-route-lines': view, '/admin/nodes/1/vless-route-outbounds': { items: [{ tag: 'direct', protocol: 'freedom', source: 'template' }] } })
+  installReads({ '/admin/nodes': list([configured]), '/admin/nodes/1/vless-route-editor': Object.assign(view, { outbounds: [{ tag: 'direct', protocol: 'freedom' }] }) })
   api.put.mockImplementation(async (url, body) => {
     if (String(url).endsWith('/vless-route-lines')) {
       view.state = { ...view.state, revision: 4, lines: body.lines.map((line: object) => ({ ...line, route: 1001 })) }
@@ -246,7 +245,7 @@ it.each(['disabled', 'deleted'])('keeps an unavailable %s relay selected without
   const view = initial()
   view.state = { revision: 2, status: 'applied', lines: [{ id: 'route', route: 1001, name: 'B', outbound_tag: 'direct', entry_relay_id: 'front', enabled: true }] }
   const configured = { ...node, hide_direct: true, relays: state === 'deleted' ? [] : [{ id: 'front', name: 'R', address: 'relay.example', enabled: false, port: 443 }] }
-  installReads({ '/admin/nodes': list([configured]), '/admin/nodes/1/vless-route-lines': view, '/admin/nodes/1/vless-route-outbounds': { items: [{ tag: 'direct', protocol: 'freedom', source: 'template' }] } })
+  installReads({ '/admin/nodes': list([configured]), '/admin/nodes/1/vless-route-editor': Object.assign(view, { outbounds: [{ tag: 'direct', protocol: 'freedom' }] }) })
   mount(<NodesView />)
   const dialog = await editRow()
   fireEvent.click(within(dialog).getByRole('tab', { name: 'admin:nodes.vless_route.title' }))
@@ -262,7 +261,7 @@ it.each(['disabled', 'deleted'])('keeps an unavailable %s relay selected without
 it('does not enable a previously disabled direct-inbound route when direct is hidden', async () => {
   const view = initial()
   view.state = { revision: 2, status: 'applied', lines: [{ id: 'route', route: 1001, name: 'B', outbound_tag: 'direct', enabled: false }] }
-  installReads({ '/admin/nodes': list([{ ...node, hide_direct: true }]), '/admin/nodes/1/vless-route-lines': view, '/admin/nodes/1/vless-route-outbounds': { items: [{ tag: 'direct', protocol: 'freedom', source: 'template' }] } })
+  installReads({ '/admin/nodes': list([{ ...node, hide_direct: true }]), '/admin/nodes/1/vless-route-editor': Object.assign(view, { outbounds: [{ tag: 'direct', protocol: 'freedom' }] }) })
   mount(<NodesView />)
   const dialog = await editRow()
   fireEvent.click(within(dialog).getByRole('tab', { name: 'admin:nodes.vless_route.title' }))
@@ -283,8 +282,7 @@ it('keeps the editor open after metadata succeeds but route application is unkno
   view.state = { revision: 2, status: 'unknown', error: 'remote_update_unconfirmed', lines: [{ id: 'route', route: 1001, name: 'B', outbound_tag: 'direct', enabled: true }] }
   installReads({
     '/admin/nodes': list([node]),
-    '/admin/nodes/1/vless-route-lines': view,
-    '/admin/nodes/1/vless-route-outbounds': { items: [{ tag: 'direct', protocol: 'freedom', source: 'template' }] },
+    '/admin/nodes/1/vless-route-editor': Object.assign(view, { outbounds: [{ tag: 'direct', protocol: 'freedom' }] }),
   })
   confirmation.mockResolvedValue(true)
   api.put.mockImplementation(async url => ({ data: String(url).endsWith('/vless-route-lines') ? view : node }))
@@ -303,7 +301,7 @@ it('keeps the editor open after metadata succeeds but route application is unkno
 it.each(['unsupported_or_stopped_core', 'inbound_binding_changed', 'routing_or_outbound_changed', 'unsupported_or_changed_binding', 'routes_withdrawn'])('shows the exact drift identifier %s separately from the status explanation', async error => {
   const view = initial()
   view.state = { revision: 2, status: 'drift', error, lines: [] }
-  installReads({ '/admin/nodes': list([node]), '/admin/nodes/1/vless-route-lines': view, '/admin/nodes/1/vless-route-outbounds': { items: [] } })
+  installReads({ '/admin/nodes': list([node]), '/admin/nodes/1/vless-route-editor': Object.assign(view, { outbounds: [] }) })
   mount(<NodesView />)
   const dialog = await editRow()
   fireEvent.click(within(dialog).getByRole('tab', { name: 'admin:nodes.vless_route.title' }))
@@ -316,7 +314,7 @@ it.each(['unsupported_or_stopped_core', 'inbound_binding_changed', 'routing_or_o
 it('does not invent an error identifier for an applying state without one', async () => {
   const view = initial()
   view.state = { revision: 1, status: 'applying', lines: [] }
-  installReads({ '/admin/nodes': list([node]), '/admin/nodes/1/vless-route-lines': view, '/admin/nodes/1/vless-route-outbounds': { items: [] } })
+  installReads({ '/admin/nodes': list([node]), '/admin/nodes/1/vless-route-editor': Object.assign(view, { outbounds: [] }) })
   mount(<NodesView />)
   const dialog = await editRow()
   fireEvent.click(within(dialog).getByRole('tab', { name: 'admin:nodes.vless_route.title' }))
@@ -327,7 +325,7 @@ it('does not invent an error identifier for an applying state without one', asyn
 it('refreshes state on the refresh button and on tab reentry without discarding an edited name', async () => {
   const view = initial()
   view.state = { revision: 2, status: 'applied', lines: [{ id: 'one', route: 1, name: 'B', outbound_tag: 'direct', enabled: true }] }
-  const reads = (latest: RouteLinesView) => installReads({ '/admin/nodes': list([node]), '/admin/nodes/1/vless-route-lines': latest, '/admin/nodes/1/vless-route-outbounds': { items: [{ tag: 'direct', protocol: 'freedom', source: 'template' }] } })
+  const reads = (latest: RouteEditorView) => installReads({ '/admin/nodes': list([node]), '/admin/nodes/1/vless-route-editor': Object.assign(latest, { outbounds: [{ tag: 'direct', protocol: 'freedom' }] }) })
   reads(view)
   mount(<NodesView />)
   const dialog = await editRow()
@@ -354,8 +352,7 @@ it('keeps enable, delete and reorder controls working in the relay-style route l
   ] }
   installReads({
     '/admin/nodes': list([node]),
-    '/admin/nodes/1/vless-route-lines': view,
-    '/admin/nodes/1/vless-route-outbounds': { items: [{ tag: 'direct', protocol: 'freedom', source: 'template' }] },
+    '/admin/nodes/1/vless-route-editor': Object.assign(view, { outbounds: [{ tag: 'direct', protocol: 'freedom' }] }),
   })
   confirmation.mockResolvedValue(true)
   api.put.mockImplementation(async (url, body) => ({ data: String(url).endsWith('/vless-route-lines')

@@ -59,7 +59,6 @@ interface Props {
   onOptionsChange: (options: OptionMap) => void
   previewGroups: Group[]
   draft?: RuleSet
-  originalSlug?: string
   mihomoSubRules?: MihomoSubRule[]
   mihomoRematchOutbounds?: MihomoRematchOutbound[]
   onValidationChange?: (hasErrors: boolean) => void
@@ -68,7 +67,7 @@ interface Props {
 type AddKind = 'node' | 'line' | 'builtin' | 'proxy_group' | 'rematch' | 'region' | 'tag' | 'remaining'
 type AddOption = { value: string | number; label: string; unavailable?: boolean }
 
-export default function ProxyGroupMembersEditor({ content, groupOrder, initialGroupOrder, onGroupOrderChange, members, initialMembers, onChange, options, initialOptions, onOptionsChange, previewGroups, draft, originalSlug, mihomoSubRules = [], mihomoRematchOutbounds = [], onValidationChange }: Props) {
+export default function ProxyGroupMembersEditor({ content, groupOrder, initialGroupOrder, onGroupOrderChange, members, initialMembers, onChange, options, initialOptions, onOptionsChange, previewGroups, draft, mihomoSubRules = [], mihomoRematchOutbounds = [], onValidationChange }: Props) {
   const theme = useTheme()
   const md = theme.palette.md
   const { t } = useTranslation(['admin', 'common'])
@@ -124,7 +123,7 @@ export default function ProxyGroupMembersEditor({ content, groupOrder, initialGr
     if (!draft) return () => controller.abort()
     setPreviewLoading(true)
     const timer = window.setTimeout(() => {
-      void previewProxyGroups({ draft, original_slug: originalSlug, preview_group_id: previewGroupID }, controller.signal).then(result => {
+      void previewProxyGroups({ draft, preview_group_id: previewGroupID }, controller.signal).then(result => {
         if (!controller.signal.aborted) { setPreview(result); setResolvedPreviewGroupID(result.group_id) }
       }).catch(error => {
         if (!controller.signal.aborted) {
@@ -134,7 +133,7 @@ export default function ProxyGroupMembersEditor({ content, groupOrder, initialGr
       }).finally(() => { if (!controller.signal.aborted) setPreviewLoading(false) })
     }, 300)
     return () => { controller.abort(); window.clearTimeout(timer) }
-  }, [serializedDraft, originalSlug, previewGroupID]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [serializedDraft, previewGroupID]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const current = inspection?.groups.find(group => group.name === selected)
   const currentPreview = preview?.groups.find(group => group.name === selected)
@@ -242,7 +241,7 @@ export default function ProxyGroupMembersEditor({ content, groupOrder, initialGr
   const lineNodeOptions = useMemo<AddOption[]>(() => (inspection?.nodes || []).map(node => ({ value: node.id, label: node.display_name })), [inspection])
   const addOptions = useMemo<AddOption[]>(() => {
     switch (addKind) {
-      case 'line': return (inspection?.lines || []).filter(line => line.node_id === lineNode?.id).map(line => ({ value: JSON.stringify([line.node_id, line.line_id]), label: `${line.kind === 'direct' ? '' : `${line.name ?? line.display_name} `}[${t(`admin:rules.members.line_type_${line.kind}`)}]`, unavailable: !line.available }))
+      case 'line': return (inspection?.lines || []).filter(line => line.node_id === lineNode?.id).map(line => ({ value: JSON.stringify([line.node_id, line.line_id]), label: `${line.kind === 'direct' ? '' : `${line.name} `}[${t(`admin:rules.members.line_type_${line.kind}`)}]`, unavailable: !line.available }))
       case 'node': return (inspection?.nodes || []).map(node => ({ value: node.id, label: node.display_name }))
       case 'builtin': return (inspection?.builtins || []).map(value => ({ value, label: value }))
       case 'proxy_group': return (inspection?.groups || []).filter(group => group.name !== selected).map(group => ({ value: group.name, label: group.name }))

@@ -25,7 +25,7 @@ func TestAvailableMembersPreserveTypedIdentityAndRecover(t *testing.T) {
 	if got := availableProxyGroupMembers(members, nil, nil); !reflect.DeepEqual(got, members[3:]) {
 		t.Fatalf("dangling references survived: %+v", got)
 	}
-	if got := availableProxyGroupMembers(members, []string{"Same"}, nil); !reflect.DeepEqual(got, []domain.ProxyGroupMember{members[0], members[3]}) {
+	if got := availableProxyGroupMembers(members, map[string]bool{"Same": true}, nil); !reflect.DeepEqual(got, []domain.ProxyGroupMember{members[0], members[3]}) {
 		t.Fatalf("group rebound another kind: %+v", got)
 	}
 	if got := availableProxyGroupMembers(members, nil, map[string]bool{"Same": true}); !reflect.DeepEqual(got, []domain.ProxyGroupMember{members[1], members[3]}) {

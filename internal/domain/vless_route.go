@@ -54,9 +54,24 @@ func (line VlessRouteLine) ResolveEntry(n *Node) (*RelayLine, bool) {
 // LocallyAvailable is the shared effective publication gate. Enabled records
 // retain the administrator's intent while an unavailable entry suspends use.
 func (line VlessRouteLine) LocallyAvailable(n *Node) bool {
-	_, entryAvailable := line.ResolveEntry(n)
-	return n != nil && n.Enabled && strings.EqualFold(n.DesiredProtocol, "vless") &&
-		n.RouteState.Status == "applied" && line.Enabled && !line.Deleted && entryAvailable
+	_, available := line.AvailableEntry(n)
+	return available
+}
+
+// AvailableEntry resolves the publication gate and selected inbound together.
+func (line VlessRouteLine) AvailableEntry(n *Node) (*RelayLine, bool) {
+	if n == nil || !n.Enabled || !strings.EqualFold(n.DesiredProtocol, "vless") ||
+		n.RouteState.Status != "applied" || !line.Enabled || line.Deleted {
+		return nil, false
+	}
+	return line.ResolveEntry(n)
+}
+
+// RouteBackendMatches is local metadata only; user credential confirmation is
+// a separate gate that must not be bypassed by a matching backend binding.
+func RouteBackendMatches(n *Node, panel *XUIPanel) bool {
+	return n != nil && panel != nil && NormalizePanelKind(panel.Kind) == PanelKind3XUI &&
+		n.RouteState.Binding == RouteBinding(panel.URL, n)
 }
 
 // NodeRouteState records an idempotent target before touching the remote API.

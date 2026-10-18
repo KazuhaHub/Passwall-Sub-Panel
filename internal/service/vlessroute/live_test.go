@@ -168,8 +168,8 @@ func TestLive_VlessRouteV2HTTPAndDataPlane(t *testing.T) {
 			f.waitCore(server.ID)
 			var state View
 			f.api("GET", fmt.Sprintf("/admin/nodes/%d/vless-route-lines", node.ID), nil, &state)
-			f.api("GET", fmt.Sprintf("/admin/nodes/%d/vless-route-outbounds", node.ID), nil, &struct {
-				Items []json.RawMessage `json:"items"`
+			f.api("GET", fmt.Sprintf("/admin/nodes/%d/vless-route-editor", node.ID), nil, &struct {
+				Outbounds []json.RawMessage `json:"outbounds"`
 			}{})
 			f.api("PUT", fmt.Sprintf("/admin/nodes/%d/vless-route-lines", node.ID), SaveRequest{Revision: state.State.Revision, Lines: []LineInput{{Name: "BLOCK", OutboundTag: f.block, Enabled: true}, {Name: "DIRECT", OutboundTag: f.direct, Enabled: true}}}, &state)
 			if state.State.Status != "applied" {

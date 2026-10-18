@@ -53,7 +53,7 @@ func (h *AdminRuleSetsHandler) routePreviewNodes(ctx context.Context, nodes []*d
 			panel, _ = h.routePanels.GetByID(ctx, node.PanelID)
 			panels[node.PanelID] = panel
 		}
-		if panel == nil || domain.NormalizePanelKind(panel.Kind) != domain.PanelKind3XUI || node.RouteState.Binding != domain.RouteBinding(panel.URL, node) {
+		if !domain.RouteBackendMatches(node, panel) {
 			copy := *node
 			copy.RouteState.Status = "drift"
 			copy.RouteState.Error = "unsupported_or_changed_binding"

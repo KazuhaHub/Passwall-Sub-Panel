@@ -55,7 +55,7 @@ func decodeRouteTemplate(obj json.RawMessage) (ports.RouteTemplate, error) {
 	}
 	result := ports.RouteTemplate{Config: wrapper.Config, TestURL: wrapper.TestURL, Outbounds: []ports.RouteOutbound{}}
 	seen := map[string]bool{}
-	add := func(tag, protocol, source string) error {
+	add := func(tag, protocol string) error {
 		if strings.TrimSpace(tag) == "" {
 			return nil
 		}
@@ -63,22 +63,22 @@ func decodeRouteTemplate(obj json.RawMessage) (ports.RouteTemplate, error) {
 			return errors.New("duplicate 3X-UI outbound tags")
 		}
 		seen[tag] = true
-		result.Outbounds = append(result.Outbounds, ports.RouteOutbound{Tag: tag, Protocol: protocol, Source: source})
+		result.Outbounds = append(result.Outbounds, ports.RouteOutbound{Tag: tag, Protocol: protocol})
 		return nil
 	}
 	for _, o := range template.Outbounds {
-		if err := add(o.Tag, o.Protocol, "template"); err != nil {
+		if err := add(o.Tag, o.Protocol); err != nil {
 			return ports.RouteTemplate{}, err
 		}
 	}
 	for _, o := range wrapper.Subscription {
-		if err := add(o.Tag, o.Protocol, "subscription"); err != nil {
+		if err := add(o.Tag, o.Protocol); err != nil {
 			return ports.RouteTemplate{}, err
 		}
 	}
 	for _, tag := range wrapper.SubscriptionTags {
 		if !seen[tag] {
-			if err := add(tag, "", "subscription"); err != nil {
+			if err := add(tag, ""); err != nil {
 				return ports.RouteTemplate{}, err
 			}
 		}

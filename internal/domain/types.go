@@ -603,7 +603,7 @@ type Node struct {
 	Relays []RelayLine
 	// RouteState is written only by the vlessRoute synchronization service.
 	RouteState NodeRouteState
-	// HideDirect suppresses the direct entry and derived routes that depend on it.
+	// HideDirect suppresses only the standalone direct subscription entry.
 	HideDirect bool
 	// ShowRelayStatus is retained for storage compatibility only. Relay status
 	// is automatic for enabled lines. RelayHealth remains health-worker-owned.

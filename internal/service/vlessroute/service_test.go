@@ -73,9 +73,18 @@ type testClient struct {
 	driftOnSecondRead bool
 	coreState         string
 	readError         bool
+	statusReads       int
+	inboundReads      int
+	statusFailureAt   int
+	afterRead         func()
+	afterInbounds     func()
 }
 
 func (c *testClient) GetServerStatus(context.Context) (*ports.ServerStatus, error) {
+	c.statusReads++
+	if c.statusFailureAt == c.statusReads {
+		return nil, errors.New("status unavailable")
+	}
 	state := c.coreState
 	if state == "" {
 		state = "running"
@@ -87,9 +96,13 @@ func (c *testClient) GetInbound(context.Context, int) (*ports.Inbound, error) {
 }
 
 func (c *testClient) ListInbounds(ctx context.Context) ([]ports.Inbound, error) {
+	c.inboundReads++
 	inbound, err := c.GetInbound(ctx, 1)
 	if err != nil {
 		return nil, err
+	}
+	if c.afterInbounds != nil {
+		c.afterInbounds()
 	}
 	return []ports.Inbound{*inbound}, nil
 }
@@ -100,6 +113,9 @@ func (c *testClient) ReadRouteTemplate(context.Context) (ports.RouteTemplate, er
 	}
 	if c.driftOnSecondRead && c.reads == 2 {
 		c.template.Config = json.RawMessage(`{"outbounds":[{"tag":"direct","protocol":"freedom"}],"routing":{"rules":[{"domain":["changed.example"],"outboundTag":"direct"}]}}`)
+	}
+	if c.afterRead != nil {
+		c.afterRead()
 	}
 	return c.template, nil
 }
@@ -162,7 +178,7 @@ func TestRoutingLinesKeepBackendProtocolAndCoreStateChecks(t *testing.T) {
 			}
 			if condition != "stopped_core" {
 				view, err := s.Get(context.Background(), 1)
-				if err != nil || view.Supported || view.Reason != "requires_3xui_vless" {
+				if err != nil || view.Supported {
 					t.Fatalf("unsupported node was offered routing lines: %+v %v", view, err)
 				}
 			}

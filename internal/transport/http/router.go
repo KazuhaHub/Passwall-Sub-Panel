@@ -467,7 +467,7 @@ func NewRouter(d Deps) stdhttp.Handler {
 	)
 	routeLines := handler.NewAdminVlessRouteHandler(d.VlessRoute)
 	staffGroup.GET("/nodes/:id/vless-route-lines", routeLines.Get)
-	adminGroup.GET("/nodes/:id/vless-route-outbounds", routeLines.Outbounds)
+	adminGroup.GET("/nodes/:id/vless-route-editor", routeLines.Editor)
 	adminGroup.PUT("/nodes/:id/vless-route-lines", routeLines.Save)
 	{
 		users := handler.NewAdminUserHandler(d.User, d.Repos.Settings, d.Mail, d.Async, twofaSvc, passkeySvc).

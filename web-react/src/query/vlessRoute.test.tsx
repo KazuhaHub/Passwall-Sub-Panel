@@ -1,18 +1,17 @@
 // @vitest-environment jsdom
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { beforeEach, expect, it, vi } from 'vitest'
-import { getRouteLines, getRouteOutbounds, saveRouteLines, type RouteLinesView } from '@/api/vlessRoute'
+import { getRouteLines, getRouteEditor, saveRouteLines, type RouteEditorView } from '@/api/vlessRoute'
 import { makeTestQueryClient, queryWrapper } from '@/test/queryTestUtils'
 import { useVlessRouteDraft } from './vlessRoute'
 import type { QueryScope } from './session'
 
-vi.mock('@/api/vlessRoute', async importOriginal => ({ ...await importOriginal<typeof import('@/api/vlessRoute')>(), getRouteLines: vi.fn(), getRouteOutbounds: vi.fn(), saveRouteLines: vi.fn() }))
+vi.mock('@/api/vlessRoute', async importOriginal => ({ ...await importOriginal<typeof import('@/api/vlessRoute')>(), getRouteLines: vi.fn(), getRouteEditor: vi.fn(), saveRouteLines: vi.fn() }))
 const scope: QueryScope = { apiBase: '/api', userId: 1, role: 'admin', authEpoch: 1 }
-const view = (): RouteLinesView => ({ node_id: 1, supported: true, warnings: [], state: { revision: 2, status: 'applied', lines: [{ id: 'stable', name: 'B', outbound_tag: 'direct', route: 1001, enabled: true }] } })
+const view = (): RouteEditorView => ({ node_id: 1, supported: true, outbounds: [{ tag: 'direct', protocol: 'freedom' }], warnings: [], state: { revision: 2, status: 'applied', lines: [{ id: 'stable', name: 'B', outbound_tag: 'direct', route: 1001, enabled: true }] } })
 beforeEach(() => {
   vi.clearAllMocks()
-  vi.mocked(getRouteLines).mockResolvedValue(view())
-  vi.mocked(getRouteOutbounds).mockResolvedValue([{ tag: 'direct', protocol: 'freedom', source: 'template' }])
+  vi.mocked(getRouteEditor).mockResolvedValue(view())
 })
 
 it('treats an omitted legacy option as false and detects display-only edits', async () => {
@@ -47,14 +46,14 @@ it('treats empty match fields like old data and preserves edited conditions acro
   expect(result.current.needsSave).toBe(false)
   act(() => result.current.setLines(previous => previous.map(line => ({ ...line, network: 'tcp', protocols: ['tls'], ip: ['192.0.2.0/24'], domain: ['domain:example.com'], port: '443' }))))
   const drift = view(); drift.state.status = 'drift'; drift.state.revision = 3
-  vi.mocked(getRouteLines).mockResolvedValue(drift)
+  vi.mocked(getRouteEditor).mockResolvedValue(drift)
   await act(async () => { await result.current.refresh() })
   expect(result.current.lines[0]).toMatchObject({ network: 'tcp', protocols: ['tls'], ip: ['192.0.2.0/24'], domain: ['domain:example.com'], port: '443' })
   expect(result.current.needsSave).toBe(true)
   expect(result.current.baseline?.state.revision).toBe(3)
   expect(result.current.conflict).toBe(false)
   const changed = view(); changed.state.revision = 4; changed.state.lines[0].port = '80'
-  vi.mocked(getRouteLines).mockResolvedValue(changed)
+  vi.mocked(getRouteEditor).mockResolvedValue(changed)
   await act(async () => { await result.current.refresh() })
   expect(result.current.conflict).toBe(true)
   expect(result.current.baseline?.state.revision).toBe(3)
@@ -67,11 +66,11 @@ it('rechecks status on every tab activation and preserves unsaved edits while ad
   await waitFor(() => expect(result.current.baseline).not.toBeNull())
   act(() => result.current.setLines(previous => previous.map(line => ({ ...line, name: 'edited' }))))
   const drift = view(); drift.state.status = 'drift'; drift.state.error = 'routing_or_outbound_changed'; drift.state.revision = 3
-  vi.mocked(getRouteLines).mockResolvedValue(drift)
+  vi.mocked(getRouteEditor).mockResolvedValue(drift)
   rerender({ active: false })
   rerender({ active: true })
   await waitFor(() => expect(result.current.baseline?.state.status).toBe('drift'))
-  expect(getRouteLines).toHaveBeenCalledTimes(2)
+  expect(getRouteEditor).toHaveBeenCalledTimes(2)
   expect(result.current.baseline?.state.revision).toBe(3)
   expect(result.current.lines[0].name).toBe('edited')
   expect(result.current.conflict).toBe(false)
@@ -85,8 +84,8 @@ it('refreshes both state and outbound catalog without issuing a save', async () 
   const { result } = renderHook(() => useVlessRouteDraft(scope, 1, 1, true), { wrapper: queryWrapper(client) })
   await waitFor(() => expect(result.current.baseline).not.toBeNull())
   const unknown = view(); unknown.state.status = 'unknown'; unknown.state.error = 'remote_check_unavailable'; unknown.state.revision = 3
-  vi.mocked(getRouteLines).mockResolvedValue(unknown)
-  vi.mocked(getRouteOutbounds).mockResolvedValue([{ tag: 'warp', protocol: 'socks', source: 'template' }])
+  vi.mocked(getRouteEditor).mockResolvedValue(unknown)
+  unknown.outbounds = [{ tag: 'warp', protocol: 'socks' }]
   await act(async () => { await result.current.refresh() })
   await waitFor(() => expect(result.current.baseline?.state.status).toBe('unknown'))
   expect(result.current.outbounds[0].tag).toBe('warp')
@@ -95,8 +94,8 @@ it('refreshes both state and outbound catalog without issuing a save', async () 
 
 it('keeps a verified drift status when the outbound catalog cannot be loaded', async () => {
   const drift = view(); drift.state.status = 'drift'; drift.state.error = 'unsupported_or_stopped_core'
-  vi.mocked(getRouteLines).mockResolvedValue(drift)
-  vi.mocked(getRouteOutbounds).mockRejectedValue(Object.assign(new Error('core stopped'), { isAxiosError: true, response: { status: 400 } }))
+  vi.mocked(getRouteEditor).mockResolvedValue(drift)
+  drift.outbounds = []; drift.outbounds_error = 'catalog_unavailable'
   const { result } = renderHook(() => useVlessRouteDraft(scope, 1, 1, true), { wrapper: queryWrapper(makeTestQueryClient()) })
   await waitFor(() => expect(result.current.baseline?.state.status).toBe('drift'))
   expect(result.current.baseline?.supported).toBe(true)
@@ -109,7 +108,7 @@ it('preserves the old CAS revision and blocks saving when another writer changes
   await waitFor(() => expect(result.current.baseline).not.toBeNull())
   act(() => result.current.setLines(previous => previous.map(line => ({ ...line, name: 'my-edit' }))))
   const changed = view(); changed.state.lines[0].name = 'another-admin'; changed.state.revision = 9
-  vi.mocked(getRouteLines).mockResolvedValue(changed)
+  vi.mocked(getRouteEditor).mockResolvedValue(changed)
   await act(async () => { await result.current.refresh() })
   await waitFor(() => expect(result.current.conflict).toBe(true))
   expect(result.current.lines[0].name).toBe('my-edit')
@@ -123,7 +122,7 @@ it('updates a clean draft after another writer changes its target', async () => 
   const { result } = renderHook(() => useVlessRouteDraft(scope, 1, 1, true), { wrapper: queryWrapper(client) })
   await waitFor(() => expect(result.current.baseline).not.toBeNull())
   const changed = view(); changed.state.lines[0].name = 'another-admin'; changed.state.revision = 9
-  vi.mocked(getRouteLines).mockResolvedValue(changed)
+  vi.mocked(getRouteEditor).mockResolvedValue(changed)
   await act(async () => { await result.current.refresh() })
   await waitFor(() => expect(result.current.lines[0].name).toBe('another-admin'))
   expect(result.current.baseline?.state.revision).toBe(9)
@@ -135,7 +134,7 @@ it('reports a failed refresh and retains the unsaved draft for a retry', async (
   const { result } = renderHook(() => useVlessRouteDraft(scope, 1, 1, true), { wrapper: queryWrapper(client) })
   await waitFor(() => expect(result.current.baseline).not.toBeNull())
   act(() => result.current.setLines(previous => previous.map(line => ({ ...line, name: 'edited' }))))
-  vi.mocked(getRouteLines).mockRejectedValue(new Error('unreachable'))
+  vi.mocked(getRouteEditor).mockRejectedValue(new Error('unreachable'))
   await act(async () => { await result.current.refresh() })
   await waitFor(() => expect(result.current.readError).toBe(true))
   expect(result.current.lines[0].name).toBe('edited')
@@ -194,7 +193,7 @@ it('does not discard edits when an ambiguous save readback advanced only the sta
 
 it('recognizes server-assigned IDs when reading back an ambiguous new-line save', async () => {
   const empty = view(); empty.state.lines = []
-  vi.mocked(getRouteLines).mockResolvedValue(empty)
+  vi.mocked(getRouteEditor).mockResolvedValue(empty)
   const client = makeTestQueryClient()
   const { result } = renderHook(() => useVlessRouteDraft(scope, 1, 1, true), { wrapper: queryWrapper(client) })
   await waitFor(() => expect(result.current.baseline).not.toBeNull())

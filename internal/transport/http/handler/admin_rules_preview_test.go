@@ -38,7 +38,7 @@ func (p *previewCompiler) PreviewMihomoGroup(_ context.Context, groupID int64, d
 	if p.err != nil {
 		return nil, p.err
 	}
-	return &render.GroupSubscriptionPreview{GroupID: groupID, RuleSet: draft.Slug, Status: "ready", Groups: []render.GroupSubscriptionPreviewGroup{{Name: "Pick", Members: []string{"only"}}}}, nil
+	return &render.GroupSubscriptionPreview{GroupID: groupID, Status: "ready", Groups: []render.GroupSubscriptionPreviewGroup{{Name: "Pick", Members: []string{"only"}}}}, nil
 }
 
 func TestAdminGroupPreviewDefaultsAndReadOnlyDraft(t *testing.T) {
@@ -48,7 +48,7 @@ func TestAdminGroupPreviewDefaultsAndReadOnlyDraft(t *testing.T) {
 			users := &previewAdminRepo{groupID: 71}
 			compiler := &previewCompiler{}
 			h := &AdminRuleSetsHandler{previewUsers: users, previewRenderer: compiler}
-			req := map[string]any{"original_slug": "saved", "draft": ruleSetDTO{Slug: "renamed", Enabled: true, Content: "- MATCH,Pick", ProxyGroupOrder: []string{"Pick"}, ProxyGroupMembers: map[string][]domain.ProxyGroupMember{"Pick": {{Kind: "builtin", Value: "DIRECT"}}}}}
+			req := map[string]any{"draft": ruleSetDTO{Slug: "renamed", Enabled: true, Content: "- MATCH,Pick", ProxyGroupOrder: []string{"Pick"}, ProxyGroupMembers: map[string][]domain.ProxyGroupMember{"Pick": {{Kind: "builtin", Value: "DIRECT"}}}}}
 			want := http.StatusOK
 			switch scenario {
 			case "explicit":
@@ -89,7 +89,7 @@ func TestAdminGroupPreviewDefaultsAndReadOnlyDraft(t *testing.T) {
 				if scenario == "explicit" {
 					expected = 98
 				}
-				if compiler.groupID != expected || compiler.draft.Slug != "saved" || len(compiler.draft.ProxyGroupOrder) != 1 {
+				if compiler.groupID != expected || compiler.draft.Slug != "renamed" || len(compiler.draft.ProxyGroupOrder) != 1 {
 					t.Fatalf("context not preserved: %+v", compiler)
 				}
 				if scenario == "explicit" && users.calls != 0 {

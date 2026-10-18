@@ -1,19 +1,10 @@
 // Browser-only fixture: every API request is intercepted; no live panel is used.
 import assert from 'node:assert/strict'
-import { mkdtemp } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { pathToFileURL } from 'node:url'
+import { mockBrowserFixture } from './browser-fixture.mjs'
 
-const base = process.env.PSP_GROUP_PREVIEW_URL || 'http://127.0.0.1:19881'
-assert.equal(base, 'http://127.0.0.1:19881')
-assert.ok(process.env.PLAYWRIGHT_MODULE, 'set PLAYWRIGHT_MODULE to the local playwright entry point')
-const { chromium } = await import(pathToFileURL(process.env.PLAYWRIGHT_MODULE).href)
-const browser = await chromium.launch({ headless: true })
-const context = await browser.newContext({ locale: 'zh-CN', viewport: { width: 1440, height: 1100 } })
-const output = await mkdtemp(join(tmpdir(), 'psp-group-preview-browser-'))
-const page = await context.newPage(), errors = [], writes = [], previews = []
-page.on('pageerror', e => errors.push(e.message))
+const { base, browser, context, page, errors, output } = await mockBrowserFixture('psp-group-preview-browser-', '/admin/rules')
+const writes = [], previews = []
 page.on('requestfailed', request => errors.push(`${request.url()}: ${request.failure()?.errorText}`))
 const draft = { slug: 'test', name: '预览验收', sort: 1, enabled: true, direct_subscription_domain: false,
   content: '- MATCH,Pick', proxy_group_order: ['Pick'], proxy_group_members: { Pick: [{ kind: 'line', node_id: 3, line_id: 'route' }] }, proxy_group_options: {}, mihomo_sub_rules: [], mihomo_rematch_outbounds: [] }
@@ -22,7 +13,7 @@ const groups = [{ id: 1, slug: 'first', name: '其他分组', tag_filter: { all:
 const envelope = items => ({ items, total: items.length, page: 1, page_size: 200 })
 const inspection = { groups: [{ name: 'Pick', configured: true, options_configured: false, options: { type: 'select' }, default_members: [], members: draft.proxy_group_members.Pick }], builtins: ['DIRECT'],
   nodes: [{ id: 3, display_name: '日本节点', region: 'JP', tags: [], enabled: true, server_address: 'fixture.invalid' }],
-  lines: [{ node_id: 3, line_id: 'route', kind: 'vless_route', name: '专线', display_name: '专线', enabled: true, available: true }], regions: ['JP'], tags: [], issues: [] }
+  lines: [{ node_id: 3, line_id: 'route', kind: 'vless_route', name: '专线', display_name: '专线', available: true }], regions: ['JP'], tags: [], issues: [] }
 let fail = false
 await context.route('**/api/**', async route => {
   const request = route.request(), path = new URL(request.url()).pathname
@@ -32,7 +23,7 @@ await context.route('**/api/**', async route => {
     const req = request.postDataJSON(); previews.push(req)
     if (fail) return route.fulfill({ status: 400, json: { error: 'fixture ambiguous line' } })
     const id = req.preview_group_id || 2
-    data = { group_id: id, rule_set: 'test', status: 'ready', groups: [{ name: 'Pick', members: id === 2 ? ['🇯🇵专线'] : ['🇯🇵专线 [中转:52787c21]', '🇯🇵专线 [中转:6b752549]', '🇯🇵专线 [VLESS 路由]'] }] }
+    data = { group_id: id, status: 'ready', groups: [{ name: 'Pick', members: id === 2 ? ['🇯🇵专线'] : ['🇯🇵专线 [中转:52787c21]', '🇯🇵专线 [中转:6b752549]', '🇯🇵专线 [VLESS 路由]'] }] }
   } else if (path.endsWith('/inspect-proxy-groups')) data = inspection
   else if (path.endsWith('/admin/rules')) data = envelope([draft])
   else if (path.endsWith('/admin/groups')) data = envelope(groups)
@@ -44,16 +35,6 @@ await context.route('**/api/**', async route => {
 })
 // The production Go host injects this base tag for deep SPA routes; Vite's
 // static preview host does not. Reproduce that host contract in the fixture.
-await context.route(`${base}/admin/rules`, async route => {
-  if (route.request().resourceType() !== 'document') return route.fallback()
-  const response = await route.fetch()
-  return route.fulfill({ response, body: (await response.text()).replace('<!-- PSP_PANEL_BASE -->', '<base href="/">') })
-})
-await context.addInitScript(() => {
-  localStorage.setItem('psp_access', 'browser-fixture-only')
-  localStorage.setItem('psp_user', JSON.stringify({ userId: 1, upn: 'fixture', displayName: 'Fixture', role: 'admin', authEpoch: 1 }))
-  localStorage.setItem('i18nextLng', 'zh-CN')
-})
 try {
   await page.goto(`${base}/admin/rules`)
   await page.getByRole('row').filter({ has: page.getByText('预览验收', { exact: true }) }).getByRole('button').first().click()

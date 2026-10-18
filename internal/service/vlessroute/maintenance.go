@@ -2,15 +2,14 @@ package vlessroute
 
 import (
 	"context"
-	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
-	"github.com/google/uuid"
 )
 
 // CheckAll performs only remote reads. A mismatch withdraws the affected
@@ -37,177 +36,208 @@ func (s *Service) CheckAll(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		if err := s.checkGroup(ctx, p, group, false); err != nil {
+		if _, err := s.checkGroup(ctx, p, group, false); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-// Refresh verifies one node against the remote template before returning its
-// latest local view. It never applies or repairs remote routing rules.
+// EditorView combines a verified node view and its read-only outbound catalog.
+type EditorView struct {
+	*View
+	Outbounds      []ports.RouteOutbound `json:"outbounds"`
+	OutboundsError string                `json:"outbounds_error,omitempty"`
+}
+
 func (s *Service) Refresh(ctx context.Context, id int64) (*View, error) {
-	view, err := s.Get(ctx, id)
-	if err != nil || !view.Supported {
-		return view, err
-	}
-	n, err := s.repos.Node.GetByID(ctx, id)
+	result, err := s.refresh(ctx, id, false)
 	if err != nil {
 		return nil, err
 	}
-	if len(n.RouteState.Lines) == 0 {
-		return view, nil
+	return result.View, nil
+}
+
+func (s *Service) RefreshEditor(ctx context.Context, id int64) (*EditorView, error) {
+	return s.refresh(ctx, id, true)
+}
+
+func (s *Service) refresh(ctx context.Context, id int64, catalog bool) (*EditorView, error) {
+	n, err := s.repos.Node.GetByID(ctx, id)
+	if err != nil {
+		return nil, err
 	}
 	p, err := s.repos.XUIPanel.GetByID(ctx, n.PanelID)
 	if err != nil {
 		return nil, err
 	}
-	if err := s.checkGroup(ctx, p, []*domain.Node{n}, true); err != nil {
+	result := &EditorView{View: s.nodeView(n, p), Outbounds: []ports.RouteOutbound{}}
+	if !result.Supported || len(n.RouteState.Lines) == 0 && !catalog {
+		return result, nil
+	}
+	checked, err := s.checkGroup(ctx, p, []*domain.Node{n}, true)
+	if err != nil {
 		return nil, err
 	}
-	return s.Get(ctx, id)
+	n = checked.nodes[id]
+	if n.PanelID != p.ID {
+		p, err = s.repos.XUIPanel.GetByID(ctx, n.PanelID)
+		if err != nil {
+			return nil, err
+		}
+		checked.catalogAvailable = false
+	} else {
+		p = checked.panel
+	}
+	result.View = s.nodeView(n, p)
+	if catalog && result.Supported {
+		if checked.catalogAvailable {
+			if checked.template.Outbounds != nil {
+				result.Outbounds = checked.template.Outbounds
+			}
+		} else {
+			result.OutboundsError = "catalog_unavailable"
+		}
+	}
+	return result, nil
 }
 
-func (s *Service) checkGroup(parent context.Context, p *domain.XUIPanel, nodes []*domain.Node, failIfBusy bool) error {
+type routeCheckResult struct {
+	nodes            map[int64]*domain.Node
+	panel            *domain.XUIPanel
+	template         ports.RouteTemplate
+	catalogAvailable bool
+}
+
+// The unlocked scan only chooses work. Each lease owns one remote snapshot and
+// one fresh registry; credentials from different panel records are not merged.
+func (s *Service) checkGroup(parent context.Context, p *domain.XUIPanel, nodes []*domain.Node, failIfBusy bool) (*routeCheckResult, error) {
 	ctx, cancel := context.WithTimeout(parent, 45*time.Second)
 	defer cancel()
-	backend := fmt.Sprintf("%x", sha256.Sum256([]byte(strings.TrimRight(p.URL, "/"))))
-	owner := uuid.NewString()
-	acquired, err := s.repos.NodeRoute.AcquireRouteLease(ctx, backend, owner, time.Now().UTC().Add(90*time.Second))
-	if err != nil {
-		return err
+	release, acquired, err := s.acquireBackendLease(ctx, p.URL, failIfBusy)
+	if err != nil || !acquired {
+		return nil, err
 	}
-	if !acquired {
-		if failIfBusy {
-			return fmt.Errorf("%w: another routing operation is running; retry refresh", domain.ErrConflict)
-		}
-		return nil
-	}
-	defer func() {
-		releaseCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		defer cancel()
-		_ = s.repos.NodeRoute.ReleaseRouteLease(releaseCtx, backend, owner)
-	}()
-	c, poolErr := s.pool.Get(p.ID)
+	defer release()
+	c, readErr := s.pool.Get(p.ID)
 	adapter, ok := c.(ports.VlessRouteAdapter)
-	var template ports.RouteTemplate
-	var inbounds []ports.Inbound
-	var status *ports.ServerStatus
-	readErr := poolErr
 	if readErr == nil && !ok {
 		readErr = ports.ErrPanelCapabilityUnsupported
 	}
+	var status *ports.ServerStatus
+	result := &routeCheckResult{nodes: map[int64]*domain.Node{}}
 	if readErr == nil {
 		status, readErr = c.GetServerStatus(ctx)
 	}
 	if readErr == nil {
-		template, readErr = adapter.ReadRouteTemplate(ctx)
+		result.template, readErr = adapter.ReadRouteTemplate(ctx)
+		result.catalogAvailable = readErr == nil && status != nil && status.XrayState == "running"
 	}
-	if readErr == nil {
+	registry, err := s.backendNodes(ctx, p.URL)
+	if err != nil {
+		return nil, err
+	}
+	owned := map[string]bool{}
+	for _, n := range registry {
+		result.nodes[n.ID] = n
+		for _, line := range n.RouteState.Lines {
+			owned[RuleTag(n.ID, line.ID)] = true
+		}
+	}
+	needsInbounds := false
+	for _, snapshot := range nodes {
+		n := result.nodes[snapshot.ID]
+		if n == nil {
+			// Metadata edits can move nodes without taking the routing lease.
+			n, err = s.repos.Node.GetByID(ctx, snapshot.ID)
+			if err != nil {
+				return nil, err
+			}
+			result.nodes[n.ID] = n
+		}
+		needsInbounds = needsInbounds || len(n.RouteState.Lines) > 0
+	}
+	var inbounds []ports.Inbound
+	if readErr == nil && needsInbounds {
 		inbounds, readErr = c.ListInbounds(ctx)
 	}
 	actual := map[int]*ports.Inbound{}
 	for i := range inbounds {
 		actual[inbounds[i].ID] = &inbounds[i]
 	}
-	owned := map[string]bool{}
-	// Registered peers on the same backend also form part of the tail block.
-	peerTags, err := s.peerRuleTags(ctx, 0, p.URL)
+	// Panel metadata can change during a slow remote read. Keep this protected
+	// re-read rather than confirming an old backend snapshot under a new URL.
+	result.panel, err = s.repos.XUIPanel.GetByID(ctx, p.ID)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	for _, tag := range peerTags {
-		owned[tag] = true
-	}
-	for _, snapshot := range nodes {
-		n, err := s.repos.Node.GetByID(ctx, snapshot.ID)
-		if err != nil {
-			return err
-		}
-		next := n.RouteState
-		next.Status = "applied"
-		next.Error = ""
-		if readErr != nil {
-			next.Status = "unknown"
-			next.Error = "remote_check_unavailable"
-		} else if status == nil || domain.NormalizePanelKind(p.Kind) != domain.PanelKind3XUI || status.XrayState != "running" {
-			next.Status = "drift"
-			next.Error = "unsupported_or_stopped_core"
-		} else if inbound := actual[n.InboundID]; n.PanelID != p.ID || inbound == nil || inbound.Protocol != "vless" || inbound.Port != n.DesiredPort || n.RouteState.Binding != domain.RouteBinding(p.URL, n) {
-			next.Status = "drift"
-			next.Error = "inbound_binding_changed"
-		} else if !matchesNodeRules(template, n, inbound, owned) {
-			next.Status = "drift"
-			next.Error = "routing_or_outbound_changed"
-		}
-		if next.Status == n.RouteState.Status && next.Error == n.RouteState.Error {
-			continue
-		}
-		if err := s.store(ctx, n, &next); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func matchesNodeRules(template ports.RouteTemplate, n *domain.Node, inbound *ports.Inbound, allOwned map[string]bool) bool {
-	compiled, _, err := Compile(template, n.ID, inbound.Tag, n.RouteState.Lines, n.RouteState.Lines)
-	if err != nil {
-		return false
-	}
-	readRules := func(config json.RawMessage) ([]json.RawMessage, bool) {
-		var root struct {
-			Routing struct {
-				Rules []json.RawMessage `json:"rules"`
-			} `json:"routing"`
-		}
-		err := json.Unmarshal(config, &root)
-		return root.Routing.Rules, err == nil
-	}
-	actual, ok := readRules(template.Config)
-	if !ok {
-		return false
-	}
-	expected, ok := readRules(compiled.Config)
-	if !ok {
-		return false
-	}
-	mine := map[string]bool{}
-	for _, line := range n.RouteState.Lines {
-		mine[RuleTag(n.ID, line.ID)] = true
-	}
-	selectMine := func(rules []json.RawMessage) ([]json.RawMessage, bool) {
-		result := []json.RawMessage{}
+	backendUnchanged := strings.TrimRight(result.panel.URL, "/") == strings.TrimRight(p.URL, "/") &&
+		domain.NormalizePanelKind(result.panel.Kind) == domain.PanelKind3XUI
+	result.catalogAvailable = result.catalogAvailable && backendUnchanged
+	parsed, _ := parseRouteTemplate(result.template)
+	tailValid := true
+	if parsed != nil {
 		tail := false
-		for _, raw := range rules {
-			var rule struct {
-				Tag string `json:"ruleTag"`
-			}
-			if json.Unmarshal(raw, &rule) != nil {
-				return nil, false
-			}
-			if allOwned[rule.Tag] {
+		for _, rule := range parsed.rules {
+			if owned[rule.tag] {
 				tail = true
 			} else if tail {
-				return nil, false
-			}
-			if mine[rule.Tag] {
-				result = append(result, raw)
+				tailValid = false
 			}
 		}
-		return result, true
 	}
-	left, leftOK := selectMine(actual)
-	right, rightOK := selectMine(expected)
-	if !leftOK || !rightOK || len(left) != len(right) {
+	for _, snapshot := range nodes {
+		// Ordinary node metadata edits do not take the routing lease. Re-read
+		// after remote I/O so an old inbound cannot confirm a changed binding.
+		n, err := s.repos.Node.GetByID(ctx, snapshot.ID)
+		if err != nil {
+			return nil, err
+		}
+		result.nodes[n.ID] = n
+		if len(n.RouteState.Lines) == 0 {
+			continue
+		}
+		next := n.RouteState
+		next.Status, next.Error = "applied", ""
+		if readErr != nil {
+			next.Status, next.Error = "unknown", "remote_check_unavailable"
+		} else if status == nil || domain.NormalizePanelKind(p.Kind) != domain.PanelKind3XUI || status.XrayState != "running" {
+			next.Status, next.Error = "drift", "unsupported_or_stopped_core"
+		} else if inbound := actual[n.InboundID]; !backendUnchanged || n.PanelID != p.ID || inbound == nil || inbound.Protocol != "vless" || inbound.Port != n.DesiredPort || !domain.RouteBackendMatches(n, result.panel) {
+			next.Status, next.Error = "drift", "inbound_binding_changed"
+		} else if !tailValid || !matchesNodeRules(parsed, n, inbound) {
+			next.Status, next.Error = "drift", "routing_or_outbound_changed"
+		}
+		if next.Status != n.RouteState.Status || next.Error != n.RouteState.Error {
+			if err := s.store(ctx, n, &next); err != nil {
+				return nil, err
+			}
+		}
+	}
+	return result, nil
+}
+
+func matchesNodeRules(snapshot *routeTemplateSnapshot, n *domain.Node, inbound *ports.Inbound) bool {
+	if snapshot == nil {
 		return false
 	}
-	for i := range left {
-		if !sameConfig(left[i], right[i]) {
+	expected, err := compileDesiredRules(n.ID, inbound.Tag, n.RouteState.Lines, snapshot.outbounds)
+	if err != nil {
+		return false
+	}
+	positions := []int{}
+	for _, line := range n.RouteState.Lines {
+		positions = append(positions, snapshot.rulePositions[RuleTag(n.ID, line.ID)]...)
+	}
+	if len(positions) != len(expected) {
+		return false
+	}
+	sort.Ints(positions)
+	for index, position := range positions {
+		if !sameConfig(snapshot.rules[position].raw, expected[index]) {
 			return false
 		}
 	}
-	// An original client UUID must not already carry an allocated route value.
 	var settings struct {
 		Clients []struct {
 			ID string `json:"id"`
@@ -247,20 +277,11 @@ func (s *Service) RemoveForNode(parent context.Context, id int64) error {
 	if err != nil {
 		return err
 	}
-	backend := fmt.Sprintf("%x", sha256.Sum256([]byte(strings.TrimRight(p.URL, "/"))))
-	owner := uuid.NewString()
-	acquired, err := s.repos.NodeRoute.AcquireRouteLease(ctx, backend, owner, time.Now().UTC().Add(90*time.Second))
+	release, _, err := s.acquireBackendLease(ctx, p.URL, true)
 	if err != nil {
 		return err
 	}
-	if !acquired {
-		return fmt.Errorf("%w: another routing update is running", domain.ErrConflict)
-	}
-	defer func() {
-		releaseCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		defer cancel()
-		_ = s.repos.NodeRoute.ReleaseRouteLease(releaseCtx, backend, owner)
-	}()
+	defer release()
 	n, err = s.repos.Node.GetByID(ctx, id)
 	if err != nil {
 		return err

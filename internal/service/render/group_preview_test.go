@@ -269,7 +269,7 @@ func TestGroupPreviewNeedsNoExternalTemplateOrRuleRepository(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.RuleSet != rule.Slug || len(got.Groups) != 1 || !reflect.DeepEqual(got.Groups[0].Members, []string{"same"}) {
+	if len(got.Groups) != 1 || !reflect.DeepEqual(got.Groups[0].Members, []string{"same"}) {
 		t.Fatalf("external dependencies influenced standalone preview: %+v", got)
 	}
 }

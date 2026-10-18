@@ -1745,9 +1745,6 @@
       "kind_builtin_hint": "加入 DIRECT、REJECT 等客户端内置出站，不关联服务器节点或线路。",
       "kind_proxy_group_hint": "引用当前规则集中的其他代理组，不复制其成员配置；不能引用自身或形成循环引用。",
       "kind_rematch_hint": "引用主规则中已配置的 Rematch 出站，仅用于 Mihomo 订阅；sing-box 订阅会跳过此成员。",
-      "line_direct": "直连线路",
-      "line_relay": "中转线路",
-      "line_vless_route": "VLESS 路由线路",
       "select_line_node": "节点",
       "select_line": "线路",
       "line_type_direct": "直连线路",
@@ -1874,13 +1871,16 @@
       "entry_direct": "直连",
       "entry_missing": "已删除的中转线路",
       "entry_unavailable": "所选中转线路已停用或删除，该路由线路暂不启用和发布。",
-      "entry_unsaved": "保存后可选",
       "entry_unsaved_hint": "新增中转线路需先保存节点，再选择为线路入站。",
       "unknown_protocol": "未知协议",
       "missing_outbound": "当前未找到",
       "partial_failure": "节点资料已保存，但路由同步尚未确认；编辑器保持打开，请检查状态后重试。",
       "state_applied": "路由已回读确认；实际流量仍需测试。",
       "error_code": "错误标识：",
+      "warnings": {
+        "earlier_route_priority": "前面的路由规则优先，请检查是否存在重叠。",
+        "earlier_broad_rule": "前面的宽泛路由规则可能使本线路无法命中。"
+      },
       "match": {
         "title": "高级路由规则",
         "network": "网络",

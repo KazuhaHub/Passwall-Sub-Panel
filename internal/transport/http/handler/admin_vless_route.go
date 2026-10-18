@@ -37,17 +37,17 @@ func (h *AdminVlessRouteHandler) Get(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, view)
 }
-func (h *AdminVlessRouteHandler) Outbounds(c *gin.Context) {
+func (h *AdminVlessRouteHandler) Editor(c *gin.Context) {
 	id, ok := h.id(c)
 	if !ok {
 		return
 	}
-	outbounds, err := h.service.Outbounds(c.Request.Context(), id)
+	view, err := h.service.RefreshEditor(c.Request.Context(), id)
 	if err != nil {
 		respondError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"items": outbounds})
+	c.JSON(http.StatusOK, view)
 }
 func (h *AdminVlessRouteHandler) Save(c *gin.Context) {
 	id, ok := h.id(c)

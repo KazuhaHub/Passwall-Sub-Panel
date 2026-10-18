@@ -14,12 +14,15 @@ func TestRouteTemplateReadOnlyCatalogAndWrapperForms(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(got.Outbounds) != 2 || got.Outbounds[0].Tag != "remote" || got.Outbounds[0].Source != "subscription" || got.TestURL != "https://example.test" {
+		if len(got.Outbounds) != 2 || got.Outbounds[0].Tag != "remote" || got.TestURL != "https://example.test" {
 			t.Fatalf("bad metadata: %+v", got.Outbounds)
 		}
 		public, _ := json.Marshal(got.Outbounds)
 		if strings.Contains(string(public), "secret") || strings.Contains(string(public), "credential") {
 			t.Fatal("catalog leaked outbound settings")
+		}
+		if strings.Contains(string(public), `"source"`) {
+			t.Fatal("unused outbound source leaked into the public catalog")
 		}
 		if !strings.Contains(string(got.Config), "9007199254740993") {
 			t.Fatal("unknown numeric data lost precision")

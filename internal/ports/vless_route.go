@@ -13,7 +13,6 @@ import (
 type RouteOutbound struct {
 	Tag      string `json:"tag"`
 	Protocol string `json:"protocol"`
-	Source   string `json:"source"`
 }
 
 type RouteTemplate struct {

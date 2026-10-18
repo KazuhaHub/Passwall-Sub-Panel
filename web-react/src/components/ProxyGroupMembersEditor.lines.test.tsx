@@ -12,10 +12,10 @@ const inspection: ProxyGroupInspection = {
   groups: [{ name: 'Pick', configured: true, options_configured: false, options: { type: 'select' }, default_members: [], members: initialMembers.Pick }],
   builtins: ['DIRECT'], nodes: [node(1, 'Alpha'), node(2, 'Beta')], regions: [], tags: [], issues: [],
   lines: [
-    { node_id: 1, line_id: 'direct', kind: 'direct', name: 'Alpha', display_name: 'Alpha', enabled: true, available: true },
-    { node_id: 1, line_id: 'relay-a', kind: 'relay', name: 'my-relay-line', display_name: 'Alpha my-relay-line', enabled: true, available: true },
-    { node_id: 1, line_id: 'route-a', kind: 'vless_route', name: 'my-vlessroute-line', display_name: 'Alpha my-vlessroute-line', enabled: true, available: true },
-    { node_id: 2, line_id: 'relay-b', kind: 'relay', name: 'beta-only', display_name: 'Beta beta-only', enabled: true, available: false },
+    { node_id: 1, line_id: 'direct', kind: 'direct', name: 'Alpha', display_name: 'Alpha', available: true },
+    { node_id: 1, line_id: 'relay-a', kind: 'relay', name: 'my-relay-line', display_name: 'Alpha my-relay-line', available: true },
+    { node_id: 1, line_id: 'route-a', kind: 'vless_route', name: 'my-vlessroute-line', display_name: 'Alpha my-vlessroute-line', available: true },
+    { node_id: 2, line_id: 'relay-b', kind: 'relay', name: 'beta-only', display_name: 'Beta beta-only', available: false },
   ],
 }
 

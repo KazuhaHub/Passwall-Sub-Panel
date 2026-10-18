@@ -544,7 +544,6 @@ export default function RuleSetsView() {
                 onOptionsChange={proxy_group_options => setForm(current => ({ ...current, proxy_group_options }))}
                 previewGroups={groups}
                 draft={form}
-                originalSlug={editing ? form.slug : undefined}
                 mihomoSubRules={form.mihomo_sub_rules}
                 mihomoRematchOutbounds={form.mihomo_rematch_outbounds}
               />

@@ -4,6 +4,7 @@ import (
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
+	"io"
 	"sort"
 	"strings"
 
@@ -17,7 +18,6 @@ type subscriptionLineName struct {
 	nodeID int64
 	lineID string
 	base   string
-	legacy string
 	kind   string
 	token  string
 }
@@ -33,15 +33,6 @@ type lineNameCatalog struct {
 
 func newLineNameCatalog(items []renderItem, flags bool, nodes ...[]*domain.Node) (*lineNameCatalog, []renderItem) {
 	catalog := &lineNameCatalog{lines: map[string]subscriptionLineName{}, aliases: map[string][]string{}}
-	bases := append([]renderItem(nil), items...)
-	for i := range bases {
-		if bases[i].baseName != "" {
-			bases[i].name = bases[i].baseName
-		}
-	}
-	if flags {
-		applyRegionFlagPrefix(bases) // Reuse, do not reimplement, the flag policy.
-	}
 	internal := append([]renderItem(nil), items...)
 	prefix := "psp-line-" + uuid.NewString() + "-"
 	catalog.probe = prefix + "probe"
@@ -50,7 +41,7 @@ func newLineNameCatalog(items []renderItem, flags bool, nodes ...[]*domain.Node)
 			continue
 		}
 		token := fmt.Sprintf("%s%d:%s", prefix, item.node.ID, item.lineID())
-		line := subscriptionLineName{nodeID: item.node.ID, lineID: item.lineID(), base: bases[i].name, legacy: item.name, kind: subscriptionLineKind(item), token: token}
+		line := subscriptionLineName{nodeID: item.node.ID, lineID: item.lineID(), base: item.name, kind: subscriptionLineKind(item), token: token}
 		catalog.add(line)
 		internal[i].name = token
 	}
@@ -74,7 +65,7 @@ func newLineNameCatalog(items []renderItem, flags bool, nodes ...[]*domain.Node)
 			for _, definition := range definitions {
 				token := fmt.Sprintf("%s%d:%s", prefix, node.ID, definition.lineID())
 				if _, exists := catalog.lines[token]; !exists {
-					catalog.add(subscriptionLineName{nodeID: node.ID, lineID: definition.lineID(), base: definition.name, legacy: definition.name, kind: subscriptionLineKind(definition), token: token})
+					catalog.add(subscriptionLineName{nodeID: node.ID, lineID: definition.lineID(), base: definition.name, kind: subscriptionLineKind(definition), token: token})
 				}
 			}
 		}
@@ -112,7 +103,7 @@ func (line subscriptionLineName) shortName(length int) string {
 
 func (c *lineNameCatalog) add(line subscriptionLineName) {
 	c.lines[line.token] = line
-	aliases := []string{line.base, line.legacy, fmt.Sprintf("%s [%d:%s]", line.base, line.nodeID, line.lineID), line.typedName()}
+	aliases := []string{line.base, fmt.Sprintf("%s [%d:%s]", line.base, line.nodeID, line.lineID), line.typedName()}
 	// Reconstruct new public names as aliases too, even when the current final
 	// set no longer needs a suffix. Ambiguous aliases still fail closed.
 	id := line.shortIdentity()
@@ -137,7 +128,7 @@ func (c *lineNameCatalog) resolve(name string, fixed, available map[string]bool)
 	}
 	if _, internal := c.lines[name]; internal {
 		if !available[name] {
-			return "", fmt.Errorf("unavailable subscription line %q", c.lines[name].legacy)
+			return "", fmt.Errorf("unavailable subscription line %q", c.lines[name].base)
 		}
 		return name, nil
 	}
@@ -431,11 +422,50 @@ func (c *lineNameCatalog) singBoxNames(config map[string]any) (map[string]bool, 
 	return fixed, available
 }
 
-func (c *lineNameCatalog) bindMihomo(body string) (string, error) {
+// finishMihomo keeps the formal document in one tree across all phases.
+func (c *lineNameCatalog) finishMihomo(body string, generated map[string]bool, origin string) (string, error) {
 	document, err := parseMihomoSubscription(body)
 	if err != nil {
 		return "", err
 	}
+	if err := c.bindMihomo(document); err != nil {
+		return "", err
+	}
+	if err := pruneMihomoDocument(document, generated, origin); err != nil {
+		return "", err
+	}
+	if err := c.finalizeMihomo(document); err != nil {
+		return "", err
+	}
+	if err := validateMihomoDocument(document); err != nil {
+		return "", err
+	}
+	raw, err := yaml.Marshal(document)
+	return string(raw), err
+}
+
+func (c *lineNameCatalog) finishSingBox(body string, generated map[string]bool, origin string) (string, error) {
+	config, err := parseSingBoxSubscription(body)
+	if err != nil {
+		return "", err
+	}
+	if err := c.bindSingBox(config); err != nil {
+		return "", err
+	}
+	if err := pruneSingBoxDocument(config, generated, origin); err != nil {
+		return "", err
+	}
+	if err := c.finalizeSingBox(config); err != nil {
+		return "", err
+	}
+	if err := validateSingBoxDocument(config); err != nil {
+		return "", err
+	}
+	raw, err := json.MarshalIndent(config, "", "  ")
+	return string(raw), err
+}
+
+func (c *lineNameCatalog) bindMihomo(document *yaml.Node) error {
 	for key, kind := range map[string]yaml.Kind{"proxy-groups": yaml.SequenceNode, "sub-rules": yaml.MappingNode} {
 		if field := referenceField(document.Content[0], key); field != nil && field.Tag == "!!null" {
 			field.Kind, field.Value = kind, ""
@@ -447,40 +477,27 @@ func (c *lineNameCatalog) bindMihomo(body string) (string, error) {
 	}
 	fixed, available, err := c.mihomoNames(document)
 	if err != nil {
-		return "", err
+		return err
 	}
-	err = transformMihomoReferences(document.Content[0], func(_ string, name string, _ bool) (string, error) { return c.resolve(name, fixed, available) })
-	if err != nil {
-		return "", err
-	}
-	raw, err := yaml.Marshal(document)
-	return string(raw), err
+	return transformMihomoReferences(document.Content[0], func(_ string, name string, _ bool) (string, error) {
+		return c.resolve(name, fixed, available)
+	})
 }
 
-func (c *lineNameCatalog) bindSingBox(body string) (string, error) {
-	config, err := parseSingBoxSubscription(body)
-	if err != nil {
-		return "", err
-	}
+func (c *lineNameCatalog) bindSingBox(config map[string]any) error {
 	fixed, available := c.singBoxNames(config)
-	if err := transformSingBoxReferences(config, func(_ string, name string, _ bool) (string, error) { return c.resolve(name, fixed, available) }); err != nil {
-		return "", err
-	}
-	raw, err := json.MarshalIndent(config, "", "  ")
-	return string(raw), err
+	return transformSingBoxReferences(config, func(_ string, name string, _ bool) (string, error) {
+		return c.resolve(name, fixed, available)
+	})
 }
 
-func (c *lineNameCatalog) finalizeMihomo(body string) (string, error) {
-	document, err := parseMihomoSubscription(body)
-	if err != nil {
-		return "", err
-	}
+func (c *lineNameCatalog) finalizeMihomo(document *yaml.Node) error {
 	fixed, kept, err := c.mihomoNames(document)
 	if err != nil {
-		return "", err
+		return err
 	}
 	if err := c.validateBases(kept); err != nil {
-		return "", err
+		return err
 	}
 	names := c.allocate(kept, fixed)
 	if err := transformMihomoReferences(document.Content[0], func(_ string, name string, _ bool) (string, error) {
@@ -489,7 +506,7 @@ func (c *lineNameCatalog) finalizeMihomo(body string) (string, error) {
 		}
 		return name, nil
 	}); err != nil {
-		return "", err
+		return err
 	}
 	proxies, _ := referenceSequence(referenceField(document.Content[0], "proxies"))
 	for _, proxy := range proxies {
@@ -499,22 +516,13 @@ func (c *lineNameCatalog) finalizeMihomo(body string) (string, error) {
 		}
 	}
 	c.expandPrivateYAMLValues(document, names)
-	raw, err := yaml.Marshal(document)
-	if err != nil {
-		return "", err
-	}
-	// Validate names and references again without treating any output as owned.
-	return pruneMihomoLines(string(raw), nil)
+	return nil
 }
 
-func (c *lineNameCatalog) finalizeSingBox(body string) (string, error) {
-	config, err := parseSingBoxSubscription(body)
-	if err != nil {
-		return "", err
-	}
+func (c *lineNameCatalog) finalizeSingBox(config map[string]any) error {
 	fixed, kept := c.singBoxNames(config)
 	if err := c.validateBases(kept); err != nil {
-		return "", err
+		return err
 	}
 	names := c.allocate(kept, fixed)
 	if err := transformSingBoxReferences(config, func(_ string, name string, _ bool) (string, error) {
@@ -523,22 +531,18 @@ func (c *lineNameCatalog) finalizeSingBox(body string) (string, error) {
 		}
 		return name, nil
 	}); err != nil {
-		return "", err
+		return err
 	}
 	outbounds, _ := config["outbounds"].([]any)
 	for _, value := range outbounds {
-		outbound, _ := value.(map[string]any)
+		outbound := value.(map[string]any)
 		tag, _ := outbound["tag"].(string)
 		if final, ok := names[tag]; ok {
 			outbound["tag"] = final
 		}
 	}
 	c.expandPrivateJSONValues(config, names)
-	raw, err := json.MarshalIndent(config, "", "  ")
-	if err != nil {
-		return "", err
-	}
-	return pruneSingBoxLines(string(raw), nil)
+	return nil
 }
 
 func (c *lineNameCatalog) validateBases(kept map[string]bool) error {
@@ -625,6 +629,9 @@ func parseSingBoxSubscription(body string) (map[string]any, error) {
 	decoder.UseNumber()
 	if err := decoder.Decode(&config); err != nil {
 		return nil, err
+	}
+	if err := decoder.Decode(new(any)); err != io.EOF {
+		return nil, fmt.Errorf("subscription JSON must contain exactly one object")
 	}
 	if config == nil {
 		return nil, fmt.Errorf("subscription JSON must be an object")

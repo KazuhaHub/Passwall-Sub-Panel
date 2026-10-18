@@ -78,7 +78,7 @@ export interface ProxyGroupInspection {
   groups: ProxyGroupInspectGroup[]
   builtins: string[]
   nodes: ProxyGroupInspectNode[]
-  lines?: ProxyGroupInspectLine[]
+  lines: ProxyGroupInspectLine[]
   regions: string[]
   tags: string[]
   issues: ProxyGroupIssue[]
@@ -88,11 +88,9 @@ export interface ProxyGroupInspectLine {
   node_id: number
   line_id: string
   kind: 'direct' | 'relay' | 'vless_route'
-  name?: string
+  name: string
   display_name: string
-  enabled: boolean
   available: boolean
-  reason?: string
 }
 
 export interface RuleSetListParams {
@@ -132,12 +130,11 @@ export async function inspectProxyGroups(req: {
 
 export interface GroupSubscriptionPreview {
   group_id: number
-  rule_set: string
   status: 'ready' | 'disabled'
   groups: { name: string; type?: string; members: string[] }[]
 }
 
-export async function previewProxyGroups(req: { preview_group_id?: number; original_slug?: string; draft: RuleSet }, signal?: AbortSignal) {
+export async function previewProxyGroups(req: { preview_group_id?: number; draft: RuleSet }, signal?: AbortSignal) {
   const { data } = await client.post<GroupSubscriptionPreview>('/admin/rules/preview-proxy-groups', req, { signal, _skipErrorToast: true })
   return data
 }

@@ -1,27 +1,19 @@
 // All API traffic is mocked: this fixture never writes to a live PSP or panel.
 import assert from 'node:assert/strict'
-import { mkdtemp } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { pathToFileURL } from 'node:url'
+import { mockBrowserFixture } from './browser-fixture.mjs'
 
-const base = 'http://127.0.0.1:19881'
-assert.ok(process.env.PLAYWRIGHT_MODULE, 'set PLAYWRIGHT_MODULE to a local playwright entry point')
-const { chromium } = await import(pathToFileURL(process.env.PLAYWRIGHT_MODULE).href)
-const browser = await chromium.launch({ headless: true })
-const context = await browser.newContext({ locale: 'zh-CN', viewport: { width: 1440, height: 1100 } })
-const output = await mkdtemp(join(tmpdir(), 'psp-line-inbound-browser-'))
-const page = await context.newPage(), errors = [], writes = []
-page.on('pageerror', error => errors.push(error.message))
+const { base, browser, context, page, errors, output } = await mockBrowserFixture('psp-line-inbound-browser-', '/admin/nodes')
+const writes = []
 const envelope = items => ({ items, total: items.length, page: 1, page_size: 200 })
 const node = { id: 1, panel_id: 1, inbound_id: 1, panel_name: 'Fixture', display_name: '入站解耦验收', server_address: 'fixture.invalid', region: 'JP', tags: [], sort_order: 0, enabled: true, protocol: 'vless', desired_protocol: 'vless', desired_port: 443, observed_protocol: 'vless', observed_port: 443, endpoint_in_sync: true, flow: '', relays: [], hide_direct: true, cert_source: 'manual', cert_id: 0 }
-const view = { node_id: 1, supported: true, state: { revision: 2, status: 'applied', lines: [{ id: 'route', route: 1001, name: '直连入站派生', outbound_tag: 'direct', enabled: true }] }, warnings: [] }
+const view = { node_id: 1, supported: true, state: { revision: 2, status: 'applied', lines: [{ id: 'route', route: 1001, name: '直连入站派生', outbound_tag: 'direct', enabled: true }] }, warnings: ['earlier_route_priority', 'earlier_broad_rule', 'future_warning'] }
 const defaults = {
   '/api/admin/servers': envelope([{ id: 1, name: 'Fixture', url: 'https://fixture.invalid', panel_type: '3xui', enabled: true, capabilities: ['inbound.read', 'inbound.update'] }]),
   '/api/admin/groups': envelope([]), '/api/admin/nodes/separator': envelope([]), '/api/admin/settings/ui': {},
   '/api/admin/certs': { certs: [] }, '/api/admin/dns-credentials': { credentials: [] }, '/api/admin/acme-accounts': { accounts: [] },
   '/api/admin/dns-providers': { providers: [] }, '/api/admin/acme-key-types': { key_types: ['EC256'] },
-  '/api/admin/nodes/1/vless-route-outbounds': { items: [{ tag: 'direct', protocol: 'freedom', source: 'template' }] },
+  '/api/admin/nodes/1/vless-route-editor': Object.assign(view, { outbounds: [{ tag: 'direct', protocol: 'freedom' }] }),
   '/api/version': { version: 'line-inbound-browser-fixture' }, '/api/i18n/langs': [],
 }
 await context.route('**/api/**', async route => {
@@ -40,16 +32,6 @@ await context.route('**/api/**', async route => {
   } else if (path.includes('/notifications')) data = { items: [], total: 0, unread: 0 }
   return route.fulfill({ json: data })
 })
-await context.route(`${base}/admin/nodes`, async route => {
-  if (route.request().resourceType() !== 'document') return route.fallback()
-  const response = await route.fetch()
-  return route.fulfill({ response, body: (await response.text()).replace('<!-- PSP_PANEL_BASE -->', '<base href="/">') })
-})
-await context.addInitScript(() => {
-  localStorage.setItem('psp_access', 'browser-fixture-only')
-  localStorage.setItem('psp_user', JSON.stringify({ userId: 1, upn: 'fixture', displayName: 'Fixture', role: 'admin', authEpoch: 1 }))
-  if (!localStorage.getItem('psp-lang')) localStorage.setItem('psp-lang', 'zh-CN')
-})
 const open = async () => {
   await page.getByRole('row').filter({ has: page.getByText('入站解耦验收', { exact: true }) }).getByRole('button').first().click()
   const dialog = page.getByRole('dialog')
@@ -61,6 +43,9 @@ const open = async () => {
 try {
   await page.goto(`${base}/admin/nodes`)
   let dialog = await open()
+  for (const text of ['前面的路由规则优先，请检查是否存在重叠。', '前面的宽泛路由规则可能使本线路无法命中。', 'future_warning']) {
+    assert.equal(await dialog.getByText(text, { exact: true }).count(), 1)
+  }
   let toggle = dialog.getByRole('switch', { name: '启用', exact: true })
   assert.equal(await toggle.isChecked(), true)
   await toggle.uncheck(); await toggle.check()
@@ -96,6 +81,9 @@ try {
   assert.equal(await dialog.getByRole('switch', { name: 'Hide direct line', exact: true }).isChecked(), true)
   await dialog.getByRole('tab', { name: 'VLESS routing lines', exact: true }).click()
   await dialog.getByRole('combobox', { name: 'Line inbound', exact: true }).waitFor()
+  for (const text of ['Earlier routing rules take priority; inspect overlaps.', 'Earlier broad routing rules may shadow this line.', 'future_warning']) {
+    assert.equal(await dialog.getByText(text, { exact: true }).count(), 1)
+  }
   assert.equal(await dialog.getByRole('combobox', { name: 'Line inbound', exact: true }).textContent(), 'Direct')
   assert.equal(await dialog.getByRole('combobox', { name: 'Line outbound', exact: true }).textContent(), 'direct [freedom]')
   assert.deepEqual(errors, [])

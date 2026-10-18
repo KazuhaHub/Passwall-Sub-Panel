@@ -61,9 +61,7 @@ type ProxyGroupInspectLine struct {
 	Kind        string `json:"kind"`
 	Name        string `json:"name"`
 	DisplayName string `json:"display_name"`
-	Enabled     bool   `json:"enabled"`
 	Available   bool   `json:"available"`
-	Reason      string `json:"reason,omitempty"`
 }
 
 func inspectNodeLines(nodes []*domain.Node) []ProxyGroupInspectLine {
@@ -72,11 +70,7 @@ func inspectNodeLines(nodes []*domain.Node) []ProxyGroupInspectLine {
 		if n == nil || n.IsSeparator() {
 			continue
 		}
-		reason := ""
-		if n.EffectiveHideDirect() {
-			reason = "hidden_direct"
-		}
-		lines = append(lines, ProxyGroupInspectLine{NodeID: n.ID, LineID: domain.DirectLineID, Kind: "direct", Name: n.DisplayName, DisplayName: n.DisplayName, Enabled: n.Enabled, Available: n.Enabled && reason == "", Reason: reason})
+		lines = append(lines, ProxyGroupInspectLine{NodeID: n.ID, LineID: domain.DirectLineID, Kind: "direct", Name: n.DisplayName, DisplayName: n.DisplayName, Available: n.Enabled && !n.EffectiveHideDirect()})
 		for _, r := range n.Relays {
 			if r.ID == "" {
 				continue
@@ -85,20 +79,13 @@ func inspectNodeLines(nodes []*domain.Node) []ProxyGroupInspectLine {
 			if name == "" {
 				name = r.Address
 			}
-			lines = append(lines, ProxyGroupInspectLine{NodeID: n.ID, LineID: r.ID, Kind: "relay", Name: name, DisplayName: relayEntryName(n.DisplayName, r), Enabled: r.Enabled, Available: n.Enabled && r.Enabled})
+			lines = append(lines, ProxyGroupInspectLine{NodeID: n.ID, LineID: r.ID, Kind: "relay", Name: name, DisplayName: relayEntryName(n.DisplayName, r), Available: n.Enabled && r.Enabled})
 		}
 		for _, line := range n.RouteState.Lines {
 			if line.Deleted {
 				continue
 			}
-			reason := ""
-			_, entryAvailable := line.ResolveEntry(n)
-			if !entryAvailable {
-				reason = "entry_unavailable"
-			} else if n.RouteState.Status != "applied" {
-				reason = n.RouteState.Status
-			}
-			lines = append(lines, ProxyGroupInspectLine{NodeID: n.ID, LineID: line.ID, Kind: "vless_route", Name: line.Label(), DisplayName: routeEntryName(n.DisplayName, line), Enabled: line.Enabled && entryAvailable, Available: line.LocallyAvailable(n), Reason: reason})
+			lines = append(lines, ProxyGroupInspectLine{NodeID: n.ID, LineID: line.ID, Kind: "vless_route", Name: line.Label(), DisplayName: routeEntryName(n.DisplayName, line), Available: line.LocallyAvailable(n)})
 		}
 	}
 	return lines
@@ -178,7 +165,8 @@ func InspectProxyGroups(content string, members map[string][]domain.ProxyGroupMe
 func InspectProxyGroupsWithMihomo(content string, members map[string][]domain.ProxyGroupMember, options map[string]domain.ProxyGroupOptions, nodes []*domain.Node, advanced MihomoRuleFeatures) ProxyGroupInspection {
 	advanced = NormalizeMihomoRuleFeatures(advanced)
 	targets := proxyGroupTargets(content, members, advanced)
-	issues := validateProxyGroupMembers(targets, members, nodes, advanced.outboundNames())
+	groupNames, outboundNames := proxyGroupNameSet(targets), advanced.outboundNames()
+	issues := validateProxyGroupMembers(targets, members, nodes, outboundNames)
 	issues = append(issues, validateProxyGroupOptions(targets, options)...)
 	issues = append(issues, inspectMihomoFeatures(content, advanced, targets, members, nodes)...)
 
@@ -227,7 +215,7 @@ func InspectProxyGroupsWithMihomo(content string, members map[string][]domain.Pr
 		isAutoType := effectiveOptions.Type == ProxyGroupTypeURLTest ||
 			effectiveOptions.Type == ProxyGroupTypeFallback ||
 			effectiveOptions.Type == ProxyGroupTypeLoadBalance
-		if isAutoType && membersContainNonTestableExit(availableProxyGroupMembers(effective, targets, advanced.outboundNames())) {
+		if isAutoType && membersContainNonTestableExit(availableProxyGroupMembers(effective, groupNames, outboundNames)) {
 			// A DIRECT/REJECT member turns an auto group into a no-op: DIRECT wins
 			// the health check in ~0ms (everything routes direct) and REJECT makes
 			// the check fail. Block it at save time so the misconfiguration surfaces
@@ -444,11 +432,7 @@ func membersContainNonTestableExit(members []domain.ProxyGroupMember) bool {
 
 // availableProxyGroupMembers filters dangling typed references without changing
 // persisted identities or rebinding them to an unrelated same-named object.
-func availableProxyGroupMembers(members []domain.ProxyGroupMember, groups []string, outbounds map[string]bool) []domain.ProxyGroupMember {
-	groupNames := make(map[string]bool, len(groups))
-	for _, name := range groups {
-		groupNames[name] = true
-	}
+func availableProxyGroupMembers(members []domain.ProxyGroupMember, groupNames, outbounds map[string]bool) []domain.ProxyGroupMember {
 	available := make([]domain.ProxyGroupMember, 0, len(members))
 	for _, member := range members {
 		switch member.Kind {
@@ -468,6 +452,14 @@ func availableProxyGroupMembers(members []domain.ProxyGroupMember, groups []stri
 		available = append(available, member)
 	}
 	return available
+}
+
+func proxyGroupNameSet(groups []string) map[string]bool {
+	names := make(map[string]bool, len(groups))
+	for _, name := range groups {
+		names[name] = true
+	}
+	return names
 }
 
 func memberLabel(member domain.ProxyGroupMember, nodes map[int64]*domain.Node) string {

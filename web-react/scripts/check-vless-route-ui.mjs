@@ -1,34 +1,12 @@
 // Real-browser acceptance against a dedicated local vlessRoute V2 fixture.
 // Never run against a production or the user's ordinary manual-test instance.
 import assert from 'node:assert/strict'
-import { mkdtemp } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { pathToFileURL } from 'node:url'
+import { liveBrowserFixture, loginLiveFixture } from './browser-fixture.mjs'
 
-const base = process.env.PSP_V2_PANEL_URL
-assert.equal(process.env.PSP_V2_UI_TEST, 'isolated-acceptance-fixture')
-const target = new URL(base)
-assert.equal(target.hostname, '127.0.0.1')
-assert.equal(target.protocol, 'http:')
-const password = process.env.PSP_V2_ADMIN_PASSWORD
-assert.ok(password)
-const build = await (await fetch(`${base}/api/version`)).json()
-assert.equal(build.version, 'vlessroute-v2-acceptance')
-const { chromium } = await import(pathToFileURL(process.env.PLAYWRIGHT_MODULE).href)
-const output = await mkdtemp(join(tmpdir(), 'psp-v2-ui-'))
-const browser = await chromium.launch({ headless: true })
-const context = await browser.newContext({ viewport: { width: 1440, height: 1000 }, locale: 'zh-CN' })
-const page = await context.newPage()
-const errors = []
-page.on('pageerror', error => errors.push(error.message))
+const { base, password, browser, context, page, errors, output } = await liveBrowserFixture('psp-vless-route-ui-')
 try {
-  await page.goto(`${base}/login`)
-  await page.getByRole('textbox').first().fill('admin')
-  await page.locator('input[type="password"]').fill(password)
-  await page.locator('button[type="submit"]').first().click()
-  await page.waitForURL(url => !url.pathname.includes('login'))
-  const token = await page.evaluate(() => localStorage.getItem('psp_access'))
+  const token = await loginLiveFixture({ page, base, password })
   const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }
   await page.goto(`${base}/admin/nodes`)
   const editNode = async (nodeName = 'A-false') => {

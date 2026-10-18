@@ -47,7 +47,7 @@ func TestVlessRouteEndpointsPreserveNodeReadAndAdminWriteGates(t *testing.T) {
 		for _, endpoint := range []struct {
 			method, path string
 			staffRead    bool
-		}{{"GET", "/api/admin/nodes/1/vless-route-lines", true}, {"GET", "/api/admin/nodes/1/vless-route-outbounds", false}, {"PUT", "/api/admin/nodes/1/vless-route-lines", false}} {
+		}{{"GET", "/api/admin/nodes/1/vless-route-lines", true}, {"GET", "/api/admin/nodes/1/vless-route-editor", false}, {"PUT", "/api/admin/nodes/1/vless-route-lines", false}} {
 			expected := stdhttp.StatusServiceUnavailable // Authorized requests reach the intentionally absent service.
 			if id == 0 {
 				expected = stdhttp.StatusUnauthorized
@@ -81,12 +81,14 @@ func TestVlessRouteWritesRespectRequiredSecondFactorEnrollment(t *testing.T) {
 		t.Fatal(err)
 	}
 	router := NewRouter(Deps{Cfg: &config.Config{ConfigDir: t.TempDir()}, Repos: ports.Repos{User: users, Settings: &dispatchSettingsRepo{}, ScopedSettings: vlessRouteScopedSettings{}}, Auth: authSvc, User: user.New(users, nil, nil, nil, nil, nil, nil, nil)})
-	req := httptest.NewRequest("PUT", "/api/admin/nodes/1/vless-route-lines", strings.NewReader(`{"revision":0,"lines":[]}`))
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
-	if w.Code != stdhttp.StatusForbidden || !strings.Contains(w.Body.String(), "2fa_enrollment_required") {
-		t.Fatalf("write bypassed enrollment gate: %d %s", w.Code, w.Body.String())
+	for _, endpoint := range []struct{ method, path string }{{"PUT", "/api/admin/nodes/1/vless-route-lines"}, {"GET", "/api/admin/nodes/1/vless-route-editor"}} {
+		req := httptest.NewRequest(endpoint.method, endpoint.path, strings.NewReader(`{"revision":0,"lines":[]}`))
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		if w.Code != stdhttp.StatusForbidden || !strings.Contains(w.Body.String(), "2fa_enrollment_required") {
+			t.Fatalf("write bypassed enrollment gate: %d %s", w.Code, w.Body.String())
+		}
 	}
 }

@@ -94,6 +94,7 @@ func TestLineOnlyNamingKeepsRelayFallbackAndUniqueIdentities(t *testing.T) {
 		RouteState: domain.NodeRouteState{Status: "applied", Lines: []domain.VlessRouteLine{{ID: "route", Name: "same", OnlyLineName: true, Enabled: true}}},
 	}
 	items := expandNodeLines([]renderItem{{node: n, name: "Parent"}})
+	applyLegacyLineNames(items)
 	if items[1].name == items[2].name || items[1].lineID() != "relay" || items[2].lineID() != "route" {
 		t.Fatal("line-only labels broke disambiguation or stable references")
 	}

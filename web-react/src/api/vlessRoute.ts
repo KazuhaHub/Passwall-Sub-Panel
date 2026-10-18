@@ -39,17 +39,21 @@ export interface RouteState {
 export interface RouteLinesView {
   node_id: number
   supported: boolean
-  reason?: string
   state: RouteState
   warnings: string[]
 }
-export interface RouteOutbound { tag: string; protocol: string; source: string }
+export interface RouteOutbound { tag: string; protocol: string }
+
+export interface RouteEditorView extends RouteLinesView {
+  outbounds: RouteOutbound[]
+  outbounds_error?: 'catalog_unavailable'
+}
 
 export async function getRouteLines(nodeId: number, signal?: AbortSignal): Promise<RouteLinesView> {
   return (await client.get<RouteLinesView>(`/admin/nodes/${nodeId}/vless-route-lines`, { signal })).data
 }
-export async function getRouteOutbounds(nodeId: number, signal?: AbortSignal): Promise<RouteOutbound[]> {
-  return (await client.get<{ items: RouteOutbound[] }>(`/admin/nodes/${nodeId}/vless-route-outbounds`, { signal })).data.items
+export async function getRouteEditor(nodeId: number, signal?: AbortSignal): Promise<RouteEditorView> {
+  return (await client.get<RouteEditorView>(`/admin/nodes/${nodeId}/vless-route-editor`, { signal })).data
 }
 export async function saveRouteLines(nodeId: number, revision: number, lines: VlessRouteLine[]): Promise<RouteLinesView> {
   return (await client.put<RouteLinesView>(`/admin/nodes/${nodeId}/vless-route-lines`, {

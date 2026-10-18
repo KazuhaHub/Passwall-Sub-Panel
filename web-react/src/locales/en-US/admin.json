@@ -1747,9 +1747,6 @@
       "kind_builtin_hint": "Adds a client built-in outbound such as DIRECT or REJECT, without referencing a server node or line.",
       "kind_proxy_group_hint": "References another proxy group in this rule set without copying its members. Self-references and circular references are not allowed.",
       "kind_rematch_hint": "References a Rematch outbound configured in the main rules, for Mihomo subscriptions only. sing-box subscriptions skip this member.",
-      "line_direct": "Direct line",
-      "line_relay": "Relay line",
-      "line_vless_route": "VLESS routing line",
       "select_line_node": "Node",
       "select_line": "Line",
       "line_type_direct": "Direct line",
@@ -1876,13 +1873,16 @@
       "entry_direct": "Direct",
       "entry_missing": "Deleted relay line",
       "entry_unavailable": "The selected relay line is disabled or deleted; this routing line is inactive and not published.",
-      "entry_unsaved": "Save first",
       "entry_unsaved_hint": "Save the node before selecting a newly added relay line as the line inbound.",
       "unknown_protocol": "unknown protocol",
       "missing_outbound": "Not currently found",
       "partial_failure": "Node metadata was saved, but routing is not confirmed. The editor remains open; check its status before retrying.",
       "state_applied": "Routing readback confirmed; actual traffic still needs testing.",
       "error_code": "Error code:",
+      "warnings": {
+        "earlier_route_priority": "Earlier routing rules take priority; inspect overlaps.",
+        "earlier_broad_rule": "Earlier broad routing rules may shadow this line."
+      },
       "match": {
         "title": "Advanced routing rules",
         "network": "Network",

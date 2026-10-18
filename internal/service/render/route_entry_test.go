@@ -140,7 +140,7 @@ func TestRoutesWithUnavailableEntriesStayWithdrawn(t *testing.T) {
 			t.Fatal("status page published an unavailable route")
 		}
 		catalog := inspectNodeLines([]*domain.Node{n})
-		if line := catalog[len(catalog)-1]; line.Available || line.Enabled || line.Reason != "entry_unavailable" {
+		if line := catalog[len(catalog)-1]; line.Available {
 			t.Fatalf("unavailable route was selectable: %+v", line)
 		}
 		for _, kind := range []string{"node", "line"} {

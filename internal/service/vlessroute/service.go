@@ -2,7 +2,6 @@ package vlessroute
 
 import (
 	"context"
-	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"reflect"
@@ -44,7 +43,6 @@ type SaveRequest struct {
 type View struct {
 	NodeID    int64                 `json:"node_id"`
 	Supported bool                  `json:"supported"`
-	Reason    string                `json:"reason,omitempty"`
 	State     domain.NodeRouteState `json:"state"`
 	Warnings  []string              `json:"warnings"`
 }
@@ -58,16 +56,17 @@ func (s *Service) Get(ctx context.Context, id int64) (*View, error) {
 	if err != nil {
 		return nil, err
 	}
+	return s.nodeView(n, p), nil
+}
+
+func (s *Service) nodeView(n *domain.Node, p *domain.XUIPanel) *View {
 	view := viewFor(n)
 	view.Supported = s.repos.NodeRoute != nil && strings.EqualFold(n.DesiredProtocol, "vless") && domain.NormalizePanelKind(p.Kind) == domain.PanelKind3XUI
-	if !view.Supported {
-		view.Reason = "requires_3xui_vless"
-	}
-	if view.State.Status == "applied" && (!view.Supported || view.State.Binding != domain.RouteBinding(p.URL, n)) {
+	if view.State.Status == "applied" && (!view.Supported || !domain.RouteBackendMatches(n, p)) {
 		view.State.Status = "drift"
 		view.State.Error = "unsupported_or_changed_binding"
 	}
-	return view, nil
+	return view
 }
 
 func viewFor(n *domain.Node) *View {
@@ -105,18 +104,6 @@ func (s *Service) resources(ctx context.Context, id int64, cleanupOnly ...bool) 
 	return n, p, c, a, nil
 }
 
-func (s *Service) Outbounds(ctx context.Context, id int64) ([]ports.RouteOutbound, error) {
-	_, _, _, a, err := s.resources(ctx, id)
-	if err != nil {
-		return nil, err
-	}
-	template, err := a.ReadRouteTemplate(ctx)
-	if err != nil {
-		return nil, err
-	}
-	return template.Outbounds, nil
-}
-
 func (s *Service) store(ctx context.Context, n *domain.Node, state *domain.NodeRouteState) error {
 	if err := s.repos.NodeRoute.SaveRouteState(ctx, n.ID, n.RouteState.Revision, state); err != nil {
 		return err
@@ -135,20 +122,11 @@ func (s *Service) Save(ctx context.Context, id int64, req SaveRequest) (*View, e
 	if err != nil {
 		return nil, err
 	}
-	backend := fmt.Sprintf("%x", sha256.Sum256([]byte(strings.TrimRight(p.URL, "/"))))
-	owner := uuid.NewString()
-	acquired, err := s.repos.NodeRoute.AcquireRouteLease(ctx, backend, owner, time.Now().UTC().Add(90*time.Second))
+	release, _, err := s.acquireBackendLease(ctx, p.URL, true)
 	if err != nil {
 		return nil, err
 	}
-	if !acquired {
-		return nil, fmt.Errorf("%w: another routing update is running", domain.ErrConflict)
-	}
-	defer func() {
-		releaseCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		defer cancel()
-		_ = s.repos.NodeRoute.ReleaseRouteLease(releaseCtx, backend, owner)
-	}()
+	defer release()
 	// Re-read after acquiring the backend lease, not the pre-lease snapshot.
 	n, err := s.repos.Node.GetByID(ctx, id)
 	if err != nil {
@@ -231,9 +209,27 @@ func (s *Service) Save(ctx context.Context, id int64, req SaveRequest) (*View, e
 	if !sameConfig(template.Config, latest.Config) || template.TestURL != latest.TestURL {
 		return nil, fmt.Errorf("%w: 3X-UI template changed; reload and retry", domain.ErrConflict)
 	}
-	target.Status = "applying"
 	target.Error = ""
 	target.Binding = domain.RouteBinding(p.URL, n)
+	if n.RouteState.Status == "applied" && n.RouteState.Binding == target.Binding &&
+		sameConfig(compiled.Config, latest.Config) && compiled.TestURL == latest.TestURL {
+		// Display names and connection paths do not change the server rule.
+		// Reconfirm the core without performing an unnecessary template update.
+		target.Status = "applied"
+		status, statusErr := c.GetServerStatus(ctx)
+		if statusErr != nil || status == nil || status.XrayState != "running" {
+			target.Status, target.Error = "unknown", "core_running_not_confirmed"
+		}
+		if !reflect.DeepEqual(n.RouteState, target) {
+			if err := s.store(ctx, n, &target); err != nil {
+				return nil, err
+			}
+		}
+		view := viewFor(n)
+		view.Supported, view.Warnings = true, warnings
+		return view, nil
+	}
+	target.Status = "applying"
 	if err := s.store(ctx, n, &target); err != nil {
 		return nil, err
 	}
@@ -348,6 +344,22 @@ func makeTarget(previous domain.NodeRouteState, input []LineInput, used map[uint
 }
 
 func (s *Service) peerRuleTags(ctx context.Context, nodeID int64, backendURL string) ([]string, error) {
+	nodes, err := s.backendNodes(ctx, backendURL)
+	if err != nil {
+		return nil, err
+	}
+	tags := []string{}
+	for _, node := range nodes {
+		if node.ID != nodeID {
+			for _, line := range node.RouteState.Lines {
+				tags = append(tags, RuleTag(node.ID, line.ID))
+			}
+		}
+	}
+	return tags, nil
+}
+
+func (s *Service) backendNodes(ctx context.Context, backendURL string) ([]*domain.Node, error) {
 	panels, err := s.repos.XUIPanel.List(ctx)
 	if err != nil {
 		return nil, err
@@ -362,15 +374,13 @@ func (s *Service) peerRuleTags(ctx context.Context, nodeID int64, backendURL str
 	if err != nil {
 		return nil, err
 	}
-	tags := []string{}
+	matched := []*domain.Node{}
 	for _, node := range nodes {
-		if node.ID != nodeID && same[node.PanelID] {
-			for _, line := range node.RouteState.Lines {
-				tags = append(tags, RuleTag(node.ID, line.ID))
-			}
+		if same[node.PanelID] {
+			matched = append(matched, node)
 		}
 	}
-	return tags, nil
+	return matched, nil
 }
 
 func sameConfig(a, b json.RawMessage) bool {
