@@ -15,6 +15,47 @@ func TestProxyGroupBuiltinsMatchMihomoSupportedTargets(t *testing.T) {
 	}
 }
 
+func TestAvailableMembersPreserveTypedIdentityAndRecover(t *testing.T) {
+	members := []domain.ProxyGroupMember{
+		{Kind: "proxy_group", Value: "Same"},
+		{Kind: "rematch", Value: "Same"},
+		{Kind: "builtin", Value: "Same"},
+		{Kind: "builtin", Value: "DIRECT"},
+	}
+	if got := availableProxyGroupMembers(members, nil, nil); !reflect.DeepEqual(got, members[3:]) {
+		t.Fatalf("dangling references survived: %+v", got)
+	}
+	if got := availableProxyGroupMembers(members, []string{"Same"}, nil); !reflect.DeepEqual(got, []domain.ProxyGroupMember{members[0], members[3]}) {
+		t.Fatalf("group rebound another kind: %+v", got)
+	}
+	if got := availableProxyGroupMembers(members, nil, map[string]bool{"Same": true}); !reflect.DeepEqual(got, []domain.ProxyGroupMember{members[1], members[3]}) {
+		t.Fatalf("Rematch rebound another kind: %+v", got)
+	}
+}
+
+func TestDanglingOnlyGroupUsesExistingDirectFallback(t *testing.T) {
+	members := map[string][]domain.ProxyGroupMember{"G": {
+		{Kind: "proxy_group", Value: "Missing"},
+		{Kind: "rematch", Value: "Missing"},
+		{Kind: "builtin", Value: "Missing"},
+	}}
+	raw, err := buildProxyGroupsYAMLWithMembers("- MATCH,G", nil, members, nil, []renderItem{{name: "Missing"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var groups []proxyGroup
+	if err := yaml.Unmarshal([]byte(raw), &groups); err != nil {
+		t.Fatal(err)
+	}
+	if len(groups) != 1 || !reflect.DeepEqual(groups[0].Proxies, []string{"DIRECT"}) {
+		t.Fatalf("Mihomo emitted dangling members or rebound to line: %s", raw)
+	}
+	outbounds := buildSingBoxGroupOutboundsWithMembers("- MATCH,G", []renderItem{{name: "Missing"}}, nil, members, nil)
+	if len(outbounds) != 1 || !reflect.DeepEqual(outbounds[0]["outbounds"], []string{"direct"}) {
+		t.Fatalf("sing-box emitted dangling members or rebound to line: %+v", outbounds)
+	}
+}
+
 func TestExplicitMembersNeedNotIncludeRemainingAndKeepOtherValidation(t *testing.T) {
 	nodes := []*domain.Node{{ID: 1, DisplayName: "A", Enabled: true, Region: "HK", Tags: []string{"fast"}}}
 	for _, tc := range []struct {

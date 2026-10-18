@@ -114,7 +114,7 @@ func buildProxyGroupsYAMLInternal(rules string, preferredOrder []string, members
 			if configured, ok := members[target]; ok {
 				effectiveMembers = configured
 			}
-			choices = resolveConfiguredMembersWithOutbounds(effectiveMembers, items)
+			choices = resolveConfiguredMembersWithOutbounds(availableProxyGroupMembers(effectiveMembers, targets, excludedTargets), items)
 		}
 		// Auto types (url-test/fallback/load-balance) health-check their members
 		// and pick a winner, so a DIRECT/REJECT or control-flow-only Rematch
@@ -224,7 +224,7 @@ func withoutBuiltinExits(choices []string, nonTestable ...map[string]bool) []str
 // withEffectiveProxyGroupDependencies closes the two implicit built-in group
 // dependencies using effective members, never defaults that a user overrode.
 // Other group references must still be declared by rules: synthesizing them
-// here would hide missing_group errors and resurrect orphaned configuration.
+// here would hide missing_group warnings and resurrect orphaned configuration.
 func withEffectiveProxyGroupDependencies(targets []string, configs map[string][]domain.ProxyGroupMember) []string {
 	seen := make(map[string]bool, len(targets))
 	queue := append([]string(nil), targets...)

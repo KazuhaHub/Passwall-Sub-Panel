@@ -43,6 +43,26 @@ async function chooseNode(name: string) {
   fireEvent.click(await screen.findByRole('option', { name }))
 }
 
+it('shows dangling-reference warnings without blocking save or rewriting members', async () => {
+  const members: Record<string, ProxyGroupMember[]> = { Pick: [
+    { kind: 'proxy_group', value: 'Deleted group' },
+    { kind: 'rematch', value: 'Deleted Rematch' },
+    { kind: 'builtin', value: 'Unknown' },
+  ] }
+  const issues: ProxyGroupInspection['issues'] = ['missing_group', 'missing_rematch', 'unknown_builtin'].map(code => ({
+    level: 'warning', group: 'Pick', code, message: code,
+  }))
+  api.post.mockResolvedValue({ data: { ...inspection, issues } })
+  const validation = vi.fn()
+  const changed = vi.fn()
+  mount(<ProxyGroupMembersEditor content="- MATCH,Pick" groupOrder={[]} initialGroupOrder={[]} onGroupOrderChange={() => {}}
+    members={members} initialMembers={members} onChange={changed} options={{}} initialOptions={{}} onOptionsChange={() => {}}
+    previewGroups={[]} onValidationChange={validation} />)
+  await waitFor(() => expect(validation).toHaveBeenLastCalledWith(false))
+  for (const issue of issues) expect(await screen.findByText(`admin:rules.members.issues.${issue.code}`)).toBeTruthy()
+  expect(changed).not.toHaveBeenCalled()
+})
+
 it('first chooses a node, then lists only its own named lines and saves stable references', async () => {
   const changed = await setup()
   expect((screen.getByRole('combobox', { name: 'admin:rules.members.select_line' }) as HTMLInputElement).disabled).toBe(true)

@@ -482,7 +482,7 @@ func buildSingBoxGroupOutboundsWithMembers(rules string, items []renderItem, pre
 				return member.Kind == "rematch" || (member.Kind == "builtin" && builtInRuleTargets[member.Value])
 			})
 		}
-		resolved := resolveConfiguredMembers(members, items)
+		resolved := resolveConfiguredMembers(availableProxyGroupMembers(members, targets, nil), items)
 		// sing-box has no PASS outbound. When PASS is the effective default,
 		// route compilation omits rules targeting this group so matching really
 		// continues. Do not emit an unreachable selector whose displayed default
@@ -590,7 +590,7 @@ func singBoxPassThroughProxyGroupsExcluding(items []renderItem, memberConfigs ma
 		if configured, ok := memberConfigs[target]; ok {
 			members = configured
 		}
-		resolvedByTarget[target] = resolveConfiguredMembers(members, items)
+		resolvedByTarget[target] = resolveConfiguredMembers(availableProxyGroupMembers(members, targets, nil), items)
 	}
 	result := make(map[string]bool)
 	visiting := make(map[string]bool)

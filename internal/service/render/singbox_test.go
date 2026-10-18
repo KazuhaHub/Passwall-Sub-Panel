@@ -546,7 +546,7 @@ func TestBuildSingBoxURLTestZeroIntervalAndEmptyMemberFallback(t *testing.T) {
 		"Zero":  {{Kind: "proxy_group", Value: "Nested"}},
 		"Empty": {{Kind: "builtin", Value: "DIRECT"}},
 	}
-	outbounds := buildSingBoxGroupOutboundsWithMembers("- DOMAIN,a,Zero\n- MATCH,Empty", nil, nil, members, options)
+	outbounds := buildSingBoxGroupOutboundsWithMembers("- DOMAIN,a,Zero\n- DOMAIN,b,Nested\n- MATCH,Empty", nil, nil, members, options)
 	byTag := make(map[string]map[string]any, len(outbounds))
 	for _, outbound := range outbounds {
 		byTag[outbound["tag"].(string)] = outbound

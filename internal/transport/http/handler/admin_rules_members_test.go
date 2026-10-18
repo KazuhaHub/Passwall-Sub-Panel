@@ -287,7 +287,7 @@ func TestAdminRuleSetsSaveRejectsMemberCycleWithoutInvalidating(t *testing.T) {
 	}
 }
 
-func TestAdminRuleSetsSaveStillRejectsSurvivingReferenceToRemovedGroup(t *testing.T) {
+func TestAdminRuleSetsSaveRetainsDanglingMemberReferences(t *testing.T) {
 	repo, err := yamladapter.NewRuleSetRepo(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -297,18 +297,22 @@ func TestAdminRuleSetsSaveStillRejectsSurvivingReferenceToRemovedGroup(t *testin
 	body := ruleSetDTO{
 		Slug: "bad", Name: "Bad", Enabled: true, Content: "- MATCH,Keep",
 		ProxyGroupMembers: map[string][]domain.ProxyGroupMember{
-			"Keep": {{Kind: "proxy_group", Value: "Removed"}},
+			"Keep": {{Kind: "proxy_group", Value: "Removed"}, {Kind: "rematch", Value: "Removed Rematch"}, {Kind: "builtin", Value: "Unknown"}},
 		},
 	}
 	w := performRuleSave(t, h, body)
-	if w.Code != http.StatusBadRequest {
+	if w.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
 	}
-	if invalidations != 0 {
+	if invalidations != 1 {
 		t.Fatalf("invalidations=%d", invalidations)
 	}
-	if !bytes.Contains(w.Body.Bytes(), []byte(`"code":"missing_group"`)) {
-		t.Fatalf("missing_group issue not returned: %s", w.Body.String())
+	var saved ruleSetDTO
+	if err := json.Unmarshal(w.Body.Bytes(), &saved); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(saved.ProxyGroupMembers, body.ProxyGroupMembers) {
+		t.Fatalf("dangling identities changed: %+v", saved.ProxyGroupMembers)
 	}
 }
 

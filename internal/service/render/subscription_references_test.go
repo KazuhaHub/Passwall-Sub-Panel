@@ -392,7 +392,7 @@ func TestEffectiveDependenciesMatchInspectionNormalizationAndRendering(t *testin
 	if len(inspection.Groups) != 2 {
 		t.Fatalf("inspection added unwanted groups: %+v", inspection.Groups)
 	}
-	// Non-canonical references remain missing_group errors, not synthesized
+	// Non-canonical references remain missing_group warnings, not synthesized
 	// defaults. Cycles remain errors at the existing save-validation boundary.
 	for _, tc := range []struct {
 		members map[string][]domain.ProxyGroupMember
@@ -408,6 +408,56 @@ func TestEffectiveDependenciesMatchInspectionNormalizationAndRendering(t *testin
 		}
 		if !found {
 			t.Fatalf("lost %s validation: %+v", tc.code, got.Issues)
+		}
+	}
+}
+
+func TestDanglingTypedMembersAreWarningsAndSkipped(t *testing.T) {
+	for _, kind := range []string{"proxy_group", "rematch", "builtin"} {
+		t.Run(kind, func(t *testing.T) {
+			for _, client := range []domain.ClientType{domain.ClientMihomo, domain.ClientSingBox} {
+				s, _, user, rule := referenceRenderFixture(t)
+				missing := domain.ProxyGroupMember{Kind: kind, Value: "Deleted member"}
+				rule.ProxyGroupMembers["国外媒体"] = []domain.ProxyGroupMember{missing, {Kind: "node", NodeID: 7}}
+				inspection := InspectProxyGroups(rule.Content, rule.ProxyGroupMembers, nil, nil)
+				found := false
+				for _, issue := range inspection.Issues {
+					if issue.Code == "missing_group" || issue.Code == "missing_rematch" || issue.Code == "unknown_builtin" {
+						found = true
+						if issue.Level != "warning" {
+							t.Fatalf("dangling member blocks saving: %+v", issue)
+						}
+					}
+				}
+				if !found {
+					t.Fatal("missing warning")
+				}
+				output, err := s.RenderForUser(context.Background(), user, client)
+				if err != nil {
+					t.Fatalf("%s: %v", client, err)
+				}
+				if strings.Contains(string(output.Body), missing.Value) {
+					t.Fatalf("%s emitted dangling reference", client)
+				}
+			}
+		})
+	}
+}
+
+func TestDanglingMembersDoNotChangePassOrAutoValidation(t *testing.T) {
+	members := map[string][]domain.ProxyGroupMember{"G": {
+		{Kind: "proxy_group", Value: "Missing"},
+		{Kind: "builtin", Value: "Unknown"},
+		{Kind: "builtin", Value: "PASS"},
+	}}
+	if !singBoxPassThroughProxyGroups(nil, members, "- MATCH,G")["G"] {
+		t.Fatal("dangling members changed PASS default")
+	}
+	members["G"] = []domain.ProxyGroupMember{{Kind: "rematch", Value: "Missing"}}
+	inspection := InspectProxyGroups("- MATCH,G", members, map[string]domain.ProxyGroupOptions{"G": {Type: ProxyGroupTypeURLTest}}, nil)
+	for _, issue := range inspection.Issues {
+		if issue.Code == "auto_group_builtin_member" {
+			t.Fatalf("missing Rematch still blocks auto group: %+v", issue)
 		}
 	}
 }

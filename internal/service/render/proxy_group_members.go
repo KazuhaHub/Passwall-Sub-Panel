@@ -227,7 +227,7 @@ func InspectProxyGroupsWithMihomo(content string, members map[string][]domain.Pr
 		isAutoType := effectiveOptions.Type == ProxyGroupTypeURLTest ||
 			effectiveOptions.Type == ProxyGroupTypeFallback ||
 			effectiveOptions.Type == ProxyGroupTypeLoadBalance
-		if isAutoType && membersContainNonTestableExit(effective) {
+		if isAutoType && membersContainNonTestableExit(availableProxyGroupMembers(effective, targets, advanced.outboundNames())) {
 			// A DIRECT/REJECT member turns an auto group into a no-op: DIRECT wins
 			// the health check in ~0ms (everything routes direct) and REJECT makes
 			// the check fail. Block it at save time so the misconfiguration surfaces
@@ -323,13 +323,13 @@ func validateProxyGroupMembers(targets []string, configs map[string][]domain.Pro
 			switch member.Kind {
 			case "builtin":
 				if !builtInRuleTargets[member.Value] {
-					issues = append(issues, ProxyGroupIssue{Level: "error", Group: group, Code: "unknown_builtin", Params: map[string]any{"value": member.Value}, Message: "未知内置出站：" + member.Value})
+					issues = append(issues, ProxyGroupIssue{Level: "warning", Group: group, Code: "unknown_builtin", Params: map[string]any{"value": member.Value}, Message: "未知内置出站，渲染时会跳过：" + member.Value})
 				}
 			case "proxy_group":
 				if member.Value == group {
 					issues = append(issues, ProxyGroupIssue{Level: "error", Group: group, Code: "self_reference", Message: "代理组不能引用自身"})
 				} else if !targetSet[member.Value] {
-					issues = append(issues, ProxyGroupIssue{Level: "error", Group: group, Code: "missing_group", Params: map[string]any{"value": member.Value}, Message: "引用的代理组不存在：" + member.Value})
+					issues = append(issues, ProxyGroupIssue{Level: "warning", Group: group, Code: "missing_group", Params: map[string]any{"value": member.Value}, Message: "引用的代理组不存在，渲染时会跳过：" + member.Value})
 				} else {
 					graph[group] = append(graph[group], member.Value)
 				}
@@ -358,7 +358,7 @@ func validateProxyGroupMembers(targets []string, configs map[string][]domain.Pro
 				}
 			case "rematch":
 				if !knownOutbounds[member.Value] {
-					issues = append(issues, ProxyGroupIssue{Level: "error", Group: group, Code: "missing_rematch", Params: map[string]any{"value": member.Value}, Message: "引用的 Rematch 出站不存在：" + member.Value})
+					issues = append(issues, ProxyGroupIssue{Level: "warning", Group: group, Code: "missing_rematch", Params: map[string]any{"value": member.Value}, Message: "引用的 Rematch 出站不存在，渲染时会跳过：" + member.Value})
 				}
 			default:
 				issues = append(issues, ProxyGroupIssue{Level: "error", Group: group, Code: "unknown_kind", Params: map[string]any{"value": member.Kind}, Message: "未知成员类型：" + member.Kind})
@@ -440,6 +440,34 @@ func membersContainNonTestableExit(members []domain.ProxyGroupMember) bool {
 		}
 	}
 	return false
+}
+
+// availableProxyGroupMembers filters dangling typed references without changing
+// persisted identities or rebinding them to an unrelated same-named object.
+func availableProxyGroupMembers(members []domain.ProxyGroupMember, groups []string, outbounds map[string]bool) []domain.ProxyGroupMember {
+	groupNames := make(map[string]bool, len(groups))
+	for _, name := range groups {
+		groupNames[name] = true
+	}
+	available := make([]domain.ProxyGroupMember, 0, len(members))
+	for _, member := range members {
+		switch member.Kind {
+		case "builtin":
+			if !builtInRuleTargets[member.Value] {
+				continue
+			}
+		case "proxy_group":
+			if !groupNames[member.Value] {
+				continue
+			}
+		case "rematch":
+			if !outbounds[member.Value] {
+				continue
+			}
+		}
+		available = append(available, member)
+	}
+	return available
 }
 
 func memberLabel(member domain.ProxyGroupMember, nodes map[int64]*domain.Node) string {

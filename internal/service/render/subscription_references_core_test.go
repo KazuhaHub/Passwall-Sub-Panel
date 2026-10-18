@@ -32,7 +32,7 @@ func TestReferencedSubscriptionRealCores(t *testing.T) {
 	if xray == "" || mihomo == "" || singbox == "" {
 		t.Skip("set PSP_REFERENCE_XRAY, PSP_REFERENCE_MIHOMO and PSP_REFERENCE_SINGBOX for offline core acceptance")
 	}
-	for _, scenario := range []string{"vless_route", "hidden_direct_route", "collision_both", "collision_single", "same_type_routes", "direct_special", "direct_quoted", "direct_outer_quoted", "legacy_direct", "legacy_relay"} {
+	for _, scenario := range []string{"vless_route", "dangling_members", "hidden_direct_route", "collision_both", "collision_single", "same_type_routes", "direct_special", "direct_quoted", "direct_outer_quoted", "legacy_direct", "legacy_relay"} {
 		t.Run(scenario, func(t *testing.T) {
 			testReferencedCoreScenario(t, xray, mihomo, singbox, scenario)
 		})
@@ -84,6 +84,13 @@ func testReferencedCoreScenario(t *testing.T, xray, mihomo, singbox, scenario st
 			rule.Content = "- MATCH,OnlyRoute"
 			rule.ProxyGroupMembers["OnlyRoute"] = rule.ProxyGroupMembers["国外媒体"]
 			delete(rule.ProxyGroupMembers, "国外媒体")
+			if scenario == "dangling_members" {
+				rule.ProxyGroupMembers["OnlyRoute"] = append([]domain.ProxyGroupMember{
+					{Kind: "proxy_group", Value: "Deleted group"},
+					{Kind: "rematch", Value: "Deleted Rematch"},
+					{Kind: "builtin", Value: "Unknown"},
+				}, rule.ProxyGroupMembers["OnlyRoute"]...)
+			}
 			expectedName, expectedUUID := "A B", "12345678-1234-03e9-8def-123456789abc"
 			if scenario == "same_type_routes" {
 				line := &node.RouteState.Lines[0]
