@@ -47,7 +47,12 @@ type Service struct {
 	nodes   ports.NodeRepo
 	// ownership is late-bound (SetOwnershipRepo): the migration's DeleteLegacyForUser
 	// reads + removes legacy per-node ownership rows. nil = legacy delete is skipped.
-	ownership ports.OwnershipRepo
+	ownership               ports.OwnershipRepo
+	invalidateSubscriptions func()
+}
+
+func (s *Service) SetSubscriptionInvalidator(invalidate func()) {
+	s.invalidateSubscriptions = invalidate
 }
 
 func New(clients ports.PSPClientRepo, pool ports.XUIPool, nodes ports.NodeRepo) *Service {
@@ -167,10 +172,10 @@ func (s *Service) ProvisionClient(ctx context.Context, c *domain.PSPClient) (Pro
 	cur, _ := cli.GetClient(ctx, c.Email)
 	if cur != nil && sameInboundSet(cur.InboundIDs, desiredSet) {
 		for _, nodeID := range nodeByInbound {
-			if err := s.clients.UpdateInboundState(ctx, domain.PSPClientInbound{
+			if err := s.recordApplied(ctx, domain.PSPClientInbound{
 				ClientID: c.ID, NodeID: nodeID, State: domain.ClientApplyApplied,
 				AppliedEmail: cur.Email, AppliedUUID: appliedUUID(cur), AppliedPassword: cur.Password,
-			}); err != nil {
+			}, atts); err != nil {
 				log.Warn("sharedclient: mark provisioned", "client_id", c.ID, "node_id", nodeID, "err", err)
 				continue
 			}
@@ -234,10 +239,10 @@ func (s *Service) ProvisionClient(ctx context.Context, c *domain.PSPClient) (Pro
 		if !confirmed[inb] {
 			continue
 		}
-		if err := s.clients.UpdateInboundState(ctx, domain.PSPClientInbound{
+		if err := s.recordApplied(ctx, domain.PSPClientInbound{
 			ClientID: c.ID, NodeID: nodeID, State: domain.ClientApplyApplied,
 			AppliedEmail: detail.Email, AppliedUUID: appliedUUID(detail), AppliedPassword: detail.Password,
-		}); err != nil {
+		}, atts); err != nil {
 			log.Warn("sharedclient: mark provisioned", "client_id", c.ID, "node_id", nodeID, "err", err)
 			continue
 		}
@@ -270,13 +275,34 @@ func (s *Service) refreshAppliedCredentials(ctx context.Context, c *domain.PSPCl
 		if !attachment.Applied() {
 			continue
 		}
-		if err := s.clients.UpdateInboundState(ctx, domain.PSPClientInbound{
+		if err := s.recordApplied(ctx, domain.PSPClientInbound{
 			ClientID: c.ID, NodeID: attachment.NodeID, State: domain.ClientApplyApplied,
 			AppliedVersion: attachment.AppliedVersion, AppliedEmail: detail.Email,
 			AppliedUUID: uuid, AppliedPassword: detail.Password,
-		}); err != nil {
+		}, attachments); err != nil {
 			return fmt.Errorf("record applied credentials for client %d node %d: %w", c.ID, attachment.NodeID, err)
 		}
+	}
+	return nil
+}
+
+// recordApplied invalidates only when the actual credential snapshot changes.
+// A subscription may have cached an original entry while an asynchronous
+// attachment was still pending; route entries must appear immediately once
+// their source credential is confirmed, not after the normal cache TTL.
+func (s *Service) recordApplied(ctx context.Context, update domain.PSPClientInbound, previous []domain.PSPClientInbound) error {
+	changed := true
+	for _, old := range previous {
+		if old.NodeID == update.NodeID && old.ClientID == update.ClientID {
+			changed = old.AppliedUUID != update.AppliedUUID || old.AppliedEmail != update.AppliedEmail || old.AppliedPassword != update.AppliedPassword
+			break
+		}
+	}
+	if err := s.clients.UpdateInboundState(ctx, update); err != nil {
+		return err
+	}
+	if changed && s.invalidateSubscriptions != nil {
+		s.invalidateSubscriptions()
 	}
 	return nil
 }

@@ -2214,6 +2214,7 @@ type Repos struct {
 	User                    UserRepo
 	Group                   GroupRepo
 	Node                    NodeRepo
+	NodeRoute               NodeRouteStore
 	Separator               SeparatorRepo
 	Ownership               OwnershipRepo
 	PSPClient               PSPClientRepo

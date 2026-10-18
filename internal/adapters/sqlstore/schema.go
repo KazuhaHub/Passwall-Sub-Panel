@@ -383,6 +383,8 @@ type nodeRow struct {
 	// least one relay is enabled. AutoMigrate adds both; empty/false on legacy
 	// rows, no backfill.
 	Relays          jsonRelays      `gorm:"column:relays"`
+	RouteState      jsonRouteState  `gorm:"column:route_state"`
+	RouteRevision   int64           `gorm:"not null;default:0"`
 	HideDirect      bool            `gorm:"default:false"`
 	ShowRelayStatus bool            `gorm:"default:false"`
 	RelayHealth     jsonRelayHealth `gorm:"column:relay_health"`
@@ -452,6 +454,7 @@ func (r *nodeRow) toDomain() (*domain.Node, error) {
 		CertSource:              domain.CertSource(r.CertSource),
 		CertID:                  r.CertID,
 		Relays:                  []domain.RelayLine(r.Relays),
+		RouteState:              domain.NodeRouteState(r.RouteState),
 		HideDirect:              r.HideDirect,
 		ShowRelayStatus:         r.ShowRelayStatus,
 		RelayHealth:             []domain.RelayHealth(r.RelayHealth),
@@ -515,6 +518,8 @@ func nodeFromDomain(n *domain.Node) (*nodeRow, error) {
 		CertSource:              string(n.CertSource),
 		CertID:                  n.CertID,
 		Relays:                  jsonRelays(n.Relays),
+		RouteState:              jsonRouteState(n.RouteState),
+		RouteRevision:           n.RouteState.Revision,
 		HideDirect:              n.HideDirect,
 		ShowRelayStatus:         n.ShowRelayStatus,
 		RelayHealth:             jsonRelayHealth(n.RelayHealth),
@@ -1534,6 +1539,7 @@ var schemaModels = []any{
 	&roleAssignmentRow{},
 	&groupRow{},
 	&nodeRow{},
+	&routeLeaseRow{},
 	// ownershipRow (user_xui_clients) is intentionally NOT here: v3.9.0 retired the
 	// per-node ownership model. A fresh install never creates the table; an upgrade
 	// keeps its existing one (AutoMigrate leaves untracked tables alone) until the
@@ -1605,6 +1611,9 @@ func EnsureSchema(db *gorm.DB) error {
 		return err
 	}
 	if err := repairTrafficCounterNulls(db); err != nil {
+		return err
+	}
+	if err := backfillRelayLineIDs(db); err != nil {
 		return err
 	}
 	return seedBuiltinRoles(db)

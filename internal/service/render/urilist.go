@@ -30,9 +30,8 @@ import (
 //
 // The whole document is then standard-base64 encoded (no line breaks) so it
 // matches what these clients fetch with their built-in subscription updater.
-func (s *Service) renderURIList(ctx context.Context, u *domain.User, items []renderItem, st ports.UISettings) (*Output, error) {
+func (s *Service) renderURIListWithCredentials(ctx context.Context, u *domain.User, items []renderItem, st ports.UISettings, appliedCredentials map[int64]appliedClientCredential) (*Output, error) {
 	emailRules := domain.EmailRules{Domain: st.EmailDomain}
-	appliedCredentials := s.appliedClientCredentialsByNode(ctx, u)
 	nativePanels := s.nativePanelIDs(ctx, items)
 
 	// Local snapshot for captured nodes, one batched ListInbounds per panel for
@@ -66,6 +65,10 @@ func (s *Service) renderURIList(ctx context.Context, u *domain.User, items []ren
 			}
 		}
 		renderUser, userEmail, appliedPassword := renderIdentityForNode(u, it.node.ID, emailRules, appliedCredentials)
+		renderUser, lineErr := it.userForLine(renderUser)
+		if lineErr != nil {
+			continue
+		}
 		// it.name (not DisplayName) carries the layout-applied name — the
 		// region-flag prefix and, for relay variants, the per-line suffix —
 		// so each transit entry gets a distinct fragment.

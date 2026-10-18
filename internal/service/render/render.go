@@ -58,21 +58,18 @@ type Output struct {
 	Headers     map[string]string
 }
 
-// loadRenderSettings loads UISettings once for the whole /sub request,
-// with the union of every caller's fallback defaults applied. Pre-perf
-// audit each render did 6-10 separate Settings.Load calls (region flag,
-// update interval, profile placeholders, email domain, max-concurrency,
-// profile-name template — singbox + urilist add their own); the cache
-// decorator removed the DB cost but each call still acquired the
-// RWMutex + copied the UISettings struct + ran applyUISettingsDefaults.
-// One Load + threading the value through helpers eliminates that work
-// for the polling-fleet case, which is the only case that matters here.
-func (s *Service) loadRenderSettings(ctx context.Context, u *domain.User) ports.UISettings {
-	defaults := ports.UISettings{
+// renderSettingsDefaults keeps preview and subscription fallback values equal.
+func renderSettingsDefaults() ports.UISettings {
+	return ports.UISettings{
 		SiteTitle:   "Kazuha Hub Passwall",
 		LogoURL:     "/images/logo-title-circle.png",
 		LogoURLDark: "/images/logo-title-circle-darkmode.png",
 	}
+}
+
+// loadRenderSettings resolves settings once for each subscription request.
+func (s *Service) loadRenderSettings(ctx context.Context, u *domain.User) ports.UISettings {
+	defaults := renderSettingsDefaults()
 	// Per-user effective (global ⊕ this user's group overrides): the
 	// subscription-policy fields rendered into the document — update-interval
 	// header, profile-name template, region-flag prefix — are group-scoped.
@@ -97,10 +94,34 @@ func (s *Service) loadRenderSettings(ctx context.Context, u *domain.User) ports.
 //	├── 6. expand @all / @region / @tag inside proxy-groups
 //	└── 7. set Subscription-Userinfo header from traffic + expire
 func (s *Service) RenderForUser(ctx context.Context, u *domain.User, ct domain.ClientType) (*Output, error) {
+	return s.renderForContext(ctx, u, ct, nil)
+}
+
+// previewContext is internal only: subscription callers cannot opt out of
+// personal credential publication gates.
+type previewContext struct {
+	ruleSets []*domain.RuleSet
+	template *domain.Template
+}
+
+func (s *Service) renderForContext(ctx context.Context, u *domain.User, ct domain.ClientType, preview *previewContext) (*Output, error) {
 	if ct == "" {
 		ct = domain.ClientMihomo
 	}
-	st := s.loadRenderSettings(ctx, u)
+	var st ports.UISettings
+	if preview == nil {
+		st = s.loadRenderSettings(ctx, u)
+	} else {
+		var err error
+		if s.repos.ScopedSettings != nil {
+			st, err = s.repos.ScopedSettings.LoadForGroup(ctx, u.GroupID, renderSettingsDefaults())
+		} else {
+			st, err = s.repos.Settings.Load(ctx, renderSettingsDefaults())
+		}
+		if err != nil {
+			return nil, err
+		}
+	}
 	g, err := s.repos.Group.GetByID(ctx, u.GroupID)
 	if err != nil {
 		return nil, fmt.Errorf("load group: %w", err)
@@ -129,7 +150,15 @@ func (s *Service) RenderForUser(ctx context.Context, u *domain.User, ct domain.C
 	// Expand each relay-bearing node into its direct entry + one entry per
 	// enabled transit line BEFORE the flag prefix, so every variant inherits
 	// its node's region flag. relay-less nodes pass through unchanged.
-	items = expandRelays(items)
+	items = expandNodeLines(items)
+	if ct == domain.ClientURIList {
+		applyLegacyLineNames(items)
+	}
+	var applied map[int64]appliedClientCredential
+	if preview == nil {
+		applied = s.appliedClientCredentialsByNode(ctx, u)
+	}
+	items = s.filterRouteItemsForContext(ctx, items, preview != nil, applied)
 	if st.SubRegionFlagPrefix {
 		applyRegionFlagPrefix(items)
 	}
@@ -141,24 +170,39 @@ func (s *Service) RenderForUser(ctx context.Context, u *domain.User, ct domain.C
 	// doesn't propagate ErrNotFound up to the sub handler and produce
 	// a misleading 404 to UAs that match a uri-list rule.
 	if ct == domain.ClientURIList {
-		return s.renderURIList(ctx, u, items, st)
+		return s.renderURIListWithCredentials(ctx, u, items, st, applied)
 	}
 
-	tpl, err := s.repos.Template.GetDefault(ctx, ct)
+	var tpl *domain.Template
+	if preview == nil {
+		tpl, err = s.repos.Template.GetDefault(ctx, ct)
+	} else {
+		tpl = preview.template
+	}
 	if err != nil {
 		return nil, fmt.Errorf("load template: %w", err)
 	}
-	bundle, err := s.resolveRuleBundle(ctx, tpl, st, ct)
+	var overrides []*domain.RuleSet
+	if preview != nil {
+		overrides = preview.ruleSets
+	}
+	bundle, err := s.resolveRuleBundle(ctx, tpl, st, ct, overrides...)
 	if err != nil {
 		return nil, fmt.Errorf("resolve rules: %w", err)
 	}
 	if len(bundle.ProxyGroupOrder) == 0 {
 		bundle.ProxyGroupOrder = tpl.ProxyGroupOrder
 	}
+	lineNames, internalItems := newLineNameCatalog(items, st.SubRegionFlagPrefix, nodes)
+	items = internalItems
 	if ct == domain.ClientSingBox {
-		return s.renderSingBox(ctx, u, tpl, items, bundle.SharedRules, bundle.ProxyGroupOrder, bundle.ProxyGroupMembers, bundle.ProxyGroupOptions, st)
+		return s.renderSingBox(ctx, u, tpl, items, bundle.SharedRules, bundle.ProxyGroupOrder, bundle.ProxyGroupMembers, bundle.ProxyGroupOptions, st, lineNames, applied)
 	}
-	proxies := s.buildProxies(ctx, u, items, st)
+	proxies := s.buildProxiesForContext(ctx, u, items, st, preview != nil, applied)
+	generatedLines := emittedProxyNames(proxies, "name")
+	items = emittedRenderItems(items, generatedLines)
+	lineOrigin := markGeneratedLines(proxies, "name", generatedLines)
+	lineNames.origin = lineOrigin
 	proxies, err = appendMihomoRematchOutbounds(proxies, bundle.RematchOutbounds)
 	if err != nil {
 		return nil, err
@@ -167,24 +211,91 @@ func (s *Service) RenderForUser(ctx context.Context, u *domain.User, ct domain.C
 	if err != nil {
 		return nil, fmt.Errorf("marshal proxies: %w", err)
 	}
-	advanced := MihomoRuleFeatures{SubRules: bundle.SubRules, RematchOutbounds: bundle.RematchOutbounds}
-	proxyGroupsYAML, err := buildProxyGroupsYAMLWithFeatures(strings.Join([]string{u.PersonalRules, bundle.SharedRules}, "\n"), bundle.ProxyGroupOrder, bundle.ProxyGroupMembers, bundle.ProxyGroupOptions, items, advanced)
-	if err != nil {
-		return nil, fmt.Errorf("build proxy groups: %w", err)
-	}
 	subRulesYAML, err := marshalMihomoSubRules(bundle.SubRules)
 	if err != nil {
 		return nil, fmt.Errorf("marshal Mihomo sub-rules: %w", err)
 	}
-	body := substituteBlockPlaceholders(tpl.Content, map[string]string{
-		"proxies":        strings.TrimRight(string(proxiesYAML), "\n"),
-		"proxy_groups":   proxyGroupsYAML,
-		"rules_common":   strings.TrimRight(bundle.SharedRules, "\n"),
-		"rules_personal": strings.TrimRight(u.PersonalRules, "\n"),
-		"sub_rules":      subRulesYAML,
-	})
-	body = substituteInlinePlaceholders(body, s.profilePlaceholders(u, st))
-	body = expandNodeRefs(body, items)
+	compose := func(groups string) string {
+		if groups == "[]" {
+			groups = "" // A template may append its own group list entries.
+		}
+		subRules := subRulesYAML
+		if subRules == "{}" {
+			subRules = "" // Likewise, allow template-owned sub-rule mappings.
+		}
+		body := substituteBlockPlaceholders(tpl.Content, map[string]string{
+			"proxies":        strings.TrimRight(string(proxiesYAML), "\n"),
+			"proxy_groups":   groups,
+			"rules_common":   strings.TrimRight(bundle.SharedRules, "\n"),
+			"rules_personal": strings.TrimRight(u.PersonalRules, "\n"),
+			"sub_rules":      subRules,
+		})
+		body = substituteInlinePlaceholders(body, s.profilePlaceholders(u, st))
+		return expandNodeRefs(body, items)
+	}
+	// Use a harmless list entry instead of [] so templates may append custom
+	// groups after the generated block. Only template-owned names are fixed.
+	probe, err := parseMihomoSubscription(compose("- name: " + yamlScalar(lineNames.probe) + "\n  type: select\n  proxies: [DIRECT]"))
+	if err != nil {
+		return nil, fmt.Errorf("resolve template names: %w", err)
+	}
+	fixedNames, _, err := lineNames.mihomoNames(probe)
+	if err != nil {
+		return nil, err
+	}
+	templateTargets := make(map[string]bool, len(fixedNames))
+	for name := range fixedNames {
+		templateTargets[name] = true
+	}
+	for name := range configuredGroupNames(bundle.ProxyGroupMembers, bundle.ProxyGroupOptions) {
+		fixedNames[name] = true
+	}
+	userCopy := *u
+	userCopy.PersonalRules, err = lineNames.prepareRules(u.PersonalRules, fixedNames, generatedLines, true)
+	if err != nil {
+		return nil, err
+	}
+	u = &userCopy
+	bundle.SharedRules, err = lineNames.prepareRules(bundle.SharedRules, fixedNames, generatedLines, true)
+	if err != nil {
+		return nil, err
+	}
+	for index := range bundle.SubRules {
+		bundle.SubRules[index].Content, err = lineNames.prepareRules(bundle.SubRules[index].Content, fixedNames, generatedLines, true)
+		if err != nil {
+			return nil, err
+		}
+	}
+	subRulesYAML, err = marshalMihomoSubRules(bundle.SubRules)
+	if err != nil {
+		return nil, err
+	}
+	advanced := MihomoRuleFeatures{SubRules: bundle.SubRules, RematchOutbounds: bundle.RematchOutbounds}
+	proxyGroupsYAML, err := buildProxyGroupsYAMLWithFeatures(strings.Join([]string{u.PersonalRules, bundle.SharedRules}, "\n"), bundle.ProxyGroupOrder, bundle.ProxyGroupMembers, bundle.ProxyGroupOptions, items, advanced, templateTargets)
+	if err != nil {
+		return nil, fmt.Errorf("build proxy groups: %w", err)
+	}
+	body := compose(proxyGroupsYAML)
+	missingGroups, err := mihomoMissingTemplateGroups(body)
+	if err != nil {
+		return nil, fmt.Errorf("resolve template dependencies: %w", err)
+	}
+	if len(missingGroups) > 0 {
+		groupRules := strings.Join([]string{u.PersonalRules, bundle.SharedRules}, "\n")
+		for _, group := range missingGroups {
+			// These synthetic targets drive group generation only, never rules.
+			groupRules += "\n- MATCH," + group
+		}
+		proxyGroupsYAML, err = buildProxyGroupsYAMLWithFeatures(groupRules, bundle.ProxyGroupOrder, bundle.ProxyGroupMembers, bundle.ProxyGroupOptions, items, advanced, templateTargets)
+		if err != nil {
+			return nil, fmt.Errorf("build template dependency groups: %w", err)
+		}
+		body = compose(proxyGroupsYAML)
+	}
+	body, err = lineNames.finishMihomo(body, generatedLines, lineOrigin)
+	if err != nil {
+		return nil, fmt.Errorf("finalize subscription line names: %w", err)
+	}
 
 	// Build profile name for Content-Disposition header.
 	profileName := buildProfileName(u, st)
@@ -201,8 +312,10 @@ func (s *Service) RenderForUser(ctx context.Context, u *domain.User, ct domain.C
 		"Content-Disposition":     `attachment; filename*=UTF-8''` + encodedName,
 		"Profile-Title":           profileName,
 	}
-	if info := s.buildSubInfo(ctx, u); info != "" {
-		headers["Subscription-Userinfo"] = info
+	if preview == nil {
+		if info := s.buildSubInfo(ctx, u); info != "" {
+			headers["Subscription-Userinfo"] = info
+		}
 	}
 
 	return &Output{
@@ -284,10 +397,13 @@ func absoluteURL(base, raw string) string {
 }
 
 func (s *Service) buildProxies(ctx context.Context, u *domain.User, items []renderItem, st ports.UISettings) []map[string]any {
+	return s.buildProxiesForContext(ctx, u, items, st, false, s.appliedClientCredentialsByNode(ctx, u))
+}
+
+func (s *Service) buildProxiesForContext(ctx context.Context, u *domain.User, items []renderItem, st ports.UISettings, preview bool, appliedCredentials map[int64]appliedClientCredential) []map[string]any {
 	// Pre-resolve EmailRules once per render. ClientEmail is per-(user,
 	// node), so the rules can be reused across the loop.
 	emailRules := domain.EmailRules{Domain: st.EmailDomain}
-	appliedCredentials := s.appliedClientCredentialsByNode(ctx, u)
 	nativePanels := s.nativePanelIDs(ctx, items)
 
 	// Captured nodes render from the local snapshot (zero 3X-UI calls), so a
@@ -309,7 +425,7 @@ func (s *Service) buildProxies(ctx context.Context, u *domain.User, items []rend
 				"node_id", it.node.ID, "panel_id", it.node.PanelID, "inbound_id", it.node.InboundID)
 			continue
 		}
-		if _, native := nativePanels[it.node.PanelID]; native {
+		if _, native := nativePanels[it.node.PanelID]; native && !preview {
 			if _, applied := appliedCredentials[it.node.ID]; !applied {
 				log.Warn("render: skip native node until client credentials are confirmed applied",
 					"node_id", it.node.ID, "panel_id", it.node.PanelID, "user_id", u.ID)
@@ -317,6 +433,10 @@ func (s *Service) buildProxies(ctx context.Context, u *domain.User, items []rend
 			}
 		}
 		renderUser, userEmail, appliedPassword := renderIdentityForNode(u, it.node.ID, emailRules, appliedCredentials)
+		renderUser, lineErr := it.userForLine(renderUser)
+		if lineErr != nil {
+			continue
+		}
 		block, err := emitProxy(it.name, it.node, renderUser, inb, userEmail, appliedPassword, it.relay,
 			mlkemFirstRealityByPanel[it.node.PanelID])
 		if err != nil {
@@ -609,7 +729,7 @@ type resolvedRuleBundle struct {
 	RematchOutbounds  []domain.MihomoRematchOutbound
 }
 
-func (s *Service) resolveRuleBundle(ctx context.Context, tpl *domain.Template, st ports.UISettings, clientType domain.ClientType) (resolvedRuleBundle, error) {
+func (s *Service) resolveRuleBundle(ctx context.Context, tpl *domain.Template, st ports.UISettings, clientType domain.ClientType, overrides ...*domain.RuleSet) (resolvedRuleBundle, error) {
 	slugs := tpl.RuleSets
 	if len(slugs) == 0 {
 		log.Debug("render: no rule_sets configured for template", "template", tpl.Slug)
@@ -627,7 +747,17 @@ func (s *Service) resolveRuleBundle(ctx context.Context, tpl *domain.Template, s
 	seenSubRules := map[string]string{}
 	seenRematchOutbounds := map[string]string{}
 	for _, slug := range slugs {
-		rs, err := s.repos.RuleSet.GetBySlug(ctx, slug)
+		var rs *domain.RuleSet
+		var err error
+		for _, draft := range overrides {
+			if draft != nil && draft.Slug == slug {
+				rs = draft
+				break
+			}
+		}
+		if rs == nil {
+			rs, err = s.repos.RuleSet.GetBySlug(ctx, slug)
+		}
 		if err != nil {
 			log.Warn("render: skip rule_set, lookup failed", "slug", slug, "err", err)
 			continue

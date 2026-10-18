@@ -1,6 +1,7 @@
 package render
 
 import (
+	"encoding/csv"
 	"strconv"
 	"strings"
 
@@ -63,8 +64,12 @@ func buildProxyGroupsYAMLWithMembers(rules string, preferredOrder []string, memb
 	return buildProxyGroupsYAMLWithFeatures(rules, preferredOrder, members, options, items, MihomoRuleFeatures{})
 }
 
-func buildProxyGroupsYAMLWithFeatures(rules string, preferredOrder []string, members map[string][]domain.ProxyGroupMember, options map[string]domain.ProxyGroupOptions, items []renderItem, advanced MihomoRuleFeatures) (string, error) {
-	return buildProxyGroupsYAMLInternal(rules, preferredOrder, members, options, items, true, advanced.outboundNames())
+func buildProxyGroupsYAMLWithFeatures(rules string, preferredOrder []string, members map[string][]domain.ProxyGroupMember, options map[string]domain.ProxyGroupOptions, items []renderItem, advanced MihomoRuleFeatures, templateTargets ...map[string]bool) (string, error) {
+	templateNames := map[string]bool{}
+	if len(templateTargets) > 0 {
+		templateNames = templateTargets[0]
+	}
+	return buildProxyGroupsYAMLInternal(strings.Join(advanced.allRuleFragments(rules), "\n"), preferredOrder, members, options, items, true, advanced.outboundNames(), templateNames)
 }
 
 func buildProxyGroupsYAMLInternal(rules string, preferredOrder []string, members map[string][]domain.ProxyGroupMember, options map[string]domain.ProxyGroupOptions, items []renderItem, resolve bool, excluded ...map[string]bool) (string, error) {
@@ -72,15 +77,33 @@ func buildProxyGroupsYAMLInternal(rules string, preferredOrder []string, members
 	if len(excluded) > 0 {
 		excludedTargets = excluded[0]
 	}
-	targets := ruleTargetsInOrderExcluding(rules, excludedTargets)
-	targets = withRequiredProxyGroupDependencies(targets)
-	targets = withConfiguredProxyGroupDependencies(targets, members)
+	targetExclusions := excludedTargets
+	if resolve {
+		targetExclusions = proxyTargetExclusions(items, excludedTargets)
+	}
+	if len(excluded) > 1 {
+		for name := range excluded[1] {
+			targetExclusions[name] = true
+		}
+	}
+	targets := ruleTargetsInOrderExcluding(rules, targetExclusions, true)
+	targets = withEffectiveProxyGroupDependencies(targets, members)
+	if len(excluded) > 1 {
+		kept := []string{}
+		for _, name := range targets {
+			if !excluded[1][name] {
+				kept = append(kept, name)
+			}
+		}
+		targets = kept
+	}
 	targets = applyProxyGroupOrder(targets, preferredOrder)
 	if len(targets) == 0 {
 		return "[]", nil
 	}
 
 	lines := make([]string, 0, len(targets)*6)
+	groupNames := proxyGroupNameSet(targets)
 	for _, target := range targets {
 		groupOptions := domain.ProxyGroupOptions{Type: ProxyGroupTypeSelect}
 		if configured, ok := options[target]; ok {
@@ -92,7 +115,7 @@ func buildProxyGroupsYAMLInternal(rules string, preferredOrder []string, members
 			if configured, ok := members[target]; ok {
 				effectiveMembers = configured
 			}
-			choices = resolveConfiguredMembersWithOutbounds(effectiveMembers, items)
+			choices = resolveConfiguredMembersWithOutbounds(availableProxyGroupMembers(effectiveMembers, groupNames, excludedTargets), items)
 		}
 		// Auto types (url-test/fallback/load-balance) health-check their members
 		// and pick a winner, so a DIRECT/REJECT or control-flow-only Rematch
@@ -119,9 +142,11 @@ func buildProxyGroupsYAMLInternal(rules string, preferredOrder []string, members
 		for _, proxy := range choices {
 			lines = append(lines, "  - "+yamlScalar(proxy))
 		}
+		if groupOptions.URL != "" {
+			lines = append(lines, "  url: "+yamlScalar(groupOptions.URL))
+		}
 		if groupOptions.Type != ProxyGroupTypeSelect {
 			lines = append(lines,
-				"  url: "+yamlScalar(groupOptions.URL),
 				"  interval: "+strconv.Itoa(*groupOptions.Interval),
 				"  lazy: "+strconv.FormatBool(*groupOptions.Lazy),
 				"  timeout: "+strconv.Itoa(*groupOptions.Timeout),
@@ -135,6 +160,19 @@ func buildProxyGroupsYAMLInternal(rules string, preferredOrder []string, members
 		}
 	}
 	return strings.Join(lines, "\n"), nil
+}
+
+// Explicit rule targets can name a line directly. Such names are not groups;
+// materializing default groups with the same names would create collisions.
+func proxyTargetExclusions(items []renderItem, additional map[string]bool) map[string]bool {
+	excluded := make(map[string]bool, len(items)+len(additional))
+	for name, value := range additional {
+		excluded[name] = value
+	}
+	for _, item := range items {
+		excluded[item.name] = true
+	}
+	return excluded
 }
 
 // applyProxyGroupOrder emits the explicitly ordered groups first, in the
@@ -186,62 +224,58 @@ func withoutBuiltinExits(choices []string, nonTestable ...map[string]bool) []str
 	return out
 }
 
-func withRequiredProxyGroupDependencies(targets []string) []string {
-	hasNodeSelector, hasUDPSelector := false, false
-	needsNodeSelector, needsUDPSelector := false, false
+// withEffectiveProxyGroupDependencies closes the two implicit built-in group
+// dependencies using effective members, never defaults that a user overrode.
+// Other group references must still be declared by rules: synthesizing them
+// here would hide missing_group warnings and resurrect orphaned configuration.
+func withEffectiveProxyGroupDependencies(targets []string, configs map[string][]domain.ProxyGroupMember) []string {
+	seen := make(map[string]bool, len(targets))
+	queue := append([]string(nil), targets...)
 	for _, target := range targets {
-		// Exact match, not substring: a custom group merely CONTAINING the phrase
-		// (e.g. "美国节点选择") must not suppress the canonical "🚀 节点选择"
-		// selector other emitted groups still reference, which would leave a
-		// dangling reference Clash-family clients reject.
-		if target == "🚀 节点选择" {
-			hasNodeSelector = true
+		seen[target] = true
+	}
+	for index := 0; index < len(queue); index++ {
+		target := queue[index]
+		members, configured := configs[target]
+		if !configured {
+			members = defaultMembersForTarget(target)
 		}
-		if target == "🎮 UDP控制" {
-			hasUDPSelector = true
-		}
-		for _, choice := range proxyGroupChoices(target) {
-			if choice == "🚀 节点选择" {
-				needsNodeSelector = true
+		for _, member := range members {
+			if member.Kind != "proxy_group" || (member.Value != "🚀 节点选择" && member.Value != "🎮 UDP控制") || seen[member.Value] {
+				continue
 			}
-			if choice == "🎮 UDP控制" {
-				needsUDPSelector = true
+			seen[member.Value] = true
+			queue = append(queue, member.Value)
+		}
+	}
+	// Preserve legacy dependency order when no explicit order is configured.
+	out := make([]string, 0, len(queue))
+	for _, dependency := range []string{"🚀 节点选择", "🎮 UDP控制"} {
+		for _, added := range queue[len(targets):] {
+			if added == dependency {
+				out = append(out, added)
 			}
 		}
 	}
-	// The QUIC selector offers delegation to the UDP selector, and UDP's own
-	// alternatives reference the canonical node selector. Close that transitive
-	// dependency even when an administrator defines only a QUIC rule.
-	if needsUDPSelector && !hasUDPSelector {
-		needsNodeSelector = true
-	}
-	if (!needsNodeSelector || hasNodeSelector) && (!needsUDPSelector || hasUDPSelector) {
-		return targets
-	}
-	out := make([]string, 0, len(targets)+2)
-	if needsNodeSelector && !hasNodeSelector {
-		out = append(out, "🚀 节点选择")
-	}
-	if needsUDPSelector && !hasUDPSelector {
-		out = append(out, "🎮 UDP控制")
-	}
-	out = append(out, targets...)
-	return out
+	return append(out, targets...)
 }
 
 func ruleTargetsInOrder(rules string) []string {
 	return ruleTargetsInOrderExcluding(rules, nil)
 }
 
-func ruleTargetsInOrderExcluding(rules string, excluded map[string]bool) []string {
+func ruleTargetsInOrderExcluding(rules string, excluded map[string]bool, rawPolicy ...bool) []string {
 	seen := map[string]bool{}
 	out := []string{}
-	for _, rawLine := range strings.Split(rules, "\n") {
+	for _, rawLine := range subscriptionRuleLines(rules) {
 		parts := splitRuleFields(rawLine)
 		if len(parts) < 2 || strings.EqualFold(parts[0], "SUB-RULE") {
 			continue
 		}
 		target := ruleOutboundTarget(parts)
+		if len(rawPolicy) > 0 && rawPolicy[0] {
+			target = mihomoRuleTarget(rawLine)
+		}
 		if target == "" || builtInRuleTargets[target] || excluded[target] || seen[target] {
 			continue
 		}
@@ -251,8 +285,29 @@ func ruleTargetsInOrderExcluding(rules string, excluded map[string]bool) []strin
 	return out
 }
 
+// Saved rule fragments may quote an entire YAML rule scalar, independently of
+// CSV quoting inside that scalar. Group discovery and route compilation must
+// inspect decoded values, not confuse those two layers of quoting.
+func subscriptionRuleLines(content string) []string {
+	if lines, err := parseRuleSequence(content); err == nil {
+		return lines
+	}
+	return strings.Split(content, "\n")
+}
+
 func normalizeRulePart(raw string) string {
-	return strings.Trim(strings.TrimSpace(raw), `"'`)
+	raw = strings.TrimSpace(raw)
+	if len(raw) >= 2 && raw[0] == raw[len(raw)-1] {
+		if raw[0] == '"' {
+			reader := csv.NewReader(strings.NewReader(raw))
+			if fields, err := reader.Read(); err == nil && len(fields) == 1 {
+				return fields[0]
+			}
+		} else if raw[0] == '\'' {
+			return strings.ReplaceAll(raw[1:len(raw)-1], "''", "'")
+		}
+	}
+	return raw
 }
 
 func proxyGroupChoices(name string) []string {

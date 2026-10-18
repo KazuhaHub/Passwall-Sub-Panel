@@ -1,5 +1,9 @@
 {
   "title": "Appearance",
+  "density": {
+    "switch_to_comfortable": "Switch to comfortable density",
+    "switch_to_compact": "Switch to compact density"
+  },
   "preset_section": "Preset palette",
   "custom_section": "Custom",
   "custom_hint": "Enter a HEX color (e.g. #6750A4)",

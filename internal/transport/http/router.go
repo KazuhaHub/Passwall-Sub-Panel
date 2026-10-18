@@ -42,6 +42,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/traffic"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/twofa"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/user"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/vlessroute"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/transport/http/handler"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/transport/http/middleware"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/version"
@@ -65,6 +66,7 @@ type AsyncDispatcher interface {
 // Deps bundles every dependency the HTTP layer needs. App-startup wiring
 // populates this and passes it to NewRouter.
 type Deps struct {
+	VlessRoute    *vlessroute.Service
 	OperationGate *operationgate.Gate
 	Cfg           *config.Config
 	Repos         ports.Repos
@@ -397,7 +399,7 @@ func NewRouter(d Deps) stdhttp.Handler {
 	enroll2FA := authpolicy.New(authpolicy.Deps{Groups: d.Repos.Group, Passkeys: d.Repos.WebAuthn, Settings: d.Repos.ScopedSettings})
 	require2FAGate := middleware.Require2FAEnrollment(enroll2FA, d.User)
 
-	userMe := handler.NewUserMeHandler(d.User, d.Traffic, d.Repos.ScopedSettings, d.Group, twofaSvc, passkeySvc, enroll2FA)
+	userMe := handler.NewUserMeHandler(d.User, d.Traffic, d.Repos.ScopedSettings, d.Group, twofaSvc, passkeySvc, enroll2FA, d.Render)
 	userGroup := g.Group("/api/user/me",
 		middleware.RequireAuth(d.Auth, d.User, authUserCache),
 		// Operators are included so that an operator forced to enroll 2FA (via the
@@ -463,6 +465,10 @@ func NewRouter(d Deps) stdhttp.Handler {
 		middleware.RequireRole(domain.RoleAdmin),
 		require2FAGate,
 	)
+	routeLines := handler.NewAdminVlessRouteHandler(d.VlessRoute)
+	staffGroup.GET("/nodes/:id/vless-route-lines", routeLines.Get)
+	adminGroup.GET("/nodes/:id/vless-route-editor", routeLines.Editor)
+	adminGroup.PUT("/nodes/:id/vless-route-lines", routeLines.Save)
 	{
 		users := handler.NewAdminUserHandler(d.User, d.Repos.Settings, d.Mail, d.Async, twofaSvc, passkeySvc).
 			WithLimitEnforcement(d.SharedClients, d.Repos.XUIPanel)
@@ -573,9 +579,10 @@ func NewRouter(d Deps) stdhttp.Handler {
 		adminGroup.PUT("/groups/:id/scope-settings", scopeSettings.SetOverride)
 		adminGroup.DELETE("/groups/:id/scope-settings/:type/:name", scopeSettings.DeleteOverride)
 
-		rules := handler.NewAdminRuleSetsHandler(d.Repos.RuleSet, d.Repos.Node, d.Group, d.Render.InvalidateAll, d.Cfg.ConfigDir, d.Repos.Template)
+		rules := handler.NewAdminRuleSetsHandler(d.Repos.RuleSet, d.Repos.Node, d.Render.InvalidateAll, d.Cfg.ConfigDir, d.Repos.Template).WithRoutePanels(d.Repos.XUIPanel).WithGroupPreview(d.Render, d.Repos.User)
 		staffGroup.GET("/rules", rules.List)
 		adminGroup.POST("/rules/inspect-proxy-groups", rules.InspectProxyGroups)
+		adminGroup.POST("/rules/preview-proxy-groups", rules.PreviewProxyGroups)
 		staffGroup.GET("/rules/:slug", rules.Get)
 		adminGroup.PUT("/rules/:slug", rules.Save)
 		adminGroup.DELETE("/rules/:slug", rules.Delete)

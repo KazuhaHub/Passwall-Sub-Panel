@@ -27,9 +27,10 @@ export interface MihomoRematchOutbound {
 }
 
 export interface ProxyGroupMember {
-  kind: 'builtin' | 'proxy_group' | 'node' | 'node_set' | 'rematch'
+  kind: 'builtin' | 'proxy_group' | 'node' | 'line' | 'node_set' | 'rematch'
   value?: string
   node_id?: number
+  line_id?: string
 }
 
 export type ProxyGroupType = 'select' | 'url-test' | 'fallback' | 'load-balance'
@@ -71,16 +72,25 @@ export interface ProxyGroupInspectGroup {
   options: ProxyGroupOptions
   default_members: ProxyGroupMember[]
   members: ProxyGroupMember[]
-  preview: string[]
 }
 
 export interface ProxyGroupInspection {
   groups: ProxyGroupInspectGroup[]
   builtins: string[]
   nodes: ProxyGroupInspectNode[]
+  lines: ProxyGroupInspectLine[]
   regions: string[]
   tags: string[]
   issues: ProxyGroupIssue[]
+}
+
+export interface ProxyGroupInspectLine {
+  node_id: number
+  line_id: string
+  kind: 'direct' | 'relay' | 'vless_route'
+  name: string
+  display_name: string
+  available: boolean
 }
 
 export interface RuleSetListParams {
@@ -113,9 +123,19 @@ export async function inspectProxyGroups(req: {
   proxy_group_options: Record<string, ProxyGroupOptions>
   mihomo_sub_rules?: MihomoSubRule[]
   mihomo_rematch_outbounds?: MihomoRematchOutbound[]
-  preview_group_id?: number
 }, signal?: AbortSignal) {
   const { data } = await client.post<ProxyGroupInspection>('/admin/rules/inspect-proxy-groups', req, { signal })
+  return data
+}
+
+export interface GroupSubscriptionPreview {
+  group_id: number
+  status: 'ready' | 'disabled'
+  groups: { name: string; type?: string; members: string[] }[]
+}
+
+export async function previewProxyGroups(req: { preview_group_id?: number; draft: RuleSet }, signal?: AbortSignal) {
+  const { data } = await client.post<GroupSubscriptionPreview>('/admin/rules/preview-proxy-groups', req, { signal, _skipErrorToast: true })
   return data
 }
 

@@ -16,6 +16,10 @@ import (
 type nodeRepo struct{ db *gorm.DB }
 
 func (r *nodeRepo) Create(ctx context.Context, n *domain.Node) error {
+	domain.AssignRelayIDs(n.Relays)
+	if err := domain.ValidateRelayIDs(n.Relays); err != nil {
+		return err
+	}
 	// sort_order <= 0 means "append to the bottom": new nodes land after every
 	// existing one (max+10, matching the drag-reorder 10-step spacing) instead
 	// of at a fixed position in the middle. An explicit positive value is kept.
@@ -46,7 +50,9 @@ func (r *nodeRepo) Update(ctx context.Context, n *domain.Node) error {
 	if err != nil {
 		return err
 	}
-	return r.db.WithContext(ctx).Save(row).Error
+	// Route synchronization has its own CAS writer. A stale full node snapshot
+	// must never overwrite a newer applied/unknown route state.
+	return r.db.WithContext(ctx).Omit("RouteState", "RouteRevision").Save(row).Error
 }
 
 // UpdateMetadata writes ONLY the admin-editable identity columns, leaving the

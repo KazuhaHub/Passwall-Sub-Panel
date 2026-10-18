@@ -1,19 +1,38 @@
 package handler
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 )
 
-func TestForceRelayStatusForHiddenDirect(t *testing.T) {
+func TestRelayLineNameOnlyDefaultsAndDTORoundTrip(t *testing.T) {
+	var input []relayLineDTO
+	if err := json.Unmarshal([]byte(`[{"name":"legacy","address":"legacy.example","enabled":true},{"name":"solo","address":"solo.example","enabled":true,"only_line_name":true}]`), &input); err != nil {
+		t.Fatal(err)
+	}
+	lines, err := parseRelays(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := relayDTOs(lines)
+	if lines[0].OnlyLineName || got[0].OnlyLineName || !lines[1].OnlyLineName || !got[1].OnlyLineName {
+		t.Fatal("relay display option did not round-trip or default to false")
+	}
+}
+
+func TestRelayStatusAutomaticallyFollowsEnabledRelays(t *testing.T) {
 	n := &domain.Node{
 		HideDirect: true,
 		Relays:     []domain.RelayLine{{Address: "relay.example", Enabled: true}},
 	}
-	forceRelayStatusForHiddenDirect(n)
-	if !n.ShowRelayStatus {
-		t.Fatal("hidden direct did not force relay status visibility")
+	if !n.EffectiveShowRelayStatus() || n.ShowRelayStatus {
+		t.Fatal("relay status was not automatic or mutated the obsolete flag")
+	}
+	n.HideDirect = false
+	if !n.EffectiveShowRelayStatus() {
+		t.Fatal("showing the direct line disabled relay status")
 	}
 }
 

@@ -237,8 +237,8 @@ func (s *Service) CheckOnce(ctx context.Context) error {
 			targets = append(targets, target{owner: state, relaySlot: -1, host: n.ServerAddress, port: n.DesiredPort, network: network})
 		}
 
-		// Relay probes are opt-in, except HideDirect forces them on. Only
-		// enabled lines are user-visible/probed. Their snapshot is separate
+		// Every enabled relay is automatically user-visible/probed. Disabled
+		// lines are skipped. Their snapshot is separate
 		// from Relays so this worker never overwrites admin-owned config.
 		//
 		// Scope of a relay "ok": this measures FRONT-EDGE reachability only —

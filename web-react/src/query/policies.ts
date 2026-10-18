@@ -23,6 +23,12 @@ export interface ResourcePolicy {
 }
 
 export const policies = {
+  nodeRouteLines: {
+    staleTime: 0,
+    gcTime: MINUTE,
+    refetchInterval: false,
+    note: 'Verify remote route status on tab activation or explicit refresh; scoped per editing session. Preserve unsaved edits and never poll the editor.',
+  },
   /** Keeps the existing 60s cadence; pauses while the tab is hidden. */
   alerts: {
     staleTime: 30 * SECOND,

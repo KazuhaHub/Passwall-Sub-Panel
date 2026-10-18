@@ -1,0 +1,243 @@
+// @vitest-environment jsdom
+import { useState } from 'react'
+import { fireEvent, screen, waitFor, within } from '@testing-library/react'
+import { expect, it, vi } from 'vitest'
+import { api, mount } from '@/test/adminSaveHarness'
+import type { ProxyGroupInspection, ProxyGroupMember, ProxyGroupOptions, ProxyGroupType } from '@/api/rules'
+import ProxyGroupMembersEditor from './ProxyGroupMembersEditor'
+
+const initialMembers: Record<string, ProxyGroupMember[]> = { Pick: [{ kind: 'builtin', value: 'DIRECT' }] }
+const node = (id: number, name: string) => ({ id, display_name: name, server_address: 'example.test', region: 'HK', tags: [], enabled: true })
+const inspection: ProxyGroupInspection = {
+  groups: [{ name: 'Pick', configured: true, options_configured: false, options: { type: 'select' }, default_members: [], members: initialMembers.Pick }],
+  builtins: ['DIRECT'], nodes: [node(1, 'Alpha'), node(2, 'Beta')], regions: [], tags: [], issues: [],
+  lines: [
+    { node_id: 1, line_id: 'direct', kind: 'direct', name: 'Alpha', display_name: 'Alpha', available: true },
+    { node_id: 1, line_id: 'relay-a', kind: 'relay', name: 'my-relay-line', display_name: 'Alpha my-relay-line', available: true },
+    { node_id: 1, line_id: 'route-a', kind: 'vless_route', name: 'my-vlessroute-line', display_name: 'Alpha my-vlessroute-line', available: true },
+    { node_id: 2, line_id: 'relay-b', kind: 'relay', name: 'beta-only', display_name: 'Beta beta-only', available: false },
+  ],
+}
+
+function Controlled({ changed }: { changed: (members: Record<string, ProxyGroupMember[]>) => void }) {
+  const [members, setMembers] = useState(initialMembers)
+  return <ProxyGroupMembersEditor content="- MATCH,Pick" groupOrder={[]} initialGroupOrder={[]} onGroupOrderChange={() => {}}
+    members={members} initialMembers={initialMembers} onChange={next => { changed(next); setMembers(next) }}
+    options={{}} initialOptions={{}} onOptionsChange={() => {}} previewGroups={[]} />
+}
+
+function OptionsEditor({ initialOptions, changed }: { initialOptions: Record<string, ProxyGroupOptions>; changed: (options: Record<string, ProxyGroupOptions>) => void }) {
+  const [options, setOptions] = useState(initialOptions)
+  return <ProxyGroupMembersEditor content="- MATCH,Pick" groupOrder={[]} initialGroupOrder={[]} onGroupOrderChange={() => {}}
+    members={initialMembers} initialMembers={initialMembers} onChange={() => {}}
+    options={options} initialOptions={initialOptions} onOptionsChange={next => { changed(next); setOptions(next) }} previewGroups={[]} />
+}
+
+async function chooseType(type: ProxyGroupType) {
+  fireEvent.mouseDown(screen.getByRole('combobox', { name: 'admin:rules.members.group_type' }))
+  fireEvent.click(await screen.findByRole('option', { name: `admin:rules.members.type.${type}` }))
+}
+
+async function setup() {
+  api.post.mockResolvedValue({ data: inspection })
+  const changed = vi.fn()
+  mount(<Controlled changed={changed} />)
+  expect(screen.queryByText('admin:rules.members.groups_hint')).toBeNull()
+  const kind = await screen.findByText('admin:rules.members.kind_node')
+  fireEvent.mouseDown(kind.closest('[role="combobox"]')!)
+  fireEvent.click(await screen.findByRole('option', { name: 'admin:rules.members.kind_line' }))
+  return changed
+}
+
+async function chooseNode(name: string) {
+  const input = screen.getByRole('combobox', { name: 'admin:rules.members.select_line_node' })
+  fireEvent.click(within(input.closest('.MuiAutocomplete-root') as HTMLElement).getByRole('button', { name: 'Open' }))
+  fireEvent.click(await screen.findByRole('option', { name }))
+}
+
+it('loads and edits the optional test URL for manual select groups without automatic test parameters', async () => {
+  api.post.mockResolvedValue({ data: inspection })
+  const initialOptions: Record<string, ProxyGroupOptions> = { Pick: { type: 'select', url: 'https://example.com/saved' } }
+  const changed = vi.fn()
+  mount(<OptionsEditor initialOptions={initialOptions} changed={changed} />)
+  const input = await screen.findByRole('textbox', { name: 'admin:rules.members.test_url' }) as HTMLInputElement
+  expect(input.value).toBe('https://example.com/saved')
+  for (const field of ['interval', 'timeout', 'lazy', 'tolerance', 'strategy']) {
+    expect(screen.queryByLabelText(`admin:rules.members.${field}`)).toBeNull()
+  }
+  fireEvent.change(input, { target: { value: '' } })
+  expect(changed).toHaveBeenLastCalledWith({ Pick: { type: 'select', url: '' } })
+  fireEvent.change(input, { target: { value: 'https://example.com/check' } })
+  expect(changed).toHaveBeenLastCalledWith({ Pick: { type: 'select', url: 'https://example.com/check' } })
+  expect(input.value).toBe('https://example.com/check')
+  await waitFor(() => expect(api.post).toHaveBeenLastCalledWith('/admin/rules/inspect-proxy-groups', expect.objectContaining({
+    proxy_group_options: { Pick: { type: 'select', url: 'https://example.com/check' } },
+  }), expect.anything()))
+})
+
+it.each(['https://example.com/saved', ''])('preserves the test URL %j when switching between manual and automatic types', async url => {
+  api.post.mockResolvedValue({ data: inspection })
+  const initialOptions: Record<string, ProxyGroupOptions> = { Pick: { type: 'select', url } }
+  const changed = vi.fn()
+  mount(<OptionsEditor initialOptions={initialOptions} changed={changed} />)
+  const input = await screen.findByRole('textbox', { name: 'admin:rules.members.test_url' }) as HTMLInputElement
+  for (const type of ['url-test', 'fallback', 'load-balance'] as const) {
+    await chooseType(type)
+    expect(input.value).toBe(url)
+    expect(changed).toHaveBeenLastCalledWith({ Pick: expect.objectContaining({ type, url, interval: 300, timeout: 5000, lazy: true }) })
+    await chooseType('select')
+    expect(input.value).toBe(url)
+    expect(changed).toHaveBeenLastCalledWith({ Pick: expect.objectContaining({ type: 'select', url }) })
+    expect(screen.queryByLabelText('admin:rules.members.interval')).toBeNull()
+  }
+  fireEvent.click(screen.getByRole('button', { name: 'admin:rules.members.restore_default' }))
+  expect(changed).toHaveBeenLastCalledWith({})
+  expect(input.value).toBe('')
+})
+
+it('preserves all edited parameters across types and inspection refreshes, including zero and false', async () => {
+  api.post.mockResolvedValue({ data: inspection })
+  const saved: ProxyGroupOptions = { type: 'load-balance', url: 'https://example.com/check', interval: 0, timeout: 1234, lazy: false, strategy: 'round-robin' }
+  const changed = vi.fn()
+  mount(<OptionsEditor initialOptions={{ Pick: saved }} changed={changed} />)
+  await screen.findByRole('combobox', { name: 'admin:rules.members.strategy' })
+  await chooseType('url-test')
+  fireEvent.change(screen.getByLabelText('admin:rules.members.tolerance'), { target: { value: '73' } })
+  const expected = { ...saved, tolerance: 73 }
+  for (const type of ['select', 'fallback', 'load-balance', 'url-test'] as const) {
+    await chooseType(type)
+    expect(changed).toHaveBeenLastCalledWith({ Pick: { ...expected, type } })
+    await waitFor(() => expect(api.post).toHaveBeenLastCalledWith('/admin/rules/inspect-proxy-groups', expect.objectContaining({
+      proxy_group_options: { Pick: { ...expected, type } },
+    }), expect.anything()))
+    if (type === 'select') {
+      expect(screen.queryByLabelText('admin:rules.members.interval')).toBeNull()
+    } else {
+      expect((screen.getByLabelText('admin:rules.members.interval') as HTMLInputElement).value).toBe('0')
+      expect((screen.getByLabelText('admin:rules.members.timeout') as HTMLInputElement).value).toBe('1234')
+      expect((screen.getByLabelText('admin:rules.members.lazy') as HTMLInputElement).checked).toBe(false)
+    }
+    if (type === 'load-balance') expect(screen.getByRole('combobox', { name: 'admin:rules.members.strategy' }).textContent).toBe('admin:rules.members.strategy_value.round-robin')
+    if (type === 'url-test') expect((screen.getByLabelText('admin:rules.members.tolerance') as HTMLInputElement).value).toBe('73')
+  }
+  expect(saved).not.toHaveProperty('tolerance')
+})
+
+it('shows dangling-reference warnings without blocking save or rewriting members', async () => {
+  const members: Record<string, ProxyGroupMember[]> = { Pick: [
+    { kind: 'proxy_group', value: 'Deleted group' },
+    { kind: 'rematch', value: 'Deleted Rematch' },
+    { kind: 'builtin', value: 'Unknown' },
+  ] }
+  const issues: ProxyGroupInspection['issues'] = ['missing_group', 'missing_rematch', 'unknown_builtin'].map(code => ({
+    level: 'warning', group: 'Pick', code, message: code,
+  }))
+  api.post.mockResolvedValue({ data: { ...inspection, issues } })
+  const validation = vi.fn()
+  const changed = vi.fn()
+  mount(<ProxyGroupMembersEditor content="- MATCH,Pick" groupOrder={[]} initialGroupOrder={[]} onGroupOrderChange={() => {}}
+    members={members} initialMembers={members} onChange={changed} options={{}} initialOptions={{}} onOptionsChange={() => {}}
+    previewGroups={[]} onValidationChange={validation} />)
+  await waitFor(() => expect(validation).toHaveBeenLastCalledWith(false))
+  for (const issue of issues) expect(await screen.findByText(`admin:rules.members.issues.${issue.code}`)).toBeTruthy()
+  expect(changed).not.toHaveBeenCalled()
+})
+
+it('first chooses a node, then lists only its own named lines and saves stable references', async () => {
+  const changed = await setup()
+  expect((screen.getByRole('combobox', { name: 'admin:rules.members.select_line' }) as HTMLInputElement).disabled).toBe(true)
+  await chooseNode('Alpha')
+  const line = screen.getByRole('combobox', { name: 'admin:rules.members.select_line' }) as HTMLInputElement
+  expect(line.disabled).toBe(false)
+  fireEvent.change(line, { target: { value: '[' } })
+  expect(await screen.findByRole('option', { name: '[admin:rules.members.line_type_direct]' })).toBeTruthy()
+  expect(screen.queryByRole('option', { name: /Alpha \[/ })).toBeNull()
+  fireEvent.change(line, { target: { value: 'my-' } })
+  expect(await screen.findByRole('option', { name: 'my-relay-line [admin:rules.members.line_type_relay]' })).toBeTruthy()
+  const route = screen.getByRole('option', { name: 'my-vlessroute-line [admin:rules.members.line_type_vless_route]' })
+  expect(screen.queryByRole('option', { name: /beta-only/ })).toBeNull()
+  expect(screen.queryByRole('option', { name: /Alpha my-/ })).toBeNull()
+  fireEvent.click(route)
+  fireEvent.click(screen.getByRole('button', { name: 'admin:rules.members.add' }))
+  await waitFor(() => expect(changed).toHaveBeenCalledWith({ Pick: [...initialMembers.Pick, { kind: 'line', node_id: 1, line_id: 'route-a' }] }))
+  expect((screen.getByRole('combobox', { name: 'admin:rules.members.select_line_node' }) as HTMLInputElement).value).toBe('Alpha')
+  expect(screen.queryByText('line:1:route-a')).toBeNull()
+  const memberName = screen.getByText('admin:rules.members.member_label_vless_route')
+  expect(memberName.tagName).toBe('SPAN')
+  expect(memberName.classList.contains('MuiTypography-noWrap')).toBe(true)
+  expect(memberName.getAttribute('title')).toBe('line:1:route-a')
+  fireEvent.mouseOver(memberName)
+  expect((await screen.findByRole('tooltip')).textContent).toBe('line:1:route-a')
+  fireEvent.mouseLeave(memberName)
+})
+
+it('prefixes sortable cards by member type without changing identities or inspection payloads', async () => {
+  const members: Record<string, ProxyGroupMember[]> = { Pick: [
+    { kind: 'node', node_id: 1 },
+    { kind: 'line', node_id: 1, line_id: 'direct' },
+    { kind: 'line', node_id: 1, line_id: 'relay-a' },
+    { kind: 'line', node_id: 1, line_id: 'route-a' },
+    { kind: 'node_set', value: 'remaining' },
+    { kind: 'node_set', value: 'region:HK' },
+    { kind: 'node_set', value: 'tag:fast' },
+    { kind: 'builtin', value: 'DIRECT' },
+    { kind: 'proxy_group', value: 'Other' },
+    { kind: 'rematch', value: 'Mark' },
+    { kind: 'line', node_id: 1, line_id: 'deleted' },
+  ] }
+  api.post.mockResolvedValue({ data: inspection })
+  const changed = vi.fn()
+  mount(<ProxyGroupMembersEditor content="- MATCH,Pick" groupOrder={[]} initialGroupOrder={[]} onGroupOrderChange={() => {}}
+    members={members} initialMembers={members} onChange={changed} options={{}} initialOptions={{}} onOptionsChange={() => {}} previewGroups={[]} />)
+  await screen.findByText('admin:rules.members.member_label_vless_route')
+  for (const key of ['node', 'direct', 'relay', 'vless_route', 'builtin', 'proxy_group', 'rematch', 'line']) {
+    const name = screen.getByText(`admin:rules.members.member_label_${key}`)
+    expect(name.tagName).toBe('SPAN')
+    expect(name.getAttribute('title')).toBeTruthy()
+  }
+  for (const key of ['remaining', 'region_set', 'tag_set']) expect(screen.getByText(`admin:rules.members.${key}`)).toBeTruthy()
+  expect(screen.getByText('admin:rules.members.member_label_direct').getAttribute('title')).toBe('line:1:direct')
+  expect(screen.getByText('admin:rules.members.member_label_rematch').getAttribute('title')).toBe('rematch:Mark:0')
+  expect(api.post).toHaveBeenCalledWith('/admin/rules/inspect-proxy-groups', expect.objectContaining({ proxy_group_members: members }), expect.anything())
+  expect(changed).not.toHaveBeenCalled()
+  fireEvent.click(screen.getByRole('button', { name: 'common:actions.delete admin:rules.members.member_label_relay' }))
+  expect(changed).toHaveBeenCalledWith({ Pick: members.Pick.filter(member => member.line_id !== 'relay-a') })
+})
+
+it('shows a category-specific explanation for every member category', async () => {
+  await setup()
+  for (const [kind, label] of [
+    ['line', 'line'], ['node', 'node'], ['remaining', 'remaining'], ['region', 'region'],
+    ['tag', 'tag'], ['builtin', 'builtin'], ['proxy_group', 'group'], ['rematch', 'rematch'],
+  ]) {
+    await waitFor(() => expect(screen.queryByRole('listbox')).toBeNull())
+    const current = screen.getAllByRole('combobox').find(element => element.textContent?.startsWith('admin:rules.members.kind_'))!
+    fireEvent.mouseDown(current)
+    fireEvent.click(await screen.findByRole('option', { name: `admin:rules.members.kind_${label}` }))
+    expect(screen.getByText(`admin:rules.members.kind_${kind}_hint`)).toBeTruthy()
+  }
+})
+
+it('clears the selected line when changing or clearing its node and keeps unavailable lines identifiable', async () => {
+  const changed = await setup()
+  await chooseNode('Alpha')
+  let line = screen.getByRole('combobox', { name: 'admin:rules.members.select_line' }) as HTMLInputElement
+  fireEvent.change(line, { target: { value: 'my-relay' } })
+  fireEvent.click(await screen.findByRole('option', { name: 'my-relay-line [admin:rules.members.line_type_relay]' }))
+  await chooseNode('Beta')
+  line = screen.getByRole('combobox', { name: 'admin:rules.members.select_line' }) as HTMLInputElement
+  expect(line.value).toBe('')
+  expect((screen.getByRole('button', { name: 'admin:rules.members.add' }) as HTMLButtonElement).disabled).toBe(true)
+  fireEvent.change(line, { target: { value: 'beta' } })
+  expect(await screen.findByRole('option', { name: /beta-only \[admin:rules.members.line_type_relay\]/ })).toBeTruthy()
+  expect(screen.getByText('admin:rules.members.line_unavailable')).toBeTruthy()
+  expect(screen.queryByRole('option', { name: /my-relay/ })).toBeNull()
+  fireEvent.keyDown(line, { key: 'Escape' })
+  const parent = screen.getByRole('combobox', { name: 'admin:rules.members.select_line_node' }) as HTMLInputElement
+  fireEvent.click(within(parent.closest('.MuiAutocomplete-root') as HTMLElement).getByRole('button', { name: 'Clear' }))
+  expect(parent.value).toBe('')
+  const clearedLine = screen.getByRole('combobox', { name: 'admin:rules.members.select_line' }) as HTMLInputElement
+  expect(clearedLine.value).toBe('')
+  expect(clearedLine.disabled).toBe(true)
+  expect(changed).not.toHaveBeenCalled()
+})

@@ -42,16 +42,53 @@ type ProxyGroupInspectGroup struct {
 	Options           domain.ProxyGroupOptions  `json:"options"`
 	DefaultMembers    []domain.ProxyGroupMember `json:"default_members"`
 	Members           []domain.ProxyGroupMember `json:"members"`
-	Preview           []string                  `json:"preview"`
 }
 
 type ProxyGroupInspection struct {
 	Groups   []ProxyGroupInspectGroup `json:"groups"`
 	Builtins []string                 `json:"builtins"`
 	Nodes    []ProxyGroupInspectNode  `json:"nodes"`
+	Lines    []ProxyGroupInspectLine  `json:"lines"`
 	Regions  []string                 `json:"regions"`
 	Tags     []string                 `json:"tags"`
 	Issues   []ProxyGroupIssue        `json:"issues"`
+}
+
+// ProxyGroupInspectLine is a credential-free catalog entry, not a proxy config.
+type ProxyGroupInspectLine struct {
+	NodeID      int64  `json:"node_id"`
+	LineID      string `json:"line_id"`
+	Kind        string `json:"kind"`
+	Name        string `json:"name"`
+	DisplayName string `json:"display_name"`
+	Available   bool   `json:"available"`
+}
+
+func inspectNodeLines(nodes []*domain.Node) []ProxyGroupInspectLine {
+	lines := []ProxyGroupInspectLine{}
+	for _, n := range nodes {
+		if n == nil || n.IsSeparator() {
+			continue
+		}
+		lines = append(lines, ProxyGroupInspectLine{NodeID: n.ID, LineID: domain.DirectLineID, Kind: "direct", Name: n.DisplayName, DisplayName: n.DisplayName, Available: n.Enabled && !n.EffectiveHideDirect()})
+		for _, r := range n.Relays {
+			if r.ID == "" {
+				continue
+			}
+			name := r.Name
+			if name == "" {
+				name = r.Address
+			}
+			lines = append(lines, ProxyGroupInspectLine{NodeID: n.ID, LineID: r.ID, Kind: "relay", Name: name, DisplayName: relayEntryName(n.DisplayName, r), Available: n.Enabled && r.Enabled})
+		}
+		for _, line := range n.RouteState.Lines {
+			if line.Deleted {
+				continue
+			}
+			lines = append(lines, ProxyGroupInspectLine{NodeID: n.ID, LineID: line.ID, Kind: "vless_route", Name: line.Label(), DisplayName: routeEntryName(n.DisplayName, line), Available: line.LocallyAvailable(n)})
+		}
+	}
+	return lines
 }
 
 // ProxyGroupMetadata is the rule-set metadata whose keys must refer to groups
@@ -118,17 +155,18 @@ func NormalizeProxyGroupMetadata(content string, order []string, members map[str
 }
 
 // InspectProxyGroups parses the same target set used by subscription rendering,
-// validates a draft member map, and resolves a metadata-only preview. It is
+// validates a draft member map, and returns a credential-free candidate catalog. It is
 // intentionally free of repositories so the admin handler and unit tests can
 // use the exact compiler semantics without constructing a render Service.
-func InspectProxyGroups(content string, members map[string][]domain.ProxyGroupMember, options map[string]domain.ProxyGroupOptions, nodes []*domain.Node, previewScope ...[]*domain.Node) ProxyGroupInspection {
-	return InspectProxyGroupsWithMihomo(content, members, options, nodes, MihomoRuleFeatures{}, previewScope...)
+func InspectProxyGroups(content string, members map[string][]domain.ProxyGroupMember, options map[string]domain.ProxyGroupOptions, nodes []*domain.Node) ProxyGroupInspection {
+	return InspectProxyGroupsWithMihomo(content, members, options, nodes, MihomoRuleFeatures{})
 }
 
-func InspectProxyGroupsWithMihomo(content string, members map[string][]domain.ProxyGroupMember, options map[string]domain.ProxyGroupOptions, nodes []*domain.Node, advanced MihomoRuleFeatures, previewScope ...[]*domain.Node) ProxyGroupInspection {
+func InspectProxyGroupsWithMihomo(content string, members map[string][]domain.ProxyGroupMember, options map[string]domain.ProxyGroupOptions, nodes []*domain.Node, advanced MihomoRuleFeatures) ProxyGroupInspection {
 	advanced = NormalizeMihomoRuleFeatures(advanced)
 	targets := proxyGroupTargets(content, members, advanced)
-	issues := validateProxyGroupMembers(targets, members, nodes, advanced.outboundNames())
+	groupNames, outboundNames := proxyGroupNameSet(targets), advanced.outboundNames()
+	issues := validateProxyGroupMembers(targets, members, nodes, outboundNames)
 	issues = append(issues, validateProxyGroupOptions(targets, options)...)
 	issues = append(issues, inspectMihomoFeatures(content, advanced, targets, members, nodes)...)
 
@@ -161,23 +199,6 @@ func InspectProxyGroupsWithMihomo(content string, members map[string][]domain.Pr
 		return inspectNodes[i].ID < inspectNodes[j].ID
 	})
 
-	previewNodes := nodes
-	if len(previewScope) > 0 && previewScope[0] != nil {
-		previewNodes = previewScope[0]
-	}
-	previewItems := make([]renderItem, 0, len(previewNodes))
-	for _, n := range previewNodes {
-		if n != nil && n.Enabled && !n.IsSeparator() {
-			previewItems = append(previewItems, renderItem{name: n.DisplayName, node: n})
-		}
-	}
-	sort.SliceStable(previewItems, func(i, j int) bool {
-		if previewItems[i].node.SortOrder != previewItems[j].node.SortOrder {
-			return previewItems[i].node.SortOrder < previewItems[j].node.SortOrder
-		}
-		return previewItems[i].node.ID < previewItems[j].node.ID
-	})
-
 	groups := make([]ProxyGroupInspectGroup, 0, len(targets))
 	for _, target := range targets {
 		defaults := defaultMembersForTarget(target)
@@ -191,31 +212,27 @@ func InspectProxyGroupsWithMihomo(content string, members map[string][]domain.Pr
 		if optionsConfigured {
 			effectiveOptions = EffectiveProxyGroupOptions(rawOptions)
 		}
-		preview := resolveConfiguredMembersWithOutbounds(effective, previewItems)
 		isAutoType := effectiveOptions.Type == ProxyGroupTypeURLTest ||
 			effectiveOptions.Type == ProxyGroupTypeFallback ||
 			effectiveOptions.Type == ProxyGroupTypeLoadBalance
-		if isAutoType && membersContainNonTestableExit(effective) {
+		if isAutoType && membersContainNonTestableExit(availableProxyGroupMembers(effective, groupNames, outboundNames)) {
 			// A DIRECT/REJECT member turns an auto group into a no-op: DIRECT wins
 			// the health check in ~0ms (everything routes direct) and REJECT makes
 			// the check fail. Block it at save time so the misconfiguration surfaces
 			// in the editor instead of silently misrouting at render time.
-			issues = append(issues, ProxyGroupIssue{Level: "error", Group: target, Code: "auto_group_builtin_member", Message: "自动测速 / 回退 / 负载均衡类型的成员不能包含内置出口或 Rematch 出站，请改用具体节点或其它代理组"})
-		}
-		if (effectiveOptions.Type == ProxyGroupTypeURLTest || effectiveOptions.Type == ProxyGroupTypeLoadBalance) && len(preview) < 2 {
-			issues = append(issues, ProxyGroupIssue{Level: "warning", Group: target, Code: "insufficient_auto_members", Message: "自动选择或负载均衡通常至少需要两个可用成员"})
+			issues = append(issues, ProxyGroupIssue{Level: "error", Group: target, Code: "auto_group_builtin_member", Message: "自动测速 / 回退 / 负载均衡类型的成员不能包含内置出站或 Rematch 出站，请按节点或线路选择成员，或引用代理组"})
 		}
 		groups = append(groups, ProxyGroupInspectGroup{
 			Name: target, Configured: configured, OptionsConfigured: optionsConfigured,
 			Options:        effectiveOptions,
 			DefaultMembers: defaults,
 			Members:        append([]domain.ProxyGroupMember(nil), effective...),
-			Preview:        preview,
 		})
 	}
 
 	return ProxyGroupInspection{
 		Groups: groups, Builtins: append([]string(nil), proxyGroupBuiltins...),
+		Lines: inspectNodeLines(nodes),
 		Nodes: inspectNodes, Regions: sortedKeys(regionsSet), Tags: sortedKeys(tagsSet), Issues: issues,
 	}
 }
@@ -225,37 +242,8 @@ func proxyGroupTargets(content string, members map[string][]domain.ProxyGroupMem
 	if len(advanced) > 0 {
 		features = advanced[0]
 	}
-	targets := withRequiredProxyGroupDependencies(ruleTargetsInOrderExcluding(strings.Join(features.allRuleFragments(content), "\n"), features.outboundNames()))
-	return withConfiguredProxyGroupDependencies(targets, members)
-}
-
-func withConfiguredProxyGroupDependencies(targets []string, configs map[string][]domain.ProxyGroupMember) []string {
-	hasNodeSelector := false
-	needsNodeSelector := false
-	targetSet := make(map[string]bool, len(targets))
-	for _, target := range targets {
-		targetSet[target] = true
-		if target == "🚀 节点选择" {
-			hasNodeSelector = true
-		}
-	}
-	for group, members := range configs {
-		// An orphaned owner cannot make another otherwise-unused group valid.
-		// This keeps cleanup stable when the removed group happened to reference
-		// the canonical node selector.
-		if !targetSet[group] {
-			continue
-		}
-		for _, member := range members {
-			if member.Kind == "proxy_group" && member.Value == "🚀 节点选择" {
-				needsNodeSelector = true
-			}
-		}
-	}
-	if !needsNodeSelector || hasNodeSelector {
-		return targets
-	}
-	return append([]string{"🚀 节点选择"}, targets...)
+	targets := ruleTargetsInOrderExcluding(strings.Join(features.allRuleFragments(content), "\n"), features.outboundNames())
+	return withEffectiveProxyGroupDependencies(targets, members)
 }
 
 func sortedKeys(set map[string]bool) []string {
@@ -312,9 +300,8 @@ func validateProxyGroupMembers(targets []string, configs map[string][]domain.Pro
 			issues = append(issues, ProxyGroupIssue{Level: "error", Group: group, Code: "too_many_members", Params: map[string]any{"max": maxProxyGroupMembers}, Message: fmt.Sprintf("成员数量不能超过 %d", maxProxyGroupMembers)})
 		}
 		seen := map[string]bool{}
-		hasRemaining := false
 		for _, member := range list {
-			key := member.Kind + ":" + member.Value + ":" + strconv.FormatInt(member.NodeID, 10)
+			key := member.Kind + ":" + member.Value + ":" + strconv.FormatInt(member.NodeID, 10) + ":" + member.LineID
 			if seen[key] {
 				label := memberLabel(member, nodeSet)
 				issues = append(issues, ProxyGroupIssue{Level: "error", Group: group, Code: "duplicate", Params: map[string]any{"member": label}, Message: "存在重复成员：" + label})
@@ -324,15 +311,21 @@ func validateProxyGroupMembers(targets []string, configs map[string][]domain.Pro
 			switch member.Kind {
 			case "builtin":
 				if !builtInRuleTargets[member.Value] {
-					issues = append(issues, ProxyGroupIssue{Level: "error", Group: group, Code: "unknown_builtin", Params: map[string]any{"value": member.Value}, Message: "未知内置出口：" + member.Value})
+					issues = append(issues, ProxyGroupIssue{Level: "warning", Group: group, Code: "unknown_builtin", Params: map[string]any{"value": member.Value}, Message: "未知内置出站，渲染时会跳过：" + member.Value})
 				}
 			case "proxy_group":
 				if member.Value == group {
 					issues = append(issues, ProxyGroupIssue{Level: "error", Group: group, Code: "self_reference", Message: "代理组不能引用自身"})
 				} else if !targetSet[member.Value] {
-					issues = append(issues, ProxyGroupIssue{Level: "error", Group: group, Code: "missing_group", Params: map[string]any{"value": member.Value}, Message: "引用的代理组不存在：" + member.Value})
+					issues = append(issues, ProxyGroupIssue{Level: "warning", Group: group, Code: "missing_group", Params: map[string]any{"value": member.Value}, Message: "引用的代理组不存在，渲染时会跳过：" + member.Value})
 				} else {
 					graph[group] = append(graph[group], member.Value)
+				}
+			case "line":
+				if member.NodeID <= 0 || member.LineID == "" {
+					issues = append(issues, ProxyGroupIssue{Level: "error", Group: group, Code: "invalid_line", Message: "线路引用必须包含节点和稳定线路 ID"})
+				} else if n := nodeSet[member.NodeID]; n == nil || !n.HasLine(member.LineID) {
+					issues = append(issues, ProxyGroupIssue{Level: "warning", Group: group, Code: "missing_line", Message: "引用的线路已不存在，渲染时会跳过"})
 				}
 			case "node":
 				if member.NodeID <= 0 {
@@ -351,19 +344,13 @@ func validateProxyGroupMembers(targets []string, configs map[string][]domain.Pro
 				} else if member.Value != "remaining" && !nodeSetHasMatch(member.Value, nodes) {
 					issues = append(issues, ProxyGroupIssue{Level: "warning", Group: group, Code: "empty_node_set", Params: map[string]any{"value": member.Value}, Message: "节点集合当前没有匹配项：" + member.Value})
 				}
-				if member.Value == "remaining" {
-					hasRemaining = true
-				}
 			case "rematch":
 				if !knownOutbounds[member.Value] {
-					issues = append(issues, ProxyGroupIssue{Level: "error", Group: group, Code: "missing_rematch", Params: map[string]any{"value": member.Value}, Message: "引用的 Rematch 出站不存在：" + member.Value})
+					issues = append(issues, ProxyGroupIssue{Level: "warning", Group: group, Code: "missing_rematch", Params: map[string]any{"value": member.Value}, Message: "引用的 Rematch 出站不存在，渲染时会跳过：" + member.Value})
 				}
 			default:
 				issues = append(issues, ProxyGroupIssue{Level: "error", Group: group, Code: "unknown_kind", Params: map[string]any{"value": member.Kind}, Message: "未知成员类型：" + member.Kind})
 			}
-		}
-		if len(list) > 0 && !hasRemaining {
-			issues = append(issues, ProxyGroupIssue{Level: "warning", Group: group, Code: "missing_remaining", Message: "未包含“其余节点”，未来新增节点不会自动进入此代理组"})
 		}
 	}
 
@@ -443,7 +430,42 @@ func membersContainNonTestableExit(members []domain.ProxyGroupMember) bool {
 	return false
 }
 
+// availableProxyGroupMembers filters dangling typed references without changing
+// persisted identities or rebinding them to an unrelated same-named object.
+func availableProxyGroupMembers(members []domain.ProxyGroupMember, groupNames, outbounds map[string]bool) []domain.ProxyGroupMember {
+	available := make([]domain.ProxyGroupMember, 0, len(members))
+	for _, member := range members {
+		switch member.Kind {
+		case "builtin":
+			if !builtInRuleTargets[member.Value] {
+				continue
+			}
+		case "proxy_group":
+			if !groupNames[member.Value] {
+				continue
+			}
+		case "rematch":
+			if !outbounds[member.Value] {
+				continue
+			}
+		}
+		available = append(available, member)
+	}
+	return available
+}
+
+func proxyGroupNameSet(groups []string) map[string]bool {
+	names := make(map[string]bool, len(groups))
+	for _, name := range groups {
+		names[name] = true
+	}
+	return names
+}
+
 func memberLabel(member domain.ProxyGroupMember, nodes map[int64]*domain.Node) string {
+	if member.Kind == "line" {
+		return fmt.Sprintf("node #%d / line %s", member.NodeID, member.LineID)
+	}
 	if member.Kind == "node" {
 		if n := nodes[member.NodeID]; n != nil {
 			return n.DisplayName
@@ -494,6 +516,10 @@ func resolveConfiguredMembersForClient(members []domain.ProxyGroupMember, items 
 			}
 		case "node":
 			addMatching(func(item renderItem) bool { return item.node != nil && item.node.ID == member.NodeID })
+		case "line":
+			addMatching(func(item renderItem) bool {
+				return item.node != nil && item.node.ID == member.NodeID && item.lineID() == member.LineID
+			})
 		case "node_set":
 			switch {
 			case member.Value == "remaining":

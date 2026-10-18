@@ -17,6 +17,17 @@ type renderItem struct {
 	// Host override) instead of the node's own ServerAddress. nil = direct.
 	// Populated by expandRelays.
 	relay *domain.RelayLine
+	route *domain.VlessRouteLine
+}
+
+func (it renderItem) lineID() string {
+	if it.route != nil {
+		return it.route.ID
+	}
+	if it.relay != nil {
+		return it.relay.ID
+	}
+	return domain.DirectLineID
 }
 
 // applyLayout returns the ordered list of items to emit, applying:

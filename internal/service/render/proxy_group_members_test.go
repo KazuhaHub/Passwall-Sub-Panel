@@ -15,6 +15,74 @@ func TestProxyGroupBuiltinsMatchMihomoSupportedTargets(t *testing.T) {
 	}
 }
 
+func TestAvailableMembersPreserveTypedIdentityAndRecover(t *testing.T) {
+	members := []domain.ProxyGroupMember{
+		{Kind: "proxy_group", Value: "Same"},
+		{Kind: "rematch", Value: "Same"},
+		{Kind: "builtin", Value: "Same"},
+		{Kind: "builtin", Value: "DIRECT"},
+	}
+	if got := availableProxyGroupMembers(members, nil, nil); !reflect.DeepEqual(got, members[3:]) {
+		t.Fatalf("dangling references survived: %+v", got)
+	}
+	if got := availableProxyGroupMembers(members, map[string]bool{"Same": true}, nil); !reflect.DeepEqual(got, []domain.ProxyGroupMember{members[0], members[3]}) {
+		t.Fatalf("group rebound another kind: %+v", got)
+	}
+	if got := availableProxyGroupMembers(members, nil, map[string]bool{"Same": true}); !reflect.DeepEqual(got, []domain.ProxyGroupMember{members[1], members[3]}) {
+		t.Fatalf("Rematch rebound another kind: %+v", got)
+	}
+}
+
+func TestDanglingOnlyGroupUsesExistingDirectFallback(t *testing.T) {
+	members := map[string][]domain.ProxyGroupMember{"G": {
+		{Kind: "proxy_group", Value: "Missing"},
+		{Kind: "rematch", Value: "Missing"},
+		{Kind: "builtin", Value: "Missing"},
+	}}
+	raw, err := buildProxyGroupsYAMLWithMembers("- MATCH,G", nil, members, nil, []renderItem{{name: "Missing"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var groups []proxyGroup
+	if err := yaml.Unmarshal([]byte(raw), &groups); err != nil {
+		t.Fatal(err)
+	}
+	if len(groups) != 1 || !reflect.DeepEqual(groups[0].Proxies, []string{"DIRECT"}) {
+		t.Fatalf("Mihomo emitted dangling members or rebound to line: %s", raw)
+	}
+	outbounds := buildSingBoxGroupOutboundsWithMembers("- MATCH,G", []renderItem{{name: "Missing"}}, nil, members, nil)
+	if len(outbounds) != 1 || !reflect.DeepEqual(outbounds[0]["outbounds"], []string{"direct"}) {
+		t.Fatalf("sing-box emitted dangling members or rebound to line: %+v", outbounds)
+	}
+}
+
+func TestExplicitMembersNeedNotIncludeRemainingAndKeepOtherValidation(t *testing.T) {
+	nodes := []*domain.Node{{ID: 1, DisplayName: "A", Enabled: true, Region: "HK", Tags: []string{"fast"}}}
+	for _, tc := range []struct {
+		member domain.ProxyGroupMember
+		issue  string
+	}{
+		{domain.ProxyGroupMember{Kind: "builtin", Value: "DIRECT"}, ""},
+		{domain.ProxyGroupMember{Kind: "node", NodeID: 1}, ""},
+		{domain.ProxyGroupMember{Kind: "line", NodeID: 1, LineID: "direct"}, ""},
+		{domain.ProxyGroupMember{Kind: "node_set", Value: "region:HK"}, ""},
+		{domain.ProxyGroupMember{Kind: "node_set", Value: "tag:fast"}, ""},
+		{domain.ProxyGroupMember{Kind: "node_set", Value: "remaining"}, ""},
+		{domain.ProxyGroupMember{Kind: "node", NodeID: 999}, "missing_node"},
+		{domain.ProxyGroupMember{Kind: "builtin", Value: "INVALID"}, "unknown_builtin"},
+		{domain.ProxyGroupMember{Kind: "node_set", Value: "region:XX"}, "empty_node_set"},
+	} {
+		got := InspectProxyGroups("- MATCH,Pick", map[string][]domain.ProxyGroupMember{"Pick": {tc.member}}, nil, nodes)
+		if tc.issue == "" {
+			if len(got.Issues) != 0 {
+				t.Fatalf("explicit member %+v produced unnecessary issues: %+v", tc.member, got.Issues)
+			}
+		} else if len(got.Issues) != 1 || got.Issues[0].Code != tc.issue {
+			t.Fatalf("other validation changed for %+v: %+v", tc.member, got.Issues)
+		}
+	}
+}
+
 func TestResolveConfiguredMembersSpecificNodeBeforeDirectAndRemainingDeduplicates(t *testing.T) {
 	china := &domain.Node{ID: 42, DisplayName: "🇨🇳 China SH - Aliyun", Region: "CN", Tags: []string{"premium"}}
 	taiwan := &domain.Node{ID: 7, DisplayName: "🇹🇼 Taiwan", Region: "TW"}
@@ -142,7 +210,7 @@ func TestSingBoxCustomMembersUseSameOrder(t *testing.T) {
 	}
 }
 
-func TestInspectProxyGroupsRejectsCycleAndWarnsWithoutRemaining(t *testing.T) {
+func TestInspectProxyGroupsRejectsCycleWithoutAdditionalMembershipWarning(t *testing.T) {
 	configs := map[string][]domain.ProxyGroupMember{
 		"A": {{Kind: "proxy_group", Value: "B"}},
 		"B": {{Kind: "proxy_group", Value: "A"}},
@@ -160,8 +228,8 @@ func TestInspectProxyGroupsRejectsCycleAndWarnsWithoutRemaining(t *testing.T) {
 	if !hasCycle {
 		t.Fatalf("expected cycle error: %#v", inspection.Issues)
 	}
-	if !hasWarning {
-		t.Fatalf("expected remaining warning: %#v", inspection.Issues)
+	if hasWarning {
+		t.Fatalf("unexpected membership warning: %#v", inspection.Issues)
 	}
 }
 

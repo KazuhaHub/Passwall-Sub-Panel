@@ -55,14 +55,15 @@ type MemberResyncer interface {
 }
 
 type Service struct {
-	nodes      ports.NodeRepo
-	separators ports.SeparatorRepo
-	pool       ports.XUIPool
-	cleaner    InboundCleaner
-	tasks      ports.SyncTaskRepo
-	groups     ports.GroupRepo
-	users      ports.UserRepo
-	resyncer   MemberResyncer
+	routeCleaner func(context.Context, int64) error
+	nodes        ports.NodeRepo
+	separators   ports.SeparatorRepo
+	pool         ports.XUIPool
+	cleaner      InboundCleaner
+	tasks        ports.SyncTaskRepo
+	groups       ports.GroupRepo
+	users        ports.UserRepo
+	resyncer     MemberResyncer
 	// bg routes handler-spawned background work (member provisioning after a node
 	// recreate; sync-existing-users after a node add) through the app's tracked
 	// dispatcher so App.Shutdown drains it under a cancellable context. Late-bound
@@ -77,6 +78,8 @@ type Service struct {
 	// decorator on a re-wire.
 	repoWrapped bool
 }
+
+func (s *Service) SetRouteCleaner(clean func(context.Context, int64) error) { s.routeCleaner = clean }
 
 // SetMemberResyncer late-binds the shared-client member resyncer (user.Service).
 func (s *Service) SetMemberResyncer(r MemberResyncer) { s.resyncer = r }
@@ -518,6 +521,11 @@ func (s *Service) RecreateInboundOnServer(ctx context.Context, nodeID int64) err
 	// inbound already exists but whose clients didn't push (e.g. the panel was briefly
 	// broken so the provision queue gave up) is a safe "push clients now".
 	if inb, gerr := c.GetInbound(ctx, n.InboundID); gerr != nil || inb == nil {
+		if s.routeCleaner != nil {
+			if err := s.routeCleaner(ctx, n.ID); err != nil {
+				return err
+			}
+		}
 		if !inboundcfg.HasLocalConfig(n) {
 			return fmt.Errorf("%w: node %d has no captured inbound config to recreate", domain.ErrValidation, nodeID)
 		}
@@ -659,7 +667,11 @@ func (s *Service) Reorder(ctx context.Context, updates []ports.NodeSortUpdate) e
 }
 
 func (s *Service) UpdateMetadata(ctx context.Context, n *domain.Node) error {
-	if _, err := s.nodes.GetByID(ctx, n.ID); err != nil {
+	previous, err := s.nodes.GetByID(ctx, n.ID)
+	if err != nil {
+		return err
+	}
+	if err := domain.ReconcileRelayIDs(previous.Relays, n.Relays); err != nil {
 		return err
 	}
 	// Column-scoped: a full-row Update here would roll back the poll-owned
@@ -672,6 +684,11 @@ func (s *Service) UpdateInboundConfig(ctx context.Context, id int64, spec ports.
 	n, err := s.nodes.GetByID(ctx, id)
 	if err != nil {
 		return err
+	}
+	if s.routeCleaner != nil && (spec.Port != n.DesiredPort || !strings.EqualFold(spec.Protocol, n.DesiredProtocol)) {
+		if err := s.routeCleaner(ctx, n.ID); err != nil {
+			return err
+		}
 	}
 	// v3.5 write-through (local-first): PSP owns the inbound config, so persist
 	// the new config into the local snapshot before pushing. Render reflects it
@@ -853,13 +870,11 @@ func (s *Service) DeleteAndSync(ctx context.Context, id int64) error {
 	return s.enqueueNodeTask(ctx, domain.SyncTaskNodeDelete, n, "delete node", nil)
 }
 
-// DetachAndSync drops the node record and the panel's ownership rows for
-// this inbound without contacting 3X-UI. Intended for nodes whose upstream
-// is already unreachable (server decommissioned, panel offline) where
-// queueing a remote delete would just retry forever. Clients PSP previously
-// created on the inbound remain in 3X-UI; the admin can clean them up
-// there directly. Separators (layout-only rows) have no upstream binding,
-// so detach falls back to a plain local delete.
+// DetachAndSync drops the node record and the panel's ownership rows without
+// requiring a reachable upstream. Route cleanup is best-effort; clients and any
+// remaining rules must be cleaned up manually in 3X-UI. This is intended for
+// decommissioned/offline servers where queued remote deletes would retry
+// forever. Separators have no upstream binding and use a plain local delete.
 func (s *Service) DetachAndSync(ctx context.Context, id int64) error {
 	n, err := s.nodes.GetByID(ctx, id)
 	if err != nil {
@@ -867,6 +882,13 @@ func (s *Service) DetachAndSync(ctx context.Context, id int64) error {
 	}
 	if n.IsSeparator() {
 		return s.nodes.Delete(ctx, id)
+	}
+	if s.routeCleaner != nil {
+		if err := s.routeCleaner(ctx, id); err != nil {
+			// An unreachable upstream must not block local detachment. Unlike
+			// deletion/recreation, remote cleanup is not a prerequisite here.
+			log.Warn("node detach: route cleanup failed; remote rules require manual cleanup", "node_id", id, "err", err)
+		}
 	}
 	if err := s.cleaner.UnclaimAllForInbound(ctx, n.PanelID, n.InboundID); err != nil {
 		return fmt.Errorf("unclaim owned clients: %w", err)
@@ -974,6 +996,11 @@ func (s *Service) runNodeTask(ctx context.Context, task *domain.SyncTask) error 
 	}
 	switch task.Type {
 	case domain.SyncTaskNodeDelete:
+		if s.routeCleaner != nil {
+			if err := s.routeCleaner(ctx, n.ID); err != nil {
+				return err
+			}
+		}
 		// If the inbound is already gone upstream (operator deleted it directly
 		// in 3X-UI — the common orphan case), the clients went with it: skip the
 		// guard and per-client deletes (which would each fail "record not found"

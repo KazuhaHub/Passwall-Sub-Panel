@@ -72,6 +72,8 @@ import { nodeKeys } from '@/query/keys'
 import { useNodesList, useSeparators, useUnmanagedInbounds } from '@/query/nodes'
 import { useServersList } from '@/query/servers'
 import { useQueryScope } from '@/query/useQueryScope'
+import { useVlessRouteDraft } from '@/query/vlessRoute'
+import VlessRouteLinesEditor from './VlessRouteLinesEditor'
 import { useQueryClient } from '@tanstack/react-query'
 import { xrayRequiresMLKEMFirst } from '@/utils/xrayReality'
 
@@ -198,7 +200,6 @@ interface MetaForm {
   sort_order: number
   relays: RelayLine[]
   hide_direct: boolean
-  show_relay_status: boolean
 }
 
 interface ImportForm extends MetaForm {
@@ -364,7 +365,7 @@ interface InboundFormState {
 
 const EMPTY_META: MetaForm = {
   display_name: '', server_address: '', flow: '', region: '', tags_text: '', sort_order: 0,
-  relays: [], hide_direct: false, show_relay_status: false,
+  relays: [], hide_direct: false,
 }
 
 const EMPTY_IMPORT: ImportForm = {
@@ -2329,6 +2330,9 @@ export default function NodesView() {
   const [editBusy, setEditBusy] = useState(false)
   const [editing, setEditing] = useState<Node | null>(null)
   const [editForm, setEditForm] = useState<MetaForm>(EMPTY_META)
+  const [lineTab, setLineTab] = useState<'relay' | 'route'>('relay')
+  const [lineSession, setLineSession] = useState(0)
+  const routeDraft = useVlessRouteDraft(qScope, editing?.id || 0, lineSession, editOpen && lineTab === 'route')
   type MetaField = 'display_name' | 'server_address' | 'region'
   const [editMetaErr, setEditMetaErr] = useState<FieldErrors<MetaField>>({})
 
@@ -2508,6 +2512,8 @@ export default function NodesView() {
   }
 
   function openEdit(n: Node) {
+    setLineTab('relay')
+    setLineSession(previous => previous + 1)
     setEditing(n)
     setEditForm({
       display_name: n.display_name,
@@ -2516,9 +2522,8 @@ export default function NodesView() {
       region: n.region,
       tags_text: (n.tags ?? []).join(', '),
       sort_order: n.sort_order,
-      relays: (n.relays ?? []).map(r => ({ ...r })),
+      relays: (n.relays ?? []).map(r => ({ ...r, only_line_name: !!r.only_line_name })),
       hide_direct: !!n.hide_direct,
-      show_relay_status: !!n.show_relay_status || !!n.hide_direct,
     })
     setEditMetaErr({})
     setEditOpen(true)
@@ -2534,12 +2539,13 @@ export default function NodesView() {
 
   async function submitEdit(e: FormEvent) {
     e.preventDefault()
-    if (!editing) return
+    if (!editing || routeDraft.loading || routeDraft.refreshing || routeDraft.conflict || routeDraft.readError) return
     const errs = validateMeta(editForm)
     setEditMetaErr(errs)
     const firstKey = firstError(errs)
     if (firstKey) { pushSnack(t(`admin:${firstKey}`), 'warning'); return }
     setEditBusy(true)
+    let metadataSaved = false
     try {
       const saved = await updateNodeMetadata(editing.id, {
         display_name: editForm.display_name,
@@ -2553,14 +2559,24 @@ export default function NodesView() {
         // Drop blank-address lines, trim, and coerce port to a number so a
         // half-filled row never reaches the backend (which would 400).
         relays: editForm.relays
-          .map(r => ({ ...r, name: r.name.trim(), address: r.address.trim(), port: Number(r.port) || 0, sni: r.sni?.trim() || undefined, host: r.host?.trim() || undefined }))
+          .map(r => ({ ...r, name: r.name.trim(), only_line_name: !!r.only_line_name, address: r.address.trim(), port: Number(r.port) || 0, sni: r.sni?.trim() || undefined, host: r.host?.trim() || undefined }))
           .filter(r => r.address),
         hide_direct: editForm.hide_direct,
-        show_relay_status: editForm.hide_direct || editForm.show_relay_status,
       })
       mutateManaged(prev => prev.map(node => node.id === saved.id ? saved : node))
+      metadataSaved = true
+      setEditing(saved)
+      const routed = await routeDraft.save()
+      if (routed) {
+        if (routed.state.status !== 'applied') {
+          pushSnack(t('admin:nodes.vless_route.partial_failure'), 'warning')
+          return
+        }
+      }
       pushSnack(t('admin:nodes.toast.saved'), 'success')
       setEditOpen(false)
+    } catch {
+      if (metadataSaved) pushSnack(t('admin:nodes.vless_route.partial_failure'), 'warning')
     } finally { setEditBusy(false) }
   }
 
@@ -3869,11 +3885,15 @@ export default function NodesView() {
                 relay fronts. Server-side forwarding (realm/gost/iptables) is
                 set up outside the panel; here we only record each front's
                 address/port (+ optional CDN SNI/Host). */}
-            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+            <Tabs value={lineTab} onChange={(_, value: 'relay' | 'route') => setLineTab(value)} aria-label={t('admin:nodes.vless_route.tabs')}>
+              <Tab value="relay" label={t('admin:nodes.relay.title')} />
+              <Tab value="route" label={t('admin:nodes.vless_route.title')} />
+            </Tabs>
+            <Box hidden={lineTab !== 'relay'} sx={{ display: lineTab === 'relay' ? 'flex' : 'none', flexDirection: 'column', gap: 1 }}>
               <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                 <Typography sx={{ fontSize: 14, fontWeight: 600 }}>{t('admin:nodes.relay.title')}</Typography>
                 <Button size="small" startIcon={<AddIcon />}
-                  onClick={() => setEditForm(f => ({ ...f, relays: [...f.relays, { name: '', address: '', port: 0, sni: '', host: '', enabled: true }] }))}>
+                  onClick={() => setEditForm(f => ({ ...f, relays: [...f.relays, { name: '', only_line_name: false, address: '', port: 0, sni: '', host: '', enabled: true }] }))}>
                   {t('admin:nodes.relay.add')}
                 </Button>
               </Box>
@@ -3912,27 +3932,21 @@ export default function NodesView() {
                         onChange={e => update({ host: e.target.value })} sx={{ flex: 1 }}
                         placeholder={t('admin:nodes.relay.cdn_optional')} />
                     </Box>
+                    <FormControlLabel sx={{ m: 0, '& .MuiFormControlLabel-label': { ml: 0.75 } }} label={t('admin:nodes.relay.only_line_name')}
+                      control={<Switch size="small" checked={!!r.only_line_name} onChange={(_, checked) => update({ only_line_name: checked })} />} />
                   </Box>
                 )
               })}
-              {editForm.relays.some(r => r.enabled) && (
-                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
-                  <FormControlLabel sx={{ m: 0, '& .MuiFormControlLabel-label': { ml: 0.75 } }} label={t('admin:nodes.relay.hide_direct')}
-                    control={<Switch size="small" checked={editForm.hide_direct}
-                      onChange={(_, c) => setEditForm(f => ({ ...f, hide_direct: c, show_relay_status: c || f.show_relay_status }))} />} />
-                  <FormControlLabel sx={{ m: 0, '& .MuiFormControlLabel-label': { ml: 0.75 } }} label={t('admin:nodes.relay.show_relay_status')}
-                    control={<Switch size="small" checked={editForm.hide_direct || editForm.show_relay_status}
-                      disabled={editForm.hide_direct}
-                      onChange={(_, c) => setEditForm(f => ({ ...f, show_relay_status: c }))} />} />
-                </Box>
-              )}
+              <FormControlLabel sx={{ m: 0, '& .MuiFormControlLabel-label': { ml: 0.75 } }} label={t('admin:nodes.relay.hide_direct')}
+                control={<Switch size="small" checked={editForm.hide_direct} onChange={(_, checked) => setEditForm(f => ({ ...f, hide_direct: checked }))} />} />
             </Box>
+            {lineTab === 'route' && <VlessRouteLinesEditor draft={routeDraft} busy={editBusy} relays={editForm.relays} />}
             <Box sx={{ display: 'none' }}>{alpha(md.error, 0.5)}</Box>
           </Box>
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setEditOpen(false)} disabled={editBusy} variant="text">{t('common:actions.cancel')}</Button>
-          <Button type="submit" form="node-form" variant="contained" disabled={editBusy}
+          <Button type="submit" form="node-form" variant="contained" disabled={editBusy || routeDraft.loading || routeDraft.refreshing || routeDraft.conflict || routeDraft.readError}
             startIcon={editBusy ? <CircularProgress size={16} color="inherit" /> : null}>
             {t('common:actions.ok')}
           </Button>

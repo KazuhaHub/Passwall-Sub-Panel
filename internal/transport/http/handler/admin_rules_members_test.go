@@ -26,7 +26,7 @@ func TestAdminRuleSetsSavePersistsMembersAndOptionsAndInvalidatesRenderCache(t *
 		t.Fatal(err)
 	}
 	invalidations := 0
-	h := NewAdminRuleSetsHandler(repo, staticRuleNodes{nodes: []*domain.Node{{ID: 42, DisplayName: "China", Enabled: true}}}, nil, func() { invalidations++ }, t.TempDir())
+	h := NewAdminRuleSetsHandler(repo, staticRuleNodes{nodes: []*domain.Node{{ID: 42, DisplayName: "China", Enabled: true}}}, func() { invalidations++ }, t.TempDir())
 
 	body := ruleSetDTO{
 		Slug: "custom", Name: "Custom", Enabled: true, DirectSubscriptionDomain: true, Content: "- MATCH,🇨🇳 中国大陆",
@@ -38,6 +38,7 @@ func TestAdminRuleSetsSavePersistsMembersAndOptionsAndInvalidatesRenderCache(t *
 		},
 		ProxyGroupOptions: map[string]domain.ProxyGroupOptions{
 			"🇨🇳 中国大陆": {Type: "load-balance", Strategy: "consistent-hashing"},
+			"🚀 节点选择":  {Type: "select", URL: "https://example.com/check"},
 		},
 	}
 	w := performRuleSave(t, h, body)
@@ -64,6 +65,9 @@ func TestAdminRuleSetsSavePersistsMembersAndOptionsAndInvalidatesRenderCache(t *
 	if options.Type != "load-balance" || options.Strategy != "consistent-hashing" || options.URL == "" || options.Interval == nil || options.Lazy == nil || options.Timeout == nil {
 		t.Fatalf("options were not normalized and persisted: %#v", options)
 	}
+	if manual := got.ProxyGroupOptions["🚀 节点选择"]; manual.Type != "select" || manual.URL != "https://example.com/check" || manual.Interval != nil {
+		t.Fatalf("manual test URL was not persisted: %#v", manual)
+	}
 }
 
 func TestAdminRuleSetsSaveMigratesLegacyMihomoRulesIntoContent(t *testing.T) {
@@ -71,7 +75,7 @@ func TestAdminRuleSetsSaveMigratesLegacyMihomoRulesIntoContent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	h := NewAdminRuleSetsHandler(repo, staticRuleNodes{}, nil, nil, t.TempDir())
+	h := NewAdminRuleSetsHandler(repo, staticRuleNodes{}, nil, t.TempDir())
 	body := ruleSetDTO{
 		Slug: "advanced", Name: "Advanced", Enabled: true, Content: "- MATCH,DIRECT",
 		MihomoRules:            "- DOMAIN-SUFFIX,openai.com,use-ai-rules",
@@ -99,7 +103,7 @@ func TestAdminRuleSetsInspectMergesLegacyMihomoRulesIntoContent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	h := NewAdminRuleSetsHandler(repo, staticRuleNodes{}, nil, nil, t.TempDir())
+	h := NewAdminRuleSetsHandler(repo, staticRuleNodes{}, nil, t.TempDir())
 	raw, err := json.Marshal(inspectProxyGroupsRequest{
 		Content:     "- MATCH,Current",
 		MihomoRules: "- MATCH,Legacy",
@@ -133,7 +137,7 @@ func TestAdminRuleSetsSaveAllowsBoundSubRulesWithoutTemplatePlaceholder(t *testi
 	}); err != nil {
 		t.Fatal(err)
 	}
-	h := NewAdminRuleSetsHandler(rules, staticRuleNodes{}, nil, nil, root, templates)
+	h := NewAdminRuleSetsHandler(rules, staticRuleNodes{}, nil, root, templates)
 	w := performRuleSave(t, h, ruleSetDTO{
 		Slug: "advanced", Name: "Advanced", Enabled: true, Content: "- MATCH,DIRECT",
 		MihomoSubRules: []domain.MihomoSubRule{{Name: "ai-rules", Content: "- MATCH,DIRECT"}},
@@ -153,7 +157,7 @@ func TestAdminRuleSetsSavePrunesRemovedGroupMetadataAndReturnsPersistedRuleSet(t
 		t.Fatal(err)
 	}
 	invalidations := 0
-	h := NewAdminRuleSetsHandler(repo, staticRuleNodes{}, nil, func() { invalidations++ }, t.TempDir())
+	h := NewAdminRuleSetsHandler(repo, staticRuleNodes{}, func() { invalidations++ }, t.TempDir())
 	body := ruleSetDTO{
 		Slug: "custom", Name: "Custom", Enabled: true,
 		Content:         "- MATCH,🐟 漏网之鱼",
@@ -197,10 +201,11 @@ func TestAdminRuleSetsSaveRejectsInvalidProxyGroupOptions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	h := NewAdminRuleSetsHandler(repo, staticRuleNodes{}, nil, nil, t.TempDir())
+	h := NewAdminRuleSetsHandler(repo, staticRuleNodes{}, nil, t.TempDir())
 	negative, zero := -1, 0
 	tests := []domain.ProxyGroupOptions{
 		{Type: "random"},
+		{Type: "select", URL: "ftp://example.com"},
 		{Type: "url-test", URL: "ftp://example.com", Interval: &negative},
 		{Type: "fallback", Timeout: &zero},
 		{Type: "load-balance", Strategy: "random"},
@@ -220,7 +225,7 @@ func TestAdminRuleSetsSaveRejectsInvalidProxyGroupOptions(t *testing.T) {
 func TestAdminRuleSetsInspectReturnsEffectiveOptionsForAllTypes(t *testing.T) {
 	h := NewAdminRuleSetsHandler(nil, staticRuleNodes{nodes: []*domain.Node{
 		{ID: 1, DisplayName: "A", Enabled: true}, {ID: 2, DisplayName: "B", Enabled: true},
-	}}, nil, nil, t.TempDir())
+	}}, nil, t.TempDir())
 	req := inspectProxyGroupsRequest{
 		Content: "- DOMAIN,a,Manual\n- DOMAIN,b,Auto\n- DOMAIN,c,Failover\n- MATCH,Balanced",
 		ProxyGroupOptions: map[string]domain.ProxyGroupOptions{
@@ -270,7 +275,7 @@ func TestAdminRuleSetsSaveRejectsMemberCycleWithoutInvalidating(t *testing.T) {
 		t.Fatal(err)
 	}
 	invalidations := 0
-	h := NewAdminRuleSetsHandler(repo, staticRuleNodes{}, nil, func() { invalidations++ }, t.TempDir())
+	h := NewAdminRuleSetsHandler(repo, staticRuleNodes{}, func() { invalidations++ }, t.TempDir())
 	body := ruleSetDTO{
 		Slug: "bad", Name: "Bad", Enabled: true, Content: "- DOMAIN,a,A\n- MATCH,B",
 		ProxyGroupMembers: map[string][]domain.ProxyGroupMember{
@@ -287,28 +292,32 @@ func TestAdminRuleSetsSaveRejectsMemberCycleWithoutInvalidating(t *testing.T) {
 	}
 }
 
-func TestAdminRuleSetsSaveStillRejectsSurvivingReferenceToRemovedGroup(t *testing.T) {
+func TestAdminRuleSetsSaveRetainsDanglingMemberReferences(t *testing.T) {
 	repo, err := yamladapter.NewRuleSetRepo(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
 	invalidations := 0
-	h := NewAdminRuleSetsHandler(repo, staticRuleNodes{}, nil, func() { invalidations++ }, t.TempDir())
+	h := NewAdminRuleSetsHandler(repo, staticRuleNodes{}, func() { invalidations++ }, t.TempDir())
 	body := ruleSetDTO{
 		Slug: "bad", Name: "Bad", Enabled: true, Content: "- MATCH,Keep",
 		ProxyGroupMembers: map[string][]domain.ProxyGroupMember{
-			"Keep": {{Kind: "proxy_group", Value: "Removed"}},
+			"Keep": {{Kind: "proxy_group", Value: "Removed"}, {Kind: "rematch", Value: "Removed Rematch"}, {Kind: "builtin", Value: "Unknown"}},
 		},
 	}
 	w := performRuleSave(t, h, body)
-	if w.Code != http.StatusBadRequest {
+	if w.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
 	}
-	if invalidations != 0 {
+	if invalidations != 1 {
 		t.Fatalf("invalidations=%d", invalidations)
 	}
-	if !bytes.Contains(w.Body.Bytes(), []byte(`"code":"missing_group"`)) {
-		t.Fatalf("missing_group issue not returned: %s", w.Body.String())
+	var saved ruleSetDTO
+	if err := json.Unmarshal(w.Body.Bytes(), &saved); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(saved.ProxyGroupMembers, body.ProxyGroupMembers) {
+		t.Fatalf("dangling identities changed: %+v", saved.ProxyGroupMembers)
 	}
 }
 

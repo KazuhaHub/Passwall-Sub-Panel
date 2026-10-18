@@ -26,6 +26,7 @@
 | [0036](0036-saml-pre-migration-hardening.md) | SAML 加固线：先收紧本地校验与请求绑定，再考虑替换协议实现 | 已接受（2026-09-18；替代 ADR 0023 第 3、4 项；H1–H3 已实现，协议替换候选经实验否决，见 `docs/authcore-migration-measurement.md` §6） |
 | [0037](0037-authcore-shareability-experiment.md) | authcore 共享收益实验的测量口径与退出判据 | 已接受（2026-09-18；判据在结果出现前冻结；三包结论见测量文档 §6、§8） |
 | [0038](0038-refused-node-report-is-recorded.md) | 被拒绝的节点上报是一个要记录、要判定、要显示的事实 | 已接受（2026-09-22） |
+| [0039](0039-vless-route-lines-v2.md) | 节点级 VLESS 路由线路与“按线路选择”引用 | 已接受，已实现并完成有界本地验收（2026-10-16） |
 
 > 编号从 0023 起始：更早的设计决策分散记录在 [ARCHITECTURE.md](../ARCHITECTURE.md)、各专题文档（如 [3xui-compat.md](../3xui-compat.md)、[panel-adapters.md](../panel-adapters.md)）以及提交历史中，尚未回溯整理为 ADR。新增决策请沿用此处的递增编号。
 

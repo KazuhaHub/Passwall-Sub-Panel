@@ -84,6 +84,7 @@ export function proxyGroupOrderEqual(left: string[], right: string[]): boolean {
 }
 
 export function proxyGroupMemberIdentity(member: ProxyGroupMember): string {
+  if (member.kind === 'line') return `line:${member.node_id || 0}:${member.line_id || ''}`
   return `${member.kind}:${member.value || ''}:${member.node_id || 0}`
 }
 

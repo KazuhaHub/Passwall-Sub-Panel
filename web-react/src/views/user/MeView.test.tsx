@@ -25,9 +25,9 @@ vi.mock('react-i18next', () => ({
 
 const theme = createAppTheme({ mode: 'light', sourceColor: '#6750a4', language: 'en-US' })
 
-function mount() {
+function mount(entry = '/') {
   render(
-    <MemoryRouter>
+    <MemoryRouter initialEntries={[entry]}>
       <ThemeProvider theme={theme}>
         <MeView />
       </ThemeProvider>
@@ -39,6 +39,48 @@ function mount() {
 beforeEach(() => {
   vi.clearAllMocks()
   ui.language = 'en-US'
+})
+
+describe('MeView server status lines', () => {
+  function serveStatus(nodes: unknown[]) {
+    api.get.mockImplementation(async (url: string) => {
+      if (url === '/user/me') return { data: profile }
+      if (url === '/user/me/server-status') return { data: { nodes } }
+      if (url === '/user/me/traffic') return { data: { user_id: 1, permanent_total_bytes: 0, period_used_bytes: 0, today_used_bytes: 0 } }
+      if (url === '/user/me/traffic/history') return { data: { points: [] } }
+      throw new Error(`Unexpected GET ${url}`)
+    })
+  }
+  it('renders relay and route names with independent only-line options and shared entry statuses', async () => {
+    serveStatus([{ name: 'Parent', region: 'JP', status: 'ok', show_direct: false,
+      relay_statuses: [{ name: 'Relay only', only_line_name: true, status: 'down' }, { name: 'Relay combined', status: 'ok' }],
+      route_statuses: [{ name: 'warp', only_line_name: true, status: 'down' }, { name: 'Route combined', only_line_name: false, status: 'ok' }],
+    }])
+    mount('/?tab=status')
+    await screen.findByText('Relay only')
+    expect(screen.getByText('Parent Relay combined')).toBeTruthy()
+    expect(screen.getByText('warp')).toBeTruthy()
+    expect(screen.getByText('Parent Route combined')).toBeTruthy()
+    expect(screen.queryByText('Parent')).toBeNull()
+    expect(screen.queryByText('Parent Relay only')).toBeNull()
+    expect(screen.queryByText('Parent warp')).toBeNull()
+    expect(screen.getAllByText('离线')).toHaveLength(2)
+    expect(screen.getAllByText('正常')).toHaveLength(2)
+    expect(screen.getByText(/VLESS 路由线路复用所选入口/)).toBeTruthy()
+  })
+  it('shows the empty state when every entry is hidden or inactive', async () => {
+    serveStatus([{ name: 'Hidden', region: 'JP', status: 'ok', show_direct: false }])
+    mount('/?tab=status')
+    await screen.findByText('暂无可显示的节点')
+    expect(screen.queryByText('Hidden')).toBeNull()
+  })
+  it('keeps legacy direct and relay responses working without the new fields', async () => {
+    serveStatus([{ name: 'Old', region: 'JP', status: 'unknown', relay_statuses: [{ name: 'Relay', status: 'unknown' }] }])
+    mount('/?tab=status')
+    await screen.findByText('Old Relay')
+    expect(screen.getByText('Old')).toBeTruthy()
+    expect(screen.queryByText(/VLESS 路由线路复用所选入口/)).toBeNull()
+  })
 })
 afterEach(cleanup)
 
