@@ -870,13 +870,11 @@ func (s *Service) DeleteAndSync(ctx context.Context, id int64) error {
 	return s.enqueueNodeTask(ctx, domain.SyncTaskNodeDelete, n, "delete node", nil)
 }
 
-// DetachAndSync drops the node record and the panel's ownership rows for
-// this inbound without contacting 3X-UI. Intended for nodes whose upstream
-// is already unreachable (server decommissioned, panel offline) where
-// queueing a remote delete would just retry forever. Clients PSP previously
-// created on the inbound remain in 3X-UI; the admin can clean them up
-// there directly. Separators (layout-only rows) have no upstream binding,
-// so detach falls back to a plain local delete.
+// DetachAndSync drops the node record and the panel's ownership rows without
+// requiring a reachable upstream. Route cleanup is best-effort; clients and any
+// remaining rules must be cleaned up manually in 3X-UI. This is intended for
+// decommissioned/offline servers where queued remote deletes would retry
+// forever. Separators have no upstream binding and use a plain local delete.
 func (s *Service) DetachAndSync(ctx context.Context, id int64) error {
 	n, err := s.nodes.GetByID(ctx, id)
 	if err != nil {
@@ -887,7 +885,9 @@ func (s *Service) DetachAndSync(ctx context.Context, id int64) error {
 	}
 	if s.routeCleaner != nil {
 		if err := s.routeCleaner(ctx, id); err != nil {
-			return err
+			// An unreachable upstream must not block local detachment. Unlike
+			// deletion/recreation, remote cleanup is not a prerequisite here.
+			log.Warn("node detach: route cleanup failed; remote rules require manual cleanup", "node_id", id, "err", err)
 		}
 	}
 	if err := s.cleaner.UnclaimAllForInbound(ctx, n.PanelID, n.InboundID); err != nil {
