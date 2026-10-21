@@ -37,6 +37,8 @@ github.com/KazuhaHub/passwall-protocol v0.2.0 h1:nYnqmFMJYXZ3TuiCfKOGeT8zrSOALUP
 github.com/KazuhaHub/passwall-protocol v0.2.0/go.mod h1:IQAhUtHV50QCZFbjIKDvrQBzyQY1tZerGp7F4KfquBI=
 github.com/KazuhaHub/passwall-protocol v0.2.1-0.20261021082316-85e902e9e0eb h1:/d4fi6cuj7qDlebaJKSOuXU52o7/B/dk1OUsXFMVeSE=
 github.com/KazuhaHub/passwall-protocol v0.2.1-0.20261021082316-85e902e9e0eb/go.mod h1:IQAhUtHV50QCZFbjIKDvrQBzyQY1tZerGp7F4KfquBI=
+github.com/KazuhaHub/passwall-protocol v0.2.1 h1:uTlSgzTscA+6/aiC0VM7Bm8aYLL1cVvAWjDtEnrBWXw=
+github.com/KazuhaHub/passwall-protocol v0.2.1/go.mod h1:IQAhUtHV50QCZFbjIKDvrQBzyQY1tZerGp7F4KfquBI=
 github.com/alibabacloud-go/alibabacloud-gateway-pop v0.0.6 h1:eIf+iGJxdU4U9ypaUfbtOWCsZSbTb8AUHvyPrxu6mAA=
 github.com/alibabacloud-go/alibabacloud-gateway-pop v0.0.6/go.mod h1:4EUIoxs/do24zMOGGqYVWgw0s9NtiylnJglOeEB5UJo=
 github.com/alibabacloud-go/alibabacloud-gateway-spi v0.0.4/go.mod h1:sCavSAvdzOjul4cEqeVtvlSaSScfNsTQ+46HwlTL1hc=

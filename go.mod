@@ -2,11 +2,11 @@ module github.com/KazuhaHub/passwall-sub-panel
 
 go 1.26.0
 
-toolchain go1.27.2
+toolchain go1.27.3
 
 require (
 	github.com/KazuhaHub/authcore v0.5.0
-	github.com/KazuhaHub/passwall-protocol v0.2.1-0.20261021082316-85e902e9e0eb
+	github.com/KazuhaHub/passwall-protocol v0.2.1
 	github.com/coreos/go-oidc/v3 v3.21.0
 	github.com/crewjam/saml v0.5.1
 	github.com/gin-gonic/gin v1.12.0
