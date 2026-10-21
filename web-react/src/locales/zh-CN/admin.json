@@ -4154,7 +4154,6 @@
     "freshnessLabel": "数据新鲜度",
     "resourceHealth": "资源健康",
     "doctorHint": "在节点上运行 {{command}} 可获取本机诊断。",
-    "diagnosticsPhaseTwo": "远程诊断任务将在第二阶段提供。",
     "finding": {
       "node_metric_stale": "主机指标已停止上报",
       "node_cpu_saturated": "CPU 持续高占用",
@@ -4173,11 +4172,65 @@
       "node_tcp_retrans_high": "TCP 重传率偏高",
       "node_conntrack_pressure": "连接跟踪表接近上限",
       "node_fd_pressure": "文件描述符接近上限",
-      "node_core_restart_loop": "Core 反复重启",
+      "node_core_restart_loop": "Core 反复异常退出",
       "node_sync_degraded": "同步连续失败",
       "node_clock_skew": "节点时钟偏差过大",
       "node_collector_slow": "采集耗时过长"
-    }
+    },
+    "heading": "主机指标",
+    "coverage": "有效覆盖",
+    "timezone": "显示时区：{{value}}",
+    "historyRange": "历史时间范围",
+    "range": {
+      "1h": "过去 1 小时",
+      "24h": "过去 24 小时",
+      "7d": "过去 7 天",
+      "30d": "过去 30 天",
+      "90d": "过去 90 天"
+    },
+    "resolution": {
+      "minute": "分钟采样",
+      "hour": "小时聚合"
+    },
+    "previousRange": "正在加载所选范围，图表暂时显示上次结果",
+    "measurementScope": "采集范围",
+    "deploymentValue": {
+      "systemd": "系统服务",
+      "docker": "Docker",
+      "manual": "手动运行",
+      "unknown": "未知"
+    },
+    "networkScopeHint": "TCP 重传率统计采集进程所在网络命名空间的全部 TCP 流量，可能包含其他程序；它不等于线路丢包率，也不能单独定位到面板连接。",
+    "coreLifecycle": "Core 运行记录",
+    "totalRestarts": "累计重启",
+    "totalRestartsHint": "包含配置部署、升级及异常恢复",
+    "unexpectedExits": "意外退出",
+    "sinceAgentStart": "从本次节点进程启动起累计",
+    "lastUnexpectedExit": "最近一次意外退出",
+    "restartReasonUnavailable": "此节点未上报独立的意外退出计数，无法区分配置部署与异常退出。不会据此判定“反复异常退出”；升级节点后可获得此项监控。",
+    "restartPolicy": "异常告警仅统计非预期退出：10 分钟内 3 次为警告，5 次为严重。正常配置部署和升级不计入；连续 30 分钟没有新的意外退出后恢复。",
+    "investigate": "继续排查",
+    "investigateHint": "远程诊断可采集检查项、运行状态和事件。退出码或信号等详细原因请查看节点的 passwall-node 服务日志。",
+    "openDiagnostics": "打开远程诊断",
+    "noFindings": "当前没有活动资源告警。数据新鲜度与采集范围请结合上方状态查看。",
+    "observedValue": "观测值",
+    "threshold": "触发阈值",
+    "startedAt": "开始时间",
+    "lastSeenAt": "最近观测",
+    "interface": "接口",
+    "restartEvidence": "观测值为 {{window}} 分钟窗口内的意外退出峰值；告警在最后一次意外退出后连续 {{recovery}} 分钟无新退出时解除。",
+    "unit": {
+      "events": "次",
+      "restarts": "次",
+      "seconds": "秒",
+      "boolean": "",
+      "count": "个"
+    },
+    "refreshTimeout": "暂未收到新样本，仍显示上次结果。节点可能尚未完成下一轮同步。",
+    "refreshFailed": "未能获取新样本，仍显示上次结果。请重试。",
+    "latestReading": "当前读数",
+    "staleHint": "数据已滞后，以下读数来自上次采集，不能代表节点当前状态。",
+    "waitingForSample": "节点支持主机指标，正在等待首个样本。"
   },
   "nodeDiagnostics": {
     "title": "远程诊断 · {{name}}",

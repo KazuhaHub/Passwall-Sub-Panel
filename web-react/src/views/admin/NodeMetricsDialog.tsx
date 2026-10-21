@@ -1,28 +1,23 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
-  Alert, Box, Chip, CircularProgress, Dialog, DialogContent, DialogTitle,
-  Divider, LinearProgress, Stack, Tab, Tabs, Typography,
+  Alert, AlertTitle, Box, Button, Chip, CircularProgress, Dialog, DialogContent, DialogTitle,
+  IconButton, LinearProgress, Stack, Tab, Tabs, ToggleButton, ToggleButtonGroup, Typography,
+  useMediaQuery, useTheme,
 } from '@mui/material'
 import RefreshIcon from '@mui/icons-material/Refresh'
-
+import CloseIcon from '@mui/icons-material/Close'
+import CheckIcon from '@mui/icons-material/Check'
 import { AsyncButton } from '@/components/AsyncButton'
-import NodeMetricsChart, { formatBits, formatBytes, type MetricsSeries } from '@/components/NodeMetricsChart'
+import NodeMetricsChart, { formatBits, formatBytes, formatValue, metricsTimeFormatter, type MetricsSeries } from '@/components/NodeMetricsChart'
+import NodeDiagnosticsDialog from './NodeDiagnosticsDialog'
 import {
-  getNodeHealth, getNodeMetricsCurrent, getNodeMetricsHistory, requestNodeMetricsRefresh,
-  type HistoryResolution, type NodeHealthDetail, type NodeMetricsCurrent, type NodeMetricsHistory,
+  getNodeMetricsCurrent, getNodeMetricsHistory, requestNodeMetricsRefresh,
+  type HistoryResolution, type NodeHealthFinding, type NodeMetricsCurrent, type NodeMetricsHistory,
   type NodeMetricsSeriesPoint,
 } from '@/api/nodeMetrics'
 import type { Server } from '@/api/servers'
-
-/**
- * Node resource telemetry.
- *
- * EVERY STATE HAS ITS OWN WORDS, and that is the point of the component rather
- * than a detail of it: unsupported (an older node), unavailable (nothing readable
- * yet), stale (it stopped reporting) and healthy are four different situations,
- * and a single empty chart would say the same thing about all four.
- */
+import { useSiteStore } from '@/stores/site'
 
 const RANGES: { key: string; hours: number; resolution: HistoryResolution }[] = [
   { key: '1h', hours: 1, resolution: 'minute' },
@@ -31,23 +26,30 @@ const RANGES: { key: string; hours: number; resolution: HistoryResolution }[] = 
   { key: '30d', hours: 24 * 30, resolution: 'hour' },
   { key: '90d', hours: 24 * 90, resolution: 'hour' },
 ]
-
+const cards = { display: 'grid', gridTemplateColumns: { xs: '1fr 1fr', md: 'repeat(3, minmax(0, 1fr))' }, gap: 2 }
+const charts = { display: 'grid', gridTemplateColumns: { xs: 'minmax(0, 1fr)', md: 'repeat(2, minmax(0, 1fr))' }, gap: 2 }
 type Status = 'loading' | 'ready' | 'error'
 
 export default function NodeMetricsDialog({ server, open, onClose }: {
-  server: Server | null
-  open: boolean
-  onClose: () => void
+  server: Server | null; open: boolean; onClose: () => void
 }) {
-  const { t } = useTranslation(['admin', 'common'])
+  const { t, i18n } = useTranslation(['admin', 'common'])
+  const theme = useTheme()
+  const mobile = useMediaQuery(theme.breakpoints.down('sm'))
+  const timeZone = useSiteStore(state => state.timezone)
   const [tab, setTab] = useState(0)
   const [range, setRange] = useState(RANGES[0])
-  const [current, setCurrent] = useState<NodeMetricsCurrent | null>(null)
-  const [history, setHistory] = useState<NodeMetricsHistory | null>(null)
+  const [data, setData] = useState<{ serverID: number; current: NodeMetricsCurrent; history: NodeMetricsHistory } | null>(null)
   const [status, setStatus] = useState<Status>('loading')
   const [refreshing, setRefreshing] = useState(false)
-
+  const [notice, setNotice] = useState<'refreshTimeout' | 'refreshFailed' | null>(null)
+  const [diagnostics, setDiagnostics] = useState(false)
+  const refreshController = useRef<AbortController | null>(null)
   const serverID = server?.id ?? 0
+  // Keep old history during a range fetch, but never show another server's data.
+  const current = data?.serverID === serverID ? data.current : null
+  const history = data?.serverID === serverID ? data.history : null
+  const dateFormat = metricsTimeFormatter(i18n?.resolvedLanguage, timeZone, true)
 
   const load = useCallback(async (signal?: AbortSignal) => {
     if (!serverID) return
@@ -59,12 +61,11 @@ export default function NodeMetricsDialog({ server, open, onClose }: {
         getNodeMetricsCurrent(serverID, signal),
         getNodeMetricsHistory(serverID, from.toISOString(), to.toISOString(), range.resolution, signal),
       ])
-      setCurrent(currentBody)
-      setHistory(historyBody)
+      if (signal?.aborted) return
+      setData({ serverID, current: currentBody, history: historyBody })
       setStatus('ready')
     } catch {
-      if (signal?.aborted) return
-      setStatus('error')
+      if (!signal?.aborted) setStatus('error')
     }
   }, [serverID, range])
 
@@ -75,320 +76,262 @@ export default function NodeMetricsDialog({ server, open, onClose }: {
     return () => controller.abort()
   }, [open, serverID, load])
 
-  /**
-   * The refresh opens a window on the panel; the sample arrives on the node's
-   * NEXT sync, so the poll waits for the sample id to change rather than for a
-   * fixed delay.
-   */
+  useEffect(() => {
+    setNotice(null)
+    setRefreshing(false)
+    setDiagnostics(false)
+    return () => refreshController.current?.abort()
+  }, [open, serverID])
+
   async function refresh() {
-    if (!serverID) return
+    if (!serverID || refreshing) return
+    const controller = new AbortController()
+    refreshController.current?.abort()
+    refreshController.current = controller
     setRefreshing(true)
+    setNotice(null)
     const baseline = current?.received_at
     try {
-      await requestNodeMetricsRefresh(serverID)
+      await requestNodeMetricsRefresh(serverID, controller.signal)
       const deadline = Date.now() + 30_000
-      while (Date.now() < deadline) {
-        await new Promise(resolve => setTimeout(resolve, 2000))
-        const body = await getNodeMetricsCurrent(serverID)
+      while (!controller.signal.aborted && Date.now() < deadline) {
+        await new Promise<void>(resolve => {
+          const finish = () => { clearTimeout(timer); controller.signal.removeEventListener('abort', finish); resolve() }
+          const timer = setTimeout(finish, 2000)
+          controller.signal.addEventListener('abort', finish, { once: true })
+        })
+        if (controller.signal.aborted) return
+        const body = await getNodeMetricsCurrent(serverID, controller.signal)
         if (body.received_at && body.received_at !== baseline) {
-          setCurrent(body)
-          break
+          // Refresh current readings, findings and history together. Otherwise
+          // Diagnostics could keep showing a warning that the node cleared.
+          await load(controller.signal)
+          return
         }
       }
+      if (!controller.signal.aborted) setNotice('refreshTimeout')
+    } catch {
+      if (!controller.signal.aborted) setNotice('refreshFailed')
     } finally {
-      setRefreshing(false)
+      if (!controller.signal.aborted) setRefreshing(false)
     }
   }
 
-  const times = useMemo(() => history?.series.map(p => p.at) ?? [], [history])
-  const coverage = useMemo(() => history?.series.map(p => p.coverage_seconds) ?? [], [history])
-  const hasPoints = (history?.series.length ?? 0) > 0
+  const chartProps = useMemo(() => ({
+    times: history?.series.map(point => point.at) ?? [],
+    coverage: history?.series.map(point => point.coverage_seconds) ?? [],
+    from: history?.from || undefined, to: history?.to || undefined,
+  }), [history])
+  const findings = current?.health?.findings ?? []
 
-  return (
-    <Dialog open={open} onClose={onClose} fullWidth maxWidth="lg">
-      <DialogTitle>
-        <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-          <span>{t('admin:nodeMetrics.title', { name: server?.name ?? '' })}</span>
-          {current && <HealthChip health={current.available ? current.freshness : 'unsupported'} />}
-          <Box sx={{ flexGrow: 1 }} />
-          {/* AsyncButton: the refresh polls for up to 30s waiting for a
-              changed sample, and a disabled-only button on that whole wait
-              looked identical to a stuck one. */}
-          <AsyncButton size="small" startIcon={<RefreshIcon />} pending={refreshing} onClick={refresh}>
+  return <>
+    <Dialog open={open} onClose={onClose} fullWidth fullScreen={mobile} maxWidth="xl"
+      aria-labelledby="node-metrics-title"
+      slotProps={{ paper: { sx: { maxWidth: 1280, height: { sm: 'min(900px, calc(100dvh - 64px))' }, minWidth: 0 } } }}>
+      <DialogTitle id="node-metrics-title" component="div" sx={{ pb: 2, px: { xs: 2, sm: 4 } }}>
+        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: 'minmax(0, 1fr) auto', sm: 'minmax(0, 1fr) auto auto' },
+          gridTemplateAreas: { xs: '"title close" "status refresh"', sm: '"title refresh close" "status refresh close"' }, gap: 1.5, alignItems: 'center' }}>
+          <Box sx={{ gridArea: 'title', minWidth: 0 }}>
+            <Typography variant="overline" color="text.secondary">{t('admin:nodeMetrics.heading')}</Typography>
+            <Typography component="h2" variant="h6" sx={{ overflowWrap: 'anywhere' }}>{server?.name}</Typography>
+          </Box>
+          {current && <Stack direction="row" sx={{ gridArea: 'status', gap: 1, flexWrap: 'wrap' }}>
+            {current.available && <HealthChip health={current.health?.status ?? 'unavailable'} />}
+            <HealthChip health={current.freshness} />
+          </Stack>}
+          <AsyncButton size="small" startIcon={<RefreshIcon />} pending={refreshing}
+            disabled={status === 'loading'} onClick={refresh} sx={{ gridArea: 'refresh', justifySelf: 'end' }}>
             {t('admin:nodeMetrics.refresh')}
           </AsyncButton>
-        </Stack>
+          <IconButton onClick={onClose} aria-label={t('common:actions.close')} sx={{ gridArea: 'close', alignSelf: 'start' }}><CloseIcon /></IconButton>
+        </Box>
       </DialogTitle>
-      <DialogContent dividers>
-        {status === 'error' && <Alert severity="error">{t('admin:nodeMetrics.loadFailed')}</Alert>}
-        {status === 'loading' && !current && (
-          <Box sx={{ display: 'flex', justifyContent: 'center', py: 6 }}><CircularProgress /></Box>
-        )}
-        {current && !current.available && (
-          <Alert severity="info">{t('admin:nodeMetrics.unsupported')}</Alert>
-        )}
-        {current && current.available && (
-          <>
-            <ScopeNote current={current} />
-            <Tabs value={tab} onChange={(_, next) => setTab(next)} sx={{ mb: 2 }}>
-              <Tab label={t('admin:nodeMetrics.tabOverview')} />
-              <Tab label={t('admin:nodeMetrics.tabPerformance')} />
-              <Tab label={t('admin:nodeMetrics.tabNetwork')} />
-              <Tab label={t('admin:nodeMetrics.tabDiagnostics')} />
-            </Tabs>
-            <Stack direction="row" spacing={1} sx={{ mb: 2, flexWrap: 'wrap' }}>
-              {RANGES.map(item => (
-                <Chip
-                  key={item.key}
-                  label={item.key}
-                  size="small"
-                  color={item.key === range.key ? 'primary' : 'default'}
-                  onClick={() => setRange(item)}
-                  // All chips, not only the clicked one: a range switch
-                  // re-fetches both current and history, and a click on a
-                  // different chip mid-fetch would otherwise start a second,
-                  // overlapping request rather than being ignored like the
-                  // rest of this dialog's async actions.
-                  disabled={status === 'loading'}
-                  icon={status === 'loading' && item.key === range.key
-                    ? <CircularProgress size={12} color="inherit" /> : undefined}
-                />
-              ))}
+      <Tabs value={tab} onChange={(_, next) => setTab(next)} variant={mobile ? 'fullWidth' : 'scrollable'} scrollButtons="auto"
+        aria-label={t('admin:nodeMetrics.heading')} sx={{ px: { xs: 2, sm: 3 }, borderBottom: 1, borderColor: 'divider', flexShrink: 0, '& .MuiTab-root': { minWidth: { xs: 0, sm: 90 }, px: { xs: 1, sm: 2 }, fontSize: { xs: 12, sm: 14 } } }}>
+        {['tabOverview', 'tabPerformance', 'tabNetwork', 'tabDiagnostics'].map((key, index) =>
+          <Tab key={key} id={`node-metrics-tab-${index}`} aria-controls="node-metrics-panel" label={t(`admin:nodeMetrics.${key}`)} />)}
+      </Tabs>
+      <DialogContent sx={{ p: { xs: 2, sm: 3 }, minWidth: 0 }}>
+        <Stack spacing={2.5}>
+          {status === 'error' && <Alert severity="error" action={<Button onClick={() => void load()}>{t('common:actions.retry')}</Button>}>{t('admin:nodeMetrics.loadFailed')}</Alert>}
+          {notice && <Alert severity="warning">{t(`admin:nodeMetrics.${notice}`)}</Alert>}
+          {status === 'loading' && (current ? <LinearProgress /> : <Box sx={{ py: 6, textAlign: 'center' }}><CircularProgress /></Box>)}
+          {current && !current.available && <Alert severity="info">{t('admin:nodeMetrics.unsupported')}</Alert>}
+          {current?.available && <>
+            {current.freshness === 'stale' && <Alert severity="warning">{t('admin:nodeMetrics.staleHint')}</Alert>}
+            {current.freshness === 'missing' && <Alert severity="info">{t('admin:nodeMetrics.waitingForSample')}</Alert>}
+            <Stack direction={{ xs: 'column', sm: 'row' }} sx={{ justifyContent: 'space-between', gap: 1 }}>
+              <Typography variant="body2" color="text.secondary">
+                {t('admin:nodeMetrics.collected')}: {current.collected_at ? dateFormat.format(new Date(current.collected_at)) : '—'}
+              </Typography>
+              <Typography variant="caption" color="text.secondary">{t('admin:nodeMetrics.timezone', { value: timeZone || Intl.DateTimeFormat().resolvedOptions().timeZone })}</Typography>
             </Stack>
-            {/* The range/tab re-fetch keeps the previous current+history on
-                screen (see load()) so switching never blanks the chart, but
-                that silence read as broken — this is the only signal that a
-                request is actually running while the stale data still shows. */}
-            {status === 'loading' && <LinearProgress sx={{ mb: 2 }} />}
-            {tab === 0 && <OverviewTab current={current} />}
-            {tab === 1 && (
-              <PerformanceTab
-                current={current} times={times} coverage={coverage} points={history?.series ?? []}
-                empty={!hasPoints}
-              />
-            )}
-            {tab === 2 && <NetworkTab current={current} />}
-            {tab === 3 && <DiagnosticsTab serverID={serverID} current={current} />}
-          </>
-        )}
+            {(tab === 1 || tab === 2) && <Box sx={{ p: 2, borderRadius: 2, bgcolor: 'action.hover' }}>
+              <Stack direction={{ xs: 'column', sm: 'row' }} sx={{ gap: 2, justifyContent: 'space-between', alignItems: { sm: 'center' } }}>
+                <Box>
+                  <Typography variant="subtitle2">{t('admin:nodeMetrics.historyRange')}</Typography>
+                  <Typography variant="caption" color="text.secondary">{t(`admin:nodeMetrics.range.${range.key}`)}</Typography>
+                </Box>
+                <ToggleButtonGroup exclusive value={range.key} aria-label={t('admin:nodeMetrics.historyRange')}
+                  onChange={(_, key: string | null) => { if (key) setRange(RANGES.find(item => item.key === key)!) }}
+                  size="small" disabled={status === 'loading' || refreshing}
+                  sx={{ alignSelf: { xs: 'flex-start', sm: 'auto' }, '& .MuiToggleButton-root': { px: { xs: 1, sm: 1.5 }, minWidth: { xs: 49, sm: 62 }, gap: 0.5 },
+                    '& .MuiToggleButton-root.Mui-selected': { bgcolor: theme.palette.md.primaryContainer, color: theme.palette.md.onPrimaryContainer,
+                      borderColor: theme.palette.md.primary, fontWeight: 700, '&:hover': { bgcolor: theme.palette.md.primaryContainer } } }}>
+                  {RANGES.map(item => <ToggleButton key={item.key} value={item.key} aria-label={item.key}>
+                    {range.key === item.key && <CheckIcon sx={{ fontSize: 15 }} />}{item.key}
+                  </ToggleButton>)}
+                </ToggleButtonGroup>
+              </Stack>
+              {history?.from && history.to && <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
+                {dateFormat.format(new Date(history.from))} — {dateFormat.format(new Date(history.to))}
+                {' · '}{t(`admin:nodeMetrics.resolution.${history.resolution}`)}
+                {status === 'loading' && ` · ${t('admin:nodeMetrics.previousRange')}`}
+              </Typography>}
+            </Box>}
+            <Box id="node-metrics-panel" role="tabpanel" aria-labelledby={`node-metrics-tab-${tab}`}>
+              {tab === 0 && <Stack spacing={3}>
+                <Box sx={cards}>
+                  <MetricCard label={t('admin:nodeMetrics.cpu')} value={show(current.summary.cpu_percent, percentText)}
+                    hint={current.summary.cpu_scope ? t(`admin:nodeMetrics.cpuScope.${current.summary.cpu_scope}`) : undefined} />
+                  <MetricCard label={t('admin:nodeMetrics.memory')} value={show(current.summary.memory_used_percent, percentText)}
+                    hint={current.summary.memory_scope ? t(`admin:nodeMetrics.memoryScope.${current.summary.memory_scope}`) : undefined} />
+                  <MetricCard label={t('admin:nodeMetrics.disk')} value={show(current.summary.disk_used_percent, percentText)} />
+                  <MetricCard label={t('admin:nodeMetrics.rxBps')} value={show(current.summary.rx_bps, formatBits)} />
+                  <MetricCard label={t('admin:nodeMetrics.txBps')} value={show(current.summary.tx_bps, formatBits)} />
+                  <MetricCard label={t('admin:nodeMetrics.coreRSS')} value={show(current.summary.core_rss_bytes, formatBytes)} />
+                </Box>
+                <Findings findings={findings} />
+                <ScopeNote current={current} />
+              </Stack>}
+              {tab === 1 && <Box sx={charts}>
+                <MetricPlot title={t('admin:nodeMetrics.chartCPU')} value={show(current.summary.cpu_percent, percentText)} {...chartProps}
+                  series={plotSeries(history, [ ['system_cpu_percent', t('admin:nodeMetrics.systemCPU'), 'percent'], ['cgroup_cpu_capacity_percent', t('admin:nodeMetrics.cgroupCapacity'), 'percent'] ])} />
+                <MetricPlot title={t('admin:nodeMetrics.chartMemory')} {...chartProps}
+                  series={plotSeries(history, [['memory_used_percent', t('admin:nodeMetrics.memory'), 'percent']])} />
+                <MetricPlot title={t('admin:nodeMetrics.chartDisk')} {...chartProps}
+                  series={plotSeries(history, [['disk_available_bytes', t('admin:nodeMetrics.diskAvailable'), 'bytes']])} />
+                <Box sx={{ p: 2.5, border: 1, borderColor: 'divider', borderRadius: 2 }}><ScopeNote current={current} /></Box>
+              </Box>}
+              {tab === 2 && <Stack spacing={2}>
+                <Box sx={cards}>
+                  <MetricCard label={t('admin:nodeMetrics.rxBps')} value={show(current.summary.rx_bps, formatBits)} />
+                  <MetricCard label={t('admin:nodeMetrics.txBps')} value={show(current.summary.tx_bps, formatBits)} />
+                  <MetricCard label={t('admin:nodeMetrics.retrans')} value={show(current.summary.tcp_retrans_percent, percentText)} />
+                </Box>
+                <Box sx={charts}>
+                  <MetricPlot title={t('admin:nodeMetrics.network')} {...chartProps}
+                    series={plotSeries(history, [['rx_bps', t('admin:nodeMetrics.rxBps'), 'bps'], ['tx_bps', t('admin:nodeMetrics.txBps'), 'bps']])} />
+                  <MetricPlot title={t('admin:nodeMetrics.retrans')} {...chartProps}
+                    series={plotSeries(history, [['tcp_retrans_percent', t('admin:nodeMetrics.retrans'), 'percent']])} />
+                </Box>
+                <Alert severity="info">{t('admin:nodeMetrics.networkScopeHint')}</Alert>
+              </Stack>}
+              {tab === 3 && <Stack spacing={3}>
+                <Findings findings={findings} />
+                <Box>
+                  <Typography variant="subtitle1" sx={{ mb: 1.5 }}>{t('admin:nodeMetrics.coreLifecycle')}</Typography>
+                  <Box sx={cards}>
+                    <MetricCard label={t('admin:nodeMetrics.totalRestarts')} value={current.core?.restarts ?? '—'} hint={t('admin:nodeMetrics.totalRestartsHint')} />
+                    <MetricCard label={t('admin:nodeMetrics.unexpectedExits')} value={current.core?.unexpected_exits ?? '—'} hint={t('admin:nodeMetrics.sinceAgentStart')} />
+                    <MetricCard label={t('admin:nodeMetrics.lastUnexpectedExit')}
+                      value={current.core?.last_unexpected_exit_at ? dateFormat.format(new Date(current.core.last_unexpected_exit_at)) : '—'} />
+                  </Box>
+                </Box>
+                {current.core?.unexpected_exits == null && <Alert severity="info">{t('admin:nodeMetrics.restartReasonUnavailable')}</Alert>}
+                <Alert severity="info">{t('admin:nodeMetrics.restartPolicy')}</Alert>
+                <Box sx={{ p: 2.5, border: 1, borderColor: 'divider', borderRadius: 2 }}>
+                  <Typography variant="subtitle1">{t('admin:nodeMetrics.investigate')}</Typography>
+                  <Typography variant="body2" color="text.secondary" sx={{ mt: 1, mb: 2 }}>{t('admin:nodeMetrics.investigateHint')}</Typography>
+                  <Button variant="outlined" onClick={() => setDiagnostics(true)}>{t('admin:nodeMetrics.openDiagnostics')}</Button>
+                  <Typography variant="body2" sx={{ mt: 2 }}>{t('admin:nodeMetrics.doctorHint', { command: 'passwall-node doctor --json --data-dir /opt/passwall-node/data' })}</Typography>
+                </Box>
+              </Stack>}
+            </Box>
+          </>}
+        </Stack>
       </DialogContent>
     </Dialog>
-  )
+    {diagnostics && <NodeDiagnosticsDialog server={server} open={open} onClose={() => setDiagnostics(false)} />}
+  </>
 }
 
 function HealthChip({ health }: { health: string }) {
-  const { t } = useTranslation(['admin'])
-  const color = health === 'critical' ? 'error'
-    : health === 'warning' || health === 'stale' ? 'warning'
-      : health === 'healthy' ? 'success' : 'default'
-  return <Chip size="small" color={color} label={t(`admin:nodeMetrics.freshness.${health}`)} />
+  const { t } = useTranslation('admin')
+  const theme = useTheme()
+  const color = health === 'critical' ? theme.palette.error : health === 'warning' || health === 'stale' ? theme.palette.warning
+    : health === 'healthy' ? theme.palette.success : theme.palette.info
+  return <Chip size="small" variant="outlined" label={t(`admin:nodeMetrics.freshness.${health}`, health)}
+    sx={{ color: color.main, borderColor: color.main, bgcolor: 'transparent' }} />
 }
 
-/**
- * The scope is shown, never folded away. A container reading the host's /proc and
- * a container reading its own cgroup produce the same field names, so "mixed"
- * must not be rendered as "host" — that is how a 512 MiB container gets drawn
- * against the host's RAM.
- */
 function ScopeNote({ current }: { current: NodeMetricsCurrent }) {
-  const { t } = useTranslation(['admin'])
+  const { t } = useTranslation('admin')
   if (!current.scope) return null
-  return (
-    <Stack direction="row" spacing={1} sx={{ mb: 1, flexWrap: 'wrap' }}>
-      <Chip size="small" variant="outlined" label={t('admin:nodeMetrics.deployment') + ': ' + current.scope.deployment} />
-      <Chip
-        size="small"
-        variant="outlined"
-        color={current.scope.resource_scope === 'host' ? 'default' : 'info'}
-        label={t('admin:nodeMetrics.scope') + ': ' + t(`admin:nodeMetrics.scopeValue.${current.scope.resource_scope}`, current.scope.resource_scope)}
-      />
-      {current.scope.cgroup_version > 0 && (
-        <Chip size="small" variant="outlined" label={`cgroup v${current.scope.cgroup_version}`} />
-      )}
-      {current.collected_at && (
-        <Chip size="small" variant="outlined" label={`${t('admin:nodeMetrics.collected')}: ${new Date(current.collected_at).toLocaleString()}`} />
-      )}
+  return <Box>
+    <Typography variant="subtitle2" sx={{ mb: 1 }}>{t('admin:nodeMetrics.measurementScope')}</Typography>
+    <Stack direction="row" sx={{ gap: 1, flexWrap: 'wrap' }}>
+      <Chip size="small" variant="outlined" label={`${t('admin:nodeMetrics.deployment')}: ${t(`admin:nodeMetrics.deploymentValue.${current.scope.deployment}`, current.scope.deployment)}`} />
+      <Chip size="small" variant="outlined" label={`${t('admin:nodeMetrics.scope')}: ${t(`admin:nodeMetrics.scopeValue.${current.scope.resource_scope}`, current.scope.resource_scope)}`}
+        sx={{ height: 'auto', minHeight: 32, maxWidth: '100%', '& .MuiChip-label': { py: 0.5, whiteSpace: 'normal' } }} />
+      {current.scope.cgroup_version > 0 && <Chip size="small" variant="outlined" label={`cgroup v${current.scope.cgroup_version}`} />}
     </Stack>
-  )
+    {current.scope.resource_scope === 'mixed' && <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>{t('admin:nodeMetrics.scopeNote')}</Typography>}
+  </Box>
 }
 
 function MetricCard({ label, value, hint }: { label: string; value: string; hint?: string }) {
-  return (
-    <Box sx={{ minWidth: 160, flex: '1 1 160px' }}>
-      <Typography variant="caption" color="text.secondary">{label}</Typography>
-      <Typography variant="h6">{value}</Typography>
-      {hint && <Typography variant="caption" color="text.secondary">{hint}</Typography>}
-    </Box>
-  )
+  return <Box sx={{ p: { xs: 1.5, sm: 2 }, border: 1, borderColor: 'divider', borderRadius: 2, minWidth: 0 }}>
+    <Typography variant="body2" color="text.secondary">{label}</Typography>
+    <Typography variant="h5" sx={{ mt: 0.75, fontVariantNumeric: 'tabular-nums', overflowWrap: 'anywhere' }}>{value}</Typography>
+    {hint && <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>{hint}</Typography>}
+  </Box>
 }
-
-/** A missing value is an em dash, never a zero. */
-function show(value: number | null | undefined, format: (v: number) => string): string {
-  return value === null || value === undefined ? '—' : format(value)
-}
-
+function show(value: number | null | undefined, format: (value: number) => string): string { return value == null ? '—' : format(value) }
 function percentText(value: number): string { return `${value.toFixed(1)}%` }
-
-function OverviewTab({ current }: { current: NodeMetricsCurrent }) {
-  const { t } = useTranslation(['admin'])
-  const summary = current.summary
-  return (
-    <Stack spacing={2}>
-      <Stack direction="row" spacing={3} sx={{ flexWrap: 'wrap' }}>
-        <MetricCard
-          label={t('admin:nodeMetrics.cpu')}
-          value={show(summary.cpu_percent, percentText)}
-          hint={summary.cpu_scope ? t(`admin:nodeMetrics.cpuScope.${summary.cpu_scope}`, summary.cpu_scope) : undefined}
-        />
-        <MetricCard
-          label={t('admin:nodeMetrics.memory')}
-          value={show(summary.memory_used_percent, percentText)}
-          hint={summary.memory_scope ? t(`admin:nodeMetrics.memoryScope.${summary.memory_scope}`, summary.memory_scope) : undefined}
-        />
-        <MetricCard label={t('admin:nodeMetrics.disk')} value={show(summary.disk_used_percent, percentText)} />
-        <MetricCard
-          label={t('admin:nodeMetrics.network')}
-          value={show(summary.tx_bps, formatBits)}
-          hint={t('admin:nodeMetrics.networkHint')}
-        />
-        <MetricCard label={t('admin:nodeMetrics.coreRSS')} value={show(summary.core_rss_bytes, formatBytes)} />
+function plotSeries(history: NodeMetricsHistory | null, fields: [keyof NodeMetricsSeriesPoint, string, MetricsSeries['unit']][]): MetricsSeries[] {
+  return fields.map(([key, name, unit]) => ({ name, unit, values: history?.series.map(point => typeof point[key] === 'number' ? point[key] as number : null) ?? [] }))
+}
+function MetricPlot({ title, value, ...props }: React.ComponentProps<typeof NodeMetricsChart> & { title: string; value?: string }) {
+  const { t } = useTranslation('admin')
+  return <Box sx={{ p: { xs: 1.5, sm: 2.5 }, minWidth: 0, border: 1, borderColor: 'divider', borderRadius: 2 }}>
+    <Stack direction="row" sx={{ mb: 2, gap: 1, alignItems: 'baseline', justifyContent: 'space-between', flexWrap: 'wrap' }}>
+      <Typography variant="subtitle1">{title}</Typography>
+      {value && <Stack direction="row" sx={{ gap: 1, alignItems: 'baseline' }}>
+        <Typography variant="caption" color="text.secondary">{t('admin:nodeMetrics.latestReading')}</Typography>
+        <Typography variant="body2">{value}</Typography>
+      </Stack>}
+    </Stack>
+    <NodeMetricsChart {...props} label={title} />
+  </Box>
+}
+function Findings({ findings }: { findings: NodeHealthFinding[] }) {
+  const { t, i18n } = useTranslation('admin')
+  const timeZone = useSiteStore(state => state.timezone)
+  const dateFormat = metricsTimeFormatter(i18n?.resolvedLanguage, timeZone, true)
+  const value = (finding: NodeHealthFinding, number: number) => {
+    if (finding.unit === 'percent' || finding.unit === 'ratio' || finding.unit === 'bytes' || finding.unit === 'milliseconds') return formatValue(number, finding.unit)
+    return `${number.toLocaleString()} ${t(`admin:nodeMetrics.unit.${finding.unit}`, finding.unit)}`
+  }
+  return <Stack spacing={1.5}>
+    <Typography variant="subtitle1">{t('admin:nodeMetrics.activeFindings')}</Typography>
+    {findings.length === 0 && <Alert severity="info">{t('admin:nodeMetrics.noFindings')}</Alert>}
+    {findings.map(finding => <Alert key={`${finding.code}:${finding.interface_name ?? ''}:${finding.started_at}`} severity={finding.severity === 'critical' ? 'error' : 'warning'}
+      sx={{ '& .MuiAlert-message': { minWidth: 0, width: '100%' } }}>
+      <AlertTitle>{t(`admin:nodeMetrics.finding.${finding.code}`, finding.code)}</AlertTitle>
+      <Stack direction="row" sx={{ gap: 1, columnGap: 3, flexWrap: 'wrap' }}>
+        <Evidence label={t('admin:nodeMetrics.observedValue')}>{value(finding, finding.current_value)}</Evidence>
+        <Evidence label={t('admin:nodeMetrics.threshold')}>{value(finding, finding.threshold)}</Evidence>
+        <Evidence label={t('admin:nodeMetrics.startedAt')}>{dateFormat.format(new Date(finding.started_at))}</Evidence>
+        {finding.last_seen_at && <Evidence label={t('admin:nodeMetrics.lastSeenAt')}>{dateFormat.format(new Date(finding.last_seen_at))}</Evidence>}
+        {finding.interface_name && <Evidence label={t('admin:nodeMetrics.interface')}>{finding.interface_name}</Evidence>}
       </Stack>
-      {current.health && current.health.findings.length > 0 && (
-        <>
-          <Divider />
-          <Typography variant="subtitle2">{t('admin:nodeMetrics.activeFindings')}</Typography>
-          <Stack spacing={1}>
-            {current.health.findings.map(finding => (
-              <Alert key={finding.code} severity={finding.severity === 'critical' ? 'error' : 'warning'}>
-                {t(`admin:nodeMetrics.finding.${finding.code}`, finding.code)}
-              </Alert>
-            ))}
-          </Stack>
-        </>
-      )}
-    </Stack>
-  )
+      {finding.code === 'node_core_restart_loop' && <Typography variant="body2" sx={{ mt: 1 }}>{t('admin:nodeMetrics.restartEvidence', {
+        window: (finding.window_seconds ?? 600) / 60, recovery: (finding.recovery_seconds ?? 1800) / 60,
+      })}</Typography>}
+    </Alert>)}
+  </Stack>
 }
-
-/**
- * THE CHART BREAKS ITS LINE AT A GAP. A null in the series is a sample that could
- * not be derived — a reboot, an outage, a counter reset — and interpolating
- * across one would draw a confident slope through the event an operator is
- * looking for.
- */
-function PerformanceTab({ current, times, coverage, points, empty }: {
-  current: NodeMetricsCurrent
-  times: string[]
-  coverage: number[]
-  points: NodeMetricsSeriesPoint[]
-  empty: boolean
-}) {
-  const { t } = useTranslation(['admin'])
-  const series = (pick: (p: NodeMetricsSeriesPoint) => number | null | undefined, name: string, unit: MetricsSeries['unit']): MetricsSeries => ({
-    name,
-    unit,
-    values: points.map(p => {
-      const value = pick(p)
-      return value === undefined ? null : value
-    }),
-  })
-  return (
-    <Stack spacing={3}>
-      {empty && <Alert severity="info">{t('admin:nodeMetrics.noHistory')}</Alert>}
-      <ChartBlock title={t('admin:nodeMetrics.chartCPU')}>
-        <NodeMetricsChart
-          times={times} coverage={coverage}
-          series={[
-            series(p => p.system_cpu_percent, t('admin:nodeMetrics.systemCPU'), 'percent'),
-            series(p => p.cgroup_cpu_capacity_percent, t('admin:nodeMetrics.cgroupCapacity'), 'percent'),
-          ]}
-        />
-      </ChartBlock>
-      <ChartBlock title={t('admin:nodeMetrics.chartMemory')}>
-        <NodeMetricsChart times={times} coverage={coverage}
-          series={[series(p => p.memory_used_percent, t('admin:nodeMetrics.memory'), 'percent')]} />
-      </ChartBlock>
-      <ChartBlock title={t('admin:nodeMetrics.chartDisk')}>
-        <NodeMetricsChart times={times} coverage={coverage}
-          series={[series(p => p.disk_available_bytes, t('admin:nodeMetrics.diskAvailable'), 'bytes')]} />
-      </ChartBlock>
-      <Typography variant="caption" color="text.secondary">
-        {t('admin:nodeMetrics.currentNow', { value: show(current.summary.cpu_percent, percentText) })}
-      </Typography>
-    </Stack>
-  )
-}
-
-function ChartBlock({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <Box>
-      <Typography variant="subtitle2" sx={{ mb: 1 }}>{title}</Typography>
-      {children}
-    </Box>
-  )
-}
-
-function NetworkTab({ current }: { current: NodeMetricsCurrent }) {
-  const { t } = useTranslation(['admin'])
-  const summary = current.summary
-  return (
-    <Stack spacing={2}>
-      <Stack direction="row" spacing={3} sx={{ flexWrap: 'wrap' }}>
-        <MetricCard label={t('admin:nodeMetrics.rxBps')} value={show(summary.rx_bps, formatBits)} />
-        <MetricCard label={t('admin:nodeMetrics.txBps')} value={show(summary.tx_bps, formatBits)} />
-        <MetricCard label={t('admin:nodeMetrics.retrans')} value={show(summary.tcp_retrans_percent, percentText)} />
-      </Stack>
-      {/* READ-ONLY, AND THE COPY SAYS SO. An operator who reads "congestion
-          control" without being told will reasonably ask whether PSP can change
-          it, and the answer is that it never will. */}
-      <Alert severity="info">{t('admin:nodeMetrics.bbrReadOnly')}</Alert>
-    </Stack>
-  )
-}
-
-function DiagnosticsTab({ serverID, current }: { serverID: number; current: NodeMetricsCurrent }) {
-  const { t } = useTranslation(['admin', 'common'])
-  // The detailed findings come from their own endpoint, so the overview never
-  // loads a snapshot to render a badge and this tab never loads a chart to list
-  // a condition.
-  const [health, setHealth] = useState<NodeHealthDetail | null>(null)
-  // Switching to this tab is itself a fetch (see the effect below), and until
-  // this existed the cards sat on the current.freshness/em-dash fallback the
-  // whole time — indistinguishable from "checked and found nothing".
-  const [healthLoading, setHealthLoading] = useState(false)
-  useEffect(() => {
-    if (!current.available || !serverID) return
-    const controller = new AbortController()
-    setHealthLoading(true)
-    void getNodeHealth(serverID, controller.signal).then(setHealth).catch(() => undefined)
-      .finally(() => { if (!controller.signal.aborted) setHealthLoading(false) })
-    return () => controller.abort()
-  }, [current.available, serverID])
-  return (
-    <Stack spacing={2}>
-      {healthLoading && (
-        <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-          <CircularProgress size={16} />
-          <Typography variant="body2">{t('common:status.loading')}</Typography>
-        </Stack>
-      )}
-      <Stack direction="row" spacing={3} sx={{ flexWrap: 'wrap' }}>
-        <MetricCard label={t('admin:nodeMetrics.freshnessLabel')} value={health?.freshness ?? current.freshness} />
-        <MetricCard label={t('admin:nodeMetrics.resourceHealth')} value={health?.resource_health ?? '—'} />
-      </Stack>
-      {health && health.findings.length > 0 && (
-        <Stack spacing={1}>
-          {health.findings.map(finding => (
-            <Alert key={`${finding.code}:${finding.started_at}`} severity={finding.severity === 'critical' ? 'error' : 'warning'}>
-              {t(`admin:nodeMetrics.finding.${finding.code}`, finding.code)}
-            </Alert>
-          ))}
-        </Stack>
-      )}
-      <Typography variant="body2">
-        {t('admin:nodeMetrics.doctorHint', { command: 'passwall-node doctor --json' })}
-      </Typography>
-      <Alert severity="info">{t('admin:nodeMetrics.diagnosticsPhaseTwo')}</Alert>
-    </Stack>
-  )
+function Evidence({ label, children }: { label: string; children: ReactNode }) {
+  return <Typography variant="body2" component="span"><Box component="span" sx={{ opacity: 0.8 }}>{label}: </Box><strong>{children}</strong></Typography>
 }

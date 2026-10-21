@@ -4156,7 +4156,6 @@
     "freshnessLabel": "Data freshness",
     "resourceHealth": "Resource health",
     "doctorHint": "Run {{command}} on the node for a local diagnostic.",
-    "diagnosticsPhaseTwo": "Remote diagnostics arrive in phase two.",
     "finding": {
       "node_metric_stale": "Host telemetry stopped arriving",
       "node_cpu_saturated": "CPU is sustained near capacity",
@@ -4175,11 +4174,65 @@
       "node_tcp_retrans_high": "TCP retransmission rate is high",
       "node_conntrack_pressure": "The connection-tracking table is nearly full",
       "node_fd_pressure": "File descriptors are nearly exhausted",
-      "node_core_restart_loop": "The core keeps restarting",
+      "node_core_restart_loop": "Repeated unexpected core exits",
       "node_sync_degraded": "Sync keeps failing",
       "node_clock_skew": "The node clock is skewed",
       "node_collector_slow": "Collection is taking too long"
-    }
+    },
+    "heading": "Host metrics",
+    "coverage": "Observed coverage",
+    "timezone": "Display timezone: {{value}}",
+    "historyRange": "History range",
+    "range": {
+      "1h": "Last hour",
+      "24h": "Last 24 hours",
+      "7d": "Last 7 days",
+      "30d": "Last 30 days",
+      "90d": "Last 90 days"
+    },
+    "resolution": {
+      "minute": "Minute samples",
+      "hour": "Hourly aggregates"
+    },
+    "previousRange": "Loading selected range; charts still show the previous result",
+    "measurementScope": "Measurement scope",
+    "deploymentValue": {
+      "systemd": "System service",
+      "docker": "Docker",
+      "manual": "Manual",
+      "unknown": "Unknown"
+    },
+    "networkScopeHint": "TCP retransmissions cover all TCP traffic in the collector’s network namespace and may include other applications. This is not a packet-loss measurement or evidence about the panel connection alone.",
+    "coreLifecycle": "Core lifecycle",
+    "totalRestarts": "Total restarts",
+    "totalRestartsHint": "Includes deployments, upgrades and failure recovery",
+    "unexpectedExits": "Unexpected exits",
+    "sinceAgentStart": "Since this agent process started",
+    "lastUnexpectedExit": "Last unexpected exit",
+    "restartReasonUnavailable": "This node does not report a separate unexpected-exit counter. Deployment restarts cannot be distinguished from failures, so they do not trigger a failure-loop alert. Upgrade the node to enable this check.",
+    "restartPolicy": "Only unexpected exits trigger this alert: 3 in 10 minutes is a warning; 5 is critical. Configuration deployments and upgrades are excluded. Recovery requires 30 minutes without another unexpected exit.",
+    "investigate": "Investigate further",
+    "investigateHint": "Remote diagnostics collect checks, runtime state and events. For exit codes or signals, inspect the node’s passwall-node service journal.",
+    "openDiagnostics": "Open remote diagnostics",
+    "noFindings": "No active resource findings. Check freshness and measurement scope alongside this result.",
+    "observedValue": "Observed value",
+    "threshold": "Trigger threshold",
+    "startedAt": "Started",
+    "lastSeenAt": "Last observed",
+    "interface": "Interface",
+    "restartEvidence": "The observed value is the peak unexpected-exit count in a {{window}}-minute window. The alert clears after {{recovery}} minutes without another unexpected exit.",
+    "unit": {
+      "events": "events",
+      "restarts": "restarts",
+      "seconds": "s",
+      "boolean": "",
+      "count": "items"
+    },
+    "refreshTimeout": "No new sample arrived yet. The previous result is still shown; the node may be waiting for its next sync.",
+    "refreshFailed": "Could not obtain a new sample. The previous result is still shown. Please retry.",
+    "latestReading": "Latest reading",
+    "staleHint": "Telemetry is stale. These readings describe the last sample, not the node’s current state.",
+    "waitingForSample": "This node supports host metrics. Waiting for its first sample."
   },
   "nodeDiagnostics": {
     "title": "Remote diagnostics · {{name}}",

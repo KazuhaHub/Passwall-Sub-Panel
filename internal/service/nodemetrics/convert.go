@@ -129,6 +129,8 @@ func sampleFromObservation(agentID string, stored *domain.NodeHostObservation, o
 		sample.AgentRuntimeStartedAt = epochToTime(runtime.AgentStartedAtMS)
 		restarts := runtime.CoreRestartCount
 		sample.CoreRestartCount = &restarts
+		sample.CoreUnexpectedExitCount = runtime.CoreUnexpectedExitCount
+		sample.LastCoreUnexpectedExitAt = epochToTime(runtime.LastCoreUnexpectedExitAtMS)
 		sample.LastSyncSuccessAt = epochToTime(runtime.LastSyncSuccessAtMS)
 		sample.LastSyncFailureAt = epochToTime(runtime.LastSyncFailureAtMS)
 		failures := runtime.ConsecutiveSyncFailures

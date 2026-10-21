@@ -40,6 +40,10 @@ type Finding struct {
 	// InterfaceName scopes an interface-specific finding. Empty for host-wide
 	// ones, and part of the identity when present.
 	InterfaceName string
+	// WindowSeconds and RecoverySeconds explain event findings, whose observed
+	// count is evidence from a bounded window rather than a current gauge.
+	WindowSeconds   int
+	RecoverySeconds int
 }
 
 // Point is one sample of the window with its own derived values.

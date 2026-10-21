@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { screen, waitFor } from '@testing-library/react'
+import { fireEvent, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { installReads, mount } from '@/test/adminSaveHarness'
 import { formatBits, formatBytes, formatValue } from '@/components/NodeMetricsChart'
@@ -109,5 +109,46 @@ describe('NodeMetricsDialog', () => {
     })
     mount(<NodeMetricsDialog server={server} open onClose={() => {}} />)
     await waitFor(() => expect(screen.getByText('admin:nodeMetrics.tabPerformance')).toBeTruthy())
+  })
+})
+
+
+describe('metrics navigation and evidence', () => {
+  it('makes the selected history range explicit and hides it outside history tabs', async () => {
+    installReads({
+      '/admin/servers/7/node-metrics/current': currentBody({}),
+      '/admin/servers/7/node-metrics/history': { resolution: 'minute', from: '', to: '', series: [] },
+    })
+    mount(<NodeMetricsDialog server={server} open onClose={() => {}} />)
+    await screen.findByText('admin:nodeMetrics.measurementScope')
+    expect(screen.queryByRole('button', { name: '1h' })).toBeNull()
+    fireEvent.click(screen.getByRole('tab', { name: 'admin:nodeMetrics.tabPerformance' }))
+    expect(screen.getByRole('button', { name: '1h' }).getAttribute('aria-pressed')).toBe('true')
+    expect(screen.getByRole('button', { name: '24h' }).getAttribute('aria-pressed')).toBe('false')
+    fireEvent.click(screen.getByRole('button', { name: '24h' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: '24h' }).getAttribute('aria-pressed')).toBe('true'))
+    expect(screen.getByRole('button', { name: '1h' }).getAttribute('aria-pressed')).toBe('false')
+  })
+
+  it('shows the actual finding evidence and keeps total restarts separate from failures', async () => {
+    installReads({
+      '/admin/servers/7/node-metrics/current': currentBody({
+        core: { restarts: '23', unexpected_exits: '3', last_unexpected_exit_at: '2026-09-18T11:58:00Z' },
+        health: { status: 'warning', findings: [{
+          code: 'node_core_restart_loop', severity: 'warning', current_value: 3, threshold: 3,
+          unit: 'events', started_at: '2026-09-18T11:55:00Z', last_seen_at: '2026-09-18T11:58:00Z',
+          window_seconds: 600, recovery_seconds: 1800,
+        }] },
+      }),
+      '/admin/servers/7/node-metrics/history': { resolution: 'minute', from: '', to: '', series: [] },
+    })
+    mount(<NodeMetricsDialog server={server} open onClose={() => {}} />)
+    await screen.findByText('admin:nodeMetrics.finding.node_core_restart_loop')
+    expect(screen.getByText(/admin:nodeMetrics.observedValue/)).toBeTruthy()
+    expect(screen.getByText(/admin:nodeMetrics.threshold/)).toBeTruthy()
+    fireEvent.click(screen.getByRole('tab', { name: 'admin:nodeMetrics.tabDiagnostics' }))
+    expect(screen.getByText('23')).toBeTruthy()
+    expect(screen.getByText('3')).toBeTruthy()
+    expect(screen.queryByText('admin:nodeMetrics.restartReasonUnavailable')).toBeNull()
   })
 })
