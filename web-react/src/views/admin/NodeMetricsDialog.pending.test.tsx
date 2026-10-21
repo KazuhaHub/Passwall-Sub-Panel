@@ -94,7 +94,8 @@ describe('NodeMetricsDialog range switch', () => {
     // blanking, and something has to say a fetch is running. (Both the
     // LinearProgress above the chart and the active chip's own spinner icon
     // carry role="progressbar", hence the plural query.)
-    fireEvent.click(screen.getByText('24h'))
+    fireEvent.click(screen.getByRole('tab', { name: 'admin:nodeMetrics.tabPerformance' }))
+    fireEvent.click(screen.getByRole('button', { name: '24h' }))
     await waitFor(() => expect(currentCalls).toBe(2))
     expect(screen.getAllByRole('progressbar').length).toBeGreaterThan(0)
     expect(screen.getByText('41.2%')).toBeTruthy()
@@ -111,27 +112,17 @@ describe('NodeMetricsDialog range switch', () => {
 })
 
 describe('NodeMetricsDialog Diagnostics tab', () => {
-  it('shows a loading indicator instead of leaving the cards on the dash while node-health loads', async () => {
-    const gate = deferred<{ data: unknown }>()
-    api.get.mockImplementation((url: string) => {
-      if (url === '/admin/servers/7/node-metrics/current') return Promise.resolve({ data: currentBody() })
-      if (url === '/admin/servers/7/node-metrics/history') return Promise.resolve({ data: emptyHistory })
-      if (url === '/admin/servers/7/node-health') return gate.promise
-      throw new Error(`Unexpected GET ${url}`)
+  it('uses the same health snapshot as the overview and explains missing exit telemetry', async () => {
+    installReads({
+      '/admin/servers/7/node-metrics/current': currentBody({ health: { status: 'healthy', findings: [] } }),
+      '/admin/servers/7/node-metrics/history': emptyHistory,
     })
     mount(<NodeMetricsDialog server={server} open onClose={() => {}} />)
     await waitFor(() => expect(screen.getByText('41.2%')).toBeTruthy())
-
     fireEvent.click(screen.getByRole('tab', { name: 'admin:nodeMetrics.tabDiagnostics' }))
-
-    expect(await screen.findByText('common:status.loading')).toBeTruthy()
-    // The dash placeholder must not be the only thing shown while it loads —
-    // that reads as "unhealthy" or "unknown" rather than "still fetching".
-    expect(screen.getByRole('progressbar')).toBeTruthy()
-
-    gate.resolve({ data: { freshness: 'fresh', resource_health: 'healthy', findings: [] } })
-    await waitFor(() => expect(screen.queryByText('common:status.loading')).toBeNull())
-    expect(screen.getByText('healthy')).toBeTruthy()
+    expect(screen.getByText('admin:nodeMetrics.restartReasonUnavailable')).toBeTruthy()
+    expect(screen.getByText('admin:nodeMetrics.freshness.healthy')).toBeTruthy()
+    expect(api.get.mock.calls.filter(call => call[0] === '/admin/servers/7/node-health')).toHaveLength(0)
   })
 })
 

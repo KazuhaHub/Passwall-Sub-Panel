@@ -244,3 +244,41 @@ func TestNodeMetricsRefreshIsAcceptedWithoutWaiting(t *testing.T) {
 		t.Fatalf("refreshed %q, want the panel's agent", service.refreshed)
 	}
 }
+
+func TestNodeMetricsSeparatesDeploymentFromScopeAndPreservesLargeLifecycleCounters(t *testing.T) {
+	total, exits := uint64(9007199254740993), uint64(0)
+	at := time.Date(2026, 10, 21, 8, 0, 0, 0, time.UTC)
+	snapshot := &nodemetrics.Snapshot{
+		Observation: &domain.NodeHostObservation{AgentID: "agt_1", ReceivedAt: at, CollectedAt: at, ResourceScope: "mixed"},
+		Sample:      &domain.NodeHostMetricSample{Deployment: "docker", ResourceScope: "mixed", CoreRestartCount: &total, CoreUnexpectedExitCount: &exits},
+	}
+	router := newNodeMetricsRouter(t, nativePanel(), nativeAgent(true), &nodeMetricsServiceStub{snapshot: snapshot})
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/servers/7/node-metrics/current", nil))
+	if response.Code != http.StatusOK {
+		t.Fatal(response.Body.String())
+	}
+	var body struct {
+		Scope struct {
+			Deployment    string `json:"deployment"`
+			ResourceScope string `json:"resource_scope"`
+		} `json:"scope"`
+		Core struct {
+			Restarts string  `json:"restarts"`
+			Exits    *string `json:"unexpected_exits"`
+		} `json:"core"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Scope.Deployment != "docker" || body.Scope.ResourceScope != "mixed" {
+		t.Fatalf("wrong scope: %+v", body.Scope)
+	}
+	if body.Core.Restarts != "9007199254740993" || body.Core.Exits == nil || *body.Core.Exits != "0" {
+		t.Fatalf("lost lifecycle precision: %+v", body.Core)
+	}
+	snapshot.Sample.CoreUnexpectedExitCount = nil
+	if coreLifecycleOf(snapshot.Sample)["unexpected_exits"] != nil {
+		t.Fatal("unsupported failure counter represented as zero")
+	}
+}

@@ -60,6 +60,10 @@ export interface NodeHealthFinding {
   current_value: number
   threshold: number
   unit: string
+  last_seen_at?: string
+  interface_name?: string
+  window_seconds?: number
+  recovery_seconds?: number
 }
 
 export interface NodeMetricsCurrent {
@@ -70,6 +74,11 @@ export interface NodeMetricsCurrent {
   scope?: NodeMetricsScope
   summary: NodeMetricsSummary
   health?: { status: NodeResourceHealth; findings: NodeHealthFinding[] }
+  core?: {
+    restarts: string | null
+    unexpected_exits: string | null
+    last_unexpected_exit_at: string | null
+  }
 }
 
 export interface NodeMetricsSeriesPoint extends Partial<NodeMetricsSummary> {
@@ -146,8 +155,8 @@ export async function getNodeInterfaceHistory(
 }
 
 /** Opens the on-demand refresh window. Resolves immediately; the sample arrives on the next sync. */
-export async function requestNodeMetricsRefresh(serverId: number): Promise<void> {
-  await client.post(`/admin/servers/${serverId}/node-metrics/refresh`)
+export async function requestNodeMetricsRefresh(serverId: number, signal?: AbortSignal): Promise<void> {
+  await client.post(`/admin/servers/${serverId}/node-metrics/refresh`, undefined, { signal })
 }
 
 export async function getNodeHealth(serverId: number, signal?: AbortSignal): Promise<NodeHealthDetail> {

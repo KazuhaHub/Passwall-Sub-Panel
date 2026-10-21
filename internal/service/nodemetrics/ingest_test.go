@@ -236,3 +236,26 @@ func TestRefreshWindowClosesOnANewSampleOrOnExpiry(t *testing.T) {
 		t.Fatal("an unanswered refresh window did not expire")
 	}
 }
+
+func TestIngestPreservesUnknownVersusMeasuredUnexpectedExits(t *testing.T) {
+	for _, count := range []*uint64{nil, new(uint64)} {
+		repo := &stubRepo{}
+		service := newIngestService(t, repo)
+		observation := validObservation("0123456789abcdef0123456789abcdef", ingestBaseTime)
+		observation.Runtime = &nodeprotocol.RuntimeObservation{
+			AgentStartedAtMS: ingestBaseTime.Add(-time.Hour).UnixMilli(), CoreRestartCount: 19,
+			CoreUnexpectedExitCount: count,
+		}
+		service.Ingest(t.Context(), "agt_1", observation, ingestBaseTime)
+		if len(repo.persists) != 1 || repo.persists[0].Sample == nil {
+			t.Fatal("no history sample stored")
+		}
+		stored := repo.persists[0].Sample
+		if (stored.CoreUnexpectedExitCount == nil) != (count == nil) {
+			t.Fatal("lost absence versus measured zero")
+		}
+		if stored.CoreRestartCount == nil || *stored.CoreRestartCount != 19 {
+			t.Fatal("lost total restart history")
+		}
+	}
+}

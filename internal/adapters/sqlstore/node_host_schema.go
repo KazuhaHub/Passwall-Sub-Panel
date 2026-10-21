@@ -156,16 +156,18 @@ type nodeHostMetricSampleRow struct {
 	CoreFDLimit           *int64
 	CoreThreads           *int64
 
-	AgentRuntimeStartedAt   *time.Time
-	CoreRestartCount        *int64
-	LastSyncSuccessAt       *time.Time
-	LastSyncFailureAt       *time.Time
-	ConsecutiveSyncFailures *int64
-	SyncSuccessCount        *int64
-	SyncFailureCount        *int64
-	LastRoundTripMS         *int64
-	LastRequestBytes        *int64
-	LastResponseBytes       *int64
+	AgentRuntimeStartedAt    *time.Time
+	CoreRestartCount         *int64
+	CoreUnexpectedExitCount  *int64
+	LastCoreUnexpectedExitAt *time.Time
+	LastSyncSuccessAt        *time.Time
+	LastSyncFailureAt        *time.Time
+	ConsecutiveSyncFailures  *int64
+	SyncSuccessCount         *int64
+	SyncFailureCount         *int64
+	LastRoundTripMS          *int64
+	LastRequestBytes         *int64
+	LastResponseBytes        *int64
 
 	CollectorDurationMS int64 `gorm:"not null"`
 	CreatedAt           time.Time

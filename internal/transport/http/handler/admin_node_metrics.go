@@ -19,11 +19,9 @@ import (
 // the host's kernel, its interface names and its distribution — operational
 // detail an operator has no reason to read and a subscriber certainly does not.
 //
-// THE RAW COUNTERS NEVER APPEAR IN ANY RESPONSE. §11.1 is explicit: a uint64 above
-// 2^53 loses precision in JavaScript, and a counter the browser rounds disagrees
-// with the panel that stored it. Every value below is a rate, a percentage or a
-// gauge, and an absent value is null rather than omitted, so the client renders
-// one shape instead of branching on which keys exist.
+// Numeric chart values are rates, percentages or gauges, never raw byte/tick
+// counters. Lifecycle totals are decimal strings so values above 2^53 retain
+// their precision in JavaScript. An unavailable metric remains null.
 
 type NodeMetricsService interface {
 	Current(ctx context.Context, agentID string) (*nodemetrics.Snapshot, error)
@@ -117,12 +115,13 @@ func (h *AdminNodeMetricsHandler) Current(c *gin.Context) {
 		"received_at":  snapshot.Observation.ReceivedAt.UTC(),
 		"collected_at": snapshot.Observation.CollectedAt.UTC(),
 		"scope": gin.H{
-			"deployment":            snapshot.Observation.ResourceScope,
+			"deployment":            deploymentOf(snapshot.Sample),
 			"resource_scope":        snapshot.Observation.ResourceScope,
 			"cgroup_version":        cgroupVersionOf(snapshot.Sample),
 			"data_filesystem_scope": filesystemScopeOf(snapshot.Sample),
 		},
 		"summary": summaryOf(snapshot.Derived),
+		"core":    coreLifecycleOf(snapshot.Sample),
 		"health":  gin.H{"status": health.Status, "findings": findingsOf(health)},
 	})
 }
@@ -152,9 +151,37 @@ func findingsOf(health nodehealth.Health) []gin.H {
 			"code": finding.Code, "severity": string(finding.Severity),
 			"started_at": finding.StartedAt.UTC(), "current_value": finding.CurrentValue,
 			"threshold": finding.Threshold, "unit": finding.Unit,
+			"last_seen_at": finding.LastSeenAt.UTC(), "interface_name": finding.InterfaceName,
+			"window_seconds": finding.WindowSeconds, "recovery_seconds": finding.RecoverySeconds,
 		})
 	}
 	return findings
+}
+
+func deploymentOf(sample *domain.NodeHostMetricSample) string {
+	if sample == nil {
+		return "unknown"
+	}
+	return sample.Deployment
+}
+
+// Lifetime counters are strings at the browser boundary: uint64 values cannot
+// be represented exactly by JavaScript numbers. Unknown remains null.
+func coreLifecycleOf(sample *domain.NodeHostMetricSample) gin.H {
+	result := gin.H{"restarts": nil, "unexpected_exits": nil, "last_unexpected_exit_at": nil}
+	if sample == nil {
+		return result
+	}
+	if sample.CoreRestartCount != nil {
+		result["restarts"] = strconv.FormatUint(*sample.CoreRestartCount, 10)
+	}
+	if sample.CoreUnexpectedExitCount != nil {
+		result["unexpected_exits"] = strconv.FormatUint(*sample.CoreUnexpectedExitCount, 10)
+	}
+	if sample.LastCoreUnexpectedExitAt != nil {
+		result["last_unexpected_exit_at"] = sample.LastCoreUnexpectedExitAt.UTC()
+	}
+	return result
 }
 
 // window is the parsed and validated range a series request asks for.

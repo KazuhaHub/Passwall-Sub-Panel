@@ -143,16 +143,18 @@ type NodeHostMetricSample struct {
 	CoreFDLimit           *uint64
 	CoreThreads           *uint64
 
-	AgentRuntimeStartedAt   *time.Time
-	CoreRestartCount        *uint64
-	LastSyncSuccessAt       *time.Time
-	LastSyncFailureAt       *time.Time
-	ConsecutiveSyncFailures *uint64
-	SyncSuccessCount        *uint64
-	SyncFailureCount        *uint64
-	LastRoundTripMS         *uint64
-	LastRequestBytes        *uint64
-	LastResponseBytes       *uint64
+	AgentRuntimeStartedAt    *time.Time
+	CoreRestartCount         *uint64
+	CoreUnexpectedExitCount  *uint64
+	LastCoreUnexpectedExitAt *time.Time
+	LastSyncSuccessAt        *time.Time
+	LastSyncFailureAt        *time.Time
+	ConsecutiveSyncFailures  *uint64
+	SyncSuccessCount         *uint64
+	SyncFailureCount         *uint64
+	LastRoundTripMS          *uint64
+	LastRequestBytes         *uint64
+	LastResponseBytes        *uint64
 
 	CollectorDurationMS uint64
 	CreatedAt           time.Time

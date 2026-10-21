@@ -441,6 +441,9 @@ func TestNodeHostCountersRoundTripAtTheBoundary(t *testing.T) {
 	sample := hostSample(agent, sampleID, strings.Repeat("b", 64), hostBaseTime)
 	sample.SystemCPUTotal = &maximum
 	sample.SystemCPUIdle = &maximum
+	sample.CoreUnexpectedExitCount = &maximum
+	exitAt := hostBaseTime.Add(-time.Minute)
+	sample.LastCoreUnexpectedExitAt = &exitAt
 	if _, err := repo.Persist(ctx, domain.NodeHostPersistRequest{
 		Observation: hostObservation(agent, sampleID, strings.Repeat("b", 64), hostBaseTime),
 		Sample:      sample,
@@ -453,6 +456,9 @@ func TestNodeHostCountersRoundTripAtTheBoundary(t *testing.T) {
 	}
 	if samples[0].SystemCPUTotal == nil || *samples[0].SystemCPUTotal != maximum {
 		t.Fatalf("system_cpu_total = %v, want %d", samples[0].SystemCPUTotal, maximum)
+	}
+	if samples[0].CoreUnexpectedExitCount == nil || *samples[0].CoreUnexpectedExitCount != maximum || samples[0].LastCoreUnexpectedExitAt == nil || !samples[0].LastCoreUnexpectedExitAt.Equal(exitAt) {
+		t.Fatal("unexpected-exit evidence did not survive storage")
 	}
 	if samples[0].SystemCPUIOWait != nil {
 		t.Fatal("a column that was never set came back as a value")

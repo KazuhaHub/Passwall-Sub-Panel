@@ -60,50 +60,73 @@ const (
 	restartRecovery = 30 * time.Minute
 )
 
-// evaluateRestartLoop counts core restarts inside a rolling window.
-//
-// A COUNT OVER A WINDOW rather than a rate: three restarts in ten minutes is the
-// condition the spec names, and expressing it as a rate would make two restarts
-// in three minutes look worse than five in ten.
+// evaluateRestartLoop requires explicit unexpected-exit telemetry. Total starts
+// include normal deployments and are never evidence of a failure loop. Events
+// are counted in a sliding ten-minute window, not a chain of ten-minute gaps.
 func evaluateRestartLoop(window Window) *Finding {
-	restarts := 0.0
-	var first, last time.Time
+	type event struct {
+		at    time.Time
+		count uint64
+	}
+	var events []event
+	var finding *Finding
+	var last time.Time
 	for index := 1; index < len(window.Points); index++ {
 		previous := window.Points[index-1].Sample
 		current := window.Points[index].Sample
-		delta := counterIncrease(previous.CoreRestartCount, current.CoreRestartCount)
+		// A new agent lifetime or missing counter is a new baseline, not a delta
+		// against the previous process. This also prevents old total-only samples
+		// from being interpreted as unexpected-exit history during an upgrade.
+		if previous.CoreUnexpectedExitCount == nil || current.CoreUnexpectedExitCount == nil ||
+			previous.AgentRuntimeStartedAt == nil || current.AgentRuntimeStartedAt == nil ||
+			!previous.AgentRuntimeStartedAt.Equal(*current.AgentRuntimeStartedAt) ||
+			previous.BootID != current.BootID || *current.CoreUnexpectedExitCount < *previous.CoreUnexpectedExitCount {
+			events, finding, last = nil, nil, time.Time{}
+			continue
+		}
+		at := current.ReceivedAt
+		if !last.IsZero() && at.Sub(last) >= restartRecovery {
+			finding = nil
+		}
+		delta := counterIncrease(previous.CoreUnexpectedExitCount, current.CoreUnexpectedExitCount)
 		if delta == 0 {
 			continue
 		}
-		if last.IsZero() || current.ReceivedAt.Sub(last) > restartWindow {
-			// The window starts fresh: a restart hours ago is not part of a loop
-			// that began a minute ago.
-			restarts, first = 0, current.ReceivedAt
+		// A long blind interval cannot establish that its exits clustered within
+		// ten minutes. Do not manufacture event times from an aggregate counter.
+		if at.Sub(previous.ReceivedAt) > restartWindow {
+			events = nil
+			continue
 		}
-		restarts += float64(delta)
-		last = current.ReceivedAt
+		last = at
+		for len(events) > 0 && events[0].at.Before(at.Add(-restartWindow)) {
+			events = events[1:]
+		}
+		events = append(events, event{at, delta})
+		var count uint64
+		for _, event := range events {
+			count += event.count
+		}
+		if count < 3 {
+			continue
+		}
+		severity, threshold := SeverityWarning, 3.0
+		if count >= 5 {
+			severity, threshold = SeverityCritical, 5
+		}
+		if finding == nil {
+			finding = &Finding{Code: CodeCoreRestartLoop, StartedAt: events[0].at,
+				WindowSeconds: int(restartWindow.Seconds()), RecoverySeconds: int(restartRecovery.Seconds()), Unit: "events"}
+		}
+		if float64(count) >= finding.CurrentValue {
+			finding.Severity, finding.Threshold, finding.CurrentValue = severity, threshold, float64(count)
+		}
 	}
-	if last.IsZero() {
+	if finding == nil || window.Now.Sub(last) >= restartRecovery {
 		return nil
 	}
-	// The recovery is a period with no restart at all, which is why it is longer
-	// than the window: a core that restarts once every twenty minutes is not
-	// looping, and it is also not healthy.
-	if window.Now.Sub(last) >= restartRecovery {
-		return nil
-	}
-	severity := SeverityWarning
-	threshold := 3.0
-	if restarts >= 5 {
-		severity, threshold = SeverityCritical, 5.0
-	} else if restarts < 3 {
-		return nil
-	}
-	return &Finding{
-		Code: CodeCoreRestartLoop, Severity: severity,
-		StartedAt: first, LastSeenAt: last,
-		CurrentValue: restarts, Threshold: threshold, Unit: "restarts",
-	}
+	finding.LastSeenAt = last
+	return finding
 }
 
 // clockSkewRule watches the magnitude of the node's clock error.
