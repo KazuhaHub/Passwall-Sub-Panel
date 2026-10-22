@@ -19,18 +19,28 @@ package main
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/version"
 )
 
 func main() {
-	if len(os.Args) != 2 {
+	args := os.Args[1:]
+	publish := len(args) == 2 && args[0] == "--publish"
+	if publish {
+		args = args[1:]
+	}
+	if len(args) != 1 {
 		fmt.Fprintln(os.Stderr, "release requires an explicit tag: vMAJOR.MINOR.PATCH[.BUILD]")
 		os.Exit(1)
 	}
-	released, ok := version.VersionOfReleaseTag(os.Args[1])
+	released, ok := version.VersionOfReleaseTag(args[0])
 	if !ok {
-		fmt.Fprintf(os.Stderr, "not a publishable release tag: %q\n", os.Args[1])
+		fmt.Fprintf(os.Stderr, "not a publishable release tag: %q\n", args[0])
+		os.Exit(1)
+	}
+	if publish && (strings.HasPrefix(args[0], "release/") || len(strings.Split(strings.SplitN(released, "-", 2)[0], ".")) != 3) {
+		fmt.Fprintln(os.Stderr, "new releases require vMAJOR.MINOR.PATCH with optional -beta.N or -rc.N")
 		os.Exit(1)
 	}
 	fmt.Println(released)

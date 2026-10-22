@@ -146,11 +146,11 @@ function caseBlock(text, opener) {
 //
 // The image-channel case still reads the tag, and that is about the ADDRESS — is
 // this a release ref at all — rather than about the channel.
-test('every automatic channel is a pre-release, and stable is stated', () => {
+test('every publication is testing and stable requires promotion', () => {
   const setup = job('setup')
   const channel = caseBlock(setup, 'case "${REQUESTED:-auto}" in')
   assert(channel, 'the channel step must resolve the requested channel')
-  assert(/stable\)\s*prerelease=false/.test(channel), 'an explicit stable must resolve to stable')
+  assert(/stable\).*promote\.yml/.test(channel), 'direct stable publication must be refused')
   assert(/auto\)\s*prerelease=true/.test(channel), 'an automatic channel must be a pre-release')
   assert(
     !/PINNED_TAG/.test(channel),
@@ -533,7 +533,7 @@ test('published releases and exact images cannot silently overwrite while rollin
   assert(docker.includes('release tag changed during the build'))
   assert(job('setup').includes('node deploy/check-image.mjs'))
   assert(docker.includes('node deploy/check-image.mjs'))
-  assert(docker.includes("value=latest,enable=${{ needs.setup.outputs.image_channel == 'true' && needs.setup.outputs.prerelease == 'false' }}"))
+  assert(!docker.includes("value=latest,"), "publication must not move stable aliases")
   assert(docker.includes("value=beta,enable=${{ needs.setup.outputs.image_channel == 'true' }}"))
   assert(workflow.includes('group: release-passwall-sub-panel\n  cancel-in-progress: false'))
 })
@@ -1002,7 +1002,7 @@ function resolveChannel(tag, requested = 'auto') {
 
 test('the image channels both read the one resolved answer', () => {
   const docker = job('docker')
-  const latest = /value=latest,enable=\$\{\{ (.*?) \}\}/.exec(docker)
+  const latest = /value=testing,enable=\$\{\{ (.*?) \}\}/.exec(docker)
   const beta = /value=beta,enable=\$\{\{ (.*?) \}\}/.exec(docker)
   assert(latest && beta, 'the image channels must both declare an enable condition')
   for (const [name, expression] of [['latest', latest[1]], ['beta', beta[1]]]) {
@@ -1011,8 +1011,7 @@ test('the image channels both read the one resolved answer', () => {
       `${name} must read whether images are published at all: ${expression}`,
     )
   }
-  assert(latest[1].includes("needs.setup.outputs.prerelease == 'false'"),
-    'latest must move only for a stable release')
+  assert(!docker.includes('type=raw,value=latest,'), 'stable pointers move only in promotion')
   assert(!beta[1].includes('prerelease'),
     'beta tracks the newest of any kind, so it must not read the channel')
 })
@@ -1036,8 +1035,8 @@ test('latest never points at a prerelease and beta always tracks the newest of a
   assert.deepEqual(resolveChannel('nightly'), { prerelease: true, images: false })
 
   // An explicit channel overrides the default, which is what the input is for.
-  assert.deepEqual(resolveChannel('release/4.0.0', 'stable'), { prerelease: false, images: true })
-  assert.deepEqual(resolveChannel('v1.0.0', 'stable'), { prerelease: false, images: true })
+  assert.throws(() => resolveChannel('release/4.0.0', 'stable'))
+  assert.throws(() => resolveChannel('v1.0.0', 'stable'))
   assert.deepEqual(resolveChannel('v1.0.0', 'testing'), { prerelease: true, images: true })
 })
 
@@ -1097,7 +1096,7 @@ test('the publication channel is resolved once, never inferred from a hyphen', (
   assert(/image_channel: \$\{\{ steps\.channel\.outputs\.images \}\}/.test(setup), 'setup must expose whether images are tagged')
 
   assert(/prerelease: \$\{\{ needs\.setup\.outputs\.prerelease \}\}/.test(release), 'the release must publish the resolved channel')
-  assert(/type=raw,value=latest,enable=\$\{\{ needs\.setup\.outputs\.image_channel/.test(docker), 'latest must read the resolved answer')
+  assert(/type=raw,value=testing,enable=\$\{\{ needs\.setup\.outputs\.image_channel/.test(docker), 'latest must read the resolved answer')
   assert(/type=raw,value=beta,enable=\$\{\{ needs\.setup\.outputs\.image_channel/.test(docker), 'beta must read the resolved answer')
 
   // The recoverable direction is now the default for every tag, not a fallback for

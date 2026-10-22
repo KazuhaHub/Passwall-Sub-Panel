@@ -50,6 +50,7 @@ export interface ProductVersion {
    *  would be two spellings of one version, and a release identity is one string
    *  naming one release. */
   build: number
+  prerelease?: string
 }
 
 export type Scheme = 'product'
@@ -65,20 +66,14 @@ export interface ReleaseTag {
 
 export type Channel = 'stable' | 'testing'
 
-/**
- * Parses a product version.
- *
- * One to three segments, each a run of ASCII digits, missing trailing segments
- * padded with zero. A fourth segment is REFUSED rather than truncated: the
- * format has three, and silently dropping a segment accepts an input from a
- * format this build does not understand. Leading zeros, signs, whitespace,
- * non-ASCII digits and scientific notation are refused for the same reason —
- * guessing at a malformed version is how two sides end up agreeing on a version
- * neither was given.
- */
+/** Parse numeric versions and numbered beta/rc candidates. Historical fourth segments and shorthand remain readable; candidate bases require three segments. */
 export function parseProductVersion(input: string): ProductVersion {
   if (input === '') throw new ReleaseIdError('releaseid: empty')
-  const parts = input.split('.')
+  const [base, pre, ...extra] = input.split('-')
+  if (extra.length || (pre !== undefined && !/^(beta|rc)\.[1-9]\d*$/.test(pre))) throw new ReleaseIdError('invalid prerelease')
+  if (pre !== undefined) parseSegment(pre.split('.')[1], input)
+  const parts = base.split('.')
+  if (pre !== undefined && parts.length !== 3) throw new ReleaseIdError('prereleases require three segments')
   if (parts.length > 4) {
     throw new ReleaseIdError(
       `releaseid: ${JSON.stringify(input)} has ${parts.length} segments, the format has at most four`,
@@ -93,7 +88,7 @@ export function parseProductVersion(input: string): ProductVersion {
       `releaseid: ${JSON.stringify(input)} has a zero fourth segment, which is another way to write ${segments[0]}.${segments[1]}.${segments[2]}`,
     )
   }
-  return { major: segments[0], minor: segments[1], patch: segments[2], build: segments[3] }
+  return { major: segments[0], minor: segments[1], patch: segments[2], build: segments[3], ...(pre === undefined ? {} : { prerelease: pre }) }
 }
 
 function parseSegment(part: string, whole: string): number {
@@ -117,7 +112,7 @@ function parseSegment(part: string, whole: string): number {
  *  is present. Lossless, because a zero fourth is refused at parse time. */
 export function formatProductVersion(v: ProductVersion): string {
   if (v.build > 0) return `${v.major}.${v.minor}.${v.patch}.${v.build}`
-  return `${v.major}.${v.minor}.${v.patch}`
+  return `${v.major}.${v.minor}.${v.patch}${v.prerelease ? `-${v.prerelease}` : ''}`
 }
 
 /**
@@ -142,7 +137,13 @@ export function compareProductVersion(a: ProductVersion, b: ProductVersion): num
   for (const [left, right] of pairs) {
     if (left !== right) return left < right ? -1 : 1
   }
-  return 0
+  if (a.prerelease === b.prerelease) return 0
+  if (!a.prerelease) return 1
+  if (!b.prerelease) return -1
+  const [astage, anum] = a.prerelease.split('.')
+  const [bstage, bnum] = b.prerelease.split('.')
+  if (astage !== bstage) return astage < bstage ? -1 : 1
+  return Number(anum) < Number(bnum) ? -1 : 1
 }
 
 /**
@@ -166,7 +167,7 @@ export function parseReleaseTag(raw: string): ReleaseTag {
       `releaseid: ${JSON.stringify(raw)} is neither a ${TAG_PREFIX}MAJOR.MINOR.PATCH nor a ${HISTORICAL_TAG_PREFIX}MAJOR.MINOR.PATCH tag`,
     )
   }
-  const dots = (body.match(/\./g) ?? []).length
+  const dots = (body.split('-')[0].match(/\./g) ?? []).length
   if (dots !== 2 && dots !== 3) {
     throw new ReleaseIdError(`releaseid: ${JSON.stringify(raw)} is a product tag, which is three or four segments`)
   }
@@ -202,33 +203,19 @@ export function compareReleaseVersion(a: string, b: string): number {
   return compareProductVersion(parseProductVersion(left), parseProductVersion(right))
 }
 
-/**
- * Reads the channel from GitHub's release metadata.
- *
- * From the METADATA, never from the tag text: whether a tag contains a hyphen
- * says nothing about whether its release is a testing candidate, and a product
- * version has no hyphen at all. Returns null for a draft — a draft is not
- * published and has no channel, and defaulting it to stable is how an unreleased
- * build becomes an upgrade target.
- */
+/** Read publication metadata; drafts have no channel. Catalog consumers also reject a beta/rc identity labelled stable. */
 export function resolveChannel(draft: boolean, prerelease: boolean): Channel | null {
   if (draft) return null
   return prerelease ? 'testing' : 'stable'
 }
 
-/**
- * The version a release is identified by — the string a daemon is stamped with
- * and the string the catalog carries. Undefined for anything that is not one.
- *
- * A TAG IS NOT A VERSION and this returns undefined for one: `release/4.0.0` is
- * an address, `4.0.0` is the thing.
- */
+/** Return an exact release identity, including current beta/rc suffixes and historical fourth segments. Prefixes, shorthand, metadata and malformed counters are refused. */
 export function canonicalReleaseVersion(input: string): string | undefined {
   if (typeof input !== 'string' || input === '' || input.includes('+')) return undefined
   // Three or four segments, never fewer: a version is a published identity, and
   // the short forms parseProductVersion pads are input convenience, not
   // identities. The fourth is the optional BUILD component.
-  const dots = (input.match(/\./g) ?? []).length
+  const dots = (input.split('-')[0].match(/\./g) ?? []).length
   if (dots !== 2 && dots !== 3) return undefined
   try {
     const product = parseProductVersion(input)

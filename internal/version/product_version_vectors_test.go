@@ -79,6 +79,13 @@ func TestProductVersionVectorsMatchTheNodeCheckout(t *testing.T) {
 			"the vendored copy carries it, and the two are compared once the pin moves past the change", checkout)
 	}
 
+	// The pinned contract job also tests older released nodes. Those parsers
+	// intentionally reject suffixes; the bridge release introduces this scheme.
+	// Compare current copies byte-for-byte as soon as the pin carries the scheme.
+	if !bytes.Contains(canonical, []byte(`"version_scheme": "semver-candidates-v1"`)) {
+		t.Skipf("the pinned Node predates numbered beta/rc identities (%s); historical compatibility is tested separately", checkout)
+	}
+
 	if !bytes.Equal(vendored, canonical) {
 		t.Fatalf("the vendored product-version vectors differ from the Node checkout's copy.\n"+
 			"vendored: %s\ncanonical: %s\n"+

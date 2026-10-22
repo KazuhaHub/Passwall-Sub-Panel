@@ -33,7 +33,7 @@ func TestMain(m *testing.M) {
 
 func run(t *testing.T, args ...string) (int, string, string) {
 	t.Helper()
-	cmd := exec.Command(binary, args...)
+	cmd := exec.Command(binary, append([]string{"-stage", ""}, args...)...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	err := cmd.Run()
@@ -106,5 +106,22 @@ func TestARefusalPrintsNothingOnStdout(t *testing.T) {
 				t.Fatal("a refusal must say why; the maintainer sees only this")
 			}
 		})
+	}
+}
+
+func TestCurrentAllocatorUsesCandidateNamesAndResumesOnlyItsStage(t *testing.T) {
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"-stage", "beta", "-line", "4.1"}, "v4.1.0-beta.1"},
+		{[]string{"-stage", "beta", "-line", "4.1", "-existing", "v4.1.0-beta.10"}, "v4.1.0-beta.11"},
+		{[]string{"-stage", "rc", "-line", "4.1", "-existing", "v4.1.0-beta.10", "-on-commit", "v4.1.0-beta.10"}, "v4.1.0-rc.1"},
+		{[]string{"-stage", "rc", "-line", "4.1", "-existing", "v4.1.0-beta.10,v4.1.0-rc.1", "-on-commit", "v4.1.0-beta.10,v4.1.0-rc.1"}, "v4.1.0-rc.1"},
+	} {
+		code, out, err := run(t, tc.args...)
+		if code != 0 || out != tc.want+"\n" {
+			t.Errorf("%v: %s %s", tc.args, out, err)
+		}
 	}
 }

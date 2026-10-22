@@ -1,6 +1,6 @@
 {
   "format": 1,
-  "comment": "THE SHARED VECTORS. One file, three consumers: this package, the web front end (web-react/src/utils/productVersion.vectors.json), and the panel's Go mirror. It is COPIED rather than fetched, because a test may not reach into another module at run time.\n\nTWO NAMESPACES, ONE CURRENT ADDRESS. A release tag is `vMAJOR.MINOR.PATCH[.BUILD]`, and four releases were published under `release/` before the address changed; `tag_namespace` is the current one. BOTH are read, because a published tag cannot be moved and the panel still lists those four; only the current one is DERIVED, and `derive` pins that — including the case that makes it matter, where a version published under the historical namespace does NOT derive back to its own address. The legacy v0.0.1-beta forms are a third shape and are neither: `reject_tags` is where they are refused.\n\nWHAT IT PINS IS THE SHAPE, THE ORDER AND THE ADDRESSES. The order section carries the BUILD COMPONENT pairs, which nothing covered before: the fourth segment was ignored by the comparison, so a rebuild and its base compared equal while the panel's mirror disagreed.",
+  "comment": "Shared release identity vectors for Node, panel Go, and the browser. Three-segment versions with beta.N or rc.N are current; historical four-segment versions and release/ addresses remain readable. Numeric prerelease counters sort numerically; beta < rc < stable.",
   "tag_namespace": "v",
   "max_segment": 2147483647,
   "normalize": [
@@ -47,6 +47,22 @@
     {
       "in": "102.0.1",
       "out": "102.0.1"
+    },
+    {
+      "in": "4.0.0-beta.25",
+      "out": "4.0.0-beta.25"
+    },
+    {
+      "in": "4.1.0-beta.1",
+      "out": "4.1.0-beta.1"
+    },
+    {
+      "in": "4.1.0-beta.10",
+      "out": "4.1.0-beta.10"
+    },
+    {
+      "in": "4.1.0-rc.1",
+      "out": "4.1.0-rc.1"
     }
   ],
   "reject": [
@@ -153,6 +169,38 @@
     {
       "in": "102.1.0.0",
       "why": "a zero fourth segment is another spelling of 102.1.0"
+    },
+    {
+      "in": "4.1.0-beta.0",
+      "why": "invalid candidate identity"
+    },
+    {
+      "in": "4.1.0-beta.01",
+      "why": "invalid candidate identity"
+    },
+    {
+      "in": "4.1.0-beta.2147483648",
+      "why": "invalid candidate identity"
+    },
+    {
+      "in": "4.1.0-rc",
+      "why": "invalid candidate identity"
+    },
+    {
+      "in": "4.1-beta.1",
+      "why": "invalid candidate identity"
+    },
+    {
+      "in": "4.1.0.1-beta.1",
+      "why": "invalid candidate identity"
+    },
+    {
+      "in": "4.1.0-alpha.1",
+      "why": "invalid candidate identity"
+    },
+    {
+      "in": "4.1.0-beta.1+build",
+      "why": "invalid candidate identity"
     }
   ],
   "order": [
@@ -230,6 +278,56 @@
       "a": "4.0.1",
       "b": "4.0.0.1",
       "cmp": 1
+    },
+    {
+      "a": "4.0.1.22",
+      "b": "4.1.0-beta.1",
+      "cmp": -1
+    },
+    {
+      "a": "4.1.0-beta.1",
+      "b": "4.0.1.22",
+      "cmp": 1
+    },
+    {
+      "a": "4.1.0-beta.2",
+      "b": "4.1.0-beta.10",
+      "cmp": -1
+    },
+    {
+      "a": "4.1.0-beta.10",
+      "b": "4.1.0-beta.2",
+      "cmp": 1
+    },
+    {
+      "a": "4.1.0-beta.10",
+      "b": "4.1.0-rc.1",
+      "cmp": -1
+    },
+    {
+      "a": "4.1.0-rc.1",
+      "b": "4.1.0-beta.10",
+      "cmp": 1
+    },
+    {
+      "a": "4.1.0-rc.1",
+      "b": "4.1.0",
+      "cmp": -1
+    },
+    {
+      "a": "4.1.0",
+      "b": "4.1.0-rc.1",
+      "cmp": 1
+    },
+    {
+      "a": "4.0.1.22",
+      "b": "4.0.2-beta.1",
+      "cmp": -1
+    },
+    {
+      "a": "4.0.2-beta.1",
+      "b": "4.0.1.22",
+      "cmp": 1
     }
   ],
   "tags": [
@@ -274,6 +372,26 @@
       "scheme": "product",
       "version": "102.1.0.1",
       "why": "the historical namespace, with the build component"
+    },
+    {
+      "in": "v4.0.0-beta.25",
+      "scheme": "product",
+      "version": "4.0.0-beta.25"
+    },
+    {
+      "in": "v4.1.0-beta.1",
+      "scheme": "product",
+      "version": "4.1.0-beta.1"
+    },
+    {
+      "in": "v4.1.0-beta.10",
+      "scheme": "product",
+      "version": "4.1.0-beta.10"
+    },
+    {
+      "in": "v4.1.0-rc.1",
+      "scheme": "product",
+      "version": "4.1.0-rc.1"
     }
   ],
   "reject_tags": [
@@ -326,10 +444,6 @@
       "why": "the legacy scheme, whose tag was the version itself"
     },
     {
-      "in": "v4.0.0-beta.25",
-      "why": "a prerelease is a CHANNEL, not a spelling of a published identity"
-    },
-    {
       "in": "v4.0.0/../../PRIVATE_RESPONSE",
       "why": "a path separator"
     },
@@ -344,6 +458,38 @@
     {
       "in": "v102.1.0.1.2",
       "why": "a fifth segment is a different format, in either namespace"
+    },
+    {
+      "in": "v4.1.0-beta.0",
+      "why": "invalid candidate identity"
+    },
+    {
+      "in": "v4.1.0-beta.01",
+      "why": "invalid candidate identity"
+    },
+    {
+      "in": "v4.1.0-beta.2147483648",
+      "why": "invalid candidate identity"
+    },
+    {
+      "in": "v4.1.0-rc",
+      "why": "invalid candidate identity"
+    },
+    {
+      "in": "v4.1-beta.1",
+      "why": "invalid candidate identity"
+    },
+    {
+      "in": "v4.1.0.1-beta.1",
+      "why": "invalid candidate identity"
+    },
+    {
+      "in": "v4.1.0-alpha.1",
+      "why": "invalid candidate identity"
+    },
+    {
+      "in": "v4.1.0-beta.1+build",
+      "why": "invalid candidate identity"
     }
   ],
   "channels": [
@@ -388,6 +534,26 @@
       "in": "4.0.0.1",
       "scheme": "product",
       "ok": true
+    },
+    {
+      "in": "4.0.0-beta.25",
+      "scheme": "product",
+      "ok": true
+    },
+    {
+      "in": "4.1.0-beta.1",
+      "scheme": "product",
+      "ok": true
+    },
+    {
+      "in": "4.1.0-beta.10",
+      "scheme": "product",
+      "ok": true
+    },
+    {
+      "in": "4.1.0-rc.1",
+      "scheme": "product",
+      "ok": true
     }
   ],
   "derive": [
@@ -409,6 +575,23 @@
       "in": "4.0.1.2",
       "tag": "v4.0.1.2",
       "why": "DERIVATION DOES NOT KNOW HISTORY: 4.0.1.2 was published as release/4.0.1.2, and a caller addressing a published release carries its tag rather than deriving it"
+    },
+    {
+      "in": "4.0.0-beta.25",
+      "tag": "v4.0.0-beta.25"
+    },
+    {
+      "in": "4.1.0-beta.1",
+      "tag": "v4.1.0-beta.1"
+    },
+    {
+      "in": "4.1.0-beta.10",
+      "tag": "v4.1.0-beta.10"
+    },
+    {
+      "in": "4.1.0-rc.1",
+      "tag": "v4.1.0-rc.1"
     }
-  ]
+  ],
+  "version_scheme": "semver-candidates-v1"
 }

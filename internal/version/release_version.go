@@ -5,35 +5,9 @@ import (
 	"strings"
 )
 
-// RELEASE VERSIONS AND THEIR MAJOR.
-//
-// A version here is a PRODUCT release version: three integers, optionally
-// followed by a fourth BUILD component, with no prefix and no suffix. A tag is
-// not a version — `v4.0.0` is an address, `4.0.0` is the thing — and neither is a
-// channel name or a branch. A candidate release is distinguished by the CHANNEL
-// it was published on, which is release metadata rather than a spelling of the
-// version.
-//
-// THE ADDRESS WEARS A `v` NOW, AND READING IS WIDER THAN WRITING. Releases were
-// published under `release/MAJOR.MINOR.PATCH[.BUILD]`, a namespace chosen so a
-// product tag could not be read as a Go module version. Four were published that
-// way — `release/4.0.0`, `release/4.0.1`, `release/4.0.1.1`, `release/4.0.1.2` —
-// and a published tag is immutable, so those four addresses are fixed forever and
-// still have to be read. Every release from here on is `vMAJOR.MINOR.PATCH[.BUILD]`,
-// the shape the projects this one talks to have always used.
-//
-// SO A VERSION NO LONGER DETERMINES ONE ADDRESS. Deriving gives the CURRENT
-// address: right for a release about to be published, wrong for one of the four
-// that already were. Where an address has to be exact, it is carried — the panel
-// states `release_tag` for every published release it lists
-// (internal/ports.NodeReleaseCatalogEntry) rather than letting a caller re-derive
-// it, and the release workflow reads the tag it was handed rather than building
-// one from a version.
-//
-// STRICT ON PURPOSE. One caller guards a GitHub API URL path, so a string that
-// could be read as a path separator must be refused rather than escaped — which
-// is the historical namespace's doing, and the reason it stays a closed set of
-// four rather than something new releases keep using.
+// Product versions use MAJOR.MINOR.PATCH with optional -beta.N or -rc.N.
+// Historical four-segment releases and release/ addresses remain readable.
+// New publication uses v-prefixed tags; version strings themselves have no v.
 
 // MaxVersionSegmentBounds the segments. It matches the ceiling every other
 // implementation uses; a version beyond it is a different format, not a longer

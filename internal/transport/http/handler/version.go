@@ -15,6 +15,7 @@ import (
 func Version(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"version":    version.Version,
+		"channel":    version.Channel(),
 		"commit":     version.Commit,
 		"build_date": version.BuildDate,
 	})

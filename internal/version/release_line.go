@@ -154,7 +154,14 @@ func ResumeVersion(line Line, onCommit []string) (string, error) {
 // releaseSegments parses a release version into its four segments, the fourth
 // being zero when it is absent. THE ONE PARSER: MajorOfRelease reads through it.
 func releaseSegments(value string) ([4]int, bool) {
-	parts := strings.Split(value, ".")
+	base, pre, hasPre := strings.Cut(value, "-")
+	if hasPre && !validPrerelease(pre) {
+		return [4]int{}, false
+	}
+	parts := strings.Split(base, ".")
+	if hasPre && len(parts) != 3 {
+		return [4]int{}, false
+	}
 	if len(parts) != 3 && len(parts) != 4 {
 		return [4]int{}, false
 	}

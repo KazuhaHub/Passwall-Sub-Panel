@@ -2966,7 +2966,7 @@
     "update_available": "Update available: {{latest}}",
     "hint": {
       "name": "Display name; the internal reference uses the database ID.",
-      "update_channel": "Saved preference for installation and upgrade lists. Docker files follow latest for Stable or beta for Testing by default; manual and systemd installation still use an exact reviewed release. Saving does not install, upgrade, or change server/node identities or credentials. Temporary channel selections in dialogs are not saved.",
+      "update_channel": "Saved preference for installation and upgrade lists. Docker files follow stable for Stable or testing for Testing (latest/beta remain aliases) by default; manual and systemd installation still use an exact reviewed release. Saving does not install, upgrade, or change server/node identities or credentials. Temporary channel selections in dialogs are not saved.",
       "update_channel_short": "Default release channel; Docker files follow its image tag, but saving does not upgrade the node.",
       "configured": "Configured (kept unchanged)",
       "unconfigured": "Not configured",
@@ -3000,7 +3000,7 @@
       "method_hint": {
         "linux": "For Linux servers running systemd. The panel generates one short, private, server-specific command that installs an exact release with a dedicated user and service.",
         "github": "Run one public command on a Linux/systemd host. By default it installs the newest selected channel and immediately asks for the PSP connection values; an install-only command is also available.",
-        "docker": "Requires Linux Docker Engine, standard Docker Compose, and host networking. The generated Compose follows the selected latest/beta channel and enables an isolated remote-upgrade service by default. The updater alone mounts the root-equivalent Docker socket; turn it off in Advanced for a minimal one-service NAS deployment.",
+        "docker": "Requires Linux Docker Engine, standard Docker Compose, and host networking. The generated Compose follows the selected stable/testing channel and enables an isolated remote-upgrade service by default. The updater alone mounts the root-equivalent Docker socket; turn it off in Advanced for a minimal one-service NAS deployment.",
         "manual": "Choose an exact reviewed package for Linux, macOS or Windows. Download it on a connected device, transfer it with the generated identity files, then verify and run it without requiring GitHub access on the target host."
       },
       "method_version_hint": "Choose an installation method and save the server before generating its installation files. Switching methods does not rotate credentials or change the server identity.",
@@ -3048,7 +3048,7 @@
       },
       "method_steps": {
         "linux": "1. Save the server and generate the private script for an exact release.\n2. Transfer the script to the target Linux server and run the provided commands as root.\n3. Confirm the service and heartbeat, then configure inbounds separately on the Nodes page.",
-        "github": "1. Run the default public command on the target Linux/systemd host; it uses Stable unless this server's saved channel is Beta.\n2. Enter the endpoint, Agent ID and credential shown here when prompted.\n3. Use the install-only command when configuration must be deferred; finish later with sudo pn connect.",
+        "github": "1. Run the default public command on the target Linux/systemd host; it uses Stable unless this server's saved channel is Testing.\n2. Enter the endpoint, Agent ID and credential shown here when prompted.\n3. Use the install-only command when configuration must be deferred; finish later with sudo pn connect.",
         "docker": "1. Save the server and generate compose.yaml plus node-credential.txt.\n2. Put compose.yaml in the project root and node-credential.txt in ./config; retain the generated ./data directory. The updater is enabled by default; turn it off from Advanced if this host must not expose its Docker socket.\n3. Preserve the complete project directory, confirm the generated service(s) and heartbeat, then configure inbounds separately.",
         "manual": "1. Select the target OS, architecture and exact reviewed release, then generate all server-specific files.\n2. Download the listed public release files on a connected device and transfer all four files to the target.\n3. Follow the offline verification and foreground-run steps in Advanced; no target-side GitHub access is required."
       },
@@ -3085,7 +3085,7 @@
       "agent_version": "Passwall Node application version (not the proxy-core version)",
       "release_channel": "Release channel",
       "release_stable": "Stable",
-      "release_testing": "Beta / Testing (Pre-release)",
+      "release_testing": "Testing (Beta / RC)",
       "release_loading": "Loading compatible Passwall Node releases…",
       "release_retry": "Retry",
       "release_failed": "Unable to load compatible releases. Retry before selecting a version.",
@@ -3096,7 +3096,7 @@
       "release_choose_version": "Choose a version",
       "release_recommended": "Recommended",
       "release_follow_stable": "Follow Stable (latest)",
-      "release_follow_testing": "Follow Beta / Testing (beta)",
+      "release_follow_testing": "Follow Testing (testing)",
       "release_published": "Published {{date}} (UTC)",
       "release_details": "Passwall Node release details",
       "release_review": "Release notes and publication details",
@@ -3108,8 +3108,8 @@
       "command_safety": "Private, single-use command · run as root on the node host, not PSP · expires {{time}}",
       "copied": "Command copied. Run it on the intended node host.",
       "copy_failed": "Copy failed. Select and copy the command manually, or allow clipboard access and retry.",
-      "version_hint": "No version is preselected. Enter an exact published version with installation assets, such as v1.0.0 or v1.0.0-beta.1. Installation is unavailable before publication. Select the core version separately in the server menu.",
-      "version_invalid": "Enter an exact vX.Y.Z or vX.Y.Z-beta.1 version. Do not use latest, spaces, or a download URL.",
+      "version_hint": "No version is preselected. Enter an exact published version with installation assets, such as 4.1.0, 4.1.0-beta.1 or 4.1.0-rc.1. Installation is unavailable before publication. Select the core version separately in the server menu.",
+      "version_invalid": "Enter an exact X.Y.Z, X.Y.Z-beta.N or X.Y.Z-rc.N version. Do not use latest, spaces, or a download URL.",
       "generate_command": "Generate node-host one-click command",
       "install_command": "Run on this node host",
       "command_hint": "Run the generated command on the intended node host. Its script-delivery token expires after 15 minutes and can be used once; the installed agent still reuses this server's original fixed credential. Generating a command does not rotate its identity or prove installation succeeded.",

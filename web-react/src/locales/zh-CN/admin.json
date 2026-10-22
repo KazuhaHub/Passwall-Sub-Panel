@@ -2964,7 +2964,7 @@
     "update_available": "可用更新：{{latest}}",
     "hint": {
       "name": "显示名称，可修改；内部关联使用数据库 ID",
-      "update_channel": "保存安装与升级列表的默认频道。Docker 文件默认以 latest 跟随稳定版、以 beta 跟随测试版；手动与 systemd 安装仍使用已审核的精确版本。保存不会执行安装或升级，也不会更改服务器、节点身份或凭据。弹窗内临时切换频道不会自动保存。",
+      "update_channel": "保存安装与升级列表的默认频道。Docker 文件默认以 stable 跟随正式通道、以 testing 跟随测试通道（兼容旧 latest/beta 别名）；手动与 systemd 安装仍使用已审核的精确版本。保存不会执行安装或升级，也不会更改服务器、节点身份或凭据。弹窗内临时切换频道不会自动保存。",
       "update_channel_short": "默认发布频道；Docker 文件跟随对应镜像标签，但保存不会自动升级节点。",
       "configured": "已配置（保持不变）",
       "unconfigured": "未配置",
@@ -2998,7 +2998,7 @@
       "method_hint": {
         "linux": "适合启用 systemd 的 Linux 服务器。面板会生成一条简短、私有且仅用于这台服务器的一键命令，安装固定版本并配置专用用户与服务。",
         "github": "在 Linux/systemd 主机执行一条公开命令。默认安装所选频道的最新版本并立即询问 PSP 对接信息；也提供仅安装、不配置的命令。",
-        "docker": "需要 Linux Docker Engine、标准 Docker Compose 与 host 网络。生成的 Compose 跟随所选 latest/beta 频道，并默认启用隔离的远程升级服务。只有 updater 挂载等同 root 权限的 Docker socket；如需最精简的 NAS 单服务部署，可在“高级”中关闭。",
+        "docker": "需要 Linux Docker Engine、标准 Docker Compose 与 host 网络。生成的 Compose 跟随所选 stable/testing 通道，并默认启用隔离的远程升级服务。只有 updater 挂载等同 root 权限的 Docker socket；如需最精简的 NAS 单服务部署，可在“高级”中关闭。",
         "manual": "为 Linux、macOS 或 Windows 选择已审核的准确安装包；在能访问 GitHub 的设备下载，连同面板生成的身份文件传到目标机，再离线校验并运行。"
       },
       "method_version_hint": "先选择安装方式并保存服务器，再生成该服务器的专属安装文件。切换安装方式不会轮换凭据或改变服务器身份。",
@@ -3046,7 +3046,7 @@
       },
       "method_steps": {
         "linux": "1. 保存服务器并生成固定版本的私有安装脚本。\n2. 将脚本传到目标 Linux 服务器，以 root 权限执行提供的命令。\n3. 确认服务与心跳后，前往节点页面单独配置 inbound。",
-        "github": "1. 在目标 Linux/systemd 主机执行默认公开命令；除非这台服务器已保存为 Beta 频道，否则使用稳定版。\n2. 按提示输入这里显示的同步地址、Agent ID 与凭据。\n3. 需要稍后配置时才使用“仅安装”命令，之后运行 sudo pn connect 完成对接。",
+        "github": "1. 在目标 Linux/systemd 主机执行默认公开命令；除非这台服务器已保存为测试通道，否则使用稳定版。\n2. 按提示输入这里显示的同步地址、Agent ID 与凭据。\n3. 需要稍后配置时才使用“仅安装”命令，之后运行 sudo pn connect 完成对接。",
         "docker": "1. 保存服务器并生成 compose.yaml 与 node-credential.txt。\n2. compose.yaml 放项目根目录，node-credential.txt 放进 ./config，并保留生成的 ./data。updater 默认启用；若主机不应暴露 Docker socket，请在“高级”中关闭。\n3. 保留整个项目目录，确认生成的服务与心跳后单独配置 inbound。",
         "manual": "1. 选择目标系统、架构和已审核的准确版本，再生成全部专属文件。\n2. 在可联网设备下载列出的两个公开发行文件，把四个文件一起传到目标机。\n3. 按“高级”中的离线核验与前台运行步骤操作；目标机不需要访问 GitHub。"
       },
@@ -3083,7 +3083,7 @@
       "agent_version": "Passwall Node 程序版本（不是代理内核版本）",
       "release_channel": "发布渠道",
       "release_stable": "稳定版",
-      "release_testing": "Beta / 测试版（预发布）",
+      "release_testing": "测试通道（Beta / RC）",
       "release_loading": "正在加载兼容的 Passwall Node 版本…",
       "release_retry": "重试",
       "release_failed": "无法加载兼容版本，请重试后再选择。",
@@ -3094,7 +3094,7 @@
       "release_choose_version": "请选择具体版本",
       "release_recommended": "推荐",
       "release_follow_stable": "跟随稳定版（latest）",
-      "release_follow_testing": "跟随 Beta / 测试版（beta）",
+      "release_follow_testing": "跟随测试通道（testing）",
       "release_published": "发布于 {{date}}（UTC）",
       "release_details": "Passwall Node 发布详情",
       "release_review": "版本说明与发布详情",
@@ -3106,8 +3106,8 @@
       "command_safety": "私有、仅限一次 · 在节点机以 root 执行，不是在 PSP 主机 · {{time}} 过期",
       "copied": "命令已复制，请在目标节点机执行。",
       "copy_failed": "复制失败。请手动选择并复制命令，或允许剪贴板访问后重试。",
-      "version_hint": "没有预选版本。请输入已发布且包含安装资产的准确版本，如 v1.0.0 或 v1.0.0-beta.1；尚未发布时不能安装。内核版本在服务器菜单中另行选择。",
-      "version_invalid": "请输入准确的 vX.Y.Z 或 vX.Y.Z-beta.1 版本；不能使用 latest、空格或下载 URL。",
+      "version_hint": "没有预选版本。请输入已发布且包含安装资产的准确版本，如 4.1.0、4.1.0-beta.1 或 4.1.0-rc.1；尚未发布时不能安装。内核版本在服务器菜单中另行选择。",
+      "version_invalid": "请输入准确的 X.Y.Z、X.Y.Z-beta.N 或 X.Y.Z-rc.N 版本；不能使用 latest、空格或下载 URL。",
       "generate_command": "生成节点端一键命令",
       "install_command": "在此节点机执行",
       "command_hint": "请在目标节点机执行生成的命令。脚本领取令牌仅可使用一次、15 分钟后过期；安装后的 Agent 仍复用此服务器原有固定凭据。生成命令不会轮换身份，也不代表安装成功。",

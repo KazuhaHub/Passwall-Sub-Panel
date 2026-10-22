@@ -1,0 +1,146 @@
+name: Promote a release to stable
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Published plain release tag, for example v4.1.0 (never a beta/rc tag)"
+        required: true
+        type: string
+permissions:
+  contents: write
+  packages: write
+  actions: read
+  attestations: read
+env:
+  GOWORK: "off"
+  GOTOOLCHAIN: "local"
+concurrency:
+  group: release-passwall-sub-panel
+  cancel-in-progress: false
+jobs:
+  promote:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: release-promotion
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-go@v7
+        env:
+          GOTOOLCHAIN: auto
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Verify exact preferred compiler
+        run: |
+          set -eu
+          build_toolchain=$(awk '$1 == "toolchain" { print $2 }' go.mod)
+          test -n "$build_toolchain"
+          test "$(go env GOVERSION)" = "$build_toolchain"
+          test "$(go tool compile -V | awk '{ print $3 }')" = "$build_toolchain"
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: Verify release identity and completed publication
+        id: identity
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          version=$(go run ./cmd/release-tag "$TAG")
+          case "$version" in
+            *-*) echo 'publish the plain version from the tested source; beta/rc identities remain testing forever' >&2; exit 1 ;;
+          esac
+          git fetch --no-tags origin "refs/tags/${TAG}:refs/tags/${TAG}" refs/heads/main:refs/remotes/origin/main
+          sha=$(git rev-parse "refs/tags/${TAG}^{commit}")
+          git merge-base --is-ancestor "$sha" origin/main
+          passed=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow release.yml --commit "$sha" --status success --limit 100 --json databaseId,event,headBranch --jq '.[].databaseId')
+          accepted=false
+          for run in $passed; do
+            # Source-bound archive/image attestations below identify the exact bytes.
+            jobs=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${run}/jobs?per_page=100")
+            # A release workflow already verifies every binary against the evidence
+            # index and attests every archive before publication. Check the run
+            # succeeded; the attestation below binds the downloaded bytes to it.
+            if printf '%s' "$jobs" | jq -e '[.jobs[] | select(.name == "Publish GitHub Release" or .name == "Publish container image" or .name == "compatibility gate") | .conclusion] | length == 3 and all(. == "success")' >/dev/null; then
+              accepted=true
+              break
+            fi
+          done
+          test "$accepted" = true || { echo 'no complete successful publication for this source' >&2; exit 1; }
+          release=$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}")
+          test "$(printf '%s' "$release" | jq -r .draft)" = false
+          {
+            echo "release_id=$(printf '%s' "$release" | jq -r .id)"
+            echo "version=$version"
+            echo "sha=$sha"
+          } >> "$GITHUB_OUTPUT"
+      - name: Verify published archives and provenance
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+          VERSION: ${{ steps.identity.outputs.version }}
+          SHA: ${{ steps.identity.outputs.sha }}
+        run: |
+          set -euo pipefail
+          mkdir verified
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir verified
+          (cd verified && sha256sum -c SHA256SUMS.txt)
+          checked=0
+          for archive in verified/passwall-sub-panel_"${VERSION}"_*; do
+            # Require the trusted publisher and exact tagged source for every file.
+            gh attestation verify "$archive" --repo "$GITHUB_REPOSITORY" --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" --source-digest "$SHA"
+            checked=$((checked + 1))
+          done
+          test "$checked" = 6
+      - name: Verify immutable image provenance
+        id: image
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.identity.outputs.version }}
+          SHA: ${{ steps.identity.outputs.sha }}
+        run: |
+          set -euo pipefail
+          repository="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/passwall-sub-panel"
+          digest=$(docker buildx imagetools inspect "$repository:$VERSION" --format '{{json .Manifest}}' | jq -er .digest)
+          gh attestation verify "oci://${repository}@${digest}" --repo "$GITHUB_REPOSITORY" --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" --source-digest "$SHA"
+          {
+            echo "repository=$repository"
+            echo "digest=$digest"
+          } >> "$GITHUB_OUTPUT"
+      - name: Promote verified artifacts
+        id: promote
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_ID: ${{ steps.identity.outputs.release_id }}
+          TAG: ${{ inputs.tag }}
+          IMAGE: ${{ steps.image.outputs.repository }}
+          DIGEST: ${{ steps.image.outputs.digest }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          docker buildx imagetools create -t "$IMAGE:stable" -t "$IMAGE:latest" "$IMAGE@$DIGEST"
+          gh api -X PATCH "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" -F prerelease=false -f make_latest=true -f "name=Passwall Sub Panel ${TAG} · Stable" >/dev/null
+      - name: Confirm stable pointers
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+          IMAGE: ${{ steps.image.outputs.repository }}
+          DIGEST: ${{ steps.image.outputs.digest }}
+        run: |
+          set -euo pipefail
+          for alias in stable latest; do
+            test "$(docker buildx imagetools inspect "$IMAGE:$alias" --format '{{json .Manifest}}' | jq -r .digest)" = "$DIGEST"
+          done
+          for attempt in 1 2 3 4 5; do
+            latest=$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq .tag_name)
+            if [ "$latest" = "$TAG" ]; then exit 0; fi
+            echo "stable metadata has not converged (attempt $attempt)"
+            sleep 3
+          done
+          echo 'promotion_pending: stable pointers have not converged; rerun this workflow' >&2
+          exit 1
+      - name: Report incomplete promotion
+        if: failure() && steps.promote.outcome != 'skipped'
+        run: echo '::error::promotion_pending. Rerun this workflow to finish updating the stable pointers.'

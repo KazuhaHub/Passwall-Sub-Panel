@@ -2,22 +2,9 @@ package version
 
 import "strings"
 
-// THE PROJECT'S RELEASE ORDER.
-//
-// It is NOT golang.org/x/mod/semver, which is the mistake this file was written
-// to undo: that package returns ZERO for anything it cannot parse, and a product
-// version has no v prefix. Zero means "equal", so a range check built on it
-// answers "inside this range" for every range — a policy reaching a build it
-// was never reviewed for. That is a fail-OPEN answer to the one question the
-// policy exists to answer.
-//
-// SemVer is not the rule either, and the reason this file once gave for that is
-// gone. It compared prerelease identifiers character by character, so
-// `v0.0.1-beta11` ranked BELOW `v0.0.1-beta9` — and this project published
-// beta1..beta12, so the SemVer answer put the older release first. Nothing
-// publishes that shape now: a version is three integers with no suffix, and a
-// candidate release is a CHANNEL rather than a spelling. What remains is plain
-// integer comparison.
+// Release order compares numeric segments, then beta.N < rc.N < stable.
+// The historical fourth segment sorts above its three-segment base and below
+// the next patch. Comparisons do not overflow on large numeric inputs.
 
 // CompareRelease orders two release versions, -1 / 0 / +1.
 //
@@ -29,7 +16,9 @@ import "strings"
 //
 // Segments are never compared as text (0.0.10 is above 0.0.9).
 func CompareRelease(a, b string) int {
-	left, right := strings.Split(a, "."), strings.Split(b, ".")
+	abase, apre, _ := strings.Cut(a, "-")
+	bbase, bpre, _ := strings.Cut(b, "-")
+	left, right := strings.Split(abase, "."), strings.Split(bbase, ".")
 	width := max(len(left), len(right))
 	for i := 0; i < width; i++ {
 		leftSegment, rightSegment := "0", "0"
@@ -43,7 +32,30 @@ func CompareRelease(a, b string) int {
 			return c
 		}
 	}
-	return 0
+	if apre == bpre {
+		return 0
+	}
+	if apre == "" {
+		return 1
+	}
+	if bpre == "" {
+		return -1
+	}
+	astage, anum, _ := strings.Cut(apre, ".")
+	bstage, bnum, _ := strings.Cut(bpre, ".")
+	if astage != bstage {
+		return strings.Compare(astage, bstage)
+	}
+	return compareNumericDigits(anum, bnum)
+}
+
+func validPrerelease(pre string) bool {
+	stage, number, ok := strings.Cut(pre, ".")
+	if !ok || (stage != "beta" && stage != "rc") {
+		return false
+	}
+	n, ok := canonicalSegment(number)
+	return ok && n > 0
 }
 
 // compareNumericDigits orders two digit strings by value. Length first, so a

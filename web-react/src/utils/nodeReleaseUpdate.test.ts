@@ -105,7 +105,7 @@ describe('newerNodeRelease', () => {
     expect(newerNodeRelease({ panel_version: '4.0.8', update_channel: 'beta' }, [stable])).toBeUndefined()
     expect(newerNodeRelease({ panel_version: '4.0.0', update_channel: 'beta' }, [release('1.0.2'), release('1.0.1')])).toBeUndefined()
     // An unrecognised saved channel is still refused rather than widened.
-    expect(newerNodeRelease({ panel_version: '4.0.0', update_channel: 'testing' as Server['update_channel'] }, catalog)).toBeUndefined()
+    expect(newerNodeRelease({ panel_version: '4.0.0', update_channel: 'nightly' as Server['update_channel'] }, catalog)).toBeUndefined()
   })
 
 
@@ -291,4 +291,14 @@ describe('newerNodeRelease, product scheme', () => {
   // so a version that is not one of ours is not a target, and that is the whole
   // of it.
 
+})
+
+it('orders current candidates and allows testing as the canonical preference', () => {
+  const beta2 = release('4.1.0-beta.2', { channel: 'testing' })
+  const beta10 = release('4.1.0-beta.10', { channel: 'testing' })
+  const stable = release('4.1.0')
+  expect(newerNodeRelease({ panel_version: '4.0.1.22', update_channel: 'testing' }, [beta2, beta10])).toBe(beta10)
+  expect(newerNodeRelease({ panel_version: '4.0.1.22', update_channel: 'stable' }, [beta10])).toBeUndefined()
+  expect(newerNodeRelease({ panel_version: '4.1.0-rc.1', update_channel: 'testing' }, [stable])).toBe(stable)
+  expect(newerNodeRelease({ panel_version: '4.0.1.22', update_channel: 'stable' }, [release('4.1.0-beta.1')])).toBeUndefined()
 })

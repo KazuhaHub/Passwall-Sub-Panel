@@ -1,4 +1,3 @@
-import { prerelease } from 'semver'
 import { canonicalReleaseVersion, compareReleaseVersion, releaseTag } from './productVersion'
 import type { NodeRelease, NodeReleaseChannel } from '@/api/nodeReleases'
 import type { Server } from '@/api/servers'
@@ -19,20 +18,10 @@ function canonicalVersion(identity: string): string | undefined {
   return canonicalReleaseVersion(identity)
 }
 
-/**
- * The channel the release METADATA states, cross-checked against the text only
- * where the text can carry it.
- *
- * A legacy version spells its channel in a prerelease suffix, so the two must
- * agree — an older beta cut before the workflow began setting the flag arrives
- * flagged stable, and the suffix is what corrects it. A product version has no
- * suffix, because a candidate is distinguished by the channel it was published
- * to, so there is nothing to agree with, and requiring agreement hid every
- * product release from the only node supposed to see a testing one.
- */
+/** A beta/rc suffix always implies Testing, regardless of catalog metadata.
+ * Historical numeric versions continue to use their publication metadata. */
 function channelAgrees(version: string, channel: 'stable' | 'testing'): boolean {
-  if (!version.startsWith('v')) return true
-  return (prerelease(version) !== null) === (channel === 'testing')
+  return !version.includes('-') || channel === 'testing'
 }
 
 /** Highest newer reviewed Linux release in the server's saved channel. */
@@ -51,7 +40,7 @@ export function newerNodeRelease(
   if (!identity || identity[0] !== rawIdentity) return undefined
   const current = canonicalVersion(identity[1])
   if (!current) return undefined
-  if (server.update_channel !== undefined && server.update_channel !== 'stable' && server.update_channel !== 'beta') return undefined
+  if (server.update_channel !== undefined && server.update_channel !== 'stable' && server.update_channel !== 'beta' && server.update_channel !== 'testing') return undefined
   // THE SAVED CHANNEL IS A FLOOR ON HOW ADVENTUROUS THE NODE MAY BE, NOT A
   // FILTER ON WHAT IT MAY BE OFFERED. A stable node takes released targets only; a
   // testing node takes released OR testing ones. Making the beta channel
@@ -61,7 +50,7 @@ export function newerNodeRelease(
   //
   // IT CANNOT BECOME A DOWNGRADE: the strictly-newer comparison below still
   // applies, so a released target older than the running version is not offered.
-  const channels: NodeReleaseChannel[] = server.update_channel === 'beta' ? ['stable', 'testing'] : ['stable']
+  const channels: NodeReleaseChannel[] = (server.update_channel === 'beta' || server.update_channel === 'testing') ? ['stable', 'testing'] : ['stable']
 
   return releases.filter(release => {
     if (!release) return false
