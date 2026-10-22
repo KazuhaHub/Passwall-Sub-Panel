@@ -534,7 +534,7 @@ test('published releases and exact images cannot silently overwrite while rollin
   assert(job('setup').includes('node deploy/check-image.mjs'))
   assert(docker.includes('node deploy/check-image.mjs'))
   assert(!docker.includes("value=latest,"), "publication must not move stable aliases")
-  assert(docker.includes("bash .github/scripts/update-image-channels.sh"))
+  assert(job('channels').includes("bash .github/scripts/update-image-channels.sh"))
   assert(workflow.includes('group: release-passwall-sub-panel\n  cancel-in-progress: false'))
 })
 
@@ -1001,9 +1001,9 @@ function resolveChannel(tag, requested = 'auto') {
 }
 
 test('publication advances candidate channels through the pinned policy', () => {
- const docker = job('docker')
- assert(docker.includes('bash .github/scripts/update-image-channels.sh'))
- assert(docker.includes('DIGEST: ${{ steps.push.outputs.digest }}'))
+ const docker = job('channels')
+ assert(job('channels').includes('bash .github/scripts/update-image-channels.sh'))
+ assert(docker.includes('DIGEST: ${{ needs.docker.outputs.digest }}'))
  assert(docker.includes('VERSION: ${{ needs.setup.outputs.version }}'))
  assert(!/type=raw,value=(latest|stable|rc|beta|testing),/.test(docker), 'only exact image tags belong in the build push')
 })
@@ -1088,7 +1088,7 @@ test('the publication channel is resolved once, never inferred from a hyphen', (
   assert(/image_channel: \$\{\{ steps\.channel\.outputs\.images \}\}/.test(setup), 'setup must expose whether images are tagged')
 
   assert(/prerelease: \$\{\{ needs\.setup\.outputs\.prerelease \}\}/.test(release), 'the release must publish the resolved channel')
-  assert(docker.includes('bash .github/scripts/update-image-channels.sh'))
+  assert(job('channels').includes('bash .github/scripts/update-image-channels.sh'))
   assert(!docker.includes('type=raw,value=latest,'))
 
   // The recoverable direction is now the default for every tag, not a fallback for

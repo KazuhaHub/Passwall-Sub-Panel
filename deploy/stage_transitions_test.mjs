@@ -94,4 +94,6 @@ test('a conflicting target or failed publication cannot be promoted',()=>{
  assert.notEqual(r.status,0);assert.match(r.stderr,/another commit/);assert.doesNotMatch(calls(f),/"workflow","run"/)
  const failure=sourceFixture();failure.env.PUBLICATION_FAILURE='1';r=advance(failure)
  assert.notEqual(r.status,0);assert.match(r.stderr,/failed/);assert.doesNotMatch(calls(failure),/"workflow","run","promote.yml"/)
+ delete failure.env.PUBLICATION_FAILURE; r=advance(failure);assert.equal(r.status,0,r.stderr)
+ assert.equal(calls(failure).split('\n').filter(l=>l.includes('"workflow","run","release.yml"')).length,1)
 })

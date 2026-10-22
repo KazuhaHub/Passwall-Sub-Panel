@@ -119,6 +119,8 @@ describe('Passwall Node installation', () => {
     expect(api.post).not.toHaveBeenCalled()
     expect(api.put).not.toHaveBeenCalled()
   })
+  // The full flow includes an async clipboard assertion with its own 5s bound.
+  // Keep the outer budget above that bound so a failure reports the assertion.
   it('keeps identity, credentials and full scripts folded by default, with a labeled advanced control and one-line command feedback', async () => {
     reads()
     const generated = { server_id: 7, command: 'curl -fsSL https://panel.test/bootstrap/private-ticket -o /tmp/install',
@@ -149,7 +151,7 @@ describe('Passwall Node installation', () => {
     expect((await screen.findByLabelText('admin:servers.native.credential') as HTMLInputElement).value).toBe(provisioning.credential)
     expect(api.post).toHaveBeenCalledTimes(1)
     expect(api.put).not.toHaveBeenCalled()
-  })
+  }, 10_000)
   it.each(['stable', 'beta'] as const)('saves a PN %s preference on the original record and reopens Edit with the saved response', async preference => {
     const saved = { ...nativeServer, update_channel: preference }
     reads()
