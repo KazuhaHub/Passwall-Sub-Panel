@@ -19,7 +19,7 @@ var currentPublication atomic.Value
 // identities use the cached release metadata and stay unknown until verified.
 func Channel() string {
 	if IsReleaseVersion(Version) && strings.Contains(Version, "-") {
-		return "testing"
+		return ReleaseStage(Version, true)
 	}
 	if v, ok := currentPublication.Load().(buildPublication); ok && v.Version == Version {
 		return v.Channel
@@ -56,10 +56,7 @@ func refreshBuildChannel(ctx context.Context) error {
 	if release.Tag != tag || release.Draft == nil || release.Prerelease == nil || *release.Draft {
 		return fmt.Errorf("current build release is not published")
 	}
-	channel := "stable"
-	if *release.Prerelease {
-		channel = "testing"
-	}
+	channel := ReleaseStage(Version, *release.Prerelease)
 	currentPublication.Store(buildPublication{Version, channel})
 	return nil
 }

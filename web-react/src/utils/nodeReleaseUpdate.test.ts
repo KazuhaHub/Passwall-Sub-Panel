@@ -302,3 +302,19 @@ it('orders current candidates and allows testing as the canonical preference', (
   expect(newerNodeRelease({ panel_version: '4.1.0-rc.1', update_channel: 'testing' }, [stable])).toBe(stable)
   expect(newerNodeRelease({ panel_version: '4.0.1.22', update_channel: 'stable' }, [release('4.1.0-beta.1')])).toBeUndefined()
 })
+
+describe('three update channels', () => {
+  const stable = release('4.1.0')
+  const rc = release('4.1.1-rc.2', { channel: 'rc' })
+  const beta = release('4.2.0-beta.1', { channel: 'beta' })
+  const pending = release('4.3.0', { channel: 'pending' })
+  it.each([
+    ['stable', stable], ['rc', rc], ['beta', beta], ['testing', beta],
+  ] as const)('%s receives only its permitted stages', (update_channel, want) => {
+    expect(newerNodeRelease({ panel_version: '4.0.2', update_channel }, [pending, beta, rc, stable])).toBe(want)
+  })
+  it('RC accepts a final release and excludes Beta even when its catalog flag is wrong', () => {
+    expect(newerNodeRelease({ panel_version: '4.0.2', update_channel: 'rc' }, [stable])).toBe(stable)
+    expect(newerNodeRelease({ panel_version: '4.0.2', update_channel: 'rc' }, [release(beta.version, {channel:'stable'})])).toBeUndefined()
+  })
+})

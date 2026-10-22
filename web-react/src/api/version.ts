@@ -2,7 +2,7 @@ import { client } from './client'
 
 export interface VersionInfo {
   version: string
-  channel?: 'stable' | 'testing' | 'unknown'
+  channel?: 'stable' | 'rc' | 'beta' | 'pending' | 'testing' | 'unknown'
   commit: string
   build_date: string
 }

@@ -73,7 +73,7 @@ on:
         required: false
         type: string
       channel:
-        description: "Publish to Testing. Stable is a separate verified promotion."
+        description: "Publish a staged release. Beta/RC comes from the tag; final approval is separate."
         required: false
         default: auto
         type: choice
@@ -1171,7 +1171,7 @@ jobs:
           # tag cannot be read as a Go module version, and it is not what the
           # release is called. `Passwall Sub Panel v4.0.1.2` says which product and
           # which release in one line, and the tag is shown beside it by GitHub.
-          name: Passwall Sub Panel ${{ needs.setup.outputs.tag }} · ${{ contains(needs.setup.outputs.version, '-') && 'Testing' || 'Awaiting promotion' }}
+          name: Passwall Sub Panel ${{ needs.setup.outputs.tag }} · ${{ contains(needs.setup.outputs.version, '-rc.') && 'RC' || contains(needs.setup.outputs.version, '-beta.') && 'Beta' || 'Awaiting promotion' }}
           # Resolved once in setup, where the reason for each answer is written
           # down; both this job and the image job read that one answer.
           prerelease: ${{ needs.setup.outputs.prerelease }}
@@ -1277,7 +1277,7 @@ jobs:
     timeout-minutes: 15
     # Same reason as `release` above: a channel this job rolls forward must not
     # move on a run whose compatibility evidence is incomplete.
-    needs: [setup, build, compatibility]
+    needs: [setup, build, compatibility, release]
     # The docker/* actions are pinned by commit for the release step's reason:
     # after the login, this job's credential pushes :latest and :beta, which every
     # Docker deployment pulls, and a moved tag would run past the image preflight.
@@ -1346,8 +1346,6 @@ jobs:
             type=raw,value=${{ needs.setup.outputs.version }}
             # The canonical early-access alias and its historical spelling move
             # together. Stable/latest are updated only by verified promotion.
-            type=raw,value=testing,enable=${{ needs.setup.outputs.image_channel == 'true' }}
-            type=raw,value=beta,enable=${{ needs.setup.outputs.image_channel == 'true' }}
           labels: |
             org.opencontainers.image.title=passwall-sub-panel
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
@@ -1422,3 +1420,45 @@ jobs:
           subject-digest: ${{ steps.push.outputs.digest }}
           push-to-registry: true
           create-storage-record: false
+
+
+  channels:
+    name: Advance candidate image channels
+    needs: [setup, release, docker, compatibility]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.setup.outputs.sha }}
+      - uses: actions/setup-go@v7
+        env:
+          GOTOOLCHAIN: auto
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Verify exact preferred compiler
+        run: |
+          set -eu
+          build_toolchain=$(awk '$1 == "toolchain" { print $2 }' go.mod)
+          test -n "$build_toolchain"
+          test "$(go env GOVERSION)" = "$build_toolchain"
+          test "$(go tool compile -V | awk '{ print $3 }')" = "$build_toolchain"
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: Build channel policy
+        run: go build -o "$RUNNER_TEMP/release-stage" ./cmd/release-stage
+      - name: Advance eligible candidate image channels
+        env:
+          GH_TOKEN: ${{ github.token }}
+          IMAGE: ghcr.io/${{ needs.setup.outputs.owner_lc }}/passwall-sub-panel
+          VERSION: ${{ needs.setup.outputs.version }}
+          DIGEST: ${{ needs.docker.outputs.digest }}
+          STAGE_TOOL: ${{ runner.temp }}/release-stage
+        run: |
+          set -euo pipefail
+          test "$(docker buildx imagetools inspect "$IMAGE:$VERSION" --format '{{json .Manifest}}' | jq -er .digest)" = "$DIGEST"
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          bash .github/scripts/update-image-channels.sh

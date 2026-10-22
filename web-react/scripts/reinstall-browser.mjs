@@ -109,7 +109,7 @@ async function fixture(request, response, url) {
       policy: { installed: false, applicable: false, enforcing: false, expired: false },
     });
     if (pathname === '/api/admin/servers/node-releases') return reply(response, {
-      checked_at: new Date().toISOString(), releases: [{ version, channel: 'testing',
+      checked_at: new Date().toISOString(), releases: [{ version, channel: 'beta',
         published_at: '2026-09-12T12:00:00Z', notes: 'Reviewed browser acceptance fixture',
         // THE ADDRESS IS THE TAG AND THE RECORD IS THE VERSION, which are never the same
         // string — and a version no longer determines the address, so the panel states it
@@ -147,7 +147,7 @@ async function fixture(request, response, url) {
     if (previewOnly && pathname === '/api/admin/servers') {
       assert(previewCreatedIDs.size < 10, 'Preview server limit reached. Restart the disposable preview.');
       assert(body?.panel_type === 'psp' && typeof body.name === 'string' && body.name.trim() && body.name.length <= 64);
-      assert(['stable', 'testing', 'beta'].includes(body.update_channel));
+      assert(['stable', 'rc', 'beta', 'testing'].includes(body.update_channel));
       assert(Object.keys(body).every(key => ['name', 'panel_type', 'remark', 'update_channel'].includes(key)));
       assert(body.remark === undefined || typeof body.remark === 'string' && body.remark.length <= 1024);
       const id = 47 + previewCreatedIDs.size;
@@ -190,8 +190,8 @@ async function fixture(request, response, url) {
     return reply(response, original);
   }
   if (method === 'PUT' && pathname === '/api/admin/servers/7') {
-    assert.deepEqual(body, { name: servers[0].name, remark: '', update_channel: 'testing' });
-    servers[0].update_channel = 'testing';
+    assert.deepEqual(body, { name: servers[0].name, remark: '', update_channel: 'beta' });
+    servers[0].update_channel = 'beta';
     return reply(response, servers[0]);
   }
   throw new Error(`Unexpected API/write: ${method} ${pathname}`);
@@ -272,7 +272,7 @@ try {
     await expect(dialog.getByText(s('native.release_no_stable'), { exact: true })).toBeVisible();
     await expect(dialog.getByRole('combobox', { name: s('native.agent_version'), exact: true })).toHaveAttribute('aria-disabled', 'true');
     await dialog.getByRole('combobox', { name: s('native.release_channel'), exact: true }).click();
-    await page.getByRole('option', { name: s('native.release_testing'), exact: true }).click();
+    await page.getByRole('option', { name: s('native.release_beta'), exact: true }).click();
     await dialog.getByRole('combobox', { name: s('native.agent_version'), exact: true }).click();
     await page.getByRole('option', { name: version, exact: true }).click();
   }
@@ -347,14 +347,14 @@ try {
   dialog = page.getByRole('dialog');
   await expect(dialog.getByRole('combobox', { name: s('field.update_channel'), exact: true })).toHaveText(s('native.release_stable'));
   await dialog.getByRole('combobox', { name: s('field.update_channel'), exact: true }).click();
-  await page.getByRole('option', { name: s('native.release_testing'), exact: true }).click();
+  await page.getByRole('option', { name: s('native.release_beta'), exact: true }).click();
   await dialog.getByRole('button', { name: text('common:actions.ok'), exact: true }).click();
   await expect(page.getByRole('dialog')).toHaveCount(0);
   assert.equal(count('PUT', '/api/admin/servers/7'), 1, 'The saved update preference must address the original PN ID.');
   await (await openChooser(servers[0])).getByRole('button', { name: s('install_reinstall.continue'), exact: true }).click();
   dialog = page.getByRole('dialog');
   await inspectOriginalIdentity(dialog);
-  await expect(dialog.getByRole('combobox', { name: s('native.release_channel'), exact: true })).toHaveText(s('native.release_testing'));
+  await expect(dialog.getByRole('combobox', { name: s('native.release_channel'), exact: true })).toHaveText(s('native.release_beta'));
   await expect(dialog.getByRole('combobox', { name: s('native.agent_version'), exact: true }).locator('..').locator('input')).toHaveValue(version);
   await expect(dialog.getByRole('button', { name: s('native.generate_command'), exact: true })).toBeEnabled();
   // A temporary override must not save a second preference or replace identity.
@@ -365,7 +365,7 @@ try {
   await originalPNRow.getByRole('button', { name: s('action.more'), exact: true }).click();
   await page.getByRole('menuitem', { name: s('agent_upgrade.action'), exact: true }).click();
   dialog = page.getByRole('dialog');
-  await expect(dialog.getByRole('combobox', { name: s('native.release_channel'), exact: true })).toHaveText(s('native.release_testing'));
+  await expect(dialog.getByRole('combobox', { name: s('native.release_channel'), exact: true })).toHaveText(s('native.release_beta'));
   // The upgrade surface selects the newest reviewed release in the saved
   // channel automatically; the administrator can still change it before
   // confirming the request.

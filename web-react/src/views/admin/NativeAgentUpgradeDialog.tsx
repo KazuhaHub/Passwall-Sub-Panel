@@ -1,3 +1,4 @@
+import { effectiveUpdateChannel } from '@/utils/nodeReleaseUpdate'
 import { useEffect, useRef, useState } from 'react'
 import { Alert, Box, Button, CircularProgress, Dialog, DialogActions, DialogContent, DialogTitle, TextField, Typography } from '@mui/material'
 import { useTranslation } from 'react-i18next'
@@ -117,7 +118,7 @@ export function NativeAgentUpgradeDialog({ server, onClose }: { server: Server |
         {blocked
           ? <Alert severity="warning">{blocked}</Alert>
           : <NodeReleaseSelector key={server?.id} enabled={!!server} selection={{ method: 'linux', os: 'linux', arch: 'amd64' }}
-          initialChannel={(server?.update_channel === 'beta' || server?.update_channel === 'testing') ? 'testing' : 'stable'} value={version}
+          initialChannel={effectiveUpdateChannel(server?.update_channel)} value={version}
           onChange={next => { setVersion(next); if (!error) key.current = '' }} autoSelectLatest context="upgrade"
           newerThan={expected} targets={targets} disabled={busy || !!task || !!error} />}
         <Typography variant="body2">{t('admin:servers.agent_upgrade.version_hint')}</Typography>

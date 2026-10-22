@@ -136,7 +136,7 @@ func TestNativeUpdateChannelPoolFailureRollsBackOnlySubmittedFields(t *testing.T
 
 func TestNativeCreateUpdateChannelDefaultsStableOrAcceptsExplicitChoice(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	for _, test := range []struct{ extra, want string }{{"", "stable"}, {`,"update_channel":"stable"`, "stable"}, {`,"update_channel":"beta"`, "beta"}, {`,"update_channel":"testing"`, "testing"}} {
+	for _, test := range []struct{ extra, want string }{{"", "stable"}, {`,"update_channel":"stable"`, "stable"}, {`,"update_channel":"beta"`, "beta"}, {`,"update_channel":"testing"`, "testing"}, {`,"update_channel":"rc"`, "rc"}} {
 		provisioning := &nativeProvisioningRepoStub{}
 		h := NewAdminServersHandler(nativeProvisioningPanelRepo{}, &nativeProvisioningPool{}, nil, nil, nil, nil).WithNativeAgentProvisioning(provisioning).WithCoreCatalog(corefixtures.Static{})
 		w := httptest.NewRecorder()
@@ -151,7 +151,11 @@ func TestNativeCreateUpdateChannelDefaultsStableOrAcceptsExplicitChoice(t *testi
 		if err := json.Unmarshal(w.Body.Bytes(), &dto); err != nil {
 			t.Fatal(err)
 		}
-		if dto.Server.UpdateChannel != test.want {
+		dtoWant := test.want
+		if dtoWant == "testing" {
+			dtoWant = "beta"
+		}
+		if dto.Server.UpdateChannel != dtoWant {
 			t.Fatal("create response omitted preference")
 		}
 	}

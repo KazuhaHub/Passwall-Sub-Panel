@@ -14,7 +14,7 @@ export type CompatStatus = 'supported' | 'too_old' | 'untested' | 'unknown'
 
 export type XUIAuthMethod = '' | 'token' | 'password'
 export type PanelType = '3xui' | 'sui' | 'psp'
-export type NodeUpdateChannel = 'stable' | 'testing' | 'beta'
+export type NodeUpdateChannel = 'stable' | 'rc' | 'beta' | 'testing'
 export type NativeCoreEngine = 'xray' | 'sing-box'
 export type NativeCompatibilityStatus = 'unknown' | 'compatible' | 'limited' | 'incompatible'
 

@@ -54,7 +54,7 @@ async function chooseBackend(backend: string) {
 function command() { return screen.queryByLabelText('admin:servers.native.install_command') as HTMLInputElement | null }
 function generateButton() { return screen.getByRole('button', { name: 'admin:servers.migration.generate_node_command' }) as HTMLButtonElement }
 async function selectVersion(version = '4.2.1') {
-  const channel = version.includes('-') ? 'testing' : 'stable'
+  const channel = version.includes('-') ? 'beta' : 'stable'
   fireEvent.mouseDown(await screen.findByRole('combobox', { name: 'admin:servers.native.release_channel' }))
   fireEvent.click(await screen.findByRole('option', { name: `admin:servers.native.release_${channel}` }))
   const field = screen.getByRole('combobox', { name: 'admin:servers.native.agent_version' })
@@ -193,7 +193,7 @@ describe('3X-UI to Passwall Node node-host migration command', () => {
     mount(<NodeMigrationPreviewDialog server={server} onClose={vi.fn()} />)
     await confirmAndSelect()
     fireEvent.mouseDown(screen.getByRole('combobox', { name: 'admin:servers.native.release_channel' }))
-    fireEvent.click(screen.getByRole('option', { name: 'admin:servers.native.release_testing' }))
+    fireEvent.click(screen.getByRole('option', { name: 'admin:servers.native.release_beta' }))
     const input = screen.getByRole('combobox', { name: 'admin:servers.native.agent_version' }).parentElement!.querySelector('input')!
     fireEvent.change(input, { target: { value: '99.99.99' } })
     expect(input.value).toBe('')
@@ -392,7 +392,7 @@ describe('3X-UI to Passwall Node node-host migration command', () => {
     fireEvent.click(generateButton())
     await screen.findByLabelText('admin:servers.native.install_command')
     fireEvent.mouseDown(screen.getByRole('combobox', { name: 'admin:servers.native.release_channel' }))
-    fireEvent.click(screen.getByRole('option', { name: 'admin:servers.native.release_testing' }))
+    fireEvent.click(screen.getByRole('option', { name: 'admin:servers.native.release_beta' }))
     expect(command()).toBeNull()
     expect(generateButton().disabled).toBe(true)
   })

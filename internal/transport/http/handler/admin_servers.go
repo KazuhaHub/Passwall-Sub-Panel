@@ -464,7 +464,7 @@ func (h *AdminServersHandler) Create(c *gin.Context) {
 	}
 	kind := domain.NormalizePanelKind(domain.PanelKind(req.Kind))
 	if req.UpdateChannel != nil && (kind != domain.PanelKindPSP || !domain.PanelUpdateChannel(*req.UpdateChannel).Valid()) {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "update_channel must be stable or testing (beta is a compatibility alias) for a Passwall Node server"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "update_channel must be stable, rc or beta (testing is a compatibility alias) for a Passwall Node server"})
 		return
 	}
 	if validator, ok := h.pool.(ports.PanelKindValidator); ok && !validator.SupportsKind(kind) {
@@ -665,7 +665,7 @@ func (h *AdminServersHandler) Update(c *gin.Context) {
 	}
 	if req.UpdateChannel != nil {
 		if domain.NormalizePanelKind(existing.Kind) != domain.PanelKindPSP || !domain.PanelUpdateChannel(*req.UpdateChannel).Valid() {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "update_channel must be stable or testing (beta is a compatibility alias) for a Passwall Node server"})
+			c.JSON(http.StatusBadRequest, gin.H{"error": "update_channel must be stable, rc or beta (testing is a compatibility alias) for a Passwall Node server"})
 			return
 		}
 		existing.UpdateChannel = domain.PanelUpdateChannel(*req.UpdateChannel)

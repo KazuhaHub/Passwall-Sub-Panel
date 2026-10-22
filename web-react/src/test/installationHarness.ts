@@ -24,7 +24,7 @@ export const releaseCatalog: NodeReleaseCatalog = {
     // which worked while a beta spelled itself; a product version does not, so the
     // fixture states the channel. The arrangement is the one the old fixture had:
     // the release is stable and the two above it are testing candidates.
-    channel: version === '4.1.0' ? 'stable' : 'testing',
+    channel: version === '4.1.0' ? 'stable' : 'beta',
     published_at: '2026-09-12T12:00:00Z', notes: 'Reviewed contract fixture',
     release_url: `https://github.com/KazuhaHub/Passwall-Node/releases/tag/${releaseTag(version)}`,
     methods: ['linux', 'docker', 'manual'],

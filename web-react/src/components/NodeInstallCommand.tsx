@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useLayoutEffect, useRef, useState } from 'react'
 import { Button, CircularProgress, Stack, TextField, Typography } from '@mui/material'
 import ContentCopyIcon from '@mui/icons-material/ContentCopy'
 import { useTranslation } from 'react-i18next'
@@ -18,10 +18,12 @@ export default function NodeInstallCommand({ command, expiresAt, disabled = fals
   const [copying, setCopying] = useState(false)
   const intent = useRef(0)
   const observed = useRef({ command, expiresAt, disabled })
-  useEffect(() => {
+  useLayoutEffect(() => {
     const previous = observed.current
     const changed = previous.command !== command || previous.expiresAt !== expiresAt || previous.disabled !== disabled
     observed.current = { command, expiresAt, disabled }
+    // Invalidate during commit, before a click can start a new copy. A passive
+    // cleanup could otherwise discard the result of a click on the new command.
     // Initial mount is not a new intent. Invalidating there can race an
     // immediate copy click on a busy runner: the resolved clipboard result is
     // then discarded even though the command never changed. Dependency changes

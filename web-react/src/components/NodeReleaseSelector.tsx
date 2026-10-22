@@ -6,6 +6,8 @@ import { listNodeReleases, type NodeRelease, type NodeReleaseChannel } from '@/a
 import type { NativeInstallationSelection } from '@/api/servers'
 import { compareReleaseVersion, releaseTag } from '@/utils/productVersion'
 
+import { acceptsRelease, effectiveUpdateChannel } from '@/utils/nodeReleaseUpdate'
+
 // Loaded when the notes are first expanded: the Markdown renderer is only ever
 // needed behind the fold, so the dialogs do not carry it until someone asks.
 const ReleaseNotes = lazy(() => import('./ReleaseNotes'))
@@ -108,7 +110,7 @@ function officialReleaseURL(release: NodeRelease): string | undefined {
 export default function NodeReleaseSelector({ enabled, selection, value, onChange, disabled = false, initialChannel = 'stable', compact = false, autoSelectLatest = false, context = 'install', newerThan, targets }: NodeReleaseSelectorProps) {
   const { t, i18n } = useTranslation(['admin', 'common'])
   const reviewID = useId()
-  const [channel, setChannel] = useState<NodeReleaseChannel>(initialChannel)
+  const [channel, setChannel] = useState(effectiveUpdateChannel(initialChannel))
   const [releases, setReleases] = useState<NodeRelease[] | null>(null)
   const [loading, setLoading] = useState(false)
   const [failed, setFailed] = useState(false)
@@ -124,7 +126,7 @@ export default function NodeReleaseSelector({ enabled, selection, value, onChang
   }, [onChange, value])
 
   useEffect(() => {
-    setChannel(initialChannel)
+    setChannel(effectiveUpdateChannel(initialChannel))
     if (valueRef.current) onChangeRef.current('')
   }, [enabled, initialChannel])
 
@@ -158,9 +160,9 @@ export default function NodeReleaseSelector({ enabled, selection, value, onChang
   }, [enabled, attempt])
 
   const options = useMemo(() => (releases ?? []).filter(release =>
-    release.channel === channel && officialReleaseURL(release) && supportsSelection(release, selection) &&
+    acceptsRelease(channel, release) && officialReleaseURL(release) && supportsSelection(release, selection) &&
     (!targets || targets.includes(release.version)),
-  ), [releases, channel, selection, targets])
+  ).sort((a, b) => compareReleaseVersion(b.version, a.version)), [releases, channel, selection, targets])
   // OLDER RELEASES ARE SHOWN AND MARKED, NOT HIDDEN. The server permits them; a
   // list that silently omits what the service would accept is a second opinion,
   // and it was an opinion that switched itself off — the dialog only supplied
@@ -185,7 +187,7 @@ export default function NodeReleaseSelector({ enabled, selection, value, onChang
   const recommended = useMemo(() => options.find(release => isAhead(release.version)), [options, newerThan])
   const selected = options.find(release => release.version === value)
   const selectedURL = selected ? officialReleaseURL(selected) : undefined
-  const channelTag = channel === 'stable' ? 'stable' : 'testing'
+  const channelTag = channel
   const followsDockerChannel = selection.method === 'docker' && value === channelTag && options.length > 0
   const acceptedValue = !!selected || followsDockerChannel
 
@@ -221,14 +223,15 @@ export default function NodeReleaseSelector({ enabled, selection, value, onChang
     <Stack direction={compact ? { xs: 'column', sm: 'row' } : 'column'} spacing={1.5}>
     <TextField select fullWidth label={t('admin:servers.native.release_channel')} value={channel} disabled={disabled}
       onChange={event => {
-        const next = event.target.value as NodeReleaseChannel
+        const next = event.target.value as typeof channel
         if (next !== channel) {
           onChangeRef.current('')
           setChannel(next)
         }
       }}>
       <MenuItem value="stable">{t('admin:servers.native.release_stable')}</MenuItem>
-      <MenuItem value="testing">{t('admin:servers.native.release_testing')}</MenuItem>
+      <MenuItem value="rc">{t('admin:servers.native.release_rc')}</MenuItem>
+      <MenuItem value="beta">{t('admin:servers.native.release_beta')}</MenuItem>
     </TextField>
     <TextField select fullWidth label={t('admin:servers.native.agent_version')} value={acceptedValue ? value : ''}
       disabled={disabled || loading || failed || options.length === 0}
@@ -241,7 +244,7 @@ export default function NodeReleaseSelector({ enabled, selection, value, onChang
       }}>
       <MenuItem value="">{t('admin:servers.native.release_choose_version')}</MenuItem>
       {selection.method === 'docker' && options.length > 0 && <MenuItem value={channelTag} aria-label={channelTag}>
-        {t(channel === 'stable' ? 'admin:servers.native.release_follow_stable' : 'admin:servers.native.release_follow_testing')}
+        {t(`admin:servers.native.release_follow_${channel}`)}
         {` (${t('admin:servers.native.release_recommended')})`}
       </MenuItem>}
       {options.map(release => <MenuItem key={release.version} value={release.version} aria-label={release.version}>

@@ -2964,7 +2964,7 @@
     "update_available": "可用更新：{{latest}}",
     "hint": {
       "name": "显示名称，可修改；内部关联使用数据库 ID",
-      "update_channel": "保存安装与升级列表的默认频道。Docker 文件默认以 stable 跟随正式通道、以 testing 跟随测试通道（兼容旧 latest/beta 别名）；手动与 systemd 安装仍使用已审核的精确版本。保存不会执行安装或升级，也不会更改服务器、节点身份或凭据。弹窗内临时切换频道不会自动保存。",
+      "update_channel": "默认更新通道：stable 只接收正式版，rc 接收候选版与正式版，beta 接收所有阶段。Docker 跟随同名标签，latest 仅指向 stable；testing 兼容 beta。保存不会自动升级。",
       "update_channel_short": "默认发布频道；Docker 文件跟随对应镜像标签，但保存不会自动升级节点。",
       "configured": "已配置（保持不变）",
       "unconfigured": "未配置",
@@ -3164,7 +3164,11 @@
       "replace_identity": "换身份覆盖安装",
       "replace_identity_hint": "把不兼容的旧安装 —— 例如另一个面板留下的节点 —— 换成这个面板的身份。旧安装会被停掉并整体移入主机的 backups/。",
       "replace_identity_warning": "覆盖安装之后：这台节点的流量计数从零开始（旧计数留在主机备份里）；如果它原本属于另一个面板，那个面板里的服务器记录需要人工删除。",
-      "release_older_than_current": "较当前版本旧"
+      "release_older_than_current": "较当前版本旧",
+      "release_rc": "候选通道（RC + 正式版）",
+      "release_beta": "测试通道（Beta + RC + 正式版）",
+      "release_follow_rc": "跟随候选通道（rc）",
+      "release_follow_beta": "跟随测试通道（beta）"
     },
     "table": {
       "name": "服务器名称",
@@ -3593,7 +3597,7 @@
           "refused": "同步上报被拒",
           "refused_caption": "版本不兼容 {{proto}} · 内容无效 {{invalid}}",
           "storage": "保存失败",
-        "storage_caption": "其中 {{history}} 次含历史样本",
+          "storage_caption": "其中 {{history}} 次含历史样本",
           "persist": "保存耗时",
           "persist_caption": "预算 500 ms"
         }

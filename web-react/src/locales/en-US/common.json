@@ -63,5 +63,8 @@
   },
   "release.testing": "Testing",
   "release.stable": "Stable",
-  "release.unknown": "Channel unknown"
+  "release.unknown": "Channel unknown",
+  "release.rc": "RC",
+  "release.beta": "Beta",
+  "release.pending": "Awaiting promotion"
 }
