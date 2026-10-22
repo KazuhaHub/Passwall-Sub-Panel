@@ -275,7 +275,7 @@ func (h *AdminServersHandler) NodeInstallationFiles(c *gin.Context) {
 	// to be v-prefixed, which was the only shape the rule accepted when the
 	// installer version doubled as a download path.
 	validationVersion := req.Version
-	if validationVersion == "stable" || validationVersion == "testing" || validationVersion == "latest" || validationVersion == "beta" {
+	if validationVersion == "rc" || validationVersion == "stable" || validationVersion == "testing" || validationVersion == "latest" || validationVersion == "beta" {
 		validationVersion = validationVersionPlaceholder
 	}
 	if installTemplateRefused(c, h.validateInstallScript(ports.InstallTemplateRequest{

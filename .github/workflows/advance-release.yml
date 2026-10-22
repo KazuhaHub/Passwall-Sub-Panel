@@ -1,0 +1,55 @@
+name: Advance a published candidate
+on:
+  workflow_dispatch:
+    inputs:
+      source_tag:
+        description: "Published candidate, for example v4.1.0-beta.3 or v4.1.0-rc.1"
+        required: true
+        type: string
+      target_stage:
+        description: "Next stage using exactly the source candidate's commit"
+        required: true
+        type: choice
+        options: [rc, stable]
+permissions:
+  contents: write
+  actions: write
+env:
+  GOWORK: "off"
+  GOTOOLCHAIN: "local"
+concurrency:
+  group: advance-published-candidate
+  cancel-in-progress: false
+jobs:
+  advance:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-go@v7
+        env:
+          GOTOOLCHAIN: auto
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Verify exact preferred compiler
+        run: |
+          set -eu
+          build_toolchain=$(awk '$1 == "toolchain" { print $2 }' go.mod)
+          test -n "$build_toolchain"
+          test "$(go env GOVERSION)" = "$build_toolchain"
+          test "$(go tool compile -V | awk '{ print $3 }')" = "$build_toolchain"
+      - name: Build the pinned transition policy
+        run: go build -o "$RUNNER_TEMP/release-stage" ./cmd/release-stage
+      - name: Publish, accept and advance the selected source
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_TAG: ${{ inputs.source_tag }}
+          TARGET_STAGE: ${{ inputs.target_stage }}
+          STAGE_TOOL: ${{ runner.temp }}/release-stage
+          REQUIRE_NODE_falseANCE: "false"
+        run: bash .github/scripts/advance-release.sh

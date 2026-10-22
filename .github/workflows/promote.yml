@@ -109,6 +109,20 @@ jobs:
             echo "repository=$repository"
             echo "digest=$digest"
           } >> "$GITHUB_OUTPUT"
+      - name: Build channel policy
+        run: go build -o "$RUNNER_TEMP/release-stage" ./cmd/release-stage
+      - name: Refuse stable pointer rollback before any change
+        env:
+          IMAGE: ${{ steps.image.outputs.repository }}
+          VERSION: ${{ steps.identity.outputs.version }}
+          DIGEST: ${{ steps.image.outputs.digest }}
+          STAGE_TOOL: ${{ runner.temp }}/release-stage
+          APPROVED: "true"
+          CHECK_ONLY: "true"
+        run: |
+          export IMAGE="${IMAGE,,}"
+          bash .github/scripts/update-image-channels.sh
+
       - name: Promote verified artifacts
         id: promote
         env:
@@ -120,7 +134,7 @@ jobs:
         run: |
           set -euo pipefail
           printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
-          docker buildx imagetools create -t "$IMAGE:stable" -t "$IMAGE:latest" "$IMAGE@$DIGEST"
+          IMAGE="$IMAGE" VERSION="${{ steps.identity.outputs.version }}" DIGEST="$DIGEST" STAGE_TOOL="$RUNNER_TEMP/release-stage" APPROVED=true bash .github/scripts/update-image-channels.sh
           gh api -X PATCH "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" -F prerelease=false -f make_latest=true -f "name=Passwall Sub Panel ${TAG} · Stable" >/dev/null
       - name: Confirm stable pointers
         env:

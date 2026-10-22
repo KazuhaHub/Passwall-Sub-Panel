@@ -2,11 +2,11 @@
 
 New releases use `MAJOR.MINOR.PATCH`, optionally followed by `-beta.N` or
 `-rc.N`. Counters start at 1, have no leading zero, and compare numerically.
-Only beta and rc stages are published. Build metadata (`+...`) is not part of a
+Candidate stages are beta and rc. Build metadata (`+...`) is not part of a
 release identity. A tag is `v` plus the exact version; archives, image tags,
 and the binary's version stamp use the version without `v`.
 The panel reads the running plain version's release metadata before displaying
-Stable or Testing; offline/unverified metadata is shown as unknown. A beta/rc
+Stable or Pending; offline/unverified metadata is shown as unknown. A beta/rc
 suffix proves Testing without a network lookup.
 
 - Increment PATCH for compatible fixes, MINOR for compatible features, MAJOR for
@@ -22,39 +22,57 @@ suffix proves Testing without a network lookup.
 
 ## Channels
 
-| Surface | Formal channel | Early-access channel |
+| Update preference / Docker alias | Accepted stages | Compatibility alias |
 | --- | --- | --- |
-| Name / API preference | `stable` | `testing` |
-| Docker canonical alias | `stable` | `testing` |
-| Compatibility alias | `latest` | `beta` |
+| `stable` | Approved final releases | `latest` |
+| `rc` | RC and approved final releases | — |
+| `beta` | Beta, RC and approved final releases | `testing` |
 
-Testing opts into early candidates and also receives final releases; it is a
-broader update preference, not a promise that every selected build has a beta
-suffix. The two testing aliases track the newest publication. Stable pointers
-move only through a manual verified promotion. Exact versions stay pinned.
-A beta/rc suffix is always Testing, even if GitHub metadata is accidentally
-labelled stable. Numeric historical releases still use their release metadata.
+`latest` always follows `stable`. Neither candidate stage can move it. Saved
+`testing` preferences remain accepted and open as Beta; new preferences use
+`stable`, `rc` or `beta`. Exact versions remain pinned.
+A suffix determines Beta or RC even if GitHub metadata is wrong. Plain modern
+versions (4.0.2 onward) published as pre-releases are pending approval, and do
+not enter any update channel. Historical plain prereleases retain Beta behavior.
+Channels choose the highest eligible version, not the most recent publication.
+A final promotion advances each eligible image alias only when it is not already
+at a newer version: finalizing 4.1.0 cannot reset Beta from 4.2.0-beta.1. Stable
+rollback is refused before any promotion write. Registry errors refuse rather
+than pretending a pointer is absent.
 
 ## Candidate and final identities
 
 `4.1.0-beta.2`, `4.1.0-rc.1`, and `4.1.0` are distinct immutable identities.
 Never mark a suffixed release stable, rename its archives, or move its tag.
 
-To finalize a tested candidate, create the plain `v4.1.0` tag at the same source
-commit and publish its correctly stamped artifacts. They are new bytes because
-of the version stamp, so they must pass the final version's checks. Publication
-stages that release as GitHub Pre-release with an "Awaiting promotion" title.
-After verification, promote the plain release; promotion reuses those exact
-artifacts and changes its title and channel pointers. A partial promotion is
-retried with the same tag, never with replacement assets.
+Dispatch **Advance a published candidate** from main with the published source
+tag and target stage `rc` or `stable`. It supports Beta → RC, Beta → final and
+RC → final. It validates the source publication and successful main tests, pins
+the source tag's commit (even when main has moved), and creates a new immutable
+version tag at that commit. A newer sibling candidate refuses a stale source.
+
+The workflow publishes the newly stamped artifacts and waits for publication to
+succeed. Node also waits for both architectures' package and container acceptance.
+For a final target it then dispatches the existing verified stable promotion,
+including the `release-promotion` environment. A plain final is staged as a
+pre-release titled "Awaiting promotion" until those checks complete.
+
+Retries resume the same tag and publication rather than incrementing the RC
+counter. A conflicting tag is never moved. If publication fails, rerun/fix that
+original publication and resume the transition; if acceptance fails, fix/rerun
+that acceptance first. A partial stable promotion is retried with the same tag
+and verified bytes. Existing candidate assets and release history are preserved.
+The manual publish-then-promote route remains available for a plain migration
+release or operator recovery. Historical four-segment candidates cannot be
+relabelled into this scheme; use the migration bridge below.
 
 ## Migration order
 
 1. Publish Node `4.0.2` as the plain migration release, complete acceptance, then
-   promote it. This introduces suffix parsing and initializes `stable/testing`
-   aliases while retaining `latest/beta`.
-2. Publish the updated panel. Existing saved `beta` preferences remain accepted;
-   newly selected testing preferences use `testing`.
+   promote it. This introduces suffix parsing and initializes `stable/rc/beta`
+   aliases while retaining `latest/testing`.
+2. Publish the updated panel. Existing saved `beta` and `testing` preferences remain
+   accepted; new preferences use `stable`, `rc` or `beta`.
 3. Publish candidates on `4.1`, then final releases with the scheme above.
 
 Old Node helpers, including `4.0.1.11`, cannot parse suffixed remote-upgrade

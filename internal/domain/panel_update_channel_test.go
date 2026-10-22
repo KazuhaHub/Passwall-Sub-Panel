@@ -9,7 +9,7 @@ func TestPanelUpdateChannelIsExplicitAndDefaultsSafely(t *testing.T) {
 		effective PanelUpdateChannel
 	}{
 		{PanelUpdateStable, true, PanelUpdateStable}, {PanelUpdateBeta, true, PanelUpdateBeta},
-		{"", false, PanelUpdateStable}, {PanelUpdateTesting, true, PanelUpdateTesting},
+		{"", false, PanelUpdateStable}, {PanelUpdateTesting, true, PanelUpdateBeta}, {PanelUpdateRC, true, PanelUpdateRC},
 		{"BETA", false, PanelUpdateStable}, {"future-custom", false, PanelUpdateStable},
 	} {
 		if test.raw.Valid() != test.valid || test.raw.Effective() != test.effective {

@@ -17,7 +17,7 @@ func TestChannelRequiresPublicationEvidenceForPlainVersions(t *testing.T) {
 	t.Cleanup(func() { Version, httpClient = oldVersion, oldClient; currentPublication.Store(buildPublication{}) })
 	currentPublication.Store(buildPublication{})
 	for _, tc := range []struct{ version, want string }{
-		{"4.1.0-beta.1", "testing"}, {"4.1.0-rc.1", "testing"}, {"4.1.0", "unknown"}, {"4.0.1.22", "unknown"}, {"dev", "unknown"},
+		{"4.1.0-beta.1", "beta"}, {"4.1.0-rc.1", "rc"}, {"4.1.0", "unknown"}, {"4.0.1.22", "unknown"}, {"dev", "unknown"},
 	} {
 		Version = tc.version
 		if got := Channel(); got != tc.want {
@@ -29,7 +29,7 @@ func TestChannelRequiresPublicationEvidenceForPlainVersions(t *testing.T) {
 		body, want string
 		ok         bool
 	}{
-		{`{"tag_name":"v4.1.0","draft":false,"prerelease":true}`, "testing", true},
+		{`{"tag_name":"v4.1.0","draft":false,"prerelease":true}`, "pending", true},
 		{`{"tag_name":"v4.1.0","draft":false,"prerelease":false}`, "stable", true},
 		{`{"tag_name":"v4.0.0","draft":false,"prerelease":false}`, "unknown", false},
 		{`{"tag_name":"v4.1.0","draft":true,"prerelease":false}`, "unknown", false},

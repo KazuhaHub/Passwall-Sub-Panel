@@ -534,7 +534,7 @@ test('published releases and exact images cannot silently overwrite while rollin
   assert(job('setup').includes('node deploy/check-image.mjs'))
   assert(docker.includes('node deploy/check-image.mjs'))
   assert(!docker.includes("value=latest,"), "publication must not move stable aliases")
-  assert(docker.includes("value=beta,enable=${{ needs.setup.outputs.image_channel == 'true' }}"))
+  assert(docker.includes("bash .github/scripts/update-image-channels.sh"))
   assert(workflow.includes('group: release-passwall-sub-panel\n  cancel-in-progress: false'))
 })
 
@@ -607,7 +607,7 @@ test('release compatibility gate derives its Node set from the single source of 
   // The gate still exercises the live contract tests and still blocks release.
   assert(compatibility.includes('TestLive_RealNode(AgentContract|MigratedServerContract|TaskEvidenceReceipt|TaskExpiryContract)'))
   assert(job('release').includes('needs: [setup, build, compatibility]'))
-  assert(job('docker').includes('needs: [setup, build, compatibility]'))
+  assert(job('docker').includes('needs: [setup, build, compatibility, release]'))
 })
 
 // EVERY PUBLISHING JOB REACHES THE COMPATIBILITY EVIDENCE ONLY THROUGH THE
@@ -623,7 +623,7 @@ test('every publishing job is gated behind the compatibility summary', () => {
   assert(gate.includes('node-compatibility'), 'the gate must summarise the compatibility leg')
   for (const name of ['release', 'docker']) {
     assert(
-      job(name).includes('needs: [setup, build, compatibility]'),
+      /needs: \[setup, build, compatibility(?:, release)?\]/.test(job(name)),
       `${name} must depend on the summary gate`
     )
     assert(
@@ -1000,20 +1000,12 @@ function resolveChannel(tag, requested = 'auto') {
   return { prerelease: read('prerelease'), images: read('images') }
 }
 
-test('the image channels both read the one resolved answer', () => {
-  const docker = job('docker')
-  const latest = /value=testing,enable=\$\{\{ (.*?) \}\}/.exec(docker)
-  const beta = /value=beta,enable=\$\{\{ (.*?) \}\}/.exec(docker)
-  assert(latest && beta, 'the image channels must both declare an enable condition')
-  for (const [name, expression] of [['latest', latest[1]], ['beta', beta[1]]]) {
-    assert(
-      expression.includes("needs.setup.outputs.image_channel == 'true'"),
-      `${name} must read whether images are published at all: ${expression}`,
-    )
-  }
-  assert(!docker.includes('type=raw,value=latest,'), 'stable pointers move only in promotion')
-  assert(!beta[1].includes('prerelease'),
-    'beta tracks the newest of any kind, so it must not read the channel')
+test('publication advances candidate channels through the pinned policy', () => {
+ const docker = job('docker')
+ assert(docker.includes('bash .github/scripts/update-image-channels.sh'))
+ assert(docker.includes('DIGEST: ${{ steps.push.outputs.digest }}'))
+ assert(docker.includes('VERSION: ${{ needs.setup.outputs.version }}'))
+ assert(!/type=raw,value=(latest|stable|rc|beta|testing),/.test(docker), 'only exact image tags belong in the build push')
 })
 
 test('latest never points at a prerelease and beta always tracks the newest of any kind', () => {
@@ -1096,8 +1088,8 @@ test('the publication channel is resolved once, never inferred from a hyphen', (
   assert(/image_channel: \$\{\{ steps\.channel\.outputs\.images \}\}/.test(setup), 'setup must expose whether images are tagged')
 
   assert(/prerelease: \$\{\{ needs\.setup\.outputs\.prerelease \}\}/.test(release), 'the release must publish the resolved channel')
-  assert(/type=raw,value=testing,enable=\$\{\{ needs\.setup\.outputs\.image_channel/.test(docker), 'latest must read the resolved answer')
-  assert(/type=raw,value=beta,enable=\$\{\{ needs\.setup\.outputs\.image_channel/.test(docker), 'beta must read the resolved answer')
+  assert(docker.includes('bash .github/scripts/update-image-channels.sh'))
+  assert(!docker.includes('type=raw,value=latest,'))
 
   // The recoverable direction is now the default for every tag, not a fallback for
   // tags in neither scheme: `stable` is reachable only through the stated input.

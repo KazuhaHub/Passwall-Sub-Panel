@@ -1,3 +1,4 @@
+import { effectiveUpdateChannel } from '@/utils/nodeReleaseUpdate'
 import { useEffect, useId, useMemo, useRef, useState, type FormEvent, type MouseEvent } from 'react'
 import { NativeAgentUpgradeDialog } from './NativeAgentUpgradeDialog'
 import NodeMetricsDialog from './NodeMetricsDialog'
@@ -166,7 +167,8 @@ const DEFAULT_INSTALLATION: NativeInstallationSelection = {
 }
 const PUBLIC_NODE_INSTALL_BASE_COMMAND = "curl --disable --fail --silent --show-error --location --proto '=https' --proto-redir '=https' --tlsv1.2 https://raw.githubusercontent.com/KazuhaHub/Passwall-Node/main/install.sh | sudo sh"
 export function publicNodeInstallCommands(channel: NodeUpdateChannel) {
-  const args = (channel === 'beta' || channel === 'testing') ? ['--channel testing'] : []
+  const canonical = effectiveUpdateChannel(channel)
+  const args = canonical === 'stable' ? [] : [`--channel ${canonical}`]
   const command = (extra: string[]) => extra.length
     ? `${PUBLIC_NODE_INSTALL_BASE_COMMAND} -s -- ${extra.join(' ')}`
     : PUBLIC_NODE_INSTALL_BASE_COMMAND
@@ -706,7 +708,7 @@ export default function ServersView() {
       ...EMPTY_FORM,
       name: s.name,
       panel_type: s.panel_type ?? '3xui',
-      update_channel: (s.update_channel === 'beta' || s.update_channel === 'testing') ? 'testing' : 'stable',
+      update_channel: effectiveUpdateChannel(s.update_channel),
       url: s.url,
       username: s.username ?? '',
       remark: s.remark ?? '',
@@ -1859,7 +1861,8 @@ export default function ServersView() {
                   helperText={editing ? t('admin:servers.hint.update_channel_short') : undefined}
                   onChange={event => setForm({ ...form, update_channel: event.target.value as NodeUpdateChannel })}>
                   <MenuItem value="stable">{t('admin:servers.native.release_stable')}</MenuItem>
-                  <MenuItem value="testing">{t('admin:servers.native.release_testing')}</MenuItem>
+                  <MenuItem value="rc">{t('admin:servers.native.release_rc')}</MenuItem>
+                  <MenuItem value="beta">{t('admin:servers.native.release_beta')}</MenuItem>
                 </TextField>
               </Box>
               {!editing && <Typography variant="body2" color="text.secondary">{t('admin:servers.native.create_record_hint')}</Typography>}
@@ -2158,7 +2161,7 @@ export function NativeInstallationDialog({ server, initialProvisioning, onClose,
   const versionValid = selection.method === 'github' || (selection.method === 'docker'
     ? isNodeDockerImageSelection(version.trim())
     : isNodeReleaseVersion(version.trim()))
-  const publicInstallCommands = publicNodeInstallCommands((server?.update_channel === 'beta' || server?.update_channel === 'testing') ? 'testing' : 'stable')
+  const publicInstallCommands = publicNodeInstallCommands(effectiveUpdateChannel(server?.update_channel))
 
   useEffect(() => {
     const controller = new AbortController()
@@ -2376,7 +2379,7 @@ export function NativeInstallationDialog({ server, initialProvisioning, onClose,
       </Box>}
       {provisioning && <>
         {selection.method !== 'github' && <NodeReleaseSelector compact key={serverID} enabled={!!server} selection={selection} value={version}
-          initialChannel={(server?.update_channel === 'beta' || server?.update_channel === 'testing') ? 'testing' : 'stable'}
+          initialChannel={effectiveUpdateChannel(server?.update_channel)}
           onChange={next => { invalidateMaterials(); setVersion(next) }} autoSelectLatest disabled={rotating} />}
         {selection.method === 'linux' && <Box>
           <FormControlLabel control={<Checkbox size="small" checked={upgradeInPlace} disabled={!server}

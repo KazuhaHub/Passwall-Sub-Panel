@@ -1,7 +1,7 @@
 import { client } from './client'
 import type { NativeInstallArch, NativeInstallMethod, NativeInstallOS } from './servers'
 
-export type NodeReleaseChannel = 'stable' | 'testing'
+export type NodeReleaseChannel = 'stable' | 'rc' | 'beta' | 'testing' | 'pending'
 
 /** Published official releases accepted by this panel's compatibility catalog. */
 export interface NodeRelease {

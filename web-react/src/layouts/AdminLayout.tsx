@@ -366,7 +366,7 @@ export default function AdminLayout() {
               placement="top"
               title={
                 <Box sx={{ fontSize: 11, lineHeight: 1.5 }}>
-                  <Box>{versionInfo.version || 'dev'} · {versionInfo.channel === 'testing' ? t('common:release.testing') : versionInfo.channel === 'stable' ? t('common:release.stable') : t('common:release.unknown')}</Box>
+                  <Box>{versionInfo.version || 'dev'} · {t(`common:release.${['stable', 'rc', 'beta', 'pending', 'testing'].includes(versionInfo.channel ?? '') ? versionInfo.channel : 'unknown'}`)}</Box>
                   {versionInfo.commit && <Box>commit: {versionInfo.commit}</Box>}
                   {versionInfo.build_date && <Box>built: {versionInfo.build_date}</Box>}
                 </Box>

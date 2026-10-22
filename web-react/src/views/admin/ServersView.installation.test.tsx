@@ -20,16 +20,18 @@ afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); vi.restoreAllMocks(
 describe('Passwall Node installation', () => {
   it('uses stable by default and requires an explicit beta channel in public commands', () => {
     expect(PUBLIC_NODE_INSTALL_COMMAND).not.toContain('--channel')
+    expect(publicNodeInstallCommands('rc').install).toContain('--channel rc')
+    expect(publicNodeInstallCommands('testing').install).toContain('--channel beta')
     expect(PUBLIC_NODE_INSTALL_COMMAND).toMatch(/\| sudo sh$/)
     expect(PUBLIC_NODE_INSTALL_ONLY_COMMAND).toMatch(/\| sudo sh -s -- --install-only$/)
-    expect(publicNodeInstallCommands('testing')).toEqual({
-      install: expect.stringContaining('--channel testing'),
-      installOnly: expect.stringMatching(/--channel testing --install-only$/),
+    expect(publicNodeInstallCommands('beta')).toEqual({
+      install: expect.stringContaining('--channel beta'),
+      installOnly: expect.stringMatching(/--channel beta --install-only$/),
     })
   })
   it('creates native metadata without a stepper or walkthrough, keeping optional remark state when its accessible details are closed', async () => {
     installReads({ '/admin/servers': list([]), '/admin/servers/7/node-agent-status': waiting })
-    api.post.mockResolvedValue({ data: { ...provisioning, server: { ...nativeServer, remark: 'optional note', update_channel: 'testing' } } })
+    api.post.mockResolvedValue({ data: { ...provisioning, server: { ...nativeServer, remark: 'optional note', update_channel: 'beta' } } })
     mount(<ServersView />)
     fireEvent.click(screen.getByRole('button', { name: 'admin:servers.create' }))
     const dialog = await screen.findByRole('dialog')
@@ -57,30 +59,30 @@ describe('Passwall Node installation', () => {
     fireEvent.click(details)
     await waitFor(() => expect(screen.queryByLabelText('admin:servers.field.remark')).toBeNull())
     fireEvent.mouseDown(within(dialog).getByRole('combobox', { name: 'admin:servers.field.update_channel' }))
-    fireEvent.click(await screen.findByRole('option', { name: 'admin:servers.native.release_testing' }))
+    fireEvent.click(await screen.findByRole('option', { name: 'admin:servers.native.release_beta' }))
     fireEvent.change(name, { target: { value: nativeServer.name } })
     fireEvent.click(within(dialog).getByRole('button', { name: 'admin:servers.native.create_continue' }))
     await screen.findByRole('combobox', { name: 'admin:servers.native.agent_version' })
-    expect(api.post).toHaveBeenCalledWith('/admin/servers', { name: nativeServer.name, panel_type: 'psp', remark: 'optional note', update_channel: 'testing' })
+    expect(api.post).toHaveBeenCalledWith('/admin/servers', { name: nativeServer.name, panel_type: 'psp', remark: 'optional note', update_channel: 'beta' })
     await waitFor(() => expect(versionInput().value).toBe('4.1.2'))
     expect(api.post).toHaveBeenCalledTimes(1)
   })
   it('keeps the native edit channel discoverable with a short helper and preserves an existing folded remark', async () => {
-    const saved = { ...nativeServer, remark: 'original note', update_channel: 'testing' as const }
+    const saved = { ...nativeServer, remark: 'original note', update_channel: 'beta' as const }
     installReads({ '/admin/servers': list([saved]) })
     api.put.mockResolvedValue({ data: saved })
     mount(<ServersView />)
     const row = (await screen.findByText(nativeServer.name)).closest('tr')!
     fireEvent.click(within(row).getByRole('button', { name: 'admin:servers.action.edit' }))
     const dialog = await screen.findByRole('dialog')
-    expect(within(dialog).getByRole('combobox', { name: 'admin:servers.field.update_channel' }).textContent).toBe('admin:servers.native.release_testing')
+    expect(within(dialog).getByRole('combobox', { name: 'admin:servers.field.update_channel' }).textContent).toBe('admin:servers.native.release_beta')
     expect(within(dialog).getByText('admin:servers.hint.update_channel_short')).toBeTruthy()
     expect(screen.queryByText('admin:servers.hint.update_channel')).toBeNull()
     expect(screen.queryByLabelText('admin:servers.field.remark')).toBeNull()
     expect(screen.queryByRole('combobox', { name: 'admin:servers.native.method_label' })).toBeNull()
     fireEvent.click(within(dialog).getByRole('button', { name: 'common:actions.ok' }))
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
-    expect(api.put).toHaveBeenCalledWith('/admin/servers/7', { name: nativeServer.name, remark: 'original note', update_channel: 'testing' })
+    expect(api.put).toHaveBeenCalledWith('/admin/servers/7', { name: nativeServer.name, remark: 'original note', update_channel: 'beta' })
     expect(api.post.mock.calls.every(([url]) => url === '/admin/servers/probe')).toBe(true)
   })
   it('resets native optional details on reopen and keeps third-party URL, token and remark fields visible', async () => {
@@ -148,7 +150,7 @@ describe('Passwall Node installation', () => {
     expect(api.post).toHaveBeenCalledTimes(1)
     expect(api.put).not.toHaveBeenCalled()
   })
-  it.each(['stable', 'testing'] as const)('saves a PN %s preference on the original record and reopens Edit with the saved response', async preference => {
+  it.each(['stable', 'beta'] as const)('saves a PN %s preference on the original record and reopens Edit with the saved response', async preference => {
     const saved = { ...nativeServer, update_channel: preference }
     reads()
     api.put.mockResolvedValue({ data: saved })
@@ -158,30 +160,30 @@ describe('Passwall Node installation', () => {
     const edit = await screen.findByRole('dialog')
     expect(within(edit).getByRole('combobox', { name: 'admin:servers.field.update_channel' }).textContent).toBe('admin:servers.native.release_stable')
     fireEvent.mouseDown(within(edit).getByRole('combobox', { name: 'admin:servers.field.update_channel' }))
-    fireEvent.click(await screen.findByRole('option', { name: preference === 'testing' ? 'admin:servers.native.release_testing' : 'admin:servers.native.release_stable' }))
+    fireEvent.click(await screen.findByRole('option', { name: preference === 'beta' ? 'admin:servers.native.release_beta' : 'admin:servers.native.release_stable' }))
     fireEvent.click(within(edit).getByRole('button', { name: 'common:actions.ok' }))
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
     expect(api.put).toHaveBeenCalledWith('/admin/servers/7', { name: nativeServer.name, remark: '', update_channel: preference })
     fireEvent.click(within((await screen.findByText(nativeServer.name)).closest('tr')!).getByRole('button', { name: 'admin:servers.action.edit' }))
     expect(screen.getByRole('combobox', { name: 'admin:servers.field.update_channel' }).textContent)
-      .toBe(preference === 'testing' ? 'admin:servers.native.release_testing' : 'admin:servers.native.release_stable')
+      .toBe(preference === 'beta' ? 'admin:servers.native.release_beta' : 'admin:servers.native.release_stable')
     expect(api.put).toHaveBeenCalledTimes(1)
     expect(api.post.mock.calls.every(([url]) => url === '/admin/servers/probe')).toBe(true)
   })
-  it.each(['stable', 'testing'] as const)('opens the saved PN %s installation preference but never persists a temporary override or changes fixed identity', async preference => {
+  it.each(['stable', 'beta'] as const)('opens the saved PN %s installation preference but never persists a temporary override or changes fixed identity', async preference => {
     reads()
     installReads({ '/admin/servers': list([{ ...nativeServer, update_channel: preference }]),
       '/admin/servers/7/node-installation': provisioning, '/admin/servers/7/node-agent-status': waiting })
     mount(<ServersView />)
     await openInstallation(nativeServer)
-    const channel = preference === 'testing' ? 'testing' : 'stable'
+    const channel = preference === 'beta' ? 'beta' : 'stable'
     await showIdentity()
     expect(screen.getByRole('combobox', { name: 'admin:servers.native.release_channel' }).textContent).toBe(`admin:servers.native.release_${channel}`)
-    expect(versionInput().value).toBe(preference === 'testing' ? '4.1.2' : '4.1.0')
+    expect(versionInput().value).toBe(preference === 'beta' ? '4.1.2' : '4.1.0')
     expect((screen.getByLabelText('admin:servers.native.credential') as HTMLInputElement).value).toBe(provisioning.credential)
     expect((screen.getByLabelText('admin:servers.native.agent_id') as HTMLInputElement).value).toBe(provisioning.agent_id)
     fireEvent.mouseDown(screen.getByRole('combobox', { name: 'admin:servers.native.release_channel' }))
-    fireEvent.click(await screen.findByRole('option', { name: `admin:servers.native.release_${channel === 'testing' ? 'stable' : 'testing'}` }))
+    fireEvent.click(await screen.findByRole('option', { name: `admin:servers.native.release_${channel === 'beta' ? 'stable' : 'beta'}` }))
     expect(api.put).not.toHaveBeenCalled()
     expect(api.post.mock.calls.every(([url]) => url === '/admin/servers/probe')).toBe(true)
     fireEvent.click(screen.getByRole('button', { name: 'common:actions.close' }))
@@ -193,23 +195,23 @@ describe('Passwall Node installation', () => {
   })
   it('saves the explicit beta preference when creating PN, then opens beta without choosing or installing a version', async () => {
     installReads({ '/admin/servers': list([]), '/admin/servers/7/node-agent-status': waiting })
-    api.post.mockResolvedValue({ data: { ...provisioning, server: { ...nativeServer, update_channel: 'testing' } } })
+    api.post.mockResolvedValue({ data: { ...provisioning, server: { ...nativeServer, update_channel: 'beta' } } })
     mount(<ServersView />)
     fireEvent.click(screen.getByRole('button', { name: 'admin:servers.create' }))
     const dialog = await screen.findByRole('dialog')
     fireEvent.mouseDown(within(dialog).getByRole('combobox', { name: 'admin:servers.field.update_channel' }))
-    fireEvent.click(await screen.findByRole('option', { name: 'admin:servers.native.release_testing' }))
+    fireEvent.click(await screen.findByRole('option', { name: 'admin:servers.native.release_beta' }))
     fireEvent.change(within(dialog).getByRole('textbox', { name: /admin:servers.field.name/ }), { target: { value: nativeServer.name } })
     fireEvent.click(within(dialog).getByRole('button', { name: 'admin:servers.native.create_continue' }))
     await showIdentity()
-    expect(api.post).toHaveBeenCalledWith('/admin/servers', { name: nativeServer.name, panel_type: 'psp', remark: undefined, update_channel: 'testing' })
-    expect(screen.getByRole('combobox', { name: 'admin:servers.native.release_channel' }).textContent).toBe('admin:servers.native.release_testing')
+    expect(api.post).toHaveBeenCalledWith('/admin/servers', { name: nativeServer.name, panel_type: 'psp', remark: undefined, update_channel: 'beta' })
+    expect(screen.getByRole('combobox', { name: 'admin:servers.native.release_channel' }).textContent).toBe('admin:servers.native.release_beta')
     expect(versionInput().value).toBe('4.1.2')
     expect(api.post).toHaveBeenCalledTimes(1)
   })
   it.each([
     ['stable', 'stable'],
-    ['testing', 'testing'],
+    ['beta', 'beta'],
   ] as const)('generates Docker files that follow the saved %s channel by default', async (preference, imageTag) => {
     const server = { ...nativeServer, update_channel: preference }
     installReads({ '/admin/servers/7/node-agent-status': waiting })

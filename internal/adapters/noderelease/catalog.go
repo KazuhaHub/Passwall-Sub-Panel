@@ -366,9 +366,7 @@ func catalogEntry(candidate candidateRelease, release githubRelease, tag string)
 		ReleaseURL: releaseBase + "tag/" + tag, Notes: candidate.Notes,
 		Methods: []string{}, Platforms: []ports.NodeReleasePlatform{},
 	}
-	if release.Prerelease || strings.Contains(candidate.Version, "-") {
-		entry.Channel = "testing"
-	}
+	entry.Channel = version.ReleaseStage(candidate.Version, release.Prerelease)
 	// THERE IS ONE SCHEME, AND THE NAMESPACE IS WHAT SAYS SO. A tag inside
 	// `release/` carries a product version of its own; the legacy scheme is gone, so
 	// a tag outside the namespace is not a release this project publishes — which is

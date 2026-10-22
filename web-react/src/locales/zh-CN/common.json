@@ -63,5 +63,8 @@
   },
   "release.testing": "测试版",
   "release.stable": "正式版",
-  "release.unknown": "通道未知"
+  "release.unknown": "通道未知",
+  "release.rc": "候选版",
+  "release.beta": "测试版",
+  "release.pending": "等待正式发布"
 }

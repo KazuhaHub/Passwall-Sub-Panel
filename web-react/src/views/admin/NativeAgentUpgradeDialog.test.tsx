@@ -32,7 +32,7 @@ async function selectRelease(savedBeta = false) {
     // than "this channel has no releases"; the wait means the same thing.
     await screen.findByText('admin:servers.native.release_no_target_for_node')
     fireEvent.mouseDown(screen.getByRole('combobox', { name: 'admin:servers.native.release_channel' }))
-    fireEvent.click(await screen.findByRole('option', { name: 'admin:servers.native.release_testing' }))
+    fireEvent.click(await screen.findByRole('option', { name: 'admin:servers.native.release_beta' }))
   }
   const field = screen.getByRole('combobox', { name: 'admin:servers.native.agent_version' })
   await waitFor(() => expect(field.getAttribute('aria-disabled')).not.toBe('true'))
@@ -125,7 +125,7 @@ it('uses the saved beta preference but still requires an exact reviewed version 
       <button onClick={() => setCurrent(current ? { ...current } : saved)}>refresh upgrade parent</button></>
   }
   mount(<Parent />)
-  expect(screen.getByRole('combobox', { name: 'admin:servers.native.release_channel' }).textContent).toBe('admin:servers.native.release_testing')
+  expect(screen.getByRole('combobox', { name: 'admin:servers.native.release_channel' }).textContent).toBe('admin:servers.native.release_beta')
   const button = screen.getByRole('button', { name: 'admin:servers.agent_upgrade.confirm' }) as HTMLButtonElement
   expect(button.disabled).toBe(true)
   await selectRelease(true)
@@ -140,7 +140,7 @@ it('uses the saved beta preference but still requires an exact reviewed version 
   fireEvent.click(screen.getByRole('button', { name: 'common:actions.close' }))
   await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
   fireEvent.click(screen.getByText('refresh upgrade parent'))
-  expect(screen.getByRole('combobox', { name: 'admin:servers.native.release_channel' }).textContent).toBe('admin:servers.native.release_testing')
+  expect(screen.getByRole('combobox', { name: 'admin:servers.native.release_channel' }).textContent).toBe('admin:servers.native.release_beta')
   expect((screen.getByRole('button', { name: 'admin:servers.agent_upgrade.confirm' }) as HTMLButtonElement).disabled).toBe(true)
 })
 

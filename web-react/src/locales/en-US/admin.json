@@ -2966,7 +2966,7 @@
     "update_available": "Update available: {{latest}}",
     "hint": {
       "name": "Display name; the internal reference uses the database ID.",
-      "update_channel": "Saved preference for installation and upgrade lists. Docker files follow stable for Stable or testing for Testing (latest/beta remain aliases) by default; manual and systemd installation still use an exact reviewed release. Saving does not install, upgrade, or change server/node identities or credentials. Temporary channel selections in dialogs are not saved.",
+      "update_channel": "Stable receives final releases; RC receives candidates and finals; Beta receives all stages. Docker follows the matching tag. latest always follows stable; testing remains a beta alias. Saving does not upgrade the node.",
       "update_channel_short": "Default release channel; Docker files follow its image tag, but saving does not upgrade the node.",
       "configured": "Configured (kept unchanged)",
       "unconfigured": "Not configured",
@@ -3166,7 +3166,11 @@
       "replace_identity": "Replace with a different identity",
       "replace_identity_hint": "Takes over an incompatible installation — a node another panel left behind, for instance — with this panel's identity. The one that is there is stopped and moved into the host's backups/.",
       "replace_identity_warning": "After this: usage for this node starts from zero (the old counters stay in the host's backup), and if it belonged to another panel, that panel's server record has to be deleted by hand.",
-      "release_older_than_current": "older than current"
+      "release_older_than_current": "older than current",
+      "release_rc": "Release candidates (RC + Stable)",
+      "release_beta": "Beta (Beta + RC + Stable)",
+      "release_follow_rc": "Follow release candidates (rc)",
+      "release_follow_beta": "Follow Beta (beta)"
     },
     "table": {
       "name": "Server name",
@@ -3595,7 +3599,7 @@
           "refused": "Sync reports refused",
           "refused_caption": "incompatible version {{proto}} · invalid {{invalid}}",
           "storage": "Save failures",
-        "storage_caption": "{{history}} of them carried a history sample",
+          "storage_caption": "{{history}} of them carried a history sample",
           "persist": "Save time",
           "persist_caption": "budget 500 ms"
         }

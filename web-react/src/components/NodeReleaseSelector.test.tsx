@@ -33,7 +33,7 @@ const stable: NodeRelease = {
   methods: ['linux', 'manual'], platforms,
 }
 const testing: NodeRelease = {
-  ...stable, version: '4.1.1', channel: 'testing',
+  ...stable, version: '4.1.1', channel: 'beta',
   release_tag: 'v4.1.1',
   release_url: 'https://github.com/KazuhaHub/Passwall-Node/releases/tag/v4.1.1',
 }
@@ -66,7 +66,7 @@ async function choose(label: string, option: string) {
 const chooseVersion = (version: string) => choose('admin:servers.native.agent_version', version)
 // Publication details are folded on every surface; open them before reading them.
 const openReview = () => fireEvent.click(screen.getByRole('button', { name: 'admin:servers.native.release_review' }))
-const chooseTesting = () => choose('admin:servers.native.release_channel', 'admin:servers.native.release_testing')
+const chooseTesting = () => choose('admin:servers.native.release_channel', 'admin:servers.native.release_beta')
 
 describe('Passwall Node release selection', () => {
   it.each([
@@ -93,7 +93,7 @@ describe('Passwall Node release selection', () => {
     reads([testing, stable])
     const view = mount(<Controlled initialChannel="testing" />)
     await waitFor(() => expect(screen.queryByRole('status')).toBeNull())
-    expect(screen.getByRole('combobox', { name: 'admin:servers.native.release_channel' }).textContent).toBe('admin:servers.native.release_testing')
+    expect(screen.getByRole('combobox', { name: 'admin:servers.native.release_channel' }).textContent).toBe('admin:servers.native.release_beta')
     expect(selected()).toBe('')
     await choose('admin:servers.native.release_channel', 'admin:servers.native.release_stable')
     await chooseVersion(stable.version)
@@ -104,7 +104,7 @@ describe('Passwall Node release selection', () => {
     view.rerender(<Controlled initialChannel="testing" />)
     await waitFor(() => expect(screen.queryByRole('status')).toBeNull())
     expect(selected()).toBe('')
-    expect(screen.getByRole('combobox', { name: 'admin:servers.native.release_channel' }).textContent).toBe('admin:servers.native.release_testing')
+    expect(screen.getByRole('combobox', { name: 'admin:servers.native.release_channel' }).textContent).toBe('admin:servers.native.release_beta')
     expect(api.get.mock.calls.every(([url]) => url === endpoint)).toBe(true)
     expect(api.post).not.toHaveBeenCalled()
     expect(api.put).not.toHaveBeenCalled()
@@ -127,9 +127,9 @@ describe('Passwall Node release selection', () => {
   it('defaults Docker to the selected floating channel tag and still allows an exact rollback pin', async () => {
     reads([testing, stable])
     mount(<Controlled selection={{ ...linux, method: 'docker' }} initialChannel="testing" />)
-    await waitFor(() => expect(selected()).toBe('testing'))
+    await waitFor(() => expect(selected()).toBe('beta'))
     expect(screen.getByRole('combobox', { name: 'admin:servers.native.agent_version' }).textContent)
-      .toContain('admin:servers.native.release_follow_testing')
+      .toContain('admin:servers.native.release_follow_beta')
     await chooseVersion(testing.version)
     expect(selected()).toBe(testing.version)
     await choose('admin:servers.native.release_channel', 'admin:servers.native.release_stable')
@@ -630,5 +630,26 @@ describe('the recommendation is strictly ahead, not merely not-older', () => {
     // But neither is recommended, and nothing was chosen on the operator's behalf.
     expect(own.textContent).not.toContain('admin:servers.native.release_recommended')
     expect(onChange).not.toHaveBeenCalled()
+  })
+})
+
+describe('RC preference and legacy testing migration', () => {
+  const rc: NodeRelease = { ...stable, version: '4.1.1-rc.1', release_tag: 'v4.1.1-rc.1', channel: 'rc', release_url: 'https://github.com/KazuhaHub/Passwall-Node/releases/tag/v4.1.1-rc.1' }
+  it('RC lists RC and final releases without Beta, and defaults Docker to rc', async () => {
+    reads([testing, stable, rc])
+    mount(<Controlled initialChannel="rc" selection={{...linux,method:'docker'}} />)
+    await waitFor(() => expect(selected()).toBe('rc'))
+    fireEvent.mouseDown(screen.getByRole('combobox', {name:'admin:servers.native.agent_version'}))
+    expect(await screen.findByRole('option', {name:rc.version})).toBeTruthy()
+    expect(screen.getByRole('option', {name:stable.version})).toBeTruthy()
+    expect(screen.queryByRole('option', {name:testing.version})).toBeNull()
+  })
+  it('opens an old testing preference as Beta with three selectable channels', async () => {
+    reads([stable, testing, rc])
+    mount(<Controlled initialChannel="testing" />)
+    const field=screen.getByRole('combobox', {name:'admin:servers.native.release_channel'})
+    expect(field.textContent).toBe('admin:servers.native.release_beta')
+    fireEvent.mouseDown(field)
+    for (const stage of ['stable','rc','beta']) expect(await screen.findByRole('option',{name:`admin:servers.native.release_${stage}`})).toBeTruthy()
   })
 })

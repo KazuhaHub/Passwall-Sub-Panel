@@ -1,5 +1,5 @@
 import { canonicalReleaseVersion, compareReleaseVersion, releaseTag } from './productVersion'
-import type { NodeRelease, NodeReleaseChannel } from '@/api/nodeReleases'
+import type { NodeRelease } from '@/api/nodeReleases'
 import type { Server } from '@/api/servers'
 
 /**
@@ -18,10 +18,19 @@ function canonicalVersion(identity: string): string | undefined {
   return canonicalReleaseVersion(identity)
 }
 
-/** A beta/rc suffix always implies Testing, regardless of catalog metadata.
- * Historical numeric versions continue to use their publication metadata. */
-function channelAgrees(version: string, channel: 'stable' | 'testing'): boolean {
-  return !version.includes('-') || channel === 'testing'
+export type UpdateChannel = 'stable' | 'rc' | 'beta'
+export function effectiveUpdateChannel(value?: string): UpdateChannel {
+  return value === 'rc' ? 'rc' : value === 'beta' || value === 'testing' ? 'beta' : 'stable'
+}
+export function acceptsRelease(channel: string, release: Pick<NodeRelease, 'version' | 'channel'>): boolean {
+  const v = canonicalReleaseVersion(release.version)
+  if (!v) return false
+  const stage = v.includes('-rc.') ? 'rc' : v.includes('-beta.') ? 'beta' : release.channel === 'testing' ? 'beta' : release.channel
+  if (!['stable', 'rc', 'beta'].includes(stage)) return false
+  // A suffix cannot borrow stable metadata, including from an older panel.
+  if (v.includes('-') && release.channel === 'stable') return false
+  const preference = effectiveUpdateChannel(channel)
+  return stage === 'stable' || preference === 'beta' || (preference === 'rc' && stage === 'rc')
 }
 
 /** Highest newer reviewed Linux release in the server's saved channel. */
@@ -40,22 +49,12 @@ export function newerNodeRelease(
   if (!identity || identity[0] !== rawIdentity) return undefined
   const current = canonicalVersion(identity[1])
   if (!current) return undefined
-  if (server.update_channel !== undefined && server.update_channel !== 'stable' && server.update_channel !== 'beta' && server.update_channel !== 'testing') return undefined
-  // THE SAVED CHANNEL IS A FLOOR ON HOW ADVENTUROUS THE NODE MAY BE, NOT A
-  // FILTER ON WHAT IT MAY BE OFFERED. A stable node takes released targets only; a
-  // testing node takes released OR testing ones. Making the beta channel
-  // testing-only hides a newer RELEASED build from every node on the beta line —
-  // a node on 4.8.0 with 5.0.0-beta.1 and 4.9.0 published was offered only the
-  // beta — and the migration plan states the rule the other way round.
-  //
-  // IT CANNOT BECOME A DOWNGRADE: the strictly-newer comparison below still
-  // applies, so a released target older than the running version is not offered.
-  const channels: NodeReleaseChannel[] = (server.update_channel === 'beta' || server.update_channel === 'testing') ? ['stable', 'testing'] : ['stable']
+  if (server.update_channel !== undefined && server.update_channel !== 'rc' && server.update_channel !== 'stable' && server.update_channel !== 'beta' && server.update_channel !== 'testing') return undefined
 
   return releases.filter(release => {
     if (!release) return false
     const version = canonicalVersion(release.version)
-    if (!version || !channels.includes(release.channel) || !channelAgrees(version, release.channel)) return false
+    if (!version || !acceptsRelease(server.update_channel ?? 'stable', release)) return false
     // THE RELEASE PAGE IS ADDRESSED BY THE TAG. A product release lives at
     // `tag/release/4.0.0` while its version is `4.0.0`, so rebuilding the URL
     // from the version asks for a page that does not exist and drops the

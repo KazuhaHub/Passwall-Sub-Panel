@@ -226,7 +226,11 @@ func TestCatalogListsByPublicationNotByVersion(t *testing.T) {
 			entry.ReleaseURL != "https://github.com/KazuhaHub/Passwall-Node/releases/tag/"+entry.ReleaseTag {
 			t.Fatalf("identity split wrong: %+v", entry)
 		}
-		if entry.Channel != "testing" {
+		wantChannel := "beta"
+		if entry.Version == "4.0.2" {
+			wantChannel = "pending"
+		}
+		if entry.Channel != wantChannel {
 			t.Fatalf("channel lost: %+v", entry)
 		}
 	}
@@ -258,7 +262,7 @@ func TestCatalogPublishedOfficialReleaseAndTrustedReviewMetadata(t *testing.T) {
 		t.Fatalf("list=%+v calls=%d err=%v", list, calls, err)
 	}
 	entry := list.Releases[0]
-	if entry.Version != fixtureVersion || entry.Channel != "testing" || entry.ReleaseURL != release.HTMLURL || !entry.PublishedAt.Equal(*release.PublishedAt) {
+	if entry.Version != fixtureVersion || entry.Channel != "beta" || entry.ReleaseURL != release.HTMLURL || !entry.PublishedAt.Equal(*release.PublishedAt) {
 		t.Fatalf("incorrect release identity: %+v", entry)
 	}
 	if !strings.HasPrefix(entry.Notes, "A release body written for a release page.") {
@@ -485,7 +489,7 @@ func TestCatalogSortsExactVersions(t *testing.T) {
 	for _, entry := range list.Releases {
 		channels[entry.Version] = entry.Channel
 	}
-	if channels[fixtureVersion] != "testing" || channels["4.0.0.1"] != "stable" || channels["4.1.0"] != "stable" {
+	if channels[fixtureVersion] != "beta" || channels["4.0.0.1"] != "stable" || channels["4.1.0"] != "stable" {
 		t.Fatalf("stable/testing channels were inferred incorrectly: %v", channels)
 	}
 
@@ -870,8 +874,8 @@ func TestAProductReleaseIsAddressedByItsTagAndNamedByItsVersion(t *testing.T) {
 		t.Errorf("methods = %+v", entry.Methods)
 	}
 	// Published under a prerelease flag, so it is a candidate.
-	if entry.Channel != "testing" {
-		t.Errorf("channel = %q, want testing", entry.Channel)
+	if entry.Channel != "beta" {
+		t.Errorf("channel = %q, want beta", entry.Channel)
 	}
 }
 
