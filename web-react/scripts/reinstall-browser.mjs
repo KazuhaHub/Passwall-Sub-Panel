@@ -147,7 +147,7 @@ async function fixture(request, response, url) {
     if (previewOnly && pathname === '/api/admin/servers') {
       assert(previewCreatedIDs.size < 10, 'Preview server limit reached. Restart the disposable preview.');
       assert(body?.panel_type === 'psp' && typeof body.name === 'string' && body.name.trim() && body.name.length <= 64);
-      assert(['stable', 'beta'].includes(body.update_channel));
+      assert(['stable', 'testing', 'beta'].includes(body.update_channel));
       assert(Object.keys(body).every(key => ['name', 'panel_type', 'remark', 'update_channel'].includes(key)));
       assert(body.remark === undefined || typeof body.remark === 'string' && body.remark.length <= 1024);
       const id = 47 + previewCreatedIDs.size;
@@ -190,8 +190,8 @@ async function fixture(request, response, url) {
     return reply(response, original);
   }
   if (method === 'PUT' && pathname === '/api/admin/servers/7') {
-    assert.deepEqual(body, { name: servers[0].name, remark: '', update_channel: 'beta' });
-    servers[0].update_channel = 'beta';
+    assert.deepEqual(body, { name: servers[0].name, remark: '', update_channel: 'testing' });
+    servers[0].update_channel = 'testing';
     return reply(response, servers[0]);
   }
   throw new Error(`Unexpected API/write: ${method} ${pathname}`);
