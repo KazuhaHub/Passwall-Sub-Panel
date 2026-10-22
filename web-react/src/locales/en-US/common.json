@@ -60,5 +60,8 @@
     "details": "View details",
     "copy": "Copy",
     "copied": "Copied"
-  }
+  },
+  "release.testing": "Testing",
+  "release.stable": "Stable",
+  "release.unknown": "Channel unknown"
 }

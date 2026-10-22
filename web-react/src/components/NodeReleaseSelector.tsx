@@ -185,7 +185,7 @@ export default function NodeReleaseSelector({ enabled, selection, value, onChang
   const recommended = useMemo(() => options.find(release => isAhead(release.version)), [options, newerThan])
   const selected = options.find(release => release.version === value)
   const selectedURL = selected ? officialReleaseURL(selected) : undefined
-  const channelTag = channel === 'stable' ? 'latest' : 'beta'
+  const channelTag = channel === 'stable' ? 'stable' : 'testing'
   const followsDockerChannel = selection.method === 'docker' && value === channelTag && options.length > 0
   const acceptedValue = !!selected || followsDockerChannel
 

@@ -18,13 +18,13 @@ afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); vi.restoreAllMocks(
 
 describe('native installation inputs', () => {
   it.each([
-    '', 'latest', 'https://example.test/4.1.0',
+    '', 'stable', 'https://example.test/4.1.0',
     // `4.1.0` USED TO BE IN THIS LIST, and that was the defect rather than the
     // rule: it is exactly what this scheme stamps, so a released product version
     // left the install action disabled with nothing said about why. It is
     // asserted as accepted below, and the near misses stay here — a short form,
     // too many segments, a prerelease, a tag, a leading zero and a zero build.
-    '4.1', '4.1.0.4.5', '04.1.0', '4.1.0-rc.1', 'release/4.1.0',
+    '4.1', '4.1.0.4.5', '04.1.0', '4.1.0-rc.01', 'release/4.1.0',
     '01.2.3', '4.1.0.0', '4.1.0-beta.01', '4.1.0.1.2',
   ])('rejects noncanonical release version %s', version => {
     expect(isNodeReleaseVersion(version)).toBe(false)

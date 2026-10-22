@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -111,12 +112,7 @@ func pspBehindStable(current, latestStable string) bool {
 	if !IsReleaseVersion(current) || !IsReleaseVersion(latestVersion) {
 		return false
 	}
-	// BEHIND, OR NOT. There used to be a third answer here: same base version,
-	// where the tie-break asked whether THIS build was a prerelease of the base
-	// the target had stabilised — "running v3.7.0-beta.N, v3.7.0 shipped". That
-	// question cannot be asked of a product version, and the shape it needed is
-	// gone: a candidate is its CHANNEL, promotion reuses the same artifact, and a
-	// testing build of 4.0.0 has nothing to move to when 4.0.0 becomes stable.
+	// A final version sorts above beta/rc candidates of the same base.
 	return CompareRelease(current, latestVersion) < 0
 }
 
@@ -136,6 +132,11 @@ func RefreshLatestPSP(ctx context.Context) error {
 	latestPSPFetchMu.Unlock()
 
 	err := fetchLatestPSP(ctx)
+	// Current-build approval is a separate fact from latest-stable. Failure to
+	// read it never turns a numeric identity into a claim of stability.
+	channelCtx, cancelChannel := context.WithTimeout(ctx, latestPSPFetchTimeout)
+	_ = refreshBuildChannel(channelCtx)
+	cancelChannel()
 
 	latestPSPFetchMu.Lock()
 	latestPSPInflight = false
@@ -185,31 +186,13 @@ func fetchLatestPSP(ctx context.Context) error {
 	return nil
 }
 
-// acceptLatestPSPStable decides whether a /releases/latest payload yields a
-// usable latest-STABLE tag: it must be a release tag this project publishes, and
-// GitHub must not have flagged it as a prerelease. Anything else yields
-// ("", false) so the self-update nudge only ever points at a real stable release.
-//
-// THE HYPHEN TEST IS GONE, AND SO IS THE EXEMPTION IT NEEDED. It existed for one
-// historical gap: a beta cut before the workflow began setting the prerelease
-// flag would arrive here without it, and the presence of a hyphen in a
-// v-prefixed version was the only other evidence available. A product tag is
-// `vMAJOR.MINOR.PATCH[.BUILD]` — integers behind a namespace, no hyphen anywhere —
-// so the test found nothing to reject there, and the code carried an exemption to
-// stop it from being applied where it was meaningless. With the legacy shape gone
-// there is no gap left to cover and no exemption to scope: the flag decides, and
-// the tag only has to be one of ours.
-//
-// ONE THING THE FLAG DOES NOT SETTLE: an old stable release is still a release
-// this accepts, and a repository whose newest release is a testing candidate
-// answers /releases/latest with the newest STABLE one — which predates the
-// product line. The comparison downstream ranks a 4.x product version above it, so
-// the nudge stays silent; that is the comparator's job and not this function's.
+// acceptLatestPSPStable requires both stable metadata and a suffix-free identity.
+// Historical numeric stable releases remain eligible.
 func acceptLatestPSPStable(tagName string, prerelease bool) (string, bool) {
 	if tagName == "" || prerelease {
 		return "", false
 	}
-	if !IsReleaseTag(tagName) {
+	if !IsReleaseTag(tagName) || strings.Contains(tagName, "-") {
 		return "", false
 	}
 	return tagName, true

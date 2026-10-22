@@ -60,5 +60,8 @@
     "details": "查看详情",
     "copy": "复制",
     "copied": "已复制"
-  }
+  },
+  "release.testing": "测试版",
+  "release.stable": "正式版",
+  "release.unknown": "通道未知"
 }

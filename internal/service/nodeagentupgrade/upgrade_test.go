@@ -509,3 +509,12 @@ func TestUpgradeIsAdmittedForACompatiblePeer(t *testing.T) {
 		t.Fatalf("a compatible target was refused for want of a recorded edge: err=%v created=%v", err, created)
 	}
 }
+
+func TestPrereleaseTargetRequiresModernInstalledHelper(t *testing.T) {
+	if err := validateRequest(Request{Version: "4.1.0-beta.1", ExpectedVersion: "4.0.1.11"}); err == nil {
+		t.Fatal("old helper accepted suffix")
+	}
+	if err := validateRequest(Request{Version: "4.1.0-beta.1", ExpectedVersion: "4.0.2"}); err != nil {
+		t.Fatal(err)
+	}
+}

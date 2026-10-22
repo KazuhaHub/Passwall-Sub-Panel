@@ -109,7 +109,7 @@ func TestServerUpdateChannelRejectsInvalidAndExplicitThirdPartyInputBeforeWrites
 		kind domain.PanelKind
 		body string
 	}{
-		{domain.PanelKindPSP, `{"update_channel":""}`}, {domain.PanelKindPSP, `{"update_channel":"testing"}`},
+		{domain.PanelKindPSP, `{"update_channel":""}`}, {domain.PanelKindPSP, `{"update_channel":"nightly"}`},
 		{domain.PanelKindPSP, `{"update_channel":"BETA"}`}, {domain.PanelKindPSP, `{"update_channel":1}`},
 		{domain.PanelKind3XUI, `{"update_channel":"beta"}`}, {domain.PanelKindSUI, `{"update_channel":"stable"}`},
 	} {
@@ -136,7 +136,7 @@ func TestNativeUpdateChannelPoolFailureRollsBackOnlySubmittedFields(t *testing.T
 
 func TestNativeCreateUpdateChannelDefaultsStableOrAcceptsExplicitChoice(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	for _, test := range []struct{ extra, want string }{{"", "stable"}, {`,"update_channel":"stable"`, "stable"}, {`,"update_channel":"beta"`, "beta"}} {
+	for _, test := range []struct{ extra, want string }{{"", "stable"}, {`,"update_channel":"stable"`, "stable"}, {`,"update_channel":"beta"`, "beta"}, {`,"update_channel":"testing"`, "testing"}} {
 		provisioning := &nativeProvisioningRepoStub{}
 		h := NewAdminServersHandler(nativeProvisioningPanelRepo{}, &nativeProvisioningPool{}, nil, nil, nil, nil).WithNativeAgentProvisioning(provisioning).WithCoreCatalog(corefixtures.Static{})
 		w := httptest.NewRecorder()
@@ -161,7 +161,7 @@ func TestServerCreateUpdateChannelRejectsInvalidOrThirdPartyPreference(t *testin
 	gin.SetMode(gin.TestMode)
 	for _, body := range []string{
 		`{"panel_type":"psp","name":"node","update_channel":""}`,
-		`{"panel_type":"psp","name":"node","update_channel":"testing"}`,
+		`{"panel_type":"psp","name":"node","update_channel":"nightly"}`,
 		`{"panel_type":"3xui","name":"node","url":"https://original.invalid","update_channel":"stable"}`,
 		`{"panel_type":"sui","name":"node","url":"https://original.invalid","api_token":"token","update_channel":"beta"}`,
 	} {

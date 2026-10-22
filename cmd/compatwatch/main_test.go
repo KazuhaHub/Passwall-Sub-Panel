@@ -357,7 +357,7 @@ func TestPublishedReleasesRefusesATagItCannotIdentify(t *testing.T) {
 		// A MALFORMED TAG OF THE CURRENT SCHEME IS NOT HISTORY. The historical
 		// pattern is as narrow as the twelve releases that exist, so anything else
 		// that merely starts with a v is a release nobody can account for.
-		"v05.0.0", "v4.0.0-beta.25", "v4.0.0.0", "v4.0.0-rc.1",
+		"v05.0.0", "v4.0.0-beta.025", "v4.0.0.0", "v4.0.0-rc.01",
 	} {
 		t.Run(tag, func(t *testing.T) {
 			got, err := publishedReleases([]string{"release/4.0.0", tag})

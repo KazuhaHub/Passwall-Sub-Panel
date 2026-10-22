@@ -84,7 +84,7 @@ func TestARefusalPrintsNothingOnStdout(t *testing.T) {
 		"v4.0.0.0",        // a literal zero build, under the current namespace
 		"release/v4.0.0",  // the historical namespace holds a bare version
 		"v0.0.1-beta11",   // the legacy shape this project stopped publishing
-		"v3.7.0-beta.16",  // a burn-in beta of a line that never had a product release
+		"v3.7.0-beta.016", // a burn-in beta of a line that never had a product release
 		"",                // nothing
 	} {
 		code, stdout, stderr := run(t, tag)
@@ -102,5 +102,20 @@ func TestARefusalPrintsNothingOnStdout(t *testing.T) {
 	// from nothing.
 	if code, _, _ := run(t); code == 0 {
 		t.Error("the command accepted no argument at all")
+	}
+}
+
+func TestPublisherReadsHistoryButDoesNotPublishFourSegments(t *testing.T) {
+	for _, tag := range []string{"v4.1.0-beta.1", "v4.1.0-rc.10", "v4.1.0"} {
+		code, out, err := run(t, "--publish", tag)
+		if code != 0 || out != tag[1:]+"\n" {
+			t.Errorf("%s: %s %s", tag, out, err)
+		}
+	}
+	for _, tag := range []string{"v4.0.1.22", "release/4.0.1.2", "v4.1.0-beta.01"} {
+		code, out, _ := run(t, "--publish", tag)
+		if code == 0 || out != "" {
+			t.Errorf("published historical/malformed tag %s: %s", tag, out)
+		}
 	}
 }

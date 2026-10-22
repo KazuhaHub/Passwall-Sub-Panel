@@ -166,7 +166,7 @@ const DEFAULT_INSTALLATION: NativeInstallationSelection = {
 }
 const PUBLIC_NODE_INSTALL_BASE_COMMAND = "curl --disable --fail --silent --show-error --location --proto '=https' --proto-redir '=https' --tlsv1.2 https://raw.githubusercontent.com/KazuhaHub/Passwall-Node/main/install.sh | sudo sh"
 export function publicNodeInstallCommands(channel: NodeUpdateChannel) {
-  const args = channel === 'beta' ? ['--channel beta'] : []
+  const args = (channel === 'beta' || channel === 'testing') ? ['--channel testing'] : []
   const command = (extra: string[]) => extra.length
     ? `${PUBLIC_NODE_INSTALL_BASE_COMMAND} -s -- ${extra.join(' ')}`
     : PUBLIC_NODE_INSTALL_BASE_COMMAND
@@ -706,7 +706,7 @@ export default function ServersView() {
       ...EMPTY_FORM,
       name: s.name,
       panel_type: s.panel_type ?? '3xui',
-      update_channel: s.update_channel === 'beta' ? 'beta' : 'stable',
+      update_channel: (s.update_channel === 'beta' || s.update_channel === 'testing') ? 'testing' : 'stable',
       url: s.url,
       username: s.username ?? '',
       remark: s.remark ?? '',
@@ -1859,7 +1859,7 @@ export default function ServersView() {
                   helperText={editing ? t('admin:servers.hint.update_channel_short') : undefined}
                   onChange={event => setForm({ ...form, update_channel: event.target.value as NodeUpdateChannel })}>
                   <MenuItem value="stable">{t('admin:servers.native.release_stable')}</MenuItem>
-                  <MenuItem value="beta">{t('admin:servers.native.release_testing')}</MenuItem>
+                  <MenuItem value="testing">{t('admin:servers.native.release_testing')}</MenuItem>
                 </TextField>
               </Box>
               {!editing && <Typography variant="body2" color="text.secondary">{t('admin:servers.native.create_record_hint')}</Typography>}
@@ -2045,7 +2045,7 @@ export function isNodeReleaseVersion(version: string): boolean {
 }
 
 function isNodeDockerImageSelection(version: string): boolean {
-  return version === 'latest' || version === 'beta' || isNodeReleaseVersion(version)
+  return ['stable', 'testing', 'latest', 'beta'].includes(version) || isNodeReleaseVersion(version)
 }
 
 // THE DOWNLOAD PATH IS ADDRESSED BY THE TAG AND THE ASSET IS NAMED BY THE
@@ -2158,7 +2158,7 @@ export function NativeInstallationDialog({ server, initialProvisioning, onClose,
   const versionValid = selection.method === 'github' || (selection.method === 'docker'
     ? isNodeDockerImageSelection(version.trim())
     : isNodeReleaseVersion(version.trim()))
-  const publicInstallCommands = publicNodeInstallCommands(server?.update_channel === 'beta' ? 'beta' : 'stable')
+  const publicInstallCommands = publicNodeInstallCommands((server?.update_channel === 'beta' || server?.update_channel === 'testing') ? 'testing' : 'stable')
 
   useEffect(() => {
     const controller = new AbortController()
@@ -2376,7 +2376,7 @@ export function NativeInstallationDialog({ server, initialProvisioning, onClose,
       </Box>}
       {provisioning && <>
         {selection.method !== 'github' && <NodeReleaseSelector compact key={serverID} enabled={!!server} selection={selection} value={version}
-          initialChannel={server?.update_channel === 'beta' ? 'testing' : 'stable'}
+          initialChannel={(server?.update_channel === 'beta' || server?.update_channel === 'testing') ? 'testing' : 'stable'}
           onChange={next => { invalidateMaterials(); setVersion(next) }} autoSelectLatest disabled={rotating} />}
         {selection.method === 'linux' && <Box>
           <FormControlLabel control={<Checkbox size="small" checked={upgradeInPlace} disabled={!server}

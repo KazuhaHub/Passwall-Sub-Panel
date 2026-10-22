@@ -50,7 +50,7 @@ func TestReleaseVersions(t *testing.T) {
 		{"4.0.0.0", 0, false, "a literal zero build is another spelling of the three-segment version"},
 		{"4.0.0+build", 0, false, "build metadata"},
 		{"4.0.0.1+build", 0, false, "build metadata"},
-		{"4.0.0-beta.1", 0, false, "a candidate is a CHANNEL, not a spelling of the version"},
+		{"4.0.0-beta.01", 0, false, "a candidate is a CHANNEL, not a spelling of the version"},
 		// THE LEGACY SHAPE, in every form it was ever published under. These are
 		// not versions now and were not versions then: the legacy scheme used the
 		// tag AS the version, which is exactly what made it unrecognisable as an
@@ -59,7 +59,7 @@ func TestReleaseVersions(t *testing.T) {
 		{"v0.0.1-beta.11", 0, false, "the dotted prerelease"},
 		{"v1.0.0", 0, false, "a product TAG whose version is 1.0.0"},
 		{"v4.0.0", 0, false, "a product TAG whose version is 4.0.0"},
-		{"v4.0.0-beta.25", 0, false, "a burn-in beta of a line that was never released under this scheme"},
+		{"v4.0.0-beta.025", 0, false, "a burn-in beta of a line that was never released under this scheme"},
 		{"v102.1.0", 0, false, ""},
 		{"v0.0.1", 0, false, ""},
 		{"v1.0.0-alpha.01", 0, false, ""},
@@ -145,7 +145,7 @@ func TestTheTagAVersionIsPublishedUnder(t *testing.T) {
 	// this project publishes it at any more.
 	for _, value := range []string{
 		"", "latest", "4.0", "04.0.0", "release/4.0.0", "v4.0.0/../../PRIVATE_RESPONSE",
-		"4.0.0-beta.1", "v0.0.1-beta11", "v4.0.0", "4.0.0.0",
+		"4.0.0-beta.01", "v0.0.1-beta11", "v4.0.0", "4.0.0.0",
 	} {
 		if tag, ok := version.ReleaseTagFor(value); ok {
 			t.Errorf("ReleaseTagFor(%q) = %q, want a refusal", value, tag)
@@ -157,7 +157,7 @@ func TestTheTagAVersionIsPublishedUnder(t *testing.T) {
 	for _, tag := range []string{
 		"", "4.0.0", "v", "v4", "release/", "release/v4.0.0", "v4.0.0/../../x",
 		"release/4.0", "release/4.0.0/../../x", "nightly",
-		"v0.0.1-beta11", "v4.0.0-beta.25", "release/4.0.0.0", "v4.0.0.0", "v0.0.1",
+		"v0.0.1-beta11", "v4.0.0-beta.025", "release/4.0.0.0", "v4.0.0.0", "v0.0.1",
 	} {
 		if version.IsReleaseTag(tag) {
 			t.Errorf("IsReleaseTag(%q) = true, want false", tag)
@@ -216,7 +216,7 @@ func TestTheVersionATagNames(t *testing.T) {
 	// release line it names was never published under a product scheme.
 	for _, tag := range []string{
 		"", "4.0.0", "v", "v4", "release/", "release/v4.0.0", "nightly",
-		"v0.0.1-beta11", "v0.0.1", "v4.0.0-beta.25", "release/4.0.0.0", "v4.0.0.0",
+		"v0.0.1-beta11", "v0.0.1", "v4.0.0-beta.025", "release/4.0.0.0", "v4.0.0.0",
 		"v4.0.0/../../PRIVATE_RESPONSE", "release/4.0.0/../../PRIVATE_RESPONSE",
 	} {
 		if got, ok := version.VersionOfReleaseTag(tag); ok {

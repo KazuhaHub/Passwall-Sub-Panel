@@ -117,7 +117,7 @@ export function NativeAgentUpgradeDialog({ server, onClose }: { server: Server |
         {blocked
           ? <Alert severity="warning">{blocked}</Alert>
           : <NodeReleaseSelector key={server?.id} enabled={!!server} selection={{ method: 'linux', os: 'linux', arch: 'amd64' }}
-          initialChannel={server?.update_channel === 'beta' ? 'testing' : 'stable'} value={version}
+          initialChannel={(server?.update_channel === 'beta' || server?.update_channel === 'testing') ? 'testing' : 'stable'} value={version}
           onChange={next => { setVersion(next); if (!error) key.current = '' }} autoSelectLatest context="upgrade"
           newerThan={expected} targets={targets} disabled={busy || !!task || !!error} />}
         <Typography variant="body2">{t('admin:servers.agent_upgrade.version_hint')}</Typography>

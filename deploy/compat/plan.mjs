@@ -27,18 +27,15 @@ const DEFAULTS = {
   profiles: fileURLToPath(new URL('profiles.json', import.meta.url))
 }
 
-// A VERSION IS THREE INTEGERS, or four with the build component: no prefix, no
-// suffix. The legacy v-prefixed form this pattern used to accept is gone with the
-// scheme — there is no production deployment, so nothing needed migrating off it —
-// and a manifest row that still carried one would now be refused as "not a release
-// version" rather than planned into a case nobody can run.
-const RELEASE_VERSION = /^\d+\.\d+\.\d+(\.\d+)?$/
+// Current versions include numbered beta/rc candidates; historical fourth
+// segments remain readable for released compatibility cases.
+const RELEASE_VERSION = /^\d+\.\d+\.\d+(?:\.\d+|-(?:beta|rc)\.[1-9]\d*)?$/
 // A RELEASE TAG IS A VERSION BEHIND A NAMESPACE, and there are two namespaces to
 // read: the current one, and the historical one the four releases published before
 // the address changed live in. A release from a fix line carries the optional
 // build component. WHICH namespace a given release is under IS NOT DERIVABLE — no
 // version string says it — so the manifest states the tag and this only checks it.
-const RELEASE_TAG = /^(?:release\/|v)\d+\.\d+\.\d+(?:\.\d+)?$/
+const RELEASE_TAG = /^(?:release\/|v)\d+\.\d+\.\d+(?:\.\d+|-(?:beta|rc)\.[1-9]\d*)?$/
 const SHA = /^[0-9a-f]{40}$/
 
 function parseArgs(argv) {

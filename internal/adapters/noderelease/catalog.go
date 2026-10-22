@@ -366,7 +366,7 @@ func catalogEntry(candidate candidateRelease, release githubRelease, tag string)
 		ReleaseURL: releaseBase + "tag/" + tag, Notes: candidate.Notes,
 		Methods: []string{}, Platforms: []ports.NodeReleasePlatform{},
 	}
-	if release.Prerelease {
+	if release.Prerelease || strings.Contains(candidate.Version, "-") {
 		entry.Channel = "testing"
 	}
 	// THERE IS ONE SCHEME, AND THE NAMESPACE IS WHAT SAYS SO. A tag inside

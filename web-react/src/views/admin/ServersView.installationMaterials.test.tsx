@@ -72,7 +72,7 @@ describe('Passwall Node installation', () => {
     await act(async () => { finish({ data: generatedFiles() }) })
     expect((screen.getByLabelText('admin:servers.native.agent_id') as HTMLInputElement).value).toBe(secondProvisioning.agent_id)
     expect((screen.getByLabelText('admin:servers.native.credential') as HTMLInputElement).value).toBe(secondProvisioning.credential)
-    expect(versionInput().value).toBe('latest')
+    expect(versionInput().value).toBe('stable')
     expect(screen.queryByLabelText('admin:servers.native.file_content')).toBeNull()
     expect(copy).not.toHaveBeenCalled()
   })

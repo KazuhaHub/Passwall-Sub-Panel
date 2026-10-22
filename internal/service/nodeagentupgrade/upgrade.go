@@ -103,6 +103,9 @@ func validateRequest(request Request) error {
 	if !version.IsReleaseVersion(request.Version) {
 		return fmt.Errorf("%w: the target must be an exact release version", domain.ErrValidation)
 	}
+	if !version.NodeCanInstallVersion(request.ExpectedVersion, request.Version) {
+		return fmt.Errorf("%w: this installed Node cannot parse beta/rc targets; install the 4.0.2 migration release first or use the generated installation script", domain.ErrValidation)
+	}
 	// THE VERSION BEING REPLACED IS OPAQUE. It is what the node reports about
 	// itself, and the node is the one that checks it — see client.go's
 	// `c.Version != args.ExpectedVersion`. This used to require a product version

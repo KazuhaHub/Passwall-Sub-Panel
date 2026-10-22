@@ -270,7 +270,9 @@ func (h *AdminServersHandler) decideAgentOption(c *gin.Context, panelID int64) u
 	if h.nodeReleases != nil {
 		if list, listErr := h.nodeReleases.List(c.Request.Context()); listErr == nil {
 			for _, entry := range list.Releases {
-				releases = append(releases, entry.Version)
+				if version.NodeCanInstallVersion(current, entry.Version) {
+					releases = append(releases, entry.Version)
+				}
 			}
 		}
 	}

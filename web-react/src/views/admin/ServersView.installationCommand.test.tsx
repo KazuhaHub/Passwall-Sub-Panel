@@ -257,7 +257,7 @@ describe('Passwall Node installation', () => {
         expect(screen.queryByLabelText('admin:servers.native.agent_version')).toBeNull()
         expect((screen.getByLabelText('admin:servers.native.github_install_command') as HTMLTextAreaElement).value).toBe(PUBLIC_NODE_INSTALL_COMMAND)
       } else {
-        await waitFor(() => expect(versionInput().value).toBe(method === 'docker' ? 'beta' : '4.1.0'))
+        await waitFor(() => expect(versionInput().value).toBe(method === 'docker' ? 'testing' : '4.1.0'))
       }
       expect(screen.getByRole('combobox', { name: 'admin:servers.native.method_label' }).textContent).toBe(`admin:servers.native.method.${method}`)
     }

@@ -32,12 +32,43 @@ func main() {
 	line := flag.String("line", "", "release line, MAJOR.MINOR (for example 4.0)")
 	existing := flag.String("existing", "", "existing release tags, whitespace- or comma-separated")
 	onCommit := flag.String("on-commit", "", "tags pointing at the revision being released; one already on this line is resumed rather than replaced")
+	stage := flag.String("stage", "beta", "candidate stage: beta or rc; empty preserves the historical allocator")
+	target := flag.String("target", "", "optional target version, for example 4.1.0")
 	flag.Parse()
 
 	parsedLine, err := version.ParseReleaseLine(*line)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
+	}
+	if *stage != "" {
+		var resumed string
+		for _, raw := range splitTags(*onCommit) {
+			named, ok := version.VersionOfReleaseTag(raw)
+			if !ok || !strings.HasPrefix(named, parsedLine.String()+".") {
+				continue
+			}
+			base, pre, _ := strings.Cut(named, "-")
+			if !strings.HasPrefix(pre, *stage+".") || (*target != "" && base != *target) {
+				continue
+			}
+			if resumed != "" {
+				fmt.Fprintln(os.Stderr, "multiple candidates of this stage on the revision")
+				os.Exit(1)
+			}
+			resumed = raw
+		}
+		if resumed != "" {
+			fmt.Println(resumed)
+			return
+		}
+		allocated, err := version.AllocateCandidate(parsedLine, *stage, *target, splitTags(*existing))
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		fmt.Println("v" + allocated)
+		return
 	}
 	// A NUMBER ALREADY BOUND TO THIS SOURCE REVISION IS RESUMED, not replaced: a
 	// rerun of a failed release continues its own number, and the tag pointing at

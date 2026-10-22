@@ -59,18 +59,26 @@ on:
         description: "Release line, MAJOR.MINOR (for example 4.0). Required only when the tag is blank."
         required: false
         type: string
+      stage:
+        description: "Candidate stage (used when tag is blank)"
+        default: beta
+        type: choice
+        options: [beta, rc]
+      target:
+        description: "Optional target version, for example 4.1.0"
+        required: false
+        type: string
       notes:
         description: "Release notes, stored on the annotated tag. Defaults to a one-line title."
         required: false
         type: string
       channel:
-        description: "Publication channel. auto reads it from the tag; stable and testing state it."
+        description: "Publish to Testing. Stable is a separate verified promotion."
         required: false
         default: auto
         type: choice
         options:
           - auto
-          - stable
           - testing
 
 env:
@@ -228,6 +236,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           SHA: ${{ github.sha }}
           RELEASE_LINE: ${{ inputs.line }}
+          RELEASE_STAGE: ${{ inputs.stage }}
+          RELEASE_TARGET: ${{ inputs.target }}
           NOTES: ${{ inputs.notes }}
         run: |
           set -euo pipefail
@@ -262,6 +272,8 @@ jobs:
           while [ "$attempt" -lt 5 ]; do
             tag=$(go run ./cmd/allocate-release-tag \
               -line "$line" \
+              -stage "${RELEASE_STAGE:-beta}" \
+              -target "${RELEASE_TARGET:-}" \
               -existing "$(all_tags | tr '\n' ',')" \
               -on-commit "$(tags_on_this_commit)")
             # A REFUSAL PRINTS NOTHING, so emptiness is the refusal. The first
@@ -275,6 +287,10 @@ jobs:
             # ANNOTATED AT CREATION, because the notes are the artefact a reader
             # opens and the only place a note survives a rerun. Writing it here
             # also keeps the push atomic: one ref, created once or not at all.
+            if git rev-parse --verify "refs/tags/${tag}^{commit}" >/dev/null 2>&1; then
+              test "$(git rev-parse "refs/tags/${tag}^{commit}")" = "$SHA" || exit 1
+              break
+            fi
             git tag -a --cleanup=verbatim "$tag" -m "$note"
             if git push --quiet origin "refs/tags/$tag" 2>/dev/null; then
               break
@@ -376,6 +392,7 @@ jobs:
           # to its braces: an empty version reaching ldflags or an archive name is
           # a silently wrong artifact rather than a failure.
           version=$(go run ./cmd/release-tag "$tag")
+          go run ./cmd/release-tag --publish "$tag" >/dev/null
           test -n "$version" || {
             echo 'the release tag produced no version' >&2
             exit 1
@@ -431,7 +448,7 @@ jobs:
         # `contains(tag, '-')` read a hyphen as pre-release and a plain `v*` as STABLE.
         # That made a v-tag the one publishable mistake with an unrecoverable half, and
         # it is the same legacy shape rule the product scheme had to be exempted from.
-        # Publishing stable is now something a maintainer states through the input.
+        # Stable publication is completed separately by promote.yml.
         #
         # The tag is still read for one thing — whether it addresses a release at all,
         # in the image-channel case — and that is about the ADDRESS, not the channel.
@@ -443,7 +460,7 @@ jobs:
         run: |
           set -euo pipefail
           case "${REQUESTED:-auto}" in
-            stable)  prerelease=false ;;
+            stable) echo 'publish a candidate first, then use promote.yml' >&2; exit 1 ;;
             testing) prerelease=true ;;
             auto)    prerelease=true ;;
             *) echo "unknown publication channel: ${REQUESTED}" >&2; exit 1 ;;
@@ -1154,7 +1171,7 @@ jobs:
           # tag cannot be read as a Go module version, and it is not what the
           # release is called. `Passwall Sub Panel v4.0.1.2` says which product and
           # which release in one line, and the tag is shown beside it by GitHub.
-          name: Passwall Sub Panel ${{ needs.setup.outputs.tag }}
+          name: Passwall Sub Panel ${{ needs.setup.outputs.tag }} · ${{ contains(needs.setup.outputs.version, '-') && 'Testing' || 'Awaiting promotion' }}
           # Resolved once in setup, where the reason for each answer is written
           # down; both this job and the image job read that one answer.
           prerelease: ${{ needs.setup.outputs.prerelease }}
@@ -1327,16 +1344,9 @@ jobs:
             # shape; the current one has no slash, and the rule stays because the
             # four releases published there are still built from this same job.
             type=raw,value=${{ needs.setup.outputs.version }}
-            # Two rolling channels:
-            #   :latest → newest STABLE only. Mirrors GitHub /releases/latest and
-            #             PSP's in-app self-update nudge, so a :latest deploy never
-            #             sees a pre-release.
-            #   :beta   → the leading edge. Applied to EVERY release (pre-release
-            #             AND stable), so it always points at the most recent
-            #             build. A :beta deploy therefore auto-rolls forward onto a
-            #             stable once that stable is the newest release, then onto
-            #             the next beta — "always newest", not "betas only".
-            type=raw,value=latest,enable=${{ needs.setup.outputs.image_channel == 'true' && needs.setup.outputs.prerelease == 'false' }}
+            # The canonical early-access alias and its historical spelling move
+            # together. Stable/latest are updated only by verified promotion.
+            type=raw,value=testing,enable=${{ needs.setup.outputs.image_channel == 'true' }}
             type=raw,value=beta,enable=${{ needs.setup.outputs.image_channel == 'true' }}
           labels: |
             org.opencontainers.image.title=passwall-sub-panel
