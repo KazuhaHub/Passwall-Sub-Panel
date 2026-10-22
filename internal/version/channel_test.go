@@ -33,6 +33,7 @@ func TestChannelRequiresPublicationEvidenceForPlainVersions(t *testing.T) {
 		{`{"tag_name":"v4.1.0","draft":false,"prerelease":false}`, "stable", true},
 		{`{"tag_name":"v4.0.0","draft":false,"prerelease":false}`, "unknown", false},
 		{`{"tag_name":"v4.1.0","draft":true,"prerelease":false}`, "unknown", false},
+		{`{"tag_name":"v4.1.0"}`, "unknown", false},
 	} {
 		currentPublication.Store(buildPublication{})
 		httpClient = &http.Client{Transport: channelTransport(func(r *http.Request) (*http.Response, error) {

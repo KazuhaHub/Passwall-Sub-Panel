@@ -47,17 +47,17 @@ func refreshBuildChannel(ctx context.Context) error {
 	}
 	var release struct {
 		Tag        string `json:"tag_name"`
-		Draft      bool   `json:"draft"`
-		Prerelease bool   `json:"prerelease"`
+		Draft      *bool  `json:"draft"`
+		Prerelease *bool  `json:"prerelease"`
 	}
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&release); err != nil {
 		return err
 	}
-	if release.Tag != tag || release.Draft {
+	if release.Tag != tag || release.Draft == nil || release.Prerelease == nil || *release.Draft {
 		return fmt.Errorf("current build release is not published")
 	}
 	channel := "stable"
-	if release.Prerelease {
+	if *release.Prerelease {
 		channel = "testing"
 	}
 	currentPublication.Store(buildPublication{Version, channel})
