@@ -2,7 +2,7 @@
   "_doc": "PSP × 3X-UI compatibility ranges for the v3.x PSP series. PSP pulls THIS file (docs/compat/v3.json) on demand from any v3.x build because it parses its own version, extracts major=3, and fetches the matching v<MAJOR>.json. V3 code is maintained on release/v3, while this manifest remains on main because deployed V3 binaries fetch it from there. Inside one file, entries is an ordered list and matching is FIRST-MATCH-WINS, so put narrower / newer ranges earlier. Bumping max_tested_xui here ships PSP a wider tested range with zero PSP release. See docs/3xui-compat.md for the human procedure when validating a new 3X-UI release.",
   "schema_version": 2,
   "major": 3,
-  "updated_at": "2026-10-17",
+  "updated_at": "2026-10-24",
   "xui_advisories_doc": "version -> pre-upgrade advisory shown in the panel-upgrade confirm dialog (version.LookupXUIAdvisory). Keyed by the 3X-UI version being upgraded TO; severity is info|warning; affects_xray flags changes that also restart/upgrade the bundled xray-core. Add a new key here to warn admins about a release without shipping a PSP build.",
   "xui_advisories": {
     "3.5.0": {
@@ -36,8 +36,8 @@
     {
       "psp_min": "v3.9.2",
       "psp_max": "v3.99.99",
-      "max_tested_sui": "1.6.5",
-      "notes": "S-UI 1.6.5 LIVE-PANEL VERIFIED (2026-10-17 UTC) using PSP source c94259e3866cf775abbc648e43d35d4d878df412 (V4) and release/v3 source 43cd70ebcf6955ad8debfa1dcae29d42d2b2971e against upstream tag 21866906a0ba260a829366ad56881b6b58d199af / sing-box 1.14.3. Both lines passed TestLive_SUISurface; V3 also passed TestLive_SUIBulkSetEnabled with UUID preservation, idempotency and missing-client handling. Fresh isolated SQLite on darwin/arm64, Go 1.27.2, upstream test build profile; placeholder SPA only, no Naive outbound. No adapter change, S-UI minimum or additional optional capability is claimed. Historical binaries, existing database upgrades, full proxy traffic and quota enforcement were not tested. Evidence: docs/compat/evidence/s-ui-1.6.5.json. The v3.9.2 range start remains for its explicit links:[] creation fix; older range members inherit the unchanged API contract rather than individual binary tests. The tested V3 adapter is identical to v3.9.3."
+      "max_tested_sui": "1.6.6",
+      "notes": "S-UI 1.6.6 LIVE-PANEL VERIFIED (2026-10-24 UTC) using PSP source e809f871e1b4777eda8a283329cb46da71151568 (V4) and release/v3 source 43cd70ebcf6955ad8debfa1dcae29d42d2b2971e against upstream tag d50238fe4cb17bac34b17141421f2111b70014cd / sing-box 1.14.4. Both lines passed TestLive_SUISurface; V3 also passed TestLive_SUIBulkSetEnabled with UUID preservation, idempotency and missing-client handling. Fresh isolated SQLite on darwin/arm64, Go 1.27.3, upstream test build profile; placeholder SPA only, no Naive outbound. The /apiv2, Token, Client and Inbound code is unchanged between 1.6.5 and 1.6.6 (api/, model/, web/, middleware/, cronjob/, app/, cmd/ and database/ carry no diff), so no adapter change, S-UI minimum or additional optional capability is claimed. Historical binaries, existing database upgrades, full proxy traffic and quota enforcement were not tested. Evidence: docs/compat/evidence/s-ui-1.6.6.json. The v3.9.2 range start remains for its explicit links:[] creation fix; older range members inherit the unchanged API contract rather than individual binary tests. The tested V3 adapter is identical to v3.9.3."
     }
   ],
   "sui_advisories_doc": "S-UI counterpart of xui_advisories (version.LookupSUIAdvisory), keyed by the S-UI version being upgraded TO. Empty for the same reason as sui_entries.",
@@ -71,6 +71,11 @@
       "severity": "info",
       "affects_xray": true,
       "text": "S-UI 1.6.5 将 sing-box 从 1.14.2 升到 1.14.3，新增订阅自定义响应头与 gzip，修复周期流量重置后的客户端状态通知、Clash UDP 默认值及外部链接解析。这些订阅功能属于 S-UI 自身，PSP 仍自行渲染订阅。V3 维护线和 V4 当前源码均已通过真实临时面板的 Token、状态、入站及客户端读写测试，V3 批量启停与 UUID 保留也通过，无需修改适配器。升级会重启 sing-box；本次未验证已有数据库升级、历史发布二进制、完整代理流量或配额执法。"
+    },
+    "1.6.6": {
+      "severity": "info",
+      "affects_xray": true,
+      "text": "S-UI 1.6.6 将 sing-box 从 1.14.3 升到 1.14.4，同时把 Go 升到 1.27.3，并修复 QUIC 入站空闲会话不被回收导致的内存泄漏（#1294）。统计写入改为先合并重试行再分批插入，XHTTP 参数会保留在外部 Clash 订阅里；这些都属于 S-UI 自身的订阅与统计实现，PSP 自行渲染订阅、自行轮询流量，不受影响。OpenConnect 客户端证书密钥对生成是新增接口，不在 PSP 已支持的功能内。PSP 已在 v1.6.6 的真实临时面板上验证 Token、状态、入站及客户端读写，V3 批量启停与 UUID 保留也通过，无需修改适配器。升级会重启 sing-box；本次未验证已有数据库升级、历史发布二进制、完整代理流量或配额执法。"
     }
   },
   "entries": [

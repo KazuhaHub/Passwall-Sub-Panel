@@ -13,7 +13,7 @@ deploy/compat/backends/third-party.sh down   # removes only this case's containe
 ```
 
 Measured on `ghcr.io/mhsanaei/3x-ui:3.8.5` (Xray 26.9.9) and
-`ghcr.io/alireza0/s-ui:v1.6.5`, from an empty host:
+`ghcr.io/alireza0/s-ui:v1.6.6`, from an empty host:
 
 `env` prints `export` statements, because the documented way to consume it is
 `eval` and the consumer is a **child** process: `go test` inherits the exported
