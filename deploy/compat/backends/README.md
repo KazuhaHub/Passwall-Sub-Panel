@@ -38,6 +38,14 @@ probes N/A. See [the review](../../../docs/3xui-compat.md) and
 [structured evidence](../../../docs/compat/evidence/3x-ui-3.10.0.json).
 The current 3.10.2 review used the official Windows release and the same nine required adapter tests, plus supplementary SS-2022 and lifecycle probes. See [3.10.2 evidence](../../../docs/compat/evidence/3x-ui-3.10.2.json). The 3.10.2 Linux container pin moves with the ceiling and is exercised by CI.
 
+The **3.11.0** review used an upstream SOURCE build rather than a container or a
+release archive, because the bundled Xray 26.10.21 has no darwin build and there
+was no local container runtime. That is worth knowing before reading its
+evidence: no test depends on the core, so the nine required adapter tests passed
+against a panel whose `xrayState` was `error` for the whole run, and the Linux
+container pin (which does carry a working core) moves with the ceiling and is
+exercised by CI. See [3.11.0 evidence](../../../docs/compat/evidence/3x-ui-3.11.0.json).
+
 ## The two probes that skip, and why a waiver has to be REQUIRED to count
 
 The fail2ban probes need a fail2ban endpoint the panel image does not run, so

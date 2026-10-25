@@ -1,9 +1,9 @@
 {
   "schema_version": 1,
   "product": "3x-ui",
-  "revision": 5,
-  "issued_at": "2026-10-15T00:06:35.412Z",
-  "expires_at": "2027-10-15T00:06:35.412Z",
+  "revision": 6,
+  "issued_at": "2026-10-25T23:50:00Z",
+  "expires_at": "2027-10-25T23:50:00Z",
   "applies_to_psp": {
     "min": "4.0.0",
     "max": "4.99.99"
@@ -14,8 +14,8 @@
       "psp_min": "4.0.0",
       "psp_max": "4.99.99",
       "min_xui": "3.4.2",
-      "max_tested_xui": "3.10.2",
-      "notes": "3X-UI 3.10.2 verification used PSP source 0401b698 (current main plus the permanent validation-error fixes) against the SHA-256-verified official Windows/amd64 archive on a fresh isolated SQLite panel, with bundled Xray 26.10.10 running. All nine required adapter tests and two supplementary tests passed; the two fail2ban probes remain N/A. Supplementary checks covered SS-2022 AES client lifecycle, permanent rejection of chacha20 and malformed server keys, negative sort-index preservation, independent inbound/client lifecycle and clearing weekly renewal through PSP UpdateClient. The tagged source review found no new PSP API route or client-field changes after 3.10.0. The CI image is pinned to the reviewed 3.10.2 multi-arch digest. Evidence: docs/compat/evidence/3x-ui-3.10.2.json and docs/3xui-compat.md. This is adapter-surface evidence, not historical PSP binary, existing-database upgrade or full proxy dataplane verification. Legacy v3 and v4 beta support claims are unchanged."
+      "max_tested_xui": "3.11.0",
+      "notes": "3X-UI 3.11.0 verification used PSP source e809f871 (origin/main) against an upstream source build of tag v3.11.0 (commit c621ba90) on darwin/arm64 with a fresh isolated SQLite panel and Go 1.27.3. All nine required adapter tests passed; the two fail2ban probes remain N/A. The panel reported panelVersion=3.11.0 and answered every PSP route; the bundled Xray 26.10.21 binary has no darwin build, so core state was 'error' for the whole run and no test depended on it — the compat claim is about the adapter surface, which is what PSP talks to. Supplementary probes confirmed the 3.10.0 Shadowsocks-2022 validators are unchanged (chacha20 and wrong-length keys still refused) and that a PSP client update survives the new KeepAliveValue type plus the new clientHostRuleIds column without losing the UUID or the enable flag. Source review of v3.10.2..v3.11.0 (640 files) found no route PSP calls added, removed or renamed: /inbounds/*, /clients/*, /server/* and /xray/* are untouched, and the new routes (clients/get/subId, inbounds/amneziawgKernelReadiness) are additive. The new validators cover XDRIVE, TUIC relay emails and AmneziaWG keepalive ranges, none of which PSP builds. The CI image is pinned to the reviewed 3.11.0 multi-arch digest. Evidence: docs/compat/evidence/3x-ui-3.11.0.json. This is adapter-surface evidence, not historical PSP binary, existing-database upgrade or full proxy dataplane verification."
     }
   ],
   "xui_advisories": {
@@ -58,6 +58,11 @@
       "severity": "info",
       "affects_xray": false,
       "text": "3X-UI 3.10.2 内置 Xray-core 仍为 26.10.10，修复 Shadowsocks 多用户客户端热更新、共享客户端字段合并和节点流量同步，并完善 vmess 链接导入。当前 PSP v4 适配器已通过真实隔离面板验证；非法 SS-2022 chacha20 方法及无效 server key 会返回永久校验错误，请选择 AES 方法并提供正确长度的 base64 密钥。Windows 面板程序改名为 3x-ui.exe，使用服务、任务或脚本启动旧 x-ui.exe 的部署需要更新路径。跨过 3.10.0 时仍需注意其内核、配置迁移和系统 CA 提示。已测上限仅覆盖适配器接口，不代表已有数据库升级、历史 PSP 二进制或完整代理流量链路验证。"
+    },
+    "3.11.0": {
+      "severity": "warning",
+      "affects_xray": true,
+      "text": "3X-UI 3.11.0 升级内置 Xray-core 到 26.10.21 并重启内核，新增 XDRIVE、Lua 噪声脚本、finalmask 源 IP 过滤与 XDNS over DoH；AMNEZIAWG 入站可选择 Linux 内核态数据面。PSP 使用的 /panel/api 路由、客户端字段和 Token 认证均未变，当前 v4 适配器已在真实 3.11.0 面板上通过全部九项必需测试，无需修改适配器。升级时请注意：新建数据库的首个面板用户改为随机账号密码并只打印一次到日志（不再是固定默认对），请从启动日志获取；反向代理后的客户端地址改由 X-Forwarded-For 的代理端决定，客户端自带的 X-Real-IP 不再被信任，PSP 的 Token 请求不受影响，但若你在 3X-UI 前用自建代理且日志里的来源地址变了，属预期；客户端新增 clientHostRuleIds（按 host 绑定）与 keepAlive 范围值（仅 AmneziaWG），PSP 不发送这两个字段，面板会保留原值。XDRIVE、AmneziaWG 内核态、TUIC relay 与 Per-Client Hosts 不属于 PSP 已支持的 3X-UI 功能。已测上限仅覆盖当前 v4 适配器与全新隔离面板，不代表历史发布二进制、已有数据库升级或完整代理链路验证。"
     }
   }
 }
