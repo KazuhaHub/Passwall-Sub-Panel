@@ -22,18 +22,18 @@ export default function NodeInstallCommand({ command, expiresAt, disabled = fals
     const previous = observed.current
     const changed = previous.command !== command || previous.expiresAt !== expiresAt || previous.disabled !== disabled
     observed.current = { command, expiresAt, disabled }
-    // Invalidate during commit, before a click can start a new copy. A passive
-    // cleanup could otherwise discard the result of a click on the new command.
-    // Initial mount is not a new intent. Invalidating there can race an
-    // immediate copy click on a busy runner: the resolved clipboard result is
-    // then discarded even though the command never changed. Dependency changes
-    // still invalidate in-flight work, and cleanup covers unmount/StrictMode.
+    // Invalidating on unmount OR on an unchanged dependency cycle discards a copy
+    // that is already in flight, and both happen without the user doing anything:
+    // StrictMode unmounts and remounts every component, so a copy clicked between
+    // the two passes resolved against a bumped intent and its feedback vanished —
+    // the button looked dead. Dependency changes are already invalidated above,
+    // during commit, so the cleanup has nothing left to cancel: a real unmount
+    // discards the state it would have written anyway.
     if (changed) {
       intent.current += 1
       setFeedback('')
       setCopying(false)
     }
-    return () => { intent.current += 1 }
   }, [command, expiresAt, disabled])
 
   async function copy() {
