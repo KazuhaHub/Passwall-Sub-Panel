@@ -1,0 +1,101 @@
+{
+  "schema_version": 1,
+  "verified_at": "2026-10-24T23:38:00Z",
+  "scope": "V3 maintenance source and current V4 source adapters against an isolated upstream source build",
+  "upstream": {
+    "version": "1.6.6",
+    "commit": "d50238fe4cb17bac34b17141421f2111b70014cd",
+    "release_url": "https://github.com/alireza0/s-ui/releases/tag/v1.6.6",
+    "frontend_commit": "a0cde18172879b411a9f0783e15741b846f42e55",
+    "sing_box_version": "1.14.4",
+    "core_state": "running"
+  },
+  "environment": {
+    "platform": "darwin/arm64",
+    "go_version": "1.27.3",
+    "database": "fresh isolated SQLite, sequential tests clean up their objects",
+    "authentication": "Token header",
+    "build_profile": "upstream test tags and ldflags, no Naive outbound",
+    "web_content": "placeholder html/index.html; production API and core unchanged"
+  },
+  "ci_image": "ghcr.io/alireza0/s-ui:v1.6.6@sha256:c3cc6fa2d8fef0213923ec0aeeb46c912ff67179cbc6481b849b75d6720ed1d2",
+  "ci_image_locally_executed": false,
+  "surface_review": {
+    "method": "git diff v1.6.5..v1.6.6, per directory",
+    "unchanged_for_psp": [
+      "api/",
+      "model/",
+      "web/",
+      "middleware/",
+      "cronjob/",
+      "app/",
+      "cmd/",
+      "database/"
+    ],
+    "touched": [
+      "config/version",
+      "core/box.go, core/usersession/registry.go (idle-session sweep)",
+      "service/server.go (tls-client keypair), service/stats.go (merge + batched insert)",
+      "sub/, util/ (XHTTP preservation, boolean-safe assertions)"
+    ],
+    "conclusion": "every /apiv2 route, the Token header handling, and the Client/Inbound model are untouched between 1.6.5 and 1.6.6"
+  },
+  "v4": {
+    "psp_commit": "e809f871e1b4777eda8a283329cb46da71151568",
+    "command": "go test ./internal/adapters/sui -run '^TestLive_SUISurface$' -count=1 -json",
+    "log_sha256": "fa0284d1e9cfadd8dab11a0a2afa22daaafd935cba767f46533a76849400cf15",
+    "result": {
+      "profile": "third-party-sui-live",
+      "package": "github.com/KazuhaHub/passwall-sub-panel/internal/adapters/sui",
+      "verdict": "pass",
+      "goExitCode": 0,
+      "requiredTests": [
+        "TestLive_SUISurface"
+      ],
+      "passed": [
+        "TestLive_SUISurface"
+      ],
+      "missing": [],
+      "failed": [],
+      "skipped": [],
+      "unexpected": [],
+      "notApplicable": []
+    }
+  },
+  "v3": {
+    "psp_branch": "release/v3",
+    "psp_commit": "43cd70ebcf6955ad8debfa1dcae29d42d2b2971e",
+    "adapter_identical_to_tag": "v3.9.3",
+    "command": "go test ./internal/adapters/sui -run '^TestLive_SUI' -count=1 -json",
+    "log_sha256": "2732f1aea55a487589e48eaa85b8f4a7faf21ffbe48feb26fb7482c3527adbba",
+    "result": {
+      "verdict": "pass",
+      "passed": [
+        "TestLive_SUISurface",
+        "TestLive_SUIBulkSetEnabled"
+      ],
+      "failed": [],
+      "skipped": []
+    }
+  },
+  "upstream_regression": {
+    "command": "go test -tags \"$(tags_for test)\" ./api ./service ./sub ./util ./cmd/migration",
+    "verdict": "pass",
+    "packages": {
+      "api": "ok 1.003s",
+      "service": "ok 1.695s",
+      "sub": "ok 2.059s",
+      "util": "ok 1.171s",
+      "cmd/migration": "ok 2.442s"
+    }
+  },
+  "limits": [
+    "no historical PSP binary verification; earlier V3 supported range inherits unchanged contract",
+    "no existing database upgrade verification",
+    "no full proxy dataplane or quota enforcement verification",
+    "no Naive outbound verification",
+    "no Linux container or official release binary execution",
+    "placeholder SPA only; the production web UI bundle was not built",
+    "OpenConnect endpoint TLS and the new tls-client keypair endpoint are outside PSP's supported surface"
+  ]
+}
