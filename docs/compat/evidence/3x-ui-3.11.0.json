@@ -1,0 +1,120 @@
+{
+  "schema_version": 1,
+  "verified_at": "2026-10-25T23:50:00Z",
+  "scope": "current PSP source adapter against a fresh isolated upstream source build",
+  "psp_commit": "e809f871e1b4777eda8a283329cb46da71151568",
+  "psp_commit_note": "origin/main at the start of the review; only compat documents, tests and the CI image pin follow this tested source commit.",
+  "upstream": {
+    "version": "3.11.0",
+    "commit": "c621ba9014a6aa21fd7c9ecf45655e44e24ebf13",
+    "release_url": "https://github.com/MHSanaei/3x-ui/releases/tag/v3.11.0",
+    "release_published_at": "2026-10-25T19:09:16Z",
+    "build": "upstream tagged source, `go build .` with the `internal/web/dist` stub the upstream Makefile also uses (placeholder SPA only)",
+    "xray_version": "26.10.21",
+    "xray_state": "error",
+    "xray_state_note": "Xray 26.10.21 ships no darwin build, so the core could not start locally (fork/exec bin/xray-darwin-arm64: no such file or directory). No adapter test depends on the core; see limits."
+  },
+  "environment": {
+    "platform": "darwin/arm64",
+    "go_version": "1.27.3",
+    "database": "fresh isolated SQLite",
+    "authentication": "admin-scoped Bearer token (SHA-256 row inserted into api_tokens, the same table the panel CLI writes)",
+    "panel_bind": "127.0.0.1:2053, webBasePath /",
+    "panel_subscription_server": "left at its defaults; PSP never calls it"
+  },
+  "ci_image": "ghcr.io/mhsanaei/3x-ui:v3.11.0@sha256:1628adbd9bed680d25d6f714bef4a20f132105f4612ea294952f6665dad32e5b",
+  "ci_image_locally_executed": false,
+  "ci_image_execution_method": "No local container runtime was available. The manual Test workflow runs the pinned linux/amd64 image, which does carry a working xray binary, before merge.",
+  "command": "go test -json -count=1 -timeout=10m ./internal/adapters/xui -run '^TestLive_'",
+  "log_sha256": "0531b13895129892e33475abe8919c0b3fd4a332e73295a84b047a8d7fec9a3c",
+  "checker": "deploy/compat/check-go-results.mjs --profile third-party-3xui-live",
+  "result": {
+    "profile": "third-party-3xui-live",
+    "package": "github.com/KazuhaHub/passwall-sub-panel/internal/adapters/xui",
+    "verdict": "pass",
+    "goExitCode": 0,
+    "requiredTests": [
+      "TestLive_BulkDelPreservesSharedClient",
+      "TestLive_ConcurrentSameClientNoCorruption",
+      "TestLive_MultiInboundClientSurface",
+      "TestLive_SharedClientMigrationFlow",
+      "TestLive_TwoClientsSameBackendNoCorruption",
+      "TestLive_XUIConnectionLimits",
+      "TestLive_XUIRealityScan",
+      "TestLive_XUISurface",
+      "TestLive_XUITrafficFloorMatrix"
+    ],
+    "passed": [
+      "TestLive_BulkDelPreservesSharedClient",
+      "TestLive_ConcurrentSameClientNoCorruption",
+      "TestLive_MultiInboundClientSurface",
+      "TestLive_SharedClientMigrationFlow",
+      "TestLive_TwoClientsSameBackendNoCorruption",
+      "TestLive_XUIConnectionLimits",
+      "TestLive_XUIRealityScan",
+      "TestLive_XUISurface",
+      "TestLive_XUITrafficFloorMatrix"
+    ],
+    "missing": [],
+    "failed": [],
+    "skipped": [],
+    "unexpected": [
+      "TestLive_XUIConnectionLimits/an_unrelated_update_does_not_wipe_the_device_cap",
+      "TestLive_XUIConnectionLimits/create_carries_both_caps",
+      "TestLive_XUIConnectionLimits/update_carries_both_caps",
+      "TestLive_XUIConnectionLimits/zero_clears_both_caps",
+      "TestLive_XUITrafficFloorMatrix/an_exhausted_user_is_cut_the_moment_they_move_traffic",
+      "TestLive_XUITrafficFloorMatrix/first_period,_deep_into_quota",
+      "TestLive_XUITrafficFloorMatrix/first_period,_past_half_quota",
+      "TestLive_XUITrafficFloorMatrix/fresh_period,_zero_used,_aged_client",
+      "TestLive_XUITrafficFloorMatrix/the_pushed_cap_does_not_move_as_traffic_accrues"
+    ],
+    "notApplicable": [
+      {
+        "test": "TestLive_Fail2banStatus",
+        "reason": "needs a fail2ban endpoint the 3X-UI image does not run; not part of the panel-backed surface"
+      },
+      {
+        "test": "TestLive_Fail2banStatusUnknownRouteIsUnsupported",
+        "reason": "same fail2ban endpoint as TestLive_Fail2banStatus"
+      }
+    ]
+  },
+  "panel_reported_at_verification": {
+    "panelVersion": "3.11.0",
+    "xrayVersion": "Unknown",
+    "xrayState": "error",
+    "getPanelUpdateInfo": "current=3.11.0 latest=v3.11.0 available=false",
+    "note": "getPanelUpdateInfo reaching GitHub from the panel and reporting current proves the route and the version field the compat gate reads."
+  },
+  "supplementary": {
+    "method": "temporary in-package Go test file using the production adapter, deleted after the run",
+    "verdict": "pass",
+    "checks": [
+      "SS-2022 aes-128-gcm inbound add accepted; chacha20-poly1305 still refused with 'does not support multiple users'; wrong-length server keys still refused with 'shadowsocks inbound password:' — both wordings unchanged from 3.10.2, so PSP's isPermanentPanelMsg still classifies them as domain.ErrValidation",
+      "PSP UpdateClient succeeds against the new KeepAliveValue type (keepAlive absent from PSP's payload)",
+      "A raw client update that omits clientHostRuleIds preserves the UUID and the stored binding, matching 3.11.0's documented omit-preserves merge rule",
+      "Disabling a client through PSP UpdateClient sticks"
+    ]
+  },
+  "source_review": {
+    "method": "git diff v3.10.2..v3.11.0 on the official tagged source, per directory",
+    "changed_files": 640,
+    "findings": [
+      "No route PSP calls was added, removed or renamed: /panel/api/inbounds/{add,del,get,list,list/slim,setEnable,update}, /panel/api/clients/{add,get,update,del,bulkAttach,bulkCreate,bulkDel,clientIpsByGuid}, /panel/api/server/* and /panel/api/xray/* all still exist with the same shapes",
+      "Two routes are ADDITIVE and unused by PSP: GET /clients/get/subId/:subId and GET /inbounds/amneziawgKernelReadiness",
+      "Token auth changed shape but not contract: api.go now resolves the scope before the mTLS branch and adds a node-admin scope. Admin tokens and the plain `Authorization: Bearer` header behave as before; node-admin only adds /server/updatePanel authority",
+      "New input validation covers XDRIVE inbounds, TUIC relay emails and AmneziaWG keepAlive ranges — PSP builds none of these protocols",
+      "Client model gained clientHostRuleIds (json array) and KeepAlive changed from *int to a KeepAliveValue type accepting integers or AmneziaWG ranges. Both marshal integers for non-AWG clients; PSP sends neither field",
+      "3.11.0 adds strict request-body schema validation on inbound add: a hand-built payload with a malformed settings string is rejected with 'request body failed validation'. PSP marshals settings with encoding/json, so this is a malformed-input improvement, not an incompatibility",
+      "Bundled Xray moves 26.10.10 -> 26.10.21, adding XDRIVE, Lua noise scripts, a finalmask source-IP filter and XDNS over DoH. PSP renders its own subscriptions and does not consume finalmask/XDNS"
+    ]
+  },
+  "limits": [
+    "The bundled Xray core could not run on darwin, so xrayState was 'error' throughout. This is adapter-surface evidence; the Linux container in CI covers a running core.",
+    "No historical PSP binary verification or existing-database upgrade verification.",
+    "No full proxy dataplane, live-connection continuity, multi-node production topology or full PSP traffic/reconcile-chain verification.",
+    "No destructive panel/core update execution.",
+    "3X-UI native XDRIVE, AmneziaWG kernel datapath, TUIC relay, MTProto and per-client host binding are outside this PSP adapter certification."
+  ]
+}

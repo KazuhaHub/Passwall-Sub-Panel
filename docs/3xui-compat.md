@@ -9,7 +9,7 @@ PSP 通过 `/panel/api/*` 对接 3X-UI 面板。本文档维护两件事：
 
 | PSP 版本 | 最低 3X-UI | 已实测通过 | 备注 |
 |---|---|---|---|
-| **v4 stable（4.0.0–4.99.99）** | **3.4.2** | **3.10.2** | 当前 v4 适配器已在官方 3.10.2 / Xray 26.10.10 隔离面板上实测；包含 SS-2022 永久校验错误分类修复，见下方验证记录 |
+| **v4 stable（4.0.0–4.99.99）** | **3.4.2** | **3.11.0** | 当前 v4 适配器已在 3.11.0 / Xray 26.10.21 隔离面板上实测；九项必需测试全过，无需改适配器，见下方验证记录 |
 | **v4.0.0-beta.9+** | **3.4.2** | **3.9.0** | 历史 beta 验证记录；不将当前 v4 源码的结果套用于旧二进制 |
 | **v4.0.0-beta.1–beta.8** | **3.4.2** | 3.7.0 | 历史二进制缺少 3X-UI 3.8.x 所需修复，不随远程清单误抬上限 |
 | **v3.9.3+** | **3.4.2** | **3.8.5** | V3 稳定维护线；补齐 Xray 26.9.8+ REALITY ML-KEM 订阅处理，并保留 3X-UI 3.8.x 的负数 `subSortIndex` |
@@ -41,6 +41,32 @@ PSP 通过 `/panel/api/*` 对接 3X-UI 面板。本文档维护两件事：
 - 抬高 `max_tested_xui` / `max_tested_sui` 时，**同一个改动**里把 `.github/workflows/test.yml` 中 `third-party-isolated` 的 `PSP_LIVE_3XUI_IMAGE` / `PSP_LIVE_SUI_IMAGE` 默认镜像改成新上限的 `tag@sha256:digest`；CI 跑的就是评审过的上限，`deploy/test_workflow_test.mjs` 会拒绝两者不一致
 
 ## 历史兼容性事件
+
+### 2026-10-25 UTC / 3X-UI 3.11.0 → v4 已测上限更新到 3.11.0
+
+3X-UI [v3.11.0](https://github.com/MHSanaei/3x-ui/releases/tag/v3.11.0) 发布于
+2026-10-25，内置 Xray-core 升到 **26.10.21**。相对 3.10.2 的 640 个文件改动里，
+PSP 用的 `/panel/api/{inbounds,clients,server,xray}/*` 路由、客户端字段和 Bearer
+Token 认证**没有**任何增删改名；新增的两条路由（`clients/get/subId/:subId`、
+`inbounds/amneziawgKernelReadiness`）都是附加项。新增的入站校验只覆盖 XDRIVE、
+TUIC relay email 和 AmneziaWG keepalive 范围，PSP 都不会生成。
+
+上游源码构建（tag `c621ba90`，darwin/arm64，Go 1.27.3，全新隔离 SQLite）上，面板
+回报 `panelVersion=3.11.0`，**九项必需适配器测试全部通过**，两项 fail2ban 按既有
+profile 记 N/A。另做了两项补充探测：3.10.0 引入的 SS-2022 校验措辞未变（chacha20
+与错误长度 key 仍被永久拒绝，PSP 的 `isPermanentPanelMsg` 依旧匹配）；PSP 的客户端
+更新在新版 `KeepAliveValue` 类型和新增的 `clientHostRuleIds` 列下不丢 UUID 与启停
+状态——PSP 不发送这两个字段，面板按 3.11.0 的合并规则保留原值。
+
+**本次验证有一处环境限制需要说明**：Xray 26.10.21 没有 darwin 构建，内核在本地
+跑不起来（`xrayState=error`）。所有测试都不依赖内核，因此兼容结论只覆盖适配器接口
+这一层；CI 的 `third-party-isolated` job 用固定 digest 的 linux/amd64 镜像补上真实
+内核路径。证据见 [3x-ui-3.11.0.json](compat/evidence/3x-ui-3.11.0.json)。
+
+**升级提醒（写进 advisory）**：新建数据库的首个面板用户改为随机账号密码、只打印
+一次到日志；反向代理后客户端地址改取 `X-Forwarded-For` 的代理端，客户端自带的
+`X-Real-IP` 不再被信任；XDRIVE、AmneziaWG 内核态、Per-Client Hosts 与 TUIC relay
+不属于 PSP 支持范围。
 
 ### 2026-10-24 UTC / S-UI 1.6.6 → V3/V4 已测上限 1.6.6
 
