@@ -15,6 +15,11 @@ deploy/compat/backends/third-party.sh down   # removes only this case's containe
 Measured on `ghcr.io/mhsanaei/3x-ui:3.8.5` (Xray 26.9.9) and
 `ghcr.io/alireza0/s-ui:v1.6.6`, from an empty host:
 
+The current S-UI review is **1.6.7**. It used an upstream source build because no
+local container runtime was available; the Linux/amd64 image pinned in CI carries
+the same release tag and is exercised by `third-party-isolated`. See
+[S-UI 1.6.7 evidence](../../../docs/compat/evidence/s-ui-1.6.7.json).
+
 `env` prints `export` statements, because the documented way to consume it is
 `eval` and the consumer is a **child** process: `go test` inherits the exported
 environment only, so a bare `NAME=value` would set a shell variable, leave every
