@@ -171,7 +171,10 @@ test('the planned set is the two ends of the supported range', () => {
   // equivalence is deliberately gone, and what remains is the rule itself.
   const manifest = realManifest()
   const names = manifest.released_nodes.map((row) => row.version)
-  const ends = [names[names.indexOf(manifest.min_supported)], names[names.length - 1]]
+  // ONE CASE WHEN THE ENDS COINCIDE. A floor raised onto the newest release names
+  // the same row twice, and running it twice adds nothing — the rule is the set of
+  // ends, not a pair.
+  const ends = [...new Set([names[names.indexOf(manifest.min_supported)], names[names.length - 1]])]
   const { result } = plan()
   assert.deepEqual(result.cases.map((c) => c.version), ends)
 })
@@ -190,7 +193,14 @@ test('the plan keeps the manifest order, and slices it at the floor positionally
   // the set below it to be empty; positionally it is everything, in list order.
   manifest.released_nodes.reverse()
   manifest.min_supported = manifest.released_nodes[0].version
-  const { result } = planTwoReleases({ manifest })
+  // Reversing moves the shipped list's FIRST row to the newest end. Rows below the
+  // shipped floor carry no pin — a raised floor takes them out of the plan — so the
+  // row now planned there is pinned here, or this case would be about a missing pin
+  // instead of about the order.
+  const verification = verificationWithASecondPin()
+  const newest = manifest.released_nodes[manifest.released_nodes.length - 1].version
+  verification.pinned_sources[newest] ??= '3'.repeat(40)
+  const { result } = planTwoReleases({ manifest, verification })
   // STATED AS THE PROPERTY RATHER THAN AS A LIST: the floor is whichever row sits
   // first and the newest is whichever sits last, in the manifest's own order — so a
   // planner that sorted by version would pick the other two. A literal pair would

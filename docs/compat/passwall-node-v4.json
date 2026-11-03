@@ -1,7 +1,7 @@
 {
   "schema_version": 2,
   "panel_major": 4,
-  "updated_at": "2026-10-22",
+  "updated_at": "2026-11-03",
   "_comment": "THE CI TEST MATRIX, AND THE TWO FACTS THE PANEL CANNOT LEARN FROM A RELEASE. released_nodes is the record of which releases were REVIEWED, and the compatibility matrix exercises the row at min_supported and the newest one — the two ends, because a harness that breaks against an old release and against a new one is caught by the pair while the rows between them add nothing. wire and features are the protocol generation and the capabilities this panel requires of a node; features.agent_upgrade_v1.required_capabilities is the one gate the upgrade path still has, and TestNodeV4CompatibilityMatrixMatchesSharedProtocolPolicy pins it to the shared protocol package. IT NO LONGER DECIDES WHAT THE PANEL OFFERS. It used to be an allow-list, with per-release display metadata (review notes, install methods, platforms, a published Docker tag) that the panel fetched and the dialog rendered — so adding a release meant editing this file, pinning its commit and publishing a panel. The catalog now lists the releases this project has PUBLISHED and reads what each release says about itself, which is why those fields are gone from the rows: leaving them would be a second, unread copy of what the assets already state. THE TAG STAYS, and it is not display metadata: it is the ADDRESS the release is fetched by, the matrix addresses each case by it, and a version does not determine it — four releases live under `release/` and everything since under `v`. The document also used to name docs/compat/releases-v1.json as the signed admission policy beside it; that policy has been deleted, and what an operator may install is their choice among the published releases.",
   "wire": {
     "endpoint": "/v1/node/sync",
@@ -18,8 +18,8 @@
       ]
     }
   },
-  "min_supported": "4.0.0",
-  "min_supported_doc": "The OLDEST Passwall-Node version this panel still tests. This row is one of the two the released-range CI matrix exercises — the other is the newest. MATCHED BY POSITION IN released_nodes, NOT by a version comparison. The positional rule was introduced because the legacy scheme's dotless prereleases sorted wrongly as text ('v0.0.1-beta9' above 'v0.0.1-beta11'), so comparing the strings would have silently inverted the floor. THAT REASON IS GONE - a version is three integers now, and integers compare correctly - and the mechanism stays because it is the one both sides already implement: the planner finds this row by indexOf exactly as this field is read. THIS SELECTS WHAT IS TESTED, NOT WHAT MAY CONNECT. No production code reads this field -- only the two workflows and the matrix test do -- so raising it stops testing the versions below it and does nothing else: an older node keeps syncing, and nothing refuses it for sitting below this row. Refusing a node is a separate decision about the wire generation (see wire.min_protocol_version) and needs its own change, announcement and migration acceptance; a floor move must not do that work by implication. Raising it is still BREAKING in the sense that matters here: the floor stops being tested at its old value, so a regression in a version now below it stops being caught. Record it in docs/compat-policy.md's history, naming what is now untested. The field exists so the matrix can stay small -- without a floor every release adds a permanent case, and the matrix grows with the release list rather than with the differences that matter.",
+  "min_supported": "4.1.0",
+  "min_supported_doc": "The OLDEST Passwall-Node version this panel still tests. This row is one of the two the released-range CI matrix exercises — the other is the newest. MATCHED BY POSITION IN released_nodes, NOT by a version comparison. The positional rule was introduced because the legacy scheme's dotless prereleases sorted wrongly as text ('v0.0.1-beta9' above 'v0.0.1-beta11'), so comparing the strings would have silently inverted the floor. THAT REASON IS GONE - a version is three integers now, and integers compare correctly - and the mechanism stays because it is the one both sides already implement: the planner finds this row by indexOf exactly as this field is read. THIS SELECTS WHAT IS TESTED, NOT WHAT MAY CONNECT. No production code reads this field -- only the two workflows and the matrix test do -- so raising it stops testing the versions below it and does nothing else: an older node keeps syncing, and nothing refuses it for sitting below this row. Refusing a node is a separate decision about the wire generation (see wire.min_protocol_version) and needs its own change, announcement and migration acceptance; a floor move must not do that work by implication. Raising it is still BREAKING in the sense that matters here: the floor stops being tested at its old value, so a regression in a version now below it stops being caught. Record it in docs/compat-policy.md's history, naming what is now untested. The field exists so the matrix can stay small -- without a floor every release adds a permanent case, and the matrix grows with the release list rather than with the differences that matter. HISTORY OF THIS FLOOR: raised from 4.0.0 to 4.1.0 on 2026-11-03, because 4.1.0 is the first stable Passwall-Node release. Every 4.0.x release (4.0.0 through 4.0.1.11) is now untested; their rows stay below as the record that they were reviewed, and because compat-watch accounts for every published release against this list. Their pins left docs/compat/verification-v1.json with the move.",
   "released_nodes": [
     {
       "version": "4.0.0",
@@ -163,6 +163,17 @@
         "managed-docker"
       ],
       "tag": "v4.0.1.11"
+    },
+    {
+      "version": "4.1.0",
+      "protocol_version": 1,
+      "base_sync": "supported",
+      "remote_upgrade": "conditional",
+      "upgrade_methods": [
+        "linux-systemd",
+        "managed-docker"
+      ],
+      "tag": "v4.1.0"
     }
   ]
 }
