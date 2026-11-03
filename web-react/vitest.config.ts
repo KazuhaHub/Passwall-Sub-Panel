@@ -8,6 +8,10 @@ export default defineConfig({
   test: {
     environment: 'node',
     include: ['src/**/*.test.{ts,tsx}'],
+    setupFiles: ['./src/test/setup.ts'],
+    environmentOptions: {
+      jsdom: { url: 'http://localhost/' },
+    },
     server: {
       deps: {
         // material-color-utilities ships extensionless relative imports
