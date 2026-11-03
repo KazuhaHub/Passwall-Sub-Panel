@@ -10,7 +10,7 @@ COPY web-react/ ./
 RUN npx tsc -b && npx vite build --outDir /web/dist --emptyOutDir
 
 # Stage 2 — build the Go binary with the SPA assets embedded.
-FROM golang:1.26.8-alpine AS go-builder
+FROM golang:1.26.10-alpine AS go-builder
 ENV GOWORK=off GOTOOLCHAIN=local
 RUN apk add --no-cache git
 WORKDIR /src
