@@ -1,0 +1,108 @@
+{
+  "schema_version": 1,
+  "verified_at": "2026-11-03T22:15:00Z",
+  "scope": "V3 maintenance source and current V4 source adapters against an isolated upstream source build",
+  "upstream": {
+    "version": "1.6.7",
+    "commit": "3c38b80172d4a6cbfcce9fd224a899d8b126d440",
+    "release_url": "https://github.com/alireza0/s-ui/releases/tag/v1.6.7",
+    "frontend_commit": "f473aeba368de6581cad70412c098ed98370cbcc",
+    "sing_box_version": "1.14.4",
+    "core_state": "running"
+  },
+  "environment": {
+    "platform": "darwin/arm64",
+    "go_version": "1.27.3",
+    "database": "fresh isolated SQLite, sequential tests clean up their objects",
+    "authentication": "Token header",
+    "build_profile": "upstream test tags and ldflags, no Naive outbound",
+    "web_content": "placeholder html/index.html; production API and core unchanged"
+  },
+  "ci_image": "ghcr.io/alireza0/s-ui:v1.6.7@sha256:c262ebd5cd53fd098d3080089af46220473bacbaf1a113e767aa9aadd2eed36d",
+  "ci_image_locally_executed": false,
+  "ci_image_execution_method": "No local container runtime was available. The Linux/amd64 image at this digest is exercised by the third-party-isolated job; local verification used the same upstream tag from source.",
+  "surface_review": {
+    "method": "git diff v1.6.6..v1.6.7, per directory",
+    "unchanged_for_psp": [
+      "api/apiV2Handler.go",
+      "database/model/client.go",
+      "database/model/inbound.go",
+      "database/model/tokens.go",
+      "middleware/",
+      "app/",
+      "cronjob/",
+      "cmd/"
+    ],
+    "touched": [
+      "api/apiHandler.go, api/apiService.go (cookie API panel-update routes only)",
+      "service/client.go, service/setting.go, service/config.go (stored subscription link prefix)",
+      "service/inbounds.go (initUsers ids passed as query parameters)",
+      "service/update.go, service/upgrade.go (panel self-update)",
+      "core/register.go, util/outJson.go (Hysteria2 realm registration and output)",
+      "sub/, util/subInfo.go (anti-probing and control-character hardening)",
+      "web/web.go (security headers)",
+      "database/model/endpoints.go, database/model/outbounds.go (safe type assertions)",
+      "Dockerfiles, install.sh, s-ui.sh (reproducible build and self-update hardening)"
+    ],
+    "conclusion": "every /apiv2 route, Token header handling, Client/Inbound model, and Client/Inbound request field used by PSP is unchanged between 1.6.6 and 1.6.7"
+  },
+  "v4": {
+    "psp_commit": "36c4c7a7959070ab0fbd0dcbf88c6a1fc1156a0b",
+    "command": "go test ./internal/adapters/sui -run '^TestLive_SUISurface$' -count=1 -json",
+    "log_sha256": "8baef31b7258f5d89b34627d80daf7f8920819bf5324cb8171b7278d53a2779e",
+    "result": {
+      "profile": "third-party-sui-live",
+      "package": "github.com/KazuhaHub/passwall-sub-panel/internal/adapters/sui",
+      "verdict": "pass",
+      "goExitCode": 0,
+      "requiredTests": [
+        "TestLive_SUISurface"
+      ],
+      "passed": [
+        "TestLive_SUISurface"
+      ],
+      "missing": [],
+      "failed": [],
+      "skipped": [],
+      "unexpected": [],
+      "notApplicable": []
+    }
+  },
+  "v3": {
+    "psp_branch": "release/v3",
+    "psp_commit": "43cd70ebcf6955ad8debfa1dcae29d42d2b2971e",
+    "adapter_identical_to_tag": "v3.9.3",
+    "command": "go test ./internal/adapters/sui -run '^TestLive_SUI' -count=1 -json",
+    "log_sha256": "674141168599a26596ccc6ae55a2fcd4ccc01138d19a03af875bef4bd83bb5e0",
+    "result": {
+      "verdict": "pass",
+      "passed": [
+        "TestLive_SUISurface",
+        "TestLive_SUIBulkSetEnabled"
+      ],
+      "failed": [],
+      "skipped": []
+    }
+  },
+  "upstream_regression": {
+    "command": "go test -tags \"$(tags_for test)\" ./api ./service ./sub ./util ./cmd/migration",
+    "verdict": "pass",
+    "packages": {
+      "api": "ok 0.898s",
+      "service": "ok 1.017s",
+      "sub": "ok 1.575s",
+      "util": "ok 2.055s",
+      "cmd/migration": "ok 1.087s"
+    }
+  },
+  "limits": [
+    "no historical PSP binary verification; earlier V3 supported range inherits the unchanged contract",
+    "no existing database upgrade verification",
+    "no full proxy dataplane or quota enforcement verification",
+    "no Hysteria2 realm client or hysteria-realm service verification",
+    "S-UI's panel self-update flow was not executed",
+    "no Naive outbound verification",
+    "no Linux container or official release binary execution",
+    "placeholder SPA only; the production web UI bundle was not built"
+  ]
+}

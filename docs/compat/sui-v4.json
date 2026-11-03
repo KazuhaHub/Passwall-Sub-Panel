@@ -1,9 +1,9 @@
 {
   "schema_version": 1,
   "product": "sui",
-  "revision": 5,
-  "issued_at": "2026-10-24T23:38:00Z",
-  "expires_at": "2027-10-24T23:38:00Z",
+  "revision": 6,
+  "issued_at": "2026-11-03T22:15:00Z",
+  "expires_at": "2027-11-03T22:15:00Z",
   "applies_to_psp": {
     "min": "4.0.0",
     "max": "4.99.99"
@@ -13,8 +13,8 @@
     {
       "psp_min": "4.0.0",
       "psp_max": "4.99.99",
-      "max_tested_sui": "1.6.6",
-      "notes": "S-UI 1.6.6 LIVE-PANEL VERIFIED (2026-10-24 UTC) using PSP source e809f871e1b4777eda8a283329cb46da71151568 (V4) and release/v3 source 43cd70ebcf6955ad8debfa1dcae29d42d2b2971e against upstream tag d50238fe4cb17bac34b17141421f2111b70014cd / sing-box 1.14.4. Both lines passed TestLive_SUISurface; V3 also passed TestLive_SUIBulkSetEnabled with UUID preservation, idempotency and missing-client handling. Fresh isolated SQLite on darwin/arm64, Go 1.27.3, upstream test build profile; placeholder SPA only, no Naive outbound. The /apiv2, Token, Client and Inbound code is unchanged between 1.6.5 and 1.6.6 (api/, model/, web/, middleware/, cronjob/, app/, cmd/ and database/ carry no diff), so no adapter change, S-UI minimum or additional optional capability is claimed. Historical binaries, existing database upgrades, full proxy traffic and quota enforcement were not tested. Evidence: docs/compat/evidence/s-ui-1.6.6.json."
+      "max_tested_sui": "1.6.7",
+      "notes": "S-UI 1.6.7 LIVE-PANEL VERIFIED (2026-11-03 UTC) using PSP source 36c4c7a7959070ab0fbd0dcbf88c6a1fc1156a0b (V4) and release/v3 source 43cd70ebcf6955ad8debfa1dcae29d42d2b2971e against upstream tag 3c38b80172d4a6cbfcce9fd224a899d8b126d440 / sing-box 1.14.4. Both lines passed TestLive_SUISurface; V3 also passed TestLive_SUIBulkSetEnabled with UUID preservation, idempotency and missing-client handling. Fresh isolated SQLite on darwin/arm64, Go 1.27.3, upstream test build profile; placeholder SPA only, no Naive outbound. The /apiv2 routes, Token header handling, Client/Inbound models and request fields used by PSP are unchanged between 1.6.6 and 1.6.7. The touched service paths rebuild S-UI's stored subscription links, bind initUsers ids as query parameters, emit the new Hysteria2 realm subscription fields and implement panel self-update; no adapter change, S-UI minimum or additional optional capability is claimed. Hysteria2 realm and panel self-update were not verified as PSP features. Historical binaries, existing database upgrades, full proxy traffic and quota enforcement were not tested. Evidence: docs/compat/evidence/s-ui-1.6.7.json."
     }
   ],
   "sui_advisories": {
@@ -52,6 +52,11 @@
       "severity": "info",
       "affects_xray": true,
       "text": "S-UI 1.6.6 将 sing-box 从 1.14.3 升到 1.14.4，同时把 Go 升到 1.27.3，并修复 QUIC 入站空闲会话不被回收导致的内存泄漏（#1294）。统计写入改为先合并重试行再分批插入，XHTTP 参数会保留在外部 Clash 订阅里；这些都属于 S-UI 自身的订阅与统计实现，PSP 自行渲染订阅、自行轮询流量，不受影响。OpenConnect 客户端证书密钥对生成是新增接口，不在 PSP 已支持的功能内。PSP 已在 v1.6.6 的真实临时面板上验证 Token、状态、入站及客户端读写，V3 批量启停与 UUID 保留也通过，无需修改适配器。升级会重启 sing-box；本次未验证已有数据库升级、历史发布二进制、完整代理流量或配额执法。"
+    },
+    "1.6.7": {
+      "severity": "info",
+      "affects_xray": false,
+      "text": "S-UI 1.6.7 保持内置 sing-box 1.14.4，没有内核版本升级。新增 Hysteria2 realm（NAT traversal）/hysteria-realm 服务、订阅节点名移除客户端 remark 前缀的开关，以及面板内检查和执行 S-UI 自更新；安全修复包括 initUsers 查询参数绑定、订阅标题控制字符过滤、HTTP 安全头与发布 URL 校验。PSP 自行渲染订阅，不消费 S-UI 的节点名前缀设置；Hysteria2 realm 和面板自更新不在 PSP 已支持范围内。PSP 已在 v1.6.7 的真实临时面板上验证 Token、状态、入站及客户端完整读写，V3 批量启停与 UUID 保留也通过，无需修改适配器。本次未验证已有数据库升级、历史发布二进制、完整代理流量或配额执法。"
     }
   }
 }

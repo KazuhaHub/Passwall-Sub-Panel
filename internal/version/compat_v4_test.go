@@ -68,8 +68,8 @@ func TestShippedCompatManifestRangesAndAdvisories(t *testing.T) {
 				}
 			}
 			sui, ok := lookupSUIForPSPVersion(payload, fmt.Sprintf("v%d.9.2", major))
-			if !ok || sui.MaxTestedSUI != "1.6.6" || sui.MinSUI != "" {
-				t.Fatalf("SUI 1.6.6 ceiling missing or an unverified floor was introduced: %#v found=%v", sui, ok)
+			if !ok || sui.MaxTestedSUI != "1.6.7" || sui.MinSUI != "" {
+				t.Fatalf("SUI 1.6.7 ceiling missing or an unverified floor was introduced: %#v found=%v", sui, ok)
 			}
 			if !payload.SUIAdvisories["1.6.0"].AffectsXray {
 				t.Fatal("SUI 1.6.0 core migration warning must remain available")
@@ -87,6 +87,9 @@ func TestShippedCompatManifestRangesAndAdvisories(t *testing.T) {
 				if a, ok := payload.SUIAdvisories[key]; !ok || a.Severity != "info" || !a.AffectsXray || a.Text == "" {
 					t.Fatalf("SUI %s must disclose its core upgrade on V3", key)
 				}
+			}
+			if a, ok := payload.SUIAdvisories["1.6.7"]; !ok || a.Severity != "info" || a.AffectsXray || a.Text == "" {
+				t.Fatal("SUI 1.6.7 must retain its unchanged-core upgrade information on V3")
 			}
 			// The schema-v2 base remains conservative for historical binaries.
 			// Current v4 builds opt into the prerelease-aware overlay below.
@@ -241,7 +244,7 @@ func TestCompatV4FetchAppliesPublishedShape(t *testing.T) {
 	if err := fetchAndApplyAll(context.Background(), sources); err != nil {
 		t.Fatal(err)
 	}
-	if ActiveMinXUI() != MinXUI || ActiveMaxTestedXUI() != "3.11.0" || ActiveMinSUI() != "" || ActiveMaxTestedSUI() != "1.6.6" {
+	if ActiveMinXUI() != MinXUI || ActiveMaxTestedXUI() != "3.11.0" || ActiveMinSUI() != "" || ActiveMaxTestedSUI() != "1.6.7" {
 		t.Fatal("runtime did not apply the V4 XUI/SUI bounds")
 	}
 	if a, ok := LookupXUIAdvisory("v3.7.0"); !ok || a.AffectsXray || a.Text == "" {
@@ -277,11 +280,14 @@ func TestCompatV4FetchAppliesPublishedShape(t *testing.T) {
 			t.Fatalf("runtime lost the SUI %s core-upgrade advisory", key)
 		}
 	}
-	if got := CheckSUI("1.6.6"); got != CompatSupported {
-		t.Fatalf("reviewed SUI 1.6.6 status=%v, want supported", got)
+	if a, ok := LookupSUIAdvisory("v1.6.7"); !ok || a.AffectsXray || a.Severity != "info" || a.Text == "" {
+		t.Fatal("runtime lost the SUI 1.6.7 unchanged-core advisory")
 	}
-	if got := CheckSUI("1.6.7"); got != CompatUntested {
-		t.Fatalf("unreviewed SUI 1.6.7 status=%v, want untested", got)
+	if got := CheckSUI("1.6.7"); got != CompatSupported {
+		t.Fatalf("reviewed SUI 1.6.7 status=%v, want supported", got)
+	}
+	if got := CheckSUI("1.6.8"); got != CompatUntested {
+		t.Fatalf("unreviewed SUI 1.6.8 status=%v, want untested", got)
 	}
 
 	// The snapshot stores the VALIDATED DOCUMENTS and their digests, not bare

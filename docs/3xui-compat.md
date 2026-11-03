@@ -26,7 +26,7 @@ PSP 通过 `/panel/api/*` 对接 3X-UI 面板。本文档维护两件事：
 
 | PSP 版本 | 最低 S-UI | 已实测通过 | 备注 |
 |---|---|---|---|
-| **v3.9.2–v3.x / v4.x** | 未发布 | **1.6.6** | V3 维护线与 V4 当前源码分别实机验证（2026-10-24 UTC）；未验证历史发布二进制、已有数据库升级或完整代理流量与配额执法。没有编译期 floor。 |
+| **v3.9.2–v3.x / v4.x** | 未发布 | **1.6.7** | V3 维护线与 V4 当前源码分别实机验证（2026-11-03 UTC）；未验证历史发布二进制、已有数据库升级或完整代理流量与配额执法。没有编译期 floor。 |
 
 > S-UI 侧没有 `min_sui`：上限验过了，但「支持到多旧」从来没有人确立过，而 `CheckSUI` 只对**显式发布过的** floor 报 too_old。
 
@@ -67,6 +67,33 @@ profile 记 N/A。另做了两项补充探测：3.10.0 引入的 SS-2022 校验�
 一次到日志；反向代理后客户端地址改取 `X-Forwarded-For` 的代理端，客户端自带的
 `X-Real-IP` 不再被信任；XDRIVE、AmneziaWG 内核态、Per-Client Hosts 与 TUIC relay
 不属于 PSP 支持范围。
+
+### 2026-11-03 UTC / S-UI 1.6.7 → V3/V4 已测上限 1.6.7
+
+[S-UI v1.6.7](https://github.com/alireza0/s-ui/releases/tag/v1.6.7) 新增
+Hysteria2 realm（NAT traversal）与 `hysteria-realm` 服务、订阅节点名移除客户端
+remark 前缀的开关，以及面板内检查/执行 S-UI 自更新。安全与稳定性修复包括
+`initUsers` 查询参数绑定、安全响应头与发布 URL 校验、订阅标题控制字符过滤、
+安装/自更新脚本失败关闭，以及 WARP/标签反序列化的类型断言修复。内置 sing-box
+仍为 1.14.4，没有内核版本升级。
+
+PSP 使用的 `/apiv2` 路由、Token 头、Client/Inbound 模型和请求字段在
+`v1.6.6..v1.6.7` 间未变。`service/client.go`、`setting.go` 与 `config.go` 的改动
+只重建 S-UI 自己保存的订阅链接；`service/inbounds.go` 只是把 `initUsers` 的 id
+从字符串拼接改成参数绑定。Hysteria2 realm、S-UI 自身的节点名前缀设置和面板自更新
+不在 PSP 已支持范围内，本次不把它们写成新能力。
+
+V4 源码 `36c4c7a7` 和 V3 `release/v3` 源码 `43cd70eb` 分别通过真实面板上的
+`TestLive_SUISurface`；V3 另通过 `TestLive_SUIBulkSetEnabled`，验证批量禁用/启用、
+UUID 保留、幂等和不存在客户端处理。两次读回版本均为 1.6.7、内核运行。
+V3 适配器与 `v3.9.3` tag 一致，较早范围成员沿用未变的接口契约。
+上游 `api`、`service`、`sub`、`util` 与 `cmd/migration` 测试通过，无需修改生产适配器。
+
+环境为 Go 1.27.3、darwin/arm64、全新隔离 SQLite、上游 test 构建配置；仅网页使用
+占位内容，生产 API 与内核未替换，构建不含 Naive outbound。未验证已有数据库升级、
+历史 PSP 二进制、完整代理流量、配额执法、Hysteria2 realm 或 S-UI 面板自更新。
+证据见 [s-ui-1.6.7.json](compat/evidence/s-ui-1.6.7.json)。CI 默认镜像同步固定到
+官方 `v1.6.7` 的多架构摘要，本地未执行 Linux 容器。
 
 ### 2026-10-24 UTC / S-UI 1.6.6 → V3/V4 已测上限 1.6.6
 
