@@ -520,8 +520,32 @@ test('every downstream job checks out trusted immutable workflow SHA proven equa
   assert(build.includes('BUILD_DATE: ${{ needs.setup.outputs.build_date }}'))
   assert(!build.includes('date -u'))
   assert(build.includes('sh deploy/check-build.sh'))
-  assert(job('release').includes('target_commitish: ${{ needs.setup.outputs.sha }}'))
   assert(job('docker').includes('org.opencontainers.image.revision=${{ needs.setup.outputs.sha }}'))
+})
+
+// THE RELEASE IS CREATED ON THE TAG, NEVER ON A COMMIT. When the commit named by
+// target_commitish is not the default branch's tip and the two differ under
+// .github/workflows/, GitHub refuses the create call unless the token may write
+// workflows, which GITHUB_TOKEN never can: v4.1.0 targeted ed7a5a72 while main
+// was at 36c4c7a7 (#302 edits test.yml), and all four publish attempts got
+// "403 Resource not accessible by integration". Every earlier release targeted
+// main's tip, which is why the field looked harmless. GitHub ignores the field
+// once the tag exists, and here it always does: the recheck before publication
+// fetches the tag and proves it resolves to the accepted commit, so the release
+// is bound to that commit without naming it.
+test('the publish step names the tag, not a target commit, and the tag is rechecked first', () => {
+  const release = job('release')
+  assert(
+    !/target_commitish:/.test(release),
+    'the publish step passes target_commitish; a release cut from a commit behind main then fails with 403 whenever main has since changed a workflow',
+  )
+  assert(release.includes('tag_name: ${{ needs.setup.outputs.tag }}'), 'the publish step must create the release on the tag')
+  const recheck = release.indexOf('- name: Recheck immutable tag before publication')
+  const publish = release.indexOf('- name: Publish GitHub Release')
+  assert(recheck >= 0 && publish > recheck, 'the tag must be rechecked before the release is created on it')
+  const step = release.slice(recheck, publish)
+  assert(step.includes('git fetch --force --no-tags origin "refs/tags/${TAG}:refs/tags/${TAG}"'), 'the recheck must fail when the tag does not exist')
+  assert(step.includes('test "$(git rev-parse --verify "refs/tags/${TAG}^{commit}")" = "$COMMIT"'), 'the recheck must prove the tag resolves to the accepted commit')
 })
 
 test('published releases and exact images cannot silently overwrite while rolling channels remain intentional', () => {
