@@ -1164,8 +1164,12 @@ jobs:
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           draft: true
+          # NO target_commitish. The tag exists by now (the recheck above fetched it
+          # and proved it is the accepted commit), and GitHub ignores the field for
+          # an existing tag — but still checks it: a target behind main, where main
+          # has since changed a workflow, is refused to GITHUB_TOKEN with 403
+          # "Resource not accessible by integration". That is how v4.1.0 failed.
           tag_name: ${{ needs.setup.outputs.tag }}
-          target_commitish: ${{ needs.setup.outputs.sha }}
           # THE TITLE CARRIES THE TAG, AND THE PRODUCT NAMES IT. The page used to
           # read `release/4.0.1.1`, which is an ADDRESS — the namespace exists so a
           # tag cannot be read as a Go module version, and it is not what the
