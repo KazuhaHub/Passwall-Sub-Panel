@@ -43,3 +43,12 @@ test('V3 literal shell blocks parse and do not interpolate dispatch input', () =
   }
   assert(count >= 6)
 })
+
+test('V3 publisher yields :latest and the GitHub Latest marker to V4', () => {
+  assert(!/value=latest/.test(workflow), 'V3 must not push the :latest image tag')
+  assert(!/passwall-sub-panel:latest/.test(workflow), 'V3 release notes must not offer :latest')
+  assert(/type=raw,value=v3,enable=/.test(workflow), 'V3 keeps its rolling :v3 tag')
+  const start = workflow.indexOf('- name: Publish GitHub Release')
+  const publish = workflow.slice(start, workflow.indexOf('\n  docker:', start))
+  assert.match(publish, /^ {10}make_latest: false$/m)
+})

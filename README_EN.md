@@ -207,7 +207,7 @@ The V3 stable maintenance line and the V4 testing line use separate rolling chan
 
 | Tag | Tracks | For |
 |---|---|---|
-| `:latest` | newest **stable** in the repository (default) | production / day-to-day |
+| `:latest` | newest **stable** in the repository (default; V4 since V4 went stable) | production / day-to-day |
 | `:v3` | newest **V3** stable maintenance release | staying on the V3 data model |
 | `:beta` | the V4 testing line | trying V4 early |
 | `:v3.9.3` / `:v4.0.0-beta.10` | a pinned exact version | no auto-roll |
@@ -220,9 +220,9 @@ services:
     image: ghcr.io/kazuhahub/passwall-sub-panel:beta   # latest → beta
 ```
 
-> A V3 maintenance release updates `:latest` and `:v3` and never touches `:beta`, so shipping a V3 security fix cannot roll a V4 test deployment back to V3. Pin with the full `:vX.Y.Z` to stop rolling entirely.
+> A V3 maintenance release updates `:v3` and its exact version tag and never touches `:latest` or `:beta`, so shipping a V3 security fix cannot roll a V4 deployment back to V3. Pin with the full `:vX.Y.Z` to stop rolling entirely.
 >
-> **To stay on V3 long-term, follow `:v3`, not `:latest`.** `:latest` means "the newest stable in this repository", not "the newest V3" — the two coincide today only because every V4 release is still a pre-release. Once V4 ships a stable, `:latest` moves to V4 and deployments tracking it are carried across a major boundary onto a different database model. `:v3` only ever follows V3 stable maintenance releases.
+> **To stay on V3 long-term, follow `:v3`, not `:latest`.** `:latest` means "the newest stable in this repository", not "the newest V3" — V4 has shipped a stable, so `:latest` now points at V4, and a V3 deployment still tracking it is carried across a major boundary onto a different database model on its next `up -d`. `:v3` only ever follows V3 stable maintenance releases.
 >
 > PSP also checks for a newer **stable** release of itself and surfaces it in the **admin notifications** (stable only — it never nags you toward a beta); it likewise flags a 3X-UI panel that's below PSP's max-tested version.
 
