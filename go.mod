@@ -5,7 +5,7 @@ go 1.26.0
 toolchain go1.27.3
 
 require (
-	github.com/KazuhaHub/authcore v0.5.0
+	github.com/KazuhaHub/authcore v0.6.2
 	github.com/KazuhaHub/passwall-protocol v0.2.1
 	github.com/coreos/go-oidc/v3 v3.21.0
 	github.com/crewjam/saml v0.5.1
@@ -148,7 +148,7 @@ require (
 	golang.org/x/arch v0.22.0 // indirect
 	golang.org/x/image v0.41.0 // indirect
 	golang.org/x/mod v0.41.0
-	golang.org/x/net v0.60.0 // indirect
+	golang.org/x/net v0.60.0
 	golang.org/x/sync v0.23.0
 	golang.org/x/sys v0.48.0 // indirect
 	golang.org/x/text v0.42.0 // indirect
