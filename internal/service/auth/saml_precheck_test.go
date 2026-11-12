@@ -25,8 +25,13 @@ const (
 		`<ds:SignatureMethod Algorithm="http://www.w3.org/2001/04/xmldsig-more#rsa-sha256"/>` +
 		`<ds:Reference><ds:DigestMethod Algorithm="http://www.w3.org/2001/04/xmlenc#sha256"/></ds:Reference>` +
 		`</ds:SignedInfo></ds:Signature>` +
-		`<saml:Assertion/>` +
+		precheckAssertion +
 		`</samlp:Response>`
+
+	// precheckAssertion is the smallest assertion samlguard's shape rule
+	// accepts: one SAML-namespace Issuer and one Subject with one NameID.
+	precheckAssertion = `<saml:Assertion><saml:Issuer>https://idp.example.com</saml:Issuer>` +
+		`<saml:Subject><saml:NameID>alice</saml:NameID></saml:Subject></saml:Assertion>`
 )
 
 // b64 encodes the way an IdP actually posts it: StdEncoding, then the MIME-style
@@ -74,7 +79,7 @@ func TestPrecheckResponse_RejectsAfterBase64Wrapping(t *testing.T) {
 		`xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion" xmlns:ds="http://www.w3.org/2000/09/xmldsig#">` +
 		`<ds:Signature><ds:SignedInfo>` +
 		`<ds:SignatureMethod Algorithm="http://www.w3.org/2000/09/xmldsig#rsa-sha1"/>` +
-		`</ds:SignedInfo></ds:Signature><saml:Assertion/></samlp:Response>`
+		`</ds:SignedInfo></ds:Signature>` + precheckAssertion + `</samlp:Response>`
 	err := precheckResponse(precheckACS, stripWS(b64(weak)))
 	if !errors.Is(err, samlguard.ErrWeakSignatureAlgorithm) {
 		t.Fatalf("expected the weak-algorithm rejection to survive base64 wrapping, got %v", err)
@@ -91,7 +96,7 @@ func TestPrecheckResponse_RunsBeforeSignatureVerification(t *testing.T) {
 	twoAssertions := `<?xml version="1.0"?><samlp:Response Destination="` + precheckACS +
 		`" xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol" ` +
 		`xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion">` +
-		`<saml:Assertion/><saml:Assertion/></samlp:Response>`
+		`` + precheckAssertion + `` + precheckAssertion + `</samlp:Response>`
 	if err := precheckResponse(precheckACS, stripWS(b64(twoAssertions))); !errors.Is(err, samlguard.ErrTooManyAssertions) {
 		t.Fatalf("expected ErrTooManyAssertions, got %v", err)
 	}
@@ -105,13 +110,13 @@ func TestPrecheckResponse_Rejections(t *testing.T) {
 		"missing destination": {
 			xml: `<?xml version="1.0"?><samlp:Response ` +
 				`xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol" ` +
-				`xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion"><saml:Assertion/></samlp:Response>`,
+				`xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion">` + precheckAssertion + `</samlp:Response>`,
 			want: samlguard.ErrMissingDestination,
 		},
 		"wrong destination": {
 			xml: `<?xml version="1.0"?><samlp:Response Destination="https://evil.example.com/acs" ` +
 				`xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol" ` +
-				`xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion"><saml:Assertion/></samlp:Response>`,
+				`xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion">` + precheckAssertion + `</samlp:Response>`,
 			want: samlguard.ErrDestinationMismatch,
 		},
 		"no assertion": {
@@ -172,20 +177,20 @@ func TestParseACSResponse_PreChecksBeforeVerifying(t *testing.T) {
 				`xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion" xmlns:ds="http://www.w3.org/2000/09/xmldsig#">` +
 				`<ds:Signature><ds:SignedInfo>` +
 				`<ds:SignatureMethod Algorithm="http://www.w3.org/2000/09/xmldsig#rsa-sha1"/>` +
-				`</ds:SignedInfo></ds:Signature><saml:Assertion/></samlp:Response>`,
+				`</ds:SignedInfo></ds:Signature>` + precheckAssertion + `</samlp:Response>`,
 			want: samlguard.ErrWeakSignatureAlgorithm,
 		},
 		"two assertions": {
 			xml: `<?xml version="1.0"?><samlp:Response Destination="` + precheckACS +
 				`" xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol" ` +
 				`xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion">` +
-				`<saml:Assertion/><saml:Assertion/></samlp:Response>`,
+				`` + precheckAssertion + `` + precheckAssertion + `</samlp:Response>`,
 			want: samlguard.ErrTooManyAssertions,
 		},
 		"missing destination": {
 			xml: `<?xml version="1.0"?><samlp:Response ` +
 				`xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol" ` +
-				`xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion"><saml:Assertion/></samlp:Response>`,
+				`xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion">` + precheckAssertion + `</samlp:Response>`,
 			want: samlguard.ErrMissingDestination,
 		},
 	}

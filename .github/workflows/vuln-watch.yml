@@ -74,14 +74,72 @@ jobs:
           test -n "$build_toolchain"
           test "$(go env GOVERSION)" = "$build_toolchain"
           test "$(go tool compile -V | awk '{ print $3 }')" = "$build_toolchain"
+      # ALLOWLISTED ADVISORIES. govulncheck has no ignore flag, so a finding with no
+      # fixed version would hold this step red until upstream ships one. An ID listed
+      # here is reported as a warning instead; every other finding still fails, and so
+      # does a run whose findings cannot be read (exit 3 with no "Vulnerability #N:
+      # GO-..." line means the output format moved, not that the tree is clean). An
+      # entry that stops being reported is flagged for removal. Keep the reason and the
+      # mitigation next to each ID; remove it the release crewjam/saml ships a fix.
+      #
+      #   GO-2026-6909  crewjam/saml <= v0.5.1, no patched version. A missing Subject
+      #                 reaches a nil dereference, and a foreign-namespace NameID can
+      #                 stand in for the Subject. Mitigated in-tree:
+      #                 internal/pkg/samlguard refuses those shapes, and any prefix
+      #                 bound to two namespaces, before crewjam verifies a plaintext
+      #                 assertion; auth.verifyResponse turns any panic in crewjam's
+      #                 verification (encrypted path, a missing Conditions, ...) into a
+      #                 refused login. Not covered: a NameID spoof inside
+      #                 an EncryptedAssertion, which the IdP itself would have to sign.
       - name: Reachable vulnerability check
+        env:
+          GOVULNCHECK_ALLOW: GO-2026-6909
         run: |
           set -u
           go install golang.org/x/vuln/cmd/govulncheck@v1.8.0 || exit 1
           failed=0
+          seen=""
           for goos in linux windows darwin
           do
             echo "== GOOS=$goos"
-            GOOS="$goos" "$(go env GOPATH)/bin/govulncheck" ./... || failed=1
+            # The default shell runs with -e, so the exit status is caught here
+            # rather than read from $? after a bare assignment.
+            code=0
+            out=$(GOOS="$goos" "$(go env GOPATH)/bin/govulncheck" ./... 2>&1) || code=$?
+            printf '%s\n' "$out"
+            case "$code" in
+              0) ;;
+              3)
+                ids=$(printf '%s\n' "$out" | sed -nE 's/^Vulnerability #[0-9]+: (GO-[0-9]+-[0-9]+).*/\1/p' | sort -u)
+                # Every finding heading must yield an ID, or an unreadable one could
+                # ride along beside an allowlisted one.
+                headings=$(printf '%s\n' "$out" | grep -c '^Vulnerability #' || true)
+                parsed=$(printf '%s\n' "$out" | grep -cE '^Vulnerability #[0-9]+: GO-[0-9]+-[0-9]+' || true)
+                if [ -z "$ids" ] || [ "$headings" != "$parsed" ]; then
+                  echo "::error::govulncheck reported findings for GOOS=$goos that could not all be read ($parsed of $headings)"
+                  failed=1
+                fi
+                for id in $ids
+                do
+                  case " $GOVULNCHECK_ALLOW " in
+                    *" $id "*)
+                      echo "::warning::$id is allowlisted (GOOS=$goos); see the comment above this step"
+                      seen="$seen $id" ;;
+                    *)
+                      echo "::error::$id is reachable (GOOS=$goos)"
+                      failed=1 ;;
+                  esac
+                done ;;
+              *)
+                echo "::error::govulncheck failed for GOOS=$goos (exit $code)"
+                failed=1 ;;
+            esac
+          done
+          for id in $GOVULNCHECK_ALLOW
+          do
+            case " $seen " in
+              *" $id "*) ;;
+              *) echo "::warning::$id is allowlisted but no longer reported; remove it" ;;
+            esac
           done
           exit "$failed"

@@ -59,8 +59,11 @@ func sig(sigAlg, digestAlg string) string {
 		`<ds:Reference>` + d + `</ds:Reference></ds:SignedInfo></ds:Signature>`
 }
 
+// plainAssertion wraps inner in an Assertion carrying the Issuer and Subject
+// every real IdP assertion has, so a test about some other rule is not
+// rejected by the assertion-shape rules (samlguard_assertion_test.go).
 func plainAssertion(inner string) string {
-	return `<saml:Assertion>` + inner + `</saml:Assertion>`
+	return `<saml:Assertion>` + issuerEl + subjectEl + inner + `</saml:Assertion>`
 }
 
 func strongBody() string { return sig(sha256RSA, sha256X) + plainAssertion(sig(sha256RSA, sha256X)) }
@@ -96,7 +99,7 @@ func TestCheck_RejectsEmptyDestination(t *testing.T) {
 	// A present-but-empty Destination is as unusable as a missing one, and
 	// authcore treats the two identically.
 	raw := []byte(`<samlp:Response xmlns:samlp="` + nsProtocol + `" xmlns:saml="` + nsAssert +
-		`" Destination="">` + `<saml:Assertion/>` + `</samlp:Response>`)
+		`" Destination="">` + plainAssertion("") + `</samlp:Response>`)
 	check(t, raw, ErrMissingDestination)
 }
 
@@ -123,7 +126,7 @@ func TestCheck_DestinationKeepsLastAttribute(t *testing.T) {
 			`<samlp:Response xmlns:samlp="` + nsProtocol + `" xmlns:saml="` + nsAssert +
 			`" xmlns:evil="urn:example:evil" Destination="` + first +
 			`" evil:Destination="` + second + `">` +
-			`<saml:Assertion/>` +
+			plainAssertion("") +
 			`</samlp:Response>`)
 	}
 	// Correct value last → accepted.
@@ -301,7 +304,8 @@ func TestCheck_AcceptsAlternateNamespacePrefixes(t *testing.T) {
 		`<ds:Signature><ds:SignedInfo><ds:SignatureMethod Algorithm="` + sha256RSA + `"/>` +
 		`<ds:Reference><ds:DigestMethod Algorithm="` + sha256X + `"/></ds:Reference>` +
 		`</ds:SignedInfo></ds:Signature>` +
-		`<ns2:Assertion/>` +
+		`<ns2:Assertion><ns2:Issuer>https://idp.example.com</ns2:Issuer>` +
+		`<ns2:Subject><ns2:NameID>alice</ns2:NameID></ns2:Subject></ns2:Assertion>` +
 		`</ns1:Response>`)
 	check(t, raw, nil)
 }
