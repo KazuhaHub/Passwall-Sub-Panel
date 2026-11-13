@@ -138,7 +138,7 @@ config ETag 不变，core 不会因为升级面板而重启。
 | POST | `/lists/:id/refresh` | 202；仅远程列表 |
 | GET | `/geosite/status` `/geosite/categories` | 规则数据版本面板；无数据时分类 503 `dest_geosite_unavailable` |
 | POST | `/geosite/update[?dry_run=1]` `/geosite/rollback[?dry_run=1]` | dry-run 返回每分类差异与判定；被拒 409 `dest_geosite_update_rejected`；忙 409 `dest_geosite_busy` |
-| GET / POST | `/catalog`、`/catalog/:key/instantiate` | 目录；实例化 `{state:"off"|"on", locale?}`；不可用的组 400 `dest_template_unavailable`；已添加 409 `dest_template_exists` |
+| GET / POST | `/catalog`、`/catalog/:key/instantiate` | 目录；实例化 `{state:"off"|"on", locale?}`；不可用的组 400 `dest_template_unavailable`；已添加 409 `dest_template_exists`，名称与现有策略重复 409 `dest_name_taken` |
 | GET / POST / PUT / DELETE | `/policies[/:id]`、`/policies/preview`、`/policies/order` | 额度形状 `budget:{rules,domains,regexps,cidrs,source_cidrs,subjects,bytes}`，各为 `{used,limit}`。`order` 的 `ids` 必须恰好等于该动作当前的全部策略，否则 409 `dest_policy_order_stale`。预览**不写库、不写审计** |
 | GET / POST / PUT / DELETE | `/exemptions[/:user_id]` | 重复添加 409 `dest_exemption_exists`；响应带 `created_by_upn`、`expired` |
 | GET | `/source-rules`、`/source-rules/:node_id` | 全部 / 单个（无规则返回 `state:"off"`）；带 `geoip_available` |

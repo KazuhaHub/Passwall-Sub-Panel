@@ -19,6 +19,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"net/netip"
 	"regexp"
@@ -107,6 +108,19 @@ type ParseReport struct {
 	Samples      []Sample  `json:"samples"`
 	Warnings     []Warning `json:"warnings"`
 	WarningCount int       `json:"warning_count"`
+}
+
+// MarshalJSON sends empty sample and warning lists as [] rather than null: the
+// page reads them as arrays.
+func (r ParseReport) MarshalJSON() ([]byte, error) {
+	type plain ParseReport
+	if r.Samples == nil {
+		r.Samples = []Sample{}
+	}
+	if r.Warnings == nil {
+		r.Warnings = []Warning{}
+	}
+	return json.Marshal(plain(r))
 }
 
 // Parsed is a list's canonical content and its report.

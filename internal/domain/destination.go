@@ -2,6 +2,7 @@ package domain
 
 import (
 	"encoding/json"
+	"fmt"
 	"regexp"
 	"slices"
 	"strings"
@@ -457,3 +458,8 @@ type DestDefinitions struct {
 	Exemptions  []*DestExemption
 	SourceRules []*DestSourceRule
 }
+
+// ErrDestTemplateExists is a built-in rule group added a second time. It is an
+// ErrAlreadyExists, kept distinct so the API can tell it from a policy name that
+// is merely taken.
+var ErrDestTemplateExists = fmt.Errorf("%w: template already added", ErrAlreadyExists)

@@ -142,7 +142,7 @@ func (h *AdminDestHandler) InstantiateCatalog(c *gin.Context) {
 	ctx := c.Request.Context()
 	p, err := h.w.Catalog.Instantiate(ctx, c.Param("key"), locale, req.State)
 	if err != nil {
-		h.destError(c, err, errCodes{exists: "dest_template_exists"})
+		h.destError(c, err, errCodes{exists: "dest_name_taken"})
 		return
 	}
 	c.JSON(http.StatusCreated, gin.H{"policy": h.policyView(ctx, p, nil)})

@@ -393,7 +393,7 @@ func (r *DestPolicyRepo) UsingList(ctx context.Context, listID int64) ([]int64, 
 // destination list no group owns — is reused instead of created, so two
 // templates that share a category share its list (and its refresh). The
 // policy's ListIDs are set to the resulting ids in the order given. A second
-// policy from the same template_key is refused with ErrAlreadyExists: the page
+// policy from the same template_key is refused with domain.ErrDestTemplateExists (an ErrAlreadyExists): the page
 // shows a template as added once, and two copies would double its quota.
 func (r *DestRepos) InstantiateTemplate(ctx context.Context, lists []domain.DestList, p *domain.DestPolicy) (*domain.DestPolicy, error) {
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -408,7 +408,7 @@ func (r *DestRepos) InstantiateTemplate(ctx context.Context, lists []domain.Dest
 				return err
 			}
 			if n > 0 {
-				return fmt.Errorf("%w: template %q was already added", domain.ErrAlreadyExists, p.TemplateKey)
+				return fmt.Errorf("%w: template %q was already added", domain.ErrDestTemplateExists, p.TemplateKey)
 			}
 		}
 		ids := make([]int64, 0, len(lists))

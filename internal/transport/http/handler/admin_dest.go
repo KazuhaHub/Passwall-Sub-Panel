@@ -113,6 +113,7 @@ type errCodes struct{ stale, exists string }
 //	400 dest_policy_invalid / _no_match / _over_limit {kind,used,limit} / dest_policy_state_unavailable
 //	409 dest_list_in_use {used_by}            deleting a list a policy uses
 //	409 <stale>                               the precondition failed
+//	409 dest_template_exists                  a built-in rule group added twice
 //	409 <exists>                              a duplicate (name, exemption)
 //	409 dest_geosite_busy / dest_geosite_update_rejected {rejection}
 //	409 dest_source_rule_not_native
@@ -178,6 +179,8 @@ func (h *AdminDestHandler) destError(c *gin.Context, err error, codes errCodes) 
 		body(http.StatusServiceUnavailable, "dest_geosite_unavailable", "there is no geosite data", nil)
 	case errors.Is(err, destcatalog.ErrTemplateUnavailable):
 		body(http.StatusBadRequest, "dest_template_unavailable", "this group has no generic category", nil)
+	case errors.Is(err, domain.ErrDestTemplateExists):
+		body(http.StatusConflict, "dest_template_exists", "this rule group was already added", nil)
 	case errors.Is(err, domain.ErrAlreadyExists) && codes.exists != "":
 		body(http.StatusConflict, codes.exists, "already exists", nil)
 	case errors.Is(err, domain.ErrConflict) && codes.stale != "":
