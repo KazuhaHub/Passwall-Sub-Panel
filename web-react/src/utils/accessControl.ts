@@ -1,0 +1,368 @@
+import type { ComponentType } from 'react'
+import type { SvgIconProps, Theme } from '@mui/material'
+import AllInclusiveIcon from '@mui/icons-material/AllInclusive'
+import BlockIcon from '@mui/icons-material/Block'
+import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutlineOutlined'
+import ErrorOutlineIcon from '@mui/icons-material/ErrorOutlineOutlined'
+import HelpOutlineIcon from '@mui/icons-material/HelpOutlineOutlined'
+import HourglassEmptyIcon from '@mui/icons-material/HourglassEmpty'
+import LockOutlinedIcon from '@mui/icons-material/LockOutlined'
+import PauseCircleOutlineIcon from '@mui/icons-material/PauseCircleOutlineOutlined'
+import RadioButtonUncheckedIcon from '@mui/icons-material/RadioButtonUnchecked'
+import RemoveCircleOutlineIcon from '@mui/icons-material/RemoveCircleOutlineOutlined'
+import ScienceOutlinedIcon from '@mui/icons-material/ScienceOutlined'
+import VerifiedUserOutlinedIcon from '@mui/icons-material/VerifiedUserOutlined'
+import VisibilityOutlinedIcon from '@mui/icons-material/VisibilityOutlined'
+import WarningAmberIcon from '@mui/icons-material/WarningAmber'
+import type {
+  DestBudget, DestBudgetItem, DestListsView, DestNodeState, DestNodeStatus, DestPolicies, DestPolicy, DestStatus,
+} from '@/api/accessControl'
+import type { StatusLineTone } from '@/components/StatusLine'
+import { amber, type Tone } from '@/components/ToneBadge'
+
+// THE ACCESS-CONTROL PAGE'S PURE RULES: the closed colour table, the one
+// node-state table, the page verdict and the small decisions several screens
+// share. No React, no router, no i18n: every word is a key the views resolve,
+// so a table-driven test can hold the rules without a renderer.
+
+// ---------------------------------------------------------------------------
+// The closed colour table (plan §7.2). One row per MEANING; a synonym shares
+// its row, and no two rows share a (fill, words, icon) triple — the test
+// asserts it. "Block" is a word, not an alarm: it is not drawn on red.
+// ---------------------------------------------------------------------------
+
+export const ACCESS_TONE_KINDS = [
+  'block', 'allowlist_deny', 'observe', 'would_deny', 'allow', 'exempt', 'allowlist_enforced', 'ok', 'measuring',
+  'attention', 'failing', 'paused', 'not_applicable', 'none', 'unknown', 'permanent',
+] as const
+export type AccessToneKind = (typeof ACCESS_TONE_KINDS)[number]
+
+export function accessTone(theme: Theme, kind: AccessToneKind): Tone {
+  const md = theme.palette.md
+  const quiet = { bg: md.surfaceContainerHighest, fg: md.onSurfaceVariant }
+  switch (kind) {
+    case 'block': return { bg: md.surfaceContainerHighest, fg: md.error, Icon: BlockIcon }
+    case 'allowlist_deny': return { bg: md.surfaceContainerHighest, fg: md.error, Icon: LockOutlinedIcon }
+    case 'observe': return { bg: md.secondaryContainer, fg: md.onSecondaryContainer, Icon: VisibilityOutlinedIcon }
+    case 'would_deny': return { bg: md.secondaryContainer, fg: md.onSecondaryContainer, Icon: ScienceOutlinedIcon }
+    case 'allow': return { ...quiet, Icon: CheckCircleOutlineIcon }
+    case 'exempt': return { bg: md.surfaceContainerHigh, fg: md.onSurface, Icon: VerifiedUserOutlinedIcon }
+    case 'allowlist_enforced': return { bg: md.surfaceContainerHigh, fg: md.onSurface, Icon: LockOutlinedIcon }
+    case 'ok': return { bg: md.surfaceContainerHigh, fg: theme.palette.success.main, text: md.onSurface, Icon: CheckCircleOutlineIcon }
+    case 'measuring': return { bg: md.secondaryContainer, fg: md.onSecondaryContainer, Icon: HourglassEmptyIcon }
+    case 'attention': return { ...amber(theme), text: md.onSurface, Icon: WarningAmberIcon }
+    case 'failing': return { bg: md.errorContainer, fg: md.onErrorContainer, Icon: ErrorOutlineIcon }
+    case 'paused': return { ...quiet, Icon: PauseCircleOutlineIcon }
+    case 'not_applicable': return { ...quiet, Icon: RemoveCircleOutlineIcon }
+    case 'none': return { ...quiet, Icon: RadioButtonUncheckedIcon }
+    case 'unknown': return { ...quiet, Icon: HelpOutlineIcon }
+    case 'permanent': return { ...quiet, Icon: AllInclusiveIcon }
+  }
+}
+
+/** The icon component, for tests that compare the table's rows. */
+export type ToneIcon = ComponentType<SvgIconProps>
+
+// ---------------------------------------------------------------------------
+// Node states (plan §7.4 S14): ONE table, read by the coverage sheet, the
+// servers page and the single-node dialog (components/NodePolicyStatusRow).
+// ---------------------------------------------------------------------------
+
+/** A node that has been "applying" this long is a problem, not progress. */
+export const PENDING_STUCK_MS = 10 * 60 * 1000
+
+export type NodeStateKey =
+  | 'applied' | 'applied_exec_only' | 'pending' | 'pending_long' | 'rejected' | 'sniffing' | 'over_limit'
+  | 'unsupported_version' | 'not_enrolled' | 'unsupported_kind' | 'offline' | 'none' | 'paused'
+
+/** Filter chips of the coverage sheet (`node_state`). */
+export const NODE_FILTERS = ['applied', 'pending', 'problem', 'upgrade', 'inactive'] as const
+export type NodeFilter = (typeof NODE_FILTERS)[number]
+
+export function parseNodeFilter(raw: string | null): NodeFilter | null {
+  return (NODE_FILTERS as readonly string[]).includes(raw ?? '') ? raw as NodeFilter : null
+}
+
+export const NODE_STATE_TONE: Record<NodeStateKey, AccessToneKind> = {
+  applied: 'ok',
+  applied_exec_only: 'ok',
+  pending: 'measuring',
+  pending_long: 'attention',
+  rejected: 'failing',
+  sniffing: 'failing',
+  over_limit: 'failing',
+  unsupported_version: 'attention',
+  not_enrolled: 'unknown',
+  unsupported_kind: 'not_applicable',
+  offline: 'unknown',
+  none: 'none',
+  paused: 'paused',
+}
+
+/** Which filter chip each state is counted under. */
+export const NODE_STATE_FILTER: Record<NodeStateKey, NodeFilter> = {
+  applied: 'applied',
+  applied_exec_only: 'applied',
+  pending: 'pending',
+  pending_long: 'problem',
+  rejected: 'problem',
+  sniffing: 'problem',
+  over_limit: 'problem',
+  unsupported_version: 'upgrade',
+  not_enrolled: 'inactive',
+  unsupported_kind: 'inactive',
+  offline: 'inactive',
+  none: 'inactive',
+  paused: 'inactive',
+}
+
+export function nodeStateKey(node: Pick<DestNodeStatus, 'state' | 'engine' | 'pending_since'> & Partial<Pick<DestNodeStatus, 'kind' | 'agent_id'>>, now: number): NodeStateKey {
+  switch (node.state as DestNodeState) {
+    case 'applied': return node.engine === 'sing-box' ? 'applied_exec_only' : 'applied'
+    case 'pending':
+      return node.pending_since && now - node.pending_since > PENDING_STUCK_MS ? 'pending_long' : 'pending'
+    case 'rejected': return 'rejected'
+    case 'sniffing': return 'sniffing'
+    case 'over_limit': return 'over_limit'
+    // The server gives a native panel that has no agent the same state as an old one;
+    // what tells them apart is the agent id it could not fill in.
+    case 'unsupported_version': return node.kind === 'psp' && node.agent_id === '' ? 'not_enrolled' : 'unsupported_version'
+    case 'unsupported_kind': return 'unsupported_kind'
+    case 'offline': return 'offline'
+    case 'paused': return 'paused'
+    default: return 'none'
+  }
+}
+
+/** Whether a node is one this page sees as a native one: the 3X-UI and S-UI rows are "by design". */
+export function isNativeKind(kind: string): boolean {
+  return kind === 'psp'
+}
+
+/** The `{{what}}` of an over-limit or refused publish: the limit's kind as a key suffix. */
+export function limitKindKey(kind: string | undefined): 'rules' | 'domains' | 'regexps' | 'cidrs' | 'bytes' | 'entries' | 'invalid' {
+  switch (kind) {
+    case 'rules': case 'domains': case 'regexps': case 'bytes': case 'cidrs': case 'entries': return kind
+    case 'remote_bytes': return 'bytes'
+    case 'source_cidrs': return 'cidrs'
+    case 'subjects': return 'rules'
+    default: return 'invalid'
+  }
+}
+
+// ---------------------------------------------------------------------------
+// The page verdict (plan §7.4 S1). The worst finding wins; 3X-UI and S-UI not
+// executing is by design and never changes the colour.
+// ---------------------------------------------------------------------------
+
+export type VerdictKind =
+  | 'paused' | 'publish_refused' | 'rejected' | 'sniffing' | 'over_limit' | 'no_coverage'
+  | 'upgrade' | 'offline' | 'list_failed' | 'list_pending'
+  | 'waiting' | 'rolling' | 'rolling_slow' | 'applied' | 'idle'
+
+export interface AccessVerdict {
+  tone: StatusLineTone
+  kind: VerdictKind
+  /** What the title interpolates. */
+  n: number
+  done: number
+  total: number
+  /** A list's name (list_failed / list_pending). */
+  name?: string
+  /** The first node's name and the inbound labels behind a sniffing verdict. */
+  node?: string
+  inbounds?: string[]
+  /** The publish error behind publish_refused, or the node's over-limit. */
+  limit?: { kind: string; used?: number; limit?: number; field?: string }
+  /** Which button the line offers. */
+  action: 'nodes' | 'lists' | 'resume' | 'publish' | null
+  /** The parts of "not enforced" the detail line lists; zero parts are left out. */
+  skipped: { unsupportedKind: number; upgrade: number; offline: number; notEnrolled: number }
+  /** Epoch ms the pending change goes out (waiting), for the countdown. */
+  nextPublishAt: number | null
+  /** How many nodes the pending change reaches. */
+  executors: number
+}
+
+/**
+ * How many nodes a first publish (or any apply) reaches: native nodes that can
+ * run a policy and are neither offline nor too old. null when the status could
+ * not be read ("each node", never 0). The ONE definition every confirmation and
+ * footer line uses.
+ */
+export function enforcingNodeCount(status: Pick<DestStatus, 'nodes'> | undefined): number | null {
+  if (!status) return null
+  return status.nodes.filter(n => isNativeKind(n.kind) && n.supports.policy && n.state !== 'offline' && n.state !== 'unsupported_version').length
+}
+
+/** Policies that are on. */
+export function enabledPolicies(policies: Pick<DestPolicies, 'allow' | 'block' | 'observe'> | undefined): DestPolicy[] {
+  if (!policies) return []
+  return [...policies.allow, ...policies.block, ...policies.observe].filter(p => p.state === 'on')
+}
+
+/** A native node that is online and runs a build that can enforce. */
+function canEnforce(n: DestNodeStatus): boolean {
+  return isNativeKind(n.kind) && n.state !== 'unsupported_kind' && n.state !== 'unsupported_version' && n.state !== 'offline'
+}
+
+/**
+ * The page's one sentence. `hasDefinitions` is true when anything enforceable
+ * exists: an enabled policy or a source rule that is on (the status read does
+ * not know source rules).
+ */
+export function accessVerdict(
+  status: DestStatus,
+  opts: { policies?: DestPolicies; lists?: DestListsView; hasDefinitions?: boolean; now: number },
+): AccessVerdict {
+  const now = opts.now
+  const nodes = status.nodes
+  const states = nodes.map(n => ({ n, key: nodeStateKey(n, now) }))
+  const count = (pred: (k: NodeStateKey) => boolean) => states.filter(s => pred(s.key)).length
+  const executors = nodes.filter(canEnforce)
+  const enabled = enabledPolicies(opts.policies).length
+  const hasDefinitions = opts.hasDefinitions ?? enabled > 0
+  const skipped = {
+    unsupportedKind: count(k => k === 'unsupported_kind'),
+    upgrade: count(k => k === 'unsupported_version'),
+    // A native panel with no agent yet: quiet, listed in the summary, never a colour.
+    notEnrolled: count(k => k === 'not_enrolled'),
+    offline: states.filter(s => s.key === 'offline' && isNativeKind(s.n.kind)).length,
+  }
+  const done = count(k => k === 'applied' || k === 'applied_exec_only')
+  const base: AccessVerdict = {
+    tone: 'ok', kind: 'applied', n: done, done, total: executors.length, action: 'nodes', skipped,
+    nextPublishAt: status.next_publish_at, executors: executors.length,
+  }
+  const first = (key: NodeStateKey) => states.find(s => s.key === key)
+
+  if (status.paused) return { ...base, tone: 'failing', kind: 'paused', action: 'resume' }
+
+  if (status.publish_error) {
+    return { ...base, tone: 'failing', kind: 'publish_refused', limit: status.publish_error, action: 'lists' }
+  }
+  const rejected = first('rejected')
+  if (rejected) return { ...base, tone: 'failing', kind: 'rejected', n: count(k => k === 'rejected'), node: rejected.n.panel_name }
+  const sniffing = first('sniffing')
+  if (sniffing) {
+    return {
+      ...base, tone: 'failing', kind: 'sniffing', n: count(k => k === 'sniffing'), node: sniffing.n.panel_name,
+      inbounds: sniffing.n.sniffing_insufficient.map(s => s.label),
+    }
+  }
+  const over = first('over_limit')
+  if (over) {
+    return { ...base, tone: 'failing', kind: 'over_limit', n: count(k => k === 'over_limit'), node: over.n.panel_name, limit: over.n.over_limit ?? undefined, action: 'lists' }
+  }
+  if (hasDefinitions && executors.length === 0) {
+    return { ...base, tone: 'failing', kind: 'no_coverage', n: enabled }
+  }
+
+  if (skipped.upgrade > 0) return { ...base, tone: 'attention', kind: 'upgrade', n: skipped.upgrade }
+  if (skipped.offline > 0) return { ...base, tone: 'attention', kind: 'offline', n: skipped.offline }
+  const listProblem = (opts.lists?.items ?? []).find(l =>
+    l.state === 'failed' && l.last_fetched_at !== null && l.used_by.length > 0)
+  if (listProblem) return { ...base, tone: 'attention', kind: 'list_failed', name: listProblem.name, action: 'lists' }
+  const neverDownloaded = (opts.lists?.items ?? []).find(l =>
+    (l.state === 'pending' || (l.state === 'failed' && l.last_fetched_at === null)) && l.used_by.some(u => isEnabledRef(opts.policies, u.id)))
+  if (neverDownloaded) return { ...base, tone: 'attention', kind: 'list_pending', name: neverDownloaded.name, action: 'lists' }
+
+  const unpublished = status.generation !== status.published_generation
+  if (unpublished) {
+    return { ...base, tone: 'measuring', kind: 'waiting', action: 'publish', n: executors.length }
+  }
+  const pending = count(k => k === 'pending' || k === 'pending_long')
+  if (pending > 0) {
+    const slow = count(k => k === 'pending_long') > 0
+    return { ...base, tone: slow ? 'attention' : 'measuring', kind: slow ? 'rolling_slow' : 'rolling', total: done + pending }
+  }
+  if (!hasDefinitions) return { ...base, tone: 'quiet', kind: 'idle', action: null }
+  return base
+}
+
+function isEnabledRef(policies: DestPolicies | undefined, id: number): boolean {
+  return enabledPolicies(policies).some(p => p.id === id)
+}
+
+/** Whether the status read should be repeated: a node is applying, or a saved change waits to go out. */
+export function destStatusActive(status: DestStatus | undefined): boolean {
+  if (!status) return false
+  if (status.paused) return false
+  if (status.nodes.some(n => n.state === 'pending')) return true
+  return status.generation !== status.published_generation && !status.publish_error
+}
+
+/** Whether a list read should be repeated: one is being refreshed. */
+export function listsRefreshing(lists: DestListsView | undefined): boolean {
+  return !!lists?.items.some(l => l.state === 'refreshing')
+}
+
+// ---------------------------------------------------------------------------
+// Budget (plan §7.4 S2/S3): ≥ 80% is a warning, > 100% blocks the save.
+// ---------------------------------------------------------------------------
+
+export type BudgetLevel = 'ok' | 'near' | 'over'
+
+export function budgetLevel(item: DestBudgetItem | undefined): BudgetLevel {
+  if (!item || item.limit <= 0) return 'ok'
+  if (item.used > item.limit) return 'over'
+  return item.used / item.limit >= 0.8 ? 'near' : 'ok'
+}
+
+/** The four quotas always shown; `subjects` and `bytes` only when ≥ 80%. */
+export function visibleBudget(b: DestBudget): (keyof DestBudget)[] {
+  const always: (keyof DestBudget)[] = ['rules', 'domains', 'regexps', 'cidrs']
+  const sometimes: (keyof DestBudget)[] = ['subjects', 'bytes']
+  return [...always, ...sometimes.filter(k => budgetLevel(b[k]) !== 'ok')]
+}
+
+export function anyBudgetOver(b: DestBudget | undefined): boolean {
+  return !!b && (Object.keys(b) as (keyof DestBudget)[]).some(k => budgetLevel(b[k]) === 'over')
+}
+
+// ---------------------------------------------------------------------------
+// The match-order rail (plan §7.4 S2): numbering is computed, never written.
+// ---------------------------------------------------------------------------
+
+export type PipelineStepId = 'allow' | 'exempt' | 'block' | 'allowlist' | 'observe' | 'rest'
+
+/**
+ * The steps that exist at this stage, numbered from 1. Batch 1 has neither
+ * report-only (observe) nor allowlist groups, so the rail is allow, exempt,
+ * block, rest — and the numbers move up by themselves when a later batch
+ * turns a step on.
+ */
+export function pipelineSteps(features: { observe?: boolean; allowlist?: boolean } = {}): { id: PipelineStepId; n: number }[] {
+  const ids: PipelineStepId[] = ['allow', 'exempt', 'block']
+  if (features.allowlist) ids.push('allowlist')
+  if (features.observe) ids.push('observe')
+  ids.push('rest')
+  return ids.map((id, i) => ({ id, n: i + 1 }))
+}
+
+export const CIRCLED = ['①', '②', '③', '④', '⑤', '⑥', '⑦'] as const
+
+// ---------------------------------------------------------------------------
+// First publish (plan §7.4 S20): the one write that moves the whole fleet from
+// "nothing enforced" to "something enforced" asks first. Every entry point
+// goes through this one function.
+// ---------------------------------------------------------------------------
+
+export function needsFirstPublishConfirm(
+  current: { policiesOn: number; sourceRulesOn: number },
+  change: { turnsOn: boolean },
+): boolean {
+  return change.turnsOn && current.policiesOn === 0 && current.sourceRulesOn === 0
+}
+
+/** `ceil(apply_eta_ms / 60000)`; null when the server did not say (the copy then says "a few minutes"). */
+export function applyMinutes(status: Pick<DestStatus, 'apply_eta_ms'> | undefined): number | null {
+  const ms = status?.apply_eta_ms
+  if (ms === undefined || ms === null || !(ms > 0)) return null
+  return Math.max(1, Math.ceil(ms / 60000))
+}
+
+/** The window fixed statistics read over, clamped to the retention (R14). */
+export function clampDays(fixed: number, retention: number | undefined): number {
+  return retention && retention > 0 ? Math.min(fixed, retention) : fixed
+}

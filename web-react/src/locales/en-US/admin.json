@@ -1410,7 +1410,8 @@
       "open_records": "See all in Records",
       "records_capped": "Showing the latest {{shown}} of {{total}} records",
       "logins_title": "Recent logins",
-      "open_auth_logs": "Open in auth logs"
+      "open_auth_logs": "Open in auth logs",
+      "tab_access": "Access"
     },
     "actions": {
       "pause": "Suspend proxy service",
@@ -3293,6 +3294,12 @@
       "range-stale": "The 3X-UI tested ceiling {{max}} is the last successful fetch; the most recent refresh failed: {{error}}",
       "core-catalog-stale": "The reviewed core catalog could not be refreshed, so the panel is offering {{source}} (reviewed {{review}}). Reason: {{error}}. A release withdrawn since that review is still shown.",
       "range-unavailable": "The 3X-UI compatibility range could not be fetched, so every 3X-UI server reads “unknown”: {{error}}"
+    },
+    "access": {
+      "line": "Access control: {{state}}",
+      "dialog_title": "{{name}} · Access control",
+      "open_page": "Open access control",
+      "close": "Close"
     }
   },
   "diagnostics": {
@@ -4325,6 +4332,841 @@
       "succeeded": "Succeeded",
       "failed": "Failed",
       "indeterminate": "Indeterminate"
+    }
+  },
+  "access_control": {
+    "title": "Access control",
+    "subtitle": "Decides which destinations users can reach through native nodes.",
+    "retry": "Retry",
+    "unwired": "Access control is not wired: the server does not have this feature enabled",
+    "tab_policies": "Policies",
+    "tab_lists": "Lists",
+    "help": {
+      "label": "Help",
+      "policies": "Access control is enforced by the nodes: a connection that matches a block is cut. The rule library only decides how clients route, and users can change it themselves. Only PSP native nodes enforce these policies; routing on 3X-UI and S-UI is managed by their operators.\n\nRules are checked from top to bottom and checking stops at the first match.\n\nA node sees only the destination (a domain or an IP), never the URL path. It can be bypassed: ECH, resolving with DoH and then connecting to the IP directly, and a client's own encrypted tunnel.\n\nIP ranges apply only to connections made to an IP; the IPs a domain resolves to are not matched. BitTorrent is recognised only by its plaintext handshake and uTP; encrypted BitTorrent and DHT are not.\n\nRegular expressions are matched against every connection one by one and are expensive: at most {{max_regexps}}.\n\nEach apply restarts the proxy on a node once and drops the connections in use once; the apply waits {{seconds}} seconds after the last change, and a run of changes is merged into one.",
+      "lists": "Supported forms: plain domains, `domain:` / `full:` / `keyword:` / `regexp:`, `*.x`, hosts lines, AdGuard `||x^`, Clash rules, IPs and IP ranges; `#` starts a comment. On save everything is lowercased, trailing dots are removed, Chinese domains become punycode and IP ranges are aligned to the network address.\n\nRemote and category lists refresh every {{hours}} hours and are applied only when their content changed; if a refresh fails the old content stays in use.\n\nEntries that are too broad (a regular expression that matches nearly every domain, a keyword under 4 characters, a public suffix itself, an IP range that is too large) are ignored in a custom list; when a remote or category list used by an allow policy contains one, the refresh counts as failed and the old content stays in use."
+    },
+    "header": {
+      "test": "Test a destination",
+      "pick_user": "Find account…"
+    },
+    "menu": {
+      "label": "More actions",
+      "settings": "Data and apply settings…",
+      "pause": "Pause all enforcement…",
+      "paused_snack": "Access control is paused",
+      "resumed_snack": "Enforcement resumed"
+    },
+    "verdict": {
+      "read_failed": "Could not read the node status",
+      "read_at": "Read at {{time}}",
+      "stale": "Refresh failed; the data may be out of date",
+      "what": {
+        "rules": "rules",
+        "domains": "domains",
+        "regexps": "regular expressions",
+        "cidrs": "IP ranges",
+        "bytes": "configuration size",
+        "invalid": "invalid configuration",
+        "entries": "entries"
+      },
+      "title": {
+        "paused": "Access control is paused: no node enforces the policy",
+        "publish_refused": "The change was not applied: {{what}} {{used}} / {{limit}} is over the quota; nodes keep the previous version",
+        "publish_refused_invalid": "The change was not applied: invalid configuration; nodes keep the previous version",
+        "refused_one": "{{count}} node refused the new policy and still runs the previous version",
+        "refused_other": "{{count}} nodes refused the new policy and still run the previous version",
+        "no_coverage_one": "{{count}} policy is enabled, but no node will enforce it",
+        "no_coverage_other": "{{count}} policies are enabled, but no node will enforce them",
+        "upgrade_one": "{{count}} native node needs an upgrade to enforce policies",
+        "upgrade_other": "{{count}} native nodes need an upgrade to enforce policies",
+        "offline_one": "{{count}} native node is offline and will enforce the latest version once it reports again",
+        "offline_other": "{{count}} native nodes are offline and will enforce the latest version once they report again",
+        "list_failed": "List \"{{name}}\" failed to refresh; still using the content from {{ago}}",
+        "list_pending": "List \"{{name}}\" has not downloaded yet; the parts that use it are not enforced",
+        "waiting_one": "Change saved; goes out to {{count}} node within about {{minutes}} min",
+        "waiting_other": "Change saved; goes out to {{count}} nodes within about {{minutes}} min",
+        "waiting_unknown_one": "Change saved; goes out to {{count}} node within a few minutes",
+        "waiting_unknown_other": "Change saved; goes out to {{count}} nodes within a few minutes",
+        "rolling": "Applying: {{done}} of {{total}} nodes in effect",
+        "applied_one": "The policy is in effect on {{count}} node",
+        "applied_other": "The policy is in effect on {{count}} nodes",
+        "idle": "No policy is enabled yet"
+      },
+      "skip": {
+        "prefix": "Not enforcing: ",
+        "separator": " · ",
+        "unsupported_kind_one": "{{count}} 3X-UI / S-UI node (by design)",
+        "unsupported_kind_other": "{{count}} 3X-UI / S-UI nodes (by design)",
+        "upgrade_one": "{{count}} needs an upgrade",
+        "upgrade_other": "{{count}} need an upgrade",
+        "offline_one": "{{count}} offline",
+        "offline_other": "{{count}} offline",
+        "not_enrolled_one": "{{count}} not enrolled",
+        "not_enrolled_other": "{{count}} not enrolled"
+      },
+      "detail": {
+        "countdown_one": "Goes out in {{count}} second",
+        "countdown_other": "Goes out in {{count}} seconds",
+        "restart": "Each node restarts its proxy once and drops the connections in use once; a run of changes is merged into one apply.",
+        "sniffing": "Inbound \"{{inbounds}}\" does not detect domains, so domain rules do not apply on it. Still running the previous version.",
+        "over_limit": "{{what}} {{used}} / {{limit}}. Still running the previous version.",
+        "rejected": "The node refused the new policy. Still running the previous version.",
+        "publish_refused": "Saving again tries to apply it once more.",
+        "list_separator": ", "
+      },
+      "action": {
+        "nodes": "Node coverage",
+        "lists": "View lists",
+        "resume": "Resume",
+        "publish": "Apply now"
+      }
+    },
+    "confirm": {
+      "minutes_one": "about {{count}} minute",
+      "minutes_other": "about {{count}} minutes",
+      "minutes_unknown": "a few minutes",
+      "nodes_one": "{{count}} node",
+      "nodes_other": "{{count}} nodes",
+      "nodes_unknown": "each node",
+      "first_publish": {
+        "title": "Enable the first access policy?",
+        "message": "{{nodes}} will each restart the proxy once within {{minutes}} and drop the connections in use once; clients reconnect on their own. Later changes go out the same way; changes within {{seconds}} seconds of each other are merged into one.",
+        "message_no_window": "{{nodes}} will each restart the proxy once within {{minutes}} and drop the connections in use once; clients reconnect on their own. Later changes go out the same way, and a run of changes is merged into one.",
+        "action": "Enable"
+      },
+      "delete_policy": {
+        "title": "Delete policy \"{{name}}\"?",
+        "message": "It stops being enforced within {{minutes}}.",
+        "action": "Delete"
+      },
+      "delete_list": {
+        "title": "Delete list \"{{name}}\"?",
+        "message": "This list is not used, so deleting it does not affect the nodes.",
+        "action": "Delete"
+      },
+      "list_in_use": {
+        "title": "This list is in use",
+        "message": "Remove it from these first:",
+        "action": "Got it"
+      },
+      "switch_list_type": {
+        "title": "Switching the type clears what you entered?",
+        "message": "Custom text, a remote address and a category choice do not carry over to each other, so the current input is not kept.",
+        "action": "Switch"
+      },
+      "remove_exemption": {
+        "title": "Remove the exemption of {{upn}}?",
+        "message": "Access policies then apply to this account, within {{minutes}}.",
+        "action": "Remove exemption"
+      },
+      "pause": {
+        "title": "Pause all access control?",
+        "message": "Every node stops enforcing policies within {{minutes}} and restarts its proxy once; all definitions are kept and enforced again as before when you resume.",
+        "action": "Pause"
+      },
+      "resume": {
+        "title": "Resume access control?",
+        "message": "Every node enforces policies again within {{minutes}} and restarts its proxy once.",
+        "action": "Resume"
+      },
+      "discard": {
+        "title": "Discard unsaved changes?",
+        "message": "If you close now, these changes are not saved.",
+        "action": "Discard",
+        "keep": "Keep editing"
+      }
+    },
+    "errors": {
+      "generic": "The action failed; try again in a moment",
+      "dest_unavailable": "Access control is not wired: the server does not have this feature enabled",
+      "dest_bad_request": "The request could not be understood",
+      "dest_bad_id": "The object number is not valid",
+      "dest_list_parse_failed": "The list has lines that cannot be saved",
+      "dest_list_too_large": "The list is too large: {{what}} {{used}} / {{limit}}",
+      "dest_list_too_broad": "The list has an entry that is too broad",
+      "dest_list_insecure_url": "Only https addresses are supported",
+      "dest_list_in_use": "A policy uses this list",
+      "dest_list_stale": "This list was just changed by someone else",
+      "dest_policy_invalid": "The policy is not valid",
+      "dest_policy_no_match": "Choose at least one list or set one condition",
+      "dest_policy_over_limit": "Over the quota: {{what}} {{used}} / {{limit}}. A new version over the quota is not applied; nodes keep the previous one",
+      "dest_policy_state_unavailable": "This state is not available yet",
+      "dest_policy_stale": "This policy was just changed by someone else and has been reloaded",
+      "dest_policy_order_stale": "The order was changed by someone else and has been reloaded",
+      "dest_name_taken": "This name is already used",
+      "dest_geosite_busy": "The community category data is being updated; try again shortly",
+      "dest_geosite_update_rejected": "The update would break a policy in force; the old data is kept",
+      "dest_geosite_unavailable": "Community category data has not been downloaded yet",
+      "dest_geoip_unavailable": "There is no GeoIP database",
+      "dest_source_rule_not_native": "Only a native node can have a source rule",
+      "dest_source_rule_stale": "This source rule was just changed by someone else and has been reloaded",
+      "dest_exemption_exists": "This account is already exempt",
+      "dest_exemption_invalid": "The exemption is not valid",
+      "dest_exception_invalid": "The allow exception is not valid",
+      "dest_test_invalid": "The test input is not valid",
+      "dest_settings_invalid": "A setting is out of range",
+      "dest_template_unavailable": "This group has no generic category",
+      "dest_template_exists": "This group was already added",
+      "dest_source_rule_invalid": "The source rule is not valid"
+    },
+    "node_state": {
+      "applied": "In effect",
+      "applied_exec_only": "In effect · enforce only",
+      "pending": "Applying",
+      "pending_long": "Applying · {{minutes}} min",
+      "rejected": "Node refused the new policy",
+      "sniffing": "Inbound does not detect domains",
+      "over_limit": "Too many rules",
+      "unsupported_version": "Upgrade needed",
+      "unsupported_kind": "Not applicable",
+      "offline": "Offline",
+      "none": "No policy",
+      "paused": "Paused",
+      "not_enrolled": "Not enrolled"
+    },
+    "node_note": {
+      "applied": "Enforcing {{rules}} rules · in effect {{ago}}",
+      "applied_no_time": "Enforcing {{rules}} rules",
+      "applied_exec_only": "sing-box nodes only enforce, they do not record",
+      "pending": "The node restarts its proxy at its next sync",
+      "pending_long": "The node may be offline, or its proxy failed to restart",
+      "rejected": "Still running the previous version. While it falls back, members newly added to a group a policy is scoped to are not covered by that group's block policies on this node.",
+      "sniffing": "Inbound \"{{inbounds}}\" does not detect domains, so domain rules do not apply on it. Still running the previous version.",
+      "over_limit": "{{what}} {{used}} / {{limit}}. Still running the previous version.",
+      "unsupported_version": "The node agent is too old to enforce access policies.",
+      "unsupported_kind": "Routing on 3X-UI / S-UI is managed by its operator; they do not enforce access policies.",
+      "offline": "Applied automatically once it reports again",
+      "none": "This node has no policy to enforce",
+      "paused": "Access control is paused; it resumes as it was.",
+      "not_enrolled": "This native node has not enrolled: no agent has reported."
+    },
+    "node_action": {
+      "retry": "Apply again",
+      "open_inbound": "Edit inbound",
+      "view_lists": "View lists",
+      "upgrade": "Upgrade",
+      "node_issues": "Node issues",
+      "open_server": "Open server"
+    },
+    "node_problem": {
+      "sniffing_title": "Inbound \"{{inbounds}}\" does not detect domains",
+      "sniffing_impact": "Impact: connections arriving on this inbound are not held to domain policies",
+      "rejected_title": "The node refused the new policy",
+      "rejected_impact": "Impact: still running the previous version",
+      "over_limit_title": "{{what}} {{used}} / {{limit}}, over the quota",
+      "over_limit_impact": "Impact: still running the previous version",
+      "list_separator": ", "
+    },
+    "lists": {
+      "new": "New list",
+      "kind": {
+        "custom": "Custom",
+        "remote": "Remote address",
+        "geosite": "Community category"
+      },
+      "kpi": {
+        "domains": "Domain entries",
+        "regexps": "Regular expressions",
+        "cidrs": "IP ranges",
+        "problems": "Problems",
+        "of": "of {{limit}}",
+        "problems_caption": "Refresh failed or not ready",
+        "over_quota": "A new version over the quota is not applied; nodes keep the previous one"
+      },
+      "refresh_note": "Remote and category lists refresh every {{hours}} hours",
+      "change": "Change",
+      "cols": {
+        "name": "Name",
+        "entries": "Entries",
+        "status": "Status",
+        "usage": "Used by",
+        "actions": "Actions"
+      },
+      "state": {
+        "ready": "Updated",
+        "refreshing": "Refreshing",
+        "failed_old": "Refresh failed, still using old content",
+        "failed_never": "Download failed, never succeeded",
+        "pending": "Waiting for the first download",
+        "pending_used": "Never downloaded; the parts that use it are not enforced"
+      },
+      "usage": {
+        "policies_one": "{{count}} policy",
+        "policies_other": "{{count}} policies",
+        "unused": "Not used"
+      },
+      "menu": {
+        "label": "Actions for {{name}}",
+        "view": "View entries",
+        "edit": "Edit",
+        "refresh": "Refresh now",
+        "delete": "Delete",
+        "delete_in_use": "Used by {{count}} policies"
+      },
+      "empty": "No lists yet. Policies take their destinations from lists.",
+      "empty_filtered": "No matching lists",
+      "clear_filter": "Clear filter",
+      "load_failed": "Could not read the lists",
+      "geosite_missing": "Community category data has not been downloaded yet",
+      "geosite_download": "Download now",
+      "snack": {
+        "saved": "Saved \"{{name}}\"",
+        "deleted": "Deleted \"{{name}}\"",
+        "refresh_started": "Started refreshing \"{{name}}\"",
+        "downloaded": "Community category data downloaded"
+      },
+      "label": {
+        "entries": "Entries",
+        "status": "Status",
+        "usage": "Used by"
+      },
+      "sheet": {
+        "close": "Close",
+        "source": "Remote address: {{url}}",
+        "category": "Community category: {{name}}",
+        "custom": "Custom list",
+        "counts": "Entries {{entries}} · Regular expressions {{regexps}}",
+        "first200": "{{count}} entries in all; only the first 200 are shown (search covers only those 200)",
+        "search": "Search entries",
+        "none": "No entries",
+        "no_match": "No matching entries",
+        "test": "Test this destination",
+        "refresh": "Refresh now",
+        "edit": "Edit",
+        "load_failed": "Could not read the entries"
+      },
+      "dialog": {
+        "title_new": "New list",
+        "title_edit": "Edit list \"{{name}}\"",
+        "close": "Close",
+        "name": "Name",
+        "name_required": "A name is required",
+        "text": "List content",
+        "url": "Address",
+        "url_https": "Only https addresses are supported",
+        "test_fetch": "Test fetch",
+        "fetching": "Fetching…",
+        "fetch_result": "Fetch result  HTTP {{code}} · {{size}} · {{accepted}} accepted · {{ignored}} ignored",
+        "fetch_failed": "Fetch failed: {{error}}",
+        "refresh_follows": "Refresh: follows the global setting (every {{hours}} hours)",
+        "category": "Category",
+        "category_option": "{{name}} · {{entries}} entries",
+        "attrs": "Attributes",
+        "geosite_note": "Data comes from v2fly domain-list-community.",
+        "geosite_counts": "This category has {{entries}} entries, {{regexps}} of them regular expressions",
+        "footer_used_one": "Used by {{count}} enabled policy; a change in content makes {{nodes}} restart once.",
+        "footer_used_other": "Used by {{count}} enabled policies; a change in content makes {{nodes}} restart once.",
+        "footer_nodes_one": "{{count}} node",
+        "footer_nodes_other": "{{count}} nodes",
+        "footer_nodes_unknown": "each node",
+        "footer_unchanged": "The content is unchanged, so nothing restarts",
+        "footer_unused": "This list is not used, so saving does not affect the nodes",
+        "save": "Save",
+        "cancel": "Cancel",
+        "stale": "This list was just changed by someone else",
+        "load_latest": "Load latest",
+        "preview_failed": "Could not parse: {{error}}",
+        "previewing": "Parsing…",
+        "parse_failed": "Lines that cannot be saved",
+        "line_n": "Line {{line}}",
+        "load_failed": "Could not read the list",
+        "too_large": "The list is too large: {{what}} {{used}} / {{limit}}; it cannot be saved",
+        "too_broad": "Entry too broad: {{entry}}",
+        "name_taken": "This name is already used",
+        "syntax_title": "Supported forms",
+        "syntax": "One entry per line; # starts a comment.\nPlain domain: example.com\ndomain:example.com (with subdomains)\nfull:www.example.com (this host only)\nkeyword:example\nregexp:^ads[0-9]+\\.example\\.com$\n*.example.com or .example.com\nhosts line: 0.0.0.0 example.com\nAdGuard: ||example.com^\nIPs and ranges: 203.0.113.0/24\nClash rule: DOMAIN-SUFFIX,example.com\nOn save everything is lowercased, trailing dots are removed, Chinese domains become punycode and IP ranges are aligned to the network address."
+      },
+      "report": {
+        "summary": "Parse result  {{accepted}} accepted · {{rewritten}} rewritten · {{ignored}} ignored",
+        "duplicates": "{{count}} duplicates",
+        "more_one": "{{count}} more",
+        "more_other": "{{count}} more",
+        "warnings": "Warnings",
+        "entries_only": "{{count}} accepted, {{regexps}} of them regular expressions",
+        "jump": "Go to line {{line}}",
+        "reason": {
+          "rewritten_to_network": "Rewritten: the IP range was aligned to its network address",
+          "trailing_field_dropped": "Rewritten: extra text at the end of the line was dropped",
+          "localhost": "A local address, ignored",
+          "adguard_modifier": "Rules with modifiers are not supported",
+          "adguard_exception": "Exception rules are not supported",
+          "adguard_unsupported": "Unsupported AdGuard syntax",
+          "not_applicable_on_node": "Does not apply on a node",
+          "unrecognized": "Unrecognised form",
+          "invalid_domain": "Not a valid domain",
+          "invalid_cidr": "Not a valid IP range",
+          "invalid_country": "Not a valid country code",
+          "invalid_geosite": "Not a valid category name",
+          "broad_regexp": "Too broad: matches almost every domain",
+          "broad_keyword": "Too broad: the keyword is too short",
+          "broad_suffix": "Too broad: this is a public suffix",
+          "broad_cidr": "Too broad: the IP range is too large",
+          "regexp_invalid": "The regular expression does not compile",
+          "regexp_too_long": "The regular expression is too long",
+          "source_line_in_dest_list": "A source rule can only be used in a source list",
+          "dest_line_in_source_list": "A destination rule cannot be used in a source list",
+          "unknown": "This line cannot be saved"
+        },
+        "warn": {
+          "regexp_no_anchor": "The regular expression has no literal anchor; matching will be slow",
+          "regexp_long": "The regular expression is long; matching will be slow",
+          "unknown": "Worth a look"
+        }
+      },
+      "error": {
+        "http": "The server answered HTTP {{code}}",
+        "too_large": "The list is too large for the quota",
+        "broad": "Contains a too-broad entry: {{entry}}",
+        "generic": "Refresh failed"
+      }
+    },
+    "exemptions": {
+      "title": "Exempt accounts",
+      "lead": "An exempt account is not held to any access restriction. Use it only for troubleshooting or special accounts.",
+      "add": "Add exemption",
+      "empty": "No account is exempt. Exempt an account only while troubleshooting, and set an expiry.",
+      "load_failed": "Could not read the exempt accounts",
+      "reason_line": "{{reason}} · added by {{by}} {{ago}}",
+      "permanent": "Permanent",
+      "expires_in": "Expires in {{left}}",
+      "expired": "Expired, waiting for cleanup (up to 1 hour)",
+      "expiry_tip": "After the expiry it takes up to about 1 hour plus one apply window to actually stop",
+      "row_menu": "More actions",
+      "open_user": "Open account",
+      "edit": "Change reason and expiry",
+      "cancel": "Remove exemption",
+      "removed_snack": "Removed the exemption of {{upn}}; takes effect with the next apply",
+      "dialog": {
+        "title_add": "Add exemption",
+        "title_edit": "Change exemption",
+        "user": "Account",
+        "reason": "Reason",
+        "expiry": "Expires",
+        "forever": "Permanent",
+        "h24": "24 hours",
+        "d7": "7 days",
+        "custom": "Custom…",
+        "custom_label": "Expiry (browser time)",
+        "custom_past": "The expiry must be in the future",
+        "user_required": "Choose an account",
+        "reason_required": "Enter a reason",
+        "exists": "This account is already exempt",
+        "h24_note": "After the expiry it takes up to about 1 hour plus one apply window to actually stop",
+        "apply_note": "Takes effect within {{minutes}}.",
+        "save": "Add",
+        "save_edit": "Save",
+        "cancel": "Cancel",
+        "added_snack": "Exempted {{upn}}; takes effect with the next apply",
+        "updated_snack": "Updated the exemption of {{upn}}"
+      },
+      "left_minutes": "{{count}} min",
+      "left_hours": "{{count}} h",
+      "left_days": "{{count}} d"
+    },
+    "drawer": {
+      "group": "Group",
+      "open": "Unrestricted",
+      "no_group": "No group",
+      "exemption": "Exemption",
+      "not_exempt": "Not exempt",
+      "permanent": "Permanent",
+      "expires_in": "Expires in {{left}}",
+      "exemption_line": "Exempt: {{reason}} · added by {{by}} {{ago}} · {{expiry}}",
+      "exempt_hint": "Access policies do not apply to this account",
+      "add_exemption": "Exempt this account…",
+      "remove_exemption": "Remove exemption",
+      "removed_snack": "Removed the exemption of {{upn}}; it takes effect with the next apply",
+      "retry": "Retry",
+      "load_failed": "Could not read this account's access information"
+    },
+    "sheet": {
+      "close": "Close"
+    },
+    "settings": {
+      "title": "Data and apply settings",
+      "saved": "Saved",
+      "unwired": "Settings are not wired",
+      "read_failed": "Could not read the settings",
+      "group_refresh": "List refresh",
+      "group_apply": "Apply",
+      "group_rules": "Rule data version",
+      "apply_seconds": "Wait before applying a policy (seconds)",
+      "apply_seconds_hint": "How long to wait after the last change before applying it; a run of changes is merged into one. Each apply restarts the proxy on a node once.",
+      "refresh_hours": "Remote and category list refresh interval (hours)",
+      "refresh_hours_hint": "Remote and category lists are fetched again at this interval and applied only when their content changed.",
+      "out_of_range": "Out of range",
+      "changed_one": "{{count}} change",
+      "changed_other": "{{count}} changes",
+      "discard": "Discard",
+      "save": "Save"
+    },
+    "rule_data": {
+      "read_failed": "Could not read the rule data version",
+      "none": "No community category data has been downloaded yet.",
+      "current": "Current version {{tag}}",
+      "released": "released {{date}}",
+      "age_one": "{{count}} day old",
+      "age_other": "{{count}} days old",
+      "latest": "Latest upstream version {{tag}}",
+      "latest_unknown": "The latest upstream version has not been checked yet",
+      "behind_one": "{{count}} day behind",
+      "behind_other": "{{count}} days behind",
+      "update_available": "Update available",
+      "latest_error": "Could not check the upstream",
+      "data_error": {
+        "summary": "The current rule data cannot be used",
+        "detail": "The rule data on disk is missing or damaged, so the parts that use community categories are not enforced. Update again, or go back to the previous version."
+      },
+      "last_update_error": {
+        "summary": "The last update failed; the old data is still in use",
+        "detail": "The last update did not succeed and the rule data did not change. Try again later."
+      },
+      "check_update": "Check for updates…",
+      "rollback": "Go back to the previous version ({{tag}})",
+      "working": "Downloading and verifying, please wait",
+      "applied_snack": "Switched to rule data {{tag}}",
+      "mode": {
+        "title": "Update mode",
+        "manual": "Manual",
+        "auto": "Automatic",
+        "manual_hint": "A new version is only shown; you check for updates and confirm.",
+        "auto_hint": "A new version is downloaded, verified and applied; every change to a category in use restarts the proxy on each node once."
+      },
+      "rejection": {
+        "broad_entry": "List \"{{list}}\" would get an entry that is too broad ({{entry}}), so this update would be refused and the old data kept.",
+        "dest_list_too_large": "List \"{{list}}\" would go over its quota ({{used}} / {{limit}}), so this update would be refused and the old data kept.",
+        "category_gone": "The category used by list \"{{list}}\" no longer exists in the new version, so this update would be refused and the old data kept.",
+        "policy_over_limit": "The policies would go over the quota after the update ({{used}} / {{limit}}), so it would be refused and the old data kept.",
+        "other": "This update would break a policy in force, so the old data is kept.",
+        "refused": "This update was refused and the old data is kept."
+      },
+      "review": {
+        "title_update": "Update the rule data?",
+        "title_rollback": "Go back to the previous version?",
+        "from_to": "{{from}} → {{to}}",
+        "to": "Update to {{to}}",
+        "unchanged": "This is already the version in use; there is nothing to update.",
+        "category": "Category",
+        "entries": "Entries",
+        "change": "Change",
+        "in_use": "In use",
+        "restart": "A category in use changes, so each node restarts its proxy once after this is applied.",
+        "no_restart": "No category in use changes, so no node restarts.",
+        "cancel": "Cancel",
+        "apply_update": "Apply update",
+        "apply_rollback": "Go back to this version"
+      },
+      "rollback_changed": "The previous release changed after you reviewed it, so nothing was rolled back. Check again.",
+      "rollback_recheck_failed": "Could not confirm that the previous version is still the one you reviewed, so nothing was rolled back. Try again shortly."
+    },
+    "source_rules": {
+      "read_failed": "Could not read the source rule",
+      "title": "Deny source countries or regions",
+      "hint": "This inbound refuses connections from the countries or regions below and from the IP ranges below. It answers who the inbound is open to, so an exempt account cannot get around it.",
+      "geoip_missing": {
+        "summary": "No GeoIP database: country rules are not enforced",
+        "detail": "A country is expanded into IP ranges with the GeoIP database. Without one the rule is skipped and is never treated as enforced; configure a GeoIP database in the system settings first."
+      },
+      "note": {
+        "geoip_unavailable": {
+          "summary": "This rule is not enforced because the GeoIP database is unavailable",
+          "detail": "A country rule that is on needs the GeoIP database, and none is available, so it was not applied."
+        },
+        "empty": {
+          "summary": "This rule is empty",
+          "detail": "No country is chosen and no IP range is entered, so turning it on refuses nothing."
+        }
+      },
+      "countries": "Denied countries or regions",
+      "cidrs": "Denied source IP ranges (optional, one per line)",
+      "cidrs_hint": "For example 203.0.113.0/24 or 2001:db8::/32. Behind a relay or CDN the node sees its address.",
+      "bad_lines": "Line {{lines}} is not a valid IP range",
+      "enabled": "Enabled",
+      "save": "Save source rule",
+      "saved": "Source rule saved",
+      "stale": "This source rule was just changed by someone else and has been reloaded; check it before saving.",
+      "restart_one": "Takes effect within about {{count}} minute of saving; the node restarts its proxy once.",
+      "restart_other": "Takes effect within about {{count}} minutes of saving; the node restarts its proxy once.",
+      "restart_unknown": "Takes effect within a few minutes of saving; the node restarts its proxy once.",
+      "unsaved": {
+        "summary": "Source rules are not saved; use the button below",
+        "detail": "The \"Deny source country or region\" changes of this inbound are unsaved. They are saved by their own button, not by OK above."
+      }
+    },
+    "coverage": {
+      "title": "Node coverage · {{n}}",
+      "filter": {
+        "applied": "In effect",
+        "pending": "Applying",
+        "problem": "Problems",
+        "upgrade": "Upgrade needed",
+        "inactive": "Not enforcing"
+      },
+      "empty": "No matching nodes",
+      "clear_filter": "Clear filter",
+      "apply_line": "A change is applied {{seconds}} seconds after the last edit; a run of changes is merged",
+      "edit": "Change",
+      "old_data": "Still on older rule data ({{version}})",
+      "geoip_unavailable": "Source rule not enforced: the GeoIP database is unavailable",
+      "row_menu": "More actions for {{name}}",
+      "retried": "Asked to apply again",
+      "not_retried": "This node has no refusal to retry"
+    },
+    "policies": {
+      "read_failed": "Could not read the policies",
+      "new": "New policy",
+      "new_blank": "Blank policy",
+      "state": {
+        "off": "Off",
+        "on": "On"
+      },
+      "action": {
+        "block": "Block",
+        "allow": "Allow"
+      },
+      "list_kind": {
+        "custom": "Custom",
+        "remote": "Remote address",
+        "geosite": "Community category"
+      },
+      "summary": {
+        "list": "list \"{{value}}\"",
+        "cidrs": "{{value}} IP range(s)",
+        "private": "private and cloud-metadata addresses",
+        "bt": "BitTorrent",
+        "ports": "port {{value}}",
+        "network": "{{value}}",
+        "or": " or ",
+        "and": " and "
+      },
+      "quota": {
+        "label": "Quota",
+        "failed": "Could not read the quota",
+        "kind": {
+          "rules": "Rules",
+          "domains": "Domains",
+          "regexps": "Regexps",
+          "cidrs": "IP ranges",
+          "subjects": "Accounts",
+          "bytes": "Config size"
+        },
+        "over_note": "A new version over the quota is not applied; nodes keep the previous one",
+        "after_save": "Quota (after saving)",
+        "no_executor": "no node enforces right now"
+      },
+      "rail": {
+        "order": "In match order, top to bottom; the first match stops the check",
+        "allow": "Allow",
+        "allow_caption": "a match is let through",
+        "exempt_one": "Exempt accounts · {{count}}",
+        "exempt_other": "Exempt accounts · {{count}}",
+        "exempt_none": "No exempt accounts",
+        "exempt_caption": "not subject to any access limit",
+        "manage": "Manage",
+        "block": "Block",
+        "rest": "Every other connection: allowed",
+        "empty_step": "No policy in this step yet",
+        "add_allow": "Allow policy",
+        "add_block": "Block policy",
+        "add_allow_aria": "New allow policy",
+        "add_block_aria": "New block policy"
+      },
+      "row": {
+        "paused": "Paused",
+        "not_ready": "List not ready",
+        "not_ready_hint": "A list it uses has not downloaded yet; that part is not enforced and the rest goes out as usual",
+        "not_ready_detail": "a list is waiting for its first download; that part is not enforced",
+        "empty_list": "List is empty",
+        "nothing_left": "Nothing to apply",
+        "scope_missing_badge": "Scope deleted",
+        "scope_missing": "its scope was deleted, so this policy applies to nobody now",
+        "deleted_list": "Deleted list",
+        "deleted_group": "Deleted group",
+        "deleted_panel": "Deleted node",
+        "scope_all": "Everyone",
+        "no_condition": "No condition",
+        "saving": "Saving",
+        "toggle": "Enable \"{{name}}\"",
+        "menu": "More actions for \"{{name}}\"",
+        "menu_edit": "Edit",
+        "menu_duplicate": "Duplicate",
+        "menu_up": "Move up",
+        "menu_down": "Move down",
+        "menu_top": "Move to the top of this step",
+        "menu_bottom": "Move to the bottom of this step",
+        "menu_delete": "Delete",
+        "copy_name": "{{name}} (copy)"
+      },
+      "snack": {
+        "disabled": "\"{{name}}\" is off; takes effect with the next apply",
+        "moved": "Moved to position {{n}} of \"{{section}}\"",
+        "template_added": "Rule group added"
+      },
+      "empty": {
+        "title": "No access policy yet",
+        "body": "Start from a template or make a blank policy. You choose Off or On when you add one; nothing is enabled by default.",
+        "blank": "New blank policy"
+      },
+      "editor": {
+        "close": "Close",
+        "cancel": "Cancel",
+        "save": "Save",
+        "title_new": "New policy",
+        "title_edit": "Edit policy \"{{name}}\"",
+        "reload": "Load the latest",
+        "stale": "This policy was just changed by someone else",
+        "name": "Name",
+        "description": "Description",
+        "action": "Action",
+        "action_help": {
+          "block": "Cuts the connection.",
+          "allow": "Lets the connection through; checked before exempt accounts and blocks."
+        },
+        "allow_hint": {
+          "summary": "Allow is checked before block",
+          "detail": "Allow is checked ahead of blocks: a connection it matches is always let through, and the block policies after it do not apply to it."
+        },
+        "state": "State",
+        "match": "What it matches",
+        "lists": "Lists",
+        "list_option": "{{name}} · {{kind}} · {{entries}} entries (regexps {{regexps}})",
+        "list_not_ready": "Not ready",
+        "not_ready_hint": {
+          "summary": "This part does not apply until the list has downloaded",
+          "detail": "Nodes enforce the policy's other conditions as usual; the list is added at the next apply after its first successful download."
+        },
+        "cidrs": "IP ranges (one per line)",
+        "cidr_hint": {
+          "summary": "Applies only to connections made to an IP",
+          "detail": "The IPs a domain resolves to are not matched; nodes do no extra resolving."
+        },
+        "ports": "Ports",
+        "ports_hint": "Format: 25,465,587 or 1000-2000",
+        "network": "Network",
+        "network_all": "All",
+        "bittorrent": "BitTorrent",
+        "bittorrent_hint": "Recognises only the plaintext handshake and uTP",
+        "private": "Private and cloud-metadata addresses",
+        "scope": "Who it applies to",
+        "scope_all": "Everyone",
+        "scope_groups": "Selected groups",
+        "scope_panels": "Selected nodes",
+        "groups": "Groups",
+        "panels": "Nodes",
+        "errors": {
+          "name_required": "Enter a name",
+          "no_match": "Choose at least one list or set one condition",
+          "scope_groups": "Choose at least one group",
+          "scope_panels": "Choose at least one node",
+          "description_too_long": "The description is limited to {{max}} bytes (UTF-8; a Chinese character takes about 3).",
+          "name_too_long": "The name is at most {{max}} bytes (UTF-8; a Chinese character is about 3)"
+        },
+        "saved": "Saved \"{{name}}\"; takes effect with the next apply",
+        "position": "checked at step {{step}}, place {{index}}",
+        "split": "It goes out as two rules; ports and network apply to both parts",
+        "footer": {
+          "disabled": "A policy that is off is not applied",
+          "rename_only": "Changing only the name or description does not restart nodes",
+          "applies_unknown": "Takes effect on the nodes within a few minutes; each node restarts its proxy once",
+          "applies_one": "Takes effect on {{count}} node within about {{minutes}} min; the node restarts its proxy once",
+          "applies_other": "Takes effect on {{count}} nodes within about {{minutes}} min; each node restarts its proxy once"
+        },
+        "template_locked": {
+          "summary": "Matching is set by the rule-group catalog",
+          "detail": "This policy comes from a built-in rule group, so what it matches is read-only. Name, description, state and scope can be changed; to change the matching, duplicate it as a custom policy."
+        },
+        "bittorrent_block_only": "BitTorrent can only be used by block policies.",
+        "removed_deleted_other": "{{count}} deleted group or node was removed from the scope; it takes effect when you save"
+      },
+      "separator": ", ",
+      "template_name_taken": "A policy with this name already exists. Rename or delete it first, then add this group."
+    },
+    "templates": {
+      "added": "Added",
+      "add_another": "Add another",
+      "use": "Use template",
+      "new_list": "New list",
+      "unavailable_title": "Rule groups with no ready-made category",
+      "close": "Close",
+      "menu_heading": "Common templates",
+      "why_none": "Why do some rule groups have no template?",
+      "chooser_title": "Add \"{{name}}\"",
+      "chooser_state": "State after adding",
+      "chooser_help": "Nothing is enabled by default: Off only creates the policy, On enforces it after the next apply.",
+      "update_data": "Update the rule data",
+      "cancel": "Cancel",
+      "add": "Add"
+    },
+    "test": {
+      "title": "Test a destination",
+      "target": "Destination",
+      "target_required": "Enter a domain or an IP",
+      "host_only": "Only the host name is looked at, never the URL path",
+      "port": "Port",
+      "port_bad": "The port is 1–65535",
+      "network": "Network",
+      "account": "Account (optional)",
+      "inbound": "Inbound (optional)",
+      "source_ip": "Source IP (optional)",
+      "source_ip_bad": "Not a valid IP address",
+      "source_ip_hint": "Used to test rules that refuse by source",
+      "run": "Test",
+      "initial": "Enter a destination to see at which step it is allowed or blocked",
+      "failed": "The test failed",
+      "deleted_policy": "A deleted policy",
+      "unpublished": "There are changes that are not applied yet; the result is of the applied version",
+      "badge": {
+        "block": "Block",
+        "allow": "Allow",
+        "observe": "Watch only",
+        "exempt": "Exempt",
+        "none": "No rule matched",
+        "would_deny": "Would be denied",
+        "allowlist_deny": "Allowlist denied"
+      },
+      "verdict": {
+        "block": "Blocked at step {{step}} by \"{{name}}\" ({{entry}})",
+        "allow": "Allowed at step {{step}} by \"{{name}}\"",
+        "default": "No rule matched; allowed",
+        "exempt": "This account is not held to any access restriction",
+        "builtin": "Blocked by the node's built-in rule: host names ending in a dot",
+        "source": "Blocked by the inbound's source rule ({{entry}})"
+      },
+      "kind": {
+        "source": "Source rule",
+        "allow": "Allow",
+        "block": "Block",
+        "exempt": "Exemption",
+        "builtin": "Built in to the node: blocks host names ending in a dot"
+      },
+      "result": {
+        "miss": "No match",
+        "hit": "Matched, stops here",
+        "shadowed": "Would also match (cut off by an earlier step)",
+        "skipped": "Not checked",
+        "untestable": "Cannot be tested"
+      },
+      "node_hint": "{{node}}: {{note}} The actual result may differ",
+      "node_applied": "Judged by the policy applied on {{node}}",
+      "note_published": "Judged by the saved policy that has been applied.",
+      "note_no_dns": "Judged by the destination only; no DNS resolution is done. BitTorrent rules cannot be tested.",
+      "note_ip": "When testing an IP, domain rules do not take part.",
+      "note_hostname_skips_ip": "This is a host name: IP range and private-address rules apply only to connections made to an IP, so they did not take part.",
+      "note_conditional": "Some conditions need input you left empty (port, source IP, inbound); those steps cannot be judged.",
+      "add_exception": "Add an allow exception…",
+      "open_policy": "Open \"{{name}}\"",
+      "exception_saved": "Added the allow exception \"{{entry}}\"; takes effect with the next apply",
+      "exception": {
+        "title": "Add an allow exception",
+        "lead": "Allows this destination for everyone, ahead of every block.",
+        "invalid": "This destination cannot be an allow exception",
+        "match": "Scope",
+        "site": "The whole site (with subdomains)",
+        "host": "This host only",
+        "cancel": "Cancel",
+        "save": "Add"
+      }
     }
   }
 }

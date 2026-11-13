@@ -22,11 +22,16 @@ export function isAdminPath(path: string): boolean {
 // The diagnostics page is the second page held by all three gates the same
 // way: `diagnostics.view`, its nav item's adminOnly flag, and this entry.
 // Every read and the clear behind it are adminGroup endpoints.
+//
+// Access control is the fourth page held by all three gates:
+// `access.view`, its nav item's adminOnly flag, and this entry. Its lists,
+// policies and exemptions are adminGroup, and so are the audit rows of a test.
 const ADMIN_ONLY_ROUTES = [
   '/admin/servers',
   '/admin/settings',
   '/admin/risk',
   '/admin/diagnostics',
+  '/admin/access-control',
 ]
 
 export function isAdminOnlyPath(path: string): boolean {

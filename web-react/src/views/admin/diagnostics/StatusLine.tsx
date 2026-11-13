@@ -1,35 +1,20 @@
-import { Box, Tooltip, Typography, useTheme, type Theme } from '@mui/material'
-import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutlineOutlined'
-import ErrorOutlineIcon from '@mui/icons-material/ErrorOutlineOutlined'
-import HourglassEmptyIcon from '@mui/icons-material/HourglassEmpty'
-import WarningAmberIcon from '@mui/icons-material/WarningAmber'
+import { Tooltip, Typography } from '@mui/material'
 import type { DiagnosticsSnapshot } from '@/api/diagnostics'
+import SharedStatusLine, { type StatusLineTone } from '@/components/StatusLine'
 import { formatMsDualTz } from '@/utils/datetime'
 import { wasReset, type PageVerdict, type VerdictTone } from '@/utils/diagnostics'
-import { amber, type Tone } from './StatusBadge'
 import type { DiagFormat } from './useDiagFormat'
 
-// The one summary on the page. Drawn from the same tokens as the badges,
-// not an <Alert severity>, for the same reason the badges are not chips: the
-// theme's overrides would decide the colour, and the colour has to come from
-// the worst finding.
+// The page's one summary. The shell moved to components/StatusLine (the
+// access-control page uses it too); this maps the diagnostics verdict onto it.
 
-function verdictTone(theme: Theme, tone: VerdictTone): Tone & { text: string } {
-  const md = theme.palette.md
-  switch (tone) {
-    case 'critical':
-    case 'action':
-      return { bg: md.errorContainer, fg: md.onErrorContainer, text: md.onErrorContainer, Icon: ErrorOutlineIcon }
-    case 'attention': {
-      const a = amber(theme)
-      return { ...a, text: md.onSurface, Icon: WarningAmberIcon }
-    }
-    case 'blackout':
-    case 'measuring':
-      return { bg: md.secondaryContainer, fg: md.onSecondaryContainer, text: md.onSecondaryContainer, Icon: HourglassEmptyIcon }
-    case 'ok':
-      return { bg: md.surfaceContainerHigh, fg: theme.palette.success.main, text: md.onSurface, Icon: CheckCircleOutlineIcon }
-  }
+const TONE: Record<VerdictTone, StatusLineTone> = {
+  critical: 'failing',
+  action: 'failing',
+  attention: 'attention',
+  blackout: 'measuring',
+  measuring: 'measuring',
+  ok: 'ok',
 }
 
 /** A panel-time instant, as the rest of the panel writes one. */
@@ -55,10 +40,7 @@ export default function StatusLine({
   panelTz: string
   fmt: DiagFormat
 }) {
-  const theme = useTheme()
   const { t } = fmt
-  const tone = verdictTone(theme, verdict.tone)
-  const { Icon } = tone
   const m = snap.metrics
   const cards = verdict.cards.map(id => t(`admin:diagnostics.cards.${id}.title`)).join(t('admin:diagnostics.status.list_separator'))
   const headline = t(`admin:diagnostics.verdict.${verdict.key}`, {
@@ -78,18 +60,12 @@ export default function StatusLine({
     : t('admin:diagnostics.status.interval_unknown')
 
   return (
-    <Box data-testid="diag-status" data-tone={verdict.tone} role="status"
-      sx={{ display: 'flex', gap: 1.5, alignItems: 'flex-start', p: 2, mb: 2, borderRadius: 3, bgcolor: tone.bg }}>
-      <Icon aria-hidden sx={{ color: tone.fg, mt: 0.25 }} />
-      <Box sx={{ minWidth: 0 }}>
-        <Typography sx={{ fontWeight: 600, color: verdict.tone === 'ok' ? tone.fg : tone.text }}>{headline}</Typography>
+    <SharedStatusLine testId="diag-status" dataTone={verdict.tone} tone={TONE[verdict.tone]} title={headline}
+      detail={
         <Tooltip title={formatMsDualTz(m.since_unix_ms, panelTz)}>
-          <Typography variant="body2" sx={{ mt: 0.5, color: tone.text }}>{`${window} · ${interval}`}</Typography>
+          <Typography variant="body2" component="span" sx={{ color: 'inherit' }}>{`${window} · ${interval}`}</Typography>
         </Tooltip>
-        <Typography variant="caption" sx={{ display: 'block', mt: 0.25, color: tone.text, opacity: 0.8 }}>
-          {t('admin:diagnostics.status.read_at', { time: panelTime(readAt, panelTz, fmt.lang, true) })}
-        </Typography>
-      </Box>
-    </Box>
+      }
+      meta={t('admin:diagnostics.status.read_at', { time: panelTime(readAt, panelTz, fmt.lang, true) })} />
   )
 }

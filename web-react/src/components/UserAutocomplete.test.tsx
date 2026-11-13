@@ -85,4 +85,13 @@ describe('UserAutocomplete', () => {
     )
     await waitFor(() => expect((screen.getByRole('combobox') as HTMLInputElement).value).toBe('Alice (alice)'))
   })
+
+  it('fullWidth fills the parent and has no fixed pixel width (a 375px sheet must not overflow)', () => {
+    const { container } = render(
+      <ThemeProvider theme={theme}><UserAutocomplete value={null} onChange={() => {}} label="user" fullWidth /></ThemeProvider>,
+      { wrapper: queryWrapper(makeTestQueryClient()) },
+    )
+    const root = container.querySelector('.MuiAutocomplete-root') as HTMLElement
+    expect(getComputedStyle(root).width).toBe('100%')
+  })
 })

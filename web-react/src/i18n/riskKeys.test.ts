@@ -129,7 +129,10 @@ function missingKeys(src: string): string[] {
   const out: string[] = []
   for (const key of literalAdminKeys(src)) {
     for (const [lang, dict] of Object.entries(bundles)) {
-      if (typeof dict[key] !== 'string' || dict[key] === '') out.push(`${lang}: ${key}`)
+      // A counted text lives under its plural forms (key_one / key_other): the
+      // literal key the code asks for is the base of those.
+      const has = ['', '_other', '_one'].some(suffix => typeof dict[key + suffix] === 'string' && dict[key + suffix] !== '')
+      if (!has) out.push(`${lang}: ${key}`)
     }
   }
   return out
@@ -185,6 +188,8 @@ describe.each([
   // scanning nothing.
   { dir: '../views/admin/risk', name: 'views/admin/risk', atLeast: 11 },
   { dir: '../views/admin/diagnostics', name: 'views/admin/diagnostics', atLeast: 10 },
+  // The access-control page reads every word from the bundles too (plan §7.2).
+  { dir: '../views/admin/accessControl', name: 'views/admin/accessControl', atLeast: 20 },
 ])('$name reads every word from the bundles', ({ dir, name, atLeast }) => {
   const files = sources(viewDir(dir))
 

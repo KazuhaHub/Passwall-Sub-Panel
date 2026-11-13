@@ -77,6 +77,7 @@ describe('AdminLayout view prefetching', () => {
     expect(paths).not.toContain('/admin/servers')
     expect(paths).not.toContain('/admin/settings')
     expect(paths).not.toContain('/admin/risk')
+    expect(paths).not.toContain('/admin/access-control')
   })
 
   // The risk center is a nav item like any other for an admin, so its chunk is
@@ -88,5 +89,14 @@ describe('AdminLayout view prefetching', () => {
     const paths = prefetch.prefetchViewsWhenIdle.mock.calls.at(-1)![0]
     expect(paths).toContain('/admin/risk')
     expect(paths).toContain('/admin/settings')
+  })
+
+  // Gate 3 of 3: the nav item is adminOnly, so an admin is offered it (and its
+  // chunk is warmed) and an operator is not (the operator case above).
+  it("queues access control for an admin's idle loading", async () => {
+    mountLayout()
+    await waitFor(() => expect(prefetch.prefetchViewsWhenIdle).toHaveBeenCalled())
+    const paths = prefetch.prefetchViewsWhenIdle.mock.calls.at(-1)![0]
+    expect(paths).toContain('/admin/access-control')
   })
 })

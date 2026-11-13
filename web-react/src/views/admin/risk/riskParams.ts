@@ -2,6 +2,7 @@ import {
   EXCLUSION_EXCLUDED, EXCLUSION_KEPT, EXCLUSION_REASONS, FLAG_EVENTS, FLAG_LEVELS, QUEUE_SOURCE_FILTERS,
   type LiveParams, type QueueParams, type QueueStatus,
 } from '@/api/riskCenter'
+import { parseUserId } from '@/hooks/useDrawerParam'
 import { FLAG_SOURCES } from '@/utils/riskCenter'
 
 // THE RISK CENTER'S URL. The page, its tabs' filters and the drawer's
@@ -19,16 +20,8 @@ export function parseRiskTab(raw: string | null): RiskTab {
   return (RISK_TABS as readonly string[]).includes(raw ?? '') ? raw as RiskTab : 'queue'
 }
 
-/**
- * An account id from the URL, or null for anything that is not a positive
- * safe integer: a malformed link asks for nobody rather than for #0 or for
- * whatever Number() makes of the text ("7.5", "07x", "-7").
- */
-export function parseUserId(raw: string | null): number | null {
-  if (!raw || !/^\d+$/.test(raw)) return null
-  const id = Number(raw)
-  return Number.isSafeInteger(id) && id > 0 ? id : null
-}
+// Moved to hooks/useDrawerParam (the drawer hook reads it); kept here for the callers.
+export { parseUserId }
 
 /**
  * Where a link written for the old five tabs lands now, as a search string,
