@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import { act, renderHook, waitFor } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { act, cleanup, renderHook, waitFor } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import * as api from '@/api/accessControl'
 import { makeTestQueryClient, queryWrapper } from '@/test/queryTestUtils'
@@ -27,7 +27,7 @@ const ac = accessControlKeys
 // exact keys it invalidates: a write that forgets one leaves a screen showing
 // the old truth, and one that invalidates too much re-reads the polled status.
 function spy() {
-  const client = makeTestQueryClient()
+  const client = newClient()
   const inv = vi.spyOn(client, 'invalidateQueries')
   const keys = () => inv.mock.calls.map(c => JSON.stringify((c[0] as { queryKey: unknown }).queryKey))
   return { client, keys, expectKeys: (expected: readonly (readonly unknown[])[]) => {
@@ -36,6 +36,21 @@ function spy() {
 }
 
 beforeEach(() => { vi.clearAllMocks() })
+
+// Unmount every hook and drop every client after each test. A polled query
+// keeps its refetchInterval timer alive while mounted; left running, it fires
+// after the jsdom environment is torn down and React throws "window is not
+// defined" outside any test.
+const clients: ReturnType<typeof makeTestQueryClient>[] = []
+function newClient() {
+  const c = makeTestQueryClient()
+  clients.push(c)
+  return c
+}
+afterEach(() => {
+  cleanup()
+  for (const c of clients.splice(0)) c.clear()
+})
 
 async function run<T>(hook: () => { mutateAsync: (v: never) => Promise<unknown> } & T, client: ReturnType<typeof makeTestQueryClient>, arg: unknown) {
   const { result } = renderHook(hook, { wrapper: queryWrapper(client) })
@@ -159,7 +174,7 @@ describe('write → invalidate', () => {
 
 describe('polling is conditional', () => {
   it('the status poll is the policy ceiling while a node applies, and off otherwise', async () => {
-    const client = makeTestQueryClient()
+    const client = newClient()
     const status = (state: string) => ({
       generation: 1, published_generation: 1, paused: false, publish_error: null, nodes: [{ state }], policy_notes: {}, totals: {},
     }) as unknown as api.DestStatus
@@ -175,7 +190,7 @@ describe('polling is conditional', () => {
   })
 
   it('the list read polls at the refreshing cadence only while a list is refreshing', async () => {
-    const client = makeTestQueryClient()
+    const client = newClient()
     const lists = (state: string) => ({ items: [{ id: 1, state }], refresh_hours: 24, budget: {} }) as unknown as api.DestListsView
     vi.mocked(api.getDestLists).mockResolvedValue(lists('refreshing'))
     const { result } = renderHook(() => useDestLists(scope), { wrapper: queryWrapper(client) })
