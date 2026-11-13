@@ -258,9 +258,12 @@ func (s *ServerMigrationSnapshot) Blockers() []MigrationIssue {
 			add("duplicate_username", 0, c.ID)
 		}
 		usernames[username] = true
-		if len(record.Inbounds) == 0 {
-			add("missing_attachment", 0, c.ID)
-		}
+		// Zero attachments is not an inconsistency: clientprov.Sync detaches a
+		// user's client when they lose every node on this server and keeps the
+		// row so its counters survive a later re-add. The native roster carries
+		// such a row as a listener-less client, so it converts as-is. Blocking
+		// it stranded every server any user had ever been moved off. The
+		// identity checks above still apply, because the roster ships them.
 		seen := make(map[int64]bool)
 		flow := ""
 		flowSet := false

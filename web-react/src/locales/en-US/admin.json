@@ -2873,7 +2873,6 @@
         "duplicate_client": "The migration contains duplicate client identities.",
         "invalid_credentials": "A required managed proxy credential is missing or invalid.",
         "duplicate_username": "Different managed clients have the same upstream username.",
-        "missing_attachment": "A managed client has no inbound attachment.",
         "orphan_attachment": "A client attachment has no matching managed client or node.",
         "duplicate_attachment": "A client is attached to the same node more than once.",
         "flow_conflict": "The shared client's inbound attachments require conflicting VLESS flows.",

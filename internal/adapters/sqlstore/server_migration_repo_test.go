@@ -250,6 +250,48 @@ func TestServerMigrationPreservesOriginalIdentityConfigurationAndHistory(t *test
 	}
 }
 
+// A user moved off every node on this server leaves a retained psp_client row
+// with zero attachments (clientprov.Sync's deliberate retire). The conversion
+// must accept it, leave the row and its counters untouched, and hand it to the
+// native desired state as a client with no listeners.
+func TestServerMigrationConvertsRetainedDetachedClient(t *testing.T) {
+	f := newServerMigrationFixture(t)
+	moved := userRow{UPN: "moved-user", SSOProvider: "local", SSOSubject: "moved-user", SubToken: "migration-fixture-moved-token",
+		UUID: "22222222-2222-4222-8222-222222222222", Enabled: true}
+	if err := f.db.Create(&moved).Error; err != nil {
+		t.Fatal(err)
+	}
+	detached := pspClientRow{UserID: moved.ID, PanelID: f.panelID, Email: "shared-moved@example.test", UUID: moved.UUID,
+		Password: "moved-user-password", DesiredEnable: true, DesiredMinted: true,
+		LifetimeUpBytes: 10, LifetimeDownBytes: 20, LifetimeTotalBytes: 30}
+	if err := f.db.Create(&detached).Error; err != nil {
+		t.Fatal(err)
+	}
+	before := migrationState(t, f.db)
+	if err := f.repos.ServerMigration.Apply(t.Context(), f.panelID, f.fingerprint(t), f.agent, f.raw); err != nil {
+		t.Fatalf("conversion with a retained detached client = %v", err)
+	}
+	if after := migrationState(t, f.db); !reflect.DeepEqual(after.Clients, before.Clients) || len(after.Attachments) != len(before.Attachments) {
+		t.Fatal("conversion changed client rows or invented attachments for the detached client")
+	}
+	desired, err := f.repos.NativeDesired.Load(t.Context(), f.panelID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, c := range desired.Clients {
+		if c.Client != nil && c.Client.ID == detached.ID {
+			found = true
+			if len(c.Inbounds) != 0 {
+				t.Fatalf("detached client gained attachments: %+v", c.Inbounds)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("detached client missing from native desired state; its counters would restart")
+	}
+}
+
 func TestServerMigrationRetiresOnlyOriginalServerNodeTasks(t *testing.T) {
 	f := newServerMigrationFixture(t)
 	fingerprint := f.fingerprint(t)
