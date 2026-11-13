@@ -97,21 +97,15 @@ xui_token() {
   # and the header is only obtainable once the session cookie is set.
   local jar="$WORKDIR/xui.cookies" csrf body
   curl -sS -o /dev/null -c "$jar" "$XUI_ORIGIN/"
-  # DIAGNOSTIC (temporary): status and a redacted body for each auth step.
-  log "diag GET / -> $(curl -sS -o /dev/null -w '%{http_code} %{redirect_url}' -b "$jar" -c "$jar" "$XUI_ORIGIN/")"
-  log "diag GET /csrf-token -> $(curl -sS -w ' [%{http_code} %{content_type}]' -b "$jar" -c "$jar" "$XUI_ORIGIN/csrf-token" | sed 's/"obj":"[^"]*"/"obj":"<redacted>"/' | head -c 300)"
-  log "diag cookies: $(awk 'NF>=7{print $6}' "$jar" | tr '\n' ' ')"
   csrf=$(curl -sS -b "$jar" -c "$jar" "$XUI_ORIGIN/csrf-token" | python3 -c 'import json,sys;print(json.load(sys.stdin)["obj"])')
-  log "diag POST /login -> $(curl -sS -w ' [%{http_code}]' -b "$jar" -c "$jar" -X POST -H "X-CSRF-Token: $csrf" -H 'Content-Type: application/x-www-form-urlencoded' -d 'username=admin&password=admin' "$XUI_ORIGIN/login" | head -c 300)"
-  log "diag GET /csrf-token after login -> $(curl -sS -w ' [%{http_code} %{content_type}]' -b "$jar" -c "$jar" "$XUI_ORIGIN/csrf-token" | sed 's/"obj":"[^"]*"/"obj":"<redacted>"/' | head -c 300)"
-  local dcsrf; dcsrf=$(curl -sS -b "$jar" -c "$jar" "$XUI_ORIGIN/csrf-token" | python3 -c 'import json,sys;print(json.load(sys.stdin)["obj"])' 2>/dev/null || true)
-  log "diag POST apiTokens/create -> $(curl -sS -w ' [%{http_code} %{content_type}]' -b "$jar" -X POST -H "X-CSRF-Token: $dcsrf" -H 'Content-Type: application/json' -d '{"name":"psp-diag","scope":"admin"}' "$XUI_ORIGIN/panel/api/setting/apiTokens/create" | sed 's/"token":"[^"]*"/"token":"<redacted>"/' | head -c 400)"
-  jar="$WORKDIR/xui.cookies2"; : > "$jar"
-  curl -sS -o /dev/null -c "$jar" "$XUI_ORIGIN/"
-  csrf=$(curl -sS -b "$jar" -c "$jar" "$XUI_ORIGIN/csrf-token" | python3 -c 'import json,sys;print(json.load(sys.stdin)["obj"])')
-  curl -sS -o /dev/null -b "$jar" -c "$jar" -X POST \
+  # The login answers HTTP 200 either way; only its body says whether it
+  # worked. Checked here, a refusal names itself instead of surfacing two
+  # requests later as an empty 404 body and a JSONDecodeError.
+  body=$(curl -sS -b "$jar" -c "$jar" -X POST \
     -H "X-CSRF-Token: $csrf" -H 'Content-Type: application/x-www-form-urlencoded' \
-    -d 'username=admin&password=admin' "$XUI_ORIGIN/login"
+    -d 'username=admin&password=admin' "$XUI_ORIGIN/login")
+  printf '%s' "$body" | python3 -c 'import json,sys;sys.exit(0 if json.load(sys.stdin).get("success") is True else 1)' \
+    || { log "3X-UI refused the admin/admin login: $body"; return 1; }
   csrf=$(curl -sS -b "$jar" -c "$jar" "$XUI_ORIGIN/csrf-token" | python3 -c 'import json,sys;print(json.load(sys.stdin)["obj"])')
   body=$(curl -sS -b "$jar" -X POST -H "X-CSRF-Token: $csrf" -H 'Content-Type: application/json' \
     -d '{"name":"psp-compat","scope":"admin"}' "$XUI_ORIGIN/panel/api/setting/apiTokens/create")
@@ -197,6 +191,14 @@ up() {
   XUI_ORIGIN="http://$HOST:$XUI_PORT"
   wait_for "$XUI_ORIGIN/" 120
   log "3X-UI ready at $XUI_ORIGIN"
+  # KNOWN CREDENTIALS ARE SET, NOT ASSUMED. Up to 3.10.x a fresh panel seeded
+  # admin/admin; 3.11.0 seeds a random username and password instead (shown
+  # once in its log, database.EnsureFirstUser), so the admin/admin login below
+  # was refused and every later call answered unauthenticated. The panel's own
+  # CLI rewrites the first user on every version this harness drives, and the
+  # login reads the user from the database per request, so no restart is needed.
+  $SUDO "$RUNTIME" exec "$XUI_NAME" /app/x-ui setting -username admin -password admin >/dev/null \
+    || { log "could not set the 3X-UI first user to admin/admin through its CLI"; return 1; }
   local token; token=$(xui_token)
   xui_seed "$token"
   printf '%s' "$token" > "$WORKDIR/3xui.token"
