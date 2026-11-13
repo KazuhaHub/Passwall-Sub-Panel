@@ -217,7 +217,7 @@ describe('3X-UI to Passwall Node node-host migration command', () => {
       'cross_panel_attachment', 'config_not_synced', 'endpoint_not_confirmed', 'unsupported_protocol',
       'inbound_expiry_unsupported', 'unsupported_flow', 'invalid_config', 'snapshot_contains_clients',
       'missing_client', 'duplicate_client', 'lifecycle_not_minted', 'invalid_credentials', 'duplicate_username',
-      'missing_attachment', 'orphan_attachment', 'duplicate_attachment', 'credential_not_confirmed', 'flow_conflict',
+      'orphan_attachment', 'duplicate_attachment', 'credential_not_confirmed', 'flow_conflict',
       'external_file_dependency', 'global_config_dependency', 'local_fallback_dependency',
       'fallback_environment_dependency', 'socket_environment_dependency', 'connection_limits_not_enforced',
       'core_not_verified', 'core_ack_required', 'restricted_core', 'reality_compatibility_normalization',

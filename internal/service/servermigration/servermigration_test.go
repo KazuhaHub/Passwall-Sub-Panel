@@ -209,7 +209,6 @@ func TestSnapshotBlockersFailClosedWithoutSecrets(t *testing.T) {
 		{"orphan_attachment", "orphan_attachment", func(s *domain.ServerMigrationSnapshot) { s.Clients[0].Inbounds[0].NodeID = 10 }},
 		{"wrong_client", "orphan_attachment", func(s *domain.ServerMigrationSnapshot) { s.Clients[0].Inbounds[0].ClientID = 10 }},
 		{"nil_client", "missing_client", func(s *domain.ServerMigrationSnapshot) { s.Clients[0].Client = nil }},
-		{"no_attachment", "missing_attachment", func(s *domain.ServerMigrationSnapshot) { s.Clients[0].Inbounds = nil }},
 		{"duplicate_attachment", "duplicate_attachment", func(s *domain.ServerMigrationSnapshot) {
 			s.Clients[0].Inbounds = append(s.Clients[0].Inbounds, s.Clients[0].Inbounds[0])
 		}},
@@ -228,6 +227,55 @@ func TestSnapshotBlockersFailClosedWithoutSecrets(t *testing.T) {
 				t.Fatal("issues leaked secret configuration")
 			}
 		})
+	}
+}
+
+// A client whose user lost every node on this server keeps its row, counters
+// and identity with zero attachments: clientprov.Sync retires access that way
+// on purpose, and the native roster carries it as a listener-less client
+// ("an empty set still materialises the client"). Conversion must accept that
+// state instead of stranding the server, while the identity checks the native
+// roster still depends on keep applying to the retained row.
+func TestSnapshotAcceptsRetainedDetachedClient(t *testing.T) {
+	s := migrationFixture()
+	detached := *s.Clients[0].Client
+	detached.ID, detached.UserID, detached.Email = 4, 8, "u8@example.invalid"
+	s.Clients = append(s.Clients, domain.ServerMigrationClient{Client: &detached})
+	if issues := s.Blockers(); len(issues) != 0 {
+		t.Fatalf("retained detached client blocked conversion: %+v", issues)
+	}
+
+	s = migrationFixture()
+	s.Clients[0].Inbounds = nil
+	if issues := s.Blockers(); len(issues) != 0 {
+		t.Fatalf("server whose only managed client is detached was blocked: %+v", issues)
+	}
+
+	for _, test := range []struct {
+		name, code string
+		change     func(*domain.PSPClient)
+	}{
+		{"lifecycle", "lifecycle_not_minted", func(c *domain.PSPClient) { c.DesiredMinted = false }},
+		{"username", "invalid_credentials", func(c *domain.PSPClient) { c.Email = " " }},
+		{"cross_panel", "cross_panel_attachment", func(c *domain.PSPClient) { c.PanelID = 10 }},
+		{"identity", "missing_client", func(c *domain.PSPClient) { c.UserID = 0 }},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			s := migrationFixture()
+			s.Clients[0].Inbounds = nil
+			test.change(s.Clients[0].Client)
+			if !hasIssue(s.Blockers(), test.code) {
+				t.Fatalf("detached client skipped %s: %+v", test.code, s.Blockers())
+			}
+		})
+	}
+
+	s = migrationFixture()
+	duplicate := *s.Clients[0].Client
+	duplicate.ID = 4
+	s.Clients = append(s.Clients, domain.ServerMigrationClient{Client: &duplicate})
+	if !hasIssue(s.Blockers(), "duplicate_username") {
+		t.Fatal("detached client sharing a roster username was accepted")
 	}
 }
 

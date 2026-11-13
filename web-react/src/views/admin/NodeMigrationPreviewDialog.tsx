@@ -15,7 +15,7 @@ const knownIssues = new Set([
   'cross_panel_attachment', 'core_not_verified', 'core_ack_required', 'core_version_changed', 'managed_scope',
   'source_not_3xui', 'duplicate_node', 'duplicate_inbound', 'duplicate_listener_binding', 'config_not_synced', 'endpoint_not_confirmed',
   'unsupported_flow', 'snapshot_contains_clients', 'missing_client', 'duplicate_client', 'invalid_credentials',
-  'duplicate_username', 'missing_attachment', 'orphan_attachment', 'duplicate_attachment', 'flow_conflict',
+  'duplicate_username', 'orphan_attachment', 'duplicate_attachment', 'flow_conflict',
   'global_config_dependency', 'fallback_environment_dependency', 'socket_environment_dependency',
   'connection_limits_not_enforced', 'restricted_core', 'reality_compatibility_normalization',
   'unsafe_reality_finalmask_tcp',
