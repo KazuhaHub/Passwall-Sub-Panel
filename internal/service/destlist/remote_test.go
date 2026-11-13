@@ -71,17 +71,14 @@ func TestFetchBody_ReadsAndRefusesToTruncate(t *testing.T) {
 }
 
 func TestFetchBody_RefusesOnAdvertisedLengthWithoutReading(t *testing.T) {
-	read := 0
 	srv, doer := tlsServer(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Length", "5000")
 		_, _ = w.Write([]byte(strings.Repeat("a", 5000)))
-		read = 5000
 	})
 	_, err := fetchBody(context.Background(), doer, srv.URL, 100)
 	if !errors.Is(err, ErrListTooLarge) {
 		t.Fatalf("err = %v", err)
 	}
-	_ = read
 }
 
 func TestFetchBody_Non2xxIsAnError(t *testing.T) {
