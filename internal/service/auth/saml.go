@@ -687,6 +687,33 @@ func precheckResponse(acsURL, rawB64 string) error {
 	return samlguard.New(acsURL).Check(decoded)
 }
 
+// errSAMLParsePanic marks a login refused because crewjam panicked while
+// verifying the response.
+var errSAMLParsePanic = errors.New("SAML response verification panicked")
+
+// verifyResponse runs crewjam's verification and turns a panic into an error.
+//
+// GO-2026-6909 (crewjam/saml ≤ v0.5.1, no patched release) includes a nil
+// dereference of an assertion's Subject AFTER the signature check. samlguard
+// refuses that shape in a plaintext assertion, but it reads raw XML and cannot see
+// inside an EncryptedAssertion, and validateAssertion makes the same unchecked
+// assumption about other optional elements on EVERY path: a signed plaintext
+// assertion without <Conditions>, or a SubjectConfirmation without
+// SubjectConfirmationData, panics there too. So this covers all of them rather
+// than one advisory's shapes. gin.Recovery would keep the process alive, but as a bare 500 that skips
+// the refused-login handling and its auth event; recovering here makes it one
+// more refused response. This is local to one parse and holds no lock, so
+// nothing is left half-done by the unwind.
+func verifyResponse(parse func() (*saml.Assertion, error)) (a *saml.Assertion, err error) {
+	defer func() {
+		if p := recover(); p != nil {
+			log.Warn("saml: response verification panicked", "panic", fmt.Sprint(p))
+			a, err = nil, fmt.Errorf("%w: %v", errSAMLParsePanic, p)
+		}
+	}()
+	return parse()
+}
+
 // ParseACSResponse validates the SAML Response posted by the IdP and
 // returns the extracted attributes. possibleRequestIDs should contain the
 // AuthnRequest ID stored at login time; pass nil only for IdP-initiated SSO.
@@ -732,7 +759,9 @@ func (s *SAMLService) parseACSResponse(sp *saml.ServiceProvider, cfg *config.SAM
 		log.Warn("saml: response rejected by pre-check", "err", err)
 		return nil, fmt.Errorf("SAML response rejected: %w", err)
 	}
-	assertion, err := sp.ParseResponse(r, possibleRequestIDs)
+	assertion, err := verifyResponse(func() (*saml.Assertion, error) {
+		return sp.ParseResponse(r, possibleRequestIDs)
+	})
 	if err != nil {
 		// Log the private reason hidden inside InvalidResponseError.
 		if ire, ok := err.(*saml.InvalidResponseError); ok {

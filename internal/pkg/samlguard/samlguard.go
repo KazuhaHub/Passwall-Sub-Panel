@@ -10,6 +10,22 @@
 //     differently-trusted assertion alongside a legitimate one.
 //   - Weak signature algorithms. crewjam accepts whatever the IdP declares,
 //     including rsa-sha1 (ADFS's and legacy Keycloak's historical default).
+//   - Assertion shape (GO-2026-6909, no patched crewjam release). A signed
+//     assertion lacking <Subject> reaches a nil dereference in crewjam's
+//     validateAssertion (Issuer is a value field, so a missing one only fails
+//     the issuer comparison; it is required here anyway). And crewjam's
+//     Subject.NameID field carries no tag and NameID has no XMLName, so
+//     encoding/xml fills it from a <NameID> in ANY namespace: a foreign NameID
+//     inside a signed Subject would become the Subject PSP keys SSO accounts
+//     on. A plaintext assertion must therefore carry exactly one SAML-namespace
+//     Issuer and Subject, and its Subject may hold at most one NameID, in the
+//     SAML namespace.
+//   - Prefix rebinding. crewjam does not decode the signed bytes as written:
+//     elementToBytes re-serialises the assertion with ONE binding per prefix,
+//     collected from every element in the subtree, last one wins, written over
+//     the copy's root. A prefix bound to two URIs can thus be foreign to this
+//     scan and SAML to crewjam, which defeats every namespace-qualified rule
+//     above. A document that binds any prefix to more than one URI is refused.
 //
 // Every check here is "shape of the document", never "content a verifier has
 // already extracted", so a bug in this package cannot be masked by — or mask —
@@ -18,9 +34,11 @@
 //
 // # Parity with authcore
 //
-// The rules are authcore/saml's verbatim (saml/rawxml.go and the shape half of
-// saml/validate.go), because the replacement line must not relax anything this
-// hardening line enforces. Where the two implementations could plausibly drift
+// The first three rules are authcore/saml's verbatim (saml/rawxml.go and the
+// shape half of saml/validate.go), because the replacement line must not relax
+// anything this hardening line enforces. The assertion-shape rule is PSP's own,
+// added for an advisory against the library this line still runs on; it only
+// narrows what is accepted. Where the two implementations could plausibly drift
 // — the digest allowlist, local-name matching, last-Destination-wins, an
 // Algorithm-less declaration — the behaviour is pinned by a test in this
 // package rather than left to chance.
@@ -30,7 +48,10 @@
 // The algorithm scan reads the raw XML, so it cannot see inside an
 // EncryptedAssertion: the enclosed assertion's own signature algorithms are
 // opaque until decrypted, and are the decrypting library's business. Do not
-// describe this check as covering "every signature in the message".
+// describe this check as covering "every signature in the message". The
+// assertion-shape rule has the same limit: an encrypted assertion's Issuer,
+// Subject and NameID are not inspected (the caller recovers a panic on that
+// path instead).
 package samlguard
 
 import (
@@ -65,6 +86,16 @@ var (
 	// ErrWeakSignatureAlgorithm means a declared SignatureMethod or
 	// DigestMethod is outside the SHA-256-or-better allowlist.
 	ErrWeakSignatureAlgorithm = errors.New("samlguard: weak signature or digest algorithm")
+
+	// ErrAssertionShape means a plaintext assertion lacks exactly one
+	// SAML-namespace Issuer and Subject, or its Subject carries a NameID that
+	// is foreign-namespaced or repeated (GO-2026-6909).
+	ErrAssertionShape = errors.New("samlguard: assertion Issuer/Subject/NameID shape refused")
+
+	// ErrNamespaceRebound means some namespace prefix is declared with more than
+	// one URI in the document, so this scan and crewjam's re-serialised decode
+	// could resolve the same element to different namespaces.
+	ErrNamespaceRebound = errors.New("samlguard: a namespace prefix is bound to more than one URI")
 )
 
 const (
@@ -123,6 +154,18 @@ type shape struct {
 	destination    string
 	hasDestination bool
 	assertionCount int
+
+	// Children of the (single) plaintext Assertion, counted only in the SAML
+	// assertion namespace, and the NameIDs directly under its Subject.
+	plainAssertion bool
+	issuerCount    int
+	subjectCount   int
+	nameIDCount    int
+	foreignNameID  bool
+
+	// reboundPrefix is the first prefix seen declared with a second, different
+	// URI, or "" when every prefix has one binding.
+	reboundPrefix string
 }
 
 // Check rejects a raw SAML Response that is structurally unusable or declares
@@ -141,6 +184,23 @@ func (g *Guard) Check(raw []byte) error {
 		return fmt.Errorf("%w: no Assertion or EncryptedAssertion element", ErrMalformed)
 	case sh.assertionCount > 1:
 		return fmt.Errorf("%w: found %d", ErrTooManyAssertions, sh.assertionCount)
+	}
+	// Before the namespace-qualified shape rule, because a rebound prefix is
+	// exactly what would make that rule judge different names than crewjam.
+	if sh.reboundPrefix != "" {
+		return fmt.Errorf("%w: %q", ErrNamespaceRebound, sh.reboundPrefix)
+	}
+	if sh.plainAssertion {
+		switch {
+		case sh.issuerCount != 1:
+			return fmt.Errorf("%w: %d Issuer elements", ErrAssertionShape, sh.issuerCount)
+		case sh.subjectCount != 1:
+			return fmt.Errorf("%w: %d Subject elements", ErrAssertionShape, sh.subjectCount)
+		case sh.foreignNameID:
+			return fmt.Errorf("%w: Subject carries a NameID outside the SAML assertion namespace", ErrAssertionShape)
+		case sh.nameIDCount > 1:
+			return fmt.Errorf("%w: Subject carries %d NameID elements", ErrAssertionShape, sh.nameIDCount)
+		}
 	}
 	if !sh.hasDestination || sh.destination == "" {
 		return ErrMissingDestination
@@ -163,10 +223,19 @@ func (g *Guard) Check(raw []byte) error {
 // The count looks at the root's IMMEDIATE children only — the same scope
 // crewjam's findChildren uses, so this cannot reject a document the verifier
 // would have read differently.
+//
+// Inside a plaintext Assertion it also records the immediate Issuer and Subject
+// children and the elements directly under that Subject, which is exactly the
+// scope of crewjam's Assertion.Issuer / Assertion.Subject / Subject.NameID
+// fields. A NameID is matched by local name whatever its namespace, because a
+// foreign one is precisely what encoding/xml would bind. A truncated document
+// ends the scan early and leaves the counts short, which fails closed.
 func scanShape(raw []byte) shape {
 	var sh shape
 	dec := xml.NewDecoder(bytes.NewReader(raw))
 	depth := 0
+	inAssertion, inSubject := false, false
+	bindings := map[string]string{}
 	for {
 		tok, err := dec.Token()
 		if err != nil {
@@ -175,6 +244,18 @@ func scanShape(raw []byte) shape {
 		switch el := tok.(type) {
 		case xml.StartElement:
 			depth++
+			// encoding/xml reports xmlns:p="uri" as an attribute in the "xmlns"
+			// space. The default namespace (plain xmlns) is left alone: crewjam's
+			// copy keeps those declarations in place rather than hoisting them.
+			for _, a := range el.Attr {
+				if a.Name.Space != "xmlns" || sh.reboundPrefix != "" {
+					continue
+				}
+				if prev, ok := bindings[a.Name.Local]; ok && prev != a.Value {
+					sh.reboundPrefix = a.Name.Local
+				}
+				bindings[a.Name.Local] = a.Value
+			}
 			if depth == 1 {
 				if el.Name.Local != "Response" {
 					return sh
@@ -193,8 +274,34 @@ func scanShape(raw []byte) shape {
 			if depth == 2 && el.Name.Space == nsAssertion &&
 				(el.Name.Local == "Assertion" || el.Name.Local == "EncryptedAssertion") {
 				sh.assertionCount++
+				if el.Name.Local == "Assertion" {
+					sh.plainAssertion = true
+					inAssertion = true
+				}
+			}
+			if depth == 3 && inAssertion && el.Name.Space == nsAssertion {
+				switch el.Name.Local {
+				case "Issuer":
+					sh.issuerCount++
+				case "Subject":
+					sh.subjectCount++
+					inSubject = true
+				}
+			}
+			if depth == 4 && inSubject && el.Name.Local == "NameID" {
+				if el.Name.Space == nsAssertion {
+					sh.nameIDCount++
+				} else {
+					sh.foreignNameID = true
+				}
 			}
 		case xml.EndElement:
+			switch depth {
+			case 2:
+				inAssertion = false
+			case 3:
+				inSubject = false
+			}
 			depth--
 		}
 	}
