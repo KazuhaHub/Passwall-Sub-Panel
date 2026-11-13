@@ -1,0 +1,156 @@
+{
+  "catalog_version": 1,
+  "templates": [
+    {
+      "key": "bittorrent",
+      "name": {"zh-CN": "BT 下载", "en-US": "BitTorrent"},
+      "description": {
+        "zh-CN": "拦截 BitTorrent 协议握手，以及公开 Tracker 的域名。协议识别需要入站开启嗅探，PSP 会在下发前检查，条件不满足时保持上一版策略。",
+        "en-US": "Blocks the BitTorrent handshake and the domains of public trackers. Protocol detection needs sniffing on the inbound; PSP checks that before publishing and keeps the previous policy when it is not met."
+      },
+      "geosite": ["category-public-tracker"],
+      "protocols": ["bittorrent"]
+    },
+    {
+      "key": "pt",
+      "name": {"zh-CN": "PT 站", "en-US": "Private trackers"},
+      "description": {
+        "zh-CN": "拦截 PT（私有 Tracker）站点的域名。",
+        "en-US": "Blocks the domains of private-tracker (PT) sites."
+      },
+      "geosite": ["category-pt"]
+    },
+    {
+      "key": "finance",
+      "name": {"zh-CN": "金融", "en-US": "Finance"},
+      "description": {
+        "zh-CN": "银行、券商与金融服务的域名：category-finance、中国券商，以及中国、日本、俄罗斯、伊朗、缅甸的银行分类。收录的是正规机构，不含高风险金融。",
+        "en-US": "Domains of banks, brokers and financial services: category-finance, Chinese securities firms, and the bank categories of China, Japan, Russia, Iran and Myanmar. Regulated institutions only; high-risk finance is not covered."
+      },
+      "geosite": [
+        "category-finance", "category-securities-cn", "category-bank-cn", "category-bank-jp",
+        "category-bank-ru", "category-bank-ir", "category-bank-mm"
+      ]
+    },
+    {
+      "key": "crypto",
+      "name": {"zh-CN": "加密货币", "en-US": "Cryptocurrency"},
+      "description": {
+        "zh-CN": "加密货币交易所、钱包与相关服务的域名（category-cryptocurrency）。",
+        "en-US": "Domains of cryptocurrency exchanges, wallets and related services (category-cryptocurrency)."
+      },
+      "geosite": ["category-cryptocurrency"]
+    },
+    {
+      "key": "ecommerce",
+      "name": {"zh-CN": "电商", "en-US": "E-commerce"},
+      "description": {
+        "zh-CN": "电商平台的域名（category-ecommerce）。",
+        "en-US": "Domains of e-commerce platforms (category-ecommerce)."
+      },
+      "geosite": ["category-ecommerce"]
+    },
+    {
+      "key": "scholar",
+      "name": {"zh-CN": "学术与教育（中国、俄罗斯、伊朗与学术网站）", "en-US": "Scholarly and education (China, Russia, Iran and academic sites)"},
+      "description": {
+        "zh-CN": "中国、俄罗斯、伊朗的教育分类，学术网站分类（含中国、香港、英国、伊朗），以及中国 MOOC。这不是一个通用的「教育」分类：v2fly 没有这样的分类。",
+        "en-US": "The education categories of China, Russia and Iran, the scholarly-site categories (including China, Hong Kong, the UK and Iran) and Chinese MOOCs. This is not a generic \"education\" category: v2fly has none."
+      },
+      "geosite": [
+        "category-education-cn", "category-education-ru", "category-education-ir", "category-scholar-!cn",
+        "category-scholar-cn", "category-scholar-hk", "category-scholar-uk", "category-scholar-ir", "category-mooc-cn"
+      ]
+    },
+    {
+      "key": "porn",
+      "name": {"zh-CN": "成人内容", "en-US": "Adult content"},
+      "description": {
+        "zh-CN": "成人内容站点的域名（category-porn，约 6 600 条）。其中约 140 条是正则，会占用策略的 256 条正则额度。",
+        "en-US": "Domains of adult-content sites (category-porn, about 6,600 entries). About 140 of them are regular expressions, which use the policy's quota of 256."
+      },
+      "geosite": ["category-porn"]
+    },
+    {
+      "key": "ads",
+      "name": {"zh-CN": "广告与追踪", "en-US": "Ads and trackers"},
+      "description": {
+        "zh-CN": "广告网络与追踪服务的域名（category-ads-all）。",
+        "en-US": "Domains of ad networks and tracking services (category-ads-all)."
+      },
+      "geosite": ["category-ads-all"]
+    },
+    {
+      "key": "proxy",
+      "name": {"zh-CN": "代理与 VPN 服务", "en-US": "Proxy and VPN services"},
+      "description": {
+        "zh-CN": "代理隧道与 VPN 服务的域名（category-proxy-tunnels、category-vpnservices）。",
+        "en-US": "Domains of proxy tunnels and VPN services (category-proxy-tunnels, category-vpnservices)."
+      },
+      "geosite": ["category-proxy-tunnels", "category-vpnservices"]
+    },
+    {
+      "key": "doh",
+      "name": {"zh-CN": "加密 DNS", "en-US": "Encrypted DNS"},
+      "description": {
+        "zh-CN": "DNS over HTTPS 服务的域名（category-doh）。",
+        "en-US": "Domains of DNS-over-HTTPS services (category-doh)."
+      },
+      "geosite": ["category-doh"]
+    },
+    {
+      "key": "speedtest",
+      "name": {"zh-CN": "测速", "en-US": "Speed tests"},
+      "description": {
+        "zh-CN": "测速服务的域名（category-speedtest）。",
+        "en-US": "Domains of speed-test services (category-speedtest)."
+      },
+      "geosite": ["category-speedtest"]
+    },
+    {
+      "key": "smtp",
+      "name": {"zh-CN": "发信端口", "en-US": "Outgoing mail ports"},
+      "description": {
+        "zh-CN": "拦截访问 25、465、587 端口（SMTP）的 TCP 连接，防止节点被用来发垃圾邮件。",
+        "en-US": "Blocks TCP connections to ports 25, 465 and 587 (SMTP), so the node cannot be used to send spam."
+      },
+      "ports": "25,465,587",
+      "network": "tcp"
+    },
+    {
+      "key": "private",
+      "name": {"zh-CN": "内网与云元数据", "en-US": "Private networks and cloud metadata"},
+      "description": {
+        "zh-CN": "拦截访问私有与保留地址（含云厂商元数据地址）。Xray 的 freedom 出站对代理入站默认已经拦截这些地址，所以在 Xray 上这条主要起记录作用；sing-box 没有这个默认。",
+        "en-US": "Blocks connections to private and reserved addresses, cloud metadata addresses included. Xray's freedom outbound already blocks them for proxy inbounds by default, so on Xray this mainly records; sing-box has no such default."
+      },
+      "private": true
+    }
+  ],
+  "unavailable": [
+    {
+      "key": "education",
+      "name": {"zh-CN": "通用教育", "en-US": "Generic education"},
+      "reason": {
+        "zh-CN": "v2fly 没有通用的「教育」分类，只有中国、俄罗斯、伊朗的教育分类（已包含在「学术与教育」里）。要覆盖其他国家，请用自定义列表或远程列表。",
+        "en-US": "v2fly has no generic \"education\" category, only the education categories of China, Russia and Iran (already part of \"Scholarly and education\"). To cover other countries, use a custom or remote list."
+      }
+    },
+    {
+      "key": "payment",
+      "name": {"zh-CN": "支付", "en-US": "Payments"},
+      "reason": {
+        "zh-CN": "v2fly 只有 category-payment-ir（伊朗），没有通用的支付分类；拿它冒充通用分类会漏掉绝大多数支付服务。请用自定义列表或远程列表。",
+        "en-US": "v2fly has only category-payment-ir (Iran) and no generic payment category; passing it off as one would miss most payment services. Use a custom or remote list."
+      }
+    },
+    {
+      "key": "gambling",
+      "name": {"zh-CN": "博彩", "en-US": "Gambling"},
+      "reason": {
+        "zh-CN": "v2fly 只有仅覆盖俄罗斯的 category-betting-ru（十几条），没有通用的博彩分类。请用自定义列表或远程列表。",
+        "en-US": "v2fly has only category-betting-ru, which covers Russia alone (a dozen entries), and no generic gambling category. Use a custom or remote list."
+      }
+    }
+  ]
+}

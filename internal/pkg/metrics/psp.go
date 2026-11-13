@@ -616,6 +616,40 @@ var (
 )
 
 // ---------------------------------------------------------------------
+// Destination policy ("access control") — answers "are the lists the policy
+// matches against staying current, and when they do not, why?".
+//
+// The refresh loop (service/destlist) counts once per remote list it fetches
+// and once per geosite update it attempts, labelled by the CLOSED set of
+// results below: a list URL or an error message on a label would be
+// attacker-sized cardinality, and a list URL may carry a token.
+//
+//	unchanged  fetched; the entries' digest is the one already stored, so
+//	           nothing was republished (F13)
+//	updated    fetched; the entries changed
+//	failed     the fetch, the parse, a size limit or a rule refused it; the
+//	           previous entries stay in force and the list says why
+//	broad      the refresh would have introduced an entry so broad it matches
+//	           nearly everything; refused like a failure, counted apart because
+//	           it is the one that needs an admin's eyes
+// ---------------------------------------------------------------------
+
+const (
+	DestListRefreshUnchanged = "unchanged"
+	DestListRefreshUpdated   = "updated"
+	DestListRefreshFailed    = "failed"
+	DestListRefreshBroad     = "broad"
+)
+
+var (
+	DestListRefreshTotal = NewCounterVec(
+		"psp_dest_list_refresh_total",
+		"Destination-policy list refreshes (remote lists and geosite updates), by result.",
+		"result",
+	)
+)
+
+// ---------------------------------------------------------------------
 // SAML ACS refusals — answers "is this refusal an attack, an outage, or a bad
 // configuration?" Those three need different responses and, before this counter,
 // all arrived as a single reason code.

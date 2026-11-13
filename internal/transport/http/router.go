@@ -653,6 +653,15 @@ func NewRouter(d Deps) stdhttp.Handler {
 		riskPolicyH := handler.NewAdminRiskPolicyHandler(d.Repos.Settings)
 		adminGroup.GET("/risk-center/policy", riskPolicyH.Get)
 		adminGroup.PUT("/risk-center/policy", riskPolicyH.Put)
+		// Access control's settings (the debounce, the list refresh interval,
+		// the geosite update mode): the same arrangement — adminGroup, the
+		// one writer of its dest_* keys, the system settings PUT's write
+		// lock — and its audit rows are the owner's too
+		// (adminOnlyAuditTargets). The rest of the access-control API is
+		// registered beside it.
+		destSettingsH := handler.NewAdminDestSettingsHandler(d.Repos.Settings)
+		adminGroup.GET("/dest/settings", destSettingsH.Get)
+		adminGroup.PUT("/dest/settings", destSettingsH.Put)
 		adminGroup.GET("/diagnostics/metrics", diagH.Metrics)
 		adminGroup.POST("/diagnostics/metrics/reset", diagH.ResetMetrics)
 

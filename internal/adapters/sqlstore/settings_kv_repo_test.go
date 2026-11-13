@@ -965,10 +965,80 @@ func TestSettingsKV_RiskRuntimeKeysRoundTrip(t *testing.T) {
 	}
 }
 
+// The access-control settings survive Save → Load under the exact "dest.<name>"
+// keys, and a fresh install reads every one of them as unset: 0 and "" are
+// "the shipped default", owned by ports.AccessControlEffectiveOf, so the
+// settings layer must not fill a default in (a stored 0 would then read as a
+// value somebody chose).
+func TestSettingsKV_DestKeysRoundTrip(t *testing.T) {
+	db, err := openTestDB(t)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	t.Cleanup(func() {
+		if sqlDB, _ := db.DB(); sqlDB != nil {
+			_ = sqlDB.Close()
+		}
+	})
+	if err := ensureTestSchema(db); err != nil {
+		t.Fatalf("schema: %v", err)
+	}
+	repo := newKVSettingsRepo(db)
+	ctx := context.Background()
+
+	fresh, err := repo.Load(ctx, ports.UISettings{})
+	if err != nil {
+		t.Fatalf("Load fresh: %v", err)
+	}
+	if got := fresh.AccessControlSettings(); got != (ports.AccessControlSettings{}) {
+		t.Fatalf("a fresh install must read every dest key as unset, got %+v", got)
+	}
+
+	in := fresh
+	in.SetAccessControlSettings(ports.AccessControlSettings{DestPolicyApplyMinSeconds: 90, DestListRefreshHours: 12, DestRulesUpdateMode: "auto"})
+	if err := repo.Save(ctx, in); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	out, err := repo.Load(ctx, ports.UISettings{})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got, want := out.AccessControlSettings(), in.AccessControlSettings(); got != want {
+		t.Fatalf("round trip = %+v, want %+v", got, want)
+	}
+	var rows []settingRow
+	if err := db.Where("type = ?", "dest").Find(&rows).Error; err != nil {
+		t.Fatalf("read rows: %v", err)
+	}
+	stored := map[string]string{}
+	for _, r := range rows {
+		stored[r.Name] = r.Value
+	}
+	for name, want := range map[string]string{
+		"policy_apply_min_seconds": "90",
+		"list_refresh_hours":       "12",
+		"rules_update_mode":        "auto",
+	} {
+		if got, ok := stored[name]; !ok || got != want {
+			t.Errorf("dest.%s stored as %q (present %v), want %q", name, got, ok, want)
+		}
+	}
+
+	// Cleared again, they read back as unset rather than as a default.
+	in.SetAccessControlSettings(ports.AccessControlSettings{})
+	if err := repo.Save(ctx, in); err != nil {
+		t.Fatalf("Save cleared: %v", err)
+	}
+	cleared, _ := repo.Load(ctx, ports.UISettings{})
+	if got := cleared.AccessControlSettings(); got != (ports.AccessControlSettings{}) {
+		t.Fatalf("cleared keys read back as %+v, want unset", got)
+	}
+}
+
 // descriptorGuardedPrefixes are the settings families whose every UISettings
 // field must be persisted: the detector's knobs, the same prefixes the admin
 // settings drift guard watches (handler.guardedSettingPrefixes).
-var descriptorGuardedPrefixes = []string{"geo_anomaly_", "risk_"}
+var descriptorGuardedPrefixes = []string{"geo_anomaly_", "risk_", "dest_"}
 
 // TestSettingsKV_EveryGuardedFieldHasADescriptor (guard): a UISettings field
 // with no descriptor is never stored, and nothing anywhere reports it — the

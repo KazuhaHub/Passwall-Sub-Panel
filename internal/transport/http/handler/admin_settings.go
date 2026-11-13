@@ -630,6 +630,11 @@ func (h *AdminSettingsHandler) Put(c *gin.Context) {
 	// more — this save does not store it, so a list that does not parse must
 	// not make the rest of the page unsavable.
 	s.SetRiskCenterPolicy(prev.RiskCenterPolicy())
+	// The access-control page owns the dest_* keys the same way
+	// (PUT /dest/settings), and this page does not even show them: they are
+	// written back exactly as loaded, so a save here cannot reset a debounce an
+	// admin set there (TestSettingsPut_PreservesEveryDestKey).
+	s.SetAccessControlSettings(prev.AccessControlSettings())
 	var pathErr error
 	if s.PanelPath, pathErr = panelpath.Normalize(s.PanelPath); pathErr != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": pathErr.Error()})

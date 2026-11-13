@@ -133,3 +133,32 @@ func TestStatusListsAvailable(t *testing.T) {
 		}
 	}
 }
+
+// The destination policy reads the active database's path from here: the
+// admin's choice when it exists, else the first by name, "" when there is none
+// — and independent of the display toggle, which gates lookups, not the file.
+func TestActiveMMDBPath(t *testing.T) {
+	set := &fakeSettings{}
+	svc := New(set, t.TempDir())
+	ctx := context.Background()
+	if got := svc.ActiveMMDBPath(ctx); got != "" {
+		t.Fatalf("no database → %q, want empty", got)
+	}
+	write(t, filepath.Join(svc.Dir(), "a.mmdb"))
+	write(t, filepath.Join(svc.Dir(), "b.mmdb"))
+	if got := filepath.Base(svc.ActiveMMDBPath(ctx)); got != "a.mmdb" {
+		t.Fatalf("default → %q", got)
+	}
+	set.s.GeoIPDBFile = "b.mmdb"
+	if got := svc.ActiveMMDBPath(ctx); filepath.Base(got) != "b.mmdb" || !filepath.IsAbs(got) {
+		t.Fatalf("chosen → %q, want an absolute path to b.mmdb", got)
+	}
+	set.s.GeoIPEnabled = false
+	if svc.ActiveMMDBPath(ctx) == "" {
+		t.Fatal("the display toggle hid the file from the policy")
+	}
+	var nilSvc *Service
+	if nilSvc.ActiveMMDBPath(ctx) != "" {
+		t.Fatal("a nil service must answer no database")
+	}
+}

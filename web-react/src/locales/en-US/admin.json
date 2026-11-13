@@ -3953,6 +3953,10 @@
         "label": "Node sync reports refused",
         "desc": "Authenticated native-node sync reports this panel refused. \"Incompatible version\" means the node is effectively offline."
       },
+      "psp_dest_list_refresh_total": {
+        "label": "Access-control list refreshes",
+        "desc": "Results of refreshing the lists the access-control policy matches against (remote lists and geosite updates). Repeated \"Failed\" means a list is serving old entries; any \"Refused: too broad\" needs an admin to look at the list."
+      },
       "psp_saml_acs_failure_total": {
         "label": "SAML sign-ins refused",
         "desc": "Refused SAML sign-ins (and sign-in starts), by reason. Configuration reasons point at identity-provider settings; \"Assertion replayed\" needs investigating."
@@ -4048,6 +4052,12 @@
       "node_refused": {
         "protocol_generation": "Incompatible version",
         "report_invalid": "Invalid report"
+      },
+      "dest_list_refresh": {
+        "unchanged": "Unchanged",
+        "updated": "Updated",
+        "failed": "Failed",
+        "broad": "Refused: too broad"
       },
       "node_host_report": {
         "accepted": "Accepted",

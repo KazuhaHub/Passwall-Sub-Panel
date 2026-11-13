@@ -38,6 +38,8 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/auth"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/cert"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/clientprov"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/destcatalog"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/destlist"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/geo"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/group"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/health"
@@ -165,6 +167,15 @@ type App struct {
 	// account's row — an admin's note about somebody nobody can open — would
 	// otherwise stay for ever: TestBuildPrunesRiskReviewOrphans.
 	riskReviews riskReviewPruner
+	// destRepos is the destination-policy store family (access control):
+	// lists, policies, exemptions, source rules, publish state, snapshots and
+	// per-agent delivery state. Concrete, like flagRecords: each consumer is
+	// handed the narrow view it declares. TestBuildWiresTheDestinationRepos.
+	destRepos *sqlstore.DestRepos
+	// destLists owns the lists (parsing, refresh, geosite data, country
+	// expansion) and destCatalog the built-in rule groups.
+	destLists   *destlist.Service
+	destCatalog *destcatalog.Service
 	saml        *auth.SAMLService
 	// repos kept around so Run() can call initAdminIfNeeded AFTER the
 	// listen socket is bound — that way a bind failure (port busy / TLS
@@ -668,6 +679,32 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 		Resumer:   userSvc,
 	})
 
+	// The destination policy ("access control"): the store family, the list
+	// service and the built-in catalog. The list service's collaborators are
+	// all optional and each degrades silently when left out (no settings: the
+	// defaults; no locator: every country is "unavailable"; no state: a GeoIP
+	// change is never noticed), which is why TestBuildWiresTheDestinationRepos
+	// drives an effect through every one of them. The locator is the geo
+	// service: a country is expanded from the very database the risk center
+	// places addresses with.
+	destRepos := sqlstore.NewDestRepos(db)
+	destLists := destlist.New(destlist.Deps{
+		Lists:       destRepos.Lists,
+		Policies:    destRepos.Policies,
+		SourceRules: destRepos.SourceRules,
+		State:       destRepos.State,
+		Settings:    repos.Settings,
+		Locator:     geoSvc,
+		DataDir:     cfg.DataDir,
+		ObserveRefresh: func(result string) {
+			metrics.DestListRefreshTotal.With(result).Inc()
+		},
+	})
+	destCatalog, err := destcatalog.New(destLists, destRepos, destRepos.Policies)
+	if err != nil {
+		return nil, fmt.Errorf("destination catalog: %w", err)
+	}
+
 	// --- transport layer ---
 	// The Node installation template is fetched from the release that published it
 	// and verified against a compiled-in key — which is why an unusable key is a
@@ -770,6 +807,9 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	a.connHistory = connHistory
 	a.flagRecords = flagRecords
 	a.riskReviews = riskReviews
+	a.destRepos = destRepos
+	a.destLists = destLists
+	a.destCatalog = destCatalog
 	// The observe-only risk signals. The worker is handed read-only views and
 	// one store that writes only risk_signals (and, in the same transaction,
 	// the flag records of what each save changed) — the store built above,
@@ -945,6 +985,9 @@ func (a *App) Run() error {
 	safego.GoTracked(&a.bgWG, "reconcile-loop", func() { a.runReconcileLoop(bgCtx) })
 	safego.GoTracked(&a.bgWG, "health-loop", func() { a.runHealthLoop(bgCtx) })
 	safego.GoTracked(&a.bgWG, "cert-renewal-loop", func() { a.runCertRenewalLoop(bgCtx) })
+	safego.GoTracked(&a.bgWG, "dest-list-refresh", func() {
+		a.runDestListRefreshLoop(bgCtx, destRefreshFirstDelay, destRefreshMaxWait)
+	})
 	return a.server.Serve(ln)
 }
 
@@ -1273,6 +1316,53 @@ func (a *App) runGeoUpdateLoop(ctx context.Context) {
 			interval = time.Duration(set.GeoIPUpdateIntervalHours) * time.Hour
 		}
 		t.Reset(interval)
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+	}
+}
+
+// The refresh loop's cadence. The first pass waits a little so a fresh boot
+// serves before it fetches; afterwards the loop sleeps the list refresh
+// interval (dest_list_refresh_hours, re-read before every sleep) but never more
+// than destRefreshMaxWait, so SHORTENING the setting takes effect within an
+// hour without a restart, as the interval-liveness table promises for the
+// other re-read loops. Lists are fetched only when older than the interval, so
+// waking more often than it costs nothing.
+const (
+	destRefreshFirstDelay = 45 * time.Second
+	destRefreshMaxWait    = time.Hour
+)
+
+// runDestListRefreshLoop is the dest-list-refresh loop: each pass refreshes the
+// remote lists that are due, probes the upstream geosite release (applying it
+// in auto mode) and notices a replaced GeoIP database (destlist.RefreshDue).
+// It runs under the operation gate like the other background passes, so a
+// restore or upgrade in progress keeps it from writing.
+func (a *App) runDestListRefreshLoop(ctx context.Context, firstDelay, maxWait time.Duration) {
+	if a.destLists == nil {
+		return
+	}
+	select {
+	case <-ctx.Done():
+		return
+	case <-time.After(firstDelay):
+	}
+	t := time.NewTimer(time.Hour) // Reset below before the first wait.
+	defer t.Stop()
+	log.Info("destination list refresh loop started")
+	for {
+		err := a.operationGate.RunRead(ctx, func(ctx context.Context) error {
+			a.destLists.RefreshDue(ctx)
+			return nil
+		})
+		if err != nil && ctx.Err() == nil {
+			log.Warn("destination list refresh pass", "err", err)
+		}
+		wait := min(a.destLists.RefreshInterval(ctx), maxWait)
+		t.Reset(wait)
 		select {
 		case <-ctx.Done():
 			return
