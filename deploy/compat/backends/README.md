@@ -48,8 +48,10 @@ release archive, because the bundled Xray 26.10.21 has no darwin build and there
 was no local container runtime. That is worth knowing before reading its
 evidence: no test depends on the core, so the nine required adapter tests passed
 against a panel whose `xrayState` was `error` for the whole run, and the Linux
-container pin (which does carry a working core) moves with the ceiling and is
-exercised by CI. See [3.11.0 evidence](../../../docs/compat/evidence/3x-ui-3.11.0.json).
+container pin (which does carry a working core) moves with the ceiling. CI did
+not actually exercise it at first: the job was skipped on the #302 PR and then
+failed on every main commit (see the random-first-user item below). The first
+passing run against the pinned digest was workflow run 43377699643. See [3.11.0 evidence](../../../docs/compat/evidence/3x-ui-3.11.0.json).
 
 ## The two probes that skip, and why a waiver has to be REQUIRED to count
 
@@ -82,6 +84,13 @@ broken adapter rather than a missing setup step.
   created through the panel — which means a cookie session *and* the
   `X-CSRF-Token` header, because the login POST now refuses without it. Inserting
   a row directly does not work: the stored value is not the presented one.
+- **3X-UI 3.11.0 seeds a random first user** (`database.EnsureFirstUser`; the
+  credentials appear once in its log) instead of admin/admin. `up` therefore sets
+  admin/admin through the panel's own `x-ui setting -username -password` before
+  logging in. Without it the login is refused with HTTP 200 and
+  `success:false`, the token request answers an unauthenticated empty 404, and
+  the launcher dies on a `JSONDecodeError`. That is how this job failed on every
+  main commit from #302 until the fix.
 - **The shared-client tests skip below two inbounds.** A fresh panel has none, so
   the launcher seeds two. Without them five tests report SKIP and the suite still
   exits 0.

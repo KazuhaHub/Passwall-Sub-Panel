@@ -24,7 +24,7 @@
   },
   "ci_image": "ghcr.io/mhsanaei/3x-ui:v3.11.0@sha256:1628adbd9bed680d25d6f714bef4a20f132105f4612ea294952f6665dad32e5b",
   "ci_image_locally_executed": false,
-  "ci_image_execution_method": "No local container runtime was available. The manual Test workflow runs the pinned linux/amd64 image, which does carry a working xray binary, before merge.",
+  "ci_image_execution_method": "No local container runtime was available. The pinned linux/amd64 image was not exercised before merge: the third-party job is skipped on pull requests, and on main it failed in launcher setup because 3.11.0 seeds a random first user instead of admin/admin. After the launcher was fixed to set the first user through the panel CLI, Test workflow run 43377699643 passed against this digest, with all nine required adapter tests passing and only the two fail2ban probes skipped as N/A.",
   "command": "go test -json -count=1 -timeout=10m ./internal/adapters/xui -run '^TestLive_'",
   "log_sha256": "0531b13895129892e33475abe8919c0b3fd4a332e73295a84b047a8d7fec9a3c",
   "checker": "deploy/compat/check-go-results.mjs --profile third-party-3xui-live",

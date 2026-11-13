@@ -197,8 +197,12 @@ up() {
   # was refused and every later call answered unauthenticated. The panel's own
   # CLI rewrites the first user on every version this harness drives, and the
   # login reads the user from the database per request, so no restart is needed.
-  $SUDO "$RUNTIME" exec "$XUI_NAME" /app/x-ui setting -username admin -password admin >/dev/null \
-    || { log "could not set the 3X-UI first user to admin/admin through its CLI"; return 1; }
+  # Its output goes to stderr, not /dev/null: upstream prints a failed user
+  # update ("Failed to update username and password") and still exits 0, so
+  # that line is the only place the real cause shows up when the login check
+  # below then refuses admin/admin.
+  $SUDO "$RUNTIME" exec "$XUI_NAME" /app/x-ui setting -username admin -password admin >&2 \
+    || { log "could not run the 3X-UI CLI to set the first user to admin/admin"; return 1; }
   local token; token=$(xui_token)
   xui_seed "$token"
   printf '%s' "$token" > "$WORKDIR/3xui.token"
