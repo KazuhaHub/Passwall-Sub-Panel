@@ -51,4 +51,16 @@ describe('HelpTip', () => {
     fireEvent.click(screen.getByRole('button', { name: 'admin:diagnostics.help_label' }))
     expect(screen.getByText('admin:diagnostics.help')).toBeTruthy()
   })
+
+  // Paragraph breaks are honoured only in a text that has them; a single-line
+  // help (every older caller) keeps the plain white-space handling.
+  it('keeps line breaks only when the text has them', () => {
+    mount(<HelpTip textKey={'a\nb'} />)
+    fireEvent.click(screen.getByRole('button'))
+    expect(getComputedStyle(document.querySelector('.MuiPopover-paper p')!).whiteSpace).toBe('pre-line')
+    cleanup()
+    mount(<HelpTip textKey="plain text" />)
+    fireEvent.click(screen.getByRole('button'))
+    expect(getComputedStyle(document.querySelector('.MuiPopover-paper p')!).whiteSpace).not.toBe('pre-line')
+  })
 })

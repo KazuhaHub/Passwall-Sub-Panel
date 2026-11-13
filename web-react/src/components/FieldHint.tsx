@@ -1,6 +1,8 @@
 import { useState } from 'react'
-import { Link, Popover, Typography } from '@mui/material'
+import { Link, Popover, Typography, useTheme } from '@mui/material'
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined'
+import WarningAmberIcon from '@mui/icons-material/WarningAmber'
+import { amber } from './ToneBadge'
 
 /**
  * A one-glance verdict under a form field, with the reasoning one click away.
@@ -23,11 +25,19 @@ export default function FieldHint({
 }: {
   summary: string
   detail: string
-  /** 'warning' for a broken or misleading cap; 'muted' for merely informational. */
-  tone?: 'warning' | 'muted'
+  /**
+   * 'warning' for a broken or misleading cap; 'muted' for merely
+   * informational; 'amber' for a reminder on the access-control page: the
+   * icon takes the amber hue and the words stay in onSurface (warning.main
+   * text reads at about 3:1, which is why the older 'warning' is kept for the
+   * old pages only).
+   */
+  tone?: 'warning' | 'muted' | 'amber'
 }) {
   const [anchor, setAnchor] = useState<HTMLElement | null>(null)
-  const color = tone === 'warning' ? 'warning.main' : 'text.secondary'
+  const theme = useTheme()
+  const isAmber = tone === 'amber'
+  const color = isAmber ? theme.palette.md.onSurface : tone === 'warning' ? 'warning.main' : 'text.secondary'
   return (
     <>
       <Link
@@ -50,6 +60,7 @@ export default function FieldHint({
           textAlign: 'left',
         }}
       >
+        {isAmber && <WarningAmberIcon aria-hidden sx={{ fontSize: 14, color: amber(theme).fg }} />}
         {summary}
         <InfoOutlinedIcon sx={{ fontSize: 13 }} />
       </Link>

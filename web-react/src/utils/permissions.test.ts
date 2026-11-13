@@ -13,6 +13,7 @@ describe('roleCan', () => {
     'sync.operate',
     'risk.view',
     'diagnostics.view',
+    'access.view',
   ]
 
   it('grants every built-in capability to admins', () => {
@@ -40,6 +41,15 @@ describe('roleCan', () => {
   it('keeps diagnostics admin-only', () => {
     expect(roleCan('admin', 'diagnostics.view')).toBe(true)
     expect(roleCan('operator', 'diagnostics.view')).toBe(false)
+  })
+
+  // Gate 2 of 3: every access-control endpoint is adminGroup (the lists and
+  // policies, and the audit rows of a test, are admin-only data).
+  it('keeps access control admin-only', () => {
+    expect(roleCan('admin', 'access.view')).toBe(true)
+    expect(roleCan('operator', 'access.view')).toBe(false)
+    expect(roleCan('user', 'access.view')).toBe(false)
+    expect(roleCan('', 'access.view')).toBe(false)
   })
 
   it('fails closed for users and missing roles', () => {

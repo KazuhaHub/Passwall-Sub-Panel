@@ -291,6 +291,39 @@ export const policies = {
     refetchInterval: 60 * SECOND,
     note: 'One registry read per minute per visible page; paused while hidden (refetchIntervalInBackground=false). Feeds the per-session growth line.',
   },
+  /**
+   * The access-control publish state and every node's delivery state. The
+   * interval is the CEILING: the hook polls at it only while a node is applying
+   * or a saved change waits to go out (destStatusActive), and never in a hidden
+   * tab; otherwise it is a focus-revalidated read like its neighbours.
+   */
+  destStatus: {
+    staleTime: 15 * SECOND,
+    gcTime: 5 * MINUTE,
+    refetchInterval: 10 * SECOND,
+    note: 'Watch delivery progress: polled only while a node is pending or a change is unpublished (conditional in the hook).',
+  },
+  /** Policies, lists, exemptions, source rules, the catalog and the rule data. */
+  destDefinitions: {
+    staleTime: 5 * MINUTE,
+    gcTime: 15 * MINUTE,
+    refetchInterval: false,
+    note: 'Edited by the admin on this page; every write invalidates what it moves (the matrix in query/accessControl.ts).',
+  },
+  /** The lists read while a refresh runs (the row's [refresh now]). */
+  destListRefreshing: {
+    staleTime: 0,
+    gcTime: MINUTE,
+    refetchInterval: 5 * SECOND,
+    note: 'Waits for a refresh to end: polled only while a list is in the refreshing state (conditional in the hook).',
+  },
+  /** One account's group and exemption, for the drawer's access tab. */
+  destUser: {
+    staleTime: 30 * SECOND,
+    gcTime: 5 * MINUTE,
+    refetchInterval: false,
+    note: 'Keyed by user id; an exemption write invalidates it; read only while the tab is open.',
+  },
 } as const satisfies Record<string, ResourcePolicy>
 
 export type PolicyName = keyof typeof policies

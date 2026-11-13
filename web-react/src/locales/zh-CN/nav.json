@@ -12,6 +12,7 @@
     "traffic": "流量统计",
     "logs": "日志管理",
     "risk_center": "风控中心",
+    "access_control": "访问控制",
     "sync_tasks": "同步任务",
     "node_issues": "节点问题",
     "language_packs": "语言包",

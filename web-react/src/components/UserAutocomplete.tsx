@@ -23,6 +23,8 @@ export interface UserAutocompleteProps {
   onChange: (userId: number | null) => void
   label?: string
   width?: number
+  /** Fill the parent's width instead of a fixed one (a phone's single column). */
+  fullWidth?: boolean
 }
 
 /**
@@ -35,7 +37,7 @@ export interface UserAutocompleteProps {
  * return it (a filter read back from the URL): it is read by id
  * (userKeys.detail).
  */
-export default function UserAutocomplete({ value, onChange, label, width = 280 }: UserAutocompleteProps) {
+export default function UserAutocomplete({ value, onChange, label, width = 280, fullWidth = false }: UserAutocompleteProps) {
   const { t } = useTranslation(['admin'])
   const scope = useQueryScope()
   const [input, setInput] = useState('')
@@ -74,7 +76,7 @@ export default function UserAutocomplete({ value, onChange, label, width = 280 }
       onInputChange={(_, v, reason) => { if (reason === 'input' || reason === 'clear') setInput(v) }}
       isOptionEqualToValue={(a, b) => a.id === b.id}
       getOptionLabel={o => o.label}
-      sx={{ width, maxWidth: '100%' }}
+      sx={{ width: fullWidth ? '100%' : width, maxWidth: '100%' }}
       renderInput={params => (
         <TextField {...params} label={label ?? t('admin:risk_center.pick_user')} />
       )}

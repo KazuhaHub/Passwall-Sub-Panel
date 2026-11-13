@@ -1408,7 +1408,8 @@
       "open_records": "在记录中查看全部",
       "records_capped": "仅显示最近 {{shown}} 条（共 {{total}} 条）",
       "logins_title": "最近登录",
-      "open_auth_logs": "在认证日志中查看"
+      "open_auth_logs": "在认证日志中查看",
+      "tab_access": "访问"
     },
     "actions": {
       "pause": "暂停代理服务",
@@ -3291,6 +3292,12 @@
       "range-stale": "当前 3X-UI 已测上限 {{max}} 是最后一次成功获取的结果；最近一次刷新失败：{{error}}",
       "core-catalog-stale": "内核审核目录未能刷新，面板正在使用{{source}}（审核时间 {{review}}）。原因：{{error}}。该审核之后被撤回的 release 仍会显示。",
       "range-unavailable": "3X-UI 兼容范围未能获取，因此所有 3X-UI 服务器都显示「未知」：{{error}}"
+    },
+    "access": {
+      "line": "访问控制：{{state}}",
+      "dialog_title": "{{name}} · 访问控制",
+      "open_page": "打开访问控制",
+      "close": "关闭"
     }
   },
   "diagnostics": {
@@ -4323,6 +4330,819 @@
       "succeeded": "成功",
       "failed": "失败",
       "indeterminate": "结果未知"
+    }
+  },
+  "access_control": {
+    "title": "访问控制",
+    "subtitle": "决定用户能通过原生节点访问哪些目的地。",
+    "retry": "重试",
+    "unwired": "访问控制未接线：服务端没有启用这个功能",
+    "tab_policies": "策略",
+    "tab_lists": "列表",
+    "help": {
+      "label": "说明",
+      "policies": "访问控制由节点强制执行，命中拦截的连接会被断开。「规则库」只决定客户端怎么分流，用户可以自己改掉。只有 PSP 原生节点执行这些策略；3X-UI 和 S-UI 的路由由运营者自己管理。\n\n规则从上到下判断，命中第一条就停止。\n\n节点只看得到目的地（域名或 IP），看不到网址路径。可被绕过：ECH、先用 DoH 解析再直连 IP、客户端自带的加密隧道。\n\nIP 段只对以 IP 发起的连接生效，域名解析出的 IP 不参与匹配。BT 只识别明文握手与 uTP，加密 BT 和 DHT 识别不到。\n\n正则要对每个连接逐条匹配，很耗资源，最多 {{max_regexps}} 条。\n\n每次下发，节点会重启代理程序一次，正在使用的连接断开一次；最后一次修改后等 {{seconds}} 秒再下发，连续修改合并为一次。",
+      "lists": "支持的写法：纯域名、`domain:` / `full:` / `keyword:` / `regexp:`、`*.x`、hosts 行、AdGuard `||x^`、Clash 规则、IP 与 IP 段；`#` 开头是注释。保存时统一转小写、去尾点、中文域名转 punycode、IP 段对齐到网络号。\n\n远程与分类列表每 {{hours}} 小时刷新一次，只在内容变化时才下发；刷新失败时继续用旧内容。\n\n过宽的条目（几乎匹配所有域名的正则、少于 4 个字符的关键词、公共后缀本身、太大的 IP 段）在自定义列表里会被忽略；放行策略引用的远程、分类列表里出现它们时，这次刷新算失败，继续用旧内容。"
+    },
+    "header": {
+      "test": "测试目的地",
+      "pick_user": "查看账号…"
+    },
+    "menu": {
+      "label": "更多操作",
+      "settings": "数据与下发设置…",
+      "pause": "暂停全部执行…",
+      "paused_snack": "访问控制已暂停",
+      "resumed_snack": "已恢复执行"
+    },
+    "verdict": {
+      "read_failed": "读取节点状态失败",
+      "read_at": "读取于 {{time}}",
+      "stale": "刷新失败，数据可能已过期",
+      "what": {
+        "rules": "规则",
+        "domains": "域名",
+        "regexps": "正则",
+        "cidrs": "IP 段",
+        "bytes": "配置大小",
+        "invalid": "配置无效",
+        "entries": "条目"
+      },
+      "title": {
+        "paused": "访问控制已暂停：所有节点都不执行策略",
+        "publish_refused": "改动没有下发：{{what}} {{used}} / {{limit}}，超出额度；各节点仍执行上一版",
+        "publish_refused_invalid": "改动没有下发：配置无效；各节点仍执行上一版",
+        "refused_other": "{{count}} 台节点拒绝了新策略，仍在执行上一版",
+        "no_coverage_other": "有 {{count}} 条启用的策略，但没有任何节点会执行它们",
+        "upgrade_other": "{{count}} 台原生节点需升级才能执行策略",
+        "offline_other": "{{count}} 台原生节点离线，恢复上报后才会执行最新版本",
+        "list_failed": "列表「{{name}}」刷新失败，仍在使用 {{ago}}的内容",
+        "list_pending": "列表「{{name}}」还没有下载成功，引用它的部分暂不生效",
+        "waiting_other": "改动已保存，约 {{minutes}} 分钟内下发到 {{count}} 台节点",
+        "waiting_unknown_other": "改动已保存，几分钟内下发到 {{count}} 台节点",
+        "rolling": "正在下发：已生效 {{done}} / {{total}} 台",
+        "applied_other": "策略在 {{count}} 台节点上生效",
+        "idle": "还没有启用的策略"
+      },
+      "skip": {
+        "prefix": "不执行：",
+        "separator": " · ",
+        "unsupported_kind_other": "3X-UI / S-UI {{count}} 台（设计如此）",
+        "upgrade_other": "需升级 {{count}} 台",
+        "offline_other": "离线 {{count}} 台",
+        "not_enrolled_other": "{{count}} 台未接入"
+      },
+      "detail": {
+        "countdown_other": "{{count}} 秒后下发",
+        "restart": "每台节点会重启代理程序一次，正在使用的连接断开一次；连续修改会合并为一次下发。",
+        "sniffing": "入站「{{inbounds}}」没有识别域名，域名规则在它上面不生效。仍在执行上一版。",
+        "over_limit": "{{what}} {{used}} / {{limit}}。仍在执行上一版。",
+        "rejected": "节点拒绝了新策略。仍在执行上一版。",
+        "publish_refused": "再次保存会重新尝试下发。",
+        "list_separator": "、"
+      },
+      "action": {
+        "nodes": "节点覆盖",
+        "lists": "查看列表",
+        "resume": "恢复执行",
+        "publish": "立即下发"
+      }
+    },
+    "confirm": {
+      "minutes_other": "约 {{count}} 分钟",
+      "minutes_unknown": "几分钟",
+      "nodes_other": "{{count}} 台节点",
+      "nodes_unknown": "各节点",
+      "first_publish": {
+        "title": "启用第一条访问策略？",
+        "message": "{{nodes}}会在{{minutes}}内各重启代理程序一次，正在使用的连接断开一次，客户端会自动重连。之后的修改也会这样下发；{{seconds}} 秒内的连续修改合并为一次。",
+        "message_no_window": "{{nodes}}会在{{minutes}}内各重启代理程序一次，正在使用的连接断开一次，客户端会自动重连。之后的修改也会这样下发，连续修改合并为一次。",
+        "action": "启用"
+      },
+      "delete_policy": {
+        "title": "删除策略「{{name}}」？",
+        "message": "删除后{{minutes}}内不再执行。",
+        "action": "删除"
+      },
+      "delete_list": {
+        "title": "删除列表「{{name}}」？",
+        "message": "这个列表没有被使用，删除不会影响节点。",
+        "action": "删除"
+      },
+      "list_in_use": {
+        "title": "列表正在被使用",
+        "message": "先从这些地方移除它：",
+        "action": "知道了"
+      },
+      "switch_list_type": {
+        "title": "切换类型会清空已填内容？",
+        "message": "自定义的文本、远程地址、分类选择互不通用，切换后当前输入不保留。",
+        "action": "切换"
+      },
+      "remove_exemption": {
+        "title": "取消 {{upn}} 的豁免？",
+        "message": "之后访问策略会对这个账号生效，{{minutes}}内生效。",
+        "action": "取消豁免"
+      },
+      "pause": {
+        "title": "暂停全部访问控制？",
+        "message": "所有节点会在{{minutes}}内停止执行策略，并各重启代理程序一次；定义全部保留，恢复后照原样执行。",
+        "action": "暂停"
+      },
+      "resume": {
+        "title": "恢复访问控制？",
+        "message": "所有节点会在{{minutes}}内重新执行策略，并各重启代理程序一次。",
+        "action": "恢复"
+      },
+      "discard": {
+        "title": "放弃未保存的修改？",
+        "message": "关闭后，这次的修改不会保存。",
+        "action": "放弃",
+        "keep": "继续编辑"
+      }
+    },
+    "errors": {
+      "generic": "操作失败，请稍后重试",
+      "dest_unavailable": "访问控制未接线：服务端没有启用这个功能",
+      "dest_bad_request": "请求内容无法识别",
+      "dest_bad_id": "对象编号无效",
+      "dest_list_parse_failed": "列表里有无法保存的行",
+      "dest_list_too_large": "列表太大：{{what}} {{used}} / {{limit}}",
+      "dest_list_too_broad": "列表里有过宽的条目",
+      "dest_list_insecure_url": "只支持 https 地址",
+      "dest_list_in_use": "这个列表正在被策略使用",
+      "dest_list_stale": "这个列表刚被其他人修改过",
+      "dest_policy_invalid": "策略的内容无效",
+      "dest_policy_no_match": "至少选择一个列表或设置一个条件",
+      "dest_policy_over_limit": "超出额度：{{what}} {{used}} / {{limit}}。超出额度时新版本不会下发，节点继续执行上一版",
+      "dest_policy_state_unavailable": "这个状态暂不可用",
+      "dest_policy_stale": "这条策略刚被其他人修改过，已重新载入",
+      "dest_policy_order_stale": "顺序已被其他人修改，已重新载入",
+      "dest_name_taken": "这个名称已被使用",
+      "dest_geosite_busy": "社区分类数据正在更新，请稍后再试",
+      "dest_geosite_update_rejected": "这次更新会破坏正在生效的策略，已保留旧数据",
+      "dest_geosite_unavailable": "社区分类数据尚未下载",
+      "dest_geoip_unavailable": "没有可用的 GeoIP 库",
+      "dest_source_rule_not_native": "只有原生节点能设置来源规则",
+      "dest_source_rule_stale": "这条来源规则刚被其他人修改过，已重新载入",
+      "dest_exemption_exists": "这个账号已被豁免",
+      "dest_exemption_invalid": "豁免的内容无效",
+      "dest_exception_invalid": "放行例外的内容无效",
+      "dest_test_invalid": "测试的内容无效",
+      "dest_settings_invalid": "设置超出范围",
+      "dest_template_unavailable": "这个规则组没有现成的通用分类",
+      "dest_template_exists": "这个规则组已经添加过了",
+      "dest_source_rule_invalid": "来源规则的内容无效"
+    },
+    "node_state": {
+      "applied": "已生效",
+      "applied_exec_only": "已生效 · 只执行",
+      "pending": "下发中",
+      "pending_long": "下发中 · {{minutes}} 分钟",
+      "rejected": "节点拒绝了新策略",
+      "sniffing": "入站没有识别域名",
+      "over_limit": "规则太多",
+      "unsupported_version": "需升级",
+      "unsupported_kind": "不适用",
+      "offline": "离线",
+      "none": "没有策略",
+      "paused": "已暂停",
+      "not_enrolled": "未接入"
+    },
+    "node_note": {
+      "applied": "执行 {{rules}} 条规则 · {{ago}}生效",
+      "applied_no_time": "执行 {{rules}} 条规则",
+      "applied_exec_only": "sing-box 节点只执行，不记录",
+      "pending": "节点会在下次同步时重启代理程序",
+      "pending_long": "节点可能离线，或代理程序重启失败",
+      "rejected": "仍在执行上一版。回退期间新加入作用分组的成员，在这台节点上不受该分组的拦截策略约束。",
+      "sniffing": "入站「{{inbounds}}」没有识别域名，域名规则在它上面不生效。仍在执行上一版。",
+      "over_limit": "{{what}} {{used}} / {{limit}}。仍在执行上一版。",
+      "unsupported_version": "节点版本过旧，不能执行访问策略。",
+      "unsupported_kind": "3X-UI / S-UI 的路由由运营者自己管理，不执行访问策略。",
+      "offline": "恢复上报后自动下发",
+      "none": "这台节点没有要执行的策略",
+      "paused": "访问控制已暂停，恢复后照原样执行。",
+      "not_enrolled": "这台原生节点还没有接入，没有 agent 上报。"
+    },
+    "node_action": {
+      "retry": "重新下发",
+      "open_inbound": "修改入站",
+      "view_lists": "查看列表",
+      "upgrade": "升级",
+      "node_issues": "节点问题",
+      "open_server": "打开服务器"
+    },
+    "node_problem": {
+      "sniffing_title": "入站「{{inbounds}}」没有识别域名",
+      "sniffing_impact": "影响：从这个入站进来的连接不受域名策略约束",
+      "rejected_title": "节点拒绝了新策略",
+      "rejected_impact": "影响：仍在执行上一版",
+      "over_limit_title": "{{what}} {{used}} / {{limit}}，超出额度",
+      "over_limit_impact": "影响：仍在执行上一版",
+      "list_separator": "、"
+    },
+    "lists": {
+      "new": "新建列表",
+      "kind": {
+        "custom": "自定义",
+        "remote": "远程地址",
+        "geosite": "社区分类"
+      },
+      "kpi": {
+        "domains": "域名条目",
+        "regexps": "正则",
+        "cidrs": "IP 段",
+        "problems": "有问题",
+        "of": "共 {{limit}}",
+        "problems_caption": "刷新失败或未就绪",
+        "over_quota": "超出额度时新版本不会下发，节点继续执行上一版"
+      },
+      "refresh_note": "远程与分类列表每 {{hours}} 小时刷新一次",
+      "change": "修改",
+      "cols": {
+        "name": "名称",
+        "entries": "条目",
+        "status": "状态",
+        "usage": "使用情况",
+        "actions": "操作"
+      },
+      "state": {
+        "ready": "已更新",
+        "refreshing": "刷新中",
+        "failed_old": "刷新失败，仍用旧内容",
+        "failed_never": "下载失败，从未成功",
+        "pending": "等待首次下载",
+        "pending_used": "从未下载，引用它的部分暂不生效"
+      },
+      "usage": {
+        "policies_other": "{{count}} 条策略",
+        "unused": "未使用"
+      },
+      "menu": {
+        "label": "{{name}} 的操作",
+        "view": "查看条目",
+        "edit": "编辑",
+        "refresh": "立即刷新",
+        "delete": "删除",
+        "delete_in_use": "被 {{count}} 条策略使用"
+      },
+      "empty": "还没有列表。策略都从列表里取目的地。",
+      "empty_filtered": "没有符合的列表",
+      "clear_filter": "清除筛选",
+      "load_failed": "读取列表失败",
+      "geosite_missing": "社区分类数据尚未下载",
+      "geosite_download": "立即下载",
+      "snack": {
+        "saved": "已保存「{{name}}」",
+        "deleted": "已删除「{{name}}」",
+        "refresh_started": "已开始刷新「{{name}}」",
+        "downloaded": "已下载社区分类数据"
+      },
+      "label": {
+        "entries": "条目",
+        "status": "状态",
+        "usage": "使用情况"
+      },
+      "sheet": {
+        "close": "关闭",
+        "source": "远程地址：{{url}}",
+        "category": "社区分类：{{name}}",
+        "custom": "自定义列表",
+        "counts": "条目 {{entries}} · 正则 {{regexps}}",
+        "first200": "共 {{count}} 条，这里只显示前 200 条（搜索只在这 200 条里进行）",
+        "search": "搜索条目",
+        "none": "没有条目",
+        "no_match": "没有匹配的条目",
+        "test": "测试此目的地",
+        "refresh": "立即刷新",
+        "edit": "编辑",
+        "load_failed": "读取条目失败"
+      },
+      "dialog": {
+        "title_new": "新建列表",
+        "title_edit": "编辑列表「{{name}}」",
+        "close": "关闭",
+        "name": "名称",
+        "name_required": "名称必填",
+        "text": "列表内容",
+        "url": "地址",
+        "url_https": "只支持 https 地址",
+        "test_fetch": "测试拉取",
+        "fetching": "正在拉取…",
+        "fetch_result": "拉取结果  HTTP {{code}} · {{size}} · 接受 {{accepted}} 条 · 忽略 {{ignored}} 条",
+        "fetch_failed": "拉取失败：{{error}}",
+        "refresh_follows": "刷新：跟随全局设置（每 {{hours}} 小时）",
+        "category": "分类",
+        "category_option": "{{name}} · {{entries}} 条",
+        "attrs": "属性",
+        "geosite_note": "数据来自 v2fly domain-list-community。",
+        "geosite_counts": "这个分类有 {{entries}} 条，其中正则 {{regexps}} 条",
+        "footer_used_other": "被 {{count}} 条启用的策略使用；内容变化会让 {{nodes}}各重启一次。",
+        "footer_nodes_other": "{{count}} 台节点",
+        "footer_nodes_unknown": "各节点",
+        "footer_unchanged": "内容未变化，不会触发重启",
+        "footer_unused": "这个列表没有被使用，保存不会影响节点",
+        "save": "保存",
+        "cancel": "取消",
+        "stale": "这个列表刚被其他人修改过",
+        "load_latest": "载入最新",
+        "preview_failed": "无法解析：{{error}}",
+        "previewing": "正在解析…",
+        "parse_failed": "有无法保存的行",
+        "line_n": "第 {{line}} 行",
+        "load_failed": "读取列表失败",
+        "too_large": "列表太大：{{what}} {{used}} / {{limit}}，无法保存",
+        "too_broad": "条目过宽：{{entry}}",
+        "name_taken": "这个名称已被使用",
+        "syntax_title": "支持的写法",
+        "syntax": "每行一条，# 开头是注释。\n纯域名：example.com\ndomain:example.com（含子域名）\nfull:www.example.com（只匹配这个主机名）\nkeyword:example\nregexp:^ads[0-9]+\\.example\\.com$\n*.example.com 或 .example.com\nhosts 行：0.0.0.0 example.com\nAdGuard：||example.com^\nIP 与 IP 段：203.0.113.0/24\nClash 规则：DOMAIN-SUFFIX,example.com\n保存时统一转小写、去尾点、中文域名转 punycode、IP 段对齐到网络号。"
+      },
+      "report": {
+        "summary": "解析结果  接受 {{accepted}} 条 · 改写 {{rewritten}} 条 · 忽略 {{ignored}} 条",
+        "duplicates": "重复 {{count}} 条",
+        "more_other": "还有 {{count}} 条",
+        "warnings": "提醒",
+        "entries_only": "接受 {{count}} 条，其中正则 {{regexps}} 条",
+        "jump": "跳到第 {{line}} 行",
+        "reason": {
+          "rewritten_to_network": "已改写：IP 段已对齐到网络号",
+          "trailing_field_dropped": "已改写：行尾多余的内容已去掉",
+          "localhost": "本机地址，已忽略",
+          "adguard_modifier": "带修饰符的规则不支持",
+          "adguard_exception": "例外规则不支持",
+          "adguard_unsupported": "不支持的 AdGuard 写法",
+          "not_applicable_on_node": "不适用于节点",
+          "unrecognized": "无法识别的写法",
+          "invalid_domain": "不是有效的域名",
+          "invalid_cidr": "不是有效的 IP 段",
+          "invalid_country": "不是有效的国家代码",
+          "invalid_geosite": "不是有效的分类名",
+          "broad_regexp": "过宽：几乎匹配所有域名",
+          "broad_keyword": "过宽：关键词太短",
+          "broad_suffix": "过宽：这是公共后缀",
+          "broad_cidr": "过宽：IP 段太大",
+          "regexp_invalid": "正则无法编译",
+          "regexp_too_long": "正则太长",
+          "source_line_in_dest_list": "来源规则只能用在来源列表里",
+          "dest_line_in_source_list": "目的地规则不能用在来源列表里",
+          "unknown": "无法保存这一行"
+        },
+        "warn": {
+          "regexp_no_anchor": "正则没有字面量锚点，匹配会很慢",
+          "regexp_long": "正则太长，匹配会很慢",
+          "unknown": "需要留意的写法"
+        }
+      },
+      "error": {
+        "http": "服务器返回 HTTP {{code}}",
+        "too_large": "列表太大，超出额度",
+        "broad": "含有过宽的条目：{{entry}}",
+        "generic": "刷新失败"
+      }
+    },
+    "exemptions": {
+      "title": "豁免账号",
+      "lead": "豁免的账号不受任何访问限制。只用于排障或特殊账号。",
+      "add": "添加豁免",
+      "empty": "没有豁免的账号。建议只在排查问题时临时豁免，并设置到期时间。",
+      "load_failed": "读取豁免账号失败",
+      "reason_line": "{{reason}} · 由 {{by}} 于 {{ago}}添加",
+      "permanent": "永久",
+      "expires_in": "{{left}}后到期",
+      "expired": "已到期，等待清理（最多 1 小时）",
+      "expiry_tip": "到期后最迟约 1 小时加一个下发窗口才真正失效",
+      "row_menu": "更多操作",
+      "open_user": "打开账号",
+      "edit": "修改原因与到期",
+      "cancel": "取消豁免",
+      "removed_snack": "已取消 {{upn}} 的豁免，将随下一次下发生效",
+      "dialog": {
+        "title_add": "添加豁免",
+        "title_edit": "修改豁免",
+        "user": "账号",
+        "reason": "原因",
+        "expiry": "到期",
+        "forever": "永久",
+        "h24": "24 小时",
+        "d7": "7 天",
+        "custom": "自定义…",
+        "custom_label": "到期时间（浏览器时间）",
+        "custom_past": "到期时间必须晚于现在",
+        "user_required": "请选择账号",
+        "reason_required": "请填写原因",
+        "exists": "这个账号已被豁免",
+        "h24_note": "到期后最迟约 1 小时加一个下发窗口才真正失效",
+        "apply_note": "{{minutes}}内生效。",
+        "save": "添加",
+        "save_edit": "保存",
+        "cancel": "取消",
+        "added_snack": "已豁免 {{upn}}，将随下一次下发生效",
+        "updated_snack": "已更新 {{upn}} 的豁免"
+      },
+      "left_minutes": "{{count}} 分钟",
+      "left_hours": "{{count}} 小时",
+      "left_days": "{{count}} 天"
+    },
+    "drawer": {
+      "group": "分组",
+      "open": "不限",
+      "no_group": "没有分组",
+      "exemption": "豁免",
+      "not_exempt": "未豁免",
+      "permanent": "永久",
+      "expires_in": "{{left}}后到期",
+      "exemption_line": "豁免：{{reason}} · 由 {{by}} 于 {{ago}}添加 · {{expiry}}",
+      "exempt_hint": "访问策略不对这个账号生效",
+      "add_exemption": "豁免此账号…",
+      "remove_exemption": "取消豁免",
+      "removed_snack": "已取消 {{upn}} 的豁免，将随下一次下发生效",
+      "retry": "重试",
+      "load_failed": "读取这个账号的访问信息失败"
+    },
+    "sheet": {
+      "close": "关闭"
+    },
+    "settings": {
+      "title": "数据与下发设置",
+      "saved": "已保存",
+      "unwired": "设置未接线",
+      "read_failed": "读取设置失败",
+      "group_refresh": "列表刷新",
+      "group_apply": "下发",
+      "group_rules": "规则数据版本",
+      "apply_seconds": "策略下发等待（秒）",
+      "apply_seconds_hint": "最后一次修改后等这么久再下发；连续修改合并为一次。每次下发，节点会重启代理程序一次。",
+      "refresh_hours": "远程与分类列表刷新间隔（小时）",
+      "refresh_hours_hint": "远程与分类列表按这个间隔重新拉取，只在内容变化时才下发。",
+      "out_of_range": "超出范围",
+      "changed_other": "已修改 {{count}} 项",
+      "discard": "放弃",
+      "save": "保存"
+    },
+    "rule_data": {
+      "read_failed": "读取规则数据版本失败",
+      "none": "还没有下载社区分类数据。",
+      "current": "当前版本 {{tag}}",
+      "released": "发布于 {{date}}",
+      "age_other": "{{count}} 天前",
+      "latest": "上游最新版本 {{tag}}",
+      "latest_unknown": "还没有检查过上游的最新版本",
+      "behind_other": "落后 {{count}} 天",
+      "update_available": "有新版本",
+      "latest_error": "检查上游失败",
+      "data_error": {
+        "summary": "当前规则数据无法使用",
+        "detail": "磁盘上的规则数据缺失或已损坏，引用社区分类的部分暂不生效。可以重新更新，或回到上一版本。"
+      },
+      "last_update_error": {
+        "summary": "上一次更新失败，仍在使用旧数据",
+        "detail": "这次更新没有成功，规则数据没有变化。可以稍后重试。"
+      },
+      "check_update": "检查更新…",
+      "rollback": "回到上一版本（{{tag}}）",
+      "working": "正在下载并校验，请稍候",
+      "applied_snack": "已切换到规则数据 {{tag}}",
+      "mode": {
+        "title": "更新方式",
+        "manual": "手动",
+        "auto": "自动",
+        "manual_hint": "发现新版本时只提示，由你检查更新并确认。",
+        "auto_hint": "发现新版本就下载、校验并应用；每次让正在使用的分类变化，节点会各重启代理程序一次。"
+      },
+      "rejection": {
+        "broad_entry": "列表「{{list}}」里会出现过宽的条目 {{entry}}，这次更新会被拒绝，继续使用旧数据。",
+        "dest_list_too_large": "列表「{{list}}」会超出额度（{{used}} / {{limit}}），这次更新会被拒绝，继续使用旧数据。",
+        "category_gone": "列表「{{list}}」用的分类在新版本里已经没有了，这次更新会被拒绝，继续使用旧数据。",
+        "policy_over_limit": "更新后策略会超出额度（{{used}} / {{limit}}），这次更新会被拒绝，继续使用旧数据。",
+        "other": "这次更新会破坏正在生效的策略，继续使用旧数据。",
+        "refused": "这次更新被拒绝，继续使用旧数据。"
+      },
+      "review": {
+        "title_update": "更新规则数据？",
+        "title_rollback": "回到上一版本？",
+        "from_to": "{{from}} → {{to}}",
+        "to": "更新到 {{to}}",
+        "unchanged": "已经是这个版本，没有可更新的内容。",
+        "category": "分类",
+        "entries": "条目",
+        "change": "变化",
+        "in_use": "正在使用",
+        "restart": "正在使用的分类有变化，应用后各节点会重启代理程序一次。",
+        "no_restart": "正在使用的分类没有变化，不会触发节点重启。",
+        "cancel": "取消",
+        "apply_update": "应用更新",
+        "apply_rollback": "回到这个版本"
+      },
+      "rollback_changed": "上一版本已经变了，没有回滚。请重新检查。",
+      "rollback_recheck_failed": "无法确认上一版本是否仍是刚才预览的那一版，没有回滚。请稍后重试。"
+    },
+    "source_rules": {
+      "read_failed": "读取来源规则失败",
+      "title": "拒绝来源国家或地区",
+      "hint": "这个入站拒绝来自下列国家或地区、以及下列 IP 段的连接。它回答「这个入站对谁开放」，豁免账号也绕不过。",
+      "geoip_missing": {
+        "summary": "没有 GeoIP 库：国家规则不会执行",
+        "detail": "国家要用 GeoIP 库展开成 IP 段。库不可用时，这条来源规则会被跳过，不会被当作已执行；请先在系统设置里配置 GeoIP 库。"
+      },
+      "note": {
+        "geoip_unavailable": {
+          "summary": "这条规则因 GeoIP 库不可用而未执行",
+          "detail": "已开启的国家规则需要 GeoIP 库，现在没有可用的库，所以没有下发。"
+        },
+        "empty": {
+          "summary": "这条规则没有内容",
+          "detail": "没有选择国家，也没有填写 IP 段，开启它不会拒绝任何连接。"
+        }
+      },
+      "countries": "拒绝的国家或地区",
+      "cidrs": "拒绝的来源 IP 段（可选，每行一个）",
+      "cidrs_hint": "例如 203.0.113.0/24 或 2001:db8::/32。节点前面有中转或 CDN 时，看到的是它们的地址。",
+      "bad_lines": "第 {{lines}} 行不是有效的 IP 段",
+      "enabled": "启用",
+      "save": "保存来源规则",
+      "saved": "已保存来源规则",
+      "stale": "这条来源规则刚被其他人修改过，已重新载入，请确认后再保存。",
+      "restart_other": "保存后约 {{count}} 分钟内生效，节点会重启代理程序一次。",
+      "restart_unknown": "保存后几分钟内生效，节点会重启代理程序一次。",
+      "unsaved": {
+        "summary": "来源规则未保存，用下方按钮保存",
+        "detail": "这个入站的「拒绝来源国家或地区」有未保存的修改。它由自己的保存按钮保存，不会随上面的确定一起保存。"
+      }
+    },
+    "coverage": {
+      "title": "节点覆盖 · {{n}} 台",
+      "filter": {
+        "applied": "已生效",
+        "pending": "下发中",
+        "problem": "有问题",
+        "upgrade": "需升级",
+        "inactive": "不执行"
+      },
+      "empty": "没有符合的节点",
+      "clear_filter": "清除筛选",
+      "apply_line": "最后一次修改后等 {{seconds}} 秒再下发，连续修改会合并",
+      "edit": "修改",
+      "old_data": "仍在使用旧版规则数据（{{version}}）",
+      "geoip_unavailable": "来源规则未执行：GeoIP 库不可用",
+      "row_menu": "{{name}} 的更多操作",
+      "retried": "已请求重新下发",
+      "not_retried": "这台节点没有被拒绝的策略，无需重新下发"
+    },
+    "policies": {
+      "read_failed": "读取策略失败",
+      "new": "新建策略",
+      "new_blank": "空白策略",
+      "state": {
+        "off": "关闭",
+        "on": "开启"
+      },
+      "action": {
+        "block": "拦截",
+        "allow": "放行"
+      },
+      "list_kind": {
+        "custom": "自定义",
+        "remote": "远程地址",
+        "geosite": "社区分类"
+      },
+      "summary": {
+        "list": "列表「{{value}}」",
+        "cidrs": "IP 段 {{value}} 个",
+        "private": "内网与云元数据地址",
+        "bt": "BT 协议",
+        "ports": "端口 {{value}}",
+        "network": "{{value}}",
+        "or": " 或 ",
+        "and": " 且 "
+      },
+      "quota": {
+        "label": "额度",
+        "failed": "额度读取失败",
+        "kind": {
+          "rules": "规则",
+          "domains": "域名",
+          "regexps": "正则",
+          "cidrs": "IP 段",
+          "subjects": "账号",
+          "bytes": "配置大小"
+        },
+        "over_note": "超出额度时新版本不会下发，节点继续执行上一版",
+        "after_save": "额度（保存后）",
+        "no_executor": "当前没有节点执行"
+      },
+      "rail": {
+        "order": "按匹配顺序，从上到下，命中第一条即停止",
+        "allow": "放行",
+        "allow_caption": "命中即放行",
+        "exempt_one": "豁免账号 · {{count}} 个",
+        "exempt_other": "豁免账号 · {{count}} 个",
+        "exempt_none": "没有豁免账号",
+        "exempt_caption": "不受任何访问限制",
+        "manage": "管理",
+        "block": "拦截",
+        "rest": "其余连接：直接放行",
+        "empty_step": "这一步还没有策略",
+        "add_allow": "放行策略",
+        "add_block": "拦截策略",
+        "add_allow_aria": "新建放行策略",
+        "add_block_aria": "新建拦截策略"
+      },
+      "row": {
+        "paused": "已停用",
+        "not_ready": "列表未就绪",
+        "not_ready_hint": "引用的列表还没下载成功，这部分暂不生效，其余照常下发",
+        "not_ready_detail": "列表等待首次下载，这部分暂不生效",
+        "empty_list": "列表为空",
+        "nothing_left": "没有可下发的内容",
+        "scope_missing_badge": "作用范围已删除",
+        "scope_missing": "作用范围已删除，这条策略现在对谁都不生效",
+        "deleted_list": "已删除的列表",
+        "deleted_group": "已删除的分组",
+        "deleted_panel": "已删除的节点",
+        "scope_all": "所有人",
+        "no_condition": "没有匹配条件",
+        "saving": "保存中",
+        "toggle": "启用「{{name}}」",
+        "menu": "「{{name}}」的更多操作",
+        "menu_edit": "编辑",
+        "menu_duplicate": "复制",
+        "menu_up": "上移",
+        "menu_down": "下移",
+        "menu_top": "移到本段顶部",
+        "menu_bottom": "移到本段底部",
+        "menu_delete": "删除",
+        "copy_name": "{{name}}（副本）"
+      },
+      "snack": {
+        "disabled": "已停用「{{name}}」，将随下一次下发生效",
+        "moved": "已移到「{{section}}」第 {{n}} 位",
+        "template_added": "已添加规则组"
+      },
+      "empty": {
+        "title": "还没有访问策略",
+        "body": "从模板开始，或新建空白策略。添加时自己选择关闭或开启，不会默认启用。",
+        "blank": "新建空白策略"
+      },
+      "editor": {
+        "close": "关闭",
+        "cancel": "取消",
+        "save": "保存",
+        "title_new": "新建策略",
+        "title_edit": "编辑策略「{{name}}」",
+        "reload": "载入最新",
+        "stale": "这条策略刚被其他人修改过",
+        "name": "名称",
+        "description": "说明",
+        "action": "动作",
+        "action_help": {
+          "block": "断开连接。",
+          "allow": "直接放行，先于豁免和拦截判断。"
+        },
+        "allow_hint": {
+          "summary": "放行先于拦截判断",
+          "detail": "放行在拦截之前判断：命中的连接一律放过，后面的拦截策略对它们不起作用。"
+        },
+        "state": "状态",
+        "match": "匹配什么",
+        "lists": "列表",
+        "list_option": "{{name}} · {{kind}} · {{entries}} 条（正则 {{regexps}}）",
+        "list_not_ready": "未就绪",
+        "not_ready_hint": {
+          "summary": "这部分在列表下载成功前不生效",
+          "detail": "节点照常执行这条策略的其他条件；列表第一次下载成功后，下一次下发时补上。"
+        },
+        "cidrs": "IP 段（每行一个）",
+        "cidr_hint": {
+          "summary": "只对以 IP 发起的连接生效",
+          "detail": "域名解析出的 IP 不参与匹配，节点不做额外解析。"
+        },
+        "ports": "端口",
+        "ports_hint": "写法：25,465,587 或 1000-2000",
+        "network": "网络",
+        "network_all": "全部",
+        "bittorrent": "BT 协议",
+        "bittorrent_hint": "只识别明文握手与 uTP",
+        "private": "内网与云元数据地址",
+        "scope": "对谁生效",
+        "scope_all": "所有人",
+        "scope_groups": "指定分组",
+        "scope_panels": "指定节点",
+        "groups": "分组",
+        "panels": "节点",
+        "errors": {
+          "name_required": "请填写名称",
+          "no_match": "至少选择一个列表或设置一个条件",
+          "scope_groups": "至少选择一个分组",
+          "scope_panels": "至少选择一个节点",
+          "description_too_long": "描述最多 {{max}} 字节（按 UTF-8 计，一个汉字约 3 字节）",
+          "name_too_long": "名称最多 {{max}} 字节（按 UTF-8 计，一个汉字约 3 字节）"
+        },
+        "saved": "已保存「{{name}}」，将随下一次下发生效",
+        "position": "在第 {{step}} 步、第 {{index}} 条判断",
+        "split": "会拆成两条规则下发；端口与网络对两部分都生效",
+        "footer": {
+          "disabled": "已停用的策略不会下发",
+          "rename_only": "只改名称或说明不会让节点重启",
+          "applies_unknown": "保存后几分钟内在各节点生效，节点会重启代理程序一次",
+          "applies_one": "约 {{minutes}} 分钟内在 {{count}} 台节点生效，节点会重启代理程序一次",
+          "applies_other": "约 {{minutes}} 分钟内在 {{count}} 台节点生效，节点会重启代理程序一次"
+        },
+        "template_locked": {
+          "summary": "匹配内容由规则组目录决定",
+          "detail": "这条策略来自内置规则组，匹配内容只读。名称、说明、状态和作用范围可以修改；要改匹配内容，请复制成自定义策略。"
+        },
+        "bittorrent_block_only": "BT 协议只能用于拦截策略。",
+        "removed_deleted_other": "有 {{count}} 个已删除的分组或节点已从范围中移除，保存后生效"
+      },
+      "separator": "、",
+      "template_name_taken": "已有同名策略。先给现有策略改名或删除它，再添加这个规则组。"
+    },
+    "templates": {
+      "added": "已添加",
+      "add_another": "再添加一条",
+      "use": "使用模板",
+      "new_list": "新建列表",
+      "unavailable_title": "没有现成分类的规则组",
+      "close": "关闭",
+      "menu_heading": "常用模板",
+      "why_none": "为什么有些规则组没有模板？",
+      "chooser_title": "添加「{{name}}」",
+      "chooser_state": "添加后的状态",
+      "chooser_help": "不会默认启用：关闭只创建策略，开启会在下一次下发后执行。",
+      "update_data": "去更新规则数据",
+      "cancel": "取消",
+      "add": "添加"
+    },
+    "test": {
+      "title": "测试目的地",
+      "target": "目的地",
+      "target_required": "请填写域名或 IP",
+      "host_only": "只看主机名，看不到网址路径",
+      "port": "端口",
+      "port_bad": "端口是 1–65535",
+      "network": "网络",
+      "account": "账号（可选）",
+      "inbound": "入站（可选）",
+      "source_ip": "来源 IP（可选）",
+      "source_ip_bad": "不是有效的 IP 地址",
+      "source_ip_hint": "用来测试按来源拒绝的规则",
+      "run": "测试",
+      "initial": "输入目的地，看它在哪一步被放行或拦截",
+      "failed": "测试失败",
+      "deleted_policy": "已删除的策略",
+      "unpublished": "有改动尚未下发，结果按已下发的版本判断",
+      "badge": {
+        "block": "拦截",
+        "allow": "放行",
+        "observe": "仅观察",
+        "exempt": "豁免",
+        "none": "没有规则命中",
+        "would_deny": "本应拒绝",
+        "allowlist_deny": "白名单拒绝"
+      },
+      "verdict": {
+        "block": "在第 {{step}} 步被「{{name}}」拦截（{{entry}}）",
+        "allow": "在第 {{step}} 步被「{{name}}」放行",
+        "default": "没有规则命中，直接放行",
+        "exempt": "这个账号不受任何访问限制",
+        "builtin": "被节点内置规则拦截：以 . 结尾的主机名",
+        "source": "被入站的来源规则拦截（{{entry}}）"
+      },
+      "kind": {
+        "source": "来源规则",
+        "allow": "放行",
+        "block": "拦截",
+        "exempt": "豁免",
+        "builtin": "节点内置：拦截以 . 结尾的主机名"
+      },
+      "result": {
+        "miss": "未命中",
+        "hit": "命中，停止",
+        "shadowed": "也会命中（被前面截住）",
+        "skipped": "不再判断",
+        "untestable": "无法测试"
+      },
+      "node_hint": "{{node}}：{{note}}，实际结果可能不同",
+      "node_applied": "按 {{node}} 已下发的策略判断",
+      "note_published": "按已保存并已下发的策略判断。",
+      "note_no_dns": "只按目的地判断，不做 DNS 解析。BT 规则无法用测试判断。",
+      "note_ip": "以 IP 测试时，域名规则不参与。",
+      "note_hostname_skips_ip": "这是主机名：IP 段与内网地址规则只对以 IP 发起的连接生效，这里没有参与匹配。",
+      "note_conditional": "有些条件需要你没有填的信息（端口、来源 IP、入站），那些步骤无法判断。",
+      "add_exception": "加入放行例外…",
+      "open_policy": "打开「{{name}}」",
+      "exception_saved": "已加入放行例外「{{entry}}」，将随下一次下发生效",
+      "exception": {
+        "title": "加入放行例外",
+        "lead": "对所有人放行这个目的地，排在所有拦截之前。",
+        "invalid": "这个目的地不能作为放行例外",
+        "match": "范围",
+        "site": "整个主域名（含子域名）",
+        "host": "只这个主机",
+        "cancel": "取消",
+        "save": "加入"
+      }
     }
   }
 }

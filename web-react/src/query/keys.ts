@@ -206,3 +206,29 @@ export const diagnosticsKeys = {
   all: (s: QueryScope) => [...privateRoot(s), 'diagnostics'] as const,
   metrics: (s: QueryScope) => [...diagnosticsKeys.all(s), 'metrics'] as const,
 }
+
+/**
+ * The access-control page's reads. One prefix for all of them; a write
+ * invalidates the specific entries the plan's matrix names (§7.3), never the
+ * prefix, because the status read (polled while nodes apply) must not be
+ * refetched by every list edit more than it has to be.
+ */
+export const accessControlKeys = {
+  all: (s: QueryScope) => [...privateRoot(s), 'access-control'] as const,
+  status: (s: QueryScope) => [...accessControlKeys.all(s), 'status'] as const,
+  policies: (s: QueryScope) => [...accessControlKeys.all(s), 'policies'] as const,
+  lists: (s: QueryScope) => [...accessControlKeys.all(s), 'lists'] as const,
+  /** One list's detail; `text` asks for the pasted source too. */
+  list: (s: QueryScope, id: number, text: boolean) => [...accessControlKeys.all(s), 'list', id, text] as const,
+  /** Every cached list detail (the prefix of `list`). */
+  listDetails: (s: QueryScope) => [...accessControlKeys.all(s), 'list'] as const,
+  catalog: (s: QueryScope) => [...accessControlKeys.all(s), 'catalog'] as const,
+  exemptions: (s: QueryScope) => [...accessControlKeys.all(s), 'exemptions'] as const,
+  sourceRules: (s: QueryScope) => [...accessControlKeys.all(s), 'source-rules'] as const,
+  sourceRule: (s: QueryScope, nodeId: number) => [...accessControlKeys.all(s), 'source-rule', nodeId] as const,
+  geositeStatus: (s: QueryScope) => [...accessControlKeys.all(s), 'geosite', 'status'] as const,
+  geositeCategories: (s: QueryScope) => [...accessControlKeys.all(s), 'geosite', 'categories'] as const,
+  /** One account's group and exemption (the drawer's "access" tab). */
+  user: (s: QueryScope, id: number) => [...accessControlKeys.all(s), 'user', id] as const,
+  settings: (s: QueryScope) => [...accessControlKeys.all(s), 'settings'] as const,
+}

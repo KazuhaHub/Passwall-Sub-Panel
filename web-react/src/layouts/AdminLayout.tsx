@@ -41,6 +41,7 @@ import SyncIcon from '@mui/icons-material/Sync'
 import ReportProblemIcon from '@mui/icons-material/ReportProblemOutlined'
 import MonitorHeartIcon from '@mui/icons-material/MonitorHeart'
 import ShieldOutlinedIcon from '@mui/icons-material/ShieldOutlined'
+import PolicyOutlinedIcon from '@mui/icons-material/PolicyOutlined'
 import SettingsIcon from '@mui/icons-material/Settings'
 import TranslateIcon from '@mui/icons-material/Translate'
 import LogoutIcon from '@mui/icons-material/Logout'
@@ -119,13 +120,19 @@ const ADMIN_NAV: NavSection[] = [
     { to: '/admin/diagnostics', labelKey: 'nav:admin.diagnostics', Icon: MonitorHeartIcon, adminOnly: true },
   ] },
   // A standalone entry rather than one more reporting item: it is where an
-  // admin goes to look at people (who is connected, who is flagged, one
-  // account in full), not at the fleet's plumbing. Admin-only everywhere it is
-  // named — here, ADMIN_ONLY_ROUTES and the risk.view capability — because
-  // every read behind it is adminGroup. The shield is the one the bell's
-  // location and risk alerts carry, so the alert and its page look alike.
+  // admin goes to look at people — who is connected, who is flagged, one
+  // account in full — and at where they are allowed to go: the destination
+  // policies the native nodes enforce, which accounts are exempt, which nodes
+  // run them. Access control sits here and not under infrastructure because
+  // its subject is a person's reach, not the fleet's plumbing, even though a
+  // node's delivery state is on it too. Admin-only everywhere it is named —
+  // here, ADMIN_ONLY_ROUTES and the risk.view / access.view capabilities —
+  // because every read behind both pages is adminGroup. The shield is the one
+  // the bell's location and risk alerts carry; access control's policy icon is
+  // its sibling.
   { items: [
     { to: '/admin/risk', labelKey: 'nav:admin.risk_center', Icon: ShieldOutlinedIcon, adminOnly: true },
+    { to: '/admin/access-control', labelKey: 'nav:admin.access_control', Icon: PolicyOutlinedIcon, adminOnly: true },
   ] },
   { items: [
     { to: '/admin/language-packs', labelKey: 'nav:admin.language_packs', Icon: TranslateIcon, adminOnly: true },

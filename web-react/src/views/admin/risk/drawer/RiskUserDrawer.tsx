@@ -12,8 +12,10 @@ import { isAxiosError } from 'axios'
 
 import { useRiskUser } from '@/query/riskCenter'
 import { useQueryScope } from '@/query/useQueryScope'
+import { useCan } from '@/utils/permissions'
 import { availableActions, otherHold, subjectOfSummary, type RiskActionKind, type RiskSubject } from '../actions/riskSubject'
 import { useRiskActions } from '../actions/useRiskActions'
+import AccessTab from './AccessTab'
 import ConnectionsTab from './ConnectionsTab'
 import DevicesTab from './DevicesTab'
 import DrawerHeader from './DrawerHeader'
@@ -36,15 +38,18 @@ export const riskDrawerZIndex = (t: Theme) => t.zIndex.modal + 1
  */
 const aboveDrawer = (outer: Theme): Theme => ({ ...outer, zIndex: { ...outer.zIndex, modal: outer.zIndex.modal + 2 } })
 
-type DrawerTab = 'overview' | 'connections' | 'devices' | 'timeline'
-const TABS: readonly DrawerTab[] = ['overview', 'connections', 'devices', 'timeline']
+export type DrawerTab = 'overview' | 'connections' | 'devices' | 'timeline' | 'access'
+/** The fifth tab is the access-control one: only an admin is offered it. */
+const TABS: readonly DrawerTab[] = ['overview', 'connections', 'devices', 'timeline', 'access']
+
+export type DrawerHost = 'risk' | 'users' | 'access'
 
 /** The actions shown as buttons; the rest (undo, trust) sit behind ⋯. */
 const PRIMARY: readonly RiskActionKind[] = ['pause', 'convert_manual', 'resume', 'dismiss', 'redismiss']
 
 function ActionBar({ subject, host, onStart }: {
   subject: RiskSubject
-  host: 'risk' | 'users'
+  host: DrawerHost
   onStart: (kind: RiskActionKind, subject: RiskSubject) => void
 }) {
   const { t } = useTranslation(['admin'])
@@ -63,7 +68,7 @@ function ActionBar({ subject, host, onStart }: {
       ))}
       {/* A hold the risk center did not write is not its to lift: the Users
           page owns it. Not offered on the Users page itself. */}
-      {otherHold(subject) && host === 'risk' && (
+      {otherHold(subject) && host !== 'users' && (
         <Button size="small" component={RouterLink} to={`/admin/users?q=${encodeURIComponent(subject.upn)}`}
           sx={{ textTransform: 'none' }}>
           {t('admin:risk_center.drawer.open_users')}
@@ -109,12 +114,16 @@ function Loading() {
  * another account — starts again on 概览 with no dialog left open. It reads
  * nothing while closed.
  */
-export default function RiskUserDrawer({ userId, onClose, host }: {
+export default function RiskUserDrawer({ userId, onClose, host, initialTab }: {
   userId: number | null
   onClose: () => void
   /** 'users' when the Users page hosts it: its link back to that page is
-   *  left out. */
-  host: 'risk' | 'users'
+   *  left out. 'access' is the access-control page, which opens on the
+   *  access tab. */
+  host: DrawerHost
+  /** The tab each open starts on; the access host defaults to 'access', the
+   *  others to the overview. */
+  initialTab?: DrawerTab
 }) {
   const { t } = useTranslation(['admin'])
   const theme = useTheme()
@@ -128,13 +137,19 @@ export default function RiskUserDrawer({ userId, onClose, host }: {
   const [shown, setShown] = useState<number | null>(userId)
   if (userId !== null && userId !== shown) setShown(userId)
 
-  const [tab, setTab] = useState<DrawerTab>('overview')
+  const canAccess = useCan('access.view')
+  const tabs = TABS.filter(k => k !== 'access' || canAccess)
+  const startTab: DrawerTab = initialTab ?? (host === 'access' ? 'access' : 'overview')
+  const landing: DrawerTab = tabs.includes(startTab) ? startTab : 'overview'
+  const [tabState, setTab] = useState<DrawerTab>(landing)
+  // A tab the role can no longer see (the permission went while it was open) reads as the overview.
+  const tab: DrawerTab = tabs.includes(tabState) ? tabState : 'overview'
   // Each open edge and each switch of account resets the transient UI.
   const openKey = open ? String(userId) : ''
   const [seenKey, setSeenKey] = useState(openKey)
   if (openKey !== seenKey) {
     setSeenKey(openKey)
-    setTab('overview')
+    setTab(landing)
     actions.cancel()
   }
 
@@ -147,14 +162,15 @@ export default function RiskUserDrawer({ userId, onClose, host }: {
       <>
         <DrawerHeader summary={data} headingId={headingId} onClose={onClose} />
         <ActionBar subject={subjectOfSummary(data)} host={host} onStart={actions.start} />
-        <Tabs value={tab} onChange={(_, v: DrawerTab) => setTab(v)} variant="fullWidth"
+        <Tabs value={tab} onChange={(_, v: DrawerTab) => setTab(v)} variant={phone && tabs.length > 4 ? 'scrollable' : 'fullWidth'} allowScrollButtonsMobile
           sx={{ px: 1, borderBottom: `1px solid ${md.outlineVariant}` }}>
-          {TABS.map(k => <Tab key={k} value={k} label={t(`admin:risk_center.drawer.tab_${k}`)} />)}
+          {tabs.map(k => <Tab key={k} value={k} label={t(`admin:risk_center.drawer.tab_${k}`)} />)}
         </Tabs>
         <Box sx={{ flex: 1, overflowY: 'auto', p: 2 }}>
           {tab === 'overview' && <OverviewTab summary={data} />}
           {tab === 'connections' && <ConnectionsTab summary={data} />}
           {tab === 'devices' && <DevicesTab summary={data} />}
+          {tab === 'access' && canAccess && <AccessTab userId={data.user.id} />}
           {tab === 'timeline' && <TimelineTab userId={data.user.id} upn={data.user.upn} />}
         </Box>
       </>

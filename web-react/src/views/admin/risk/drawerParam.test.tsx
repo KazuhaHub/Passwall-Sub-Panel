@@ -51,7 +51,7 @@ describe('useDrawerParam', () => {
 
     expect(where()).toBe('/admin/risk?tab=queue&source=geo&user=7')
     expect(screen.getByTestId('id').textContent).toBe('7')
-    expect(JSON.parse(screen.getByTestId('state').textContent ?? 'null')).toEqual({ riskDrawer: 'user' })
+    expect(JSON.parse(screen.getByTestId('state').textContent ?? 'null')).toEqual({ drawer: 'user' })
     // Pushed, not replaced: Back returns to the list without the drawer.
     act(() => { fireEvent.click(screen.getByText('back')) })
     expect(where()).toBe('/admin/risk?tab=queue&source=geo')

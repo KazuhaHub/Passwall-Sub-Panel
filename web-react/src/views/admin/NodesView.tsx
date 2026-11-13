@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type Dispatch, type SetStateAction } from 'react'
+import { useSearchParams } from 'react-router'
 import {
   Autocomplete,
   Alert,
@@ -72,6 +73,8 @@ import { nodeKeys } from '@/query/keys'
 import { useNodesList, useSeparators, useUnmanagedInbounds } from '@/query/nodes'
 import { useServersList } from '@/query/servers'
 import { useQueryScope } from '@/query/useQueryScope'
+import SourceRulesSection, { type SourceDraftHandle } from './accessControl/SourceRulesSection'
+import { discardChangesConfirm } from './accessControl/confirmCopy'
 import { useVlessRouteDraft } from '@/query/vlessRoute'
 import VlessRouteLinesEditor from './VlessRouteLinesEditor'
 import { useQueryClient } from '@tanstack/react-query'
@@ -2117,6 +2120,10 @@ export default function NodesView() {
   const md = theme.palette.md
   const { t } = useTranslation(['admin', 'common'])
   const canConfig = useCan('config.write')
+  // Access control is adminGroup: its section is offered to those who may open the page.
+  const canAccess = useCan('access.view')
+  // Registered by the source-rules section: whether its draft holds unsaved changes.
+  const sourceDirtyRef = useRef<SourceDraftHandle | null>(null)
   // Admin view: render times in the panel timezone (with the viewer's browser
   // tz disclosed when they differ), consistent with the other admin pages.
   const panelTz = useSiteStore(s => s.timezone)
@@ -2454,6 +2461,26 @@ export default function NodesView() {
   const [editInboundGenBusy, setEditInboundGenBusy] = useState(false)
   const [editingInboundNode, setEditingInboundNode] = useState<Node | null>(null)
   useEffect(() => () => { editInboundIntent.current += 1 }, [])
+  // Deep link `?inbound=<nodeId>` (the access-control coverage sheet's "edit
+  // inbound"): open that node's edit dialog once the list has loaded, then
+  // drop the param so a reload or Back does not reopen it.
+  const [linkParams, setLinkParams] = useSearchParams()
+  const inboundLink = linkParams.get('inbound')
+  useEffect(() => {
+    // Wait for the list (and not for a refetch of a stale one): the link is consumed once, on data.
+    if (inboundLink === null || nodesQuery.isPending || !nodesQuery.data) return
+    const id = Number(inboundLink)
+    const target = Number.isSafeInteger(id) ? nodesQuery.data.items.find(n => n.id === id) : undefined
+    // Editing an inbound needs config.write; without it the link only goes away.
+    if (target && canConfig) void openEditInbound(target)
+    setLinkParams(prev => {
+      const out = new URLSearchParams(prev)
+      out.delete('inbound')
+      return out
+    }, { replace: true })
+    // openEditInbound is a plain function of this render; the link is consumed once.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [inboundLink, nodesQuery.data, nodesQuery.isPending])
   // Advanced-mode toggle is per-dialog UI state, not part of the form
   // (it doesn't persist to backend). Tracked separately so opening edit
   // doesn't carry the create dialog's mode.
@@ -3063,7 +3090,11 @@ export default function NodesView() {
     } finally { if (editInboundIntent.current === intent) setEditInboundLoading(false) }
   }
 
-  function closeEditInbound() {
+  // `afterSave`: the inbound was just saved, and a dirty source draft was
+  // already asked about before that save, so nothing is asked again.
+  async function closeEditInbound(afterSave = false) {
+    // The source-country section saves on its own; closing must not drop its draft silently.
+    if (!afterSave && sourceDirtyRef.current?.dirty() && !(await confirm(discardChangesConfirm(t)))) return
     editInboundIntent.current += 1
     setEditInboundOpen(false)
     setEditInboundReady(false)
@@ -3114,6 +3145,11 @@ export default function NodesView() {
     const sniffing = editAdvanced
       ? (f.raw_sniffing || '{}')
       : panelType === '3xui' ? JSON.stringify(buildSniffing(f)) : '{}'
+    // The source-country draft is a different endpoint with its own [Save]. A
+    // dirty one asks the ordinary "discard unsaved changes?": Yes saves the
+    // inbound only and drops the draft; No or a dismiss aborts this OK, so both
+    // drafts stay as they are.
+    if (sourceDirtyRef.current?.dirty() && !(await confirm(discardChangesConfirm(t)))) return
     setEditInboundBusy(true)
     try {
       await updateInboundConfig(editingInboundNode.id, {
@@ -3161,7 +3197,7 @@ export default function NodesView() {
         }
       } catch { /* toast via interceptor */ }
       pushSnack(t('admin:nodes.edit_inbound_dialog.saved'), 'success')
-      closeEditInbound()
+      void closeEditInbound(true)
       void load().catch(() => {})
     } finally { setEditInboundBusy(false) }
   }
@@ -3693,7 +3729,7 @@ export default function NodesView() {
         </DialogActions>
       </Dialog>
       {/* Edit Inbound config dialog (multi-protocol) */}
-      <Dialog open={editInboundOpen} onClose={() => !editInboundBusy && closeEditInbound()}
+      <Dialog open={editInboundOpen} onClose={() => !editInboundBusy && void closeEditInbound()}
         slotProps={{
           paper: { sx: { borderRadius: 3, bgcolor: md.surfaceContainerHigh, width: 800, maxWidth: '95vw' } }
         }}>
@@ -3730,11 +3766,16 @@ export default function NodesView() {
                 panelType={servers.find(s => s.id === editingInboundNode?.panel_id)?.panel_type}
                 allowRealityScan={!!editingInboundNode && panelSupports(editingInboundNode.panel_id, 'reality.scan')}
               />
+              {/* A native panel's inbound can deny source countries. A separate endpoint
+                  from the form above, so it has its own Save and is not part of OK. */}
+              {canAccess && editingInboundNode && servers.find(s => s.id === editingInboundNode.panel_id)?.panel_type === 'psp' && (
+                <SourceRulesSection nodeId={editingInboundNode.id} dirtyRef={sourceDirtyRef} />
+              )}
             </Box>
           ) : null}
         </DialogContent>
         <DialogActions>
-          <Button onClick={closeEditInbound} disabled={editInboundBusy} variant="text">{t('common:actions.cancel')}</Button>
+          <Button onClick={() => void closeEditInbound()} disabled={editInboundBusy} variant="text">{t('common:actions.cancel')}</Button>
           {!!editInboundLoadError && <Button variant="outlined" disabled={editInboundLoading || !editingInboundNode}
             onClick={() => editingInboundNode && void openEditInbound(editingInboundNode)}>{t('common:actions.retry')}</Button>}
           {editInboundReady && !editInboundUnsupported && !editInboundLoading && !editInboundLoadError && (

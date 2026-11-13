@@ -21,14 +21,18 @@ export default function HelpTip({
   textKey,
   labelKey = 'admin:risk_center.help.label',
   labelValues,
+  textValues,
 }: {
   textKey: string
   labelKey?: string
   labelValues?: Record<string, string>
+  /** Interpolated into the text: a tunable the help names is a number the page reads from its settings, never a literal. */
+  textValues?: Record<string, unknown>
 }) {
   const { t } = useTranslation(['admin'])
   const md = useTheme().palette.md
   const [anchor, setAnchor] = useState<HTMLElement | null>(null)
+  const text = textValues ? t(textKey, textValues) : t(textKey)
   return (
     <Box sx={{ display: 'flex', flex: '0 0 auto', alignSelf: 'stretch', alignItems: 'center' }}>
       <IconButton size="small" aria-label={labelValues ? t(labelKey, labelValues) : t(labelKey)} aria-haspopup="dialog"
@@ -39,7 +43,7 @@ export default function HelpTip({
         anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
         transformOrigin={{ vertical: 'top', horizontal: 'right' }}
         slotProps={{ paper: { sx: { maxWidth: 420, p: 2 } } }}>
-        <Typography sx={{ fontSize: 13, lineHeight: 1.6, color: md.onSurface }}>{t(textKey)}</Typography>
+        <Typography sx={{ fontSize: 13, lineHeight: 1.6, color: md.onSurface, whiteSpace: text.includes('\n') ? 'pre-line' : undefined }}>{text}</Typography>
       </Popover>
     </Box>
   )

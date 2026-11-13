@@ -9,12 +9,18 @@ import NodeReleaseSelector from '@/components/NodeReleaseSelector'
 import { compatNotice } from '@/utils/compatNotice'
 import NodeInstallCommand from '@/components/NodeInstallCommand'
 import { Link as RouterLink } from 'react-router'
+import ServerAccessDialog from './ServerAccessDialog'
+import { nodeStateText } from '@/components/NodePolicyStatusRow'
+import { useDestStatus } from '@/query/accessControl'
+import { accessTone, NODE_STATE_TONE } from '@/utils/accessControl'
+import type { DestNodeStatus } from '@/api/accessControl'
 import {
 	Alert,
   Accordion,
   AccordionDetails,
   AccordionSummary,
   Box,
+  ButtonBase,
   Button,
   Card,
   Checkbox,
@@ -250,6 +256,12 @@ export default function ServersView() {
   const { page, pageSize, sortBy, sortDir, setPage, setPageSize, setKeyword, setSort } = ps
   const scope = useQueryScope()
   const queryClient = useQueryClient()
+  // The access-control state of each native node (S15). A failed or unwired
+  // read shows nothing at all: the list must not carry noise for a feature
+  // the build does not have. Only when the fleet already has a policy.
+  const canAccess = useCan('access.view')
+  const destStatus = useDestStatus(scope, { enabled: canAccess })
+  const [accessNode, setAccessNode] = useState<{ node: DestNodeStatus; name: string } | null>(null)
 
   const listParams = useMemo<ServerListParams>(() => ({
     ...ps.request,
@@ -1287,6 +1299,25 @@ export default function ServersView() {
     return chip
   }
 
+  // accessLine: the node's access-control state, one ButtonBase line under the
+  // connection status that opens the node's dialog. Native rows only.
+  function accessLine(s: Server) {
+    const st = destStatus.data
+    if (!canAccess || destStatus.isError || !st || s.panel_type !== 'psp' || st.generation <= 0) return null
+    const node = st.nodes.find(n => n.panel_id === s.id)
+    if (!node) return null
+    const { key, label } = nodeStateText(t, node, Date.now())
+    const tone = accessTone(theme, NODE_STATE_TONE[key])
+    const Icon = tone.Icon
+    return (
+      <ButtonBase data-testid="access-line" data-state={key} onClick={() => setAccessNode({ node, name: s.name })}
+        sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mt: 0.5, fontSize: 12, color: tone.text ?? md.onSurface, borderRadius: 1 }}>
+        <Icon aria-hidden sx={{ fontSize: 12, color: tone.fg }} />
+        {t('admin:servers.access.line', { state: label })}
+      </ButtonBase>
+    )
+  }
+
   // ipCapBadge says whether a concurrent-IP cap pushed to this node is acted
   // on. It sits under the connection status because that is the question it
   // answers: the panel is reachable, the write succeeds, and the limit still
@@ -1558,6 +1589,7 @@ export default function ServersView() {
                   <TableCell sx={{ whiteSpace: 'nowrap' }}>
                     <Box>{statusBadge(s)}</Box>
                     {ipCapBadge(s)}
+                    {accessLine(s)}
                   </TableCell>
                   <TableCell sx={{ whiteSpace: 'nowrap' }}>{versionCell(s)}</TableCell>
                   <TableCell align="right" sx={{ whiteSpace: 'nowrap' }}>
@@ -1984,6 +2016,7 @@ export default function ServersView() {
         open={diagnosticsTarget !== null}
         onClose={() => setDiagnosticsTarget(null)}
       />
+      <ServerAccessDialog node={accessNode?.node ?? null} serverName={accessNode?.name ?? ''} onClose={() => setAccessNode(null)} />
       <NativeAgentUpgradeDialog server={nativeUpgradeTarget} onClose={() => { setNativeUpgradeTarget(null); refresh() }} />
       <ReinstallBackendDialog key={`reinstall-${reinstallTarget?.id ?? 'closed'}`} server={reinstallTarget}
         onClose={() => setReinstallTarget(null)}

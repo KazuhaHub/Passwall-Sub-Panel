@@ -238,15 +238,9 @@ export function cardKeys(card: PolicyCardSpec): RiskPolicyKey[] {
   return [...toggle, ...cardFields(card).map(f => f.key)]
 }
 
-/**
- * Whether a stored value is outside the field's bounds. Only a SET number
- * is judged: 0 (or a negative the server reads the same way) is the
- * default, which is in range by construction.
- */
-export function outOfRange(spec: PolicyFieldSpec, value: unknown): boolean {
-  if ((spec.kind !== 'number' && spec.kind !== 'float') || typeof value !== 'number' || !(value > 0)) return false
-  return (spec.min !== undefined && value < spec.min) || (spec.max !== undefined && value > spec.max)
-}
+// The check itself lives with the field (components/PolicyField), which
+// the access-control page uses too.
+export { outOfRange } from '@/components/PolicyField'
 
 /**
  * Whether anything behind a card's 高级 panel is configured, which opens

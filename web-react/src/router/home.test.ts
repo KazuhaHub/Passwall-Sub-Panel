@@ -41,4 +41,13 @@ describe('route access helpers', () => {
     expect(isAdminOnlyPath('/admin/diagnostics/x')).toBe(true)
     expect(isAdminOnlyPath('/admin/diagnosticsx')).toBe(false)
   })
+
+  // Access control decides what proxy users may reach and what a pasted list
+  // carries; every read behind it is adminGroup. Gate 1 of 3 (the other two:
+  // the `access.view` capability and the nav item's adminOnly flag).
+  it('keeps access control and anything under it admin-only', () => {
+    expect(isAdminOnlyPath('/admin/access-control')).toBe(true)
+    expect(isAdminOnlyPath('/admin/access-control/x')).toBe(true)
+    expect(isAdminOnlyPath('/admin/access-controls')).toBe(false)
+  })
 })
