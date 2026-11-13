@@ -98,9 +98,14 @@ xui_token() {
   local jar="$WORKDIR/xui.cookies" csrf body
   curl -sS -o /dev/null -c "$jar" "$XUI_ORIGIN/"
   csrf=$(curl -sS -b "$jar" -c "$jar" "$XUI_ORIGIN/csrf-token" | python3 -c 'import json,sys;print(json.load(sys.stdin)["obj"])')
-  curl -sS -o /dev/null -b "$jar" -c "$jar" -X POST \
+  # The login answers HTTP 200 either way; only its body says whether it
+  # worked. Checked here, a refusal names itself instead of surfacing two
+  # requests later as an empty 404 body and a JSONDecodeError.
+  body=$(curl -sS -b "$jar" -c "$jar" -X POST \
     -H "X-CSRF-Token: $csrf" -H 'Content-Type: application/x-www-form-urlencoded' \
-    -d 'username=admin&password=admin' "$XUI_ORIGIN/login"
+    -d 'username=admin&password=admin' "$XUI_ORIGIN/login")
+  printf '%s' "$body" | python3 -c 'import json,sys;sys.exit(0 if json.load(sys.stdin).get("success") is True else 1)' \
+    || { log "3X-UI refused the admin/admin login: $body"; return 1; }
   csrf=$(curl -sS -b "$jar" -c "$jar" "$XUI_ORIGIN/csrf-token" | python3 -c 'import json,sys;print(json.load(sys.stdin)["obj"])')
   body=$(curl -sS -b "$jar" -X POST -H "X-CSRF-Token: $csrf" -H 'Content-Type: application/json' \
     -d '{"name":"psp-compat","scope":"admin"}' "$XUI_ORIGIN/panel/api/setting/apiTokens/create")
@@ -186,6 +191,18 @@ up() {
   XUI_ORIGIN="http://$HOST:$XUI_PORT"
   wait_for "$XUI_ORIGIN/" 120
   log "3X-UI ready at $XUI_ORIGIN"
+  # KNOWN CREDENTIALS ARE SET, NOT ASSUMED. Up to 3.10.x a fresh panel seeded
+  # admin/admin; 3.11.0 seeds a random username and password instead (shown
+  # once in its log, database.EnsureFirstUser), so the admin/admin login below
+  # was refused and every later call answered unauthenticated. The panel's own
+  # CLI rewrites the first user on every version this harness drives, and the
+  # login reads the user from the database per request, so no restart is needed.
+  # Its output goes to stderr, not /dev/null: upstream prints a failed user
+  # update ("Failed to update username and password") and still exits 0, so
+  # that line is the only place the real cause shows up when the login check
+  # below then refuses admin/admin.
+  $SUDO "$RUNTIME" exec "$XUI_NAME" /app/x-ui setting -username admin -password admin >&2 \
+    || { log "could not run the 3X-UI CLI to set the first user to admin/admin"; return 1; }
   local token; token=$(xui_token)
   xui_seed "$token"
   printf '%s' "$token" > "$WORKDIR/3xui.token"
