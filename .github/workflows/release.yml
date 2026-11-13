@@ -646,7 +646,12 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: node-wire-v1@${{ matrix.node_case.version }}
-          path: evidence/node-wire-v1@${{ matrix.node_case.version }}/
+          # THE PARENT, SO THE ZIP HOLDS `<case>/result.json`. The gate downloads
+          # by pattern, and a pattern matching ONE artifact is extracted straight
+          # into its path with no directory of its own; an artifact of bare files
+          # then reported as a case named "evidence" and the real one as missing.
+          # This leg's runner holds only its own case, so the parent is the case.
+          path: evidence/
           if-no-files-found: error
           retention-days: 90
 
