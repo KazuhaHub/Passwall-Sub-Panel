@@ -650,6 +650,70 @@ var (
 )
 
 // ---------------------------------------------------------------------
+// Destination policy compilation and publication — answers "is the policy
+// reaching the nodes, and when it is not, is it the panel holding it back?".
+//
+// Compile counts once per node per sync, labelled by the CLOSED set of results
+// (service/destpolicy): cache_hit (nothing changed, answered from memory),
+// compiled (a fresh policy was built and sent), fallback_rejected /
+// fallback_sniffing / fallback_over_limit (the node runs the last policy that
+// applied, trimmed, because it refused the new one, its inbounds cannot sniff
+// what the policy needs, or the policy is too large for it), fallback_nil (the
+// same, with no last policy to run: the node got none) and invalid (the policy
+// compiled for the node failed validation: a bug, never an admin's mistake).
+// Publish counts each publication by what triggered it: debounced (the edits
+// went quiet), max_wait (they never did, and five windows passed), manual (the
+// admin asked) or pause (the emergency switch moved).
+//
+// The status counter counts node policy reports the panel dropped whole (a
+// status that does not decode, fails its own validation or arrives without the
+// capability): the sync itself still succeeds, which is why the drop would
+// otherwise be invisible.
+// ---------------------------------------------------------------------
+
+const (
+	DestCompileCacheHit       = "cache_hit"
+	DestCompileCompiled       = "compiled"
+	DestCompileFallbackReject = "fallback_rejected"
+	DestCompileFallbackSniff  = "fallback_sniffing"
+	DestCompileFallbackLimit  = "fallback_over_limit"
+	DestCompileFallbackNil    = "fallback_nil"
+	DestCompileInvalid        = "invalid"
+	DestPublishDebounced      = "debounced"
+	DestPublishMaxWait        = "max_wait"
+	DestPublishManual         = "manual"
+	DestPublishPause          = "pause"
+)
+
+var (
+	DestPolicyCompileTotal = NewCounterVec(
+		"psp_dest_policy_compile_total",
+		"Destination-policy compiles for a node sync, by result.",
+		"result",
+	)
+	// Only fresh compiles are timed: a cache hit costs a lookup and would bury
+	// the distribution that matters (a policy of megabytes being built).
+	DestPolicyCompileMS = NewHistogram(
+		"psp_dest_policy_compile_ms",
+		"Time to compile the destination policy for one node (cache misses only), in milliseconds.",
+		"ms", []float64{1, 5, 25, 100, 250, 500, 1000, 2500},
+	)
+	DestPolicyPublishTotal = NewCounterVec(
+		"psp_dest_policy_publish_total",
+		"Destination-policy snapshots published, by what triggered it.",
+		"trigger",
+	)
+	DestPolicyPublishRejectedTotal = NewCounter(
+		"psp_dest_policy_publish_rejected_total",
+		"Publications the pre-publish validation refused (a limit passed, or the policy invalid); the previous snapshot stays in force.",
+	)
+	NodePolicyStatusDroppedTotal = NewCounter(
+		"psp_node_policy_status_dropped_total",
+		"Node policy-status reports dropped whole because they did not decode, did not validate or lacked the capability.",
+	)
+)
+
+// ---------------------------------------------------------------------
 // SAML ACS refusals — answers "is this refusal an attack, an outage, or a bad
 // configuration?" Those three need different responses and, before this counter,
 // all arrived as a single reason code.

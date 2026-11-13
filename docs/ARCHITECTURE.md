@@ -260,6 +260,20 @@
 | 新建 inbound | 需要先拿到 3X-UI 返回的 `inbound_id`，随后把整份连接配置写入本地快照 | 远端创建失败时仅保留 `node_create` 任务，不创建无法映射的本地节点 |
 | 修改 inbound 连接配置 | **先写本地配置快照（`nodes` 的 inbound 配置列），local-first** | 再推 3X-UI；失败进入 `node_update`。**v3.5 起 PSP 是 inbound 连接配置的真相源**（端口/TLS/Reality/stream 等存本地、render 只读本地、reconcile 反向下发覆盖漂移），详见 [inbound-ownership.md](inbound-ownership.md) |
 
+### 3.3 后台循环
+
+长驻 worker 一律由 `safego.GoTracked` 启动并随 `Shutdown` 排空；`Build()` 不启动任何 goroutine，`Run()` 在监听成功之后才拉起它们。
+下表只登记与访问控制相关的循环（其余循环的间隔与是否可热改见 `internal/app/app.go` 的 `Run()`）：
+
+| 循环 | 做什么 | 间隔来源 | 可热改？ |
+|---|---|---|---|
+| `dest-list-refresh` | 刷新到期的远程列表；探测上游 geosite 最新版本（至多每 6 小时一次），自动模式下应用；发现 GeoIP 库被替换且有规则用到国家时让策略 generation +1；清理已到期的豁免 | 首次启动后 45 秒；之后每次睡眠 `min(dest_list_refresh_hours, 1 小时)`，每次醒来前重读设置 | **是**：缩短设置最多 1 小时内生效，不需要重启。只有早于刷新间隔的列表才会真的去拉，所以醒得勤不花代价 |
+
+访问控制的策略发布**没有自己的循环**：每台原生节点每次同步时，`destpolicy.Service.Compile` 先检查是否该发布（尾随去抖，见 [access-control.md](access-control.md) §4.1），
+所以发布的节奏跟着节点同步周期走，不需要定时器。两个服务的位置：`internal/service/destlist`（列表、geosite、国家展开）与
+`internal/service/destpolicy`（发布、编译、回退、管理端读取），二者与规则组目录 `internal/service/destcatalog` 都只依赖
+`domain`、`ports` 与彼此，仓库层是 `sqlstore.DestRepos` 这一组具体仓库（不进 `ports.Repos`）。
+
 ---
 
 ## 4. 管理边界（核心安全约束）

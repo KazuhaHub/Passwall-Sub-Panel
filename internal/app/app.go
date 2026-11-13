@@ -40,6 +40,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/clientprov"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/destcatalog"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/destlist"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/destpolicy"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/geo"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/group"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/health"
@@ -62,6 +63,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/user"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/vlessroute"
 	httptransport "github.com/KazuhaHub/passwall-sub-panel/internal/transport/http"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/transport/http/handler"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/version"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -176,6 +178,8 @@ type App struct {
 	// expansion) and destCatalog the built-in rule groups.
 	destLists   *destlist.Service
 	destCatalog *destcatalog.Service
+	destPolicy  *destpolicy.Service
+	nativeSync  *nodesync.Service
 	saml        *auth.SAMLService
 	// repos kept around so Run() can call initAdminIfNeeded AFTER the
 	// listen socket is bound — that way a bind failure (port busy / TLS
@@ -704,6 +708,34 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	if err != nil {
 		return nil, fmt.Errorf("destination catalog: %w", err)
 	}
+	// The policy compiler and its admin side. The compiler is handed to the
+	// node-sync service (late-bound: that service was built first, before the
+	// list service it needs existed), and an unbound one is silent — nodes are
+	// simply never sent a policy — which is why TestBuildWiresTheAccessControlPolicy
+	// drives a policy to a node through the assembled application.
+	destPolicy, err := destpolicy.New(destpolicy.Deps{
+		Definitions: destRepos, State: destRepos.State, Agents: destRepos.Agents,
+		Lists: destLists, Countries: destLists.Countries, Settings: repos.Settings,
+		Metrics: destpolicy.Metrics{
+			Compile:         func(result string) { metrics.DestPolicyCompileTotal.With(result).Inc() },
+			CompileDuration: metrics.DestPolicyCompileMS.ObserveDuration,
+			Publish:         func(trigger string) { metrics.DestPolicyPublishTotal.With(trigger).Inc() },
+			PublishRejected: metrics.DestPolicyPublishRejectedTotal.Inc,
+		},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("destination policy: %w", err)
+	}
+	destAdmin, err := destpolicy.NewAdmin(destpolicy.AdminDeps{
+		Service: destPolicy, Policies: destRepos.Policies, Lists: destRepos.Lists, Counter: destRepos,
+		Groups: repos.Group, Panels: repos.XUIPanel, Nodes: repos.Node, Clients: repos.PSPClient,
+		Agents: repos.NodeAgent, Desired: repos.NativeDesired, Settings: repos.Settings,
+		Instantiate: destRepos.InstantiateTemplate, ExceptionEditor: destLists,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("destination policy admin: %w", err)
+	}
+	nativeSync.SetPolicies(destPolicy)
 
 	// --- transport layer ---
 	// The Node installation template is fetched from the release that published it
@@ -763,6 +795,14 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 		Reconcile:  reconcileSvc,
 		Geo:        geoSvc,
 		NodeSync:   nativeSync,
+		// The access-control API. Optional in the sense that every field left
+		// out turns its routes into 503s, so an omission compiles and fails
+		// only when the page is opened: TestBuildWiresTheAccessControlAPI.
+		Dest: handler.DestWiring{
+			Lists: destLists, Catalog: destCatalog, Policy: destPolicy, Admin: destAdmin,
+			Policies: destRepos.Policies, Exemptions: destRepos.Exemptions, SourceRules: destRepos.SourceRules,
+			Users: repos.User, Groups: repos.Group, Nodes: repos.Node, Panels: repos.XUIPanel, Async: dispatcher,
+		},
 		// THE SAME INSTANCE THAT INGESTS AND ROLLS UP. Its routes are the read
 		// side of the telemetry the server list already shows, and the field is
 		// optional so an omission here is silent: the writes and the list keep
@@ -810,6 +850,8 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	a.destRepos = destRepos
 	a.destLists = destLists
 	a.destCatalog = destCatalog
+	a.destPolicy = destPolicy
+	a.nativeSync = nativeSync
 	// The observe-only risk signals. The worker is handed read-only views and
 	// one store that writes only risk_signals (and, in the same transaction,
 	// the flag records of what each save changed) — the store built above,
@@ -1356,6 +1398,8 @@ func (a *App) runDestListRefreshLoop(ctx context.Context, firstDelay, maxWait ti
 	for {
 		err := a.operationGate.RunRead(ctx, func(ctx context.Context) error {
 			a.destLists.RefreshDue(ctx)
+			a.sweepExpiredExemptions(ctx)
+			a.pruneAgentCaches(ctx)
 			return nil
 		})
 		if err != nil && ctx.Err() == nil {
@@ -1368,6 +1412,46 @@ func (a *App) runDestListRefreshLoop(ctx context.Context, firstDelay, maxWait ti
 			return
 		case <-t.C:
 		}
+	}
+}
+
+// sweepExpiredExemptions deletes the access-control exemptions that have
+// expired. The published policy already leaves an expired exemption out (a
+// publish skips it), but the row keeps showing as "expired" until this removes
+// it, and removing it advances the generation, so the change is the same one the
+// admin's own delete would be. It rides the refresh loop (every pass is at most
+// an hour apart), which is why an exemption lapses at most an hour plus a
+// debounce window after its expiry.
+func (a *App) sweepExpiredExemptions(ctx context.Context) {
+	if a.destRepos == nil {
+		return
+	}
+	n, err := a.destRepos.Exemptions.DeleteExpired(ctx, time.Now())
+	if err != nil {
+		log.Warn("destination exemption cleanup", "err", err)
+		return
+	}
+	if n > 0 {
+		log.Info("destination exemptions expired", "count", n)
+	}
+}
+
+// pruneAgentCaches drops the per-agent caches of the policy compiler and the
+// node-sync config cache for agents that no longer exist.
+func (a *App) pruneAgentCaches(ctx context.Context) {
+	agents, err := a.repos.NodeAgent.List(ctx)
+	if err != nil {
+		return
+	}
+	live := make(map[string]bool, len(agents))
+	for _, ag := range agents {
+		live[ag.AgentID] = true
+	}
+	if a.destPolicy != nil {
+		a.destPolicy.PruneAgents(live)
+	}
+	if a.nativeSync != nil {
+		a.nativeSync.PruneAgents(live)
 	}
 }
 

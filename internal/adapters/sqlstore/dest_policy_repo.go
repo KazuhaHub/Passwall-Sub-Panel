@@ -256,9 +256,24 @@ func (r *DestPolicyRepo) Update(ctx context.Context, p *domain.DestPolicy, ifUpd
 		}
 		row := destPolicyToRow(p)
 		row.Priority = cur.Priority
+		if row.Action != cur.Action {
+			// A policy that changes action joins the END of its new action's
+			// order: a priority only means something among the policies of
+			// one action, and inheriting the old number would drop it into
+			// the middle of a list it never took part in.
+			var top sql.NullInt64
+			if err := tx.Model(&destPolicyRow{}).Where("action = ?", row.Action).
+				Select("MAX(priority)").Scan(&top).Error; err != nil {
+				return err
+			}
+			row.Priority = 1
+			if top.Valid {
+				row.Priority = int(top.Int64) + 1
+			}
+		}
 		if err := tx.Model(&destPolicyRow{}).Where("id = ?", p.ID).
 			Select("Name", "Description", "Action", "ListIDs", "Inline", "State", "Scope", "GroupIDs", "PanelIDs",
-				"CountsAsRisk", "TemplateKey", "UpdatedAt").
+				"Priority", "CountsAsRisk", "TemplateKey", "UpdatedAt").
 			Updates(&row).Error; err != nil {
 			return mapPolicyWriteError(err)
 		}

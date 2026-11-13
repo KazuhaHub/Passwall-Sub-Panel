@@ -325,7 +325,26 @@ type DestAgentPolicy struct {
 	ReportedIssue     string
 	ReportedListeners string
 	ReportedAt        *time.Time
-	UpdatedAt         time.Time
+	// RejectedCaps is which of the three capabilities that gate delivery
+	// (policy, hits, usage) the agent advertised when the rejection was
+	// recorded, as a short token ("p", "ph", "phu"). A change of that set is
+	// one of the three reasons to try the new policy again.
+	RejectedCaps string
+	// RejectedSHA256 is the digest of the policy the node refused, "" when no
+	// refusal is being held. It is tracked apart from FallbackReason, which a
+	// sniffing or over-limit episode overwrites: the refusal must outlive them.
+	// MintedGeneration is the published generation the minted policy was minted
+	// at; a refusal is recorded against THAT generation, not the one that
+	// happens to be published when the report arrives.
+	RejectedSHA256   string
+	MintedGeneration int64
+	// MintedCtx / RejectedCtx are a hash of what the node was running when the
+	// policy was minted (engine, core version, inbound sniffing). A refusal is
+	// recorded with the context it happened in: a change of it is a reason to
+	// retry the refused policy even though its bytes are unchanged.
+	MintedCtx   string
+	RejectedCtx string
+	UpdatedAt   time.Time
 }
 
 // DestAgentPolicyPatch is a column-level write to a DestAgentPolicy row: a nil
@@ -353,6 +372,11 @@ type DestAgentPolicyPatch struct {
 	ReportedIssue      *string
 	ReportedListeners  *string
 	ReportedAt         *time.Time
+	RejectedCaps       *string
+	RejectedSHA256     *string
+	MintedGeneration   *int64
+	MintedCtx          *string
+	RejectedCtx        *string
 }
 
 // Valid reports whether r is one of the four stored reasons.
@@ -421,4 +445,15 @@ func DecodeDestPublishError(s *string) *DestPublishError {
 		return &DestPublishError{Kind: "invalid", Field: "publish_error"}
 	}
 	return &e
+}
+
+// DestDefinitions is one consistent read of every definition the compiler
+// publishes: the generation it was taken at, and the rows as they were then.
+// Lists carry their entries (and no pasted text).
+type DestDefinitions struct {
+	Generation  int64
+	Lists       []*DestList
+	Policies    []*DestPolicy
+	Exemptions  []*DestExemption
+	SourceRules []*DestSourceRule
 }

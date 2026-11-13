@@ -3955,6 +3955,26 @@
         "label": "访问控制列表刷新",
         "desc": "刷新访问控制策略所用列表（远程列表与 geosite 更新）的结果分布。「失败」持续出现，说明有列表仍在使用旧条目；出现「因过宽被拒」需要管理员查看该列表。"
       },
+      "psp_dest_policy_compile_total": {
+        "label": "访问控制策略编译",
+        "desc": "为节点同步编译访问控制策略的结果。「沿用缓存」是常态；「回退」表示该节点正在运行上一份已生效的策略（被节点拒绝、入站嗅探不满足、或超出该节点的上限）；「无可回退」表示没有上一份可用，节点没有拿到策略；「无效」是面板自身的缺陷。"
+      },
+      "psp_dest_policy_compile_ms": {
+        "label": "访问控制策略编译耗时",
+        "desc": "为一个节点重新编译访问控制策略（缓存未命中）的耗时，单位毫秒。"
+      },
+      "psp_dest_policy_publish_total": {
+        "label": "访问控制策略发布",
+        "desc": "已发布的访问控制策略快照，按触发原因统计：修改停顿后自动发布、连续修改达到最长等待、手动立即下发、紧急开关变化。"
+      },
+      "psp_dest_policy_publish_rejected_total": {
+        "label": "访问控制策略发布被拒",
+        "desc": "发布前校验拒绝的发布（超出上限或策略无效）。上一份快照继续生效，原因见访问控制页的结论条。"
+      },
+      "psp_node_policy_status_dropped_total": {
+        "label": "节点策略状态被丢弃",
+        "desc": "整体丢弃的节点策略状态上报（无法解码、校验失败或没有对应能力）。同步本身仍然成功，所以这一项只能靠计数发现。"
+      },
       "psp_saml_acs_failure_total": {
         "label": "SAML 登录被拒",
         "desc": "被拒绝的 SAML 登录（及登录发起）按原因分类。配置类原因指向身份提供方设置；「断言被重放」需要调查。"
@@ -4056,6 +4076,21 @@
         "updated": "已更新",
         "failed": "失败",
         "broad": "因过宽被拒"
+      },
+      "dest_compile": {
+        "cache_hit": "沿用缓存",
+        "compiled": "重新编译",
+        "fallback_rejected": "回退（节点拒绝）",
+        "fallback_sniffing": "回退（嗅探不满足）",
+        "fallback_over_limit": "回退（超出上限）",
+        "fallback_nil": "无可回退",
+        "invalid": "无效"
+      },
+      "dest_publish": {
+        "debounced": "修改停顿后",
+        "max_wait": "达到最长等待",
+        "manual": "手动下发",
+        "pause": "紧急开关"
       },
       "node_host_report": {
         "accepted": "已接收",

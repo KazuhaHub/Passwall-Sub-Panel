@@ -6,6 +6,8 @@ package nodesync
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -22,6 +24,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/keyedmutex"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/log"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/destpolicy"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/nodemetrics"
 )
 
@@ -63,7 +66,48 @@ type Service struct {
 	// COLLECT IT, which is what keeps a panel with no metrics repository from
 	// advertising a cadence it cannot honour.
 	host *nodemetrics.Service
+	// policies decides the destination policy a node runs. NIL MEANS THIS BUILD
+	// HAS NO ACCESS CONTROL: the sync is then exactly what it was before the
+	// feature existed. It is late-bound (SetPolicies) because the compiler needs
+	// the GeoIP and list services, which are built after this one.
+	policies DestPolicyCompiler
+	// configCache holds, per agent, the canonical bytes of the last config
+	// that carried a policy, keyed by what they were built from: the policy
+	// is up to several MiB and re-encoding it on every thirty-second sync of
+	// every node is the cost this avoids.
+	configCache map[string]configCacheEntry
 }
+
+// DestPolicyCompiler is the destination-policy collaborator
+// (service/destpolicy.Service).
+type DestPolicyCompiler interface {
+	// ObserveStatus takes what the node reports about the policy it runs. It
+	// is called BEFORE the node's config is built.
+	ObserveStatus(ctx context.Context, agentID string, capabilities []string, status *nodeprotocol.PolicyStatus) ([]domain.NodeAgentIssue, error)
+	// Compile produces the policy for the config about to be sent. It is
+	// called AFTER the config (without a policy) is built.
+	Compile(ctx context.Context, in destpolicy.CompileInput) (destpolicy.Result, error)
+}
+
+type configCacheEntry struct {
+	key       string
+	canonical []byte
+}
+
+// PruneAgents drops the cached config of every agent not in live.
+func (s *Service) PruneAgents(live map[string]bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for id := range s.configCache {
+		if !live[id] {
+			delete(s.configCache, id)
+		}
+	}
+}
+
+// SetPolicies binds the destination-policy compiler. Left unbound, nodes are
+// never sent a policy.
+func (s *Service) SetPolicies(p DestPolicyCompiler) { s.policies = p }
 
 // receivedFullReport keeps the control plane's receipt time beside the latest
 // full enumeration. ReportedAtMS is useful for clock-skew diagnostics, but it
@@ -186,11 +230,47 @@ func (s *Service) Sync(ctx context.Context, report nodeprotocol.NodeReport) (nod
 	if err != nil {
 		return nodeprotocol.SyncResponse{}, fmt.Errorf("nodesync: %w", err)
 	}
+	// THE DESTINATION POLICY. The node's status is a CONTROL INPUT, unlike host
+	// telemetry, so it is taken before the config is built: a refusal has to
+	// change this round's answer (fall back), and the record of what applied
+	// has to be current when the compile reads it. Taking it after the
+	// response would make "refused, so fall back" arrive a sync late.
+	var policyIssues []domain.NodeAgentIssue
+	if s.policies != nil {
+		issues, err := s.policies.ObserveStatus(ctx, agent.AgentID, report.Capabilities, report.PolicyStatus)
+		if err != nil {
+			return nodeprotocol.SyncResponse{}, fmt.Errorf("nodesync: observe destination policy status: %w", err)
+		}
+		policyIssues = append(policyIssues, issues...)
+	}
 	configBody, err := buildConfig(snapshot, agent, coreDocument)
 	if err != nil {
 		return nodeprotocol.SyncResponse{}, err
 	}
-	configStream, err := s.mint(ctx, agent, domain.NodeAgentStreamConfig, configBody, now)
+	policyDigest := ""
+	if s.policies != nil {
+		// A compile that cannot decide fails the sync, and the node keeps what it
+		// has: sending the config without a policy would silently stop
+		// enforcing one the node is running.
+		result, err := s.policies.Compile(ctx, destpolicy.CompileInput{
+			PanelID: agent.PanelID, AgentID: agent.AgentID, Capabilities: report.Capabilities,
+			Snapshot: snapshot, Config: configBody, CoreVersion: report.CoreVersion,
+		})
+		if err != nil {
+			return nodeprotocol.SyncResponse{}, fmt.Errorf("nodesync: compile destination policy: %w", err)
+		}
+		configBody.Policy, policyDigest = result.Policy, result.Digest
+		policyIssues = append(policyIssues, result.Issues...)
+	}
+	if len(policyIssues) > 0 {
+		for i := range policyIssues {
+			policyIssues[i].AgentID = agent.AgentID
+		}
+		if err := s.issues.RecordBatch(ctx, agent.AgentID, policyIssues, now); err != nil {
+			return nodeprotocol.SyncResponse{}, fmt.Errorf("nodesync: record destination policy issues: %w", err)
+		}
+	}
+	configStream, err := s.mintConfig(ctx, agent, configBody, policyDigest, now)
 	if err != nil {
 		return nodeprotocol.SyncResponse{}, err
 	}
@@ -308,6 +388,52 @@ func (s *Service) mint(ctx context.Context, agent *domain.NodeAgent, stream doma
 	stored, _, err := s.agents.MintStream(ctx, agent.AgentID, stream, canonical, now)
 	if err != nil {
 		return nil, fmt.Errorf("nodesync: mint %s: %w", stream, err)
+	}
+	return stored, nil
+}
+
+// mintConfig mints the config stream. Without a policy it is exactly mint: the
+// body is encoded as it always was, which is what keeps a policy-less config
+// byte-identical to before. With one, the canonical bytes are cached under the
+// digest of the part that is cheap to encode (the config without its policy)
+// and the policy's own digest, so an idle sync re-encodes nothing and an
+// unchanged policy cannot move the ETag.
+func (s *Service) mintConfig(ctx context.Context, agent *domain.NodeAgent, body nodeprotocol.ConfigBody, policyDigest string, now time.Time) (*domain.NodeAgentStream, error) {
+	if body.Policy == nil {
+		s.mu.Lock()
+		delete(s.configCache, agent.AgentID)
+		s.mu.Unlock()
+		return s.mint(ctx, agent, domain.NodeAgentStreamConfig, body, now)
+	}
+	bare := body
+	bare.Policy = nil
+	bareBytes, err := json.Marshal(bare)
+	if err != nil {
+		return nil, fmt.Errorf("nodesync: encode %s: %w", domain.NodeAgentStreamConfig, err)
+	}
+	sum := sha256.Sum256(bareBytes)
+	key := hex.EncodeToString(sum[:]) + ":" + policyDigest
+
+	s.mu.RLock()
+	cached, hit := s.configCache[agent.AgentID]
+	s.mu.RUnlock()
+	canonical := cached.canonical
+	if !hit || cached.key != key || policyDigest == "" {
+		if canonical, err = json.Marshal(body); err != nil {
+			return nil, fmt.Errorf("nodesync: encode %s: %w", domain.NodeAgentStreamConfig, err)
+		}
+		if policyDigest != "" {
+			s.mu.Lock()
+			if s.configCache == nil {
+				s.configCache = map[string]configCacheEntry{}
+			}
+			s.configCache[agent.AgentID] = configCacheEntry{key: key, canonical: canonical}
+			s.mu.Unlock()
+		}
+	}
+	stored, _, err := s.agents.MintStream(ctx, agent.AgentID, domain.NodeAgentStreamConfig, canonical, now)
+	if err != nil {
+		return nil, fmt.Errorf("nodesync: mint %s: %w", domain.NodeAgentStreamConfig, err)
 	}
 	return stored, nil
 }
@@ -721,6 +847,9 @@ func cloneReport(in nodeprotocol.NodeReport) nodeprotocol.NodeReport {
 		out.TaskResults[i].Result = append([]byte(nil), in.TaskResults[i].Result...)
 	}
 	out.Capabilities = append([]string(nil), in.Capabilities...)
+	// The policy status is a control input consumed before the response is
+	// built; nothing later reads it, so it is not kept.
+	out.PolicyStatus = nil
 	// Host is cleared EXPLICITLY as a second line of defence. The caller already
 	// removes it before this is reached, but a clone that silently carried 128 KiB
 	// per agent into the latest-full cache is the kind of regression that only

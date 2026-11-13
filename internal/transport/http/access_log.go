@@ -44,7 +44,18 @@ func newAccessLogger(output io.Writer) gin.HandlerFunc {
 	return gin.LoggerWithConfig(cfg)
 }
 
+// accessLogNoQueryPrefix is the part of the API whose query strings never reach
+// the access log: access control keeps its own records under retention
+// settings, and the journal must not outlive them with the search terms and
+// account ids its pages put in the query.
+const accessLogNoQueryPrefix = "/api/admin/dest/"
+
 func xrayAccessLogFormatter(params gin.LogFormatterParams) string {
+	if strings.HasPrefix(params.Path, accessLogNoQueryPrefix) {
+		if i := strings.IndexByte(params.Path, '?'); i >= 0 {
+			params.Path = params.Path[:i]
+		}
+	}
 	line := fmt.Sprintf("%s [Info] passwall-sub-panel: http request status=%d method=%s path=%s latency=%s client_ip=%s",
 		params.TimeStamp.UTC().Format("2006/01/02 15:04:05.000000"),
 		params.StatusCode,

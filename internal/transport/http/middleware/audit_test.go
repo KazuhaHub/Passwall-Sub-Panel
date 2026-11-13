@@ -223,3 +223,32 @@ func TestIsSensitiveKey(t *testing.T) {
 		}
 	}
 }
+
+// THE TWO PREVIEWS ARE READS DRESSED AS POSTS. The access-control page calls
+// them whenever typing pauses, and a list preview carries the whole pasted
+// text; audited, each pause would write a row with up to that text in it. They
+// are exempt by EXACT path (a prefix would exempt a route added later by
+// accident), and the test tool next to them is a real action — who tested what
+// for whom — and stays audited.
+func TestDestPreviewEndpointsAreNotAudited(t *testing.T) {
+	for _, path := range []string{"/api/admin/dest/lists/preview", "/api/admin/dest/policies/preview"} {
+		if shouldAuditPath(path, http.MethodPost) {
+			t.Errorf("%s is a preview and must not be audited", path)
+		}
+	}
+	for _, c := range []struct{ path, method string }{
+		{"/api/admin/dest/test", http.MethodPost},
+		{"/api/admin/dest/lists", http.MethodPost},
+		{"/api/admin/dest/lists/12", http.MethodPut},
+		{"/api/admin/dest/policies", http.MethodPost},
+		{"/api/admin/dest/policies/order", http.MethodPut},
+		{"/api/admin/dest/exemptions", http.MethodPost},
+		{"/api/admin/dest/publish", http.MethodPost},
+		{"/api/admin/dest/lists/preview/other", http.MethodPost}, // exact, not a prefix
+		{"/api/admin/dest/lists/previews", http.MethodPost},
+	} {
+		if !shouldAuditPath(c.path, c.method) {
+			t.Errorf("%s %s must still be audited", c.method, c.path)
+		}
+	}
+}

@@ -223,6 +223,11 @@ type destAgentPolicyRow struct {
 	ReportedIssue      string     `gorm:"size:64;not null;default:''"`
 	ReportedListeners  *string    `gorm:"column:reported_listeners;type:text"`
 	ReportedAt         *time.Time
+	RejectedCaps       string `gorm:"size:8;not null;default:''"`
+	RejectedSHA256     string `gorm:"column:rejected_sha256;size:64;not null;default:''"`
+	MintedGeneration   int64  `gorm:"not null;default:0"`
+	MintedCtx          string `gorm:"column:minted_ctx;size:64;not null;default:''"`
+	RejectedCtx        string `gorm:"column:rejected_ctx;size:64;not null;default:''"`
 	UpdatedAt          time.Time
 }
 
@@ -237,7 +242,7 @@ func (r destAgentPolicyRow) toDomain() *domain.DestAgentPolicy {
 		AppliedRuleCount: r.AppliedRuleCount, AppliedGroups: nilIfEmptyInt64s(r.AppliedGroups),
 		CollectEffective: r.CollectEffective, ReportedSHA256: r.ReportedSHA256, ReportedState: r.ReportedState,
 		ReportedIssue: r.ReportedIssue, ReportedListeners: derefString(r.ReportedListeners),
-		ReportedAt: utcPtr(r.ReportedAt), UpdatedAt: r.UpdatedAt.UTC(),
+		ReportedAt: utcPtr(r.ReportedAt), RejectedCaps: r.RejectedCaps, RejectedSHA256: r.RejectedSHA256, MintedGeneration: r.MintedGeneration, MintedCtx: r.MintedCtx, RejectedCtx: r.RejectedCtx, UpdatedAt: r.UpdatedAt.UTC(),
 	}
 }
 

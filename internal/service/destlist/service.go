@@ -106,6 +106,12 @@ type Service struct {
 	// refreshMu makes the refresh single-flight; a second RefreshDue while one
 	// runs returns at once.
 	refreshMu sync.Mutex
+	// entriesMu serialises AddEntries' read-modify-write of a list's text.
+	entriesMu sync.Mutex
+	// refreshing marks the lists an admin asked to refresh that are still
+	// running (BeginRefresh), for the page's "refreshing" state.
+	refreshingMu sync.Mutex
+	refreshing   map[int64]time.Time
 
 	// afterSwap is a test seam: called with the files swapped and the lists
 	// not yet committed.

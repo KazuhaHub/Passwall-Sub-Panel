@@ -119,6 +119,20 @@ func (r *DestExemptionRepo) Delete(ctx context.Context, userID int64) error {
 	})
 }
 
+// deleteDestExemptionTx removes a user's exemption on tx and advances the
+// generation when there was one: an exemption in force is leaving the policy.
+// It is the user repository's half of the removal cleanup.
+func deleteDestExemptionTx(tx *gorm.DB, userID int64) error {
+	res := tx.Where("user_id = ?", userID).Delete(&destExemptionRow{})
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return nil
+	}
+	return bumpDestGeneration(tx, time.Now())
+}
+
 // DeleteExpired removes every exemption whose expiry is at or before now and
 // returns how many. Expiry is a definition change — the exemption leaves the
 // policy — so it advances the generation, but only when something expired.
@@ -326,9 +340,13 @@ func (r *DestAgentPolicyRepo) Patch(ctx context.Context, agentID string, patch d
 		digest("minted_sha256", patch.MintedSHA256),
 		digest("applied_sha256", patch.AppliedSHA256),
 		digest("reported_sha256", patch.ReportedSHA256),
+		digest("rejected_sha256", patch.RejectedSHA256),
+		digest("minted_ctx", patch.MintedCtx),
+		digest("rejected_ctx", patch.RejectedCtx),
 		short("collect_effective", patch.CollectEffective, 16),
 		short("reported_state", patch.ReportedState, 16),
 		short("reported_issue", patch.ReportedIssue, 64),
+		short("rejected_caps", patch.RejectedCaps, 8),
 	} {
 		if step != nil {
 			return step
@@ -342,6 +360,9 @@ func (r *DestAgentPolicyRepo) Patch(ctx context.Context, agentID string, patch d
 	}
 	if patch.RejectedGeneration != nil {
 		set["rejected_generation"] = *patch.RejectedGeneration
+	}
+	if patch.MintedGeneration != nil {
+		set["minted_generation"] = *patch.MintedGeneration
 	}
 	if patch.AppliedRuleCount != nil {
 		set["applied_rule_count"] = *patch.AppliedRuleCount

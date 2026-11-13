@@ -65,3 +65,28 @@ func TestAccessLoggerSuppressesCredentialBearingPaths(t *testing.T) {
 		t.Fatalf("ordinary request disappeared from access log: %q", logs.String())
 	}
 }
+
+// THE ACCESS LOG IS NOT UNDER THE ACCESS-CONTROL RETENTION. gin's formatter
+// writes the path WITH its query string, and the access-control page puts
+// search terms and account ids in the query; those would reach the journal and
+// outlive every setting that bounds what the page itself keeps. Under
+// /api/admin/dest/ only the path is logged.
+func TestAccessLoggerDropsTheQueryUnderAdminDest(t *testing.T) {
+	line := func(path string) string {
+		return xrayAccessLogFormatter(gin.LogFormatterParams{
+			TimeStamp: time.Date(2026, 11, 13, 1, 2, 3, 0, time.UTC), StatusCode: 200, Method: stdhttp.MethodGet, Path: path, ClientIP: "192.0.2.1",
+		})
+	}
+	got := line("/api/admin/dest/users/7?usage=24h&q=secret.example.com")
+	if strings.Contains(got, "secret.example.com") || strings.Contains(got, "usage=") || !strings.Contains(got, "path=/api/admin/dest/users/7 ") {
+		t.Fatalf("the query reached the log: %q", got)
+	}
+	// Elsewhere the query is kept, as it always was.
+	if other := line("/api/admin/users?keyword=alice"); !strings.Contains(other, "keyword=alice") {
+		t.Fatalf("a query outside /dest/ was dropped: %q", other)
+	}
+	// The exact prefix, not a lookalike.
+	if other := line("/api/admin/destiny?x=1"); !strings.Contains(other, "x=1") {
+		t.Fatalf("a lookalike prefix lost its query: %q", other)
+	}
+}
