@@ -3953,6 +3953,30 @@
         "label": "Node sync reports refused",
         "desc": "Authenticated native-node sync reports this panel refused. \"Incompatible version\" means the node is effectively offline."
       },
+      "psp_dest_list_refresh_total": {
+        "label": "Access-control list refreshes",
+        "desc": "Results of refreshing the lists the access-control policy matches against (remote lists and geosite updates). Repeated \"Failed\" means a list is serving old entries; any \"Refused: too broad\" needs an admin to look at the list."
+      },
+      "psp_dest_policy_compile_total": {
+        "label": "Access-control policy compiles",
+        "desc": "Results of compiling the access-control policy for a node sync. \"Reused\" is the normal case; \"Fallback\" means the node runs the last policy that applied (it refused the new one, an inbound's sniffing cannot supply what the policy needs, or the policy is over the node's limit); \"Nothing to fall back to\" means no earlier policy exists and the node got none; \"Invalid\" is a bug in the panel."
+      },
+      "psp_dest_policy_compile_ms": {
+        "label": "Access-control policy compile time",
+        "desc": "Time to recompile the access-control policy for one node (cache misses only), in milliseconds."
+      },
+      "psp_dest_policy_publish_total": {
+        "label": "Access-control policy publications",
+        "desc": "Published access-control policy snapshots, by trigger: edits went quiet, the longest wait was reached, an admin published now, or the emergency switch moved."
+      },
+      "psp_dest_policy_publish_rejected_total": {
+        "label": "Access-control publications refused",
+        "desc": "Publications the pre-publish validation refused (a limit passed, or the policy invalid). The previous snapshot stays in force; the access-control page says why."
+      },
+      "psp_node_policy_status_dropped_total": {
+        "label": "Node policy status dropped",
+        "desc": "Node policy-status reports dropped whole (did not decode, failed validation or lacked the capability). The sync itself still succeeds, so only this count shows it."
+      },
       "psp_saml_acs_failure_total": {
         "label": "SAML sign-ins refused",
         "desc": "Refused SAML sign-ins (and sign-in starts), by reason. Configuration reasons point at identity-provider settings; \"Assertion replayed\" needs investigating."
@@ -4048,6 +4072,27 @@
       "node_refused": {
         "protocol_generation": "Incompatible version",
         "report_invalid": "Invalid report"
+      },
+      "dest_list_refresh": {
+        "unchanged": "Unchanged",
+        "updated": "Updated",
+        "failed": "Failed",
+        "broad": "Refused: too broad"
+      },
+      "dest_compile": {
+        "cache_hit": "Reused",
+        "compiled": "Recompiled",
+        "fallback_rejected": "Fallback (refused by node)",
+        "fallback_sniffing": "Fallback (sniffing insufficient)",
+        "fallback_over_limit": "Fallback (over the limit)",
+        "fallback_nil": "Nothing to fall back to",
+        "invalid": "Invalid"
+      },
+      "dest_publish": {
+        "debounced": "After edits went quiet",
+        "max_wait": "Longest wait reached",
+        "manual": "Published now",
+        "pause": "Emergency switch"
       },
       "node_host_report": {
         "accepted": "Accepted",

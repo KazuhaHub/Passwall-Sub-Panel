@@ -1,12 +1,14 @@
 package handler
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"sync"
 	"time"
 
@@ -69,6 +71,8 @@ type NodeSyncHandler struct {
 	// a permanently broken collector would otherwise emit one warning per poll
 	// forever, which is how a real signal gets filtered out of a log.
 	drops hostDropLog
+	// policyDrops is the same throttle for the policy status.
+	policyDrops hostDropLog
 }
 
 // hostDropLogInterval is how often one agent's telemetry failure may be logged.
@@ -191,6 +195,62 @@ func (h *NodeSyncHandler) recordHostDrop(agentID, reason string) {
 	log.Warn("node host telemetry dropped", "agent_id", agentID, "reason", reason)
 }
 
+// nodeReportWire is the report as it is decoded off the wire: the typed
+// NodeReport with the policy status held back as raw bytes.
+//
+// Both fields are named policy_status, and encoding/json resolves the SHALLOWER
+// one, so the typed field of the embedded NodeReport is never reached by the
+// decoder and a status that is the wrong shape (a number for a digest, a string
+// for the object) cannot fail the decode of the whole report. The raw bytes are
+// then decoded, validated and capability-checked on their own, in
+// sanitizePolicyStatus, where any failure costs the status and nothing else.
+type nodeReportWire struct {
+	nodeprotocol.NodeReport
+	PolicyStatus json.RawMessage `json:"policy_status,omitempty"`
+}
+
+// maxPolicyStatusBytes bounds the raw status. The protocol's own bounds
+// (MaxPolicyStatusListeners listener keys of at most a few dozen bytes) keep a
+// real one under ~16 KiB; the measure is on the raw bytes because a decoded
+// struct has already forgotten what an unknown additive field weighed.
+const maxPolicyStatusBytes = 16 << 10
+
+// sanitizePolicyStatus decodes and validates the policy-status subtree and
+// returns nil for one that is absent or unusable.
+//
+// DROPPING IS THE WHOLE POINT, as for the host telemetry: the caller keeps the
+// request and answers it normally. A node whose status the panel cannot read
+// costs the panel a counter and nothing else. (It does leave the panel without
+// the node's confirmation, which is the safe direction: no confirmation never
+// records a last-known-good and never clears a refusal.)
+func (h *NodeSyncHandler) sanitizePolicyStatus(raw json.RawMessage, capabilities []string, agentID string) *nodeprotocol.PolicyStatus {
+	raw = bytes.TrimSpace(raw)
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil
+	}
+	drop := func(reason string) *nodeprotocol.PolicyStatus {
+		metrics.NodePolicyStatusDroppedTotal.Inc()
+		if h.policyDrops.shouldLog(agentID, time.Now()) {
+			log.Warn("node policy status dropped", "agent_id", agentID, "reason", reason)
+		}
+		return nil
+	}
+	if len(raw) > maxPolicyStatusBytes {
+		return drop("oversized")
+	}
+	var status nodeprotocol.PolicyStatus
+	if err := json.Unmarshal(raw, &status); err != nil {
+		return drop("decode")
+	}
+	if err := nodeprotocol.ValidatePolicyStatus(status); err != nil {
+		return drop("invalid")
+	}
+	if !slices.Contains(capabilities, nodeprotocol.CapabilityDestinationPolicy) {
+		return drop("no_capability")
+	}
+	return &status
+}
+
 func (h *NodeSyncHandler) ServeHTTP(w http.ResponseWriter, request *http.Request) {
 	if request.Method != http.MethodPost || request.URL.Path != "/v1/node/sync" {
 		http.NotFound(w, request)
@@ -217,14 +277,16 @@ func (h *NodeSyncHandler) ServeHTTP(w http.ResponseWriter, request *http.Request
 		writeNodeError(w, status, fmt.Errorf("read node report: %w", err))
 		return
 	}
-	var report nodeprotocol.NodeReport
+	var wire nodeReportWire
 	// Unmarshal rather than a streaming decoder: this makes a trailing second
 	// document a syntax error, instead of something a following Decode has to be
 	// remembered to notice.
-	if err := json.Unmarshal(body, &report); err != nil {
+	if err := json.Unmarshal(body, &wire); err != nil {
 		writeNodeError(w, http.StatusBadRequest, fmt.Errorf("decode node report: %w", err))
 		return
 	}
+	report := wire.NodeReport
+	report.PolicyStatus = nil
 	if report.AgentID != agentID {
 		writeNodeError(w, http.StatusUnauthorized, ErrNodeAuthentication)
 		return
@@ -254,6 +316,10 @@ func (h *NodeSyncHandler) ServeHTTP(w http.ResponseWriter, request *http.Request
 		return
 	}
 	report.Host = h.sanitizeHost(body, report.Host, agentID)
+	// The policy status is validated AFTER the control half, and on its own:
+	// a report that is wrong about its roster is still refused outright, and
+	// one whose status is wrong keeps everything but the status.
+	report.PolicyStatus = h.sanitizePolicyStatus(wire.PolicyStatus, report.Capabilities, agentID)
 	response, err := h.service.Sync(request.Context(), report)
 	if err != nil {
 		// The untrusted shape was already validated above. Everything after this

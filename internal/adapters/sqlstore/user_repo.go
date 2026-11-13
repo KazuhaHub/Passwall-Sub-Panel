@@ -524,7 +524,20 @@ func (r *userRepo) GrantEmergencyAccess(ctx context.Context, userID int64, until
 }
 
 func (r *userRepo) Delete(ctx context.Context, id int64) error {
-	return r.db.WithContext(ctx).Delete(&userRow{}, id).Error
+	// The account's access-control exemption leaves with it, in the same
+	// transaction: it is keyed by user id with no foreign key, so nothing else
+	// would ever remove it, and a stale one would sit in the exemption list
+	// naming nobody. The state lock comes first (see lockDestState): removing an
+	// exemption in force is a definition write.
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := lockDestState(tx); err != nil {
+			return err
+		}
+		if err := tx.Delete(&userRow{}, id).Error; err != nil {
+			return err
+		}
+		return deleteDestExemptionTx(tx, id)
+	})
 }
 
 func (r *userRepo) GetByID(ctx context.Context, id int64) (*domain.User, error) {

@@ -524,6 +524,14 @@ func settingDescriptors(s *ports.UISettings) []settingDescriptor {
 		intField("risk", "live_refresh_cooldown_seconds", &s.RiskLiveRefreshCooldownSeconds),
 		intField("risk", "device_infer_hours", &s.RiskDeviceInferHours),
 
+		// dest --- access control (destination policy). Owned by
+		// /api/admin/dest/settings. 0 and "" are "never configured";
+		// ports.AccessControlEffectiveOf owns the defaults and the clamps, so
+		// none of them is defaulted in Load.
+		intField("dest", "policy_apply_min_seconds", &s.DestPolicyApplyMinSeconds),
+		intField("dest", "list_refresh_hours", &s.DestListRefreshHours),
+		strField("dest", "rules_update_mode", &s.DestRulesUpdateMode),
+
 		// geo --- IP geolocation for access-log region display (offline .mmdb)
 		boolField("geo", "geo_ip_enabled", &s.GeoIPEnabled),
 		strField("geo", "geo_ip_db_file", &s.GeoIPDBFile),

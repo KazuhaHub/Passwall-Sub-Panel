@@ -1699,6 +1699,25 @@ type UISettings struct {
 	RiskLiveRefreshCooldownSeconds int `json:"risk_live_refresh_cooldown_seconds"`
 	RiskDeviceInferHours           int `json:"risk_device_infer_hours"`
 
+	// ---- Access control (destination policy) ----
+	// Owned by /api/admin/dest/settings, not the system settings page:
+	// UISettings.AccessControlSettings is the exact set (every dest_ field),
+	// and the system settings PUT writes them back as loaded.
+	//
+	// DestPolicyApplyMinSeconds is the trailing debounce of policy
+	// publication: a definition write is published once no further write has
+	// arrived for this long (and in any case within five times it). Default
+	// 60, clamped to 30..3600. Every publish restarts the cores whose policy
+	// changed, so a burst of edits must collapse into one.
+	DestPolicyApplyMinSeconds int `json:"dest_policy_apply_min_seconds"`
+	// DestListRefreshHours is how often remote and geosite lists are
+	// refreshed. Default 24, clamped to 6..168. Never 0 for "off": a list
+	// that cannot refresh is a rule that quietly goes stale.
+	DestListRefreshHours int `json:"dest_list_refresh_hours"`
+	// DestRulesUpdateMode is "manual" (the default: a new geosite release is
+	// only announced) or "auto" (it is downloaded, verified and applied).
+	DestRulesUpdateMode string `json:"dest_rules_update_mode"`
+
 	// ---- IP geolocation (access-log region display, offline .mmdb) ----
 	// Resolution is fully offline against a local .mmdb in <ConfigDir>/geoip/;
 	// no per-IP external calls. GeoIPEnabled gates the whole feature (default

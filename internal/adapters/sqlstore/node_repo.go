@@ -366,7 +366,21 @@ func (r *nodeRepo) BatchUpdateSortOrder(ctx context.Context, updates []ports.Nod
 }
 
 func (r *nodeRepo) Delete(ctx context.Context, id int64) error {
-	return r.db.WithContext(ctx).Delete(&nodeRow{}, id).Error
+	// The node's destination source rule leaves with it, in the same
+	// transaction: it is keyed by node id with no foreign key, so nothing
+	// else would ever find it again, and the compiler would keep reading a
+	// rule for an inbound that no longer exists.
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// The state lock first (see lockDestState): the source rule goes with
+		// the node, and its removal is a definition write.
+		if err := lockDestState(tx); err != nil {
+			return err
+		}
+		if err := tx.Delete(&nodeRow{}, id).Error; err != nil {
+			return err
+		}
+		return deleteDestSourceRuleTx(tx, id)
+	})
 }
 
 func (r *nodeRepo) GetByID(ctx context.Context, id int64) (*domain.Node, error) {

@@ -6,7 +6,7 @@ toolchain go1.27.4
 
 require (
 	github.com/KazuhaHub/authcore v0.5.0
-	github.com/KazuhaHub/passwall-protocol v0.2.1
+	github.com/KazuhaHub/passwall-protocol v0.3.0
 	github.com/coreos/go-oidc/v3 v3.21.0
 	github.com/crewjam/saml v0.5.1
 	github.com/gin-gonic/gin v1.12.0
@@ -16,7 +16,9 @@ require (
 	github.com/go-webauthn/webauthn v0.18.2
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/google/uuid v1.6.0
+	github.com/maxmind/mmdbwriter v1.2.0 // test only: builds the GeoIP fixture databases
 	github.com/mojocn/base64Captcha v1.3.8
+	github.com/oschwald/maxminddb-golang v1.13.1
 	github.com/pquerna/otp v1.5.0
 	golang.org/x/crypto v0.58.0
 	golang.org/x/oauth2 v0.37.0
@@ -29,8 +31,9 @@ require (
 require (
 	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/ncruces/go-strftime v1.1.0 // indirect
-	github.com/oschwald/maxminddb-golang v1.13.1 // indirect
+	github.com/oschwald/maxminddb-golang/v2 v2.1.1 // indirect
 	go.opentelemetry.io/otel/log v1.47.0 // indirect
+	go4.org/netipx v0.0.0-20231129151722-fdeea329fbba // indirect
 )
 
 require (

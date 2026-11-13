@@ -852,3 +852,61 @@ PSP 拨入时「这次没到」的证据由 PSP 的传输层产生，节点拨�
 3. 关闭父目录 `go.work`，跑 PSP 后端、前端、跨平台构建和 live contract 全套闸门。
 4. 后续能力按 §9 独立立项；quota gate 已闭合，开放首个真实 task 前仍须完成 expiry / retention /
    restore 三道硬门，不得把未知或冲突结果当成功，也不得把未经目录核验的 core 版本暴露为可选项。
+
+
+## 11. 目的地策略（访问控制）：新增的线上字段与能力（协议 v0.3.0）
+
+> 行为、编译顺序与回退见 [access-control.md](access-control.md)。这一节只登记协议上多了什么、PSP 怎么接。
+> 全部是**加性**改动：不升线上协议版本、不加端点、不加 stream（节点 SQLite 的 `stream_documents` 约束与远程升级的 schema 比较都不动）。
+
+### 11.1 能力
+
+`policy.destination.v1`（`protocol.CapabilityDestinationPolicy`）。**它不是升级能力**：不在 `AgentUpgradeCapabilities()` 里，缺了它不代表协议不兼容，
+也不妨碍节点被远程升级。PSP **只向本次上报声明了它的 agent** 下发 `ConfigBody.Policy`；没声明的 agent 永远看不到这个字段（旧节点收到不认识的字段会静默丢弃却仍报已应用，
+所以必须靠能力把关）。PSP 用**本次上报**的能力，不用 agent 行上记的旧值。
+
+### 11.2 下行：`ConfigBody.Policy`
+
+```go
+Policy *DestinationPolicy `json:"policy,omitempty"` // omitempty 是承重的
+```
+
+- `Policy == nil` 时 `ConfigBody` 的规范序列化与 v0.2.x **逐字节相同**（PSP 与 Protocol 各有一个测试钉住）。没有策略的面板升级后，所有现有节点的 config ETag 不变。
+- `DestinationPolicy{Rules, Exempt, Collect}`：`Rules` 永远非 nil（`[]` 与 `null` 是不同字节、不同摘要）；`Collect` 第一批恒为 `""`；
+  `Exempt` 是本节点 roster 里有 client 的豁免账号。
+- `DestinationRule` 的 ID 是 `p<policy>[x<k>]`（策略）、`s<node>`（来源规则）、`g<gid>…`（白名单分组，后续批次）。规则必须按阶段非递减排列；每个切片排序（按字节序）去重。
+  PSP 在铸出之前用同一个 `protocol.ValidateDestinationPolicy` 校验，节点收到时再校验一遍：**校验失败等于整段 config 被拒（连带 listener 变更）**，
+  所以 PSP 必须先判断，定义层面的失败在发布时拦下，每节点的失败走回退。
+- 来源规则的字段是 `Inbounds`（`lst_<node_id>`）与 `SourceCIDRs`；`Inbounds` 也可以出现在 `p*` 规则上，`g*` 规则不带。
+- 摘要 `protocol.PolicyDigest(policy)` 是规范 JSON 的 sha256；PSP 用它判断节点跑的是哪一份。
+
+### 11.3 上行：`NodeReport.PolicyStatus`
+
+```go
+type PolicyStatus struct {
+    Digest    string        // 最近一次「部署成功」或「因策略被拒」的那份策略的摘要；无策略为 ""
+    State     string        // "applied" | "rejected"
+    IssueCode string        // rejected 才有：destination_policy_rejected | destination_policy_sniffing_insufficient
+    Listeners []ListenerKey // 嗅探不足时，列出不满足的入站
+}
+```
+
+- 它说的是「节点对摘要 D 做了什么」，不是「这是我的策略」：PSP 把 `Digest` 与自己铸出的摘要比较，确认不会退化成 PSP 自己同意自己。
+- 只在部署成功、或**因策略本身**被拒时更新；无关的部署失败不改它（config 的 ETag 证明不了策略生效：processor 对未变化的 listener 不调 runtime 就标 applied）。
+- **PSP 不把它放进 `ValidateNodeReportBase`。** HTTP handler 先把整份上报解进 `nodeReportWire`（内嵌 `NodeReport`，另有同名 `policy_status` 的 `json.RawMessage`），
+  `encoding/json` 取较浅的字段，所以类型错误的 `policy_status`（如 `digest` 是数字）不会让整份上报解码失败。随后单独解码、校验（`ValidatePolicyStatus`）、
+  检查能力绑定（缺 `policy.destination.v1` 则丢弃）、限制原始大小（16 KiB）。**任何一步失败只丢这棵子树**，计 `psp_node_policy_status_dropped_total`，同步照常 200。
+  上报缓存（latest-full）也不保留它。
+- 它是**控制输入**，与 `Host` 不同：`Sync` 在构建 config **之前**调用 `ObserveStatus`（记录 LKG、处理拒绝），构建之后才 `Compile`；
+  若放到响应之后，「被拒 → 回退」会晚一轮。
+
+### 11.4 PSP 侧 issue 码
+
+除协议里的两个码（`destination_policy_rejected`、`destination_policy_sniffing_insufficient`）外，PSP 自己记两个：
+`destination_policy_over_limit`（该节点超出 Subjects / 字节上限，回退）、`destination_policy_lkg_rejected`（回退用的上一版自己也被拒，已清空 LKG）。
+用现有的 `NodeAgentIssueRepo.RecordBatch`（按 agent + code + key + detail 幂等）。内容只有摘要前缀、入站键和额度数字，不含用户或目的地。
+
+### 11.5 嗅探
+
+PSP 与 Node 共用 `protocol.CheckXraySniffing(raw, need)`（Xray 入站的 `sniffing` 对象）：`SniffInject`（关闭，节点注入）、`SniffOK`、`SniffInsufficient`（带原因）。
+注入的对象是 `protocol.XraySniffingInjection()`（`routeOnly:false`）原样写入。PSP 只对 Xray 预检；sing-box 的 sniff 在 `route.rules` 里，由节点编译器生成。

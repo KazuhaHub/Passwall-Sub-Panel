@@ -105,23 +105,28 @@ type Deps struct {
 	// the composition root from the panel secret, so the handler never sees
 	// key material; TestBuildRecordsTheDeclaredDeviceOnEveryLoggedFetch
 	// guards that it is actually handed over.
-	DeviceHasher     *subdevice.Hasher
-	Pool             ports.XUIPool
-	Auth             *auth.Service
-	SAML             *auth.SAMLService
-	OIDC             *auth.OIDCService
-	User             *user.Service
-	Group            *group.Service
-	Node             *node.Service
-	Cert             *cert.Service
-	Render           *render.Service
-	Audit            *audit.Service
-	Sync             *syncsvc.Service
-	Traffic          *traffic.Service
-	Mail             *mailer.Service
-	Reconcile        *reconcile.Service
-	Geo              *geo.Service
-	NodeSync         handler.NodeSyncService
+	DeviceHasher *subdevice.Hasher
+	Pool         ports.XUIPool
+	Auth         *auth.Service
+	SAML         *auth.SAMLService
+	OIDC         *auth.OIDCService
+	User         *user.Service
+	Group        *group.Service
+	Node         *node.Service
+	Cert         *cert.Service
+	Render       *render.Service
+	Audit        *audit.Service
+	Sync         *syncsvc.Service
+	Traffic      *traffic.Service
+	Mail         *mailer.Service
+	Reconcile    *reconcile.Service
+	Geo          *geo.Service
+	NodeSync     handler.NodeSyncService
+	// Dest is the access-control API's wiring. Its routes are always
+	// registered, so that "admin only" is provable with nothing wired; a
+	// field left out makes the routes that need it answer 503.
+	// TestBuildWiresTheAccessControlAPI guards that Build fills it.
+	Dest             handler.DestWiring
 	NodeAgentUpgrade handler.NativeAgentUpgradeService
 	NodeDiagnostics  handler.NodeDiagnosticsService
 	// NodeMetrics serves the resource-telemetry API. Optional: absent, its
@@ -653,6 +658,16 @@ func NewRouter(d Deps) stdhttp.Handler {
 		riskPolicyH := handler.NewAdminRiskPolicyHandler(d.Repos.Settings)
 		adminGroup.GET("/risk-center/policy", riskPolicyH.Get)
 		adminGroup.PUT("/risk-center/policy", riskPolicyH.Put)
+		// Access control's settings (the debounce, the list refresh interval,
+		// the geosite update mode): the same arrangement — adminGroup, the
+		// one writer of its dest_* keys, the system settings PUT's write
+		// lock — and its audit rows are the owner's too
+		// (adminOnlyAuditTargets). The rest of the access-control API is
+		// registered beside it.
+		destSettingsH := handler.NewAdminDestSettingsHandler(d.Repos.Settings)
+		adminGroup.GET("/dest/settings", destSettingsH.Get)
+		adminGroup.PUT("/dest/settings", destSettingsH.Put)
+		registerDestRoutes(adminGroup, handler.NewAdminDestHandler(d.Dest))
 		adminGroup.GET("/diagnostics/metrics", diagH.Metrics)
 		adminGroup.POST("/diagnostics/metrics/reset", diagH.ResetMetrics)
 
@@ -1001,4 +1016,58 @@ func (c *settingsIntCache) get() int {
 		c.mu.RUnlock()
 	}
 	return v
+}
+
+// registerDestRoutes mounts the access-control API on the admin-only group.
+// EVERY route is adminGroup (TestDestRoutesAreAdminOnly drives each through the
+// assembled router): access control decides what proxy users may reach, and its
+// writes carry list text and exemption reasons that only administrators read
+// back (adminOnlyAuditTargets).
+//
+// Two routes are not audited: the previews (middleware.shouldAuditPath, by
+// exact path). The test route is a POST like any other and IS audited.
+func registerDestRoutes(g *gin.RouterGroup, h *handler.AdminDestHandler) {
+	// Lists. /lists/preview is registered before /lists/:id; gin gives a static
+	// segment priority over a parameter either way.
+	g.GET("/dest/lists", h.ListLists)
+	g.POST("/dest/lists/preview", h.PreviewList)
+	g.POST("/dest/lists", h.CreateList)
+	g.GET("/dest/lists/:id", h.GetList)
+	g.PUT("/dest/lists/:id", h.UpdateList)
+	g.DELETE("/dest/lists/:id", h.DeleteList)
+	g.POST("/dest/lists/:id/entries", h.ListEntries)
+	g.POST("/dest/lists/:id/refresh", h.RefreshList)
+	// Rule data (geosite).
+	g.GET("/dest/geosite/status", h.GeositeStatus)
+	g.GET("/dest/geosite/categories", h.GeositeCategories)
+	g.POST("/dest/geosite/update", h.GeositeUpdate)
+	g.POST("/dest/geosite/rollback", h.GeositeRollback)
+	// The built-in rule groups.
+	g.GET("/dest/catalog", h.Catalog)
+	g.POST("/dest/catalog/:key/instantiate", h.InstantiateCatalog)
+	// Policies.
+	g.GET("/dest/policies", h.ListPolicies)
+	g.POST("/dest/policies/preview", h.PreviewPolicy)
+	g.PUT("/dest/policies/order", h.ReorderPolicies)
+	g.POST("/dest/policies", h.CreatePolicy)
+	g.PUT("/dest/policies/:id", h.UpdatePolicy)
+	g.DELETE("/dest/policies/:id", h.DeletePolicy)
+	// Exemptions, source rules, exceptions.
+	g.GET("/dest/exemptions", h.ListExemptions)
+	g.POST("/dest/exemptions", h.CreateExemption)
+	g.GET("/dest/exemptions/:user_id", h.GetExemption)
+	g.PUT("/dest/exemptions/:user_id", h.UpdateExemption)
+	g.DELETE("/dest/exemptions/:user_id", h.DeleteExemption)
+	g.GET("/dest/source-rules", h.ListSourceRules)
+	g.GET("/dest/source-rules/:node_id", h.GetSourceRule)
+	g.PUT("/dest/source-rules/:node_id", h.PutSourceRule)
+	g.POST("/dest/exceptions", h.AddException)
+	// Tools and one account.
+	g.POST("/dest/test", h.Test)
+	g.GET("/dest/users/:id", h.User)
+	// Status and control.
+	g.GET("/dest/status", h.Status)
+	g.POST("/dest/publish", h.Publish)
+	g.PUT("/dest/pause", h.Pause)
+	g.POST("/dest/agents/:agent_id/retry", h.RetryAgent)
 }

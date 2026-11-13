@@ -166,6 +166,20 @@ skip 命中率 = psp_lifecycle_sync_skipped_total / psp_lifecycle_sync_total
 
 `active_users` 与 `floor_push_enqueued` 之间有个缺口：用户动了流量，也可能到不了入队（inbound 拉取失败被跳过、或已因配额停用）。**这个缺口本身有诊断价值**——它大，说明模型里的 N 高估了负载。
 
+### 4.7 访问控制（目的地策略）
+
+| 指标 | 含义 |
+|---|---|
+| `psp_dest_policy_compile_total{result=…}` | 为节点同步编译策略的结果：`cache_hit`（常态，从内存回答）、`compiled`（新编译并下发）、`fallback_rejected` / `fallback_sniffing` / `fallback_over_limit`（节点正在运行上一份已生效的策略，因为它拒绝了新版、入站嗅探不满足、或该节点超出上限）、`fallback_nil`（同样回退，但没有上一份可用，节点没拿到策略）、`invalid`（为节点编出的策略没通过校验：面板自身的缺陷，不是管理员的错） |
+| `psp_dest_policy_compile_ms` | 缓存未命中的编译耗时分布。命中缓存只是一次查找，混进来会盖住「几 MiB 的策略正在被编译」这个真正要看的分布 |
+| `psp_dest_policy_publish_total{trigger=…}` | 已发布的快照，按触发原因：`debounced`（修改停顿）、`max_wait`（连续修改，到了 5 倍窗口）、`manual`（管理员立即下发）、`pause`（紧急开关变化） |
+| `psp_dest_policy_publish_rejected_total` | 发布前校验拒绝的次数（超出上限或策略无效）；上一份快照继续生效，原因在访问控制页的结论条里 |
+| `psp_node_policy_status_dropped_total` | 节点上报的 `policy_status` 被整体丢弃的次数（无法解码、校验失败、缺能力）。**同步本身仍然成功**，所以只有这个计数能看出来 |
+| `psp_dest_list_refresh_total{result=…}` | 远程列表与 geosite 更新的刷新结果：`unchanged`、`updated`、`failed`、`broad` |
+
+读法：`fallback_*` 持续增长说明有节点一直没拿到完整策略，状态页能看到是哪台、为什么；`invalid` 只要不为零就是缺陷；
+`publish_rejected` 增长而 `publish_total` 不动，说明管理员的修改被额度卡住了。标签值都是固定集合，不含用户、目的地或列表地址。
+
 ## 5. 已知限制
 
 - **快照跨指标非原子。** 并发跑着的 poll 可能只被记了一半，两个相关计数最多差一个周期的量。要做成原子的就得在每次记录上加锁，用热路径的真实成本，去买一个以小时计的测量窗口根本不需要的一致性。

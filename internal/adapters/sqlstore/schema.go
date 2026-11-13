@@ -1590,6 +1590,15 @@ var schemaModels = []any{
 	&nodeHostMetricSampleRow{},
 	&nodeInterfaceMetricSampleRow{},
 	&nodeHostMetricHourlyRow{},
+	// Destination policy ("access control", v4.x): definitions, publish
+	// bookkeeping and per-agent delivery state. See dest_schema.go.
+	&destListRow{},
+	&destPolicyRow{},
+	&destExemptionRow{},
+	&destSourceRuleRow{},
+	&destPolicyStateRow{},
+	&destPolicySnapshotRow{},
+	&destAgentPolicyRow{},
 }
 
 // EnsureSchema validates the supported input before performing any DDL, then

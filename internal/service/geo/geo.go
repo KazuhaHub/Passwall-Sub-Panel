@@ -80,6 +80,27 @@ func New(settings ports.SettingsRepo, configDir string) *Service {
 // Dir returns the directory where .mmdb files live.
 func (s *Service) Dir() string { return s.dir }
 
+// ActiveMMDBPath is the absolute path of the database that is active now (the
+// admin's choice when it exists, else the first by name), "" when there is
+// none. The destination policy expands a country into address ranges from this
+// very file, so a source rule and the risk center's region display can never
+// disagree about where an address is.
+//
+// It does NOT require geo_ip_enabled. That switch gates the per-address
+// lookups behind the region display; a rule that denies a country needs only
+// the file, and refusing to read it because a display toggle is off would
+// quietly un-deny the country.
+func (s *Service) ActiveMMDBPath(ctx context.Context) string {
+	if s == nil {
+		return ""
+	}
+	set, err := s.settings.Load(ctx, ports.UISettings{})
+	if err != nil {
+		return ""
+	}
+	return s.resolveActivePath(set.GeoIPDBFile)
+}
+
 // Lookup resolves the given IPs against the active database. Returns an empty
 // (non-nil) map when the feature is disabled or no database is loaded.
 func (s *Service) Lookup(ctx context.Context, ips []string) map[string]domain.GeoLocation {

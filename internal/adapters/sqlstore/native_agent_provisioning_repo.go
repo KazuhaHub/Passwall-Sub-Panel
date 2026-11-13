@@ -376,6 +376,11 @@ func (r *nativeAgentProvisioningRepo) DeleteConverged(ctx context.Context, panel
 		if err := tx.Where("agent_id = ?", agent.AgentID).Delete(&nodeHostObservationRow{}).Error; err != nil {
 			return err
 		}
+		// The destination-policy delivery state is keyed by agent id too, with
+		// no foreign key; it goes in this transaction for the same reason.
+		if err := tx.Where("agent_id = ?", agent.AgentID).Delete(&destAgentPolicyRow{}).Error; err != nil {
+			return err
+		}
 		if err := tx.Delete(&nodeAgentRow{}, agent.ID).Error; err != nil {
 			return err
 		}

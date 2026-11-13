@@ -1,7 +1,6 @@
 package sqlstore
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -416,15 +415,22 @@ func (r *nodeAgentRepo) MintStream(ctx context.Context, agentID string, stream d
 	etag := contentETag(body)
 	now = now.UTC()
 	for attempt := 0; attempt < 8; attempt++ {
+		// THE IDENTITY COLUMNS ONLY. This read runs every sync for every node,
+		// and a config body that carries a destination policy is up to several
+		// MiB: reading it back just to learn that nothing changed is what
+		// the equal-content path must not cost. The ETag is the SHA-256 of the
+		// body, so equal ETags are equal bodies; a collision that fooled this
+		// would have to be a SHA-256 collision, which is not a risk worth a
+		// whole-row read every thirty seconds per node (the old whole-body
+		// comparison here guarded against exactly that and nothing else).
 		var current nodeAgentStreamRow
-		if err := r.db.WithContext(ctx).Where("agent_id = ? AND stream = ?", agentID, stream).
+		if err := r.db.WithContext(ctx).
+			Select("id", "agent_id", "stream", "desired_version", "desired_etag").
+			Where("agent_id = ? AND stream = ?", agentID, stream).
 			First(&current).Error; err != nil {
 			return nil, false, wrapNotFound(err)
 		}
 		if current.DesiredETag == etag {
-			if !bytes.Equal(current.DesiredBody, body) {
-				return nil, false, errors.New("mint node agent stream: SHA-256 collision")
-			}
 			return streamRowToDomain(&current), false, nil
 		}
 		if current.DesiredVersion == math.MaxUint64 {

@@ -616,6 +616,104 @@ var (
 )
 
 // ---------------------------------------------------------------------
+// Destination policy ("access control") — answers "are the lists the policy
+// matches against staying current, and when they do not, why?".
+//
+// The refresh loop (service/destlist) counts once per remote list it fetches
+// and once per geosite update it attempts, labelled by the CLOSED set of
+// results below: a list URL or an error message on a label would be
+// attacker-sized cardinality, and a list URL may carry a token.
+//
+//	unchanged  fetched; the entries' digest is the one already stored, so
+//	           nothing was republished (F13)
+//	updated    fetched; the entries changed
+//	failed     the fetch, the parse, a size limit or a rule refused it; the
+//	           previous entries stay in force and the list says why
+//	broad      the refresh would have introduced an entry so broad it matches
+//	           nearly everything; refused like a failure, counted apart because
+//	           it is the one that needs an admin's eyes
+// ---------------------------------------------------------------------
+
+const (
+	DestListRefreshUnchanged = "unchanged"
+	DestListRefreshUpdated   = "updated"
+	DestListRefreshFailed    = "failed"
+	DestListRefreshBroad     = "broad"
+)
+
+var (
+	DestListRefreshTotal = NewCounterVec(
+		"psp_dest_list_refresh_total",
+		"Destination-policy list refreshes (remote lists and geosite updates), by result.",
+		"result",
+	)
+)
+
+// ---------------------------------------------------------------------
+// Destination policy compilation and publication — answers "is the policy
+// reaching the nodes, and when it is not, is it the panel holding it back?".
+//
+// Compile counts once per node per sync, labelled by the CLOSED set of results
+// (service/destpolicy): cache_hit (nothing changed, answered from memory),
+// compiled (a fresh policy was built and sent), fallback_rejected /
+// fallback_sniffing / fallback_over_limit (the node runs the last policy that
+// applied, trimmed, because it refused the new one, its inbounds cannot sniff
+// what the policy needs, or the policy is too large for it), fallback_nil (the
+// same, with no last policy to run: the node got none) and invalid (the policy
+// compiled for the node failed validation: a bug, never an admin's mistake).
+// Publish counts each publication by what triggered it: debounced (the edits
+// went quiet), max_wait (they never did, and five windows passed), manual (the
+// admin asked) or pause (the emergency switch moved).
+//
+// The status counter counts node policy reports the panel dropped whole (a
+// status that does not decode, fails its own validation or arrives without the
+// capability): the sync itself still succeeds, which is why the drop would
+// otherwise be invisible.
+// ---------------------------------------------------------------------
+
+const (
+	DestCompileCacheHit       = "cache_hit"
+	DestCompileCompiled       = "compiled"
+	DestCompileFallbackReject = "fallback_rejected"
+	DestCompileFallbackSniff  = "fallback_sniffing"
+	DestCompileFallbackLimit  = "fallback_over_limit"
+	DestCompileFallbackNil    = "fallback_nil"
+	DestCompileInvalid        = "invalid"
+	DestPublishDebounced      = "debounced"
+	DestPublishMaxWait        = "max_wait"
+	DestPublishManual         = "manual"
+	DestPublishPause          = "pause"
+)
+
+var (
+	DestPolicyCompileTotal = NewCounterVec(
+		"psp_dest_policy_compile_total",
+		"Destination-policy compiles for a node sync, by result.",
+		"result",
+	)
+	// Only fresh compiles are timed: a cache hit costs a lookup and would bury
+	// the distribution that matters (a policy of megabytes being built).
+	DestPolicyCompileMS = NewHistogram(
+		"psp_dest_policy_compile_ms",
+		"Time to compile the destination policy for one node (cache misses only), in milliseconds.",
+		"ms", []float64{1, 5, 25, 100, 250, 500, 1000, 2500},
+	)
+	DestPolicyPublishTotal = NewCounterVec(
+		"psp_dest_policy_publish_total",
+		"Destination-policy snapshots published, by what triggered it.",
+		"trigger",
+	)
+	DestPolicyPublishRejectedTotal = NewCounter(
+		"psp_dest_policy_publish_rejected_total",
+		"Publications the pre-publish validation refused (a limit passed, or the policy invalid); the previous snapshot stays in force.",
+	)
+	NodePolicyStatusDroppedTotal = NewCounter(
+		"psp_node_policy_status_dropped_total",
+		"Node policy-status reports dropped whole because they did not decode, did not validate or lacked the capability.",
+	)
+)
+
+// ---------------------------------------------------------------------
 // SAML ACS refusals — answers "is this refusal an attack, an outage, or a bad
 // configuration?" Those three need different responses and, before this counter,
 // all arrived as a single reason code.
