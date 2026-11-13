@@ -679,6 +679,24 @@ test('the compatibility gate actually runs the case-set checker', () => {
   }
 })
 
+// THE CASE ID TRAVELS INSIDE THE ARTIFACT, NOT ONLY IN ITS NAME. The gate
+// downloads by pattern, and download-artifact extracts a pattern that matches ONE
+// artifact straight into `path` with no directory of its own. The checker names
+// each case after the directory holding its result.json, so an artifact that
+// carried only the case's files read as a case called "evidence" and its real
+// case as missing. That is how v4.1.1-beta.1's first release run failed once the
+// matrix's floor and newest became the same Node release. Uploading the parent
+// keeps `<case>/result.json` inside the zip, which survives either layout; it is
+// what test.yml's evidence upload already does.
+test('each Node case artifact carries its own case directory', () => {
+  const steps = withoutComments(job('node-compatibility'))
+    .split(/\n(?= {6}- )/)
+    .filter((step) => step.includes('uses: actions/upload-artifact@'))
+  assert.equal(steps.length, 1, 'the Node case leg uploads exactly one evidence artifact')
+  const path = /^ {10}path: (.+)$/m.exec(steps[0])?.[1]?.trim()
+  assert.equal(path, 'evidence/', `the case artifact must contain its case directory, not only its files: path is ${path}`)
+})
+
 // R10 STEP 1, MADE ENFORCEABLE. "Walk the release needs graph and list every job
 // that really writes a release asset, an image or a channel" is a one-off reading
 // of the file; the property worth keeping is that a job ADDED LATER cannot write
