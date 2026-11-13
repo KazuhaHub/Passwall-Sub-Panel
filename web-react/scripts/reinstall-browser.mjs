@@ -95,6 +95,13 @@ async function fixture(request, response, url) {
     if (pathname === '/api/version') return reply(response, { version: 'fixture', commit: 'fixture', build_date: '' });
     if (pathname === '/api/admin/alerts') return reply(response, { alerts: [], counts: { error: 0, warning: 0, info: 0 } });
     if (pathname === '/api/admin/servers') return reply(response, { items: servers, total: servers.length, page: 1, page_size: 25 });
+    // The servers page reads the access-control fleet status for its native rows.
+    // A fleet with no policy: the status line stays hidden on every row.
+    if (pathname === '/api/admin/dest/status') return reply(response, {
+      generation: 0, published_generation: 0, last_write_at: null, next_publish_at: null, apply_eta_ms: 0,
+      paused: false, publish_error: null, publish_error_at: null, geosite_release: '', geoip_unavailable: false,
+      totals: {}, nodes: [], policy_notes: {},
+    });
     // Match GetSUIRelease's read-only metadata DTO; no upstream request is made.
     if (pathname === '/api/admin/servers/sui-release') return reply(response, { version: 'v1.6.2' });
     // THE SERVERS PAGE READS THE PANEL'S OWN COMPATIBILITY STATE, so the fixture has
