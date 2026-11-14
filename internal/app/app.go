@@ -775,7 +775,7 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	}
 	destAdmin, err := destpolicy.NewAdmin(destpolicy.AdminDeps{
 		Service: destPolicy, Policies: destRepos.Policies, Lists: destRepos.Lists, Counter: destRepos,
-		Groups: repos.Group, Panels: repos.XUIPanel, Nodes: repos.Node, Clients: repos.PSPClient,
+		Groups: repos.Group, GroupPanels: groupSvc, Panels: repos.XUIPanel, Nodes: repos.Node, Clients: repos.PSPClient,
 		Agents: repos.NodeAgent, Desired: repos.NativeDesired, Settings: repos.Settings,
 		Instantiate: destRepos.InstantiateTemplate, ExceptionEditor: destLists, Hits: destRepos.Hits,
 	})

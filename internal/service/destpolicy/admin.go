@@ -46,6 +46,11 @@ type GroupLookup interface {
 	GetByID(ctx context.Context, id int64) (*domain.Group, error)
 }
 
+// GroupPanels is the panels a group's tags select.
+type GroupPanels interface {
+	PanelsFor(ctx context.Context, g *domain.Group) ([]int64, error)
+}
+
 // PanelLookup reads panels.
 type PanelLookup interface {
 	GetByID(ctx context.Context, id int64) (*domain.XUIPanel, error)
@@ -83,12 +88,16 @@ type AdminDeps struct {
 	Lists    ListReader
 	Counter  GroupCounter
 	Groups   GroupLookup
-	Panels   PanelLookup
-	Nodes    NodeLookup
-	Clients  ClientLookup
-	Agents   AgentLister
-	Desired  DesiredReader
-	Settings SettingsReader
+	// GroupPanels says which panels a group's tags select (group.Service): the
+	// subject limit is per node, so an allowlist group counts on its own panels.
+	// Nil: every group is counted on one node, which is the upper bound.
+	GroupPanels GroupPanels
+	Panels      PanelLookup
+	Nodes       NodeLookup
+	Clients     ClientLookup
+	Agents      AgentLister
+	Desired     DesiredReader
+	Settings    SettingsReader
 	// Hits counts the hits each panel produced recently (sqlstore.DestHitRepo).
 	// Nil: hits_24h is null.
 	Hits HitCounter
@@ -401,9 +410,35 @@ func (a *Admin) budget(ctx context.Context, hypo *domain.DestPolicy, gh GroupHyp
 				}
 			}
 		}
+		// The limit is per node: a group counts on the panels its tags select, and
+		// the figure is the busiest panel's.
+		perPanel, flat := map[int64]int{}, 0
 		for gid, n := range groupRules {
-			usage.Subjects += counts[gid] * n
+			members := counts[gid] * n
+			if a.GroupPanels == nil || a.Groups == nil {
+				flat += members
+				continue
+			}
+			g, err := a.Groups.GetByID(ctx, gid)
+			if err != nil {
+				if errors.Is(err, domain.ErrNotFound) {
+					continue
+				}
+				return nil, err
+			}
+			panels, err := a.GroupPanels.PanelsFor(ctx, g)
+			if err != nil {
+				return nil, err
+			}
+			for _, p := range panels {
+				perPanel[p] += members
+			}
 		}
+		busiest := flat
+		for _, n := range perPanel {
+			busiest = max(busiest, n)
+		}
+		usage.Subjects += busiest
 	}
 	out := budgetOf(usage)
 	if cacheable {

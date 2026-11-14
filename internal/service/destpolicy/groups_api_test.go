@@ -268,3 +268,43 @@ func TestTest_AGroupStepIsNamedAfterTheGroup(t *testing.T) {
 		}
 	}
 }
+
+// ---- the budget is per node ----
+
+type fakeGroupPanels map[int64][]int64
+
+func (f fakeGroupPanels) PanelsFor(_ context.Context, g *domain.Group) ([]int64, error) {
+	return f[g.ID], nil
+}
+
+// The subject limit is per node: groups on different panels do not add up.
+func TestBudget_GroupSubjectsAreBoundPerPanel(t *testing.T) {
+	ah := newAdminHarness(t)
+	ah.admin.Groups = fakeGroupNames{5: "A", 6: "B"}
+	ah.admin.Counter = fakeCounter{5: 9000, 6: 9000}
+	doms := ah.list("doms", "DOMAIN-SUFFIX,a.example.com")
+	ah.allowGroup(5, domain.DestStateOn, []*domain.DestList{doms}, "DOMAIN-SUFFIX,doh.example", "") // 3 rules each
+	ah.allowGroup(6, domain.DestStateOn, []*domain.DestList{doms}, "DOMAIN-SUFFIX,doh.example", "")
+	ah.publishNow()
+
+	// Disjoint panels: 27 000 on each, never 54 000 on one.
+	ah.admin.GroupPanels = fakeGroupPanels{5: {1}, 6: {2}}
+	b, err := ah.admin.Budget(ah.ctx, nil)
+	if err != nil || b.Subjects.Used != 27000 {
+		t.Fatalf("disjoint: subjects = %+v, %v, want 27000", b, err)
+	}
+	// An unrelated policy save is not refused on their account.
+	p := &domain.DestPolicy{Name: "x", Action: domain.DestActionBlock, State: domain.DestStateOn, Scope: domain.DestScopeAll, Inline: domain.DestPolicyInline{Ports: "25"}}
+	if err := ah.admin.CheckBudget(ah.ctx, p); err != nil {
+		t.Fatalf("an unrelated policy save was refused: %v", err)
+	}
+	// The same panel: they add up, over 50 000.
+	ah.admin.GroupPanels = fakeGroupPanels{5: {1}, 6: {1}}
+	ah.admin.budgetCache = nil // a tag change moves no generation; the cache's TTL covers it in production
+	if b, _ = ah.admin.Budget(ah.ctx, nil); b.Subjects.Used != 54000 {
+		t.Fatalf("shared panel: subjects = %d, want 54000", b.Subjects.Used)
+	}
+	if err := ah.admin.CheckBudget(ah.ctx, p); err == nil {
+		t.Fatal("groups that overrun one node were not refused")
+	}
+}
