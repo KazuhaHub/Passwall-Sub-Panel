@@ -1,15 +1,17 @@
 import { useMemo, useState } from 'react'
 import { Alert, Box, Button, IconButton, Link, Menu, MenuItem, Skeleton, Typography, useTheme } from '@mui/material'
+import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined'
 import MoreVertIcon from '@mui/icons-material/MoreVert'
 import { useNavigate } from 'react-router'
 import { useTranslation } from 'react-i18next'
 
 import type { DestNodeStatus } from '@/api/accessControl'
+import AuditCollectDialog from '@/components/AuditCollectDialog'
 import KpiTile, { KpiGrid } from '@/components/KpiTile'
 import NodePolicyStatusRow from '@/components/NodePolicyStatusRow'
 import { useDestSettings, useDestStatus, useRetryDestAgent } from '@/query/accessControl'
 import { useQueryScope } from '@/query/useQueryScope'
-import { NODE_FILTERS, NODE_STATE_FILTER, nodeStateKey } from '@/utils/accessControl'
+import { collectingNodeCount, isNativeKind, NODE_FILTERS, NODE_STATE_FILTER, nodeStateKey } from '@/utils/accessControl'
 import { reportDestError, reportRetry } from '../destErrors'
 import type { NodeFilter } from '../accessParams'
 import SheetDrawer from './SheetDrawer'
@@ -26,9 +28,10 @@ export interface CoverageSheetProps {
 const C = 'admin:access_control.coverage.'
 
 /**
- * S14 (batch 1): the whole fleet, one row per node, with where it stands and
- * what to do next. No recording mode and no hit figures: nothing is recorded
- * yet. The rows are NodePolicyStatusRow, the one node-state component.
+ * S14: the whole fleet, one row per node, with where it stands, what to do next
+ * and what it records. The rows are NodePolicyStatusRow, the one node-state
+ * component; the recording mode is set in AuditCollectDialog (shared with the
+ * servers page) from a row's menu.
  */
 export default function CoverageSheet({ open, onClose, filter, onFilterChange, onOpenSettings }: CoverageSheetProps) {
   const { t } = useTranslation(['admin'])
@@ -40,14 +43,16 @@ export default function CoverageSheet({ open, onClose, filter, onFilterChange, o
   const settings = useDestSettings(scope, { enabled: open })
   const retry = useRetryDestAgent(scope)
   const [menu, setMenu] = useState<{ el: HTMLElement; node: DestNodeStatus } | null>(null)
-  const now = Date.now()
+  const [recordingFor, setRecordingFor] = useState<DestNodeStatus | null>(null)
+  const readAt = status.dataUpdatedAt
+  const now = useMemo(() => Date.now(), [readAt]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const nodes = useMemo(() => status.data?.nodes ?? [], [status.data])
   const counts = useMemo(() => {
     const c: Record<NodeFilter, number> = { applied: 0, pending: 0, problem: 0, upgrade: 0, inactive: 0 }
-    for (const n of nodes) c[NODE_STATE_FILTER[nodeStateKey(n, Date.now())]]++
+    for (const n of nodes) c[NODE_STATE_FILTER[nodeStateKey(n, now)]]++
     return c
-  }, [nodes])
+  }, [nodes, now])
   const shown = filter ? nodes.filter(n => NODE_STATE_FILTER[nodeStateKey(n, now)] === filter) : nodes
 
   const doRetry = async (agentId: string) => {
@@ -59,6 +64,7 @@ export default function CoverageSheet({ open, onClose, filter, onFilterChange, o
   }
   const toServer = (n: DestNodeStatus) => void navigate(`/admin/servers?q=${encodeURIComponent(n.panel_name)}`)
   const release = status.data?.geosite_release
+  const recordingCount = collectingNodeCount(status.data)
 
   return (
     <SheetDrawer open={open} onClose={onClose} headingId="coverage-heading"
@@ -71,6 +77,14 @@ export default function CoverageSheet({ open, onClose, filter, onFilterChange, o
       )}
       {status.data && (
         <>
+          <Box data-testid="recording-note" sx={{ display: 'flex', gap: 1, alignItems: 'flex-start', p: 1.25, mb: 1, borderRadius: 2, bgcolor: md.surfaceContainerHigh }}>
+            <InfoOutlinedIcon aria-hidden sx={{ fontSize: 18, mt: '2px', color: md.onSurfaceVariant }} />
+            <Typography variant="body2">
+              {recordingCount > 0
+                ? t(`${C}recording_note`, { count: recordingCount, days: settings.data?.effective.dest_hit_retention_days ?? '…' })
+                : t(`${C}recording_none`)}
+            </Typography>
+          </Box>
           <KpiGrid>
             {NODE_FILTERS.map(f => (
               <KpiTile key={f} label={t(`${C}filter.${f}`)} value={counts[f]} pressed={filter === f}
@@ -120,11 +134,15 @@ export default function CoverageSheet({ open, onClose, filter, onFilterChange, o
         </>
       )}
       <Menu anchorEl={menu?.el} open={menu !== null} onClose={() => setMenu(null)}>
+        {menu && isNativeKind(menu.node.kind) && menu.node.state !== 'unsupported_kind' && (
+          <MenuItem onClick={() => { const n = menu.node; setMenu(null); setRecordingFor(n) }}>{t(`${C}set_recording`)}</MenuItem>
+        )}
         <MenuItem disabled={menu?.node.kind !== 'psp'} onClick={() => { const n = menu!.node; setMenu(null); toServer(n) }}>{t('admin:access_control.node_action.open_server')}</MenuItem>
         <MenuItem onClick={() => { const n = menu!.node; setMenu(null); void navigate(`/admin/node-issues?agent=${encodeURIComponent(n.agent_id)}`) }}>
           {t('admin:access_control.node_action.node_issues')}
         </MenuItem>
       </Menu>
+      <AuditCollectDialog node={recordingFor} onClose={() => setRecordingFor(null)} />
     </SheetDrawer>
   )
 }

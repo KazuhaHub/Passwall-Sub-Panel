@@ -303,7 +303,18 @@ export const policies = {
     refetchInterval: 10 * SECOND,
     note: 'Watch delivery progress: polled only while a node is pending or a change is unpublished (conditional in the hook).',
   },
-  /** Policies, lists, exemptions, source rules, the catalog and the rule data. */
+  /**
+   * The policy list. It is a definition (every write invalidates it) that ALSO
+   * carries each policy's hit counters, which move with the clock and not with
+   * a write: so it is reused for a minute, not five.
+   */
+  destPolicies: {
+    staleTime: MINUTE,
+    gcTime: 15 * MINUTE,
+    refetchInterval: false,
+    note: 'Definitions plus the per-policy hit counters of the hit window; every write invalidates it, and a revisit after a minute re-reads the counters. Never polled: the counters are a summary, not a live view.',
+  },
+  /** Policies without counters, lists, exemptions, source rules, the catalog and the rule data. */
   destDefinitions: {
     staleTime: 5 * MINUTE,
     gcTime: 15 * MINUTE,
@@ -317,12 +328,19 @@ export const policies = {
     refetchInterval: 5 * SECOND,
     note: 'Waits for a refresh to end: polled only while a list is in the refreshing state (conditional in the hook).',
   },
-  /** One account's group and exemption, for the drawer's access tab. */
+  /** One account's group, exemption and recent hits, for the drawer's access tab. */
   destUser: {
     staleTime: 30 * SECOND,
     gcTime: 5 * MINUTE,
     refetchInterval: false,
-    note: 'Keyed by user id; an exemption write invalidates it; read only while the tab is open.',
+    note: 'Keyed by user id; an exemption or a policy write invalidates it; read only while the tab is open. The hit part is a summary of the window, so a revisit after 30s re-reads it.',
+  },
+  /** The hit records: a query page, filtered and paged by the admin. */
+  destHits: {
+    staleTime: 30 * SECOND,
+    gcTime: 5 * MINUTE,
+    refetchInterval: false,
+    note: 'A query page: each filter set is its own key, re-read after 30s on revisit or focus, never polled. Records arrive hourly from the nodes, so a live view would show nothing a refresh would not. A policy or settings write invalidates every key.',
   },
 } as const satisfies Record<string, ResourcePolicy>
 

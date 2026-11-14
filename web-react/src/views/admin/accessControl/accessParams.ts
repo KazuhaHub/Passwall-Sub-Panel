@@ -7,10 +7,10 @@ import { parseNodeFilter, type NodeFilter } from '@/utils/accessControl'
 // destinations and search terms (R12): they ride in history state (a sheet's
 // `prefill`) or live in component state. Pure: parse and build, no router.
 
-/** Batch 1 has two tabs. The allowlist and records tabs arrive in later
- *  batches and are not rendered, with no placeholder; a link to one falls
- *  back to the policies tab. */
-export const ACCESS_TABS = ['policies', 'lists'] as const
+/** Policies, lists and records. The allowlist tab arrives in a later phase
+ *  and is not rendered, with no placeholder; a link to it falls back to the
+ *  policies tab. */
+export const ACCESS_TABS = ['policies', 'lists', 'records'] as const
 export type AccessTab = (typeof ACCESS_TABS)[number]
 
 /** Anything else (a later batch's tab, a typo) reads as the policies tab and
@@ -66,4 +66,4 @@ export interface AccessNavState {
 }
 
 /** Where the settings dialog is asked to put the focus. */
-export type SettingsFocus = 'apply' | 'refresh' | 'rules'
+export type SettingsFocus = 'apply' | 'refresh' | 'rules' | 'retention'

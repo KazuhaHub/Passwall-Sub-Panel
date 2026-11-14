@@ -1,15 +1,15 @@
 import { useEffect, useMemo, useState, type MutableRefObject } from 'react'
-import { Alert, Autocomplete, Box, Button, FormControlLabel, Skeleton, Switch, TextField, Typography, useTheme } from '@mui/material'
+import { Alert, Autocomplete, Box, Button, Skeleton, TextField, ToggleButton, ToggleButtonGroup, Typography, useTheme } from '@mui/material'
 import { useTranslation } from 'react-i18next'
 
-import { destErrorOf, isDestUnavailable } from '@/api/accessControl'
+import { destErrorOf, isDestUnavailable, type DestState } from '@/api/accessControl'
 import { AsyncButton } from '@/components/AsyncButton'
 import { confirm } from '@/components/ConfirmHost'
 import FieldHint from '@/components/FieldHint'
 import { pushSnack } from '@/components/SnackbarHost'
 import { useDestPolicies, useDestSourceRule, useDestSourceRules, useDestStatus, usePutSourceRule } from '@/query/accessControl'
 import { useQueryScope } from '@/query/useQueryScope'
-import { applyMinutes, enforcingNodeCount, needsFirstPublishConfirm } from '@/utils/accessControl'
+import { applyMinutes, enabledPolicies, enforcingNodeCount, needsFirstPublishConfirm } from '@/utils/accessControl'
 import { firstPublishConfirm } from './confirmCopy'
 import { destErrorText } from './destErrors'
 
@@ -86,7 +86,8 @@ export default function SourceRulesSection({ nodeId, dirtyRef }: {
 
   const [countries, setCountries] = useState<string[]>([])
   const [cidrText, setCidrText] = useState('')
-  const [on, setOn] = useState(false)
+  // Off / Report only / On: the same three states as a block policy (a source rule is always a block).
+  const [state, setState] = useState<DestState>('off')
   // A dialog that is gone has no draft to guard.
   useEffect(() => () => { if (dirtyRef) dirtyRef.current = null }, [dirtyRef])
   const [seeded, setSeeded] = useState<string>('')
@@ -101,7 +102,7 @@ export default function SourceRulesSection({ nodeId, dirtyRef }: {
     setSeeded(seedKey)
     setCountries(rule.countries)
     setCidrText(rule.cidrs.join('\n'))
-    setOn(rule.state === 'on')
+    setState(rule.state)
     setFieldError(null)
   }, [rule, seedKey, seeded])
 
@@ -123,7 +124,7 @@ export default function SourceRulesSection({ nodeId, dirtyRef }: {
   if (!read.data.native) return null
 
   const dirty = !!rule && (
-    on !== (rule.state === 'on')
+    state !== rule.state
     || countries.join() !== rule.countries.join()
     || parsed.cidrs.join() !== rule.cidrs.join()
   )
@@ -136,9 +137,10 @@ export default function SourceRulesSection({ nodeId, dirtyRef }: {
       setFieldError({ field: 'cidrs', text: t(`${S}bad_lines`, { lines: parsed.bad.join(', ') }) })
       return false
     }
-    const policiesOn = [...(policies.data?.allow ?? []), ...(policies.data?.block ?? [])].filter(p => p.state === 'on').length
-    const sourceRulesOn = (all.data?.items ?? []).filter(r => r.state === 'on' && r.node_id !== nodeId).length
-    if (needsFirstPublishConfirm({ policiesOn, sourceRulesOn }, { turnsOn: on && (countries.length > 0 || parsed.cidrs.length > 0) })) {
+    // Report-only is deployed too: the node restarts for it.
+    const policiesOn = enabledPolicies(policies.data).length
+    const sourceRulesOn = (all.data?.items ?? []).filter(r => r.state !== 'off' && r.node_id !== nodeId).length
+    if (needsFirstPublishConfirm({ policiesOn, sourceRulesOn }, { turnsOn: state !== 'off' && (countries.length > 0 || parsed.cidrs.length > 0) })) {
       const nodes = enforcingNodeCount(status.data)
       const ok = await confirm(firstPublishConfirm({
         t, minutes, nodes, seconds: null,
@@ -149,7 +151,7 @@ export default function SourceRulesSection({ nodeId, dirtyRef }: {
     try {
       await put.mutateAsync({
         nodeId,
-        input: { countries, cidrs: parsed.cidrs, state: on ? 'on' : 'off', updated_at: rule.updated_at ?? undefined },
+        input: { countries, cidrs: parsed.cidrs, state, updated_at: rule.updated_at ?? undefined },
       })
       pushSnack(t(`${S}saved`), 'success')
       return true
@@ -206,8 +208,16 @@ export default function SourceRulesSection({ nodeId, dirtyRef }: {
         </Box>
       )}
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mt: 1.5, flexWrap: 'wrap' }}>
-        <FormControlLabel label={t(`${S}enabled`)} control={<Switch checked={on} disabled={put.isPending} onChange={(_, c) => setOn(c)} />} />
-        <Box sx={{ flex: 1 }} />
+        <Box sx={{ flex: '1 1 260px', minWidth: 0 }}>
+          <Typography variant="body2" sx={{ mb: 0.5, fontWeight: 600 }}>{t(`${S}state`)}</Typography>
+          <ToggleButtonGroup exclusive size="small" value={state} disabled={put.isPending} onChange={(_, v: DestState | null) => { if (v) setState(v) }}
+            aria-label={t(`${S}state`)}>
+            {(['off', 'report', 'on'] as const).map(st => (
+              <ToggleButton key={st} value={st}>{t(`admin:access_control.policies.state.${st}`)}</ToggleButton>
+            ))}
+          </ToggleButtonGroup>
+          <Typography variant="body2" sx={{ color: md.onSurfaceVariant, mt: 0.5 }}>{t(`${S}state_help.${state}`)}</Typography>
+        </Box>
         <AsyncButton variant="contained" size="small" disabled={!dirty} pending={put.isPending} onClick={save}>{t(`${S}save`)}</AsyncButton>
       </Box>
       <Typography variant="caption" sx={{ display: 'block', mt: 0.5, color: md.onSurfaceVariant }}>

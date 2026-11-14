@@ -947,6 +947,7 @@
       "directives_ahead_of_roster": "策略等待客户端列表",
       "directive_unknown_client": "策略引用的客户端不存在",
       "report_missing_object": "节点报告不完整",
+      "destination_policy_report_only_not_deployed": "仅报告规则未下发",
       "task_identity_conflict": "任务身份冲突",
       "task_replay_fenced": "任务重放已阻止",
       "legacy_task_result_quarantined": "旧任务结果已隔离"
@@ -962,6 +963,7 @@
       "directives_ahead_of_roster": "策略依赖的客户端列表尚未收到。",
       "directive_unknown_client": "策略引用的客户端不在列表中。",
       "report_missing_object": "完整节点报告缺少应有的对象。",
+      "destination_policy_report_only_not_deployed": "这台节点只收到了拦截规则，没有收到仅报告规则（入站嗅探不支持，或超出规则预算）；拦截规则不受影响。",
       "task_identity_conflict": "同一个任务 ID 对应了不同的操作参数。",
       "task_replay_fenced": "节点未能确认该任务可以安全开始执行。",
       "legacy_task_result_quarantined": "旧任务结果缺少可核验的操作身份。"
@@ -1188,7 +1190,12 @@
         "over_building": "被拦截的次数已过阈值的一半",
         "over": "被拦截的次数达到阈值"
       }
-    }
+    },
+    "dest_block_source_rule": "来源规则",
+    "dest_block_deleted": "已删除的策略",
+    "dest_block_policy_id": "策略 #{{id}}",
+    "dest_block_nodes_other": "{{count}} 台记录命中的节点",
+    "dest_block_view_hits": "查看这些命中"
   },
   "risk_center": {
     "title": "风控中心",
@@ -1410,7 +1417,7 @@
       "last_judged": "最后判定 {{time}}",
       "stale_verdict": "超过新鲜度未重新判定，不计入待处理",
       "suspended_since": "暂停于 {{time}}",
-      "trust_scope": "已信任：异地并发、订阅多地、登录国家不再判定；设备数与用量变化照常判定。",
+      "trust_scope": "已信任：异地并发、订阅多地、登录国家不再判定；设备数、用量变化和访问拦截照常判定。",
       "online": "在线",
       "last_seen": "最近 {{time}}",
       "seen_detail": "首次 {{first}} · 共 {{count}} 次判定",
@@ -1455,7 +1462,7 @@
       "undismiss_title": "取消忽略 {{upn}}？",
       "undismiss_message": "账号会按当前信号重新列入待处理。",
       "trust_title": "信任 {{upn}}？",
-      "trust_message": "此账号不再做异地并发、订阅多地和登录国家判定，自动临时暂停也不会作用于它；设备数和用量变化照常。",
+      "trust_message": "此账号不再做异地并发、订阅多地和登录国家判定，自动临时暂停也不会作用于它；设备数、用量变化和访问拦截照常。",
       "trust_resume": "同时恢复代理服务（当前为异地自动暂停）",
       "untrust_title": "取消信任 {{upn}}？",
       "untrust_message": "下一轮检测起按分组策略重新判定。",
@@ -1546,7 +1553,8 @@
       "geoip_city": "城市级",
       "geoip_country": "仅国家",
       "geoip_off": "不可用",
-      "geoip_open": "前往设置"
+      "geoip_open": "前往设置",
+      "dest_block_open": "打开访问控制"
     }
   },
   "logs": {
@@ -3318,7 +3326,17 @@
       "line": "访问控制：{{state}}",
       "dialog_title": "{{name}} · 访问控制",
       "open_page": "打开访问控制",
-      "close": "关闭"
+      "close": "关闭",
+      "recording": "记录方式",
+      "recording_off": "不记录",
+      "recording_hits": "只记录规则命中",
+      "recording_exec_only": "sing-box 节点只执行，不记录",
+      "recording_too_old": "节点版本过旧，需升级",
+      "retention": "保留 {{days}} 天",
+      "change": "修改",
+      "hits_24h": "24 小时命中",
+      "view_records": "查看记录",
+      "hits_none_note": "这台节点还没有开始上报命中，策略下发并生效后才会有数字。这里显示「—」，不代表 0 次。"
     }
   },
   "diagnostics": {
@@ -4398,15 +4416,16 @@
   },
   "access_control": {
     "title": "访问控制",
-    "subtitle": "决定用户能通过原生节点访问哪些目的地。",
+    "subtitle": "决定用户能通过原生节点访问哪些目的地，并记录规则命中。",
     "retry": "重试",
     "unwired": "访问控制未接线：服务端没有启用这个功能",
     "tab_policies": "策略",
     "tab_lists": "列表",
     "help": {
       "label": "说明",
-      "policies": "访问控制由节点强制执行，命中拦截的连接会被断开。「规则库」只决定客户端怎么分流，用户可以自己改掉。只有 PSP 原生节点执行这些策略；3X-UI 和 S-UI 的路由由运营者自己管理。\n\n规则从上到下判断，命中第一条就停止。\n\n节点只看得到目的地（域名或 IP），看不到网址路径。可被绕过：ECH、先用 DoH 解析再直连 IP、客户端自带的加密隧道。\n\nIP 段只对以 IP 发起的连接生效，域名解析出的 IP 不参与匹配。BT 只识别明文握手与 uTP，加密 BT 和 DHT 识别不到。\n\n正则要对每个连接逐条匹配，很耗资源，最多 {{max_regexps}} 条。\n\n每次下发，节点会重启代理程序一次，正在使用的连接断开一次；最后一次修改后等 {{seconds}} 秒再下发，连续修改合并为一次。",
-      "lists": "支持的写法：纯域名、`domain:` / `full:` / `keyword:` / `regexp:`、`*.x`、hosts 行、AdGuard `||x^`、Clash 规则、IP 与 IP 段；`#` 开头是注释。保存时统一转小写、去尾点、中文域名转 punycode、IP 段对齐到网络号。\n\n远程与分类列表每 {{hours}} 小时刷新一次，只在内容变化时才下发；刷新失败时继续用旧内容。\n\n过宽的条目（几乎匹配所有域名的正则、少于 4 个字符的关键词、公共后缀本身、太大的 IP 段）在自定义列表里会被忽略；放行策略引用的远程、分类列表里出现它们时，这次刷新算失败，继续用旧内容。"
+      "policies": "访问控制由节点强制执行，命中拦截的连接会被断开。「规则库」只决定客户端怎么分流，用户可以自己改掉。只有 PSP 原生节点执行这些策略；3X-UI 和 S-UI 的路由由运营者自己管理。\n\n规则从上到下判断，命中第一条就停止。同一动作内的先后只决定命中记在哪条策略名下。\n\n每条拦截策略可以设为关闭、仅报告或开启，由你自己选。仅报告不拦截任何连接，只记录它本应拦截的连接；它排在所有生效的规则之后判断，所以不会改变任何连接的结果。看过命中之后再改为开启即可。放行策略没有仅报告。\n\n节点只看得到目的地（域名或 IP），看不到网址路径。可被绕过：ECH、先用 DoH 解析再直连 IP、客户端自带的加密隧道。\n\nIP 段只对以 IP 发起的连接生效，域名解析出的 IP 不参与匹配。BT 只识别明文握手与 uTP，加密 BT 和 DHT 识别不到。\n\n正则要对每个连接逐条匹配，很耗资源，最多 {{max_regexps}} 条。\n\n每次下发，节点会重启代理程序一次，正在使用的连接断开一次；最后一次修改后等 {{seconds}} 秒再下发，连续修改合并为一次。",
+      "lists": "支持的写法：纯域名、`domain:` / `full:` / `keyword:` / `regexp:`、`*.x`、hosts 行、AdGuard `||x^`、Clash 规则、IP 与 IP 段；`#` 开头是注释。保存时统一转小写、去尾点、中文域名转 punycode、IP 段对齐到网络号。\n\n远程与分类列表每 {{hours}} 小时刷新一次，只在内容变化时才下发；刷新失败时继续用旧内容。\n\n过宽的条目（几乎匹配所有域名的正则、少于 4 个字符的关键词、公共后缀本身、太大的 IP 段）在自定义列表里会被忽略；放行策略引用的远程、分类列表里出现它们时，这次刷新算失败，继续用旧内容。",
+      "records": "每行是一个账号在一小时内对同一目的地的命中次数。记录的是节点识别出的域名，看不到网址路径。sing-box 节点只执行、不记录。「本应拦截」是仅报告的策略命中的连接：它们被放行了，只是记了下来。命中记录保留 {{days}} 天。"
     },
     "header": {
       "test": "测试目的地",
@@ -4454,7 +4473,8 @@
         "unsupported_kind_other": "3X-UI / S-UI {{count}} 台（设计如此）",
         "upgrade_other": "需升级 {{count}} 台",
         "offline_other": "离线 {{count}} 台",
-        "not_enrolled_other": "{{count}} 台未接入"
+        "not_enrolled_other": "{{count}} 台未接入",
+        "recording_other": "记录命中的节点 {{count}} 台"
       },
       "detail": {
         "countdown_other": "{{count}} 秒后下发",
@@ -4482,6 +4502,11 @@
         "message": "{{nodes}}会在{{minutes}}内各重启代理程序一次，正在使用的连接断开一次，客户端会自动重连。之后的修改也会这样下发；{{seconds}} 秒内的连续修改合并为一次。",
         "message_no_window": "{{nodes}}会在{{minutes}}内各重启代理程序一次，正在使用的连接断开一次，客户端会自动重连。之后的修改也会这样下发，连续修改合并为一次。",
         "action": "启用"
+      },
+      "convert_policy": {
+        "title": "把「{{name}}」改为拦截？",
+        "message": "保存后，命中的连接会被断开，{{minutes}}内开始执行。要先看它本应拦截多少连接，请在策略列表里用「转为拦截」。",
+        "action": "改为拦截"
       },
       "delete_policy": {
         "title": "删除策略「{{name}}」？",
@@ -4523,6 +4548,11 @@
         "message": "关闭后，这次的修改不会保存。",
         "action": "放弃",
         "keep": "继续编辑"
+      },
+      "shorten_retention": {
+        "title": "缩短保留期？",
+        "message": "超过 {{days}} 天的记录会在一小时内删除，无法恢复。",
+        "action": "缩短"
       }
     },
     "errors": {
@@ -4539,7 +4569,7 @@
       "dest_policy_invalid": "策略的内容无效",
       "dest_policy_no_match": "至少选择一个列表或设置一个条件",
       "dest_policy_over_limit": "超出额度：{{what}} {{used}} / {{limit}}。超出额度时新版本不会下发，节点继续执行上一版",
-      "dest_policy_state_unavailable": "放行策略不能设为仅记录",
+      "dest_policy_state_unavailable": "放行策略不能设为仅报告",
       "dest_policy_stale": "这条策略刚被其他人修改过，已重新载入",
       "dest_policy_order_stale": "顺序已被其他人修改，已重新载入",
       "dest_name_taken": "这个名称已被使用",
@@ -4552,6 +4582,8 @@
       "dest_exemption_exists": "这个账号已被豁免",
       "dest_exemption_invalid": "豁免的内容无效",
       "dest_exception_invalid": "放行例外的内容无效",
+      "dest_hits_range": "时间范围太长，请缩小范围",
+      "dest_hits_invalid": "筛选条件无效，请检查后重试",
       "dest_test_invalid": "测试的内容无效",
       "dest_settings_invalid": "设置超出范围",
       "dest_template_unavailable": "这个规则组没有现成的通用分类",
@@ -4586,6 +4618,8 @@
       "unsupported_kind": "3X-UI / S-UI 的路由由运营者自己管理，不执行访问策略。",
       "offline": "恢复上报后自动下发",
       "none": "这台节点没有要执行的策略",
+      "report_not_deployed_sniffing": "该节点入站的嗅探无法支持仅报告规则，已只下发拦截规则",
+      "report_not_deployed_limit": "超出规则预算，仅报告规则未下发",
       "paused": "访问控制已暂停，恢复后照原样执行。",
       "not_enrolled": "这台原生节点还没有接入，没有 agent 上报。"
     },
@@ -4822,7 +4856,16 @@
       "remove_exemption": "取消豁免",
       "removed_snack": "已取消 {{upn}} 的豁免，将随下一次下发生效",
       "retry": "重试",
-      "load_failed": "读取这个账号的访问信息失败"
+      "load_failed": "读取这个账号的访问信息失败",
+      "hits_title": "过去 {{days}} 天命中",
+      "hits_view_all": "在记录中查看全部",
+      "hits_none": "过去 {{days}} 天没有命中",
+      "hits_not_recorded": "这个账号所在的节点都不记录命中",
+      "hits_nodes": "节点覆盖",
+      "hits_deleted_policy": "已删除的策略",
+      "hits_deleted_source_rule": "已删除的来源规则",
+      "hits_source_rule": "来源规则 · {{name}}",
+      "hits_list_separator": "、"
     },
     "sheet": {
       "close": "关闭"
@@ -4842,7 +4885,10 @@
       "out_of_range": "超出范围",
       "changed_other": "已修改 {{count}} 项",
       "discard": "放弃",
-      "save": "保存"
+      "save": "保存",
+      "group_retention": "记录保留",
+      "hit_retention_days": "命中记录保留（天）",
+      "hit_retention_days_hint": "命中记录保留多久；缩短后，更早的记录会被删除。"
     },
     "rule_data": {
       "read_failed": "读取规则数据版本失败",
@@ -4923,7 +4969,6 @@
       "cidrs": "拒绝的来源 IP 段（可选，每行一个）",
       "cidrs_hint": "例如 203.0.113.0/24 或 2001:db8::/32。节点前面有中转或 CDN 时，看到的是它们的地址。",
       "bad_lines": "第 {{lines}} 行不是有效的 IP 段",
-      "enabled": "启用",
       "save": "保存来源规则",
       "saved": "已保存来源规则",
       "stale": "这条来源规则刚被其他人修改过，已重新载入，请确认后再保存。",
@@ -4932,6 +4977,12 @@
       "unsaved": {
         "summary": "来源规则未保存，用下方按钮保存",
         "detail": "这个入站的「拒绝来源国家或地区」有未保存的修改。它由自己的保存按钮保存，不会随上面的确定一起保存。"
+      },
+      "state": "状态",
+      "state_help": {
+        "off": "不下发这条来源规则。",
+        "report": "不拒绝任何来源，只记录它本应拒绝的连接；它排在所有生效的规则之后判断，不改变任何连接的结果。",
+        "on": "拒绝来自这些国家或地区、这些 IP 段的连接；它排在最前，豁免账号也绕不过。"
       }
     },
     "coverage": {
@@ -4951,7 +5002,10 @@
       "geoip_unavailable": "来源规则未执行：GeoIP 库不可用",
       "row_menu": "{{name}} 的更多操作",
       "retried": "已请求重新下发",
-      "not_retried": "这台节点没有被拒绝的策略，无需重新下发"
+      "not_retried": "这台节点没有被拒绝的策略，无需重新下发",
+      "recording_note_other": "{{count}} 台只记录规则命中（保留 {{days}} 天）· 原始访问日志不离开节点",
+      "recording_none": "没有节点在记录命中 · 原始访问日志不离开节点",
+      "set_recording": "设置记录方式…"
     },
     "policies": {
       "read_failed": "读取策略失败",
@@ -4959,7 +5013,8 @@
       "new_blank": "空白策略",
       "state": {
         "off": "关闭",
-        "on": "开启"
+        "on": "开启",
+        "report": "仅报告"
       },
       "action": {
         "block": "拦截",
@@ -5010,7 +5065,11 @@
         "add_allow": "放行策略",
         "add_block": "拦截策略",
         "add_allow_aria": "新建放行策略",
-        "add_block_aria": "新建拦截策略"
+        "add_block_aria": "新建拦截策略",
+        "report": "仅报告",
+        "report_caption": "不拦截，只记录本应拦截的连接；不改变任何连接的结果",
+        "add_report": "仅报告策略",
+        "add_report_aria": "新建仅报告策略"
       },
       "row": {
         "paused": "已停用",
@@ -5036,16 +5095,34 @@
         "menu_top": "移到本段顶部",
         "menu_bottom": "移到本段底部",
         "menu_delete": "删除",
-        "copy_name": "{{name}}（副本）"
+        "copy_name": "{{name}}（副本）",
+        "hits_zero": "{{days}} 天未命中",
+        "hits_never": "保留期内未命中",
+        "hits_unavailable": "—",
+        "hits_unavailable_tip": "需节点开启记录",
+        "would_block_none": "过去 {{days}} 天没有本应拦截的连接",
+        "not_deployed_nodes_other": "（{{count}} 个节点未部署）",
+        "counts_as_risk": "计入风险",
+        "last_hit": "最近 {{ago}}",
+        "view_records": "在记录中查看",
+        "menu_records": "在记录中查看",
+        "menu_report": "改为仅报告",
+        "convert": "转为拦截…",
+        "convert_aria": "把「{{name}}」转为拦截",
+        "toggle_report": "仅报告",
+        "hits_count_other": "{{days}} 天 {{n}} 次",
+        "would_block_other": "过去 {{days}} 天本应拦截 {{n}} 次"
       },
       "snack": {
         "disabled": "已停用「{{name}}」，将随下一次下发生效",
         "moved": "已移到「{{section}}」第 {{n}} 位",
-        "template_added": "已添加规则组"
+        "template_added": "已添加规则组",
+        "converted": "已改为拦截，排在「拦截」第 {{n}} 位",
+        "reported": "「{{name}}」已改为仅报告，将随下一次下发生效"
       },
       "empty": {
         "title": "还没有访问策略",
-        "body": "从模板开始，或新建空白策略。添加时自己选择关闭或开启，不会默认启用。",
+        "body": "从模板开始，或新建空白策略。添加时自己选择关闭、仅报告或开启：仅报告先记录它本应拦截的连接，看过之后再决定是否拦截。",
         "blank": "新建空白策略"
       },
       "editor": {
@@ -5087,6 +5164,8 @@
         "network_all": "全部",
         "bittorrent": "BT 协议",
         "bittorrent_hint": "只识别明文握手与 uTP",
+        "counts_as_risk": "计入风险",
+        "counts_as_risk_hint": "把这条策略真正拦截的连接计入风控中心的「访问拦截」信号。仅报告的命中不计入。",
         "private": "内网与云元数据地址",
         "scope": "对谁生效",
         "scope_all": "所有人",
@@ -5117,10 +5196,28 @@
           "detail": "这条策略来自内置规则组，匹配内容只读。名称、说明、状态和作用范围可以修改；要改匹配内容，请复制成自定义策略。"
         },
         "bittorrent_block_only": "BT 协议只能用于拦截策略。",
-        "removed_deleted_other": "有 {{count}} 个已删除的分组或节点已从范围中移除，保存后生效"
+        "removed_deleted_other": "有 {{count}} 个已删除的分组或节点已从范围中移除，保存后生效",
+        "position_report": "在第 {{step}} 步，所有生效的规则之后判断",
+        "state_aria": "策略状态"
       },
       "separator": "、",
-      "template_name_taken": "已有同名策略。先给现有策略改名或删除它，再添加这个规则组。"
+      "template_name_taken": "已有同名策略。先给现有策略改名或删除它，再添加这个规则组。",
+      "turn_on": {
+        "title": "开启「{{name}}」？",
+        "body": "页面已经不知道这条策略关闭前是仅报告还是开启。选「仅报告」只记录、不拦截；选「开启拦截」会断开它命中的连接。",
+        "report": "仅报告",
+        "block": "开启拦截",
+        "cancel": "取消"
+      },
+      "state_help": {
+        "off": "不下发这条策略。",
+        "report": "不拦截任何连接，只记录它本应拦截的连接。它排在所有生效的规则之后判断，所以不会改变任何连接的结果。",
+        "on_block": "断开命中的连接，并记录命中。",
+        "on_allow": "直接放行，不记录；先于豁免和拦截判断。",
+        "allow_no_report": "放行策略没有「仅报告」：放行要改变判定结果才有意义，而仅报告不改变任何结果。",
+        "recommend": "推荐",
+        "recommend_note": "新建的拦截策略建议先用「仅报告」，看过命中再开启；也可以直接开启。"
+      }
     },
     "templates": {
       "added": "已添加",
@@ -5133,10 +5230,12 @@
       "why_none": "为什么有些规则组没有模板？",
       "chooser_title": "添加「{{name}}」",
       "chooser_state": "添加后的状态",
-      "chooser_help": "不会默认启用：关闭只创建策略，开启会在下一次下发后执行。",
+      "chooser_help": "关闭只创建策略；仅报告会下发，但不拦截，只记录它本应拦截的连接；开启会在下一次下发后拦截。不会默认启用。",
+      "chooser_risk": "这个规则组创建的策略命中会计入风险信号（风控中心的「访问拦截」）；仅报告的命中不计入。",
       "update_data": "去更新规则数据",
       "cancel": "取消",
-      "add": "添加"
+      "add": "添加",
+      "recommend": "推荐"
     },
     "test": {
       "title": "测试目的地",
@@ -5159,7 +5258,7 @@
       "badge": {
         "block": "拦截",
         "allow": "放行",
-        "observe": "仅观察",
+        "observe": "本应拦截",
         "exempt": "豁免",
         "none": "没有规则命中",
         "would_deny": "本应拒绝",
@@ -5171,21 +5270,25 @@
         "default": "没有规则命中，直接放行",
         "exempt": "这个账号不受任何访问限制",
         "builtin": "被节点内置规则拦截：以 . 结尾的主机名",
-        "source": "被入站的来源规则拦截（{{entry}}）"
+        "source": "被入站的来源规则拦截（{{entry}}）",
+        "observe": "没有被拦截：仅报告的策略命中了它，开启后会被拦截（{{entry}}）",
+        "observe_source": "没有被拦截：仅报告的来源规则命中了它，开启后会被拦截（{{entry}}）"
       },
       "kind": {
         "source": "来源规则",
         "allow": "放行",
         "block": "拦截",
         "exempt": "豁免",
-        "builtin": "节点内置：拦截以 . 结尾的主机名"
+        "builtin": "节点内置：拦截以 . 结尾的主机名",
+        "report": "仅报告"
       },
       "result": {
         "miss": "未命中",
         "hit": "命中，停止",
         "shadowed": "也会命中（被前面截住）",
         "skipped": "不再判断",
-        "untestable": "无法测试"
+        "untestable": "无法测试",
+        "hit_report": "命中：本应拦截，实际放行"
       },
       "node_hint": "{{node}}：{{note}}，实际结果可能不同",
       "node_applied": "按 {{node}} 已下发的策略判断",
@@ -5207,6 +5310,163 @@
         "cancel": "取消",
         "save": "加入"
       }
+    },
+    "tab_records": "记录",
+    "convert": {
+      "title": "把「{{name}}」改为拦截？",
+      "hits": "过去 {{days}} 天本应拦截",
+      "users": "涉及账号",
+      "top": "最多的目的地：{{list}}",
+      "no_collect": "节点还没有记录命中，无法估计影响",
+      "no_hits": "过去 {{days}} 天没有本应拦截的连接。",
+      "read_failed": "读取命中失败，仍然可以改为拦截。",
+      "body": "改为拦截后，这些连接会被断开，正在使用的连接断开一次。之前被排在它前面的另一条仅报告策略记走的连接，这次也会被拦截；节点上报有上限，记录也可能不全。所以实际影响可能比上面的数字大。",
+      "counts_as_risk": "改为拦截后，它拦截的连接会计入风险信号（风控中心的「访问拦截」）。",
+      "action": "改为拦截",
+      "cancel": "取消",
+      "view_records": "在记录中查看",
+      "at_least": "至少 {{n}} 次"
+    },
+    "records": {
+      "title": "命中记录",
+      "tiles": {
+        "block": "拦截",
+        "observe": "本应拦截",
+        "users": "涉及账号"
+      },
+      "filters": {
+        "user": "账号",
+        "source": "规则",
+        "source_all": "全部规则",
+        "group_policies": "策略",
+        "group_rules": "来源规则",
+        "group_deleted": "已删除",
+        "panel": "节点",
+        "panel_all": "全部节点",
+        "range": "时间范围",
+        "search": "搜索目的地…",
+        "more": "筛选"
+      },
+      "range": {
+        "h1": "过去 1 小时",
+        "h24": "过去 24 小时",
+        "days": "过去 {{days}} 天",
+        "custom": "自定义…",
+        "since": "开始（浏览器时间）",
+        "until": "结束（浏览器时间）",
+        "custom_note": "自定义范围按浏览器时间，最长 {{days}} 天。"
+      },
+      "view": {
+        "label": "查看",
+        "none": "明细",
+        "site": "按目的地",
+        "user": "按账号",
+        "policy": "按策略"
+      },
+      "count": {
+        "detail": "共 {{n}} 条 · 按小时汇总",
+        "grouped": "共 {{n}} 项"
+      },
+      "cols": {
+        "hour": "时段",
+        "user": "账号",
+        "rule": "规则",
+        "dest": "目的地",
+        "panel": "节点",
+        "count": "次数",
+        "object": "对象",
+        "last": "最近"
+      },
+      "rule": {
+        "blocked": "拦截",
+        "would_block": "本应拦截",
+        "deleted_policy": "已删除的策略",
+        "deleted_source_rule": "已删除的来源规则",
+        "deleted_user": "已删除的账号 #{{id}}",
+        "source_rule": "来源规则 · {{name}}",
+        "filter_by": "只看「{{name}}」"
+      },
+      "hover": {
+        "first_last": "首次 {{first}} · 最后 {{last}}"
+      },
+      "day": {
+        "today": "今天",
+        "yesterday": "昨天"
+      },
+      "dropped": "本期有 {{n}} 条记录因节点上报上限未统计",
+      "empty": {
+        "no_policies": "还没有启用的策略",
+        "to_policies": "去新建",
+        "no_collect": "没有节点在记录命中：节点版本过旧，或记录方式为「不记录」",
+        "nodes": "节点覆盖",
+        "filtered": "这段时间内没有符合条件的命中",
+        "clear": "清除筛选",
+        "none": "这段时间内没有命中",
+        "older": "命中记录只保留 {{days}} 天"
+      },
+      "read_failed": "读取命中记录失败",
+      "retention": "命中记录保留 {{days}} 天",
+      "change": "修改",
+      "menu": {
+        "label": "更多操作",
+        "test": "测试此目的地",
+        "exception": "加入放行例外…",
+        "open_user": "打开账号"
+      },
+      "exception": {
+        "title": "放行 {{dest}}？",
+        "where": "加到",
+        "global": "全局放行例外（对所有人放行）",
+        "global_hint": {
+          "summary": "会越过所有拦截策略",
+          "detail": "放行在拦截之前判断：所有人访问它都不再被拦截。"
+        },
+        "first_time": "第一次使用会新建列表「放行例外」和一条放行策略",
+        "match": "写成",
+        "exempt": "只豁免 {{upn}}（不受任何访问限制）",
+        "exempt_hint": {
+          "summary": "这个账号将不受任何访问限制",
+          "detail": "豁免对所有策略都生效，不只是这一个目的地。"
+        },
+        "cancel": "取消",
+        "allow": "放行",
+        "exempt_action": "豁免此账号…",
+        "invalid": "这个目的地不能作为放行例外",
+        "eta_other": "约 {{count}} 分钟内生效。",
+        "eta_unknown": "几分钟内生效。",
+        "saved": "已加入放行例外「{{entry}}」，将随下一次下发生效",
+        "saved_created": "已新建列表「放行例外」和一条放行策略，并加入「{{entry}}」，将随下一次下发生效"
+      }
+    },
+    "audit_collect": {
+      "title": "{{name}} 记录什么？",
+      "label": "记录方式",
+      "mode": {
+        "off": "不记录",
+        "hits": "只记录规则命中",
+        "hits_and_usage": "记录命中和按网站用量"
+      },
+      "mode_help": {
+        "hits_and_usage": "这台节点原本设为同时记录按网站的用量；当前版本还不提供，实际按「只记录规则命中」执行。改选上面的方式即可。",
+        "off": "只执行策略，不留任何记录。",
+        "hits": "记下命中拦截和仅报告的连接：账号、目的地、次数，按小时汇总，保留 {{days}} 天。原始访问日志不离开节点。"
+      },
+      "too_old": "节点版本过旧，需升级",
+      "exec_only": "sing-box 节点只执行，不记录",
+      "restart": "保存后这台节点会重启代理程序一次。",
+      "cancel": "取消",
+      "save": "保存",
+      "saved_other": "已保存，{{node}} 会在约 {{count}} 分钟内重启代理程序一次",
+      "saved_unknown": "已保存，{{node}} 会在几分钟内重启代理程序一次"
+    },
+    "node_recording": {
+      "mode": {
+        "off": "不记录",
+        "hits": "只记录规则命中"
+      },
+      "hits_24h": "24 小时 {{n}} 次",
+      "reported": "{{ago}}上报",
+      "separator": " · "
     }
   }
 }

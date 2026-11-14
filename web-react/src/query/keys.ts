@@ -1,3 +1,4 @@
+import type { DestHitsParams } from '@/api/accessControl'
 import type { AuditFilter } from '@/api/audit'
 import type { AuthEventFilter } from '@/api/authEvents'
 import type { EmailLogFilter } from '@/api/emailLogs'
@@ -213,6 +214,10 @@ export const diagnosticsKeys = {
  * prefix, because the status read (polled while nodes apply) must not be
  * refetched by every list edit more than it has to be.
  */
+function cleanHitParams(params: DestHitsParams): DestHitsParams {
+  return Object.fromEntries(Object.entries(params).filter(([, v]) => v !== undefined && v !== '' && v !== null)) as DestHitsParams
+}
+
 export const accessControlKeys = {
   all: (s: QueryScope) => [...privateRoot(s), 'access-control'] as const,
   status: (s: QueryScope) => [...accessControlKeys.all(s), 'status'] as const,
@@ -228,7 +233,16 @@ export const accessControlKeys = {
   sourceRule: (s: QueryScope, nodeId: number) => [...accessControlKeys.all(s), 'source-rule', nodeId] as const,
   geositeStatus: (s: QueryScope) => [...accessControlKeys.all(s), 'geosite', 'status'] as const,
   geositeCategories: (s: QueryScope) => [...accessControlKeys.all(s), 'geosite', 'categories'] as const,
-  /** One account's group and exemption (the drawer's "access" tab). */
-  user: (s: QueryScope, id: number) => [...accessControlKeys.all(s), 'user', id] as const,
+  /** One account's group, exemption and recent hits (the drawer's "access" tab). */
+  user: (s: QueryScope, id: number) => [...accessControlKeys.usersAll(s), id] as const,
+  /** Every cached account view (the prefix of `user`): a policy's name is in each of them. */
+  usersAll: (s: QueryScope) => [...accessControlKeys.all(s), 'user'] as const,
+  /**
+   * One hit-records read. The params are the server's: the keyword `q` is among
+   * them (it is request state, not URL state), and an empty one is no key at all.
+   */
+  hits: (s: QueryScope, params: DestHitsParams) => [...accessControlKeys.hitsAll(s), cleanHitParams(params)] as const,
+  /** Every cached hit read (the prefix of `hits`). */
+  hitsAll: (s: QueryScope) => [...accessControlKeys.all(s), 'hits'] as const,
   settings: (s: QueryScope) => [...accessControlKeys.all(s), 'settings'] as const,
 }

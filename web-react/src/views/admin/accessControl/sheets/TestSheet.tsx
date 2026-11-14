@@ -62,6 +62,8 @@ function TestBody({ prefill, onOpenPolicy }: { prefill?: DrawerPrefill; onOpenPo
   const [failed, setFailed] = useState(false)
   const [exception, setException] = useState(false)
 
+  const inboundName = (id: number) => { const n = nodes.data?.items.find(x => x.id === id); return n ? (n.display_name || n.panel_name) : undefined }
+
   const norm = normalizeTarget(target)
   const targetBad = submitted && norm.host === ''
   const portBad = !validPort(port)
@@ -141,7 +143,7 @@ function TestBody({ prefill, onOpenPolicy }: { prefill?: DrawerPrefill; onOpenPo
               </Box>
             )}
             <VerdictLine result={result.r} />
-            <EvalTrace result={result.r} />
+            <EvalTrace result={result.r} inboundName={inboundName} />
             <Box sx={{ display: 'grid', gap: 0.5 }}>
               {result.r.nodes.map(n => {
                 const st = status.data?.nodes.find(x => x.panel_id === n.panel_id)

@@ -62,3 +62,63 @@ describe('NodePolicyStatusRow', () => {
     expect(screen.getByText('不适用')).toBeTruthy()
   })
 })
+
+describe('the recording line of a row (2c)', () => {
+  const rec = (over: Partial<DestNodeStatus> = {}) => node({
+    supports: { policy: true, hits: true, usage: false }, collect: 'hits', collect_effective: 'hits', collecting: true, hits_24h: 1204,
+    last_report_at: NOW - 30_000, ...over,
+  })
+  const line = () => screen.queryByTestId('node-recording')?.textContent
+
+  it('says the mode, the hits of the last 24 hours and when the node last reported', () => {
+    renderAccess(<NodePolicyStatusRow node={rec()} variant="row" now={NOW} />)
+    expect(line()).toBe('只记录规则命中 · 24 小时 1,204 次 · 刚刚上报')
+  })
+
+  it('a node that has no count yet leaves the count out; it is never a 0', () => {
+    renderAccess(<NodePolicyStatusRow node={rec({ hits_24h: null, last_report_at: null })} variant="row" now={NOW} />)
+    expect(line()).toBe('只记录规则命中')
+  })
+
+  it('not recording says so, with no count', () => {
+    renderAccess(<NodePolicyStatusRow node={rec({ collect: 'off', collect_effective: 'off', collecting: false, hits_24h: 0 })} variant="row" now={NOW} />)
+    expect(line()).toBe('不记录 · 刚刚上报')
+  })
+
+  it('has no line for sing-box (its note already says it only enforces), a node too old, or a 3X-UI node', () => {
+    for (const n of [rec({ engine: 'sing-box', supports: { policy: true, hits: false, usage: false } }), rec({ supports: { policy: true, hits: false, usage: false }, state: 'unsupported_version' }), rec({ kind: 'x-ui', state: 'unsupported_kind' })]) {
+      const { unmount } = renderAccess(<NodePolicyStatusRow node={n} variant="row" now={NOW} />)
+      expect(line()).toBeUndefined()
+      unmount()
+    }
+  })
+
+  it('the single-node block draws its recording in its own blocks, not as a line', () => {
+    renderAccess(<NodePolicyStatusRow node={rec()} variant="block" now={NOW} />)
+    expect(line()).toBeUndefined()
+  })
+
+  it('in English', () => {
+    setTestLang('en-US')
+    renderAccess(<NodePolicyStatusRow node={rec()} variant="row" now={NOW} />)
+    expect(line()).toBe('Rule matches only · 1,204 in 24 hours · reported just now')
+  })
+})
+
+describe('report-only rules not deployed', () => {
+  it.each([
+    ['sniffing', '该节点入站的嗅探无法支持仅报告规则，已只下发拦截规则'],
+    ['limit', '超出规则预算，仅报告规则未下发'],
+  ] as const)('%s says so, on the row and in the block, and nothing is said when it is null', (why, words) => {
+    const r = renderAccess(<NodePolicyStatusRow node={node({ report_only_not_deployed: why })} variant="row" now={NOW} />)
+    expect(screen.getByTestId('node-report-not-deployed').textContent).toBe(words)
+    r.unmount()
+    renderAccess(<NodePolicyStatusRow node={node({ report_only_not_deployed: why })} variant="block" now={NOW} />)
+    expect(screen.getByTestId('node-report-not-deployed').textContent).toBe(words)
+  })
+
+  it('is absent when every report-only rule was sent', () => {
+    renderAccess(<NodePolicyStatusRow node={node({ report_only_not_deployed: null })} variant="row" now={NOW} />)
+    expect(screen.queryByTestId('node-report-not-deployed')).toBeNull()
+  })
+})

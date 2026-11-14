@@ -47,6 +47,8 @@ export interface Server {
   panel_type: PanelType
   /** Saved Passwall Node release preference; legacy omission means stable. Docker installation files follow its floating image tag by default. */
   update_channel?: NodeUpdateChannel
+  /** How much a Passwall Node server records of its destination rules; absent for other panels. */
+  audit_collect?: 'off' | 'hits' | 'hits_and_usage'
   capabilities: PanelCapability[]
   name: string
   url: string
@@ -197,6 +199,7 @@ export interface NativeInstallationFiles {
 export interface UpdateServerRequest {
   panel_type?: PanelType
   update_channel?: NodeUpdateChannel
+  audit_collect?: 'off' | 'hits' | 'hits_and_usage'
   name?: string
   url?: string
   api_token?: string

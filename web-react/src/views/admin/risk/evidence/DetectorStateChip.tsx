@@ -1,7 +1,9 @@
-import { Chip, Tooltip } from '@mui/material'
+import { Tooltip, useTheme } from '@mui/material'
 import { useTranslation } from 'react-i18next'
 
-import { stateColor, stateLabelKey, type DetectorState } from './state'
+import ToneBadge from '@/components/ToneBadge'
+import { accessTone } from '@/utils/accessControl'
+import { stateLabelKey, stateTone, type DetectorState } from './state'
 
 export interface DetectorStateChipProps {
   state: DetectorState
@@ -14,7 +16,9 @@ export interface DetectorStateChipProps {
 
 /**
  * One detector's state, in the one vocabulary and the one colour scheme every
- * risk surface uses, so a state never reads two ways across tabs.
+ * risk surface uses, so a state never reads two ways across tabs. It is a
+ * ToneBadge from the access-control page's closed colour table, with an icon
+ * and its words: no state is told by colour alone, and no <Chip color> says it.
  *
  * A clean verdict judged while some panel could not be read stands on a floor
  * of the account's sources — "clean as far as could be seen" — so it is never
@@ -23,11 +27,11 @@ export interface DetectorStateChipProps {
  */
 export function DetectorStateChip({ state, code, complete, tooltip }: DetectorStateChipProps) {
   const { t } = useTranslation(['admin'])
-  const c = stateColor(state)
-  const chip = (
-    <Chip size="small" color={complete === false && c === 'success' ? 'default' : c}
-      variant={state === 'not_computed' ? 'outlined' : 'filled'}
-      label={t(`admin:${stateLabelKey(state, code)}`)} />
+  const theme = useTheme()
+  const partial = state === 'clean' && complete === false
+  const badge = (
+    <ToneBadge tone={accessTone(theme, stateTone(state, complete))} label={t(`admin:${stateLabelKey(state, code)}`)}
+      testId="detector-state" data={partial ? 'clean_partial' : state} />
   )
-  return tooltip ? <Tooltip title={tooltip}>{chip}</Tooltip> : chip
+  return tooltip ? <Tooltip title={tooltip}><span>{badge}</span></Tooltip> : badge
 }

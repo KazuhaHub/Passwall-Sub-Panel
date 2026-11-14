@@ -1,4 +1,5 @@
 import type { GeoAnomaly } from '@/api/geoAnomalies'
+import type { AccessToneKind } from '@/utils/accessControl'
 
 /**
  * Every state a detector row can be in: the seven the server stores (the
@@ -7,27 +8,6 @@ import type { GeoAnomaly } from '@/api/geoAnomalies'
  * yet", never blank and never clean.
  */
 export type DetectorState = GeoAnomaly['state'] | 'not_computed'
-
-/**
- * Colour carries meaning here, so it is assigned by what the operator should
- * DO rather than by how alarming the word sounds.
- *
- * Only `flagged` is actionable. `suspect` is the visible ramp and must look
- * different from both a flag and a clean row — hiding it would make the
- * eventual flag appear out of nowhere. Everything else means the detector is
- * not in a position to judge, and those states are deliberately NOT green:
- * `unknown` on a fleet whose geo database has stopped working looks exactly
- * like a clean fleet if it is coloured like one.
- */
-export function stateColor(state: DetectorState): 'error' | 'warning' | 'success' | 'info' | 'default' {
-  switch (state) {
-    case 'flagged': return 'error'
-    case 'suspect': return 'warning'
-    case 'clean': return 'success'
-    case 'unknown': return 'info'
-    default: return 'default'   // exempt / disabled / idle / not_computed
-  }
-}
 
 /**
  * The admin-namespace key naming a state, from the one vocabulary every risk
@@ -45,4 +25,25 @@ export function stateColor(state: DetectorState): 'error' | 'warning' | 'success
 export function stateLabelKey(state: DetectorState, code?: string): string {
   if (state === 'exempt' && code === 'trusted') return 'risk_center.state.trusted'
   return `risk_center.state.${state}`
+}
+
+/**
+ * The row of the closed colour table a state is drawn in (the badge is a
+ * ToneBadge, never a <Chip color>). Only `flagged` is actionable, and `suspect` is
+ * the visible ramp, so neither may look like the other or like a clean row;
+ * every state that is not a verdict is deliberately NOT green: `unknown` on a
+ * fleet whose geo database has stopped working looks exactly like a clean
+ * fleet if it is coloured like one. A clean verdict that was judged on a floor of
+ * its sources (`complete` false) is "cannot be sure", not the green row.
+ */
+export function stateTone(state: DetectorState, complete?: boolean): AccessToneKind {
+  switch (state) {
+    case 'flagged': return 'failing'
+    case 'suspect': return 'attention'
+    case 'clean': return complete === false ? 'unknown' : 'ok'
+    case 'exempt': return 'exempt'
+    case 'disabled': return 'paused'
+    case 'idle': return 'none'
+    default: return 'unknown' // unknown, not_computed
+  }
 }

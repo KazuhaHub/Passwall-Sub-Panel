@@ -89,6 +89,7 @@ export function TemplateChooser({ template, onClose, onConfirm, error, onOpenSet
   onOpenSettings: () => void
 }) {
   const { t, i18n } = useTranslation(['admin'])
+  const md = useTheme().palette.md
   const [state, setState] = useState<DestState | null>(null)
   return (
     <Dialog open={template !== null} onClose={onClose} fullWidth maxWidth="sm" slotProps={{ transition: { onExited: () => setState(null) } }}>
@@ -98,9 +99,15 @@ export function TemplateChooser({ template, onClose, onConfirm, error, onOpenSet
         <Typography variant="body2" sx={{ fontWeight: 600 }}>{t(`${T}chooser_state`)}</Typography>
         <ToggleButtonGroup exclusive fullWidth value={state} onChange={(_, v: DestState | null) => setState(v)} aria-label={t(`${T}chooser_state`)}>
           <ToggleButton value="off">{t('admin:access_control.policies.state.off')}</ToggleButton>
+          {/* The templates are block policies: Report only is offered and recommended, never preselected. */}
+          <ToggleButton value="report" sx={{ gap: 0.75 }}>
+            {t('admin:access_control.policies.state.report')}
+            <Typography component="span" sx={{ fontSize: 11, fontWeight: 600, color: md.primary }}>{t(`${T}recommend`)}</Typography>
+          </ToggleButton>
           <ToggleButton value="on">{t('admin:access_control.policies.state.on')}</ToggleButton>
         </ToggleButtonGroup>
         <Typography variant="caption">{t(`${T}chooser_help`)}</Typography>
+        {template?.counts_as_risk && <Typography variant="caption" sx={{ display: 'block' }}>{t(`${T}chooser_risk`)}</Typography>}
         {error && (
           <Alert severity="error" action={error.needsData ? <Button color="inherit" size="small" onClick={onOpenSettings}>{t(`${T}update_data`)}</Button> : undefined}>
             {error.text}

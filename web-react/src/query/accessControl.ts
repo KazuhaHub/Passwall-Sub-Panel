@@ -3,14 +3,14 @@ import {
   addDestException, createDestExemption, createDestList, createDestPolicy, deleteDestExemption, deleteDestList, deleteDestPolicy,
   editDestListEntries, getDestCatalog, getDestExemptions, getDestList, getDestLists, getDestPolicies, getDestSettings,
   getDestSourceRule, getDestSourceRules, getDestStatus, getDestUser, getGeositeCategories, getGeositeStatus,
-  instantiateDestTemplate, pauseDest, publishDest, putDestSettings, putDestSourceRule, refreshDestList,
-  reorderDestPolicies, retryDestAgent, rollbackGeosite, testDestination, updateDestExemption, updateDestList,
+  getDestHits, instantiateDestTemplate, pauseDest, publishDest, putDestSettings, putDestSourceRule, refreshDestList,
+  reorderDestPolicies, retryDestAgent, rollbackGeosite, setAuditCollect, testDestination, updateDestExemption, updateDestList,
   updateDestPolicy, updateGeosite,
-  type DestAction, type DestExemptionInput, type DestListInput, type DestPolicyInput, type DestSettings,
-  type DestSourceRuleInput, type DestState, type DestTestInput,
+  type AuditCollect, type DestAction, type DestExemptionInput, type DestHitsParams, type DestListInput, type DestPolicyInput,
+  type DestSettings, type DestSourceRuleInput, type DestState, type DestTestInput,
 } from '@/api/accessControl'
 import { destStatusActive, listsRefreshing } from '@/utils/accessControl'
-import { accessControlKeys, riskCenterKeys, settingsKeys } from './keys'
+import { accessControlKeys, riskCenterKeys, serverKeys, settingsKeys } from './keys'
 import { freshness, policies } from './policies'
 import type { QueryScope } from './session'
 
@@ -21,7 +21,7 @@ import type { QueryScope } from './session'
 
 type Part =
   | 'status' | 'policies' | 'lists' | 'listDetails' | 'catalog' | 'exemptions' | 'sourceRules'
-  | 'geosite' | 'settings' | 'uiSettings'
+  | 'geosite' | 'settings' | 'uiSettings' | 'hits' | 'users' | 'servers'
 
 function invalidate(qc: QueryClient, scope: QueryScope, parts: Part[], extra: readonly (readonly unknown[])[] = []) {
   const k = accessControlKeys
@@ -36,6 +36,9 @@ function invalidate(qc: QueryClient, scope: QueryScope, parts: Part[], extra: re
     geosite: [k.geositeStatus(scope), k.geositeCategories(scope)],
     settings: [k.settings(scope)],
     uiSettings: [settingsKeys.ui(scope)],
+    hits: [k.hitsAll(scope)],
+    users: [k.usersAll(scope)],
+    servers: [serverKeys.lists(scope)],
   }
   return Promise.all([...parts.flatMap(p => keys[p]), ...extra].map(queryKey => qc.invalidateQueries({ queryKey })))
 }
@@ -63,7 +66,7 @@ export function destPoliciesQuery(scope: QueryScope, enabled = true) {
     queryKey: accessControlKeys.policies(scope),
     queryFn: ({ signal }) => getDestPolicies({ signal }),
     enabled,
-    ...freshness(policies.destDefinitions),
+    ...freshness(policies.destPolicies),
   })
 }
 
@@ -164,6 +167,17 @@ export function useDestUser(scope: QueryScope, userId: number, { enabled = true 
   }))
 }
 
+/** The hit records of one filter set; the previous page stays on screen while the next loads. */
+export function useDestHits(scope: QueryScope, params: DestHitsParams, { enabled = true }: { enabled?: boolean } = {}) {
+  return useQuery(queryOptions({
+    queryKey: accessControlKeys.hits(scope, params),
+    queryFn: ({ signal }) => getDestHits(params, { signal }),
+    enabled,
+    placeholderData: keepPreviousData,
+    ...freshness(policies.destHits),
+  }))
+}
+
 export function useDestSettings(scope: QueryScope, { enabled = true }: { enabled?: boolean } = {}) {
   return useQuery(queryOptions({
     queryKey: accessControlKeys.settings(scope),
@@ -176,8 +190,9 @@ export function useDestSettings(scope: QueryScope, { enabled = true }: { enabled
 // ---- writes ----
 
 /** What a policy write makes stale: the policies, the status the verdict reads, the lists' reference
- *  counts and the catalog's "added" marks. */
-const POLICY_WRITE: Part[] = ['policies', 'status', 'lists', 'catalog']
+ *  counts and the catalog's "added" marks, and every hit read and account view, which name the
+ *  policy a hit was credited to (a rename or a delete changes what they say). */
+const POLICY_WRITE: Part[] = ['policies', 'status', 'lists', 'catalog', 'hits', 'users']
 
 export function useCreateDestPolicy(scope: QueryScope) {
   const qc = useQueryClient()
@@ -295,8 +310,21 @@ export function useSaveDestSettings(scope: QueryScope) {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (changed: Partial<DestSettings>) => putDestSettings(changed),
-    // The refresh interval is quoted on the lists, and the system settings record holds the same keys.
-    onSettled: () => invalidate(qc, scope, ['settings', 'status', 'lists', 'uiSettings']),
+    // The refresh interval is quoted on the lists, the retention under the hit records, and the system settings record holds the same keys.
+    onSettled: () => invalidate(qc, scope, ['settings', 'status', 'lists', 'policies', 'hits', 'users', 'uiSettings']),
+  })
+}
+
+/**
+ * A native server's recording mode (PUT /servers/:id, one key). It moves what
+ * the status says of the node (collect, collecting, its 24-hour hits) and the
+ * servers list that carries `audit_collect`.
+ */
+export function useSetAuditCollect(scope: QueryScope) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ serverId, collect }: { serverId: number; collect: AuditCollect }) => setAuditCollect(serverId, collect),
+    onSettled: () => invalidate(qc, scope, ['status', 'servers', 'policies', 'hits', 'users']),
   })
 }
 

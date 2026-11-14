@@ -169,6 +169,35 @@ describe('headlineText', () => {
   })
 })
 
+// The access-block kind reads in the queue like every risk kind: its code
+// sentence, with the verdict's own window and counts (never a literal 24 or 20).
+describe('headlineText: dest_block', () => {
+  const destBlock = (code: string, over: Record<string, unknown> = {}): RiskSignal => ({
+    kind: 'dest_block', state: code === 'over' ? 'flagged' : 'suspect', code, updated_at_ms: 1,
+    evidence: { v: 1, window_hours: 24, threshold: 20, total: 37, by_source: [{ source: 'p1', count: 37 }], nodes: 1, ...over },
+  })
+
+  it('reads the blocks in the window against the threshold, in both languages', () => {
+    const sig = destBlock('over')
+    const r = row({ level: 'flagged', sources: [{ source: 'dest_block', level: 'flagged' }], signals: [sig] })
+    expect(headlineText(r, t, ctx)).toBe('近 24 小时被拦截 37 次，达到阈值 20')
+    expect(headlineText(r, tEn, ctxEn)).toMatch(/37/)
+    expect(headlineText(r, tEn, ctxEn)).toMatch(/20/)
+    expect(headlineText(r, tEn, ctxEn)).not.toMatch(/admin:|risk_signals/)
+  })
+
+  it('takes its numbers from the evidence: another window and threshold read as such', () => {
+    const sig = destBlock('over', { window_hours: 12, threshold: 5, total: 9 })
+    const r = row({ level: 'flagged', sources: [{ source: 'dest_block', level: 'flagged' }], signals: [sig] })
+    expect(headlineText(r, t, ctx)).toBe('近 12 小时被拦截 9 次，达到阈值 5')
+  })
+
+  it('has its own chip name', () => {
+    expect(sourceChipLabel('dest_block', row(), t)).toBe('访问拦截')
+    expect(sourceChipLabel('dest_block', row(), tEn)).toBe('Blocked access')
+  })
+})
+
 describe('sourceChipLabel', () => {
   it('adds the tier to the geo chip', () => {
     const r = row({ sources: [{ source: 'geo', level: 'suspect' }], geo: geo({ tier: 'city' }) })

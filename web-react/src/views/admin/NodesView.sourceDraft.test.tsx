@@ -49,13 +49,13 @@ const sourcePuts = () => api.put.mock.calls.filter(c => c[0] === '/admin/dest/so
 it('shows an amber hint in the section while the draft is dirty, and not otherwise', async () => {
   const { section } = await mountEdit()
   expect(within(section).queryByText('admin:access_control.source_rules.unsaved.summary')).toBeNull()
-  fireEvent.click(within(section).getByRole('switch'))
+  fireEvent.click(within(section).getByRole('button', { name: 'admin:access_control.policies.state.on' }))
   expect(within(section).getByText('admin:access_control.source_rules.unsaved.summary')).toBeTruthy()
 })
 
 it('a dirty draft at OK asks the discard question; Yes saves the inbound only and drops the draft', async () => {
   const { section, dialog } = await mountEdit()
-  fireEvent.click(within(section).getByRole('switch'))
+  fireEvent.click(within(section).getByRole('button', { name: 'admin:access_control.policies.state.on' }))
   submit(dialog)
   await waitFor(() => expect(inboundPuts()).toHaveLength(1))
   expect(titlesAsked()).toEqual(['admin:access_control.confirm.discard.title'])
@@ -66,19 +66,19 @@ it('a dirty draft at OK asks the discard question; Yes saves the inbound only an
 it('No or a dismiss aborts the OK and leaves the dialog open with both drafts intact', async () => {
   confirmMock.mockImplementationOnce(() => Promise.resolve(false))
   const { section, dialog } = await mountEdit()
-  fireEvent.click(within(section).getByRole('switch'))
+  fireEvent.click(within(section).getByRole('button', { name: 'admin:access_control.policies.state.on' }))
   submit(dialog)
   await waitFor(() => expect(confirmMock).toHaveBeenCalledTimes(1))
   await new Promise(r => setTimeout(r, 30))
   expect(inboundPuts()).toHaveLength(0)
   expect(screen.getByRole('dialog')).toBeTruthy()
-  expect((within(section).getByRole('switch') as HTMLInputElement).checked).toBe(true)
+  expect(within(section).getByRole('button', { name: 'admin:access_control.policies.state.on' }).getAttribute('aria-pressed')).toBe('true')
   expect(within(section).getByText('admin:access_control.source_rules.unsaved.summary')).toBeTruthy()
 })
 
 it('the source [Save] button still saves the draft on its own', async () => {
   const { section } = await mountEdit()
-  fireEvent.click(within(section).getByRole('switch'))
+  fireEvent.click(within(section).getByRole('button', { name: 'admin:access_control.policies.state.on' }))
   fireEvent.click(within(section).getByRole('button', { name: 'admin:access_control.source_rules.save' }))
   await waitFor(() => expect(sourcePuts()).toHaveLength(1))
   expect(inboundPuts()).toHaveLength(0)

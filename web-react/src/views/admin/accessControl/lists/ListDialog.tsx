@@ -202,7 +202,7 @@ export default function ListDialog({ open, onClose, editId, initialKind = 'custo
 
   // The footer: what saving does to the nodes.
   const enabledIds = useMemo(
-    () => new Set([...(policies.data?.allow ?? []), ...(policies.data?.block ?? [])].filter(p => p.state === 'on').map(p => p.id)),
+    () => new Set([...(policies.data?.allow ?? []), ...(policies.data?.block ?? [])].filter(p => p.state !== 'off').map(p => p.id)),
     [policies.data])
   const usedEnabled = (detail.data?.list.used_by ?? []).filter(u => enabledIds.has(u.id)).length
   const nodeCount = enforcingNodeCount(status.data)

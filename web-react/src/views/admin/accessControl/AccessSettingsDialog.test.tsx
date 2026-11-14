@@ -13,9 +13,9 @@ vi.mock('@/api/accessControl', async importOriginal => {
 })
 
 const view = (over: Partial<api.DestSettings> = {}): api.DestSettingsView => ({
-  settings: { dest_policy_apply_min_seconds: 0, dest_list_refresh_hours: 0, dest_rules_update_mode: '', ...over },
-  defaults: { dest_policy_apply_min_seconds: 60, dest_list_refresh_hours: 24 },
-  effective: { dest_policy_apply_min_seconds: 60, dest_list_refresh_hours: 24, dest_rules_update_mode: 'manual' },
+  settings: { dest_policy_apply_min_seconds: 0, dest_list_refresh_hours: 0, dest_rules_update_mode: '', dest_hit_retention_days: 0, dest_trial_retention_days: 0, ...over },
+  defaults: { dest_policy_apply_min_seconds: 60, dest_list_refresh_hours: 24, dest_hit_retention_days: 30, dest_trial_retention_days: 7 },
+  effective: { dest_policy_apply_min_seconds: 60, dest_list_refresh_hours: 24, dest_rules_update_mode: 'manual', dest_hit_retention_days: 30, dest_trial_retention_days: 7 },
 })
 const meta = (tag: string): api.GeositeMeta => ({ tag, sha256: 'x', downloaded_at: '2026-11-01T00:00:00Z', bytes: 1 })
 const geo = (over: Partial<api.GeositeStatus> = {}): api.GeositeStatus => ({
@@ -87,6 +87,63 @@ describe('settings', () => {
     vi.mocked(api.getDestSettings).mockRejectedValue(Object.assign(new Error('x'), { isAxiosError: true, response: { status: 503, data: { code: 'dest_unavailable' } } }))
     open()
     expect(await screen.findByText('设置未接线')).toBeTruthy()
+  })
+})
+
+describe('the hit-record retention (S18, the records tab\'s "change")', () => {
+  it('is a field with the served default, never a 0, and says its range', async () => {
+    open()
+    const days = (await screen.findByLabelText('命中记录保留（天）')) as HTMLInputElement
+    expect(days.value).toBe('')
+    expect(days.placeholder).toBe('30')
+    expect(screen.getByText(/1–365/)).toBeTruthy()
+    // The trial retention belongs to the allowlist, which is a later phase: no field for it.
+    expect(screen.queryByLabelText(/试运行/)).toBeNull()
+  })
+
+  it('sends only the retention when only it changed; lengthening asks nothing', async () => {
+    vi.mocked(api.putDestSettings).mockResolvedValue(view({ dest_hit_retention_days: 60 }))
+    open()
+    const days = await screen.findByLabelText('命中记录保留（天）')
+    fireEvent.focus(days)
+    fireEvent.change(days, { target: { value: '60' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(api.putDestSettings).toHaveBeenCalledWith({ dest_hit_retention_days: 60 }))
+    expect(confirmMock).not.toHaveBeenCalledWith(expect.objectContaining({ title: '缩短保留期？' }))
+  })
+
+  it('shortening asks first, naming the days that will be kept, and a "no" sends nothing', async () => {
+    vi.mocked(api.putDestSettings).mockResolvedValue(view({ dest_hit_retention_days: 14 }))
+    open()
+    const days = await screen.findByLabelText('命中记录保留（天）')
+    fireEvent.focus(days)
+    fireEvent.change(days, { target: { value: '14' } })
+    confirmMock.mockResolvedValueOnce(false)
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(confirmMock).toHaveBeenCalledWith(expect.objectContaining({
+      title: '缩短保留期？', message: '超过 14 天的记录会在一小时内删除，无法恢复。', confirmText: '缩短', destructive: true,
+    })))
+    expect(api.putDestSettings).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(api.putDestSettings).toHaveBeenCalledWith({ dest_hit_retention_days: 14 }))
+  })
+
+  it('opens focused on the field when the records tab asks', async () => {
+    renderAccess(<AccessSettingsDialog open focus="retention" onClose={onClose} />)
+    const days = await screen.findByLabelText('命中记录保留（天）')
+    await waitFor(() => expect(document.activeElement).toBe(days))
+  })
+
+  it('a 400 puts the range error on the retention field', async () => {
+    vi.mocked(api.putDestSettings).mockRejectedValue(Object.assign(new Error('x'), {
+      isAxiosError: true, response: { status: 400, data: { code: 'dest_settings_invalid', field: 'dest_hit_retention_days' } },
+    }))
+    open()
+    const days = await screen.findByLabelText('命中记录保留（天）')
+    fireEvent.focus(days)
+    fireEvent.change(days, { target: { value: '90' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+    expect(await screen.findByText('超出范围')).toBeTruthy()
   })
 })
 

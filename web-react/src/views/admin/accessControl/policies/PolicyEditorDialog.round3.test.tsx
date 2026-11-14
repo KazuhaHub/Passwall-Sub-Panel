@@ -18,7 +18,7 @@ vi.mock('@/api/servers', async o => ({ ...await o<typeof import('@/api/servers')
 const budget = { rules: { used: 1, limit: 256 }, domains: { used: 0, limit: 50000 }, regexps: { used: 0, limit: 256 }, cidrs: { used: 0, limit: 20000 }, source_cidrs: { used: 0, limit: 60000 }, subjects: { used: 0, limit: 5000 }, bytes: { used: 0, limit: 1000 } }
 const pol = (over: Partial<DestPolicy> = {}): DestPolicy => ({
   id: 1, name: '禁止发信', description: '', action: 'block', state: 'on', list_ids: [], inline: { ports: '25' }, scope: 'all', group_ids: [], panel_ids: [],
-  priority: 1, template_key: '', created_at: 0, updated_at: 111, list_states: [], note: null, scope_missing: false, hits_recent: null, last_hit_at: null, ...over,
+  priority: 1, template_key: '', created_at: 0, updated_at: 111, list_states: [], note: null, scope_missing: false, hits_recent: null, would_block_recent: null, last_hit_at: null, ...over,
 })
 const bad = (field: string) => Object.assign(new Error('x'), { isAxiosError: true, response: { status: 400, data: { code: 'dest_policy_invalid', field, error: 'bad' } } })
 

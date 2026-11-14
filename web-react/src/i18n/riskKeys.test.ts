@@ -208,6 +208,25 @@ describe.each([
   })
 })
 
+// The access-control pieces that live outside views/admin/accessControl and
+// views/admin/risk are held to the same two rules, file by file: the shared
+// node row and recording dialog, and the servers page's single-node dialog.
+describe.each([
+  { file: '../components/AuditCollectDialog.tsx' },
+  { file: '../components/NodePolicyStatusRow.tsx' },
+  { file: '../views/admin/ServerAccessDialog.tsx' },
+])('$file reads every word from the bundles', ({ file }) => {
+  const source = readFileSync(viewDir(file), 'utf8')
+
+  it('every literal admin key exists in both bundles', () => {
+    expect(missingKeys(source)).toEqual([])
+  })
+
+  it('no Chinese text outside comments', () => {
+    expect(cjkOutsideComments(source)).toEqual([])
+  })
+})
+
 // ONE ACTION, ONE NAME (spec §3.7). The risk center's service actions are the
 // Users page's: an admin who suspends a user from the row menu and then opens
 // the risk drawer from the same row must meet the same words, and the toast

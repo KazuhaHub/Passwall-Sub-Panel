@@ -19,7 +19,7 @@ const budget = { rules: { used: 2, limit: 256 }, domains: { used: 0, limit: 5000
 const pol = (over: Partial<DestPolicy>): DestPolicy => ({
   id: 1, name: '禁止发信', description: '', action: 'block', state: 'on', list_ids: [], inline: { ports: '25,465,587', network: 'tcp' }, scope: 'all',
   group_ids: [], panel_ids: [], priority: 1, template_key: '', created_at: 0, updated_at: 111, list_states: [], note: null, scope_missing: false,
-  hits_recent: null, last_hit_at: null, ...over,
+  hits_recent: null, would_block_recent: null, last_hit_at: null, ...over,
 })
 const policies = (over: Partial<DestPolicies> = {}): DestPolicies => ({
   allow: [pol({ id: 9, name: '公司内网', action: 'allow', inline: { private: true } })],
@@ -46,7 +46,7 @@ beforeEach(() => {
   vi.mocked(api.getDestLists).mockResolvedValue({ items: [], refresh_hours: 24, budget })
   vi.mocked(api.getDestStatus).mockResolvedValue(status())
   vi.mocked(api.getDestSourceRules).mockResolvedValue({ items: [], geoip_available: true })
-  vi.mocked(api.getDestSettings).mockResolvedValue({ settings: { dest_policy_apply_min_seconds: 0, dest_list_refresh_hours: 0, dest_rules_update_mode: '' }, defaults: {}, effective: { dest_policy_apply_min_seconds: 60, dest_list_refresh_hours: 24, dest_rules_update_mode: 'manual' } })
+  vi.mocked(api.getDestSettings).mockResolvedValue({ settings: { dest_policy_apply_min_seconds: 0, dest_list_refresh_hours: 0, dest_rules_update_mode: '', dest_hit_retention_days: 0, dest_trial_retention_days: 0 }, defaults: {}, effective: { dest_policy_apply_min_seconds: 60, dest_list_refresh_hours: 24, dest_rules_update_mode: 'manual', dest_hit_retention_days: 30, dest_trial_retention_days: 7 } })
   vi.mocked(api.updateDestPolicy).mockResolvedValue(pol({}))
   vi.mocked(api.reorderDestPolicies).mockResolvedValue()
   vi.mocked(api.previewDestPolicy).mockResolvedValue({ budget })
@@ -57,7 +57,7 @@ describe('the rail', () => {
     renderAccess(<PoliciesTab {...props} />)
     expect(await screen.findByText('禁止发信')).toBeTruthy()
     const heads = screen.getAllByRole('heading', { level: 2 }).map(h => h.textContent)
-    expect(heads).toEqual(['放行 · 命中即放行', '豁免账号 · 3 个 · 不受任何访问限制', '拦截', '其余连接：直接放行'])
+    expect(heads).toEqual(['放行 · 命中即放行', '豁免账号 · 3 个 · 不受任何访问限制', '拦截', '仅报告 · 不拦截，只记录本应拦截的连接；不改变任何连接的结果', '其余连接：直接放行'])
     expect(screen.getByText(/额度/).textContent).toContain('正则 230 / 256')
     const rows = screen.getAllByTestId('policy-row')
     expect(rows).toHaveLength(4)
@@ -65,7 +65,7 @@ describe('the rail', () => {
     expect(within(rows[1]).getByText('端口 25,465,587 且 TCP · 所有人')).toBeTruthy()
     expect(within(rows[2]).getByText('已停用')).toBeTruthy()
     expect(within(rows[3]).getByText(/学生/)).toBeTruthy()
-    // No observe or allowlist step, and no hit column: nothing is a placeholder.
+    // No allowlist step and no "watch only" action: those are not part of this build.
     expect(screen.queryByText(/仅观察|白名单/)).toBeNull()
   })
 
@@ -81,6 +81,8 @@ describe('writes', () => {
     renderAccess(<PoliciesTab {...props} />)
     await screen.findByText('禁止 BT')
     fireEvent.click(screen.getByRole('switch', { name: '启用「禁止 BT」' }))
+    // Its earlier state is not known here, so the admin says which it is turned on as.
+    fireEvent.click(await screen.findByRole('button', { name: '开启拦截' }))
     await waitFor(() => expect(api.updateDestPolicy).toHaveBeenCalled())
     const [id, body] = vi.mocked(api.updateDestPolicy).mock.calls[0]
     expect(id).toBe(2)
@@ -92,6 +94,7 @@ describe('writes', () => {
     vi.mocked(api.getDestPolicies).mockResolvedValue(policies({ allow: [], block: [pol({ id: 2, state: 'off' })] }))
     renderAccess(<PoliciesTab {...props} />)
     fireEvent.click(await screen.findByRole('switch', { name: '启用「禁止发信」' }))
+    fireEvent.click(await screen.findByRole('button', { name: '开启拦截' }))
     await waitFor(() => expect(confirmMock).toHaveBeenCalledWith(expect.objectContaining({ title: '启用第一条访问策略？', message: expect.stringContaining('1 台节点会在约 2 分钟内') })))
     await waitFor(() => expect(api.updateDestPolicy).toHaveBeenCalled())
   })

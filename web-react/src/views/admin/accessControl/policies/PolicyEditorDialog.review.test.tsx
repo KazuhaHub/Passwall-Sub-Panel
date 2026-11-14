@@ -19,7 +19,7 @@ const budget = { rules: { used: 1, limit: 256 }, domains: { used: 0, limit: 5000
 const list = (id: number, name: string, side: 'dest' | 'source'): DestList => ({ id, name, kind: 'custom', side, entry_count: 3, regexp_count: 0, state: 'ready', empty: false, last_fetched_at: 1, last_error: '', owner_group_id: 0, updated_at: 1, used_by: [] })
 const pol = (over: Partial<DestPolicy> = {}): DestPolicy => ({
   id: 1, name: '禁止发信', description: '', action: 'block', state: 'on', list_ids: [], inline: { ports: '25', network: 'tcp', protocols: ['bittorrent'] }, scope: 'all', group_ids: [], panel_ids: [],
-  priority: 1, template_key: '', created_at: 0, updated_at: 111, list_states: [], note: null, scope_missing: false, hits_recent: null, last_hit_at: null, ...over,
+  priority: 1, template_key: '', created_at: 0, updated_at: 111, list_states: [], note: null, scope_missing: false, hits_recent: null, would_block_recent: null, last_hit_at: null, ...over,
 })
 
 beforeEach(() => {

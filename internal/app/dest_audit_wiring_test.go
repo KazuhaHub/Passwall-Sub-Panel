@@ -94,17 +94,28 @@ func TestBuildStoresAReportedHitBatch(t *testing.T) {
 		t.Fatalf("the sync with an audit batch answered %d: %s", rec.Code, rec.Body.String())
 	}
 
+	// Wait for the worker Run started to store the batch. Shutting down at once
+	// would race Run itself: if Run has not yet registered the worker, Shutdown
+	// finds nothing to wait for and the write lands after the read below.
+	var (
+		rows  []domain.DestHitRow
+		total int64
+	)
+	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+		if rows, total, err = a.destRepos.Hits.List(ctx, domain.DestHitFilter{}); err != nil {
+			t.Fatal(err)
+		}
+		if total > 0 {
+			break
+		}
+	}
+
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := a.Shutdown(shutdownCtx); err != nil {
 		t.Fatal(err)
 	}
 	<-runErr
-
-	rows, total, err := a.destRepos.Hits.List(ctx, domain.DestHitFilter{})
-	if err != nil {
-		t.Fatal(err)
-	}
 	if total != 1 || rows[0].Dest != "wired.example" || rows[0].Source != "p7" || rows[0].Action != "observe" ||
 		rows[0].UserID != user.ID || rows[0].PanelID != panel.ID || rows[0].Count != 4 {
 		t.Fatalf("stored = %+v (%d): is nativeSync.SetAudit called, and is dest-audit-ingest started by Run?", rows, total)

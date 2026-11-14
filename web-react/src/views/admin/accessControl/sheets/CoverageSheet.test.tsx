@@ -25,7 +25,7 @@ const status = (nodes: api.DestNodeStatus[]) => ({
 
 beforeEach(() => {
   vi.clearAllMocks()
-  vi.mocked(api.getDestSettings).mockResolvedValue({ settings: {}, defaults: {}, effective: { dest_policy_apply_min_seconds: 45, dest_list_refresh_hours: 24, dest_rules_update_mode: 'manual' } } as unknown as api.DestSettingsView)
+  vi.mocked(api.getDestSettings).mockResolvedValue({ settings: {}, defaults: {}, effective: { dest_policy_apply_min_seconds: 45, dest_list_refresh_hours: 24, dest_rules_update_mode: 'manual', dest_hit_retention_days: 30 } } as unknown as api.DestSettingsView)
   vi.mocked(api.getDestStatus).mockResolvedValue(status([
     node({}), node({ panel_id: 2, agent_id: 'a2', panel_name: 'Frankfurt', state: 'rejected' }),
     node({ panel_id: 3, agent_id: 'a3', panel_name: 'US A', kind: 'x-ui', state: 'unsupported_kind', rules_data_version: null }),
@@ -85,5 +85,58 @@ describe('CoverageSheet', () => {
     const row = (await screen.findAllByTestId('node-policy-row')).find(r => within(r).queryByText('Osaka'))!
     fireEvent.click(within(row).getByRole('button', { name: '升级' }))
     await waitFor(() => expect(whereIs(router)).toBe('/admin/servers?q=Osaka'))
+  })
+})
+
+describe('recording (2c)', () => {
+  const rec = (over: Partial<api.DestNodeStatus> = {}) => node({
+    supports: { policy: true, hits: true, usage: false }, collect: 'hits', collect_effective: 'hits', collecting: true, hits_24h: 1204, last_report_at: Date.now() - 30_000, ...over,
+  })
+  const sheet = () => renderAccess(<CoverageSheet open onClose={() => {}} filter={null} onFilterChange={() => {}} onOpenSettings={() => {}} />)
+
+  it('says what is recorded, over the retention that is set, and that the raw log stays on the node', async () => {
+    vi.mocked(api.getDestStatus).mockResolvedValue(status([rec(), rec({ panel_id: 2, agent_id: 'a2', panel_name: 'Osaka', collecting: true }), node({ panel_id: 3, agent_id: 'a3', panel_name: 'Seoul' })]))
+    sheet()
+    const box = await screen.findByTestId('recording-note')
+    expect(box.textContent).toBe('2 台只记录规则命中（保留 30 天）· 原始访问日志不离开节点')
+  })
+
+  it('no node recording is said, not drawn as 0', async () => {
+    sheet()
+    expect((await screen.findByTestId('recording-note')).textContent).toBe('没有节点在记录命中 · 原始访问日志不离开节点')
+  })
+
+  it('every native row has "set the recording" in its menu; a 3X-UI row does not', async () => {
+    vi.mocked(api.getDestStatus).mockResolvedValue(status([rec(), node({ panel_id: 3, agent_id: 'a3', panel_name: 'US A', kind: 'x-ui', state: 'unsupported_kind' })]))
+    sheet()
+    fireEvent.click(await screen.findByRole('button', { name: 'Tokyo 01 的更多操作' }))
+    expect(await screen.findByRole('menuitem', { name: '设置记录方式…' })).toBeTruthy()
+    fireEvent.keyDown(screen.getByRole('menu'), { key: 'Escape' })
+    await waitFor(() => expect(screen.queryByRole('menu')).toBeNull())
+    fireEvent.click(screen.getByRole('button', { name: 'US A 的更多操作' }))
+    expect(screen.queryByRole('menuitem', { name: '设置记录方式…' })).toBeNull()
+  })
+
+  it('opens the recording dialog on that node and saves its mode', async () => {
+    vi.mocked(api.getDestStatus).mockResolvedValue(status([rec()]))
+    vi.mocked(api.setAuditCollect).mockResolvedValue()
+    sheet()
+    fireEvent.click(await screen.findByRole('button', { name: 'Tokyo 01 的更多操作' }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: '设置记录方式…' }))
+    const dialog = (await screen.findAllByRole('dialog')).find(d => d.textContent?.includes('记录什么'))!
+    fireEvent.click(within(dialog).getByRole('radio', { name: /不记录/ }))
+    fireEvent.click(within(dialog).getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(api.setAuditCollect).toHaveBeenCalledWith(1, 'off'))
+  })
+
+  it('the dialog opens above the drawer: it is a modal, the drawer is not raised', async () => {
+    vi.mocked(api.getDestStatus).mockResolvedValue(status([rec()]))
+    sheet()
+    fireEvent.click(await screen.findByRole('button', { name: 'Tokyo 01 的更多操作' }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: '设置记录方式…' }))
+    const dialog = (await screen.findAllByRole('dialog')).find(d => d.textContent?.includes('记录什么'))!
+    const z = (el: Element | null) => { while (el) { const v = Number(getComputedStyle(el).zIndex); if (v) return v; el = el.parentElement } return 0 }
+    const drawer = document.querySelector('.MuiDrawer-root')
+    expect(z(dialog.closest('.MuiDialog-root'))).toBeGreaterThan(z(drawer))
   })
 })
