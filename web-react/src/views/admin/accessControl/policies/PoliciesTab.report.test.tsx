@@ -224,6 +224,17 @@ describe('report-only rules some nodes do not run', () => {
     expect(screen.getByTestId('rail-report-not-deployed').textContent).toBe('（2 个节点未部署）')
   })
 
+  it('a policy scoped to panels counts only its own panels\' nodes; the rail still counts the fleet', async () => {
+    vi.mocked(api.getDestStatus).mockResolvedValue(withShed(2)) // panels 1 and 2 shed
+    vi.mocked(api.getDestPolicies).mockResolvedValue(policies({
+      block: [pol({ id: 4, name: '成人内容', state: 'report', priority: 4, hits_recent: 0, would_block_recent: 0, last_hit_at: null, inline: { ports: '80' }, scope: 'panels', panel_ids: [2, 7] })],
+    }))
+    renderAccess(<PoliciesTab {...props} />)
+    await screen.findByText('成人内容')
+    expect(within(rowOf('成人内容')).getByTestId('policy-hits').textContent).toBe('过去 7 天没有本应拦截的连接（1 个节点未部署）')
+    expect(screen.getByTestId('rail-report-not-deployed').textContent).toBe('（2 个节点未部署）')
+  })
+
   it('says nothing extra when every node runs them', async () => {
     renderAccess(<PoliciesTab {...props} />)
     await screen.findByText('成人内容')

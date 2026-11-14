@@ -579,8 +579,9 @@ func TestDestExceptionsTestStatusAndControl(t *testing.T) {
 			native = m
 		}
 	}
-	if native == nil || native["state"] != "unsupported_version" {
-		t.Fatalf("native node status = %v (no agent has reported)", native)
+	// A native panel no agent has enrolled on says so; it is not an old node.
+	if native == nil || native["state"] != "not_enrolled" {
+		t.Fatalf("native node status = %v (no agent has enrolled)", native)
 	}
 	if v, present := native["report_only_not_deployed"]; !present || v != nil {
 		t.Fatalf("report_only_not_deployed = %v (present %v): the field is always there, null when nothing was left out", v, present)

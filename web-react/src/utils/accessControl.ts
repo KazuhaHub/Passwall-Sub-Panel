@@ -125,8 +125,9 @@ export function nodeStateKey(node: Pick<DestNodeStatus, 'state' | 'engine' | 'pe
     case 'rejected': return 'rejected'
     case 'sniffing': return 'sniffing'
     case 'over_limit': return 'over_limit'
-    // The server gives a native panel that has no agent the same state as an old one;
-    // what tells them apart is the agent id it could not fill in.
+    case 'not_enrolled': return 'not_enrolled'
+    // A server before not_enrolled gave a native panel with no agent the same state
+    // as an old node; the agent id it could not fill in tells them apart.
     case 'unsupported_version': return node.kind === 'psp' && node.agent_id === '' ? 'not_enrolled' : 'unsupported_version'
     case 'unsupported_kind': return 'unsupported_kind'
     case 'offline': return 'offline'
@@ -207,7 +208,7 @@ export function enabledPolicies(policies: Pick<DestPolicies, 'allow' | 'block' |
 
 /** A native node that is online and runs a build that can enforce. */
 function canEnforce(n: DestNodeStatus): boolean {
-  return isNativeKind(n.kind) && n.state !== 'unsupported_kind' && n.state !== 'unsupported_version' && n.state !== 'offline'
+  return isNativeKind(n.kind) && n.state !== 'unsupported_kind' && n.state !== 'unsupported_version' && n.state !== 'not_enrolled' && n.state !== 'offline'
 }
 
 /**
@@ -455,8 +456,17 @@ export function policyHitsView(p: DestPolicy, days: number, notDeployed = 0): Po
 }
 
 /** Nodes the server sent the policy WITHOUT its report-only rules (sniffing, or a limit). */
-export function reportNotDeployedCount(status: { nodes: Pick<DestNodeStatus, 'report_only_not_deployed'>[] } | undefined): number {
-  return status ? status.nodes.filter(n => !!n.report_only_not_deployed).length : 0
+export function reportNotDeployedCount(
+  status: { nodes: Pick<DestNodeStatus, 'panel_id' | 'report_only_not_deployed'>[] } | undefined,
+  policy?: Pick<DestPolicy, 'scope' | 'panel_ids' | 'group_ids'>,
+): number {
+  if (!status) return 0
+  // A panel-scoped policy is sent only to its panels' nodes. Which nodes a
+  // group's members reach is not in the status, so a group scope (and the
+  // fleet-wide rail) counts every node that reports a shed: an upper bound
+  // for those nodes.
+  const inScope = policy?.scope === 'panels' ? (n: { panel_id: number }) => policy.panel_ids.includes(n.panel_id) : () => true
+  return status.nodes.filter(n => !!n.report_only_not_deployed && inScope(n)).length
 }
 
 /** Native nodes that record hits now (the derived flag: a node that was only told to is not counted). */

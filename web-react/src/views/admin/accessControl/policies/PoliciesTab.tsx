@@ -256,7 +256,7 @@ export default function PoliciesTab({ onOpenExemptions, onOpenSettings, onGoToLi
         <Box sx={{ display: 'grid', gap: 1 }}>
           {rows.map((p, i) => (
             <PolicyRow key={p.id} policy={p} index={i} count={rows.length} listNames={listNames} scopeText={scopeText(p)}
-              now={now} notDeployed={shed} busy={busyId === p.id} moving={reorder.isPending} highlighted={highlight === p.id} hitDays={data.hit_window_days}
+              now={now} notDeployed={reportNotDeployedCount(status.data, p)} busy={busyId === p.id} moving={reorder.isPending} highlighted={highlight === p.id} hitDays={data.hit_window_days}
               onOpen={() => setEditing({ policy: p })} onToggle={() => void toggle(p)} onMove={m => void move(p, k, m)}
               onDuplicate={() => duplicate(p)} onDelete={() => void remove(p)} onReport={() => void toReport(p)}
               onConvert={() => setConverting(p)} onViewRecords={() => viewRecords(p)} />

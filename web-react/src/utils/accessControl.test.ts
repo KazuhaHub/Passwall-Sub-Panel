@@ -101,6 +101,13 @@ describe('accessVerdict: the worst finding wins', () => {
     expect(v).toMatchObject({ kind: 'applied', tone: 'ok' })
   })
 
+  it('the server\'s own not_enrolled state: quiet, counted, and never an executor that has not applied', () => {
+    const v = accessVerdict(status([node(), node({ panel_id: 2, state: 'not_enrolled', agent_id: '', agent_version: '' })]), { policies: on, now: NOW })
+    expect(v.skipped.notEnrolled).toBe(1)
+    expect(v.skipped.upgrade).toBe(0)
+    expect(v).toMatchObject({ kind: 'applied', tone: 'ok', executors: 1, total: 1 })
+  })
+
   it('source rules alone count as something to enforce', () => {
     const v = accessVerdict(status([node()]), { policies: pols(), hasDefinitions: true, now: NOW })
     expect(v.kind).toBe('applied')
@@ -118,6 +125,7 @@ describe('node states: one table', () => {
     { node: { state: 'over_limit' }, key: 'over_limit' },
     { node: { state: 'unsupported_version' }, key: 'unsupported_version' },
     { node: { state: 'unsupported_version', agent_id: '' }, key: 'not_enrolled' },
+    { node: { state: 'not_enrolled' }, key: 'not_enrolled' },
     { node: { state: 'unsupported_version', agent_id: 'a1' }, key: 'unsupported_version' },
     { node: { state: 'unsupported_kind' }, key: 'unsupported_kind' },
     { node: { state: 'offline' }, key: 'offline' },
@@ -261,6 +269,15 @@ describe('report-only rules some nodes do not run', () => {
     const n = (v: 'sniffing' | 'limit' | null | undefined) => ({ report_only_not_deployed: v }) as never
     expect(reportNotDeployedCount(undefined)).toBe(0)
     expect(reportNotDeployedCount({ nodes: [n(null), n('sniffing'), n('limit'), n(undefined)] })).toBe(2)
+  })
+  it('for a policy, counts only the nodes it is sent to: all, its panels, or every node for a group scope', () => {
+    const n = (panel_id: number, v: 'sniffing' | 'limit' | null): Pick<DestNodeStatus, 'panel_id' | 'report_only_not_deployed'> => ({ panel_id, report_only_not_deployed: v })
+    const st = { nodes: [n(1, 'sniffing'), n(2, 'limit'), n(3, null)] }
+    expect(reportNotDeployedCount(st, { scope: 'all', panel_ids: [], group_ids: [] })).toBe(2)
+    expect(reportNotDeployedCount(st, { scope: 'panels', panel_ids: [2, 3], group_ids: [] })).toBe(1)
+    expect(reportNotDeployedCount(st, { scope: 'panels', panel_ids: [3], group_ids: [] })).toBe(0)
+    // Which nodes a group's members reach is not in the status: the fleet count is the upper bound.
+    expect(reportNotDeployedCount(st, { scope: 'groups', panel_ids: [], group_ids: [4] })).toBe(2)
   })
   it('a report-only "nothing would be blocked" or count carries how many nodes are not running it', () => {
     expect(policyHitsView(policy({ state: 'report', would_block_recent: 0, last_hit_at: null }), 7, 2)).toEqual({ kind: 'would_block_none', days: 7, notDeployed: 2 })

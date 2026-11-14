@@ -176,7 +176,7 @@ PostgreSQL 的多行 `ON CONFLICT DO UPDATE` 遇到同一语句内的重复键�
 | POST / PUT | `/publish`、`/pause` | 立即发布（被校验拒绝 409 `dest_policy_over_limit` 带 `publish_error`）；紧急开关 `{paused}` |
 | POST | `/agents/:agent_id/retry` | 清除 `rejected`，下一轮重试新版 |
 
-节点 `state`：`none`、`paused`、`unsupported_kind`、`unsupported_version`、`pending`、`applied`、`rejected`、`over_limit`、`sniffing`、`offline`
+节点 `state`：`none`、`paused`、`unsupported_kind`、`not_enrolled`（原生面板上还没有节点注册）、`unsupported_version`、`pending`、`applied`、`rejected`、`over_limit`、`sniffing`、`offline`
 （agent 超过 3 个同步周期未上报）。`rules_data_version` 由节点上报的摘要反查得到（PSP 记录每份已下发策略对应的 geosite 发布号）；
 进程重启后、或摘要对应的是重启前的旧策略时为 null。
 
@@ -211,6 +211,7 @@ PostgreSQL 的多行 `ON CONFLICT DO UPDATE` 遇到同一语句内的重复键�
 | 节点回滚到旧版 | 能力消失 → PSP 不再下发 → 该节点重启一次、失去策略 | 无（自动） |
 | 新节点 + 旧 PSP | 多出来的 `policy_status` 被旧 PSP 静默忽略 | 无 |
 | 新 PSP + 旧节点 | 节点没有能力，状态显示 `unsupported_version` | 升级节点 |
+| 原生面板还没有节点注册 | 状态显示 `not_enrolled`，不计入执行节点，也不算需升级 | 在服务器页安装并注册节点 |
 | 生产节点升级到带 `audit.hits.v1` 的 agent，且已有第一批拦截策略、`audit_collect` 为默认 `hits` | 策略里多了记录级别，摘要变化，**core 再重启一次** | 想避免：升级前把该服务器的 `audit_collect` 设为 `off`（`PUT /servers/:id`） |
 
 **每次策略变更，节点 core 重启一次**（Xray、sing-box 都没有热重载），现有连接会断开；去抖与摘要比对把次数压到最低。
