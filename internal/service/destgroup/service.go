@@ -280,3 +280,16 @@ type ExceptionResult struct {
 	GroupID int64  `json:"group_id"`
 	ListID  int64  `json:"list_id"`
 }
+
+// Wiring says which optional collaborators the service was built with. It exists
+// for the application's wiring test: a collaborator left out degrades without a
+// word.
+type Wiring struct{ Budget, Resync, Changed, Hits, BaseHosts, Editor, Settings bool }
+
+// Wired reports what the service has.
+func (s *Service) Wired() Wiring {
+	return Wiring{
+		Budget: s.Budget != nil, Resync: s.Resync != nil, Changed: s.Changed != nil, Hits: s.Hits != nil,
+		BaseHosts: s.BaseHosts != nil, Editor: s.Editor != nil, Settings: s.Settings != nil,
+	}
+}

@@ -475,10 +475,11 @@ type destExceptionRequest struct {
 	GroupID int64  `json:"group_id"`
 }
 
-// AddException answers POST /api/admin/dest/exceptions: allow a site or a host
-// everywhere. Only the global scope exists in this build; the first call creates
-// the exceptions list and the allow policy over it (created is set), later
-// calls append.
+// AddException answers POST /api/admin/dest/exceptions: allow a site or a host.
+// Scope global (the default) allows it everywhere: the first call creates the
+// exceptions list and the allow policy over it (created is set), later calls
+// append. Scope group (with group_id) adds it to that group's own extra list, as
+// the list's entries route does.
 func (h *AdminDestHandler) AddException(c *gin.Context) {
 	if !h.ready(c, h.w.Admin != nil) {
 		return
@@ -487,8 +488,13 @@ func (h *AdminDestHandler) AddException(c *gin.Context) {
 	if !bindDestJSON(c, &req) {
 		return
 	}
-	if req.Scope != "" && req.Scope != "global" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "only the global scope is available", "code": destpolicy.CodeExceptionInvalid, "field": "scope"})
+	switch req.Scope {
+	case "", "global":
+	case "group":
+		h.addGroupException(c, req)
+		return
+	default:
+		c.JSON(http.StatusBadRequest, gin.H{"error": "scope is global or group", "code": destpolicy.CodeExceptionInvalid, "field": "scope", "bad": []string{req.Scope}})
 		return
 	}
 	res, err := h.w.Admin.AddException(c.Request.Context(), req.Target, req.Match)
@@ -504,6 +510,23 @@ func (h *AdminDestHandler) AddException(c *gin.Context) {
 		out["list_id"], out["policy_id"] = res.ListID, res.PolicyID
 	}
 	c.JSON(http.StatusOK, out)
+}
+
+// addGroupException is the group scope of POST /exceptions.
+func (h *AdminDestHandler) addGroupException(c *gin.Context, req destExceptionRequest) {
+	if !h.groupsReady(c) {
+		return
+	}
+	if req.GroupID <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "scope group needs a group_id", "code": destpolicy.CodePolicyInvalid, "field": "group_id"})
+		return
+	}
+	res, err := h.w.AllowlistGroups.AddException(c.Request.Context(), req.GroupID, req.Target, req.Match)
+	if err != nil {
+		h.groupError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"entry": res.Entry, "created": nil, "group_id": res.GroupID, "list_id": res.ListID})
 }
 
 // ---- test ----
@@ -585,7 +608,11 @@ func (h *AdminDestHandler) User(c *gin.Context) {
 	}
 	if h.w.Groups != nil {
 		if g, err := h.w.Groups.GetByID(ctx, u.GroupID); err == nil {
-			out["group"] = gin.H{"id": g.ID, "name": g.Name, "mode": "open", "stage": nil}
+			state := g.DestAllowlist.State
+			if state == "" {
+				state = domain.DestStateOff
+			}
+			out["group"] = gin.H{"id": g.ID, "name": g.Name, "state": state, "state_changed_at": msPtr(g.DestAllowlist.StateChangedAt)}
 		}
 	}
 	if e, err := h.w.Exemptions.Get(ctx, id); err == nil {

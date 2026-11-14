@@ -41,6 +41,14 @@ func describeRules(cb *cachedBase) map[string]TestStep {
 			out["s"+strconv.FormatInt(n, 10)] = TestStep{Kind: "source", ReportOnly: g.report, NodeID: n}
 		}
 	}
+	// An allowlist group's three rules (the group's name is read when a trace is
+	// made: the snapshot does not carry it).
+	for _, g := range cb.base.groups {
+		id := "g" + strconv.FormatInt(g.id, 10)
+		for _, rule := range []string{id, id + "x1", id + "x2"} {
+			out[rule] = TestStep{Kind: "group", ReportOnly: g.report, GroupID: g.id}
+		}
+	}
 	return out
 }
 

@@ -530,15 +530,18 @@ type TestStep struct {
 	// Step is the 1-based position.
 	Step   int    `json:"step"`
 	RuleID string `json:"rule_id,omitempty"`
-	// Kind is "source", "allow", "block", "exempt" or "builtin".
+	// Kind is "source", "allow", "block", "group" (one of an allowlist group's
+	// rules), "exempt" or "builtin".
 	Kind string `json:"kind"`
 	// ReportOnly is true on a step whose rule is report-only (a policy or a
 	// source rule in the report state): the step records, and a hit on it does
 	// not block. Kind stays what the rule is (block, allow, source).
-	ReportOnly bool   `json:"report_only"`
-	PolicyID   int64  `json:"policy_id,omitempty"`
-	NodeID     int64  `json:"node_id,omitempty"`
-	Name       string `json:"name,omitempty"`
+	ReportOnly bool  `json:"report_only"`
+	PolicyID   int64 `json:"policy_id,omitempty"`
+	NodeID     int64 `json:"node_id,omitempty"`
+	// GroupID is the allowlist group a "group" step belongs to.
+	GroupID int64  `json:"group_id,omitempty"`
+	Name    string `json:"name,omitempty"`
 	// Result is "hit", "miss", "untestable", "shadowed" or "skipped".
 	Result  string `json:"result"`
 	Entry   string `json:"entry,omitempty"`
@@ -699,6 +702,9 @@ func (a *Admin) Test(ctx context.Context, in TestInput) (*TestResult, error) {
 		default:
 			info := stepInfo(names, s.RuleID)
 			step.Kind, step.ReportOnly, step.PolicyID, step.NodeID, step.Name = info.Kind, info.ReportOnly, info.PolicyID, info.NodeID, info.Name
+			if info.Kind == "group" {
+				step.GroupID, step.Name = info.GroupID, a.groupName(ctx, info.GroupID)
+			}
 		}
 		res.Steps = append(res.Steps, step)
 	}
@@ -724,4 +730,16 @@ func (a *Admin) CheckGroupBudget(ctx context.Context, h GroupHypo) error {
 		return err
 	}
 	return b.over()
+}
+
+// groupName is an allowlist group's name for a trace ("" when it cannot be read:
+// a trace is not refused for a name).
+func (a *Admin) groupName(ctx context.Context, gid int64) string {
+	if a.Groups == nil {
+		return ""
+	}
+	if g, err := a.Groups.GetByID(ctx, gid); err == nil && g != nil {
+		return g.Name
+	}
+	return ""
 }

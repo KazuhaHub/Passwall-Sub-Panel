@@ -219,3 +219,52 @@ func (f fakeCounter) CountUsersByGroup(context.Context) (map[int64]int, error) {
 	}
 	return out, nil
 }
+
+// ---- the test tool ----
+
+// A step that a group's rule decided is named after the group, so the trace
+// reads "denied by Guests" and not "g5".
+func TestTest_AGroupStepIsNamedAfterTheGroup(t *testing.T) {
+	ah := newAdminHarness(t)
+	ah.admin.Groups = fakeGroupNames{5: "Guests"}
+	ah.setGroups(map[int64]int64{10: 5})
+	doms := ah.list("doms", "DOMAIN-SUFFIX,a.example.com")
+	ah.allowGroup(5, domain.DestStateOn, []*domain.DestList{doms}, "DOMAIN-SUFFIX,doh.example", "")
+	ah.publishNow()
+
+	res, err := ah.admin.Test(ah.ctx, TestInput{Target: "elsewhere.example", UserID: 10, PanelID: 9})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Verdict != "block" || res.TerminatingStep != "g5" {
+		t.Fatalf("verdict %q by %q, want block by g5: %+v", res.Verdict, res.TerminatingStep, res.Steps)
+	}
+	var got []TestStep
+	for _, s := range res.Steps {
+		if s.Kind == "group" {
+			got = append(got, s)
+		}
+	}
+	if len(got) != 3 {
+		t.Fatalf("steps = %+v, want the three group steps", res.Steps)
+	}
+	for _, s := range got {
+		if s.GroupID != 5 || s.Name != "Guests" || s.ReportOnly {
+			t.Fatalf("step = %+v, want group 5 named Guests, not report-only", s)
+		}
+	}
+	// A report group's steps say so.
+	m := ah.modeOf(5)
+	m.State = domain.DestStateReport
+	ah.setMode(m)
+	ah.publishNow()
+	res, _ = ah.admin.Test(ah.ctx, TestInput{Target: "elsewhere.example", UserID: 10, PanelID: 9})
+	if res.Verdict != "observe" || res.TerminatingStep != "g5" {
+		t.Fatalf("report: verdict %q by %q", res.Verdict, res.TerminatingStep)
+	}
+	for _, s := range res.Steps {
+		if s.Kind == "group" && !s.ReportOnly {
+			t.Fatalf("a report group's step is not marked report-only: %+v", s)
+		}
+	}
+}
