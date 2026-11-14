@@ -51,7 +51,7 @@ export default function ServerAccessDialog({ node, serverName, onClose }: {
               onOpenInbound={id => { onClose(); void navigate(`/admin/nodes?inbound=${id}`) }}
               onRetry={async id => { try { reportRetry(t, await retry.mutateAsync(id)) } catch (err) { reportDestError(t, err) } }}
               onUpgrade={onClose} onOpenLists={() => { onClose(); void navigate('/admin/access-control?tab=lists') }} />
-            {node && rec && (
+            {rec && (
               <KpiGrid>
                 <Box data-testid="server-recording">
                   <KpiTile label={t(`${R}recording`)}
@@ -71,7 +71,7 @@ export default function ServerAccessDialog({ node, serverName, onClose }: {
                 )}
               </KpiGrid>
             )}
-            {node && rec && rec.mode === 'hits' && rec.hits24h === null && (
+            {rec && rec.mode === 'hits' && rec.hits24h === null && (
               <Typography variant="caption" sx={{ color: theme.palette.md.onSurfaceVariant }}>{t(`${R}hits_none_note`)}</Typography>
             )}
           </Box>
