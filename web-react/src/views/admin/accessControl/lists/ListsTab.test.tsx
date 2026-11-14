@@ -38,7 +38,8 @@ const items = [
 const onOpenEntries = vi.fn()
 const onOpenSettings = vi.fn()
 const onOpenPolicy = vi.fn()
-const ui = <ListsTab onOpenEntries={onOpenEntries} onOpenSettings={onOpenSettings} onOpenPolicy={onOpenPolicy} />
+const onOpenAllowlist = vi.fn()
+const ui = <ListsTab onOpenEntries={onOpenEntries} onOpenSettings={onOpenSettings} onOpenPolicy={onOpenPolicy} onOpenAllowlist={onOpenAllowlist} />
 const route = '/admin/access-control?tab=lists'
 
 beforeEach(() => {
@@ -47,6 +48,27 @@ beforeEach(() => {
   vi.mocked(api.getDestLists).mockResolvedValue(view(items))
   vi.mocked(api.getDestPolicies).mockResolvedValue(policies)
   vi.mocked(api.getGeositeStatus).mockResolvedValue({ current: { tag: 't', sha256: '', downloaded_at: '', bytes: 1 }, latest: { tag: 't' }, update_available: false, mode: 'manual' })
+})
+
+describe('a list an allowlist group uses', () => {
+  const used = [{ kind: 'policy' as const, id: 5, name: 'No mail' }, { kind: 'group' as const, id: 4, name: 'Guests' }]
+
+  it('counts the policies and the groups apart, and the group is a link to the allowlist tab', async () => {
+    vi.mocked(api.getDestLists).mockResolvedValue(view([list({ id: 1, name: 'Internal', used_by: used })]))
+    renderAccess(ui, { route })
+    expect(await screen.findByText('1 条策略 · 1 个白名单分组')).toBeTruthy()
+    fireEvent.click(screen.getByText('1 条策略 · 1 个白名单分组'))
+    fireEvent.click(await screen.findByRole('button', { name: 'Guests' }))
+    expect(onOpenAllowlist).toHaveBeenCalledWith(4)
+  })
+
+  it('only a policy decides whether the list is in use by something enabled: a group whose id equals an enabled policy\'s does not', async () => {
+    vi.mocked(api.getDestLists).mockResolvedValue(view([list({ id: 3, name: 'News', kind: 'remote', state: 'pending', last_fetched_at: null, entry_count: 0, used_by: [{ kind: 'group', id: 5, name: 'Guests' }] })]))
+    renderAccess(ui, { route })
+    await screen.findByText('News')
+    // Policy 5 is enabled in the fixture; the group 5 is not that policy.
+    expect(screen.getByTestId('list-state').getAttribute('data-state')).toBe('pending')
+  })
 })
 
 describe('the lists tab', () => {

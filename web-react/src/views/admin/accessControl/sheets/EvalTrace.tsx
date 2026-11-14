@@ -30,14 +30,17 @@ export function VerdictLine({ result }: { result: DestTestResult }) {
   const kind = verdictTone(result)
   const hit = terminatingStep(result)
   const name = hit?.policy_id ? (hit.name || t(`${T}deleted_policy`)) : (hit?.name ?? '')
+  const groupName = hit?.name ?? ''
   const entry = hit?.entry ?? ''
   let sentence: string
   if (result.terminating_step === 'exempt') sentence = t(`${T}verdict.exempt`)
   else if (hit?.kind === 'builtin') sentence = t(`${T}verdict.builtin`)
   // A report-only hit is decided by the flag, whatever the rule's kind: it recorded the connection and blocked nothing.
+  else if (hit?.kind === 'group' && (hit.report_only || result.verdict === 'observe')) sentence = t(`${T}verdict.observe_group`, { group: groupName })
   else if (hit?.report_only || result.verdict === 'observe') {
     sentence = t(`${T}verdict.${hit?.kind === 'source' ? 'observe_source' : 'observe'}`, { entry: hit?.entry ?? result.steps.find(s => s.result === 'hit' && s.entry)?.entry ?? '' })
   }
+  else if (hit?.kind === 'group') sentence = t(`${T}verdict.group`, { group: groupName })
   else if (hit?.kind === 'source') sentence = t(`${T}verdict.source`, { entry })
   else if (result.verdict === 'block') sentence = t(`${T}verdict.block`, { step: hit?.step ?? 0, name, entry })
   else if (result.verdict === 'allow') sentence = t(`${T}verdict.allow`, { step: hit?.step ?? 0, name })
@@ -61,6 +64,7 @@ export default function EvalTrace({ result, inboundName }: { result: DestTestRes
         const inbound = s.kind === 'source' && s.node_id ? inboundName?.(s.node_id) : undefined
         const named = s.kind === 'source'
           ? [t(`${T}kind.source`), inbound].filter(Boolean).join(' · ')
+          : s.kind === 'group' ? `${t(`${T}kind.group`)} · ${s.name || t(`${T}deleted_group`)}`
           : s.kind === 'builtin' ? t(`${T}kind.builtin`)
             : s.kind === 'exempt' ? t(`${T}kind.exempt`)
               : `${t(`${T}kind.${report ? 'report' : s.kind}`)}${s.policy_id ? ` · ${s.name || t(`${T}deleted_policy`)}` : ''}`

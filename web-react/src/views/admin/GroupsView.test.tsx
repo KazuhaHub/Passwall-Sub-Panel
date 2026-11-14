@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { ThemeProvider } from '@mui/material/styles'
-import { MemoryRouter } from 'react-router'
+import { MemoryRouter, useLocation } from 'react-router'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createAppTheme } from '@/theme'
@@ -23,11 +23,17 @@ vi.mock('react-i18next', () => ({
 
 const theme = createAppTheme({ mode: 'light', sourceColor: '#6750a4', language: 'en-US' })
 
-function mount() {
+function Where() {
+  const l = useLocation()
+  return <p data-testid="where">{l.pathname + l.search}</p>
+}
+
+function mount(route = '/') {
   render(
-    <MemoryRouter>
+    <MemoryRouter initialEntries={[route]}>
       <ThemeProvider theme={theme}>
         <GroupsView />
+        <Where />
       </ThemeProvider>
     </MemoryRouter>,
     { wrapper: queryWrapper(makeTestQueryClient()) },
@@ -80,5 +86,62 @@ describe('GroupsView', () => {
     expect(link.getAttribute('href')).toBe('/admin/risk?tab=policy&group=5')
     expect(link.getAttribute('target')).toBe('_blank')
     expect(link.getAttribute('rel')).toContain('noopener')
+  })
+
+  // THE DESTINATIONS TAB AND THE LIST BADGE (S17): the allowlist is edited on the
+  // access-control page; here it is a summary, a way there, and a badge on the row.
+  describe('the allowlist summary', () => {
+    const teamGroup = (over: Record<string, unknown> = {}) => ({
+      id: 5, slug: 'team', name: 'Team', tag_filter: { all: true, tags: [], mode: 'all' }, members: 3, remark: '', require_2fa: false, ...over,
+    })
+    const destGroup = { group_id: 5, group_name: 'Team', members: 3, state: 'on', state_changed_at: 1, updated_at: 1, list_ids: [], lists: [], base_list_id: 0, extra_list_id: 0, base_count: 0, eligible_nodes: 1, total_nodes: 1, ineligible: [], applied_nodes: 1, pending_nodes: [], not_ready_lists: [], would_deny_recent: null, denied_24h: 0 }
+    function serve(groups: unknown[]) {
+      api.get.mockImplementation(async (url: string) => {
+        if (url === '/admin/groups') return { data: { items: groups, total: groups.length, page: 1, page_size: 25 } }
+        if (url === '/admin/nodes') return { data: { items: [], total: 0, page: 1, page_size: 500 } }
+        if (url === '/admin/dest/groups') return { data: { items: [destGroup] } }
+        if (url.startsWith('/admin/groups/') && url.endsWith('/scope-settings')) return { data: { overrides: {}, overridable: SCOPE_KEYS.map(k => k.key) } }
+        if (url === '/admin/settings/ui') return { data: {} }
+        throw new Error(`Unexpected GET ${url}`)
+      })
+    }
+
+    it('shows an administrator the summary and the way to the access-control page in a destinations tab', async () => {
+      useAuthStore.setState({ role: 'admin', userId: 1, hasToken: true })
+      serve([teamGroup({ dest_state: 'on' })])
+      mount()
+      fireEvent.click(await screen.findByRole('button', { name: 'admin:groups.action.edit' }))
+      fireEvent.click(await screen.findByRole('tab', { name: '目的地' }))
+      expect(await screen.findByText('admin:groups.destination.on')).toBeTruthy()
+      expect(screen.getByRole('button', { name: 'admin:groups.destination.edit' })).toBeTruthy()
+    })
+
+    it('a group that is not saved yet only says to save it first', async () => {
+      useAuthStore.setState({ role: 'admin', userId: 1, hasToken: true })
+      serve([])
+      mount()
+      fireEvent.click(await screen.findByRole('button', { name: 'admin:groups.create' }))
+      fireEvent.click(await screen.findByRole('tab', { name: '目的地' }))
+      expect(await screen.findByText('admin:groups.destination.save_first')).toBeTruthy()
+    })
+
+    it('an operator sees the badge on the row, and no way to edit', async () => {
+      useAuthStore.setState({ role: 'operator', userId: 2, hasToken: true })
+      serve([teamGroup({ dest_state: 'report' }), teamGroup({ id: 6, slug: 'other', name: 'Other', dest_state: 'off' })])
+      mount()
+      expect(await screen.findByText('admin:groups.destination.badge_report')).toBeTruthy()
+      expect(screen.queryByText('admin:groups.destination.badge_on')).toBeNull()
+      expect(screen.getAllByTestId('allowlist-state')).toHaveLength(1)
+      expect(screen.queryByRole('button', { name: 'admin:groups.action.edit' })).toBeNull()
+    })
+
+    it('a deep link opens the group on the destinations tab, once, and drops the two params', async () => {
+      useAuthStore.setState({ role: 'admin', userId: 1, hasToken: true })
+      serve([teamGroup({ dest_state: 'on' })])
+      mount('/?edit=5&dtab=destination')
+      expect(await screen.findByText('admin:groups.destination.on', {}, { timeout: 3000 })).toBeTruthy()
+      expect(screen.getByRole('tab', { name: '目的地' }).getAttribute('aria-selected')).toBe('true')
+      await waitFor(() => expect(screen.getByTestId('where').textContent).toBe('/'))
+    })
   })
 })

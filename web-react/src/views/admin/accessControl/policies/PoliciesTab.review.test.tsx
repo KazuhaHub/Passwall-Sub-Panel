@@ -22,7 +22,7 @@ const pol = (over: Partial<DestPolicy>): DestPolicy => ({
   priority: 1, template_key: '', created_at: 0, updated_at: 111, list_states: [], note: null, scope_missing: false, hits_recent: null, would_block_recent: null, last_hit_at: null, ...over,
 })
 const status = { generation: 1, published_generation: 1, paused: false, publish_error: null, apply_eta_ms: 0, totals: {}, policy_notes: {}, nodes: [{ panel_id: 1, kind: 'psp', state: 'applied', supports: { policy: true }, engine: 'xray', sniffing_insufficient: [] }] } as unknown as api.DestStatus
-const props = { onOpenExemptions: vi.fn(), onOpenSettings: vi.fn(), onGoToLists: vi.fn() }
+const props = { onOpenExemptions: vi.fn(), onOpenSettings: vi.fn(), onGoToLists: vi.fn(), onOpenAllowlist: vi.fn() }
 
 function Jumper() {
   const nav = useNavigate()

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Alert, Box, Button, Dialog, DialogActions, DialogContent, DialogTitle, Skeleton, Typography, useTheme } from '@mui/material'
+import { Alert, Box, Button, ButtonBase, Dialog, DialogActions, DialogContent, DialogTitle, Skeleton, Typography, useTheme } from '@mui/material'
 import AddIcon from '@mui/icons-material/Add'
 import { useLocation, useNavigate } from 'react-router'
 import { useTranslation } from 'react-i18next'
@@ -20,6 +20,7 @@ import { recordsHref, relativeSince } from '../records/recordsParams'
 import { deletePolicyConfirm } from '../confirmCopy'
 import { destErrorText, reportDestError } from '../destErrors'
 import ConvertToBlockDialog from './ConvertToBlockDialog'
+import StateBadge from '../allowlist/StateBadge'
 import PolicyEditorDialog, { emptyForm, formOf, inputOf, type PolicyForm } from './PolicyEditorDialog'
 import PolicyRow, { type RowMove } from './PolicyRow'
 import { RailStep } from './PolicyRail'
@@ -35,6 +36,8 @@ export interface PoliciesTabProps {
   onOpenSettings: (focus?: 'apply' | 'refresh' | 'rules') => void
   /** Switches to the lists tab, optionally opening the new-list dialog of a kind (S4's "no generic category" card). */
   onGoToLists: (open?: 'new_custom' | 'new_remote' | 'new_geosite') => void
+  /** Opens the allowlist tab, on a group's card when one is named. */
+  onOpenAllowlist: (groupId?: number) => void
 }
 
 const P = 'admin:access_control.policies.'
@@ -49,7 +52,7 @@ const HIGHLIGHT_MS = 2000
  * which policy a hit is credited to within one action. A policy is always
  * written whole with the `updated_at` it was read at (R18).
  */
-export default function PoliciesTab({ onOpenExemptions, onOpenSettings, onGoToLists }: PoliciesTabProps) {
+export default function PoliciesTab({ onOpenExemptions, onOpenSettings, onGoToLists, onOpenAllowlist }: PoliciesTabProps) {
   const { t, i18n } = useTranslation(['admin'])
   const theme = useTheme()
   const md = theme.palette.md
@@ -135,7 +138,7 @@ export default function PoliciesTab({ onOpenExemptions, onOpenSettings, onGoToLi
   const split = splitBlockByState(data.block)
   /** The rows of a rail section: the report-only step is the block action's rows in that state. */
   const section = (k: 'allow' | 'block' | 'report'): DestPolicy[] => (k === 'allow' ? data.allow : k === 'block' ? split.enforced : split.report)
-  const steps = pipelineSteps({ report: true })
+  const steps = pipelineSteps({ report: true, allowlist: true })
   const minutes = applyMinutes(status.data)
   const shed = reportNotDeployedCount(status.data)
   const hasNoExecutor = status.data ? !status.data.nodes.some(n => n.kind === 'psp' && n.supports.policy && n.state !== 'offline' && n.state !== 'unsupported_version') : false
@@ -305,6 +308,25 @@ export default function PoliciesTab({ onOpenExemptions, onOpenSettings, onGoToLi
                   )
                 case 'block':
                   return <RailStep key={s.id} n={s.n} title={t(`${P}rail.block`)} actions={addButton('block')}>{renderSection('block')}</RailStep>
+                case 'allowlist':
+                  return (
+                    <RailStep key={s.id} n={s.n}
+                      title={data.allowlist_groups.length > 0 ? t(`${P}rail.allowlist_count`, { count: data.allowlist_groups.length }) : t(`${P}rail.allowlist_none`)}
+                      caption={t(`${P}rail.allowlist_caption`)}
+                      actions={<Button size="small" onClick={() => onOpenAllowlist()}>{t(`${P}rail.allowlist_open`)}</Button>}>
+                      {data.allowlist_groups.length > 0 && (
+                        <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+                          {data.allowlist_groups.map(g => (
+                            <ButtonBase key={g.group_id} onClick={() => onOpenAllowlist(g.group_id)} aria-label={g.name}
+                              sx={{ display: 'inline-flex', alignItems: 'center', gap: 1, px: 1.5, py: 0.5, minHeight: 36, borderRadius: 2, bgcolor: md.surfaceContainer }}>
+                              <Typography component="span" sx={{ fontSize: 14, overflowWrap: 'anywhere' }}>{g.name}</Typography>
+                              <StateBadge state={g.state} day={g.state_days + 1} />
+                            </ButtonBase>
+                          ))}
+                        </Box>
+                      )}
+                    </RailStep>
+                  )
                 case 'report':
                   return (
                     <RailStep key={s.id} n={s.n} title={t(`${P}rail.report`)} caption={(

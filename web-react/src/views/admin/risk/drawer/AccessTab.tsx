@@ -9,6 +9,8 @@ import type { DestExemption, DestUserHit } from '@/api/accessControl'
 import { AsyncButton } from '@/components/AsyncButton'
 import { confirm } from '@/components/ConfirmHost'
 import { pushSnack } from '@/components/SnackbarHost'
+import StateBadge from '@/views/admin/accessControl/allowlist/StateBadge'
+import { stateDay } from '@/views/admin/accessControl/allowlist/allowlistState'
 import ToneBadge from '@/components/ToneBadge'
 import { useDeleteDestExemption, useDestStatus, useDestUser } from '@/query/accessControl'
 import { useQueryScope } from '@/query/useQueryScope'
@@ -95,7 +97,8 @@ export default function AccessTab({ userId }: { userId: number }) {
           ? (
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
               <span>{group.name}</span>
-              {group.mode === 'open' && <ToneBadge tone={accessTone(theme, 'none')} label={t(`${D}open`)} testId="group-mode" data="open" />}
+              {(group.state === 'report' || group.state === 'on') && <StateBadge scope="group" state={group.state} day={stateDay(group.state_changed_at ?? null, Date.now())} />}
+              {!(group.state === 'report' || group.state === 'on') && group.mode === 'open' && <ToneBadge tone={accessTone(theme, 'none')} label={t(`${D}open`)} testId="group-mode" data="open" />}
             </Box>
           )
           : <Typography component="span" sx={{ color: md.onSurfaceVariant, fontSize: 14 }}>{t(`${D}no_group`)}</Typography>}

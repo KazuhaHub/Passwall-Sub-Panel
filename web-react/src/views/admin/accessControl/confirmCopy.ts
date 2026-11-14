@@ -13,7 +13,7 @@ type T = (key: string, opts?: Record<string, unknown>) => string
 const P = 'admin:access_control.confirm.'
 
 /** `minutes` is `applyMinutes(status)`: null when the server did not say. */
-function minutesWords(t: T, minutes: number | null): string {
+export function minutesWords(t: T, minutes: number | null): string {
   return minutes === null ? t(`${P}minutes_unknown`) : t(`${P}minutes`, { count: minutes })
 }
 
@@ -117,6 +117,52 @@ export function shortenRetentionConfirm(t: T, days: number): ConfirmOpts {
     title: t(`${P}shorten_retention.title`),
     message: t(`${P}shorten_retention.message`, { days }),
     confirmText: t(`${P}shorten_retention.action`),
+    destructive: true,
+  }
+}
+
+// ---- allowlist groups ----
+// The state words are the owner's: report-only, on, off. Only turning ON
+// restricts anyone, and it has its own dialog (TurnOnDialog, whose checklist
+// does not fit a confirmation); going back to report-only and turning off only
+// loosen, so they are plain buttons.
+
+/** Report-only again: members reach everything again, and it is recorded. */
+export function allowlistBackToReportConfirm({ t, minutes }: ConfirmArgs, group: string): ConfirmOpts {
+  return {
+    title: t(`${P}allowlist_report.title`, { group }),
+    message: t(`${P}allowlist_report.message`, { minutes: minutesWords(t, minutes) }),
+    confirmText: t(`${P}allowlist_report.action`),
+  }
+}
+
+/** Off: the lists stay. From report-only nothing was limited, so the question is only that the recording stops. */
+export function allowlistOffConfirm({ t, minutes }: ConfirmArgs, group: string, nodesBack: number, from: 'report' | 'on'): ConfirmOpts {
+  const when = minutesWords(t, minutes)
+  const key = `${P}allowlist_off.${from}${nodesBack > 0 ? '_nodes' : ''}`
+  return {
+    title: t(`${P}allowlist_off.title`, { group }),
+    message: t(key, { minutes: when, n: nodesBack }),
+    confirmText: t(`${P}allowlist_off.action`),
+  }
+}
+
+/** Turning on or starting a report with no node that enforces it: the members would have no node at all. */
+export function allowlistNoNodesConfirm(t: T, group: string, members: number, nodes: number, state: 'report' | 'on'): ConfirmOpts {
+  return {
+    title: t(`${P}allowlist_no_nodes.title_${state}`, { group }),
+    message: t(`${P}allowlist_no_nodes.message_${state}`, { members, n: nodes }),
+    confirmText: t(`${P}allowlist_no_nodes.action_${state}`),
+    destructive: true,
+  }
+}
+
+/** Taking lists out of an allowlist that is on: what they covered is refused from then on. */
+export function allowlistRemoveListsConfirm(t: T, group: string, lists: string[]): ConfirmOpts {
+  return {
+    title: t(`${P}allowlist_remove_lists.title`, { group, lists: lists.join(t(`${P}allowlist_remove_lists.separator`)) }),
+    message: t(`${P}allowlist_remove_lists.message`),
+    confirmText: t(`${P}allowlist_remove_lists.action`),
     destructive: true,
   }
 }

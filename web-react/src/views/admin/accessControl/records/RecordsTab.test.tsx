@@ -79,6 +79,15 @@ afterEach(() => { useSiteStore.setState({ timezone: '' }) })
 
 const lastParams = () => vi.mocked(api.getDestHits).mock.calls.at(-1)![0]!
 
+describe('an allowlist group as the rule', () => {
+  it('is a filter by its name, and a link to its source is understood', async () => {
+    vi.mocked(api.getDestHits).mockResolvedValue(result({ sources: [{ source: 'g2', name: 'Guests' }, { source: 'g8', name: null }] }))
+    renderAccess(ui, { route: `${route}&rec_source=g2` })
+    expect(await screen.findByText('白名单 · Guests')).toBeTruthy()
+    expect(lastParams().source).toBe('g2')
+  })
+})
+
 describe('the metric tiles', () => {
   it('count the whole time / account / node selection; the first two filter by action, the third only counts', async () => {
     const { router } = renderAccess(ui, { route })
@@ -424,6 +433,21 @@ describe('the footer and the row menu', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: '放行' }))
     await waitFor(() => expect(api.addDestException).toHaveBeenCalledWith({ target: 'smtp.gmail.com', match: 'site' }))
     await waitFor(() => expect(snack).toHaveBeenCalledWith('已新建列表「放行例外」和一条放行策略，并加入「gmail.com」，将随下一次下发生效', 'success'))
+  })
+
+  it('on a row refused by an allowlist group the exception goes to that group\'s supplement list by default, and "everyone" stays a choice', async () => {
+    vi.mocked(api.getDestHits).mockResolvedValue(result({ items: [item({ source: 'g4', source_name: 'Guests', source_kind: 'group', dest: 'figma.com' })], sources: [{ source: 'g4', name: 'Guests' }] }))
+    vi.mocked(api.addDestException).mockResolvedValue({ entry: 'domain:figma.com', created: null, list_id: 9 })
+    renderAccess(ui, { route })
+    const rows = await screen.findAllByTestId('hit-row')
+    fireEvent.click(within(rows[0]).getByRole('button', { name: '更多操作' }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: '加入放行例外…' }))
+    const dialog = await screen.findByRole('dialog')
+    expect((within(dialog).getByRole('radio', { name: /补充列表/ }) as HTMLInputElement).checked).toBe(true)
+    expect(within(dialog).queryByText('会越过所有拦截策略')).toBeNull()
+    fireEvent.click(within(dialog).getByRole('button', { name: '放行' }))
+    await waitFor(() => expect(api.addDestException).toHaveBeenCalledWith({ target: 'figma.com', match: 'site', group_id: 4 }))
+    expect(snack).toHaveBeenCalledWith('已加入「Guests」的补充列表「domain:figma.com」，将随下一次下发生效', 'success')
   })
 
   it('"exempt only this account" hands over to the exemption dialog for that account', async () => {

@@ -112,6 +112,15 @@ export default function NodePolicyStatusRow({
   const { key, label, note, reportNote } = nodeStateText(t, node, now)
   const allowLine = node.sniffing_allow_exempt_lost && node.sniffing_insufficient.length > 0 && <Typography variant="body2" data-testid="node-sniffing-allow-lost" sx={{ color: md.onSurfaceVariant }}>{t(`${S}node_note.sniffing_allow_lost`)}</Typography>
   const reportLine = reportNote && <Typography variant="body2" data-testid="node-report-not-deployed" sx={{ color: md.onSurfaceVariant }}>{reportNote}</Typography>
+  const sepG = t(`${S}node_note.groups_separator`)
+  const appliedGroups = node.allowlist_groups ?? []
+  const droppedGroups = node.sniffing_groups_dropped ?? []
+  const groupLines = (
+    <>
+      {appliedGroups.length > 0 && <Typography variant="body2" data-testid="node-allowlist-groups" sx={{ color: md.onSurfaceVariant }}>{t(`${S}node_note.allowlist_groups`, { groups: appliedGroups.map(g => g.name).join(sepG) })}</Typography>}
+      {droppedGroups.length > 0 && <Typography variant="body2" data-testid="node-groups-dropped" sx={{ color: md.onSurface }}>{t(`${S}node_note.groups_dropped`, { groups: droppedGroups.map(g => g.name).join(sepG) })}</Typography>}
+    </>
+  )
   const badge = <ToneBadge tone={accessTone(theme, NODE_STATE_TONE[key])} label={label} testId="node-state-badge" data={key} />
   const first = node.sniffing_insufficient[0]
   const recording = nodeRecordingText(t, node, now)
@@ -150,6 +159,7 @@ export default function NodePolicyStatusRow({
         <Typography variant="body2" sx={{ mt: 0.75, color: md.onSurfaceVariant }}>{note}</Typography>
         {allowLine}
         {reportLine}
+        {groupLines}
         {extra}
         {problem && (
           <Box sx={{ mt: 1.5, p: 1.5, borderRadius: 2, bgcolor: md.surfaceContainerHigh }}>
@@ -173,6 +183,7 @@ export default function NodePolicyStatusRow({
       <Typography variant="body2" sx={{ mt: 0.25, color: md.onSurfaceVariant }}>{note}</Typography>
       {allowLine}
       {reportLine}
+      {groupLines}
       {recording && <Typography variant="body2" data-testid="node-recording" sx={{ color: md.onSurfaceVariant }}>{recording}</Typography>}
       {resolveText && (
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>

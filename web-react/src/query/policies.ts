@@ -328,6 +328,13 @@ export const policies = {
     refetchInterval: 5 * SECOND,
     note: 'Waits for a refresh to end: polled only while a list is in the refreshing state (conditional in the hook).',
   },
+  /** The allowlist groups: their state, nodes and what a report-only group would have denied. */
+  destGroups: {
+    staleTime: 30 * SECOND,
+    gcTime: 5 * MINUTE,
+    refetchInterval: false,
+    note: 'The admin edits these here and every write invalidates them; the counts come from hit rows that arrive hourly, so a revisit after 30s re-reads them. Never polled.',
+  },
   /** One account's group, exemption and recent hits, for the drawer's access tab. */
   destUser: {
     staleTime: 30 * SECOND,

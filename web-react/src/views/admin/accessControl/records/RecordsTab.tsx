@@ -108,9 +108,10 @@ export default function RecordsTab({ onOpenUser, onTestDestination, onOpenSettin
   // ---- labels ----
   const ruleName = (h: Pick<DestHitItem, 'source' | 'source_name' | 'source_kind'>) => {
     if (h.source_name === null) return null
+    if (h.source_kind === 'group') return t(`${R}rule.group_rule`, { name: h.source_name })
     return h.source_kind === 'source' ? t(`${R}rule.source_rule`, { name: h.source_name }) : h.source_name
   }
-  const deletedRule = (source: string) => t(`${R}rule.${source.startsWith('s') ? 'deleted_source_rule' : 'deleted_policy'}`)
+  const deletedRule = (source: string) => t(`${R}rule.${source.startsWith('s') ? 'deleted_source_rule' : source.startsWith('g') ? 'deleted_group' : 'deleted_policy'}`)
   const userName = (h: Pick<DestHitItem, 'user_id' | 'upn'>) => h.upn ?? t(`${R}rule.deleted_user`, { id: h.user_id })
   const days7 = relativeSince(7, retention)
 
@@ -121,16 +122,17 @@ export default function RecordsTab({ onOpenUser, onTestDestination, onOpenSettin
       if (p.action === 'block') byId.set(`p${p.id}`, p.name)
     }
     const rules: { source: string; label: string }[] = []
+    const allowlists: { source: string; label: string }[] = []
     const deleted: { source: string }[] = []
     for (const s of data?.sources ?? []) {
-      if (s.source.startsWith('g')) continue
       if (s.name === null) deleted.push({ source: s.source })
+      else if (s.source.startsWith('g')) allowlists.push({ source: s.source, label: t(`${R}rule.group_rule`, { name: s.name }) })
       else if (s.source.startsWith('s')) rules.push({ source: s.source, label: t(`${R}rule.source_rule`, { name: s.name }) })
       else byId.set(s.source, s.name)
     }
-    return { policies: [...byId].map(([source, label]) => ({ source, label })), rules, deleted }
+    return { policies: [...byId].map(([source, label]) => ({ source, label })), rules, allowlists, deleted }
   }, [policies.data, data?.sources, t])
-  const known = new Set([...ruleOptions.policies, ...ruleOptions.rules, ...ruleOptions.deleted].map(o => o.source))
+  const known = new Set([...ruleOptions.policies, ...ruleOptions.rules, ...ruleOptions.allowlists, ...ruleOptions.deleted].map(o => o.source))
   const panels = (status.data?.nodes ?? []).filter(n => isNativeKind(n.kind) && n.state !== 'unsupported_kind')
 
   // ---- state of the page ----
@@ -179,7 +181,7 @@ export default function RecordsTab({ onOpenUser, onTestDestination, onOpenSettin
       onChange={e => patch({ source: e.target.value || undefined })} sx={{ minWidth: 200 }} fullWidth={phone}
       slotProps={{ inputLabel: { shrink: true }, select: { displayEmpty: true, renderValue: (v: unknown) => {
         if (!v) return t(`${R}filters.source_all`)
-        const all = [...ruleOptions.policies, ...ruleOptions.rules]
+        const all = [...ruleOptions.policies, ...ruleOptions.rules, ...ruleOptions.allowlists]
         return all.find(o => o.source === v)?.label ?? deletedRule(String(v))
       } } }}>
       <MenuItem value="">{t(`${R}filters.source_all`)}</MenuItem>
@@ -187,6 +189,8 @@ export default function RecordsTab({ onOpenUser, onTestDestination, onOpenSettin
       {ruleOptions.policies.map(o => <MenuItem key={o.source} value={o.source}>{o.label}</MenuItem>)}
       {ruleOptions.rules.length > 0 && <ListSubheader>{t(`${R}filters.group_rules`)}</ListSubheader>}
       {ruleOptions.rules.map(o => <MenuItem key={o.source} value={o.source}>{o.label}</MenuItem>)}
+      {ruleOptions.allowlists.length > 0 && <ListSubheader>{t(`${R}filters.group_allowlists`)}</ListSubheader>}
+      {ruleOptions.allowlists.map(o => <MenuItem key={o.source} value={o.source}>{o.label}</MenuItem>)}
       {ruleOptions.deleted.length > 0 && <ListSubheader>{t(`${R}filters.group_deleted`)}</ListSubheader>}
       {ruleOptions.deleted.map(o => <MenuItem key={o.source} value={o.source}>{deletedRule(o.source)}</MenuItem>)}
     </TextField>
@@ -314,7 +318,7 @@ export default function RecordsTab({ onOpenUser, onTestDestination, onOpenSettin
 
       <Menu anchorEl={menu?.el} open={menu !== null} onClose={() => setMenu(null)}>
         <MenuItem onClick={() => { const h = menu!.hit; setMenu(null); onTestDestination(h.dest) }}><ListItemText>{t(`${R}menu.test`)}</ListItemText></MenuItem>
-        <MenuItem onClick={() => { const h = menu!.hit; setMenu(null); setException({ host: h.dest, user: h.upn ? { id: h.user_id, upn: h.upn } : null }) }}>
+        <MenuItem onClick={() => { const h = menu!.hit; setMenu(null); setException({ host: h.dest, user: h.upn ? { id: h.user_id, upn: h.upn } : null, group: h.source_kind === 'group' && h.source_name ? { id: Number(h.source.slice(1)), name: h.source_name } : null }) }}>
           <ListItemText>{t(`${R}menu.exception`)}</ListItemText>
         </MenuItem>
         <Divider />
