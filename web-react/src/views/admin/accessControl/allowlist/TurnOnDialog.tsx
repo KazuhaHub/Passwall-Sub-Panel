@@ -159,7 +159,7 @@ export default function TurnOnDialog({ open, group, listIds, savedListIds, baseC
       </DialogContent>
       <DialogActions sx={{ ...(phone ? { position: 'sticky', bottom: 0, bgcolor: md.surfaceContainerHigh } : {}) }}>
         <Button onClick={onClose}>{t(`${K}cancel`)}</Button>
-        <AsyncButton variant="contained" color="error" disabled={reading || failed || blocked} onClick={confirm}>{t(`${K}confirm`)}</AsyncButton>
+        <AsyncButton variant="contained" color="error" disabled={reading || failed || blocked || (!sameLists && (preview.isPending || preview.isFetching || preview.isError))} onClick={confirm}>{t(`${K}confirm`)}</AsyncButton>
       </DialogActions>
     </Dialog>
   )

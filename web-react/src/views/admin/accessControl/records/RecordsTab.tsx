@@ -318,7 +318,7 @@ export default function RecordsTab({ onOpenUser, onTestDestination, onOpenSettin
 
       <Menu anchorEl={menu?.el} open={menu !== null} onClose={() => setMenu(null)}>
         <MenuItem onClick={() => { const h = menu!.hit; setMenu(null); onTestDestination(h.dest) }}><ListItemText>{t(`${R}menu.test`)}</ListItemText></MenuItem>
-        <MenuItem onClick={() => { const h = menu!.hit; setMenu(null); setException({ host: h.dest, user: h.upn ? { id: h.user_id, upn: h.upn } : null, group: h.source_kind === 'group' && h.source_name ? { id: Number(h.source.slice(1)), name: h.source_name } : null }) }}>
+        <MenuItem onClick={() => { const h = menu!.hit; setMenu(null); setException({ host: h.dest, user: h.upn ? { id: h.user_id, upn: h.upn } : null, group: h.source_kind === 'group' && h.source_name ? { id: Number(h.source.slice(1)), name: h.source_name } : null, groupGone: h.source_kind === 'group' && !h.source_name }) }}>
           <ListItemText>{t(`${R}menu.exception`)}</ListItemText>
         </MenuItem>
         <Divider />

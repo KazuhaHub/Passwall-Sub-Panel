@@ -111,6 +111,7 @@ describe('the allowlist tab', () => {
     const card = (await screen.findByText('Guests')).closest('[data-testid="allowlist-card"]') as HTMLElement
     expect(await within(card).findByText(/Tokyo 01/)).toBeTruthy()
     expect(within(card).getByText(/所有入站上都不生效/)).toBeTruthy()
+    expect(within(card).getByText(/成员会在下一次同步中失去这些节点/)).toBeTruthy()
   })
 
   it('opens a list in the entries sheet from its name', async () => {

@@ -450,6 +450,20 @@ describe('the footer and the row menu', () => {
     expect(snack).toHaveBeenCalledWith('已加入「Guests」的补充列表「domain:figma.com」，将随下一次下发生效', 'success')
   })
 
+  it('a row from a group that is gone selects nothing: it says so and does not default to everyone', async () => {
+    vi.mocked(api.getDestHits).mockResolvedValue(result({ items: [item({ source: 'g8', source_name: null, source_kind: 'group', dest: 'figma.com' })], sources: [{ source: 'g8', name: null }] }))
+    renderAccess(ui, { route })
+    const rows = await screen.findAllByTestId('hit-row')
+    fireEvent.click(within(rows[0]).getByRole('button', { name: '更多操作' }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: '加入放行例外…' }))
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByText('拒绝它的分组已删除，请选择要放行的范围。')).toBeTruthy()
+    for (const r of within(dialog).getAllByRole('radio')) expect((r as HTMLInputElement).checked).toBe(false)
+    expect((within(dialog).getByRole('button', { name: '放行' }) as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.click(within(dialog).getByRole('radio', { name: /全局放行例外/ }))
+    expect((within(dialog).getByRole('button', { name: '放行' }) as HTMLButtonElement).disabled).toBe(false)
+  })
+
   it('"exempt only this account" hands over to the exemption dialog for that account', async () => {
     renderAccess(ui, { route })
     const rows = await screen.findAllByTestId('hit-row')

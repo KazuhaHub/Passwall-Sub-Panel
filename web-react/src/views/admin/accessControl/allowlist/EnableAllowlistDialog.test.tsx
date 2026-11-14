@@ -220,12 +220,22 @@ describe('a preview the server refuses', () => {
     const alert = await screen.findByRole('alert')
     expect(alert.textContent).toContain('列表里有过宽的条目')
     expect((screen.getByRole('button', { name: '开始仅报告' }) as HTMLButtonElement).disabled).toBe(true)
+    expect(screen.queryByTestId('enable-kpi-skeleton')).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: '返回修改名单' }))
     expect(await screen.findByText('本组成员只能访问这些列表里的目的地')).toBeTruthy()
   })
 })
 
 describe('editing a group that is on', () => {
+  it('the button is named for the state chosen when it differs from the one saved', async () => {
+    const live = group({ group_id: 4, group_name: 'Ops', state: 'report', updated_at: 5, ineligible: [], pending_nodes: [] })
+    renderAccess(dlg({ groups: [live], initialGroupId: 4 }))
+    fireEvent.click(await screen.findByRole('button', { name: '下一步' }))
+    expect(await screen.findByRole('button', { name: '保存' })).toBeTruthy()
+    fireEvent.click(screen.getByRole('radio', { name: /^开启/ }))
+    expect(await screen.findByRole('button', { name: '开启白名单' })).toBeTruthy()
+  })
+
   it('asks before a list is taken out of it, naming the list', async () => {
     const live = group({ group_id: 4, group_name: 'Ops', state: 'on', updated_at: 5, list_ids: [10, 11], lists: [{ id: 10, name: 'Guest list', entry_count: 40, state: 'ready' }, { id: 11, name: 'Remote feed', entry_count: 3, state: 'ready' }], ineligible: [], pending_nodes: [] })
     confirmMock.mockResolvedValueOnce(false)

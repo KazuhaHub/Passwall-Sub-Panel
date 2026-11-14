@@ -4613,7 +4613,7 @@
       "allowlist_remove_lists": {
         "title": "从「{{group}}」的名单里去掉 {{lists}}？",
         "separator": "、",
-        "message": "它们覆盖的目的地不在名单里了，本组成员访问这些目的地会被拒绝。",
+        "message": "它们覆盖的目的地中，不在其他名单里的会被拒绝。",
         "action": "去掉"
       }
     },
@@ -5534,7 +5534,8 @@
         "saved": "已加入放行例外「{{entry}}」，将随下一次下发生效",
         "saved_created": "已新建列表「放行例外」和一条放行策略，并加入「{{entry}}」，将随下一次下发生效",
         "group": "加到「{{group}}」的补充列表（只放行本组成员）",
-        "saved_group": "已加入「{{group}}」的补充列表「{{entry}}」，将随下一次下发生效"
+        "saved_group": "已加入「{{group}}」的补充列表「{{entry}}」，将随下一次下发生效",
+        "group_gone": "拒绝它的分组已删除，请选择要放行的范围。"
       }
     },
     "audit_collect": {
@@ -5660,7 +5661,8 @@
         "saved_on": "「{{group}}」已开启白名单，{{minutes}}内生效",
         "saved_edit": "「{{group}}」的白名单已保存，{{minutes}}内生效",
         "stale": "状态已被其他人修改，已重新载入",
-        "back_to_lists": "返回修改名单"
+        "back_to_lists": "返回修改名单",
+        "back_to_report": "改回仅报告"
       },
       "read_failed": "读取白名单分组失败",
       "empty": {
@@ -5701,7 +5703,7 @@
         "not_open_item": "{{name}} · {{reason}}",
         "applying_other": "{{count}} 台节点正在下发本组规则",
         "list_not_ready": "名单「{{list}}」还没下载",
-        "sniffing_dropped": "该分组在 {{nodes}} 上没有下发：入站的嗅探识别不出域名，所以它在这些节点的所有入站上都不生效",
+        "sniffing_dropped": "该分组在 {{nodes}} 上没有下发：入站的嗅探识别不出域名，所以它在这些节点的所有入站上都不生效；成员会在下一次同步中失去这些节点",
         "would_deny": "过去 {{days}} 天本应拒绝 {{sites}} 个主域名，共 {{times}} 次",
         "denied_24h": "过去 24 小时拒绝 {{times}} 次",
         "no_nodes": "本组成员现在没有任何可用节点",

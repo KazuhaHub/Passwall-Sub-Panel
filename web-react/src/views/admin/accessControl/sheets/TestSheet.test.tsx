@@ -164,6 +164,37 @@ describe('TestSheet', () => {
     fireEvent.click(await screen.findByRole('button', { name: '加入' }))
     await waitFor(() => expect(api.addDestException).toHaveBeenCalledWith({ target: 'smtp.gmail.com', match: 'site' }))
   })
+  describe('when an allowlist group refused it', () => {
+    const refused = () => blocked({ terminating_step: 'g4', steps: [
+      { step: 1, kind: 'group', rule_id: 'g4x1', group_id: 4, name: 'Guests', result: 'miss' },
+      { step: 2, kind: 'group', rule_id: 'g4', group_id: 4, name: 'Guests', result: 'hit' },
+    ] })
+    async function open() {
+      vi.mocked(api.testDestination).mockResolvedValue(refused())
+      vi.mocked(api.addDestException).mockResolvedValue({ entry: 'domain:figma.com', created: null, list_id: 9 })
+      renderAccess(<TestSheet open onClose={() => {}} onOpenPolicy={() => {}} />)
+      fireEvent.change(screen.getByRole('textbox', { name: /目的地/ }), { target: { value: 'figma.com' } })
+      run()
+      fireEvent.click(await screen.findByRole('button', { name: '加入放行例外…' }))
+    }
+
+    it('the default is the group\'s supplement list, not everyone', async () => {
+      await open()
+      expect((await screen.findByRole('radio', { name: /「Guests」的补充列表/ }) as HTMLInputElement).checked).toBe(true)
+      expect(screen.queryByText('会越过所有拦截策略')).toBeNull()
+      fireEvent.click(await screen.findByRole('button', { name: '加入' }))
+      await waitFor(() => expect(api.addDestException).toHaveBeenCalledWith({ target: 'figma.com', match: 'site', group_id: 4 }))
+    })
+
+    it('everyone is a deliberate choice, with its warning, and sends no group', async () => {
+      await open()
+      fireEvent.click(await screen.findByRole('radio', { name: /全局放行例外/ }))
+      expect(screen.getByText('会越过所有拦截策略')).toBeTruthy()
+      fireEvent.click(screen.getByRole('button', { name: '加入' }))
+      await waitFor(() => expect(api.addDestException).toHaveBeenCalledWith({ target: 'figma.com', match: 'site' }))
+    })
+  })
+
   it('sends resolved_ips only when filled, split on commas and spaces', async () => {
     vi.mocked(api.testDestination).mockResolvedValue(blocked())
     renderAccess(<TestSheet open onClose={() => {}} onOpenPolicy={() => {}} />)

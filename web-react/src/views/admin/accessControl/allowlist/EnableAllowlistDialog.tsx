@@ -103,7 +103,8 @@ export default function EnableAllowlistDialog({ open, groups, initialGroupId, on
     setTouched(true)
   }
   const canNext = step === 0 ? groupId !== null : step === 1 ? listIds.length > 0 : false
-  const label = editing ? t(`${E}save`) : t(state === 'on' ? `${E}turn_on` : `${E}start_report`)
+  // Named for what it does: the saved state is just saved, a different one is that state.
+  const label = editing && state === group?.state ? t(`${E}save`) : t(state === 'on' ? `${E}turn_on` : editing ? `${E}back_to_report` : `${E}start_report`)
   const needsChecklist = state === 'on' && group?.state !== 'on'
 
   const body = (): DestGroupPut => (hasRow && group?.updated_at != null
@@ -246,7 +247,7 @@ export default function EnableAllowlistDialog({ open, groups, initialGroupId, on
                     <KpiTile label={t(`${E}kpi_lost`)} value={pv.nodes_lost.length} />
                   </KpiGrid>
                 )
-                : <Skeleton variant="rounded" height={64} />}
+                : !preview.isError && <Skeleton data-testid="enable-kpi-skeleton" variant="rounded" height={64} />}
               {pv && pv.eligible_nodes === 0 && (
                 <Box data-testid="enable-no-nodes" sx={{ p: 1.5, borderRadius: 2, bgcolor: md.errorContainer, color: md.onErrorContainer }}>
                   <Typography variant="body2">{t(`${E}no_nodes`)}</Typography>

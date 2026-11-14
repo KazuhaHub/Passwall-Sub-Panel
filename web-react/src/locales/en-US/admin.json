@@ -4633,7 +4633,7 @@
       "allowlist_remove_lists": {
         "title": "Take {{lists}} out of the lists of “{{group}}”?",
         "separator": ", ",
-        "message": "What they covered is no longer in the lists, so the members are refused those destinations.",
+        "message": "Of what they covered, whatever is not in the other lists is refused.",
         "action": "Take out"
       }
     },
@@ -5569,7 +5569,8 @@
         "saved": "Added the allow exception \"{{entry}}\"; it takes effect with the next apply",
         "saved_created": "Created the list \"Allow exceptions\" and an allow policy, and added \"{{entry}}\"; it takes effect with the next apply",
         "group": "Add to the supplement list of “{{group}}” (allows it for its members only)",
-        "saved_group": "Added “{{entry}}” to the supplement list of “{{group}}”; it takes effect with the next delivery"
+        "saved_group": "Added “{{entry}}” to the supplement list of “{{group}}”; it takes effect with the next delivery",
+        "group_gone": "The group that refused it is gone; choose what to allow it for."
       }
     },
     "audit_collect": {
@@ -5702,7 +5703,8 @@
         "saved_on": "The allowlist of “{{group}}” is on; it takes effect within {{minutes}}",
         "saved_edit": "The allowlist of “{{group}}” is saved; it takes effect within {{minutes}}",
         "stale": "The state was changed by someone else and has been reloaded",
-        "back_to_lists": "Back to the lists"
+        "back_to_lists": "Back to the lists",
+        "back_to_report": "Back to report only"
       },
       "read_failed": "Could not read the allowlist groups",
       "empty": {
@@ -5746,7 +5748,7 @@
         "applying_one": "{{count}} node is receiving this group's rules",
         "applying_other": "{{count}} nodes are receiving this group's rules",
         "list_not_ready": "List “{{list}}” has not been downloaded",
-        "sniffing_dropped": "Not delivered on {{nodes}}: an inbound's sniffing cannot read domains, so this group does not apply on any inbound of those nodes",
+        "sniffing_dropped": "Not delivered on {{nodes}}: an inbound's sniffing cannot read domains, so this group does not apply on any inbound of those nodes; the members lose those nodes at the next sync",
         "would_deny": "Past {{days}} days: {{sites}} sites would have been refused, {{times}} times in all",
         "denied_24h": "Refused {{times}} times in the past 24 hours",
         "no_nodes": "This group's members have no usable node right now",
