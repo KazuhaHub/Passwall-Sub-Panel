@@ -15,6 +15,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/authpolicy"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/group"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/legal"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/passkey"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/render"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/traffic"
@@ -34,6 +35,59 @@ type UserMeHandler struct {
 	twofa    *twofa.Service
 	passkey  *passkey.Service
 	enroll   *authpolicy.Service
+	// legal is optional: unset, nobody is ever pending.
+	legal *legal.Service
+}
+
+// SetLegal wires the privacy and terms service (legal_pending, accept).
+func (h *UserMeHandler) SetLegal(svc *legal.Service) { h.legal = svc }
+
+// legalPending reports whether the account is to be asked to consent. A
+// failed read is "not pending": the prompt is a courtesy, nothing is gated on
+// it, and the profile must still load.
+func (h *UserMeHandler) legalPending(ctx context.Context, u *domain.User) (bool, error) {
+	if h.legal == nil {
+		return false, nil
+	}
+	pending, err := h.legal.Pending(ctx, u)
+	if err != nil {
+		return false, err
+	}
+	return pending, nil
+}
+
+type acceptLegalRequest struct {
+	ConsentVersion int `json:"consent_version"`
+}
+
+// AcceptLegal records that the signed-in account accepted the current consent
+// version. 409 legal_consent_outdated when the version it saw is stale; 404
+// while the feature is off.
+func (h *UserMeHandler) AcceptLegal(c *gin.Context) {
+	claims := middleware.ClaimsFrom(c)
+	if claims == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "No auth"})
+		return
+	}
+	var req acceptLegalRequest
+	if err := c.ShouldBindJSON(&req); err != nil || req.ConsentVersion < 1 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "consent_version is required"})
+		return
+	}
+	if h.legal == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Not found"})
+		return
+	}
+	err := h.legal.Accept(c.Request.Context(), claims.UserID, req.ConsentVersion, domain.LegalConsentPrompt)
+	switch {
+	case err == nil:
+		c.Status(http.StatusNoContent)
+	case errors.Is(err, domain.ErrLegalConsentOutdated):
+		cur, _ := h.legal.Current(c.Request.Context())
+		c.JSON(http.StatusConflict, gin.H{"error": "The terms changed; reload and accept again", "code": "legal_consent_outdated", "consent_version": cur.ConsentVersion})
+	default:
+		respondError(c, err)
+	}
 }
 
 func NewUserMeHandler(userSvc *user.Service, trafficSvc *traffic.Service, settings ports.ScopedSettings, groupSvc *group.Service, twofaSvc *twofa.Service, passkeySvc *passkey.Service, enroll *authpolicy.Service, renderSvc *render.Service) *UserMeHandler {
@@ -81,6 +135,7 @@ func (h *UserMeHandler) Profile(c *gin.Context) {
 	passkeyList := h.passkeyList(c.Request.Context(), u.ID)
 	now := time.Now()
 	access := u.AccessSnapshot(now)
+	legalPending, _ := h.legalPending(c.Request.Context(), u)
 	c.JSON(http.StatusOK, gin.H{
 		"id":           u.ID,
 		"display_name": u.DisplayName,
@@ -122,6 +177,10 @@ func (h *UserMeHandler) Profile(c *gin.Context) {
 		"service_disable_detail":  u.ServiceDisableDetail,
 		"service_disabled_at":     u.ServiceDisabledAt,
 		"can_change_password":     canChangePassword,
+		// legal_pending: the account (role user only) has not accepted the
+		// current terms and privacy version, so the SPA asks. Nothing is gated
+		// on it.
+		"legal_pending": legalPending,
 		// 2FA self-service: totp_available means the admin has turned on
 		// panel-wide enrollment AND the account has a local password (SSO-only
 		// accounts can't enroll). totp_enabled is this user's current state.

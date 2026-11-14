@@ -300,3 +300,29 @@ func TestVerify_InvalidToken(t *testing.T) {
 		t.Fatal("invalid token must not activate")
 	}
 }
+
+// The handler records the new account's consent, so the result names the
+// account on every path that ends with one.
+func TestRegister_ResultCarriesTheUserID(t *testing.T) {
+	svc, us, _, _ := newSvc(enabledSet())
+	res, err := svc.Register(context.Background(), RegisterInput{Email: "a@x.com", Password: "GoodPass1"})
+	if err != nil || res.UserID == 0 || res.UserID != us.nextID {
+		t.Fatalf("verification path: %+v, %v (created id %d)", res, err, us.nextID)
+	}
+
+	set := enabledSet()
+	set.RegistrationAllowUnverified = true
+	svc, us, _, _ = newSvc(set)
+	res, err = svc.Register(context.Background(), RegisterInput{Email: "b@x.com", Password: "GoodPass1"})
+	if err != nil || res.UserID == 0 || res.UserID != us.nextID {
+		t.Fatalf("no-verification path: %+v, %v (created id %d)", res, err, us.nextID)
+	}
+
+	// The resumed signup of an abandoned, still-pending account.
+	svc, us, _, _ = newSvc(enabledSet())
+	us.byUPN["c@x.com"] = &domain.User{ID: 77, Enabled: false, AutoDisabledReason: domain.DisabledPendingEmailVerify}
+	res, err = svc.Register(context.Background(), RegisterInput{Email: "c@x.com", Password: "GoodPass1"})
+	if err != nil || res.UserID != 77 {
+		t.Fatalf("resume path: %+v, %v", res, err)
+	}
+}

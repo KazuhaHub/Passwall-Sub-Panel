@@ -126,7 +126,12 @@ type Deps struct {
 	// registered, so that "admin only" is provable with nothing wired; a
 	// field left out makes the routes that need it answer 503.
 	// TestBuildWiresTheAccessControlAPI guards that Build fills it.
-	Dest             handler.DestWiring
+	Dest handler.DestWiring
+	// Legal is the privacy and terms wiring. Optional in the sense that a field
+	// left out makes the public document answer 404 and the admin routes 503, so
+	// an omission compiles and fails only when the page is opened:
+	// TestBuildWiresTheLegalAPI.
+	Legal            handler.LegalWiring
 	NodeAgentUpgrade handler.NativeAgentUpgradeService
 	NodeDiagnostics  handler.NodeDiagnosticsService
 	// NodeMetrics serves the resource-telemetry API. Optional: absent, its
@@ -366,6 +371,7 @@ func NewRouter(d Deps) stdhttp.Handler {
 			Settings: d.Repos.Settings,
 		})
 		registerH := handler.NewAuthRegisterHandler(registerSvc, d.Repos.Settings, captchaSvc)
+		registerH.SetLegal(d.Legal.Service)
 		authGroup.POST("/register", loginLimiter.Handler(), registerH.Register)
 		authGroup.POST("/resend-verification", loginLimiter.Handler(), registerH.ResendVerification)
 		authGroup.POST("/verify-email", loginLimiter.Handler(), registerH.VerifyEmail)
@@ -393,6 +399,9 @@ func NewRouter(d Deps) stdhttp.Handler {
 	// Public UI language packs. Unauthenticated on purpose: the login screen must
 	// render in a custom language before anyone signs in. Serves only UI text (no
 	// secrets); ETag-cached so repeat page loads revalidate cheaply.
+	// The published terms and privacy documents: public, no session.
+	g.GET("/api/legal/:kind", handler.NewLegalPublicHandler(d.Legal.Service).Get)
+
 	i18nPub := handler.NewI18nPublicHandler(d.Repos.Locale)
 	g.GET("/api/i18n/langs", i18nPub.Langs)
 	g.GET("/api/i18n/:lang", i18nPub.Bundle)
@@ -405,6 +414,7 @@ func NewRouter(d Deps) stdhttp.Handler {
 	require2FAGate := middleware.Require2FAEnrollment(enroll2FA, d.User)
 
 	userMe := handler.NewUserMeHandler(d.User, d.Traffic, d.Repos.ScopedSettings, d.Group, twofaSvc, passkeySvc, enroll2FA, d.Render)
+	userMe.SetLegal(d.Legal.Service)
 	userGroup := g.Group("/api/user/me",
 		middleware.RequireAuth(d.Auth, d.User, authUserCache),
 		// Operators are included so that an operator forced to enroll 2FA (via the
@@ -425,6 +435,8 @@ func NewRouter(d Deps) stdhttp.Handler {
 		userGroup.GET("/sync-status", userMe.SyncStatus)
 		userGroup.GET("/rules", userMe.GetRules)
 		userGroup.PUT("/rules", userMe.PutRules)
+		// Accept the current terms and privacy version (the consent prompt).
+		userGroup.POST("/legal/accept", userMe.AcceptLegal)
 		userGroup.POST("/emergency-access", userMe.EmergencyAccess)
 		userGroup.POST("/reset-credentials", userMe.ResetCredentials)
 		userGroup.POST("/change-password", userMe.ChangePassword)
@@ -668,6 +680,16 @@ func NewRouter(d Deps) stdhttp.Handler {
 		adminGroup.GET("/dest/settings", destSettingsH.Get)
 		adminGroup.PUT("/dest/settings", destSettingsH.Put)
 		registerDestRoutes(adminGroup, handler.NewAdminDestHandler(d.Dest))
+		// The terms and privacy documents: publish a new version, read the
+		// versions, count whom a material change would ask again. adminGroup:
+		// the published text and the consent version are the owner's. The
+		// published content is public by design, so these audit rows are NOT
+		// admin-only (adminOnlyAuditTargets). affected-users is registered
+		// beside /:kind; gin gives the static segment priority.
+		legalH := handler.NewAdminLegalHandler(d.Legal, d.Repos.Settings)
+		adminGroup.GET("/legal/affected-users", legalH.AffectedUsers)
+		adminGroup.GET("/legal/:kind", legalH.Get)
+		adminGroup.POST("/legal/:kind", legalH.Publish)
 		adminGroup.GET("/diagnostics/metrics", diagH.Metrics)
 		adminGroup.POST("/diagnostics/metrics/reset", diagH.ResetMetrics)
 

@@ -46,6 +46,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/geo"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/group"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/health"
+	legalsvc "github.com/KazuhaHub/passwall-sub-panel/internal/service/legal"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/mailer"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/node"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/nodeagentupgrade"
@@ -172,6 +173,13 @@ type App struct {
 	// account's row — an admin's note about somebody nobody can open — would
 	// otherwise stay for ever: TestBuildPrunesRiskReviewOrphans.
 	riskReviews riskReviewPruner
+	// legalConsents is the legal_consents store as the hourly cleanup sees it:
+	// the orphan purge only (a consent record has no retention and no foreign
+	// key, so a deleted account's row would stay for ever):
+	// TestBuildPrunesLegalConsentOrphans. legal is the privacy and terms
+	// service, kept so the tests can read what Build wired.
+	legalConsents legalConsentPruner
+	legal         *legalsvc.Service
 	// destRepos is the destination-policy store family (access control):
 	// lists, policies, exemptions, source rules, publish state, snapshots and
 	// per-agent delivery state. Concrete, like flagRecords: each consumer is
@@ -824,6 +832,13 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Privacy and terms. The "what we collect" list reads the same node
+	// derivation the status page uses; a later feature that records something
+	// new registers a provider on the collector rather than editing the list.
+	legalRepo := sqlstore.NewLegalRepo(db)
+	legalSvc := legalsvc.New(legalRepo, repos.Settings, legalsvc.NewCollector(legalDestRecording{admin: destAdmin, groups: destRepos.GroupAllowlists}))
+	a.legalConsents = legalRepo
+	a.legal = legalSvc
 	httpHandler := httptransport.NewRouter(httptransport.Deps{
 		OperationGate: a.operationGate,
 		Async:         dispatcher,
@@ -873,6 +888,7 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 		Reconcile:  reconcileSvc,
 		Geo:        geoSvc,
 		NodeSync:   nativeSync,
+		Legal:      handler.LegalWiring{Service: legalSvc, Store: legalRepo},
 		// The access-control API. Optional in the sense that every field left
 		// out turns its routes into 503s, so an omission compiles and fails
 		// only when the page is opened: TestBuildWiresTheAccessControlAPI.
@@ -1621,6 +1637,7 @@ func (a *App) runAuditCleanupLoop(ctx context.Context) {
 		a.pruneConnectionHistory(ctx)
 		a.pruneFlagRecords(ctx)
 		a.pruneRiskReviews(ctx)
+		a.pruneLegalConsents(ctx)
 		a.pruneDestRows(ctx)
 		a.pruneCertEvents(ctx)
 		select {
@@ -2006,6 +2023,58 @@ func (a *App) pruneRiskReviews(ctx context.Context) {
 	case purged > 0:
 		log.Info("risk review orphan purge", "deleted", purged)
 	}
+}
+
+// legalConsentPruner is what the hourly cleanup needs of the legal_consents
+// store, and all it is handed.
+type legalConsentPruner interface {
+	PurgeConsentOrphans(ctx context.Context) (int64, error)
+}
+
+// pruneLegalConsents deletes the consent records of accounts that no longer
+// exist. No retention pass: a record is the proof an account accepted a
+// version, and it lives as long as the account. The reads need no JOIN (they
+// are by account id), so this is what makes a deleted account's record gone
+// within the hour. Counts only in the log.
+func (a *App) pruneLegalConsents(ctx context.Context) {
+	if a.legalConsents == nil {
+		return
+	}
+	purged, err := a.legalConsents.PurgeConsentOrphans(ctx)
+	switch {
+	case err != nil:
+		log.Warn("legal consent orphan purge", "err", err)
+	case purged > 0:
+		log.Info("legal consent orphan purge", "deleted", purged)
+	}
+}
+
+// legalDestRecording answers the privacy page's access-control questions from
+// the policy admin (which nodes record) and the allowlist groups (which are in
+// trial).
+type legalDestRecording struct {
+	admin  *destpolicy.Admin
+	groups interface {
+		List(ctx context.Context) ([]*domain.DestGroupAllowlistEntry, error)
+	}
+}
+
+func (d legalDestRecording) CollectingNodes(ctx context.Context) (int, error) {
+	return d.admin.CollectingNodes(ctx)
+}
+
+func (d legalDestRecording) AllowlistTrialGroups(ctx context.Context) (int, error) {
+	entries, err := d.groups.List(ctx)
+	if err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, e := range entries {
+		if e.Allowlist.State == domain.DestStateReport {
+			n++
+		}
+	}
+	return n, nil
 }
 
 // pruneCertEvents trims the cert issuance/renewal activity log. It's low-volume

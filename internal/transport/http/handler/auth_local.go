@@ -125,6 +125,10 @@ func (h *AuthLocalHandler) Methods(c *gin.Context) {
 		// Drives the login page's "resend email code" countdown so it matches the
 		// server-side per-account cooldown.
 		"twofa_email_resend_cooldown_sec": s.TwoFAEmailResendCooldownSec,
+		// Privacy and terms: the register form's required checkbox and the
+		// footer links render off this. consent_version is the one a signup
+		// must echo back as accepted_consent_version.
+		"legal": gin.H{"enabled": s.LegalEnabled, "consent_version": s.LegalConsentVersion},
 	})
 }
 
