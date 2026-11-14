@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
@@ -19,6 +20,15 @@ type Service struct {
 	// render); now is its clock seam (defaults to time.Now).
 	enabledCache *nodeListCache
 	now          func() time.Time
+
+	// Eligibility (allowlist groups): the reads it rests on, late-bound; a
+	// per-panel cache of the answer; the resyncer a capability change drives;
+	// and the cached member counts TagMatchedMembers answers from.
+	elig      EligibilityDeps
+	eligCache *eligibilityCache
+	resyncer  MemberResyncer
+	countMu   sync.Mutex
+	counts    map[int64]memberCountEntry
 }
 
 func New(groups ports.GroupRepo, nodes ports.NodeRepo, scope ports.ScopeSettingsRepo) *Service {
@@ -28,6 +38,7 @@ func New(groups ports.GroupRepo, nodes ports.NodeRepo, scope ports.ScopeSettings
 		scope:        scope,
 		enabledCache: newNodeListCache(enabledNodesTTL),
 		now:          time.Now,
+		eligCache:    newEligibilityCache(eligibilityTTL),
 	}
 }
 
@@ -93,20 +104,26 @@ func (s *Service) Delete(ctx context.Context, id int64) error {
 	return nil
 }
 
-// NodesFor returns the nodes that a group's tag_filter selects, sorted by
-// the global node sort_order (group.layout overrides happen later in the
-// render pipeline).
+// NodesFor returns the nodes a group's members get clients on and see in their
+// subscription: the nodes the tag_filter selects (all of them for TagFilter.All)
+// and, for a group with an allowlist, only those that can enforce it
+// (Eligible). Sorted by the global node sort_order (group.layout overrides
+// happen later in the render pipeline).
 func (s *Service) NodesFor(ctx context.Context, g *domain.Group) ([]*domain.Node, error) {
 	all, err := s.listEnabledCached(ctx)
 	if err != nil {
 		return nil, err
 	}
-	if g.TagFilter.All {
+	if g.TagFilter.All && !allowlisted(g) {
 		return all, nil
 	}
 	out := make([]*domain.Node, 0, len(all))
 	for _, n := range all {
-		if matchFilter(n, g.TagFilter) {
+		ok, err := s.Eligible(ctx, n, g)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
 			out = append(out, n)
 		}
 	}
