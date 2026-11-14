@@ -158,7 +158,9 @@ test('the plan covers the floor and the newest, and nothing between them', () =>
     // the address changed (and the wrong shape for every release after) — and this
     // is the tag the matrix fetches each case by.
     assert.equal(entry.tag, realManifest().released_nodes.find((row) => row.version === entry.version).tag)
-    assert.match(entry.tag, /^(?:release\/|v)\d+\.\d+\.\d+(?:\.\d+)?$/)
+    // THE PRE-RELEASE SPELLING IS A TAG THIS PROJECT PUBLISHES: the planner accepts
+    // `-beta.N` and `-rc.N`, and the newest end is one while a beta is the latest release.
+    assert.match(entry.tag, /^(?:release\/|v)\d+\.\d+\.\d+(?:\.\d+|-(?:beta|rc)\.[1-9]\d*)?$/)
     assert.match(entry.sha, /^[0-9a-f]{40}$/)
     assert.equal(entry.id, `node-wire-v1@${entry.version}`)
   }

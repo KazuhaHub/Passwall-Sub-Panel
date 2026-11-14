@@ -718,6 +718,38 @@ test('the contract job skips only a wire run the matrix already made, and always
   assert.equal(match('0'.repeat(40)), '', 'a commit outside the plan must not be treated as covered, or its wire run is silently dropped')
 })
 
+// THE POLICY ROUND TRIP RUNS IN THE CONTRACT JOB, EVERY TIME, AGAINST ITS OWN PROFILE.
+//
+// It cannot be a case of the node-wire-v1 profile: that profile is planned for the
+// floor as well as for the newest release, and the floor predates the
+// policy.destination.v1 capability, so a policy test there fails on a Node that is
+// correct. The contract job is the one place a revision that declares the
+// capability is on disk, and contract_source is chosen to be one. It is judged the
+// way the wire suite is -- by a profile, never by its own exit code, because a
+// skipped test exits 0 -- and its verdict is collected like the others, so it can
+// neither hide nor be hidden by them. The profile lives in its own file because
+// profiles.json is expanded into a case per supported version by the gate, and a
+// policy case at the floor would be reported missing forever.
+test('the contract job runs the policy round trip against its own profile and collects the verdict', () => {
+  const contract = step(job('node-contract'), 'real Node sync, durable result receipt and task expiry')
+  const run = contract.indexOf("-run '^TestLive_RealNodePolicyContract$'")
+  const drift = contract.indexOf('./internal/version/ ./internal/pkg/nodebootstrap/ ./internal/adapters/corecatalogdoc/')
+  assert(run > drift, 'the policy round trip runs after, and regardless of, the covered-by branch')
+  const tail = contract.slice(run)
+  assert(/\n          fi\n/.test(contract.slice(0, run)), 'the policy round trip must sit outside the covered-by branch')
+  assert(
+    tail.includes('--profiles deploy/compat/profiles-node-contract.json') && tail.includes('--profile node-policy-v1'),
+    'the policy run must be judged against the node-policy-v1 profile, not against its exit code',
+  )
+  assert(/--output "\$policy_evidence\/result\.json" \|\| failed=1/.test(tail), 'a policy failure must be collected, not end the step')
+  assert(contract.trimEnd().endsWith('exit "$failed"'), 'the step must still report the failures it collected')
+
+  const profiles = JSON.parse(readFileSync(new URL('compat/profiles-node-contract.json', import.meta.url), 'utf8'))
+  assert.deepEqual(Object.keys(profiles['node-policy-v1'].required), ['TestLive_RealNodePolicyContract'])
+  const shipped = JSON.parse(readFileSync(new URL('compat/profiles.json', import.meta.url), 'utf8'))
+  assert(!('node-policy-v1' in shipped), 'profiles.json is expanded into a case per supported version; the policy profile must stay out of it')
+})
+
 // A JOB WITHOUT A TIMEOUT HOLDS ITS RUNNER FOR 360 MINUTES WHEN SOMETHING HANGS, and
 // for a required check that is six hours of a red nobody can read. Every job here
 // states its own bound.

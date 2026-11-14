@@ -350,6 +350,28 @@ jobs:
           # They read the checkout this step already verified.
           PSP_LIVE_NODE_REPO="$contract_repo" go test -count=1 -timeout=5m \
             ./internal/version/ ./internal/pkg/nodebootstrap/ ./internal/adapters/corecatalogdoc/ || failed=1
+          # THE DESTINATION-POLICY ROUND TRIP, ALWAYS, against the revision this job
+          # verified above. It is not a matrix case: the matrix runs the floor too,
+          # and the floor predates the capability. contract_source is chosen to be a
+          # release that declares policy.destination.v1, and this is what makes that
+          # a tested claim rather than a comment. Judged against its own profile
+          # (deploy/compat/profiles-node-contract.json), never by its exit code: a
+          # skip because PSP_LIVE_NODE_REPO was unset exits 0 and proves nothing.
+          # Filed beside the wire evidence, not inside it, so each result.json keeps
+          # the directory name that says what it measured.
+          policy_evidence="evidence/pinned-source-policy"
+          mkdir -p "$policy_evidence"
+          policy_exit=0
+          PSP_LIVE_NODE_REPO="$contract_repo" go test -json -count=1 -timeout=5m \
+            ./internal/service/nodesync \
+            -run '^TestLive_RealNodePolicyContract$' \
+            > "$policy_evidence/go-events.jsonl" 2> "$policy_evidence/go-stderr.txt" || policy_exit=$?
+          node deploy/compat/check-go-results.mjs \
+            --profiles deploy/compat/profiles-node-contract.json \
+            --profile node-policy-v1 \
+            --input "$policy_evidence/go-events.jsonl" \
+            --go-exit-code "$policy_exit" \
+            --output "$policy_evidence/result.json" || failed=1
           exit "$failed"
       - name: upload case evidence
         if: always()

@@ -26,7 +26,7 @@ import { test } from 'node:test'
 // validator's reasoning about what it never sees.
 // ---------------------------------------------------------------------------
 
-const PROFILES = ['profiles.json', 'profiles-third-party.json'].map((name) =>
+const PROFILES = ['profiles.json', 'profiles-third-party.json', 'profiles-node-contract.json'].map((name) =>
   fileURLToPath(new URL(name, import.meta.url)),
 )
 
