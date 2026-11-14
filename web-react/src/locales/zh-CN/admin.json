@@ -5319,7 +5319,8 @@
         "save": "加入"
       },
       "resolved_ips": "解析出的 IP（可选，PSP 不做解析）",
-      "resolved_ips_hint": "节点会把主机名解析成哪些地址，用逗号或空格分隔",
+      "resolved_ips_hint": "节点会把主机名解析成哪些地址，用逗号或空格分隔。只有选了按需解析（on_demand）的节点或入站时才会用到，否则忽略。",
+      "resolved_failed": "解析失败（空结果）",
       "resolved_ips_bad": "最多 16 个，每个都要是有效的 IP 地址",
       "note_hostname_needs_resolution": "这台节点会解析这个主机名，而这里没有解析：IP 段与内网地址规则的结果取决于解析出的地址，所以只是有条件的结果。在「解析出的 IP」里填上节点会看到的地址再测。",
       "note_resolution_failed": "解析结果为空（或解析失败），IP 段与内网地址规则不会命中。真实结果取决于内核：Xray 放行，sing-box 拒绝连接。"
@@ -5486,7 +5487,7 @@
       "label": "匹配方式",
       "option": {
         "as_is": "按原样（默认）：不做 DNS。IP 段与内网地址规则只对以 IP 发起的连接生效；带假 SNI/Host 的连接会被改去 SNI 指向的地址，IP 规则看不到它。",
-        "on_demand": "按需解析：路由走到第一条 IP 规则时解析一次主机名，任一解析结果落在被拦网段即拦截。代价：每个连接多一次 DNS 查询与一次往返延迟（Xray 另外在拨号时再解析一次）。",
+        "on_demand": "按需解析：路由走到第一条 IP 规则时解析一次主机名，任一解析结果落在被拦网段即拦截。",
         "if_non_match": "不匹配时解析（IPIfNonMatch）：不提供——会让仅报告和试运行分组改变判定。"
       },
       "caveat": {
@@ -5494,11 +5495,15 @@
         "dial_again": "Xray 在拨号时再解析一次，所以命中的地址可能与实际拨出的不是同一个；sing-box 拨的就是命中的地址。",
         "route_only": "某个入站的嗅探开了 routeOnly:true 且会替换目标名时，这台节点保持按原样，并在状态里标出原因。"
       },
-      "restart": "切到按需解析后，这台节点会重启代理程序一次。",
+      "cost": {
+        "xray": "Xray：每个到达 IP 规则的主机名连接多一次未缓存的系统解析，拨号时 freedom 自己还会再解析一次。",
+        "singbox": "sing-box：一次带缓存的解析，拨号时复用，放行的连接基本没有额外开销。"
+      },
+      "restart": "切换后，只有节点实际收到的模式发生变化时（包括切回按原样），这台节点才会重启代理程序一次；策略里没有 IP 规则、节点版本不支持或被 routeOnly 入站拦下时不会重启。",
       "cancel": "取消",
       "save": "保存",
-      "saved_other": "已保存，{{node}} 会在约 {{count}} 分钟内重启代理程序一次",
-      "saved_unknown": "已保存，{{node}} 会在几分钟内重启代理程序一次"
+      "saved_other": "已保存，{{node}} 可能会在约 {{count}} 分钟内重启代理程序一次",
+      "saved_unknown": "已保存，{{node}} 可能会在几分钟内重启代理程序一次"
     },
     "node_resolve": {
       "line": "IP 规则对主机名：{{mode}}",
@@ -5509,7 +5514,9 @@
       "pending": "按原样（按需解析待下发）",
       "unavailable": {
         "version": "节点版本不支持，按原样执行",
-        "route_only": "入站 routeOnly 开启，按原样执行"
+        "route_only": "入站 routeOnly 开启，按原样执行",
+        "sniffing": "入站嗅探配置无法解析，按原样执行",
+        "no_ip_rules": "策略里没有 IP 段或内网规则，无需解析，按原样执行"
       }
     }
   }

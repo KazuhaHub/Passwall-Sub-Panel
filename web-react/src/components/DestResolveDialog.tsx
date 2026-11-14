@@ -94,6 +94,9 @@ export default function DestResolveDialog({ node, onClose }: {
         <RadioGroup value={mode} onChange={(_, v) => { if (v === 'as_is' || v === 'on_demand') setMode(v) }} aria-label={t(`${A}label`)} sx={{ gap: 1 }}>
           {ROWS.map(option)}
         </RadioGroup>
+        <Box data-testid="resolve-cost" component="ul" sx={{ m: 0, pl: 2.5, display: 'grid', gap: 0.5, color: md.onSurfaceVariant }}>
+          {(['xray', 'singbox'] as const).map(e => <Typography key={e} component="li" variant="body2">{t(`${A}cost.${e}`)}</Typography>)}
+        </Box>
         <Box data-testid="resolve-caveats" component="ul" sx={{ m: 0, pl: 2.5, display: 'grid', gap: 0.5, color: md.onSurfaceVariant }}>
           {CAVEATS.map(c => <Typography key={c} component="li" variant="body2">{t(`${A}caveat.${c}`)}</Typography>)}
         </Box>

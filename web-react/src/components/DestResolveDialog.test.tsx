@@ -39,7 +39,7 @@ describe('the hostname-matching dialog', () => {
     expect(radios.map(r => r.disabled)).toEqual([false, false, true])
     expect(radios[0].checked).toBe(true)
     expect(within(dialog).getByText('按原样（默认）：不做 DNS。IP 段与内网地址规则只对以 IP 发起的连接生效；带假 SNI/Host 的连接会被改去 SNI 指向的地址，IP 规则看不到它。')).toBeTruthy()
-    expect(within(dialog).getByText('按需解析：路由走到第一条 IP 规则时解析一次主机名，任一解析结果落在被拦网段即拦截。代价：每个连接多一次 DNS 查询与一次往返延迟（Xray 另外在拨号时再解析一次）。')).toBeTruthy()
+    expect(within(dialog).getByText('按需解析：路由走到第一条 IP 规则时解析一次主机名，任一解析结果落在被拦网段即拦截。')).toBeTruthy()
     expect(within(dialog).getByText('不匹配时解析（IPIfNonMatch）：不提供——会让仅报告和试运行分组改变判定。')).toBeTruthy()
   })
 
@@ -49,7 +49,29 @@ describe('the hostname-matching dialog', () => {
     expect(within(dialog).getByText(/Xray 在解析失败时放行/)).toBeTruthy()
     expect(within(dialog).getByText(/拨号时再解析一次/, { selector: '[data-testid="resolve-caveats"] *' })).toBeTruthy()
     expect(within(dialog).getByText(/routeOnly:true/)).toBeTruthy()
-    expect(within(dialog).getByText('切到按需解析后，这台节点会重启代理程序一次。')).toBeTruthy()
+    expect(within(dialog).getByText('切换后，只有节点实际收到的模式发生变化时（包括切回按原样），这台节点才会重启代理程序一次；策略里没有 IP 规则、节点版本不支持或被 routeOnly 入站拦下时不会重启。')).toBeTruthy()
+  })
+
+  it('states the per-engine cost', async () => {
+    open()
+    const dialog = await screen.findByRole('dialog')
+    const cost = within(dialog).getByTestId('resolve-cost')
+    expect(cost.textContent).toContain('Xray')
+    expect(cost.textContent).toContain('未缓存')
+    expect(cost.textContent).toContain('sing-box')
+    expect(cost.textContent).toContain('缓存')
+  })
+
+  it('says a node with no IP rules needs no resolution, as a neutral note', async () => {
+    open(node({ resolve: 'on_demand', resolve_effective: '', resolve_unavailable: 'no_ip_rules' }))
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByText('策略里没有 IP 段或内网规则，无需解析，按原样执行')).toBeTruthy()
+  })
+
+  it('says an unparseable sniffing config runs as-is', async () => {
+    open(node({ resolve: 'on_demand', resolve_effective: '', resolve_unavailable: 'sniffing' }))
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByText('入站嗅探配置无法解析，按原样执行')).toBeTruthy()
   })
 
   it('Save is disabled until the choice changes, then sends on_demand and closes', async () => {
@@ -62,7 +84,7 @@ describe('the hostname-matching dialog', () => {
     fireEvent.click(save)
     await waitFor(() => expect(api.setDestResolve).toHaveBeenCalledWith(5, 'on_demand'))
     expect(confirmMock).not.toHaveBeenCalled()
-    await waitFor(() => expect(snack).toHaveBeenCalledWith('已保存，东京 01 会在约 3 分钟内重启代理程序一次', 'success'))
+    await waitFor(() => expect(snack).toHaveBeenCalledWith('已保存，东京 01 可能会在约 3 分钟内重启代理程序一次', 'success'))
     expect(onClose).toHaveBeenCalled()
   })
 
@@ -109,5 +131,7 @@ describe('the hostname-matching dialog', () => {
     expect(within(dialog).getByRole('radio', { name: /As is \(default\)/ })).toBeTruthy()
     expect(within(dialog).getByRole('radio', { name: /Resolve on demand/ })).toBeTruthy()
     expect((within(dialog).getByRole('radio', { name: /Resolve if nothing matches/ }) as HTMLInputElement).disabled).toBe(true)
+    expect(within(dialog).getByText(/May restart the proxy core once/)).toBeTruthy()
+    expect(within(dialog).getByTestId('resolve-cost').textContent).toContain('uncached')
   })
 })

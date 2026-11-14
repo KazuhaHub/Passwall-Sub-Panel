@@ -38,6 +38,23 @@ describe('node state words', () => {
   }
 })
 
+describe('NodePolicyStatusRow hostname matching', () => {
+  const asked = { resolve: 'on_demand', resolve_effective: '' } as const
+  it('on_demand with no IP rules shows the neutral note and never the pending text', () => {
+    renderAccess(<NodePolicyStatusRow node={node({ ...asked, resolve_unavailable: 'no_ip_rules' })} variant="row" now={NOW} />)
+    expect(screen.getByText('策略里没有 IP 段或内网规则，无需解析，按原样执行')).toBeTruthy()
+    expect(screen.queryByText(/待下发/)).toBeNull()
+  })
+  it('an unparseable sniffing config is said', () => {
+    renderAccess(<NodePolicyStatusRow node={node({ ...asked, resolve_unavailable: 'sniffing' })} variant="row" now={NOW} />)
+    expect(screen.getByText('入站嗅探配置无法解析，按原样执行')).toBeTruthy()
+  })
+  it('on_demand without a reason is still pending', () => {
+    renderAccess(<NodePolicyStatusRow node={node({ ...asked, resolve_unavailable: null })} variant="row" now={NOW} />)
+    expect(screen.getByText(/待下发/)).toBeTruthy()
+  })
+})
+
 describe('NodePolicyStatusRow', () => {
   it('rejected: offers Apply again, which retries the agent', async () => {
     const onRetry = vi.fn()

@@ -298,6 +298,8 @@ export interface DestSourceRuleInput { countries: string[]; cidrs: string[]; sta
 
 // ---- test ----
 
+export type ResolveUnavailable = 'version' | 'route_only' | 'sniffing' | 'no_ip_rules'
+
 export interface DestTestInput {
   target: string
   port?: number
@@ -306,7 +308,7 @@ export interface DestTestInput {
   panel_id?: number
   inbound_node_id?: number
   source_ip?: string
-  /** The addresses the node would resolve the host name to (PSP does no DNS); at most 16 IP literals. */
+  /** The addresses the node would resolve the host name to (PSP does no DNS); at most 16 IP literals. Omitted: unknown. An empty array: the lookup failed. */
   resolved_ips?: string[]
 }
 
@@ -461,8 +463,8 @@ export interface DestNodeStatus {
   resolve?: DestResolve
   /** What the node was actually sent; '' is as_is. */
   resolve_effective?: '' | 'on_demand'
-  /** Why a node set to on_demand runs as_is: its version cannot, or an inbound sniffs with routeOnly. */
-  resolve_unavailable?: 'version' | 'route_only' | null
+  /** Why a node set to on_demand runs as_is. `no_ip_rules` is not a fault: the policy has nothing to resolve for. */
+  resolve_unavailable?: ResolveUnavailable | null
   /** Why the node was sent the policy without its report-only rules (enforced ones untouched); null when it got them all. */
   report_only_not_deployed?: 'sniffing' | 'limit' | null
   state: DestNodeState

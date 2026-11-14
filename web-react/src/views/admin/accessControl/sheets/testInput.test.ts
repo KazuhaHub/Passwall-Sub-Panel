@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { normalizeTarget, parseResolvedIps, validIp, validPort } from './testInput'
+import { normalizeTarget, parseResolvedIps, resolvedIpsPayload, validIp, validPort } from './testInput'
 
 describe('normalizeTarget', () => {
   it.each([
@@ -37,5 +37,19 @@ describe('parseResolvedIps', () => {
     expect(parseResolvedIps('10.0.0.1 nope').bad).toBe(true)
     expect(parseResolvedIps(Array.from({ length: 17 }, (_, i) => `10.0.0.${i}`).join(',')).bad).toBe(true)
     expect(parseResolvedIps(Array.from({ length: 16 }, (_, i) => `10.0.0.${i}`).join(',')).bad).toBe(false)
+  })
+})
+
+describe('resolvedIpsPayload', () => {
+  it('omits the field when nothing is typed and the lookup did not fail', () => {
+    expect(resolvedIpsPayload('', false)).toBeUndefined()
+    expect(resolvedIpsPayload(' , ', false)).toBeUndefined()
+  })
+  it('sends an empty array for a failed lookup, whatever is typed', () => {
+    expect(resolvedIpsPayload('', true)).toEqual([])
+    expect(resolvedIpsPayload('10.0.0.1', true)).toEqual([])
+  })
+  it('sends the list when typed', () => {
+    expect(resolvedIpsPayload('10.0.0.1, 2001:db8::1', false)).toEqual(['10.0.0.1', '2001:db8::1'])
   })
 })

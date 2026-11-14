@@ -15,7 +15,7 @@ import VerifiedUserOutlinedIcon from '@mui/icons-material/VerifiedUserOutlined'
 import VisibilityOutlinedIcon from '@mui/icons-material/VisibilityOutlined'
 import WarningAmberIcon from '@mui/icons-material/WarningAmber'
 import type {
-  DestAction, DestBudget, DestBudgetItem, DestListsView, DestNodeState, DestNodeStatus, DestPolicies, DestPolicy, DestState,
+  DestAction, DestBudget, DestBudgetItem, DestListsView, DestNodeState, DestNodeStatus, DestPolicies, DestPolicy, DestState, ResolveUnavailable,
   DestStatus,
 } from '@/api/accessControl'
 import type { StatusLineTone } from '@/components/StatusLine'
@@ -515,7 +515,7 @@ export type NodeResolveMode = 'as_is' | 'on_demand'
  * on_demand runs as_is. null for a node this page does not run policies on.
  * An older answer without the fields reads as as_is.
  */
-export function nodeResolve(node: Pick<DestNodeStatus, 'kind' | 'state' | 'resolve' | 'resolve_effective' | 'resolve_unavailable'>): { mode: NodeResolveMode; effective: NodeResolveMode; unavailable: 'version' | 'route_only' | null } | null {
+export function nodeResolve(node: Pick<DestNodeStatus, 'kind' | 'state' | 'resolve' | 'resolve_effective' | 'resolve_unavailable'>): { mode: NodeResolveMode; effective: NodeResolveMode; unavailable: ResolveUnavailable | null } | null {
   if (!isNativeKind(node.kind) || node.state === 'unsupported_kind') return null
   return {
     mode: node.resolve === 'on_demand' ? 'on_demand' : 'as_is',

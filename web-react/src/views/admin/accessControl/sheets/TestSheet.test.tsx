@@ -177,6 +177,30 @@ describe('TestSheet', () => {
     expect(vi.mocked(api.testDestination).mock.calls[1][0]).toMatchObject({ resolved_ips: ['10.0.0.1', '2001:db8::1'] })
   })
 
+  it('hints that the resolved IPs matter only for an on_demand node or inbound', () => {
+    renderAccess(<TestSheet open onClose={() => {}} onOpenPolicy={() => {}} />)
+    expect(screen.getByText(/只有选了按需解析（on_demand）的节点或入站时才会用到，否则忽略/)).toBeTruthy()
+  })
+
+  it('a failed lookup sends an empty resolved_ips, disables and clears the IP field', async () => {
+    vi.mocked(api.testDestination).mockResolvedValue(blocked())
+    renderAccess(<TestSheet open onClose={() => {}} onOpenPolicy={() => {}} />)
+    fireEvent.change(screen.getByRole('textbox', { name: /目的地/ }), { target: { value: 'a.example' } })
+    const ips = screen.getByRole('textbox', { name: /解析出的 IP/ }) as HTMLInputElement
+    fireEvent.change(ips, { target: { value: '10.0.0.1' } })
+    fireEvent.click(screen.getByRole('checkbox', { name: '解析失败（空结果）' }))
+    expect(ips.disabled).toBe(true)
+    expect(ips.value).toBe('')
+    run()
+    await waitFor(() => expect(api.testDestination).toHaveBeenCalledTimes(1))
+    expect(vi.mocked(api.testDestination).mock.calls[0][0]).toHaveProperty('resolved_ips', [])
+    fireEvent.click(screen.getByRole('checkbox', { name: '解析失败（空结果）' }))
+    expect(ips.disabled).toBe(false)
+    run()
+    await waitFor(() => expect(api.testDestination).toHaveBeenCalledTimes(2))
+    expect(vi.mocked(api.testDestination).mock.calls[1][0]).not.toHaveProperty('resolved_ips')
+  })
+
   it('validates the resolved IPs before asking', async () => {
     renderAccess(<TestSheet open onClose={() => {}} onOpenPolicy={() => {}} />)
     fireEvent.change(screen.getByRole('textbox', { name: /目的地/ }), { target: { value: 'a.example' } })

@@ -3,7 +3,7 @@ import { Box, Button, Typography, useTheme } from '@mui/material'
 import ChevronRightIcon from '@mui/icons-material/ChevronRight'
 import { useTranslation } from 'react-i18next'
 
-import type { DestNodeStatus } from '@/api/accessControl'
+import type { DestNodeStatus, ResolveUnavailable } from '@/api/accessControl'
 import { AsyncButton } from '@/components/AsyncButton'
 import ToneBadge from '@/components/ToneBadge'
 import {
@@ -80,11 +80,14 @@ export function nodeResolveText(t: T, node: DestNodeStatus): string | null {
   return t(`${S}node_resolve.line`, { mode: t(pending ? `${S}node_resolve.pending` : `${S}node_resolve.mode.${v.effective}`) })
 }
 
-/** Why a node set to on_demand runs as as_is: a quiet-amber badge with its words. */
-export function ResolveUnavailableBadge({ reason }: { reason: 'version' | 'route_only' }) {
+/**
+ * Why a node set to on_demand runs as as_is: a quiet-amber badge with its words.
+ * "No IP rules" is not a fault (nothing to resolve for), so it is a neutral note.
+ */
+export function ResolveUnavailableBadge({ reason }: { reason: ResolveUnavailable }) {
   const { t } = useTranslation(['admin'])
   const theme = useTheme()
-  return <ToneBadge tone={accessTone(theme, 'attention')} label={t(`${S}node_resolve.unavailable.${reason}`)} testId="node-resolve-unavailable" data={reason} />
+  return <ToneBadge tone={accessTone(theme, reason === 'no_ip_rules' ? 'none' : 'attention')} label={t(`${S}node_resolve.unavailable.${reason}`)} testId="node-resolve-unavailable" data={reason} />
 }
 
 export interface NodePolicyStatusRowProps {

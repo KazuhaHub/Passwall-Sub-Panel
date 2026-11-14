@@ -62,6 +62,13 @@ describe('the single-node dialog: recording and the last 24 hours (S15, 2c)', ()
     expect(box.textContent).toContain('入站 routeOnly 开启，按原样执行')
   })
 
+  it('a node with no IP rules shows the neutral note, not the pending text', async () => {
+    show(node({ resolve: 'on_demand', resolve_effective: '', resolve_unavailable: 'no_ip_rules' }))
+    const box = await screen.findByTestId('server-resolve')
+    expect(box.textContent).toContain('策略里没有 IP 段或内网规则，无需解析，按原样执行')
+    expect(box.textContent).not.toContain('待下发')
+  })
+
   it('a node that does not record has no hit block and says it does not record', async () => {
     show(node({ collect: 'off', collect_effective: 'off', collecting: false, hits_24h: 0 }))
     const recording = await screen.findByTestId('server-recording')
