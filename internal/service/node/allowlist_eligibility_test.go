@@ -155,3 +155,33 @@ func TestInboundEditsTriggerTheAllowlistResync(t *testing.T) {
 		t.Fatalf("a no-op enable told %v", *panels)
 	}
 }
+
+// An inbound that appears on or leaves a native panel changes what that panel's
+// sniffing judgement covers, so creating, importing, deleting and detaching one
+// tell the panel too.
+func TestInboundCreateAndRemovalTriggerTheAllowlistResync(t *testing.T) {
+	var panels []int64
+	resync := func(_ context.Context, id int64) { panels = append(panels, id) }
+
+	repo := &captureNodeRepo{}
+	client := &stubXUIClient{addID: 7, getResp: &ports.Inbound{Protocol: "vless", Settings: `{"decryption":"none"}`}}
+	svc := &Service{nodes: repo, pool: stubXUIPool{c: client}, groups: emptyGroups{}}
+	svc.SetAllowlistResyncer(resync)
+	spec := ports.InboundSpec{Protocol: "vless", Port: 443, Settings: `{"decryption":"none"}`, StreamSettings: `{"network":"tcp"}`}
+	if err := svc.CreateInbound(context.Background(), &domain.Node{DisplayName: "x", Region: "us", PanelID: 4}, spec); err != nil {
+		t.Fatal(err)
+	}
+	if len(panels) != 1 || panels[0] != 4 {
+		t.Fatalf("creating an inbound told %v, want panel 4", panels)
+	}
+
+	panels = nil
+	dsvc, drepo, _ := detachFixture()
+	dsvc.SetAllowlistResyncer(resync)
+	if err := dsvc.DetachAndSync(context.Background(), 7); err != nil {
+		t.Fatal(err)
+	}
+	if !drepo.deleted || len(panels) != 1 {
+		t.Fatalf("detaching told %v (deleted=%v), want one panel", panels, drepo.deleted)
+	}
+}

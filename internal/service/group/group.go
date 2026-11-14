@@ -29,6 +29,9 @@ type Service struct {
 	resyncer  MemberResyncer
 	countMu   sync.Mutex
 	counts    map[int64]memberCountEntry
+	// countVersion moves on every InvalidateMembers so an in-flight count read
+	// cannot repopulate what was just dropped.
+	countVersion uint64
 }
 
 func New(groups ports.GroupRepo, nodes ports.NodeRepo, scope ports.ScopeSettingsRepo) *Service {

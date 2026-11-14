@@ -766,3 +766,38 @@ func TestAllowlistExcludedPanels(t *testing.T) {
 		t.Fatal("a failed read must be an error")
 	}
 }
+
+func TestInvalidateMembersDropsCountsAndRejectsInFlightPut(t *testing.T) {
+	e := newEligEnv(t)
+	e.groups.groups = []*domain.Group{{ID: 5, TagFilter: domain.TagFilter{All: true}}}
+	e.groups.members = map[int64]int64{5: 40}
+	ctx := context.Background()
+	if n, _ := e.svc.TagMatchedMembers(ctx, 1, 5); n != 40 {
+		t.Fatalf("members = %d", n)
+	}
+	e.groups.members[5] = 41
+	e.svc.InvalidateMembers()
+	if n, _ := e.svc.TagMatchedMembers(ctx, 1, 5); n != 41 {
+		t.Fatalf("after a join the count is %d, want 41", n)
+	}
+}
+
+// ResyncAllowlistGroups says how many groups it resynced, so a caller can skip
+// work (dropping rendered subscriptions) when no group has an allowlist.
+func TestResyncAllowlistGroupsReportsHowManyWereResynced(t *testing.T) {
+	e := newEligEnv(t)
+	e.svc.groups = e.groups
+	var events []string
+	e.svc.SetMemberResyncer(resyncLog{&events})
+	e.groups.groups = []*domain.Group{{ID: 1}, {ID: 2}}
+	if n := e.svc.ResyncAllowlistGroups(context.Background(), 1); n != 0 {
+		t.Fatalf("resynced %d groups with no allowlist", n)
+	}
+	e.groups.groups = append(e.groups.groups, &domain.Group{ID: 3, DestAllowlist: domain.DestAllowlist{State: domain.DestStateOn}})
+	if n := e.svc.ResyncAllowlistGroups(context.Background(), 1); n != 1 {
+		t.Fatalf("resynced %d groups, want 1", n)
+	}
+	if n := e.svc.InboundsChanged(context.Background(), 1); n != 1 {
+		t.Fatalf("InboundsChanged resynced %d groups, want 1", n)
+	}
+}

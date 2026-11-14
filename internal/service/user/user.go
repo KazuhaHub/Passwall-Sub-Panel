@@ -122,6 +122,16 @@ type allowlistExclusions interface {
 	AllowlistExcludedPanels(ctx context.Context, g *domain.Group) (map[int64]bool, error)
 }
 
+// memberCountInvalidator is a NodeSelector that caches group member counts
+// (group.Service): told when anyone joins or leaves a group.
+type memberCountInvalidator interface{ InvalidateMembers() }
+
+func (s *Service) membersChanged() {
+	if inv, ok := s.selector.(memberCountInvalidator); ok {
+		inv.InvalidateMembers()
+	}
+}
+
 // retirementReporter is a PSPClientProvisioner that also says which of the
 // clients it retired went because the user has no node left on their panel and
 // which because another client on the same panel replaced them
@@ -374,6 +384,7 @@ func (s *Service) deleteUser(ctx context.Context, userID int64) error {
 	if err := s.users.Delete(ctx, userID); err != nil {
 		return err
 	}
+	s.membersChanged()
 	s.invalidateAuth(userID)
 	return nil
 }
@@ -745,6 +756,7 @@ func (s *Service) CreateLocal(ctx context.Context, in CreateLocalInput) (*Create
 	if err := s.users.Create(ctx, u); err != nil {
 		return nil, err
 	}
+	s.membersChanged()
 	return &CreateLocalResult{User: u, InitialPassword: pwd}, nil
 }
 
@@ -1023,6 +1035,7 @@ func (s *Service) EnsureSSO(ctx context.Context, in EnsureSSOInput) (*domain.Use
 	if err := s.users.Create(ctx, u); err != nil {
 		return nil, fmt.Errorf("create sso user: %w", err)
 	}
+	s.membersChanged()
 	return u, nil
 }
 
@@ -1111,6 +1124,7 @@ func (s *Service) reconcileSSOUser(ctx context.Context, u *domain.User, in Ensur
 		}
 	}
 	if groupChanged {
+		s.membersChanged()
 		// The new OU's node membership AND its inherited entitlements
 		// have to reach the panels; the stored row alone changes
 		// nothing on the nodes. Same mechanism an admin-side group move
@@ -1852,6 +1866,7 @@ func (s *Service) UpdateProfile(ctx context.Context, userID int64, in UpdateInpu
 		serviceStateChanged = true
 	}
 	if groupChanged {
+		s.membersChanged()
 		// ResyncMembershipOrEnqueue already returns nil when it managed to queue
 		// the work, so a non-nil error here means neither happened.
 		if err := s.ResyncMembershipOrEnqueue(ctx, userID, fmt.Sprintf("sync node membership for user %s", u.UPN)); err != nil {
@@ -2114,6 +2129,7 @@ func (s *Service) ChangeGroupAndSync(ctx context.Context, userID, newGroupID int
 	if err := s.updateUser(ctx, u); err != nil {
 		return err
 	}
+	s.membersChanged()
 	if err := s.ResyncMembershipOrEnqueue(ctx, userID, fmt.Sprintf("sync node membership for user %s", u.UPN)); err != nil {
 		log.Warn("enqueue user membership resync failed", "user_id", userID, "err", err)
 		return errUnqueuedPush("resync node membership", err, err)

@@ -206,6 +206,7 @@ func (s *Service) groupMembership(ctx context.Context, groupID int64) (memberCou
 		s.countMu.Unlock()
 		return e, nil
 	}
+	version := s.countVersion
 	s.countMu.Unlock()
 	g, err := s.groups.GetByID(ctx, groupID)
 	if err != nil {
@@ -217,10 +218,12 @@ func (s *Service) groupMembership(ctx context.Context, groupID int64) (memberCou
 	}
 	e := memberCountEntry{filter: g.TagFilter, members: int(n), expires: now.Add(eligibilityTTL)}
 	s.countMu.Lock()
-	if s.counts == nil {
-		s.counts = map[int64]memberCountEntry{}
+	if s.countVersion == version { // a read that began before an invalidation must not put its answer back
+		if s.counts == nil {
+			s.counts = map[int64]memberCountEntry{}
+		}
+		s.counts[groupID] = e
 	}
-	s.counts[groupID] = e
 	s.countMu.Unlock()
 	return e, nil
 }
@@ -239,33 +242,46 @@ func (s *Service) InvalidateEligibility(panelID int64) {
 		if panelID == 0 {
 			// The allowlist's state or the group itself changed: the cached tag
 			// filters and member counts go with the eligibility.
-			s.countMu.Lock()
-			clear(s.counts)
-			s.countMu.Unlock()
+			s.InvalidateMembers()
 		}
 	}
+}
+
+// InvalidateMembers drops the cached tag filters and member counts, for when a
+// member joins or leaves a group (the user service tells it).
+func (s *Service) InvalidateMembers() {
+	if s == nil {
+		return
+	}
+	s.countMu.Lock()
+	clear(s.counts)
+	s.countVersion++
+	s.countMu.Unlock()
 }
 
 // ResyncAllowlistGroups is what a change in what a panel can enforce triggers:
 // it drops the panel's cached eligibility and then re-derives the memberships
 // of every group that has an allowlist. The order is required: the resync
 // reads Eligible, which would otherwise answer from the cache the change made
-// stale. With no resyncer wired it only invalidates (the heal sweep converges
-// the members).
-func (s *Service) ResyncAllowlistGroups(ctx context.Context, panelID int64) {
+// stale. It returns how many groups it resynced. With no resyncer wired it only
+// invalidates (the heal sweep converges the members).
+func (s *Service) ResyncAllowlistGroups(ctx context.Context, panelID int64) int {
 	s.InvalidateEligibility(panelID)
 	if s.resyncer == nil {
-		return
+		return 0
 	}
 	groups, err := s.groups.List(ctx)
 	if err != nil {
-		return
+		return 0
 	}
+	n := 0
 	for _, g := range groups {
 		if allowlisted(g) {
 			s.resyncer.ResyncGroupMembersInBackground(g.ID)
+			n++
 		}
 	}
+	return n
 }
 
 func (s *Service) clock() time.Time {
@@ -346,15 +362,15 @@ func (c *eligibilityCache) invalidate(panelID int64) {
 // whether they are enabled) triggers. Only a native panel can enforce an
 // allowlist, so only for one does the change matter; its eligibility is then
 // re-read and the allowlist groups' members resynced.
-func (s *Service) InboundsChanged(ctx context.Context, panelID int64) {
+func (s *Service) InboundsChanged(ctx context.Context, panelID int64) int {
 	if s == nil || s.elig.Panels == nil {
-		return
+		return 0
 	}
 	panel, err := s.elig.Panels.GetByID(ctx, panelID)
 	if err != nil || domain.NormalizePanelKind(panel.Kind) != domain.PanelKindPSP {
-		return
+		return 0
 	}
-	s.ResyncAllowlistGroups(ctx, panelID)
+	return s.ResyncAllowlistGroups(ctx, panelID)
 }
 
 // Wired reports whether the eligibility reads and the member resyncer have been

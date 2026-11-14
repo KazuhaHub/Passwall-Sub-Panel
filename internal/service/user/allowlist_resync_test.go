@@ -270,3 +270,38 @@ func TestResyncMembership_AnAlreadyGoneClientOrPanelIsNotAFailure(t *testing.T) 
 		}
 	}
 }
+
+// invalidatingSelector records the member-count invalidations the group service
+// is owed when someone joins or leaves a group.
+type invalidatingSelector struct {
+	bfSelector
+	invalidations int
+}
+
+func (s *invalidatingSelector) InvalidateMembers() { s.invalidations++ }
+
+// A member joining or leaving a group changes the count the per-node limit is
+// judged by, so the cached count must not outlive it.
+func TestMembershipChangesInvalidateTheMemberCount(t *testing.T) {
+	sel := &invalidatingSelector{}
+	u := &domain.User{ID: 7, Enabled: true, GroupID: 1}
+	svc := &Service{
+		users:    &memoryUserRepo{byID: map[int64]*domain.User{7: u}},
+		groups:   &bfGroupRepo{g: &domain.Group{ID: 2}},
+		selector: sel,
+		settings: bfSettings{},
+	}
+	if err := svc.ChangeGroupAndSync(context.Background(), 7, 2); err != nil {
+		t.Logf("resync: %v", err) // the resync itself is not what is under test
+	}
+	if sel.invalidations == 0 {
+		t.Fatal("moving a user to another group left the cached member counts standing")
+	}
+	sel.invalidations = 0
+	if err := svc.deleteUser(context.Background(), 7); err != nil {
+		t.Fatal(err)
+	}
+	if sel.invalidations == 0 {
+		t.Fatal("deleting a user left the cached member counts standing")
+	}
+}

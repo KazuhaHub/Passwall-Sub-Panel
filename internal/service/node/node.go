@@ -500,6 +500,7 @@ func (s *Service) ImportExisting(ctx context.Context, n *domain.Node) error {
 	if err := s.nodes.Create(ctx, n); err != nil {
 		return err
 	}
+	s.inboundsChanged(ctx, n.PanelID)
 	s.syncExistingUsersToNodeInBackground(n)
 	return nil
 }
@@ -534,6 +535,7 @@ func (s *Service) CreateInbound(ctx context.Context, n *domain.Node, spec ports.
 		_ = c.DelInbound(context.Background(), inboundID)
 		return err
 	}
+	s.inboundsChanged(ctx, n.PanelID)
 	s.syncExistingUsersToNodeInBackground(n)
 	return nil
 }
@@ -943,6 +945,7 @@ func (s *Service) DeleteAndSync(ctx context.Context, id int64) error {
 	if err := s.nodes.UpdateEnabled(ctx, n.ID, false); err != nil {
 		return err
 	}
+	s.inboundsChanged(ctx, n.PanelID)
 	return s.enqueueNodeTask(ctx, domain.SyncTaskNodeDelete, n, "delete node", nil)
 }
 
@@ -969,7 +972,11 @@ func (s *Service) DetachAndSync(ctx context.Context, id int64) error {
 	if err := s.cleaner.UnclaimAllForInbound(ctx, n.PanelID, n.InboundID); err != nil {
 		return fmt.Errorf("unclaim owned clients: %w", err)
 	}
-	return s.nodes.Delete(ctx, n.ID)
+	if err := s.nodes.Delete(ctx, n.ID); err != nil {
+		return err
+	}
+	s.inboundsChanged(ctx, n.PanelID)
+	return nil
 }
 
 // ProcessDueTasks runs pending node-scoped 3X-UI write tasks.

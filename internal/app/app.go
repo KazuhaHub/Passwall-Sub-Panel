@@ -713,13 +713,16 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	nodeSvc.SetGroupEligibility(groupSvc)
 	reconcileSvc.SetGroupEligibility(groupSvc)
 	allowlistResync := func(ctx context.Context, panelID int64) {
-		groupSvc.ResyncAllowlistGroups(ctx, panelID)
-		renderSvc.InvalidateAll()
+		// Only an allowlist group's subscription depends on the answer.
+		if groupSvc.ResyncAllowlistGroups(ctx, panelID) > 0 {
+			renderSvc.InvalidateAll()
+		}
 	}
 	nativeSync.SetAllowlistResyncer(allowlistResync)
 	nodeSvc.SetAllowlistResyncer(func(ctx context.Context, panelID int64) {
-		groupSvc.InboundsChanged(ctx, panelID)
-		renderSvc.InvalidateAll()
+		if groupSvc.InboundsChanged(ctx, panelID) > 0 {
+			renderSvc.InvalidateAll()
+		}
 	})
 	destLists := destlist.New(destlist.Deps{
 		Lists:       destRepos.Lists,
