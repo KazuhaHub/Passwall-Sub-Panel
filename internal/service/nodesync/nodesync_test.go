@@ -70,7 +70,7 @@ func TestNativeCoreObservationPersistsAndInvalidatesRenderCache(t *testing.T) {
 	service := &Service{panels: repo, agents: agents, invalidateRender: func() { invalidations++ }}
 	now := time.Date(2026, time.September, 11, 12, 0, 0, 0, time.UTC)
 	agent := &domain.NodeAgent{AgentID: "agt_test", PanelID: 9}
-	if _, err := service.recordPanelObservation(t.Context(), agent, nodeprotocol.NodeReport{
+	if _, _, err := service.recordPanelObservation(t.Context(), agent, nodeprotocol.NodeReport{
 		AgentVersion: "v0.2.0", CoreEngine: "sing-box", CoreVersion: "1.14.0", CoreState: "running",
 	}, now); err != nil {
 		t.Fatal(err)
@@ -78,7 +78,7 @@ func TestNativeCoreObservationPersistsAndInvalidatesRenderCache(t *testing.T) {
 	if repo.panel.PanelVersion != "v0.2.0" || repo.panel.XrayVersion != "1.14.0" || agents.engine != domain.NodeCoreSingBox || repo.updates != 1 || invalidations != 1 {
 		t.Fatalf("persisted panel=%+v updates=%d invalidations=%d", repo.panel, repo.updates, invalidations)
 	}
-	if _, err := service.recordPanelObservation(t.Context(), agent, nodeprotocol.NodeReport{}, now.Add(time.Second)); err != nil {
+	if _, _, err := service.recordPanelObservation(t.Context(), agent, nodeprotocol.NodeReport{}, now.Add(time.Second)); err != nil {
 		t.Fatal(err)
 	}
 	if repo.panel.PanelVersion != "v0.2.0" || repo.panel.XrayVersion != "1.14.0" || invalidations != 1 {
@@ -105,13 +105,13 @@ func TestNativeXrayObservationConvergesEveryReportAndRetries(t *testing.T) {
 	agent := &domain.NodeAgent{AgentID: "agt_xray", PanelID: 9, ObservedCoreEngine: domain.NodeCoreXray}
 	report := nodeprotocol.NodeReport{CoreEngine: "xray", CoreVersion: "26.9.9", CoreState: "running"}
 
-	if _, err := service.recordPanelObservation(t.Context(), agent, report, time.Now()); err == nil {
+	if _, _, err := service.recordPanelObservation(t.Context(), agent, report, time.Now()); err == nil {
 		t.Fatal("first normalization failure was ignored")
 	}
 	if repo.panel.XrayVersion != "26.9.9" {
 		t.Fatalf("native boundary observation was not persisted: %q", repo.panel.XrayVersion)
 	}
-	normalized, err := service.recordPanelObservation(t.Context(), agent, report, time.Now().Add(time.Second))
+	normalized, _, err := service.recordPanelObservation(t.Context(), agent, report, time.Now().Add(time.Second))
 	if err != nil {
 		t.Fatal(err)
 	}

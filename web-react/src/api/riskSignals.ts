@@ -1,15 +1,15 @@
 import type { GeoAnomaly, GeoExcluded, GeoTier } from './geoAnomalies'
 
 /**
- * The four observe-only risk signals, mirroring domain.RiskKind. Each is
+ * The five observe-only risk signals, mirroring domain.RiskKind. Each is
  * judged on its own and stored as its own (account, kind) row: there is no
  * score, and nothing on the server acts on any of them.
  */
-export type RiskKind = 'sub_spread' | 'devices' | 'usage_shift' | 'login_country'
+export type RiskKind = 'sub_spread' | 'devices' | 'usage_shift' | 'login_country' | 'dest_block'
 
 /** Display order — the table's column order, and domain.RiskKinds(). The one
  *  list to extend for a new kind; a kind outside it is ignored everywhere. */
-export const RISK_KINDS: readonly RiskKind[] = ['sub_spread', 'devices', 'usage_shift', 'login_country']
+export const RISK_KINDS: readonly RiskKind[] = ['sub_spread', 'devices', 'usage_shift', 'login_country', 'dest_block']
 
 /**
  * Every code each kind's evaluator can write: a copy of
@@ -37,6 +37,9 @@ export const RISK_CODES: Readonly<Record<RiskKind, readonly string[]>> = {
     'signal_off', 'scope_off', 'allow_anywhere', 'trusted', 'no_recent_logins',
     'geo_unavailable', 'unplaced', 'learning',
     'new_country', 'known_countries',
+  ],
+  dest_block: [
+    'signal_off', 'no_collector', 'no_hits', 'within', 'over_building', 'over',
   ],
 }
 
@@ -138,6 +141,19 @@ export interface LoginCountryEvidence {
   known: string[]
   /** Newest first. */
   events: { cc: string; at_ms: number; method: string }[]
+}
+
+/** dest_block: blocked connections in the window by source (p<policy id> or
+ *  s<inbound id>). No address, port or destination, by design. */
+export interface DestBlockEvidence {
+  v: number
+  window_hours: number
+  threshold: number
+  total: number
+  /** At most five, most-hit first. */
+  by_source: { source: string; count: number }[]
+  /** Recording nodes the account has a client on. */
+  nodes: number
 }
 
 /** One stored (account, kind) row. `evidence` is null for a verdict with

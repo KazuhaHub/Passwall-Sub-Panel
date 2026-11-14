@@ -65,6 +65,8 @@ func (s *Service) ObserveStatus(ctx context.Context, agentID string, caps []stri
 					count, groups := len(pol.Rules), []int64{}
 					patch.AppliedSHA256, patch.AppliedBody, patch.AppliedAt = &status.Digest, &body, &now
 					patch.AppliedRuleCount, patch.AppliedGroups = &count, &groups
+					level := string(pol.Collect)
+					patch.AppliedCollect = &level
 				}
 			}
 		}
@@ -89,6 +91,7 @@ func (s *Service) ObserveStatus(ctx context.Context, agentID string, caps []stri
 			empty, none := "", []byte{}
 			zero, noGroups := 0, []int64{}
 			patch.AppliedSHA256, patch.AppliedBody, patch.AppliedRuleCount, patch.AppliedGroups = &empty, &none, &zero, &noGroups
+			patch.AppliedCollect = &empty
 			short := status.Digest
 			if len(short) > 12 {
 				short = short[:12]

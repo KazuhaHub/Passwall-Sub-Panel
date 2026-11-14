@@ -269,6 +269,10 @@
 |---|---|---|---|
 | `dest-list-refresh` | 刷新到期的远程列表；探测上游 geosite 最新版本（至多每 6 小时一次），自动模式下应用；发现 GeoIP 库被替换且有规则用到国家时让策略 generation +1；清理已到期的豁免 | 首次启动后 45 秒；之后每次睡眠 `min(dest_list_refresh_hours, 1 小时)`，每次醒来前重读设置 | **是**：缩短设置最多 1 小时内生效，不需要重启。只有早于刷新间隔的列表才会真的去拉，所以醒得勤不花代价 |
 
+| `dest-audit-ingest` | 命中记录入库 worker：从有界队列（每节点 4 批、全局 256 批）取出节点上报的命中批次，映射（subject → 账号、规则号去掉 `x<k>` → 来源）、按最终主键归并、写 `dest_hits` 与 `dest_audit_batches`（见 [access-control.md](access-control.md) §7） | 事件驱动（队列有新批次即醒）；另有 15 秒的定时器写出内存里记下的丢失计数 | 不适用。**关停时排空**：收到取消后在不随之取消的上下文里把队列处理完再返回（`Shutdown` 先停 HTTP、再取消、再等待，所以此时不会再有新批次入队） |
+
+命中记录的保留期清理不在这里，而是在每小时的 `audit-cleanup` 循环里（`pruneDestRows`，在 `pruneRiskReviews` 之后、`pruneCertEvents` 之前）：按 `dest.hit_retention_days` / `dest.trial_retention_days` 删除、清批次标记（72 小时）、清孤儿。
+
 访问控制的策略发布**没有自己的循环**：每台原生节点每次同步时，`destpolicy.Service.Compile` 先检查是否该发布（尾随去抖，见 [access-control.md](access-control.md) §4.1），
 所以发布的节奏跟着节点同步周期走，不需要定时器。两个服务的位置：`internal/service/destlist`（列表、geosite、国家展开）与
 `internal/service/destpolicy`（发布、编译、回退、管理端读取），二者与规则组目录 `internal/service/destcatalog` 都只依赖

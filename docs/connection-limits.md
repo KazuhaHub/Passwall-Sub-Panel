@@ -842,7 +842,7 @@ DNS 视角是不完整的：GeoDNS、anycast 下，PSP 解析到的地址和客�
 
 **刻意没做的**：任何信号都不触发自动动作（将来要做，就按 `geo_auto` 的路子给它单独的原因代码和按分组开启）；不按 x-hwid 执行设备上限，也不回 `x-hwid-*` 响应头；不做「不可能的行程」检测；没有手动重算。（按人「忽略」和「信任此账号」2026-09-28 在风控中心加上了，§14.5、§14.6：它们不改判定，只改谁需要一个决定。）
 
-### 13.2 四个信号，七种状态
+### 13.2 四个信号，七种状态（第五个信号 `dest_block` 见 §13.12）
 
 | 信号（`kind`） | 界面名 | 数据源 | 窗口 | 问的是什么 |
 |---|---|---|---|---|
@@ -1044,7 +1044,7 @@ max(floor(倍数 × 中位数 × 机队系数), 每日下限)
 | 列 | 类型 | 说明 |
 |---|---|---|
 | `user_id` | bigint | 和 `kind` 组成复合主键，两列都不自增 |
-| `kind` | varchar(24) | 四个信号之一 |
+| `kind` | varchar(24) | 五个信号之一（含 `dest_block`） |
 | `state` | varchar(16)，NOT NULL DEFAULT '' | v2 的七种状态之一 |
 | `code` | varchar(32)，NOT NULL DEFAULT '' | 分支代码 |
 | `evidence` | text，可空，**无默认值** | 证据 JSON；`idle` / `disabled` / `exempt` 为 NULL |
@@ -1157,6 +1157,26 @@ max(floor(倍数 × 中位数 × 机队系数), 每日下限)
 - 设置表里的 `risk.*` 行和分组覆盖里的 `risk.*` 行，旧版本都会跳过。
 - 更新的构建写下、这一版不认识的信号种类，接口不返回（13.8）。
 
+### 13.12 访问拦截（`dest_block`）
+
+第五个风险信号：账号在**最近 24 小时**里被访问控制策略**真正拦截**了多少次。观测，不处置。
+
+| 状态 | 代码 | 条件 |
+|---|---|---|
+| `disabled` | `signal_off` | `risk.dest_block_off`（全局或分组覆盖） |
+| `unknown` | `no_collector` | 该账号有 client 的原生节点里**没有一台在记录**（「在记录」由 PSP 推导：Xray、声明 `audit.hits.v1`、下发的采集档位非空、并且上报了对当前摘要的 `applied`；sing-box 节点只执行、永远不算）。没人在看，「0 次」是没有依据的说法，所以是未知，不是正常 |
+| `idle` | `no_hits` | 有节点在记录，窗口内被拦截 0 次 |
+| `clean` | `within` | 0 < 次数 < ⌈阈值/2⌉ |
+| `suspect` | `over_building` | ⌈阈值/2⌉ ≤ 次数 < 阈值 |
+| `flagged` | `over` | 次数 ≥ 阈值 |
+
+- **永不 `exempt`**：「信任此账号」只免去地点类来源（`LOCATION_SOURCES`），不隐藏 `dest_block`——信任一个人在哪里登录，不等于信任他去哪里；「忽略」照常可用。`domain.AllRiskCodes()[dest_block]` 恰好是这六个代码。
+- **计数口径**：窗口固定 24 小时（当前小时加前 23 个小时桶）；只统计 `dest_hits` 中 `action = block`、且来源是 `counts_as_risk = true` 的 `p*` 策略的行。**仅报告（`observe`）的命中不计入**——那是被放行的连接；白名单兜底（`g*`）永不计入；已删除策略的命中不计。
+- **阈值**：`risk.dest_block_threshold`，0 = 默认 20，夹到 1–10000，可按分组覆盖；开关 `risk.dest_block_off` 同样。两者属于风控中心策略（`ports.RiskCenterPolicy`，48 → 50 个键），不在系统设置页；不在 `RuntimeEffective` 里。
+- **证据**：`{"v":1,"window_hours":24,"threshold":20,"total":37,"by_source":[{"source":"p12","count":30},…],"nodes":2}`，最多 5 个来源。**不含目的地、端口、IP**（§14.14 的规矩，而且证据会被复制进 `flag_records`，保留期比命中更长）。`TestRefresh_DestBlockEvidenceHasNoAddress` 与领域层的同名断言要求证据里任何字符串都不能解析为地址或网段。
+- **读取是窄的只读接口**：`risk.Deps.Dest` 只有 `DestBlockInputs`，一轮一次，返回每个账号的「在记录节点数」与计入的拦截数；`TestRiskServiceCannotWriteServiceState` 钉住方法集。读不到时这个信号保留上一轮的行，这一轮计 `partial`。
+- 进入待处理与通知铃的方式与其他信号相同（`flagged` 进待处理，计入唯一的 `risk_queue` 铃铛），不新增铃铛类型。
+
 ### 13.11 指标
 
 | 指标 | 类型 | 含义，以及什么时候该看 |
@@ -1229,7 +1249,7 @@ max(floor(倍数 × 中位数 × 机队系数), 每日下限)
 
 - `geo`（异地并发）看**连续计数**，不看这一轮的状态：锁住 = 已标记，`over > 0` = 疑似，否则无（`domain.GeoAttentionOf`，和标记记录同一条规则，§14.10）。一个已标记的账号断开连接，它仍然已标记。
 - `geo_auto`：服务轴上是检测器自己的暂停，级别「已暂停」，判定时间就是 `service_disabled_at`。人工的 `geo_anomaly` 不是信号来源：它是某人刚做的决定。
-- 四个风险信号：`flagged` / `suspect`，其余状态——包括 `unknown`——都算无。
+- 五个风险信号（含 §13.12 的 `dest_block`）：`flagged` / `suspect`，其余状态——包括 `unknown`——都算无。
 
 **只算新鲜的判定**：异地并发的行要在 `GeoBellFreshness` 之内被重判过，风险信号的行要在 `AlertFreshness` 之内被重写过——正是通知铃一直用的两个窗口（`risk.alert_freshness_hours`，默认 24 小时；异地并发那一条再不短于两个流量轮询间隔，风险信号那一条再不短于两个计算间隔、补足到整小时，§12.5.1）。一个一天没人重判的锁存是历史：抽屉里照样显示它，标着「超过新鲜度未重新判定，不计入待处理」。这个设置因此改名为「待处理与通知铃新鲜度（小时）」，提示里写着它也决定待处理。
 
@@ -1284,7 +1304,7 @@ max(floor(倍数 × 中位数 × 机队系数), 每日下限)
 - 账号：状态、服务状态与原因、暂停时刻和说明；
 - 当前信号：和待处理同一个计算（§14.3）；
 - 复核：谁在何时忽略、备注、接受的级别、是否再次升级（哪些来源）或已过期、谁在何时信任。管理员按**当前**的 UPN 解析，那个账号已删时前端显示 `#id`；
-- 异地并发的判定和四个风险信号，**任何状态、任何新旧**，各带「是否过时」；
+- 异地并发的判定和五个风险信号，**任何状态、任何新旧**，各带「是否过时」；
 - 这个账号在在线快照里的那部分（和 `GET /risk-center/live?user_id=` 同形）；
 - 最近 `risk.device_infer_hours` 内的订阅拉取按设备归并的结果。订阅日志读不到时标出来，不让整个抽屉失败。
 
@@ -1651,9 +1671,9 @@ AND NOT EXISTS (SELECT 1 FROM risk_reviews WHERE risk_reviews.user_id = ? AND ri
 
 （2026-09-28。取代原来的「§14.6 能调的都是设置」里「在哪设」那一部分；每个值的意义、默认、范围和为什么只有全局，见本节后半。）
 
-**「风控中心 › 策略」是这 48 个设置唯一的编辑处**：`UISettings` 里所有 `geo_anomaly_*` 和 `risk_*` 字段。它们原来在系统设置 → 基本设置里一长串，四十八个旋钮每个提示里都写着「0 = 默认」，默认值抄在前端里，一次保存发出整份设置，分组例外在另一个对话框里。
+**「风控中心 › 策略」是这 50 个设置唯一的编辑处**：`UISettings` 里所有 `geo_anomaly_*` 和 `risk_*` 字段。它们原来在系统设置 → 基本设置里一长串，四十八个旋钮每个提示里都写着「0 = 默认」，默认值抄在前端里，一次保存发出整份设置，分组例外在另一个对话框里。
 
-**卡片**，按顺序：异地并发、订阅多地、设备数、用量变化、登录国家、数据与刷新，最后是分组例外。每张检测卡是一个开关、一个预设、几个关键阈值，其余在折叠的「高级」里——里面有任何一项配置过（数字大于 0、文本非空、开关不是默认），它就默认展开，一个改过的值不会藏在折叠后面。开关关着的卡片，字段仍可编辑，只是变淡。
+**卡片**，按顺序：异地并发、订阅多地、设备数、用量变化、登录国家、访问拦截、数据与刷新，最后是分组例外（共七张检测与数据卡片）。每张检测卡是一个开关、一个预设、几个关键阈值，其余在折叠的「高级」里——里面有任何一项配置过（数字大于 0、文本非空、开关不是默认），它就默认展开，一个改过的值不会藏在折叠后面。开关关着的卡片，字段仍可编辑，只是变淡。
 
 | 卡片 | 开关 | 关键 | 处置 | 高级 |
 |---|---|---|---|---|
@@ -1662,6 +1682,7 @@ AND NOT EXISTS (SELECT 1 FROM risk_reviews WHERE risk_reviews.user_id = ? AND ri
 | 设备数 | `!risk_devices_off` | 设备上限；一行写共用的常驻天数（随订阅多地的预设变化），一行指向「数据与刷新」里的设备标识采集 | — | — |
 | 用量变化 | `!risk_usage_shift_off` | 用量倍数、每日用量下限 | — | 超标几天即标记*、超标几天即疑似*、学习期*、基线天数*、判定天数* |
 | 登录国家 | `!risk_login_country_off` | （没有关键阈值，没有预设） | — | 学习次数*、保持天数*、回溯天数* |
+| 访问拦截 | `!risk_dest_block_off` | 拦截次数阈值（`risk_dest_block_threshold`，0 = 默认 20，1–10000） | — | —（没有预设） |
 | 数据与刷新 | — | 连接历史保留*、标记记录保留*、快照过时线*、刷新冷却*、设备推断窗口*、设备标识采集 | — | 计算间隔*、首轮延迟*、待处理与通知铃新鲜度*、订阅窗口*、共享出口账号数*、中转地址刷新间隔*、主机名解析缓存* |
 
 带 `*` 的是 23 个运行参数（下面的表），下面一行写「当前生效：N」。用量的两个「超标天数」放在高级里而不在倍数旁边：它们不是预设键，一个亮着的预设不设它们，放在旁边的话，卡片会挂着一个它已经不是的预设名。
@@ -1681,7 +1702,7 @@ AND NOT EXISTS (SELECT 1 FROM risk_reviews WHERE risk_reviews.user_id = ? AND ri
 
 **默认值、范围与恢复默认**：
 
-- `GET /api/admin/risk-center/policy` 带着每个数字键（38 个）的出厂默认（`defaults`，`ports.RiskCenterPolicyDefaults()`，取自 domain 的默认值和运行参数的默认），页面不存任何默认值的副本。
+- `GET /api/admin/risk-center/policy` 带着每个数字键（39 个）的出厂默认（`defaults`，`ports.RiskCenterPolicyDefaults()`，取自 domain 的默认值和运行参数的默认），页面不存任何默认值的副本。
 - 存储值 ≤ 0（未配置）时输入框是空的，灰色占位就是默认值，尾部一个「默认」标记；配置过的值旁边有「恢复默认」，把它存回 0。可以输入小数（最低可定位比例 0.5、用量倍数 2.5），输入过程中的 `0.` 不会被吞掉。
 - 提示后面接「范围 A–B，默认 D」、「不小于 A，默认 D」或「默认 D」。运行参数的提示本来就写着默认和范围，不再接。
 - **范围是服务端夹取边界的镜像**（`policy/policyLayout.ts`，每一条都注明出自哪个 domain 函数，没有发明的）：可定位比例 0–1，暂停时长 1–10080，常驻天数 1–7，倍数不小于 1.5，运行参数按各自的 `settingOr` 边界。超出范围的值标红、「保存策略」不可用——而不是让服务端悄悄把它改成别的数。依赖另一个设置的下限（两个流量轮询间隔、判定天数、回溯天数）不做成范围，由「当前生效」一行显示。
@@ -1698,8 +1719,8 @@ AND NOT EXISTS (SELECT 1 FROM risk_reviews WHERE risk_reviews.user_id = ? AND ri
 
 **设置归属**：
 
-- `GET` / `PUT /api/admin/risk-center/policy`（仅管理员）是这 48 个键唯一的写入口。`ports.RiskCenterPolicy` 正好是 `UISettings` 里所有 `geo_anomaly_*` 和 `risk_*` 字段——同名、同类型、同 json 标签，反射测试双向钉住（`TestRiskCenterPolicy_IsExactlyTheGeoAndRiskFields`）；前端的键表 `policyKeys.json` 由一个 Go 测试对着它读（`TestRiskCenterPolicyKeysMatchTheSPA`）。给 `UISettings` 加一个 `risk_*` 字段而不加到这里，构建失败。
-- `PUT /api/admin/settings/ui` **不再读**请求里的这 48 个键，照原样写回它读到的存储值（`TestSettingsPut_NeverReadsPolicyFieldsFromTheRequest` 扫描处理器的语法树，不许出现 `req.<这些字段>`）；也不再校验忽略名单——它不存它，一个存着的坏名单不能挡住无关的保存。所以一个在策略保存**之前**打开的系统设置页再保存，也改不动策略。`GET /settings/ui` 仍返回这 48 个键（只读）：分组编辑器的继承基线和旧前端要读它们；`runtime_effective` / `runtime_defaults` 也还在。
+- `GET` / `PUT /api/admin/risk-center/policy`（仅管理员）是这 50 个键唯一的写入口。`ports.RiskCenterPolicy` 正好是 `UISettings` 里所有 `geo_anomaly_*` 和 `risk_*` 字段——同名、同类型、同 json 标签，反射测试双向钉住（`TestRiskCenterPolicy_IsExactlyTheGeoAndRiskFields`）；前端的键表 `policyKeys.json` 由一个 Go 测试对着它读（`TestRiskCenterPolicyKeysMatchTheSPA`）。给 `UISettings` 加一个 `risk_*` 字段而不加到这里，构建失败。
+- `PUT /api/admin/settings/ui` **不再读**请求里的这 50 个键，照原样写回它读到的存储值（`TestSettingsPut_NeverReadsPolicyFieldsFromTheRequest` 扫描处理器的语法树，不许出现 `req.<这些字段>`）；也不再校验忽略名单——它不存它，一个存着的坏名单不能挡住无关的保存。所以一个在策略保存**之前**打开的系统设置页再保存，也改不动策略。`GET /settings/ui` 仍返回这 50 个键（只读）：分组编辑器的继承基线和旧前端要读它们；`runtime_effective` / `runtime_defaults` 也还在。
 - 两个写入者都是「整份读 → 改自己那部分 → 整份存」（设置表的 `Save` 重写每一个键），所以共用一把**进程内**的写锁（`uiSettingsWriteMu`），从读一直拿到存完：否则两次保存在几毫秒内交错，后存的会把先存的改动整个覆盖回去（`TestSettingsWritesAreSerialized`）。
 - 系统设置 › 基本设置里只剩「IP 地区显示」一块，下面一行指向「风控中心 › 策略」。分组对话框不再显示这三个类别，只有一个在**新标签页**打开本页（带 `group=`）的链接：对话框不跟踪未保存的修改，在当前标签页跳走会把它们丢掉。
 
@@ -1824,7 +1845,7 @@ AND NOT EXISTS (SELECT 1 FROM risk_reviews WHERE risk_reviews.user_id = ? AND ri
 - **没有新的设置键**，存着的值都不变，判定也不变。`risk.alert_freshness_hours` 只是改了名字和提示（「待处理与通知铃新鲜度」）。
 - 一开始没有人被忽略或信任：待处理列出每个有新鲜信号的账号。升级前铃里的三条合成一条，同一个账号只算一次，所以数字通常比原来三条加起来小；疑似账号在待处理里，但和以前一样不响铃。
 - 旧链接自动转（§14.2）。升级时还开着的旧页面，铃里新的这一条标题是空的（旧前端不认识 `risk_queue`），刷新页面即可。
-- 系统设置里的异地并发与风险信号设置搬到了策略页。升级前打开的系统设置页再保存，也改不动这 48 个键（服务端不再读它们，§14.11）。分组对话框里的异地并发与风险信号覆盖同样搬到了策略页的分组例外；存着的分组覆盖原样生效。
+- 系统设置里的异地并发与风险信号设置搬到了策略页。升级前打开的系统设置页再保存，也改不动这 50 个键（服务端不再读它们，§14.11）。分组对话框里的异地并发与风险信号覆盖同样搬到了策略页的分组例外；存着的分组覆盖原样生效。
 
 **降级到改版之前（2026-09-27 或更早）**：
 
@@ -1832,7 +1853,7 @@ AND NOT EXISTS (SELECT 1 FROM risk_reviews WHERE risk_reviews.user_id = ? AND ri
 - **信任随之失效**：被信任的账号重新接受三个地点类判定，所在分组开了自动临时暂停的，可能再次被 `geo_auto` 暂停。降级之前，把确认误报的账号移进关闭了自动暂停、或允许任何地方的分组。忽略同样失效——旧版本没有待处理，铃又按它原来的三条计算。
 - 这张表不存地址，但有管理员写的备注；想清掉就 `DROP TABLE risk_reviews;`。
 - `flag_records` 里 `source = 'review'` 的行留着：旧版本的记录页原样显示 `review` 和事件代码，它的「已解除」筛选也会列出它们（它们的级别是空）。想去掉就 `DELETE FROM flag_records WHERE source = 'review';`。
-- 旧版本的系统设置页重新编辑这 48 个键，旧版本的铃恢复三条旧条目。
+- 旧版本的系统设置页重新编辑这 50 个键，旧版本的铃恢复三条旧条目。
 
 **2026-09-27 那一版的升级与降级**（原 §14.8）：
 

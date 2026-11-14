@@ -272,8 +272,7 @@ func cloneTemplate(t Template) Template {
 // Instantiate adds a template: it prepares the geosite lists the template
 // covers (downloading the geosite data first if there is none), then creates
 // the lists — reusing identical ones — and the policy in one transaction. The
-// admin chooses the state; there is no default, and report is refused until
-// the hit recording that makes it useful exists. A group listed as unavailable
+// admin chooses the state (off, report or on); there is no default. A group listed as unavailable
 // creates nothing.
 func (s *Service) Instantiate(ctx context.Context, key, locale string, state domain.DestState) (*domain.DestPolicy, error) {
 	if _, ok := s.catalog.unavailable(key); ok {
@@ -283,8 +282,8 @@ func (s *Service) Instantiate(ctx context.Context, key, locale string, state dom
 	if !ok {
 		return nil, fmt.Errorf("%w: %s", ErrUnknownTemplate, key)
 	}
-	if !domain.DestStateSelectable(state) {
-		return nil, fmt.Errorf("%w: the state must be off or on", domain.ErrValidation)
+	if !state.Valid() {
+		return nil, fmt.Errorf("%w: the state must be off, report or on", domain.ErrValidation)
 	}
 	var specs []domain.DestList
 	if len(t.Geosite) > 0 {

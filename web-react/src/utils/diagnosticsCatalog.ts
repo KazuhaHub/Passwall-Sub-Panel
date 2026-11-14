@@ -131,6 +131,11 @@ export const FAMILY_CATALOG: Record<string, FamilyInfo> = {
   psp_dest_policy_publish_total: c('node', true),
   psp_dest_policy_publish_rejected_total: c('node'),
   psp_node_policy_status_dropped_total: c('node'),
+  psp_node_audit_report_total: c('node', true),
+  psp_dest_audit_rows_total: c('node', true),
+  psp_dest_audit_node_dropped_total: c('node'),
+  psp_dest_audit_node_unmatched_total: c('node'),
+  psp_dest_pruned_rows_total: c('node', true),
 
   // --- single sign-on ---
   psp_saml_acs_failure_total: c('sso', true),
@@ -160,6 +165,9 @@ export const FAMILY_LABEL_GROUP: Record<string, string> = {
   psp_dest_list_refresh_total: 'dest_list_refresh',
   psp_dest_policy_compile_total: 'dest_compile',
   psp_dest_policy_publish_total: 'dest_publish',
+  psp_node_audit_report_total: 'node_audit_report',
+  psp_dest_audit_rows_total: 'dest_rows',
+  psp_dest_pruned_rows_total: 'dest_table',
   psp_saml_acs_failure_total: 'saml',
   psp_sso_claim_silent_total: 'sso_kind',
 }

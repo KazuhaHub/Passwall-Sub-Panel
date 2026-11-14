@@ -10,7 +10,7 @@ import (
 )
 
 // snapshotDoc is the published serialisation of every definition Compile reads.
-// It holds only what is IN FORCE: policies that are not off, the lists they
+// It holds only what is IN FORCE: policies that are on or report-only, the lists they
 // (and the source rules) reference, the exemptions that have not expired, and
 // the source rules that are on. Everything else is irrelevant to a node and
 // would make an edit of a policy nobody enabled look like a change.
@@ -38,19 +38,25 @@ type snapList struct {
 }
 
 type snapPolicy struct {
-	ID       int64                   `json:"id"`
-	Name     string                  `json:"name"`
-	Action   string                  `json:"action"`
-	Priority int                     `json:"priority"`
-	Scope    string                  `json:"scope"`
-	Groups   []int64                 `json:"groups,omitempty"`
-	Panels   []int64                 `json:"panels,omitempty"`
-	Lists    []int64                 `json:"lists,omitempty"`
-	Inline   domain.DestPolicyInline `json:"inline"`
+	ID       int64  `json:"id"`
+	Name     string `json:"name"`
+	Action   string `json:"action"`
+	Priority int    `json:"priority"`
+	Scope    string `json:"scope"`
+	// State is "report" for a report-only policy and absent for an enforced
+	// one, so a snapshot of enforced policies is byte-identical to what it was
+	// before the report state existed.
+	State  string                  `json:"state,omitempty"`
+	Groups []int64                 `json:"groups,omitempty"`
+	Panels []int64                 `json:"panels,omitempty"`
+	Lists  []int64                 `json:"lists,omitempty"`
+	Inline domain.DestPolicyInline `json:"inline"`
 }
 
 type snapSource struct {
-	Node      int64    `json:"node"`
+	Node int64 `json:"node"`
+	// State is "report" for a report-only source rule, absent when enforced.
+	State     string   `json:"state,omitempty"`
 	Countries []string `json:"countries,omitempty"`
 	CIDRs     []string `json:"cidrs,omitempty"`
 }
@@ -84,12 +90,18 @@ func newSnapshotDoc(defs *domain.DestDefinitions, state *domain.DestPolicyState,
 		return int(a.ID - b.ID)
 	})
 	for _, p := range policies {
-		if p.State != domain.DestStateOn {
+		// A policy is in force when it is on, or when it is a BLOCK policy in the
+		// report state. An allow policy has no report state (it would have to
+		// change a verdict to be reported); a stored one is treated as off.
+		if p.State != domain.DestStateOn && !(p.State == domain.DestStateReport && p.Action == domain.DestActionBlock) {
 			continue
 		}
 		sp := snapPolicy{
 			ID: p.ID, Name: p.Name, Action: string(p.Action), Priority: p.Priority, Scope: string(p.Scope),
 			Lists: slices.Clone(p.ListIDs), Inline: p.Inline,
+		}
+		if p.State == domain.DestStateReport {
+			sp.State = string(domain.DestStateReport)
 		}
 		slices.Sort(sp.Lists)
 		switch p.Scope {
@@ -106,10 +118,14 @@ func newSnapshotDoc(defs *domain.DestDefinitions, state *domain.DestPolicyState,
 		doc.Policy = append(doc.Policy, sp)
 	}
 	for _, r := range defs.SourceRules {
-		if r.State != domain.DestStateOn {
+		if r.State != domain.DestStateOn && r.State != domain.DestStateReport {
 			continue
 		}
-		doc.Sources = append(doc.Sources, snapSource{Node: r.NodeID, Countries: slices.Clone(r.Countries), CIDRs: slices.Clone(r.CIDRs)})
+		src := snapSource{Node: r.NodeID, Countries: slices.Clone(r.Countries), CIDRs: slices.Clone(r.CIDRs)}
+		if r.State == domain.DestStateReport {
+			src.State = string(domain.DestStateReport)
+		}
+		doc.Sources = append(doc.Sources, src)
 	}
 	for _, l := range defs.Lists {
 		if !used[l.ID] {

@@ -35,9 +35,13 @@ type destPolicyView struct {
 	Note       *destpolicy.PolicyNote `json:"note"`
 	// ScopeMissing: a group or a panel the policy is scoped to is gone.
 	ScopeMissing bool `json:"scope_missing"`
-	// HitsRecent / LastHitAt are null until hit recording exists.
-	HitsRecent *int64 `json:"hits_recent"`
-	LastHitAt  *int64 `json:"last_hit_at"`
+	// HitsRecent is the policy's BLOCK hits in the hit window, LastHitAt its
+	// latest hit of any kind, and WouldBlockRecent (report-state policies only)
+	// the connections it would have blocked: its report-only hits. HitsRecent and
+	// WouldBlockRecent are null while no node is recording.
+	HitsRecent       *int64 `json:"hits_recent"`
+	WouldBlockRecent *int64 `json:"would_block_recent"`
+	LastHitAt        *int64 `json:"last_hit_at"`
 }
 
 type destListState struct {
@@ -92,8 +96,8 @@ func (h *AdminDestHandler) policyView(ctx context.Context, p *domain.DestPolicy,
 }
 
 // ListPolicies answers GET /api/admin/dest/policies: the allow and block
-// policies in evaluation order, with the budget. (observe is always empty:
-// report-only arrives with hit recording.)
+// policies in evaluation order, with the budget. A report-only policy is in
+// block with state "report"; observe is always empty (kept for the shape).
 func (h *AdminDestHandler) ListPolicies(c *gin.Context) {
 	if !h.ready(c, h.w.Admin != nil && h.w.Policies != nil && h.w.Lists != nil && h.w.Policy != nil) {
 		return
@@ -123,6 +127,8 @@ func (h *AdminDestHandler) ListPolicies(c *gin.Context) {
 			block = append(block, v)
 		}
 	}
+	hitDays := h.policyHits(ctx, block)
+	h.policyHits(ctx, allow)
 	exemptions := 0
 	if h.w.Exemptions != nil {
 		if list, err := h.w.Exemptions.List(ctx); err == nil {
@@ -131,7 +137,7 @@ func (h *AdminDestHandler) ListPolicies(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"allow": allow, "block": block, "observe": []destPolicyView{}, "exemptions": gin.H{"count": exemptions},
-		"allowlist_groups": []any{}, "hit_window_days": 7, "budget": budget,
+		"allowlist_groups": []any{}, "hit_window_days": hitDays, "budget": budget,
 	})
 }
 

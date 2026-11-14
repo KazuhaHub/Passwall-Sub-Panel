@@ -706,7 +706,7 @@ func TestQueue_EvidenceLoadedForThePageOnly(t *testing.T) {
 // still override that, which the page's copy says.
 func TestQueue_GlobalDetectorsOff(t *testing.T) {
 	h := newHarness()
-	off := ports.UISettings{GeoAnomalyScope: " OFF ", RiskSubSpreadOff: true, RiskDevicesOff: true, RiskUsageShiftOff: true, RiskLoginCountryOff: true}
+	off := ports.UISettings{GeoAnomalyScope: " OFF ", RiskSubSpreadOff: true, RiskDevicesOff: true, RiskUsageShiftOff: true, RiskLoginCountryOff: true, RiskDestBlockOff: true}
 	h.settings.set = off
 	if !h.queue(t, QueueQuery{}).GlobalDetectorsOff {
 		t.Fatal("every detector off globally, want GlobalDetectorsOff")
@@ -717,6 +717,7 @@ func TestQueue_GlobalDetectorsOff(t *testing.T) {
 		func(s *ports.UISettings) { s.RiskDevicesOff = false },
 		func(s *ports.UISettings) { s.RiskUsageShiftOff = false },
 		func(s *ports.UISettings) { s.RiskLoginCountryOff = false },
+		func(s *ports.UISettings) { s.RiskDestBlockOff = false },
 	} {
 		set := off
 		on(&set)

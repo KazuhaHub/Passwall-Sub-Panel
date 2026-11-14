@@ -124,7 +124,7 @@ func newDestFixture(t *testing.T, wired bool) *destFixture {
 		adminSvc, err := destpolicy.NewAdmin(destpolicy.AdminDeps{
 			Service: policy, Policies: dest.Policies, Lists: dest.Lists, Counter: dest, Groups: repos.Group, Panels: repos.XUIPanel,
 			Nodes: repos.Node, Clients: repos.PSPClient, Agents: repos.NodeAgent, Desired: repos.NativeDesired, Settings: repos.Settings,
-			Instantiate: dest.InstantiateTemplate, ExceptionEditor: lists,
+			Instantiate: dest.InstantiateTemplate, ExceptionEditor: lists, Hits: dest.Hits,
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -132,6 +132,7 @@ func newDestFixture(t *testing.T, wired bool) *destFixture {
 		deps.Dest = handler.DestWiring{
 			Lists: lists, Catalog: catalog, Policy: policy, Admin: adminSvc, Policies: dest.Policies, Exemptions: dest.Exemptions,
 			SourceRules: dest.SourceRules, Users: users, Groups: repos.Group, Nodes: repos.Node, Panels: repos.XUIPanel,
+			Hits: dest.Hits,
 		}
 	}
 	router := NewRouter(deps)
@@ -191,6 +192,7 @@ var destRoutes = []destRoute{
 	{"POST", "/api/admin/dest/exceptions", `{"target":"example.com","match":"site","scope":"global"}`},
 	{"POST", "/api/admin/dest/test", `{"target":"example.com"}`},
 	{"GET", "/api/admin/dest/users/2", ""},
+	{"GET", "/api/admin/dest/hits", ""},
 	{"GET", "/api/admin/dest/status", ""},
 	{"POST", "/api/admin/dest/publish", ""},
 	{"PUT", "/api/admin/dest/pause", `{"paused":true}`},
@@ -334,7 +336,14 @@ func TestDestPoliciesAPI(t *testing.T) {
 	list := f.expect("POST", "/lists", `{"name":"l","kind":"custom","text":"a.example.com"}`, 201, "")["list"].(map[string]any)
 	lid := num(list["id"])
 
-	f.expect("POST", "/policies", `{"name":"p","action":"block","state":"report","inline":{"ports":"25"}}`, 400, "dest_policy_state_unavailable")
+	// Report-only is a state like any other for a block policy; an allow policy
+	// has none.
+	f.expect("POST", "/policies", `{"name":"p","action":"allow","state":"report","inline":{"ports":"25"}}`, 400, "dest_policy_state_unavailable")
+	rep := f.expect("POST", "/policies", `{"name":"w","action":"block","state":"report","inline":{"ports":"25"}}`, 201, "")["policy"].(map[string]any)
+	if rep["state"] != "report" {
+		t.Fatalf("a report-only policy came back as %v", rep["state"])
+	}
+	f.expect("DELETE", "/policies/"+itoa(num(rep["id"])), "", 200, "")
 	f.expect("POST", "/policies", `{"name":"p","action":"block","state":"on"}`, 400, "dest_policy_no_match")
 	f.expect("POST", "/policies", `{"name":"p","action":"block","state":"on","inline":{"ports":"99999"}}`, 400, "dest_policy_invalid")
 	f.expect("POST", "/policies", `{"name":"p","action":"block","state":"on","list_ids":[999]}`, 400, "dest_policy_invalid")
@@ -457,7 +466,7 @@ func TestDestSourceRulesAPI(t *testing.T) {
 	}
 	f.expect("PUT", "/source-rules/"+itoa(f.foreignNode), `{"countries":["CN"],"state":"on"}`, 409, "dest_source_rule_not_native")
 	f.expect("PUT", "/source-rules/"+node, `{"countries":["CHN"],"state":"on"}`, 400, "dest_source_rule_invalid")
-	f.expect("PUT", "/source-rules/"+node, `{"state":"report"}`, 400, "dest_policy_state_unavailable")
+	f.expect("PUT", "/source-rules/"+node, `{"state":"maybe"}`, 400, "dest_policy_invalid")
 	at := num(saved["updated_at"])
 	f.expect("PUT", "/source-rules/"+node, `{"countries":["US"],"state":"on","updated_at":`+itoa(at-9000)+`}`, 409, "dest_source_rule_stale")
 	f.expect("PUT", "/source-rules/"+node, `{"countries":["US"],"state":"on","updated_at":`+itoa(at)+`}`, 200, "")
@@ -485,12 +494,11 @@ func TestDestCatalogAPI(t *testing.T) {
 	if len(cat["templates"].([]any)) == 0 || len(cat["unavailable"].([]any)) == 0 || num(cat["catalog_version"]) < 1 {
 		t.Fatalf("catalog = %v", cat)
 	}
-	f.expect("POST", "/catalog/smtp/instantiate", `{"state":"report"}`, 400, "dest_policy_state_unavailable")
 	f.expect("POST", "/catalog/smtp/instantiate", `{"state":""}`, 400, "dest_policy_invalid")
 	f.expect("POST", "/catalog/nope/instantiate", `{"state":"on"}`, 404, "")
 	f.expect("POST", "/catalog/education/instantiate", `{"state":"on"}`, 400, "dest_template_unavailable")
-	made := f.expect("POST", "/catalog/smtp/instantiate", `{"state":"off","locale":"en-US"}`, 201, "")["policy"].(map[string]any)
-	if made["template_key"] != "smtp" || made["state"] != "off" || made["action"] != "block" {
+	made := f.expect("POST", "/catalog/smtp/instantiate", `{"state":"report","locale":"en-US"}`, 201, "")["policy"].(map[string]any)
+	if made["template_key"] != "smtp" || made["state"] != "report" || made["action"] != "block" {
 		t.Fatalf("instantiated = %v", made)
 	}
 	f.expect("POST", "/catalog/smtp/instantiate", `{"state":"on"}`, 409, "dest_template_exists")

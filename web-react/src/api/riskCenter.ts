@@ -584,7 +584,7 @@ export async function untrustRiskUser(userId: number): Promise<ReviewResult> {
 // ---- The policy page (handler/admin_risk_policy.go, adminGroup only) ----
 
 /**
- * The 48 keys of ports.RiskCenterPolicy: every geo_anomaly_* and risk_*
+ * The 50 keys of ports.RiskCenterPolicy: every geo_anomaly_* and risk_*
  * setting. views/admin/risk/policy/policyKeys.json lists the same keys in the
  * server's order, and a Go test holds that file to the struct; the page's
  * record of the union (policyKeys.ts) holds the file to this type.
@@ -598,7 +598,7 @@ export type RiskPolicyKey =
   | 'geo_anomaly_fresh_window_seconds' | 'geo_anomaly_shared_exit_min_users' | 'geo_anomaly_ban_max_per_poll'
   | 'geo_anomaly_lift_max_per_poll' | 'geo_anomaly_infra_refresh_minutes' | 'geo_anomaly_infra_host_ttl_minutes'
   | 'risk_hwid_capture_off' | 'risk_sub_spread_off' | 'risk_devices_off' | 'risk_usage_shift_off'
-  | 'risk_login_country_off' | 'risk_min_days' | 'risk_max_devices' | 'risk_usage_ratio' | 'risk_usage_floor_gb'
+  | 'risk_login_country_off' | 'risk_dest_block_off' | 'risk_dest_block_threshold' | 'risk_min_days' | 'risk_max_devices' | 'risk_usage_ratio' | 'risk_usage_floor_gb'
   | 'risk_login_warmup_logins' | 'risk_login_hold_days' | 'risk_usage_warmup_days' | 'risk_usage_flag_days'
   | 'risk_usage_suspect_days' | 'risk_refresh_interval_minutes' | 'risk_first_delay_minutes'
   | 'risk_alert_freshness_hours' | 'risk_window_days' | 'risk_login_lookback_days' | 'risk_usage_baseline_days'

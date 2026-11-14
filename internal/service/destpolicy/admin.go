@@ -89,12 +89,20 @@ type AdminDeps struct {
 	Agents   AgentLister
 	Desired  DesiredReader
 	Settings SettingsReader
+	// Hits counts the hits each panel produced recently (sqlstore.DestHitRepo).
+	// Nil: hits_24h is null.
+	Hits HitCounter
 	// Instantiate creates lists and a policy in one transaction
 	// (sqlstore.DestRepos.InstantiateTemplate); the global exception needs it.
 	Instantiate func(ctx context.Context, lists []domain.DestList, p *domain.DestPolicy) (*domain.DestPolicy, error)
 	// ExceptionEditor edits the exception list's text (destlist.Service).
 	ExceptionEditor ListEditor
 	Now             func() time.Time
+}
+
+// HitCounter counts a panel's hits since an instant (PanelCounts).
+type HitCounter interface {
+	PanelCounts(ctx context.Context, sinceMS int64) (map[int64]int64, error)
 }
 
 // ListEditor adds entries to a custom list (destlist.Service.AddEntries).
@@ -157,7 +165,7 @@ func (a *Admin) PreparePolicy(ctx context.Context, in PolicyInput, existing *dom
 	case !in.Scope.Valid():
 		return nil, bad("scope", "scope is all, groups or panels", string(in.Scope))
 	}
-	if err := CheckState(in.State); err != nil {
+	if err := CheckPolicyState(in.Action, in.State); err != nil {
 		return nil, err
 	}
 	inline, verr := normalizeInline(in.Inline)

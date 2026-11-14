@@ -294,6 +294,8 @@
       "min_days_hint": "Days a province or device must appear on within the fetch window (bounded by sub-log retention), counted as calendar days in the panel timezone; at most the window's days.",
       "max_devices": "Device limit",
       "max_devices_hint": "More recurring devices than this is flagged; only clients that send x-hwid are counted.",
+      "dest_block_threshold": "Blocked-connection threshold",
+      "dest_block_threshold_hint": "Blocked connections in the last 24 hours at which the signal reads flagged; half of it reads suspect. Observation only: nothing is done to the account.",
       "usage_ratio": "Usage ratio",
       "usage_ratio_hint": "A day above the daily median of the baseline days (since first use) times this ratio is an over-day; within the judged days, reaching the over-days to flag is flagged and reaching the over-days for suspect is suspect.",
       "usage_floor_gb": "Daily floor (GB)",
@@ -1076,7 +1078,8 @@
       "sub_spread": "Subscription spread",
       "devices": "Devices",
       "usage_shift": "Usage change",
-      "login_country": "Login country"
+      "login_country": "Login country",
+      "dest_block": "Blocked access"
     },
     "expand": "Show evidence",
     "collapse": "Hide",
@@ -1146,6 +1149,14 @@
         "learning": "Fewer than {{warmup}} earlier logins; still learning",
         "new_country": "Login from a new country: {{countries}}",
         "known_countries": "Recent logins all came from known countries"
+      },
+      "dest_block": {
+        "signal_off": "The \"Blocked access\" signal is switched off for this account",
+        "no_collector": "None of this account's nodes is recording hits, so it cannot be judged",
+        "no_hits": "No blocked connections in the window",
+        "within": "{{total}} blocked in the last {{hours}} h, under half the threshold of {{threshold}}",
+        "over_building": "{{total}} blocked in the last {{hours}} h, past half the threshold of {{threshold}}",
+        "over": "{{total}} blocked in the last {{hours}} h, at the threshold of {{threshold}}"
       }
     },
     "code_bare": {
@@ -1173,6 +1184,11 @@
       "login_country": {
         "learning": "Too few earlier logins; still learning",
         "new_country": "Login from a new country"
+      },
+      "dest_block": {
+        "within": "Blocked connections are under the threshold",
+        "over_building": "Blocked connections are past half the threshold",
+        "over": "Blocked connections reached the threshold"
       }
     }
   },
@@ -1307,6 +1323,7 @@
         "devices": "Devices",
         "usage_shift": "Usage change",
         "login_country": "Login country",
+        "dest_block": "Blocked access",
         "review": "Admin review"
       },
       "level": {
@@ -1484,6 +1501,8 @@
         "usage_shift_desc": "Daily usage staying above the account's own baseline.",
         "login_country": "Login country",
         "login_country_desc": "A panel login from a country the subscription fetches never established. No key threshold; warm-up and hold are under Advanced.",
+        "dest_block": "Blocked access",
+        "dest_block_desc": "Counts how many of an account's connections access-control policies blocked in the last 24 hours. Only real blocks by block policies marked as counting toward risk are counted; a connection a report-only policy matched was allowed and is not. With no node recording hits the signal reads \"cannot tell\", never \"clean\".",
         "data": "Data and refresh",
         "data_desc": "Retention, snapshots and cadence that belong to no single detector; global only.",
         "groups": "Group exceptions",
@@ -2610,6 +2629,8 @@
       "risk_devices_off": "Off: devices",
       "risk_usage_shift_off": "Off: usage change",
       "risk_login_country_off": "Off: login country",
+      "risk_dest_block_off": "Off: blocked access",
+      "risk_dest_block_threshold": "Blocked-connection threshold",
       "risk_min_days": "Recurring days",
       "risk_max_devices": "Device limit",
       "risk_usage_ratio": "Usage ratio",
@@ -3991,6 +4012,26 @@
       "psp_sso_claim_silent_total": {
         "label": "Single sign-ins without role or group",
         "desc": "Single sign-ins where role or group rules exist but the identity provider sent none of the attributes they read, counted per kind: one sign-in can count once for each. The existing role and group were kept."
+      },
+      "psp_node_audit_report_total": {
+        "label": "Node hit reports",
+        "desc": "What became of the hit records (audit) nodes reported. Accepted batches are queued for storage; oversized, invalid and no-capability batches are dropped (the sync itself still succeeds); duplicate batches are node re-sends; queue-full and ingest-error batches were not stored, which leaves a gap in the record."
+      },
+      "psp_dest_audit_rows_total": {
+        "label": "Hit record rows",
+        "desc": "Where the hit and usage rows received went. Stored rows were written to the hit table; unknown-account, out-of-range and over-budget rows were dropped; usage rows are dropped unread because per-site usage is not collected."
+      },
+      "psp_dest_audit_node_dropped_total": {
+        "label": "Events nodes dropped",
+        "desc": "Events nodes reported they had no room to aggregate (hits, trial rows and usage together). Steady growth means a node sees more hits than it can hold."
+      },
+      "psp_dest_audit_node_unmatched_total": {
+        "label": "Events nodes could not use",
+        "desc": "Events and rows nodes reported they could not use: unparseable, no account, or an unknown rule."
+      },
+      "psp_dest_pruned_rows_total": {
+        "label": "Access-control rows pruned",
+        "desc": "Access-control rows removed by retention, by table: hits, trial rows, batch markers and orphans (rows left by a deleted account or server)."
       }
     },
     "labels": {
@@ -4147,6 +4188,29 @@
       "sso_kind": {
         "role": "Role",
         "group": "Group"
+      },
+      "node_audit_report": {
+        "accepted": "Accepted",
+        "oversized": "Oversized",
+        "invalid": "Invalid",
+        "no_capability": "No capability",
+        "duplicate_batch": "Duplicate batch",
+        "queue_full": "Queue full",
+        "ingest_error": "Ingest error"
+      },
+      "dest_rows": {
+        "hits_stored": "Hits stored",
+        "hits_unknown_subject": "Unknown account",
+        "hits_out_of_range": "Out of range",
+        "hits_over_budget": "Over hourly budget",
+        "usage_collect_off": "Usage not collected"
+      },
+      "dest_table": {
+        "hits": "Hits",
+        "trial": "Trial",
+        "batches": "Batch markers",
+        "exemptions": "Exemptions",
+        "orphans": "Orphans"
       }
     }
   },
@@ -4491,7 +4555,7 @@
       "dest_policy_invalid": "The policy is not valid",
       "dest_policy_no_match": "Choose at least one list or set one condition",
       "dest_policy_over_limit": "Over the quota: {{what}} {{used}} / {{limit}}. A new version over the quota is not applied; nodes keep the previous one",
-      "dest_policy_state_unavailable": "This state is not available yet",
+      "dest_policy_state_unavailable": "An allow policy cannot be report-only",
       "dest_policy_stale": "This policy was just changed by someone else and has been reloaded",
       "dest_policy_order_stale": "The order was changed by someone else and has been reloaded",
       "dest_name_taken": "This name is already used",

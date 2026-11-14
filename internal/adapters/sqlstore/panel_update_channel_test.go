@@ -22,7 +22,7 @@ func TestPanelUpdateChannelStorageRoundTripKeepsRawLegacyAndFutureValues(t *test
 			t.Fatalf("raw channel round trip failed: %v", err)
 		}
 		remark := "display only"
-		if err := r.UpdateNativeMetadata(t.Context(), p.ID, nil, &remark, nil); err != nil {
+		if err := r.UpdateNativeMetadata(t.Context(), p.ID, nil, &remark, nil, nil); err != nil {
 			t.Fatal(err)
 		}
 		got, err = r.GetByID(t.Context(), p.ID)
@@ -60,7 +60,7 @@ func TestNativeMetadataPreferenceDoesNotRewriteIdentitySecretsCoreStreamsOrProbe
 		t.Fatal(err)
 	}
 	channel := domain.PanelUpdateBeta
-	if err := r.UpdateNativeMetadata(t.Context(), panel.ID, nil, nil, &channel); err != nil {
+	if err := r.UpdateNativeMetadata(t.Context(), panel.ID, nil, nil, &channel, nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := db.First(&afterPanel, panel.ID).Error; err != nil {
@@ -91,13 +91,13 @@ func TestNativeMetadataRequiresOriginalNativeRecord(t *testing.T) {
 	r := newPanelRepo(t)
 	p := seedPanel(t, r)
 	channel := domain.PanelUpdateBeta
-	if err := r.UpdateNativeMetadata(t.Context(), p.ID, nil, nil, &channel); !errors.Is(err, domain.ErrValidation) {
+	if err := r.UpdateNativeMetadata(t.Context(), p.ID, nil, nil, &channel, nil); !errors.Is(err, domain.ErrValidation) {
 		t.Fatalf("third-party write: %v", err)
 	}
-	if err := r.UpdateNativeMetadata(t.Context(), p.ID+100, nil, nil, &channel); !errors.Is(err, domain.ErrNotFound) {
+	if err := r.UpdateNativeMetadata(t.Context(), p.ID+100, nil, nil, &channel, nil); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("missing record: %v", err)
 	}
-	if err := r.UpdateNativeMetadata(t.Context(), 0, nil, nil, &channel); !errors.Is(err, domain.ErrValidation) {
+	if err := r.UpdateNativeMetadata(t.Context(), 0, nil, nil, &channel, nil); !errors.Is(err, domain.ErrValidation) {
 		t.Fatalf("invalid record: %v", err)
 	}
 }

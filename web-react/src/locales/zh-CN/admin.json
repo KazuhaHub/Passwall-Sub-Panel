@@ -294,6 +294,8 @@
       "min_days_hint": "一个省或一台设备在订阅窗口内（受订阅日志保留天数限制）至少出现几天才算常驻，按面板时区的自然日计；不超过订阅窗口天数。",
       "max_devices": "设备上限",
       "max_devices_hint": "常用设备超过这个数即标记，只统计带 x-hwid 的客户端。",
+      "dest_block_threshold": "拦截次数阈值",
+      "dest_block_threshold_hint": "近 24 小时被拦截达到这个次数标记为「已标记」，达到一半为「疑似」。只提示，不会自动处置账号。",
       "usage_ratio": "用量倍数",
       "usage_ratio_hint": "某天用量超过「开始使用以来、基线期内日用量中位数 × 倍数」即为超标日；判定天数内超标达到「超标几天即标记」即标记，达到「超标几天即疑似」为疑似。",
       "usage_floor_gb": "每日用量下限（GB）",
@@ -1074,7 +1076,8 @@
       "sub_spread": "订阅多地",
       "devices": "设备数",
       "usage_shift": "用量变化",
-      "login_country": "登录国家"
+      "login_country": "登录国家",
+      "dest_block": "访问拦截"
     },
     "expand": "查看证据",
     "collapse": "收起",
@@ -1144,6 +1147,14 @@
         "learning": "之前的登录不足 {{warmup}} 次，还在学习",
         "new_country": "从新国家登录：{{countries}}",
         "known_countries": "最近的登录都来自已知国家"
+      },
+      "dest_block": {
+        "signal_off": "该账号所在范围关闭了「访问拦截」",
+        "no_collector": "该账号所在的节点都没有在记录命中，无法判断",
+        "no_hits": "统计窗口内没有被拦截的连接",
+        "within": "近 {{hours}} 小时被拦截 {{total}} 次，未到阈值 {{threshold}} 的一半",
+        "over_building": "近 {{hours}} 小时被拦截 {{total}} 次，已过阈值 {{threshold}} 的一半",
+        "over": "近 {{hours}} 小时被拦截 {{total}} 次，达到阈值 {{threshold}}"
       }
     },
     "code_bare": {
@@ -1171,6 +1182,11 @@
       "login_country": {
         "learning": "之前的登录次数还不够，还在学习",
         "new_country": "从新国家登录"
+      },
+      "dest_block": {
+        "within": "被拦截的次数在阈值内",
+        "over_building": "被拦截的次数已过阈值的一半",
+        "over": "被拦截的次数达到阈值"
       }
     }
   },
@@ -1305,6 +1321,7 @@
         "devices": "设备数",
         "usage_shift": "用量变化",
         "login_country": "登录国家",
+        "dest_block": "访问拦截",
         "review": "管理员处理"
       },
       "level": {
@@ -1482,6 +1499,8 @@
         "usage_shift_desc": "每日用量持续高于自己的基线。",
         "login_country": "登录国家",
         "login_country_desc": "面板登录来自订阅从未建立过的国家。没有可调的关键阈值，学习次数与保持天数在「高级」里。",
+        "dest_block": "访问拦截",
+        "dest_block_desc": "统计账号在近 24 小时内被访问控制策略拦截的次数。只数「计入风险」的拦截策略的真正拦截；「仅报告」命中的连接是放行的，不计入。没有记录命中的节点时，显示「无法判断」，不是「正常」。",
         "data": "数据与刷新",
         "data_desc": "保留期、快照与计算节奏等不属于单个检测项的参数，均只有全局。",
         "groups": "分组例外",
@@ -2608,6 +2627,8 @@
       "risk_devices_off": "关闭：设备数",
       "risk_usage_shift_off": "关闭：用量变化",
       "risk_login_country_off": "关闭：登录国家",
+      "risk_dest_block_off": "关闭：访问拦截",
+      "risk_dest_block_threshold": "拦截次数阈值",
       "risk_min_days": "常驻天数",
       "risk_max_devices": "设备上限",
       "risk_usage_ratio": "用量倍数",
@@ -3989,6 +4010,26 @@
       "psp_sso_claim_silent_total": {
         "label": "单点登录缺少角色或分组信息",
         "desc": "配置了角色或分组规则、但身份提供方没有返回规则所需属性的情况，按角色和分组分别计数，同一次登录可能两项各计一次；此时沿用原有的角色和分组。"
+      },
+      "psp_node_audit_report_total": {
+        "label": "节点命中记录上报",
+        "desc": "节点上报的命中记录（audit）的处理结果。「已接收」入队等待写入；「过大」「无效」「无能力声明」是这一批被丢弃（同步本身照常成功）；「重复批次」是节点重发；「队列已满」「写入失败」表示这一批没有存下，命中记录因此缺一段。"
+      },
+      "psp_dest_audit_rows_total": {
+        "label": "命中记录行",
+        "desc": "收到的命中与用量行的去向。「命中已存」写入了命中表；「账号不存在」「超出时间窗口」「超出每小时预算」是被丢弃的行；「用量未采集」是未提供的按站用量，直接丢弃。"
+      },
+      "psp_dest_audit_node_dropped_total": {
+        "label": "节点丢弃的事件",
+        "desc": "节点自己报告的、因聚合表已满而没有聚合的事件数（命中、试运行与用量合计）。持续增长说明节点上命中过多。"
+      },
+      "psp_dest_audit_node_unmatched_total": {
+        "label": "节点无法使用的事件",
+        "desc": "节点自己报告的、无法解析、没有账号或指向未知规则的事件与行数。"
+      },
+      "psp_dest_pruned_rows_total": {
+        "label": "访问控制记录清理",
+        "desc": "按保留期清理掉的访问控制记录行数，按表统计：命中、试运行、批次标记、孤儿（已删除账号或面板留下的行）。"
       }
     },
     "labels": {
@@ -4145,6 +4186,29 @@
       "sso_kind": {
         "role": "角色",
         "group": "分组"
+      },
+      "node_audit_report": {
+        "accepted": "已接收",
+        "oversized": "过大",
+        "invalid": "无效",
+        "no_capability": "无能力声明",
+        "duplicate_batch": "重复批次",
+        "queue_full": "队列已满",
+        "ingest_error": "写入失败"
+      },
+      "dest_rows": {
+        "hits_stored": "命中已存",
+        "hits_unknown_subject": "账号不存在",
+        "hits_out_of_range": "超出时间窗口",
+        "hits_over_budget": "超出每小时预算",
+        "usage_collect_off": "用量未采集"
+      },
+      "dest_table": {
+        "hits": "命中",
+        "trial": "试运行",
+        "batches": "批次标记",
+        "exemptions": "豁免",
+        "orphans": "孤儿"
       }
     }
   },
@@ -4475,7 +4539,7 @@
       "dest_policy_invalid": "策略的内容无效",
       "dest_policy_no_match": "至少选择一个列表或设置一个条件",
       "dest_policy_over_limit": "超出额度：{{what}} {{used}} / {{limit}}。超出额度时新版本不会下发，节点继续执行上一版",
-      "dest_policy_state_unavailable": "这个状态暂不可用",
+      "dest_policy_state_unavailable": "放行策略不能设为仅记录",
       "dest_policy_stale": "这条策略刚被其他人修改过，已重新载入",
       "dest_policy_order_stale": "顺序已被其他人修改，已重新载入",
       "dest_name_taken": "这个名称已被使用",

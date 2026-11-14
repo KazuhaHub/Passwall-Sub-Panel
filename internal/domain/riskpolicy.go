@@ -40,9 +40,13 @@ const (
 // concurrent-location policy.
 type RiskPolicySettings struct {
 	SubSpreadOff, DevicesOff, UsageShiftOff, LoginCountryOff bool
-	MinDays, MaxDevices                                      int
-	UsageRatio                                               float64
-	UsageFloorGB                                             int
+	// DestBlockOff switches dest_block off; DestBlockThreshold is its flag
+	// count (0 = default).
+	DestBlockOff        bool
+	DestBlockThreshold  int
+	MinDays, MaxDevices int
+	UsageRatio          float64
+	UsageFloorGB        int
 	// LoginWarmupLogins and LoginHoldDays are login_country's thresholds:
 	// how many earlier placed logins a login needs before it is judged, and
 	// how many days a login from a new country keeps the account flagged.
@@ -60,6 +64,8 @@ type RiskPolicySettings struct {
 // against the fleet's configured runtime.
 type RiskPolicy struct {
 	SubSpreadOff, DevicesOff, UsageShiftOff, LoginCountryOff bool
+	DestBlockOff                                             bool
+	DestBlockThreshold                                       int     // 1..RiskDestBlockThresholdMax
 	MinDays                                                  int     // 1..RiskWindowDays; Bounded: <= the configured window
 	MaxDevices                                               int     // >= 1
 	UsageRatio                                               float64 // >= RiskUsageRatioMin, finite
@@ -75,10 +81,11 @@ type RiskPolicy struct {
 // its default.
 func DefaultRiskPolicy() RiskPolicy {
 	return RiskPolicy{
-		MinDays:         RiskDefaultMinDays,
-		MaxDevices:      RiskDefaultMaxDevices,
-		UsageRatio:      RiskDefaultUsageRatio,
-		UsageFloorBytes: RiskDefaultUsageFloorGB * RiskGiB,
+		DestBlockThreshold: RiskDefaultDestBlockThreshold,
+		MinDays:            RiskDefaultMinDays,
+		MaxDevices:         RiskDefaultMaxDevices,
+		UsageRatio:         RiskDefaultUsageRatio,
+		UsageFloorBytes:    RiskDefaultUsageFloorGB * RiskGiB,
 		// login_country's and usage_shift's thresholds, the constants
 		// they replaced.
 		LoginWarmupLogins: RiskLoginWarmupLogins,
@@ -131,6 +138,10 @@ func RiskPolicyFromSettings(s RiskPolicySettings) RiskPolicy {
 	p.DevicesOff = s.DevicesOff
 	p.UsageShiftOff = s.UsageShiftOff
 	p.LoginCountryOff = s.LoginCountryOff
+	p.DestBlockOff = s.DestBlockOff
+	if s.DestBlockThreshold > 0 {
+		p.DestBlockThreshold = min(s.DestBlockThreshold, RiskDestBlockThresholdMax)
+	}
 	if s.MinDays > 0 {
 		p.MinDays = min(s.MinDays, RiskWindowDays)
 	}

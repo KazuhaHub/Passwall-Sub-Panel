@@ -26,6 +26,8 @@
   "risk_devices_off",
   "risk_usage_shift_off",
   "risk_login_country_off",
+  "risk_dest_block_off",
+  "risk_dest_block_threshold",
   "risk_min_days",
   "risk_max_devices",
   "risk_usage_ratio",

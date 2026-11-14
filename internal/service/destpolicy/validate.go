@@ -46,7 +46,7 @@ const (
 	CodeSourceRuleInvalid      = "dest_source_rule_invalid"
 	CodeTestInvalid            = "dest_test_invalid"
 	CodeExceptionInvalid       = "dest_exception_invalid"
-	reportStateMessage         = "the report state is not available yet: it needs hit recording, which arrives later"
+	reportAllowMessage         = "an allow policy has no report-only state: to be reported it would have to change a verdict"
 	maxPortsInlineLen          = 256
 	maxInlineCIDRs             = 20000
 	protocolBitTorrent         = "bittorrent"
@@ -60,22 +60,35 @@ const (
 	exceptionPolicyDescription = "Destinations added with \"allow\" from the access-control page."
 )
 
-// ErrStateUnavailable is the report state, refused until the hit recording
-// that gives it something to show exists.
-func errStateUnavailable() error {
-	return &ValidationError{Code: CodeStateUnavailable, Field: "state", Msg: reportStateMessage}
+// errReportAllow is a report-only allow policy. It keeps the code the report
+// state was refused with before it was offered, so a client that already
+// handles it needs nothing new.
+func errReportAllow() error {
+	return &ValidationError{Code: CodeStateUnavailable, Field: "state", Msg: reportAllowMessage}
 }
 
-// CheckState validates a state an admin chose: off or on. "report" is part of
-// the model but is refused (dest_policy_state_unavailable) until batch 2.
+// CheckState validates a state an admin chose: off, report or on, freely and
+// in any order (there is no stage that has to come first). Whether the report
+// state is allowed for a given action is CheckPolicyState's question.
 func CheckState(s domain.DestState) error {
-	switch {
-	case domain.DestStateSelectable(s):
+	if s.Valid() {
 		return nil
-	case s == domain.DestStateReport:
-		return errStateUnavailable()
 	}
-	return &ValidationError{Code: CodePolicyInvalid, Field: "state", Bad: []string{string(s)}, Msg: "state must be off or on"}
+	return &ValidationError{Code: CodePolicyInvalid, Field: "state", Bad: []string{string(s)}, Msg: "state must be off, report or on"}
+}
+
+// CheckPolicyState validates a policy's state against its action: an allow
+// policy is off or on only. "Report" means "do not change the outcome, only
+// record what would have been blocked", and an allow's whole effect is changing
+// an outcome.
+func CheckPolicyState(action domain.DestAction, s domain.DestState) error {
+	if err := CheckState(s); err != nil {
+		return err
+	}
+	if s == domain.DestStateReport && action == domain.DestActionAllow {
+		return errReportAllow()
+	}
+	return nil
 }
 
 // NormalizePorts parses a port list the way the wire does and writes it in the

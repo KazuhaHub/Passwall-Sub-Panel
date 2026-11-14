@@ -27,40 +27,51 @@ type nodeView struct {
 }
 
 // assemble specialises the base for one node, in the wire's phase order:
-// source denies, then global allows, then blocks. The exempt list sits between
+// source denies, then global allows, then blocks, and last the report-only
+// rules (phase 5: source rules, then policies). The exempt list sits between
 // the allows and the blocks on the node; it is carried in the policy and not as
 // a rule. Rules whose subjects came out empty are left out, and so are rules
 // of a policy scoped to other panels.
 func (b *base) assemble(v nodeView) *protocol.DestinationPolicy {
 	policy := &protocol.DestinationPolicy{Rules: []protocol.DestinationRule{}}
 
-	for _, g := range b.sources {
-		var inbounds []protocol.ListenerKey
-		for _, n := range g.nodes {
-			if v.bound || v.nodeIDs[n] {
-				inbounds = append(inbounds, protocol.NewListenerKey(n))
+	// sourceRules emits the source groups of one state. Report-only ones wait for
+	// the last phase.
+	sourceRules := func(report bool) {
+		for _, g := range b.sources {
+			if g.report != report {
+				continue
 			}
-		}
-		if len(inbounds) == 0 {
-			continue
-		}
-		slices.Sort(inbounds)
-		first := g.nodes[0]
-		if !v.bound {
+			var inbounds []protocol.ListenerKey
 			for _, n := range g.nodes {
-				if v.nodeIDs[n] {
-					first = n
-					break
+				if v.bound || v.nodeIDs[n] {
+					inbounds = append(inbounds, protocol.NewListenerKey(n))
 				}
 			}
+			if len(inbounds) == 0 {
+				continue
+			}
+			slices.Sort(inbounds)
+			first := g.nodes[0]
+			if !v.bound {
+				for _, n := range g.nodes {
+					if v.nodeIDs[n] {
+						first = n
+						break
+					}
+				}
+			}
+			action := protocol.RuleBlock
+			if report {
+				action = protocol.RuleObserve
+			}
+			policy.Rules = append(policy.Rules, protocol.DestinationRule{
+				ID: "s" + strconv.FormatInt(first, 10), Action: action,
+				Inbounds: inbounds, SourceCIDRs: slices.Clone(g.cidrs),
+			})
 		}
-		policy.Rules = append(policy.Rules, protocol.DestinationRule{
-			ID: "s" + strconv.FormatInt(first, 10), Action: protocol.RuleBlock,
-			Inbounds: inbounds, SourceCIDRs: slices.Clone(g.cidrs),
-		})
 	}
-
-	for _, group := range [][]baseRule{b.allow, b.block} {
+	policyRules := func(group []baseRule) {
 		for _, r := range group {
 			rule := protocol.DestinationRule{
 				ID: r.id, Action: r.action, Domains: r.domains, CIDRs: r.cidrs, Ports: r.ports,
@@ -89,6 +100,13 @@ func (b *base) assemble(v nodeView) *protocol.DestinationPolicy {
 			policy.Rules = append(policy.Rules, rule)
 		}
 	}
+	sourceRules(false)
+	policyRules(b.allow)
+	policyRules(b.block)
+	// PHASE 5. Behind every enforcing rule: the first matching rule terminates,
+	// so a report rule anywhere earlier would shadow an enforced one after it.
+	sourceRules(true)
+	policyRules(b.watch)
 
 	if len(policy.Rules) == 0 {
 		return nil
@@ -117,7 +135,7 @@ func sortKeys[K ~string](keys []K) {
 // needsGroups reports whether any rule is scoped to groups, which is when the
 // roster's group ids have to be read.
 func (b *base) needsGroups() bool {
-	for _, group := range [][]baseRule{b.allow, b.block} {
+	for _, group := range [][]baseRule{b.allow, b.block, b.watch} {
 		for _, r := range group {
 			if r.scope == domain.DestScopeGroups {
 				return true

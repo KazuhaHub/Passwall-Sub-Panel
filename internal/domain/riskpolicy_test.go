@@ -19,15 +19,16 @@ import (
 // never-saved form means "observe".
 func TestRiskPolicyFromSettings_UnsetIsTheDefault(t *testing.T) {
 	want := RiskPolicy{
-		MinDays:           3,
-		MaxDevices:        3,
-		UsageRatio:        3.0,
-		UsageFloorBytes:   3 << 30,
-		LoginWarmupLogins: 3,
-		LoginHoldDays:     7,
-		UsageWarmupDays:   14,
-		UsageFlagDays:     4,
-		UsageSuspectDays:  2,
+		DestBlockThreshold: 20,
+		MinDays:            3,
+		MaxDevices:         3,
+		UsageRatio:         3.0,
+		UsageFloorBytes:    3 << 30,
+		LoginWarmupLogins:  3,
+		LoginHoldDays:      7,
+		UsageWarmupDays:    14,
+		UsageFlagDays:      4,
+		UsageSuspectDays:   2,
 	}
 	if got := DefaultRiskPolicy(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("DefaultRiskPolicy() = %+v\nwant the shipped default %+v", got, want)

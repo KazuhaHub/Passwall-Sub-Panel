@@ -123,11 +123,9 @@ func capsToken(caps []string) string {
 	return string(tok)
 }
 
-// The audit capabilities are not in the protocol module yet (batch 2); the
-// compiler only needs to notice that the set changed.
 const (
-	capabilityAuditHits  = "audit.hits.v1"
-	capabilityAuditUsage = "audit.usage.v1"
+	capabilityAuditHits  = protocol.CapabilityAuditHits
+	capabilityAuditUsage = protocol.CapabilityAuditUsage
 )
 
 func jsonMarshal(v any) ([]byte, error) { return json.Marshal(v) }

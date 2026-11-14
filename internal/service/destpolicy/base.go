@@ -24,9 +24,13 @@ type base struct {
 	geoip      string
 	geosite    string
 
-	// allow and block are in emission order (priority, then policy id).
-	allow, block []baseRule
+	// allow and block are in emission order (priority, then policy id). watch
+	// holds the report-only block policies: they compile to observe rules in
+	// the last phase, behind everything enforced, so they can never change a
+	// verdict.
+	allow, block, watch []baseRule
 	// sources are the source-deny groups, by the lowest node id of each group.
+	// Enforced and report-only groups are kept apart (see baseSource.report).
 	sources []baseSource
 	exempt  []int64
 
@@ -57,6 +61,7 @@ type baseRule struct {
 	// id is the rule id: p<policy> or p<policy>x1 / x2 when the policy split.
 	id        string
 	action    protocol.RuleAction
+	report    bool
 	scope     domain.DestScope
 	groups    []int64
 	panels    []int64
@@ -71,8 +76,12 @@ type baseRule struct {
 type baseSource struct {
 	nodes []int64
 	cidrs []string
-	// key is "CN,US|1.2.3.0/24": the rule's own definition, what makes two
-	// inbounds share one rule.
+	// report: the group is report-only (an s* observe rule in the last phase).
+	// Two inbounds with the same countries share one rule only when they are in
+	// the same state, or one of the two states would be a lie.
+	report bool
+	// key is "CN,US|1.2.3.0/24|on": the rule's own definition and state, what
+	// makes two inbounds share one rule.
 	key string
 }
 
@@ -132,10 +141,15 @@ func (s *Service) buildBase(ctx context.Context, doc *snapshotDoc) (*base, error
 
 		var parts []baseRule
 		mk := func() baseRule {
-			return baseRule{
+			r := baseRule{
 				policyID: p.ID, action: protocol.RuleAction(p.Action), scope: domain.DestScope(p.Scope),
 				groups: p.Groups, panels: p.Panels, ports: p.Inline.Ports, network: p.Inline.Network,
 			}
+			if p.State == string(domain.DestStateReport) {
+				// Report-only: the same match, but it only records.
+				r.action, r.report = protocol.RuleObserve, true
+			}
+			return r
 		}
 		switch {
 		case addrIntent:
@@ -168,9 +182,12 @@ func (s *Service) buildBase(ctx context.Context, doc *snapshotDoc) (*base, error
 			if len(parts) > 1 {
 				parts[i].id += "x" + strconv.Itoa(i+1)
 			}
-			if p.Action == string(domain.DestActionAllow) {
+			switch {
+			case parts[i].report:
+				b.watch = append(b.watch, parts[i])
+			case p.Action == string(domain.DestActionAllow):
 				b.allow = append(b.allow, parts[i])
-			} else {
+			default:
 				b.block = append(b.block, parts[i])
 			}
 		}
@@ -201,10 +218,11 @@ func (s *Service) buildBase(ctx context.Context, doc *snapshotDoc) (*base, error
 		if len(cidrs) == 0 {
 			continue
 		}
-		key := strings.Join(src.Countries, ",") + "|" + strings.Join(src.CIDRs, ",")
+		report := src.State == string(domain.DestStateReport)
+		key := strings.Join(src.Countries, ",") + "|" + strings.Join(src.CIDRs, ",") + "|" + src.State
 		g := groups[key]
 		if g == nil {
-			g = &baseSource{key: key, cidrs: cidrs}
+			g = &baseSource{key: key, cidrs: cidrs, report: report}
 			groups[key] = g
 		}
 		g.nodes = append(g.nodes, src.Node)

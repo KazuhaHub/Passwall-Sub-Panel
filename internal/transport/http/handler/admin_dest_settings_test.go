@@ -95,11 +95,11 @@ func TestDestSettingsGet_ServesSettingsDefaultsAndEffective(t *testing.T) {
 func TestDestSettingsPut_ChangesOnlyDestKeys(t *testing.T) {
 	stored := storedEverywhere()
 	repo := &policySettingsRepo{settings: stored}
-	body := `{"settings":{"dest_policy_apply_min_seconds":120,"dest_list_refresh_hours":12,"dest_rules_update_mode":"manual"}}`
+	body := `{"settings":{"dest_policy_apply_min_seconds":120,"dest_list_refresh_hours":12,"dest_rules_update_mode":"manual","dest_hit_retention_days":60,"dest_trial_retention_days":3}}`
 
 	rec := requestRiskPolicy(destSettingsRouter(repo), http.MethodPut, destSettingsPath, body)
 	_, echoed := decodeDestSettings(t, rec.Code, rec.Body.Bytes())
-	want := ports.AccessControlSettings{DestPolicyApplyMinSeconds: 120, DestListRefreshHours: 12, DestRulesUpdateMode: "manual"}
+	want := ports.AccessControlSettings{DestPolicyApplyMinSeconds: 120, DestListRefreshHours: 12, DestRulesUpdateMode: "manual", DestHitRetentionDays: 60, DestTrialRetentionDays: 3}
 	if echoed != want {
 		t.Errorf("the answer's settings = %+v, want %+v", echoed, want)
 	}
@@ -128,13 +128,14 @@ func isDestTagField(f reflect.StructField) bool {
 func TestDestSettingsPut_OmittedKeysKeepTheirStoredValues(t *testing.T) {
 	repo := &policySettingsRepo{settings: ports.UISettings{
 		LoginMode: "local_only", DestPolicyApplyMinSeconds: 90, DestListRefreshHours: 12, DestRulesUpdateMode: "auto",
+		DestHitRetentionDays: 45,
 	}}
 	rec := requestRiskPolicy(destSettingsRouter(repo), http.MethodPut, destSettingsPath, `{"settings":{"dest_list_refresh_hours":0}}`)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("PUT = %d: %s", rec.Code, rec.Body.String())
 	}
 	got, saves, _ := repo.snapshot()
-	if saves != 1 || got.DestListRefreshHours != 0 || got.DestPolicyApplyMinSeconds != 90 || got.DestRulesUpdateMode != "auto" || got.LoginMode != "local_only" {
+	if saves != 1 || got.DestListRefreshHours != 0 || got.DestPolicyApplyMinSeconds != 90 || got.DestRulesUpdateMode != "auto" || got.DestHitRetentionDays != 45 || got.LoginMode != "local_only" {
 		t.Fatalf("saves %d, stored %+v", saves, got)
 	}
 }
@@ -147,6 +148,9 @@ func TestDestSettingsPut_RefusesTheWholeSave(t *testing.T) {
 		"low debounce":       {`{"settings":{"dest_policy_apply_min_seconds":10}}`, "dest_policy_apply_min_seconds"},
 		"high refresh":       {`{"settings":{"dest_list_refresh_hours":500}}`, "dest_list_refresh_hours"},
 		"bad mode":           {`{"settings":{"dest_rules_update_mode":"always"}}`, "dest_rules_update_mode"},
+		"hit retention high": {`{"settings":{"dest_hit_retention_days":366}}`, "dest_hit_retention_days"},
+		"trial retention":    {`{"settings":{"dest_trial_retention_days":31}}`, "dest_trial_retention_days"},
+		"negative retention": {`{"settings":{"dest_hit_retention_days":-1}}`, "dest_hit_retention_days"},
 		"one bad of two":     {`{"settings":{"dest_list_refresh_hours":24,"dest_policy_apply_min_seconds":1}}`, "dest_policy_apply_min_seconds"},
 		"unknown key":        {`{"settings":{"dest_nope":1}}`, ""},
 		"foreign key":        {`{"settings":{"risk_min_days":1}}`, ""},
@@ -178,6 +182,8 @@ func sentDestOtherThan(stored ports.AccessControlSettings) map[string]any {
 		"dest_policy_apply_min_seconds": stored.DestPolicyApplyMinSeconds + 7,
 		"dest_list_refresh_hours":       stored.DestListRefreshHours + 7,
 		"dest_rules_update_mode":        stored.DestRulesUpdateMode + "-sent",
+		"dest_hit_retention_days":       stored.DestHitRetentionDays + 7,
+		"dest_trial_retention_days":     stored.DestTrialRetentionDays + 7,
 	}
 }
 

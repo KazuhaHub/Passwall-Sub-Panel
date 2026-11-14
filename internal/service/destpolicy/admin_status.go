@@ -11,6 +11,7 @@ import (
 	"github.com/KazuhaHub/passwall-protocol/protocol"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/log"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 )
 
@@ -54,6 +55,10 @@ type NodeState struct {
 		Hits   bool `json:"hits"`
 		Usage  bool `json:"usage"`
 	} `json:"supports"`
+	// Collect is the panel's recording choice (off, hits, hits_and_usage),
+	// CollectEffective what the node was told, and Collecting whether it is
+	// recording now (derived, never reported). Empty/false for a node that is not
+	// a Passwall Node.
 	Collect          string `json:"collect"`
 	CollectEffective string `json:"collect_effective"`
 	Collecting       bool   `json:"collecting"`
@@ -180,6 +185,15 @@ func (a *Admin) Status(ctx context.Context) (*StatusView, error) {
 			agentByPanel[ag.PanelID] = ag
 		}
 	}
+	var panelHits map[int64]int64
+	if a.Hits != nil {
+		since := now.UTC().Add(-24 * time.Hour).Truncate(time.Hour).UnixMilli()
+		// A count that cannot be read costs hits_24h (null), never the status.
+		if panelHits, err = a.Hits.PanelCounts(ctx, since); err != nil {
+			log.Warn("destination status: 24-hour hit count unavailable", "err", err)
+			panelHits = nil
+		}
+	}
 	rows := map[string]*domain.DestAgentPolicy{}
 	rowList, err := a.Service.agents.List(ctx)
 	if err != nil {
@@ -215,6 +229,17 @@ func (a *Admin) Status(ctx context.Context) (*StatusView, error) {
 		row := rows[agent.AgentID]
 		if row == nil {
 			row = &domain.DestAgentPolicy{AgentID: agent.AgentID}
+		}
+		// Recording: what the panel is set to (collect), what the node was told
+		// (collect_effective), whether it is recording now (collecting, derived,
+		// never reported: a quiet node sends nothing) and its hits in 24 hours,
+		// null where the node cannot record.
+		ns.Collect = string(panel.AuditCollect.Normalized())
+		ns.CollectEffective = row.CollectEffective
+		ns.Collecting = Collecting(row, agent.ObservedCapabilities, agent.ObservedCoreEngine)
+		if panelHits != nil && ns.Supports.Hits {
+			n := panelHits[panel.ID]
+			ns.Hits24h = &n
 		}
 		ns.FallbackReason = string(row.FallbackReason)
 		ns.MintedAt, ns.AppliedAt, ns.AppliedRules = ms(row.MintedAt), ms(row.AppliedAt), row.AppliedRuleCount

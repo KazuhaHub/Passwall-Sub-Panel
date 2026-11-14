@@ -230,14 +230,14 @@ func TestInstantiate_BuildsTheListsAndThePolicyOfATemplate(t *testing.T) {
 
 func TestInstantiate_TheAdminChoosesTheState(t *testing.T) {
 	svc, _, store := newService(t)
-	for _, st := range []domain.DestState{domain.DestStateOff, domain.DestStateOn} {
+	for _, st := range []domain.DestState{domain.DestStateOff, domain.DestStateReport, domain.DestStateOn} {
 		if _, err := svc.Instantiate(context.Background(), "pt", "en-US", st); err != nil || store.pol.State != st {
 			t.Errorf("state %s: %+v %v", st, store.pol, err)
 		}
 	}
 	// There is no default: an empty state is refused, as is one that does not
-	// exist, and report until the hit recording that makes it useful ships.
-	for _, st := range []domain.DestState{"", "maybe", domain.DestStateReport} {
+	// exist.
+	for _, st := range []domain.DestState{"", "maybe"} {
 		if _, err := svc.Instantiate(context.Background(), "pt", "en-US", st); !errors.Is(err, domain.ErrValidation) {
 			t.Errorf("state %q: %v, want a validation error", st, err)
 		}

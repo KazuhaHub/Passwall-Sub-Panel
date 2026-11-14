@@ -1,7 +1,7 @@
 import type { RiskPolicyKey, RiskPolicySettings } from './policyKeys'
 import type { PresetDetector } from './presets'
 
-// THE POLICY PAGE'S LAYOUT: which of the 48 keys goes on which card, in
+// THE POLICY PAGE'S LAYOUT: which of the 50 keys goes on which card, in
 // which part of it, with which label, hint and bounds. Data rather than
 // JSX, so the rules the page stands on — every key placed exactly once, the
 // runtime knobs captioned with their value in effect, a lit preset
@@ -54,7 +54,7 @@ export interface PolicyFieldSpec {
   options?: { value: string; label: string }[]
 }
 
-export type PolicyCardId = 'geo' | 'sub_spread' | 'devices' | 'usage_shift' | 'login_country' | 'data'
+export type PolicyCardId = 'geo' | 'sub_spread' | 'devices' | 'usage_shift' | 'login_country' | 'dest_block' | 'data'
 
 export interface PolicyCardSpec {
   id: PolicyCardId
@@ -202,6 +202,17 @@ export const POLICY_CARDS: PolicyCardSpec[] = [
       knob('risk_login_hold_days', 'risk', 1, 365),
       knob('risk_login_lookback_days', 'risk', 7, 365),
     ],
+  },
+  {
+    id: 'dest_block',
+    title: 'admin:risk_center.policy.card.dest_block',
+    desc: 'admin:risk_center.policy.card.dest_block_desc',
+    toggle: { kind: 'inverted', key: 'risk_dest_block_off' },
+    // domain.RiskDestBlockThresholdMax: the server clamps to 1..10000.
+    fields: [{
+      key: 'risk_dest_block_threshold', kind: 'number', label: `${RISK}dest_block_threshold`, hint: `${RISK}dest_block_threshold_hint`,
+      min: 1, max: 10000, tail: true,
+    }],
   },
   {
     id: 'data',

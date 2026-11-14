@@ -54,6 +54,9 @@ type DestWiring struct {
 	Groups      ports.GroupRepo
 	Nodes       ports.NodeRepo
 	Panels      ports.XUIPanelRepo
+	// Hits is the hit-record read side. Nil: the hit routes answer 503 and the
+	// hit fields of the policy list and the account view stay null.
+	Hits DestHitStore
 	// Async runs a list refresh in the background. Nil runs it inline.
 	Async interface {
 		Go(name string, fn func(ctx context.Context))
@@ -110,7 +113,8 @@ type errCodes struct{ stale, exists string }
 //	400 dest_list_too_large {kind,used,limit}
 //	400 dest_list_too_broad {entry}
 //	400 dest_list_insecure_url
-//	400 dest_policy_invalid / _no_match / _over_limit {kind,used,limit} / dest_policy_state_unavailable
+//	400 dest_policy_invalid / _no_match / _over_limit {kind,used,limit} / dest_policy_state_unavailable (a report-only ALLOW policy)
+//	400 dest_hits_invalid / dest_hits_range (GET /hits)
 //	409 dest_list_in_use {used_by}            deleting a list a policy uses
 //	409 <stale>                               the precondition failed
 //	409 dest_template_exists                  a built-in rule group added twice

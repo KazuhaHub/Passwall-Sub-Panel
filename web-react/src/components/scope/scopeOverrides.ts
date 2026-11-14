@@ -143,6 +143,8 @@ export const SCOPE_KEYS: ScopeKeyMeta[] = [
   { cat: 'risk', key: 'risk.usage_suspect_days', type: 'risk', name: 'usage_suspect_days', kind: 'int', field: 'risk_usage_suspect_days', labelKey: 'risk_usage_suspect_days', def: '超标几天即疑似', unsetValue: '2', hintKey: 'admin:settings.risk.usage_suspect_days_hint' },
   { cat: 'risk', key: 'risk.login_warmup_logins', type: 'risk', name: 'login_warmup_logins', kind: 'int', field: 'risk_login_warmup_logins', labelKey: 'risk_login_warmup_logins', def: '登录学习次数', unsetValue: '3', hintKey: 'admin:settings.risk.login_warmup_logins_hint' },
   { cat: 'risk', key: 'risk.login_hold_days', type: 'risk', name: 'login_hold_days', kind: 'int', field: 'risk_login_hold_days', labelKey: 'risk_login_hold_days', def: '新国家保持天数', unsetValue: '7', hintKey: 'admin:settings.risk.login_hold_days_hint' },
+  { cat: 'risk', key: 'risk.dest_block_off', type: 'risk', name: 'dest_block_off', kind: 'bool', field: 'risk_dest_block_off', labelKey: 'risk_dest_block_off', def: '关闭：访问拦截' },
+  { cat: 'risk', key: 'risk.dest_block_threshold', type: 'risk', name: 'dest_block_threshold', kind: 'int', field: 'risk_dest_block_threshold', labelKey: 'risk_dest_block_threshold', def: '拦截次数阈值', unsetValue: '20', hintKey: 'admin:settings.risk.dest_block_threshold_hint' },
 ]
 
 // edit[key].on distinguishes "overridden" (sparse row exists) from "inherit"

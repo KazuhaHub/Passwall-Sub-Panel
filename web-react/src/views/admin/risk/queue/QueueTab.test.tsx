@@ -387,7 +387,7 @@ describe('QueueTab filters', () => {
     fireEvent.mouseDown(screen.getByRole('combobox', { name: '来源' }))
     const list = await screen.findByRole('listbox')
     expect(within(list).getAllByRole('option').map(o => o.textContent))
-      .toEqual(['异地并发', '订阅多地', '设备数', '用量变化', '登录国家'])
+      .toEqual(['异地并发', '订阅多地', '设备数', '用量变化', '登录国家', '访问拦截'])
     fireEvent.click(within(list).getByRole('option', { name: '设备数' }))
     await waitFor(() => expect(urlParams().get('source')).toBe('devices'))
     fireEvent.click(within(screen.getByRole('listbox')).getByRole('option', { name: '异地并发' }))
