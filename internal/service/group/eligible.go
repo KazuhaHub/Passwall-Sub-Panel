@@ -359,3 +359,10 @@ func (s *Service) InboundsChanged(ctx context.Context, panelID int64) {
 	}
 	s.ResyncAllowlistGroups(ctx, panelID)
 }
+
+// Wired reports whether the eligibility reads and the member resyncer have been
+// bound. It exists for the application's wiring test: an unbound dependency
+// degrades to "tags only" without a word.
+func (s *Service) Wired() (eligibility, resyncer bool) {
+	return s.elig.wired(), s.resyncer != nil
+}

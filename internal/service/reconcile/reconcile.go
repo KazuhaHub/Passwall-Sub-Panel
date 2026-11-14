@@ -123,6 +123,10 @@ type GroupEligibility interface {
 // SetGroupEligibility late-binds the eligibility test.
 func (s *Service) SetGroupEligibility(e GroupEligibility) { s.eligibility = e }
 
+// GroupEligibilityWired reports whether an eligibility has been bound, for the
+// application's wiring test: unbound, the heal decides by tags alone.
+func (s *Service) GroupEligibilityWired() bool { return s.eligibility != nil }
+
 // groupIncludes asks the wired eligibility, or only the tag filter before one
 // is wired. An unreadable answer skips the group this round (nothing is added;
 // the next pass retries) and logs the group id alone.

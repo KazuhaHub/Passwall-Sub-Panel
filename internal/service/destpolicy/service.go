@@ -87,6 +87,12 @@ func New(d Deps) (*Service, error) {
 	}, nil
 }
 
+// GroupMembersWired reports whether the per-node limit counts the members a
+// panel's tags select (Deps.GroupMembers). It exists for the application's
+// wiring test: left out, the limit counts the roster, which shrinks when
+// members are made ineligible and lets the policy flap in and out of the limit.
+func (s *Service) GroupMembersWired() bool { return s.members != nil }
+
 func (s *Service) countCompile(result string) {
 	if s.metrics.Compile != nil {
 		s.metrics.Compile(result)

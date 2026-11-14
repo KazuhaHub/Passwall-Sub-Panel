@@ -96,6 +96,10 @@ type GroupEligibility interface {
 // SetGroupEligibility late-binds the eligibility test the add paths use.
 func (s *Service) SetGroupEligibility(e GroupEligibility) { s.eligibility = e }
 
+// GroupEligibilityWired reports whether an eligibility has been bound, for the
+// application's wiring test: unbound, the add paths decide by tags alone.
+func (s *Service) GroupEligibilityWired() bool { return s.eligibility != nil }
+
 // SetAllowlistResyncer late-binds what runs when a panel's inbound sniffing or
 // enabled state changes: group.Service.InboundsChanged, which decides whether
 // the panel is one that enforces allowlists and resyncs the members if so.
