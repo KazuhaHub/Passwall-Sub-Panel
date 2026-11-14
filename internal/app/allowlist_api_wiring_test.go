@@ -46,7 +46,7 @@ func TestBuildWiresTheAllowlistGroupAPI(t *testing.T) {
 	if a.destGroups == nil {
 		t.Fatal("Build left the allowlist group service unwired")
 	}
-	if w := a.destGroups.Wired(); !w.Budget || !w.Resync || !w.Changed || !w.Hits || !w.BaseHosts || !w.Editor || !w.Settings {
+	if w := a.destGroups.Wired(); !w.Budget || !w.BudgetPerPanel || !w.Resync || !w.Changed || !w.Hits || !w.BaseHosts || !w.Editor || !w.Settings {
 		t.Fatalf("the allowlist group service is missing collaborators: %+v", w)
 	}
 	// The executable seeds the templates before Build; this fixture does it after.

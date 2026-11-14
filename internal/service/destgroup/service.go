@@ -284,12 +284,24 @@ type ExceptionResult struct {
 // Wiring says which optional collaborators the service was built with. It exists
 // for the application's wiring test: a collaborator left out degrades without a
 // word.
-type Wiring struct{ Budget, Resync, Changed, Hits, BaseHosts, Editor, Settings bool }
+type Wiring struct {
+	Budget, Resync, Changed, Hits, BaseHosts, Editor, Settings bool
+	// BudgetPerPanel: the budget counts a group's subjects on the panels its
+	// tags select. Without it the budget sums every group onto one node and
+	// refuses policy saves that every node could carry.
+	BudgetPerPanel bool
+}
 
 // Wired reports what the service has.
 func (s *Service) Wired() Wiring {
 	return Wiring{
 		Budget: s.Budget != nil, Resync: s.Resync != nil, Changed: s.Changed != nil, Hits: s.Hits != nil,
 		BaseHosts: s.BaseHosts != nil, Editor: s.Editor != nil, Settings: s.Settings != nil,
+		BudgetPerPanel: budgetPerPanel(s.Budget),
 	}
+}
+
+func budgetPerPanel(b any) bool {
+	p, ok := b.(interface{ GroupBudgetPerPanel() bool })
+	return ok && p.GroupBudgetPerPanel()
 }
