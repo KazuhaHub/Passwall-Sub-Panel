@@ -242,7 +242,8 @@ export function accessVerdict(
     notEnrolled: count(k => k === 'not_enrolled'),
     offline: states.filter(s => s.key === 'offline' && isNativeKind(s.n.kind)).length,
   }
-  const done = count(k => k === 'applied' || k === 'applied_exec_only' || k === 'applied_sniffing')
+  // A node whose every rule was dropped for sniffing (state none) is flagged, but enforces nothing: not done.
+  const done = states.filter(s => s.key === 'applied' || s.key === 'applied_exec_only' || (s.key === 'applied_sniffing' && s.n.state !== 'none')).length
   const base: AccessVerdict = {
     tone: 'ok', kind: 'applied', n: done, done, total: executors.length, action: 'nodes', skipped,
     nextPublishAt: status.next_publish_at, executors: executors.length,

@@ -109,6 +109,12 @@ describe('accessVerdict: the worst finding wins', () => {
     expect(v).toMatchObject({ kind: 'applied', tone: 'ok', executors: 1, total: 1 })
   })
 
+  it('a node whose every rule was dropped for sniffing is flagged but not counted as done', () => {
+    const weak = node({ panel_id: 2, state: 'none', sniffing_insufficient: [{ listener: 'lst_1', reason: 'metadata_only' }] as never })
+    const v = accessVerdict(status([node(), weak]), { policies: on, now: NOW })
+    expect(v.done).toBe(1)
+  })
+
   it('source rules alone count as something to enforce', () => {
     const v = accessVerdict(status([node()]), { policies: pols(), hasDefinitions: true, now: NOW })
     expect(v.kind).toBe('applied')

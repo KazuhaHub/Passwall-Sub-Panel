@@ -125,7 +125,7 @@ export default function NodePolicyStatusRow({
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>{badge}</Box>
         <Typography variant="body2" sx={{ mt: 0.75, color: md.onSurfaceVariant }}>{note}</Typography>
         {allowLine}
-      {reportLine}
+        {reportLine}
         {extra}
         {problem && (
           <Box sx={{ mt: 1.5, p: 1.5, borderRadius: 2, bgcolor: md.surfaceContainerHigh }}>

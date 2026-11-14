@@ -442,6 +442,7 @@ func (s *Service) compileFresh(ctx context.Context, in CompileInput, meta *domai
 					log.Warn("destpolicy: the restricted fallback does not validate; sending none", "agent_id", in.AgentID, "err", verr)
 					output, fallbackShed = nil, ""
 				case usageOf(output).over() != nil:
+					log.Warn("destpolicy: the restricted fallback is over a limit; sending none", "agent_id", in.AgentID)
 					output, fallbackShed = nil, ""
 				case len(perListenerSniffFindings(output, nodes)) > 0:
 					log.Error("destpolicy: a restricted fallback still needs sniffing an inbound cannot supply; sending none", "agent_id", in.AgentID)
