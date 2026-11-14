@@ -31,18 +31,9 @@ type ExceptionResult struct {
 //
 // "Allow for one account only" is an exemption, not this.
 func (a *Admin) AddException(ctx context.Context, target, match string) (*ExceptionResult, error) {
-	host, err := exceptionHost(target)
+	line, err := ExceptionLine(target, match)
 	if err != nil {
 		return nil, err
-	}
-	var line string
-	switch match {
-	case "site":
-		line = "DOMAIN-SUFFIX," + host
-	case "host":
-		line = "DOMAIN," + host
-	default:
-		return nil, &ValidationError{Code: CodeExceptionInvalid, Field: "match", Bad: []string{match}, Msg: "match is site or host"}
 	}
 	if a.Instantiate == nil || a.ExceptionEditor == nil {
 		return nil, fmt.Errorf("%w: exceptions are not available in this build", domain.ErrUnavailable)
@@ -95,6 +86,23 @@ func (a *Admin) AddException(ctx context.Context, target, match string) (*Except
 	}
 	_ = a.Policies.Reorder(ctx, domain.DestActionAllow, ids)
 	return &ExceptionResult{Entry: line, ListID: created.ListIDs[0], PolicyID: created.ID, Created: true}, nil
+}
+
+// ExceptionLine is the list line an exception adds: the site (a domain and
+// everything under it) or the host (exactly that name) of what the admin typed.
+// A *ValidationError (CodeExceptionInvalid) says which field was not understood.
+func ExceptionLine(target, match string) (string, error) {
+	host, err := exceptionHost(target)
+	if err != nil {
+		return "", err
+	}
+	switch match {
+	case "site":
+		return "DOMAIN-SUFFIX," + host, nil
+	case "host":
+		return "DOMAIN," + host, nil
+	}
+	return "", &ValidationError{Code: CodeExceptionInvalid, Field: "match", Bad: []string{match}, Msg: "match is site or host"}
 }
 
 // exceptionHost reads a host name out of what the admin typed: a bare name, a
