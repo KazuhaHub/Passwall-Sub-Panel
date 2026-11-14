@@ -498,6 +498,9 @@ func (s *Service) CreateInbound(ctx context.Context, n *domain.Node, spec ports.
 // provisionNodeMembersInBackground re-provisions each eligible member's shared
 // client onto the new inbound.
 //
+// On a NATIVE panel (ports.AsynchronousApplier) PSP owns the inbound outright, so
+// this never rebuilds or relinks anything: it only re-provisions the members.
+//
 // Idempotent: it re-creates the inbound only when it is MISSING (otherwise it leaves
 // the live one and just re-provisions clients), so it never duplicates an inbound and
 // doubles as a manual "push clients now". Recreating needs a captured config
@@ -514,6 +517,18 @@ func (s *Service) RecreateInboundOnServer(ctx context.Context, nodeID int64) err
 	c, err := s.pool.Get(n.PanelID)
 	if err != nil {
 		return err
+	}
+	// A native panel's inbound is PSP's own desired config; the agent deploys it
+	// and GetInbound only reads the agent's last full report. A report that lacks
+	// the node (not reported yet, agent offline, stale) therefore says nothing
+	// about the inbound being gone, and treating it so would clear the node's
+	// routes, burn a new compatibility inbound id and relink the node for nothing.
+	// What Recreate still means here is "push the members' clients now". It does
+	// NOT re-enable a disabled node: enabling is SetEnabled's job.
+	if async, ok := c.(ports.AsynchronousApplier); ok && async.ApplyIsAsynchronous() {
+		log.Info("recreate: native panel owns the inbound — re-provisioning members only", "node_id", nodeID, "panel_id", n.PanelID, "inbound_id", n.InboundID)
+		s.provisionNodeMembersInBackground(n)
+		return nil
 	}
 	// IDEMPOTENT: if the inbound is MISSING on the panel, recreate it from the captured
 	// snapshot + relink the node; if it's already there, skip creation. EITHER way the
@@ -996,6 +1011,23 @@ func (s *Service) runNodeTask(ctx context.Context, task *domain.SyncTask) error 
 	}
 	switch task.Type {
 	case domain.SyncTaskNodeDelete:
+		// A native panel applies asynchronously: PSP owns the inbound, the agent
+		// deploys PSP's desired config, and DelInbound is a no-op. Deleting the
+		// node row IS the upstream delete (the agent drops it on its next sync), so
+		// nothing here may depend on the agent's report. Its GetInbound answers
+		// from that report, and its errors ("not found", "no cached full report:
+		// not found", offline, stale) never match isInboundGoneError, so gating on
+		// it would retry a never-reported node to the attempt cap and leave the row
+		// disabled. This comes BEFORE route cleanup too: native routes are never
+		// upstream and route_state dies with the row, while a node converted from
+		// 3X-UI that still carries route lines would fail the cleaner's validation,
+		// be cancelled as permanent, and stay disabled.
+		if async, ok := c.(ports.AsynchronousApplier); ok && async.ApplyIsAsynchronous() {
+			if err := s.cleaner.UnclaimAllForInbound(ctx, n.PanelID, n.InboundID); err != nil {
+				return fmt.Errorf("unclaim owned clients: %w", err)
+			}
+			return s.nodes.Delete(ctx, n.ID)
+		}
 		if s.routeCleaner != nil {
 			if err := s.routeCleaner(ctx, n.ID); err != nil {
 				return err
