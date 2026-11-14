@@ -12,8 +12,12 @@ import type { ReadOptions } from './requestOptions'
 // page reports whatever is left in its own words (destErrorOf below).
 
 export type DestAction = 'block' | 'allow'
-/** Batch 1: off | on. `report` is a later batch and the server refuses it. */
-export type DestState = 'off' | 'on'
+/**
+ * off | report | on. `report` (a block policy or a source rule that only
+ * records what it WOULD have blocked) is refused for an allow policy
+ * (400 dest_policy_state_unavailable).
+ */
+export type DestState = 'off' | 'report' | 'on'
 export type DestScope = 'all' | 'groups' | 'panels'
 export type DestListKind = 'custom' | 'remote' | 'geosite'
 export type DestListSide = 'dest' | 'source'
@@ -70,9 +74,14 @@ export interface DestPolicy {
   note: DestPolicyNote | null
   /** A group or panel the policy is scoped to is gone. */
   scope_missing: boolean
-  /** Null until hit recording exists (batch 2). */
+  /** Connections it blocked in the hit window. Null for an allow policy (it records nothing) and while no node records: never 0 then. */
   hits_recent: number | null
+  /** What a report-only policy WOULD have blocked in the window; null unless its state is `report`, and while no node records. */
+  would_block_recent: number | null
+  /** Its latest hit of any kind within the retention; null when there is none (or for an allow policy). */
   last_hit_at: number | null
+  /** A block policy's real blocks count as a risk signal (report-only rows never do). Absent from an older server: false. */
+  counts_as_risk?: boolean
 }
 
 export interface DestPolicies {
@@ -97,6 +106,8 @@ export interface DestPolicyInput {
   group_ids: number[]
   panel_ids: number[]
   template_key?: string
+  /** Block policies only. Left out, an edit keeps the stored value; an allow policy must not send true. */
+  counts_as_risk?: boolean
   /** A preview of an edit names the policy. */
   id?: number
   /** The precondition of a PUT. */
@@ -241,6 +252,8 @@ export interface DestTemplate {
   added: boolean
   policy_id?: number
   policy_state?: DestState
+  /** The policy it creates counts as a risk signal (its real blocks feed the dest_block signal). */
+  counts_as_risk?: boolean
 }
 
 export interface DestUnavailableTemplate { key: string; name: Localized; reason: Localized }
@@ -301,7 +314,10 @@ export type DestTestStepResult = 'hit' | 'miss' | 'untestable' | 'shadowed' | 's
 export interface DestTestStep {
   step: number
   rule_id?: string
+  /** What the rule is; a report-only rule keeps its kind (see `report_only`). */
   kind: DestTestStepKind
+  /** The rule is report-only (a policy or a source rule): a hit on it records and does not block. */
+  report_only?: boolean
   policy_id?: number
   node_id?: number
   name?: string
@@ -325,6 +341,80 @@ export interface DestTestResult {
   nodes: { panel_id: number; name: string; state: string }[]
 }
 
+// ---- hit records ----
+
+/** Rows are one account's hits on one destination in one hour, or (group_by) a fold of them. */
+export type DestHitAction = 'block' | 'observe'
+export type DestHitSourceKind = 'policy' | 'source' | 'group'
+export type DestHitGroupBy = 'none' | 'site' | 'user' | 'policy'
+
+export interface DestHitItem {
+  /** UTC ms of the start of the hour; 0 in a grouped view. */
+  hour_ms: number
+  panel_id: number
+  panel_name: string | null
+  user_id: number
+  /** Null: the account is gone (or a grouped view that folds accounts away). */
+  upn: string | null
+  /** p<policy id>, s<inbound node id>, g<group id>; '' when a grouped view folds sources away. */
+  source: string
+  /** Null for a source that no longer exists: "a deleted policy". */
+  source_name: string | null
+  source_kind: DestHitSourceKind
+  action: DestHitAction
+  dest: string
+  port: number
+  count: number
+  first_ms: number
+  last_ms: number
+}
+
+export interface DestHitSourceRef { source: string; name: string | null }
+
+export interface DestHits {
+  items: DestHitItem[]
+  total: number
+  page: number
+  page_size: number
+  group_by: string
+  since: number
+  until: number
+  /** The whole time / account / node selection, whatever the action and source filters. */
+  summary: { block: number; deny: number; observe: number; users: number }
+  /** Every source with rows in the range. */
+  sources: DestHitSourceRef[]
+  /** Reported rows that are missing from the range. */
+  dropped_in_range: number
+}
+
+/** The query of GET /dest/hits. `since` and `until` are UTC ms (at most 31 days apart). `q` is a keyword and goes to the server only. */
+export interface DestHitsParams {
+  user_id?: number
+  panel_id?: number
+  source?: string
+  source_kind?: DestHitSourceKind
+  action?: DestHitAction
+  since?: number
+  until?: number
+  q?: string
+  group_by?: DestHitGroupBy
+  page?: number
+  page_size?: number
+}
+
+/** What a recent-hit line says: one source's hits of one account in the window. */
+export interface DestUserHit {
+  source: string
+  source_name: string | null
+  action: DestHitAction
+  count: number
+  /** The destinations hit most, at most three. */
+  top_dests: string[] | null
+  /** Panel ids the hits came from. */
+  panels: number[] | null
+  last_at: number
+}
+
 // ---- one account ----
 
 export interface DestUserView {
@@ -332,8 +422,10 @@ export interface DestUserView {
   upn: string
   exemption: DestExemption | null
   group: { id: number; name: string; mode: 'open' | string; stage: string | null } | null
+  /** Whether any node of the account records hits; null when the server cannot tell. */
   hits_available: boolean | null
-  recent_hits: unknown
+  /** Absent when the server has no hit store. `days` is the window, already clamped to the retention. */
+  recent_hits: { days: number; items: DestUserHit[] } | null
   usage_available: boolean | null
   usage_nodes: unknown
 }
@@ -357,9 +449,14 @@ export interface DestNodeStatus {
   engine: string
   agent_version: string
   supports: { policy: boolean; hits: boolean; usage: boolean }
+  /** What the panel is set to record (off | hits | hits_and_usage); '' for a node that is not a Passwall Node. */
   collect: string
+  /** What the node was told: the lower of the setting and what it can do. */
   collect_effective: string
+  /** Whether it records now (derived; a quiet node sends nothing). */
   collecting: boolean
+  /** Why the node was sent the policy without its report-only rules (enforced ones untouched); null when it got them all. */
+  report_only_not_deployed?: 'sniffing' | 'limit' | null
   state: DestNodeState
   fallback_reason: string
   over_limit: DestPublishError | null
@@ -372,6 +469,7 @@ export interface DestNodeStatus {
   rules_data_version: string | null
   geoip_unavailable: boolean
   allowlist_groups: number[]
+  /** Hits it reported in the last 24 hours; null where the node cannot record. */
   hits_24h: number | null
 }
 
@@ -397,6 +495,9 @@ export interface DestSettings {
   dest_policy_apply_min_seconds: number
   dest_list_refresh_hours: number
   dest_rules_update_mode: '' | 'manual' | 'auto'
+  /** How long hit records are kept; 0 is unset (the default). */
+  dest_hit_retention_days: number
+  dest_trial_retention_days: number
 }
 
 export interface DestSettingsView {
@@ -508,7 +609,26 @@ export async function getGeositeCategories(opts: ReadOptions = {}): Promise<Geos
 
 export async function getDestUser(id: number, opts: ReadOptions = {}): Promise<DestUserView> {
   const { data } = await client.get<DestUserView>(`${BASE}/users/${id}`, { signal: opts.signal, _skipErrorToast: true })
-  return data
+  const hits = data.recent_hits
+  return {
+    ...data,
+    recent_hits: hits ? { ...hits, items: arr(hits.items).map(h => ({ ...h, top_dests: arr(h.top_dests), panels: arr(h.panels) })) } : null,
+  }
+}
+
+/**
+ * The hit records of a selection (plan S12). Parameters left out are not sent;
+ * `q` is a keyword for the destination and travels in this request only: it is
+ * never in the page URL (R12).
+ */
+export async function getDestHits(params: DestHitsParams = {}, opts: ReadOptions = {}): Promise<DestHits> {
+  const query: Record<string, string | number> = {}
+  for (const [k, v] of Object.entries(params)) {
+    if (v === undefined || v === '' || v === null) continue
+    query[k] = v as string | number
+  }
+  const { data } = await client.get<DestHits>(`${BASE}/hits`, { params: query, signal: opts.signal, _skipErrorToast: true })
+  return { ...data, items: arr(data.items), sources: arr(data.sources), summary: data.summary ?? { block: 0, deny: 0, observe: 0, users: 0 } }
 }
 
 export async function getDestSettings(opts: ReadOptions = {}): Promise<DestSettingsView> {
@@ -651,6 +771,14 @@ export interface DestExceptionResult {
 export async function addDestException(input: { target: string; match: 'site' | 'host' }): Promise<DestExceptionResult> {
   const { data } = await client.post<DestExceptionResult>(`${BASE}/exceptions`, { ...input, scope: 'global' }, quiet)
   return data
+}
+
+/** What a Passwall Node server records of its destination rules. `hits_and_usage` is not offered yet. */
+export type AuditCollect = 'off' | 'hits' | 'hits_and_usage'
+
+/** The recording mode of one native server: PUT /servers/:id with this one key (the others are kept). */
+export async function setAuditCollect(serverId: number, collect: AuditCollect): Promise<void> {
+  await client.put(`/admin/servers/${serverId}`, { audit_collect: collect }, quiet)
 }
 
 // ---- errors ----

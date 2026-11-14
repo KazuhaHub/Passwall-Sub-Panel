@@ -9,6 +9,7 @@ import {
   useEditDestListEntries, useInstantiateDestTemplate, usePauseDest, usePublishDest, usePutSourceRule,
   useReorderDestPolicies, useRetryDestAgent, useRollbackGeosite, useSaveDestExemption, useSaveDestList,
   useSaveDestSettings, useUpdateDestPolicy, useUpdateGeosite, useTestDestination, useAddDestException,
+  useDestHits, useDestPolicies, useDestUser, useSetAuditCollect,
 } from './accessControl'
 import { accessControlKeys, riskCenterKeys, serverKeys, settingsKeys } from './keys'
 import { policies } from './policies'
@@ -58,11 +59,11 @@ async function run<T>(hook: () => { mutateAsync: (v: never) => Promise<unknown> 
 }
 
 describe('write → invalidate', () => {
-  it('a policy write: policies, status, lists (the reference count), catalog (the "added" mark)', async () => {
+  it('a policy write: policies, status, lists (the reference count), catalog (the "added" mark), and the hit records and account views that name policies', async () => {
     vi.mocked(api.createDestPolicy).mockResolvedValue({ id: 1 } as api.DestPolicy)
     const s = spy()
     await run(() => useCreateDestPolicy(scope), s.client, { name: 'x' })
-    s.expectKeys([ac.policies(scope), ac.status(scope), ac.lists(scope), ac.catalog(scope)])
+    s.expectKeys([ac.policies(scope), ac.status(scope), ac.lists(scope), ac.catalog(scope), ac.hitsAll(scope), ac.usersAll(scope)])
   })
 
   it.each([
@@ -72,7 +73,7 @@ describe('write → invalidate', () => {
     vi.mocked(api[fn] as (...a: unknown[]) => Promise<unknown>).mockResolvedValue({})
     const s = spy()
     await run(hook as never, s.client, arg)
-    s.expectKeys([ac.policies(scope), ac.status(scope), ac.lists(scope), ac.catalog(scope)])
+    s.expectKeys([ac.policies(scope), ac.status(scope), ac.lists(scope), ac.catalog(scope), ac.hitsAll(scope), ac.usersAll(scope)])
   })
 
   it('reordering moves the policies and what the status reads of them', async () => {
@@ -85,8 +86,8 @@ describe('write → invalidate', () => {
   it('a template instantiation creates lists and a policy: everything those read', async () => {
     vi.mocked(api.instantiateDestTemplate).mockResolvedValue({ id: 1 } as api.DestPolicy)
     const s = spy()
-    await run(() => useInstantiateDestTemplate(scope), s.client, { key: 'bittorrent', state: 'on', locale: 'zh-CN' })
-    s.expectKeys([ac.policies(scope), ac.status(scope), ac.lists(scope), ac.catalog(scope)])
+    await run(() => useInstantiateDestTemplate(scope), s.client, { key: 'bittorrent', state: 'report', locale: 'zh-CN' })
+    s.expectKeys([ac.policies(scope), ac.status(scope), ac.lists(scope), ac.catalog(scope), ac.hitsAll(scope), ac.usersAll(scope)])
   })
 
   it.each([
@@ -121,11 +122,18 @@ describe('write → invalidate', () => {
     s.expectKeys([ac.sourceRules(scope), ac.sourceRule(scope, 4), ac.status(scope)])
   })
 
-  it('settings: settings, status, lists (the refresh interval they quote), the system settings record', async () => {
+  it('settings: settings, status, lists (the refresh interval they quote), the policies and the hit and account views (the retention window they quote), the system settings record', async () => {
     vi.mocked(api.putDestSettings).mockResolvedValue({} as api.DestSettingsView)
     const s = spy()
     await run(() => useSaveDestSettings(scope), s.client, { dest_list_refresh_hours: 12 })
-    s.expectKeys([ac.settings(scope), ac.status(scope), ac.lists(scope), settingsKeys.ui(scope)])
+    s.expectKeys([ac.settings(scope), ac.status(scope), ac.lists(scope), ac.policies(scope), ac.hitsAll(scope), ac.usersAll(scope), settingsKeys.ui(scope)])
+  })
+
+  it('a recording mode: the status, the servers list that carries audit_collect, and what is shown only while a node records (policy counters, hit records, account hits)', async () => {
+    vi.mocked(api.setAuditCollect).mockResolvedValue()
+    const s = spy()
+    await run(() => useSetAuditCollect(scope), s.client, { serverId: 5, collect: 'off' })
+    s.expectKeys([ac.status(scope), serverKeys.lists(scope), ac.policies(scope), ac.hitsAll(scope), ac.usersAll(scope)])
   })
 
   it('pause, publish-now and a retry: status and policies', async () => {
@@ -169,6 +177,41 @@ describe('write → invalidate', () => {
 
   it('never touches the servers list key (the status line there reads the status read)', () => {
     expect(serverKeys.all(scope)).not.toEqual(ac.all(scope))
+  })
+})
+
+describe('hit records and the account view are queries, not polls', () => {
+  it('the hit read is keyed by its filters, never refetches on a timer and uses the destHits policy', async () => {
+    const client = newClient()
+    vi.mocked(api.getDestHits).mockResolvedValue({ items: [], sources: [], summary: { block: 0, deny: 0, observe: 0, users: 0 } } as unknown as api.DestHits)
+    const params = { user_id: 7, source: 'p3', group_by: 'site' } as const
+    const { result } = renderHook(() => useDestHits(scope, params), { wrapper: queryWrapper(client) })
+    await waitFor(() => expect(result.current.data).toBeTruthy())
+    const q = client.getQueryCache().find({ queryKey: ac.hits(scope, params) })!
+    expect(q).toBeTruthy()
+    expect((q.options as { staleTime?: number }).staleTime).toBe(policies.destHits.staleTime)
+    expect((q.options as { gcTime?: number }).gcTime).toBe(policies.destHits.gcTime)
+    expect(policies.destHits.refetchInterval).toBe(false)
+    expect(api.getDestHits).toHaveBeenCalledWith(params, expect.anything())
+  })
+
+  it('the keyword is part of the key and of the request only: an empty keyword is the same read as none', async () => {
+    expect(ac.hits(scope, { q: '' })).toEqual(ac.hits(scope, {}))
+  })
+
+  it('the policy read carries hit counters, so its own policy keeps them under a minute-class window', () => {
+    expect(policies.destPolicies.staleTime).toBeLessThanOrEqual(60_000)
+    expect(policies.destPolicies.refetchInterval).toBe(false)
+    expect(policies.destPolicies.note.length).toBeGreaterThan(20)
+  })
+
+  it('the account read and the policy read are keyed under the access-control prefix', async () => {
+    const client = newClient()
+    vi.mocked(api.getDestPolicies).mockResolvedValue({ allow: [], block: [], observe: [] } as unknown as api.DestPolicies)
+    vi.mocked(api.getDestUser).mockResolvedValue({ user_id: 7 } as api.DestUserView)
+    renderHook(() => { useDestPolicies(scope); useDestUser(scope, 7) }, { wrapper: queryWrapper(client) })
+    await waitFor(() => expect(client.getQueryCache().find({ queryKey: ac.user(scope, 7) })).toBeTruthy())
+    expect(ac.user(scope, 7).slice(0, ac.usersAll(scope).length)).toEqual([...ac.usersAll(scope)])
   })
 })
 

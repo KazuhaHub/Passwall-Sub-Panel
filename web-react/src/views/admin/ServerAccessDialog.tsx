@@ -1,19 +1,25 @@
-import { Box, Button, Dialog, DialogActions, DialogContent, DialogTitle, useMediaQuery, useTheme } from '@mui/material'
+import { useState } from 'react'
+import { Box, Button, Dialog, DialogActions, DialogContent, DialogTitle, Typography, useMediaQuery, useTheme } from '@mui/material'
 import ChevronRightIcon from '@mui/icons-material/ChevronRight'
 import { Link as RouterLink, useNavigate } from 'react-router'
 import { useTranslation } from 'react-i18next'
 
 import type { DestNodeStatus } from '@/api/accessControl'
+import AuditCollectDialog from '@/components/AuditCollectDialog'
+import KpiTile, { KpiGrid } from '@/components/KpiTile'
 import NodePolicyStatusRow from '@/components/NodePolicyStatusRow'
-import { useRetryDestAgent } from '@/query/accessControl'
+import { useDestSettings, useRetryDestAgent } from '@/query/accessControl'
 import { useQueryScope } from '@/query/useQueryScope'
+import { nodeRecording } from '@/utils/accessControl'
 import { reportDestError, reportRetry } from './accessControl/destErrors'
+import { recordsHref } from './accessControl/records/recordsParams'
 
 /**
  * One native node's access-control state, opened from the Servers page's
- * "Access control: …" line (batch 1: the state line and its problems; the
- * recording and hits blocks arrive with later batches). The state is drawn by
- * the one NodePolicyStatusRow the coverage sheet uses.
+ * "Access control: …" line: the state line and its problems, then what the
+ * node records and how many hits it reported in the last 24 hours. The state
+ * is drawn by the one NodePolicyStatusRow the coverage sheet uses; the
+ * recording mode is set in the one AuditCollectDialog.
  */
 export default function ServerAccessDialog({ node, serverName, onClose }: {
   /** The node's delivery state, or null (closed). */
@@ -27,6 +33,12 @@ export default function ServerAccessDialog({ node, serverName, onClose }: {
   const scope = useQueryScope()
   const navigate = useNavigate()
   const retry = useRetryDestAgent(scope)
+  const settings = useDestSettings(scope, { enabled: node !== null })
+  const [recordingFor, setRecordingFor] = useState<DestNodeStatus | null>(null)
+  const rec = node ? nodeRecording(node) : null
+  const days = settings.data?.effective.dest_hit_retention_days
+  const num = new Intl.NumberFormat()
+  const R = 'admin:servers.access.'
 
   return (
     <Dialog open={node !== null} onClose={onClose} fullWidth maxWidth="sm" fullScreen={fullScreen}
@@ -39,6 +51,29 @@ export default function ServerAccessDialog({ node, serverName, onClose }: {
               onOpenInbound={id => { onClose(); void navigate(`/admin/nodes?inbound=${id}`) }}
               onRetry={async id => { try { reportRetry(t, await retry.mutateAsync(id)) } catch (err) { reportDestError(t, err) } }}
               onUpgrade={onClose} onOpenLists={() => { onClose(); void navigate('/admin/access-control?tab=lists') }} />
+            {node && rec && (
+              <KpiGrid>
+                <Box data-testid="server-recording">
+                  <KpiTile label={t(`${R}recording`)}
+                    value={rec.mode === 'exec_only' ? t(`${R}recording_exec_only`) : rec.mode === 'too_old' ? t(`${R}recording_too_old`) : t(`${R}recording_${rec.mode}`)}
+                    caption={(
+                      <Box component="span" sx={{ display: 'flex', alignItems: 'center', gap: 0.5, flexWrap: 'wrap' }}>
+                        {rec.mode === 'hits' && days !== undefined && <span>{t(`${R}retention`, { days })}</span>}
+                        <Button size="small" onClick={() => setRecordingFor(node)}>{t(`${R}change`)}</Button>
+                      </Box>
+                    )} />
+                </Box>
+                {rec.mode === 'hits' && (
+                  <Box data-testid="server-hits">
+                    <KpiTile label={t(`${R}hits_24h`)} value={rec.hits24h === null ? '—' : num.format(rec.hits24h)}
+                      caption={<Button size="small" endIcon={<ChevronRightIcon />} onClick={() => { onClose(); void navigate(`/admin/access-control${recordsHref({ panel_id: node.panel_id })}`) }}>{t(`${R}view_records`)}</Button>} />
+                  </Box>
+                )}
+              </KpiGrid>
+            )}
+            {node && rec && rec.mode === 'hits' && rec.hits24h === null && (
+              <Typography variant="caption" sx={{ color: theme.palette.md.onSurfaceVariant }}>{t(`${R}hits_none_note`)}</Typography>
+            )}
           </Box>
         )}
       </DialogContent>
@@ -48,6 +83,7 @@ export default function ServerAccessDialog({ node, serverName, onClose }: {
         </Button>
         <Button onClick={onClose}>{t('admin:servers.access.close')}</Button>
       </DialogActions>
+      <AuditCollectDialog node={recordingFor} onClose={() => setRecordingFor(null)} />
     </Dialog>
   )
 }

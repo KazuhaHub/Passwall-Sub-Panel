@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Link as RouterLink, useSearchParams } from 'react-router'
 import { Alert, Box, Button, Paper, Skeleton, Typography, useTheme } from '@mui/material'
+import ChevronRightIcon from '@mui/icons-material/ChevronRight'
 import { useTranslation } from 'react-i18next'
 import { isAxiosError } from 'axios'
 
@@ -235,6 +236,15 @@ function PolicyBody({ loaded }: { loaded: RiskPolicyView }) {
         return caption(t('admin:settings.risk.sub_spread_hint'))
       case 'devices':
         return caption(t(`${P}hwid_on_devices`))
+      case 'dest_block':
+        // Which policies count is set on the access-control page, not here; this is the way there.
+        return (
+          <Box>
+            <Button component={RouterLink} to="/admin/access-control?tab=policies" size="small" endIcon={<ChevronRightIcon />}>
+              {t(`${P}dest_block_open`)}
+            </Button>
+          </Box>
+        )
       default:
         return null
     }

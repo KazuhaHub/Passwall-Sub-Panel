@@ -256,11 +256,11 @@ afterEach(() => {
 })
 
 describe('PolicyTab, the page', () => {
-  it('lays out the six detector cards and the group exceptions', async () => {
+  it('lays out the seven detector cards and the group exceptions', async () => {
     serve()
     mount()
     await loaded()
-    for (const k of ['geo', 'sub_spread', 'devices', 'usage_shift', 'login_country', 'data', 'groups']) {
+    for (const k of ['geo', 'sub_spread', 'devices', 'usage_shift', 'login_country', 'dest_block', 'data', 'groups']) {
       expect(card(`risk_center.policy.card.${k}`), k).toBeTruthy()
     }
     // Nothing is unsaved on arrival.
@@ -290,6 +290,35 @@ describe('PolicyTab, the page', () => {
     })
     mount()
     expect(await screen.findByText(L('risk_center.unwired'))).toBeTruthy()
+  })
+})
+
+describe('PolicyTab, the access-block card (S19)', () => {
+  it('sits between login country and the data card, with its switch and threshold', async () => {
+    serve()
+    mount()
+    await loaded()
+    const titles = screen.getAllByRole('region').map(r => r.getAttribute('aria-labelledby')).filter(Boolean)
+      .map(id => document.getElementById(id!)?.textContent)
+    const i = titles.indexOf(L('risk_center.policy.card.dest_block'))
+    expect(titles[i - 1]).toBe(L('risk_center.policy.card.login_country'))
+    expect(titles[i + 1]).toBe(L('risk_center.policy.card.data'))
+    const c = card('risk_center.policy.card.dest_block')
+    expect(within(c).getByRole('switch')).toBeTruthy()
+    expect(field('settings.risk.dest_block_threshold', c)).toBeTruthy()
+  })
+
+  it('opens the access-control page from the card, and asks first while the draft is unsaved', async () => {
+    serve()
+    mount()
+    await loaded()
+    const link = within(card('risk_center.policy.card.dest_block')).getByRole('link', { name: L('risk_center.policy.dest_block_open') })
+    expect(link.getAttribute('href')).toBe('/admin/access-control?tab=policies')
+    type(field('settings.risk.max_devices'), '5')
+    confirmMock.mockResolvedValueOnce(false)
+    fireEvent.click(link)
+    await waitFor(() => expect(confirmMock).toHaveBeenCalledWith(expect.objectContaining({ title: L('risk_center.policy.leave_title') })))
+    expect(lastLocation).toBe('/admin/risk?tab=policy')
   })
 })
 

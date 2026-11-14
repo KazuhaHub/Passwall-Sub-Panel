@@ -6,6 +6,8 @@ import {
   ACCESS_TONE_KINDS, accessTone, enforcingNodeCount, limitKindKey, accessVerdict, applyMinutes, budgetLevel, clampDays, destStatusActive,
   needsFirstPublishConfirm, nodeStateKey, NODE_STATE_FILTER, NODE_STATE_TONE, PENDING_STUCK_MS, pipelineSteps,
   visibleBudget, type NodeStateKey,
+  collectingNodeCount, enabledPolicies, reportNotDeployedCount, nodeRecording, policyHitsView, policyStateOptions, policyStateTone, reorderWithin,
+  splitBlockByState,
 } from './accessControl'
 
 const NOW = 1_700_000_000_000
@@ -32,7 +34,7 @@ function policy(over: Partial<DestPolicy> = {}): DestPolicy {
   return {
     id: 1, name: 'No mail', description: '', action: 'block', state: 'on', list_ids: [], inline: {}, scope: 'all',
     group_ids: [], panel_ids: [], priority: 1, template_key: '', created_at: 0, updated_at: 0, list_states: [], note: null,
-    scope_missing: false, hits_recent: null, last_hit_at: null, ...over,
+    scope_missing: false, hits_recent: null, would_block_recent: null, last_hit_at: null, ...over,
   }
 }
 
@@ -168,8 +170,10 @@ describe('shared node counts and limit kinds', () => {
 describe('small decisions', () => {
   it('the rail numbers itself', () => {
     expect(pipelineSteps().map(s => s.id)).toEqual(['allow', 'exempt', 'block', 'rest'])
-    expect(pipelineSteps({ observe: true, allowlist: true }).map(s => `${s.n}:${s.id}`))
-      .toEqual(['1:allow', '2:exempt', '3:block', '4:allowlist', '5:observe', '6:rest'])
+    expect(pipelineSteps({ report: true, allowlist: true }).map(s => `${s.n}:${s.id}`))
+      .toEqual(['1:allow', '2:exempt', '3:block', '4:allowlist', '5:report', '6:rest'])
+    // Report-only is phase 5 of the compile: after every enforced step, and before the rest.
+    expect(pipelineSteps({ report: true }).map(s => `${s.n}:${s.id}`)).toEqual(['1:allow', '2:exempt', '3:block', '4:report', '5:rest'])
   })
 
   it('budget levels: 80% warns, over 100% blocks', () => {
@@ -210,5 +214,109 @@ describe('small decisions', () => {
     expect(clampDays(7, 3)).toBe(3)
     expect(clampDays(7, 30)).toBe(7)
     expect(clampDays(7, undefined)).toBe(7)
+  })
+})
+
+describe('the three states', () => {
+  it('an allow policy offers off and on only; a block policy and a source rule all three', () => {
+    expect(policyStateOptions('allow')).toEqual(['off', 'on'])
+    expect(policyStateOptions('block')).toEqual(['off', 'report', 'on'])
+  })
+
+  it('every state has a tone from the closed table: report is the "would be denied" row (ScienceOutlined), never the allow or block row', () => {
+    expect(policyStateTone('off')).toBe('paused')
+    expect(policyStateTone('report')).toBe('would_deny')
+    expect(policyStateTone('on')).toBeNull()
+  })
+
+  it('a report-only policy counts as deployed (nodes run it) for what "enabled" means', () => {
+    const on = pols(policy({ id: 1, state: 'on' }), policy({ id: 2, state: 'report' }), policy({ id: 3, state: 'off' }))
+    expect(enabledPolicies(on).map(p => p.id)).toEqual([1, 2])
+  })
+
+  it('a deployed report-only policy needs a node that can run it: no coverage is failing, as for an enforced one', () => {
+    const v = accessVerdict(status([node({ state: 'unsupported_kind', kind: 'x-ui' })]), { policies: pols(policy({ state: 'report' })), now: NOW })
+    expect(v.kind).toBe('no_coverage')
+  })
+
+  it('splits the block section into the enforced-or-off rows and the report-only rows, each in the server order', () => {
+    const a = policy({ id: 1, state: 'on' }); const b = policy({ id: 2, state: 'report' }); const c = policy({ id: 3, state: 'off' }); const d = policy({ id: 4, state: 'report' })
+    const { enforced, report } = splitBlockByState([a, b, c, d])
+    expect(enforced.map(p => p.id)).toEqual([1, 3])
+    expect(report.map(p => p.id)).toEqual([2, 4])
+  })
+
+  it('moving within a section rewrites only that section\'s slots of the whole order', () => {
+    // block order [1 on, 2 report, 3 off, 4 report]: report section is [2, 4].
+    expect(reorderWithin([1, 2, 3, 4], [2, 4], 4, 'up')).toEqual([1, 4, 3, 2])
+    expect(reorderWithin([1, 2, 3, 4], [2, 4], 2, 'bottom')).toEqual([1, 4, 3, 2])
+    expect(reorderWithin([1, 2, 3, 4], [1, 3], 3, 'top')).toEqual([3, 2, 1, 4])
+    expect(reorderWithin([1, 2, 3, 4], [2, 4], 2, 'up')).toBeNull()
+    expect(reorderWithin([1, 2, 3, 4], [2, 4], 4, 'down')).toBeNull()
+  })
+})
+
+describe('report-only rules some nodes do not run', () => {
+  it('counts the nodes the server says were sent the policy without its report-only rules', () => {
+    const n = (v: 'sniffing' | 'limit' | null | undefined) => ({ report_only_not_deployed: v }) as never
+    expect(reportNotDeployedCount(undefined)).toBe(0)
+    expect(reportNotDeployedCount({ nodes: [n(null), n('sniffing'), n('limit'), n(undefined)] })).toBe(2)
+  })
+  it('a report-only "nothing would be blocked" or count carries how many nodes are not running it', () => {
+    expect(policyHitsView(policy({ state: 'report', would_block_recent: 0, last_hit_at: null }), 7, 2)).toEqual({ kind: 'would_block_none', days: 7, notDeployed: 2 })
+    expect(policyHitsView(policy({ state: 'report', would_block_recent: 5, last_hit_at: 1 }), 7, 1)).toEqual({ kind: 'would_block', count: 5, days: 7, last: 1, notDeployed: 1 })
+    expect(policyHitsView(policy({ state: 'report', would_block_recent: 0, last_hit_at: null }), 7, 0)).toEqual({ kind: 'would_block_none', days: 7 })
+  })
+})
+
+describe('what a policy row says of its hits', () => {
+  const win = 7
+  it('an allow policy records nothing: no hit line at all', () => {
+    expect(policyHitsView(policy({ action: 'allow' }), win)).toEqual({ kind: 'none' })
+  })
+  it('null is "no node records", never 0', () => {
+    expect(policyHitsView(policy({ hits_recent: null }), win)).toEqual({ kind: 'unavailable' })
+    expect(policyHitsView(policy({ state: 'report', would_block_recent: null }), win)).toEqual({ kind: 'unavailable' })
+  })
+  it('a block policy: the count and the last hit, "no hits in the window", or "none within the retention"', () => {
+    expect(policyHitsView(policy({ hits_recent: 214, last_hit_at: 5 }), win)).toEqual({ kind: 'count', count: 214, days: 7, last: 5 })
+    expect(policyHitsView(policy({ hits_recent: 0, last_hit_at: 9 }), win)).toEqual({ kind: 'zero', days: 7, last: 9 })
+    expect(policyHitsView(policy({ hits_recent: 0, last_hit_at: null }), win)).toEqual({ kind: 'never' })
+  })
+  it('a report-only policy speaks of what it would have blocked, from would_block_recent and not the block count', () => {
+    expect(policyHitsView(policy({ state: 'report', hits_recent: 0, would_block_recent: 1032, last_hit_at: 5 }), win))
+      .toEqual({ kind: 'would_block', count: 1032, days: 7, last: 5 })
+    expect(policyHitsView(policy({ state: 'report', hits_recent: 0, would_block_recent: 0, last_hit_at: null }), win))
+      .toEqual({ kind: 'would_block_none', days: 7 })
+  })
+})
+
+describe('recording', () => {
+  it('counts the nodes that record now, by the derived flag and never by the setting', () => {
+    expect(collectingNodeCount(undefined)).toBe(0)
+    expect(collectingNodeCount(status([node({ collecting: true }), node({ panel_id: 2, collect: 'hits', collecting: false }), node({ panel_id: 3, collecting: true })]))).toBe(2)
+  })
+
+  it('a node line: off, hits, cannot (too old), sing-box executes only, none for a non-native node', () => {
+    expect(nodeRecording(node({ supports: { policy: true, hits: true, usage: false }, collect: 'hits', collect_effective: 'hits', collecting: true, hits_24h: 1204 })))
+      .toEqual({ mode: 'hits', hits24h: 1204 })
+    expect(nodeRecording(node({ supports: { policy: true, hits: true, usage: false }, collect: 'off', collect_effective: 'off' })))
+      .toEqual({ mode: 'off', hits24h: null })
+    expect(nodeRecording(node({ supports: { policy: true, hits: false, usage: false }, collect: 'hits' }))).toEqual({ mode: 'too_old', hits24h: null })
+    expect(nodeRecording(node({ engine: 'sing-box', supports: { policy: true, hits: false, usage: false } }))).toEqual({ mode: 'exec_only', hits24h: null })
+    expect(nodeRecording(node({ kind: 'x-ui', state: 'unsupported_kind' }))).toBeNull()
+  })
+
+  it('reads what the node was told (collect_effective), not what the panel has stored', () => {
+    const hitsNode = { supports: { policy: true, hits: true, usage: false }, hits_24h: null }
+    expect(nodeRecording(node({ ...hitsNode, collect: 'hits', collect_effective: 'off' }))).toEqual({ mode: 'off', hits24h: null })
+    expect(nodeRecording(node({ ...hitsNode, collect: 'off', collect_effective: 'hits' }))).toEqual({ mode: 'hits', hits24h: null })
+    // Nothing delivered yet: the stored choice stands in.
+    expect(nodeRecording(node({ ...hitsNode, collect: 'off', collect_effective: '' }))).toEqual({ mode: 'off', hits24h: null })
+  })
+
+  it('a node that was told to record but is not recording yet is "hits" with a null 24h, not 0', () => {
+    expect(nodeRecording(node({ supports: { policy: true, hits: true, usage: false }, collect: 'hits', collect_effective: 'hits', collecting: false, hits_24h: null })))
+      .toEqual({ mode: 'hits', hits24h: null })
   })
 })

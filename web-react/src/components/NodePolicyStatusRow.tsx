@@ -7,7 +7,7 @@ import type { DestNodeStatus } from '@/api/accessControl'
 import { AsyncButton } from '@/components/AsyncButton'
 import ToneBadge from '@/components/ToneBadge'
 import {
-  accessTone, limitKindKey, nodeStateKey, NODE_STATE_TONE, type NodeStateKey,
+  accessTone, limitKindKey, nodeRecording, nodeStateKey, NODE_STATE_TONE, type NodeStateKey,
 } from '@/utils/accessControl'
 import { formatRelativeTimeShort } from '@/utils/relativeTime'
 
@@ -21,7 +21,7 @@ type T = (key: string, opts?: Record<string, unknown>) => string
 const S = 'admin:access_control.'
 
 /** The badge words and the explaining line for a node, resolved from the bundle. */
-export function nodeStateText(t: T, node: DestNodeStatus, now: number): { key: NodeStateKey; label: string; note: string } {
+export function nodeStateText(t: T, node: DestNodeStatus, now: number): { key: NodeStateKey; label: string; note: string; reportNote: string | null } {
   const key = nodeStateKey(node, now)
   const num = (n: number | undefined) => new Intl.NumberFormat().format(n ?? 0)
   const label = t(`${S}node_state.${key}`, { minutes: node.pending_since ? Math.max(1, Math.floor((now - node.pending_since) / 60000)) : 0 })
@@ -43,7 +43,26 @@ export function nodeStateText(t: T, node: DestNodeStatus, now: number): { key: N
     default:
       note = t(`${S}node_note.${key}`)
   }
-  return { key, label, note }
+  // The enforced rules are untouched either way; this says only that the report-only ones are not running on the node.
+  const reportNote = node.report_only_not_deployed ? t(`${S}node_note.report_not_deployed_${node.report_only_not_deployed}`) : null
+  return { key, label, note, reportNote }
+}
+
+/**
+ * The recording line of a coverage row (plan S14): what the node is set to
+ * record, its hits of the last 24 hours and when it last reported. Only for a
+ * node that can be set: a sing-box node's note already says it only enforces,
+ * an old node's that it must be upgraded, and 3X-UI has none. A count the
+ * server does not have (null) is left out, never written as 0, and a node
+ * that does not record has no count to give.
+ */
+export function nodeRecordingText(t: T, node: DestNodeStatus, now: number): string | null {
+  const rec = nodeRecording(node)
+  if (!rec || (rec.mode !== 'off' && rec.mode !== 'hits')) return null
+  const parts = [t(`${S}node_recording.mode.${rec.mode}`)]
+  if (rec.mode === 'hits' && rec.hits24h !== null) parts.push(t(`${S}node_recording.hits_24h`, { n: new Intl.NumberFormat().format(rec.hits24h) }))
+  if (node.last_report_at) parts.push(t(`${S}node_recording.reported`, { ago: formatRelativeTimeShort(now - node.last_report_at, t) }))
+  return parts.join(t(`${S}node_recording.separator`))
 }
 
 export interface NodePolicyStatusRowProps {
@@ -65,9 +84,11 @@ export default function NodePolicyStatusRow({
   const { t } = useTranslation(['admin'])
   const theme = useTheme()
   const md = theme.palette.md
-  const { key, label, note } = nodeStateText(t, node, now)
+  const { key, label, note, reportNote } = nodeStateText(t, node, now)
+  const reportLine = reportNote && <Typography variant="body2" data-testid="node-report-not-deployed" sx={{ color: md.onSurfaceVariant }}>{reportNote}</Typography>
   const badge = <ToneBadge tone={accessTone(theme, NODE_STATE_TONE[key])} label={label} testId="node-state-badge" data={key} />
   const first = node.sniffing_insufficient[0]
+  const recording = nodeRecordingText(t, node, now)
 
   const actions: ReactNode[] = []
   const link = (id: string, text: string, onClick: () => void) => (
@@ -98,6 +119,7 @@ export default function NodePolicyStatusRow({
       <Box data-testid="node-policy-block" sx={{ minWidth: 0 }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>{badge}</Box>
         <Typography variant="body2" sx={{ mt: 0.75, color: md.onSurfaceVariant }}>{note}</Typography>
+        {reportLine}
         {extra}
         {problem && (
           <Box sx={{ mt: 1.5, p: 1.5, borderRadius: 2, bgcolor: md.surfaceContainerHigh }}>
@@ -119,6 +141,8 @@ export default function NodePolicyStatusRow({
         {badge}
       </Box>
       <Typography variant="body2" sx={{ mt: 0.25, color: md.onSurfaceVariant }}>{note}</Typography>
+      {reportLine}
+      {recording && <Typography variant="body2" data-testid="node-recording" sx={{ color: md.onSurfaceVariant }}>{recording}</Typography>}
       {extra}
       {actions.length > 0 && <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', justifyContent: 'flex-end' }}>{actions}</Box>}
     </Box>

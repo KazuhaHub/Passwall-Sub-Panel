@@ -31,6 +31,66 @@ beforeEach(() => {
 
 const run = () => fireEvent.click(screen.getByRole('button', { name: '测试' }))
 
+describe('TestSheet: report-only hits', () => {
+  // A report-only rule's step keeps its kind and name; report_only is what says a hit on it does not block.
+  const reportHit = (): api.DestTestResult => blocked({
+    verdict: 'observe', terminating_step: 'p3',
+    steps: [
+      { step: 1, kind: 'allow', policy_id: 9, name: 'Internal', result: 'miss' },
+      { step: 2, kind: 'exempt', result: 'miss' },
+      { step: 3, kind: 'block', policy_id: 1, name: 'No mail', result: 'miss' },
+      { step: 4, kind: 'block', report_only: true, policy_id: 3, name: 'Crypto', rule_id: 'p3', result: 'hit', entry: 'binance.com' },
+    ],
+  })
+
+  it('says it would have been blocked, in the report-only tone, never the retired "watch only" and never a raw key', async () => {
+    vi.mocked(api.testDestination).mockResolvedValue(reportHit())
+    renderAccess(<TestSheet open onClose={() => {}} onOpenPolicy={() => {}} />)
+    fireEvent.change(screen.getByRole('textbox', { name: /目的地/ }), { target: { value: 'www.binance.com' } })
+    run()
+    const verdict = await screen.findByTestId('test-verdict')
+    expect(verdict.textContent).toBe('本应拦截')
+    expect(verdict.getAttribute('data-state')).toBe('would_deny')
+    expect(screen.getByText('没有被拦截：仅报告的策略命中了它，开启后会被拦截（binance.com）')).toBeTruthy()
+    const trace = screen.getByTestId('eval-trace')
+    expect(within(trace).getByText('仅报告 · Crypto')).toBeTruthy()
+    expect(within(trace).getByText(/命中：本应拦截，实际放行/)).toBeTruthy()
+    expect(document.body.textContent).not.toMatch(/仅观察|admin:access_control|\bobserve\b/)
+  })
+
+  it('a report-only source rule is never read as blocked, and names its inbound', async () => {
+    vi.mocked(api.testDestination).mockResolvedValue(blocked({
+      verdict: 'observe', terminating_step: 's4',
+      steps: [
+        { step: 1, kind: 'source', report_only: true, node_id: 4, rule_id: 's4', result: 'hit', entry: 'CN' },
+        { step: 2, kind: 'block', policy_id: 1, name: 'No mail', result: 'miss' },
+      ],
+    }))
+    renderAccess(<TestSheet open onClose={() => {}} onOpenPolicy={() => {}} />)
+    fireEvent.change(screen.getByRole('textbox', { name: /目的地/ }), { target: { value: 'example.com' } })
+    run()
+    const verdict = await screen.findByTestId('test-verdict')
+    expect(verdict.textContent).toBe('本应拦截')
+    expect(document.body.textContent).not.toContain('被入站的来源规则拦截')
+    expect(screen.getByText(/没有被拦截：仅报告的来源规则命中了它.*CN/)).toBeTruthy()
+    const trace = screen.getByTestId('eval-trace')
+    expect(await within(trace).findByText('来源规则 · tokyo-vless · 仅报告')).toBeTruthy()
+    expect(within(trace).getByText(/命中：本应拦截，实际放行/)).toBeTruthy()
+  })
+
+  it('an enforced source rule still reads as blocked, with its inbound', async () => {
+    vi.mocked(api.testDestination).mockResolvedValue(blocked({
+      verdict: 'block', terminating_step: 's4',
+      steps: [{ step: 1, kind: 'source', report_only: false, node_id: 4, rule_id: 's4', result: 'hit', entry: 'CN' }],
+    }))
+    renderAccess(<TestSheet open onClose={() => {}} onOpenPolicy={() => {}} />)
+    fireEvent.change(screen.getByRole('textbox', { name: /目的地/ }), { target: { value: 'example.com' } })
+    run()
+    expect(await screen.findByText('被入站的来源规则拦截（CN）')).toBeTruthy()
+    expect(await within(screen.getByTestId('eval-trace')).findByText('来源规则 · tokyo-vless')).toBeTruthy()
+  })
+})
+
 describe('TestSheet', () => {
   it('starts with an instruction, tests on submit and shows the verdict, the trace and the shadowed hit', async () => {
     vi.mocked(api.testDestination).mockResolvedValue(blocked())

@@ -1,11 +1,18 @@
 import type { ReactNode } from 'react'
-import { Box, Chip, Tooltip, Typography, useTheme } from '@mui/material'
+import { Box, Button, Chip, Tooltip, Typography, useTheme } from '@mui/material'
+import ChevronRightIcon from '@mui/icons-material/ChevronRight'
 import { useTranslation } from 'react-i18next'
 
+import { useNavigate } from 'react-router'
+
 import type {
-  DevicesEvidence, LoginCountryEvidence, RiskSignal, SubSpreadEvidence, UsageShiftEvidence,
+  DestBlockEvidence, DevicesEvidence, LoginCountryEvidence, RiskSignal, SubSpreadEvidence, UsageShiftEvidence,
 } from '@/api/riskSignals'
+import { useDestPolicies } from '@/query/accessControl'
+import { useQueryScope } from '@/query/useQueryScope'
 import { useSiteStore } from '@/stores/site'
+import { useCan } from '@/utils/permissions'
+import { recordsHref } from '../../accessControl/records/recordsParams'
 import { formatMsDualTz } from '@/utils/datetime'
 import { countryFlag } from '@/utils/geo'
 import { regionNamer } from '@/utils/regionName'
@@ -250,18 +257,65 @@ export function LoginPanel({ ev }: { ev: LoginCountryEvidence }) {
 }
 
 /**
+ * dest_block: the blocks of the window by the policy they were credited to,
+ * and how many recording nodes the account has a client on (S19). The
+ * evidence holds no address, port or destination, by design. A source is named
+ * by the policy's name; one that no longer exists reads "a deleted policy"
+ * (when the names can be read at all: an operator has no access-control read,
+ * and then it is "policy #id", which is a fact, not a guess). The link to the
+ * hits is only for who may open that page.
+ */
+export function DestBlockPanel({ ev, userId }: { ev: DestBlockEvidence; userId?: number }) {
+  const { t, i18n } = useTranslation(['admin'])
+  const scope = useQueryScope()
+  const navigate = useNavigate()
+  const canView = useCan('access.view')
+  const policies = useDestPolicies(scope, { enabled: canView })
+  const names = new Map([...(policies.data?.allow ?? []), ...(policies.data?.block ?? [])].map(p => [`p${p.id}`, p.name]))
+  const num = new Intl.NumberFormat(i18n.language)
+  const label = (source: string) => {
+    if (source.startsWith('s')) return t('admin:risk_signals.dest_block_source_rule')
+    const name = names.get(source)
+    if (name) return name
+    return policies.data ? t('admin:risk_signals.dest_block_deleted') : t('admin:risk_signals.dest_block_policy_id', { id: source.slice(1) })
+  }
+  const hours = ev.window_hours
+  const since = hours <= 1 ? '1h' : hours <= 24 ? '24h' : `${Math.ceil(hours / 24)}d`
+  return (
+    <Box data-testid="dest-block-evidence" sx={{ display: 'contents' }}>
+      {(ev.by_source ?? []).map(b => (
+        <Line key={b.source}>
+          <Box component="span" sx={{ minWidth: 140 }}>{label(b.source)}</Box>
+          <Typography component="span" sx={{ fontSize: 13, fontVariantNumeric: 'tabular-nums', fontWeight: 600 }}>{num.format(b.count)}</Typography>
+        </Line>
+      ))}
+      <Caption>{t('admin:risk_signals.dest_block_nodes', { count: ev.nodes })}</Caption>
+      {canView && userId !== undefined && (
+        <Box>
+          <Button size="small" endIcon={<ChevronRightIcon />}
+            onClick={() => void navigate(`/admin/access-control${recordsHref({ user_id: userId, since, action: 'block' })}`)}>
+            {t('admin:risk_signals.dest_block_view_hits')}
+          </Button>
+        </Box>
+      )}
+    </Box>
+  )
+}
+
+/**
  * One kind's evidence by its kind: the one entry point, so a signal row and a
  * flag record's params render a kind the same way. Nothing for a kind this
  * build does not know or for a verdict with nothing to show (evidence null on
  * idle, disabled and exempt rows).
  */
-export function RiskKindEvidence({ kind, evidence }: { kind: string; evidence: unknown }) {
+export function RiskKindEvidence({ kind, evidence, userId }: { kind: string; evidence: unknown; userId?: number }) {
   if (!evidence || typeof evidence !== 'object') return null
   switch (kind) {
     case 'sub_spread': return <SubSpreadPanel ev={evidence as SubSpreadEvidence} />
     case 'devices': return <DevicesPanel ev={evidence as DevicesEvidence} />
     case 'usage_shift': return <UsagePanel ev={evidence as UsageShiftEvidence} />
     case 'login_country': return <LoginPanel ev={evidence as LoginCountryEvidence} />
+    case 'dest_block': return <DestBlockPanel ev={evidence as DestBlockEvidence} userId={userId} />
     default: return null
   }
 }

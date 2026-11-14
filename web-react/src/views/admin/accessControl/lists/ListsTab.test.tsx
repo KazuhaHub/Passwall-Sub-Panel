@@ -27,7 +27,7 @@ const list = (o: Partial<DestList>): DestList => ({
 const view = (items: DestList[], over: Partial<DestListsView> = {}): DestListsView => ({ items, refresh_hours: 24, budget, ...over })
 const policies: DestPolicies = {
   allow: [], observe: [], exemptions: { count: 0 }, allowlist_groups: [], hit_window_days: 7, budget,
-  block: [{ id: 5, name: 'No mail', description: '', action: 'block', state: 'on', list_ids: [], inline: {}, scope: 'all', group_ids: [], panel_ids: [], priority: 1, template_key: '', created_at: 0, updated_at: 0, list_states: [], note: null, scope_missing: false, hits_recent: null, last_hit_at: null }],
+  block: [{ id: 5, name: 'No mail', description: '', action: 'block', state: 'on', list_ids: [], inline: {}, scope: 'all', group_ids: [], panel_ids: [], priority: 1, template_key: '', created_at: 0, updated_at: 0, list_states: [], note: null, scope_missing: false, hits_recent: null, would_block_recent: null, last_hit_at: null }],
 }
 const items = [
   list({ id: 1, name: 'Internal', used_by: [{ kind: 'policy', id: 5, name: 'No mail' }] }),

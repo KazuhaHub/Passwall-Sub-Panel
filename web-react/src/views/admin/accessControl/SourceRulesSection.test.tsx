@@ -33,6 +33,52 @@ describe('CIDR lines', () => {
   })
 })
 
+describe('SourceRulesSection: Off / Report only / On', () => {
+  it('offers the three states, with what each does, and Off is the quiet default of a new rule', async () => {
+    renderAccess(<SourceRulesSection nodeId={4} />)
+    const group = await screen.findByRole('group', { name: '状态' })
+    expect(Array.from(group.querySelectorAll('button')).map(b => b.textContent)).toEqual(['关闭', '仅报告', '开启'])
+    expect(group.querySelector('[aria-pressed="true"]')?.textContent).toBe('关闭')
+    expect(screen.getByText('不下发这条来源规则。')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: '仅报告' }))
+    expect(screen.getByText(/只记录它本应拒绝的连接/)).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: '开启' }))
+    expect(screen.getByText(/它排在最前/)).toBeTruthy()
+  })
+
+  it('saves Report only as state report, and a first deployed rule asks first even so', async () => {
+    vi.mocked(api.getDestSourceRule).mockResolvedValue({ rule: rule({ updated_at: 9, countries: ['CN'] }), native: true, geoip_available: true })
+    vi.mocked(api.putDestSourceRule).mockResolvedValue({ rule: rule(), geoip_available: true })
+    renderAccess(<SourceRulesSection nodeId={4} />)
+    fireEvent.click(await screen.findByRole('button', { name: '仅报告' }))
+    fireEvent.click(screen.getByRole('button', { name: '保存来源规则' }))
+    await waitFor(() => expect(confirmMock).toHaveBeenCalledWith(expect.objectContaining({ title: '启用第一条访问策略？' })))
+    await waitFor(() => expect(api.putDestSourceRule).toHaveBeenCalledWith(4, { countries: ['CN'], cidrs: [], state: 'report', updated_at: 9 }))
+  })
+
+  it('a report-only rule elsewhere already counts as deployed: no first-publish confirmation', async () => {
+    vi.mocked(api.getDestSourceRules).mockResolvedValue({ items: [rule({ node_id: 8, state: 'report', countries: ['RU'] })], geoip_available: true })
+    vi.mocked(api.getDestSourceRule).mockResolvedValue({ rule: rule({ updated_at: 9, countries: ['CN'] }), native: true, geoip_available: true })
+    vi.mocked(api.putDestSourceRule).mockResolvedValue({ rule: rule(), geoip_available: true })
+    renderAccess(<SourceRulesSection nodeId={4} />)
+    fireEvent.click(await screen.findByRole('button', { name: '开启' }))
+    fireEvent.click(screen.getByRole('button', { name: '保存来源规则' }))
+    await waitFor(() => expect(api.putDestSourceRule).toHaveBeenCalled())
+    expect(confirmMock).not.toHaveBeenCalled()
+  })
+
+  it('a stored report-only rule is shown as Report only, and moving it to Off is a change', async () => {
+    const guard = { current: null as import('./SourceRulesSection').SourceDraftHandle | null }
+    vi.mocked(api.getDestSourceRule).mockResolvedValue({ rule: rule({ updated_at: 3, state: 'report', countries: ['CN'] }), native: true, geoip_available: true })
+    renderAccess(<SourceRulesSection nodeId={4} dirtyRef={guard} />)
+    const group = await screen.findByRole('group', { name: '状态' })
+    await waitFor(() => expect(group.querySelector('[aria-pressed="true"]')?.textContent).toBe('仅报告'))
+    expect(guard.current?.dirty()).toBe(false)
+    fireEvent.click(screen.getByRole('button', { name: '关闭' }))
+    expect(guard.current?.dirty()).toBe(true)
+  })
+})
+
 describe('SourceRulesSection', () => {
   it('renders nothing for an inbound that is not on a native node', async () => {
     vi.mocked(api.getDestSourceRule).mockResolvedValue({ rule: rule(), native: false, geoip_available: true })
@@ -56,7 +102,7 @@ describe('SourceRulesSection', () => {
     fireEvent.change(input, { target: { value: 'China' } })
     fireEvent.keyDown(input, { key: 'ArrowDown' })
     fireEvent.click(await screen.findByRole('option', { name: /\(CN\)/ }))
-    fireEvent.click(screen.getByRole('switch', { name: '启用' }))
+    fireEvent.click(screen.getByRole('button', { name: '开启' }))
     fireEvent.click(screen.getByRole('button', { name: '保存来源规则' }))
     await waitFor(() => expect(confirmMock).toHaveBeenCalledWith(expect.objectContaining({ title: '启用第一条访问策略？' })))
     await waitFor(() => expect(api.putDestSourceRule).toHaveBeenCalledWith(4, { countries: ['CN'], cidrs: [], state: 'on', updated_at: 1234 }))
@@ -74,7 +120,7 @@ describe('SourceRulesSection', () => {
   it('explains a stale rule and reloads it', async () => {
     vi.mocked(api.putDestSourceRule).mockRejectedValue(Object.assign(new Error('x'), { isAxiosError: true, response: { status: 409, data: { code: 'dest_source_rule_stale' } } }))
     renderAccess(<SourceRulesSection nodeId={4} />)
-    fireEvent.click(await screen.findByRole('switch', { name: '启用' }))
+    fireEvent.click(await screen.findByRole('button', { name: '开启' }))
     fireEvent.click(screen.getByRole('button', { name: '保存来源规则' }))
     expect(await screen.findByText(/刚被其他人修改过，已重新载入/)).toBeTruthy()
     await waitFor(() => expect(vi.mocked(api.getDestSourceRule).mock.calls.length).toBeGreaterThan(1))
@@ -86,7 +132,7 @@ describe('SourceRulesSection', () => {
     renderAccess(<SourceRulesSection nodeId={4} dirtyRef={guard} />)
     await screen.findByTestId('source-rules-section')
     expect(guard.current?.dirty()).toBe(false)
-    fireEvent.click(screen.getByRole('switch', { name: '启用' }))
+    fireEvent.click(screen.getByRole('button', { name: '开启' }))
     expect(guard.current?.dirty()).toBe(true)
   })
 })

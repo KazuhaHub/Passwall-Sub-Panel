@@ -76,7 +76,7 @@ export default function ListsTab({ onOpenEntries, onOpenSettings, onOpenPolicy }
   }, [location, navigate])
 
   const enabledIds = useMemo(
-    () => new Set([...(policies.data?.allow ?? []), ...(policies.data?.block ?? [])].filter(p => p.state === 'on').map(p => p.id)),
+    () => new Set([...(policies.data?.allow ?? []), ...(policies.data?.block ?? [])].filter(p => p.state !== 'off').map(p => p.id)),
     [policies.data])
   const items = lists.data?.items
   const usedEnabled = (l: DestList) => l.used_by.some(u => enabledIds.has(u.id))

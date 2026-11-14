@@ -15,7 +15,8 @@ import VerifiedUserOutlinedIcon from '@mui/icons-material/VerifiedUserOutlined'
 import VisibilityOutlinedIcon from '@mui/icons-material/VisibilityOutlined'
 import WarningAmberIcon from '@mui/icons-material/WarningAmber'
 import type {
-  DestBudget, DestBudgetItem, DestListsView, DestNodeState, DestNodeStatus, DestPolicies, DestPolicy, DestStatus,
+  DestAction, DestBudget, DestBudgetItem, DestListsView, DestNodeState, DestNodeStatus, DestPolicies, DestPolicy, DestState,
+  DestStatus,
 } from '@/api/accessControl'
 import type { StatusLineTone } from '@/components/StatusLine'
 import { amber, type Tone } from '@/components/ToneBadge'
@@ -195,10 +196,13 @@ export function enforcingNodeCount(status: Pick<DestStatus, 'nodes'> | undefined
   return status.nodes.filter(n => isNativeKind(n.kind) && n.supports.policy && n.state !== 'offline' && n.state !== 'unsupported_version').length
 }
 
-/** Policies that are on. */
+/**
+ * Policies the nodes run: on, and report-only (which a node runs too, and
+ * restarts for). Off is the only state that is not deployed.
+ */
 export function enabledPolicies(policies: Pick<DestPolicies, 'allow' | 'block' | 'observe'> | undefined): DestPolicy[] {
   if (!policies) return []
-  return [...policies.allow, ...policies.block, ...policies.observe].filter(p => p.state === 'on')
+  return [...policies.allow, ...policies.block, ...policies.observe].filter(p => p.state !== 'off')
 }
 
 /** A native node that is online and runs a build that can enforce. */
@@ -324,18 +328,19 @@ export function anyBudgetOver(b: DestBudget | undefined): boolean {
 // The match-order rail (plan §7.4 S2): numbering is computed, never written.
 // ---------------------------------------------------------------------------
 
-export type PipelineStepId = 'allow' | 'exempt' | 'block' | 'allowlist' | 'observe' | 'rest'
+export type PipelineStepId = 'allow' | 'exempt' | 'block' | 'allowlist' | 'report' | 'rest'
 
 /**
- * The steps that exist at this stage, numbered from 1. Batch 1 has neither
- * report-only (observe) nor allowlist groups, so the rail is allow, exempt,
- * block, rest — and the numbers move up by themselves when a later batch
- * turns a step on.
+ * The steps that exist at this stage, numbered from 1. Report-only is the
+ * step after every enforced one (the compiler places it there so that it can
+ * never change a verdict); there are no allowlist groups yet, so the rail is
+ * allow, exempt, block, report-only, rest — and the numbers move up by
+ * themselves when a later batch turns a step on.
  */
-export function pipelineSteps(features: { observe?: boolean; allowlist?: boolean } = {}): { id: PipelineStepId; n: number }[] {
+export function pipelineSteps(features: { report?: boolean; allowlist?: boolean } = {}): { id: PipelineStepId; n: number }[] {
   const ids: PipelineStepId[] = ['allow', 'exempt', 'block']
   if (features.allowlist) ids.push('allowlist')
-  if (features.observe) ids.push('observe')
+  if (features.report) ids.push('report')
   ids.push('rest')
   return ids.map((id, i) => ({ id, n: i + 1 }))
 }
@@ -365,4 +370,112 @@ export function applyMinutes(status: Pick<DestStatus, 'apply_eta_ms'> | undefine
 /** The window fixed statistics read over, clamped to the retention (R14). */
 export function clampDays(fixed: number, retention: number | undefined): number {
   return retention && retention > 0 ? Math.min(fixed, retention) : fixed
+}
+
+// ---------------------------------------------------------------------------
+// The three states (owner decision): Off / Report-only / On. The admin picks
+// any of them freely; the UI may recommend report-only for a new block policy
+// and never forces it. An allow policy has no report-only (a verdict that
+// "would have been" an allow cannot be told from the real one).
+// ---------------------------------------------------------------------------
+
+export function policyStateOptions(action: DestAction): DestState[] {
+  return action === 'allow' ? ['off', 'on'] : ['off', 'report', 'on']
+}
+
+/**
+ * The badge a state adds to a row: off is the quiet "paused" row, report-only
+ * the "would be denied" row (ScienceOutlined: what a policy WOULD do, the same
+ * meaning the closed table already gives the trial), and on adds none (the
+ * action badge is the whole story of an enforced policy).
+ */
+export function policyStateTone(state: DestState): AccessToneKind | null {
+  switch (state) {
+    case 'off': return 'paused'
+    case 'report': return 'would_deny'
+    default: return null
+  }
+}
+
+/** The block section's rows by what the compiler does with them: report-only rows are step 4 of the rail, everything else step 3. */
+export function splitBlockByState(block: DestPolicy[]): { enforced: DestPolicy[]; report: DestPolicy[] } {
+  return { enforced: block.filter(p => p.state !== 'report'), report: block.filter(p => p.state === 'report') }
+}
+
+/**
+ * The server's order of one action is ONE list, but the rail shows it as two
+ * sections. A move inside a section rewrites only the slots that section holds
+ * in the whole order, so the other section's rows keep theirs. null: the move
+ * goes nowhere.
+ */
+export function reorderWithin(all: number[], section: number[], id: number, move: 'up' | 'down' | 'top' | 'bottom'): number[] | null {
+  const i = section.indexOf(id)
+  if (i < 0) return null
+  const to = move === 'up' ? i - 1 : move === 'down' ? i + 1 : move === 'top' ? 0 : section.length - 1
+  if (to < 0 || to >= section.length || to === i) return null
+  const next = [...section]
+  next.splice(i, 1)
+  next.splice(to, 0, id)
+  const slots = new Set(section)
+  let k = 0
+  return all.map(x => (slots.has(x) ? next[k++] : x))
+}
+
+// ---------------------------------------------------------------------------
+// Hits (plan S2): a count is only as good as the recording behind it.
+// ---------------------------------------------------------------------------
+
+export type PolicyHitsView =
+  | { kind: 'none' }
+  | { kind: 'unavailable' }
+  | { kind: 'count'; count: number; days: number; last: number | null }
+  | { kind: 'zero'; days: number; last: number | null }
+  | { kind: 'never' }
+  | { kind: 'would_block'; count: number; days: number; last: number | null; notDeployed?: number }
+  | { kind: 'would_block_none'; days: number; notDeployed?: number }
+
+/**
+ * What a policy row says about hits. null counts are "no node records" and
+ * are NEVER drawn as 0; an allow policy records nothing and says nothing;
+ * a report-only policy speaks of what it would have blocked.
+ */
+export function policyHitsView(p: DestPolicy, days: number, notDeployed = 0): PolicyHitsView {
+  if (p.action === 'allow') return { kind: 'none' }
+  if (p.state === 'report') {
+    if (p.would_block_recent === null) return { kind: 'unavailable' }
+    // Nodes that were not sent the report-only rules recorded nothing for them: a count (or a zero) is then of the others only.
+    const shed = notDeployed > 0 ? { notDeployed } : {}
+    return p.would_block_recent > 0
+      ? { kind: 'would_block', count: p.would_block_recent, days, last: p.last_hit_at, ...shed }
+      : { kind: 'would_block_none', days, ...shed }
+  }
+  if (p.hits_recent === null) return { kind: 'unavailable' }
+  if (p.hits_recent > 0) return { kind: 'count', count: p.hits_recent, days, last: p.last_hit_at }
+  return p.last_hit_at === null ? { kind: 'never' } : { kind: 'zero', days, last: p.last_hit_at }
+}
+
+/** Nodes the server sent the policy WITHOUT its report-only rules (sniffing, or a limit). */
+export function reportNotDeployedCount(status: { nodes: Pick<DestNodeStatus, 'report_only_not_deployed'>[] } | undefined): number {
+  return status ? status.nodes.filter(n => !!n.report_only_not_deployed).length : 0
+}
+
+/** Native nodes that record hits now (the derived flag: a node that was only told to is not counted). */
+export function collectingNodeCount(status: Pick<DestStatus, 'nodes'> | undefined): number {
+  return status ? status.nodes.filter(n => n.collecting).length : 0
+}
+
+export type NodeRecordingMode = 'off' | 'hits' | 'too_old' | 'exec_only'
+
+/**
+ * A native node's recording line: what it is set to, or why it cannot record.
+ * null for a node this page does not run policies on (3X-UI, S-UI).
+ * `hits24h` is null where the node cannot record, never 0.
+ */
+export function nodeRecording(node: Pick<DestNodeStatus, 'kind' | 'state' | 'engine' | 'supports' | 'collect' | 'collect_effective' | 'hits_24h'>): { mode: NodeRecordingMode; hits24h: number | null } | null {
+  if (!isNativeKind(node.kind) || node.state === 'unsupported_kind') return null
+  if (node.engine === 'sing-box') return { mode: 'exec_only', hits24h: null }
+  if (!node.supports.hits) return { mode: 'too_old', hits24h: null }
+  // What the node was told is what it does; the stored choice only stands in before anything was delivered.
+  const set = node.collect_effective || node.collect
+  return { mode: set === 'off' ? 'off' : 'hits', hits24h: node.hits_24h }
 }

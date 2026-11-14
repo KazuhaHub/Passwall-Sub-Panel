@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import * as acApi from '@/api/accessControl'
 import * as riskApi from '@/api/riskCenter'
-import { confirmMock, renderAccess } from '@/test/accessControlHarness'
+import { confirmMock, renderAccess, setTestLang, whereIs } from '@/test/accessControlHarness'
 import RiskUserDrawer from './RiskUserDrawer'
 
 vi.mock('@/api/accessControl', async importOriginal => {
@@ -122,5 +122,88 @@ describe('the access tab', () => {
     act(() => { useAuthStore.setState({ role: 'operator' }) })
     await waitFor(() => expect(tabs()).toHaveLength(4))
     expect(screen.getByRole('tab', { name: '概览' }).getAttribute('aria-selected')).toBe('true')
+  })
+})
+
+describe('the access tab: the hits of this account (S16, 2c)', () => {
+  const NOW = Date.now()
+  const hits = (over: Partial<acApi.DestUserView> = {}) => view({
+    hits_available: true,
+    recent_hits: {
+      days: 3,
+      items: [
+        { source: 'p1', source_name: '禁止发信', action: 'block', count: 214, top_dests: ['smtp.gmail.com', 'mail.qq.com'], panels: [5], last_at: NOW - 3_600_000 },
+        { source: 'p3', source_name: '加密货币交易所', action: 'observe', count: 1037, top_dests: ['www.binance.com'], panels: [5, 6], last_at: NOW - 600_000 },
+        { source: 'p9', source_name: null, action: 'block', count: 4, top_dests: ['tracker.example.org'], panels: [6], last_at: NOW - 86_400_000 },
+        { source: 's4', source_name: '东京 01', action: 'block', count: 2, top_dests: [], panels: [5], last_at: NOW - 86_400_000 },
+        { source: 's8', source_name: null, action: 'block', count: 1, top_dests: [], panels: [5], last_at: NOW - 86_400_000 },
+      ],
+    },
+    ...over,
+  })
+  const nodes = [{ panel_id: 5, panel_name: '东京 01' }, { panel_id: 6, panel_name: '洛杉矶 02' }]
+  beforeEach(() => {
+    vi.mocked(acApi.getDestStatus).mockResolvedValue({ apply_eta_ms: 0, nodes, generation: 0, published_generation: 0, paused: false, publish_error: null, policy_notes: {}, totals: {} } as unknown as acApi.DestStatus)
+  })
+  const open = () => renderAccess(<RiskUserDrawer userId={7} onClose={vi.fn()} host="access" initialTab="access" />)
+
+  it('lists each rule that was hit: its action, the count, the destinations most hit and the nodes they were hit on', async () => {
+    vi.mocked(acApi.getDestUser).mockResolvedValue(hits())
+    open()
+    const section = await screen.findByTestId('access-hits')
+    expect(section.textContent).toContain('过去 3 天命中')
+    const rows = Array.from(section.querySelectorAll('[data-testid="access-hit"]'))
+    expect(rows).toHaveLength(5)
+    expect(rows[0].textContent).toContain('禁止发信')
+    expect(rows[0].textContent).toContain('214')
+    expect(rows[0].querySelector('[data-state="block"]')?.textContent).toBe('拦截')
+    await waitFor(() => expect(rows[0].textContent).toContain('smtp.gmail.com · mail.qq.com · 东京 01'))
+    // Report-only hits are what the rule WOULD have blocked, not a block.
+    expect(rows[1].querySelector('[data-state="observe"]')?.textContent).toBe('本应拦截')
+    expect(rows[1].textContent).toContain('1,037')
+    await waitFor(() => expect(rows[1].textContent).toContain('www.binance.com · 东京 01、洛杉矶 02'))
+    expect(rows[2].textContent).toContain('已删除的策略')
+    expect(rows[3].textContent).toContain('来源规则 · 东京 01')
+    expect(rows[4].textContent).toContain('已删除的来源规则')
+  })
+
+  it('the window is the days the server answered (held to the retention), in the words', async () => {
+    vi.mocked(acApi.getDestUser).mockResolvedValue(hits({ recent_hits: { days: 1, items: [] } }))
+    open()
+    expect(await screen.findByText('过去 1 天没有命中')).toBeTruthy()
+  })
+
+  it('view all goes to the records filtered to this account over that window', async () => {
+    vi.mocked(acApi.getDestUser).mockResolvedValue(hits())
+    const { router } = open()
+    fireEvent.click(await screen.findByRole('button', { name: '在记录中查看全部' }))
+    await waitFor(() => expect(whereIs(router)).toBe('/admin/access-control?tab=records&rec_user=7&rec_since=3d'))
+  })
+
+  it('no node of the account records: say that, never "no hits", and offer the node coverage', async () => {
+    vi.mocked(acApi.getDestUser).mockResolvedValue(view({ hits_available: false, recent_hits: { days: 7, items: [] } }))
+    const { router } = open()
+    expect(await screen.findByText('这个账号所在的节点都不记录命中')).toBeTruthy()
+    expect(screen.queryByText(/没有命中/)).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: '节点覆盖' }))
+    await waitFor(() => expect(whereIs(router)).toBe('/admin/access-control?sheet=nodes'))
+  })
+
+  it('a server without the hit store has no hit section at all', async () => {
+    vi.mocked(acApi.getDestUser).mockResolvedValue(view())
+    open()
+    await screen.findByText('Team A')
+    expect(screen.queryByTestId('access-hits')).toBeNull()
+    expect(screen.queryByText(/命中/)).toBeNull()
+  })
+
+  it('in English', async () => {
+    setTestLang('en-US')
+    vi.mocked(acApi.getDestUser).mockResolvedValue(hits())
+    open()
+    const section = await screen.findByTestId('access-hits')
+    expect(section.textContent).toContain('Hits in the past 3 days')
+    expect(screen.getByRole('button', { name: 'View all in records' })).toBeTruthy()
+    expect(section.textContent).toContain('Would be blocked')
   })
 })

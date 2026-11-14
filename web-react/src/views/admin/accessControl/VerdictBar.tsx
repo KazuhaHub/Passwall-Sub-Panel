@@ -7,7 +7,7 @@ import { AsyncButton } from '@/components/AsyncButton'
 import StatusLine from '@/components/StatusLine'
 import { useDestLists, useDestPolicies, useDestSourceRules, useDestStatus } from '@/query/accessControl'
 import { useQueryScope } from '@/query/useQueryScope'
-import { accessVerdict, applyMinutes, limitKindKey, type AccessVerdict } from '@/utils/accessControl'
+import { accessVerdict, applyMinutes, collectingNodeCount, enabledPolicies, limitKindKey, type AccessVerdict } from '@/utils/accessControl'
 import { formatRelativeTimeShort } from '@/utils/relativeTime'
 import type { NodeFilter } from './accessParams'
 
@@ -63,8 +63,9 @@ export default function VerdictBar({ onOpenNodes, onOpenLists, onResume, onPubli
 
   const verdict: AccessVerdict | null = useMemo(() => {
     if (!data) return null
-    const sourceOn = (sourceRules.data?.items ?? []).filter(r => r.state === 'on').length
-    const policiesOn = [...(policies.data?.allow ?? []), ...(policies.data?.block ?? [])].filter(p => p.state === 'on').length
+    // Deployed means on or report-only: a node runs both, and both need a node that can.
+    const sourceOn = (sourceRules.data?.items ?? []).filter(r => r.state !== 'off').length
+    const policiesOn = enabledPolicies(policies.data).length
     return accessVerdict(data, { policies: policies.data, lists: lists.data, hasDefinitions: policiesOn + sourceOn > 0, now })
   }, [data, policies.data, lists.data, sourceRules.data, now])
 
@@ -144,10 +145,18 @@ export default function VerdictBar({ onOpenNodes, onOpenLists, onResume, onPubli
       break
     }
     case 'publish_refused': detail = t(`${V}detail.publish_refused`); break
-    default:
-      detail = parts.length > 0
+    default: {
+      // "Not enforcing: …" lists what does not run; the nodes that record hits are a fact about the fleet, not a
+      // reason, so they follow after the separator and stand alone when nothing is skipped. Zero is not written.
+      const recording = collectingNodeCount(data)
+      const sep = <span key="rec-sep">{t(`${V}skip.separator`)}</span>
+      const recordingPart = recording > 0 ? <span key="rec" data-testid="verdict-recording">{t(`${V}skip.recording`, { count: recording })}</span> : null
+      const skipped = parts.length > 0
         ? [<span key="prefix">{t(`${V}skip.prefix`)}</span>, ...parts.flatMap((p, i) => (i === 0 ? [p] : [<span key={`s${i}`}>{t(`${V}skip.separator`)}</span>, p]))]
-        : null
+        : []
+      const all = [...skipped, ...(recordingPart ? (skipped.length > 0 ? [sep, recordingPart] : [recordingPart]) : [])]
+      detail = all.length > 0 ? all : null
+    }
   }
 
   let action: ReactNode = null

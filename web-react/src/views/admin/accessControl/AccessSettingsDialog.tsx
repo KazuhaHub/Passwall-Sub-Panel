@@ -7,12 +7,13 @@ import { useTranslation } from 'react-i18next'
 import { destErrorOf, isDestUnavailable, type DestSettings } from '@/api/accessControl'
 import { AsyncButton } from '@/components/AsyncButton'
 import PolicyField, { outOfRange, type FieldSpec } from '@/components/PolicyField'
+import { confirm } from '@/components/ConfirmHost'
 import { pushSnack } from '@/components/SnackbarHost'
 import { useDirtyClose } from '@/hooks/useDirtyClose'
 import { useDestSettings, useSaveDestSettings } from '@/query/accessControl'
 import { useQueryScope } from '@/query/useQueryScope'
 import type { SettingsFocus } from './accessParams'
-import { discardChangesConfirm } from './confirmCopy'
+import { discardChangesConfirm, shortenRetentionConfirm } from './confirmCopy'
 import { destErrorText } from './destErrors'
 import RuleDataPanel from './RuleDataPanel'
 
@@ -22,9 +23,11 @@ const S = 'admin:access_control.settings.'
 // DestPolicyApplyMinSeconds 30–3600, DestListRefreshHours 6–168). The server
 // refuses a value outside them, and the defaults come from the served
 // `defaults`, never from here.
-const FIELDS: (FieldSpec & { key: 'dest_policy_apply_min_seconds' | 'dest_list_refresh_hours'; focus: SettingsFocus })[] = [
+const FIELDS: (FieldSpec & { key: 'dest_policy_apply_min_seconds' | 'dest_list_refresh_hours' | 'dest_hit_retention_days'; focus: SettingsFocus })[] = [
   { key: 'dest_policy_apply_min_seconds', kind: 'number', label: `${S}apply_seconds`, hint: `${S}apply_seconds_hint`, min: 30, max: 3600, tail: true, focus: 'apply' },
   { key: 'dest_list_refresh_hours', kind: 'number', label: `${S}refresh_hours`, hint: `${S}refresh_hours_hint`, min: 6, max: 168, tail: true, focus: 'refresh' },
+  // DestHitRetentionDays 1–365. The allowlist trial's own retention (1–30) is a later phase's field.
+  { key: 'dest_hit_retention_days', kind: 'number', label: `${S}hit_retention_days`, hint: `${S}hit_retention_days_hint`, min: 1, max: 365, tail: true, focus: 'retention' },
 ]
 
 export interface AccessSettingsDialogProps {
@@ -94,6 +97,11 @@ export default function AccessSettingsDialog({ open, focus, onClose }: AccessSet
 
   const submit = async () => {
     setErrors({})
+    // A shorter retention deletes records within the hour, for good: asked first (S20).
+    if (read.data && 'dest_hit_retention_days' in changed) {
+      const next = changed.dest_hit_retention_days || read.data.defaults.dest_hit_retention_days
+      if (next && next < read.data.effective.dest_hit_retention_days && !(await confirm(shortenRetentionConfirm(t, next)))) return
+    }
     try {
       await save.mutateAsync(changed)
       pushSnack(t(`${S}saved`), 'success')
@@ -117,6 +125,15 @@ export default function AccessSettingsDialog({ open, focus, onClose }: AccessSet
         {draft && read.data && (
           <Box sx={{ display: 'grid', gap: 2.5, pt: 1 }}>
             {errors._ && <Alert severity="error">{errors._}</Alert>}
+            <Box>
+              <Typography component="h2" sx={{ fontSize: 16, fontWeight: 600, mb: 1.5 }}>{t(`${S}group_retention`)}</Typography>
+              <Box data-focus="retention">
+                <PolicyField spec={FIELDS[2]} value={draft.dest_hit_retention_days} defaults={read.data.defaults}
+                  effective={read.data.effective.dest_hit_retention_days} error={errors.dest_hit_retention_days}
+                  onChange={v => setDraft({ ...draft, dest_hit_retention_days: v as number })} />
+                {errors.dest_hit_retention_days && <Typography variant="caption" role="alert" sx={{ color: md.error }}>{errors.dest_hit_retention_days}</Typography>}
+              </Box>
+            </Box>
             <Box>
               <Typography component="h2" sx={{ fontSize: 16, fontWeight: 600, mb: 1.5 }}>{t(`${S}group_refresh`)}</Typography>
               <Box data-focus="refresh">

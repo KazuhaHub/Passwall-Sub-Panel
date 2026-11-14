@@ -46,6 +46,8 @@ function mount(node: ReactNode) {
 }
 
 const chipOf = (label: string) => screen.getByText(label).closest('.MuiChip-root') as HTMLElement
+/** A detector's state badge (a ToneBadge, its state in data-state). */
+const badgeOf = (label: string) => screen.getByText(label).closest('[data-testid="detector-state"]') as HTMLElement
 
 beforeEach(() => useSiteStore.setState({ timezone: PANEL_TZ }))
 afterEach(() => {
@@ -75,7 +77,7 @@ describe('DetectorStateChip', () => {
 
   it('says 尚未计算 for a detector with no row', () => {
     mount(<DetectorStateChip state="not_computed" />)
-    expect(chipOf('尚未计算').className).not.toContain('MuiChip-colorSuccess')
+    expect(badgeOf('尚未计算').getAttribute('data-state')).toBe('not_computed')
   })
 
   // A clean verdict judged while a panel was unreadable stands on a FLOOR of
@@ -87,18 +89,36 @@ describe('DetectorStateChip', () => {
       <DetectorStateChip state="clean" complete={false} />
       <DetectorStateChip state="flagged" complete={false} />
     </>)
-    expect(chipOf('正常').className).not.toContain('MuiChip-colorSuccess')
-    expect(chipOf('正常').className).toContain('MuiChip-colorDefault')
-    expect(chipOf('已标记').className).toContain('MuiChip-colorError')
+    expect(badgeOf('正常').getAttribute('data-state')).toBe('clean_partial')
+    expect(badgeOf('已标记').getAttribute('data-state')).toBe('flagged')
     cleanup()
 
     mount(<DetectorStateChip state="clean" />)
-    expect(chipOf('正常').className).toContain('MuiChip-colorSuccess')
+    expect(badgeOf('正常').getAttribute('data-state')).toBe('clean')
   })
 
   it('carries its tooltip', () => {
     mount(<DetectorStateChip state="suspect" tooltip="why" />)
-    expect(chipOf('疑似').closest('[aria-label]')?.getAttribute('aria-label')).toBe('why')
+    expect(badgeOf('疑似').closest('[aria-label]')?.getAttribute('aria-label')).toBe('why')
+  })
+})
+
+// The detector states are drawn by the one ToneBadge the access-control page
+// uses, from the closed colour table (plan S19): no <Chip color> says a state,
+// and the badges carry icon and words so no state is told by colour alone.
+describe('DetectorStateChip is a ToneBadge', () => {
+  it('draws no MUI chip for a state', () => {
+    mount(<>
+      <DetectorStateChip state="flagged" /><DetectorStateChip state="suspect" /><DetectorStateChip state="clean" /><DetectorStateChip state="unknown" />
+      <DetectorStateChip state="idle" /><DetectorStateChip state="exempt" /><DetectorStateChip state="disabled" /><DetectorStateChip state="not_computed" />
+    </>)
+    expect(document.querySelectorAll('.MuiChip-root')).toHaveLength(0)
+    expect(document.querySelectorAll('[data-testid="detector-state"]')).toHaveLength(8)
+  })
+
+  it('every badge has an icon next to its words', () => {
+    mount(<DetectorStateChip state="flagged" />)
+    expect(badgeOf('已标记').querySelector('svg')).toBeTruthy()
   })
 })
 
@@ -247,7 +267,7 @@ describe('RiskKindChip', () => {
 
   it('labels by the one vocabulary and explains itself with its code and panel time', () => {
     mount(<RiskKindChip sig={sig({ state: 'exempt', code: 'trusted' })} />)
-    const tip = chipOf('已信任').closest('[aria-label]')?.getAttribute('aria-label') ?? ''
+    const tip = badgeOf('已信任').closest('[aria-label]')?.getAttribute('aria-label') ?? ''
     expect(tip).toContain('管理员已信任此账号，不判断订阅地点')
     expect(tip).toContain(formatMsDualTz(1_790_000_000_000, PANEL_TZ))
   })

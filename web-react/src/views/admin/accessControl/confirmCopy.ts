@@ -93,6 +93,15 @@ export function resumeConfirm({ t, minutes }: ConfirmArgs): ConfirmOpts {
   }
 }
 
+/** Saving a report-only policy as On: the Convert dialog's question, for the editor's own path to the same change. */
+export function convertToBlockConfirm({ t, minutes }: ConfirmArgs, name: string): ConfirmOpts {
+  return {
+    title: t(`${P}convert_policy.title`, { name }),
+    message: t(`${P}convert_policy.message`, { minutes: minutesWords(t, minutes) }),
+    confirmText: t(`${P}convert_policy.action`),
+  }
+}
+
 export function discardChangesConfirm(t: T): ConfirmOpts {
   return {
     title: t(`${P}discard.title`),
@@ -102,4 +111,12 @@ export function discardChangesConfirm(t: T): ConfirmOpts {
   }
 }
 
-/** Asked before an inbound save when the source-country draft is unsaved: yes saves both, no saves the inbound only. */
+/** Shortening the hit retention deletes the older records within the hour, for good: the one retention change that asks. */
+export function shortenRetentionConfirm(t: T, days: number): ConfirmOpts {
+  return {
+    title: t(`${P}shorten_retention.title`),
+    message: t(`${P}shorten_retention.message`, { days }),
+    confirmText: t(`${P}shorten_retention.action`),
+    destructive: true,
+  }
+}

@@ -22,8 +22,9 @@ import { useAllGroups } from '@/query/groups'
 import { useServersList } from '@/query/servers'
 import { useQueryScope } from '@/query/useQueryScope'
 import { pushSnack } from '@/components/SnackbarHost'
-import { accessTone, anyBudgetOver, applyMinutes, enforcingNodeCount, pipelineSteps } from '@/utils/accessControl'
-import { discardChangesConfirm } from '../confirmCopy'
+import { accessTone, anyBudgetOver, applyMinutes, enforcingNodeCount, pipelineSteps, policyStateOptions } from '@/utils/accessControl'
+import { confirm } from '@/components/ConfirmHost'
+import { convertToBlockConfirm, discardChangesConfirm } from '../confirmCopy'
 import { destErrorText } from '../destErrors'
 import { matchSummary, summaryText } from './matchSummary'
 import QuotaMeters from './QuotaMeters'
@@ -57,20 +58,27 @@ export interface PolicyForm {
   groupIds: number[]
   panelIds: number[]
   templateKey: string
+  /** Block policies only: the real blocks count as a risk signal. */
+  countsAsRisk: boolean
 }
 
+/**
+ * A new policy's form. A block policy starts as Report only, which the dialog
+ * recommends and the admin may change to anything; an allow policy has no
+ * report-only and starts Off.
+ */
 export const emptyForm = (action: DestAction = 'block'): PolicyForm => ({
-  name: '', description: '', action, state: 'off', listIds: [], cidrs: '', ports: '', network: '', bittorrent: false,
-  private: false, scope: 'all', groupIds: [], panelIds: [], templateKey: '',
+  name: '', description: '', action, state: action === 'block' ? 'report' : 'off', listIds: [], cidrs: '', ports: '', network: '', bittorrent: false,
+  private: false, scope: 'all', groupIds: [], panelIds: [], templateKey: '', countsAsRisk: false,
 })
 
 export function formOf(p: DestPolicy): PolicyForm {
   return {
-    name: p.name, description: p.description, action: p.action, state: p.state === 'on' ? 'on' : 'off', listIds: p.list_ids,
+    name: p.name, description: p.description, action: p.action, state: p.state, listIds: p.list_ids,
     cidrs: (p.inline.cidrs ?? []).join('\n'), ports: p.inline.ports ?? '',
     network: p.inline.network === 'tcp' || p.inline.network === 'udp' ? p.inline.network : '',
     bittorrent: (p.inline.protocols ?? []).includes('bittorrent'), private: p.inline.private === true,
-    scope: p.scope, groupIds: p.group_ids, panelIds: p.panel_ids, templateKey: p.template_key,
+    scope: p.scope, groupIds: p.group_ids, panelIds: p.panel_ids, templateKey: p.template_key, countsAsRisk: p.action === 'block' && p.counts_as_risk === true,
   }
 }
 
@@ -86,13 +94,15 @@ export function inputOf(f: PolicyForm, extra: { id?: number; updatedAt?: number 
     },
     scope: f.scope, group_ids: f.scope === 'groups' ? f.groupIds : [], panel_ids: f.scope === 'panels' ? f.panelIds : [],
     ...(f.templateKey ? { template_key: f.templateKey } : {}),
+    // An allow policy sends none: the server clears it on a block turned allow and refuses a true one.
+    ...(f.action === 'block' ? { counts_as_risk: f.countsAsRisk } : {}),
     ...(extra.id ? { id: extra.id } : {}), ...(extra.updatedAt !== undefined ? { updated_at: extra.updatedAt } : {}),
   }
 }
 
-/** Whether a change reaches the nodes: only a rename or a new description does not. */
+/** Whether a change reaches the nodes: a rename, a new description or the risk flag (none of them compiled) does not. */
 function changesWire(a: PolicyForm, b: PolicyForm): boolean {
-  return JSON.stringify({ ...a, name: '', description: '' }) !== JSON.stringify({ ...b, name: '', description: '' })
+  return JSON.stringify({ ...a, name: '', description: '', countsAsRisk: false }) !== JSON.stringify({ ...b, name: '', description: '', countsAsRisk: false })
 }
 
 const lineNumbersOf = (text: string) => text.split('\n').map((l, i) => [l.trim(), i + 1] as const).filter(([l]) => l)
@@ -206,13 +216,19 @@ export default function PolicyEditorDialog({ open, policy, initial, onClose, onS
   const over = anyBudgetOver(preview.budget ?? undefined)
   const busy = create.isPending || update.isPending
 
-  // Where it lands: the step and its place among that action's policies.
+  // A new block policy is recommended Report only; an edit of an existing one is not a "new policy".
+  const recommend = !policy && form.action === 'block'
+
+  // Where it lands: the step and its place among that step's policies. Report-only is its own step, after
+  // every enforced one, so the same block action can land in step 3 or step 4 by its state.
+  const stepOf = (p: { action: DestAction; state: DestState }) => (p.action === 'block' && p.state === 'report' ? 'report' : p.action)
   const position = useMemo(() => {
     const all = [...(policies.data?.allow ?? []), ...(policies.data?.block ?? [])]
-    const same = all.filter(p => p.action === form.action)
-    const idx = policy && policy.action === form.action ? same.findIndex(p => p.id === policy.id) : same.length
-    return { index: idx >= 0 ? idx + 1 : same.length + 1, step: pipelineSteps().find(s => s.id === form.action)?.n ?? 1 }
-  }, [policies.data, policy, form.action])
+    const here = stepOf(form)
+    const same = all.filter(p => stepOf(p) === here)
+    const idx = policy && stepOf(policy) === here ? same.findIndex(p => p.id === policy.id) : same.length
+    return { index: idx >= 0 ? idx + 1 : same.length + 1, step: pipelineSteps({ report: true }).find(s => s.id === here)?.n ?? 1, report: here === 'report' }
+  }, [policies.data, policy, form]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const summary = summaryText(t, matchSummary({
     listNames: form.listIds.map(id => listById.get(id)?.name ?? ''), cidrs: cidrLines.length, private: form.private,
@@ -223,7 +239,7 @@ export default function PolicyEditorDialog({ open, policy, initial, onClose, onS
   const executors = enforcingNodeCount(status.data)
   const minutes = applyMinutes(status.data)
   let footer: string
-  if (form.state !== 'on' && base.state !== 'on') footer = t(`${D}footer.disabled`)
+  if (form.state === 'off' && base.state === 'off') footer = t(`${D}footer.disabled`)
   else if (policy && !changesWire(form, base)) footer = t(`${D}footer.rename_only`)
   else if (executors === null || minutes === null) footer = t(`${D}footer.applies_unknown`)
   else footer = t(`${D}footer.applies`, { count: executors, minutes })
@@ -241,7 +257,9 @@ export default function PolicyEditorDialog({ open, policy, initial, onClose, onS
   const save = async () => {
     setTouched(true); setTopError(null)
     if (!validate() || over) return
-    if (!(await gate(form.state === 'on' && (!policy || policy.state !== 'on')))) return
+    // Report-only to On is the Convert action by another door: ask the same question.
+    if (policy && policy.state === 'report' && form.state === 'on' && form.action === 'block' && !(await confirm(convertToBlockConfirm({ t, minutes }, form.name.trim())))) return
+    if (!(await gate(form.state !== 'off' && (!policy || policy.state === 'off')))) return
     try {
       const saved = policy
         ? await update.mutateAsync({ id: policy.id, input: inputOf(form, { updatedAt }) })
@@ -299,7 +317,7 @@ export default function PolicyEditorDialog({ open, policy, initial, onClose, onS
 
           <Box>
             <Typography variant="body2" sx={{ mb: 0.5, fontWeight: 600 }}>{t(`${D}action`)}</Typography>
-            <ToggleButtonGroup exclusive disabled={locked} value={form.action} fullWidth={phone} onChange={(_, v: DestAction | null) => { if (v) setForm(f => ({ ...f, action: v, bittorrent: v === 'allow' ? false : f.bittorrent })) }}
+            <ToggleButtonGroup exclusive disabled={locked} value={form.action} fullWidth={phone} onChange={(_, v: DestAction | null) => { if (v) setForm(f => ({ ...f, action: v, bittorrent: v === 'allow' ? false : f.bittorrent, state: v === 'allow' && f.state === 'report' ? 'off' : f.state })) }}
               aria-label={t(`${D}action`)}>
               <ToggleButton value="block">{t('admin:access_control.policies.action.block')}</ToggleButton>
               <ToggleButton value="allow">{t('admin:access_control.policies.action.allow')}</ToggleButton>
@@ -314,9 +332,23 @@ export default function PolicyEditorDialog({ open, policy, initial, onClose, onS
             <Typography variant="body2" sx={{ mb: 0.5, fontWeight: 600 }}>{t(`${D}state`)}</Typography>
             <ToggleButtonGroup exclusive value={form.state} fullWidth={phone} onChange={(_, v: DestState | null) => { if (v) set('state', v) }}
               aria-label={t(`${D}state`)}>
-              <ToggleButton value="off">{t('admin:access_control.policies.state.off')}</ToggleButton>
-              <ToggleButton value="on">{t('admin:access_control.policies.state.on')}</ToggleButton>
+              {policyStateOptions(form.action).map(st => (
+                <ToggleButton key={st} value={st} sx={{ gap: 0.75 }}>
+                  {t(`admin:access_control.policies.state.${st}`)}
+                  {/* Recommended for a NEW block policy only; the admin is never made to take it. */}
+                  {st === 'report' && recommend && <Typography component="span" sx={{ fontSize: 11, color: md.primary, fontWeight: 600 }}>{t('admin:access_control.policies.state_help.recommend')}</Typography>}
+                </ToggleButton>
+              ))}
             </ToggleButtonGroup>
+            <Typography variant="body2" sx={{ color: md.onSurfaceVariant, mt: 0.5 }}>
+              {t(`admin:access_control.policies.state_help.${form.state === 'on' ? (form.action === 'allow' ? 'on_allow' : 'on_block') : form.state}`)}
+            </Typography>
+            {recommend && form.state !== 'report' && (
+              <Typography variant="body2" sx={{ color: md.onSurfaceVariant }}>{t('admin:access_control.policies.state_help.recommend_note')}</Typography>
+            )}
+            {form.action === 'allow' && (
+              <Typography variant="body2" sx={{ color: md.onSurfaceVariant }}>{t('admin:access_control.policies.state_help.allow_no_report')}</Typography>
+            )}
           </Box>
 
           <Box sx={{ display: 'grid', gap: 1.5 }}>
@@ -371,6 +403,12 @@ export default function PolicyEditorDialog({ open, policy, initial, onClose, onS
               </Box>
               <FormControlLabel control={<Checkbox disabled={locked} checked={form.private} onChange={(_, c) => set('private', c)} />} label={t(`${D}private`)} />
             </Box>
+            {form.action === 'block' && (
+              <Box>
+                <FormControlLabel control={<Checkbox checked={form.countsAsRisk} onChange={(_, c) => set('countsAsRisk', c)} />} label={t(`${D}counts_as_risk`)} />
+                <Typography variant="caption" sx={{ display: 'block', color: md.onSurfaceVariant, ml: 4 }}>{t(`${D}counts_as_risk_hint`)}</Typography>
+              </Box>
+            )}
             {errors.match && touched && <Typography variant="body2" role="alert" sx={{ color: md.error }}>{errors.match}</Typography>}
           </Box>
 
@@ -405,7 +443,11 @@ export default function PolicyEditorDialog({ open, policy, initial, onClose, onS
       <DialogActions sx={{ flexDirection: 'column', alignItems: 'stretch', gap: 1, p: 2, position: phone ? 'sticky' : undefined, bottom: 0, bgcolor: md.surfaceContainerHigh }}>
         <Box>
           <Typography variant="body2" data-testid="editor-summary" sx={{ fontWeight: 600 }}>
-            {[t(`admin:access_control.policies.action.${form.action}`), summary, t(`${D}position`, { step: position.step, index: position.index })].filter(Boolean).join(' · ')}
+            {[
+              t(form.state === 'report' ? 'admin:access_control.policies.state.report' : `admin:access_control.policies.action.${form.action}`),
+              summary,
+              position.report ? t(`${D}position_report`, { step: position.step }) : t(`${D}position`, { step: position.step, index: position.index }),
+            ].filter(Boolean).join(' · ')}
           </Typography>
           {split && <Typography variant="caption" sx={{ display: 'block', color: md.onSurfaceVariant }}>{t(`${D}split`)}</Typography>}
           <Typography variant="caption" sx={{ display: 'block', color: md.onSurfaceVariant }}>{footer}</Typography>

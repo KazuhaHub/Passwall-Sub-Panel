@@ -949,6 +949,7 @@
       "directives_ahead_of_roster": "Policy is waiting for the client list",
       "directive_unknown_client": "Policy references a missing client",
       "report_missing_object": "Node report is incomplete",
+      "destination_policy_report_only_not_deployed": "Report-only rules not deployed",
       "task_identity_conflict": "Task identity conflict",
       "task_replay_fenced": "Task replay was prevented",
       "legacy_task_result_quarantined": "Legacy task result isolated"
@@ -964,6 +965,7 @@
       "directives_ahead_of_roster": "The policy depends on a client list not yet received.",
       "directive_unknown_client": "The policy references a client missing from the client list.",
       "report_missing_object": "A required object was absent from a full node report.",
+      "destination_policy_report_only_not_deployed": "This node received only the blocking rules, not the report-only ones (inbound sniffing cannot support them, or the rule budget is exceeded); blocking is unaffected.",
       "task_identity_conflict": "One task ID was used with different operation inputs.",
       "task_replay_fenced": "The node could not prove a safe fresh task start.",
       "legacy_task_result_quarantined": "An old task result lacks a verifiable operation identity."
@@ -1190,7 +1192,13 @@
         "over_building": "Blocked connections are past half the threshold",
         "over": "Blocked connections reached the threshold"
       }
-    }
+    },
+    "dest_block_source_rule": "Source rule",
+    "dest_block_deleted": "A deleted policy",
+    "dest_block_policy_id": "Policy #{{id}}",
+    "dest_block_nodes_one": "{{count}} node recording hits",
+    "dest_block_nodes_other": "{{count}} nodes recording hits",
+    "dest_block_view_hits": "View these hits"
   },
   "risk_center": {
     "title": "Risk center",
@@ -1412,7 +1420,7 @@
       "last_judged": "Last judged {{time}}",
       "stale_verdict": "Not re-judged within the freshness window; not counted for review",
       "suspended_since": "Suspended at {{time}}",
-      "trust_scope": "Trusted: locations, subscription spread and login country are not judged; devices and usage change still are.",
+      "trust_scope": "Trusted: locations, subscription spread and login country are not judged; devices, usage change and blocked access still are.",
       "online": "Online",
       "last_seen": "Last seen {{time}}",
       "seen_detail": "First seen {{first}} · {{count}} samples",
@@ -1457,7 +1465,7 @@
       "undismiss_title": "Undo dismiss for {{upn}}?",
       "undismiss_message": "The account returns to the queue with its current signals.",
       "trust_title": "Trust {{upn}}?",
-      "trust_message": "Locations, subscription spread and login country are no longer judged for this account, and automatic suspension never applies to it; devices and usage change still are.",
+      "trust_message": "Locations, subscription spread and login country are no longer judged for this account, and automatic suspension never applies to it; devices, usage change and blocked access still are.",
       "trust_resume": "Also resume proxy service (auto-suspended for locations now)",
       "untrust_title": "Stop trusting {{upn}}?",
       "untrust_message": "From the next check it is judged by its group's policy again.",
@@ -1548,7 +1556,8 @@
       "geoip_city": "city level",
       "geoip_country": "countries only",
       "geoip_off": "unavailable",
-      "geoip_open": "Open settings"
+      "geoip_open": "Open settings",
+      "dest_block_open": "Open access control"
     }
   },
   "logs": {
@@ -3320,7 +3329,17 @@
       "line": "Access control: {{state}}",
       "dialog_title": "{{name}} · Access control",
       "open_page": "Open access control",
-      "close": "Close"
+      "close": "Close",
+      "recording": "Recording",
+      "recording_off": "Don't record",
+      "recording_hits": "Rule matches only",
+      "recording_exec_only": "A sing-box node only enforces and does not record",
+      "recording_too_old": "Node agent too old: upgrade needed",
+      "retention": "kept {{days}} days",
+      "change": "Change",
+      "hits_24h": "Hits, 24 hours",
+      "view_records": "View records",
+      "hits_none_note": "This node has not started reporting hits yet; numbers appear once a policy is applied. The dash does not mean zero."
     }
   },
   "diagnostics": {
@@ -4400,15 +4419,16 @@
   },
   "access_control": {
     "title": "Access control",
-    "subtitle": "Decides which destinations users can reach through native nodes.",
+    "subtitle": "Decides which destinations users can reach through native nodes, and records rule matches.",
     "retry": "Retry",
     "unwired": "Access control is not wired: the server does not have this feature enabled",
     "tab_policies": "Policies",
     "tab_lists": "Lists",
     "help": {
       "label": "Help",
-      "policies": "Access control is enforced by the nodes: a connection that matches a block is cut. The rule library only decides how clients route, and users can change it themselves. Only PSP native nodes enforce these policies; routing on 3X-UI and S-UI is managed by their operators.\n\nRules are checked from top to bottom and checking stops at the first match.\n\nA node sees only the destination (a domain or an IP), never the URL path. It can be bypassed: ECH, resolving with DoH and then connecting to the IP directly, and a client's own encrypted tunnel.\n\nIP ranges apply only to connections made to an IP; the IPs a domain resolves to are not matched. BitTorrent is recognised only by its plaintext handshake and uTP; encrypted BitTorrent and DHT are not.\n\nRegular expressions are matched against every connection one by one and are expensive: at most {{max_regexps}}.\n\nEach apply restarts the proxy on a node once and drops the connections in use once; the apply waits {{seconds}} seconds after the last change, and a run of changes is merged into one.",
-      "lists": "Supported forms: plain domains, `domain:` / `full:` / `keyword:` / `regexp:`, `*.x`, hosts lines, AdGuard `||x^`, Clash rules, IPs and IP ranges; `#` starts a comment. On save everything is lowercased, trailing dots are removed, Chinese domains become punycode and IP ranges are aligned to the network address.\n\nRemote and category lists refresh every {{hours}} hours and are applied only when their content changed; if a refresh fails the old content stays in use.\n\nEntries that are too broad (a regular expression that matches nearly every domain, a keyword under 4 characters, a public suffix itself, an IP range that is too large) are ignored in a custom list; when a remote or category list used by an allow policy contains one, the refresh counts as failed and the old content stays in use."
+      "policies": "Access control is enforced by the nodes: a connection that matches a block is cut. The rule library only decides how clients route, and users can change it themselves. Only PSP native nodes enforce these policies; routing on 3X-UI and S-UI is managed by their operators.\n\nRules are checked from top to bottom and checking stops at the first match. Within one action, the order only decides which policy a hit is credited to.\n\nEach block policy can be Off, Report only or On: your choice. Report only blocks nothing and records the connections it would have blocked; it is checked after every rule that is in force, so it never changes the outcome of any connection. Turn it On once you have seen the hits. An allow policy has no Report only.\n\nA node sees only the destination (a domain or an IP), never the URL path. It can be bypassed: ECH, resolving with DoH and then connecting to the IP directly, and a client's own encrypted tunnel.\n\nIP ranges apply only to connections made to an IP; the IPs a domain resolves to are not matched. BitTorrent is recognised only by its plaintext handshake and uTP; encrypted BitTorrent and DHT are not.\n\nRegular expressions are matched against every connection one by one and are expensive: at most {{max_regexps}}.\n\nEach apply restarts the proxy on a node once and drops the connections in use once; the apply waits {{seconds}} seconds after the last change, and a run of changes is merged into one.",
+      "lists": "Supported forms: plain domains, `domain:` / `full:` / `keyword:` / `regexp:`, `*.x`, hosts lines, AdGuard `||x^`, Clash rules, IPs and IP ranges; `#` starts a comment. On save everything is lowercased, trailing dots are removed, Chinese domains become punycode and IP ranges are aligned to the network address.\n\nRemote and category lists refresh every {{hours}} hours and are applied only when their content changed; if a refresh fails the old content stays in use.\n\nEntries that are too broad (a regular expression that matches nearly every domain, a keyword under 4 characters, a public suffix itself, an IP range that is too large) are ignored in a custom list; when a remote or category list used by an allow policy contains one, the refresh counts as failed and the old content stays in use.",
+      "records": "Each row is one account's hits on one destination within one hour. What is recorded is the domain the node recognised, never the URL path. sing-box nodes only enforce and do not record. \"Would be blocked\" is what report-only policies matched: those connections were let through and only noted. Hit records are kept {{days}} days."
     },
     "header": {
       "test": "Test a destination",
@@ -4467,7 +4487,9 @@
         "offline_one": "{{count}} offline",
         "offline_other": "{{count}} offline",
         "not_enrolled_one": "{{count}} not enrolled",
-        "not_enrolled_other": "{{count}} not enrolled"
+        "not_enrolled_other": "{{count}} not enrolled",
+        "recording_one": "{{count}} node recording hits",
+        "recording_other": "{{count}} nodes recording hits"
       },
       "detail": {
         "countdown_one": "Goes out in {{count}} second",
@@ -4498,6 +4520,11 @@
         "message": "{{nodes}} will each restart the proxy once within {{minutes}} and drop the connections in use once; clients reconnect on their own. Later changes go out the same way; changes within {{seconds}} seconds of each other are merged into one.",
         "message_no_window": "{{nodes}} will each restart the proxy once within {{minutes}} and drop the connections in use once; clients reconnect on their own. Later changes go out the same way, and a run of changes is merged into one.",
         "action": "Enable"
+      },
+      "convert_policy": {
+        "title": "Turn \"{{name}}\" into a block?",
+        "message": "Once saved, connections it matches are cut, within {{minutes}}. To see how many it would have blocked first, use \"Turn into a block\" in the policy list.",
+        "action": "Turn into a block"
       },
       "delete_policy": {
         "title": "Delete policy \"{{name}}\"?",
@@ -4539,6 +4566,11 @@
         "message": "If you close now, these changes are not saved.",
         "action": "Discard",
         "keep": "Keep editing"
+      },
+      "shorten_retention": {
+        "title": "Shorten the retention?",
+        "message": "Records older than {{days}} days will be deleted within the hour and cannot be recovered.",
+        "action": "Shorten"
       }
     },
     "errors": {
@@ -4568,6 +4600,8 @@
       "dest_exemption_exists": "This account is already exempt",
       "dest_exemption_invalid": "The exemption is not valid",
       "dest_exception_invalid": "The allow exception is not valid",
+      "dest_hits_range": "The time range is too long; narrow it",
+      "dest_hits_invalid": "A filter is not valid; check it and try again",
       "dest_test_invalid": "The test input is not valid",
       "dest_settings_invalid": "A setting is out of range",
       "dest_template_unavailable": "This group has no generic category",
@@ -4602,6 +4636,8 @@
       "unsupported_kind": "Routing on 3X-UI / S-UI is managed by its operator; they do not enforce access policies.",
       "offline": "Applied automatically once it reports again",
       "none": "This node has no policy to enforce",
+      "report_not_deployed_sniffing": "This node's inbound sniffing cannot support report-only rules, so only the blocking rules were sent",
+      "report_not_deployed_limit": "Over the rule budget: the report-only rules were not sent",
       "paused": "Access control is paused; it resumes as it was.",
       "not_enrolled": "This native node has not enrolled: no agent has reported."
     },
@@ -4842,7 +4878,16 @@
       "remove_exemption": "Remove exemption",
       "removed_snack": "Removed the exemption of {{upn}}; it takes effect with the next apply",
       "retry": "Retry",
-      "load_failed": "Could not read this account's access information"
+      "load_failed": "Could not read this account's access information",
+      "hits_title": "Hits in the past {{days}} days",
+      "hits_view_all": "View all in records",
+      "hits_none": "No hits in the past {{days}} days",
+      "hits_not_recorded": "None of this account's nodes record hits",
+      "hits_nodes": "Node coverage",
+      "hits_deleted_policy": "A deleted policy",
+      "hits_deleted_source_rule": "A deleted source rule",
+      "hits_source_rule": "Source rule · {{name}}",
+      "hits_list_separator": ", "
     },
     "sheet": {
       "close": "Close"
@@ -4863,7 +4908,10 @@
       "changed_one": "{{count}} change",
       "changed_other": "{{count}} changes",
       "discard": "Discard",
-      "save": "Save"
+      "save": "Save",
+      "group_retention": "Record retention",
+      "hit_retention_days": "Hit-record retention (days)",
+      "hit_retention_days_hint": "How long hit records are kept; after shortening it, older records are deleted."
     },
     "rule_data": {
       "read_failed": "Could not read the rule data version",
@@ -4946,7 +4994,6 @@
       "cidrs": "Denied source IP ranges (optional, one per line)",
       "cidrs_hint": "For example 203.0.113.0/24 or 2001:db8::/32. Behind a relay or CDN the node sees its address.",
       "bad_lines": "Line {{lines}} is not a valid IP range",
-      "enabled": "Enabled",
       "save": "Save source rule",
       "saved": "Source rule saved",
       "stale": "This source rule was just changed by someone else and has been reloaded; check it before saving.",
@@ -4956,6 +5003,12 @@
       "unsaved": {
         "summary": "Source rules are not saved; use the button below",
         "detail": "The \"Deny source country or region\" changes of this inbound are unsaved. They are saved by their own button, not by OK above."
+      },
+      "state": "State",
+      "state_help": {
+        "off": "This source rule is not applied.",
+        "report": "Refuses no source and records the connections it would have refused; it is checked after every rule that is in force and changes no outcome.",
+        "on": "Refuses connections from these countries or regions and these IP ranges; it is checked first, and exempt accounts cannot get around it."
       }
     },
     "coverage": {
@@ -4975,7 +5028,11 @@
       "geoip_unavailable": "Source rule not enforced: the GeoIP database is unavailable",
       "row_menu": "More actions for {{name}}",
       "retried": "Asked to apply again",
-      "not_retried": "This node has no refusal to retry"
+      "not_retried": "This node has no refusal to retry",
+      "recording_note_one": "{{count}} node records rule matches only (kept {{days}} days) · the raw access log never leaves the node",
+      "recording_note_other": "{{count}} nodes record rule matches only (kept {{days}} days) · the raw access log never leaves the node",
+      "recording_none": "No node is recording hits · the raw access log never leaves the node",
+      "set_recording": "Set the recording…"
     },
     "policies": {
       "read_failed": "Could not read the policies",
@@ -4983,7 +5040,8 @@
       "new_blank": "Blank policy",
       "state": {
         "off": "Off",
-        "on": "On"
+        "on": "On",
+        "report": "Report only"
       },
       "action": {
         "block": "Block",
@@ -5034,7 +5092,11 @@
         "add_allow": "Allow policy",
         "add_block": "Block policy",
         "add_allow_aria": "New allow policy",
-        "add_block_aria": "New block policy"
+        "add_block_aria": "New block policy",
+        "report": "Report only",
+        "report_caption": "blocks nothing, only noting what it would have blocked; changes no outcome",
+        "add_report": "Report-only policy",
+        "add_report_aria": "New report-only policy"
       },
       "row": {
         "paused": "Paused",
@@ -5060,16 +5122,37 @@
         "menu_top": "Move to the top of this step",
         "menu_bottom": "Move to the bottom of this step",
         "menu_delete": "Delete",
-        "copy_name": "{{name}} (copy)"
+        "copy_name": "{{name}} (copy)",
+        "hits_zero": "No hits in {{days}} days",
+        "hits_never": "No hits within the retention",
+        "hits_unavailable": "—",
+        "hits_unavailable_tip": "Needs a node that records",
+        "would_block_none": "Nothing would have been blocked in the past {{days}} days",
+        "not_deployed_nodes_one": " (not deployed on {{count}} node)",
+        "not_deployed_nodes_other": " (not deployed on {{count}} nodes)",
+        "counts_as_risk": "Counts as risk",
+        "last_hit": "last {{ago}}",
+        "view_records": "View in records",
+        "menu_records": "View in records",
+        "menu_report": "Change to Report only",
+        "convert": "Turn into a block…",
+        "convert_aria": "Turn \"{{name}}\" into a block",
+        "toggle_report": "Report only",
+        "hits_count_one": "{{n}} hit in {{days}} days",
+        "hits_count_other": "{{n}} hits in {{days}} days",
+        "would_block_one": "Would have blocked {{n}} connection in the past {{days}} days",
+        "would_block_other": "Would have blocked {{n}} connections in the past {{days}} days"
       },
       "snack": {
         "disabled": "\"{{name}}\" is off; takes effect with the next apply",
         "moved": "Moved to position {{n}} of \"{{section}}\"",
-        "template_added": "Rule group added"
+        "template_added": "Rule group added",
+        "converted": "Now blocking; position {{n}} of \"Block\"",
+        "reported": "\"{{name}}\" is Report only; it takes effect with the next apply"
       },
       "empty": {
         "title": "No access policy yet",
-        "body": "Start from a template or make a blank policy. You choose Off or On when you add one; nothing is enabled by default.",
+        "body": "Start from a template or make a blank policy. You choose Off, Report only or On when you add one: Report only records what it would have blocked, so you can look before you decide to block.",
         "blank": "New blank policy"
       },
       "editor": {
@@ -5111,6 +5194,8 @@
         "network_all": "All",
         "bittorrent": "BitTorrent",
         "bittorrent_hint": "Recognises only the plaintext handshake and uTP",
+        "counts_as_risk": "Count as a risk signal",
+        "counts_as_risk_hint": "Connections this policy really blocks count toward the Risk Center's “Blocked access” signal. Report-only hits never count.",
         "private": "Private and cloud-metadata addresses",
         "scope": "Who it applies to",
         "scope_all": "Everyone",
@@ -5141,10 +5226,28 @@
           "detail": "This policy comes from a built-in rule group, so what it matches is read-only. Name, description, state and scope can be changed; to change the matching, duplicate it as a custom policy."
         },
         "bittorrent_block_only": "BitTorrent can only be used by block policies.",
-        "removed_deleted_other": "{{count}} deleted group or node was removed from the scope; it takes effect when you save"
+        "removed_deleted_other": "{{count}} deleted group or node was removed from the scope; it takes effect when you save",
+        "position_report": "In step {{step}}, checked after every rule that is in force",
+        "state_aria": "Policy state"
       },
       "separator": ", ",
-      "template_name_taken": "A policy with this name already exists. Rename or delete it first, then add this group."
+      "template_name_taken": "A policy with this name already exists. Rename or delete it first, then add this group.",
+      "turn_on": {
+        "title": "Turn on \"{{name}}\"?",
+        "body": "The page no longer knows whether this policy was report-only or on before it was switched off. Report only records and blocks nothing; Turn on blocking cuts the connections it matches.",
+        "report": "Report only",
+        "block": "Turn on blocking",
+        "cancel": "Cancel"
+      },
+      "state_help": {
+        "off": "This policy is not applied.",
+        "report": "Blocks nothing and records the connections it would have blocked. It is checked after every rule that is in force, so it never changes the outcome of any connection.",
+        "on_block": "Cuts the matching connection and records the hit.",
+        "on_allow": "Lets the connection through without recording; checked before exempt accounts and blocks.",
+        "allow_no_report": "An allow policy has no Report only: an allow matters only by changing an outcome, and Report only changes none.",
+        "recommend": "Recommended",
+        "recommend_note": "A new block policy is best started as Report only: look at the hits, then turn it On. You can also turn it On straight away."
+      }
     },
     "templates": {
       "added": "Added",
@@ -5157,10 +5260,12 @@
       "why_none": "Why do some rule groups have no template?",
       "chooser_title": "Add \"{{name}}\"",
       "chooser_state": "State after adding",
-      "chooser_help": "Nothing is enabled by default: Off only creates the policy, On enforces it after the next apply.",
+      "chooser_help": "Off only creates the policy; Report only applies it but blocks nothing, noting what it would have blocked; On blocks after the next apply. Nothing is enabled by default.",
+      "chooser_risk": "The policy this template creates counts as a risk signal (Risk Center, \"Blocked access\"); report-only hits never count.",
       "update_data": "Update the rule data",
       "cancel": "Cancel",
-      "add": "Add"
+      "add": "Add",
+      "recommend": "Recommended"
     },
     "test": {
       "title": "Test a destination",
@@ -5183,7 +5288,7 @@
       "badge": {
         "block": "Block",
         "allow": "Allow",
-        "observe": "Watch only",
+        "observe": "Would be blocked",
         "exempt": "Exempt",
         "none": "No rule matched",
         "would_deny": "Would be denied",
@@ -5195,21 +5300,25 @@
         "default": "No rule matched; allowed",
         "exempt": "This account is not held to any access restriction",
         "builtin": "Blocked by the node's built-in rule: host names ending in a dot",
-        "source": "Blocked by the inbound's source rule ({{entry}})"
+        "source": "Blocked by the inbound's source rule ({{entry}})",
+        "observe": "Not blocked: a report-only policy matched it and would block it once turned on ({{entry}})",
+        "observe_source": "Not blocked: a report-only source rule matched it and would block it once turned on ({{entry}})"
       },
       "kind": {
         "source": "Source rule",
         "allow": "Allow",
         "block": "Block",
         "exempt": "Exemption",
-        "builtin": "Built in to the node: blocks host names ending in a dot"
+        "builtin": "Built in to the node: blocks host names ending in a dot",
+        "report": "Report only"
       },
       "result": {
         "miss": "No match",
         "hit": "Matched, stops here",
         "shadowed": "Would also match (cut off by an earlier step)",
         "skipped": "Not checked",
-        "untestable": "Cannot be tested"
+        "untestable": "Cannot be tested",
+        "hit_report": "Matched: would be blocked, was let through"
       },
       "node_hint": "{{node}}: {{note}} The actual result may differ",
       "node_applied": "Judged by the policy applied on {{node}}",
@@ -5231,6 +5340,165 @@
         "cancel": "Cancel",
         "save": "Add"
       }
+    },
+    "tab_records": "Records",
+    "convert": {
+      "title": "Turn \"{{name}}\" into a block?",
+      "hits": "Would have blocked, past {{days}} days",
+      "users": "Accounts involved",
+      "top": "Most-hit destinations: {{list}}",
+      "no_collect": "No node is recording hits yet, so the effect cannot be estimated",
+      "no_hits": "Nothing would have been blocked in the past {{days}} days.",
+      "read_failed": "Could not read the hits; you can still turn it into a block.",
+      "body": "Once it blocks, these connections are cut, and the connections in use are dropped once. A connection that another report-only policy ahead of it had noted will be blocked too, and a node reports up to a limit, so the record may be incomplete. The real effect can be larger than the figures above.",
+      "counts_as_risk": "Once it blocks, the connections it blocks count as a risk signal (Risk Center, \"Blocked access\").",
+      "action": "Turn into a block",
+      "cancel": "Cancel",
+      "view_records": "View in records",
+      "at_least": "at least {{n}}"
+    },
+    "records": {
+      "title": "Hit records",
+      "tiles": {
+        "block": "Blocked",
+        "observe": "Would be blocked",
+        "users": "Accounts involved"
+      },
+      "filters": {
+        "user": "Account",
+        "source": "Rule",
+        "source_all": "All rules",
+        "group_policies": "Policies",
+        "group_rules": "Source rules",
+        "group_deleted": "Deleted",
+        "panel": "Node",
+        "panel_all": "All nodes",
+        "range": "Time range",
+        "search": "Search destinations…",
+        "more": "Filters"
+      },
+      "range": {
+        "h1": "Past hour",
+        "h24": "Past 24 hours",
+        "days": "Past {{days}} days",
+        "custom": "Custom…",
+        "since": "From (browser time)",
+        "until": "To (browser time)",
+        "custom_note": "A custom range is in browser time and at most {{days}} days."
+      },
+      "view": {
+        "label": "View",
+        "none": "Details",
+        "site": "By destination",
+        "user": "By account",
+        "policy": "By policy"
+      },
+      "count": {
+        "detail": "{{n}} rows · summed by the hour",
+        "grouped": "{{n}} items"
+      },
+      "cols": {
+        "hour": "Hour",
+        "user": "Account",
+        "rule": "Rule",
+        "dest": "Destination",
+        "panel": "Node",
+        "count": "Hits",
+        "object": "Object",
+        "last": "Latest"
+      },
+      "rule": {
+        "blocked": "Blocked",
+        "would_block": "Would be blocked",
+        "deleted_policy": "A deleted policy",
+        "deleted_source_rule": "A deleted source rule",
+        "deleted_user": "A deleted account #{{id}}",
+        "source_rule": "Source rule · {{name}}",
+        "filter_by": "Only \"{{name}}\""
+      },
+      "hover": {
+        "first_last": "First {{first}} · last {{last}}"
+      },
+      "day": {
+        "today": "Today",
+        "yesterday": "Yesterday"
+      },
+      "dropped": "{{n}} records in this period are not counted because of the nodes' reporting limit",
+      "empty": {
+        "no_policies": "No policy is turned on yet",
+        "to_policies": "Make one",
+        "no_collect": "No node is recording hits: the node is too old, or its recording is set to \"Don't record\"",
+        "nodes": "Node coverage",
+        "filtered": "No hits match these filters in this range",
+        "clear": "Clear filters",
+        "none": "No hits in this range",
+        "older": "Hit records are kept only {{days}} days"
+      },
+      "read_failed": "Could not read the hit records",
+      "retention": "Hit records are kept {{days}} days",
+      "change": "Change",
+      "menu": {
+        "label": "More actions",
+        "test": "Test this destination",
+        "exception": "Add an allow exception…",
+        "open_user": "Open account"
+      },
+      "exception": {
+        "title": "Allow {{dest}}?",
+        "where": "Add to",
+        "global": "Global allow exception (allowed for everyone)",
+        "global_hint": {
+          "summary": "Overrides every block policy",
+          "detail": "An allow is checked before the blocks: nobody is blocked from it any more."
+        },
+        "first_time": "The first use creates the list \"Allow exceptions\" and an allow policy over it",
+        "match": "Written as",
+        "exempt": "Only exempt {{upn}} (no access limit at all)",
+        "exempt_hint": {
+          "summary": "This account will have no access limit",
+          "detail": "An exemption applies to every policy, not just this destination."
+        },
+        "cancel": "Cancel",
+        "allow": "Allow",
+        "exempt_action": "Exempt this account…",
+        "invalid": "This destination cannot be an allow exception",
+        "eta_one": "Takes effect within about {{count}} minute.",
+        "eta_other": "Takes effect within about {{count}} minutes.",
+        "eta_unknown": "Takes effect within a few minutes.",
+        "saved": "Added the allow exception \"{{entry}}\"; it takes effect with the next apply",
+        "saved_created": "Created the list \"Allow exceptions\" and an allow policy, and added \"{{entry}}\"; it takes effect with the next apply"
+      }
+    },
+    "audit_collect": {
+      "title": "What does {{name}} record?",
+      "label": "Recording",
+      "mode": {
+        "off": "Don't record",
+        "hits": "Rule matches only",
+        "hits_and_usage": "Rule matches and per-site usage"
+      },
+      "mode_help": {
+        "hits_and_usage": "This node was set to also record per-site usage; this version does not offer it, so it runs as \"Rule matches only\". Pick one of the modes above to change it.",
+        "off": "Only enforces the policies and keeps no record.",
+        "hits": "Notes the connections that matched a block or a report-only rule: account, destination, count, summed by the hour and kept {{days}} days. The raw access log never leaves the node."
+      },
+      "too_old": "Node agent too old: upgrade needed",
+      "exec_only": "A sing-box node only enforces and does not record",
+      "restart": "After saving, this node restarts its proxy once.",
+      "cancel": "Cancel",
+      "save": "Save",
+      "saved_one": "Saved. {{node}} restarts its proxy once within about {{count}} minute",
+      "saved_other": "Saved. {{node}} restarts its proxy once within about {{count}} minutes",
+      "saved_unknown": "Saved. {{node}} restarts its proxy once within a few minutes"
+    },
+    "node_recording": {
+      "mode": {
+        "off": "Don't record",
+        "hits": "Rule matches only"
+      },
+      "hits_24h": "{{n}} in 24 hours",
+      "reported": "reported {{ago}}",
+      "separator": " · "
     }
   }
 }

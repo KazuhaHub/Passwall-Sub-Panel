@@ -26,12 +26,12 @@ export function RailStep({ n, title, caption, actions, children, last = false }:
         position: 'absolute', left: 0, top: 0, width: dot, height: dot, borderRadius: '50%', bgcolor: md.surfaceContainerHighest,
         color: md.onSurface, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 600,
       }}>{n}</Box>
-      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1, minHeight: dot, mb: children ? 1 : 0 }}>
+      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1, flexWrap: 'wrap', minHeight: dot, mb: children ? 1 : 0 }}>
         <Typography component="h2" sx={{ fontSize: 16, fontWeight: 600, minWidth: 0 }}>
           {title}
           {caption ? <Box component="span" sx={{ fontSize: 13, fontWeight: 400, color: md.onSurfaceVariant }}>{' · '}{caption}</Box> : null}
         </Typography>
-        {actions}
+        {actions && <Box sx={{ flex: '0 0 auto', whiteSpace: 'nowrap', ml: 'auto' }}>{actions}</Box>}
       </Box>
       {children}
     </Box>

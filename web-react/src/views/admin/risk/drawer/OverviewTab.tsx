@@ -151,14 +151,14 @@ function GeoDetector({ geo }: { geo: RiskUserSummary['geo'] }) {
   )
 }
 
-function KindDetector({ kind, sig }: { kind: RiskKind; sig: (RiskSignal & { stale: boolean }) | undefined }) {
+function KindDetector({ kind, sig, userId }: { kind: RiskKind; sig: (RiskSignal & { stale: boolean }) | undefined; userId: number }) {
   const { t } = useTranslation(['admin'])
   const title = t(`admin:risk_signals.kind.${kind}`)
   if (!sig) return <DetectorRow title={title} chip={<DetectorStateChip state="not_computed" />} />
   return (
     <DetectorRow title={title} chip={<DetectorStateChip state={sig.state} code={sig.code} />}
       reason={riskCodeText(sig, t)} judgedAt={sig.updated_at_ms} stale={sig.stale}
-      evidence={sig.evidence ? <RiskKindEvidence kind={kind} evidence={sig.evidence} /> : undefined} />
+      evidence={sig.evidence ? <RiskKindEvidence kind={kind} evidence={sig.evidence} userId={userId} /> : undefined} />
   )
 }
 
@@ -196,7 +196,7 @@ function ReviewLines({ review }: { review: RiskReview }) {
 }
 
 /**
- * 概览: one row per detector, always the same five in the same order (the
+ * 概览: one row per detector, always the same six in the same order (the
  * concurrent-location verdict, then each risk kind), so a detector with no
  * verdict reads "not computed yet" in its place rather than going missing.
  */
@@ -205,7 +205,7 @@ export default function OverviewTab({ summary }: { summary: RiskUserSummary }) {
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.25 }}>
       <GeoDetector geo={summary.geo} />
       {RISK_KINDS.map(k => (
-        <KindDetector key={k} kind={k} sig={summary.signals.find(s => s.kind === k)} />
+        <KindDetector key={k} kind={k} sig={summary.signals.find(s => s.kind === k)} userId={summary.user.id} />
       ))}
       <ReviewLines review={summary.review} />
     </Box>

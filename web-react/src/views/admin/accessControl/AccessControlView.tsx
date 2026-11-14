@@ -29,6 +29,7 @@ import { reportDestError } from './destErrors'
 import ListsTab from './lists/ListsTab'
 import ListEntriesSheet from './lists/ListEntriesSheet'
 import PoliciesTab from './policies/PoliciesTab'
+import RecordsTab from './records/RecordsTab'
 import CoverageSheet from './sheets/CoverageSheet'
 import ExemptionsSheet from './sheets/ExemptionsSheet'
 import TestSheet from './sheets/TestSheet'
@@ -37,6 +38,7 @@ import VerdictBar from './VerdictBar'
 const HELP_KEY: Record<AccessTab, string> = {
   policies: 'admin:access_control.help.policies',
   lists: 'admin:access_control.help.lists',
+  records: 'admin:access_control.help.records',
 }
 
 /**
@@ -63,7 +65,7 @@ export default function AccessControlView() {
   // The help texts name tunables (the regexp cap, the apply window, the refresh interval); they are read, never written in.
   const policiesRead = useDestPolicies(scope, { enabled: canView })
   const listsRead = useDestLists(scope, { enabled: canView })
-  const settingsRead = useDestSettings(scope, { enabled: canView && tab === 'policies' })
+  const settingsRead = useDestSettings(scope, { enabled: canView && (tab === 'policies' || tab === 'records') })
   const pause = usePauseDest(scope)
   const publish = usePublishDest(scope)
   const pendingEdit = useRef<number | null>(null)
@@ -201,17 +203,23 @@ export default function AccessControlView() {
                 sx={{ flex: 1, minWidth: 0 }}>
                 <Tab value="policies" label={t('admin:access_control.tab_policies')} />
                 <Tab value="lists" label={t('admin:access_control.tab_lists')} />
+                <Tab value="records" label={t('admin:access_control.tab_records')} />
               </Tabs>
               <HelpTip textKey={HELP_KEY[tab]} labelKey="admin:access_control.help.label" textValues={{
                 max_regexps: policiesRead.data?.budget.regexps.limit ?? '…',
                 seconds: settingsRead.data?.effective.dest_policy_apply_min_seconds ?? '…',
                 hours: listsRead.data?.refresh_hours ?? '…',
+                days: settingsRead.data?.effective.dest_hit_retention_days ?? '…',
               }} />
             </Box>
             {/* Only the open tab mounts, so only its reads are made. */}
             {tab === 'policies' && (
               <PoliciesTab onOpenExemptions={() => sheet.open('exemptions')} onOpenSettings={openSettings}
                 onGoToLists={open => setTab('lists', open ? { openList: open } : undefined)} />
+            )}
+            {tab === 'records' && (
+              <RecordsTab onOpenUser={id => account.open(id)} onTestDestination={target => sheet.open('test', { prefill: { target } })}
+                onOpenSettings={openSettings} onOpenNodes={() => sheet.open('nodes')} onGoToPolicies={() => setTab('policies')} />
             )}
             {tab === 'lists' && (
               <ListsTab onOpenEntries={id => sheet.open('list', { extra: { list: String(id) } })} onOpenSettings={openSettings}

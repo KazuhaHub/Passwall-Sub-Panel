@@ -28,9 +28,17 @@ const scanned = [
   'access_control.', 'servers.access.',
 ]
 
+// The access-control keys are also held to the stricter rule below: no digit
+// directly before a day unit at all, because every number of days is a setting
+// or the min of one (the one fixed window in this block, the 24 hours of
+// \"hits in the last 24 hours\", is a unit of the server's field name).
+
+// The hit records add the windows of the access-control page: the days a count
+// is over are `min(7, retention)` (R14) and the retention is a setting, so a
+// text interpolates them ({{days}}) and never states 7 or 30 as the rule.
 const literals: Record<'zh' | 'en', string[]> = {
-  zh: ['每小时', '4 周', '最近 7 天', '3 个以上', '35 天', '满 14 天', '满 4 天'],
-  en: ['hourly', 'four weeks', '4 weeks', 'last 7 days', '3+ ', '35 days', 'starts at 14', 'flagged at 4'],
+  zh: ['每小时', '4 周', '最近 7 天', '3 个以上', '35 天', '满 14 天', '满 4 天', '过去 7 天', '近 7 天', '7 天内', '7 天命中', '保留 30 天', '保留 7 天'],
+  en: ['hourly', 'four weeks', '4 weeks', 'last 7 days', '3+ ', '35 days', 'starts at 14', 'flagged at 4', 'past 7 days', 'in 7 days', 'kept 7 days', 'kept 30 days'],
 }
 
 // Drops every innermost parenthesis that names a default, repeatedly, so a
@@ -80,5 +88,26 @@ describe('no hard-coded tunable text remains', () => {
     expect(hits('en', 'recomputed at the risk refresh interval (hourly by default)')).toEqual([])
     expect(hits('zh', '每小时计算一次')).toEqual(['每小时'])
     expect(hits('en', 'recomputed hourly')).toEqual(['hourly'])
+  })
+})
+
+describe('the access-control texts name their windows only through the setting', () => {
+  const cases = [['zh', zh], ['en', en]] as const
+  it.each(cases)('%s: no literal number of days in access_control.*, servers.access.* or the hit texts of the risk center', (_lang, bundle) => {
+    const found: string[] = []
+    for (const [key, value] of Object.entries(flatten(bundle as Nested))) {
+      if (!(key.startsWith('access_control.') || key.startsWith('servers.access.') || key.startsWith('risk_signals.dest_block'))) continue
+      // An exemption's expiry choices (24 hours, 7 days, never) are options the admin picks, not a window the page states.
+      if (key.startsWith('access_control.exemptions.dialog.d')) continue
+      // "{{days}} 天" is the form; "7 天" or "30 days" is a rule that is only true on the shipped settings.
+      if (/(?<![{\w])\d+\s*(天|days?)(?!\w)/.test(unqualified(value))) found.push(`${key}: ${JSON.stringify(value)}`)
+    }
+    expect(found).toEqual([])
+  })
+
+  it('catches a planted literal and allows a qualified default', () => {
+    expect(hits('zh', '过去 7 天本应拦截')).toEqual(['过去 7 天'])
+    expect(hits('en', 'Hits in the past 7 days')).toEqual(['past 7 days'])
+    expect(hits('zh', '命中记录保留（默认 30 天）')).toEqual([])
   })
 })

@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { confirm } from '@/components/ConfirmHost'
 import { useDestPolicies, useDestSettings, useDestSourceRules, useDestStatus } from '@/query/accessControl'
 import { useQueryScope } from '@/query/useQueryScope'
-import { applyMinutes, enforcingNodeCount, needsFirstPublishConfirm } from '@/utils/accessControl'
+import { applyMinutes, enabledPolicies, enforcingNodeCount, needsFirstPublishConfirm } from '@/utils/accessControl'
 import { firstPublishConfirm } from '../confirmCopy'
 
 /**
@@ -19,8 +19,9 @@ export function useFirstPublishGate() {
   const status = useDestStatus(scope)
   const settings = useDestSettings(scope)
   return async (turnsOn: boolean): Promise<boolean> => {
-    const policiesOn = [...(policies.data?.allow ?? []), ...(policies.data?.block ?? [])].filter(p => p.state === 'on').length
-    const sourceRulesOn = (sources.data?.items ?? []).filter(r => r.state === 'on').length
+    // Report-only is deployed too (the nodes restart for it), so it is "something enforced" for this purpose.
+    const policiesOn = enabledPolicies(policies.data).length
+    const sourceRulesOn = (sources.data?.items ?? []).filter(r => r.state !== 'off').length
     if (!needsFirstPublishConfirm({ policiesOn, sourceRulesOn }, { turnsOn })) return true
     const nodes = enforcingNodeCount(status.data)
     return confirm(firstPublishConfirm({

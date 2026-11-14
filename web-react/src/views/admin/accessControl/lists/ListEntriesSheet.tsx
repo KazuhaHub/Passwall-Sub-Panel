@@ -44,7 +44,7 @@ export default function ListEntriesSheet({ listId, onClose, onEdit, onTest }: Li
   const [search, setSearch] = useState('')
 
   const list = q.data?.list
-  const enabledUsed = !!list && list.used_by.some(u => [...(policies.data?.allow ?? []), ...(policies.data?.block ?? [])].some(p => p.id === u.id && p.state === 'on'))
+  const enabledUsed = !!list && list.used_by.some(u => [...(policies.data?.allow ?? []), ...(policies.data?.block ?? [])].some(p => p.id === u.id && p.state !== 'off'))
   const st = list ? listStatus(list, enabledUsed) : null
   const needle = search.trim().toLowerCase()
   const shown = (q.data?.samples ?? []).filter(e => !needle || e.toLowerCase().includes(needle))
