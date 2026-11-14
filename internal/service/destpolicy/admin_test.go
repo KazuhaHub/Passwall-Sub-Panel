@@ -531,3 +531,34 @@ func TestStatus_StatesAndRuleDataVersion(t *testing.T) {
 		t.Fatalf("offline: %+v", n)
 	}
 }
+
+// The budget counts a group's members per panel only with all three: the
+// member counter, the group lookup and the panels a group's tags select.
+// Without the counter it leaves group members out entirely, so the wiring
+// report must say no.
+func TestAdmin_GroupBudgetPerPanelNeedsTheCounterToo(t *testing.T) {
+	var a Admin
+	if a.GroupBudgetPerPanel() {
+		t.Fatal("an Admin with nothing wired reports a per-panel budget")
+	}
+	a.GroupPanels, a.Groups = stubGroupPanels{}, stubGroups{}
+	if a.GroupBudgetPerPanel() {
+		t.Fatal("an Admin without the member counter reports a per-panel budget")
+	}
+	a.Counter = stubCounter{}
+	if !a.GroupBudgetPerPanel() {
+		t.Fatal("an Admin with counter, groups and panels does not report a per-panel budget")
+	}
+}
+
+type stubGroupPanels struct{}
+
+func (stubGroupPanels) PanelsFor(context.Context, *domain.Group) ([]int64, error) { return nil, nil }
+
+type stubGroups struct{}
+
+func (stubGroups) GetByID(context.Context, int64) (*domain.Group, error) { return nil, nil }
+
+type stubCounter struct{}
+
+func (stubCounter) CountUsersByGroup(context.Context) (map[int64]int, error) { return nil, nil }

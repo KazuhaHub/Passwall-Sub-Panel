@@ -780,6 +780,10 @@ func (a *Admin) groupName(ctx context.Context, gid int64) string {
 }
 
 // GroupBudgetPerPanel reports whether the budget counts a group's subjects per
-// panel (it has GroupPanels and Groups); otherwise it sums every group onto one
-// node. For the application's wiring test.
-func (a *Admin) GroupBudgetPerPanel() bool { return a.GroupPanels != nil && a.Groups != nil }
+// panel: it needs the member counter (without it group members are left out of
+// the budget entirely), the group lookup and the panels a group's tags select
+// (without those it sums every group onto one node). For the application's
+// wiring test.
+func (a *Admin) GroupBudgetPerPanel() bool {
+	return a.Counter != nil && a.GroupPanels != nil && a.Groups != nil
+}
