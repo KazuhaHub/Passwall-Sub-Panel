@@ -24,7 +24,7 @@ func mixedFleet(weak string) fleet {
 	return fleet{panelID: 9, nodes: []*domain.Node{node(1, goodSniffing), node(2, weak)}, users: []int64{10}}
 }
 
-func ruleByID(t *testing.T, p *protocol.DestinationPolicy, id string) protocol.DestinationRule {
+func mustRule(t *testing.T, p *protocol.DestinationPolicy, id string) protocol.DestinationRule {
 	t.Helper()
 	if p != nil {
 		for _, r := range p.Rules {
@@ -62,11 +62,11 @@ func TestSniffPartial_DomainRuleRunsOnlyOnTheInboundsThatCanSniff(t *testing.T) 
 	if err := protocol.ValidateDestinationPolicy(res.Policy); err != nil {
 		t.Fatal(err)
 	}
-	if got := ruleByID(t, res.Policy, idOf(dp)).Inbounds; !slices.Equal(got, []protocol.ListenerKey{"lst_1"}) {
+	if got := mustRule(t, res.Policy, idOf(dp)).Inbounds; !slices.Equal(got, []protocol.ListenerKey{"lst_1"}) {
 		t.Fatalf("domain rule inbounds = %v, want [lst_1]", got)
 	}
 	for _, p := range []*domain.DestPolicy{cp, sp} {
-		if got := ruleByID(t, res.Policy, idOf(p)).Inbounds; len(got) != 0 {
+		if got := mustRule(t, res.Policy, idOf(p)).Inbounds; len(got) != 0 {
 			t.Fatalf("%s needs no sniffing and must run everywhere, got inbounds %v", idOf(p), got)
 		}
 	}
@@ -153,12 +153,12 @@ func TestSniffPartial_AProtocolRuleIsRestrictedByItsOwnNeed(t *testing.T) {
 	h.publishNow()
 
 	res := h.compile(mixedFleet(weakSniffing))
-	if got := ruleByID(t, res.Policy, idOf(bt)).Inbounds; !slices.Equal(got, []protocol.ListenerKey{"lst_1"}) {
+	if got := mustRule(t, res.Policy, idOf(bt)).Inbounds; !slices.Equal(got, []protocol.ListenerKey{"lst_1"}) {
 		t.Fatalf("bittorrent inbounds = %v, want [lst_1]", got)
 	}
 	// routeOnly cannot supply domains but supplies the protocol: nothing to restrict.
 	res = h.compile(mixedFleet(routeOnlySniffing))
-	if got := ruleByID(t, res.Policy, idOf(bt)).Inbounds; len(got) != 0 {
+	if got := mustRule(t, res.Policy, idOf(bt)).Inbounds; len(got) != 0 {
 		t.Fatalf("a routeOnly inbound sniffs protocols; inbounds = %v", got)
 	}
 }
@@ -172,7 +172,7 @@ func TestSniffPartial_ASplitPolicyRestrictsBothHalves(t *testing.T) {
 	})
 	h.publishNow()
 	res := h.compile(mixedFleet(weakSniffing))
-	x1, x2 := ruleByID(t, res.Policy, idOf(bt)+"x1"), ruleByID(t, res.Policy, idOf(bt)+"x2")
+	x1, x2 := mustRule(t, res.Policy, idOf(bt)+"x1"), mustRule(t, res.Policy, idOf(bt)+"x2")
 	want := []protocol.ListenerKey{"lst_1"}
 	if !slices.Equal(x1.Inbounds, want) || !slices.Equal(x2.Inbounds, want) || x1.Ports != "6881-6889" || x2.Ports != "6881-6889" {
 		t.Fatalf("x1 = %+v x2 = %+v", x1, x2)
@@ -182,10 +182,10 @@ func TestSniffPartial_ASplitPolicyRestrictsBothHalves(t *testing.T) {
 	}
 	// routeOnly: the domain half goes, the protocol half stays everywhere.
 	res = h.compile(mixedFleet(routeOnlySniffing))
-	if got := ruleByID(t, res.Policy, idOf(bt)+"x1").Inbounds; !slices.Equal(got, want) {
+	if got := mustRule(t, res.Policy, idOf(bt)+"x1").Inbounds; !slices.Equal(got, want) {
 		t.Fatalf("x1 inbounds = %v", got)
 	}
-	if got := ruleByID(t, res.Policy, idOf(bt)+"x2").Inbounds; len(got) != 0 {
+	if got := mustRule(t, res.Policy, idOf(bt)+"x2").Inbounds; len(got) != 0 {
 		t.Fatalf("x2 inbounds = %v, want none (every inbound)", got)
 	}
 }
@@ -198,7 +198,7 @@ func TestSniffPartial_ReportOnlyRulesAreRestrictedAndSaySo(t *testing.T) {
 	h.publishNow()
 
 	res := h.compile(mixedFleet(weakSniffing))
-	r := ruleByID(t, res.Policy, idOf(w))
+	r := mustRule(t, res.Policy, idOf(w))
 	if r.Action != protocol.RuleObserve || !slices.Equal(r.Inbounds, []protocol.ListenerKey{"lst_1"}) {
 		t.Fatalf("observe rule = %+v", r)
 	}
@@ -210,7 +210,7 @@ func TestSniffPartial_ReportOnlyRulesAreRestrictedAndSaySo(t *testing.T) {
 	}
 	// Every inbound sniffs: nothing is restricted, nothing is said.
 	good := h.compile(base1())
-	if got := ruleByID(t, good.Policy, idOf(w)).Inbounds; len(got) != 0 || hasIssue(good, IssueReportOnlyNotDeployed, "") {
+	if got := mustRule(t, good.Policy, idOf(w)).Inbounds; len(got) != 0 || hasIssue(good, IssueReportOnlyNotDeployed, "") {
 		t.Fatalf("rule inbounds %v, issues %+v", got, good.Issues)
 	}
 	if m := h.meta(); m.ReportOnlyShed != "" {
@@ -353,10 +353,10 @@ func TestRestrictForSniffing_TheResultPassesTheNodesPerListenerCheck(t *testing.
 	if bad := perListenerSniffFindings(p, nodes); len(bad) == 0 {
 		t.Fatal("the unrestricted policy must fail the per-listener check")
 	}
-	if got := ruleByID(t, out, "p1").Inbounds; !slices.Equal(got, []protocol.ListenerKey{"lst_1", "lst_4"}) {
+	if got := mustRule(t, out, "p1").Inbounds; !slices.Equal(got, []protocol.ListenerKey{"lst_1", "lst_4"}) {
 		t.Fatalf("p1 inbounds = %v", got)
 	}
-	if got := ruleByID(t, out, "p2").Inbounds; !slices.Equal(got, []protocol.ListenerKey{"lst_1", "lst_3", "lst_4"}) {
+	if got := mustRule(t, out, "p2").Inbounds; !slices.Equal(got, []protocol.ListenerKey{"lst_1", "lst_3", "lst_4"}) {
 		t.Fatalf("p2 inbounds = %v", got)
 	}
 }
@@ -550,5 +550,36 @@ func TestSniffPartial_StatusSaysTheAllowExemptionIsLostOnlyWhenThereIsADomainAll
 	}
 	if flag(false) {
 		t.Fatal("no domain allow rule: the line is noise")
+	}
+}
+
+// Allowlist groups and a weak inbound: a group whose allowlist needs sniffing
+// that an inbound cannot supply is dropped as a whole on the node (its allows
+// cannot be limited to inbounds), while a group whose lists are addresses only
+// keeps running, and so does every non-domain rule.
+func TestSniffPartial_AGroupAllowlistThatNeedsSniffingIsDroppedPerGroup(t *testing.T) {
+	h := newHarness(t)
+	h.setGroups(map[int64]int64{10: 5, 11: 6})
+	doms := h.list("doms", "DOMAIN-SUFFIX,a.example.com")
+	addrs := h.list("addrs", "IP-CIDR,198.51.100.0/24")
+	smtp := smtpPolicy(h, "smtp")
+	h.allowGroup(5, domain.DestStateOn, []*domain.DestList{doms}, "", "")
+	h.allowGroup(6, domain.DestStateOn, []*domain.DestList{addrs}, "", "")
+	h.publishNow()
+	f := fleet{panelID: 9, nodes: []*domain.Node{node(1, goodSniffing), node(2, weakSniffing)}, users: []int64{10, 11}}
+
+	good := h.compile(fleet{panelID: 9, nodes: []*domain.Node{node(1, goodSniffing), node(2, goodSniffing)}, users: []int64{10, 11}}, policyCap, groupsCap)
+	if got := ruleIDs(good.Policy); !slices.Equal(got, []string{idOf(smtp), "g5x1", "g5", "g6x1", "g6"}) {
+		t.Fatalf("setup: rules = %v", got)
+	}
+	res := h.compile(f, policyCap, groupsCap)
+	if got := ruleIDs(res.Policy); !slices.Equal(got, []string{idOf(smtp), "g6x1", "g6"}) {
+		t.Fatalf("rules = %v, want group 5 dropped as a whole and group 6 and the port rule kept", got)
+	}
+	if err := protocol.ValidateDestinationPolicy(res.Policy); err != nil {
+		t.Fatal(err)
+	}
+	if !hasSniffIssue(res, "lst_2") {
+		t.Fatalf("issues = %+v", res.Issues)
 	}
 }
