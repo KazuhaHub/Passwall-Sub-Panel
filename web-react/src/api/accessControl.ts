@@ -910,7 +910,7 @@ export async function putDestSettings(changed: Partial<DestSettings>): Promise<D
   return { ...data, defaults: data.defaults ?? {} }
 }
 
-/** Allow a site (`site`: the domain and its subdomains) or one host everywhere. Global scope only in this build. */
+/** Allow a site (`site`: the domain and its subdomains) or one host, for everyone or for one allowlist group. */
 export interface DestExceptionResult {
   entry: string
   /** Set the first time: the exceptions list and the allow policy over it were created. */
@@ -919,8 +919,10 @@ export interface DestExceptionResult {
   policy_id?: number
 }
 
-export async function addDestException(input: { target: string; match: 'site' | 'host' }): Promise<DestExceptionResult> {
-  const { data } = await client.post<DestExceptionResult>(`${BASE}/exceptions`, { ...input, scope: 'global' }, quiet)
+export async function addDestException(input: { target: string; match: 'site' | 'host'; group_id?: number }): Promise<DestExceptionResult> {
+  // With a group the entry goes to that group's supplement list (only its members); without, it is allowed for everyone.
+  const scope = input.group_id ? { scope: 'group', group_id: input.group_id } : { scope: 'global' }
+  const { data } = await client.post<DestExceptionResult>(`${BASE}/exceptions`, { target: input.target, match: input.match, ...scope }, quiet)
   return data
 }
 

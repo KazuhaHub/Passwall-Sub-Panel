@@ -21,7 +21,7 @@ import { formatRelativeTimeShort } from '@/utils/relativeTime'
 import { allowlistSearch, parseAllowlistParams, type SettingsFocus } from '../accessParams'
 import { minutesWords } from '../confirmCopy'
 import { reportDestError } from '../destErrors'
-import { reportDayOptions } from './allowlistState'
+import { reportDayOptions, stateDay } from './allowlistState'
 
 const R = 'admin:access_control.allowlist.report.'
 const IP = '(ip)'
@@ -89,7 +89,7 @@ export default function AllowlistReport({ groupId, onBack, onOpenEntries, onTest
   }, [data, sort])
   const max = rows.reduce((m, r) => Math.max(m, r.count), 0)
   const total = rows.reduce((n, r) => n + r.count, 0)
-  const unhandled = rows.filter(r => !isAdded(r)).length
+  const unhandled = rows.filter(r => r.site !== IP && !isAdded(r)).length
   const addable = (i: DestGroupReportItem) => i.site !== IP && !isAdded(i)
 
   const setDays = (d: number) => setParams(allowlistSearch(params, { days: d }), { replace: true })
@@ -104,7 +104,8 @@ export default function AllowlistReport({ groupId, onBack, onOpenEntries, onTest
     if (sites.length === 0 || targetId <= 0) return
     try {
       await edit.mutateAsync({ id: targetId, add: sites.map(s => `domain:${s}`) })
-      setAdded(prev => new Set([...prev, ...sites]))
+      // "Added" means in the group's own lists, which is what the server marks; another list the admin picked is not.
+      if (targetId === extraId) setAdded(prev => new Set([...prev, ...sites]))
       setSelected(new Set())
       pushSnack(t(`${R}snack_added`, { count: sites.length, list: listName(targetId), minutes: minutesWords(t, applyMinutes(status.data)) }), 'success')
     } catch (err) {
@@ -115,7 +116,8 @@ export default function AllowlistReport({ groupId, onBack, onOpenEntries, onTest
   const on = group?.state === 'on'
   const since = data?.since_at ?? null
   const sinceMs = since === null ? null : Date.now() - since
-  const age = sinceMs === null ? null : sinceMs < DAY ? { young: true, n: Math.max(1, Math.floor(sinceMs / HOUR)) } : { young: false, n: Math.floor(sinceMs / DAY) }
+  // The day is counted as the card's badge counts it (the day it began is day 1), by the one rule in stateDay.
+  const age = since === null || sinceMs === null ? null : sinceMs < DAY ? { young: true, n: Math.max(1, Math.floor(sinceMs / HOUR)) } : { young: false, n: stateDay(since, Date.now()) ?? 1 }
   const noneEver = data !== undefined && since === null && data.items.length === 0
 
   const sortButton = (key: SortKey, label: string) => (

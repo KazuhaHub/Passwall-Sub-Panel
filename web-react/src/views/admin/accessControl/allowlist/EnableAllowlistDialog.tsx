@@ -18,7 +18,7 @@ import { useDestGroupPreview, useDestLists, useDestStatus, usePutDestGroup } fro
 import { accessControlKeys } from '@/query/keys'
 import { useQueryScope } from '@/query/useQueryScope'
 import { applyMinutes } from '@/utils/accessControl'
-import { allowlistNoNodesConfirm, discardChangesConfirm, minutesWords } from '../confirmCopy'
+import { allowlistNoNodesConfirm, allowlistRemoveListsConfirm, discardChangesConfirm, minutesWords } from '../confirmCopy'
 import { destErrorText } from '../destErrors'
 import { useFirstPublishGate } from '../policies/useFirstPublish'
 import TurnOnDialog from './TurnOnDialog'
@@ -89,7 +89,7 @@ export default function EnableAllowlistDialog({ open, groups, initialGroupId, on
 
   const candidates = groups.filter(g => g.state === 'off')
   const shownCandidates = candidates.filter(g => !search.trim() || g.group_name.toLowerCase().includes(search.trim().toLowerCase()))
-  const options = useMemo(() => (lists.data?.items ?? []).filter(l => l.side === 'dest' && l.owner_group_id === 0), [lists.data])
+  const options = useMemo(() => (lists.data?.items ?? []).filter(l => l.side === 'dest' && l.owner_group_id === 0 && !(l.kind === 'custom' && (l.empty || l.entry_count === 0))), [lists.data])
   const chosen: DestList[] = listIds.map(id => (lists.data?.items ?? []).find(l => l.id === id)).filter((l): l is DestList => !!l)
   const pending = chosen.filter(l => l.state === 'pending')
   const hosts = baseText !== null ? lines(baseText) : pv?.base_hosts ?? []
@@ -123,7 +123,10 @@ export default function EnableAllowlistDialog({ open, groups, initialGroupId, on
     if (!group) return
     setError(null)
     // The one question that asks even when the rest is fine: nobody could reach anything.
-    if (pv && pv.eligible_nodes === 0 && !(await confirm(allowlistNoNodesConfirm(t, group.group_name, pv.members, pv.total_nodes)))) return
+    if (pv && pv.eligible_nodes === 0 && !(await confirm(allowlistNoNodesConfirm(t, group.group_name, pv.members, pv.total_nodes, state === 'on' ? 'on' : 'report')))) return
+    // Lists taken out of an allowlist that is already on make what they covered refused at once.
+    const removed = group.state === 'on' && state === 'on' ? group.lists.filter(l => !listIds.includes(l.id)).map(l => l.name) : []
+    if (removed.length > 0 && !(await confirm(allowlistRemoveListsConfirm(t, group.group_name, removed)))) return
     if (!(await gate(true))) return
     if (needsChecklist) { setTurnOn(true); return }
     try {
@@ -194,6 +197,7 @@ export default function EnableAllowlistDialog({ open, groups, initialGroupId, on
                     return <Chip key={key} {...rest} size="small" label={t(`${E}list_chip`, { name: l.name, entries: num.format(l.entry_count) })} />
                   })}
                   renderInput={params => <TextField {...params} label={t(`${E}pick_lists`)} />} />
+                {preview.isError && <Typography variant="body2" role="alert" sx={{ color: md.error }}>{destErrorText(t, preview.error)}</Typography>}
                 {pending.length > 0 && <FieldHint tone="amber" summary={t(`${E}not_ready_summary`)} detail={t(`${E}not_ready_detail`)} />}
               </Box>
 
@@ -205,7 +209,7 @@ export default function EnableAllowlistDialog({ open, groups, initialGroupId, on
                     <>
                       {!editBase && !noTemplateHosts && (
                         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
-                          {pv ? <Typography variant="body2" sx={{ overflowWrap: 'anywhere' }}>{t(`${E}base_prefilled`, { count: hosts.length, hosts: hosts.join(t(`${E}host_separator`)) })}</Typography> : <Skeleton width={220} />}
+                          {pv || preview.isError ? <Typography variant="body2" sx={{ overflowWrap: 'anywhere' }}>{t(`${E}base_prefilled`, { count: hosts.length, hosts: hosts.join(t(`${E}host_separator`)) })}</Typography> : <Skeleton width={220} />}
                           <Button size="small" onClick={() => setEditBase(true)}>{t(`${E}base_edit`)}</Button>
                         </Box>
                       )}
@@ -229,6 +233,11 @@ export default function EnableAllowlistDialog({ open, groups, initialGroupId, on
 
           {step === 2 && group && (
             <Box sx={{ display: 'grid', gap: 1.5 }}>
+              {preview.isError && (
+                <Alert severity="error" action={<Button color="inherit" size="small" onClick={() => setStep(1)}>{t(`${E}back_to_lists`)}</Button>}>
+                  {destErrorText(t, preview.error)}
+                </Alert>
+              )}
               {pv
                 ? (
                   <KpiGrid>
@@ -274,11 +283,12 @@ export default function EnableAllowlistDialog({ open, groups, initialGroupId, on
           {step > (initial ? 1 : 0) && <Button onClick={() => setStep(step - 1)}>{t(`${E}back`)}</Button>}
           {step < 2
             ? <Button variant="contained" disabled={!canNext} onClick={() => setStep(step + 1)}>{t(`${E}next`)}</Button>
-            : <AsyncButton variant="contained" color={state === 'on' ? 'error' : 'primary'} disabled={!pv || preview.isFetching} onClick={submit}>{label}</AsyncButton>}
+            : <AsyncButton variant="contained" color={state === 'on' ? 'error' : 'primary'} disabled={!pv || preview.isFetching || preview.isError} onClick={submit}>{label}</AsyncButton>}
         </DialogActions>
       </Dialog>
       {group && turnOn && (
         <TurnOnDialog open group={{ id: group.group_id, name: group.group_name, members: group.members }} listIds={listIds}
+          savedListIds={group.list_ids} hasRow={hasRow} baseCount={hasRow ? undefined : hosts.length}
           reportDay={group.state === 'report' ? stateDay(group.state_changed_at, Date.now()) : null}
           onConfirm={write} onClose={() => setTurnOn(false)}
           onViewReport={() => { setTurnOn(false); onClose(); onOpenGroupReport(group.group_id) }}

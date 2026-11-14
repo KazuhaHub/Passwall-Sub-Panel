@@ -2748,7 +2748,9 @@
       "badge_report": "Allowlist · report only",
       "badge_on": "Allowlist · on",
       "list_item": "{{name}} ({{entries}})",
-      "list_separator": ", "
+      "list_separator": ", ",
+      "not_open_item": "{{name}} · {{reason}}",
+      "detail_separator": "; "
     }
   },
   "certs": {
@@ -4614,13 +4616,25 @@
       },
       "allowlist_off": {
         "title": "Turn off the allowlist of “{{group}}”?",
-        "message": "The members can reach every destination again (global policies still apply) and get back the {{n}} nodes that were not open to them, within {{minutes}}. The lists are kept; you can turn it on again later.",
+        "on": "The members can reach every destination again (global policies still apply); it takes effect within {{minutes}}. The lists are kept; you can turn it on again later.",
+        "on_nodes": "The members can reach every destination again (global policies still apply) and get back the {{n}} nodes that were not open to them, within {{minutes}}. The lists are kept; you can turn it on again later.",
+        "report": "The members could already reach every destination; turning it off only stops recording what would be refused. It takes effect within {{minutes}}. The lists are kept; you can turn it on again later.",
+        "report_nodes": "The members could already reach every destination; turning it off stops recording what would be refused and gives back the {{n}} nodes that were not open to them, within {{minutes}}. The lists are kept; you can turn it on again later.",
         "action": "Turn off"
       },
       "allowlist_no_nodes": {
-        "title": "After this, will the members of “{{group}}” have no usable node?",
-        "message": "The {{members}} members of this group would get no node: none of the {{n}} nodes can enforce an allowlist (3X-UI, S-UI or an old version). Usually upgrade the native nodes first.",
-        "action": "Turn on anyway"
+        "title_on": "After this, will the members of “{{group}}” have no usable node?",
+        "title_report": "After starting report only, will the members of “{{group}}” have no usable node?",
+        "message_on": "The {{members}} members of this group would get no node: none of the {{n}} nodes can enforce an allowlist. Usually upgrade or fix the nodes first.",
+        "message_report": "The {{members}} members of this group would get no node (report only is not open to nodes that cannot enforce it either): none of the {{n}} nodes can enforce an allowlist. Usually upgrade or fix the nodes first.",
+        "action_on": "Turn on anyway",
+        "action_report": "Start anyway"
+      },
+      "allowlist_remove_lists": {
+        "title": "Take {{lists}} out of the lists of “{{group}}”?",
+        "separator": ", ",
+        "message": "What they covered is no longer in the lists, so the members are refused those destinations.",
+        "action": "Take out"
       }
     },
     "errors": {
@@ -4756,7 +4770,9 @@
       "usage": {
         "policies_one": "{{count}} policy",
         "policies_other": "{{count}} policies",
-        "unused": "Not used"
+        "unused": "Not used",
+        "groups_one": "{{count}} allowlist group",
+        "groups_other": "{{count}} allowlist groups"
       },
       "menu": {
         "label": "Actions for {{name}}",
@@ -5551,7 +5567,9 @@
         "eta_other": "Takes effect within about {{count}} minutes.",
         "eta_unknown": "Takes effect within a few minutes.",
         "saved": "Added the allow exception \"{{entry}}\"; it takes effect with the next apply",
-        "saved_created": "Created the list \"Allow exceptions\" and an allow policy, and added \"{{entry}}\"; it takes effect with the next apply"
+        "saved_created": "Created the list \"Allow exceptions\" and an allow policy, and added \"{{entry}}\"; it takes effect with the next apply",
+        "group": "Add to the supplement list of “{{group}}” (allows it for its members only)",
+        "saved_group": "Added “{{entry}}” to the supplement list of “{{group}}”; it takes effect with the next delivery"
       }
     },
     "audit_collect": {
@@ -5683,7 +5701,8 @@
         "saved_report": "“{{group}}” is report only; it takes effect within {{minutes}}",
         "saved_on": "The allowlist of “{{group}}” is on; it takes effect within {{minutes}}",
         "saved_edit": "The allowlist of “{{group}}” is saved; it takes effect within {{minutes}}",
-        "stale": "The state was changed by someone else and has been reloaded"
+        "stale": "The state was changed by someone else and has been reloaded",
+        "back_to_lists": "Back to the lists"
       },
       "read_failed": "Could not read the allowlist groups",
       "empty": {
@@ -5758,12 +5777,14 @@
         "remaining_other": "In the past 24 hours {{count}} sites would still be refused; the most visited are {{top}}",
         "remaining_none": "Nothing would have been refused in the past 24 hours",
         "view_report": "See report",
-        "age": "Report only for {{days}} days",
+        "age": "Report only, day {{days}}",
         "age_none": "No report-only data yet: you cannot see what it will refuse",
         "consequence": "After this, the {{members}} members of this group are refused destinations outside the lists; it takes effect within {{minutes}}. You can go back to report only at any time.",
         "cancel": "Cancel",
         "confirm": "Turn on the allowlist",
-        "stale": "The state was changed by someone else and has been reloaded"
+        "stale": "The state was changed by someone else and has been reloaded",
+        "lost_one": "Also, the members no longer get {{count}} node that cannot enforce an allowlist.",
+        "lost_other": "Also, the members no longer get {{count}} nodes that cannot enforce an allowlist."
       },
       "report": {
         "crumb_label": "Location",
@@ -5785,7 +5806,7 @@
         "kpi_lost": "Not counted",
         "lost_note": "Nodes report only so much; the report may miss some sites. This is the total over all groups",
         "age_young": "Report only began {{hours}} hours ago; there is little data yet",
-        "age": "Report only for {{days}} days",
+        "age": "Report only, day {{days}}",
         "never": "No report-only data for this group: you cannot see what it will refuse before turning it on",
         "empty": "Nothing would have been refused in the past {{days}} days",
         "col_site": "Site",

@@ -25,13 +25,14 @@ export interface ListRowProps {
   onRefresh: (list: DestList) => void
   onDelete: (list: DestList) => void
   onOpenPolicy: (id: number) => void
+  onOpenAllowlist: (groupId: number) => void
 }
 
 const mono = { fontFamily: 'ui-monospace, monospace' }
 
 /** One list: a table row from md up, a block below. */
 export default function ListRow(props: ListRowProps) {
-  const { list, usedByEnabled, block, onOpenEntries, onEdit, onRefresh, onDelete, onOpenPolicy } = props
+  const { list, usedByEnabled, block, onOpenEntries, onEdit, onRefresh, onDelete, onOpenPolicy, onOpenAllowlist } = props
   const { t, i18n } = useTranslation(['admin'])
   const theme = useTheme()
   const md = theme.palette.md
@@ -98,7 +99,7 @@ export default function ListRow(props: ListRowProps) {
         <Typography sx={{ fontSize: 13, color: md.onSurfaceVariant, overflowWrap: 'anywhere' }}>
           {kindLine} · <Box component="span" sx={{ position: 'absolute', width: 1, height: 1, overflow: 'hidden', clip: 'rect(0 0 0 0)' }}>{t(`${L}label.entries`)} </Box>
           {entries} · <Box component="span" sx={{ position: 'absolute', width: 1, height: 1, overflow: 'hidden', clip: 'rect(0 0 0 0)' }}>{t(`${L}label.usage`)} </Box>
-          <UsedByPopover usedBy={list.used_by} onOpenPolicy={onOpenPolicy} />
+          <UsedByPopover usedBy={list.used_by} onOpenPolicy={onOpenPolicy} onOpenAllowlist={onOpenAllowlist} />
         </Typography>
         {second}
       </Box>
@@ -114,7 +115,7 @@ export default function ListRow(props: ListRowProps) {
       <TableCell align="right" sx={{ fontVariantNumeric: 'tabular-nums' }}>{entries}</TableCell>
       <TableCell>{badge}<Box>{second}</Box></TableCell>
       <TableCell onClick={e => e.stopPropagation()}>
-        <UsedByPopover usedBy={list.used_by} onOpenPolicy={onOpenPolicy} />
+        <UsedByPopover usedBy={list.used_by} onOpenPolicy={onOpenPolicy} onOpenAllowlist={onOpenAllowlist} />
       </TableCell>
       <TableCell align="right" onClick={e => e.stopPropagation()}>{menu}</TableCell>
     </TableRow>

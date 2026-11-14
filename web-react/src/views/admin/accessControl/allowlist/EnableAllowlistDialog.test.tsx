@@ -48,7 +48,7 @@ beforeEach(() => {
   vi.mocked(api.getDestLists).mockResolvedValue({
     items: [
       list({}), list({ id: 11, name: 'Remote feed', kind: 'remote', state: 'pending', last_fetched_at: null }),
-      list({ id: 12, name: 'Mine', owner_group_id: 9 }), list({ id: 13, name: 'Source side', side: 'source' }),
+      list({ id: 14, name: 'Empty custom', empty: true, entry_count: 0 }), list({ id: 12, name: 'Mine', owner_group_id: 9 }), list({ id: 13, name: 'Source side', side: 'source' }),
     ], refresh_hours: 24, budget,
   })
   vi.mocked(api.getDestStatus).mockResolvedValue(status())
@@ -104,6 +104,8 @@ describe('step 2: the lists', () => {
     expect(await screen.findByRole('option', { name: 'Guest list' })).toBeTruthy()
     expect(screen.queryByRole('option', { name: 'Mine' })).toBeNull()
     expect(screen.queryByRole('option', { name: 'Source side' })).toBeNull()
+    // The server refuses an empty custom list, so it is not offered.
+    expect(screen.queryByRole('option', { name: 'Empty custom' })).toBeNull()
     fireEvent.click(screen.getByRole('option', { name: 'Remote feed' }))
     expect(await screen.findByText('仅报告时跳过，开启前必须就绪')).toBeTruthy()
     expect(next.disabled).toBe(false)
@@ -178,7 +180,7 @@ describe('step 3: the effect, and one write', () => {
     await toStep3()
     expect(await screen.findByText('启用后本组成员将没有任何可用节点')).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: '开始仅报告' }))
-    await waitFor(() => expect(confirmMock).toHaveBeenCalledWith(expect.objectContaining({ title: '开启后「Guests」的成员将没有任何可用节点？', destructive: true })))
+    await waitFor(() => expect(confirmMock).toHaveBeenCalledWith(expect.objectContaining({ title: '开始仅报告后「Guests」的成员将没有任何可用节点？', destructive: true })))
     expect(api.putDestGroup).not.toHaveBeenCalled()
   })
 
@@ -205,5 +207,33 @@ describe('step 3: the effect, and one write', () => {
     await waitFor(() => expect(api.putDestGroup).toHaveBeenCalledTimes(1))
     expect(api.putDestGroup).toHaveBeenCalledWith(3, { state: 'report', list_ids: [10], updated_at: 77 })
     await waitFor(() => expect(onSaved).toHaveBeenCalledWith({ groupId: 3, state: 'report', created: false }))
+  })
+})
+
+describe('a preview the server refuses', () => {
+  const refused = Object.assign(new Error('x'), { isAxiosError: true, response: { status: 400, data: { code: 'dest_list_too_broad', field: 'list_ids' } } })
+
+  it('is said on step 3 with a way back to the lists, and the button stays off', async () => {
+    vi.mocked(api.previewDestGroup).mockRejectedValue(refused)
+    renderAccess(dlg({ initialGroupId: 3 }))
+    fireEvent.click(await screen.findByRole('button', { name: '下一步' }))
+    const alert = await screen.findByRole('alert')
+    expect(alert.textContent).toContain('列表里有过宽的条目')
+    expect((screen.getByRole('button', { name: '开始仅报告' }) as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.click(screen.getByRole('button', { name: '返回修改名单' }))
+    expect(await screen.findByText('本组成员只能访问这些列表里的目的地')).toBeTruthy()
+  })
+})
+
+describe('editing a group that is on', () => {
+  it('asks before a list is taken out of it, naming the list', async () => {
+    const live = group({ group_id: 4, group_name: 'Ops', state: 'on', updated_at: 5, list_ids: [10, 11], lists: [{ id: 10, name: 'Guest list', entry_count: 40, state: 'ready' }, { id: 11, name: 'Remote feed', entry_count: 3, state: 'ready' }], ineligible: [], pending_nodes: [] })
+    confirmMock.mockResolvedValueOnce(false)
+    renderAccess(dlg({ groups: [live], initialGroupId: 4 }))
+    fireEvent.click((await screen.findAllByTestId('CancelIcon'))[1])
+    fireEvent.click(await screen.findByRole('button', { name: '下一步' }))
+    fireEvent.click(await screen.findByRole('button', { name: '保存' }))
+    await waitFor(() => expect(confirmMock).toHaveBeenCalledWith(expect.objectContaining({ title: '从「Ops」的名单里去掉 Remote feed？' })))
+    expect(api.putDestGroup).not.toHaveBeenCalled()
   })
 })

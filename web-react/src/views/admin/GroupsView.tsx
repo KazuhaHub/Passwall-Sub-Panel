@@ -38,6 +38,7 @@ import { useTranslation } from 'react-i18next'
 import { Link as RouterLink, useSearchParams } from 'react-router'
 import StateBadge from '@/views/admin/accessControl/allowlist/StateBadge'
 import GroupDestinationTab from './groups/GroupDestinationTab'
+import { discardChangesConfirm } from './accessControl/confirmCopy'
 import { deviceCapIsInert } from '@/utils/capabilities'
 import { useCan } from '@/utils/permissions'
 import { allSettledLimited } from '@/utils/promises'
@@ -230,6 +231,8 @@ export default function GroupsView() {
   // on create — overrides apply only to an existing group).
   const [scope, setScope] = useState<ScopeState | null>(null)
   const [form, setForm] = useState<FormState>(EMPTY_FORM)
+  // The form as the dialog opened it: leaving for another page with a different one asks first.
+  const [openedForm, setOpenedForm] = useState<FormState>(EMPTY_FORM)
   const [busy, setBusy] = useState(false)
 
   // Tag filter conditions accept "region:XX" / "tag:YY" / a bare tag. Build
@@ -320,6 +323,7 @@ export default function GroupsView() {
     setEditing(null)
     setScope(null) // overrides apply only to an existing group
     setForm(EMPTY_FORM)
+    setOpenedForm(EMPTY_FORM)
     setDlgTab('access')
     setDialogOpen(true)
   }
@@ -327,7 +331,7 @@ export default function GroupsView() {
   function openEdit(g: Group) {
     setEditing(g)
     const parsed = parseTagConditions(g.tag_filter.tags || [])
-    setForm({
+    const opened: FormState = {
       slug: g.slug,
       name: g.name,
       all: g.tag_filter.all,
@@ -341,7 +345,9 @@ export default function GroupsView() {
       traffic_limit_gb: g.traffic_limit_gb == null ? '' : String(g.traffic_limit_gb),
       ip_limit: g.ip_limit == null ? '' : String(g.ip_limit),
       device_limit: g.device_limit == null ? '' : String(g.device_limit),
-    })
+    }
+    setForm(opened)
+    setOpenedForm(opened)
     setScope(null)
     setDlgTab('access')
     setDialogOpen(true)
@@ -750,7 +756,11 @@ export default function GroupsView() {
             </Tabs>
 
             {dlgTab === 'destination' && canAccess && (
-              <GroupDestinationTab groupId={editing?.id ?? null} onLeave={() => setDialogOpen(false)} />
+              <GroupDestinationTab groupId={editing?.id ?? null} onLeave={async () => {
+                if (JSON.stringify(form) !== JSON.stringify(openedForm) && !(await confirm(discardChangesConfirm(t)))) return false
+                setDialogOpen(false)
+                return true
+              }} />
             )}
 
             {dlgTab === 'access' && (

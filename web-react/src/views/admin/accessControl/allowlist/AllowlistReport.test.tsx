@@ -49,7 +49,8 @@ describe('the report view', () => {
     const kpi = await screen.findByText('本应拒绝的主域名')
     expect(kpi.parentElement?.textContent).toContain('4')
     expect(screen.getByText('4,714')).toBeTruthy()
-    expect(screen.getByText('未处理').parentElement?.textContent).toContain('3')
+    // The (ip) row cannot be added by name, so it is not counted among what is left to handle.
+    expect(screen.getByText('未处理').parentElement?.textContent).toContain('2')
     const lost = screen.getByText('未统计').parentElement as HTMLElement
     expect(lost.textContent).toContain('12')
     expect(screen.getByText('节点上报有上限，报告可能漏了一些主域名；这是所有分组的合计')).toBeTruthy()
@@ -98,6 +99,20 @@ describe('the report view', () => {
     expect(api.editDestListEntries).toHaveBeenCalledWith(12, { add: ['domain:gstatic.com', 'domain:figma.com'], remove: undefined })
   })
 
+  it('an add to a list other than the supplement does not mark the site added: only the supplement and the base are what "added" means', async () => {
+    vi.mocked(api.getDestGroups).mockResolvedValue([group({ lists: [{ id: 10, name: 'Guest list', entry_count: 40, state: 'ready' }] })])
+    vi.mocked(api.getDestLists).mockResolvedValue({ items: [{ id: 10, name: 'Guest list', kind: 'custom', side: 'dest', entry_count: 40, regexp_count: 0, state: 'ready', empty: false, last_fetched_at: 1, last_error: '', owner_group_id: 0, updated_at: 1, used_by: [] }], refresh_hours: 24, budget: {} as api.DestBudget })
+    renderAccess(ui, { route })
+    const row = (await screen.findByText('gstatic.com')).closest('[data-testid="report-row"]') as HTMLElement
+    fireEvent.click(screen.getByRole('checkbox', { name: '选择 gstatic.com' }))
+    const bar = await screen.findByTestId('bulk-bar')
+    fireEvent.mouseDown(within(bar).getByRole('combobox'))
+    fireEvent.click(await screen.findByRole('option', { name: 'Guest list' }))
+    fireEvent.click(within(bar).getByRole('button', { name: '加入白名单（1）' }))
+    await waitFor(() => expect(api.editDestListEntries).toHaveBeenCalledWith(10, { add: ['domain:gstatic.com'], remove: undefined }))
+    expect(within(row).queryByText('已加入 · 下次下发后生效')).toBeNull()
+  })
+
   it('sorts by count or by recency', async () => {
     renderAccess(ui, { route })
     await screen.findByText('gstatic.com')
@@ -143,7 +158,7 @@ describe('what the report says of itself', () => {
     first.unmount()
     vi.mocked(api.getDestGroupReport).mockResolvedValue(report())
     renderAccess(ui, { route })
-    expect(await screen.findByText('仅报告已 3 天')).toBeTruthy()
+    expect(await screen.findByText('仅报告第 4 天')).toBeTruthy()
   })
 
   it('an empty range says so, with the way to turn it on; one that never ran says that instead', async () => {

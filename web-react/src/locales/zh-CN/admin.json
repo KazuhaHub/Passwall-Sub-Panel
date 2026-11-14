@@ -2744,7 +2744,9 @@
       "badge_report": "白名单 · 仅报告",
       "badge_on": "白名单 · 开启",
       "list_item": "{{name}}（{{entries}}）",
-      "list_separator": "、"
+      "list_separator": "、",
+      "not_open_item": "{{name}} · {{reason}}",
+      "detail_separator": "；"
     }
   },
   "certs": {
@@ -4594,13 +4596,25 @@
       },
       "allowlist_off": {
         "title": "关闭「{{group}}」的白名单？",
-        "message": "本组成员恢复访问所有目的地（仍受全局策略约束），并在{{minutes}}内重新获得 {{n}} 台此前不开放的节点。名单保留，以后可以再次开启。",
+        "on": "本组成员恢复访问所有目的地（仍受全局策略约束），{{minutes}}内生效。名单保留，以后可以再次开启。",
+        "on_nodes": "本组成员恢复访问所有目的地（仍受全局策略约束），并在{{minutes}}内重新获得 {{n}} 台此前不开放的节点。名单保留，以后可以再次开启。",
+        "report": "本组成员本来就能访问所有目的地；关闭后不再记录本应拒绝的目的地。{{minutes}}内生效。名单保留，以后可以再次开启。",
+        "report_nodes": "本组成员本来就能访问所有目的地；关闭后不再记录本应拒绝的目的地，并在{{minutes}}内重新获得 {{n}} 台此前不开放的节点。名单保留，以后可以再次开启。",
         "action": "关闭白名单"
       },
       "allowlist_no_nodes": {
-        "title": "开启后「{{group}}」的成员将没有任何可用节点？",
-        "message": "本组 {{members}} 人在开启后就拿不到任何节点：{{n}} 台节点都不执行白名单（3X-UI、S-UI 或版本过旧）。通常应先升级原生节点。",
-        "action": "仍然开启"
+        "title_on": "开启后「{{group}}」的成员将没有任何可用节点？",
+        "title_report": "开始仅报告后「{{group}}」的成员将没有任何可用节点？",
+        "message_on": "本组 {{members}} 人在开启后就拿不到任何节点：{{n}} 台节点都不能执行白名单。通常应先升级或修好节点。",
+        "message_report": "本组 {{members}} 人在开始仅报告后就拿不到任何节点（仅报告同样不对不能执行的节点开放）：{{n}} 台节点都不能执行白名单。通常应先升级或修好节点。",
+        "action_on": "仍然开启",
+        "action_report": "仍然开始"
+      },
+      "allowlist_remove_lists": {
+        "title": "从「{{group}}」的名单里去掉 {{lists}}？",
+        "separator": "、",
+        "message": "它们覆盖的目的地不在名单里了，本组成员访问这些目的地会被拒绝。",
+        "action": "去掉"
       }
     },
     "errors": {
@@ -4735,7 +4749,8 @@
       },
       "usage": {
         "policies_other": "{{count}} 条策略",
-        "unused": "未使用"
+        "unused": "未使用",
+        "groups_other": "{{count}} 个白名单分组"
       },
       "menu": {
         "label": "{{name}} 的操作",
@@ -5517,7 +5532,9 @@
         "eta_other": "约 {{count}} 分钟内生效。",
         "eta_unknown": "几分钟内生效。",
         "saved": "已加入放行例外「{{entry}}」，将随下一次下发生效",
-        "saved_created": "已新建列表「放行例外」和一条放行策略，并加入「{{entry}}」，将随下一次下发生效"
+        "saved_created": "已新建列表「放行例外」和一条放行策略，并加入「{{entry}}」，将随下一次下发生效",
+        "group": "加到「{{group}}」的补充列表（只放行本组成员）",
+        "saved_group": "已加入「{{group}}」的补充列表「{{entry}}」，将随下一次下发生效"
       }
     },
     "audit_collect": {
@@ -5642,7 +5659,8 @@
         "saved_report": "「{{group}}」已开始仅报告，{{minutes}}内生效",
         "saved_on": "「{{group}}」已开启白名单，{{minutes}}内生效",
         "saved_edit": "「{{group}}」的白名单已保存，{{minutes}}内生效",
-        "stale": "状态已被其他人修改，已重新载入"
+        "stale": "状态已被其他人修改，已重新载入",
+        "back_to_lists": "返回修改名单"
       },
       "read_failed": "读取白名单分组失败",
       "empty": {
@@ -5712,12 +5730,13 @@
         "remaining_other": "过去 24 小时仍有 {{count}} 个主域名本应被拒绝，最多的是 {{top}}",
         "remaining_none": "过去 24 小时没有本应被拒绝的主域名",
         "view_report": "看报告",
-        "age": "仅报告已 {{days}} 天",
+        "age": "仅报告第 {{days}} 天",
         "age_none": "还没有仅报告的数据：开启前看不到会拦到什么",
         "consequence": "开启后，本组 {{members}} 人访问名单外的目的地会被拒绝，{{minutes}}内生效。可以随时改回仅报告。",
         "cancel": "取消",
         "confirm": "开启白名单",
-        "stale": "状态已被其他人修改，已重新载入"
+        "stale": "状态已被其他人修改，已重新载入",
+        "lost_other": "同时，本组成员不再获得 {{count}} 台不执行白名单的节点。"
       },
       "report": {
         "crumb_label": "位置",
@@ -5739,7 +5758,7 @@
         "kpi_lost": "未统计",
         "lost_note": "节点上报有上限，报告可能漏了一些主域名；这是所有分组的合计",
         "age_young": "仅报告刚开始 {{hours}} 小时，数据还少",
-        "age": "仅报告已 {{days}} 天",
+        "age": "仅报告第 {{days}} 天",
         "never": "本组没有仅报告的数据：开启前看不到会拦到什么",
         "empty": "过去 {{days}} 天没有本应被拒绝的目的地",
         "col_site": "主域名",

@@ -240,7 +240,7 @@ export default function AccessControlView() {
             )}
             {tab === 'lists' && (
               <ListsTab onOpenEntries={id => sheet.open('list', { extra: { list: String(id) } })} onOpenSettings={openSettings}
-                onOpenPolicy={id => openPolicy(id)} />
+                onOpenPolicy={id => openPolicy(id)} onOpenAllowlist={openAllowlist} />
             )}
           </>
         )}

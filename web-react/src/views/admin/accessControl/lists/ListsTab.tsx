@@ -32,6 +32,8 @@ export interface ListsTabProps {
   onOpenSettings: (focus?: SettingsFocus) => void
   /** Switches to the policies tab and opens that policy's editor. */
   onOpenPolicy: (id: number) => void
+  /** Opens an allowlist group's card on the allowlist tab. */
+  onOpenAllowlist: (groupId: number) => void
 }
 
 type SortColumn = 'name' | 'entries' | 'status'
@@ -41,7 +43,7 @@ type SortColumn = 'name' | 'entries' | 'status'
  * broken (and still serving its old content), and who uses each one. The
  * filters are in the URL (`lst_state`, `lst_kind`); sorting is the page's own.
  */
-export default function ListsTab({ onOpenEntries, onOpenSettings, onOpenPolicy }: ListsTabProps) {
+export default function ListsTab({ onOpenEntries, onOpenSettings, onOpenPolicy, onOpenAllowlist }: ListsTabProps) {
   const { t, i18n } = useTranslation(['admin'])
   const theme = useTheme()
   const md = theme.palette.md
@@ -79,12 +81,12 @@ export default function ListsTab({ onOpenEntries, onOpenSettings, onOpenPolicy }
     () => new Set([...(policies.data?.allow ?? []), ...(policies.data?.block ?? [])].filter(p => p.state !== 'off').map(p => p.id)),
     [policies.data])
   const items = lists.data?.items
-  const usedEnabled = (l: DestList) => l.used_by.some(u => enabledIds.has(u.id))
+  const usedEnabled = (l: DestList) => l.used_by.some(u => u.kind === 'policy' && enabledIds.has(u.id))
   const problems = (items ?? []).filter(l => listStatus(l, usedEnabled(l)).problem).length
 
   const visible = useMemo(() => {
     let out = (items ?? []).filter(l => !kindFilter || l.kind === kindFilter)
-    if (stateFilter === 'problem') out = out.filter(l => listStatus(l, l.used_by.some(u => enabledIds.has(u.id))).problem)
+    if (stateFilter === 'problem') out = out.filter(l => listStatus(l, l.used_by.some(u => u.kind === 'policy' && enabledIds.has(u.id))).problem)
     const sign = sort.dir === 'asc' ? 1 : -1
     return [...out].sort((a, b) => {
       switch (sort.col) {
@@ -171,7 +173,7 @@ export default function ListsTab({ onOpenEntries, onOpenSettings, onOpenPolicy }
   } else {
     const rowProps = (l: DestList) => ({
       list: l, usedByEnabled: usedEnabled(l), onOpenEntries, onEdit: (id: number) => setDialog({ open: true, editId: id, kind: 'custom' }),
-      onRefresh: doRefresh, onDelete: doDelete, onOpenPolicy,
+      onRefresh: doRefresh, onDelete: doDelete, onOpenPolicy, onOpenAllowlist,
     })
     body = folded
       ? <Box sx={{ display: 'grid', gap: 1 }}>{visible.map(l => <ListRow key={l.id} block {...rowProps(l)} />)}</Box>
@@ -237,7 +239,7 @@ export default function ListsTab({ onOpenEntries, onOpenSettings, onOpenPolicy }
           <Box component="ul" sx={{ m: 0, pl: 2 }}>
             {(inUse?.usedBy ?? []).map(u => (
               <li key={`${u.kind}:${u.id}`}>
-                <Link component="button" type="button" onClick={() => { setInUse(null); onOpenPolicy(u.id) }}>{u.name || String(u.id)}</Link>
+                <Link component="button" type="button" onClick={() => { setInUse(null); if (u.kind === 'group') onOpenAllowlist(u.id); else onOpenPolicy(u.id) }}>{u.name || String(u.id)}</Link>
               </li>
             ))}
           </Box>

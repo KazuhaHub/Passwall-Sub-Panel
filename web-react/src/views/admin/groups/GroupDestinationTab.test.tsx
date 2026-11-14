@@ -13,7 +13,7 @@ vi.mock('@/api/accessControl', async importOriginal => {
   return { ...real, ...fns, destErrorOf: real.destErrorOf, isDestUnavailable: real.isDestUnavailable }
 })
 
-const onLeave = vi.fn()
+const onLeave = vi.fn(() => Promise.resolve(true))
 const ui = (id: number | null) => <GroupDestinationTab groupId={id} onLeave={onLeave} />
 const route = '/admin/groups'
 const off = group({ group_id: 7, group_name: 'Staff', state: 'off', updated_at: null, list_ids: [], lists: [], base_list_id: 0, extra_list_id: 0, base_count: 0, ineligible: [], pending_nodes: [] })
@@ -43,6 +43,20 @@ describe('the group dialog destinations tab', () => {
     fireEvent.click(screen.getByRole('button', { name: '在访问控制中编辑 ›' }))
     await waitFor(() => expect(whereIs(router)).toBe('/admin/access-control?tab=allowlist&al_group=1'))
     expect(onLeave).toHaveBeenCalled()
+  })
+
+  it('does not leave when the dialog has unsaved changes the admin keeps', async () => {
+    onLeave.mockResolvedValueOnce(false)
+    const { router } = renderAccess(ui(1), { route })
+    fireEvent.click(await screen.findByRole('button', { name: '在访问控制中编辑 ›' }))
+    await waitFor(() => expect(onLeave).toHaveBeenCalled())
+    expect(whereIs(router)).toBe('/admin/groups')
+  })
+
+  it('lists the nodes that are not open to the group, with the reason, behind the count', async () => {
+    renderAccess(ui(1), { route })
+    fireEvent.click(await screen.findByRole('button', { name: /2 台节点不对本组开放/ }))
+    expect(await screen.findByText(/US West A · 3X-UI/)).toBeTruthy()
   })
 
   it('an allowlist that is on says so', async () => {

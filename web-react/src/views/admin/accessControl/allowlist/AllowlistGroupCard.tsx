@@ -92,8 +92,10 @@ export default function AllowlistGroupCard(p: AllowlistGroupCardProps) {
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap' }}>
             <Typography variant="body2">{t(`${C}nodes`, { ok: g.eligible_nodes, total: g.total_nodes })}</Typography>
             {g.ineligible.length > 0 && (
-              <FieldHint tone="muted" summary={t(`${C}not_open`, { count: g.ineligible.length })}
-                detail={g.ineligible.map(n => t(`${C}not_open_item`, { name: n.name, reason: t(`admin:access_control.allowlist.reason.${n.reason}`) })).join(t(`${C}detail_separator`))} />
+              <Typography variant="body2" component="span">
+                <FieldHint tone="muted" summary={t(`${C}not_open`, { count: g.ineligible.length })}
+                  detail={g.ineligible.map(n => t(`${C}not_open_item`, { name: n.name, reason: t(`admin:access_control.allowlist.reason.${n.reason}`) })).join(t(`${C}detail_separator`))} />
+              </Typography>
             )}
           </Box>
         )}

@@ -46,6 +46,12 @@ export interface TurnOnDialogProps {
   group: { id: number; name: string; members: number }
   /** The lists the allowlist will be made of (the chosen ones, saved or not). */
   listIds: readonly number[]
+  /** The lists as saved, when the lists being turned on differ from them (an edit): what is saved no longer decides. Default: the same. */
+  savedListIds?: readonly number[]
+  /** The base hosts about to be saved with a group's first allowlist; with none yet the saved row says. */
+  baseCount?: number
+  /** The group already has an allowlist (a report to look at); a first one has none. */
+  hasRow?: boolean
   /** Which day of report-only the group is on; null when it never was (no data to look at). */
   reportDay: number | null
   /** Makes the one write. A rejection is explained here. */
@@ -63,7 +69,7 @@ export interface TurnOnDialogProps {
  * The write itself is the caller's: this dialog asks once and says why a
  * refusal came back.
  */
-export default function TurnOnDialog({ open, group, listIds, reportDay, onConfirm, onClose, onViewReport, onViewNodes }: TurnOnDialogProps) {
+export default function TurnOnDialog({ open, group, listIds, savedListIds, baseCount, hasRow = true, reportDay, onConfirm, onClose, onViewReport, onViewNodes }: TurnOnDialogProps) {
   const { t, i18n } = useTranslation(['admin'])
   const theme = useTheme()
   const md = theme.palette.md
@@ -78,8 +84,10 @@ export default function TurnOnDialog({ open, group, listIds, reportDay, onConfir
   const r = detail.data?.readiness
   const reading = detail.isPending
   const failed = detail.isError
+  // The saved readiness speaks of the saved lists; once the lists were edited only what is chosen counts.
+  const sameLists = !savedListIds || (savedListIds.length === listIds.length && savedListIds.every(id => listIds.includes(id)))
   const notReady: DestRef[] = []
-  for (const l of [...(r?.not_ready_lists ?? []), ...(preview.data?.not_ready_lists ?? [])]) {
+  for (const l of [...(sameLists ? r?.not_ready_lists ?? [] : []), ...(preview.data?.not_ready_lists ?? [])]) {
     if (!notReady.some(x => x.id === l.id)) notReady.push(l)
   }
   const blocked = blockedByLists(notReady)
@@ -126,12 +134,12 @@ export default function TurnOnDialog({ open, group, listIds, reportDay, onConfir
                 {t(`${K}unapplied`, { count: r.unapplied_nodes })}
               </Check>
             )}
-            {r.base_nonempty
+            {(baseCount !== undefined ? baseCount > 0 : r.base_nonempty)
               ? <Check id="base" tone="ok">{t(`${K}base_ok`)}</Check>
               : <Check id="base" tone="attention">{t(`${K}base_empty`)}</Check>}
             {r.remaining_sites_24h > 0
               ? (
-                <Check id="remaining" tone="attention" action={<Button size="small" onClick={onViewReport}>{t(`${K}view_report`)}</Button>}>
+                <Check id="remaining" tone="attention" action={hasRow ? <Button size="small" onClick={onViewReport}>{t(`${K}view_report`)}</Button> : undefined}>
                   {t(`${K}remaining`, { count: r.remaining_sites_24h, top: topSites })}
                 </Check>
               )
@@ -143,6 +151,9 @@ export default function TurnOnDialog({ open, group, listIds, reportDay, onConfir
         )}
         <Box sx={{ p: 1.5, borderRadius: 2, bgcolor: md.errorContainer, color: md.onErrorContainer }}>
           <Typography variant="body2">{t(`${K}consequence`, { members: num.format(group.members), minutes: minutesWords(t, applyMinutes(status.data)) })}</Typography>
+          {(preview.data?.nodes_lost.length ?? 0) > 0 && (
+            <Typography variant="body2" sx={{ mt: 0.5 }}>{t(`${K}lost`, { count: preview.data?.nodes_lost.length })}</Typography>
+          )}
         </Box>
         {refusal && <Alert severity="error" sx={{ mt: 1.5 }}>{refusal}</Alert>}
       </DialogContent>

@@ -136,21 +136,33 @@ export function allowlistBackToReportConfirm({ t, minutes }: ConfirmArgs, group:
   }
 }
 
-/** Off: the lists stay, and the members get back the nodes that did not enforce the allowlist. */
-export function allowlistOffConfirm({ t, minutes }: ConfirmArgs, group: string, nodesBack: number): ConfirmOpts {
+/** Off: the lists stay. From report-only nothing was limited, so the question is only that the recording stops. */
+export function allowlistOffConfirm({ t, minutes }: ConfirmArgs, group: string, nodesBack: number, from: 'report' | 'on'): ConfirmOpts {
+  const when = minutesWords(t, minutes)
+  const key = `${P}allowlist_off.${from}${nodesBack > 0 ? '_nodes' : ''}`
   return {
     title: t(`${P}allowlist_off.title`, { group }),
-    message: t(`${P}allowlist_off.message`, { minutes: minutesWords(t, minutes), n: nodesBack }),
+    message: t(key, { minutes: when, n: nodesBack }),
     confirmText: t(`${P}allowlist_off.action`),
   }
 }
 
 /** Turning on or starting a report with no node that enforces it: the members would have no node at all. */
-export function allowlistNoNodesConfirm(t: T, group: string, members: number, nodes: number): ConfirmOpts {
+export function allowlistNoNodesConfirm(t: T, group: string, members: number, nodes: number, state: 'report' | 'on'): ConfirmOpts {
   return {
-    title: t(`${P}allowlist_no_nodes.title`, { group }),
-    message: t(`${P}allowlist_no_nodes.message`, { members, n: nodes }),
-    confirmText: t(`${P}allowlist_no_nodes.action`),
+    title: t(`${P}allowlist_no_nodes.title_${state}`, { group }),
+    message: t(`${P}allowlist_no_nodes.message_${state}`, { members, n: nodes }),
+    confirmText: t(`${P}allowlist_no_nodes.action_${state}`),
+    destructive: true,
+  }
+}
+
+/** Taking lists out of an allowlist that is on: what they covered is refused from then on. */
+export function allowlistRemoveListsConfirm(t: T, group: string, lists: string[]): ConfirmOpts {
+  return {
+    title: t(`${P}allowlist_remove_lists.title`, { group, lists: lists.join(t(`${P}allowlist_remove_lists.separator`)) }),
+    message: t(`${P}allowlist_remove_lists.message`),
+    confirmText: t(`${P}allowlist_remove_lists.action`),
     destructive: true,
   }
 }

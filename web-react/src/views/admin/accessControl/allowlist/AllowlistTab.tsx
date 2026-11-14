@@ -84,7 +84,7 @@ export default function AllowlistTab({ onOpenEntries, onOpenNodes, onOpenSetting
     await put.mutateAsync({ id: g.group_id, input: { state, list_ids: g.list_ids, ...(g.updated_at !== null ? { updated_at: g.updated_at } : {}) } })
   }
   const change = async (g: DestGroup, state: 'report' | 'off') => {
-    const ask = state === 'report' ? allowlistBackToReportConfirm({ t, minutes }, g.group_name) : allowlistOffConfirm({ t, minutes }, g.group_name, g.ineligible.length)
+    const ask = state === 'report' ? allowlistBackToReportConfirm({ t, minutes }, g.group_name) : allowlistOffConfirm({ t, minutes }, g.group_name, g.ineligible.length, g.state === 'on' ? 'on' : 'report')
     if (!(await confirm(ask))) return
     try {
       await write(g, state)

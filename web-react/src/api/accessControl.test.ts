@@ -130,4 +130,12 @@ describe('the allowlist groups API', () => {
     http.get.mockResolvedValueOnce(ok({ nodes: [{ sniffing_insufficient: null, allowlist_groups: null, sniffing_groups_dropped: null }] }))
     expect((await api.getDestStatus()).nodes[0].sniffing_groups_dropped).toEqual([])
   })
+
+  it('a group exception names the group, and the global one still says global', async () => {
+    http.post.mockResolvedValue(ok({ entry: 'domain:a.com', created: null, group_id: 3, list_id: 9 }))
+    await api.addDestException({ target: 'a.com', match: 'site', group_id: 3 })
+    expect(http.post).toHaveBeenLastCalledWith('/admin/dest/exceptions', { target: 'a.com', match: 'site', scope: 'group', group_id: 3 }, expect.anything())
+    await api.addDestException({ target: 'a.com', match: 'site' })
+    expect(http.post).toHaveBeenLastCalledWith('/admin/dest/exceptions', { target: 'a.com', match: 'site', scope: 'global' }, expect.anything())
+  })
 })

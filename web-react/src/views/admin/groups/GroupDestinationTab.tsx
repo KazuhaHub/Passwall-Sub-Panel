@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router'
 import { useTranslation } from 'react-i18next'
 
 import type { DestGroup } from '@/api/accessControl'
+import FieldHint from '@/components/FieldHint'
 import StateBadge from '@/views/admin/accessControl/allowlist/StateBadge'
 import { groupHasAllowlist, stateDay } from '@/views/admin/accessControl/allowlist/allowlistState'
 import { useDestGroups } from '@/query/accessControl'
@@ -31,8 +32,8 @@ function Row({ label, children }: { label: string; children: ReactNode }) {
 export default function GroupDestinationTab({ groupId, onLeave }: {
   /** Null for a group that is not saved yet. */
   groupId: number | null
-  /** Called before leaving for the access-control page (the dialog closes). */
-  onLeave: () => void
+  /** Asked before leaving for the access-control page: closes the dialog (after the discard question when it holds unsaved changes) and says whether to go. */
+  onLeave: () => Promise<boolean>
 }) {
   const { t } = useTranslation(['admin'])
   const md = useTheme().palette.md
@@ -52,7 +53,7 @@ export default function GroupDestinationTab({ groupId, onLeave }: {
   }
 
   const g: DestGroup | undefined = read.data?.find(x => x.group_id === groupId)
-  const go = (search: string) => { onLeave(); void navigate(`/admin/access-control?tab=allowlist&${search}`) }
+  const go = async (search: string) => { if (await onLeave()) void navigate(`/admin/access-control?tab=allowlist&${search}`) }
   const enforced = g !== undefined && g.state !== 'off'
   const kept = g !== undefined && g.state === 'off' && groupHasAllowlist(g)
 
@@ -73,7 +74,12 @@ export default function GroupDestinationTab({ groupId, onLeave }: {
           </Row>
           <Row label={t(`${D}nodes`)}>
             <Typography variant="body2" component="span">{t(`${D}nodes_line`, { ok: g.eligible_nodes, total: g.total_nodes })}</Typography>
-            {g.ineligible.length > 0 && <Typography variant="body2" component="span" sx={{ ml: 1.5, color: md.onSurfaceVariant }}>{t(`${D}not_open`, { count: g.ineligible.length })}</Typography>}
+            {g.ineligible.length > 0 && (
+              <Typography variant="body2" component="span" sx={{ ml: 1.5 }}>
+                <FieldHint tone="muted" summary={t(`${D}not_open`, { count: g.ineligible.length })}
+                  detail={g.ineligible.map(n => t(`${D}not_open_item`, { name: n.name, reason: t(`admin:access_control.allowlist.reason.${n.reason}`) })).join(t(`${D}detail_separator`))} />
+              </Typography>
+            )}
           </Row>
           <Typography variant="body2" sx={{ color: md.onSurfaceVariant }}>{t(`${D}summary_note`)}</Typography>
           <Box sx={{ display: 'flex', justifyContent: { sm: 'flex-end' } }}>

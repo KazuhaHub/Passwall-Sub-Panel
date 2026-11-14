@@ -39,7 +39,7 @@ describe('the turn-on dialog', () => {
     expect(await within(d).findByText('开启后，本组 51 人访问名单外的目的地会被拒绝，约 2 分钟内生效。可以随时改回仅报告。')).toBeTruthy()
     expect(await within(d).findByText('所有名单都已就绪')).toBeTruthy()
     expect(within(d).getByText('基础放行不为空')).toBeTruthy()
-    expect(within(d).getByText('仅报告已 3 天')).toBeTruthy()
+    expect(within(d).getByText('仅报告第 3 天')).toBeTruthy()
     const go = within(d).getByRole('button', { name: '开启白名单' })
     await waitFor(() => expect((go as HTMLButtonElement).disabled).toBe(false))
     fireEvent.click(go)
@@ -106,5 +106,26 @@ describe('the turn-on dialog', () => {
     fireEvent.click(go)
     await waitFor(() => expect(snack).toHaveBeenCalledWith('状态已被其他人修改，已重新载入', 'warning'))
     expect(onClose).toHaveBeenCalled()
+  })
+
+  it('lists taken out in the edit dialog are no longer counted: only the chosen lists are asked about', async () => {
+    vi.mocked(api.getDestGroup).mockResolvedValue(detail({ readiness: { lists_ready: false, not_ready_lists: [{ id: 3, name: 'Remote feed' }], unapplied_nodes: 0, base_nonempty: true, remaining_sites_24h: 0, top_sites: [] } }))
+    vi.mocked(api.previewDestGroup).mockResolvedValue(preview({ not_ready_lists: [] }))
+    renderAccess(dialog({ listIds: [10], savedListIds: [10, 3] }))
+    const d = await screen.findByRole('dialog')
+    expect(await within(d).findByText('所有名单都已就绪')).toBeTruthy()
+    await waitFor(() => expect((within(d).getByRole('button', { name: '开启白名单' }) as HTMLButtonElement).disabled).toBe(false))
+  })
+
+  it('a first allowlist is judged by the base hosts typed in the dialog, not by a row that is not there', async () => {
+    vi.mocked(api.getDestGroup).mockResolvedValue(detail({ readiness: { lists_ready: true, not_ready_lists: [], unapplied_nodes: 0, base_nonempty: true, remaining_sites_24h: 5, top_sites: [] } }))
+    renderAccess(dialog({ baseCount: 0, hasRow: false }))
+    expect((await screen.findByText(/基础放行为空/)).closest('[data-testid="check-base"]')?.getAttribute('data-tone')).toBe('attention')
+    expect(screen.queryByRole('button', { name: '看报告' })).toBeNull()
+  })
+
+  it('says the group will also lose the nodes that cannot enforce it', async () => {
+    renderAccess(dialog())
+    expect(await screen.findByText('同时，本组成员不再获得 2 台不执行白名单的节点。')).toBeTruthy()
   })
 })

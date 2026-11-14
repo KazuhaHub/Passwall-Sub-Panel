@@ -342,7 +342,7 @@ export function usePutDestGroup(scope: QueryScope) {
   return useMutation({
     mutationFn: ({ id, input }: { id: number; input: DestGroupPut }) => putDestGroup(id, input),
     // Settled either way: a stale or refused write leaves the screen holding an old copy.
-    onSettled: () => invalidate(qc, scope, ['groups', 'status', 'policies', 'lists', 'listDetails', 'groupsPage']),
+    onSettled: () => invalidate(qc, scope, ['groups', 'status', 'policies', 'lists', 'listDetails', 'groupsPage', 'users', 'servers']),
   })
 }
 
@@ -457,8 +457,8 @@ export function useRollbackGeosite(scope: QueryScope) {
 export function useAddDestException(scope: QueryScope) {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (input: { target: string; match: 'site' | 'host' }) => addDestException(input),
-    onSettled: () => invalidate(qc, scope, ['lists', 'listDetails', 'policies', 'status']),
+    mutationFn: (input: { target: string; match: 'site' | 'host'; group_id?: number }) => addDestException(input),
+    onSettled: () => invalidate(qc, scope, ['lists', 'listDetails', 'policies', 'status', 'groups']),
   })
 }
 

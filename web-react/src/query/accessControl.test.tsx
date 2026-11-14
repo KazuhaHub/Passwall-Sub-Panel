@@ -101,11 +101,11 @@ describe('write → invalidate', () => {
     s.expectKeys([ac.lists(scope), ac.listDetails(scope), ac.policies(scope), ac.status(scope), ac.groupsAll(scope)])
   })
 
-  it('an allowlist group write: the groups (list, detail, previews, reports), status, policies (its group list), lists (used by), their details, and the groups page that carries the badge', async () => {
+  it('an allowlist group write: the groups (list, detail, previews, reports), status, policies (its group list), lists (used by), their details, the account views that name the state of the group, the servers list, and the groups page that carries the badge', async () => {
     vi.mocked(api.putDestGroup).mockResolvedValue({} as api.DestGroup)
     const s = spy()
     await run(() => usePutDestGroup(scope), s.client, { id: 3, input: { state: 'report', list_ids: [1] } })
-    s.expectKeys([ac.groupsAll(scope), ac.status(scope), ac.policies(scope), ac.lists(scope), ac.listDetails(scope), groupKeys.all(scope)])
+    s.expectKeys([ac.groupsAll(scope), ac.status(scope), ac.policies(scope), ac.lists(scope), ac.listDetails(scope), groupKeys.all(scope), ac.usersAll(scope), serverKeys.lists(scope)])
   })
 
   it('the groups read is keyed by the scope and is not polled', async () => {
@@ -187,7 +187,7 @@ describe('write → invalidate', () => {
     vi.mocked(api.addDestException).mockResolvedValue({ entry: 'a.com', created: null })
     const s = spy()
     await run(() => useAddDestException(scope), s.client, { target: 'a.com', match: 'site' })
-    s.expectKeys([ac.lists(scope), ac.listDetails(scope), ac.policies(scope), ac.status(scope)])
+    s.expectKeys([ac.lists(scope), ac.listDetails(scope), ac.policies(scope), ac.status(scope), ac.groupsAll(scope)])
   })
 
   it('the test tool is a pure read of the published policy: it invalidates nothing', async () => {
