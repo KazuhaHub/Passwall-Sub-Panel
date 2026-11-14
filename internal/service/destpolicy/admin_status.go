@@ -217,6 +217,21 @@ func (a *Admin) Status(ctx context.Context) (*StatusView, error) {
 		rows[r.AgentID] = r
 	}
 
+	// A group's name is read once per status read, however many nodes apply it.
+	groupNames := map[int64]string{}
+	groupName := func(gid int64) string {
+		if name, ok := groupNames[gid]; ok {
+			return name
+		}
+		name := ""
+		if a.Groups != nil {
+			if g, err := a.Groups.GetByID(ctx, gid); err == nil && g != nil {
+				name = g.Name
+			}
+		}
+		groupNames[gid] = name
+		return name
+	}
 	for _, panel := range panels {
 		ns := NodeState{
 			PanelID: panel.ID, PanelName: panel.Name, Kind: string(domain.NormalizePanelKind(panel.Kind)),
@@ -264,13 +279,7 @@ func (a *Admin) Status(ctx context.Context) (*StatusView, error) {
 		ns.FallbackReason = string(row.FallbackReason)
 		ns.MintedAt, ns.AppliedAt, ns.AppliedRules = ms(row.MintedAt), ms(row.AppliedAt), row.AppliedRuleCount
 		for _, gid := range row.AppliedGroups {
-			ref := AllowlistGroupRef{ID: gid}
-			if a.Groups != nil {
-				if g, err := a.Groups.GetByID(ctx, gid); err == nil && g != nil {
-					ref.Name = g.Name
-				}
-			}
-			ns.AllowlistGroups = append(ns.AllowlistGroups, ref)
+			ns.AllowlistGroups = append(ns.AllowlistGroups, AllowlistGroupRef{ID: gid, Name: groupName(gid)})
 		}
 		if row.OverLimit != "" {
 			var o domain.DestPublishError

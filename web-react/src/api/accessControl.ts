@@ -468,7 +468,8 @@ export interface DestNodeStatus {
   last_report_at: number | null
   rules_data_version: string | null
   geoip_unavailable: boolean
-  allowlist_groups: number[]
+  /** The allowlist groups in the policy this node last applied. */
+  allowlist_groups: { id: number; name: string }[]
   /** Hits it reported in the last 24 hours; null where the node cannot record. */
   hits_24h: number | null
 }

@@ -6,7 +6,7 @@
 > 策略状态有 **关闭 / 仅报告 / 开启** 三态，管理员自由选择，没有「必须先仅报告」的门槛。**命中记录**（A 档）随第二批上线：
 > 节点上报命中，PSP 入库并在记录接口、策略列表、账号视图和风险信号里使用。**用量（B 档）、白名单分组的接口与界面、sing-box 采集** 在后续批次（白名单分组的数据模型与编译见 §3.2）。
 >
-> 线上协议见 Passwall-Protocol `v0.3.0`（`protocol/policy.go`、`match.go`、`sniff.go`）；字段说明见
+> 线上协议见 Passwall-Protocol `v0.4.1`（`protocol/policy.go`、`match.go`、`sniff.go`）；字段说明见
 > [psp-node-agent.md](psp-node-agent.md) §11。
 
 ## 1. 行为一句话
