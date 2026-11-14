@@ -88,6 +88,9 @@ type Service struct {
 	pool      ports.XUIPool
 	syncer    ClientSyncer
 	clients   ports.PSPClientRepo
+	// eligibility decides whether a group includes a node
+	// (group.Service.Eligible). Late-bound; nil is MatchOnly.
+	eligibility GroupEligibility
 
 	// axisAReversePush gates the v3.5 "PSP pushes its config back over 3X-UI
 	// drift" behavior in reconcileInboundConfig (the push uses
@@ -109,6 +112,31 @@ func New(users ports.UserRepo, ownership ports.OwnershipRepo, nodes ports.NodeRe
 		audit: audit, pool: pool, syncer: syncer,
 		axisAReversePush: true,
 	}
+}
+
+// GroupEligibility is the one test of "does this group include this node"
+// (group.Service.Eligible).
+type GroupEligibility interface {
+	Eligible(ctx context.Context, n *domain.Node, g *domain.Group) (bool, error)
+}
+
+// SetGroupEligibility late-binds the eligibility test.
+func (s *Service) SetGroupEligibility(e GroupEligibility) { s.eligibility = e }
+
+// groupIncludes asks the wired eligibility, or only the tag filter before one
+// is wired. An unreadable answer skips the group this round (nothing is added;
+// the next pass retries) and logs the group id alone.
+func (s *Service) groupIncludes(ctx context.Context, n *domain.Node, g *domain.Group) bool {
+	var e GroupEligibility = group.MatchOnly{}
+	if s.eligibility != nil {
+		e = s.eligibility
+	}
+	ok, err := e.Eligible(ctx, n, g)
+	if err != nil {
+		log.Warn("group eligibility unreadable; skipping the group this round", "group_id", g.ID)
+		return false
+	}
+	return ok
 }
 
 // SetPSPClientRepo supplies the authoritative desired client rows. Nil keeps
@@ -426,7 +454,7 @@ func (s *Service) checkMissingOwnershipsWithCtx(
 		if n == nil || n.IsSeparator() || !n.Enabled {
 			continue
 		}
-		if !group.Matches(n, g.TagFilter) {
+		if !s.groupIncludes(ctx, n, g) {
 			continue
 		}
 		if owned[nodeKey{n.PanelID, n.InboundID}] {

@@ -64,6 +64,9 @@ type Service struct {
 	groups       ports.GroupRepo
 	users        ports.UserRepo
 	resyncer     MemberResyncer
+	// eligibility decides whether a group's members get a client on a node
+	// (group.Service.Eligible). Late-bound; nil is MatchOnly.
+	eligibility GroupEligibility
 	// bg routes handler-spawned background work (member provisioning after a node
 	// recreate; sync-existing-users after a node add) through the app's tracked
 	// dispatcher so App.Shutdown drains it under a cancellable context. Late-bound
@@ -77,6 +80,33 @@ type Service struct {
 	// repoWrapped guards SetSubscriptionInvalidator against stacking a second
 	// decorator on a re-wire.
 	repoWrapped bool
+}
+
+// GroupEligibility is the one test of "does this group include this node"
+// (group.Service.Eligible): the tag filter and, for a group with a destination
+// allowlist, whether the node can enforce it.
+type GroupEligibility interface {
+	Eligible(ctx context.Context, n *domain.Node, g *domain.Group) (bool, error)
+}
+
+// SetGroupEligibility late-binds the eligibility test the add paths use.
+func (s *Service) SetGroupEligibility(e GroupEligibility) { s.eligibility = e }
+
+// groupIncludes asks the wired eligibility, or only the tag filter before one
+// is wired. An error means the answer is unknown: the add paths skip the group
+// this round, which is the safe direction (nothing is added; the next round or
+// the heal sweep adds what is still missing), and log the group id alone.
+func (s *Service) groupIncludes(ctx context.Context, n *domain.Node, g *domain.Group) bool {
+	var e GroupEligibility = group.MatchOnly{}
+	if s.eligibility != nil {
+		e = s.eligibility
+	}
+	ok, err := e.Eligible(ctx, n, g)
+	if err != nil {
+		log.Warn("group eligibility unreadable; skipping the group this round", "group_id", g.ID)
+		return false
+	}
+	return ok
 }
 
 func (s *Service) SetRouteCleaner(clean func(context.Context, int64) error) { s.routeCleaner = clean }
@@ -617,7 +647,7 @@ func (s *Service) provisionNodeMembers(ctx context.Context, n *domain.Node) {
 	seen := make(map[int64]bool)
 	var memberIDs []int64
 	for _, g := range groups {
-		if !group.Matches(n, g.TagFilter) {
+		if !s.groupIncludes(ctx, n, g) {
 			continue
 		}
 		members, err := s.users.ListByGroup(ctx, g.ID)
@@ -1421,7 +1451,7 @@ func (s *Service) syncExistingUsersToNode(ctx context.Context, n *domain.Node) e
 	seen := make(map[int64]bool)
 	considered, enqueued := 0, 0
 	for _, g := range groups {
-		if !group.Matches(n, g.TagFilter) {
+		if !s.groupIncludes(ctx, n, g) {
 			continue
 		}
 		members, err := s.users.ListByGroup(ctx, g.ID)

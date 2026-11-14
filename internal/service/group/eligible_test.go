@@ -113,8 +113,8 @@ func newEligEnv(t *testing.T) *eligEnv {
 	t.Helper()
 	node := &domain.Node{ID: 10, PanelID: 1, Enabled: true, Region: "TW", Sniffing: sniffOK}
 	e := &eligEnv{
-		node:  node,
-		nodes: &eligNodes{nodes: []*domain.Node{node}},
+		node:   node,
+		nodes:  &eligNodes{nodes: []*domain.Node{node}},
 		groups: &eligGroups{members: map[int64]int64{}},
 		panels: &eligPanels{kinds: map[int64]domain.PanelKind{1: domain.PanelKindPSP}},
 		agents: &eligAgents{byPanel: map[int64]*domain.NodeAgent{1: {
